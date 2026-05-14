@@ -5,452 +5,427 @@
 #include "Components/StaticMeshComponent.h"
 #include "Particles/ParticleSystemComponent.h"
 #include "Kismet/GameplayStatics.h"
+#include "Kismet/KismetMathLibrary.h"
 #include "Engine/StaticMeshActor.h"
-#include "Math/UnrealMathUtility.h"
-#include "TimerManager.h"
 
-UWorld_VolcanicEcosystemManager::UWorld_VolcanicEcosystemManager()
+AWorld_VolcanicEcosystemManager::AWorld_VolcanicEcosystemManager()
 {
-    PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 0.1f;
+    PrimaryActorTick.bCanEverTick = true;
 
-    // Initialize volcanic parameters
-    BaseVolcanicActivity = 0.5f;
-    VolcanicActivityVariation = 0.3f;
-    MaxVolcanicTemperature = 1500.0f;
-    VolcanicInfluenceRadius = 2000.0f;
-    bVolcanicSystemActive = true;
+    // Create root component
+    RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootComponent"));
 
-    // Initialize timers
-    VolcanicActivityTimer = 0.0f;
-    AudioUpdateTimer = 0.0f;
-    ParticleUpdateTimer = 0.0f;
+    // Create volcanic mesh component
+    VolcanicMeshComponent = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("VolcanicMeshComponent"));
+    VolcanicMeshComponent->SetupAttachment(RootComponent);
 
-    // Initialize sound cues to nullptr
-    EruptionSoundCue = nullptr;
-    RumblingSoundCue = nullptr;
-    SteamHissingSoundCue = nullptr;
+    // Create particle system component for volcanic smoke
+    VolcanicSmokeComponent = CreateDefaultSubobject<UParticleSystemComponent>(TEXT("VolcanicSmokeComponent"));
+    VolcanicSmokeComponent->SetupAttachment(RootComponent);
 
-    // Initialize materials to nullptr
-    LavaMaterial = nullptr;
-    VolcanicRockMaterial = nullptr;
-    GeothermalSteamMaterial = nullptr;
+    // Create audio component for volcanic sounds
+    VolcanicAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("VolcanicAudioComponent"));
+    VolcanicAudioComponent->SetupAttachment(RootComponent);
+
+    // Initialize default values
+    VolcanicActivityLevel = 0.5f;
+    EruptionProbability = 0.01f;
+    bVolcanicWeatherEnabled = true;
+    MaxHotSprings = 15;
+    MaxGeyserFields = 8;
+    GeothermalDensity = 0.3f;
+    VolcanicUpdateTimer = 0.0f;
+    bEffectsActive = false;
+
+    // Initialize default volcanic zones
+    FWorld_VolcanicZoneData DefaultZone;
+    DefaultZone.ZoneCenter = FVector(8000.0f, 8000.0f, 0.0f);
+    DefaultZone.ZoneRadius = 3000.0f;
+    DefaultZone.TemperatureIncrease = 30.0f;
+    DefaultZone.ToxicGasLevel = 0.4f;
+    DefaultZone.bIsActiveVolcano = true;
+    VolcanicZones.Add(DefaultZone);
 }
 
-void UWorld_VolcanicEcosystemManager::BeginPlay()
+void AWorld_VolcanicEcosystemManager::BeginPlay()
 {
     Super::BeginPlay();
     
-    UE_LOG(LogTemp, Log, TEXT("VolcanicEcosystemManager: Initializing volcanic ecosystem"));
-    InitializeVolcanicEcosystem();
+    UE_LOG(LogTemp, Warning, TEXT("World_VolcanicEcosystemManager: BeginPlay started"));
+    
+    // Initialize volcanic ecosystem
+    InitializeVolcanicZones();
+    SpawnGeothermalFeatures();
+    PlayVolcanicAmbientSound();
+    StartVolcanicParticleEffects();
+    
+    UE_LOG(LogTemp, Warning, TEXT("World_VolcanicEcosystemManager: Initialization complete"));
 }
 
-void UWorld_VolcanicEcosystemManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void AWorld_VolcanicEcosystemManager::Tick(float DeltaTime)
 {
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-
-    if (!bVolcanicSystemActive)
+    Super::Tick(DeltaTime);
+    
+    VolcanicUpdateTimer += DeltaTime;
+    
+    // Update volcanic activity every 5 seconds
+    if (VolcanicUpdateTimer >= 5.0f)
     {
-        return;
-    }
-
-    UpdateVolcanicActivity(DeltaTime);
-    UpdateLavaFlows(DeltaTime);
-    UpdateVolcanicAudio(DeltaTime);
-    UpdateVolcanicParticles(DeltaTime);
-    UpdateEcosystemTemperature(DeltaTime);
-}
-
-void UWorld_VolcanicEcosystemManager::InitializeVolcanicEcosystem()
-{
-    UE_LOG(LogTemp, Log, TEXT("VolcanicEcosystemManager: Setting up volcanic ecosystem"));
-
-    // Create default volcanic vents
-    CreateVolcanicVent(FVector(2000, 2000, 400), 1200.0f, 0.8f);
-    CreateVolcanicVent(FVector(2500, 1500, 350), 900.0f, 0.6f);
-    CreateVolcanicVent(FVector(1800, 2200, 380), 1000.0f, 0.7f);
-
-    // Create default lava flows
-    TArray<FVector> MainLavaFlow = {
-        FVector(2000, 2000, 400),
-        FVector(1950, 1950, 380),
-        FVector(1900, 1900, 360),
-        FVector(1850, 1850, 340)
-    };
-    CreateLavaFlow(MainLavaFlow, 2.5f);
-
-    TArray<FVector> SecondaryLavaFlow = {
-        FVector(2500, 1500, 350),
-        FVector(2450, 1450, 330),
-        FVector(2400, 1400, 310)
-    };
-    CreateLavaFlow(SecondaryLavaFlow, 1.8f);
-
-    // Create volcanic audio zones
-    CreateVolcanicAudioZone(FVector(2000, 2000, 300), 1200.0f);
-    CreateVolcanicAudioZone(FVector(2200, 1800, 300), 800.0f);
-
-    // Spawn volcanic vegetation
-    SpawnVolcanicVegetation();
-
-    // Create volcanic lighting
-    CreateVolcanicLighting();
-
-    UE_LOG(LogTemp, Log, TEXT("VolcanicEcosystemManager: Volcanic ecosystem initialized with %d vents, %d lava flows, %d audio zones"), 
-           VolcanicVents.Num(), LavaFlows.Num(), AudioZones.Num());
-}
-
-void UWorld_VolcanicEcosystemManager::UpdateVolcanicActivity(float DeltaTime)
-{
-    VolcanicActivityTimer += DeltaTime;
-
-    // Update each volcanic vent
-    for (FWorld_VolcanicVent& Vent : VolcanicVents)
-    {
-        UpdateVolcanicVentActivity(Vent, DeltaTime);
-    }
-
-    // Periodic activity fluctuations
-    if (VolcanicActivityTimer >= 5.0f)
-    {
-        for (FWorld_VolcanicVent& Vent : VolcanicVents)
+        UpdateVolcanicActivity(DeltaTime);
+        UpdateVolcanicZoneEffects();
+        ProcessGeothermalActivity();
+        
+        if (bVolcanicWeatherEnabled)
         {
-            float ActivityChange = FMath::RandRange(-VolcanicActivityVariation, VolcanicActivityVariation);
-            Vent.Activity = FMath::Clamp(Vent.Activity + ActivityChange, 0.1f, 1.0f);
+            HandleVolcanicWeatherEffects();
+        }
+        
+        VolcanicUpdateTimer = 0.0f;
+    }
+}
+
+void AWorld_VolcanicEcosystemManager::InitializeVolcanicZones()
+{
+    UE_LOG(LogTemp, Warning, TEXT("Initializing %d volcanic zones"), VolcanicZones.Num());
+    
+    for (int32 i = 0; i < VolcanicZones.Num(); i++)
+    {
+        FWorld_VolcanicZoneData& Zone = VolcanicZones[i];
+        
+        // Validate zone parameters
+        if (Zone.ZoneRadius <= 0.0f)
+        {
+            Zone.ZoneRadius = 2000.0f;
+        }
+        
+        if (Zone.TemperatureIncrease <= 0.0f)
+        {
+            Zone.TemperatureIncrease = 20.0f;
+        }
+        
+        UE_LOG(LogTemp, Log, TEXT("Volcanic Zone %d: Center(%s), Radius(%.1f), Temp(+%.1f)"), 
+               i, *Zone.ZoneCenter.ToString(), Zone.ZoneRadius, Zone.TemperatureIncrease);
+    }
+}
+
+void AWorld_VolcanicEcosystemManager::SpawnGeothermalFeatures()
+{
+    UE_LOG(LogTemp, Warning, TEXT("Spawning geothermal features..."));
+    
+    // Clear existing features
+    GeothermalFeatures.Empty();
+    
+    // Spawn hot springs
+    for (int32 i = 0; i < MaxHotSprings; i++)
+    {
+        FVector Location = FindOptimalGeothermalLocation();
+        if (IsValidGeothermalLocation(Location))
+        {
+            CreateGeothermalVent(Location, EWorld_GeothermalType::HotSpring);
+        }
+    }
+    
+    // Spawn geyser fields
+    for (int32 i = 0; i < MaxGeyserFields; i++)
+    {
+        FVector Location = FindOptimalGeothermalLocation();
+        if (IsValidGeothermalLocation(Location))
+        {
+            CreateGeothermalVent(Location, EWorld_GeothermalType::GeyserField);
+        }
+    }
+    
+    UE_LOG(LogTemp, Warning, TEXT("Created %d geothermal features"), GeothermalFeatures.Num());
+}
+
+void AWorld_VolcanicEcosystemManager::UpdateVolcanicActivity(float DeltaTime)
+{
+    // Check for potential eruptions
+    for (int32 i = 0; i < VolcanicZones.Num(); i++)
+    {
+        FWorld_VolcanicZoneData& Zone = VolcanicZones[i];
+        
+        if (Zone.bIsActiveVolcano)
+        {
+            float EruptionChance = EruptionProbability * VolcanicActivityLevel * DeltaTime;
+            float RandomValue = FMath::FRand();
             
-            // Temperature follows activity
-            Vent.Temperature = FMath::Lerp(800.0f, MaxVolcanicTemperature, Vent.Activity);
-        }
-        VolcanicActivityTimer = 0.0f;
-    }
-}
-
-void UWorld_VolcanicEcosystemManager::CreateVolcanicVent(const FVector& Location, float Temperature, float Activity)
-{
-    FWorld_VolcanicVent NewVent;
-    NewVent.Location = Location;
-    NewVent.Temperature = Temperature;
-    NewVent.Activity = Activity;
-    NewVent.GasEmission = Activity * 0.5f;
-    NewVent.bIsActive = true;
-
-    VolcanicVents.Add(NewVent);
-
-    // Create geothermal effects at this location
-    CreateGeothermalEffects(Location);
-
-    UE_LOG(LogTemp, Log, TEXT("VolcanicEcosystemManager: Created volcanic vent at %s with temperature %.1f°C"), 
-           *Location.ToString(), Temperature);
-}
-
-void UWorld_VolcanicEcosystemManager::CreateLavaFlow(const TArray<FVector>& FlowPath, float FlowSpeed)
-{
-    if (FlowPath.Num() < 2)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("VolcanicEcosystemManager: Lava flow needs at least 2 points"));
-        return;
-    }
-
-    FWorld_LavaFlow NewFlow;
-    NewFlow.FlowPath = FlowPath;
-    NewFlow.FlowSpeed = FlowSpeed;
-    NewFlow.Temperature = 1200.0f;
-    NewFlow.Width = 5.0f;
-    NewFlow.bIsFlowing = true;
-
-    LavaFlows.Add(NewFlow);
-
-    UE_LOG(LogTemp, Log, TEXT("VolcanicEcosystemManager: Created lava flow with %d points, speed %.1f m/s"), 
-           FlowPath.Num(), FlowSpeed);
-}
-
-void UWorld_VolcanicEcosystemManager::UpdateLavaFlows(float DeltaTime)
-{
-    for (FWorld_LavaFlow& Flow : LavaFlows)
-    {
-        if (Flow.bIsFlowing)
-        {
-            UpdateLavaFlowMovement(Flow, DeltaTime);
-        }
-    }
-}
-
-void UWorld_VolcanicEcosystemManager::CreateVolcanicAudioZone(const FVector& Center, float Radius)
-{
-    FWorld_VolcanicAudioZone NewZone;
-    NewZone.Center = Center;
-    NewZone.Radius = Radius;
-    NewZone.RumblingIntensity = 0.7f;
-    NewZone.HissingSteamVolume = 0.5f;
-    NewZone.bPlayEruptionSounds = false;
-
-    AudioZones.Add(NewZone);
-
-    // Create audio component for this zone
-    if (AActor* Owner = GetOwner())
-    {
-        UAudioComponent* RumblingAudio = Owner->CreateDefaultSubobject<UAudioComponent>(
-            *FString::Printf(TEXT("VolcanicRumbling_%d"), AudioZones.Num()));
-        
-        if (RumblingAudio)
-        {
-            RumblingAudio->SetWorldLocation(Center);
-            RumblingAudio->SetVolumeMultiplier(NewZone.RumblingIntensity);
-            RumblingAudioComponents.Add(RumblingAudio);
-        }
-
-        UAudioComponent* SteamAudio = Owner->CreateDefaultSubobject<UAudioComponent>(
-            *FString::Printf(TEXT("VolcanicSteam_%d"), AudioZones.Num()));
-        
-        if (SteamAudio)
-        {
-            SteamAudio->SetWorldLocation(Center);
-            SteamAudio->SetVolumeMultiplier(NewZone.HissingSteamVolume);
-            SteamAudioComponents.Add(SteamAudio);
-        }
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("VolcanicEcosystemManager: Created volcanic audio zone at %s with radius %.1f"), 
-           *Center.ToString(), Radius);
-}
-
-void UWorld_VolcanicEcosystemManager::UpdateVolcanicAudio(float DeltaTime)
-{
-    AudioUpdateTimer += DeltaTime;
-
-    if (AudioUpdateTimer >= 0.5f) // Update audio every 0.5 seconds
-    {
-        for (int32 i = 0; i < AudioZones.Num(); ++i)
-        {
-            UpdateAudioZoneIntensity(AudioZones[i], DeltaTime);
-
-            // Update audio component volumes
-            if (RumblingAudioComponents.IsValidIndex(i) && RumblingAudioComponents[i])
+            if (RandomValue < EruptionChance)
             {
-                RumblingAudioComponents[i]->SetVolumeMultiplier(AudioZones[i].RumblingIntensity);
-            }
-
-            if (SteamAudioComponents.IsValidIndex(i) && SteamAudioComponents[i])
-            {
-                SteamAudioComponents[i]->SetVolumeMultiplier(AudioZones[i].HissingSteamVolume);
+                TriggerVolcanicEruption(i);
             }
         }
-        AudioUpdateTimer = 0.0f;
     }
 }
 
-void UWorld_VolcanicEcosystemManager::PlayEruptionSound(const FVector& Location)
+bool AWorld_VolcanicEcosystemManager::IsLocationInVolcanicZone(const FVector& Location, float& TemperatureModifier) const
 {
-    if (EruptionSoundCue)
+    TemperatureModifier = 0.0f;
+    
+    for (const FWorld_VolcanicZoneData& Zone : VolcanicZones)
     {
-        UGameplayStatics::PlaySoundAtLocation(GetWorld(), EruptionSoundCue, Location, 1.0f, 1.0f);
-        UE_LOG(LogTemp, Log, TEXT("VolcanicEcosystemManager: Playing eruption sound at %s"), *Location.ToString());
-    }
-}
-
-void UWorld_VolcanicEcosystemManager::UpdateRumblingAudio(float Intensity)
-{
-    for (UAudioComponent* AudioComp : RumblingAudioComponents)
-    {
-        if (AudioComp)
-        {
-            AudioComp->SetVolumeMultiplier(Intensity);
-        }
-    }
-}
-
-void UWorld_VolcanicEcosystemManager::CreateGeothermalEffects(const FVector& Location)
-{
-    if (AActor* Owner = GetOwner())
-    {
-        // Create steam particle effect
-        UParticleSystemComponent* SteamParticle = Owner->CreateDefaultSubobject<UParticleSystemComponent>(
-            *FString::Printf(TEXT("GeothermalSteam_%d"), SteamParticles.Num()));
+        float Distance = FVector::Dist(Location, Zone.ZoneCenter);
         
-        if (SteamParticle)
+        if (Distance <= Zone.ZoneRadius)
         {
-            SteamParticle->SetWorldLocation(Location + FVector(0, 0, 50));
-            SteamParticles.Add(SteamParticle);
-        }
-
-        UE_LOG(LogTemp, Log, TEXT("VolcanicEcosystemManager: Created geothermal effects at %s"), *Location.ToString());
-    }
-}
-
-void UWorld_VolcanicEcosystemManager::UpdateVolcanicParticles(float DeltaTime)
-{
-    ParticleUpdateTimer += DeltaTime;
-
-    if (ParticleUpdateTimer >= 1.0f) // Update particles every second
-    {
-        // Update steam particle intensity based on volcanic activity
-        for (int32 i = 0; i < SteamParticles.Num() && i < VolcanicVents.Num(); ++i)
-        {
-            if (SteamParticles[i] && VolcanicVents.IsValidIndex(i))
-            {
-                float Intensity = VolcanicVents[i].Activity * VolcanicVents[i].GasEmission;
-                // Particle intensity would be set here if we had access to the particle parameters
-            }
-        }
-
-        ParticleUpdateTimer = 0.0f;
-    }
-}
-
-void UWorld_VolcanicEcosystemManager::CreateVolcanicLighting()
-{
-    // Create warm, orange lighting for volcanic areas
-    for (const FWorld_VolcanicVent& Vent : VolcanicVents)
-    {
-        // Lighting would be created here using UE5's lighting system
-        UE_LOG(LogTemp, Log, TEXT("VolcanicEcosystemManager: Creating volcanic lighting at %s"), *Vent.Location.ToString());
-    }
-}
-
-void UWorld_VolcanicEcosystemManager::SpawnVolcanicVegetation()
-{
-    // Spawn heat-resistant vegetation around volcanic areas
-    TArray<FVector> VegetationLocations = {
-        FVector(1700, 1700, 280),
-        FVector(1750, 1650, 285),
-        FVector(1650, 1750, 275),
-        FVector(2300, 1300, 300),
-        FVector(2350, 1250, 305)
-    };
-
-    for (const FVector& Location : VegetationLocations)
-    {
-        // Vegetation spawning would be handled here
-        UE_LOG(LogTemp, Log, TEXT("VolcanicEcosystemManager: Spawning volcanic vegetation at %s"), *Location.ToString());
-    }
-}
-
-void UWorld_VolcanicEcosystemManager::UpdateEcosystemTemperature(float DeltaTime)
-{
-    // Update temperature effects on the ecosystem
-    for (const FWorld_VolcanicVent& Vent : VolcanicVents)
-    {
-        if (Vent.bIsActive)
-        {
-            // Temperature effects would be calculated and applied here
-            float TemperatureRadius = VolcanicInfluenceRadius * (Vent.Activity * 0.5f + 0.5f);
-            // Apply temperature effects to nearby vegetation and wildlife
-        }
-    }
-}
-
-bool UWorld_VolcanicEcosystemManager::IsLocationInVolcanicZone(const FVector& Location) const
-{
-    for (const FWorld_VolcanicVent& Vent : VolcanicVents)
-    {
-        float Distance = FVector::Dist(Location, Vent.Location);
-        if (Distance <= VolcanicInfluenceRadius)
-        {
+            // Calculate temperature modifier based on distance from center
+            float DistanceRatio = 1.0f - (Distance / Zone.ZoneRadius);
+            TemperatureModifier = Zone.TemperatureIncrease * DistanceRatio;
             return true;
         }
     }
+    
     return false;
 }
 
-float UWorld_VolcanicEcosystemManager::GetVolcanicTemperatureAtLocation(const FVector& Location) const
+void AWorld_VolcanicEcosystemManager::TriggerVolcanicEruption(int32 ZoneIndex)
 {
-    float MaxTemperature = 20.0f; // Base ambient temperature
-    
-    for (const FWorld_VolcanicVent& Vent : VolcanicVents)
-    {
-        float Distance = FVector::Dist(Location, Vent.Location);
-        if (Distance <= VolcanicInfluenceRadius)
-        {
-            float TemperatureContribution = Vent.Temperature * (1.0f - (Distance / VolcanicInfluenceRadius));
-            MaxTemperature = FMath::Max(MaxTemperature, TemperatureContribution);
-        }
-    }
-    
-    return MaxTemperature;
-}
-
-// Private helper functions
-void UWorld_VolcanicEcosystemManager::UpdateVolcanicVentActivity(FWorld_VolcanicVent& Vent, float DeltaTime)
-{
-    if (!Vent.bIsActive)
+    if (!VolcanicZones.IsValidIndex(ZoneIndex))
     {
         return;
     }
-
-    // Simulate natural activity fluctuations
-    float ActivityNoise = FMath::Sin(GetWorld()->GetTimeSeconds() * 0.1f) * 0.1f;
-    Vent.Activity = FMath::Clamp(BaseVolcanicActivity + ActivityNoise, 0.1f, 1.0f);
     
-    // Gas emission follows activity
-    Vent.GasEmission = Vent.Activity * 0.6f;
+    const FWorld_VolcanicZoneData& Zone = VolcanicZones[ZoneIndex];
     
-    // Temperature fluctuates with activity
-    float TargetTemperature = FMath::Lerp(800.0f, MaxVolcanicTemperature, Vent.Activity);
-    Vent.Temperature = FMath::FInterpTo(Vent.Temperature, TargetTemperature, DeltaTime, 0.5f);
-}
-
-void UWorld_VolcanicEcosystemManager::UpdateLavaFlowMovement(FWorld_LavaFlow& Flow, float DeltaTime)
-{
-    // Simulate lava flow movement and cooling
-    float CoolingRate = 50.0f; // Degrees per second
-    Flow.Temperature = FMath::Max(Flow.Temperature - (CoolingRate * DeltaTime), 600.0f);
+    UE_LOG(LogTemp, Warning, TEXT("VOLCANIC ERUPTION triggered at zone %d (%s)"), 
+           ZoneIndex, *Zone.ZoneCenter.ToString());
     
-    // If temperature drops too low, stop flowing
-    if (Flow.Temperature < 800.0f)
+    // Increase volcanic activity temporarily
+    VolcanicActivityLevel = FMath::Clamp(VolcanicActivityLevel + 0.3f, 0.0f, 1.0f);
+    
+    // Enhanced particle effects during eruption
+    if (VolcanicSmokeComponent && VolcanicSmokeComponent->IsActive())
     {
-        Flow.bIsFlowing = false;
-        Flow.FlowSpeed *= 0.9f; // Gradual slowdown
+        VolcanicSmokeComponent->SetFloatParameter(TEXT("IntensityMultiplier"), 3.0f);
     }
 }
 
-void UWorld_VolcanicEcosystemManager::UpdateAudioZoneIntensity(FWorld_VolcanicAudioZone& Zone, float DeltaTime)
+void AWorld_VolcanicEcosystemManager::CreateGeothermalVent(const FVector& Location, EWorld_GeothermalType VentType)
 {
-    // Find nearest volcanic vent to determine audio intensity
-    float NearestVentDistance = CalculateDistanceToNearestVent(Zone.Center);
+    FWorld_GeothermalFeature NewFeature;
+    NewFeature.Location = Location;
+    NewFeature.FeatureType = VentType;
     
-    if (NearestVentDistance < Zone.Radius)
+    switch (VentType)
     {
-        float DistanceFactor = 1.0f - (NearestVentDistance / Zone.Radius);
-        Zone.RumblingIntensity = FMath::Lerp(0.2f, 1.0f, DistanceFactor);
-        Zone.HissingSteamVolume = FMath::Lerp(0.1f, 0.8f, DistanceFactor);
+        case EWorld_GeothermalType::HotSpring:
+            NewFeature.Intensity = FMath::RandRange(0.5f, 1.0f);
+            NewFeature.EffectRadius = FMath::RandRange(500.0f, 1000.0f);
+            NewFeature.bIsHazardous = false;
+            break;
+            
+        case EWorld_GeothermalType::GeyserField:
+            NewFeature.Intensity = FMath::RandRange(0.7f, 1.0f);
+            NewFeature.EffectRadius = FMath::RandRange(800.0f, 1500.0f);
+            NewFeature.bIsHazardous = true;
+            break;
+            
+        case EWorld_GeothermalType::SulfurVent:
+            NewFeature.Intensity = FMath::RandRange(0.3f, 0.8f);
+            NewFeature.EffectRadius = FMath::RandRange(300.0f, 800.0f);
+            NewFeature.bIsHazardous = true;
+            break;
+            
+        default:
+            NewFeature.Intensity = 0.5f;
+            NewFeature.EffectRadius = 500.0f;
+            NewFeature.bIsHazardous = false;
+            break;
+    }
+    
+    GeothermalFeatures.Add(NewFeature);
+    
+    UE_LOG(LogTemp, Log, TEXT("Created geothermal vent: Type(%d), Location(%s), Intensity(%.2f)"), 
+           (int32)VentType, *Location.ToString(), NewFeature.Intensity);
+}
+
+float AWorld_VolcanicEcosystemManager::GetToxicGasLevelAtLocation(const FVector& Location) const
+{
+    float TotalToxicity = 0.0f;
+    
+    // Check volcanic zones
+    for (const FWorld_VolcanicZoneData& Zone : VolcanicZones)
+    {
+        float Distance = FVector::Dist(Location, Zone.ZoneCenter);
+        
+        if (Distance <= Zone.ZoneRadius)
+        {
+            float DistanceRatio = 1.0f - (Distance / Zone.ZoneRadius);
+            TotalToxicity += Zone.ToxicGasLevel * DistanceRatio;
+        }
+    }
+    
+    // Check geothermal features
+    for (const FWorld_GeothermalFeature& Feature : GeothermalFeatures)
+    {
+        if (Feature.bIsHazardous)
+        {
+            float Distance = FVector::Dist(Location, Feature.Location);
+            
+            if (Distance <= Feature.EffectRadius)
+            {
+                float DistanceRatio = 1.0f - (Distance / Feature.EffectRadius);
+                TotalToxicity += 0.2f * Feature.Intensity * DistanceRatio;
+            }
+        }
+    }
+    
+    return FMath::Clamp(TotalToxicity, 0.0f, 1.0f);
+}
+
+TArray<FVector> AWorld_VolcanicEcosystemManager::GetNearbyGeothermalFeatures(const FVector& Location, float SearchRadius) const
+{
+    TArray<FVector> NearbyFeatures;
+    
+    for (const FWorld_GeothermalFeature& Feature : GeothermalFeatures)
+    {
+        float Distance = FVector::Dist(Location, Feature.Location);
+        
+        if (Distance <= SearchRadius)
+        {
+            NearbyFeatures.Add(Feature.Location);
+        }
+    }
+    
+    return NearbyFeatures;
+}
+
+void AWorld_VolcanicEcosystemManager::PlayVolcanicAmbientSound()
+{
+    if (VolcanicAudioComponent)
+    {
+        VolcanicAudioComponent->SetVolumeMultiplier(VolcanicActivityLevel);
+        
+        if (!VolcanicAudioComponent->IsPlaying())
+        {
+            VolcanicAudioComponent->Play();
+        }
+        
+        UE_LOG(LogTemp, Log, TEXT("Volcanic ambient sound started"));
+    }
+}
+
+void AWorld_VolcanicEcosystemManager::StartVolcanicParticleEffects()
+{
+    if (VolcanicSmokeComponent)
+    {
+        VolcanicSmokeComponent->SetActive(true);
+        bEffectsActive = true;
+        
+        UE_LOG(LogTemp, Log, TEXT("Volcanic particle effects started"));
+    }
+}
+
+void AWorld_VolcanicEcosystemManager::StopVolcanicEffects()
+{
+    if (VolcanicSmokeComponent && VolcanicSmokeComponent->IsActive())
+    {
+        VolcanicSmokeComponent->SetActive(false);
+    }
+    
+    if (VolcanicAudioComponent && VolcanicAudioComponent->IsPlaying())
+    {
+        VolcanicAudioComponent->Stop();
+    }
+    
+    bEffectsActive = false;
+    
+    UE_LOG(LogTemp, Log, TEXT("Volcanic effects stopped"));
+}
+
+void AWorld_VolcanicEcosystemManager::UpdateVolcanicZoneEffects()
+{
+    // Update particle intensity based on activity level
+    if (VolcanicSmokeComponent && bEffectsActive)
+    {
+        float IntensityMultiplier = 0.5f + (VolcanicActivityLevel * 1.5f);
+        VolcanicSmokeComponent->SetFloatParameter(TEXT("IntensityMultiplier"), IntensityMultiplier);
+    }
+    
+    // Update audio volume based on activity
+    if (VolcanicAudioComponent)
+    {
+        float VolumeLevel = 0.3f + (VolcanicActivityLevel * 0.7f);
+        VolcanicAudioComponent->SetVolumeMultiplier(VolumeLevel);
+    }
+}
+
+void AWorld_VolcanicEcosystemManager::ProcessGeothermalActivity()
+{
+    // Randomly activate geysers
+    for (FWorld_GeothermalFeature& Feature : GeothermalFeatures)
+    {
+        if (Feature.FeatureType == EWorld_GeothermalType::GeyserField)
+        {
+            float ActivationChance = 0.05f * Feature.Intensity;
+            
+            if (FMath::FRand() < ActivationChance)
+            {
+                UE_LOG(LogTemp, Log, TEXT("Geyser activated at %s"), *Feature.Location.ToString());
+                // Could spawn temporary particle effect here
+            }
+        }
+    }
+}
+
+void AWorld_VolcanicEcosystemManager::HandleVolcanicWeatherEffects()
+{
+    // Reduce volcanic activity over time
+    if (VolcanicActivityLevel > 0.1f)
+    {
+        VolcanicActivityLevel = FMath::Max(0.1f, VolcanicActivityLevel - 0.02f);
+    }
+    
+    // Weather effects could modify temperature and air quality
+    // This would integrate with weather system when available
+}
+
+FVector AWorld_VolcanicEcosystemManager::FindOptimalGeothermalLocation() const
+{
+    // Find location near volcanic zones but not too close to existing features
+    FVector OptimalLocation = FVector::ZeroVector;
+    
+    if (VolcanicZones.Num() > 0)
+    {
+        // Pick a random volcanic zone
+        int32 ZoneIndex = FMath::RandRange(0, VolcanicZones.Num() - 1);
+        const FWorld_VolcanicZoneData& Zone = VolcanicZones[ZoneIndex];
+        
+        // Generate location within zone but not at center
+        float Distance = FMath::RandRange(Zone.ZoneRadius * 0.3f, Zone.ZoneRadius * 0.8f);
+        float Angle = FMath::RandRange(0.0f, 360.0f);
+        
+        OptimalLocation = Zone.ZoneCenter + FVector(
+            FMath::Cos(FMath::DegreesToRadians(Angle)) * Distance,
+            FMath::Sin(FMath::DegreesToRadians(Angle)) * Distance,
+            0.0f
+        );
     }
     else
     {
-        Zone.RumblingIntensity = FMath::FInterpTo(Zone.RumblingIntensity, 0.1f, DeltaTime, 1.0f);
-        Zone.HissingSteamVolume = FMath::FInterpTo(Zone.HissingSteamVolume, 0.05f, DeltaTime, 1.0f);
+        // Fallback to random location
+        OptimalLocation = FVector(
+            FMath::RandRange(-10000.0f, 10000.0f),
+            FMath::RandRange(-10000.0f, 10000.0f),
+            0.0f
+        );
     }
+    
+    return OptimalLocation;
 }
 
-float UWorld_VolcanicEcosystemManager::CalculateDistanceToNearestVent(const FVector& Location) const
+bool AWorld_VolcanicEcosystemManager::IsValidGeothermalLocation(const FVector& Location) const
 {
-    float MinDistance = MAX_FLT;
+    // Check minimum distance from existing features
+    const float MinDistance = 1000.0f;
     
-    for (const FWorld_VolcanicVent& Vent : VolcanicVents)
+    for (const FWorld_GeothermalFeature& Feature : GeothermalFeatures)
     {
-        if (Vent.bIsActive)
+        if (FVector::Dist(Location, Feature.Location) < MinDistance)
         {
-            float Distance = FVector::Dist(Location, Vent.Location);
-            MinDistance = FMath::Min(MinDistance, Distance);
+            return false;
         }
     }
     
-    return MinDistance;
-}
-
-void UWorld_VolcanicEcosystemManager::CreateVolcanicParticleEffect(const FVector& Location, float Intensity)
-{
-    if (AActor* Owner = GetOwner())
-    {
-        UParticleSystemComponent* NewParticle = Owner->CreateDefaultSubobject<UParticleSystemComponent>(
-            *FString::Printf(TEXT("VolcanicParticle_%d"), LavaParticles.Num()));
-        
-        if (NewParticle)
-        {
-            NewParticle->SetWorldLocation(Location);
-            LavaParticles.Add(NewParticle);
-            
-            UE_LOG(LogTemp, Log, TEXT("VolcanicEcosystemManager: Created volcanic particle effect at %s with intensity %.2f"), 
-                   *Location.ToString(), Intensity);
-        }
-    }
+    return true;
 }
