@@ -1,43 +1,35 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Components/ActorComponent.h"
+#include "Subsystems/GameInstanceSubsystem.h"
 #include "Engine/World.h"
-#include "Sound/SoundCue.h"
-#include "MetasoundSource.h"
 #include "Components/AudioComponent.h"
-#include "Kismet/GameplayStatics.h"
-#include "../SharedTypes.h"
+#include "MetasoundSource.h"
+#include "SharedTypes.h"
 #include "Audio_MetaSoundManager.generated.h"
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FAudio_SoundLayer
+struct TRANSPERSONALGAME_API FAudio_EnvironmentSettings
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Layer")
-    FString LayerName;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment")
+    float AmbientVolume = 0.7f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Layer")
-    class UMetaSoundSource* MetaSound;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment")
+    float MusicVolume = 0.5f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Layer")
-    float Volume;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment")
+    float EffectsVolume = 0.8f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Layer")
-    float FadeTime;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment")
+    EBiomeType CurrentBiome = EBiomeType::Forest;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Layer")
-    bool bIsActive;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment")
+    float TimeOfDay = 12.0f; // 0-24 hours
 
-    FAudio_SoundLayer()
-    {
-        LayerName = TEXT("DefaultLayer");
-        MetaSound = nullptr;
-        Volume = 1.0f;
-        FadeTime = 2.0f;
-        bIsActive = false;
-    }
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment")
+    float ThreatLevel = 0.0f; // 0-1, affects music intensity
 };
 
 USTRUCT(BlueprintType)
@@ -45,166 +37,116 @@ struct TRANSPERSONALGAME_API FAudio_ProximityTrigger
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Proximity Audio")
-    EDinosaurSpecies TriggerSpecies;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Proximity")
+    float TriggerDistance = 500.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Proximity Audio")
-    float TriggerDistance;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Proximity")
+    float MaxDistance = 2000.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Proximity Audio")
-    class UMetaSoundSource* ProximitySound;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Proximity")
+    bool bIsActive = true;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Proximity Audio")
-    class USoundCue* VoiceWarning;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Proximity Audio")
-    float CooldownTime;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Proximity Audio")
-    float LastTriggered;
-
-    FAudio_ProximityTrigger()
-    {
-        TriggerSpecies = EDinosaurSpecies::TRex;
-        TriggerDistance = 2000.0f;
-        ProximitySound = nullptr;
-        VoiceWarning = nullptr;
-        CooldownTime = 30.0f;
-        LastTriggered = 0.0f;
-    }
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Proximity")
+    FString AudioEventName;
 };
 
-UCLASS(ClassGroup=(Audio), meta=(BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UAudio_MetaSoundManager : public UActorComponent
+/**
+ * MetaSound-based audio manager for dynamic prehistoric soundscapes
+ * Handles adaptive music, environmental audio, and proximity-based sound triggers
+ */
+UCLASS()
+class TRANSPERSONALGAME_API UAudio_MetaSoundManager : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
 public:
-    UAudio_MetaSoundManager();
+    // USubsystem interface
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
+
+    // Environment audio control
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    void SetEnvironmentSettings(const FAudio_EnvironmentSettings& Settings);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    void UpdateBiomeAudio(EBiomeType NewBiome);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    void UpdateTimeOfDay(float Hours);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    void SetThreatLevel(float Level);
+
+    // Proximity audio system
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    void RegisterProximityTrigger(AActor* TriggerActor, const FAudio_ProximityTrigger& TriggerData);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    void UnregisterProximityTrigger(AActor* TriggerActor);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    void UpdateProximityAudio(const FVector& PlayerLocation);
+
+    // Dynamic music system
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    void PlayAdaptiveMusic(const FString& MusicLayer);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    void StopAdaptiveMusic();
+
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    void CrossfadeToLayer(const FString& NewLayer, float FadeTime = 2.0f);
+
+    // Environmental effects
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    void PlayEnvironmentalEffect(const FString& EffectName, const FVector& Location, float Volume = 1.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    void StartWeatherAudio(EWeatherType WeatherType);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    void StopWeatherAudio();
+
+    // Narration system
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    void PlayNarration(const FString& NarrationKey, bool bInterruptCurrent = false);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    void StopNarration();
+
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    bool IsNarrationPlaying() const;
 
 protected:
-    virtual void BeginPlay() override;
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
-
-    // Environmental Audio Layers
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environmental Audio")
-    TArray<FAudio_SoundLayer> EnvironmentalLayers;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environmental Audio")
-    class UMetaSoundSource* BaseAmbientMetaSound;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environmental Audio")
-    class UMetaSoundSource* DayNightTransitionMetaSound;
-
-    // Proximity Warning System
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Proximity Audio")
-    TArray<FAudio_ProximityTrigger> ProximityTriggers;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Proximity Audio")
-    class UAudioComponent* ProximityAudioComponent;
-
-    // Dynamic Music System
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dynamic Music")
-    class UMetaSoundSource* CombatMusicMetaSound;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dynamic Music")
-    class UMetaSoundSource* ExplorationMusicMetaSound;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dynamic Music")
-    class UMetaSoundSource* TensionMusicMetaSound;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dynamic Music")
-    class UAudioComponent* MusicAudioComponent;
-
-    // Audio State Management
-    UPROPERTY(BlueprintReadOnly, Category = "Audio State")
-    EGameplayState CurrentGameplayState;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Audio State")
-    ETimeOfDay CurrentTimeOfDay;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Audio State")
-    float MasterVolume;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Audio State")
-    float EnvironmentalVolume;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Audio State")
-    float MusicVolume;
-
-public:
-    // Environmental Audio Control
-    UFUNCTION(BlueprintCallable, Category = "Audio Control")
-    void SetEnvironmentalLayer(const FString& LayerName, bool bActive, float FadeTime = 2.0f);
-
-    UFUNCTION(BlueprintCallable, Category = "Audio Control")
-    void UpdateTimeOfDayAudio(ETimeOfDay NewTimeOfDay);
-
-    UFUNCTION(BlueprintCallable, Category = "Audio Control")
-    void UpdateWeatherAudio(EWeatherType WeatherType, float Intensity);
-
-    // Proximity Warning System
-    UFUNCTION(BlueprintCallable, Category = "Proximity Audio")
-    void CheckProximityTriggers();
-
-    UFUNCTION(BlueprintCallable, Category = "Proximity Audio")
-    void TriggerProximityWarning(EDinosaurSpecies Species, float Distance);
-
-    // Dynamic Music Control
-    UFUNCTION(BlueprintCallable, Category = "Music Control")
-    void TransitionToGameplayState(EGameplayState NewState, float TransitionTime = 3.0f);
-
-    UFUNCTION(BlueprintCallable, Category = "Music Control")
-    void SetMusicIntensity(float Intensity);
-
-    UFUNCTION(BlueprintCallable, Category = "Music Control")
-    void PlayStinger(class USoundCue* StingerSound);
-
-    // Volume Control
-    UFUNCTION(BlueprintCallable, Category = "Audio Control")
-    void SetMasterVolume(float Volume);
-
-    UFUNCTION(BlueprintCallable, Category = "Audio Control")
-    void SetEnvironmentalVolume(float Volume);
-
-    UFUNCTION(BlueprintCallable, Category = "Audio Control")
-    void SetMusicVolume(float Volume);
-
-    // Audio Event System
-    UFUNCTION(BlueprintCallable, Category = "Audio Events")
-    void PlayDinosaurCall(EDinosaurSpecies Species, FVector Location, float VolumeMultiplier = 1.0f);
-
-    UFUNCTION(BlueprintCallable, Category = "Audio Events")
-    void PlayFootstepAudio(EDinosaurSpecies Species, FVector Location, float Intensity);
-
-    UFUNCTION(BlueprintCallable, Category = "Audio Events")
-    void PlayEnvironmentalEvent(const FString& EventName, FVector Location);
-
-private:
-    // Internal Audio Management
-    void InitializeAudioComponents();
-    void UpdateEnvironmentalAudio(float DeltaTime);
-    void UpdateDynamicMusic(float DeltaTime);
-    void ProcessAudioFades(float DeltaTime);
-
-    // Proximity Detection
-    TArray<class AActor*> GetNearbyDinosaurs(float SearchRadius);
-    float CalculateProximityIntensity(float Distance, float MaxDistance);
-
-    // Audio Component References
+    // Audio components
     UPROPERTY()
-    class UAudioComponent* EnvironmentalAudioComponent;
+    UAudioComponent* AmbientAudioComponent;
 
     UPROPERTY()
-    TArray<class UAudioComponent*> LayerAudioComponents;
+    UAudioComponent* MusicAudioComponent;
 
-    // Fade Management
-    TMap<FString, float> LayerFadeTargets;
-    TMap<FString, float> LayerFadeSpeeds;
+    UPROPERTY()
+    UAudioComponent* EffectsAudioComponent;
 
-    // Performance Optimization
-    float LastProximityCheck;
-    float ProximityCheckInterval;
-    float LastAudioUpdate;
-    float AudioUpdateInterval;
+    UPROPERTY()
+    UAudioComponent* NarrationAudioComponent;
+
+    // Current environment settings
+    UPROPERTY()
+    FAudio_EnvironmentSettings CurrentEnvironment;
+
+    // Proximity triggers
+    UPROPERTY()
+    TMap<AActor*, FAudio_ProximityTrigger> ProximityTriggers;
+
+    // MetaSound assets
+    UPROPERTY()
+    TMap<FString, UMetaSoundSource*> MetaSoundAssets;
+
+    // Internal methods
+    void LoadMetaSoundAssets();
+    void UpdateAmbientAudio();
+    void UpdateMusicIntensity();
+    float CalculateProximityVolume(float Distance, const FAudio_ProximityTrigger& Trigger) const;
+    UMetaSoundSource* GetMetaSoundAsset(const FString& AssetName) const;
 };
