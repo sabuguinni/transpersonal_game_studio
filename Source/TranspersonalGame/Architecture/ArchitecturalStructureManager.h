@@ -4,8 +4,7 @@
 #include "GameFramework/Actor.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/SceneComponent.h"
-#include "Engine/StaticMesh.h"
-#include "Materials/MaterialInterface.h"
+#include "Engine/TriggerVolume.h"
 #include "../SharedTypes.h"
 #include "ArchitecturalStructureManager.generated.h"
 
@@ -14,12 +13,23 @@ enum class EArch_StructureType : uint8
 {
     CaveDwelling        UMETA(DisplayName = "Cave Dwelling"),
     WoodenShelter       UMETA(DisplayName = "Wooden Shelter"),
-    StoneCircle         UMETA(DisplayName = "Stone Circle"),
-    Village             UMETA(DisplayName = "Village"),
-    Watchtower          UMETA(DisplayName = "Watchtower"),
-    StoragePit          UMETA(DisplayName = "Storage Pit"),
-    CraftingArea        UMETA(DisplayName = "Crafting Area"),
-    DefensiveWall       UMETA(DisplayName = "Defensive Wall")
+    StoneMonument       UMETA(DisplayName = "Stone Monument"),
+    UndergroundTunnel   UMETA(DisplayName = "Underground Tunnel"),
+    DefensiveBarrier    UMETA(DisplayName = "Defensive Barrier"),
+    StorageCache        UMETA(DisplayName = "Storage Cache"),
+    RitualSite          UMETA(DisplayName = "Ritual Site"),
+    WaterSource         UMETA(DisplayName = "Water Source")
+};
+
+UENUM(BlueprintType)
+enum class EArch_StructureCondition : uint8
+{
+    Pristine            UMETA(DisplayName = "Pristine"),
+    WellMaintained      UMETA(DisplayName = "Well Maintained"),
+    Weathered           UMETA(DisplayName = "Weathered"),
+    Damaged             UMETA(DisplayName = "Damaged"),
+    Ruined              UMETA(DisplayName = "Ruined"),
+    Collapsed           UMETA(DisplayName = "Collapsed")
 };
 
 USTRUCT(BlueprintType)
@@ -31,52 +41,41 @@ struct FArch_StructureData
     EArch_StructureType StructureType = EArch_StructureType::CaveDwelling;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    FVector Dimensions = FVector(500.0f, 500.0f, 300.0f);
+    EArch_StructureCondition Condition = EArch_StructureCondition::Weathered;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    int32 Capacity = 4;
+    float AgeInYears = 50.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
+    int32 MaxOccupants = 4;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
+    bool bIsHabitable = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
+    bool bHasFirePit = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
+    bool bHasWaterAccess = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
+    bool bIsDefensive = false;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
     float StructuralIntegrity = 100.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    bool bIsWeatherproof = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    bool bProvidesWarmth = false;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    TArray<FString> RequiredMaterials;
-
     FArch_StructureData()
     {
-        RequiredMaterials.Add(TEXT("Stone"));
-        RequiredMaterials.Add(TEXT("Wood"));
+        StructureType = EArch_StructureType::CaveDwelling;
+        Condition = EArch_StructureCondition::Weathered;
+        AgeInYears = 50.0f;
+        MaxOccupants = 4;
+        bIsHabitable = true;
+        bHasFirePit = false;
+        bHasWaterAccess = false;
+        bIsDefensive = false;
+        StructuralIntegrity = 100.0f;
     }
-};
-
-USTRUCT(BlueprintType)
-struct FArch_InteriorLayout
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interior")
-    TArray<FVector> SleepingAreas;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interior")
-    FVector FirePitLocation = FVector::ZeroVector;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interior")
-    TArray<FVector> StorageLocations;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interior")
-    TArray<FVector> ToolRackLocations;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interior")
-    bool bHasVentilation = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interior")
-    float LightLevel = 0.3f;
 };
 
 UCLASS(BlueprintType, Blueprintable)
@@ -96,65 +95,78 @@ protected:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
     UStaticMeshComponent* MainStructureMesh;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    UStaticMeshComponent* InteriorMesh;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    UStaticMeshComponent* PropsMesh;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure Data")
     FArch_StructureData StructureData;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interior")
-    FArch_InteriorLayout InteriorLayout;
+    TArray<FVector> InteriorSpawnPoints;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Materials")
-    UMaterialInterface* StoneMaterial;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interior")
+    TArray<FString> InteriorPropNames;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Materials")
-    UMaterialInterface* WoodMaterial;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
+    bool bHasNaturalLighting = true;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Materials")
-    UMaterialInterface* ThatchMaterial;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
+    bool bHasArtificialLighting = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
+    float AmbientLightIntensity = 0.3f;
 
 public:
     virtual void Tick(float DeltaTime) override;
 
-    UFUNCTION(BlueprintCallable, Category = "Structure")
-    void InitializeStructure(EArch_StructureType Type, FVector Location, FRotator Rotation);
+    UFUNCTION(BlueprintCallable, Category = "Structure Management")
+    void InitializeStructure(EArch_StructureType Type, EArch_StructureCondition InitialCondition);
 
-    UFUNCTION(BlueprintCallable, Category = "Structure")
-    void SetupInteriorLayout();
+    UFUNCTION(BlueprintCallable, Category = "Structure Management")
+    void UpdateStructuralIntegrity(float DamageAmount);
 
-    UFUNCTION(BlueprintCallable, Category = "Structure")
-    void AddInteriorProp(FVector Location, FRotator Rotation, const FString& PropType);
+    UFUNCTION(BlueprintCallable, Category = "Structure Management")
+    bool CanAccommodateOccupants(int32 RequestedOccupants) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Structure")
-    bool CanAccommodateOccupants(int32 OccupantCount) const;
+    UFUNCTION(BlueprintCallable, Category = "Interior Management")
+    void SpawnInteriorProps();
 
-    UFUNCTION(BlueprintCallable, Category = "Structure")
-    float GetStructuralIntegrity() const { return StructureData.StructuralIntegrity; }
+    UFUNCTION(BlueprintCallable, Category = "Interior Management")
+    void ClearInteriorProps();
 
-    UFUNCTION(BlueprintCallable, Category = "Structure")
-    void DamageStructure(float DamageAmount);
+    UFUNCTION(BlueprintCallable, Category = "Interior Management")
+    FVector GetRandomInteriorSpawnPoint() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Structure")
-    void RepairStructure(float RepairAmount);
+    UFUNCTION(BlueprintCallable, Category = "Lighting")
+    void UpdateLightingConditions(bool bDayTime, float WeatherIntensity);
 
-    UFUNCTION(BlueprintCallable, Category = "Structure")
-    TArray<FVector> GetSleepingPositions() const;
+    UFUNCTION(BlueprintCallable, Category = "Structure Management")
+    void ApplyWeatherDamage(float WeatherSeverity, float DeltaTime);
 
-    UFUNCTION(BlueprintCallable, Category = "Structure")
-    FVector GetFirePitLocation() const;
+    UFUNCTION(BlueprintPure, Category = "Structure Management")
+    FString GetStructureDescription() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Structure")
-    bool IsWeatherproof() const { return StructureData.bIsWeatherproof; }
+    UFUNCTION(BlueprintPure, Category = "Structure Management")
+    bool IsStructureUsable() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Structure")
-    bool ProvidesWarmth() const { return StructureData.bProvidesWarmth; }
+protected:
+    UFUNCTION()
+    void OnStructureEntered(AActor* OverlappedActor, AActor* OtherActor);
+
+    UFUNCTION()
+    void OnStructureExited(AActor* OverlappedActor, AActor* OtherActor);
 
 private:
-    void SetupCaveDwelling();
-    void SetupWoodenShelter();
-    void SetupStoneCircle();
-    void SetupVillageLayout();
-    void ApplyMaterialToStructure();
-    void CreateInteriorProps();
-    
+    void SetupStructureMeshes();
+    void ConfigureInteriorLayout();
+    void UpdateVisualCondition();
+
     UPROPERTY()
-    TArray<UStaticMeshComponent*> InteriorProps;
+    TArray<AActor*> SpawnedProps;
+
+    float LastWeatherDamageTime = 0.0f;
+    float WeatherDamageInterval = 60.0f; // Apply weather damage every minute
 };
