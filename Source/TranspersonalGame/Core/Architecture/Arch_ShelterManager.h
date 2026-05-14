@@ -3,19 +3,20 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "Components/StaticMeshComponent.h"
-#include "Components/PointLightComponent.h"
-#include "Engine/World.h"
-#include "../SharedTypes.h"
+#include "Components/SceneComponent.h"
+#include "Engine/StaticMesh.h"
+#include "SharedTypes.h"
 #include "Arch_ShelterManager.generated.h"
 
 UENUM(BlueprintType)
 enum class EArch_ShelterType : uint8
 {
-    Cave UMETA(DisplayName = "Cave Dwelling"),
-    TreePlatform UMETA(DisplayName = "Tree Platform"),
-    StoneCircle UMETA(DisplayName = "Stone Circle"),
-    CliffDwelling UMETA(DisplayName = "Cliff Dwelling"),
-    Underground UMETA(DisplayName = "Underground Bunker")
+    None = 0,
+    CaveDwelling,
+    ElevatedPlatform,
+    StoneCircle,
+    WorkshopArea,
+    TemporaryLeanTo
 };
 
 USTRUCT(BlueprintType)
@@ -24,35 +25,35 @@ struct FArch_ShelterData
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter")
-    EArch_ShelterType ShelterType = EArch_ShelterType::Cave;
+    EArch_ShelterType ShelterType = EArch_ShelterType::None;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter")
-    FVector Location = FVector::ZeroVector;
+    int32 MaxOccupants = 4;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter")
-    FRotator Rotation = FRotator::ZeroRotator;
+    float WeatherProtection = 0.8f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter")
-    float SafetyRadius = 500.0f;
+    float TemperatureBonus = 5.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter")
     bool bHasFirePit = false;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter")
-    bool bHasStorage = false;
+    bool bHasStorageArea = false;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter")
-    int32 MaxOccupants = 1;
+    bool bHasCraftingStation = false;
 
     FArch_ShelterData()
     {
-        ShelterType = EArch_ShelterType::Cave;
-        Location = FVector::ZeroVector;
-        Rotation = FRotator::ZeroRotator;
-        SafetyRadius = 500.0f;
+        ShelterType = EArch_ShelterType::None;
+        MaxOccupants = 4;
+        WeatherProtection = 0.8f;
+        TemperatureBonus = 5.0f;
         bHasFirePit = false;
-        bHasStorage = false;
-        MaxOccupants = 1;
+        bHasStorageArea = false;
+        bHasCraftingStation = false;
     }
 };
 
@@ -67,54 +68,66 @@ public:
 protected:
     virtual void BeginPlay() override;
 
+public:
+    virtual void Tick(float DeltaTime) override;
+
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
     USceneComponent* RootSceneComponent;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
     UStaticMeshComponent* ShelterMesh;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    UPointLightComponent* InteriorLight;
-
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter Configuration")
     FArch_ShelterData ShelterData;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter Configuration")
-    TArray<FArch_ShelterData> ManagedShelters;
+    TArray<FVector> OccupantPositions;
 
-public:
-    virtual void Tick(float DeltaTime) override;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter Configuration")
+    float InteractionRange = 300.0f;
 
-    UFUNCTION(BlueprintCallable, Category = "Shelter Management")
-    void CreateShelter(EArch_ShelterType ShelterType, FVector Location, FRotator Rotation);
+    UPROPERTY(BlueprintReadOnly, Category = "Shelter State")
+    TArray<AActor*> CurrentOccupants;
 
-    UFUNCTION(BlueprintCallable, Category = "Shelter Management")
-    void DestroyShelter(int32 ShelterIndex);
+    UPROPERTY(BlueprintReadOnly, Category = "Shelter State")
+    bool bIsOccupied = false;
 
-    UFUNCTION(BlueprintCallable, Category = "Shelter Management")
-    bool IsLocationSafe(FVector TestLocation, float TestRadius = 100.0f);
+    UFUNCTION(BlueprintCallable, Category = "Shelter")
+    bool CanEnterShelter(AActor* Actor);
 
-    UFUNCTION(BlueprintCallable, Category = "Shelter Management")
-    FArch_ShelterData GetNearestShelter(FVector PlayerLocation);
+    UFUNCTION(BlueprintCallable, Category = "Shelter")
+    bool EnterShelter(AActor* Actor);
 
-    UFUNCTION(BlueprintCallable, Category = "Shelter Management")
-    void AddFirePit(int32 ShelterIndex);
+    UFUNCTION(BlueprintCallable, Category = "Shelter")
+    bool ExitShelter(AActor* Actor);
 
-    UFUNCTION(BlueprintCallable, Category = "Shelter Management")
-    void AddStorage(int32 ShelterIndex);
+    UFUNCTION(BlueprintCallable, Category = "Shelter")
+    float GetWeatherProtection() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Shelter Management")
-    void SetupInteriorLighting(EArch_ShelterType ShelterType);
+    UFUNCTION(BlueprintCallable, Category = "Shelter")
+    float GetTemperatureBonus() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Shelter Management")
-    void ValidateAllShelters();
+    UFUNCTION(BlueprintCallable, Category = "Shelter")
+    bool HasFirePit() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Shelter Management", CallInEditor)
-    void CreateDefaultShelters();
+    UFUNCTION(BlueprintCallable, Category = "Shelter")
+    bool HasStorageArea() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Shelter")
+    bool HasCraftingStation() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Shelter")
+    void SetShelterType(EArch_ShelterType NewType);
+
+    UFUNCTION(BlueprintCallable, Category = "Shelter")
+    void UpdateShelterMesh();
+
+    UFUNCTION(BlueprintCallable, Category = "Shelter")
+    TArray<FVector> GetAvailablePositions();
 
 private:
-    void InitializeShelterMesh(EArch_ShelterType ShelterType);
-    void SetupShelterLighting(EArch_ShelterType ShelterType);
-    bool CheckShelterSafety(const FArch_ShelterData& Shelter);
-    void UpdateShelterVisuals();
+    void InitializeShelterData();
+    void SetupOccupantPositions();
+    FVector GetRandomPositionInShelter();
+    bool IsPositionOccupied(const FVector& Position);
 };
