@@ -1,328 +1,262 @@
 #include "Narr_DialogueManager.h"
-#include "Engine/Engine.h"
-#include "Engine/World.h"
 #include "Components/AudioComponent.h"
-#include "Sound/SoundCue.h"
-#include "Engine/DataTable.h"
+#include "Sound/SoundBase.h"
+#include "Engine/Engine.h"
+#include "GameFramework/PlayerController.h"
 #include "Kismet/GameplayStatics.h"
 
-void UNarr_DialogueManager::Initialize(FSubsystemCollectionBase& Collection)
+ANarr_DialogueManager::ANarr_DialogueManager()
 {
-    Super::Initialize(Collection);
-    
-    UE_LOG(LogTemp, Log, TEXT("Narrative DialogueManager initialized"));
-    
-    // Initialize narrative state
-    NarrativeState = FNarr_NarrativeState();
-    
-    // Load dialogue database
-    LoadDialogueDatabase();
-    
-    // Setup default unlocked dialogues for new players
-    UnlockDialogue("INTRO_SURVIVAL_001");
-    UnlockDialogue("HUNT_BASICS_001");
-    UnlockDialogue("DANGER_GENERAL_001");
+    PrimaryActorTick.bCanEverTick = true;
+
+    // Create audio component for voice playback
+    AudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("AudioComponent"));
+    RootComponent = AudioComponent;
+
+    // Initialize default values
+    DefaultDialogueCooldown = 3.0f;
+    bIsDialoguePlaying = false;
+    CurrentDialogueIndex = 0;
 }
 
-void UNarr_DialogueManager::Deinitialize()
+void ANarr_DialogueManager::BeginPlay()
 {
-    if (CurrentDialogueAudio && IsValid(CurrentDialogueAudio))
+    Super::BeginPlay();
+    
+    InitializeDefaultDialogues();
+    
+    if (AudioComponent)
     {
-        CurrentDialogueAudio->Stop();
-        CurrentDialogueAudio = nullptr;
+        AudioComponent->SetVolumeMultiplier(0.8f);
     }
-    
-    DialogueDatabase.Empty();
-    
-    Super::Deinitialize();
 }
 
-void UNarr_DialogueManager::LoadDialogueDatabase()
+void ANarr_DialogueManager::Tick(float DeltaTime)
 {
-    // Create default dialogue entries for prehistoric survival game
-    FNarr_DialogueEntry HuntEntry;
-    HuntEntry.DialogueID = "HUNT_BASICS_001";
-    HuntEntry.SpeakerRole = ENarr_CharacterRole::HuntMaster;
-    HuntEntry.DialogueType = ENarr_DialogueType::HuntInstruction;
-    HuntEntry.DialogueText = FText::FromString("The great hunt begins at dawn. Position yourself on the ridge and strike when the sun touches the peaks.");
-    HuntEntry.Duration = 8.0f;
-    DialogueDatabase.Add(HuntEntry.DialogueID, HuntEntry);
+    Super::Tick(DeltaTime);
     
-    FNarr_DialogueEntry SurvivalEntry;
-    SurvivalEntry.DialogueID = "SURVIVAL_RAPTORS_001";
-    SurvivalEntry.SpeakerRole = ENarr_CharacterRole::SurvivalGuide;
-    SurvivalEntry.DialogueType = ENarr_DialogueType::SurvivalWarning;
-    SurvivalEntry.DialogueText = FText::FromString("Velociraptors hunt in packs. They flank from both sides while one distracts. Keep your spear ready.");
-    SurvivalEntry.Duration = 10.0f;
-    DialogueDatabase.Add(SurvivalEntry.DialogueID, SurvivalEntry);
-    
-    FNarr_DialogueEntry DangerEntry;
-    DangerEntry.DialogueID = "DANGER_TREX_001";
-    DangerEntry.SpeakerRole = ENarr_CharacterRole::Scout;
-    DangerEntry.DialogueType = ENarr_DialogueType::ThreatAlert;
-    DangerEntry.DialogueText = FText::FromString("Thunder Lizard approaches! Retreat to higher ground immediately. Do not engage!");
-    DangerEntry.Duration = 6.0f;
-    DialogueDatabase.Add(DangerEntry.DialogueID, DangerEntry);
-    
-    FNarr_DialogueEntry WisdomEntry;
-    WisdomEntry.DialogueID = "WISDOM_CAVES_001";
-    WisdomEntry.SpeakerRole = ENarr_CharacterRole::Elder;
-    WisdomEntry.DialogueType = ENarr_DialogueType::TribeWisdom;
-    WisdomEntry.DialogueText = FText::FromString("Ancient caves hold secrets. Study the markings - they guide to water, shelter, or warn of danger.");
-    WisdomEntry.Duration = 9.0f;
-    DialogueDatabase.Add(WisdomEntry.DialogueID, WisdomEntry);
-    
-    UE_LOG(LogTemp, Log, TEXT("Dialogue database loaded with %d entries"), DialogueDatabase.Num());
-}
-
-void UNarr_DialogueManager::TriggerDialogue(const FString& DialogueID, AActor* Speaker)
-{
-    if (!IsDialogueUnlocked(DialogueID))
+    // Handle dialogue progression
+    if (bIsDialoguePlaying && AudioComponent && !AudioComponent->IsPlaying())
     {
-        UE_LOG(LogTemp, Warning, TEXT("Dialogue %s is not unlocked"), *DialogueID);
+        OnDialogueFinished();
+    }
+}
+
+void ANarr_DialogueManager::PlayDialogueSequence(const FString& SequenceName)
+{
+    if (bIsDialoguePlaying)
+    {
+        return; // Don't interrupt current dialogue
+    }
+
+    FNarr_DialogueSequence* Sequence = FindDialogueSequence(SequenceName);
+    if (!Sequence || Sequence->DialogueLines.Num() == 0)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Dialogue sequence not found: %s"), *SequenceName);
         return;
     }
-    
-    const FNarr_DialogueEntry* DialogueEntry = DialogueDatabase.Find(DialogueID);
-    if (!DialogueEntry)
+
+    // Check if this dialogue has been played and is not repeatable
+    if (!Sequence->bIsRepeatable && PlayedDialogues.Contains(SequenceName))
     {
-        UE_LOG(LogTemp, Error, TEXT("Dialogue %s not found in database"), *DialogueID);
         return;
     }
+
+    bIsDialoguePlaying = true;
+    CurrentDialogueIndex = 0;
+    PlayedDialogues.Add(SequenceName, true);
     
-    if (!CheckDialogueConditions(*DialogueEntry))
+    PlayNextDialogueLine();
+}
+
+void ANarr_DialogueManager::StopCurrentDialogue()
+{
+    if (AudioComponent && AudioComponent->IsPlaying())
     {
-        UE_LOG(LogTemp, Log, TEXT("Dialogue %s conditions not met"), *DialogueID);
-        return;
+        AudioComponent->Stop();
     }
     
-    // Play the dialogue
-    PlayDialogueAudio(*DialogueEntry);
+    bIsDialoguePlaying = false;
+    CurrentDialogueIndex = 0;
+}
+
+bool ANarr_DialogueManager::IsDialoguePlaying() const
+{
+    return bIsDialoguePlaying;
+}
+
+void ANarr_DialogueManager::RegisterDialogueSequence(const FNarr_DialogueSequence& NewSequence)
+{
+    DialogueSequences.Add(NewSequence);
+}
+
+void ANarr_DialogueManager::TriggerContextualDialogue(ENarr_DialogueType DialogueType, const FVector& PlayerLocation)
+{
+    // Find appropriate dialogue based on context
+    FString SequenceName;
     
-    // Log the event
-    LogDialogueEvent(DialogueID, Speaker ? Speaker->GetName() : "System");
-    
-    UE_LOG(LogTemp, Log, TEXT("Playing dialogue: %s"), *DialogueEntry->DialogueText.ToString());
-}
-
-void UNarr_DialogueManager::PlayDialogueByType(ENarr_DialogueType DialogueType, ENarr_CharacterRole SpeakerRole)
-{
-    for (const auto& DialoguePair : DialogueDatabase)
+    switch (DialogueType)
     {
-        const FNarr_DialogueEntry& Entry = DialoguePair.Value;
-        if (Entry.DialogueType == DialogueType && Entry.SpeakerRole == SpeakerRole)
-        {
-            if (IsDialogueUnlocked(Entry.DialogueID))
-            {
-                TriggerDialogue(Entry.DialogueID);
-                return;
-            }
-        }
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("No unlocked dialogue found for type %d, role %d"), 
-           (int32)DialogueType, (int32)SpeakerRole);
-}
-
-bool UNarr_DialogueManager::IsDialogueUnlocked(const FString& DialogueID) const
-{
-    return NarrativeState.UnlockedDialogues.Contains(DialogueID);
-}
-
-void UNarr_DialogueManager::UnlockDialogue(const FString& DialogueID)
-{
-    if (!NarrativeState.UnlockedDialogues.Contains(DialogueID))
-    {
-        NarrativeState.UnlockedDialogues.Add(DialogueID);
-        UE_LOG(LogTemp, Log, TEXT("Unlocked dialogue: %s"), *DialogueID);
-    }
-}
-
-void UNarr_DialogueManager::AdvanceChapter(int32 NewChapter)
-{
-    if (NewChapter > NarrativeState.CurrentChapter)
-    {
-        NarrativeState.CurrentChapter = NewChapter;
-        UE_LOG(LogTemp, Log, TEXT("Advanced to chapter %d"), NewChapter);
-        
-        // Unlock chapter-specific dialogues
-        switch (NewChapter)
-        {
-        case 2:
-            UnlockDialogue("HUNT_ADVANCED_001");
-            UnlockDialogue("TRIBE_MEETING_001");
+        case ENarr_DialogueType::Warning:
+            SequenceName = TEXT("ScoutWarning");
             break;
-        case 3:
-            UnlockDialogue("ELDER_WISDOM_001");
-            UnlockDialogue("DANGEROUS_TERRITORY_001");
+        case ENarr_DialogueType::Information:
+            SequenceName = TEXT("ElderWisdom");
             break;
-        }
+        case ENarr_DialogueType::Combat:
+            SequenceName = TEXT("WarriorBattle");
+            break;
+        case ENarr_DialogueType::Exploration:
+            SequenceName = TEXT("ShamanHerd");
+            break;
+        default:
+            SequenceName = TEXT("ElderWisdom");
+            break;
+    }
+    
+    PlayDialogueSequence(SequenceName);
+}
+
+void ANarr_DialogueManager::SetDialogueVolume(float Volume)
+{
+    if (AudioComponent)
+    {
+        AudioComponent->SetVolumeMultiplier(FMath::Clamp(Volume, 0.0f, 1.0f));
     }
 }
 
-void UNarr_DialogueManager::RegisterQuestCompletion(const FString& QuestID)
+void ANarr_DialogueManager::OnDialogueFinished()
 {
-    if (!NarrativeState.CompletedQuests.Contains(QuestID))
+    if (!bIsDialoguePlaying)
     {
-        NarrativeState.CompletedQuests.Add(QuestID);
-        UE_LOG(LogTemp, Log, TEXT("Quest completed: %s"), *QuestID);
-        
-        // Unlock related dialogues based on quest completion
-        if (QuestID.Contains("HUNT"))
-        {
-            NarrativeState.SuccessfulHunts++;
-            UnlockDialogue("HUNT_SUCCESS_001");
-        }
-        else if (QuestID.Contains("SURVIVAL"))
-        {
-            UnlockDialogue("SURVIVAL_MASTERY_001");
-        }
+        return;
     }
-}
 
-void UNarr_DialogueManager::UpdateSurvivalExperience(float ExperienceGained)
-{
-    NarrativeState.SurvivalExperience += ExperienceGained;
+    // Move to next dialogue line or finish sequence
+    CurrentDialogueIndex++;
     
-    // Unlock dialogues based on experience milestones
-    if (NarrativeState.SurvivalExperience >= 100.0f && !IsDialogueUnlocked("EXPERIENCED_SURVIVOR_001"))
+    if (CurrentDialogueIndex < DialogueSequences.Num() && 
+        DialogueSequences.IsValidIndex(0) && 
+        CurrentDialogueIndex < DialogueSequences[0].DialogueLines.Num())
     {
-        UnlockDialogue("EXPERIENCED_SURVIVOR_001");
-    }
-    
-    if (NarrativeState.SurvivalExperience >= 500.0f && !IsDialogueUnlocked("MASTER_SURVIVOR_001"))
-    {
-        UnlockDialogue("MASTER_SURVIVOR_001");
-    }
-}
-
-void UNarr_DialogueManager::TriggerHuntDialogue(const FString& DinosaurType, int32 PackSize)
-{
-    FString DialogueContext = FString::Printf(TEXT("Hunt_%s_Pack%d"), *DinosaurType, PackSize);
-    
-    if (DinosaurType.Contains("Raptor") && PackSize > 1)
-    {
-        TriggerDialogue("SURVIVAL_RAPTORS_001");
-    }
-    else if (DinosaurType.Contains("TRex"))
-    {
-        TriggerDialogue("DANGER_TREX_001");
+        // Wait for cooldown before next line
+        GetWorld()->GetTimerManager().SetTimer(
+            FTimerHandle(),
+            this,
+            &ANarr_DialogueManager::PlayNextDialogueLine,
+            DefaultDialogueCooldown,
+            false
+        );
     }
     else
     {
-        PlayDialogueByType(ENarr_DialogueType::HuntInstruction, ENarr_CharacterRole::HuntMaster);
+        bIsDialoguePlaying = false;
+        CurrentDialogueIndex = 0;
     }
-    
-    LogDialogueEvent("HUNT_TRIGGERED", DialogueContext);
 }
 
-void UNarr_DialogueManager::TriggerDangerWarning(const FString& ThreatType, float Distance)
+void ANarr_DialogueManager::PlayNextDialogueLine()
 {
-    FString DialogueContext = FString::Printf(TEXT("Danger_%s_Dist%.0f"), *ThreatType, Distance);
-    
-    if (ThreatType.Contains("TRex") || ThreatType.Contains("Thunder"))
+    if (!bIsDialoguePlaying || DialogueSequences.Num() == 0)
     {
-        TriggerDialogue("DANGER_TREX_001");
+        return;
     }
-    else
-    {
-        PlayDialogueByType(ENarr_DialogueType::ThreatAlert, ENarr_CharacterRole::Scout);
-    }
-    
-    LogDialogueEvent("DANGER_WARNING", DialogueContext);
-}
 
-void UNarr_DialogueManager::TriggerResourceGuidance(const FString& ResourceType, bool bFound)
-{
-    FString DialogueContext = FString::Printf(TEXT("Resource_%s_%s"), *ResourceType, bFound ? TEXT("Found") : TEXT("Seeking"));
-    
-    if (ResourceType.Contains("Water") || ResourceType.Contains("Shelter"))
+    FNarr_DialogueSequence& CurrentSequence = DialogueSequences[0];
+    if (!CurrentSequence.DialogueLines.IsValidIndex(CurrentDialogueIndex))
     {
-        TriggerDialogue("WISDOM_CAVES_001");
+        bIsDialoguePlaying = false;
+        return;
     }
-    else
-    {
-        PlayDialogueByType(ENarr_DialogueType::ResourceGuidance, ENarr_CharacterRole::Elder);
-    }
-    
-    LogDialogueEvent("RESOURCE_GUIDANCE", DialogueContext);
-}
 
-TArray<FNarr_DialogueEntry> UNarr_DialogueManager::GetAvailableDialogues() const
-{
-    TArray<FNarr_DialogueEntry> AvailableDialogues;
+    FNarr_DialogueLine& CurrentLine = CurrentSequence.DialogueLines[CurrentDialogueIndex];
     
-    for (const auto& DialoguePair : DialogueDatabase)
-    {
-        if (IsDialogueUnlocked(DialoguePair.Key))
-        {
-            AvailableDialogues.Add(DialoguePair.Value);
-        }
-    }
-    
-    return AvailableDialogues;
-}
-
-void UNarr_DialogueManager::PlayDialogueAudio(const FNarr_DialogueEntry& DialogueEntry)
-{
-    // Stop current dialogue if playing
-    if (CurrentDialogueAudio && IsValid(CurrentDialogueAudio))
-    {
-        CurrentDialogueAudio->Stop();
-    }
-    
-    // For now, just log the dialogue text
-    // In a full implementation, this would load and play the audio asset
-    UE_LOG(LogTemp, Log, TEXT("DIALOGUE [%s]: %s"), 
-           *UEnum::GetValueAsString(DialogueEntry.SpeakerRole),
-           *DialogueEntry.DialogueText.ToString());
-    
-    // Display dialogue text on screen for debugging
+    // Display dialogue text (this would connect to UI system)
     if (GEngine)
     {
-        FString DisplayText = FString::Printf(TEXT("[%s]: %s"), 
-                                            *UEnum::GetValueAsString(DialogueEntry.SpeakerRole),
-                                            *DialogueEntry.DialogueText.ToString());
-        GEngine->AddOnScreenDebugMessage(-1, DialogueEntry.Duration, FColor::Yellow, DisplayText);
+        FString DisplayText = FString::Printf(TEXT("%s: %s"), 
+            *CurrentLine.CharacterName, 
+            *CurrentLine.DialogueText);
+        GEngine->AddOnScreenDebugMessage(-1, CurrentLine.Duration, FColor::Yellow, DisplayText);
     }
-}
 
-bool UNarr_DialogueManager::CheckDialogueConditions(const FNarr_DialogueEntry& DialogueEntry) const
-{
-    // Check basic narrative state conditions
-    for (const FString& Condition : DialogueEntry.TriggerConditions)
+    // Play voice clip if available
+    if (AudioComponent && CurrentLine.VoiceClip)
     {
-        if (Condition.Contains("Chapter") && !Condition.Contains(FString::FromInt(NarrativeState.CurrentChapter)))
-        {
-            return false;
-        }
-        
-        if (Condition.Contains("Quest") && !NarrativeState.CompletedQuests.ContainsByPredicate([&Condition](const FString& Quest)
-        {
-            return Condition.Contains(Quest);
-        }))
-        {
-            return false;
-        }
-        
-        if (Condition.Contains("Experience"))
-        {
-            FString ExpString = Condition.RightChop(Condition.Find("Experience") + 10);
-            float RequiredExp = FCString::Atof(*ExpString);
-            if (NarrativeState.SurvivalExperience < RequiredExp)
-            {
-                return false;
-            }
-        }
+        AudioComponent->SetSound(CurrentLine.VoiceClip);
+        AudioComponent->Play();
     }
-    
-    return true;
 }
 
-void UNarr_DialogueManager::LogDialogueEvent(const FString& DialogueID, const FString& Context)
+void ANarr_DialogueManager::InitializeDefaultDialogues()
 {
-    FString LogEntry = FString::Printf(TEXT("NARRATIVE_EVENT: %s | Context: %s | Chapter: %d | Experience: %.1f"), 
-                                     *DialogueID, *Context, NarrativeState.CurrentChapter, NarrativeState.SurvivalExperience);
-    
-    UE_LOG(LogTemp, Log, TEXT("%s"), *LogEntry);
+    // Elder Wisdom dialogue
+    FNarr_DialogueSequence ElderSequence;
+    ElderSequence.SequenceName = TEXT("ElderWisdom");
+    ElderSequence.bIsRepeatable = true;
+    ElderSequence.Priority = 1;
+
+    FNarr_DialogueLine ElderLine;
+    ElderLine.CharacterName = TEXT("Tribal Elder");
+    ElderLine.DialogueText = TEXT("The ancient valley holds many secrets, hunter. Beyond the great river lies the territory of the Thunder Lizards.");
+    ElderLine.Duration = 8.0f;
+    ElderLine.DialogueType = ENarr_DialogueType::Information;
+    ElderSequence.DialogueLines.Add(ElderLine);
+
+    // Scout Warning dialogue
+    FNarr_DialogueSequence ScoutSequence;
+    ScoutSequence.SequenceName = TEXT("ScoutWarning");
+    ScoutSequence.bIsRepeatable = true;
+    ScoutSequence.Priority = 3;
+
+    FNarr_DialogueLine ScoutLine;
+    ScoutLine.CharacterName = TEXT("Tribal Scout");
+    ScoutLine.DialogueText = TEXT("Danger approaches from the north! The pack hunters move like shadows through the fern groves.");
+    ScoutLine.Duration = 7.0f;
+    ScoutLine.DialogueType = ENarr_DialogueType::Warning;
+    ScoutSequence.DialogueLines.Add(ScoutLine);
+
+    // Shaman Herd dialogue
+    FNarr_DialogueSequence ShamanSequence;
+    ShamanSequence.SequenceName = TEXT("ShamanHerd");
+    ShamanSequence.bIsRepeatable = true;
+    ShamanSequence.Priority = 2;
+
+    FNarr_DialogueLine ShamanLine;
+    ShamanLine.CharacterName = TEXT("Tribal Shaman");
+    ShamanLine.DialogueText = TEXT("The great herds are moving again. This is the season of plenty - when the long-necks follow the green paths.");
+    ShamanLine.Duration = 9.0f;
+    ShamanLine.DialogueType = ENarr_DialogueType::Exploration;
+    ShamanSequence.DialogueLines.Add(ShamanLine);
+
+    // Warrior Battle dialogue
+    FNarr_DialogueSequence WarriorSequence;
+    WarriorSequence.SequenceName = TEXT("WarriorBattle");
+    WarriorSequence.bIsRepeatable = false;
+    WarriorSequence.Priority = 5;
+
+    FNarr_DialogueLine WarriorLine;
+    WarriorLine.CharacterName = TEXT("Tribal Warrior");
+    WarriorLine.DialogueText = TEXT("Hold your ground, warriors! The great predator circles our camp, testing our resolve.");
+    WarriorLine.Duration = 6.0f;
+    WarriorLine.DialogueType = ENarr_DialogueType::Combat;
+    WarriorSequence.DialogueLines.Add(WarriorLine);
+
+    // Register all sequences
+    DialogueSequences.Add(ElderSequence);
+    DialogueSequences.Add(ScoutSequence);
+    DialogueSequences.Add(ShamanSequence);
+    DialogueSequences.Add(WarriorSequence);
+}
+
+FNarr_DialogueSequence* ANarr_DialogueManager::FindDialogueSequence(const FString& SequenceName)
+{
+    for (FNarr_DialogueSequence& Sequence : DialogueSequences)
+    {
+        if (Sequence.SequenceName == SequenceName)
+        {
+            return &Sequence;
+        }
+    }
+    return nullptr;
 }
