@@ -4,7 +4,6 @@
 #include "Engine/GameInstanceSubsystem.h"
 #include "Engine/World.h"
 #include "Components/ActorComponent.h"
-#include "GameFramework/Actor.h"
 #include "Build_FinalIntegrationOrchestrator.generated.h"
 
 UENUM(BlueprintType)
@@ -18,7 +17,7 @@ enum class EBuild_SystemStatus : uint8
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FBuild_SystemHealthReport
+struct TRANSPERSONALGAME_API FBuild_SystemHealthData
 {
     GENERATED_BODY()
 
@@ -29,57 +28,64 @@ struct TRANSPERSONALGAME_API FBuild_SystemHealthReport
     EBuild_SystemStatus Status;
 
     UPROPERTY(BlueprintReadOnly, Category = "System Health")
-    FString StatusMessage;
-
-    UPROPERTY(BlueprintReadOnly, Category = "System Health")
-    float PerformanceMetric;
-
-    UPROPERTY(BlueprintReadOnly, Category = "System Health")
     int32 ActorCount;
 
-    FBuild_SystemHealthReport()
+    UPROPERTY(BlueprintReadOnly, Category = "System Health")
+    float PerformanceScore;
+
+    UPROPERTY(BlueprintReadOnly, Category = "System Health")
+    FString LastError;
+
+    UPROPERTY(BlueprintReadOnly, Category = "System Health")
+    FDateTime LastValidation;
+
+    FBuild_SystemHealthData()
     {
         SystemName = TEXT("Unknown");
         Status = EBuild_SystemStatus::Unknown;
-        StatusMessage = TEXT("Not initialized");
-        PerformanceMetric = 0.0f;
         ActorCount = 0;
+        PerformanceScore = 0.0f;
+        LastError = TEXT("");
+        LastValidation = FDateTime::Now();
     }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FBuild_IntegrationMetrics
+struct TRANSPERSONALGAME_API FBuild_BiomeValidationData
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    int32 TotalActors;
+    UPROPERTY(BlueprintReadOnly, Category = "Biome Validation")
+    FString BiomeName;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    int32 ActiveSystems;
+    UPROPERTY(BlueprintReadOnly, Category = "Biome Validation")
+    FVector BiomeCenter;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    float FrameRate;
+    UPROPERTY(BlueprintReadOnly, Category = "Biome Validation")
+    int32 RequiredActors;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    float MemoryUsageMB;
+    UPROPERTY(BlueprintReadOnly, Category = "Biome Validation")
+    int32 CurrentActors;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    bool bAllSystemsHealthy;
+    UPROPERTY(BlueprintReadOnly, Category = "Biome Validation")
+    bool bIsPopulated;
 
-    FBuild_IntegrationMetrics()
+    UPROPERTY(BlueprintReadOnly, Category = "Biome Validation")
+    TArray<FString> MissingAssetTypes;
+
+    FBuild_BiomeValidationData()
     {
-        TotalActors = 0;
-        ActiveSystems = 0;
-        FrameRate = 0.0f;
-        MemoryUsageMB = 0.0f;
-        bAllSystemsHealthy = false;
+        BiomeName = TEXT("Unknown");
+        BiomeCenter = FVector::ZeroVector;
+        RequiredActors = 500;
+        CurrentActors = 0;
+        bIsPopulated = false;
     }
 };
 
 /**
  * Final Integration Orchestrator - Manages complete system integration and build validation
- * Coordinates all game systems and ensures stable operation
+ * Coordinates all subsystems, validates biome population, and ensures stable build state
  */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UBuild_FinalIntegrationOrchestrator : public UGameInstanceSubsystem
@@ -95,83 +101,123 @@ public:
 
     // Core Integration Functions
     UFUNCTION(BlueprintCallable, Category = "Integration")
-    void InitializeAllSystems();
+    void ValidateAllSystems();
 
     UFUNCTION(BlueprintCallable, Category = "Integration")
-    void ValidateSystemIntegration();
+    void ValidateBiomePopulation();
 
     UFUNCTION(BlueprintCallable, Category = "Integration")
-    FBuild_IntegrationMetrics GetIntegrationMetrics();
+    void ValidateAssetPipeline();
 
     UFUNCTION(BlueprintCallable, Category = "Integration")
-    TArray<FBuild_SystemHealthReport> GetSystemHealthReports();
+    void GenerateIntegrationReport();
 
     // System Health Monitoring
-    UFUNCTION(BlueprintCallable, Category = "Health")
-    EBuild_SystemStatus GetOverallSystemHealth();
+    UFUNCTION(BlueprintCallable, Category = "System Health")
+    EBuild_SystemStatus GetSystemStatus(const FString& SystemName);
 
-    UFUNCTION(BlueprintCallable, Category = "Health")
-    void RunComprehensiveHealthCheck();
+    UFUNCTION(BlueprintCallable, Category = "System Health")
+    TArray<FBuild_SystemHealthData> GetAllSystemHealth();
 
-    UFUNCTION(BlueprintCallable, Category = "Health")
-    bool AreAllSystemsOperational();
+    UFUNCTION(BlueprintCallable, Category = "System Health")
+    float GetOverallSystemHealth();
+
+    // Biome Validation
+    UFUNCTION(BlueprintCallable, Category = "Biome Validation")
+    TArray<FBuild_BiomeValidationData> GetBiomeValidationData();
+
+    UFUNCTION(BlueprintCallable, Category = "Biome Validation")
+    bool AreBiomesProperlyPopulated();
+
+    UFUNCTION(BlueprintCallable, Category = "Biome Validation")
+    int32 GetTotalActorCount();
+
+    // Asset Pipeline Validation
+    UFUNCTION(BlueprintCallable, Category = "Asset Pipeline")
+    bool ValidateFBXImportPipeline();
+
+    UFUNCTION(BlueprintCallable, Category = "Asset Pipeline")
+    TArray<FString> GetAvailableAssets();
+
+    UFUNCTION(BlueprintCallable, Category = "Asset Pipeline")
+    bool TestAssetSpawning();
 
     // Performance Monitoring
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    void MonitorPerformanceMetrics();
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    float GetCurrentFrameRate();
+    float GetCurrentFPS();
 
     UFUNCTION(BlueprintCallable, Category = "Performance")
     float GetMemoryUsage();
 
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    bool IsPerformanceWithinLimits();
+
     // Build Validation
-    UFUNCTION(BlueprintCallable, Category = "Build")
-    bool ValidateBuildIntegrity();
+    UFUNCTION(BlueprintCallable, Category = "Build Validation")
+    bool ValidateModuleCompilation();
 
-    UFUNCTION(BlueprintCallable, Category = "Build")
-    void GenerateBuildReport();
+    UFUNCTION(BlueprintCallable, Category = "Build Validation")
+    TArray<FString> GetCompilationErrors();
 
-    UFUNCTION(BlueprintCallable, Category = "Build")
-    void SaveIntegrationState();
+    UFUNCTION(BlueprintCallable, Category = "Build Validation")
+    bool IsReadyForProduction();
 
 protected:
     // System Health Data
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    TArray<FBuild_SystemHealthReport> SystemHealthReports;
+    UPROPERTY(BlueprintReadOnly, Category = "System Health")
+    TMap<FString, FBuild_SystemHealthData> SystemHealthMap;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    FBuild_IntegrationMetrics CurrentMetrics;
+    // Biome Validation Data
+    UPROPERTY(BlueprintReadOnly, Category = "Biome Validation")
+    TArray<FBuild_BiomeValidationData> BiomeValidationArray;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    bool bSystemsInitialized;
+    // Performance Thresholds
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float MinimumFPS = 30.0f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    bool bIntegrationValidated;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float MaximumMemoryUsage = 85.0f;
 
-    // Performance Tracking
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float LastFrameRate;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    int32 MaximumActorCount = 20000;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float LastMemoryUsage;
+    // Validation Flags
+    UPROPERTY(BlueprintReadOnly, Category = "Validation")
+    bool bSystemsValidated = false;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    FDateTime LastHealthCheck;
+    UPROPERTY(BlueprintReadOnly, Category = "Validation")
+    bool bBiomesValidated = false;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Validation")
+    bool bAssetPipelineValidated = false;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Validation")
+    bool bPerformanceValidated = false;
 
 private:
     // Internal validation functions
     void ValidateWorldGeneration();
     void ValidateCharacterSystems();
-    void ValidateFoliageSystem();
     void ValidatePhysicsSystems();
-    void ValidateLightingSystem();
     void ValidateVFXSystems();
     void ValidateAudioSystems();
+    void ValidateNPCSystems();
+    void ValidateCrowdSystems();
 
-    // Helper functions
-    void UpdateSystemHealth(const FString& SystemName, EBuild_SystemStatus Status, const FString& Message, float Metric = 0.0f);
-    void LogIntegrationStatus();
-    void CleanupInvalidActors();
+    // Biome validation helpers
+    void ValidateSavanaBiome();
+    void ValidatePantanoBiome();
+    void ValidateFlorestaBiome();
+    void ValidateDesertoBiome();
+    void ValidateMontanhaBiome();
+
+    // Performance monitoring helpers
+    void UpdatePerformanceMetrics();
+    void CheckMemoryLeaks();
+    void ValidateActorCounts();
+
+    // Asset pipeline helpers
+    void TestFBXImport();
+    void ValidateAssetRegistry();
+    void CheckAssetIntegrity();
 };
