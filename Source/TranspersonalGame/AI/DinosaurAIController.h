@@ -5,64 +5,33 @@
 #include "BehaviorTree/BehaviorTreeComponent.h"
 #include "BehaviorTree/BlackboardComponent.h"
 #include "Perception/AIPerceptionComponent.h"
-#include "Perception/AISightConfig.h"
+#include "Perception/AISenseConfig_Sight.h"
+#include "Perception/AISenseConfig_Hearing.h"
+#include "../SharedTypes.h"
 #include "DinosaurAIController.generated.h"
 
-UENUM(BlueprintType)
-enum class ENPC_DinosaurState : uint8
-{
-    Idle        UMETA(DisplayName = "Idle"),
-    Patrol      UMETA(DisplayName = "Patrol"),
-    Hunt        UMETA(DisplayName = "Hunt"),
-    Flee        UMETA(DisplayName = "Flee"),
-    Attack      UMETA(DisplayName = "Attack"),
-    Dead        UMETA(DisplayName = "Dead")
-};
-
-USTRUCT(BlueprintType)
-struct FNPC_DinosaurStats
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
-    float Health = 100.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
-    float MaxHealth = 100.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
-    float AttackDamage = 25.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
-    float MovementSpeed = 400.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
-    float SightRange = 3000.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
-    float AttackRange = 200.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
-    float PatrolRadius = 1500.0f;
-};
+class UBehaviorTree;
+class UBlackboardData;
+class APawn;
 
 /**
- * AI Controller base para todos os dinossauros
- * Implementa comportamento básico: patrulha, caça, fuga, ataque
+ * AI Controller for dinosaur NPCs with advanced behavior trees and perception
+ * Handles territorial behavior, pack dynamics, and threat assessment
  */
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API ANPC_DinosaurAIController : public AAIController
+class TRANSPERSONALGAME_API ADinosaurAIController : public AAIController
 {
     GENERATED_BODY()
 
 public:
-    ANPC_DinosaurAIController();
+    ADinosaurAIController();
 
 protected:
     virtual void BeginPlay() override;
-    virtual void Tick(float DeltaTime) override;
+    virtual void Possess(APawn* InPawn) override;
+    virtual void UnPossess() override;
 
-    // Componentes de IA
+    // AI Components
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI")
     class UBehaviorTreeComponent* BehaviorTreeComponent;
 
@@ -70,69 +39,135 @@ protected:
     class UBlackboardComponent* BlackboardComponent;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI")
-    class UAIPerceptionComponent* AIPerceptionComponent;
+    class UAIPerceptionComponent* PerceptionComponent;
 
-    // Configuração da IA
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI Config")
-    class UBehaviorTree* BehaviorTree;
+    // Behavior Trees
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI")
+    class UBehaviorTree* DefaultBehaviorTree;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI Config")
-    class UBlackboardData* BlackboardAsset;
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI")
+    class UBehaviorTree* CombatBehaviorTree;
 
-    // Stats do dinossauro
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur")
-    FNPC_DinosaurStats DinosaurStats;
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI")
+    class UBehaviorTree* FlockingBehaviorTree;
 
-    // Estado actual
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur")
-    ENPC_DinosaurState CurrentState;
+    // Blackboard Data
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI")
+    class UBlackboardData* DinosaurBlackboard;
 
-    // Target actual
-    UPROPERTY(BlueprintReadOnly, Category = "AI")
-    AActor* CurrentTarget;
+    // AI Behavior Settings
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI Behavior")
+    ENPC_DinosaurSpecies DinosaurSpecies;
 
-    // Posição inicial para patrulha
-    UPROPERTY(BlueprintReadOnly, Category = "AI")
-    FVector HomeLocation;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI Behavior")
+    float TerritorialRadius;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI Behavior")
+    float AggressionLevel;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI Behavior")
+    float PackLoyalty;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI Behavior")
+    bool bIsPackLeader;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI Behavior")
+    bool bIsAlphaSpecimen;
+
+    // Perception Settings
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI Perception")
+    float SightRadius;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI Perception")
+    float HearingRadius;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI Perception")
+    float PeripheralVisionAngle;
+
+    // Memory System
+    UPROPERTY(BlueprintReadOnly, Category = "AI Memory")
+    TArray<FNPC_ThreatMemory> ThreatMemories;
+
+    UPROPERTY(BlueprintReadOnly, Category = "AI Memory")
+    TArray<FNPC_LocationMemory> LocationMemories;
+
+    UPROPERTY(BlueprintReadOnly, Category = "AI Memory")
+    TArray<AActor*> PackMembers;
 
 public:
-    // Funções públicas para controlo da IA
-    UFUNCTION(BlueprintCallable, Category = "AI")
-    void SetDinosaurState(ENPC_DinosaurState NewState);
+    // AI Behavior Interface
+    UFUNCTION(BlueprintCallable, Category = "AI Behavior")
+    void SetBehaviorTree(UBehaviorTree* NewBehaviorTree);
 
-    UFUNCTION(BlueprintCallable, Category = "AI")
-    ENPC_DinosaurState GetDinosaurState() const { return CurrentState; }
+    UFUNCTION(BlueprintCallable, Category = "AI Behavior")
+    void SwitchToCombatMode();
 
-    UFUNCTION(BlueprintCallable, Category = "AI")
-    void SetTarget(AActor* NewTarget);
+    UFUNCTION(BlueprintCallable, Category = "AI Behavior")
+    void SwitchToFlockingMode();
 
-    UFUNCTION(BlueprintCallable, Category = "AI")
-    AActor* GetTarget() const { return CurrentTarget; }
+    UFUNCTION(BlueprintCallable, Category = "AI Behavior")
+    void SwitchToDefaultMode();
 
-    UFUNCTION(BlueprintCallable, Category = "AI")
-    void TakeDamage(float DamageAmount);
+    // Threat Assessment
+    UFUNCTION(BlueprintCallable, Category = "AI Threat")
+    void AssessThreat(AActor* ThreatActor);
 
-    UFUNCTION(BlueprintCallable, Category = "AI")
-    bool IsAlive() const { return DinosaurStats.Health > 0.0f; }
+    UFUNCTION(BlueprintCallable, Category = "AI Threat")
+    bool IsActorThreat(AActor* Actor) const;
 
-    UFUNCTION(BlueprintCallable, Category = "AI")
-    float GetHealthPercentage() const;
+    UFUNCTION(BlueprintCallable, Category = "AI Threat")
+    float CalculateThreatLevel(AActor* Actor) const;
+
+    // Pack Behavior
+    UFUNCTION(BlueprintCallable, Category = "AI Pack")
+    void RegisterPackMember(AActor* PackMember);
+
+    UFUNCTION(BlueprintCallable, Category = "AI Pack")
+    void RemovePackMember(AActor* PackMember);
+
+    UFUNCTION(BlueprintCallable, Category = "AI Pack")
+    void CallForBackup(AActor* Threat);
+
+    UFUNCTION(BlueprintCallable, Category = "AI Pack")
+    void RespondToPackCall(AActor* PackLeader, AActor* Threat);
+
+    // Memory Management
+    UFUNCTION(BlueprintCallable, Category = "AI Memory")
+    void RememberThreat(AActor* ThreatActor, float ThreatLevel);
+
+    UFUNCTION(BlueprintCallable, Category = "AI Memory")
+    void RememberLocation(FVector Location, ENPC_LocationImportance Importance);
+
+    UFUNCTION(BlueprintCallable, Category = "AI Memory")
+    void ForgetOldMemories();
 
 protected:
-    // Callbacks de percepção
+    // Perception Events
     UFUNCTION()
     void OnPerceptionUpdated(const TArray<AActor*>& UpdatedActors);
 
-    // Lógica de comportamento
-    void UpdateBehavior(float DeltaTime);
-    void HandleIdleState();
-    void HandlePatrolState();
-    void HandleHuntState();
-    void HandleAttackState();
-    void HandleFleeState();
+    UFUNCTION()
+    void OnTargetPerceptionUpdated(AActor* Actor, FAIStimulus Stimulus);
 
-    // Utilitários
-    bool CanSeeTarget(AActor* Target) const;
-    float GetDistanceToTarget(AActor* Target) const;
-    FVector GetRandomPatrolPoint() const;
+    // Behavior Tree Helpers
+    void InitializeBehaviorTree();
+    void ConfigurePerception();
+    void SetupBlackboardValues();
+
+    // Species-specific behavior initialization
+    void ConfigureTRexBehavior();
+    void ConfigureRaptorBehavior();
+    void ConfigureHerbivoreBehavior();
+
+private:
+    // Internal state
+    AActor* CurrentTarget;
+    FVector HomeLocation;
+    float LastThreatAssessmentTime;
+    bool bInCombatMode;
+    bool bInFlockingMode;
+
+    // Memory cleanup timer
+    FTimerHandle MemoryCleanupTimer;
+    void CleanupMemories();
 };
