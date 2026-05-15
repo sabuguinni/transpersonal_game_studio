@@ -1,309 +1,209 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/Engine.h"
+#include "Engine/GameInstanceSubsystem.h"
 #include "Engine/World.h"
 #include "Components/ActorComponent.h"
 #include "GameFramework/Actor.h"
-#include "UObject/NoExportTypes.h"
 #include "../SharedTypes.h"
 #include "Eng_BiomeArchitecture.generated.h"
 
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnBiomeTransition, EEng_BiomeType, FromBiome, EEng_BiomeType, ToBiome);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnBiomeLoaded, EEng_BiomeType, BiomeType);
+
 /**
- * Biome Architecture System - Defines the technical foundation for all biome systems
- * This system ensures that all biome-related modules follow consistent patterns
- * and maintain proper separation of concerns.
+ * Core biome data structure for the world generation system
+ * Defines environmental parameters, spawn rules, and atmospheric settings
  */
-
-UENUM(BlueprintType)
-enum class EEng_BiomeType : uint8
-{
-    Swamp = 0,      // SW quadrant - wetlands, murky water, dense vegetation
-    Forest = 1,     // NW quadrant - dense trees, undergrowth, filtered light
-    Savanna = 2,    // Center - grasslands, scattered trees, open spaces
-    Desert = 3,     // E quadrant - arid, sparse vegetation, sand/rock
-    Mountains = 4   // NE quadrant - rocky terrain, elevation, alpine vegetation
-};
-
-UENUM(BlueprintType)
-enum class EEng_BiomeLayer : uint8
-{
-    Terrain = 0,        // Base landscape and elevation
-    Vegetation = 1,     // Trees, grass, bushes, plants
-    Water = 2,          // Rivers, lakes, wetlands
-    Atmosphere = 3,     // Fog, lighting, weather effects
-    Wildlife = 4,       // Dinosaurs and other creatures
-    Resources = 5,      // Rocks, minerals, crafting materials
-    Structures = 6      // Natural formations, caves, cliffs
-};
-
-UENUM(BlueprintType)
-enum class EEng_BiomeQuality : uint8
-{
-    Placeholder = 0,    // Basic shapes, development only
-    Low = 1,           // Simple meshes, basic materials
-    Medium = 2,        // Detailed meshes, good materials
-    High = 3,          // High-poly meshes, advanced materials
-    Ultra = 4          // Photorealistic, commercial quality
-};
-
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEng_BiomeRegion
+struct TRANSPERSONALGAME_API FEng_BiomeDefinition
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Region")
-    EEng_BiomeType BiomeType;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Core")
+    EEng_BiomeType BiomeType = EEng_BiomeType::Savanna;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Region")
-    FVector CenterLocation;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Core")
+    FString BiomeName = TEXT("Unnamed Biome");
 
-    UPROPERTY(BlueprintReadOnly, Category = "Region")
-    float Radius;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment")
+    float Temperature = 25.0f; // Celsius
 
-    UPROPERTY(BlueprintReadOnly, Category = "Region")
-    FVector2D BoundingBox;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment")
+    float Humidity = 0.5f; // 0.0 to 1.0
 
-    UPROPERTY(BlueprintReadOnly, Category = "Region")
-    float Temperature;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment")
+    float Precipitation = 0.3f; // 0.0 to 1.0
 
-    UPROPERTY(BlueprintReadOnly, Category = "Region")
-    float Humidity;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment")
+    FLinearColor SkyColor = FLinearColor(0.4f, 0.7f, 1.0f, 1.0f);
 
-    UPROPERTY(BlueprintReadOnly, Category = "Region")
-    float Elevation;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment")
+    FLinearColor FogColor = FLinearColor(0.8f, 0.9f, 1.0f, 1.0f);
 
-    FEng_BiomeRegion()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment")
+    float FogDensity = 0.02f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Vegetation")
+    TArray<TSoftObjectPtr<UStaticMesh>> VegetationMeshes;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Vegetation")
+    float VegetationDensity = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wildlife")
+    TArray<TSoftClassPtr<APawn>> DinosaurSpecies;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wildlife")
+    float DinosaurSpawnRate = 0.1f;
+
+    FEng_BiomeDefinition()
     {
         BiomeType = EEng_BiomeType::Savanna;
-        CenterLocation = FVector::ZeroVector;
-        Radius = 1000.0f;
-        BoundingBox = FVector2D(2000.0f, 2000.0f);
+        BiomeName = TEXT("Default Savanna");
         Temperature = 25.0f;
-        Humidity = 50.0f;
-        Elevation = 0.0f;
-    }
-};
-
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEng_BiomeLayer
-{
-    GENERATED_BODY()
-
-    UPROPERTY(BlueprintReadOnly, Category = "Layer")
-    EEng_BiomeLayer LayerType;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Layer")
-    FString LayerName;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Layer")
-    bool bEnabled;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Layer")
-    float Density;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Layer")
-    EEng_BiomeQuality Quality;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Layer")
-    TArray<FString> AssetPaths;
-
-    FEng_BiomeLayer()
-    {
-        LayerType = EEng_BiomeLayer::Terrain;
-        LayerName = TEXT("UnnamedLayer");
-        bEnabled = true;
-        Density = 1.0f;
-        Quality = EEng_BiomeQuality::Low;
-    }
-};
-
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEng_BiomeConfiguration
-{
-    GENERATED_BODY()
-
-    UPROPERTY(BlueprintReadOnly, Category = "Configuration")
-    EEng_BiomeType BiomeType;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Configuration")
-    FString BiomeName;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Configuration")
-    TArray<FEng_BiomeLayer> Layers;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Configuration")
-    FLinearColor AmbientColor;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Configuration")
-    float FogDensity;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Configuration")
-    FLinearColor FogColor;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Configuration")
-    float WindStrength;
-
-    FEng_BiomeConfiguration()
-    {
-        BiomeType = EEng_BiomeType::Savanna;
-        BiomeName = TEXT("DefaultBiome");
-        AmbientColor = FLinearColor(1.0f, 1.0f, 1.0f, 1.0f);
-        FogDensity = 0.1f;
-        FogColor = FLinearColor(0.8f, 0.8f, 0.9f, 1.0f);
-        WindStrength = 1.0f;
+        Humidity = 0.5f;
+        Precipitation = 0.3f;
     }
 };
 
 /**
- * Core biome architecture component that manages biome system integration
- * and ensures proper layering and quality control.
+ * Biome zone component - attached to actors that define biome boundaries
+ * Handles biome detection and transition triggers
  */
-UCLASS(BlueprintType, Blueprintable, ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UEng_BiomeArchitecture : public UActorComponent
+UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UEng_BiomeZoneComponent : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    UEng_BiomeArchitecture();
+    UEng_BiomeZoneComponent();
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Zone")
+    EEng_BiomeType BiomeType = EEng_BiomeType::Savanna;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Zone")
+    float ZoneRadius = 5000.0f; // 5km radius
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Zone")
+    int32 ZonePriority = 0; // Higher priority overrides lower
+
+    UPROPERTY(BlueprintAssignable, Category = "Events")
+    FOnBiomeTransition OnBiomeEntered;
+
+    UPROPERTY(BlueprintAssignable, Category = "Events")
+    FOnBiomeTransition OnBiomeExited;
+
+    UFUNCTION(BlueprintCallable, Category = "Biome Zone")
+    bool IsLocationInZone(const FVector& Location) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Biome Zone")
+    float GetDistanceToZoneCenter(const FVector& Location) const;
 
 protected:
     virtual void BeginPlay() override;
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-public:
-    // Biome system management
-    UFUNCTION(BlueprintCallable, Category = "Biome Architecture")
-    void InitializeBiomeSystem();
-
-    UFUNCTION(BlueprintCallable, Category = "Biome Architecture")
-    bool RegisterBiomeRegion(const FEng_BiomeRegion& Region);
-
-    UFUNCTION(BlueprintCallable, Category = "Biome Architecture")
-    bool UnregisterBiomeRegion(EEng_BiomeType BiomeType);
-
-    UFUNCTION(BlueprintCallable, Category = "Biome Architecture")
-    void ValidateBiomeArchitecture();
-
-    // Biome configuration
-    UFUNCTION(BlueprintCallable, Category = "Biome Configuration")
-    void SetBiomeConfiguration(const FEng_BiomeConfiguration& Configuration);
-
-    UFUNCTION(BlueprintCallable, Category = "Biome Configuration")
-    FEng_BiomeConfiguration GetBiomeConfiguration(EEng_BiomeType BiomeType) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Biome Configuration")
-    void UpdateBiomeLayer(EEng_BiomeType BiomeType, const FEng_BiomeLayer& Layer);
-
-    // Quality management
-    UFUNCTION(BlueprintCallable, Category = "Quality")
-    void SetGlobalBiomeQuality(EEng_BiomeQuality Quality);
-
-    UFUNCTION(BlueprintCallable, Category = "Quality")
-    void SetBiomeQuality(EEng_BiomeType BiomeType, EEng_BiomeQuality Quality);
-
-    UFUNCTION(BlueprintCallable, Category = "Quality")
-    EEng_BiomeQuality GetBiomeQuality(EEng_BiomeType BiomeType) const;
-
-    // Spatial queries
-    UFUNCTION(BlueprintCallable, Category = "Spatial")
-    EEng_BiomeType GetBiomeAtLocation(const FVector& Location) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Spatial")
-    FEng_BiomeRegion GetBiomeRegion(EEng_BiomeType BiomeType) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Spatial")
-    TArray<FEng_BiomeRegion> GetAllBiomeRegions() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Spatial")
-    float GetDistanceToBiome(const FVector& Location, EEng_BiomeType BiomeType) const;
-
-    // Editor utilities
-    UFUNCTION(CallInEditor, Category = "Debug")
-    void GenerateBiomeReport();
-
-    UFUNCTION(CallInEditor, Category = "Debug")
-    void ValidateAllBiomes();
-
-    UFUNCTION(CallInEditor, Category = "Debug")
-    void ResetBiomeSystem();
-
-    UFUNCTION(CallInEditor, Category = "Setup")
-    void CreateDefaultBiomeLayout();
-
-protected:
-    UPROPERTY(BlueprintReadOnly, Category = "Biome System")
-    TArray<FEng_BiomeRegion> RegisteredRegions;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Biome System")
-    TArray<FEng_BiomeConfiguration> BiomeConfigurations;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Quality")
-    EEng_BiomeQuality GlobalQuality;
-
-    UPROPERTY(BlueprintReadOnly, Category = "System")
-    bool bBiomeSystemInitialized;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float BiomeUpdateInterval;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float LastBiomeUpdate;
-
 private:
-    void InitializeDefaultBiomes();
-    void UpdateBiomeStates();
-    bool IsBiomeRegistered(EEng_BiomeType BiomeType) const;
-    void CreateBiomeConfiguration(EEng_BiomeType BiomeType);
-    void ValidateBiomeOverlaps();
-    FEng_BiomeLayer CreateDefaultLayer(EEng_BiomeLayer LayerType);
+    UPROPERTY()
+    TArray<AActor*> ActorsInZone;
+
+    void CheckActorProximity();
 };
 
 /**
- * Biome Manager Actor - Central coordinator for all biome systems
- * This actor should be placed once in the level to manage all biome operations.
+ * Global biome management subsystem
+ * Handles biome registration, queries, and environmental state
  */
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API AEng_BiomeManager : public AActor
+UCLASS()
+class TRANSPERSONALGAME_API UEng_BiomeManager : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
 public:
-    AEng_BiomeManager();
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
+
+    UFUNCTION(BlueprintCallable, Category = "Biome Manager")
+    void RegisterBiome(const FEng_BiomeDefinition& BiomeDefinition);
+
+    UFUNCTION(BlueprintCallable, Category = "Biome Manager")
+    EEng_BiomeType GetBiomeAtLocation(const FVector& WorldLocation) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Biome Manager")
+    FEng_BiomeDefinition GetBiomeDefinition(EEng_BiomeType BiomeType) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Biome Manager")
+    TArray<EEng_BiomeType> GetAllRegisteredBiomes() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Biome Manager")
+    void SetCurrentBiome(EEng_BiomeType NewBiome);
+
+    UFUNCTION(BlueprintCallable, Category = "Biome Manager")
+    EEng_BiomeType GetCurrentBiome() const { return CurrentBiome; }
+
+    UPROPERTY(BlueprintAssignable, Category = "Events")
+    FOnBiomeTransition OnBiomeChanged;
+
+    UPROPERTY(BlueprintAssignable, Category = "Events")
+    FOnBiomeLoaded OnBiomeSystemReady;
+
+    // Environmental queries
+    UFUNCTION(BlueprintCallable, Category = "Environment")
+    float GetTemperatureAtLocation(const FVector& Location) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Environment")
+    float GetHumidityAtLocation(const FVector& Location) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Environment")
+    FLinearColor GetSkyColorForBiome(EEng_BiomeType BiomeType) const;
+
+protected:
+    UPROPERTY()
+    TMap<EEng_BiomeType, FEng_BiomeDefinition> RegisteredBiomes;
+
+    UPROPERTY()
+    EEng_BiomeType CurrentBiome = EEng_BiomeType::Savanna;
+
+    UPROPERTY()
+    TArray<UEng_BiomeZoneComponent*> ActiveZones;
+
+private:
+    void InitializeDefaultBiomes();
+    void RegisterBiomeZone(UEng_BiomeZoneComponent* ZoneComponent);
+    void UnregisterBiomeZone(UEng_BiomeZoneComponent* ZoneComponent);
+
+    friend class UEng_BiomeZoneComponent;
+};
+
+/**
+ * Biome marker actor - placed in the world to define biome boundaries
+ * Automatically registers with the biome manager on spawn
+ */
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API AEng_BiomeMarker : public AActor
+{
+    GENERATED_BODY()
+
+public:
+    AEng_BiomeMarker();
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    class UStaticMeshComponent* MarkerMesh;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    UEng_BiomeZoneComponent* BiomeZone;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Marker")
+    EEng_BiomeType BiomeType = EEng_BiomeType::Savanna;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Marker")
+    float BiomeRadius = 5000.0f;
 
 protected:
     virtual void BeginPlay() override;
-    virtual void Tick(float DeltaTime) override;
+    virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
-public:
-    UFUNCTION(BlueprintCallable, Category = "Biome Manager")
-    UEng_BiomeArchitecture* GetBiomeArchitecture() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Biome Manager")
-    bool IsWorldBiomeSystemReady() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Biome Manager")
-    void InitializeWorldBiomes();
-
-    UFUNCTION(BlueprintCallable, Category = "Biome Manager")
-    void UpdateAllBiomes();
-
-    UFUNCTION(CallInEditor, Category = "World Setup")
-    void SetupMinPlayableMapBiomes();
-
-    UFUNCTION(CallInEditor, Category = "Debug")
-    void ValidateWorldBiomes();
-
-protected:
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Biome System")
-    UEng_BiomeArchitecture* BiomeArchitecture;
-
-    UPROPERTY(BlueprintReadOnly, Category = "World State")
-    bool bWorldBiomesInitialized;
-
-    UPROPERTY(BlueprintReadOnly, Category = "World State")
-    float WorldSize;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    int32 ActiveBiomeRegions;
+#if WITH_EDITOR
+    virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
+#endif
 };
