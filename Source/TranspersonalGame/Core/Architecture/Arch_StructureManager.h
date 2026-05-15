@@ -3,71 +3,44 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "Components/StaticMeshComponent.h"
-#include "Components/BoxComponent.h"
+#include "Components/SceneComponent.h"
 #include "Engine/StaticMesh.h"
-#include "Materials/MaterialInterface.h"
-#include "../SharedTypes.h"
+#include "SharedTypes.h"
 #include "Arch_StructureManager.generated.h"
 
 UENUM(BlueprintType)
 enum class EArch_StructureType : uint8
 {
     CaveDwelling,
-    TreePlatform,
-    StoneCircle,
-    CliffRuin,
-    SimpleHut,
-    WoodBridge,
-    StoneWall,
-    Watchtower
-};
-
-UENUM(BlueprintType)
-enum class EArch_StructureState : uint8
-{
-    Pristine,
-    Weathered,
-    Damaged,
-    Ruined,
-    Overgrown
+    ElevatedShelter,
+    GroundShelter,
+    StorageHut,
+    CraftingArea,
+    DefensiveWall
 };
 
 USTRUCT(BlueprintType)
-struct FArch_StructureData
+struct FArch_StructureConfig
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
     EArch_StructureType StructureType = EArch_StructureType::CaveDwelling;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    EArch_StructureState CurrentState = EArch_StructureState::Weathered;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
+    FVector Dimensions = FVector(400, 300, 200);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FVector StructureScale = FVector(1.0f, 1.0f, 1.0f);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
+    int32 MaxOccupants = 2;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float StructuralIntegrity = 75.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
+    bool bHasFirePit = true;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    bool bCanBeEntered = true;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
+    bool bHasStorage = true;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    bool bProvidesWeatherShelter = false;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    int32 MaxOccupants = 1;
-
-    FArch_StructureData()
-    {
-        StructureType = EArch_StructureType::CaveDwelling;
-        CurrentState = EArch_StructureState::Weathered;
-        StructureScale = FVector(1.0f, 1.0f, 1.0f);
-        StructuralIntegrity = 75.0f;
-        bCanBeEntered = true;
-        bProvidesWeatherShelter = false;
-        MaxOccupants = 1;
-    }
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
+    float StructuralIntegrity = 100.0f;
 };
 
 UCLASS(BlueprintType, Blueprintable)
@@ -82,77 +55,50 @@ protected:
     virtual void BeginPlay() override;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    UStaticMeshComponent* StructureMesh;
+    USceneComponent* RootSceneComponent;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    UBoxComponent* InteractionVolume;
+    UStaticMeshComponent* MainStructureMesh;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure Settings")
-    FArch_StructureData StructureData;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    UStaticMeshComponent* InteriorMesh;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure Settings")
-    TArray<UStaticMesh*> StructureMeshVariants;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure Config")
+    FArch_StructureConfig StructureConfig;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure Settings")
-    TArray<UMaterialInterface*> WeatheringMaterials;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure Config")
+    TArray<AActor*> InteriorProps;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure Settings")
-    bool bAutoSelectMeshByType = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure Settings")
-    float WeatheringRate = 0.1f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure Config")
+    FVector SpawnLocation = FVector::ZeroVector;
 
 public:
-    virtual void Tick(float DeltaTime) override;
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    void CreateStructure(EArch_StructureType Type, FVector Location, FVector Scale = FVector::OneVector);
 
-    UFUNCTION(BlueprintCallable, Category = "Structure Management")
-    void SetStructureType(EArch_StructureType NewType);
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    void AddInteriorProp(AActor* PropActor, FVector RelativeLocation);
 
-    UFUNCTION(BlueprintCallable, Category = "Structure Management")
-    void SetStructureState(EArch_StructureState NewState);
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    void SetStructuralIntegrity(float NewIntegrity);
 
-    UFUNCTION(BlueprintCallable, Category = "Structure Management")
-    void ApplyWeathering(float WeatheringAmount);
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    float GetStructuralIntegrity() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Structure Management")
-    bool CanPlayerEnter() const;
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    bool CanAccommodateOccupants(int32 NumOccupants) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Structure Management")
-    bool ProvidesWeatherProtection() const;
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    void RepairStructure(float RepairAmount);
 
-    UFUNCTION(BlueprintCallable, Category = "Structure Management")
-    void OnPlayerEnter();
-
-    UFUNCTION(BlueprintCallable, Category = "Structure Management")
-    void OnPlayerExit();
-
-    UFUNCTION(BlueprintCallable, Category = "Structure Management")
-    FVector GetSafeSpawnLocation() const;
-
-    UFUNCTION(BlueprintPure, Category = "Structure Info")
-    EArch_StructureType GetStructureType() const { return StructureData.StructureType; }
-
-    UFUNCTION(BlueprintPure, Category = "Structure Info")
-    EArch_StructureState GetStructureState() const { return StructureData.CurrentState; }
-
-    UFUNCTION(BlueprintPure, Category = "Structure Info")
-    float GetStructuralIntegrity() const { return StructureData.StructuralIntegrity; }
-
-protected:
-    UFUNCTION()
-    void OnInteractionVolumeBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult);
-
-    UFUNCTION()
-    void OnInteractionVolumeEndOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex);
-
-    void UpdateMeshBasedOnType();
-    void UpdateMaterialBasedOnState();
-    void SetupInteractionVolume();
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    TArray<FVector> GetInteriorSpawnPoints() const;
 
 private:
-    UPROPERTY()
-    TArray<AActor*> CurrentOccupants;
-
-    float WeatheringTimer = 0.0f;
-    bool bPlayerInside = false;
+    void SetupCaveDwelling();
+    void SetupElevatedShelter();
+    void SetupGroundShelter();
+    void CreateFirePit();
+    void CreateStorageAreas();
+    void UpdateStructuralMesh();
 };
