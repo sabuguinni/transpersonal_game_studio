@@ -2,455 +2,520 @@
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
+#include "Components/StaticMeshComponent.h"
+#include "Components/PrimitiveComponent.h"
+#include "PhysicsEngine/BodyInstance.h"
 #include "HAL/PlatformFilemanager.h"
-#include "HAL/PlatformMemory.h"
-#include "Stats/StatsHierarchical.h"
-#include "ProfilingDebugging/CpuProfilerTrace.h"
-#include "Async/AsyncWork.h"
-#include "Kismet/GameplayStatics.h"
+#include "Misc/DateTime.h"
+#include "Engine/StaticMeshActor.h"
+#include "GameFramework/Pawn.h"
 
-DEFINE_STAT(STAT_VehiclePhysicsUpdate);
-DEFINE_STAT(STAT_VehicleSurfaceDetection);
-DEFINE_STAT(STAT_VehicleDamageCalculation);
-DEFINE_STAT(STAT_VehicleMemoryUsage);
-
-UPerf_VehiclePhysicsPerformanceIntegrator::UPerf_VehiclePhysicsPerformanceIntegrator()
-    : bIsMonitoringActive(false)
-    , bDebugEnabled(false)
-    , LastOptimizationTime(0.0f)
-    , OptimizationInterval(PERFORMANCE_UPDATE_INTERVAL)
-    , AccumulatedPhysicsTime(0.0f)
-    , AccumulatedFrameTime(0.0f)
-    , SampleCount(0)
+APerf_VehiclePhysicsPerformanceIntegrator::APerf_VehiclePhysicsPerformanceIntegrator()
 {
-    // Initialize default optimization settings
-    OptimizationSettings = FPerf_VehicleOptimizationSettings();
-    
-    // Initialize metrics
-    CurrentMetrics = FPerf_VehiclePhysicsMetrics();
-    
-    // Reserve space for performance history
-    FrameTimeHistory.Reserve(MAX_FRAME_HISTORY);
-    PhysicsTimeHistory.Reserve(MAX_FRAME_HISTORY);
-}
+    PrimaryActorTick.bCanEverTick = true;
+    PrimaryActorTick.TickInterval = 0.1f;
 
-void UPerf_VehiclePhysicsPerformanceIntegrator::Initialize(FSubsystemCollectionBase& Collection)
-{
-    Super::Initialize(Collection);
-    
-    UE_LOG(LogTemp, Log, TEXT("VehiclePhysicsPerformanceIntegrator: Initializing vehicle physics performance monitoring"));
-    
-    // Initialize performance monitoring
-    InitializeVehiclePerformanceMonitoring();
-    
-    // Set up optimization timer
-    if (UWorld* World = GetWorld())
-    {
-        World->GetTimerManager().SetTimer(
-            FTimerHandle(),
-            this,
-            &UPerf_VehiclePhysicsPerformanceIntegrator::UpdateVehiclePerformanceMetrics,
-            OptimizationInterval,
-            true
-        );
-    }
-}
-
-void UPerf_VehiclePhysicsPerformanceIntegrator::Deinitialize()
-{
-    UE_LOG(LogTemp, Log, TEXT("VehiclePhysicsPerformanceIntegrator: Deinitializing vehicle physics performance monitoring"));
-    
-    bIsMonitoringActive = false;
-    TrackedVehicles.Empty();
-    
-    Super::Deinitialize();
-}
-
-void UPerf_VehiclePhysicsPerformanceIntegrator::InitializeVehiclePerformanceMonitoring()
-{
-    SCOPE_CYCLE_COUNTER(STAT_VehiclePhysicsUpdate);
-    
-    UE_LOG(LogTemp, Log, TEXT("VehiclePhysicsPerformanceIntegrator: Starting vehicle physics performance monitoring"));
-    
-    // Clear previous tracking data
-    TrackedVehicles.Empty();
-    FrameTimeHistory.Empty();
-    PhysicsTimeHistory.Empty();
-    
-    // Reset metrics
-    CurrentMetrics = FPerf_VehiclePhysicsMetrics();
+    PerformanceLevel = EPerf_VehiclePerformanceLevel::High;
+    PerformanceUpdateInterval = 1.0f;
+    bEnableAutomaticOptimization = true;
+    TargetFrameRate = 60.0f;
+    LastPerformanceUpdate = 0.0f;
     AccumulatedPhysicsTime = 0.0f;
-    AccumulatedFrameTime = 0.0f;
-    SampleCount = 0;
-    
-    // Find all vehicle physics actors in the world
-    if (UWorld* World = GetWorld())
-    {
-        for (TActorIterator<AActor> ActorIterator(World); ActorIterator; ++ActorIterator)
-        {
-            AActor* Actor = *ActorIterator;
-            if (Actor && Actor->GetName().Contains(TEXT("Vehicle")))
-            {
-                TrackedVehicles.Add(Actor);
-                UE_LOG(LogTemp, Log, TEXT("VehiclePhysicsPerformanceIntegrator: Tracking vehicle actor: %s"), *Actor->GetName());
-            }
-        }
-    }
-    
-    bIsMonitoringActive = true;
-    LastOptimizationTime = FPlatformTime::Seconds();
-    
-    UE_LOG(LogTemp, Log, TEXT("VehiclePhysicsPerformanceIntegrator: Monitoring %d vehicle actors"), TrackedVehicles.Num());
+    PhysicsUpdateCount = 0;
+
+    // Initialize optimization settings based on performance level
+    OptimizationSettings.MaxActiveVehicles = 20;
+    OptimizationSettings.PhysicsUpdateRate = 60.0f;
+    OptimizationSettings.bEnableComplexCollision = true;
+    OptimizationSettings.CullingDistance = 10000.0f;
+    OptimizationSettings.bEnableLODSystem = true;
 }
 
-void UPerf_VehiclePhysicsPerformanceIntegrator::UpdateVehiclePerformanceMetrics()
+void APerf_VehiclePhysicsPerformanceIntegrator::BeginPlay()
 {
-    if (!bIsMonitoringActive)
+    Super::BeginPlay();
+    
+    UE_LOG(LogTemp, Warning, TEXT("Vehicle Physics Performance Integrator initialized"));
+    
+    // Apply initial performance settings
+    ApplyPerformanceLevelSettings();
+    
+    // Start performance monitoring
+    UpdatePerformanceMetrics();
+}
+
+void APerf_VehiclePhysicsPerformanceIntegrator::Tick(float DeltaTime)
+{
+    Super::Tick(DeltaTime);
+    
+    LastPerformanceUpdate += DeltaTime;
+    AccumulatedPhysicsTime += DeltaTime;
+    PhysicsUpdateCount++;
+    
+    // Update performance metrics at specified intervals
+    if (LastPerformanceUpdate >= PerformanceUpdateInterval)
+    {
+        UpdatePerformanceMetrics();
+        
+        if (bEnableAutomaticOptimization)
+        {
+            OptimizeVehiclePhysics();
+        }
+        
+        LastPerformanceUpdate = 0.0f;
+    }
+    
+    // Continuous optimizations
+    CullDistantVehicles();
+    ManageActiveVehicleCount();
+}
+
+void APerf_VehiclePhysicsPerformanceIntegrator::UpdatePerformanceMetrics()
+{
+    if (!GetWorld())
     {
         return;
     }
     
-    SCOPE_CYCLE_COUNTER(STAT_VehiclePhysicsUpdate);
-    
-    const float CurrentTime = FPlatformTime::Seconds();
-    const float DeltaTime = CurrentTime - LastOptimizationTime;
-    
-    // Update frame time tracking
-    const float CurrentFrameTime = FApp::GetDeltaTime() * 1000.0f; // Convert to milliseconds
-    FrameTimeHistory.Add(CurrentFrameTime);
-    if (FrameTimeHistory.Num() > MAX_FRAME_HISTORY)
+    // Calculate physics update time
+    if (PhysicsUpdateCount > 0)
     {
-        FrameTimeHistory.RemoveAt(0);
+        CurrentMetrics.PhysicsUpdateTime = AccumulatedPhysicsTime / PhysicsUpdateCount;
+        AccumulatedPhysicsTime = 0.0f;
+        PhysicsUpdateCount = 0;
     }
     
-    // Calculate average frame time
-    float TotalFrameTime = 0.0f;
-    for (float FrameTime : FrameTimeHistory)
+    // Count active vehicles
+    CurrentMetrics.ActiveVehicleCount = TrackedVehicles.Num();
+    
+    // Calculate average velocity
+    CurrentMetrics.AverageVelocity = CalculateAverageVelocity();
+    
+    // Calculate collision complexity
+    CurrentMetrics.CollisionComplexity = CalculateCollisionComplexity();
+    
+    // Estimate memory usage
+    CurrentMetrics.MemoryUsageMB = EstimateMemoryUsage();
+    
+    UE_LOG(LogTemp, Log, TEXT("Vehicle Physics Metrics - Active: %d, AvgVel: %.2f, PhysTime: %.4f, Memory: %.2f MB"),
+        CurrentMetrics.ActiveVehicleCount,
+        CurrentMetrics.AverageVelocity,
+        CurrentMetrics.PhysicsUpdateTime,
+        CurrentMetrics.MemoryUsageMB);
+}
+
+void APerf_VehiclePhysicsPerformanceIntegrator::OptimizeVehiclePhysics()
+{
+    if (!IsPerformanceTargetMet())
     {
-        TotalFrameTime += FrameTime;
-    }
-    CurrentMetrics.AverageFrameTime = FrameTimeHistory.Num() > 0 ? TotalFrameTime / FrameTimeHistory.Num() : 0.0f;
-    
-    // Update vehicle count and physics metrics
-    int32 ActiveVehicles = 0;
-    float TotalPhysicsTime = 0.0f;
-    float TotalSurfaceDetectionTime = 0.0f;
-    float TotalDamageTime = 0.0f;
-    float TotalSuspensionTime = 0.0f;
-    float TotalTireTime = 0.0f;
-    
-    // Clean up invalid weak pointers
-    TrackedVehicles.RemoveAll([](const TWeakObjectPtr<AActor>& WeakPtr) {
-        return !WeakPtr.IsValid();
-    });
-    
-    // Update metrics for each tracked vehicle
-    for (const TWeakObjectPtr<AActor>& WeakVehicle : TrackedVehicles)
-    {
-        if (AActor* Vehicle = WeakVehicle.Get())
+        UE_LOG(LogTemp, Warning, TEXT("Performance target not met - applying optimizations"));
+        
+        // Adjust physics update rate
+        AdjustPhysicsUpdateRate();
+        
+        // Optimize physics settings
+        OptimizePhysicsSettings();
+        
+        // Apply LOD optimizations
+        if (OptimizationSettings.bEnableLODSystem)
         {
-            ActiveVehicles++;
-            
-            // Simulate physics timing measurements
-            TotalPhysicsTime += 0.5f + FMath::RandRange(-0.2f, 0.2f);
-            TotalSurfaceDetectionTime += 0.1f + FMath::RandRange(-0.05f, 0.05f);
-            TotalDamageTime += 0.05f + FMath::RandRange(-0.02f, 0.02f);
-            TotalSuspensionTime += 0.3f + FMath::RandRange(-0.1f, 0.1f);
-            TotalTireTime += 0.2f + FMath::RandRange(-0.08f, 0.08f);
+            for (AActor* Vehicle : TrackedVehicles)
+            {
+                if (Vehicle)
+                {
+                    float Distance = FVector::Dist(Vehicle->GetActorLocation(), GetActorLocation());
+                    bool bUseLOD = Distance > OptimizationSettings.CullingDistance * 0.5f;
+                    EnableVehicleLOD(Vehicle, bUseLOD);
+                }
+            }
         }
-    }
-    
-    // Update current metrics
-    CurrentMetrics.ActiveVehicleCount = ActiveVehicles;
-    CurrentMetrics.PhysicsUpdateTime = TotalPhysicsTime;
-    CurrentMetrics.SurfaceDetectionTime = TotalSurfaceDetectionTime;
-    CurrentMetrics.DamageCalculationTime = TotalDamageTime;
-    CurrentMetrics.SuspensionUpdateTime = TotalSuspensionTime;
-    CurrentMetrics.TirePhysicsTime = TotalTireTime;
-    
-    // Monitor memory usage
-    MonitorVehicleMemoryUsage();
-    
-    // Check performance targets
-    const float TargetFrameTime = (OptimizationSettings.PerformanceLevel == EPerf_VehiclePerformanceLevel::Ultra) ? 
-        TARGET_60FPS_FRAME_TIME : TARGET_30FPS_FRAME_TIME;
-    CurrentMetrics.bPerformanceTargetMet = CurrentMetrics.AverageFrameTime <= TargetFrameTime;
-    
-    // Apply optimizations if needed
-    if (DeltaTime >= OptimizationInterval)
-    {
-        OptimizeVehiclePhysicsPerformance();
-        LastOptimizationTime = CurrentTime;
-    }
-    
-    // Debug logging
-    if (bDebugEnabled)
-    {
-        UE_LOG(LogTemp, Log, TEXT("VehiclePhysicsPerformanceIntegrator: Active Vehicles: %d, Avg Frame Time: %.2fms, Physics Time: %.2fms"), 
-            CurrentMetrics.ActiveVehicleCount, CurrentMetrics.AverageFrameTime, CurrentMetrics.PhysicsUpdateTime);
     }
 }
 
-FPerf_VehiclePhysicsMetrics UPerf_VehiclePhysicsPerformanceIntegrator::GetVehiclePhysicsMetrics() const
+void APerf_VehiclePhysicsPerformanceIntegrator::SetPerformanceLevel(EPerf_VehiclePerformanceLevel NewLevel)
+{
+    PerformanceLevel = NewLevel;
+    ApplyPerformanceLevelSettings();
+    UE_LOG(LogTemp, Log, TEXT("Vehicle physics performance level set to: %d"), (int32)NewLevel);
+}
+
+FPerf_VehiclePhysicsMetrics APerf_VehiclePhysicsPerformanceIntegrator::GetCurrentMetrics() const
 {
     return CurrentMetrics;
 }
 
-void UPerf_VehiclePhysicsPerformanceIntegrator::SetVehicleOptimizationSettings(const FPerf_VehicleOptimizationSettings& Settings)
+void APerf_VehiclePhysicsPerformanceIntegrator::RegisterVehicle(AActor* Vehicle)
 {
-    OptimizationSettings = Settings;
-    UE_LOG(LogTemp, Log, TEXT("VehiclePhysicsPerformanceIntegrator: Updated optimization settings - Performance Level: %d"), 
-        static_cast<int32>(Settings.PerformanceLevel));
-    
-    // Apply new settings immediately
-    ApplyPerformanceOptimizations();
-}
-
-FPerf_VehicleOptimizationSettings UPerf_VehiclePhysicsPerformanceIntegrator::GetOptimizationSettings() const
-{
-    return OptimizationSettings;
-}
-
-void UPerf_VehiclePhysicsPerformanceIntegrator::OptimizeVehiclePhysicsPerformance()
-{
-    SCOPE_CYCLE_COUNTER(STAT_VehiclePhysicsUpdate);
-    
-    if (!CurrentMetrics.bPerformanceTargetMet)
+    if (Vehicle && !TrackedVehicles.Contains(Vehicle))
     {
-        UE_LOG(LogTemp, Warning, TEXT("VehiclePhysicsPerformanceIntegrator: Performance target not met, applying optimizations"));
+        TrackedVehicles.Add(Vehicle);
+        UE_LOG(LogTemp, Log, TEXT("Registered vehicle for performance tracking: %s"), *Vehicle->GetName());
         
-        // Automatically adjust performance level if targets are not met
-        if (CurrentMetrics.AverageFrameTime > TARGET_60FPS_FRAME_TIME * 1.5f)
+        // Apply current optimization settings to new vehicle
+        ApplyOptimizationSettings();
+    }
+}
+
+void APerf_VehiclePhysicsPerformanceIntegrator::UnregisterVehicle(AActor* Vehicle)
+{
+    if (Vehicle)
+    {
+        TrackedVehicles.Remove(Vehicle);
+        UE_LOG(LogTemp, Log, TEXT("Unregistered vehicle from performance tracking: %s"), *Vehicle->GetName());
+    }
+}
+
+void APerf_VehiclePhysicsPerformanceIntegrator::ApplyOptimizationSettings()
+{
+    for (AActor* Vehicle : TrackedVehicles)
+    {
+        if (Vehicle)
         {
-            // Significant performance issues - reduce to Low
-            if (OptimizationSettings.PerformanceLevel > EPerf_VehiclePerformanceLevel::Low)
+            // Apply complex collision settings
+            UpdateVehiclePhysicsComplexity(Vehicle, OptimizationSettings.bEnableComplexCollision);
+            
+            // Apply LOD settings
+            if (OptimizationSettings.bEnableLODSystem)
             {
-                OptimizationSettings.PerformanceLevel = EPerf_VehiclePerformanceLevel::Low;
-                UE_LOG(LogTemp, Warning, TEXT("VehiclePhysicsPerformanceIntegrator: Auto-reducing to Low performance level"));
-            }
-        }
-        else if (CurrentMetrics.AverageFrameTime > TARGET_60FPS_FRAME_TIME * 1.2f)
-        {
-            // Moderate performance issues - reduce to Medium
-            if (OptimizationSettings.PerformanceLevel > EPerf_VehiclePerformanceLevel::Medium)
-            {
-                OptimizationSettings.PerformanceLevel = EPerf_VehiclePerformanceLevel::Medium;
-                UE_LOG(LogTemp, Warning, TEXT("VehiclePhysicsPerformanceIntegrator: Auto-reducing to Medium performance level"));
+                float Distance = FVector::Dist(Vehicle->GetActorLocation(), GetActorLocation());
+                bool bUseLOD = Distance > OptimizationSettings.CullingDistance * 0.5f;
+                EnableVehicleLOD(Vehicle, bUseLOD);
             }
         }
     }
-    else if (CurrentMetrics.AverageFrameTime < TARGET_60FPS_FRAME_TIME * 0.8f)
+}
+
+bool APerf_VehiclePhysicsPerformanceIntegrator::IsPerformanceTargetMet() const
+{
+    if (GEngine && GEngine->GetGameViewport())
     {
-        // Performance is good - can potentially increase quality
-        if (OptimizationSettings.PerformanceLevel < EPerf_VehiclePerformanceLevel::Ultra)
-        {
-            OptimizationSettings.PerformanceLevel = static_cast<EPerf_VehiclePerformanceLevel>(
-                static_cast<int32>(OptimizationSettings.PerformanceLevel) + 1);
-            UE_LOG(LogTemp, Log, TEXT("VehiclePhysicsPerformanceIntegrator: Auto-increasing performance level"));
-        }
+        float CurrentFPS = 1.0f / GetWorld()->GetDeltaSeconds();
+        return CurrentFPS >= TargetFrameRate * 0.9f; // 90% of target
+    }
+    return true; // Assume target met if we can't measure
+}
+
+void APerf_VehiclePhysicsPerformanceIntegrator::EnableVehicleLOD(AActor* Vehicle, bool bEnable)
+{
+    if (!Vehicle)
+    {
+        return;
     }
     
-    ApplyPerformanceOptimizations();
-}
-
-void UPerf_VehiclePhysicsPerformanceIntegrator::SetPerformanceLevel(EPerf_VehiclePerformanceLevel Level)
-{
-    OptimizationSettings.PerformanceLevel = Level;
-    UE_LOG(LogTemp, Log, TEXT("VehiclePhysicsPerformanceIntegrator: Performance level set to %d"), static_cast<int32>(Level));
+    // Find static mesh components and apply LOD settings
+    TArray<UStaticMeshComponent*> MeshComponents;
+    Vehicle->GetComponents<UStaticMeshComponent>(MeshComponents);
     
-    ApplyPerformanceOptimizations();
-}
-
-bool UPerf_VehiclePhysicsPerformanceIntegrator::ArePerformanceTargetsMet() const
-{
-    return CurrentMetrics.bPerformanceTargetMet;
-}
-
-TArray<FString> UPerf_VehiclePhysicsPerformanceIntegrator::GetPerformanceRecommendations() const
-{
-    TArray<FString> Recommendations;
-    
-    if (CurrentMetrics.AverageFrameTime > TARGET_60FPS_FRAME_TIME)
+    for (UStaticMeshComponent* MeshComp : MeshComponents)
     {
-        Recommendations.Add(TEXT("Consider reducing vehicle physics update frequency"));
-        
-        if (CurrentMetrics.ActiveVehicleCount > OptimizationSettings.MaxConcurrentVehicles)
+        if (MeshComp)
         {
-            Recommendations.Add(FString::Printf(TEXT("Too many active vehicles (%d). Consider reducing to %d"), 
-                CurrentMetrics.ActiveVehicleCount, OptimizationSettings.MaxConcurrentVehicles));
-        }
-        
-        if (CurrentMetrics.PhysicsUpdateTime > 2.0f)
-        {
-            Recommendations.Add(TEXT("Physics update time is high. Enable async physics processing"));
-        }
-        
-        if (CurrentMetrics.SurfaceDetectionTime > 0.5f)
-        {
-            Recommendations.Add(TEXT("Surface detection is expensive. Increase LOD distance"));
-        }
-        
-        if (CurrentMetrics.MemoryUsageMB > 100.0f)
-        {
-            Recommendations.Add(TEXT("High memory usage detected. Consider reducing vehicle detail levels"));
+            if (bEnable)
+            {
+                // Enable LOD - reduce detail at distance
+                MeshComp->SetForcedLodModel(2); // Use LOD level 2
+            }
+            else
+            {
+                // Disable LOD - use full detail
+                MeshComp->SetForcedLodModel(0); // Use highest LOD
+            }
         }
     }
-    
-    if (Recommendations.Num() == 0)
+}
+
+void APerf_VehiclePhysicsPerformanceIntegrator::UpdateVehiclePhysicsComplexity(AActor* Vehicle, bool bUseComplexCollision)
+{
+    if (!Vehicle)
     {
-        Recommendations.Add(TEXT("Performance is optimal"));
+        return;
     }
     
-    return Recommendations;
-}
-
-void UPerf_VehiclePhysicsPerformanceIntegrator::SetVehiclePhysicsDebugging(bool bEnabled)
-{
-    bDebugEnabled = bEnabled;
-    UE_LOG(LogTemp, Log, TEXT("VehiclePhysicsPerformanceIntegrator: Debug mode %s"), bEnabled ? TEXT("enabled") : TEXT("disabled"));
-}
-
-FString UPerf_VehiclePhysicsPerformanceIntegrator::GetVehiclePhysicsDebugInfo() const
-{
-    FString DebugInfo = FString::Printf(TEXT("Vehicle Physics Performance Debug Info:\n"));
-    DebugInfo += FString::Printf(TEXT("Active Vehicles: %d\n"), CurrentMetrics.ActiveVehicleCount);
-    DebugInfo += FString::Printf(TEXT("Average Frame Time: %.2fms\n"), CurrentMetrics.AverageFrameTime);
-    DebugInfo += FString::Printf(TEXT("Physics Update Time: %.2fms\n"), CurrentMetrics.PhysicsUpdateTime);
-    DebugInfo += FString::Printf(TEXT("Surface Detection Time: %.2fms\n"), CurrentMetrics.SurfaceDetectionTime);
-    DebugInfo += FString::Printf(TEXT("Damage Calculation Time: %.2fms\n"), CurrentMetrics.DamageCalculationTime);
-    DebugInfo += FString::Printf(TEXT("Memory Usage: %.2fMB\n"), CurrentMetrics.MemoryUsageMB);
-    DebugInfo += FString::Printf(TEXT("Performance Target Met: %s\n"), CurrentMetrics.bPerformanceTargetMet ? TEXT("Yes") : TEXT("No"));
-    DebugInfo += FString::Printf(TEXT("Performance Level: %d\n"), static_cast<int32>(OptimizationSettings.PerformanceLevel));
+    // Find primitive components and update collision complexity
+    TArray<UPrimitiveComponent*> PrimitiveComponents;
+    Vehicle->GetComponents<UPrimitiveComponent>(PrimitiveComponents);
     
-    return DebugInfo;
-}
-
-void UPerf_VehiclePhysicsPerformanceIntegrator::UpdateVehiclePhysicsLOD()
-{
-    // Update LOD based on distance and performance level
-    float LODDistance = OptimizationSettings.SurfaceDetectionLODDistance;
-    
-    switch (OptimizationSettings.PerformanceLevel)
+    for (UPrimitiveComponent* PrimComp : PrimitiveComponents)
     {
-        case EPerf_VehiclePerformanceLevel::Ultra:
-            LODDistance *= 1.5f;
-            break;
-        case EPerf_VehiclePerformanceLevel::High:
-            LODDistance *= 1.2f;
-            break;
-        case EPerf_VehiclePerformanceLevel::Medium:
-            LODDistance *= 1.0f;
-            break;
+        if (PrimComp && PrimComp->GetBodyInstance())
+        {
+            if (bUseComplexCollision)
+            {
+                PrimComp->SetCollisionResponseToAllChannels(ECR_Block);
+            }
+            else
+            {
+                // Simplified collision for performance
+                PrimComp->SetCollisionResponseToAllChannels(ECR_Ignore);
+                PrimComp->SetCollisionResponseToChannel(ECC_WorldStatic, ECR_Block);
+                PrimComp->SetCollisionResponseToChannel(ECC_Pawn, ECR_Block);
+            }
+        }
+    }
+}
+
+void APerf_VehiclePhysicsPerformanceIntegrator::AnalyzeVehiclePerformance()
+{
+    // Analyze current performance state and log findings
+    UE_LOG(LogTemp, Log, TEXT("Vehicle Performance Analysis:"));
+    UE_LOG(LogTemp, Log, TEXT("- Active Vehicles: %d/%d"), CurrentMetrics.ActiveVehicleCount, OptimizationSettings.MaxActiveVehicles);
+    UE_LOG(LogTemp, Log, TEXT("- Physics Update Time: %.4f ms"), CurrentMetrics.PhysicsUpdateTime * 1000.0f);
+    UE_LOG(LogTemp, Log, TEXT("- Average Velocity: %.2f units/s"), CurrentMetrics.AverageVelocity);
+    UE_LOG(LogTemp, Log, TEXT("- Collision Complexity: %.2f"), CurrentMetrics.CollisionComplexity);
+    UE_LOG(LogTemp, Log, TEXT("- Memory Usage: %.2f MB"), CurrentMetrics.MemoryUsageMB);
+}
+
+void APerf_VehiclePhysicsPerformanceIntegrator::ApplyPerformanceLevelSettings()
+{
+    switch (PerformanceLevel)
+    {
         case EPerf_VehiclePerformanceLevel::Low:
-            LODDistance *= 0.7f;
+            OptimizationSettings.MaxActiveVehicles = 10;
+            OptimizationSettings.PhysicsUpdateRate = 30.0f;
+            OptimizationSettings.bEnableComplexCollision = false;
+            OptimizationSettings.CullingDistance = 5000.0f;
+            TargetFrameRate = 30.0f;
             break;
-        case EPerf_VehiclePerformanceLevel::Minimal:
-            LODDistance *= 0.5f;
+            
+        case EPerf_VehiclePerformanceLevel::Medium:
+            OptimizationSettings.MaxActiveVehicles = 15;
+            OptimizationSettings.PhysicsUpdateRate = 45.0f;
+            OptimizationSettings.bEnableComplexCollision = true;
+            OptimizationSettings.CullingDistance = 7500.0f;
+            TargetFrameRate = 45.0f;
+            break;
+            
+        case EPerf_VehiclePerformanceLevel::High:
+            OptimizationSettings.MaxActiveVehicles = 20;
+            OptimizationSettings.PhysicsUpdateRate = 60.0f;
+            OptimizationSettings.bEnableComplexCollision = true;
+            OptimizationSettings.CullingDistance = 10000.0f;
+            TargetFrameRate = 60.0f;
+            break;
+            
+        case EPerf_VehiclePerformanceLevel::Ultra:
+            OptimizationSettings.MaxActiveVehicles = 30;
+            OptimizationSettings.PhysicsUpdateRate = 120.0f;
+            OptimizationSettings.bEnableComplexCollision = true;
+            OptimizationSettings.CullingDistance = 15000.0f;
+            TargetFrameRate = 60.0f;
             break;
     }
     
-    // Apply LOD settings to tracked vehicles
-    for (const TWeakObjectPtr<AActor>& WeakVehicle : TrackedVehicles)
+    ApplyOptimizationSettings();
+}
+
+void APerf_VehiclePhysicsPerformanceIntegrator::CullDistantVehicles()
+{
+    if (!GetWorld() || !GetWorld()->GetFirstPlayerController())
     {
-        if (AActor* Vehicle = WeakVehicle.Get())
+        return;
+    }
+    
+    APawn* PlayerPawn = GetWorld()->GetFirstPlayerController()->GetPawn();
+    if (!PlayerPawn)
+    {
+        return;
+    }
+    
+    FVector PlayerLocation = PlayerPawn->GetActorLocation();
+    
+    for (int32 i = TrackedVehicles.Num() - 1; i >= 0; --i)
+    {
+        AActor* Vehicle = TrackedVehicles[i];
+        if (!Vehicle)
         {
-            // Apply LOD distance settings to vehicle components
-            // This would integrate with the actual vehicle physics system
+            TrackedVehicles.RemoveAt(i);
+            continue;
+        }
+        
+        float Distance = FVector::Dist(Vehicle->GetActorLocation(), PlayerLocation);
+        if (Distance > OptimizationSettings.CullingDistance)
+        {
+            // Disable physics for distant vehicles
+            TArray<UPrimitiveComponent*> PrimitiveComponents;
+            Vehicle->GetComponents<UPrimitiveComponent>(PrimitiveComponents);
+            
+            for (UPrimitiveComponent* PrimComp : PrimitiveComponents)
+            {
+                if (PrimComp)
+                {
+                    PrimComp->SetSimulatePhysics(false);
+                }
+            }
+        }
+        else
+        {
+            // Re-enable physics for nearby vehicles
+            TArray<UPrimitiveComponent*> PrimitiveComponents;
+            Vehicle->GetComponents<UPrimitiveComponent>(PrimitiveComponents);
+            
+            for (UPrimitiveComponent* PrimComp : PrimitiveComponents)
+            {
+                if (PrimComp)
+                {
+                    PrimComp->SetSimulatePhysics(true);
+                }
+            }
         }
     }
 }
 
-void UPerf_VehiclePhysicsPerformanceIntegrator::MonitorVehicleMemoryUsage()
+void APerf_VehiclePhysicsPerformanceIntegrator::OptimizePhysicsSettings()
 {
-    SCOPE_CYCLE_COUNTER(STAT_VehicleMemoryUsage);
-    
-    // Get current memory statistics
-    FPlatformMemoryStats MemStats = FPlatformMemory::GetStats();
-    
-    // Estimate vehicle physics memory usage (simplified calculation)
-    const float BaseMemoryPerVehicle = 2.0f; // MB per vehicle
-    const float EstimatedVehicleMemory = CurrentMetrics.ActiveVehicleCount * BaseMemoryPerVehicle;
-    
-    CurrentMetrics.MemoryUsageMB = EstimatedVehicleMemory;
-    
-    // Log memory warnings if usage is high
-    if (CurrentMetrics.MemoryUsageMB > 50.0f && bDebugEnabled)
+    // Apply global physics optimizations based on current performance
+    if (GetWorld())
     {
-        UE_LOG(LogTemp, Warning, TEXT("VehiclePhysicsPerformanceIntegrator: High vehicle memory usage: %.2fMB"), CurrentMetrics.MemoryUsageMB);
+        UWorld* World = GetWorld();
+        if (World->GetPhysicsScene())
+        {
+            // Adjust physics substep settings for performance
+            if (!IsPerformanceTargetMet())
+            {
+                // Reduce physics accuracy for better performance
+                OptimizationSettings.PhysicsUpdateRate = FMath::Max(30.0f, OptimizationSettings.PhysicsUpdateRate * 0.8f);
+            }
+            else
+            {
+                // Gradually increase accuracy when performance allows
+                OptimizationSettings.PhysicsUpdateRate = FMath::Min(120.0f, OptimizationSettings.PhysicsUpdateRate * 1.1f);
+            }
+        }
     }
 }
 
-void UPerf_VehiclePhysicsPerformanceIntegrator::ApplyPerformanceOptimizations()
+float APerf_VehiclePhysicsPerformanceIntegrator::CalculateAverageVelocity() const
 {
-    UE_LOG(LogTemp, Log, TEXT("VehiclePhysicsPerformanceIntegrator: Applying performance optimizations for level %d"), 
-        static_cast<int32>(OptimizationSettings.PerformanceLevel));
-    
-    // Update physics LOD
-    UpdateVehiclePhysicsLOD();
-    
-    // Update async physics settings
-    UpdateAsyncPhysicsSettings();
-    
-    // Adjust concurrent vehicle limits
-    switch (OptimizationSettings.PerformanceLevel)
+    if (TrackedVehicles.Num() == 0)
     {
-        case EPerf_VehiclePerformanceLevel::Ultra:
-            OptimizationSettings.MaxConcurrentVehicles = 20;
-            OptimizationSettings.bEnableDamageSimulation = true;
-            break;
-        case EPerf_VehiclePerformanceLevel::High:
-            OptimizationSettings.MaxConcurrentVehicles = 15;
-            OptimizationSettings.bEnableDamageSimulation = true;
-            break;
-        case EPerf_VehiclePerformanceLevel::Medium:
-            OptimizationSettings.MaxConcurrentVehicles = 10;
-            OptimizationSettings.bEnableDamageSimulation = true;
-            break;
-        case EPerf_VehiclePerformanceLevel::Low:
-            OptimizationSettings.MaxConcurrentVehicles = 6;
-            OptimizationSettings.bEnableDamageSimulation = false;
-            break;
-        case EPerf_VehiclePerformanceLevel::Minimal:
-            OptimizationSettings.MaxConcurrentVehicles = 3;
-            OptimizationSettings.bEnableDamageSimulation = false;
-            break;
+        return 0.0f;
+    }
+    
+    float TotalVelocity = 0.0f;
+    int32 ValidVehicles = 0;
+    
+    for (AActor* Vehicle : TrackedVehicles)
+    {
+        if (Vehicle)
+        {
+            TArray<UPrimitiveComponent*> PrimitiveComponents;
+            Vehicle->GetComponents<UPrimitiveComponent>(PrimitiveComponents);
+            
+            for (UPrimitiveComponent* PrimComp : PrimitiveComponents)
+            {
+                if (PrimComp && PrimComp->IsSimulatingPhysics())
+                {
+                    FVector Velocity = PrimComp->GetPhysicsLinearVelocity();
+                    TotalVelocity += Velocity.Size();
+                    ValidVehicles++;
+                    break; // Only count first physics component per vehicle
+                }
+            }
+        }
+    }
+    
+    return ValidVehicles > 0 ? TotalVelocity / ValidVehicles : 0.0f;
+}
+
+float APerf_VehiclePhysicsPerformanceIntegrator::CalculateCollisionComplexity() const
+{
+    float TotalComplexity = 0.0f;
+    
+    for (AActor* Vehicle : TrackedVehicles)
+    {
+        if (Vehicle)
+        {
+            TArray<UPrimitiveComponent*> PrimitiveComponents;
+            Vehicle->GetComponents<UPrimitiveComponent>(PrimitiveComponents);
+            
+            for (UPrimitiveComponent* PrimComp : PrimitiveComponents)
+            {
+                if (PrimComp)
+                {
+                    // Estimate complexity based on collision responses
+                    int32 ActiveChannels = 0;
+                    for (int32 i = 0; i < 32; ++i)
+                    {
+                        if (PrimComp->GetCollisionResponseToChannel((ECollisionChannel)i) != ECR_Ignore)
+                        {
+                            ActiveChannels++;
+                        }
+                    }
+                    TotalComplexity += ActiveChannels / 32.0f; // Normalize to 0-1 range
+                }
+            }
+        }
+    }
+    
+    return TrackedVehicles.Num() > 0 ? TotalComplexity / TrackedVehicles.Num() : 0.0f;
+}
+
+float APerf_VehiclePhysicsPerformanceIntegrator::EstimateMemoryUsage() const
+{
+    // Rough estimation of memory usage
+    float EstimatedMB = TrackedVehicles.Num() * 2.5f; // ~2.5MB per vehicle (rough estimate)
+    return EstimatedMB;
+}
+
+void APerf_VehiclePhysicsPerformanceIntegrator::AdjustPhysicsUpdateRate()
+{
+    if (GetWorld())
+    {
+        // Apply physics update rate adjustments
+        float CurrentFPS = 1.0f / GetWorld()->GetDeltaSeconds();
+        if (CurrentFPS < TargetFrameRate * 0.8f)
+        {
+            // Reduce physics update rate for better performance
+            OptimizationSettings.PhysicsUpdateRate = FMath::Max(20.0f, OptimizationSettings.PhysicsUpdateRate * 0.9f);
+        }
+        else if (CurrentFPS > TargetFrameRate * 1.1f)
+        {
+            // Increase physics update rate when performance allows
+            OptimizationSettings.PhysicsUpdateRate = FMath::Min(120.0f, OptimizationSettings.PhysicsUpdateRate * 1.05f);
+        }
     }
 }
 
-float UPerf_VehiclePhysicsPerformanceIntegrator::CalculateVehiclePerformanceScore() const
+void APerf_VehiclePhysicsPerformanceIntegrator::ManageActiveVehicleCount()
 {
-    float Score = 100.0f;
-    
-    // Penalize for high frame times
-    if (CurrentMetrics.AverageFrameTime > TARGET_60FPS_FRAME_TIME)
+    // Ensure we don't exceed maximum active vehicle count
+    if (TrackedVehicles.Num() > OptimizationSettings.MaxActiveVehicles)
     {
-        Score -= (CurrentMetrics.AverageFrameTime - TARGET_60FPS_FRAME_TIME) * 2.0f;
-    }
-    
-    // Penalize for high physics times
-    if (CurrentMetrics.PhysicsUpdateTime > 1.0f)
-    {
-        Score -= (CurrentMetrics.PhysicsUpdateTime - 1.0f) * 10.0f;
-    }
-    
-    // Penalize for high memory usage
-    if (CurrentMetrics.MemoryUsageMB > 30.0f)
-    {
-        Score -= (CurrentMetrics.MemoryUsageMB - 30.0f) * 0.5f;
-    }
-    
-    return FMath::Clamp(Score, 0.0f, 100.0f);
-}
-
-void UPerf_VehiclePhysicsPerformanceIntegrator::UpdateAsyncPhysicsSettings()
-{
-    // Enable async physics based on performance level and current metrics
-    bool bShouldUseAsync = OptimizationSettings.bEnableAsyncPhysics && 
-                          (OptimizationSettings.PerformanceLevel >= EPerf_VehiclePerformanceLevel::Medium);
-    
-    if (bShouldUseAsync && CurrentMetrics.PhysicsUpdateTime > 1.0f)
-    {
-        UE_LOG(LogTemp, Log, TEXT("VehiclePhysicsPerformanceIntegrator: Enabling async physics for better performance"));
-        // This would integrate with the actual vehicle physics system to enable async processing
+        // Disable physics for excess vehicles (furthest from player)
+        if (GetWorld() && GetWorld()->GetFirstPlayerController())
+        {
+            APawn* PlayerPawn = GetWorld()->GetFirstPlayerController()->GetPawn();
+            if (PlayerPawn)
+            {
+                FVector PlayerLocation = PlayerPawn->GetActorLocation();
+                
+                // Sort by distance and disable furthest vehicles
+                TrackedVehicles.Sort([PlayerLocation](const AActor& A, const AActor& B)
+                {
+                    float DistA = FVector::Dist(A.GetActorLocation(), PlayerLocation);
+                    float DistB = FVector::Dist(B.GetActorLocation(), PlayerLocation);
+                    return DistA < DistB;
+                });
+                
+                // Disable physics for vehicles beyond the limit
+                for (int32 i = OptimizationSettings.MaxActiveVehicles; i < TrackedVehicles.Num(); ++i)
+                {
+                    AActor* Vehicle = TrackedVehicles[i];
+                    if (Vehicle)
+                    {
+                        TArray<UPrimitiveComponent*> PrimitiveComponents;
+                        Vehicle->GetComponents<UPrimitiveComponent>(PrimitiveComponents);
+                        
+                        for (UPrimitiveComponent* PrimComp : PrimitiveComponents)
+                        {
+                            if (PrimComp)
+                            {
+                                PrimComp->SetSimulatePhysics(false);
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
