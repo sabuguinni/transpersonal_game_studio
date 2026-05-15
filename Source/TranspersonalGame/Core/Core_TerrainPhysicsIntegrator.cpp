@@ -1,1 +1,363 @@
-#include \"Core_TerrainPhysicsIntegrator.h\"\n#include \"Engine/World.h\"\n#include \"Engine/Engine.h\"\n#include \"Landscape/LandscapeComponent.h\"\n#include \"Components/PrimitiveComponent.h\"\n#include \"GameFramework/Character.h\"\n#include \"GameFramework/CharacterMovementComponent.h\"\n#include \"PhysicsEngine/PhysicsSettings.h\"\n#include \"Materials/MaterialParameterCollection.h\"\n#include \"Kismet/GameplayStatics.h\"\n\nUCore_TerrainPhysicsIntegrator::UCore_TerrainPhysicsIntegrator()\n{\n    LastCleanupTime = 0.0f;\n    LastLODUpdateTime = 0.0f;\n    TerrainPhysicsUpdateCount = 0;\n    MaxActiveInteractions = 100;\n    InteractionCleanupInterval = 5.0f;\n    TerrainUpdateRadius = 5000.0f;\n}\n\nvoid UCore_TerrainPhysicsIntegrator::Initialize(FSubsystemCollectionBase& Collection)\n{\n    Super::Initialize(Collection);\n    \n    UE_LOG(LogTemp, Warning, TEXT(\"Core_TerrainPhysicsIntegrator: Initializing terrain physics system\"));\n    \n    InitializeDefaultTerrainProperties();\n    SetupDefaultBiomeTerrainMapping();\n    \n    // Find biome architecture reference\n    if (UWorld* World = GetWorld())\n    {\n        BiomeArchitecture = World->GetSubsystem<UEng_BiomeArchitecture>();\n        if (BiomeArchitecture.IsValid())\n        {\n            UE_LOG(LogTemp, Warning, TEXT(\"Core_TerrainPhysicsIntegrator: Connected to BiomeArchitecture\"));\n        }\n    }\n    \n    InitializeTerrainPhysics();\n}\n\nvoid UCore_TerrainPhysicsIntegrator::Deinitialize()\n{\n    UE_LOG(LogTemp, Warning, TEXT(\"Core_TerrainPhysicsIntegrator: Shutting down terrain physics system\"));\n    \n    ActiveInteractions.Empty();\n    ManagedLandscapes.Empty();\n    TerrainPhysicsMap.Empty();\n    BiomeTerrainMapping.Empty();\n    \n    Super::Deinitialize();\n}\n\nvoid UCore_TerrainPhysicsIntegrator::Tick(float DeltaTime)\n{\n    Super::Tick(DeltaTime);\n    \n    // Cleanup expired interactions\n    if (GetWorld()->GetTimeSeconds() - LastCleanupTime > InteractionCleanupInterval)\n    {\n        CleanupExpiredInteractions();\n        LastCleanupTime = GetWorld()->GetTimeSeconds();\n    }\n    \n    // Update terrain physics LOD\n    if (GetWorld()->GetTimeSeconds() - LastLODUpdateTime > 1.0f)\n    {\n        UpdateTerrainPhysicsLOD(DeltaTime);\n        LastLODUpdateTime = GetWorld()->GetTimeSeconds();\n    }\n    \n    UpdateTerrainMoisture(DeltaTime);\n}\n\nvoid UCore_TerrainPhysicsIntegrator::InitializeTerrainPhysics()\n{\n    UE_LOG(LogTemp, Warning, TEXT(\"Core_TerrainPhysicsIntegrator: Setting up terrain physics\"));\n    \n    if (UWorld* World = GetWorld())\n    {\n        // Find all landscape actors in the world\n        TArray<AActor*> LandscapeActors;\n        UGameplayStatics::GetAllActorsOfClass(World, ALandscapeProxy::StaticClass(), LandscapeActors);\n        \n        for (AActor* Actor : LandscapeActors)\n        {\n            if (ALandscapeProxy* Landscape = Cast<ALandscapeProxy>(Actor))\n            {\n                SetupLandscapePhysics(Landscape);\n                ManagedLandscapes.Add(Landscape);\n                UE_LOG(LogTemp, Warning, TEXT(\"Core_TerrainPhysicsIntegrator: Setup physics for landscape: %s\"), *Landscape->GetName());\n            }\n        }\n    }\n}\n\nvoid UCore_TerrainPhysicsIntegrator::SetupLandscapePhysics(ALandscapeProxy* Landscape)\n{\n    if (!Landscape)\n    {\n        return;\n    }\n    \n    // Get landscape components and setup physics properties\n    TArray<ULandscapeComponent*> LandscapeComponents;\n    Landscape->GetLandscapeComponents(LandscapeComponents);\n    \n    for (ULandscapeComponent* Component : LandscapeComponents)\n    {\n        if (Component)\n        {\n            // Set collision properties\n            Component->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);\n            Component->SetCollisionObjectType(ECC_WorldStatic);\n            Component->SetCollisionResponseToAllChannels(ECR_Block);\n            \n            // Apply default grass terrain properties\n            ApplyTerrainPhysicsProperties(Component, ECore_TerrainType::Grass);\n        }\n    }\n}\n\nvoid UCore_TerrainPhysicsIntegrator::ApplyTerrainPhysicsProperties(UStaticMeshComponent* TerrainComponent, ECore_TerrainType TerrainType)\n{\n    if (!TerrainComponent)\n    {\n        return;\n    }\n    \n    const FCore_TerrainPhysicsProperties* Properties = TerrainPhysicsMap.Find(TerrainType);\n    if (!Properties)\n    {\n        UE_LOG(LogTemp, Warning, TEXT(\"Core_TerrainPhysicsIntegrator: No properties found for terrain type\"));\n        return;\n    }\n    \n    // Apply physics material if available\n    if (TSoftObjectPtr<UPhysicalMaterial>* PhysMat = TerrainPhysicalMaterials.Find(TerrainType))\n    {\n        if (UPhysicalMaterial* LoadedMaterial = PhysMat->LoadSynchronous())\n        {\n            TerrainComponent->SetPhysMaterialOverride(LoadedMaterial);\n        }\n    }\n    \n    UE_LOG(LogTemp, Log, TEXT(\"Core_TerrainPhysicsIntegrator: Applied physics properties for terrain type\"));\n}\n\nECore_TerrainType UCore_TerrainPhysicsIntegrator::GetTerrainTypeAtLocation(const FVector& WorldLocation)\n{\n    // Default to grass, can be enhanced with biome detection\n    ECore_TerrainType TerrainType = ECore_TerrainType::Grass;\n    \n    if (BiomeArchitecture.IsValid())\n    {\n        EBiomeType BiomeType = BiomeArchitecture->GetBiomeAtLocation(WorldLocation);\n        if (ECore_TerrainType* MappedTerrain = BiomeTerrainMapping.Find(BiomeType))\n        {\n            TerrainType = *MappedTerrain;\n        }\n    }\n    \n    return TerrainType;\n}\n\nFCore_TerrainPhysicsProperties UCore_TerrainPhysicsIntegrator::GetTerrainPropertiesAtLocation(const FVector& WorldLocation)\n{\n    ECore_TerrainType TerrainType = GetTerrainTypeAtLocation(WorldLocation);\n    \n    const FCore_TerrainPhysicsProperties* Properties = TerrainPhysicsMap.Find(TerrainType);\n    if (Properties)\n    {\n        return *Properties;\n    }\n    \n    // Return default grass properties\n    return FCore_TerrainPhysicsProperties();\n}\n\nvoid UCore_TerrainPhysicsIntegrator::SetTerrainTypeForBiome(EBiomeType BiomeType, ECore_TerrainType TerrainType)\n{\n    BiomeTerrainMapping.Add(BiomeType, TerrainType);\n    UE_LOG(LogTemp, Log, TEXT(\"Core_TerrainPhysicsIntegrator: Mapped biome to terrain type\"));\n}\n\nfloat UCore_TerrainPhysicsIntegrator::GetMovementSpeedMultiplier(AActor* Character, const FVector& Location)\n{\n    if (!Character)\n    {\n        return 1.0f;\n    }\n    \n    FCore_TerrainPhysicsProperties Properties = GetTerrainPropertiesAtLocation(Location);\n    return Properties.WalkSpeedMultiplier;\n}\n\nbool UCore_TerrainPhysicsIntegrator::CanCharacterStandStably(AActor* Character, const FVector& Location)\n{\n    if (!Character)\n    {\n        return true;\n    }\n    \n    FCore_TerrainPhysicsProperties Properties = GetTerrainPropertiesAtLocation(Location);\n    \n    // Check if character mass is within terrain support limits\n    if (ACharacter* CharacterPawn = Cast<ACharacter>(Character))\n    {\n        float CharacterMass = CharacterPawn->GetCharacterMovement()->Mass;\n        return Properties.bCanSupportHeavyObjects || CharacterMass < 1000.0f;\n    }\n    \n    return Properties.StabilityFactor > 0.5f;\n}\n\nvoid UCore_TerrainPhysicsIntegrator::ApplyTerrainEffectsToCharacter(AActor* Character, const FVector& Location)\n{\n    if (!Character)\n    {\n        return;\n    }\n    \n    FCore_TerrainPhysicsProperties Properties = GetTerrainPropertiesAtLocation(Location);\n    \n    if (ACharacter* CharacterPawn = Cast<ACharacter>(Character))\n    {\n        if (UCharacterMovementComponent* MovementComp = CharacterPawn->GetCharacterMovement())\n        {\n            // Apply terrain-based movement modifications\n            float BaseWalkSpeed = MovementComp->MaxWalkSpeed;\n            MovementComp->MaxWalkSpeed = BaseWalkSpeed * Properties.WalkSpeedMultiplier;\n            \n            // Apply ground friction\n            MovementComp->GroundFriction = Properties.Friction * 8.0f; // UE5 friction scaling\n        }\n    }\n}\n\nvoid UCore_TerrainPhysicsIntegrator::RegisterTerrainInteraction(const FCore_TerrainInteractionData& InteractionData)\n{\n    if (ActiveInteractions.Num() >= MaxActiveInteractions)\n    {\n        // Remove oldest interaction\n        ActiveInteractions.RemoveAt(0);\n    }\n    \n    ActiveInteractions.Add(InteractionData);\n    TerrainPhysicsUpdateCount++;\n}\n\nvoid UCore_TerrainPhysicsIntegrator::HandleObjectTerrainCollision(AActor* Object, const FVector& ImpactPoint, float ImpactForce)\n{\n    if (!Object)\n    {\n        return;\n    }\n    \n    FCore_TerrainInteractionData InteractionData;\n    InteractionData.InteractingActor = Object;\n    InteractionData.ContactPoint = ImpactPoint;\n    InteractionData.TerrainType = GetTerrainTypeAtLocation(ImpactPoint);\n    InteractionData.ContactForce = ImpactForce;\n    InteractionData.ContactTime = GetWorld()->GetTimeSeconds();\n    \n    RegisterTerrainInteraction(InteractionData);\n    \n    // Apply terrain-specific collision effects\n    FCore_TerrainPhysicsProperties Properties = GetTerrainPropertiesAtLocation(ImpactPoint);\n    \n    if (UPrimitiveComponent* PrimComp = Object->FindComponentByClass<UPrimitiveComponent>())\n    {\n        // Reduce impact based on terrain restitution\n        FVector Velocity = PrimComp->GetPhysicsLinearVelocity();\n        Velocity *= (1.0f - Properties.Restitution);\n        PrimComp->SetPhysicsLinearVelocity(Velocity);\n    }\n}\n\nvoid UCore_TerrainPhysicsIntegrator::CreateTerrainDeformation(const FVector& Location, float Radius, float Depth)\n{\n    // Placeholder for terrain deformation - would integrate with landscape editing tools\n    UE_LOG(LogTemp, Log, TEXT(\"Core_TerrainPhysicsIntegrator: Terrain deformation at %s, radius: %f, depth: %f\"), \n           *Location.ToString(), Radius, Depth);\n}\n\nvoid UCore_TerrainPhysicsIntegrator::SimulateTerrainErosion(const FVector& Location, float Intensity)\n{\n    // Placeholder for erosion simulation\n    UE_LOG(LogTemp, Log, TEXT(\"Core_TerrainPhysicsIntegrator: Terrain erosion at %s, intensity: %f\"), \n           *Location.ToString(), Intensity);\n}\n\nvoid UCore_TerrainPhysicsIntegrator::ApplyWeatherEffectsToTerrain(const FVector& Location, float Intensity)\n{\n    ECore_TerrainType CurrentTerrain = GetTerrainTypeAtLocation(Location);\n    \n    // Weather effects modify terrain properties temporarily\n    if (FCore_TerrainPhysicsProperties* Properties = TerrainPhysicsMap.Find(CurrentTerrain))\n    {\n        // Rain makes terrain more slippery\n        Properties->Friction *= (1.0f - Intensity * 0.3f);\n        Properties->WalkSpeedMultiplier *= (1.0f - Intensity * 0.2f);\n    }\n}\n\nvoid UCore_TerrainPhysicsIntegrator::UpdateTerrainMoisture(float DeltaTime)\n{\n    // Placeholder for moisture simulation affecting terrain properties\n    // Would integrate with weather system\n}\n\nvoid UCore_TerrainPhysicsIntegrator::ValidateTerrainPhysicsSetup()\n{\n    UE_LOG(LogTemp, Warning, TEXT(\"Core_TerrainPhysicsIntegrator: Validating terrain physics setup\"));\n    \n    int32 ValidLandscapes = 0;\n    for (const TWeakObjectPtr<ALandscapeProxy>& LandscapePtr : ManagedLandscapes)\n    {\n        if (LandscapePtr.IsValid())\n        {\n            ValidLandscapes++;\n        }\n    }\n    \n    UE_LOG(LogTemp, Warning, TEXT(\"Core_TerrainPhysicsIntegrator: %d valid landscapes, %d terrain types, %d active interactions\"),\n           ValidLandscapes, TerrainPhysicsMap.Num(), ActiveInteractions.Num());\n}\n\nvoid UCore_TerrainPhysicsIntegrator::CreateTerrainPhysicsTestScenario()\n{\n    UE_LOG(LogTemp, Warning, TEXT(\"Core_TerrainPhysicsIntegrator: Creating terrain physics test scenario\"));\n    \n    if (UWorld* World = GetWorld())\n    {\n        // Create test objects with different masses to test terrain interaction\n        TArray<FVector> TestLocations = {\n            FVector(0, 0, 1000),\n            FVector(1000, 0, 1000),\n            FVector(-1000, 0, 1000)\n        };\n        \n        for (int32 i = 0; i < TestLocations.Num(); i++)\n        {\n            // This would spawn test objects in a real implementation\n            UE_LOG(LogTemp, Log, TEXT(\"Core_TerrainPhysicsIntegrator: Test location %d: %s\"), \n                   i, *TestLocations[i].ToString());\n        }\n    }\n}\n\nvoid UCore_TerrainPhysicsIntegrator::OptimizeTerrainPhysicsPerformance()\n{\n    // Remove expired interactions\n    CleanupExpiredInteractions();\n    \n    // Optimize terrain physics LOD based on distance to player\n    if (UWorld* World = GetWorld())\n    {\n        if (APawn* PlayerPawn = World->GetFirstPlayerController()->GetPawn())\n        {\n            FVector PlayerLocation = PlayerPawn->GetActorLocation();\n            \n            // Reduce physics detail for distant terrain\n            for (const TWeakObjectPtr<ALandscapeProxy>& LandscapePtr : ManagedLandscapes)\n            {\n                if (ALandscapeProxy* Landscape = LandscapePtr.Get())\n                {\n                    float Distance = FVector::Dist(PlayerLocation, Landscape->GetActorLocation());\n                    if (Distance > TerrainUpdateRadius)\n                    {\n                        // Reduce physics detail for distant landscapes\n                        // Implementation would adjust LOD settings\n                    }\n                }\n            }\n        }\n    }\n}\n\nvoid UCore_TerrainPhysicsIntegrator::InitializeDefaultTerrainProperties()\n{\n    // Grass terrain\n    FCore_TerrainPhysicsProperties GrassProps;\n    GrassProps.Friction = 0.7f;\n    GrassProps.Restitution = 0.1f;\n    GrassProps.Density = 1.5f;\n    GrassProps.WalkSpeedMultiplier = 1.0f;\n    GrassProps.StabilityFactor = 1.0f;\n    GrassProps.bCanSupportHeavyObjects = true;\n    TerrainPhysicsMap.Add(ECore_TerrainType::Grass, GrassProps);\n    \n    // Rock terrain\n    FCore_TerrainPhysicsProperties RockProps;\n    RockProps.Friction = 0.9f;\n    RockProps.Restitution = 0.3f;\n    RockProps.Density = 2.7f;\n    RockProps.WalkSpeedMultiplier = 0.8f;\n    RockProps.StabilityFactor = 1.0f;\n    RockProps.bCanSupportHeavyObjects = true;\n    TerrainPhysicsMap.Add(ECore_TerrainType::Rock, RockProps);\n    \n    // Mud terrain\n    FCore_TerrainPhysicsProperties MudProps;\n    MudProps.Friction = 0.3f;\n    MudProps.Restitution = 0.05f;\n    MudProps.Density = 1.8f;\n    MudProps.WalkSpeedMultiplier = 0.5f;\n    MudProps.StabilityFactor = 0.6f;\n    MudProps.bCanSupportHeavyObjects = false;\n    MudProps.SinkDepth = 10.0f;\n    TerrainPhysicsMap.Add(ECore_TerrainType::Mud, MudProps);\n    \n    // Sand terrain\n    FCore_TerrainPhysicsProperties SandProps;\n    SandProps.Friction = 0.5f;\n    SandProps.Restitution = 0.1f;\n    SandProps.Density = 1.6f;\n    SandProps.WalkSpeedMultiplier = 0.7f;\n    SandProps.StabilityFactor = 0.8f;\n    SandProps.bCanSupportHeavyObjects = true;\n    SandProps.SinkDepth = 5.0f;\n    TerrainPhysicsMap.Add(ECore_TerrainType::Sand, SandProps);\n    \n    UE_LOG(LogTemp, Warning, TEXT(\"Core_TerrainPhysicsIntegrator: Initialized %d terrain physics types\"), TerrainPhysicsMap.Num());\n}\n\nvoid UCore_TerrainPhysicsIntegrator::SetupDefaultBiomeTerrainMapping()\n{\n    // Map biomes to terrain types\n    BiomeTerrainMapping.Add(EBiomeType::Swamp, ECore_TerrainType::Mud);\n    BiomeTerrainMapping.Add(EBiomeType::Forest, ECore_TerrainType::Grass);\n    BiomeTerrainMapping.Add(EBiomeType::Savanna, ECore_TerrainType::Grass);\n    BiomeTerrainMapping.Add(EBiomeType::Desert, ECore_TerrainType::Sand);\n    BiomeTerrainMapping.Add(EBiomeType::Mountain, ECore_TerrainType::Rock);\n    \n    UE_LOG(LogTemp, Warning, TEXT(\"Core_TerrainPhysicsIntegrator: Setup %d biome-terrain mappings\"), BiomeTerrainMapping.Num());\n}\n\nvoid UCore_TerrainPhysicsIntegrator::CleanupExpiredInteractions()\n{\n    float CurrentTime = GetWorld()->GetTimeSeconds();\n    float ExpirationTime = 10.0f; // Interactions expire after 10 seconds\n    \n    ActiveInteractions.RemoveAll([CurrentTime, ExpirationTime](const FCore_TerrainInteractionData& Interaction)\n    {\n        return (CurrentTime - Interaction.ContactTime) > ExpirationTime;\n    });\n}\n\nvoid UCore_TerrainPhysicsIntegrator::UpdateTerrainPhysicsLOD(float DeltaTime)\n{\n    // Update terrain physics level of detail based on performance\n    // Placeholder for LOD system\n}"
+#include "Core_TerrainPhysicsIntegrator.h"
+#include "Engine/Engine.h"
+#include "Engine/World.h"
+#include "PhysicsEngine/PhysicalMaterial.h"
+#include "Landscape/LandscapeComponent.h"
+#include "Components/PrimitiveComponent.h"
+#include "Engine/StaticMeshActor.h"
+#include "DrawDebugHelpers.h"
+#include "TimerManager.h"
+
+UCore_TerrainPhysicsIntegrator::UCore_TerrainPhysicsIntegrator()
+{
+    PrimaryComponentTick.bCanEverTick = true;
+    PrimaryComponentTick.TickInterval = 0.1f;
+    
+    bEnableTerrainPhysics = true;
+    bEnableDynamicFriction = true;
+    PhysicsUpdateInterval = 0.1f;
+    LastPhysicsUpdateTime = 0.0f;
+}
+
+void UCore_TerrainPhysicsIntegrator::BeginPlay()
+{
+    Super::BeginPlay();
+    
+    if (bEnableTerrainPhysics)
+    {
+        InitializeDefaultBiomeConfigurations();
+        InitializeTerrainPhysics();
+        
+        UE_LOG(LogTemp, Warning, TEXT("Core_TerrainPhysicsIntegrator: Initialized with %d biome configurations"), 
+               BiomeConfigurations.Num());
+    }
+}
+
+void UCore_TerrainPhysicsIntegrator::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+{
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+    
+    if (!bEnableTerrainPhysics)
+        return;
+        
+    LastPhysicsUpdateTime += DeltaTime;
+    
+    if (LastPhysicsUpdateTime >= PhysicsUpdateInterval)
+    {
+        // Update physics for tracked actors
+        for (int32 i = TrackedPhysicsActors.Num() - 1; i >= 0; --i)
+        {
+            if (TrackedPhysicsActors[i].IsValid())
+            {
+                UpdateActorPhysicsProperties(TrackedPhysicsActors[i].Get());
+            }
+            else
+            {
+                TrackedPhysicsActors.RemoveAt(i);
+            }
+        }
+        
+        LastPhysicsUpdateTime = 0.0f;
+    }
+}
+
+void UCore_TerrainPhysicsIntegrator::InitializeTerrainPhysics()
+{
+    if (BiomeConfigurations.Num() == 0)
+    {
+        InitializeDefaultBiomeConfigurations();
+    }
+    
+    SetupBiomePhysicsMaterials();
+    
+    // Find and configure landscape actors
+    UWorld* World = GetWorld();
+    if (World)
+    {
+        for (TActorIterator<ALandscape> ActorIterator(World); ActorIterator; ++ActorIterator)
+        {
+            ALandscape* LandscapeActor = *ActorIterator;
+            if (LandscapeActor)
+            {
+                ConfigureLandscapePhysics(LandscapeActor);
+            }
+        }
+    }
+    
+    UE_LOG(LogTemp, Warning, TEXT("Core_TerrainPhysicsIntegrator: Physics initialization complete"));
+}
+
+void UCore_TerrainPhysicsIntegrator::InitializeDefaultBiomeConfigurations()
+{
+    BiomeConfigurations.Empty();
+    
+    // Savanna (center)
+    FCore_BiomePhysicsConfig SavannaConfig;
+    SavannaConfig.TerrainType = ECore_TerrainType::Savanna;
+    SavannaConfig.BiomeCenter = FVector(0.0f, 0.0f, 0.0f);
+    SavannaConfig.BiomeRadius = 30000.0f;
+    SavannaConfig.PhysicsProperties.Friction = 0.7f;
+    SavannaConfig.PhysicsProperties.Restitution = 0.3f;
+    SavannaConfig.PhysicsProperties.MovementSpeedMultiplier = 1.0f;
+    BiomeConfigurations.Add(SavannaConfig);
+    
+    // Swamp (southwest)
+    FCore_BiomePhysicsConfig SwampConfig;
+    SwampConfig.TerrainType = ECore_TerrainType::Swamp;
+    SwampConfig.BiomeCenter = FVector(-50000.0f, -45000.0f, 0.0f);
+    SwampConfig.BiomeRadius = 25000.0f;
+    SwampConfig.PhysicsProperties.Friction = 0.3f;
+    SwampConfig.PhysicsProperties.Restitution = 0.1f;
+    SwampConfig.PhysicsProperties.MovementSpeedMultiplier = 0.6f;
+    BiomeConfigurations.Add(SwampConfig);
+    
+    // Forest (northwest)
+    FCore_BiomePhysicsConfig ForestConfig;
+    ForestConfig.TerrainType = ECore_TerrainType::Forest;
+    ForestConfig.BiomeCenter = FVector(-45000.0f, 40000.0f, 0.0f);
+    ForestConfig.BiomeRadius = 28000.0f;
+    ForestConfig.PhysicsProperties.Friction = 0.8f;
+    ForestConfig.PhysicsProperties.Restitution = 0.4f;
+    ForestConfig.PhysicsProperties.MovementSpeedMultiplier = 0.8f;
+    BiomeConfigurations.Add(ForestConfig);
+    
+    // Desert (east)
+    FCore_BiomePhysicsConfig DesertConfig;
+    DesertConfig.TerrainType = ECore_TerrainType::Desert;
+    DesertConfig.BiomeCenter = FVector(55000.0f, 0.0f, 0.0f);
+    DesertConfig.BiomeRadius = 32000.0f;
+    DesertConfig.PhysicsProperties.Friction = 0.4f;
+    DesertConfig.PhysicsProperties.Restitution = 0.2f;
+    DesertConfig.PhysicsProperties.MovementSpeedMultiplier = 0.7f;
+    BiomeConfigurations.Add(DesertConfig);
+    
+    // Mountain (northeast)
+    FCore_BiomePhysicsConfig MountainConfig;
+    MountainConfig.TerrainType = ECore_TerrainType::Mountain;
+    MountainConfig.BiomeCenter = FVector(40000.0f, 50000.0f, 0.0f);
+    MountainConfig.BiomeRadius = 30000.0f;
+    MountainConfig.PhysicsProperties.Friction = 0.9f;
+    MountainConfig.PhysicsProperties.Restitution = 0.6f;
+    MountainConfig.PhysicsProperties.MovementSpeedMultiplier = 0.5f;
+    BiomeConfigurations.Add(MountainConfig);
+}
+
+void UCore_TerrainPhysicsIntegrator::SetupBiomePhysicsMaterials()
+{
+    BiomePhysicsMaterials.Empty();
+    
+    for (const FCore_BiomePhysicsConfig& BiomeConfig : BiomeConfigurations)
+    {
+        CreatePhysicsMaterialForBiome(BiomeConfig.TerrainType, BiomeConfig.PhysicsProperties);
+    }
+}
+
+void UCore_TerrainPhysicsIntegrator::CreatePhysicsMaterialForBiome(ECore_TerrainType BiomeType, const FCore_TerrainPhysicsProperties& Properties)
+{
+    FString MaterialName = FString::Printf(TEXT("PhysMat_%s"), 
+        *UEnum::GetValueAsString(BiomeType));
+    
+    UPhysicalMaterial* PhysMaterial = NewObject<UPhysicalMaterial>(this, *MaterialName);
+    if (PhysMaterial)
+    {
+        PhysMaterial->Friction = Properties.Friction;
+        PhysMaterial->Restitution = Properties.Restitution;
+        PhysMaterial->Density = Properties.Density;
+        
+        BiomePhysicsMaterials.Add(BiomeType, PhysMaterial);
+        
+        UE_LOG(LogTemp, Log, TEXT("Created physics material for biome: %s"), *MaterialName);
+    }
+}
+
+FCore_TerrainPhysicsProperties UCore_TerrainPhysicsIntegrator::GetTerrainPropertiesAtLocation(const FVector& WorldLocation) const
+{
+    ECore_TerrainType BiomeType = GetBiomeTypeAtLocation(WorldLocation);
+    
+    for (const FCore_BiomePhysicsConfig& BiomeConfig : BiomeConfigurations)
+    {
+        if (BiomeConfig.TerrainType == BiomeType)
+        {
+            return BiomeConfig.PhysicsProperties;
+        }
+    }
+    
+    // Return default properties if no biome found
+    return FCore_TerrainPhysicsProperties();
+}
+
+ECore_TerrainType UCore_TerrainPhysicsIntegrator::GetBiomeTypeAtLocation(const FVector& WorldLocation) const
+{
+    for (const FCore_BiomePhysicsConfig& BiomeConfig : BiomeConfigurations)
+    {
+        if (IsLocationInBiome(WorldLocation, BiomeConfig))
+        {
+            return BiomeConfig.TerrainType;
+        }
+    }
+    
+    return ECore_TerrainType::Savanna; // Default fallback
+}
+
+bool UCore_TerrainPhysicsIntegrator::IsLocationInBiome(const FVector& Location, const FCore_BiomePhysicsConfig& BiomeConfig) const
+{
+    float DistanceSquared = FVector::DistSquared(Location, BiomeConfig.BiomeCenter);
+    float RadiusSquared = BiomeConfig.BiomeRadius * BiomeConfig.BiomeRadius;
+    
+    return DistanceSquared <= RadiusSquared;
+}
+
+void UCore_TerrainPhysicsIntegrator::ApplyPhysicsPropertiesToActor(AActor* TargetActor, const FCore_TerrainPhysicsProperties& Properties)
+{
+    if (!TargetActor)
+        return;
+        
+    UPrimitiveComponent* PrimComp = TargetActor->FindComponentByClass<UPrimitiveComponent>();
+    if (PrimComp)
+    {
+        // Apply physics properties
+        PrimComp->SetUseCCD(Properties.bEnableComplexCollision);
+        
+        // Track this actor for future updates
+        TrackedPhysicsActors.AddUnique(TargetActor);
+    }
+}
+
+void UCore_TerrainPhysicsIntegrator::UpdateActorPhysicsProperties(AActor* Actor)
+{
+    if (!Actor || !bEnableDynamicFriction)
+        return;
+        
+    FVector ActorLocation = Actor->GetActorLocation();
+    FCore_TerrainPhysicsProperties TerrainProps = GetTerrainPropertiesAtLocation(ActorLocation);
+    
+    ApplyPhysicsPropertiesToActor(Actor, TerrainProps);
+}
+
+void UCore_TerrainPhysicsIntegrator::ConfigureLandscapePhysics(ALandscape* LandscapeActor)
+{
+    if (!LandscapeActor)
+        return;
+        
+    // Configure landscape collision and physics
+    ULandscapeComponent* LandscapeComp = LandscapeActor->FindComponentByClass<ULandscapeComponent>();
+    if (LandscapeComp)
+    {
+        LandscapeComp->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+        LandscapeComp->SetCollisionResponseToAllChannels(ECR_Block);
+        
+        UE_LOG(LogTemp, Log, TEXT("Configured landscape physics for: %s"), 
+               *LandscapeActor->GetName());
+    }
+}
+
+void UCore_TerrainPhysicsIntegrator::UpdateTerrainPhysicsForBiome(ECore_TerrainType BiomeType)
+{
+    UWorld* World = GetWorld();
+    if (!World)
+        return;
+        
+    // Find biome configuration
+    const FCore_BiomePhysicsConfig* BiomeConfig = nullptr;
+    for (const FCore_BiomePhysicsConfig& Config : BiomeConfigurations)
+    {
+        if (Config.TerrainType == BiomeType)
+        {
+            BiomeConfig = &Config;
+            break;
+        }
+    }
+    
+    if (!BiomeConfig)
+        return;
+        
+    // Update all actors in this biome
+    for (TActorIterator<AActor> ActorIterator(World); ActorIterator; ++ActorIterator)
+    {
+        AActor* Actor = *ActorIterator;
+        if (Actor && IsLocationInBiome(Actor->GetActorLocation(), *BiomeConfig))
+        {
+            ApplyPhysicsPropertiesToActor(Actor, BiomeConfig->PhysicsProperties);
+        }
+    }
+    
+    UE_LOG(LogTemp, Warning, TEXT("Updated terrain physics for biome: %s"), 
+           *UEnum::GetValueAsString(BiomeType));
+}
+
+void UCore_TerrainPhysicsIntegrator::ValidateTerrainPhysicsSetup()
+{
+    UE_LOG(LogTemp, Warning, TEXT("=== Terrain Physics Validation ==="));
+    UE_LOG(LogTemp, Warning, TEXT("Biome Configurations: %d"), BiomeConfigurations.Num());
+    UE_LOG(LogTemp, Warning, TEXT("Physics Materials: %d"), BiomePhysicsMaterials.Num());
+    UE_LOG(LogTemp, Warning, TEXT("Tracked Actors: %d"), TrackedPhysicsActors.Num());
+    UE_LOG(LogTemp, Warning, TEXT("Terrain Physics Enabled: %s"), bEnableTerrainPhysics ? TEXT("Yes") : TEXT("No"));
+    
+    for (const FCore_BiomePhysicsConfig& Config : BiomeConfigurations)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Biome %s: Center(%s), Radius(%.1f)"), 
+               *UEnum::GetValueAsString(Config.TerrainType),
+               *Config.BiomeCenter.ToString(),
+               Config.BiomeRadius);
+    }
+}
+
+void UCore_TerrainPhysicsIntegrator::DebugDrawBiomeBoundaries()
+{
+    UWorld* World = GetWorld();
+    if (!World)
+        return;
+        
+    for (const FCore_BiomePhysicsConfig& Config : BiomeConfigurations)
+    {
+        FColor BiomeColor = FColor::Red;
+        switch (Config.TerrainType)
+        {
+            case ECore_TerrainType::Savanna: BiomeColor = FColor::Yellow; break;
+            case ECore_TerrainType::Swamp: BiomeColor = FColor::Green; break;
+            case ECore_TerrainType::Forest: BiomeColor = FColor::Emerald; break;
+            case ECore_TerrainType::Desert: BiomeColor = FColor::Orange; break;
+            case ECore_TerrainType::Mountain: BiomeColor = FColor::Blue; break;
+        }
+        
+        DrawDebugCircle(World, Config.BiomeCenter, Config.BiomeRadius, 32, BiomeColor, false, 5.0f);
+    }
+}
+
+void UCore_TerrainPhysicsIntegrator::OptimizeTerrainPhysicsForPerformance()
+{
+    // Remove invalid tracked actors
+    for (int32 i = TrackedPhysicsActors.Num() - 1; i >= 0; --i)
+    {
+        if (!TrackedPhysicsActors[i].IsValid())
+        {
+            TrackedPhysicsActors.RemoveAt(i);
+        }
+    }
+    
+    // Increase update interval if too many actors
+    if (TrackedPhysicsActors.Num() > 1000)
+    {
+        PhysicsUpdateInterval = FMath::Max(0.2f, PhysicsUpdateInterval * 1.1f);
+    }
+    else if (TrackedPhysicsActors.Num() < 100)
+    {
+        PhysicsUpdateInterval = FMath::Max(0.05f, PhysicsUpdateInterval * 0.9f);
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("Optimized terrain physics: %d actors, %.3fs interval"), 
+           TrackedPhysicsActors.Num(), PhysicsUpdateInterval);
+}
+
+int32 UCore_TerrainPhysicsIntegrator::GetActivePhysicsActorCount() const
+{
+    int32 ValidCount = 0;
+    for (const TWeakObjectPtr<AActor>& ActorPtr : TrackedPhysicsActors)
+    {
+        if (ActorPtr.IsValid())
+        {
+            ValidCount++;
+        }
+    }
+    return ValidCount;
+}
