@@ -1,189 +1,188 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/World.h"
-#include "Components/ActorComponent.h"
+#include "GameFramework/Actor.h"
 #include "Components/StaticMeshComponent.h"
-#include "Engine/StaticMesh.h"
-#include "Materials/MaterialInterface.h"
-#include "../SharedTypes.h"
+#include "Components/PointLightComponent.h"
+#include "Engine/World.h"
 #include "ArchitectureManager.generated.h"
 
 UENUM(BlueprintType)
-enum class EArch_DwellingType : uint8
+enum class EArch_ShelterType : uint8
 {
-    CaveDwelling        UMETA(DisplayName = "Cave Dwelling"),
-    ElevatedPlatform    UMETA(DisplayName = "Elevated Platform"),
-    GroundShelter       UMETA(DisplayName = "Ground Shelter"),
-    DefensiveOutpost    UMETA(DisplayName = "Defensive Outpost"),
-    StoragePit          UMETA(DisplayName = "Storage Pit")
+    Cave            UMETA(DisplayName = "Cave Dwelling"),
+    ElevatedPlatform UMETA(DisplayName = "Elevated Platform"),
+    StoneDwelling   UMETA(DisplayName = "Stone Dwelling"),
+    UndergroundBunker UMETA(DisplayName = "Underground Bunker"),
+    TemporaryLean   UMETA(DisplayName = "Temporary Lean-to")
 };
 
 UENUM(BlueprintType)
-enum class EArch_MaterialType : uint8
+enum class EArch_DefenseLevel : uint8
 {
-    Stone               UMETA(DisplayName = "Stone"),
-    Wood                UMETA(DisplayName = "Wood"),
-    AnimalHide          UMETA(DisplayName = "Animal Hide"),
-    Bone                UMETA(DisplayName = "Bone"),
-    Clay                UMETA(DisplayName = "Clay")
+    None        UMETA(DisplayName = "No Defense"),
+    Basic       UMETA(DisplayName = "Basic Walls"),
+    Reinforced  UMETA(DisplayName = "Reinforced Structure"),
+    Fortified   UMETA(DisplayName = "Fortified Compound")
 };
 
 USTRUCT(BlueprintType)
-struct FArch_DwellingConfig
+struct TRANSPERSONALGAME_API FArch_ShelterData
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dwelling")
-    EArch_DwellingType DwellingType = EArch_DwellingType::CaveDwelling;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter")
+    EArch_ShelterType ShelterType = EArch_ShelterType::Cave;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dwelling")
-    FVector Dimensions = FVector(400.0f, 300.0f, 250.0f);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter")
+    FVector Location = FVector::ZeroVector;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dwelling")
-    EArch_MaterialType PrimaryMaterial = EArch_MaterialType::Stone;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter")
+    FRotator Rotation = FRotator::ZeroRotator;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dwelling")
-    int32 MaxOccupants = 4;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter")
+    EArch_DefenseLevel DefenseLevel = EArch_DefenseLevel::None;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dwelling")
-    bool bHasFirePit = true;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter")
+    bool bHasFirePit = false;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dwelling")
-    bool bHasStorage = true;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter")
+    bool bHasStorage = false;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dwelling")
-    float DefenseRating = 0.5f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter")
+    int32 Capacity = 1;
 
-    FArch_DwellingConfig()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter")
+    float StructuralIntegrity = 100.0f;
+
+    FArch_ShelterData()
     {
-        DwellingType = EArch_DwellingType::CaveDwelling;
-        Dimensions = FVector(400.0f, 300.0f, 250.0f);
-        PrimaryMaterial = EArch_MaterialType::Stone;
-        MaxOccupants = 4;
-        bHasFirePit = true;
-        bHasStorage = true;
-        DefenseRating = 0.5f;
+        ShelterType = EArch_ShelterType::Cave;
+        Location = FVector::ZeroVector;
+        Rotation = FRotator::ZeroRotator;
+        DefenseLevel = EArch_DefenseLevel::None;
+        bHasFirePit = false;
+        bHasStorage = false;
+        Capacity = 1;
+        StructuralIntegrity = 100.0f;
     }
 };
 
 USTRUCT(BlueprintType)
-struct FArch_InteriorElement
+struct TRANSPERSONALGAME_API FArch_InteriorComponent
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interior")
-    FString ElementName;
+    FString ComponentName;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interior")
     FVector RelativeLocation = FVector::ZeroVector;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interior")
-    FRotator RelativeRotation = FRotator::ZeroRotator;
+    bool bIsActive = true;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interior")
-    EArch_MaterialType Material = EArch_MaterialType::Stone;
+    float Durability = 100.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interior")
-    bool bIsEssential = false;
-
-    FArch_InteriorElement()
+    FArch_InteriorComponent()
     {
-        ElementName = TEXT("GenericElement");
+        ComponentName = TEXT("Unknown Component");
         RelativeLocation = FVector::ZeroVector;
-        RelativeRotation = FRotator::ZeroRotator;
-        Material = EArch_MaterialType::Stone;
-        bIsEssential = false;
+        bIsActive = true;
+        Durability = 100.0f;
     }
 };
 
-UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UArchitectureManager : public UActorComponent
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API AArchitectureManager : public AActor
 {
     GENERATED_BODY()
 
 public:
-    UArchitectureManager();
+    AArchitectureManager();
 
 protected:
     virtual void BeginPlay() override;
 
 public:
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+    virtual void Tick(float DeltaTime) override;
 
-    // Dwelling Management
+    // Shelter Management
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    bool CreateDwelling(const FArch_DwellingConfig& Config, const FVector& Location, const FRotator& Rotation);
-
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void RemoveDwelling(int32 DwellingID);
+    bool CreateShelter(const FArch_ShelterData& ShelterData);
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    TArray<int32> GetNearbyDwellings(const FVector& Location, float Radius) const;
+    bool RemoveShelter(int32 ShelterIndex);
+
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    TArray<FArch_ShelterData> GetAllShelters() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    FArch_ShelterData GetNearestShelter(const FVector& Location, float MaxDistance = 5000.0f) const;
 
     // Interior Management
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    bool AddInteriorElement(int32 DwellingID, const FArch_InteriorElement& Element);
+    bool AddInteriorComponent(int32 ShelterIndex, const FArch_InteriorComponent& Component);
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void RemoveInteriorElement(int32 DwellingID, const FString& ElementName);
+    bool RemoveInteriorComponent(int32 ShelterIndex, const FString& ComponentName);
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    TArray<FArch_InteriorElement> GetInteriorElements(int32 DwellingID) const;
+    TArray<FArch_InteriorComponent> GetInteriorComponents(int32 ShelterIndex) const;
 
-    // Settlement Management
+    // Defense System
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    bool CreateSettlement(const FVector& CenterLocation, float Radius, int32 DwellingCount);
-
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void UpdateSettlementDefenses(int32 SettlementID, float DefenseMultiplier);
-
-    // Material and Weathering
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void ApplyWeathering(int32 DwellingID, float WeatheringAmount);
+    bool UpgradeDefenses(int32 ShelterIndex, EArch_DefenseLevel NewLevel);
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void UpdateMaterialCondition(int32 DwellingID, float DeltaTime);
+    float CalculateDefenseRating(int32 ShelterIndex) const;
+
+    // Structural Integrity
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    bool RepairStructure(int32 ShelterIndex, float RepairAmount);
+
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    void ApplyWeatherDamage(float DamageAmount);
+
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    void ApplyDinosaurDamage(int32 ShelterIndex, float DamageAmount);
 
     // Utility Functions
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    float CalculateDwellingCapacity(const FArch_DwellingConfig& Config) const;
+    bool IsShelterSafe(int32 ShelterIndex) const;
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    bool IsDwellingOccupied(int32 DwellingID) const;
+    int32 GetShelterCapacity(int32 ShelterIndex) const;
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    FVector GetOptimalDwellingLocation(const FVector& SearchCenter, float SearchRadius, EArch_DwellingType DwellingType) const;
+    bool CanUpgradeShelter(int32 ShelterIndex) const;
 
 protected:
-    // Internal data structures
+    // Data Storage
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Architecture", meta = (AllowPrivateAccess = "true"))
-    TMap<int32, FArch_DwellingConfig> ActiveDwellings;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Architecture", meta = (AllowPrivateAccess = "true"))
-    TMap<int32, TArray<FArch_InteriorElement>> DwellingInteriors;
+    TArray<FArch_ShelterData> ActiveShelters;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Architecture", meta = (AllowPrivateAccess = "true"))
-    TMap<int32, FVector> DwellingLocations;
+    TMap<int32, TArray<FArch_InteriorComponent>> ShelterInteriors;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Architecture", meta = (AllowPrivateAccess = "true"))
-    TMap<int32, TArray<int32>> Settlements;
+    // Configuration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
+    float WeatherDamageRate = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    float WeatheringRate = 0.1f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
+    float DinosaurDamageMultiplier = 2.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    float MaxWeatheringAmount = 0.8f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
+    float RepairEfficiency = 1.5f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    int32 MaxDwellings = 50;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
+    int32 MaxSheltersPerArea = 5;
 
 private:
-    int32 NextDwellingID = 1;
-    int32 NextSettlementID = 1;
-
-    // Helper functions
-    bool ValidateDwellingLocation(const FVector& Location, const FArch_DwellingConfig& Config) const;
-    void SpawnDwellingMesh(const FArch_DwellingConfig& Config, const FVector& Location, const FRotator& Rotation);
-    void CreateDefaultInteriorElements(int32 DwellingID, const FArch_DwellingConfig& Config);
+    // Internal Helper Functions
+    bool ValidateShelterLocation(const FVector& Location) const;
+    void InitializeDefaultShelters();
+    void UpdateStructuralIntegrity(float DeltaTime);
+    int32 FindNearestShelterIndex(const FVector& Location) const;
 };
