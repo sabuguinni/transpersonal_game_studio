@@ -4,286 +4,214 @@
 #include "Engine/GameInstanceSubsystem.h"
 #include "Engine/World.h"
 #include "Components/ActorComponent.h"
-#include "Subsystems/WorldSubsystem.h"
-#include "SharedTypes.h"
 #include "Eng_TechnicalArchitecture.generated.h"
 
 /**
- * TECHNICAL ARCHITECTURE SYSTEM - Engine Architect Agent #2
- * 
- * This system defines the absolute technical rules and constraints that ALL agents
- * must follow. It establishes performance budgets, memory limits, and architectural
- * patterns that ensure the game can scale from prototype to full production.
- * 
- * CRITICAL: This is the technical law of the studio. No agent can violate these rules.
+ * Engine Architect Technical Framework
+ * Defines the core technical architecture rules and systems for the Transpersonal Game
+ * This system enforces compilation rules, module dependencies, and performance standards
  */
 
 UENUM(BlueprintType)
-enum class EEng_PerformanceProfile : uint8
+enum class EEng_ModuleType : uint8
 {
-    Development,    // No limits, debug mode
-    Console,        // 30 FPS target, strict memory
-    PC_High,        // 60 FPS target, moderate limits
-    PC_Ultra        // 120 FPS target, minimal limits
+    Core = 0,
+    WorldGeneration = 1,
+    CharacterSystems = 2,
+    AI_Behavior = 3,
+    Combat = 4,
+    Audio = 5,
+    VFX = 6,
+    UI = 7,
+    Performance = 8,
+    Integration = 9
 };
 
 UENUM(BlueprintType)
-enum class EEng_SystemPriority : uint8
+enum class EEng_PerformanceLevel : uint8
 {
-    Critical,       // Core gameplay systems
-    High,           // Performance-sensitive systems
-    Medium,         // Standard game features
-    Low,            // Polish and extras
-    Debug           // Development tools only
+    Critical = 0,    // Must maintain 60fps
+    High = 1,        // Should maintain 45fps
+    Medium = 2,      // Should maintain 30fps
+    Low = 3          // Can drop to 20fps temporarily
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEng_PerformanceBudget
+struct TRANSPERSONALGAME_API FEng_ModuleSpec
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float MaxFrameTimeMS;
+    UPROPERTY(BlueprintReadOnly, Category = "Module")
+    FString ModuleName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 MaxActiveActors;
+    UPROPERTY(BlueprintReadOnly, Category = "Module")
+    EEng_ModuleType ModuleType;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 MaxPhysicsBodies;
+    UPROPERTY(BlueprintReadOnly, Category = "Module")
+    TArray<FString> Dependencies;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 MaxParticleCount;
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    EEng_PerformanceLevel PerformanceRequirement;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float MaxMemoryMB;
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    int32 MaxActorsPerFrame;
 
-    FEng_PerformanceBudget()
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float MaxFrameTimeMs;
+
+    FEng_ModuleSpec()
     {
-        MaxFrameTimeMS = 16.67f; // 60 FPS
-        MaxActiveActors = 5000;
-        MaxPhysicsBodies = 1000;
-        MaxParticleCount = 10000;
-        MaxMemoryMB = 8192.0f; // 8 GB
+        ModuleName = TEXT("");
+        ModuleType = EEng_ModuleType::Core;
+        PerformanceRequirement = EEng_PerformanceLevel::Medium;
+        MaxActorsPerFrame = 1000;
+        MaxFrameTimeMs = 16.67f; // 60fps target
     }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEng_SystemConstraints
+struct TRANSPERSONALGAME_API FEng_CompilationRule
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Constraints")
-    bool bEnforcePerformanceLimits;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Constraints")
-    bool bRequireModularDesign;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Constraints")
-    bool bEnforceMemoryPools;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Constraints")
-    bool bRequireThreadSafety;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Constraints")
-    float MaxSystemInitTimeMS;
-
-    FEng_SystemConstraints()
-    {
-        bEnforcePerformanceLimits = true;
-        bRequireModularDesign = true;
-        bEnforceMemoryPools = true;
-        bRequireThreadSafety = true;
-        MaxSystemInitTimeMS = 100.0f;
-    }
-};
-
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEng_ArchitecturalRule
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rule")
+    UPROPERTY(BlueprintReadOnly, Category = "Compilation")
     FString RuleName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rule")
+    UPROPERTY(BlueprintReadOnly, Category = "Compilation")
     FString Description;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rule")
-    EEng_SystemPriority Priority;
+    UPROPERTY(BlueprintReadOnly, Category = "Compilation")
+    bool bIsMandatory;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rule")
-    bool bMandatory;
+    UPROPERTY(BlueprintReadOnly, Category = "Compilation")
+    FString ViolationMessage;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rule")
-    TArray<FString> AffectedAgents;
-
-    FEng_ArchitecturalRule()
+    FEng_CompilationRule()
     {
-        Priority = EEng_SystemPriority::Medium;
-        bMandatory = true;
+        RuleName = TEXT("");
+        Description = TEXT("");
+        bIsMandatory = true;
+        ViolationMessage = TEXT("");
     }
 };
 
 /**
- * Technical Architecture Subsystem - Global Rules Engine
- * 
- * This subsystem enforces technical constraints across all game systems.
- * It monitors performance, validates system compliance, and blocks
- * operations that would violate architectural rules.
+ * Technical Architecture Manager
+ * Enforces technical standards and validates system compliance
  */
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UEng_TechnicalArchitectureSubsystem : public UGameInstanceSubsystem
+class TRANSPERSONALGAME_API UEng_TechnicalArchitecture : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
 public:
+    UEng_TechnicalArchitecture();
+
+    // Subsystem interface
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
-    // Performance Management
-    UFUNCTION(BlueprintCallable, Category = "Technical Architecture")
-    void SetPerformanceProfile(EEng_PerformanceProfile Profile);
+    // Module Management
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    bool RegisterModule(const FEng_ModuleSpec& ModuleSpec);
 
-    UFUNCTION(BlueprintCallable, Category = "Technical Architecture")
-    FEng_PerformanceBudget GetCurrentPerformanceBudget() const;
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    bool ValidateModuleDependencies(const FString& ModuleName);
 
-    UFUNCTION(BlueprintCallable, Category = "Technical Architecture")
-    bool ValidatePerformanceCompliance(const FString& SystemName, float FrameTimeMS, int32 ActorCount);
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    TArray<FString> GetModuleLoadOrder();
 
-    // System Registration and Validation
-    UFUNCTION(BlueprintCallable, Category = "Technical Architecture")
-    bool RegisterSystem(const FString& SystemName, EEng_SystemPriority Priority, const FString& AgentOwner);
+    // Compilation Rules
+    UFUNCTION(BlueprintCallable, Category = "Compilation")
+    bool ValidateCompilationRules();
 
-    UFUNCTION(BlueprintCallable, Category = "Technical Architecture")
-    bool ValidateSystemArchitecture(const FString& SystemName);
+    UFUNCTION(BlueprintCallable, Category = "Compilation")
+    TArray<FEng_CompilationRule> GetFailedRules();
 
-    UFUNCTION(BlueprintCallable, Category = "Technical Architecture")
-    void BlockSystemOperation(const FString& SystemName, const FString& Reason);
+    // Performance Monitoring
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    bool CheckPerformanceCompliance();
 
-    // Architectural Rules Management
-    UFUNCTION(BlueprintCallable, Category = "Technical Architecture")
-    void AddArchitecturalRule(const FEng_ArchitecturalRule& Rule);
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    float GetCurrentFrameTime();
 
-    UFUNCTION(BlueprintCallable, Category = "Technical Architecture")
-    bool ValidateAgentCompliance(const FString& AgentName);
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    int32 GetCurrentActorCount();
 
-    UFUNCTION(BlueprintCallable, Category = "Technical Architecture")
-    TArray<FString> GetViolatingAgents() const;
+    // Architecture Validation
+    UFUNCTION(BlueprintCallable, Category = "Validation")
+    bool ValidateSystemArchitecture();
 
-    // Memory and Resource Management
-    UFUNCTION(BlueprintCallable, Category = "Technical Architecture")
-    float GetCurrentMemoryUsageMB() const;
+    UFUNCTION(BlueprintCallable, Category = "Validation")
+    TArray<FString> GetArchitectureWarnings();
 
-    UFUNCTION(BlueprintCallable, Category = "Technical Architecture")
-    bool RequestMemoryAllocation(const FString& SystemName, float SizeMB);
+    // Debug and Diagnostics
+    UFUNCTION(BlueprintCallable, Category = "Debug", CallInEditor = true)
+    void RunArchitectureDiagnostics();
 
-    UFUNCTION(BlueprintCallable, Category = "Technical Architecture")
-    void ReleaseMemoryAllocation(const FString& SystemName, float SizeMB);
-
-    // Thread Safety Validation
-    UFUNCTION(BlueprintCallable, Category = "Technical Architecture")
-    bool ValidateThreadSafety(const FString& SystemName);
-
-    UFUNCTION(BlueprintCallable, Category = "Technical Architecture")
-    void ReportThreadSafetyViolation(const FString& SystemName, const FString& Details);
-
-    // Development Tools
-    UFUNCTION(BlueprintCallable, Category = "Technical Architecture", CallInEditor = true)
-    void GenerateArchitectureReport();
-
-    UFUNCTION(BlueprintCallable, Category = "Technical Architecture", CallInEditor = true)
-    void ValidateAllSystems();
-
-    UFUNCTION(BlueprintCallable, Category = "Technical Architecture", CallInEditor = true)
-    void EnforceArchitecturalCompliance();
+    UFUNCTION(BlueprintCallable, Category = "Debug")
+    void LogModuleStatus();
 
 protected:
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
-    EEng_PerformanceProfile CurrentProfile;
+    UPROPERTY(BlueprintReadOnly, Category = "Modules")
+    TArray<FEng_ModuleSpec> RegisteredModules;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
-    FEng_PerformanceBudget PerformanceBudget;
+    UPROPERTY(BlueprintReadOnly, Category = "Rules")
+    TArray<FEng_CompilationRule> CompilationRules;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
-    FEng_SystemConstraints SystemConstraints;
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float TargetFrameRate;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rules")
-    TArray<FEng_ArchitecturalRule> ArchitecturalRules;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Systems")
-    TMap<FString, EEng_SystemPriority> RegisteredSystems;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Systems")
-    TMap<FString, FString> SystemOwners;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    TMap<FString, float> SystemMemoryAllocations;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Violations")
-    TArray<FString> ViolatingAgents;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Violations")
-    TArray<FString> BlockedSystems;
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    int32 MaxWorldActors;
 
 private:
-    void InitializeDefaultRules();
-    void InitializePerformanceProfiles();
-    bool CheckSystemCompliance(const FString& SystemName);
-    void LogArchitecturalViolation(const FString& SystemName, const FString& Violation);
+    void InitializeCompilationRules();
+    void InitializeDefaultModules();
+    bool ValidateModuleSpec(const FEng_ModuleSpec& ModuleSpec);
+    void UpdatePerformanceMetrics();
+
+    // Performance tracking
+    float LastFrameTime;
+    int32 LastActorCount;
+    TArray<FString> ArchitectureWarnings;
 };
 
 /**
- * Technical Architecture Component - Per-Actor Rules Enforcement
- * 
- * Attach this component to actors that need architectural validation.
- * It monitors the actor's performance and enforces technical constraints.
+ * Technical Standards Component
+ * Can be attached to any actor to enforce technical compliance
  */
 UCLASS(BlueprintType, Blueprintable, ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UEng_TechnicalArchitectureComponent : public UActorComponent
+class TRANSPERSONALGAME_API UEng_TechnicalStandardsComponent : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    UEng_TechnicalArchitectureComponent();
+    UEng_TechnicalStandardsComponent();
 
-protected:
     virtual void BeginPlay() override;
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-public:
-    UFUNCTION(BlueprintCallable, Category = "Technical Architecture")
-    void ValidateActorCompliance();
+    UFUNCTION(BlueprintCallable, Category = "Standards")
+    bool ValidateActorCompliance();
 
-    UFUNCTION(BlueprintCallable, Category = "Technical Architecture")
-    bool IsActorCompliant() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Technical Architecture")
-    void ReportPerformanceMetrics(float FrameTime, int32 ComponentCount);
-
-    UFUNCTION(BlueprintCallable, Category = "Technical Architecture")
-    void SetSystemPriority(EEng_SystemPriority Priority);
+    UFUNCTION(BlueprintCallable, Category = "Standards")
+    void EnforcePerformanceStandards();
 
 protected:
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
-    EEng_SystemPriority ActorPriority;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    EEng_PerformanceLevel RequiredPerformanceLevel;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
-    bool bEnforcePerformanceLimits;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float MaxTickTime;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
-    float MaxFrameTimeMS;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Monitoring")
-    float CurrentFrameTime;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Monitoring")
+    UPROPERTY(BlueprintReadOnly, Category = "Validation")
     bool bIsCompliant;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Monitoring")
-    TArray<FString> ComplianceViolations;
-
 private:
-    void CheckPerformanceCompliance();
-    void ValidateComponentArchitecture();
-    void ReportViolation(const FString& Violation);
+    void CheckActorPerformance();
+    void ValidateComponentSetup();
+
+    float AccumulatedTickTime;
+    int32 TickCount;
 };
