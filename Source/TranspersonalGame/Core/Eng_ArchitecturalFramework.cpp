@@ -3,12 +3,9 @@
 #include "Engine/World.h"
 #include "HAL/PlatformFilemanager.h"
 #include "Misc/DateTime.h"
-#include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "Stats/Stats.h"
-#include "HAL/IConsoleManager.h"
 
-// Constructor for UEng_ArchitecturalFramework
 UEng_ArchitecturalFramework::UEng_ArchitecturalFramework()
 {
     PrimaryComponentTick.bCanEverTick = true;
@@ -18,16 +15,13 @@ UEng_ArchitecturalFramework::UEng_ArchitecturalFramework()
     CurrentProfile = EEng_PerformanceProfile::Development;
     MetricsUpdateInterval = 1.0f; // Update metrics every second
     LastMetricsUpdate = 0.0f;
-    
-    // Initialize default metrics
-    LastMetrics = FEng_SystemMetrics();
 }
 
 void UEng_ArchitecturalFramework::BeginPlay()
 {
     Super::BeginPlay();
     
-    UE_LOG(LogTemp, Log, TEXT("ArchitecturalFramework: BeginPlay - Initializing framework"));
+    UE_LOG(LogTemp, Warning, TEXT("ArchitecturalFramework: BeginPlay - Initializing framework"));
     InitializeFramework();
 }
 
@@ -41,26 +35,19 @@ void UEng_ArchitecturalFramework::TickComponent(float DeltaTime, ELevelTick Tick
     }
     
     LastMetricsUpdate += DeltaTime;
+    
     if (LastMetricsUpdate >= MetricsUpdateInterval)
     {
         UpdateSystemMetrics();
         CheckPerformanceLimits();
+        ValidateModuleDependencies();
         LastMetricsUpdate = 0.0f;
-    }
-    
-    // Enforce architectural rules periodically
-    static float RuleEnforcementTimer = 0.0f;
-    RuleEnforcementTimer += DeltaTime;
-    if (RuleEnforcementTimer >= 5.0f) // Check rules every 5 seconds
-    {
-        EnforceArchitecturalRules();
-        RuleEnforcementTimer = 0.0f;
     }
 }
 
 void UEng_ArchitecturalFramework::InitializeFramework()
 {
-    UE_LOG(LogTemp, Log, TEXT("ArchitecturalFramework: Initializing architectural framework"));
+    UE_LOG(LogTemp, Warning, TEXT("ArchitecturalFramework: Initializing architectural framework"));
     
     // Clear existing data
     RegisteredModules.Empty();
@@ -71,21 +58,30 @@ void UEng_ArchitecturalFramework::InitializeFramework()
     
     // Register core modules
     FEng_ModuleInfo CoreModule;
-    CoreModule.ModuleName = TEXT("TranspersonalGameCore");
+    CoreModule.ModuleName = TEXT("Core");
     CoreModule.Priority = EEng_SystemPriority::Critical;
     CoreModule.State = EEng_ModuleState::Active;
-    CoreModule.InitializationTime = 0.1f;
     RegisterModule(CoreModule);
     
-    FEng_ModuleInfo ArchitectureModule;
-    ArchitectureModule.ModuleName = TEXT("ArchitecturalFramework");
-    ArchitectureModule.Priority = EEng_SystemPriority::Critical;
-    ArchitectureModule.State = EEng_ModuleState::Active;
-    ArchitectureModule.InitializationTime = 0.05f;
-    RegisterModule(ArchitectureModule);
+    FEng_ModuleInfo PhysicsModule;
+    PhysicsModule.ModuleName = TEXT("Physics");
+    PhysicsModule.Priority = EEng_SystemPriority::Critical;
+    PhysicsModule.State = EEng_ModuleState::Active;
+    PhysicsModule.Dependencies.Add(TEXT("Core"));
+    RegisterModule(PhysicsModule);
+    
+    FEng_ModuleInfo WorldGenModule;
+    WorldGenModule.ModuleName = TEXT("WorldGeneration");
+    WorldGenModule.Priority = EEng_SystemPriority::High;
+    WorldGenModule.State = EEng_ModuleState::Initializing;
+    WorldGenModule.Dependencies.Add(TEXT("Core"));
+    WorldGenModule.Dependencies.Add(TEXT("Physics"));
+    RegisterModule(WorldGenModule);
     
     bFrameworkInitialized = true;
-    UE_LOG(LogTemp, Log, TEXT("ArchitecturalFramework: Framework initialization complete"));
+    
+    UE_LOG(LogTemp, Warning, TEXT("ArchitecturalFramework: Framework initialized with %d modules and %d rules"), 
+           RegisteredModules.Num(), ArchitecturalRules.Num());
 }
 
 bool UEng_ArchitecturalFramework::RegisterModule(const FEng_ModuleInfo& ModuleInfo)
@@ -96,7 +92,11 @@ bool UEng_ArchitecturalFramework::RegisterModule(const FEng_ModuleInfo& ModuleIn
         return false;
     }
     
-    RegisteredModules.Add(ModuleInfo);
+    FEng_ModuleInfo NewModule = ModuleInfo;
+    NewModule.InitializationTime = FPlatformTime::Seconds();
+    
+    RegisteredModules.Add(NewModule);
+    
     UE_LOG(LogTemp, Log, TEXT("ArchitecturalFramework: Registered module %s with priority %d"), 
            *ModuleInfo.ModuleName, (int32)ModuleInfo.Priority);
     
@@ -115,7 +115,7 @@ bool UEng_ArchitecturalFramework::UnregisterModule(const FString& ModuleName)
         }
     }
     
-    UE_LOG(LogTemp, Warning, TEXT("ArchitecturalFramework: Module %s not found for unregistration"), *ModuleName);
+    UE_LOG(LogTemp, Warning, TEXT("ArchitecturalFramework: Failed to unregister module %s - not found"), *ModuleName);
     return false;
 }
 
@@ -126,28 +126,38 @@ void UEng_ArchitecturalFramework::EnforceArchitecturalRules()
         return;
     }
     
-    // Check each architectural rule
+    int32 ViolationCount = 0;
+    
     for (const FEng_ArchitecturalRule& Rule : ArchitecturalRules)
     {
-        // Performance rule enforcement
-        if (Rule.RuleName == TEXT("MaxFrameTime"))
+        // Check specific rules
+        if (Rule.RuleName == TEXT("MaxActorCount"))
         {
-            if (LastMetrics.FrameTime > 33.33f) // 30 FPS limit
+            UWorld* World = GetWorld();
+            if (World)
             {
-                UE_LOG(LogTemp, Warning, TEXT("ArchitecturalFramework: Frame time violation - %f ms"), LastMetrics.FrameTime);
+                int32 ActorCount = World->GetActorCount();
+                if (ActorCount > 10000) // Max 10k actors
+                {
+                    ViolationCount++;
+                    UE_LOG(LogTemp, Warning, TEXT("ArchitecturalFramework: Rule violation - Too many actors: %d"), ActorCount);
+                }
             }
         }
-        else if (Rule.RuleName == TEXT("MaxActiveActors"))
+        else if (Rule.RuleName == TEXT("FrameTimeLimit"))
         {
-            if (LastMetrics.ActiveActors > 10000) // 10k actor limit
+            if (LastMetrics.FrameTime > 33.33f) // 30 FPS minimum
             {
-                UE_LOG(LogTemp, Warning, TEXT("ArchitecturalFramework: Active actor limit violation - %d actors"), LastMetrics.ActiveActors);
+                ViolationCount++;
+                UE_LOG(LogTemp, Warning, TEXT("ArchitecturalFramework: Rule violation - Frame time too high: %f ms"), LastMetrics.FrameTime);
             }
         }
     }
     
-    // Validate module dependencies
-    ValidateModuleDependencies();
+    if (ViolationCount > 0)
+    {
+        UE_LOG(LogTemp, Error, TEXT("ArchitecturalFramework: %d architectural rule violations detected"), ViolationCount);
+    }
 }
 
 FEng_SystemMetrics UEng_ArchitecturalFramework::GetCurrentMetrics() const
@@ -158,9 +168,7 @@ FEng_SystemMetrics UEng_ArchitecturalFramework::GetCurrentMetrics() const
 void UEng_ArchitecturalFramework::SetPerformanceProfile(EEng_PerformanceProfile Profile)
 {
     CurrentProfile = Profile;
-    UE_LOG(LogTemp, Log, TEXT("ArchitecturalFramework: Performance profile set to %d"), (int32)Profile);
     
-    // Adjust monitoring based on profile
     switch (Profile)
     {
         case EEng_PerformanceProfile::Development:
@@ -173,29 +181,23 @@ void UEng_ArchitecturalFramework::SetPerformanceProfile(EEng_PerformanceProfile 
             MetricsUpdateInterval = 0.1f;
             break;
     }
+    
+    UE_LOG(LogTemp, Log, TEXT("ArchitecturalFramework: Performance profile set to %d"), (int32)Profile);
 }
 
 bool UEng_ArchitecturalFramework::IsPerformanceWithinLimits() const
 {
-    // Check frame time limit
-    if (LastMetrics.FrameTime > 33.33f) // 30 FPS minimum
+    switch (CurrentProfile)
     {
-        return false;
+        case EEng_PerformanceProfile::Development:
+            return true; // No limits in development
+        case EEng_PerformanceProfile::Testing:
+            return LastMetrics.FrameTime < 50.0f && LastMetrics.MemoryUsage < 80.0f;
+        case EEng_PerformanceProfile::Shipping:
+            return LastMetrics.FrameTime < 33.33f && LastMetrics.MemoryUsage < 70.0f;
+        default:
+            return false;
     }
-    
-    // Check memory usage
-    if (LastMetrics.MemoryUsage > 85.0f) // 85% memory limit
-    {
-        return false;
-    }
-    
-    // Check actor count
-    if (LastMetrics.ActiveActors > 10000)
-    {
-        return false;
-    }
-    
-    return true;
 }
 
 TArray<FEng_ModuleInfo> UEng_ArchitecturalFramework::GetRegisteredModules() const
@@ -212,7 +214,6 @@ EEng_ModuleState UEng_ArchitecturalFramework::GetModuleState(const FString& Modu
             return Module.State;
         }
     }
-    
     return EEng_ModuleState::Uninitialized;
 }
 
@@ -227,7 +228,6 @@ bool UEng_ArchitecturalFramework::SetModuleState(const FString& ModuleName, EEng
             return true;
         }
     }
-    
     return false;
 }
 
@@ -245,7 +245,7 @@ void UEng_ArchitecturalFramework::RemoveArchitecturalRule(const FString& RuleNam
         {
             ArchitecturalRules.RemoveAt(i);
             UE_LOG(LogTemp, Log, TEXT("ArchitecturalFramework: Removed rule %s"), *RuleName);
-            break;
+            return;
         }
     }
 }
@@ -257,109 +257,105 @@ TArray<FEng_ArchitecturalRule> UEng_ArchitecturalFramework::GetActiveRules() con
 
 void UEng_ArchitecturalFramework::ValidateSystemArchitecture()
 {
-    UE_LOG(LogTemp, Log, TEXT("ArchitecturalFramework: Validating system architecture"));
+    UE_LOG(LogTemp, Warning, TEXT("ArchitecturalFramework: Validating system architecture"));
     
-    // Check module states
+    EnforceArchitecturalRules();
+    ValidateModuleDependencies();
+    
+    int32 ActiveModules = 0;
+    int32 ErrorModules = 0;
+    
     for (const FEng_ModuleInfo& Module : RegisteredModules)
     {
-        if (Module.State == EEng_ModuleState::Error)
+        if (Module.State == EEng_ModuleState::Active)
         {
-            UE_LOG(LogTemp, Error, TEXT("ArchitecturalFramework: Module %s is in error state"), *Module.ModuleName);
+            ActiveModules++;
+        }
+        else if (Module.State == EEng_ModuleState::Error)
+        {
+            ErrorModules++;
         }
     }
     
-    // Check performance metrics
-    if (!IsPerformanceWithinLimits())
-    {
-        UE_LOG(LogTemp, Warning, TEXT("ArchitecturalFramework: Performance outside acceptable limits"));
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("ArchitecturalFramework: Architecture validation complete"));
+    UE_LOG(LogTemp, Warning, TEXT("ArchitecturalFramework: Validation complete - %d active modules, %d error modules"), 
+           ActiveModules, ErrorModules);
 }
 
 void UEng_ArchitecturalFramework::GenerateArchitecturalReport()
 {
-    FString Report = TEXT("=== ARCHITECTURAL FRAMEWORK REPORT ===\n");
-    Report += FString::Printf(TEXT("Generated: %s\n"), *FDateTime::Now().ToString());
-    Report += FString::Printf(TEXT("Performance Profile: %d\n"), (int32)CurrentProfile);
-    Report += FString::Printf(TEXT("Framework Initialized: %s\n"), bFrameworkInitialized ? TEXT("Yes") : TEXT("No"));
+    FString ReportContent;
+    ReportContent += TEXT("=== ARCHITECTURAL FRAMEWORK REPORT ===\n");
+    ReportContent += FString::Printf(TEXT("Generated: %s\n"), *FDateTime::Now().ToString());
+    ReportContent += FString::Printf(TEXT("Framework Initialized: %s\n"), bFrameworkInitialized ? TEXT("Yes") : TEXT("No"));
+    ReportContent += FString::Printf(TEXT("Performance Profile: %d\n"), (int32)CurrentProfile);
+    ReportContent += TEXT("\n");
     
-    Report += TEXT("\n--- REGISTERED MODULES ---\n");
+    ReportContent += TEXT("=== REGISTERED MODULES ===\n");
     for (const FEng_ModuleInfo& Module : RegisteredModules)
     {
-        Report += FString::Printf(TEXT("Module: %s | Priority: %d | State: %d\n"), 
-                                  *Module.ModuleName, (int32)Module.Priority, (int32)Module.State);
+        ReportContent += FString::Printf(TEXT("Module: %s | Priority: %d | State: %d | Dependencies: %d\n"),
+                                       *Module.ModuleName, (int32)Module.Priority, (int32)Module.State, Module.Dependencies.Num());
     }
+    ReportContent += TEXT("\n");
     
-    Report += TEXT("\n--- CURRENT METRICS ---\n");
-    Report += FString::Printf(TEXT("Frame Time: %.2f ms\n"), LastMetrics.FrameTime);
-    Report += FString::Printf(TEXT("CPU Usage: %.2f%%\n"), LastMetrics.CPUUsage);
-    Report += FString::Printf(TEXT("Memory Usage: %.2f%%\n"), LastMetrics.MemoryUsage);
-    Report += FString::Printf(TEXT("Active Actors: %d\n"), LastMetrics.ActiveActors);
-    Report += FString::Printf(TEXT("Ticking Components: %d\n"), LastMetrics.TickingComponents);
-    
-    Report += TEXT("\n--- ARCHITECTURAL RULES ---\n");
+    ReportContent += TEXT("=== ARCHITECTURAL RULES ===\n");
     for (const FEng_ArchitecturalRule& Rule : ArchitecturalRules)
     {
-        Report += FString::Printf(TEXT("Rule: %s | Mandatory: %s\n"), 
-                                  *Rule.RuleName, Rule.bMandatory ? TEXT("Yes") : TEXT("No"));
+        ReportContent += FString::Printf(TEXT("Rule: %s | Mandatory: %s | Penalty: %.2f\n"),
+                                       *Rule.RuleName, Rule.bMandatory ? TEXT("Yes") : TEXT("No"), Rule.ViolationPenalty);
     }
+    ReportContent += TEXT("\n");
     
-    // Save report to file
-    FString FilePath = FPaths::ProjectLogDir() / TEXT("ArchitecturalReport.txt");
-    FFileHelper::SaveStringToFile(Report, *FilePath);
+    ReportContent += TEXT("=== SYSTEM METRICS ===\n");
+    ReportContent += FString::Printf(TEXT("Frame Time: %.2f ms\n"), LastMetrics.FrameTime);
+    ReportContent += FString::Printf(TEXT("CPU Usage: %.2f%%\n"), LastMetrics.CPUUsage);
+    ReportContent += FString::Printf(TEXT("Memory Usage: %.2f%%\n"), LastMetrics.MemoryUsage);
+    ReportContent += FString::Printf(TEXT("Active Actors: %d\n"), LastMetrics.ActiveActors);
+    ReportContent += FString::Printf(TEXT("Ticking Components: %d\n"), LastMetrics.TickingComponents);
     
-    UE_LOG(LogTemp, Log, TEXT("ArchitecturalFramework: Report generated at %s"), *FilePath);
+    UE_LOG(LogTemp, Warning, TEXT("%s"), *ReportContent);
 }
 
 void UEng_ArchitecturalFramework::ResetFramework()
 {
-    UE_LOG(LogTemp, Log, TEXT("ArchitecturalFramework: Resetting framework"));
+    UE_LOG(LogTemp, Warning, TEXT("ArchitecturalFramework: Resetting framework"));
     
     bFrameworkInitialized = false;
     RegisteredModules.Empty();
     ArchitecturalRules.Empty();
-    LastMetrics = FEng_SystemMetrics();
+    LastMetricsUpdate = 0.0f;
     
     InitializeFramework();
 }
 
 void UEng_ArchitecturalFramework::UpdateSystemMetrics()
 {
-    if (!GetWorld())
+    UWorld* World = GetWorld();
+    if (!World)
     {
         return;
     }
     
     // Update frame time
-    LastMetrics.FrameTime = FApp::GetDeltaTime() * 1000.0f; // Convert to milliseconds
+    LastMetrics.FrameTime = FPlatformTime::ToMilliseconds(FPlatformTime::Cycles());
     
     // Update actor count
-    TArray<AActor*> AllActors;
-    UGameplayStatics::GetAllActorsOfClass(GetWorld(), AActor::StaticClass(), AllActors);
-    LastMetrics.ActiveActors = AllActors.Num();
+    LastMetrics.ActiveActors = World->GetActorCount();
     
     // Count ticking components
-    int32 TickingCount = 0;
-    for (AActor* Actor : AllActors)
+    LastMetrics.TickingComponents = 0;
+    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
     {
+        AActor* Actor = *ActorItr;
         if (Actor)
         {
-            TArray<UActorComponent*> Components = Actor->GetComponents().Array();
-            for (UActorComponent* Component : Components)
-            {
-                if (Component && Component->PrimaryComponentTick.bCanEverTick)
-                {
-                    TickingCount++;
-                }
-            }
+            LastMetrics.TickingComponents += Actor->GetRootComponent() ? 1 : 0;
         }
     }
-    LastMetrics.TickingComponents = TickingCount;
     
-    // Update CPU and memory usage (simplified for now)
-    LastMetrics.CPUUsage = FPlatformTime::GetSecondsPerCycle() * 100.0f;
-    LastMetrics.MemoryUsage = FPlatformMemory::GetStats().UsedPhysical / (1024.0f * 1024.0f * 1024.0f) * 100.0f;
+    // Estimate CPU and memory usage (simplified)
+    LastMetrics.CPUUsage = FMath::Clamp(LastMetrics.FrameTime / 33.33f * 100.0f, 0.0f, 100.0f);
+    LastMetrics.MemoryUsage = FMath::Clamp(LastMetrics.ActiveActors / 10000.0f * 100.0f, 0.0f, 100.0f);
 }
 
 void UEng_ArchitecturalFramework::CheckPerformanceLimits()
@@ -371,27 +367,20 @@ void UEng_ArchitecturalFramework::CheckPerformanceLimits()
     
     if (!IsPerformanceWithinLimits())
     {
-        UE_LOG(LogTemp, Warning, TEXT("ArchitecturalFramework: Performance limits exceeded"));
-        
-        if (CurrentProfile == EEng_PerformanceProfile::Shipping)
-        {
-            // In shipping, we might want to take corrective action
-            // For now, just log the issue
-            UE_LOG(LogTemp, Error, TEXT("ArchitecturalFramework: Critical performance violation in shipping build"));
-        }
+        UE_LOG(LogTemp, Warning, TEXT("ArchitecturalFramework: Performance limits exceeded - Frame: %.2f ms, Memory: %.2f%%"),
+               LastMetrics.FrameTime, LastMetrics.MemoryUsage);
     }
 }
 
 void UEng_ArchitecturalFramework::ValidateModuleDependencies()
 {
-    // Check that all module dependencies are satisfied
     for (const FEng_ModuleInfo& Module : RegisteredModules)
     {
         for (const FString& Dependency : Module.Dependencies)
         {
             if (!IsModuleRegistered(Dependency))
             {
-                UE_LOG(LogTemp, Warning, TEXT("ArchitecturalFramework: Module %s has unmet dependency: %s"), 
+                UE_LOG(LogTemp, Error, TEXT("ArchitecturalFramework: Module %s has unregistered dependency %s"),
                        *Module.ModuleName, *Dependency);
             }
         }
@@ -412,36 +401,39 @@ bool UEng_ArchitecturalFramework::IsModuleRegistered(const FString& ModuleName) 
 
 void UEng_ArchitecturalFramework::InitializeDefaultRules()
 {
-    // Performance rules
-    FEng_ArchitecturalRule FrameTimeRule;
-    FrameTimeRule.RuleName = TEXT("MaxFrameTime");
-    FrameTimeRule.Description = TEXT("Maximum frame time should not exceed 33.33ms (30 FPS)");
-    FrameTimeRule.bMandatory = true;
-    FrameTimeRule.ViolationPenalty = 5.0f;
-    AddArchitecturalRule(FrameTimeRule);
+    // Max actor count rule
+    FEng_ArchitecturalRule ActorRule;
+    ActorRule.RuleName = TEXT("MaxActorCount");
+    ActorRule.Description = TEXT("Maximum number of actors allowed in the world");
+    ActorRule.bMandatory = true;
+    ActorRule.ViolationPenalty = 5.0f;
+    AddArchitecturalRule(ActorRule);
     
-    FEng_ArchitecturalRule ActorLimitRule;
-    ActorLimitRule.RuleName = TEXT("MaxActiveActors");
-    ActorLimitRule.Description = TEXT("Maximum active actors should not exceed 10,000");
-    ActorLimitRule.bMandatory = true;
-    ActorLimitRule.ViolationPenalty = 3.0f;
-    AddArchitecturalRule(ActorLimitRule);
+    // Frame time limit rule
+    FEng_ArchitecturalRule FrameRule;
+    FrameRule.RuleName = TEXT("FrameTimeLimit");
+    FrameRule.Description = TEXT("Maximum frame time for smooth gameplay");
+    FrameRule.bMandatory = true;
+    FrameRule.ViolationPenalty = 10.0f;
+    AddArchitecturalRule(FrameRule);
     
+    // Memory usage rule
     FEng_ArchitecturalRule MemoryRule;
-    MemoryRule.RuleName = TEXT("MaxMemoryUsage");
-    MemoryRule.Description = TEXT("Memory usage should not exceed 85%");
-    MemoryRule.bMandatory = true;
-    MemoryRule.ViolationPenalty = 4.0f;
+    MemoryRule.RuleName = TEXT("MemoryUsageLimit");
+    MemoryRule.Description = TEXT("Maximum memory usage percentage");
+    MemoryRule.bMandatory = false;
+    MemoryRule.ViolationPenalty = 3.0f;
     AddArchitecturalRule(MemoryRule);
 }
 
-// Constructor for AEng_ArchitecturalGameMode
+// AEng_ArchitecturalGameMode Implementation
+
 AEng_ArchitecturalGameMode::AEng_ArchitecturalGameMode()
 {
     PrimaryActorTick.bCanEverTick = true;
     PrimaryActorTick.TickInterval = 1.0f; // Tick every second
     
-    // Create the architectural framework component
+    // Create architectural framework component
     ArchitecturalFramework = CreateDefaultSubobject<UEng_ArchitecturalFramework>(TEXT("ArchitecturalFramework"));
     bArchitectureValidated = false;
 }
@@ -450,11 +442,11 @@ void AEng_ArchitecturalGameMode::BeginPlay()
 {
     Super::BeginPlay();
     
-    UE_LOG(LogTemp, Log, TEXT("ArchitecturalGameMode: BeginPlay - Starting architectural validation"));
+    UE_LOG(LogTemp, Warning, TEXT("ArchitecturalGameMode: BeginPlay - Starting architectural validation"));
     
     if (ArchitecturalFramework)
     {
-        // Framework will initialize itself in BeginPlay
+        ArchitecturalFramework->InitializeFramework();
         bArchitectureValidated = true;
     }
 }
@@ -463,13 +455,9 @@ void AEng_ArchitecturalGameMode::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
     
-    // Periodic architecture validation
     if (ArchitecturalFramework && bArchitectureValidated)
     {
-        if (!ArchitecturalFramework->IsPerformanceWithinLimits())
-        {
-            UE_LOG(LogTemp, Warning, TEXT("ArchitecturalGameMode: Performance outside limits"));
-        }
+        ArchitecturalFramework->EnforceArchitecturalRules();
     }
 }
 
@@ -490,13 +478,11 @@ bool AEng_ArchitecturalGameMode::IsSystemArchitectureValid() const
 
 void AEng_ArchitecturalGameMode::ValidateAllSystems()
 {
-    UE_LOG(LogTemp, Log, TEXT("ArchitecturalGameMode: Validating all systems"));
+    UE_LOG(LogTemp, Warning, TEXT("ArchitecturalGameMode: Validating all systems"));
     
     if (ArchitecturalFramework)
     {
         ArchitecturalFramework->ValidateSystemArchitecture();
         ArchitecturalFramework->GenerateArchitecturalReport();
     }
-    
-    bArchitectureValidated = IsSystemArchitectureValid();
 }
