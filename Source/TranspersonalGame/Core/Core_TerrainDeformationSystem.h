@@ -1,85 +1,32 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Components/ActorComponent.h"
 #include "Engine/Engine.h"
-#include "Landscape/LandscapeProxy.h"
+#include "Components/ActorComponent.h"
+#include "Engine/World.h"
+#include "Landscape/Landscape.h"
 #include "Landscape/LandscapeComponent.h"
 #include "Landscape/LandscapeInfo.h"
-#include "Landscape/LandscapeDataAccess.h"
+#include "Engine/StaticMeshActor.h"
+#include "Components/StaticMeshComponent.h"
+#include "PhysicsEngine/BodyInstance.h"
 #include "SharedTypes.h"
 #include "Core_TerrainDeformationSystem.generated.h"
 
 /**
- * Core Terrain Deformation System
- * Handles realistic terrain deformation from impacts, explosions, and heavy objects
- * Integrates with UE5 Landscape system for real-time height modifications
+ * Core_TerrainDeformationSystem
+ * 
+ * Manages real-time terrain deformation for dinosaur footprints, impacts, and environmental changes.
+ * Integrates with UE5 Landscape system for height-based deformation and material blending.
+ * Provides performance-optimized deformation with LOD system for large-scale worlds.
+ * 
+ * Key Features:
+ * - Dynamic height map modification for footprints and impacts
+ * - Material blending for mud, sand, and rock surface changes
+ * - Performance LOD system with distance-based detail reduction
+ * - Integration with physics simulation for realistic deformation
+ * - Temporal decay system for gradual terrain recovery
  */
-
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FCore_DeformationEvent
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Deformation")
-    FVector ImpactLocation = FVector::ZeroVector;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Deformation")
-    float Force = 0.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Deformation")
-    float Radius = 100.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Deformation")
-    float Depth = 50.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Deformation")
-    ECore_TerrainType TerrainType = ECore_TerrainType::Dirt;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Deformation")
-    float TimeStamp = 0.0f;
-
-    FCore_DeformationEvent()
-    {
-        ImpactLocation = FVector::ZeroVector;
-        Force = 0.0f;
-        Radius = 100.0f;
-        Depth = 50.0f;
-        TerrainType = ECore_TerrainType::Dirt;
-        TimeStamp = 0.0f;
-    }
-};
-
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FCore_TerrainMaterial
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Material")
-    ECore_TerrainType MaterialType = ECore_TerrainType::Dirt;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Material")
-    float Hardness = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Material")
-    float DeformationResistance = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Material")
-    float RecoveryRate = 0.1f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Material")
-    float MaxDeformation = 200.0f;
-
-    FCore_TerrainMaterial()
-    {
-        MaterialType = ECore_TerrainType::Dirt;
-        Hardness = 1.0f;
-        DeformationResistance = 1.0f;
-        RecoveryRate = 0.1f;
-        MaxDeformation = 200.0f;
-    }
-};
-
 UCLASS(ClassGroup=(TranspersonalGame), meta=(BlueprintSpawnableComponent))
 class TRANSPERSONALGAME_API UCore_TerrainDeformationSystem : public UActorComponent
 {
@@ -93,107 +40,199 @@ protected:
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 public:
-    // Core deformation functions
+    // === TERRAIN DEFORMATION INTERFACE ===
+    
+    /**
+     * Creates a deformation at the specified world location
+     * @param WorldLocation - World position for deformation
+     * @param DeformationRadius - Radius of affected area in cm
+     * @param DeformationDepth - Depth of deformation in cm (negative for depression)
+     * @param DeformationType - Type of deformation (footprint, impact, erosion)
+     * @param bPermanent - Whether deformation persists or decays over time
+     */
     UFUNCTION(BlueprintCallable, Category = "Terrain Deformation")
-    void ApplyDeformation(const FCore_DeformationEvent& DeformationEvent);
+    void CreateTerrainDeformation(
+        const FVector& WorldLocation,
+        float DeformationRadius,
+        float DeformationDepth,
+        ECore_TerrainDeformationType DeformationType,
+        bool bPermanent = false
+    );
 
+    /**
+     * Creates dinosaur footprint with species-specific characteristics
+     * @param FootprintLocation - World position of footprint
+     * @param DinosaurSpecies - Species type for footprint shape and size
+     * @param FootSize - Scale multiplier for footprint size
+     * @param bDeepMud - Whether terrain is muddy (deeper impressions)
+     */
     UFUNCTION(BlueprintCallable, Category = "Terrain Deformation")
-    void ApplyExplosionDeformation(FVector Location, float ExplosionForce, float BlastRadius);
+    void CreateDinosaurFootprint(
+        const FVector& FootprintLocation,
+        ECore_DinosaurSpecies DinosaurSpecies,
+        float FootSize = 1.0f,
+        bool bDeepMud = false
+    );
 
+    /**
+     * Creates impact crater from falling objects or explosions
+     * @param ImpactLocation - World position of impact
+     * @param ImpactForce - Force of impact (affects crater size)
+     * @param ImpactType - Type of impact (meteorite, tree fall, etc.)
+     */
     UFUNCTION(BlueprintCallable, Category = "Terrain Deformation")
-    void ApplyFootstepDeformation(FVector Location, float Weight, float FootSize);
+    void CreateImpactCrater(
+        const FVector& ImpactLocation,
+        float ImpactForce,
+        ECore_ImpactType ImpactType
+    );
 
-    UFUNCTION(BlueprintCallable, Category = "Terrain Deformation")
-    void ApplyVehicleDeformation(FVector Location, float VehicleWeight, float TireWidth);
+    // === TERRAIN MATERIAL MODIFICATION ===
+    
+    /**
+     * Modifies terrain materials at specified location
+     * @param Location - World position for material change
+     * @param Radius - Radius of affected area
+     * @param NewMaterial - Target material type
+     * @param BlendStrength - Strength of material blending (0-1)
+     */
+    UFUNCTION(BlueprintCallable, Category = "Terrain Materials")
+    void ModifyTerrainMaterial(
+        const FVector& Location,
+        float Radius,
+        ECore_TerrainMaterial NewMaterial,
+        float BlendStrength = 1.0f
+    );
 
-    // Terrain analysis
-    UFUNCTION(BlueprintCallable, Category = "Terrain Analysis")
-    ECore_TerrainType GetTerrainTypeAtLocation(FVector Location);
+    // === PERFORMANCE AND LOD SYSTEM ===
+    
+    /**
+     * Sets LOD level for terrain deformation detail
+     * @param LODLevel - Level of detail (0=highest, 3=lowest)
+     */
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void SetDeformationLOD(int32 LODLevel);
 
-    UFUNCTION(BlueprintCallable, Category = "Terrain Analysis")
-    float GetTerrainHardnessAtLocation(FVector Location);
+    /**
+     * Enables or disables deformation processing
+     * @param bEnabled - Whether to process deformations
+     */
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void SetDeformationEnabled(bool bEnabled);
 
-    UFUNCTION(BlueprintCallable, Category = "Terrain Analysis")
-    bool CanDeformAtLocation(FVector Location, float RequiredForce);
-
-    // Recovery system
+    // === TERRAIN RECOVERY SYSTEM ===
+    
+    /**
+     * Starts gradual recovery of terrain to original state
+     * @param RecoveryLocation - Center of recovery area
+     * @param RecoveryRadius - Radius of recovery area
+     * @param RecoveryTime - Time in seconds for full recovery
+     */
     UFUNCTION(BlueprintCallable, Category = "Terrain Recovery")
-    void ProcessTerrainRecovery(float DeltaTime);
+    void StartTerrainRecovery(
+        const FVector& RecoveryLocation,
+        float RecoveryRadius,
+        float RecoveryTime = 300.0f
+    );
 
-    UFUNCTION(BlueprintCallable, Category = "Terrain Recovery")
-    void SetRecoveryEnabled(bool bEnabled);
-
-    // Debug and visualization
+    // === DEBUG AND VISUALIZATION ===
+    
+    /**
+     * Enables debug visualization of deformation areas
+     * @param bShowDebug - Whether to show debug visuals
+     */
     UFUNCTION(BlueprintCallable, Category = "Debug", CallInEditor)
-    void DebugDrawDeformationZones();
+    void SetDebugVisualization(bool bShowDebug);
 
-    UFUNCTION(BlueprintCallable, Category = "Debug", CallInEditor)
-    void ValidateTerrainSystem();
+    /**
+     * Gets current deformation statistics
+     * @return Structure containing performance and usage stats
+     */
+    UFUNCTION(BlueprintCallable, Category = "Debug")
+    FCore_TerrainDeformationStats GetDeformationStats() const;
 
 protected:
-    // Landscape integration
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Landscape")
-    class ALandscapeProxy* CachedLandscape;
+    // === CORE PROPERTIES ===
+    
+    /** Maximum number of active deformations */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance", meta = (ClampMin = "10", ClampMax = "1000"))
+    int32 MaxActiveDeformations = 100;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Landscape")
+    /** Maximum deformation radius in cm */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Limits", meta = (ClampMin = "50", ClampMax = "5000"))
+    float MaxDeformationRadius = 1000.0f;
+
+    /** Maximum deformation depth in cm */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Limits", meta = (ClampMin = "1", ClampMax = "500"))
+    float MaxDeformationDepth = 200.0f;
+
+    /** Current LOD level for deformation detail */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance", meta = (ClampMin = "0", ClampMax = "3"))
+    int32 CurrentLODLevel = 1;
+
+    /** Whether deformation system is enabled */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance")
+    bool bDeformationEnabled = true;
+
+    /** Whether to show debug visualization */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Debug")
+    bool bShowDebugVisualization = false;
+
+    // === TERRAIN REFERENCES ===
+    
+    /** Reference to the main landscape actor */
+    UPROPERTY(BlueprintReadOnly, Category = "Terrain")
+    class ALandscape* MainLandscape;
+
+    /** Cached landscape info for performance */
+    UPROPERTY(BlueprintReadOnly, Category = "Terrain")
     class ULandscapeInfo* LandscapeInfo;
 
-    // Deformation settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Deformation Settings")
-    float MaxDeformationRadius = 500.0f;
+    // === DEFORMATION TRACKING ===
+    
+    /** Array of active deformations */
+    UPROPERTY(BlueprintReadOnly, Category = "Internal")
+    TArray<FCore_TerrainDeformation> ActiveDeformations;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Deformation Settings")
-    float MinDeformationForce = 100.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Deformation Settings")
-    float DeformationFalloffExponent = 2.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Deformation Settings")
-    int32 MaxConcurrentDeformations = 50;
-
-    // Material properties
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Material Properties")
-    TMap<ECore_TerrainType, FCore_TerrainMaterial> TerrainMaterials;
-
-    // Recovery system
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Recovery")
-    bool bEnableTerrainRecovery = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Recovery")
-    float GlobalRecoveryRate = 0.1f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Recovery")
-    float RecoveryTickInterval = 1.0f;
-
-    // Performance settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 MaxHeightmapUpdatesPerFrame = 10;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float MinDeformationThreshold = 1.0f;
+    /** Array of recovery operations */
+    UPROPERTY(BlueprintReadOnly, Category = "Internal")
+    TArray<FCore_TerrainRecovery> ActiveRecoveries;
 
 private:
-    // Internal deformation tracking
-    TArray<FCore_DeformationEvent> ActiveDeformations;
-    TArray<FCore_DeformationEvent> PendingDeformations;
+    // === INTERNAL METHODS ===
     
-    // Landscape modification helpers
-    void ModifyLandscapeHeightmap(const FCore_DeformationEvent& Event);
-    void CalculateDeformationShape(const FCore_DeformationEvent& Event, TArray<FVector2D>& OutPoints, TArray<float>& OutHeights);
+    /** Initializes landscape references */
+    void InitializeLandscapeReferences();
+
+    /** Processes deformation on landscape heightmap */
+    void ProcessLandscapeDeformation(const FCore_TerrainDeformation& Deformation);
+
+    /** Processes material blending on landscape */
+    void ProcessMaterialBlending(const FVector& Location, float Radius, ECore_TerrainMaterial Material, float Strength);
+
+    /** Updates recovery operations */
+    void UpdateRecoveryOperations(float DeltaTime);
+
+    /** Cleans up expired deformations */
+    void CleanupExpiredDeformations();
+
+    /** Calculates deformation shape based on type and parameters */
+    TArray<FVector2D> CalculateDeformationShape(ECore_TerrainDeformationType Type, float Radius);
+
+    /** Gets landscape heightmap data for modification */
+    bool GetLandscapeHeightData(const FVector& WorldLocation, float Radius, TArray<uint16>& HeightData, FIntRect& DataRect);
+
+    /** Sets landscape heightmap data after modification */
+    bool SetLandscapeHeightData(const FIntRect& DataRect, const TArray<uint16>& HeightData);
+
+    // === PERFORMANCE TRACKING ===
     
-    // Material detection
-    void InitializeTerrainMaterials();
-    FCore_TerrainMaterial GetMaterialProperties(ECore_TerrainType TerrainType);
-    
-    // Performance optimization
-    void OptimizeDeformationQueue();
-    bool ShouldProcessDeformation(const FCore_DeformationEvent& Event);
-    
-    // Recovery processing
-    float LastRecoveryTime = 0.0f;
-    void ProcessSingleDeformationRecovery(FCore_DeformationEvent& Event, float DeltaTime);
-    
-    // Debug helpers
-    void DrawDeformationDebugInfo(const FCore_DeformationEvent& Event);
-    void LogDeformationStats();
+    /** Current frame deformation count */
+    int32 CurrentFrameDeformations = 0;
+
+    /** Total deformations processed */
+    int32 TotalDeformationsProcessed = 0;
+
+    /** Last performance check time */
+    float LastPerformanceCheckTime = 0.0f;
 };
