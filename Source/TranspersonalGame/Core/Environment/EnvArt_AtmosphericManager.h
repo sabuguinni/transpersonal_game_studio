@@ -4,59 +4,25 @@
 #include "GameFramework/Actor.h"
 #include "Components/DirectionalLightComponent.h"
 #include "Components/ExponentialHeightFogComponent.h"
-#include "Components/SkyAtmosphereComponent.h"
-#include "Engine/World.h"
+#include "Particles/ParticleSystemComponent.h"
+#include "Engine/DirectionalLight.h"
+#include "Engine/ExponentialHeightFog.h"
+#include "SharedTypes.h"
 #include "EnvArt_AtmosphericManager.generated.h"
 
-UENUM(BlueprintType)
-enum class EEnvArt_TimeOfDay : uint8
-{
-    Dawn        UMETA(DisplayName = "Dawn"),
-    Morning     UMETA(DisplayName = "Morning"),
-    Noon        UMETA(DisplayName = "Noon"),
-    Afternoon   UMETA(DisplayName = "Afternoon"),
-    Dusk        UMETA(DisplayName = "Dusk"),
-    Night       UMETA(DisplayName = "Night")
-};
-
-UENUM(BlueprintType)
-enum class EEnvArt_WeatherState : uint8
-{
-    Clear       UMETA(DisplayName = "Clear"),
-    Cloudy      UMETA(DisplayName = "Cloudy"),
-    Foggy       UMETA(DisplayName = "Foggy"),
-    Stormy      UMETA(DisplayName = "Stormy"),
-    Humid       UMETA(DisplayName = "Humid")
-};
-
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEnvArt_LightingSettings
+struct TRANSPERSONALGAME_API FEnvArt_AtmosphericSettings
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
-    float SunIntensity = 4.0f;
+    FLinearColor SunColor = FLinearColor(1.0f, 0.86f, 0.63f, 1.0f);
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
-    FLinearColor SunColor = FLinearColor(1.0f, 0.9f, 0.7f, 1.0f);
+    float SunIntensity = 8.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
-    float SunAngle = -30.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
-    float SunAzimuth = 45.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
-    float Temperature = 3200.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
-    float VolumetricScattering = 2.0f;
-};
-
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEnvArt_FogSettings
-{
-    GENERATED_BODY()
+    FRotator SunRotation = FRotator(-15.0f, 45.0f, 0.0f);
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fog")
     float FogDensity = 0.02f;
@@ -65,25 +31,18 @@ struct TRANSPERSONALGAME_API FEnvArt_FogSettings
     float FogHeightFalloff = 0.2f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fog")
-    FLinearColor FogInscatteringColor = FLinearColor(0.9f, 0.9f, 1.0f, 1.0f);
+    float FogMaxOpacity = 0.6f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fog")
-    float DirectionalInscatteringExponent = 4.0f;
+    FLinearColor FogColor = FLinearColor(0.9f, 0.8f, 0.6f, 1.0f);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fog")
-    FLinearColor DirectionalInscatteringColor = FLinearColor(1.0f, 0.8f, 0.6f, 1.0f);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Particles")
+    int32 ParticleEmitterCount = 3;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fog")
-    bool bVolumetricFog = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fog")
-    float VolumetricScatteringDistribution = 0.2f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Particles")
+    float ParticleSpawnRadius = 2000.0f;
 };
 
-/**
- * Atmospheric Manager for creating and controlling Cretaceous period environmental atmosphere
- * Manages lighting, fog, weather effects, and day/night cycles for prehistoric immersion
- */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API AEnvArt_AtmosphericManager : public AActor
 {
@@ -95,94 +54,58 @@ public:
 protected:
     virtual void BeginPlay() override;
 
-public:
-    virtual void Tick(float DeltaTime) override;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmospheric Settings")
+    FEnvArt_AtmosphericSettings AtmosphericSettings;
 
-    // Core atmospheric components
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
     class USceneComponent* RootSceneComponent;
 
-    // Current atmospheric state
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmosphere")
-    EEnvArt_TimeOfDay CurrentTimeOfDay = EEnvArt_TimeOfDay::Morning;
+    // References to scene lighting actors
+    UPROPERTY(BlueprintReadOnly, Category = "Scene References")
+    ADirectionalLight* DirectionalLightActor;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmosphere")
-    EEnvArt_WeatherState CurrentWeather = EEnvArt_WeatherState::Clear;
+    UPROPERTY(BlueprintReadOnly, Category = "Scene References")
+    AExponentialHeightFog* FogActor;
 
-    // Lighting configuration
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
-    FEnvArt_LightingSettings LightingSettings;
+    UPROPERTY(BlueprintReadOnly, Category = "Scene References")
+    TArray<AActor*> ParticleEmitters;
 
-    // Fog configuration
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fog")
-    FEnvArt_FogSettings FogSettings;
+public:
+    virtual void Tick(float DeltaTime) override;
 
-    // Time progression
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Time", meta = (ClampMin = "0.1", ClampMax = "10.0"))
-    float TimeProgressionSpeed = 1.0f;
+    UFUNCTION(BlueprintCallable, Category = "Atmospheric Control")
+    void SetupGoldenHourLighting();
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Time", meta = (ClampMin = "0.0", ClampMax = "24.0"))
-    float CurrentHour = 8.0f;
+    UFUNCTION(BlueprintCallable, Category = "Atmospheric Control")
+    void ConfigureAtmosphericFog();
 
-    // Weather transition
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather", meta = (ClampMin = "0.1", ClampMax = "60.0"))
-    float WeatherTransitionTime = 10.0f;
+    UFUNCTION(BlueprintCallable, Category = "Atmospheric Control")
+    void CreateParticleEffects();
 
-    // Atmospheric functions
-    UFUNCTION(BlueprintCallable, Category = "Atmosphere")
-    void SetTimeOfDay(EEnvArt_TimeOfDay NewTimeOfDay);
+    UFUNCTION(BlueprintCallable, Category = "Atmospheric Control")
+    void ApplyAtmosphericSettings(const FEnvArt_AtmosphericSettings& NewSettings);
 
-    UFUNCTION(BlueprintCallable, Category = "Atmosphere")
-    void SetWeatherState(EEnvArt_WeatherState NewWeather);
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Editor Tools")
+    void RefreshAtmosphericEffects();
 
-    UFUNCTION(BlueprintCallable, Category = "Atmosphere")
-    void ApplyGoldenHourLighting();
+    UFUNCTION(BlueprintCallable, Category = "Time of Day")
+    void SetTimeOfDay(float TimeHours); // 0-24 hour format
 
-    UFUNCTION(BlueprintCallable, Category = "Atmosphere")
-    void ApplyCretaceousAtmosphere();
-
-    UFUNCTION(BlueprintCallable, Category = "Atmosphere")
-    void UpdateLightingSettings();
-
-    UFUNCTION(BlueprintCallable, Category = "Atmosphere")
-    void UpdateFogSettings();
-
-    UFUNCTION(BlueprintCallable, Category = "Atmosphere")
-    void CreateVolumetricFog();
-
-    UFUNCTION(BlueprintCallable, Category = "Atmosphere")
-    void CreateSkyAtmosphere();
-
-    // Editor functions
-    UFUNCTION(CallInEditor, Category = "Editor")
-    void PreviewGoldenHour();
-
-    UFUNCTION(CallInEditor, Category = "Editor")
-    void PreviewStormyWeather();
-
-    UFUNCTION(CallInEditor, Category = "Editor")
-    void ResetToDefault();
+    UFUNCTION(BlueprintCallable, Category = "Weather")
+    void SetWeatherIntensity(float Intensity); // 0-1 range
 
 protected:
-    // Internal references
-    UPROPERTY()
-    class ADirectionalLight* DirectionalLightActor;
+    UFUNCTION()
+    void FindSceneLightingActors();
 
-    UPROPERTY()
-    class AExponentialHeightFog* FogActor;
+    UFUNCTION()
+    FRotator CalculateSunRotationForTime(float TimeHours);
 
-    UPROPERTY()
-    class ASkyAtmosphere* SkyAtmosphereActor;
+    UFUNCTION()
+    FLinearColor CalculateSunColorForTime(float TimeHours);
 
-    // Internal state
-    float WeatherTransitionTimer = 0.0f;
-    bool bIsTransitioning = false;
-    EEnvArt_WeatherState TargetWeather;
-
-    // Internal functions
-    void FindOrCreateLightingActors();
-    void UpdateTimeBasedLighting();
-    void UpdateWeatherEffects();
-    FEnvArt_LightingSettings GetLightingForTime(EEnvArt_TimeOfDay TimeOfDay) const;
-    FEnvArt_FogSettings GetFogForWeather(EEnvArt_WeatherState Weather) const;
+private:
+    float CurrentTimeOfDay = 12.0f; // Start at noon
+    float CurrentWeatherIntensity = 0.0f;
+    bool bAtmosphericEffectsInitialized = false;
 };
