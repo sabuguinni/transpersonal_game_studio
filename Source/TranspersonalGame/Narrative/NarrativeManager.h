@@ -1,14 +1,34 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/GameInstanceSubsystem.h"
-#include "Engine/DataTable.h"
-#include "Sound/SoundBase.h"
+#include "GameFramework/Actor.h"
+#include "Engine/Engine.h"
+#include "Components/AudioComponent.h"
+#include "Sound/SoundCue.h"
 #include "../SharedTypes.h"
 #include "NarrativeManager.generated.h"
 
-class UDialogueComponent;
-class ATranspersonalCharacter;
+UENUM(BlueprintType)
+enum class ENarr_StoryState : uint8
+{
+    Introduction,
+    FirstHunt,
+    PackEncounter,
+    ResourceScarcity,
+    TribalConflict,
+    SeasonalMigration,
+    FinalSurvival
+};
+
+UENUM(BlueprintType)
+enum class ENarr_DialogueType : uint8
+{
+    Narration,
+    Warning,
+    Instruction,
+    Observation,
+    Emergency
+};
 
 USTRUCT(BlueprintType)
 struct TRANSPERSONALGAME_API FNarr_DialogueLine
@@ -19,65 +39,43 @@ struct TRANSPERSONALGAME_API FNarr_DialogueLine
     FString SpeakerName;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    FText DialogueText;
+    FString DialogueText;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    TSoftObjectPtr<USoundBase> VoiceClip;
+    ENarr_DialogueType DialogueType;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
     float Duration;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    bool bIsPlayerChoice;
+    TSoftObjectPtr<USoundCue> VoiceClip;
 
     FNarr_DialogueLine()
     {
-        SpeakerName = TEXT("Unknown");
-        DialogueText = FText::GetEmpty();
-        Duration = 3.0f;
-        bIsPlayerChoice = false;
+        SpeakerName = TEXT("Narrator");
+        DialogueText = TEXT("");
+        DialogueType = ENarr_DialogueType::Narration;
+        Duration = 5.0f;
+        VoiceClip = nullptr;
     }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FNarr_QuestDialogue
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    FString QuestID;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    TArray<FNarr_DialogueLine> IntroLines;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    TArray<FNarr_DialogueLine> ProgressLines;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    TArray<FNarr_DialogueLine> CompletionLines;
-
-    FNarr_QuestDialogue()
-    {
-        QuestID = TEXT("DefaultQuest");
-    }
-};
-
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FNarr_StoryCheckpoint
+struct TRANSPERSONALGAME_API FNarr_StoryEvent
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    FString CheckpointID;
+    FString EventName;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    FText NarrativeText;
+    ENarr_StoryState RequiredState;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    TSoftObjectPtr<USoundBase> NarrationClip;
+    TArray<FNarr_DialogueLine> DialogueLines;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    bool bTriggerAutomatically;
+    bool bIsTriggered;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
     FVector TriggerLocation;
@@ -85,97 +83,83 @@ struct TRANSPERSONALGAME_API FNarr_StoryCheckpoint
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
     float TriggerRadius;
 
-    FNarr_StoryCheckpoint()
+    FNarr_StoryEvent()
     {
-        CheckpointID = TEXT("Checkpoint_001");
-        NarrativeText = FText::GetEmpty();
-        bTriggerAutomatically = true;
+        EventName = TEXT("DefaultEvent");
+        RequiredState = ENarr_StoryState::Introduction;
+        bIsTriggered = false;
         TriggerLocation = FVector::ZeroVector;
         TriggerRadius = 500.0f;
     }
 };
 
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UNarrativeManager : public UGameInstanceSubsystem
+class TRANSPERSONALGAME_API ANarrativeManager : public AActor
 {
     GENERATED_BODY()
 
 public:
-    UNarrativeManager();
-
-    // USubsystem interface
-    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
-    virtual void Deinitialize() override;
-
-    // Core narrative functions
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void StartDialogue(const FString& DialogueID, ATranspersonalCharacter* Player);
-
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void TriggerNarration(const FString& CheckpointID);
-
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void RegisterQuestDialogue(const FString& QuestID, const FNarr_QuestDialogue& DialogueData);
-
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    bool IsStoryCheckpointReached(const FString& CheckpointID) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void MarkCheckpointReached(const FString& CheckpointID);
-
-    // Dialogue system
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    void PlayDialogueLine(const FNarr_DialogueLine& DialogueLine);
-
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    void EndCurrentDialogue();
-
-    // Story progression
-    UFUNCTION(BlueprintCallable, Category = "Story")
-    void CheckLocationTriggers(const FVector& PlayerLocation);
-
-    UFUNCTION(BlueprintCallable, Category = "Story")
-    float GetStoryProgress() const;
+    ANarrativeManager();
 
 protected:
-    // Narrative data
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    TMap<FString, FNarr_QuestDialogue> QuestDialogues;
+    virtual void BeginPlay() override;
+    virtual void Tick(float DeltaTime) override;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    TArray<FNarr_StoryCheckpoint> StoryCheckpoints;
+    ENarr_StoryState CurrentStoryState;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    TSet<FString> ReachedCheckpoints;
+    TArray<FNarr_StoryEvent> StoryEvents;
 
-    // Current dialogue state
-    UPROPERTY(BlueprintReadOnly, Category = "Dialogue")
-    bool bDialogueActive;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Dialogue")
-    FString CurrentDialogueID;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Dialogue")
-    int32 CurrentLineIndex;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Dialogue")
-    TArray<FNarr_DialogueLine> CurrentDialogueLines;
-
-    // Audio management
-    UPROPERTY(BlueprintReadOnly, Category = "Audio")
-    class UAudioComponent* NarrationAudioComponent;
-
-    // Timing
-    UPROPERTY(BlueprintReadOnly, Category = "Timing")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
     float DialogueTimer;
 
-private:
-    void InitializeStoryCheckpoints();
-    void LoadQuestDialogues();
-    void UpdateDialogueTimer(float DeltaTime);
-    void ProcessNextDialogueLine();
-    
-    // Story checkpoint helpers
-    bool IsPlayerNearCheckpoint(const FNarr_StoryCheckpoint& Checkpoint, const FVector& PlayerLocation) const;
-    void TriggerCheckpointNarration(const FNarr_StoryCheckpoint& Checkpoint);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    bool bIsPlayingDialogue;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    class UAudioComponent* VoiceAudioComponent;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    float StoryProgressionTimer;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    int32 CurrentDialogueIndex;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    FNarr_StoryEvent* CurrentStoryEvent;
+
+public:
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    void TriggerStoryEvent(const FString& EventName);
+
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    void AdvanceStoryState();
+
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    void PlayDialogueLine(const FNarr_DialogueLine& DialogueLine);
+
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    void CheckPlayerProximityToEvents();
+
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    ENarr_StoryState GetCurrentStoryState() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    void InitializeStoryEvents();
+
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    bool IsDialoguePlaying() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    void StopCurrentDialogue();
+
+    UFUNCTION(BlueprintImplementableEvent, Category = "Narrative")
+    void OnStoryStateChanged(ENarr_StoryState NewState);
+
+    UFUNCTION(BlueprintImplementableEvent, Category = "Narrative")
+    void OnDialogueStarted(const FNarr_DialogueLine& DialogueLine);
+
+    UFUNCTION(BlueprintImplementableEvent, Category = "Narrative")
+    void OnDialogueFinished();
 };
