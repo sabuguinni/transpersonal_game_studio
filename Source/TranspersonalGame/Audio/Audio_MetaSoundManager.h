@@ -1,249 +1,185 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/World.h"
+#include "GameFramework/Actor.h"
 #include "Components/AudioComponent.h"
 #include "MetasoundSource.h"
-#include "Subsystems/WorldSubsystem.h"
-#include "../SharedTypes.h"
+#include "Sound/SoundCue.h"
+#include "Engine/DataTable.h"
+#include "SharedTypes.h"
 #include "Audio_MetaSoundManager.generated.h"
 
-/**
- * Estrutura para configuração de MetaSound por bioma
- */
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FAudio_BiomeMetaSoundConfig
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    TSoftObjectPtr<UMetaSoundSource> AmbientMetaSound;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    float BaseVolume = 0.7f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    float BasePitch = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    float ReverbWetness = 0.3f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    float LowPassFrequency = 8000.0f;
-
-    FAudio_BiomeMetaSoundConfig()
-    {
-        AmbientMetaSound = nullptr;
-        BaseVolume = 0.7f;
-        BasePitch = 1.0f;
-        ReverbWetness = 0.3f;
-        LowPassFrequency = 8000.0f;
-    }
-};
-
-/**
- * Estrutura para configuração de MetaSound de dinossauros
- */
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FAudio_DinosaurMetaSoundConfig
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    TSoftObjectPtr<UMetaSoundSource> FootstepMetaSound;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    TSoftObjectPtr<UMetaSoundSource> RoarMetaSound;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    TSoftObjectPtr<UMetaSoundSource> BreathingMetaSound;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    float FootstepVolume = 0.8f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    float RoarVolume = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    float BreathingVolume = 0.4f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    float ThreatMultiplier = 1.0f;
-
-    FAudio_DinosaurMetaSoundConfig()
-    {
-        FootstepMetaSound = nullptr;
-        RoarMetaSound = nullptr;
-        BreathingMetaSound = nullptr;
-        FootstepVolume = 0.8f;
-        RoarVolume = 1.0f;
-        BreathingVolume = 0.4f;
-        ThreatMultiplier = 1.0f;
-    }
-};
-
-/**
- * Enum para tipos de eventos de áudio
- */
 UENUM(BlueprintType)
-enum class EAudio_EventType : uint8
+enum class EAudio_NarrativeType : uint8
 {
-    BiomeEnter,
-    BiomeExit,
-    DinosaurFootstep,
-    DinosaurRoar,
-    DinosaurBreathing,
-    PlayerFootstep,
-    PlayerHeartbeat,
-    EnvironmentalEffect
+    None = 0,
+    AncientWisdom,
+    DangerWarning,
+    HuntInstruction,
+    SurvivalTip,
+    QuestNarration,
+    EnvironmentalAlert
 };
 
-/**
- * Estrutura para eventos de áudio em tempo real
- */
+UENUM(BlueprintType)
+enum class EAudio_SpatialMode : uint8
+{
+    TwoD = 0,
+    ThreeD_Positional,
+    ThreeD_Ambient,
+    ThreeD_Directional
+};
+
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FAudio_Event
+struct TRANSPERSONALGAME_API FAudio_VoiceLine
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    EAudio_EventType EventType;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Voice")
+    EAudio_NarrativeType NarrativeType = EAudio_NarrativeType::None;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    FVector Location;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Voice")
+    FString AudioURL;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    float Intensity = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Voice")
+    TSoftObjectPtr<USoundWave> SoundAsset;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    float Duration = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Voice")
+    float Duration = 0.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    AActor* SourceActor = nullptr;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Voice")
+    int32 Priority = 1;
 
-    FAudio_Event()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Voice")
+    bool bIs3D = true;
+
+    FAudio_VoiceLine()
     {
-        EventType = EAudio_EventType::EnvironmentalEffect;
-        Location = FVector::ZeroVector;
-        Intensity = 1.0f;
-        Duration = 1.0f;
-        SourceActor = nullptr;
+        NarrativeType = EAudio_NarrativeType::None;
+        AudioURL = "";
+        Duration = 0.0f;
+        Priority = 1;
+        bIs3D = true;
     }
 };
 
-/**
- * Sistema de gestão de MetaSounds para áudio dinâmico e adaptativo
- * Responsável por:
- * - Configuração de MetaSounds por bioma
- * - Gestão de áudio de dinossauros em tempo real
- * - Sistema de eventos de áudio baseado em localização
- * - Integração com sistema de ameaças e sobrevivência
- */
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FAudio_MetaSoundParams
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaSound")
+    float Volume = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaSound")
+    float Pitch = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaSound")
+    float LowPassFilter = 22000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaSound")
+    float HighPassFilter = 20.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaSound")
+    float ReverbAmount = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaSound")
+    bool bUseDistanceAttenuation = true;
+
+    FAudio_MetaSoundParams()
+    {
+        Volume = 1.0f;
+        Pitch = 1.0f;
+        LowPassFilter = 22000.0f;
+        HighPassFilter = 20.0f;
+        ReverbAmount = 0.0f;
+        bUseDistanceAttenuation = true;
+    }
+};
+
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UAudio_MetaSoundManager : public UWorldSubsystem
+class TRANSPERSONALGAME_API AAudio_MetaSoundManager : public AActor
 {
     GENERATED_BODY()
 
 public:
-    UAudio_MetaSoundManager();
-
-    // USubsystem interface
-    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
-    virtual void Deinitialize() override;
-    virtual bool ShouldCreateSubsystem(UObject* Outer) const override;
-
-    // Gestão de biomas
-    UFUNCTION(BlueprintCallable, Category = "Audio|Biome")
-    void SetCurrentBiome(EBiomeType NewBiome);
-
-    UFUNCTION(BlueprintCallable, Category = "Audio|Biome")
-    void UpdateBiomeAudio(EBiomeType BiomeType, const FVector& PlayerLocation);
-
-    UFUNCTION(BlueprintCallable, Category = "Audio|Biome")
-    FAudio_BiomeMetaSoundConfig GetBiomeAudioConfig(EBiomeType BiomeType) const;
-
-    // Gestão de dinossauros
-    UFUNCTION(BlueprintCallable, Category = "Audio|Dinosaur")
-    void RegisterDinosaurActor(AActor* DinosaurActor, EDinosaurSpecies Species);
-
-    UFUNCTION(BlueprintCallable, Category = "Audio|Dinosaur")
-    void UnregisterDinosaurActor(AActor* DinosaurActor);
-
-    UFUNCTION(BlueprintCallable, Category = "Audio|Dinosaur")
-    void PlayDinosaurFootstep(AActor* DinosaurActor, const FVector& FootstepLocation);
-
-    UFUNCTION(BlueprintCallable, Category = "Audio|Dinosaur")
-    void PlayDinosaurRoar(AActor* DinosaurActor, float ThreatLevel = 1.0f);
-
-    // Sistema de eventos
-    UFUNCTION(BlueprintCallable, Category = "Audio|Events")
-    void TriggerAudioEvent(const FAudio_Event& AudioEvent);
-
-    UFUNCTION(BlueprintCallable, Category = "Audio|Events")
-    void ProcessAudioEvents(float DeltaTime);
-
-    // Configuração master
-    UFUNCTION(BlueprintCallable, Category = "Audio|Master")
-    void SetMasterVolume(float Volume);
-
-    UFUNCTION(BlueprintCallable, Category = "Audio|Master")
-    void SetAmbientVolume(float Volume);
-
-    UFUNCTION(BlueprintCallable, Category = "Audio|Master")
-    void SetEffectsVolume(float Volume);
-
-    // Análise de proximidade
-    UFUNCTION(BlueprintCallable, Category = "Audio|Analysis")
-    float CalculateProximityThreat(const FVector& PlayerLocation) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Audio|Analysis")
-    TArray<AActor*> GetNearbyDinosaurs(const FVector& PlayerLocation, float Radius = 5000.0f) const;
+    AAudio_MetaSoundManager();
 
 protected:
-    // Configurações de bioma
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Config")
-    TMap<EBiomeType, FAudio_BiomeMetaSoundConfig> BiomeConfigs;
+    virtual void BeginPlay() override;
+    virtual void Tick(float DeltaTime) override;
 
-    // Configurações de dinossauros
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Config")
-    TMap<EDinosaurSpecies, FAudio_DinosaurMetaSoundConfig> DinosaurConfigs;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    class UAudioComponent* PrimaryAudioComponent;
 
-    // Estado actual
-    UPROPERTY(BlueprintReadOnly, Category = "Audio|State")
-    EBiomeType CurrentBiome;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    class UAudioComponent* SecondaryAudioComponent;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Audio|State")
-    TMap<AActor*, EDinosaurSpecies> RegisteredDinosaurs;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    class UAudioComponent* AmbientAudioComponent;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Audio|State")
-    TArray<FAudio_Event> PendingAudioEvents;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Voice Lines")
+    TArray<FAudio_VoiceLine> NarrativeVoiceLines;
 
-    // Componentes de áudio activos
-    UPROPERTY()
-    TMap<EBiomeType, UAudioComponent*> BiomeAudioComponents;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaSound")
+    TSoftObjectPtr<UMetaSoundSource> NarrativeMetaSound;
 
-    UPROPERTY()
-    TMap<AActor*, TArray<UAudioComponent*>> DinosaurAudioComponents;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaSound")
+    TSoftObjectPtr<UMetaSoundSource> AmbientMetaSound;
 
-    // Configurações master
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Master")
-    float MasterVolume = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    FAudio_MetaSoundParams DefaultParams;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Master")
-    float AmbientVolume = 0.8f;
+    UPROPERTY(BlueprintReadOnly, Category = "State")
+    bool bIsPlayingNarrative = false;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Master")
-    float EffectsVolume = 0.9f;
+    UPROPERTY(BlueprintReadOnly, Category = "State")
+    EAudio_NarrativeType CurrentNarrativeType = EAudio_NarrativeType::None;
+
+    UPROPERTY(BlueprintReadOnly, Category = "State")
+    float CurrentPlaybackTime = 0.0f;
+
+public:
+    // Narrative voice line playback
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    bool PlayNarrativeLine(EAudio_NarrativeType NarrativeType, const FVector& WorldLocation = FVector::ZeroVector);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    void StopNarrativeLine();
+
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    bool IsNarrativePlaying() const { return bIsPlayingNarrative; }
+
+    // MetaSound parameter control
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    void SetMetaSoundParameter(const FString& ParameterName, float Value);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    void SetAudioParams(const FAudio_MetaSoundParams& Params);
+
+    // Voice line management
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    void RegisterVoiceLine(const FAudio_VoiceLine& VoiceLine);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    FAudio_VoiceLine GetVoiceLineByType(EAudio_NarrativeType NarrativeType) const;
+
+    // 3D spatial audio
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    void SetSpatialMode(EAudio_SpatialMode SpatialMode);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    void UpdateListenerPosition(const FVector& ListenerLocation, const FVector& ListenerForward);
 
 private:
-    // Métodos internos
-    void InitializeBiomeConfigs();
-    void InitializeDinosaurConfigs();
-    void CreateBiomeAudioComponent(EBiomeType BiomeType);
-    void CreateDinosaurAudioComponents(AActor* DinosaurActor, EDinosaurSpecies Species);
-    void UpdateAudioComponentSettings(UAudioComponent* AudioComp, const FAudio_BiomeMetaSoundConfig& Config);
-    void CleanupInvalidActors();
+    void InitializeDefaultVoiceLines();
+    void LoadMetaSoundAssets();
+    UAudioComponent* GetAvailableAudioComponent();
+    void OnNarrativeFinished();
 
-    // Timer para limpeza periódica
-    FTimerHandle CleanupTimerHandle;
+    UPROPERTY()
+    TArray<UAudioComponent*> AudioComponentPool;
+
+    float NarrativeStartTime = 0.0f;
+    float CurrentNarrativeDuration = 0.0f;
 };
