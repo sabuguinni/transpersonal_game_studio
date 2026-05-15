@@ -3,32 +3,29 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Character.h"
 #include "Components/SkeletalMeshComponent.h"
-#include "Components/StaticMeshComponent.h"
 #include "Components/CapsuleComponent.h"
-#include "Camera/CameraComponent.h"
 #include "GameFramework/SpringArmComponent.h"
+#include "Camera/CameraComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Engine/Engine.h"
-#include "Materials/MaterialInterface.h"
 #include "Char_TribalCharacter.generated.h"
 
 UENUM(BlueprintType)
-enum class EChar_TribalGender : uint8
+enum class EChar_TribalType : uint8
 {
-    Male UMETA(DisplayName = "Male"),
-    Female UMETA(DisplayName = "Female"),
-    Child UMETA(DisplayName = "Child")
+    Hunter      UMETA(DisplayName = "Hunter"),
+    Gatherer    UMETA(DisplayName = "Gatherer"),
+    Warrior     UMETA(DisplayName = "Warrior"),
+    Shaman      UMETA(DisplayName = "Shaman"),
+    Child       UMETA(DisplayName = "Child"),
+    Elder       UMETA(DisplayName = "Elder")
 };
 
 UENUM(BlueprintType)
-enum class EChar_TribalRole : uint8
+enum class EChar_Gender : uint8
 {
-    Hunter UMETA(DisplayName = "Hunter"),
-    Gatherer UMETA(DisplayName = "Gatherer"),
-    Shaman UMETA(DisplayName = "Shaman"),
-    Crafter UMETA(DisplayName = "Crafter"),
-    Scout UMETA(DisplayName = "Scout"),
-    Elder UMETA(DisplayName = "Elder")
+    Male        UMETA(DisplayName = "Male"),
+    Female      UMETA(DisplayName = "Female")
 };
 
 USTRUCT(BlueprintType)
@@ -37,16 +34,22 @@ struct FChar_TribalAppearance
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
+    EChar_Gender Gender = EChar_Gender::Male;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
     FLinearColor SkinTone = FLinearColor(0.8f, 0.6f, 0.4f, 1.0f);
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
     FLinearColor HairColor = FLinearColor(0.2f, 0.1f, 0.05f, 1.0f);
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
-    float BodyMassIndex = 1.0f;
+    float BodyMass = 1.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
     float Height = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
+    bool bHasWarPaint = false;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
     bool bHasScars = false;
@@ -54,18 +57,16 @@ struct FChar_TribalAppearance
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
     bool bHasTattoos = false;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
-    int32 Age = 25;
-
     FChar_TribalAppearance()
     {
+        Gender = EChar_Gender::Male;
         SkinTone = FLinearColor(0.8f, 0.6f, 0.4f, 1.0f);
         HairColor = FLinearColor(0.2f, 0.1f, 0.05f, 1.0f);
-        BodyMassIndex = 1.0f;
+        BodyMass = 1.0f;
         Height = 1.0f;
+        bHasWarPaint = false;
         bHasScars = false;
         bHasTattoos = false;
-        Age = 25;
     }
 };
 
@@ -75,30 +76,39 @@ struct FChar_TribalClothing
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Clothing")
-    TSoftObjectPtr<UStaticMesh> ChestClothing;
+    bool bHasAnimalHideVest = true;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Clothing")
-    TSoftObjectPtr<UStaticMesh> LegClothing;
+    bool bHasLeatherLoincloth = true;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Clothing")
-    TSoftObjectPtr<UStaticMesh> FootClothing;
+    bool bHasBoneJewelry = true;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Clothing")
-    TSoftObjectPtr<UStaticMesh> HeadAccessory;
+    bool bHasFeatherHeaddress = false;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Clothing")
-    TSoftObjectPtr<UMaterialInterface> ClothingMaterial;
+    bool bHasStoneNecklace = true;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Clothing")
     FLinearColor ClothingColor = FLinearColor(0.6f, 0.4f, 0.2f, 1.0f);
 
     FChar_TribalClothing()
     {
+        bHasAnimalHideVest = true;
+        bHasLeatherLoincloth = true;
+        bHasBoneJewelry = true;
+        bHasFeatherHeaddress = false;
+        bHasStoneNecklace = true;
         ClothingColor = FLinearColor(0.6f, 0.4f, 0.2f, 1.0f);
     }
 };
 
-UCLASS(Blueprintable, BlueprintType)
+/**
+ * Tribal character class for Cretaceous period humans
+ * Represents primitive humans surviving in the dinosaur age
+ */
+UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API AChar_TribalCharacter : public ACharacter
 {
     GENERATED_BODY()
@@ -109,91 +119,153 @@ public:
 protected:
     virtual void BeginPlay() override;
 
+    // Camera system
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera", meta = (AllowPrivateAccess = "true"))
+    class USpringArmComponent* CameraBoom;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera", meta = (AllowPrivateAccess = "true"))
+    class UCameraComponent* FollowCamera;
+
+    // Character properties
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
+    EChar_TribalType TribalType = EChar_TribalType::Hunter;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
+    FChar_TribalAppearance Appearance;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
+    FChar_TribalClothing Clothing;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
+    FString CharacterName = TEXT("Tribal Hunter");
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
+    int32 Age = 25;
+
+    // Survival stats
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival")
+    float Health = 100.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival")
+    float MaxHealth = 100.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival")
+    float Stamina = 100.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival")
+    float MaxStamina = 100.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival")
+    float Hunger = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival")
+    float Thirst = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival")
+    float Fear = 0.0f;
+
+    // Skills
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Skills")
+    float HuntingSkill = 50.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Skills")
+    float CraftingSkill = 50.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Skills")
+    float SurvivalSkill = 50.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Skills")
+    float CombatSkill = 50.0f;
+
 public:
     virtual void Tick(float DeltaTime) override;
     virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
 
-    // Character Appearance System
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal Character")
-    EChar_TribalGender Gender = EChar_TribalGender::Male;
+    // Movement functions
+    void MoveForward(float Value);
+    void MoveRight(float Value);
+    void TurnAtRate(float Rate);
+    void LookUpAtRate(float Rate);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal Character")
-    EChar_TribalRole TribalRole = EChar_TribalRole::Hunter;
+    // Character functions
+    UFUNCTION(BlueprintCallable, Category = "Character")
+    void SetTribalType(EChar_TribalType NewType);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal Character")
-    FChar_TribalAppearance Appearance;
+    UFUNCTION(BlueprintCallable, Category = "Character")
+    void SetAppearance(const FChar_TribalAppearance& NewAppearance);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal Character")
-    FChar_TribalClothing Clothing;
+    UFUNCTION(BlueprintCallable, Category = "Character")
+    void SetClothing(const FChar_TribalClothing& NewClothing);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal Character")
-    FString CharacterName = TEXT("Tribal Survivor");
+    UFUNCTION(BlueprintCallable, Category = "Character")
+    void ApplyWarPaint();
 
-    // Camera System
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera")
-    USpringArmComponent* SpringArm;
+    UFUNCTION(BlueprintCallable, Category = "Character")
+    void RemoveWarPaint();
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera")
-    UCameraComponent* FollowCamera;
+    // Survival functions
+    UFUNCTION(BlueprintCallable, Category = "Survival")
+    void TakeDamage(float DamageAmount);
 
-    // Clothing Mesh Components
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Clothing")
-    UStaticMeshComponent* ChestClothingMesh;
+    UFUNCTION(BlueprintCallable, Category = "Survival")
+    void RestoreHealth(float HealAmount);
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Clothing")
-    UStaticMeshComponent* LegClothingMesh;
+    UFUNCTION(BlueprintCallable, Category = "Survival")
+    void ConsumeStamina(float StaminaAmount);
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Clothing")
-    UStaticMeshComponent* FootClothingMesh;
+    UFUNCTION(BlueprintCallable, Category = "Survival")
+    void RestoreStamina(float StaminaAmount);
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Clothing")
-    UStaticMeshComponent* HeadAccessoryMesh;
+    UFUNCTION(BlueprintCallable, Category = "Survival")
+    void IncreaseHunger(float HungerAmount);
 
-    // Character Customization Functions
-    UFUNCTION(BlueprintCallable, Category = "Tribal Character")
-    void SetCharacterGender(EChar_TribalGender NewGender);
+    UFUNCTION(BlueprintCallable, Category = "Survival")
+    void DecreaseHunger(float HungerAmount);
 
-    UFUNCTION(BlueprintCallable, Category = "Tribal Character")
-    void SetTribalRole(EChar_TribalRole NewRole);
+    UFUNCTION(BlueprintCallable, Category = "Survival")
+    void IncreaseThirst(float ThirstAmount);
 
-    UFUNCTION(BlueprintCallable, Category = "Tribal Character")
-    void SetCharacterAppearance(const FChar_TribalAppearance& NewAppearance);
+    UFUNCTION(BlueprintCallable, Category = "Survival")
+    void DecreaseThirst(float ThirstAmount);
 
-    UFUNCTION(BlueprintCallable, Category = "Tribal Character")
-    void SetCharacterClothing(const FChar_TribalClothing& NewClothing);
+    UFUNCTION(BlueprintCallable, Category = "Survival")
+    void IncreaseFear(float FearAmount);
 
-    UFUNCTION(BlueprintCallable, Category = "Tribal Character")
-    void ApplyRandomTribalAppearance();
+    UFUNCTION(BlueprintCallable, Category = "Survival")
+    void DecreaseFear(float FearAmount);
 
-    UFUNCTION(BlueprintCallable, Category = "Tribal Character")
-    void SetupDefaultMannequinMesh();
+    // Skill functions
+    UFUNCTION(BlueprintCallable, Category = "Skills")
+    void IncreaseSkill(const FString& SkillName, float Amount);
 
-    UFUNCTION(BlueprintCallable, Category = "Tribal Character")
-    void ConfigureCameraSystem(float ArmLength = 400.0f, float ArmHeight = 50.0f);
+    UFUNCTION(BlueprintCallable, Category = "Skills")
+    float GetSkillLevel(const FString& SkillName) const;
 
-    // Material and Mesh Management
-    UFUNCTION(BlueprintCallable, Category = "Tribal Character")
-    void UpdateSkinMaterial();
+    // Getters
+    UFUNCTION(BlueprintPure, Category = "Character")
+    EChar_TribalType GetTribalType() const { return TribalType; }
 
-    UFUNCTION(BlueprintCallable, Category = "Tribal Character")
-    void UpdateClothingMeshes();
+    UFUNCTION(BlueprintPure, Category = "Character")
+    FChar_TribalAppearance GetAppearance() const { return Appearance; }
 
-    UFUNCTION(BlueprintCallable, Category = "Tribal Character")
-    void SetSkeletalMeshFromPath(const FString& MeshPath);
+    UFUNCTION(BlueprintPure, Category = "Character")
+    FChar_TribalClothing GetClothing() const { return Clothing; }
 
-protected:
-    // Internal helper functions
-    void InitializeCharacterComponents();
-    void SetupDefaultAppearance();
-    void ApplyAppearanceToMesh();
-    FLinearColor GenerateRandomSkinTone();
-    FLinearColor GenerateRandomHairColor();
+    UFUNCTION(BlueprintPure, Category = "Camera")
+    class USpringArmComponent* GetCameraBoom() const { return CameraBoom; }
 
-    // Movement configuration
-    void ConfigureMovementSettings();
+    UFUNCTION(BlueprintPure, Category = "Camera")
+    class UCameraComponent* GetFollowCamera() const { return FollowCamera; }
 
 private:
-    // Character state tracking
-    bool bIsInitialized = false;
-    float LastAppearanceUpdateTime = 0.0f;
+    // Input rates
+    float BaseTurnRate = 45.0f;
+    float BaseLookUpRate = 45.0f;
+
+    // Internal functions
+    void UpdateSurvivalStats(float DeltaTime);
+    void ApplyAppearanceToMesh();
+    void ApplyClothingToMesh();
 };
+
+#include "Char_TribalCharacter.generated.h"
