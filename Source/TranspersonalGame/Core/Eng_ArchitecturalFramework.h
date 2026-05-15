@@ -1,149 +1,113 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/GameInstanceSubsystem.h"
+#include "Engine/Engine.h"
 #include "Engine/World.h"
+#include "GameFramework/GameModeBase.h"
+#include "Subsystems/GameInstanceSubsystem.h"
+#include "Subsystems/WorldSubsystem.h"
 #include "UObject/NoExportTypes.h"
 #include "Eng_ArchitecturalFramework.generated.h"
 
-// Engine Architect System Types - Global Classification
+TRANSPERSONALGAME_API DECLARE_LOG_CATEGORY_EXTERN(LogEngineArchitect, Log, All);
+
+/**
+ * Engine Architect Framework - Core architectural patterns and validation
+ * Defines the foundational rules that all other systems must follow
+ * Created by Engine Architect Agent #02
+ */
+
+// Core architectural validation levels
 UENUM(BlueprintType)
-enum class EEng_SystemType : uint8
+enum class EEng_ValidationLevel : uint8
 {
-    Core            UMETA(DisplayName = "Core Systems"),
-    World           UMETA(DisplayName = "World Generation"),
-    Character       UMETA(DisplayName = "Character Systems"),
-    AI              UMETA(DisplayName = "AI & Behavior"),
-    Gameplay        UMETA(DisplayName = "Gameplay Mechanics"),
-    Audio           UMETA(DisplayName = "Audio Systems"),
-    VFX             UMETA(DisplayName = "Visual Effects"),
-    Performance     UMETA(DisplayName = "Performance & Optimization"),
-    Integration     UMETA(DisplayName = "Integration & Build")
+    None = 0        UMETA(DisplayName = "No Validation"),
+    Basic = 1       UMETA(DisplayName = "Basic Checks"),
+    Standard = 2    UMETA(DisplayName = "Standard Validation"),
+    Strict = 3      UMETA(DisplayName = "Strict Enforcement"),
+    Critical = 4    UMETA(DisplayName = "Critical Systems")
 };
 
-// Performance Monitoring Tiers
+// System dependency priorities
 UENUM(BlueprintType)
-enum class EEng_PerformanceTier : uint8
+enum class EEng_SystemPriority : uint8
 {
-    Critical        UMETA(DisplayName = "Critical - Must be 60fps"),
-    High            UMETA(DisplayName = "High - Target 60fps"),
-    Medium          UMETA(DisplayName = "Medium - Target 30fps"),
-    Low             UMETA(DisplayName = "Low - Background processing")
+    Critical = 0    UMETA(DisplayName = "Critical Infrastructure"),
+    Core = 1        UMETA(DisplayName = "Core Systems"),
+    Gameplay = 2    UMETA(DisplayName = "Gameplay Systems"),
+    Content = 3     UMETA(DisplayName = "Content Systems"),
+    Polish = 4      UMETA(DisplayName = "Polish & Effects")
 };
 
-// Compilation Status Tracking
+// Module loading states
 UENUM(BlueprintType)
-enum class EEng_CompilationStatus : uint8
+enum class EEng_ModuleState : uint8
 {
-    NotCompiled     UMETA(DisplayName = "Not Compiled"),
-    Compiling       UMETA(DisplayName = "Compiling"),
-    Success         UMETA(DisplayName = "Compilation Success"),
-    Failed          UMETA(DisplayName = "Compilation Failed"),
-    Warning         UMETA(DisplayName = "Compiled with Warnings")
+    Unloaded = 0    UMETA(DisplayName = "Not Loaded"),
+    Loading = 1     UMETA(DisplayName = "Loading"),
+    Loaded = 2      UMETA(DisplayName = "Loaded"),
+    Error = 3       UMETA(DisplayName = "Load Error"),
+    Deprecated = 4  UMETA(DisplayName = "Deprecated")
 };
 
-// Module Dependency Levels
-UENUM(BlueprintType)
-enum class EEng_DependencyLevel : uint8
-{
-    Core            UMETA(DisplayName = "Core - No dependencies"),
-    Foundation      UMETA(DisplayName = "Foundation - Core only"),
-    System          UMETA(DisplayName = "System - Foundation + Core"),
-    Gameplay        UMETA(DisplayName = "Gameplay - All lower levels"),
-    Integration     UMETA(DisplayName = "Integration - All systems")
-};
-
-// System Requirements Definition
+// Architectural compliance result
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEng_SystemRequirements
+struct TRANSPERSONALGAME_API FEng_ComplianceResult
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System Requirements")
-    EEng_SystemType SystemType = EEng_SystemType::Core;
+    UPROPERTY(BlueprintReadOnly, Category = "Compliance")
+    bool bIsCompliant = false;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System Requirements")
-    EEng_PerformanceTier PerformanceTier = EEng_PerformanceTier::Medium;
+    UPROPERTY(BlueprintReadOnly, Category = "Compliance")
+    FString ErrorMessage;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System Requirements")
-    EEng_DependencyLevel DependencyLevel = EEng_DependencyLevel::Core;
+    UPROPERTY(BlueprintReadOnly, Category = "Compliance")
+    EEng_ValidationLevel ValidationLevel = EEng_ValidationLevel::None;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System Requirements")
-    TArray<FString> RequiredModules;
+    UPROPERTY(BlueprintReadOnly, Category = "Compliance")
+    float ComplianceScore = 0.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System Requirements")
-    int32 MaxActorsPerSystem = 1000;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System Requirements")
-    float TargetFrameTime = 16.67f; // 60fps = 16.67ms
-
-    FEng_SystemRequirements()
+    FEng_ComplianceResult()
     {
-        RequiredModules.Add(TEXT("Core"));
-        RequiredModules.Add(TEXT("Engine"));
-        RequiredModules.Add(TEXT("TranspersonalGame"));
+        bIsCompliant = false;
+        ErrorMessage = TEXT("Not validated");
+        ValidationLevel = EEng_ValidationLevel::None;
+        ComplianceScore = 0.0f;
     }
 };
 
-// Module Compilation Status
+// System dependency definition
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEng_ModuleStatus
+struct TRANSPERSONALGAME_API FEng_SystemDependency
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Module Status")
-    FString ModuleName;
+    UPROPERTY(BlueprintReadOnly, Category = "Dependency")
+    FString SystemName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Module Status")
-    EEng_CompilationStatus CompilationStatus = EEng_CompilationStatus::NotCompiled;
+    UPROPERTY(BlueprintReadOnly, Category = "Dependency")
+    EEng_SystemPriority Priority = EEng_SystemPriority::Gameplay;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Module Status")
-    FString LastError;
+    UPROPERTY(BlueprintReadOnly, Category = "Dependency")
+    TArray<FString> RequiredSystems;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Module Status")
-    float CompilationTime = 0.0f;
+    UPROPERTY(BlueprintReadOnly, Category = "Dependency")
+    bool bIsOptional = false;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Module Status")
-    int32 ClassCount = 0;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Module Status")
-    FDateTime LastCompiled;
-};
-
-// Agent System Integration Rules
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEng_AgentIntegrationRules
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent Rules")
-    int32 AgentID = 0;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent Rules")
-    FString AgentName;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent Rules")
-    EEng_SystemType PrimarySystemType = EEng_SystemType::Core;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent Rules")
-    TArray<EEng_SystemType> AllowedSystemTypes;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent Rules")
-    int32 MaxFilesPerCycle = 8;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent Rules")
-    bool bRequiresCppImplementation = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent Rules")
-    TArray<FString> MandatoryIncludes;
+    FEng_SystemDependency()
+    {
+        SystemName = TEXT("Unknown");
+        Priority = EEng_SystemPriority::Gameplay;
+        bIsOptional = false;
+    }
 };
 
 /**
- * Engine Architectural Framework - Central authority for all technical architecture decisions
- * This system enforces compilation rules, module dependencies, and agent coordination
- * Created by Agent #2 (Engine Architect) - Cycle 010
+ * Core Architectural Framework Subsystem
+ * Validates system compliance and enforces architectural rules
  */
-UCLASS(BlueprintType, Blueprintable)
+UCLASS(BlueprintType)
 class TRANSPERSONALGAME_API UEng_ArchitecturalFramework : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
@@ -151,69 +115,126 @@ class TRANSPERSONALGAME_API UEng_ArchitecturalFramework : public UGameInstanceSu
 public:
     UEng_ArchitecturalFramework();
 
-    // Subsystem Interface
+    // USubsystem interface
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
-    // System Registration and Validation
+    // Core validation functions
     UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    bool RegisterSystem(const FString& SystemName, const FEng_SystemRequirements& Requirements);
+    FEng_ComplianceResult ValidateSystemCompliance(const FString& SystemName, EEng_ValidationLevel Level = EEng_ValidationLevel::Standard);
+
+    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
+    bool RegisterSystemDependency(const FEng_SystemDependency& Dependency);
 
     UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
     bool ValidateSystemDependencies(const FString& SystemName);
 
     UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    EEng_CompilationStatus CheckModuleCompilation(const FString& ModuleName);
-
-    // Agent Coordination
-    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    bool ValidateAgentOutput(int32 AgentID, const TArray<FString>& CreatedFiles);
+    TArray<FString> GetSystemLoadOrder();
 
     UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    FEng_AgentIntegrationRules GetAgentRules(int32 AgentID);
+    EEng_ModuleState GetModuleState(const FString& ModuleName);
 
-    // Performance Monitoring
+    // Performance validation
     UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    bool CheckPerformanceCompliance(const FString& SystemName, float CurrentFrameTime);
+    bool ValidatePerformanceRequirements(const FString& SystemName, float MaxFrameTime = 16.67f);
 
+    // Memory management validation
     UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    void LogPerformanceMetrics(const FString& SystemName, float FrameTime, int32 ActorCount);
+    bool ValidateMemoryUsage(const FString& SystemName, int32 MaxMemoryMB = 512);
 
-    // Module Management
+    // Thread safety validation
     UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    TArray<FEng_ModuleStatus> GetAllModuleStatus();
-
-    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    bool ForceModuleRecompilation(const FString& ModuleName);
-
-    // Architectural Validation
-    UFUNCTION(BlueprintCallable, Category = "Engine Architecture", CallInEditor = true)
-    void ValidateEntireArchitecture();
-
-    UFUNCTION(BlueprintCallable, Category = "Engine Architecture", CallInEditor = true)
-    void GenerateArchitectureReport();
+    bool ValidateThreadSafety(const FString& SystemName);
 
 protected:
-    // System Registry
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Architecture State")
-    TMap<FString, FEng_SystemRequirements> RegisteredSystems;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Architecture State")
-    TMap<FString, FEng_ModuleStatus> ModuleStatusMap;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Architecture State")
-    TMap<int32, FEng_AgentIntegrationRules> AgentRulesMap;
-
-    // Performance Tracking
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Performance")
-    TMap<FString, float> SystemPerformanceMap;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Performance")
-    float GlobalFrameTimeTarget = 16.67f; // 60fps
+    // Internal validation logic
+    bool ValidateClassHierarchy(UClass* ClassToValidate);
+    bool ValidateModuleDependencies(const FString& ModuleName);
+    bool CheckCircularDependencies(const TArray<FEng_SystemDependency>& Dependencies);
 
 private:
-    void InitializeAgentRules();
-    void InitializeDefaultSystems();
-    bool ValidateFileStructure(const FString& FilePath);
-    void LogArchitecturalViolation(const FString& Violation);
+    // Registered system dependencies
+    UPROPERTY()
+    TArray<FEng_SystemDependency> RegisteredSystems;
+
+    // Module state tracking
+    UPROPERTY()
+    TMap<FString, EEng_ModuleState> ModuleStates;
+
+    // Performance metrics
+    UPROPERTY()
+    TMap<FString, float> SystemPerformanceMetrics;
+
+    // Validation cache
+    UPROPERTY()
+    TMap<FString, FEng_ComplianceResult> ValidationCache;
+
+    // Critical system list (cannot be disabled)
+    TArray<FString> CriticalSystems;
 };
+
+/**
+ * World-level architectural validator
+ * Validates world-specific architectural compliance
+ */
+UCLASS(BlueprintType)
+class TRANSPERSONALGAME_API UEng_WorldArchitectValidator : public UWorldSubsystem
+{
+    GENERATED_BODY()
+
+public:
+    UEng_WorldArchitectValidator();
+
+    // USubsystem interface
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void OnWorldBeginPlay(UWorld& InWorld) override;
+
+    // World validation functions
+    UFUNCTION(BlueprintCallable, Category = "World Architecture")
+    bool ValidateWorldConfiguration();
+
+    UFUNCTION(BlueprintCallable, Category = "World Architecture")
+    bool ValidateActorHierarchy();
+
+    UFUNCTION(BlueprintCallable, Category = "World Architecture")
+    bool ValidateComponentDependencies();
+
+    UFUNCTION(BlueprintCallable, Category = "World Architecture")
+    TArray<FString> GetArchitecturalWarnings();
+
+private:
+    // Validation state
+    bool bWorldValidated = false;
+    TArray<FString> ValidationWarnings;
+};
+
+// Global architectural constants
+namespace EngArchitecturalConstants
+{
+    // Performance limits
+    constexpr float MAX_FRAME_TIME_MS = 16.67f;  // 60 FPS target
+    constexpr int32 MAX_ACTORS_PER_LEVEL = 50000;
+    constexpr int32 MAX_COMPONENTS_PER_ACTOR = 20;
+    
+    // Memory limits
+    constexpr int32 MAX_SYSTEM_MEMORY_MB = 512;
+    constexpr int32 MAX_TEXTURE_MEMORY_MB = 1024;
+    constexpr int32 MAX_AUDIO_MEMORY_MB = 256;
+    
+    // System priorities (load order)
+    const TArray<FString> CRITICAL_SYSTEMS = {
+        TEXT("Core"),
+        TEXT("Physics"), 
+        TEXT("Rendering"),
+        TEXT("Audio"),
+        TEXT("Input")
+    };
+    
+    const TArray<FString> CORE_SYSTEMS = {
+        TEXT("WorldGeneration"),
+        TEXT("CharacterSystem"),
+        TEXT("GameMode"),
+        TEXT("PlayerController")
+    };
+}
