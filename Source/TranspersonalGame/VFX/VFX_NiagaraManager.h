@@ -1,154 +1,229 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Subsystems/GameInstanceSubsystem.h"
-#include "Engine/World.h"
+#include "Components/ActorComponent.h"
 #include "NiagaraSystem.h"
 #include "NiagaraComponent.h"
-#include "NiagaraFunctionLibrary.h"
+#include "Engine/Engine.h"
 #include "SharedTypes.h"
 #include "VFX_NiagaraManager.generated.h"
 
+// VFX Categories for prehistoric environments
+UENUM(BlueprintType)
+enum class EVFX_EffectCategory : uint8
+{
+    Environment     UMETA(DisplayName = "Environment"),
+    DinosaurImpact  UMETA(DisplayName = "Dinosaur Impact"),
+    WeatherEffect   UMETA(DisplayName = "Weather Effect"),
+    CombatEffect    UMETA(DisplayName = "Combat Effect"),
+    AmbientEffect   UMETA(DisplayName = "Ambient Effect")
+};
+
+// VFX intensity levels for performance scaling
+UENUM(BlueprintType)
+enum class EVFX_IntensityLevel : uint8
+{
+    Low     UMETA(DisplayName = "Low"),
+    Medium  UMETA(DisplayName = "Medium"),
+    High    UMETA(DisplayName = "High"),
+    Ultra   UMETA(DisplayName = "Ultra")
+};
+
+// Dinosaur-specific VFX profile for footsteps and impacts
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FVFX_EffectData
+struct TRANSPERSONALGAME_API FVFX_DinosaurProfile
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
-    TSoftObjectPtr<UNiagaraSystem> NiagaraSystem;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur VFX")
+    FString DinosaurName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
-    FVector DefaultScale = FVector(1.0f, 1.0f, 1.0f);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur VFX")
+    float FootstepIntensity = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
-    float DefaultLifetime = 5.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur VFX")
+    float DustCloudSize = 100.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
-    bool bAutoDestroy = true;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur VFX")
+    FLinearColor ParticleColor = FLinearColor::Brown;
 
-    FVFX_EffectData()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur VFX")
+    bool bCreateGroundCrack = false;
+
+    FVFX_DinosaurProfile()
     {
-        NiagaraSystem = nullptr;
-        DefaultScale = FVector(1.0f, 1.0f, 1.0f);
-        DefaultLifetime = 5.0f;
-        bAutoDestroy = true;
+        DinosaurName = TEXT("DefaultDinosaur");
+        FootstepIntensity = 1.0f;
+        DustCloudSize = 100.0f;
+        ParticleColor = FLinearColor::Brown;
+        bCreateGroundCrack = false;
     }
 };
 
+// Environment-specific VFX settings for each biome
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FVFX_BiomeEffects
+struct TRANSPERSONALGAME_API FVFX_EnvironmentSettings
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
-    FVFX_EffectData AmbientParticles;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment VFX")
+    EBiomeType BiomeType = EBiomeType::Savanna;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
-    FVFX_EffectData WeatherEffect;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment VFX")
+    float AmbientParticleDensity = 0.5f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
-    FVFX_EffectData GroundImpact;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment VFX")
+    FLinearColor AmbientParticleColor = FLinearColor::White;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
-    float EffectIntensity = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment VFX")
+    float WindIntensity = 1.0f;
 
-    FVFX_BiomeEffects()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment VFX")
+    bool bHasVolcanicAsh = false;
+
+    FVFX_EnvironmentSettings()
     {
-        EffectIntensity = 1.0f;
+        BiomeType = EBiomeType::Savanna;
+        AmbientParticleDensity = 0.5f;
+        AmbientParticleColor = FLinearColor::White;
+        WindIntensity = 1.0f;
+        bHasVolcanicAsh = false;
     }
 };
 
 /**
- * VFX Niagara Manager - Sistema central de gestão de efeitos visuais
- * Gere todos os efeitos de partículas Niagara do jogo pré-histórico
+ * VFX Niagara Manager - Handles all visual effects for prehistoric environments
+ * Manages dinosaur footsteps, environmental particles, weather effects, and combat VFX
+ * Integrates with Audio system for synchronized audio-visual effects
  */
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UVFX_NiagaraManager : public UGameInstanceSubsystem
+UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent), BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API UVFX_NiagaraManager : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
     UVFX_NiagaraManager();
 
-    // USubsystem interface
-    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
-    virtual void Deinitialize() override;
+protected:
+    virtual void BeginPlay() override;
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    // Spawn de efeitos básicos
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    UNiagaraComponent* SpawnEffectAtLocation(const FString& EffectName, FVector Location, FRotator Rotation = FRotator::ZeroRotator, FVector Scale = FVector(1.0f));
+public:
+    // === DINOSAUR IMPACT VFX ===
+    UFUNCTION(BlueprintCallable, Category = "VFX Dinosaur")
+    void SpawnDinosaurFootstep(const FVector& Location, const FString& DinosaurType, float ImpactForce = 1.0f);
 
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    UNiagaraComponent* SpawnEffectAttached(const FString& EffectName, USceneComponent* AttachComponent, FName AttachPointName = NAME_None);
+    UFUNCTION(BlueprintCallable, Category = "VFX Dinosaur")
+    void SpawnDinosaurRoarEffect(const FVector& Location, const FString& DinosaurType);
 
-    // Efeitos específicos de dinossauros
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    void PlayFootstepEffect(FVector Location, EBiomeType BiomeType, float DinosaurSize = 1.0f);
+    UFUNCTION(BlueprintCallable, Category = "VFX Dinosaur")
+    void SpawnDinosaurBreathEffect(const FVector& Location, const FRotator& Direction, const FString& DinosaurType);
 
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    void PlayBloodEffect(FVector Location, FVector ImpactDirection, float Intensity = 1.0f);
+    // === ENVIRONMENTAL VFX ===
+    UFUNCTION(BlueprintCallable, Category = "VFX Environment")
+    void SetEnvironmentVFX(EBiomeType BiomeType, EVFX_IntensityLevel Intensity);
 
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    void PlayBreathEffect(FVector Location, FRotator Direction, float Temperature = 20.0f);
+    UFUNCTION(BlueprintCallable, Category = "VFX Environment")
+    void SpawnCampfireEffect(const FVector& Location, float FireIntensity = 1.0f);
 
-    // Efeitos ambientais
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    void StartBiomeAmbientEffects(EBiomeType BiomeType, FVector CenterLocation, float Radius = 5000.0f);
+    UFUNCTION(BlueprintCallable, Category = "VFX Environment")
+    void SpawnWaterfallSpray(const FVector& Location, const FVector& Direction, float WaterVolume = 1.0f);
 
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    void StopBiomeAmbientEffects(EBiomeType BiomeType);
+    UFUNCTION(BlueprintCallable, Category = "VFX Environment")
+    void SpawnVolcanicAsh(const FVector& Location, float AshDensity = 1.0f);
 
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    void UpdateWeatherEffects(EWeatherType WeatherType, float Intensity = 1.0f);
+    // === WEATHER VFX ===
+    UFUNCTION(BlueprintCallable, Category = "VFX Weather")
+    void StartRainEffect(float RainIntensity = 1.0f);
 
-    // Efeitos de combate
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    void PlayWeaponImpactEffect(FVector Location, FVector ImpactDirection, EWeaponType WeaponType);
+    UFUNCTION(BlueprintCallable, Category = "VFX Weather")
+    void StopRainEffect();
 
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    void PlayExplosionEffect(FVector Location, float Radius = 500.0f, float Intensity = 1.0f);
+    UFUNCTION(BlueprintCallable, Category = "VFX Weather")
+    void StartWindEffect(const FVector& WindDirection, float WindStrength = 1.0f);
 
-    // Gestão de performance
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    void SetEffectQuality(int32 QualityLevel); // 0=Low, 1=Medium, 2=High, 3=Ultra
+    UFUNCTION(BlueprintCallable, Category = "VFX Weather")
+    void SpawnLightningStrike(const FVector& Location);
 
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    void SetMaxActiveEffects(int32 MaxEffects);
+    // === COMBAT VFX ===
+    UFUNCTION(BlueprintCallable, Category = "VFX Combat")
+    void SpawnWeaponImpact(const FVector& Location, const FString& WeaponType, const FString& SurfaceType);
 
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    int32 GetActiveEffectCount() const;
+    UFUNCTION(BlueprintCallable, Category = "VFX Combat")
+    void SpawnBloodEffect(const FVector& Location, const FVector& Direction, float BloodAmount = 1.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "VFX Combat")
+    void SpawnSpearThrow(const FVector& StartLocation, const FVector& EndLocation);
+
+    // === CRAFTING VFX ===
+    UFUNCTION(BlueprintCallable, Category = "VFX Crafting")
+    void SpawnStoneKnapping(const FVector& Location);
+
+    UFUNCTION(BlueprintCallable, Category = "VFX Crafting")
+    void SpawnFireMaking(const FVector& Location);
+
+    UFUNCTION(BlueprintCallable, Category = "VFX Crafting")
+    void SpawnCookingSmoke(const FVector& Location, float CookingIntensity = 1.0f);
+
+    // === VFX MANAGEMENT ===
+    UFUNCTION(BlueprintCallable, Category = "VFX Management")
+    void SetGlobalVFXIntensity(EVFX_IntensityLevel NewIntensity);
+
+    UFUNCTION(BlueprintCallable, Category = "VFX Management")
+    void EnableVFXCategory(EVFX_EffectCategory Category, bool bEnable);
+
+    UFUNCTION(BlueprintCallable, Category = "VFX Management")
+    void CleanupExpiredEffects();
 
 protected:
-    // Configuração de efeitos por bioma
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Config")
-    TMap<EBiomeType, FVFX_BiomeEffects> BiomeEffectConfigs;
+    // === NIAGARA SYSTEM REFERENCES ===
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Systems")
+    TSoftObjectPtr<UNiagaraSystem> FootstepEffect;
 
-    // Efeitos base registados
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Config")
-    TMap<FString, FVFX_EffectData> RegisteredEffects;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Systems")
+    TSoftObjectPtr<UNiagaraSystem> CampfireEffect;
 
-    // Componentes activos
-    UPROPERTY()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Systems")
+    TSoftObjectPtr<UNiagaraSystem> RainEffect;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Systems")
+    TSoftObjectPtr<UNiagaraSystem> BloodEffect;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Systems")
+    TSoftObjectPtr<UNiagaraSystem> DustCloudEffect;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Systems")
+    TSoftObjectPtr<UNiagaraSystem> SparksEffect;
+
+    // === VFX CONFIGURATION ===
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Config")
+    EVFX_IntensityLevel GlobalIntensity = EVFX_IntensityLevel::Medium;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Config")
+    TMap<FString, FVFX_DinosaurProfile> DinosaurProfiles;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Config")
+    TMap<EBiomeType, FVFX_EnvironmentSettings> EnvironmentSettings;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Config")
+    TMap<EVFX_EffectCategory, bool> EnabledCategories;
+
+    // === ACTIVE EFFECTS TRACKING ===
+    UPROPERTY(BlueprintReadOnly, Category = "VFX Runtime")
     TArray<UNiagaraComponent*> ActiveEffects;
 
-    // Configurações de performance
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 MaxActiveEffects = 50;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Config")
+    float EffectCleanupInterval = 5.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 CurrentQualityLevel = 2; // Medium by default
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float EffectCullingDistance = 10000.0f;
+    UPROPERTY(BlueprintReadOnly, Category = "VFX Runtime")
+    float LastCleanupTime = 0.0f;
 
 private:
-    // Métodos internos
-    void InitializeEffectDatabase();
-    void RegisterDefaultEffects();
-    void CleanupExpiredEffects();
-    UNiagaraSystem* LoadNiagaraAsset(const FString& AssetPath);
-    FString GetEffectPathForBiome(EBiomeType BiomeType, const FString& EffectType);
-
-    // Timer para limpeza
-    FTimerHandle CleanupTimerHandle;
+    // === HELPER METHODS ===
+    UNiagaraComponent* SpawnNiagaraEffect(UNiagaraSystem* System, const FVector& Location, const FRotator& Rotation = FRotator::ZeroRotator);
+    void InitializeDinosaurProfiles();
+    void InitializeEnvironmentSettings();
+    void InitializeEnabledCategories();
+    bool IsEffectCategoryEnabled(EVFX_EffectCategory Category) const;
+    float GetIntensityMultiplier() const;
 };
