@@ -1,330 +1,252 @@
 #include "Narr_DialogueSystem.h"
-#include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "GameFramework/Actor.h"
-#include "GameFramework/Pawn.h"
-#include "Components/PrimitiveComponent.h"
+#include "TimerManager.h"
+#include "Kismet/GameplayStatics.h"
 
-UNarr_DialogueComponent::UNarr_DialogueComponent()
+UNarr_DialogueSystem::UNarr_DialogueSystem()
 {
-    PrimaryComponentTick.bCanEverTick = false;
-    bDialogueActive = false;
-    InteractionRange = 300.0f;
-    CurrentDialogueID = "";
+    PrimaryComponentTick.bCanEverTick = true;
+    PrimaryComponentTick.bStartWithTickEnabled = true;
+    
+    CurrentState = ENarr_DialogueState::Inactive;
+    ActiveSequenceID = TEXT("");
+    CurrentLineIndex = 0;
+    DialogueTimer = 0.0f;
+    bAutoAdvance = true;
+    AutoAdvanceDelay = 3.0f;
 }
 
-void UNarr_DialogueComponent::BeginPlay()
+void UNarr_DialogueSystem::BeginPlay()
 {
     Super::BeginPlay();
     
-    // Initialize with basic survival dialogues
-    FNarr_DialogueEntry GreetingEntry;
-    GreetingEntry.DialogueID = "greeting_basic";
-    GreetingEntry.SpeakerName = FText::FromString("Tribal Elder");
-    GreetingEntry.DialogueText = FText::FromString("You look tired, young hunter. The path of survival is never easy in these lands.");
-    GreetingEntry.DialogueType = ENarr_DialogueType::Greeting;
-    GreetingEntry.DisplayDuration = 4.0f;
+    InitializeDefaultDialogues();
+    LoadDialogueFromConfig();
     
-    FNarr_DialogueChoice ContinueChoice;
-    ContinueChoice.ChoiceText = FText::FromString("Tell me about survival here.");
-    ContinueChoice.NextDialogueID = "teaching_survival";
-    GreetingEntry.Choices.Add(ContinueChoice);
-    
-    AddDialogueEntry(GreetingEntry);
-    
-    // Teaching dialogue
-    FNarr_DialogueEntry TeachingEntry;
-    TeachingEntry.DialogueID = "teaching_survival";
-    TeachingEntry.SpeakerName = FText::FromString("Tribal Elder");
-    TeachingEntry.DialogueText = FText::FromString("Listen well - water is life, fire is safety, and shelter is hope. The great beasts respect strength, but they fear cleverness more.");
-    TeachingEntry.DialogueType = ENarr_DialogueType::Teaching;
-    TeachingEntry.DisplayDuration = 6.0f;
-    
-    FNarr_DialogueChoice EndChoice;
-    EndChoice.ChoiceText = FText::FromString("Thank you for the wisdom.");
-    EndChoice.NextDialogueID = "";
-    TeachingEntry.Choices.Add(EndChoice);
-    
-    AddDialogueEntry(TeachingEntry);
+    UE_LOG(LogTemp, Warning, TEXT("Narrative Dialogue System initialized with %d sequences"), DialogueSequences.Num());
 }
 
-bool UNarr_DialogueComponent::StartDialogue(const FString& DialogueID)
+void UNarr_DialogueSystem::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
-    if (bDialogueActive)
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+    
+    if (CurrentState == ENarr_DialogueState::DisplayingText)
     {
-        return false;
+        UpdateDialogueTimer(DeltaTime);
     }
-    
-    FNarr_DialogueEntry* FoundEntry = FindDialogueByID(DialogueID);
-    if (!FoundEntry)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Dialogue ID not found: %s"), *DialogueID);
-        return false;
-    }
-    
-    CurrentDialogueID = DialogueID;
-    bDialogueActive = true;
-    
-    UE_LOG(LogTemp, Log, TEXT("Started dialogue: %s"), *DialogueID);
-    return true;
 }
 
-void UNarr_DialogueComponent::EndDialogue()
+void UNarr_DialogueSystem::StartDialogueSequence(const FString& SequenceID)
 {
-    bDialogueActive = false;
-    CurrentDialogueID = "";
-    
-    // Mark dialogue as completed in the global manager
-    if (UNarr_DialogueManager* DialogueManager = GetWorld()->GetGameInstance()->GetSubsystem<UNarr_DialogueManager>())
+    if (!DialogueSequences.Contains(SequenceID))
     {
-        DialogueManager->MarkDialogueCompleted(CurrentDialogueID);
+        UE_LOG(LogTemp, Warning, TEXT("Dialogue sequence not found: %s"), *SequenceID);
+        return;
     }
     
-    UE_LOG(LogTemp, Log, TEXT("Ended dialogue"));
-}
-
-FNarr_DialogueEntry UNarr_DialogueComponent::GetCurrentDialogue() const
-{
-    if (CurrentDialogueID.IsEmpty())
-    {
-        return FNarr_DialogueEntry();
-    }
+    ActiveSequenceID = SequenceID;
+    CurrentLineIndex = 0;
+    DialogueTimer = 0.0f;
+    CurrentState = ENarr_DialogueState::DisplayingText;
     
-    for (const FNarr_DialogueEntry& Entry : DialogueEntries)
+    const FNarr_DialogueSequence& Sequence = DialogueSequences[SequenceID];
+    if (Sequence.DialogueLines.Num() > 0)
     {
-        if (Entry.DialogueID == CurrentDialogueID)
+        const FNarr_DialogueLine& FirstLine = Sequence.DialogueLines[0];
+        if (!FirstLine.AudioURL.IsEmpty())
         {
-            return Entry;
+            PlayDialogueAudio(FirstLine.AudioURL);
         }
+        
+        UE_LOG(LogTemp, Log, TEXT("Started dialogue: %s - %s"), *FirstLine.SpeakerName, *FirstLine.DialogueText);
     }
-    
-    return FNarr_DialogueEntry();
 }
 
-bool UNarr_DialogueComponent::SelectChoice(int32 ChoiceIndex)
+void UNarr_DialogueSystem::AdvanceDialogue()
 {
-    if (!bDialogueActive || CurrentDialogueID.IsEmpty())
+    if (!CanAdvanceDialogue())
     {
-        return false;
+        return;
     }
     
-    FNarr_DialogueEntry CurrentEntry = GetCurrentDialogue();
-    if (ChoiceIndex < 0 || ChoiceIndex >= CurrentEntry.Choices.Num())
-    {
-        return false;
-    }
+    const FNarr_DialogueSequence& Sequence = DialogueSequences[ActiveSequenceID];
+    CurrentLineIndex++;
     
-    const FNarr_DialogueChoice& SelectedChoice = CurrentEntry.Choices[ChoiceIndex];
-    
-    // Check if choice meets conditions
-    if (!CheckCondition(SelectedChoice.RequiredCondition, SelectedChoice.ConditionValue))
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Choice condition not met"));
-        return false;
-    }
-    
-    // Move to next dialogue or end
-    if (SelectedChoice.NextDialogueID.IsEmpty())
+    if (CurrentLineIndex >= Sequence.DialogueLines.Num())
     {
         EndDialogue();
+        return;
+    }
+    
+    const FNarr_DialogueLine& CurrentLine = Sequence.DialogueLines[CurrentLineIndex];
+    DialogueTimer = 0.0f;
+    
+    if (!CurrentLine.AudioURL.IsEmpty())
+    {
+        PlayDialogueAudio(CurrentLine.AudioURL);
+    }
+    
+    if (CurrentLine.bIsPlayerChoice)
+    {
+        CurrentState = ENarr_DialogueState::WaitingForChoice;
     }
     else
     {
-        CurrentDialogueID = SelectedChoice.NextDialogueID;
+        CurrentState = ENarr_DialogueState::DisplayingText;
     }
     
-    return true;
+    UE_LOG(LogTemp, Log, TEXT("Advanced dialogue: %s - %s"), *CurrentLine.SpeakerName, *CurrentLine.DialogueText);
 }
 
-void UNarr_DialogueComponent::AddDialogueEntry(const FNarr_DialogueEntry& NewEntry)
+void UNarr_DialogueSystem::EndDialogue()
 {
-    DialogueEntries.Add(NewEntry);
+    CurrentState = ENarr_DialogueState::Completed;
+    ActiveSequenceID = TEXT("");
+    CurrentLineIndex = 0;
+    DialogueTimer = 0.0f;
     
-    // Also register with global manager
-    if (UNarr_DialogueManager* DialogueManager = GetWorld()->GetGameInstance()->GetSubsystem<UNarr_DialogueManager>())
-    {
-        DialogueManager->RegisterDialogue(NewEntry);
-    }
-}
-
-bool UNarr_DialogueComponent::CanStartDialogue(AActor* Player) const
-{
-    if (!Player || bDialogueActive)
-    {
-        return false;
-    }
+    StopDialogueAudio();
     
-    // Check distance
-    float Distance = FVector::Dist(GetOwner()->GetActorLocation(), Player->GetActorLocation());
-    return Distance <= InteractionRange;
-}
-
-FNarr_DialogueEntry* UNarr_DialogueComponent::FindDialogueByID(const FString& DialogueID)
-{
-    for (FNarr_DialogueEntry& Entry : DialogueEntries)
+    UE_LOG(LogTemp, Log, TEXT("Dialogue sequence ended"));
+    
+    // Reset to inactive after a brief delay
+    if (UWorld* World = GetWorld())
     {
-        if (Entry.DialogueID == DialogueID)
+        World->GetTimerManager().SetTimer(FTimerHandle(), [this]()
         {
-            return &Entry;
-        }
+            CurrentState = ENarr_DialogueState::Inactive;
+        }, 1.0f, false);
     }
-    return nullptr;
 }
 
-bool UNarr_DialogueComponent::CheckCondition(const ENarr_DialogueCondition& Condition, const FString& Value) const
+bool UNarr_DialogueSystem::IsDialogueActive() const
 {
-    switch (Condition)
+    return CurrentState != ENarr_DialogueState::Inactive && CurrentState != ENarr_DialogueState::Completed;
+}
+
+FNarr_DialogueLine UNarr_DialogueSystem::GetCurrentDialogueLine() const
+{
+    if (!DialogueSequences.Contains(ActiveSequenceID))
     {
-        case ENarr_DialogueCondition::None:
-            return true;
-            
-        case ENarr_DialogueCondition::FirstMeeting:
-        {
-            if (UNarr_DialogueManager* DialogueManager = GetWorld()->GetGameInstance()->GetSubsystem<UNarr_DialogueManager>())
-            {
-                return !DialogueManager->IsDialogueCompleted(Value);
-            }
-            return true;
-        }
+        return FNarr_DialogueLine();
+    }
+    
+    const FNarr_DialogueSequence& Sequence = DialogueSequences[ActiveSequenceID];
+    if (CurrentLineIndex < 0 || CurrentLineIndex >= Sequence.DialogueLines.Num())
+    {
+        return FNarr_DialogueLine();
+    }
+    
+    return Sequence.DialogueLines[CurrentLineIndex];
+}
+
+void UNarr_DialogueSystem::RegisterDialogueSequence(const FNarr_DialogueSequence& Sequence)
+{
+    DialogueSequences.Add(Sequence.SequenceID, Sequence);
+    UE_LOG(LogTemp, Log, TEXT("Registered dialogue sequence: %s with %d lines"), *Sequence.SequenceID, Sequence.DialogueLines.Num());
+}
+
+void UNarr_DialogueSystem::LoadDialogueFromConfig()
+{
+    // TODO: Load dialogue sequences from JSON config file
+    // For now, we use the default dialogues initialized in InitializeDefaultDialogues()
+    UE_LOG(LogTemp, Log, TEXT("Dialogue config loading - using default dialogues"));
+}
+
+void UNarr_DialogueSystem::PlayDialogueAudio(const FString& AudioURL)
+{
+    // TODO: Integrate with audio system to play dialogue from URL
+    UE_LOG(LogTemp, Log, TEXT("Playing dialogue audio: %s"), *AudioURL);
+}
+
+void UNarr_DialogueSystem::StopDialogueAudio()
+{
+    // TODO: Stop current dialogue audio playback
+    UE_LOG(LogTemp, Log, TEXT("Stopping dialogue audio"));
+}
+
+void UNarr_DialogueSystem::InitializeDefaultDialogues()
+{
+    // Tribal Elder Introduction
+    FNarr_DialogueSequence ElderIntro;
+    ElderIntro.SequenceID = TEXT("elder_intro");
+    ElderIntro.bIsRepeatable = false;
+    
+    FNarr_DialogueLine Line1;
+    Line1.SpeakerName = TEXT("Tribal Elder");
+    Line1.DialogueText = TEXT("Listen well, young hunter. The great predators of this land follow ancient patterns.");
+    Line1.AudioURL = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1778879892767_TribalElder.mp3");
+    Line1.DisplayDuration = 5.0f;
+    ElderIntro.DialogueLines.Add(Line1);
+    
+    FNarr_DialogueLine Line2;
+    Line2.SpeakerName = TEXT("Tribal Elder");
+    Line2.DialogueText = TEXT("When the Thunder Lizard roars at dawn, it marks territory. Learn these signs, or become prey yourself.");
+    Line2.DisplayDuration = 4.0f;
+    ElderIntro.DialogueLines.Add(Line2);
+    
+    RegisterDialogueSequence(ElderIntro);
+    
+    // Scout Warning
+    FNarr_DialogueSequence ScoutWarning;
+    ScoutWarning.SequenceID = TEXT("scout_warning");
+    ScoutWarning.bIsRepeatable = true;
+    
+    FNarr_DialogueLine Warning1;
+    Warning1.SpeakerName = TEXT("Scout");
+    Warning1.DialogueText = TEXT("Warning! Raptor pack moving through the eastern valley. Three hunters, coordinated attack pattern.");
+    Warning1.AudioURL = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1778879907731_ScoutWarning.mp3");
+    Warning1.DisplayDuration = 4.0f;
+    ScoutWarning.DialogueLines.Add(Warning1);
+    
+    RegisterDialogueSequence(ScoutWarning);
+    
+    // Night Guard
+    FNarr_DialogueSequence NightGuard;
+    NightGuard.SequenceID = TEXT("night_guard");
+    NightGuard.bIsRepeatable = true;
+    
+    FNarr_DialogueLine Night1;
+    Night1.SpeakerName = TEXT("Night Guard");
+    Night1.DialogueText = TEXT("The herds are restless tonight. Something big moves in the darkness beyond our fires.");
+    Night1.AudioURL = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1778879914075_NightGuard.mp3");
+    Night1.DisplayDuration = 4.0f;
+    NightGuard.DialogueLines.Add(Night1);
+    
+    RegisterDialogueSequence(NightGuard);
+    
+    // Game Narrator Introduction
+    FNarr_DialogueSequence GameIntro;
+    GameIntro.SequenceID = TEXT("game_intro");
+    GameIntro.bIsRepeatable = false;
+    
+    FNarr_DialogueLine Intro1;
+    Intro1.SpeakerName = TEXT("Narrator");
+    Intro1.DialogueText = TEXT("Welcome to the Cretaceous world, survivor. Here, every sunrise is earned through cunning and courage.");
+    Intro1.AudioURL = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1778879919586_GameNarrator.mp3");
+    Intro1.DisplayDuration = 5.0f;
+    GameIntro.DialogueLines.Add(Intro1);
+    
+    RegisterDialogueSequence(GameIntro);
+}
+
+void UNarr_DialogueSystem::UpdateDialogueTimer(float DeltaTime)
+{
+    DialogueTimer += DeltaTime;
+    
+    if (bAutoAdvance)
+    {
+        const FNarr_DialogueLine& CurrentLine = GetCurrentDialogueLine();
+        float RequiredTime = FMath::Max(CurrentLine.DisplayDuration, AutoAdvanceDelay);
         
-        case ENarr_DialogueCondition::TimeOfDay:
+        if (DialogueTimer >= RequiredTime)
         {
-            // Simple time check - could be expanded with actual time system
-            return true;
+            AdvanceDialogue();
         }
-        
-        default:
-            return true;
     }
 }
 
-// Dialogue Manager Implementation
-void UNarr_DialogueManager::Initialize(FSubsystemCollectionBase& Collection)
+bool UNarr_DialogueSystem::CanAdvanceDialogue() const
 {
-    Super::Initialize(Collection);
-    LoadPrehistoricDialogues();
-    UE_LOG(LogTemp, Log, TEXT("Dialogue Manager initialized"));
-}
-
-void UNarr_DialogueManager::RegisterDialogue(const FNarr_DialogueEntry& DialogueEntry)
-{
-    GlobalDialogueDatabase.Add(DialogueEntry.DialogueID, DialogueEntry);
-    UE_LOG(LogTemp, Log, TEXT("Registered dialogue: %s"), *DialogueEntry.DialogueID);
-}
-
-FNarr_DialogueEntry UNarr_DialogueManager::GetDialogue(const FString& DialogueID) const
-{
-    if (const FNarr_DialogueEntry* FoundEntry = GlobalDialogueDatabase.Find(DialogueID))
-    {
-        return *FoundEntry;
-    }
-    return FNarr_DialogueEntry();
-}
-
-void UNarr_DialogueManager::MarkDialogueCompleted(const FString& DialogueID)
-{
-    CompletedDialogues.AddUnique(DialogueID);
-    UE_LOG(LogTemp, Log, TEXT("Marked dialogue completed: %s"), *DialogueID);
-}
-
-bool UNarr_DialogueManager::IsDialogueCompleted(const FString& DialogueID) const
-{
-    return CompletedDialogues.Contains(DialogueID);
-}
-
-void UNarr_DialogueManager::SetDialogueFlag(const FString& FlagName, int32 Value)
-{
-    DialogueFlags.Add(FlagName, Value);
-}
-
-int32 UNarr_DialogueManager::GetDialogueFlag(const FString& FlagName) const
-{
-    if (const int32* FoundValue = DialogueFlags.Find(FlagName))
-    {
-        return *FoundValue;
-    }
-    return 0;
-}
-
-void UNarr_DialogueManager::LoadPrehistoricDialogues()
-{
-    CreateSurvivalDialogues();
-    CreateTeachingDialogues();
-    CreateWarningDialogues();
-}
-
-void UNarr_DialogueManager::CreateSurvivalDialogues()
-{
-    // Water finding dialogue
-    FNarr_DialogueEntry WaterEntry;
-    WaterEntry.DialogueID = "water_teaching";
-    WaterEntry.SpeakerName = FText::FromString("Water Guide");
-    WaterEntry.DialogueText = FText::FromString("The water runs clear here, but taste it first - the bitter streams carry death. Look for where the plant-eaters drink.");
-    WaterEntry.DialogueType = ENarr_DialogueType::Teaching;
-    WaterEntry.AudioAssetPath = "/Game/Audio/Dialogue/WaterGuide.mp3";
-    RegisterDialogue(WaterEntry);
-    
-    // Fire keeping dialogue
-    FNarr_DialogueEntry FireEntry;
-    FireEntry.DialogueID = "fire_teaching";
-    FireEntry.SpeakerName = FText::FromString("Flame Keeper");
-    FireEntry.DialogueText = FText::FromString("Fire is life. Fire is safety. The flame-keeper's duty is sacred - let the fire die and the tribe dies with it.");
-    FireEntry.DialogueType = ENarr_DialogueType::Teaching;
-    FireEntry.AudioAssetPath = "/Game/Audio/Dialogue/FlameKeeper.mp3";
-    RegisterDialogue(FireEntry);
-    
-    // Shelter building dialogue
-    FNarr_DialogueEntry ShelterEntry;
-    ShelterEntry.DialogueID = "shelter_teaching";
-    ShelterEntry.SpeakerName = FText::FromString("Builder");
-    ShelterEntry.DialogueText = FText::FromString("Build your shelter facing away from the wind, but where you can see the approaches. The great hunters are patient - they will wait for you to sleep.");
-    ShelterEntry.DialogueType = ENarr_DialogueType::Teaching;
-    RegisterDialogue(ShelterEntry);
-}
-
-void UNarr_DialogueManager::CreateTeachingDialogues()
-{
-    // Hunting wisdom
-    FNarr_DialogueEntry HuntEntry;
-    HuntEntry.DialogueID = "hunting_wisdom";
-    HuntEntry.SpeakerName = FText::FromString("Master Hunter");
-    HuntEntry.DialogueText = FText::FromString("The small prey feeds the body, but the great beasts feed the tribe. Learn their patterns - when they drink, where they sleep, how they protect their young.");
-    HuntEntry.DialogueType = ENarr_DialogueType::Teaching;
-    RegisterDialogue(HuntEntry);
-    
-    // Tool crafting
-    FNarr_DialogueEntry ToolEntry;
-    ToolEntry.DialogueID = "tool_crafting";
-    ToolEntry.SpeakerName = FText::FromString("Tool Maker");
-    ToolEntry.DialogueText = FText::FromString("Sharp stone cuts, but shaped stone kills. Bind it well with sinew and sap. A broken spear in battle means death - check your tools like your life depends on them.");
-    ToolEntry.DialogueType = ENarr_DialogueType::Teaching;
-    RegisterDialogue(ToolEntry);
-}
-
-void UNarr_DialogueManager::CreateWarningDialogues()
-{
-    // Raptor warning
-    FNarr_DialogueEntry RaptorEntry;
-    RaptorEntry.DialogueID = "raptor_warning";
-    RaptorEntry.SpeakerName = FText::FromString("Scout");
-    RaptorEntry.DialogueText = FText::FromString("Pack hunters spotted near the eastern cliffs! Three, maybe four raptors moving in formation. They hunt at dawn and dusk.");
-    RaptorEntry.DialogueType = ENarr_DialogueType::Warning;
-    RaptorEntry.AudioAssetPath = "/Game/Audio/Dialogue/ScoutWarning.mp3";
-    RegisterDialogue(RaptorEntry);
-    
-    // Weather warning
-    FNarr_DialogueEntry WeatherEntry;
-    WeatherEntry.DialogueID = "storm_warning";
-    WeatherEntry.SpeakerName = FText::FromString("Weather Watcher");
-    WeatherEntry.DialogueText = FText::FromString("The sky grows dark and the wind shifts. The great storms bring flooding and drive the predators to higher ground - our ground.");
-    WeatherEntry.DialogueType = ENarr_DialogueType::Warning;
-    RegisterDialogue(WeatherEntry);
-    
-    // Territory warning
-    FNarr_DialogueEntry TerritoryEntry;
-    TerritoryEntry.DialogueID = "territory_warning";
-    TerritoryEntry.SpeakerName = FText::FromString("Territory Guard");
-    TerritoryEntry.DialogueText = FText::FromString("That is Thunder Lizard territory. The great one marks its domain with deep footprints and broken trees. Enter only if you seek death.");
-    TerritoryEntry.DialogueType = ENarr_DialogueType::Warning;
-    RegisterDialogue(TerritoryEntry);
+    return CurrentState == ENarr_DialogueState::DisplayingText || CurrentState == ENarr_DialogueState::WaitingForChoice;
 }
