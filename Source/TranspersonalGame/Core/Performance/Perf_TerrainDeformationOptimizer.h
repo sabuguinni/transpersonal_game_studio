@@ -1,107 +1,143 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/World.h"
-#include "Components/ActorComponent.h"
-#include "Subsystems/GameInstanceSubsystem.h"
 #include "Engine/Engine.h"
+#include "Components/ActorComponent.h"
+#include "Engine/World.h"
+#include "Landscape.h"
+#include "LandscapeComponent.h"
+#include "LandscapeInfo.h"
+#include "Engine/GameInstance.h"
+#include "Subsystems/GameInstanceSubsystem.h"
 #include "SharedTypes.h"
 #include "Perf_TerrainDeformationOptimizer.generated.h"
 
 // Forward declarations
-class UCore_TerrainDeformationComponent;
-class UCore_TerrainDeformationManager;
+class UCore_TerrainDeformationSystem;
+class ALandscape;
 
-/**
- * Terrain Deformation Performance Metrics
- * Tracks performance data for terrain deformation operations
- */
+UENUM(BlueprintType)
+enum class EPerf_TerrainDeformationQuality : uint8
+{
+    Disabled    UMETA(DisplayName = "Disabled"),
+    Low         UMETA(DisplayName = "Low Quality"),
+    Medium      UMETA(DisplayName = "Medium Quality"),
+    High        UMETA(DisplayName = "High Quality"),
+    Ultra       UMETA(DisplayName = "Ultra Quality")
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FPerf_TerrainDeformationBudget
+{
+    GENERATED_BODY()
+
+    // Maximum number of active deformations per frame
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    int32 MaxDeformationsPerFrame = 5;
+
+    // Maximum number of simultaneous deformations in the world
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    int32 MaxSimultaneousDeformations = 200;
+
+    // Distance at which deformations are culled
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float CullingDistance = 5000.0f;
+
+    // Memory budget for deformation data in MB
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float MemoryBudgetMB = 50.0f;
+
+    // Time budget for deformation processing per frame in milliseconds
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float TimeBudgetMS = 2.0f;
+
+    FPerf_TerrainDeformationBudget()
+    {
+        MaxDeformationsPerFrame = 5;
+        MaxSimultaneousDeformations = 200;
+        CullingDistance = 5000.0f;
+        MemoryBudgetMB = 50.0f;
+        TimeBudgetMS = 2.0f;
+    }
+};
+
 USTRUCT(BlueprintType)
 struct TRANSPERSONALGAME_API FPerf_TerrainDeformationMetrics
 {
     GENERATED_BODY()
 
-    // Performance timing metrics
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float DeformationTime;
+    // Current number of active deformations
+    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
+    int32 ActiveDeformations = 0;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance") 
-    float LandscapeUpdateTime;
+    // Current memory usage in MB
+    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
+    float CurrentMemoryUsageMB = 0.0f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float ComponentUpdateTime;
+    // Current frame time for deformation processing in MS
+    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
+    float CurrentFrameTimeMS = 0.0f;
 
-    // Resource usage metrics
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    int32 ActiveDeformations;
+    // Number of deformations culled this frame
+    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
+    int32 CulledDeformationsThisFrame = 0;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    int32 PendingDeformations;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float MemoryUsageMB;
-
-    // Quality metrics
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    int32 LODLevel;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float UpdateRadius;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    bool bIsOptimized;
+    // Performance efficiency ratio (0-1)
+    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
+    float PerformanceEfficiency = 1.0f;
 
     FPerf_TerrainDeformationMetrics()
-        : DeformationTime(0.0f)
-        , LandscapeUpdateTime(0.0f)
-        , ComponentUpdateTime(0.0f)
-        , ActiveDeformations(0)
-        , PendingDeformations(0)
-        , MemoryUsageMB(0.0f)
-        , LODLevel(0)
-        , UpdateRadius(1000.0f)
-        , bIsOptimized(false)
-    {}
+    {
+        ActiveDeformations = 0;
+        CurrentMemoryUsageMB = 0.0f;
+        CurrentFrameTimeMS = 0.0f;
+        CulledDeformationsThisFrame = 0;
+        PerformanceEfficiency = 1.0f;
+    }
 };
 
-/**
- * Terrain Deformation LOD Settings
- * Controls level-of-detail for terrain deformation based on distance and performance
- */
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FPerf_TerrainDeformationLOD
+struct TRANSPERSONALGAME_API FPerf_TerrainLODSettings
 {
     GENERATED_BODY()
 
+    // Distance thresholds for different LOD levels
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
-    float Distance;
+    float LOD0Distance = 1000.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
-    float UpdateFrequency;
+    float LOD1Distance = 3000.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
-    float DeformationRadius;
+    float LOD2Distance = 6000.0f;
+
+    // Resolution multipliers for each LOD level
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
+    float LOD0ResolutionMultiplier = 1.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
-    float IntensityMultiplier;
+    float LOD1ResolutionMultiplier = 0.5f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
-    bool bEnableDeformation;
+    float LOD2ResolutionMultiplier = 0.25f;
 
-    FPerf_TerrainDeformationLOD()
-        : Distance(1000.0f)
-        , UpdateFrequency(60.0f)
-        , DeformationRadius(500.0f)
-        , IntensityMultiplier(1.0f)
-        , bEnableDeformation(true)
-    {}
+    FPerf_TerrainLODSettings()
+    {
+        LOD0Distance = 1000.0f;
+        LOD1Distance = 3000.0f;
+        LOD2Distance = 6000.0f;
+        LOD0ResolutionMultiplier = 1.0f;
+        LOD1ResolutionMultiplier = 0.5f;
+        LOD2ResolutionMultiplier = 0.25f;
+    }
 };
 
 /**
- * Terrain Deformation Performance Component
- * Monitors and optimizes terrain deformation performance for individual actors
+ * Performance optimizer for terrain deformation systems
+ * Manages LOD, culling, memory budgets, and frame time budgets for terrain modifications
+ * Ensures 60fps target is maintained even with extensive terrain deformation
  */
-UCLASS(BlueprintType, Blueprintable, ClassGroup=(Performance), meta=(BlueprintSpawnableComponent))
+UCLASS(BlueprintType, Blueprintable, meta = (BlueprintSpawnableComponent))
 class TRANSPERSONALGAME_API UPerf_TerrainDeformationOptimizer : public UActorComponent
 {
     GENERATED_BODY()
@@ -111,99 +147,136 @@ public:
 
 protected:
     virtual void BeginPlay() override;
-    virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 public:
-    // Performance monitoring
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void StartPerformanceMonitoring();
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void StopPerformanceMonitoring();
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    FPerf_TerrainDeformationMetrics GetPerformanceMetrics() const;
-
-    // LOD management
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void UpdateLODLevel(float DistanceToPlayer);
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    int32 GetCurrentLODLevel() const;
-
-    // Optimization controls
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void SetOptimizationEnabled(bool bEnabled);
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void OptimizeDeformationRadius(float TargetFrameTime);
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void CullDistantDeformations(float MaxDistance);
-
-    // Debug and profiling
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Debug")
-    void RunPerformanceTest();
-
-    UFUNCTION(BlueprintCallable, Category = "Debug")
-    void EnableDebugVisualization(bool bEnabled);
-
-protected:
-    // Performance settings
+    // Performance configuration
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    bool bEnableOptimization;
+    EPerf_TerrainDeformationQuality QualityLevel = EPerf_TerrainDeformationQuality::High;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float TargetFrameRate;
+    FPerf_TerrainDeformationBudget PerformanceBudget;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float MaxDeformationRadius;
+    FPerf_TerrainLODSettings LODSettings;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 MaxActiveDeformations;
-
-    // LOD settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
-    TArray<FPerf_TerrainDeformationLOD> LODLevels;
-
-    UPROPERTY(BlueprintReadOnly, Category = "LOD")
-    int32 CurrentLODLevel;
-
-    // Performance tracking
     UPROPERTY(BlueprintReadOnly, Category = "Performance")
     FPerf_TerrainDeformationMetrics CurrentMetrics;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    bool bIsMonitoring;
+    // Optimization settings
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Optimization")
+    bool bEnableAutomaticQualityAdjustment = true;
 
-    // Component references
-    UPROPERTY()
-    UCore_TerrainDeformationComponent* TerrainDeformationComponent;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Optimization")
+    bool bEnableDistanceCulling = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Optimization")
+    bool bEnableLODOptimization = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Optimization")
+    bool bEnableMemoryPooling = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Optimization")
+    float TargetFrameRate = 60.0f;
+
+    // Performance monitoring
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Monitoring")
+    float PerformanceCheckInterval = 0.1f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Monitoring")
+    bool bEnableDetailedProfiling = false;
+
+    // Core optimization functions
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void OptimizeTerrainDeformations();
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void SetQualityLevel(EPerf_TerrainDeformationQuality NewQuality);
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void UpdatePerformanceBudget(const FPerf_TerrainDeformationBudget& NewBudget);
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void CullDistantDeformations(const FVector& ViewerLocation);
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    int32 GetOptimalLODLevel(float Distance) const;
+
+    // Memory management
+    UFUNCTION(BlueprintCallable, Category = "Memory")
+    void CleanupInactiveDeformations();
+
+    UFUNCTION(BlueprintCallable, Category = "Memory")
+    float GetCurrentMemoryUsage() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Memory")
+    bool IsWithinMemoryBudget() const;
+
+    // Performance analysis
+    UFUNCTION(BlueprintCallable, Category = "Analysis")
+    void UpdatePerformanceMetrics();
+
+    UFUNCTION(BlueprintCallable, Category = "Analysis")
+    bool IsPerformanceTargetMet() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Analysis")
+    void AdjustQualityForPerformance();
+
+    // Integration with terrain systems
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    void RegisterTerrainDeformationSystem(UCore_TerrainDeformationSystem* System);
+
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    void UnregisterTerrainDeformationSystem(UCore_TerrainDeformationSystem* System);
+
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    void OptimizeLandscapeComponents(ALandscape* Landscape);
+
+    // Debug and profiling
+    UFUNCTION(BlueprintCallable, Category = "Debug", CallInEditor = true)
+    void PrintPerformanceReport();
+
+    UFUNCTION(BlueprintCallable, Category = "Debug", CallInEditor = true)
+    void ResetPerformanceCounters();
+
+    UFUNCTION(BlueprintCallable, Category = "Debug")
+    void SetDebugVisualization(bool bEnabled);
 
 private:
-    // Performance timing
-    float LastUpdateTime;
-    float AccumulatedFrameTime;
-    int32 FrameCount;
+    // Internal tracking
+    UPROPERTY()
+    TArray<TWeakObjectPtr<UCore_TerrainDeformationSystem>> RegisteredSystems;
+
+    UPROPERTY()
+    TArray<TWeakObjectPtr<ALandscape>> ManagedLandscapes;
+
+    // Performance tracking
+    float LastPerformanceCheck = 0.0f;
+    float AccumulatedFrameTime = 0.0f;
+    int32 FrameTimesamples = 0;
 
     // Optimization state
-    bool bNeedsOptimization;
-    float LastOptimizationTime;
+    bool bCurrentlyOptimizing = false;
+    float LastOptimizationTime = 0.0f;
 
-    // Helper methods
-    void UpdatePerformanceMetrics(float DeltaTime);
-    void ApplyLODOptimizations();
+    // Internal optimization functions
+    void PerformDistanceCulling();
+    void UpdateLODLevels();
+    void ManageMemoryUsage();
     void CheckPerformanceThresholds();
-    float CalculateDistanceToPlayer() const;
+    void ApplyQualitySettings();
+    
+    // Utility functions
+    float CalculateDistanceToViewer(const FVector& Location) const;
+    void UpdateBudgetBasedOnQuality();
+    void LogPerformanceWarning(const FString& Warning);
 };
 
 /**
- * Terrain Deformation Performance Manager
- * Global subsystem for managing terrain deformation performance across the world
+ * Global subsystem for managing terrain deformation performance across the entire game world
  */
 UCLASS()
-class TRANSPERSONALGAME_API UPerf_TerrainDeformationManager : public UGameInstanceSubsystem
+class TRANSPERSONALGAME_API UPerf_TerrainDeformationSubsystem : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
@@ -211,60 +284,23 @@ public:
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
-    // Component registration
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void RegisterOptimizer(UPerf_TerrainDeformationOptimizer* Optimizer);
+    // Global performance management
+    UFUNCTION(BlueprintCallable, Category = "Global Performance")
+    void SetGlobalTerrainQuality(EPerf_TerrainDeformationQuality Quality);
 
-    UFUNCTION(BlueprintCallable, Category = "Performance")
+    UFUNCTION(BlueprintCallable, Category = "Global Performance")
+    void OptimizeAllTerrainSystems();
+
+    UFUNCTION(BlueprintCallable, Category = "Global Performance")
+    FPerf_TerrainDeformationMetrics GetGlobalPerformanceMetrics() const;
+
+    // System registration
+    void RegisterOptimizer(UPerf_TerrainDeformationOptimizer* Optimizer);
     void UnregisterOptimizer(UPerf_TerrainDeformationOptimizer* Optimizer);
 
-    // Global performance management
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void UpdateGlobalPerformance(float DeltaTime);
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    FPerf_TerrainDeformationMetrics GetGlobalMetrics() const;
-
-    // Performance controls
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void SetGlobalOptimizationLevel(int32 Level);
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void EnablePerformanceMode(bool bEnabled);
-
-    // Debugging
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Debug")
-    void RunGlobalPerformanceTest();
-
-    UFUNCTION(BlueprintCallable, Category = "Debug")
-    void LogPerformanceReport();
-
-protected:
-    // Registered optimizers
-    UPROPERTY()
-    TArray<UPerf_TerrainDeformationOptimizer*> RegisteredOptimizers;
-
-    // Global performance settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float GlobalTargetFrameRate;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 MaxGlobalDeformations;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    bool bEnableGlobalOptimization;
-
-    // Performance tracking
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    FPerf_TerrainDeformationMetrics GlobalMetrics;
-
 private:
-    // Performance management
-    void OptimizeGlobalPerformance();
-    void UpdateGlobalLOD();
-    void CullExcessiveDeformations();
+    UPROPERTY()
+    TArray<TWeakObjectPtr<UPerf_TerrainDeformationOptimizer>> RegisteredOptimizers;
 
-    // Timing
-    float LastGlobalUpdate;
-    float GlobalUpdateInterval;
+    EPerf_TerrainDeformationQuality GlobalQualityLevel = EPerf_TerrainDeformationQuality::High;
 };
