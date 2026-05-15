@@ -1,94 +1,116 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Subsystems/GameInstanceSubsystem.h"
-#include "Engine/Engine.h"
+#include "Engine/GameInstanceSubsystem.h"
 #include "SharedTypes.h"
 #include "Quest_ExplorationManager.generated.h"
 
-// Forward declarations
-class ATranspersonalCharacter;
+UENUM(BlueprintType)
+enum class EQuest_BiomeType : uint8
+{
+    None = 0,
+    Savanna,
+    Swamp,
+    Forest,
+    Desert,
+    Mountain
+};
+
+UENUM(BlueprintType)
+enum class EQuest_DiscoveryType : uint8
+{
+    None = 0,
+    Cave,
+    WaterSource,
+    ResourceDeposit,
+    AncientRuins,
+    DinosaurNest,
+    VantagePoint,
+    SafeZone,
+    DangerZone
+};
 
 USTRUCT(BlueprintType)
-struct FQuest_ExplorationZone
+struct TRANSPERSONALGAME_API FQuest_DiscoveryData
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Exploration")
-    FString ZoneName;
+    UPROPERTY(BlueprintReadOnly, Category = "Discovery")
+    EQuest_DiscoveryType Type = EQuest_DiscoveryType::None;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Exploration")
-    FVector ZoneLocation;
+    UPROPERTY(BlueprintReadOnly, Category = "Discovery")
+    FString Name;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Exploration")
-    float ZoneRadius;
+    UPROPERTY(BlueprintReadOnly, Category = "Discovery")
+    FVector Location = FVector::ZeroVector;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Exploration")
-    EBiomeType BiomeType;
+    UPROPERTY(BlueprintReadOnly, Category = "Discovery")
+    EQuest_BiomeType Biome = EQuest_BiomeType::None;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Exploration")
-    bool bIsDiscovered;
+    UPROPERTY(BlueprintReadOnly, Category = "Discovery")
+    bool bIsDiscovered = false;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Exploration")
-    float DiscoveryTime;
+    UPROPERTY(BlueprintReadOnly, Category = "Discovery")
+    float DiscoveryRadius = 500.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Exploration")
-    int32 ExplorationPoints;
+    UPROPERTY(BlueprintReadOnly, Category = "Discovery")
+    int32 ExperienceReward = 50;
 
-    FQuest_ExplorationZone()
+    UPROPERTY(BlueprintReadOnly, Category = "Discovery")
+    FString Description;
+
+    FQuest_DiscoveryData()
     {
-        ZoneName = TEXT("Unknown Zone");
-        ZoneLocation = FVector::ZeroVector;
-        ZoneRadius = 1000.0f;
-        BiomeType = EBiomeType::Grassland;
+        Type = EQuest_DiscoveryType::None;
+        Name = TEXT("");
+        Location = FVector::ZeroVector;
+        Biome = EQuest_BiomeType::None;
         bIsDiscovered = false;
-        DiscoveryTime = 0.0f;
-        ExplorationPoints = 10;
+        DiscoveryRadius = 500.0f;
+        ExperienceReward = 50;
+        Description = TEXT("");
     }
 };
 
 USTRUCT(BlueprintType)
-struct FQuest_ExplorationData
+struct TRANSPERSONALGAME_API FQuest_ExplorationObjective
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Exploration")
-    FString QuestName;
+    UPROPERTY(BlueprintReadOnly, Category = "Exploration")
+    FString ObjectiveName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Exploration")
-    TArray<FQuest_ExplorationZone> TargetZones;
+    UPROPERTY(BlueprintReadOnly, Category = "Exploration")
+    EQuest_BiomeType TargetBiome = EQuest_BiomeType::None;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Exploration")
-    int32 RequiredZones;
+    UPROPERTY(BlueprintReadOnly, Category = "Exploration")
+    EQuest_DiscoveryType TargetDiscovery = EQuest_DiscoveryType::None;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Exploration")
-    int32 DiscoveredZones;
+    UPROPERTY(BlueprintReadOnly, Category = "Exploration")
+    FVector TargetLocation = FVector::ZeroVector;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Exploration")
-    float TimeLimit;
+    UPROPERTY(BlueprintReadOnly, Category = "Exploration")
+    float TargetDistance = 1000.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Exploration")
-    float ElapsedTime;
+    UPROPERTY(BlueprintReadOnly, Category = "Exploration")
+    bool bIsCompleted = false;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Exploration")
-    bool bIsActive;
+    UPROPERTY(BlueprintReadOnly, Category = "Exploration")
+    int32 ExperienceReward = 100;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Exploration")
-    int32 TotalExplorationPoints;
-
-    FQuest_ExplorationData()
+    FQuest_ExplorationObjective()
     {
-        QuestName = TEXT("Exploration Quest");
-        RequiredZones = 1;
-        DiscoveredZones = 0;
-        TimeLimit = 1200.0f; // 20 minutes
-        ElapsedTime = 0.0f;
-        bIsActive = false;
-        TotalExplorationPoints = 0;
+        ObjectiveName = TEXT("");
+        TargetBiome = EQuest_BiomeType::None;
+        TargetDiscovery = EQuest_DiscoveryType::None;
+        TargetLocation = FVector::ZeroVector;
+        TargetDistance = 1000.0f;
+        bIsCompleted = false;
+        ExperienceReward = 100;
     }
 };
 
-UCLASS(BlueprintType, Blueprintable)
+UCLASS(BlueprintType)
 class TRANSPERSONALGAME_API UQuest_ExplorationManager : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
@@ -100,89 +122,84 @@ public:
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
-    // Quest management
-    UFUNCTION(BlueprintCallable, Category = "Quest Exploration")
-    void StartExplorationQuest(const TArray<FQuest_ExplorationZone>& Zones, int32 RequiredCount, float TimeLimit, const FString& QuestName);
+    // Discovery system
+    UFUNCTION(BlueprintCallable, Category = "Quest|Exploration")
+    void CheckForDiscoveries(const FVector& PlayerLocation);
 
-    UFUNCTION(BlueprintCallable, Category = "Quest Exploration")
-    void CompleteExplorationQuest();
+    UFUNCTION(BlueprintCallable, Category = "Quest|Exploration")
+    bool DiscoverLocation(const FQuest_DiscoveryData& Discovery);
 
-    UFUNCTION(BlueprintCallable, Category = "Quest Exploration")
-    void CancelExplorationQuest();
+    UFUNCTION(BlueprintPure, Category = "Quest|Exploration")
+    TArray<FQuest_DiscoveryData> GetDiscoveredLocations() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Quest Exploration")
-    void RegisterZoneDiscovery(const FString& ZoneName, ATranspersonalCharacter* Explorer);
+    UFUNCTION(BlueprintPure, Category = "Quest|Exploration")
+    TArray<FQuest_DiscoveryData> GetUndiscoveredLocations() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Quest Exploration")
-    bool IsExplorationQuestActive() const;
+    // Biome system
+    UFUNCTION(BlueprintPure, Category = "Quest|Exploration")
+    EQuest_BiomeType GetCurrentBiome(const FVector& Location) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Quest Exploration")
-    FQuest_ExplorationData GetCurrentExplorationQuest() const;
+    UFUNCTION(BlueprintCallable, Category = "Quest|Exploration")
+    void OnPlayerEnteredBiome(EQuest_BiomeType NewBiome);
 
-    UFUNCTION(BlueprintCallable, Category = "Quest Exploration")
+    UFUNCTION(BlueprintPure, Category = "Quest|Exploration")
+    bool HasVisitedBiome(EQuest_BiomeType Biome) const;
+
+    // Exploration objectives
+    UFUNCTION(BlueprintCallable, Category = "Quest|Exploration")
+    void GenerateExplorationObjective();
+
+    UFUNCTION(BlueprintCallable, Category = "Quest|Exploration")
+    bool CompleteExplorationObjective(const FString& ObjectiveName);
+
+    UFUNCTION(BlueprintPure, Category = "Quest|Exploration")
+    TArray<FQuest_ExplorationObjective> GetActiveObjectives() const;
+
+    // Map and navigation
+    UFUNCTION(BlueprintCallable, Category = "Quest|Exploration")
+    void RevealMapArea(const FVector& Center, float Radius);
+
+    UFUNCTION(BlueprintPure, Category = "Quest|Exploration")
     float GetExplorationProgress() const;
 
-    // Zone management
-    UFUNCTION(BlueprintCallable, Category = "Quest Exploration")
-    void AddExplorationZone(const FQuest_ExplorationZone& Zone);
+    UFUNCTION(BlueprintCallable, Category = "Quest|Exploration")
+    void SpawnExplorationMarkers();
 
-    UFUNCTION(BlueprintCallable, Category = "Quest Exploration")
-    TArray<FQuest_ExplorationZone> GetNearbyZones(const FVector& Location, float SearchRadius) const;
+    // Quest integration
+    UFUNCTION(BlueprintPure, Category = "Quest|Exploration")
+    bool HasCompletedExplorationRequirement(const FString& RequirementType) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Quest Exploration")
-    bool IsPlayerInZone(const FVector& PlayerLocation, const FQuest_ExplorationZone& Zone) const;
-
-    // Preset exploration quests
-    UFUNCTION(BlueprintCallable, Category = "Quest Exploration")
-    void CreateSwampExplorationQuest();
-
-    UFUNCTION(BlueprintCallable, Category = "Quest Exploration")
-    void CreateForestExplorationQuest();
-
-    UFUNCTION(BlueprintCallable, Category = "Quest Exploration")
-    void CreateDesertExplorationQuest();
-
-    UFUNCTION(BlueprintCallable, Category = "Quest Exploration")
-    void CreateMountainExplorationQuest();
-
-    UFUNCTION(BlueprintCallable, Category = "Quest Exploration")
-    void CreateFullWorldExplorationQuest();
-
-    // Events
-    DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnExplorationQuestStarted, FString, QuestName, int32, RequiredZones);
-    DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnExplorationQuestCompleted, FString, QuestName, int32, TotalPoints);
-    DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnExplorationQuestFailed, FString, Reason);
-    DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnZoneDiscovered, FString, ZoneName, EBiomeType, BiomeType, int32, Points);
-
-    UPROPERTY(BlueprintAssignable, Category = "Quest Events")
-    FOnExplorationQuestStarted OnExplorationQuestStarted;
-
-    UPROPERTY(BlueprintAssignable, Category = "Quest Events")
-    FOnExplorationQuestCompleted OnExplorationQuestCompleted;
-
-    UPROPERTY(BlueprintAssignable, Category = "Quest Events")
-    FOnExplorationQuestFailed OnExplorationQuestFailed;
-
-    UPROPERTY(BlueprintAssignable, Category = "Quest Events")
-    FOnZoneDiscovered OnZoneDiscovered;
+    UFUNCTION(BlueprintCallable, Category = "Quest|Exploration")
+    void TrackPlayerMovement(const FVector& NewLocation);
 
 protected:
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest State")
-    FQuest_ExplorationData CurrentExplorationQuest;
+    UPROPERTY(BlueprintReadOnly, Category = "Quest|Exploration")
+    TArray<FQuest_DiscoveryData> AllDiscoveries;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Config")
-    TArray<FQuest_ExplorationZone> AllExplorationZones;
+    UPROPERTY(BlueprintReadOnly, Category = "Quest|Exploration")
+    TArray<FQuest_ExplorationObjective> ExplorationObjectives;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Config")
-    float BaseTimeLimit;
+    UPROPERTY(BlueprintReadOnly, Category = "Quest|Exploration")
+    TSet<EQuest_BiomeType> VisitedBiomes;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Config")
-    float ZoneDiscoveryRadius;
+    UPROPERTY(BlueprintReadOnly, Category = "Quest|Exploration")
+    EQuest_BiomeType CurrentBiome = EQuest_BiomeType::Savanna;
 
-private:
-    void UpdateQuestTimer();
-    void CheckQuestCompletion();
-    void InitializeExplorationZones();
+    UPROPERTY(BlueprintReadOnly, Category = "Quest|Exploration")
+    FVector LastPlayerLocation = FVector::ZeroVector;
 
-    FTimerHandle QuestTimerHandle;
+    UPROPERTY(BlueprintReadOnly, Category = "Quest|Exploration")
+    float TotalDistanceTraveled = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Quest|Exploration")
+    TSet<FVector> RevealedMapAreas;
+
+    // Initialize discovery locations
+    void InitializeDiscoveryLocations();
+    void InitializeBiomeLocations();
+
+    // Helper functions
+    FQuest_DiscoveryData CreateDiscovery(EQuest_DiscoveryType Type, const FString& Name, const FVector& Location, EQuest_BiomeType Biome) const;
+    FQuest_ExplorationObjective CreateExplorationObjective(const FString& Name, EQuest_BiomeType TargetBiome, const FVector& Target) const;
+    float CalculateDistanceToDiscovery(const FVector& PlayerLocation, const FQuest_DiscoveryData& Discovery) const;
 };
