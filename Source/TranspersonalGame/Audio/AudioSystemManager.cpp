@@ -1,309 +1,442 @@
 #include "AudioSystemManager.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
+#include "TimerManager.h"
+#include "Kismet/GameplayStatics.h"
 #include "Components/AudioComponent.h"
 #include "Sound/SoundCue.h"
-#include "Sound/SoundWave.h"
-#include "Kismet/GameplayStatics.h"
-#include "TimerManager.h"
+#include "AudioDevice.h"
 
 UAudioSystemManager::UAudioSystemManager()
 {
-    MasterVolume = 1.0f;
+	CurrentBiome = EAudio_BiomeType::Forest;
+	CurrentThreatLevel = EAudio_ThreatLevel::Safe;
+	PlayerLocation = FVector::ZeroVector;
+	MasterVolume = 1.0f;
+	EnvironmentalAudioComponent = nullptr;
+	ThreatAudioComponent = nullptr;
 }
 
 void UAudioSystemManager::Initialize(FSubsystemCollectionBase& Collection)
 {
-    Super::Initialize(Collection);
-    
-    InitializeVolumeSettings();
-    
-    // Configurar timer para limpeza de componentes
-    if (UWorld* World = GetWorld())
-    {
-        World->GetTimerManager().SetTimer(CleanupTimerHandle, this, &UAudioSystemManager::CleanupFinishedComponents, 5.0f, true);
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("AudioSystemManager initialized"));
+	Super::Initialize(Collection);
+	
+	UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Initializing audio subsystem"));
+	
+	// Initialize biome audio data with default values
+	BiomeAudioMap.Empty();
+	
+	// Forest biome
+	FAudio_BiomeAudioData ForestAudio;
+	ForestAudio.BaseVolume = 0.8f;
+	ForestAudio.FadeDistance = 2500.0f;
+	BiomeAudioMap.Add(EAudio_BiomeType::Forest, ForestAudio);
+	
+	// Savanna biome
+	FAudio_BiomeAudioData SavannaAudio;
+	SavannaAudio.BaseVolume = 0.7f;
+	SavannaAudio.FadeDistance = 3000.0f;
+	BiomeAudioMap.Add(EAudio_BiomeType::Savanna, SavannaAudio);
+	
+	// Swamp biome
+	FAudio_BiomeAudioData SwampAudio;
+	SwampAudio.BaseVolume = 0.9f;
+	SwampAudio.FadeDistance = 2000.0f;
+	BiomeAudioMap.Add(EAudio_BiomeType::Swamp, SwampAudio);
+	
+	// Desert biome
+	FAudio_BiomeAudioData DesertAudio;
+	DesertAudio.BaseVolume = 0.6f;
+	DesertAudio.FadeDistance = 4000.0f;
+	BiomeAudioMap.Add(EAudio_BiomeType::Desert, DesertAudio);
+	
+	// Mountain biome
+	FAudio_BiomeAudioData MountainAudio;
+	MountainAudio.BaseVolume = 0.5f;
+	MountainAudio.FadeDistance = 5000.0f;
+	BiomeAudioMap.Add(EAudio_BiomeType::Mountain, MountainAudio);
+	
+	// Initialize threat audio map (will be populated with actual sound cues later)
+	ThreatAudioMap.Empty();
+	
+	// Start audio update timers
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().SetTimer(
+			AudioUpdateTimerHandle,
+			this,
+			&UAudioSystemManager::UpdateEnvironmentalAudio,
+			AudioUpdateInterval,
+			true
+		);
+		
+		World->GetTimerManager().SetTimer(
+			ProximityUpdateTimerHandle,
+			this,
+			&UAudioSystemManager::UpdateProximityAudio,
+			ProximityUpdateInterval,
+			true
+		);
+	}
+	
+	UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Initialization complete"));
 }
 
 void UAudioSystemManager::Deinitialize()
 {
-    StopAllSounds();
-    
-    if (UWorld* World = GetWorld())
-    {
-        World->GetTimerManager().ClearTimer(CleanupTimerHandle);
-    }
-    
-    ActiveAudioComponents.Empty();
-    SoundDatabase.Empty();
-    
-    Super::Deinitialize();
-    
-    UE_LOG(LogTemp, Log, TEXT("AudioSystemManager deinitialized"));
+	UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Deinitializing audio subsystem"));
+	
+	// Clear timers
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(AudioUpdateTimerHandle);
+		World->GetTimerManager().ClearTimer(ProximityUpdateTimerHandle);
+	}
+	
+	// Stop all audio
+	StopEnvironmentalAudio();
+	StopThreatAudio();
+	
+	// Clean up audio components
+	if (EnvironmentalAudioComponent && IsValid(EnvironmentalAudioComponent))
+	{
+		EnvironmentalAudioComponent->Stop();
+		EnvironmentalAudioComponent = nullptr;
+	}
+	
+	if (ThreatAudioComponent && IsValid(ThreatAudioComponent))
+	{
+		ThreatAudioComponent->Stop();
+		ThreatAudioComponent = nullptr;
+	}
+	
+	// Clean up proximity audio components
+	for (UAudioComponent* AudioComp : ProximityAudioComponents)
+	{
+		if (AudioComp && IsValid(AudioComp))
+		{
+			AudioComp->Stop();
+		}
+	}
+	ProximityAudioComponents.Empty();
+	
+	Super::Deinitialize();
 }
 
-void UAudioSystemManager::InitializeVolumeSettings()
+bool UAudioSystemManager::ShouldCreateSubsystem(UObject* Outer) const
 {
-    VolumeSettings.Add(EAudio_SoundType::Dialogue, 0.8f);
-    VolumeSettings.Add(EAudio_SoundType::Ambient, 0.6f);
-    VolumeSettings.Add(EAudio_SoundType::Footsteps, 0.7f);
-    VolumeSettings.Add(EAudio_SoundType::DinosaurRoar, 0.9f);
-    VolumeSettings.Add(EAudio_SoundType::Warning, 1.0f);
-    VolumeSettings.Add(EAudio_SoundType::Music, 0.5f);
+	return true;
 }
 
-void UAudioSystemManager::PlaySoundAtLocation(const FAudio_SoundData& SoundData, const FVector& Location, AActor* SourceActor)
+void UAudioSystemManager::SetCurrentBiome(EAudio_BiomeType NewBiome)
 {
-    if (SoundData.SoundID.IsEmpty())
-    {
-        UE_LOG(LogTemp, Warning, TEXT("AudioSystemManager: Cannot play sound with empty ID"));
-        return;
-    }
-    
-    // Criar componente de áudio
-    UAudioComponent* AudioComp = CreateAudioComponent(SourceActor, Location);
-    if (!AudioComp)
-    {
-        UE_LOG(LogTemp, Error, TEXT("AudioSystemManager: Failed to create audio component"));
-        return;
-    }
-    
-    // Configurar volume
-    float TypeVolume = GetVolumeByType(SoundData.SoundType);
-    float FinalVolume = SoundData.Volume * TypeVolume * MasterVolume;
-    AudioComp->SetVolumeMultiplier(FinalVolume);
-    
-    // Configurar áudio espacial
-    if (SoundData.bIs3D)
-    {
-        AudioComp->bAllowSpatialization = true;
-        AudioComp->AttenuationSettings = nullptr; // Usar configuração padrão por agora
-    }
-    else
-    {
-        AudioComp->bAllowSpatialization = false;
-    }
-    
-    // Registar componente activo
-    ActiveAudioComponents.Add(SoundData.SoundID, AudioComp);
-    
-    // Reproduzir áudio
-    AudioComp->Play();
-    
-    // Disparar evento
-    OnSoundStarted.Broadcast(SoundData.SoundID, SoundData.SoundType);
-    
-    UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Playing sound %s at location %s"), *SoundData.SoundID, *Location.ToString());
+	if (CurrentBiome != NewBiome)
+	{
+		CurrentBiome = NewBiome;
+		UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Biome changed to %d"), (int32)NewBiome);
+		UpdateEnvironmentalAudio();
+	}
 }
 
-void UAudioSystemManager::PlayDialogue(const FString& DialogueID, AActor* Speaker, AActor* Listener)
+void UAudioSystemManager::SetThreatLevel(EAudio_ThreatLevel NewThreatLevel)
 {
-    if (!HasSoundData(DialogueID))
-    {
-        UE_LOG(LogTemp, Warning, TEXT("AudioSystemManager: Dialogue %s not found in database"), *DialogueID);
-        return;
-    }
-    
-    FAudio_SoundData SoundData = GetSoundData(DialogueID);
-    FVector SpeakerLocation = Speaker ? Speaker->GetActorLocation() : FVector::ZeroVector;
-    
-    PlaySoundAtLocation(SoundData, SpeakerLocation, Speaker);
-    
-    UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Playing dialogue %s"), *DialogueID);
+	if (CurrentThreatLevel != NewThreatLevel)
+	{
+		EAudio_ThreatLevel PreviousThreatLevel = CurrentThreatLevel;
+		CurrentThreatLevel = NewThreatLevel;
+		
+		UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Threat level changed from %d to %d"), 
+			(int32)PreviousThreatLevel, (int32)NewThreatLevel);
+		
+		// Handle threat audio changes
+		if (NewThreatLevel == EAudio_ThreatLevel::Safe)
+		{
+			StopThreatAudio();
+		}
+		else
+		{
+			PlayThreatAudio(NewThreatLevel, PlayerLocation);
+		}
+	}
 }
 
-void UAudioSystemManager::PlayAmbientSound(const FString& SoundID, const FVector& Location, float FadeInTime)
+void UAudioSystemManager::PlayProximityAudio(const FVector& Location, const FAudio_ProximityAudioData& AudioData)
 {
-    if (!HasSoundData(SoundID))
-    {
-        UE_LOG(LogTemp, Warning, TEXT("AudioSystemManager: Ambient sound %s not found"), *SoundID);
-        return;
-    }
-    
-    FAudio_SoundData SoundData = GetSoundData(SoundID);
-    PlaySoundAtLocation(SoundData, Location);
-    
-    // TODO: Implementar fade in
-    
-    UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Playing ambient sound %s"), *SoundID);
+	if (!AudioData.ProximitySound)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("AudioSystemManager: No proximity sound provided"));
+		return;
+	}
+	
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+	
+	// Check if we're within trigger distance
+	float Distance = FVector::Dist(PlayerLocation, Location);
+	if (Distance > AudioData.TriggerDistance)
+	{
+		return;
+	}
+	
+	// Create new audio component for proximity sound
+	UAudioComponent* ProximityAudioComp = CreateAudioComponent(TEXT("ProximityAudio"));
+	if (ProximityAudioComp)
+	{
+		ProximityAudioComp->SetSound(AudioData.ProximitySound);
+		ProximityAudioComp->SetWorldLocation(Location);
+		ProximityAudioComp->SetVolumeMultiplier(CalculateVolumeByDistance(Distance, AudioData.TriggerDistance) * AudioData.MaxVolume);
+		
+		if (AudioData.bLooping)
+		{
+			ProximityAudioComp->Play();
+		}
+		else
+		{
+			ProximityAudioComp->FadeIn(0.5f);
+		}
+		
+		ProximityAudioComponents.Add(ProximityAudioComp);
+		
+		UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Started proximity audio at distance %.2f"), Distance);
+	}
 }
 
-void UAudioSystemManager::StopSound(const FString& SoundID, float FadeOutTime)
+void UAudioSystemManager::StopProximityAudio(const FVector& Location)
 {
-    if (UAudioComponent** AudioCompPtr = ActiveAudioComponents.Find(SoundID))
-    {
-        UAudioComponent* AudioComp = *AudioCompPtr;
-        if (AudioComp && AudioComp->IsValidLowLevel())
-        {
-            AudioComp->Stop();
-            OnSoundFinished.Broadcast(SoundID, EAudio_SoundType::Ambient); // TODO: Guardar tipo original
-            
-            UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Stopped sound %s"), *SoundID);
-        }
-        
-        ActiveAudioComponents.Remove(SoundID);
-    }
+	// Find and stop proximity audio components near this location
+	for (int32 i = ProximityAudioComponents.Num() - 1; i >= 0; i--)
+	{
+		UAudioComponent* AudioComp = ProximityAudioComponents[i];
+		if (AudioComp && IsValid(AudioComp))
+		{
+			float Distance = FVector::Dist(AudioComp->GetComponentLocation(), Location);
+			if (Distance < 100.0f) // Close enough to be the same source
+			{
+				AudioComp->FadeOut(0.5f, 0.0f);
+				ProximityAudioComponents.RemoveAt(i);
+			}
+		}
+	}
 }
 
-void UAudioSystemManager::StopAllSounds(EAudio_SoundType SoundType)
+void UAudioSystemManager::UpdatePlayerLocation(const FVector& NewPlayerLocation)
 {
-    TArray<FString> SoundsToRemove;
-    
-    for (auto& AudioPair : ActiveAudioComponents)
-    {
-        UAudioComponent* AudioComp = AudioPair.Value;
-        if (AudioComp && AudioComp->IsValidLowLevel())
-        {
-            // TODO: Filtrar por tipo quando tivermos essa informação guardada
-            AudioComp->Stop();
-            SoundsToRemove.Add(AudioPair.Key);
-        }
-    }
-    
-    for (const FString& SoundID : SoundsToRemove)
-    {
-        ActiveAudioComponents.Remove(SoundID);
-        OnSoundFinished.Broadcast(SoundID, SoundType);
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Stopped all sounds of type %d"), (int32)SoundType);
+	PlayerLocation = NewPlayerLocation;
 }
 
-void UAudioSystemManager::SetSpatialConfig(const FAudio_SpatialConfig& Config)
+void UAudioSystemManager::StartEnvironmentalAudio()
 {
-    SpatialConfig = Config;
-    
-    // Aplicar configuração a componentes activos
-    for (auto& AudioPair : ActiveAudioComponents)
-    {
-        UAudioComponent* AudioComp = AudioPair.Value;
-        if (AudioComp && AudioComp->IsValidLowLevel())
-        {
-            // TODO: Aplicar configurações espaciais
-        }
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Updated spatial configuration"));
+	if (!EnvironmentalAudioComponent)
+	{
+		EnvironmentalAudioComponent = CreateAudioComponent(TEXT("EnvironmentalAudio"));
+	}
+	
+	if (EnvironmentalAudioComponent)
+	{
+		UpdateEnvironmentalAudio();
+		UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Environmental audio started"));
+	}
 }
 
-void UAudioSystemManager::UpdateListenerPosition(const FVector& Position, const FRotator& Rotation)
+void UAudioSystemManager::StopEnvironmentalAudio()
 {
-    // TODO: Actualizar posição do listener para cálculos espaciais
-    UE_LOG(LogTemp, VeryVerbose, TEXT("AudioSystemManager: Updated listener position to %s"), *Position.ToString());
+	if (EnvironmentalAudioComponent && IsValid(EnvironmentalAudioComponent))
+	{
+		EnvironmentalAudioComponent->FadeOut(2.0f, 0.0f);
+		UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Environmental audio stopped"));
+	}
 }
 
 void UAudioSystemManager::SetMasterVolume(float Volume)
 {
-    MasterVolume = FMath::Clamp(Volume, 0.0f, 1.0f);
-    
-    // Actualizar volume de todos os componentes activos
-    for (auto& AudioPair : ActiveAudioComponents)
-    {
-        UAudioComponent* AudioComp = AudioPair.Value;
-        if (AudioComp && AudioComp->IsValidLowLevel())
-        {
-            // TODO: Recalcular volume com novo master volume
-        }
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Set master volume to %f"), MasterVolume);
+	MasterVolume = FMath::Clamp(Volume, 0.0f, 1.0f);
+	
+	// Update all active audio components
+	if (EnvironmentalAudioComponent && IsValid(EnvironmentalAudioComponent))
+	{
+		EnvironmentalAudioComponent->SetVolumeMultiplier(MasterVolume);
+	}
+	
+	if (ThreatAudioComponent && IsValid(ThreatAudioComponent))
+	{
+		ThreatAudioComponent->SetVolumeMultiplier(MasterVolume);
+	}
+	
+	for (UAudioComponent* AudioComp : ProximityAudioComponents)
+	{
+		if (AudioComp && IsValid(AudioComp))
+		{
+			AudioComp->SetVolumeMultiplier(MasterVolume);
+		}
+	}
+	
+	UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Master volume set to %.2f"), MasterVolume);
 }
 
-void UAudioSystemManager::SetVolumeByType(EAudio_SoundType SoundType, float Volume)
+float UAudioSystemManager::GetMasterVolume() const
 {
-    VolumeSettings.Add(SoundType, FMath::Clamp(Volume, 0.0f, 1.0f));
-    
-    UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Set volume for type %d to %f"), (int32)SoundType, Volume);
+	return MasterVolume;
 }
 
-float UAudioSystemManager::GetVolumeByType(EAudio_SoundType SoundType) const
+void UAudioSystemManager::PlayThreatAudio(EAudio_ThreatLevel ThreatLevel, const FVector& ThreatLocation)
 {
-    if (const float* Volume = VolumeSettings.Find(SoundType))
-    {
-        return *Volume;
-    }
-    
-    return 1.0f; // Volume padrão
+	USoundCue** ThreatSoundPtr = ThreatAudioMap.Find(ThreatLevel);
+	if (!ThreatSoundPtr || !*ThreatSoundPtr)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("AudioSystemManager: No threat audio found for level %d"), (int32)ThreatLevel);
+		return;
+	}
+	
+	if (!ThreatAudioComponent)
+	{
+		ThreatAudioComponent = CreateAudioComponent(TEXT("ThreatAudio"));
+	}
+	
+	if (ThreatAudioComponent)
+	{
+		ThreatAudioComponent->SetSound(*ThreatSoundPtr);
+		ThreatAudioComponent->SetWorldLocation(ThreatLocation);
+		ThreatAudioComponent->SetVolumeMultiplier(MasterVolume);
+		ThreatAudioComponent->Play();
+		
+		UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Threat audio started for level %d"), (int32)ThreatLevel);
+	}
 }
 
-void UAudioSystemManager::RegisterSoundData(const FAudio_SoundData& SoundData)
+void UAudioSystemManager::StopThreatAudio()
 {
-    if (SoundData.SoundID.IsEmpty())
-    {
-        UE_LOG(LogTemp, Warning, TEXT("AudioSystemManager: Cannot register sound with empty ID"));
-        return;
-    }
-    
-    SoundDatabase.Add(SoundData.SoundID, SoundData);
-    
-    UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Registered sound %s"), *SoundData.SoundID);
+	if (ThreatAudioComponent && IsValid(ThreatAudioComponent))
+	{
+		ThreatAudioComponent->FadeOut(1.0f, 0.0f);
+		UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Threat audio stopped"));
+	}
 }
 
-FAudio_SoundData UAudioSystemManager::GetSoundData(const FString& SoundID) const
+void UAudioSystemManager::UpdateEnvironmentalAudio()
 {
-    if (const FAudio_SoundData* SoundData = SoundDatabase.Find(SoundID))
-    {
-        return *SoundData;
-    }
-    
-    return FAudio_SoundData(); // Retornar dados vazios se não encontrado
+	if (!EnvironmentalAudioComponent || !IsValid(EnvironmentalAudioComponent))
+	{
+		return;
+	}
+	
+	// Get current biome audio data
+	FAudio_BiomeAudioData* BiomeAudio = BiomeAudioMap.Find(CurrentBiome);
+	if (!BiomeAudio)
+	{
+		return;
+	}
+	
+	// Update environmental audio based on current biome
+	if (BiomeAudio->AmbientSound)
+	{
+		EnvironmentalAudioComponent->SetSound(BiomeAudio->AmbientSound);
+	}
+	else if (BiomeAudio->MetaSoundAmbient)
+	{
+		EnvironmentalAudioComponent->SetSound(BiomeAudio->MetaSoundAmbient);
+	}
+	
+	// Set volume based on biome and master volume
+	float FinalVolume = BiomeAudio->BaseVolume * MasterVolume;
+	EnvironmentalAudioComponent->SetVolumeMultiplier(FinalVolume);
+	
+	// Ensure the audio is playing
+	if (!EnvironmentalAudioComponent->IsPlaying())
+	{
+		EnvironmentalAudioComponent->Play();
+	}
 }
 
-bool UAudioSystemManager::HasSoundData(const FString& SoundID) const
+void UAudioSystemManager::UpdateProximityAudio()
 {
-    return SoundDatabase.Contains(SoundID);
+	CleanupInactiveAudioComponents();
+	
+	// Update volume of proximity audio based on player distance
+	for (UAudioComponent* AudioComp : ProximityAudioComponents)
+	{
+		if (AudioComp && IsValid(AudioComp))
+		{
+			float Distance = FVector::Dist(PlayerLocation, AudioComp->GetComponentLocation());
+			float Volume = CalculateVolumeByDistance(Distance, 1000.0f) * MasterVolume;
+			AudioComp->SetVolumeMultiplier(Volume);
+			
+			// Stop audio if too far away
+			if (Distance > 1500.0f)
+			{
+				AudioComp->FadeOut(0.5f, 0.0f);
+			}
+		}
+	}
 }
 
-UAudioComponent* UAudioSystemManager::CreateAudioComponent(AActor* SourceActor, const FVector& Location)
+void UAudioSystemManager::CleanupInactiveAudioComponents()
 {
-    UAudioComponent* AudioComp = nullptr;
-    
-    if (SourceActor)
-    {
-        // Criar componente no actor
-        AudioComp = NewObject<UAudioComponent>(SourceActor);
-        AudioComp->AttachToComponent(SourceActor->GetRootComponent(), FAttachmentTransformRules::KeepWorldTransform);
-    }
-    else
-    {
-        // Criar componente standalone no mundo
-        if (UWorld* World = GetWorld())
-        {
-            AudioComp = NewObject<UAudioComponent>(World);
-            AudioComp->SetWorldLocation(Location);
-        }
-    }
-    
-    return AudioComp;
+	// Remove invalid or stopped audio components
+	for (int32 i = ProximityAudioComponents.Num() - 1; i >= 0; i--)
+	{
+		UAudioComponent* AudioComp = ProximityAudioComponents[i];
+		if (!AudioComp || !IsValid(AudioComp) || !AudioComp->IsPlaying())
+		{
+			ProximityAudioComponents.RemoveAt(i);
+		}
+	}
 }
 
-void UAudioSystemManager::CleanupFinishedComponents()
+float UAudioSystemManager::CalculateVolumeByDistance(float Distance, float MaxDistance) const
 {
-    TArray<FString> ComponentsToRemove;
-    
-    for (auto& AudioPair : ActiveAudioComponents)
-    {
-        UAudioComponent* AudioComp = AudioPair.Value;
-        if (!AudioComp || !AudioComp->IsValidLowLevel() || !AudioComp->IsPlaying())
-        {
-            ComponentsToRemove.Add(AudioPair.Key);
-            
-            if (AudioComp && AudioComp->IsValidLowLevel())
-            {
-                OnSoundFinished.Broadcast(AudioPair.Key, EAudio_SoundType::Ambient); // TODO: Tipo correcto
-            }
-        }
-    }
-    
-    for (const FString& SoundID : ComponentsToRemove)
-    {
-        ActiveAudioComponents.Remove(SoundID);
-    }
-    
-    if (ComponentsToRemove.Num() > 0)
-    {
-        UE_LOG(LogTemp, VeryVerbose, TEXT("AudioSystemManager: Cleaned up %d finished audio components"), ComponentsToRemove.Num());
-    }
+	if (Distance >= MaxDistance)
+	{
+		return 0.0f;
+	}
+	
+	// Linear falloff
+	return 1.0f - (Distance / MaxDistance);
+}
+
+void UAudioSystemManager::FadeAudioComponent(UAudioComponent* AudioComp, float TargetVolume, float FadeTime)
+{
+	if (AudioComp && IsValid(AudioComp))
+	{
+		if (TargetVolume > 0.0f)
+		{
+			AudioComp->FadeIn(FadeTime, TargetVolume);
+		}
+		else
+		{
+			AudioComp->FadeOut(FadeTime, 0.0f);
+		}
+	}
+}
+
+UAudioComponent* UAudioSystemManager::CreateAudioComponent(const FString& ComponentName)
+{
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return nullptr;
+	}
+	
+	UAudioComponent* NewAudioComponent = NewObject<UAudioComponent>(World);
+	if (NewAudioComponent)
+	{
+		NewAudioComponent->bAutoActivate = false;
+		NewAudioComponent->bStopWhenOwnerDestroyed = false;
+		NewAudioComponent->SetWorldLocation(PlayerLocation);
+		
+		UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Created audio component '%s'"), *ComponentName);
+	}
+	
+	return NewAudioComponent;
+}
+
+void UAudioSystemManager::RemoveAudioComponent(UAudioComponent* ComponentToRemove)
+{
+	if (ComponentToRemove && IsValid(ComponentToRemove))
+	{
+		ComponentToRemove->Stop();
+		ProximityAudioComponents.Remove(ComponentToRemove);
+	}
 }
