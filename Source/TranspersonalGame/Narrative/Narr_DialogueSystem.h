@@ -1,30 +1,60 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/GameInstanceSubsystem.h"
+#include "Engine/GameInstance.h"
+#include "Components/ActorComponent.h"
 #include "Engine/DataTable.h"
+#include "SharedTypes.h"
 #include "Narr_DialogueSystem.generated.h"
 
 UENUM(BlueprintType)
 enum class ENarr_DialogueType : uint8
 {
-    Narrator        UMETA(DisplayName = "Narrator"),
+    Greeting        UMETA(DisplayName = "Greeting"),
     Warning         UMETA(DisplayName = "Warning"),
-    HuntLeader      UMETA(DisplayName = "Hunt Leader"),
-    ElderWisdom     UMETA(DisplayName = "Elder Wisdom"),
-    ScoutReport     UMETA(DisplayName = "Scout Report"),
-    QuestGiver      UMETA(DisplayName = "Quest Giver")
+    Teaching        UMETA(DisplayName = "Teaching"),
+    Trading         UMETA(DisplayName = "Trading"),
+    QuestGiving     UMETA(DisplayName = "Quest Giving"),
+    Storytelling    UMETA(DisplayName = "Storytelling"),
+    Emergency       UMETA(DisplayName = "Emergency")
 };
 
 UENUM(BlueprintType)
-enum class ENarr_DialogueTrigger : uint8
+enum class ENarr_DialogueCondition : uint8
 {
-    OnQuestStart        UMETA(DisplayName = "Quest Start"),
-    OnDinosaurSighted   UMETA(DisplayName = "Dinosaur Sighted"),
-    OnDangerArea        UMETA(DisplayName = "Danger Area"),
-    OnCampSetup         UMETA(DisplayName = "Camp Setup"),
-    OnHuntSuccess       UMETA(DisplayName = "Hunt Success"),
-    OnSurvivalTip       UMETA(DisplayName = "Survival Tip")
+    None            UMETA(DisplayName = "No Condition"),
+    HasItem         UMETA(DisplayName = "Has Item"),
+    CompletedQuest  UMETA(DisplayName = "Completed Quest"),
+    TimeOfDay       UMETA(DisplayName = "Time of Day"),
+    PlayerHealth    UMETA(DisplayName = "Player Health"),
+    NearDanger      UMETA(DisplayName = "Near Danger"),
+    FirstMeeting    UMETA(DisplayName = "First Meeting")
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FNarr_DialogueChoice
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    FText ChoiceText;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    FString NextDialogueID;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    ENarr_DialogueCondition RequiredCondition;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    FString ConditionValue;
+
+    FNarr_DialogueChoice()
+    {
+        ChoiceText = FText::FromString("Continue...");
+        NextDialogueID = "";
+        RequiredCondition = ENarr_DialogueCondition::None;
+        ConditionValue = "";
+    }
 };
 
 USTRUCT(BlueprintType)
@@ -36,86 +66,126 @@ struct TRANSPERSONALGAME_API FNarr_DialogueEntry
     FString DialogueID;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    ENarr_DialogueType SpeakerType;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    ENarr_DialogueTrigger TriggerCondition;
+    FText SpeakerName;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
     FText DialogueText;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    ENarr_DialogueType DialogueType;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
     FString AudioAssetPath;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    float Priority;
+    TArray<FNarr_DialogueChoice> Choices;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    bool bIsRepeatable;
+    float DisplayDuration;
 
     FNarr_DialogueEntry()
     {
-        SpeakerType = ENarr_DialogueType::Narrator;
-        TriggerCondition = ENarr_DialogueTrigger::OnQuestStart;
-        Priority = 1.0f;
-        bIsRepeatable = false;
+        DialogueID = "";
+        SpeakerName = FText::FromString("Unknown");
+        DialogueText = FText::FromString("");
+        DialogueType = ENarr_DialogueType::Greeting;
+        AudioAssetPath = "";
+        DisplayDuration = 5.0f;
     }
 };
 
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UNarr_DialogueSystem : public UGameInstanceSubsystem
+class TRANSPERSONALGAME_API UNarr_DialogueComponent : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    UNarr_DialogueSystem();
-
-    // Subsystem interface
-    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
-    virtual void Deinitialize() override;
-
-    // Dialogue management
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void TriggerDialogue(ENarr_DialogueTrigger TriggerType, const FString& ContextData = "");
-
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void PlayDialogueEntry(const FNarr_DialogueEntry& DialogueEntry);
-
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void RegisterDialogueEntry(const FNarr_DialogueEntry& NewEntry);
-
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    TArray<FNarr_DialogueEntry> GetDialoguesForTrigger(ENarr_DialogueTrigger TriggerType);
-
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void SetDialogueEnabled(bool bEnabled);
-
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    bool IsDialogueEnabled() const { return bDialogueEnabled; }
+    UNarr_DialogueComponent();
 
 protected:
-    // Dialogue storage
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    virtual void BeginPlay() override;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
     TArray<FNarr_DialogueEntry> DialogueEntries;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    UDataTable* DialogueDataTable;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    FString CurrentDialogueID;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    bool bDialogueEnabled;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    bool bDialogueActive;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    float DialogueCooldownTime;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    float InteractionRange;
 
-    // Internal state
+public:
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    bool StartDialogue(const FString& DialogueID);
+
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    void EndDialogue();
+
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    FNarr_DialogueEntry GetCurrentDialogue() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    bool SelectChoice(int32 ChoiceIndex);
+
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    void AddDialogueEntry(const FNarr_DialogueEntry& NewEntry);
+
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    bool IsDialogueActive() const { return bDialogueActive; }
+
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    bool CanStartDialogue(AActor* Player) const;
+
+private:
+    FNarr_DialogueEntry* FindDialogueByID(const FString& DialogueID);
+    bool CheckCondition(const ENarr_DialogueCondition& Condition, const FString& Value) const;
+};
+
+UCLASS(BlueprintType)
+class TRANSPERSONALGAME_API UNarr_DialogueManager : public UGameInstanceSubsystem
+{
+    GENERATED_BODY()
+
+public:
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+
+protected:
     UPROPERTY()
-    TArray<FString> PlayedDialogueIDs;
+    TMap<FString, FNarr_DialogueEntry> GlobalDialogueDatabase;
 
     UPROPERTY()
-    float LastDialogueTime;
+    TArray<FString> CompletedDialogues;
 
-    // Helper methods
-    void LoadDefaultDialogues();
-    bool CanPlayDialogue(const FNarr_DialogueEntry& Entry);
-    void MarkDialogueAsPlayed(const FString& DialogueID);
+    UPROPERTY()
+    TMap<FString, int32> DialogueFlags;
+
+public:
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    void RegisterDialogue(const FNarr_DialogueEntry& DialogueEntry);
+
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    FNarr_DialogueEntry GetDialogue(const FString& DialogueID) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    void MarkDialogueCompleted(const FString& DialogueID);
+
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    bool IsDialogueCompleted(const FString& DialogueID) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    void SetDialogueFlag(const FString& FlagName, int32 Value);
+
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    int32 GetDialogueFlag(const FString& FlagName) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    void LoadPrehistoricDialogues();
+
+private:
+    void CreateSurvivalDialogues();
+    void CreateTeachingDialogues();
+    void CreateWarningDialogues();
 };
