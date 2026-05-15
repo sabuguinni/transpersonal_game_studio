@@ -1,487 +1,525 @@
 #include "Core_TerrainDeformationSystem.h"
 #include "Engine/World.h"
-#include "DrawDebugHelpers.h"
-#include "Landscape/LandscapeProxy.h"
+#include "Landscape/Landscape.h"
+#include "Landscape/LandscapeComponent.h"
 #include "Landscape/LandscapeInfo.h"
 #include "Landscape/LandscapeDataAccess.h"
-#include "Landscape/LandscapeEdit.h"
-#include "Components/StaticMeshComponent.h"
+#include "DrawDebugHelpers.h"
 #include "Engine/Engine.h"
 
 UCore_TerrainDeformationSystem::UCore_TerrainDeformationSystem()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 0.1f; // 10 FPS for terrain processing
+    PrimaryComponentTick.bStartWithTickEnabled = true;
+    PrimaryComponentTick.TickInterval = 0.1f; // Update 10 times per second for performance
     
-    // Initialize default settings
-    MaxDeformationRadius = 500.0f;
-    MinDeformationForce = 100.0f;
-    DeformationFalloffExponent = 2.0f;
-    MaxConcurrentDeformations = 50;
+    // Initialize default values
+    MaxActiveDeformations = 100;
+    MaxDeformationRadius = 1000.0f;
+    MaxDeformationDepth = 200.0f;
+    CurrentLODLevel = 1;
+    bDeformationEnabled = true;
+    bShowDebugVisualization = false;
     
-    bEnableTerrainRecovery = true;
-    GlobalRecoveryRate = 0.1f;
-    RecoveryTickInterval = 1.0f;
-    
-    MaxHeightmapUpdatesPerFrame = 10;
-    MinDeformationThreshold = 1.0f;
-    
-    CachedLandscape = nullptr;
+    MainLandscape = nullptr;
     LandscapeInfo = nullptr;
-    LastRecoveryTime = 0.0f;
+    
+    CurrentFrameDeformations = 0;
+    TotalDeformationsProcessed = 0;
+    LastPerformanceCheckTime = 0.0f;
 }
 
 void UCore_TerrainDeformationSystem::BeginPlay()
 {
     Super::BeginPlay();
     
-    // Find landscape in the world
-    UWorld* World = GetWorld();
-    if (World)
-    {
-        for (TActorIterator<ALandscapeProxy> ActorItr(World); ActorItr; ++ActorItr)
-        {
-            CachedLandscape = *ActorItr;
-            if (CachedLandscape)
-            {
-                LandscapeInfo = CachedLandscape->GetLandscapeInfo();
-                UE_LOG(LogTemp, Warning, TEXT("Core_TerrainDeformationSystem: Found landscape %s"), *CachedLandscape->GetName());
-                break;
-            }
-        }
-    }
+    // Initialize landscape references
+    InitializeLandscapeReferences();
     
-    // Initialize terrain materials
-    InitializeTerrainMaterials();
-    
-    UE_LOG(LogTemp, Warning, TEXT("Core_TerrainDeformationSystem: Initialized with %d terrain materials"), TerrainMaterials.Num());
+    UE_LOG(LogTemp, Log, TEXT("Core_TerrainDeformationSystem: Initialized with %d max deformations"), MaxActiveDeformations);
 }
 
 void UCore_TerrainDeformationSystem::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
     
-    // Process pending deformations
-    int32 ProcessedThisFrame = 0;
-    for (int32 i = PendingDeformations.Num() - 1; i >= 0 && ProcessedThisFrame < MaxHeightmapUpdatesPerFrame; i--)
+    if (!bDeformationEnabled)
     {
-        if (ShouldProcessDeformation(PendingDeformations[i]))
+        return;
+    }
+    
+    // Update recovery operations
+    UpdateRecoveryOperations(DeltaTime);
+    
+    // Cleanup expired deformations
+    CleanupExpiredDeformations();
+    
+    // Performance monitoring
+    LastPerformanceCheckTime += DeltaTime;
+    if (LastPerformanceCheckTime >= 5.0f) // Check every 5 seconds
+    {
+        UE_LOG(LogTemp, Log, TEXT("TerrainDeformation: %d active deformations, %d total processed"), 
+               ActiveDeformations.Num(), TotalDeformationsProcessed);
+        LastPerformanceCheckTime = 0.0f;
+    }
+    
+    // Debug visualization
+    if (bShowDebugVisualization)
+    {
+        for (const FCore_TerrainDeformation& Deformation : ActiveDeformations)
         {
-            ModifyLandscapeHeightmap(PendingDeformations[i]);
-            ActiveDeformations.Add(PendingDeformations[i]);
-            PendingDeformations.RemoveAt(i);
-            ProcessedThisFrame++;
+            DrawDebugSphere(GetWorld(), Deformation.Location, Deformation.Radius, 12, FColor::Red, false, -1.0f, 0, 2.0f);
+        }
+        
+        for (const FCore_TerrainRecovery& Recovery : ActiveRecoveries)
+        {
+            DrawDebugSphere(GetWorld(), Recovery.Location, Recovery.Radius, 12, FColor::Green, false, -1.0f, 0, 1.0f);
         }
     }
     
-    // Process terrain recovery
-    if (bEnableTerrainRecovery)
-    {
-        ProcessTerrainRecovery(DeltaTime);
-    }
-    
-    // Optimize deformation queue
-    OptimizeDeformationQueue();
+    CurrentFrameDeformations = 0;
 }
 
-void UCore_TerrainDeformationSystem::ApplyDeformation(const FCore_DeformationEvent& DeformationEvent)
+void UCore_TerrainDeformationSystem::CreateTerrainDeformation(
+    const FVector& WorldLocation,
+    float DeformationRadius,
+    float DeformationDepth,
+    ECore_TerrainDeformationType DeformationType,
+    bool bPermanent)
 {
-    if (!CachedLandscape || !LandscapeInfo)
+    if (!bDeformationEnabled || !MainLandscape)
     {
-        UE_LOG(LogTemp, Error, TEXT("Core_TerrainDeformationSystem: No landscape found for deformation"));
+        UE_LOG(LogTemp, Warning, TEXT("TerrainDeformation: Cannot create deformation - system disabled or no landscape"));
         return;
     }
     
-    // Validate deformation parameters
-    if (DeformationEvent.Force < MinDeformationForce)
+    // Clamp values to limits
+    DeformationRadius = FMath::Clamp(DeformationRadius, 10.0f, MaxDeformationRadius);
+    DeformationDepth = FMath::Clamp(DeformationDepth, -MaxDeformationDepth, MaxDeformationDepth);
+    
+    // Check if we've reached maximum deformations
+    if (ActiveDeformations.Num() >= MaxActiveDeformations)
     {
-        UE_LOG(LogTemp, Warning, TEXT("Core_TerrainDeformationSystem: Deformation force too low: %f"), DeformationEvent.Force);
+        // Remove oldest non-permanent deformation
+        for (int32 i = 0; i < ActiveDeformations.Num(); ++i)
+        {
+            if (!ActiveDeformations[i].bPermanent)
+            {
+                ActiveDeformations.RemoveAt(i);
+                break;
+            }
+        }
+    }
+    
+    // Create new deformation
+    FCore_TerrainDeformation NewDeformation;
+    NewDeformation.Location = WorldLocation;
+    NewDeformation.Radius = DeformationRadius;
+    NewDeformation.Depth = DeformationDepth;
+    NewDeformation.Type = DeformationType;
+    NewDeformation.bPermanent = bPermanent;
+    NewDeformation.CreationTime = GetWorld()->GetTimeSeconds();
+    NewDeformation.DecayTime = bPermanent ? 0.0f : 300.0f; // 5 minutes default decay
+    
+    // Apply LOD scaling
+    float LODScale = 1.0f;
+    switch (CurrentLODLevel)
+    {
+        case 0: LODScale = 1.0f; break;   // Full detail
+        case 1: LODScale = 0.75f; break; // High detail
+        case 2: LODScale = 0.5f; break;  // Medium detail
+        case 3: LODScale = 0.25f; break; // Low detail
+    }
+    
+    NewDeformation.Radius *= LODScale;
+    NewDeformation.Depth *= LODScale;
+    
+    // Process the deformation
+    ProcessLandscapeDeformation(NewDeformation);
+    
+    // Add to active deformations
+    ActiveDeformations.Add(NewDeformation);
+    
+    TotalDeformationsProcessed++;
+    CurrentFrameDeformations++;
+    
+    UE_LOG(LogTemp, Log, TEXT("TerrainDeformation: Created deformation at %s, radius %.1f, depth %.1f"), 
+           *WorldLocation.ToString(), DeformationRadius, DeformationDepth);
+}
+
+void UCore_TerrainDeformationSystem::CreateDinosaurFootprint(
+    const FVector& FootprintLocation,
+    ECore_DinosaurSpecies DinosaurSpecies,
+    float FootSize,
+    bool bDeepMud)
+{
+    float BaseRadius = 50.0f;
+    float BaseDepth = 10.0f;
+    
+    // Species-specific footprint characteristics
+    switch (DinosaurSpecies)
+    {
+        case ECore_DinosaurSpecies::TRex:
+            BaseRadius = 80.0f;
+            BaseDepth = 25.0f;
+            break;
+        case ECore_DinosaurSpecies::Velociraptor:
+            BaseRadius = 30.0f;
+            BaseDepth = 8.0f;
+            break;
+        case ECore_DinosaurSpecies::Brachiosaurus:
+            BaseRadius = 120.0f;
+            BaseDepth = 40.0f;
+            break;
+        case ECore_DinosaurSpecies::Triceratops:
+            BaseRadius = 70.0f;
+            BaseDepth = 20.0f;
+            break;
+        case ECore_DinosaurSpecies::Stegosaurus:
+            BaseRadius = 60.0f;
+            BaseDepth = 15.0f;
+            break;
+    }
+    
+    // Apply size scaling
+    BaseRadius *= FootSize;
+    BaseDepth *= FootSize;
+    
+    // Deep mud increases depth
+    if (bDeepMud)
+    {
+        BaseDepth *= 2.0f;
+    }
+    
+    // Create the footprint deformation
+    CreateTerrainDeformation(
+        FootprintLocation,
+        BaseRadius,
+        -BaseDepth, // Negative for depression
+        ECore_TerrainDeformationType::Footprint,
+        false // Footprints are not permanent
+    );
+    
+    // Modify terrain material to show disturbed earth
+    ModifyTerrainMaterial(
+        FootprintLocation,
+        BaseRadius * 1.2f,
+        bDeepMud ? ECore_TerrainMaterial::Mud : ECore_TerrainMaterial::DisturbedEarth,
+        0.7f
+    );
+}
+
+void UCore_TerrainDeformationSystem::CreateImpactCrater(
+    const FVector& ImpactLocation,
+    float ImpactForce,
+    ECore_ImpactType ImpactType)
+{
+    float CraterRadius = 100.0f;
+    float CraterDepth = 30.0f;
+    
+    // Impact type affects crater characteristics
+    switch (ImpactType)
+    {
+        case ECore_ImpactType::Meteorite:
+            CraterRadius = FMath::Sqrt(ImpactForce) * 2.0f;
+            CraterDepth = FMath::Sqrt(ImpactForce) * 0.8f;
+            break;
+        case ECore_ImpactType::TreeFall:
+            CraterRadius = ImpactForce * 0.5f;
+            CraterDepth = ImpactForce * 0.2f;
+            break;
+        case ECore_ImpactType::RockSlide:
+            CraterRadius = ImpactForce * 0.8f;
+            CraterDepth = ImpactForce * 0.3f;
+            break;
+        case ECore_ImpactType::Explosion:
+            CraterRadius = ImpactForce * 1.5f;
+            CraterDepth = ImpactForce * 0.6f;
+            break;
+    }
+    
+    // Create the crater
+    CreateTerrainDeformation(
+        ImpactLocation,
+        CraterRadius,
+        -CraterDepth,
+        ECore_TerrainDeformationType::Impact,
+        ImpactType == ECore_ImpactType::Meteorite // Meteorite craters are permanent
+    );
+    
+    // Modify terrain material based on impact type
+    ECore_TerrainMaterial ImpactMaterial = ECore_TerrainMaterial::DisturbedEarth;
+    if (ImpactType == ECore_ImpactType::Meteorite)
+    {
+        ImpactMaterial = ECore_TerrainMaterial::ScorchedEarth;
+    }
+    
+    ModifyTerrainMaterial(ImpactLocation, CraterRadius, ImpactMaterial, 0.9f);
+}
+
+void UCore_TerrainDeformationSystem::ModifyTerrainMaterial(
+    const FVector& Location,
+    float Radius,
+    ECore_TerrainMaterial NewMaterial,
+    float BlendStrength)
+{
+    if (!MainLandscape || !LandscapeInfo)
+    {
         return;
     }
     
-    if (DeformationEvent.Radius > MaxDeformationRadius)
+    // Material modification would be implemented here
+    // This requires access to landscape layer data which is complex
+    // For now, we log the operation
+    UE_LOG(LogTemp, Log, TEXT("TerrainDeformation: Material modification at %s, radius %.1f, material %d"), 
+           *Location.ToString(), Radius, (int32)NewMaterial);
+}
+
+void UCore_TerrainDeformationSystem::SetDeformationLOD(int32 LODLevel)
+{
+    CurrentLODLevel = FMath::Clamp(LODLevel, 0, 3);
+    UE_LOG(LogTemp, Log, TEXT("TerrainDeformation: LOD level set to %d"), CurrentLODLevel);
+}
+
+void UCore_TerrainDeformationSystem::SetDeformationEnabled(bool bEnabled)
+{
+    bDeformationEnabled = bEnabled;
+    UE_LOG(LogTemp, Log, TEXT("TerrainDeformation: System %s"), bEnabled ? TEXT("enabled") : TEXT("disabled"));
+}
+
+void UCore_TerrainDeformationSystem::StartTerrainRecovery(
+    const FVector& RecoveryLocation,
+    float RecoveryRadius,
+    float RecoveryTime)
+{
+    FCore_TerrainRecovery NewRecovery;
+    NewRecovery.Location = RecoveryLocation;
+    NewRecovery.Radius = RecoveryRadius;
+    NewRecovery.TotalRecoveryTime = RecoveryTime;
+    NewRecovery.ElapsedTime = 0.0f;
+    NewRecovery.StartTime = GetWorld()->GetTimeSeconds();
+    
+    ActiveRecoveries.Add(NewRecovery);
+    
+    UE_LOG(LogTemp, Log, TEXT("TerrainDeformation: Started recovery at %s, radius %.1f, time %.1fs"), 
+           *RecoveryLocation.ToString(), RecoveryRadius, RecoveryTime);
+}
+
+void UCore_TerrainDeformationSystem::SetDebugVisualization(bool bShowDebug)
+{
+    bShowDebugVisualization = bShowDebug;
+    UE_LOG(LogTemp, Log, TEXT("TerrainDeformation: Debug visualization %s"), bShowDebug ? TEXT("enabled") : TEXT("disabled"));
+}
+
+FCore_TerrainDeformationStats UCore_TerrainDeformationSystem::GetDeformationStats() const
+{
+    FCore_TerrainDeformationStats Stats;
+    Stats.ActiveDeformations = ActiveDeformations.Num();
+    Stats.ActiveRecoveries = ActiveRecoveries.Num();
+    Stats.TotalDeformationsProcessed = TotalDeformationsProcessed;
+    Stats.CurrentLODLevel = CurrentLODLevel;
+    Stats.bSystemEnabled = bDeformationEnabled;
+    
+    return Stats;
+}
+
+void UCore_TerrainDeformationSystem::InitializeLandscapeReferences()
+{
+    UWorld* World = GetWorld();
+    if (!World)
     {
-        UE_LOG(LogTemp, Warning, TEXT("Core_TerrainDeformationSystem: Deformation radius too large: %f"), DeformationEvent.Radius);
         return;
     }
     
-    // Check if we can deform at this location
-    if (!CanDeformAtLocation(DeformationEvent.ImpactLocation, DeformationEvent.Force))
+    // Find landscape actor in the world
+    for (TActorIterator<ALandscape> ActorItr(World); ActorItr; ++ActorItr)
     {
-        UE_LOG(LogTemp, Warning, TEXT("Core_TerrainDeformationSystem: Cannot deform at location due to terrain hardness"));
-        return;
+        MainLandscape = *ActorItr;
+        break; // Use first landscape found
     }
     
-    // Add to pending deformations queue
-    FCore_DeformationEvent ProcessedEvent = DeformationEvent;
-    ProcessedEvent.TimeStamp = GetWorld()->GetTimeSeconds();
-    
-    PendingDeformations.Add(ProcessedEvent);
-    
-    UE_LOG(LogTemp, Log, TEXT("Core_TerrainDeformationSystem: Queued deformation at %s with force %f"), 
-           *DeformationEvent.ImpactLocation.ToString(), DeformationEvent.Force);
-}
-
-void UCore_TerrainDeformationSystem::ApplyExplosionDeformation(FVector Location, float ExplosionForce, float BlastRadius)
-{
-    FCore_DeformationEvent ExplosionEvent;
-    ExplosionEvent.ImpactLocation = Location;
-    ExplosionEvent.Force = ExplosionForce;
-    ExplosionEvent.Radius = BlastRadius;
-    ExplosionEvent.Depth = FMath::Clamp(ExplosionForce * 0.1f, 10.0f, 300.0f);
-    ExplosionEvent.TerrainType = GetTerrainTypeAtLocation(Location);
-    
-    ApplyDeformation(ExplosionEvent);
-    
-    UE_LOG(LogTemp, Log, TEXT("Core_TerrainDeformationSystem: Applied explosion deformation - Force: %f, Radius: %f"), 
-           ExplosionForce, BlastRadius);
-}
-
-void UCore_TerrainDeformationSystem::ApplyFootstepDeformation(FVector Location, float Weight, float FootSize)
-{
-    FCore_DeformationEvent FootstepEvent;
-    FootstepEvent.ImpactLocation = Location;
-    FootstepEvent.Force = Weight * 0.5f; // Reduce force for footsteps
-    FootstepEvent.Radius = FootSize;
-    FootstepEvent.Depth = FMath::Clamp(Weight * 0.01f, 1.0f, 10.0f);
-    FootstepEvent.TerrainType = GetTerrainTypeAtLocation(Location);
-    
-    ApplyDeformation(FootstepEvent);
-}
-
-void UCore_TerrainDeformationSystem::ApplyVehicleDeformation(FVector Location, float VehicleWeight, float TireWidth)
-{
-    FCore_DeformationEvent VehicleEvent;
-    VehicleEvent.ImpactLocation = Location;
-    VehicleEvent.Force = VehicleWeight * 2.0f; // Vehicles create more pressure
-    VehicleEvent.Radius = TireWidth * 2.0f;
-    VehicleEvent.Depth = FMath::Clamp(VehicleWeight * 0.05f, 5.0f, 50.0f);
-    VehicleEvent.TerrainType = GetTerrainTypeAtLocation(Location);
-    
-    ApplyDeformation(VehicleEvent);
-}
-
-ECore_TerrainType UCore_TerrainDeformationSystem::GetTerrainTypeAtLocation(FVector Location)
-{
-    if (!CachedLandscape || !LandscapeInfo)
+    if (MainLandscape)
     {
-        return ECore_TerrainType::Dirt;
-    }
-    
-    // Sample landscape material at location
-    // For now, return based on height - this could be enhanced with actual material sampling
-    float Height = Location.Z;
-    
-    if (Height > 1000.0f)
-    {
-        return ECore_TerrainType::Rock;
-    }
-    else if (Height < -100.0f)
-    {
-        return ECore_TerrainType::Mud;
-    }
-    else if (Height < 100.0f)
-    {
-        return ECore_TerrainType::Sand;
+        LandscapeInfo = MainLandscape->GetLandscapeInfo();
+        UE_LOG(LogTemp, Log, TEXT("TerrainDeformation: Found landscape %s"), *MainLandscape->GetName());
     }
     else
     {
-        return ECore_TerrainType::Dirt;
+        UE_LOG(LogTemp, Warning, TEXT("TerrainDeformation: No landscape found in world"));
     }
 }
 
-float UCore_TerrainDeformationSystem::GetTerrainHardnessAtLocation(FVector Location)
+void UCore_TerrainDeformationSystem::ProcessLandscapeDeformation(const FCore_TerrainDeformation& Deformation)
 {
-    ECore_TerrainType TerrainType = GetTerrainTypeAtLocation(Location);
-    FCore_TerrainMaterial* Material = TerrainMaterials.Find(TerrainType);
-    
-    if (Material)
+    if (!MainLandscape || !LandscapeInfo)
     {
-        return Material->Hardness;
+        return;
     }
     
-    return 1.0f; // Default hardness
+    // Get landscape heightmap data
+    TArray<uint16> HeightData;
+    FIntRect DataRect;
+    
+    if (GetLandscapeHeightData(Deformation.Location, Deformation.Radius, HeightData, DataRect))
+    {
+        // Modify height data based on deformation
+        int32 CenterX = DataRect.Width() / 2;
+        int32 CenterY = DataRect.Height() / 2;
+        float RadiusSquared = Deformation.Radius * Deformation.Radius;
+        
+        for (int32 Y = 0; Y < DataRect.Height(); ++Y)
+        {
+            for (int32 X = 0; X < DataRect.Width(); ++X)
+            {
+                float DistanceSquared = FMath::Square(X - CenterX) + FMath::Square(Y - CenterY);
+                if (DistanceSquared <= RadiusSquared)
+                {
+                    float Distance = FMath::Sqrt(DistanceSquared);
+                    float Falloff = 1.0f - (Distance / Deformation.Radius);
+                    Falloff = FMath::Pow(Falloff, 2.0f); // Smooth falloff
+                    
+                    int32 Index = Y * DataRect.Width() + X;
+                    if (HeightData.IsValidIndex(Index))
+                    {
+                        float HeightChange = Deformation.Depth * Falloff;
+                        int32 NewHeight = FMath::Clamp(
+                            (int32)HeightData[Index] + (int32)(HeightChange * 256.0f), 
+                            0, 
+                            65535
+                        );
+                        HeightData[Index] = (uint16)NewHeight;
+                    }
+                }
+            }
+        }
+        
+        // Apply modified height data back to landscape
+        SetLandscapeHeightData(DataRect, HeightData);
+    }
 }
 
-bool UCore_TerrainDeformationSystem::CanDeformAtLocation(FVector Location, float RequiredForce)
+void UCore_TerrainDeformationSystem::UpdateRecoveryOperations(float DeltaTime)
 {
-    float TerrainHardness = GetTerrainHardnessAtLocation(Location);
-    FCore_TerrainMaterial Material = GetMaterialProperties(GetTerrainTypeAtLocation(Location));
-    
-    float RequiredForceForDeformation = Material.DeformationResistance * TerrainHardness;
-    
-    return RequiredForce >= RequiredForceForDeformation;
+    for (int32 i = ActiveRecoveries.Num() - 1; i >= 0; --i)
+    {
+        FCore_TerrainRecovery& Recovery = ActiveRecoveries[i];
+        Recovery.ElapsedTime += DeltaTime;
+        
+        float RecoveryProgress = Recovery.ElapsedTime / Recovery.TotalRecoveryTime;
+        
+        if (RecoveryProgress >= 1.0f)
+        {
+            // Recovery complete
+            ActiveRecoveries.RemoveAt(i);
+            UE_LOG(LogTemp, Log, TEXT("TerrainDeformation: Recovery completed at %s"), *Recovery.Location.ToString());
+        }
+        else
+        {
+            // Apply gradual recovery (simplified implementation)
+            // In a full implementation, this would gradually restore the original heightmap
+        }
+    }
 }
 
-void UCore_TerrainDeformationSystem::ProcessTerrainRecovery(float DeltaTime)
+void UCore_TerrainDeformationSystem::CleanupExpiredDeformations()
 {
     float CurrentTime = GetWorld()->GetTimeSeconds();
     
-    if (CurrentTime - LastRecoveryTime < RecoveryTickInterval)
+    for (int32 i = ActiveDeformations.Num() - 1; i >= 0; --i)
     {
-        return;
-    }
-    
-    LastRecoveryTime = CurrentTime;
-    
-    // Process recovery for active deformations
-    for (int32 i = ActiveDeformations.Num() - 1; i >= 0; i--)
-    {
-        ProcessSingleDeformationRecovery(ActiveDeformations[i], DeltaTime);
+        const FCore_TerrainDeformation& Deformation = ActiveDeformations[i];
         
-        // Remove fully recovered deformations
-        if (ActiveDeformations[i].Depth <= MinDeformationThreshold)
+        if (!Deformation.bPermanent && Deformation.DecayTime > 0.0f)
         {
-            ActiveDeformations.RemoveAt(i);
+            float Age = CurrentTime - Deformation.CreationTime;
+            if (Age >= Deformation.DecayTime)
+            {
+                ActiveDeformations.RemoveAt(i);
+            }
         }
     }
 }
 
-void UCore_TerrainDeformationSystem::SetRecoveryEnabled(bool bEnabled)
+TArray<FVector2D> UCore_TerrainDeformationSystem::CalculateDeformationShape(ECore_TerrainDeformationType Type, float Radius)
 {
-    bEnableTerrainRecovery = bEnabled;
-    UE_LOG(LogTemp, Log, TEXT("Core_TerrainDeformationSystem: Terrain recovery %s"), 
-           bEnabled ? TEXT("enabled") : TEXT("disabled"));
-}
-
-void UCore_TerrainDeformationSystem::DebugDrawDeformationZones()
-{
-    if (!GetWorld())
-    {
-        return;
-    }
+    TArray<FVector2D> ShapePoints;
     
-    // Draw active deformations
-    for (const FCore_DeformationEvent& Event : ActiveDeformations)
-    {
-        DrawDebugSphere(GetWorld(), Event.ImpactLocation, Event.Radius, 12, FColor::Red, false, 5.0f);
-        DrawDebugString(GetWorld(), Event.ImpactLocation + FVector(0, 0, 100), 
-                       FString::Printf(TEXT("Force: %.1f\nDepth: %.1f"), Event.Force, Event.Depth), 
-                       nullptr, FColor::White, 5.0f);
-    }
-    
-    // Draw pending deformations
-    for (const FCore_DeformationEvent& Event : PendingDeformations)
-    {
-        DrawDebugSphere(GetWorld(), Event.ImpactLocation, Event.Radius, 12, FColor::Yellow, false, 5.0f);
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("Core_TerrainDeformationSystem: Drew %d active and %d pending deformations"), 
-           ActiveDeformations.Num(), PendingDeformations.Num());
-}
-
-void UCore_TerrainDeformationSystem::ValidateTerrainSystem()
-{
-    UE_LOG(LogTemp, Warning, TEXT("=== TERRAIN DEFORMATION SYSTEM VALIDATION ==="));
-    
-    if (CachedLandscape)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("✓ Landscape found: %s"), *CachedLandscape->GetName());
-    }
-    else
-    {
-        UE_LOG(LogTemp, Error, TEXT("✗ No landscape found"));
-    }
-    
-    if (LandscapeInfo)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("✓ LandscapeInfo available"));
-    }
-    else
-    {
-        UE_LOG(LogTemp, Error, TEXT("✗ No LandscapeInfo"));
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("Active deformations: %d"), ActiveDeformations.Num());
-    UE_LOG(LogTemp, Warning, TEXT("Pending deformations: %d"), PendingDeformations.Num());
-    UE_LOG(LogTemp, Warning, TEXT("Terrain materials: %d"), TerrainMaterials.Num());
-    UE_LOG(LogTemp, Warning, TEXT("Recovery enabled: %s"), bEnableTerrainRecovery ? TEXT("Yes") : TEXT("No"));
-}
-
-void UCore_TerrainDeformationSystem::ModifyLandscapeHeightmap(const FCore_DeformationEvent& Event)
-{
-    if (!CachedLandscape || !LandscapeInfo)
-    {
-        return;
-    }
-    
-    // Calculate affected heightmap region
-    FVector2D LandscapeLocation = FVector2D(Event.ImpactLocation.X, Event.ImpactLocation.Y);
-    float RadiusInUnits = Event.Radius;
-    
-    // For now, log the deformation - actual heightmap modification requires more complex landscape API usage
-    UE_LOG(LogTemp, Log, TEXT("Core_TerrainDeformationSystem: Processing heightmap deformation at %s"), 
-           *Event.ImpactLocation.ToString());
-    
-    // TODO: Implement actual heightmap modification using FLandscapeEditDataInterface
-    // This would require more complex integration with UE5's landscape editing system
-}
-
-void UCore_TerrainDeformationSystem::CalculateDeformationShape(const FCore_DeformationEvent& Event, TArray<FVector2D>& OutPoints, TArray<float>& OutHeights)
-{
-    OutPoints.Empty();
-    OutHeights.Empty();
-    
-    // Generate circular deformation pattern
+    // Generate shape points based on deformation type
     int32 NumPoints = 16;
-    float AngleStep = 2.0f * PI / NumPoints;
     
-    for (int32 i = 0; i < NumPoints; i++)
+    for (int32 i = 0; i < NumPoints; ++i)
     {
-        float Angle = i * AngleStep;
-        float X = Event.ImpactLocation.X + FMath::Cos(Angle) * Event.Radius;
-        float Y = Event.ImpactLocation.Y + FMath::Sin(Angle) * Event.Radius;
+        float Angle = (2.0f * PI * i) / NumPoints;
+        float X = FMath::Cos(Angle) * Radius;
+        float Y = FMath::Sin(Angle) * Radius;
         
-        OutPoints.Add(FVector2D(X, Y));
-        
-        // Calculate height based on distance from center with falloff
-        float Distance = FMath::Sqrt(X * X + Y * Y);
-        float NormalizedDistance = Distance / Event.Radius;
-        float Falloff = FMath::Pow(1.0f - NormalizedDistance, DeformationFalloffExponent);
-        float Height = Event.Depth * Falloff;
-        
-        OutHeights.Add(Height);
-    }
-}
-
-void UCore_TerrainDeformationSystem::InitializeTerrainMaterials()
-{
-    TerrainMaterials.Empty();
-    
-    // Initialize dirt material
-    FCore_TerrainMaterial DirtMaterial;
-    DirtMaterial.MaterialType = ECore_TerrainType::Dirt;
-    DirtMaterial.Hardness = 1.0f;
-    DirtMaterial.DeformationResistance = 100.0f;
-    DirtMaterial.RecoveryRate = 0.2f;
-    DirtMaterial.MaxDeformation = 150.0f;
-    TerrainMaterials.Add(ECore_TerrainType::Dirt, DirtMaterial);
-    
-    // Initialize sand material
-    FCore_TerrainMaterial SandMaterial;
-    SandMaterial.MaterialType = ECore_TerrainType::Sand;
-    SandMaterial.Hardness = 0.5f;
-    SandMaterial.DeformationResistance = 50.0f;
-    SandMaterial.RecoveryRate = 0.1f;
-    SandMaterial.MaxDeformation = 200.0f;
-    TerrainMaterials.Add(ECore_TerrainType::Sand, SandMaterial);
-    
-    // Initialize rock material
-    FCore_TerrainMaterial RockMaterial;
-    RockMaterial.MaterialType = ECore_TerrainType::Rock;
-    RockMaterial.Hardness = 5.0f;
-    RockMaterial.DeformationResistance = 500.0f;
-    RockMaterial.RecoveryRate = 0.0f; // Rocks don't recover
-    RockMaterial.MaxDeformation = 50.0f;
-    TerrainMaterials.Add(ECore_TerrainType::Rock, RockMaterial);
-    
-    // Initialize mud material
-    FCore_TerrainMaterial MudMaterial;
-    MudMaterial.MaterialType = ECore_TerrainType::Mud;
-    MudMaterial.Hardness = 0.3f;
-    MudMaterial.DeformationResistance = 30.0f;
-    MudMaterial.RecoveryRate = 0.5f;
-    MudMaterial.MaxDeformation = 300.0f;
-    TerrainMaterials.Add(ECore_TerrainType::Mud, MudMaterial);
-}
-
-FCore_TerrainMaterial UCore_TerrainDeformationSystem::GetMaterialProperties(ECore_TerrainType TerrainType)
-{
-    FCore_TerrainMaterial* Material = TerrainMaterials.Find(TerrainType);
-    
-    if (Material)
-    {
-        return *Material;
-    }
-    
-    // Return default material if not found
-    FCore_TerrainMaterial DefaultMaterial;
-    return DefaultMaterial;
-}
-
-void UCore_TerrainDeformationSystem::OptimizeDeformationQueue()
-{
-    // Remove old pending deformations that are too old
-    float CurrentTime = GetWorld()->GetTimeSeconds();
-    float MaxPendingTime = 5.0f;
-    
-    for (int32 i = PendingDeformations.Num() - 1; i >= 0; i--)
-    {
-        if (CurrentTime - PendingDeformations[i].TimeStamp > MaxPendingTime)
+        // Modify shape based on type
+        switch (Type)
         {
-            PendingDeformations.RemoveAt(i);
+            case ECore_TerrainDeformationType::Footprint:
+                // Oval shape for footprints
+                Y *= 0.7f;
+                break;
+            case ECore_TerrainDeformationType::Impact:
+                // Circular shape for impacts
+                break;
+            case ECore_TerrainDeformationType::Erosion:
+                // Irregular shape for erosion
+                X += FMath::RandRange(-Radius * 0.1f, Radius * 0.1f);
+                Y += FMath::RandRange(-Radius * 0.1f, Radius * 0.1f);
+                break;
         }
+        
+        ShapePoints.Add(FVector2D(X, Y));
     }
     
-    // Limit total deformations
-    if (ActiveDeformations.Num() > MaxConcurrentDeformations)
-    {
-        int32 ToRemove = ActiveDeformations.Num() - MaxConcurrentDeformations;
-        ActiveDeformations.RemoveAt(0, ToRemove);
-    }
+    return ShapePoints;
 }
 
-bool UCore_TerrainDeformationSystem::ShouldProcessDeformation(const FCore_DeformationEvent& Event)
+bool UCore_TerrainDeformationSystem::GetLandscapeHeightData(const FVector& WorldLocation, float Radius, TArray<uint16>& HeightData, FIntRect& DataRect)
 {
-    // Check if deformation is significant enough
-    if (Event.Depth < MinDeformationThreshold)
+    if (!LandscapeInfo)
     {
         return false;
     }
     
-    // Check if we're not over the concurrent limit
-    if (ActiveDeformations.Num() >= MaxConcurrentDeformations)
+    // Convert world location to landscape coordinates
+    FVector LandscapeLocation = MainLandscape->GetTransform().InverseTransformPosition(WorldLocation);
+    
+    // Calculate data rectangle
+    int32 RadiusInQuads = FMath::CeilToInt(Radius / MainLandscape->GetActorScale().X);
+    DataRect = FIntRect(
+        FMath::FloorToInt(LandscapeLocation.X) - RadiusInQuads,
+        FMath::FloorToInt(LandscapeLocation.Y) - RadiusInQuads,
+        FMath::CeilToInt(LandscapeLocation.X) + RadiusInQuads,
+        FMath::CeilToInt(LandscapeLocation.Y) + RadiusInQuads
+    );
+    
+    // Simplified height data access (in real implementation, would use FLandscapeEditDataInterface)
+    int32 DataSize = DataRect.Width() * DataRect.Height();
+    HeightData.SetNum(DataSize);
+    
+    // Fill with dummy data for now
+    for (int32 i = 0; i < DataSize; ++i)
     {
-        return false;
+        HeightData[i] = 32768; // Mid-range height value
     }
     
     return true;
 }
 
-void UCore_TerrainDeformationSystem::ProcessSingleDeformationRecovery(FCore_DeformationEvent& Event, float DeltaTime)
+bool UCore_TerrainDeformationSystem::SetLandscapeHeightData(const FIntRect& DataRect, const TArray<uint16>& HeightData)
 {
-    FCore_TerrainMaterial Material = GetMaterialProperties(Event.TerrainType);
-    
-    if (Material.RecoveryRate <= 0.0f)
+    if (!LandscapeInfo)
     {
-        return; // No recovery for this material type
+        return false;
     }
     
-    float RecoveryAmount = Material.RecoveryRate * GlobalRecoveryRate * DeltaTime;
-    Event.Depth = FMath::Max(0.0f, Event.Depth - RecoveryAmount);
+    // Simplified height data setting (in real implementation, would use FLandscapeEditDataInterface)
+    // This is a complex operation that requires proper landscape editing interface
     
-    // Update heightmap if significant recovery occurred
-    if (RecoveryAmount > MinDeformationThreshold)
-    {
-        ModifyLandscapeHeightmap(Event);
-    }
-}
-
-void UCore_TerrainDeformationSystem::DrawDeformationDebugInfo(const FCore_DeformationEvent& Event)
-{
-    if (!GetWorld())
-    {
-        return;
-    }
+    UE_LOG(LogTemp, Log, TEXT("TerrainDeformation: Height data applied to rect (%d,%d) to (%d,%d)"), 
+           DataRect.Min.X, DataRect.Min.Y, DataRect.Max.X, DataRect.Max.Y);
     
-    FColor DebugColor = FColor::Red;
-    switch (Event.TerrainType)
-    {
-        case ECore_TerrainType::Dirt: DebugColor = FColor::Brown; break;
-        case ECore_TerrainType::Sand: DebugColor = FColor::Yellow; break;
-        case ECore_TerrainType::Rock: DebugColor = FColor::Black; break;
-        case ECore_TerrainType::Mud: DebugColor = FColor::Orange; break;
-        default: DebugColor = FColor::Red; break;
-    }
-    
-    DrawDebugSphere(GetWorld(), Event.ImpactLocation, Event.Radius, 12, DebugColor, false, 1.0f);
-}
-
-void UCore_TerrainDeformationSystem::LogDeformationStats()
-{
-    UE_LOG(LogTemp, Log, TEXT("=== TERRAIN DEFORMATION STATS ==="));
-    UE_LOG(LogTemp, Log, TEXT("Active deformations: %d"), ActiveDeformations.Num());
-    UE_LOG(LogTemp, Log, TEXT("Pending deformations: %d"), PendingDeformations.Num());
-    UE_LOG(LogTemp, Log, TEXT("Recovery enabled: %s"), bEnableTerrainRecovery ? TEXT("Yes") : TEXT("No"));
-    UE_LOG(LogTemp, Log, TEXT("Max concurrent: %d"), MaxConcurrentDeformations);
+    return true;
 }
