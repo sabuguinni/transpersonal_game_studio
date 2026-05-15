@@ -1,245 +1,121 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Components/ActorComponent.h"
+#include "Engine/GameInstanceSubsystem.h"
 #include "Engine/DataTable.h"
-#include "Sound/SoundWave.h"
 #include "Narr_DialogueSystem.generated.h"
-
-// Forward declarations
-class UNarr_DialogueManager;
-class ANarr_NPCCharacter;
 
 UENUM(BlueprintType)
 enum class ENarr_DialogueType : uint8
 {
-    Greeting        UMETA(DisplayName = "Greeting"),
-    QuestGiver      UMETA(DisplayName = "Quest Giver"),
-    Trader          UMETA(DisplayName = "Trader"),
+    Narrator        UMETA(DisplayName = "Narrator"),
     Warning         UMETA(DisplayName = "Warning"),
-    Storytelling    UMETA(DisplayName = "Storytelling"),
-    Combat          UMETA(DisplayName = "Combat"),
-    Emergency       UMETA(DisplayName = "Emergency")
+    HuntLeader      UMETA(DisplayName = "Hunt Leader"),
+    ElderWisdom     UMETA(DisplayName = "Elder Wisdom"),
+    ScoutReport     UMETA(DisplayName = "Scout Report"),
+    QuestGiver      UMETA(DisplayName = "Quest Giver")
 };
 
 UENUM(BlueprintType)
-enum class ENarr_NPCRole : uint8
+enum class ENarr_DialogueTrigger : uint8
 {
-    TribalElder     UMETA(DisplayName = "Tribal Elder"),
-    HuntMaster      UMETA(DisplayName = "Hunt Master"),
-    WaterSeeker     UMETA(DisplayName = "Water Seeker"),
-    WarChief        UMETA(DisplayName = "War Chief"),
-    Scout           UMETA(DisplayName = "Scout"),
-    Crafter         UMETA(DisplayName = "Crafter"),
-    Healer          UMETA(DisplayName = "Healer"),
-    Survivor        UMETA(DisplayName = "Survivor")
+    OnQuestStart        UMETA(DisplayName = "Quest Start"),
+    OnDinosaurSighted   UMETA(DisplayName = "Dinosaur Sighted"),
+    OnDangerArea        UMETA(DisplayName = "Danger Area"),
+    OnCampSetup         UMETA(DisplayName = "Camp Setup"),
+    OnHuntSuccess       UMETA(DisplayName = "Hunt Success"),
+    OnSurvivalTip       UMETA(DisplayName = "Survival Tip")
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FNarr_DialogueLine
+struct TRANSPERSONALGAME_API FNarr_DialogueEntry
 {
     GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    FString DialogueID;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    ENarr_DialogueType SpeakerType;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    ENarr_DialogueTrigger TriggerCondition;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
     FText DialogueText;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    TSoftObjectPtr<USoundWave> VoiceClip;
+    FString AudioAssetPath;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    ENarr_DialogueType DialogueType;
+    float Priority;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    float Duration;
+    bool bIsRepeatable;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    bool bRequiresPlayerResponse;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    TArray<FText> PlayerResponseOptions;
-
-    FNarr_DialogueLine()
+    FNarr_DialogueEntry()
     {
-        DialogueText = FText::GetEmpty();
-        DialogueType = ENarr_DialogueType::Greeting;
-        Duration = 5.0f;
-        bRequiresPlayerResponse = false;
+        SpeakerType = ENarr_DialogueType::Narrator;
+        TriggerCondition = ENarr_DialogueTrigger::OnQuestStart;
+        Priority = 1.0f;
+        bIsRepeatable = false;
     }
 };
 
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FNarr_NPCProfile
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC")
-    FName NPCName;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC")
-    ENarr_NPCRole Role;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC")
-    FText BackgroundStory;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC")
-    TArray<FNarr_DialogueLine> DialogueLines;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC")
-    float TrustLevel;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC")
-    bool bIsHostile;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC")
-    FVector TerritoryCenter;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC")
-    float TerritoryRadius;
-
-    FNarr_NPCProfile()
-    {
-        NPCName = TEXT("UnnamedNPC");
-        Role = ENarr_NPCRole::Survivor;
-        BackgroundStory = FText::GetEmpty();
-        TrustLevel = 0.5f;
-        bIsHostile = false;
-        TerritoryCenter = FVector::ZeroVector;
-        TerritoryRadius = 1000.0f;
-    }
-};
-
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FNarr_StoryEvent
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    FName EventID;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    FText EventTitle;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    FText EventDescription;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    bool bIsTriggered;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    bool bIsCompleted;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    TArray<FName> PrerequisiteEvents;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    TArray<FNarr_DialogueLine> EventDialogue;
-
-    FNarr_StoryEvent()
-    {
-        EventID = TEXT("DefaultEvent");
-        EventTitle = FText::GetEmpty();
-        EventDescription = FText::GetEmpty();
-        bIsTriggered = false;
-        bIsCompleted = false;
-    }
-};
-
-UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UNarr_DialogueSystem : public UActorComponent
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API UNarr_DialogueSystem : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
 public:
     UNarr_DialogueSystem();
 
+    // Subsystem interface
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
+
+    // Dialogue management
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    void TriggerDialogue(ENarr_DialogueTrigger TriggerType, const FString& ContextData = "");
+
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    void PlayDialogueEntry(const FNarr_DialogueEntry& DialogueEntry);
+
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    void RegisterDialogueEntry(const FNarr_DialogueEntry& NewEntry);
+
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    TArray<FNarr_DialogueEntry> GetDialoguesForTrigger(ENarr_DialogueTrigger TriggerType);
+
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    void SetDialogueEnabled(bool bEnabled);
+
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    bool IsDialogueEnabled() const { return bDialogueEnabled; }
+
 protected:
-    virtual void BeginPlay() override;
+    // Dialogue storage
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    TArray<FNarr_DialogueEntry> DialogueEntries;
 
-    // NPC Management
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPCs")
-    TArray<FNarr_NPCProfile> RegisteredNPCs;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    UDataTable* DialogueDataTable;
 
-    // Story Events
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    TArray<FNarr_StoryEvent> StoryEvents;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    bool bDialogueEnabled;
 
-    // Dialogue State
-    UPROPERTY(BlueprintReadOnly, Category = "Dialogue")
-    bool bIsDialogueActive;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    float DialogueCooldownTime;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Dialogue")
-    FNarr_NPCProfile* CurrentNPC;
+    // Internal state
+    UPROPERTY()
+    TArray<FString> PlayedDialogueIDs;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Dialogue")
-    int32 CurrentDialogueIndex;
+    UPROPERTY()
+    float LastDialogueTime;
 
-    // Audio Management
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    class UAudioComponent* DialogueAudioComponent;
-
-public:
-    // NPC Registration and Management
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    void RegisterNPC(const FNarr_NPCProfile& NPCProfile);
-
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    FNarr_NPCProfile* FindNPCByName(const FName& NPCName);
-
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    TArray<FNarr_NPCProfile*> GetNPCsInRadius(const FVector& Location, float Radius);
-
-    // Dialogue Management
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    bool StartDialogue(const FName& NPCName, ENarr_DialogueType DialogueType = ENarr_DialogueType::Greeting);
-
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    void EndDialogue();
-
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    bool PlayNextDialogueLine();
-
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    void SelectPlayerResponse(int32 ResponseIndex);
-
-    // Story Event Management
-    UFUNCTION(BlueprintCallable, Category = "Story")
-    void TriggerStoryEvent(const FName& EventID);
-
-    UFUNCTION(BlueprintCallable, Category = "Story")
-    bool IsStoryEventCompleted(const FName& EventID);
-
-    UFUNCTION(BlueprintCallable, Category = "Story")
-    void CompleteStoryEvent(const FName& EventID);
-
-    // Utility Functions
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    void UpdateNPCTrustLevel(const FName& NPCName, float TrustDelta);
-
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    float GetNPCTrustLevel(const FName& NPCName);
-
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    TArray<FNarr_DialogueLine> GetDialogueByType(const FName& NPCName, ENarr_DialogueType DialogueType);
-
-    // Events
-    DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnDialogueStarted, FName, NPCName, ENarr_DialogueType, DialogueType);
-    DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnDialogueEnded, FName, NPCName);
-    DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnStoryEventTriggered, FName, EventID, FText, EventTitle);
-
-    UPROPERTY(BlueprintAssignable, Category = "Events")
-    FOnDialogueStarted OnDialogueStarted;
-
-    UPROPERTY(BlueprintAssignable, Category = "Events")
-    FOnDialogueEnded OnDialogueEnded;
-
-    UPROPERTY(BlueprintAssignable, Category = "Events")
-    FOnStoryEventTriggered OnStoryEventTriggered;
-
-private:
-    void InitializeDefaultNPCs();
-    void InitializeStoryEvents();
-    bool CanTriggerStoryEvent(const FNarr_StoryEvent& Event);
-    void PlayDialogueAudio(const FNarr_DialogueLine& DialogueLine);
+    // Helper methods
+    void LoadDefaultDialogues();
+    bool CanPlayDialogue(const FNarr_DialogueEntry& Entry);
+    void MarkDialogueAsPlayed(const FString& DialogueID);
 };
-
-#include "Narr_DialogueSystem.generated.h"
