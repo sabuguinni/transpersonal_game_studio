@@ -1,296 +1,274 @@
 #include "NarrativeManager.h"
-#include "Engine/World.h"
-#include "Engine/Engine.h"
 #include "Components/AudioComponent.h"
-#include "Sound/SoundBase.h"
+#include "Engine/World.h"
+#include "GameFramework/PlayerController.h"
+#include "GameFramework/Pawn.h"
 #include "Kismet/GameplayStatics.h"
-#include "../Character/TranspersonalCharacter.h"
-#include "../TranspersonalGameState.h"
+#include "Engine/Engine.h"
 
-UNarrativeManager::UNarrativeManager()
+ANarrativeManager::ANarrativeManager()
 {
-    bDialogueActive = false;
-    CurrentDialogueID = TEXT("");
-    CurrentLineIndex = 0;
+    PrimaryActorTick.bCanEverTick = true;
+    
+    // Create audio component for voice playback
+    VoiceAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("VoiceAudioComponent"));
+    RootComponent = VoiceAudioComponent;
+    
+    // Initialize narrative state
+    CurrentStoryState = ENarr_StoryState::Introduction;
     DialogueTimer = 0.0f;
-    NarrationAudioComponent = nullptr;
+    bIsPlayingDialogue = false;
+    StoryProgressionTimer = 0.0f;
+    CurrentDialogueIndex = 0;
+    CurrentStoryEvent = nullptr;
+    
+    // Set up audio component
+    VoiceAudioComponent->bAutoActivate = false;
+    VoiceAudioComponent->SetVolumeMultiplier(1.0f);
 }
 
-void UNarrativeManager::Initialize(FSubsystemCollectionBase& Collection)
+void ANarrativeManager::BeginPlay()
 {
-    Super::Initialize(Collection);
+    Super::BeginPlay();
     
-    UE_LOG(LogTemp, Warning, TEXT("NarrativeManager: Initializing narrative system"));
+    // Initialize story events when the game starts
+    InitializeStoryEvents();
     
-    InitializeStoryCheckpoints();
-    LoadQuestDialogues();
+    UE_LOG(LogTemp, Warning, TEXT("NarrativeManager: Story system initialized"));
+}
+
+void ANarrativeManager::Tick(float DeltaTime)
+{
+    Super::Tick(DeltaTime);
     
-    // Create audio component for narration
-    if (UWorld* World = GetWorld())
+    // Update dialogue timer
+    if (bIsPlayingDialogue)
     {
-        if (AActor* WorldActor = World->GetFirstPlayerController())
+        DialogueTimer -= DeltaTime;
+        if (DialogueTimer <= 0.0f)
         {
-            NarrationAudioComponent = WorldActor->CreateDefaultSubobject<UAudioComponent>(TEXT("NarrationAudio"));
-            if (NarrationAudioComponent)
+            bIsPlayingDialogue = false;
+            OnDialogueFinished();
+            
+            // Check if there are more dialogue lines in current event
+            if (CurrentStoryEvent && CurrentDialogueIndex < CurrentStoryEvent->DialogueLines.Num() - 1)
             {
-                NarrationAudioComponent->bAutoActivate = false;
-                UE_LOG(LogTemp, Warning, TEXT("NarrativeManager: Audio component created"));
+                CurrentDialogueIndex++;
+                PlayDialogueLine(CurrentStoryEvent->DialogueLines[CurrentDialogueIndex]);
+            }
+            else
+            {
+                CurrentStoryEvent = nullptr;
+                CurrentDialogueIndex = 0;
+            }
+        }
+    }
+    
+    // Check for story event triggers
+    CheckPlayerProximityToEvents();
+    
+    // Update story progression timer
+    StoryProgressionTimer += DeltaTime;
+}
+
+void ANarrativeManager::TriggerStoryEvent(const FString& EventName)
+{
+    for (FNarr_StoryEvent& Event : StoryEvents)
+    {
+        if (Event.EventName == EventName && !Event.bIsTriggered)
+        {
+            // Check if we're in the right story state
+            if (Event.RequiredState == CurrentStoryState || Event.RequiredState == ENarr_StoryState::Introduction)
+            {
+                Event.bIsTriggered = true;
+                CurrentStoryEvent = &Event;
+                CurrentDialogueIndex = 0;
+                
+                if (Event.DialogueLines.Num() > 0)
+                {
+                    PlayDialogueLine(Event.DialogueLines[0]);
+                }
+                
+                UE_LOG(LogTemp, Warning, TEXT("NarrativeManager: Triggered story event: %s"), *EventName);
+                break;
             }
         }
     }
 }
 
-void UNarrativeManager::Deinitialize()
+void ANarrativeManager::AdvanceStoryState()
 {
-    EndCurrentDialogue();
+    ENarr_StoryState OldState = CurrentStoryState;
     
-    if (NarrationAudioComponent)
+    switch (CurrentStoryState)
     {
-        NarrationAudioComponent->Stop();
-        NarrationAudioComponent = nullptr;
-    }
-    
-    Super::Deinitialize();
-}
-
-void UNarrativeManager::StartDialogue(const FString& DialogueID, ATranspersonalCharacter* Player)
-{
-    if (bDialogueActive)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("NarrativeManager: Cannot start dialogue - another dialogue is active"));
-        return;
-    }
-
-    if (!QuestDialogues.Contains(DialogueID))
-    {
-        UE_LOG(LogTemp, Error, TEXT("NarrativeManager: Dialogue ID not found: %s"), *DialogueID);
-        return;
-    }
-
-    const FNarr_QuestDialogue& QuestDialogue = QuestDialogues[DialogueID];
-    
-    bDialogueActive = true;
-    CurrentDialogueID = DialogueID;
-    CurrentLineIndex = 0;
-    DialogueTimer = 0.0f;
-    
-    // Start with intro lines
-    CurrentDialogueLines = QuestDialogue.IntroLines;
-    
-    if (CurrentDialogueLines.Num() > 0)
-    {
-        PlayDialogueLine(CurrentDialogueLines[0]);
-        UE_LOG(LogTemp, Warning, TEXT("NarrativeManager: Started dialogue: %s"), *DialogueID);
-    }
-    else
-    {
-        UE_LOG(LogTemp, Warning, TEXT("NarrativeManager: No dialogue lines found for: %s"), *DialogueID);
-        EndCurrentDialogue();
-    }
-}
-
-void UNarrativeManager::TriggerNarration(const FString& CheckpointID)
-{
-    for (const FNarr_StoryCheckpoint& Checkpoint : StoryCheckpoints)
-    {
-        if (Checkpoint.CheckpointID == CheckpointID)
-        {
-            TriggerCheckpointNarration(Checkpoint);
-            MarkCheckpointReached(CheckpointID);
+        case ENarr_StoryState::Introduction:
+            CurrentStoryState = ENarr_StoryState::FirstHunt;
             break;
-        }
+        case ENarr_StoryState::FirstHunt:
+            CurrentStoryState = ENarr_StoryState::PackEncounter;
+            break;
+        case ENarr_StoryState::PackEncounter:
+            CurrentStoryState = ENarr_StoryState::ResourceScarcity;
+            break;
+        case ENarr_StoryState::ResourceScarcity:
+            CurrentStoryState = ENarr_StoryState::TribalConflict;
+            break;
+        case ENarr_StoryState::TribalConflict:
+            CurrentStoryState = ENarr_StoryState::SeasonalMigration;
+            break;
+        case ENarr_StoryState::SeasonalMigration:
+            CurrentStoryState = ENarr_StoryState::FinalSurvival;
+            break;
+        case ENarr_StoryState::FinalSurvival:
+            // Story complete
+            break;
     }
-}
-
-void UNarrativeManager::RegisterQuestDialogue(const FString& QuestID, const FNarr_QuestDialogue& DialogueData)
-{
-    QuestDialogues.Add(QuestID, DialogueData);
-    UE_LOG(LogTemp, Warning, TEXT("NarrativeManager: Registered dialogue for quest: %s"), *QuestID);
-}
-
-bool UNarrativeManager::IsStoryCheckpointReached(const FString& CheckpointID) const
-{
-    return ReachedCheckpoints.Contains(CheckpointID);
-}
-
-void UNarrativeManager::MarkCheckpointReached(const FString& CheckpointID)
-{
-    if (!ReachedCheckpoints.Contains(CheckpointID))
+    
+    if (OldState != CurrentStoryState)
     {
-        ReachedCheckpoints.Add(CheckpointID);
-        UE_LOG(LogTemp, Warning, TEXT("NarrativeManager: Checkpoint reached: %s"), *CheckpointID);
+        OnStoryStateChanged(CurrentStoryState);
+        UE_LOG(LogTemp, Warning, TEXT("NarrativeManager: Story state advanced to: %d"), (int32)CurrentStoryState);
     }
 }
 
-void UNarrativeManager::PlayDialogueLine(const FNarr_DialogueLine& DialogueLine)
+void ANarrativeManager::PlayDialogueLine(const FNarr_DialogueLine& DialogueLine)
 {
-    // Display text (in a real implementation, this would update UI)
-    UE_LOG(LogTemp, Warning, TEXT("NarrativeManager: %s: %s"), *DialogueLine.SpeakerName, *DialogueLine.DialogueText.ToString());
+    if (bIsPlayingDialogue)
+    {
+        StopCurrentDialogue();
+    }
+    
+    bIsPlayingDialogue = true;
+    DialogueTimer = DialogueLine.Duration;
     
     // Play voice clip if available
-    if (DialogueLine.VoiceClip.IsValid() && NarrationAudioComponent)
+    if (DialogueLine.VoiceClip.IsValid())
     {
-        if (USoundBase* Sound = DialogueLine.VoiceClip.LoadSynchronous())
-        {
-            NarrationAudioComponent->SetSound(Sound);
-            NarrationAudioComponent->Play();
-        }
+        VoiceAudioComponent->SetSound(DialogueLine.VoiceClip.LoadSynchronous());
+        VoiceAudioComponent->Play();
     }
     
-    // Set timer for next line
-    DialogueTimer = DialogueLine.Duration;
+    // Trigger Blueprint event
+    OnDialogueStarted(DialogueLine);
+    
+    UE_LOG(LogTemp, Warning, TEXT("NarrativeManager: Playing dialogue: %s - %s"), 
+           *DialogueLine.SpeakerName, *DialogueLine.DialogueText);
 }
 
-void UNarrativeManager::EndCurrentDialogue()
+void ANarrativeManager::CheckPlayerProximityToEvents()
 {
-    if (!bDialogueActive)
+    // Get player pawn
+    APlayerController* PlayerController = UGameplayStatics::GetPlayerController(GetWorld(), 0);
+    if (!PlayerController || !PlayerController->GetPawn())
+    {
         return;
-        
-    bDialogueActive = false;
-    CurrentDialogueID = TEXT("");
-    CurrentLineIndex = 0;
-    DialogueTimer = 0.0f;
-    CurrentDialogueLines.Empty();
-    
-    if (NarrationAudioComponent)
-    {
-        NarrationAudioComponent->Stop();
     }
     
-    UE_LOG(LogTemp, Warning, TEXT("NarrativeManager: Dialogue ended"));
-}
-
-void UNarrativeManager::CheckLocationTriggers(const FVector& PlayerLocation)
-{
-    for (const FNarr_StoryCheckpoint& Checkpoint : StoryCheckpoints)
+    FVector PlayerLocation = PlayerController->GetPawn()->GetActorLocation();
+    
+    // Check each story event for proximity triggers
+    for (FNarr_StoryEvent& Event : StoryEvents)
     {
-        if (Checkpoint.bTriggerAutomatically && 
-            !IsStoryCheckpointReached(Checkpoint.CheckpointID) &&
-            IsPlayerNearCheckpoint(Checkpoint, PlayerLocation))
+        if (!Event.bIsTriggered && Event.RequiredState == CurrentStoryState)
         {
-            TriggerNarration(Checkpoint.CheckpointID);
+            float Distance = FVector::Dist(PlayerLocation, Event.TriggerLocation);
+            if (Distance <= Event.TriggerRadius)
+            {
+                TriggerStoryEvent(Event.EventName);
+            }
         }
     }
 }
 
-float UNarrativeManager::GetStoryProgress() const
+ENarr_StoryState ANarrativeManager::GetCurrentStoryState() const
 {
-    if (StoryCheckpoints.Num() == 0)
-        return 0.0f;
-        
-    return static_cast<float>(ReachedCheckpoints.Num()) / static_cast<float>(StoryCheckpoints.Num());
+    return CurrentStoryState;
 }
 
-void UNarrativeManager::InitializeStoryCheckpoints()
+void ANarrativeManager::InitializeStoryEvents()
 {
-    // Initialize basic story checkpoints
-    FNarr_StoryCheckpoint IntroCheckpoint;
-    IntroCheckpoint.CheckpointID = TEXT("Intro_001");
-    IntroCheckpoint.NarrativeText = FText::FromString(TEXT("Day 233 in the Cretaceous wilderness. The morning reveals disturbing signs..."));
-    IntroCheckpoint.TriggerLocation = FVector(0, 0, 100);
-    IntroCheckpoint.TriggerRadius = 1000.0f;
-    IntroCheckpoint.bTriggerAutomatically = true;
-    StoryCheckpoints.Add(IntroCheckpoint);
+    StoryEvents.Empty();
     
-    FNarr_StoryCheckpoint ThreatCheckpoint;
-    ThreatCheckpoint.CheckpointID = TEXT("Threat_001");
-    ThreatCheckpoint.NarrativeText = FText::FromString(TEXT("Critical threat assessment! Massive Carnotaurus pack detected..."));
-    ThreatCheckpoint.TriggerLocation = FVector(2000, 0, 100);
-    ThreatCheckpoint.TriggerRadius = 800.0f;
-    ThreatCheckpoint.bTriggerAutomatically = true;
-    StoryCheckpoints.Add(ThreatCheckpoint);
+    // Introduction Event
+    FNarr_StoryEvent IntroEvent;
+    IntroEvent.EventName = TEXT("GameIntroduction");
+    IntroEvent.RequiredState = ENarr_StoryState::Introduction;
+    IntroEvent.TriggerLocation = FVector(0, 0, 0);
+    IntroEvent.TriggerRadius = 1000.0f;
     
-    FNarr_StoryCheckpoint GuideCheckpoint;
-    GuideCheckpoint.CheckpointID = TEXT("Guide_001");
-    GuideCheckpoint.NarrativeText = FText::FromString(TEXT("The ancient river crossing holds secrets of survival..."));
-    GuideCheckpoint.TriggerLocation = FVector(1000, 1500, 50);
-    GuideCheckpoint.TriggerRadius = 600.0f;
-    GuideCheckpoint.bTriggerAutomatically = true;
-    StoryCheckpoints.Add(GuideCheckpoint);
+    FNarr_DialogueLine IntroLine;
+    IntroLine.SpeakerName = TEXT("Narrator");
+    IntroLine.DialogueText = TEXT("The ancient world awakens. You are alone in a land where giants roam and survival depends on wit, courage, and understanding the rhythms of nature.");
+    IntroLine.DialogueType = ENarr_DialogueType::Narration;
+    IntroLine.Duration = 8.0f;
+    IntroEvent.DialogueLines.Add(IntroLine);
     
-    UE_LOG(LogTemp, Warning, TEXT("NarrativeManager: Initialized %d story checkpoints"), StoryCheckpoints.Num());
+    StoryEvents.Add(IntroEvent);
+    
+    // First Hunt Event
+    FNarr_StoryEvent HuntEvent;
+    HuntEvent.EventName = TEXT("FirstHuntEncounter");
+    HuntEvent.RequiredState = ENarr_StoryState::FirstHunt;
+    HuntEvent.TriggerLocation = FVector(2000, 0, 100);
+    HuntEvent.TriggerRadius = 800.0f;
+    
+    FNarr_DialogueLine HuntLine;
+    HuntLine.SpeakerName = TEXT("Hunter");
+    HuntLine.DialogueText = TEXT("Fresh tracks in the mud. Large herbivore, moving slowly. The hunt begins now - stay downwind and move with patience.");
+    HuntLine.DialogueType = ENarr_DialogueType::Instruction;
+    HuntLine.Duration = 6.0f;
+    HuntEvent.DialogueLines.Add(HuntLine);
+    
+    StoryEvents.Add(HuntEvent);
+    
+    // Pack Encounter Event
+    FNarr_StoryEvent PackEvent;
+    PackEvent.EventName = TEXT("RaptorPackWarning");
+    PackEvent.RequiredState = ENarr_StoryState::PackEncounter;
+    PackEvent.TriggerLocation = FVector(0, -3000, 100);
+    PackEvent.TriggerRadius = 1200.0f;
+    
+    FNarr_DialogueLine PackLine;
+    PackLine.SpeakerName = TEXT("Scout");
+    PackLine.DialogueText = TEXT("Pack hunters circle in the distance. They test our defenses, looking for weakness. Show no fear, but prepare for battle.");
+    PackLine.DialogueType = ENarr_DialogueType::Warning;
+    PackLine.Duration = 7.0f;
+    PackEvent.DialogueLines.Add(PackLine);
+    
+    StoryEvents.Add(PackEvent);
+    
+    // Resource Scarcity Event
+    FNarr_StoryEvent ResourceEvent;
+    ResourceEvent.EventName = TEXT("WaterScarcity");
+    ResourceEvent.RequiredState = ENarr_StoryState::ResourceScarcity;
+    ResourceEvent.TriggerLocation = FVector(3000, 3000, 100);
+    ResourceEvent.TriggerRadius = 600.0f;
+    
+    FNarr_DialogueLine ResourceLine;
+    ResourceLine.SpeakerName = TEXT("Elder");
+    ResourceLine.DialogueText = TEXT("The streams run low and the earth cracks with thirst. We must venture into dangerous territory to find new water sources.");
+    ResourceLine.DialogueType = ENarr_DialogueType::Observation;
+    ResourceLine.Duration = 6.5f;
+    ResourceEvent.DialogueLines.Add(ResourceLine);
+    
+    StoryEvents.Add(ResourceEvent);
+    
+    UE_LOG(LogTemp, Warning, TEXT("NarrativeManager: Initialized %d story events"), StoryEvents.Num());
 }
 
-void UNarrativeManager::LoadQuestDialogues()
+bool ANarrativeManager::IsDialoguePlaying() const
 {
-    // Create sample quest dialogue
-    FNarr_QuestDialogue SurvivalQuest;
-    SurvivalQuest.QuestID = TEXT("Survival_001");
-    
-    // Intro lines
-    FNarr_DialogueLine IntroLine1;
-    IntroLine1.SpeakerName = TEXT("Survival Guide");
-    IntroLine1.DialogueText = FText::FromString(TEXT("Welcome to the Cretaceous period. Your survival depends on understanding this dangerous world."));
-    IntroLine1.Duration = 4.0f;
-    SurvivalQuest.IntroLines.Add(IntroLine1);
-    
-    FNarr_DialogueLine IntroLine2;
-    IntroLine2.SpeakerName = TEXT("Survival Guide");
-    IntroLine2.DialogueText = FText::FromString(TEXT("Find shelter, gather resources, and avoid the apex predators. Your journey begins now."));
-    IntroLine2.Duration = 4.0f;
-    SurvivalQuest.IntroLines.Add(IntroLine2);
-    
-    // Progress lines
-    FNarr_DialogueLine ProgressLine;
-    ProgressLine.SpeakerName = TEXT("Survival Guide");
-    ProgressLine.DialogueText = FText::FromString(TEXT("Good progress. You're learning to read the signs of this ancient world."));
-    ProgressLine.Duration = 3.0f;
-    SurvivalQuest.ProgressLines.Add(ProgressLine);
-    
-    // Completion lines
-    FNarr_DialogueLine CompletionLine;
-    CompletionLine.SpeakerName = TEXT("Survival Guide");
-    CompletionLine.DialogueText = FText::FromString(TEXT("Excellent work, survivor. You've taken your first steps toward mastering this prehistoric realm."));
-    CompletionLine.Duration = 4.0f;
-    SurvivalQuest.CompletionLines.Add(CompletionLine);
-    
-    RegisterQuestDialogue(TEXT("Survival_001"), SurvivalQuest);
+    return bIsPlayingDialogue;
 }
 
-void UNarrativeManager::UpdateDialogueTimer(float DeltaTime)
+void ANarrativeManager::StopCurrentDialogue()
 {
-    if (!bDialogueActive)
-        return;
-        
-    DialogueTimer -= DeltaTime;
-    
-    if (DialogueTimer <= 0.0f)
+    if (bIsPlayingDialogue)
     {
-        ProcessNextDialogueLine();
-    }
-}
-
-void UNarrativeManager::ProcessNextDialogueLine()
-{
-    CurrentLineIndex++;
-    
-    if (CurrentLineIndex >= CurrentDialogueLines.Num())
-    {
-        EndCurrentDialogue();
-        return;
-    }
-    
-    PlayDialogueLine(CurrentDialogueLines[CurrentLineIndex]);
-}
-
-bool UNarrativeManager::IsPlayerNearCheckpoint(const FNarr_StoryCheckpoint& Checkpoint, const FVector& PlayerLocation) const
-{
-    float Distance = FVector::Dist(PlayerLocation, Checkpoint.TriggerLocation);
-    return Distance <= Checkpoint.TriggerRadius;
-}
-
-void UNarrativeManager::TriggerCheckpointNarration(const FNarr_StoryCheckpoint& Checkpoint)
-{
-    UE_LOG(LogTemp, Warning, TEXT("NarrativeManager: Triggered checkpoint: %s"), *Checkpoint.CheckpointID);
-    UE_LOG(LogTemp, Warning, TEXT("Narration: %s"), *Checkpoint.NarrativeText.ToString());
-    
-    // Play narration audio if available
-    if (Checkpoint.NarrationClip.IsValid() && NarrationAudioComponent)
-    {
-        if (USoundBase* Sound = Checkpoint.NarrationClip.LoadSynchronous())
-        {
-            NarrationAudioComponent->SetSound(Sound);
-            NarrationAudioComponent->Play();
-        }
+        bIsPlayingDialogue = false;
+        DialogueTimer = 0.0f;
+        VoiceAudioComponent->Stop();
+        OnDialogueFinished();
     }
 }
