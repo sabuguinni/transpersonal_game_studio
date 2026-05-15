@@ -1,144 +1,227 @@
 #include "Crowd_MassSimulationManager.h"
 #include "MassEntitySubsystem.h"
 #include "MassSpawnerSubsystem.h"
-#include "MassSimulationSubsystem.h"
-#include "Components/StaticMeshComponent.h"
-#include "Engine/StaticMesh.h"
+#include "MassCommonFragments.h"
+#include "MassMovementFragments.h"
+#include "MassRepresentationFragments.h"
 #include "Engine/World.h"
+#include "Engine/Engine.h"
 #include "Kismet/GameplayStatics.h"
 #include "DrawDebugHelpers.h"
 
 ACrowd_MassSimulationManager::ACrowd_MassSimulationManager()
 {
     PrimaryActorTick.bCanEverTick = true;
+    PrimaryActorTick.TickInterval = 0.033f; // 30 FPS for crowd simulation
     
-    VisualizationMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("VisualizationMesh"));
-    RootComponent = VisualizationMesh;
-    
-    // Initialize default values
-    bSimulationActive = false;
-    LastLODUpdateTime = 0.0f;
-    CurrentDestination = FVector::ZeroVector;
-    
-    // Set default simulation settings
-    SimulationSettings.MaxCrowdAgents = 1000;
+    // Initialize default simulation settings
+    SimulationSettings.MaxAgents = 1000;
     SimulationSettings.SpawnRadius = 5000.0f;
-    SimulationSettings.AgentSpeed = 150.0f;
-    SimulationSettings.AvoidanceRadius = 100.0f;
+    SimulationSettings.MovementSpeed = 150.0f;
+    SimulationSettings.LODDistance1 = 1000.0f;
+    SimulationSettings.LODDistance2 = 2500.0f;
+    SimulationSettings.LODDistance3 = 5000.0f;
+    SimulationSettings.bEnableFlocking = true;
+    SimulationSettings.FlockingRadius = 300.0f;
+    SimulationSettings.SeparationWeight = 2.0f;
+    SimulationSettings.AlignmentWeight = 1.0f;
+    SimulationSettings.CohesionWeight = 1.0f;
     
     // Create default agent group
     FCrowd_AgentGroup DefaultGroup;
-    DefaultGroup.GroupName = "DefaultCrowd";
+    DefaultGroup.GroupName = TEXT("PrehistoricHumans");
     DefaultGroup.AgentCount = 50;
-    DefaultGroup.SpawnLocation = FVector(0, 0, 100);
+    DefaultGroup.SpawnLocation = FVector::ZeroVector;
     DefaultGroup.GroupRadius = 1000.0f;
+    DefaultGroup.GroupMovementSpeed = 120.0f;
+    DefaultGroup.PreferredBiome = BiomeType::Savanna;
+    DefaultGroup.bIsNomadic = true;
     AgentGroups.Add(DefaultGroup);
+    
+    MassEntitySubsystem = nullptr;
+    bIsInitialized = false;
+    ActiveAgentCount = 0;
+    CurrentSimulationTime = 0.0f;
+    LastFrameTime = 0.0f;
+    CurrentLODLevel = 0;
 }
 
 void ACrowd_MassSimulationManager::BeginPlay()
 {
     Super::BeginPlay();
     
-    // Get Mass Entity Subsystem
-    MassEntitySubsystem = GetWorld()->GetSubsystem<UMassEntitySubsystem>();
-    
-    if (MassEntitySubsystem)
+    if (UWorld* World = GetWorld())
     {
-        UE_LOG(LogTemp, Warning, TEXT("Crowd_MassSimulationManager: Mass Entity Subsystem found"));
-        InitializeCrowdSimulation();
+        MassEntitySubsystem = World->GetSubsystem<UMassEntitySubsystem>();
+        if (MassEntitySubsystem)
+        {
+            InitializeMassEntity();
+            if (bSimulationActive)
+            {
+                StartSimulation();
+            }
+            UE_LOG(LogTemp, Warning, TEXT("Crowd Mass Simulation Manager initialized with %d agent groups"), AgentGroups.Num());
+        }
+        else
+        {
+            UE_LOG(LogTemp, Error, TEXT("Failed to get MassEntitySubsystem"));
+        }
     }
-    else
-    {
-        UE_LOG(LogTemp, Error, TEXT("Crowd_MassSimulationManager: Mass Entity Subsystem not found"));
-    }
+}
+
+void ACrowd_MassSimulationManager::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+    StopSimulation();
+    CleanupEntities();
+    Super::EndPlay(EndPlayReason);
 }
 
 void ACrowd_MassSimulationManager::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
     
-    if (bSimulationActive && MassEntitySubsystem)
+    if (!bSimulationActive || !bIsInitialized)
     {
-        UpdateAgentMovement(DeltaTime);
-        
-        // Update LOD every 0.5 seconds
-        LastLODUpdateTime += DeltaTime;
-        if (LastLODUpdateTime >= 0.5f)
-        {
-            UpdateCrowdLOD();
-            LastLODUpdateTime = 0.0f;
-        }
-    }
-}
-
-void ACrowd_MassSimulationManager::InitializeCrowdSimulation()
-{
-    if (!MassEntitySubsystem)
-    {
-        UE_LOG(LogTemp, Error, TEXT("Cannot initialize crowd simulation - Mass Entity Subsystem is null"));
         return;
     }
     
-    // Clear existing entities
-    ClearAllCrowdAgents();
+    CurrentSimulationTime += DeltaTime;
+    UpdateSimulationMetrics(DeltaTime);
     
-    // Spawn initial crowd groups
-    for (const FCrowd_AgentGroup& Group : AgentGroups)
+    if (SimulationSettings.bEnableFlocking)
     {
-        if (Group.bIsActive)
-        {
-            SpawnCrowdAgents(Group);
-        }
+        UpdateFlockingBehavior(DeltaTime);
+    }
+    
+    if (bUsePerformanceLOD)
+    {
+        UpdateAgentLOD();
+        ProcessPerformanceOptimization();
+    }
+}
+
+void ACrowd_MassSimulationManager::StartSimulation()
+{
+    if (!MassEntitySubsystem || !bIsInitialized)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Cannot start simulation - Mass Entity not initialized"));
+        return;
     }
     
     bSimulationActive = true;
-    UE_LOG(LogTemp, Warning, TEXT("Crowd simulation initialized with %d active entities"), SpawnedEntities.Num());
+    
+    // Spawn all configured agent groups
+    for (const FCrowd_AgentGroup& Group : AgentGroups)
+    {
+        SpawnAgentGroup(Group);
+    }
+    
+    UE_LOG(LogTemp, Warning, TEXT("Crowd simulation started with %d active agents"), ActiveAgentCount);
 }
 
-void ACrowd_MassSimulationManager::SpawnCrowdAgents(const FCrowd_AgentGroup& AgentGroup)
+void ACrowd_MassSimulationManager::StopSimulation()
 {
-    if (!MassEntitySubsystem)
+    bSimulationActive = false;
+    CleanupEntities();
+    ActiveAgentCount = 0;
+    CurrentSimulationTime = 0.0f;
+    GroupEntityMap.Empty();
+    
+    UE_LOG(LogTemp, Warning, TEXT("Crowd simulation stopped"));
+}
+
+void ACrowd_MassSimulationManager::PauseSimulation()
+{
+    bSimulationActive = false;
+    UE_LOG(LogTemp, Warning, TEXT("Crowd simulation paused"));
+}
+
+void ACrowd_MassSimulationManager::ResumeSimulation()
+{
+    if (bIsInitialized)
     {
+        bSimulationActive = true;
+        UE_LOG(LogTemp, Warning, TEXT("Crowd simulation resumed"));
+    }
+}
+
+void ACrowd_MassSimulationManager::SpawnAgentGroup(const FCrowd_AgentGroup& GroupSettings)
+{
+    if (!MassEntitySubsystem || !CrowdArchetype.IsValid())
+    {
+        UE_LOG(LogTemp, Error, TEXT("Cannot spawn agent group - Mass Entity not properly initialized"));
         return;
     }
     
-    // Create entities for this group
-    for (int32 i = 0; i < AgentGroup.AgentCount; ++i)
+    TArray<FMassEntityHandle> GroupEntities;
+    
+    for (int32 i = 0; i < GroupSettings.AgentCount; ++i)
     {
         // Calculate spawn position within group radius
         float Angle = FMath::RandRange(0.0f, 2.0f * PI);
-        float Distance = FMath::RandRange(0.0f, AgentGroup.GroupRadius);
-        
+        float Distance = FMath::RandRange(0.0f, GroupSettings.GroupRadius);
         FVector SpawnOffset = FVector(
             FMath::Cos(Angle) * Distance,
             FMath::Sin(Angle) * Distance,
             0.0f
         );
+        FVector SpawnLocation = GroupSettings.SpawnLocation + SpawnOffset;
         
-        FVector SpawnLocation = AgentGroup.SpawnLocation + SpawnOffset;
-        
-        // Create Mass Entity
-        FMassEntityHandle NewEntity = MassEntitySubsystem->CreateEntity();
-        if (NewEntity.IsValid())
+        // Create entity
+        FMassEntityHandle EntityHandle = MassEntitySubsystem->CreateEntity(CrowdArchetype);
+        if (EntityHandle.IsValid())
         {
-            SpawnedEntities.Add(NewEntity);
+            // Set transform
+            if (FMassTransformFragment* TransformFragment = MassEntitySubsystem->GetFragmentDataPtr<FMassTransformFragment>(EntityHandle))
+            {
+                TransformFragment->SetTransform(FTransform(FRotator::ZeroRotator, SpawnLocation, FVector::OneVector));
+            }
             
-            // Debug visualization
-            DrawDebugSphere(GetWorld(), SpawnLocation, 50.0f, 8, FColor::Blue, false, 5.0f);
+            // Set velocity
+            if (FMassVelocityFragment* VelocityFragment = MassEntitySubsystem->GetFragmentDataPtr<FMassVelocityFragment>(EntityHandle))
+            {
+                FVector RandomDirection = FVector(FMath::RandRange(-1.0f, 1.0f), FMath::RandRange(-1.0f, 1.0f), 0.0f).GetSafeNormal();
+                VelocityFragment->Value = RandomDirection * GroupSettings.GroupMovementSpeed;
+            }
+            
+            GroupEntities.Add(EntityHandle);
+            SpawnedEntities.Add(EntityHandle);
         }
     }
     
-    UE_LOG(LogTemp, Warning, TEXT("Spawned %d crowd agents for group: %s"), AgentGroup.AgentCount, *AgentGroup.GroupName);
+    GroupEntityMap.Add(GroupSettings.GroupName, GroupEntities);
+    ActiveAgentCount += GroupEntities.Num();
+    
+    UE_LOG(LogTemp, Warning, TEXT("Spawned agent group '%s' with %d agents"), *GroupSettings.GroupName, GroupEntities.Num());
 }
 
-void ACrowd_MassSimulationManager::UpdateCrowdLOD()
+void ACrowd_MassSimulationManager::RemoveAgentGroup(const FString& GroupName)
 {
-    if (!GetWorld() || !GetWorld()->GetFirstPlayerController())
+    if (TArray<FMassEntityHandle>* GroupEntities = GroupEntityMap.Find(GroupName))
+    {
+        for (const FMassEntityHandle& Entity : *GroupEntities)
+        {
+            if (Entity.IsValid() && MassEntitySubsystem)
+            {
+                MassEntitySubsystem->DestroyEntity(Entity);
+                SpawnedEntities.Remove(Entity);
+                ActiveAgentCount--;
+            }
+        }
+        GroupEntityMap.Remove(GroupName);
+        
+        UE_LOG(LogTemp, Warning, TEXT("Removed agent group '%s'"), *GroupName);
+    }
+}
+
+void ACrowd_MassSimulationManager::UpdateLODSettings()
+{
+    if (!MassEntitySubsystem)
     {
         return;
     }
     
-    APawn* PlayerPawn = GetWorld()->GetFirstPlayerController()->GetPawn();
+    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
     if (!PlayerPawn)
     {
         return;
@@ -146,59 +229,161 @@ void ACrowd_MassSimulationManager::UpdateCrowdLOD()
     
     FVector PlayerLocation = PlayerPawn->GetActorLocation();
     
-    // Process LOD for each spawned entity
     for (const FMassEntityHandle& Entity : SpawnedEntities)
     {
-        if (Entity.IsValid())
+        if (!Entity.IsValid())
         {
-            // Calculate distance to player (simplified - would need actual entity position)
-            float Distance = FVector::Dist(GetActorLocation(), PlayerLocation);
+            continue;
+        }
+        
+        if (FMassTransformFragment* TransformFragment = MassEntitySubsystem->GetFragmentDataPtr<FMassTransformFragment>(Entity))
+        {
+            float Distance = FVector::Dist(PlayerLocation, TransformFragment->GetTransform().GetLocation());
             
-            // Apply LOD based on distance
-            if (Distance < SimulationSettings.LODDistance1)
+            int32 LODLevel = 0;
+            if (Distance > SimulationSettings.LODDistance3)
             {
-                // High LOD - full simulation
+                LODLevel = 3;
             }
-            else if (Distance < SimulationSettings.LODDistance2)
+            else if (Distance > SimulationSettings.LODDistance2)
             {
-                // Medium LOD - reduced update rate
+                LODLevel = 2;
             }
-            else if (Distance < SimulationSettings.LODDistance3)
+            else if (Distance > SimulationSettings.LODDistance1)
             {
-                // Low LOD - minimal simulation
+                LODLevel = 1;
             }
-            else
+            
+            // Apply LOD-based optimizations
+            if (LODLevel >= 2)
             {
-                // Ultra low LOD - static or culled
+                // Reduce update frequency for distant agents
+                // This would be implemented with Mass Entity processors
             }
         }
     }
 }
 
-void ACrowd_MassSimulationManager::SetCrowdDestination(FVector Destination)
+float ACrowd_MassSimulationManager::GetCurrentFrameTime() const
 {
-    CurrentDestination = Destination;
-    UE_LOG(LogTemp, Warning, TEXT("Crowd destination set to: %s"), *Destination.ToString());
+    return LastFrameTime;
 }
 
-int32 ACrowd_MassSimulationManager::GetActiveCrowdCount() const
+void ACrowd_MassSimulationManager::SetSimulationSettings(const FCrowd_SimulationSettings& NewSettings)
 {
-    return SpawnedEntities.Num();
+    SimulationSettings = NewSettings;
+    UpdateLODSettings();
+    UE_LOG(LogTemp, Warning, TEXT("Simulation settings updated"));
 }
 
-void ACrowd_MassSimulationManager::PauseCrowdSimulation()
+void ACrowd_MassSimulationManager::InitializeMassEntity()
 {
-    bSimulationActive = false;
-    UE_LOG(LogTemp, Warning, TEXT("Crowd simulation paused"));
+    if (!MassEntitySubsystem)
+    {
+        return;
+    }
+    
+    CreateAgentArchetypes();
+    bIsInitialized = true;
+    
+    UE_LOG(LogTemp, Warning, TEXT("Mass Entity system initialized for crowd simulation"));
 }
 
-void ACrowd_MassSimulationManager::ResumeCrowdSimulation()
+void ACrowd_MassSimulationManager::CreateAgentArchetypes()
 {
-    bSimulationActive = true;
-    UE_LOG(LogTemp, Warning, TEXT("Crowd simulation resumed"));
+    if (!MassEntitySubsystem)
+    {
+        return;
+    }
+    
+    // Create archetype with required fragments
+    FMassArchetypeCompositionDescriptor CompositionDescriptor;
+    CompositionDescriptor.Fragments.Add<FMassTransformFragment>();
+    CompositionDescriptor.Fragments.Add<FMassVelocityFragment>();
+    CompositionDescriptor.Fragments.Add<FMassRepresentationFragment>();
+    
+    CrowdArchetype = MassEntitySubsystem->CreateArchetype(CompositionDescriptor);
+    
+    UE_LOG(LogTemp, Warning, TEXT("Crowd archetype created successfully"));
 }
 
-void ACrowd_MassSimulationManager::ClearAllCrowdAgents()
+void ACrowd_MassSimulationManager::UpdateFlockingBehavior(float DeltaTime)
+{
+    if (!MassEntitySubsystem || SpawnedEntities.Num() == 0)
+    {
+        return;
+    }
+    
+    // Update flocking behavior for all entities
+    for (int32 i = 0; i < SpawnedEntities.Num(); ++i)
+    {
+        const FMassEntityHandle& Entity = SpawnedEntities[i];
+        if (!Entity.IsValid())
+        {
+            continue;
+        }
+        
+        // Find nearby entities for flocking calculations
+        TArray<FMassEntityHandle> NearbyEntities;
+        if (FMassTransformFragment* TransformFragment = MassEntitySubsystem->GetFragmentDataPtr<FMassTransformFragment>(Entity))
+        {
+            FVector EntityLocation = TransformFragment->GetTransform().GetLocation();
+            
+            for (int32 j = 0; j < SpawnedEntities.Num(); ++j)
+            {
+                if (i == j) continue;
+                
+                const FMassEntityHandle& OtherEntity = SpawnedEntities[j];
+                if (!OtherEntity.IsValid()) continue;
+                
+                if (FMassTransformFragment* OtherTransform = MassEntitySubsystem->GetFragmentDataPtr<FMassTransformFragment>(OtherEntity))
+                {
+                    float Distance = FVector::Dist(EntityLocation, OtherTransform->GetTransform().GetLocation());
+                    if (Distance <= SimulationSettings.FlockingRadius)
+                    {
+                        NearbyEntities.Add(OtherEntity);
+                    }
+                }
+            }
+            
+            // Calculate and apply flocking force
+            FVector FlockingForce = CalculateFlockingForce(Entity, NearbyEntities);
+            
+            if (FMassVelocityFragment* VelocityFragment = MassEntitySubsystem->GetFragmentDataPtr<FMassVelocityFragment>(Entity))
+            {
+                VelocityFragment->Value += FlockingForce * DeltaTime;
+                VelocityFragment->Value = VelocityFragment->Value.GetClampedToMaxSize(SimulationSettings.MovementSpeed);
+            }
+        }
+    }
+}
+
+void ACrowd_MassSimulationManager::UpdateAgentLOD()
+{
+    // LOD updates are handled in UpdateLODSettings()
+    UpdateLODSettings();
+}
+
+void ACrowd_MassSimulationManager::ProcessPerformanceOptimization()
+{
+    if (LastFrameTime > PerformanceThreshold)
+    {
+        // Reduce simulation quality if performance drops
+        if (CurrentLODLevel < 3)
+        {
+            CurrentLODLevel++;
+            UE_LOG(LogTemp, Warning, TEXT("Performance optimization: increased LOD level to %d"), CurrentLODLevel);
+        }
+    }
+    else if (LastFrameTime < PerformanceThreshold * 0.8f && CurrentLODLevel > 0)
+    {
+        // Increase quality if performance allows
+        CurrentLODLevel--;
+        UE_LOG(LogTemp, Warning, TEXT("Performance optimization: decreased LOD level to %d"), CurrentLODLevel);
+    }
+}
+
+void ACrowd_MassSimulationManager::CleanupEntities()
 {
     if (MassEntitySubsystem)
     {
@@ -212,156 +397,94 @@ void ACrowd_MassSimulationManager::ClearAllCrowdAgents()
     }
     
     SpawnedEntities.Empty();
-    UE_LOG(LogTemp, Warning, TEXT("All crowd agents cleared"));
+    GroupEntityMap.Empty();
 }
 
-void ACrowd_MassSimulationManager::UpdateAgentMovement(float DeltaTime)
+void ACrowd_MassSimulationManager::UpdateSimulationMetrics(float DeltaTime)
 {
-    // Update movement for all active entities
-    for (const FMassEntityHandle& Entity : SpawnedEntities)
+    LastFrameTime = DeltaTime * 1000.0f; // Convert to milliseconds
+    
+    // Update active agent count (remove invalid entities)
+    int32 ValidEntityCount = 0;
+    for (int32 i = SpawnedEntities.Num() - 1; i >= 0; --i)
     {
-        if (Entity.IsValid())
+        if (SpawnedEntities[i].IsValid())
         {
-            // Calculate flocking behavior
-            FVector FlockingForce = CalculateFlockingBehavior(Entity);
-            FVector AvoidanceForce = CalculateAvoidance(Entity);
-            
-            // Combine forces and apply movement
-            FVector TotalForce = FlockingForce + AvoidanceForce;
-            TotalForce = TotalForce.GetClampedToMaxSize(SimulationSettings.AgentSpeed);
-            
-            // Apply movement (simplified - would need actual entity transform component)
+            ValidEntityCount++;
+        }
+        else
+        {
+            SpawnedEntities.RemoveAt(i);
         }
     }
+    ActiveAgentCount = ValidEntityCount;
 }
 
-void ACrowd_MassSimulationManager::ProcessAgentLOD()
+FVector ACrowd_MassSimulationManager::CalculateFlockingForce(const FMassEntityHandle& Entity, const TArray<FMassEntityHandle>& NearbyEntities)
 {
-    // Process LOD changes for agents based on distance
-    UpdateCrowdLOD();
-}
-
-void ACrowd_MassSimulationManager::HandleAgentCollisions()
-{
-    // Handle collision detection and response between agents
-    for (int32 i = 0; i < SpawnedEntities.Num(); ++i)
+    if (!MassEntitySubsystem || NearbyEntities.Num() == 0)
     {
-        for (int32 j = i + 1; j < SpawnedEntities.Num(); ++j)
+        return FVector::ZeroVector;
+    }
+    
+    FMassTransformFragment* EntityTransform = MassEntitySubsystem->GetFragmentDataPtr<FMassTransformFragment>(Entity);
+    FMassVelocityFragment* EntityVelocity = MassEntitySubsystem->GetFragmentDataPtr<FMassVelocityFragment>(Entity);
+    
+    if (!EntityTransform || !EntityVelocity)
+    {
+        return FVector::ZeroVector;
+    }
+    
+    FVector EntityLocation = EntityTransform->GetTransform().GetLocation();
+    FVector EntityVel = EntityVelocity->Value;
+    
+    // Separation force
+    FVector SeparationForce = FVector::ZeroVector;
+    FVector AlignmentForce = FVector::ZeroVector;
+    FVector CohesionForce = FVector::ZeroVector;
+    
+    FVector CenterOfMass = FVector::ZeroVector;
+    FVector AverageVelocity = FVector::ZeroVector;
+    
+    for (const FMassEntityHandle& NearbyEntity : NearbyEntities)
+    {
+        if (FMassTransformFragment* NearbyTransform = MassEntitySubsystem->GetFragmentDataPtr<FMassTransformFragment>(NearbyEntity))
         {
-            const FMassEntityHandle& EntityA = SpawnedEntities[i];
-            const FMassEntityHandle& EntityB = SpawnedEntities[j];
+            FVector NearbyLocation = NearbyTransform->GetTransform().GetLocation();
+            FVector ToNearby = NearbyLocation - EntityLocation;
+            float Distance = ToNearby.Size();
             
-            if (EntityA.IsValid() && EntityB.IsValid())
+            if (Distance > 0.0f)
             {
-                // Check collision and apply separation force
-                // (Implementation would require actual entity positions)
+                // Separation
+                SeparationForce -= ToNearby.GetSafeNormal() / Distance;
+                
+                // Cohesion
+                CenterOfMass += NearbyLocation;
+                
+                // Alignment
+                if (FMassVelocityFragment* NearbyVelocity = MassEntitySubsystem->GetFragmentDataPtr<FMassVelocityFragment>(NearbyEntity))
+                {
+                    AverageVelocity += NearbyVelocity->Value;
+                }
             }
         }
     }
-}
-
-FVector ACrowd_MassSimulationManager::CalculateFlockingBehavior(const FMassEntityHandle& Entity)
-{
-    if (!Entity.IsValid())
+    
+    if (NearbyEntities.Num() > 0)
     {
-        return FVector::ZeroVector;
+        CenterOfMass /= NearbyEntities.Num();
+        CohesionForce = (CenterOfMass - EntityLocation).GetSafeNormal();
+        
+        AverageVelocity /= NearbyEntities.Num();
+        AlignmentForce = (AverageVelocity - EntityVel).GetSafeNormal();
     }
     
-    // Calculate separation, alignment, and cohesion
-    FVector Separation = CalculateAvoidance(Entity);
-    FVector Alignment = CalculateAlignment(Entity);
-    FVector Cohesion = CalculateCohesion(Entity);
+    // Combine forces with weights
+    FVector TotalForce = 
+        SeparationForce * SimulationSettings.SeparationWeight +
+        AlignmentForce * SimulationSettings.AlignmentWeight +
+        CohesionForce * SimulationSettings.CohesionWeight;
     
-    // Weight and combine forces
-    FVector FlockingForce = (Separation * 2.0f) + (Alignment * 1.0f) + (Cohesion * 1.0f);
-    
-    return FlockingForce.GetSafeNormal() * SimulationSettings.AgentSpeed;
-}
-
-FVector ACrowd_MassSimulationManager::CalculateAvoidance(const FMassEntityHandle& Entity)
-{
-    if (!Entity.IsValid())
-    {
-        return FVector::ZeroVector;
-    }
-    
-    FVector AvoidanceForce = FVector::ZeroVector;
-    
-    // Calculate avoidance force from nearby agents
-    for (const FMassEntityHandle& OtherEntity : SpawnedEntities)
-    {
-        if (OtherEntity.IsValid() && OtherEntity != Entity)
-        {
-            // Calculate separation force (simplified)
-            // Would need actual entity positions for real implementation
-            FVector RandomSeparation = FVector(
-                FMath::RandRange(-1.0f, 1.0f),
-                FMath::RandRange(-1.0f, 1.0f),
-                0.0f
-            );
-            AvoidanceForce += RandomSeparation;
-        }
-    }
-    
-    return AvoidanceForce.GetSafeNormal();
-}
-
-FVector ACrowd_MassSimulationManager::CalculateCohesion(const FMassEntityHandle& Entity)
-{
-    if (!Entity.IsValid())
-    {
-        return FVector::ZeroVector;
-    }
-    
-    FVector CenterOfMass = FVector::ZeroVector;
-    int32 NeighborCount = 0;
-    
-    // Calculate center of mass of nearby agents
-    for (const FMassEntityHandle& OtherEntity : SpawnedEntities)
-    {
-        if (OtherEntity.IsValid() && OtherEntity != Entity)
-        {
-            // Would need actual entity positions
-            CenterOfMass += GetActorLocation(); // Placeholder
-            NeighborCount++;
-        }
-    }
-    
-    if (NeighborCount > 0)
-    {
-        CenterOfMass /= NeighborCount;
-        return (CenterOfMass - GetActorLocation()).GetSafeNormal();
-    }
-    
-    return FVector::ZeroVector;
-}
-
-FVector ACrowd_MassSimulationManager::CalculateAlignment(const FMassEntityHandle& Entity)
-{
-    if (!Entity.IsValid())
-    {
-        return FVector::ZeroVector;
-    }
-    
-    FVector AverageVelocity = FVector::ZeroVector;
-    int32 NeighborCount = 0;
-    
-    // Calculate average velocity of nearby agents
-    for (const FMassEntityHandle& OtherEntity : SpawnedEntities)
-    {
-        if (OtherEntity.IsValid() && OtherEntity != Entity)
-        {
-            // Would need actual entity velocity
-            AverageVelocity += FVector(1, 0, 0); // Placeholder
-            NeighborCount++;
-        }
-    }
-    
-    if (NeighborCount > 0)
-    {
-        AverageVelocity /= NeighborCount;
-        return AverageVelocity.GetSafeNormal();
-    }
-    
-    return FVector::ZeroVector;
+    return TotalForce.GetClampedToMaxSize(SimulationSettings.MovementSpeed * 0.1f);
 }
