@@ -2,53 +2,38 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
-#include "Engine/Engine.h"
-#include "GameFramework/Character.h"
-#include "GameFramework/CharacterMovementComponent.h"
 #include "Animation/BlendSpace.h"
 #include "Animation/BlendSpace1D.h"
-#include "Kismet/KismetMathLibrary.h"
+#include "Engine/Engine.h"
 #include "Anim_BlendSpaceController.generated.h"
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FAnim_MovementBlendData
+struct TRANSPERSONALGAME_API FAnim_BlendSpaceData
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Movement")
-    float Speed;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Blend Space")
+    float Speed = 0.0f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Movement")
-    float Direction;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Blend Space")
+    float Direction = 0.0f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Movement")
-    float LeanAngle;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Blend Space")
+    float Lean = 0.0f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Movement")
-    bool bIsMoving;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Blend Space")
+    float Turn = 0.0f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Movement")
-    bool bIsInAir;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Blend Space")
+    float Slope = 0.0f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Movement")
-    bool bIsCrouching;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Movement")
-    float AimPitch;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Movement")
-    float AimYaw;
-
-    FAnim_MovementBlendData()
+    FAnim_BlendSpaceData()
     {
         Speed = 0.0f;
         Direction = 0.0f;
-        LeanAngle = 0.0f;
-        bIsMoving = false;
-        bIsInAir = false;
-        bIsCrouching = false;
-        AimPitch = 0.0f;
-        AimYaw = 0.0f;
+        Lean = 0.0f;
+        Turn = 0.0f;
+        Slope = 0.0f;
     }
 };
 
@@ -57,33 +42,36 @@ struct TRANSPERSONALGAME_API FAnim_BlendSpaceSettings
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Blend Space")
-    TSoftObjectPtr<UBlendSpace> LocomotionBlendSpace;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Blend Space Settings")
+    float SpeedSmoothingRate = 5.0f;
 
-    UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Blend Space")
-    TSoftObjectPtr<UBlendSpace1D> IdleBlendSpace;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Blend Space Settings")
+    float DirectionSmoothingRate = 8.0f;
 
-    UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Blend Space")
-    TSoftObjectPtr<UBlendSpace> AimOffsetBlendSpace;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Blend Space Settings")
+    float LeanSmoothingRate = 6.0f;
 
-    UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Settings")
-    float SpeedInterpRate;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Blend Space Settings")
+    float TurnSmoothingRate = 4.0f;
 
-    UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Settings")
-    float DirectionInterpRate;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Blend Space Settings")
+    float MaxLeanAngle = 15.0f;
 
-    UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Settings")
-    float LeanInterpRate;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Blend Space Settings")
+    float MaxTurnRate = 180.0f;
 
-    UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Settings")
-    float MovingThreshold;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Blend Space Settings")
+    float SlopeDetectionDistance = 200.0f;
 
     FAnim_BlendSpaceSettings()
     {
-        SpeedInterpRate = 5.0f;
-        DirectionInterpRate = 10.0f;
-        LeanInterpRate = 8.0f;
-        MovingThreshold = 3.0f;
+        SpeedSmoothingRate = 5.0f;
+        DirectionSmoothingRate = 8.0f;
+        LeanSmoothingRate = 6.0f;
+        TurnSmoothingRate = 4.0f;
+        MaxLeanAngle = 15.0f;
+        MaxTurnRate = 180.0f;
+        SlopeDetectionDistance = 200.0f;
     }
 };
 
@@ -101,72 +89,112 @@ protected:
 public:
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    // Blend Space Settings
-    UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Blend Spaces")
-    FAnim_BlendSpaceSettings BlendSpaceSettings;
+    // Blend space data access
+    UFUNCTION(BlueprintPure, Category = "Blend Space")
+    FAnim_BlendSpaceData GetBlendSpaceData() const { return CurrentBlendData; }
 
-    // Current blend data
-    UPROPERTY(BlueprintReadOnly, Category = "Animation Data")
-    FAnim_MovementBlendData CurrentBlendData;
+    UFUNCTION(BlueprintPure, Category = "Blend Space")
+    float GetSpeed() const { return CurrentBlendData.Speed; }
 
-    // Smoothed blend data
-    UPROPERTY(BlueprintReadOnly, Category = "Animation Data")
-    FAnim_MovementBlendData SmoothedBlendData;
+    UFUNCTION(BlueprintPure, Category = "Blend Space")
+    float GetDirection() const { return CurrentBlendData.Direction; }
 
-    // Functions
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    void UpdateMovementBlendData(float DeltaTime);
+    UFUNCTION(BlueprintPure, Category = "Blend Space")
+    float GetLean() const { return CurrentBlendData.Lean; }
 
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    FAnim_MovementBlendData CalculateBlendData();
+    UFUNCTION(BlueprintPure, Category = "Blend Space")
+    float GetTurn() const { return CurrentBlendData.Turn; }
 
-    UFUNCTION(BlueprintCallable, Category = "Animation")
+    UFUNCTION(BlueprintPure, Category = "Blend Space")
+    float GetSlope() const { return CurrentBlendData.Slope; }
+
+    // Manual overrides
+    UFUNCTION(BlueprintCallable, Category = "Blend Space")
+    void SetSpeedOverride(float Speed, float Duration = 0.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "Blend Space")
+    void SetDirectionOverride(float Direction, float Duration = 0.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "Blend Space")
+    void ClearOverrides();
+
+    // Configuration
+    UFUNCTION(BlueprintCallable, Category = "Blend Space")
     void SetBlendSpaceSettings(const FAnim_BlendSpaceSettings& NewSettings);
 
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    float GetNormalizedSpeed();
+    UFUNCTION(BlueprintPure, Category = "Blend Space")
+    FAnim_BlendSpaceSettings GetBlendSpaceSettings() const { return Settings; }
 
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    float GetMovementDirection();
+    // Utility functions
+    UFUNCTION(BlueprintCallable, Category = "Blend Space")
+    void ResetBlendData();
 
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    float GetLeanAngle();
+    UFUNCTION(BlueprintCallable, Category = "Blend Space")
+    void SetSmoothingEnabled(bool bEnabled);
 
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    bool ShouldUseLocomotion();
+protected:
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Blend Space")
+    FAnim_BlendSpaceData CurrentBlendData;
 
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    bool ShouldUseAimOffset();
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Blend Space")
+    FAnim_BlendSpaceData TargetBlendData;
 
-    // Getters for animation blueprint
-    UFUNCTION(BlueprintPure, Category = "Animation Data")
-    float GetBlendSpaceX() const { return SmoothedBlendData.Speed; }
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Blend Space Settings")
+    FAnim_BlendSpaceSettings Settings;
 
-    UFUNCTION(BlueprintPure, Category = "Animation Data")
-    float GetBlendSpaceY() const { return SmoothedBlendData.Direction; }
-
-    UFUNCTION(BlueprintPure, Category = "Animation Data")
-    float GetAimPitch() const { return SmoothedBlendData.AimPitch; }
-
-    UFUNCTION(BlueprintPure, Category = "Animation Data")
-    float GetAimYaw() const { return SmoothedBlendData.AimYaw; }
-
-private:
+    // Component references
     UPROPERTY()
-    ACharacter* OwnerCharacter;
+    class ACharacter* OwnerCharacter;
 
     UPROPERTY()
-    UCharacterMovementComponent* MovementComponent;
+    class UCharacterMovementComponent* MovementComponent;
 
-    // Internal calculation functions
-    float CalculateSpeed();
-    float CalculateDirection();
-    float CalculateLeanAngle();
-    void CalculateAimRotation(float& OutPitch, float& OutYaw);
-    void SmoothBlendData(float DeltaTime);
+    UPROPERTY()
+    class UAnim_StateManager* StateManager;
+
+    // Override system
+    UPROPERTY()
+    bool bSpeedOverride = false;
+
+    UPROPERTY()
+    bool bDirectionOverride = false;
+
+    UPROPERTY()
+    float SpeedOverrideValue = 0.0f;
+
+    UPROPERTY()
+    float DirectionOverrideValue = 0.0f;
+
+    UPROPERTY()
+    float SpeedOverrideEndTime = 0.0f;
+
+    UPROPERTY()
+    float DirectionOverrideEndTime = 0.0f;
+
+    // Smoothing control
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Blend Space Settings")
+    bool bSmoothingEnabled = true;
 
     // Previous frame data for calculations
-    FVector LastVelocity;
-    FRotator LastRotation;
-    float LastDeltaTime;
+    UPROPERTY()
+    FVector PreviousVelocity;
+
+    UPROPERTY()
+    FRotator PreviousRotation;
+
+    UPROPERTY()
+    float PreviousSpeed = 0.0f;
+
+private:
+    void CacheComponentReferences();
+    void UpdateTargetBlendData();
+    void SmoothBlendData(float DeltaTime);
+    void UpdateSpeedAndDirection();
+    void UpdateLeanAndTurn(float DeltaTime);
+    void UpdateSlope();
+    void ProcessOverrides();
+    float CalculateDirectionFromVelocity(const FVector& Velocity, const FRotator& ActorRotation) const;
+    float CalculateLeanFromAcceleration(const FVector& Acceleration) const;
+    float CalculateTurnRate(const FRotator& CurrentRotation, const FRotator& PreviousRotation, float DeltaTime) const;
+    float SmoothDamp(float Current, float Target, float SmoothTime, float DeltaTime) const;
 };
