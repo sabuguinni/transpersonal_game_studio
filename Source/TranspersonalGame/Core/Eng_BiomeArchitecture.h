@@ -1,209 +1,169 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/GameInstanceSubsystem.h"
 #include "Engine/World.h"
-#include "Components/ActorComponent.h"
 #include "GameFramework/Actor.h"
-#include "../SharedTypes.h"
+#include "Components/StaticMeshComponent.h"
+#include "Subsystems/WorldSubsystem.h"
+#include "SharedTypes.h"
 #include "Eng_BiomeArchitecture.generated.h"
 
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnBiomeTransition, EEng_BiomeType, FromBiome, EEng_BiomeType, ToBiome);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnBiomeLoaded, EEng_BiomeType, BiomeType);
-
 /**
- * Core biome data structure for the world generation system
- * Defines environmental parameters, spawn rules, and atmospheric settings
+ * Engine Architect - Biome Architecture System
+ * Defines the technical foundation for the 5-biome world structure
+ * Coordinates with World Generation Agent (#5) for biome placement
  */
+
 USTRUCT(BlueprintType)
 struct TRANSPERSONALGAME_API FEng_BiomeDefinition
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Core")
-    EEng_BiomeType BiomeType = EEng_BiomeType::Savanna;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    EBiomeType BiomeType = EBiomeType::Savanna;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Core")
-    FString BiomeName = TEXT("Unnamed Biome");
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    FVector WorldPosition = FVector::ZeroVector;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment")
-    float Temperature = 25.0f; // Celsius
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    float BiomeRadius = 100000.0f; // 1km radius
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment")
-    float Humidity = 0.5f; // 0.0 to 1.0
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    int32 MinActorCount = 500;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment")
-    float Precipitation = 0.3f; // 0.0 to 1.0
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    int32 MaxActorCount = 2000;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment")
-    FLinearColor SkyColor = FLinearColor(0.4f, 0.7f, 1.0f, 1.0f);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    TArray<FString> RequiredAssetTypes;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment")
-    FLinearColor FogColor = FLinearColor(0.8f, 0.9f, 1.0f, 1.0f);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    bool bIsPopulated = false;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment")
-    float FogDensity = 0.02f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Vegetation")
-    TArray<TSoftObjectPtr<UStaticMesh>> VegetationMeshes;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Vegetation")
-    float VegetationDensity = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wildlife")
-    TArray<TSoftClassPtr<APawn>> DinosaurSpecies;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wildlife")
-    float DinosaurSpawnRate = 0.1f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    FDateTime LastPopulationUpdate;
 
     FEng_BiomeDefinition()
     {
-        BiomeType = EEng_BiomeType::Savanna;
-        BiomeName = TEXT("Default Savanna");
-        Temperature = 25.0f;
-        Humidity = 0.5f;
-        Precipitation = 0.3f;
+        RequiredAssetTypes.Add(TEXT("Vegetation"));
+        RequiredAssetTypes.Add(TEXT("Rocks"));
+        RequiredAssetTypes.Add(TEXT("Terrain"));
+        LastPopulationUpdate = FDateTime::Now();
     }
 };
 
-/**
- * Biome zone component - attached to actors that define biome boundaries
- * Handles biome detection and transition triggers
- */
-UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UEng_BiomeZoneComponent : public UActorComponent
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FEng_BiomeValidationReport
 {
     GENERATED_BODY()
 
-public:
-    UEng_BiomeZoneComponent();
+    UPROPERTY(BlueprintReadOnly, Category = "Validation")
+    TMap<EBiomeType, int32> ActorCounts;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Zone")
-    EEng_BiomeType BiomeType = EEng_BiomeType::Savanna;
+    UPROPERTY(BlueprintReadOnly, Category = "Validation")
+    TMap<EBiomeType, bool> BiomeCompletionStatus;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Zone")
-    float ZoneRadius = 5000.0f; // 5km radius
+    UPROPERTY(BlueprintReadOnly, Category = "Validation")
+    int32 TotalActorsSpawned = 0;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Zone")
-    int32 ZonePriority = 0; // Higher priority overrides lower
+    UPROPERTY(BlueprintReadOnly, Category = "Validation")
+    bool bAllBiomesPopulated = false;
 
-    UPROPERTY(BlueprintAssignable, Category = "Events")
-    FOnBiomeTransition OnBiomeEntered;
+    UPROPERTY(BlueprintReadOnly, Category = "Validation")
+    FString ValidationSummary;
 
-    UPROPERTY(BlueprintAssignable, Category = "Events")
-    FOnBiomeTransition OnBiomeExited;
-
-    UFUNCTION(BlueprintCallable, Category = "Biome Zone")
-    bool IsLocationInZone(const FVector& Location) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Biome Zone")
-    float GetDistanceToZoneCenter(const FVector& Location) const;
-
-protected:
-    virtual void BeginPlay() override;
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
-
-private:
-    UPROPERTY()
-    TArray<AActor*> ActorsInZone;
-
-    void CheckActorProximity();
+    FEng_BiomeValidationReport()
+    {
+        ActorCounts.Empty();
+        BiomeCompletionStatus.Empty();
+        TotalActorsSpawned = 0;
+        bAllBiomesPopulated = false;
+        ValidationSummary = TEXT("Not validated");
+    }
 };
 
-/**
- * Global biome management subsystem
- * Handles biome registration, queries, and environmental state
- */
-UCLASS()
-class TRANSPERSONALGAME_API UEng_BiomeManager : public UGameInstanceSubsystem
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API UEng_BiomeArchitecture : public UWorldSubsystem
 {
     GENERATED_BODY()
 
 public:
+    UEng_BiomeArchitecture();
+
+    // USubsystem interface
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
-    UFUNCTION(BlueprintCallable, Category = "Biome Manager")
-    void RegisterBiome(const FEng_BiomeDefinition& BiomeDefinition);
+    /**
+     * Initializes the 5-biome world structure with correct coordinates
+     * Savanna (0,0), Swamp (-50000,-45000), Forest (-45000,40000), Desert (55000,0), Mountains (40000,50000)
+     */
+    UFUNCTION(BlueprintCallable, Category = "Biome Architecture", CallInEditor = true)
+    void InitializeBiomeStructure();
 
-    UFUNCTION(BlueprintCallable, Category = "Biome Manager")
-    EEng_BiomeType GetBiomeAtLocation(const FVector& WorldLocation) const;
+    /**
+     * Validates that all biomes meet the minimum actor count requirement (500+ actors each)
+     */
+    UFUNCTION(BlueprintCallable, Category = "Biome Architecture", CallInEditor = true)
+    FEng_BiomeValidationReport ValidateBiomePopulation();
 
-    UFUNCTION(BlueprintCallable, Category = "Biome Manager")
-    FEng_BiomeDefinition GetBiomeDefinition(EEng_BiomeType BiomeType) const;
+    /**
+     * Gets the biome definition for a specific biome type
+     */
+    UFUNCTION(BlueprintCallable, Category = "Biome Architecture")
+    FEng_BiomeDefinition GetBiomeDefinition(EBiomeType BiomeType);
 
-    UFUNCTION(BlueprintCallable, Category = "Biome Manager")
-    TArray<EEng_BiomeType> GetAllRegisteredBiomes() const;
+    /**
+     * Registers that a biome has been populated by another agent
+     */
+    UFUNCTION(BlueprintCallable, Category = "Biome Architecture")
+    void RegisterBiomePopulation(EBiomeType BiomeType, int32 ActorCount);
 
-    UFUNCTION(BlueprintCallable, Category = "Biome Manager")
-    void SetCurrentBiome(EEng_BiomeType NewBiome);
+    /**
+     * Gets the total number of actors in a specific biome area
+     */
+    UFUNCTION(BlueprintCallable, Category = "Biome Architecture")
+    int32 GetBiomeActorCount(EBiomeType BiomeType);
 
-    UFUNCTION(BlueprintCallable, Category = "Biome Manager")
-    EEng_BiomeType GetCurrentBiome() const { return CurrentBiome; }
+    /**
+     * Checks if a world position falls within a specific biome
+     */
+    UFUNCTION(BlueprintCallable, Category = "Biome Architecture")
+    EBiomeType GetBiomeAtPosition(const FVector& WorldPosition);
 
-    UPROPERTY(BlueprintAssignable, Category = "Events")
-    FOnBiomeTransition OnBiomeChanged;
+    /**
+     * Gets all actors within a biome's area
+     */
+    UFUNCTION(BlueprintCallable, Category = "Biome Architecture")
+    TArray<AActor*> GetActorsInBiome(EBiomeType BiomeType);
 
-    UPROPERTY(BlueprintAssignable, Category = "Events")
-    FOnBiomeLoaded OnBiomeSystemReady;
-
-    // Environmental queries
-    UFUNCTION(BlueprintCallable, Category = "Environment")
-    float GetTemperatureAtLocation(const FVector& Location) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Environment")
-    float GetHumidityAtLocation(const FVector& Location) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Environment")
-    FLinearColor GetSkyColorForBiome(EEng_BiomeType BiomeType) const;
+    /**
+     * Spawns a validation marker at each biome center for visualization
+     */
+    UFUNCTION(BlueprintCallable, Category = "Biome Architecture", CallInEditor = true)
+    void SpawnBiomeMarkers();
 
 protected:
-    UPROPERTY()
-    TMap<EEng_BiomeType, FEng_BiomeDefinition> RegisteredBiomes;
+    UPROPERTY(BlueprintReadOnly, Category = "Biome Architecture")
+    TMap<EBiomeType, FEng_BiomeDefinition> BiomeDefinitions;
 
-    UPROPERTY()
-    EEng_BiomeType CurrentBiome = EEng_BiomeType::Savanna;
+    UPROPERTY(BlueprintReadOnly, Category = "Biome Architecture")
+    FEng_BiomeValidationReport LastValidationReport;
 
-    UPROPERTY()
-    TArray<UEng_BiomeZoneComponent*> ActiveZones;
+    UPROPERTY(BlueprintReadOnly, Category = "Biome Architecture")
+    TArray<AActor*> BiomeMarkers;
+
+    /**
+     * Creates the standard biome definitions with correct world coordinates
+     */
+    void CreateStandardBiomeDefinitions();
+
+    /**
+     * Counts actors within a circular area around a biome center
+     */
+    int32 CountActorsInRadius(const FVector& Center, float Radius);
 
 private:
-    void InitializeDefaultBiomes();
-    void RegisterBiomeZone(UEng_BiomeZoneComponent* ZoneComponent);
-    void UnregisterBiomeZone(UEng_BiomeZoneComponent* ZoneComponent);
-
-    friend class UEng_BiomeZoneComponent;
-};
-
-/**
- * Biome marker actor - placed in the world to define biome boundaries
- * Automatically registers with the biome manager on spawn
- */
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API AEng_BiomeMarker : public AActor
-{
-    GENERATED_BODY()
-
-public:
-    AEng_BiomeMarker();
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    class UStaticMeshComponent* MarkerMesh;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    UEng_BiomeZoneComponent* BiomeZone;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Marker")
-    EEng_BiomeType BiomeType = EEng_BiomeType::Savanna;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Marker")
-    float BiomeRadius = 5000.0f;
-
-protected:
-    virtual void BeginPlay() override;
-    virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
-
-#if WITH_EDITOR
-    virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
-#endif
+    bool bIsInitialized = false;
+    FDateTime LastValidationTime;
 };
