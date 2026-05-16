@@ -1,187 +1,156 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/World.h"
-#include "Subsystems/WorldSubsystem.h"
+#include "GameFramework/Actor.h"
 #include "Components/AudioComponent.h"
 #include "Sound/SoundCue.h"
-#include "MetasoundSource.h"
+#include "Engine/TriggerVolume.h"
 #include "AudioSystemManager.generated.h"
 
 UENUM(BlueprintType)
 enum class EAudio_BiomeType : uint8
 {
-	Forest		UMETA(DisplayName = "Forest"),
-	Savanna		UMETA(DisplayName = "Savanna"),
-	Swamp		UMETA(DisplayName = "Swamp"),
-	Desert		UMETA(DisplayName = "Desert"),
-	Mountain	UMETA(DisplayName = "Mountain")
-};
-
-UENUM(BlueprintType)
-enum class EAudio_ThreatLevel : uint8
-{
-	Safe		UMETA(DisplayName = "Safe"),
-	Caution		UMETA(DisplayName = "Caution"),
-	Danger		UMETA(DisplayName = "Danger"),
-	Combat		UMETA(DisplayName = "Combat")
+    Savana      UMETA(DisplayName = "Savana"),
+    Pantano     UMETA(DisplayName = "Pantano"),
+    Floresta    UMETA(DisplayName = "Floresta"),
+    Deserto     UMETA(DisplayName = "Deserto"),
+    Montanha    UMETA(DisplayName = "Montanha")
 };
 
 USTRUCT(BlueprintType)
 struct TRANSPERSONALGAME_API FAudio_BiomeAudioData
 {
-	GENERATED_BODY()
+    GENERATED_BODY()
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-	TObjectPtr<USoundCue> AmbientSound;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    EAudio_BiomeType BiomeType;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-	TObjectPtr<UMetaSoundSource> MetaSoundAmbient;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    TSoftObjectPtr<USoundCue> AmbientSoundCue;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-	float BaseVolume = 0.7f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    TSoftObjectPtr<USoundCue> MusicCue;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-	float FadeDistance = 2000.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    float AmbientVolume;
 
-	FAudio_BiomeAudioData()
-	{
-		AmbientSound = nullptr;
-		MetaSoundAmbient = nullptr;
-		BaseVolume = 0.7f;
-		FadeDistance = 2000.0f;
-	}
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    float MusicVolume;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    float CrossfadeTime;
+
+    FAudio_BiomeAudioData()
+    {
+        BiomeType = EAudio_BiomeType::Savana;
+        AmbientVolume = 0.7f;
+        MusicVolume = 0.5f;
+        CrossfadeTime = 3.0f;
+    }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FAudio_ProximityAudioData
+struct TRANSPERSONALGAME_API FAudio_DangerAudioSettings
 {
-	GENERATED_BODY()
+    GENERATED_BODY()
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-	TObjectPtr<USoundCue> ProximitySound;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    TSoftObjectPtr<USoundCue> DinosaurRoarCue;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-	float TriggerDistance = 1000.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    TSoftObjectPtr<USoundCue> FootstepsCue;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-	float MaxVolume = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    TSoftObjectPtr<USoundCue> TensionMusicCue;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-	bool bLooping = true;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    float DangerRadius;
 
-	FAudio_ProximityAudioData()
-	{
-		ProximitySound = nullptr;
-		TriggerDistance = 1000.0f;
-		MaxVolume = 1.0f;
-		bLooping = true;
-	}
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    float IntensityMultiplier;
+
+    FAudio_DangerAudioSettings()
+    {
+        DangerRadius = 5000.0f;
+        IntensityMultiplier = 1.5f;
+    }
 };
 
-/**
- * Audio System Manager - Handles environmental audio, proximity-based sounds, and adaptive music
- * Integrates with MetaSound for real-time audio processing and biome-specific soundscapes
- */
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UAudioSystemManager : public UWorldSubsystem
+class TRANSPERSONALGAME_API AAudioSystemManager : public AActor
 {
-	GENERATED_BODY()
+    GENERATED_BODY()
 
 public:
-	UAudioSystemManager();
-
-	// USubsystem interface
-	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
-	virtual void Deinitialize() override;
-	virtual bool ShouldCreateSubsystem(UObject* Outer) const override;
-
-	// Audio Management
-	UFUNCTION(BlueprintCallable, Category = "Audio System")
-	void SetCurrentBiome(EAudio_BiomeType NewBiome);
-
-	UFUNCTION(BlueprintCallable, Category = "Audio System")
-	void SetThreatLevel(EAudio_ThreatLevel NewThreatLevel);
-
-	UFUNCTION(BlueprintCallable, Category = "Audio System")
-	void PlayProximityAudio(const FVector& Location, const FAudio_ProximityAudioData& AudioData);
-
-	UFUNCTION(BlueprintCallable, Category = "Audio System")
-	void StopProximityAudio(const FVector& Location);
-
-	UFUNCTION(BlueprintCallable, Category = "Audio System")
-	void UpdatePlayerLocation(const FVector& PlayerLocation);
-
-	// Environmental Audio
-	UFUNCTION(BlueprintCallable, Category = "Audio System")
-	void StartEnvironmentalAudio();
-
-	UFUNCTION(BlueprintCallable, Category = "Audio System")
-	void StopEnvironmentalAudio();
-
-	UFUNCTION(BlueprintCallable, Category = "Audio System")
-	void SetMasterVolume(float Volume);
-
-	UFUNCTION(BlueprintCallable, Category = "Audio System")
-	float GetMasterVolume() const;
-
-	// Threat-based Audio
-	UFUNCTION(BlueprintCallable, Category = "Audio System")
-	void PlayThreatAudio(EAudio_ThreatLevel ThreatLevel, const FVector& ThreatLocation);
-
-	UFUNCTION(BlueprintCallable, Category = "Audio System")
-	void StopThreatAudio();
+    AAudioSystemManager();
 
 protected:
-	// Current audio state
-	UPROPERTY(BlueprintReadOnly, Category = "Audio State")
-	EAudio_BiomeType CurrentBiome;
+    virtual void BeginPlay() override;
+    virtual void Tick(float DeltaTime) override;
 
-	UPROPERTY(BlueprintReadOnly, Category = "Audio State")
-	EAudio_ThreatLevel CurrentThreatLevel;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    class USceneComponent* RootSceneComponent;
 
-	UPROPERTY(BlueprintReadOnly, Category = "Audio State")
-	FVector PlayerLocation;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    class UAudioComponent* AmbientAudioComponent;
 
-	UPROPERTY(BlueprintReadOnly, Category = "Audio State")
-	float MasterVolume;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    class UAudioComponent* MusicAudioComponent;
 
-	// Audio components
-	UPROPERTY(BlueprintReadOnly, Category = "Audio Components")
-	TObjectPtr<UAudioComponent> EnvironmentalAudioComponent;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    class UAudioComponent* DangerAudioComponent;
 
-	UPROPERTY(BlueprintReadOnly, Category = "Audio Components")
-	TObjectPtr<UAudioComponent> ThreatAudioComponent;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Settings")
+    TArray<FAudio_BiomeAudioData> BiomeAudioSettings;
 
-	UPROPERTY(BlueprintReadOnly, Category = "Audio Components")
-	TArray<TObjectPtr<UAudioComponent>> ProximityAudioComponents;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Settings")
+    FAudio_DangerAudioSettings DangerSettings;
 
-	// Audio data maps
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Data", meta = (AllowPrivateAccess = "true"))
-	TMap<EAudio_BiomeType, FAudio_BiomeAudioData> BiomeAudioMap;
+    UPROPERTY(BlueprintReadOnly, Category = "State")
+    EAudio_BiomeType CurrentBiome;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Data", meta = (AllowPrivateAccess = "true"))
-	TMap<EAudio_ThreatLevel, TObjectPtr<USoundCue>> ThreatAudioMap;
+    UPROPERTY(BlueprintReadOnly, Category = "State")
+    bool bInDangerZone;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Settings")
+    float BiomeDetectionRadius;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Settings")
+    float AudioUpdateInterval;
 
 private:
-	// Internal audio management
-	void UpdateEnvironmentalAudio();
-	void UpdateProximityAudio();
-	void CleanupInactiveAudioComponents();
-	
-	// Audio calculation helpers
-	float CalculateVolumeByDistance(float Distance, float MaxDistance) const;
-	void FadeAudioComponent(UAudioComponent* AudioComp, float TargetVolume, float FadeTime = 1.0f);
+    FTimerHandle AudioUpdateTimer;
+    class APawn* PlayerPawn;
 
-	// Component management
-	UAudioComponent* CreateAudioComponent(const FString& ComponentName);
-	void RemoveAudioComponent(UAudioComponent* ComponentToRemove);
+public:
+    UFUNCTION(BlueprintCallable, Category = "Audio System")
+    void SetCurrentBiome(EAudio_BiomeType NewBiome);
 
-	// Timer handles for audio updates
-	FTimerHandle AudioUpdateTimerHandle;
-	FTimerHandle ProximityUpdateTimerHandle;
+    UFUNCTION(BlueprintCallable, Category = "Audio System")
+    void SetDangerState(bool bDangerous);
 
-	// Audio update frequency (in seconds)
-	static constexpr float AudioUpdateInterval = 0.1f;
-	static constexpr float ProximityUpdateInterval = 0.2f;
+    UFUNCTION(BlueprintCallable, Category = "Audio System")
+    void PlayDinosaurRoar(FVector Location, float Intensity = 1.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio System")
+    void PlayFootstepAudio(FVector Location, bool bHeavyFootsteps = false);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio System")
+    EAudio_BiomeType DetectBiomeAtLocation(FVector Location);
+
+    UFUNCTION(BlueprintImplementableEvent, Category = "Audio System")
+    void OnBiomeChanged(EAudio_BiomeType OldBiome, EAudio_BiomeType NewBiome);
+
+    UFUNCTION(BlueprintImplementableEvent, Category = "Audio System")
+    void OnDangerStateChanged(bool bNewDangerState);
+
+private:
+    UFUNCTION()
+    void UpdateAudioSystem();
+
+    void CrossfadeToNewBiome(EAudio_BiomeType NewBiome);
+    void UpdateDangerAudio();
+    float CalculateDistanceToNearestDinosaur();
 };
+
+#include "AudioSystemManager.generated.h"
