@@ -1,125 +1,166 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
-#include "Components/StaticMeshComponent.h"
-#include "Particles/ParticleSystemComponent.h"
-#include "Components/AudioComponent.h"
-#include "Engine/World.h"
-#include "TimerManager.h"
+#include "Components/ActorComponent.h"
+#include "NiagaraComponent.h"
+#include "NiagaraSystem.h"
+#include "Engine/Engine.h"
+#include "../SharedTypes.h"
 #include "VFX_EnvironmentalEffects.generated.h"
 
 UENUM(BlueprintType)
-enum class EVFX_EnvironmentalType : uint8
+enum class EVFX_WeatherType : uint8
 {
-    VolcanicEruption    UMETA(DisplayName = "Volcanic Eruption"),
-    WaterSplash         UMETA(DisplayName = "Water Splash"),
-    DustCloud           UMETA(DisplayName = "Dust Cloud"),
-    WindEffect          UMETA(DisplayName = "Wind Effect"),
-    RainDroplets        UMETA(DisplayName = "Rain Droplets")
+    Clear = 0,
+    Rain,
+    Storm,
+    Fog,
+    Dust,
+    Snow
+};
+
+UENUM(BlueprintType) 
+enum class EVFX_BiomeType : uint8
+{
+    Savana = 0,
+    Forest,
+    Swamp,
+    Desert,
+    Mountain
 };
 
 USTRUCT(BlueprintType)
-struct FVFX_EnvironmentalSettings
+struct FVFX_WeatherSettings
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Settings")
-    EVFX_EnvironmentalType EffectType = EVFX_EnvironmentalType::DustCloud;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Settings", meta = (ClampMin = "0.1", ClampMax = "10.0"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather VFX")
     float Intensity = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Settings", meta = (ClampMin = "1.0", ClampMax = "100.0"))
-    float Duration = 5.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather VFX")
+    float ParticleCount = 100.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Settings")
-    bool bAutoActivate = true;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather VFX")
+    FVector WindDirection = FVector(1.0f, 0.0f, 0.0f);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Settings")
-    bool bLooping = false;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather VFX")
+    float WindStrength = 50.0f;
 
-    FVFX_EnvironmentalSettings()
-    {
-        EffectType = EVFX_EnvironmentalType::DustCloud;
-        Intensity = 1.0f;
-        Duration = 5.0f;
-        bAutoActivate = true;
-        bLooping = false;
-    }
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather VFX")
+    FLinearColor ParticleColor = FLinearColor::White;
 };
 
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API AVFX_EnvironmentalEffects : public AActor
+USTRUCT(BlueprintType)
+struct FVFX_BiomeEffectData
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome VFX")
+    EVFX_BiomeType BiomeType = EVFX_BiomeType::Savana;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome VFX")
+    float AmbientParticleChance = 0.1f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome VFX")
+    FLinearColor FogColor = FLinearColor(0.8f, 0.9f, 1.0f, 0.3f);
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome VFX")
+    float FogDensity = 0.02f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome VFX")
+    TArray<FString> ParticleEffectNames;
+};
+
+UCLASS(ClassGroup=(VFX), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UVFX_EnvironmentalEffects : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    AVFX_EnvironmentalEffects();
+    UVFX_EnvironmentalEffects();
 
 protected:
     virtual void BeginPlay() override;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    USceneComponent* RootSceneComponent;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    UParticleSystemComponent* PrimaryParticleComponent;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    UParticleSystemComponent* SecondaryParticleComponent;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    UStaticMeshComponent* VisualReferenceComponent;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    UAudioComponent* EnvironmentalAudioComponent;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Configuration")
-    FVFX_EnvironmentalSettings EffectSettings;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Configuration")
-    TArray<UParticleSystem*> VolcanicParticleSystems;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Configuration")
-    TArray<UParticleSystem*> WaterSplashParticleSystems;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Configuration")
-    TArray<UParticleSystem*> DustParticleSystems;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Configuration")
-    TArray<USoundBase*> EnvironmentalSounds;
-
 public:
-    UFUNCTION(BlueprintCallable, Category = "VFX Control")
-    void ActivateEnvironmentalEffect();
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    UFUNCTION(BlueprintCallable, Category = "VFX Control")
-    void DeactivateEnvironmentalEffect();
+    // Weather System
+    UFUNCTION(BlueprintCallable, Category = "Environmental VFX")
+    void SetWeatherType(EVFX_WeatherType NewWeatherType);
 
-    UFUNCTION(BlueprintCallable, Category = "VFX Control")
-    void SetEffectType(EVFX_EnvironmentalType NewType);
+    UFUNCTION(BlueprintCallable, Category = "Environmental VFX")
+    void UpdateWeatherIntensity(float NewIntensity);
 
-    UFUNCTION(BlueprintCallable, Category = "VFX Control")
-    void SetEffectIntensity(float NewIntensity);
+    UFUNCTION(BlueprintCallable, Category = "Environmental VFX")
+    void SetWindDirection(FVector NewWindDirection);
 
-    UFUNCTION(BlueprintCallable, Category = "VFX Control")
-    void TriggerVolcanicEruption(FVector EruptionLocation, float EruptionPower = 1.0f);
+    // Biome System
+    UFUNCTION(BlueprintCallable, Category = "Environmental VFX")
+    void SetCurrentBiome(EVFX_BiomeType NewBiome);
 
-    UFUNCTION(BlueprintCallable, Category = "VFX Control")
-    void TriggerWaterSplash(FVector SplashLocation, float SplashSize = 1.0f);
+    UFUNCTION(BlueprintCallable, Category = "Environmental VFX")
+    void SpawnBiomeAmbientEffect(FVector Location);
 
-    UFUNCTION(BlueprintCallable, Category = "VFX Control")
-    void CreateDustCloud(FVector DustLocation, float CloudRadius = 500.0f);
+    // Dynamic Effects
+    UFUNCTION(BlueprintCallable, Category = "Environmental VFX")
+    void SpawnDustCloud(FVector Location, float Size = 1.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "Environmental VFX")
+    void SpawnWaterSplash(FVector Location, float Intensity = 1.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "Environmental VFX")
+    void SpawnFireEffect(FVector Location, float Duration = 10.0f);
+
+    // Atmospheric Effects
+    UFUNCTION(BlueprintCallable, Category = "Environmental VFX")
+    void UpdateFogSettings(FLinearColor Color, float Density);
+
+    UFUNCTION(BlueprintCallable, Category = "Environmental VFX")
+    void CreateVolumetricLightRays(FVector SunDirection, float Intensity);
+
+protected:
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather Settings")
+    EVFX_WeatherType CurrentWeatherType = EVFX_WeatherType::Clear;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather Settings")
+    FVFX_WeatherSettings WeatherSettings;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Settings")
+    EVFX_BiomeType CurrentBiome = EVFX_BiomeType::Savana;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Settings")
+    TArray<FVFX_BiomeEffectData> BiomeEffectData;
+
+    // Niagara Components
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "VFX Components")
+    class UNiagaraComponent* RainEffect;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "VFX Components")
+    class UNiagaraComponent* DustEffect;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "VFX Components")
+    class UNiagaraComponent* FogEffect;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "VFX Components")
+    class UNiagaraComponent* AmbientEffect;
+
+    // Effect Management
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Effect Settings")
+    float EffectUpdateInterval = 0.1f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Effect Settings")
+    float MaxEffectDistance = 5000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Effect Settings")
+    int32 MaxActiveEffects = 50;
 
 private:
-    void SetupParticleSystemForType(EVFX_EnvironmentalType Type);
-    void PlayEnvironmentalSound(EVFX_EnvironmentalType Type);
-    void StopAllEffects();
+    float LastEffectUpdate = 0.0f;
+    TArray<class UNiagaraComponent*> ActiveEffects;
 
-    UFUNCTION()
-    void OnEffectDurationComplete();
-
-    FTimerHandle EffectDurationTimer;
-    bool bEffectActive = false;
+    void UpdateWeatherEffects();
+    void UpdateBiomeEffects();
+    void CleanupExpiredEffects();
+    void InitializeBiomeData();
 };
