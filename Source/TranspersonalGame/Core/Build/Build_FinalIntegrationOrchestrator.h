@@ -1,94 +1,78 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/GameInstanceSubsystem.h"
 #include "Engine/World.h"
+#include "GameFramework/GameModeBase.h"
+#include "Subsystems/WorldSubsystem.h"
 #include "Components/ActorComponent.h"
 #include "Build_FinalIntegrationOrchestrator.generated.h"
 
 UENUM(BlueprintType)
-enum class EBuild_SystemStatus : uint8
+enum class EBuild_IntegrationStatus : uint8
 {
-    Unknown     UMETA(DisplayName = "Unknown"),
-    Healthy     UMETA(DisplayName = "Healthy"),
-    Warning     UMETA(DisplayName = "Warning"),
-    Critical    UMETA(DisplayName = "Critical"),
+    Pending     UMETA(DisplayName = "Pending"),
+    InProgress  UMETA(DisplayName = "In Progress"),
+    Completed   UMETA(DisplayName = "Completed"),
     Failed      UMETA(DisplayName = "Failed")
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FBuild_SystemHealthData
+struct TRANSPERSONALGAME_API FBuild_SystemValidationResult
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "System Health")
+    UPROPERTY(BlueprintReadOnly, Category = "Validation")
     FString SystemName;
 
-    UPROPERTY(BlueprintReadOnly, Category = "System Health")
-    EBuild_SystemStatus Status;
+    UPROPERTY(BlueprintReadOnly, Category = "Validation")
+    bool bIsValid;
 
-    UPROPERTY(BlueprintReadOnly, Category = "System Health")
-    int32 ActorCount;
+    UPROPERTY(BlueprintReadOnly, Category = "Validation")
+    FString ErrorMessage;
 
-    UPROPERTY(BlueprintReadOnly, Category = "System Health")
-    float PerformanceScore;
+    UPROPERTY(BlueprintReadOnly, Category = "Validation")
+    float ValidationTime;
 
-    UPROPERTY(BlueprintReadOnly, Category = "System Health")
-    FString LastError;
-
-    UPROPERTY(BlueprintReadOnly, Category = "System Health")
-    FDateTime LastValidation;
-
-    FBuild_SystemHealthData()
+    FBuild_SystemValidationResult()
     {
-        SystemName = TEXT("Unknown");
-        Status = EBuild_SystemStatus::Unknown;
-        ActorCount = 0;
-        PerformanceScore = 0.0f;
-        LastError = TEXT("");
-        LastValidation = FDateTime::Now();
+        SystemName = TEXT("");
+        bIsValid = false;
+        ErrorMessage = TEXT("");
+        ValidationTime = 0.0f;
     }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FBuild_BiomeValidationData
+struct TRANSPERSONALGAME_API FBuild_IntegrationReport
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Biome Validation")
-    FString BiomeName;
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    TArray<FBuild_SystemValidationResult> SystemResults;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Biome Validation")
-    FVector BiomeCenter;
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    int32 TotalActors;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Biome Validation")
-    int32 RequiredActors;
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    float MemoryUsagePercent;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Biome Validation")
-    int32 CurrentActors;
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    EBuild_IntegrationStatus OverallStatus;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Biome Validation")
-    bool bIsPopulated;
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    FDateTime ReportTimestamp;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Biome Validation")
-    TArray<FString> MissingAssetTypes;
-
-    FBuild_BiomeValidationData()
+    FBuild_IntegrationReport()
     {
-        BiomeName = TEXT("Unknown");
-        BiomeCenter = FVector::ZeroVector;
-        RequiredActors = 500;
-        CurrentActors = 0;
-        bIsPopulated = false;
+        TotalActors = 0;
+        MemoryUsagePercent = 0.0f;
+        OverallStatus = EBuild_IntegrationStatus::Pending;
+        ReportTimestamp = FDateTime::Now();
     }
 };
 
-/**
- * Final Integration Orchestrator - Manages complete system integration and build validation
- * Coordinates all subsystems, validates biome population, and ensures stable build state
- */
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UBuild_FinalIntegrationOrchestrator : public UGameInstanceSubsystem
+class TRANSPERSONALGAME_API UBuild_FinalIntegrationOrchestrator : public UWorldSubsystem
 {
     GENERATED_BODY()
 
@@ -99,125 +83,74 @@ public:
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
-    // Core Integration Functions
     UFUNCTION(BlueprintCallable, Category = "Integration")
-    void ValidateAllSystems();
-
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    void ValidateBiomePopulation();
+    void StartIntegrationValidation();
 
     UFUNCTION(BlueprintCallable, Category = "Integration")
-    void ValidateAssetPipeline();
+    FBuild_IntegrationReport GetLastIntegrationReport() const;
 
     UFUNCTION(BlueprintCallable, Category = "Integration")
-    void GenerateIntegrationReport();
+    bool ValidateSystemIntegrity(const FString& SystemName);
 
-    // System Health Monitoring
-    UFUNCTION(BlueprintCallable, Category = "System Health")
-    EBuild_SystemStatus GetSystemStatus(const FString& SystemName);
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    void ForceGarbageCollection();
 
-    UFUNCTION(BlueprintCallable, Category = "System Health")
-    TArray<FBuild_SystemHealthData> GetAllSystemHealth();
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    int32 GetActiveActorCount() const;
 
-    UFUNCTION(BlueprintCallable, Category = "System Health")
-    float GetOverallSystemHealth();
-
-    // Biome Validation
-    UFUNCTION(BlueprintCallable, Category = "Biome Validation")
-    TArray<FBuild_BiomeValidationData> GetBiomeValidationData();
-
-    UFUNCTION(BlueprintCallable, Category = "Biome Validation")
-    bool AreBiomesProperlyPopulated();
-
-    UFUNCTION(BlueprintCallable, Category = "Biome Validation")
-    int32 GetTotalActorCount();
-
-    // Asset Pipeline Validation
-    UFUNCTION(BlueprintCallable, Category = "Asset Pipeline")
-    bool ValidateFBXImportPipeline();
-
-    UFUNCTION(BlueprintCallable, Category = "Asset Pipeline")
-    TArray<FString> GetAvailableAssets();
-
-    UFUNCTION(BlueprintCallable, Category = "Asset Pipeline")
-    bool TestAssetSpawning();
-
-    // Performance Monitoring
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    float GetCurrentFPS();
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    float GetMemoryUsage();
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    bool IsPerformanceWithinLimits();
-
-    // Build Validation
-    UFUNCTION(BlueprintCallable, Category = "Build Validation")
-    bool ValidateModuleCompilation();
-
-    UFUNCTION(BlueprintCallable, Category = "Build Validation")
-    TArray<FString> GetCompilationErrors();
-
-    UFUNCTION(BlueprintCallable, Category = "Build Validation")
-    bool IsReadyForProduction();
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    float GetMemoryUsagePercent() const;
 
 protected:
-    // System Health Data
-    UPROPERTY(BlueprintReadOnly, Category = "System Health")
-    TMap<FString, FBuild_SystemHealthData> SystemHealthMap;
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    FBuild_IntegrationReport LastReport;
 
-    // Biome Validation Data
-    UPROPERTY(BlueprintReadOnly, Category = "Biome Validation")
-    TArray<FBuild_BiomeValidationData> BiomeValidationArray;
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    bool bValidationInProgress;
 
-    // Performance Thresholds
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float MinimumFPS = 30.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float MaximumMemoryUsage = 85.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 MaximumActorCount = 20000;
-
-    // Validation Flags
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    bool bSystemsValidated = false;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    bool bBiomesValidated = false;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    bool bAssetPipelineValidated = false;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    bool bPerformanceValidated = false;
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    TArray<FString> CriticalSystems;
 
 private:
-    // Internal validation functions
+    void ValidateCharacterSystem();
     void ValidateWorldGeneration();
-    void ValidateCharacterSystems();
-    void ValidatePhysicsSystems();
-    void ValidateVFXSystems();
-    void ValidateAudioSystems();
-    void ValidateNPCSystems();
-    void ValidateCrowdSystems();
+    void ValidatePhysicsSystem();
+    void ValidateAudioSystem();
+    void ValidateLightingSystem();
+    void ValidateVFXSystem();
+    void ValidateAssetPipeline();
+    
+    void CompileValidationReport();
+    FBuild_SystemValidationResult CreateValidationResult(const FString& SystemName, bool bValid, const FString& Error = TEXT(""));
+};
 
-    // Biome validation helpers
-    void ValidateSavanaBiome();
-    void ValidatePantanoBiome();
-    void ValidateFlorestaBiome();
-    void ValidateDesertoBiome();
-    void ValidateMontanhaBiome();
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API ABuild_IntegrationTestActor : public AActor
+{
+    GENERATED_BODY()
 
-    // Performance monitoring helpers
-    void UpdatePerformanceMetrics();
-    void CheckMemoryLeaks();
-    void ValidateActorCounts();
+public:
+    ABuild_IntegrationTestActor();
 
-    // Asset pipeline helpers
-    void TestFBXImport();
-    void ValidateAssetRegistry();
-    void CheckAssetIntegrity();
+    UFUNCTION(BlueprintCallable, Category = "Testing")
+    void RunIntegrationTests();
+
+    UFUNCTION(BlueprintCallable, Category = "Testing")
+    bool TestActorSpawning();
+
+    UFUNCTION(BlueprintCallable, Category = "Testing")
+    bool TestComponentRegistration();
+
+    UFUNCTION(BlueprintCallable, Category = "Testing")
+    bool TestCrossSystemCommunication();
+
+protected:
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    class USceneComponent* RootSceneComponent;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Testing")
+    TArray<FString> TestResults;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Testing")
+    bool bTestsCompleted;
 };
