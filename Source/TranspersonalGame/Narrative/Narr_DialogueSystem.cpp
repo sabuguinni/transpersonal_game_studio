@@ -1,153 +1,340 @@
 #include "Narr_DialogueSystem.h"
-#include "Engine/Engine.h"
+#include "Engine/World.h"
+#include "GameFramework/PlayerController.h"
+#include "GameFramework/Pawn.h"
 #include "Kismet/GameplayStatics.h"
-#include "Sound/SoundCue.h"
 #include "Components/AudioComponent.h"
+#include "Sound/SoundWave.h"
+#include "Engine/Engine.h"
+#include "TimerManager.h"
 
-void UNarr_DialogueSystem::Initialize(FSubsystemCollectionBase& Collection)
+UNarr_DialogueComponent::UNarr_DialogueComponent()
 {
-    Super::Initialize(Collection);
+    PrimaryComponentTick.bCanEverTick = true;
+    PrimaryComponentTick.TickInterval = 1.0f; // Check every second for performance
     
-    UE_LOG(LogTemp, Warning, TEXT("Narrative Dialogue System Initialized"));
+    // Initialize default character data
+    CharacterData = FNarr_CharacterArchetype();
+    TriggerConditions = FNarr_DialogueTrigger();
+    CurrentEmotion = ENarr_EmotionalState::Calm;
+    LastTriggerTime = 0.0f;
+    CurrentDialogue = FNarr_DialogueEntry();
     
-    // Initialize default dialogue database
-    InitializeDefaultDialogues();
-    LoadDialogueDatabase();
-}
-
-void UNarr_DialogueSystem::RegisterDialogueLine(const FNarr_DialogueLine& DialogueLine)
-{
-    DialogueDatabase.Add(DialogueLine);
-    UE_LOG(LogTemp, Log, TEXT("Registered dialogue line: %s"), *DialogueLine.DialogueID);
-}
-
-void UNarr_DialogueSystem::RegisterDialogueSequence(const FNarr_DialogueSequence& DialogueSequence)
-{
-    DialogueSequences.Add(DialogueSequence);
-    UE_LOG(LogTemp, Log, TEXT("Registered dialogue sequence: %s"), *DialogueSequence.SequenceID);
-}
-
-FNarr_DialogueLine UNarr_DialogueSystem::GetRandomDialogue(ENarr_DialogueType DialogueType, ENarr_CharacterType CharacterType)
-{
-    TArray<FNarr_DialogueLine> MatchingDialogues;
-    
-    for (const FNarr_DialogueLine& Dialogue : DialogueDatabase)
+    // Create audio component for voice playback
+    AudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("DialogueAudio"));
+    if (AudioComponent)
     {
-        if (Dialogue.DialogueType == DialogueType && Dialogue.SpeakerType == CharacterType)
-        {
-            if (CheckDialogueConditions(Dialogue.TriggerConditions))
-            {
-                MatchingDialogues.Add(Dialogue);
-            }
-        }
+        AudioComponent->bAutoActivate = false;
+        AudioComponent->SetVolumeMultiplier(0.8f);
+        AudioComponent->SetPitchMultiplier(1.0f);
+    }
+}
+
+void UNarr_DialogueComponent::BeginPlay()
+{
+    Super::BeginPlay();
+    
+    // Initialize default dialogue entries if none exist
+    if (CharacterData.DialogueEntries.Num() == 0)
+    {
+        // Warning dialogue
+        FNarr_DialogueEntry WarningEntry;
+        WarningEntry.DialogueText = TEXT("Danger stalks these lands. Keep your spear ready.");
+        WarningEntry.DialogueType = ENarr_DialogueType::Warning;
+        WarningEntry.TriggerContext = ENarr_SurvivalContext::Danger;
+        WarningEntry.RequiredEmotion = ENarr_EmotionalState::Fearful;
+        WarningEntry.TriggerDistance = 20.0f;
+        WarningEntry.Priority = 8;
+        CharacterData.DialogueEntries.Add(WarningEntry);
+        
+        // Hunting instruction
+        FNarr_DialogueEntry HuntingEntry;
+        HuntingEntry.DialogueText = TEXT("Follow the tracks. The herd moves toward water at dawn.");
+        HuntingEntry.DialogueType = ENarr_DialogueType::Instruction;
+        HuntingEntry.TriggerContext = ENarr_SurvivalContext::Hunting;
+        HuntingEntry.RequiredEmotion = ENarr_EmotionalState::Calm;
+        HuntingEntry.TriggerDistance = 15.0f;
+        HuntingEntry.Priority = 6;
+        CharacterData.DialogueEntries.Add(HuntingEntry);
+        
+        // Greeting
+        FNarr_DialogueEntry GreetingEntry;
+        GreetingEntry.DialogueText = TEXT("Hunter. The spirits watch over your path.");
+        GreetingEntry.DialogueType = ENarr_DialogueType::Greeting;
+        GreetingEntry.TriggerContext = ENarr_SurvivalContext::Rest;
+        GreetingEntry.RequiredEmotion = ENarr_EmotionalState::Calm;
+        GreetingEntry.TriggerDistance = 10.0f;
+        GreetingEntry.Priority = 3;
+        CharacterData.DialogueEntries.Add(GreetingEntry);
     }
     
-    if (MatchingDialogues.Num() > 0)
-    {
-        int32 RandomIndex = FMath::RandRange(0, MatchingDialogues.Num() - 1);
-        return MatchingDialogues[RandomIndex];
-    }
-    
-    // Return empty dialogue if none found
-    return FNarr_DialogueLine();
+    UE_LOG(LogTemp, Log, TEXT("Dialogue Component initialized for %s with %d dialogue entries"), 
+           *CharacterData.CharacterName, CharacterData.DialogueEntries.Num());
 }
 
-TArray<FNarr_DialogueLine> UNarr_DialogueSystem::GetDialogueSequence(const FString& SequenceID)
+void UNarr_DialogueComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
-    for (const FNarr_DialogueSequence& Sequence : DialogueSequences)
-    {
-        if (Sequence.SequenceID == SequenceID)
-        {
-            return Sequence.DialogueLines;
-        }
-    }
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
     
-    return TArray<FNarr_DialogueLine>();
-}
-
-void UNarr_DialogueSystem::PlayDialogue(const FNarr_DialogueLine& DialogueLine)
-{
-    if (DialogueLine.DialogueText.IsEmpty())
+    // Get player actor
+    AActor* PlayerActor = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
+    if (!PlayerActor)
     {
         return;
     }
     
-    // Log dialogue for debugging
-    UE_LOG(LogTemp, Warning, TEXT("Playing Dialogue: %s"), *DialogueLine.DialogueText.ToString());
+    // Update emotional state based on environment
+    float PlayerDistance = GetDistanceToPlayer();
+    int32 ThreatLevel = GetNearbyThreatLevel();
+    bool IsNearPredator = ThreatLevel >= 3;
     
-    // Track played dialogues
-    if (PlayedDialogues.Contains(DialogueLine.DialogueID))
+    // Simple health simulation (would integrate with actual player health system)
+    float PlayerHealth = 0.8f; // Placeholder
+    UpdateEmotionalState(PlayerHealth, ThreatLevel, IsNearPredator);
+    
+    // Check if dialogue should trigger
+    ENarr_SurvivalContext CurrentContext = GetPlayerSurvivalContext();
+    if (ShouldTriggerDialogue(PlayerActor, CurrentContext))
     {
-        PlayedDialogues[DialogueLine.DialogueID]++;
+        FNarr_DialogueEntry SelectedDialogue = SelectDialogue(CurrentContext, CurrentEmotion);
+        if (!SelectedDialogue.DialogueText.IsEmpty())
+        {
+            PlayDialogue(SelectedDialogue);
+            LastTriggerTime = GetWorld()->GetTimeSeconds();
+        }
+    }
+}
+
+bool UNarr_DialogueComponent::ShouldTriggerDialogue(AActor* PlayerActor, ENarr_SurvivalContext Context)
+{
+    if (!PlayerActor)
+    {
+        return false;
+    }
+    
+    // Check cooldown
+    float CurrentTime = GetWorld()->GetTimeSeconds();
+    if (CurrentTime - LastTriggerTime < TriggerConditions.MinTimeBetweenTriggers)
+    {
+        return false;
+    }
+    
+    // Check distance
+    float PlayerDistance = GetDistanceToPlayer();
+    if (PlayerDistance > TriggerConditions.ProximityDistance)
+    {
+        return false;
+    }
+    
+    // Check if we have dialogue for this context
+    if (!HasDialogueForContext(Context))
+    {
+        return false;
+    }
+    
+    // Check threat level
+    int32 CurrentThreatLevel = GetNearbyThreatLevel();
+    if (CurrentThreatLevel > TriggerConditions.ThreatLevel && Context != ENarr_SurvivalContext::Danger)
+    {
+        return false;
+    }
+    
+    return true;
+}
+
+FNarr_DialogueEntry UNarr_DialogueComponent::SelectDialogue(ENarr_SurvivalContext Context, ENarr_EmotionalState Emotion)
+{
+    TArray<FNarr_DialogueEntry> CandidateDialogues;
+    
+    // Filter dialogues by context and emotion
+    for (const FNarr_DialogueEntry& Entry : CharacterData.DialogueEntries)
+    {
+        if (Entry.TriggerContext == Context || Context == ENarr_SurvivalContext::Exploration)
+        {
+            if (Entry.RequiredEmotion == Emotion || Entry.RequiredEmotion == ENarr_EmotionalState::Calm)
+            {
+                CandidateDialogues.Add(Entry);
+            }
+        }
+    }
+    
+    // If no exact matches, try broader search
+    if (CandidateDialogues.Num() == 0)
+    {
+        for (const FNarr_DialogueEntry& Entry : CharacterData.DialogueEntries)
+        {
+            if (Entry.RequiredEmotion == ENarr_EmotionalState::Calm)
+            {
+                CandidateDialogues.Add(Entry);
+            }
+        }
+    }
+    
+    // Select highest priority dialogue
+    if (CandidateDialogues.Num() > 0)
+    {
+        FNarr_DialogueEntry BestDialogue = CandidateDialogues[0];
+        for (const FNarr_DialogueEntry& Entry : CandidateDialogues)
+        {
+            if (Entry.Priority > BestDialogue.Priority)
+            {
+                BestDialogue = Entry;
+            }
+        }
+        return BestDialogue;
+    }
+    
+    return FNarr_DialogueEntry();
+}
+
+void UNarr_DialogueComponent::PlayDialogue(const FNarr_DialogueEntry& DialogueEntry)
+{
+    CurrentDialogue = DialogueEntry;
+    
+    // Log dialogue to screen and console
+    UE_LOG(LogTemp, Log, TEXT("%s: %s"), *CharacterData.CharacterName, *DialogueEntry.DialogueText);
+    
+    if (GEngine)
+    {
+        FString DisplayText = FString::Printf(TEXT("%s: %s"), 
+                                            *CharacterData.CharacterName, 
+                                            *DialogueEntry.DialogueText);
+        GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Yellow, DisplayText);
+    }
+    
+    // Play audio if available and audio component exists
+    if (AudioComponent && !DialogueEntry.AudioURL.IsEmpty())
+    {
+        // In a full implementation, this would load and play the audio from the URL
+        // For now, we'll use a placeholder sound or text-to-speech integration
+        UE_LOG(LogTemp, Log, TEXT("Playing audio from URL: %s"), *DialogueEntry.AudioURL);
+    }
+}
+
+void UNarr_DialogueComponent::UpdateEmotionalState(float PlayerHealth, float ThreatLevel, bool IsNearPredator)
+{
+    // Simple emotional state logic based on survival conditions
+    if (IsNearPredator || ThreatLevel >= 4)
+    {
+        CurrentEmotion = ENarr_EmotionalState::Fearful;
+    }
+    else if (ThreatLevel >= 2)
+    {
+        CurrentEmotion = ENarr_EmotionalState::Aggressive;
+    }
+    else if (PlayerHealth < 0.3f)
+    {
+        CurrentEmotion = ENarr_EmotionalState::Exhausted;
     }
     else
     {
-        PlayedDialogues.Add(DialogueLine.DialogueID, 1);
+        CurrentEmotion = CharacterData.DefaultEmotion;
     }
+}
+
+void UNarr_DialogueComponent::AddDialogueEntry(const FNarr_DialogueEntry& NewEntry)
+{
+    CharacterData.DialogueEntries.Add(NewEntry);
+    UE_LOG(LogTemp, Log, TEXT("Added new dialogue entry: %s"), *NewEntry.DialogueText);
+}
+
+TArray<FNarr_DialogueEntry> UNarr_DialogueComponent::GetDialoguesByType(ENarr_DialogueType Type)
+{
+    TArray<FNarr_DialogueEntry> FilteredDialogues;
     
-    // TODO: Integrate with audio system when available
-    // For now, just log the audio URL
-    if (!DialogueLine.AudioURL.IsEmpty())
+    for (const FNarr_DialogueEntry& Entry : CharacterData.DialogueEntries)
     {
-        UE_LOG(LogTemp, Log, TEXT("Audio URL: %s"), *DialogueLine.AudioURL);
+        if (Entry.DialogueType == Type)
+        {
+            FilteredDialogues.Add(Entry);
+        }
     }
+    
+    return FilteredDialogues;
 }
 
-void UNarr_DialogueSystem::LoadDialogueDatabase()
+bool UNarr_DialogueComponent::HasDialogueForContext(ENarr_SurvivalContext Context)
 {
-    UE_LOG(LogTemp, Warning, TEXT("Loading dialogue database - %d dialogues registered"), DialogueDatabase.Num());
+    for (const FNarr_DialogueEntry& Entry : CharacterData.DialogueEntries)
+    {
+        if (Entry.TriggerContext == Context)
+        {
+            return true;
+        }
+    }
+    return false;
 }
 
-int32 UNarr_DialogueSystem::GetTotalDialogueCount() const
+float UNarr_DialogueComponent::GetDistanceToPlayer() const
 {
-    return DialogueDatabase.Num();
+    AActor* PlayerActor = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
+    if (!PlayerActor || !GetOwner())
+    {
+        return 9999.0f;
+    }
+    
+    return FVector::Dist(GetOwner()->GetActorLocation(), PlayerActor->GetActorLocation());
 }
 
-void UNarr_DialogueSystem::InitializeDefaultDialogues()
+float UNarr_DialogueComponent::GetCurrentTimeOfDay() const
 {
-    // Initialize with the generated TTS dialogues
-    FNarr_DialogueLine ThunderLizardDialogue;
-    ThunderLizardDialogue.DialogueID = "elder_thunder_lizard_warning";
-    ThunderLizardDialogue.SpeakerType = ENarr_CharacterType::TribalElder;
-    ThunderLizardDialogue.DialogueType = ENarr_DialogueType::Warning;
-    ThunderLizardDialogue.DialogueText = FText::FromString("The great Thunder Lizard has returned to the valley! Its footsteps shake the earth and its roar echoes through the canyons. The tribe must prepare for the ancient ritual of the Hunt. Only the bravest warriors dare face the king of all beasts.");
-    ThunderLizardDialogue.AudioURL = "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1778904906665_TribalElder.mp3";
-    ThunderLizardDialogue.Duration = 17.0f;
-    RegisterDialogueLine(ThunderLizardDialogue);
-    
-    FNarr_DialogueLine RaptorWarning;
-    RaptorWarning.DialogueID = "warrior_raptor_warning";
-    RaptorWarning.SpeakerType = ENarr_CharacterType::TribalWarrior;
-    RaptorWarning.DialogueType = ENarr_DialogueType::Warning;
-    RaptorWarning.DialogueText = FText::FromString("The pack hunters circle in the darkness beyond the firelight. Their eyes gleam like stars in the night, watching, waiting for weakness. Stay close to the flames, young one, for the Raptors fear only fire and the courage of united hunters.");
-    RaptorWarning.AudioURL = "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1778904912638_TribalWarrior.mp3";
-    RaptorWarning.Duration = 16.0f;
-    RegisterDialogueLine(RaptorWarning);
-    
-    FNarr_DialogueLine BrachiosaurusInfo;
-    BrachiosaurusInfo.DialogueID = "scout_brachiosaurus_info";
-    BrachiosaurusInfo.SpeakerType = ENarr_CharacterType::TribalScout;
-    BrachiosaurusInfo.DialogueType = ENarr_DialogueType::Information;
-    BrachiosaurusInfo.DialogueText = FText::FromString("The gentle giants graze in the eastern meadows, their long necks reaching toward the sky like living trees. The Brachiosaurus brings no threat to those who respect their domain, but beware - where they flee, greater dangers follow.");
-    BrachiosaurusInfo.AudioURL = "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1778904918646_TribalScout.mp3";
-    BrachiosaurusInfo.Duration = 16.0f;
-    RegisterDialogueLine(BrachiosaurusInfo);
-    
-    FNarr_DialogueLine BloodScent;
-    BloodScent.DialogueID = "tracker_blood_warning";
-    BloodScent.SpeakerType = ENarr_CharacterType::TribalTracker;
-    BloodScent.DialogueType = ENarr_DialogueType::Warning;
-    BloodScent.DialogueText = FText::FromString("Blood on the wind... the scent carries far across the savanna. Something has fallen to predators in the northern hunting grounds. We must move carefully - the feast will draw every carnivore for miles around.");
-    BloodScent.AudioURL = "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1778904924389_TribalTracker.mp3";
-    BloodScent.Duration = 14.0f;
-    RegisterDialogueLine(BloodScent);
-    
-    UE_LOG(LogTemp, Warning, TEXT("Initialized %d default dialogues"), DialogueDatabase.Num());
+    // Placeholder - would integrate with actual day/night cycle
+    return 0.5f; // Noon
 }
 
-bool UNarr_DialogueSystem::CheckDialogueConditions(const TArray<FString>& Conditions)
+int32 UNarr_DialogueComponent::GetNearbyThreatLevel() const
 {
-    // For now, return true for all conditions
-    // TODO: Implement condition checking system
-    return true;
+    // Simple threat detection - would integrate with actual dinosaur AI system
+    UWorld* World = GetWorld();
+    if (!World || !GetOwner())
+    {
+        return 0;
+    }
+    
+    // Check for actors with "Dinosaur" or "Predator" in their name within 100 meters
+    TArray<AActor*> NearbyActors;
+    FVector OwnerLocation = GetOwner()->GetActorLocation();
+    
+    for (TActorIterator<AActor> ActorIterator(World); ActorIterator; ++ActorIterator)
+    {
+        AActor* Actor = *ActorIterator;
+        if (Actor && Actor != GetOwner())
+        {
+            float Distance = FVector::Dist(OwnerLocation, Actor->GetActorLocation());
+            if (Distance <= 10000.0f) // 100 meters
+            {
+                FString ActorName = Actor->GetName().ToLower();
+                if (ActorName.Contains(TEXT("trex")) || ActorName.Contains(TEXT("raptor")))
+                {
+                    return 4; // High threat
+                }
+                else if (ActorName.Contains(TEXT("dinosaur")) || ActorName.Contains(TEXT("predator")))
+                {
+                    return 2; // Medium threat
+                }
+            }
+        }
+    }
+    
+    return 1; // Low/no threat
+}
+
+ENarr_SurvivalContext UNarr_DialogueComponent::GetPlayerSurvivalContext() const
+{
+    // Placeholder logic - would integrate with actual player state system
+    int32 ThreatLevel = GetNearbyThreatLevel();
+    
+    if (ThreatLevel >= 3)
+    {
+        return ENarr_SurvivalContext::Danger;
+    }
+    else if (ThreatLevel >= 2)
+    {
+        return ENarr_SurvivalContext::Combat;
+    }
+    else
+    {
+        // Default to exploration when no immediate threats
+        return ENarr_SurvivalContext::Exploration;
+    }
 }
