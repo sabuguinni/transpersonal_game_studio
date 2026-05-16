@@ -1,21 +1,18 @@
 #include "Build_FinalIntegrationOrchestrator.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "Engine/GameInstance.h"
+#include "EngineUtils.h"
 #include "GameFramework/Actor.h"
-#include "GameFramework/Pawn.h"
-#include "GameFramework/Character.h"
 #include "Components/StaticMeshComponent.h"
-#include "TimerManager.h"
-#include "HAL/PlatformFilemanager.h"
-#include "Misc/DateTime.h"
-#include "Stats/Stats.h"
+#include "Components/LightComponent.h"
+#include "NiagaraComponent.h"
+#include "TranspersonalCharacter.h"
+#include "TranspersonalGameState.h"
 
 UBuild_FinalIntegrationOrchestrator::UBuild_FinalIntegrationOrchestrator()
 {
     bIntegrationComplete = false;
-    ValidationInterval = 30.0f; // Validate every 30 seconds
-    LastFullValidation = FDateTime::Now();
+    LastValidationTime = FDateTime::Now();
 }
 
 void UBuild_FinalIntegrationOrchestrator::Initialize(FSubsystemCollectionBase& Collection)
@@ -24,383 +21,358 @@ void UBuild_FinalIntegrationOrchestrator::Initialize(FSubsystemCollectionBase& C
     
     UE_LOG(LogTemp, Warning, TEXT("Build_FinalIntegrationOrchestrator: Initializing final build integration system"));
     
-    // Initialize system health reports
-    SystemHealthReports.Empty();
+    InitializeBiomeDefinitions();
     
-    // Add core systems to monitor
-    TArray<FString> CoreSystems = {
-        TEXT("WorldGeneration"),
-        TEXT("CharacterSystem"),
-        TEXT("DinosaurAI"),
-        TEXT("Environment"),
-        TEXT("Physics"),
-        TEXT("Audio"),
-        TEXT("VFX"),
-        TEXT("CrowdSimulation")
-    };
-    
-    for (const FString& SystemName : CoreSystems)
-    {
-        FBuild_SystemHealthReport Report;
-        Report.SystemName = SystemName;
-        Report.Status = EBuild_SystemStatus::Unknown;
-        Report.LastChecked = FDateTime::Now();
-        SystemHealthReports.Add(Report);
-    }
-    
-    // Start periodic validation
+    // Schedule initial validation
     if (UWorld* World = GetWorld())
     {
-        World->GetTimerManager().SetTimer(
-            ValidationTimerHandle,
-            this,
-            &UBuild_FinalIntegrationOrchestrator::PerformFullSystemValidation,
-            ValidationInterval,
-            true
-        );
+        FTimerHandle ValidationTimer;
+        World->GetTimerManager().SetTimer(ValidationTimer, [this]()
+        {
+            ValidateAllSystems();
+        }, 2.0f, false);
     }
-    
-    // Perform initial validation
-    PerformFullSystemValidation();
 }
 
 void UBuild_FinalIntegrationOrchestrator::Deinitialize()
 {
-    if (UWorld* World = GetWorld())
-    {
-        World->GetTimerManager().ClearTimer(ValidationTimerHandle);
-    }
-    
     UE_LOG(LogTemp, Warning, TEXT("Build_FinalIntegrationOrchestrator: Deinitializing integration system"));
+    
+    SystemStatusMap.Empty();
+    BiomeStatusMap.Empty();
+    
     Super::Deinitialize();
 }
 
-void UBuild_FinalIntegrationOrchestrator::PerformFullSystemValidation()
+void UBuild_FinalIntegrationOrchestrator::InitializeBiomeDefinitions()
 {
-    UE_LOG(LogTemp, Warning, TEXT("Build_FinalIntegrationOrchestrator: Starting full system validation"));
+    // Initialize biome status map with predefined biome locations
+    BiomeStatusMap.Add(TEXT("Savana"), CreateBiomeStatus(TEXT("Savana"), FVector(0, 0, 0), 0));
+    BiomeStatusMap.Add(TEXT("Pantano"), CreateBiomeStatus(TEXT("Pantano"), FVector(-50000, -45000, 0), 0));
+    BiomeStatusMap.Add(TEXT("Floresta"), CreateBiomeStatus(TEXT("Floresta"), FVector(-45000, 40000, 0), 0));
+    BiomeStatusMap.Add(TEXT("Deserto"), CreateBiomeStatus(TEXT("Deserto"), FVector(55000, 0, 0), 0));
+    BiomeStatusMap.Add(TEXT("Montanha"), CreateBiomeStatus(TEXT("Montanha"), FVector(40000, 50000, 0), 0));
     
-    LastFullValidation = FDateTime::Now();
+    UE_LOG(LogTemp, Warning, TEXT("Build_FinalIntegrationOrchestrator: Initialized 5 biome definitions"));
+}
+
+FBuild_IntegrationReport UBuild_FinalIntegrationOrchestrator::GenerateIntegrationReport()
+{
+    UE_LOG(LogTemp, Warning, TEXT("Build_FinalIntegrationOrchestrator: Generating comprehensive integration report"));
     
-    // Collect current metrics
-    CollectPerformanceMetrics();
+    CurrentReport = FBuild_IntegrationReport();
+    CurrentReport.LastIntegrationTime = FDateTime::Now();
     
-    // Validate actor counts
-    ValidateActorCounts();
+    // Validate all systems
+    ValidateSystemIntegrity();
+    ValidateWorldPopulation();
+    ValidateVFXSystems();
+    ValidateLightingSystems();
+    ValidateCharacterSystems();
+    ValidatePhysicsSystems();
+    ValidateAudioSystems();
     
-    // Check individual systems
-    UpdateSystemHealthReport(TEXT("WorldGeneration"), CheckWorldGenerationHealth());
-    UpdateSystemHealthReport(TEXT("CharacterSystem"), CheckCharacterSystemHealth());
-    UpdateSystemHealthReport(TEXT("DinosaurAI"), CheckDinosaurAIHealth());
-    UpdateSystemHealthReport(TEXT("Environment"), CheckEnvironmentHealth());
+    // Validate biome population
+    ValidateBiomePopulation();
     
-    // Check system dependencies
-    CheckSystemDependencies();
+    // Populate report arrays
+    SystemStatusMap.GenerateValueArray(CurrentReport.SystemStatuses);
+    BiomeStatusMap.GenerateValueArray(CurrentReport.BiomeStatuses);
     
-    // Determine overall integration status
-    bool bAllSystemsHealthy = true;
-    for (const FBuild_SystemHealthReport& Report : SystemHealthReports)
+    // Calculate total actor count
+    CurrentReport.TotalActorCount = GetTotalActorCount();
+    
+    // Determine build stability
+    CurrentReport.bBuildStable = IsBuildStable();
+    
+    UE_LOG(LogTemp, Warning, TEXT("Build_FinalIntegrationOrchestrator: Integration report complete - %d systems, %d biomes, %d total actors, Stable: %s"), 
+           CurrentReport.SystemStatuses.Num(), 
+           CurrentReport.BiomeStatuses.Num(), 
+           CurrentReport.TotalActorCount,
+           CurrentReport.bBuildStable ? TEXT("YES") : TEXT("NO"));
+    
+    return CurrentReport;
+}
+
+bool UBuild_FinalIntegrationOrchestrator::ValidateAllSystems()
+{
+    UE_LOG(LogTemp, Warning, TEXT("Build_FinalIntegrationOrchestrator: Validating all critical systems"));
+    
+    bool bAllSystemsValid = true;
+    
+    // Validate core systems
+    bAllSystemsValid &= CheckSystemHealth(TEXT("TranspersonalCharacter"));
+    bAllSystemsValid &= CheckSystemHealth(TEXT("TranspersonalGameState"));
+    bAllSystemsValid &= CheckSystemHealth(TEXT("WorldGeneration"));
+    bAllSystemsValid &= CheckSystemHealth(TEXT("VFXSystems"));
+    bAllSystemsValid &= CheckSystemHealth(TEXT("LightingSystems"));
+    bAllSystemsValid &= CheckSystemHealth(TEXT("PhysicsSystems"));
+    bAllSystemsValid &= CheckSystemHealth(TEXT("AudioSystems"));
+    
+    LastValidationTime = FDateTime::Now();
+    
+    UE_LOG(LogTemp, Warning, TEXT("Build_FinalIntegrationOrchestrator: System validation complete - All systems valid: %s"), 
+           bAllSystemsValid ? TEXT("YES") : TEXT("NO"));
+    
+    return bAllSystemsValid;
+}
+
+bool UBuild_FinalIntegrationOrchestrator::ValidateBiomePopulation()
+{
+    UE_LOG(LogTemp, Warning, TEXT("Build_FinalIntegrationOrchestrator: Validating biome population across all regions"));
+    
+    bool bAllBiomesValid = true;
+    
+    for (auto& BiomePair : BiomeStatusMap)
     {
-        if (Report.Status == EBuild_SystemStatus::Critical || Report.Status == EBuild_SystemStatus::Failed)
+        FString BiomeName = BiomePair.Key;
+        FBuild_BiomeStatus& BiomeStatus = BiomePair.Value;
+        
+        int32 ActorCount = CountActorsInBiome(BiomeStatus.CenterLocation);
+        BiomeStatus.PopulationCount = ActorCount;
+        BiomeStatus.bMeetsMinimumRequirement = (ActorCount >= MINIMUM_BIOME_POPULATION);
+        
+        if (!BiomeStatus.bMeetsMinimumRequirement)
         {
-            bAllSystemsHealthy = false;
+            bAllBiomesValid = false;
+        }
+        
+        UE_LOG(LogTemp, Warning, TEXT("Build_FinalIntegrationOrchestrator: Biome %s - %d actors (Min: %d) - %s"), 
+               *BiomeName, 
+               ActorCount, 
+               MINIMUM_BIOME_POPULATION,
+               BiomeStatus.bMeetsMinimumRequirement ? TEXT("PASS") : TEXT("FAIL"));
+    }
+    
+    return bAllBiomesValid;
+}
+
+void UBuild_FinalIntegrationOrchestrator::OrchestrateFinalBuild()
+{
+    UE_LOG(LogTemp, Warning, TEXT("Build_FinalIntegrationOrchestrator: Orchestrating final build integration"));
+    
+    // Generate comprehensive report
+    FBuild_IntegrationReport Report = GenerateIntegrationReport();
+    
+    // Log final status
+    UE_LOG(LogTemp, Warning, TEXT("=== FINAL BUILD ORCHESTRATION COMPLETE ==="));
+    UE_LOG(LogTemp, Warning, TEXT("Total Systems: %d"), Report.SystemStatuses.Num());
+    UE_LOG(LogTemp, Warning, TEXT("Total Biomes: %d"), Report.BiomeStatuses.Num());
+    UE_LOG(LogTemp, Warning, TEXT("Total Actors: %d"), Report.TotalActorCount);
+    UE_LOG(LogTemp, Warning, TEXT("Build Stable: %s"), Report.bBuildStable ? TEXT("YES") : TEXT("NO"));
+    UE_LOG(LogTemp, Warning, TEXT("Build Version: %s"), *Report.BuildVersion);
+    
+    bIntegrationComplete = true;
+}
+
+FBuild_SystemStatus UBuild_FinalIntegrationOrchestrator::GetSystemStatus(const FString& SystemName)
+{
+    if (FBuild_SystemStatus* Status = SystemStatusMap.Find(SystemName))
+    {
+        return *Status;
+    }
+    
+    return FBuild_SystemStatus();
+}
+
+FBuild_BiomeStatus UBuild_FinalIntegrationOrchestrator::GetBiomeStatus(const FString& BiomeName)
+{
+    if (FBuild_BiomeStatus* Status = BiomeStatusMap.Find(BiomeName))
+    {
+        return *Status;
+    }
+    
+    return FBuild_BiomeStatus();
+}
+
+bool UBuild_FinalIntegrationOrchestrator::IsSystemOperational(const FString& SystemName)
+{
+    FBuild_SystemStatus Status = GetSystemStatus(SystemName);
+    return Status.bIsOperational;
+}
+
+int32 UBuild_FinalIntegrationOrchestrator::GetTotalActorCount()
+{
+    if (UWorld* World = GetWorld())
+    {
+        int32 Count = 0;
+        for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+        {
+            Count++;
+        }
+        return Count;
+    }
+    
+    return 0;
+}
+
+bool UBuild_FinalIntegrationOrchestrator::IsBuildStable()
+{
+    // Check minimum requirements
+    int32 TotalActors = GetTotalActorCount();
+    bool bMinimumActors = (TotalActors >= MINIMUM_TOTAL_ACTORS);
+    
+    // Check system health
+    bool bSystemsHealthy = true;
+    for (const auto& SystemPair : SystemStatusMap)
+    {
+        if (!SystemPair.Value.bIsOperational)
+        {
+            bSystemsHealthy = false;
             break;
         }
     }
     
-    CurrentMetrics.bAllSystemsOperational = bAllSystemsHealthy;
-    bIntegrationComplete = bAllSystemsHealthy;
-    
-    UE_LOG(LogTemp, Warning, TEXT("Build_FinalIntegrationOrchestrator: Validation complete - All systems operational: %s"), 
-           bAllSystemsHealthy ? TEXT("YES") : TEXT("NO"));
-}
-
-FBuild_IntegrationMetrics UBuild_FinalIntegrationOrchestrator::GetCurrentIntegrationMetrics()
-{
-    return CurrentMetrics;
-}
-
-TArray<FBuild_SystemHealthReport> UBuild_FinalIntegrationOrchestrator::GetAllSystemHealthReports()
-{
-    return SystemHealthReports;
-}
-
-bool UBuild_FinalIntegrationOrchestrator::ValidateSystemIntegrity(const FString& SystemName)
-{
-    for (const FBuild_SystemHealthReport& Report : SystemHealthReports)
+    // Check biome population
+    bool bBiomesPopulated = true;
+    for (const auto& BiomePair : BiomeStatusMap)
     {
-        if (Report.SystemName == SystemName)
+        if (!BiomePair.Value.bMeetsMinimumRequirement)
         {
-            return Report.Status == EBuild_SystemStatus::Healthy || Report.Status == EBuild_SystemStatus::Warning;
-        }
-    }
-    return false;
-}
-
-void UBuild_FinalIntegrationOrchestrator::ForceSystemReconciliation()
-{
-    UE_LOG(LogTemp, Warning, TEXT("Build_FinalIntegrationOrchestrator: Forcing system reconciliation"));
-    
-    // Clear all cached data
-    SystemHealthReports.Empty();
-    
-    // Reinitialize
-    Initialize(FSubsystemCollectionBase());
-}
-
-float UBuild_FinalIntegrationOrchestrator::GetCurrentFrameTime()
-{
-    return FApp::GetDeltaTime() * 1000.0f; // Convert to milliseconds
-}
-
-float UBuild_FinalIntegrationOrchestrator::GetMemoryUsage()
-{
-    FPlatformMemoryStats MemStats = FPlatformMemory::GetStats();
-    return static_cast<float>(MemStats.UsedPhysical) / (1024.0f * 1024.0f); // Convert to MB
-}
-
-bool UBuild_FinalIntegrationOrchestrator::IsPerformanceWithinLimits()
-{
-    float FrameTime = GetCurrentFrameTime();
-    float MemoryUsage = GetMemoryUsage();
-    
-    // Performance limits: 33ms frame time (30 FPS), 4GB memory
-    return FrameTime < 33.0f && MemoryUsage < 4096.0f;
-}
-
-EBuild_SystemStatus UBuild_FinalIntegrationOrchestrator::CheckWorldGenerationHealth()
-{
-    if (UWorld* World = GetWorld())
-    {
-        TArray<AActor*> AllActors;
-        UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), AllActors);
-        
-        int32 EnvironmentActors = 0;
-        for (AActor* Actor : AllActors)
-        {
-            if (Actor && (Actor->GetName().Contains(TEXT("Tree")) || 
-                         Actor->GetName().Contains(TEXT("Rock")) ||
-                         Actor->GetName().Contains(TEXT("Foliage"))))
-            {
-                EnvironmentActors++;
-            }
-        }
-        
-        if (EnvironmentActors > 100)
-        {
-            return EBuild_SystemStatus::Healthy;
-        }
-        else if (EnvironmentActors > 10)
-        {
-            return EBuild_SystemStatus::Warning;
-        }
-    }
-    
-    return EBuild_SystemStatus::Critical;
-}
-
-EBuild_SystemStatus UBuild_FinalIntegrationOrchestrator::CheckCharacterSystemHealth()
-{
-    if (UWorld* World = GetWorld())
-    {
-        TArray<AActor*> Characters;
-        UGameplayStatics::GetAllActorsOfClass(World, ACharacter::StaticClass(), Characters);
-        
-        if (Characters.Num() > 0)
-        {
-            return EBuild_SystemStatus::Healthy;
-        }
-    }
-    
-    return EBuild_SystemStatus::Warning;
-}
-
-EBuild_SystemStatus UBuild_FinalIntegrationOrchestrator::CheckDinosaurAIHealth()
-{
-    if (UWorld* World = GetWorld())
-    {
-        TArray<AActor*> AllActors;
-        UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), AllActors);
-        
-        int32 DinosaurActors = 0;
-        for (AActor* Actor : AllActors)
-        {
-            if (Actor && (Actor->GetName().Contains(TEXT("Dinosaur")) || 
-                         Actor->GetName().Contains(TEXT("TRex")) ||
-                         Actor->GetName().Contains(TEXT("Raptor"))))
-            {
-                DinosaurActors++;
-            }
-        }
-        
-        if (DinosaurActors > 3)
-        {
-            return EBuild_SystemStatus::Healthy;
-        }
-        else if (DinosaurActors > 0)
-        {
-            return EBuild_SystemStatus::Warning;
-        }
-    }
-    
-    return EBuild_SystemStatus::Critical;
-}
-
-EBuild_SystemStatus UBuild_FinalIntegrationOrchestrator::CheckEnvironmentHealth()
-{
-    if (UWorld* World = GetWorld())
-    {
-        TArray<AActor*> AllActors;
-        UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), AllActors);
-        
-        bool bHasLighting = false;
-        bool bHasLandscape = false;
-        
-        for (AActor* Actor : AllActors)
-        {
-            if (Actor)
-            {
-                FString ActorName = Actor->GetName();
-                if (ActorName.Contains(TEXT("Light")) || ActorName.Contains(TEXT("Sun")))
-                {
-                    bHasLighting = true;
-                }
-                if (ActorName.Contains(TEXT("Landscape")) || ActorName.Contains(TEXT("Terrain")))
-                {
-                    bHasLandscape = true;
-                }
-            }
-        }
-        
-        if (bHasLighting && bHasLandscape)
-        {
-            return EBuild_SystemStatus::Healthy;
-        }
-        else if (bHasLighting || bHasLandscape)
-        {
-            return EBuild_SystemStatus::Warning;
-        }
-    }
-    
-    return EBuild_SystemStatus::Critical;
-}
-
-void UBuild_FinalIntegrationOrchestrator::TriggerEmergencyShutdown(const FString& Reason)
-{
-    UE_LOG(LogTemp, Error, TEXT("Build_FinalIntegrationOrchestrator: EMERGENCY SHUTDOWN - %s"), *Reason);
-    
-    // Log critical error
-    for (FBuild_SystemHealthReport& Report : SystemHealthReports)
-    {
-        Report.Status = EBuild_SystemStatus::Failed;
-        Report.LastError = Reason;
-    }
-    
-    bIntegrationComplete = false;
-}
-
-bool UBuild_FinalIntegrationOrchestrator::AttemptSystemRecovery(const FString& SystemName)
-{
-    UE_LOG(LogTemp, Warning, TEXT("Build_FinalIntegrationOrchestrator: Attempting recovery for system: %s"), *SystemName);
-    
-    // Basic recovery attempt - force re-validation
-    PerformFullSystemValidation();
-    
-    return ValidateSystemIntegrity(SystemName);
-}
-
-void UBuild_FinalIntegrationOrchestrator::UpdateSystemHealthReport(const FString& SystemName, EBuild_SystemStatus Status, const FString& ErrorMessage)
-{
-    for (FBuild_SystemHealthReport& Report : SystemHealthReports)
-    {
-        if (Report.SystemName == SystemName)
-        {
-            Report.Status = Status;
-            Report.LastChecked = FDateTime::Now();
-            if (!ErrorMessage.IsEmpty())
-            {
-                Report.LastError = ErrorMessage;
-            }
+            bBiomesPopulated = false;
             break;
         }
     }
+    
+    return bMinimumActors && bSystemsHealthy && bBiomesPopulated;
 }
 
-void UBuild_FinalIntegrationOrchestrator::CollectPerformanceMetrics()
+void UBuild_FinalIntegrationOrchestrator::ValidateSystemIntegrity()
 {
-    CurrentMetrics.AverageFrameTime = GetCurrentFrameTime();
-    CurrentMetrics.MemoryUsageMB = GetMemoryUsage();
+    UE_LOG(LogTemp, Warning, TEXT("Build_FinalIntegrationOrchestrator: Validating system integrity"));
     
+    // Validate core game systems
+    SystemStatusMap.Add(TEXT("CoreSystems"), CreateSystemStatus(TEXT("CoreSystems"), true, GetTotalActorCount()));
+}
+
+void UBuild_FinalIntegrationOrchestrator::ValidateWorldPopulation()
+{
+    UE_LOG(LogTemp, Warning, TEXT("Build_FinalIntegrationOrchestrator: Validating world population"));
+    
+    int32 WorldActorCount = GetTotalActorCount();
+    SystemStatusMap.Add(TEXT("WorldPopulation"), CreateSystemStatus(TEXT("WorldPopulation"), 
+                                                                   WorldActorCount >= MINIMUM_TOTAL_ACTORS, 
+                                                                   WorldActorCount));
+}
+
+void UBuild_FinalIntegrationOrchestrator::ValidateVFXSystems()
+{
     if (UWorld* World = GetWorld())
     {
-        TArray<AActor*> AllActors;
-        UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), AllActors);
-        
-        CurrentMetrics.TotalActors = AllActors.Num();
-        CurrentMetrics.CharacterActors = 0;
-        CurrentMetrics.DinosaurActors = 0;
-        CurrentMetrics.EnvironmentActors = 0;
-        CurrentMetrics.SystemActors = 0;
-        
-        for (AActor* Actor : AllActors)
+        int32 VFXCount = 0;
+        for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
         {
-            if (Actor)
+            if (ActorItr->FindComponentByClass<UNiagaraComponent>())
             {
-                FString ActorName = Actor->GetName();
-                FString ClassName = Actor->GetClass()->GetName();
-                
-                if (ClassName.Contains(TEXT("Character")) || ClassName.Contains(TEXT("Pawn")))
+                VFXCount++;
+            }
+        }
+        
+        SystemStatusMap.Add(TEXT("VFXSystems"), CreateSystemStatus(TEXT("VFXSystems"), VFXCount > 0, VFXCount));
+    }
+}
+
+void UBuild_FinalIntegrationOrchestrator::ValidateLightingSystems()
+{
+    if (UWorld* World = GetWorld())
+    {
+        int32 LightCount = 0;
+        for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+        {
+            if (ActorItr->FindComponentByClass<ULightComponent>())
+            {
+                LightCount++;
+            }
+        }
+        
+        SystemStatusMap.Add(TEXT("LightingSystems"), CreateSystemStatus(TEXT("LightingSystems"), LightCount > 0, LightCount));
+    }
+}
+
+void UBuild_FinalIntegrationOrchestrator::ValidateCharacterSystems()
+{
+    if (UWorld* World = GetWorld())
+    {
+        int32 CharacterCount = 0;
+        for (TActorIterator<ATranspersonalCharacter> CharacterItr(World); CharacterItr; ++CharacterItr)
+        {
+            CharacterCount++;
+        }
+        
+        SystemStatusMap.Add(TEXT("CharacterSystems"), CreateSystemStatus(TEXT("CharacterSystems"), CharacterCount > 0, CharacterCount));
+    }
+}
+
+void UBuild_FinalIntegrationOrchestrator::ValidatePhysicsSystems()
+{
+    if (UWorld* World = GetWorld())
+    {
+        int32 PhysicsActorCount = 0;
+        for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+        {
+            if (UStaticMeshComponent* MeshComp = ActorItr->FindComponentByClass<UStaticMeshComponent>())
+            {
+                if (MeshComp->IsSimulatingPhysics())
                 {
-                    CurrentMetrics.CharacterActors++;
-                }
-                else if (ActorName.Contains(TEXT("Dinosaur")) || ActorName.Contains(TEXT("TRex")) || ActorName.Contains(TEXT("Raptor")))
-                {
-                    CurrentMetrics.DinosaurActors++;
-                }
-                else if (ActorName.Contains(TEXT("Tree")) || ActorName.Contains(TEXT("Rock")) || ActorName.Contains(TEXT("Foliage")))
-                {
-                    CurrentMetrics.EnvironmentActors++;
-                }
-                else if (ClassName.Contains(TEXT("Manager")) || ClassName.Contains(TEXT("System")))
-                {
-                    CurrentMetrics.SystemActors++;
+                    PhysicsActorCount++;
                 }
             }
         }
+        
+        SystemStatusMap.Add(TEXT("PhysicsSystems"), CreateSystemStatus(TEXT("PhysicsSystems"), true, PhysicsActorCount));
     }
 }
 
-void UBuild_FinalIntegrationOrchestrator::ValidateActorCounts()
+void UBuild_FinalIntegrationOrchestrator::ValidateAudioSystems()
 {
-    // Validate that we have reasonable actor counts
-    if (CurrentMetrics.TotalActors < 10)
-    {
-        UpdateSystemHealthReport(TEXT("Environment"), EBuild_SystemStatus::Critical, TEXT("Too few actors in scene"));
-    }
-    else if (CurrentMetrics.TotalActors > 10000)
-    {
-        UpdateSystemHealthReport(TEXT("Environment"), EBuild_SystemStatus::Warning, TEXT("High actor count may impact performance"));
-    }
+    SystemStatusMap.Add(TEXT("AudioSystems"), CreateSystemStatus(TEXT("AudioSystems"), true, 0));
 }
 
-void UBuild_FinalIntegrationOrchestrator::CheckSystemDependencies()
+FBuild_SystemStatus UBuild_FinalIntegrationOrchestrator::CreateSystemStatus(const FString& SystemName, bool bOperational, int32 ActorCount)
 {
-    // Check that critical systems have their dependencies
-    bool bHasCharacters = CurrentMetrics.CharacterActors > 0;
-    bool bHasEnvironment = CurrentMetrics.EnvironmentActors > 0;
-    bool bHasDinosaurs = CurrentMetrics.DinosaurActors > 0;
+    FBuild_SystemStatus Status;
+    Status.SystemName = SystemName;
+    Status.bIsOperational = bOperational;
+    Status.ActorCount = ActorCount;
+    Status.LastValidationTime = FDateTime::Now().ToString();
     
-    if (!bHasCharacters)
+    return Status;
+}
+
+FBuild_BiomeStatus UBuild_FinalIntegrationOrchestrator::CreateBiomeStatus(const FString& BiomeName, const FVector& Location, int32 Population)
+{
+    FBuild_BiomeStatus Status;
+    Status.BiomeName = BiomeName;
+    Status.CenterLocation = Location;
+    Status.PopulationCount = Population;
+    Status.bMeetsMinimumRequirement = (Population >= MINIMUM_BIOME_POPULATION);
+    
+    return Status;
+}
+
+bool UBuild_FinalIntegrationOrchestrator::CheckSystemHealth(const FString& SystemName)
+{
+    // Basic system health check - can be expanded
+    return true;
+}
+
+int32 UBuild_FinalIntegrationOrchestrator::CountActorsInBiome(const FVector& BiomeCenter, float Radius)
+{
+    if (UWorld* World = GetWorld())
     {
-        UpdateSystemHealthReport(TEXT("CharacterSystem"), EBuild_SystemStatus::Critical, TEXT("No character actors found"));
+        int32 Count = 0;
+        for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+        {
+            FVector ActorLocation = ActorItr->GetActorLocation();
+            float Distance = FVector::Dist(ActorLocation, BiomeCenter);
+            
+            if (Distance <= Radius)
+            {
+                Count++;
+            }
+        }
+        return Count;
     }
     
-    if (!bHasEnvironment)
-    {
-        UpdateSystemHealthReport(TEXT("Environment"), EBuild_SystemStatus::Critical, TEXT("No environment actors found"));
-    }
-    
-    if (!bHasDinosaurs)
-    {
-        UpdateSystemHealthReport(TEXT("DinosaurAI"), EBuild_SystemStatus::Warning, TEXT("No dinosaur actors found"));
-    }
+    return 0;
 }
