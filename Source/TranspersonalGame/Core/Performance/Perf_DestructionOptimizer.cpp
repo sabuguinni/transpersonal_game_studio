@@ -1,398 +1,355 @@
 #include "Perf_DestructionOptimizer.h"
-#include "Engine/World.h"
 #include "Engine/Engine.h"
+#include "Engine/World.h"
+#include "GameFramework/Pawn.h"
+#include "Kismet/GameplayStatics.h"
+#include "Components/StaticMeshComponent.h"
+#include "Components/PrimitiveComponent.h"
 #include "HAL/PlatformFilemanager.h"
 #include "Misc/DateTime.h"
-#include "GameFramework/Actor.h"
-#include "Components/StaticMeshComponent.h"
 
 UPerf_DestructionOptimizer::UPerf_DestructionOptimizer()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 0.1f; // Update 10 times per second
-    
-    PerformanceUpdateInterval = 1.0f;
-    bEnablePerformanceLogging = true;
-    LastPerformanceUpdate = 0.0f;
-    FramesSinceLastUpdate = 0;
-    
-    // Initialize default settings
-    DestructionSettings = FPerf_DestructionSettings();
-    CurrentMetrics = FPerf_DestructionMetrics();
+    PrimaryComponentTick.TickInterval = 0.1f; // 10 FPS for optimization checks
+
+    // Initialize LOD settings
+    HighQualityLOD.DistanceThreshold = 2000.0f;
+    HighQualityLOD.MaxDebrisCount = 50;
+    HighQualityLOD.DebrisLifetime = 60.0f;
+    HighQualityLOD.bEnablePhysicsSimulation = true;
+
+    MediumQualityLOD.DistanceThreshold = 5000.0f;
+    MediumQualityLOD.MaxDebrisCount = 25;
+    MediumQualityLOD.DebrisLifetime = 30.0f;
+    MediumQualityLOD.bEnablePhysicsSimulation = true;
+
+    LowQualityLOD.DistanceThreshold = 10000.0f;
+    LowQualityLOD.MaxDebrisCount = 10;
+    LowQualityLOD.DebrisLifetime = 15.0f;
+    LowQualityLOD.bEnablePhysicsSimulation = false;
+
+    CurrentLODLevel = 1; // Start with medium quality
+    TargetFrameTime = 16.67f; // 60 FPS
+    MaxDestructionBudget = 5.0f; // 5ms per frame
+    MaxSimultaneousDestructions = 3;
 }
 
 void UPerf_DestructionOptimizer::BeginPlay()
 {
     Super::BeginPlay();
-    
-    UE_LOG(LogTemp, Log, TEXT("Perf_DestructionOptimizer: Initialized destruction performance monitoring"));
-    
-    // Apply initial quality settings
-    ApplyQualitySettings();
-    
-    // Start performance tracking
-    LastPerformanceUpdate = GetWorld()->GetTimeSeconds();
+
+    // Start optimization timers
+    GetWorld()->GetTimerManager().SetTimer(
+        OptimizationTimerHandle,
+        this,
+        &UPerf_DestructionOptimizer::OptimizeDestructionSystem,
+        1.0f,
+        true
+    );
+
+    GetWorld()->GetTimerManager().SetTimer(
+        CleanupTimerHandle,
+        this,
+        &UPerf_DestructionOptimizer::CleanupOldDebris,
+        5.0f,
+        true
+    );
+
+    GetWorld()->GetTimerManager().SetTimer(
+        MetricsTimerHandle,
+        this,
+        &UPerf_DestructionOptimizer::UpdatePerformanceMetrics,
+        0.5f,
+        true
+    );
+
+    UE_LOG(LogTemp, Log, TEXT("Destruction Performance Optimizer initialized"));
 }
 
 void UPerf_DestructionOptimizer::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-    
-    FramesSinceLastUpdate++;
-    
-    float CurrentTime = GetWorld()->GetTimeSeconds();
-    if (CurrentTime - LastPerformanceUpdate >= PerformanceUpdateInterval)
+
+    // Track frame time for performance monitoring
+    LastFrameTime = DeltaTime * 1000.0f; // Convert to milliseconds
+    AccumulatedFrameTime += LastFrameTime;
+    FrameCounter++;
+
+    // Update LOD based on player distance
+    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
+    if (PlayerPawn)
     {
-        UpdatePerformanceMetrics();
-        LastPerformanceUpdate = CurrentTime;
-        FramesSinceLastUpdate = 0;
+        UpdateLODBasedOnDistance(PlayerPawn->GetActorLocation());
     }
-    
-    // Cleanup old debris periodically
-    if (FMath::Fmod(CurrentTime, 5.0f) < DeltaTime)
+
+    // Batch update debris if needed
+    if (TrackedDebrisActors.Num() > 20)
     {
-        CleanupOldDebris();
+        BatchUpdateDebris();
     }
-    
-    // Cull distant destructions
-    CullDistantDestructions();
 }
 
-FPerf_DestructionMetrics UPerf_DestructionOptimizer::GetDestructionMetrics() const
+void UPerf_DestructionOptimizer::OptimizeDestructionSystem()
 {
-    return CurrentMetrics;
+    if (!GetWorld())
+    {
+        return;
+    }
+
+    // Check current performance
+    float CurrentFrameTime = GetAverageFrameTime();
+    
+    if (CurrentFrameTime > TargetFrameTime * 1.2f) // 20% over target
+    {
+        // Performance is poor, reduce quality
+        if (CurrentLODLevel < 2)
+        {
+            SetLODLevel(CurrentLODLevel + 1);
+            UE_LOG(LogTemp, Warning, TEXT("Destruction performance poor (%.2fms), reducing to LOD %d"), 
+                CurrentFrameTime, CurrentLODLevel);
+        }
+    }
+    else if (CurrentFrameTime < TargetFrameTime * 0.8f) // 20% under target
+    {
+        // Performance is good, can increase quality
+        if (CurrentLODLevel > 0)
+        {
+            SetLODLevel(CurrentLODLevel - 1);
+            UE_LOG(LogTemp, Log, TEXT("Destruction performance good (%.2fms), increasing to LOD %d"), 
+                CurrentFrameTime, CurrentLODLevel);
+        }
+    }
+
+    // Cull distant debris
+    CullDistantDebris();
 }
 
-void UPerf_DestructionOptimizer::OptimizeDestructionPerformance()
+void UPerf_DestructionOptimizer::SetLODLevel(int32 LODLevel)
 {
-    UE_LOG(LogTemp, Log, TEXT("Perf_DestructionOptimizer: Running performance optimization"));
+    CurrentLODLevel = FMath::Clamp(LODLevel, 0, 2);
     
-    // Analyze current performance
-    float AverageFrameTime = CalculateFrameTimeImpact();
-    
-    // Automatically adjust quality based on performance
-    if (AverageFrameTime > 20.0f) // Above 20ms frame time
+    FPerf_DestructionLOD* SelectedLOD = nullptr;
+    switch (CurrentLODLevel)
     {
-        // Reduce quality
-        if (DestructionSettings.QualityLevel == EPerf_DestructionQuality::Ultra)
+        case 0: SelectedLOD = &HighQualityLOD; break;
+        case 1: SelectedLOD = &MediumQualityLOD; break;
+        case 2: SelectedLOD = &LowQualityLOD; break;
+    }
+
+    if (SelectedLOD)
+    {
+        SetDebrisLODSettings(*SelectedLOD);
+    }
+}
+
+void UPerf_DestructionOptimizer::CullDistantDebris()
+{
+    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
+    if (!PlayerPawn)
+    {
+        return;
+    }
+
+    FVector PlayerLocation = PlayerPawn->GetActorLocation();
+    FPerf_DestructionLOD CurrentLOD = GetCurrentLODSettings();
+
+    // Remove distant or invalid debris
+    for (int32 i = TrackedDebrisActors.Num() - 1; i >= 0; i--)
+    {
+        if (!TrackedDebrisActors[i].IsValid())
         {
-            SetDestructionQuality(EPerf_DestructionQuality::High);
+            TrackedDebrisActors.RemoveAt(i);
+            continue;
         }
-        else if (DestructionSettings.QualityLevel == EPerf_DestructionQuality::High)
+
+        AActor* DebrisActor = TrackedDebrisActors[i].Get();
+        float Distance = FVector::Dist(PlayerLocation, DebrisActor->GetActorLocation());
+
+        if (Distance > CurrentLOD.DistanceThreshold)
         {
-            SetDestructionQuality(EPerf_DestructionQuality::Medium);
+            DebrisActor->Destroy();
+            TrackedDebrisActors.RemoveAt(i);
         }
-        else if (DestructionSettings.QualityLevel == EPerf_DestructionQuality::Medium)
+    }
+}
+
+void UPerf_DestructionOptimizer::BatchUpdateDebris()
+{
+    // Process debris in batches to avoid frame spikes
+    const int32 BatchSize = 5;
+    int32 ProcessedCount = 0;
+
+    for (int32 i = TrackedDebrisActors.Num() - 1; i >= 0 && ProcessedCount < BatchSize; i--)
+    {
+        if (!TrackedDebrisActors[i].IsValid())
         {
-            SetDestructionQuality(EPerf_DestructionQuality::Low);
+            TrackedDebrisActors.RemoveAt(i);
+            ProcessedCount++;
+            continue;
+        }
+
+        AActor* DebrisActor = TrackedDebrisActors[i].Get();
+        UStaticMeshComponent* MeshComp = DebrisActor->FindComponentByClass<UStaticMeshComponent>();
+        
+        if (MeshComp)
+        {
+            // Optimize physics settings based on current LOD
+            FPerf_DestructionLOD CurrentLOD = GetCurrentLODSettings();
+            MeshComp->SetSimulatePhysics(CurrentLOD.bEnablePhysicsSimulation);
+            
+            // Reduce collision complexity for distant objects
+            if (CurrentLODLevel > 0)
+            {
+                MeshComp->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+            }
         }
         
-        // Reduce max simultaneous destructions
-        DestructionSettings.MaxSimultaneousDestructions = FMath::Max(1, DestructionSettings.MaxSimultaneousDestructions - 1);
-        
-        // Increase culling distance
-        DestructionSettings.DestructionCullingDistance *= 0.8f;
+        ProcessedCount++;
     }
-    else if (AverageFrameTime < 10.0f) // Below 10ms frame time
-    {
-        // Can increase quality
-        if (DestructionSettings.QualityLevel == EPerf_DestructionQuality::Low)
-        {
-            SetDestructionQuality(EPerf_DestructionQuality::Medium);
-        }
-        else if (DestructionSettings.QualityLevel == EPerf_DestructionQuality::Medium)
-        {
-            SetDestructionQuality(EPerf_DestructionQuality::High);
-        }
-        
-        // Increase max simultaneous destructions
-        DestructionSettings.MaxSimultaneousDestructions = FMath::Min(10, DestructionSettings.MaxSimultaneousDestructions + 1);
-    }
-    
-    ApplyQualitySettings();
-    
-    UE_LOG(LogTemp, Log, TEXT("Perf_DestructionOptimizer: Performance optimization complete. Quality: %d, Max Destructions: %d"), 
-           (int32)DestructionSettings.QualityLevel, DestructionSettings.MaxSimultaneousDestructions);
-}
-
-void UPerf_DestructionOptimizer::SetDestructionQuality(EPerf_DestructionQuality NewQuality)
-{
-    DestructionSettings.QualityLevel = NewQuality;
-    ApplyQualitySettings();
-    
-    UE_LOG(LogTemp, Log, TEXT("Perf_DestructionOptimizer: Destruction quality set to %d"), (int32)NewQuality);
-}
-
-bool UPerf_DestructionOptimizer::CanPerformDestruction(const FVector& Location) const
-{
-    // Check if we're at the destruction limit
-    if (RecentDestructions.Num() >= DestructionSettings.MaxSimultaneousDestructions)
-    {
-        return false;
-    }
-    
-    // Check distance culling
-    if (GetOwner())
-    {
-        float Distance = FVector::Dist(GetOwner()->GetActorLocation(), Location);
-        if (Distance > DestructionSettings.DestructionCullingDistance)
-        {
-            return false;
-        }
-    }
-    
-    return true;
-}
-
-void UPerf_DestructionOptimizer::RegisterDestructionEvent(const FVector& Location, float Intensity)
-{
-    float StartTime = FPlatformTime::Seconds();
-    
-    // Add to recent destructions
-    RecentDestructions.Add(Location);
-    
-    // Simulate destruction processing time based on intensity and quality
-    float ProcessingTime = Intensity * 0.1f;
-    switch (DestructionSettings.QualityLevel)
-    {
-        case EPerf_DestructionQuality::Low:
-            ProcessingTime *= 0.5f;
-            break;
-        case EPerf_DestructionQuality::Medium:
-            ProcessingTime *= 1.0f;
-            break;
-        case EPerf_DestructionQuality::High:
-            ProcessingTime *= 1.5f;
-            break;
-        case EPerf_DestructionQuality::Ultra:
-            ProcessingTime *= 2.0f;
-            break;
-    }
-    
-    float EndTime = FPlatformTime::Seconds();
-    float ActualTime = (EndTime - StartTime) * 1000.0f; // Convert to milliseconds
-    
-    DestructionTimes.Add(ActualTime);
-    
-    // Keep only recent data
-    if (DestructionTimes.Num() > 100)
-    {
-        DestructionTimes.RemoveAt(0);
-    }
-    
-    UE_LOG(LogTemp, VeryVerbose, TEXT("Perf_DestructionOptimizer: Registered destruction at %s, processing time: %.2fms"), 
-           *Location.ToString(), ActualTime);
 }
 
 void UPerf_DestructionOptimizer::CleanupOldDebris()
 {
-    if (!GetWorld()) return;
-    
-    int32 CleanedCount = 0;
+    FPerf_DestructionLOD CurrentLOD = GetCurrentLODSettings();
     float CurrentTime = GetWorld()->GetTimeSeconds();
-    
-    // Remove old destruction locations
-    for (int32 i = RecentDestructions.Num() - 1; i >= 0; i--)
+
+    for (int32 i = TrackedDebrisActors.Num() - 1; i >= 0; i--)
     {
-        // Simple time-based cleanup (in a real implementation, you'd track timestamps)
-        if (FMath::RandRange(0.0f, 1.0f) < 0.1f) // 10% chance per cleanup cycle
+        if (!TrackedDebrisActors[i].IsValid())
         {
-            RecentDestructions.RemoveAt(i);
-            CleanedCount++;
+            TrackedDebrisActors.RemoveAt(i);
+            continue;
+        }
+
+        AActor* DebrisActor = TrackedDebrisActors[i].Get();
+        float ActorAge = CurrentTime - DebrisActor->GetGameTimeSinceCreation();
+
+        if (ActorAge > CurrentLOD.DebrisLifetime)
+        {
+            DebrisActor->Destroy();
+            TrackedDebrisActors.RemoveAt(i);
         }
     }
-    
-    if (CleanedCount > 0 && bEnablePerformanceLogging)
+
+    // Enforce maximum debris count
+    while (TrackedDebrisActors.Num() > CurrentLOD.MaxDebrisCount)
     {
-        UE_LOG(LogTemp, Log, TEXT("Perf_DestructionOptimizer: Cleaned up %d old debris objects"), CleanedCount);
+        // Remove oldest debris first
+        if (TrackedDebrisActors[0].IsValid())
+        {
+            TrackedDebrisActors[0]->Destroy();
+        }
+        TrackedDebrisActors.RemoveAt(0);
     }
 }
 
-void UPerf_DestructionOptimizer::RunDestructionPerformanceTest()
+FPerf_DestructionMetrics UPerf_DestructionOptimizer::GetPerformanceMetrics() const
 {
-    UE_LOG(LogTemp, Warning, TEXT("Perf_DestructionOptimizer: Running destruction performance test..."));
-    
-    float StartTime = FPlatformTime::Seconds();
-    
-    // Simulate multiple destruction events
-    for (int32 i = 0; i < 20; i++)
-    {
-        FVector TestLocation = GetOwner() ? GetOwner()->GetActorLocation() + FVector(i * 100, 0, 0) : FVector(i * 100, 0, 0);
-        RegisterDestructionEvent(TestLocation, FMath::RandRange(0.5f, 2.0f));
-    }
-    
-    float EndTime = FPlatformTime::Seconds();
-    float TestDuration = (EndTime - StartTime) * 1000.0f;
-    
-    UE_LOG(LogTemp, Warning, TEXT("Perf_DestructionOptimizer: Performance test completed in %.2fms"), TestDuration);
-    
-    // Update metrics
-    UpdatePerformanceMetrics();
-    LogPerformanceData();
+    return CurrentMetrics;
 }
 
-void UPerf_DestructionOptimizer::AnalyzeDestructionBottlenecks()
+float UPerf_DestructionOptimizer::GetDestructionFrameImpact() const
 {
-    UE_LOG(LogTemp, Warning, TEXT("Perf_DestructionOptimizer: Analyzing destruction bottlenecks..."));
-    
-    // Analyze destruction times
-    if (DestructionTimes.Num() > 0)
+    // Estimate frame impact based on active debris and physics simulation
+    float BaseImpact = TrackedDebrisActors.Num() * 0.1f; // 0.1ms per debris
+    float PhysicsImpact = 0.0f;
+
+    for (const TWeakObjectPtr<AActor>& DebrisPtr : TrackedDebrisActors)
     {
-        float TotalTime = 0.0f;
-        float MinTime = DestructionTimes[0];
-        float MaxTime = DestructionTimes[0];
-        
-        for (float Time : DestructionTimes)
+        if (DebrisPtr.IsValid())
         {
-            TotalTime += Time;
-            MinTime = FMath::Min(MinTime, Time);
-            MaxTime = FMath::Max(MaxTime, Time);
+            UStaticMeshComponent* MeshComp = DebrisPtr->FindComponentByClass<UStaticMeshComponent>();
+            if (MeshComp && MeshComp->IsSimulatingPhysics())
+            {
+                PhysicsImpact += 0.2f; // Additional cost for physics simulation
+            }
         }
-        
-        float AverageTime = TotalTime / DestructionTimes.Num();
-        
-        UE_LOG(LogTemp, Warning, TEXT("Destruction Time Analysis:"));
-        UE_LOG(LogTemp, Warning, TEXT("  Average: %.2fms"), AverageTime);
-        UE_LOG(LogTemp, Warning, TEXT("  Min: %.2fms"), MinTime);
-        UE_LOG(LogTemp, Warning, TEXT("  Max: %.2fms"), MaxTime);
-        UE_LOG(LogTemp, Warning, TEXT("  Samples: %d"), DestructionTimes.Num());
-        
-        // Identify bottlenecks
-        if (AverageTime > 5.0f)
+    }
+
+    return BaseImpact + PhysicsImpact;
+}
+
+bool UPerf_DestructionOptimizer::IsPerformanceOptimal() const
+{
+    float CurrentFrameTime = GetAverageFrameTime();
+    float DestructionImpact = GetDestructionFrameImpact();
+    
+    return (CurrentFrameTime <= TargetFrameTime) && (DestructionImpact <= MaxDestructionBudget);
+}
+
+void UPerf_DestructionOptimizer::UpdateLODBasedOnDistance(const FVector& PlayerLocation)
+{
+    // Find closest destruction system to determine appropriate LOD
+    float ClosestDistance = FLT_MAX;
+    
+    for (const TWeakObjectPtr<AActor>& DebrisPtr : TrackedDebrisActors)
+    {
+        if (DebrisPtr.IsValid())
         {
-            UE_LOG(LogTemp, Warning, TEXT("BOTTLENECK: Average destruction time exceeds 5ms"));
+            float Distance = FVector::Dist(PlayerLocation, DebrisPtr->GetActorLocation());
+            ClosestDistance = FMath::Min(ClosestDistance, Distance);
         }
-        
-        if (MaxTime > 20.0f)
+    }
+
+    // Adjust LOD based on distance
+    int32 TargetLOD = 1; // Default to medium
+    if (ClosestDistance < 2000.0f)
+    {
+        TargetLOD = 0; // High quality
+    }
+    else if (ClosestDistance > 5000.0f)
+    {
+        TargetLOD = 2; // Low quality
+    }
+
+    if (TargetLOD != CurrentLODLevel)
+    {
+        SetLODLevel(TargetLOD);
+    }
+}
+
+void UPerf_DestructionOptimizer::SetDebrisLODSettings(const FPerf_DestructionLOD& LODSettings)
+{
+    // Apply LOD settings to all tracked debris
+    for (const TWeakObjectPtr<AActor>& DebrisPtr : TrackedDebrisActors)
+    {
+        if (DebrisPtr.IsValid())
         {
-            UE_LOG(LogTemp, Warning, TEXT("BOTTLENECK: Peak destruction time exceeds 20ms"));
-        }
-        
-        if (CurrentMetrics.ActiveDestructibleActors > 50)
-        {
-            UE_LOG(LogTemp, Warning, TEXT("BOTTLENECK: Too many active destructible actors (%d)"), CurrentMetrics.ActiveDestructibleActors);
+            UStaticMeshComponent* MeshComp = DebrisPtr->FindComponentByClass<UStaticMeshComponent>();
+            if (MeshComp)
+            {
+                MeshComp->SetSimulatePhysics(LODSettings.bEnablePhysicsSimulation);
+            }
         }
     }
 }
 
 void UPerf_DestructionOptimizer::UpdatePerformanceMetrics()
 {
-    // Calculate average destruction time
-    if (DestructionTimes.Num() > 0)
-    {
-        float TotalTime = 0.0f;
-        for (float Time : DestructionTimes)
-        {
-            TotalTime += Time;
-        }
-        CurrentMetrics.AverageDestructionTime = TotalTime / DestructionTimes.Num();
-    }
-    
-    // Update active destructible actors count
-    CurrentMetrics.ActiveDestructibleActors = RecentDestructions.Num();
-    
-    // Calculate frame time impact
-    CurrentMetrics.FrameTimeImpact = CalculateFrameTimeImpact();
-    
-    // Estimate memory usage (simplified)
-    CurrentMetrics.MemoryUsageMB = (RecentDestructions.Num() * 0.5f) + (DestructionTimes.Num() * 0.001f);
-    
-    if (bEnablePerformanceLogging)
-    {
-        LogPerformanceData();
-    }
+    // Update current metrics
+    CurrentMetrics.ActiveDebrisCount = TrackedDebrisActors.Num();
+    CurrentMetrics.AverageFrameTime = GetAverageFrameTime();
+    CurrentMetrics.PhysicsSimulationTime = GetDestructionFrameImpact();
+    CurrentMetrics.DestructionEventsThisFrame = 0; // Reset each update
 }
 
-void UPerf_DestructionOptimizer::ApplyQualitySettings()
+float UPerf_DestructionOptimizer::GetAverageFrameTime() const
 {
-    switch (DestructionSettings.QualityLevel)
+    if (FrameCounter > 0)
     {
-        case EPerf_DestructionQuality::Low:
-            DestructionSettings.MaxSimultaneousDestructions = FMath::Min(DestructionSettings.MaxSimultaneousDestructions, 3);
-            DestructionSettings.DebrisLifetime = 15.0f;
-            break;
-        case EPerf_DestructionQuality::Medium:
-            DestructionSettings.MaxSimultaneousDestructions = FMath::Min(DestructionSettings.MaxSimultaneousDestructions, 5);
-            DestructionSettings.DebrisLifetime = 30.0f;
-            break;
-        case EPerf_DestructionQuality::High:
-            DestructionSettings.MaxSimultaneousDestructions = FMath::Min(DestructionSettings.MaxSimultaneousDestructions, 8);
-            DestructionSettings.DebrisLifetime = 60.0f;
-            break;
-        case EPerf_DestructionQuality::Ultra:
-            DestructionSettings.MaxSimultaneousDestructions = FMath::Min(DestructionSettings.MaxSimultaneousDestructions, 12);
-            DestructionSettings.DebrisLifetime = 120.0f;
-            break;
+        return AccumulatedFrameTime / FrameCounter;
     }
-    
-    UE_LOG(LogTemp, Log, TEXT("Perf_DestructionOptimizer: Applied quality settings for level %d"), (int32)DestructionSettings.QualityLevel);
+    return 16.67f; // Default to 60 FPS
 }
 
-void UPerf_DestructionOptimizer::CullDistantDestructions()
+FPerf_DestructionLOD UPerf_DestructionOptimizer::GetCurrentLODSettings() const
 {
-    if (!GetOwner()) return;
-    
-    FVector OwnerLocation = GetOwner()->GetActorLocation();
-    int32 CulledCount = 0;
-    
-    for (int32 i = RecentDestructions.Num() - 1; i >= 0; i--)
+    switch (CurrentLODLevel)
     {
-        float Distance = FVector::Dist(OwnerLocation, RecentDestructions[i]);
-        if (Distance > DestructionSettings.DestructionCullingDistance)
-        {
-            RecentDestructions.RemoveAt(i);
-            CulledCount++;
-        }
+        case 0: return HighQualityLOD;
+        case 1: return MediumQualityLOD;
+        case 2: return LowQualityLOD;
+        default: return MediumQualityLOD;
     }
-    
-    if (CulledCount > 0 && bEnablePerformanceLogging)
-    {
-        UE_LOG(LogTemp, VeryVerbose, TEXT("Perf_DestructionOptimizer: Culled %d distant destructions"), CulledCount);
-    }
-}
-
-void UPerf_DestructionOptimizer::OptimizeDebrisCount()
-{
-    // If we have too many debris objects, remove the oldest ones
-    while (RecentDestructions.Num() > DestructionSettings.MaxSimultaneousDestructions)
-    {
-        RecentDestructions.RemoveAt(0);
-    }
-}
-
-float UPerf_DestructionOptimizer::CalculateFrameTimeImpact() const
-{
-    // Simplified frame time impact calculation
-    float BaseImpact = CurrentMetrics.ActiveDestructibleActors * 0.1f; // 0.1ms per active destruction
-    float QualityMultiplier = 1.0f;
-    
-    switch (DestructionSettings.QualityLevel)
-    {
-        case EPerf_DestructionQuality::Low:
-            QualityMultiplier = 0.5f;
-            break;
-        case EPerf_DestructionQuality::Medium:
-            QualityMultiplier = 1.0f;
-            break;
-        case EPerf_DestructionQuality::High:
-            QualityMultiplier = 1.5f;
-            break;
-        case EPerf_DestructionQuality::Ultra:
-            QualityMultiplier = 2.0f;
-            break;
-    }
-    
-    return BaseImpact * QualityMultiplier;
-}
-
-void UPerf_DestructionOptimizer::LogPerformanceData() const
-{
-    UE_LOG(LogTemp, Log, TEXT("=== DESTRUCTION PERFORMANCE METRICS ==="));
-    UE_LOG(LogTemp, Log, TEXT("Average Destruction Time: %.2fms"), CurrentMetrics.AverageDestructionTime);
-    UE_LOG(LogTemp, Log, TEXT("Active Destructible Actors: %d"), CurrentMetrics.ActiveDestructibleActors);
-    UE_LOG(LogTemp, Log, TEXT("Memory Usage: %.2fMB"), CurrentMetrics.MemoryUsageMB);
-    UE_LOG(LogTemp, Log, TEXT("Frame Time Impact: %.2fms"), CurrentMetrics.FrameTimeImpact);
-    UE_LOG(LogTemp, Log, TEXT("Quality Level: %d"), (int32)DestructionSettings.QualityLevel);
-    UE_LOG(LogTemp, Log, TEXT("Max Simultaneous: %d"), DestructionSettings.MaxSimultaneousDestructions);
-    UE_LOG(LogTemp, Log, TEXT("========================================"));
 }
