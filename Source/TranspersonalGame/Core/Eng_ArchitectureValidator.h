@@ -2,160 +2,166 @@
 
 #include "CoreMinimal.h"
 #include "Engine/World.h"
-#include "GameFramework/GameModeBase.h"
-#include "Subsystems/WorldSubsystem.h"
+#include "Subsystems/GameInstanceSubsystem.h"
 #include "SharedTypes.h"
 #include "Eng_ArchitectureValidator.generated.h"
 
+DECLARE_LOG_CATEGORY_EXTERN(LogEngineArchitect, Log, All);
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FEng_ModuleComplianceReport
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadOnly, Category = "Architecture")
+    FString ModuleName;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Architecture")
+    bool bHasValidHeaders = false;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Architecture")
+    bool bHasMatchingCppFiles = false;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Architecture")
+    bool bFollowsNamingConvention = false;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Architecture")
+    bool bCompilesSuccessfully = false;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Architecture")
+    TArray<FString> MissingCppFiles;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Architecture")
+    TArray<FString> CompilationErrors;
+
+    FEng_ModuleComplianceReport()
+    {
+        ModuleName = TEXT("Unknown");
+    }
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FEng_SystemDependency
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadOnly, Category = "Architecture")
+    FString SystemName;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Architecture")
+    TArray<FString> RequiredModules;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Architecture")
+    TArray<FString> OptionalModules;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Architecture")
+    int32 Priority = 0;
+
+    FEng_SystemDependency()
+    {
+        SystemName = TEXT("Unknown");
+    }
+};
+
 /**
- * Engine Architecture Validator
- * Ensures all systems follow architectural rules and validates cross-system dependencies
+ * Engine Architect validation system that enforces technical architecture rules
+ * across all agent-created modules and ensures compilation compliance
  */
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UEng_ArchitectureValidator : public UWorldSubsystem
+UCLASS(BlueprintType)
+class TRANSPERSONALGAME_API UEng_ArchitectureValidator : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
 public:
-    UEng_ArchitectureValidator();
-
     // USubsystem interface
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
-    /**
-     * Validate all architectural rules and dependencies
-     * @return True if all validations pass
-     */
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    bool ValidateArchitecture();
+    // Architecture validation methods
+    UFUNCTION(BlueprintCallable, Category = "Engine Architect")
+    bool ValidateModuleCompliance(const FString& ModulePath);
 
-    /**
-     * Check for duplicate system instances
-     * @return Number of duplicates found and cleaned
-     */
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    int32 CleanupDuplicateSystems();
+    UFUNCTION(BlueprintCallable, Category = "Engine Architect")
+    FEng_ModuleComplianceReport GenerateComplianceReport(const FString& ModuleName);
 
-    /**
-     * Validate biome system architecture
-     * @return True if biome system is properly configured
-     */
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    bool ValidateBiomeArchitecture();
+    UFUNCTION(BlueprintCallable, Category = "Engine Architect")
+    bool ValidateHeaderCppPairs();
 
-    /**
-     * Check module dependencies and loading order
-     * @return True if all modules are loaded correctly
-     */
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    bool ValidateModuleDependencies();
+    UFUNCTION(BlueprintCallable, Category = "Engine Architect")
+    bool EnforceNamingConventions();
 
-    /**
-     * Validate performance constraints
-     * @return True if performance targets are met
-     */
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    bool ValidatePerformanceConstraints();
+    UFUNCTION(BlueprintCallable, Category = "Engine Architect")
+    TArray<FString> GetMissingCppFiles();
+
+    UFUNCTION(BlueprintCallable, Category = "Engine Architect")
+    bool ValidateSystemDependencies();
+
+    UFUNCTION(BlueprintCallable, Category = "Engine Architect")
+    void RegisterSystemDependency(const FEng_SystemDependency& Dependency);
+
+    // Compilation validation
+    UFUNCTION(BlueprintCallable, Category = "Engine Architect")
+    bool ValidateCompilation();
+
+    UFUNCTION(BlueprintCallable, Category = "Engine Architect")
+    TArray<FString> GetCompilationErrors();
+
+    // Performance architecture rules
+    UFUNCTION(BlueprintCallable, Category = "Engine Architect")
+    bool ValidatePerformanceCompliance();
+
+    UFUNCTION(BlueprintCallable, Category = "Engine Architect")
+    bool EnforceMemoryLimits();
+
+    // Blueprint integration validation
+    UFUNCTION(BlueprintCallable, Category = "Engine Architect")
+    bool ValidateBlueprintExposure();
+
+    UFUNCTION(BlueprintCallable, Category = "Engine Architect")
+    TArray<FString> GetUndocumentedBlueprintFunctions();
+
+    // Critical system validation
+    UFUNCTION(BlueprintCallable, Category = "Engine Architect")
+    bool ValidateCriticalSystems();
+
+    UFUNCTION(BlueprintCallable, Category = "Engine Architect", CallInEditor = true)
+    void RunFullArchitectureAudit();
 
 protected:
-    /** Last validation timestamp */
     UPROPERTY(BlueprintReadOnly, Category = "Architecture")
-    float LastValidationTime;
+    TArray<FEng_ModuleComplianceReport> ComplianceReports;
 
-    /** Validation results cache */
     UPROPERTY(BlueprintReadOnly, Category = "Architecture")
-    TMap<FString, bool> ValidationResults;
+    TArray<FEng_SystemDependency> SystemDependencies;
 
-    /** Performance metrics */
     UPROPERTY(BlueprintReadOnly, Category = "Architecture")
-    FEng_PerformanceMetrics CurrentMetrics;
+    TArray<FString> CriticalSystems;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Architecture")
+    bool bArchitectureValid = false;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Architecture")
+    float LastValidationTime = 0.0f;
 
 private:
-    /** Internal validation helpers */
-    bool ValidateLightingSetup();
-    bool ValidateWorldPartitioning();
-    bool ValidateCharacterSystems();
-    bool ValidateDinosaurSystems();
+    // Internal validation helpers
+    bool ValidateHeaderFile(const FString& HeaderPath);
+    bool ValidateCppFile(const FString& CppPath);
+    bool CheckIncludeStructure(const FString& FilePath);
+    bool ValidateUPropertyMacros(const FString& FilePath);
+    bool ValidateUFunctionMacros(const FString& FilePath);
     
-    /** Cleanup helpers */
-    void CleanupDuplicateLighting();
-    void CleanupDuplicateManagers();
+    // Naming convention enforcement
+    bool ValidateClassName(const FString& ClassName);
+    bool ValidateVariableName(const FString& VariableName);
+    bool ValidateFunctionName(const FString& FunctionName);
     
-    /** Performance monitoring */
-    void UpdatePerformanceMetrics();
-    bool CheckFrameRate();
+    // Dependency analysis
+    void AnalyzeDependencyChain();
+    bool DetectCircularDependencies();
+    
+    // Performance validation
     bool CheckMemoryUsage();
-};
-
-/**
- * Architecture validation data structure
- */
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEng_ValidationReport
-{
-    GENERATED_BODY()
-
-    /** Overall validation status */
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    bool bIsValid;
-
-    /** Individual test results */
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    TMap<FString, bool> TestResults;
-
-    /** Error messages */
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    TArray<FString> Errors;
-
-    /** Warning messages */
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    TArray<FString> Warnings;
-
-    /** Performance metrics */
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    FEng_PerformanceMetrics Metrics;
-
-    FEng_ValidationReport()
-    {
-        bIsValid = false;
-    }
-};
-
-/**
- * Performance metrics structure
- */
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEng_PerformanceMetrics
-{
-    GENERATED_BODY()
-
-    /** Current frame rate */
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float FrameRate;
-
-    /** Memory usage in MB */
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float MemoryUsageMB;
-
-    /** Draw calls per frame */
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    int32 DrawCalls;
-
-    /** Triangle count */
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    int32 TriangleCount;
-
-    /** Actor count in level */
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    int32 ActorCount;
-
-    FEng_PerformanceMetrics()
-    {
-        FrameRate = 0.0f;
-        MemoryUsageMB = 0.0f;
-        DrawCalls = 0;
-        TriangleCount = 0;
-        ActorCount = 0;
-    }
+    bool ValidateTickFrequency();
+    bool CheckRenderingCompliance();
 };
