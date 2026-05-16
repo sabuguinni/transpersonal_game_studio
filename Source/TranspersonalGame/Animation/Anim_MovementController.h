@@ -4,9 +4,8 @@
 #include "Components/ActorComponent.h"
 #include "Engine/Engine.h"
 #include "Animation/AnimInstance.h"
-#include "Animation/BlendSpace.h"
 #include "Animation/AnimMontage.h"
-#include "GameFramework/Character.h"
+#include "Animation/BlendSpace.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Anim_MovementController.generated.h"
 
@@ -14,18 +13,26 @@ UENUM(BlueprintType)
 enum class EAnim_MovementState : uint8
 {
     Idle        UMETA(DisplayName = "Idle"),
-    Walking     UMETA(DisplayName = "Walking"),
+    Walking     UMETA(DisplayName = "Walking"), 
     Running     UMETA(DisplayName = "Running"),
-    Sprinting   UMETA(DisplayName = "Sprinting"),
     Jumping     UMETA(DisplayName = "Jumping"),
     Falling     UMETA(DisplayName = "Falling"),
-    Landing     UMETA(DisplayName = "Landing"),
     Crouching   UMETA(DisplayName = "Crouching"),
-    Crawling    UMETA(DisplayName = "Crawling")
+    Swimming    UMETA(DisplayName = "Swimming"),
+    Climbing    UMETA(DisplayName = "Climbing")
+};
+
+UENUM(BlueprintType)
+enum class EAnim_LocomotionMode : uint8
+{
+    Ground      UMETA(DisplayName = "Ground"),
+    Air         UMETA(DisplayName = "Air"),
+    Water       UMETA(DisplayName = "Water"),
+    Climbing    UMETA(DisplayName = "Climbing")
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FAnim_MovementData
+struct FAnim_MovementData
 {
     GENERATED_BODY()
 
@@ -45,7 +52,16 @@ struct TRANSPERSONALGAME_API FAnim_MovementData
     bool bIsCrouching = false;
 
     UPROPERTY(BlueprintReadOnly, Category = "Movement")
-    EAnim_MovementState MovementState = EAnim_MovementState::Idle;
+    EAnim_MovementState CurrentState = EAnim_MovementState::Idle;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Movement")
+    EAnim_LocomotionMode LocomotionMode = EAnim_LocomotionMode::Ground;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Movement")
+    FVector Velocity = FVector::ZeroVector;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Movement")
+    float GroundDistance = 0.0f;
 
     FAnim_MovementData()
     {
@@ -54,11 +70,14 @@ struct TRANSPERSONALGAME_API FAnim_MovementData
         bIsMoving = false;
         bIsInAir = false;
         bIsCrouching = false;
-        MovementState = EAnim_MovementState::Idle;
+        CurrentState = EAnim_MovementState::Idle;
+        LocomotionMode = EAnim_LocomotionMode::Ground;
+        Velocity = FVector::ZeroVector;
+        GroundDistance = 0.0f;
     }
 };
 
-UCLASS(ClassGroup=(Animation), meta=(BlueprintSpawnableComponent))
+UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
 class TRANSPERSONALGAME_API UAnim_MovementController : public UActorComponent
 {
     GENERATED_BODY()
@@ -72,65 +91,74 @@ protected:
 public:
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
+    // Movement data calculation
     UFUNCTION(BlueprintCallable, Category = "Animation")
-    void UpdateMovementData();
+    FAnim_MovementData CalculateMovementData();
 
     UFUNCTION(BlueprintCallable, Category = "Animation")
+    void UpdateMovementState();
+
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    EAnim_MovementState DetermineMovementState();
+
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    float CalculateDirection();
+
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    bool IsCharacterInAir();
+
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    float GetGroundDistance();
+
+    // Animation triggers
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    void TriggerJumpAnimation();
+
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    void TriggerLandAnimation();
+
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    void TriggerCrouchAnimation(bool bCrouch);
+
+    // Getters
+    UFUNCTION(BlueprintPure, Category = "Animation")
     FAnim_MovementData GetMovementData() const { return MovementData; }
 
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    void SetMovementState(EAnim_MovementState NewState);
+    UFUNCTION(BlueprintPure, Category = "Animation")
+    float GetCurrentSpeed() const { return MovementData.Speed; }
 
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    bool PlayMontage(UAnimMontage* Montage, float PlayRate = 1.0f);
-
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    void StopMontage(UAnimMontage* Montage = nullptr);
+    UFUNCTION(BlueprintPure, Category = "Animation")
+    EAnim_MovementState GetCurrentState() const { return MovementData.CurrentState; }
 
 protected:
-    UPROPERTY(BlueprintReadOnly, Category = "Movement Data")
+    UPROPERTY(BlueprintReadOnly, Category = "Animation", meta = (AllowPrivateAccess = "true"))
     FAnim_MovementData MovementData;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Animation Settings")
-    float WalkSpeedThreshold = 100.0f;
+    UPROPERTY(BlueprintReadOnly, Category = "Animation", meta = (AllowPrivateAccess = "true"))
+    class ACharacter* OwnerCharacter;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Animation Settings")
-    float RunSpeedThreshold = 300.0f;
+    UPROPERTY(BlueprintReadOnly, Category = "Animation", meta = (AllowPrivateAccess = "true"))
+    class UCharacterMovementComponent* MovementComponent;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Animation Settings")
-    float SprintSpeedThreshold = 500.0f;
+    UPROPERTY(BlueprintReadOnly, Category = "Animation", meta = (AllowPrivateAccess = "true"))
+    class USkeletalMeshComponent* MeshComponent;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Animation Settings")
-    float MovementSmoothingSpeed = 10.0f;
+    // Animation thresholds
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Settings", meta = (AllowPrivateAccess = "true"))
+    float WalkSpeedThreshold = 150.0f;
 
-    // Animation assets
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Assets")
-    UBlendSpace* MovementBlendSpace;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Settings", meta = (AllowPrivateAccess = "true"))
+    float RunSpeedThreshold = 400.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Assets")
-    UAnimMontage* JumpMontage;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Settings", meta = (AllowPrivateAccess = "true"))
+    float MovingThreshold = 10.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Assets")
-    UAnimMontage* LandingMontage;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Assets")
-    UAnimMontage* CrouchMontage;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Settings", meta = (AllowPrivateAccess = "true"))
+    float GroundTraceDistance = 200.0f;
 
 private:
-    UPROPERTY()
-    ACharacter* OwnerCharacter;
-
-    UPROPERTY()
-    UCharacterMovementComponent* MovementComponent;
-
-    UPROPERTY()
-    UAnimInstance* AnimInstance;
-
-    float PreviousSpeed;
-    float SmoothSpeed;
-    EAnim_MovementState PreviousState;
-
-    void CalculateMovementState();
-    void UpdateBlendSpaceValues();
-    bool ShouldPlayLandingAnimation() const;
+    void CacheComponents();
+    void UpdateMovementValues();
+    void UpdateLocomotionMode();
+    float CalculateSpeedRatio();
 };
