@@ -1,352 +1,406 @@
 #include "Build_FinalIntegrationOrchestrator.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "EngineUtils.h"
+#include "Engine/GameInstance.h"
+#include "GameFramework/Actor.h"
+#include "GameFramework/Pawn.h"
 #include "GameFramework/Character.h"
 #include "Components/StaticMeshComponent.h"
-#include "Components/LightComponent.h"
-#include "NiagaraComponent.h"
-#include "Particles/ParticleSystemComponent.h"
-#include "Components/AudioComponent.h"
-#include "AIController.h"
-#include "GameFramework/Pawn.h"
+#include "TimerManager.h"
+#include "HAL/PlatformFilemanager.h"
+#include "Misc/DateTime.h"
+#include "Stats/Stats.h"
 
 UBuild_FinalIntegrationOrchestrator::UBuild_FinalIntegrationOrchestrator()
 {
-    LastValidationTime = 0.0f;
-    bIsValidationInProgress = false;
-
-    // Initialize core system names
-    CoreSystemNames.Add(TEXT("Character System"));
-    CoreSystemNames.Add(TEXT("Environment System"));
-    CoreSystemNames.Add(TEXT("Lighting System"));
-    CoreSystemNames.Add(TEXT("VFX System"));
-    CoreSystemNames.Add(TEXT("Audio System"));
-    CoreSystemNames.Add(TEXT("Physics System"));
-    CoreSystemNames.Add(TEXT("AI System"));
+    bIntegrationComplete = false;
+    ValidationInterval = 30.0f; // Validate every 30 seconds
+    LastFullValidation = FDateTime::Now();
 }
 
 void UBuild_FinalIntegrationOrchestrator::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
     
-    UE_LOG(LogTemp, Warning, TEXT("Build Integration Orchestrator Initialized"));
+    UE_LOG(LogTemp, Warning, TEXT("Build_FinalIntegrationOrchestrator: Initializing final build integration system"));
     
-    // Register all core systems
-    for (const FString& SystemName : CoreSystemNames)
+    // Initialize system health reports
+    SystemHealthReports.Empty();
+    
+    // Add core systems to monitor
+    TArray<FString> CoreSystems = {
+        TEXT("WorldGeneration"),
+        TEXT("CharacterSystem"),
+        TEXT("DinosaurAI"),
+        TEXT("Environment"),
+        TEXT("Physics"),
+        TEXT("Audio"),
+        TEXT("VFX"),
+        TEXT("CrowdSimulation")
+    };
+    
+    for (const FString& SystemName : CoreSystems)
     {
-        RegisterSystemForValidation(SystemName, 0);
+        FBuild_SystemHealthReport Report;
+        Report.SystemName = SystemName;
+        Report.Status = EBuild_SystemStatus::Unknown;
+        Report.LastChecked = FDateTime::Now();
+        SystemHealthReports.Add(Report);
     }
     
-    // Run initial validation
-    RunFullSystemValidation();
+    // Start periodic validation
+    if (UWorld* World = GetWorld())
+    {
+        World->GetTimerManager().SetTimer(
+            ValidationTimerHandle,
+            this,
+            &UBuild_FinalIntegrationOrchestrator::PerformFullSystemValidation,
+            ValidationInterval,
+            true
+        );
+    }
+    
+    // Perform initial validation
+    PerformFullSystemValidation();
 }
 
 void UBuild_FinalIntegrationOrchestrator::Deinitialize()
 {
-    RegisteredSystems.Empty();
+    if (UWorld* World = GetWorld())
+    {
+        World->GetTimerManager().ClearTimer(ValidationTimerHandle);
+    }
+    
+    UE_LOG(LogTemp, Warning, TEXT("Build_FinalIntegrationOrchestrator: Deinitializing integration system"));
     Super::Deinitialize();
 }
 
-void UBuild_FinalIntegrationOrchestrator::RunFullSystemValidation()
+void UBuild_FinalIntegrationOrchestrator::PerformFullSystemValidation()
 {
-    if (bIsValidationInProgress)
+    UE_LOG(LogTemp, Warning, TEXT("Build_FinalIntegrationOrchestrator: Starting full system validation"));
+    
+    LastFullValidation = FDateTime::Now();
+    
+    // Collect current metrics
+    CollectPerformanceMetrics();
+    
+    // Validate actor counts
+    ValidateActorCounts();
+    
+    // Check individual systems
+    UpdateSystemHealthReport(TEXT("WorldGeneration"), CheckWorldGenerationHealth());
+    UpdateSystemHealthReport(TEXT("CharacterSystem"), CheckCharacterSystemHealth());
+    UpdateSystemHealthReport(TEXT("DinosaurAI"), CheckDinosaurAIHealth());
+    UpdateSystemHealthReport(TEXT("Environment"), CheckEnvironmentHealth());
+    
+    // Check system dependencies
+    CheckSystemDependencies();
+    
+    // Determine overall integration status
+    bool bAllSystemsHealthy = true;
+    for (const FBuild_SystemHealthReport& Report : SystemHealthReports)
     {
-        UE_LOG(LogTemp, Warning, TEXT("Validation already in progress, skipping"));
-        return;
-    }
-
-    bIsValidationInProgress = true;
-    UE_LOG(LogTemp, Warning, TEXT("Starting full system validation"));
-
-    // Validate all core systems
-    ValidateCharacterSystem();
-    ValidateEnvironmentSystem();
-    ValidateLightingSystem();
-    ValidateVFXSystem();
-    ValidateAudioSystem();
-    ValidatePhysicsSystem();
-    ValidateAISystem();
-
-    LastValidationTime = GetWorld()->GetTimeSeconds();
-    bIsValidationInProgress = false;
-
-    UE_LOG(LogTemp, Warning, TEXT("Full system validation complete"));
-}
-
-FBuild_IntegrationReport UBuild_FinalIntegrationOrchestrator::GenerateIntegrationReport()
-{
-    FBuild_IntegrationReport Report;
-    Report.LastIntegrationTime = FDateTime::Now();
-    Report.TotalActors = 0;
-    Report.ValidatedSystems = 0;
-
-    // Collect system reports
-    for (const auto& SystemPair : RegisteredSystems)
-    {
-        Report.SystemReports.Add(SystemPair.Value);
-        Report.TotalActors += SystemPair.Value.ActorCount;
-        
-        if (SystemPair.Value.Status == EBuild_SystemStatus::Validated)
+        if (Report.Status == EBuild_SystemStatus::Critical || Report.Status == EBuild_SystemStatus::Failed)
         {
-            Report.ValidatedSystems++;
+            bAllSystemsHealthy = false;
+            break;
         }
     }
-
-    // Calculate build health
-    Report.BuildHealth = CalculateBuildHealth();
     
-    // Determine build status
-    if (Report.BuildHealth >= 0.8f)
-    {
-        Report.BuildStatus = TEXT("Excellent");
-    }
-    else if (Report.BuildHealth >= 0.6f)
-    {
-        Report.BuildStatus = TEXT("Good");
-    }
-    else if (Report.BuildHealth >= 0.4f)
-    {
-        Report.BuildStatus = TEXT("Fair");
-    }
-    else
-    {
-        Report.BuildStatus = TEXT("Poor");
-    }
+    CurrentMetrics.bAllSystemsOperational = bAllSystemsHealthy;
+    bIntegrationComplete = bAllSystemsHealthy;
+    
+    UE_LOG(LogTemp, Warning, TEXT("Build_FinalIntegrationOrchestrator: Validation complete - All systems operational: %s"), 
+           bAllSystemsHealthy ? TEXT("YES") : TEXT("NO"));
+}
 
-    LastIntegrationReport = Report;
-    return Report;
+FBuild_IntegrationMetrics UBuild_FinalIntegrationOrchestrator::GetCurrentIntegrationMetrics()
+{
+    return CurrentMetrics;
+}
+
+TArray<FBuild_SystemHealthReport> UBuild_FinalIntegrationOrchestrator::GetAllSystemHealthReports()
+{
+    return SystemHealthReports;
 }
 
 bool UBuild_FinalIntegrationOrchestrator::ValidateSystemIntegrity(const FString& SystemName)
 {
-    if (!RegisteredSystems.Contains(SystemName))
+    for (const FBuild_SystemHealthReport& Report : SystemHealthReports)
     {
-        UE_LOG(LogTemp, Error, TEXT("System not registered: %s"), *SystemName);
-        return false;
-    }
-
-    FBuild_SystemInfo& SystemInfo = RegisteredSystems[SystemName];
-    
-    // Basic validation - check if system has any actors
-    bool bIsValid = SystemInfo.ActorCount > 0;
-    
-    if (bIsValid)
-    {
-        SystemInfo.Status = EBuild_SystemStatus::Validated;
-        SystemInfo.ValidationDetails = TEXT("System validation passed");
-    }
-    else
-    {
-        SystemInfo.Status = EBuild_SystemStatus::Failed;
-        SystemInfo.ValidationDetails = TEXT("No actors found for system");
-    }
-
-    SystemInfo.LastValidationTime = GetWorld()->GetTimeSeconds();
-    
-    return bIsValid;
-}
-
-void UBuild_FinalIntegrationOrchestrator::RegisterSystemForValidation(const FString& SystemName, int32 ExpectedActorCount)
-{
-    FBuild_SystemInfo SystemInfo;
-    SystemInfo.SystemName = SystemName;
-    SystemInfo.Status = EBuild_SystemStatus::Pending;
-    SystemInfo.ActorCount = ExpectedActorCount;
-    SystemInfo.LastValidationTime = 0.0f;
-    SystemInfo.ValidationDetails = TEXT("System registered for validation");
-
-    RegisteredSystems.Add(SystemName, SystemInfo);
-    
-    UE_LOG(LogTemp, Warning, TEXT("Registered system for validation: %s"), *SystemName);
-}
-
-float UBuild_FinalIntegrationOrchestrator::CalculateBuildHealth()
-{
-    if (RegisteredSystems.Num() == 0)
-    {
-        return 0.0f;
-    }
-
-    int32 ValidatedCount = 0;
-    int32 TotalCount = RegisteredSystems.Num();
-
-    for (const auto& SystemPair : RegisteredSystems)
-    {
-        if (SystemPair.Value.Status == EBuild_SystemStatus::Validated)
+        if (Report.SystemName == SystemName)
         {
-            ValidatedCount++;
+            return Report.Status == EBuild_SystemStatus::Healthy || Report.Status == EBuild_SystemStatus::Warning;
         }
     }
-
-    return static_cast<float>(ValidatedCount) / static_cast<float>(TotalCount);
+    return false;
 }
 
-EBuild_SystemStatus UBuild_FinalIntegrationOrchestrator::GetSystemStatus(const FString& SystemName)
+void UBuild_FinalIntegrationOrchestrator::ForceSystemReconciliation()
 {
-    if (RegisteredSystems.Contains(SystemName))
-    {
-        return RegisteredSystems[SystemName].Status;
-    }
-    return EBuild_SystemStatus::Unknown;
-}
-
-void UBuild_FinalIntegrationOrchestrator::SetSystemStatus(const FString& SystemName, EBuild_SystemStatus NewStatus)
-{
-    if (RegisteredSystems.Contains(SystemName))
-    {
-        RegisteredSystems[SystemName].Status = NewStatus;
-        UE_LOG(LogTemp, Warning, TEXT("System %s status updated to %d"), *SystemName, static_cast<int32>(NewStatus));
-    }
-}
-
-TArray<FString> UBuild_FinalIntegrationOrchestrator::GetFailedSystems()
-{
-    TArray<FString> FailedSystems;
+    UE_LOG(LogTemp, Warning, TEXT("Build_FinalIntegrationOrchestrator: Forcing system reconciliation"));
     
-    for (const auto& SystemPair : RegisteredSystems)
-    {
-        if (SystemPair.Value.Status == EBuild_SystemStatus::Failed)
-        {
-            FailedSystems.Add(SystemPair.Key);
-        }
-    }
+    // Clear all cached data
+    SystemHealthReports.Empty();
     
-    return FailedSystems;
+    // Reinitialize
+    Initialize(FSubsystemCollectionBase());
 }
 
-void UBuild_FinalIntegrationOrchestrator::OrchestrateFullBuild()
+float UBuild_FinalIntegrationOrchestrator::GetCurrentFrameTime()
 {
-    UE_LOG(LogTemp, Warning, TEXT("Starting full build orchestration"));
+    return FApp::GetDeltaTime() * 1000.0f; // Convert to milliseconds
+}
+
+float UBuild_FinalIntegrationOrchestrator::GetMemoryUsage()
+{
+    FPlatformMemoryStats MemStats = FPlatformMemory::GetStats();
+    return static_cast<float>(MemStats.UsedPhysical) / (1024.0f * 1024.0f); // Convert to MB
+}
+
+bool UBuild_FinalIntegrationOrchestrator::IsPerformanceWithinLimits()
+{
+    float FrameTime = GetCurrentFrameTime();
+    float MemoryUsage = GetMemoryUsage();
     
-    // Run comprehensive validation
-    RunFullSystemValidation();
-    
-    // Generate integration report
-    FBuild_IntegrationReport Report = GenerateIntegrationReport();
-    
-    UE_LOG(LogTemp, Warning, TEXT("Build orchestration complete - Health: %.2f, Status: %s"), 
-           Report.BuildHealth, *Report.BuildStatus);
+    // Performance limits: 33ms frame time (30 FPS), 4GB memory
+    return FrameTime < 33.0f && MemoryUsage < 4096.0f;
 }
 
-bool UBuild_FinalIntegrationOrchestrator::IsBuildReady()
+EBuild_SystemStatus UBuild_FinalIntegrationOrchestrator::CheckWorldGenerationHealth()
 {
-    float Health = CalculateBuildHealth();
-    return Health >= 0.7f; // 70% of systems must be validated
-}
-
-void UBuild_FinalIntegrationOrchestrator::ForceBuildValidation()
-{
-    bIsValidationInProgress = false; // Reset flag
-    RunFullSystemValidation();
-}
-
-// Private validation functions
-void UBuild_FinalIntegrationOrchestrator::ValidateCharacterSystem()
-{
-    int32 CharacterCount = CountActorsOfType(TEXT("Character"));
-    UpdateSystemInfo(TEXT("Character System"), 
-                    CharacterCount > 0 ? EBuild_SystemStatus::Validated : EBuild_SystemStatus::Failed,
-                    CharacterCount,
-                    FString::Printf(TEXT("Found %d character actors"), CharacterCount));
-}
-
-void UBuild_FinalIntegrationOrchestrator::ValidateEnvironmentSystem()
-{
-    int32 StaticMeshCount = CountActorsOfType(TEXT("StaticMesh"));
-    UpdateSystemInfo(TEXT("Environment System"),
-                    StaticMeshCount > 0 ? EBuild_SystemStatus::Validated : EBuild_SystemStatus::Failed,
-                    StaticMeshCount,
-                    FString::Printf(TEXT("Found %d static mesh actors"), StaticMeshCount));
-}
-
-void UBuild_FinalIntegrationOrchestrator::ValidateLightingSystem()
-{
-    int32 LightCount = CountActorsOfType(TEXT("Light"));
-    UpdateSystemInfo(TEXT("Lighting System"),
-                    LightCount > 0 ? EBuild_SystemStatus::Validated : EBuild_SystemStatus::Failed,
-                    LightCount,
-                    FString::Printf(TEXT("Found %d light actors"), LightCount));
-}
-
-void UBuild_FinalIntegrationOrchestrator::ValidateVFXSystem()
-{
-    int32 VFXCount = CountActorsOfType(TEXT("Niagara")) + CountActorsOfType(TEXT("Particle"));
-    UpdateSystemInfo(TEXT("VFX System"),
-                    VFXCount >= 0 ? EBuild_SystemStatus::Validated : EBuild_SystemStatus::Failed,
-                    VFXCount,
-                    FString::Printf(TEXT("Found %d VFX actors"), VFXCount));
-}
-
-void UBuild_FinalIntegrationOrchestrator::ValidateAudioSystem()
-{
-    int32 AudioCount = CountActorsOfType(TEXT("Audio"));
-    UpdateSystemInfo(TEXT("Audio System"),
-                    AudioCount >= 0 ? EBuild_SystemStatus::Validated : EBuild_SystemStatus::Failed,
-                    AudioCount,
-                    FString::Printf(TEXT("Found %d audio actors"), AudioCount));
-}
-
-void UBuild_FinalIntegrationOrchestrator::ValidatePhysicsSystem()
-{
-    // Physics system is always considered validated if world exists
-    UpdateSystemInfo(TEXT("Physics System"),
-                    GetWorld() ? EBuild_SystemStatus::Validated : EBuild_SystemStatus::Failed,
-                    1,
-                    TEXT("Physics world validated"));
-}
-
-void UBuild_FinalIntegrationOrchestrator::ValidateAISystem()
-{
-    int32 AICount = CountActorsOfType(TEXT("Pawn"));
-    UpdateSystemInfo(TEXT("AI System"),
-                    AICount >= 0 ? EBuild_SystemStatus::Validated : EBuild_SystemStatus::Failed,
-                    AICount,
-                    FString::Printf(TEXT("Found %d AI pawns"), AICount));
-}
-
-int32 UBuild_FinalIntegrationOrchestrator::CountActorsOfType(const FString& ActorTypeName)
-{
-    if (!GetWorld())
+    if (UWorld* World = GetWorld())
     {
-        return 0;
-    }
-
-    int32 Count = 0;
-    for (TActorIterator<AActor> ActorItr(GetWorld()); ActorItr; ++ActorItr)
-    {
-        AActor* Actor = *ActorItr;
-        if (Actor && Actor->GetClass()->GetName().Contains(ActorTypeName))
-        {
-            Count++;
-        }
-    }
-    
-    return Count;
-}
-
-void UBuild_FinalIntegrationOrchestrator::LogSystemValidation(const FString& SystemName, bool bSuccess, const FString& Details)
-{
-    if (bSuccess)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("✓ %s: %s"), *SystemName, *Details);
-    }
-    else
-    {
-        UE_LOG(LogTemp, Error, TEXT("✗ %s: %s"), *SystemName, *Details);
-    }
-}
-
-void UBuild_FinalIntegrationOrchestrator::UpdateSystemInfo(const FString& SystemName, EBuild_SystemStatus Status, int32 ActorCount, const FString& Details)
-{
-    if (RegisteredSystems.Contains(SystemName))
-    {
-        FBuild_SystemInfo& SystemInfo = RegisteredSystems[SystemName];
-        SystemInfo.Status = Status;
-        SystemInfo.ActorCount = ActorCount;
-        SystemInfo.ValidationDetails = Details;
-        SystemInfo.LastValidationTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
+        TArray<AActor*> AllActors;
+        UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), AllActors);
         
-        LogSystemValidation(SystemName, Status == EBuild_SystemStatus::Validated, Details);
+        int32 EnvironmentActors = 0;
+        for (AActor* Actor : AllActors)
+        {
+            if (Actor && (Actor->GetName().Contains(TEXT("Tree")) || 
+                         Actor->GetName().Contains(TEXT("Rock")) ||
+                         Actor->GetName().Contains(TEXT("Foliage"))))
+            {
+                EnvironmentActors++;
+            }
+        }
+        
+        if (EnvironmentActors > 100)
+        {
+            return EBuild_SystemStatus::Healthy;
+        }
+        else if (EnvironmentActors > 10)
+        {
+            return EBuild_SystemStatus::Warning;
+        }
+    }
+    
+    return EBuild_SystemStatus::Critical;
+}
+
+EBuild_SystemStatus UBuild_FinalIntegrationOrchestrator::CheckCharacterSystemHealth()
+{
+    if (UWorld* World = GetWorld())
+    {
+        TArray<AActor*> Characters;
+        UGameplayStatics::GetAllActorsOfClass(World, ACharacter::StaticClass(), Characters);
+        
+        if (Characters.Num() > 0)
+        {
+            return EBuild_SystemStatus::Healthy;
+        }
+    }
+    
+    return EBuild_SystemStatus::Warning;
+}
+
+EBuild_SystemStatus UBuild_FinalIntegrationOrchestrator::CheckDinosaurAIHealth()
+{
+    if (UWorld* World = GetWorld())
+    {
+        TArray<AActor*> AllActors;
+        UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), AllActors);
+        
+        int32 DinosaurActors = 0;
+        for (AActor* Actor : AllActors)
+        {
+            if (Actor && (Actor->GetName().Contains(TEXT("Dinosaur")) || 
+                         Actor->GetName().Contains(TEXT("TRex")) ||
+                         Actor->GetName().Contains(TEXT("Raptor"))))
+            {
+                DinosaurActors++;
+            }
+        }
+        
+        if (DinosaurActors > 3)
+        {
+            return EBuild_SystemStatus::Healthy;
+        }
+        else if (DinosaurActors > 0)
+        {
+            return EBuild_SystemStatus::Warning;
+        }
+    }
+    
+    return EBuild_SystemStatus::Critical;
+}
+
+EBuild_SystemStatus UBuild_FinalIntegrationOrchestrator::CheckEnvironmentHealth()
+{
+    if (UWorld* World = GetWorld())
+    {
+        TArray<AActor*> AllActors;
+        UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), AllActors);
+        
+        bool bHasLighting = false;
+        bool bHasLandscape = false;
+        
+        for (AActor* Actor : AllActors)
+        {
+            if (Actor)
+            {
+                FString ActorName = Actor->GetName();
+                if (ActorName.Contains(TEXT("Light")) || ActorName.Contains(TEXT("Sun")))
+                {
+                    bHasLighting = true;
+                }
+                if (ActorName.Contains(TEXT("Landscape")) || ActorName.Contains(TEXT("Terrain")))
+                {
+                    bHasLandscape = true;
+                }
+            }
+        }
+        
+        if (bHasLighting && bHasLandscape)
+        {
+            return EBuild_SystemStatus::Healthy;
+        }
+        else if (bHasLighting || bHasLandscape)
+        {
+            return EBuild_SystemStatus::Warning;
+        }
+    }
+    
+    return EBuild_SystemStatus::Critical;
+}
+
+void UBuild_FinalIntegrationOrchestrator::TriggerEmergencyShutdown(const FString& Reason)
+{
+    UE_LOG(LogTemp, Error, TEXT("Build_FinalIntegrationOrchestrator: EMERGENCY SHUTDOWN - %s"), *Reason);
+    
+    // Log critical error
+    for (FBuild_SystemHealthReport& Report : SystemHealthReports)
+    {
+        Report.Status = EBuild_SystemStatus::Failed;
+        Report.LastError = Reason;
+    }
+    
+    bIntegrationComplete = false;
+}
+
+bool UBuild_FinalIntegrationOrchestrator::AttemptSystemRecovery(const FString& SystemName)
+{
+    UE_LOG(LogTemp, Warning, TEXT("Build_FinalIntegrationOrchestrator: Attempting recovery for system: %s"), *SystemName);
+    
+    // Basic recovery attempt - force re-validation
+    PerformFullSystemValidation();
+    
+    return ValidateSystemIntegrity(SystemName);
+}
+
+void UBuild_FinalIntegrationOrchestrator::UpdateSystemHealthReport(const FString& SystemName, EBuild_SystemStatus Status, const FString& ErrorMessage)
+{
+    for (FBuild_SystemHealthReport& Report : SystemHealthReports)
+    {
+        if (Report.SystemName == SystemName)
+        {
+            Report.Status = Status;
+            Report.LastChecked = FDateTime::Now();
+            if (!ErrorMessage.IsEmpty())
+            {
+                Report.LastError = ErrorMessage;
+            }
+            break;
+        }
+    }
+}
+
+void UBuild_FinalIntegrationOrchestrator::CollectPerformanceMetrics()
+{
+    CurrentMetrics.AverageFrameTime = GetCurrentFrameTime();
+    CurrentMetrics.MemoryUsageMB = GetMemoryUsage();
+    
+    if (UWorld* World = GetWorld())
+    {
+        TArray<AActor*> AllActors;
+        UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), AllActors);
+        
+        CurrentMetrics.TotalActors = AllActors.Num();
+        CurrentMetrics.CharacterActors = 0;
+        CurrentMetrics.DinosaurActors = 0;
+        CurrentMetrics.EnvironmentActors = 0;
+        CurrentMetrics.SystemActors = 0;
+        
+        for (AActor* Actor : AllActors)
+        {
+            if (Actor)
+            {
+                FString ActorName = Actor->GetName();
+                FString ClassName = Actor->GetClass()->GetName();
+                
+                if (ClassName.Contains(TEXT("Character")) || ClassName.Contains(TEXT("Pawn")))
+                {
+                    CurrentMetrics.CharacterActors++;
+                }
+                else if (ActorName.Contains(TEXT("Dinosaur")) || ActorName.Contains(TEXT("TRex")) || ActorName.Contains(TEXT("Raptor")))
+                {
+                    CurrentMetrics.DinosaurActors++;
+                }
+                else if (ActorName.Contains(TEXT("Tree")) || ActorName.Contains(TEXT("Rock")) || ActorName.Contains(TEXT("Foliage")))
+                {
+                    CurrentMetrics.EnvironmentActors++;
+                }
+                else if (ClassName.Contains(TEXT("Manager")) || ClassName.Contains(TEXT("System")))
+                {
+                    CurrentMetrics.SystemActors++;
+                }
+            }
+        }
+    }
+}
+
+void UBuild_FinalIntegrationOrchestrator::ValidateActorCounts()
+{
+    // Validate that we have reasonable actor counts
+    if (CurrentMetrics.TotalActors < 10)
+    {
+        UpdateSystemHealthReport(TEXT("Environment"), EBuild_SystemStatus::Critical, TEXT("Too few actors in scene"));
+    }
+    else if (CurrentMetrics.TotalActors > 10000)
+    {
+        UpdateSystemHealthReport(TEXT("Environment"), EBuild_SystemStatus::Warning, TEXT("High actor count may impact performance"));
+    }
+}
+
+void UBuild_FinalIntegrationOrchestrator::CheckSystemDependencies()
+{
+    // Check that critical systems have their dependencies
+    bool bHasCharacters = CurrentMetrics.CharacterActors > 0;
+    bool bHasEnvironment = CurrentMetrics.EnvironmentActors > 0;
+    bool bHasDinosaurs = CurrentMetrics.DinosaurActors > 0;
+    
+    if (!bHasCharacters)
+    {
+        UpdateSystemHealthReport(TEXT("CharacterSystem"), EBuild_SystemStatus::Critical, TEXT("No character actors found"));
+    }
+    
+    if (!bHasEnvironment)
+    {
+        UpdateSystemHealthReport(TEXT("Environment"), EBuild_SystemStatus::Critical, TEXT("No environment actors found"));
+    }
+    
+    if (!bHasDinosaurs)
+    {
+        UpdateSystemHealthReport(TEXT("DinosaurAI"), EBuild_SystemStatus::Warning, TEXT("No dinosaur actors found"));
     }
 }
