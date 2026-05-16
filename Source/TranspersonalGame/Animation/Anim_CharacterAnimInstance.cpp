@@ -4,222 +4,172 @@
 #include "Kismet/KismetMathLibrary.h"
 #include "Engine/Engine.h"
 
+DEFINE_LOG_CATEGORY(LogAnimInstance);
+
 UAnim_CharacterAnimInstance::UAnim_CharacterAnimInstance()
-    : OwningCharacter(nullptr)
-    , MovementComponent(nullptr)
-    , IdleAnimation(nullptr)
-    , WalkAnimation(nullptr)
-    , RunAnimation(nullptr)
-    , JumpStartAnimation(nullptr)
-    , JumpLoopAnimation(nullptr)
-    , JumpEndAnimation(nullptr)
-    , CrouchIdleAnimation(nullptr)
-    , CrouchWalkAnimation(nullptr)
-    , WalkRunBlendAlpha(0.0f)
-    , IdleToMovementBlendAlpha(0.0f)
-    , PreviousMovementState(EAnim_MovementState::Idle)
-    , StateTransitionTime(0.0f)
-    , MaxWalkSpeed(300.0f)
-    , MaxRunSpeed(600.0f)
 {
-    // Initialize movement data
-    MovementData = FAnim_MovementData();
+	// Initialize default values
+	Speed = 0.0f;
+	Direction = 0.0f;
+	bIsInAir = false;
+	bIsAccelerating = false;
+	bIsCrouching = false;
+	bIsRunning = false;
+	
+	HealthPercentage = 1.0f;
+	StaminaPercentage = 1.0f;
+	FearLevel = 0.0f;
+	bIsInjured = false;
+	bIsExhausted = false;
+	
+	InjurySpeedModifier = 1.0f;
+	FatigueSpeedModifier = 1.0f;
+	FearSpeedModifier = 1.0f;
+	
+	Character = nullptr;
+	CharacterMovement = nullptr;
 }
 
 void UAnim_CharacterAnimInstance::NativeInitializeAnimation()
 {
-    Super::NativeInitializeAnimation();
-
-    // Get character reference
-    OwningCharacter = Cast<ACharacter>(GetOwningActor());
-    if (OwningCharacter)
-    {
-        MovementComponent = OwningCharacter->GetCharacterMovement();
-        
-        if (MovementComponent)
-        {
-            MaxWalkSpeed = MovementComponent->MaxWalkSpeed;
-            MaxRunSpeed = MovementComponent->MaxWalkSpeed * 2.0f; // Assume run is 2x walk speed
-        }
-    }
-
-    // Initialize state
-    PreviousMovementState = EAnim_MovementState::Idle;
-    StateTransitionTime = 0.0f;
+	Super::NativeInitializeAnimation();
+	
+	// Get character reference
+	Character = Cast<ACharacter>(GetOwningActor());
+	if (Character)
+	{
+		CharacterMovement = Character->GetCharacterMovement();
+		UE_LOG(LogAnimInstance, Log, TEXT("Animation Instance initialized for character: %s"), *Character->GetName());
+	}
+	else
+	{
+		UE_LOG(LogAnimInstance, Warning, TEXT("Failed to get character reference in animation instance"));
+	}
 }
 
 void UAnim_CharacterAnimInstance::NativeUpdateAnimation(float DeltaTimeX)
 {
-    Super::NativeUpdateAnimation(DeltaTimeX);
-
-    if (!OwningCharacter || !MovementComponent)
-    {
-        return;
-    }
-
-    // Update movement data
-    UpdateMovementData();
-    
-    // Update state machine
-    UpdateMovementState();
-    
-    // Update blending parameters
-    UpdateBlendingParameters();
-    
-    // Track state transition time
-    StateTransitionTime += DeltaTimeX;
+	Super::NativeUpdateAnimation(DeltaTimeX);
+	
+	if (!Character || !CharacterMovement)
+	{
+		return;
+	}
+	
+	// Update all animation values
+	UpdateMovementValues();
+	UpdateSurvivalStates();
+	UpdateAnimationModifiers();
 }
 
-void UAnim_CharacterAnimInstance::UpdateMovementData()
+void UAnim_CharacterAnimInstance::UpdateMovementValues()
 {
-    if (!OwningCharacter || !MovementComponent)
-    {
-        return;
-    }
-
-    // Get velocity and speed
-    FVector Velocity = MovementComponent->Velocity;
-    MovementData.Speed = Velocity.Size();
-    
-    // Calculate direction relative to character forward
-    CalculateDirection();
-    
-    // Update movement flags
-    MovementData.bIsInAir = MovementComponent->IsFalling();
-    MovementData.bIsCrouching = MovementComponent->IsCrouching();
-    MovementData.bIsAccelerating = MovementComponent->GetCurrentAcceleration().SizeSquared() > 0.0f;
+	if (!Character || !CharacterMovement)
+	{
+		return;
+	}
+	
+	// Get velocity and calculate speed
+	FVector Velocity = CharacterMovement->Velocity;
+	Speed = Velocity.Size();
+	
+	// Calculate direction relative to character rotation
+	Direction = CalculateDirection(Velocity, Character->GetActorRotation());
+	
+	// Update movement states
+	bIsInAir = CharacterMovement->IsFalling();
+	bIsAccelerating = CharacterMovement->GetCurrentAcceleration().Size() > 0.0f;
+	bIsCrouching = CharacterMovement->IsCrouching();
+	
+	// Determine if running based on speed threshold
+	bIsRunning = Speed > RunSpeedThreshold;
+	
+	UE_LOG(LogAnimInstance, VeryVerbose, TEXT("Movement Update - Speed: %.2f, Direction: %.2f, InAir: %s, Running: %s"), 
+		Speed, Direction, bIsInAir ? TEXT("true") : TEXT("false"), bIsRunning ? TEXT("true") : TEXT("false"));
 }
 
-void UAnim_CharacterAnimInstance::CalculateDirection()
+void UAnim_CharacterAnimInstance::UpdateSurvivalStates()
 {
-    if (!OwningCharacter || !MovementComponent)
-    {
-        MovementData.Direction = 0.0f;
-        return;
-    }
-
-    FVector Velocity = MovementComponent->Velocity;
-    if (Velocity.SizeSquared() < 1.0f)
-    {
-        MovementData.Direction = 0.0f;
-        return;
-    }
-
-    // Get character forward vector (ignore Z component for direction calculation)
-    FVector ForwardVector = OwningCharacter->GetActorForwardVector();
-    ForwardVector.Z = 0.0f;
-    ForwardVector.Normalize();
-
-    // Get velocity direction (ignore Z component)
-    FVector VelocityDirection = Velocity;
-    VelocityDirection.Z = 0.0f;
-    VelocityDirection.Normalize();
-
-    // Calculate angle between forward and velocity
-    float DotProduct = FVector::DotProduct(ForwardVector, VelocityDirection);
-    float CrossProduct = FVector::CrossProduct(ForwardVector, VelocityDirection).Z;
-
-    // Convert to angle in degrees (-180 to 180)
-    MovementData.Direction = FMath::Atan2(CrossProduct, DotProduct) * (180.0f / PI);
+	// This would integrate with the actual survival system
+	// For now, using placeholder logic
+	
+	// Check for injury state
+	bIsInjured = HealthPercentage < InjuryThreshold;
+	
+	// Check for exhaustion state
+	bIsExhausted = StaminaPercentage < ExhaustionThreshold;
+	
+	// Fear level affects animation intensity
+	if (FearLevel > 0.7f)
+	{
+		// High fear - tense, quick movements
+		FearSpeedModifier = 1.3f;
+	}
+	else if (FearLevel > 0.4f)
+	{
+		// Moderate fear - slightly faster
+		FearSpeedModifier = 1.1f;
+	}
+	else
+	{
+		// Normal state
+		FearSpeedModifier = 1.0f;
+	}
 }
 
-void UAnim_CharacterAnimInstance::UpdateMovementState()
+void UAnim_CharacterAnimInstance::UpdateAnimationModifiers()
 {
-    EAnim_MovementState NewState = DetermineMovementState();
-    
-    if (NewState != MovementData.MovementState)
-    {
-        PreviousMovementState = MovementData.MovementState;
-        MovementData.MovementState = NewState;
-        StateTransitionTime = 0.0f;
-    }
+	// Injury affects movement speed and style
+	if (bIsInjured)
+	{
+		InjurySpeedModifier = FMath::Lerp(0.5f, 1.0f, HealthPercentage);
+	}
+	else
+	{
+		InjurySpeedModifier = 1.0f;
+	}
+	
+	// Fatigue affects animation speed
+	if (bIsExhausted)
+	{
+		FatigueSpeedModifier = FMath::Lerp(0.7f, 1.0f, StaminaPercentage);
+	}
+	else
+	{
+		FatigueSpeedModifier = 1.0f;
+	}
 }
 
-EAnim_MovementState UAnim_CharacterAnimInstance::DetermineMovementState() const
+float UAnim_CharacterAnimInstance::CalculateDirection(const FVector& Velocity, const FRotator& BaseRotation)
 {
-    if (!OwningCharacter || !MovementComponent)
-    {
-        return EAnim_MovementState::Idle;
-    }
-
-    // Check for air states first
-    if (MovementData.bIsInAir)
-    {
-        if (MovementComponent->Velocity.Z > 0.0f)
-        {
-            return EAnim_MovementState::Jumping;
-        }
-        else
-        {
-            return EAnim_MovementState::Falling;
-        }
-    }
-
-    // Check for swimming
-    if (MovementComponent->IsSwimming())
-    {
-        return EAnim_MovementState::Swimming;
-    }
-
-    // Check for crouching
-    if (MovementData.bIsCrouching)
-    {
-        return EAnim_MovementState::Crouching;
-    }
-
-    // Check movement speed
-    if (MovementData.Speed < 10.0f)
-    {
-        return EAnim_MovementState::Idle;
-    }
-    else if (MovementData.Speed < MaxWalkSpeed * 0.8f)
-    {
-        return EAnim_MovementState::Walking;
-    }
-    else
-    {
-        return EAnim_MovementState::Running;
-    }
+	if (Velocity.Size() < 0.1f)
+	{
+		return 0.0f;
+	}
+	
+	// Calculate the direction relative to the character's forward vector
+	FVector ForwardVector = BaseRotation.Vector();
+	FVector RightVector = FVector::CrossProduct(ForwardVector, FVector::UpVector);
+	
+	FVector NormalizedVelocity = Velocity.GetSafeNormal();
+	
+	float ForwardAmount = FVector::DotProduct(NormalizedVelocity, ForwardVector);
+	float RightAmount = FVector::DotProduct(NormalizedVelocity, RightVector);
+	
+	return FMath::Atan2(RightAmount, ForwardAmount) * (180.0f / PI);
 }
 
-void UAnim_CharacterAnimInstance::UpdateBlendingParameters()
+bool UAnim_CharacterAnimInstance::ShouldPlayInjuredAnimation() const
 {
-    // Update walk/run blend alpha
-    if (MovementData.Speed > 0.0f)
-    {
-        float NormalizedSpeed = FMath::Clamp(MovementData.Speed / MaxRunSpeed, 0.0f, 1.0f);
-        WalkRunBlendAlpha = FMath::FInterpTo(WalkRunBlendAlpha, NormalizedSpeed, GetWorld()->GetDeltaSeconds(), 5.0f);
-    }
-    else
-    {
-        WalkRunBlendAlpha = FMath::FInterpTo(WalkRunBlendAlpha, 0.0f, GetWorld()->GetDeltaSeconds(), 10.0f);
-    }
-
-    // Update idle to movement blend alpha
-    bool bShouldMove = MovementData.MovementState == EAnim_MovementState::Walking || 
-                      MovementData.MovementState == EAnim_MovementState::Running;
-    
-    float TargetAlpha = bShouldMove ? 1.0f : 0.0f;
-    IdleToMovementBlendAlpha = FMath::FInterpTo(IdleToMovementBlendAlpha, TargetAlpha, GetWorld()->GetDeltaSeconds(), 8.0f);
+	return bIsInjured && HealthPercentage < 0.7f;
 }
 
-bool UAnim_CharacterAnimInstance::ShouldEnterIdleState() const
+bool UAnim_CharacterAnimInstance::ShouldPlayExhaustedAnimation() const
 {
-    return MovementData.MovementState == EAnim_MovementState::Idle;
+	return bIsExhausted && StaminaPercentage < 0.3f;
 }
 
-bool UAnim_CharacterAnimInstance::ShouldEnterMovementState() const
+float UAnim_CharacterAnimInstance::GetEffectiveAnimationSpeed() const
 {
-    return MovementData.MovementState == EAnim_MovementState::Walking || 
-           MovementData.MovementState == EAnim_MovementState::Running;
-}
-
-bool UAnim_CharacterAnimInstance::ShouldEnterJumpState() const
-{
-    return MovementData.MovementState == EAnim_MovementState::Jumping;
-}
-
-bool UAnim_CharacterAnimInstance::ShouldEnterFallingState() const
-{
-    return MovementData.MovementState == EAnim_MovementState::Falling;
+	return InjurySpeedModifier * FatigueSpeedModifier * FearSpeedModifier;
 }
