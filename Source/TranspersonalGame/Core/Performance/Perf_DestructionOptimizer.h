@@ -1,18 +1,38 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/World.h"
 #include "Components/ActorComponent.h"
-#include "Engine/Engine.h"
+#include "Engine/World.h"
+#include "TimerManager.h"
+#include "SharedTypes.h"
 #include "Perf_DestructionOptimizer.generated.h"
 
-UENUM(BlueprintType)
-enum class EPerf_DestructionQuality : uint8
+class ACore_DestructionSystem;
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FPerf_DestructionLOD
 {
-    Low         UMETA(DisplayName = "Low Quality"),
-    Medium      UMETA(DisplayName = "Medium Quality"),
-    High        UMETA(DisplayName = "High Quality"),
-    Ultra       UMETA(DisplayName = "Ultra Quality")
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float DistanceThreshold = 5000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    int32 MaxDebrisCount = 25;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float DebrisLifetime = 30.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    bool bEnablePhysicsSimulation = true;
+
+    FPerf_DestructionLOD()
+    {
+        DistanceThreshold = 5000.0f;
+        MaxDebrisCount = 25;
+        DebrisLifetime = 30.0f;
+        bEnablePhysicsSimulation = true;
+    }
 };
 
 USTRUCT(BlueprintType)
@@ -21,59 +41,27 @@ struct TRANSPERSONALGAME_API FPerf_DestructionMetrics
     GENERATED_BODY()
 
     UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float AverageDestructionTime;
+    int32 ActiveDebrisCount = 0;
 
     UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    int32 ActiveDestructibleActors;
+    float AverageFrameTime = 0.0f;
 
     UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float MemoryUsageMB;
+    int32 DestructionEventsThisFrame = 0;
 
     UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float FrameTimeImpact;
+    float PhysicsSimulationTime = 0.0f;
 
     FPerf_DestructionMetrics()
-        : AverageDestructionTime(0.0f)
-        , ActiveDestructibleActors(0)
-        , MemoryUsageMB(0.0f)
-        , FrameTimeImpact(0.0f)
-    {}
+    {
+        ActiveDebrisCount = 0;
+        AverageFrameTime = 0.0f;
+        DestructionEventsThisFrame = 0;
+        PhysicsSimulationTime = 0.0f;
+    }
 };
 
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FPerf_DestructionSettings
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 MaxSimultaneousDestructions;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float DestructionCullingDistance;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    bool bEnableDestructionLOD;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    EPerf_DestructionQuality QualityLevel;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float DebrisLifetime;
-
-    FPerf_DestructionSettings()
-        : MaxSimultaneousDestructions(5)
-        , DestructionCullingDistance(5000.0f)
-        , bEnableDestructionLOD(true)
-        , QualityLevel(EPerf_DestructionQuality::Medium)
-        , DebrisLifetime(30.0f)
-    {}
-};
-
-/**
- * Performance optimizer for destruction systems
- * Manages destruction quality, culling, and performance metrics
- */
-UCLASS(BlueprintType, Blueprintable, meta = (BlueprintSpawnableComponent))
+UCLASS(ClassGroup=(Performance), meta=(BlueprintSpawnableComponent))
 class TRANSPERSONALGAME_API UPerf_DestructionOptimizer : public UActorComponent
 {
     GENERATED_BODY()
@@ -86,58 +74,85 @@ protected:
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 public:
-    // Performance monitoring
+    // Performance optimization methods
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    FPerf_DestructionMetrics GetDestructionMetrics() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void OptimizeDestructionPerformance();
+    void OptimizeDestructionSystem();
 
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    void SetDestructionQuality(EPerf_DestructionQuality NewQuality);
+    void SetLODLevel(int32 LODLevel);
 
-    // Destruction management
-    UFUNCTION(BlueprintCallable, Category = "Destruction")
-    bool CanPerformDestruction(const FVector& Location) const;
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void CullDistantDebris();
 
-    UFUNCTION(BlueprintCallable, Category = "Destruction")
-    void RegisterDestructionEvent(const FVector& Location, float Intensity);
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void BatchUpdateDebris();
 
-    UFUNCTION(BlueprintCallable, Category = "Destruction")
+    UFUNCTION(BlueprintCallable, Category = "Performance")
     void CleanupOldDebris();
 
-    // Performance testing
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Performance")
-    void RunDestructionPerformanceTest();
+    // Performance monitoring
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    FPerf_DestructionMetrics GetPerformanceMetrics() const;
 
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Performance")
-    void AnalyzeDestructionBottlenecks();
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    float GetDestructionFrameImpact() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    bool IsPerformanceOptimal() const;
+
+    // LOD management
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void UpdateLODBasedOnDistance(const FVector& PlayerLocation);
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void SetDebrisLODSettings(const FPerf_DestructionLOD& LODSettings);
 
 protected:
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
-    FPerf_DestructionSettings DestructionSettings;
+    // Performance settings
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance", meta = (AllowPrivateAccess = "true"))
+    FPerf_DestructionLOD HighQualityLOD;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance", meta = (AllowPrivateAccess = "true"))
+    FPerf_DestructionLOD MediumQualityLOD;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance", meta = (AllowPrivateAccess = "true"))
+    FPerf_DestructionLOD LowQualityLOD;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance", meta = (AllowPrivateAccess = "true"))
+    float TargetFrameTime = 16.67f; // 60 FPS
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance", meta = (AllowPrivateAccess = "true"))
+    float MaxDestructionBudget = 5.0f; // 5ms per frame
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance", meta = (AllowPrivateAccess = "true"))
+    int32 MaxSimultaneousDestructions = 3;
+
+    // Current state
+    UPROPERTY(BlueprintReadOnly, Category = "Performance", meta = (AllowPrivateAccess = "true"))
+    int32 CurrentLODLevel = 0;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Performance", meta = (AllowPrivateAccess = "true"))
     FPerf_DestructionMetrics CurrentMetrics;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float PerformanceUpdateInterval;
+    // Timer handles
+    FTimerHandle OptimizationTimerHandle;
+    FTimerHandle CleanupTimerHandle;
+    FTimerHandle MetricsTimerHandle;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    bool bEnablePerformanceLogging;
+    // Internal tracking
+    TArray<TWeakObjectPtr<AActor>> TrackedDebrisActors;
+    TArray<TWeakObjectPtr<ACore_DestructionSystem>> DestructionSystems;
+    
+    float LastFrameTime = 0.0f;
+    int32 FrameCounter = 0;
+    float AccumulatedFrameTime = 0.0f;
 
 private:
-    // Internal tracking
-    TArray<FVector> RecentDestructions;
-    TArray<float> DestructionTimes;
-    float LastPerformanceUpdate;
-    int32 FramesSinceLastUpdate;
-
-    // Performance optimization methods
+    // Internal optimization methods
     void UpdatePerformanceMetrics();
-    void ApplyQualitySettings();
-    void CullDistantDestructions();
-    void OptimizeDebrisCount();
-    float CalculateFrameTimeImpact() const;
-    void LogPerformanceData() const;
+    void AdjustLODBasedOnPerformance();
+    void RegisterDestructionSystem(ACore_DestructionSystem* System);
+    void UnregisterDestructionSystem(ACore_DestructionSystem* System);
+    void ProcessDebrisQueue();
+    void OptimizePhysicsSettings();
 };
