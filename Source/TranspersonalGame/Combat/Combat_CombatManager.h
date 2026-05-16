@@ -1,117 +1,107 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Subsystems/GameInstanceSubsystem.h"
+#include "GameFramework/GameModeBase.h"
 #include "Engine/World.h"
-#include "GameFramework/Actor.h"
-#include "Components/ActorComponent.h"
-#include "Engine/Engine.h"
-#include "../SharedTypes.h"
+#include "TimerManager.h"
+#include "SharedTypes.h"
 #include "Combat_CombatManager.generated.h"
 
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FCombat_OnCombatEvent, AActor*, Attacker, AActor*, Target, float, Damage);
+class APawn;
+class ACharacter;
+class UBehaviorTreeComponent;
 
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnCombatStateChanged, APawn*, Attacker, APawn*, Target);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnDamageDealt, APawn*, Attacker, APawn*, Victim, float, Damage);
+
+/**
+ * Central combat management system for dinosaur AI and player combat
+ * Handles combat state tracking, damage calculation, and AI coordination
+ */
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UCombat_CombatManager : public UGameInstanceSubsystem
+class TRANSPERSONALGAME_API UCombat_CombatManager : public UObject
 {
     GENERATED_BODY()
 
 public:
     UCombat_CombatManager();
 
-    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
-    virtual void Deinitialize() override;
-
-    // Combat System Core
+    // Core combat management
     UFUNCTION(BlueprintCallable, Category = "Combat")
-    bool InitiateCombat(AActor* Attacker, AActor* Target, float Damage = 10.0f);
+    void InitializeCombatManager(UWorld* InWorld);
 
     UFUNCTION(BlueprintCallable, Category = "Combat")
-    void EndCombat(AActor* Combatant);
+    void RegisterCombatant(APawn* Combatant, ECombat_CombatRole Role);
 
     UFUNCTION(BlueprintCallable, Category = "Combat")
-    bool IsInCombat(AActor* Actor);
+    void UnregisterCombatant(APawn* Combatant);
 
     UFUNCTION(BlueprintCallable, Category = "Combat")
-    TArray<AActor*> GetCombatants();
-
-    // Damage System
-    UFUNCTION(BlueprintCallable, Category = "Combat")
-    float CalculateDamage(AActor* Attacker, AActor* Target, float BaseDamage);
+    bool StartCombat(APawn* Attacker, APawn* Target);
 
     UFUNCTION(BlueprintCallable, Category = "Combat")
-    void ApplyDamage(AActor* Target, float Damage, AActor* DamageSource = nullptr);
-
-    // Threat System
-    UFUNCTION(BlueprintCallable, Category = "Combat")
-    void AddThreat(AActor* Target, AActor* ThreatSource, float ThreatAmount);
+    void EndCombat(APawn* Combatant);
 
     UFUNCTION(BlueprintCallable, Category = "Combat")
-    AActor* GetHighestThreatTarget(AActor* Combatant);
+    float CalculateDamage(APawn* Attacker, APawn* Target, ECombat_AttackType AttackType);
 
     UFUNCTION(BlueprintCallable, Category = "Combat")
-    float GetThreatLevel(AActor* Target, AActor* ThreatSource);
+    void ApplyDamage(APawn* Attacker, APawn* Target, float Damage);
 
-    // Combat Events
+    // Combat state queries
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Combat")
+    bool IsInCombat(APawn* Combatant) const;
+
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Combat")
+    APawn* GetCombatTarget(APawn* Combatant) const;
+
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Combat")
+    TArray<APawn*> GetNearbyEnemies(APawn* Combatant, float Radius) const;
+
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Combat")
+    float GetCombatThreatLevel(APawn* Combatant) const;
+
+    // AI coordination
+    UFUNCTION(BlueprintCallable, Category = "Combat")
+    void CoordinatePackAttack(const TArray<APawn*>& PackMembers, APawn* Target);
+
+    UFUNCTION(BlueprintCallable, Category = "Combat")
+    void UpdateCombatAI(float DeltaTime);
+
+    // Events
     UPROPERTY(BlueprintAssignable, Category = "Combat Events")
-    FCombat_OnCombatEvent OnCombatStarted;
+    FOnCombatStateChanged OnCombatStarted;
 
     UPROPERTY(BlueprintAssignable, Category = "Combat Events")
-    FCombat_OnCombatEvent OnDamageDealt;
+    FOnCombatStateChanged OnCombatEnded;
 
     UPROPERTY(BlueprintAssignable, Category = "Combat Events")
-    FCombat_OnCombatEvent OnCombatEnded;
-
-    // Combat State Management
-    UFUNCTION(BlueprintCallable, Category = "Combat")
-    void RegisterCombatant(AActor* Combatant);
-
-    UFUNCTION(BlueprintCallable, Category = "Combat")
-    void UnregisterCombatant(AActor* Combatant);
-
-    // Proximity Combat Detection
-    UFUNCTION(BlueprintCallable, Category = "Combat")
-    void CheckProximityCombat();
-
-    UFUNCTION(BlueprintCallable, Category = "Combat")
-    TArray<AActor*> GetNearbyEnemies(AActor* Actor, float Range = 1000.0f);
+    FOnDamageDealt OnDamageDealt;
 
 protected:
-    // Active combatants
-    UPROPERTY(BlueprintReadOnly, Category = "Combat State")
-    TArray<AActor*> ActiveCombatants;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat")
+    UWorld* CombatWorld;
 
-    // Threat table - maps Target -> ThreatSource -> ThreatAmount
-    UPROPERTY()
-    TMap<AActor*, TMap<AActor*, float>> ThreatTable;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat")
+    TMap<APawn*, ECombat_CombatRole> RegisteredCombatants;
 
-    // Combat pairs tracking
-    UPROPERTY()
-    TMap<AActor*, AActor*> CombatPairs;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat")
+    TMap<APawn*, APawn*> CombatPairs;
 
-    // Combat timers
-    UPROPERTY()
-    TMap<AActor*, float> CombatTimers;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat")
+    TMap<APawn*, float> CombatTimers;
 
-    // Combat settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Settings")
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat Settings")
+    float BaseDamageMultiplier = 1.0f;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat Settings")
     float CombatTimeout = 30.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Settings")
-    float ProximityCheckInterval = 2.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Settings")
-    float CombatRange = 800.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Settings")
-    float ThreatDecayRate = 1.0f;
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat Settings")
+    float PackCoordinationRadius = 1500.0f;
 
 private:
-    // Internal helpers
-    void UpdateCombatTimers(float DeltaTime);
-    void DecayThreat(float DeltaTime);
-    bool AreEnemies(AActor* Actor1, AActor* Actor2);
-    
-    FTimerHandle ProximityCheckTimer;
-    FTimerHandle CombatUpdateTimer;
+    void CleanupExpiredCombat();
+    float CalculateSpeciesDamageModifier(APawn* Attacker, APawn* Target);
+    void NotifyAIOfCombatState(APawn* Combatant, bool bInCombat);
 };
