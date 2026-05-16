@@ -1,180 +1,184 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
+#include "Subsystems/GameInstanceSubsystem.h"
 #include "MassEntityTypes.h"
 #include "MassEntitySubsystem.h"
 #include "MassSpawnerTypes.h"
-#include "MassCommonFragments.h"
-#include "MassMovementFragments.h"
-#include "MassRepresentationFragments.h"
+#include "MassCommonTypes.h"
 #include "Engine/World.h"
 #include "Components/StaticMeshComponent.h"
 #include "SharedTypes.h"
 #include "Crowd_MassSimulationManager.generated.h"
 
+class UMassEntitySubsystem;
+class UCrowd_FlockingComponent;
+
+// Mass Entity archetype for crowd simulation
 USTRUCT(BlueprintType)
-struct FCrowd_SimulationSettings
+struct TRANSPERSONALGAME_API FCrowd_MassArchetype
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Simulation")
-    int32 MaxAgents = 1000;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mass Simulation")
+    FMassEntityTemplate EntityTemplate;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Simulation")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mass Simulation")
+    int32 MaxEntities = 1000;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mass Simulation")
     float SpawnRadius = 5000.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Simulation")
-    float MovementSpeed = 150.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mass Simulation")
+    ECrowd_BehaviorState DefaultBehaviorState = ECrowd_BehaviorState::Wandering;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Simulation")
-    float LODDistance1 = 1000.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Simulation")
-    float LODDistance2 = 2500.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Simulation")
-    float LODDistance3 = 5000.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Simulation")
-    bool bEnableFlocking = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Simulation")
-    float FlockingRadius = 300.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Simulation")
-    float SeparationWeight = 2.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Simulation")
-    float AlignmentWeight = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Simulation")
-    float CohesionWeight = 1.0f;
+    FCrowd_MassArchetype()
+    {
+        MaxEntities = 1000;
+        SpawnRadius = 5000.0f;
+        DefaultBehaviorState = ECrowd_BehaviorState::Wandering;
+    }
 };
 
+// Mass crowd spawn configuration
 USTRUCT(BlueprintType)
-struct FCrowd_AgentGroup
+struct TRANSPERSONALGAME_API FCrowd_SpawnConfig
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent Group")
-    FString GroupName = TEXT("DefaultGroup");
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent Group")
-    int32 AgentCount = 100;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent Group")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn Config")
     FVector SpawnLocation = FVector::ZeroVector;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent Group")
-    float GroupRadius = 500.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn Config")
+    float SpawnRadius = 2000.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent Group")
-    float GroupMovementSpeed = 120.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn Config")
+    int32 EntityCount = 500;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent Group")
-    BiomeType PreferredBiome = BiomeType::Savanna;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn Config")
+    ECrowd_BehaviorState InitialBehavior = ECrowd_BehaviorState::Wandering;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent Group")
-    bool bIsNomadic = true;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn Config")
+    float MovementSpeed = 200.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent Group")
-    TArray<FVector> PatrolPoints;
+    FCrowd_SpawnConfig()
+    {
+        SpawnLocation = FVector::ZeroVector;
+        SpawnRadius = 2000.0f;
+        EntityCount = 500;
+        InitialBehavior = ECrowd_BehaviorState::Wandering;
+        MovementSpeed = 200.0f;
+    }
 };
 
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FCrowd_OnPanicTriggered, FVector, ThreatLocation, float, ThreatRadius);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FCrowd_OnCrowdStateChanged, ECrowd_BehaviorState, NewState);
+
+/**
+ * Mass Entity-based crowd simulation manager for large-scale NPC behavior
+ * Handles up to 50,000 simultaneous entities using UE5 Mass Entity framework
+ */
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API ACrowd_MassSimulationManager : public AActor
+class TRANSPERSONALGAME_API UCrowd_MassSimulationManager : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
 public:
-    ACrowd_MassSimulationManager();
+    UCrowd_MassSimulationManager();
+
+    // USubsystem interface
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
+
+    // Mass simulation management
+    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
+    bool InitializeMassSimulation();
+
+    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
+    void ShutdownMassSimulation();
+
+    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
+    bool SpawnCrowdAtLocation(const FCrowd_SpawnConfig& SpawnConfig);
+
+    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
+    void DespawnAllCrowds();
+
+    // Combat integration for panic responses
+    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
+    void TriggerPanicResponse(FVector ThreatLocation, float ThreatRadius, float PanicDuration = 30.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
+    void SetGlobalCrowdBehavior(ECrowd_BehaviorState NewBehavior);
+
+    // LOD and performance management
+    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
+    void SetCrowdLODDistance(float NearDistance, float FarDistance);
+
+    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
+    void SetMaxActiveEntities(int32 MaxEntities);
+
+    // Query and information
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Crowd Simulation")
+    int32 GetActiveEntityCount() const;
+
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Crowd Simulation")
+    bool IsSimulationActive() const { return bSimulationActive; }
+
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Crowd Simulation")
+    ECrowd_BehaviorState GetCurrentGlobalBehavior() const { return CurrentGlobalBehavior; }
+
+    // Event delegates
+    UPROPERTY(BlueprintAssignable, Category = "Crowd Events")
+    FCrowd_OnPanicTriggered OnPanicTriggered;
+
+    UPROPERTY(BlueprintAssignable, Category = "Crowd Events")
+    FCrowd_OnCrowdStateChanged OnCrowdStateChanged;
 
 protected:
-    virtual void BeginPlay() override;
-    virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
-    virtual void Tick(float DeltaTime) override;
+    // Mass Entity system references
+    UPROPERTY()
+    TObjectPtr<UMassEntitySubsystem> MassEntitySubsystem;
 
-public:
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mass Simulation")
-    FCrowd_SimulationSettings SimulationSettings;
+    // Crowd archetypes and configurations
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mass Configuration")
+    TArray<FCrowd_MassArchetype> CrowdArchetypes;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mass Simulation")
-    TArray<FCrowd_AgentGroup> AgentGroups;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mass Configuration")
+    int32 MaxSimultaneousEntities = 50000;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Mass Simulation")
-    int32 ActiveAgentCount = 0;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mass Configuration")
+    float LODNearDistance = 1000.0f;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Mass Simulation")
-    float CurrentSimulationTime = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mass Configuration")
+    float LODFarDistance = 5000.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mass Simulation")
-    bool bSimulationActive = true;
+    // Current simulation state
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Simulation State")
+    bool bSimulationActive = false;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mass Simulation")
-    bool bUsePerformanceLOD = true;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Simulation State")
+    int32 CurrentActiveEntities = 0;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mass Simulation")
-    float PerformanceThreshold = 16.67f; // Target 60 FPS
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Simulation State")
+    ECrowd_BehaviorState CurrentGlobalBehavior = ECrowd_BehaviorState::Wandering;
 
-    UFUNCTION(BlueprintCallable, Category = "Mass Simulation")
-    void StartSimulation();
+    // Panic response system
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Panic Response")
+    float PanicSpeedMultiplier = 2.5f;
 
-    UFUNCTION(BlueprintCallable, Category = "Mass Simulation")
-    void StopSimulation();
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Panic Response")
+    float PanicFleeDistance = 3000.0f;
 
-    UFUNCTION(BlueprintCallable, Category = "Mass Simulation")
-    void PauseSimulation();
-
-    UFUNCTION(BlueprintCallable, Category = "Mass Simulation")
-    void ResumeSimulation();
-
-    UFUNCTION(BlueprintCallable, Category = "Mass Simulation")
-    void SpawnAgentGroup(const FCrowd_AgentGroup& GroupSettings);
-
-    UFUNCTION(BlueprintCallable, Category = "Mass Simulation")
-    void RemoveAgentGroup(const FString& GroupName);
-
-    UFUNCTION(BlueprintCallable, Category = "Mass Simulation")
-    void UpdateLODSettings();
-
-    UFUNCTION(BlueprintCallable, Category = "Mass Simulation")
-    int32 GetActiveAgentCount() const { return ActiveAgentCount; }
-
-    UFUNCTION(BlueprintCallable, Category = "Mass Simulation")
-    float GetCurrentFrameTime() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Mass Simulation")
-    void SetSimulationSettings(const FCrowd_SimulationSettings& NewSettings);
-
-protected:
-    UFUNCTION()
-    void InitializeMassEntity();
-
-    UFUNCTION()
-    void CreateAgentArchetypes();
-
-    UFUNCTION()
-    void UpdateFlockingBehavior(float DeltaTime);
-
-    UFUNCTION()
-    void UpdateAgentLOD();
-
-    UFUNCTION()
-    void ProcessPerformanceOptimization();
+    UPROPERTY()
+    FTimerHandle PanicTimerHandle;
 
 private:
-    UMassEntitySubsystem* MassEntitySubsystem;
+    // Internal management
+    void SetupDefaultArchetypes();
+    void CleanupMassEntities();
+    void OnPanicTimerExpired();
+    
+    // Mass Entity tracking
     TArray<FMassEntityHandle> SpawnedEntities;
-    FMassArchetypeHandle CrowdArchetype;
-    
-    bool bIsInitialized = false;
-    float LastFrameTime = 0.0f;
-    int32 CurrentLODLevel = 0;
-    
-    TMap<FString, TArray<FMassEntityHandle>> GroupEntityMap;
-    
-    void CleanupEntities();
-    void UpdateSimulationMetrics(float DeltaTime);
-    FVector CalculateFlockingForce(const FMassEntityHandle& Entity, const TArray<FMassEntityHandle>& NearbyEntities);
+    TMap<FMassEntityHandle, FCrowd_SpawnConfig> EntityConfigurations;
 };
