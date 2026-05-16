@@ -1,274 +1,221 @@
 #include "Crowd_MassEntityProcessor.h"
-#include "MassEntitySubsystem.h"
+#include "MassEntityManager.h"
 #include "MassCommonFragments.h"
 #include "MassMovementFragments.h"
-#include "MassLODFragments.h"
+#include "MassEntityView.h"
 #include "Engine/World.h"
-#include "Kismet/GameplayStatics.h"
-#include "GameFramework/Pawn.h"
+#include "Components/StaticMeshComponent.h"
 
-// UCrowd_MovementProcessor Implementation
-UCrowd_MovementProcessor::UCrowd_MovementProcessor()
+UCrowd_MassEntityProcessor::UCrowd_MassEntityProcessor()
 {
-    ExecutionFlags = (int32)(EProcessorExecutionFlags::All);
-    ExecutionOrder.ExecuteInGroup = UE::Mass::ProcessorGroupNames::Movement;
-    ExecutionOrder.ExecuteAfter.Add(UE::Mass::ProcessorGroupNames::Tasks);
+    bAutoRegisterWithProcessingPhases = true;
+    ExecutionFlags = (int32)EProcessorExecutionFlags::All;
+    ProcessingPhase = EMassProcessingPhase::PrePhysics;
+    
+    MaxEntitiesPerFrame = 1000;
+    ProcessingTimeLimit = 0.016f; // 16ms target
+    CrowdDensityThreshold = 100.0f;
+    AvoidanceRadius = 150.0f;
 }
 
-void UCrowd_MovementProcessor::ConfigureQueries()
+void UCrowd_MassEntityProcessor::ConfigureQueries()
 {
-    EntityQuery.AddRequirement<FTransformFragment>(EMassFragmentAccess::ReadWrite);
-    EntityQuery.AddRequirement<FMassVelocityFragment>(EMassFragmentAccess::ReadWrite);
-    EntityQuery.AddRequirement<FCrowd_AgentFragment>(EMassFragmentAccess::ReadWrite);
-    EntityQuery.AddRequirement<FCrowd_FlockingFragment>(EMassFragmentAccess::ReadWrite);
-    EntityQuery.AddChunkRequirement<FMassSimulationVariableTickChunkFragment>(EMassFragmentAccess::ReadOnly);
+    // Movement query - entities that need position updates
+    MovementQuery.AddRequirement<FTransformFragment>(EMassFragmentAccess::ReadWrite);
+    MovementQuery.AddRequirement<FMassVelocityFragment>(EMassFragmentAccess::ReadWrite);
+    MovementQuery.AddTagRequirement<FCrowd_MovingTag>(EMassFragmentPresence::All);
+    
+    // Behavior query - entities with AI behavior
+    BehaviorQuery.AddRequirement<FTransformFragment>(EMassFragmentAccess::ReadOnly);
+    BehaviorQuery.AddRequirement<FCrowd_BehaviorFragment>(EMassFragmentAccess::ReadWrite);
+    BehaviorQuery.AddTagRequirement<FCrowd_ActiveTag>(EMassFragmentPresence::All);
+    
+    // LOD query - all entities for level-of-detail processing
+    LODQuery.AddRequirement<FTransformFragment>(EMassFragmentAccess::ReadOnly);
+    LODQuery.AddRequirement<FCrowd_LODFragment>(EMassFragmentAccess::ReadWrite);
 }
 
-void UCrowd_MovementProcessor::Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context)
+void UCrowd_MassEntityProcessor::Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context)
 {
-    EntityQuery.ForEachEntityChunk(EntityManager, Context, [this](FMassExecutionContext& Context)
+    double StartTime = FPlatformTime::Seconds();
+    
+    // Process movement first
+    ProcessMovement(EntityManager, Context);
+    
+    // Check time budget
+    if (FPlatformTime::Seconds() - StartTime > ProcessingTimeLimit * 0.5)
     {
-        const int32 NumEntities = Context.GetNumEntities();
-        const float DeltaTime = Context.GetDeltaTimeSeconds();
-        
+        return; // Skip other processing if running out of time
+    }
+    
+    // Process behavior
+    ProcessBehavior(EntityManager, Context);
+    
+    // Check time budget again
+    if (FPlatformTime::Seconds() - StartTime > ProcessingTimeLimit * 0.8)
+    {
+        return; // Skip LOD processing if needed
+    }
+    
+    // Process LOD
+    ProcessLOD(EntityManager, Context);
+}
+
+void UCrowd_MassEntityProcessor::ProcessMovement(FMassEntityManager& EntityManager, FMassExecutionContext& Context)
+{
+    MovementQuery.ForEachEntityChunk(EntityManager, Context, [this](FMassExecutionContext& Context)
+    {
         const TArrayView<FTransformFragment> TransformList = Context.GetMutableFragmentView<FTransformFragment>();
         const TArrayView<FMassVelocityFragment> VelocityList = Context.GetMutableFragmentView<FMassVelocityFragment>();
-        const TArrayView<FCrowd_AgentFragment> AgentList = Context.GetMutableFragmentView<FCrowd_AgentFragment>();
-        const TArrayView<FCrowd_FlockingFragment> FlockingList = Context.GetMutableFragmentView<FCrowd_FlockingFragment>();
-
-        for (int32 EntityIndex = 0; EntityIndex < NumEntities; ++EntityIndex)
-        {
-            FTransformFragment& Transform = TransformList[EntityIndex];
-            FMassVelocityFragment& Velocity = VelocityList[EntityIndex];
-            FCrowd_AgentFragment& Agent = AgentList[EntityIndex];
-            FCrowd_FlockingFragment& Flocking = FlockingList[EntityIndex];
-
-            // Calculate flocking forces
-            CalculateFlockingForces(Context, Agent, Flocking, Transform);
-
-            // Combine forces
-            FVector TotalForce = Flocking.SeparationForce * Flocking.SeparationWeight +
-                               Flocking.CohesionForce * Flocking.CohesionWeight +
-                               Flocking.AlignmentForce * Flocking.AlignmentWeight;
-
-            // Add goal-seeking behavior
-            if (!Agent.TargetLocation.IsZero())
-            {
-                FVector ToTarget = (Agent.TargetLocation - Transform.GetTransform().GetLocation()).GetSafeNormal();
-                TotalForce += ToTarget * 50.0f; // Goal weight
-            }
-
-            // Apply forces to velocity
-            Velocity.Value += TotalForce * DeltaTime;
-            
-            // Limit speed
-            if (Velocity.Value.Size() > Agent.MovementSpeed)
-            {
-                Velocity.Value = Velocity.Value.GetSafeNormal() * Agent.MovementSpeed;
-            }
-
-            // Update position
-            FVector NewLocation = Transform.GetTransform().GetLocation() + Velocity.Value * DeltaTime;
-            Transform.GetMutableTransform().SetLocation(NewLocation);
-
-            // Update rotation to face movement direction
-            if (!Velocity.Value.IsNearlyZero())
-            {
-                FRotator NewRotation = Velocity.Value.Rotation();
-                Transform.GetMutableTransform().SetRotation(NewRotation.Quaternion());
-            }
-        }
-    });
-}
-
-void UCrowd_MovementProcessor::CalculateFlockingForces(const FMassExecutionContext& Context, 
-                                                      FCrowd_AgentFragment& Agent, 
-                                                      FCrowd_FlockingFragment& Flocking,
-                                                      const FTransformFragment& Transform)
-{
-    FVector Position = Transform.GetTransform().GetLocation();
-    
-    Flocking.SeparationForce = CalculateSeparation(Position, Context, NeighborRadius);
-    Flocking.CohesionForce = CalculateCohesion(Position, Context, NeighborRadius);
-    Flocking.AlignmentForce = CalculateAlignment(FVector::ZeroVector, Context, NeighborRadius);
-}
-
-FVector UCrowd_MovementProcessor::CalculateSeparation(const FVector& Position, const FMassExecutionContext& Context, float Radius)
-{
-    FVector SeparationForce = FVector::ZeroVector;
-    int32 NeighborCount = 0;
-
-    // Simple separation - move away from nearby agents
-    // In a full implementation, this would query nearby entities
-    return SeparationForce;
-}
-
-FVector UCrowd_MovementProcessor::CalculateCohesion(const FVector& Position, const FMassExecutionContext& Context, float Radius)
-{
-    FVector CohesionForce = FVector::ZeroVector;
-    
-    // Simple cohesion - move toward average position of nearby agents
-    // In a full implementation, this would calculate center of mass
-    return CohesionForce;
-}
-
-FVector UCrowd_MovementProcessor::CalculateAlignment(const FVector& Velocity, const FMassExecutionContext& Context, float Radius)
-{
-    FVector AlignmentForce = FVector::ZeroVector;
-    
-    // Simple alignment - match velocity of nearby agents
-    // In a full implementation, this would average nearby velocities
-    return AlignmentForce;
-}
-
-// UCrowd_LODProcessor Implementation
-UCrowd_LODProcessor::UCrowd_LODProcessor()
-{
-    ExecutionFlags = (int32)(EProcessorExecutionFlags::All);
-    ExecutionOrder.ExecuteInGroup = UE::Mass::ProcessorGroupNames::LOD;
-}
-
-void UCrowd_LODProcessor::ConfigureQueries()
-{
-    EntityQuery.AddRequirement<FTransformFragment>(EMassFragmentAccess::ReadOnly);
-    EntityQuery.AddRequirement<FMassLODFragment>(EMassFragmentAccess::ReadWrite);
-    EntityQuery.AddRequirement<FCrowd_AgentFragment>(EMassFragmentAccess::ReadOnly);
-}
-
-void UCrowd_LODProcessor::Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context)
-{
-    // Get player location for distance calculations
-    UWorld* World = Context.GetWorld();
-    if (!World) return;
-
-    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(World, 0);
-    if (!PlayerPawn) return;
-
-    FVector PlayerLocation = PlayerPawn->GetActorLocation();
-
-    EntityQuery.ForEachEntityChunk(EntityManager, Context, [this, PlayerLocation](FMassExecutionContext& Context)
-    {
-        const int32 NumEntities = Context.GetNumEntities();
         
-        const TArrayView<FTransformFragment> TransformList = Context.GetFragmentView<FTransformFragment>();
-        const TArrayView<FMassLODFragment> LODList = Context.GetMutableFragmentView<FMassLODFragment>();
-        const TArrayView<FCrowd_AgentFragment> AgentList = Context.GetFragmentView<FCrowd_AgentFragment>();
-
-        for (int32 EntityIndex = 0; EntityIndex < NumEntities; ++EntityIndex)
-        {
-            const FTransformFragment& Transform = TransformList[EntityIndex];
-            FMassLODFragment& LODFragment = LODList[EntityIndex];
-            const FCrowd_AgentFragment& Agent = AgentList[EntityIndex];
-
-            float Distance = FVector::Dist(Transform.GetTransform().GetLocation(), PlayerLocation);
-            UpdateLODLevel(LODFragment, Distance);
-        }
-    });
-}
-
-void UCrowd_LODProcessor::UpdateLODLevel(FMassLODFragment& LODFragment, float DistanceToPlayer)
-{
-    if (DistanceToPlayer <= HighDetailDistance)
-    {
-        LODFragment.LOD = EMassLOD::High;
-    }
-    else if (DistanceToPlayer <= MediumDetailDistance)
-    {
-        LODFragment.LOD = EMassLOD::Medium;
-    }
-    else if (DistanceToPlayer <= LowDetailDistance)
-    {
-        LODFragment.LOD = EMassLOD::Low;
-    }
-    else
-    {
-        LODFragment.LOD = EMassLOD::Off;
-    }
-}
-
-// UCrowd_BehaviorProcessor Implementation
-UCrowd_BehaviorProcessor::UCrowd_BehaviorProcessor()
-{
-    ExecutionFlags = (int32)(EProcessorExecutionFlags::All);
-    ExecutionOrder.ExecuteInGroup = UE::Mass::ProcessorGroupNames::Behavior;
-}
-
-void UCrowd_BehaviorProcessor::ConfigureQueries()
-{
-    EntityQuery.AddRequirement<FTransformFragment>(EMassFragmentAccess::ReadOnly);
-    EntityQuery.AddRequirement<FCrowd_AgentFragment>(EMassFragmentAccess::ReadWrite);
-    EntityQuery.AddChunkRequirement<FMassSimulationVariableTickChunkFragment>(EMassFragmentAccess::ReadOnly);
-}
-
-void UCrowd_BehaviorProcessor::Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context)
-{
-    EntityQuery.ForEachEntityChunk(EntityManager, Context, [this](FMassExecutionContext& Context)
-    {
-        const int32 NumEntities = Context.GetNumEntities();
         const float DeltaTime = Context.GetDeltaTimeSeconds();
+        const int32 NumEntities = Context.GetNumEntities();
         
-        const TArrayView<FTransformFragment> TransformList = Context.GetFragmentView<FTransformFragment>();
-        const TArrayView<FCrowd_AgentFragment> AgentList = Context.GetMutableFragmentView<FCrowd_AgentFragment>();
-
-        for (int32 EntityIndex = 0; EntityIndex < NumEntities; ++EntityIndex)
+        for (int32 i = 0; i < NumEntities; ++i)
         {
-            const FTransformFragment& Transform = TransformList[EntityIndex];
-            FCrowd_AgentFragment& Agent = AgentList[EntityIndex];
-
-            UpdateAgentBehavior(Agent, Transform, DeltaTime);
+            FTransformFragment& Transform = TransformList[i];
+            FMassVelocityFragment& Velocity = VelocityList[i];
             
-            if (Agent.bIsInGroup)
+            // Simple movement integration
+            FVector NewLocation = Transform.GetTransform().GetLocation() + (Velocity.Value * DeltaTime);
+            
+            // Basic collision avoidance with other entities
+            for (int32 j = 0; j < NumEntities; ++j)
             {
-                HandleGroupBehavior(Agent, Context);
+                if (i == j) continue;
+                
+                FVector OtherLocation = TransformList[j].GetTransform().GetLocation();
+                float Distance = FVector::Dist(NewLocation, OtherLocation);
+                
+                if (Distance < AvoidanceRadius)
+                {
+                    FVector AvoidanceVector = (NewLocation - OtherLocation).GetSafeNormal();
+                    NewLocation += AvoidanceVector * (AvoidanceRadius - Distance) * 0.5f;
+                }
+            }
+            
+            // Update transform
+            FTransform NewTransform = Transform.GetTransform();
+            NewTransform.SetLocation(NewLocation);
+            Transform.SetTransform(NewTransform);
+            
+            // Apply drag
+            Velocity.Value *= 0.95f;
+        }
+    });
+}
+
+void UCrowd_MassEntityProcessor::ProcessBehavior(FMassEntityManager& EntityManager, FMassExecutionContext& Context)
+{
+    BehaviorQuery.ForEachEntityChunk(EntityManager, Context, [this](FMassExecutionContext& Context)
+    {
+        const TArrayView<FTransformFragment> TransformList = Context.GetFragmentView<FTransformFragment>();
+        const TArrayView<FCrowd_BehaviorFragment> BehaviorList = Context.GetMutableFragmentView<FCrowd_BehaviorFragment>();
+        
+        const float DeltaTime = Context.GetDeltaTimeSeconds();
+        const int32 NumEntities = Context.GetNumEntities();
+        
+        for (int32 i = 0; i < NumEntities; ++i)
+        {
+            const FTransformFragment& Transform = TransformList[i];
+            FCrowd_BehaviorFragment& Behavior = BehaviorList[i];
+            
+            // Update behavior timer
+            Behavior.StateTimer += DeltaTime;
+            
+            // Simple state machine
+            switch (Behavior.CurrentState)
+            {
+                case ECrowd_BehaviorState::Wandering:
+                    if (Behavior.StateTimer > 5.0f)
+                    {
+                        Behavior.CurrentState = ECrowd_BehaviorState::Idle;
+                        Behavior.StateTimer = 0.0f;
+                    }
+                    break;
+                    
+                case ECrowd_BehaviorState::Idle:
+                    if (Behavior.StateTimer > 3.0f)
+                    {
+                        Behavior.CurrentState = ECrowd_BehaviorState::Wandering;
+                        Behavior.StateTimer = 0.0f;
+                        // Set random target
+                        Behavior.TargetLocation = Transform.GetTransform().GetLocation() + 
+                            FVector(FMath::RandRange(-500.0f, 500.0f), FMath::RandRange(-500.0f, 500.0f), 0.0f);
+                    }
+                    break;
+                    
+                case ECrowd_BehaviorState::Following:
+                    // Follow behavior logic would go here
+                    break;
+                    
+                case ECrowd_BehaviorState::Fleeing:
+                    // Flee behavior logic would go here
+                    if (Behavior.StateTimer > 10.0f)
+                    {
+                        Behavior.CurrentState = ECrowd_BehaviorState::Wandering;
+                        Behavior.StateTimer = 0.0f;
+                    }
+                    break;
             }
         }
     });
 }
 
-void UCrowd_BehaviorProcessor::UpdateAgentBehavior(FCrowd_AgentFragment& Agent, const FTransformFragment& Transform, float DeltaTime)
+void UCrowd_MassEntityProcessor::ProcessLOD(FMassEntityManager& EntityManager, FMassExecutionContext& Context)
 {
-    FVector Position = Transform.GetTransform().GetLocation();
-
-    // Update stress level based on environment
-    Agent.StressLevel = FMath::Max(0.0f, Agent.StressLevel - DeltaTime * 0.1f);
-
-    // Assign new targets based on agent type
-    if (Agent.TargetLocation.IsZero() || FVector::Dist(Position, Agent.TargetLocation) < 100.0f)
+    LODQuery.ForEachEntityChunk(EntityManager, Context, [this](FMassExecutionContext& Context)
     {
-        switch (Agent.AgentType)
+        const TArrayView<FTransformFragment> TransformList = Context.GetFragmentView<FTransformFragment>();
+        const TArrayView<FCrowd_LODFragment> LODList = Context.GetMutableFragmentView<FCrowd_LODFragment>();
+        
+        const int32 NumEntities = Context.GetNumEntities();
+        
+        // Get player location for distance calculations
+        UWorld* World = Context.GetWorld();
+        FVector PlayerLocation = FVector::ZeroVector;
+        if (World && World->GetFirstPlayerController() && World->GetFirstPlayerController()->GetPawn())
         {
-            case 0: // Villager
-                Agent.TargetLocation = FindNearestGatheringPoint(Position);
-                break;
-            case 1: // Hunter
-                Agent.TargetLocation = Position + FMath::VRand() * 1000.0f; // Random patrol
-                break;
-            case 2: // Gatherer
-                Agent.TargetLocation = FindNearestGatheringPoint(Position);
-                break;
-            case 3: // Child
-                Agent.TargetLocation = FindNearestShelter(Position);
-                break;
+            PlayerLocation = World->GetFirstPlayerController()->GetPawn()->GetActorLocation();
         }
-    }
-}
-
-void UCrowd_BehaviorProcessor::HandleGroupBehavior(FCrowd_AgentFragment& Agent, const FMassExecutionContext& Context)
-{
-    // Simple group behavior - stay close to group members
-    // In a full implementation, this would find other agents with the same GroupID
-}
-
-FVector UCrowd_BehaviorProcessor::FindNearestGatheringPoint(const FVector& Position)
-{
-    // Simple implementation - return a point near water or food sources
-    // In a full implementation, this would query the world for resource locations
-    return Position + FVector(FMath::RandRange(-500.0f, 500.0f), FMath::RandRange(-500.0f, 500.0f), 0.0f);
-}
-
-FVector UCrowd_BehaviorProcessor::FindNearestShelter(const FVector& Position)
-{
-    // Simple implementation - return a point near caves or settlements
-    // In a full implementation, this would query the world for shelter locations
-    return Position + FVector(FMath::RandRange(-200.0f, 200.0f), FMath::RandRange(-200.0f, 200.0f), 0.0f);
+        
+        for (int32 i = 0; i < NumEntities; ++i)
+        {
+            const FTransformFragment& Transform = TransformList[i];
+            FCrowd_LODFragment& LOD = LODList[i];
+            
+            // Calculate distance to player
+            float DistanceToPlayer = FVector::Dist(Transform.GetTransform().GetLocation(), PlayerLocation);
+            
+            // Determine LOD level
+            ECrowd_LODLevel NewLODLevel;
+            if (DistanceToPlayer < 1000.0f)
+            {
+                NewLODLevel = ECrowd_LODLevel::High;
+            }
+            else if (DistanceToPlayer < 5000.0f)
+            {
+                NewLODLevel = ECrowd_LODLevel::Medium;
+            }
+            else if (DistanceToPlayer < 15000.0f)
+            {
+                NewLODLevel = ECrowd_LODLevel::Low;
+            }
+            else
+            {
+                NewLODLevel = ECrowd_LODLevel::Culled;
+            }
+            
+            // Update LOD if changed
+            if (LOD.CurrentLOD != NewLODLevel)
+            {
+                LOD.CurrentLOD = NewLODLevel;
+                LOD.bLODChanged = true;
+            }
+            else
+            {
+                LOD.bLODChanged = false;
+            }
+        }
+    });
 }
