@@ -1,281 +1,358 @@
 #include "Perf_RagdollPerformanceOptimizer.h"
 #include "Engine/World.h"
 #include "Engine/Engine.h"
-#include "GameFramework/Actor.h"
+#include "Components/StaticMeshComponent.h"
 #include "Components/SkeletalMeshComponent.h"
-#include "Components/PrimitiveComponent.h"
-#include "Engine/StaticMeshActor.h"
-#include "GameFramework/PlayerController.h"
-#include "Camera/PlayerCameraManager.h"
-#include "PhysicsEngine/PhysicsAsset.h"
+#include "GameFramework/Pawn.h"
 #include "Kismet/GameplayStatics.h"
+#include "DrawDebugHelpers.h"
+#include "../Core_RagdollSystem.h"
 
 UPerf_RagdollPerformanceOptimizer::UPerf_RagdollPerformanceOptimizer()
 {
-    MaxSimultaneousRagdolls = 10;
-    CullingDistance = 5000.0f;
-    bEnableAutomaticOptimization = true;
-    PerformanceThresholdMs = 16.67f; // 60 FPS target
+    PrimaryComponentTick.bCanEverTick = true;
+    PrimaryComponentTick.TickInterval = 0.1f; // Update 10 times per second
+    
+    // Initialize default settings
+    LODSettings = FPerf_RagdollLODSettings();
+    CurrentMetrics = FPerf_RagdollPerformanceMetrics();
+    
+    bEnableRagdollOptimization = true;
+    bEnableDistanceCulling = true;
+    bEnableLODSystem = true;
+    PerformanceUpdateInterval = 0.1f;
+    
+    LastPerformanceUpdate = 0.0f;
+    AccumulatedFrameTime = 0.0f;
+    FrameTimesamples = 0;
 }
 
-void UPerf_RagdollPerformanceOptimizer::OptimizeRagdollPerformance(UWorld* World)
+void UPerf_RagdollPerformanceOptimizer::BeginPlay()
 {
-    if (!World || !bEnableAutomaticOptimization)
+    Super::BeginPlay();
+    
+    UE_LOG(LogTemp, Log, TEXT("Ragdoll Performance Optimizer initialized"));
+    
+    // Find all ragdoll actors in the world
+    if (UWorld* World = GetWorld())
     {
-        return;
-    }
-
-    // Update current metrics
-    UpdateRagdollMetrics(World);
-
-    // Check if performance optimization is needed
-    if (CurrentMetrics.bPerformanceWarning || CurrentMetrics.ActiveRagdolls > MaxSimultaneousRagdolls)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Ragdoll performance critical - applying optimizations"));
+        TArray<AActor*> FoundActors;
+        UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), FoundActors);
         
-        // Limit active ragdolls
-        LimitActiveRagdolls(World, MaxSimultaneousRagdolls);
+        for (AActor* Actor : FoundActors)
+        {
+            if (Actor && Actor->FindComponentByClass<UCore_RagdollSystem>())
+            {
+                TrackedRagdolls.Add(Actor);
+                UE_LOG(LogTemp, Log, TEXT("Found ragdoll actor: %s"), *Actor->GetName());
+            }
+        }
         
-        // Disable distant ragdolls
-        DisableDistantRagdolls(World, CullingDistance);
-        
-        // Update metrics after optimization
-        UpdateRagdollMetrics(World);
+        UE_LOG(LogTemp, Log, TEXT("Tracking %d ragdoll actors"), TrackedRagdolls.Num());
     }
 }
 
-void UPerf_RagdollPerformanceOptimizer::SetRagdollLODLevel(AActor* RagdollActor, EPerf_RagdollLODLevel LODLevel)
+void UPerf_RagdollPerformanceOptimizer::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+{
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+    
+    if (!bEnableRagdollOptimization)
+        return;
+    
+    // Accumulate frame time for performance analysis
+    AccumulatedFrameTime += DeltaTime * 1000.0f; // Convert to milliseconds
+    FrameTimesamples++;
+    
+    LastPerformanceUpdate += DeltaTime;
+    if (LastPerformanceUpdate >= PerformanceUpdateInterval)
+    {
+        OptimizeRagdollPerformance();
+        LastPerformanceUpdate = 0.0f;
+    }
+}
+
+void UPerf_RagdollPerformanceOptimizer::OptimizeRagdollPerformance()
+{
+    if (!GetWorld())
+        return;
+    
+    // Update performance metrics
+    AnalyzeRagdollPerformance();
+    
+    // Apply optimizations based on current performance
+    if (bEnableLODSystem)
+    {
+        UpdateRagdollLOD();
+    }
+    
+    if (bEnableDistanceCulling)
+    {
+        CullDistantRagdolls();
+    }
+    
+    // Batch updates if performance is poor
+    if (CurrentMetrics.RagdollFrameTime > WARNING_FRAME_TIME)
+    {
+        BatchRagdollUpdates();
+    }
+    
+    // Emergency culling if performance is critical
+    if (CurrentMetrics.RagdollFrameTime > CRITICAL_FRAME_TIME)
+    {
+        // Aggressively cull ragdolls to maintain performance
+        int32 CullCount = FMath::Max(1, CurrentMetrics.ActiveRagdolls / 4);
+        for (int32 i = 0; i < CullCount && i < TrackedRagdolls.Num(); i++)
+        {
+            if (TrackedRagdolls[i].IsValid())
+            {
+                CullRagdoll(TrackedRagdolls[i].Get());
+            }
+        }
+        
+        UE_LOG(LogTemp, Warning, TEXT("Emergency ragdoll culling: removed %d ragdolls"), CullCount);
+    }
+}
+
+void UPerf_RagdollPerformanceOptimizer::UpdateRagdollLOD()
+{
+    if (!GetWorld())
+        return;
+    
+    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
+    if (!PlayerPawn)
+        return;
+    
+    FVector PlayerLocation = PlayerPawn->GetActorLocation();
+    
+    CurrentMetrics.HighDetailRagdolls = 0;
+    CurrentMetrics.LowDetailRagdolls = 0;
+    float TotalDistance = 0.0f;
+    int32 ValidRagdolls = 0;
+    
+    for (TWeakObjectPtr<AActor>& RagdollPtr : TrackedRagdolls)
+    {
+        if (!RagdollPtr.IsValid())
+            continue;
+        
+        AActor* RagdollActor = RagdollPtr.Get();
+        float Distance = FVector::Dist(PlayerLocation, RagdollActor->GetActorLocation());
+        
+        TotalDistance += Distance;
+        ValidRagdolls++;
+        
+        ApplyRagdollLOD(RagdollActor, Distance);
+        
+        // Count LOD levels
+        if (Distance <= LODSettings.HighDetailDistance)
+        {
+            CurrentMetrics.HighDetailRagdolls++;
+        }
+        else if (Distance <= LODSettings.LowDetailDistance)
+        {
+            CurrentMetrics.LowDetailRagdolls++;
+        }
+    }
+    
+    // Update average distance
+    if (ValidRagdolls > 0)
+    {
+        CurrentMetrics.AverageRagdollDistance = TotalDistance / ValidRagdolls;
+    }
+}
+
+void UPerf_RagdollPerformanceOptimizer::ApplyRagdollLOD(AActor* RagdollActor, float Distance)
 {
     if (!RagdollActor)
-    {
         return;
-    }
-
-    USkeletalMeshComponent* SkeletalMesh = RagdollActor->FindComponentByClass<USkeletalMeshComponent>();
-    if (!SkeletalMesh)
-    {
+    
+    UCore_RagdollSystem* RagdollComp = RagdollActor->FindComponentByClass<UCore_RagdollSystem>();
+    if (!RagdollComp)
         return;
-    }
-
-    switch (LODLevel)
+    
+    // Apply different LOD levels based on distance
+    if (Distance <= LODSettings.HighDetailDistance)
     {
-    case EPerf_RagdollLODLevel::High:
-        SkeletalMesh->SetForcedLOD(0);
-        SkeletalMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-        break;
+        // High detail - full ragdoll simulation
+        RagdollComp->SetComponentTickInterval(1.0f / LODSettings.UpdateFrequencyHigh);
+    }
+    else if (Distance <= LODSettings.MediumDetailDistance)
+    {
+        // Medium detail - reduced update frequency
+        RagdollComp->SetComponentTickInterval(1.0f / LODSettings.UpdateFrequencyMedium);
+    }
+    else if (Distance <= LODSettings.LowDetailDistance)
+    {
+        // Low detail - minimal updates
+        RagdollComp->SetComponentTickInterval(1.0f / LODSettings.UpdateFrequencyLow);
+    }
+    else if (Distance > LODSettings.CullDistance)
+    {
+        // Too far - consider for culling
+        CullRagdoll(RagdollActor);
+    }
+}
+
+void UPerf_RagdollPerformanceOptimizer::CullDistantRagdolls()
+{
+    if (!GetWorld())
+        return;
+    
+    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
+    if (!PlayerPawn)
+        return;
+    
+    FVector PlayerLocation = PlayerPawn->GetActorLocation();
+    int32 CulledThisFrame = 0;
+    
+    for (int32 i = TrackedRagdolls.Num() - 1; i >= 0; i--)
+    {
+        if (!TrackedRagdolls[i].IsValid())
+        {
+            TrackedRagdolls.RemoveAt(i);
+            continue;
+        }
         
-    case EPerf_RagdollLODLevel::Medium:
-        SkeletalMesh->SetForcedLOD(1);
-        SkeletalMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-        break;
+        AActor* RagdollActor = TrackedRagdolls[i].Get();
+        float Distance = FVector::Dist(PlayerLocation, RagdollActor->GetActorLocation());
         
-    case EPerf_RagdollLODLevel::Low:
-        SkeletalMesh->SetForcedLOD(2);
-        SkeletalMesh->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
-        break;
+        if (Distance > LODSettings.CullDistance || CurrentMetrics.ActiveRagdolls > LODSettings.MaxActiveRagdolls)
+        {
+            CullRagdoll(RagdollActor);
+            CulledThisFrame++;
+        }
+    }
+    
+    CurrentMetrics.CulledRagdolls += CulledThisFrame;
+}
+
+void UPerf_RagdollPerformanceOptimizer::CullRagdoll(AActor* RagdollActor)
+{
+    if (!RagdollActor)
+        return;
+    
+    UCore_RagdollSystem* RagdollComp = RagdollActor->FindComponentByClass<UCore_RagdollSystem>();
+    if (RagdollComp)
+    {
+        // Disable ragdoll simulation
+        RagdollComp->SetComponentTickEnabled(false);
         
-    case EPerf_RagdollLODLevel::Disabled:
-        SkeletalMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-        SkeletalMesh->SetSimulatePhysics(false);
-        break;
+        // Add to culled list for potential restoration
+        CulledRagdolls.AddUnique(RagdollActor);
+        
+        // Remove from active tracking
+        TrackedRagdolls.Remove(RagdollActor);
+        
+        UE_LOG(LogTemp, Verbose, TEXT("Culled ragdoll actor: %s"), *RagdollActor->GetName());
     }
 }
 
-FPerf_RagdollMetrics UPerf_RagdollPerformanceOptimizer::GetRagdollMetrics(UWorld* World)
+void UPerf_RagdollPerformanceOptimizer::RestoreRagdoll(AActor* RagdollActor)
 {
-    UpdateRagdollMetrics(World);
-    return CurrentMetrics;
-}
-
-void UPerf_RagdollPerformanceOptimizer::LimitActiveRagdolls(UWorld* World, int32 MaxCount)
-{
-    if (!World)
-    {
+    if (!RagdollActor)
         return;
-    }
-
-    TArray<AActor*> RagdollActors;
     
-    // Find all ragdoll actors
-    for (TActorIterator<AActor> ActorIterator(World); ActorIterator; ++ActorIterator)
+    UCore_RagdollSystem* RagdollComp = RagdollActor->FindComponentByClass<UCore_RagdollSystem>();
+    if (RagdollComp)
     {
-        AActor* Actor = *ActorIterator;
-        if (Actor)
-        {
-            USkeletalMeshComponent* SkeletalMesh = Actor->FindComponentByClass<USkeletalMeshComponent>();
-            if (SkeletalMesh && SkeletalMesh->IsSimulatingPhysics())
-            {
-                RagdollActors.Add(Actor);
-            }
-        }
+        // Re-enable ragdoll simulation
+        RagdollComp->SetComponentTickEnabled(true);
+        
+        // Add back to active tracking
+        TrackedRagdolls.AddUnique(RagdollActor);
+        
+        // Remove from culled list
+        CulledRagdolls.Remove(RagdollActor);
+        
+        UE_LOG(LogTemp, Verbose, TEXT("Restored ragdoll actor: %s"), *RagdollActor->GetName());
     }
+}
 
-    // If we have too many ragdolls, disable the furthest ones
-    if (RagdollActors.Num() > MaxCount)
+void UPerf_RagdollPerformanceOptimizer::BatchRagdollUpdates()
+{
+    // Implement batched updates to reduce per-frame overhead
+    const int32 MaxUpdatesPerFrame = 5;
+    int32 UpdatesThisFrame = 0;
+    
+    for (TWeakObjectPtr<AActor>& RagdollPtr : TrackedRagdolls)
     {
-        // Get player location for distance calculation
-        FVector PlayerLocation = FVector::ZeroVector;
-        APlayerController* PC = UGameplayStatics::GetPlayerController(World, 0);
-        if (PC && PC->PlayerCameraManager)
+        if (UpdatesThisFrame >= MaxUpdatesPerFrame)
+            break;
+        
+        if (!RagdollPtr.IsValid())
+            continue;
+        
+        AActor* RagdollActor = RagdollPtr.Get();
+        UCore_RagdollSystem* RagdollComp = RagdollActor->FindComponentByClass<UCore_RagdollSystem>();
+        
+        if (RagdollComp && RagdollComp->IsComponentTickEnabled())
         {
-            PlayerLocation = PC->PlayerCameraManager->GetCameraLocation();
-        }
-
-        // Sort by distance from player
-        RagdollActors.Sort([PlayerLocation](const AActor& A, const AActor& B)
-        {
-            float DistA = FVector::Dist(A.GetActorLocation(), PlayerLocation);
-            float DistB = FVector::Dist(B.GetActorLocation(), PlayerLocation);
-            return DistA < DistB;
-        });
-
-        // Disable ragdolls beyond the limit
-        for (int32 i = MaxCount; i < RagdollActors.Num(); ++i)
-        {
-            SetRagdollLODLevel(RagdollActors[i], EPerf_RagdollLODLevel::Disabled);
+            // Force an update for this ragdoll
+            RagdollComp->TickComponent(GetWorld()->GetDeltaSeconds(), LEVELTICK_All, nullptr);
+            UpdatesThisFrame++;
         }
     }
 }
 
-void UPerf_RagdollPerformanceOptimizer::DisableDistantRagdolls(UWorld* World, float MaxDistance)
+void UPerf_RagdollPerformanceOptimizer::AnalyzeRagdollPerformance()
 {
-    if (!World)
-    {
-        return;
-    }
-
-    // Get player location
-    FVector PlayerLocation = FVector::ZeroVector;
-    APlayerController* PC = UGameplayStatics::GetPlayerController(World, 0);
-    if (PC && PC->PlayerCameraManager)
-    {
-        PlayerLocation = PC->PlayerCameraManager->GetCameraLocation();
-    }
-
-    // Check all ragdoll actors
-    for (TActorIterator<AActor> ActorIterator(World); ActorIterator; ++ActorIterator)
-    {
-        AActor* Actor = *ActorIterator;
-        if (Actor)
-        {
-            USkeletalMeshComponent* SkeletalMesh = Actor->FindComponentByClass<USkeletalMeshComponent>();
-            if (SkeletalMesh && SkeletalMesh->IsSimulatingPhysics())
-            {
-                float Distance = FVector::Dist(Actor->GetActorLocation(), PlayerLocation);
-                
-                if (Distance > MaxDistance)
-                {
-                    SetRagdollLODLevel(Actor, EPerf_RagdollLODLevel::Disabled);
-                }
-                else
-                {
-                    // Apply distance-based LOD
-                    ApplyLODOptimizations(Actor, Distance);
-                }
-            }
-        }
-    }
-}
-
-bool UPerf_RagdollPerformanceOptimizer::IsRagdollPerformanceCritical(UWorld* World)
-{
-    UpdateRagdollMetrics(World);
-    return CurrentMetrics.bPerformanceWarning;
-}
-
-void UPerf_RagdollPerformanceOptimizer::EnableRagdollCulling(bool bEnable)
-{
-    bEnableAutomaticOptimization = bEnable;
-    UE_LOG(LogTemp, Log, TEXT("Ragdoll culling %s"), bEnable ? TEXT("enabled") : TEXT("disabled"));
-}
-
-void UPerf_RagdollPerformanceOptimizer::RunRagdollPerformanceTest()
-{
-    UWorld* World = GEngine->GetCurrentPlayWorld();
-    if (!World)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("No world found for ragdoll performance test"));
-        return;
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("Running ragdoll performance test..."));
-    
-    FPerf_RagdollMetrics Metrics = GetRagdollMetrics(World);
-    
-    UE_LOG(LogTemp, Log, TEXT("Ragdoll Performance Test Results:"));
-    UE_LOG(LogTemp, Log, TEXT("- Active Ragdolls: %d/%d"), Metrics.ActiveRagdolls, Metrics.MaxRagdolls);
-    UE_LOG(LogTemp, Log, TEXT("- Average Frame Time: %.2f ms"), Metrics.AverageFrameTime);
-    UE_LOG(LogTemp, Log, TEXT("- Physics Time: %.2f ms"), Metrics.PhysicsTimeMs);
-    UE_LOG(LogTemp, Log, TEXT("- Performance Warning: %s"), Metrics.bPerformanceWarning ? TEXT("YES") : TEXT("NO"));
-    
-    if (Metrics.bPerformanceWarning)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Performance optimization recommended!"));
-        OptimizeRagdollPerformance(World);
-    }
-}
-
-void UPerf_RagdollPerformanceOptimizer::UpdateRagdollMetrics(UWorld* World)
-{
-    if (!World)
-    {
-        return;
-    }
-
+    // Update active ragdoll count
     CurrentMetrics.ActiveRagdolls = 0;
-    CurrentMetrics.MaxRagdolls = MaxSimultaneousRagdolls;
-
-    // Count active ragdoll actors
-    for (TActorIterator<AActor> ActorIterator(World); ActorIterator; ++ActorIterator)
+    for (const TWeakObjectPtr<AActor>& RagdollPtr : TrackedRagdolls)
     {
-        AActor* Actor = *ActorIterator;
-        if (Actor)
+        if (RagdollPtr.IsValid())
         {
-            USkeletalMeshComponent* SkeletalMesh = Actor->FindComponentByClass<USkeletalMeshComponent>();
-            if (SkeletalMesh && SkeletalMesh->IsSimulatingPhysics())
-            {
-                CurrentMetrics.ActiveRagdolls++;
-            }
+            CurrentMetrics.ActiveRagdolls++;
         }
     }
-
-    // Get frame time metrics
-    CurrentMetrics.AverageFrameTime = FApp::GetDeltaTime() * 1000.0f; // Convert to milliseconds
-    CurrentMetrics.PhysicsTimeMs = CurrentMetrics.AverageFrameTime * 0.3f; // Estimate physics time
-
-    // Check performance warning threshold
-    CurrentMetrics.bPerformanceWarning = (CurrentMetrics.AverageFrameTime > PerformanceThresholdMs) || 
-                                        (CurrentMetrics.ActiveRagdolls > MaxSimultaneousRagdolls);
+    
+    // Calculate average frame time
+    if (FrameTimesamples > 0)
+    {
+        CurrentMetrics.RagdollFrameTime = AccumulatedFrameTime / FrameTimesamples;
+        
+        // Reset for next measurement period
+        AccumulatedFrameTime = 0.0f;
+        FrameTimesamples = 0;
+    }
 }
 
-void UPerf_RagdollPerformanceOptimizer::ApplyLODOptimizations(AActor* RagdollActor, float Distance)
+void UPerf_RagdollPerformanceOptimizer::LogRagdollPerformanceStats()
 {
-    if (!RagdollActor)
-    {
-        return;
-    }
-
-    EPerf_RagdollLODLevel LODLevel = EPerf_RagdollLODLevel::High;
-
-    if (Distance > CullingDistance * 0.8f)
-    {
-        LODLevel = EPerf_RagdollLODLevel::Low;
-    }
-    else if (Distance > CullingDistance * 0.5f)
-    {
-        LODLevel = EPerf_RagdollLODLevel::Medium;
-    }
-
-    SetRagdollLODLevel(RagdollActor, LODLevel);
+    UE_LOG(LogTemp, Log, TEXT("=== Ragdoll Performance Stats ==="));
+    UE_LOG(LogTemp, Log, TEXT("Active Ragdolls: %d"), CurrentMetrics.ActiveRagdolls);
+    UE_LOG(LogTemp, Log, TEXT("Culled Ragdolls: %d"), CurrentMetrics.CulledRagdolls);
+    UE_LOG(LogTemp, Log, TEXT("High Detail: %d, Low Detail: %d"), CurrentMetrics.HighDetailRagdolls, CurrentMetrics.LowDetailRagdolls);
+    UE_LOG(LogTemp, Log, TEXT("Average Distance: %.2f"), CurrentMetrics.AverageRagdollDistance);
+    UE_LOG(LogTemp, Log, TEXT("Frame Time: %.2f ms"), CurrentMetrics.RagdollFrameTime);
+    UE_LOG(LogTemp, Log, TEXT("Performance Status: %s"), 
+           CurrentMetrics.RagdollFrameTime < TARGET_FRAME_TIME ? TEXT("GOOD") :
+           CurrentMetrics.RagdollFrameTime < WARNING_FRAME_TIME ? TEXT("WARNING") : TEXT("CRITICAL"));
 }
 
-bool UPerf_RagdollPerformanceOptimizer::ShouldCullRagdoll(AActor* RagdollActor, const FVector& ViewLocation)
+void UPerf_RagdollPerformanceOptimizer::ResetPerformanceMetrics()
 {
-    if (!RagdollActor)
-    {
-        return true;
-    }
+    CurrentMetrics = FPerf_RagdollPerformanceMetrics();
+    AccumulatedFrameTime = 0.0f;
+    FrameTimesamples = 0;
+    
+    UE_LOG(LogTemp, Log, TEXT("Ragdoll performance metrics reset"));
+}
 
-    float Distance = FVector::Dist(RagdollActor->GetActorLocation(), ViewLocation);
-    return Distance > CullingDistance;
+void UPerf_RagdollPerformanceOptimizer::TestRagdollOptimization()
+{
+    UE_LOG(LogTemp, Log, TEXT("Testing ragdoll optimization system..."));
+    
+    // Force a performance analysis
+    AnalyzeRagdollPerformance();
+    
+    // Test LOD system
+    UpdateRagdollLOD();
+    
+    // Test culling system
+    CullDistantRagdolls();
+    
+    // Log results
+    LogRagdollPerformanceStats();
+    
+    UE_LOG(LogTemp, Log, TEXT("Ragdoll optimization test complete"));
 }
