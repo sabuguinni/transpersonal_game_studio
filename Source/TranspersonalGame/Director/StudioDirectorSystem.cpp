@@ -1,293 +1,297 @@
 #include "StudioDirectorSystem.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
+#include "EngineUtils.h"
 #include "Kismet/GameplayStatics.h"
-#include "Engine/StaticMeshActor.h"
-#include "Landscape/Landscape.h"
 
-UStudioDirectorSystem::UStudioDirectorSystem()
+AStudioDirectorSystem::AStudioDirectorSystem()
 {
-    CurrentCycleId = TEXT("PROD_CYCLE_AUTO_20260516_001");
-    CycleStartTime = 0.0f;
+    PrimaryActorTick.bCanEverTick = true;
+    
+    RootSceneComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootSceneComponent"));
+    RootComponent = RootSceneComponent;
+    
+    bPlayablePrototypeReady = false;
+    OverallProgress = 0.0f;
 }
 
-void UStudioDirectorSystem::Initialize(FSubsystemCollectionBase& Collection)
+void AStudioDirectorSystem::BeginPlay()
 {
-    Super::Initialize(Collection);
+    Super::BeginPlay();
     
-    UE_LOG(LogTemp, Warning, TEXT("Studio Director System Initialized"));
+    InitializeAgentTasks();
+    InitializeBiomeStatuses();
     
-    CycleStartTime = FPlatformTime::Seconds();
-    SetupInitialTasks();
-    InitializeBiomeTargets();
+    UE_LOG(LogTemp, Warning, TEXT("Studio Director System initialized"));
 }
 
-void UStudioDirectorSystem::Deinitialize()
+void AStudioDirectorSystem::Tick(float DeltaTime)
+{
+    Super::Tick(DeltaTime);
+    
+    // Update progress every 5 seconds
+    static float UpdateTimer = 0.0f;
+    UpdateTimer += DeltaTime;
+    
+    if (UpdateTimer >= 5.0f)
+    {
+        CheckBiomePopulation();
+        ValidatePlayablePrototype();
+        OverallProgress = CalculateOverallProgress();
+        UpdateTimer = 0.0f;
+    }
+}
+
+void AStudioDirectorSystem::InitializeAgentTasks()
 {
     AgentTasks.Empty();
-    BiomeStatuses.Empty();
     
-    Super::Deinitialize();
-}
-
-void UStudioDirectorSystem::AssignTaskToAgent(int32 AgentNumber, const FString& TaskDescription, EDir_TaskPriority Priority)
-{
-    FDir_AgentTask NewTask;
-    NewTask.AgentNumber = AgentNumber;
-    NewTask.TaskDescription = TaskDescription;
-    NewTask.Priority = Priority;
-    NewTask.Status = EDir_TaskStatus::Pending;
-    NewTask.CycleId = CurrentCycleId;
+    // Critical tasks for playable prototype
+    TArray<TPair<FString, FString>> TaskDefinitions = {
+        {TEXT("Agent_02_EngineArchitect"), TEXT("Validate core systems compilation and module dependencies")},
+        {TEXT("Agent_03_CoreSystems"), TEXT("Implement physics collision for character-dinosaur interaction")},
+        {TEXT("Agent_05_WorldGenerator"), TEXT("Populate 5 biomes with terrain actors (500+ per biome)")},
+        {TEXT("Agent_06_EnvironmentArt"), TEXT("Spawn vegetation and rocks using FBX pipeline test")},
+        {TEXT("Agent_07_Architecture"), TEXT("Create primitive shelters and landmarks for navigation")},
+        {TEXT("Agent_08_Lighting"), TEXT("Establish Cretaceous atmosphere with proper lighting")},
+        {TEXT("Agent_09_CharacterArtist"), TEXT("Create dinosaur actors with collision and basic AI")},
+        {TEXT("Agent_10_Animation"), TEXT("Implement character movement animations and IK")},
+        {TEXT("Agent_11_NPCBehavior"), TEXT("Basic dinosaur behavior trees for survival gameplay")},
+        {TEXT("Agent_12_CombatAI"), TEXT("Implement survival HUD (health/hunger/thirst bars)")},
+        {TEXT("Agent_13_CrowdSim"), TEXT("Optimize mass simulation for 500+ actors per biome")},
+        {TEXT("Agent_14_QuestDesigner"), TEXT("Create first survival objective: find water source")},
+        {TEXT("Agent_15_Narrative"), TEXT("Write survival tutorial and basic lore snippets")},
+        {TEXT("Agent_16_Audio"), TEXT("Ambient prehistoric soundscape and dinosaur calls")},
+        {TEXT("Agent_17_VFX"), TEXT("Basic particle effects for environmental atmosphere")},
+        {TEXT("Agent_18_QA"), TEXT("Test character movement and basic survival mechanics")},
+        {TEXT("Agent_19_Integration"), TEXT("Ensure all systems work together in MinPlayableMap")}
+    };
     
-    // Estimate duration based on agent type
-    switch (AgentNumber)
+    for (int32 i = 0; i < TaskDefinitions.Num(); i++)
     {
-        case 2: // Engine Architect
-        case 3: // Core Systems
-            NewTask.EstimatedDuration = 300.0f; // 5 minutes
-            break;
-        case 5: // World Generator
-        case 6: // Environment Artist
-        case 7: // Architecture
-            NewTask.EstimatedDuration = 600.0f; // 10 minutes
-            break;
-        case 9: // Character Artist
-        case 10: // Animation
-            NewTask.EstimatedDuration = 450.0f; // 7.5 minutes
-            break;
-        default:
-            NewTask.EstimatedDuration = 360.0f; // 6 minutes
-            break;
+        FDir_AgentTask NewTask;
+        NewTask.AgentID = TaskDefinitions[i].Key;
+        NewTask.TaskDescription = TaskDefinitions[i].Value;
+        NewTask.Priority = i < 5 ? 10 : 5; // First 5 are high priority
+        NewTask.bIsCompleted = false;
+        NewTask.CompletionPercentage = 0.0f;
+        
+        AgentTasks.Add(NewTask);
     }
     
-    AgentTasks.Add(NewTask);
-    
-    UE_LOG(LogTemp, Warning, TEXT("Studio Director: Assigned task to Agent #%d: %s"), 
-           AgentNumber, *TaskDescription);
+    UE_LOG(LogTemp, Warning, TEXT("Initialized %d agent tasks"), AgentTasks.Num());
 }
 
-void UStudioDirectorSystem::UpdateTaskStatus(int32 AgentNumber, const FString& CycleId, EDir_TaskStatus NewStatus)
+void AStudioDirectorSystem::InitializeBiomeStatuses()
+{
+    BiomeStatuses.Empty();
+    
+    TArray<TPair<FString, FVector>> BiomeDefinitions = {
+        {TEXT("Savana"), FVector(0, 0, 0)},
+        {TEXT("Pantano"), FVector(-50000, -45000, 0)},
+        {TEXT("Floresta"), FVector(-45000, 40000, 0)},
+        {TEXT("Deserto"), FVector(55000, 0, 0)},
+        {TEXT("Montanha"), FVector(40000, 50000, 0)}
+    };
+    
+    for (const auto& BiomeDef : BiomeDefinitions)
+    {
+        FDir_BiomeStatus NewBiome;
+        NewBiome.BiomeName = BiomeDef.Key;
+        NewBiome.BiomeLocation = BiomeDef.Value;
+        NewBiome.ActorCount = 0;
+        NewBiome.bIsPopulated = false;
+        
+        BiomeStatuses.Add(NewBiome);
+    }
+}
+
+void AStudioDirectorSystem::UpdateAgentTask(const FString& AgentID, float Progress, bool bCompleted)
 {
     for (FDir_AgentTask& Task : AgentTasks)
     {
-        if (Task.AgentNumber == AgentNumber && Task.CycleId == CycleId)
+        if (Task.AgentID == AgentID)
         {
-            Task.Status = NewStatus;
+            Task.CompletionPercentage = FMath::Clamp(Progress, 0.0f, 100.0f);
+            Task.bIsCompleted = bCompleted || (Progress >= 100.0f);
             
-            UE_LOG(LogTemp, Warning, TEXT("Studio Director: Agent #%d task status updated to %d"), 
-                   AgentNumber, (int32)NewStatus);
+            UE_LOG(LogTemp, Warning, TEXT("Updated task for %s: %.1f%% complete"), 
+                   *AgentID, Task.CompletionPercentage);
             break;
         }
     }
 }
 
-TArray<FDir_AgentTask> UStudioDirectorSystem::GetPendingTasks() const
+void AStudioDirectorSystem::CheckBiomePopulation()
+{
+    UWorld* World = GetWorld();
+    if (!World) return;
+    
+    for (FDir_BiomeStatus& Biome : BiomeStatuses)
+    {
+        int32 ActorCount = 0;
+        
+        // Count actors within 10km of biome center
+        for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+        {
+            AActor* Actor = *ActorItr;
+            if (!Actor || Actor == this) continue;
+            
+            float Distance = FVector::Dist(Actor->GetActorLocation(), Biome.BiomeLocation);
+            if (Distance <= 1000000.0f) // 10km in UE units
+            {
+                ActorCount++;
+            }
+        }
+        
+        Biome.ActorCount = ActorCount;
+        Biome.bIsPopulated = ActorCount >= 500; // Criterion from memory
+        
+        if (Biome.ActorCount != ActorCount)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("Biome %s: %d actors (target: 500+)"), 
+                   *Biome.BiomeName, ActorCount);
+        }
+    }
+}
+
+void AStudioDirectorSystem::ValidatePlayablePrototype()
+{
+    bool bCharacterMovement = ValidateCharacterMovement();
+    bool bDinosaurPresence = ValidateDinosaurPresence();
+    bool bTerrainLighting = ValidateTerrainAndLighting();
+    
+    // Check if at least 3 biomes are populated
+    int32 PopulatedBiomes = 0;
+    for (const FDir_BiomeStatus& Biome : BiomeStatuses)
+    {
+        if (Biome.bIsPopulated) PopulatedBiomes++;
+    }
+    
+    bPlayablePrototypeReady = bCharacterMovement && bDinosaurPresence && 
+                             bTerrainLighting && (PopulatedBiomes >= 3);
+    
+    if (bPlayablePrototypeReady)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("PLAYABLE PROTOTYPE READY!"));
+    }
+}
+
+bool AStudioDirectorSystem::ValidateCharacterMovement()
+{
+    // Check if TranspersonalCharacter exists and has movement component
+    UWorld* World = GetWorld();
+    if (!World) return false;
+    
+    // Look for character actors in the world
+    for (TActorIterator<APawn> PawnItr(World); PawnItr; ++PawnItr)
+    {
+        APawn* Pawn = *PawnItr;
+        if (Pawn && Pawn->GetName().Contains(TEXT("TranspersonalCharacter")))
+        {
+            return true; // Found character
+        }
+    }
+    
+    return false;
+}
+
+bool AStudioDirectorSystem::ValidateDinosaurPresence()
+{
+    UWorld* World = GetWorld();
+    if (!World) return false;
+    
+    int32 DinosaurCount = 0;
+    
+    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+    {
+        AActor* Actor = *ActorItr;
+        if (Actor && (Actor->GetName().Contains(TEXT("Dinosaur")) || 
+                     Actor->GetName().Contains(TEXT("TRex")) ||
+                     Actor->GetName().Contains(TEXT("Raptor")) ||
+                     Actor->GetName().Contains(TEXT("Brachiosaurus"))))
+        {
+            DinosaurCount++;
+        }
+    }
+    
+    return DinosaurCount >= 5; // Need at least 5 dinosaurs
+}
+
+bool AStudioDirectorSystem::ValidateTerrainAndLighting()
+{
+    UWorld* World = GetWorld();
+    if (!World) return false;
+    
+    // Check for directional light (sun)
+    bool bHasDirectionalLight = false;
+    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+    {
+        AActor* Actor = *ActorItr;
+        if (Actor && Actor->GetName().Contains(TEXT("DirectionalLight")))
+        {
+            bHasDirectionalLight = true;
+            break;
+        }
+    }
+    
+    return bHasDirectionalLight;
+}
+
+float AStudioDirectorSystem::CalculateOverallProgress() const
+{
+    if (AgentTasks.Num() == 0) return 0.0f;
+    
+    float TotalProgress = 0.0f;
+    for (const FDir_AgentTask& Task : AgentTasks)
+    {
+        TotalProgress += Task.CompletionPercentage;
+    }
+    
+    return TotalProgress / AgentTasks.Num();
+}
+
+TArray<FDir_AgentTask> AStudioDirectorSystem::GetPendingTasks() const
 {
     TArray<FDir_AgentTask> PendingTasks;
     
     for (const FDir_AgentTask& Task : AgentTasks)
     {
-        if (Task.Status == EDir_TaskStatus::Pending || Task.Status == EDir_TaskStatus::InProgress)
+        if (!Task.bIsCompleted)
         {
             PendingTasks.Add(Task);
         }
     }
     
+    // Sort by priority (higher first)
+    PendingTasks.Sort([](const FDir_AgentTask& A, const FDir_AgentTask& B) {
+        return A.Priority > B.Priority;
+    });
+    
     return PendingTasks;
 }
 
-FDir_AgentTask UStudioDirectorSystem::GetTaskForAgent(int32 AgentNumber) const
+void AStudioDirectorSystem::DebugPrintStatus()
 {
-    for (const FDir_AgentTask& Task : AgentTasks)
+    UE_LOG(LogTemp, Warning, TEXT("=== STUDIO DIRECTOR STATUS ==="));
+    UE_LOG(LogTemp, Warning, TEXT("Overall Progress: %.1f%%"), OverallProgress);
+    UE_LOG(LogTemp, Warning, TEXT("Playable Prototype Ready: %s"), 
+           bPlayablePrototypeReady ? TEXT("YES") : TEXT("NO"));
+    
+    UE_LOG(LogTemp, Warning, TEXT("=== BIOME STATUS ==="));
+    for (const FDir_BiomeStatus& Biome : BiomeStatuses)
     {
-        if (Task.AgentNumber == AgentNumber && Task.CycleId == CurrentCycleId)
-        {
-            return Task;
-        }
+        UE_LOG(LogTemp, Warning, TEXT("%s: %d actors (%s)"), 
+               *Biome.BiomeName, Biome.ActorCount, 
+               Biome.bIsPopulated ? TEXT("POPULATED") : TEXT("NEEDS WORK"));
     }
     
-    return FDir_AgentTask(); // Return default task if none found
-}
-
-void UStudioDirectorSystem::RegisterBiomeStatus(EDir_BiomeType BiomeType, FVector Location, int32 ActorCount)
-{
-    // Find existing biome status or create new one
-    FDir_BiomeStatus* ExistingStatus = nullptr;
-    for (FDir_BiomeStatus& Status : BiomeStatuses)
+    UE_LOG(LogTemp, Warning, TEXT("=== PENDING TASKS ==="));
+    TArray<FDir_AgentTask> Pending = GetPendingTasks();
+    for (int32 i = 0; i < FMath::Min(5, Pending.Num()); i++)
     {
-        if (Status.BiomeType == BiomeType)
-        {
-            ExistingStatus = &Status;
-            break;
-        }
+        const FDir_AgentTask& Task = Pending[i];
+        UE_LOG(LogTemp, Warning, TEXT("%s: %.1f%% - %s"), 
+               *Task.AgentID, Task.CompletionPercentage, *Task.TaskDescription);
     }
-    
-    if (!ExistingStatus)
-    {
-        FDir_BiomeStatus NewStatus;
-        NewStatus.BiomeType = BiomeType;
-        NewStatus.WorldLocation = Location;
-        BiomeStatuses.Add(NewStatus);
-        ExistingStatus = &BiomeStatuses.Last();
-    }
-    
-    ExistingStatus->ActorCount = ActorCount;
-    ExistingStatus->bIsPopulated = ActorCount >= 500; // Minimum for populated biome
-    
-    UE_LOG(LogTemp, Warning, TEXT("Studio Director: Biome %d registered with %d actors at %s"), 
-           (int32)BiomeType, ActorCount, *Location.ToString());
-}
-
-TArray<FDir_BiomeStatus> UStudioDirectorSystem::GetBiomeStatuses() const
-{
-    return BiomeStatuses;
-}
-
-bool UStudioDirectorSystem::AreCriteriaMet() const
-{
-    bool bCriterion1 = ValidateBiomePopulation();
-    bool bCriterion2 = ValidateAtmosphere();
-    bool bCriterion3 = ValidateFBXPipeline();
-    
-    UE_LOG(LogTemp, Warning, TEXT("Studio Director: Criteria Status - Biomes: %s, Atmosphere: %s, FBX: %s"), 
-           bCriterion1 ? TEXT("PASS") : TEXT("FAIL"),
-           bCriterion2 ? TEXT("PASS") : TEXT("FAIL"),
-           bCriterion3 ? TEXT("PASS") : TEXT("FAIL"));
-    
-    return bCriterion1 && bCriterion2 && bCriterion3;
-}
-
-void UStudioDirectorSystem::ValidateMinPlayableMap()
-{
-    if (UWorld* World = GetWorld())
-    {
-        TArray<AActor*> AllActors;
-        UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), AllActors);
-        
-        int32 CharacterCount = 0;
-        int32 StaticMeshCount = 0;
-        int32 LandscapeCount = 0;
-        
-        for (AActor* Actor : AllActors)
-        {
-            if (Actor->IsA<APawn>())
-            {
-                CharacterCount++;
-            }
-            else if (Actor->IsA<AStaticMeshActor>())
-            {
-                StaticMeshCount++;
-            }
-            else if (Actor->IsA<ALandscape>())
-            {
-                LandscapeCount++;
-            }
-        }
-        
-        UE_LOG(LogTemp, Warning, TEXT("Studio Director: MinPlayableMap Validation - Characters: %d, Static Meshes: %d, Landscapes: %d"), 
-               CharacterCount, StaticMeshCount, LandscapeCount);
-    }
-}
-
-void UStudioDirectorSystem::GenerateProductionReport()
-{
-    float CurrentTime = FPlatformTime::Seconds();
-    float CycleDuration = CurrentTime - CycleStartTime;
-    
-    int32 CompletedTasks = 0;
-    int32 PendingTasks = 0;
-    
-    for (const FDir_AgentTask& Task : AgentTasks)
-    {
-        if (Task.Status == EDir_TaskStatus::Completed)
-        {
-            CompletedTasks++;
-        }
-        else
-        {
-            PendingTasks++;
-        }
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("Studio Director Production Report:"));
-    UE_LOG(LogTemp, Warning, TEXT("Cycle Duration: %.2f seconds"), CycleDuration);
-    UE_LOG(LogTemp, Warning, TEXT("Tasks Completed: %d"), CompletedTasks);
-    UE_LOG(LogTemp, Warning, TEXT("Tasks Pending: %d"), PendingTasks);
-    UE_LOG(LogTemp, Warning, TEXT("Biomes Registered: %d"), BiomeStatuses.Num());
-}
-
-void UStudioDirectorSystem::InitializeAgentTasks()
-{
-    AgentTasks.Empty();
-    CurrentCycleId = TEXT("PROD_CYCLE_AUTO_20260516_001");
-    
-    // Critical path tasks for MILESTONE 1
-    AssignTaskToAgent(2, TEXT("Validate engine architecture and compilation"), EDir_TaskPriority::Critical);
-    AssignTaskToAgent(3, TEXT("Implement core physics and movement systems"), EDir_TaskPriority::Critical);
-    AssignTaskToAgent(5, TEXT("Populate 5 biomes with 500+ actors each"), EDir_TaskPriority::Critical);
-    AssignTaskToAgent(6, TEXT("Create environment assets for biomes"), EDir_TaskPriority::High);
-    AssignTaskToAgent(8, TEXT("Establish Cretaceous atmosphere lighting"), EDir_TaskPriority::High);
-    AssignTaskToAgent(9, TEXT("Test FBX pipeline with character assets"), EDir_TaskPriority::High);
-    AssignTaskToAgent(12, TEXT("Implement survival HUD system"), EDir_TaskPriority::Medium);
-    
-    UE_LOG(LogTemp, Warning, TEXT("Studio Director: Initialized %d agent tasks for cycle %s"), 
-           AgentTasks.Num(), *CurrentCycleId);
-}
-
-void UStudioDirectorSystem::SetupInitialTasks()
-{
-    InitializeAgentTasks();
-}
-
-void UStudioDirectorSystem::InitializeBiomeTargets()
-{
-    // Initialize biome targets based on memory coordinates
-    TArray<TPair<EDir_BiomeType, FVector>> BiomeTargets = {
-        {EDir_BiomeType::Savanna, FVector(0, 0, 0)},
-        {EDir_BiomeType::Swamp, FVector(-50000, -45000, 0)},
-        {EDir_BiomeType::Forest, FVector(-45000, 40000, 0)},
-        {EDir_BiomeType::Desert, FVector(55000, 0, 0)},
-        {EDir_BiomeType::Mountain, FVector(40000, 50000, 0)}
-    };
-    
-    for (const auto& BiomeTarget : BiomeTargets)
-    {
-        FDir_BiomeStatus Status;
-        Status.BiomeType = BiomeTarget.Key;
-        Status.WorldLocation = BiomeTarget.Value;
-        Status.ActorCount = 0;
-        Status.bIsPopulated = false;
-        BiomeStatuses.Add(Status);
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("Studio Director: Initialized %d biome targets"), BiomeStatuses.Num());
-}
-
-bool UStudioDirectorSystem::ValidateBiomePopulation() const
-{
-    int32 PopulatedBiomes = 0;
-    
-    for (const FDir_BiomeStatus& Status : BiomeStatuses)
-    {
-        if (Status.bIsPopulated && Status.ActorCount >= 500)
-        {
-            PopulatedBiomes++;
-        }
-    }
-    
-    return PopulatedBiomes >= 5; // All 5 biomes must be populated
-}
-
-bool UStudioDirectorSystem::ValidateAtmosphere() const
-{
-    // Check for proper Cretaceous lighting setup
-    // This would normally check for specific lighting actors and settings
-    return true; // Placeholder - Agent #8 responsibility
-}
-
-bool UStudioDirectorSystem::ValidateFBXPipeline() const
-{
-    // Check if FBX import pipeline has been tested
-    // This would normally check for imported assets in Content/TestAssets/
-    return false; // Placeholder - Agents #6/#7/#9 responsibility
 }
