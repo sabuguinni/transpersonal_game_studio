@@ -1,120 +1,81 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Components/ActorComponent.h"
-#include "Engine/Engine.h"
+#include "GameFramework/Actor.h"
+#include "Components/StaticMeshComponent.h"
 #include "NiagaraComponent.h"
 #include "NiagaraSystem.h"
-#include "Sound/SoundCue.h"
+#include "Engine/World.h"
+#include "SharedTypes.h"
 #include "VFX_ImpactEffectManager.generated.h"
 
-UENUM(BlueprintType)
-enum class EVFX_ImpactType : uint8
-{
-    Footstep        UMETA(DisplayName = "Footstep"),
-    WeaponHit       UMETA(DisplayName = "Weapon Hit"),
-    Fall            UMETA(DisplayName = "Fall Impact"),
-    RockCollision   UMETA(DisplayName = "Rock Collision"),
-    WaterSplash     UMETA(DisplayName = "Water Splash")
-};
-
-UENUM(BlueprintType)
-enum class EVFX_SurfaceType : uint8
-{
-    Dirt            UMETA(DisplayName = "Dirt"),
-    Rock            UMETA(DisplayName = "Rock"),
-    Water           UMETA(DisplayName = "Water"),
-    Mud             UMETA(DisplayName = "Mud"),
-    Sand            UMETA(DisplayName = "Sand"),
-    Grass           UMETA(DisplayName = "Grass"),
-    Snow            UMETA(DisplayName = "Snow")
-};
-
 USTRUCT(BlueprintType)
-struct FVFX_ImpactEffectData
+struct TRANSPERSONALGAME_API FVFX_ImpactData
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
-    class UNiagaraSystem* ParticleEffect;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Impact VFX")
+    TSoftObjectPtr<UNiagaraSystem> DustEffect;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    class USoundCue* ImpactSound;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Impact VFX")
+    TSoftObjectPtr<UNiagaraSystem> BloodEffect;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
-    float EffectScale = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Impact VFX")
+    TSoftObjectPtr<UNiagaraSystem> WaterSplashEffect;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
-    float VolumeMultiplier = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Impact VFX")
+    float EffectScale;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
-    bool bSpawnDecal = true;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Impact VFX")
+    float Duration;
 
-    FVFX_ImpactEffectData()
+    FVFX_ImpactData()
     {
-        ParticleEffect = nullptr;
-        ImpactSound = nullptr;
         EffectScale = 1.0f;
-        VolumeMultiplier = 1.0f;
-        bSpawnDecal = true;
+        Duration = 2.0f;
     }
 };
 
-UCLASS(ClassGroup=(VFX), meta=(BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UVFX_ImpactEffectManager : public UActorComponent
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API AVFX_ImpactEffectManager : public AActor
 {
     GENERATED_BODY()
 
 public:
-    UVFX_ImpactEffectManager();
+    AVFX_ImpactEffectManager();
 
 protected:
     virtual void BeginPlay() override;
 
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    USceneComponent* RootSceneComponent;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Settings")
+    FVFX_ImpactData ImpactSettings;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Settings")
+    int32 MaxActiveEffects;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Settings")
+    float EffectPoolingRadius;
+
 public:
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
-
-    // Spawn impact effect at location
     UFUNCTION(BlueprintCallable, Category = "VFX")
-    void SpawnImpactEffect(EVFX_ImpactType ImpactType, EVFX_SurfaceType SurfaceType, FVector Location, FVector Normal = FVector::UpVector);
+    void SpawnDustImpact(const FVector& Location, const FVector& Normal, float Intensity = 1.0f);
 
-    // Spawn footstep effect for dinosaurs
     UFUNCTION(BlueprintCallable, Category = "VFX")
-    void SpawnFootstepEffect(FVector Location, float DinosaurSize = 1.0f, EVFX_SurfaceType SurfaceType = EVFX_SurfaceType::Dirt);
+    void SpawnBloodSplatter(const FVector& Location, const FVector& Direction, float Amount = 1.0f);
 
-    // Configure effect data for different combinations
     UFUNCTION(BlueprintCallable, Category = "VFX")
-    void SetEffectData(EVFX_ImpactType ImpactType, EVFX_SurfaceType SurfaceType, const FVFX_ImpactEffectData& EffectData);
+    void SpawnWaterSplash(const FVector& Location, float SplashSize = 1.0f);
 
-protected:
-    // Effect data storage
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Effects")
-    TMap<EVFX_ImpactType, TMap<EVFX_SurfaceType, FVFX_ImpactEffectData>> ImpactEffects;
-
-    // Default Niagara systems
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Default Effects")
-    class UNiagaraSystem* DefaultDustEffect;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Default Effects")
-    class UNiagaraSystem* DefaultWaterSplash;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Default Effects")
-    class UNiagaraSystem* DefaultRockImpact;
-
-    // Default sounds
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Default Audio")
-    class USoundCue* DefaultFootstepSound;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Default Audio")
-    class USoundCue* DefaultImpactSound;
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    void CleanupExpiredEffects();
 
 private:
-    // Initialize default effect data
-    void InitializeDefaultEffects();
+    UPROPERTY()
+    TArray<UNiagaraComponent*> ActiveEffects;
 
-    // Get effect data for specific combination
-    FVFX_ImpactEffectData GetEffectData(EVFX_ImpactType ImpactType, EVFX_SurfaceType SurfaceType);
-
-    // Detect surface type from hit result
-    EVFX_SurfaceType DetectSurfaceType(FVector Location);
+    void SpawnNiagaraEffect(UNiagaraSystem* System, const FVector& Location, const FRotator& Rotation, float Scale);
+    void RemoveOldestEffect();
 };
