@@ -2,238 +2,117 @@
 
 #include "CoreMinimal.h"
 #include "Engine/World.h"
-#include "Subsystems/WorldSubsystem.h"
+#include "GameFramework/GameModeBase.h"
+#include "Subsystems/GameInstanceSubsystem.h"
 #include "SharedTypes.h"
 #include "Eng_CompilationValidator.generated.h"
 
 /**
- * ENGINE ARCHITECT CYCLE 001 - COMPILATION VALIDATOR
- * 
- * This system ensures that all C++ code written by agents follows
- * UE5 compilation rules and architectural standards. It validates:
- * 1. Header/implementation file pairing
- * 2. UE5 macro usage (UCLASS, USTRUCT, UENUM)
- * 3. Include dependencies and module references
- * 4. Type naming conventions and conflicts
- * 5. Blueprint exposure and editor integration
- * 
- * CRITICAL: This runs automatically after each agent cycle
+ * Engine Architect - Compilation Validation System
+ * Validates that all required .cpp files exist and compile correctly
+ * Enforces the "Every .h MUST have a matching .cpp" rule
  */
 
-// Compilation Issue Severity
-UENUM(BlueprintType)
-enum class EEng_CompilationSeverity : uint8
-{
-    Info            UMETA(DisplayName = "Info"),
-    Warning         UMETA(DisplayName = "Warning"),
-    Error           UMETA(DisplayName = "Error"),
-    Critical        UMETA(DisplayName = "Critical")
-};
-
-// Compilation Issue Type
-UENUM(BlueprintType)
-enum class EEng_CompilationIssueType : uint8
-{
-    MissingImplementation   UMETA(DisplayName = "Missing Implementation"),
-    InvalidMacroUsage       UMETA(DisplayName = "Invalid Macro Usage"),
-    IncludeDependency       UMETA(DisplayName = "Include Dependency"),
-    TypeNamingConflict      UMETA(DisplayName = "Type Naming Conflict"),
-    ModuleDependency        UMETA(DisplayName = "Module Dependency"),
-    BlueprintExposure       UMETA(DisplayName = "Blueprint Exposure"),
-    PerformanceIssue        UMETA(DisplayName = "Performance Issue"),
-    ArchitecturalViolation  UMETA(DisplayName = "Architectural Violation")
-};
-
-// Compilation Issue Data
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEng_CompilationIssue
+struct TRANSPERSONALGAME_API FEng_CompilationReport
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Issue")
-    FString FilePath;
+    UPROPERTY(BlueprintReadOnly)
+    TArray<FString> MissingCppFiles;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Issue")
-    int32 LineNumber;
+    UPROPERTY(BlueprintReadOnly)
+    TArray<FString> CompilationErrors;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Issue")
-    EEng_CompilationSeverity Severity;
+    UPROPERTY(BlueprintReadOnly)
+    TArray<FString> LoadedClasses;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Issue")
-    EEng_CompilationIssueType IssueType;
+    UPROPERTY(BlueprintReadOnly)
+    bool bAllClassesLoaded = false;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Issue")
-    FString Description;
+    UPROPERTY(BlueprintReadOnly)
+    int32 TotalHeaderFiles = 0;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Issue")
-    FString SuggestedFix;
+    UPROPERTY(BlueprintReadOnly)
+    int32 TotalCppFiles = 0;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Issue")
-    FString AgentResponsible;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Issue")
-    FDateTime DetectedAt;
-
-    FEng_CompilationIssue()
+    FEng_CompilationReport()
     {
-        LineNumber = 0;
-        Severity = EEng_CompilationSeverity::Info;
-        IssueType = EEng_CompilationIssueType::MissingImplementation;
-        DetectedAt = FDateTime::Now();
+        MissingCppFiles.Empty();
+        CompilationErrors.Empty();
+        LoadedClasses.Empty();
+        bAllClassesLoaded = false;
+        TotalHeaderFiles = 0;
+        TotalCppFiles = 0;
     }
 };
 
-// File Validation Result
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEng_FileValidationResult
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Validation")
-    FString FilePath;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Validation")
-    bool bHasImplementation;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Validation")
-    bool bValidMacroUsage;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Validation")
-    bool bValidIncludes;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Validation")
-    bool bValidTypeNames;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Validation")
-    TArray<FEng_CompilationIssue> Issues;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Validation")
-    FDateTime LastValidated;
-
-    FEng_FileValidationResult()
-    {
-        bHasImplementation = false;
-        bValidMacroUsage = false;
-        bValidIncludes = false;
-        bValidTypeNames = false;
-        LastValidated = FDateTime::Now();
-    }
-};
-
-/**
- * COMPILATION VALIDATOR SUBSYSTEM
- * 
- * This subsystem validates all C++ code for compilation safety
- * and architectural compliance. It runs after each agent cycle.
- */
-UCLASS(BlueprintType)
-class TRANSPERSONALGAME_API UEng_CompilationValidator : public UWorldSubsystem
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API UEng_CompilationValidator : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
 public:
-    // Subsystem Interface
+    UEng_CompilationValidator();
+
+    // USubsystem interface
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
-    // Validation Methods
-    UFUNCTION(BlueprintCallable, Category = "Compilation")
-    bool ValidateAllSourceFiles();
+    /**
+     * Validates that all .h files have corresponding .cpp files
+     * Returns detailed report of missing files and compilation status
+     */
+    UFUNCTION(BlueprintCallable, Category = "Engine Architecture", CallInEditor = true)
+    FEng_CompilationReport ValidateCompilation();
 
-    UFUNCTION(BlueprintCallable, Category = "Compilation")
-    FEng_FileValidationResult ValidateSourceFile(const FString& FilePath);
+    /**
+     * Checks if a specific class is properly loaded in the engine
+     */
+    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
+    bool IsClassLoaded(const FString& ClassName);
 
-    UFUNCTION(BlueprintCallable, Category = "Compilation")
-    bool ValidateHeaderImplementationPairing();
+    /**
+     * Forces recompilation of the TranspersonalGame module
+     */
+    UFUNCTION(BlueprintCallable, Category = "Engine Architecture", CallInEditor = true)
+    bool ForceRecompile();
 
-    UFUNCTION(BlueprintCallable, Category = "Compilation")
-    bool ValidateUE5MacroUsage();
+    /**
+     * Gets the current compilation status summary
+     */
+    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
+    FString GetCompilationSummary();
 
-    UFUNCTION(BlueprintCallable, Category = "Compilation")
-    bool ValidateIncludeDependencies();
-
-    UFUNCTION(BlueprintCallable, Category = "Compilation")
-    bool ValidateTypeNamingConventions();
-
-    // Issue Management
-    UFUNCTION(BlueprintCallable, Category = "Compilation")
-    TArray<FEng_CompilationIssue> GetAllIssues();
-
-    UFUNCTION(BlueprintCallable, Category = "Compilation")
-    TArray<FEng_CompilationIssue> GetIssuesBySeverity(EEng_CompilationSeverity Severity);
-
-    UFUNCTION(BlueprintCallable, Category = "Compilation")
-    TArray<FEng_CompilationIssue> GetIssuesByAgent(const FString& AgentName);
-
-    UFUNCTION(BlueprintCallable, Category = "Compilation")
-    int32 GetIssueCount();
-
-    UFUNCTION(BlueprintCallable, Category = "Compilation")
-    int32 GetCriticalIssueCount();
-
-    // Reporting
-    UFUNCTION(BlueprintCallable, Category = "Compilation")
-    FString GenerateValidationReport();
-
-    UFUNCTION(BlueprintCallable, Category = "Compilation")
-    bool SaveValidationReport(const FString& FilePath);
-
-    // Auto-Fix Capabilities
-    UFUNCTION(BlueprintCallable, Category = "Compilation")
-    bool AttemptAutoFix(const FEng_CompilationIssue& Issue);
-
-    UFUNCTION(BlueprintCallable, Category = "Compilation")
-    int32 AttemptAutoFixAll();
-
-    // Agent Integration
-    UFUNCTION(BlueprintCallable, Category = "Compilation")
-    bool ValidateAgentOutput(const FString& AgentName, const TArray<FString>& FilePaths);
-
-    UFUNCTION(BlueprintCallable, Category = "Compilation")
-    bool BlockAgentIfCriticalIssues(const FString& AgentName);
+    /**
+     * Validates that all core game classes are properly loaded
+     */
+    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
+    bool ValidateCoreClasses();
 
 protected:
-    // Internal validation data
-    UPROPERTY()
-    TArray<FEng_CompilationIssue> DetectedIssues;
+    UPROPERTY(BlueprintReadOnly, Category = "Engine Architecture")
+    FEng_CompilationReport LastReport;
 
-    UPROPERTY()
-    TMap<FString, FEng_FileValidationResult> FileValidationCache;
+    UPROPERTY(BlueprintReadOnly, Category = "Engine Architecture")
+    TArray<FString> RequiredCoreClasses;
 
-    UPROPERTY()
-    TArray<FString> KnownTypeNames;
+    /**
+     * Scans the source directory for .h files without matching .cpp
+     */
+    TArray<FString> FindOrphanedHeaders();
 
-    UPROPERTY()
-    TArray<FString> RequiredIncludes;
+    /**
+     * Checks if a .cpp file exists for the given .h file
+     */
+    bool DoesCppExist(const FString& HeaderPath);
 
-    // Validation settings
-    UPROPERTY(EditAnywhere, Category = "Validation")
-    bool bEnableAutoValidation;
-
-    UPROPERTY(EditAnywhere, Category = "Validation")
-    bool bEnableAutoFix;
-
-    UPROPERTY(EditAnywhere, Category = "Validation")
-    float ValidationInterval;
-
-    UPROPERTY(EditAnywhere, Category = "Validation")
-    bool bBlockOnCriticalIssues;
-
-    // Internal methods
-    void ScanSourceDirectory();
-    void ValidateFileContent(const FString& FilePath, const FString& Content);
-    void CheckHeaderImplementationPair(const FString& HeaderPath);
-    void CheckUE5MacroSyntax(const FString& FilePath, const FString& Content);
-    void CheckIncludeStatements(const FString& FilePath, const FString& Content);
-    void CheckTypeNaming(const FString& FilePath, const FString& Content);
-    void AddIssue(const FEng_CompilationIssue& Issue);
-    void LogValidationEvent(const FString& Event, const FString& Details);
+    /**
+     * Gets all classes that should be loaded from TranspersonalGame module
+     */
+    void PopulateRequiredClasses();
 
 private:
-    // Validation timer
-    FTimerHandle ValidationTimer;
-    
-    // File system monitoring
-    TArray<FString> MonitoredDirectories;
-    TMap<FString, FDateTime> FileModificationTimes;
+    bool bIsInitialized = false;
+    FDateTime LastValidationTime;
 };
