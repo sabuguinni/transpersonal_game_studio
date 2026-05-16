@@ -12,11 +12,11 @@ enum class EQA_ValidationResult : uint8
     Pass        UMETA(DisplayName = "Pass"),
     Fail        UMETA(DisplayName = "Fail"),
     Warning     UMETA(DisplayName = "Warning"),
-    Skipped     UMETA(DisplayName = "Skipped")
+    Pending     UMETA(DisplayName = "Pending")
 };
 
 USTRUCT(BlueprintType)
-struct FQA_TestResult
+struct TRANSPERSONALGAME_API FQA_TestResult
 {
     GENERATED_BODY()
 
@@ -35,48 +35,35 @@ struct FQA_TestResult
     FQA_TestResult()
     {
         TestName = TEXT("");
-        Result = EQA_ValidationResult::Skipped;
+        Result = EQA_ValidationResult::Pending;
         Message = TEXT("");
         ExecutionTime = 0.0f;
-    }
-
-    FQA_TestResult(const FString& InTestName, EQA_ValidationResult InResult, const FString& InMessage, float InTime)
-        : TestName(InTestName), Result(InResult), Message(InMessage), ExecutionTime(InTime)
-    {
     }
 };
 
 USTRUCT(BlueprintType)
-struct FQA_SystemHealth
+struct TRANSPERSONALGAME_API FQA_BiomeValidation
 {
     GENERATED_BODY()
 
     UPROPERTY(BlueprintReadOnly, Category = "QA")
-    int32 TotalActors;
+    FString BiomeName;
 
     UPROPERTY(BlueprintReadOnly, Category = "QA")
-    int32 CompiledClasses;
+    FVector BiomeCenter;
 
     UPROPERTY(BlueprintReadOnly, Category = "QA")
-    float MemoryUsagePercent;
+    int32 ActorCount;
 
     UPROPERTY(BlueprintReadOnly, Category = "QA")
-    int32 BiomesPopulated;
+    bool bMeetsPopulationTarget;
 
-    UPROPERTY(BlueprintReadOnly, Category = "QA")
-    bool bLightingValid;
-
-    UPROPERTY(BlueprintReadOnly, Category = "QA")
-    bool bPhysicsValid;
-
-    FQA_SystemHealth()
+    FQA_BiomeValidation()
     {
-        TotalActors = 0;
-        CompiledClasses = 0;
-        MemoryUsagePercent = 0.0f;
-        BiomesPopulated = 0;
-        bLightingValid = false;
-        bPhysicsValid = false;
+        BiomeName = TEXT("");
+        BiomeCenter = FVector::ZeroVector;
+        ActorCount = 0;
+        bMeetsPopulationTarget = false;
     }
 };
 
@@ -85,7 +72,7 @@ struct FQA_SystemHealth
  * Provides comprehensive testing of game systems, performance, and integration
  */
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UQA_ValidationFramework : public UActorComponent
+class TRANSPERSONALGAME_API UQA_ValidationFramework : public UObject
 {
     GENERATED_BODY()
 
@@ -94,69 +81,58 @@ public:
 
     // Core validation functions
     UFUNCTION(BlueprintCallable, Category = "QA", CallInEditor)
-    void RunFullValidationSuite();
+    TArray<FQA_TestResult> RunFullValidationSuite();
 
     UFUNCTION(BlueprintCallable, Category = "QA", CallInEditor)
-    void ValidateSystemHealth();
+    FQA_TestResult ValidateBridgeConnection();
 
     UFUNCTION(BlueprintCallable, Category = "QA", CallInEditor)
-    void ValidateCharacterSystems();
+    FQA_TestResult ValidateCharacterSystems();
 
     UFUNCTION(BlueprintCallable, Category = "QA", CallInEditor)
-    void ValidateVFXSystems();
+    FQA_TestResult ValidateVFXSystems();
 
     UFUNCTION(BlueprintCallable, Category = "QA", CallInEditor)
-    void ValidateBiomePopulation();
+    FQA_TestResult ValidatePhysicsSystems();
 
     UFUNCTION(BlueprintCallable, Category = "QA", CallInEditor)
-    void ValidateLightingAndAtmosphere();
+    TArray<FQA_BiomeValidation> ValidateBiomePopulation();
 
     UFUNCTION(BlueprintCallable, Category = "QA", CallInEditor)
-    void ValidatePhysicsAndCollision();
+    FQA_TestResult ValidateAssetPipeline();
 
     UFUNCTION(BlueprintCallable, Category = "QA", CallInEditor)
-    void ValidateDinosaurAI();
+    FQA_TestResult ValidateLightingAtmosphere();
 
     UFUNCTION(BlueprintCallable, Category = "QA", CallInEditor)
-    void GenerateQAReport();
+    FQA_TestResult ValidatePerformanceMetrics();
 
-    // Getters for test results
-    UFUNCTION(BlueprintPure, Category = "QA")
-    const TArray<FQA_TestResult>& GetTestResults() const { return TestResults; }
+    // Utility functions
+    UFUNCTION(BlueprintCallable, Category = "QA")
+    float GetSystemMemoryUsage();
 
-    UFUNCTION(BlueprintPure, Category = "QA")
-    const FQA_SystemHealth& GetSystemHealth() const { return SystemHealth; }
+    UFUNCTION(BlueprintCallable, Category = "QA")
+    int32 GetTotalActorCount();
 
-    UFUNCTION(BlueprintPure, Category = "QA")
-    int32 GetPassedTestCount() const;
-
-    UFUNCTION(BlueprintPure, Category = "QA")
-    int32 GetFailedTestCount() const;
-
-    UFUNCTION(BlueprintPure, Category = "QA")
-    float GetOverallSuccessRate() const;
+    UFUNCTION(BlueprintCallable, Category = "QA")
+    float CalculateSystemHealthScore();
 
 protected:
-    // Test result storage
     UPROPERTY(BlueprintReadOnly, Category = "QA")
-    TArray<FQA_TestResult> TestResults;
+    TArray<FQA_TestResult> LastValidationResults;
 
     UPROPERTY(BlueprintReadOnly, Category = "QA")
-    FQA_SystemHealth SystemHealth;
+    TArray<FQA_BiomeValidation> LastBiomeValidation;
 
     UPROPERTY(BlueprintReadOnly, Category = "QA")
-    FDateTime LastValidationTime;
-
-    // Helper functions
-    void AddTestResult(const FString& TestName, EQA_ValidationResult Result, const FString& Message, float ExecutionTime = 0.0f);
-    void ClearTestResults();
-    bool ValidateClassCompilation(const FString& ClassName);
-    int32 CountActorsInBiome(const FVector& BiomeCenter, float Radius = 10000.0f);
-    bool CheckActorCollision(AActor* Actor);
-    void LogValidationMessage(const FString& Message, EQA_ValidationResult ResultType = EQA_ValidationResult::Pass);
+    float LastHealthScore;
 
 private:
-    // Internal validation state
-    bool bValidationInProgress;
-    float ValidationStartTime;
+    // Internal validation helpers
+    bool ValidateClassLoading(const FString& ClassName, FString& OutMessage);
+    bool ValidateActorSpawning(UClass* ActorClass, FString& OutMessage);
+    bool CheckBiomeActorDistribution(const FVector& BiomeCenter, float Radius, int32& OutActorCount);
+    bool ValidateAssetImportCapability(FString& OutMessage);
+    bool CheckLightingConfiguration(FString& OutMessage);
+    bool ValidateMemoryUsage(FString& OutMessage);
 };
