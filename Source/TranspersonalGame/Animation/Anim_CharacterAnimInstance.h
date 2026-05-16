@@ -5,144 +5,109 @@
 #include "Engine/Engine.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
+#include "Components/CapsuleComponent.h"
+#include "../SharedTypes.h"
 #include "Anim_CharacterAnimInstance.generated.h"
 
-UENUM(BlueprintType)
-enum class EAnim_MovementState : uint8
-{
-    Idle        UMETA(DisplayName = "Idle"),
-    Walking     UMETA(DisplayName = "Walking"),
-    Running     UMETA(DisplayName = "Running"),
-    Jumping     UMETA(DisplayName = "Jumping"),
-    Falling     UMETA(DisplayName = "Falling"),
-    Crouching   UMETA(DisplayName = "Crouching"),
-    Swimming    UMETA(DisplayName = "Swimming")
-};
-
-USTRUCT(BlueprintType)
-struct FAnim_MovementData
-{
-    GENERATED_BODY()
-
-    UPROPERTY(BlueprintReadOnly, Category = "Movement")
-    float Speed;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Movement")
-    float Direction;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Movement")
-    bool bIsInAir;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Movement")
-    bool bIsCrouching;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Movement")
-    bool bIsAccelerating;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Movement")
-    EAnim_MovementState MovementState;
-
-    FAnim_MovementData()
-        : Speed(0.0f)
-        , Direction(0.0f)
-        , bIsInAir(false)
-        , bIsCrouching(false)
-        , bIsAccelerating(false)
-        , MovementState(EAnim_MovementState::Idle)
-    {
-    }
-};
+TRANSPERSONALGAME_API DECLARE_LOG_CATEGORY_EXTERN(LogAnimInstance, Log, All);
 
 /**
- * Core animation instance for TranspersonalCharacter
- * Handles movement state machine and animation blending
+ * Animation Instance for TranspersonalCharacter
+ * Handles state machine logic for idle/walk/run/jump animations
+ * Integrates with survival stats and environmental adaptation
  */
-UCLASS(Blueprintable, BlueprintType)
+UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UAnim_CharacterAnimInstance : public UAnimInstance
 {
-    GENERATED_BODY()
+	GENERATED_BODY()
 
 public:
-    UAnim_CharacterAnimInstance();
+	UAnim_CharacterAnimInstance();
+
+	virtual void NativeInitializeAnimation() override;
+	virtual void NativeUpdateAnimation(float DeltaTimeX) override;
+
+	// Animation state properties
+	UPROPERTY(BlueprintReadOnly, Category = "Animation State", meta = (AllowPrivateAccess = "true"))
+	float Speed;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Animation State", meta = (AllowPrivateAccess = "true"))
+	float Direction;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Animation State", meta = (AllowPrivateAccess = "true"))
+	bool bIsInAir;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Animation State", meta = (AllowPrivateAccess = "true"))
+	bool bIsAccelerating;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Animation State", meta = (AllowPrivateAccess = "true"))
+	bool bIsCrouching;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Animation State", meta = (AllowPrivateAccess = "true"))
+	bool bIsRunning;
+
+	// Survival state integration
+	UPROPERTY(BlueprintReadOnly, Category = "Survival State", meta = (AllowPrivateAccess = "true"))
+	float HealthPercentage;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Survival State", meta = (AllowPrivateAccess = "true"))
+	float StaminaPercentage;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Survival State", meta = (AllowPrivateAccess = "true"))
+	float FearLevel;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Survival State", meta = (AllowPrivateAccess = "true"))
+	bool bIsInjured;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Survival State", meta = (AllowPrivateAccess = "true"))
+	bool bIsExhausted;
+
+	// Animation speed modifiers
+	UPROPERTY(BlueprintReadOnly, Category = "Animation Modifiers", meta = (AllowPrivateAccess = "true"))
+	float InjurySpeedModifier;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Animation Modifiers", meta = (AllowPrivateAccess = "true"))
+	float FatigueSpeedModifier;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Animation Modifiers", meta = (AllowPrivateAccess = "true"))
+	float FearSpeedModifier;
+
+	// Animation thresholds
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Settings")
+	float WalkSpeedThreshold = 150.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Settings")
+	float RunSpeedThreshold = 300.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Settings")
+	float InjuryThreshold = 0.5f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Settings")
+	float ExhaustionThreshold = 0.2f;
 
 protected:
-    // Animation Blueprint Interface
-    virtual void NativeInitializeAnimation() override;
-    virtual void NativeUpdateAnimation(float DeltaTimeX) override;
+	// Reference to the character
+	UPROPERTY(BlueprintReadOnly, Category = "Character", meta = (AllowPrivateAccess = "true"))
+	class ACharacter* Character;
 
-    // Movement Data
-    UPROPERTY(BlueprintReadOnly, Category = "Movement", meta = (AllowPrivateAccess = "true"))
-    FAnim_MovementData MovementData;
+	UPROPERTY(BlueprintReadOnly, Category = "Character", meta = (AllowPrivateAccess = "true"))
+	class UCharacterMovementComponent* CharacterMovement;
 
-    // Character Reference
-    UPROPERTY(BlueprintReadOnly, Category = "Character", meta = (AllowPrivateAccess = "true"))
-    ACharacter* OwningCharacter;
+	// Update functions
+	void UpdateMovementValues();
+	void UpdateSurvivalStates();
+	void UpdateAnimationModifiers();
 
-    // Movement Component Reference
-    UPROPERTY(BlueprintReadOnly, Category = "Character", meta = (AllowPrivateAccess = "true"))
-    UCharacterMovementComponent* MovementComponent;
+	// Helper functions
+	UFUNCTION(BlueprintCallable, Category = "Animation Helpers")
+	float CalculateDirection(const FVector& Velocity, const FRotator& BaseRotation);
 
-    // Animation Sequences
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Animations")
-    UAnimSequence* IdleAnimation;
+	UFUNCTION(BlueprintCallable, Category = "Animation Helpers")
+	bool ShouldPlayInjuredAnimation() const;
 
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Animations")
-    UAnimSequence* WalkAnimation;
+	UFUNCTION(BlueprintCallable, Category = "Animation Helpers")
+	bool ShouldPlayExhaustedAnimation() const;
 
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Animations")
-    UAnimSequence* RunAnimation;
-
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Animations")
-    UAnimSequence* JumpStartAnimation;
-
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Animations")
-    UAnimSequence* JumpLoopAnimation;
-
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Animations")
-    UAnimSequence* JumpEndAnimation;
-
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Animations")
-    UAnimSequence* CrouchIdleAnimation;
-
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Animations")
-    UAnimSequence* CrouchWalkAnimation;
-
-    // Animation Blending Parameters
-    UPROPERTY(BlueprintReadOnly, Category = "Blending", meta = (AllowPrivateAccess = "true"))
-    float WalkRunBlendAlpha;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Blending", meta = (AllowPrivateAccess = "true"))
-    float IdleToMovementBlendAlpha;
-
-    // State Machine Functions
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    void UpdateMovementState();
-
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    void UpdateBlendingParameters();
-
-    UFUNCTION(BlueprintPure, Category = "Animation")
-    bool ShouldEnterIdleState() const;
-
-    UFUNCTION(BlueprintPure, Category = "Animation")
-    bool ShouldEnterMovementState() const;
-
-    UFUNCTION(BlueprintPure, Category = "Animation")
-    bool ShouldEnterJumpState() const;
-
-    UFUNCTION(BlueprintPure, Category = "Animation")
-    bool ShouldEnterFallingState() const;
-
-private:
-    // Internal state tracking
-    EAnim_MovementState PreviousMovementState;
-    float StateTransitionTime;
-    float MaxWalkSpeed;
-    float MaxRunSpeed;
-
-    // Helper functions
-    void UpdateMovementData();
-    void CalculateDirection();
-    void UpdateBlendAlpha();
-    EAnim_MovementState DetermineMovementState() const;
+	UFUNCTION(BlueprintCallable, Category = "Animation Helpers")
+	float GetEffectiveAnimationSpeed() const;
 };
