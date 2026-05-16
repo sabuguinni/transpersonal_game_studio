@@ -1,328 +1,318 @@
 #include "Audio_EnvironmentalSoundManager.h"
 #include "Components/AudioComponent.h"
 #include "Sound/SoundCue.h"
-#include "Sound/SoundWave.h"
-#include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "TimerManager.h"
 #include "Kismet/GameplayStatics.h"
 
-AAudio_EnvironmentalSoundManager::AAudio_EnvironmentalSoundManager()
+UAudio_EnvironmentalSoundManager::UAudio_EnvironmentalSoundManager()
 {
-    PrimaryActorTick.bCanEverTick = true;
-    PrimaryActorTick.TickInterval = 1.0f; // Tick once per second for performance
+    PrimaryComponentTick.bCanEverTick = true;
+    PrimaryComponentTick.TickInterval = 0.5f; // Update every 0.5 seconds
+
+    // Initialize default values
+    CurrentBiome = EAudio_BiomeType::Savanna;
+    CurrentThreatLevel = EAudio_ThreatLevel::Safe;
+    CurrentTimeOfDay = 0.5f; // Noon
+    CurrentWeatherIntensity = 0.0f; // Clear weather
 
     // Create audio components
-    AmbientAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("AmbientAudioComponent"));
-    RootComponent = AmbientAudioComponent;
-    AmbientAudioComponent->bAutoActivate = false;
-    AmbientAudioComponent->SetVolumeMultiplier(0.7f);
+    AmbientAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("AmbientAudio"));
+    WindAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("WindAudio"));
+    CreatureAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("CreatureAudio"));
+    ThreatAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("ThreatAudio"));
 
-    RandomSoundComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("RandomSoundComponent"));
-    RandomSoundComponent->SetupAttachment(RootComponent);
-    RandomSoundComponent->bAutoActivate = false;
-    RandomSoundComponent->SetVolumeMultiplier(0.8f);
-
-    WeatherAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("WeatherAudioComponent"));
-    WeatherAudioComponent->SetupAttachment(RootComponent);
-    WeatherAudioComponent->bAutoActivate = false;
-    WeatherAudioComponent->SetVolumeMultiplier(0.6f);
-
-    // Initialize default biome
-    CurrentBiome = EAudio_BiomeType::Forest;
-    
-    // Set default volumes
-    MasterVolume = 1.0f;
-    AmbientVolume = 0.7f;
-    EffectsVolume = 0.8f;
-}
-
-void AAudio_EnvironmentalSoundManager::BeginPlay()
-{
-    Super::BeginPlay();
-    
-    InitializeBiomeAudio();
-    LoadAudioAssets();
-    UpdateAmbientAudio();
-    ScheduleNextRandomSound();
-
-    UE_LOG(LogTemp, Warning, TEXT("Audio_EnvironmentalSoundManager: BeginPlay completed for biome %d"), (int32)CurrentBiome);
-}
-
-void AAudio_EnvironmentalSoundManager::EndPlay(const EEndPlayReason::Type EndPlayReason)
-{
-    // Clear timers
-    if (GetWorld())
-    {
-        GetWorld()->GetTimerManager().ClearTimer(RandomSoundTimer);
-    }
-    
-    // Stop all audio components
-    if (AmbientAudioComponent && AmbientAudioComponent->IsPlaying())
-    {
-        AmbientAudioComponent->Stop();
-    }
-    
-    if (RandomSoundComponent && RandomSoundComponent->IsPlaying())
-    {
-        RandomSoundComponent->Stop();
-    }
-    
-    if (WeatherAudioComponent && WeatherAudioComponent->IsPlaying())
-    {
-        WeatherAudioComponent->Stop();
-    }
-
-    Super::EndPlay(EndPlayReason);
-}
-
-void AAudio_EnvironmentalSoundManager::Tick(float DeltaTime)
-{
-    Super::Tick(DeltaTime);
-    
-    // Update volume levels based on master volume
+    // Configure audio components
     if (AmbientAudioComponent)
     {
-        AmbientAudioComponent->SetVolumeMultiplier(AmbientVolume * MasterVolume);
+        AmbientAudioComponent->bAutoActivate = false;
+        AmbientAudioComponent->VolumeMultiplier = 0.7f;
     }
-    
-    if (RandomSoundComponent)
+
+    if (WindAudioComponent)
     {
-        RandomSoundComponent->SetVolumeMultiplier(EffectsVolume * MasterVolume);
+        WindAudioComponent->bAutoActivate = false;
+        WindAudioComponent->VolumeMultiplier = 0.5f;
     }
-    
-    if (WeatherAudioComponent)
+
+    if (CreatureAudioComponent)
     {
-        WeatherAudioComponent->SetVolumeMultiplier(EffectsVolume * MasterVolume * CurrentRainIntensity);
+        CreatureAudioComponent->bAutoActivate = false;
+        CreatureAudioComponent->VolumeMultiplier = 0.6f;
+    }
+
+    if (ThreatAudioComponent)
+    {
+        ThreatAudioComponent->bAutoActivate = false;
+        ThreatAudioComponent->VolumeMultiplier = 1.0f;
     }
 }
 
-void AAudio_EnvironmentalSoundManager::InitializeBiomeAudio()
+void UAudio_EnvironmentalSoundManager::BeginPlay()
 {
-    // Initialize default biome audio data
-    FAudio_BiomeAudioData ForestData;
-    ForestData.MinRandomInterval = 15.0f;
-    ForestData.MaxRandomInterval = 45.0f;
-    ForestData.VolumeMultiplier = 1.0f;
-    BiomeAudioMap.Add(EAudio_BiomeType::Forest, ForestData);
+    Super::BeginPlay();
 
-    FAudio_BiomeAudioData SwampData;
-    SwampData.MinRandomInterval = 20.0f;
-    SwampData.MaxRandomInterval = 60.0f;
-    SwampData.VolumeMultiplier = 0.8f;
-    BiomeAudioMap.Add(EAudio_BiomeType::Swamp, SwampData);
+    InitializeBiomeProfiles();
+    InitializeThreatSounds();
 
-    FAudio_BiomeAudioData SavannaData;
-    SavannaData.MinRandomInterval = 25.0f;
-    SavannaData.MaxRandomInterval = 90.0f;
-    SavannaData.VolumeMultiplier = 0.9f;
-    BiomeAudioMap.Add(EAudio_BiomeType::Savanna, SavannaData);
+    // Start periodic audio updates
+    if (UWorld* World = GetWorld())
+    {
+        World->GetTimerManager().SetTimer(AudioUpdateTimer, this, 
+            &UAudio_EnvironmentalSoundManager::PeriodicAudioUpdate, 2.0f, true);
+    }
 
-    FAudio_BiomeAudioData DesertData;
-    DesertData.MinRandomInterval = 30.0f;
-    DesertData.MaxRandomInterval = 120.0f;
-    DesertData.VolumeMultiplier = 0.6f;
-    BiomeAudioMap.Add(EAudio_BiomeType::Desert, DesertData);
-
-    FAudio_BiomeAudioData MountainData;
-    MountainData.MinRandomInterval = 20.0f;
-    MountainData.MaxRandomInterval = 80.0f;
-    MountainData.VolumeMultiplier = 0.7f;
-    BiomeAudioMap.Add(EAudio_BiomeType::Mountain, MountainData);
-
-    FAudio_BiomeAudioData CaveData;
-    CaveData.MinRandomInterval = 10.0f;
-    CaveData.MaxRandomInterval = 30.0f;
-    CaveData.VolumeMultiplier = 0.5f;
-    BiomeAudioMap.Add(EAudio_BiomeType::Cave, CaveData);
+    // Initialize with current biome
+    SetCurrentBiome(CurrentBiome);
 }
 
-void AAudio_EnvironmentalSoundManager::LoadAudioAssets()
+void UAudio_EnvironmentalSoundManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
-    // This would normally load actual sound assets
-    // For now, we set up the framework for asset loading
-    UE_LOG(LogTemp, Warning, TEXT("Audio_EnvironmentalSoundManager: LoadAudioAssets called - ready for sound asset integration"));
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+
+    // Update volume based on current threat level
+    UpdateVolumeBasedOnThreat();
 }
 
-void AAudio_EnvironmentalSoundManager::UpdateAmbientAudio()
+void UAudio_EnvironmentalSoundManager::SetCurrentBiome(EAudio_BiomeType NewBiome)
 {
-    if (!AmbientAudioComponent)
+    if (CurrentBiome == NewBiome)
     {
         return;
     }
 
-    // Get current biome data
-    const FAudio_BiomeAudioData* BiomeData = BiomeAudioMap.Find(CurrentBiome);
-    if (!BiomeData)
+    CurrentBiome = NewBiome;
+    UpdateAmbientAudio();
+
+    UE_LOG(LogTemp, Log, TEXT("Environmental Audio: Switched to biome %d"), (int32)NewBiome);
+}
+
+void UAudio_EnvironmentalSoundManager::UpdateThreatLevel(EAudio_ThreatLevel NewThreatLevel)
+{
+    if (CurrentThreatLevel == NewThreatLevel)
     {
-        UE_LOG(LogTemp, Warning, TEXT("Audio_EnvironmentalSoundManager: No audio data found for biome %d"), (int32)CurrentBiome);
         return;
     }
 
-    // Stop current ambient sound
-    if (AmbientAudioComponent->IsPlaying())
-    {
-        AmbientAudioComponent->Stop();
-    }
+    EAudio_ThreatLevel PreviousThreatLevel = CurrentThreatLevel;
+    CurrentThreatLevel = NewThreatLevel;
 
-    // Load and play new ambient sound if available
-    if (!BiomeData->AmbientLoop.IsNull())
+    // Log threat level change
+    UE_LOG(LogTemp, Warning, TEXT("Environmental Audio: Threat level changed from %d to %d"), 
+           (int32)PreviousThreatLevel, (int32)NewThreatLevel);
+
+    // Immediate volume adjustment
+    UpdateVolumeBasedOnThreat();
+}
+
+void UAudio_EnvironmentalSoundManager::PlayThreatSound(const FString& ThreatType, FVector Location)
+{
+    if (FAudio_ThreatAudioData* ThreatData = ThreatSounds.Find(ThreatType))
     {
-        USoundCue* AmbientSound = BiomeData->AmbientLoop.LoadSynchronous();
-        if (AmbientSound)
+        if (ThreatAudioComponent && ThreatData->ThreatSound.IsValid())
         {
-            AmbientAudioComponent->SetSound(AmbientSound);
-            AmbientAudioComponent->SetVolumeMultiplier(BiomeData->VolumeMultiplier * AmbientVolume * MasterVolume);
-            AmbientAudioComponent->Play();
-            UE_LOG(LogTemp, Warning, TEXT("Audio_EnvironmentalSoundManager: Playing ambient sound for biome %d"), (int32)CurrentBiome);
+            // Stop current threat sound if playing
+            if (ThreatAudioComponent->IsPlaying())
+            {
+                ThreatAudioComponent->Stop();
+            }
+
+            // Load and play the threat sound
+            if (USoundCue* SoundCue = ThreatData->ThreatSound.LoadSynchronous())
+            {
+                ThreatAudioComponent->SetSound(SoundCue);
+                ThreatAudioComponent->SetVolumeMultiplier(ThreatData->Volume);
+                ThreatAudioComponent->SetWorldLocation(Location);
+                ThreatAudioComponent->Play();
+
+                UE_LOG(LogTemp, Warning, TEXT("Environmental Audio: Playing threat sound %s at location %s"), 
+                       *ThreatType, *Location.ToString());
+            }
+        }
+    }
+    else
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Environmental Audio: Threat sound %s not found"), *ThreatType);
+    }
+}
+
+void UAudio_EnvironmentalSoundManager::StopAllThreatSounds()
+{
+    if (ThreatAudioComponent && ThreatAudioComponent->IsPlaying())
+    {
+        ThreatAudioComponent->Stop();
+        UE_LOG(LogTemp, Log, TEXT("Environmental Audio: Stopped all threat sounds"));
+    }
+}
+
+void UAudio_EnvironmentalSoundManager::SetTimeOfDay(float NormalizedTime)
+{
+    CurrentTimeOfDay = FMath::Clamp(NormalizedTime, 0.0f, 1.0f);
+
+    // Adjust ambient volumes based on time of day
+    float NightVolume = 1.0f;
+    if (CurrentTimeOfDay > 0.25f && CurrentTimeOfDay < 0.75f) // Day time
+    {
+        NightVolume = 0.6f;
+    }
+    else // Night time
+    {
+        NightVolume = 1.2f; // Night sounds are more prominent
+    }
+
+    if (CreatureAudioComponent)
+    {
+        CreatureAudioComponent->SetVolumeMultiplier(0.6f * NightVolume);
+    }
+}
+
+void UAudio_EnvironmentalSoundManager::SetWeatherIntensity(float Intensity)
+{
+    CurrentWeatherIntensity = FMath::Clamp(Intensity, 0.0f, 1.0f);
+
+    // Increase wind volume during storms
+    if (WindAudioComponent)
+    {
+        float WindVolume = 0.5f + (CurrentWeatherIntensity * 0.8f);
+        WindAudioComponent->SetVolumeMultiplier(WindVolume);
+    }
+}
+
+void UAudio_EnvironmentalSoundManager::InitializeBiomeProfiles()
+{
+    // Initialize Savanna profile
+    FAudio_BiomeAudioProfile SavannaProfile;
+    SavannaProfile.BaseVolume = 0.7f;
+    SavannaProfile.ThreatVolumeMultiplier = 1.3f;
+    BiomeProfiles.Add(EAudio_BiomeType::Savanna, SavannaProfile);
+
+    // Initialize Swamp profile
+    FAudio_BiomeAudioProfile SwampProfile;
+    SwampProfile.BaseVolume = 0.8f;
+    SwampProfile.ThreatVolumeMultiplier = 1.5f;
+    BiomeProfiles.Add(EAudio_BiomeType::Swamp, SwampProfile);
+
+    // Initialize Forest profile
+    FAudio_BiomeAudioProfile ForestProfile;
+    ForestProfile.BaseVolume = 0.9f;
+    ForestProfile.ThreatVolumeMultiplier = 1.4f;
+    BiomeProfiles.Add(EAudio_BiomeType::Forest, ForestProfile);
+
+    // Initialize Desert profile
+    FAudio_BiomeAudioProfile DesertProfile;
+    DesertProfile.BaseVolume = 0.5f;
+    DesertProfile.ThreatVolumeMultiplier = 1.6f;
+    BiomeProfiles.Add(EAudio_BiomeType::Desert, DesertProfile);
+
+    // Initialize Mountain profile
+    FAudio_BiomeAudioProfile MountainProfile;
+    MountainProfile.BaseVolume = 0.6f;
+    MountainProfile.ThreatVolumeMultiplier = 1.7f;
+    BiomeProfiles.Add(EAudio_BiomeType::Mountain, MountainProfile);
+
+    UE_LOG(LogTemp, Log, TEXT("Environmental Audio: Initialized %d biome profiles"), BiomeProfiles.Num());
+}
+
+void UAudio_EnvironmentalSoundManager::InitializeThreatSounds()
+{
+    // T-Rex threat
+    FAudio_ThreatAudioData TRexThreat;
+    TRexThreat.TriggerDistance = 3000.0f;
+    TRexThreat.Volume = 1.2f;
+    TRexThreat.bLooping = false;
+    ThreatSounds.Add(TEXT("TRex"), TRexThreat);
+
+    // Raptor pack threat
+    FAudio_ThreatAudioData RaptorThreat;
+    RaptorThreat.TriggerDistance = 2000.0f;
+    RaptorThreat.Volume = 1.0f;
+    RaptorThreat.bLooping = true;
+    ThreatSounds.Add(TEXT("RaptorPack"), RaptorThreat);
+
+    // Herbivore stampede
+    FAudio_ThreatAudioData StampedeThreat;
+    StampedeThreat.TriggerDistance = 4000.0f;
+    StampedeThreat.Volume = 1.5f;
+    StampedeThreat.bLooping = false;
+    ThreatSounds.Add(TEXT("Stampede"), StampedeThreat);
+
+    // Environmental danger (storm, earthquake)
+    FAudio_ThreatAudioData EnvironmentalThreat;
+    EnvironmentalThreat.TriggerDistance = 5000.0f;
+    EnvironmentalThreat.Volume = 0.8f;
+    EnvironmentalThreat.bLooping = true;
+    ThreatSounds.Add(TEXT("Environmental"), EnvironmentalThreat);
+
+    UE_LOG(LogTemp, Log, TEXT("Environmental Audio: Initialized %d threat sound types"), ThreatSounds.Num());
+}
+
+void UAudio_EnvironmentalSoundManager::UpdateAmbientAudio()
+{
+    if (FAudio_BiomeAudioProfile* Profile = BiomeProfiles.Find(CurrentBiome))
+    {
+        // Update ambient audio component
+        if (AmbientAudioComponent)
+        {
+            AmbientAudioComponent->SetVolumeMultiplier(Profile->BaseVolume * CalculateVolumeMultiplier());
+        }
+
+        UE_LOG(LogTemp, Log, TEXT("Environmental Audio: Updated ambient audio for biome %d"), (int32)CurrentBiome);
+    }
+}
+
+void UAudio_EnvironmentalSoundManager::UpdateVolumeBasedOnThreat()
+{
+    float ThreatMultiplier = CalculateVolumeMultiplier();
+
+    if (FAudio_BiomeAudioProfile* Profile = BiomeProfiles.Find(CurrentBiome))
+    {
+        float FinalVolume = Profile->BaseVolume * ThreatMultiplier;
+
+        // Apply to all audio components
+        if (AmbientAudioComponent)
+        {
+            AmbientAudioComponent->SetVolumeMultiplier(FinalVolume);
+        }
+
+        if (WindAudioComponent)
+        {
+            WindAudioComponent->SetVolumeMultiplier(FinalVolume * 0.8f);
+        }
+
+        if (CreatureAudioComponent)
+        {
+            CreatureAudioComponent->SetVolumeMultiplier(FinalVolume * 0.9f);
         }
     }
 }
 
-void AAudio_EnvironmentalSoundManager::ScheduleNextRandomSound()
+float UAudio_EnvironmentalSoundManager::CalculateVolumeMultiplier() const
 {
-    if (!GetWorld())
+    switch (CurrentThreatLevel)
     {
-        return;
+        case EAudio_ThreatLevel::Safe:
+            return 1.0f;
+        case EAudio_ThreatLevel::Caution:
+            return 1.2f;
+        case EAudio_ThreatLevel::Danger:
+            return 1.5f;
+        case EAudio_ThreatLevel::Extreme:
+            return 2.0f;
+        default:
+            return 1.0f;
     }
-
-    const FAudio_BiomeAudioData* BiomeData = BiomeAudioMap.Find(CurrentBiome);
-    if (!BiomeData)
-    {
-        return;
-    }
-
-    // Calculate random interval
-    float RandomInterval = FMath::RandRange(BiomeData->MinRandomInterval, BiomeData->MaxRandomInterval);
-    
-    // Schedule next random sound
-    GetWorld()->GetTimerManager().SetTimer(
-        RandomSoundTimer,
-        this,
-        &AAudio_EnvironmentalSoundManager::PlayRandomBiomeSound,
-        RandomInterval,
-        false
-    );
 }
 
-void AAudio_EnvironmentalSoundManager::SetCurrentBiome(EAudio_BiomeType NewBiome)
+void UAudio_EnvironmentalSoundManager::PeriodicAudioUpdate()
 {
-    if (CurrentBiome != NewBiome)
+    // Periodic check for audio state consistency
+    if (AmbientAudioComponent && !AmbientAudioComponent->IsPlaying())
     {
-        CurrentBiome = NewBiome;
+        // Restart ambient audio if it stopped unexpectedly
         UpdateAmbientAudio();
-        
-        // Reset random sound timer for new biome
-        if (GetWorld())
-        {
-            GetWorld()->GetTimerManager().ClearTimer(RandomSoundTimer);
-            ScheduleNextRandomSound();
-        }
-        
-        UE_LOG(LogTemp, Warning, TEXT("Audio_EnvironmentalSoundManager: Changed to biome %d"), (int32)NewBiome);
-    }
-}
-
-void AAudio_EnvironmentalSoundManager::PlayRandomBiomeSound()
-{
-    if (!RandomSoundComponent)
-    {
-        ScheduleNextRandomSound();
-        return;
     }
 
-    const FAudio_BiomeAudioData* BiomeData = BiomeAudioMap.Find(CurrentBiome);
-    if (!BiomeData || BiomeData->RandomSounds.Num() == 0)
-    {
-        ScheduleNextRandomSound();
-        return;
-    }
-
-    // Pick random sound from biome collection
-    int32 RandomIndex = FMath::RandRange(0, BiomeData->RandomSounds.Num() - 1);
-    const TSoftObjectPtr<USoundWave>& RandomSoundRef = BiomeData->RandomSounds[RandomIndex];
-    
-    if (!RandomSoundRef.IsNull())
-    {
-        USoundWave* RandomSound = RandomSoundRef.LoadSynchronous();
-        if (RandomSound)
-        {
-            RandomSoundComponent->SetSound(RandomSound);
-            RandomSoundComponent->SetVolumeMultiplier(BiomeData->VolumeMultiplier * EffectsVolume * MasterVolume);
-            RandomSoundComponent->Play();
-        }
-    }
-
-    // Schedule next random sound
-    ScheduleNextRandomSound();
-}
-
-void AAudio_EnvironmentalSoundManager::StartRain(float Intensity)
-{
-    if (!WeatherAudioComponent)
-    {
-        return;
-    }
-
-    CurrentRainIntensity = FMath::Clamp(Intensity, 0.0f, 1.0f);
-    bIsRaining = true;
-
-    if (!RainSound.IsNull())
-    {
-        USoundCue* RainSoundCue = RainSound.LoadSynchronous();
-        if (RainSoundCue)
-        {
-            WeatherAudioComponent->SetSound(RainSoundCue);
-            WeatherAudioComponent->SetVolumeMultiplier(CurrentRainIntensity * EffectsVolume * MasterVolume);
-            WeatherAudioComponent->Play();
-            UE_LOG(LogTemp, Warning, TEXT("Audio_EnvironmentalSoundManager: Rain started with intensity %f"), Intensity);
-        }
-    }
-}
-
-void AAudio_EnvironmentalSoundManager::StopRain()
-{
-    bIsRaining = false;
-    CurrentRainIntensity = 0.0f;
-
-    if (WeatherAudioComponent && WeatherAudioComponent->IsPlaying())
-    {
-        WeatherAudioComponent->Stop();
-        UE_LOG(LogTemp, Warning, TEXT("Audio_EnvironmentalSoundManager: Rain stopped"));
-    }
-}
-
-void AAudio_EnvironmentalSoundManager::PlayThunder()
-{
-    if (!RandomSoundComponent)
-    {
-        return;
-    }
-
-    if (!ThunderSound.IsNull())
-    {
-        USoundCue* ThunderSoundCue = ThunderSound.LoadSynchronous();
-        if (ThunderSoundCue)
-        {
-            RandomSoundComponent->SetSound(ThunderSoundCue);
-            RandomSoundComponent->SetVolumeMultiplier(EffectsVolume * MasterVolume);
-            RandomSoundComponent->Play();
-            UE_LOG(LogTemp, Warning, TEXT("Audio_EnvironmentalSoundManager: Thunder played"));
-        }
-    }
-}
-
-void AAudio_EnvironmentalSoundManager::SetMasterVolume(float Volume)
-{
-    MasterVolume = FMath::Clamp(Volume, 0.0f, 1.0f);
-}
-
-void AAudio_EnvironmentalSoundManager::SetAmbientVolume(float Volume)
-{
-    AmbientVolume = FMath::Clamp(Volume, 0.0f, 1.0f);
-}
-
-void AAudio_EnvironmentalSoundManager::SetEffectsVolume(float Volume)
-{
-    EffectsVolume = FMath::Clamp(Volume, 0.0f, 1.0f);
+    // Log current audio state for debugging
+    UE_LOG(LogTemp, VeryVerbose, TEXT("Environmental Audio: Biome=%d, Threat=%d, Time=%.2f, Weather=%.2f"), 
+           (int32)CurrentBiome, (int32)CurrentThreatLevel, CurrentTimeOfDay, CurrentWeatherIntensity);
 }
