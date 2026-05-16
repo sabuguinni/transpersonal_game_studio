@@ -1,353 +1,325 @@
 #include "Narr_DialogueSystem.h"
 #include "Engine/Engine.h"
-#include "Engine/World.h"
-#include "Components/AudioComponent.h"
-#include "Sound/SoundCue.h"
+#include "Components/SphereComponent.h"
+#include "GameFramework/Character.h"
 #include "Kismet/GameplayStatics.h"
+#include "Engine/World.h"
 #include "TimerManager.h"
 
-UNarr_DialogueSystem::UNarr_DialogueSystem()
+ANarr_DialogueSystem::ANarr_DialogueSystem()
 {
-    bIsPlaying = false;
-    CurrentDialogueTime = 0.0f;
-    CurrentQueueIndex = 0;
-    CurrentAudioComponent = nullptr;
-    MasterVolume = 1.0f;
-    LastUpdateTime = 0.0f;
+    PrimaryActorTick.bCanEverTick = true;
+
+    // Create root component
+    RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootComponent"));
+
+    // Create trigger mesh (invisible sphere for proximity detection)
+    TriggerMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("TriggerMesh"));
+    TriggerMesh->SetupAttachment(RootComponent);
+    TriggerMesh->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+    TriggerMesh->SetCollisionResponseToAllChannels(ECR_Ignore);
+    TriggerMesh->SetCollisionResponseToChannel(ECC_Pawn, ECR_Overlap);
+
+    // Create audio component for dialogue playback
+    AudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("AudioComponent"));
+    AudioComponent->SetupAttachment(RootComponent);
+    AudioComponent->bAutoActivate = false;
+
+    // Initialize default values
+    AssociatedBiome = EBiomeType::Savana;
+    bAutoPlayOnTrigger = true;
+    DialogueVolume = 1.0f;
+    bHasTriggered = false;
+    LastTriggerTime = 0.0f;
+    CurrentDialogueIndex = 0;
+    bIsPlayingDialogue = false;
+    CurrentDialogueTimer = 0.0f;
+
+    // Set default trigger settings
+    TriggerSettings.TriggerType = ENarr_TriggerCondition::ProximityEnter;
+    TriggerSettings.TriggerRadius = 500.0f;
+    TriggerSettings.bOnlyTriggerOnce = false;
+    TriggerSettings.CooldownTime = 10.0f;
 }
 
-void UNarr_DialogueSystem::Initialize(FSubsystemCollectionBase& Collection)
+void ANarr_DialogueSystem::BeginPlay()
 {
-    Super::Initialize(Collection);
+    Super::BeginPlay();
     
-    // Initialize default voice type volumes
-    VoiceTypeVolumes.Add(ENarr_DialogueType::Narrator, 0.8f);
-    VoiceTypeVolumes.Add(ENarr_DialogueType::Warning, 1.0f);
-    VoiceTypeVolumes.Add(ENarr_DialogueType::TribalElder, 0.9f);
-    VoiceTypeVolumes.Add(ENarr_DialogueType::TrackerGuide, 0.85f);
-    VoiceTypeVolumes.Add(ENarr_DialogueType::SystemMessage, 0.7f);
-    
-    InitializeDefaultSequences();
-    
-    UE_LOG(LogTemp, Log, TEXT("Narr_DialogueSystem initialized"));
+    InitializeDialogueSystem();
+    LoadBiomeSpecificDialogue();
+
+    // Set trigger mesh scale based on trigger radius
+    if (TriggerMesh)
+    {
+        float Scale = TriggerSettings.TriggerRadius / 100.0f; // Assuming 100 unit base radius
+        TriggerMesh->SetWorldScale3D(FVector(Scale, Scale, Scale));
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("Dialogue System initialized with %d dialogue lines"), DialogueLines.Num());
 }
 
-void UNarr_DialogueSystem::Deinitialize()
+void ANarr_DialogueSystem::Tick(float DeltaTime)
 {
-    StopCurrentDialogue();
-    CleanupAudioComponents();
-    DialogueSequences.Empty();
-    DialogueQueue.Empty();
-    SequenceCooldowns.Empty();
-    PlayedOnceSequences.Empty();
-    
-    Super::Deinitialize();
-}
+    Super::Tick(DeltaTime);
 
-void UNarr_DialogueSystem::InitializeDefaultSequences()
-{
-    // Proximity-based survival guidance
-    FNarr_DialogueSequence ProximitySequence;
-    ProximitySequence.SequenceID = TEXT("ProximityGuidance");
-    ProximitySequence.TriggerType = ENarr_DialogueTrigger::PlayerProximity;
-    ProximitySequence.bPlayOnce = false;
-    ProximitySequence.CooldownTime = 45.0f;
-    
-    FNarr_DialogueEntry ProximityEntry;
-    ProximityEntry.DialogueText = TEXT("The ancient valley holds many dangers, survivor. Stay alert - the pack hunters communicate through low growls and coordinated movements.");
-    ProximityEntry.VoiceType = ENarr_DialogueType::Narrator;
-    ProximityEntry.DisplayDuration = 8.0f;
-    ProximityEntry.Priority = 2;
-    ProximitySequence.DialogueEntries.Add(ProximityEntry);
-    
-    RegisterDialogueSequence(ProximitySequence);
-    
-    // Danger warning sequence
-    FNarr_DialogueSequence DangerSequence;
-    DangerSequence.SequenceID = TEXT("DangerWarning");
-    DangerSequence.TriggerType = ENarr_DialogueTrigger::DangerDetected;
-    DangerSequence.bPlayOnce = false;
-    DangerSequence.CooldownTime = 20.0f;
-    
-    FNarr_DialogueEntry DangerEntry;
-    DangerEntry.DialogueText = TEXT("Danger approaches! The Thunder Lizard has caught your scent. Find cover behind the boulder formations!");
-    DangerEntry.VoiceType = ENarr_DialogueType::Warning;
-    DangerEntry.DisplayDuration = 6.0f;
-    DangerEntry.Priority = 5;
-    DangerSequence.DialogueEntries.Add(DangerEntry);
-    
-    RegisterDialogueSequence(DangerSequence);
-    
-    // Migration guidance sequence
-    FNarr_DialogueSequence MigrationSequence;
-    MigrationSequence.SequenceID = TEXT("MigrationGuidance");
-    MigrationSequence.TriggerType = ENarr_DialogueTrigger::LocationDiscovered;
-    MigrationSequence.bPlayOnce = true;
-    MigrationSequence.CooldownTime = 0.0f;
-    
-    FNarr_DialogueEntry MigrationEntry;
-    MigrationEntry.DialogueText = TEXT("The herbivore migration begins at sunrise. Follow the great long-necks to fresh water, but beware - predators hunt along their ancient paths.");
-    MigrationEntry.VoiceType = ENarr_DialogueType::TribalElder;
-    MigrationEntry.DisplayDuration = 10.0f;
-    MigrationEntry.Priority = 3;
-    MigrationSequence.DialogueEntries.Add(MigrationEntry);
-    
-    RegisterDialogueSequence(MigrationSequence);
-    
-    // Tracking guidance sequence
-    FNarr_DialogueSequence TrackingSequence;
-    TrackingSequence.SequenceID = TEXT("TrackingGuidance");
-    TrackingSequence.TriggerType = ENarr_DialogueTrigger::DinosaurSighting;
-    TrackingSequence.bPlayOnce = false;
-    TrackingSequence.CooldownTime = 60.0f;
-    
-    FNarr_DialogueEntry TrackingEntry;
-    TrackingEntry.DialogueText = TEXT("Fresh tracks in the mud - three-toed, deep impressions. The pack is close. They hunt in formation: two flankers, one direct assault.");
-    TrackingEntry.VoiceType = ENarr_DialogueType::TrackerGuide;
-    TrackingEntry.DisplayDuration = 8.0f;
-    TrackingEntry.Priority = 4;
-    TrackingSequence.DialogueEntries.Add(TrackingEntry);
-    
-    RegisterDialogueSequence(TrackingSequence);
-}
-
-void UNarr_DialogueSystem::PlayDialogue(const FString& SequenceID, bool bForcePlay)
-{
-    if (!bForcePlay && !CanPlayDialogue(SequenceID))
+    // Handle dialogue playback timing
+    if (bIsPlayingDialogue && CurrentDialogueTimer > 0.0f)
     {
-        return;
-    }
-    
-    const FNarr_DialogueSequence* Sequence = DialogueSequences.Find(SequenceID);
-    if (!Sequence || Sequence->DialogueEntries.Num() == 0)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Dialogue sequence not found or empty: %s"), *SequenceID);
-        return;
-    }
-    
-    // Add entries to queue sorted by priority
-    for (const FNarr_DialogueEntry& Entry : Sequence->DialogueEntries)
-    {
-        DialogueQueue.Add(Entry);
-    }
-    
-    // Sort queue by priority (higher priority first)
-    DialogueQueue.Sort([](const FNarr_DialogueEntry& A, const FNarr_DialogueEntry& B)
-    {
-        return A.Priority > B.Priority;
-    });
-    
-    // Update cooldown
-    if (Sequence->CooldownTime > 0.0f)
-    {
-        SequenceCooldowns.Add(SequenceID, GetWorld()->GetTimeSeconds() + Sequence->CooldownTime);
-    }
-    
-    // Mark as played once if needed
-    if (Sequence->bPlayOnce)
-    {
-        PlayedOnceSequences.Add(SequenceID);
-    }
-    
-    // Start playback if not already playing
-    if (!bIsPlaying && DialogueQueue.Num() > 0)
-    {
-        CurrentQueueIndex = 0;
-        PlayDialogueEntry(DialogueQueue[CurrentQueueIndex]);
-    }
-}
-
-void UNarr_DialogueSystem::PlayDialogueEntry(const FNarr_DialogueEntry& Entry)
-{
-    if (bIsPlaying)
-    {
-        StopCurrentDialogue();
-    }
-    
-    CurrentDialogue = Entry;
-    bIsPlaying = true;
-    CurrentDialogueTime = 0.0f;
-    
-    // Get audio component
-    CurrentAudioComponent = GetOrCreateAudioComponent();
-    if (!CurrentAudioComponent)
-    {
-        UE_LOG(LogTemp, Error, TEXT("Failed to create audio component for dialogue"));
-        OnDialogueFinished();
-        return;
-    }
-    
-    // Set volume based on voice type and master volume
-    float VoiceVolume = VoiceTypeVolumes.Contains(Entry.VoiceType) ? 
-        VoiceTypeVolumes[Entry.VoiceType] : 1.0f;
-    CurrentAudioComponent->SetVolumeMultiplier(MasterVolume * VoiceVolume);
-    
-    // Play audio if available
-    if (Entry.AudioCue.IsValid())
-    {
-        USoundCue* SoundCue = Entry.AudioCue.LoadSynchronous();
-        if (SoundCue)
+        CurrentDialogueTimer -= DeltaTime;
+        if (CurrentDialogueTimer <= 0.0f)
         {
-            CurrentAudioComponent->SetSound(SoundCue);
-            CurrentAudioComponent->Play();
+            PlayNextDialogueLine();
         }
     }
-    
-    // Display text (in a real implementation, this would update UI)
-    UE_LOG(LogTemp, Log, TEXT("Dialogue: %s"), *Entry.DialogueText);
-    
-    // Set timer for dialogue duration
-    if (UWorld* World = GetWorld())
+
+    // Check proximity trigger if enabled
+    if (TriggerSettings.TriggerType == ENarr_TriggerCondition::ProximityEnter)
     {
-        FTimerHandle TimerHandle;
-        World->GetTimerManager().SetTimer(TimerHandle, this, &UNarr_DialogueSystem::OnDialogueFinished, Entry.DisplayDuration, false);
+        CheckProximityTrigger();
     }
 }
 
-void UNarr_DialogueSystem::StopCurrentDialogue()
+void ANarr_DialogueSystem::InitializeDialogueSystem()
 {
-    if (CurrentAudioComponent && CurrentAudioComponent->IsPlaying())
+    // Initialize with default survival dialogue lines
+    if (DialogueLines.Num() == 0)
     {
-        CurrentAudioComponent->Stop();
-    }
-    
-    bIsPlaying = false;
-    CurrentDialogueTime = 0.0f;
-    
-    // Clear any pending timers
-    if (UWorld* World = GetWorld())
-    {
-        World->GetTimerManager().ClearAllTimersForObject(this);
-    }
-}
+        FNarr_DialogueLine SurvivalTip;
+        SurvivalTip.DialogueText = TEXT("Stay alert, survivor. The ancient valley holds many dangers.");
+        SurvivalTip.CharacterName = TEXT("Survival Guide");
+        SurvivalTip.Duration = 4.0f;
+        SurvivalTip.DialogueType = ENarr_DialogueType::SurvivalTip;
+        SurvivalTip.bIsNarration = true;
+        DialogueLines.Add(SurvivalTip);
 
-bool UNarr_DialogueSystem::IsDialoguePlaying() const
-{
-    return bIsPlaying;
-}
-
-void UNarr_DialogueSystem::TriggerProximityDialogue(const FVector& PlayerLocation, const FVector& TriggerLocation, float Range)
-{
-    float Distance = FVector::Dist(PlayerLocation, TriggerLocation);
-    if (Distance <= Range)
-    {
-        PlayDialogue(TEXT("ProximityGuidance"));
+        FNarr_DialogueLine DangerWarning;
+        DangerWarning.DialogueText = TEXT("Warning! Predators hunt in packs. Listen for their calls.");
+        DangerWarning.CharacterName = TEXT("Danger Alert");
+        DangerWarning.Duration = 3.5f;
+        DangerWarning.DialogueType = ENarr_DialogueType::DangerWarning;
+        DangerWarning.bIsNarration = true;
+        DialogueLines.Add(DangerWarning);
     }
 }
 
-void UNarr_DialogueSystem::TriggerDangerWarning(const FString& DinosaurType, const FVector& ThreatLocation)
+void ANarr_DialogueSystem::LoadBiomeSpecificDialogue()
 {
-    PlayDialogue(TEXT("DangerWarning"), true); // Force play for danger warnings
-}
+    // Clear existing dialogue and load biome-specific content
+    DialogueLines.Empty();
 
-void UNarr_DialogueSystem::TriggerLocationDiscovery(const FString& LocationName)
-{
-    if (LocationName.Contains(TEXT("Migration")) || LocationName.Contains(TEXT("Watering")))
+    switch (AssociatedBiome)
     {
-        PlayDialogue(TEXT("MigrationGuidance"));
+        case EBiomeType::Savana:
+        {
+            FNarr_DialogueLine SavanaLine;
+            SavanaLine.DialogueText = TEXT("The open savana offers little shelter. Watch the horizon for movement.");
+            SavanaLine.CharacterName = TEXT("Plains Guide");
+            SavanaLine.Duration = 4.0f;
+            SavanaLine.DialogueType = ENarr_DialogueType::Environmental;
+            DialogueLines.Add(SavanaLine);
+            break;
+        }
+        case EBiomeType::Floresta:
+        {
+            FNarr_DialogueLine ForestLine;
+            ForestLine.DialogueText = TEXT("The forest provides cover, but predators lurk in the shadows between trees.");
+            ForestLine.CharacterName = TEXT("Forest Watcher");
+            ForestLine.Duration = 4.5f;
+            ForestLine.DialogueType = ENarr_DialogueType::Environmental;
+            DialogueLines.Add(ForestLine);
+            break;
+        }
+        case EBiomeType::Pantano:
+        {
+            FNarr_DialogueLine SwampLine;
+            SwampLine.DialogueText = TEXT("Beware the swamp waters. What lurks beneath may be more dangerous than what stalks above.");
+            SwampLine.CharacterName = TEXT("Swamp Survivor");
+            SwampLine.Duration = 5.0f;
+            SwampLine.DialogueType = ENarr_DialogueType::DangerWarning;
+            DialogueLines.Add(SwampLine);
+            break;
+        }
+        case EBiomeType::Deserto:
+        {
+            FNarr_DialogueLine DesertLine;
+            DesertLine.DialogueText = TEXT("The desert sun is merciless. Seek shade and conserve your water.");
+            DesertLine.CharacterName = TEXT("Desert Wanderer");
+            DesertLine.Duration = 4.0f;
+            DesertLine.DialogueType = ENarr_DialogueType::SurvivalTip;
+            DialogueLines.Add(DesertLine);
+            break;
+        }
+        case EBiomeType::Montanha:
+        {
+            FNarr_DialogueLine MountainLine;
+            MountainLine.DialogueText = TEXT("High ground offers advantage, but the climb leaves you exposed. Choose your path wisely.");
+            MountainLine.CharacterName = TEXT("Mountain Guide");
+            MountainLine.Duration = 4.5f;
+            MountainLine.DialogueType = ENarr_DialogueType::SurvivalTip;
+            DialogueLines.Add(MountainLine);
+            break;
+        }
     }
+
+    UE_LOG(LogTemp, Log, TEXT("Loaded %d biome-specific dialogue lines for %s"), 
+           DialogueLines.Num(), 
+           *UEnum::GetValueAsString(AssociatedBiome));
 }
 
-void UNarr_DialogueSystem::RegisterDialogueSequence(const FNarr_DialogueSequence& Sequence)
+void ANarr_DialogueSystem::TriggerDialogue()
 {
-    DialogueSequences.Add(Sequence.SequenceID, Sequence);
-    UE_LOG(LogTemp, Log, TEXT("Registered dialogue sequence: %s"), *Sequence.SequenceID);
-}
-
-void UNarr_DialogueSystem::UnregisterDialogueSequence(const FString& SequenceID)
-{
-    DialogueSequences.Remove(SequenceID);
-    SequenceCooldowns.Remove(SequenceID);
-    PlayedOnceSequences.Remove(SequenceID);
-}
-
-FNarr_DialogueSequence UNarr_DialogueSystem::GetDialogueSequence(const FString& SequenceID) const
-{
-    const FNarr_DialogueSequence* Found = DialogueSequences.Find(SequenceID);
-    return Found ? *Found : FNarr_DialogueSequence();
-}
-
-void UNarr_DialogueSystem::SetMasterVolume(float Volume)
-{
-    MasterVolume = FMath::Clamp(Volume, 0.0f, 1.0f);
-}
-
-void UNarr_DialogueSystem::SetVoiceTypeVolume(ENarr_DialogueType VoiceType, float Volume)
-{
-    VoiceTypeVolumes.Add(VoiceType, FMath::Clamp(Volume, 0.0f, 1.0f));
-}
-
-bool UNarr_DialogueSystem::CanPlayDialogue(const FString& SequenceID) const
-{
-    // Check if already played once
-    if (PlayedOnceSequences.Contains(SequenceID))
+    if (bIsPlayingDialogue)
     {
-        return false;
+        return; // Already playing dialogue
     }
-    
+
     // Check cooldown
-    const float* CooldownEnd = SequenceCooldowns.Find(SequenceID);
-    if (CooldownEnd && GetWorld()->GetTimeSeconds() < *CooldownEnd)
+    float CurrentTime = GetWorld()->GetTimeSeconds();
+    if (CurrentTime - LastTriggerTime < TriggerSettings.CooldownTime)
+    {
+        return;
+    }
+
+    // Check if should only trigger once
+    if (TriggerSettings.bOnlyTriggerOnce && bHasTriggered)
+    {
+        return;
+    }
+
+    if (DialogueLines.Num() > 0)
+    {
+        bIsPlayingDialogue = true;
+        CurrentDialogueIndex = 0;
+        bHasTriggered = true;
+        LastTriggerTime = CurrentTime;
+        
+        PlayNextDialogueLine();
+        
+        UE_LOG(LogTemp, Log, TEXT("Dialogue triggered: %s"), *DialogueLines[0].DialogueText);
+    }
+}
+
+void ANarr_DialogueSystem::PlayNextDialogueLine()
+{
+    if (CurrentDialogueIndex >= DialogueLines.Num())
+    {
+        OnDialogueComplete();
+        return;
+    }
+
+    const FNarr_DialogueLine& CurrentLine = DialogueLines[CurrentDialogueIndex];
+    
+    // Display dialogue text (in a real game, this would go to UI)
+    if (GEngine)
+    {
+        FString DisplayText = FString::Printf(TEXT("%s: %s"), 
+                                            *CurrentLine.CharacterName, 
+                                            *CurrentLine.DialogueText);
+        GEngine->AddOnScreenDebugMessage(-1, CurrentLine.Duration, FColor::Yellow, DisplayText);
+    }
+
+    // Set timer for next line
+    CurrentDialogueTimer = CurrentLine.Duration;
+    CurrentDialogueIndex++;
+
+    UE_LOG(LogTemp, Log, TEXT("Playing dialogue line %d: %s"), 
+           CurrentDialogueIndex, *CurrentLine.DialogueText);
+}
+
+void ANarr_DialogueSystem::StopDialogue()
+{
+    bIsPlayingDialogue = false;
+    CurrentDialogueTimer = 0.0f;
+    CurrentDialogueIndex = 0;
+
+    if (AudioComponent && AudioComponent->IsPlaying())
+    {
+        AudioComponent->Stop();
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("Dialogue stopped"));
+}
+
+void ANarr_DialogueSystem::AddDialogueLine(const FNarr_DialogueLine& NewLine)
+{
+    DialogueLines.Add(NewLine);
+    UE_LOG(LogTemp, Log, TEXT("Added dialogue line: %s"), *NewLine.DialogueText);
+}
+
+bool ANarr_DialogueSystem::CheckTriggerConditions(AActor* TriggeringActor)
+{
+    if (!TriggeringActor)
     {
         return false;
     }
-    
+
+    // Check if triggering actor is a player character
+    if (!TriggeringActor->IsA<ACharacter>())
+    {
+        return false;
+    }
+
+    // Check tag requirements
+    if (!TriggerSettings.RequiredTag.IsEmpty())
+    {
+        if (!TriggeringActor->ActorHasTag(FName(*TriggerSettings.RequiredTag)))
+        {
+            return false;
+        }
+    }
+
     return true;
 }
 
-void UNarr_DialogueSystem::OnDialogueFinished()
+void ANarr_DialogueSystem::SetBiomeContext(EBiomeType NewBiome)
 {
-    bIsPlaying = false;
-    
-    // Move to next dialogue in queue
-    CurrentQueueIndex++;
-    if (CurrentQueueIndex < DialogueQueue.Num())
+    if (AssociatedBiome != NewBiome)
     {
-        PlayDialogueEntry(DialogueQueue[CurrentQueueIndex]);
-    }
-    else
-    {
-        // Queue finished, clear it
-        DialogueQueue.Empty();
-        CurrentQueueIndex = 0;
+        AssociatedBiome = NewBiome;
+        LoadBiomeSpecificDialogue();
     }
 }
 
-UAudioComponent* UNarr_DialogueSystem::GetOrCreateAudioComponent()
+void ANarr_DialogueSystem::OnDialogueComplete()
 {
-    // Try to find an available audio component
-    for (UAudioComponent* Component : AudioComponents)
+    bIsPlayingDialogue = false;
+    CurrentDialogueTimer = 0.0f;
+    CurrentDialogueIndex = 0;
+
+    UE_LOG(LogTemp, Log, TEXT("Dialogue sequence completed"));
+
+    // Broadcast completion event (in a real game, this would trigger delegates)
+    if (GEngine)
     {
-        if (Component && !Component->IsPlaying())
-        {
-            return Component;
-        }
+        GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Green, TEXT("Dialogue Complete"));
     }
-    
-    // Create new audio component if needed
-    if (UWorld* World = GetWorld())
-    {
-        UAudioComponent* NewComponent = NewObject<UAudioComponent>(this);
-        if (NewComponent)
-        {
-            AudioComponents.Add(NewComponent);
-            return NewComponent;
-        }
-    }
-    
-    return nullptr;
 }
 
-void UNarr_DialogueSystem::CleanupAudioComponents()
+void ANarr_DialogueSystem::CheckProximityTrigger()
 {
-    for (UAudioComponent* Component : AudioComponents)
+    if (!GetWorld())
     {
-        if (Component)
+        return;
+    }
+
+    // Find nearby player characters
+    TArray<AActor*> FoundActors;
+    UGameplayStatics::GetAllActorsOfClass(GetWorld(), ACharacter::StaticClass(), FoundActors);
+
+    for (AActor* Actor : FoundActors)
+    {
+        if (Actor && CheckTriggerConditions(Actor))
         {
-            Component->Stop();
-            Component->DestroyComponent();
+            float Distance = FVector::Dist(GetActorLocation(), Actor->GetActorLocation());
+            if (Distance <= TriggerSettings.TriggerRadius)
+            {
+                if (bAutoPlayOnTrigger)
+                {
+                    TriggerDialogue();
+                }
+                break;
+            }
         }
     }
-    AudioComponents.Empty();
-    CurrentAudioComponent = nullptr;
 }
