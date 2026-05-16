@@ -1,185 +1,161 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
+#include "Engine/GameInstanceSubsystem.h"
 #include "Components/AudioComponent.h"
 #include "MetasoundSource.h"
 #include "Sound/SoundCue.h"
-#include "Engine/DataTable.h"
-#include "SharedTypes.h"
 #include "Audio_MetaSoundManager.generated.h"
 
 UENUM(BlueprintType)
-enum class EAudio_NarrativeType : uint8
+enum class EAudio_BiomeType : uint8
 {
-    None = 0,
-    AncientWisdom,
-    DangerWarning,
-    HuntInstruction,
-    SurvivalTip,
-    QuestNarration,
-    EnvironmentalAlert
+    Savanna     UMETA(DisplayName = "Savanna"),
+    Forest      UMETA(DisplayName = "Forest"),
+    Swamp       UMETA(DisplayName = "Swamp"),
+    Desert      UMETA(DisplayName = "Desert"),
+    Mountain    UMETA(DisplayName = "Mountain")
 };
 
 UENUM(BlueprintType)
-enum class EAudio_SpatialMode : uint8
+enum class EAudio_ThreatLevel : uint8
 {
-    TwoD = 0,
-    ThreeD_Positional,
-    ThreeD_Ambient,
-    ThreeD_Directional
+    Safe        UMETA(DisplayName = "Safe"),
+    Caution     UMETA(DisplayName = "Caution"),
+    Danger      UMETA(DisplayName = "Danger"),
+    Extreme     UMETA(DisplayName = "Extreme Danger")
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FAudio_VoiceLine
+struct FAudio_BiomeAudioProfile
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Voice")
-    EAudio_NarrativeType NarrativeType = EAudio_NarrativeType::None;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    EAudio_BiomeType BiomeType = EAudio_BiomeType::Savanna;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Voice")
-    FString AudioURL;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Voice")
-    TSoftObjectPtr<USoundWave> SoundAsset;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Voice")
-    float Duration = 0.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Voice")
-    int32 Priority = 1;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Voice")
-    bool bIs3D = true;
-
-    FAudio_VoiceLine()
-    {
-        NarrativeType = EAudio_NarrativeType::None;
-        AudioURL = "";
-        Duration = 0.0f;
-        Priority = 1;
-        bIs3D = true;
-    }
-};
-
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FAudio_MetaSoundParams
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaSound")
-    float Volume = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaSound")
-    float Pitch = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaSound")
-    float LowPassFilter = 22000.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaSound")
-    float HighPassFilter = 20.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaSound")
-    float ReverbAmount = 0.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaSound")
-    bool bUseDistanceAttenuation = true;
-
-    FAudio_MetaSoundParams()
-    {
-        Volume = 1.0f;
-        Pitch = 1.0f;
-        LowPassFilter = 22000.0f;
-        HighPassFilter = 20.0f;
-        ReverbAmount = 0.0f;
-        bUseDistanceAttenuation = true;
-    }
-};
-
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API AAudio_MetaSoundManager : public AActor
-{
-    GENERATED_BODY()
-
-public:
-    AAudio_MetaSoundManager();
-
-protected:
-    virtual void BeginPlay() override;
-    virtual void Tick(float DeltaTime) override;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    class UAudioComponent* PrimaryAudioComponent;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    class UAudioComponent* SecondaryAudioComponent;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    class UAudioComponent* AmbientAudioComponent;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Voice Lines")
-    TArray<FAudio_VoiceLine> NarrativeVoiceLines;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaSound")
-    TSoftObjectPtr<UMetaSoundSource> NarrativeMetaSound;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaSound")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
     TSoftObjectPtr<UMetaSoundSource> AmbientMetaSound;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    FAudio_MetaSoundParams DefaultParams;
+    TSoftObjectPtr<USoundCue> BiomeMusic;
 
-    UPROPERTY(BlueprintReadOnly, Category = "State")
-    bool bIsPlayingNarrative = false;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    TArray<TSoftObjectPtr<USoundWave>> CreatureSounds;
 
-    UPROPERTY(BlueprintReadOnly, Category = "State")
-    EAudio_NarrativeType CurrentNarrativeType = EAudio_NarrativeType::None;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    float BaseVolume = 0.7f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "State")
-    float CurrentPlaybackTime = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    float FadeDistance = 5000.0f;
+
+    FAudio_BiomeAudioProfile()
+    {
+        BiomeType = EAudio_BiomeType::Savanna;
+        BaseVolume = 0.7f;
+        FadeDistance = 5000.0f;
+    }
+};
+
+USTRUCT(BlueprintType)
+struct FAudio_DialogueAudioData
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    FString NPCName;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    TSoftObjectPtr<USoundWave> VoiceLine;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    float Duration = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    bool bHasSubtitles = true;
+
+    FAudio_DialogueAudioData()
+    {
+        Duration = 0.0f;
+        bHasSubtitles = true;
+    }
+};
+
+/**
+ * MetaSound-based audio manager for adaptive biome soundscapes and dialogue integration
+ */
+UCLASS(BlueprintType)
+class TRANSPERSONALGAME_API UAudio_MetaSoundManager : public UGameInstanceSubsystem
+{
+    GENERATED_BODY()
 
 public:
-    // Narrative voice line playback
+    UAudio_MetaSoundManager();
+
+    // USubsystem interface
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
+
+    // Biome audio management
     UFUNCTION(BlueprintCallable, Category = "Audio")
-    bool PlayNarrativeLine(EAudio_NarrativeType NarrativeType, const FVector& WorldLocation = FVector::ZeroVector);
+    void SetCurrentBiome(EAudio_BiomeType NewBiome, const FVector& PlayerLocation);
 
     UFUNCTION(BlueprintCallable, Category = "Audio")
-    void StopNarrativeLine();
+    void UpdateThreatLevel(EAudio_ThreatLevel ThreatLevel);
 
     UFUNCTION(BlueprintCallable, Category = "Audio")
-    bool IsNarrativePlaying() const { return bIsPlayingNarrative; }
+    void PlayDinosaurSound(const FString& DinosaurType, const FVector& Location, float Intensity = 1.0f);
 
-    // MetaSound parameter control
+    // Dialogue system integration
     UFUNCTION(BlueprintCallable, Category = "Audio")
-    void SetMetaSoundParameter(const FString& ParameterName, float Value);
-
-    UFUNCTION(BlueprintCallable, Category = "Audio")
-    void SetAudioParams(const FAudio_MetaSoundParams& Params);
-
-    // Voice line management
-    UFUNCTION(BlueprintCallable, Category = "Audio")
-    void RegisterVoiceLine(const FAudio_VoiceLine& VoiceLine);
+    void PlayDialogueLine(const FString& NPCName, const FString& DialogueID);
 
     UFUNCTION(BlueprintCallable, Category = "Audio")
-    FAudio_VoiceLine GetVoiceLineByType(EAudio_NarrativeType NarrativeType) const;
-
-    // 3D spatial audio
-    UFUNCTION(BlueprintCallable, Category = "Audio")
-    void SetSpatialMode(EAudio_SpatialMode SpatialMode);
+    void SetDialogueVolume(float Volume);
 
     UFUNCTION(BlueprintCallable, Category = "Audio")
-    void UpdateListenerPosition(const FVector& ListenerLocation, const FVector& ListenerForward);
+    bool IsDialoguePlaying() const;
 
-private:
-    void InitializeDefaultVoiceLines();
-    void LoadMetaSoundAssets();
-    UAudioComponent* GetAvailableAudioComponent();
-    void OnNarrativeFinished();
+    // Environmental audio
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    void PlayEnvironmentalEffect(const FString& EffectName, const FVector& Location);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    void SetMasterVolume(float Volume);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    void SetAmbientVolume(float Volume);
+
+protected:
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Audio Configuration")
+    TArray<FAudio_BiomeAudioProfile> BiomeProfiles;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Audio Configuration")
+    TMap<FString, FAudio_DialogueAudioData> DialogueDatabase;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Audio State")
+    EAudio_BiomeType CurrentBiome;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Audio State")
+    EAudio_ThreatLevel CurrentThreatLevel;
 
     UPROPERTY()
-    TArray<UAudioComponent*> AudioComponentPool;
+    UAudioComponent* BiomeAudioComponent;
 
-    float NarrativeStartTime = 0.0f;
-    float CurrentNarrativeDuration = 0.0f;
+    UPROPERTY()
+    UAudioComponent* DialogueAudioComponent;
+
+    UPROPERTY()
+    UAudioComponent* EffectsAudioComponent;
+
+private:
+    void InitializeBiomeProfiles();
+    void InitializeDialogueDatabase();
+    void UpdateBiomeAudio();
+    void CrossfadeBiomes(EAudio_BiomeType FromBiome, EAudio_BiomeType ToBiome);
+
+    float MasterVolume = 1.0f;
+    float AmbientVolume = 0.8f;
+    float DialogueVolume = 1.0f;
+    bool bDialoguePlaying = false;
 };
