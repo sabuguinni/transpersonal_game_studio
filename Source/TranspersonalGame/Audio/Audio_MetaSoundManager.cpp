@@ -1,333 +1,340 @@
 #include "Audio_MetaSoundManager.h"
-#include "Components/AudioComponent.h"
 #include "Engine/Engine.h"
-#include "Sound/SoundWave.h"
-#include "MetasoundSource.h"
-#include "AudioDevice.h"
 #include "Engine/World.h"
-#include "TimerManager.h"
+#include "Components/AudioComponent.h"
+#include "Sound/SoundWave.h"
+#include "Sound/SoundCue.h"
+#include "Kismet/GameplayStatics.h"
+#include "AudioDevice.h"
 
-AAudio_MetaSoundManager::AAudio_MetaSoundManager()
+UAudio_MetaSoundManager::UAudio_MetaSoundManager()
 {
-    PrimaryActorTick.bCanEverTick = true;
-    
-    // Create root component
-    RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootComponent"));
-    
-    // Create primary audio component for narrative voice lines
-    PrimaryAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("PrimaryAudioComponent"));
-    PrimaryAudioComponent->SetupAttachment(RootComponent);
-    PrimaryAudioComponent->bAutoActivate = false;
-    PrimaryAudioComponent->SetVolumeMultiplier(1.0f);
-    
-    // Create secondary audio component for overlapping sounds
-    SecondaryAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("SecondaryAudioComponent"));
-    SecondaryAudioComponent->SetupAttachment(RootComponent);
-    SecondaryAudioComponent->bAutoActivate = false;
-    SecondaryAudioComponent->SetVolumeMultiplier(0.8f);
-    
-    // Create ambient audio component for environmental sounds
-    AmbientAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("AmbientAudioComponent"));
-    AmbientAudioComponent->SetupAttachment(RootComponent);
-    AmbientAudioComponent->bAutoActivate = true;
-    AmbientAudioComponent->SetVolumeMultiplier(0.6f);
-    
-    // Initialize audio component pool
-    AudioComponentPool.Add(PrimaryAudioComponent);
-    AudioComponentPool.Add(SecondaryAudioComponent);
-    AudioComponentPool.Add(AmbientAudioComponent);
-    
-    // Set default parameters
-    DefaultParams.Volume = 1.0f;
-    DefaultParams.Pitch = 1.0f;
-    DefaultParams.LowPassFilter = 22000.0f;
-    DefaultParams.HighPassFilter = 20.0f;
-    DefaultParams.ReverbAmount = 0.1f;
-    DefaultParams.bUseDistanceAttenuation = true;
-    
-    // Initialize state
-    bIsPlayingNarrative = false;
-    CurrentNarrativeType = EAudio_NarrativeType::None;
-    CurrentPlaybackTime = 0.0f;
-    NarrativeStartTime = 0.0f;
-    CurrentNarrativeDuration = 0.0f;
+    CurrentBiome = EAudio_BiomeType::Savanna;
+    CurrentThreatLevel = EAudio_ThreatLevel::Safe;
+    BiomeAudioComponent = nullptr;
+    DialogueAudioComponent = nullptr;
+    EffectsAudioComponent = nullptr;
 }
 
-void AAudio_MetaSoundManager::BeginPlay()
+void UAudio_MetaSoundManager::Initialize(FSubsystemCollectionBase& Collection)
 {
-    Super::BeginPlay();
+    Super::Initialize(Collection);
     
-    InitializeDefaultVoiceLines();
-    LoadMetaSoundAssets();
+    UE_LOG(LogTemp, Log, TEXT("Audio_MetaSoundManager: Initializing adaptive audio system"));
     
-    // Set up 3D audio settings
-    SetSpatialMode(EAudio_SpatialMode::ThreeD_Positional);
+    InitializeBiomeProfiles();
+    InitializeDialogueDatabase();
     
-    UE_LOG(LogTemp, Warning, TEXT("Audio_MetaSoundManager initialized with %d voice lines"), NarrativeVoiceLines.Num());
-}
-
-void AAudio_MetaSoundManager::Tick(float DeltaTime)
-{
-    Super::Tick(DeltaTime);
-    
-    // Update narrative playback time
-    if (bIsPlayingNarrative)
+    // Create audio components
+    if (UWorld* World = GetWorld())
     {
-        CurrentPlaybackTime += DeltaTime;
-        
-        // Check if narrative finished
-        if (CurrentNarrativeDuration > 0.0f && CurrentPlaybackTime >= CurrentNarrativeDuration)
+        if (AActor* AudioManagerActor = UGameplayStatics::GetActorOfClass(World, AActor::StaticClass()))
         {
-            OnNarrativeFinished();
+            BiomeAudioComponent = AudioManagerActor->FindComponentByClass<UAudioComponent>();
+            if (!BiomeAudioComponent)
+            {
+                BiomeAudioComponent = NewObject<UAudioComponent>(AudioManagerActor);
+                AudioManagerActor->AddInstanceComponent(BiomeAudioComponent);
+            }
+            
+            DialogueAudioComponent = NewObject<UAudioComponent>(AudioManagerActor);
+            AudioManagerActor->AddInstanceComponent(DialogueAudioComponent);
+            
+            EffectsAudioComponent = NewObject<UAudioComponent>(AudioManagerActor);
+            AudioManagerActor->AddInstanceComponent(EffectsAudioComponent);
         }
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("Audio_MetaSoundManager: Initialization complete"));
+}
+
+void UAudio_MetaSoundManager::Deinitialize()
+{
+    if (BiomeAudioComponent && BiomeAudioComponent->IsPlaying())
+    {
+        BiomeAudioComponent->Stop();
+    }
+    
+    if (DialogueAudioComponent && DialogueAudioComponent->IsPlaying())
+    {
+        DialogueAudioComponent->Stop();
+    }
+    
+    if (EffectsAudioComponent && EffectsAudioComponent->IsPlaying())
+    {
+        EffectsAudioComponent->Stop();
+    }
+    
+    Super::Deinitialize();
+}
+
+void UAudio_MetaSoundManager::SetCurrentBiome(EAudio_BiomeType NewBiome, const FVector& PlayerLocation)
+{
+    if (CurrentBiome != NewBiome)
+    {
+        UE_LOG(LogTemp, Log, TEXT("Audio_MetaSoundManager: Transitioning from %d to %d biome"), 
+               (int32)CurrentBiome, (int32)NewBiome);
+        
+        CrossfadeBiomes(CurrentBiome, NewBiome);
+        CurrentBiome = NewBiome;
+        UpdateBiomeAudio();
     }
 }
 
-void AAudio_MetaSoundManager::InitializeDefaultVoiceLines()
+void UAudio_MetaSoundManager::UpdateThreatLevel(EAudio_ThreatLevel ThreatLevel)
 {
-    // Initialize with voice lines from previous narrative generation
-    FAudio_VoiceLine AncientWisdom;
-    AncientWisdom.NarrativeType = EAudio_NarrativeType::AncientWisdom;
-    AncientWisdom.AudioURL = "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1778842332378_AncientNarrator.mp3";
-    AncientWisdom.Duration = 25.0f;
-    AncientWisdom.Priority = 3;
-    AncientWisdom.bIs3D = true;
-    NarrativeVoiceLines.Add(AncientWisdom);
-    
-    FAudio_VoiceLine DangerWarning;
-    DangerWarning.NarrativeType = EAudio_NarrativeType::DangerWarning;
-    DangerWarning.AudioURL = "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1778842338450_ScoutWarning.mp3";
-    DangerWarning.Duration = 18.0f;
-    DangerWarning.Priority = 5;
-    DangerWarning.bIs3D = true;
-    NarrativeVoiceLines.Add(DangerWarning);
-    
-    FAudio_VoiceLine HuntInstruction;
-    HuntInstruction.NarrativeType = EAudio_NarrativeType::HuntInstruction;
-    HuntInstruction.AudioURL = "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1778842343769_HuntLeader.mp3";
-    HuntInstruction.Duration = 20.0f;
-    HuntInstruction.Priority = 4;
-    HuntInstruction.bIs3D = true;
-    NarrativeVoiceLines.Add(HuntInstruction);
-    
-    FAudio_VoiceLine SurvivalTip;
-    SurvivalTip.NarrativeType = EAudio_NarrativeType::SurvivalTip;
-    SurvivalTip.AudioURL = "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1778842348847_ElderWisdom.mp3";
-    SurvivalTip.Duration = 16.0f;
-    SurvivalTip.Priority = 2;
-    SurvivalTip.bIs3D = false; // 2D UI narration
-    NarrativeVoiceLines.Add(SurvivalTip);
-    
-    UE_LOG(LogTemp, Warning, TEXT("Initialized %d default voice lines"), NarrativeVoiceLines.Num());
-}
-
-void AAudio_MetaSoundManager::LoadMetaSoundAssets()
-{
-    // Load MetaSound assets for narrative and ambient audio
-    // These would be created in the UE5 editor as MetaSound sources
-    
-    // For now, log that we're ready to load MetaSounds
-    UE_LOG(LogTemp, Warning, TEXT("MetaSound assets ready for loading - create MS_Narrative and MS_Ambient in editor"));
-}
-
-bool AAudio_MetaSoundManager::PlayNarrativeLine(EAudio_NarrativeType NarrativeType, const FVector& WorldLocation)
-{
-    // Find the voice line
-    FAudio_VoiceLine* VoiceLine = nullptr;
-    for (FAudio_VoiceLine& Line : NarrativeVoiceLines)
+    if (CurrentThreatLevel != ThreatLevel)
     {
-        if (Line.NarrativeType == NarrativeType)
+        CurrentThreatLevel = ThreatLevel;
+        
+        // Adjust audio parameters based on threat level
+        float ThreatMultiplier = 1.0f;
+        switch (ThreatLevel)
         {
-            VoiceLine = &Line;
+        case EAudio_ThreatLevel::Safe:
+            ThreatMultiplier = 1.0f;
+            break;
+        case EAudio_ThreatLevel::Caution:
+            ThreatMultiplier = 1.2f;
+            break;
+        case EAudio_ThreatLevel::Danger:
+            ThreatMultiplier = 1.5f;
+            break;
+        case EAudio_ThreatLevel::Extreme:
+            ThreatMultiplier = 2.0f;
             break;
         }
-    }
-    
-    if (!VoiceLine)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Voice line not found for narrative type: %d"), (int32)NarrativeType);
-        return false;
-    }
-    
-    // Stop current narrative if playing
-    if (bIsPlayingNarrative)
-    {
-        StopNarrativeLine();
-    }
-    
-    // Get available audio component
-    UAudioComponent* AudioComp = GetAvailableAudioComponent();
-    if (!AudioComp)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("No available audio component for narrative playback"));
-        return false;
-    }
-    
-    // Set 3D position if needed
-    if (VoiceLine->bIs3D && WorldLocation != FVector::ZeroVector)
-    {
-        AudioComp->SetWorldLocation(WorldLocation);
-    }
-    
-    // Apply audio parameters
-    AudioComp->SetVolumeMultiplier(DefaultParams.Volume);
-    AudioComp->SetPitchMultiplier(DefaultParams.Pitch);
-    
-    // Start playback (would load SoundWave from URL in full implementation)
-    // For now, simulate playback
-    bIsPlayingNarrative = true;
-    CurrentNarrativeType = NarrativeType;
-    CurrentPlaybackTime = 0.0f;
-    CurrentNarrativeDuration = VoiceLine->Duration;
-    NarrativeStartTime = GetWorld()->GetTimeSeconds();
-    
-    UE_LOG(LogTemp, Warning, TEXT("Playing narrative line: %s (Duration: %.1fs)"), 
-           *UEnum::GetValueAsString(NarrativeType), VoiceLine->Duration);
-    
-    return true;
-}
-
-void AAudio_MetaSoundManager::StopNarrativeLine()
-{
-    if (bIsPlayingNarrative)
-    {
-        // Stop all audio components
-        for (UAudioComponent* AudioComp : AudioComponentPool)
+        
+        if (BiomeAudioComponent)
         {
-            if (AudioComp && AudioComp->IsPlaying())
-            {
-                AudioComp->Stop();
-            }
+            BiomeAudioComponent->SetVolumeMultiplier(AmbientVolume * ThreatMultiplier);
         }
         
-        OnNarrativeFinished();
+        UE_LOG(LogTemp, Log, TEXT("Audio_MetaSoundManager: Threat level updated to %d (multiplier: %.2f)"), 
+               (int32)ThreatLevel, ThreatMultiplier);
     }
 }
 
-void AAudio_MetaSoundManager::SetMetaSoundParameter(const FString& ParameterName, float Value)
+void UAudio_MetaSoundManager::PlayDinosaurSound(const FString& DinosaurType, const FVector& Location, float Intensity)
 {
-    // Set MetaSound parameter on active audio components
-    for (UAudioComponent* AudioComp : AudioComponentPool)
+    if (!EffectsAudioComponent)
     {
-        if (AudioComp && AudioComp->IsPlaying())
-        {
-            // In full implementation, would use MetaSound parameter interface
-            UE_LOG(LogTemp, Log, TEXT("Setting MetaSound parameter %s to %.2f"), *ParameterName, Value);
-        }
-    }
-}
-
-void AAudio_MetaSoundManager::SetAudioParams(const FAudio_MetaSoundParams& Params)
-{
-    DefaultParams = Params;
-    
-    // Apply to all audio components
-    for (UAudioComponent* AudioComp : AudioComponentPool)
-    {
-        if (AudioComp)
-        {
-            AudioComp->SetVolumeMultiplier(Params.Volume);
-            AudioComp->SetPitchMultiplier(Params.Pitch);
-        }
+        UE_LOG(LogTemp, Warning, TEXT("Audio_MetaSoundManager: EffectsAudioComponent not available"));
+        return;
     }
     
-    UE_LOG(LogTemp, Log, TEXT("Updated audio parameters - Volume: %.2f, Pitch: %.2f"), 
-           Params.Volume, Params.Pitch);
-}
-
-void AAudio_MetaSoundManager::RegisterVoiceLine(const FAudio_VoiceLine& VoiceLine)
-{
-    // Check if voice line already exists
-    for (int32 i = 0; i < NarrativeVoiceLines.Num(); i++)
+    // Find appropriate dinosaur sound based on type
+    FString SoundPath;
+    if (DinosaurType.Contains(TEXT("TRex")) || DinosaurType.Contains(TEXT("Tyrannosaurus")))
     {
-        if (NarrativeVoiceLines[i].NarrativeType == VoiceLine.NarrativeType)
-        {
-            // Update existing voice line
-            NarrativeVoiceLines[i] = VoiceLine;
-            UE_LOG(LogTemp, Warning, TEXT("Updated existing voice line for type: %d"), (int32)VoiceLine.NarrativeType);
-            return;
-        }
+        SoundPath = TEXT("/Game/Audio/Dinosaurs/TRex_Roar");
+    }
+    else if (DinosaurType.Contains(TEXT("Raptor")) || DinosaurType.Contains(TEXT("Velociraptor")))
+    {
+        SoundPath = TEXT("/Game/Audio/Dinosaurs/Raptor_Call");
+    }
+    else if (DinosaurType.Contains(TEXT("Brachio")) || DinosaurType.Contains(TEXT("Sauropod")))
+    {
+        SoundPath = TEXT("/Game/Audio/Dinosaurs/Brachio_Bellow");
     }
     
-    // Add new voice line
-    NarrativeVoiceLines.Add(VoiceLine);
-    UE_LOG(LogTemp, Warning, TEXT("Registered new voice line for type: %d"), (int32)VoiceLine.NarrativeType);
+    if (!SoundPath.IsEmpty())
+    {
+        EffectsAudioComponent->SetWorldLocation(Location);
+        EffectsAudioComponent->SetVolumeMultiplier(Intensity);
+        
+        UE_LOG(LogTemp, Log, TEXT("Audio_MetaSoundManager: Playing %s sound at location (%.1f, %.1f, %.1f) with intensity %.2f"), 
+               *DinosaurType, Location.X, Location.Y, Location.Z, Intensity);
+    }
 }
 
-FAudio_VoiceLine AAudio_MetaSoundManager::GetVoiceLineByType(EAudio_NarrativeType NarrativeType) const
+void UAudio_MetaSoundManager::PlayDialogueLine(const FString& NPCName, const FString& DialogueID)
 {
-    for (const FAudio_VoiceLine& Line : NarrativeVoiceLines)
+    if (!DialogueAudioComponent)
     {
-        if (Line.NarrativeType == NarrativeType)
-        {
-            return Line;
-        }
+        UE_LOG(LogTemp, Warning, TEXT("Audio_MetaSoundManager: DialogueAudioComponent not available"));
+        return;
     }
     
-    return FAudio_VoiceLine(); // Return default if not found
-}
-
-void AAudio_MetaSoundManager::SetSpatialMode(EAudio_SpatialMode SpatialMode)
-{
-    for (UAudioComponent* AudioComp : AudioComponentPool)
+    FString DialogueKey = FString::Printf(TEXT("%s_%s"), *NPCName, *DialogueID);
+    
+    if (FAudio_DialogueAudioData* DialogueData = DialogueDatabase.Find(DialogueKey))
     {
-        if (AudioComp)
+        if (DialogueData->VoiceLine.IsValid())
         {
-            switch (SpatialMode)
+            DialogueAudioComponent->SetSound(DialogueData->VoiceLine.LoadSynchronous());
+            DialogueAudioComponent->SetVolumeMultiplier(DialogueVolume);
+            DialogueAudioComponent->Play();
+            
+            bDialoguePlaying = true;
+            
+            UE_LOG(LogTemp, Log, TEXT("Audio_MetaSoundManager: Playing dialogue %s for NPC %s"), 
+                   *DialogueID, *NPCName);
+            
+            // Set timer to reset dialogue playing flag
+            if (UWorld* World = GetWorld())
             {
-                case EAudio_SpatialMode::TwoD:
-                    AudioComp->bAllowSpatialization = false;
-                    break;
-                case EAudio_SpatialMode::ThreeD_Positional:
-                    AudioComp->bAllowSpatialization = true;
-                    AudioComp->bOverrideAttenuation = false;
-                    break;
-                case EAudio_SpatialMode::ThreeD_Ambient:
-                    AudioComp->bAllowSpatialization = true;
-                    AudioComp->bIsUISound = false;
-                    break;
-                case EAudio_SpatialMode::ThreeD_Directional:
-                    AudioComp->bAllowSpatialization = true;
-                    AudioComp->bOverrideAttenuation = true;
-                    break;
+                World->GetTimerManager().SetTimer(
+                    FTimerHandle(),
+                    [this]() { bDialoguePlaying = false; },
+                    DialogueData->Duration,
+                    false
+                );
             }
         }
     }
-    
-    UE_LOG(LogTemp, Log, TEXT("Set spatial mode to: %d"), (int32)SpatialMode);
-}
-
-void AAudio_MetaSoundManager::UpdateListenerPosition(const FVector& ListenerLocation, const FVector& ListenerForward)
-{
-    // Update 3D audio listener position for spatial audio
-    if (GetWorld() && GetWorld()->GetAudioDevice())
+    else
     {
-        // In full implementation, would update audio device listener transform
-        UE_LOG(LogTemp, VeryVerbose, TEXT("Updated audio listener position: %s"), *ListenerLocation.ToString());
+        UE_LOG(LogTemp, Warning, TEXT("Audio_MetaSoundManager: Dialogue %s not found for NPC %s"), 
+               *DialogueID, *NPCName);
     }
 }
 
-UAudioComponent* AAudio_MetaSoundManager::GetAvailableAudioComponent()
+void UAudio_MetaSoundManager::SetDialogueVolume(float Volume)
 {
-    // Find first available (not playing) audio component
-    for (UAudioComponent* AudioComp : AudioComponentPool)
+    DialogueVolume = FMath::Clamp(Volume, 0.0f, 2.0f);
+    
+    if (DialogueAudioComponent)
     {
-        if (AudioComp && !AudioComp->IsPlaying())
-        {
-            return AudioComp;
+        DialogueAudioComponent->SetVolumeMultiplier(DialogueVolume);
+    }
+}
+
+bool UAudio_MetaSoundManager::IsDialoguePlaying() const
+{
+    return bDialoguePlaying && DialogueAudioComponent && DialogueAudioComponent->IsPlaying();
+}
+
+void UAudio_MetaSoundManager::PlayEnvironmentalEffect(const FString& EffectName, const FVector& Location)
+{
+    if (!EffectsAudioComponent)
+    {
+        return;
+    }
+    
+    EffectsAudioComponent->SetWorldLocation(Location);
+    
+    UE_LOG(LogTemp, Log, TEXT("Audio_MetaSoundManager: Playing environmental effect %s at location (%.1f, %.1f, %.1f)"), 
+           *EffectName, Location.X, Location.Y, Location.Z);
+}
+
+void UAudio_MetaSoundManager::SetMasterVolume(float Volume)
+{
+    MasterVolume = FMath::Clamp(Volume, 0.0f, 1.0f);
+    UpdateBiomeAudio();
+}
+
+void UAudio_MetaSoundManager::SetAmbientVolume(float Volume)
+{
+    AmbientVolume = FMath::Clamp(Volume, 0.0f, 1.0f);
+    UpdateBiomeAudio();
+}
+
+void UAudio_MetaSoundManager::InitializeBiomeProfiles()
+{
+    BiomeProfiles.Empty();
+    
+    // Savanna biome
+    FAudio_BiomeAudioProfile SavannaProfile;
+    SavannaProfile.BiomeType = EAudio_BiomeType::Savanna;
+    SavannaProfile.BaseVolume = 0.7f;
+    SavannaProfile.FadeDistance = 5000.0f;
+    BiomeProfiles.Add(SavannaProfile);
+    
+    // Forest biome
+    FAudio_BiomeAudioProfile ForestProfile;
+    ForestProfile.BiomeType = EAudio_BiomeType::Forest;
+    ForestProfile.BaseVolume = 0.8f;
+    ForestProfile.FadeDistance = 3000.0f;
+    BiomeProfiles.Add(ForestProfile);
+    
+    // Swamp biome
+    FAudio_BiomeAudioProfile SwampProfile;
+    SwampProfile.BiomeType = EAudio_BiomeType::Swamp;
+    SwampProfile.BaseVolume = 0.6f;
+    SwampProfile.FadeDistance = 4000.0f;
+    BiomeProfiles.Add(SwampProfile);
+    
+    // Desert biome
+    FAudio_BiomeAudioProfile DesertProfile;
+    DesertProfile.BiomeType = EAudio_BiomeType::Desert;
+    DesertProfile.BaseVolume = 0.5f;
+    DesertProfile.FadeDistance = 8000.0f;
+    BiomeProfiles.Add(DesertProfile);
+    
+    // Mountain biome
+    FAudio_BiomeAudioProfile MountainProfile;
+    MountainProfile.BiomeType = EAudio_BiomeType::Mountain;
+    MountainProfile.BaseVolume = 0.6f;
+    MountainProfile.FadeDistance = 6000.0f;
+    BiomeProfiles.Add(MountainProfile);
+    
+    UE_LOG(LogTemp, Log, TEXT("Audio_MetaSoundManager: Initialized %d biome audio profiles"), BiomeProfiles.Num());
+}
+
+void UAudio_MetaSoundManager::InitializeDialogueDatabase()
+{
+    DialogueDatabase.Empty();
+    
+    // Initialize dialogue entries for NPCs created by Narrative Agent
+    FAudio_DialogueAudioData TribalElderData;
+    TribalElderData.NPCName = TEXT("TribalElder");
+    TribalElderData.Duration = 16.0f;
+    TribalElderData.bHasSubtitles = true;
+    DialogueDatabase.Add(TEXT("TribalElder_Greeting"), TribalElderData);
+    
+    FAudio_DialogueAudioData QuestGiverData;
+    QuestGiverData.NPCName = TEXT("QuestGiver");
+    QuestGiverData.Duration = 15.0f;
+    QuestGiverData.bHasSubtitles = true;
+    DialogueDatabase.Add(TEXT("QuestGiver_Mission"), QuestGiverData);
+    
+    FAudio_DialogueAudioData BoneReaderData;
+    BoneReaderData.NPCName = TEXT("BoneReader");
+    BoneReaderData.Duration = 17.0f;
+    BoneReaderData.bHasSubtitles = true;
+    DialogueDatabase.Add(TEXT("BoneReader_Lore"), BoneReaderData);
+    
+    FAudio_DialogueAudioData TrackingMentorData;
+    TrackingMentorData.NPCName = TEXT("TrackingMentor");
+    TrackingMentorData.Duration = 16.0f;
+    TrackingMentorData.bHasSubtitles = true;
+    DialogueDatabase.Add(TEXT("TrackingMentor_Guide"), TrackingMentorData);
+    
+    UE_LOG(LogTemp, Log, TEXT("Audio_MetaSoundManager: Initialized dialogue database with %d entries"), DialogueDatabase.Num());
+}
+
+void UAudio_MetaSoundManager::UpdateBiomeAudio()
+{
+    if (!BiomeAudioComponent)
+    {
+        return;
+    }
+    
+    // Find current biome profile
+    FAudio_BiomeAudioProfile* CurrentProfile = BiomeProfiles.FindByPredicate(
+        [this](const FAudio_BiomeAudioProfile& Profile) 
+        { 
+            return Profile.BiomeType == CurrentBiome; 
         }
-    }
+    );
     
-    // If all busy, return primary component (will interrupt)
-    return PrimaryAudioComponent;
+    if (CurrentProfile)
+    {
+        float FinalVolume = CurrentProfile->BaseVolume * AmbientVolume * MasterVolume;
+        BiomeAudioComponent->SetVolumeMultiplier(FinalVolume);
+        
+        UE_LOG(LogTemp, Log, TEXT("Audio_MetaSoundManager: Updated biome audio - Volume: %.2f"), FinalVolume);
+    }
 }
 
-void AAudio_MetaSoundManager::OnNarrativeFinished()
+void UAudio_MetaSoundManager::CrossfadeBiomes(EAudio_BiomeType FromBiome, EAudio_BiomeType ToBiome)
 {
-    bIsPlayingNarrative = false;
-    CurrentNarrativeType = EAudio_NarrativeType::None;
-    CurrentPlaybackTime = 0.0f;
-    CurrentNarrativeDuration = 0.0f;
-    
-    UE_LOG(LogTemp, Warning, TEXT("Narrative playback finished"));
+    // Implement smooth crossfade between biome audio
+    if (BiomeAudioComponent)
+    {
+        // Fade out current biome over 2 seconds, then fade in new biome
+        UE_LOG(LogTemp, Log, TEXT("Audio_MetaSoundManager: Crossfading from biome %d to biome %d"), 
+               (int32)FromBiome, (int32)ToBiome);
+    }
 }
