@@ -1,6 +1,8 @@
 #include "Arch_ShelterManager.h"
 #include "Components/StaticMeshComponent.h"
-#include "Components/BoxComponent.h"
+#include "Components/SceneComponent.h"
+#include "Engine/StaticMesh.h"
+#include "Materials/MaterialInterface.h"
 #include "Engine/Engine.h"
 #include "UObject/ConstructorHelpers.h"
 
@@ -9,276 +11,220 @@ AArch_ShelterManager::AArch_ShelterManager()
     PrimaryActorTick.bCanEverTick = true;
 
     // Create root component
-    RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootComponent"));
+    RootSceneComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootScene"));
+    RootComponent = RootSceneComponent;
 
-    // Create shelter mesh component
-    ShelterMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("ShelterMesh"));
-    ShelterMesh->SetupAttachment(RootComponent);
-    ShelterMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-    ShelterMesh->SetCollisionObjectType(ECollisionChannel::ECC_WorldStatic);
+    // Create main structure mesh component
+    MainStructureMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("MainStructureMesh"));
+    MainStructureMesh->SetupAttachment(RootComponent);
+    MainStructureMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+    MainStructureMesh->SetCollisionObjectType(ECollisionChannel::ECC_WorldStatic);
 
-    // Create interaction volume
-    InteractionVolume = CreateDefaultSubobject<UBoxComponent>(TEXT("InteractionVolume"));
-    InteractionVolume->SetupAttachment(RootComponent);
-    InteractionVolume->SetBoxExtent(FVector(300.0f, 300.0f, 200.0f));
-    InteractionVolume->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
-    InteractionVolume->SetCollisionObjectType(ECollisionChannel::ECC_WorldDynamic);
-    InteractionVolume->SetCollisionResponseToAllChannels(ECollisionResponse::ECR_Ignore);
-    InteractionVolume->SetCollisionResponseToChannel(ECollisionChannel::ECC_Pawn, ECollisionResponse::ECR_Overlap);
+    // Create support structure mesh component
+    SupportStructureMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("SupportStructureMesh"));
+    SupportStructureMesh->SetupAttachment(RootComponent);
+    SupportStructureMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+    SupportStructureMesh->SetCollisionObjectType(ECollisionChannel::ECC_WorldStatic);
 
-    // Initialize shelter properties
-    ShelterProperties.ShelterType = EArch_ShelterType::Cave;
-    ShelterProperties.ProtectionLevel = 0.7f;
-    ShelterProperties.TemperatureBonus = 15.0f;
-    ShelterProperties.MaxOccupants = 2;
-    ShelterProperties.bHasFirePit = true;
-    ShelterProperties.bHasStorage = true;
-    ShelterProperties.bIsDefensive = false;
+    // Initialize default shelter data
+    ShelterData.ShelterType = EArch_ShelterType::Cave;
+    ShelterData.ProtectionValue = 0.5f;
+    ShelterData.MaxOccupants = 2;
+    ShelterData.bHasFirePit = false;
+    ShelterData.bHasStorage = false;
+    ShelterData.TemperatureBonus = 5.0f;
 
-    RestBonus = 25.0f;
-    WeatherProtection = 0.8f;
+    AssignedBiome = EBiomeType::Savanna;
+    ShelterRadius = 500.0f;
 
-    // Bind overlap events
-    InteractionVolume->OnComponentBeginOverlap.AddDynamic(this, &AArch_ShelterManager::OnInteractionVolumeBeginOverlap);
-    InteractionVolume->OnComponentEndOverlap.AddDynamic(this, &AArch_ShelterManager::OnInteractionVolumeEndOverlap);
+    // Try to load default meshes (will be null if not found, that's OK)
+    static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeMeshAsset(TEXT("/Engine/BasicShapes/Cube"));
+    if (CubeMeshAsset.Succeeded())
+    {
+        MainStructureMesh->SetStaticMesh(CubeMeshAsset.Object);
+        SupportStructureMesh->SetStaticMesh(CubeMeshAsset.Object);
+    }
 }
 
 void AArch_ShelterManager::BeginPlay()
 {
     Super::BeginPlay();
     
-    UpdateShelterMesh();
-    
-    UE_LOG(LogTemp, Log, TEXT("Shelter Manager initialized: Type=%d, Protection=%.2f"), 
-           (int32)ShelterProperties.ShelterType, ShelterProperties.ProtectionLevel);
+    // Apply initial configuration
+    UpdateMeshBasedOnType();
+    ApplyBiomeSpecificMaterials();
+    SetupCollisionAndPhysics();
+
+    UE_LOG(LogTemp, Log, TEXT("Arch_ShelterManager: Initialized shelter type %d in biome %d"), 
+           (int32)ShelterData.ShelterType, (int32)AssignedBiome);
 }
 
 void AArch_ShelterManager::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
-
-    // Apply continuous shelter effects to occupants
-    for (AActor* Occupant : OccupiedBy)
-    {
-        if (IsValid(Occupant))
-        {
-            ApplyShelterEffects(Occupant);
-        }
-    }
-}
-
-bool AArch_ShelterManager::CanEnterShelter(AActor* Actor)
-{
-    if (!IsValid(Actor))
-    {
-        return false;
-    }
-
-    if (OccupiedBy.Num() >= ShelterProperties.MaxOccupants)
-    {
-        return false;
-    }
-
-    return true;
-}
-
-bool AArch_ShelterManager::EnterShelter(AActor* Actor)
-{
-    if (!CanEnterShelter(Actor))
-    {
-        return false;
-    }
-
-    if (!OccupiedBy.Contains(Actor))
-    {
-        OccupiedBy.Add(Actor);
-        ApplyShelterEffects(Actor);
-        
-        UE_LOG(LogTemp, Log, TEXT("Actor %s entered shelter"), *Actor->GetName());
-        return true;
-    }
-
-    return false;
-}
-
-bool AArch_ShelterManager::ExitShelter(AActor* Actor)
-{
-    if (OccupiedBy.Contains(Actor))
-    {
-        OccupiedBy.Remove(Actor);
-        RemoveShelterEffects(Actor);
-        
-        UE_LOG(LogTemp, Log, TEXT("Actor %s exited shelter"), *Actor->GetName());
-        return true;
-    }
-
-    return false;
-}
-
-float AArch_ShelterManager::GetProtectionLevel() const
-{
-    return ShelterProperties.ProtectionLevel;
-}
-
-float AArch_ShelterManager::GetTemperatureBonus() const
-{
-    return ShelterProperties.TemperatureBonus;
-}
-
-bool AArch_ShelterManager::HasFirePit() const
-{
-    return ShelterProperties.bHasFirePit;
-}
-
-bool AArch_ShelterManager::HasStorage() const
-{
-    return ShelterProperties.bHasStorage;
-}
-
-void AArch_ShelterManager::SetShelterType(EArch_ShelterType NewType)
-{
-    ShelterProperties.ShelterType = NewType;
-    UpdateShelterMesh();
     
-    // Adjust properties based on shelter type
-    switch (NewType)
+    // Shelter systems can be updated here if needed
+    // For now, shelters are static structures
+}
+
+void AArch_ShelterManager::InitializeShelter(EArch_ShelterType Type, EBiomeType Biome)
+{
+    ShelterData.ShelterType = Type;
+    AssignedBiome = Biome;
+
+    // Configure shelter properties based on type
+    switch (Type)
     {
         case EArch_ShelterType::Cave:
-            ShelterProperties.ProtectionLevel = 0.9f;
-            ShelterProperties.TemperatureBonus = 20.0f;
-            ShelterProperties.MaxOccupants = 3;
-            ShelterProperties.bHasFirePit = true;
-            ShelterProperties.bHasStorage = true;
-            ShelterProperties.bIsDefensive = true;
+            ShelterData.ProtectionValue = 0.8f;
+            ShelterData.MaxOccupants = 4;
+            ShelterData.TemperatureBonus = 10.0f;
             break;
             
-        case EArch_ShelterType::TreePlatform:
-            ShelterProperties.ProtectionLevel = 0.6f;
-            ShelterProperties.TemperatureBonus = 10.0f;
-            ShelterProperties.MaxOccupants = 2;
-            ShelterProperties.bHasFirePit = true;
-            ShelterProperties.bHasStorage = true;
-            ShelterProperties.bIsDefensive = false;
+        case EArch_ShelterType::Platform:
+            ShelterData.ProtectionValue = 0.6f;
+            ShelterData.MaxOccupants = 3;
+            ShelterData.TemperatureBonus = 3.0f;
             break;
             
-        case EArch_ShelterType::UndergroundBunker:
-            ShelterProperties.ProtectionLevel = 0.95f;
-            ShelterProperties.TemperatureBonus = 25.0f;
-            ShelterProperties.MaxOccupants = 5;
-            ShelterProperties.bHasFirePit = true;
-            ShelterProperties.bHasStorage = true;
-            ShelterProperties.bIsDefensive = true;
+        case EArch_ShelterType::LeanTo:
+            ShelterData.ProtectionValue = 0.4f;
+            ShelterData.MaxOccupants = 2;
+            ShelterData.TemperatureBonus = 2.0f;
             break;
             
-        case EArch_ShelterType::FortifiedCamp:
-            ShelterProperties.ProtectionLevel = 0.8f;
-            ShelterProperties.TemperatureBonus = 15.0f;
-            ShelterProperties.MaxOccupants = 8;
-            ShelterProperties.bHasFirePit = true;
-            ShelterProperties.bHasStorage = true;
-            ShelterProperties.bIsDefensive = true;
+        case EArch_ShelterType::StoneCircle:
+            ShelterData.ProtectionValue = 0.3f;
+            ShelterData.MaxOccupants = 6;
+            ShelterData.TemperatureBonus = 1.0f;
             break;
             
-        case EArch_ShelterType::RockOverhang:
-            ShelterProperties.ProtectionLevel = 0.5f;
-            ShelterProperties.TemperatureBonus = 8.0f;
-            ShelterProperties.MaxOccupants = 2;
-            ShelterProperties.bHasFirePit = false;
-            ShelterProperties.bHasStorage = false;
-            ShelterProperties.bIsDefensive = false;
+        case EArch_ShelterType::Underground:
+            ShelterData.ProtectionValue = 0.9f;
+            ShelterData.MaxOccupants = 2;
+            ShelterData.TemperatureBonus = 15.0f;
             break;
-            
-        default:
-            ShelterProperties.ProtectionLevel = 0.3f;
-            ShelterProperties.TemperatureBonus = 5.0f;
-            ShelterProperties.MaxOccupants = 1;
-            ShelterProperties.bHasFirePit = false;
-            ShelterProperties.bHasStorage = false;
-            ShelterProperties.bIsDefensive = false;
-            break;
+    }
+
+    UpdateMeshBasedOnType();
+    ApplyBiomeSpecificMaterials();
+
+    UE_LOG(LogTemp, Log, TEXT("Arch_ShelterManager: Initialized shelter type %d with protection %f"), 
+           (int32)Type, ShelterData.ProtectionValue);
+}
+
+void AArch_ShelterManager::SetShelterMesh(UStaticMesh* NewMesh)
+{
+    if (NewMesh && MainStructureMesh)
+    {
+        MainStructureMesh->SetStaticMesh(NewMesh);
+        UE_LOG(LogTemp, Log, TEXT("Arch_ShelterManager: Set new shelter mesh"));
     }
 }
 
-EArch_ShelterType AArch_ShelterManager::GetShelterType() const
+float AArch_ShelterManager::GetProtectionValue() const
 {
-    return ShelterProperties.ShelterType;
+    return ShelterData.ProtectionValue;
 }
 
-void AArch_ShelterManager::OnInteractionVolumeBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
+bool AArch_ShelterManager::CanAccommodateOccupants(int32 RequestedOccupants) const
 {
-    if (IsValid(OtherActor) && OtherActor->IsA<APawn>())
+    return RequestedOccupants <= ShelterData.MaxOccupants;
+}
+
+void AArch_ShelterManager::AddFirePit()
+{
+    if (!ShelterData.bHasFirePit)
     {
-        EnterShelter(OtherActor);
+        ShelterData.bHasFirePit = true;
+        ShelterData.TemperatureBonus += 5.0f;
+        ShelterData.ProtectionValue += 0.1f;
+        
+        UE_LOG(LogTemp, Log, TEXT("Arch_ShelterManager: Added fire pit, new temp bonus: %f"), 
+               ShelterData.TemperatureBonus);
     }
 }
 
-void AArch_ShelterManager::OnInteractionVolumeEndOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex)
+void AArch_ShelterManager::AddStorageArea()
 {
-    if (IsValid(OtherActor))
+    if (!ShelterData.bHasStorage)
     {
-        ExitShelter(OtherActor);
+        ShelterData.bHasStorage = true;
+        ShelterData.ProtectionValue += 0.05f;
+        
+        UE_LOG(LogTemp, Log, TEXT("Arch_ShelterManager: Added storage area"));
     }
 }
 
-void AArch_ShelterManager::ApplyShelterEffects(AActor* Actor)
+FVector AArch_ShelterManager::GetShelterCenter() const
 {
-    if (!IsValid(Actor))
-    {
+    return GetActorLocation();
+}
+
+void AArch_ShelterManager::UpdateMeshBasedOnType()
+{
+    if (!MainStructureMesh)
         return;
-    }
 
-    // Apply temperature bonus, rest bonus, and protection effects
-    // This would integrate with the character's survival system
-    UE_LOG(LogTemp, Log, TEXT("Applying shelter effects to %s: Protection=%.2f, Temperature=%.2f"), 
-           *Actor->GetName(), ShelterProperties.ProtectionLevel, ShelterProperties.TemperatureBonus);
-}
+    // Scale and position based on shelter type
+    FVector Scale = FVector(1.0f);
+    FVector Offset = FVector::ZeroVector;
 
-void AArch_ShelterManager::RemoveShelterEffects(AActor* Actor)
-{
-    if (!IsValid(Actor))
+    switch (ShelterData.ShelterType)
     {
-        return;
+        case EArch_ShelterType::Cave:
+            Scale = FVector(3.0f, 2.0f, 2.5f);
+            Offset = FVector(0.0f, 0.0f, 100.0f);
+            break;
+            
+        case EArch_ShelterType::Platform:
+            Scale = FVector(2.0f, 2.0f, 0.2f);
+            Offset = FVector(0.0f, 0.0f, 300.0f);
+            break;
+            
+        case EArch_ShelterType::LeanTo:
+            Scale = FVector(1.5f, 1.0f, 1.5f);
+            Offset = FVector(0.0f, 0.0f, 50.0f);
+            break;
+            
+        case EArch_ShelterType::StoneCircle:
+            Scale = FVector(4.0f, 4.0f, 0.3f);
+            Offset = FVector(0.0f, 0.0f, 0.0f);
+            break;
+            
+        case EArch_ShelterType::Underground:
+            Scale = FVector(2.0f, 2.0f, 1.0f);
+            Offset = FVector(0.0f, 0.0f, -100.0f);
+            break;
     }
 
-    // Remove shelter bonuses
-    UE_LOG(LogTemp, Log, TEXT("Removing shelter effects from %s"), *Actor->GetName());
+    MainStructureMesh->SetWorldScale3D(Scale);
+    MainStructureMesh->SetRelativeLocation(Offset);
 }
 
-void AArch_ShelterManager::UpdateShelterMesh()
+void AArch_ShelterManager::ApplyBiomeSpecificMaterials()
 {
-    // Update the visual representation based on shelter type
-    // In a full implementation, this would load different static meshes
-    // For now, we'll use basic shapes and log the change
+    // Materials will be applied based on biome when available
+    // For now, this is a placeholder for future material assignment
     
-    if (ShelterMesh)
+    UE_LOG(LogTemp, Log, TEXT("Arch_ShelterManager: Applied biome-specific materials for biome %d"), 
+           (int32)AssignedBiome);
+}
+
+void AArch_ShelterManager::SetupCollisionAndPhysics()
+{
+    if (MainStructureMesh)
     {
-        FVector NewScale = FVector(1.0f);
-        
-        switch (ShelterProperties.ShelterType)
-        {
-            case EArch_ShelterType::Cave:
-                NewScale = FVector(2.0f, 2.0f, 1.5f);
-                break;
-            case EArch_ShelterType::TreePlatform:
-                NewScale = FVector(1.5f, 1.5f, 0.5f);
-                break;
-            case EArch_ShelterType::UndergroundBunker:
-                NewScale = FVector(3.0f, 3.0f, 1.0f);
-                break;
-            case EArch_ShelterType::FortifiedCamp:
-                NewScale = FVector(4.0f, 4.0f, 2.0f);
-                break;
-            case EArch_ShelterType::RockOverhang:
-                NewScale = FVector(1.2f, 2.0f, 1.0f);
-                break;
-            default:
-                NewScale = FVector(1.0f, 1.0f, 1.0f);
-                break;
-        }
-        
-        ShelterMesh->SetWorldScale3D(NewScale);
-        
-        UE_LOG(LogTemp, Log, TEXT("Updated shelter mesh for type %d with scale %.2f,%.2f,%.2f"), 
-               (int32)ShelterProperties.ShelterType, NewScale.X, NewScale.Y, NewScale.Z);
+        MainStructureMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+        MainStructureMesh->SetCollisionObjectType(ECollisionChannel::ECC_WorldStatic);
+        MainStructureMesh->SetCollisionResponseToAllChannels(ECollisionResponse::ECR_Block);
+        MainStructureMesh->SetCollisionResponseToChannel(ECollisionChannel::ECC_Pawn, ECollisionResponse::ECR_Overlap);
+    }
+
+    if (SupportStructureMesh)
+    {
+        SupportStructureMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+        SupportStructureMesh->SetCollisionObjectType(ECollisionChannel::ECC_WorldStatic);
+        SupportStructureMesh->SetCollisionResponseToAllChannels(ECollisionResponse::ECR_Block);
     }
 }
