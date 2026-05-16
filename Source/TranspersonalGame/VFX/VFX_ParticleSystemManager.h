@@ -1,120 +1,189 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/World.h"
-#include "Components/ActorComponent.h"
-#include "Particles/ParticleSystem.h"
-#include "Particles/ParticleSystemComponent.h"
+#include "GameFramework/Actor.h"
 #include "NiagaraSystem.h"
 #include "NiagaraComponent.h"
-#include "NiagaraFunctionLibrary.h"
-#include "Engine/Engine.h"
+#include "Components/AudioComponent.h"
+#include "SharedTypes.h"
 #include "VFX_ParticleSystemManager.generated.h"
 
+// VFX particle type enum for prehistoric effects
 UENUM(BlueprintType)
 enum class EVFX_ParticleType : uint8
 {
-    Fire_Campfire       UMETA(DisplayName = "Campfire"),
-    Dust_Footstep       UMETA(DisplayName = "Dinosaur Footstep Dust"),
-    Blood_Impact        UMETA(DisplayName = "Blood Impact"),
-    Water_Splash        UMETA(DisplayName = "Water Splash"),
-    Rain_Weather        UMETA(DisplayName = "Rain Weather"),
-    Smoke_Fire          UMETA(DisplayName = "Fire Smoke"),
-    Sparks_Crafting     UMETA(DisplayName = "Crafting Sparks"),
-    Breath_Cold         UMETA(DisplayName = "Cold Breath Vapor")
+    VolcanicEruption    UMETA(DisplayName = "Volcanic Eruption"),
+    WaterSplash         UMETA(DisplayName = "Water Splash"),
+    DustCloud           UMETA(DisplayName = "Dust Cloud"),
+    DinosaurBreath      UMETA(DisplayName = "Dinosaur Breath"),
+    CampfireSmoke       UMETA(DisplayName = "Campfire Smoke"),
+    BloodSpray          UMETA(DisplayName = "Blood Spray"),
+    FootstepDust        UMETA(DisplayName = "Footstep Dust"),
+    WeatherRain         UMETA(DisplayName = "Weather Rain"),
+    WeatherSnow         UMETA(DisplayName = "Weather Snow"),
+    InsectSwarm         UMETA(DisplayName = "Insect Swarm")
 };
 
+// VFX intensity levels for realistic prehistoric effects
+UENUM(BlueprintType)
+enum class EVFX_IntensityLevel : uint8
+{
+    Low         UMETA(DisplayName = "Low Intensity"),
+    Medium      UMETA(DisplayName = "Medium Intensity"),
+    High        UMETA(DisplayName = "High Intensity"),
+    Extreme     UMETA(DisplayName = "Extreme Intensity")
+};
+
+// Particle system configuration for prehistoric VFX
 USTRUCT(BlueprintType)
 struct FVFX_ParticleConfig
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Config")
-    EVFX_ParticleType ParticleType = EVFX_ParticleType::Fire_Campfire;
+    TSoftObjectPtr<UNiagaraSystem> ParticleSystem;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Config")
-    FVector SpawnLocation = FVector::ZeroVector;
+    FVector SpawnLocation;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Config")
-    FRotator SpawnRotation = FRotator::ZeroRotator;
+    FRotator SpawnRotation;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Config")
-    float LifeTime = 5.0f;
+    EVFX_IntensityLevel Intensity;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Config")
-    float Scale = 1.0f;
+    float Duration;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Config")
-    bool bAutoDestroy = true;
+    float Scale;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Config")
+    bool bLooping;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Config")
+    bool bAutoDestroy;
 
     FVFX_ParticleConfig()
     {
-        ParticleType = EVFX_ParticleType::Fire_Campfire;
         SpawnLocation = FVector::ZeroVector;
         SpawnRotation = FRotator::ZeroRotator;
-        LifeTime = 5.0f;
+        Intensity = EVFX_IntensityLevel::Medium;
+        Duration = 5.0f;
         Scale = 1.0f;
+        bLooping = false;
         bAutoDestroy = true;
     }
 };
 
-UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UVFX_ParticleSystemManager : public UActorComponent
+/**
+ * VFX Particle System Manager - Handles all prehistoric visual effects
+ * Creates realistic particle effects for dinosaur interactions, environmental events,
+ * and atmospheric conditions in the prehistoric world
+ */
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API AVFX_ParticleSystemManager : public AActor
 {
     GENERATED_BODY()
 
 public:
-    UVFX_ParticleSystemManager();
+    AVFX_ParticleSystemManager();
 
 protected:
     virtual void BeginPlay() override;
+    virtual void Tick(float DeltaTime) override;
+
+    // Core Niagara component for particle effects
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "VFX Components")
+    class UNiagaraComponent* MainParticleComponent;
+
+    // Audio component for VFX sound synchronization
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "VFX Components")
+    class UAudioComponent* VFXAudioComponent;
+
+    // Particle system configurations for each effect type
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Systems")
+    TMap<EVFX_ParticleType, FVFX_ParticleConfig> ParticleConfigs;
+
+    // Active particle components for management
+    UPROPERTY(BlueprintReadOnly, Category = "VFX Runtime")
+    TArray<class UNiagaraComponent*> ActiveParticleComponents;
+
+    // Current biome for biome-specific VFX adaptation
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Environment")
+    EBiomeType CurrentBiome;
+
+    // Weather intensity for environmental VFX
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Environment", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float WeatherIntensity;
+
+    // Time of day for day/night VFX adaptation
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Environment", meta = (ClampMin = "0.0", ClampMax = "24.0"))
+    float TimeOfDay;
 
 public:
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+    // Spawn particle effect at specified location
+    UFUNCTION(BlueprintCallable, Category = "VFX Control")
+    class UNiagaraComponent* SpawnParticleEffect(EVFX_ParticleType EffectType, FVector Location, FRotator Rotation = FRotator::ZeroRotator, EVFX_IntensityLevel Intensity = EVFX_IntensityLevel::Medium);
 
-    // Spawn particle effect at location
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    UNiagaraComponent* SpawnParticleEffect(const FVFX_ParticleConfig& Config);
-
-    // Spawn particle effect attached to actor
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    UNiagaraComponent* SpawnParticleEffectAttached(const FVFX_ParticleConfig& Config, AActor* AttachActor, FName SocketName = NAME_None);
+    // Stop specific particle effect
+    UFUNCTION(BlueprintCallable, Category = "VFX Control")
+    void StopParticleEffect(class UNiagaraComponent* ParticleComponent);
 
     // Stop all active particle effects
-    UFUNCTION(BlueprintCallable, Category = "VFX")
+    UFUNCTION(BlueprintCallable, Category = "VFX Control")
     void StopAllParticleEffects();
 
-    // Get particle system for type
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    UNiagaraSystem* GetParticleSystemForType(EVFX_ParticleType ParticleType);
+    // Create volcanic eruption effect with audio
+    UFUNCTION(BlueprintCallable, Category = "VFX Environmental")
+    void TriggerVolcanicEruption(FVector EruptionLocation, EVFX_IntensityLevel Intensity = EVFX_IntensityLevel::High);
 
-    // Spawn dinosaur footstep effect
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    void SpawnDinosaurFootstepEffect(FVector FootLocation, float DinosaurSize = 1.0f);
+    // Create water splash effect for dinosaur water entry
+    UFUNCTION(BlueprintCallable, Category = "VFX Environmental")
+    void TriggerWaterSplash(FVector SplashLocation, float DinosaurSize = 1.0f);
 
-    // Spawn campfire effect
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    UNiagaraComponent* SpawnCampfireEffect(FVector FireLocation);
+    // Create dust cloud effect for dinosaur movement
+    UFUNCTION(BlueprintCallable, Category = "VFX Dinosaur")
+    void TriggerDustCloud(FVector FootstepLocation, float DinosaurWeight = 1.0f);
 
-    // Spawn blood impact effect
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    void SpawnBloodImpactEffect(FVector ImpactLocation, FVector ImpactNormal);
+    // Create dinosaur breath vapor effect
+    UFUNCTION(BlueprintCallable, Category = "VFX Dinosaur")
+    void TriggerDinosaurBreath(FVector MouthLocation, FRotator BreathDirection);
+
+    // Create blood spray effect for combat
+    UFUNCTION(BlueprintCallable, Category = "VFX Combat")
+    void TriggerBloodSpray(FVector ImpactLocation, FVector ImpactDirection, EVFX_IntensityLevel Severity = EVFX_IntensityLevel::Medium);
+
+    // Create campfire smoke and ember effects
+    UFUNCTION(BlueprintCallable, Category = "VFX Survival")
+    void TriggerCampfireEffect(FVector FireLocation, bool bIsLit = true);
+
+    // Update environmental VFX based on biome and weather
+    UFUNCTION(BlueprintCallable, Category = "VFX Environment")
+    void UpdateEnvironmentalVFX(EBiomeType NewBiome, float NewWeatherIntensity, float NewTimeOfDay);
+
+    // Create weather particle effects (rain, snow)
+    UFUNCTION(BlueprintCallable, Category = "VFX Weather")
+    void TriggerWeatherEffect(EVFX_ParticleType WeatherType, EVFX_IntensityLevel Intensity);
+
+    // Create insect swarm effect for forest biome
+    UFUNCTION(BlueprintCallable, Category = "VFX Biome")
+    void TriggerInsectSwarm(FVector SwarmCenter, float SwarmRadius = 500.0f);
 
 protected:
-    // Particle system assets
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Assets")
-    TMap<EVFX_ParticleType, TSoftObjectPtr<UNiagaraSystem>> ParticleSystemMap;
+    // Initialize particle system configurations
+    UFUNCTION(CallInEditor)
+    void InitializeParticleConfigs();
 
-    // Active particle components
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "VFX Runtime")
-    TArray<UNiagaraComponent*> ActiveParticleComponents;
+    // Clean up expired particle effects
+    void CleanupExpiredEffects();
 
-    // Initialize particle system map
-    void InitializeParticleSystemMap();
+    // Get biome-specific particle intensity multiplier
+    float GetBiomeIntensityMultiplier(EVFX_ParticleType EffectType) const;
 
-    // Clean up finished particle effects
-    void CleanupFinishedEffects();
+    // Get time-of-day particle visibility multiplier
+    float GetTimeOfDayMultiplier(EVFX_ParticleType EffectType) const;
 
-    // Load particle system asset
-    UNiagaraSystem* LoadParticleSystemAsset(const FString& AssetPath);
+    // Load Niagara system asset safely
+    UNiagaraSystem* LoadParticleSystemAsset(const FString& AssetPath) const;
 };
