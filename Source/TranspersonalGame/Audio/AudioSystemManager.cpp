@@ -1,442 +1,362 @@
 #include "AudioSystemManager.h"
-#include "Engine/Engine.h"
-#include "Engine/World.h"
-#include "TimerManager.h"
-#include "Kismet/GameplayStatics.h"
 #include "Components/AudioComponent.h"
+#include "Components/SceneComponent.h"
+#include "Engine/World.h"
+#include "GameFramework/Pawn.h"
+#include "GameFramework/PlayerController.h"
+#include "Kismet/GameplayStatics.h"
 #include "Sound/SoundCue.h"
-#include "AudioDevice.h"
+#include "TimerManager.h"
 
-UAudioSystemManager::UAudioSystemManager()
+AAudioSystemManager::AAudioSystemManager()
 {
-	CurrentBiome = EAudio_BiomeType::Forest;
-	CurrentThreatLevel = EAudio_ThreatLevel::Safe;
-	PlayerLocation = FVector::ZeroVector;
-	MasterVolume = 1.0f;
-	EnvironmentalAudioComponent = nullptr;
-	ThreatAudioComponent = nullptr;
+    PrimaryActorTick.bCanEverTick = true;
+
+    // Create root component
+    RootSceneComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootSceneComponent"));
+    RootComponent = RootSceneComponent;
+
+    // Create audio components
+    AmbientAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("AmbientAudioComponent"));
+    AmbientAudioComponent->SetupAttachment(RootComponent);
+    AmbientAudioComponent->bAutoActivate = false;
+
+    MusicAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("MusicAudioComponent"));
+    MusicAudioComponent->SetupAttachment(RootComponent);
+    MusicAudioComponent->bAutoActivate = false;
+
+    DangerAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("DangerAudioComponent"));
+    DangerAudioComponent->SetupAttachment(RootComponent);
+    DangerAudioComponent->bAutoActivate = false;
+
+    // Initialize settings
+    CurrentBiome = EAudio_BiomeType::Savana;
+    bInDangerZone = false;
+    BiomeDetectionRadius = 10000.0f;
+    AudioUpdateInterval = 2.0f;
+    PlayerPawn = nullptr;
+
+    // Initialize biome audio settings
+    BiomeAudioSettings.SetNum(5);
+    
+    // Savana settings
+    BiomeAudioSettings[0].BiomeType = EAudio_BiomeType::Savana;
+    BiomeAudioSettings[0].AmbientVolume = 0.6f;
+    BiomeAudioSettings[0].MusicVolume = 0.4f;
+    BiomeAudioSettings[0].CrossfadeTime = 3.0f;
+
+    // Pantano settings
+    BiomeAudioSettings[1].BiomeType = EAudio_BiomeType::Pantano;
+    BiomeAudioSettings[1].AmbientVolume = 0.8f;
+    BiomeAudioSettings[1].MusicVolume = 0.3f;
+    BiomeAudioSettings[1].CrossfadeTime = 4.0f;
+
+    // Floresta settings
+    BiomeAudioSettings[2].BiomeType = EAudio_BiomeType::Floresta;
+    BiomeAudioSettings[2].AmbientVolume = 0.7f;
+    BiomeAudioSettings[2].MusicVolume = 0.5f;
+    BiomeAudioSettings[2].CrossfadeTime = 2.5f;
+
+    // Deserto settings
+    BiomeAudioSettings[3].BiomeType = EAudio_BiomeType::Deserto;
+    BiomeAudioSettings[3].AmbientVolume = 0.5f;
+    BiomeAudioSettings[3].MusicVolume = 0.6f;
+    BiomeAudioSettings[3].CrossfadeTime = 5.0f;
+
+    // Montanha settings
+    BiomeAudioSettings[4].BiomeType = EAudio_BiomeType::Montanha;
+    BiomeAudioSettings[4].AmbientVolume = 0.9f;
+    BiomeAudioSettings[4].MusicVolume = 0.4f;
+    BiomeAudioSettings[4].CrossfadeTime = 3.5f;
 }
 
-void UAudioSystemManager::Initialize(FSubsystemCollectionBase& Collection)
+void AAudioSystemManager::BeginPlay()
 {
-	Super::Initialize(Collection);
-	
-	UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Initializing audio subsystem"));
-	
-	// Initialize biome audio data with default values
-	BiomeAudioMap.Empty();
-	
-	// Forest biome
-	FAudio_BiomeAudioData ForestAudio;
-	ForestAudio.BaseVolume = 0.8f;
-	ForestAudio.FadeDistance = 2500.0f;
-	BiomeAudioMap.Add(EAudio_BiomeType::Forest, ForestAudio);
-	
-	// Savanna biome
-	FAudio_BiomeAudioData SavannaAudio;
-	SavannaAudio.BaseVolume = 0.7f;
-	SavannaAudio.FadeDistance = 3000.0f;
-	BiomeAudioMap.Add(EAudio_BiomeType::Savanna, SavannaAudio);
-	
-	// Swamp biome
-	FAudio_BiomeAudioData SwampAudio;
-	SwampAudio.BaseVolume = 0.9f;
-	SwampAudio.FadeDistance = 2000.0f;
-	BiomeAudioMap.Add(EAudio_BiomeType::Swamp, SwampAudio);
-	
-	// Desert biome
-	FAudio_BiomeAudioData DesertAudio;
-	DesertAudio.BaseVolume = 0.6f;
-	DesertAudio.FadeDistance = 4000.0f;
-	BiomeAudioMap.Add(EAudio_BiomeType::Desert, DesertAudio);
-	
-	// Mountain biome
-	FAudio_BiomeAudioData MountainAudio;
-	MountainAudio.BaseVolume = 0.5f;
-	MountainAudio.FadeDistance = 5000.0f;
-	BiomeAudioMap.Add(EAudio_BiomeType::Mountain, MountainAudio);
-	
-	// Initialize threat audio map (will be populated with actual sound cues later)
-	ThreatAudioMap.Empty();
-	
-	// Start audio update timers
-	if (UWorld* World = GetWorld())
-	{
-		World->GetTimerManager().SetTimer(
-			AudioUpdateTimerHandle,
-			this,
-			&UAudioSystemManager::UpdateEnvironmentalAudio,
-			AudioUpdateInterval,
-			true
-		);
-		
-		World->GetTimerManager().SetTimer(
-			ProximityUpdateTimerHandle,
-			this,
-			&UAudioSystemManager::UpdateProximityAudio,
-			ProximityUpdateInterval,
-			true
-		);
-	}
-	
-	UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Initialization complete"));
+    Super::BeginPlay();
+
+    // Get player pawn reference
+    if (UWorld* World = GetWorld())
+    {
+        if (APlayerController* PC = World->GetFirstPlayerController())
+        {
+            PlayerPawn = PC->GetPawn();
+        }
+    }
+
+    // Start audio update timer
+    if (UWorld* World = GetWorld())
+    {
+        World->GetTimerManager().SetTimer(
+            AudioUpdateTimer,
+            this,
+            &AAudioSystemManager::UpdateAudioSystem,
+            AudioUpdateInterval,
+            true
+        );
+    }
+
+    // Initialize with current biome
+    SetCurrentBiome(CurrentBiome);
 }
 
-void UAudioSystemManager::Deinitialize()
+void AAudioSystemManager::Tick(float DeltaTime)
 {
-	UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Deinitializing audio subsystem"));
-	
-	// Clear timers
-	if (UWorld* World = GetWorld())
-	{
-		World->GetTimerManager().ClearTimer(AudioUpdateTimerHandle);
-		World->GetTimerManager().ClearTimer(ProximityUpdateTimerHandle);
-	}
-	
-	// Stop all audio
-	StopEnvironmentalAudio();
-	StopThreatAudio();
-	
-	// Clean up audio components
-	if (EnvironmentalAudioComponent && IsValid(EnvironmentalAudioComponent))
-	{
-		EnvironmentalAudioComponent->Stop();
-		EnvironmentalAudioComponent = nullptr;
-	}
-	
-	if (ThreatAudioComponent && IsValid(ThreatAudioComponent))
-	{
-		ThreatAudioComponent->Stop();
-		ThreatAudioComponent = nullptr;
-	}
-	
-	// Clean up proximity audio components
-	for (UAudioComponent* AudioComp : ProximityAudioComponents)
-	{
-		if (AudioComp && IsValid(AudioComp))
-		{
-			AudioComp->Stop();
-		}
-	}
-	ProximityAudioComponents.Empty();
-	
-	Super::Deinitialize();
+    Super::Tick(DeltaTime);
+
+    // Update danger state based on nearby dinosaurs
+    float DinosaurDistance = CalculateDistanceToNearestDinosaur();
+    bool bShouldBeInDanger = DinosaurDistance < DangerSettings.DangerRadius;
+    
+    if (bShouldBeInDanger != bInDangerZone)
+    {
+        SetDangerState(bShouldBeInDanger);
+    }
 }
 
-bool UAudioSystemManager::ShouldCreateSubsystem(UObject* Outer) const
+void AAudioSystemManager::UpdateAudioSystem()
 {
-	return true;
+    if (!PlayerPawn)
+    {
+        return;
+    }
+
+    // Detect current biome based on player location
+    FVector PlayerLocation = PlayerPawn->GetActorLocation();
+    EAudio_BiomeType DetectedBiome = DetectBiomeAtLocation(PlayerLocation);
+
+    // Change biome if different
+    if (DetectedBiome != CurrentBiome)
+    {
+        SetCurrentBiome(DetectedBiome);
+    }
+
+    // Update danger audio
+    UpdateDangerAudio();
 }
 
-void UAudioSystemManager::SetCurrentBiome(EAudio_BiomeType NewBiome)
+void AAudioSystemManager::SetCurrentBiome(EAudio_BiomeType NewBiome)
 {
-	if (CurrentBiome != NewBiome)
-	{
-		CurrentBiome = NewBiome;
-		UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Biome changed to %d"), (int32)NewBiome);
-		UpdateEnvironmentalAudio();
-	}
+    if (NewBiome == CurrentBiome)
+    {
+        return;
+    }
+
+    EAudio_BiomeType OldBiome = CurrentBiome;
+    CurrentBiome = NewBiome;
+
+    // Crossfade to new biome audio
+    CrossfadeToNewBiome(NewBiome);
+
+    // Trigger Blueprint event
+    OnBiomeChanged(OldBiome, NewBiome);
 }
 
-void UAudioSystemManager::SetThreatLevel(EAudio_ThreatLevel NewThreatLevel)
+void AAudioSystemManager::SetDangerState(bool bDangerous)
 {
-	if (CurrentThreatLevel != NewThreatLevel)
-	{
-		EAudio_ThreatLevel PreviousThreatLevel = CurrentThreatLevel;
-		CurrentThreatLevel = NewThreatLevel;
-		
-		UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Threat level changed from %d to %d"), 
-			(int32)PreviousThreatLevel, (int32)NewThreatLevel);
-		
-		// Handle threat audio changes
-		if (NewThreatLevel == EAudio_ThreatLevel::Safe)
-		{
-			StopThreatAudio();
-		}
-		else
-		{
-			PlayThreatAudio(NewThreatLevel, PlayerLocation);
-		}
-	}
+    if (bDangerous == bInDangerZone)
+    {
+        return;
+    }
+
+    bInDangerZone = bDangerous;
+
+    // Update danger audio
+    UpdateDangerAudio();
+
+    // Trigger Blueprint event
+    OnDangerStateChanged(bInDangerZone);
 }
 
-void UAudioSystemManager::PlayProximityAudio(const FVector& Location, const FAudio_ProximityAudioData& AudioData)
+void AAudioSystemManager::PlayDinosaurRoar(FVector Location, float Intensity)
 {
-	if (!AudioData.ProximitySound)
-	{
-		UE_LOG(LogTemp, Warning, TEXT("AudioSystemManager: No proximity sound provided"));
-		return;
-	}
-	
-	UWorld* World = GetWorld();
-	if (!World)
-	{
-		return;
-	}
-	
-	// Check if we're within trigger distance
-	float Distance = FVector::Dist(PlayerLocation, Location);
-	if (Distance > AudioData.TriggerDistance)
-	{
-		return;
-	}
-	
-	// Create new audio component for proximity sound
-	UAudioComponent* ProximityAudioComp = CreateAudioComponent(TEXT("ProximityAudio"));
-	if (ProximityAudioComp)
-	{
-		ProximityAudioComp->SetSound(AudioData.ProximitySound);
-		ProximityAudioComp->SetWorldLocation(Location);
-		ProximityAudioComp->SetVolumeMultiplier(CalculateVolumeByDistance(Distance, AudioData.TriggerDistance) * AudioData.MaxVolume);
-		
-		if (AudioData.bLooping)
-		{
-			ProximityAudioComp->Play();
-		}
-		else
-		{
-			ProximityAudioComp->FadeIn(0.5f);
-		}
-		
-		ProximityAudioComponents.Add(ProximityAudioComp);
-		
-		UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Started proximity audio at distance %.2f"), Distance);
-	}
+    if (DangerSettings.DinosaurRoarCue.IsValid())
+    {
+        if (USoundCue* RoarSound = DangerSettings.DinosaurRoarCue.LoadSynchronous())
+        {
+            UGameplayStatics::PlaySoundAtLocation(
+                this,
+                RoarSound,
+                Location,
+                Intensity * DangerSettings.IntensityMultiplier
+            );
+        }
+    }
 }
 
-void UAudioSystemManager::StopProximityAudio(const FVector& Location)
+void AAudioSystemManager::PlayFootstepAudio(FVector Location, bool bHeavyFootsteps)
 {
-	// Find and stop proximity audio components near this location
-	for (int32 i = ProximityAudioComponents.Num() - 1; i >= 0; i--)
-	{
-		UAudioComponent* AudioComp = ProximityAudioComponents[i];
-		if (AudioComp && IsValid(AudioComp))
-		{
-			float Distance = FVector::Dist(AudioComp->GetComponentLocation(), Location);
-			if (Distance < 100.0f) // Close enough to be the same source
-			{
-				AudioComp->FadeOut(0.5f, 0.0f);
-				ProximityAudioComponents.RemoveAt(i);
-			}
-		}
-	}
+    if (DangerSettings.FootstepsCue.IsValid())
+    {
+        if (USoundCue* FootstepsSound = DangerSettings.FootstepsCue.LoadSynchronous())
+        {
+            float VolumeMultiplier = bHeavyFootsteps ? 1.5f : 1.0f;
+            UGameplayStatics::PlaySoundAtLocation(
+                this,
+                FootstepsSound,
+                Location,
+                VolumeMultiplier
+            );
+        }
+    }
 }
 
-void UAudioSystemManager::UpdatePlayerLocation(const FVector& NewPlayerLocation)
+EAudio_BiomeType AAudioSystemManager::DetectBiomeAtLocation(FVector Location)
 {
-	PlayerLocation = NewPlayerLocation;
+    // Biome detection based on world coordinates
+    // Savana: center (0,0)
+    // Pantano: SW (-50000,-45000)
+    // Floresta: NW (-45000,40000)
+    // Deserto: E (55000,0)
+    // Montanha: NE (40000,50000)
+
+    float X = Location.X;
+    float Y = Location.Y;
+
+    // Calculate distances to biome centers
+    float DistToSavana = FVector::Dist2D(Location, FVector(0, 0, 0));
+    float DistToPantano = FVector::Dist2D(Location, FVector(-50000, -45000, 0));
+    float DistToFloresta = FVector::Dist2D(Location, FVector(-45000, 40000, 0));
+    float DistToDeserto = FVector::Dist2D(Location, FVector(55000, 0, 0));
+    float DistToMontanha = FVector::Dist2D(Location, FVector(40000, 50000, 0));
+
+    // Find closest biome
+    float MinDistance = DistToSavana;
+    EAudio_BiomeType ClosestBiome = EAudio_BiomeType::Savana;
+
+    if (DistToPantano < MinDistance)
+    {
+        MinDistance = DistToPantano;
+        ClosestBiome = EAudio_BiomeType::Pantano;
+    }
+    if (DistToFloresta < MinDistance)
+    {
+        MinDistance = DistToFloresta;
+        ClosestBiome = EAudio_BiomeType::Floresta;
+    }
+    if (DistToDeserto < MinDistance)
+    {
+        MinDistance = DistToDeserto;
+        ClosestBiome = EAudio_BiomeType::Deserto;
+    }
+    if (DistToMontanha < MinDistance)
+    {
+        MinDistance = DistToMontanha;
+        ClosestBiome = EAudio_BiomeType::Montanha;
+    }
+
+    return ClosestBiome;
 }
 
-void UAudioSystemManager::StartEnvironmentalAudio()
+void AAudioSystemManager::CrossfadeToNewBiome(EAudio_BiomeType NewBiome)
 {
-	if (!EnvironmentalAudioComponent)
-	{
-		EnvironmentalAudioComponent = CreateAudioComponent(TEXT("EnvironmentalAudio"));
-	}
-	
-	if (EnvironmentalAudioComponent)
-	{
-		UpdateEnvironmentalAudio();
-		UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Environmental audio started"));
-	}
+    // Find biome settings
+    FAudio_BiomeAudioData* BiomeData = nullptr;
+    for (FAudio_BiomeAudioData& Data : BiomeAudioSettings)
+    {
+        if (Data.BiomeType == NewBiome)
+        {
+            BiomeData = &Data;
+            break;
+        }
+    }
+
+    if (!BiomeData)
+    {
+        return;
+    }
+
+    // Stop current audio
+    if (AmbientAudioComponent && AmbientAudioComponent->IsPlaying())
+    {
+        AmbientAudioComponent->FadeOut(BiomeData->CrossfadeTime, 0.0f);
+    }
+    if (MusicAudioComponent && MusicAudioComponent->IsPlaying())
+    {
+        MusicAudioComponent->FadeOut(BiomeData->CrossfadeTime, 0.0f);
+    }
+
+    // Start new biome audio
+    if (BiomeData->AmbientSoundCue.IsValid())
+    {
+        if (USoundCue* AmbientSound = BiomeData->AmbientSoundCue.LoadSynchronous())
+        {
+            AmbientAudioComponent->SetSound(AmbientSound);
+            AmbientAudioComponent->FadeIn(BiomeData->CrossfadeTime, BiomeData->AmbientVolume);
+        }
+    }
+
+    if (BiomeData->MusicCue.IsValid())
+    {
+        if (USoundCue* MusicSound = BiomeData->MusicCue.LoadSynchronous())
+        {
+            MusicAudioComponent->SetSound(MusicSound);
+            MusicAudioComponent->FadeIn(BiomeData->CrossfadeTime, BiomeData->MusicVolume);
+        }
+    }
 }
 
-void UAudioSystemManager::StopEnvironmentalAudio()
+void AAudioSystemManager::UpdateDangerAudio()
 {
-	if (EnvironmentalAudioComponent && IsValid(EnvironmentalAudioComponent))
-	{
-		EnvironmentalAudioComponent->FadeOut(2.0f, 0.0f);
-		UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Environmental audio stopped"));
-	}
+    if (bInDangerZone)
+    {
+        // Start tension music if not already playing
+        if (DangerSettings.TensionMusicCue.IsValid() && !DangerAudioComponent->IsPlaying())
+        {
+            if (USoundCue* TensionSound = DangerSettings.TensionMusicCue.LoadSynchronous())
+            {
+                DangerAudioComponent->SetSound(TensionSound);
+                DangerAudioComponent->FadeIn(1.0f, 0.8f);
+            }
+        }
+    }
+    else
+    {
+        // Stop tension music
+        if (DangerAudioComponent->IsPlaying())
+        {
+            DangerAudioComponent->FadeOut(2.0f, 0.0f);
+        }
+    }
 }
 
-void UAudioSystemManager::SetMasterVolume(float Volume)
+float AAudioSystemManager::CalculateDistanceToNearestDinosaur()
 {
-	MasterVolume = FMath::Clamp(Volume, 0.0f, 1.0f);
-	
-	// Update all active audio components
-	if (EnvironmentalAudioComponent && IsValid(EnvironmentalAudioComponent))
-	{
-		EnvironmentalAudioComponent->SetVolumeMultiplier(MasterVolume);
-	}
-	
-	if (ThreatAudioComponent && IsValid(ThreatAudioComponent))
-	{
-		ThreatAudioComponent->SetVolumeMultiplier(MasterVolume);
-	}
-	
-	for (UAudioComponent* AudioComp : ProximityAudioComponents)
-	{
-		if (AudioComp && IsValid(AudioComp))
-		{
-			AudioComp->SetVolumeMultiplier(MasterVolume);
-		}
-	}
-	
-	UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Master volume set to %.2f"), MasterVolume);
-}
+    if (!PlayerPawn)
+    {
+        return 99999.0f;
+    }
 
-float UAudioSystemManager::GetMasterVolume() const
-{
-	return MasterVolume;
-}
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        return 99999.0f;
+    }
 
-void UAudioSystemManager::PlayThreatAudio(EAudio_ThreatLevel ThreatLevel, const FVector& ThreatLocation)
-{
-	USoundCue** ThreatSoundPtr = ThreatAudioMap.Find(ThreatLevel);
-	if (!ThreatSoundPtr || !*ThreatSoundPtr)
-	{
-		UE_LOG(LogTemp, Warning, TEXT("AudioSystemManager: No threat audio found for level %d"), (int32)ThreatLevel);
-		return;
-	}
-	
-	if (!ThreatAudioComponent)
-	{
-		ThreatAudioComponent = CreateAudioComponent(TEXT("ThreatAudio"));
-	}
-	
-	if (ThreatAudioComponent)
-	{
-		ThreatAudioComponent->SetSound(*ThreatSoundPtr);
-		ThreatAudioComponent->SetWorldLocation(ThreatLocation);
-		ThreatAudioComponent->SetVolumeMultiplier(MasterVolume);
-		ThreatAudioComponent->Play();
-		
-		UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Threat audio started for level %d"), (int32)ThreatLevel);
-	}
-}
+    float MinDistance = 99999.0f;
+    FVector PlayerLocation = PlayerPawn->GetActorLocation();
 
-void UAudioSystemManager::StopThreatAudio()
-{
-	if (ThreatAudioComponent && IsValid(ThreatAudioComponent))
-	{
-		ThreatAudioComponent->FadeOut(1.0f, 0.0f);
-		UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Threat audio stopped"));
-	}
-}
+    // Find all actors with "Dinosaur" or "TRex" or "Raptor" in their name
+    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+    {
+        AActor* Actor = *ActorItr;
+        if (!Actor)
+        {
+            continue;
+        }
 
-void UAudioSystemManager::UpdateEnvironmentalAudio()
-{
-	if (!EnvironmentalAudioComponent || !IsValid(EnvironmentalAudioComponent))
-	{
-		return;
-	}
-	
-	// Get current biome audio data
-	FAudio_BiomeAudioData* BiomeAudio = BiomeAudioMap.Find(CurrentBiome);
-	if (!BiomeAudio)
-	{
-		return;
-	}
-	
-	// Update environmental audio based on current biome
-	if (BiomeAudio->AmbientSound)
-	{
-		EnvironmentalAudioComponent->SetSound(BiomeAudio->AmbientSound);
-	}
-	else if (BiomeAudio->MetaSoundAmbient)
-	{
-		EnvironmentalAudioComponent->SetSound(BiomeAudio->MetaSoundAmbient);
-	}
-	
-	// Set volume based on biome and master volume
-	float FinalVolume = BiomeAudio->BaseVolume * MasterVolume;
-	EnvironmentalAudioComponent->SetVolumeMultiplier(FinalVolume);
-	
-	// Ensure the audio is playing
-	if (!EnvironmentalAudioComponent->IsPlaying())
-	{
-		EnvironmentalAudioComponent->Play();
-	}
-}
+        FString ActorName = Actor->GetName();
+        if (ActorName.Contains(TEXT("Dinosaur")) || 
+            ActorName.Contains(TEXT("TRex")) || 
+            ActorName.Contains(TEXT("Raptor")) ||
+            ActorName.Contains(TEXT("Brachiosaurus")))
+        {
+            float Distance = FVector::Dist(PlayerLocation, Actor->GetActorLocation());
+            if (Distance < MinDistance)
+            {
+                MinDistance = Distance;
+            }
+        }
+    }
 
-void UAudioSystemManager::UpdateProximityAudio()
-{
-	CleanupInactiveAudioComponents();
-	
-	// Update volume of proximity audio based on player distance
-	for (UAudioComponent* AudioComp : ProximityAudioComponents)
-	{
-		if (AudioComp && IsValid(AudioComp))
-		{
-			float Distance = FVector::Dist(PlayerLocation, AudioComp->GetComponentLocation());
-			float Volume = CalculateVolumeByDistance(Distance, 1000.0f) * MasterVolume;
-			AudioComp->SetVolumeMultiplier(Volume);
-			
-			// Stop audio if too far away
-			if (Distance > 1500.0f)
-			{
-				AudioComp->FadeOut(0.5f, 0.0f);
-			}
-		}
-	}
-}
-
-void UAudioSystemManager::CleanupInactiveAudioComponents()
-{
-	// Remove invalid or stopped audio components
-	for (int32 i = ProximityAudioComponents.Num() - 1; i >= 0; i--)
-	{
-		UAudioComponent* AudioComp = ProximityAudioComponents[i];
-		if (!AudioComp || !IsValid(AudioComp) || !AudioComp->IsPlaying())
-		{
-			ProximityAudioComponents.RemoveAt(i);
-		}
-	}
-}
-
-float UAudioSystemManager::CalculateVolumeByDistance(float Distance, float MaxDistance) const
-{
-	if (Distance >= MaxDistance)
-	{
-		return 0.0f;
-	}
-	
-	// Linear falloff
-	return 1.0f - (Distance / MaxDistance);
-}
-
-void UAudioSystemManager::FadeAudioComponent(UAudioComponent* AudioComp, float TargetVolume, float FadeTime)
-{
-	if (AudioComp && IsValid(AudioComp))
-	{
-		if (TargetVolume > 0.0f)
-		{
-			AudioComp->FadeIn(FadeTime, TargetVolume);
-		}
-		else
-		{
-			AudioComp->FadeOut(FadeTime, 0.0f);
-		}
-	}
-}
-
-UAudioComponent* UAudioSystemManager::CreateAudioComponent(const FString& ComponentName)
-{
-	UWorld* World = GetWorld();
-	if (!World)
-	{
-		return nullptr;
-	}
-	
-	UAudioComponent* NewAudioComponent = NewObject<UAudioComponent>(World);
-	if (NewAudioComponent)
-	{
-		NewAudioComponent->bAutoActivate = false;
-		NewAudioComponent->bStopWhenOwnerDestroyed = false;
-		NewAudioComponent->SetWorldLocation(PlayerLocation);
-		
-		UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Created audio component '%s'"), *ComponentName);
-	}
-	
-	return NewAudioComponent;
-}
-
-void UAudioSystemManager::RemoveAudioComponent(UAudioComponent* ComponentToRemove)
-{
-	if (ComponentToRemove && IsValid(ComponentToRemove))
-	{
-		ComponentToRemove->Stop();
-		ProximityAudioComponents.Remove(ComponentToRemove);
-	}
+    return MinDistance;
 }
