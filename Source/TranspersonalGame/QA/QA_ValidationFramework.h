@@ -3,9 +3,7 @@
 #include "CoreMinimal.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
-#include "Components/StaticMeshComponent.h"
-#include "Components/AudioComponent.h"
-#include "Engine/Engine.h"
+#include "Components/ActorComponent.h"
 #include "QA_ValidationFramework.generated.h"
 
 UENUM(BlueprintType)
@@ -14,38 +12,22 @@ enum class EQA_ValidationResult : uint8
     Pass        UMETA(DisplayName = "Pass"),
     Fail        UMETA(DisplayName = "Fail"),
     Warning     UMETA(DisplayName = "Warning"),
-    Critical    UMETA(DisplayName = "Critical")
-};
-
-UENUM(BlueprintType)
-enum class EQA_SystemType : uint8
-{
-    Character   UMETA(DisplayName = "Character System"),
-    VFX         UMETA(DisplayName = "VFX System"),
-    WorldGen    UMETA(DisplayName = "World Generation"),
-    GameState   UMETA(DisplayName = "Game State"),
-    Physics     UMETA(DisplayName = "Physics System"),
-    Audio       UMETA(DisplayName = "Audio System"),
-    AI          UMETA(DisplayName = "AI System"),
-    UI          UMETA(DisplayName = "UI System")
+    Skipped     UMETA(DisplayName = "Skipped")
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FQA_ValidationReport
+struct FQA_ValidationTest
 {
     GENERATED_BODY()
-
-    UPROPERTY(BlueprintReadWrite, Category = "QA")
-    EQA_SystemType SystemType;
-
-    UPROPERTY(BlueprintReadWrite, Category = "QA")
-    EQA_ValidationResult Result;
 
     UPROPERTY(BlueprintReadWrite, Category = "QA")
     FString TestName;
 
     UPROPERTY(BlueprintReadWrite, Category = "QA")
-    FString Description;
+    FString TestDescription;
+
+    UPROPERTY(BlueprintReadWrite, Category = "QA")
+    EQA_ValidationResult Result;
 
     UPROPERTY(BlueprintReadWrite, Category = "QA")
     FString ErrorMessage;
@@ -53,190 +35,128 @@ struct TRANSPERSONALGAME_API FQA_ValidationReport
     UPROPERTY(BlueprintReadWrite, Category = "QA")
     float ExecutionTime;
 
-    UPROPERTY(BlueprintReadWrite, Category = "QA")
-    FDateTime Timestamp;
-
-    FQA_ValidationReport()
+    FQA_ValidationTest()
     {
-        SystemType = EQA_SystemType::Character;
-        Result = EQA_ValidationResult::Pass;
         TestName = TEXT("");
-        Description = TEXT("");
+        TestDescription = TEXT("");
+        Result = EQA_ValidationResult::Skipped;
         ErrorMessage = TEXT("");
         ExecutionTime = 0.0f;
-        Timestamp = FDateTime::Now();
     }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FQA_BiomePopulation
+struct FQA_SystemValidationReport
 {
     GENERATED_BODY()
 
     UPROPERTY(BlueprintReadWrite, Category = "QA")
-    FString BiomeName;
+    FString SystemName;
 
     UPROPERTY(BlueprintReadWrite, Category = "QA")
-    FVector BiomeCenter;
+    TArray<FQA_ValidationTest> Tests;
 
     UPROPERTY(BlueprintReadWrite, Category = "QA")
-    int32 ActorCount;
+    int32 PassCount;
 
     UPROPERTY(BlueprintReadWrite, Category = "QA")
-    int32 RequiredMinimum;
+    int32 FailCount;
 
     UPROPERTY(BlueprintReadWrite, Category = "QA")
-    bool bMeetsRequirement;
+    int32 WarningCount;
 
-    FQA_BiomePopulation()
+    UPROPERTY(BlueprintReadWrite, Category = "QA")
+    float TotalExecutionTime;
+
+    FQA_SystemValidationReport()
     {
-        BiomeName = TEXT("");
-        BiomeCenter = FVector::ZeroVector;
-        ActorCount = 0;
-        RequiredMinimum = 500;
-        bMeetsRequirement = false;
+        SystemName = TEXT("");
+        PassCount = 0;
+        FailCount = 0;
+        WarningCount = 0;
+        TotalExecutionTime = 0.0f;
     }
 };
 
 /**
- * QA Validation Framework Actor
- * Provides comprehensive testing and validation for all game systems
- * Monitors performance, memory usage, and system integration
+ * QA Validation Framework - Automated testing system for TranspersonalGame
+ * Validates all critical systems: VFX, Physics, Character, Biomes, Audio, etc.
  */
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API AQA_ValidationFramework : public AActor
+class TRANSPERSONALGAME_API UQA_ValidationFramework : public UObject
 {
     GENERATED_BODY()
 
 public:
-    AQA_ValidationFramework();
+    UQA_ValidationFramework();
+
+    // Core validation methods
+    UFUNCTION(BlueprintCallable, Category = "QA")
+    FQA_SystemValidationReport ValidateVFXSystems();
+
+    UFUNCTION(BlueprintCallable, Category = "QA")
+    FQA_SystemValidationReport ValidateCharacterSystems();
+
+    UFUNCTION(BlueprintCallable, Category = "QA")
+    FQA_SystemValidationReport ValidatePhysicsSystems();
+
+    UFUNCTION(BlueprintCallable, Category = "QA")
+    FQA_SystemValidationReport ValidateBiomePopulation();
+
+    UFUNCTION(BlueprintCallable, Category = "QA")
+    FQA_SystemValidationReport ValidateAudioSystems();
+
+    UFUNCTION(BlueprintCallable, Category = "QA")
+    FQA_SystemValidationReport ValidateCrowdSimulation();
+
+    // Comprehensive validation
+    UFUNCTION(BlueprintCallable, Category = "QA")
+    TArray<FQA_SystemValidationReport> RunFullValidationSuite();
+
+    // Bridge health check
+    UFUNCTION(BlueprintCallable, Category = "QA")
+    bool ValidateBridgeHealth();
+
+    // Level integrity check
+    UFUNCTION(BlueprintCallable, Category = "QA")
+    FQA_ValidationTest ValidateLevelIntegrity();
+
+    // Class loading validation
+    UFUNCTION(BlueprintCallable, Category = "QA")
+    FQA_ValidationTest ValidateClassLoading(const FString& ClassName);
+
+    // Actor count validation
+    UFUNCTION(BlueprintCallable, Category = "QA")
+    FQA_ValidationTest ValidateActorCounts();
+
+    // Performance validation
+    UFUNCTION(BlueprintCallable, Category = "QA")
+    FQA_ValidationTest ValidatePerformanceMetrics();
 
 protected:
-    virtual void BeginPlay() override;
+    // Internal validation helpers
+    FQA_ValidationTest CreateTest(const FString& Name, const FString& Description);
+    void SetTestResult(FQA_ValidationTest& Test, EQA_ValidationResult Result, const FString& ErrorMsg = TEXT(""));
+    void StartTestTimer(FQA_ValidationTest& Test);
+    void EndTestTimer(FQA_ValidationTest& Test);
 
-public:
-    virtual void Tick(float DeltaTime) override;
-
-    // Core validation functions
-    UFUNCTION(BlueprintCallable, Category = "QA")
-    void RunFullValidationSuite();
-
-    UFUNCTION(BlueprintCallable, Category = "QA")
-    FQA_ValidationReport ValidateCharacterSystem();
-
-    UFUNCTION(BlueprintCallable, Category = "QA")
-    FQA_ValidationReport ValidateVFXSystem();
-
-    UFUNCTION(BlueprintCallable, Category = "QA")
-    FQA_ValidationReport ValidateWorldGeneration();
-
-    UFUNCTION(BlueprintCallable, Category = "QA")
-    FQA_ValidationReport ValidateGameState();
-
-    UFUNCTION(BlueprintCallable, Category = "QA")
-    FQA_ValidationReport ValidatePhysicsSystem();
-
-    UFUNCTION(BlueprintCallable, Category = "QA")
-    FQA_ValidationReport ValidateAudioSystem();
-
-    // Biome and population validation
-    UFUNCTION(BlueprintCallable, Category = "QA")
-    TArray<FQA_BiomePopulation> ValidateBiomePopulation();
-
-    UFUNCTION(BlueprintCallable, Category = "QA")
-    int32 GetActorCountInRadius(FVector Center, float Radius);
-
-    // Performance monitoring
-    UFUNCTION(BlueprintCallable, Category = "QA")
-    float GetCurrentFPS();
-
-    UFUNCTION(BlueprintCallable, Category = "QA")
-    float GetMemoryUsagePercent();
-
-    UFUNCTION(BlueprintCallable, Category = "QA")
-    int32 GetTotalActorCount();
-
-    // Asset validation
-    UFUNCTION(BlueprintCallable, Category = "QA")
-    bool ValidateAssetImportPipeline();
-
-    UFUNCTION(BlueprintCallable, Category = "QA")
-    bool TestFBXImportCapability();
-
-    // Integration testing
-    UFUNCTION(BlueprintCallable, Category = "QA")
-    bool TestCrossSystemIntegration();
-
-    UFUNCTION(BlueprintCallable, Category = "QA")
-    bool ValidateRemoteControlAPI();
-
-    // Reporting
-    UFUNCTION(BlueprintCallable, Category = "QA")
-    void GenerateValidationReport();
-
-    UFUNCTION(BlueprintCallable, Category = "QA")
-    void LogValidationResults(const TArray<FQA_ValidationReport>& Reports);
-
-    UFUNCTION(BlueprintCallable, Category = "QA")
-    float CalculateSystemHealthPercentage();
-
-protected:
-    // Validation data
-    UPROPERTY(BlueprintReadOnly, Category = "QA")
-    TArray<FQA_ValidationReport> ValidationReports;
-
-    UPROPERTY(BlueprintReadOnly, Category = "QA")
-    TArray<FQA_BiomePopulation> BiomePopulations;
-
-    // Configuration
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA")
-    bool bAutoRunValidation;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA")
-    float ValidationInterval;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA")
-    bool bLogDetailedResults;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA")
-    bool bGenerateReports;
-
-    // Performance thresholds
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA")
-    float MinimumFPS;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA")
-    float MaxMemoryUsagePercent;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA")
-    int32 MaxActorCount;
-
-    // Biome centers (from brain memory coordinates)
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA")
-    FVector SavanaCenter;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA")
-    FVector PantanoCenter;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA")
-    FVector FlorestaCenter;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA")
-    FVector DesertoCenter;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA")
-    FVector MontanhaCenter;
+    // System validation helpers
+    bool ValidateClassExists(const FString& ClassName);
+    int32 CountActorsOfType(const FString& ActorType);
+    bool ValidateActorInBiome(const FVector& BiomeCenter, float Radius, int32 MinActors);
 
 private:
-    // Internal validation helpers
-    bool ValidateClassLoading(const FString& ClassName);
-    bool ValidateActorSpawning(UClass* ActorClass);
-    bool ValidateComponentFunctionality(AActor* TestActor);
+    // Timing for performance tests
+    double TestStartTime;
     
-    // Timer for automatic validation
-    FTimerHandle ValidationTimerHandle;
+    // Critical class names for validation
+    TArray<FString> CriticalClasses;
     
-    // Performance tracking
-    float LastValidationTime;
-    int32 ValidationRunCount;
+    // Biome definitions for validation
+    TMap<FString, FVector> BiomeLocations;
+    
+    // Performance thresholds
+    float MaxFrameTime;
+    int32 MaxActorCount;
+    float MaxMemoryUsage;
 };
