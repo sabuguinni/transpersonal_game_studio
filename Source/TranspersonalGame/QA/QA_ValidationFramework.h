@@ -12,11 +12,11 @@ enum class EQA_ValidationResult : uint8
     Pass        UMETA(DisplayName = "Pass"),
     Fail        UMETA(DisplayName = "Fail"),
     Warning     UMETA(DisplayName = "Warning"),
-    Pending     UMETA(DisplayName = "Pending")
+    Skipped     UMETA(DisplayName = "Skipped")
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FQA_TestResult
+struct FQA_TestResult
 {
     GENERATED_BODY()
 
@@ -35,41 +35,62 @@ struct TRANSPERSONALGAME_API FQA_TestResult
     FQA_TestResult()
     {
         TestName = TEXT("");
-        Result = EQA_ValidationResult::Pending;
+        Result = EQA_ValidationResult::Skipped;
         Message = TEXT("");
         ExecutionTime = 0.0f;
+    }
+
+    FQA_TestResult(const FString& InTestName, EQA_ValidationResult InResult, const FString& InMessage, float InExecutionTime)
+        : TestName(InTestName), Result(InResult), Message(InMessage), ExecutionTime(InExecutionTime)
+    {
     }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FQA_BiomeValidation
+struct FQA_SystemHealth
 {
     GENERATED_BODY()
 
     UPROPERTY(BlueprintReadOnly, Category = "QA")
-    FString BiomeName;
+    int32 TotalActors;
 
     UPROPERTY(BlueprintReadOnly, Category = "QA")
-    FVector BiomeCenter;
+    int32 CharacterActors;
 
     UPROPERTY(BlueprintReadOnly, Category = "QA")
-    int32 ActorCount;
+    int32 DinosaurActors;
 
     UPROPERTY(BlueprintReadOnly, Category = "QA")
-    bool bMeetsPopulationTarget;
+    int32 LightingActors;
 
-    FQA_BiomeValidation()
+    UPROPERTY(BlueprintReadOnly, Category = "QA")
+    int32 EnvironmentActors;
+
+    UPROPERTY(BlueprintReadOnly, Category = "QA")
+    float MemoryUsagePercent;
+
+    UPROPERTY(BlueprintReadOnly, Category = "QA")
+    float CPUUsagePercent;
+
+    UPROPERTY(BlueprintReadOnly, Category = "QA")
+    float OverallHealthScore;
+
+    FQA_SystemHealth()
     {
-        BiomeName = TEXT("");
-        BiomeCenter = FVector::ZeroVector;
-        ActorCount = 0;
-        bMeetsPopulationTarget = false;
+        TotalActors = 0;
+        CharacterActors = 0;
+        DinosaurActors = 0;
+        LightingActors = 0;
+        EnvironmentActors = 0;
+        MemoryUsagePercent = 0.0f;
+        CPUUsagePercent = 0.0f;
+        OverallHealthScore = 0.0f;
     }
 };
 
 /**
- * QA Validation Framework for automated testing and quality assurance
- * Provides comprehensive testing of game systems, performance, and integration
+ * QA Validation Framework for comprehensive system testing
+ * Provides automated testing capabilities for all game systems
  */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UQA_ValidationFramework : public UObject
@@ -81,13 +102,13 @@ public:
 
     // Core validation functions
     UFUNCTION(BlueprintCallable, Category = "QA", CallInEditor)
-    TArray<FQA_TestResult> RunFullValidationSuite();
-
-    UFUNCTION(BlueprintCallable, Category = "QA", CallInEditor)
-    FQA_TestResult ValidateBridgeConnection();
+    TArray<FQA_TestResult> RunAllValidationTests();
 
     UFUNCTION(BlueprintCallable, Category = "QA", CallInEditor)
     FQA_TestResult ValidateCharacterSystems();
+
+    UFUNCTION(BlueprintCallable, Category = "QA", CallInEditor)
+    FQA_TestResult ValidateDinosaurAI();
 
     UFUNCTION(BlueprintCallable, Category = "QA", CallInEditor)
     FQA_TestResult ValidateVFXSystems();
@@ -96,43 +117,45 @@ public:
     FQA_TestResult ValidatePhysicsSystems();
 
     UFUNCTION(BlueprintCallable, Category = "QA", CallInEditor)
-    TArray<FQA_BiomeValidation> ValidateBiomePopulation();
+    FQA_TestResult ValidateLightingSystems();
 
     UFUNCTION(BlueprintCallable, Category = "QA", CallInEditor)
     FQA_TestResult ValidateAssetPipeline();
 
     UFUNCTION(BlueprintCallable, Category = "QA", CallInEditor)
-    FQA_TestResult ValidateLightingAtmosphere();
+    FQA_TestResult ValidateBiomePopulation();
 
     UFUNCTION(BlueprintCallable, Category = "QA", CallInEditor)
-    FQA_TestResult ValidatePerformanceMetrics();
+    FQA_SystemHealth GetSystemHealthReport();
+
+    // Performance testing
+    UFUNCTION(BlueprintCallable, Category = "QA", CallInEditor)
+    FQA_TestResult RunPerformanceTest();
+
+    UFUNCTION(BlueprintCallable, Category = "QA", CallInEditor)
+    FQA_TestResult ValidateMemoryUsage();
+
+    // Integration testing
+    UFUNCTION(BlueprintCallable, Category = "QA", CallInEditor)
+    FQA_TestResult TestCrossSystemIntegration();
 
     // Utility functions
     UFUNCTION(BlueprintCallable, Category = "QA")
-    float GetSystemMemoryUsage();
+    void LogTestResult(const FQA_TestResult& TestResult);
 
     UFUNCTION(BlueprintCallable, Category = "QA")
-    int32 GetTotalActorCount();
-
-    UFUNCTION(BlueprintCallable, Category = "QA")
-    float CalculateSystemHealthScore();
+    void GenerateQAReport();
 
 protected:
     UPROPERTY(BlueprintReadOnly, Category = "QA")
-    TArray<FQA_TestResult> LastValidationResults;
+    TArray<FQA_TestResult> TestResults;
 
     UPROPERTY(BlueprintReadOnly, Category = "QA")
-    TArray<FQA_BiomeValidation> LastBiomeValidation;
+    FQA_SystemHealth CurrentSystemHealth;
 
-    UPROPERTY(BlueprintReadOnly, Category = "QA")
-    float LastHealthScore;
-
-private:
-    // Internal validation helpers
-    bool ValidateClassLoading(const FString& ClassName, FString& OutMessage);
-    bool ValidateActorSpawning(UClass* ActorClass, FString& OutMessage);
-    bool CheckBiomeActorDistribution(const FVector& BiomeCenter, float Radius, int32& OutActorCount);
-    bool ValidateAssetImportCapability(FString& OutMessage);
-    bool CheckLightingConfiguration(FString& OutMessage);
-    bool ValidateMemoryUsage(FString& OutMessage);
+    // Helper functions
+    FQA_TestResult CreateTestResult(const FString& TestName, EQA_ValidationResult Result, const FString& Message);
+    bool IsClassLoaded(const FString& ClassName);
+    int32 CountActorsOfType(const FString& ActorType);
+    float MeasureExecutionTime(TFunction<void()> TestFunction);
 };
