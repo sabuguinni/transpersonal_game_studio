@@ -2,161 +2,193 @@
 
 #include "CoreMinimal.h"
 #include "Engine/World.h"
-#include "GameFramework/Actor.h"
 #include "Components/ActorComponent.h"
+#include "Engine/Engine.h"
 #include "QA_ValidationFramework.generated.h"
 
 UENUM(BlueprintType)
-enum class EQA_ValidationResult : uint8
+enum class EQA_SystemStatus : uint8
 {
-    Pass        UMETA(DisplayName = "Pass"),
-    Fail        UMETA(DisplayName = "Fail"),
-    Warning     UMETA(DisplayName = "Warning"),
-    Skipped     UMETA(DisplayName = "Skipped")
+    Unknown     UMETA(DisplayName = "Unknown"),
+    Healthy     UMETA(DisplayName = "Healthy"),
+    Stable      UMETA(DisplayName = "Stable"),
+    Critical    UMETA(DisplayName = "Critical"),
+    Failed      UMETA(DisplayName = "Failed")
+};
+
+UENUM(BlueprintType)
+enum class EQA_TestType : uint8
+{
+    Bridge          UMETA(DisplayName = "Bridge Connectivity"),
+    VFX             UMETA(DisplayName = "VFX System"),
+    Character       UMETA(DisplayName = "Character System"),
+    Physics         UMETA(DisplayName = "Physics System"),
+    Assets          UMETA(DisplayName = "Asset Pipeline"),
+    Performance     UMETA(DisplayName = "Performance"),
+    BiomePopulation UMETA(DisplayName = "Biome Population"),
+    Integration     UMETA(DisplayName = "System Integration")
 };
 
 USTRUCT(BlueprintType)
-struct FQA_ValidationTest
+struct TRANSPERSONALGAME_API FQA_TestResult
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadWrite, Category = "QA")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA")
+    EQA_TestType TestType;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA")
+    EQA_SystemStatus Status;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA")
     FString TestName;
 
-    UPROPERTY(BlueprintReadWrite, Category = "QA")
-    FString TestDescription;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA")
+    FString ResultMessage;
 
-    UPROPERTY(BlueprintReadWrite, Category = "QA")
-    EQA_ValidationResult Result;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA")
+    float ExecutionTimeMs;
 
-    UPROPERTY(BlueprintReadWrite, Category = "QA")
-    FString ErrorMessage;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA")
+    FDateTime Timestamp;
 
-    UPROPERTY(BlueprintReadWrite, Category = "QA")
-    float ExecutionTime;
-
-    FQA_ValidationTest()
+    FQA_TestResult()
     {
+        TestType = EQA_TestType::Bridge;
+        Status = EQA_SystemStatus::Unknown;
         TestName = TEXT("");
-        TestDescription = TEXT("");
-        Result = EQA_ValidationResult::Skipped;
-        ErrorMessage = TEXT("");
-        ExecutionTime = 0.0f;
+        ResultMessage = TEXT("");
+        ExecutionTimeMs = 0.0f;
+        Timestamp = FDateTime::Now();
     }
 };
 
 USTRUCT(BlueprintType)
-struct FQA_SystemValidationReport
+struct TRANSPERSONALGAME_API FQA_BiomeValidation
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadWrite, Category = "QA")
-    FString SystemName;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA")
+    FString BiomeName;
 
-    UPROPERTY(BlueprintReadWrite, Category = "QA")
-    TArray<FQA_ValidationTest> Tests;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA")
+    FVector BiomeCenter;
 
-    UPROPERTY(BlueprintReadWrite, Category = "QA")
-    int32 PassCount;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA")
+    int32 ActorCount;
 
-    UPROPERTY(BlueprintReadWrite, Category = "QA")
-    int32 FailCount;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA")
+    int32 RequiredActorCount;
 
-    UPROPERTY(BlueprintReadWrite, Category = "QA")
-    int32 WarningCount;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA")
+    bool bMeetsRequirement;
 
-    UPROPERTY(BlueprintReadWrite, Category = "QA")
-    float TotalExecutionTime;
-
-    FQA_SystemValidationReport()
+    FQA_BiomeValidation()
     {
-        SystemName = TEXT("");
-        PassCount = 0;
-        FailCount = 0;
-        WarningCount = 0;
-        TotalExecutionTime = 0.0f;
+        BiomeName = TEXT("");
+        BiomeCenter = FVector::ZeroVector;
+        ActorCount = 0;
+        RequiredActorCount = 500;
+        bMeetsRequirement = false;
     }
 };
 
 /**
- * QA Validation Framework - Automated testing system for TranspersonalGame
- * Validates all critical systems: VFX, Physics, Character, Biomes, Audio, etc.
+ * QA Validation Framework Component
+ * Provides comprehensive testing and validation for all game systems
+ * Monitors system health, performance, and integration status
  */
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UQA_ValidationFramework : public UObject
+UCLASS(ClassGroup=(QA), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UQA_ValidationFramework : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
     UQA_ValidationFramework();
 
-    // Core validation methods
+protected:
+    virtual void BeginPlay() override;
+
+public:
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+
+    // Core validation functions
     UFUNCTION(BlueprintCallable, Category = "QA")
-    FQA_SystemValidationReport ValidateVFXSystems();
+    FQA_TestResult ValidateBridgeConnectivity();
 
     UFUNCTION(BlueprintCallable, Category = "QA")
-    FQA_SystemValidationReport ValidateCharacterSystems();
+    FQA_TestResult ValidateVFXSystem();
 
     UFUNCTION(BlueprintCallable, Category = "QA")
-    FQA_SystemValidationReport ValidatePhysicsSystems();
+    FQA_TestResult ValidateCharacterSystem();
 
     UFUNCTION(BlueprintCallable, Category = "QA")
-    FQA_SystemValidationReport ValidateBiomePopulation();
+    FQA_TestResult ValidatePhysicsSystem();
 
     UFUNCTION(BlueprintCallable, Category = "QA")
-    FQA_SystemValidationReport ValidateAudioSystems();
+    FQA_TestResult ValidateAssetPipeline();
 
     UFUNCTION(BlueprintCallable, Category = "QA")
-    FQA_SystemValidationReport ValidateCrowdSimulation();
+    FQA_TestResult ValidatePerformance();
 
-    // Comprehensive validation
     UFUNCTION(BlueprintCallable, Category = "QA")
-    TArray<FQA_SystemValidationReport> RunFullValidationSuite();
+    TArray<FQA_BiomeValidation> ValidateBiomePopulation();
 
-    // Bridge health check
+    // Comprehensive test suite
     UFUNCTION(BlueprintCallable, Category = "QA")
-    bool ValidateBridgeHealth();
+    TArray<FQA_TestResult> RunFullValidationSuite();
 
-    // Level integrity check
+    // System health monitoring
     UFUNCTION(BlueprintCallable, Category = "QA")
-    FQA_ValidationTest ValidateLevelIntegrity();
+    EQA_SystemStatus GetOverallSystemHealth();
 
-    // Class loading validation
     UFUNCTION(BlueprintCallable, Category = "QA")
-    FQA_ValidationTest ValidateClassLoading(const FString& ClassName);
+    float GetSystemHealthPercentage();
 
-    // Actor count validation
+    // Performance monitoring
     UFUNCTION(BlueprintCallable, Category = "QA")
-    FQA_ValidationTest ValidateActorCounts();
+    int32 GetCurrentActorCount();
 
-    // Performance validation
     UFUNCTION(BlueprintCallable, Category = "QA")
-    FQA_ValidationTest ValidatePerformanceMetrics();
+    bool IsPerformanceWithinThreshold();
+
+    // Utility functions
+    UFUNCTION(BlueprintCallable, Category = "QA")
+    void LogTestResult(const FQA_TestResult& TestResult);
+
+    UFUNCTION(BlueprintCallable, Category = "QA")
+    void GenerateValidationReport();
 
 protected:
-    // Internal validation helpers
-    FQA_ValidationTest CreateTest(const FString& Name, const FString& Description);
-    void SetTestResult(FQA_ValidationTest& Test, EQA_ValidationResult Result, const FString& ErrorMsg = TEXT(""));
-    void StartTestTimer(FQA_ValidationTest& Test);
-    void EndTestTimer(FQA_ValidationTest& Test);
+    // Test results storage
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "QA")
+    TArray<FQA_TestResult> TestResults;
 
-    // System validation helpers
-    bool ValidateClassExists(const FString& ClassName);
-    int32 CountActorsOfType(const FString& ActorType);
-    bool ValidateActorInBiome(const FVector& BiomeCenter, float Radius, int32 MinActors);
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "QA")
+    TArray<FQA_BiomeValidation> BiomeValidations;
+
+    // Configuration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA")
+    float ValidationInterval;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA")
+    int32 MaxActorThreshold;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA")
+    int32 WarningActorThreshold;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA")
+    bool bAutoRunValidation;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA")
+    bool bLogDetailedResults;
 
 private:
-    // Timing for performance tests
-    double TestStartTime;
+    // Internal state
+    float LastValidationTime;
+    EQA_SystemStatus CachedSystemHealth;
     
-    // Critical class names for validation
-    TArray<FString> CriticalClasses;
-    
-    // Biome definitions for validation
-    TMap<FString, FVector> BiomeLocations;
-    
-    // Performance thresholds
-    float MaxFrameTime;
-    int32 MaxActorCount;
-    float MaxMemoryUsage;
+    // Helper functions
+    FQA_TestResult CreateTestResult(EQA_TestType TestType, const FString& TestName, EQA_SystemStatus Status, const FString& Message, float ExecutionTime = 0.0f);
+    EQA_SystemStatus CalculateSystemHealth(const TArray<FQA_TestResult>& Results);
 };
