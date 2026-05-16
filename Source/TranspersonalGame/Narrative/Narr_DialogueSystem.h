@@ -1,10 +1,31 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Components/ActorComponent.h"
-#include "Engine/Engine.h"
-#include "SharedTypes.h"
+#include "Engine/GameInstanceSubsystem.h"
+#include "Engine/DataTable.h"
 #include "Narr_DialogueSystem.generated.h"
+
+UENUM(BlueprintType)
+enum class ENarr_DialogueType : uint8
+{
+    Greeting,
+    Warning,
+    Information,
+    Quest,
+    Lore,
+    Combat
+};
+
+UENUM(BlueprintType)
+enum class ENarr_CharacterType : uint8
+{
+    TribalElder,
+    TribalWarrior,
+    TribalScout,
+    TribalTracker,
+    TribalHunter,
+    TribalShaman
+};
 
 USTRUCT(BlueprintType)
 struct TRANSPERSONALGAME_API FNarr_DialogueLine
@@ -12,27 +33,31 @@ struct TRANSPERSONALGAME_API FNarr_DialogueLine
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    FString SpeakerName;
+    FString DialogueID;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    FString DialogueText;
+    ENarr_CharacterType SpeakerType;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    ENarr_DialogueType DialogueType;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    FText DialogueText;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
     FString AudioURL;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    float DisplayDuration;
+    float Duration;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    bool bIsPlayerChoice;
+    TArray<FString> TriggerConditions;
 
     FNarr_DialogueLine()
     {
-        SpeakerName = TEXT("Unknown");
-        DialogueText = TEXT("");
-        AudioURL = TEXT("");
-        DisplayDuration = 3.0f;
-        bIsPlayerChoice = false;
+        SpeakerType = ENarr_CharacterType::TribalElder;
+        DialogueType = ENarr_DialogueType::Information;
+        Duration = 10.0f;
     }
 };
 
@@ -51,94 +76,55 @@ struct TRANSPERSONALGAME_API FNarr_DialogueSequence
     bool bIsRepeatable;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    bool bRequiresQuestProgress;
+    int32 Priority;
 
     FNarr_DialogueSequence()
     {
-        SequenceID = TEXT("default");
         bIsRepeatable = true;
-        bRequiresQuestProgress = false;
+        Priority = 1;
     }
 };
 
-UENUM(BlueprintType)
-enum class ENarr_DialogueState : uint8
-{
-    Inactive,
-    WaitingForPlayer,
-    DisplayingText,
-    WaitingForChoice,
-    Completed
-};
-
-UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UNarr_DialogueSystem : public UActorComponent
+UCLASS(BlueprintType)
+class TRANSPERSONALGAME_API UNarr_DialogueSystem : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
 public:
-    UNarr_DialogueSystem();
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    void RegisterDialogueLine(const FNarr_DialogueLine& DialogueLine);
+
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    void RegisterDialogueSequence(const FNarr_DialogueSequence& DialogueSequence);
+
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    FNarr_DialogueLine GetRandomDialogue(ENarr_DialogueType DialogueType, ENarr_CharacterType CharacterType);
+
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    TArray<FNarr_DialogueLine> GetDialogueSequence(const FString& SequenceID);
+
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    void PlayDialogue(const FNarr_DialogueLine& DialogueLine);
+
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    void LoadDialogueDatabase();
+
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    int32 GetTotalDialogueCount() const;
 
 protected:
-    virtual void BeginPlay() override;
+    UPROPERTY(BlueprintReadOnly, Category = "Dialogue")
+    TArray<FNarr_DialogueLine> DialogueDatabase;
 
-public:
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+    UPROPERTY(BlueprintReadOnly, Category = "Dialogue")
+    TArray<FNarr_DialogueSequence> DialogueSequences;
 
-    // Dialogue Management
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    void StartDialogueSequence(const FString& SequenceID);
-
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    void AdvanceDialogue();
-
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    void EndDialogue();
-
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    bool IsDialogueActive() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    FNarr_DialogueLine GetCurrentDialogueLine() const;
-
-    // Dialogue Registration
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    void RegisterDialogueSequence(const FNarr_DialogueSequence& Sequence);
-
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    void LoadDialogueFromConfig();
-
-    // Audio Integration
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    void PlayDialogueAudio(const FString& AudioURL);
-
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    void StopDialogueAudio();
-
-protected:
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue", meta = (AllowPrivateAccess = "true"))
-    TMap<FString, FNarr_DialogueSequence> DialogueSequences;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue", meta = (AllowPrivateAccess = "true"))
-    ENarr_DialogueState CurrentState;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue", meta = (AllowPrivateAccess = "true"))
-    FString ActiveSequenceID;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue", meta = (AllowPrivateAccess = "true"))
-    int32 CurrentLineIndex;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue", meta = (AllowPrivateAccess = "true"))
-    float DialogueTimer;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue", meta = (AllowPrivateAccess = "true"))
-    bool bAutoAdvance;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue", meta = (AllowPrivateAccess = "true"))
-    float AutoAdvanceDelay;
+    UPROPERTY(BlueprintReadOnly, Category = "Dialogue")
+    TMap<FString, int32> PlayedDialogues;
 
 private:
     void InitializeDefaultDialogues();
-    void UpdateDialogueTimer(float DeltaTime);
-    bool CanAdvanceDialogue() const;
+    bool CheckDialogueConditions(const TArray<FString>& Conditions);
 };
