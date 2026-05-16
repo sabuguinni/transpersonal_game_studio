@@ -4,20 +4,15 @@
 #include "Engine/GameInstanceSubsystem.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
-#include "Components/ActorComponent.h"
+#include "Components/StaticMeshComponent.h"
+#include "Materials/MaterialInterface.h"
+#include "Sound/SoundCue.h"
+#include "Particles/ParticleSystem.h"
+#include "NiagaraSystem.h"
 #include "Build_FinalIntegrationOrchestrator.generated.h"
 
-UENUM(BlueprintType)
-enum class EBuild_IntegrationStatus : uint8
-{
-    Pending     UMETA(DisplayName = "Pending"),
-    InProgress  UMETA(DisplayName = "In Progress"),
-    Complete    UMETA(DisplayName = "Complete"),
-    Failed      UMETA(DisplayName = "Failed")
-};
-
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FBuild_SystemValidationResult
+struct TRANSPERSONALGAME_API FBuild_SystemStatus
 {
     GENERATED_BODY()
 
@@ -25,20 +20,46 @@ struct TRANSPERSONALGAME_API FBuild_SystemValidationResult
     FString SystemName;
 
     UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    bool bIsValid;
+    bool bIsOperational;
 
     UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    FString ValidationMessage;
+    int32 ComponentCount;
 
     UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    float ValidationTime;
+    FString LastValidationTime;
 
-    FBuild_SystemValidationResult()
+    FBuild_SystemStatus()
     {
-        SystemName = TEXT("");
-        bIsValid = false;
-        ValidationMessage = TEXT("");
-        ValidationTime = 0.0f;
+        SystemName = TEXT("Unknown");
+        bIsOperational = false;
+        ComponentCount = 0;
+        LastValidationTime = TEXT("Never");
+    }
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FBuild_BiomeStatus
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    FString BiomeName;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    FVector BiomeCenter;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    int32 ActorCount;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    bool bMeetsPopulationTarget;
+
+    FBuild_BiomeStatus()
+    {
+        BiomeName = TEXT("Unknown");
+        BiomeCenter = FVector::ZeroVector;
+        ActorCount = 0;
+        bMeetsPopulationTarget = false;
     }
 };
 
@@ -48,32 +69,35 @@ struct TRANSPERSONALGAME_API FBuild_IntegrationReport
     GENERATED_BODY()
 
     UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    TArray<FBuild_SystemValidationResult> SystemResults;
+    TArray<FBuild_SystemStatus> SystemStatuses;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    TArray<FBuild_BiomeStatus> BiomeStatuses;
 
     UPROPERTY(BlueprintReadOnly, Category = "Integration")
     int32 TotalActorCount;
 
     UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    int32 ValidSystemCount;
+    bool bBuildStable;
 
     UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    float TotalIntegrationTime;
+    FString BuildVersion;
 
     UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    EBuild_IntegrationStatus OverallStatus;
+    FDateTime LastIntegrationTime;
 
     FBuild_IntegrationReport()
     {
         TotalActorCount = 0;
-        ValidSystemCount = 0;
-        TotalIntegrationTime = 0.0f;
-        OverallStatus = EBuild_IntegrationStatus::Pending;
+        bBuildStable = false;
+        BuildVersion = TEXT("1.0.0");
+        LastIntegrationTime = FDateTime::Now();
     }
 };
 
 /**
- * Final Integration Orchestrator - Coordinates all game systems and validates build integrity
- * Responsible for ensuring all agent outputs work together cohesively
+ * Final Integration Orchestrator - Coordinates all game systems and validates build stability
+ * Responsible for ensuring all 18 agent outputs integrate into a cohesive, playable experience
  */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UBuild_FinalIntegrationOrchestrator : public UGameInstanceSubsystem
@@ -87,48 +111,99 @@ public:
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
+    // Core Integration Functions
     UFUNCTION(BlueprintCallable, Category = "Integration", CallInEditor = true)
-    void RunFullSystemIntegration();
+    FBuild_IntegrationReport GenerateIntegrationReport();
 
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    FBuild_IntegrationReport GetLastIntegrationReport() const { return LastIntegrationReport; }
+    UFUNCTION(BlueprintCallable, Category = "Integration", CallInEditor = true)
+    bool ValidateAllSystems();
 
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    bool ValidateWorldGeneration();
+    UFUNCTION(BlueprintCallable, Category = "Integration", CallInEditor = true)
+    bool ValidateBiomePopulation();
 
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    bool ValidateCharacterSystems();
+    UFUNCTION(BlueprintCallable, Category = "Integration", CallInEditor = true)
+    bool ValidateAssetPipeline();
 
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    bool ValidateLightingAndAtmosphere();
-
-    UFUNCTION(BlueprintCallable, Category = "Integration")
+    UFUNCTION(BlueprintCallable, Category = "Integration", CallInEditor = true)
     bool ValidateVFXSystems();
 
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    bool ValidateAudioSystems();
+    UFUNCTION(BlueprintCallable, Category = "Integration", CallInEditor = true)
+    bool ValidateLightingAndAtmosphere();
 
-    UFUNCTION(BlueprintCallable, Category = "Integration")
+    UFUNCTION(BlueprintCallable, Category = "Integration", CallInEditor = true)
+    bool ValidateCharacterSystems();
+
+    UFUNCTION(BlueprintCallable, Category = "Integration", CallInEditor = true)
+    bool ValidateDinosaurAI();
+
+    UFUNCTION(BlueprintCallable, Category = "Integration", CallInEditor = true)
     bool ValidatePhysicsAndCollision();
 
+    // System Monitoring
     UFUNCTION(BlueprintCallable, Category = "Integration")
-    bool ValidateQuestAndNarrative();
+    void StartContinuousMonitoring();
+
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    void StopContinuousMonitoring();
+
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    FBuild_SystemStatus GetSystemStatus(const FString& SystemName);
+
+    // Build Management
+    UFUNCTION(BlueprintCallable, Category = "Integration", CallInEditor = true)
+    bool CreateBuildSnapshot();
+
+    UFUNCTION(BlueprintCallable, Category = "Integration", CallInEditor = true)
+    bool RestoreFromSnapshot(const FString& SnapshotName);
+
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    TArray<FString> GetAvailableSnapshots();
 
 protected:
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    FBuild_IntegrationReport LastIntegrationReport;
+    // System validation helpers
+    FBuild_SystemStatus ValidateWorldGeneration();
+    FBuild_SystemStatus ValidateEnvironmentArt();
+    FBuild_SystemStatus ValidateArchitecture();
+    FBuild_SystemStatus ValidateAnimation();
+    FBuild_SystemStatus ValidateNPCBehavior();
+    FBuild_SystemStatus ValidateCombatAI();
+    FBuild_SystemStatus ValidateCrowdSimulation();
+    FBuild_SystemStatus ValidateQuestSystem();
+    FBuild_SystemStatus ValidateNarrative();
+    FBuild_SystemStatus ValidateAudioSystems();
 
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    bool bIntegrationInProgress;
+    // Biome validation helpers
+    FBuild_BiomeStatus ValidateSavanaBiome();
+    FBuild_BiomeStatus ValidatePantanoBiome();
+    FBuild_BiomeStatus ValidateFlorestaBiome();
+    FBuild_BiomeStatus ValidateDesertoBiome();
+    FBuild_BiomeStatus ValidateMontanhaBiome();
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration")
-    float ValidationTimeout;
+    // Internal state
+    UPROPERTY()
+    TMap<FString, FBuild_SystemStatus> CachedSystemStatuses;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration")
-    bool bVerboseLogging;
+    UPROPERTY()
+    TArray<FBuild_BiomeStatus> CachedBiomeStatuses;
+
+    UPROPERTY()
+    bool bMonitoringActive;
+
+    UPROPERTY()
+    FTimerHandle MonitoringTimerHandle;
+
+    // Configuration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration", meta = (AllowPrivateAccess = "true"))
+    float MonitoringInterval;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration", meta = (AllowPrivateAccess = "true"))
+    int32 MinimumBiomePopulation;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration", meta = (AllowPrivateAccess = "true"))
+    bool bAutoFixIssues;
 
 private:
-    void ValidateSystem(const FString& SystemName, TFunction<bool()> ValidationFunction);
-    void LogIntegrationResult(const FString& Message, bool bSuccess = true);
-    void ResetIntegrationReport();
+    void PerformMonitoringTick();
+    void LogIntegrationStatus(const FBuild_IntegrationReport& Report);
+    bool IsSystemCritical(const FString& SystemName);
 };
