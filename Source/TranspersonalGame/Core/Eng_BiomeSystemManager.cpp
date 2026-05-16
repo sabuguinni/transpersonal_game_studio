@@ -1,32 +1,37 @@
 #include "Eng_BiomeSystemManager.h"
-#include "Engine/World.h"
 #include "Engine/Engine.h"
-#include "Kismet/GameplayStatics.h"
+#include "Engine/World.h"
+#include "GameFramework/PlayerController.h"
+#include "GameFramework/Pawn.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMeshActor.h"
-#include "Math/UnrealMathUtility.h"
+#include "Kismet/GameplayStatics.h"
+#include "Kismet/KismetMathLibrary.h"
+#include "DrawDebugHelpers.h"
 
 AEng_BiomeSystemManager::AEng_BiomeSystemManager()
 {
     PrimaryActorTick.bCanEverTick = true;
     
-    // Default parameters
-    BiomeTransitionRadius = 5000.0f; // 50m transition zone
-    MaxAssetSpawnDistance = 50000.0f; // 500m spawn radius
-    TargetActorsPerBiome = 500; // Target from memory requirements
-    BiomeUpdateInterval = 2.0f; // Update every 2 seconds
-    BiomeUpdateTimer = 0.0f;
-    
+    // Initialize default values
+    BiomeTransitionRadius = 5000.0f;
+    MaxAssetSpawnDistance = 10000.0f;
+    TargetActorsPerBiome = 500;
     CurrentBiome = EBiomeType::Savana;
     LastPlayerLocation = FVector::ZeroVector;
+    BiomeUpdateTimer = 0.0f;
+    BiomeUpdateInterval = 2.0f; // Update every 2 seconds
+    
+    // Setup default biomes and environmental parameters
+    SetupDefaultBiomes();
+    SetupEnvironmentalParameters();
 }
 
 void AEng_BiomeSystemManager::BeginPlay()
 {
     Super::BeginPlay();
     
-    UE_LOG(LogTemp, Warning, TEXT("ENGINE ARCHITECT: BiomeSystemManager BeginPlay - Initializing biome system"));
-    
+    UE_LOG(LogTemp, Warning, TEXT("AEng_BiomeSystemManager::BeginPlay - Initializing biome system"));
     InitializeBiomeSystem();
 }
 
@@ -36,84 +41,81 @@ void AEng_BiomeSystemManager::Tick(float DeltaTime)
     
     BiomeUpdateTimer += DeltaTime;
     
+    // Update current biome based on player location every few seconds
     if (BiomeUpdateTimer >= BiomeUpdateInterval)
     {
         BiomeUpdateTimer = 0.0f;
         
-        // Get player location and update current biome
-        APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
-        if (PlayerPawn)
+        // Get player location
+        APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0);
+        if (PC && PC->GetPawn())
         {
-            FVector PlayerLocation = PlayerPawn->GetActorLocation();
+            FVector PlayerLocation = PC->GetPawn()->GetActorLocation();
             UpdateCurrentBiome(PlayerLocation);
         }
     }
-}
-
-void AEng_BiomeSystemManager::InitializeBiomeSystem()
-{
-    UE_LOG(LogTemp, Warning, TEXT("ENGINE ARCHITECT: Initializing biome system with 5 biomes"));
-    
-    SetupDefaultBiomes();
-    SetupEnvironmentalParameters();
-    
-    // Validate system after initialization
-    bool bSystemValid = ValidateBiomeSystem();
-    UE_LOG(LogTemp, Warning, TEXT("ENGINE ARCHITECT: Biome system validation: %s"), 
-           bSystemValid ? TEXT("PASSED") : TEXT("FAILED"));
 }
 
 void AEng_BiomeSystemManager::SetupDefaultBiomes()
 {
     BiomeDefinitions.Empty();
     
-    // Biome coordinates from memory ID 709
+    // Savana (Center) - Coordinates: (0, 0)
     FBiomeDefinition SavanaBiome;
     SavanaBiome.BiomeType = EBiomeType::Savana;
     SavanaBiome.CenterLocation = FVector(0.0f, 0.0f, 0.0f);
-    SavanaBiome.Radius = 25000.0f; // 250m radius
-    SavanaBiome.BiomeName = TEXT("Cretaceous Savanna");
+    SavanaBiome.Radius = 25000.0f;
+    SavanaBiome.BiomeName = TEXT("Cretaceous Savana");
+    SavanaBiome.Description = TEXT("Open grasslands with scattered acacia trees and rocky outcrops");
     BiomeDefinitions.Add(SavanaBiome);
     
+    // Pantano (Southwest) - Coordinates: (-50000, -45000)
     FBiomeDefinition PantanoBiome;
     PantanoBiome.BiomeType = EBiomeType::Pantano;
     PantanoBiome.CenterLocation = FVector(-50000.0f, -45000.0f, 0.0f);
-    PantanoBiome.Radius = 25000.0f;
-    PantanoBiome.BiomeName = TEXT("Cretaceous Swampland");
+    PantanoBiome.Radius = 20000.0f;
+    PantanoBiome.BiomeName = TEXT("Prehistoric Wetlands");
+    PantanoBiome.Description = TEXT("Swampy marshlands with dense vegetation and standing water");
     BiomeDefinitions.Add(PantanoBiome);
     
+    // Floresta (Northwest) - Coordinates: (-45000, 40000)
     FBiomeDefinition FlorestaBiome;
     FlorestaBiome.BiomeType = EBiomeType::Floresta;
     FlorestaBiome.CenterLocation = FVector(-45000.0f, 40000.0f, 0.0f);
-    FlorestaBiome.Radius = 25000.0f;
+    FlorestaBiome.Radius = 22000.0f;
     FlorestaBiome.BiomeName = TEXT("Cretaceous Forest");
+    FlorestaBiome.Description = TEXT("Dense coniferous and fern forests with towering trees");
     BiomeDefinitions.Add(FlorestaBiome);
     
+    // Deserto (East) - Coordinates: (55000, 0)
     FBiomeDefinition DesertoBiome;
     DesertoBiome.BiomeType = EBiomeType::Deserto;
     DesertoBiome.CenterLocation = FVector(55000.0f, 0.0f, 0.0f);
-    DesertoBiome.Radius = 25000.0f;
-    DesertoBiome.BiomeName = TEXT("Cretaceous Desert");
+    DesertoBiome.Radius = 18000.0f;
+    DesertoBiome.BiomeName = TEXT("Arid Badlands");
+    DesertoBiome.Description = TEXT("Rocky desert with sparse vegetation and extreme temperatures");
     BiomeDefinitions.Add(DesertoBiome);
     
+    // Montanha (Northeast) - Coordinates: (40000, 50000)
     FBiomeDefinition MontanhaBiome;
     MontanhaBiome.BiomeType = EBiomeType::Montanha;
     MontanhaBiome.CenterLocation = FVector(40000.0f, 50000.0f, 0.0f);
-    MontanhaBiome.Radius = 25000.0f;
-    MontanhaBiome.BiomeName = TEXT("Cretaceous Mountains");
+    MontanhaBiome.Radius = 15000.0f;
+    MontanhaBiome.BiomeName = TEXT("Volcanic Highlands");
+    MontanhaBiome.Description = TEXT("Mountainous terrain with volcanic activity and rocky peaks");
     BiomeDefinitions.Add(MontanhaBiome);
     
-    UE_LOG(LogTemp, Warning, TEXT("ENGINE ARCHITECT: Setup %d biome definitions"), BiomeDefinitions.Num());
+    UE_LOG(LogTemp, Warning, TEXT("AEng_BiomeSystemManager: Setup %d default biomes"), BiomeDefinitions.Num());
 }
 
 void AEng_BiomeSystemManager::SetupEnvironmentalParameters()
 {
-    // Temperature ranges (Celsius) - Cretaceous period was warmer
+    // Temperature ranges (Celsius)
     BiomeTemperatureRanges.Add(EBiomeType::Savana, FVector2D(25.0f, 35.0f));
-    BiomeTemperatureRanges.Add(EBiomeType::Pantano, FVector2D(28.0f, 38.0f));
-    BiomeTemperatureRanges.Add(EBiomeType::Floresta, FVector2D(22.0f, 32.0f));
+    BiomeTemperatureRanges.Add(EBiomeType::Pantano, FVector2D(22.0f, 30.0f));
+    BiomeTemperatureRanges.Add(EBiomeType::Floresta, FVector2D(18.0f, 28.0f));
     BiomeTemperatureRanges.Add(EBiomeType::Deserto, FVector2D(30.0f, 45.0f));
-    BiomeTemperatureRanges.Add(EBiomeType::Montanha, FVector2D(15.0f, 25.0f));
+    BiomeTemperatureRanges.Add(EBiomeType::Montanha, FVector2D(10.0f, 20.0f));
     
     // Humidity levels (0-1)
     BiomeHumidityLevels.Add(EBiomeType::Savana, 0.4f);
@@ -122,15 +124,38 @@ void AEng_BiomeSystemManager::SetupEnvironmentalParameters()
     BiomeHumidityLevels.Add(EBiomeType::Deserto, 0.1f);
     BiomeHumidityLevels.Add(EBiomeType::Montanha, 0.6f);
     
-    // Danger levels (0-1) - based on dinosaur populations
-    BiomeDangerLevels.Add(EBiomeType::Savana, 0.5f); // Moderate - mixed herbivores/carnivores
-    BiomeDangerLevels.Add(EBiomeType::Pantano, 0.8f); // High - crocodilians and predators
-    BiomeDangerLevels.Add(EBiomeType::Floresta, 0.7f); // High - dense predator territory
-    BiomeDangerLevels.Add(EBiomeType::Deserto, 0.3f); // Low - sparse populations
-    BiomeDangerLevels.Add(EBiomeType::Montanha, 0.4f); // Moderate - territorial species
+    // Danger levels (0-1)
+    BiomeDangerLevels.Add(EBiomeType::Savana, 0.5f);
+    BiomeDangerLevels.Add(EBiomeType::Pantano, 0.8f);
+    BiomeDangerLevels.Add(EBiomeType::Floresta, 0.7f);
+    BiomeDangerLevels.Add(EBiomeType::Deserto, 0.9f);
+    BiomeDangerLevels.Add(EBiomeType::Montanha, 0.6f);
+}
+
+void AEng_BiomeSystemManager::InitializeBiomeSystem()
+{
+    UE_LOG(LogTemp, Warning, TEXT("AEng_BiomeSystemManager::InitializeBiomeSystem - Starting initialization"));
     
-    UE_LOG(LogTemp, Warning, TEXT("ENGINE ARCHITECT: Setup environmental parameters for %d biomes"), 
-           BiomeTemperatureRanges.Num());
+    // Clear existing spawned actors
+    for (auto& BiomeActorPair : SpawnedBiomeActors)
+    {
+        for (AActor* Actor : BiomeActorPair.Value)
+        {
+            if (IsValid(Actor))
+            {
+                Actor->Destroy();
+            }
+        }
+    }
+    SpawnedBiomeActors.Empty();
+    
+    // Initialize spawned actor arrays for each biome
+    for (const FBiomeDefinition& Biome : BiomeDefinitions)
+    {
+        SpawnedBiomeActors.Add(Biome.BiomeType, TArray<AActor*>());
+    }
+    
+    UE_LOG(LogTemp, Warning, TEXT("AEng_BiomeSystemManager: Biome system initialized with %d biomes"), BiomeDefinitions.Num());
 }
 
 EBiomeType AEng_BiomeSystemManager::GetBiomeAtLocation(FVector WorldLocation)
@@ -140,15 +165,7 @@ EBiomeType AEng_BiomeSystemManager::GetBiomeAtLocation(FVector WorldLocation)
     
     for (const FBiomeDefinition& Biome : BiomeDefinitions)
     {
-        float Distance = FVector::Dist(WorldLocation, Biome.CenterLocation);
-        
-        // If within biome radius, return immediately
-        if (Distance <= Biome.Radius)
-        {
-            return Biome.BiomeType;
-        }
-        
-        // Track closest biome for fallback
+        float Distance = FVector::Dist2D(WorldLocation, Biome.CenterLocation);
         if (Distance < MinDistance)
         {
             MinDistance = Distance;
@@ -165,20 +182,15 @@ float AEng_BiomeSystemManager::GetDistanceToBiomeCenter(FVector WorldLocation, E
     {
         if (Biome.BiomeType == BiomeType)
         {
-            return FVector::Dist(WorldLocation, Biome.CenterLocation);
+            return FVector::Dist2D(WorldLocation, Biome.CenterLocation);
         }
     }
-    
     return -1.0f; // Biome not found
 }
 
 void AEng_BiomeSystemManager::SpawnBiomeAssets(EBiomeType BiomeType, int32 AssetCount)
 {
-    UE_LOG(LogTemp, Warning, TEXT("ENGINE ARCHITECT: Spawning %d assets for biome %d"), 
-           AssetCount, (int32)BiomeType);
-    
-    // Clear existing assets first
-    ClearBiomeAssets(BiomeType);
+    UE_LOG(LogTemp, Warning, TEXT("AEng_BiomeSystemManager::SpawnBiomeAssets - Spawning %d assets for biome %d"), AssetCount, (int32)BiomeType);
     
     // Find biome definition
     FBiomeDefinition* BiomeDef = nullptr;
@@ -193,95 +205,123 @@ void AEng_BiomeSystemManager::SpawnBiomeAssets(EBiomeType BiomeType, int32 Asset
     
     if (!BiomeDef)
     {
-        UE_LOG(LogTemp, Error, TEXT("ENGINE ARCHITECT: Biome definition not found for type %d"), (int32)BiomeType);
+        UE_LOG(LogTemp, Error, TEXT("AEng_BiomeSystemManager::SpawnBiomeAssets - Biome definition not found for type %d"), (int32)BiomeType);
         return;
     }
     
-    TArray<AActor*> NewSpawnedActors;
+    // Clear existing assets for this biome
+    ClearBiomeAssets(BiomeType);
     
-    // Spawn basic placeholder assets (will be replaced with real assets later)
+    // Get or create spawned actors array for this biome
+    if (!SpawnedBiomeActors.Contains(BiomeType))
+    {
+        SpawnedBiomeActors.Add(BiomeType, TArray<AActor*>());
+    }
+    
+    TArray<AActor*>& BiomeActors = SpawnedBiomeActors[BiomeType];
+    
+    // Spawn placeholder assets (basic shapes for now)
     for (int32 i = 0; i < AssetCount; i++)
     {
         FVector SpawnLocation = GetRandomSpawnLocationInBiome(BiomeType);
         
         if (IsValidSpawnLocation(SpawnLocation))
         {
-            // Spawn basic static mesh actor as placeholder
-            AStaticMeshActor* SpawnedActor = GetWorld()->SpawnActor<AStaticMeshActor>(
-                AStaticMeshActor::StaticClass(),
-                SpawnLocation,
-                FRotator::ZeroRotator
-            );
+            // Create a basic static mesh actor as placeholder
+            AStaticMeshActor* SpawnedActor = GetWorld()->SpawnActor<AStaticMeshActor>(AStaticMeshActor::StaticClass(), SpawnLocation, FRotator::ZeroRotator);
             
             if (SpawnedActor)
             {
-                SpawnedActor->SetActorLabel(FString::Printf(TEXT("BiomeAsset_%s_%d"), 
-                    *UEnum::GetValueAsString(BiomeType), i));
-                NewSpawnedActors.Add(SpawnedActor);
+                // Set a basic cube mesh as placeholder
+                UStaticMeshComponent* MeshComp = SpawnedActor->GetStaticMeshComponent();
+                if (MeshComp)
+                {
+                    // Try to load a basic cube mesh
+                    UStaticMesh* CubeMesh = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube"));
+                    if (CubeMesh)
+                    {
+                        MeshComp->SetStaticMesh(CubeMesh);
+                        
+                        // Scale based on biome type
+                        float Scale = 1.0f;
+                        switch (BiomeType)
+                        {
+                            case EBiomeType::Savana:
+                                Scale = FMath::RandRange(0.5f, 2.0f); // Rocks and small trees
+                                break;
+                            case EBiomeType::Floresta:
+                                Scale = FMath::RandRange(1.0f, 4.0f); // Large trees
+                                break;
+                            case EBiomeType::Pantano:
+                                Scale = FMath::RandRange(0.3f, 1.5f); // Swamp vegetation
+                                break;
+                            case EBiomeType::Deserto:
+                                Scale = FMath::RandRange(0.2f, 1.0f); // Sparse rocks
+                                break;
+                            case EBiomeType::Montanha:
+                                Scale = FMath::RandRange(1.5f, 5.0f); // Large rocks and boulders
+                                break;
+                        }
+                        
+                        SpawnedActor->SetActorScale3D(FVector(Scale));
+                    }
+                }
+                
+                // Set actor label for identification
+                FString ActorLabel = FString::Printf(TEXT("%s_Asset_%d"), *UEnum::GetValueAsString(BiomeType), i);
+                SpawnedActor->SetActorLabel(ActorLabel);
+                
+                BiomeActors.Add(SpawnedActor);
             }
         }
     }
     
-    SpawnedBiomeActors.Add(BiomeType, NewSpawnedActors);
-    
-    UE_LOG(LogTemp, Warning, TEXT("ENGINE ARCHITECT: Successfully spawned %d assets for biome %s"), 
-           NewSpawnedActors.Num(), *UEnum::GetValueAsString(BiomeType));
+    UE_LOG(LogTemp, Warning, TEXT("AEng_BiomeSystemManager: Spawned %d assets for biome %s"), BiomeActors.Num(), *UEnum::GetValueAsString(BiomeType));
 }
 
 void AEng_BiomeSystemManager::ClearBiomeAssets(EBiomeType BiomeType)
 {
-    if (TArray<AActor*>* ExistingActors = SpawnedBiomeActors.Find(BiomeType))
+    if (SpawnedBiomeActors.Contains(BiomeType))
     {
-        int32 ClearedCount = 0;
-        for (AActor* Actor : *ExistingActors)
+        TArray<AActor*>& BiomeActors = SpawnedBiomeActors[BiomeType];
+        
+        for (AActor* Actor : BiomeActors)
         {
             if (IsValid(Actor))
             {
                 Actor->Destroy();
-                ClearedCount++;
             }
         }
         
-        ExistingActors->Empty();
-        UE_LOG(LogTemp, Warning, TEXT("ENGINE ARCHITECT: Cleared %d assets from biome %s"), 
-               ClearedCount, *UEnum::GetValueAsString(BiomeType));
+        BiomeActors.Empty();
+        UE_LOG(LogTemp, Warning, TEXT("AEng_BiomeSystemManager: Cleared assets for biome %s"), *UEnum::GetValueAsString(BiomeType));
     }
 }
 
 FBiomeEnvironmentalData AEng_BiomeSystemManager::GetBiomeEnvironmentalData(EBiomeType BiomeType)
 {
     FBiomeEnvironmentalData Data;
-    Data.BiomeType = BiomeType;
     
     // Get temperature range
-    if (FVector2D* TempRange = BiomeTemperatureRanges.Find(BiomeType))
+    if (BiomeTemperatureRanges.Contains(BiomeType))
     {
-        Data.Temperature = FMath::RandRange(TempRange->X, TempRange->Y);
-    }
-    else
-    {
-        Data.Temperature = 25.0f; // Default
+        FVector2D TempRange = BiomeTemperatureRanges[BiomeType];
+        Data.Temperature = FMath::RandRange(TempRange.X, TempRange.Y);
     }
     
     // Get humidity
-    if (float* Humidity = BiomeHumidityLevels.Find(BiomeType))
+    if (BiomeHumidityLevels.Contains(BiomeType))
     {
-        Data.Humidity = *Humidity;
-    }
-    else
-    {
-        Data.Humidity = 0.5f; // Default
+        Data.Humidity = BiomeHumidityLevels[BiomeType];
     }
     
     // Get danger level
-    if (float* Danger = BiomeDangerLevels.Find(BiomeType))
+    if (BiomeDangerLevels.Contains(BiomeType))
     {
-        Data.DangerLevel = *Danger;
+        Data.DangerLevel = BiomeDangerLevels[BiomeType];
     }
-    else
-    {
-        Data.DangerLevel = 0.5f; // Default
-    }
+    
+    Data.BiomeType = BiomeType;
     
     return Data;
 }
@@ -293,10 +333,9 @@ void AEng_BiomeSystemManager::UpdateCurrentBiome(FVector PlayerLocation)
     if (NewBiome != CurrentBiome)
     {
         CurrentBiome = NewBiome;
-        UE_LOG(LogTemp, Warning, TEXT("ENGINE ARCHITECT: Player entered biome: %s"), 
-               *UEnum::GetValueAsString(CurrentBiome));
+        UE_LOG(LogTemp, Warning, TEXT("AEng_BiomeSystemManager: Player entered biome: %s"), *UEnum::GetValueAsString(CurrentBiome));
         
-        // Trigger biome transition events here if needed
+        // Trigger biome change events here if needed
     }
     
     LastPlayerLocation = PlayerLocation;
@@ -306,31 +345,21 @@ bool AEng_BiomeSystemManager::ValidateBiomeSystem()
 {
     bool bIsValid = true;
     
-    // Check biome definitions
+    // Check if all biomes have definitions
     if (BiomeDefinitions.Num() != 5)
     {
-        UE_LOG(LogTemp, Error, TEXT("ENGINE ARCHITECT: Invalid biome count: %d (expected 5)"), 
-               BiomeDefinitions.Num());
+        UE_LOG(LogTemp, Error, TEXT("AEng_BiomeSystemManager: Expected 5 biomes, found %d"), BiomeDefinitions.Num());
         bIsValid = false;
     }
     
-    // Check environmental parameters
+    // Check if all environmental parameters are set
     if (BiomeTemperatureRanges.Num() != 5 || BiomeHumidityLevels.Num() != 5 || BiomeDangerLevels.Num() != 5)
     {
-        UE_LOG(LogTemp, Error, TEXT("ENGINE ARCHITECT: Incomplete environmental parameters"));
+        UE_LOG(LogTemp, Error, TEXT("AEng_BiomeSystemManager: Missing environmental parameters"));
         bIsValid = false;
     }
     
-    // Validate each biome has valid coordinates
-    for (const FBiomeDefinition& Biome : BiomeDefinitions)
-    {
-        if (Biome.Radius <= 0.0f)
-        {
-            UE_LOG(LogTemp, Error, TEXT("ENGINE ARCHITECT: Invalid radius for biome %s"), 
-                   *UEnum::GetValueAsString(Biome.BiomeType));
-            bIsValid = false;
-        }
-    }
+    UE_LOG(LogTemp, Warning, TEXT("AEng_BiomeSystemManager: Validation %s"), bIsValid ? TEXT("PASSED") : TEXT("FAILED"));
     
     return bIsValid;
 }
@@ -339,21 +368,23 @@ FString AEng_BiomeSystemManager::GetBiomeSystemStatus()
 {
     FString Status = TEXT("=== BIOME SYSTEM STATUS ===\n");
     
+    Status += FString::Printf(TEXT("Total Biomes: %d\n"), BiomeDefinitions.Num());
     Status += FString::Printf(TEXT("Current Biome: %s\n"), *UEnum::GetValueAsString(CurrentBiome));
-    Status += FString::Printf(TEXT("Biome Definitions: %d/5\n"), BiomeDefinitions.Num());
-    Status += FString::Printf(TEXT("Environmental Parameters: %d/5\n"), BiomeTemperatureRanges.Num());
     
-    // Asset counts per biome
-    Status += TEXT("\nAsset Counts:\n");
-    for (const auto& BiomeActors : SpawnedBiomeActors)
+    for (const FBiomeDefinition& Biome : BiomeDefinitions)
     {
-        Status += FString::Printf(TEXT("  %s: %d actors\n"), 
-            *UEnum::GetValueAsString(BiomeActors.Key), 
-            BiomeActors.Value.Num());
+        int32 ActorCount = 0;
+        if (SpawnedBiomeActors.Contains(Biome.BiomeType))
+        {
+            ActorCount = SpawnedBiomeActors[Biome.BiomeType].Num();
+        }
+        
+        Status += FString::Printf(TEXT("%s: %d actors at (%.0f, %.0f)\n"), 
+            *UEnum::GetValueAsString(Biome.BiomeType), 
+            ActorCount,
+            Biome.CenterLocation.X, 
+            Biome.CenterLocation.Y);
     }
-    
-    Status += FString::Printf(TEXT("\nSystem Valid: %s\n"), 
-        ValidateBiomeSystem() ? TEXT("YES") : TEXT("NO"));
     
     return Status;
 }
@@ -362,17 +393,9 @@ TMap<EBiomeType, int32> AEng_BiomeSystemManager::GetSpawnedActorCounts()
 {
     TMap<EBiomeType, int32> Counts;
     
-    for (const auto& BiomeActors : SpawnedBiomeActors)
+    for (const auto& BiomeActorPair : SpawnedBiomeActors)
     {
-        int32 ValidCount = 0;
-        for (AActor* Actor : BiomeActors.Value)
-        {
-            if (IsValid(Actor))
-            {
-                ValidCount++;
-            }
-        }
-        Counts.Add(BiomeActors.Key, ValidCount);
+        Counts.Add(BiomeActorPair.Key, BiomeActorPair.Value.Num());
     }
     
     return Counts;
@@ -380,17 +403,18 @@ TMap<EBiomeType, int32> AEng_BiomeSystemManager::GetSpawnedActorCounts()
 
 FVector AEng_BiomeSystemManager::GetRandomSpawnLocationInBiome(EBiomeType BiomeType)
 {
+    // Find biome definition
     for (const FBiomeDefinition& Biome : BiomeDefinitions)
     {
         if (Biome.BiomeType == BiomeType)
         {
             // Generate random point within biome radius
-            float RandomAngle = FMath::RandRange(0.0f, 2.0f * PI);
-            float RandomRadius = FMath::RandRange(0.0f, Biome.Radius * 0.8f); // Stay within 80% of radius
+            float RandomAngle = FMath::RandRange(0.0f, 360.0f);
+            float RandomDistance = FMath::RandRange(0.0f, Biome.Radius * 0.8f); // Stay within 80% of radius
             
             FVector Offset = FVector(
-                FMath::Cos(RandomAngle) * RandomRadius,
-                FMath::Sin(RandomAngle) * RandomRadius,
+                FMath::Cos(FMath::DegreesToRadians(RandomAngle)) * RandomDistance,
+                FMath::Sin(FMath::DegreesToRadians(RandomAngle)) * RandomDistance,
                 0.0f
             );
             
@@ -403,25 +427,25 @@ FVector AEng_BiomeSystemManager::GetRandomSpawnLocationInBiome(EBiomeType BiomeT
 
 bool AEng_BiomeSystemManager::IsValidSpawnLocation(FVector Location)
 {
-    // Basic validation - can be expanded with terrain checks
-    UWorld* World = GetWorld();
-    if (!World)
+    // Basic validation - check if location is not too close to existing actors
+    // This is a simplified implementation
+    
+    if (!GetWorld())
     {
         return false;
     }
     
-    // Check for overlapping actors (simple radius check)
+    // Check for overlapping actors in a small radius
     TArray<AActor*> OverlappingActors;
     UKismetSystemLibrary::SphereOverlapActors(
-        World,
+        GetWorld(),
         Location,
-        500.0f, // 5m radius
+        100.0f, // 1 meter radius
         TArray<TEnumAsByte<EObjectTypeQuery>>(),
-        nullptr,
+        AStaticMeshActor::StaticClass(),
         TArray<AActor*>(),
         OverlappingActors
     );
     
-    // Allow spawn if few overlapping actors
-    return OverlappingActors.Num() < 3;
+    return OverlappingActors.Num() == 0;
 }
