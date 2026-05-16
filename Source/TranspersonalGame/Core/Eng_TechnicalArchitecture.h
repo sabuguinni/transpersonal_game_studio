@@ -3,101 +3,157 @@
 #include "CoreMinimal.h"
 #include "Engine/GameInstanceSubsystem.h"
 #include "Engine/World.h"
-#include "Components/ActorComponent.h"
+#include "GameFramework/GameModeBase.h"
+#include "../SharedTypes.h"
 #include "Eng_TechnicalArchitecture.generated.h"
-
-/**
- * Engine Architect Technical Framework
- * Defines the core technical architecture rules and systems for the Transpersonal Game
- * This system enforces compilation rules, module dependencies, and performance standards
- */
 
 UENUM(BlueprintType)
 enum class EEng_ModuleType : uint8
 {
-    Core = 0,
-    WorldGeneration = 1,
-    CharacterSystems = 2,
-    AI_Behavior = 3,
-    Combat = 4,
-    Audio = 5,
-    VFX = 6,
-    UI = 7,
-    Performance = 8,
-    Integration = 9
+    Core            UMETA(DisplayName = "Core"),
+    WorldGeneration UMETA(DisplayName = "World Generation"),
+    Environment     UMETA(DisplayName = "Environment"),
+    Character       UMETA(DisplayName = "Character"),
+    AI              UMETA(DisplayName = "AI"),
+    Combat          UMETA(DisplayName = "Combat"),
+    Audio           UMETA(DisplayName = "Audio"),
+    VFX             UMETA(DisplayName = "VFX"),
+    UI              UMETA(DisplayName = "UI"),
+    Performance     UMETA(DisplayName = "Performance")
 };
 
 UENUM(BlueprintType)
-enum class EEng_PerformanceLevel : uint8
+enum class EEng_MemoryBudget : uint8
 {
-    Critical = 0,    // Must maintain 60fps
-    High = 1,        // Should maintain 45fps
-    Medium = 2,      // Should maintain 30fps
-    Low = 3          // Can drop to 20fps temporarily
+    Critical        UMETA(DisplayName = "Critical - 512MB"),
+    High            UMETA(DisplayName = "High - 256MB"),
+    Medium          UMETA(DisplayName = "Medium - 128MB"),
+    Low             UMETA(DisplayName = "Low - 64MB"),
+    Minimal         UMETA(DisplayName = "Minimal - 32MB")
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEng_ModuleSpec
+struct FEng_ModuleSpec
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Module")
-    FString ModuleName;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Module")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Module Spec")
     EEng_ModuleType ModuleType;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Module")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Module Spec")
+    FString ModuleName;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Module Spec")
     TArray<FString> Dependencies;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    EEng_PerformanceLevel PerformanceRequirement;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Module Spec")
+    EEng_MemoryBudget MemoryBudget;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    int32 MaxActorsPerFrame;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Module Spec")
+    int32 MaxActorsPerBiome;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float MaxFrameTimeMs;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Module Spec")
+    float TargetFrameTime;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Module Spec")
+    bool bRequiresWorldPartition;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Module Spec")
+    TArray<FString> AllowedAssetTypes;
 
     FEng_ModuleSpec()
     {
-        ModuleName = TEXT("");
         ModuleType = EEng_ModuleType::Core;
-        PerformanceRequirement = EEng_PerformanceLevel::Medium;
-        MaxActorsPerFrame = 1000;
-        MaxFrameTimeMs = 16.67f; // 60fps target
+        ModuleName = TEXT("");
+        MemoryBudget = EEng_MemoryBudget::Medium;
+        MaxActorsPerBiome = 500;
+        TargetFrameTime = 16.67f; // 60 FPS
+        bRequiresWorldPartition = false;
     }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEng_CompilationRule
+struct FEng_PerformanceRule
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Compilation")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance Rule")
     FString RuleName;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Compilation")
-    FString Description;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance Rule")
+    EEng_ModuleType ApplicableModule;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Compilation")
-    bool bIsMandatory;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance Rule")
+    int32 MaxTriangles;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Compilation")
-    FString ViolationMessage;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance Rule")
+    int32 MaxTextureSize;
 
-    FEng_CompilationRule()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance Rule")
+    float MaxDrawDistance;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance Rule")
+    bool bRequiresLOD;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance Rule")
+    int32 LODLevels;
+
+    FEng_PerformanceRule()
     {
         RuleName = TEXT("");
-        Description = TEXT("");
-        bIsMandatory = true;
-        ViolationMessage = TEXT("");
+        ApplicableModule = EEng_ModuleType::Core;
+        MaxTriangles = 10000;
+        MaxTextureSize = 2048;
+        MaxDrawDistance = 5000.0f;
+        bRequiresLOD = true;
+        LODLevels = 3;
+    }
+};
+
+USTRUCT(BlueprintType)
+struct FEng_BiomeArchitecture
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Architecture")
+    EBiomeType BiomeType;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Architecture")
+    FVector WorldCoordinates;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Architecture")
+    float BiomeRadius;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Architecture")
+    int32 MinActorCount;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Architecture")
+    int32 MaxActorCount;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Architecture")
+    TArray<FString> AllowedAssetCategories;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Architecture")
+    EEng_MemoryBudget MemoryAllocation;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Architecture")
+    bool bRequiresStreamingLOD;
+
+    FEng_BiomeArchitecture()
+    {
+        BiomeType = EBiomeType::Savanna;
+        WorldCoordinates = FVector::ZeroVector;
+        BiomeRadius = 200000.0f; // 2km radius
+        MinActorCount = 500;
+        MaxActorCount = 2000;
+        MemoryAllocation = EEng_MemoryBudget::Medium;
+        bRequiresStreamingLOD = true;
     }
 };
 
 /**
- * Technical Architecture Manager
- * Enforces technical standards and validates system compliance
+ * Technical Architecture Manager - Defines and enforces technical rules for all game systems
+ * This is the central authority for performance budgets, memory management, and module dependencies
  */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UEng_TechnicalArchitecture : public UGameInstanceSubsystem
@@ -107,111 +163,120 @@ class TRANSPERSONALGAME_API UEng_TechnicalArchitecture : public UGameInstanceSub
 public:
     UEng_TechnicalArchitecture();
 
-    // Subsystem interface
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
-    // Module Management
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    bool RegisterModule(const FEng_ModuleSpec& ModuleSpec);
-
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    bool ValidateModuleDependencies(const FString& ModuleName);
-
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    TArray<FString> GetModuleLoadOrder();
-
-    // Compilation Rules
-    UFUNCTION(BlueprintCallable, Category = "Compilation")
-    bool ValidateCompilationRules();
-
-    UFUNCTION(BlueprintCallable, Category = "Compilation")
-    TArray<FEng_CompilationRule> GetFailedRules();
-
-    // Performance Monitoring
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    bool CheckPerformanceCompliance();
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    float GetCurrentFrameTime();
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    int32 GetCurrentActorCount();
-
-    // Architecture Validation
-    UFUNCTION(BlueprintCallable, Category = "Validation")
-    bool ValidateSystemArchitecture();
-
-    UFUNCTION(BlueprintCallable, Category = "Validation")
-    TArray<FString> GetArchitectureWarnings();
-
-    // Debug and Diagnostics
-    UFUNCTION(BlueprintCallable, Category = "Debug", CallInEditor = true)
-    void RunArchitectureDiagnostics();
-
-    UFUNCTION(BlueprintCallable, Category = "Debug")
-    void LogModuleStatus();
-
 protected:
-    UPROPERTY(BlueprintReadOnly, Category = "Modules")
-    TArray<FEng_ModuleSpec> RegisteredModules;
+    // Core Architecture Data
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Technical Architecture")
+    TArray<FEng_ModuleSpec> ModuleSpecifications;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Rules")
-    TArray<FEng_CompilationRule> CompilationRules;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Technical Architecture")
+    TArray<FEng_PerformanceRule> PerformanceRules;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float TargetFrameRate;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Technical Architecture")
+    TArray<FEng_BiomeArchitecture> BiomeArchitectures;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    int32 MaxWorldActors;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Technical Architecture")
+    FString ProjectVersion;
 
-private:
-    void InitializeCompilationRules();
-    void InitializeDefaultModules();
-    bool ValidateModuleSpec(const FEng_ModuleSpec& ModuleSpec);
-    void UpdatePerformanceMetrics();
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Technical Architecture")
+    float WorldSizeKm;
 
-    // Performance tracking
-    float LastFrameTime;
-    int32 LastActorCount;
-    TArray<FString> ArchitectureWarnings;
-};
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Technical Architecture")
+    bool bWorldPartitionEnabled;
 
-/**
- * Technical Standards Component
- * Can be attached to any actor to enforce technical compliance
- */
-UCLASS(BlueprintType, Blueprintable, ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UEng_TechnicalStandardsComponent : public UActorComponent
-{
-    GENERATED_BODY()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Technical Architecture")
+    int32 MaxConcurrentActors;
 
 public:
-    UEng_TechnicalStandardsComponent();
+    // Module Management
+    UFUNCTION(BlueprintCallable, Category = "Technical Architecture")
+    void RegisterModule(const FEng_ModuleSpec& ModuleSpec);
 
-    virtual void BeginPlay() override;
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+    UFUNCTION(BlueprintCallable, Category = "Technical Architecture")
+    FEng_ModuleSpec GetModuleSpec(EEng_ModuleType ModuleType);
 
-    UFUNCTION(BlueprintCallable, Category = "Standards")
-    bool ValidateActorCompliance();
+    UFUNCTION(BlueprintCallable, Category = "Technical Architecture")
+    bool ValidateModuleDependencies(EEng_ModuleType ModuleType);
 
-    UFUNCTION(BlueprintCallable, Category = "Standards")
-    void EnforcePerformanceStandards();
+    UFUNCTION(BlueprintCallable, Category = "Technical Architecture")
+    TArray<FString> GetModuleDependencies(EEng_ModuleType ModuleType);
 
-protected:
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    EEng_PerformanceLevel RequiredPerformanceLevel;
+    // Performance Management
+    UFUNCTION(BlueprintCallable, Category = "Technical Architecture")
+    void AddPerformanceRule(const FEng_PerformanceRule& Rule);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float MaxTickTime;
+    UFUNCTION(BlueprintCallable, Category = "Technical Architecture")
+    FEng_PerformanceRule GetPerformanceRule(EEng_ModuleType ModuleType);
 
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    bool bIsCompliant;
+    UFUNCTION(BlueprintCallable, Category = "Technical Architecture")
+    bool ValidateAssetPerformance(const FString& AssetPath, EEng_ModuleType ModuleType);
+
+    UFUNCTION(BlueprintCallable, Category = "Technical Architecture")
+    int32 GetMaxTrianglesForModule(EEng_ModuleType ModuleType);
+
+    // Biome Architecture Management
+    UFUNCTION(BlueprintCallable, Category = "Technical Architecture")
+    void SetupBiomeArchitecture(EBiomeType BiomeType, FVector Coordinates, float Radius);
+
+    UFUNCTION(BlueprintCallable, Category = "Technical Architecture")
+    FEng_BiomeArchitecture GetBiomeArchitecture(EBiomeType BiomeType);
+
+    UFUNCTION(BlueprintCallable, Category = "Technical Architecture")
+    bool CanSpawnActorInBiome(EBiomeType BiomeType, const FString& AssetCategory);
+
+    UFUNCTION(BlueprintCallable, Category = "Technical Architecture")
+    int32 GetActorBudgetForBiome(EBiomeType BiomeType);
+
+    // Memory Management
+    UFUNCTION(BlueprintCallable, Category = "Technical Architecture")
+    float GetMemoryBudgetMB(EEng_MemoryBudget BudgetType);
+
+    UFUNCTION(BlueprintCallable, Category = "Technical Architecture")
+    bool CheckMemoryUsage(EEng_ModuleType ModuleType);
+
+    UFUNCTION(BlueprintCallable, Category = "Technical Architecture")
+    void OptimizeMemoryForBiome(EBiomeType BiomeType);
+
+    // World Management
+    UFUNCTION(BlueprintCallable, Category = "Technical Architecture")
+    void SetWorldSize(float SizeInKm);
+
+    UFUNCTION(BlueprintCallable, Category = "Technical Architecture")
+    bool ShouldUseWorldPartition();
+
+    UFUNCTION(BlueprintCallable, Category = "Technical Architecture")
+    FVector GetWorldBounds();
+
+    // Agent Communication Rules
+    UFUNCTION(BlueprintCallable, Category = "Technical Architecture")
+    TArray<int32> GetAllowedAgentsForModule(EEng_ModuleType ModuleType);
+
+    UFUNCTION(BlueprintCallable, Category = "Technical Architecture")
+    bool CanAgentModifyModule(int32 AgentNumber, EEng_ModuleType ModuleType);
+
+    UFUNCTION(BlueprintCallable, Category = "Technical Architecture")
+    void RegisterAgentActivity(int32 AgentNumber, EEng_ModuleType ModuleType, const FString& Activity);
+
+    // Validation and Enforcement
+    UFUNCTION(BlueprintCallable, Category = "Technical Architecture")
+    bool ValidateSystemArchitecture();
+
+    UFUNCTION(BlueprintCallable, Category = "Technical Architecture")
+    TArray<FString> GetArchitectureViolations();
+
+    UFUNCTION(BlueprintCallable, Category = "Technical Architecture")
+    FString GenerateArchitectureReport();
+
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Technical Architecture")
+    void RefreshArchitectureRules();
 
 private:
-    void CheckActorPerformance();
-    void ValidateComponentSetup();
-
-    float AccumulatedTickTime;
-    int32 TickCount;
+    void InitializeDefaultModules();
+    void InitializeDefaultPerformanceRules();
+    void InitializeDefaultBiomeArchitectures();
+    void ValidateWorldPartitionRequirements();
 };
+
+#include "Eng_TechnicalArchitecture.generated.h"
