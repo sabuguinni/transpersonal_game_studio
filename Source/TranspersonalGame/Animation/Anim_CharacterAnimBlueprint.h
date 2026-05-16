@@ -38,6 +38,12 @@ struct TRANSPERSONALGAME_API FAnim_MovementData
     UPROPERTY(BlueprintReadOnly, Category = "Movement")
     EAnim_MovementState MovementState;
 
+    UPROPERTY(BlueprintReadOnly, Category = "Movement")
+    FVector Velocity;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Movement")
+    float GroundSpeed;
+
     FAnim_MovementData()
     {
         Speed = 0.0f;
@@ -45,13 +51,14 @@ struct TRANSPERSONALGAME_API FAnim_MovementData
         bIsInAir = false;
         bIsCrouching = false;
         MovementState = EAnim_MovementState::Idle;
+        Velocity = FVector::ZeroVector;
+        GroundSpeed = 0.0f;
     }
 };
 
 /**
- * Animation Blueprint for TranspersonalCharacter
- * Handles state machine for idle, walk, run, jump animations
- * Implements Motion Matching principles for fluid movement
+ * Animation Blueprint class for TranspersonalCharacter
+ * Handles state machine transitions and movement-based animations
  */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UAnim_CharacterAnimBlueprint : public UAnimInstance
@@ -61,21 +68,22 @@ class TRANSPERSONALGAME_API UAnim_CharacterAnimBlueprint : public UAnimInstance
 public:
     UAnim_CharacterAnimBlueprint();
 
+protected:
+    // Animation update functions
     virtual void NativeInitializeAnimation() override;
     virtual void NativeUpdateAnimation(float DeltaTimeX) override;
 
-protected:
-    // Movement data for animation state machine
+    // Movement data
     UPROPERTY(BlueprintReadOnly, Category = "Animation", meta = (AllowPrivateAccess = "true"))
     FAnim_MovementData MovementData;
 
     // Character reference
     UPROPERTY(BlueprintReadOnly, Category = "Animation", meta = (AllowPrivateAccess = "true"))
-    class ACharacter* OwningCharacter;
+    ACharacter* OwnerCharacter;
 
     // Movement component reference
     UPROPERTY(BlueprintReadOnly, Category = "Animation", meta = (AllowPrivateAccess = "true"))
-    class UCharacterMovementComponent* MovementComponent;
+    UCharacterMovementComponent* MovementComponent;
 
     // Animation thresholds
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Thresholds")
@@ -85,17 +93,48 @@ protected:
     float RunSpeedThreshold;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Thresholds")
-    float JumpVelocityThreshold;
+    float IdleSpeedThreshold;
 
-    // Animation blending
-    UPROPERTY(BlueprintReadOnly, Category = "Animation Blending")
-    float IdleToWalkBlendTime;
+public:
+    // Animation state functions
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    void UpdateMovementState();
 
-    UPROPERTY(BlueprintReadOnly, Category = "Animation Blending")
-    float WalkToRunBlendTime;
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    bool ShouldPlayIdleAnimation() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    bool ShouldPlayWalkAnimation() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    bool ShouldPlayRunAnimation() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    bool ShouldPlayJumpAnimation() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    float GetMovementDirection() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    float GetMovementSpeed() const;
+
+    // Animation montage functions
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    void PlayJumpMontage();
+
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    void PlayLandMontage();
 
 private:
-    void UpdateMovementData();
-    void UpdateMovementState();
-    EAnim_MovementState CalculateMovementState() const;
+    // Internal state tracking
+    EAnim_MovementState PreviousMovementState;
+    float StateChangeTimer;
+    bool bWasInAir;
+    
+    // Animation assets
+    UPROPERTY(EditAnywhere, Category = "Animation Assets", meta = (AllowPrivateAccess = "true"))
+    UAnimMontage* JumpMontage;
+
+    UPROPERTY(EditAnywhere, Category = "Animation Assets", meta = (AllowPrivateAccess = "true"))
+    UAnimMontage* LandMontage;
 };
