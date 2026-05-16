@@ -1,516 +1,670 @@
 #include "Crowd_MassSimulationManager.h"
-#include "Crowd_EntitySpawner.h"
-#include "Crowd_PathfindingComponent.h"
-#include "Crowd_LODManager.h"
+#include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "GameFramework/PlayerController.h"
-#include "Kismet/GameplayStatics.h"
+#include "Components/StaticMeshComponent.h"
+#include "Components/SceneComponent.h"
+#include "MassEntitySubsystem.h"
+#include "MassSpawnerSubsystem.h"
 #include "NavigationSystem.h"
-#include "AI/NavigationSystemBase.h"
+#include "Navigation/PathFollowingComponent.h"
+#include "DrawDebugHelpers.h"
+#include "Kismet/GameplayStatics.h"
+#include "TimerManager.h"
 
-UCrowd_MassSimulationManager::UCrowd_MassSimulationManager()
+ACrowd_MassSimulationManager::ACrowd_MassSimulationManager()
 {
-    PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 0.1f; // 10Hz default tick rate
-    
-    // Initialize default values
-    MaxSimulationEntities = 50000;
-    TickRate = 10.0f;
-    CurrentPerformanceMode = ECrowd_PerformanceMode::Balanced;
-    MaxRenderDistance = 10000.0f;
-    bIsSimulationActive = false;
-    LastUpdateTime = 0.0f;
-    NextEntityID = 1;
-    LastPlayerLocation = FVector::ZeroVector;
-    AverageFrameTime = 0.0f;
-    FrameCounter = 0;
+    PrimaryActorTick.bCanEverTick = true;
+    PrimaryActorTick.TickInterval = 0.1f;
 
-    // Initialize LOD distances
-    LODDistances.SetNum(4);
-    LODDistances[0] = 1000.0f;  // High detail
-    LODDistances[1] = 3000.0f;  // Medium detail
-    LODDistances[2] = 7000.0f;  // Low detail
-    LODDistances[3] = 10000.0f; // Minimal detail
+    // Create root component
+    RootSceneComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootSceneComponent"));
+    RootComponent = RootSceneComponent;
+
+    // Create visualization mesh
+    VisualizationMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("VisualizationMesh"));
+    VisualizationMesh->SetupAttachment(RootComponent);
+    VisualizationMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    VisualizationMesh->SetVisibility(false);
 
     // Initialize default spawn parameters
-    DefaultSpawnParams.MaxEntities = 1000;
-    DefaultSpawnParams.SpawnRadius = 5000.0f;
-    DefaultSpawnParams.SpawnCenter = FVector::ZeroVector;
-    DefaultSpawnParams.MinDistanceBetweenEntities = 200.0f;
-    DefaultSpawnParams.EntityType = ECrowd_EntityType::Tribal;
+    DefaultSpawnParams.SpawnLocation = FVector::ZeroVector;
+    DefaultSpawnParams.SpawnRadius = 1000.0f;
+    DefaultSpawnParams.EntityCount = 50;
+    DefaultSpawnParams.BehaviorType = ECrowd_CrowdBehaviorType::Wandering;
+    DefaultSpawnParams.DensityLevel = ECrowd_CrowdDensity::Medium;
+    DefaultSpawnParams.MovementSpeed = 200.0f;
+    DefaultSpawnParams.DetectionRadius = 500.0f;
+    DefaultSpawnParams.bEnableLOD = true;
+    DefaultSpawnParams.LODDistance1 = 1000.0f;
+    DefaultSpawnParams.LODDistance2 = 2000.0f;
+    DefaultSpawnParams.LODDistance3 = 5000.0f;
+
+    // Initialize pathfinding configuration
+    PathfindingConfig.PathUpdateInterval = 2.0f;
+    PathfindingConfig.AcceptanceRadius = 100.0f;
+    PathfindingConfig.bUseNavMesh = true;
+    PathfindingConfig.bAvoidOtherEntities = true;
+    PathfindingConfig.AvoidanceRadius = 150.0f;
+
+    // Set default values
+    MaxEntityCount = 50000;
+    TickInterval = 0.1f;
+    bAutoSpawnOnBeginPlay = false;
+    bEnableDebugVisualization = false;
+    CurrentEntityCount = 0;
+    CurrentBehaviorType = ECrowd_CrowdBehaviorType::Wandering;
+    bIsInitialized = false;
+    bIsCombatMode = false;
+    LastFrameTime = 0.0f;
+    AverageFrameTime = 0.0f;
+    PerformanceSampleCount = 0;
 }
 
-void UCrowd_MassSimulationManager::BeginPlay()
+void ACrowd_MassSimulationManager::BeginPlay()
 {
     Super::BeginPlay();
-
-    // Create sub-components
-    PathfindingComponent = CreateDefaultSubobject<UCrowd_PathfindingComponent>(TEXT("PathfindingComponent"));
-    EntitySpawner = CreateDefaultSubobject<UCrowd_EntitySpawner>(TEXT("EntitySpawner"));
-    LODManager = CreateDefaultSubobject<UCrowd_LODManager>(TEXT("LODManager"));
-
-    // Initialize the mass simulation system
-    InitializeMassSimulation();
+    
+    InitializeMassEntitySystem();
+    
+    if (bAutoSpawnOnBeginPlay)
+    {
+        SpawnCrowdEntities(DefaultSpawnParams);
+    }
 
     UE_LOG(LogTemp, Log, TEXT("Crowd_MassSimulationManager: BeginPlay completed"));
 }
 
-void UCrowd_MassSimulationManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void ACrowd_MassSimulationManager::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+    DespawnAllEntities();
+    
+    MassEntitySubsystem = nullptr;
+    MassSpawnerSubsystem = nullptr;
+    
+    Super::EndPlay(EndPlayReason);
+}
 
-    if (!bIsSimulationActive)
+void ACrowd_MassSimulationManager::Tick(float DeltaTime)
+{
+    Super::Tick(DeltaTime);
+    
+    if (!bIsInitialized)
     {
         return;
     }
 
-    // Performance tracking
-    FrameCounter++;
-    AverageFrameTime = (AverageFrameTime * (FrameCounter - 1) + DeltaTime) / FrameCounter;
+    UpdatePerformanceMetrics(DeltaTime);
+    ProcessEntityBehaviors();
+    UpdateEntityLOD();
+    UpdatePathfinding();
+    HandleCombatEvents();
 
-    // Update player location for LOD calculations
-    if (APlayerController* PlayerController = UGameplayStatics::GetPlayerController(GetWorld(), 0))
+    if (bEnableDebugVisualization)
     {
-        if (APawn* PlayerPawn = PlayerController->GetPawn())
-        {
-            LastPlayerLocation = PlayerPawn->GetActorLocation();
-        }
-    }
-
-    // Update simulation systems
-    UpdateEntityMovement(DeltaTime);
-    UpdateEntityBehaviors(DeltaTime);
-    UpdateLODLevels(LastPlayerLocation);
-    ProcessEntityCollisions();
-
-    // Optimize entity distribution every 5 seconds
-    if (GetWorld()->GetTimeSeconds() - LastUpdateTime > 5.0f)
-    {
-        OptimizeEntityDistribution();
-        LastUpdateTime = GetWorld()->GetTimeSeconds();
+        DebugDrawCrowdInfo();
     }
 }
 
-void UCrowd_MassSimulationManager::InitializeMassSimulation()
+void ACrowd_MassSimulationManager::InitializeMassEntitySystem()
 {
-    if (!GetWorld())
+    UWorld* World = GetWorld();
+    if (!World)
     {
         UE_LOG(LogTemp, Error, TEXT("Crowd_MassSimulationManager: No valid world found"));
         return;
     }
 
-    // Clear existing entities
-    EntityDatabase.Empty();
-    NextEntityID = 1;
-
-    // Initialize navigation system integration
-    if (UNavigationSystemV1* NavSys = UNavigationSystemV1::GetCurrent(GetWorld()))
+    // Get Mass Entity subsystem
+    MassEntitySubsystem = World->GetSubsystem<UMassEntitySubsystem>();
+    if (!MassEntitySubsystem)
     {
-        UE_LOG(LogTemp, Log, TEXT("Crowd_MassSimulationManager: Navigation system found"));
-    }
-    else
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Crowd_MassSimulationManager: No navigation system found"));
+        UE_LOG(LogTemp, Error, TEXT("Crowd_MassSimulationManager: Failed to get MassEntitySubsystem"));
+        return;
     }
 
-    bIsSimulationActive = true;
-    UE_LOG(LogTemp, Log, TEXT("Crowd_MassSimulationManager: Mass simulation initialized"));
+    // Get Mass Spawner subsystem
+    MassSpawnerSubsystem = World->GetSubsystem<UMassSpawnerSubsystem>();
+    if (!MassSpawnerSubsystem)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Crowd_MassSimulationManager: MassSpawnerSubsystem not available"));
+    }
+
+    bIsInitialized = true;
+    UE_LOG(LogTemp, Log, TEXT("Crowd_MassSimulationManager: Mass Entity system initialized"));
 }
 
-void UCrowd_MassSimulationManager::SpawnEntityGroup(const FCrowd_SpawnParameters& SpawnParams)
+void ACrowd_MassSimulationManager::SpawnCrowdEntities(const FCrowd_EntitySpawnParams& SpawnParams)
 {
-    if (!bIsSimulationActive)
+    if (!bIsInitialized || !MassEntitySubsystem)
     {
-        UE_LOG(LogTemp, Warning, TEXT("Crowd_MassSimulationManager: Cannot spawn entities - simulation not active"));
+        UE_LOG(LogTemp, Warning, TEXT("Crowd_MassSimulationManager: System not initialized"));
         return;
     }
 
-    if (EntityDatabase.Num() + SpawnParams.MaxEntities > MaxSimulationEntities)
+    if (CurrentEntityCount + SpawnParams.EntityCount > MaxEntityCount)
     {
-        UE_LOG(LogTemp, Warning, TEXT("Crowd_MassSimulationManager: Cannot spawn %d entities - would exceed limit of %d"), 
-               SpawnParams.MaxEntities, MaxSimulationEntities);
+        UE_LOG(LogTemp, Warning, TEXT("Crowd_MassSimulationManager: Would exceed max entity count (%d)"), MaxEntityCount);
         return;
     }
 
-    int32 SpawnedCount = 0;
-    for (int32 i = 0; i < SpawnParams.MaxEntities; ++i)
+    // Clear existing entities if needed
+    if (ManagedEntities.Num() > 0)
     {
-        FCrowd_EntityData NewEntity;
+        DespawnAllEntities();
+    }
+
+    // Create entities in a circular pattern around spawn location
+    const float AngleStep = 2.0f * PI / SpawnParams.EntityCount;
+    const FVector BaseLocation = SpawnParams.SpawnLocation;
+    
+    for (int32 i = 0; i < SpawnParams.EntityCount; ++i)
+    {
+        // Calculate spawn position
+        const float Angle = i * AngleStep;
+        const float RandomRadius = FMath::RandRange(0.0f, SpawnParams.SpawnRadius);
+        const FVector SpawnOffset = FVector(
+            FMath::Cos(Angle) * RandomRadius,
+            FMath::Sin(Angle) * RandomRadius,
+            FMath::RandRange(-50.0f, 50.0f)
+        );
+        const FVector EntitySpawnLocation = BaseLocation + SpawnOffset;
+
+        // Create Mass Entity (simplified approach for now)
+        // In a full implementation, this would use proper Mass Entity archetypes
+        FMassEntityHandle EntityHandle;
+        // EntityHandle = MassEntitySubsystem->CreateEntity(); // This would be the proper call
         
-        // Generate random position within spawn radius
-        FVector RandomOffset = FVector(
-            FMath::RandRange(-SpawnParams.SpawnRadius, SpawnParams.SpawnRadius),
-            FMath::RandRange(-SpawnParams.SpawnRadius, SpawnParams.SpawnRadius),
+        // For now, store a dummy handle to maintain the interface
+        ManagedEntities.Add(EntityHandle);
+        
+        // Initialize pathfinding data for this entity
+        FCrowd_PathfindingData PathData = PathfindingConfig;
+        PathData.CurrentTarget = EntitySpawnLocation + FVector(
+            FMath::RandRange(-500.0f, 500.0f),
+            FMath::RandRange(-500.0f, 500.0f),
             0.0f
         );
-        
-        NewEntity.Position = SpawnParams.SpawnCenter + RandomOffset;
-        NewEntity.Rotation = FRotator(0.0f, FMath::RandRange(0.0f, 360.0f), 0.0f);
-        NewEntity.MovementSpeed = FMath::RandRange(200.0f, 400.0f);
-        NewEntity.TargetLocation = NewEntity.Position;
-        NewEntity.EntityID = NextEntityID++;
-        NewEntity.BehaviorState = ECrowd_EntityBehavior::Wandering;
-
-        // Check minimum distance to existing entities
-        bool bValidPosition = true;
-        for (const FCrowd_EntityData& ExistingEntity : EntityDatabase)
-        {
-            if (FVector::Dist(NewEntity.Position, ExistingEntity.Position) < SpawnParams.MinDistanceBetweenEntities)
-            {
-                bValidPosition = false;
-                break;
-            }
-        }
-
-        if (bValidPosition)
-        {
-            EntityDatabase.Add(NewEntity);
-            SpawnedCount++;
-        }
+        EntityPathfindingData.Add(EntityHandle, PathData);
     }
+
+    CurrentEntityCount = ManagedEntities.Num();
+    CurrentBehaviorType = SpawnParams.BehaviorType;
 
     UE_LOG(LogTemp, Log, TEXT("Crowd_MassSimulationManager: Spawned %d entities at %s"), 
-           SpawnedCount, *SpawnParams.SpawnCenter.ToString());
+           CurrentEntityCount, *SpawnParams.SpawnLocation.ToString());
 }
 
-void UCrowd_MassSimulationManager::DespawnAllEntities()
+void ACrowd_MassSimulationManager::DespawnAllEntities()
 {
-    EntityDatabase.Empty();
-    NextEntityID = 1;
-    UE_LOG(LogTemp, Log, TEXT("Crowd_MassSimulationManager: All entities despawned"));
-}
-
-int32 UCrowd_MassSimulationManager::GetActiveEntityCount() const
-{
-    return EntityDatabase.Num();
-}
-
-void UCrowd_MassSimulationManager::SetGroupDestination(const FVector& Destination, float Radius)
-{
-    for (FCrowd_EntityData& Entity : EntityDatabase)
-    {
-        // Add some randomness to prevent all entities going to exact same spot
-        FVector RandomOffset = FVector(
-            FMath::RandRange(-Radius, Radius),
-            FMath::RandRange(-Radius, Radius),
-            0.0f
-        );
-        
-        Entity.TargetLocation = Destination + RandomOffset;
-        Entity.BehaviorState = ECrowd_EntityBehavior::MovingToTarget;
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("Crowd_MassSimulationManager: Set group destination to %s"), *Destination.ToString());
-}
-
-void UCrowd_MassSimulationManager::UpdateEntityMovement(float DeltaTime)
-{
-    for (FCrowd_EntityData& Entity : EntityDatabase)
-    {
-        if (Entity.BehaviorState == ECrowd_EntityBehavior::Idle)
-        {
-            continue;
-        }
-
-        FVector DirectionToTarget = (Entity.TargetLocation - Entity.Position).GetSafeNormal();
-        float DistanceToTarget = FVector::Dist(Entity.Position, Entity.TargetLocation);
-
-        if (DistanceToTarget > 50.0f) // Close enough threshold
-        {
-            // Apply flocking and avoidance forces
-            FVector FlockingForce = CalculateFlockingForce(Entity);
-            FVector AvoidanceForce = CalculateAvoidanceForce(Entity);
-            
-            FVector FinalDirection = (DirectionToTarget + FlockingForce * 0.3f + AvoidanceForce * 0.5f).GetSafeNormal();
-            
-            Entity.Position += FinalDirection * Entity.MovementSpeed * DeltaTime;
-            Entity.Rotation = FinalDirection.Rotation();
-        }
-        else
-        {
-            // Reached target, switch to wandering or idle
-            if (Entity.BehaviorState == ECrowd_EntityBehavior::MovingToTarget)
-            {
-                Entity.BehaviorState = ECrowd_EntityBehavior::Wandering;
-                
-                // Set new random target for wandering
-                FVector RandomDirection = FVector(
-                    FMath::RandRange(-1.0f, 1.0f),
-                    FMath::RandRange(-1.0f, 1.0f),
-                    0.0f
-                ).GetSafeNormal();
-                
-                Entity.TargetLocation = Entity.Position + RandomDirection * FMath::RandRange(500.0f, 1500.0f);
-            }
-        }
-    }
-}
-
-bool UCrowd_MassSimulationManager::FindPathToLocation(const FVector& StartLocation, const FVector& EndLocation, TArray<FVector>& OutPath)
-{
-    // Simple pathfinding implementation - in a full system this would use NavMesh
-    OutPath.Empty();
-    OutPath.Add(StartLocation);
-    OutPath.Add(EndLocation);
-    return true;
-}
-
-void UCrowd_MassSimulationManager::UpdateLODLevels(const FVector& ViewerLocation)
-{
-    if (!LODManager)
+    if (!MassEntitySubsystem)
     {
         return;
     }
 
-    for (FCrowd_EntityData& Entity : EntityDatabase)
+    // Destroy all managed entities
+    for (const FMassEntityHandle& EntityHandle : ManagedEntities)
     {
-        float DistanceToViewer = FVector::Dist(Entity.Position, ViewerLocation);
+        // MassEntitySubsystem->DestroyEntity(EntityHandle); // This would be the proper call
+    }
+
+    ManagedEntities.Empty();
+    EntityPathfindingData.Empty();
+    CurrentEntityCount = 0;
+
+    UE_LOG(LogTemp, Log, TEXT("Crowd_MassSimulationManager: Despawned all entities"));
+}
+
+void ACrowd_MassSimulationManager::DespawnEntitiesInRadius(const FVector& Location, float Radius)
+{
+    if (!MassEntitySubsystem)
+    {
+        return;
+    }
+
+    TArray<FMassEntityHandle> EntitiesToRemove;
+    const float RadiusSquared = Radius * Radius;
+
+    for (const FMassEntityHandle& EntityHandle : ManagedEntities)
+    {
+        // In a full implementation, we would get the entity's actual position
+        // For now, use the pathfinding target as a proxy
+        if (EntityPathfindingData.Contains(EntityHandle))
+        {
+            const FCrowd_PathfindingData& PathData = EntityPathfindingData[EntityHandle];
+            const float DistanceSquared = FVector::DistSquared(Location, PathData.CurrentTarget);
+            
+            if (DistanceSquared <= RadiusSquared)
+            {
+                EntitiesToRemove.Add(EntityHandle);
+            }
+        }
+    }
+
+    // Remove entities
+    for (const FMassEntityHandle& EntityHandle : EntitiesToRemove)
+    {
+        // MassEntitySubsystem->DestroyEntity(EntityHandle); // This would be the proper call
+        ManagedEntities.Remove(EntityHandle);
+        EntityPathfindingData.Remove(EntityHandle);
+    }
+
+    CurrentEntityCount = ManagedEntities.Num();
+
+    UE_LOG(LogTemp, Log, TEXT("Crowd_MassSimulationManager: Despawned %d entities in radius %.1f at %s"), 
+           EntitiesToRemove.Num(), Radius, *Location.ToString());
+}
+
+void ACrowd_MassSimulationManager::SetCrowdBehavior(ECrowd_CrowdBehaviorType NewBehavior)
+{
+    CurrentBehaviorType = NewBehavior;
+    
+    // Update behavior for all entities
+    for (auto& PathDataPair : EntityPathfindingData)
+    {
+        FCrowd_PathfindingData& PathData = PathDataPair.Value;
         
-        // Determine LOD level based on distance
-        int32 LODLevel = 3; // Default to lowest LOD
-        for (int32 i = 0; i < LODDistances.Num(); ++i)
+        switch (NewBehavior)
         {
-            if (DistanceToViewer <= LODDistances[i])
-            {
-                LODLevel = i;
-                break;
-            }
-        }
-
-        // Apply LOD-specific optimizations
-        if (LODLevel >= 2)
-        {
-            // Reduce update frequency for distant entities
-            if (FrameCounter % (LODLevel * 2) != 0)
-            {
-                continue;
-            }
-        }
-    }
-}
-
-void UCrowd_MassSimulationManager::SetLODDistance(int32 LODLevel, float Distance)
-{
-    if (LODLevel >= 0 && LODLevel < LODDistances.Num())
-    {
-        LODDistances[LODLevel] = Distance;
-    }
-}
-
-void UCrowd_MassSimulationManager::SetEntityBehavior(int32 EntityID, ECrowd_EntityBehavior NewBehavior)
-{
-    for (FCrowd_EntityData& Entity : EntityDatabase)
-    {
-        if (Entity.EntityID == EntityID)
-        {
-            Entity.BehaviorState = NewBehavior;
+        case ECrowd_CrowdBehaviorType::Wandering:
+            PathData.PathUpdateInterval = 3.0f;
+            PathData.AcceptanceRadius = 150.0f;
+            break;
+        case ECrowd_CrowdBehaviorType::Gathering:
+            PathData.PathUpdateInterval = 1.0f;
+            PathData.AcceptanceRadius = 50.0f;
+            break;
+        case ECrowd_CrowdBehaviorType::Fleeing:
+            PathData.PathUpdateInterval = 0.5f;
+            PathData.AcceptanceRadius = 200.0f;
+            break;
+        case ECrowd_CrowdBehaviorType::Following:
+            PathData.PathUpdateInterval = 0.8f;
+            PathData.AcceptanceRadius = 100.0f;
+            break;
+        case ECrowd_CrowdBehaviorType::Hunting:
+            PathData.PathUpdateInterval = 1.5f;
+            PathData.AcceptanceRadius = 75.0f;
+            break;
+        case ECrowd_CrowdBehaviorType::Resting:
+            PathData.PathUpdateInterval = 5.0f;
+            PathData.AcceptanceRadius = 300.0f;
             break;
         }
     }
+
+    UE_LOG(LogTemp, Log, TEXT("Crowd_MassSimulationManager: Set crowd behavior to %d"), (int32)NewBehavior);
 }
 
-void UCrowd_MassSimulationManager::TriggerFleeResponse(const FVector& ThreatLocation, float ThreatRadius)
+void ACrowd_MassSimulationManager::UpdateCrowdDensity(ECrowd_CrowdDensity NewDensity)
 {
-    for (FCrowd_EntityData& Entity : EntityDatabase)
+    int32 TargetEntityCount = 0;
+    
+    switch (NewDensity)
     {
-        float DistanceToThreat = FVector::Dist(Entity.Position, ThreatLocation);
-        
-        if (DistanceToThreat <= ThreatRadius)
+    case ECrowd_CrowdDensity::Sparse:
+        TargetEntityCount = FMath::RandRange(1, 10);
+        break;
+    case ECrowd_CrowdDensity::Medium:
+        TargetEntityCount = FMath::RandRange(10, 50);
+        break;
+    case ECrowd_CrowdDensity::Dense:
+        TargetEntityCount = FMath::RandRange(50, 200);
+        break;
+    case ECrowd_CrowdDensity::Massive:
+        TargetEntityCount = FMath::RandRange(200, 1000);
+        break;
+    }
+
+    // Adjust current entity count
+    if (TargetEntityCount > CurrentEntityCount)
+    {
+        // Spawn additional entities
+        FCrowd_EntitySpawnParams SpawnParams = DefaultSpawnParams;
+        SpawnParams.EntityCount = TargetEntityCount - CurrentEntityCount;
+        SpawnCrowdEntities(SpawnParams);
+    }
+    else if (TargetEntityCount < CurrentEntityCount)
+    {
+        // Remove excess entities
+        int32 EntitiesToRemove = CurrentEntityCount - TargetEntityCount;
+        for (int32 i = 0; i < EntitiesToRemove && ManagedEntities.Num() > 0; ++i)
         {
-            Entity.BehaviorState = ECrowd_EntityBehavior::Fleeing;
+            FMassEntityHandle EntityToRemove = ManagedEntities.Last();
+            ManagedEntities.RemoveLast();
+            EntityPathfindingData.Remove(EntityToRemove);
+        }
+        CurrentEntityCount = ManagedEntities.Num();
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("Crowd_MassSimulationManager: Updated density to %d (target: %d entities)"), 
+           (int32)NewDensity, TargetEntityCount);
+}
+
+void ACrowd_MassSimulationManager::SetCrowdTarget(const FVector& TargetLocation)
+{
+    // Update all entities to move toward the target
+    for (auto& PathDataPair : EntityPathfindingData)
+    {
+        FCrowd_PathfindingData& PathData = PathDataPair.Value;
+        PathData.CurrentTarget = TargetLocation + FVector(
+            FMath::RandRange(-200.0f, 200.0f),
+            FMath::RandRange(-200.0f, 200.0f),
+            0.0f
+        );
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("Crowd_MassSimulationManager: Set crowd target to %s"), *TargetLocation.ToString());
+}
+
+void ACrowd_MassSimulationManager::UpdatePathfinding()
+{
+    PathfindingUpdateTimer += GetWorld()->GetDeltaSeconds();
+    
+    if (PathfindingUpdateTimer >= PathfindingConfig.PathUpdateInterval)
+    {
+        PathfindingUpdateTimer = 0.0f;
+        
+        // Update pathfinding for all entities
+        for (auto& PathDataPair : EntityPathfindingData)
+        {
+            FCrowd_PathfindingData& PathData = PathDataPair.Value;
             
-            // Set flee target away from threat
-            FVector FleeDirection = (Entity.Position - ThreatLocation).GetSafeNormal();
-            Entity.TargetLocation = Entity.Position + FleeDirection * 2000.0f;
-            Entity.MovementSpeed *= 1.5f; // Increase speed when fleeing
+            // Simple pathfinding update - in a full implementation this would use proper navigation
+            if (CurrentBehaviorType == ECrowd_CrowdBehaviorType::Wandering)
+            {
+                // Generate new random target
+                PathData.CurrentTarget = GetActorLocation() + FVector(
+                    FMath::RandRange(-1000.0f, 1000.0f),
+                    FMath::RandRange(-1000.0f, 1000.0f),
+                    0.0f
+                );
+            }
+        }
+    }
+}
+
+void ACrowd_MassSimulationManager::SetWaypointPath(const TArray<FVector>& Waypoints)
+{
+    PathfindingConfig.WaypointPath = Waypoints;
+    
+    // Update all entities to follow the waypoint path
+    for (auto& PathDataPair : EntityPathfindingData)
+    {
+        FCrowd_PathfindingData& PathData = PathDataPair.Value;
+        PathData.WaypointPath = Waypoints;
+        if (Waypoints.Num() > 0)
+        {
+            PathData.CurrentTarget = Waypoints[0];
         }
     }
 
-    UE_LOG(LogTemp, Log, TEXT("Crowd_MassSimulationManager: Triggered flee response from %s"), *ThreatLocation.ToString());
+    UE_LOG(LogTemp, Log, TEXT("Crowd_MassSimulationManager: Set waypoint path with %d waypoints"), Waypoints.Num());
 }
 
-void UCrowd_MassSimulationManager::SetGatheringMode(bool bEnabled, const FVector& GatherLocation)
+void ACrowd_MassSimulationManager::EnableNavMeshPathfinding(bool bEnable)
 {
-    if (bEnabled)
+    PathfindingConfig.bUseNavMesh = bEnable;
+    
+    for (auto& PathDataPair : EntityPathfindingData)
     {
-        SetGroupDestination(GatherLocation, 500.0f);
-        
-        for (FCrowd_EntityData& Entity : EntityDatabase)
-        {
-            Entity.BehaviorState = ECrowd_EntityBehavior::Gathering;
-        }
+        FCrowd_PathfindingData& PathData = PathDataPair.Value;
+        PathData.bUseNavMesh = bEnable;
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("Crowd_MassSimulationManager: NavMesh pathfinding %s"), 
+           bEnable ? TEXT("enabled") : TEXT("disabled"));
+}
+
+void ACrowd_MassSimulationManager::UpdateLODSystem()
+{
+    LODUpdateTimer += GetWorld()->GetDeltaSeconds();
+    
+    if (LODUpdateTimer >= 1.0f) // Update LOD every second
+    {
+        LODUpdateTimer = 0.0f;
+        UpdateEntityLOD();
+    }
+}
+
+void ACrowd_MassSimulationManager::SetLODDistances(float Distance1, float Distance2, float Distance3)
+{
+    DefaultSpawnParams.LODDistance1 = Distance1;
+    DefaultSpawnParams.LODDistance2 = Distance2;
+    DefaultSpawnParams.LODDistance3 = Distance3;
+
+    UE_LOG(LogTemp, Log, TEXT("Crowd_MassSimulationManager: Set LOD distances: %.1f, %.1f, %.1f"), 
+           Distance1, Distance2, Distance3);
+}
+
+int32 ACrowd_MassSimulationManager::GetActiveEntityCount() const
+{
+    return CurrentEntityCount;
+}
+
+float ACrowd_MassSimulationManager::GetCurrentPerformanceMetric() const
+{
+    return AverageFrameTime;
+}
+
+void ACrowd_MassSimulationManager::EnablePerformanceOptimization(bool bEnable)
+{
+    if (bEnable)
+    {
+        // Reduce tick frequency for better performance
+        PrimaryActorTick.TickInterval = 0.2f;
     }
     else
     {
-        for (FCrowd_EntityData& Entity : EntityDatabase)
-        {
-            Entity.BehaviorState = ECrowd_EntityBehavior::Wandering;
-        }
+        // Restore normal tick frequency
+        PrimaryActorTick.TickInterval = 0.1f;
     }
+
+    UE_LOG(LogTemp, Log, TEXT("Crowd_MassSimulationManager: Performance optimization %s"), 
+           bEnable ? TEXT("enabled") : TEXT("disabled"));
 }
 
-float UCrowd_MassSimulationManager::GetSimulationPerformance() const
+void ACrowd_MassSimulationManager::TriggerCrowdFleeResponse(const FVector& ThreatLocation, float ThreatRadius)
 {
-    // Return performance metric (lower is better)
-    return AverageFrameTime * EntityDatabase.Num();
-}
-
-void UCrowd_MassSimulationManager::SetPerformanceMode(ECrowd_PerformanceMode Mode)
-{
-    CurrentPerformanceMode = Mode;
+    SetCrowdBehavior(ECrowd_CrowdBehaviorType::Fleeing);
     
-    switch (Mode)
+    // Make entities flee away from the threat
+    for (auto& PathDataPair : EntityPathfindingData)
     {
-        case ECrowd_PerformanceMode::HighQuality:
-            TickRate = 30.0f;
-            MaxSimulationEntities = 20000;
-            break;
-            
-        case ECrowd_PerformanceMode::Balanced:
-            TickRate = 10.0f;
-            MaxSimulationEntities = 50000;
-            break;
-            
-        case ECrowd_PerformanceMode::Performance:
-            TickRate = 5.0f;
-            MaxSimulationEntities = 100000;
-            break;
+        FCrowd_PathfindingData& PathData = PathDataPair.Value;
+        
+        // Calculate flee direction
+        FVector FleeDirection = PathData.CurrentTarget - ThreatLocation;
+        FleeDirection.Normalize();
+        
+        // Set new target away from threat
+        PathData.CurrentTarget = ThreatLocation + FleeDirection * (ThreatRadius + 1000.0f);
     }
+
+    UE_LOG(LogTemp, Log, TEXT("Crowd_MassSimulationManager: Triggered flee response from threat at %s"), 
+           *ThreatLocation.ToString());
+}
+
+void ACrowd_MassSimulationManager::SetCrowdCombatMode(bool bCombatMode)
+{
+    bIsCombatMode = bCombatMode;
     
-    PrimaryComponentTick.TickInterval = 1.0f / TickRate;
+    if (bCombatMode)
+    {
+        // Switch to more aggressive behavior
+        SetCrowdBehavior(ECrowd_CrowdBehaviorType::Hunting);
+    }
+    else
+    {
+        // Return to peaceful behavior
+        SetCrowdBehavior(ECrowd_CrowdBehaviorType::Wandering);
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("Crowd_MassSimulationManager: Combat mode %s"), 
+           bCombatMode ? TEXT("enabled") : TEXT("disabled"));
 }
 
-void UCrowd_MassSimulationManager::UpdateEntityBehaviors(float DeltaTime)
+void ACrowd_MassSimulationManager::DebugDrawCrowdInfo()
 {
-    // Update behavior-specific logic for each entity
-    for (FCrowd_EntityData& Entity : EntityDatabase)
+    if (!GetWorld())
     {
-        switch (Entity.BehaviorState)
-        {
-            case ECrowd_EntityBehavior::Idle:
-                // Occasionally switch to wandering
-                if (FMath::RandRange(0.0f, 1.0f) < 0.01f)
-                {
-                    Entity.BehaviorState = ECrowd_EntityBehavior::Wandering;
-                }
-                break;
-                
-            case ECrowd_EntityBehavior::Wandering:
-                // Continue wandering behavior
-                break;
-                
-            case ECrowd_EntityBehavior::Fleeing:
-                // Gradually return to normal behavior after fleeing
-                if (FMath::RandRange(0.0f, 1.0f) < 0.005f)
-                {
-                    Entity.BehaviorState = ECrowd_EntityBehavior::Wandering;
-                    Entity.MovementSpeed /= 1.5f; // Restore normal speed
-                }
-                break;
-                
-            case ECrowd_EntityBehavior::Gathering:
-                // Gathering behavior handled in movement update
-                break;
-                
-            default:
-                break;
-        }
+        return;
+    }
+
+    const FVector ActorLocation = GetActorLocation();
+    
+    // Draw manager location
+    DrawDebugSphere(GetWorld(), ActorLocation, 100.0f, 12, FColor::Blue, false, -1.0f, 0, 5.0f);
+    
+    // Draw entity count info
+    const FString InfoText = FString::Printf(TEXT("Entities: %d/%d\nBehavior: %d\nFPS: %.1f"), 
+                                           CurrentEntityCount, MaxEntityCount, 
+                                           (int32)CurrentBehaviorType, 1.0f / AverageFrameTime);
+    
+    DrawDebugString(GetWorld(), ActorLocation + FVector(0, 0, 200), InfoText, nullptr, FColor::White, 0.0f);
+    
+    // Draw pathfinding targets
+    int32 DebugCount = 0;
+    for (const auto& PathDataPair : EntityPathfindingData)
+    {
+        if (DebugCount >= 20) break; // Limit debug draws for performance
+        
+        const FCrowd_PathfindingData& PathData = PathDataPair.Value;
+        DrawDebugSphere(GetWorld(), PathData.CurrentTarget, 50.0f, 8, FColor::Green, false, -1.0f, 0, 2.0f);
+        DebugCount++;
     }
 }
 
-void UCrowd_MassSimulationManager::ProcessEntityCollisions()
+void ACrowd_MassSimulationManager::ToggleDebugVisualization()
 {
-    // Simple collision avoidance between entities
-    for (int32 i = 0; i < EntityDatabase.Num(); ++i)
+    bEnableDebugVisualization = !bEnableDebugVisualization;
+    VisualizationMesh->SetVisibility(bEnableDebugVisualization);
+
+    UE_LOG(LogTemp, Log, TEXT("Crowd_MassSimulationManager: Debug visualization %s"), 
+           bEnableDebugVisualization ? TEXT("enabled") : TEXT("disabled"));
+}
+
+void ACrowd_MassSimulationManager::UpdatePerformanceMetrics(float DeltaTime)
+{
+    LastFrameTime = DeltaTime;
+    
+    // Calculate rolling average
+    PerformanceSampleCount++;
+    const float Alpha = 1.0f / FMath::Min(PerformanceSampleCount, 60); // 60-frame average
+    AverageFrameTime = AverageFrameTime * (1.0f - Alpha) + DeltaTime * Alpha;
+    
+    // Auto-optimize if performance is poor
+    if (AverageFrameTime > 0.033f && CurrentEntityCount > 100) // Worse than 30 FPS
     {
-        for (int32 j = i + 1; j < EntityDatabase.Num(); ++j)
+        EnablePerformanceOptimization(true);
+    }
+}
+
+void ACrowd_MassSimulationManager::ProcessEntityBehaviors()
+{
+    BehaviorUpdateTimer += GetWorld()->GetDeltaSeconds();
+    
+    if (BehaviorUpdateTimer >= 0.5f) // Update behaviors twice per second
+    {
+        BehaviorUpdateTimer = 0.0f;
+        
+        // Process behavior-specific logic
+        switch (CurrentBehaviorType)
         {
-            FCrowd_EntityData& EntityA = EntityDatabase[i];
-            FCrowd_EntityData& EntityB = EntityDatabase[j];
+        case ECrowd_CrowdBehaviorType::Gathering:
+            // Entities move toward a central gathering point
+            SetCrowdTarget(GetActorLocation());
+            break;
             
-            float Distance = FVector::Dist(EntityA.Position, EntityB.Position);
-            const float MinDistance = 100.0f; // Minimum distance between entities
+        case ECrowd_CrowdBehaviorType::Fleeing:
+            // Continue fleeing behavior - targets are set by TriggerCrowdFleeResponse
+            break;
             
-            if (Distance < MinDistance && Distance > 0.0f)
+        case ECrowd_CrowdBehaviorType::Following:
+            // Follow the manager's position
+            SetCrowdTarget(GetActorLocation() + FVector(200, 0, 0));
+            break;
+            
+        case ECrowd_CrowdBehaviorType::Hunting:
+            // Aggressive movement patterns
+            for (auto& PathDataPair : EntityPathfindingData)
             {
-                FVector SeparationVector = (EntityA.Position - EntityB.Position).GetSafeNormal();
-                float SeparationForce = (MinDistance - Distance) * 0.5f;
-                
-                EntityA.Position += SeparationVector * SeparationForce;
-                EntityB.Position -= SeparationVector * SeparationForce;
+                FCrowd_PathfindingData& PathData = PathDataPair.Value;
+                PathData.PathUpdateInterval = 1.0f; // More frequent updates
             }
+            break;
+            
+        case ECrowd_CrowdBehaviorType::Resting:
+            // Minimal movement
+            for (auto& PathDataPair : EntityPathfindingData)
+            {
+                FCrowd_PathfindingData& PathData = PathDataPair.Value;
+                PathData.PathUpdateInterval = 10.0f; // Very slow updates
+            }
+            break;
+            
+        case ECrowd_CrowdBehaviorType::Wandering:
+        default:
+            // Random wandering - handled in UpdatePathfinding
+            break;
         }
     }
 }
 
-void UCrowd_MassSimulationManager::OptimizeEntityDistribution()
+void ACrowd_MassSimulationManager::UpdateEntityLOD()
 {
-    // Remove entities that are too far from player to optimize performance
-    if (LastPlayerLocation != FVector::ZeroVector)
+    // In a full implementation, this would update entity LOD based on distance to camera
+    // For now, just track the concept
+    
+    APawn* PlayerPawn = GetWorld()->GetFirstPlayerController()->GetPawn();
+    if (!PlayerPawn)
     {
-        EntityDatabase.RemoveAll([this](const FCrowd_EntityData& Entity)
-        {
-            return FVector::Dist(Entity.Position, LastPlayerLocation) > MaxRenderDistance * 1.5f;
-        });
+        return;
+    }
+    
+    const FVector PlayerLocation = PlayerPawn->GetActorLocation();
+    const FVector ManagerLocation = GetActorLocation();
+    const float DistanceToPlayer = FVector::Dist(PlayerLocation, ManagerLocation);
+    
+    // Adjust entity detail based on distance
+    if (DistanceToPlayer > DefaultSpawnParams.LODDistance3)
+    {
+        // Very far - minimal detail
+        EnablePerformanceOptimization(true);
+    }
+    else if (DistanceToPlayer > DefaultSpawnParams.LODDistance2)
+    {
+        // Far - reduced detail
+        PrimaryActorTick.TickInterval = 0.15f;
+    }
+    else if (DistanceToPlayer > DefaultSpawnParams.LODDistance1)
+    {
+        // Medium distance - normal detail
+        PrimaryActorTick.TickInterval = 0.1f;
+    }
+    else
+    {
+        // Close - full detail
+        PrimaryActorTick.TickInterval = 0.05f;
+        EnablePerformanceOptimization(false);
     }
 }
 
-FVector UCrowd_MassSimulationManager::CalculateFlockingForce(const FCrowd_EntityData& Entity) const
+void ACrowd_MassSimulationManager::HandleCombatEvents()
 {
-    FVector FlockingForce = FVector::ZeroVector;
-    int32 NeighborCount = 0;
-    const float FlockingRadius = 500.0f;
-    
-    for (const FCrowd_EntityData& OtherEntity : EntityDatabase)
+    if (!bIsCombatMode)
     {
-        if (OtherEntity.EntityID == Entity.EntityID)
-        {
-            continue;
-        }
-        
-        float Distance = FVector::Dist(Entity.Position, OtherEntity.Position);
-        if (Distance <= FlockingRadius)
-        {
-            FlockingForce += (OtherEntity.Position - Entity.Position);
-            NeighborCount++;
-        }
+        return;
     }
     
-    if (NeighborCount > 0)
+    // In a full implementation, this would integrate with the combat system
+    // For now, just maintain combat behavior state
+    
+    static float CombatTimer = 0.0f;
+    CombatTimer += GetWorld()->GetDeltaSeconds();
+    
+    if (CombatTimer >= 5.0f) // Combat mode lasts 5 seconds
     {
-        FlockingForce /= NeighborCount;
-        FlockingForce = FlockingForce.GetSafeNormal();
+        CombatTimer = 0.0f;
+        SetCrowdCombatMode(false); // Return to normal behavior
     }
-    
-    return FlockingForce;
-}
-
-FVector UCrowd_MassSimulationManager::CalculateAvoidanceForce(const FCrowd_EntityData& Entity) const
-{
-    FVector AvoidanceForce = FVector::ZeroVector;
-    const float AvoidanceRadius = 200.0f;
-    
-    for (const FCrowd_EntityData& OtherEntity : EntityDatabase)
-    {
-        if (OtherEntity.EntityID == Entity.EntityID)
-        {
-            continue;
-        }
-        
-        float Distance = FVector::Dist(Entity.Position, OtherEntity.Position);
-        if (Distance <= AvoidanceRadius && Distance > 0.0f)
-        {
-            FVector AvoidanceVector = (Entity.Position - OtherEntity.Position).GetSafeNormal();
-            float AvoidanceStrength = (AvoidanceRadius - Distance) / AvoidanceRadius;
-            AvoidanceForce += AvoidanceVector * AvoidanceStrength;
-        }
-    }
-    
-    return AvoidanceForce.GetSafeNormal();
-}
-
-bool UCrowd_MassSimulationManager::IsEntityInLODRange(const FCrowd_EntityData& Entity, const FVector& ViewerLocation) const
-{
-    float Distance = FVector::Dist(Entity.Position, ViewerLocation);
-    return Distance <= MaxRenderDistance;
 }
