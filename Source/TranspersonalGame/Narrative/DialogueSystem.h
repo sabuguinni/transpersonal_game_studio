@@ -1,20 +1,16 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
-#include "Components/AudioComponent.h"
-#include "Sound/SoundWave.h"
+#include "Engine/World.h"
+#include "Components/ActorComponent.h"
 #include "Engine/DataTable.h"
 #include "../SharedTypes.h"
 #include "DialogueSystem.generated.h"
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FNarr_DialogueEntry
+struct TRANSPERSONALGAME_API FNarr_DialogueNode
 {
     GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    FString DialogueID;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
     FString SpeakerName;
@@ -23,122 +19,96 @@ struct TRANSPERSONALGAME_API FNarr_DialogueEntry
     FString DialogueText;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    TSoftObjectPtr<USoundWave> VoiceAudio;
+    TArray<FString> ResponseOptions;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    float Duration;
+    TArray<int32> NextNodeIDs;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    TArray<FString> NextDialogueOptions;
+    bool bIsEndNode;
 
-    FNarr_DialogueEntry()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    FString AudioAssetPath;
+
+    FNarr_DialogueNode()
     {
-        DialogueID = TEXT("");
         SpeakerName = TEXT("");
         DialogueText = TEXT("");
-        Duration = 5.0f;
+        bIsEndNode = false;
+        AudioAssetPath = TEXT("");
     }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FNarr_CharacterVoiceProfile
+struct TRANSPERSONALGAME_API FNarr_DialogueTree
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Voice")
-    FString CharacterName;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    FString TreeName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Voice")
-    FString VoiceDescription;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    TArray<FNarr_DialogueNode> DialogueNodes;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Voice")
-    float PitchModifier;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    int32 StartNodeID;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Voice")
-    float VolumeModifier;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Voice")
-    TArray<TSoftObjectPtr<USoundWave>> VoiceLines;
-
-    FNarr_CharacterVoiceProfile()
+    FNarr_DialogueTree()
     {
-        CharacterName = TEXT("");
-        VoiceDescription = TEXT("");
-        PitchModifier = 1.0f;
-        VolumeModifier = 1.0f;
+        TreeName = TEXT("");
+        StartNodeID = 0;
     }
 };
 
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API ADialogueSystem : public AActor
+UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UDialogueSystem : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    ADialogueSystem();
+    UDialogueSystem();
 
 protected:
     virtual void BeginPlay() override;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    UAudioComponent* AudioComponent;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    TArray<FNarr_DialogueTree> DialogueTrees;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue Database")
-    UDataTable* DialogueDataTable;
+    UPROPERTY(BlueprintReadOnly, Category = "Dialogue")
+    int32 CurrentTreeIndex;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Voice Profiles")
-    TMap<FString, FNarr_CharacterVoiceProfile> CharacterVoices;
+    UPROPERTY(BlueprintReadOnly, Category = "Dialogue")
+    int32 CurrentNodeIndex;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Current State")
-    FNarr_DialogueEntry CurrentDialogue;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Current State")
-    bool bIsPlayingDialogue;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Current State")
-    float DialogueTimer;
+    UPROPERTY(BlueprintReadOnly, Category = "Dialogue")
+    bool bDialogueActive;
 
 public:
-    virtual void Tick(float DeltaTime) override;
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    bool StartDialogue(const FString& TreeName);
 
     UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    bool PlayDialogue(const FString& DialogueID);
+    void EndDialogue();
 
     UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    void StopDialogue();
+    FNarr_DialogueNode GetCurrentNode();
 
     UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    bool IsDialogueActive() const;
+    bool SelectResponse(int32 ResponseIndex);
 
     UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    FNarr_DialogueEntry GetCurrentDialogue() const;
+    void AddDialogueTree(const FNarr_DialogueTree& NewTree);
 
     UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    TArray<FString> GetAvailableDialogueOptions() const;
+    TArray<FString> GetAvailableDialogueTrees();
 
-    UFUNCTION(BlueprintCallable, Category = "Voice System")
-    void RegisterCharacterVoice(const FString& CharacterName, const FNarr_CharacterVoiceProfile& VoiceProfile);
+    UFUNCTION(BlueprintPure, Category = "Dialogue")
+    bool IsDialogueActive() const { return bDialogueActive; }
 
-    UFUNCTION(BlueprintCallable, Category = "Voice System")
-    bool PlayCharacterLine(const FString& CharacterName, const FString& LineText, USoundWave* AudioClip = nullptr);
-
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void TriggerNarrativeEvent(const FString& EventID);
-
-protected:
-    UFUNCTION()
-    void OnDialogueFinished();
-
-    UFUNCTION(BlueprintImplementableEvent, Category = "Events")
-    void OnDialogueStarted(const FNarr_DialogueEntry& DialogueEntry);
-
-    UFUNCTION(BlueprintImplementableEvent, Category = "Events")
-    void OnDialogueCompleted(const FNarr_DialogueEntry& DialogueEntry);
-
-    UFUNCTION(BlueprintImplementableEvent, Category = "Events")
-    void OnNarrativeEventTriggered(const FString& EventID);
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    void LoadDialogueFromDataTable(class UDataTable* DialogueDataTable);
 
 private:
-    FNarr_DialogueEntry* FindDialogueEntry(const FString& DialogueID);
-    void ApplyVoiceProfile(const FString& CharacterName);
+    void InitializeDefaultDialogues();
+    int32 FindTreeByName(const FString& TreeName);
 };
