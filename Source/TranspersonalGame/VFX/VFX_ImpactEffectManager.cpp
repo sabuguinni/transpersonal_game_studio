@@ -1,236 +1,163 @@
 #include "VFX_ImpactEffectManager.h"
 #include "NiagaraFunctionLibrary.h"
 #include "Kismet/GameplayStatics.h"
-#include "Engine/World.h"
-#include "Components/AudioComponent.h"
-#include "DrawDebugHelpers.h"
+#include "Engine/Engine.h"
 
-UVFX_ImpactEffectManager::UVFX_ImpactEffectManager()
+AVFX_ImpactEffectManager::AVFX_ImpactEffectManager()
 {
-    PrimaryComponentTick.bCanEverTick = false;
-    
-    // Initialize default values
-    DefaultDustEffect = nullptr;
-    DefaultWaterSplash = nullptr;
-    DefaultRockImpact = nullptr;
-    DefaultFootstepSound = nullptr;
-    DefaultImpactSound = nullptr;
+    PrimaryActorTick.bCanEverTick = false;
+
+    RootSceneComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootScene"));
+    RootComponent = RootSceneComponent;
+
+    MaxActiveEffects = 50;
+    EffectPoolingRadius = 5000.0f;
+
+    // Initialize impact settings
+    ImpactSettings.EffectScale = 1.0f;
+    ImpactSettings.Duration = 2.0f;
 }
 
-void UVFX_ImpactEffectManager::BeginPlay()
+void AVFX_ImpactEffectManager::BeginPlay()
 {
     Super::BeginPlay();
     
-    // Initialize default effects when component starts
-    InitializeDefaultEffects();
+    // Reserve space for active effects array
+    ActiveEffects.Reserve(MaxActiveEffects);
 }
 
-void UVFX_ImpactEffectManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void AVFX_ImpactEffectManager::SpawnDustImpact(const FVector& Location, const FVector& Normal, float Intensity)
 {
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-}
-
-void UVFX_ImpactEffectManager::SpawnImpactEffect(EVFX_ImpactType ImpactType, EVFX_SurfaceType SurfaceType, FVector Location, FVector Normal)
-{
-    // Get effect data for this combination
-    FVFX_ImpactEffectData EffectData = GetEffectData(ImpactType, SurfaceType);
-    
-    // Spawn particle effect if available
-    if (EffectData.ParticleEffect)
+    if (!ImpactSettings.DustEffect.IsValid())
     {
-        FRotator EffectRotation = Normal.Rotation();
-        UNiagaraComponent* SpawnedEffect = UNiagaraFunctionLibrary::SpawnSystemAtLocation(
-            GetWorld(),
-            EffectData.ParticleEffect,
-            Location,
-            EffectRotation,
-            FVector(EffectData.EffectScale)
-        );
+        // Try to load default dust effect
+        ImpactSettings.DustEffect = TSoftObjectPtr<UNiagaraSystem>(FSoftObjectPath(TEXT("/Engine/VFX/Niagara/Systems/NS_DefaultDust")));
+    }
+
+    UNiagaraSystem* DustSystem = ImpactSettings.DustEffect.LoadSynchronous();
+    if (DustSystem)
+    {
+        FRotator EffectRotation = FRotationMatrix::MakeFromZ(Normal).Rotator();
+        float EffectScale = ImpactSettings.EffectScale * Intensity;
         
-        if (SpawnedEffect)
+        SpawnNiagaraEffect(DustSystem, Location, EffectRotation, EffectScale);
+        
+        UE_LOG(LogTemp, Log, TEXT("VFX: Spawned dust impact at %s with intensity %f"), 
+               *Location.ToString(), Intensity);
+    }
+}
+
+void AVFX_ImpactEffectManager::SpawnBloodSplatter(const FVector& Location, const FVector& Direction, float Amount)
+{
+    if (!ImpactSettings.BloodEffect.IsValid())
+    {
+        // Try to load default blood effect
+        ImpactSettings.BloodEffect = TSoftObjectPtr<UNiagaraSystem>(FSoftObjectPath(TEXT("/Engine/VFX/Niagara/Systems/NS_DefaultBlood")));
+    }
+
+    UNiagaraSystem* BloodSystem = ImpactSettings.BloodEffect.LoadSynchronous();
+    if (BloodSystem)
+    {
+        FRotator EffectRotation = Direction.Rotation();
+        float EffectScale = ImpactSettings.EffectScale * Amount;
+        
+        SpawnNiagaraEffect(BloodSystem, Location, EffectRotation, EffectScale);
+        
+        UE_LOG(LogTemp, Log, TEXT("VFX: Spawned blood splatter at %s with amount %f"), 
+               *Location.ToString(), Amount);
+    }
+}
+
+void AVFX_ImpactEffectManager::SpawnWaterSplash(const FVector& Location, float SplashSize)
+{
+    if (!ImpactSettings.WaterSplashEffect.IsValid())
+    {
+        // Try to load default water splash effect
+        ImpactSettings.WaterSplashEffect = TSoftObjectPtr<UNiagaraSystem>(FSoftObjectPath(TEXT("/Engine/VFX/Niagara/Systems/NS_DefaultWaterSplash")));
+    }
+
+    UNiagaraSystem* WaterSystem = ImpactSettings.WaterSplashEffect.LoadSynchronous();
+    if (WaterSystem)
+    {
+        FRotator EffectRotation = FRotator::ZeroRotator;
+        float EffectScale = ImpactSettings.EffectScale * SplashSize;
+        
+        SpawnNiagaraEffect(WaterSystem, Location, EffectRotation, EffectScale);
+        
+        UE_LOG(LogTemp, Log, TEXT("VFX: Spawned water splash at %s with size %f"), 
+               *Location.ToString(), SplashSize);
+    }
+}
+
+void AVFX_ImpactEffectManager::SpawnNiagaraEffect(UNiagaraSystem* System, const FVector& Location, const FRotator& Rotation, float Scale)
+{
+    if (!System || !GetWorld())
+    {
+        return;
+    }
+
+    // Check if we need to remove old effects
+    if (ActiveEffects.Num() >= MaxActiveEffects)
+    {
+        RemoveOldestEffect();
+    }
+
+    // Spawn the Niagara effect
+    UNiagaraComponent* NewEffect = UNiagaraFunctionLibrary::SpawnSystemAtLocation(
+        GetWorld(),
+        System,
+        Location,
+        Rotation,
+        FVector(Scale),
+        true,
+        true,
+        ENCPoolMethod::None,
+        true
+    );
+
+    if (NewEffect)
+    {
+        ActiveEffects.Add(NewEffect);
+        
+        // Set effect duration
+        FTimerHandle TimerHandle;
+        GetWorld()->GetTimerManager().SetTimer(TimerHandle, [this, NewEffect]()
         {
-            // Configure effect parameters based on surface type
-            switch (SurfaceType)
+            if (NewEffect && IsValid(NewEffect))
             {
-                case EVFX_SurfaceType::Dirt:
-                    SpawnedEffect->SetNiagaraVariableLinearColor(TEXT("ParticleColor"), FLinearColor(0.6f, 0.4f, 0.2f, 1.0f));
-                    break;
-                case EVFX_SurfaceType::Sand:
-                    SpawnedEffect->SetNiagaraVariableLinearColor(TEXT("ParticleColor"), FLinearColor(0.9f, 0.8f, 0.6f, 1.0f));
-                    break;
-                case EVFX_SurfaceType::Mud:
-                    SpawnedEffect->SetNiagaraVariableLinearColor(TEXT("ParticleColor"), FLinearColor(0.4f, 0.3f, 0.2f, 1.0f));
-                    break;
-                case EVFX_SurfaceType::Rock:
-                    SpawnedEffect->SetNiagaraVariableLinearColor(TEXT("ParticleColor"), FLinearColor(0.5f, 0.5f, 0.5f, 1.0f));
-                    break;
-                case EVFX_SurfaceType::Snow:
-                    SpawnedEffect->SetNiagaraVariableLinearColor(TEXT("ParticleColor"), FLinearColor(0.9f, 0.9f, 1.0f, 1.0f));
-                    break;
-                default:
-                    break;
+                ActiveEffects.Remove(NewEffect);
+                NewEffect->DestroyComponent();
             }
-            
-            UE_LOG(LogTemp, Log, TEXT("VFX: Spawned impact effect at %s"), *Location.ToString());
-        }
-    }
-    
-    // Play impact sound if available
-    if (EffectData.ImpactSound)
-    {
-        UGameplayStatics::PlaySoundAtLocation(
-            GetWorld(),
-            EffectData.ImpactSound,
-            Location,
-            EffectData.VolumeMultiplier
-        );
-        
-        UE_LOG(LogTemp, Log, TEXT("VFX: Played impact sound at %s"), *Location.ToString());
+        }, ImpactSettings.Duration, false);
     }
 }
 
-void UVFX_ImpactEffectManager::SpawnFootstepEffect(FVector Location, float DinosaurSize, EVFX_SurfaceType SurfaceType)
+void AVFX_ImpactEffectManager::RemoveOldestEffect()
 {
-    // Detect surface type if not specified
-    if (SurfaceType == EVFX_SurfaceType::Dirt)
+    if (ActiveEffects.Num() > 0)
     {
-        SurfaceType = DetectSurfaceType(Location);
-    }
-    
-    // Get footstep effect data
-    FVFX_ImpactEffectData EffectData = GetEffectData(EVFX_ImpactType::Footstep, SurfaceType);
-    
-    // Scale effect based on dinosaur size
-    EffectData.EffectScale *= DinosaurSize;
-    EffectData.VolumeMultiplier *= FMath::Clamp(DinosaurSize, 0.5f, 2.0f);
-    
-    // Spawn the effect
-    SpawnImpactEffect(EVFX_ImpactType::Footstep, SurfaceType, Location, FVector::UpVector);
-    
-    UE_LOG(LogTemp, Log, TEXT("VFX: Spawned footstep effect for size %.2f dinosaur"), DinosaurSize);
-}
-
-void UVFX_ImpactEffectManager::SetEffectData(EVFX_ImpactType ImpactType, EVFX_SurfaceType SurfaceType, const FVFX_ImpactEffectData& EffectData)
-{
-    if (!ImpactEffects.Contains(ImpactType))
-    {
-        ImpactEffects.Add(ImpactType, TMap<EVFX_SurfaceType, FVFX_ImpactEffectData>());
-    }
-    
-    ImpactEffects[ImpactType].Add(SurfaceType, EffectData);
-    
-    UE_LOG(LogTemp, Log, TEXT("VFX: Configured effect data for impact type %d, surface type %d"), 
-           (int32)ImpactType, (int32)SurfaceType);
-}
-
-void UVFX_ImpactEffectManager::InitializeDefaultEffects()
-{
-    UE_LOG(LogTemp, Log, TEXT("VFX: Initializing default impact effects"));
-    
-    // Initialize footstep effects for different surfaces
-    for (int32 SurfaceIndex = 0; SurfaceIndex < (int32)EVFX_SurfaceType::Snow + 1; ++SurfaceIndex)
-    {
-        EVFX_SurfaceType Surface = (EVFX_SurfaceType)SurfaceIndex;
+        UNiagaraComponent* OldestEffect = ActiveEffects[0];
+        ActiveEffects.RemoveAt(0);
         
-        FVFX_ImpactEffectData FootstepData;
-        FootstepData.ParticleEffect = DefaultDustEffect;
-        FootstepData.ImpactSound = DefaultFootstepSound;
-        FootstepData.EffectScale = 1.0f;
-        FootstepData.VolumeMultiplier = 0.7f;
-        FootstepData.bSpawnDecal = true;
-        
-        // Adjust settings per surface
-        switch (Surface)
+        if (OldestEffect && IsValid(OldestEffect))
         {
-            case EVFX_SurfaceType::Water:
-                FootstepData.ParticleEffect = DefaultWaterSplash;
-                FootstepData.VolumeMultiplier = 0.5f;
-                FootstepData.bSpawnDecal = false;
-                break;
-            case EVFX_SurfaceType::Rock:
-                FootstepData.ParticleEffect = DefaultRockImpact;
-                FootstepData.VolumeMultiplier = 0.8f;
-                FootstepData.EffectScale = 0.7f;
-                break;
-            case EVFX_SurfaceType::Snow:
-                FootstepData.VolumeMultiplier = 0.3f;
-                FootstepData.EffectScale = 1.2f;
-                break;
-            default:
-                break;
+            OldestEffect->DestroyComponent();
         }
-        
-        SetEffectData(EVFX_ImpactType::Footstep, Surface, FootstepData);
     }
-    
-    // Initialize weapon hit effects
-    FVFX_ImpactEffectData WeaponHitData;
-    WeaponHitData.ParticleEffect = DefaultRockImpact;
-    WeaponHitData.ImpactSound = DefaultImpactSound;
-    WeaponHitData.EffectScale = 0.8f;
-    WeaponHitData.VolumeMultiplier = 1.0f;
-    WeaponHitData.bSpawnDecal = true;
-    
-    for (int32 SurfaceIndex = 0; SurfaceIndex < (int32)EVFX_SurfaceType::Snow + 1; ++SurfaceIndex)
-    {
-        SetEffectData(EVFX_ImpactType::WeaponHit, (EVFX_SurfaceType)SurfaceIndex, WeaponHitData);
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("VFX: Default effects initialization complete"));
 }
 
-FVFX_ImpactEffectData UVFX_ImpactEffectManager::GetEffectData(EVFX_ImpactType ImpactType, EVFX_SurfaceType SurfaceType)
+void AVFX_ImpactEffectManager::CleanupExpiredEffects()
 {
-    if (ImpactEffects.Contains(ImpactType) && ImpactEffects[ImpactType].Contains(SurfaceType))
+    for (int32 i = ActiveEffects.Num() - 1; i >= 0; i--)
     {
-        return ImpactEffects[ImpactType][SurfaceType];
+        UNiagaraComponent* Effect = ActiveEffects[i];
+        if (!Effect || !IsValid(Effect) || !Effect->IsActive())
+        {
+            ActiveEffects.RemoveAt(i);
+            if (Effect && IsValid(Effect))
+            {
+                Effect->DestroyComponent();
+            }
+        }
     }
-    
-    // Return default effect data if specific combination not found
-    FVFX_ImpactEffectData DefaultData;
-    DefaultData.ParticleEffect = DefaultDustEffect;
-    DefaultData.ImpactSound = DefaultFootstepSound;
-    DefaultData.EffectScale = 1.0f;
-    DefaultData.VolumeMultiplier = 0.5f;
-    DefaultData.bSpawnDecal = false;
-    
-    UE_LOG(LogTemp, Warning, TEXT("VFX: Using default effect data for impact %d, surface %d"), 
-           (int32)ImpactType, (int32)SurfaceType);
-    
-    return DefaultData;
-}
-
-EVFX_SurfaceType UVFX_ImpactEffectManager::DetectSurfaceType(FVector Location)
-{
-    // Simple biome-based surface detection using coordinates from Hugo's memories
-    float X = Location.X;
-    float Y = Location.Y;
-    float Z = Location.Z;
-    
-    // Pantano (sudoeste) - X(-77500 a -25000), Y(-76500 a -15000)
-    if (X >= -77500.0f && X <= -25000.0f && Y >= -76500.0f && Y <= -15000.0f)
-    {
-        return (Z < 50.0f) ? EVFX_SurfaceType::Mud : EVFX_SurfaceType::Water;
-    }
-    
-    // Floresta (noroeste) - X(-77500 a -15000), Y(15000 a 76500)
-    if (X >= -77500.0f && X <= -15000.0f && Y >= 15000.0f && Y <= 76500.0f)
-    {
-        return EVFX_SurfaceType::Grass;
-    }
-    
-    // Deserto (leste) - X(25000 a 79500), Y(-30000 a 30000)
-    if (X >= 25000.0f && X <= 79500.0f && Y >= -30000.0f && Y <= 30000.0f)
-    {
-        return EVFX_SurfaceType::Sand;
-    }
-    
-    // Montanha Nevada (nordeste) - X(15000 a 79500), Y(20000 a 76500)
-    if (X >= 15000.0f && X <= 79500.0f && Y >= 20000.0f && Y <= 76500.0f && Z > 300.0f)
-    {
-        return EVFX_SurfaceType::Snow;
-    }
-    
-    // Savana (centro) - default
-    return EVFX_SurfaceType::Dirt;
 }
