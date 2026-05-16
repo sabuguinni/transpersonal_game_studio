@@ -4,99 +4,96 @@
 #include "Engine/GameInstanceSubsystem.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
-#include "Components/ActorComponent.h"
+#include "Components/StaticMeshComponent.h"
 #include "Build_FinalIntegrationOrchestrator.generated.h"
 
-UENUM(BlueprintType)
-enum class EBuild_SystemStatus : uint8
-{
-    Unknown     UMETA(DisplayName = "Unknown"),
-    Healthy     UMETA(DisplayName = "Healthy"),
-    Warning     UMETA(DisplayName = "Warning"),
-    Critical    UMETA(DisplayName = "Critical"),
-    Failed      UMETA(DisplayName = "Failed")
-};
-
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FBuild_SystemHealthReport
+struct TRANSPERSONALGAME_API FBuild_SystemStatus
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "System Health")
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
     FString SystemName;
 
-    UPROPERTY(BlueprintReadOnly, Category = "System Health")
-    EBuild_SystemStatus Status;
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    bool bIsOperational;
 
-    UPROPERTY(BlueprintReadOnly, Category = "System Health")
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
     int32 ActorCount;
 
-    UPROPERTY(BlueprintReadOnly, Category = "System Health")
-    float PerformanceMetric;
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    FString LastValidationTime;
 
-    UPROPERTY(BlueprintReadOnly, Category = "System Health")
-    FString LastError;
-
-    UPROPERTY(BlueprintReadOnly, Category = "System Health")
-    FDateTime LastChecked;
-
-    FBuild_SystemHealthReport()
+    FBuild_SystemStatus()
     {
         SystemName = TEXT("Unknown");
-        Status = EBuild_SystemStatus::Unknown;
+        bIsOperational = false;
         ActorCount = 0;
-        PerformanceMetric = 0.0f;
-        LastError = TEXT("");
-        LastChecked = FDateTime::Now();
+        LastValidationTime = TEXT("Never");
     }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FBuild_IntegrationMetrics
+struct TRANSPERSONALGAME_API FBuild_BiomeStatus
 {
     GENERATED_BODY()
 
     UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    int32 TotalActors;
+    FString BiomeName;
 
     UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    int32 CharacterActors;
+    FVector CenterLocation;
 
     UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    int32 DinosaurActors;
+    int32 PopulationCount;
 
     UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    int32 EnvironmentActors;
+    bool bMeetsMinimumRequirement;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    int32 SystemActors;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    float AverageFrameTime;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    float MemoryUsageMB;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    bool bAllSystemsOperational;
-
-    FBuild_IntegrationMetrics()
+    FBuild_BiomeStatus()
     {
-        TotalActors = 0;
-        CharacterActors = 0;
-        DinosaurActors = 0;
-        EnvironmentActors = 0;
-        SystemActors = 0;
-        AverageFrameTime = 0.0f;
-        MemoryUsageMB = 0.0f;
-        bAllSystemsOperational = false;
+        BiomeName = TEXT("Unknown");
+        CenterLocation = FVector::ZeroVector;
+        PopulationCount = 0;
+        bMeetsMinimumRequirement = false;
+    }
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FBuild_IntegrationReport
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    TArray<FBuild_SystemStatus> SystemStatuses;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    TArray<FBuild_BiomeStatus> BiomeStatuses;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    int32 TotalActorCount;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    bool bBuildStable;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    FString BuildVersion;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    FDateTime LastIntegrationTime;
+
+    FBuild_IntegrationReport()
+    {
+        TotalActorCount = 0;
+        bBuildStable = false;
+        BuildVersion = TEXT("PROD_CYCLE_AUTO_20260516_005");
+        LastIntegrationTime = FDateTime::Now();
     }
 };
 
 /**
- * Final Integration Orchestrator - Manages and validates all game systems
- * Ensures proper integration between all 18 agent outputs
- * Provides real-time health monitoring and performance metrics
+ * Final Integration Orchestrator - Manages the complete build integration process
+ * Validates all systems, coordinates biome population, and ensures build stability
  */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UBuild_FinalIntegrationOrchestrator : public UGameInstanceSubsystem
@@ -110,71 +107,65 @@ public:
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
-    // Core Integration Functions
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    void PerformFullSystemValidation();
+    UFUNCTION(BlueprintCallable, Category = "Integration", CallInEditor = true)
+    FBuild_IntegrationReport GenerateIntegrationReport();
+
+    UFUNCTION(BlueprintCallable, Category = "Integration", CallInEditor = true)
+    bool ValidateAllSystems();
+
+    UFUNCTION(BlueprintCallable, Category = "Integration", CallInEditor = true)
+    bool ValidateBiomePopulation();
+
+    UFUNCTION(BlueprintCallable, Category = "Integration", CallInEditor = true)
+    void OrchestrateFinalBuild();
 
     UFUNCTION(BlueprintCallable, Category = "Integration")
-    FBuild_IntegrationMetrics GetCurrentIntegrationMetrics();
+    FBuild_SystemStatus GetSystemStatus(const FString& SystemName);
 
     UFUNCTION(BlueprintCallable, Category = "Integration")
-    TArray<FBuild_SystemHealthReport> GetAllSystemHealthReports();
+    FBuild_BiomeStatus GetBiomeStatus(const FString& BiomeName);
 
     UFUNCTION(BlueprintCallable, Category = "Integration")
-    bool ValidateSystemIntegrity(const FString& SystemName);
+    bool IsSystemOperational(const FString& SystemName);
 
     UFUNCTION(BlueprintCallable, Category = "Integration")
-    void ForceSystemReconciliation();
+    int32 GetTotalActorCount();
 
-    // Performance Monitoring
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    float GetCurrentFrameTime();
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    float GetMemoryUsage();
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    bool IsPerformanceWithinLimits();
-
-    // System Health Checks
-    UFUNCTION(BlueprintCallable, Category = "Health")
-    EBuild_SystemStatus CheckWorldGenerationHealth();
-
-    UFUNCTION(BlueprintCallable, Category = "Health")
-    EBuild_SystemStatus CheckCharacterSystemHealth();
-
-    UFUNCTION(BlueprintCallable, Category = "Health")
-    EBuild_SystemStatus CheckDinosaurAIHealth();
-
-    UFUNCTION(BlueprintCallable, Category = "Health")
-    EBuild_SystemStatus CheckEnvironmentHealth();
-
-    // Emergency Protocols
-    UFUNCTION(BlueprintCallable, Category = "Emergency")
-    void TriggerEmergencyShutdown(const FString& Reason);
-
-    UFUNCTION(BlueprintCallable, Category = "Emergency")
-    bool AttemptSystemRecovery(const FString& SystemName);
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    bool IsBuildStable();
 
 protected:
     UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    TArray<FBuild_SystemHealthReport> SystemHealthReports;
+    FBuild_IntegrationReport CurrentReport;
 
     UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    FBuild_IntegrationMetrics CurrentMetrics;
+    TMap<FString, FBuild_SystemStatus> SystemStatusMap;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    TMap<FString, FBuild_BiomeStatus> BiomeStatusMap;
 
     UPROPERTY(BlueprintReadOnly, Category = "Integration")
     bool bIntegrationComplete;
 
     UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    FDateTime LastFullValidation;
+    FDateTime LastValidationTime;
 
 private:
-    void UpdateSystemHealthReport(const FString& SystemName, EBuild_SystemStatus Status, const FString& ErrorMessage = TEXT(""));
-    void CollectPerformanceMetrics();
-    void ValidateActorCounts();
-    void CheckSystemDependencies();
+    void InitializeBiomeDefinitions();
+    void ValidateSystemIntegrity();
+    void ValidateWorldPopulation();
+    void ValidateVFXSystems();
+    void ValidateLightingSystems();
+    void ValidateCharacterSystems();
+    void ValidatePhysicsSystems();
+    void ValidateAudioSystems();
     
-    FTimerHandle ValidationTimerHandle;
-    float ValidationInterval;
+    FBuild_SystemStatus CreateSystemStatus(const FString& SystemName, bool bOperational, int32 ActorCount);
+    FBuild_BiomeStatus CreateBiomeStatus(const FString& BiomeName, const FVector& Location, int32 Population);
+    
+    bool CheckSystemHealth(const FString& SystemName);
+    int32 CountActorsInBiome(const FVector& BiomeCenter, float Radius = 25000.0f);
+    
+    static constexpr int32 MINIMUM_BIOME_POPULATION = 500;
+    static constexpr int32 MINIMUM_TOTAL_ACTORS = 2500;
 };
