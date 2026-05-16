@@ -1,12 +1,12 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Animation/AnimBlueprint.h"
 #include "Animation/AnimInstance.h"
 #include "Engine/Engine.h"
+#include "Components/SkeletalMeshComponent.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
-#include "Animation/AnimMontage.h"
-#include "Animation/BlendSpace.h"
 #include "Anim_LocomotionBlueprint.generated.h"
 
 UENUM(BlueprintType)
@@ -15,41 +15,55 @@ enum class EAnim_LocomotionState : uint8
     Idle        UMETA(DisplayName = "Idle"),
     Walking     UMETA(DisplayName = "Walking"),
     Running     UMETA(DisplayName = "Running"),
-    Crouching   UMETA(DisplayName = "Crouching"),
     Jumping     UMETA(DisplayName = "Jumping"),
     Falling     UMETA(DisplayName = "Falling"),
-    Landing     UMETA(DisplayName = "Landing")
+    Landing     UMETA(DisplayName = "Landing"),
+    Crouching   UMETA(DisplayName = "Crouching")
 };
 
 USTRUCT(BlueprintType)
-struct FAnim_MovementData
+struct TRANSPERSONALGAME_API FAnim_LocomotionData
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Movement")
-    float Speed = 0.0f;
+    UPROPERTY(BlueprintReadOnly, Category = "Locomotion")
+    float Speed;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Movement")
-    float Direction = 0.0f;
+    UPROPERTY(BlueprintReadOnly, Category = "Locomotion")
+    float Direction;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Movement")
-    bool bIsInAir = false;
+    UPROPERTY(BlueprintReadOnly, Category = "Locomotion")
+    bool bIsInAir;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Movement")
-    bool bIsCrouching = false;
+    UPROPERTY(BlueprintReadOnly, Category = "Locomotion")
+    bool bIsCrouching;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Movement")
-    float JumpHeight = 0.0f;
+    UPROPERTY(BlueprintReadOnly, Category = "Locomotion")
+    EAnim_LocomotionState CurrentState;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Movement")
-    EAnim_LocomotionState CurrentState = EAnim_LocomotionState::Idle;
+    UPROPERTY(BlueprintReadOnly, Category = "Locomotion")
+    float JumpHeight;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Locomotion")
+    float FallVelocity;
+
+    FAnim_LocomotionData()
+    {
+        Speed = 0.0f;
+        Direction = 0.0f;
+        bIsInAir = false;
+        bIsCrouching = false;
+        CurrentState = EAnim_LocomotionState::Idle;
+        JumpHeight = 0.0f;
+        FallVelocity = 0.0f;
+    }
 };
 
 /**
- * Animation Blueprint for prehistoric character locomotion
- * Handles state transitions and movement blending for survival gameplay
+ * Animation Blueprint for character locomotion system
+ * Handles idle, walk, run, jump, and landing animations
  */
-UCLASS(BlueprintType, Blueprintable)
+UCLASS(Blueprintable, BlueprintType)
 class TRANSPERSONALGAME_API UAnim_LocomotionBlueprint : public UAnimInstance
 {
     GENERATED_BODY()
@@ -57,72 +71,78 @@ class TRANSPERSONALGAME_API UAnim_LocomotionBlueprint : public UAnimInstance
 public:
     UAnim_LocomotionBlueprint();
 
-    // Animation Blueprint interface
     virtual void NativeInitializeAnimation() override;
     virtual void NativeUpdateAnimation(float DeltaTimeX) override;
 
 protected:
-    // Movement data for animation logic
-    UPROPERTY(BlueprintReadOnly, Category = "Animation Data", meta = (AllowPrivateAccess = "true"))
-    FAnim_MovementData MovementData;
+    UPROPERTY(BlueprintReadOnly, Category = "Animation")
+    FAnim_LocomotionData LocomotionData;
 
-    // Character reference
-    UPROPERTY(BlueprintReadOnly, Category = "Character", meta = (AllowPrivateAccess = "true"))
+    UPROPERTY(BlueprintReadOnly, Category = "Animation")
     class ACharacter* OwnerCharacter;
 
-    // Movement component reference
-    UPROPERTY(BlueprintReadOnly, Category = "Character", meta = (AllowPrivateAccess = "true"))
+    UPROPERTY(BlueprintReadOnly, Category = "Animation")
     class UCharacterMovementComponent* MovementComponent;
 
-    // Animation assets
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Animation Assets")
-    class UBlendSpace* LocomotionBlendSpace;
+    // Animation thresholds
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Settings")
+    float WalkThreshold;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Animation Assets")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Settings")
+    float RunThreshold;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Settings")
+    float JumpThreshold;
+
+    // Animation sequences
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Assets")
     class UAnimSequence* IdleAnimation;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Animation Assets")
-    class UAnimMontage* JumpMontage;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Assets")
+    class UAnimSequence* WalkAnimation;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Animation Assets")
-    class UAnimMontage* LandingMontage;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Assets")
+    class UAnimSequence* RunAnimation;
 
-    // Animation parameters
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Animation Settings")
-    float WalkSpeedThreshold = 100.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Assets")
+    class UAnimSequence* JumpStartAnimation;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Animation Settings")
-    float RunSpeedThreshold = 300.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Assets")
+    class UAnimSequence* JumpLoopAnimation;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Animation Settings")
-    float MovementInterpolationSpeed = 10.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Assets")
+    class UAnimSequence* JumpEndAnimation;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Assets")
+    class UAnimSequence* CrouchIdleAnimation;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Assets")
+    class UAnimSequence* CrouchWalkAnimation;
 
 private:
-    // Internal state tracking
-    EAnim_LocomotionState PreviousState;
-    float StateChangeTime;
-    bool bWasInAir;
-
-    // Helper functions
-    void UpdateMovementData();
-    void UpdateLocomotionState();
-    EAnim_LocomotionState CalculateDesiredState() const;
-    void HandleStateTransition(EAnim_LocomotionState NewState);
+    void UpdateLocomotionData();
+    void UpdateAnimationState();
+    EAnim_LocomotionState CalculateLocomotionState() const;
 
 public:
-    // Blueprint callable functions
     UFUNCTION(BlueprintCallable, Category = "Animation")
-    void PlayJumpAnimation();
-
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    void PlayLandingAnimation();
+    void SetAnimationSequence(EAnim_LocomotionState State, UAnimSequence* Animation);
 
     UFUNCTION(BlueprintPure, Category = "Animation")
-    bool IsMoving() const { return MovementData.Speed > 10.0f; }
+    FAnim_LocomotionData GetLocomotionData() const { return LocomotionData; }
 
     UFUNCTION(BlueprintPure, Category = "Animation")
-    bool IsRunning() const { return MovementData.Speed > RunSpeedThreshold; }
+    bool ShouldPlayIdleAnimation() const;
 
     UFUNCTION(BlueprintPure, Category = "Animation")
-    EAnim_LocomotionState GetCurrentState() const { return MovementData.CurrentState; }
+    bool ShouldPlayWalkAnimation() const;
+
+    UFUNCTION(BlueprintPure, Category = "Animation")
+    bool ShouldPlayRunAnimation() const;
+
+    UFUNCTION(BlueprintPure, Category = "Animation")
+    bool ShouldPlayJumpAnimation() const;
+
+    UFUNCTION(BlueprintPure, Category = "Animation")
+    bool ShouldPlayCrouchAnimation() const;
 };
