@@ -1,64 +1,11 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
-#include "Engine/Engine.h"
-#include "Components/AudioComponent.h"
-#include "Sound/SoundCue.h"
+#include "Subsystems/GameInstanceSubsystem.h"
+#include "Engine/DataTable.h"
 #include "../SharedTypes.h"
+#include "DialogueSystem.h"
 #include "NarrativeManager.generated.h"
-
-UENUM(BlueprintType)
-enum class ENarr_StoryState : uint8
-{
-    Introduction,
-    FirstHunt,
-    PackEncounter,
-    ResourceScarcity,
-    TribalConflict,
-    SeasonalMigration,
-    FinalSurvival
-};
-
-UENUM(BlueprintType)
-enum class ENarr_DialogueType : uint8
-{
-    Narration,
-    Warning,
-    Instruction,
-    Observation,
-    Emergency
-};
-
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FNarr_DialogueLine
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    FString SpeakerName;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    FString DialogueText;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    ENarr_DialogueType DialogueType;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    float Duration;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    TSoftObjectPtr<USoundCue> VoiceClip;
-
-    FNarr_DialogueLine()
-    {
-        SpeakerName = TEXT("Narrator");
-        DialogueText = TEXT("");
-        DialogueType = ENarr_DialogueType::Narration;
-        Duration = 5.0f;
-        VoiceClip = nullptr;
-    }
-};
 
 USTRUCT(BlueprintType)
 struct TRANSPERSONALGAME_API FNarr_StoryEvent
@@ -66,100 +13,136 @@ struct TRANSPERSONALGAME_API FNarr_StoryEvent
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    FString EventID;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
     FString EventName;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    ENarr_StoryState RequiredState;
+    FString EventDescription;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    TArray<FNarr_DialogueLine> DialogueLines;
+    bool bIsCompleted;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    bool bIsTriggered;
+    TArray<FString> Prerequisites;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    FVector TriggerLocation;
+    TArray<FString> UnlockedEvents;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    float TriggerRadius;
+    FString AssociatedDialogue;
 
     FNarr_StoryEvent()
     {
-        EventName = TEXT("DefaultEvent");
-        RequiredState = ENarr_StoryState::Introduction;
-        bIsTriggered = false;
-        TriggerLocation = FVector::ZeroVector;
-        TriggerRadius = 500.0f;
+        EventID = TEXT("");
+        EventName = TEXT("");
+        EventDescription = TEXT("");
+        bIsCompleted = false;
+        AssociatedDialogue = TEXT("");
     }
 };
 
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API ANarrativeManager : public AActor
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FNarr_CharacterProfile
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
+    FString CharacterID;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
+    FString CharacterName;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
+    FString CharacterRole;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
+    FString CharacterBackground;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
+    TArray<FString> AvailableDialogues;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
+    FVector SpawnLocation;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
+    bool bIsAlive;
+
+    FNarr_CharacterProfile()
+    {
+        CharacterID = TEXT("");
+        CharacterName = TEXT("");
+        CharacterRole = TEXT("");
+        CharacterBackground = TEXT("");
+        SpawnLocation = FVector::ZeroVector;
+        bIsAlive = true;
+    }
+};
+
+UCLASS()
+class TRANSPERSONALGAME_API UNarrativeManager : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
 public:
-    ANarrativeManager();
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
 
 protected:
-    virtual void BeginPlay() override;
-    virtual void Tick(float DeltaTime) override;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    ENarr_StoryState CurrentStoryState;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    UPROPERTY(BlueprintReadOnly, Category = "Narrative")
     TArray<FNarr_StoryEvent> StoryEvents;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    float DialogueTimer;
+    UPROPERTY(BlueprintReadOnly, Category = "Narrative")
+    TArray<FNarr_CharacterProfile> Characters;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    bool bIsPlayingDialogue;
+    UPROPERTY(BlueprintReadOnly, Category = "Narrative")
+    FString CurrentStoryPhase;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    class UAudioComponent* VoiceAudioComponent;
+    UPROPERTY(BlueprintReadOnly, Category = "Narrative")
+    int32 DaysSurvived;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    float StoryProgressionTimer;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    int32 CurrentDialogueIndex;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    FNarr_StoryEvent* CurrentStoryEvent;
+    UPROPERTY(BlueprintReadOnly, Category = "Narrative")
+    TArray<FString> CompletedEvents;
 
 public:
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void TriggerStoryEvent(const FString& EventName);
+    void TriggerStoryEvent(const FString& EventID);
 
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void AdvanceStoryState();
+    bool IsEventCompleted(const FString& EventID);
 
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void PlayDialogueLine(const FNarr_DialogueLine& DialogueLine);
+    TArray<FNarr_StoryEvent> GetAvailableEvents();
 
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void CheckPlayerProximityToEvents();
+    void AdvanceStoryPhase(const FString& NewPhase);
 
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    ENarr_StoryState GetCurrentStoryState() const;
+    FNarr_CharacterProfile GetCharacterProfile(const FString& CharacterID);
 
     UFUNCTION(BlueprintCallable, Category = "Narrative")
+    void RegisterCharacter(const FNarr_CharacterProfile& NewCharacter);
+
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    TArray<FString> GetCharacterDialogues(const FString& CharacterID);
+
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    void IncrementDaysSurvived();
+
+    UFUNCTION(BlueprintPure, Category = "Narrative")
+    int32 GetDaysSurvived() const { return DaysSurvived; }
+
+    UFUNCTION(BlueprintPure, Category = "Narrative")
+    FString GetCurrentStoryPhase() const { return CurrentStoryPhase; }
+
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    void SaveNarrativeProgress();
+
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    void LoadNarrativeProgress();
+
+private:
     void InitializeStoryEvents();
-
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    bool IsDialoguePlaying() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void StopCurrentDialogue();
-
-    UFUNCTION(BlueprintImplementableEvent, Category = "Narrative")
-    void OnStoryStateChanged(ENarr_StoryState NewState);
-
-    UFUNCTION(BlueprintImplementableEvent, Category = "Narrative")
-    void OnDialogueStarted(const FNarr_DialogueLine& DialogueLine);
-
-    UFUNCTION(BlueprintImplementableEvent, Category = "Narrative")
-    void OnDialogueFinished();
+    void InitializeCharacters();
+    bool CheckEventPrerequisites(const FNarr_StoryEvent& Event);
 };
