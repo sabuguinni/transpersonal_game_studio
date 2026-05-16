@@ -1,297 +1,394 @@
 #include "StudioDirectorSystem.h"
-#include "Engine/Engine.h"
 #include "Engine/World.h"
+#include "Engine/Engine.h"
 #include "EngineUtils.h"
-#include "Kismet/GameplayStatics.h"
+#include "GameFramework/Character.h"
+#include "Landscape/Landscape.h"
+#include "Components/StaticMeshComponent.h"
+#include "Engine/PointLight.h"
+#include "Components/PointLightComponent.h"
 
-AStudioDirectorSystem::AStudioDirectorSystem()
+UStudioDirectorComponent::UStudioDirectorComponent()
 {
-    PrimaryActorTick.bCanEverTick = true;
-    
-    RootSceneComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootSceneComponent"));
-    RootComponent = RootSceneComponent;
-    
-    bPlayablePrototypeReady = false;
-    OverallProgress = 0.0f;
+    PrimaryComponentTick.bCanEverTick = true;
+    bAutoUpdateMetrics = true;
+    MetricsUpdateInterval = 5.0f;
+    LastMetricsUpdate = 0.0f;
 }
 
-void AStudioDirectorSystem::BeginPlay()
+void UStudioDirectorComponent::BeginPlay()
 {
     Super::BeginPlay();
     
     InitializeAgentTasks();
-    InitializeBiomeStatuses();
+    UpdateProductionMetrics();
     
-    UE_LOG(LogTemp, Warning, TEXT("Studio Director System initialized"));
+    UE_LOG(LogTemp, Warning, TEXT("Studio Director Component initialized"));
 }
 
-void AStudioDirectorSystem::Tick(float DeltaTime)
+void UStudioDirectorComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
-    Super::Tick(DeltaTime);
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
     
-    // Update progress every 5 seconds
-    static float UpdateTimer = 0.0f;
-    UpdateTimer += DeltaTime;
-    
-    if (UpdateTimer >= 5.0f)
+    if (bAutoUpdateMetrics)
     {
-        CheckBiomePopulation();
-        ValidatePlayablePrototype();
-        OverallProgress = CalculateOverallProgress();
-        UpdateTimer = 0.0f;
-    }
-}
-
-void AStudioDirectorSystem::InitializeAgentTasks()
-{
-    AgentTasks.Empty();
-    
-    // Critical tasks for playable prototype
-    TArray<TPair<FString, FString>> TaskDefinitions = {
-        {TEXT("Agent_02_EngineArchitect"), TEXT("Validate core systems compilation and module dependencies")},
-        {TEXT("Agent_03_CoreSystems"), TEXT("Implement physics collision for character-dinosaur interaction")},
-        {TEXT("Agent_05_WorldGenerator"), TEXT("Populate 5 biomes with terrain actors (500+ per biome)")},
-        {TEXT("Agent_06_EnvironmentArt"), TEXT("Spawn vegetation and rocks using FBX pipeline test")},
-        {TEXT("Agent_07_Architecture"), TEXT("Create primitive shelters and landmarks for navigation")},
-        {TEXT("Agent_08_Lighting"), TEXT("Establish Cretaceous atmosphere with proper lighting")},
-        {TEXT("Agent_09_CharacterArtist"), TEXT("Create dinosaur actors with collision and basic AI")},
-        {TEXT("Agent_10_Animation"), TEXT("Implement character movement animations and IK")},
-        {TEXT("Agent_11_NPCBehavior"), TEXT("Basic dinosaur behavior trees for survival gameplay")},
-        {TEXT("Agent_12_CombatAI"), TEXT("Implement survival HUD (health/hunger/thirst bars)")},
-        {TEXT("Agent_13_CrowdSim"), TEXT("Optimize mass simulation for 500+ actors per biome")},
-        {TEXT("Agent_14_QuestDesigner"), TEXT("Create first survival objective: find water source")},
-        {TEXT("Agent_15_Narrative"), TEXT("Write survival tutorial and basic lore snippets")},
-        {TEXT("Agent_16_Audio"), TEXT("Ambient prehistoric soundscape and dinosaur calls")},
-        {TEXT("Agent_17_VFX"), TEXT("Basic particle effects for environmental atmosphere")},
-        {TEXT("Agent_18_QA"), TEXT("Test character movement and basic survival mechanics")},
-        {TEXT("Agent_19_Integration"), TEXT("Ensure all systems work together in MinPlayableMap")}
-    };
-    
-    for (int32 i = 0; i < TaskDefinitions.Num(); i++)
-    {
-        FDir_AgentTask NewTask;
-        NewTask.AgentID = TaskDefinitions[i].Key;
-        NewTask.TaskDescription = TaskDefinitions[i].Value;
-        NewTask.Priority = i < 5 ? 10 : 5; // First 5 are high priority
-        NewTask.bIsCompleted = false;
-        NewTask.CompletionPercentage = 0.0f;
-        
-        AgentTasks.Add(NewTask);
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("Initialized %d agent tasks"), AgentTasks.Num());
-}
-
-void AStudioDirectorSystem::InitializeBiomeStatuses()
-{
-    BiomeStatuses.Empty();
-    
-    TArray<TPair<FString, FVector>> BiomeDefinitions = {
-        {TEXT("Savana"), FVector(0, 0, 0)},
-        {TEXT("Pantano"), FVector(-50000, -45000, 0)},
-        {TEXT("Floresta"), FVector(-45000, 40000, 0)},
-        {TEXT("Deserto"), FVector(55000, 0, 0)},
-        {TEXT("Montanha"), FVector(40000, 50000, 0)}
-    };
-    
-    for (const auto& BiomeDef : BiomeDefinitions)
-    {
-        FDir_BiomeStatus NewBiome;
-        NewBiome.BiomeName = BiomeDef.Key;
-        NewBiome.BiomeLocation = BiomeDef.Value;
-        NewBiome.ActorCount = 0;
-        NewBiome.bIsPopulated = false;
-        
-        BiomeStatuses.Add(NewBiome);
-    }
-}
-
-void AStudioDirectorSystem::UpdateAgentTask(const FString& AgentID, float Progress, bool bCompleted)
-{
-    for (FDir_AgentTask& Task : AgentTasks)
-    {
-        if (Task.AgentID == AgentID)
+        LastMetricsUpdate += DeltaTime;
+        if (LastMetricsUpdate >= MetricsUpdateInterval)
         {
-            Task.CompletionPercentage = FMath::Clamp(Progress, 0.0f, 100.0f);
-            Task.bIsCompleted = bCompleted || (Progress >= 100.0f);
-            
-            UE_LOG(LogTemp, Warning, TEXT("Updated task for %s: %.1f%% complete"), 
-                   *AgentID, Task.CompletionPercentage);
-            break;
+            UpdateProductionMetrics();
+            LastMetricsUpdate = 0.0f;
         }
     }
 }
 
-void AStudioDirectorSystem::CheckBiomePopulation()
+void UStudioDirectorComponent::UpdateProductionMetrics()
+{
+    if (!GetWorld())
+    {
+        return;
+    }
+
+    // Reset metrics
+    CurrentMetrics = FDir_ProductionMetrics();
+    
+    // Count all actors
+    CountActorsByType();
+    CountActorsByBiome();
+    
+    // Calculate overall progress
+    CurrentMetrics.OverallProgress = CalculateOverallProgress();
+    
+    UE_LOG(LogTemp, Log, TEXT("Studio Director: Updated production metrics - Total actors: %d"), CurrentMetrics.TotalActorsInWorld);
+}
+
+void UStudioDirectorComponent::CountActorsByType()
 {
     UWorld* World = GetWorld();
-    if (!World) return;
-    
-    for (FDir_BiomeStatus& Biome : BiomeStatuses)
+    if (!World)
     {
-        int32 ActorCount = 0;
-        
-        // Count actors within 10km of biome center
-        for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+        return;
+    }
+
+    CurrentMetrics.TotalActorsInWorld = 0;
+    CurrentMetrics.CharacterActors = 0;
+    CurrentMetrics.DinosaurActors = 0;
+    CurrentMetrics.TerrainActors = 0;
+
+    for (TActorIterator<AActor> ActorIterator(World); ActorIterator; ++ActorIterator)
+    {
+        AActor* Actor = *ActorIterator;
+        if (!Actor || Actor->IsPendingKill())
         {
-            AActor* Actor = *ActorItr;
-            if (!Actor || Actor == this) continue;
-            
-            float Distance = FVector::Dist(Actor->GetActorLocation(), Biome.BiomeLocation);
-            if (Distance <= 1000000.0f) // 10km in UE units
+            continue;
+        }
+
+        CurrentMetrics.TotalActorsInWorld++;
+
+        // Count character actors
+        if (Cast<ACharacter>(Actor))
+        {
+            CurrentMetrics.CharacterActors++;
+        }
+
+        // Count dinosaur actors (by label)
+        FString ActorLabel = Actor->GetActorLabel();
+        if (ActorLabel.Contains(TEXT("Dinosaur")) || 
+            ActorLabel.Contains(TEXT("TRex")) || 
+            ActorLabel.Contains(TEXT("Raptor")) ||
+            ActorLabel.Contains(TEXT("Brachiosaurus")))
+        {
+            CurrentMetrics.DinosaurActors++;
+        }
+
+        // Count terrain actors
+        if (Cast<ALandscape>(Actor) || ActorLabel.Contains(TEXT("Terrain")))
+        {
+            CurrentMetrics.TerrainActors++;
+        }
+    }
+}
+
+void UStudioDirectorComponent::CountActorsByBiome()
+{
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        return;
+    }
+
+    // Biome coordinates from memory ID 709
+    TMap<FString, FVector> BiomeLocations;
+    BiomeLocations.Add(TEXT("Savanna"), FVector(0, 0, 0));
+    BiomeLocations.Add(TEXT("Swamp"), FVector(-50000, -45000, 0));
+    BiomeLocations.Add(TEXT("Forest"), FVector(-45000, 40000, 0));
+    BiomeLocations.Add(TEXT("Desert"), FVector(55000, 0, 0));
+    BiomeLocations.Add(TEXT("Mountains"), FVector(40000, 50000, 0));
+
+    CurrentMetrics.BiomeActorCounts.Empty();
+
+    for (auto& BiomePair : BiomeLocations)
+    {
+        FString BiomeName = BiomePair.Key;
+        FVector BiomeCenter = BiomePair.Value;
+        int32 BiomeActorCount = 0;
+
+        for (TActorIterator<AActor> ActorIterator(World); ActorIterator; ++ActorIterator)
+        {
+            AActor* Actor = *ActorIterator;
+            if (!Actor || Actor->IsPendingKill())
             {
-                ActorCount++;
+                continue;
+            }
+
+            FVector ActorLocation = Actor->GetActorLocation();
+            float Distance = FVector::Dist2D(ActorLocation, BiomeCenter);
+            
+            // Count actors within 10km of biome center
+            if (Distance < 1000000.0f) // 10km in UE units
+            {
+                BiomeActorCount++;
             }
         }
+
+        CurrentMetrics.BiomeActorCounts.Add(BiomeName, BiomeActorCount);
+    }
+}
+
+void UStudioDirectorComponent::InitializeAgentTasks()
+{
+    AgentTasks.Empty();
+
+    // Initialize all 19 agents
+    TArray<FString> AgentNames = {
+        TEXT("Engine_Architect"),
+        TEXT("Core_Systems_Programmer"),
+        TEXT("Performance_Optimizer"),
+        TEXT("Procedural_World_Generator"),
+        TEXT("Environment_Artist"),
+        TEXT("Architecture_Interior_Agent"),
+        TEXT("Lighting_Atmosphere_Agent"),
+        TEXT("Character_Artist_Agent"),
+        TEXT("Animation_Agent"),
+        TEXT("NPC_Behavior_Agent"),
+        TEXT("Combat_Enemy_AI_Agent"),
+        TEXT("Crowd_Traffic_Simulation"),
+        TEXT("Quest_Mission_Designer"),
+        TEXT("Narrative_Dialogue_Agent"),
+        TEXT("Audio_Agent"),
+        TEXT("VFX_Agent"),
+        TEXT("QA_Testing_Agent"),
+        TEXT("Integration_Build_Agent")
+    };
+
+    // Biome task locations
+    TMap<FString, FVector> TaskLocations;
+    TaskLocations.Add(TEXT("Engine_Architect"), FVector(0, 0, 500));
+    TaskLocations.Add(TEXT("Core_Systems_Programmer"), FVector(5000, 0, 200));
+    TaskLocations.Add(TEXT("Procedural_World_Generator"), FVector(-50000, -45000, 100));
+    TaskLocations.Add(TEXT("Environment_Artist"), FVector(-45000, 40000, 100));
+    TaskLocations.Add(TEXT("Architecture_Interior_Agent"), FVector(55000, 0, 100));
+    TaskLocations.Add(TEXT("Lighting_Atmosphere_Agent"), FVector(40000, 50000, 100));
+    TaskLocations.Add(TEXT("Character_Artist_Agent"), FVector(10000, 0, 200));
+    TaskLocations.Add(TEXT("Combat_Enemy_AI_Agent"), FVector(15000, 0, 200));
+
+    for (const FString& AgentName : AgentNames)
+    {
+        FDir_AgentTaskInfo TaskInfo;
+        TaskInfo.AgentName = AgentName;
+        TaskInfo.Status = EDir_AgentStatus::Idle;
+        TaskInfo.CurrentTask = TEXT("Awaiting assignment");
+        TaskInfo.ProgressPercentage = 0.0f;
         
-        Biome.ActorCount = ActorCount;
-        Biome.bIsPopulated = ActorCount >= 500; // Criterion from memory
+        if (TaskLocations.Contains(AgentName))
+        {
+            TaskInfo.TaskLocation = TaskLocations[AgentName];
+        }
+        else
+        {
+            TaskInfo.TaskLocation = FVector::ZeroVector;
+        }
         
-        if (Biome.ActorCount != ActorCount)
-        {
-            UE_LOG(LogTemp, Warning, TEXT("Biome %s: %d actors (target: 500+)"), 
-                   *Biome.BiomeName, ActorCount);
-        }
+        AgentTasks.Add(TaskInfo);
     }
+
+    UE_LOG(LogTemp, Warning, TEXT("Studio Director: Initialized %d agent tasks"), AgentTasks.Num());
 }
 
-void AStudioDirectorSystem::ValidatePlayablePrototype()
+void UStudioDirectorComponent::UpdateAgentStatus(const FString& AgentName, EDir_AgentStatus NewStatus, const FString& TaskDescription)
 {
-    bool bCharacterMovement = ValidateCharacterMovement();
-    bool bDinosaurPresence = ValidateDinosaurPresence();
-    bool bTerrainLighting = ValidateTerrainAndLighting();
-    
-    // Check if at least 3 biomes are populated
-    int32 PopulatedBiomes = 0;
-    for (const FDir_BiomeStatus& Biome : BiomeStatuses)
+    for (FDir_AgentTaskInfo& TaskInfo : AgentTasks)
     {
-        if (Biome.bIsPopulated) PopulatedBiomes++;
-    }
-    
-    bPlayablePrototypeReady = bCharacterMovement && bDinosaurPresence && 
-                             bTerrainLighting && (PopulatedBiomes >= 3);
-    
-    if (bPlayablePrototypeReady)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("PLAYABLE PROTOTYPE READY!"));
-    }
-}
-
-bool AStudioDirectorSystem::ValidateCharacterMovement()
-{
-    // Check if TranspersonalCharacter exists and has movement component
-    UWorld* World = GetWorld();
-    if (!World) return false;
-    
-    // Look for character actors in the world
-    for (TActorIterator<APawn> PawnItr(World); PawnItr; ++PawnItr)
-    {
-        APawn* Pawn = *PawnItr;
-        if (Pawn && Pawn->GetName().Contains(TEXT("TranspersonalCharacter")))
+        if (TaskInfo.AgentName == AgentName)
         {
-            return true; // Found character
-        }
-    }
-    
-    return false;
-}
-
-bool AStudioDirectorSystem::ValidateDinosaurPresence()
-{
-    UWorld* World = GetWorld();
-    if (!World) return false;
-    
-    int32 DinosaurCount = 0;
-    
-    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
-    {
-        AActor* Actor = *ActorItr;
-        if (Actor && (Actor->GetName().Contains(TEXT("Dinosaur")) || 
-                     Actor->GetName().Contains(TEXT("TRex")) ||
-                     Actor->GetName().Contains(TEXT("Raptor")) ||
-                     Actor->GetName().Contains(TEXT("Brachiosaurus"))))
-        {
-            DinosaurCount++;
-        }
-    }
-    
-    return DinosaurCount >= 5; // Need at least 5 dinosaurs
-}
-
-bool AStudioDirectorSystem::ValidateTerrainAndLighting()
-{
-    UWorld* World = GetWorld();
-    if (!World) return false;
-    
-    // Check for directional light (sun)
-    bool bHasDirectionalLight = false;
-    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
-    {
-        AActor* Actor = *ActorItr;
-        if (Actor && Actor->GetName().Contains(TEXT("DirectionalLight")))
-        {
-            bHasDirectionalLight = true;
+            TaskInfo.Status = NewStatus;
+            TaskInfo.CurrentTask = TaskDescription;
+            
+            // Update progress based on status
+            switch (NewStatus)
+            {
+                case EDir_AgentStatus::Idle:
+                    TaskInfo.ProgressPercentage = 0.0f;
+                    break;
+                case EDir_AgentStatus::Working:
+                    TaskInfo.ProgressPercentage = FMath::Clamp(TaskInfo.ProgressPercentage + 25.0f, 0.0f, 75.0f);
+                    break;
+                case EDir_AgentStatus::Completed:
+                    TaskInfo.ProgressPercentage = 100.0f;
+                    break;
+                case EDir_AgentStatus::Blocked:
+                case EDir_AgentStatus::Error:
+                    // Progress remains unchanged for blocked/error states
+                    break;
+            }
+            
+            UE_LOG(LogTemp, Log, TEXT("Studio Director: Updated %s status to %d - %s"), 
+                   *AgentName, (int32)NewStatus, *TaskDescription);
             break;
         }
     }
-    
-    return bHasDirectionalLight;
 }
 
-float AStudioDirectorSystem::CalculateOverallProgress() const
+FDir_AgentTaskInfo UStudioDirectorComponent::GetAgentTaskInfo(const FString& AgentName)
 {
-    if (AgentTasks.Num() == 0) return 0.0f;
-    
-    float TotalProgress = 0.0f;
-    for (const FDir_AgentTask& Task : AgentTasks)
+    for (const FDir_AgentTaskInfo& TaskInfo : AgentTasks)
     {
-        TotalProgress += Task.CompletionPercentage;
+        if (TaskInfo.AgentName == AgentName)
+        {
+            return TaskInfo;
+        }
+    }
+    
+    return FDir_AgentTaskInfo();
+}
+
+TArray<FString> UStudioDirectorComponent::GetBlockedAgents()
+{
+    TArray<FString> BlockedAgents;
+    
+    for (const FDir_AgentTaskInfo& TaskInfo : AgentTasks)
+    {
+        if (TaskInfo.Status == EDir_AgentStatus::Blocked || TaskInfo.Status == EDir_AgentStatus::Error)
+        {
+            BlockedAgents.Add(TaskInfo.AgentName);
+        }
+    }
+    
+    return BlockedAgents;
+}
+
+float UStudioDirectorComponent::CalculateOverallProgress()
+{
+    if (AgentTasks.Num() == 0)
+    {
+        return 0.0f;
+    }
+
+    float TotalProgress = 0.0f;
+    for (const FDir_AgentTaskInfo& TaskInfo : AgentTasks)
+    {
+        TotalProgress += TaskInfo.ProgressPercentage;
     }
     
     return TotalProgress / AgentTasks.Num();
 }
 
-TArray<FDir_AgentTask> AStudioDirectorSystem::GetPendingTasks() const
+void UStudioDirectorComponent::CreateTaskMarkers()
 {
-    TArray<FDir_AgentTask> PendingTasks;
-    
-    for (const FDir_AgentTask& Task : AgentTasks)
+    UWorld* World = GetWorld();
+    if (!World)
     {
-        if (!Task.bIsCompleted)
+        return;
+    }
+
+    for (const FDir_AgentTaskInfo& TaskInfo : AgentTasks)
+    {
+        if (TaskInfo.TaskLocation != FVector::ZeroVector)
         {
-            PendingTasks.Add(Task);
+            APointLight* TaskMarker = World->SpawnActor<APointLight>(TaskInfo.TaskLocation, FRotator::ZeroRotator);
+            if (TaskMarker)
+            {
+                TaskMarker->SetActorLabel(FString::Printf(TEXT("TASK_%s"), *TaskInfo.AgentName));
+                
+                UPointLightComponent* LightComponent = TaskMarker->GetPointLightComponent();
+                if (LightComponent)
+                {
+                    // Color code by agent type
+                    if (TaskInfo.AgentName.Contains(TEXT("Environment")) || TaskInfo.AgentName.Contains(TEXT("World")))
+                    {
+                        LightComponent->SetLightColor(FLinearColor::Green);
+                    }
+                    else if (TaskInfo.AgentName.Contains(TEXT("Character")) || TaskInfo.AgentName.Contains(TEXT("Combat")))
+                    {
+                        LightComponent->SetLightColor(FLinearColor::Red);
+                    }
+                    else
+                    {
+                        LightComponent->SetLightColor(FLinearColor::Blue);
+                    }
+                    
+                    LightComponent->SetIntensity(1000.0f);
+                    LightComponent->SetAttenuationRadius(2000.0f);
+                }
+            }
         }
     }
-    
-    // Sort by priority (higher first)
-    PendingTasks.Sort([](const FDir_AgentTask& A, const FDir_AgentTask& B) {
-        return A.Priority > B.Priority;
-    });
-    
-    return PendingTasks;
 }
 
-void AStudioDirectorSystem::DebugPrintStatus()
+void UStudioDirectorComponent::ValidateBiomePopulation()
 {
-    UE_LOG(LogTemp, Warning, TEXT("=== STUDIO DIRECTOR STATUS ==="));
-    UE_LOG(LogTemp, Warning, TEXT("Overall Progress: %.1f%%"), OverallProgress);
-    UE_LOG(LogTemp, Warning, TEXT("Playable Prototype Ready: %s"), 
-           bPlayablePrototypeReady ? TEXT("YES") : TEXT("NO"));
-    
-    UE_LOG(LogTemp, Warning, TEXT("=== BIOME STATUS ==="));
-    for (const FDir_BiomeStatus& Biome : BiomeStatuses)
+    // Check if each biome meets the 500+ actor requirement from memory
+    for (auto& BiomePair : CurrentMetrics.BiomeActorCounts)
     {
-        UE_LOG(LogTemp, Warning, TEXT("%s: %d actors (%s)"), 
-               *Biome.BiomeName, Biome.ActorCount, 
-               Biome.bIsPopulated ? TEXT("POPULATED") : TEXT("NEEDS WORK"));
+        FString BiomeName = BiomePair.Key;
+        int32 ActorCount = BiomePair.Value;
+        
+        if (ActorCount < 500)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("Studio Director: %s biome has only %d actors (needs 500+)"), 
+                   *BiomeName, ActorCount);
+        }
+        else
+        {
+            UE_LOG(LogTemp, Log, TEXT("Studio Director: %s biome populated with %d actors"), 
+                   *BiomeName, ActorCount);
+        }
     }
+}
+
+// AStudioDirectorActor Implementation
+AStudioDirectorActor::AStudioDirectorActor()
+{
+    PrimaryActorTick.bCanEverTick = true;
     
-    UE_LOG(LogTemp, Warning, TEXT("=== PENDING TASKS ==="));
-    TArray<FDir_AgentTask> Pending = GetPendingTasks();
-    for (int32 i = 0; i < FMath::Min(5, Pending.Num()); i++)
+    DirectorComponent = CreateDefaultSubobject<UStudioDirectorComponent>(TEXT("DirectorComponent"));
+    bShowDebugInfo = true;
+}
+
+void AStudioDirectorActor::BeginPlay()
+{
+    Super::BeginPlay();
+    
+    UE_LOG(LogTemp, Warning, TEXT("Studio Director Actor initialized in world"));
+}
+
+void AStudioDirectorActor::Tick(float DeltaTime)
+{
+    Super::Tick(DeltaTime);
+    
+    if (bShowDebugInfo && DirectorComponent)
     {
-        const FDir_AgentTask& Task = Pending[i];
-        UE_LOG(LogTemp, Warning, TEXT("%s: %.1f%% - %s"), 
-               *Task.AgentID, Task.CompletionPercentage, *Task.TaskDescription);
+        // Display debug info on screen
+        if (GEngine)
+        {
+            FString DebugText = FString::Printf(
+                TEXT("Studio Director Status:\nTotal Actors: %d\nCharacters: %d\nDinosaurs: %d\nOverall Progress: %.1f%%"),
+                DirectorComponent->CurrentMetrics.TotalActorsInWorld,
+                DirectorComponent->CurrentMetrics.CharacterActors,
+                DirectorComponent->CurrentMetrics.DinosaurActors,
+                DirectorComponent->CurrentMetrics.OverallProgress
+            );
+            
+            GEngine->AddOnScreenDebugMessage(-1, 0.0f, FColor::Yellow, DebugText);
+        }
     }
 }
