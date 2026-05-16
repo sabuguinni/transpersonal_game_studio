@@ -1,304 +1,401 @@
 #include "VFX_EnvironmentalEffects.h"
 #include "Engine/Engine.h"
+#include "Engine/World.h"
+#include "NiagaraComponent.h"
+#include "NiagaraFunctionLibrary.h"
+#include "Components/StaticMeshComponent.h"
 #include "Kismet/GameplayStatics.h"
-#include "Sound/SoundBase.h"
-#include "Particles/ParticleSystem.h"
 
-AVFX_EnvironmentalEffects::AVFX_EnvironmentalEffects()
+UVFX_EnvironmentalEffects::UVFX_EnvironmentalEffects()
 {
-    PrimaryActorTick.bCanEverTick = false;
+    PrimaryComponentTick.bCanEverTick = true;
+    PrimaryComponentTick.TickInterval = 0.1f;
 
-    // Create root scene component
-    RootSceneComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootSceneComponent"));
-    RootComponent = RootSceneComponent;
+    // Initialize Niagara components
+    RainEffect = CreateDefaultSubobject<UNiagaraComponent>(TEXT("RainEffect"));
+    DustEffect = CreateDefaultSubobject<UNiagaraComponent>(TEXT("DustEffect"));
+    FogEffect = CreateDefaultSubobject<UNiagaraComponent>(TEXT("FogEffect"));
+    AmbientEffect = CreateDefaultSubobject<UNiagaraComponent>(TEXT("AmbientEffect"));
 
-    // Create primary particle system component
-    PrimaryParticleComponent = CreateDefaultSubobject<UParticleSystemComponent>(TEXT("PrimaryParticleComponent"));
-    PrimaryParticleComponent->SetupAttachment(RootComponent);
-    PrimaryParticleComponent->bAutoActivate = false;
+    // Initialize default weather settings
+    WeatherSettings.Intensity = 1.0f;
+    WeatherSettings.ParticleCount = 100.0f;
+    WeatherSettings.WindDirection = FVector(1.0f, 0.0f, 0.0f);
+    WeatherSettings.WindStrength = 50.0f;
+    WeatherSettings.ParticleColor = FLinearColor::White;
 
-    // Create secondary particle system component for layered effects
-    SecondaryParticleComponent = CreateDefaultSubobject<UParticleSystemComponent>(TEXT("SecondaryParticleComponent"));
-    SecondaryParticleComponent->SetupAttachment(RootComponent);
-    SecondaryParticleComponent->bAutoActivate = false;
-
-    // Create visual reference mesh component
-    VisualReferenceComponent = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("VisualReferenceComponent"));
-    VisualReferenceComponent->SetupAttachment(RootComponent);
-    VisualReferenceComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-    VisualReferenceComponent->SetVisibility(true);
-
-    // Create audio component for environmental sounds
-    EnvironmentalAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("EnvironmentalAudioComponent"));
-    EnvironmentalAudioComponent->SetupAttachment(RootComponent);
-    EnvironmentalAudioComponent->bAutoActivate = false;
-
-    // Initialize default settings
-    EffectSettings.EffectType = EVFX_EnvironmentalType::DustCloud;
-    EffectSettings.Intensity = 1.0f;
-    EffectSettings.Duration = 5.0f;
-    EffectSettings.bAutoActivate = true;
-    EffectSettings.bLooping = false;
-
-    bEffectActive = false;
+    CurrentWeatherType = EVFX_WeatherType::Clear;
+    CurrentBiome = EVFX_BiomeType::Savana;
+    EffectUpdateInterval = 0.1f;
+    MaxEffectDistance = 5000.0f;
+    MaxActiveEffects = 50;
 }
 
-void AVFX_EnvironmentalEffects::BeginPlay()
+void UVFX_EnvironmentalEffects::BeginPlay()
 {
     Super::BeginPlay();
-
-    // Setup initial particle system based on effect type
-    SetupParticleSystemForType(EffectSettings.EffectType);
-
-    // Auto-activate if enabled
-    if (EffectSettings.bAutoActivate)
-    {
-        ActivateEnvironmentalEffect();
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("VFX_EnvironmentalEffects: BeginPlay completed for effect type %d"), 
-           static_cast<int32>(EffectSettings.EffectType));
+    
+    InitializeBiomeData();
+    
+    // Start with clear weather
+    SetWeatherType(EVFX_WeatherType::Clear);
+    SetCurrentBiome(EVFX_BiomeType::Savana);
+    
+    UE_LOG(LogTemp, Warning, TEXT("VFX_EnvironmentalEffects: System initialized with %d biome configurations"), BiomeEffectData.Num());
 }
 
-void AVFX_EnvironmentalEffects::ActivateEnvironmentalEffect()
+void UVFX_EnvironmentalEffects::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
-    if (bEffectActive)
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+    
+    LastEffectUpdate += DeltaTime;
+    
+    if (LastEffectUpdate >= EffectUpdateInterval)
     {
-        return;
+        UpdateWeatherEffects();
+        UpdateBiomeEffects();
+        CleanupExpiredEffects();
+        LastEffectUpdate = 0.0f;
     }
-
-    bEffectActive = true;
-
-    // Activate particle systems
-    if (PrimaryParticleComponent && PrimaryParticleComponent->Template)
-    {
-        PrimaryParticleComponent->Activate();
-        UE_LOG(LogTemp, Log, TEXT("VFX_EnvironmentalEffects: Primary particle system activated"));
-    }
-
-    if (SecondaryParticleComponent && SecondaryParticleComponent->Template)
-    {
-        SecondaryParticleComponent->Activate();
-        UE_LOG(LogTemp, Log, TEXT("VFX_EnvironmentalEffects: Secondary particle system activated"));
-    }
-
-    // Play environmental sound
-    PlayEnvironmentalSound(EffectSettings.EffectType);
-
-    // Set duration timer if not looping
-    if (!EffectSettings.bLooping && EffectSettings.Duration > 0.0f)
-    {
-        GetWorld()->GetTimerManager().SetTimer(
-            EffectDurationTimer,
-            this,
-            &AVFX_EnvironmentalEffects::OnEffectDurationComplete,
-            EffectSettings.Duration,
-            false
-        );
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("VFX_EnvironmentalEffects: Environmental effect activated"));
 }
 
-void AVFX_EnvironmentalEffects::DeactivateEnvironmentalEffect()
+void UVFX_EnvironmentalEffects::SetWeatherType(EVFX_WeatherType NewWeatherType)
 {
-    if (!bEffectActive)
+    CurrentWeatherType = NewWeatherType;
+    
+    // Deactivate all weather effects first
+    if (RainEffect) RainEffect->SetVisibility(false);
+    if (DustEffect) DustEffect->SetVisibility(false);
+    if (FogEffect) FogEffect->SetVisibility(false);
+    
+    // Activate appropriate effect
+    switch (CurrentWeatherType)
     {
-        return;
+        case EVFX_WeatherType::Rain:
+        case EVFX_WeatherType::Storm:
+            if (RainEffect)
+            {
+                RainEffect->SetVisibility(true);
+                RainEffect->SetFloatParameter(TEXT("Intensity"), WeatherSettings.Intensity);
+                RainEffect->SetFloatParameter(TEXT("ParticleCount"), WeatherSettings.ParticleCount);
+                RainEffect->SetVectorParameter(TEXT("WindDirection"), WeatherSettings.WindDirection);
+            }
+            break;
+            
+        case EVFX_WeatherType::Dust:
+            if (DustEffect)
+            {
+                DustEffect->SetVisibility(true);
+                DustEffect->SetFloatParameter(TEXT("Intensity"), WeatherSettings.Intensity);
+                DustEffect->SetVectorParameter(TEXT("WindDirection"), WeatherSettings.WindDirection);
+            }
+            break;
+            
+        case EVFX_WeatherType::Fog:
+            if (FogEffect)
+            {
+                FogEffect->SetVisibility(true);
+                FogEffect->SetFloatParameter(TEXT("Density"), WeatherSettings.Intensity * 0.5f);
+                FogEffect->SetColorParameter(TEXT("FogColor"), WeatherSettings.ParticleColor);
+            }
+            break;
+            
+        case EVFX_WeatherType::Clear:
+        default:
+            // All effects already disabled
+            break;
     }
-
-    StopAllEffects();
-    bEffectActive = false;
-
-    // Clear duration timer
-    if (GetWorld() && EffectDurationTimer.IsValid())
-    {
-        GetWorld()->GetTimerManager().ClearTimer(EffectDurationTimer);
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("VFX_EnvironmentalEffects: Environmental effect deactivated"));
+    
+    UE_LOG(LogTemp, Warning, TEXT("VFX_EnvironmentalEffects: Weather changed to %d"), (int32)CurrentWeatherType);
 }
 
-void AVFX_EnvironmentalEffects::SetEffectType(EVFX_EnvironmentalType NewType)
+void UVFX_EnvironmentalEffects::UpdateWeatherIntensity(float NewIntensity)
 {
-    if (EffectSettings.EffectType != NewType)
+    WeatherSettings.Intensity = FMath::Clamp(NewIntensity, 0.0f, 2.0f);
+    
+    // Update active weather effects
+    SetWeatherType(CurrentWeatherType);
+}
+
+void UVFX_EnvironmentalEffects::SetWindDirection(FVector NewWindDirection)
+{
+    WeatherSettings.WindDirection = NewWindDirection.GetSafeNormal();
+    
+    // Update wind parameters on active effects
+    if (RainEffect && RainEffect->IsVisible())
     {
-        bool bWasActive = bEffectActive;
+        RainEffect->SetVectorParameter(TEXT("WindDirection"), WeatherSettings.WindDirection);
+    }
+    if (DustEffect && DustEffect->IsVisible())
+    {
+        DustEffect->SetVectorParameter(TEXT("WindDirection"), WeatherSettings.WindDirection);
+    }
+}
+
+void UVFX_EnvironmentalEffects::SetCurrentBiome(EVFX_BiomeType NewBiome)
+{
+    CurrentBiome = NewBiome;
+    
+    // Find biome data
+    FVFX_BiomeEffectData* BiomeData = nullptr;
+    for (FVFX_BiomeEffectData& Data : BiomeEffectData)
+    {
+        if (Data.BiomeType == CurrentBiome)
+        {
+            BiomeData = &Data;
+            break;
+        }
+    }
+    
+    if (BiomeData)
+    {
+        // Update fog settings for biome
+        UpdateFogSettings(BiomeData->FogColor, BiomeData->FogDensity);
         
-        if (bWasActive)
+        // Update ambient effects
+        if (AmbientEffect)
         {
-            DeactivateEnvironmentalEffect();
+            AmbientEffect->SetFloatParameter(TEXT("SpawnRate"), BiomeData->AmbientParticleChance * 10.0f);
         }
+        
+        UE_LOG(LogTemp, Warning, TEXT("VFX_EnvironmentalEffects: Biome changed to %d"), (int32)CurrentBiome);
+    }
+}
 
-        EffectSettings.EffectType = NewType;
-        SetupParticleSystemForType(NewType);
-
-        if (bWasActive)
+void UVFX_EnvironmentalEffects::SpawnBiomeAmbientEffect(FVector Location)
+{
+    if (ActiveEffects.Num() >= MaxActiveEffects) return;
+    
+    // Find current biome data
+    FVFX_BiomeEffectData* BiomeData = nullptr;
+    for (FVFX_BiomeEffectData& Data : BiomeEffectData)
+    {
+        if (Data.BiomeType == CurrentBiome)
         {
-            ActivateEnvironmentalEffect();
+            BiomeData = &Data;
+            break;
         }
-
-        UE_LOG(LogTemp, Log, TEXT("VFX_EnvironmentalEffects: Effect type changed to %d"), static_cast<int32>(NewType));
     }
-}
-
-void AVFX_EnvironmentalEffects::SetEffectIntensity(float NewIntensity)
-{
-    EffectSettings.Intensity = FMath::Clamp(NewIntensity, 0.1f, 10.0f);
-
-    // Apply intensity to particle systems
-    if (PrimaryParticleComponent)
-    {
-        PrimaryParticleComponent->SetFloatParameter(TEXT("Intensity"), EffectSettings.Intensity);
-    }
-
-    if (SecondaryParticleComponent)
-    {
-        SecondaryParticleComponent->SetFloatParameter(TEXT("Intensity"), EffectSettings.Intensity);
-    }
-
-    // Apply intensity to audio
-    if (EnvironmentalAudioComponent)
-    {
-        EnvironmentalAudioComponent->SetVolumeMultiplier(EffectSettings.Intensity);
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("VFX_EnvironmentalEffects: Intensity set to %f"), EffectSettings.Intensity);
-}
-
-void AVFX_EnvironmentalEffects::TriggerVolcanicEruption(FVector EruptionLocation, float EruptionPower)
-{
-    SetActorLocation(EruptionLocation);
-    SetEffectType(EVFX_EnvironmentalType::VolcanicEruption);
-    SetEffectIntensity(EruptionPower);
-    ActivateEnvironmentalEffect();
-
-    UE_LOG(LogTemp, Log, TEXT("VFX_EnvironmentalEffects: Volcanic eruption triggered at %s with power %f"), 
-           *EruptionLocation.ToString(), EruptionPower);
-}
-
-void AVFX_EnvironmentalEffects::TriggerWaterSplash(FVector SplashLocation, float SplashSize)
-{
-    SetActorLocation(SplashLocation);
-    SetEffectType(EVFX_EnvironmentalType::WaterSplash);
-    SetEffectIntensity(SplashSize);
-    ActivateEnvironmentalEffect();
-
-    UE_LOG(LogTemp, Log, TEXT("VFX_EnvironmentalEffects: Water splash triggered at %s with size %f"), 
-           *SplashLocation.ToString(), SplashSize);
-}
-
-void AVFX_EnvironmentalEffects::CreateDustCloud(FVector DustLocation, float CloudRadius)
-{
-    SetActorLocation(DustLocation);
-    SetEffectType(EVFX_EnvironmentalType::DustCloud);
     
-    // Scale intensity based on cloud radius
-    float IntensityFromRadius = FMath::Clamp(CloudRadius / 500.0f, 0.1f, 10.0f);
-    SetEffectIntensity(IntensityFromRadius);
-    
-    ActivateEnvironmentalEffect();
-
-    UE_LOG(LogTemp, Log, TEXT("VFX_EnvironmentalEffects: Dust cloud created at %s with radius %f"), 
-           *DustLocation.ToString(), CloudRadius);
+    if (BiomeData && BiomeData->ParticleEffectNames.Num() > 0)
+    {
+        // Random chance to spawn ambient effect
+        if (FMath::RandRange(0.0f, 1.0f) <= BiomeData->AmbientParticleChance)
+        {
+            UNiagaraComponent* NewEffect = UNiagaraFunctionLibrary::SpawnSystemAtLocation(
+                GetWorld(), 
+                nullptr, // Will use default system for now
+                Location,
+                FRotator::ZeroRotator
+            );
+            
+            if (NewEffect)
+            {
+                ActiveEffects.Add(NewEffect);
+                UE_LOG(LogTemp, Log, TEXT("VFX_EnvironmentalEffects: Spawned ambient effect at %s"), *Location.ToString());
+            }
+        }
+    }
 }
 
-void AVFX_EnvironmentalEffects::SetupParticleSystemForType(EVFX_EnvironmentalType Type)
+void UVFX_EnvironmentalEffects::SpawnDustCloud(FVector Location, float Size)
 {
-    UParticleSystem* PrimarySystem = nullptr;
-    UParticleSystem* SecondarySystem = nullptr;
-
-    switch (Type)
+    if (ActiveEffects.Num() >= MaxActiveEffects) return;
+    
+    UNiagaraComponent* DustCloud = UNiagaraFunctionLibrary::SpawnSystemAtLocation(
+        GetWorld(),
+        nullptr, // Will use default dust system
+        Location,
+        FRotator::ZeroRotator
+    );
+    
+    if (DustCloud)
     {
-        case EVFX_EnvironmentalType::VolcanicEruption:
-            if (VolcanicParticleSystems.Num() > 0)
+        DustCloud->SetFloatParameter(TEXT("Size"), Size);
+        DustCloud->SetFloatParameter(TEXT("Lifetime"), 3.0f);
+        DustCloud->SetColorParameter(TEXT("DustColor"), FLinearColor(0.8f, 0.7f, 0.5f, 1.0f));
+        
+        ActiveEffects.Add(DustCloud);
+        UE_LOG(LogTemp, Log, TEXT("VFX_EnvironmentalEffects: Spawned dust cloud at %s"), *Location.ToString());
+    }
+}
+
+void UVFX_EnvironmentalEffects::SpawnWaterSplash(FVector Location, float Intensity)
+{
+    if (ActiveEffects.Num() >= MaxActiveEffects) return;
+    
+    UNiagaraComponent* WaterSplash = UNiagaraFunctionLibrary::SpawnSystemAtLocation(
+        GetWorld(),
+        nullptr, // Will use default water system
+        Location,
+        FRotator::ZeroRotator
+    );
+    
+    if (WaterSplash)
+    {
+        WaterSplash->SetFloatParameter(TEXT("Intensity"), Intensity);
+        WaterSplash->SetFloatParameter(TEXT("Lifetime"), 2.0f);
+        WaterSplash->SetColorParameter(TEXT("WaterColor"), FLinearColor(0.2f, 0.5f, 0.8f, 0.8f));
+        
+        ActiveEffects.Add(WaterSplash);
+        UE_LOG(LogTemp, Log, TEXT("VFX_EnvironmentalEffects: Spawned water splash at %s"), *Location.ToString());
+    }
+}
+
+void UVFX_EnvironmentalEffects::SpawnFireEffect(FVector Location, float Duration)
+{
+    if (ActiveEffects.Num() >= MaxActiveEffects) return;
+    
+    UNiagaraComponent* Fire = UNiagaraFunctionLibrary::SpawnSystemAtLocation(
+        GetWorld(),
+        nullptr, // Will use default fire system
+        Location,
+        FRotator::ZeroRotator
+    );
+    
+    if (Fire)
+    {
+        Fire->SetFloatParameter(TEXT("Lifetime"), Duration);
+        Fire->SetFloatParameter(TEXT("Intensity"), 1.0f);
+        Fire->SetColorParameter(TEXT("FireColor"), FLinearColor(1.0f, 0.5f, 0.1f, 1.0f));
+        
+        ActiveEffects.Add(Fire);
+        UE_LOG(LogTemp, Log, TEXT("VFX_EnvironmentalEffects: Spawned fire effect at %s"), *Location.ToString());
+    }
+}
+
+void UVFX_EnvironmentalEffects::UpdateFogSettings(FLinearColor Color, float Density)
+{
+    if (FogEffect)
+    {
+        FogEffect->SetColorParameter(TEXT("FogColor"), Color);
+        FogEffect->SetFloatParameter(TEXT("Density"), Density);
+    }
+}
+
+void UVFX_EnvironmentalEffects::CreateVolumetricLightRays(FVector SunDirection, float Intensity)
+{
+    // Spawn volumetric light rays effect
+    UNiagaraComponent* LightRays = UNiagaraFunctionLibrary::SpawnSystemAtLocation(
+        GetWorld(),
+        nullptr, // Will use default light rays system
+        GetOwner()->GetActorLocation() + SunDirection * 1000.0f,
+        SunDirection.Rotation()
+    );
+    
+    if (LightRays)
+    {
+        LightRays->SetFloatParameter(TEXT("Intensity"), Intensity);
+        LightRays->SetVectorParameter(TEXT("Direction"), SunDirection);
+        ActiveEffects.Add(LightRays);
+        UE_LOG(LogTemp, Log, TEXT("VFX_EnvironmentalEffects: Created volumetric light rays"));
+    }
+}
+
+void UVFX_EnvironmentalEffects::UpdateWeatherEffects()
+{
+    // Update weather-based effects based on current conditions
+    switch (CurrentWeatherType)
+    {
+        case EVFX_WeatherType::Storm:
+            // Increase intensity during storms
+            if (RainEffect && RainEffect->IsVisible())
             {
-                PrimarySystem = VolcanicParticleSystems[0];
-                if (VolcanicParticleSystems.Num() > 1)
-                {
-                    SecondarySystem = VolcanicParticleSystems[1];
-                }
+                float StormIntensity = WeatherSettings.Intensity * 1.5f;
+                RainEffect->SetFloatParameter(TEXT("Intensity"), StormIntensity);
             }
             break;
-
-        case EVFX_EnvironmentalType::WaterSplash:
-            if (WaterSplashParticleSystems.Num() > 0)
+            
+        case EVFX_WeatherType::Dust:
+            // Vary dust intensity based on wind
+            if (DustEffect && DustEffect->IsVisible())
             {
-                PrimarySystem = WaterSplashParticleSystems[0];
-                if (WaterSplashParticleSystems.Num() > 1)
-                {
-                    SecondarySystem = WaterSplashParticleSystems[1];
-                }
+                float DustIntensity = WeatherSettings.Intensity * WeatherSettings.WindStrength / 50.0f;
+                DustEffect->SetFloatParameter(TEXT("Intensity"), DustIntensity);
             }
             break;
-
-        case EVFX_EnvironmentalType::DustCloud:
-            if (DustParticleSystems.Num() > 0)
-            {
-                PrimarySystem = DustParticleSystems[0];
-                if (DustParticleSystems.Num() > 1)
-                {
-                    SecondarySystem = DustParticleSystems[1];
-                }
-            }
-            break;
-
+            
         default:
             break;
     }
-
-    // Set particle systems
-    if (PrimaryParticleComponent)
-    {
-        PrimaryParticleComponent->SetTemplate(PrimarySystem);
-    }
-
-    if (SecondaryParticleComponent)
-    {
-        SecondaryParticleComponent->SetTemplate(SecondarySystem);
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("VFX_EnvironmentalEffects: Particle systems setup for type %d"), static_cast<int32>(Type));
 }
 
-void AVFX_EnvironmentalEffects::PlayEnvironmentalSound(EVFX_EnvironmentalType Type)
+void UVFX_EnvironmentalEffects::UpdateBiomeEffects()
 {
-    if (EnvironmentalSounds.Num() > 0)
+    // Randomly spawn biome-specific ambient effects
+    if (GetOwner() && FMath::RandRange(0.0f, 1.0f) < 0.1f)
     {
-        int32 SoundIndex = static_cast<int32>(Type) % EnvironmentalSounds.Num();
-        USoundBase* SoundToPlay = EnvironmentalSounds[SoundIndex];
-
-        if (SoundToPlay && EnvironmentalAudioComponent)
-        {
-            EnvironmentalAudioComponent->SetSound(SoundToPlay);
-            EnvironmentalAudioComponent->Play();
-            UE_LOG(LogTemp, Log, TEXT("VFX_EnvironmentalEffects: Environmental sound played for type %d"), static_cast<int32>(Type));
-        }
+        FVector RandomOffset = FVector(
+            FMath::RandRange(-MaxEffectDistance, MaxEffectDistance),
+            FMath::RandRange(-MaxEffectDistance, MaxEffectDistance),
+            FMath::RandRange(0.0f, 500.0f)
+        );
+        
+        SpawnBiomeAmbientEffect(GetOwner()->GetActorLocation() + RandomOffset);
     }
 }
 
-void AVFX_EnvironmentalEffects::StopAllEffects()
+void UVFX_EnvironmentalEffects::CleanupExpiredEffects()
 {
-    if (PrimaryParticleComponent)
-    {
-        PrimaryParticleComponent->Deactivate();
-    }
-
-    if (SecondaryParticleComponent)
-    {
-        SecondaryParticleComponent->Deactivate();
-    }
-
-    if (EnvironmentalAudioComponent)
-    {
-        EnvironmentalAudioComponent->Stop();
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("VFX_EnvironmentalEffects: All effects stopped"));
+    // Remove null or completed effects
+    ActiveEffects.RemoveAll([](UNiagaraComponent* Effect) {
+        return !Effect || !IsValid(Effect) || !Effect->IsActive();
+    });
 }
 
-void AVFX_EnvironmentalEffects::OnEffectDurationComplete()
+void UVFX_EnvironmentalEffects::InitializeBiomeData()
 {
-    DeactivateEnvironmentalEffect();
-    UE_LOG(LogTemp, Log, TEXT("VFX_EnvironmentalEffects: Effect duration completed, deactivating"));
+    BiomeEffectData.Empty();
+    
+    // Savana biome
+    FVFX_BiomeEffectData SavanaData;
+    SavanaData.BiomeType = EVFX_BiomeType::Savana;
+    SavanaData.AmbientParticleChance = 0.05f;
+    SavanaData.FogColor = FLinearColor(0.9f, 0.8f, 0.6f, 0.2f);
+    SavanaData.FogDensity = 0.01f;
+    SavanaData.ParticleEffectNames.Add(TEXT("Dust"));
+    SavanaData.ParticleEffectNames.Add(TEXT("Heat_Shimmer"));
+    BiomeEffectData.Add(SavanaData);
+    
+    // Forest biome
+    FVFX_BiomeEffectData ForestData;
+    ForestData.BiomeType = EVFX_BiomeType::Forest;
+    ForestData.AmbientParticleChance = 0.08f;
+    ForestData.FogColor = FLinearColor(0.6f, 0.8f, 0.7f, 0.3f);
+    ForestData.FogDensity = 0.03f;
+    ForestData.ParticleEffectNames.Add(TEXT("Pollen"));
+    ForestData.ParticleEffectNames.Add(TEXT("Falling_Leaves"));
+    BiomeEffectData.Add(ForestData);
+    
+    // Swamp biome
+    FVFX_BiomeEffectData SwampData;
+    SwampData.BiomeType = EVFX_BiomeType::Swamp;
+    SwampData.AmbientParticleChance = 0.12f;
+    SwampData.FogColor = FLinearColor(0.5f, 0.7f, 0.5f, 0.4f);
+    SwampData.FogDensity = 0.05f;
+    SwampData.ParticleEffectNames.Add(TEXT("Mist"));
+    SwampData.ParticleEffectNames.Add(TEXT("Fireflies"));
+    BiomeEffectData.Add(SwampData);
+    
+    // Desert biome
+    FVFX_BiomeEffectData DesertData;
+    DesertData.BiomeType = EVFX_BiomeType::Desert;
+    DesertData.AmbientParticleChance = 0.03f;
+    DesertData.FogColor = FLinearColor(1.0f, 0.9f, 0.7f, 0.15f);
+    DesertData.FogDensity = 0.005f;
+    DesertData.ParticleEffectNames.Add(TEXT("Sand"));
+    DesertData.ParticleEffectNames.Add(TEXT("Heat_Waves"));
+    BiomeEffectData.Add(DesertData);
+    
+    // Mountain biome
+    FVFX_BiomeEffectData MountainData;
+    MountainData.BiomeType = EVFX_BiomeType::Mountain;
+    MountainData.AmbientParticleChance = 0.06f;
+    MountainData.FogColor = FLinearColor(0.8f, 0.9f, 1.0f, 0.25f);
+    MountainData.FogDensity = 0.02f;
+    MountainData.ParticleEffectNames.Add(TEXT("Snow"));
+    MountainData.ParticleEffectNames.Add(TEXT("Rock_Dust"));
+    BiomeEffectData.Add(MountainData);
+    
+    UE_LOG(LogTemp, Warning, TEXT("VFX_EnvironmentalEffects: Initialized %d biome effect configurations"), BiomeEffectData.Num());
 }
