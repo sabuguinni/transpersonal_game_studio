@@ -7,18 +7,9 @@
 #include "Engine/DataTable.h"
 #include "Narr_DialogueSystem.generated.h"
 
-UENUM(BlueprintType)
-enum class ENarr_DialogueType : uint8
-{
-    Warning,
-    Information,
-    Quest,
-    Lore,
-    Tutorial
-};
-
+// Dialogue line data structure
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FNarr_DialogueEntry : public FTableRowBase
+struct TRANSPERSONALGAME_API FNarr_DialogueLine
 {
     GENERATED_BODY()
 
@@ -29,25 +20,72 @@ struct TRANSPERSONALGAME_API FNarr_DialogueEntry : public FTableRowBase
     FText DialogueText;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    ENarr_DialogueType DialogueType;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    float TriggerRadius;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    bool bOneTimeOnly;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
     FString AudioFilePath;
 
-    FNarr_DialogueEntry()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    float Duration;
+
+    FNarr_DialogueLine()
     {
         SpeakerName = TEXT("Unknown");
         DialogueText = FText::FromString(TEXT("..."));
-        DialogueType = ENarr_DialogueType::Information;
-        TriggerRadius = 500.0f;
-        bOneTimeOnly = true;
         AudioFilePath = TEXT("");
+        Duration = 3.0f;
+    }
+};
+
+// Dialogue sequence data
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FNarr_DialogueSequence
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    FString SequenceID;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    TArray<FNarr_DialogueLine> DialogueLines;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    bool bRepeatable;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    FString TriggerCondition;
+
+    FNarr_DialogueSequence()
+    {
+        SequenceID = TEXT("DefaultSequence");
+        bRepeatable = false;
+        TriggerCondition = TEXT("None");
+    }
+};
+
+// Narrative context for environmental storytelling
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FNarr_NarrativeContext
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    FString LocationName;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    FString BiomeType;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    TArray<FString> DiscoveredLore;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    float DangerLevel;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    TArray<FString> AvailableResources;
+
+    FNarr_NarrativeContext()
+    {
+        LocationName = TEXT("Unknown Territory");
+        BiomeType = TEXT("Wilderness");
+        DangerLevel = 0.5f;
     }
 };
 
@@ -62,46 +100,78 @@ public:
 protected:
     virtual void BeginPlay() override;
 
+    // Components
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    USphereComponent* TriggerSphere;
+    USphereComponent* InteractionSphere;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    UStaticMeshComponent* VisualMarker;
+    UStaticMeshComponent* DialogueMarker;
+
+    // Dialogue data
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    TArray<FNarr_DialogueSequence> DialogueSequences;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    UDataTable* DialogueTable;
+    FNarr_NarrativeContext CurrentContext;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    FName DialogueRowName;
+    float InteractionRange;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    bool bHasBeenTriggered;
+    bool bIsActive;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    class USoundBase* DialogueSound;
+    // Current dialogue state
+    UPROPERTY(BlueprintReadOnly, Category = "Dialogue State")
+    int32 CurrentSequenceIndex;
 
-    UFUNCTION()
-    void OnTriggerBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, 
-                              UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, 
-                              bool bFromSweep, const FHitResult& SweepResult);
+    UPROPERTY(BlueprintReadOnly, Category = "Dialogue State")
+    int32 CurrentLineIndex;
 
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    void TriggerDialogue(AActor* PlayerActor);
-
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    FNarr_DialogueEntry GetDialogueEntry();
-
-    UFUNCTION(BlueprintImplementableEvent, Category = "Dialogue")
-    void OnDialogueTriggered(const FNarr_DialogueEntry& DialogueEntry);
+    UPROPERTY(BlueprintReadOnly, Category = "Dialogue State")
+    bool bIsPlayingDialogue;
 
 public:
-    virtual void Tick(float DeltaTime) override;
+    // Dialogue control functions
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    void StartDialogueSequence(const FString& SequenceID);
 
     UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    void SetDialogueEntry(FName RowName);
+    void PlayNextDialogueLine();
 
     UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    bool IsDialogueAvailable() const;
+    void StopDialogue();
+
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    bool CanInteract() const;
+
+    // Narrative context functions
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    void UpdateNarrativeContext(const FNarr_NarrativeContext& NewContext);
+
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    FNarr_NarrativeContext GetCurrentContext() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    void AddDiscoveredLore(const FString& LoreEntry);
+
+    // Environmental storytelling
+    UFUNCTION(BlueprintCallable, Category = "Environmental")
+    void TriggerEnvironmentalNarrative(const FString& EventType);
+
+    UFUNCTION(BlueprintCallable, Category = "Environmental")
+    TArray<FString> GetContextualHints() const;
+
+    // Interaction events
+    UFUNCTION()
+    void OnInteractionSphereBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult);
+
+    UFUNCTION()
+    void OnInteractionSphereEndOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex);
+
+private:
+    // Helper functions
+    void InitializeDefaultDialogue();
+    void SetupInteractionComponents();
+    FNarr_DialogueSequence* FindDialogueSequence(const FString& SequenceID);
+    void ProcessDialogueTriggers();
 };
-
-#include "Narr_DialogueSystem.generated.h"
