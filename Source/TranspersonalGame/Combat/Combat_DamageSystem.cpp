@@ -1,19 +1,18 @@
 #include "Combat_DamageSystem.h"
 #include "Engine/Engine.h"
-#include "TimerManager.h"
-#include "Engine/World.h"
 #include "GameFramework/Actor.h"
 
 UCombat_DamageSystem::UCombat_DamageSystem()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 0.1f;
+    PrimaryComponentTick.bStartWithTickEnabled = false;
     
     MaxHealth = 100.0f;
     CurrentHealth = MaxHealth;
-    ArmorValue = 0.0f;
-    DamageReduction = 0.0f;
-    bIsInvulnerable = false;
+    PhysicalResistance = 0.0f;
+    BiteResistance = 0.0f;
+    ClawResistance = 0.0f;
+    CriticalHealthThreshold = 0.25f;
     bIsDead = false;
 }
 
@@ -23,136 +22,103 @@ void UCombat_DamageSystem::BeginPlay()
     
     CurrentHealth = MaxHealth;
     bIsDead = false;
-    bIsInvulnerable = false;
     
-    UE_LOG(LogTemp, Log, TEXT("Combat_DamageSystem initialized for %s with %f health"), 
-           *GetOwner()->GetName(), MaxHealth);
+    if (GEngine)
+    {
+        GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Green, 
+            FString::Printf(TEXT("Combat Damage System initialized for %s - Health: %.1f"), 
+            *GetOwner()->GetName(), CurrentHealth));
+    }
 }
 
 void UCombat_DamageSystem::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
     
-    // Health regeneration could be added here if needed
+    // Tick is disabled by default, only enabled when needed for special effects
 }
 
-float UCombat_DamageSystem::DealDamage(AActor* Target, const FCombat_DamageInfo& DamageInfo)
+void UCombat_DamageSystem::ApplyDamage(const FCombat_DamageInfo& DamageInfo)
 {
-    if (!Target || !IsValid(Target))
+    if (bIsDead || DamageInfo.Amount <= 0.0f)
     {
-        return 0.0f;
+        return;
     }
-    
-    UCombat_DamageSystem* TargetDamageSystem = Target->FindComponentByClass<UCombat_DamageSystem>();
-    if (!TargetDamageSystem)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Target %s has no damage system component"), *Target->GetName());
-        return 0.0f;
-    }
-    
-    float DamageDealt = TargetDamageSystem->TakeDamage(DamageInfo, GetOwner());
-    
-    if (DamageDealt > 0.0f)
-    {
-        OnDamageDealt.Broadcast(Target, DamageDealt, GetOwner());
-        UE_LOG(LogTemp, Log, TEXT("%s dealt %f damage to %s"), 
-               *GetOwner()->GetName(), DamageDealt, *Target->GetName());
-    }
-    
-    return DamageDealt;
-}
 
-float UCombat_DamageSystem::TakeDamage(const FCombat_DamageInfo& DamageInfo, AActor* DamageSource)
-{
-    if (!CanTakeDamage() || bIsDead)
-    {
-        return 0.0f;
-    }
-    
     float FinalDamage = CalculateFinalDamage(DamageInfo);
     
-    CurrentHealth = FMath::Clamp(CurrentHealth - FinalDamage, 0.0f, MaxHealth);
+    float OldHealth = CurrentHealth;
+    CurrentHealth = FMath::Max(0.0f, CurrentHealth - FinalDamage);
     
-    UE_LOG(LogTemp, Log, TEXT("%s took %f damage (from %f base), health now %f/%f"), 
-           *GetOwner()->GetName(), FinalDamage, DamageInfo.BaseDamage, CurrentHealth, MaxHealth);
+    // Broadcast damage event
+    OnDamageTaken.Broadcast(FinalDamage, DamageInfo.Instigator);
+    OnHealthChanged.Broadcast(GetHealthPercentage());
     
+    if (GEngine)
+    {
+        FString InstigatorName = DamageInfo.Instigator ? DamageInfo.Instigator->GetName() : TEXT("Unknown");
+        GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Red, 
+            FString::Printf(TEXT("%s took %.1f %s damage from %s - Health: %.1f/%.1f"), 
+            *GetOwner()->GetName(), FinalDamage, 
+            *UEnum::GetValueAsString(DamageInfo.DamageType),
+            *InstigatorName, CurrentHealth, MaxHealth));
+    }
+    
+    // Check for death
     if (CurrentHealth <= 0.0f && !bIsDead)
     {
-        HandleDeath(DamageSource);
-    }
-    
-    return FinalDamage;
-}
-
-float UCombat_DamageSystem::CalculateFinalDamage(const FCombat_DamageInfo& DamageInfo) const
-{
-    float Damage = DamageInfo.BaseDamage;
-    
-    // Apply armor reduction
-    float EffectiveArmor = FMath::Max(0.0f, ArmorValue - DamageInfo.ArmorPenetration);
-    float ArmorReduction = EffectiveArmor / (EffectiveArmor + 100.0f);
-    Damage *= (1.0f - ArmorReduction);
-    
-    // Apply general damage reduction
-    Damage *= (1.0f - DamageReduction);
-    
-    // Damage type modifiers could be added here
-    switch (DamageInfo.DamageType)
-    {
-        case ECombat_DamageType::Bite:
-            // Bite damage might be more effective against soft targets
-            break;
-        case ECombat_DamageType::Claw:
-            // Claw damage might have bleeding effects
-            break;
-        case ECombat_DamageType::Stomp:
-            // Stomp damage might ignore some armor
-            Damage *= 1.2f;
-            break;
-        default:
-            break;
-    }
-    
-    return FMath::Max(0.0f, Damage);
-}
-
-void UCombat_DamageSystem::SetHealth(float NewHealth)
-{
-    float OldHealth = CurrentHealth;
-    CurrentHealth = FMath::Clamp(NewHealth, 0.0f, MaxHealth);
-    
-    if (OldHealth > 0.0f && CurrentHealth <= 0.0f && !bIsDead)
-    {
-        HandleDeath(nullptr);
-    }
-    else if (OldHealth <= 0.0f && CurrentHealth > 0.0f)
-    {
-        // Resurrection
-        bIsDead = false;
+        HandleDeath();
     }
 }
 
-void UCombat_DamageSystem::HealDamage(float HealAmount)
+void UCombat_DamageSystem::ApplySimpleDamage(float DamageAmount, AActor* DamageInstigator)
 {
-    if (bIsDead)
+    FCombat_DamageInfo DamageInfo;
+    DamageInfo.Amount = DamageAmount;
+    DamageInfo.DamageType = ECombat_DamageType::Physical;
+    DamageInfo.Instigator = DamageInstigator;
+    
+    ApplyDamage(DamageInfo);
+}
+
+void UCombat_DamageSystem::Heal(float HealAmount)
+{
+    if (bIsDead || HealAmount <= 0.0f)
     {
         return;
     }
     
     float OldHealth = CurrentHealth;
-    CurrentHealth = FMath::Clamp(CurrentHealth + HealAmount, 0.0f, MaxHealth);
+    CurrentHealth = FMath::Min(MaxHealth, CurrentHealth + HealAmount);
     
-    UE_LOG(LogTemp, Log, TEXT("%s healed for %f, health now %f/%f"), 
-           *GetOwner()->GetName(), CurrentHealth - OldHealth, CurrentHealth, MaxHealth);
+    OnHealthChanged.Broadcast(GetHealthPercentage());
+    
+    if (GEngine)
+    {
+        GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Green, 
+            FString::Printf(TEXT("%s healed for %.1f - Health: %.1f/%.1f"), 
+            *GetOwner()->GetName(), HealAmount, CurrentHealth, MaxHealth));
+    }
+}
+
+void UCombat_DamageSystem::SetHealth(float NewHealth)
+{
+    CurrentHealth = FMath::Clamp(NewHealth, 0.0f, MaxHealth);
+    OnHealthChanged.Broadcast(GetHealthPercentage());
+    
+    if (CurrentHealth <= 0.0f && !bIsDead)
+    {
+        HandleDeath();
+    }
+    else if (bIsDead && CurrentHealth > 0.0f)
+    {
+        bIsDead = false;
+    }
 }
 
 float UCombat_DamageSystem::GetHealthPercentage() const
 {
-    if (MaxHealth <= 0.0f)
-    {
-        return 0.0f;
-    }
-    return CurrentHealth / MaxHealth;
+    return MaxHealth > 0.0f ? (CurrentHealth / MaxHealth) : 0.0f;
 }
 
 bool UCombat_DamageSystem::IsAlive() const
@@ -160,33 +126,45 @@ bool UCombat_DamageSystem::IsAlive() const
     return !bIsDead && CurrentHealth > 0.0f;
 }
 
-bool UCombat_DamageSystem::IsAtFullHealth() const
+bool UCombat_DamageSystem::IsCriticalHealth() const
 {
-    return CurrentHealth >= MaxHealth;
+    return GetHealthPercentage() <= CriticalHealthThreshold;
 }
 
-bool UCombat_DamageSystem::CanTakeDamage() const
+float UCombat_DamageSystem::CalculateFinalDamage(const FCombat_DamageInfo& DamageInfo)
 {
-    return !bIsInvulnerable && !bIsDead;
-}
-
-void UCombat_DamageSystem::SetInvulnerable(bool bInvulnerable, float Duration)
-{
-    bIsInvulnerable = bInvulnerable;
+    float BaseDamage = DamageInfo.Amount;
+    float Resistance = 0.0f;
     
-    if (bInvulnerable && Duration > 0.0f)
+    // Apply damage type specific resistance
+    switch (DamageInfo.DamageType)
     {
-        GetWorld()->GetTimerManager().SetTimer(InvulnerabilityTimer, this, 
-                                               &UCombat_DamageSystem::ClearInvulnerability, 
-                                               Duration, false);
+        case ECombat_DamageType::Physical:
+            Resistance = PhysicalResistance;
+            break;
+        case ECombat_DamageType::Bite:
+            Resistance = BiteResistance;
+            break;
+        case ECombat_DamageType::Claw:
+            Resistance = ClawResistance;
+            break;
+        case ECombat_DamageType::Crush:
+            Resistance = PhysicalResistance * 1.5f; // Crush is harder to resist
+            break;
+        case ECombat_DamageType::Environmental:
+            Resistance = PhysicalResistance * 0.5f; // Environmental damage bypasses some resistance
+            break;
+        default:
+            Resistance = PhysicalResistance;
+            break;
     }
-    else if (!bInvulnerable)
-    {
-        GetWorld()->GetTimerManager().ClearTimer(InvulnerabilityTimer);
-    }
+    
+    // Calculate final damage with resistance
+    float DamageMultiplier = FMath::Max(0.0f, 1.0f - (Resistance / 100.0f));
+    return BaseDamage * DamageMultiplier;
 }
 
-void UCombat_DamageSystem::HandleDeath(AActor* Killer)
+void UCombat_DamageSystem::HandleDeath()
 {
     if (bIsDead)
     {
@@ -196,19 +174,15 @@ void UCombat_DamageSystem::HandleDeath(AActor* Killer)
     bIsDead = true;
     CurrentHealth = 0.0f;
     
-    UE_LOG(LogTemp, Warning, TEXT("%s has died"), *GetOwner()->GetName());
+    OnDeath.Broadcast();
+    OnHealthChanged.Broadcast(0.0f);
     
-    OnActorDied.Broadcast(GetOwner(), Killer);
+    if (GEngine)
+    {
+        GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red, 
+            FString::Printf(TEXT("%s has died!"), *GetOwner()->GetName()));
+    }
     
-    // Additional death handling could be added here
-    // - Disable collision
-    // - Play death animation
-    // - Drop items
-    // - Award experience
-}
-
-void UCombat_DamageSystem::ClearInvulnerability()
-{
-    bIsInvulnerable = false;
-    UE_LOG(LogTemp, Log, TEXT("%s is no longer invulnerable"), *GetOwner()->GetName());
+    // Disable tick component to save performance
+    SetComponentTickEnabled(false);
 }
