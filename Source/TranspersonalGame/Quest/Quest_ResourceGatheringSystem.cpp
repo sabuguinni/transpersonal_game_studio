@@ -1,436 +1,348 @@
 #include "Quest_ResourceGatheringSystem.h"
-#include "Engine/Engine.h"
-#include "Engine/World.h"
-#include "Math/UnrealMathUtility.h"
-#include "Kismet/GameplayStatics.h"
 #include "Components/StaticMeshComponent.h"
+#include "Components/SphereComponent.h"
 #include "Engine/StaticMesh.h"
+#include "Engine/World.h"
+#include "TimerManager.h"
+#include "GameFramework/Character.h"
 
-UQuest_ResourceGatheringSystem::UQuest_ResourceGatheringSystem()
+AQuest_ResourceNode::AQuest_ResourceNode()
 {
-    PrimaryComponentTick.bCanEverTick = true;
-    
-    ResourceScanRadius = 5000.0f;
-    MaxResourcesPerBiome = 50;
-    MaxConcurrentMissions = 3;
-    MissionGenerationInterval = 180.0f;
-    LastMissionGenerationTime = 0.0f;
+    PrimaryActorTick.bCanEverTick = true;
+
+    // Create root component
+    RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootComponent"));
+
+    // Create mesh component
+    ResourceMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("ResourceMesh"));
+    ResourceMesh->SetupAttachment(RootComponent);
+    ResourceMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+    ResourceMesh->SetCollisionResponseToAllChannels(ECR_Block);
+
+    // Create interaction sphere
+    InteractionSphere = CreateDefaultSubobject<USphereComponent>(TEXT("InteractionSphere"));
+    InteractionSphere->SetupAttachment(RootComponent);
+    InteractionSphere->SetSphereRadius(200.0f);
+    InteractionSphere->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+    InteractionSphere->SetCollisionResponseToAllChannels(ECR_Ignore);
+    InteractionSphere->SetCollisionResponseToChannel(ECC_Pawn, ECR_Overlap);
+
+    // Initialize default values
+    bIsHarvestable = true;
+    HarvestTime = 3.0f;
+    bIsBeingHarvested = false;
+
+    // Set default resource data
+    ResourceData.ResourceType = EQuest_ResourceType::Stone;
+    ResourceData.Quantity = 1;
+    ResourceData.ResourceName = TEXT("Stone");
+    ResourceData.RespawnTime = 30.0f;
 }
 
-void UQuest_ResourceGatheringSystem::BeginPlay()
+void AQuest_ResourceNode::BeginPlay()
 {
     Super::BeginPlay();
-    
-    // Initialize resource system
-    SpawnResourceNodes();
-    
-    // Generate initial gathering mission
-    GenerateGatheringMission();
-    
-    UE_LOG(LogTemp, Warning, TEXT("Quest Resource Gathering System initialized"));
+
+    // Bind overlap events
+    if (InteractionSphere)
+    {
+        InteractionSphere->OnComponentBeginOverlap.AddDynamic(this, &AQuest_ResourceNode::OnInteractionSphereBeginOverlap);
+    }
+
+    SetupResourceMesh();
 }
 
-void UQuest_ResourceGatheringSystem::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void AQuest_ResourceNode::Tick(float DeltaTime)
 {
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-    
-    UpdateMissionTimers(DeltaTime);
-    UpdateResourceRespawn(DeltaTime);
-    CheckMissionCompletion();
-    
-    // Generate new missions periodically
-    if (GetWorld()->GetTimeSeconds() - LastMissionGenerationTime > MissionGenerationInterval)
+    Super::Tick(DeltaTime);
+
+    // Handle harvest progress visualization here if needed
+    if (bIsBeingHarvested && ResourceMesh)
     {
-        if (ActiveMissions.Num() < MaxConcurrentMissions)
+        // Could add visual feedback like scaling or material changes
+        float ScaleFactor = FMath::Sin(GetWorld()->GetTimeSeconds() * 5.0f) * 0.1f + 0.9f;
+        ResourceMesh->SetWorldScale3D(FVector(ScaleFactor));
+    }
+}
+
+bool AQuest_ResourceNode::CanHarvest() const
+{
+    return bIsHarvestable && !bIsBeingHarvested;
+}
+
+void AQuest_ResourceNode::StartHarvest(AActor* Harvester)
+{
+    if (!CanHarvest() || !Harvester)
+    {
+        return;
+    }
+
+    bIsBeingHarvested = true;
+
+    // Start harvest timer
+    FTimerDelegate HarvestDelegate;
+    HarvestDelegate.BindUFunction(this, FName("CompleteHarvest"));
+    GetWorld()->GetTimerManager().SetTimer(RespawnTimerHandle, HarvestDelegate, HarvestTime, false);
+
+    UE_LOG(LogTemp, Warning, TEXT("Starting harvest of %s"), *ResourceData.ResourceName);
+}
+
+void AQuest_ResourceNode::CompleteHarvest()
+{
+    if (!bIsBeingHarvested)
+    {
+        return;
+    }
+
+    bIsBeingHarvested = false;
+    bIsHarvestable = false;
+
+    // Hide the mesh
+    if (ResourceMesh)
+    {
+        ResourceMesh->SetVisibility(false);
+        ResourceMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    }
+
+    // Trigger harvest event
+    OnResourceHarvested(nullptr, ResourceData);
+
+    // Start respawn timer
+    FTimerDelegate RespawnDelegate;
+    RespawnDelegate.BindUFunction(this, FName("RespawnResource"));
+    GetWorld()->GetTimerManager().SetTimer(RespawnTimerHandle, RespawnDelegate, ResourceData.RespawnTime, false);
+
+    UE_LOG(LogTemp, Warning, TEXT("Harvested %s x%d"), *ResourceData.ResourceName, ResourceData.Quantity);
+}
+
+void AQuest_ResourceNode::SetResourceType(EQuest_ResourceType NewType, int32 NewQuantity)
+{
+    ResourceData.ResourceType = NewType;
+    ResourceData.Quantity = NewQuantity;
+
+    switch (NewType)
+    {
+        case EQuest_ResourceType::Stone:
+            ResourceData.ResourceName = TEXT("Stone");
+            break;
+        case EQuest_ResourceType::Wood:
+            ResourceData.ResourceName = TEXT("Wood");
+            break;
+        case EQuest_ResourceType::Plant:
+            ResourceData.ResourceName = TEXT("Plant Fiber");
+            break;
+        case EQuest_ResourceType::Water:
+            ResourceData.ResourceName = TEXT("Water");
+            break;
+        case EQuest_ResourceType::Bone:
+            ResourceData.ResourceName = TEXT("Bone");
+            break;
+    }
+
+    SetupResourceMesh();
+}
+
+void AQuest_ResourceNode::OnInteractionSphereBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
+{
+    if (!OtherActor || !CanHarvest())
+    {
+        return;
+    }
+
+    // Check if overlapping actor is a character
+    ACharacter* Character = Cast<ACharacter>(OtherActor);
+    if (Character)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Player can harvest %s"), *ResourceData.ResourceName);
+        // Could trigger UI prompt here
+    }
+}
+
+void AQuest_ResourceNode::RespawnResource()
+{
+    bIsHarvestable = true;
+    bIsBeingHarvested = false;
+
+    // Show the mesh again
+    if (ResourceMesh)
+    {
+        ResourceMesh->SetVisibility(true);
+        ResourceMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+        ResourceMesh->SetWorldScale3D(FVector(1.0f));
+    }
+
+    OnResourceRespawned();
+    UE_LOG(LogTemp, Warning, TEXT("Resource %s respawned"), *ResourceData.ResourceName);
+}
+
+void AQuest_ResourceNode::SetupResourceMesh()
+{
+    if (!ResourceMesh)
+    {
+        return;
+    }
+
+    // Set different meshes based on resource type
+    // For now, use basic shapes - in production these would be proper assets
+    UStaticMesh* MeshToUse = nullptr;
+    
+    switch (ResourceData.ResourceType)
+    {
+        case EQuest_ResourceType::Stone:
+            // Use cube for stone
+            MeshToUse = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube"));
+            break;
+        case EQuest_ResourceType::Wood:
+            // Use cylinder for wood
+            MeshToUse = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cylinder"));
+            break;
+        case EQuest_ResourceType::Plant:
+            // Use sphere for plants
+            MeshToUse = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Sphere"));
+            break;
+        default:
+            MeshToUse = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube"));
+            break;
+    }
+
+    if (MeshToUse)
+    {
+        ResourceMesh->SetStaticMesh(MeshToUse);
+    }
+}
+
+// Resource Gathering System Implementation
+UQuest_ResourceGatheringSystem::UQuest_ResourceGatheringSystem()
+{
+    bQuestCompleted = false;
+    QuestTitle = TEXT("Gather Resources");
+    QuestDescription = TEXT("Collect the required resources to complete this quest.");
+}
+
+void UQuest_ResourceGatheringSystem::InitializeGatheringQuest(const TArray<FQuest_ResourceData>& Resources)
+{
+    RequiredResources = Resources;
+    CollectedResources.Empty();
+    bQuestCompleted = false;
+
+    // Initialize collected resources map
+    for (const FQuest_ResourceData& Resource : RequiredResources)
+    {
+        CollectedResources.Add(Resource.ResourceType, 0);
+    }
+
+    UE_LOG(LogTemp, Warning, TEXT("Initialized gathering quest with %d resource types"), RequiredResources.Num());
+}
+
+bool UQuest_ResourceGatheringSystem::AddResource(EQuest_ResourceType ResourceType, int32 Quantity)
+{
+    if (!CollectedResources.Contains(ResourceType))
+    {
+        return false;
+    }
+
+    int32 CurrentAmount = CollectedResources[ResourceType];
+    int32 NewAmount = CurrentAmount + Quantity;
+
+    // Find required amount
+    int32 RequiredAmount = 0;
+    for (const FQuest_ResourceData& Resource : RequiredResources)
+    {
+        if (Resource.ResourceType == ResourceType)
         {
-            GenerateGatheringMission();
-            LastMissionGenerationTime = GetWorld()->GetTimeSeconds();
-        }
-    }
-}
-
-void UQuest_ResourceGatheringSystem::SpawnResourceNodes()
-{
-    TArray<EBiomeType> Biomes = {EBiomeType::Savana, EBiomeType::Forest, EBiomeType::Swamp, EBiomeType::Desert, EBiomeType::Mountain};
-    TArray<FString> ResourceTypes = GetAvailableResourceTypes();
-    
-    for (EBiomeType Biome : Biomes)
-    {
-        FVector BiomeCenter = GetBiomeCenter(Biome);
-        
-        for (int32 i = 0; i < MaxResourcesPerBiome; i++)
-        {
-            FString ResourceType = ResourceTypes[FMath::RandRange(0, ResourceTypes.Num() - 1)];
-            
-            // Random location within biome radius
-            float Angle = FMath::RandRange(0.0f, 360.0f);
-            float Distance = FMath::RandRange(1000.0f, 8000.0f);
-            FVector Offset = FVector(
-                FMath::Cos(FMath::DegreesToRadians(Angle)) * Distance,
-                FMath::Sin(FMath::DegreesToRadians(Angle)) * Distance,
-                0.0f
-            );
-            
-            FVector SpawnLocation = BiomeCenter + Offset;
-            SpawnLocation.Z = 100.0f; // Ground level
-            
-            int32 Quantity = FMath::RandRange(1, 3);
-            SpawnResourceNodeAtLocation(ResourceType, SpawnLocation, Quantity);
-        }
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("Spawned %d resource nodes across all biomes"), ResourceNodes.Num());
-}
-
-void UQuest_ResourceGatheringSystem::SpawnResourceNodeAtLocation(const FString& ResourceType, const FVector& Location, int32 Quantity)
-{
-    UWorld* World = GetWorld();
-    if (!World) return;
-    
-    // Create resource node data
-    FQuest_ResourceNode NewNode;
-    NewNode.ResourceType = ResourceType;
-    NewNode.Quantity = Quantity;
-    NewNode.Location = Location;
-    NewNode.bIsActive = true;
-    NewNode.RespawnTime = FMath::RandRange(300.0f, 600.0f);
-    
-    // Spawn visual actor
-    AStaticMeshActor* ResourceActor = World->SpawnActor<AStaticMeshActor>(AStaticMeshActor::StaticClass(), Location, FRotator::ZeroRotator);
-    if (ResourceActor)
-    {
-        ResourceActor->SetActorLabel(FString::Printf(TEXT("Resource_%s_%d"), *ResourceType, ResourceNodes.Num()));
-        
-        // Set a basic cube mesh as placeholder
-        UStaticMeshComponent* MeshComp = ResourceActor->GetStaticMeshComponent();
-        if (MeshComp)
-        {
-            UStaticMesh* CubeMesh = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube"));
-            if (CubeMesh)
-            {
-                MeshComp->SetStaticMesh(CubeMesh);
-                
-                // Scale based on resource type
-                FVector Scale = FVector(0.5f, 0.5f, 0.5f);
-                if (ResourceType == TEXT("Stone")) Scale = FVector(0.8f, 0.8f, 0.6f);
-                else if (ResourceType == TEXT("Wood")) Scale = FVector(0.3f, 0.3f, 1.2f);
-                else if (ResourceType == TEXT("Plant")) Scale = FVector(0.4f, 0.4f, 0.8f);
-                
-                ResourceActor->SetActorScale3D(Scale);
-            }
-        }
-        
-        NewNode.NodeActor = ResourceActor;
-    }
-    
-    ResourceNodes.Add(NewNode);
-}
-
-bool UQuest_ResourceGatheringSystem::GatherResource(const FVector& Location, const FString& ResourceType, int32 Quantity)
-{
-    // Find nearby resource node
-    for (int32 i = 0; i < ResourceNodes.Num(); i++)
-    {
-        FQuest_ResourceNode& Node = ResourceNodes[i];
-        
-        if (Node.bIsActive && Node.ResourceType == ResourceType)
-        {
-            float Distance = FVector::Dist(Location, Node.Location);
-            if (Distance <= 200.0f) // Gathering range
-            {
-                int32 GatheredAmount = FMath::Min(Quantity, Node.Quantity);
-                Node.Quantity -= GatheredAmount;
-                
-                // Add to player inventory
-                AddToPlayerInventory(ResourceType, GatheredAmount);
-                
-                // Update mission progress
-                UpdateMissionProgress(ResourceType, GatheredAmount);
-                
-                // Deactivate node if depleted
-                if (Node.Quantity <= 0)
-                {
-                    Node.bIsActive = false;
-                    if (Node.NodeActor)
-                    {
-                        Node.NodeActor->SetActorHiddenInGame(true);
-                    }
-                }
-                
-                UE_LOG(LogTemp, Warning, TEXT("Gathered %d %s at location %s"), GatheredAmount, *ResourceType, *Location.ToString());
-                return true;
-            }
-        }
-    }
-    
-    return false;
-}
-
-int32 UQuest_ResourceGatheringSystem::GetPlayerResourceCount(const FString& ResourceType)
-{
-    if (PlayerInventory.Contains(ResourceType))
-    {
-        return PlayerInventory[ResourceType];
-    }
-    return 0;
-}
-
-void UQuest_ResourceGatheringSystem::AddToPlayerInventory(const FString& ResourceType, int32 Quantity)
-{
-    if (PlayerInventory.Contains(ResourceType))
-    {
-        PlayerInventory[ResourceType] += Quantity;
-    }
-    else
-    {
-        PlayerInventory.Add(ResourceType, Quantity);
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("Added %d %s to inventory. Total: %d"), Quantity, *ResourceType, PlayerInventory[ResourceType]);
-}
-
-TArray<FQuest_ResourceNode> UQuest_ResourceGatheringSystem::GetNearbyResources(const FVector& Location, float Radius)
-{
-    TArray<FQuest_ResourceNode> NearbyNodes;
-    
-    for (const FQuest_ResourceNode& Node : ResourceNodes)
-    {
-        if (Node.bIsActive)
-        {
-            float Distance = FVector::Dist(Location, Node.Location);
-            if (Distance <= Radius)
-            {
-                NearbyNodes.Add(Node);
-            }
-        }
-    }
-    
-    return NearbyNodes;
-}
-
-void UQuest_ResourceGatheringSystem::GenerateGatheringMission()
-{
-    TArray<FString> ResourceTypes = GetAvailableResourceTypes();
-    FString TargetResource = ResourceTypes[FMath::RandRange(0, ResourceTypes.Num() - 1)];
-    
-    FQuest_GatheringMission NewMission;
-    NewMission.MissionName = FString::Printf(TEXT("Gather %s Resources"), *TargetResource);
-    NewMission.TargetResource = TargetResource;
-    NewMission.RequiredQuantity = FMath::RandRange(3, 8);
-    NewMission.CurrentQuantity = 0;
-    NewMission.TimeLimit = FMath::RandRange(300.0f, 900.0f);
-    NewMission.TimeRemaining = NewMission.TimeLimit;
-    NewMission.bIsActive = false;
-    NewMission.bIsCompleted = false;
-    NewMission.RewardExperience = NewMission.RequiredQuantity * 20.0f;
-    
-    // Add hint locations (nearby resource nodes)
-    for (const FQuest_ResourceNode& Node : ResourceNodes)
-    {
-        if (Node.bIsActive && Node.ResourceType == TargetResource)
-        {
-            NewMission.HintLocations.Add(Node.Location);
-            if (NewMission.HintLocations.Num() >= 3) break;
-        }
-    }
-    
-    ActiveMissions.Add(NewMission);
-    
-    UE_LOG(LogTemp, Warning, TEXT("Generated gathering mission: %s (Collect %d %s)"), 
-        *NewMission.MissionName, NewMission.RequiredQuantity, *TargetResource);
-}
-
-void UQuest_ResourceGatheringSystem::StartMission(const FString& MissionName)
-{
-    for (FQuest_GatheringMission& Mission : ActiveMissions)
-    {
-        if (Mission.MissionName == MissionName && !Mission.bIsActive)
-        {
-            Mission.bIsActive = true;
-            UE_LOG(LogTemp, Warning, TEXT("Started gathering mission: %s"), *MissionName);
+            RequiredAmount = Resource.Quantity;
             break;
         }
     }
+
+    // Cap at required amount
+    NewAmount = FMath::Min(NewAmount, RequiredAmount);
+    CollectedResources[ResourceType] = NewAmount;
+
+    OnResourceAdded(ResourceType, NewAmount, RequiredAmount);
+    CheckQuestCompletion();
+
+    UE_LOG(LogTemp, Warning, TEXT("Added resource: %d, New total: %d/%d"), (int32)ResourceType, NewAmount, RequiredAmount);
+    return true;
 }
 
-void UQuest_ResourceGatheringSystem::UpdateMissionProgress(const FString& ResourceType, int32 Quantity)
+bool UQuest_ResourceGatheringSystem::IsQuestComplete() const
 {
-    for (FQuest_GatheringMission& Mission : ActiveMissions)
+    for (const FQuest_ResourceData& Resource : RequiredResources)
     {
-        if (Mission.bIsActive && !Mission.bIsCompleted && Mission.TargetResource == ResourceType)
+        int32 CollectedAmount = CollectedResources.FindRef(Resource.ResourceType);
+        if (CollectedAmount < Resource.Quantity)
         {
-            Mission.CurrentQuantity += Quantity;
-            UE_LOG(LogTemp, Warning, TEXT("Mission progress: %s (%d/%d)"), 
-                *Mission.MissionName, Mission.CurrentQuantity, Mission.RequiredQuantity);
+            return false;
         }
     }
+    return true;
 }
 
-void UQuest_ResourceGatheringSystem::CompleteMission(const FString& MissionName)
+float UQuest_ResourceGatheringSystem::GetQuestProgress() const
 {
-    for (int32 i = ActiveMissions.Num() - 1; i >= 0; i--)
+    if (RequiredResources.Num() == 0)
     {
-        FQuest_GatheringMission& Mission = ActiveMissions[i];
-        if (Mission.MissionName == MissionName)
-        {
-            Mission.bIsCompleted = true;
-            Mission.bIsActive = false;
-            
-            UE_LOG(LogTemp, Warning, TEXT("Completed gathering mission: %s (Reward: %.1f XP)"), 
-                *MissionName, Mission.RewardExperience);
-            
-            // Remove completed mission after a delay
-            ActiveMissions.RemoveAt(i);
-            break;
-        }
+        return 1.0f;
     }
-}
 
-bool UQuest_ResourceGatheringSystem::IsMissionActive(const FString& MissionName)
-{
-    for (const FQuest_GatheringMission& Mission : ActiveMissions)
+    float TotalProgress = 0.0f;
+    for (const FQuest_ResourceData& Resource : RequiredResources)
     {
-        if (Mission.MissionName == MissionName && Mission.bIsActive)
-        {
-            return true;
-        }
+        int32 CollectedAmount = CollectedResources.FindRef(Resource.ResourceType);
+        float ResourceProgress = FMath::Clamp((float)CollectedAmount / (float)Resource.Quantity, 0.0f, 1.0f);
+        TotalProgress += ResourceProgress;
     }
-    return false;
+
+    return TotalProgress / RequiredResources.Num();
 }
 
-TArray<FQuest_GatheringMission> UQuest_ResourceGatheringSystem::GetActiveMissions()
+FString UQuest_ResourceGatheringSystem::GetProgressText() const
 {
-    TArray<FQuest_GatheringMission> Result;
-    for (const FQuest_GatheringMission& Mission : ActiveMissions)
-    {
-        if (Mission.bIsActive)
-        {
-            Result.Add(Mission);
-        }
-    }
-    return Result;
-}
-
-FVector UQuest_ResourceGatheringSystem::GetRandomLocationInBiome(EBiomeType BiomeType)
-{
-    FVector BiomeCenter = GetBiomeCenter(BiomeType);
+    FString ProgressText = TEXT("Progress:\n");
     
-    float Angle = FMath::RandRange(0.0f, 360.0f);
-    float Distance = FMath::RandRange(2000.0f, 8000.0f);
-    
-    FVector RandomLocation = BiomeCenter + FVector(
-        FMath::Cos(FMath::DegreesToRadians(Angle)) * Distance,
-        FMath::Sin(FMath::DegreesToRadians(Angle)) * Distance,
-        100.0f
-    );
-    
-    return RandomLocation;
-}
-
-FString UQuest_ResourceGatheringSystem::GetRandomResourceType()
-{
-    TArray<FString> ResourceTypes = GetAvailableResourceTypes();
-    return ResourceTypes[FMath::RandRange(0, ResourceTypes.Num() - 1)];
-}
-
-void UQuest_ResourceGatheringSystem::CleanupExpiredMissions()
-{
-    for (int32 i = ActiveMissions.Num() - 1; i >= 0; i--)
+    for (const FQuest_ResourceData& Resource : RequiredResources)
     {
-        FQuest_GatheringMission& Mission = ActiveMissions[i];
-        if (Mission.bIsActive && Mission.TimeRemaining <= 0.0f)
-        {
-            UE_LOG(LogTemp, Warning, TEXT("Mission expired: %s"), *Mission.MissionName);
-            ActiveMissions.RemoveAt(i);
-        }
+        int32 CollectedAmount = CollectedResources.FindRef(Resource.ResourceType);
+        ProgressText += FString::Printf(TEXT("%s: %d/%d\n"), *Resource.ResourceName, CollectedAmount, Resource.Quantity);
     }
+
+    return ProgressText;
 }
 
-void UQuest_ResourceGatheringSystem::RespawnResourceNode(int32 NodeIndex)
+void UQuest_ResourceGatheringSystem::SpawnResourceNodes(UWorld* World, const TArray<FVector>& Locations)
 {
-    if (ResourceNodes.IsValidIndex(NodeIndex))
+    if (!World || RequiredResources.Num() == 0)
     {
-        FQuest_ResourceNode& Node = ResourceNodes[NodeIndex];
-        if (!Node.bIsActive)
+        return;
+    }
+
+    for (int32 i = 0; i < Locations.Num() && i < RequiredResources.Num() * 3; ++i)
+    {
+        FVector SpawnLocation = Locations[i];
+        EQuest_ResourceType ResourceType = RequiredResources[i % RequiredResources.Num()].ResourceType;
+
+        FActorSpawnParameters SpawnParams;
+        SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
+
+        AQuest_ResourceNode* ResourceNode = World->SpawnActor<AQuest_ResourceNode>(AQuest_ResourceNode::StaticClass(), SpawnLocation, FRotator::ZeroRotator, SpawnParams);
+        
+        if (ResourceNode)
         {
-            Node.bIsActive = true;
-            Node.Quantity = FMath::RandRange(1, 3);
+            ResourceNode->SetResourceType(ResourceType, 1);
+            ResourceNode->SetActorLabel(FString::Printf(TEXT("ResourceNode_%s_%d"), *RequiredResources[i % RequiredResources.Num()].ResourceName, i));
             
-            if (Node.NodeActor)
-            {
-                Node.NodeActor->SetActorHiddenInGame(false);
-            }
-            
-            UE_LOG(LogTemp, Warning, TEXT("Respawned resource node: %s"), *Node.ResourceType);
+            UE_LOG(LogTemp, Warning, TEXT("Spawned resource node: %s at %s"), *ResourceNode->GetActorLabel(), *SpawnLocation.ToString());
         }
     }
 }
 
-void UQuest_ResourceGatheringSystem::UpdateMissionTimers(float DeltaTime)
+void UQuest_ResourceGatheringSystem::CheckQuestCompletion()
 {
-    for (FQuest_GatheringMission& Mission : ActiveMissions)
+    if (!bQuestCompleted && IsQuestComplete())
     {
-        if (Mission.bIsActive)
-        {
-            Mission.TimeRemaining -= DeltaTime;
-        }
+        bQuestCompleted = true;
+        OnQuestCompleted();
+        UE_LOG(LogTemp, Warning, TEXT("Quest completed!"));
     }
-}
-
-void UQuest_ResourceGatheringSystem::UpdateResourceRespawn(float DeltaTime)
-{
-    for (int32 i = 0; i < ResourceNodes.Num(); i++)
-    {
-        FQuest_ResourceNode& Node = ResourceNodes[i];
-        if (!Node.bIsActive)
-        {
-            Node.RespawnTime -= DeltaTime;
-            if (Node.RespawnTime <= 0.0f)
-            {
-                RespawnResourceNode(i);
-                Node.RespawnTime = FMath::RandRange(300.0f, 600.0f);
-            }
-        }
-    }
-}
-
-void UQuest_ResourceGatheringSystem::CheckMissionCompletion()
-{
-    for (FQuest_GatheringMission& Mission : ActiveMissions)
-    {
-        if (Mission.bIsActive && !Mission.bIsCompleted)
-        {
-            if (Mission.CurrentQuantity >= Mission.RequiredQuantity)
-            {
-                CompleteMission(Mission.MissionName);
-            }
-        }
-    }
-}
-
-FVector UQuest_ResourceGatheringSystem::GetBiomeCenter(EBiomeType BiomeType)
-{
-    switch (BiomeType)
-    {
-        case EBiomeType::Savana: return FVector(0.0f, 0.0f, 0.0f);
-        case EBiomeType::Forest: return FVector(-45000.0f, 40000.0f, 0.0f);
-        case EBiomeType::Swamp: return FVector(-50000.0f, -45000.0f, 0.0f);
-        case EBiomeType::Desert: return FVector(55000.0f, 0.0f, 0.0f);
-        case EBiomeType::Mountain: return FVector(40000.0f, 50000.0f, 0.0f);
-        default: return FVector::ZeroVector;
-    }
-}
-
-TArray<FString> UQuest_ResourceGatheringSystem::GetAvailableResourceTypes()
-{
-    return {
-        TEXT("Stone"),
-        TEXT("Wood"),
-        TEXT("Plant"),
-        TEXT("Bone"),
-        TEXT("Hide"),
-        TEXT("Flint"),
-        TEXT("Clay"),
-        TEXT("Water")
-    };
 }
