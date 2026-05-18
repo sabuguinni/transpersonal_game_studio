@@ -1,392 +1,428 @@
 #include "Core_TerrainPhysicsSystem.h"
 #include "Engine/World.h"
 #include "Engine/Engine.h"
-#include "GameFramework/GameModeBase.h"
-#include "Components/PrimitiveComponent.h"
-#include "PhysicalMaterials/PhysicalMaterial.h"
-#include "Landscape/Landscape.h"
-#include "Landscape/LandscapeComponent.h"
-#include "Materials/MaterialInterface.h"
 #include "Kismet/GameplayStatics.h"
+#include "Landscape/LandscapeComponent.h"
+#include "Landscape/LandscapeInfo.h"
+#include "BiomeManager.h"
 #include "DrawDebugHelpers.h"
 
 UCore_TerrainPhysicsSystem::UCore_TerrainPhysicsSystem()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 0.1f; // 10 FPS for performance
+    PrimaryComponentTick.TickInterval = 0.1f; // 10 FPS for terrain physics
     
-    // Initialize default settings
-    bEnableTerrainDeformation = true;
-    GlobalDeformationThreshold = 2000.0f;
-    MaxDeformationRadius = 500.0f;
-    MaxDeformationDepth = 50.0f;
-    MaxActiveDeformations = 100;
-    DeformationUpdateFrequency = 0.1f;
+    // Initialize default terrain properties
+    BiomeFrictionValues.Add(ECore_BiomeType::Savana, 0.7f);
+    BiomeFrictionValues.Add(ECore_BiomeType::Forest, 0.6f);
+    BiomeFrictionValues.Add(ECore_BiomeType::Swamp, 0.3f);
+    BiomeFrictionValues.Add(ECore_BiomeType::Desert, 0.4f);
+    BiomeFrictionValues.Add(ECore_BiomeType::Mountain, 0.8f);
     
-    LastDeformationUpdate = 0.0f;
-    DeformationsProcessedThisFrame = 0;
-    FrameStartTime = 0.0f;
+    BiomeHardnessValues.Add(ECore_BiomeType::Savana, 0.6f);
+    BiomeHardnessValues.Add(ECore_BiomeType::Forest, 0.5f);
+    BiomeHardnessValues.Add(ECore_BiomeType::Swamp, 0.2f);
+    BiomeHardnessValues.Add(ECore_BiomeType::Desert, 0.4f);
+    BiomeHardnessValues.Add(ECore_BiomeType::Mountain, 0.9f);
     
-    // Initialize default surface properties
-    InitializeDefaultSurfaceProperties();
+    BiomeMoistureValues.Add(ECore_BiomeType::Savana, 0.3f);
+    BiomeMoistureValues.Add(ECore_BiomeType::Forest, 0.7f);
+    BiomeMoistureValues.Add(ECore_BiomeType::Swamp, 1.0f);
+    BiomeMoistureValues.Add(ECore_BiomeType::Desert, 0.1f);
+    BiomeMoistureValues.Add(ECore_BiomeType::Mountain, 0.4f);
+    
+    // Footprint settings
+    bEnableFootprints = true;
+    MaxFootprints = 500;
+    FootprintFadeTime = 300.0f; // 5 minutes
+    MinFootprintWeight = 50.0f; // kg
+    
+    // Erosion settings
+    bEnableErosion = true;
+    RainIntensity = 0.0f;
+    WindStrength = 0.0f;
+    ErosionUpdateFrequency = 60.0f; // 1 minute
+    
+    // Slope physics
+    MaxStableSlope = 45.0f; // degrees
+    LandslideThreshold = 60.0f; // degrees
+    bEnableSlopePhysics = true;
+    
+    // Mud physics
+    MudViscosity = 0.5f;
+    QuicksandSinkRate = 0.1f; // m/s
+    bEnableMudPhysics = true;
+    
+    // Performance settings
+    PhysicsLODDistances = {1000.0f, 5000.0f, 10000.0f};
+    DistantPhysicsUpdateRate = 1.0f; // 1 second
+    MaxPhysicsCalculationsPerFrame = 10;
+    
+    // Internal state
+    ErosionTimer = 0.0f;
+    CurrentFrameCalculations = 0;
+    CachedLandscape = nullptr;
+    BiomeManager = nullptr;
 }
 
 void UCore_TerrainPhysicsSystem::BeginPlay()
 {
     Super::BeginPlay();
-    
-    // Cache landscape reference for performance
-    if (UWorld* World = GetWorld())
-    {
-        CachedLandscape = FindLandscapeAtLocation(GetOwner()->GetActorLocation());
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("Core_TerrainPhysicsSystem: Initialized with %d surface types"), SurfaceProperties.Num());
+    InitializeTerrainPhysics();
 }
 
 void UCore_TerrainPhysicsSystem::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
     
-    FrameStartTime = GetWorld()->GetTimeSeconds();
-    DeformationsProcessedThisFrame = 0;
+    // Reset frame calculation counter
+    CurrentFrameCalculations = 0;
     
-    // Update deformations at controlled frequency
-    if (bEnableTerrainDeformation && (FrameStartTime - LastDeformationUpdate) >= DeformationUpdateFrequency)
+    // Update footprint system
+    if (bEnableFootprints)
     {
-        UpdateDeformations(DeltaTime);
-        LastDeformationUpdate = FrameStartTime;
+        UpdateFootprints(DeltaTime);
     }
     
-    // Cleanup expired deformations
-    CleanupExpiredDeformations();
-}
-
-void UCore_TerrainPhysicsSystem::InitializeDefaultSurfaceProperties()
-{
-    // Rock surface
-    FCore_TerrainSurfaceProperties RockProperties;
-    RockProperties.SurfaceType = ECore_TerrainSurfaceType::Rock;
-    RockProperties.Friction = 0.9f;
-    RockProperties.Restitution = 0.1f;
-    RockProperties.Density = 2500.0f;
-    RockProperties.Hardness = 0.9f;
-    RockProperties.bCanDeform = false;
-    RockProperties.DeformationThreshold = 5000.0f;
-    RockProperties.RecoveryRate = 0.1f;
-    SurfaceProperties.Add(ECore_TerrainSurfaceType::Rock, RockProperties);
-    
-    // Dirt surface
-    FCore_TerrainSurfaceProperties DirtProperties;
-    DirtProperties.SurfaceType = ECore_TerrainSurfaceType::Dirt;
-    DirtProperties.Friction = 0.7f;
-    DirtProperties.Restitution = 0.3f;
-    DirtProperties.Density = 1500.0f;
-    DirtProperties.Hardness = 0.4f;
-    DirtProperties.bCanDeform = true;
-    DirtProperties.DeformationThreshold = 800.0f;
-    DirtProperties.RecoveryRate = 2.0f;
-    SurfaceProperties.Add(ECore_TerrainSurfaceType::Dirt, DirtProperties);
-    
-    // Grass surface
-    FCore_TerrainSurfaceProperties GrassProperties;
-    GrassProperties.SurfaceType = ECore_TerrainSurfaceType::Grass;
-    GrassProperties.Friction = 0.6f;
-    GrassProperties.Restitution = 0.4f;
-    GrassProperties.Density = 1200.0f;
-    GrassProperties.Hardness = 0.3f;
-    GrassProperties.bCanDeform = true;
-    GrassProperties.DeformationThreshold = 600.0f;
-    GrassProperties.RecoveryRate = 3.0f;
-    SurfaceProperties.Add(ECore_TerrainSurfaceType::Grass, GrassProperties);
-    
-    // Sand surface
-    FCore_TerrainSurfaceProperties SandProperties;
-    SandProperties.SurfaceType = ECore_TerrainSurfaceType::Sand;
-    SandProperties.Friction = 0.4f;
-    SandProperties.Restitution = 0.2f;
-    SandProperties.Density = 1600.0f;
-    SandProperties.Hardness = 0.2f;
-    SandProperties.bCanDeform = true;
-    SandProperties.DeformationThreshold = 400.0f;
-    SandProperties.RecoveryRate = 1.5f;
-    SurfaceProperties.Add(ECore_TerrainSurfaceType::Sand, SandProperties);
-    
-    // Mud surface
-    FCore_TerrainSurfaceProperties MudProperties;
-    MudProperties.SurfaceType = ECore_TerrainSurfaceType::Mud;
-    MudProperties.Friction = 0.3f;
-    MudProperties.Restitution = 0.1f;
-    MudProperties.Density = 1800.0f;
-    MudProperties.Hardness = 0.1f;
-    MudProperties.bCanDeform = true;
-    MudProperties.DeformationThreshold = 200.0f;
-    MudProperties.RecoveryRate = 0.5f;
-    SurfaceProperties.Add(ECore_TerrainSurfaceType::Mud, MudProperties);
-    
-    // Add more surface types...
-    // Snow, Ice, Water, Lava, Wood with appropriate properties
-}
-
-ECore_TerrainSurfaceType UCore_TerrainPhysicsSystem::GetSurfaceTypeAtLocation(const FVector& Location)
-{
-    UPhysicalMaterial* PhysMat = GetPhysicalMaterialAtLocation(Location);
-    if (PhysMat && PhysicalMaterialMapping.Contains(PhysMat))
+    // Process erosion
+    if (bEnableErosion)
     {
-        return PhysicalMaterialMapping[PhysMat];
+        ProcessErosion(DeltaTime);
     }
     
-    // Default fallback based on height and slope analysis
-    if (CachedLandscape.IsValid())
+    // Check slope stability
+    if (bEnableSlopePhysics)
+    {
+        CheckSlopeStability();
+    }
+    
+    // Update mud physics
+    if (bEnableMudPhysics)
+    {
+        UpdateMudPhysics(DeltaTime);
+    }
+}
+
+void UCore_TerrainPhysicsSystem::InitializeTerrainPhysics()
+{
+    UWorld* World = GetWorld();
+    if (!World) return;
+    
+    // Find landscape in the world
+    for (TActorIterator<ALandscape> ActorIterator(World); ActorIterator; ++ActorIterator)
+    {
+        CachedLandscape = *ActorIterator;
+        break;
+    }
+    
+    // Find biome manager
+    BiomeManager = World->GetGameInstance()->GetSubsystem<UBiomeManager>();
+    
+    UE_LOG(LogTemp, Log, TEXT("Core_TerrainPhysicsSystem initialized - Landscape: %s, BiomeManager: %s"),
+        CachedLandscape ? TEXT("Found") : TEXT("Not Found"),
+        BiomeManager ? TEXT("Found") : TEXT("Not Found"));
+}
+
+void UCore_TerrainPhysicsSystem::UpdateFootprints(float DeltaTime)
+{
+    // Age and remove old footprints
+    for (int32 i = ActiveFootprints.Num() - 1; i >= 0; i--)
+    {
+        ActiveFootprints[i].Age += DeltaTime;
+        
+        if (ActiveFootprints[i].Age >= FootprintFadeTime)
+        {
+            ActiveFootprints.RemoveAt(i);
+        }
+    }
+    
+    // Limit total footprints
+    while (ActiveFootprints.Num() > MaxFootprints)
+    {
+        ActiveFootprints.RemoveAt(0);
+    }
+}
+
+void UCore_TerrainPhysicsSystem::ProcessErosion(float DeltaTime)
+{
+    ErosionTimer += DeltaTime;
+    
+    if (ErosionTimer >= ErosionUpdateFrequency)
+    {
+        ErosionTimer = 0.0f;
+        
+        // Process erosion calculations
+        if (CurrentFrameCalculations < MaxPhysicsCalculationsPerFrame)
+        {
+            // Sample random locations for erosion
+            UWorld* World = GetWorld();
+            if (World && CachedLandscape)
+            {
+                FVector LandscapeLocation = CachedLandscape->GetActorLocation();
+                FVector RandomLocation = LandscapeLocation + FVector(
+                    FMath::RandRange(-50000.0f, 50000.0f),
+                    FMath::RandRange(-50000.0f, 50000.0f),
+                    0.0f
+                );
+                
+                float ErosionFactor = CalculateErosionFactor(RandomLocation, RainIntensity, WindStrength);
+                
+                if (ErosionFactor > 0.1f)
+                {
+                    ApplyTerrainDeformation(RandomLocation, ErosionFactor * 0.01f, 500.0f);
+                }
+                
+                CurrentFrameCalculations++;
+            }
+        }
+    }
+}
+
+void UCore_TerrainPhysicsSystem::CheckSlopeStability()
+{
+    if (CurrentFrameCalculations >= MaxPhysicsCalculationsPerFrame) return;
+    
+    // Sample random locations for slope stability
+    UWorld* World = GetWorld();
+    if (World && CachedLandscape)
     {
         FVector LandscapeLocation = CachedLandscape->GetActorLocation();
-        float RelativeHeight = Location.Z - LandscapeLocation.Z;
+        FVector RandomLocation = LandscapeLocation + FVector(
+            FMath::RandRange(-50000.0f, 50000.0f),
+            FMath::RandRange(-50000.0f, 50000.0f),
+            0.0f
+        );
         
-        if (RelativeHeight > 1000.0f)
+        FVector TerrainNormal = GetTerrainNormalAtLocation(RandomLocation);
+        float SlopeAngle = FMath::RadiansToDegrees(FMath::Acos(FVector::DotProduct(TerrainNormal, FVector::UpVector)));
+        
+        if (SlopeAngle > LandslideThreshold)
         {
-            return ECore_TerrainSurfaceType::Rock; // High altitude = rock
+            // Trigger landslide effect
+            UE_LOG(LogTemp, Warning, TEXT("Landslide triggered at location: %s, Slope: %.1f degrees"), 
+                *RandomLocation.ToString(), SlopeAngle);
+            
+            // Apply terrain deformation to simulate landslide
+            ApplyTerrainDeformation(RandomLocation, 0.05f, 1000.0f);
         }
-        else if (RelativeHeight < 100.0f)
-        {
-            return ECore_TerrainSurfaceType::Mud; // Low altitude = mud/water
-        }
+        
+        CurrentFrameCalculations++;
     }
-    
-    return ECore_TerrainSurfaceType::Grass; // Default surface type
 }
 
-FCore_TerrainSurfaceProperties UCore_TerrainPhysicsSystem::GetSurfacePropertiesAtLocation(const FVector& Location)
+void UCore_TerrainPhysicsSystem::UpdateMudPhysics(float DeltaTime)
 {
-    ECore_TerrainSurfaceType SurfaceType = GetSurfaceTypeAtLocation(Location);
+    // Check for actors in mud areas
+    UWorld* World = GetWorld();
+    if (!World) return;
     
-    if (SurfaceProperties.Contains(SurfaceType))
+    // Find all pawns and check if they're in mud
+    for (TActorIterator<APawn> ActorIterator(World); ActorIterator; ++ActorIterator)
     {
-        return SurfaceProperties[SurfaceType];
+        APawn* Pawn = *ActorIterator;
+        if (!Pawn) continue;
+        
+        FVector PawnLocation = Pawn->GetActorLocation();
+        ECore_BiomeType BiomeType = GetBiomeTypeAtLocation(PawnLocation);
+        
+        if (BiomeType == ECore_BiomeType::Swamp)
+        {
+            float MudDepth = GetMudDepthAtLocation(PawnLocation);
+            
+            if (MudDepth > 10.0f) // 10cm of mud
+            {
+                // Apply mud physics to the pawn
+                UPrimitiveComponent* PawnRoot = Cast<UPrimitiveComponent>(Pawn->GetRootComponent());
+                if (PawnRoot)
+                {
+                    FVector MudForce = FVector(0, 0, -MudDepth * QuicksandSinkRate * 100.0f);
+                    PawnRoot->AddForce(MudForce);
+                    
+                    // Reduce movement speed
+                    if (UCharacterMovementComponent* MovementComp = Pawn->FindComponentByClass<UCharacterMovementComponent>())
+                    {
+                        float MudSlowdown = FMath::Clamp(1.0f - (MudDepth / 100.0f), 0.1f, 1.0f);
+                        MovementComp->MaxWalkSpeed *= MudSlowdown;
+                    }
+                }
+            }
+        }
+        
+        CurrentFrameCalculations++;
+        if (CurrentFrameCalculations >= MaxPhysicsCalculationsPerFrame) break;
     }
-    
-    // Return default properties if not found
-    return FCore_TerrainSurfaceProperties();
 }
 
-bool UCore_TerrainPhysicsSystem::ApplyTerrainDeformation(const FVector& Location, float Force, float Radius)
+void UCore_TerrainPhysicsSystem::ApplyTerrainPhysicsAtLocation(const FVector& Location, float Radius, float Force)
 {
-    if (!bEnableTerrainDeformation || Force < GlobalDeformationThreshold)
+    if (!CachedLandscape) return;
+    
+    // Apply physics force to terrain
+    ApplyTerrainDeformation(Location, Force * 0.01f, Radius);
+    
+    UE_LOG(LogTemp, Log, TEXT("Applied terrain physics at %s with force %.2f and radius %.2f"), 
+        *Location.ToString(), Force, Radius);
+}
+
+FCore_TerrainProperties UCore_TerrainPhysicsSystem::GetTerrainPropertiesAtLocation(const FVector& Location)
+{
+    FCore_TerrainProperties Properties;
+    
+    ECore_BiomeType BiomeType = GetBiomeTypeAtLocation(Location);
+    
+    Properties.BiomeType = BiomeType;
+    Properties.Friction = BiomeFrictionValues.FindRef(BiomeType);
+    Properties.Hardness = BiomeHardnessValues.FindRef(BiomeType);
+    Properties.Moisture = BiomeMoistureValues.FindRef(BiomeType);
+    Properties.Height = GetTerrainHeightAtLocation(Location);
+    Properties.Normal = GetTerrainNormalAtLocation(Location);
+    
+    float SlopeAngle = FMath::RadiansToDegrees(FMath::Acos(FVector::DotProduct(Properties.Normal, FVector::UpVector)));
+    Properties.SlopeAngle = SlopeAngle;
+    Properties.bIsStable = SlopeAngle <= MaxStableSlope;
+    
+    return Properties;
+}
+
+void UCore_TerrainPhysicsSystem::CreateFootprint(const FVector& Location, float Weight, float Size, ECore_CreatureType CreatureType)
+{
+    if (!bEnableFootprints || Weight < MinFootprintWeight) return;
+    
+    ECore_BiomeType BiomeType = GetBiomeTypeAtLocation(Location);
+    float Hardness = BiomeHardnessValues.FindRef(BiomeType);
+    
+    // Calculate footprint depth based on weight and terrain hardness
+    float FootprintDepth = (Weight / 1000.0f) * (1.0f - Hardness) * Size;
+    
+    if (FootprintDepth > 0.5f) // Minimum 0.5cm depth
+    {
+        FCore_FootprintData Footprint;
+        Footprint.Location = Location;
+        Footprint.Depth = FootprintDepth;
+        Footprint.Size = Size;
+        Footprint.CreatureType = CreatureType;
+        Footprint.Age = 0.0f;
+        Footprint.BiomeType = BiomeType;
+        
+        ActiveFootprints.Add(Footprint);
+        
+        UE_LOG(LogTemp, Log, TEXT("Created footprint at %s - Depth: %.2fcm, Size: %.2f"), 
+            *Location.ToString(), FootprintDepth, Size);
+    }
+}
+
+void UCore_TerrainPhysicsSystem::TriggerErosionInArea(const FVector& Center, float Radius, float Intensity)
+{
+    ApplyTerrainDeformation(Center, Intensity * 0.02f, Radius);
+    
+    UE_LOG(LogTemp, Log, TEXT("Triggered erosion at %s - Radius: %.2f, Intensity: %.2f"), 
+        *Center.ToString(), Radius, Intensity);
+}
+
+bool UCore_TerrainPhysicsSystem::IsLocationStableForBuilding(const FVector& Location, float StructureWeight)
+{
+    FCore_TerrainProperties Properties = GetTerrainPropertiesAtLocation(Location);
+    
+    // Check slope stability
+    if (Properties.SlopeAngle > MaxStableSlope * 0.8f) // 80% of max slope for safety
     {
         return false;
     }
     
-    // Check if we're at max deformations
-    if (ActiveDeformations.Num() >= MaxActiveDeformations)
-    {
-        // Remove oldest deformation
-        ActiveDeformations.RemoveAt(0);
-    }
-    
-    // Get surface properties at location
-    FCore_TerrainSurfaceProperties SurfaceProps = GetSurfacePropertiesAtLocation(Location);
-    
-    if (!SurfaceProps.bCanDeform || Force < SurfaceProps.DeformationThreshold)
+    // Check terrain hardness for foundation
+    if (Properties.Hardness < 0.3f) // Too soft for heavy structures
     {
         return false;
     }
     
-    // Calculate deformation parameters
-    float ClampedRadius = FMath::Clamp(Radius, 10.0f, MaxDeformationRadius);
-    float DeformationDepth = FMath::Clamp((Force / SurfaceProps.DeformationThreshold) * 10.0f, 1.0f, MaxDeformationDepth);
-    
-    // Create deformation data
-    FCore_TerrainDeformationData NewDeformation;
-    NewDeformation.Location = Location;
-    NewDeformation.Radius = ClampedRadius;
-    NewDeformation.Depth = DeformationDepth;
-    NewDeformation.Force = Force;
-    NewDeformation.Timestamp = GetWorld()->GetTimeSeconds();
-    NewDeformation.bIsRecovering = false;
-    
-    ActiveDeformations.Add(NewDeformation);
-    
-    // Broadcast deformation event
-    OnTerrainDeformation.Broadcast(Location, Force);
-    
-    UE_LOG(LogTemp, Log, TEXT("Terrain deformation applied at %s with force %.2f, depth %.2f"), 
-           *Location.ToString(), Force, DeformationDepth);
+    // Check if in swamp (unstable ground)
+    if (Properties.BiomeType == ECore_BiomeType::Swamp && StructureWeight > 1000.0f)
+    {
+        return false;
+    }
     
     return true;
 }
 
-void UCore_TerrainPhysicsSystem::ProcessSurfaceImpact(const FVector& Location, float ImpactForce, UPrimitiveComponent* HitComponent)
+float UCore_TerrainPhysicsSystem::GetMudDepthAtLocation(const FVector& Location)
 {
-    ECore_TerrainSurfaceType SurfaceType = GetSurfaceTypeAtLocation(Location);
-    FCore_TerrainSurfaceProperties SurfaceProps = GetSurfacePropertiesAtLocation(Location);
+    ECore_BiomeType BiomeType = GetBiomeTypeAtLocation(Location);
     
-    // Apply physical material properties to the hit component
-    if (HitComponent)
+    if (BiomeType != ECore_BiomeType::Swamp)
     {
-        ApplyPhysicalMaterialProperties(HitComponent, SurfaceProps);
+        return 0.0f;
     }
     
-    // Check for deformation
-    if (ImpactForce > SurfaceProps.DeformationThreshold)
-    {
-        ApplyTerrainDeformation(Location, ImpactForce, 100.0f);
-    }
+    float Moisture = BiomeMoistureValues.FindRef(BiomeType);
+    float BaseDepth = 20.0f; // 20cm base mud depth in swamps
     
-    // Broadcast surface impact event
-    OnSurfaceImpact.Broadcast(Location, SurfaceType, ImpactForce);
+    // Add variation based on location
+    float NoiseValue = FMath::PerlinNoise2D(FVector2D(Location.X / 1000.0f, Location.Y / 1000.0f));
+    float VariationDepth = NoiseValue * 30.0f; // +/- 30cm variation
     
-    UE_LOG(LogTemp, Log, TEXT("Surface impact processed: Type=%d, Force=%.2f at %s"), 
-           (int32)SurfaceType, ImpactForce, *Location.ToString());
+    return FMath::Max(0.0f, BaseDepth + VariationDepth);
 }
 
-void UCore_TerrainPhysicsSystem::UpdateDeformations(float DeltaTime)
+ECore_BiomeType UCore_TerrainPhysicsSystem::GetBiomeTypeAtLocation(const FVector& Location)
 {
-    for (int32 i = ActiveDeformations.Num() - 1; i >= 0; --i)
+    if (BiomeManager)
     {
-        if (DeformationsProcessedThisFrame >= 10) // Limit processing per frame
-        {
-            break;
-        }
-        
-        FCore_TerrainDeformationData& Deformation = ActiveDeformations[i];
-        
-        // Start recovery after 5 seconds
-        float Age = GetWorld()->GetTimeSeconds() - Deformation.Timestamp;
-        if (Age > 5.0f && !Deformation.bIsRecovering)
-        {
-            Deformation.bIsRecovering = true;
-        }
-        
-        if (Deformation.bIsRecovering)
-        {
-            ProcessDeformationRecovery(Deformation, DeltaTime);
-        }
-        
-        DeformationsProcessedThisFrame++;
+        return BiomeManager->GetBiomeTypeAtLocation(Location);
     }
+    
+    // Fallback: simple distance-based biome detection
+    if (Location.X < -25000.0f && Location.Y < -25000.0f)
+        return ECore_BiomeType::Swamp;
+    else if (Location.X < -25000.0f && Location.Y > 25000.0f)
+        return ECore_BiomeType::Forest;
+    else if (Location.X > 25000.0f)
+        return ECore_BiomeType::Desert;
+    else if (Location.Y > 25000.0f)
+        return ECore_BiomeType::Mountain;
+    else
+        return ECore_BiomeType::Savana;
 }
 
-void UCore_TerrainPhysicsSystem::ProcessDeformationRecovery(FCore_TerrainDeformationData& Deformation, float DeltaTime)
+FVector UCore_TerrainPhysicsSystem::GetTerrainNormalAtLocation(const FVector& Location)
 {
-    FCore_TerrainSurfaceProperties SurfaceProps = GetSurfacePropertiesAtLocation(Deformation.Location);
+    if (!CachedLandscape) return FVector::UpVector;
     
-    // Reduce deformation depth over time
-    float RecoveryAmount = SurfaceProps.RecoveryRate * DeltaTime;
-    Deformation.Depth = FMath::Max(0.0f, Deformation.Depth - RecoveryAmount);
+    // Sample nearby points to calculate normal
+    float SampleDistance = 100.0f;
+    float HeightCenter = GetTerrainHeightAtLocation(Location);
+    float HeightX = GetTerrainHeightAtLocation(Location + FVector(SampleDistance, 0, 0));
+    float HeightY = GetTerrainHeightAtLocation(Location + FVector(0, SampleDistance, 0));
     
-    // Remove if fully recovered
-    if (Deformation.Depth <= 0.1f)
-    {
-        for (int32 i = ActiveDeformations.Num() - 1; i >= 0; --i)
-        {
-            if (ActiveDeformations[i].Location.Equals(Deformation.Location, 1.0f))
-            {
-                ActiveDeformations.RemoveAt(i);
-                break;
-            }
-        }
-    }
+    FVector TangentX = FVector(SampleDistance, 0, HeightX - HeightCenter).GetSafeNormal();
+    FVector TangentY = FVector(0, SampleDistance, HeightY - HeightCenter).GetSafeNormal();
+    
+    return FVector::CrossProduct(TangentY, TangentX).GetSafeNormal();
 }
 
-UPhysicalMaterial* UCore_TerrainPhysicsSystem::GetPhysicalMaterialAtLocation(const FVector& Location)
+float UCore_TerrainPhysicsSystem::GetTerrainHeightAtLocation(const FVector& Location)
 {
-    // Perform line trace to get physical material
+    if (!CachedLandscape) return 0.0f;
+    
+    UWorld* World = GetWorld();
+    if (!World) return 0.0f;
+    
     FHitResult HitResult;
-    FVector Start = Location + FVector(0, 0, 100);
-    FVector End = Location - FVector(0, 0, 100);
+    FVector StartLocation = Location + FVector(0, 0, 10000.0f);
+    FVector EndLocation = Location + FVector(0, 0, -10000.0f);
     
-    FCollisionQueryParams QueryParams;
-    QueryParams.bReturnPhysicalMaterial = true;
-    
-    if (GetWorld()->LineTraceSingleByChannel(HitResult, Start, End, ECC_WorldStatic, QueryParams))
+    if (World->LineTraceSingleByChannel(HitResult, StartLocation, EndLocation, ECC_WorldStatic))
     {
-        return HitResult.PhysMaterial.Get();
+        return HitResult.Location.Z;
     }
     
-    return nullptr;
+    return 0.0f;
 }
 
-ALandscape* UCore_TerrainPhysicsSystem::FindLandscapeAtLocation(const FVector& Location)
+bool UCore_TerrainPhysicsSystem::ShouldUpdatePhysicsAtDistance(float Distance)
 {
-    if (UWorld* World = GetWorld())
+    for (int32 i = 0; i < PhysicsLODDistances.Num(); i++)
     {
-        TArray<AActor*> LandscapeActors;
-        UGameplayStatics::GetAllActorsOfClass(World, ALandscape::StaticClass(), LandscapeActors);
-        
-        for (AActor* Actor : LandscapeActors)
-        {
-            if (ALandscape* Landscape = Cast<ALandscape>(Actor))
-            {
-                FBox LandscapeBounds = Landscape->GetComponentsBoundingBox();
-                if (LandscapeBounds.IsInsideXY(Location))
-                {
-                    return Landscape;
-                }
-            }
-        }
-    }
-    
-    return nullptr;
-}
-
-void UCore_TerrainPhysicsSystem::ApplyPhysicalMaterialProperties(UPrimitiveComponent* Component, const FCore_TerrainSurfaceProperties& Properties)
-{
-    if (!Component || !Component->GetBodyInstance())
-    {
-        return;
-    }
-    
-    FBodyInstance* BodyInstance = Component->GetBodyInstance();
-    
-    // Apply friction and restitution
-    BodyInstance->SetPhysMaterialOverride(nullptr); // Clear override first
-    
-    // Note: In a full implementation, you would create and assign a UPhysicalMaterial
-    // with the desired properties. This is a simplified version.
-    
-    UE_LOG(LogTemp, VeryVerbose, TEXT("Applied surface properties: Friction=%.2f, Restitution=%.2f"), 
-           Properties.Friction, Properties.Restitution);
-}
-
-void UCore_TerrainPhysicsSystem::CleanupExpiredDeformations()
-{
-    float CurrentTime = GetWorld()->GetTimeSeconds();
-    
-    for (int32 i = ActiveDeformations.Num() - 1; i >= 0; --i)
-    {
-        const FCore_TerrainDeformationData& Deformation = ActiveDeformations[i];
-        float Age = CurrentTime - Deformation.Timestamp;
-        
-        // Remove deformations older than 60 seconds
-        if (Age > 60.0f)
-        {
-            ActiveDeformations.RemoveAt(i);
-        }
-    }
-}
-
-void UCore_TerrainPhysicsSystem::ClearAllDeformations()
-{
-    ActiveDeformations.Empty();
-    UE_LOG(LogTemp, Warning, TEXT("All terrain deformations cleared"));
-}
-
-int32 UCore_TerrainPhysicsSystem::GetActiveDeformationCount() const
-{
-    return ActiveDeformations.Num();
-}
-
-void UCore_TerrainPhysicsSystem::SetSurfaceProperties(ECore_TerrainSurfaceType SurfaceType, const FCore_TerrainSurfaceProperties& Properties)
-{
-    SurfaceProperties.Add(SurfaceType, Properties);
-    UE_LOG(LogTemp, Log, TEXT("Surface properties updated for type %d"), (int32)SurfaceType);
-}
-
-bool UCore_TerrainPhysicsSystem::IsLocationDeformed(const FVector& Location, float Tolerance) const
-{
-    for (const FCore_TerrainDeformationData& Deformation : ActiveDeformations)
-    {
-        float Distance = FVector::Dist(Location, Deformation.Location);
-        if (Distance <= (Deformation.Radius + Tolerance))
+        if (Distance <= PhysicsLODDistances[i])
         {
             return true;
         }
@@ -395,123 +431,35 @@ bool UCore_TerrainPhysicsSystem::IsLocationDeformed(const FVector& Location, flo
     return false;
 }
 
-void UCore_TerrainPhysicsSystem::ValidatePhysicalMaterialMappings()
+void UCore_TerrainPhysicsSystem::CleanupOldFootprints()
 {
-    int32 ValidMappings = 0;
-    
-    for (const auto& Mapping : PhysicalMaterialMapping)
+    ActiveFootprints.RemoveAll([this](const FCore_FootprintData& Footprint)
     {
-        if (Mapping.Key && SurfaceProperties.Contains(Mapping.Value))
-        {
-            ValidMappings++;
-        }
-    }
+        return Footprint.Age >= FootprintFadeTime;
+    });
+}
+
+float UCore_TerrainPhysicsSystem::CalculateErosionFactor(const FVector& Location, float RainAmount, float WindAmount)
+{
+    FVector TerrainNormal = GetTerrainNormalAtLocation(Location);
+    float SlopeAngle = FMath::RadiansToDegrees(FMath::Acos(FVector::DotProduct(TerrainNormal, FVector::UpVector)));
     
-    UE_LOG(LogTemp, Warning, TEXT("Physical Material Mappings Validated: %d/%d valid"), 
-           ValidMappings, PhysicalMaterialMapping.Num());
-}
-
-// ACore_TerrainPhysicsManager Implementation
-
-ACore_TerrainPhysicsManager::ACore_TerrainPhysicsManager()
-{
-    PrimaryActorTick.bCanEverTick = true;
-    PrimaryActorTick.TickInterval = 0.1f;
+    // Steeper slopes erode faster
+    float SlopeFactor = SlopeAngle / 90.0f;
     
-    // Create terrain physics system component
-    TerrainPhysicsSystem = CreateDefaultSubobject<UCore_TerrainPhysicsSystem>(TEXT("TerrainPhysicsSystem"));
+    // Rain and wind contribute to erosion
+    float WeatherFactor = (RainAmount + WindAmount) * 0.5f;
     
-    bAutoRegisterWithGameMode = true;
-    bProcessGlobalTerrainEvents = true;
+    return SlopeFactor * WeatherFactor;
 }
 
-void ACore_TerrainPhysicsManager::BeginPlay()
+void UCore_TerrainPhysicsSystem::ApplyTerrainDeformation(const FVector& Location, float Intensity, float Radius)
 {
-    Super::BeginPlay();
+    // This would require direct landscape editing which is complex in runtime
+    // For now, we log the deformation for debugging
+    UE_LOG(LogTemp, Log, TEXT("Terrain deformation applied at %s - Intensity: %.4f, Radius: %.2f"), 
+        *Location.ToString(), Intensity, Radius);
     
-    // Bind to terrain physics events
-    if (TerrainPhysicsSystem)
-    {
-        TerrainPhysicsSystem->OnTerrainDeformation.AddDynamic(this, &ACore_TerrainPhysicsManager::OnTerrainDeformationReceived);
-        TerrainPhysicsSystem->OnSurfaceImpact.AddDynamic(this, &ACore_TerrainPhysicsManager::OnSurfaceImpactReceived);
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("TerrainPhysicsManager initialized and ready"));
-}
-
-void ACore_TerrainPhysicsManager::Tick(float DeltaTime)
-{
-    Super::Tick(DeltaTime);
-    
-    // Process global terrain events if enabled
-    if (bProcessGlobalTerrainEvents)
-    {
-        // Cleanup invalid registered actors
-        for (int32 i = RegisteredTerrainActors.Num() - 1; i >= 0; --i)
-        {
-            if (!RegisteredTerrainActors[i].IsValid())
-            {
-                RegisteredTerrainActors.RemoveAt(i);
-            }
-        }
-    }
-}
-
-ACore_TerrainPhysicsManager* ACore_TerrainPhysicsManager::GetTerrainPhysicsManager(const UObject* WorldContext)
-{
-    if (UWorld* World = GEngine->GetWorldFromContextObject(WorldContext, EGetWorldErrorMode::LogAndReturnNull))
-    {
-        TArray<AActor*> FoundManagers;
-        UGameplayStatics::GetAllActorsOfClass(World, ACore_TerrainPhysicsManager::StaticClass(), FoundManagers);
-        
-        if (FoundManagers.Num() > 0)
-        {
-            return Cast<ACore_TerrainPhysicsManager>(FoundManagers[0]);
-        }
-    }
-    
-    return nullptr;
-}
-
-void ACore_TerrainPhysicsManager::RegisterTerrainActor(AActor* TerrainActor)
-{
-    if (TerrainActor && !RegisteredTerrainActors.Contains(TerrainActor))
-    {
-        RegisteredTerrainActors.Add(TerrainActor);
-        UE_LOG(LogTemp, Log, TEXT("Terrain actor registered: %s"), *TerrainActor->GetName());
-    }
-}
-
-void ACore_TerrainPhysicsManager::UnregisterTerrainActor(AActor* TerrainActor)
-{
-    if (TerrainActor)
-    {
-        RegisteredTerrainActors.Remove(TerrainActor);
-        UE_LOG(LogTemp, Log, TEXT("Terrain actor unregistered: %s"), *TerrainActor->GetName());
-    }
-}
-
-void ACore_TerrainPhysicsManager::ProcessGlobalTerrainImpact(const FVector& Location, float Force, AActor* Instigator)
-{
-    if (TerrainPhysicsSystem)
-    {
-        TerrainPhysicsSystem->ProcessSurfaceImpact(Location, Force, nullptr);
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("Global terrain impact processed at %s with force %.2f"), 
-           *Location.ToString(), Force);
-}
-
-void ACore_TerrainPhysicsManager::OnTerrainDeformationReceived(FVector Location, float Force)
-{
-    // Handle global deformation events
-    UE_LOG(LogTemp, VeryVerbose, TEXT("Global deformation event: %s, Force: %.2f"), 
-           *Location.ToString(), Force);
-}
-
-void ACore_TerrainPhysicsManager::OnSurfaceImpactReceived(FVector Location, ECore_TerrainSurfaceType SurfaceType, float ImpactForce)
-{
-    // Handle global surface impact events
-    UE_LOG(LogTemp, VeryVerbose, TEXT("Global surface impact: Type=%d, Force=%.2f at %s"), 
-           (int32)SurfaceType, ImpactForce, *Location.ToString());
+    // In a full implementation, this would modify the landscape heightmap
+    // using ULandscapeInfo::ModifyLandscape or similar functions
 }
