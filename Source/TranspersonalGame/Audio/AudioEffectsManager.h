@@ -3,62 +3,44 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "Components/AudioComponent.h"
-#include "Engine/PointLight.h"
+#include "Engine/World.h"
 #include "Camera/CameraShakeBase.h"
+#include "Particles/ParticleSystemComponent.h"
 #include "AudioEffectsManager.generated.h"
 
+UENUM(BlueprintType)
+enum class EAudio_EffectType : uint8
+{
+    ScreenShake     UMETA(DisplayName = "Screen Shake"),
+    DamageFlash     UMETA(DisplayName = "Damage Flash"),
+    FootstepDust    UMETA(DisplayName = "Footstep Dust"),
+    ProximityRumble UMETA(DisplayName = "Proximity Rumble")
+};
+
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FAudio_ScreenShakeData
+struct TRANSPERSONALGAME_API FAudio_EffectSettings
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Screen Shake")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Effects")
     float Intensity = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Screen Shake")
-    float Duration = 0.5f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Effects")
+    float Duration = 2.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Screen Shake")
-    float Frequency = 10.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Effects")
+    float Range = 1000.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Screen Shake")
-    float Range = 2000.0f;
-};
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Effects")
+    bool bEnabled = true;
 
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FAudio_DamageFlashData
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Damage Flash")
-    FLinearColor FlashColor = FLinearColor(1.0f, 0.1f, 0.1f, 1.0f);
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Damage Flash")
-    float FlashIntensity = 5000.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Damage Flash")
-    float FlashDuration = 0.2f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Damage Flash")
-    float FadeSpeed = 10.0f;
-};
-
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FAudio_FootstepEffectData
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Footstep")
-    float ParticleScale = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Footstep")
-    float SoundVolume = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Footstep")
-    float ShakeIntensity = 0.5f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Footstep")
-    float EffectRange = 1000.0f;
+    FAudio_EffectSettings()
+    {
+        Intensity = 1.0f;
+        Duration = 2.0f;
+        Range = 1000.0f;
+        bEnabled = true;
+    }
 };
 
 UCLASS(BlueprintType, Blueprintable)
@@ -71,99 +53,53 @@ public:
 
 protected:
     virtual void BeginPlay() override;
-    virtual void Tick(float DeltaTime) override;
 
-    // Components
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    class USceneComponent* RootSceneComponent;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio Components")
+    class UAudioComponent* ProximityAudioComponent;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    class UPointLightComponent* DamageFlashLight;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio Components")
+    class UAudioComponent* DamageAudioComponent;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    class UAudioComponent* AmbientAudioComponent;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Particle Components")
+    class UParticleSystemComponent* FootstepDustComponent;
 
-    // Screen Shake System
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Screen Shake")
-    FAudio_ScreenShakeData DefaultShakeData;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Effects")
+    FAudio_EffectSettings TRexShakeSettings;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Screen Shake")
-    FAudio_ScreenShakeData DinosaurFootstepShake;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Effects")
+    FAudio_EffectSettings DamageFlashSettings;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Screen Shake")
-    FAudio_ScreenShakeData TRexProximityShake;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Effects")
+    FAudio_EffectSettings FootstepDustSettings;
 
-    // Damage Flash System
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Damage Flash")
-    FAudio_DamageFlashData DamageFlashSettings;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Damage Flash")
-    bool bIsDamageFlashing = false;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Damage Flash")
-    float CurrentFlashTimer = 0.0f;
-
-    // Footstep Effects
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Footstep Effects")
-    FAudio_FootstepEffectData PlayerFootstepData;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Footstep Effects")
-    FAudio_FootstepEffectData DinosaurFootstepData;
-
-    // Audio Assets
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    class USoundBase* DinosaurFootstepSound;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    class USoundBase* PlayerFootstepSound;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    class USoundBase* DamageSound;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    class USoundBase* TRexRoarSound;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Effects")
+    TSubclassOf<UCameraShakeBase> TRexCameraShakeClass;
 
 public:
-    // Screen Shake Functions
-    UFUNCTION(BlueprintCallable, Category = "Audio Effects")
-    void TriggerScreenShake(const FAudio_ScreenShakeData& ShakeData, const FVector& EpicenterLocation);
+    virtual void Tick(float DeltaTime) override;
 
     UFUNCTION(BlueprintCallable, Category = "Audio Effects")
-    void TriggerDinosaurFootstepShake(const FVector& FootstepLocation, float DinosaurSize = 1.0f);
+    void TriggerTRexProximityEffect(FVector TRexLocation, float Distance);
 
     UFUNCTION(BlueprintCallable, Category = "Audio Effects")
-    void TriggerTRexProximityShake(const FVector& TRexLocation, float Distance);
-
-    // Damage Flash Functions
-    UFUNCTION(BlueprintCallable, Category = "Audio Effects")
-    void TriggerDamageFlash();
+    void TriggerDamageFlashEffect(float DamageAmount);
 
     UFUNCTION(BlueprintCallable, Category = "Audio Effects")
-    void StopDamageFlash();
-
-    // Footstep Effect Functions
-    UFUNCTION(BlueprintCallable, Category = "Audio Effects")
-    void TriggerFootstepEffect(const FVector& FootstepLocation, bool bIsPlayer = true);
+    void TriggerFootstepDustEffect(FVector FootstepLocation, float CreatureSize);
 
     UFUNCTION(BlueprintCallable, Category = "Audio Effects")
-    void TriggerDinosaurFootstep(const FVector& FootstepLocation, float DinosaurSize = 1.0f);
-
-    // Audio Management
-    UFUNCTION(BlueprintCallable, Category = "Audio Effects")
-    void PlaySoundAtLocation(USoundBase* Sound, const FVector& Location, float VolumeMultiplier = 1.0f);
+    void UpdateDayNightCycle(float TimeOfDay);
 
     UFUNCTION(BlueprintCallable, Category = "Audio Effects")
-    void SetAmbientAudio(USoundBase* AmbientSound, float Volume = 1.0f);
-
-    // Utility Functions
-    UFUNCTION(BlueprintCallable, Category = "Audio Effects")
-    float GetDistanceToPlayer(const FVector& Location) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Audio Effects")
-    bool IsPlayerInRange(const FVector& Location, float Range) const;
+    void SetEffectEnabled(EAudio_EffectType EffectType, bool bEnabled);
 
 private:
-    void UpdateDamageFlash(float DeltaTime);
-    void ApplyScreenShake(const FAudio_ScreenShakeData& ShakeData, const FVector& EpicenterLocation);
-    class APlayerController* GetPlayerController() const;
+    float CurrentTimeOfDay = 12.0f; // Start at noon
+    bool bDamageFlashActive = false;
+    float DamageFlashTimer = 0.0f;
+
+    void UpdateScreenShakeIntensity(float Distance);
+    void PlayProximityWarningSound(float Distance);
+    void CreateFootstepDustParticles(FVector Location, float Size);
+    void RotateSunLight(float TimeOfDay);
 };
