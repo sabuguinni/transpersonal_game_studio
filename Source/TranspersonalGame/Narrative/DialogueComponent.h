@@ -3,77 +3,11 @@
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
 #include "Engine/DataTable.h"
-#include "../SharedTypes.h"
+#include "NarrativeManager.h"
 #include "DialogueComponent.generated.h"
 
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FNarr_DialogueNode
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    FString SpeakerName;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    FText DialogueText;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    FString VoiceClipPath;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    TArray<FString> PlayerResponses;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    TArray<int32> NextNodeIDs;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    ENarr_EmotionalState EmotionalTone;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    bool bRequiresConsciousnessLevel;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    int32 MinConsciousnessLevel;
-
-    FNarr_DialogueNode()
-    {
-        SpeakerName = TEXT("Unknown");
-        DialogueText = FText::GetEmpty();
-        VoiceClipPath = TEXT("");
-        EmotionalTone = ENarr_EmotionalState::Neutral;
-        bRequiresConsciousnessLevel = false;
-        MinConsciousnessLevel = 0;
-    }
-};
-
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FNarr_DialogueTree
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    FString TreeName;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    TArray<FNarr_DialogueNode> DialogueNodes;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    int32 RootNodeID;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    ENarr_CharacterArchetype SpeakerArchetype;
-
-    FNarr_DialogueTree()
-    {
-        TreeName = TEXT("DefaultTree");
-        RootNodeID = 0;
-        SpeakerArchetype = ENarr_CharacterArchetype::Neutral;
-    }
-};
-
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnDialogueStarted, const FString&, SpeakerName, const FText&, DialogueText);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnDialogueEnded, bool, bCompletedSuccessfully);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnPlayerResponseSelected, int32, ResponseIndex, const FString&, ResponseText, int32, NextNodeID);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnDialogueTriggered, const FString&, DialogueID, AActor*, Speaker);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnDialogueCompleted, const FString&, DialogueID);
 
 UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
 class TRANSPERSONALGAME_API UDialogueComponent : public UActorComponent
@@ -87,74 +21,53 @@ protected:
     virtual void BeginPlay() override;
 
 public:
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
-
-    // Dialogue Management
     UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    void StartDialogue(const FString& TreeName);
+    void TriggerDialogue(const FString& DialogueID);
 
     UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    void EndDialogue();
+    void SetDialogueEnabled(bool bEnabled);
 
     UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    void SelectPlayerResponse(int32 ResponseIndex);
+    bool IsDialogueActive() const;
 
     UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    void AdvanceToNextNode(int32 NodeID);
-
-    // Dialogue Tree Management
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    void LoadDialogueTree(const FString& TreeName);
+    void AddDialogueOption(const FString& DialogueID, const FString& OptionText);
 
     UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    void AddDialogueTree(const FNarr_DialogueTree& NewTree);
+    void SelectDialogueOption(int32 OptionIndex);
 
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    bool HasDialogueTree(const FString& TreeName) const;
+    UPROPERTY(BlueprintAssignable, Category = "Dialogue")
+    FOnDialogueTriggered OnDialogueTriggered;
 
-    // State Queries
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Dialogue")
-    bool IsDialogueActive() const { return bDialogueActive; }
-
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Dialogue")
-    FNarr_DialogueNode GetCurrentNode() const { return CurrentNode; }
-
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Dialogue")
-    TArray<FString> GetCurrentResponses() const { return CurrentNode.PlayerResponses; }
-
-    // Events
-    UPROPERTY(BlueprintAssignable, Category = "Dialogue Events")
-    FOnDialogueStarted OnDialogueStarted;
-
-    UPROPERTY(BlueprintAssignable, Category = "Dialogue Events")
-    FOnDialogueEnded OnDialogueEnded;
-
-    UPROPERTY(BlueprintAssignable, Category = "Dialogue Events")
-    FOnPlayerResponseSelected OnPlayerResponseSelected;
+    UPROPERTY(BlueprintAssignable, Category = "Dialogue")
+    FOnDialogueCompleted OnDialogueCompleted;
 
 protected:
-    // Dialogue State
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Dialogue State")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    bool bDialogueEnabled;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    FString DefaultDialogueID;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    float DialogueRange;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    bool bAutoTriggerOnOverlap;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Dialogue")
     bool bDialogueActive;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Dialogue State")
-    FNarr_DialogueNode CurrentNode;
+    UPROPERTY(BlueprintReadOnly, Category = "Dialogue")
+    FString CurrentDialogueID;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Dialogue State")
-    FString CurrentTreeName;
+    UPROPERTY(BlueprintReadOnly, Category = "Dialogue")
+    TArray<FString> CurrentDialogueOptions;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Dialogue State")
-    int32 CurrentNodeID;
+private:
+    UPROPERTY()
+    UNarrativeManager* NarrativeManager;
 
-    // Dialogue Data
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue Data")
-    TMap<FString, FNarr_DialogueTree> DialogueTrees;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue Data")
-    class UDataTable* DialogueDataTable;
-
-    // Helper Functions
-    bool ValidateNodeTransition(int32 FromNodeID, int32 ToNodeID) const;
-    bool CheckConsciousnessRequirement(const FNarr_DialogueNode& Node) const;
-    void ProcessDialogueEffects(const FNarr_DialogueNode& Node);
+    void InitializeNarrativeManager();
+    bool IsPlayerInRange() const;
 };
