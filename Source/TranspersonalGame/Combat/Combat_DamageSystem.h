@@ -2,53 +2,47 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
-#include "Engine/DamageEvents.h"
-#include "SharedTypes.h"
+#include "Engine/Engine.h"
+#include "GameFramework/Actor.h"
 #include "Combat_DamageSystem.generated.h"
-
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnDamageDealt, AActor*, DamagedActor, float, DamageAmount, AActor*, DamageSource);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnActorDied, AActor*, DeadActor, AActor*, Killer);
 
 UENUM(BlueprintType)
 enum class ECombat_DamageType : uint8
 {
-    None            UMETA(DisplayName = "None"),
-    Bite            UMETA(DisplayName = "Bite"),
-    Claw            UMETA(DisplayName = "Claw"),
-    Stomp           UMETA(DisplayName = "Stomp"),
-    Spear           UMETA(DisplayName = "Spear"),
-    Club            UMETA(DisplayName = "Club"),
-    Environmental   UMETA(DisplayName = "Environmental"),
-    Fall            UMETA(DisplayName = "Fall")
+    Physical    UMETA(DisplayName = "Physical"),
+    Bite        UMETA(DisplayName = "Bite"),
+    Claw        UMETA(DisplayName = "Claw"),
+    Crush       UMETA(DisplayName = "Crush"),
+    Environmental UMETA(DisplayName = "Environmental")
 };
 
 USTRUCT(BlueprintType)
-struct FCombat_DamageInfo
+struct TRANSPERSONALGAME_API FCombat_DamageInfo
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Damage")
-    float BaseDamage = 10.0f;
+    float Amount = 10.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Damage")
-    ECombat_DamageType DamageType = ECombat_DamageType::None;
+    ECombat_DamageType DamageType = ECombat_DamageType::Physical;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Damage")
-    float ArmorPenetration = 0.0f;
+    AActor* Instigator = nullptr;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Damage")
-    bool bCanKnockdown = false;
+    FVector HitLocation = FVector::ZeroVector;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Damage")
-    float KnockdownForce = 0.0f;
+    FVector HitDirection = FVector::ZeroVector;
 
     FCombat_DamageInfo()
     {
-        BaseDamage = 10.0f;
-        DamageType = ECombat_DamageType::None;
-        ArmorPenetration = 0.0f;
-        bCanKnockdown = false;
-        KnockdownForce = 0.0f;
+        Amount = 10.0f;
+        DamageType = ECombat_DamageType::Physical;
+        Instigator = nullptr;
+        HitLocation = FVector::ZeroVector;
+        HitDirection = FVector::ZeroVector;
     }
 };
 
@@ -70,28 +64,30 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Health", meta = (ClampMin = "0.0"))
     float MaxHealth = 100.0f;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Health")
+    UPROPERTY(BlueprintReadOnly, Category = "Health")
     float CurrentHealth = 100.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Defense")
-    float ArmorValue = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Damage Resistance")
+    float PhysicalResistance = 0.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Defense")
-    float DamageReduction = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Damage Resistance")
+    float BiteResistance = 0.0f;
 
-    // Damage dealing
-    UFUNCTION(BlueprintCallable, Category = "Combat")
-    float DealDamage(AActor* Target, const FCombat_DamageInfo& DamageInfo);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Damage Resistance")
+    float ClawResistance = 0.0f;
 
-    UFUNCTION(BlueprintCallable, Category = "Combat")
-    float TakeDamage(const FCombat_DamageInfo& DamageInfo, AActor* DamageSource);
+    // Damage application functions
+    UFUNCTION(BlueprintCallable, Category = "Damage")
+    void ApplyDamage(const FCombat_DamageInfo& DamageInfo);
 
-    // Health management
+    UFUNCTION(BlueprintCallable, Category = "Damage")
+    void ApplySimpleDamage(float DamageAmount, AActor* DamageInstigator = nullptr);
+
+    UFUNCTION(BlueprintCallable, Category = "Health")
+    void Heal(float HealAmount);
+
     UFUNCTION(BlueprintCallable, Category = "Health")
     void SetHealth(float NewHealth);
-
-    UFUNCTION(BlueprintCallable, Category = "Health")
-    void HealDamage(float HealAmount);
 
     UFUNCTION(BlueprintPure, Category = "Health")
     float GetHealthPercentage() const;
@@ -100,39 +96,34 @@ public:
     bool IsAlive() const;
 
     UFUNCTION(BlueprintPure, Category = "Health")
-    bool IsAtFullHealth() const;
-
-    // Combat state
-    UFUNCTION(BlueprintPure, Category = "Combat")
-    bool CanTakeDamage() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Combat")
-    void SetInvulnerable(bool bInvulnerable, float Duration = 0.0f);
+    bool IsCriticalHealth() const;
 
     // Events
+    DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnDamageTaken, float, DamageAmount, AActor*, Instigator);
     UPROPERTY(BlueprintAssignable, Category = "Events")
-    FOnDamageDealt OnDamageDealt;
+    FOnDamageTaken OnDamageTaken;
 
+    DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnDeath);
     UPROPERTY(BlueprintAssignable, Category = "Events")
-    FOnActorDied OnActorDied;
+    FOnDeath OnDeath;
+
+    DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnHealthChanged, float, NewHealthPercentage);
+    UPROPERTY(BlueprintAssignable, Category = "Events")
+    FOnHealthChanged OnHealthChanged;
 
 protected:
-    // Internal state
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat")
-    bool bIsInvulnerable = false;
+    // Internal damage calculation
+    float CalculateFinalDamage(const FCombat_DamageInfo& DamageInfo);
 
-    UPROPERTY()
-    FTimerHandle InvulnerabilityTimer;
-
-    // Damage calculation
-    float CalculateFinalDamage(const FCombat_DamageInfo& DamageInfo) const;
-    
     // Death handling
-    void HandleDeath(AActor* Killer);
+    UFUNCTION()
+    void HandleDeath();
 
-    // Invulnerability
-    void ClearInvulnerability();
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Health")
+    float CriticalHealthThreshold = 0.25f;
 
 private:
     bool bIsDead = false;
 };
+
+#include "Combat_DamageSystem.generated.h"
