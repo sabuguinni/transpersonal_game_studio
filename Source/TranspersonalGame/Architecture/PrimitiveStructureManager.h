@@ -1,11 +1,11 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/World.h"
+#include "GameFramework/Actor.h"
 #include "Components/StaticMeshComponent.h"
-#include "Engine/StaticMeshActor.h"
-#include "Subsystems/WorldSubsystem.h"
-#include "../Core/SharedTypes.h"
+#include "Components/BoxComponent.h"
+#include "Engine/StaticMesh.h"
+#include "../SharedTypes.h"
 #include "PrimitiveStructureManager.generated.h"
 
 USTRUCT(BlueprintType)
@@ -17,13 +17,10 @@ struct TRANSPERSONALGAME_API FArch_StructureData
     FString StructureName;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    FVector Location;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    FRotator Rotation;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
     EBiomeType BiomeType;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
+    FVector SpawnLocation;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
     float StructureHealth;
@@ -34,9 +31,8 @@ struct TRANSPERSONALGAME_API FArch_StructureData
     FArch_StructureData()
     {
         StructureName = TEXT("Unknown Structure");
-        Location = FVector::ZeroVector;
-        Rotation = FRotator::ZeroRotator;
-        BiomeType = EBiomeType::Savanna;
+        BiomeType = EBiomeType::Savana;
+        SpawnLocation = FVector::ZeroVector;
         StructureHealth = 100.0f;
         bIsHabitable = false;
     }
@@ -45,83 +41,94 @@ struct TRANSPERSONALGAME_API FArch_StructureData
 UENUM(BlueprintType)
 enum class EArch_StructureType : uint8
 {
-    Dwelling        UMETA(DisplayName = "Dwelling"),
-    Shelter         UMETA(DisplayName = "Shelter"),
-    StorageHut      UMETA(DisplayName = "Storage Hut"),
-    Watchtower      UMETA(DisplayName = "Watchtower"),
-    CraftingArea    UMETA(DisplayName = "Crafting Area"),
-    FirePit         UMETA(DisplayName = "Fire Pit"),
-    DefensiveWall   UMETA(DisplayName = "Defensive Wall"),
-    Bridge          UMETA(DisplayName = "Bridge"),
-    Ruins           UMETA(DisplayName = "Ruins")
+    None            UMETA(DisplayName = "None"),
+    CaveEntrance    UMETA(DisplayName = "Cave Entrance"),
+    StoneArchway    UMETA(DisplayName = "Stone Archway"),
+    RockShelter     UMETA(DisplayName = "Rock Shelter"),
+    StonePillar     UMETA(DisplayName = "Stone Pillar"),
+    PrimitiveHut    UMETA(DisplayName = "Primitive Hut"),
+    RitualCircle    UMETA(DisplayName = "Ritual Circle")
 };
 
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UPrimitiveStructureManager : public UWorldSubsystem
+class TRANSPERSONALGAME_API APrimitiveStructureManager : public AActor
 {
     GENERATED_BODY()
 
 public:
-    UPrimitiveStructureManager();
+    APrimitiveStructureManager();
 
-    // USubsystem interface
-    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
-    virtual void Deinitialize() override;
+protected:
+    virtual void BeginPlay() override;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    USceneComponent* RootSceneComponent;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    UStaticMeshComponent* StructureMesh;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    UBoxComponent* InteractionVolume;
+
+    // Structure Properties
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
+    EArch_StructureType StructureType;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
+    FArch_StructureData StructureData;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
+    TArray<UStaticMesh*> StructureMeshVariants;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
+    float InteractionRange;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
+    bool bCanProvideShel ter;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
+    float ShelterEffectiveness;
+
+public:
+    virtual void Tick(float DeltaTime) override;
 
     // Structure Management
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    bool SpawnStructure(EArch_StructureType StructureType, FVector Location, EBiomeType Biome);
+    void InitializeStructure(EArch_StructureType Type, const FVector& Location, EBiomeType Biome);
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void RemoveStructure(const FString& StructureName);
+    void SetStructureMesh(UStaticMesh* NewMesh);
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    TArray<FArch_StructureData> GetStructuresInBiome(EBiomeType Biome);
+    bool CanPlayerInteract(const FVector& PlayerLocation) const;
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    FArch_StructureData GetNearestStructure(FVector PlayerLocation, float SearchRadius = 1000.0f);
+    void OnPlayerInteract();
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    bool IsLocationSuitableForStructure(FVector Location, EArch_StructureType StructureType);
-
-    // Interior Management
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void SetupStructureInterior(const FString& StructureName, bool bAddFirePit = true, bool bAddStorage = true);
+    float GetShelterValue() const;
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    bool CanPlayerEnterStructure(const FString& StructureName);
-
-    // Damage and Repair
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void DamageStructure(const FString& StructureName, float DamageAmount);
+    bool IsStructureIntact() const;
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void RepairStructure(const FString& StructureName, float RepairAmount);
-
-    // Weather Resistance
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    float GetStructureWeatherResistance(const FString& StructureName);
+    void DamageStructure(float DamageAmount);
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void ApplyWeatherEffects(float DeltaTime);
+    void RepairStructure(float RepairAmount);
+
+    // Biome Integration
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    void AdaptToBiome(EBiomeType Biome);
+
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    TArray<FVector> GetSpawnPointsAroundStructure(int32 NumPoints) const;
 
 protected:
-    UPROPERTY(BlueprintReadOnly, Category = "Architecture")
-    TArray<FArch_StructureData> SpawnedStructures;
+    UFUNCTION()
+    void OnInteractionVolumeBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult);
 
-    UPROPERTY(BlueprintReadOnly, Category = "Architecture")
-    TMap<FString, AActor*> StructureActors;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    float WeatherDamageRate;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    float MaxStructureHealth;
-
-private:
-    void InitializeDefaultStructures();
-    AActor* CreateStructureActor(EArch_StructureType StructureType, FVector Location, FRotator Rotation);
-    FString GenerateStructureName(EArch_StructureType StructureType, EBiomeType Biome);
-    void SetupStructureMaterials(AActor* StructureActor, EBiomeType Biome);
-    bool ValidateStructurePlacement(FVector Location, EArch_StructureType StructureType);
+    void UpdateStructureAppearance();
+    void SetupInteractionVolume();
+    UStaticMesh* SelectMeshForBiome(EBiomeType Biome) const;
 };
