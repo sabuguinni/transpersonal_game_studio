@@ -1,14 +1,24 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/World.h"
 #include "GameFramework/Actor.h"
-#include "Components/ActorComponent.h"
-#include "SharedTypes.h"
+#include "Components/SphereComponent.h"
+#include "Components/StaticMeshComponent.h"
+#include "Engine/DataTable.h"
 #include "Narr_DialogueSystem.generated.h"
 
+UENUM(BlueprintType)
+enum class ENarr_DialogueType : uint8
+{
+    Warning,
+    Information,
+    Quest,
+    Lore,
+    Tutorial
+};
+
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FNarr_DialogueEntry
+struct TRANSPERSONALGAME_API FNarr_DialogueEntry : public FTableRowBase
 {
     GENERATED_BODY()
 
@@ -16,107 +26,82 @@ struct TRANSPERSONALGAME_API FNarr_DialogueEntry
     FString SpeakerName;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    FString DialogueText;
+    FText DialogueText;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    float DisplayDuration;
+    ENarr_DialogueType DialogueType;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    bool bIsNarration;
+    float TriggerRadius;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    bool bOneTimeOnly;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
     FString AudioFilePath;
 
     FNarr_DialogueEntry()
     {
-        SpeakerName = TEXT("");
-        DialogueText = TEXT("");
-        DisplayDuration = 3.0f;
-        bIsNarration = false;
+        SpeakerName = TEXT("Unknown");
+        DialogueText = FText::FromString(TEXT("..."));
+        DialogueType = ENarr_DialogueType::Information;
+        TriggerRadius = 500.0f;
+        bOneTimeOnly = true;
         AudioFilePath = TEXT("");
     }
 };
 
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FNarr_DialogueSequence
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    FString SequenceName;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    TArray<FNarr_DialogueEntry> DialogueEntries;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    bool bAutoPlay;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    float DelayBetweenEntries;
-
-    FNarr_DialogueSequence()
-    {
-        SequenceName = TEXT("");
-        bAutoPlay = true;
-        DelayBetweenEntries = 1.0f;
-    }
-};
-
-UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UNarr_DialogueSystem : public UActorComponent
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API ANarr_DialogueSystem : public AActor
 {
     GENERATED_BODY()
 
 public:
-    UNarr_DialogueSystem();
+    ANarr_DialogueSystem();
 
 protected:
     virtual void BeginPlay() override;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue System")
-    TArray<FNarr_DialogueSequence> DialogueSequences;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    USphereComponent* TriggerSphere;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue System")
-    bool bDialogueActive;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    UStaticMeshComponent* VisualMarker;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue System")
-    int32 CurrentSequenceIndex;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    UDataTable* DialogueTable;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue System")
-    int32 CurrentEntryIndex;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    FName DialogueRowName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue System")
-    float DialogueSpeed;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    bool bHasBeenTriggered;
 
-    FTimerHandle DialogueTimerHandle;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    class USoundBase* DialogueSound;
+
+    UFUNCTION()
+    void OnTriggerBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, 
+                              UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, 
+                              bool bFromSweep, const FHitResult& SweepResult);
+
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    void TriggerDialogue(AActor* PlayerActor);
+
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    FNarr_DialogueEntry GetDialogueEntry();
+
+    UFUNCTION(BlueprintImplementableEvent, Category = "Dialogue")
+    void OnDialogueTriggered(const FNarr_DialogueEntry& DialogueEntry);
 
 public:
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+    virtual void Tick(float DeltaTime) override;
 
-    UFUNCTION(BlueprintCallable, Category = "Dialogue System")
-    void StartDialogueSequence(const FString& SequenceName);
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    void SetDialogueEntry(FName RowName);
 
-    UFUNCTION(BlueprintCallable, Category = "Dialogue System")
-    void StopDialogue();
-
-    UFUNCTION(BlueprintCallable, Category = "Dialogue System")
-    void AddDialogueSequence(const FNarr_DialogueSequence& NewSequence);
-
-    UFUNCTION(BlueprintCallable, Category = "Dialogue System")
-    void PlayNarration(const FString& NarrationText, float Duration = 5.0f);
-
-    UFUNCTION(BlueprintCallable, Category = "Dialogue System")
-    bool IsDialogueActive() const { return bDialogueActive; }
-
-    UFUNCTION(BlueprintCallable, Category = "Dialogue System")
-    FNarr_DialogueEntry GetCurrentDialogueEntry() const;
-
-protected:
-    UFUNCTION()
-    void ProcessNextDialogueEntry();
-
-    UFUNCTION()
-    void OnDialogueEntryComplete();
-
-    void InitializeDefaultDialogues();
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    bool IsDialogueAvailable() const;
 };
+
+#include "Narr_DialogueSystem.generated.h"
