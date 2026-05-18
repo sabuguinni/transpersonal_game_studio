@@ -1,99 +1,148 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
+#include "Engine/World.h"
+#include "Components/ActorComponent.h"
 #include "Engine/StaticMeshActor.h"
 #include "Components/StaticMeshComponent.h"
-#include "Engine/World.h"
 #include "SharedTypes.h"
 #include "World_BiomeTerrainGenerator.generated.h"
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FWorld_BiomeTerrainConfig
+struct TRANSPERSONALGAME_API FWorld_BiomeConfiguration
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    EBiomeType BiomeType = EBiomeType::Savana;
+    FString BiomeName;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    FVector CenterLocation = FVector::ZeroVector;
+    FVector CenterLocation;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float BiomeRadius = 10000.0f;
+    float BiomeRadius;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
-    int32 RockCount = 15;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
-    int32 VegetationCount = 25;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
-    float MinScale = 0.8f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
-    float MaxScale = 2.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Assets")
-    TArray<FString> RockAssetPaths;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Assets")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
     TArray<FString> VegetationAssetPaths;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    TArray<FString> TerrainFeatureAssetPaths;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    int32 VegetationDensity;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    int32 TerrainFeatureDensity;
+
+    FWorld_BiomeConfiguration()
+    {
+        BiomeName = TEXT("DefaultBiome");
+        CenterLocation = FVector::ZeroVector;
+        BiomeRadius = 10000.0f;
+        VegetationDensity = 50;
+        TerrainFeatureDensity = 25;
+    }
 };
 
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API AWorld_BiomeTerrainGenerator : public AActor
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FWorld_TerrainFeature
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
+    FString FeatureName;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
+    FVector Location;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
+    FRotator Rotation;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
+    FVector Scale;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
+    FString AssetPath;
+
+    FWorld_TerrainFeature()
+    {
+        FeatureName = TEXT("DefaultFeature");
+        Location = FVector::ZeroVector;
+        Rotation = FRotator::ZeroRotator;
+        Scale = FVector::OneVector;
+        AssetPath = TEXT("");
+    }
+};
+
+UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UWorld_BiomeTerrainGenerator : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    AWorld_BiomeTerrainGenerator();
+    UWorld_BiomeTerrainGenerator();
 
 protected:
     virtual void BeginPlay() override;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World Generation")
+    TArray<FWorld_BiomeConfiguration> BiomeConfigurations;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World Generation")
+    TArray<FWorld_TerrainFeature> GeneratedTerrainFeatures;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World Generation")
+    int32 RandomSeed;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World Generation")
+    bool bAutoGenerateOnBeginPlay;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World Generation")
+    float MinDistanceBetweenFeatures;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World Generation")
+    float TerrainVariationScale;
+
 public:
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
-    TArray<FWorld_BiomeTerrainConfig> BiomeConfigs;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Generation")
-    bool bAutoGenerateOnBeginPlay = false;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Generation")
-    int32 RandomSeed = 12345;
+    UFUNCTION(BlueprintCallable, Category = "World Generation")
+    void InitializeBiomes();
 
     UFUNCTION(BlueprintCallable, Category = "World Generation")
-    void GenerateAllBiomes();
+    void GenerateTerrainForBiome(const FWorld_BiomeConfiguration& BiomeConfig);
 
     UFUNCTION(BlueprintCallable, Category = "World Generation")
-    void GenerateBiome(const FWorld_BiomeTerrainConfig& Config);
+    void GenerateAllBiomeTerrain();
 
     UFUNCTION(BlueprintCallable, Category = "World Generation")
     void ClearGeneratedTerrain();
 
     UFUNCTION(BlueprintCallable, Category = "World Generation")
-    int32 GetGeneratedActorCount() const;
+    FVector GetRandomLocationInBiome(const FWorld_BiomeConfiguration& BiomeConfig);
 
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Editor Tools")
-    void EditorGenerateAllBiomes();
+    UFUNCTION(BlueprintCallable, Category = "World Generation")
+    bool IsLocationValidForFeature(const FVector& Location, float MinDistance);
 
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Editor Tools")
+    UFUNCTION(BlueprintCallable, Category = "World Generation")
+    AStaticMeshActor* SpawnTerrainFeature(const FString& AssetPath, const FVector& Location, const FRotator& Rotation, const FVector& Scale);
+
+    UFUNCTION(BlueprintCallable, Category = "World Generation")
+    void SetBiomeConfiguration(const TArray<FWorld_BiomeConfiguration>& NewConfigurations);
+
+    UFUNCTION(BlueprintCallable, Category = "World Generation")
+    TArray<FWorld_BiomeConfiguration> GetBiomeConfigurations() const;
+
+    UFUNCTION(BlueprintCallable, Category = "World Generation")
+    int32 GetTerrainFeatureCount() const;
+
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "World Generation")
+    void EditorGenerateTerrain();
+
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "World Generation")
     void EditorClearTerrain();
 
-protected:
-    UFUNCTION(BlueprintCallable, Category = "Generation")
-    AStaticMeshActor* SpawnTerrainActor(const FString& AssetPath, const FVector& Location, const FRotator& Rotation, const FVector& Scale);
-
-    UFUNCTION(BlueprintCallable, Category = "Generation")
-    FVector GenerateRandomLocationInBiome(const FWorld_BiomeTerrainConfig& Config) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Generation")
-    void InitializeDefaultBiomeConfigs();
-
 private:
-    UPROPERTY()
-    TArray<AStaticMeshActor*> GeneratedTerrainActors;
-
-    void SetupBiomeConfiguration(EBiomeType BiomeType, const FVector& Location);
-    bool LoadAndValidateAssets(const FWorld_BiomeTerrainConfig& Config);
+    void SetupDefaultBiomes();
+    float GetPerlinNoise(float X, float Y, float Scale) const;
+    FRotator GetRandomRotationVariation() const;
+    FVector GetRandomScaleVariation() const;
 };
