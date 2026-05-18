@@ -1,162 +1,143 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
 #include "Components/ActorComponent.h"
-#include "Engine/TriggerBox.h"
+#include "Engine/World.h"
+#include "GameFramework/Actor.h"
 #include "SharedTypes.h"
 #include "Combat_EncounterManager.generated.h"
-
-class UCombat_ThreatDetectionSystem;
-class ACombat_TacticalAIController;
 
 UENUM(BlueprintType)
 enum class ECombat_EncounterType : uint8
 {
-    Ambush UMETA(DisplayName = "Ambush"),
-    Territory UMETA(DisplayName = "Territory Defense"),
-    Hunt UMETA(DisplayName = "Hunting Pack"),
-    Patrol UMETA(DisplayName = "Patrol Route"),
-    Feeding UMETA(DisplayName = "Feeding Ground"),
-    Migration UMETA(DisplayName = "Migration Path")
+    Ambush          UMETA(DisplayName = "Ambush"),
+    DirectAssault   UMETA(DisplayName = "Direct Assault"),
+    PackHunt        UMETA(DisplayName = "Pack Hunt"),
+    TerritorialDefense UMETA(DisplayName = "Territorial Defense"),
+    Stalking        UMETA(DisplayName = "Stalking"),
+    Retreat         UMETA(DisplayName = "Retreat")
 };
 
 UENUM(BlueprintType)
 enum class ECombat_ThreatLevel : uint8
 {
-    Low UMETA(DisplayName = "Low Threat"),
-    Medium UMETA(DisplayName = "Medium Threat"),
-    High UMETA(DisplayName = "High Threat"),
-    Extreme UMETA(DisplayName = "Extreme Threat"),
-    Lethal UMETA(DisplayName = "Lethal Threat")
+    Low         UMETA(DisplayName = "Low"),
+    Medium      UMETA(DisplayName = "Medium"),
+    High        UMETA(DisplayName = "High"),
+    Extreme     UMETA(DisplayName = "Extreme"),
+    Lethal      UMETA(DisplayName = "Lethal")
 };
 
 USTRUCT(BlueprintType)
-struct FCombat_EncounterData
+struct TRANSPERSONALGAME_API FCombat_EncounterData
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Encounter")
-    ECombat_EncounterType EncounterType;
+    ECombat_EncounterType EncounterType = ECombat_EncounterType::DirectAssault;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Encounter")
-    ECombat_ThreatLevel ThreatLevel;
+    ECombat_ThreatLevel ThreatLevel = ECombat_ThreatLevel::Medium;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Encounter")
-    FVector EncounterLocation;
+    TArray<AActor*> ParticipatingActors;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Encounter")
-    float EncounterRadius;
+    FVector EncounterCenter = FVector::ZeroVector;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Encounter")
-    TArray<TSubclassOf<APawn>> EnemyTypes;
+    float EncounterRadius = 2000.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Encounter")
-    int32 MinEnemyCount;
+    float Duration = 0.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Encounter")
-    int32 MaxEnemyCount;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Encounter")
-    float ActivationDistance;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Encounter")
-    bool bIsActive;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Encounter")
-    float CooldownTime;
+    bool bIsActive = false;
 
     FCombat_EncounterData()
     {
-        EncounterType = ECombat_EncounterType::Patrol;
-        ThreatLevel = ECombat_ThreatLevel::Medium;
-        EncounterLocation = FVector::ZeroVector;
-        EncounterRadius = 2000.0f;
-        MinEnemyCount = 1;
-        MaxEnemyCount = 3;
-        ActivationDistance = 1500.0f;
-        bIsActive = true;
-        CooldownTime = 300.0f;
+        ParticipatingActors.Empty();
     }
 };
 
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API ACombat_EncounterManager : public AActor
+UCLASS(ClassGroup=(Combat), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UCombat_EncounterManager : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    ACombat_EncounterManager();
+    UCombat_EncounterManager();
 
 protected:
     virtual void BeginPlay() override;
-    virtual void Tick(float DeltaTime) override;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Encounter System")
-    TArray<FCombat_EncounterData> EncounterZones;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Encounter System")
-    float PlayerDetectionRadius;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Encounter System")
-    float EncounterCheckInterval;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Encounter System")
-    bool bDebugEncounters;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    class UCombat_ThreatDetectionSystem* ThreatDetection;
-
-private:
-    UPROPERTY()
-    TArray<AActor*> ActiveEncounters;
-
-    UPROPERTY()
-    TArray<AActor*> SpawnedEnemies;
-
-    float LastEncounterCheck;
-    float LastThreatAssessment;
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 public:
-    UFUNCTION(BlueprintCallable, Category = "Encounter System")
-    void InitializeEncounterZones();
+    // Core encounter management
+    UFUNCTION(BlueprintCallable, Category = "Combat Encounter")
+    void InitiateEncounter(ECombat_EncounterType Type, const TArray<AActor*>& Participants, FVector Center, float Radius);
 
-    UFUNCTION(BlueprintCallable, Category = "Encounter System")
-    void CheckPlayerProximity();
+    UFUNCTION(BlueprintCallable, Category = "Combat Encounter")
+    void EndEncounter(bool bPlayerVictory);
 
-    UFUNCTION(BlueprintCallable, Category = "Encounter System")
-    bool TriggerEncounter(const FCombat_EncounterData& EncounterData);
+    UFUNCTION(BlueprintCallable, Category = "Combat Encounter")
+    void UpdateEncounter(float DeltaTime);
 
-    UFUNCTION(BlueprintCallable, Category = "Encounter System")
-    void SpawnEncounterEnemies(const FCombat_EncounterData& EncounterData);
+    // Encounter queries
+    UFUNCTION(BlueprintPure, Category = "Combat Encounter")
+    bool IsEncounterActive() const { return CurrentEncounter.bIsActive; }
 
-    UFUNCTION(BlueprintCallable, Category = "Encounter System")
-    void DeactivateEncounter(int32 EncounterIndex);
+    UFUNCTION(BlueprintPure, Category = "Combat Encounter")
+    ECombat_ThreatLevel GetCurrentThreatLevel() const { return CurrentEncounter.ThreatLevel; }
 
-    UFUNCTION(BlueprintCallable, Category = "Encounter System")
-    ECombat_ThreatLevel AssessThreatLevel(const FVector& Location, float Radius);
+    UFUNCTION(BlueprintPure, Category = "Combat Encounter")
+    float GetEncounterDuration() const { return CurrentEncounter.Duration; }
 
-    UFUNCTION(BlueprintCallable, Category = "Encounter System")
-    void UpdateDynamicThreatLevels();
+    // Tactical analysis
+    UFUNCTION(BlueprintCallable, Category = "Combat Encounter")
+    ECombat_EncounterType DetermineOptimalEncounterType(const TArray<AActor*>& Predators, AActor* Target);
 
-    UFUNCTION(BlueprintCallable, Category = "Encounter System")
-    TArray<AActor*> GetNearbyEnemies(const FVector& Location, float Radius);
+    UFUNCTION(BlueprintCallable, Category = "Combat Encounter")
+    ECombat_ThreatLevel CalculateThreatLevel(const TArray<AActor*>& Threats, AActor* Target);
 
-    UFUNCTION(BlueprintCallable, Category = "Encounter System")
-    void SetEncounterActive(int32 EncounterIndex, bool bActive);
+    UFUNCTION(BlueprintCallable, Category = "Combat Encounter")
+    TArray<FVector> GenerateTacticalPositions(FVector Center, int32 NumPositions, float Radius);
 
-    UFUNCTION(BlueprintCallable, Category = "Encounter System")
-    void AddEncounterZone(const FCombat_EncounterData& NewEncounter);
+    // Pack coordination
+    UFUNCTION(BlueprintCallable, Category = "Combat Encounter")
+    void CoordinatePackBehavior(const TArray<AActor*>& PackMembers, AActor* Target);
 
-    UFUNCTION(BlueprintCallable, Category = "Encounter System")
-    void RemoveEncounterZone(int32 EncounterIndex);
+    UFUNCTION(BlueprintCallable, Category = "Combat Encounter")
+    FVector GetOptimalFlankingPosition(AActor* Predator, AActor* Target, const TArray<AActor*>& PackMembers);
 
-    UFUNCTION(BlueprintImplementableEvent, Category = "Encounter Events")
-    void OnEncounterTriggered(const FCombat_EncounterData& EncounterData);
+protected:
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat State")
+    FCombat_EncounterData CurrentEncounter;
 
-    UFUNCTION(BlueprintImplementableEvent, Category = "Encounter Events")
-    void OnEncounterCompleted(const FCombat_EncounterData& EncounterData);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Settings")
+    float EncounterUpdateInterval = 0.1f;
 
-    UFUNCTION(BlueprintImplementableEvent, Category = "Encounter Events")
-    void OnThreatLevelChanged(ECombat_ThreatLevel NewThreatLevel, const FVector& Location);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Settings")
+    float MaxEncounterDuration = 300.0f; // 5 minutes max
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Settings")
+    float ThreatDecayRate = 1.0f;
+
+private:
+    float LastUpdateTime = 0.0f;
+    
+    // Internal encounter logic
+    void ProcessAmbushEncounter(float DeltaTime);
+    void ProcessDirectAssaultEncounter(float DeltaTime);
+    void ProcessPackHuntEncounter(float DeltaTime);
+    void ProcessTerritorialDefenseEncounter(float DeltaTime);
+    void ProcessStalkingEncounter(float DeltaTime);
+    void ProcessRetreatEncounter(float DeltaTime);
+
+    // Utility functions
+    float CalculateDistanceToTarget(AActor* Predator, AActor* Target);
+    bool IsPlayerInDanger(AActor* Player, const TArray<AActor*>& Threats);
+    void BroadcastEncounterEvent(const FString& EventName, const FCombat_EncounterData& Data);
 };
+
+#include "Combat_EncounterManager.generated.h"
