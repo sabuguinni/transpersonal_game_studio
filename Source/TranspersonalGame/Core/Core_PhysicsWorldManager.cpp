@@ -1,352 +1,306 @@
 #include "Core_PhysicsWorldManager.h"
-#include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "GameFramework/PlayerController.h"
-#include "GameFramework/Pawn.h"
-#include "PhysicsEngine/PhysicsSettings.h"
-#include "Components/StaticMeshComponent.h"
-#include "Components/SkeletalMeshComponent.h"
-#include "Kismet/GameplayStatics.h"
-#include "TimerManager.h"
+#include "Components/PrimitiveComponent.h"
+#include "PhysicsEngine/BodyInstance.h"
+#include "Engine/Engine.h"
 
-ACore_PhysicsWorldManager::ACore_PhysicsWorldManager()
+UCore_PhysicsWorldManager::UCore_PhysicsWorldManager()
 {
-    PrimaryActorTick.bCanEverTick = true;
-    PrimaryActorTick.TickInterval = 0.1f; // Update physics management 10 times per second
-    
-    // Set default physics LOD distances (in cm)
-    PhysicsLODDistances = {5000.0f, 15000.0f, 30000.0f}; // 50m, 150m, 300m
-    PhysicsUpdateRates = {60.0f, 30.0f, 10.0f}; // Full rate, half rate, low rate
-    
-    // Initialize destruction zone tracking
-    ActiveDestructionZones.Reserve(MaxDestructionZones);
+    PrimaryComponentTick.bCanEverTick = true;
+    PrimaryComponentTick.TickGroup = TG_PrePhysics;
+
+    // Default physics world settings
+    WorldGravityScale = 1.0f;
+    GlobalPhysicsTimeStep = 0.016667f; // 60 FPS
+    MaxPhysicsSubSteps = 6;
+    bEnableAsyncPhysics = true;
+
+    // Default environmental settings
+    WindStrength = 0.0f;
+    WindDirection = FVector(1.0f, 0.0f, 0.0f);
+    AirDensity = 1.225f; // kg/m³ at sea level
+    WaterDensity = 1000.0f; // kg/m³
+
+    // Default optimization settings
+    PhysicsLODDistance = 5000.0f;
+    MaxActiveRigidBodies = 1000;
+    bEnablePhysicsCulling = true;
+
+    // Internal state
+    bPhysicsWorldInitialized = false;
+    LastPhysicsUpdateTime = 0.0f;
 }
 
-void ACore_PhysicsWorldManager::BeginPlay()
+void UCore_PhysicsWorldManager::BeginPlay()
 {
     Super::BeginPlay();
-    
-    InitializeWorldPhysics();
-    
-    UE_LOG(LogTemp, Warning, TEXT("Core_PhysicsWorldManager: Initialized prehistoric world physics"));
+    InitializePhysicsWorld();
 }
 
-void ACore_PhysicsWorldManager::Tick(float DeltaTime)
+void UCore_PhysicsWorldManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
-    Super::Tick(DeltaTime);
-    
-    UpdatePhysicsMetrics();
-    CleanupDestructionZones();
-    
-    // Update physics LOD for all tracked actors
-    APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0);
-    if (PC && PC->GetPawn())
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+
+    if (bPhysicsWorldInitialized)
     {
-        FVector PlayerLocation = PC->GetPawn()->GetActorLocation();
-        
-        for (auto& ActorLODPair : ActorPhysicsLODCache)
+        LastPhysicsUpdateTime += DeltaTime;
+
+        // Update physics LOD every 0.1 seconds
+        if (LastPhysicsUpdateTime >= 0.1f)
         {
-            if (IsValid(ActorLODPair.Key))
-            {
-                float Distance = FVector::Dist(PlayerLocation, ActorLODPair.Key->GetActorLocation());
-                UpdateActorPhysicsLOD(ActorLODPair.Key, Distance);
-            }
+            UpdatePhysicsLOD();
+            LastPhysicsUpdateTime = 0.0f;
+        }
+
+        // Optimize performance if enabled
+        if (bEnablePhysicsCulling)
+        {
+            CullDistantPhysicsBodies();
         }
     }
 }
 
-void ACore_PhysicsWorldManager::InitializeWorldPhysics()
+void UCore_PhysicsWorldManager::InitializePhysicsWorld()
 {
     UWorld* World = GetWorld();
     if (!World)
     {
-        UE_LOG(LogTemp, Error, TEXT("Core_PhysicsWorldManager: No world context for physics initialization"));
+        UE_LOG(LogTemp, Error, TEXT("Core_PhysicsWorldManager: No valid world found"));
         return;
     }
-    
-    // Set prehistoric world gravity
-    World->GetWorldSettings()->GlobalGravityZ = BaseGravityZ * GravityMultiplier;
-    
-    // Configure physics settings for large-scale simulation
-    UPhysicsSettings* PhysicsSettings = UPhysicsSettings::Get();
-    if (PhysicsSettings)
-    {
-        // Optimize for large dinosaur interactions
-        PhysicsSettings->MaxSubstepDeltaTime = 0.0166f; // 60fps max
-        PhysicsSettings->MaxSubsteps = 6;
-        PhysicsSettings->SyncSceneSmoothingFactor = 0.0f; // Disable smoothing for accuracy
-        
-        UE_LOG(LogTemp, Warning, TEXT("Core_PhysicsWorldManager: Physics settings optimized for prehistoric simulation"));
-    }
-    
-    // Initialize physics material defaults if not set
-    if (!TerrainPhysicsMaterial)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Core_PhysicsWorldManager: No terrain physics material assigned"));
-    }
-    
-    ActivePhysicsBodies = 0;
-}
 
-void ACore_PhysicsWorldManager::ApplyPhysicsMaterialToActor(AActor* Actor, ECore_SurfaceType SurfaceType)
-{
-    if (!IsValid(Actor))
+    // Set global physics settings
+    UpdatePhysicsSettings();
+
+    // Initialize physics actor tracking
+    ActivePhysicsActors.Empty();
+    CulledPhysicsActors.Empty();
+
+    // Find all actors with physics components
+    for (TActorIterator<AActor> ActorIterator(World); ActorIterator; ++ActorIterator)
     {
-        return;
-    }
-    
-    UPhysicalMaterial* MaterialToApply = nullptr;
-    
-    switch (SurfaceType)
-    {
-        case ECore_SurfaceType::Terrain:
-            MaterialToApply = TerrainPhysicsMaterial;
-            break;
-        case ECore_SurfaceType::DinosaurSkin:
-        case ECore_SurfaceType::DinosaurBone:
-            MaterialToApply = DinosaurPhysicsMaterial;
-            break;
-        case ECore_SurfaceType::Vegetation:
-        case ECore_SurfaceType::Wood:
-            MaterialToApply = VegetationPhysicsMaterial;
-            break;
-        case ECore_SurfaceType::Rock:
-        case ECore_SurfaceType::Stone:
-            MaterialToApply = RockPhysicsMaterial;
-            break;
-        default:
-            MaterialToApply = TerrainPhysicsMaterial; // Default fallback
-            break;
-    }
-    
-    if (MaterialToApply)
-    {
-        // Apply to all primitive components
-        TArray<UPrimitiveComponent*> PrimitiveComponents;
-        Actor->GetComponents<UPrimitiveComponent>(PrimitiveComponents);
-        
-        for (UPrimitiveComponent* Component : PrimitiveComponents)
+        AActor* Actor = *ActorIterator;
+        if (Actor && Actor->GetRootComponent())
         {
-            AssignPhysicsMaterialToComponent(Component, MaterialToApply);
-        }
-        
-        UE_LOG(LogTemp, Log, TEXT("Core_PhysicsWorldManager: Applied physics material to %s"), *Actor->GetName());
-    }
-}
-
-void ACore_PhysicsWorldManager::RegisterDestructionZone(FVector Location, float Radius)
-{
-    if (ActiveDestructionZones.Num() >= MaxDestructionZones)
-    {
-        // Remove oldest destruction zone
-        ActiveDestructionZones.RemoveAt(0);
-        UE_LOG(LogTemp, Warning, TEXT("Core_PhysicsWorldManager: Max destruction zones reached, removing oldest"));
-    }
-    
-    ActiveDestructionZones.Add(Location);
-    
-    UE_LOG(LogTemp, Log, TEXT("Core_PhysicsWorldManager: Registered destruction zone at %s"), *Location.ToString());
-}
-
-void ACore_PhysicsWorldManager::CleanupDestructionZones()
-{
-    // For now, just limit the number of zones
-    // In a full implementation, we'd track zone lifetimes and clean up expired ones
-    while (ActiveDestructionZones.Num() > MaxDestructionZones)
-    {
-        ActiveDestructionZones.RemoveAt(0);
-    }
-}
-
-void ACore_PhysicsWorldManager::SetGravityMultiplier(float NewMultiplier, float Duration)
-{
-    GravityMultiplier = NewMultiplier;
-    
-    UWorld* World = GetWorld();
-    if (World)
-    {
-        World->GetWorldSettings()->GlobalGravityZ = BaseGravityZ * GravityMultiplier;
-        
-        UE_LOG(LogTemp, Warning, TEXT("Core_PhysicsWorldManager: Gravity multiplier set to %f"), NewMultiplier);
-    }
-    
-    if (Duration > 0.0f)
-    {
-        // Reset gravity after duration
-        GetWorldTimerManager().SetTimer(GravityResetTimer, this, &ACore_PhysicsWorldManager::ResetGravityMultiplier, Duration, false);
-    }
-}
-
-int32 ACore_PhysicsWorldManager::GetPhysicsLODLevel(float DistanceFromPlayer) const
-{
-    for (int32 i = 0; i < PhysicsLODDistances.Num(); ++i)
-    {
-        if (DistanceFromPlayer <= PhysicsLODDistances[i])
-        {
-            return i;
-        }
-    }
-    
-    return PhysicsLODDistances.Num(); // Maximum LOD level (disabled)
-}
-
-void ACore_PhysicsWorldManager::UpdateActorPhysicsLOD(AActor* Actor, float DistanceFromPlayer)
-{
-    if (!IsValid(Actor))
-    {
-        return;
-    }
-    
-    int32 NewLODLevel = GetPhysicsLODLevel(DistanceFromPlayer);
-    int32* CurrentLODLevel = ActorPhysicsLODCache.Find(Actor);
-    
-    if (!CurrentLODLevel || *CurrentLODLevel != NewLODLevel)
-    {
-        // Update LOD level
-        ActorPhysicsLODCache.Add(Actor, NewLODLevel);
-        
-        // Apply LOD settings to actor
-        TArray<UPrimitiveComponent*> PrimitiveComponents;
-        Actor->GetComponents<UPrimitiveComponent>(PrimitiveComponents);
-        
-        for (UPrimitiveComponent* Component : PrimitiveComponents)
-        {
-            if (NewLODLevel >= PhysicsLODDistances.Num())
+            UPrimitiveComponent* PrimComp = Cast<UPrimitiveComponent>(Actor->GetRootComponent());
+            if (PrimComp && PrimComp->IsSimulatingPhysics())
             {
-                // Disable physics simulation at maximum distance
-                Component->SetSimulatePhysics(false);
+                ActivePhysicsActors.Add(Actor);
+            }
+        }
+    }
+
+    bPhysicsWorldInitialized = true;
+    UE_LOG(LogTemp, Log, TEXT("Core_PhysicsWorldManager: Physics world initialized with %d active physics actors"), ActivePhysicsActors.Num());
+}
+
+void UCore_PhysicsWorldManager::UpdatePhysicsSettings()
+{
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        return;
+    }
+
+    // Update world gravity
+    FVector NewGravity = FVector(0.0f, 0.0f, -980.0f * WorldGravityScale);
+    World->GetPhysicsScene()->SetGravity(NewGravity);
+
+    // Update physics time step
+    if (UPhysicsSettings* PhysicsSettings = GetMutableDefault<UPhysicsSettings>())
+    {
+        PhysicsSettings->MaxSubstepDeltaTime = GlobalPhysicsTimeStep;
+        PhysicsSettings->MaxSubsteps = MaxPhysicsSubSteps;
+        PhysicsSettings->bEnableAsyncScene = bEnableAsyncPhysics;
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("Core_PhysicsWorldManager: Physics settings updated - Gravity Scale: %f, Time Step: %f"), 
+           WorldGravityScale, GlobalPhysicsTimeStep);
+}
+
+void UCore_PhysicsWorldManager::SetGlobalGravity(float NewGravity)
+{
+    WorldGravityScale = NewGravity;
+    UpdatePhysicsSettings();
+}
+
+void UCore_PhysicsWorldManager::SetPhysicsTimeStep(float NewTimeStep)
+{
+    GlobalPhysicsTimeStep = FMath::Clamp(NewTimeStep, 0.008333f, 0.033333f); // 30-120 FPS range
+    UpdatePhysicsSettings();
+}
+
+void UCore_PhysicsWorldManager::ApplyWindForce(AActor* TargetActor, float ForceMultiplier)
+{
+    if (!TargetActor || WindStrength <= 0.0f)
+    {
+        return;
+    }
+
+    UPrimitiveComponent* PrimComp = Cast<UPrimitiveComponent>(TargetActor->GetRootComponent());
+    if (PrimComp && PrimComp->IsSimulatingPhysics())
+    {
+        FVector WindForce = WindDirection.GetSafeNormal() * WindStrength * ForceMultiplier * AirDensity;
+        PrimComp->AddForce(WindForce, NAME_None, true);
+    }
+}
+
+void UCore_PhysicsWorldManager::SetEnvironmentalConditions(float Wind, FVector WindDir, float AirDens, float WaterDens)
+{
+    WindStrength = FMath::Max(0.0f, Wind);
+    WindDirection = WindDir.GetSafeNormal();
+    AirDensity = FMath::Max(0.1f, AirDens);
+    WaterDensity = FMath::Max(100.0f, WaterDens);
+
+    UE_LOG(LogTemp, Log, TEXT("Core_PhysicsWorldManager: Environmental conditions updated - Wind: %f, Air Density: %f"), 
+           WindStrength, AirDensity);
+}
+
+void UCore_PhysicsWorldManager::OptimizePhysicsPerformance()
+{
+    // Clean up invalid actor references
+    ActivePhysicsActors.RemoveAll([](const TWeakObjectPtr<AActor>& ActorPtr)
+    {
+        return !ActorPtr.IsValid();
+    });
+
+    CulledPhysicsActors.RemoveAll([](const TWeakObjectPtr<AActor>& ActorPtr)
+    {
+        return !ActorPtr.IsValid();
+    });
+
+    // Limit active physics bodies
+    if (ActivePhysicsActors.Num() > MaxActiveRigidBodies)
+    {
+        int32 ExcessBodies = ActivePhysicsActors.Num() - MaxActiveRigidBodies;
+        for (int32 i = 0; i < ExcessBodies; i++)
+        {
+            if (ActivePhysicsActors.IsValidIndex(i))
+            {
+                AActor* Actor = ActivePhysicsActors[i].Get();
+                if (Actor)
+                {
+                    UPrimitiveComponent* PrimComp = Cast<UPrimitiveComponent>(Actor->GetRootComponent());
+                    if (PrimComp)
+                    {
+                        PrimComp->SetSimulatePhysics(false);
+                        CulledPhysicsActors.Add(Actor);
+                    }
+                }
+                ActivePhysicsActors.RemoveAt(i);
+                i--; // Adjust index after removal
+                ExcessBodies--;
+            }
+        }
+    }
+
+    ManagePhysicsMemory();
+}
+
+int32 UCore_PhysicsWorldManager::GetActivePhysicsBodiesCount()
+{
+    return ActivePhysicsActors.Num();
+}
+
+void UCore_PhysicsWorldManager::DebugPhysicsWorld()
+{
+    UE_LOG(LogTemp, Warning, TEXT("=== Core_PhysicsWorldManager Debug Info ==="));
+    UE_LOG(LogTemp, Warning, TEXT("Physics World Initialized: %s"), bPhysicsWorldInitialized ? TEXT("Yes") : TEXT("No"));
+    UE_LOG(LogTemp, Warning, TEXT("Active Physics Bodies: %d"), ActivePhysicsActors.Num());
+    UE_LOG(LogTemp, Warning, TEXT("Culled Physics Bodies: %d"), CulledPhysicsActors.Num());
+    UE_LOG(LogTemp, Warning, TEXT("Gravity Scale: %f"), WorldGravityScale);
+    UE_LOG(LogTemp, Warning, TEXT("Physics Time Step: %f"), GlobalPhysicsTimeStep);
+    UE_LOG(LogTemp, Warning, TEXT("Wind Strength: %f"), WindStrength);
+    UE_LOG(LogTemp, Warning, TEXT("Air Density: %f"), AirDensity);
+    UE_LOG(LogTemp, Warning, TEXT("==========================================="));
+}
+
+void UCore_PhysicsWorldManager::UpdatePhysicsLOD()
+{
+    if (!GetOwner())
+    {
+        return;
+    }
+
+    FVector OwnerLocation = GetOwner()->GetActorLocation();
+
+    // Update LOD for active physics actors
+    for (int32 i = ActivePhysicsActors.Num() - 1; i >= 0; i--)
+    {
+        if (ActivePhysicsActors.IsValidIndex(i))
+        {
+            AActor* Actor = ActivePhysicsActors[i].Get();
+            if (Actor)
+            {
+                float Distance = FVector::Dist(OwnerLocation, Actor->GetActorLocation());
+                if (Distance > PhysicsLODDistance)
+                {
+                    UPrimitiveComponent* PrimComp = Cast<UPrimitiveComponent>(Actor->GetRootComponent());
+                    if (PrimComp)
+                    {
+                        PrimComp->SetSimulatePhysics(false);
+                        CulledPhysicsActors.Add(Actor);
+                        ActivePhysicsActors.RemoveAt(i);
+                    }
+                }
             }
             else
             {
-                // Enable physics with appropriate update rate
-                Component->SetSimulatePhysics(true);
-                // Note: Update rate control would require custom physics stepping
+                ActivePhysicsActors.RemoveAt(i);
             }
         }
     }
-}
 
-TArray<UPrimitiveComponent*> ACore_PhysicsWorldManager::GetPhysicsBodiesInRadius(FVector Center, float Radius)
-{
-    TArray<UPrimitiveComponent*> PhysicsBodies;
-    
-    UWorld* World = GetWorld();
-    if (!World)
+    // Re-enable physics for culled actors that are now close
+    for (int32 i = CulledPhysicsActors.Num() - 1; i >= 0; i--)
     {
-        return PhysicsBodies;
-    }
-    
-    // Use overlap sphere to find physics bodies
-    TArray<FOverlapResult> OverlapResults;
-    FCollisionQueryParams QueryParams;
-    QueryParams.bTraceComplex = false;
-    
-    bool bHit = World->OverlapMultiByChannel(
-        OverlapResults,
-        Center,
-        FQuat::Identity,
-        ECollisionChannel::ECC_WorldDynamic,
-        FCollisionShape::MakeSphere(Radius),
-        QueryParams
-    );
-    
-    if (bHit)
-    {
-        for (const FOverlapResult& Result : OverlapResults)
+        if (CulledPhysicsActors.IsValidIndex(i))
         {
-            if (Result.Component.IsValid() && Result.Component->IsSimulatingPhysics())
+            AActor* Actor = CulledPhysicsActors[i].Get();
+            if (Actor)
             {
-                PhysicsBodies.Add(Result.Component.Get());
-            }
-        }
-    }
-    
-    return PhysicsBodies;
-}
-
-bool ACore_PhysicsWorldManager::IsLocationInDestructionZone(FVector Location) const
-{
-    const float DestructionRadius = 2000.0f; // 20 meter radius per zone
-    
-    for (const FVector& ZoneCenter : ActiveDestructionZones)
-    {
-        if (FVector::Dist(Location, ZoneCenter) <= DestructionRadius)
-        {
-            return true;
-        }
-    }
-    
-    return false;
-}
-
-float ACore_PhysicsWorldManager::GetPhysicsSimulationLoad() const
-{
-    // Simple load calculation based on active physics bodies
-    const int32 MaxBodies = 1000; // Arbitrary maximum for prehistoric world
-    return FMath::Clamp(static_cast<float>(ActivePhysicsBodies) / MaxBodies, 0.0f, 1.0f);
-}
-
-void ACore_PhysicsWorldManager::AssignPhysicsMaterialToComponent(UPrimitiveComponent* Component, UPhysicalMaterial* Material)
-{
-    if (!IsValid(Component) || !IsValid(Material))
-    {
-        return;
-    }
-    
-    Component->SetPhysMaterialOverride(Material);
-    
-    // Update physics body if simulating
-    if (Component->IsSimulatingPhysics())
-    {
-        Component->RecreatePhysicsState();
-    }
-}
-
-void ACore_PhysicsWorldManager::ResetGravityMultiplier()
-{
-    SetGravityMultiplier(1.0f, 0.0f);
-    UE_LOG(LogTemp, Warning, TEXT("Core_PhysicsWorldManager: Gravity multiplier reset to normal"));
-}
-
-void ACore_PhysicsWorldManager::UpdatePhysicsMetrics()
-{
-    // Count active physics bodies in the world
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        return;
-    }
-    
-    int32 NewActiveBodyCount = 0;
-    
-    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
-    {
-        AActor* Actor = *ActorItr;
-        if (IsValid(Actor))
-        {
-            TArray<UPrimitiveComponent*> PrimitiveComponents;
-            Actor->GetComponents<UPrimitiveComponent>(PrimitiveComponents);
-            
-            for (UPrimitiveComponent* Component : PrimitiveComponents)
-            {
-                if (Component && Component->IsSimulatingPhysics())
+                float Distance = FVector::Dist(OwnerLocation, Actor->GetActorLocation());
+                if (Distance <= PhysicsLODDistance)
                 {
-                    NewActiveBodyCount++;
+                    UPrimitiveComponent* PrimComp = Cast<UPrimitiveComponent>(Actor->GetRootComponent());
+                    if (PrimComp)
+                    {
+                        PrimComp->SetSimulatePhysics(true);
+                        ActivePhysicsActors.Add(Actor);
+                        CulledPhysicsActors.RemoveAt(i);
+                    }
                 }
             }
+            else
+            {
+                CulledPhysicsActors.RemoveAt(i);
+            }
         }
     }
-    
-    ActivePhysicsBodies = NewActiveBodyCount;
-    
-    // Track physics update frequency
-    PhysicsUpdatesThisSecond++;
-    float CurrentTime = GetWorld()->GetTimeSeconds();
-    
-    if (CurrentTime - LastPhysicsUpdateTime >= 1.0f)
+}
+
+void UCore_PhysicsWorldManager::CullDistantPhysicsBodies()
+{
+    // This is called from UpdatePhysicsLOD, so no additional work needed here
+    // Could be extended for more sophisticated culling strategies
+}
+
+void UCore_PhysicsWorldManager::ManagePhysicsMemory()
+{
+    // Force garbage collection if we have too many physics objects
+    if (ActivePhysicsActors.Num() + CulledPhysicsActors.Num() > MaxActiveRigidBodies * 2)
     {
-        // Reset counter every second
-        PhysicsUpdatesThisSecond = 0;
-        LastPhysicsUpdateTime = CurrentTime;
+        // Clean up invalid references
+        ActivePhysicsActors.RemoveAll([](const TWeakObjectPtr<AActor>& ActorPtr)
+        {
+            return !ActorPtr.IsValid();
+        });
+
+        CulledPhysicsActors.RemoveAll([](const TWeakObjectPtr<AActor>& ActorPtr)
+        {
+            return !ActorPtr.IsValid();
+        });
+
+        UE_LOG(LogTemp, Log, TEXT("Core_PhysicsWorldManager: Physics memory cleanup completed"));
     }
 }
