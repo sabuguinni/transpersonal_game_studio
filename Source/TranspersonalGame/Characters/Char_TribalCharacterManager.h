@@ -3,101 +3,93 @@
 #include "CoreMinimal.h"
 #include "Engine/World.h"
 #include "Components/ActorComponent.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Components/StaticMeshComponent.h"
+#include "Engine/StaticMesh.h"
 #include "Engine/SkeletalMesh.h"
 #include "Materials/MaterialInterface.h"
+#include "GameFramework/Character.h"
+#include "GameFramework/CharacterMovementComponent.h"
+#include "Camera/CameraComponent.h"
+#include "GameFramework/SpringArmComponent.h"
 #include "../SharedTypes.h"
 #include "Char_TribalCharacterManager.generated.h"
 
+UENUM(BlueprintType)
+enum class EChar_TribalRole : uint8
+{
+    Hunter      UMETA(DisplayName = "Hunter"),
+    Gatherer    UMETA(DisplayName = "Gatherer"),
+    Warrior     UMETA(DisplayName = "Warrior"),
+    Shaman      UMETA(DisplayName = "Shaman"),
+    Child       UMETA(DisplayName = "Child"),
+    Elder       UMETA(DisplayName = "Elder")
+};
+
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FChar_TribalAppearanceData
+struct FChar_TribalAppearance
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
-    FString CharacterName;
+    TSoftObjectPtr<USkeletalMesh> BaseMesh;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
-    EChar_Gender Gender;
+    TSoftObjectPtr<UMaterialInterface> SkinMaterial;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
-    EChar_AgeGroup AgeGroup;
+    TSoftObjectPtr<UMaterialInterface> ClothingMaterial;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
+    TArray<TSoftObjectPtr<UStaticMesh>> Accessories;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
     FLinearColor SkinTone;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
-    FLinearColor HairColor;
+    float BodyScale;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
-    FLinearColor EyeColor;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
-    float BodyMass;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
-    float Height;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
-    TArray<FString> TribalMarkings;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
-    TArray<FString> Scars;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
-    FString ClothingStyle;
-
-    FChar_TribalAppearanceData()
+    FChar_TribalAppearance()
     {
-        CharacterName = TEXT("Unknown");
-        Gender = EChar_Gender::Male;
-        AgeGroup = EChar_AgeGroup::Adult;
-        SkinTone = FLinearColor(0.8f, 0.6f, 0.4f, 1.0f); // Tanned skin
-        HairColor = FLinearColor(0.2f, 0.1f, 0.05f, 1.0f); // Dark brown
-        EyeColor = FLinearColor(0.3f, 0.2f, 0.1f, 1.0f); // Brown eyes
-        BodyMass = 1.0f;
-        Height = 1.0f;
-        ClothingStyle = TEXT("Hunter");
+        SkinTone = FLinearColor(0.8f, 0.6f, 0.4f, 1.0f);
+        BodyScale = 1.0f;
     }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FChar_TribalArchetype
+struct FChar_TribalStats
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Archetype")
-    FString ArchetypeName;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
+    float Strength;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Archetype")
-    FString Description;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
+    float Agility;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Archetype")
-    TArray<FString> PreferredClothing;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
+    float Intelligence;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Archetype")
-    TArray<FString> TypicalTools;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
+    float Survival;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Archetype")
-    FLinearColor PreferredSkinTone;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
+    float Health;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Archetype")
-    float PreferredBodyMass;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
+    float Stamina;
 
-    FChar_TribalArchetype()
+    FChar_TribalStats()
     {
-        ArchetypeName = TEXT("Hunter");
-        Description = TEXT("Skilled tracker and hunter of prehistoric beasts");
-        PreferredClothing = { TEXT("Animal Hide"), TEXT("Bone Ornaments") };
-        TypicalTools = { TEXT("Spear"), TEXT("Stone Knife"), TEXT("Bone Tools") };
-        PreferredSkinTone = FLinearColor(0.7f, 0.5f, 0.3f, 1.0f);
-        PreferredBodyMass = 1.1f; // Slightly muscular
+        Strength = 50.0f;
+        Agility = 50.0f;
+        Intelligence = 50.0f;
+        Survival = 50.0f;
+        Health = 100.0f;
+        Stamina = 100.0f;
     }
 };
 
-/**
- * Manager for creating and customizing tribal characters in the Cretaceous world
- * Handles character diversity, appearance variation, and archetype-based generation
- */
 UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
 class TRANSPERSONALGAME_API UChar_TribalCharacterManager : public UActorComponent
 {
@@ -114,90 +106,79 @@ public:
 
     // Character Generation
     UFUNCTION(BlueprintCallable, Category = "Character Generation")
-    FChar_TribalAppearanceData GenerateRandomTribalCharacter();
+    void GenerateRandomTribalCharacter(EChar_TribalRole Role);
 
     UFUNCTION(BlueprintCallable, Category = "Character Generation")
-    FChar_TribalAppearanceData GenerateCharacterFromArchetype(const FString& ArchetypeName);
+    void ApplyTribalAppearance(const FChar_TribalAppearance& Appearance);
 
     UFUNCTION(BlueprintCallable, Category = "Character Generation")
-    void ApplyAppearanceToCharacter(AActor* Character, const FChar_TribalAppearanceData& AppearanceData);
+    void SetTribalRole(EChar_TribalRole NewRole);
 
-    // Archetype Management
-    UFUNCTION(BlueprintCallable, Category = "Archetypes")
-    void RegisterArchetype(const FChar_TribalArchetype& Archetype);
+    // Character Customization
+    UFUNCTION(BlueprintCallable, Category = "Customization")
+    void SetSkinTone(const FLinearColor& NewSkinTone);
 
-    UFUNCTION(BlueprintCallable, Category = "Archetypes")
-    FChar_TribalArchetype GetArchetype(const FString& ArchetypeName) const;
+    UFUNCTION(BlueprintCallable, Category = "Customization")
+    void AttachAccessory(UStaticMesh* Accessory, const FName& SocketName);
 
-    UFUNCTION(BlueprintCallable, Category = "Archetypes")
-    TArray<FString> GetAvailableArchetypes() const;
+    UFUNCTION(BlueprintCallable, Category = "Customization")
+    void RemoveAccessory(const FName& SocketName);
 
-    // Diversity System
-    UFUNCTION(BlueprintCallable, Category = "Diversity")
-    void EnsureCharacterDiversity(TArray<AActor*>& Characters);
+    // Character Stats
+    UFUNCTION(BlueprintCallable, Category = "Stats")
+    void SetTribalStats(const FChar_TribalStats& NewStats);
 
-    UFUNCTION(BlueprintCallable, Category = "Diversity")
-    float CalculateDiversityScore(const TArray<FChar_TribalAppearanceData>& Characters) const;
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Stats")
+    FChar_TribalStats GetTribalStats() const { return CurrentStats; }
 
-    // Material and Mesh Management
-    UFUNCTION(BlueprintCallable, Category = "Materials")
-    void UpdateCharacterMaterials(AActor* Character, const FChar_TribalAppearanceData& AppearanceData);
+    // Validation
+    UFUNCTION(BlueprintCallable, Category = "Validation")
+    bool ValidateCharacterSetup() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Materials")
-    UMaterialInterface* GetSkinMaterial(const FLinearColor& SkinTone) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Materials")
-    UMaterialInterface* GetClothingMaterial(const FString& ClothingStyle) const;
+    UFUNCTION(CallInEditor, Category = "Editor")
+    void RegenerateCharacter();
 
 protected:
-    // Archetype Database
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
-    TMap<FString, FChar_TribalArchetype> TribalArchetypes;
+    // Core Properties
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character", meta = (AllowPrivateAccess = "true"))
+    EChar_TribalRole CurrentRole;
 
-    // Material Assets
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Materials")
-    TMap<FString, TSoftObjectPtr<UMaterialInterface>> SkinMaterials;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character", meta = (AllowPrivateAccess = "true"))
+    FChar_TribalAppearance CurrentAppearance;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Materials")
-    TMap<FString, TSoftObjectPtr<UMaterialInterface>> ClothingMaterials;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character", meta = (AllowPrivateAccess = "true"))
+    FChar_TribalStats CurrentStats;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Materials")
-    TMap<FString, TSoftObjectPtr<USkeletalMesh>> CharacterMeshes;
+    // Component References
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components", meta = (AllowPrivateAccess = "true"))
+    TObjectPtr<USkeletalMeshComponent> CharacterMesh;
 
-    // Diversity Settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Diversity")
-    float MinDiversityScore;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Diversity")
-    int32 MaxSimilarCharacters;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components", meta = (AllowPrivateAccess = "true"))
+    TArray<TObjectPtr<UStaticMeshComponent>> AccessoryComponents;
 
     // Generation Settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Generation")
-    TArray<FLinearColor> AvailableSkinTones;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Generation", meta = (AllowPrivateAccess = "true"))
+    TArray<TSoftObjectPtr<USkeletalMesh>> AvailableMeshes;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Generation")
-    TArray<FLinearColor> AvailableHairColors;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Generation", meta = (AllowPrivateAccess = "true"))
+    TArray<TSoftObjectPtr<UMaterialInterface>> AvailableMaterials;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Generation")
-    TArray<FLinearColor> AvailableEyeColors;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Generation")
-    TArray<FString> AvailableTribalMarkings;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Generation")
-    TArray<FString> AvailableScarTypes;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Generation", meta = (AllowPrivateAccess = "true"))
+    TMap<EChar_TribalRole, FChar_TribalStats> RoleStatTemplates;
 
 private:
-    // Helper Functions
-    FLinearColor GenerateRandomSkinTone() const;
-    FLinearColor GenerateRandomHairColor() const;
-    FLinearColor GenerateRandomEyeColor() const;
-    FString GenerateRandomTribalMarking() const;
-    FString GenerateRandomScar() const;
-    float GenerateRandomBodyMass() const;
-    float GenerateRandomHeight() const;
-    
-    void InitializeDefaultArchetypes();
-    void InitializeDefaultMaterials();
-    void InitializeColorPalettes();
+    // Internal Methods
+    void InitializeRoleTemplates();
+    void LoadDefaultAssets();
+    FChar_TribalStats GenerateStatsForRole(EChar_TribalRole Role) const;
+    void ApplyRoleSpecificCustomization(EChar_TribalRole Role);
+    void UpdateCharacterMesh();
+    void UpdateCharacterMaterials();
+    void SpawnAccessoryComponents();
+    void CleanupAccessoryComponents();
+
+    // Validation
+    bool bIsInitialized;
+    bool bHasValidMesh;
+    bool bHasValidMaterials;
 };
