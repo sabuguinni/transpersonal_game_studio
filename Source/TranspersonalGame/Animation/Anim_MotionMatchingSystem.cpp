@@ -4,152 +4,156 @@
 #include "Components/SkeletalMeshComponent.h"
 #include "Animation/AnimInstance.h"
 #include "Engine/World.h"
+#include "DrawDebugHelpers.h"
 #include "Kismet/KismetMathLibrary.h"
 
 UAnim_MotionMatchingSystem::UAnim_MotionMatchingSystem()
 {
     PrimaryComponentTick.bCanEverTick = true;
     PrimaryComponentTick.TickGroup = TG_PrePhysics;
-
-    // Initialize state
-    CurrentMovementState = EAnim_MovementState::Idle;
-    CurrentActionState = EAnim_ActionState::None;
-    PreviousMovementState = EAnim_MovementState::Idle;
-    PreviousActionState = EAnim_ActionState::None;
-
-    // Initialize transition data
-    bIsTransitioning = false;
-    TransitionAlpha = 0.0f;
-    TransitionTime = 0.0f;
-    MaxTransitionTime = 0.2f;
-
-    // Initialize motion thresholds
-    WalkSpeedThreshold = 50.0f;
-    RunSpeedThreshold = 300.0f;
-    SprintSpeedThreshold = 600.0f;
-    MovementStopThreshold = 10.0f;
-
-    // Initialize cached references
-    OwnerCharacter = nullptr;
-    MovementComponent = nullptr;
-    MeshComponent = nullptr;
-
-    // Initialize animation assets to null
-    MovementBlendSpace = nullptr;
-    JumpMontage = nullptr;
-    LandMontage = nullptr;
-    GatherMontage = nullptr;
-    CraftMontage = nullptr;
-
-    StateChangeTime = 0.0f;
+    
+    // Initialize motion data
+    CurrentMotionData = FAnim_MotionData();
+    PreviousMotionData = FAnim_MotionData();
+    
+    // Set default thresholds for prehistoric human movement
+    WalkSpeedThreshold = 120.0f;     // Slow tribal walk
+    RunSpeedThreshold = 280.0f;      // Normal running
+    SprintSpeedThreshold = 450.0f;   // Emergency sprint
+    StateTransitionSmoothness = 0.15f; // Quick transitions for survival
 }
 
 void UAnim_MotionMatchingSystem::BeginPlay()
 {
     Super::BeginPlay();
-    CacheComponentReferences();
+    
+    // Get character reference
+    OwnerCharacter = Cast<ACharacter>(GetOwner());
+    if (!OwnerCharacter)
+    {
+        UE_LOG(LogTemp, Error, TEXT("MotionMatchingSystem: Owner is not a Character!"));
+        return;
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("MotionMatchingSystem initialized for: %s"), *OwnerCharacter->GetName());
 }
 
 void UAnim_MotionMatchingSystem::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-
-    if (OwnerCharacter && MovementComponent)
+    
+    if (!OwnerCharacter)
+        return;
+    
+    // Store previous frame data
+    PreviousMotionData = CurrentMotionData;
+    
+    // Update motion data for this frame
+    UpdateMotionData(DeltaTime);
+    
+    // Update movement state based on new data
+    UpdateMovementState();
+    
+    // Debug visualization in development builds
+    #if WITH_EDITOR
+    if (GEngine && GEngine->bIsPlayInEditorWorld)
     {
-        UpdateMotionData(DeltaTime);
-        UpdateTransition(DeltaTime);
+        FString DebugString = FString::Printf(TEXT("State: %s | Speed: %.1f | Dir: %.1f"), 
+            *UEnum::GetValueAsString(CurrentMotionData.CurrentState),
+            CurrentMotionData.Speed,
+            CurrentMotionData.Direction);
+        
+        GEngine->AddOnScreenDebugMessage(-1, 0.0f, FColor::Green, DebugString);
     }
+    #endif
 }
 
 void UAnim_MotionMatchingSystem::UpdateMotionData(float DeltaTime)
 {
-    if (!MovementComponent)
-    {
+    if (!OwnerCharacter || !OwnerCharacter->GetCharacterMovement())
         return;
-    }
-
+    
+    UCharacterMovementComponent* Movement = OwnerCharacter->GetCharacterMovement();
+    
     // Update basic motion data
-    CurrentMotionData.Velocity = MovementComponent->Velocity;
+    CurrentMotionData.Velocity = Movement->Velocity;
     CurrentMotionData.Speed = CurrentMotionData.Velocity.Size();
-    CurrentMotionData.Acceleration = MovementComponent->GetCurrentAcceleration();
-    CurrentMotionData.bIsInAir = MovementComponent->IsFalling();
-
-    // Calculate movement direction relative to character forward
-    if (CurrentMotionData.Speed > MovementStopThreshold)
+    CurrentMotionData.bIsInAir = Movement->IsFalling();
+    
+    // Calculate movement direction relative to character facing
+    CurrentMotionData.Direction = CalculateDirection();
+    
+    // Perform ground distance trace
+    PerformGroundTrace();
+    
+    // Update state transition timing
+    if (CurrentMotionData.CurrentState == PreviousMotionData.CurrentState)
     {
-        FVector ForwardVector = OwnerCharacter->GetActorForwardVector();
-        FVector VelocityNormalized = CurrentMotionData.Velocity.GetSafeNormal();
-        CurrentMotionData.Direction = FMath::RadiansToDegrees(FMath::Acos(FVector::DotProduct(ForwardVector, VelocityNormalized)));
-        
-        // Determine if moving left or right
-        FVector RightVector = OwnerCharacter->GetActorRightVector();
-        float RightDot = FVector::DotProduct(RightVector, VelocityNormalized);
-        if (RightDot < 0.0f)
-        {
-            CurrentMotionData.Direction *= -1.0f;
-        }
-
-        CurrentMotionData.bIsMoving = true;
-        CurrentMotionData.TimeSinceLastMovement = 0.0f;
+        CurrentMotionData.StateTransitionTime += DeltaTime;
     }
     else
     {
-        CurrentMotionData.Direction = 0.0f;
-        CurrentMotionData.bIsMoving = false;
-        CurrentMotionData.TimeSinceLastMovement += DeltaTime;
-    }
-
-    // Update movement state based on motion data
-    EAnim_MovementState NewMovementState = CalculateMovementState();
-    if (NewMovementState != CurrentMovementState)
-    {
-        OnMovementStateChanged(NewMovementState);
+        CurrentMotionData.StateTransitionTime = 0.0f;
     }
 }
 
-EAnim_MovementState UAnim_MotionMatchingSystem::CalculateMovementState() const
+void UAnim_MotionMatchingSystem::UpdateMovementState()
 {
-    if (!MovementComponent)
+    EAnim_MovementState NewState = DetermineMovementState();
+    
+    if (NewState != CurrentMotionData.CurrentState)
     {
-        return EAnim_MovementState::Idle;
+        HandleStateTransition(NewState);
     }
+}
 
-    // Check if character is in air
-    if (CurrentMotionData.bIsInAir)
+EAnim_MovementState UAnim_MotionMatchingSystem::DetermineMovementState() const
+{
+    if (!OwnerCharacter || !OwnerCharacter->GetCharacterMovement())
+        return EAnim_MovementState::Idle;
+    
+    UCharacterMovementComponent* Movement = OwnerCharacter->GetCharacterMovement();
+    
+    // Air states have priority
+    if (Movement->IsFalling())
     {
-        if (CurrentMotionData.Velocity.Z > 0.0f)
-        {
+        // Distinguish between jumping up and falling down
+        if (CurrentMotionData.Velocity.Z > 100.0f)
             return EAnim_MovementState::Jumping;
-        }
         else
-        {
             return EAnim_MovementState::Falling;
-        }
     }
-
-    // Check if character is crouching
-    if (MovementComponent->IsCrouching())
+    
+    // Just landed
+    if (PreviousMotionData.bIsInAir && !CurrentMotionData.bIsInAir)
     {
-        if (CurrentMotionData.bIsMoving)
-        {
-            return EAnim_MovementState::Crawling;
-        }
-        else
-        {
-            return EAnim_MovementState::Crouching;
-        }
+        return EAnim_MovementState::Landing;
     }
-
-    // Determine movement state based on speed
-    if (CurrentMotionData.Speed < MovementStopThreshold)
+    
+    // Crouching
+    if (Movement->IsCrouching())
+    {
+        return EAnim_MovementState::Crouching;
+    }
+    
+    // Swimming
+    if (Movement->IsSwimming())
+    {
+        return EAnim_MovementState::Swimming;
+    }
+    
+    // Ground movement based on speed
+    float Speed = CurrentMotionData.Speed;
+    
+    if (Speed < 10.0f) // Nearly stationary
     {
         return EAnim_MovementState::Idle;
     }
-    else if (CurrentMotionData.Speed < WalkSpeedThreshold)
+    else if (Speed < WalkSpeedThreshold)
     {
         return EAnim_MovementState::Walking;
     }
-    else if (CurrentMotionData.Speed < RunSpeedThreshold)
+    else if (Speed < RunSpeedThreshold)
     {
         return EAnim_MovementState::Running;
     }
@@ -159,132 +163,115 @@ EAnim_MovementState UAnim_MotionMatchingSystem::CalculateMovementState() const
     }
 }
 
-void UAnim_MotionMatchingSystem::UpdateTransition(float DeltaTime)
+void UAnim_MotionMatchingSystem::HandleStateTransition(EAnim_MovementState NewState)
 {
-    if (bIsTransitioning)
-    {
-        TransitionTime += DeltaTime;
-        TransitionAlpha = FMath::Clamp(TransitionTime / MaxTransitionTime, 0.0f, 1.0f);
-
-        if (TransitionAlpha >= 1.0f)
-        {
-            bIsTransitioning = false;
-            TransitionAlpha = 0.0f;
-            TransitionTime = 0.0f;
-        }
-    }
-}
-
-void UAnim_MotionMatchingSystem::OnMovementStateChanged(EAnim_MovementState NewState)
-{
-    PreviousMovementState = CurrentMovementState;
-    CurrentMovementState = NewState;
-    StateChangeTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
-
-    // Start transition
-    bIsTransitioning = true;
-    TransitionTime = 0.0f;
-    TransitionAlpha = 0.0f;
-
-    // Handle special state transitions
-    if (NewState == EAnim_MovementState::Jumping && JumpMontage)
-    {
-        PlayActionMontage(JumpMontage);
-    }
-    else if (PreviousMovementState == EAnim_MovementState::Falling && 
-             NewState != EAnim_MovementState::Falling && 
-             NewState != EAnim_MovementState::Jumping && 
-             LandMontage)
-    {
-        PlayActionMontage(LandMontage);
-    }
-}
-
-void UAnim_MotionMatchingSystem::OnActionStateChanged(EAnim_ActionState NewState)
-{
-    PreviousActionState = CurrentActionState;
-    CurrentActionState = NewState;
-
-    // Play appropriate montage for action state
+    EAnim_MovementState OldState = CurrentMotionData.CurrentState;
+    CurrentMotionData.CurrentState = NewState;
+    
+    // Trigger specific animations for certain transitions
     switch (NewState)
     {
-        case EAnim_ActionState::Gathering:
-            if (GatherMontage)
-            {
-                PlayActionMontage(GatherMontage);
-            }
+        case EAnim_MovementState::Jumping:
+            PlayJumpAnimation();
             break;
-        case EAnim_ActionState::Crafting:
-            if (CraftMontage)
-            {
-                PlayActionMontage(CraftMontage);
-            }
+            
+        case EAnim_MovementState::Landing:
+            PlayLandingAnimation();
             break;
+            
         default:
             break;
     }
+    
+    UE_LOG(LogTemp, Log, TEXT("MotionMatching: State transition %s -> %s"), 
+        *UEnum::GetValueAsString(OldState),
+        *UEnum::GetValueAsString(NewState));
 }
 
-void UAnim_MotionMatchingSystem::CacheComponentReferences()
+float UAnim_MotionMatchingSystem::CalculateDirection() const
 {
-    OwnerCharacter = Cast<ACharacter>(GetOwner());
-    if (OwnerCharacter)
+    if (!OwnerCharacter || CurrentMotionData.Speed < 10.0f)
+        return 0.0f;
+    
+    // Get character forward vector
+    FVector ForwardVector = OwnerCharacter->GetActorForwardVector();
+    
+    // Get movement direction (normalized velocity)
+    FVector MovementDirection = CurrentMotionData.Velocity.GetSafeNormal();
+    
+    // Calculate angle between forward and movement direction
+    float DotProduct = FVector::DotProduct(ForwardVector, MovementDirection);
+    float CrossProduct = FVector::CrossProduct(ForwardVector, MovementDirection).Z;
+    
+    // Convert to degrees (-180 to 180)
+    float Angle = FMath::RadiansToDegrees(FMath::Atan2(CrossProduct, DotProduct));
+    
+    return Angle;
+}
+
+void UAnim_MotionMatchingSystem::PerformGroundTrace()
+{
+    if (!OwnerCharacter)
+        return;
+    
+    FVector StartLocation = OwnerCharacter->GetActorLocation();
+    FVector EndLocation = StartLocation - FVector(0, 0, 1000.0f); // Trace down 10 meters
+    
+    FHitResult HitResult;
+    FCollisionQueryParams QueryParams;
+    QueryParams.AddIgnoredActor(OwnerCharacter);
+    
+    bool bHit = GetWorld()->LineTraceSingleByChannel(
+        HitResult,
+        StartLocation,
+        EndLocation,
+        ECC_WorldStatic,
+        QueryParams
+    );
+    
+    if (bHit)
     {
-        MovementComponent = OwnerCharacter->GetCharacterMovement();
-        MeshComponent = OwnerCharacter->GetMesh();
+        CurrentMotionData.DistanceToGround = FVector::Dist(StartLocation, HitResult.Location);
+    }
+    else
+    {
+        CurrentMotionData.DistanceToGround = 1000.0f; // Max trace distance
     }
 }
 
-EAnim_MovementState UAnim_MotionMatchingSystem::GetCurrentMovementState() const
+void UAnim_MotionMatchingSystem::SetLocomotionBlendSpace(UBlendSpace* NewBlendSpace)
 {
-    return CurrentMovementState;
+    LocomotionBlendSpace = NewBlendSpace;
+    UE_LOG(LogTemp, Log, TEXT("MotionMatching: Locomotion BlendSpace updated"));
 }
 
-EAnim_ActionState UAnim_MotionMatchingSystem::GetCurrentActionState() const
+void UAnim_MotionMatchingSystem::PlayJumpAnimation()
 {
-    return CurrentActionState;
-}
-
-FAnim_MotionData UAnim_MotionMatchingSystem::GetMotionData() const
-{
-    return CurrentMotionData;
-}
-
-void UAnim_MotionMatchingSystem::SetActionState(EAnim_ActionState NewState)
-{
-    if (NewState != CurrentActionState)
+    if (!OwnerCharacter || !JumpMontage)
+        return;
+    
+    USkeletalMeshComponent* MeshComp = OwnerCharacter->GetMesh();
+    if (MeshComp && MeshComp->GetAnimInstance())
     {
-        OnActionStateChanged(NewState);
+        MeshComp->GetAnimInstance()->Montage_Play(JumpMontage);
+        UE_LOG(LogTemp, Log, TEXT("MotionMatching: Playing jump animation"));
     }
 }
 
-bool UAnim_MotionMatchingSystem::IsTransitioning() const
+void UAnim_MotionMatchingSystem::PlayLandingAnimation()
 {
-    return bIsTransitioning;
-}
-
-float UAnim_MotionMatchingSystem::GetTransitionAlpha() const
-{
-    return TransitionAlpha;
-}
-
-void UAnim_MotionMatchingSystem::BlendToMovementState(EAnim_MovementState NewState, float BlendTime)
-{
-    if (NewState != CurrentMovementState)
+    if (!OwnerCharacter || !LandingMontage)
+        return;
+    
+    USkeletalMeshComponent* MeshComp = OwnerCharacter->GetMesh();
+    if (MeshComp && MeshComp->GetAnimInstance())
     {
-        MaxTransitionTime = BlendTime;
-        OnMovementStateChanged(NewState);
+        MeshComp->GetAnimInstance()->Montage_Play(LandingMontage);
+        UE_LOG(LogTemp, Log, TEXT("MotionMatching: Playing landing animation"));
     }
 }
 
-void UAnim_MotionMatchingSystem::PlayActionMontage(UAnimMontage* Montage, float PlayRate)
+bool UAnim_MotionMatchingSystem::IsTransitioningStates() const
 {
-    if (Montage && MeshComponent)
-    {
-        UAnimInstance* AnimInstance = MeshComponent->GetAnimInstance();
-        if (AnimInstance)
-        {
-            AnimInstance->Montage_Play(Montage, PlayRate);
-        }
-    }
+    return CurrentMotionData.StateTransitionTime < StateTransitionSmoothness;
 }
