@@ -1,158 +1,231 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "BehaviorTree/BehaviorTreeComponent.h"
+#include "BehaviorTree/BehaviorTree.h"
 #include "BehaviorTree/BlackboardComponent.h"
+#include "BehaviorTree/BehaviorTreeComponent.h"
 #include "AIController.h"
-#include "Engine/Engine.h"
 #include "GameFramework/Pawn.h"
-#include "../Core/SharedTypes.h"
+#include "Components/ActorComponent.h"
+#include "Engine/World.h"
+#include "TimerManager.h"
+#include "../SharedTypes.h"
 #include "NPC_DinosaurBehaviorTree.generated.h"
 
+UENUM(BlueprintType)
+enum class ENPC_DinosaurState : uint8
+{
+    Idle        UMETA(DisplayName = "Idle"),
+    Patrolling  UMETA(DisplayName = "Patrolling"),
+    Hunting     UMETA(DisplayName = "Hunting"),
+    Fleeing     UMETA(DisplayName = "Fleeing"),
+    Feeding     UMETA(DisplayName = "Feeding"),
+    Sleeping    UMETA(DisplayName = "Sleeping"),
+    Territorial UMETA(DisplayName = "Territorial"),
+    PackHunting UMETA(DisplayName = "Pack Hunting")
+};
+
+UENUM(BlueprintType)
+enum class ENPC_DinosaurSpecies : uint8
+{
+    TRex            UMETA(DisplayName = "T-Rex"),
+    Velociraptor    UMETA(DisplayName = "Velociraptor"),
+    Triceratops     UMETA(DisplayName = "Triceratops"),
+    Brachiosaurus   UMETA(DisplayName = "Brachiosaurus"),
+    Ankylosaurus    UMETA(DisplayName = "Ankylosaurus"),
+    Parasaurolophus UMETA(DisplayName = "Parasaurolophus")
+};
+
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FNPC_DinosaurState
+struct FNPC_DinosaurStats
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur State")
-    EDinosaurSpecies Species = EDinosaurSpecies::TRex;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur State")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
     float Health = 100.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur State")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
+    float MaxHealth = 100.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
+    float Stamina = 100.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
+    float MaxStamina = 100.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
     float Hunger = 50.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur State")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
+    float Fear = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
     float Aggression = 30.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur State")
-    bool bIsHunting = false;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur State")
-    bool bIsPatrolling = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur State")
-    FVector TerritoryCenter = FVector::ZeroVector;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur State")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
     float TerritoryRadius = 5000.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur State")
-    AActor* CurrentTarget = nullptr;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
+    float DetectionRadius = 3000.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur State")
-    float LastSeenTargetTime = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
+    float AttackDamage = 25.0f;
 
-    FNPC_DinosaurState()
-    {
-        Health = 100.0f;
-        Hunger = 50.0f;
-        Aggression = 30.0f;
-        bIsHunting = false;
-        bIsPatrolling = true;
-        TerritoryRadius = 5000.0f;
-        CurrentTarget = nullptr;
-        LastSeenTargetTime = 0.0f;
-    }
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
+    float MovementSpeed = 600.0f;
 };
 
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UNPC_DinosaurBehaviorTree : public UObject
+USTRUCT(BlueprintType)
+struct FNPC_PackBehavior
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pack")
+    TArray<AActor*> PackMembers;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pack")
+    AActor* PackLeader = nullptr;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pack")
+    FVector PackCenterLocation = FVector::ZeroVector;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pack")
+    float PackRadius = 2000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pack")
+    bool bIsPackHunting = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pack")
+    AActor* PackTarget = nullptr;
+};
+
+UCLASS(BlueprintType, Blueprintable, meta = (BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UNPC_DinosaurBehaviorTree : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
     UNPC_DinosaurBehaviorTree();
 
-    // Core behavior tree management
-    UFUNCTION(BlueprintCallable, Category = "Dinosaur AI")
-    void InitializeBehaviorTree(AAIController* AIController, EDinosaurSpecies Species);
+protected:
+    virtual void BeginPlay() override;
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    UFUNCTION(BlueprintCallable, Category = "Dinosaur AI")
-    void UpdateDinosaurState(float DeltaTime);
+public:
+    // Core behavior properties
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
+    ENPC_DinosaurSpecies Species = ENPC_DinosaurSpecies::TRex;
 
-    UFUNCTION(BlueprintCallable, Category = "Dinosaur AI")
-    bool CanSeeTarget(AActor* Target) const;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
+    ENPC_DinosaurState CurrentState = ENPC_DinosaurState::Idle;
 
-    UFUNCTION(BlueprintCallable, Category = "Dinosaur AI")
-    void SetHuntingTarget(AActor* Target);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
+    FNPC_DinosaurStats DinosaurStats;
 
-    UFUNCTION(BlueprintCallable, Category = "Dinosaur AI")
-    void ClearHuntingTarget();
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
+    FNPC_PackBehavior PackBehavior;
 
-    UFUNCTION(BlueprintCallable, Category = "Dinosaur AI")
-    FVector GetNextPatrolPoint() const;
+    // Behavior Tree assets
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI")
+    UBehaviorTree* BehaviorTreeAsset = nullptr;
 
-    UFUNCTION(BlueprintCallable, Category = "Dinosaur AI")
-    bool IsInTerritory(const FVector& Location) const;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI")
+    UBlackboardComponent* BlackboardComponent = nullptr;
 
-    UFUNCTION(BlueprintCallable, Category = "Dinosaur AI")
-    void OnTargetLost();
+    // Territory and patrol
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Territory")
+    FVector HomeLocation = FVector::ZeroVector;
 
-    UFUNCTION(BlueprintCallable, Category = "Dinosaur AI")
-    void OnTargetSpotted(AActor* Target);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Territory")
+    TArray<FVector> PatrolPoints;
 
-    // Species-specific behaviors
-    UFUNCTION(BlueprintCallable, Category = "Dinosaur AI")
-    void ExecuteTRexBehavior(float DeltaTime);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Territory")
+    int32 CurrentPatrolIndex = 0;
 
-    UFUNCTION(BlueprintCallable, Category = "Dinosaur AI")
-    void ExecuteRaptorBehavior(float DeltaTime);
+    // Target tracking
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Targeting")
+    AActor* CurrentTarget = nullptr;
 
-    UFUNCTION(BlueprintCallable, Category = "Dinosaur AI")
-    void ExecuteBrachiosaurusBehavior(float DeltaTime);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Targeting")
+    AActor* LastKnownThreat = nullptr;
 
-    // Pack behavior for raptors
-    UFUNCTION(BlueprintCallable, Category = "Pack AI")
-    void JoinPack(UNPC_DinosaurBehaviorTree* PackLeader);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Targeting")
+    FVector LastKnownThreatLocation = FVector::ZeroVector;
 
-    UFUNCTION(BlueprintCallable, Category = "Pack AI")
+    // Timers
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Timing")
+    float StateChangeTimer = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Timing")
+    float LastFeedTime = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Timing")
+    float LastSleepTime = 0.0f;
+
+    // Behavior functions
+    UFUNCTION(BlueprintCallable, Category = "Behavior")
+    void SetBehaviorState(ENPC_DinosaurState NewState);
+
+    UFUNCTION(BlueprintCallable, Category = "Behavior")
+    void InitializeBehaviorTree();
+
+    UFUNCTION(BlueprintCallable, Category = "Detection")
+    AActor* DetectNearbyThreats();
+
+    UFUNCTION(BlueprintCallable, Category = "Detection")
+    AActor* DetectNearbyPrey();
+
+    UFUNCTION(BlueprintCallable, Category = "Movement")
+    void MoveToLocation(FVector TargetLocation);
+
+    UFUNCTION(BlueprintCallable, Category = "Movement")
+    void MoveToActor(AActor* TargetActor);
+
+    UFUNCTION(BlueprintCallable, Category = "Patrol")
+    void StartPatrolBehavior();
+
+    UFUNCTION(BlueprintCallable, Category = "Patrol")
+    FVector GetNextPatrolPoint();
+
+    UFUNCTION(BlueprintCallable, Category = "Combat")
+    void AttackTarget(AActor* Target);
+
+    UFUNCTION(BlueprintCallable, Category = "Pack")
+    void JoinPack(UNPC_DinosaurBehaviorTree* PackLeaderComponent);
+
+    UFUNCTION(BlueprintCallable, Category = "Pack")
     void LeavePack();
 
-    UFUNCTION(BlueprintCallable, Category = "Pack AI")
-    void CoordinatePackHunt(AActor* Target);
+    UFUNCTION(BlueprintCallable, Category = "Pack")
+    void InitiatePackHunt(AActor* Target);
 
-protected:
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur State")
-    FNPC_DinosaurState DinosaurState;
+    // Species-specific behavior
+    UFUNCTION(BlueprintCallable, Category = "Species")
+    void ApplySpeciesTraits();
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI Components")
-    TWeakObjectPtr<AAIController> OwnerController;
+    UFUNCTION(BlueprintCallable, Category = "Species")
+    void TRexBehavior();
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI Components")
-    TWeakObjectPtr<UBlackboardComponent> BlackboardComp;
+    UFUNCTION(BlueprintCallable, Category = "Species")
+    void VelociraptorBehavior();
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI Components")
-    TWeakObjectPtr<UBehaviorTreeComponent> BehaviorTreeComp;
-
-    // Pack system for raptors
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pack System")
-    TArray<TWeakObjectPtr<UNPC_DinosaurBehaviorTree>> PackMembers;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pack System")
-    TWeakObjectPtr<UNPC_DinosaurBehaviorTree> PackLeader;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pack System")
-    bool bIsPackLeader = false;
-
-    // Behavior timing
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Timing")
-    float LastBehaviorUpdate = 0.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Timing")
-    float BehaviorUpdateInterval = 0.5f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Timing")
-    float PatrolPointChangeTime = 10.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Timing")
-    float LastPatrolChange = 0.0f;
+    UFUNCTION(BlueprintCallable, Category = "Species")
+    void HerbivoreBehavior();
 
 private:
-    void UpdateHungerAndAggression(float DeltaTime);
-    void UpdatePatrolBehavior(float DeltaTime);
-    void UpdateHuntingBehavior(float DeltaTime);
-    FVector GenerateRandomPatrolPoint() const;
-    bool IsValidPatrolPoint(const FVector& Point) const;
+    // Internal state management
+    void UpdateBehaviorState(float DeltaTime);
+    void UpdateStats(float DeltaTime);
+    void CheckEnvironmentalFactors();
+    void HandleStateTransitions();
+    
+    // Utility functions
+    float GetDistanceToActor(AActor* Actor);
+    bool IsActorInRange(AActor* Actor, float Range);
+    FVector GetRandomLocationInRadius(FVector Center, float Radius);
+    
+    // Timer handles
+    FTimerHandle StateUpdateTimer;
+    FTimerHandle StatsUpdateTimer;
+    FTimerHandle PatrolTimer;
 };
