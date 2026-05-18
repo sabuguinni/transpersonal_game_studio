@@ -1,112 +1,113 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/World.h"
 #include "Components/ActorComponent.h"
-#include "GameFramework/Actor.h"
 #include "Engine/Engine.h"
-#include "../SharedTypes.h"
+#include "Engine/World.h"
+#include "GameFramework/Actor.h"
+#include "GameFramework/Pawn.h"
+#include "Components/StaticMeshComponent.h"
+#include "Engine/StaticMesh.h"
+#include "SharedTypes.h"
 #include "Quest_DinosaurHuntSystem.generated.h"
 
 UENUM(BlueprintType)
 enum class EQuest_DinosaurSpecies : uint8
 {
-    Compsognathus    UMETA(DisplayName = "Compsognathus"),
-    Parasaurolophus  UMETA(DisplayName = "Parasaurolophus"),
-    Triceratops      UMETA(DisplayName = "Triceratops"),
-    Velociraptor     UMETA(DisplayName = "Velociraptor"),
-    Allosaurus       UMETA(DisplayName = "Allosaurus"),
-    Tyrannosaurus    UMETA(DisplayName = "Tyrannosaurus Rex")
+    TRex           UMETA(DisplayName = "T-Rex"),
+    Velociraptor   UMETA(DisplayName = "Velociraptor"),
+    Triceratops    UMETA(DisplayName = "Triceratops"),
+    Brachiosaurus  UMETA(DisplayName = "Brachiosaurus"),
+    Ankylosaurus   UMETA(DisplayName = "Ankylosaurus"),
+    Parasaurolophus UMETA(DisplayName = "Parasaurolophus"),
+    Unknown        UMETA(DisplayName = "Unknown Species")
 };
 
 UENUM(BlueprintType)
 enum class EQuest_HuntDifficulty : uint8
 {
-    Scavenger        UMETA(DisplayName = "Scavenger"),
-    Hunter           UMETA(DisplayName = "Hunter"),
-    Predator         UMETA(DisplayName = "Predator"),
-    Apex             UMETA(DisplayName = "Apex Predator")
+    Scavenge       UMETA(DisplayName = "Scavenge (Find Dead)"),
+    Ambush         UMETA(DisplayName = "Ambush (Sleeping)"),
+    Hunt           UMETA(DisplayName = "Active Hunt"),
+    PackHunt       UMETA(DisplayName = "Pack Hunt"),
+    ApexPredator   UMETA(DisplayName = "Apex Predator")
 };
 
 USTRUCT(BlueprintType)
-struct FQuest_DinosaurTarget
+struct TRANSPERSONALGAME_API FQuest_HuntTarget
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hunt Target")
-    EQuest_DinosaurSpecies Species;
+    EQuest_DinosaurSpecies Species = EQuest_DinosaurSpecies::Unknown;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hunt Target")
-    int32 RequiredCount;
+    FVector LastKnownLocation = FVector::ZeroVector;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hunt Target")
-    EQuest_HuntDifficulty Difficulty;
+    float ThreatLevel = 1.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hunt Target")
-    FVector LastKnownLocation;
+    bool bIsAlive = true;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hunt Target")
-    float TrackingRadius;
+    float TrackingRadius = 5000.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hunt Target")
-    bool bRequiresSpecificWeapon;
+    int32 PackSize = 1;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hunt Target")
-    FString RequiredWeaponType;
-
-    FQuest_DinosaurTarget()
+    FQuest_HuntTarget()
     {
-        Species = EQuest_DinosaurSpecies::Compsognathus;
-        RequiredCount = 1;
-        Difficulty = EQuest_HuntDifficulty::Scavenger;
+        Species = EQuest_DinosaurSpecies::Unknown;
         LastKnownLocation = FVector::ZeroVector;
+        ThreatLevel = 1.0f;
+        bIsAlive = true;
         TrackingRadius = 5000.0f;
-        bRequiresSpecificWeapon = false;
-        RequiredWeaponType = TEXT("Stone Spear");
+        PackSize = 1;
     }
 };
 
 USTRUCT(BlueprintType)
-struct FQuest_HuntMission
+struct TRANSPERSONALGAME_API FQuest_HuntMission
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hunt Mission")
-    FString MissionName;
+    FString MissionName = TEXT("Hunt Mission");
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hunt Mission")
-    FString MissionDescription;
+    FQuest_HuntTarget Target;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hunt Mission")
-    TArray<FQuest_DinosaurTarget> Targets;
+    EQuest_HuntDifficulty Difficulty = EQuest_HuntDifficulty::Hunt;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hunt Mission")
-    float TimeLimit;
+    float TimeLimit = 1800.0f; // 30 minutes
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hunt Mission")
-    FVector StartLocation;
+    float RemainingTime = 1800.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hunt Mission")
-    float SearchRadius;
+    bool bIsActive = false;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hunt Mission")
-    bool bRequiresGroupHunt;
+    bool bIsCompleted = false;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hunt Mission")
-    int32 MinimumHunters;
+    FVector StartLocation = FVector::ZeroVector;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hunt Mission")
-    TArray<FString> RewardItems;
+    TArray<FString> RequiredTools;
 
     FQuest_HuntMission()
     {
-        MissionName = TEXT("First Hunt");
-        MissionDescription = TEXT("Track and hunt small prey to prove your survival skills");
-        TimeLimit = 1800.0f; // 30 minutes
+        MissionName = TEXT("Hunt Mission");
+        Difficulty = EQuest_HuntDifficulty::Hunt;
+        TimeLimit = 1800.0f;
+        RemainingTime = 1800.0f;
+        bIsActive = false;
+        bIsCompleted = false;
         StartLocation = FVector::ZeroVector;
-        SearchRadius = 10000.0f;
-        bRequiresGroupHunt = false;
-        MinimumHunters = 1;
     }
 };
 
@@ -120,81 +121,101 @@ public:
 
 protected:
     virtual void BeginPlay() override;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hunt System")
-    TArray<FQuest_HuntMission> AvailableMissions;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hunt System")
-    FQuest_HuntMission CurrentMission;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hunt System")
-    bool bMissionActive;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hunt System")
-    float MissionStartTime;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hunt System")
-    TMap<EQuest_DinosaurSpecies, int32> KillCounts;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hunt System")
-    TArray<AActor*> TrackedDinosaurs;
-
-public:
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    UFUNCTION(BlueprintCallable, Category = "Hunt System")
-    void InitializeHuntSystem();
+public:
+    // Hunt Mission Management
+    UFUNCTION(BlueprintCallable, Category = "Dinosaur Hunt")
+    void StartHuntMission(EQuest_DinosaurSpecies Species, EQuest_HuntDifficulty Difficulty, FVector TargetLocation);
 
-    UFUNCTION(BlueprintCallable, Category = "Hunt System")
-    void StartHuntMission(const FString& MissionName);
+    UFUNCTION(BlueprintCallable, Category = "Dinosaur Hunt")
+    void CompleteHuntMission();
 
-    UFUNCTION(BlueprintCallable, Category = "Hunt System")
-    void CompleteMission();
+    UFUNCTION(BlueprintCallable, Category = "Dinosaur Hunt")
+    void CancelHuntMission();
 
-    UFUNCTION(BlueprintCallable, Category = "Hunt System")
-    void FailMission();
+    UFUNCTION(BlueprintCallable, Category = "Dinosaur Hunt")
+    bool IsHuntActive() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Hunt System")
-    void RegisterDinosaurKill(EQuest_DinosaurSpecies Species, const FVector& KillLocation);
-
-    UFUNCTION(BlueprintCallable, Category = "Hunt System")
-    bool CheckMissionProgress();
-
-    UFUNCTION(BlueprintCallable, Category = "Hunt System")
-    void UpdateDinosaurTracking();
-
-    UFUNCTION(BlueprintCallable, Category = "Hunt System")
-    TArray<FQuest_HuntMission> GetAvailableMissions() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Hunt System")
-    FQuest_HuntMission GetCurrentMission() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Hunt System")
+    UFUNCTION(BlueprintCallable, Category = "Dinosaur Hunt")
     float GetRemainingTime() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Hunt System")
-    void CreateBasicHuntMissions();
+    // Target Tracking
+    UFUNCTION(BlueprintCallable, Category = "Dinosaur Hunt")
+    void UpdateTargetLocation(FVector NewLocation);
 
-    UFUNCTION(BlueprintCallable, Category = "Hunt System")
-    void SpawnDinosaurTargets();
+    UFUNCTION(BlueprintCallable, Category = "Dinosaur Hunt")
+    FVector GetTargetLocation() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Hunt System")
-    AActor* FindNearestDinosaur(EQuest_DinosaurSpecies Species, const FVector& SearchLocation);
+    UFUNCTION(BlueprintCallable, Category = "Dinosaur Hunt")
+    float GetDistanceToTarget() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Hunt System")
-    void SetHuntWaypoint(const FVector& Location);
+    // Hunt Validation
+    UFUNCTION(BlueprintCallable, Category = "Dinosaur Hunt")
+    bool ValidateHuntSuccess(AActor* KilledDinosaur);
 
-    UFUNCTION(BlueprintCallable, Category = "Hunt System")
-    void ShowHuntObjectives();
+    UFUNCTION(BlueprintCallable, Category = "Dinosaur Hunt")
+    bool CheckRequiredTools();
+
+    // Hunt Difficulty Scaling
+    UFUNCTION(BlueprintCallable, Category = "Dinosaur Hunt")
+    void ScaleDifficultyBySpecies(EQuest_DinosaurSpecies Species);
+
+    UFUNCTION(BlueprintCallable, Category = "Dinosaur Hunt")
+    FString GetHuntInstructions() const;
+
+    // Hunt Rewards
+    UFUNCTION(BlueprintCallable, Category = "Dinosaur Hunt")
+    void CalculateHuntRewards();
+
+    UFUNCTION(BlueprintCallable, Category = "Dinosaur Hunt")
+    int32 GetMeatReward() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Dinosaur Hunt")
+    int32 GetBoneReward() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Dinosaur Hunt")
+    int32 GetHideReward() const;
+
+protected:
+    // Current Hunt Mission
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Hunt State")
+    FQuest_HuntMission CurrentMission;
+
+    // Hunt Configuration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hunt Config")
+    float MaxHuntDistance = 50000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hunt Config")
+    float TrackingUpdateInterval = 5.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hunt Config")
+    bool bShowHuntMarkers = true;
+
+    // Reward Multipliers
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hunt Rewards")
+    float MeatMultiplier = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hunt Rewards")
+    float BoneMultiplier = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hunt Rewards")
+    float HideMultiplier = 1.0f;
+
+    // Calculated Rewards
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Hunt Rewards")
+    int32 CalculatedMeatReward = 0;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Hunt Rewards")
+    int32 CalculatedBoneReward = 0;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Hunt Rewards")
+    int32 CalculatedHideReward = 0;
 
 private:
-    void CreateScavengerMissions();
-    void CreateHunterMissions();
-    void CreatePredatorMissions();
-    void CreateApexMissions();
-    
-    bool ValidateWeaponRequirement(const FString& WeaponType);
-    void DistributeRewards(const TArray<FString>& Rewards);
-    void UpdateMissionUI();
-    void LogHuntProgress(const FString& Message);
+    float TrackingTimer = 0.0f;
+    void UpdateHuntTimer(float DeltaTime);
+    void CheckHuntTimeout();
+    FString GetSpeciesDisplayName(EQuest_DinosaurSpecies Species) const;
+    FString GetDifficultyDisplayName(EQuest_HuntDifficulty Difficulty) const;
 };
