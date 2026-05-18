@@ -3,94 +3,22 @@
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
 #include "Engine/Engine.h"
-#include "PhysicsEngine/PhysicsConstraintComponent.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "PhysicsEngine/PhysicsAsset.h"
 #include "Animation/AnimInstance.h"
 #include "SharedTypes.h"
 #include "Core_RagdollSystem.generated.h"
 
 class USkeletalMeshComponent;
-class UPhysicsConstraintComponent;
+class UPhysicsAsset;
 class UAnimInstance;
 
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FCore_RagdollBone
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll")
-    FName BoneName;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll")
-    float Mass;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll")
-    float LinearDamping;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll")
-    float AngularDamping;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll")
-    bool bEnableGravity;
-
-    FCore_RagdollBone()
-    {
-        BoneName = NAME_None;
-        Mass = 1.0f;
-        LinearDamping = 0.1f;
-        AngularDamping = 0.1f;
-        bEnableGravity = true;
-    }
-};
-
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FCore_RagdollConstraint
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll")
-    FName ParentBone;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll")
-    FName ChildBone;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll")
-    float AngularSwing1Limit;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll")
-    float AngularSwing2Limit;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll")
-    float AngularTwistLimit;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll")
-    float LinearBreakForce;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll")
-    float AngularBreakTorque;
-
-    FCore_RagdollConstraint()
-    {
-        ParentBone = NAME_None;
-        ChildBone = NAME_None;
-        AngularSwing1Limit = 45.0f;
-        AngularSwing2Limit = 45.0f;
-        AngularTwistLimit = 15.0f;
-        LinearBreakForce = 100000.0f;
-        AngularBreakTorque = 100000.0f;
-    }
-};
-
-UENUM(BlueprintType)
-enum class ECore_RagdollState : uint8
-{
-    Disabled        UMETA(DisplayName = "Disabled"),
-    Transitioning   UMETA(DisplayName = "Transitioning"),
-    Active          UMETA(DisplayName = "Active"),
-    Recovering      UMETA(DisplayName = "Recovering")
-};
-
-UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
+/**
+ * Core_RagdollSystem - Advanced ragdoll physics management for dinosaurs and characters
+ * Handles realistic death animations, impact responses, and physics-based character reactions
+ * Optimized for performance with LOD-based activation and memory management
+ */
+UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent), BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UCore_RagdollSystem : public UActorComponent
 {
     GENERATED_BODY()
@@ -100,115 +28,102 @@ public:
 
 protected:
     virtual void BeginPlay() override;
-
-public:
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    // Ragdoll Configuration
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll Configuration")
-    TArray<FCore_RagdollBone> RagdollBones;
+public:
+    // === RAGDOLL ACTIVATION ===
+    
+    /** Activate ragdoll physics on the target skeletal mesh */
+    UFUNCTION(BlueprintCallable, Category = "Core Physics|Ragdoll")
+    void ActivateRagdoll(USkeletalMeshComponent* TargetMesh, bool bPreserveVelocity = true);
+    
+    /** Deactivate ragdoll and return to animation */
+    UFUNCTION(BlueprintCallable, Category = "Core Physics|Ragdoll")
+    void DeactivateRagdoll(USkeletalMeshComponent* TargetMesh, float BlendTime = 1.0f);
+    
+    /** Apply impact force to ragdoll at specific bone */
+    UFUNCTION(BlueprintCallable, Category = "Core Physics|Ragdoll")
+    void ApplyImpactForce(USkeletalMeshComponent* TargetMesh, FName BoneName, FVector Force, FVector Location);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll Configuration")
-    TArray<FCore_RagdollConstraint> RagdollConstraints;
+    // === RAGDOLL CONFIGURATION ===
+    
+    /** Configure ragdoll physics properties */
+    UFUNCTION(BlueprintCallable, Category = "Core Physics|Ragdoll")
+    void ConfigureRagdollPhysics(USkeletalMeshComponent* TargetMesh, float Mass = 80.0f, float LinearDamping = 0.1f, float AngularDamping = 0.1f);
+    
+    /** Set ragdoll bone constraints */
+    UFUNCTION(BlueprintCallable, Category = "Core Physics|Ragdoll")
+    void SetBoneConstraints(USkeletalMeshComponent* TargetMesh, FName BoneName, bool bLockPosition, bool bLockRotation);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll Configuration")
-    float TransitionTime;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll Configuration")
-    float RecoveryTime;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll Configuration")
-    bool bAutoRecover;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll Configuration")
-    float MinVelocityForRagdoll;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll Configuration")
-    float MaxRagdollTime;
-
-    // Ragdoll State
-    UPROPERTY(BlueprintReadOnly, Category = "Ragdoll State")
-    ECore_RagdollState CurrentState;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Ragdoll State")
-    float StateTimer;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Ragdoll State")
-    bool bIsRagdollActive;
-
-    // Component References
-    UPROPERTY(BlueprintReadOnly, Category = "Components")
-    USkeletalMeshComponent* SkeletalMeshComponent;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Components")
-    TArray<UPhysicsConstraintComponent*> PhysicsConstraints;
-
-    // Ragdoll Control Functions
-    UFUNCTION(BlueprintCallable, Category = "Ragdoll Control")
-    void ActivateRagdoll(float Force = 0.0f, FVector ImpactLocation = FVector::ZeroVector);
-
-    UFUNCTION(BlueprintCallable, Category = "Ragdoll Control")
-    void DeactivateRagdoll();
-
-    UFUNCTION(BlueprintCallable, Category = "Ragdoll Control")
-    void SetRagdollState(ECore_RagdollState NewState);
-
-    UFUNCTION(BlueprintCallable, Category = "Ragdoll Control")
-    bool IsRagdollActive() const;
-
-    // Bone Configuration Functions
-    UFUNCTION(BlueprintCallable, Category = "Ragdoll Configuration")
-    void ConfigureBonePhysics(FName BoneName, float Mass, float LinearDamping, float AngularDamping);
-
-    UFUNCTION(BlueprintCallable, Category = "Ragdoll Configuration")
-    void SetupDefaultRagdollBones();
-
-    UFUNCTION(BlueprintCallable, Category = "Ragdoll Configuration")
-    void CreatePhysicsConstraints();
-
-    // Impact and Force Functions
-    UFUNCTION(BlueprintCallable, Category = "Ragdoll Physics")
-    void ApplyImpactForce(FVector Force, FVector Location, FName BoneName = NAME_None);
-
-    UFUNCTION(BlueprintCallable, Category = "Ragdoll Physics")
-    void ApplyRadialImpulse(FVector Origin, float Radius, float Strength);
-
-    UFUNCTION(BlueprintCallable, Category = "Ragdoll Physics")
-    FVector GetBoneVelocity(FName BoneName) const;
-
-    // Recovery Functions
-    UFUNCTION(BlueprintCallable, Category = "Ragdoll Recovery")
-    void StartRecovery();
-
-    UFUNCTION(BlueprintCallable, Category = "Ragdoll Recovery")
-    bool CanRecover() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Ragdoll Recovery")
-    void BlendToAnimation(float BlendTime = 1.0f);
-
-    // Utility Functions
-    UFUNCTION(BlueprintCallable, Category = "Ragdoll Utility")
-    void SaveCurrentPose();
-
-    UFUNCTION(BlueprintCallable, Category = "Ragdoll Utility")
-    void RestoreSavedPose();
-
-    UFUNCTION(BlueprintCallable, Category = "Ragdoll Utility")
-    float GetRagdollIntensity() const;
+    // === PERFORMANCE OPTIMIZATION ===
+    
+    /** Check if ragdoll should be active based on distance */
+    UFUNCTION(BlueprintCallable, Category = "Core Physics|Ragdoll")
+    bool ShouldActivateRagdoll(AActor* TargetActor) const;
+    
+    /** Update ragdoll LOD based on distance */
+    UFUNCTION(BlueprintCallable, Category = "Core Physics|Ragdoll")
+    void UpdateRagdollLOD(USkeletalMeshComponent* TargetMesh, float DistanceToPlayer);
 
 protected:
-    // Internal Functions
-    void UpdateRagdollState(float DeltaTime);
-    void ProcessTransition(float DeltaTime);
-    void ProcessRecovery(float DeltaTime);
-    void InitializeRagdollBones();
-    void CleanupPhysicsConstraints();
-    bool ValidateSkeletalMesh() const;
+    // === RAGDOLL PROPERTIES ===
+    
+    /** Maximum distance for ragdoll activation */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Core Physics|Ragdoll", meta = (AllowPrivateAccess = "true"))
+    float MaxRagdollDistance;
+    
+    /** Minimum impact force required to activate ragdoll */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Core Physics|Ragdoll", meta = (AllowPrivateAccess = "true"))
+    float MinImpactForce;
+    
+    /** Default ragdoll mass */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Core Physics|Ragdoll", meta = (AllowPrivateAccess = "true"))
+    float DefaultRagdollMass;
+    
+    /** Ragdoll linear damping */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Core Physics|Ragdoll", meta = (AllowPrivateAccess = "true"))
+    float RagdollLinearDamping;
+    
+    /** Ragdoll angular damping */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Core Physics|Ragdoll", meta = (AllowPrivateAccess = "true"))
+    float RagdollAngularDamping;
 
-    // Saved Animation Data
-    TMap<FName, FTransform> SavedBoneTransforms;
-    UAnimInstance* CachedAnimInstance;
-    float RagdollTimer;
-    FVector LastImpactLocation;
-    float LastImpactForce;
+    // === RAGDOLL STATE ===
+    
+    /** Currently active ragdolls */
+    UPROPERTY(BlueprintReadOnly, Category = "Core Physics|Ragdoll", meta = (AllowPrivateAccess = "true"))
+    TArray<USkeletalMeshComponent*> ActiveRagdolls;
+    
+    /** Ragdoll activation timestamps */
+    UPROPERTY(BlueprintReadOnly, Category = "Core Physics|Ragdoll", meta = (AllowPrivateAccess = "true"))
+    TMap<USkeletalMeshComponent*, float> RagdollActivationTimes;
+    
+    /** Maximum number of simultaneous ragdolls */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Core Physics|Ragdoll", meta = (AllowPrivateAccess = "true"))
+    int32 MaxSimultaneousRagdolls;
+
+    // === PERFORMANCE MONITORING ===
+    
+    /** Current ragdoll count */
+    UPROPERTY(BlueprintReadOnly, Category = "Core Physics|Ragdoll", meta = (AllowPrivateAccess = "true"))
+    int32 CurrentRagdollCount;
+    
+    /** Ragdoll performance budget (ms) */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Core Physics|Ragdoll", meta = (AllowPrivateAccess = "true"))
+    float RagdollPerformanceBudget;
+
+private:
+    // === INTERNAL METHODS ===
+    
+    /** Internal ragdoll activation */
+    void InternalActivateRagdoll(USkeletalMeshComponent* TargetMesh);
+    
+    /** Internal ragdoll deactivation */
+    void InternalDeactivateRagdoll(USkeletalMeshComponent* TargetMesh);
+    
+    /** Cleanup inactive ragdolls */
+    void CleanupInactiveRagdolls();
+    
+    /** Get player location for distance calculations */
+    FVector GetPlayerLocation() const;
 };
