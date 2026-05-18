@@ -1,152 +1,99 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
 #include "Engine/World.h"
+#include "Components/ActorComponent.h"
+#include "Engine/Engine.h"
 #include "PhysicsEngine/PhysicsSettings.h"
-#include "Components/StaticMeshComponent.h"
-#include "Components/PrimitiveComponent.h"
 #include "SharedTypes.h"
 #include "Core_PhysicsWorldManager.generated.h"
 
-/**
- * Core_PhysicsWorldManager - Manages global physics settings and world-scale physics simulation
- * Handles gravity variations, physics material assignments, and large-scale destruction events
- * Optimized for prehistoric world with varying terrain and massive dinosaur interactions
- */
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API ACore_PhysicsWorldManager : public AActor
+UCLASS(BlueprintType, Blueprintable, meta = (BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UCore_PhysicsWorldManager : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    ACore_PhysicsWorldManager();
+    UCore_PhysicsWorldManager();
 
 protected:
     virtual void BeginPlay() override;
-    virtual void Tick(float DeltaTime) override;
-
-    // === WORLD PHYSICS SETTINGS ===
-    
-    /** Base gravity for the prehistoric world */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World Physics")
-    float BaseGravityZ = -980.0f;
-    
-    /** Current gravity multiplier (for special events like meteor impacts) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World Physics")
-    float GravityMultiplier = 1.0f;
-    
-    /** Maximum physics simulation distance from player */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float MaxPhysicsDistance = 50000.0f;
-    
-    /** Number of physics bodies being actively simulated */
-    UPROPERTY(BlueprintReadOnly, Category = "Debug")
-    int32 ActivePhysicsBodies = 0;
-    
-    // === PHYSICS MATERIALS MANAGEMENT ===
-    
-    /** Default physics material for terrain */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Materials")
-    class UPhysicalMaterial* TerrainPhysicsMaterial;
-    
-    /** Physics material for dinosaur bones/scales */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Materials")
-    class UPhysicalMaterial* DinosaurPhysicsMaterial;
-    
-    /** Physics material for vegetation */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Materials")
-    class UPhysicalMaterial* VegetationPhysicsMaterial;
-    
-    /** Physics material for rocks and minerals */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Materials")
-    class UPhysicalMaterial* RockPhysicsMaterial;
-    
-    // === LARGE SCALE PHYSICS EVENTS ===
-    
-    /** Track major destruction events for performance management */
-    UPROPERTY(BlueprintReadOnly, Category = "Events")
-    TArray<FVector> ActiveDestructionZones;
-    
-    /** Maximum number of simultaneous destruction zones */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 MaxDestructionZones = 5;
-    
-    // === PHYSICS OPTIMIZATION ===
-    
-    /** Distance-based LOD for physics simulation */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    TArray<float> PhysicsLODDistances = {5000.0f, 15000.0f, 30000.0f};
-    
-    /** Physics update frequency per LOD level */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    TArray<float> PhysicsUpdateRates = {60.0f, 30.0f, 10.0f};
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 public:
-    // === PHYSICS WORLD MANAGEMENT ===
-    
-    /** Initialize world physics settings for prehistoric environment */
+    // Physics world configuration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics World")
+    float WorldGravityScale;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics World")
+    float GlobalPhysicsTimeStep;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics World")
+    int32 MaxPhysicsSubSteps;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics World")
+    bool bEnableAsyncPhysics;
+
+    // Environmental physics
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environmental Physics")
+    float WindStrength;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environmental Physics")
+    FVector WindDirection;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environmental Physics")
+    float AirDensity;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environmental Physics")
+    float WaterDensity;
+
+    // Physics optimization
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Optimization")
+    float PhysicsLODDistance;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Optimization")
+    int32 MaxActiveRigidBodies;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Optimization")
+    bool bEnablePhysicsCulling;
+
+    // Physics world management functions
     UFUNCTION(BlueprintCallable, Category = "Physics World")
-    void InitializeWorldPhysics();
-    
-    /** Apply physics material to actor based on surface type */
+    void InitializePhysicsWorld();
+
     UFUNCTION(BlueprintCallable, Category = "Physics World")
-    void ApplyPhysicsMaterialToActor(AActor* Actor, ECore_SurfaceType SurfaceType);
-    
-    /** Register a new destruction zone for performance tracking */
+    void UpdatePhysicsSettings();
+
     UFUNCTION(BlueprintCallable, Category = "Physics World")
-    void RegisterDestructionZone(FVector Location, float Radius);
-    
-    /** Clean up completed destruction zones */
+    void SetGlobalGravity(float NewGravity);
+
     UFUNCTION(BlueprintCallable, Category = "Physics World")
-    void CleanupDestructionZones();
-    
-    /** Adjust gravity for special events (meteor impact, volcanic activity) */
-    UFUNCTION(BlueprintCallable, Category = "Physics World")
-    void SetGravityMultiplier(float NewMultiplier, float Duration = 0.0f);
-    
-    /** Get physics LOD level based on distance from player */
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    int32 GetPhysicsLODLevel(float DistanceFromPlayer) const;
-    
-    /** Enable/disable physics simulation for actor based on distance */
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void UpdateActorPhysicsLOD(AActor* Actor, float DistanceFromPlayer);
-    
-    // === PHYSICS QUERIES ===
-    
-    /** Get all physics bodies within radius */
-    UFUNCTION(BlueprintCallable, Category = "Physics Queries")
-    TArray<UPrimitiveComponent*> GetPhysicsBodiesInRadius(FVector Center, float Radius);
-    
-    /** Check if location is in active destruction zone */
-    UFUNCTION(BlueprintCallable, Category = "Physics Queries")
-    bool IsLocationInDestructionZone(FVector Location) const;
-    
-    /** Get current physics simulation load (0.0 to 1.0) */
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    float GetPhysicsSimulationLoad() const;
+    void SetPhysicsTimeStep(float NewTimeStep);
+
+    UFUNCTION(BlueprintCallable, Category = "Environmental Physics")
+    void ApplyWindForce(AActor* TargetActor, float ForceMultiplier = 1.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "Environmental Physics")
+    void SetEnvironmentalConditions(float Wind, FVector WindDir, float AirDens, float WaterDens);
+
+    UFUNCTION(BlueprintCallable, Category = "Optimization")
+    void OptimizePhysicsPerformance();
+
+    UFUNCTION(BlueprintCallable, Category = "Optimization")
+    int32 GetActivePhysicsBodiesCount();
+
+    UFUNCTION(BlueprintCallable, Category = "Debug")
+    void DebugPhysicsWorld();
 
 private:
-    // === INTERNAL MANAGEMENT ===
-    
-    /** Timer for gravity multiplier reset */
-    FTimerHandle GravityResetTimer;
-    
-    /** Cache of actors and their physics LOD levels */
-    UPROPERTY()
-    TMap<AActor*, int32> ActorPhysicsLODCache;
-    
-    /** Performance tracking */
-    float LastPhysicsUpdateTime = 0.0f;
-    int32 PhysicsUpdatesThisSecond = 0;
-    
-    /** Internal physics material assignment */
-    void AssignPhysicsMaterialToComponent(UPrimitiveComponent* Component, UPhysicalMaterial* Material);
-    
-    /** Reset gravity to base value */
-    void ResetGravityMultiplier();
-    
-    /** Update physics performance metrics */
-    void UpdatePhysicsMetrics();
+    // Internal physics management
+    void UpdatePhysicsLOD();
+    void CullDistantPhysicsBodies();
+    void ManagePhysicsMemory();
+
+    // Physics world state
+    bool bPhysicsWorldInitialized;
+    float LastPhysicsUpdateTime;
+    TArray<TWeakObjectPtr<AActor>> ActivePhysicsActors;
+    TArray<TWeakObjectPtr<AActor>> CulledPhysicsActors;
 };
