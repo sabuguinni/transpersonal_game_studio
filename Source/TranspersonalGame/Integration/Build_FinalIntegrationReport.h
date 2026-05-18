@@ -1,197 +1,118 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
-#include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "Components/StaticMeshComponent.h"
-#include "Components/SceneComponent.h"
+#include "GameFramework/Actor.h"
+#include "Components/ActorComponent.h"
 #include "Build_FinalIntegrationReport.generated.h"
 
-UENUM(BlueprintType)
-enum class EBuild_IntegrationStatus : uint8
-{
-    Unknown         UMETA(DisplayName = "Unknown"),
-    Pending         UMETA(DisplayName = "Pending"),
-    InProgress      UMETA(DisplayName = "In Progress"),
-    Completed       UMETA(DisplayName = "Completed"),
-    Failed          UMETA(DisplayName = "Failed"),
-    RequiresReview  UMETA(DisplayName = "Requires Review")
-};
-
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FBuild_SystemIntegrationData
+struct TRANSPERSONALGAME_API FBuild_IntegrationMetrics
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration")
-    FString SystemName;
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    int32 TotalActorsInLevel = 0;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration")
-    EBuild_IntegrationStatus Status;
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    int32 DinosaurActorCount = 0;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration")
-    float CompletionPercentage;
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    int32 CharacterActorCount = 0;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration")
-    FString LastValidationResult;
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    int32 StaticMeshAssetCount = 0;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration")
-    FDateTime LastUpdateTime;
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    int32 DinosaurPackAssetCount = 0;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration")
-    TArray<FString> DependentSystems;
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    bool bModuleLoadingSuccessful = false;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration")
-    TArray<FString> ValidationErrors;
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    bool bLevelSavedSuccessfully = false;
 
-    FBuild_SystemIntegrationData()
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    FString BuildStatus = TEXT("Unknown");
+
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    FDateTime ValidationTimestamp;
+
+    FBuild_IntegrationMetrics()
     {
-        SystemName = TEXT("Unknown");
-        Status = EBuild_IntegrationStatus::Unknown;
-        CompletionPercentage = 0.0f;
-        LastValidationResult = TEXT("Not Validated");
-        LastUpdateTime = FDateTime::Now();
+        ValidationTimestamp = FDateTime::Now();
+        BuildStatus = TEXT("Pending");
     }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FBuild_FinalReportData
+struct TRANSPERSONALGAME_API FBuild_BiomeValidation
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Report")
-    FString BuildVersion;
+    UPROPERTY(BlueprintReadOnly, Category = "Biomes")
+    FString BiomeName = TEXT("");
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Report")
-    FDateTime BuildTimestamp;
+    UPROPERTY(BlueprintReadOnly, Category = "Biomes")
+    FVector BiomeLocation = FVector::ZeroVector;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Report")
-    int32 TotalSystems;
+    UPROPERTY(BlueprintReadOnly, Category = "Biomes")
+    int32 ActorCount = 0;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Report")
-    int32 CompletedSystems;
+    UPROPERTY(BlueprintReadOnly, Category = "Biomes")
+    bool bPopulated = false;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Report")
-    int32 FailedSystems;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Report")
-    float OverallCompletionPercentage;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Report")
-    TArray<FBuild_SystemIntegrationData> SystemReports;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Report")
-    TArray<FString> CriticalIssues;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Report")
-    TArray<FString> Recommendations;
-
-    FBuild_FinalReportData()
+    FBuild_BiomeValidation()
     {
-        BuildVersion = TEXT("1.0.0");
-        BuildTimestamp = FDateTime::Now();
-        TotalSystems = 0;
-        CompletedSystems = 0;
-        FailedSystems = 0;
-        OverallCompletionPercentage = 0.0f;
+        BiomeName = TEXT("Unknown");
+        bPopulated = false;
+    }
+
+    FBuild_BiomeValidation(const FString& InBiomeName, const FVector& InLocation)
+        : BiomeName(InBiomeName), BiomeLocation(InLocation), ActorCount(0), bPopulated(false)
+    {
     }
 };
 
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API ABuild_FinalIntegrationReport : public AActor
+class TRANSPERSONALGAME_API UBuild_FinalIntegrationReport : public UObject
 {
     GENERATED_BODY()
 
 public:
-    ABuild_FinalIntegrationReport();
+    UBuild_FinalIntegrationReport();
 
-protected:
-    virtual void BeginPlay() override;
+    UPROPERTY(BlueprintReadOnly, Category = "Integration Report")
+    FBuild_IntegrationMetrics IntegrationMetrics;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    USceneComponent* RootSceneComponent;
+    UPROPERTY(BlueprintReadOnly, Category = "Integration Report")
+    TArray<FBuild_BiomeValidation> BiomeValidations;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    UStaticMeshComponent* ReportVisualizationMesh;
+    UPROPERTY(BlueprintReadOnly, Category = "Integration Report")
+    TArray<FString> LoadedClasses;
 
-public:
-    virtual void Tick(float DeltaTime) override;
+    UPROPERTY(BlueprintReadOnly, Category = "Integration Report")
+    TArray<FString> FailedClasses;
 
-    // Final Integration Report Data
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration Report")
-    FBuild_FinalReportData FinalReportData;
+    UPROPERTY(BlueprintReadOnly, Category = "Integration Report")
+    FString FinalBuildStatus = TEXT("Unknown");
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration Report")
-    bool bAutoGenerateReport;
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    void GenerateIntegrationReport(UWorld* World);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration Report")
-    float ReportGenerationInterval;
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    void ValidateBiomePopulation(UWorld* World);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration Report")
-    FString ReportOutputPath;
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    void ValidateModuleLoading();
 
-    // Integration Report Functions
-    UFUNCTION(BlueprintCallable, Category = "Integration Report")
-    void GenerateFinalIntegrationReport();
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    bool IsIntegrationSuccessful() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Integration Report")
-    void ValidateAllSystems();
-
-    UFUNCTION(BlueprintCallable, Category = "Integration Report")
-    void AddSystemReport(const FBuild_SystemIntegrationData& SystemData);
-
-    UFUNCTION(BlueprintCallable, Category = "Integration Report")
-    void UpdateSystemStatus(const FString& SystemName, EBuild_IntegrationStatus NewStatus);
-
-    UFUNCTION(BlueprintCallable, Category = "Integration Report")
-    FBuild_SystemIntegrationData GetSystemReport(const FString& SystemName);
-
-    UFUNCTION(BlueprintCallable, Category = "Integration Report")
-    TArray<FString> GetFailedSystems();
-
-    UFUNCTION(BlueprintCallable, Category = "Integration Report")
-    TArray<FString> GetCompletedSystems();
-
-    UFUNCTION(BlueprintCallable, Category = "Integration Report")
-    float CalculateOverallProgress();
-
-    UFUNCTION(BlueprintCallable, Category = "Integration Report")
-    void ExportReportToFile();
-
-    UFUNCTION(BlueprintCallable, Category = "Integration Report")
-    void ImportReportFromFile();
-
-    UFUNCTION(BlueprintCallable, Category = "Integration Report")
-    void ResetAllReports();
-
-    UFUNCTION(BlueprintCallable, Category = "Integration Report")
-    void PerformSystemHealthCheck();
-
-    UFUNCTION(BlueprintCallable, Category = "Integration Report")
-    void GenerateRecommendations();
-
-    UFUNCTION(BlueprintCallable, Category = "Integration Report")
-    bool ValidateSystemDependencies(const FString& SystemName);
-
-    UFUNCTION(BlueprintCallable, Category = "Integration Report")
-    void ScheduleAutomaticReporting();
-
-    UFUNCTION(BlueprintCallable, Category = "Integration Report")
-    void SendReportToStakeholders();
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    FString GetDetailedReport() const;
 
 private:
-    float LastReportTime;
-    bool bReportingActive;
-
-    void InitializeDefaultSystems();
-    void UpdateReportVisualization();
-    void LogReportData();
-    void ValidateReportIntegrity();
-    void ProcessSystemDependencies();
-    void AnalyzePerformanceMetrics();
-    void GenerateCriticalIssuesList();
-    void CreateRecommendationsList();
-    void SaveReportToDatabase();
-    void NotifyStakeholders();
+    void InitializeBiomeValidations();
+    void CountActorsInBiome(UWorld* World, FBuild_BiomeValidation& BiomeValidation);
 };
