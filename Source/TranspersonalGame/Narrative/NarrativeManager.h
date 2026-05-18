@@ -3,17 +3,11 @@
 #include "CoreMinimal.h"
 #include "Engine/GameInstanceSubsystem.h"
 #include "Engine/DataTable.h"
-#include "Sound/SoundCue.h"
-#include "../SharedTypes.h"
+#include "SharedTypes.h"
 #include "NarrativeManager.generated.h"
 
-// Forward declarations
-class USoundCue;
-class AActor;
-class APlayerController;
-
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FNarr_DialogueLine
+struct TRANSPERSONALGAME_API FNarr_DialogueEntry : public FTableRowBase
 {
     GENERATED_BODY()
 
@@ -21,139 +15,103 @@ struct TRANSPERSONALGAME_API FNarr_DialogueLine
     FString SpeakerName;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    FString DialogueText;
+    FText DialogueText;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    USoundCue* VoiceClip;
+    FString AudioPath;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
     float Duration;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    bool bIsPlayerChoice;
+    TArray<FString> ResponseOptions;
 
-    FNarr_DialogueLine()
+    FNarr_DialogueEntry()
     {
         SpeakerName = TEXT("");
-        DialogueText = TEXT("");
-        VoiceClip = nullptr;
+        DialogueText = FText::GetEmpty();
+        AudioPath = TEXT("");
         Duration = 3.0f;
-        bIsPlayerChoice = false;
     }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FNarr_NarrativeEvent
+struct TRANSPERSONALGAME_API FNarr_StoryBeat
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    FString EventID;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    FString BeatID;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    FString EventDescription;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    FText Title;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    TArray<FNarr_DialogueLine> DialogueLines;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    FText Description;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    FVector TriggerLocation;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    bool bIsCompleted;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    float TriggerRadius;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    TArray<FString> Prerequisites;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    bool bIsRepeatable;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    TArray<FString> UnlockedBeats;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    bool bHasBeenTriggered;
-
-    FNarr_NarrativeEvent()
+    FNarr_StoryBeat()
     {
-        EventID = TEXT("");
-        EventDescription = TEXT("");
-        TriggerLocation = FVector::ZeroVector;
-        TriggerRadius = 1000.0f;
-        bIsRepeatable = false;
-        bHasBeenTriggered = false;
+        BeatID = TEXT("");
+        Title = FText::GetEmpty();
+        Description = FText::GetEmpty();
+        bIsCompleted = false;
     }
 };
 
-UENUM(BlueprintType)
-enum class ENarr_StoryPhase : uint8
-{
-    Introduction    UMETA(DisplayName = "Introduction"),
-    EarlyExploration UMETA(DisplayName = "Early Exploration"),
-    FirstContact    UMETA(DisplayName = "First Contact"),
-    TerritoryWars   UMETA(DisplayName = "Territory Wars"),
-    GreatMigration  UMETA(DisplayName = "Great Migration"),
-    FinalSurvival   UMETA(DisplayName = "Final Survival")
-};
-
-UCLASS(BlueprintType, Blueprintable)
+UCLASS(BlueprintType)
 class TRANSPERSONALGAME_API UNarrativeManager : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
 public:
-    UNarrativeManager();
-
-    // USubsystem interface
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
-    // Core narrative functions
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void TriggerNarrativeEvent(const FString& EventID, AActor* TriggeringActor = nullptr);
+    void TriggerDialogue(const FString& DialogueID, AActor* Speaker = nullptr);
 
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void PlayDialogue(const FNarr_DialogueLine& DialogueLine, APlayerController* PlayerController = nullptr);
+    void CompleteStoryBeat(const FString& BeatID);
 
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void AdvanceStoryPhase();
+    bool IsStoryBeatCompleted(const FString& BeatID) const;
 
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    ENarr_StoryPhase GetCurrentStoryPhase() const { return CurrentStoryPhase; }
+    TArray<FNarr_StoryBeat> GetAvailableStoryBeats() const;
 
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void RegisterNarrativeEvent(const FNarr_NarrativeEvent& NewEvent);
+    void PlayNarration(const FString& NarrationID, const FVector& Location = FVector::ZeroVector);
 
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    bool IsEventTriggered(const FString& EventID) const;
-
-    // Location-based narrative
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void CheckLocationBasedEvents(const FVector& PlayerLocation);
+    void SetNarrativeContext(const FString& Context);
 
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void TriggerEnvironmentalNarration(EBiomeType BiomeType, const FVector& Location);
-
-    // Survival narrative integration
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void OnSurvivalStateChanged(float Health, float Hunger, float Thirst, float Fear);
-
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void OnDinosaurEncounter(const FString& DinosaurType, bool bIsHostile);
+    FString GetCurrentNarrativeContext() const;
 
 protected:
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative", meta = (AllowPrivateAccess = "true"))
-    ENarr_StoryPhase CurrentStoryPhase;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    UDataTable* DialogueDataTable;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative", meta = (AllowPrivateAccess = "true"))
-    TArray<FNarr_NarrativeEvent> RegisteredEvents;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    TArray<FNarr_StoryBeat> StoryBeats;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative", meta = (AllowPrivateAccess = "true"))
-    TArray<FString> TriggeredEventIDs;
+    UPROPERTY(BlueprintReadOnly, Category = "Narrative")
+    FString CurrentNarrativeContext;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative", meta = (AllowPrivateAccess = "true"))
-    float LastNarrationTime;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative", meta = (AllowPrivateAccess = "true"))
-    float NarrationCooldown;
+    UPROPERTY(BlueprintReadOnly, Category = "Narrative")
+    TArray<FString> CompletedStoryBeats;
 
 private:
-    void InitializeDefaultEvents();
-    void LoadNarrativeData();
-    FNarr_NarrativeEvent* FindEventByID(const FString& EventID);
-    bool CanTriggerNarration() const;
+    void InitializeStoryBeats();
+    void LoadDialogueData();
+    FNarr_DialogueEntry* FindDialogueEntry(const FString& DialogueID);
 };
