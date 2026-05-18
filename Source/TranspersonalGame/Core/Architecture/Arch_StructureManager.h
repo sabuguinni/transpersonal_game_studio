@@ -5,42 +5,47 @@
 #include "Components/StaticMeshComponent.h"
 #include "Components/SceneComponent.h"
 #include "Engine/StaticMesh.h"
-#include "SharedTypes.h"
+#include "Materials/MaterialInterface.h"
 #include "Arch_StructureManager.generated.h"
 
 UENUM(BlueprintType)
 enum class EArch_StructureType : uint8
 {
-    CaveDwelling,
-    ElevatedShelter,
-    GroundShelter,
-    StorageHut,
-    CraftingArea,
-    DefensiveWall
+    StonePillar     UMETA(DisplayName = "Stone Pillar"),
+    RockFormation   UMETA(DisplayName = "Rock Formation"),
+    CaveEntrance    UMETA(DisplayName = "Cave Entrance"),
+    AncientRuin     UMETA(DisplayName = "Ancient Ruin"),
+    TribalMarker    UMETA(DisplayName = "Tribal Marker")
 };
 
 USTRUCT(BlueprintType)
-struct FArch_StructureConfig
+struct TRANSPERSONALGAME_API FArch_StructureData
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    EArch_StructureType StructureType = EArch_StructureType::CaveDwelling;
+    EArch_StructureType StructureType;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    FVector Dimensions = FVector(400, 300, 200);
+    FVector SpawnLocation;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    int32 MaxOccupants = 2;
+    FRotator SpawnRotation;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    bool bHasFirePit = true;
+    float WeatheringLevel;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    bool bHasStorage = true;
+    bool bHasMossGrowth;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    float StructuralIntegrity = 100.0f;
+    FArch_StructureData()
+    {
+        StructureType = EArch_StructureType::StonePillar;
+        SpawnLocation = FVector::ZeroVector;
+        SpawnRotation = FRotator::ZeroRotator;
+        WeatheringLevel = 0.5f;
+        bHasMossGrowth = true;
+    }
 };
 
 UCLASS(BlueprintType, Blueprintable)
@@ -58,47 +63,40 @@ protected:
     USceneComponent* RootSceneComponent;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    UStaticMeshComponent* MainStructureMesh;
+    UStaticMeshComponent* StructureMesh;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    UStaticMeshComponent* InteriorMesh;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
+    FArch_StructureData StructureData;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure Config")
-    FArch_StructureConfig StructureConfig;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
+    TArray<UStaticMesh*> PillarMeshes;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure Config")
-    TArray<AActor*> InteriorProps;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
+    TArray<UStaticMesh*> RockMeshes;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure Config")
-    FVector SpawnLocation = FVector::ZeroVector;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
+    TArray<UMaterialInterface*> WeatheredMaterials;
 
 public:
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void CreateStructure(EArch_StructureType Type, FVector Location, FVector Scale = FVector::OneVector);
+    virtual void Tick(float DeltaTime) override;
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void AddInteriorProp(AActor* PropActor, FVector RelativeLocation);
+    void InitializeStructure(const FArch_StructureData& InStructureData);
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void SetStructuralIntegrity(float NewIntegrity);
+    void ApplyWeathering(float WeatheringAmount);
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    float GetStructuralIntegrity() const;
+    void SetMossGrowth(bool bEnableMoss);
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    bool CanAccommodateOccupants(int32 NumOccupants) const;
+    void SpawnStructureAtLocation(EArch_StructureType Type, FVector Location, FRotator Rotation);
 
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void RepairStructure(float RepairAmount);
-
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    TArray<FVector> GetInteriorSpawnPoints() const;
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Architecture")
+    void GenerateRandomStructures();
 
 private:
-    void SetupCaveDwelling();
-    void SetupElevatedShelter();
-    void SetupGroundShelter();
-    void CreateFirePit();
-    void CreateStorageAreas();
-    void UpdateStructuralMesh();
+    void UpdateStructureMesh();
+    void ApplyMaterialEffects();
+    UStaticMesh* GetMeshForStructureType(EArch_StructureType Type);
 };
