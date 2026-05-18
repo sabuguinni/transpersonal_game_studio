@@ -1,185 +1,114 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Subsystems/GameInstanceSubsystem.h"
-#include "Engine/World.h"
-#include "Components/StaticMeshComponent.h"
+#include "GameFramework/Actor.h"
+#include "Components/SceneComponent.h"
 #include "NiagaraSystem.h"
 #include "NiagaraComponent.h"
-#include "NiagaraFunctionLibrary.h"
-#include "SharedTypes.h"
+#include "Particles/ParticleSystem.h"
+#include "Components/ParticleSystemComponent.h"
+#include "Engine/Engine.h"
 #include "VFXManager.generated.h"
 
-class UNiagaraSystem;
-class UNiagaraComponent;
-class AActor;
-
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FVFX_FootstepData
+UENUM(BlueprintType)
+enum class EVFX_EffectType : uint8
 {
-    GENERATED_BODY()
-
-    // Sistema de partículas para pegadas
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Footstep VFX")
-    TSoftObjectPtr<UNiagaraSystem> FootstepParticleSystem;
-
-    // Intensidade do efeito baseada no peso do dinossauro
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Footstep VFX")
-    float ImpactIntensity = 1.0f;
-
-    // Duração do efeito em segundos
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Footstep VFX")
-    float EffectDuration = 2.0f;
-
-    // Raio de partículas
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Footstep VFX")
-    float ParticleRadius = 100.0f;
-
-    FVFX_FootstepData()
-    {
-        ImpactIntensity = 1.0f;
-        EffectDuration = 2.0f;
-        ParticleRadius = 100.0f;
-    }
+    DustCloud       UMETA(DisplayName = "Dust Cloud"),
+    BloodSplatter   UMETA(DisplayName = "Blood Splatter"),
+    CampfireFire    UMETA(DisplayName = "Campfire Fire"),
+    FootstepImpact  UMETA(DisplayName = "Footstep Impact"),
+    WeatherRain     UMETA(DisplayName = "Weather Rain"),
+    VolcanicAsh     UMETA(DisplayName = "Volcanic Ash")
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FVFX_WeatherData
+struct FVFX_EffectData
 {
     GENERATED_BODY()
 
-    // Sistema de partículas para chuva
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather VFX")
-    TSoftObjectPtr<UNiagaraSystem> RainSystem;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+    EVFX_EffectType EffectType;
 
-    // Sistema de partículas para neve
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather VFX")
-    TSoftObjectPtr<UNiagaraSystem> SnowSystem;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+    UNiagaraSystem* NiagaraEffect;
 
-    // Sistema de partículas para nevoeiro
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather VFX")
-    TSoftObjectPtr<UNiagaraSystem> FogSystem;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+    UParticleSystem* LegacyEffect;
 
-    // Intensidade do tempo
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather VFX")
-    float WeatherIntensity = 0.5f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+    float Duration;
 
-    FVFX_WeatherData()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+    float Intensity;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+    bool bLooping;
+
+    FVFX_EffectData()
     {
-        WeatherIntensity = 0.5f;
+        EffectType = EVFX_EffectType::DustCloud;
+        NiagaraEffect = nullptr;
+        LegacyEffect = nullptr;
+        Duration = 2.0f;
+        Intensity = 1.0f;
+        bLooping = false;
     }
 };
 
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FVFX_CombatData
-{
-    GENERATED_BODY()
-
-    // Sistema de partículas para sangue
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat VFX")
-    TSoftObjectPtr<UNiagaraSystem> BloodSplatterSystem;
-
-    // Sistema de partículas para impacto de armas
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat VFX")
-    TSoftObjectPtr<UNiagaraSystem> WeaponImpactSystem;
-
-    // Sistema de partículas para poeira de combate
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat VFX")
-    TSoftObjectPtr<UNiagaraSystem> CombatDustSystem;
-
-    FVFX_CombatData()
-    {
-    }
-};
-
-/**
- * VFX Manager - Sistema central de gestão de efeitos visuais
- * Responsável por criar e gerir todos os efeitos de partículas Niagara do jogo
- */
-UCLASS()
-class TRANSPERSONALGAME_API UVFX_Manager : public UGameInstanceSubsystem
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API AVFX_Manager : public AActor
 {
     GENERATED_BODY()
 
 public:
-    // USubsystem interface
-    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
-    virtual void Deinitialize() override;
-
-    // Footstep VFX
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    void PlayFootstepEffect(const FVector& Location, EDinosaurSpecies Species, EBiomeType BiomeType);
-
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    void PlayPlayerFootstepEffect(const FVector& Location, EBiomeType BiomeType);
-
-    // Weather VFX
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    void StartWeatherEffect(EWeatherType WeatherType, float Intensity = 0.5f);
-
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    void StopWeatherEffect();
-
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    void UpdateWeatherIntensity(float NewIntensity);
-
-    // Combat VFX
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    void PlayBloodSplatterEffect(const FVector& Location, const FVector& ImpactDirection);
-
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    void PlayWeaponImpactEffect(const FVector& Location, const FVector& ImpactDirection);
-
-    // Environment VFX
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    void PlayCampfireEffect(const FVector& Location);
-
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    void StopCampfireEffect();
-
-    // Utility functions
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    void CleanupExpiredEffects();
-
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    int32 GetActiveEffectCount() const;
+    AVFX_Manager();
 
 protected:
-    // Dados de configuração VFX por espécie de dinossauro
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "VFX Configuration")
-    TMap<EDinosaurSpecies, FVFX_FootstepData> DinosaurFootstepData;
+    virtual void BeginPlay() override;
 
-    // Dados de configuração VFX por bioma
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "VFX Configuration")
-    TMap<EBiomeType, FVFX_FootstepData> BiomeFootstepData;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    USceneComponent* RootSceneComponent;
 
-    // Dados de configuração de tempo
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "VFX Configuration")
-    FVFX_WeatherData WeatherData;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Effects")
+    TArray<FVFX_EffectData> AvailableEffects;
 
-    // Dados de configuração de combate
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "VFX Configuration")
-    FVFX_CombatData CombatData;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "VFX Components")
+    TArray<UNiagaraComponent*> NiagaraComponents;
 
-    // Componentes Niagara activos
-    UPROPERTY()
-    TArray<UNiagaraComponent*> ActiveEffects;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "VFX Components")
+    TArray<UParticleSystemComponent*> ParticleComponents;
 
-    // Componente de tempo actual
-    UPROPERTY()
-    UNiagaraComponent* CurrentWeatherEffect;
+public:
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    void PlayEffect(EVFX_EffectType EffectType, FVector Location, FRotator Rotation = FRotator::ZeroRotator);
 
-    // Componente de fogueira actual
-    UPROPERTY()
-    UNiagaraComponent* CurrentCampfireEffect;
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    void StopEffect(EVFX_EffectType EffectType);
 
-private:
-    // Métodos internos
-    void InitializeFootstepData();
-    void InitializeWeatherData();
-    void InitializeCombatData();
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    void StopAllEffects();
 
-    UNiagaraComponent* SpawnNiagaraEffect(UNiagaraSystem* System, const FVector& Location, const FRotator& Rotation = FRotator::ZeroRotator);
-    void RegisterActiveEffect(UNiagaraComponent* Effect);
-    void UnregisterActiveEffect(UNiagaraComponent* Effect);
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    void PlayDinosaurFootstepEffect(FVector ImpactLocation, float DinosaurSize = 1.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    void PlayBloodSplatterEffect(FVector HitLocation, FVector HitNormal);
+
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    void PlayCampfireEffect(FVector FireLocation, bool bStartFire = true);
+
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    void SetEffectIntensity(EVFX_EffectType EffectType, float NewIntensity);
+
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    bool IsEffectPlaying(EVFX_EffectType EffectType) const;
+
+protected:
+    void InitializeEffectComponents();
+    UNiagaraComponent* GetNiagaraComponentForEffect(EVFX_EffectType EffectType);
+    UParticleSystemComponent* GetParticleComponentForEffect(EVFX_EffectType EffectType);
+    
+    FVFX_EffectData* GetEffectData(EVFX_EffectType EffectType);
 };
+
+#include "VFXManager.generated.h"
