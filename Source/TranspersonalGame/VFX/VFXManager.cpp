@@ -1,289 +1,190 @@
 #include "VFXManager.h"
-#include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "Components/SceneComponent.h"
+#include "TimerManager.h"
 #include "NiagaraFunctionLibrary.h"
 #include "Kismet/GameplayStatics.h"
+#include "Engine/Engine.h"
 
-AVFX_Manager::AVFX_Manager()
+UVFX_Manager::UVFX_Manager()
 {
-    PrimaryActorTick.bCanEverTick = false;
-
-    // Create root scene component
-    RootSceneComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootSceneComponent"));
-    RootComponent = RootSceneComponent;
-
-    // Initialize default effect data
-    FVFX_EffectData DustCloudData;
-    DustCloudData.EffectType = EVFX_EffectType::DustCloud;
-    DustCloudData.Duration = 3.0f;
-    DustCloudData.Intensity = 1.0f;
-    DustCloudData.bLooping = false;
-    AvailableEffects.Add(DustCloudData);
-
-    FVFX_EffectData BloodData;
-    BloodData.EffectType = EVFX_EffectType::BloodSplatter;
-    BloodData.Duration = 2.0f;
-    BloodData.Intensity = 0.8f;
-    BloodData.bLooping = false;
-    AvailableEffects.Add(BloodData);
-
-    FVFX_EffectData CampfireData;
-    CampfireData.EffectType = EVFX_EffectType::CampfireFire;
-    CampfireData.Duration = -1.0f; // Infinite
-    CampfireData.Intensity = 1.0f;
-    CampfireData.bLooping = true;
-    AvailableEffects.Add(CampfireData);
-
-    FVFX_EffectData FootstepData;
-    FootstepData.EffectType = EVFX_EffectType::FootstepImpact;
-    FootstepData.Duration = 1.5f;
-    FootstepData.Intensity = 1.2f;
-    FootstepData.bLooping = false;
-    AvailableEffects.Add(FootstepData);
-
-    FVFX_EffectData RainData;
-    RainData.EffectType = EVFX_EffectType::WeatherRain;
-    RainData.Duration = -1.0f; // Infinite
-    RainData.Intensity = 0.7f;
-    RainData.bLooping = true;
-    AvailableEffects.Add(RainData);
-
-    FVFX_EffectData VolcanicData;
-    VolcanicData.EffectType = EVFX_EffectType::VolcanicAsh;
-    VolcanicData.Duration = 10.0f;
-    VolcanicData.Intensity = 0.9f;
-    VolcanicData.bLooping = true;
-    AvailableEffects.Add(VolcanicData);
+    PrimaryComponentTick.bCanEverTick = false;
+    InitializeEffectDatabase();
 }
 
-void AVFX_Manager::BeginPlay()
+void UVFX_Manager::BeginPlay()
 {
     Super::BeginPlay();
-    InitializeEffectComponents();
-}
-
-void AVFX_Manager::InitializeEffectComponents()
-{
-    // Create Niagara components for each effect type
-    for (int32 i = 0; i < AvailableEffects.Num(); i++)
+    
+    // Start cleanup timer for expired effects
+    if (UWorld* World = GetWorld())
     {
-        // Create Niagara component
-        UNiagaraComponent* NiagaraComp = CreateDefaultSubobject<UNiagaraComponent>(*FString::Printf(TEXT("NiagaraComponent_%d"), i));
-        if (NiagaraComp)
-        {
-            NiagaraComp->SetupAttachment(RootComponent);
-            NiagaraComp->SetAutoActivate(false);
-            NiagaraComponents.Add(NiagaraComp);
-        }
-
-        // Create legacy particle component as backup
-        UParticleSystemComponent* ParticleComp = CreateDefaultSubobject<UParticleSystemComponent>(*FString::Printf(TEXT("ParticleComponent_%d"), i));
-        if (ParticleComp)
-        {
-            ParticleComp->SetupAttachment(RootComponent);
-            ParticleComp->SetAutoActivate(false);
-            ParticleComponents.Add(ParticleComp);
-        }
+        World->GetTimerManager().SetTimer(
+            FTimerHandle(),
+            this,
+            &UVFX_Manager::CleanupExpiredEffects,
+            5.0f,  // Check every 5 seconds
+            true   // Loop
+        );
     }
-
-    UE_LOG(LogTemp, Warning, TEXT("VFX Manager initialized with %d effect types"), AvailableEffects.Num());
 }
 
-void AVFX_Manager::PlayEffect(EVFX_EffectType EffectType, FVector Location, FRotator Rotation)
+void UVFX_Manager::InitializeEffectDatabase()
+{
+    EffectDatabase.Empty();
+
+    // Blood splatter effect
+    FVFX_EffectData BloodData;
+    BloodData.EffectType = EVFX_EffectType::BloodSplatter;
+    BloodData.DefaultScale = FVector(1.0f, 1.0f, 1.0f);
+    BloodData.Duration = 3.0f;
+    EffectDatabase.Add(BloodData);
+
+    // Footstep dust effect
+    FVFX_EffectData DustData;
+    DustData.EffectType = EVFX_EffectType::FootstepDust;
+    DustData.DefaultScale = FVector(2.0f, 2.0f, 1.0f);
+    DustData.Duration = 2.0f;
+    EffectDatabase.Add(DustData);
+
+    // Volcanic ash effect
+    FVFX_EffectData AshData;
+    AshData.EffectType = EVFX_EffectType::VolcanicAsh;
+    AshData.DefaultScale = FVector(10.0f, 10.0f, 5.0f);
+    AshData.Duration = 30.0f;
+    EffectDatabase.Add(AshData);
+
+    // Campfire smoke effect
+    FVFX_EffectData SmokeData;
+    SmokeData.EffectType = EVFX_EffectType::CampfireSmoke;
+    SmokeData.DefaultScale = FVector(1.5f, 1.5f, 2.0f);
+    SmokeData.Duration = -1.0f; // Continuous
+    EffectDatabase.Add(SmokeData);
+
+    // Rain drops effect
+    FVFX_EffectData RainData;
+    RainData.EffectType = EVFX_EffectType::RainDrops;
+    RainData.DefaultScale = FVector(20.0f, 20.0f, 10.0f);
+    RainData.Duration = -1.0f; // Continuous
+    EffectDatabase.Add(RainData);
+
+    // Dinosaur breath effect
+    FVFX_EffectData BreathData;
+    BreathData.EffectType = EVFX_EffectType::DinosaurBreath;
+    BreathData.DefaultScale = FVector(1.0f, 1.0f, 1.0f);
+    BreathData.Duration = 1.5f;
+    EffectDatabase.Add(BreathData);
+}
+
+void UVFX_Manager::SpawnEffect(EVFX_EffectType EffectType, FVector Location, FRotator Rotation, FVector Scale)
 {
     FVFX_EffectData* EffectData = GetEffectData(EffectType);
     if (!EffectData)
     {
-        UE_LOG(LogTemp, Warning, TEXT("VFX Manager: Effect type not found"));
+        UE_LOG(LogTemp, Warning, TEXT("VFXManager: Effect type not found in database"));
         return;
     }
 
-    // Try Niagara first
-    UNiagaraComponent* NiagaraComp = GetNiagaraComponentForEffect(EffectType);
-    if (NiagaraComp && EffectData->NiagaraEffect)
+    UWorld* World = GetWorld();
+    if (!World)
     {
-        NiagaraComp->SetAsset(EffectData->NiagaraEffect);
-        NiagaraComp->SetWorldLocationAndRotation(Location, Rotation);
-        NiagaraComp->SetFloatParameter(TEXT("Intensity"), EffectData->Intensity);
-        NiagaraComp->Activate(true);
-        
-        if (!EffectData->bLooping && EffectData->Duration > 0.0f)
+        return;
+    }
+
+    // Try Niagara system first
+    if (EffectData->NiagaraSystem.IsValid())
+    {
+        UNiagaraSystem* NiagaraAsset = EffectData->NiagaraSystem.LoadSynchronous();
+        if (NiagaraAsset)
         {
-            // Auto-deactivate after duration
-            FTimerHandle TimerHandle;
-            GetWorld()->GetTimerManager().SetTimer(TimerHandle, [NiagaraComp]()
+            UNiagaraComponent* NiagaraComp = UNiagaraFunctionLibrary::SpawnSystemAtLocation(
+                World,
+                NiagaraAsset,
+                Location,
+                Rotation,
+                Scale * EffectData->DefaultScale
+            );
+
+            if (NiagaraComp)
             {
-                if (IsValid(NiagaraComp))
-                {
-                    NiagaraComp->Deactivate();
-                }
-            }, EffectData->Duration, false);
-        }
-
-        UE_LOG(LogTemp, Log, TEXT("VFX Manager: Playing Niagara effect %s at location %s"), 
-               *UEnum::GetValueAsString(EffectType), *Location.ToString());
-        return;
-    }
-
-    // Fallback to legacy particle system
-    UParticleSystemComponent* ParticleComp = GetParticleComponentForEffect(EffectType);
-    if (ParticleComp && EffectData->LegacyEffect)
-    {
-        ParticleComp->SetTemplate(EffectData->LegacyEffect);
-        ParticleComp->SetWorldLocationAndRotation(Location, Rotation);
-        ParticleComp->Activate(true);
-        
-        UE_LOG(LogTemp, Log, TEXT("VFX Manager: Playing legacy particle effect %s"), 
-               *UEnum::GetValueAsString(EffectType));
-    }
-}
-
-void AVFX_Manager::StopEffect(EVFX_EffectType EffectType)
-{
-    UNiagaraComponent* NiagaraComp = GetNiagaraComponentForEffect(EffectType);
-    if (NiagaraComp)
-    {
-        NiagaraComp->Deactivate();
-    }
-
-    UParticleSystemComponent* ParticleComp = GetParticleComponentForEffect(EffectType);
-    if (ParticleComp)
-    {
-        ParticleComp->Deactivate();
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("VFX Manager: Stopped effect %s"), *UEnum::GetValueAsString(EffectType));
-}
-
-void AVFX_Manager::StopAllEffects()
-{
-    for (UNiagaraComponent* NiagaraComp : NiagaraComponents)
-    {
-        if (IsValid(NiagaraComp))
-        {
-            NiagaraComp->Deactivate();
+                ActiveNiagaraEffects.Add(NiagaraComp);
+                UE_LOG(LogTemp, Log, TEXT("VFXManager: Spawned Niagara effect at %s"), *Location.ToString());
+            }
         }
     }
-
-    for (UParticleSystemComponent* ParticleComp : ParticleComponents)
+    // Fallback to particle system
+    else if (EffectData->ParticleSystem.IsValid())
     {
-        if (IsValid(ParticleComp))
+        UParticleSystem* ParticleAsset = EffectData->ParticleSystem.LoadSynchronous();
+        if (ParticleAsset)
         {
-            ParticleComp->Deactivate();
+            UParticleSystemComponent* ParticleComp = UGameplayStatics::SpawnEmitterAtLocation(
+                World,
+                ParticleAsset,
+                Location,
+                Rotation,
+                Scale * EffectData->DefaultScale
+            );
+
+            if (ParticleComp)
+            {
+                ActiveParticleEffects.Add(ParticleComp);
+                UE_LOG(LogTemp, Log, TEXT("VFXManager: Spawned particle effect at %s"), *Location.ToString());
+            }
         }
     }
-
-    UE_LOG(LogTemp, Log, TEXT("VFX Manager: All effects stopped"));
 }
 
-void AVFX_Manager::PlayDinosaurFootstepEffect(FVector ImpactLocation, float DinosaurSize)
+void UVFX_Manager::SpawnBloodSplatter(FVector ImpactLocation, FVector ImpactNormal)
 {
-    // Scale effect intensity based on dinosaur size
-    FVFX_EffectData* EffectData = GetEffectData(EVFX_EffectType::FootstepImpact);
-    if (EffectData)
-    {
-        float OriginalIntensity = EffectData->Intensity;
-        EffectData->Intensity = FMath::Clamp(DinosaurSize * 1.2f, 0.5f, 3.0f);
-        
-        PlayEffect(EVFX_EffectType::FootstepImpact, ImpactLocation);
-        PlayEffect(EVFX_EffectType::DustCloud, ImpactLocation);
-        
-        // Restore original intensity
-        EffectData->Intensity = OriginalIntensity;
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("VFX Manager: Dinosaur footstep effect at %s (size: %.2f)"), 
-           *ImpactLocation.ToString(), DinosaurSize);
+    // Calculate rotation from impact normal
+    FRotator ImpactRotation = FRotationMatrix::MakeFromZ(ImpactNormal).Rotator();
+    
+    SpawnEffect(EVFX_EffectType::BloodSplatter, ImpactLocation, ImpactRotation);
+    
+    UE_LOG(LogTemp, Log, TEXT("VFXManager: Blood splatter at %s"), *ImpactLocation.ToString());
 }
 
-void AVFX_Manager::PlayBloodSplatterEffect(FVector HitLocation, FVector HitNormal)
+void UVFX_Manager::SpawnFootstepDust(FVector FootLocation, float DinosaurSize)
 {
-    // Calculate rotation based on hit normal
-    FRotator EffectRotation = FRotationMatrix::MakeFromZ(HitNormal).Rotator();
-    PlayEffect(EVFX_EffectType::BloodSplatter, HitLocation, EffectRotation);
-
-    UE_LOG(LogTemp, Log, TEXT("VFX Manager: Blood splatter effect at %s"), *HitLocation.ToString());
+    FVector DustScale = FVector(DinosaurSize, DinosaurSize, 1.0f);
+    SpawnEffect(EVFX_EffectType::FootstepDust, FootLocation, FRotator::ZeroRotator, DustScale);
+    
+    UE_LOG(LogTemp, Log, TEXT("VFXManager: Footstep dust at %s (size: %f)"), *FootLocation.ToString(), DinosaurSize);
 }
 
-void AVFX_Manager::PlayCampfireEffect(FVector FireLocation, bool bStartFire)
+void UVFX_Manager::SpawnVolcanicAsh(FVector VolcanoLocation, float Intensity)
 {
-    if (bStartFire)
-    {
-        PlayEffect(EVFX_EffectType::CampfireFire, FireLocation);
-    }
-    else
-    {
-        StopEffect(EVFX_EffectType::CampfireFire);
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("VFX Manager: Campfire effect %s at %s"), 
-           bStartFire ? TEXT("started") : TEXT("stopped"), *FireLocation.ToString());
+    FVector AshScale = FVector(Intensity, Intensity, Intensity * 0.5f);
+    SpawnEffect(EVFX_EffectType::VolcanicAsh, VolcanoLocation, FRotator::ZeroRotator, AshScale);
+    
+    UE_LOG(LogTemp, Log, TEXT("VFXManager: Volcanic ash at %s (intensity: %f)"), *VolcanoLocation.ToString(), Intensity);
 }
 
-void AVFX_Manager::SetEffectIntensity(EVFX_EffectType EffectType, float NewIntensity)
+void UVFX_Manager::CleanupExpiredEffects()
 {
-    FVFX_EffectData* EffectData = GetEffectData(EffectType);
-    if (EffectData)
+    // Clean up finished Niagara effects
+    ActiveNiagaraEffects.RemoveAll([](UNiagaraComponent* Comp)
     {
-        EffectData->Intensity = FMath::Clamp(NewIntensity, 0.0f, 5.0f);
-        
-        // Update active Niagara component
-        UNiagaraComponent* NiagaraComp = GetNiagaraComponentForEffect(EffectType);
-        if (NiagaraComp && NiagaraComp->IsActive())
+        return !IsValid(Comp) || !Comp->IsActive();
+    });
+
+    // Clean up finished particle effects
+    ActiveParticleEffects.RemoveAll([](UParticleSystemComponent* Comp)
+    {
+        return !IsValid(Comp) || !Comp->IsActive();
+    });
+
+    UE_LOG(LogTemp, Verbose, TEXT("VFXManager: Active effects - Niagara: %d, Particles: %d"), 
+           ActiveNiagaraEffects.Num(), ActiveParticleEffects.Num());
+}
+
+FVFX_EffectData* UVFX_Manager::GetEffectData(EVFX_EffectType EffectType)
+{
+    for (FVFX_EffectData& Data : EffectDatabase)
+    {
+        if (Data.EffectType == EffectType)
         {
-            NiagaraComp->SetFloatParameter(TEXT("Intensity"), EffectData->Intensity);
-        }
-
-        UE_LOG(LogTemp, Log, TEXT("VFX Manager: Set intensity %.2f for effect %s"), 
-               NewIntensity, *UEnum::GetValueAsString(EffectType));
-    }
-}
-
-bool AVFX_Manager::IsEffectPlaying(EVFX_EffectType EffectType) const
-{
-    UNiagaraComponent* NiagaraComp = GetNiagaraComponentForEffect(EffectType);
-    if (NiagaraComp)
-    {
-        return NiagaraComp->IsActive();
-    }
-
-    UParticleSystemComponent* ParticleComp = GetParticleComponentForEffect(EffectType);
-    if (ParticleComp)
-    {
-        return ParticleComp->IsActive();
-    }
-
-    return false;
-}
-
-UNiagaraComponent* AVFX_Manager::GetNiagaraComponentForEffect(EVFX_EffectType EffectType)
-{
-    int32 EffectIndex = static_cast<int32>(EffectType);
-    if (NiagaraComponents.IsValidIndex(EffectIndex))
-    {
-        return NiagaraComponents[EffectIndex];
-    }
-    return nullptr;
-}
-
-UParticleSystemComponent* AVFX_Manager::GetParticleComponentForEffect(EVFX_EffectType EffectType)
-{
-    int32 EffectIndex = static_cast<int32>(EffectType);
-    if (ParticleComponents.IsValidIndex(EffectIndex))
-    {
-        return ParticleComponents[EffectIndex];
-    }
-    return nullptr;
-}
-
-FVFX_EffectData* AVFX_Manager::GetEffectData(EVFX_EffectType EffectType)
-{
-    for (FVFX_EffectData& EffectData : AvailableEffects)
-    {
-        if (EffectData.EffectType == EffectType)
-        {
-            return &EffectData;
+            return &Data;
         }
     }
     return nullptr;
