@@ -1,324 +1,413 @@
 #include "EngineArchitecturalFramework.h"
-#include "Engine/Engine.h"
+#include "BiomeManager.h"
+#include "AssetProductionManager.h"
+#include "BuildSystemManager.h"
+#include "ArchitectureValidationSuite.h"
 #include "Engine/World.h"
-#include "Misc/DateTime.h"
-#include "HAL/PlatformFilemanager.h"
+#include "Engine/GameInstance.h"
 
 UEngineArchitecturalFramework::UEngineArchitecturalFramework()
 {
-    bIsInitialized = false;
-    TotalPerformanceBudget = 16.67f; // 60fps target
-    ValidationFrameCounter = 0;
+    // Initialize default values
+    MaxAllowedFrameTime = 16.67f; // 60 FPS target
+    MaxActorsPerSystem = 1000;
+    bEnablePerformanceMonitoring = true;
+    bEnforceModuleCompliance = true;
+    bValidateSystemDependencies = true;
+    bGenerateComplianceReports = true;
+
+    // Initialize references to null
+    BiomeManagerRef = nullptr;
+    AssetProductionManagerRef = nullptr;
+    BuildSystemManagerRef = nullptr;
+    ValidationSuiteRef = nullptr;
 }
 
 void UEngineArchitecturalFramework::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
-    
-    UE_LOG(LogTemp, Warning, TEXT("EngineArchitecturalFramework: Initializing..."));
-    
-    // Initialize core architectural systems
-    RegisteredSystems.Empty();
-    ArchitecturalWarnings.Empty();
-    ArchitecturalErrors.Empty();
-    
-    // Register core engine systems by default
-    FEng_SystemInfo EngineSystem;
-    EngineSystem.SystemName = TEXT("EngineCore");
-    EngineSystem.Priority = EEng_SystemPriority::Critical;
-    EngineSystem.Layer = EEng_ArchitecturalLayer::Engine;
-    EngineSystem.PerformanceBudget = 5.0f; // 5ms budget for engine core
-    RegisterSystem(EngineSystem);
-    
-    FEng_SystemInfo PhysicsSystem;
-    PhysicsSystem.SystemName = TEXT("PhysicsCore");
-    PhysicsSystem.Priority = EEng_SystemPriority::Critical;
-    PhysicsSystem.Layer = EEng_ArchitecturalLayer::Core;
-    PhysicsSystem.PerformanceBudget = 3.0f; // 3ms budget for physics
-    RegisterSystem(PhysicsSystem);
-    
-    FEng_SystemInfo RenderingSystem;
-    RenderingSystem.SystemName = TEXT("RenderingCore");
-    RenderingSystem.Priority = EEng_SystemPriority::Critical;
-    RenderingSystem.Layer = EEng_ArchitecturalLayer::Engine;
-    RenderingSystem.PerformanceBudget = 8.0f; // 8ms budget for rendering
-    RegisterSystem(RenderingSystem);
-    
-    bIsInitialized = true;
+
+    UE_LOG(LogTemp, Warning, TEXT("EngineArchitecturalFramework: Initializing core architectural systems"));
+
+    // Initialize core system references
+    InitializeCoreSystemReferences();
+
+    // Register this framework as the primary architectural system
+    RegisterCoreSystem(TEXT("EngineArchitecturalFramework"), this, 0);
+
+    // Validate system integrity
+    ValidateSystemIntegrity();
+
+    // Log architectural status
+    LogArchitecturalStatus();
+
     UE_LOG(LogTemp, Warning, TEXT("EngineArchitecturalFramework: Initialization complete"));
 }
 
 void UEngineArchitecturalFramework::Deinitialize()
 {
-    UE_LOG(LogTemp, Warning, TEXT("EngineArchitecturalFramework: Shutting down..."));
-    
+    UE_LOG(LogTemp, Warning, TEXT("EngineArchitecturalFramework: Deinitializing"));
+
+    // Generate final architectural report
+    if (bGenerateComplianceReports)
+    {
+        GenerateArchitecturalReport();
+    }
+
+    // Clear all system registrations
     RegisteredSystems.Empty();
-    ArchitecturalWarnings.Empty();
-    ArchitecturalErrors.Empty();
-    bIsInitialized = false;
-    
+    SystemPriorities.Empty();
+    SystemPerformanceMetrics.Empty();
+    SystemDependencies.Empty();
+
+    // Clear references
+    BiomeManagerRef = nullptr;
+    AssetProductionManagerRef = nullptr;
+    BuildSystemManagerRef = nullptr;
+    ValidationSuiteRef = nullptr;
+
     Super::Deinitialize();
 }
 
-bool UEngineArchitecturalFramework::RegisterSystem(const FEng_SystemInfo& SystemInfo)
+void UEngineArchitecturalFramework::RegisterCoreSystem(const FString& SystemName, UObject* SystemInstance, int32 Priority)
 {
-    if (!bIsInitialized)
+    if (!SystemInstance)
     {
-        UE_LOG(LogTemp, Error, TEXT("EngineArchitecturalFramework: Cannot register system - framework not initialized"));
-        return false;
+        UE_LOG(LogTemp, Error, TEXT("EngineArchitecturalFramework: Cannot register null system: %s"), *SystemName);
+        return;
     }
-    
-    if (SystemInfo.SystemName.IsEmpty())
+
+    // Register the system
+    RegisteredSystems.Add(SystemName, SystemInstance);
+    SystemPriorities.Add(SystemName, Priority);
+    SystemPerformanceMetrics.Add(SystemName, 0.0f);
+
+    UE_LOG(LogTemp, Warning, TEXT("EngineArchitecturalFramework: Registered system '%s' with priority %d"), *SystemName, Priority);
+
+    // Validate system dependencies if enabled
+    if (bValidateSystemDependencies)
     {
-        UE_LOG(LogTemp, Error, TEXT("EngineArchitecturalFramework: Cannot register system with empty name"));
-        return false;
+        AreSystemDependenciesMet(SystemName);
     }
-    
-    // Validate system architecture before registration
-    if (!ValidateSystemLayer(SystemInfo) || !ValidateSystemPriority(SystemInfo) || !ValidatePerformanceBudget(SystemInfo))
-    {
-        UE_LOG(LogTemp, Error, TEXT("EngineArchitecturalFramework: System validation failed for %s"), *SystemInfo.SystemName);
-        return false;
-    }
-    
-    // Check for duplicate registration
-    if (RegisteredSystems.Contains(SystemInfo.SystemName))
-    {
-        UE_LOG(LogTemp, Warning, TEXT("EngineArchitecturalFramework: System %s already registered - updating"), *SystemInfo.SystemName);
-    }
-    
-    RegisteredSystems.Add(SystemInfo.SystemName, SystemInfo);
-    UE_LOG(LogTemp, Log, TEXT("EngineArchitecturalFramework: Registered system %s"), *SystemInfo.SystemName);
-    
-    return true;
 }
 
-bool UEngineArchitecturalFramework::UnregisterSystem(const FString& SystemName)
+void UEngineArchitecturalFramework::UnregisterCoreSystem(const FString& SystemName)
 {
-    if (!bIsInitialized)
-    {
-        return false;
-    }
-    
     if (RegisteredSystems.Contains(SystemName))
     {
         RegisteredSystems.Remove(SystemName);
-        UE_LOG(LogTemp, Log, TEXT("EngineArchitecturalFramework: Unregistered system %s"), *SystemName);
-        return true;
-    }
-    
-    return false;
-}
+        SystemPriorities.Remove(SystemName);
+        SystemPerformanceMetrics.Remove(SystemName);
+        SystemDependencies.Remove(SystemName);
 
-TArray<FEng_SystemInfo> UEngineArchitecturalFramework::GetRegisteredSystems() const
-{
-    TArray<FEng_SystemInfo> Systems;
-    RegisteredSystems.GenerateValueArray(Systems);
-    return Systems;
-}
-
-void UEngineArchitecturalFramework::UpdatePerformanceMetrics(const FEng_PerformanceMetrics& Metrics)
-{
-    CurrentMetrics = Metrics;
-    
-    // Check for performance budget violations
-    if (CurrentMetrics.FrameTime > TotalPerformanceBudget)
-    {
-        FString Warning = FString::Printf(TEXT("Performance budget exceeded: %.2fms > %.2fms"), 
-            CurrentMetrics.FrameTime, TotalPerformanceBudget);
-        ArchitecturalWarnings.AddUnique(Warning);
-    }
-    
-    ValidationFrameCounter++;
-    if (ValidationFrameCounter % 60 == 0) // Validate every 60 frames
-    {
-        UpdateValidationStatus();
+        UE_LOG(LogTemp, Warning, TEXT("EngineArchitecturalFramework: Unregistered system '%s'"), *SystemName);
     }
 }
 
-FEng_PerformanceMetrics UEngineArchitecturalFramework::GetCurrentPerformanceMetrics() const
+bool UEngineArchitecturalFramework::IsSystemRegistered(const FString& SystemName) const
 {
-    return CurrentMetrics;
+    return RegisteredSystems.Contains(SystemName);
 }
 
-EEng_ValidationStatus UEngineArchitecturalFramework::ValidateSystemArchitecture(const FString& SystemName)
+void UEngineArchitecturalFramework::UpdateSystemPerformance(const FString& SystemName, float DeltaTime, int32 ActorCount)
 {
-    if (!RegisteredSystems.Contains(SystemName))
+    if (!bEnablePerformanceMonitoring)
     {
-        return EEng_ValidationStatus::Error;
+        return;
     }
-    
-    const FEng_SystemInfo& SystemInfo = RegisteredSystems[SystemName];
-    
-    // Validate system dependencies
-    if (!ValidateSystemDependencies(SystemName))
-    {
-        return EEng_ValidationStatus::Warning;
-    }
-    
-    // Validate performance budget
-    if (!ValidatePerformanceBudget(SystemInfo))
-    {
-        return EEng_ValidationStatus::Warning;
-    }
-    
-    return EEng_ValidationStatus::Valid;
-}
 
-bool UEngineArchitecturalFramework::EnforceArchitecturalCompliance()
-{
-    bool bCompliant = true;
-    ArchitecturalErrors.Empty();
-    ArchitecturalWarnings.Empty();
-    
-    for (const auto& SystemPair : RegisteredSystems)
+    if (SystemPerformanceMetrics.Contains(SystemName))
     {
-        const FString& SystemName = SystemPair.Key;
-        const FEng_SystemInfo& SystemInfo = SystemPair.Value;
-        
-        EEng_ValidationStatus Status = ValidateSystemArchitecture(SystemName);
-        if (Status == EEng_ValidationStatus::Error || Status == EEng_ValidationStatus::Critical)
+        // Update performance metrics
+        float CurrentMetric = SystemPerformanceMetrics[SystemName];
+        float NewMetric = (CurrentMetric * 0.9f) + (DeltaTime * 0.1f); // Smoothed average
+        SystemPerformanceMetrics[SystemName] = NewMetric;
+
+        // Check performance limits
+        if (DeltaTime > MaxAllowedFrameTime || ActorCount > MaxActorsPerSystem)
         {
-            bCompliant = false;
-            FString Error = FString::Printf(TEXT("System %s failed architectural compliance"), *SystemName);
-            ArchitecturalErrors.AddUnique(Error);
-        }
-        else if (Status == EEng_ValidationStatus::Warning)
-        {
-            FString Warning = FString::Printf(TEXT("System %s has architectural warnings"), *SystemName);
-            ArchitecturalWarnings.AddUnique(Warning);
+            UE_LOG(LogTemp, Warning, TEXT("EngineArchitecturalFramework: Performance warning for system '%s' - DeltaTime: %f, ActorCount: %d"), 
+                   *SystemName, DeltaTime, ActorCount);
         }
     }
-    
-    return bCompliant;
 }
 
-bool UEngineArchitecturalFramework::ValidateSystemDependencies(const FString& SystemName)
+float UEngineArchitecturalFramework::GetSystemPerformanceMetric(const FString& SystemName) const
 {
-    if (!RegisteredSystems.Contains(SystemName))
+    if (SystemPerformanceMetrics.Contains(SystemName))
     {
-        return false;
-    }
-    
-    const FEng_SystemInfo& SystemInfo = RegisteredSystems[SystemName];
-    
-    // Check if all dependencies are registered
-    for (const FString& Dependency : SystemInfo.Dependencies)
-    {
-        if (!RegisteredSystems.Contains(Dependency))
-        {
-            FString Error = FString::Printf(TEXT("System %s depends on unregistered system %s"), 
-                *SystemName, *Dependency);
-            ArchitecturalErrors.AddUnique(Error);
-            return false;
-        }
-    }
-    
-    return true;
-}
-
-TArray<FString> UEngineArchitecturalFramework::GetSystemDependencies(const FString& SystemName)
-{
-    if (RegisteredSystems.Contains(SystemName))
-    {
-        return RegisteredSystems[SystemName].Dependencies;
-    }
-    return TArray<FString>();
-}
-
-bool UEngineArchitecturalFramework::SetSystemPerformanceBudget(const FString& SystemName, float BudgetMs)
-{
-    if (!RegisteredSystems.Contains(SystemName))
-    {
-        return false;
-    }
-    
-    if (BudgetMs <= 0.0f || BudgetMs > TotalPerformanceBudget)
-    {
-        return false;
-    }
-    
-    RegisteredSystems[SystemName].PerformanceBudget = BudgetMs;
-    return true;
-}
-
-float UEngineArchitecturalFramework::GetSystemPerformanceBudget(const FString& SystemName) const
-{
-    if (RegisteredSystems.Contains(SystemName))
-    {
-        return RegisteredSystems[SystemName].PerformanceBudget;
+        return SystemPerformanceMetrics[SystemName];
     }
     return 0.0f;
 }
 
-void UEngineArchitecturalFramework::LogArchitecturalStatus()
+bool UEngineArchitecturalFramework::ValidateSystemArchitecture(const FString& SystemName)
 {
-    UE_LOG(LogTemp, Warning, TEXT("=== ARCHITECTURAL STATUS REPORT ==="));
-    UE_LOG(LogTemp, Warning, TEXT("Registered Systems: %d"), RegisteredSystems.Num());
-    UE_LOG(LogTemp, Warning, TEXT("Architectural Warnings: %d"), ArchitecturalWarnings.Num());
-    UE_LOG(LogTemp, Warning, TEXT("Architectural Errors: %d"), ArchitecturalErrors.Num());
-    UE_LOG(LogTemp, Warning, TEXT("Current Frame Time: %.2fms"), CurrentMetrics.FrameTime);
-    UE_LOG(LogTemp, Warning, TEXT("Performance Budget: %.2fms"), TotalPerformanceBudget);
-    
+    if (!IsSystemRegistered(SystemName))
+    {
+        UE_LOG(LogTemp, Error, TEXT("EngineArchitecturalFramework: Cannot validate unregistered system: %s"), *SystemName);
+        return false;
+    }
+
+    // Check system dependencies
+    if (!AreSystemDependenciesMet(SystemName))
+    {
+        UE_LOG(LogTemp, Error, TEXT("EngineArchitecturalFramework: System dependencies not met for: %s"), *SystemName);
+        return false;
+    }
+
+    // Check performance compliance
+    if (!CheckSystemPerformance(SystemName))
+    {
+        UE_LOG(LogTemp, Warning, TEXT("EngineArchitecturalFramework: Performance issues detected for: %s"), *SystemName);
+        return false;
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("EngineArchitecturalFramework: System validation passed for: %s"), *SystemName);
+    return true;
+}
+
+void UEngineArchitecturalFramework::RunFullArchitecturalValidation()
+{
+    UE_LOG(LogTemp, Warning, TEXT("EngineArchitecturalFramework: Running full architectural validation"));
+
+    int32 PassedSystems = 0;
+    int32 FailedSystems = 0;
+
     for (const auto& SystemPair : RegisteredSystems)
     {
-        const FEng_SystemInfo& SystemInfo = SystemPair.Value;
-        UE_LOG(LogTemp, Log, TEXT("System: %s | Priority: %d | Layer: %d | Budget: %.2fms"), 
-            *SystemInfo.SystemName, 
-            (int32)SystemInfo.Priority,
-            (int32)SystemInfo.Layer,
-            SystemInfo.PerformanceBudget);
+        if (ValidateSystemArchitecture(SystemPair.Key))
+        {
+            PassedSystems++;
+        }
+        else
+        {
+            FailedSystems++;
+        }
     }
+
+    UE_LOG(LogTemp, Warning, TEXT("EngineArchitecturalFramework: Validation complete - Passed: %d, Failed: %d"), 
+           PassedSystems, FailedSystems);
 }
 
-TArray<FString> UEngineArchitecturalFramework::GetArchitecturalWarnings()
+void UEngineArchitecturalFramework::AddSystemDependency(const FString& SystemName, const FString& DependencyName)
 {
-    return ArchitecturalWarnings;
-}
-
-TArray<FString> UEngineArchitecturalFramework::GetArchitecturalErrors()
-{
-    return ArchitecturalErrors;
-}
-
-bool UEngineArchitecturalFramework::ValidateSystemLayer(const FEng_SystemInfo& SystemInfo)
-{
-    // Validate that system layer is appropriate for its priority
-    if (SystemInfo.Priority == EEng_SystemPriority::Critical && 
-        SystemInfo.Layer != EEng_ArchitecturalLayer::Engine && 
-        SystemInfo.Layer != EEng_ArchitecturalLayer::Core)
+    if (!SystemDependencies.Contains(SystemName))
     {
-        return false;
+        SystemDependencies.Add(SystemName, TArray<FString>());
     }
-    
+
+    SystemDependencies[SystemName].AddUnique(DependencyName);
+    UE_LOG(LogTemp, Log, TEXT("EngineArchitecturalFramework: Added dependency '%s' for system '%s'"), 
+           *DependencyName, *SystemName);
+}
+
+bool UEngineArchitecturalFramework::AreSystemDependenciesMet(const FString& SystemName) const
+{
+    if (!SystemDependencies.Contains(SystemName))
+    {
+        return true; // No dependencies means they are met
+    }
+
+    const TArray<FString>& Dependencies = SystemDependencies[SystemName];
+    for (const FString& Dependency : Dependencies)
+    {
+        if (!IsSystemRegistered(Dependency))
+        {
+            UE_LOG(LogTemp, Warning, TEXT("EngineArchitecturalFramework: Dependency '%s' not met for system '%s'"), 
+                   *Dependency, *SystemName);
+            return false;
+        }
+    }
+
     return true;
 }
 
-bool UEngineArchitecturalFramework::ValidateSystemPriority(const FEng_SystemInfo& SystemInfo)
+UBiomeManager* UEngineArchitecturalFramework::GetBiomeManager() const
 {
-    // Validate priority assignments are reasonable
-    return true; // For now, all priorities are valid
+    return BiomeManagerRef;
 }
 
-bool UEngineArchitecturalFramework::ValidatePerformanceBudget(const FEng_SystemInfo& SystemInfo)
+UAssetProductionManager* UEngineArchitecturalFramework::GetAssetProductionManager() const
 {
-    // Validate performance budget is within reasonable limits
-    if (SystemInfo.PerformanceBudget <= 0.0f || SystemInfo.PerformanceBudget > TotalPerformanceBudget)
+    return AssetProductionManagerRef;
+}
+
+UBuildSystemManager* UEngineArchitecturalFramework::GetBuildSystemManager() const
+{
+    return BuildSystemManagerRef;
+}
+
+UArchitectureValidationSuite* UEngineArchitecturalFramework::GetValidationSuite() const
+{
+    return ValidationSuiteRef;
+}
+
+void UEngineArchitecturalFramework::EnforcePerformanceStandards()
+{
+    if (!bEnablePerformanceMonitoring)
     {
-        return false;
+        return;
     }
-    
-    return true;
+
+    UE_LOG(LogTemp, Warning, TEXT("EngineArchitecturalFramework: Enforcing performance standards"));
+
+    for (const auto& SystemPair : RegisteredSystems)
+    {
+        const FString& SystemName = SystemPair.Key;
+        if (!CheckSystemPerformance(SystemName))
+        {
+            UE_LOG(LogTemp, Warning, TEXT("EngineArchitecturalFramework: Performance enforcement action for system: %s"), 
+                   *SystemName);
+            // Could implement automatic performance optimization here
+        }
+    }
 }
 
-void UEngineArchitecturalFramework::UpdateValidationStatus()
+void UEngineArchitecturalFramework::ValidateModuleCompliance()
 {
-    // Periodic validation of all systems
-    EnforceArchitecturalCompliance();
-    
-    // Log status if there are issues
-    if (ArchitecturalErrors.Num() > 0 || ArchitecturalWarnings.Num() > 0)
+    if (!bEnforceModuleCompliance)
     {
-        LogArchitecturalStatus();
+        return;
+    }
+
+    UE_LOG(LogTemp, Warning, TEXT("EngineArchitecturalFramework: Validating module compliance"));
+
+    // Check that all critical systems are registered
+    TArray<FString> RequiredSystems = {
+        TEXT("BiomeManager"),
+        TEXT("AssetProductionManager"),
+        TEXT("BuildSystemManager"),
+        TEXT("ArchitectureValidationSuite")
+    };
+
+    for (const FString& RequiredSystem : RequiredSystems)
+    {
+        if (!IsSystemRegistered(RequiredSystem))
+        {
+            UE_LOG(LogTemp, Error, TEXT("EngineArchitecturalFramework: Required system not registered: %s"), 
+                   *RequiredSystem);
+        }
+    }
+}
+
+void UEngineArchitecturalFramework::GenerateArchitecturalReport()
+{
+    UE_LOG(LogTemp, Warning, TEXT("=== ARCHITECTURAL FRAMEWORK REPORT ==="));
+    UE_LOG(LogTemp, Warning, TEXT("Registered Systems: %d"), RegisteredSystems.Num());
+    UE_LOG(LogTemp, Warning, TEXT("Performance Monitoring: %s"), bEnablePerformanceMonitoring ? TEXT("ENABLED") : TEXT("DISABLED"));
+    UE_LOG(LogTemp, Warning, TEXT("Module Compliance: %s"), bEnforceModuleCompliance ? TEXT("ENABLED") : TEXT("DISABLED"));
+
+    for (const auto& SystemPair : RegisteredSystems)
+    {
+        const FString& SystemName = SystemPair.Key;
+        int32 Priority = SystemPriorities.Contains(SystemName) ? SystemPriorities[SystemName] : -1;
+        float Performance = GetSystemPerformanceMetric(SystemName);
+        bool HasDependencies = SystemDependencies.Contains(SystemName);
+
+        UE_LOG(LogTemp, Warning, TEXT("System: %s | Priority: %d | Performance: %f | Dependencies: %s"), 
+               *SystemName, Priority, Performance, HasDependencies ? TEXT("YES") : TEXT("NO"));
+    }
+
+    UE_LOG(LogTemp, Warning, TEXT("=== END ARCHITECTURAL REPORT ==="));
+}
+
+void UEngineArchitecturalFramework::InitializeCoreSystemReferences()
+{
+    // Get references to core systems from the game instance
+    UGameInstance* GameInstance = GetGameInstance();
+    if (!GameInstance)
+    {
+        UE_LOG(LogTemp, Error, TEXT("EngineArchitecturalFramework: GameInstance not available"));
+        return;
+    }
+
+    // Initialize BiomeManager reference
+    BiomeManagerRef = GameInstance->GetSubsystem<UBiomeManager>();
+    if (BiomeManagerRef)
+    {
+        RegisterCoreSystem(TEXT("BiomeManager"), BiomeManagerRef, 10);
+    }
+
+    // Initialize AssetProductionManager reference
+    AssetProductionManagerRef = GameInstance->GetSubsystem<UAssetProductionManager>();
+    if (AssetProductionManagerRef)
+    {
+        RegisterCoreSystem(TEXT("AssetProductionManager"), AssetProductionManagerRef, 15);
+    }
+
+    // Initialize BuildSystemManager reference
+    BuildSystemManagerRef = GameInstance->GetSubsystem<UBuildSystemManager>();
+    if (BuildSystemManagerRef)
+    {
+        RegisterCoreSystem(TEXT("BuildSystemManager"), BuildSystemManagerRef, 20);
+    }
+
+    // Initialize ValidationSuite reference
+    ValidationSuiteRef = GameInstance->GetSubsystem<UArchitectureValidationSuite>();
+    if (ValidationSuiteRef)
+    {
+        RegisterCoreSystem(TEXT("ArchitectureValidationSuite"), ValidationSuiteRef, 5);
+    }
+}
+
+void UEngineArchitecturalFramework::ValidateSystemIntegrity()
+{
+    UE_LOG(LogTemp, Warning, TEXT("EngineArchitecturalFramework: Validating system integrity"));
+
+    // Check that critical systems are available
+    if (!BiomeManagerRef)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("EngineArchitecturalFramework: BiomeManager not available"));
+    }
+
+    if (!AssetProductionManagerRef)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("EngineArchitecturalFramework: AssetProductionManager not available"));
+    }
+
+    if (!BuildSystemManagerRef)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("EngineArchitecturalFramework: BuildSystemManager not available"));
+    }
+
+    if (!ValidationSuiteRef)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("EngineArchitecturalFramework: ArchitectureValidationSuite not available"));
+    }
+}
+
+void UEngineArchitecturalFramework::LogArchitecturalStatus()
+{
+    UE_LOG(LogTemp, Warning, TEXT("EngineArchitecturalFramework: Current Status"));
+    UE_LOG(LogTemp, Warning, TEXT("- Registered Systems: %d"), RegisteredSystems.Num());
+    UE_LOG(LogTemp, Warning, TEXT("- Performance Monitoring: %s"), bEnablePerformanceMonitoring ? TEXT("ON") : TEXT("OFF"));
+    UE_LOG(LogTemp, Warning, TEXT("- Module Compliance: %s"), bEnforceModuleCompliance ? TEXT("ON") : TEXT("OFF"));
+    UE_LOG(LogTemp, Warning, TEXT("- Dependency Validation: %s"), bValidateSystemDependencies ? TEXT("ON") : TEXT("OFF"));
+}
+
+bool UEngineArchitecturalFramework::CheckSystemPerformance(const FString& SystemName) const
+{
+    if (!SystemPerformanceMetrics.Contains(SystemName))
+    {
+        return true; // No metrics means no problems
+    }
+
+    float PerformanceMetric = SystemPerformanceMetrics[SystemName];
+    return PerformanceMetric <= MaxAllowedFrameTime;
+}
+
+void UEngineArchitecturalFramework::EnforceSystemLimits()
+{
+    // This could implement automatic system throttling or optimization
+    // For now, just log warnings when limits are exceeded
+    for (const auto& SystemPair : RegisteredSystems)
+    {
+        const FString& SystemName = SystemPair.Key;
+        if (!CheckSystemPerformance(SystemName))
+        {
+            UE_LOG(LogTemp, Warning, TEXT("EngineArchitecturalFramework: System '%s' exceeding performance limits"), 
+                   *SystemName);
+        }
     }
 }
