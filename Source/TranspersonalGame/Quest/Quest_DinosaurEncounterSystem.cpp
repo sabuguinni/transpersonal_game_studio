@@ -1,290 +1,313 @@
 #include "Quest_DinosaurEncounterSystem.h"
-#include "Components/SphereComponent.h"
-#include "Components/SceneComponent.h"
-#include "Engine/World.h"
-#include "GameFramework/Character.h"
-#include "Kismet/GameplayStatics.h"
 #include "Engine/Engine.h"
+#include "Engine/World.h"
+#include "Kismet/GameplayStatics.h"
+#include "GameFramework/PlayerController.h"
+#include "Components/StaticMeshComponent.h"
+#include "UObject/ConstructorHelpers.h"
 
 AQuest_DinosaurEncounterSystem::AQuest_DinosaurEncounterSystem()
 {
     PrimaryActorTick.bCanEverTick = true;
 
-    // Create root component
-    RootSceneComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootSceneComponent"));
-    RootComponent = RootSceneComponent;
+    // Initialize encounter system parameters
+    EncounterCheckRadius = 2000.0f;
+    EncounterSpawnRate = 30.0f;
+    MaxActiveEncounters = 5;
+    EncounterTimer = 0.0f;
+    CurrentDifficulty = 1.0f;
+    EncounterCounter = 0;
 
-    // Create detection sphere
-    DetectionSphere = CreateDefaultSubobject<USphereComponent>(TEXT("DetectionSphere"));
-    DetectionSphere->SetupAttachment(RootComponent);
-    DetectionSphere->SetSphereRadius(1000.0f);
-    DetectionSphere->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
-    DetectionSphere->SetCollisionResponseToAllChannels(ECR_Ignore);
-    DetectionSphere->SetCollisionResponseToChannel(ECC_Pawn, ECR_Overlap);
-
-    // Initialize default values
-    EncounterCheckInterval = 2.0f;
-    MaxSimultaneousEncounters = 3;
-    bDebugMode = true;
-    bQuestEncounterActive = false;
-    CurrentQuestObjective = TEXT("Explore the prehistoric world");
-    LastEncounterCheckTime = 0.0f;
-    ActiveEncounterCount = 0;
-
-    // Create default encounters
-    ActiveEncounters.Empty();
-    
-    // Peaceful Brachiosaurus encounter
-    FQuest_DinosaurEncounter BrachioEncounter;
-    BrachioEncounter.Species = EQuest_DinosaurSpecies::Brachiosaurus;
-    BrachioEncounter.EncounterType = EQuest_EncounterType::Feeding;
-    BrachioEncounter.Location = FVector(2000.0f, 1000.0f, 100.0f);
-    BrachioEncounter.TriggerRadius = 800.0f;
-    BrachioEncounter.EncounterDescription = TEXT("Observe the massive Brachiosaurus feeding on tall trees");
-    BrachioEncounter.bIsActive = true;
-    ActiveEncounters.Add(BrachioEncounter);
-
-    // Territorial Raptor pack
-    FQuest_DinosaurEncounter RaptorEncounter;
-    RaptorEncounter.Species = EQuest_DinosaurSpecies::Raptor;
-    RaptorEncounter.EncounterType = EQuest_EncounterType::Territorial;
-    RaptorEncounter.Location = FVector(-1500.0f, 800.0f, 50.0f);
-    RaptorEncounter.TriggerRadius = 600.0f;
-    RaptorEncounter.EncounterDescription = TEXT("Avoid the territorial Velociraptor pack");
-    RaptorEncounter.bIsActive = true;
-    ActiveEncounters.Add(RaptorEncounter);
-
-    // Migrating Triceratops herd
-    FQuest_DinosaurEncounter TriceratopsEncounter;
-    TriceratopsEncounter.Species = EQuest_DinosaurSpecies::Triceratops;
-    TriceratopsEncounter.EncounterType = EQuest_EncounterType::Migration;
-    TriceratopsEncounter.Location = FVector(500.0f, -2000.0f, 80.0f);
-    TriceratopsEncounter.TriggerRadius = 700.0f;
-    TriceratopsEncounter.EncounterDescription = TEXT("Follow the migrating Triceratops herd");
-    TriceratopsEncounter.bIsActive = true;
-    ActiveEncounters.Add(TriceratopsEncounter);
+    // Set up root component
+    RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootComponent"));
 }
 
 void AQuest_DinosaurEncounterSystem::BeginPlay()
 {
     Super::BeginPlay();
     
-    if (bDebugMode)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("DinosaurEncounterSystem: Started with %d encounters"), ActiveEncounters.Num());
-    }
-
-    // Initialize all encounters
-    for (int32 i = 0; i < ActiveEncounters.Num(); ++i)
-    {
-        if (ActiveEncounters[i].bIsActive)
-        {
-            SpawnDinosaurAtLocation(ActiveEncounters[i].Species, ActiveEncounters[i].Location);
-        }
-    }
+    InitializeEncounterSystem();
+    LoadEncounterData();
+    
+    UE_LOG(LogTemp, Warning, TEXT("Quest_DinosaurEncounterSystem: System initialized with %d max encounters"), MaxActiveEncounters);
 }
 
 void AQuest_DinosaurEncounterSystem::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
-
-    // Check for encounters at regular intervals
-    if (GetWorld()->GetTimeSeconds() - LastEncounterCheckTime > EncounterCheckInterval)
+    
+    EncounterTimer += DeltaTime;
+    
+    UpdateEncounterStates(DeltaTime);
+    CheckEncounterTriggers();
+    
+    // Spawn new encounters based on timer
+    if (EncounterTimer >= EncounterSpawnRate && ActiveEncounters.Num() < MaxActiveEncounters)
     {
-        CheckForPlayerEncounters();
-        LastEncounterCheckTime = GetWorld()->GetTimeSeconds();
+        APlayerController* PC = UGameplayStatics::GetPlayerController(GetWorld(), 0);
+        if (PC && PC->GetPawn())
+        {
+            FVector PlayerLocation = PC->GetPawn()->GetActorLocation();
+            TriggerRandomEncounter(PlayerLocation);
+        }
+        EncounterTimer = 0.0f;
+    }
+    
+    // Clean up completed encounters every 60 seconds
+    if (FMath::Fmod(GetWorld()->GetTimeSeconds(), 60.0f) < DeltaTime)
+    {
+        CleanupCompletedEncounters();
     }
 }
 
-void AQuest_DinosaurEncounterSystem::CreateDinosaurEncounter(EQuest_DinosaurSpecies Species, EQuest_EncounterType Type, FVector Location)
+void AQuest_DinosaurEncounterSystem::SpawnDinosaurEncounter(const FString& Species, EQuest_EncounterType Type, const FVector& Location)
 {
-    if (ActiveEncounters.Num() >= MaxSimultaneousEncounters)
+    if (ActiveEncounters.Num() >= MaxActiveEncounters)
     {
-        if (bDebugMode)
-        {
-            UE_LOG(LogTemp, Warning, TEXT("DinosaurEncounterSystem: Maximum encounters reached"));
-        }
+        UE_LOG(LogTemp, Warning, TEXT("Quest_DinosaurEncounterSystem: Maximum encounters reached, cannot spawn new encounter"));
         return;
     }
 
     FQuest_DinosaurEncounter NewEncounter;
-    NewEncounter.Species = Species;
+    NewEncounter.DinosaurSpecies = Species;
     NewEncounter.EncounterType = Type;
-    NewEncounter.Location = Location;
-    NewEncounter.TriggerRadius = 500.0f;
-    NewEncounter.EncounterDescription = FString::Printf(TEXT("Encounter with %s - %s"), 
-        *GetSpeciesName(Species), *GetEncounterTypeName(Type));
-    NewEncounter.bIsActive = true;
+    NewEncounter.SpawnLocation = Location;
+    NewEncounter.bIsActiveEncounter = true;
+    
+    // Set encounter parameters based on species and type
+    if (Species == TEXT("TRex"))
+    {
+        NewEncounter.DinosaurCount = 1;
+        NewEncounter.ThreatLevel = 8.0f * CurrentDifficulty;
+        NewEncounter.RewardPoints = 200.0f * CurrentDifficulty;
+    }
+    else if (Species == TEXT("Velociraptor"))
+    {
+        NewEncounter.DinosaurCount = FMath::RandRange(2, 4);
+        NewEncounter.ThreatLevel = 6.0f * CurrentDifficulty;
+        NewEncounter.RewardPoints = 150.0f * CurrentDifficulty;
+    }
+    else if (Species == TEXT("Triceratops"))
+    {
+        NewEncounter.DinosaurCount = FMath::RandRange(1, 2);
+        NewEncounter.ThreatLevel = 5.0f * CurrentDifficulty;
+        NewEncounter.RewardPoints = 120.0f * CurrentDifficulty;
+    }
+    else
+    {
+        NewEncounter.DinosaurCount = 1;
+        NewEncounter.ThreatLevel = 4.0f * CurrentDifficulty;
+        NewEncounter.RewardPoints = 100.0f * CurrentDifficulty;
+    }
 
     ActiveEncounters.Add(NewEncounter);
-    SpawnDinosaurAtLocation(Species, Location);
-
-    if (bDebugMode)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("DinosaurEncounterSystem: Created %s encounter at %s"), 
-            *GetSpeciesName(Species), *Location.ToString());
-    }
-}
-
-void AQuest_DinosaurEncounterSystem::TriggerEncounter(int32 EncounterIndex)
-{
-    if (!ActiveEncounters.IsValidIndex(EncounterIndex))
-    {
-        return;
-    }
-
-    const FQuest_DinosaurEncounter& Encounter = ActiveEncounters[EncounterIndex];
     
-    if (!Encounter.bIsActive)
-    {
-        return;
-    }
-
-    // Broadcast encounter event
-    OnEncounterTriggered.Broadcast(Encounter.Species, Encounter.EncounterType);
-
-    // Play encounter audio
-    PlayEncounterAudio(Encounter.Species, Encounter.EncounterType);
-
-    // Update quest objective
-    FString ObjectiveText = FString::Printf(TEXT("Survive the %s encounter"), *GetSpeciesName(Encounter.Species));
-    UpdateQuestObjective(ObjectiveText);
-
-    // Display encounter message
-    if (GEngine)
-    {
-        GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Yellow, 
-            FString::Printf(TEXT("ENCOUNTER: %s"), *Encounter.EncounterDescription));
-    }
-
-    if (bDebugMode)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("DinosaurEncounterSystem: Triggered encounter %d - %s"), 
-            EncounterIndex, *Encounter.EncounterDescription);
-    }
-
-    bQuestEncounterActive = true;
-}
-
-void AQuest_DinosaurEncounterSystem::CompleteEncounter(int32 EncounterIndex)
-{
-    if (!ActiveEncounters.IsValidIndex(EncounterIndex))
-    {
-        return;
-    }
-
-    ActiveEncounters[EncounterIndex].bIsActive = false;
-    bQuestEncounterActive = false;
-
-    // Update quest objective
-    UpdateQuestObjective(TEXT("Continue exploring the prehistoric world"));
-
-    // Display completion message
-    if (GEngine)
-    {
-        GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Green, 
-            TEXT("Encounter completed successfully!"));
-    }
-
-    if (bDebugMode)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("DinosaurEncounterSystem: Completed encounter %d"), EncounterIndex);
-    }
-}
-
-bool AQuest_DinosaurEncounterSystem::IsPlayerInEncounterRange(const FQuest_DinosaurEncounter& Encounter)
-{
-    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
-    if (!PlayerPawn)
-    {
-        return false;
-    }
-
-    float Distance = FVector::Dist(PlayerPawn->GetActorLocation(), Encounter.Location);
-    return Distance <= Encounter.TriggerRadius;
-}
-
-void AQuest_DinosaurEncounterSystem::UpdateQuestObjective(const FString& NewObjective)
-{
-    CurrentQuestObjective = NewObjective;
-    OnObjectiveUpdated.Broadcast(NewObjective);
-
-    if (bDebugMode)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("DinosaurEncounterSystem: Updated objective - %s"), *NewObjective);
-    }
-}
-
-void AQuest_DinosaurEncounterSystem::PlayEncounterAudio(EQuest_DinosaurSpecies Species, EQuest_EncounterType Type)
-{
-    // Audio implementation would go here
-    // For now, just log the audio that should be played
-    FString AudioDescription = FString::Printf(TEXT("%s %s audio"), 
-        *GetSpeciesName(Species), *GetEncounterTypeName(Type));
+    // Set up reward for this encounter
+    FQuest_EncounterReward Reward;
+    Reward.ExperiencePoints = FMath::RoundToInt(NewEncounter.RewardPoints * 0.5f);
+    Reward.SurvivalPoints = NewEncounter.RewardPoints * 0.3f;
     
-    if (bDebugMode)
+    if (Type == EQuest_EncounterType::Hunt)
     {
-        UE_LOG(LogTemp, Warning, TEXT("DinosaurEncounterSystem: Playing audio - %s"), *AudioDescription);
+        Reward.ItemRewards.Add(TEXT("Dinosaur_Meat"));
+        Reward.ItemRewards.Add(TEXT("Dinosaur_Hide"));
     }
+    else if (Type == EQuest_EncounterType::Observe)
+    {
+        Reward.ItemRewards.Add(TEXT("Knowledge_Points"));
+    }
+    
+    FString EncounterId = GenerateEncounterId();
+    EncounterRewards.Add(EncounterId, Reward);
+    
+    UE_LOG(LogTemp, Warning, TEXT("Quest_DinosaurEncounterSystem: Spawned %s encounter at %s"), *Species, *Location.ToString());
 }
 
-void AQuest_DinosaurEncounterSystem::CheckForPlayerEncounters()
+void AQuest_DinosaurEncounterSystem::CompleteEncounter(const FString& EncounterId)
 {
-    for (int32 i = 0; i < ActiveEncounters.Num(); ++i)
+    // Find and remove the encounter
+    for (int32 i = ActiveEncounters.Num() - 1; i >= 0; i--)
     {
-        if (ActiveEncounters[i].bIsActive && IsPlayerInEncounterRange(ActiveEncounters[i]))
+        if (ActiveEncounters[i].bIsActiveEncounter)
         {
-            TriggerEncounter(i);
+            ActiveEncounters[i].bIsActiveEncounter = false;
+            
+            // Award rewards
+            if (EncounterRewards.Contains(EncounterId))
+            {
+                FQuest_EncounterReward Reward = EncounterRewards[EncounterId];
+                UE_LOG(LogTemp, Warning, TEXT("Quest_DinosaurEncounterSystem: Encounter completed! Awarded %d XP, %.1f survival points"), 
+                       Reward.ExperiencePoints, Reward.SurvivalPoints);
+                
+                // Here you would integrate with player progression system
+                // For now, just log the rewards
+                for (const FString& Item : Reward.ItemRewards)
+                {
+                    UE_LOG(LogTemp, Warning, TEXT("Quest_DinosaurEncounterSystem: Awarded item: %s"), *Item);
+                }
+            }
+            break;
+        }
+    }
+    
+    SaveEncounterProgress();
+}
+
+bool AQuest_DinosaurEncounterSystem::CheckPlayerNearEncounter(const FVector& PlayerLocation, float CheckDistance)
+{
+    for (const FQuest_DinosaurEncounter& Encounter : ActiveEncounters)
+    {
+        if (Encounter.bIsActiveEncounter)
+        {
+            float Distance = FVector::Dist(PlayerLocation, Encounter.SpawnLocation);
+            if (Distance <= CheckDistance)
+            {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+TArray<FQuest_DinosaurEncounter> AQuest_DinosaurEncounterSystem::GetActiveEncounters() const
+{
+    TArray<FQuest_DinosaurEncounter> Active;
+    for (const FQuest_DinosaurEncounter& Encounter : ActiveEncounters)
+    {
+        if (Encounter.bIsActiveEncounter)
+        {
+            Active.Add(Encounter);
+        }
+    }
+    return Active;
+}
+
+void AQuest_DinosaurEncounterSystem::TriggerRandomEncounter(const FVector& PlayerLocation)
+{
+    // Define possible encounter types and species
+    TArray<FString> DinosaurSpecies = {TEXT("TRex"), TEXT("Velociraptor"), TEXT("Triceratops"), TEXT("Parasaurolophus")};
+    TArray<EQuest_EncounterType> EncounterTypes = {EQuest_EncounterType::Hunt, EQuest_EncounterType::Observe, EQuest_EncounterType::Escape};
+    
+    // Select random species and type
+    FString SelectedSpecies = DinosaurSpecies[FMath::RandRange(0, DinosaurSpecies.Num() - 1)];
+    EQuest_EncounterType SelectedType = EncounterTypes[FMath::RandRange(0, EncounterTypes.Num() - 1)];
+    
+    // Generate spawn location around player (500-1500 units away)
+    float SpawnDistance = FMath::RandRange(500.0f, 1500.0f);
+    float SpawnAngle = FMath::RandRange(0.0f, 360.0f);
+    
+    FVector SpawnOffset = FVector(
+        FMath::Cos(FMath::DegreesToRadians(SpawnAngle)) * SpawnDistance,
+        FMath::Sin(FMath::DegreesToRadians(SpawnAngle)) * SpawnDistance,
+        0.0f
+    );
+    
+    FVector SpawnLocation = PlayerLocation + SpawnOffset;
+    SpawnLocation.Z = 100.0f; // Ensure spawn above ground
+    
+    SpawnDinosaurEncounter(SelectedSpecies, SelectedType, SpawnLocation);
+}
+
+void AQuest_DinosaurEncounterSystem::SetEncounterDifficulty(float NewDifficulty)
+{
+    CurrentDifficulty = FMath::Clamp(NewDifficulty, 0.5f, 3.0f);
+    UE_LOG(LogTemp, Warning, TEXT("Quest_DinosaurEncounterSystem: Difficulty set to %.2f"), CurrentDifficulty);
+}
+
+FQuest_EncounterReward AQuest_DinosaurEncounterSystem::GetEncounterReward(const FString& EncounterId) const
+{
+    if (EncounterRewards.Contains(EncounterId))
+    {
+        return EncounterRewards[EncounterId];
+    }
+    return FQuest_EncounterReward();
+}
+
+void AQuest_DinosaurEncounterSystem::InitializeEncounterSystem()
+{
+    ActiveEncounters.Empty();
+    EncounterRewards.Empty();
+    EncounterTimer = 0.0f;
+    EncounterCounter = 0;
+    
+    UE_LOG(LogTemp, Warning, TEXT("Quest_DinosaurEncounterSystem: Encounter system initialized"));
+}
+
+void AQuest_DinosaurEncounterSystem::CleanupCompletedEncounters()
+{
+    int32 RemovedCount = 0;
+    
+    // Remove inactive encounters
+    for (int32 i = ActiveEncounters.Num() - 1; i >= 0; i--)
+    {
+        if (!ActiveEncounters[i].bIsActiveEncounter)
+        {
+            ActiveEncounters.RemoveAt(i);
+            RemovedCount++;
+        }
+    }
+    
+    if (RemovedCount > 0)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Quest_DinosaurEncounterSystem: Cleaned up %d completed encounters"), RemovedCount);
+    }
+}
+
+void AQuest_DinosaurEncounterSystem::UpdateEncounterStates(float DeltaTime)
+{
+    // Update encounter logic here
+    // For now, just ensure encounters stay active
+    for (FQuest_DinosaurEncounter& Encounter : ActiveEncounters)
+    {
+        if (Encounter.bIsActiveEncounter)
+        {
+            // Update encounter state based on player proximity, time, etc.
+            // This is where you'd add more complex encounter behavior
         }
     }
 }
 
-void AQuest_DinosaurEncounterSystem::SpawnDinosaurAtLocation(EQuest_DinosaurSpecies Species, FVector Location)
+void AQuest_DinosaurEncounterSystem::CheckEncounterTriggers()
 {
-    // For now, we'll use basic shapes as placeholders
-    // In a full implementation, this would spawn actual dinosaur actors
+    APlayerController* PC = UGameplayStatics::GetPlayerController(GetWorld(), 0);
+    if (!PC || !PC->GetPawn())
+    {
+        return;
+    }
     
-    if (bDebugMode)
+    FVector PlayerLocation = PC->GetPawn()->GetActorLocation();
+    
+    // Check if player is near any encounters
+    for (FQuest_DinosaurEncounter& Encounter : ActiveEncounters)
     {
-        UE_LOG(LogTemp, Warning, TEXT("DinosaurEncounterSystem: Spawning %s at %s"), 
-            *GetSpeciesName(Species), *Location.ToString());
+        if (Encounter.bIsActiveEncounter)
+        {
+            float Distance = FVector::Dist(PlayerLocation, Encounter.SpawnLocation);
+            if (Distance <= EncounterCheckRadius)
+            {
+                // Trigger encounter interaction
+                UE_LOG(LogTemp, Warning, TEXT("Quest_DinosaurEncounterSystem: Player near %s encounter at distance %.1f"), 
+                       *Encounter.DinosaurSpecies, Distance);
+            }
+        }
     }
 }
 
-FString AQuest_DinosaurEncounterSystem::GetSpeciesName(EQuest_DinosaurSpecies Species)
+FString AQuest_DinosaurEncounterSystem::GenerateEncounterId() const
 {
-    switch (Species)
-    {
-        case EQuest_DinosaurSpecies::TRex:
-            return TEXT("Tyrannosaurus Rex");
-        case EQuest_DinosaurSpecies::Raptor:
-            return TEXT("Velociraptor");
-        case EQuest_DinosaurSpecies::Triceratops:
-            return TEXT("Triceratops");
-        case EQuest_DinosaurSpecies::Brachiosaurus:
-            return TEXT("Brachiosaurus");
-        case EQuest_DinosaurSpecies::Stegosaurus:
-            return TEXT("Stegosaurus");
-        default:
-            return TEXT("Unknown Species");
-    }
+    return FString::Printf(TEXT("Encounter_%d_%d"), EncounterCounter, FMath::RandRange(1000, 9999));
 }
 
-FString AQuest_DinosaurEncounterSystem::GetEncounterTypeName(EQuest_EncounterType Type)
+void AQuest_DinosaurEncounterSystem::LoadEncounterData()
 {
-    switch (Type)
-    {
-        case EQuest_EncounterType::Peaceful:
-            return TEXT("Peaceful");
-        case EQuest_EncounterType::Territorial:
-            return TEXT("Territorial");
-        case EQuest_EncounterType::Hunting:
-            return TEXT("Hunting");
-        case EQuest_EncounterType::Feeding:
-            return TEXT("Feeding");
-        case EQuest_EncounterType::Migration:
-            return TEXT("Migration");
-        default:
-            return TEXT("Unknown Type");
-    }
+    // Load encounter configuration from data tables or config files
+    // For now, use default values
+    UE_LOG(LogTemp, Warning, TEXT("Quest_DinosaurEncounterSystem: Encounter data loaded"));
+}
+
+void AQuest_DinosaurEncounterSystem::SaveEncounterProgress()
+{
+    // Save encounter progress to persistent storage
+    // For now, just log the save operation
+    UE_LOG(LogTemp, Warning, TEXT("Quest_DinosaurEncounterSystem: Encounter progress saved"));
 }
