@@ -1,312 +1,202 @@
 #include "Narr_DialogueSystem.h"
-#include "Components/SphereComponent.h"
-#include "Components/StaticMeshComponent.h"
+#include "Components/SceneComponent.h"
+#include "Components/AudioComponent.h"
 #include "Engine/Engine.h"
-#include "GameFramework/Character.h"
-#include "Kismet/GameplayStatics.h"
+#include "TimerManager.h"
+#include "Sound/SoundBase.h"
 
 ANarr_DialogueSystem::ANarr_DialogueSystem()
 {
-    PrimaryActorTick.bCanEverTick = false;
+    PrimaryActorTick.bCanEverTick = true;
 
-    // Initialize components
-    SetupInteractionComponents();
+    // Create root scene component
+    RootSceneComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootSceneComponent"));
+    RootComponent = RootSceneComponent;
+
+    // Create audio component for dialogue playback
+    AudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("AudioComponent"));
+    AudioComponent->SetupAttachment(RootComponent);
+    AudioComponent->bAutoActivate = false;
 
     // Initialize default values
-    InteractionRange = 300.0f;
-    bIsActive = true;
-    CurrentSequenceIndex = -1;
-    CurrentLineIndex = -1;
+    DefaultDialogueVolume = 1.0f;
+    bGlobalSubtitlesEnabled = true;
     bIsPlayingDialogue = false;
-
-    // Initialize default context
-    CurrentContext.LocationName = TEXT("Ancient Valley");
-    CurrentContext.BiomeType = TEXT("Savana");
-    CurrentContext.DangerLevel = 0.3f;
-    CurrentContext.AvailableResources.Add(TEXT("Fresh Water"));
-    CurrentContext.AvailableResources.Add(TEXT("Stone Tools"));
+    CurrentDialogueIndex = 0;
 }
 
 void ANarr_DialogueSystem::BeginPlay()
 {
     Super::BeginPlay();
-    
-    InitializeDefaultDialogue();
-    ProcessDialogueTriggers();
-}
 
-void ANarr_DialogueSystem::SetupInteractionComponents()
-{
-    // Create root component
-    RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootComponent"));
-
-    // Create interaction sphere
-    InteractionSphere = CreateDefaultSubobject<USphereComponent>(TEXT("InteractionSphere"));
-    InteractionSphere->SetupAttachment(RootComponent);
-    InteractionSphere->SetSphereRadius(InteractionRange);
-    InteractionSphere->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
-    InteractionSphere->SetCollisionResponseToAllChannels(ECR_Ignore);
-    InteractionSphere->SetCollisionResponseToChannel(ECC_Pawn, ECR_Overlap);
-
-    // Create dialogue marker mesh
-    DialogueMarker = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("DialogueMarker"));
-    DialogueMarker->SetupAttachment(RootComponent);
-    DialogueMarker->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-
-    // Bind overlap events
-    InteractionSphere->OnComponentBeginOverlap.AddDynamic(this, &ANarr_DialogueSystem::OnInteractionSphereBeginOverlap);
-    InteractionSphere->OnComponentEndOverlap.AddDynamic(this, &ANarr_DialogueSystem::OnInteractionSphereEndOverlap);
-}
-
-void ANarr_DialogueSystem::InitializeDefaultDialogue()
-{
-    // Create default dialogue sequences for different contexts
-    FNarr_DialogueSequence ValleyIntroSequence;
-    ValleyIntroSequence.SequenceID = TEXT("valley_introduction");
-    ValleyIntroSequence.bRepeatable = false;
-    ValleyIntroSequence.TriggerCondition = TEXT("first_visit");
-
-    // Add dialogue lines
-    FNarr_DialogueLine IntroLine1;
-    IntroLine1.SpeakerName = TEXT("Valley Narrator");
-    IntroLine1.DialogueText = FText::FromString(TEXT("The ancient valley holds many secrets, survivor. Listen carefully to the wind - it carries the scent of predators and the promise of discovery."));
-    IntroLine1.Duration = 8.0f;
-    ValleyIntroSequence.DialogueLines.Add(IntroLine1);
-
-    FNarr_DialogueLine IntroLine2;
-    IntroLine2.SpeakerName = TEXT("Valley Narrator");
-    IntroLine2.DialogueText = FText::FromString(TEXT("Your survival depends on understanding the language of this primal world. Every sound, every movement tells a story."));
-    IntroLine2.Duration = 6.0f;
-    ValleyIntroSequence.DialogueLines.Add(IntroLine2);
-
-    DialogueSequences.Add(ValleyIntroSequence);
-
-    // Create warning sequence for dangerous areas
-    FNarr_DialogueSequence DangerWarningSequence;
-    DangerWarningSequence.SequenceID = TEXT("danger_warning");
-    DangerWarningSequence.bRepeatable = true;
-    DangerWarningSequence.TriggerCondition = TEXT("high_danger_area");
-
-    FNarr_DialogueLine WarningLine;
-    WarningLine.SpeakerName = TEXT("Survival Guide");
-    WarningLine.DialogueText = FText::FromString(TEXT("Warning! Pack hunters detected in the eastern ravines. Their coordinated movements suggest they are tracking prey. Stay low, move quietly."));
-    WarningLine.Duration = 7.0f;
-    DangerWarningSequence.DialogueLines.Add(WarningLine);
-
-    DialogueSequences.Add(DangerWarningSequence);
-
-    // Create discovery sequence for lore points
-    FNarr_DialogueSequence DiscoverySequence;
-    DiscoverySequence.SequenceID = TEXT("ancient_discovery");
-    DiscoverySequence.bRepeatable = false;
-    DiscoverySequence.TriggerCondition = TEXT("lore_interaction");
-
-    FNarr_DialogueLine DiscoveryLine;
-    DiscoveryLine.SpeakerName = TEXT("Ancient Chronicler");
-    DiscoveryLine.DialogueText = FText::FromString(TEXT("You have discovered ancient markings on this stone. The symbols speak of a time when giants walked the earth and survival meant understanding their ways."));
-    DiscoveryLine.Duration = 9.0f;
-    DiscoverySequence.DialogueLines.Add(DiscoveryLine);
-
-    DialogueSequences.Add(DiscoverySequence);
-}
-
-void ANarr_DialogueSystem::StartDialogueSequence(const FString& SequenceID)
-{
-    if (bIsPlayingDialogue)
+    // Bind audio finished delegate
+    if (AudioComponent)
     {
-        return; // Already playing dialogue
+        AudioComponent->OnAudioFinished.AddDynamic(this, &ANarr_DialogueSystem::OnAudioFinished);
+        AudioComponent->SetVolumeMultiplier(DefaultDialogueVolume);
     }
 
-    FNarr_DialogueSequence* Sequence = FindDialogueSequence(SequenceID);
-    if (!Sequence || Sequence->DialogueLines.Num() == 0)
+    // Initialize story events
+    for (FNarr_StoryEvent& Event : StoryEvents)
     {
-        UE_LOG(LogTemp, Warning, TEXT("Dialogue sequence not found or empty: %s"), *SequenceID);
-        return;
+        Event.bHasBeenTriggered = false;
     }
+}
 
-    // Find sequence index
-    for (int32 i = 0; i < DialogueSequences.Num(); i++)
+void ANarr_DialogueSystem::Tick(float DeltaTime)
+{
+    Super::Tick(DeltaTime);
+
+    // Update dialogue system state
+    if (bIsPlayingDialogue && AudioComponent && !AudioComponent->IsPlaying())
     {
-        if (DialogueSequences[i].SequenceID == SequenceID)
+        // Check if dialogue finished naturally
+        if (GetWorld() && !GetWorld()->GetTimerManager().IsTimerActive(DialogueTimerHandle))
         {
-            CurrentSequenceIndex = i;
+            PlayNextDialogue();
+        }
+    }
+}
+
+void ANarr_DialogueSystem::TriggerStoryEvent(const FString& EventID)
+{
+    for (FNarr_StoryEvent& Event : StoryEvents)
+    {
+        if (Event.EventID == EventID)
+        {
+            // Check if event can be triggered
+            if (Event.bOneTimeOnly && Event.bHasBeenTriggered)
+            {
+                return;
+            }
+
+            // Mark as triggered
+            Event.bHasBeenTriggered = true;
+
+            // Play dialogue sequence
+            if (Event.DialogueSequence.Num() > 0)
+            {
+                CurrentDialogueSequence = Event.DialogueSequence;
+                CurrentDialogueIndex = 0;
+                PlayNextDialogue();
+            }
+
+            // Broadcast event
+            OnStoryEventTriggered(Event);
+
             break;
         }
     }
+}
 
-    CurrentLineIndex = 0;
+void ANarr_DialogueSystem::PlayDialogueLine(const FNarr_DialogueLine& DialogueLine)
+{
+    if (bIsPlayingDialogue)
+    {
+        StopCurrentDialogue();
+    }
+
+    CurrentDialogue = DialogueLine;
     bIsPlayingDialogue = true;
 
-    PlayNextDialogueLine();
+    // Play audio if available
+    if (DialogueLine.AudioClip && AudioComponent)
+    {
+        AudioComponent->SetSound(DialogueLine.AudioClip);
+        AudioComponent->Play();
+    }
+
+    // Set timer for dialogue duration
+    if (GetWorld())
+    {
+        GetWorld()->GetTimerManager().SetTimer(
+            DialogueTimerHandle,
+            this,
+            &ANarr_DialogueSystem::OnAudioFinished,
+            DialogueLine.Duration,
+            false
+        );
+    }
+
+    // Broadcast dialogue started
+    OnDialogueStarted(DialogueLine);
+
+    // Log dialogue for debugging
+    UE_LOG(LogTemp, Log, TEXT("Playing dialogue: %s - %s"), 
+           *DialogueLine.SpeakerName, 
+           *DialogueLine.DialogueText.ToString());
 }
 
-void ANarr_DialogueSystem::PlayNextDialogueLine()
+void ANarr_DialogueSystem::StopCurrentDialogue()
 {
-    if (!bIsPlayingDialogue || CurrentSequenceIndex < 0 || CurrentSequenceIndex >= DialogueSequences.Num())
+    if (bIsPlayingDialogue)
     {
-        return;
-    }
+        bIsPlayingDialogue = false;
 
-    FNarr_DialogueSequence& CurrentSequence = DialogueSequences[CurrentSequenceIndex];
-    
-    if (CurrentLineIndex >= CurrentSequence.DialogueLines.Num())
-    {
-        // End of sequence
-        StopDialogue();
-        return;
-    }
-
-    FNarr_DialogueLine& CurrentLine = CurrentSequence.DialogueLines[CurrentLineIndex];
-    
-    // Display dialogue (in a real game, this would trigger UI)
-    UE_LOG(LogTemp, Log, TEXT("[%s]: %s"), *CurrentLine.SpeakerName, *CurrentLine.DialogueText.ToString());
-    
-    // In a real implementation, you would:
-    // 1. Display UI with dialogue text
-    // 2. Play audio file if available
-    // 3. Set up timer for auto-advance or wait for player input
-    
-    CurrentLineIndex++;
-    
-    // Auto-advance for now (in real game, this would be player-controlled)
-    FTimerHandle TimerHandle;
-    GetWorld()->GetTimerManager().SetTimer(TimerHandle, this, &ANarr_DialogueSystem::PlayNextDialogueLine, CurrentLine.Duration, false);
-}
-
-void ANarr_DialogueSystem::StopDialogue()
-{
-    bIsPlayingDialogue = false;
-    CurrentSequenceIndex = -1;
-    CurrentLineIndex = -1;
-    
-    // Clear any active timers
-    GetWorld()->GetTimerManager().ClearAllTimersForObject(this);
-}
-
-bool ANarr_DialogueSystem::CanInteract() const
-{
-    return bIsActive && !bIsPlayingDialogue;
-}
-
-void ANarr_DialogueSystem::UpdateNarrativeContext(const FNarr_NarrativeContext& NewContext)
-{
-    CurrentContext = NewContext;
-    ProcessDialogueTriggers();
-}
-
-FNarr_NarrativeContext ANarr_DialogueSystem::GetCurrentContext() const
-{
-    return CurrentContext;
-}
-
-void ANarr_DialogueSystem::AddDiscoveredLore(const FString& LoreEntry)
-{
-    if (!CurrentContext.DiscoveredLore.Contains(LoreEntry))
-    {
-        CurrentContext.DiscoveredLore.Add(LoreEntry);
-        UE_LOG(LogTemp, Log, TEXT("New lore discovered: %s"), *LoreEntry);
-    }
-}
-
-void ANarr_DialogueSystem::TriggerEnvironmentalNarrative(const FString& EventType)
-{
-    if (EventType == TEXT("predator_nearby"))
-    {
-        StartDialogueSequence(TEXT("danger_warning"));
-    }
-    else if (EventType == TEXT("ancient_site"))
-    {
-        StartDialogueSequence(TEXT("ancient_discovery"));
-    }
-    else if (EventType == TEXT("first_visit"))
-    {
-        StartDialogueSequence(TEXT("valley_introduction"));
-    }
-}
-
-TArray<FString> ANarr_DialogueSystem::GetContextualHints() const
-{
-    TArray<FString> Hints;
-    
-    if (CurrentContext.DangerLevel > 0.7f)
-    {
-        Hints.Add(TEXT("This area feels dangerous. Predators may be nearby."));
-    }
-    
-    if (CurrentContext.AvailableResources.Num() > 0)
-    {
-        Hints.Add(FString::Printf(TEXT("Resources available: %s"), *FString::Join(CurrentContext.AvailableResources, TEXT(", "))));
-    }
-    
-    if (CurrentContext.DiscoveredLore.Num() > 0)
-    {
-        Hints.Add(TEXT("Ancient knowledge has been uncovered in this location."));
-    }
-    
-    return Hints;
-}
-
-void ANarr_DialogueSystem::OnInteractionSphereBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
-{
-    if (!bIsActive || !OtherActor)
-    {
-        return;
-    }
-
-    // Check if it's the player character
-    ACharacter* PlayerCharacter = Cast<ACharacter>(OtherActor);
-    if (PlayerCharacter && PlayerCharacter->IsPlayerControlled())
-    {
-        UE_LOG(LogTemp, Log, TEXT("Player entered dialogue area: %s"), *GetName());
-        
-        // Trigger contextual dialogue based on current narrative context
-        if (CurrentContext.DangerLevel > 0.5f)
+        if (AudioComponent && AudioComponent->IsPlaying())
         {
-            TriggerEnvironmentalNarrative(TEXT("predator_nearby"));
+            AudioComponent->Stop();
+        }
+
+        if (GetWorld() && GetWorld()->GetTimerManager().IsTimerActive(DialogueTimerHandle))
+        {
+            GetWorld()->GetTimerManager().ClearTimer(DialogueTimerHandle);
+        }
+
+        OnDialogueFinished(CurrentDialogue);
+    }
+}
+
+bool ANarr_DialogueSystem::IsDialoguePlaying() const
+{
+    return bIsPlayingDialogue;
+}
+
+void ANarr_DialogueSystem::AddStoryEvent(const FNarr_StoryEvent& NewEvent)
+{
+    StoryEvents.Add(NewEvent);
+}
+
+void ANarr_DialogueSystem::SetSubtitlesEnabled(bool bEnabled)
+{
+    bGlobalSubtitlesEnabled = bEnabled;
+}
+
+void ANarr_DialogueSystem::OnAudioFinished()
+{
+    if (bIsPlayingDialogue)
+    {
+        OnDialogueFinished(CurrentDialogue);
+        
+        if (CurrentDialogueSequence.Num() > 0)
+        {
+            PlayNextDialogue();
         }
         else
         {
-            TriggerEnvironmentalNarrative(TEXT("first_visit"));
+            bIsPlayingDialogue = false;
         }
     }
 }
 
-void ANarr_DialogueSystem::OnInteractionSphereEndOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex)
+void ANarr_DialogueSystem::PlayNextDialogue()
 {
-    if (!OtherActor)
+    if (CurrentDialogueIndex < CurrentDialogueSequence.Num())
     {
-        return;
+        PlayDialogueLine(CurrentDialogueSequence[CurrentDialogueIndex]);
+        CurrentDialogueIndex++;
     }
-
-    ACharacter* PlayerCharacter = Cast<ACharacter>(OtherActor);
-    if (PlayerCharacter && PlayerCharacter->IsPlayerControlled())
+    else
     {
-        UE_LOG(LogTemp, Log, TEXT("Player left dialogue area: %s"), *GetName());
-        // Could stop dialogue or fade it out here
+        FinishDialogueSequence();
     }
 }
 
-FNarr_DialogueSequence* ANarr_DialogueSystem::FindDialogueSequence(const FString& SequenceID)
+void ANarr_DialogueSystem::FinishDialogueSequence()
 {
-    for (FNarr_DialogueSequence& Sequence : DialogueSequences)
-    {
-        if (Sequence.SequenceID == SequenceID)
-        {
-            return &Sequence;
-        }
-    }
-    return nullptr;
-}
+    bIsPlayingDialogue = false;
+    CurrentDialogueSequence.Empty();
+    CurrentDialogueIndex = 0;
 
-void ANarr_DialogueSystem::ProcessDialogueTriggers()
-{
-    // Process any automatic dialogue triggers based on current context
-    if (CurrentContext.BiomeType == TEXT("Savana") && CurrentContext.DangerLevel < 0.3f)
-    {
-        // Safe savana area - could trigger exploration dialogue
-    }
-    else if (CurrentContext.DangerLevel > 0.7f)
-    {
-        // High danger area - could trigger warning dialogue
-    }
+    UE_LOG(LogTemp, Log, TEXT("Dialogue sequence finished"));
 }
