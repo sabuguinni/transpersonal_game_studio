@@ -3,199 +3,216 @@
 #include "CoreMinimal.h"
 #include "Engine/GameInstanceSubsystem.h"
 #include "Engine/World.h"
-#include "GameFramework/GameModeBase.h"
+#include "Components/ActorComponent.h"
+#include "GameFramework/Actor.h"
 #include "SharedTypes.h"
 #include "Eng_CoreArchitecture.generated.h"
 
-class UEng_SystemArchitect;
-class UEng_GameModeArchitect;
-class UEng_MasterArchitect;
+/**
+ * Engine Architect Core Architecture System
+ * Defines the fundamental architectural patterns and rules for the entire game
+ * This system enforces consistency across all modules and agents
+ */
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnArchitecturalViolation, const FString&, ViolationMessage);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnModuleRegistered, const FString&, ModuleName, bool, bSuccess);
+
+UENUM(BlueprintType)
+enum class EEng_ArchitecturalLayer : uint8
+{
+    Core            UMETA(DisplayName = "Core Systems"),
+    Gameplay        UMETA(DisplayName = "Gameplay Systems"), 
+    Content         UMETA(DisplayName = "Content Systems"),
+    Presentation    UMETA(DisplayName = "Presentation Layer"),
+    Platform        UMETA(DisplayName = "Platform Layer")
+};
+
+UENUM(BlueprintType)
+enum class EEng_ModuleType : uint8
+{
+    Physics         UMETA(DisplayName = "Physics Module"),
+    WorldGen        UMETA(DisplayName = "World Generation"),
+    Character       UMETA(DisplayName = "Character Systems"),
+    AI              UMETA(DisplayName = "AI Systems"),
+    Audio           UMETA(DisplayName = "Audio Systems"),
+    VFX             UMETA(DisplayName = "Visual Effects"),
+    UI              UMETA(DisplayName = "User Interface"),
+    Narrative       UMETA(DisplayName = "Narrative Systems")
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FEng_ModuleInfo
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Module")
+    FString ModuleName;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Module")
+    EEng_ModuleType ModuleType;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Module")
+    EEng_ArchitecturalLayer Layer;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Module")
+    TArray<FString> Dependencies;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Module")
+    bool bIsActive;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Module")
+    float PerformanceWeight;
+
+    FEng_ModuleInfo()
+    {
+        ModuleName = TEXT("");
+        ModuleType = EEng_ModuleType::Physics;
+        Layer = EEng_ArchitecturalLayer::Core;
+        bIsActive = false;
+        PerformanceWeight = 1.0f;
+    }
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FEng_PerformanceMetrics
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float FrameTime;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float CPUUsage;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float MemoryUsage;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    int32 ActiveActors;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    int32 PhysicsBodies;
+
+    FEng_PerformanceMetrics()
+    {
+        FrameTime = 16.67f; // 60 FPS target
+        CPUUsage = 0.0f;
+        MemoryUsage = 0.0f;
+        ActiveActors = 0;
+        PhysicsBodies = 0;
+    }
+};
 
 /**
- * Core Architecture Registry - Central hub for all architectural systems
- * Manages initialization order, dependency resolution, and system validation
- * This is the foundation that ensures all other systems follow architectural standards
+ * Core Architecture Subsystem
+ * Manages the overall architectural integrity of the game
  */
-UCLASS(BlueprintType, Blueprintable, meta = (DisplayName = "Core Architecture Registry"))
-class TRANSPERSONALGAME_API UEng_CoreArchitecture : public UGameInstanceSubsystem
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API UEng_CoreArchitectureSubsystem : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
 public:
-    UEng_CoreArchitecture();
+    UEng_CoreArchitectureSubsystem();
 
     // USubsystem interface
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
-    // Core Architecture Management
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    bool InitializeArchitecture();
+    void RegisterModule(const FEng_ModuleInfo& ModuleInfo);
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    bool ValidateArchitecturalCompliance();
+    void UnregisterModule(const FString& ModuleName);
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void RegisterArchitecturalSystem(const FString& SystemName, UObject* SystemInstance);
+    bool ValidateModuleDependencies(const FString& ModuleName);
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    bool IsSystemRegistered(const FString& SystemName) const;
-
-    // System Dependencies
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    bool ResolveDependencies();
+    void EnforcePerformanceLimits();
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void AddSystemDependency(const FString& SystemName, const FString& DependsOn);
-
-    // Architecture Validation
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    TArray<FString> GetArchitecturalViolations() const;
+    FEng_PerformanceMetrics GetCurrentPerformanceMetrics();
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    bool EnforceArchitecturalStandards();
-
-    // Performance Monitoring
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    float GetSystemInitializationTime(const FString& SystemName) const;
+    TArray<FEng_ModuleInfo> GetRegisteredModules();
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    FString GetArchitecturalHealthReport() const;
+    void ValidateArchitecturalCompliance();
+
+    UPROPERTY(BlueprintAssignable, Category = "Architecture")
+    FOnArchitecturalViolation OnArchitecturalViolation;
+
+    UPROPERTY(BlueprintAssignable, Category = "Architecture")
+    FOnModuleRegistered OnModuleRegistered;
 
 protected:
-    // Core architectural components
-    UPROPERTY(BlueprintReadOnly, Category = "Architecture", meta = (AllowPrivateAccess = "true"))
-    TObjectPtr<UEng_MasterArchitect> MasterArchitect;
+    UPROPERTY()
+    TMap<FString, FEng_ModuleInfo> RegisteredModules;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Architecture", meta = (AllowPrivateAccess = "true"))
-    TObjectPtr<UEng_SystemArchitect> SystemArchitect;
+    UPROPERTY()
+    FEng_PerformanceMetrics CurrentMetrics;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Architecture", meta = (AllowPrivateAccess = "true"))
-    TObjectPtr<UEng_GameModeArchitect> GameModeArchitect;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float MaxFrameTime = 33.33f; // 30 FPS minimum
 
-    // System registry
-    UPROPERTY(BlueprintReadOnly, Category = "Architecture")
-    TMap<FString, TObjectPtr<UObject>> RegisteredSystems;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float MaxCPUUsage = 80.0f;
 
-    // Dependency graph
-    UPROPERTY(BlueprintReadOnly, Category = "Architecture")
-    TMap<FString, TArray<FString>> SystemDependencies;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float MaxMemoryUsage = 4096.0f; // 4GB
 
-    // Initialization tracking
-    UPROPERTY(BlueprintReadOnly, Category = "Architecture")
-    TMap<FString, float> SystemInitTimes;
-
-    // Architecture state
-    UPROPERTY(BlueprintReadOnly, Category = "Architecture")
-    bool bArchitectureInitialized;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Architecture")
-    bool bDependenciesResolved;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Architecture")
-    TArray<FString> ArchitecturalViolations;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    int32 MaxActiveActors = 10000;
 
 private:
-    // Internal initialization methods
-    void InitializeMasterArchitect();
-    void InitializeSystemArchitect();
-    void InitializeGameModeArchitect();
-    
-    // Dependency resolution
-    bool ValidateDependencyGraph();
-    TArray<FString> GetInitializationOrder();
-    
-    // Validation helpers
-    void ValidateSystemCompliance(const FString& SystemName, UObject* System);
-    void CheckArchitecturalStandards();
-    
-    // Performance tracking
-    void StartSystemTimer(const FString& SystemName);
-    void EndSystemTimer(const FString& SystemName);
-    
-    FDateTime LastValidationTime;
-    float TotalInitializationTime;
+    void UpdatePerformanceMetrics();
+    void CheckArchitecturalViolations();
+    bool ValidateLayerDependencies(EEng_ArchitecturalLayer Layer);
 };
 
 /**
- * Architectural System Interface - All major systems must implement this
+ * Architectural Compliance Component
+ * Attached to actors to ensure they follow architectural standards
  */
-UINTERFACE(BlueprintType)
-class TRANSPERSONALGAME_API UEng_ArchitecturalSystem : public UInterface
-{
-    GENERATED_BODY()
-};
-
-class TRANSPERSONALGAME_API IEng_ArchitecturalSystem
+UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UEng_ArchitecturalComplianceComponent : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    // System lifecycle
-    UFUNCTION(BlueprintImplementableEvent, Category = "Architecture")
-    bool InitializeSystem();
+    UEng_ArchitecturalComplianceComponent();
 
-    UFUNCTION(BlueprintImplementableEvent, Category = "Architecture")
-    bool ValidateSystemIntegrity();
+    virtual void BeginPlay() override;
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    UFUNCTION(BlueprintImplementableEvent, Category = "Architecture")
-    void ShutdownSystem();
+    UFUNCTION(BlueprintCallable, Category = "Compliance")
+    void ValidateActorCompliance();
 
-    // System information
-    UFUNCTION(BlueprintImplementableEvent, Category = "Architecture")
-    FString GetSystemName() const;
+    UFUNCTION(BlueprintCallable, Category = "Compliance")
+    bool CheckPerformanceCompliance();
 
-    UFUNCTION(BlueprintImplementableEvent, Category = "Architecture")
-    TArray<FString> GetSystemDependencies() const;
+    UFUNCTION(BlueprintCallable, Category = "Compliance")
+    void ReportViolation(const FString& ViolationType, const FString& Description);
 
-    UFUNCTION(BlueprintImplementableEvent, Category = "Architecture")
-    float GetSystemVersion() const;
+protected:
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Compliance")
+    EEng_ModuleType AssignedModule;
 
-    // Performance metrics
-    UFUNCTION(BlueprintImplementableEvent, Category = "Architecture")
-    FString GetPerformanceMetrics() const;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Compliance")
+    float PerformanceBudget = 1.0f;
 
-    UFUNCTION(BlueprintImplementableEvent, Category = "Architecture")
-    bool IsSystemHealthy() const;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Compliance")
+    bool bEnforceStrictCompliance = true;
+
+    UPROPERTY()
+    float LastValidationTime;
+
+    UPROPERTY()
+    TArray<FString> ViolationHistory;
+
+private:
+    void ValidateNamingConventions();
+    void ValidateComponentStructure();
+    void ValidatePerformanceImpact();
 };
-
-/**
- * Architecture Event System - For system communication
- */
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEng_ArchitecturalEvent
-{
-    GENERATED_BODY()
-
-    UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Event")
-    FString EventType;
-
-    UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Event")
-    FString SourceSystem;
-
-    UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Event")
-    FString TargetSystem;
-
-    UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Event")
-    FString EventData;
-
-    UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Event")
-    float Timestamp;
-
-    UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Event")
-    int32 Priority;
-
-    FEng_ArchitecturalEvent()
-    {
-        EventType = TEXT("");
-        SourceSystem = TEXT("");
-        TargetSystem = TEXT("");
-        EventData = TEXT("");
-        Timestamp = 0.0f;
-        Priority = 0;
-    }
-};
-
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FEng_OnArchitecturalEvent, const FEng_ArchitecturalEvent&, Event);
-
-#include "Eng_CoreArchitecture.generated.h"
