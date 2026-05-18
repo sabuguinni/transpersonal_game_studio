@@ -5,109 +5,108 @@
 #include "Engine/Engine.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
-#include "Components/CapsuleComponent.h"
-#include "../SharedTypes.h"
 #include "Anim_CharacterAnimInstance.generated.h"
 
-TRANSPERSONALGAME_API DECLARE_LOG_CATEGORY_EXTERN(LogAnimInstance, Log, All);
+UENUM(BlueprintType)
+enum class EAnim_MovementState : uint8
+{
+    Idle        UMETA(DisplayName = "Idle"),
+    Walking     UMETA(DisplayName = "Walking"), 
+    Running     UMETA(DisplayName = "Running"),
+    Jumping     UMETA(DisplayName = "Jumping"),
+    Falling     UMETA(DisplayName = "Falling"),
+    Crouching   UMETA(DisplayName = "Crouching")
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FAnim_LocomotionData
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadOnly, Category = "Locomotion")
+    float Speed;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Locomotion") 
+    float Direction;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Locomotion")
+    bool bIsInAir;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Locomotion")
+    bool bIsCrouching;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Locomotion")
+    EAnim_MovementState MovementState;
+
+    FAnim_LocomotionData()
+    {
+        Speed = 0.0f;
+        Direction = 0.0f;
+        bIsInAir = false;
+        bIsCrouching = false;
+        MovementState = EAnim_MovementState::Idle;
+    }
+};
 
 /**
  * Animation Instance for TranspersonalCharacter
- * Handles state machine logic for idle/walk/run/jump animations
- * Integrates with survival stats and environmental adaptation
+ * Handles locomotion blending and state management for realistic character movement
  */
-UCLASS(BlueprintType, Blueprintable)
+UCLASS(Blueprintable, BlueprintType)
 class TRANSPERSONALGAME_API UAnim_CharacterAnimInstance : public UAnimInstance
 {
-	GENERATED_BODY()
+    GENERATED_BODY()
 
 public:
-	UAnim_CharacterAnimInstance();
-
-	virtual void NativeInitializeAnimation() override;
-	virtual void NativeUpdateAnimation(float DeltaTimeX) override;
-
-	// Animation state properties
-	UPROPERTY(BlueprintReadOnly, Category = "Animation State", meta = (AllowPrivateAccess = "true"))
-	float Speed;
-
-	UPROPERTY(BlueprintReadOnly, Category = "Animation State", meta = (AllowPrivateAccess = "true"))
-	float Direction;
-
-	UPROPERTY(BlueprintReadOnly, Category = "Animation State", meta = (AllowPrivateAccess = "true"))
-	bool bIsInAir;
-
-	UPROPERTY(BlueprintReadOnly, Category = "Animation State", meta = (AllowPrivateAccess = "true"))
-	bool bIsAccelerating;
-
-	UPROPERTY(BlueprintReadOnly, Category = "Animation State", meta = (AllowPrivateAccess = "true"))
-	bool bIsCrouching;
-
-	UPROPERTY(BlueprintReadOnly, Category = "Animation State", meta = (AllowPrivateAccess = "true"))
-	bool bIsRunning;
-
-	// Survival state integration
-	UPROPERTY(BlueprintReadOnly, Category = "Survival State", meta = (AllowPrivateAccess = "true"))
-	float HealthPercentage;
-
-	UPROPERTY(BlueprintReadOnly, Category = "Survival State", meta = (AllowPrivateAccess = "true"))
-	float StaminaPercentage;
-
-	UPROPERTY(BlueprintReadOnly, Category = "Survival State", meta = (AllowPrivateAccess = "true"))
-	float FearLevel;
-
-	UPROPERTY(BlueprintReadOnly, Category = "Survival State", meta = (AllowPrivateAccess = "true"))
-	bool bIsInjured;
-
-	UPROPERTY(BlueprintReadOnly, Category = "Survival State", meta = (AllowPrivateAccess = "true"))
-	bool bIsExhausted;
-
-	// Animation speed modifiers
-	UPROPERTY(BlueprintReadOnly, Category = "Animation Modifiers", meta = (AllowPrivateAccess = "true"))
-	float InjurySpeedModifier;
-
-	UPROPERTY(BlueprintReadOnly, Category = "Animation Modifiers", meta = (AllowPrivateAccess = "true"))
-	float FatigueSpeedModifier;
-
-	UPROPERTY(BlueprintReadOnly, Category = "Animation Modifiers", meta = (AllowPrivateAccess = "true"))
-	float FearSpeedModifier;
-
-	// Animation thresholds
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Settings")
-	float WalkSpeedThreshold = 150.0f;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Settings")
-	float RunSpeedThreshold = 300.0f;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Settings")
-	float InjuryThreshold = 0.5f;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Settings")
-	float ExhaustionThreshold = 0.2f;
+    UAnim_CharacterAnimInstance();
 
 protected:
-	// Reference to the character
-	UPROPERTY(BlueprintReadOnly, Category = "Character", meta = (AllowPrivateAccess = "true"))
-	class ACharacter* Character;
+    // Animation Blueprint Interface
+    virtual void NativeInitializeAnimation() override;
+    virtual void NativeUpdateAnimation(float DeltaTimeX) override;
 
-	UPROPERTY(BlueprintReadOnly, Category = "Character", meta = (AllowPrivateAccess = "true"))
-	class UCharacterMovementComponent* CharacterMovement;
+    // Character reference
+    UPROPERTY(BlueprintReadOnly, Category = "Character")
+    class ACharacter* OwningCharacter;
 
-	// Update functions
-	void UpdateMovementValues();
-	void UpdateSurvivalStates();
-	void UpdateAnimationModifiers();
+    // Movement component reference  
+    UPROPERTY(BlueprintReadOnly, Category = "Character")
+    class UCharacterMovementComponent* MovementComponent;
 
-	// Helper functions
-	UFUNCTION(BlueprintCallable, Category = "Animation Helpers")
-	float CalculateDirection(const FVector& Velocity, const FRotator& BaseRotation);
+    // Locomotion data for animation blending
+    UPROPERTY(BlueprintReadOnly, Category = "Animation Data")
+    FAnim_LocomotionData LocomotionData;
 
-	UFUNCTION(BlueprintCallable, Category = "Animation Helpers")
-	bool ShouldPlayInjuredAnimation() const;
+    // Animation parameters
+    UPROPERTY(BlueprintReadOnly, Category = "Animation Data")
+    float GroundSpeed;
 
-	UFUNCTION(BlueprintCallable, Category = "Animation Helpers")
-	bool ShouldPlayExhaustedAnimation() const;
+    UPROPERTY(BlueprintReadOnly, Category = "Animation Data") 
+    float MovementDirection;
 
-	UFUNCTION(BlueprintCallable, Category = "Animation Helpers")
-	float GetEffectiveAnimationSpeed() const;
+    UPROPERTY(BlueprintReadOnly, Category = "Animation Data")
+    bool bShouldMove;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Animation Data")
+    bool bIsFalling;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Animation Data")
+    bool bIsJumping;
+
+    // Animation thresholds
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Settings")
+    float WalkSpeedThreshold;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Settings")
+    float RunSpeedThreshold;
+
+private:
+    // Update locomotion data from character
+    void UpdateLocomotionData();
+    
+    // Determine current movement state
+    EAnim_MovementState CalculateMovementState() const;
+    
+    // Calculate movement direction relative to character facing
+    float CalculateDirection() const;
 };
