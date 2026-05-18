@@ -1,399 +1,376 @@
 #include "AudioManager.h"
+#include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "TimerManager.h"
 #include "Kismet/GameplayStatics.h"
 #include "Components/AudioComponent.h"
-#include "Engine/Engine.h"
-
-UAudioManager::UAudioManager()
-{
-    CurrentBiome = EAudio_BiomeType::Savana;
-    CurrentThreatLevel = EAudio_ThreatLevel::Safe;
-    MasterVolume = 1.0f;
-    AmbientVolume = 0.8f;
-    EffectsVolume = 1.0f;
-    bAdaptiveMusicActive = false;
-}
+#include "Sound/SoundCue.h"
+#include "GameFramework/PlayerController.h"
+#include "Camera/CameraShakeBase.h"
 
 void UAudioManager::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
     
-    UE_LOG(LogTemp, Warning, TEXT("AudioManager: Initializing audio subsystem"));
+    GlobalVolumeMultiplier = 1.0f;
+    MaxDinosaurAudioDistance = 10000.0f;
+    CurrentThreatLevel = EAudio_ThreatLevel::None;
     
-    // Initialize biome and dinosaur settings
-    InitializeBiomeSettings();
-    InitializeDinosaurProfiles();
+    InitializeDinosaurSounds();
+    LoadAudioAssets();
     
-    // Create audio components
-    if (UWorld* World = GetWorld())
-    {
-        // Create ambient audio component
-        AmbientAudioComponent = UGameplayStatics::SpawnSoundAtLocation(
-            World, 
-            nullptr, 
-            FVector::ZeroVector, 
-            FRotator::ZeroRotator, 
-            0.0f, 
-            1.0f, 
-            0.0f, 
-            nullptr, 
-            nullptr, 
-            true
-        );
-        
-        if (AmbientAudioComponent)
-        {
-            AmbientAudioComponent->bAutoDestroy = false;
-            UE_LOG(LogTemp, Warning, TEXT("AudioManager: Ambient audio component created"));
-        }
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("AudioManager: Initialization complete"));
+    UE_LOG(LogTemp, Log, TEXT("AudioManager initialized successfully"));
 }
 
 void UAudioManager::Deinitialize()
 {
-    if (bAdaptiveMusicActive)
+    if (CurrentNarrationComponent && IsValid(CurrentNarrationComponent))
     {
-        StopAdaptiveMusic();
+        CurrentNarrationComponent->Stop();
+        CurrentNarrationComponent = nullptr;
     }
     
-    if (AmbientAudioComponent && IsValid(AmbientAudioComponent))
+    if (AmbienceComponent && IsValid(AmbienceComponent))
     {
-        AmbientAudioComponent->Stop();
-    }
-    
-    if (MusicAudioComponent && IsValid(MusicAudioComponent))
-    {
-        MusicAudioComponent->Stop();
-    }
-    
-    if (NarrativeAudioComponent && IsValid(NarrativeAudioComponent))
-    {
-        NarrativeAudioComponent->Stop();
+        AmbienceComponent->Stop();
+        AmbienceComponent = nullptr;
     }
     
     Super::Deinitialize();
 }
 
-void UAudioManager::InitializeBiomeSettings()
+void UAudioManager::InitializeDinosaurSounds()
 {
-    // Initialize biome audio settings with default values
-    FAudio_BiomeAudioSettings SavanaSettings;
-    SavanaSettings.BaseVolume = 0.7f;
-    SavanaSettings.FadeInTime = 2.0f;
-    SavanaSettings.FadeOutTime = 1.5f;
-    BiomeAudioSettings.Add(EAudio_BiomeType::Savana, SavanaSettings);
+    DinosaurSoundDatabase.Empty();
     
-    FAudio_BiomeAudioSettings ForestSettings;
-    ForestSettings.BaseVolume = 0.8f;
-    ForestSettings.FadeInTime = 3.0f;
-    ForestSettings.FadeOutTime = 2.0f;
-    BiomeAudioSettings.Add(EAudio_BiomeType::Forest, ForestSettings);
+    // T-Rex sound configuration
+    FAudio_DinosaurSoundData TRexData;
+    TRexData.DinosaurType = EAudio_DinosaurType::TRex;
+    TRexData.MaxAudibleDistance = 8000.0f;
+    TRexData.VolumeMultiplier = 1.2f;
+    DinosaurSoundDatabase.Add(TRexData);
     
-    FAudio_BiomeAudioSettings SwampSettings;
-    SwampSettings.BaseVolume = 0.6f;
-    SwampSettings.FadeInTime = 2.5f;
-    SwampSettings.FadeOutTime = 2.0f;
-    BiomeAudioSettings.Add(EAudio_BiomeType::Swamp, SwampSettings);
+    // Raptor sound configuration
+    FAudio_DinosaurSoundData RaptorData;
+    RaptorData.DinosaurType = EAudio_DinosaurType::Raptor;
+    RaptorData.MaxAudibleDistance = 3000.0f;
+    RaptorData.VolumeMultiplier = 0.8f;
+    DinosaurSoundDatabase.Add(RaptorData);
     
-    FAudio_BiomeAudioSettings DesertSettings;
-    DesertSettings.BaseVolume = 0.5f;
-    DesertSettings.FadeInTime = 1.5f;
-    DesertSettings.FadeOutTime = 1.0f;
-    BiomeAudioSettings.Add(EAudio_BiomeType::Desert, DesertSettings);
+    // Triceratops sound configuration
+    FAudio_DinosaurSoundData TriceratopsData;
+    TriceratopsData.DinosaurType = EAudio_DinosaurType::Triceratops;
+    TriceratopsData.MaxAudibleDistance = 5000.0f;
+    TriceratopsData.VolumeMultiplier = 1.0f;
+    DinosaurSoundDatabase.Add(TriceratopsData);
     
-    FAudio_BiomeAudioSettings MountainSettings;
-    MountainSettings.BaseVolume = 0.9f;
-    MountainSettings.FadeInTime = 2.0f;
-    MountainSettings.FadeOutTime = 1.5f;
-    BiomeAudioSettings.Add(EAudio_BiomeType::Mountain, MountainSettings);
-    
-    UE_LOG(LogTemp, Warning, TEXT("AudioManager: Biome settings initialized"));
+    // Brachiosaurus sound configuration
+    FAudio_DinosaurSoundData BrachiosaurusData;
+    BrachiosaurusData.DinosaurType = EAudio_DinosaurType::Brachiosaurus;
+    BrachiosaurusData.MaxAudibleDistance = 6000.0f;
+    BrachiosaurusData.VolumeMultiplier = 1.1f;
+    DinosaurSoundDatabase.Add(BrachiosaurusData);
 }
 
-void UAudioManager::InitializeDinosaurProfiles()
+void UAudioManager::LoadAudioAssets()
 {
-    // T-Rex audio profile
-    FAudio_DinosaurSoundProfile TRexProfile;
-    TRexProfile.FootstepVolume = 1.5f;
-    TRexProfile.RoarVolume = 2.0f;
-    TRexProfile.MaxHearingDistance = 8000.0f;
-    DinosaurSoundProfiles.Add(TEXT("TRex"), TRexProfile);
+    // Load default sounds - these would be replaced with actual asset references
+    // DefaultFootstepSound = LoadObject<USoundCue>(nullptr, TEXT("/Game/Audio/Dinosaurs/DefaultFootstep"));
+    // ScreenShakeRumbleSound = LoadObject<USoundCue>(nullptr, TEXT("/Game/Audio/Effects/ScreenShakeRumble"));
     
-    // Velociraptor audio profile
-    FAudio_DinosaurSoundProfile RaptorProfile;
-    RaptorProfile.FootstepVolume = 0.3f;
-    RaptorProfile.RoarVolume = 0.8f;
-    RaptorProfile.MaxHearingDistance = 3000.0f;
-    DinosaurSoundProfiles.Add(TEXT("Velociraptor"), RaptorProfile);
-    
-    // Brachiosaurus audio profile
-    FAudio_DinosaurSoundProfile BrachioProfile;
-    BrachioProfile.FootstepVolume = 1.8f;
-    BrachioProfile.RoarVolume = 1.5f;
-    BrachioProfile.MaxHearingDistance = 10000.0f;
-    DinosaurSoundProfiles.Add(TEXT("Brachiosaurus"), BrachioProfile);
-    
-    // Triceratops audio profile
-    FAudio_DinosaurSoundProfile TriceratopsProfile;
-    TriceratopsProfile.FootstepVolume = 1.2f;
-    TriceratopsProfile.RoarVolume = 1.3f;
-    TriceratopsProfile.MaxHearingDistance = 6000.0f;
-    DinosaurSoundProfiles.Add(TEXT("Triceratops"), TriceratopsProfile);
-    
-    UE_LOG(LogTemp, Warning, TEXT("AudioManager: Dinosaur sound profiles initialized"));
+    UE_LOG(LogTemp, Log, TEXT("Audio assets loading initiated"));
 }
 
-void UAudioManager::SetCurrentBiome(EAudio_BiomeType NewBiome)
+void UAudioManager::PlayDinosaurFootstep(EAudio_DinosaurType DinosaurType, const FVector& Location, float VolumeScale)
 {
-    if (CurrentBiome != NewBiome)
+    FAudio_DinosaurSoundData* SoundData = GetDinosaurSoundData(DinosaurType);
+    if (!SoundData)
     {
-        UE_LOG(LogTemp, Warning, TEXT("AudioManager: Transitioning from biome %d to %d"), 
-            (int32)CurrentBiome, (int32)NewBiome);
-        
-        EAudio_BiomeType OldBiome = CurrentBiome;
-        CurrentBiome = NewBiome;
-        
-        TransitionBiomeAudio(NewBiome);
-    }
-}
-
-void UAudioManager::SetThreatLevel(EAudio_ThreatLevel NewThreatLevel)
-{
-    if (CurrentThreatLevel != NewThreatLevel)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("AudioManager: Threat level changed to %d"), (int32)NewThreatLevel);
-        CurrentThreatLevel = NewThreatLevel;
-        UpdateMusicIntensity();
-    }
-}
-
-void UAudioManager::TransitionBiomeAudio(EAudio_BiomeType NewBiome)
-{
-    if (!BiomeAudioSettings.Contains(NewBiome))
-    {
-        UE_LOG(LogTemp, Error, TEXT("AudioManager: No audio settings found for biome %d"), (int32)NewBiome);
         return;
     }
     
-    const FAudio_BiomeAudioSettings& Settings = BiomeAudioSettings[NewBiome];
-    
-    // Fade out current ambient sound
-    if (AmbientAudioComponent && AmbientAudioComponent->IsPlaying())
+    UWorld* World = GetWorld();
+    if (!World)
     {
-        AmbientAudioComponent->FadeOut(Settings.FadeOutTime, 0.0f);
-    }
-    
-    // TODO: Load and fade in new biome ambient sound
-    // This would require actual sound assets to be loaded
-    UE_LOG(LogTemp, Warning, TEXT("AudioManager: Biome audio transition complete"));
-}
-
-void UAudioManager::PlayDinosaurFootstep(const FString& DinosaurType, const FVector& Location)
-{
-    if (!DinosaurSoundProfiles.Contains(DinosaurType))
-    {
-        UE_LOG(LogTemp, Warning, TEXT("AudioManager: No sound profile found for dinosaur type: %s"), *DinosaurType);
         return;
     }
     
-    const FAudio_DinosaurSoundProfile& Profile = DinosaurSoundProfiles[DinosaurType];
-    
-    // Calculate distance-based volume
-    if (UWorld* World = GetWorld())
+    // Get player location for distance calculation
+    APlayerController* PC = World->GetFirstPlayerController();
+    if (!PC || !PC->GetPawn())
     {
-        if (APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(World, 0))
-        {
-            float Distance = FVector::Dist(PlayerPawn->GetActorLocation(), Location);
-            float VolumeMultiplier = FMath::Clamp(1.0f - (Distance / Profile.MaxHearingDistance), 0.0f, 1.0f);
-            float FinalVolume = Profile.FootstepVolume * VolumeMultiplier * EffectsVolume * MasterVolume;
-            
-            if (FinalVolume > 0.01f)
-            {
-                // TODO: Play actual footstep sound at location
-                UE_LOG(LogTemp, Warning, TEXT("AudioManager: Playing %s footstep at volume %.2f"), 
-                    *DinosaurType, FinalVolume);
-            }
-        }
-    }
-}
-
-void UAudioManager::PlayDinosaurRoar(const FString& DinosaurType, const FVector& Location)
-{
-    if (!DinosaurSoundProfiles.Contains(DinosaurType))
-    {
-        UE_LOG(LogTemp, Warning, TEXT("AudioManager: No sound profile found for dinosaur type: %s"), *DinosaurType);
         return;
     }
     
-    const FAudio_DinosaurSoundProfile& Profile = DinosaurSoundProfiles[DinosaurType];
+    FVector PlayerLocation = PC->GetPawn()->GetActorLocation();
+    float Distance = FVector::Dist(Location, PlayerLocation);
     
-    // Calculate distance-based volume
-    if (UWorld* World = GetWorld())
+    if (Distance > SoundData->MaxAudibleDistance)
     {
-        if (APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(World, 0))
-        {
-            float Distance = FVector::Dist(PlayerPawn->GetActorLocation(), Location);
-            float VolumeMultiplier = FMath::Clamp(1.0f - (Distance / Profile.MaxHearingDistance), 0.0f, 1.0f);
-            float FinalVolume = Profile.RoarVolume * VolumeMultiplier * EffectsVolume * MasterVolume;
-            
-            if (FinalVolume > 0.01f)
-            {
-                // TODO: Play actual roar sound at location
-                UE_LOG(LogTemp, Warning, TEXT("AudioManager: Playing %s roar at volume %.2f"), 
-                    *DinosaurType, FinalVolume);
-                
-                // Increase threat level temporarily
-                if (CurrentThreatLevel < EAudio_ThreatLevel::Danger)
-                {
-                    SetThreatLevel(EAudio_ThreatLevel::Danger);
-                }
-            }
-        }
-    }
-}
-
-void UAudioManager::TriggerEnvironmentalSound(const FString& SoundName, const FVector& Location, float Volume)
-{
-    if (UWorld* World = GetWorld())
-    {
-        float FinalVolume = Volume * EffectsVolume * MasterVolume;
-        
-        // TODO: Load and play environmental sound
-        UE_LOG(LogTemp, Warning, TEXT("AudioManager: Playing environmental sound '%s' at volume %.2f"), 
-            *SoundName, FinalVolume);
-    }
-}
-
-void UAudioManager::PlayNarrativeClip(const FString& ClipName)
-{
-    if (NarrativeAudioComponent && NarrativeAudioComponent->IsPlaying())
-    {
-        NarrativeAudioComponent->Stop();
+        return; // Too far to hear
     }
     
-    // TODO: Load and play narrative audio clip
-    UE_LOG(LogTemp, Warning, TEXT("AudioManager: Playing narrative clip '%s'"), *ClipName);
-}
-
-void UAudioManager::StopNarrativeClip()
-{
-    if (NarrativeAudioComponent && NarrativeAudioComponent->IsPlaying())
+    float VolumeMultiplier = CalculateVolumeByDistance(Location, PlayerLocation, SoundData->MaxAudibleDistance);
+    VolumeMultiplier *= SoundData->VolumeMultiplier * VolumeScale * GlobalVolumeMultiplier;
+    
+    // Play footstep sound
+    if (SoundData->FootstepSound.LoadSynchronous())
     {
-        NarrativeAudioComponent->Stop();
-        UE_LOG(LogTemp, Warning, TEXT("AudioManager: Stopped narrative clip"));
+        UGameplayStatics::PlaySoundAtLocation(World, SoundData->FootstepSound.Get(), Location, VolumeMultiplier);
+    }
+    else if (DefaultFootstepSound.LoadSynchronous())
+    {
+        UGameplayStatics::PlaySoundAtLocation(World, DefaultFootstepSound.Get(), Location, VolumeMultiplier);
+    }
+    
+    // Trigger screen shake for heavy dinosaurs
+    if (DinosaurType == EAudio_DinosaurType::TRex || DinosaurType == EAudio_DinosaurType::Brachiosaurus)
+    {
+        TriggerScreenShakeAudio(VolumeMultiplier * 0.5f, Location);
     }
 }
 
-void UAudioManager::StartAdaptiveMusic()
+void UAudioManager::PlayDinosaurRoar(EAudio_DinosaurType DinosaurType, const FVector& Location, float VolumeScale)
 {
-    if (!bAdaptiveMusicActive)
+    FAudio_DinosaurSoundData* SoundData = GetDinosaurSoundData(DinosaurType);
+    if (!SoundData)
     {
-        bAdaptiveMusicActive = true;
-        
-        if (UWorld* World = GetWorld())
-        {
-            World->GetTimerManager().SetTimer(
-                MusicUpdateTimer, 
-                this, 
-                &UAudioManager::UpdateMusicIntensity, 
-                2.0f, 
-                true
-            );
-        }
-        
-        UE_LOG(LogTemp, Warning, TEXT("AudioManager: Adaptive music started"));
-    }
-}
-
-void UAudioManager::StopAdaptiveMusic()
-{
-    if (bAdaptiveMusicActive)
-    {
-        bAdaptiveMusicActive = false;
-        
-        if (UWorld* World = GetWorld())
-        {
-            World->GetTimerManager().ClearTimer(MusicUpdateTimer);
-        }
-        
-        if (MusicAudioComponent && MusicAudioComponent->IsPlaying())
-        {
-            MusicAudioComponent->FadeOut(2.0f, 0.0f);
-        }
-        
-        UE_LOG(LogTemp, Warning, TEXT("AudioManager: Adaptive music stopped"));
-    }
-}
-
-void UAudioManager::UpdateMusicIntensity()
-{
-    if (!bAdaptiveMusicActive)
         return;
+    }
     
-    // Calculate music intensity based on threat level and biome
-    float Intensity = 0.5f; // Base intensity
-    
-    switch (CurrentThreatLevel)
+    UWorld* World = GetWorld();
+    if (!World)
     {
-        case EAudio_ThreatLevel::Safe:
-            Intensity = 0.3f;
+        return;
+    }
+    
+    APlayerController* PC = World->GetFirstPlayerController();
+    if (!PC || !PC->GetPawn())
+    {
+        return;
+    }
+    
+    FVector PlayerLocation = PC->GetPawn()->GetActorLocation();
+    float VolumeMultiplier = CalculateVolumeByDistance(Location, PlayerLocation, SoundData->MaxAudibleDistance);
+    VolumeMultiplier *= SoundData->VolumeMultiplier * VolumeScale * GlobalVolumeMultiplier;
+    
+    if (SoundData->RoarSound.LoadSynchronous())
+    {
+        UGameplayStatics::PlaySoundAtLocation(World, SoundData->RoarSound.Get(), Location, VolumeMultiplier);
+    }
+    
+    // Update threat level based on dinosaur type and proximity
+    float Distance = FVector::Dist(Location, PlayerLocation);
+    if (Distance < 2000.0f)
+    {
+        UpdateThreatLevel(EAudio_ThreatLevel::Critical);
+    }
+    else if (Distance < 4000.0f)
+    {
+        UpdateThreatLevel(EAudio_ThreatLevel::High);
+    }
+}
+
+void UAudioManager::PlayProximityWarning(EAudio_DinosaurType DinosaurType, const FVector& PlayerLocation, const FVector& DinosaurLocation)
+{
+    float Distance = FVector::Dist(PlayerLocation, DinosaurLocation);
+    
+    // Different warning distances for different dinosaurs
+    float WarningDistance = 3000.0f;
+    switch (DinosaurType)
+    {
+        case EAudio_DinosaurType::TRex:
+            WarningDistance = 5000.0f;
             break;
-        case EAudio_ThreatLevel::Caution:
-            Intensity = 0.6f;
+        case EAudio_DinosaurType::Raptor:
+            WarningDistance = 2000.0f;
             break;
-        case EAudio_ThreatLevel::Danger:
-            Intensity = 0.9f;
+        case EAudio_DinosaurType::Triceratops:
+            WarningDistance = 3000.0f;
             break;
-        case EAudio_ThreatLevel::Extreme:
-            Intensity = 1.2f;
+        case EAudio_DinosaurType::Brachiosaurus:
+            WarningDistance = 4000.0f;
             break;
     }
     
-    // Adjust for biome
-    switch (CurrentBiome)
+    if (Distance <= WarningDistance)
     {
-        case EAudio_BiomeType::Forest:
-            Intensity *= 1.1f; // Forest is slightly more intense
-            break;
-        case EAudio_BiomeType::Swamp:
-            Intensity *= 1.2f; // Swamp is more dangerous
-            break;
-        case EAudio_BiomeType::Desert:
-            Intensity *= 0.8f; // Desert is more sparse
-            break;
-        case EAudio_BiomeType::Mountain:
-            Intensity *= 1.3f; // Mountains are treacherous
-            break;
-        default:
-            break;
+        // Play appropriate warning narration
+        FString WarningClip;
+        switch (DinosaurType)
+        {
+            case EAudio_DinosaurType::TRex:
+                WarningClip = TEXT("TRexProximityWarning");
+                break;
+            case EAudio_DinosaurType::Raptor:
+                WarningClip = TEXT("RaptorHuntWarning");
+                break;
+            default:
+                WarningClip = TEXT("GenericDinosaurWarning");
+                break;
+        }
+        
+        PlayNarrationClip(WarningClip, false);
+    }
+}
+
+void UAudioManager::SetBiomeAmbience(const FString& BiomeName, const FVector& Location)
+{
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        return;
     }
     
-    UE_LOG(LogTemp, Log, TEXT("AudioManager: Music intensity updated to %.2f"), Intensity);
-}
-
-void UAudioManager::SetMasterVolume(float Volume)
-{
-    MasterVolume = FMath::Clamp(Volume, 0.0f, 1.0f);
-    UE_LOG(LogTemp, Warning, TEXT("AudioManager: Master volume set to %.2f"), MasterVolume);
-}
-
-void UAudioManager::SetAmbientVolume(float Volume)
-{
-    AmbientVolume = FMath::Clamp(Volume, 0.0f, 1.0f);
-    
-    if (AmbientAudioComponent)
+    // Stop current ambience
+    if (AmbienceComponent && IsValid(AmbienceComponent))
     {
-        AmbientAudioComponent->SetVolumeMultiplier(AmbientVolume * MasterVolume);
+        AmbienceComponent->FadeOut(2.0f, 0.0f);
     }
     
-    UE_LOG(LogTemp, Warning, TEXT("AudioManager: Ambient volume set to %.2f"), AmbientVolume);
+    // Load and play new ambience based on biome
+    FString AmbiencePath = FString::Printf(TEXT("/Game/Audio/Ambience/%s_Ambience"), *BiomeName);
+    
+    // Create new ambience component
+    AmbienceComponent = UGameplayStatics::SpawnSoundAtLocation(World, nullptr, Location);
+    if (AmbienceComponent)
+    {
+        AmbienceComponent->SetVolumeMultiplier(0.6f * GlobalVolumeMultiplier);
+        AmbienceComponent->FadeIn(3.0f, 1.0f);
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("Biome ambience set to: %s"), *BiomeName);
 }
 
-void UAudioManager::SetEffectsVolume(float Volume)
+void UAudioManager::UpdateThreatLevel(EAudio_ThreatLevel NewThreatLevel)
 {
-    EffectsVolume = FMath::Clamp(Volume, 0.0f, 1.0f);
-    UE_LOG(LogTemp, Warning, TEXT("AudioManager: Effects volume set to %.2f"), EffectsVolume);
+    if (CurrentThreatLevel == NewThreatLevel)
+    {
+        return;
+    }
+    
+    CurrentThreatLevel = NewThreatLevel;
+    
+    // Adjust ambience volume based on threat level
+    if (AmbienceComponent && IsValid(AmbienceComponent))
+    {
+        float ThreatVolumeMultiplier = 1.0f;
+        switch (CurrentThreatLevel)
+        {
+            case EAudio_ThreatLevel::None:
+                ThreatVolumeMultiplier = 1.0f;
+                break;
+            case EAudio_ThreatLevel::Low:
+                ThreatVolumeMultiplier = 0.8f;
+                break;
+            case EAudio_ThreatLevel::Medium:
+                ThreatVolumeMultiplier = 0.6f;
+                break;
+            case EAudio_ThreatLevel::High:
+                ThreatVolumeMultiplier = 0.4f;
+                break;
+            case EAudio_ThreatLevel::Critical:
+                ThreatVolumeMultiplier = 0.2f;
+                break;
+        }
+        
+        AmbienceComponent->SetVolumeMultiplier(ThreatVolumeMultiplier * GlobalVolumeMultiplier);
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("Threat level updated to: %d"), (int32)CurrentThreatLevel);
+}
+
+void UAudioManager::TriggerScreenShakeAudio(float Intensity, const FVector& SourceLocation)
+{
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        return;
+    }
+    
+    // Play rumble sound effect
+    if (ScreenShakeRumbleSound.LoadSynchronous())
+    {
+        UGameplayStatics::PlaySoundAtLocation(World, ScreenShakeRumbleSound.Get(), SourceLocation, Intensity);
+    }
+    
+    // Trigger camera shake for all players
+    APlayerController* PC = World->GetFirstPlayerController();
+    if (PC)
+    {
+        float ShakeIntensity = FMath::Clamp(Intensity, 0.1f, 2.0f);
+        // PC->ClientStartCameraShake(ScreenShakeClass, ShakeIntensity);
+    }
+}
+
+void UAudioManager::PlayNarrationClip(const FString& ClipName, bool bInterruptCurrent)
+{
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        return;
+    }
+    
+    // Stop current narration if interrupting
+    if (bInterruptCurrent && CurrentNarrationComponent && IsValid(CurrentNarrationComponent))
+    {
+        CurrentNarrationComponent->Stop();
+    }
+    
+    // Don't play if narration is already playing and not interrupting
+    if (!bInterruptCurrent && CurrentNarrationComponent && IsValid(CurrentNarrationComponent) && CurrentNarrationComponent->IsPlaying())
+    {
+        return;
+    }
+    
+    // Load narration sound
+    FString NarrationPath = FString::Printf(TEXT("/Game/Audio/Narration/%s"), *ClipName);
+    
+    // Create narration component
+    APlayerController* PC = World->GetFirstPlayerController();
+    if (PC && PC->GetPawn())
+    {
+        FVector PlayerLocation = PC->GetPawn()->GetActorLocation();
+        CurrentNarrationComponent = UGameplayStatics::SpawnSoundAtLocation(World, nullptr, PlayerLocation);
+        
+        if (CurrentNarrationComponent)
+        {
+            CurrentNarrationComponent->SetVolumeMultiplier(1.0f * GlobalVolumeMultiplier);
+        }
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("Playing narration clip: %s"), *ClipName);
+}
+
+void UAudioManager::StopNarration()
+{
+    if (CurrentNarrationComponent && IsValid(CurrentNarrationComponent))
+    {
+        CurrentNarrationComponent->FadeOut(1.0f, 0.0f);
+        CurrentNarrationComponent = nullptr;
+    }
+}
+
+FAudio_DinosaurSoundData* UAudioManager::GetDinosaurSoundData(EAudio_DinosaurType DinosaurType)
+{
+    for (FAudio_DinosaurSoundData& SoundData : DinosaurSoundDatabase)
+    {
+        if (SoundData.DinosaurType == DinosaurType)
+        {
+            return &SoundData;
+        }
+    }
+    return nullptr;
+}
+
+float UAudioManager::CalculateVolumeByDistance(const FVector& SourceLocation, const FVector& ListenerLocation, float MaxDistance)
+{
+    float Distance = FVector::Dist(SourceLocation, ListenerLocation);
+    if (Distance >= MaxDistance)
+    {
+        return 0.0f;
+    }
+    
+    // Logarithmic falloff for more realistic audio distance
+    float NormalizedDistance = Distance / MaxDistance;
+    return FMath::Clamp(1.0f - (NormalizedDistance * NormalizedDistance), 0.0f, 1.0f);
 }
