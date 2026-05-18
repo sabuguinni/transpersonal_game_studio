@@ -2,47 +2,51 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
-#include "Components/DirectionalLightComponent.h"
 #include "Components/ExponentialHeightFogComponent.h"
+#include "Components/DirectionalLightComponent.h"
 #include "Particles/ParticleSystemComponent.h"
 #include "Engine/DirectionalLight.h"
 #include "Engine/ExponentialHeightFog.h"
-#include "SharedTypes.h"
 #include "EnvArt_AtmosphericManager.generated.h"
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEnvArt_AtmosphericSettings
+struct TRANSPERSONALGAME_API FEnvArt_BiomeAtmosphere
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
-    FLinearColor SunColor = FLinearColor(1.0f, 0.86f, 0.63f, 1.0f);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmosphere")
+    FLinearColor FogColor = FLinearColor(0.7f, 0.8f, 0.6f, 1.0f);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
-    float SunIntensity = 8.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
-    FRotator SunRotation = FRotator(-15.0f, 45.0f, 0.0f);
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fog")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmosphere")
     float FogDensity = 0.02f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fog")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmosphere")
     float FogHeightFalloff = 0.2f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fog")
-    float FogMaxOpacity = 0.6f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmosphere")
+    FLinearColor LightColor = FLinearColor(1.0f, 0.9f, 0.7f, 1.0f);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fog")
-    FLinearColor FogColor = FLinearColor(0.9f, 0.8f, 0.6f, 1.0f);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmosphere")
+    float LightIntensity = 3.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Particles")
-    int32 ParticleEmitterCount = 3;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Particles")
-    float ParticleSpawnRadius = 2000.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmosphere")
+    FRotator SunAngle = FRotator(-30.0f, 45.0f, 0.0f);
 };
 
+UENUM(BlueprintType)
+enum class EEnvArt_BiomeType : uint8
+{
+    Savana,
+    Pantano,
+    Floresta,
+    Deserto,
+    Montanha
+};
+
+/**
+ * Manages atmospheric effects and lighting for different Cretaceous biomes
+ * Creates immersive prehistoric environments with proper lighting and fog
+ */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API AEnvArt_AtmosphericManager : public AActor
 {
@@ -54,58 +58,52 @@ public:
 protected:
     virtual void BeginPlay() override;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmospheric Settings")
-    FEnvArt_AtmosphericSettings AtmosphericSettings;
-
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
     class USceneComponent* RootSceneComponent;
 
-    // References to scene lighting actors
-    UPROPERTY(BlueprintReadOnly, Category = "Scene References")
-    ADirectionalLight* DirectionalLightActor;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmosphere")
+    TMap<EEnvArt_BiomeType, FEnvArt_BiomeAtmosphere> BiomeAtmospheres;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Scene References")
-    AExponentialHeightFog* FogActor;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmosphere")
+    EEnvArt_BiomeType CurrentBiome = EEnvArt_BiomeType::Savana;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Scene References")
-    TArray<AActor*> ParticleEmitters;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmosphere")
+    float AtmosphereTransitionTime = 5.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmosphere")
+    bool bEnableVolumetricFog = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmosphere")
+    bool bEnableAtmosphericParticles = true;
 
 public:
-    virtual void Tick(float DeltaTime) override;
+    UFUNCTION(BlueprintCallable, Category = "Atmosphere")
+    void SetBiomeAtmosphere(EEnvArt_BiomeType BiomeType);
 
-    UFUNCTION(BlueprintCallable, Category = "Atmospheric Control")
-    void SetupGoldenHourLighting();
+    UFUNCTION(BlueprintCallable, Category = "Atmosphere")
+    void CreateVolumetricFog(const FVector& Location, const FEnvArt_BiomeAtmosphere& Atmosphere);
 
-    UFUNCTION(BlueprintCallable, Category = "Atmospheric Control")
-    void ConfigureAtmosphericFog();
+    UFUNCTION(BlueprintCallable, Category = "Atmosphere")
+    void CreateAtmosphericParticles(const FVector& Location, EEnvArt_BiomeType BiomeType);
 
-    UFUNCTION(BlueprintCallable, Category = "Atmospheric Control")
-    void CreateParticleEffects();
+    UFUNCTION(BlueprintCallable, Category = "Atmosphere")
+    void UpdateDirectionalLighting(const FEnvArt_BiomeAtmosphere& Atmosphere);
 
-    UFUNCTION(BlueprintCallable, Category = "Atmospheric Control")
-    void ApplyAtmosphericSettings(const FEnvArt_AtmosphericSettings& NewSettings);
+    UFUNCTION(BlueprintCallable, Category = "Atmosphere")
+    FEnvArt_BiomeAtmosphere GetBiomeAtmosphere(EEnvArt_BiomeType BiomeType) const;
 
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Editor Tools")
-    void RefreshAtmosphericEffects();
+    UFUNCTION(BlueprintCallable, Category = "Atmosphere")
+    void InitializeBiomeAtmospheres();
 
-    UFUNCTION(BlueprintCallable, Category = "Time of Day")
-    void SetTimeOfDay(float TimeHours); // 0-24 hour format
-
-    UFUNCTION(BlueprintCallable, Category = "Weather")
-    void SetWeatherIntensity(float Intensity); // 0-1 range
-
-protected:
-    UFUNCTION()
-    void FindSceneLightingActors();
-
-    UFUNCTION()
-    FRotator CalculateSunRotationForTime(float TimeHours);
-
-    UFUNCTION()
-    FLinearColor CalculateSunColorForTime(float TimeHours);
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Atmosphere")
+    void ApplyCurrentAtmosphere();
 
 private:
-    float CurrentTimeOfDay = 12.0f; // Start at noon
-    float CurrentWeatherIntensity = 0.0f;
-    bool bAtmosphericEffectsInitialized = false;
+    void SetupDefaultAtmospheres();
+    
+    UPROPERTY()
+    TArray<class AExponentialHeightFog*> SpawnedFogActors;
+
+    UPROPERTY()
+    TArray<class AEmitter*> SpawnedParticleActors;
 };
