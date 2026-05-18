@@ -1,161 +1,236 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/GameInstanceSubsystem.h"
+#include "GameFramework/Actor.h"
+#include "Components/ActorComponent.h"
 #include "Engine/DataTable.h"
 #include "Narr_DialogueSystem.generated.h"
 
+// Dialogue node types for branching conversations
 UENUM(BlueprintType)
-enum class ENarr_DialogueType : uint8
+enum class ENarr_DialogueNodeType : uint8
 {
-    Greeting,
-    Warning,
-    Information,
-    Quest,
-    Lore,
-    Survival_Tip
+    Standard        UMETA(DisplayName = "Standard"),
+    Choice          UMETA(DisplayName = "Player Choice"),
+    Conditional     UMETA(DisplayName = "Conditional"),
+    QuestGiver      UMETA(DisplayName = "Quest Giver"),
+    Trader          UMETA(DisplayName = "Trader"),
+    Warning         UMETA(DisplayName = "Warning"),
+    Lore            UMETA(DisplayName = "Lore")
 };
 
+// Character archetypes for dialogue system
 UENUM(BlueprintType)
-enum class ENarr_SpeakerType : uint8
+enum class ENarr_CharacterArchetype : uint8
 {
-    Ancient_Storyteller,
-    Tribal_Warrior,
-    Experienced_Hunter,
-    Wise_Elder,
-    Young_Scout,
-    Shaman_Healer
+    TribalHunter    UMETA(DisplayName = "Tribal Hunter"),
+    TribalGatherer  UMETA(DisplayName = "Tribal Gatherer"),
+    TribalElder     UMETA(DisplayName = "Tribal Elder"),
+    TribalScout     UMETA(DisplayName = "Tribal Scout"),
+    TribalCraftsman UMETA(DisplayName = "Tribal Craftsman"),
+    Narrator        UMETA(DisplayName = "Narrator"),
+    Survivor        UMETA(DisplayName = "Fellow Survivor"),
+    Stranger        UMETA(DisplayName = "Mysterious Stranger")
 };
 
+// Dialogue trigger conditions
+UENUM(BlueprintType)
+enum class ENarr_DialogueTrigger : uint8
+{
+    Proximity       UMETA(DisplayName = "Player Proximity"),
+    QuestComplete   UMETA(DisplayName = "Quest Completed"),
+    QuestActive     UMETA(DisplayName = "Quest Active"),
+    ItemPossessed   UMETA(DisplayName = "Has Item"),
+    TimeOfDay       UMETA(DisplayName = "Time of Day"),
+    LocationBased   UMETA(DisplayName = "Location Based"),
+    HealthLow       UMETA(DisplayName = "Low Health"),
+    FirstVisit      UMETA(DisplayName = "First Visit")
+};
+
+// Single dialogue line data structure
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FNarr_DialogueEntry
+struct TRANSPERSONALGAME_API FNarr_DialogueLine
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    FString DialogueID;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    ENarr_SpeakerType Speaker;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    ENarr_DialogueType Type;
+    FString SpeakerName;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
     FText DialogueText;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    FString AudioURL;
+    ENarr_CharacterArchetype SpeakerArchetype;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    float Duration;
+    float DisplayDuration;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    TArray<FString> RequiredConditions;
+    FString VoiceAudioPath;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    bool bIsRepeatable;
+    TArray<FString> PlayerChoices;
 
-    FNarr_DialogueEntry()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    TArray<int32> NextDialogueIDs;
+
+    FNarr_DialogueLine()
     {
-        Speaker = ENarr_SpeakerType::Ancient_Storyteller;
-        Type = ENarr_DialogueType::Information;
-        Duration = 5.0f;
-        bIsRepeatable = true;
+        SpeakerName = TEXT("Unknown");
+        DialogueText = FText::FromString(TEXT("..."));
+        SpeakerArchetype = ENarr_CharacterArchetype::Survivor;
+        DisplayDuration = 3.0f;
+        VoiceAudioPath = TEXT("");
     }
 };
 
+// Complete dialogue tree structure
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FNarr_NarrativeEvent
+struct TRANSPERSONALGAME_API FNarr_DialogueTree
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    FString EventID;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue Tree")
+    FString TreeName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    FText EventTitle;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue Tree")
+    ENarr_DialogueNodeType TreeType;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    FText EventDescription;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue Tree")
+    ENarr_DialogueTrigger TriggerCondition;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    TArray<FNarr_DialogueEntry> DialogueSequence;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue Tree")
+    TArray<FNarr_DialogueLine> DialogueLines;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    FVector TriggerLocation;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue Tree")
+    int32 CurrentLineIndex;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    float TriggerRadius;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue Tree")
+    bool bIsRepeatable;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue Tree")
     bool bHasBeenTriggered;
 
-    FNarr_NarrativeEvent()
+    FNarr_DialogueTree()
     {
-        TriggerLocation = FVector::ZeroVector;
-        TriggerRadius = 1000.0f;
+        TreeName = TEXT("Default_Tree");
+        TreeType = ENarr_DialogueNodeType::Standard;
+        TriggerCondition = ENarr_DialogueTrigger::Proximity;
+        CurrentLineIndex = 0;
+        bIsRepeatable = true;
         bHasBeenTriggered = false;
     }
 };
 
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UNarr_DialogueSystem : public UGameInstanceSubsystem
+// Main dialogue system component
+UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UNarr_DialogueComponent : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    UNarr_DialogueSystem();
-
-    // USubsystem interface
-    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
-    virtual void Deinitialize() override;
-
-    // Dialogue Management
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void PlayDialogue(const FString& DialogueID, AActor* Speaker = nullptr);
-
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void RegisterDialogueEntry(const FNarr_DialogueEntry& Entry);
-
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    bool CanPlayDialogue(const FString& DialogueID) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void TriggerNarrativeEvent(const FString& EventID, const FVector& PlayerLocation);
-
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void RegisterNarrativeEvent(const FNarr_NarrativeEvent& Event);
-
-    // Survival Narrative
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void TriggerSurvivalTip(const FString& TipCategory);
-
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void TriggerDangerWarning(const FString& ThreatType, const FVector& ThreatLocation);
-
-    // Lore System
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void UnlockLoreEntry(const FString& LoreID);
-
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    TArray<FString> GetUnlockedLore() const;
+    UNarr_DialogueComponent();
 
 protected:
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    TMap<FString, FNarr_DialogueEntry> DialogueDatabase;
+    virtual void BeginPlay() override;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    TMap<FString, FNarr_NarrativeEvent> NarrativeEvents;
+public:
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    TArray<FString> UnlockedLoreEntries;
+    // Dialogue management functions
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    bool StartDialogue(const FString& TreeName);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    TArray<FString> PlayedDialogues;
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    void EndDialogue();
 
-    // Internal functions
-    void InitializeDefaultDialogues();
-    void InitializeNarrativeEvents();
-    bool CheckDialogueConditions(const FNarr_DialogueEntry& Entry) const;
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    bool AdvanceDialogue();
+
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    void SelectPlayerChoice(int32 ChoiceIndex);
+
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    FNarr_DialogueLine GetCurrentDialogueLine() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    bool IsDialogueActive() const { return bDialogueActive; }
+
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    void RegisterDialogueTree(const FNarr_DialogueTree& NewTree);
+
+    // Trigger condition checking
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    bool CheckTriggerCondition(ENarr_DialogueTrigger TriggerType, const FString& ConditionData = TEXT(""));
+
+protected:
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue System")
+    TArray<FNarr_DialogueTree> DialogueTrees;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue System")
+    FString CurrentTreeName;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue System")
+    bool bDialogueActive;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue System")
+    float ProximityTriggerDistance;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue System")
+    AActor* PlayerReference;
+
+private:
+    FNarr_DialogueTree* GetDialogueTree(const FString& TreeName);
+    void UpdateProximityTriggers();
 };
+
+// Dialogue manager actor for scene-wide dialogue coordination
+UCLASS()
+class TRANSPERSONALGAME_API ANarr_DialogueManager : public AActor
+{
+    GENERATED_BODY()
+
+public:
+    ANarr_DialogueManager();
+
+protected:
+    virtual void BeginPlay() override;
+
+public:
+    virtual void Tick(float DeltaTime) override;
+
+    // Global dialogue management
+    UFUNCTION(BlueprintCallable, Category = "Dialogue Manager")
+    void InitializeDialogueSystem();
+
+    UFUNCTION(BlueprintCallable, Category = "Dialogue Manager")
+    void RegisterDialogueActor(AActor* DialogueActor);
+
+    UFUNCTION(BlueprintCallable, Category = "Dialogue Manager")
+    void TriggerLocationBasedDialogue(const FString& LocationName);
+
+    UFUNCTION(BlueprintCallable, Category = "Dialogue Manager")
+    void SetGlobalDialogueFlag(const FString& FlagName, bool bValue);
+
+    UFUNCTION(BlueprintCallable, Category = "Dialogue Manager")
+    bool GetGlobalDialogueFlag(const FString& FlagName) const;
+
+protected:
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue Manager")
+    TArray<AActor*> RegisteredDialogueActors;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue Manager")
+    TMap<FString, bool> GlobalDialogueFlags;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue Manager")
+    UNarr_DialogueComponent* DialogueComponent;
+
+private:
+    void LoadPresetDialogueTrees();
+    void CreateTribalHunterDialogue();
+    void CreateTribalGathererDialogue();
+    void CreateTribalElderDialogue();
+    void CreateNarratorDialogue();
+};
+
+#include "Narr_DialogueSystem.generated.h"
