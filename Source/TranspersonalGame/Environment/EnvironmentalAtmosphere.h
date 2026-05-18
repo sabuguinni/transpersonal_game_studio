@@ -1,102 +1,80 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Components/ActorComponent.h"
-#include "Engine/DirectionalLight.h"
+#include "GameFramework/Actor.h"
+#include "Components/DirectionalLightComponent.h"
 #include "Components/ExponentialHeightFogComponent.h"
-#include "Particles/ParticleSystemComponent.h"
+#include "Engine/DirectionalLight.h"
+#include "Engine/ExponentialHeightFog.h"
 #include "EnvironmentalAtmosphere.generated.h"
 
-UENUM(BlueprintType)
-enum class EEnvArt_AtmosphereType : uint8
+/**
+ * Environmental Atmosphere Manager for Cretaceous period ambiance
+ * Manages dynamic lighting, fog, and atmospheric effects for different biomes
+ */
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API AEnvironmentalAtmosphere : public AActor
 {
-    Forest      UMETA(DisplayName = "Forest Atmosphere"),
-    Swamp       UMETA(DisplayName = "Swamp Atmosphere"),
-    Desert      UMETA(DisplayName = "Desert Atmosphere"),
-    Mountain    UMETA(DisplayName = "Mountain Atmosphere"),
-    Savanna     UMETA(DisplayName = "Savanna Atmosphere")
-};
-
-USTRUCT(BlueprintType)
-struct FEnvArt_AtmosphereSettings
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
-    FLinearColor SunColor = FLinearColor::White;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
-    float SunIntensity = 3.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
-    float SunAngle = 45.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fog")
-    FLinearColor FogColor = FLinearColor(0.7f, 0.8f, 0.9f, 1.0f);
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fog")
-    float FogDensity = 0.02f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fog")
-    float FogHeightFalloff = 0.2f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Particles")
-    bool bEnablePollenParticles = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Particles")
-    float ParticleSpawnRate = 10.0f;
-};
-
-UCLASS(ClassGroup=(Environment), meta=(BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UEnvironmentalAtmosphere : public UActorComponent
-{
-    GENERATED_BODY()
+	GENERATED_BODY()
 
 public:
-    UEnvironmentalAtmosphere();
+	AEnvironmentalAtmosphere();
 
 protected:
-    virtual void BeginPlay() override;
+	virtual void BeginPlay() override;
 
 public:
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+	virtual void Tick(float DeltaTime) override;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmosphere")
-    EEnvArt_AtmosphereType AtmosphereType = EEnvArt_AtmosphereType::Forest;
+	/** Configure lighting for golden hour Cretaceous atmosphere */
+	UFUNCTION(BlueprintCallable, Category = "Atmosphere")
+	void SetCretaceousLighting();
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmosphere")
-    FEnvArt_AtmosphereSettings AtmosphereSettings;
+	/** Configure atmospheric fog for prehistoric ambiance */
+	UFUNCTION(BlueprintCallable, Category = "Atmosphere")
+	void SetCretaceousFog();
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "References")
-    ADirectionalLight* SunLight;
+	/** Update atmosphere based on time of day */
+	UFUNCTION(BlueprintCallable, Category = "Atmosphere")
+	void UpdateAtmosphereForTimeOfDay(float TimeOfDay);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "References")
-    UExponentialHeightFogComponent* HeightFog;
+protected:
+	/** Reference to the main directional light (sun) */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Lighting")
+	class ADirectionalLight* SunLight;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "References")
-    UParticleSystemComponent* PollenParticles;
+	/** Reference to the atmospheric fog */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Atmosphere")
+	class AExponentialHeightFog* AtmosphericFog;
 
-    UFUNCTION(BlueprintCallable, Category = "Atmosphere")
-    void SetAtmosphereType(EEnvArt_AtmosphereType NewType);
+	/** Sun light color for different times of day */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
+	FLinearColor GoldenHourColor;
 
-    UFUNCTION(BlueprintCallable, Category = "Atmosphere")
-    void ApplyAtmosphereSettings();
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
+	FLinearColor MidDayColor;
 
-    UFUNCTION(BlueprintCallable, Category = "Atmosphere")
-    void UpdateSunPosition(float TimeOfDay);
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
+	FLinearColor SunsetColor;
 
-    UFUNCTION(BlueprintCallable, Category = "Atmosphere")
-    void SetFogSettings(FLinearColor Color, float Density, float HeightFalloff);
+	/** Fog density settings */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmosphere", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float BaseFogDensity;
 
-    UFUNCTION(BlueprintCallable, Category = "Atmosphere")
-    void TogglePollenParticles(bool bEnabled);
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmosphere", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float FogHeightFalloff;
+
+	/** Atmospheric scattering colors */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmosphere")
+	FLinearColor InscatteringColor;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmosphere")
+	FLinearColor DirectionalInscatteringColor;
 
 private:
-    UPROPERTY()
-    float CurrentTimeOfDay = 12.0f; // Noon by default
+	/** Find or create the main directional light */
+	void FindOrCreateSunLight();
 
-    void InitializeAtmosphereForType();
-    FEnvArt_AtmosphereSettings GetDefaultSettingsForType(EEnvArt_AtmosphereType Type);
+	/** Find or create atmospheric fog */
+	void FindOrCreateAtmosphericFog();
 };
-
-#include "EnvironmentalAtmosphere.generated.h"
