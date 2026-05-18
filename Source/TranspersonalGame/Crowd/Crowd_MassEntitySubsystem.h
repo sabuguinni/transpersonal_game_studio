@@ -4,42 +4,46 @@
 #include "Subsystems/WorldSubsystem.h"
 #include "MassEntityTypes.h"
 #include "MassEntitySubsystem.h"
+#include "MassProcessingTypes.h"
 #include "MassSpawnerTypes.h"
-#include "MassCommonFragments.h"
 #include "Engine/World.h"
 #include "Crowd_MassEntitySubsystem.generated.h"
 
 // Forward declarations
 class UMassEntitySubsystem;
-class AMassSpawner;
+struct FMassEntityHandle;
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FCrowd_EntityConfig
+struct TRANSPERSONALGAME_API FCrowd_EntityData
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Config")
-    int32 MaxEntities = 1000;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Entity")
+    FVector Position;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Config")
-    float SpawnRadius = 5000.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Entity")
+    FVector Velocity;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Config")
-    float MovementSpeed = 300.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Entity")
+    FVector TargetLocation;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Config")
-    float AvoidanceRadius = 150.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Entity")
+    float Speed;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Config")
-    float CombatFleeDistance = 2000.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Entity")
+    float WanderRadius;
 
-    FCrowd_EntityConfig()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Entity")
+    int32 EntityID;
+
+    FCrowd_EntityData()
+        : Position(FVector::ZeroVector)
+        , Velocity(FVector::ZeroVector)
+        , TargetLocation(FVector::ZeroVector)
+        , Speed(150.0f)
+        , WanderRadius(1000.0f)
+        , EntityID(-1)
     {
-        MaxEntities = 1000;
-        SpawnRadius = 5000.0f;
-        MovementSpeed = 300.0f;
-        AvoidanceRadius = 150.0f;
-        CombatFleeDistance = 2000.0f;
     }
 };
 
@@ -48,24 +52,28 @@ struct TRANSPERSONALGAME_API FCrowd_BiomeSettings
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    FVector BiomeCenter = FVector::ZeroVector;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Biome")
+    FVector BiomeCenter;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float BiomeRadius = 10000.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Biome")
+    float BiomeRadius;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    int32 TargetPopulation = 500;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Biome")
+    int32 MaxCrowdSize;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    FString BiomeName = TEXT("Unknown");
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Biome")
+    float SpawnDensity;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Biome")
+    FString BiomeName;
 
     FCrowd_BiomeSettings()
+        : BiomeCenter(FVector::ZeroVector)
+        , BiomeRadius(5000.0f)
+        , MaxCrowdSize(500)
+        , SpawnDensity(0.1f)
+        , BiomeName(TEXT("Unknown"))
     {
-        BiomeCenter = FVector::ZeroVector;
-        BiomeRadius = 10000.0f;
-        TargetPopulation = 500;
-        BiomeName = TEXT("Unknown");
     }
 };
 
@@ -82,72 +90,75 @@ public:
     virtual void Deinitialize() override;
     virtual bool ShouldCreateSubsystem(UObject* Outer) const override;
 
-    // Mass Entity Management
+    // Mass Entity crowd simulation interface
     UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    void InitializeCrowdSystem();
+    void InitializeCrowdSimulation();
 
     UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    void SpawnCrowdEntitiesInBiome(const FCrowd_BiomeSettings& BiomeSettings);
+    void SpawnCrowdInBiome(const FCrowd_BiomeSettings& BiomeSettings);
 
     UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    void UpdateCrowdBehavior(float DeltaTime);
+    void UpdateCrowdSimulation(float DeltaTime);
 
     UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    void HandleCombatDetection(const FVector& CombatLocation, float CombatRadius);
+    void SetCrowdBehaviorMode(int32 BehaviorMode);
 
     UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    int32 GetActiveCrowdEntityCount() const;
+    int32 GetActiveCrowdCount() const;
 
     UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    void SetCrowdConfiguration(const FCrowd_EntityConfig& NewConfig);
+    void ClearAllCrowds();
 
+    // Biome management
     UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    FCrowd_EntityConfig GetCrowdConfiguration() const;
-
-    // Biome Management
-    UFUNCTION(BlueprintCallable, Category = "Biome Management")
     void RegisterBiome(const FCrowd_BiomeSettings& BiomeSettings);
 
-    UFUNCTION(BlueprintCallable, Category = "Biome Management")
-    void PopulateAllBiomes();
-
-    UFUNCTION(BlueprintCallable, Category = "Biome Management")
+    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
     TArray<FCrowd_BiomeSettings> GetRegisteredBiomes() const;
 
 protected:
-    // Mass Entity System
+    // Mass Entity system reference
     UPROPERTY()
-    UMassEntitySubsystem* MassEntitySubsystem;
+    TObjectPtr<UMassEntitySubsystem> MassEntitySubsystem;
 
-    // Crowd Configuration
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Config", meta = (AllowPrivateAccess = "true"))
-    FCrowd_EntityConfig CrowdConfig;
+    // Crowd entity data storage
+    UPROPERTY()
+    TArray<FCrowd_EntityData> CrowdEntities;
 
-    // Biome Registry
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biomes", meta = (AllowPrivateAccess = "true"))
+    // Biome settings storage
+    UPROPERTY()
     TArray<FCrowd_BiomeSettings> RegisteredBiomes;
 
-    // Active Entities
-    UPROPERTY()
-    TArray<FMassEntityHandle> ActiveCrowdEntities;
+    // Simulation parameters
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Simulation", meta = (AllowPrivateAccess = "true"))
+    float SimulationTickRate;
 
-    // Spawners
-    UPROPERTY()
-    TArray<AMassSpawner*> BiomeSpawners;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Simulation", meta = (AllowPrivateAccess = "true"))
+    int32 MaxEntitiesPerFrame;
 
-    // Internal Methods
-    void CreateDefaultBiomes();
-    void InitializeMassEntityArchetype();
-    FMassEntityHandle SpawnCrowdEntity(const FVector& Location, const FCrowd_BiomeSettings& BiomeSettings);
-    void UpdateEntityMovement(FMassEntityHandle EntityHandle, float DeltaTime);
-    void ProcessCombatAvoidance(FMassEntityHandle EntityHandle, const FVector& CombatLocation, float CombatRadius);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Simulation", meta = (AllowPrivateAccess = "true"))
+    bool bIsSimulationActive;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Simulation", meta = (AllowPrivateAccess = "true"))
+    int32 CurrentBehaviorMode;
 
 private:
-    // System State
-    bool bIsInitialized = false;
-    float LastUpdateTime = 0.0f;
+    // Internal crowd management
+    void ProcessCrowdMovement(float DeltaTime);
+    void ProcessCrowdBehavior(float DeltaTime);
+    void UpdateEntityPositions(float DeltaTime);
     
-    // Performance Tracking
-    int32 MaxEntitiesPerFrame = 100;
-    int32 CurrentFrameEntityCount = 0;
+    // Utility functions
+    FVector CalculateFlockingForce(const FCrowd_EntityData& Entity) const;
+    FVector CalculateSeparationForce(const FCrowd_EntityData& Entity) const;
+    FVector CalculateWanderForce(const FCrowd_EntityData& Entity) const;
+    bool IsEntityInBiome(const FCrowd_EntityData& Entity, const FCrowd_BiomeSettings& Biome) const;
+
+    // Performance tracking
+    float LastUpdateTime;
+    int32 EntitiesProcessedThisFrame;
+    
+    // Constants
+    static constexpr float DefaultTickRate = 0.016f; // ~60 FPS
+    static constexpr int32 DefaultMaxEntitiesPerFrame = 1000;
 };
