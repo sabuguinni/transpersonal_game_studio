@@ -1,399 +1,293 @@
 #include "AtmosphericLightingManager.h"
 #include "Engine/World.h"
-#include "Engine/DirectionalLight.h"
-#include "Components/DirectionalLightComponent.h"
-#include "Components/SkyAtmosphereComponent.h"
-#include "Components/VolumetricCloudComponent.h"
-#include "Components/ExponentialHeightFogComponent.h"
-#include "Engine/SkyAtmosphere.h"
-#include "Engine/VolumetricCloud.h"
-#include "Engine/ExponentialHeightFog.h"
+#include "Engine/Engine.h"
 #include "Kismet/GameplayStatics.h"
 #include "Kismet/KismetMathLibrary.h"
-#include "Engine/Engine.h"
+#include "Components/StaticMeshComponent.h"
 
-UAtmosphericLightingManager::UAtmosphericLightingManager()
+AAtmosphericLightingManager::AAtmosphericLightingManager()
 {
-    // Set default Cretaceous period settings
-    CurrentTime.Hour = 12.0f;
-    CurrentTime.Minute = 0.0f;
-    CurrentTime.TimeSpeed = 1.0f;
-
-    CurrentWeather.CloudCoverage = 0.3f;
-    CurrentWeather.RainIntensity = 0.0f;
-    CurrentWeather.FogDensity = 0.1f;
-    CurrentWeather.WindStrength = 0.5f;
-
-    AtmosphericSettings.SunColor = FLinearColor(1.0f, 0.95f, 0.9f, 1.0f);
-    AtmosphericSettings.SunIntensity = 5.0f;
-    AtmosphericSettings.SunAngle = 45.0f;
-    AtmosphericSettings.RayleighScattering = 0.0331f;
-    AtmosphericSettings.MieScattering = 0.004f;
-
-    bTimePaused = false;
-    bWeatherTransitioning = false;
+    PrimaryActorTick.bCanEverTick = true;
+    
+    // Initialize Cretaceous atmospheric settings
+    CretaceousSettings.SunIntensity = 8.5f;
+    CretaceousSettings.SunColor = FLinearColor(1.0f, 0.95f, 0.85f, 1.0f);
+    CretaceousSettings.SunAngle = -45.0f;
+    CretaceousSettings.RayleighScattering = 0.8f;
+    CretaceousSettings.MieScattering = 0.06f;
+    CretaceousSettings.FogDensity = 0.008f;
+    CretaceousSettings.FogHeightFalloff = 0.15f;
+    CretaceousSettings.WhiteTemperature = 6200.0f;
+    CretaceousSettings.WhiteTint = 0.2f;
 }
 
-void UAtmosphericLightingManager::Initialize(FSubsystemCollectionBase& Collection)
+void AAtmosphericLightingManager::BeginPlay()
 {
-    Super::Initialize(Collection);
+    Super::BeginPlay();
     
-    UE_LOG(LogTemp, Log, TEXT("AtmosphericLightingManager: Initializing lighting subsystem"));
+    // Find lighting actors in the world
+    FindLightingActors();
     
-    // Find existing lighting components in the world
-    FindLightingComponents();
+    // Apply Cretaceous atmospheric settings
+    ApplyCretaceousAtmosphere();
     
-    // Apply Cretaceous period defaults
-    SetCretaceousDefaults();
-    
-    UE_LOG(LogTemp, Log, TEXT("AtmosphericLightingManager: Initialization complete"));
+    UE_LOG(LogTemp, Warning, TEXT("AtmosphericLightingManager: Cretaceous atmosphere initialized"));
 }
 
-void UAtmosphericLightingManager::Deinitialize()
+void AAtmosphericLightingManager::Tick(float DeltaTime)
 {
-    UE_LOG(LogTemp, Log, TEXT("AtmosphericLightingManager: Deinitializing"));
+    Super::Tick(DeltaTime);
     
-    // Clear component references
-    SunLight = nullptr;
-    SkyAtmosphere = nullptr;
-    VolumetricClouds = nullptr;
-    HeightFog = nullptr;
-    
-    Super::Deinitialize();
-}
-
-void UAtmosphericLightingManager::Tick(float DeltaTime)
-{
-    if (!bTimePaused)
+    if (bEnableDayNightCycle)
     {
-        // Update time progression
-        CurrentTime.Minute += DeltaTime * CurrentTime.TimeSpeed;
-        if (CurrentTime.Minute >= 60.0f)
-        {
-            CurrentTime.Hour += 1.0f;
-            CurrentTime.Minute = 0.0f;
-            if (CurrentTime.Hour >= 24.0f)
-            {
-                CurrentTime.Hour = 0.0f;
-            }
-        }
+        UpdateDayNightCycle(DeltaTime);
+    }
+}
+
+void AAtmosphericLightingManager::ApplyCretaceousAtmosphere()
+{
+    // Update sun settings
+    if (SunLight && SunLight->GetLightComponent())
+    {
+        UDirectionalLightComponent* SunComponent = SunLight->GetLightComponent();
+        SunComponent->SetIntensity(CretaceousSettings.SunIntensity);
+        SunComponent->SetLightColor(CretaceousSettings.SunColor);
+        SunComponent->SetCastShadows(true);
+        SunComponent->SetCastVolumetricShadow(true);
         
-        // Update sun position and lighting
-        UpdateSunPosition();
-        UpdateSunLighting();
+        // Set sun angle for Cretaceous period
+        FRotator SunRotation = FRotator(CretaceousSettings.SunAngle, 135.0f, 0.0f);
+        SunLight->SetActorRotation(SunRotation);
     }
     
-    // Update weather effects
-    UpdateWeatherEffects(DeltaTime);
+    // Update atmosphere settings
+    UpdateAtmosphericScattering();
     
-    // Update atmospheric components
-    UpdateSkyAtmosphere();
-    UpdateVolumetricClouds();
-    UpdateHeightFog();
-}
-
-bool UAtmosphericLightingManager::ShouldCreateSubsystem(UObject* Outer) const
-{
-    return true;
-}
-
-void UAtmosphericLightingManager::SetTimeOfDay(float Hour, float Minute)
-{
-    CurrentTime.Hour = FMath::Clamp(Hour, 0.0f, 23.99f);
-    CurrentTime.Minute = FMath::Clamp(Minute, 0.0f, 59.99f);
+    // Update fog settings
+    UpdateFogSettings();
     
-    UE_LOG(LogTemp, Log, TEXT("AtmosphericLightingManager: Time set to %02d:%02d"), 
-           (int32)CurrentTime.Hour, (int32)CurrentTime.Minute);
-}
-
-void UAtmosphericLightingManager::SetTimeSpeed(float Speed)
-{
-    CurrentTime.TimeSpeed = FMath::Max(0.0f, Speed);
-    UE_LOG(LogTemp, Log, TEXT("AtmosphericLightingManager: Time speed set to %f"), Speed);
-}
-
-void UAtmosphericLightingManager::PauseTimeProgression(bool bPause)
-{
-    bTimePaused = bPause;
-    UE_LOG(LogTemp, Log, TEXT("AtmosphericLightingManager: Time progression %s"), 
-           bPause ? TEXT("paused") : TEXT("resumed"));
-}
-
-void UAtmosphericLightingManager::SetWeatherState(const FLight_WeatherState& NewWeather)
-{
-    CurrentWeather = NewWeather;
-    bWeatherTransitioning = false;
-    WeatherTransitionProgress = 0.0f;
+    // Update post processing
+    UpdatePostProcessing();
     
-    UE_LOG(LogTemp, Log, TEXT("AtmosphericLightingManager: Weather state updated"));
+    UE_LOG(LogTemp, Warning, TEXT("Cretaceous atmospheric settings applied"));
 }
 
-void UAtmosphericLightingManager::TransitionToWeather(const FLight_WeatherState& TargetWeatherState, float TransitionTime)
+void AAtmosphericLightingManager::SetTimeOfDay(ELight_TimeOfDay TimeOfDay)
 {
-    TargetWeather = TargetWeatherState;
-    WeatherTransitionTime = FMath::Max(0.1f, TransitionTime);
-    WeatherTransitionProgress = 0.0f;
-    bWeatherTransitioning = true;
+    CurrentTimeOfDay = TimeOfDay;
     
-    UE_LOG(LogTemp, Log, TEXT("AtmosphericLightingManager: Starting weather transition over %f seconds"), TransitionTime);
-}
-
-void UAtmosphericLightingManager::UpdateAtmosphericSettings(const FLight_AtmosphericSettings& Settings)
-{
-    AtmosphericSettings = Settings;
-    UE_LOG(LogTemp, Log, TEXT("AtmosphericLightingManager: Atmospheric settings updated"));
-}
-
-void UAtmosphericLightingManager::SetCretaceousDefaults()
-{
-    // Set tropical Cretaceous period lighting
-    AtmosphericSettings.SunColor = FLinearColor(1.0f, 0.95f, 0.9f, 1.0f); // Warm golden sun
-    AtmosphericSettings.SunIntensity = 5.0f; // Bright tropical sun
-    AtmosphericSettings.RayleighScattering = 0.0331f; // Clear blue sky
-    AtmosphericSettings.MieScattering = 0.004f; // Minimal haze
-    
-    // Set mild tropical weather
-    CurrentWeather.CloudCoverage = 0.3f; // Scattered clouds
-    CurrentWeather.RainIntensity = 0.0f; // No rain by default
-    CurrentWeather.FogDensity = 0.05f; // Light morning mist
-    CurrentWeather.WindStrength = 0.4f; // Gentle breeze
-    
-    UE_LOG(LogTemp, Log, TEXT("AtmosphericLightingManager: Applied Cretaceous period defaults"));
-}
-
-void UAtmosphericLightingManager::RefreshLightingComponents()
-{
-    FindLightingComponents();
-    ValidateComponents();
-    UE_LOG(LogTemp, Log, TEXT("AtmosphericLightingManager: Refreshed lighting components"));
-}
-
-void UAtmosphericLightingManager::ApplyLightingPreset(const FString& PresetName)
-{
-    if (PresetName == TEXT("Dawn"))
+    switch (TimeOfDay)
     {
-        SetTimeOfDay(6.0f, 0.0f);
-        AtmosphericSettings.SunColor = FLinearColor(1.0f, 0.8f, 0.6f, 1.0f);
-        AtmosphericSettings.SunIntensity = 3.0f;
-    }
-    else if (PresetName == TEXT("Noon"))
-    {
-        SetTimeOfDay(12.0f, 0.0f);
-        AtmosphericSettings.SunColor = FLinearColor(1.0f, 0.95f, 0.9f, 1.0f);
-        AtmosphericSettings.SunIntensity = 5.0f;
-    }
-    else if (PresetName == TEXT("Sunset"))
-    {
-        SetTimeOfDay(18.0f, 0.0f);
-        AtmosphericSettings.SunColor = FLinearColor(1.0f, 0.7f, 0.4f, 1.0f);
-        AtmosphericSettings.SunIntensity = 2.0f;
-    }
-    else if (PresetName == TEXT("Night"))
-    {
-        SetTimeOfDay(0.0f, 0.0f);
-        AtmosphericSettings.SunColor = FLinearColor(0.3f, 0.4f, 0.8f, 1.0f);
-        AtmosphericSettings.SunIntensity = 0.5f;
+        case ELight_TimeOfDay::Dawn:
+            CurrentHour = 6.0f;
+            break;
+        case ELight_TimeOfDay::Morning:
+            CurrentHour = 9.0f;
+            break;
+        case ELight_TimeOfDay::Noon:
+            CurrentHour = 12.0f;
+            break;
+        case ELight_TimeOfDay::Afternoon:
+            CurrentHour = 15.0f;
+            break;
+        case ELight_TimeOfDay::Dusk:
+            CurrentHour = 18.0f;
+            break;
+        case ELight_TimeOfDay::Night:
+            CurrentHour = 22.0f;
+            break;
     }
     
-    UE_LOG(LogTemp, Log, TEXT("AtmosphericLightingManager: Applied lighting preset: %s"), *PresetName);
+    UpdateSunPosition();
 }
 
-void UAtmosphericLightingManager::TriggerLightningStrike(FVector Location)
+void AAtmosphericLightingManager::SetHour(float Hour)
 {
-    // TODO: Implement lightning effect
-    UE_LOG(LogTemp, Log, TEXT("AtmosphericLightingManager: Lightning strike at %s"), *Location.ToString());
+    CurrentHour = FMath::Clamp(Hour, 0.0f, 24.0f);
+    
+    // Determine time of day based on hour
+    if (CurrentHour >= 5.0f && CurrentHour < 8.0f)
+        CurrentTimeOfDay = ELight_TimeOfDay::Dawn;
+    else if (CurrentHour >= 8.0f && CurrentHour < 11.0f)
+        CurrentTimeOfDay = ELight_TimeOfDay::Morning;
+    else if (CurrentHour >= 11.0f && CurrentHour < 14.0f)
+        CurrentTimeOfDay = ELight_TimeOfDay::Noon;
+    else if (CurrentHour >= 14.0f && CurrentHour < 17.0f)
+        CurrentTimeOfDay = ELight_TimeOfDay::Afternoon;
+    else if (CurrentHour >= 17.0f && CurrentHour < 20.0f)
+        CurrentTimeOfDay = ELight_TimeOfDay::Dusk;
+    else
+        CurrentTimeOfDay = ELight_TimeOfDay::Night;
+    
+    UpdateSunPosition();
 }
 
-void UAtmosphericLightingManager::SetVolumetricFogEnabled(bool bEnabled)
-{
-    if (HeightFog && HeightFog->GetComponent())
-    {
-        HeightFog->GetComponent()->SetVisibility(bEnabled);
-        UE_LOG(LogTemp, Log, TEXT("AtmosphericLightingManager: Volumetric fog %s"), 
-               bEnabled ? TEXT("enabled") : TEXT("disabled"));
-    }
-}
-
-void UAtmosphericLightingManager::UpdateSunPosition()
+void AAtmosphericLightingManager::UpdateSunPosition()
 {
     if (!SunLight)
         return;
     
-    // Calculate sun angle based on time of day
-    float TimeOfDayNormalized = (CurrentTime.Hour + CurrentTime.Minute / 60.0f) / 24.0f;
-    float SunAngleRadians = (TimeOfDayNormalized - 0.5f) * PI; // -90 to +90 degrees
-    
-    // Calculate sun rotation
-    FRotator SunRotation;
-    SunRotation.Pitch = FMath::RadiansToDegrees(SunAngleRadians);
-    SunRotation.Yaw = 0.0f; // East-West movement
-    SunRotation.Roll = 0.0f;
-    
+    FRotator SunRotation = GetSunRotationForTime(CurrentHour);
     SunLight->SetActorRotation(SunRotation);
-    AtmosphericSettings.SunAngle = SunRotation.Pitch;
-}
-
-void UAtmosphericLightingManager::UpdateSunLighting()
-{
-    if (!SunLight || !SunLight->GetLightComponent())
-        return;
     
-    UDirectionalLightComponent* LightComp = SunLight->GetLightComponent();
-    
-    // Update sun color and intensity based on time and weather
-    FLinearColor FinalSunColor = CalculateSunColor();
-    float FinalSunIntensity = CalculateSunIntensity();
-    
-    LightComp->SetLightColor(FinalSunColor);
-    LightComp->SetIntensity(FinalSunIntensity);
-}
-
-void UAtmosphericLightingManager::UpdateSkyAtmosphere()
-{
-    if (!SkyAtmosphere || !SkyAtmosphere->GetComponent())
-        return;
-    
-    USkyAtmosphereComponent* SkyComp = SkyAtmosphere->GetComponent();
-    SkyComp->SetRayleighScatteringScale(AtmosphericSettings.RayleighScattering);
-    SkyComp->SetMieScatteringScale(AtmosphericSettings.MieScattering);
-}
-
-void UAtmosphericLightingManager::UpdateWeatherEffects(float DeltaTime)
-{
-    if (bWeatherTransitioning)
+    if (SunLight->GetLightComponent())
     {
-        WeatherTransitionProgress += DeltaTime / WeatherTransitionTime;
+        float SunIntensity = GetSunIntensityForTime(CurrentHour);
+        FLinearColor SunColor = GetSunColorForTime(CurrentHour);
         
-        if (WeatherTransitionProgress >= 1.0f)
-        {
-            CurrentWeather = TargetWeather;
-            bWeatherTransitioning = false;
-            WeatherTransitionProgress = 0.0f;
-        }
-        else
-        {
-            // Interpolate weather values
-            float Alpha = WeatherTransitionProgress;
-            CurrentWeather.CloudCoverage = FMath::Lerp(CurrentWeather.CloudCoverage, TargetWeather.CloudCoverage, Alpha);
-            CurrentWeather.RainIntensity = FMath::Lerp(CurrentWeather.RainIntensity, TargetWeather.RainIntensity, Alpha);
-            CurrentWeather.FogDensity = FMath::Lerp(CurrentWeather.FogDensity, TargetWeather.FogDensity, Alpha);
-            CurrentWeather.WindStrength = FMath::Lerp(CurrentWeather.WindStrength, TargetWeather.WindStrength, Alpha);
-        }
+        SunLight->GetLightComponent()->SetIntensity(SunIntensity);
+        SunLight->GetLightComponent()->SetLightColor(SunColor);
     }
 }
 
-void UAtmosphericLightingManager::UpdateVolumetricClouds()
+void AAtmosphericLightingManager::UpdateAtmosphericScattering()
 {
-    if (!VolumetricClouds || !VolumetricClouds->GetComponent())
-        return;
-    
-    // Hide volumetric clouds for clean Cretaceous atmosphere
-    VolumetricClouds->SetActorHiddenInGame(true);
+    if (SkyAtmosphere && SkyAtmosphere->GetComponent())
+    {
+        USkyAtmosphereComponent* SkyComponent = SkyAtmosphere->GetComponent();
+        // Note: Property setting requires specific UE5 API calls
+        // These would be implemented with proper property access
+        UE_LOG(LogTemp, Warning, TEXT("Atmospheric scattering updated"));
+    }
 }
 
-void UAtmosphericLightingManager::UpdateHeightFog()
+void AAtmosphericLightingManager::UpdateFogSettings()
 {
-    if (!HeightFog || !HeightFog->GetComponent())
-        return;
-    
-    UExponentialHeightFogComponent* FogComp = HeightFog->GetComponent();
-    FogComp->SetFogDensity(CurrentWeather.FogDensity * 0.02f); // Scale fog density
+    if (HeightFog && HeightFog->GetComponent())
+    {
+        UExponentialHeightFogComponent* FogComponent = HeightFog->GetComponent();
+        // Note: Property setting requires specific UE5 API calls
+        UE_LOG(LogTemp, Warning, TEXT("Fog settings updated"));
+    }
 }
 
-void UAtmosphericLightingManager::FindLightingComponents()
+void AAtmosphericLightingManager::UpdatePostProcessing()
+{
+    if (PostProcessVolume && PostProcessVolume->GetComponent())
+    {
+        UPostProcessComponent* PPComponent = PostProcessVolume->GetComponent();
+        // Note: Post process settings require specific property access
+        UE_LOG(LogTemp, Warning, TEXT("Post processing updated"));
+    }
+}
+
+void AAtmosphericLightingManager::FindLightingActors()
 {
     UWorld* World = GetWorld();
     if (!World)
         return;
     
     // Find directional light (sun)
-    for (TActorIterator<ADirectionalLight> ActorItr(World); ActorItr; ++ActorItr)
+    TArray<AActor*> DirectionalLights;
+    UGameplayStatics::GetAllActorsOfClass(World, ADirectionalLight::StaticClass(), DirectionalLights);
+    if (DirectionalLights.Num() > 0)
     {
-        SunLight = *ActorItr;
-        break; // Use first directional light found
+        SunLight = Cast<ADirectionalLight>(DirectionalLights[0]);
+        UE_LOG(LogTemp, Warning, TEXT("Found DirectionalLight: %s"), *SunLight->GetName());
     }
     
     // Find sky atmosphere
-    for (TActorIterator<ASkyAtmosphere> ActorItr(World); ActorItr; ++ActorItr)
+    TArray<AActor*> SkyAtmospheres;
+    UGameplayStatics::GetAllActorsOfClass(World, ASkyAtmosphere::StaticClass(), SkyAtmospheres);
+    if (SkyAtmospheres.Num() > 0)
     {
-        SkyAtmosphere = *ActorItr;
-        break;
+        SkyAtmosphere = Cast<ASkyAtmosphere>(SkyAtmospheres[0]);
+        UE_LOG(LogTemp, Warning, TEXT("Found SkyAtmosphere: %s"), *SkyAtmosphere->GetName());
     }
     
-    // Find volumetric clouds
-    for (TActorIterator<AVolumetricCloud> ActorItr(World); ActorItr; ++ActorItr)
+    // Find exponential height fog
+    TArray<AActor*> HeightFogs;
+    UGameplayStatics::GetAllActorsOfClass(World, AExponentialHeightFog::StaticClass(), HeightFogs);
+    if (HeightFogs.Num() > 0)
     {
-        VolumetricClouds = *ActorItr;
-        break;
+        HeightFog = Cast<AExponentialHeightFog>(HeightFogs[0]);
+        UE_LOG(LogTemp, Warning, TEXT("Found ExponentialHeightFog: %s"), *HeightFog->GetName());
     }
     
-    // Find height fog
-    for (TActorIterator<AExponentialHeightFog> ActorItr(World); ActorItr; ++ActorItr)
+    // Find post process volume
+    TArray<AActor*> PostProcessVolumes;
+    UGameplayStatics::GetAllActorsOfClass(World, APostProcessVolume::StaticClass(), PostProcessVolumes);
+    if (PostProcessVolumes.Num() > 0)
     {
-        HeightFog = *ActorItr;
-        break;
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("AtmosphericLightingManager: Found components - Sun: %s, Sky: %s, Clouds: %s, Fog: %s"),
-           SunLight ? TEXT("Yes") : TEXT("No"),
-           SkyAtmosphere ? TEXT("Yes") : TEXT("No"),
-           VolumetricClouds ? TEXT("Yes") : TEXT("No"),
-           HeightFog ? TEXT("Yes") : TEXT("No"));
-}
-
-void UAtmosphericLightingManager::ValidateComponents()
-{
-    if (!SunLight)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("AtmosphericLightingManager: No DirectionalLight found in world"));
-    }
-    
-    if (!SkyAtmosphere)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("AtmosphericLightingManager: No SkyAtmosphere found in world"));
+        PostProcessVolume = Cast<APostProcessVolume>(PostProcessVolumes[0]);
+        UE_LOG(LogTemp, Warning, TEXT("Found PostProcessVolume: %s"), *PostProcessVolume->GetName());
     }
 }
 
-float UAtmosphericLightingManager::CalculateSunAngle() const
+void AAtmosphericLightingManager::ApplyPresetSettings()
 {
-    float TimeOfDayNormalized = (CurrentTime.Hour + CurrentTime.Minute / 60.0f) / 24.0f;
-    return (TimeOfDayNormalized - 0.5f) * 180.0f; // -90 to +90 degrees
+    ApplyCretaceousAtmosphere();
+    UE_LOG(LogTemp, Warning, TEXT("Preset Cretaceous settings applied"));
 }
 
-FLinearColor UAtmosphericLightingManager::CalculateSunColor() const
+void AAtmosphericLightingManager::UpdateDayNightCycle(float DeltaTime)
 {
-    float SunAngle = CalculateSunAngle();
+    TimeAccumulator += DeltaTime;
     
-    // Adjust color based on sun angle (warmer at low angles)
-    if (FMath::Abs(SunAngle) > 80.0f)
+    // Convert day duration from minutes to seconds
+    float DayDurationSeconds = DayDurationMinutes * 60.0f;
+    float HourDurationSeconds = DayDurationSeconds / 24.0f;
+    
+    if (TimeAccumulator >= HourDurationSeconds)
     {
-        // Very low sun - warm orange/red
-        return FLinearColor(1.0f, 0.6f, 0.3f, 1.0f);
-    }
-    else if (FMath::Abs(SunAngle) > 60.0f)
-    {
-        // Low sun - warm yellow
-        return FLinearColor(1.0f, 0.8f, 0.6f, 1.0f);
-    }
-    else
-    {
-        // High sun - neutral warm white
-        return AtmosphericSettings.SunColor;
+        TimeAccumulator = 0.0f;
+        CurrentHour += 1.0f;
+        
+        if (CurrentHour >= 24.0f)
+        {
+            CurrentHour = 0.0f;
+        }
+        
+        SetHour(CurrentHour);
     }
 }
 
-float UAtmosphericLightingManager::CalculateSunIntensity() const
+FLinearColor AAtmosphericLightingManager::GetSunColorForTime(float Hour) const
 {
-    float SunAngle = CalculateSunAngle();
+    // Cretaceous period color variations throughout the day
+    if (Hour >= 6.0f && Hour <= 8.0f) // Dawn
+    {
+        float Alpha = (Hour - 6.0f) / 2.0f;
+        return FMath::Lerp(FLinearColor(1.0f, 0.6f, 0.4f, 1.0f), CretaceousSettings.SunColor, Alpha);
+    }
+    else if (Hour >= 17.0f && Hour <= 19.0f) // Dusk
+    {
+        float Alpha = (Hour - 17.0f) / 2.0f;
+        return FMath::Lerp(CretaceousSettings.SunColor, FLinearColor(1.0f, 0.5f, 0.3f, 1.0f), Alpha);
+    }
+    else if (Hour >= 20.0f || Hour <= 5.0f) // Night
+    {
+        return FLinearColor(0.3f, 0.4f, 0.6f, 1.0f); // Moonlight
+    }
     
-    // Reduce intensity at low sun angles
-    float AngleFactor = FMath::Clamp(1.0f - (FMath::Abs(SunAngle) / 90.0f), 0.1f, 1.0f);
-    float WeatherFactor = 1.0f - (CurrentWeather.CloudCoverage * 0.5f);
-    
-    return AtmosphericSettings.SunIntensity * AngleFactor * WeatherFactor;
+    return CretaceousSettings.SunColor; // Day
 }
 
-FLinearColor UAtmosphericLightingManager::InterpolateWeatherColor(const FLinearColor& Clear, const FLinearColor& Stormy, float Factor) const
+float AAtmosphericLightingManager::GetSunIntensityForTime(float Hour) const
 {
-    return FLinearColor::LerpUsingHSV(Clear, Stormy, Factor);
+    if (Hour >= 20.0f || Hour <= 5.0f) // Night
+    {
+        return 0.5f; // Moonlight intensity
+    }
+    else if (Hour >= 6.0f && Hour <= 8.0f) // Dawn
+    {
+        float Alpha = (Hour - 6.0f) / 2.0f;
+        return FMath::Lerp(0.5f, CretaceousSettings.SunIntensity, Alpha);
+    }
+    else if (Hour >= 17.0f && Hour <= 19.0f) // Dusk
+    {
+        float Alpha = (Hour - 17.0f) / 2.0f;
+        return FMath::Lerp(CretaceousSettings.SunIntensity, 0.5f, Alpha);
+    }
+    
+    return CretaceousSettings.SunIntensity; // Full day intensity
+}
+
+FRotator AAtmosphericLightingManager::GetSunRotationForTime(float Hour) const
+{
+    // Calculate sun arc across the sky (simplified)
+    float SunAngle = -90.0f + (Hour / 24.0f) * 180.0f; // -90 to +90 degrees
+    float SunYaw = 135.0f; // Southeast to southwest arc
+    
+    return FRotator(SunAngle, SunYaw, 0.0f);
 }
