@@ -1,195 +1,211 @@
 #include "Audio_ScreenShakeSystem.h"
-#include "Engine/World.h"
+#include "Components/SphereComponent.h"
+#include "Components/AudioComponent.h"
+#include "Engine/Engine.h"
 #include "GameFramework/PlayerController.h"
 #include "Camera/CameraShakeBase.h"
-#include "Engine/LocalPlayer.h"
 #include "Kismet/GameplayStatics.h"
-#include "Math/UnrealMathUtility.h"
+#include "Sound/SoundBase.h"
 
 AAudio_ScreenShakeSystem::AAudio_ScreenShakeSystem()
 {
     PrimaryActorTick.bCanEverTick = false;
 
-    // Initialize shake profiles for different intensities
-    FAudio_ShakeProfile LightShake;
-    LightShake.Duration = 0.3f;
-    LightShake.Amplitude = 0.5f;
-    LightShake.Frequency = 8.0f;
-    LightShake.FadeInTime = 0.05f;
-    LightShake.FadeOutTime = 0.2f;
-    ShakeProfiles.Add(EAudio_ShakeIntensity::Light, LightShake);
+    // Create root component
+    RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootComponent"));
 
-    FAudio_ShakeProfile MediumShake;
-    MediumShake.Duration = 0.6f;
-    MediumShake.Amplitude = 1.0f;
-    MediumShake.Frequency = 12.0f;
-    MediumShake.FadeInTime = 0.1f;
-    MediumShake.FadeOutTime = 0.3f;
-    ShakeProfiles.Add(EAudio_ShakeIntensity::Medium, MediumShake);
+    // Create trigger sphere
+    TriggerSphere = CreateDefaultSubobject<USphereComponent>(TEXT("TriggerSphere"));
+    TriggerSphere->SetupAttachment(RootComponent);
+    TriggerSphere->SetSphereRadius(TriggerRadius);
+    TriggerSphere->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+    TriggerSphere->SetCollisionObjectType(ECollisionChannel::ECC_WorldStatic);
+    TriggerSphere->SetCollisionResponseToAllChannels(ECollisionResponse::ECR_Ignore);
+    TriggerSphere->SetCollisionResponseToChannel(ECollisionChannel::ECC_Pawn, ECollisionResponse::ECR_Overlap);
 
-    FAudio_ShakeProfile HeavyShake;
-    HeavyShake.Duration = 1.2f;
-    HeavyShake.Amplitude = 2.0f;
-    HeavyShake.Frequency = 15.0f;
-    HeavyShake.FadeInTime = 0.15f;
-    HeavyShake.FadeOutTime = 0.5f;
-    ShakeProfiles.Add(EAudio_ShakeIntensity::Heavy, HeavyShake);
+    // Create audio component
+    ShakeAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("ShakeAudioComponent"));
+    ShakeAudioComponent->SetupAttachment(RootComponent);
+    ShakeAudioComponent->SetAutoActivate(false);
 
-    FAudio_ShakeProfile ExtremeShake;
-    ExtremeShake.Duration = 2.0f;
-    ExtremeShake.Amplitude = 3.5f;
-    ExtremeShake.Frequency = 20.0f;
-    ExtremeShake.FadeInTime = 0.2f;
-    ExtremeShake.FadeOutTime = 0.8f;
-    ShakeProfiles.Add(EAudio_ShakeIntensity::Extreme, ExtremeShake);
-
-    MaxShakeDistance = 5000.0f;
-    MinShakeDistance = 100.0f;
+    // Initialize default shake settings
+    InitializeShakeSettings();
 }
 
 void AAudio_ScreenShakeSystem::BeginPlay()
 {
     Super::BeginPlay();
+
+    // Bind overlap events
+    if (TriggerSphere)
+    {
+        TriggerSphere->OnComponentBeginOverlap.AddDynamic(this, &AAudio_ScreenShakeSystem::OnTriggerBeginOverlap);
+    }
+
+    // Update trigger radius
+    if (TriggerSphere)
+    {
+        TriggerSphere->SetSphereRadius(TriggerRadius);
+    }
 }
 
-void AAudio_ScreenShakeSystem::TriggerFootstepShake(FVector FootstepLocation, float CreatureWeight)
+void AAudio_ScreenShakeSystem::InitializeShakeSettings()
 {
-    if (CreatureWeight <= 0.0f)
+    // Light shake (small creatures, distant impacts)
+    LightShake.Duration = 0.3f;
+    LightShake.Amplitude = 0.2f;
+    LightShake.Frequency = 8.0f;
+    LightShake.bFadeIn = true;
+    LightShake.bFadeOut = true;
+
+    // Medium shake (medium dinosaurs, nearby impacts)
+    MediumShake.Duration = 0.6f;
+    MediumShake.Amplitude = 0.5f;
+    MediumShake.Frequency = 12.0f;
+    MediumShake.bFadeIn = true;
+    MediumShake.bFadeOut = true;
+
+    // Heavy shake (T-Rex footsteps, large impacts)
+    HeavyShake.Duration = 1.0f;
+    HeavyShake.Amplitude = 1.0f;
+    HeavyShake.Frequency = 15.0f;
+    HeavyShake.bFadeIn = false;
+    HeavyShake.bFadeOut = true;
+
+    // Extreme shake (T-Rex roar, massive impacts)
+    ExtremeShake.Duration = 1.5f;
+    ExtremeShake.Amplitude = 1.5f;
+    ExtremeShake.Frequency = 20.0f;
+    ExtremeShake.bFadeIn = false;
+    ExtremeShake.bFadeOut = true;
+}
+
+void AAudio_ScreenShakeSystem::TriggerScreenShake(EAudio_ShakeIntensity Intensity)
+{
+    APlayerController* PlayerController = UGameplayStatics::GetPlayerController(this, 0);
+    if (!PlayerController)
     {
         return;
     }
 
-    EAudio_ShakeIntensity Intensity = EAudio_ShakeIntensity::Light;
+    FAudio_ShakeSettings ShakeSettings = GetShakeSettingsByIntensity(Intensity);
+    
+    // Create a simple camera shake effect
+    // Note: In a full implementation, you would create a custom UCameraShakeBase subclass
+    if (GEngine)
+    {
+        FString ShakeMessage = FString::Printf(TEXT("Screen Shake: %s - Duration: %.1f, Amplitude: %.1f"), 
+            *UEnum::GetValueAsString(Intensity), ShakeSettings.Duration, ShakeSettings.Amplitude);
+        GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Yellow, ShakeMessage);
+    }
 
-    // Determine shake intensity based on creature weight (in tons)
-    if (CreatureWeight >= 50.0f) // Titanosaur range
+    // Play associated audio
+    PlayShakeAudio(Intensity);
+
+    UE_LOG(LogTemp, Log, TEXT("Screen shake triggered: %s"), *UEnum::GetValueAsString(Intensity));
+}
+
+void AAudio_ScreenShakeSystem::TriggerTRexFootstep()
+{
+    TriggerScreenShake(EAudio_ShakeIntensity::Heavy);
+    
+    if (FootstepSound && ShakeAudioComponent)
+    {
+        ShakeAudioComponent->SetSound(FootstepSound);
+        ShakeAudioComponent->Play();
+    }
+}
+
+void AAudio_ScreenShakeSystem::TriggerDamageShake()
+{
+    TriggerScreenShake(EAudio_ShakeIntensity::Medium);
+    
+    if (ImpactSound && ShakeAudioComponent)
+    {
+        ShakeAudioComponent->SetSound(ImpactSound);
+        ShakeAudioComponent->Play();
+    }
+}
+
+void AAudio_ScreenShakeSystem::SetShakeIntensityByDistance(float Distance)
+{
+    EAudio_ShakeIntensity Intensity = EAudio_ShakeIntensity::Light;
+    
+    if (Distance < 500.0f)
     {
         Intensity = EAudio_ShakeIntensity::Extreme;
     }
-    else if (CreatureWeight >= 10.0f) // T-Rex range
+    else if (Distance < 1000.0f)
     {
         Intensity = EAudio_ShakeIntensity::Heavy;
     }
-    else if (CreatureWeight >= 3.0f) // Large herbivores
+    else if (Distance < 1500.0f)
     {
         Intensity = EAudio_ShakeIntensity::Medium;
     }
-    else if (CreatureWeight >= 0.5f) // Medium predators
-    {
-        Intensity = EAudio_ShakeIntensity::Light;
-    }
-    else
-    {
-        return; // Too light to cause noticeable shake
-    }
-
-    TriggerCustomShake(Intensity, FootstepLocation);
-}
-
-void AAudio_ScreenShakeSystem::TriggerCustomShake(EAudio_ShakeIntensity Intensity, FVector SourceLocation)
-{
-    if (!ShakeProfiles.Contains(Intensity))
-    {
-        return;
-    }
-
-    const FAudio_ShakeProfile& Profile = ShakeProfiles[Intensity];
-    float DistanceMultiplier = CalculateDistanceMultiplier(SourceLocation);
-
-    if (DistanceMultiplier > 0.0f)
-    {
-        ApplyScreenShake(Profile, DistanceMultiplier);
-    }
-}
-
-void AAudio_ScreenShakeSystem::TriggerDamageFlash(float DamageAmount)
-{
-    APlayerController* PC = GetLocalPlayerController();
-    if (!PC)
-    {
-        return;
-    }
-
-    // Create damage flash effect based on damage amount
-    EAudio_ShakeIntensity FlashIntensity = EAudio_ShakeIntensity::Light;
     
-    if (DamageAmount >= 75.0f)
-    {
-        FlashIntensity = EAudio_ShakeIntensity::Extreme;
-    }
-    else if (DamageAmount >= 50.0f)
-    {
-        FlashIntensity = EAudio_ShakeIntensity::Heavy;
-    }
-    else if (DamageAmount >= 25.0f)
-    {
-        FlashIntensity = EAudio_ShakeIntensity::Medium;
-    }
-
-    // Apply screen shake for damage feedback
-    if (ShakeProfiles.Contains(FlashIntensity))
-    {
-        const FAudio_ShakeProfile& Profile = ShakeProfiles[FlashIntensity];
-        ApplyScreenShake(Profile, 1.0f); // Full intensity for damage
-    }
+    TriggerScreenShake(Intensity);
 }
 
-void AAudio_ScreenShakeSystem::ApplyScreenShake(const FAudio_ShakeProfile& Profile, float DistanceMultiplier)
+void AAudio_ScreenShakeSystem::OnTriggerBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, 
+                                                    UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, 
+                                                    bool bFromSweep, const FHitResult& SweepResult)
 {
-    APlayerController* PC = GetLocalPlayerController();
-    if (!PC)
+    if (!bAutoTrigger || !OtherActor)
     {
         return;
     }
 
-    // Create a simple camera shake effect
-    // Note: In a full implementation, you would create a custom UCameraShakeBase subclass
-    // For now, we'll use the basic shake functionality
+    // Check if the overlapping actor is the player
+    if (OtherActor->IsA<APawn>())
+    {
+        float Distance = FVector::Dist(GetActorLocation(), OtherActor->GetActorLocation());
+        SetShakeIntensityByDistance(Distance);
+    }
+}
+
+FAudio_ShakeSettings AAudio_ScreenShakeSystem::GetShakeSettingsByIntensity(EAudio_ShakeIntensity Intensity)
+{
+    switch (Intensity)
+    {
+        case EAudio_ShakeIntensity::Light:
+            return LightShake;
+        case EAudio_ShakeIntensity::Medium:
+            return MediumShake;
+        case EAudio_ShakeIntensity::Heavy:
+            return HeavyShake;
+        case EAudio_ShakeIntensity::Extreme:
+            return ExtremeShake;
+        default:
+            return LightShake;
+    }
+}
+
+void AAudio_ScreenShakeSystem::PlayShakeAudio(EAudio_ShakeIntensity Intensity)
+{
+    if (!ShakeAudioComponent)
+    {
+        return;
+    }
+
+    // Play different sounds based on intensity
+    USoundBase* SoundToPlay = nullptr;
     
-    float AdjustedAmplitude = Profile.Amplitude * DistanceMultiplier;
-    float AdjustedDuration = Profile.Duration;
-
-    // Apply camera shake using UE5's built-in system
-    if (AdjustedAmplitude > 0.1f)
+    switch (Intensity)
     {
-        // Simple implementation - in production you'd use a proper camera shake class
-        PC->ClientStartCameraShake(nullptr, AdjustedAmplitude);
-    }
-}
-
-float AAudio_ScreenShakeSystem::CalculateDistanceMultiplier(FVector SourceLocation)
-{
-    APlayerController* PC = GetLocalPlayerController();
-    if (!PC || !PC->GetPawn())
-    {
-        return 0.0f;
+        case EAudio_ShakeIntensity::Light:
+        case EAudio_ShakeIntensity::Medium:
+            SoundToPlay = FootstepSound;
+            break;
+        case EAudio_ShakeIntensity::Heavy:
+        case EAudio_ShakeIntensity::Extreme:
+            SoundToPlay = ImpactSound;
+            break;
     }
 
-    FVector PlayerLocation = PC->GetPawn()->GetActorLocation();
-    float Distance = FVector::Dist(PlayerLocation, SourceLocation);
-
-    if (Distance >= MaxShakeDistance)
+    if (SoundToPlay)
     {
-        return 0.0f;
+        ShakeAudioComponent->SetSound(SoundToPlay);
+        ShakeAudioComponent->Play();
     }
-
-    if (Distance <= MinShakeDistance)
-    {
-        return 1.0f;
-    }
-
-    // Linear falloff between min and max distance
-    float DistanceRatio = (MaxShakeDistance - Distance) / (MaxShakeDistance - MinShakeDistance);
-    return FMath::Clamp(DistanceRatio, 0.0f, 1.0f);
-}
-
-APlayerController* AAudio_ScreenShakeSystem::GetLocalPlayerController()
-{
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        return nullptr;
-    }
-
-    return World->GetFirstPlayerController();
 }
