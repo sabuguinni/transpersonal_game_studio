@@ -2,22 +2,19 @@
 
 #include "CoreMinimal.h"
 #include "Engine/World.h"
-#include "GameFramework/Actor.h"
-#include "Components/StaticMeshComponent.h"
-#include "Components/BoxComponent.h"
-#include "Engine/TriggerBox.h"
-#include "../SharedTypes.h"
+#include "Components/ActorComponent.h"
+#include "Engine/StaticMeshActor.h"
+#include "SharedTypes.h"
 #include "World_BiomeManager.generated.h"
 
 UENUM(BlueprintType)
 enum class EWorld_BiomeType : uint8
 {
-    Forest      UMETA(DisplayName = "Forest"),
-    Savanna     UMETA(DisplayName = "Savanna"), 
-    Mountain    UMETA(DisplayName = "Mountain"),
-    Desert      UMETA(DisplayName = "Desert"),
-    Swamp       UMETA(DisplayName = "Swamp"),
-    Transition  UMETA(DisplayName = "Transition")
+    Savana      UMETA(DisplayName = "Savana"),
+    Floresta    UMETA(DisplayName = "Floresta"),
+    Deserto     UMETA(DisplayName = "Deserto"),
+    Pantano     UMETA(DisplayName = "Pantano"),
+    Montanha    UMETA(DisplayName = "Montanha")
 };
 
 USTRUCT(BlueprintType)
@@ -26,121 +23,117 @@ struct FWorld_BiomeData
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    EWorld_BiomeType BiomeType = EWorld_BiomeType::Forest;
+    EWorld_BiomeType BiomeType;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    FVector CenterLocation = FVector::ZeroVector;
+    FVector CenterLocation;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float Radius = 2000.0f;
+    float Radius;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float TemperatureBase = 20.0f;
+    int32 ActorDensity;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float HumidityBase = 50.0f;
+    TArray<TSoftObjectPtr<UStaticMesh>> VegetationAssets;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    TArray<FString> AmbientSounds;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    TArray<FString> WeatherEffects;
+    TArray<TSoftObjectPtr<UStaticMesh>> TerrainAssets;
 
     FWorld_BiomeData()
     {
-        BiomeType = EWorld_BiomeType::Forest;
+        BiomeType = EWorld_BiomeType::Savana;
         CenterLocation = FVector::ZeroVector;
-        Radius = 2000.0f;
-        TemperatureBase = 20.0f;
-        HumidityBase = 50.0f;
+        Radius = 50000.0f;
+        ActorDensity = 100;
     }
 };
 
 USTRUCT(BlueprintType)
-struct FWorld_WeatherData
+struct FWorld_WaterBody
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather")
-    float Temperature = 20.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water")
+    FString Name;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather")
-    float Humidity = 50.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water")
+    FVector Location;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather")
-    float WindSpeed = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water")
+    FVector Scale;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather")
-    float RainIntensity = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water")
+    EWorld_BiomeType ParentBiome;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather")
-    float FogDensity = 0.0f;
-
-    FWorld_WeatherData()
+    FWorld_WaterBody()
     {
-        Temperature = 20.0f;
-        Humidity = 50.0f;
-        WindSpeed = 0.0f;
-        RainIntensity = 0.0f;
-        FogDensity = 0.0f;
+        Name = TEXT("Water");
+        Location = FVector::ZeroVector;
+        Scale = FVector(100.0f, 100.0f, 1.0f);
+        ParentBiome = EWorld_BiomeType::Savana;
     }
 };
 
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API AWorld_BiomeManager : public AActor
+UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UWorld_BiomeManager : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    AWorld_BiomeManager();
+    UWorld_BiomeManager();
 
 protected:
     virtual void BeginPlay() override;
 
 public:
-    virtual void Tick(float DeltaTime) override;
-
-    // Biome Management
-    UFUNCTION(BlueprintCallable, Category = "Biome")
-    void InitializeBiomes();
-
-    UFUNCTION(BlueprintCallable, Category = "Biome")
-    EWorld_BiomeType GetBiomeAtLocation(const FVector& Location) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Biome")
-    FWorld_BiomeData GetBiomeData(EWorld_BiomeType BiomeType) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Biome")
-    FWorld_WeatherData GetCurrentWeather(const FVector& Location) const;
-
-    // Environmental Effects
-    UFUNCTION(BlueprintCallable, Category = "Environment")
-    void UpdateEnvironmentalAudio(const FVector& PlayerLocation);
-
-    UFUNCTION(BlueprintCallable, Category = "Environment")
-    void UpdateWeatherEffects(float DeltaTime);
-
-    UFUNCTION(BlueprintCallable, Category = "Environment")
-    void SpawnBiomeActors(EWorld_BiomeType BiomeType, const FVector& Location);
-
-protected:
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    class USceneComponent* RootSceneComponent;
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biomes")
-    TArray<FWorld_BiomeData> BiomeDataArray;
+    TArray<FWorld_BiomeData> BiomeConfigurations;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather")
-    FWorld_WeatherData CurrentWeather;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water")
+    TArray<FWorld_WaterBody> WaterBodies;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment")
-    float EnvironmentUpdateInterval = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Generation")
+    bool bAutoGenerateOnBeginPlay;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Environment")
-    float LastEnvironmentUpdate = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Generation")
+    int32 MaxActorsPerBiome;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Generation")
+    float MinSpawnDistance;
+
+    UFUNCTION(BlueprintCallable, Category = "Biome Generation")
+    void InitializeBiomes();
+
+    UFUNCTION(BlueprintCallable, Category = "Biome Generation")
+    void PopulateBiome(EWorld_BiomeType BiomeType);
+
+    UFUNCTION(BlueprintCallable, Category = "Biome Generation")
+    void CreateWaterBodies();
+
+    UFUNCTION(BlueprintCallable, Category = "Biome Generation")
+    void CreateTerrainFeatures();
+
+    UFUNCTION(BlueprintCallable, Category = "Biome Generation")
+    EWorld_BiomeType GetBiomeAtLocation(const FVector& Location) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Biome Generation")
+    int32 GetActorCountInBiome(EWorld_BiomeType BiomeType) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Biome Generation")
+    void ClearBiome(EWorld_BiomeType BiomeType);
+
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Debug")
+    void DebugPrintBiomeStats();
 
 private:
     void SetupDefaultBiomes();
-    float CalculateDistanceToBiome(const FVector& Location, const FWorld_BiomeData& BiomeData) const;
-    FWorld_WeatherData InterpolateWeather(const FWorld_WeatherData& WeatherA, const FWorld_WeatherData& WeatherB, float Alpha) const;
+    void SetupDefaultWaterBodies();
+    FVector GetRandomLocationInBiome(const FWorld_BiomeData& BiomeData) const;
+    bool IsLocationValid(const FVector& Location, const FWorld_BiomeData& BiomeData) const;
+
+    UPROPERTY()
+    TArray<AStaticMeshActor*> SpawnedActors;
 };
