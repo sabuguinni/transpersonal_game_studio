@@ -1,361 +1,210 @@
 #include "Narr_DialogueSystem.h"
 #include "Engine/Engine.h"
+#include "TimerManager.h"
 #include "Engine/World.h"
-#include "GameFramework/PlayerController.h"
-#include "Kismet/GameplayStatics.h"
-#include "Components/SphereComponent.h"
 
-UNarr_DialogueComponent::UNarr_DialogueComponent()
+UNarr_DialogueSystem::UNarr_DialogueSystem()
 {
     PrimaryComponentTick.bCanEverTick = true;
     bDialogueActive = false;
-    ProximityTriggerDistance = 500.0f;
-    CurrentTreeName = TEXT("");
-    PlayerReference = nullptr;
+    CurrentSequenceIndex = -1;
+    CurrentEntryIndex = -1;
+    DialogueSpeed = 1.0f;
 }
 
-void UNarr_DialogueComponent::BeginPlay()
+void UNarr_DialogueSystem::BeginPlay()
 {
     Super::BeginPlay();
-    
-    // Find player reference
-    if (UWorld* World = GetWorld())
-    {
-        if (APlayerController* PC = World->GetFirstPlayerController())
-        {
-            PlayerReference = PC->GetPawn();
-        }
-    }
+    InitializeDefaultDialogues();
 }
 
-void UNarr_DialogueComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void UNarr_DialogueSystem::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-    
-    if (!bDialogueActive)
-    {
-        UpdateProximityTriggers();
-    }
 }
 
-bool UNarr_DialogueComponent::StartDialogue(const FString& TreeName)
+void UNarr_DialogueSystem::StartDialogueSequence(const FString& SequenceName)
 {
-    FNarr_DialogueTree* Tree = GetDialogueTree(TreeName);
-    if (!Tree || Tree->DialogueLines.Num() == 0)
+    // Find the dialogue sequence by name
+    for (int32 i = 0; i < DialogueSequences.Num(); i++)
     {
-        UE_LOG(LogTemp, Warning, TEXT("Dialogue tree not found or empty: %s"), *TreeName);
-        return false;
+        if (DialogueSequences[i].SequenceName == SequenceName)
+        {
+            CurrentSequenceIndex = i;
+            CurrentEntryIndex = 0;
+            bDialogueActive = true;
+
+            if (DialogueSequences[i].DialogueEntries.Num() > 0)
+            {
+                ProcessNextDialogueEntry();
+            }
+            return;
+        }
     }
 
-    CurrentTreeName = TreeName;
-    Tree->CurrentLineIndex = 0;
-    Tree->bHasBeenTriggered = true;
-    bDialogueActive = true;
-
-    UE_LOG(LogTemp, Log, TEXT("Started dialogue tree: %s"), *TreeName);
-    return true;
+    UE_LOG(LogTemp, Warning, TEXT("Dialogue sequence '%s' not found"), *SequenceName);
 }
 
-void UNarr_DialogueComponent::EndDialogue()
+void UNarr_DialogueSystem::StopDialogue()
 {
     bDialogueActive = false;
-    CurrentTreeName = TEXT("");
-    UE_LOG(LogTemp, Log, TEXT("Dialogue ended"));
+    CurrentSequenceIndex = -1;
+    CurrentEntryIndex = -1;
+
+    if (GetWorld() && GetWorld()->GetTimerManager().IsTimerActive(DialogueTimerHandle))
+    {
+        GetWorld()->GetTimerManager().ClearTimer(DialogueTimerHandle);
+    }
 }
 
-bool UNarr_DialogueComponent::AdvanceDialogue()
+void UNarr_DialogueSystem::AddDialogueSequence(const FNarr_DialogueSequence& NewSequence)
 {
-    FNarr_DialogueTree* Tree = GetDialogueTree(CurrentTreeName);
-    if (!Tree)
-    {
-        EndDialogue();
-        return false;
-    }
-
-    Tree->CurrentLineIndex++;
-    if (Tree->CurrentLineIndex >= Tree->DialogueLines.Num())
-    {
-        EndDialogue();
-        return false;
-    }
-
-    return true;
+    DialogueSequences.Add(NewSequence);
 }
 
-void UNarr_DialogueComponent::SelectPlayerChoice(int32 ChoiceIndex)
+void UNarr_DialogueSystem::PlayNarration(const FString& NarrationText, float Duration)
 {
-    FNarr_DialogueTree* Tree = GetDialogueTree(CurrentTreeName);
-    if (!Tree || Tree->CurrentLineIndex >= Tree->DialogueLines.Num())
+    FNarr_DialogueEntry NarrationEntry;
+    NarrationEntry.SpeakerName = TEXT("Narrator");
+    NarrationEntry.DialogueText = NarrationText;
+    NarrationEntry.DisplayDuration = Duration;
+    NarrationEntry.bIsNarration = true;
+
+    FNarr_DialogueSequence TempSequence;
+    TempSequence.SequenceName = TEXT("TempNarration");
+    TempSequence.DialogueEntries.Add(NarrationEntry);
+    TempSequence.bAutoPlay = true;
+
+    DialogueSequences.Add(TempSequence);
+    StartDialogueSequence(TEXT("TempNarration"));
+}
+
+FNarr_DialogueEntry UNarr_DialogueSystem::GetCurrentDialogueEntry() const
+{
+    if (bDialogueActive && CurrentSequenceIndex >= 0 && CurrentEntryIndex >= 0)
+    {
+        if (DialogueSequences.IsValidIndex(CurrentSequenceIndex))
+        {
+            const FNarr_DialogueSequence& CurrentSequence = DialogueSequences[CurrentSequenceIndex];
+            if (CurrentSequence.DialogueEntries.IsValidIndex(CurrentEntryIndex))
+            {
+                return CurrentSequence.DialogueEntries[CurrentEntryIndex];
+            }
+        }
+    }
+
+    return FNarr_DialogueEntry();
+}
+
+void UNarr_DialogueSystem::ProcessNextDialogueEntry()
+{
+    if (!bDialogueActive || CurrentSequenceIndex < 0 || CurrentEntryIndex < 0)
     {
         return;
     }
 
-    FNarr_DialogueLine& CurrentLine = Tree->DialogueLines[Tree->CurrentLineIndex];
-    if (ChoiceIndex >= 0 && ChoiceIndex < CurrentLine.NextDialogueIDs.Num())
+    if (!DialogueSequences.IsValidIndex(CurrentSequenceIndex))
     {
-        int32 NextLineID = CurrentLine.NextDialogueIDs[ChoiceIndex];
-        if (NextLineID >= 0 && NextLineID < Tree->DialogueLines.Num())
+        StopDialogue();
+        return;
+    }
+
+    const FNarr_DialogueSequence& CurrentSequence = DialogueSequences[CurrentSequenceIndex];
+    
+    if (!CurrentSequence.DialogueEntries.IsValidIndex(CurrentEntryIndex))
+    {
+        StopDialogue();
+        return;
+    }
+
+    const FNarr_DialogueEntry& CurrentEntry = CurrentSequence.DialogueEntries[CurrentEntryIndex];
+
+    // Display the dialogue entry
+    FString DisplayText = FString::Printf(TEXT("%s: %s"), *CurrentEntry.SpeakerName, *CurrentEntry.DialogueText);
+    
+    if (GEngine)
+    {
+        GEngine->AddOnScreenDebugMessage(-1, CurrentEntry.DisplayDuration, FColor::Cyan, DisplayText);
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("Dialogue: %s"), *DisplayText);
+
+    // Set timer for next entry or completion
+    if (GetWorld())
+    {
+        float TimerDuration = CurrentEntry.DisplayDuration + CurrentSequence.DelayBetweenEntries;
+        GetWorld()->GetTimerManager().SetTimer(DialogueTimerHandle, this, &UNarr_DialogueSystem::OnDialogueEntryComplete, TimerDuration, false);
+    }
+}
+
+void UNarr_DialogueSystem::OnDialogueEntryComplete()
+{
+    if (!bDialogueActive || CurrentSequenceIndex < 0)
+    {
+        return;
+    }
+
+    CurrentEntryIndex++;
+
+    if (DialogueSequences.IsValidIndex(CurrentSequenceIndex))
+    {
+        const FNarr_DialogueSequence& CurrentSequence = DialogueSequences[CurrentSequenceIndex];
+        
+        if (CurrentEntryIndex < CurrentSequence.DialogueEntries.Num())
         {
-            Tree->CurrentLineIndex = NextLineID;
+            // Process next entry in sequence
+            ProcessNextDialogueEntry();
         }
         else
         {
-            EndDialogue();
+            // Sequence complete
+            StopDialogue();
         }
     }
-}
-
-FNarr_DialogueLine UNarr_DialogueComponent::GetCurrentDialogueLine() const
-{
-    const FNarr_DialogueTree* Tree = const_cast<UNarr_DialogueComponent*>(this)->GetDialogueTree(CurrentTreeName);
-    if (Tree && Tree->CurrentLineIndex >= 0 && Tree->CurrentLineIndex < Tree->DialogueLines.Num())
+    else
     {
-        return Tree->DialogueLines[Tree->CurrentLineIndex];
-    }
-
-    return FNarr_DialogueLine();
-}
-
-void UNarr_DialogueComponent::RegisterDialogueTree(const FNarr_DialogueTree& NewTree)
-{
-    // Remove existing tree with same name
-    DialogueTrees.RemoveAll([&NewTree](const FNarr_DialogueTree& Tree) {
-        return Tree.TreeName == NewTree.TreeName;
-    });
-
-    DialogueTrees.Add(NewTree);
-    UE_LOG(LogTemp, Log, TEXT("Registered dialogue tree: %s"), *NewTree.TreeName);
-}
-
-bool UNarr_DialogueComponent::CheckTriggerCondition(ENarr_DialogueTrigger TriggerType, const FString& ConditionData)
-{
-    switch (TriggerType)
-    {
-        case ENarr_DialogueTrigger::Proximity:
-            if (PlayerReference && GetOwner())
-            {
-                float Distance = FVector::Dist(PlayerReference->GetActorLocation(), GetOwner()->GetActorLocation());
-                return Distance <= ProximityTriggerDistance;
-            }
-            break;
-
-        case ENarr_DialogueTrigger::FirstVisit:
-            // Check if this is the first time triggering this dialogue
-            return true; // Simplified for now
-
-        case ENarr_DialogueTrigger::TimeOfDay:
-            // Check game time - simplified implementation
-            return true;
-
-        default:
-            return false;
-    }
-
-    return false;
-}
-
-FNarr_DialogueTree* UNarr_DialogueComponent::GetDialogueTree(const FString& TreeName)
-{
-    for (FNarr_DialogueTree& Tree : DialogueTrees)
-    {
-        if (Tree.TreeName == TreeName)
-        {
-            return &Tree;
-        }
-    }
-    return nullptr;
-}
-
-void UNarr_DialogueComponent::UpdateProximityTriggers()
-{
-    if (!PlayerReference || !GetOwner())
-    {
-        return;
-    }
-
-    float Distance = FVector::Dist(PlayerReference->GetActorLocation(), GetOwner()->GetActorLocation());
-    if (Distance <= ProximityTriggerDistance)
-    {
-        // Check for proximity-triggered dialogues
-        for (FNarr_DialogueTree& Tree : DialogueTrees)
-        {
-            if (Tree.TriggerCondition == ENarr_DialogueTrigger::Proximity && 
-                (!Tree.bHasBeenTriggered || Tree.bIsRepeatable))
-            {
-                StartDialogue(Tree.TreeName);
-                break;
-            }
-        }
+        StopDialogue();
     }
 }
 
-// Dialogue Manager Implementation
-ANarr_DialogueManager::ANarr_DialogueManager()
+void UNarr_DialogueSystem::InitializeDefaultDialogues()
 {
-    PrimaryActorTick.bCanEverTick = true;
-    
-    DialogueComponent = CreateDefaultSubobject<UNarr_DialogueComponent>(TEXT("DialogueComponent"));
-}
+    // Create survival tutorial dialogue
+    FNarr_DialogueSequence TutorialSequence;
+    TutorialSequence.SequenceName = TEXT("SurvivalTutorial");
+    TutorialSequence.bAutoPlay = false;
+    TutorialSequence.DelayBetweenEntries = 2.0f;
 
-void ANarr_DialogueManager::BeginPlay()
-{
-    Super::BeginPlay();
-    InitializeDialogueSystem();
-}
+    FNarr_DialogueEntry Entry1;
+    Entry1.SpeakerName = TEXT("Narrator");
+    Entry1.DialogueText = TEXT("The ancient valley holds many secrets, survivor. Listen carefully to the wind.");
+    Entry1.DisplayDuration = 4.0f;
+    Entry1.bIsNarration = true;
+    TutorialSequence.DialogueEntries.Add(Entry1);
 
-void ANarr_DialogueManager::Tick(float DeltaTime)
-{
-    Super::Tick(DeltaTime);
-}
+    FNarr_DialogueEntry Entry2;
+    Entry2.SpeakerName = TEXT("Scout");
+    Entry2.DialogueText = TEXT("Warning! Pack hunters detected in the eastern ravines. Stay low and move quietly.");
+    Entry2.DisplayDuration = 4.0f;
+    Entry2.bIsNarration = false;
+    TutorialSequence.DialogueEntries.Add(Entry2);
 
-void ANarr_DialogueManager::InitializeDialogueSystem()
-{
-    LoadPresetDialogueTrees();
-    UE_LOG(LogTemp, Log, TEXT("Dialogue system initialized"));
-}
+    DialogueSequences.Add(TutorialSequence);
 
-void ANarr_DialogueManager::RegisterDialogueActor(AActor* DialogueActor)
-{
-    if (DialogueActor && !RegisteredDialogueActors.Contains(DialogueActor))
-    {
-        RegisteredDialogueActors.Add(DialogueActor);
-        UE_LOG(LogTemp, Log, TEXT("Registered dialogue actor: %s"), *DialogueActor->GetName());
-    }
-}
+    // Create danger warning dialogue
+    FNarr_DialogueSequence DangerSequence;
+    DangerSequence.SequenceName = TEXT("DangerWarning");
+    DangerSequence.bAutoPlay = true;
+    DangerSequence.DelayBetweenEntries = 1.5f;
 
-void ANarr_DialogueManager::TriggerLocationBasedDialogue(const FString& LocationName)
-{
-    SetGlobalDialogueFlag(FString::Printf(TEXT("Visited_%s"), *LocationName), true);
-    UE_LOG(LogTemp, Log, TEXT("Triggered location dialogue for: %s"), *LocationName);
-}
+    FNarr_DialogueEntry DangerEntry;
+    DangerEntry.SpeakerName = TEXT("Elder");
+    DangerEntry.DialogueText = TEXT("Thunder Lizard territory ahead! The massive predator's roar can be heard for miles.");
+    DangerEntry.DisplayDuration = 5.0f;
+    DangerEntry.bIsNarration = false;
+    DangerSequence.DialogueEntries.Add(DangerEntry);
 
-void ANarr_DialogueManager::SetGlobalDialogueFlag(const FString& FlagName, bool bValue)
-{
-    GlobalDialogueFlags.Add(FlagName, bValue);
-}
+    DialogueSequences.Add(DangerSequence);
 
-bool ANarr_DialogueManager::GetGlobalDialogueFlag(const FString& FlagName) const
-{
-    const bool* FoundFlag = GlobalDialogueFlags.Find(FlagName);
-    return FoundFlag ? *FoundFlag : false;
-}
-
-void ANarr_DialogueManager::LoadPresetDialogueTrees()
-{
-    CreateTribalHunterDialogue();
-    CreateTribalGathererDialogue();
-    CreateTribalElderDialogue();
-    CreateNarratorDialogue();
-}
-
-void ANarr_DialogueManager::CreateTribalHunterDialogue()
-{
-    FNarr_DialogueTree HunterTree;
-    HunterTree.TreeName = TEXT("TribalHunter_Introduction");
-    HunterTree.TreeType = ENarr_DialogueNodeType::Standard;
-    HunterTree.TriggerCondition = ENarr_DialogueTrigger::Proximity;
-
-    FNarr_DialogueLine Line1;
-    Line1.SpeakerName = TEXT("Tribal Hunter");
-    Line1.DialogueText = FText::FromString(TEXT("Greetings, survivor. I am the Hunter of this tribe. The wilderness is dangerous, but it provides for those who know its ways."));
-    Line1.SpeakerArchetype = ENarr_CharacterArchetype::TribalHunter;
-    Line1.DisplayDuration = 4.0f;
-
-    FNarr_DialogueLine Line2;
-    Line2.SpeakerName = TEXT("Tribal Hunter");
-    Line2.DialogueText = FText::FromString(TEXT("The great beasts roam these lands. Learn their patterns, respect their territory, and you might survive another day."));
-    Line2.SpeakerArchetype = ENarr_CharacterArchetype::TribalHunter;
-    Line2.DisplayDuration = 4.0f;
-
-    HunterTree.DialogueLines.Add(Line1);
-    HunterTree.DialogueLines.Add(Line2);
-
-    if (DialogueComponent)
-    {
-        DialogueComponent->RegisterDialogueTree(HunterTree);
-    }
-}
-
-void ANarr_DialogueManager::CreateTribalGathererDialogue()
-{
-    FNarr_DialogueTree GathererTree;
-    GathererTree.TreeName = TEXT("TribalGatherer_Introduction");
-    GathererTree.TreeType = ENarr_DialogueNodeType::Standard;
-    GathererTree.TriggerCondition = ENarr_DialogueTrigger::Proximity;
-
-    FNarr_DialogueLine Line1;
-    Line1.SpeakerName = TEXT("Tribal Gatherer");
-    Line1.DialogueText = FText::FromString(TEXT("Welcome, fellow survivor. I am the Gatherer, keeper of knowledge about the resources of this ancient world."));
-    Line1.SpeakerArchetype = ENarr_CharacterArchetype::TribalGatherer;
-    Line1.DisplayDuration = 4.0f;
-
-    FNarr_DialogueLine Line2;
-    Line2.SpeakerName = TEXT("Tribal Gatherer");
-    Line2.DialogueText = FText::FromString(TEXT("The plants and stones hold secrets. Learn which berries nourish and which bring death. Knowledge is survival."));
-    Line2.SpeakerArchetype = ENarr_CharacterArchetype::TribalGatherer;
-    Line2.DisplayDuration = 4.0f;
-
-    GathererTree.DialogueLines.Add(Line1);
-    GathererTree.DialogueLines.Add(Line2);
-
-    if (DialogueComponent)
-    {
-        DialogueComponent->RegisterDialogueTree(GathererTree);
-    }
-}
-
-void ANarr_DialogueManager::CreateTribalElderDialogue()
-{
-    FNarr_DialogueTree ElderTree;
-    ElderTree.TreeName = TEXT("TribalElder_Wisdom");
-    ElderTree.TreeType = ENarr_DialogueNodeType::Lore;
-    ElderTree.TriggerCondition = ENarr_DialogueTrigger::Proximity;
-
-    FNarr_DialogueLine Line1;
-    Line1.SpeakerName = TEXT("Tribal Elder");
-    Line1.DialogueText = FText::FromString(TEXT("In the time before memory, our ancestors learned the sacred laws of survival. Listen well, young one."));
-    Line1.SpeakerArchetype = ENarr_CharacterArchetype::TribalElder;
-    Line1.DisplayDuration = 4.0f;
-
-    FNarr_DialogueLine Line2;
-    Line2.SpeakerName = TEXT("Tribal Elder");
-    Line2.DialogueText = FText::FromString(TEXT("Hunt only what you need. Respect the territory of the great beasts. And never venture into the deep valley alone after sunset."));
-    Line2.SpeakerArchetype = ENarr_CharacterArchetype::TribalElder;
-    Line2.DisplayDuration = 5.0f;
-
-    ElderTree.DialogueLines.Add(Line1);
-    ElderTree.DialogueLines.Add(Line2);
-
-    if (DialogueComponent)
-    {
-        DialogueComponent->RegisterDialogueTree(ElderTree);
-    }
-}
-
-void ANarr_DialogueManager::CreateNarratorDialogue()
-{
-    FNarr_DialogueTree NarratorTree;
-    NarratorTree.TreeName = TEXT("Narrator_ValleyIntroduction");
-    NarratorTree.TreeType = ENarr_DialogueNodeType::Standard;
-    NarratorTree.TriggerCondition = ENarr_DialogueTrigger::LocationBased;
-
-    FNarr_DialogueLine Line1;
-    Line1.SpeakerName = TEXT("Narrator");
-    Line1.DialogueText = FText::FromString(TEXT("The ancient valley holds many secrets, survivor. Listen carefully to the wind - it carries the scent of predators and the whispers of danger."));
-    Line1.SpeakerArchetype = ENarr_CharacterArchetype::Narrator;
-    Line1.DisplayDuration = 5.0f;
-
-    FNarr_DialogueLine Line2;
-    Line2.SpeakerName = TEXT("Narrator");
-    Line2.DialogueText = FText::FromString(TEXT("Pack hunters move in coordinated patterns. Their intelligence should not be underestimated. Stay alert, stay alive."));
-    Line2.SpeakerArchetype = ENarr_CharacterArchetype::Narrator;
-    Line2.DisplayDuration = 4.0f;
-
-    NarratorTree.DialogueLines.Add(Line1);
-    NarratorTree.DialogueLines.Add(Line2);
-
-    if (DialogueComponent)
-    {
-        DialogueComponent->RegisterDialogueTree(NarratorTree);
-    }
+    UE_LOG(LogTemp, Log, TEXT("Narrative Dialogue System initialized with %d sequences"), DialogueSequences.Num());
 }
