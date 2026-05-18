@@ -1,259 +1,305 @@
 #include "NarrativeManager.h"
 #include "Engine/Engine.h"
+#include "Engine/World.h"
+#include "GameFramework/PlayerController.h"
 #include "Kismet/GameplayStatics.h"
 #include "Sound/SoundCue.h"
 #include "Components/AudioComponent.h"
+#include "TimerManager.h"
+
+UNarrativeManager::UNarrativeManager()
+{
+    CurrentStoryPhase = ENarr_StoryPhase::Introduction;
+    LastNarrationTime = 0.0f;
+    NarrationCooldown = 30.0f; // 30 seconds between narrations
+}
 
 void UNarrativeManager::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
     
-    bIsPlayingDialogue = false;
-    InitializeStoryEvents();
+    UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Initializing narrative system"));
     
-    UE_LOG(LogTemp, Warning, TEXT("NarrativeManager initialized with %d story events"), StoryEvents.Num());
+    InitializeDefaultEvents();
+    LoadNarrativeData();
+    
+    UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Initialized with %d events"), RegisteredEvents.Num());
 }
 
 void UNarrativeManager::Deinitialize()
 {
-    StoryEvents.Empty();
-    CompletedEvents.Empty();
+    RegisteredEvents.Empty();
+    TriggeredEventIDs.Empty();
     
     Super::Deinitialize();
 }
 
-void UNarrativeManager::InitializeStoryEvents()
+void UNarrativeManager::TriggerNarrativeEvent(const FString& EventID, AActor* TriggeringActor)
 {
-    // Initialize core survival story events
-    FNarr_StoryEvent IntroEvent;
-    IntroEvent.EventID = TEXT("game_intro");
-    IntroEvent.EventDescription = FText::FromString(TEXT("Player awakens in the prehistoric valley"));
-    
-    FNarr_DialogueLine IntroLine;
-    IntroLine.SpeakerName = TEXT("Tribal Elder");
-    IntroLine.DialogueText = FText::FromString(TEXT("The ancient valley holds many secrets, survivor. Stay alert and trust your instincts."));
-    IntroLine.Duration = 6.0f;
-    IntroEvent.DialogueLines.Add(IntroLine);
-    
-    StoryEvents.Add(IntroEvent);
+    if (!CanTriggerNarration())
+    {
+        return;
+    }
 
-    // First dinosaur encounter
-    FNarr_StoryEvent DinosaurEvent;
-    DinosaurEvent.EventID = TEXT("first_dinosaur");
-    DinosaurEvent.EventDescription = FText::FromString(TEXT("Player encounters their first dinosaur"));
-    DinosaurEvent.RequiredEvents.Add(TEXT("game_intro"));
-    
-    FNarr_DialogueLine DinosaurLine;
-    DinosaurLine.SpeakerName = TEXT("Scout");
-    DinosaurLine.DialogueText = FText::FromString(TEXT("Warning! Thunder Lizard territory ahead. Avoid open ground when the earth trembles."));
-    DinosaurLine.Duration = 5.0f;
-    DinosaurEvent.DialogueLines.Add(DinosaurLine);
-    
-    StoryEvents.Add(DinosaurEvent);
-
-    // Survival milestone
-    FNarr_StoryEvent SurvivalEvent;
-    SurvivalEvent.EventID = TEXT("survival_milestone");
-    SurvivalEvent.EventDescription = FText::FromString(TEXT("Player survives first day"));
-    
-    FNarr_DialogueLine SurvivalLine;
-    SurvivalLine.SpeakerName = TEXT("Veteran Hunter");
-    SurvivalLine.DialogueText = FText::FromString(TEXT("You have learned to read the signs of danger. The valley respects those who respect it."));
-    SurvivalLine.Duration = 5.5f;
-    SurvivalEvent.DialogueLines.Add(SurvivalLine);
-    
-    StoryEvents.Add(SurvivalEvent);
-}
-
-void UNarrativeManager::TriggerStoryEvent(const FString& EventID)
-{
-    FNarr_StoryEvent* Event = FindStoryEvent(EventID);
+    FNarr_NarrativeEvent* Event = FindEventByID(EventID);
     if (!Event)
     {
-        UE_LOG(LogTemp, Warning, TEXT("Story event not found: %s"), *EventID);
+        UE_LOG(LogTemp, Warning, TEXT("NarrativeManager: Event %s not found"), *EventID);
         return;
     }
 
-    // Check if prerequisites are met
-    for (const FString& RequiredEvent : Event->RequiredEvents)
+    if (Event->bHasBeenTriggered && !Event->bIsRepeatable)
     {
-        if (!IsEventCompleted(RequiredEvent))
+        return;
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Triggering event %s"), *EventID);
+
+    // Mark event as triggered
+    Event->bHasBeenTriggered = true;
+    if (!TriggeredEventIDs.Contains(EventID))
+    {
+        TriggeredEventIDs.Add(EventID);
+    }
+
+    // Play dialogue lines
+    APlayerController* PlayerController = nullptr;
+    if (UWorld* World = GetWorld())
+    {
+        PlayerController = World->GetFirstPlayerController();
+    }
+
+    for (const FNarr_DialogueLine& DialogueLine : Event->DialogueLines)
+    {
+        PlayDialogue(DialogueLine, PlayerController);
+    }
+
+    LastNarrationTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
+}
+
+void UNarrativeManager::PlayDialogue(const FNarr_DialogueLine& DialogueLine, APlayerController* PlayerController)
+{
+    if (DialogueLine.DialogueText.IsEmpty())
+    {
+        return;
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("NarrativeManager: %s: %s"), *DialogueLine.SpeakerName, *DialogueLine.DialogueText);
+
+    // Play voice clip if available
+    if (DialogueLine.VoiceClip && PlayerController)
+    {
+        UGameplayStatics::PlaySound2D(GetWorld(), DialogueLine.VoiceClip);
+    }
+
+    // Display text (in a real game, this would go to UI)
+    if (GEngine)
+    {
+        FString DisplayText = FString::Printf(TEXT("%s: %s"), *DialogueLine.SpeakerName, *DialogueLine.DialogueText);
+        GEngine->AddOnScreenDebugMessage(-1, DialogueLine.Duration, FColor::Yellow, DisplayText);
+    }
+}
+
+void UNarrativeManager::AdvanceStoryPhase()
+{
+    int32 CurrentPhaseInt = static_cast<int32>(CurrentStoryPhase);
+    int32 MaxPhaseInt = static_cast<int32>(ENarr_StoryPhase::FinalSurvival);
+    
+    if (CurrentPhaseInt < MaxPhaseInt)
+    {
+        CurrentStoryPhase = static_cast<ENarr_StoryPhase>(CurrentPhaseInt + 1);
+        UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Advanced to story phase %d"), CurrentPhaseInt + 1);
+        
+        // Trigger phase change event
+        FString PhaseEventID = FString::Printf(TEXT("StoryPhase_%d"), CurrentPhaseInt + 1);
+        TriggerNarrativeEvent(PhaseEventID);
+    }
+}
+
+void UNarrativeManager::RegisterNarrativeEvent(const FNarr_NarrativeEvent& NewEvent)
+{
+    if (NewEvent.EventID.IsEmpty())
+    {
+        UE_LOG(LogTemp, Warning, TEXT("NarrativeManager: Cannot register event with empty ID"));
+        return;
+    }
+
+    // Check if event already exists
+    if (FindEventByID(NewEvent.EventID))
+    {
+        UE_LOG(LogTemp, Warning, TEXT("NarrativeManager: Event %s already exists"), *NewEvent.EventID);
+        return;
+    }
+
+    RegisteredEvents.Add(NewEvent);
+    UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Registered event %s"), *NewEvent.EventID);
+}
+
+bool UNarrativeManager::IsEventTriggered(const FString& EventID) const
+{
+    return TriggeredEventIDs.Contains(EventID);
+}
+
+void UNarrativeManager::CheckLocationBasedEvents(const FVector& PlayerLocation)
+{
+    if (!CanTriggerNarration())
+    {
+        return;
+    }
+
+    for (FNarr_NarrativeEvent& Event : RegisteredEvents)
+    {
+        if (Event.bHasBeenTriggered && !Event.bIsRepeatable)
         {
-            UE_LOG(LogTemp, Warning, TEXT("Prerequisites not met for event: %s"), *EventID);
+            continue;
+        }
+
+        float Distance = FVector::Dist(PlayerLocation, Event.TriggerLocation);
+        if (Distance <= Event.TriggerRadius)
+        {
+            TriggerNarrativeEvent(Event.EventID);
+            break; // Only trigger one event per check
+        }
+    }
+}
+
+void UNarrativeManager::TriggerEnvironmentalNarration(EBiomeType BiomeType, const FVector& Location)
+{
+    if (!CanTriggerNarration())
+    {
+        return;
+    }
+
+    FString BiomeEventID;
+    switch (BiomeType)
+    {
+        case EBiomeType::Savanna:
+            BiomeEventID = TEXT("BiomeEntry_Savanna");
+            break;
+        case EBiomeType::Forest:
+            BiomeEventID = TEXT("BiomeEntry_Forest");
+            break;
+        case EBiomeType::Desert:
+            BiomeEventID = TEXT("BiomeEntry_Desert");
+            break;
+        case EBiomeType::Swamp:
+            BiomeEventID = TEXT("BiomeEntry_Swamp");
+            break;
+        case EBiomeType::Mountain:
+            BiomeEventID = TEXT("BiomeEntry_Mountain");
+            break;
+        default:
             return;
-        }
     }
 
-    // Play dialogue sequence if available
-    if (Event->DialogueLines.Num() > 0)
-    {
-        PlayDialogueSequence(Event->DialogueLines);
-    }
-
-    // Mark event as completed
-    CompleteEvent(EventID);
-    
-    UE_LOG(LogTemp, Log, TEXT("Story event triggered: %s"), *EventID);
+    TriggerNarrativeEvent(BiomeEventID);
 }
 
-bool UNarrativeManager::IsEventCompleted(const FString& EventID) const
+void UNarrativeManager::OnSurvivalStateChanged(float Health, float Hunger, float Thirst, float Fear)
 {
-    return CompletedEvents.Contains(EventID);
-}
-
-void UNarrativeManager::CompleteEvent(const FString& EventID)
-{
-    if (!CompletedEvents.Contains(EventID))
-    {
-        CompletedEvents.Add(EventID);
-        UE_LOG(LogTemp, Log, TEXT("Story event completed: %s"), *EventID);
-    }
-}
-
-void UNarrativeManager::PlayDialogue(const FNarr_DialogueLine& DialogueLine)
-{
-    if (bIsPlayingDialogue)
+    if (!CanTriggerNarration())
     {
         return;
     }
 
-    CurrentDialogue = DialogueLine;
-    bIsPlayingDialogue = true;
-
-    // Log dialogue for debugging
-    UE_LOG(LogTemp, Log, TEXT("Playing dialogue: [%s] %s"), 
-           *DialogueLine.SpeakerName, 
-           *DialogueLine.DialogueText.ToString());
-
-    // TODO: Integrate with UI system to display dialogue
-    // TODO: Play audio if AudioURL is provided
-    
-    // Simulate dialogue duration
-    FTimerHandle DialogueTimer;
-    GetWorld()->GetTimerManager().SetTimer(DialogueTimer, [this]()
+    // Trigger survival-based narrative events
+    if (Health < 0.3f && !IsEventTriggered(TEXT("LowHealth_Warning")))
     {
-        bIsPlayingDialogue = false;
-    }, CurrentDialogue.Duration, false);
+        TriggerNarrativeEvent(TEXT("LowHealth_Warning"));
+    }
+    else if (Hunger < 0.2f && !IsEventTriggered(TEXT("Starving_Warning")))
+    {
+        TriggerNarrativeEvent(TEXT("Starving_Warning"));
+    }
+    else if (Thirst < 0.2f && !IsEventTriggered(TEXT("Dehydrated_Warning")))
+    {
+        TriggerNarrativeEvent(TEXT("Dehydrated_Warning"));
+    }
+    else if (Fear > 0.8f && !IsEventTriggered(TEXT("HighFear_Narration")))
+    {
+        TriggerNarrativeEvent(TEXT("HighFear_Narration"));
+    }
 }
 
-void UNarrativeManager::PlayDialogueSequence(const TArray<FNarr_DialogueLine>& DialogueSequence)
+void UNarrativeManager::OnDinosaurEncounter(const FString& DinosaurType, bool bIsHostile)
 {
-    if (DialogueSequence.Num() == 0 || bIsPlayingDialogue)
+    if (!CanTriggerNarration())
     {
         return;
     }
 
-    // Play first dialogue line
-    PlayDialogue(DialogueSequence[0]);
-
-    // Schedule remaining lines
-    float TotalDelay = DialogueSequence[0].Duration;
-    for (int32 i = 1; i < DialogueSequence.Num(); i++)
-    {
-        FTimerHandle SequenceTimer;
-        const FNarr_DialogueLine LineCopy = DialogueSequence[i];
-        
-        GetWorld()->GetTimerManager().SetTimer(SequenceTimer, [this, LineCopy]()
-        {
-            PlayDialogue(LineCopy);
-        }, TotalDelay, false);
-        
-        TotalDelay += DialogueSequence[i].Duration;
-    }
-}
-
-void UNarrativeManager::OnPlayerSurvivalStateChanged(float Health, float Hunger, float Thirst, float Fear)
-{
-    // Trigger narrative events based on survival state
-    if (Health < 0.3f && !IsEventCompleted(TEXT("low_health_warning")))
-    {
-        FNarr_DialogueLine WarningLine;
-        WarningLine.SpeakerName = TEXT("Inner Voice");
-        WarningLine.DialogueText = FText::FromString(TEXT("Your body grows weak. Find shelter and tend to your wounds."));
-        WarningLine.Duration = 4.0f;
-        PlayDialogue(WarningLine);
-        
-        CompleteEvent(TEXT("low_health_warning"));
-    }
-
-    if (Fear > 0.8f && !IsEventCompleted(TEXT("high_fear_state")))
-    {
-        FNarr_DialogueLine FearLine;
-        FearLine.SpeakerName = TEXT("Inner Voice");
-        FearLine.DialogueText = FText::FromString(TEXT("Terror grips your heart. Breathe deeply and find your courage."));
-        FearLine.Duration = 4.5f;
-        PlayDialogue(FearLine);
-        
-        CompleteEvent(TEXT("high_fear_state"));
-    }
-}
-
-void UNarrativeManager::OnDinosaurEncounter(const FString& DinosaurType, float Distance, bool bIsHostile)
-{
-    if (DinosaurType.Contains(TEXT("TRex")) && Distance < 2000.0f)
-    {
-        if (!IsEventCompleted(TEXT("trex_encounter")))
-        {
-            TriggerStoryEvent(TEXT("first_dinosaur"));
-            CompleteEvent(TEXT("trex_encounter"));
-        }
-    }
-    else if (DinosaurType.Contains(TEXT("Raptor")) && bIsHostile)
-    {
-        FNarr_DialogueLine RaptorLine;
-        RaptorLine.SpeakerName = TEXT("Veteran Hunter");
-        RaptorLine.DialogueText = FText::FromString(TEXT("Pack hunters! They coordinate their attacks. Seek high ground immediately."));
-        RaptorLine.Duration = 4.0f;
-        PlayDialogue(RaptorLine);
-    }
-}
-
-void UNarrativeManager::OnBiomeEntered(const FString& BiomeName)
-{
-    FString EventID = FString::Printf(TEXT("entered_%s"), *BiomeName.ToLower());
+    FString EncounterEventID = FString::Printf(TEXT("DinosaurEncounter_%s"), *DinosaurType);
     
-    if (!IsEventCompleted(EventID))
+    if (bIsHostile)
     {
-        FNarr_DialogueLine BiomeLine;
-        BiomeLine.SpeakerName = TEXT("Survival Guide");
-        
-        if (BiomeName.Contains(TEXT("Swamp")))
-        {
-            BiomeLine.DialogueText = FText::FromString(TEXT("The marshlands hide both danger and resources. Watch for quicksand and predators."));
-        }
-        else if (BiomeName.Contains(TEXT("Forest")))
-        {
-            BiomeLine.DialogueText = FText::FromString(TEXT("Dense foliage provides cover but limits visibility. Listen for the sounds of the hunt."));
-        }
-        else if (BiomeName.Contains(TEXT("Desert")))
-        {
-            BiomeLine.DialogueText = FText::FromString(TEXT("The harsh sun and scarce water test even the strongest survivors."));
-        }
-        else if (BiomeName.Contains(TEXT("Mountain")))
-        {
-            BiomeLine.DialogueText = FText::FromString(TEXT("High peaks offer safety and vantage points, but the climb is treacherous."));
-        }
-        else
-        {
-            BiomeLine.DialogueText = FText::FromString(TEXT("You have entered new territory. Stay alert for signs of danger."));
-        }
-        
-        BiomeLine.Duration = 5.0f;
-        PlayDialogue(BiomeLine);
-        CompleteEvent(EventID);
+        EncounterEventID += TEXT("_Hostile");
     }
+    else
+    {
+        EncounterEventID += TEXT("_Peaceful");
+    }
+
+    TriggerNarrativeEvent(EncounterEventID);
 }
 
-void UNarrativeManager::LoadDialogueAudio(const FString& AudioURL)
+void UNarrativeManager::InitializeDefaultEvents()
 {
-    // TODO: Implement audio loading from URL
-    // This would integrate with the ElevenLabs TTS system
-    UE_LOG(LogTemp, Log, TEXT("Loading dialogue audio from: %s"), *AudioURL);
+    // Introduction phase events
+    FNarr_NarrativeEvent IntroEvent;
+    IntroEvent.EventID = TEXT("GameStart_Introduction");
+    IntroEvent.EventDescription = TEXT("Player starts the game");
+    IntroEvent.TriggerLocation = FVector(0, 0, 0);
+    IntroEvent.TriggerRadius = 5000.0f;
+    IntroEvent.bIsRepeatable = false;
+
+    FNarr_DialogueLine IntroLine;
+    IntroLine.SpeakerName = TEXT("Valley Narrator");
+    IntroLine.DialogueText = TEXT("The ancient valley holds many secrets, survivor. Your journey in this primordial world begins now.");
+    IntroLine.Duration = 5.0f;
+    IntroEvent.DialogueLines.Add(IntroLine);
+
+    RegisteredEvents.Add(IntroEvent);
+
+    // Biome entry events
+    FNarr_NarrativeEvent SavannaEvent;
+    SavannaEvent.EventID = TEXT("BiomeEntry_Savanna");
+    SavannaEvent.EventDescription = TEXT("Player enters savanna biome");
+    SavannaEvent.TriggerLocation = FVector(0, 0, 0);
+    SavannaEvent.TriggerRadius = 10000.0f;
+    SavannaEvent.bIsRepeatable = true;
+
+    FNarr_DialogueLine SavannaLine;
+    SavannaLine.SpeakerName = TEXT("Scout");
+    SavannaLine.DialogueText = TEXT("The open savanna stretches before you. Watch for predators in the tall grass.");
+    SavannaLine.Duration = 4.0f;
+    SavannaEvent.DialogueLines.Add(SavannaLine);
+
+    RegisteredEvents.Add(SavannaEvent);
+
+    // Survival warning events
+    FNarr_NarrativeEvent LowHealthEvent;
+    LowHealthEvent.EventID = TEXT("LowHealth_Warning");
+    LowHealthEvent.EventDescription = TEXT("Player health is critically low");
+    LowHealthEvent.bIsRepeatable = true;
+
+    FNarr_DialogueLine HealthLine;
+    HealthLine.SpeakerName = TEXT("Inner Voice");
+    HealthLine.DialogueText = TEXT("Your strength fades. Find shelter and tend to your wounds before it's too late.");
+    HealthLine.Duration = 4.0f;
+    LowHealthEvent.DialogueLines.Add(HealthLine);
+
+    RegisteredEvents.Add(LowHealthEvent);
 }
 
-FNarr_StoryEvent* UNarrativeManager::FindStoryEvent(const FString& EventID)
+void UNarrativeManager::LoadNarrativeData()
 {
-    for (FNarr_StoryEvent& Event : StoryEvents)
+    // In a full implementation, this would load from data tables or JSON files
+    UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Loading narrative data from default setup"));
+}
+
+FNarr_NarrativeEvent* UNarrativeManager::FindEventByID(const FString& EventID)
+{
+    for (FNarr_NarrativeEvent& Event : RegisteredEvents)
     {
         if (Event.EventID == EventID)
         {
@@ -261,4 +307,15 @@ FNarr_StoryEvent* UNarrativeManager::FindStoryEvent(const FString& EventID)
         }
     }
     return nullptr;
+}
+
+bool UNarrativeManager::CanTriggerNarration() const
+{
+    if (!GetWorld())
+    {
+        return false;
+    }
+
+    float CurrentTime = GetWorld()->GetTimeSeconds();
+    return (CurrentTime - LastNarrationTime) >= NarrationCooldown;
 }
