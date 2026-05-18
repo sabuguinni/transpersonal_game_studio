@@ -2,21 +2,141 @@
 
 #include "CoreMinimal.h"
 #include "Engine/GameInstanceSubsystem.h"
+#include "Engine/World.h"
 #include "SharedTypes.h"
 #include "EngineArchitecturalFramework.generated.h"
 
-// Forward declarations
-class UBiomeManager;
-class UAssetProductionManager;
-class UBuildSystemManager;
-class UArchitectureValidationSuite;
+// Engine Architect System Priority Levels
+UENUM(BlueprintType)
+enum class EEng_SystemPriority : uint8
+{
+    Critical        UMETA(DisplayName = "Critical"),
+    High           UMETA(DisplayName = "High"),
+    Medium         UMETA(DisplayName = "Medium"),
+    Low            UMETA(DisplayName = "Low"),
+    Background     UMETA(DisplayName = "Background")
+};
+
+// Engine Performance Monitoring Categories
+UENUM(BlueprintType)
+enum class EEng_PerformanceCategory : uint8
+{
+    Physics        UMETA(DisplayName = "Physics"),
+    Rendering      UMETA(DisplayName = "Rendering"),
+    AI             UMETA(DisplayName = "AI"),
+    Audio          UMETA(DisplayName = "Audio"),
+    Networking     UMETA(DisplayName = "Networking"),
+    Memory         UMETA(DisplayName = "Memory"),
+    IO             UMETA(DisplayName = "Input/Output")
+};
+
+// Architectural Compliance Status
+UENUM(BlueprintType)
+enum class EEng_ComplianceStatus : uint8
+{
+    Compliant      UMETA(DisplayName = "Compliant"),
+    Warning        UMETA(DisplayName = "Warning"),
+    Violation      UMETA(DisplayName = "Violation"),
+    Critical       UMETA(DisplayName = "Critical"),
+    Unknown        UMETA(DisplayName = "Unknown")
+};
+
+// System Registration Information
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FEng_SystemRegistration
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System")
+    FString SystemName;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System")
+    EEng_SystemPriority Priority = EEng_SystemPriority::Medium;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System")
+    FString ModuleName;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System")
+    FString AgentResponsible;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System")
+    bool bIsActive = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System")
+    float LastUpdateTime = 0.0f;
+
+    FEng_SystemRegistration()
+    {
+        SystemName = TEXT("UnknownSystem");
+        ModuleName = TEXT("TranspersonalGame");
+        AgentResponsible = TEXT("Unknown");
+    }
+};
+
+// Performance Metrics Structure
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FEng_PerformanceMetrics
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    EEng_PerformanceCategory Category = EEng_PerformanceCategory::Physics;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float CurrentValue = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float TargetValue = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float MaxValue = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    FString MetricName;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    bool bIsWithinLimits = true;
+
+    FEng_PerformanceMetrics()
+    {
+        MetricName = TEXT("UnknownMetric");
+    }
+};
+
+// Architectural Validation Result
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FEng_ValidationResult
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Validation")
+    EEng_ComplianceStatus Status = EEng_ComplianceStatus::Unknown;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Validation")
+    FString SystemName;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Validation")
+    FString ValidationMessage;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Validation")
+    TArray<FString> Recommendations;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Validation")
+    float ValidationTime = 0.0f;
+
+    FEng_ValidationResult()
+    {
+        SystemName = TEXT("UnknownSystem");
+        ValidationMessage = TEXT("No validation performed");
+    }
+};
 
 /**
- * Engine Architectural Framework - Core system registration and validation
- * Defines technical standards, system priorities, and architectural compliance
- * This is the foundation system that all other game systems must register with
+ * Engine Architectural Framework - Core system that defines and enforces
+ * architectural standards across all game systems. Manages system registration,
+ * performance monitoring, and architectural compliance validation.
  */
-UCLASS(BlueprintType)
+UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UEngineArchitecturalFramework : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
@@ -30,193 +150,104 @@ public:
 
     // System Registration
     UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    void RegisterCoreSystem(const FString& SystemName, UObject* SystemInstance, int32 Priority = 100);
+    bool RegisterSystem(const FEng_SystemRegistration& SystemInfo);
 
     UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    void UnregisterCoreSystem(const FString& SystemName);
+    bool UnregisterSystem(const FString& SystemName);
+
+    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
+    TArray<FEng_SystemRegistration> GetRegisteredSystems() const;
 
     UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
     bool IsSystemRegistered(const FString& SystemName) const;
 
     // Performance Monitoring
     UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    void UpdateSystemPerformance(const FString& SystemName, float DeltaTime, int32 ActorCount);
+    void UpdatePerformanceMetric(const FEng_PerformanceMetrics& Metric);
 
     UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    float GetSystemPerformanceMetric(const FString& SystemName) const;
+    FEng_PerformanceMetrics GetPerformanceMetric(const FString& MetricName) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
+    TArray<FEng_PerformanceMetrics> GetAllPerformanceMetrics() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
+    bool IsPerformanceWithinLimits() const;
 
     // Architectural Validation
     UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    bool ValidateSystemArchitecture(const FString& SystemName);
+    FEng_ValidationResult ValidateSystem(const FString& SystemName);
 
     UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    void RunFullArchitecturalValidation();
-
-    // System Dependencies
-    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    void AddSystemDependency(const FString& SystemName, const FString& DependencyName);
+    TArray<FEng_ValidationResult> ValidateAllSystems();
 
     UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    bool AreSystemDependenciesMet(const FString& SystemName) const;
+    EEng_ComplianceStatus GetOverallComplianceStatus() const;
 
-    // Critical System Access
+    // System Health Monitoring
     UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    UBiomeManager* GetBiomeManager() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    UAssetProductionManager* GetAssetProductionManager() const;
+    void UpdateSystemHealth(const FString& SystemName, float HealthValue);
 
     UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    UBuildSystemManager* GetBuildSystemManager() const;
+    float GetSystemHealth(const FString& SystemName) const;
 
     UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    UArchitectureValidationSuite* GetValidationSuite() const;
+    bool AreAllSystemsHealthy() const;
 
-    // Engine Standards Enforcement
+    // Architectural Standards Enforcement
     UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    void EnforcePerformanceStandards();
+    bool EnforceArchitecturalStandards();
 
     UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    void ValidateModuleCompliance();
+    TArray<FString> GetArchitecturalViolations() const;
 
+    // Debug and Diagnostics
     UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
     void GenerateArchitecturalReport();
 
+    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
+    FString GetFrameworkStatus() const;
+
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Engine Architecture")
+    void RunArchitecturalDiagnostics();
+
 protected:
-    // System Registry
-    UPROPERTY()
-    TMap<FString, UObject*> RegisteredSystems;
+    // Registered Systems Storage
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Systems")
+    TArray<FEng_SystemRegistration> RegisteredSystems;
 
-    UPROPERTY()
-    TMap<FString, int32> SystemPriorities;
+    // Performance Metrics Storage
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Performance")
+    TArray<FEng_PerformanceMetrics> PerformanceMetrics;
 
-    UPROPERTY()
-    TMap<FString, float> SystemPerformanceMetrics;
+    // Validation Results Storage
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Validation")
+    TArray<FEng_ValidationResult> ValidationResults;
 
-    UPROPERTY()
-    TMap<FString, TArray<FString>> SystemDependencies;
+    // System Health Tracking
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Health")
+    TMap<FString, float> SystemHealthMap;
 
-    // Core System References
-    UPROPERTY()
-    UBiomeManager* BiomeManagerRef;
-
-    UPROPERTY()
-    UAssetProductionManager* AssetProductionManagerRef;
-
-    UPROPERTY()
-    UBuildSystemManager* BuildSystemManagerRef;
-
-    UPROPERTY()
-    UArchitectureValidationSuite* ValidationSuiteRef;
-
-    // Performance Monitoring
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance")
-    float MaxAllowedFrameTime = 16.67f; // 60 FPS target
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance")
-    int32 MaxActorsPerSystem = 1000;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance")
+    // Framework Configuration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
     bool bEnablePerformanceMonitoring = true;
 
-    // Architectural Standards
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Architecture")
-    bool bEnforceModuleCompliance = true;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
+    bool bEnableArchitecturalValidation = true;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Architecture")
-    bool bValidateSystemDependencies = true;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
+    float ValidationFrequency = 5.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Architecture")
-    bool bGenerateComplianceReports = true;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
+    float PerformanceMonitoringFrequency = 1.0f;
 
 private:
-    void InitializeCoreSystemReferences();
-    void ValidateSystemIntegrity();
-    void LogArchitecturalStatus();
-    bool CheckSystemPerformance(const FString& SystemName) const;
-    void EnforceSystemLimits();
-};
+    // Internal validation methods
+    bool ValidateSystemInternal(const FString& SystemName, FEng_ValidationResult& OutResult);
+    void UpdateFrameworkMetrics();
+    void CheckArchitecturalCompliance();
 
-/**
- * Engine System Priority Levels
- * Defines the initialization and update order for all game systems
- */
-UENUM(BlueprintType)
-enum class EEng_SystemPriority : uint8
-{
-    Critical    = 0     UMETA(DisplayName = "Critical (0-19)"),
-    High        = 20    UMETA(DisplayName = "High (20-39)"),
-    Normal      = 40    UMETA(DisplayName = "Normal (40-79)"),
-    Low         = 80    UMETA(DisplayName = "Low (80-99)"),
-    Background  = 100   UMETA(DisplayName = "Background (100+)")
-};
-
-/**
- * Engine Performance Metrics
- * Standardized performance measurement structure
- */
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEng_PerformanceMetrics
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float AverageFrameTime = 0.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float PeakFrameTime = 0.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 ActiveActorCount = 0;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float MemoryUsageMB = 0.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    bool bPerformanceWithinLimits = true;
-
-    FEng_PerformanceMetrics()
-    {
-        AverageFrameTime = 0.0f;
-        PeakFrameTime = 0.0f;
-        ActiveActorCount = 0;
-        MemoryUsageMB = 0.0f;
-        bPerformanceWithinLimits = true;
-    }
-};
-
-/**
- * Engine System Registration Info
- * Contains metadata about registered systems
- */
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEng_SystemInfo
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System")
-    FString SystemName;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System")
-    EEng_SystemPriority Priority;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System")
-    bool bIsActive = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System")
-    bool bIsValidated = false;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System")
-    TArray<FString> Dependencies;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System")
-    FEng_PerformanceMetrics PerformanceData;
-
-    FEng_SystemInfo()
-    {
-        SystemName = TEXT("");
-        Priority = EEng_SystemPriority::Normal;
-        bIsActive = true;
-        bIsValidated = false;
-    }
+    // Timer handles for periodic operations
+    FTimerHandle ValidationTimerHandle;
+    FTimerHandle PerformanceTimerHandle;
 };
