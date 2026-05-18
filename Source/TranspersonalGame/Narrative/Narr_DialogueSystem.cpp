@@ -1,210 +1,169 @@
 #include "Narr_DialogueSystem.h"
+#include "Components/SphereComponent.h"
+#include "Components/StaticMeshComponent.h"
+#include "Engine/DataTable.h"
+#include "Sound/SoundBase.h"
+#include "Kismet/GameplayStatics.h"
+#include "GameFramework/Character.h"
 #include "Engine/Engine.h"
-#include "TimerManager.h"
-#include "Engine/World.h"
 
-UNarr_DialogueSystem::UNarr_DialogueSystem()
+ANarr_DialogueSystem::ANarr_DialogueSystem()
 {
-    PrimaryComponentTick.bCanEverTick = true;
-    bDialogueActive = false;
-    CurrentSequenceIndex = -1;
-    CurrentEntryIndex = -1;
-    DialogueSpeed = 1.0f;
+    PrimaryActorTick.bCanEverTick = true;
+
+    // Create root component
+    RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootComponent"));
+
+    // Create trigger sphere
+    TriggerSphere = CreateDefaultSubobject<USphereComponent>(TEXT("TriggerSphere"));
+    TriggerSphere->SetupAttachment(RootComponent);
+    TriggerSphere->SetSphereRadius(500.0f);
+    TriggerSphere->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+    TriggerSphere->SetCollisionResponseToAllChannels(ECR_Ignore);
+    TriggerSphere->SetCollisionResponseToChannel(ECC_Pawn, ECR_Overlap);
+
+    // Create visual marker
+    VisualMarker = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("VisualMarker"));
+    VisualMarker->SetupAttachment(RootComponent);
+    VisualMarker->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+
+    // Initialize properties
+    bHasBeenTriggered = false;
+    DialogueRowName = TEXT("Default");
+    DialogueTable = nullptr;
+    DialogueSound = nullptr;
+
+    // Bind overlap event
+    TriggerSphere->OnComponentBeginOverlap.AddDynamic(this, &ANarr_DialogueSystem::OnTriggerBeginOverlap);
 }
 
-void UNarr_DialogueSystem::BeginPlay()
+void ANarr_DialogueSystem::BeginPlay()
 {
     Super::BeginPlay();
-    InitializeDefaultDialogues();
-}
-
-void UNarr_DialogueSystem::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
-{
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-}
-
-void UNarr_DialogueSystem::StartDialogueSequence(const FString& SequenceName)
-{
-    // Find the dialogue sequence by name
-    for (int32 i = 0; i < DialogueSequences.Num(); i++)
-    {
-        if (DialogueSequences[i].SequenceName == SequenceName)
-        {
-            CurrentSequenceIndex = i;
-            CurrentEntryIndex = 0;
-            bDialogueActive = true;
-
-            if (DialogueSequences[i].DialogueEntries.Num() > 0)
-            {
-                ProcessNextDialogueEntry();
-            }
-            return;
-        }
-    }
-
-    UE_LOG(LogTemp, Warning, TEXT("Dialogue sequence '%s' not found"), *SequenceName);
-}
-
-void UNarr_DialogueSystem::StopDialogue()
-{
-    bDialogueActive = false;
-    CurrentSequenceIndex = -1;
-    CurrentEntryIndex = -1;
-
-    if (GetWorld() && GetWorld()->GetTimerManager().IsTimerActive(DialogueTimerHandle))
-    {
-        GetWorld()->GetTimerManager().ClearTimer(DialogueTimerHandle);
-    }
-}
-
-void UNarr_DialogueSystem::AddDialogueSequence(const FNarr_DialogueSequence& NewSequence)
-{
-    DialogueSequences.Add(NewSequence);
-}
-
-void UNarr_DialogueSystem::PlayNarration(const FString& NarrationText, float Duration)
-{
-    FNarr_DialogueEntry NarrationEntry;
-    NarrationEntry.SpeakerName = TEXT("Narrator");
-    NarrationEntry.DialogueText = NarrationText;
-    NarrationEntry.DisplayDuration = Duration;
-    NarrationEntry.bIsNarration = true;
-
-    FNarr_DialogueSequence TempSequence;
-    TempSequence.SequenceName = TEXT("TempNarration");
-    TempSequence.DialogueEntries.Add(NarrationEntry);
-    TempSequence.bAutoPlay = true;
-
-    DialogueSequences.Add(TempSequence);
-    StartDialogueSequence(TEXT("TempNarration"));
-}
-
-FNarr_DialogueEntry UNarr_DialogueSystem::GetCurrentDialogueEntry() const
-{
-    if (bDialogueActive && CurrentSequenceIndex >= 0 && CurrentEntryIndex >= 0)
-    {
-        if (DialogueSequences.IsValidIndex(CurrentSequenceIndex))
-        {
-            const FNarr_DialogueSequence& CurrentSequence = DialogueSequences[CurrentSequenceIndex];
-            if (CurrentSequence.DialogueEntries.IsValidIndex(CurrentEntryIndex))
-            {
-                return CurrentSequence.DialogueEntries[CurrentEntryIndex];
-            }
-        }
-    }
-
-    return FNarr_DialogueEntry();
-}
-
-void UNarr_DialogueSystem::ProcessNextDialogueEntry()
-{
-    if (!bDialogueActive || CurrentSequenceIndex < 0 || CurrentEntryIndex < 0)
-    {
-        return;
-    }
-
-    if (!DialogueSequences.IsValidIndex(CurrentSequenceIndex))
-    {
-        StopDialogue();
-        return;
-    }
-
-    const FNarr_DialogueSequence& CurrentSequence = DialogueSequences[CurrentSequenceIndex];
     
-    if (!CurrentSequence.DialogueEntries.IsValidIndex(CurrentEntryIndex))
+    // Set visual marker visibility based on dialogue availability
+    if (VisualMarker)
     {
-        StopDialogue();
+        VisualMarker->SetVisibility(IsDialogueAvailable());
+    }
+}
+
+void ANarr_DialogueSystem::Tick(float DeltaTime)
+{
+    Super::Tick(DeltaTime);
+    
+    // Optional: Add floating animation or other visual feedback
+    if (VisualMarker && IsDialogueAvailable())
+    {
+        FVector CurrentLocation = VisualMarker->GetRelativeLocation();
+        float FloatOffset = FMath::Sin(GetWorld()->GetTimeSeconds() * 2.0f) * 10.0f;
+        VisualMarker->SetRelativeLocation(FVector(CurrentLocation.X, CurrentLocation.Y, FloatOffset));
+    }
+}
+
+void ANarr_DialogueSystem::OnTriggerBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, 
+                                                UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, 
+                                                bool bFromSweep, const FHitResult& SweepResult)
+{
+    // Check if the overlapping actor is a player character
+    ACharacter* PlayerCharacter = Cast<ACharacter>(OtherActor);
+    if (PlayerCharacter && PlayerCharacter->IsPlayerControlled())
+    {
+        TriggerDialogue(PlayerCharacter);
+    }
+}
+
+void ANarr_DialogueSystem::TriggerDialogue(AActor* PlayerActor)
+{
+    if (!IsDialogueAvailable())
+    {
         return;
     }
 
-    const FNarr_DialogueEntry& CurrentEntry = CurrentSequence.DialogueEntries[CurrentEntryIndex];
-
-    // Display the dialogue entry
-    FString DisplayText = FString::Printf(TEXT("%s: %s"), *CurrentEntry.SpeakerName, *CurrentEntry.DialogueText);
+    FNarr_DialogueEntry DialogueEntry = GetDialogueEntry();
     
+    // Check if this is a one-time dialogue and has already been triggered
+    if (DialogueEntry.bOneTimeOnly && bHasBeenTriggered)
+    {
+        return;
+    }
+
+    // Mark as triggered
+    bHasBeenTriggered = true;
+
+    // Play dialogue sound if available
+    if (DialogueSound)
+    {
+        UGameplayStatics::PlaySoundAtLocation(this, DialogueSound, GetActorLocation());
+    }
+
+    // Display dialogue text (in a real game, this would show UI)
     if (GEngine)
     {
-        GEngine->AddOnScreenDebugMessage(-1, CurrentEntry.DisplayDuration, FColor::Cyan, DisplayText);
+        FString DisplayText = FString::Printf(TEXT("%s: %s"), 
+                                            *DialogueEntry.SpeakerName, 
+                                            *DialogueEntry.DialogueText.ToString());
+        GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Yellow, DisplayText);
     }
 
-    UE_LOG(LogTemp, Log, TEXT("Dialogue: %s"), *DisplayText);
+    // Call Blueprint event
+    OnDialogueTriggered(DialogueEntry);
 
-    // Set timer for next entry or completion
-    if (GetWorld())
+    // Hide visual marker if one-time only
+    if (DialogueEntry.bOneTimeOnly && VisualMarker)
     {
-        float TimerDuration = CurrentEntry.DisplayDuration + CurrentSequence.DelayBetweenEntries;
-        GetWorld()->GetTimerManager().SetTimer(DialogueTimerHandle, this, &UNarr_DialogueSystem::OnDialogueEntryComplete, TimerDuration, false);
+        VisualMarker->SetVisibility(false);
     }
 }
 
-void UNarr_DialogueSystem::OnDialogueEntryComplete()
+FNarr_DialogueEntry ANarr_DialogueSystem::GetDialogueEntry()
 {
-    if (!bDialogueActive || CurrentSequenceIndex < 0)
+    if (DialogueTable && !DialogueRowName.IsNone())
     {
-        return;
-    }
-
-    CurrentEntryIndex++;
-
-    if (DialogueSequences.IsValidIndex(CurrentSequenceIndex))
-    {
-        const FNarr_DialogueSequence& CurrentSequence = DialogueSequences[CurrentSequenceIndex];
-        
-        if (CurrentEntryIndex < CurrentSequence.DialogueEntries.Num())
+        FNarr_DialogueEntry* FoundEntry = DialogueTable->FindRow<FNarr_DialogueEntry>(DialogueRowName, TEXT(""));
+        if (FoundEntry)
         {
-            // Process next entry in sequence
-            ProcessNextDialogueEntry();
-        }
-        else
-        {
-            // Sequence complete
-            StopDialogue();
+            return *FoundEntry;
         }
     }
-    else
+
+    // Return default entry if not found
+    FNarr_DialogueEntry DefaultEntry;
+    DefaultEntry.SpeakerName = TEXT("Valley Guide");
+    DefaultEntry.DialogueText = FText::FromString(TEXT("The ancient valley holds many secrets, survivor."));
+    DefaultEntry.DialogueType = ENarr_DialogueType::Information;
+    return DefaultEntry;
+}
+
+void ANarr_DialogueSystem::SetDialogueEntry(FName RowName)
+{
+    DialogueRowName = RowName;
+    bHasBeenTriggered = false;
+    
+    if (VisualMarker)
     {
-        StopDialogue();
+        VisualMarker->SetVisibility(IsDialogueAvailable());
     }
 }
 
-void UNarr_DialogueSystem::InitializeDefaultDialogues()
+bool ANarr_DialogueSystem::IsDialogueAvailable() const
 {
-    // Create survival tutorial dialogue
-    FNarr_DialogueSequence TutorialSequence;
-    TutorialSequence.SequenceName = TEXT("SurvivalTutorial");
-    TutorialSequence.bAutoPlay = false;
-    TutorialSequence.DelayBetweenEntries = 2.0f;
+    if (!DialogueTable || DialogueRowName.IsNone())
+    {
+        return false;
+    }
 
-    FNarr_DialogueEntry Entry1;
-    Entry1.SpeakerName = TEXT("Narrator");
-    Entry1.DialogueText = TEXT("The ancient valley holds many secrets, survivor. Listen carefully to the wind.");
-    Entry1.DisplayDuration = 4.0f;
-    Entry1.bIsNarration = true;
-    TutorialSequence.DialogueEntries.Add(Entry1);
+    FNarr_DialogueEntry* FoundEntry = DialogueTable->FindRow<FNarr_DialogueEntry>(DialogueRowName, TEXT(""));
+    if (!FoundEntry)
+    {
+        return false;
+    }
 
-    FNarr_DialogueEntry Entry2;
-    Entry2.SpeakerName = TEXT("Scout");
-    Entry2.DialogueText = TEXT("Warning! Pack hunters detected in the eastern ravines. Stay low and move quietly.");
-    Entry2.DisplayDuration = 4.0f;
-    Entry2.bIsNarration = false;
-    TutorialSequence.DialogueEntries.Add(Entry2);
+    // If it's one-time only and already triggered, not available
+    if (FoundEntry->bOneTimeOnly && bHasBeenTriggered)
+    {
+        return false;
+    }
 
-    DialogueSequences.Add(TutorialSequence);
-
-    // Create danger warning dialogue
-    FNarr_DialogueSequence DangerSequence;
-    DangerSequence.SequenceName = TEXT("DangerWarning");
-    DangerSequence.bAutoPlay = true;
-    DangerSequence.DelayBetweenEntries = 1.5f;
-
-    FNarr_DialogueEntry DangerEntry;
-    DangerEntry.SpeakerName = TEXT("Elder");
-    DangerEntry.DialogueText = TEXT("Thunder Lizard territory ahead! The massive predator's roar can be heard for miles.");
-    DangerEntry.DisplayDuration = 5.0f;
-    DangerEntry.bIsNarration = false;
-    DangerSequence.DialogueEntries.Add(DangerEntry);
-
-    DialogueSequences.Add(DangerSequence);
-
-    UE_LOG(LogTemp, Log, TEXT("Narrative Dialogue System initialized with %d sequences"), DialogueSequences.Num());
+    return true;
 }
