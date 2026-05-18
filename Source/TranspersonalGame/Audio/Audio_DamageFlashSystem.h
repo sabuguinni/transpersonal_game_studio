@@ -1,106 +1,98 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Components/ActorComponent.h"
-#include "Engine/World.h"
-#include "GameFramework/PlayerController.h"
-#include "Components/PostProcessComponent.h"
+#include "GameFramework/Actor.h"
+#include "Components/AudioComponent.h"
+#include "Components/StaticMeshComponent.h"
+#include "Materials/MaterialInterface.h"
+#include "Materials/MaterialInstanceDynamic.h"
 #include "Audio_DamageFlashSystem.generated.h"
 
-UENUM(BlueprintType)
-enum class EAudio_DamageType : uint8
-{
-    Light      UMETA(DisplayName = "Light Damage"),
-    Medium     UMETA(DisplayName = "Medium Damage"),
-    Heavy      UMETA(DisplayName = "Heavy Damage"),
-    Critical   UMETA(DisplayName = "Critical Damage"),
-    Death      UMETA(DisplayName = "Death")
-};
-
 USTRUCT(BlueprintType)
-struct FAudio_DamageFlashSettings
+struct TRANSPERSONALGAME_API FAudio_DamageFlashData
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flash")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Damage Flash")
     float FlashDuration = 0.3f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flash")
-    float FlashIntensity = 0.5f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Damage Flash")
+    float FlashIntensity = 0.8f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flash")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Damage Flash")
     FLinearColor FlashColor = FLinearColor::Red;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flash")
-    float FadeOutTime = 0.2f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Damage Flash")
+    bool bPlayDamageSound = true;
 
-    FAudio_DamageFlashSettings()
+    FAudio_DamageFlashData()
     {
         FlashDuration = 0.3f;
-        FlashIntensity = 0.5f;
+        FlashIntensity = 0.8f;
         FlashColor = FLinearColor::Red;
-        FadeOutTime = 0.2f;
+        bPlayDamageSound = true;
     }
 };
 
-UCLASS(ClassGroup=(Audio), meta=(BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UAudio_DamageFlashSystem : public UActorComponent
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API AAudio_DamageFlashSystem : public AActor
 {
     GENERATED_BODY()
 
 public:
-    UAudio_DamageFlashSystem();
+    AAudio_DamageFlashSystem();
 
 protected:
     virtual void BeginPlay() override;
 
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    class UAudioComponent* AudioComponent;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    class UStaticMeshComponent* ScreenOverlay;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    class USoundBase* DamageSound;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    class USoundBase* CriticalDamageSound;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Materials")
+    class UMaterialInterface* FlashMaterial;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Damage Flash")
+    FAudio_DamageFlashData DefaultFlashData;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Damage Flash")
+    FAudio_DamageFlashData CriticalFlashData;
+
+private:
+    UPROPERTY()
+    class UMaterialInstanceDynamic* DynamicFlashMaterial;
+
+    float CurrentFlashTime;
+    float FlashDuration;
+    bool bIsFlashing;
+    FLinearColor FlashColor;
+    float FlashIntensity;
+
 public:
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+    virtual void Tick(float DeltaTime) override;
 
-    // Trigger damage flash effect
-    UFUNCTION(BlueprintCallable, Category = "Audio Damage Flash")
-    void TriggerDamageFlash(EAudio_DamageType DamageType);
+    UFUNCTION(BlueprintCallable, Category = "Damage Flash")
+    void TriggerDamageFlash(float DamageAmount);
 
-    // Trigger custom damage flash
-    UFUNCTION(BlueprintCallable, Category = "Audio Damage Flash")
-    void TriggerCustomFlash(FAudio_DamageFlashSettings FlashSettings);
+    UFUNCTION(BlueprintCallable, Category = "Damage Flash")
+    void TriggerCriticalDamageFlash();
 
-    // Stop current flash effect
-    UFUNCTION(BlueprintCallable, Category = "Audio Damage Flash")
+    UFUNCTION(BlueprintCallable, Category = "Damage Flash")
+    void TriggerCustomFlash(const FAudio_DamageFlashData& FlashData);
+
+    UFUNCTION(BlueprintCallable, Category = "Damage Flash")
     void StopFlash();
 
-    // Check if flash is currently active
-    UFUNCTION(BlueprintCallable, Category = "Audio Damage Flash")
-    bool IsFlashActive() const { return bIsFlashActive; }
-
-protected:
-    // Flash settings for different damage types
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flash Settings")
-    TMap<EAudio_DamageType, FAudio_DamageFlashSettings> FlashPresets;
-
-    // Current flash state
-    UPROPERTY()
-    bool bIsFlashActive = false;
-
-    UPROPERTY()
-    float CurrentFlashTime = 0.0f;
-
-    UPROPERTY()
-    float CurrentFlashDuration = 0.0f;
-
-    UPROPERTY()
-    FAudio_DamageFlashSettings CurrentFlashSettings;
-
-    // Cache player controller
-    UPROPERTY()
-    APlayerController* CachedPlayerController;
-
-    // Initialize default flash presets
-    void InitializeFlashPresets();
-
-    // Update flash effect
-    void UpdateFlashEffect(float DeltaTime);
-
-    // Apply flash to screen
-    void ApplyFlashEffect(float FlashAlpha);
+private:
+    void StartFlash(const FAudio_DamageFlashData& FlashData);
+    void UpdateFlash(float DeltaTime);
+    void PlayDamageAudio(bool bIsCritical);
 };
