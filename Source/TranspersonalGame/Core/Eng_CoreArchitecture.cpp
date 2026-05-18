@@ -1,379 +1,410 @@
 #include "Eng_CoreArchitecture.h"
-#include "Eng_MasterArchitect.h"
-#include "Eng_SystemArchitect.h"
-#include "Eng_GameModeArchitect.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "TimerManager.h"
+#include "HAL/PlatformFilemanager.h"
+#include "Misc/DateTime.h"
+#include "Stats/Stats.h"
+#include "Engine/GameInstance.h"
 
-UEng_CoreArchitecture::UEng_CoreArchitecture()
+DEFINE_LOG_CATEGORY_STATIC(LogEngineArchitect, Log, All);
+
+UEng_CoreArchitectureSubsystem::UEng_CoreArchitectureSubsystem()
 {
-    bArchitectureInitialized = false;
-    bDependenciesResolved = false;
-    TotalInitializationTime = 0.0f;
-    LastValidationTime = FDateTime::Now();
-    
-    MasterArchitect = nullptr;
-    SystemArchitect = nullptr;
-    GameModeArchitect = nullptr;
+    // Initialize default performance limits
+    MaxFrameTime = 33.33f; // 30 FPS minimum
+    MaxCPUUsage = 80.0f;
+    MaxMemoryUsage = 4096.0f; // 4GB
+    MaxActiveActors = 10000;
 }
 
-void UEng_CoreArchitecture::Initialize(FSubsystemCollectionBase& Collection)
+void UEng_CoreArchitectureSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
     
-    UE_LOG(LogTemp, Warning, TEXT("UEng_CoreArchitecture::Initialize - Starting core architecture initialization"));
+    UE_LOG(LogEngineArchitect, Log, TEXT("Engine Architecture Subsystem Initialized"));
     
-    // Initialize the core architectural components
-    InitializeArchitecture();
+    // Register core modules by default
+    FEng_ModuleInfo CoreModule;
+    CoreModule.ModuleName = TEXT("CoreSystems");
+    CoreModule.ModuleType = EEng_ModuleType::Physics;
+    CoreModule.Layer = EEng_ArchitecturalLayer::Core;
+    CoreModule.bIsActive = true;
+    CoreModule.PerformanceWeight = 1.0f;
+    RegisterModule(CoreModule);
+    
+    // Start performance monitoring
+    UpdatePerformanceMetrics();
 }
 
-void UEng_CoreArchitecture::Deinitialize()
+void UEng_CoreArchitectureSubsystem::Deinitialize()
 {
-    UE_LOG(LogTemp, Warning, TEXT("UEng_CoreArchitecture::Deinitialize - Shutting down architecture systems"));
-    
-    // Shutdown all registered systems
-    for (auto& SystemPair : RegisteredSystems)
-    {
-        if (SystemPair.Value && SystemPair.Value->GetClass()->ImplementsInterface(UEng_ArchitecturalSystem::StaticClass()))
-        {
-            IEng_ArchitecturalSystem::Execute_ShutdownSystem(SystemPair.Value);
-        }
-    }
-    
-    RegisteredSystems.Empty();
-    SystemDependencies.Empty();
-    SystemInitTimes.Empty();
-    ArchitecturalViolations.Empty();
-    
-    bArchitectureInitialized = false;
-    bDependenciesResolved = false;
-    
+    UE_LOG(LogEngineArchitect, Log, TEXT("Engine Architecture Subsystem Deinitialized"));
+    RegisteredModules.Empty();
     Super::Deinitialize();
 }
 
-bool UEng_CoreArchitecture::InitializeArchitecture()
+void UEng_CoreArchitectureSubsystem::RegisterModule(const FEng_ModuleInfo& ModuleInfo)
 {
-    UE_LOG(LogTemp, Warning, TEXT("UEng_CoreArchitecture::InitializeArchitecture - Beginning architecture setup"));
-    
-    if (bArchitectureInitialized)
+    if (ModuleInfo.ModuleName.IsEmpty())
     {
-        UE_LOG(LogTemp, Warning, TEXT("Architecture already initialized"));
-        return true;
-    }
-    
-    float StartTime = FPlatformTime::Seconds();
-    
-    // Initialize core architectural components in dependency order
-    InitializeMasterArchitect();
-    InitializeSystemArchitect();
-    InitializeGameModeArchitect();
-    
-    // Resolve system dependencies
-    if (!ResolveDependencies())
-    {
-        UE_LOG(LogTemp, Error, TEXT("Failed to resolve system dependencies"));
-        return false;
-    }
-    
-    // Validate architectural compliance
-    if (!ValidateArchitecturalCompliance())
-    {
-        UE_LOG(LogTemp, Error, TEXT("Architecture validation failed"));
-        return false;
-    }
-    
-    TotalInitializationTime = FPlatformTime::Seconds() - StartTime;
-    bArchitectureInitialized = true;
-    
-    UE_LOG(LogTemp, Warning, TEXT("Core Architecture initialized successfully in %.3f seconds"), TotalInitializationTime);
-    return true;
-}
-
-void UEng_CoreArchitecture::InitializeMasterArchitect()
-{
-    StartSystemTimer(TEXT("MasterArchitect"));
-    
-    MasterArchitect = NewObject<UEng_MasterArchitect>(this);
-    if (MasterArchitect)
-    {
-        RegisterArchitecturalSystem(TEXT("MasterArchitect"), MasterArchitect);
-        UE_LOG(LogTemp, Log, TEXT("MasterArchitect initialized"));
-    }
-    
-    EndSystemTimer(TEXT("MasterArchitect"));
-}
-
-void UEng_CoreArchitecture::InitializeSystemArchitect()
-{
-    StartSystemTimer(TEXT("SystemArchitect"));
-    
-    SystemArchitect = NewObject<UEng_SystemArchitect>(this);
-    if (SystemArchitect)
-    {
-        RegisterArchitecturalSystem(TEXT("SystemArchitect"), SystemArchitect);
-        AddSystemDependency(TEXT("SystemArchitect"), TEXT("MasterArchitect"));
-        UE_LOG(LogTemp, Log, TEXT("SystemArchitect initialized"));
-    }
-    
-    EndSystemTimer(TEXT("SystemArchitect"));
-}
-
-void UEng_CoreArchitecture::InitializeGameModeArchitect()
-{
-    StartSystemTimer(TEXT("GameModeArchitect"));
-    
-    GameModeArchitect = NewObject<UEng_GameModeArchitect>(this);
-    if (GameModeArchitect)
-    {
-        RegisterArchitecturalSystem(TEXT("GameModeArchitect"), GameModeArchitect);
-        AddSystemDependency(TEXT("GameModeArchitect"), TEXT("SystemArchitect"));
-        UE_LOG(LogTemp, Log, TEXT("GameModeArchitect initialized"));
-    }
-    
-    EndSystemTimer(TEXT("GameModeArchitect"));
-}
-
-bool UEng_CoreArchitecture::ValidateArchitecturalCompliance()
-{
-    UE_LOG(LogTemp, Log, TEXT("UEng_CoreArchitecture::ValidateArchitecturalCompliance - Starting validation"));
-    
-    ArchitecturalViolations.Empty();
-    
-    // Validate all registered systems
-    for (auto& SystemPair : RegisteredSystems)
-    {
-        ValidateSystemCompliance(SystemPair.Key, SystemPair.Value);
-    }
-    
-    // Check architectural standards
-    CheckArchitecturalStandards();
-    
-    LastValidationTime = FDateTime::Now();
-    
-    bool bIsCompliant = ArchitecturalViolations.Num() == 0;
-    UE_LOG(LogTemp, Warning, TEXT("Architecture validation complete. Violations found: %d"), ArchitecturalViolations.Num());
-    
-    return bIsCompliant;
-}
-
-void UEng_CoreArchitecture::RegisterArchitecturalSystem(const FString& SystemName, UObject* SystemInstance)
-{
-    if (!SystemInstance)
-    {
-        UE_LOG(LogTemp, Error, TEXT("Cannot register null system: %s"), *SystemName);
+        UE_LOG(LogEngineArchitect, Warning, TEXT("Cannot register module with empty name"));
         return;
     }
     
-    RegisteredSystems.Add(SystemName, SystemInstance);
-    UE_LOG(LogTemp, Log, TEXT("Registered architectural system: %s"), *SystemName);
-}
-
-bool UEng_CoreArchitecture::IsSystemRegistered(const FString& SystemName) const
-{
-    return RegisteredSystems.Contains(SystemName);
-}
-
-bool UEng_CoreArchitecture::ResolveDependencies()
-{
-    UE_LOG(LogTemp, Log, TEXT("UEng_CoreArchitecture::ResolveDependencies - Resolving system dependencies"));
-    
-    if (!ValidateDependencyGraph())
+    // Check if module already exists
+    if (RegisteredModules.Contains(ModuleInfo.ModuleName))
     {
-        UE_LOG(LogTemp, Error, TEXT("Dependency graph validation failed"));
+        UE_LOG(LogEngineArchitect, Warning, TEXT("Module %s already registered, updating..."), *ModuleInfo.ModuleName);
+    }
+    
+    // Validate dependencies
+    bool bDependenciesValid = true;
+    for (const FString& Dependency : ModuleInfo.Dependencies)
+    {
+        if (!RegisteredModules.Contains(Dependency))
+        {
+            UE_LOG(LogEngineArchitect, Error, TEXT("Module %s has unmet dependency: %s"), *ModuleInfo.ModuleName, *Dependency);
+            bDependenciesValid = false;
+        }
+    }
+    
+    RegisteredModules.Add(ModuleInfo.ModuleName, ModuleInfo);
+    
+    UE_LOG(LogEngineArchitect, Log, TEXT("Registered module: %s (Type: %d, Layer: %d)"), 
+           *ModuleInfo.ModuleName, 
+           (int32)ModuleInfo.ModuleType, 
+           (int32)ModuleInfo.Layer);
+    
+    OnModuleRegistered.Broadcast(ModuleInfo.ModuleName, bDependenciesValid);
+}
+
+void UEng_CoreArchitectureSubsystem::UnregisterModule(const FString& ModuleName)
+{
+    if (RegisteredModules.Contains(ModuleName))
+    {
+        RegisteredModules.Remove(ModuleName);
+        UE_LOG(LogEngineArchitect, Log, TEXT("Unregistered module: %s"), *ModuleName);
+    }
+}
+
+bool UEng_CoreArchitectureSubsystem::ValidateModuleDependencies(const FString& ModuleName)
+{
+    if (!RegisteredModules.Contains(ModuleName))
+    {
         return false;
     }
     
-    TArray<FString> InitOrder = GetInitializationOrder();
+    const FEng_ModuleInfo& ModuleInfo = RegisteredModules[ModuleName];
     
-    // Initialize systems in dependency order
-    for (const FString& SystemName : InitOrder)
+    for (const FString& Dependency : ModuleInfo.Dependencies)
     {
-        if (UObject** SystemPtr = RegisteredSystems.Find(SystemName))
+        if (!RegisteredModules.Contains(Dependency))
         {
-            UObject* System = *SystemPtr;
-            if (System && System->GetClass()->ImplementsInterface(UEng_ArchitecturalSystem::StaticClass()))
+            UE_LOG(LogEngineArchitect, Error, TEXT("Module %s missing dependency: %s"), *ModuleName, *Dependency);
+            return false;
+        }
+        
+        // Check if dependency is active
+        const FEng_ModuleInfo& DepModule = RegisteredModules[Dependency];
+        if (!DepModule.bIsActive)
+        {
+            UE_LOG(LogEngineArchitect, Warning, TEXT("Module %s depends on inactive module: %s"), *ModuleName, *Dependency);
+        }
+    }
+    
+    return true;
+}
+
+void UEng_CoreArchitectureSubsystem::EnforcePerformanceLimits()
+{
+    UpdatePerformanceMetrics();
+    
+    if (CurrentMetrics.FrameTime > MaxFrameTime)
+    {
+        FString ViolationMsg = FString::Printf(TEXT("Frame time exceeded: %.2fms > %.2fms"), 
+                                               CurrentMetrics.FrameTime, MaxFrameTime);
+        OnArchitecturalViolation.Broadcast(ViolationMsg);
+        UE_LOG(LogEngineArchitect, Warning, TEXT("%s"), *ViolationMsg);
+    }
+    
+    if (CurrentMetrics.ActiveActors > MaxActiveActors)
+    {
+        FString ViolationMsg = FString::Printf(TEXT("Too many active actors: %d > %d"), 
+                                               CurrentMetrics.ActiveActors, MaxActiveActors);
+        OnArchitecturalViolation.Broadcast(ViolationMsg);
+        UE_LOG(LogEngineArchitect, Warning, TEXT("%s"), *ViolationMsg);
+    }
+}
+
+FEng_PerformanceMetrics UEng_CoreArchitectureSubsystem::GetCurrentPerformanceMetrics()
+{
+    UpdatePerformanceMetrics();
+    return CurrentMetrics;
+}
+
+TArray<FEng_ModuleInfo> UEng_CoreArchitectureSubsystem::GetRegisteredModules()
+{
+    TArray<FEng_ModuleInfo> Modules;
+    for (const auto& ModulePair : RegisteredModules)
+    {
+        Modules.Add(ModulePair.Value);
+    }
+    return Modules;
+}
+
+void UEng_CoreArchitectureSubsystem::ValidateArchitecturalCompliance()
+{
+    UE_LOG(LogEngineArchitect, Log, TEXT("Running architectural compliance validation..."));
+    
+    // Check layer dependencies
+    for (int32 LayerIndex = 0; LayerIndex < (int32)EEng_ArchitecturalLayer::Platform; LayerIndex++)
+    {
+        EEng_ArchitecturalLayer Layer = (EEng_ArchitecturalLayer)LayerIndex;
+        if (!ValidateLayerDependencies(Layer))
+        {
+            FString ViolationMsg = FString::Printf(TEXT("Layer dependency violation in layer %d"), LayerIndex);
+            OnArchitecturalViolation.Broadcast(ViolationMsg);
+        }
+    }
+    
+    // Check module dependencies
+    for (const auto& ModulePair : RegisteredModules)
+    {
+        if (!ValidateModuleDependencies(ModulePair.Key))
+        {
+            FString ViolationMsg = FString::Printf(TEXT("Module dependency violation: %s"), *ModulePair.Key);
+            OnArchitecturalViolation.Broadcast(ViolationMsg);
+        }
+    }
+    
+    // Enforce performance limits
+    EnforcePerformanceLimits();
+    
+    UE_LOG(LogEngineArchitect, Log, TEXT("Architectural compliance validation complete"));
+}
+
+void UEng_CoreArchitectureSubsystem::UpdatePerformanceMetrics()
+{
+    // Get frame time from engine stats
+    CurrentMetrics.FrameTime = FApp::GetDeltaTime() * 1000.0f; // Convert to milliseconds
+    
+    // Get world and count actors
+    if (UWorld* World = GetWorld())
+    {
+        CurrentMetrics.ActiveActors = World->GetActorCount();
+        
+        // Count physics bodies (simplified)
+        CurrentMetrics.PhysicsBodies = 0;
+        for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+        {
+            AActor* Actor = *ActorItr;
+            if (Actor && Actor->GetRootComponent())
             {
-                StartSystemTimer(SystemName);
-                bool bInitSuccess = IEng_ArchitecturalSystem::Execute_InitializeSystem(System);
-                EndSystemTimer(SystemName);
-                
-                if (!bInitSuccess)
+                if (UPrimitiveComponent* PrimComp = Cast<UPrimitiveComponent>(Actor->GetRootComponent()))
                 {
-                    UE_LOG(LogTemp, Error, TEXT("Failed to initialize system: %s"), *SystemName);
-                    return false;
+                    if (PrimComp->IsSimulatingPhysics())
+                    {
+                        CurrentMetrics.PhysicsBodies++;
+                    }
                 }
             }
         }
     }
     
-    bDependenciesResolved = true;
-    UE_LOG(LogTemp, Warning, TEXT("System dependencies resolved successfully"));
-    return true;
+    // Memory usage (simplified - platform specific implementations would be more accurate)
+    FPlatformMemoryStats MemStats = FPlatformMemory::GetStats();
+    CurrentMetrics.MemoryUsage = MemStats.UsedPhysical / (1024.0f * 1024.0f); // Convert to MB
+    
+    // CPU usage would require platform-specific implementation
+    CurrentMetrics.CPUUsage = 0.0f; // Placeholder
 }
 
-void UEng_CoreArchitecture::AddSystemDependency(const FString& SystemName, const FString& DependsOn)
+void UEng_CoreArchitectureSubsystem::CheckArchitecturalViolations()
 {
-    if (!SystemDependencies.Contains(SystemName))
+    // This would contain more sophisticated violation detection
+    // For now, just check basic performance metrics
+    EnforcePerformanceLimits();
+}
+
+bool UEng_CoreArchitectureSubsystem::ValidateLayerDependencies(EEng_ArchitecturalLayer Layer)
+{
+    // Core architectural rule: Higher layers cannot depend on lower layers
+    // Core -> Gameplay -> Content -> Presentation -> Platform
+    
+    for (const auto& ModulePair : RegisteredModules)
     {
-        SystemDependencies.Add(SystemName, TArray<FString>());
-    }
-    
-    SystemDependencies[SystemName].AddUnique(DependsOn);
-    UE_LOG(LogTemp, Log, TEXT("Added dependency: %s depends on %s"), *SystemName, *DependsOn);
-}
-
-TArray<FString> UEng_CoreArchitecture::GetArchitecturalViolations() const
-{
-    return ArchitecturalViolations;
-}
-
-bool UEng_CoreArchitecture::EnforceArchitecturalStandards()
-{
-    UE_LOG(LogTemp, Log, TEXT("UEng_CoreArchitecture::EnforceArchitecturalStandards - Enforcing standards"));
-    
-    bool bStandardsEnforced = true;
-    
-    // Check system naming conventions
-    for (auto& SystemPair : RegisteredSystems)
-    {
-        if (!SystemPair.Key.StartsWith(TEXT("Eng_")) && !SystemPair.Key.StartsWith(TEXT("Dir_")))
+        const FEng_ModuleInfo& Module = ModulePair.Value;
+        if (Module.Layer == Layer)
         {
-            ArchitecturalViolations.Add(FString::Printf(TEXT("System %s does not follow naming convention"), *SystemPair.Key));
-            bStandardsEnforced = false;
-        }
-    }
-    
-    // Check dependency compliance
-    if (!bDependenciesResolved)
-    {
-        ArchitecturalViolations.Add(TEXT("System dependencies not properly resolved"));
-        bStandardsEnforced = false;
-    }
-    
-    return bStandardsEnforced;
-}
-
-float UEng_CoreArchitecture::GetSystemInitializationTime(const FString& SystemName) const
-{
-    if (const float* InitTime = SystemInitTimes.Find(SystemName))
-    {
-        return *InitTime;
-    }
-    return 0.0f;
-}
-
-FString UEng_CoreArchitecture::GetArchitecturalHealthReport() const
-{
-    FString Report;
-    Report += FString::Printf(TEXT("=== ARCHITECTURAL HEALTH REPORT ===\n"));
-    Report += FString::Printf(TEXT("Architecture Initialized: %s\n"), bArchitectureInitialized ? TEXT("YES") : TEXT("NO"));
-    Report += FString::Printf(TEXT("Dependencies Resolved: %s\n"), bDependenciesResolved ? TEXT("YES") : TEXT("NO"));
-    Report += FString::Printf(TEXT("Registered Systems: %d\n"), RegisteredSystems.Num());
-    Report += FString::Printf(TEXT("Total Init Time: %.3f seconds\n"), TotalInitializationTime);
-    Report += FString::Printf(TEXT("Violations: %d\n"), ArchitecturalViolations.Num());
-    
-    if (ArchitecturalViolations.Num() > 0)
-    {
-        Report += TEXT("\nVIOLATIONS:\n");
-        for (const FString& Violation : ArchitecturalViolations)
-        {
-            Report += FString::Printf(TEXT("- %s\n"), *Violation);
-        }
-    }
-    
-    return Report;
-}
-
-bool UEng_CoreArchitecture::ValidateDependencyGraph()
-{
-    // Simple cycle detection - more sophisticated algorithms can be added later
-    TSet<FString> Visited;
-    TSet<FString> InStack;
-    
-    for (auto& SystemPair : SystemDependencies)
-    {
-        if (!Visited.Contains(SystemPair.Key))
-        {
-            // For now, assume no cycles - implement proper DFS cycle detection if needed
+            for (const FString& DepName : Module.Dependencies)
+            {
+                if (RegisteredModules.Contains(DepName))
+                {
+                    const FEng_ModuleInfo& DepModule = RegisteredModules[DepName];
+                    if ((int32)DepModule.Layer > (int32)Layer)
+                    {
+                        UE_LOG(LogEngineArchitect, Error, TEXT("Layer violation: %s (Layer %d) depends on %s (Layer %d)"), 
+                               *Module.ModuleName, (int32)Layer, *DepName, (int32)DepModule.Layer);
+                        return false;
+                    }
+                }
+            }
         }
     }
     
     return true;
 }
 
-TArray<FString> UEng_CoreArchitecture::GetInitializationOrder()
+// Architectural Compliance Component Implementation
+UEng_ArchitecturalComplianceComponent::UEng_ArchitecturalComplianceComponent()
 {
-    TArray<FString> InitOrder;
+    PrimaryComponentTick.bCanEverTick = true;
+    PrimaryComponentTick.TickInterval = 1.0f; // Check every second
     
-    // Simple topological sort - start with systems that have no dependencies
-    TSet<FString> Processed;
-    
-    // Add systems with no dependencies first
-    for (auto& SystemPair : RegisteredSystems)
-    {
-        if (!SystemDependencies.Contains(SystemPair.Key) || SystemDependencies[SystemPair.Key].Num() == 0)
-        {
-            InitOrder.Add(SystemPair.Key);
-            Processed.Add(SystemPair.Key);
-        }
-    }
-    
-    // Add remaining systems (simplified - proper topological sort would be better)
-    for (auto& SystemPair : RegisteredSystems)
-    {
-        if (!Processed.Contains(SystemPair.Key))
-        {
-            InitOrder.Add(SystemPair.Key);
-        }
-    }
-    
-    return InitOrder;
+    AssignedModule = EEng_ModuleType::Physics;
+    PerformanceBudget = 1.0f;
+    bEnforceStrictCompliance = true;
+    LastValidationTime = 0.0f;
 }
 
-void UEng_CoreArchitecture::ValidateSystemCompliance(const FString& SystemName, UObject* System)
+void UEng_ArchitecturalComplianceComponent::BeginPlay()
 {
-    if (!System)
+    Super::BeginPlay();
+    
+    UE_LOG(LogEngineArchitect, Log, TEXT("Architectural Compliance Component started on %s"), 
+           *GetOwner()->GetName());
+    
+    ValidateActorCompliance();
+}
+
+void UEng_ArchitecturalComplianceComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+{
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+    
+    float CurrentTime = GetWorld()->GetTimeSeconds();
+    if (CurrentTime - LastValidationTime > 5.0f) // Validate every 5 seconds
     {
-        ArchitecturalViolations.Add(FString::Printf(TEXT("System %s is null"), *SystemName));
+        ValidateActorCompliance();
+        LastValidationTime = CurrentTime;
+    }
+}
+
+void UEng_ArchitecturalComplianceComponent::ValidateActorCompliance()
+{
+    if (!GetOwner())
+    {
         return;
     }
     
-    // Check if system implements architectural interface
-    if (!System->GetClass()->ImplementsInterface(UEng_ArchitecturalSystem::StaticClass()))
-    {
-        ArchitecturalViolations.Add(FString::Printf(TEXT("System %s does not implement IEng_ArchitecturalSystem"), *SystemName));
-    }
+    ValidateNamingConventions();
+    ValidateComponentStructure();
+    ValidatePerformanceImpact();
 }
 
-void UEng_CoreArchitecture::CheckArchitecturalStandards()
+bool UEng_ArchitecturalComplianceComponent::CheckPerformanceCompliance()
 {
-    // Verify core systems are present
-    if (!IsSystemRegistered(TEXT("MasterArchitect")))
+    // Simple performance check - more sophisticated metrics could be added
+    if (UEng_CoreArchitectureSubsystem* ArchSubsystem = GetWorld()->GetGameInstance()->GetSubsystem<UEng_CoreArchitectureSubsystem>())
     {
-        ArchitecturalViolations.Add(TEXT("MasterArchitect system not registered"));
+        FEng_PerformanceMetrics Metrics = ArchSubsystem->GetCurrentPerformanceMetrics();
+        
+        if (Metrics.FrameTime > 33.33f) // 30 FPS threshold
+        {
+            ReportViolation(TEXT("Performance"), TEXT("Frame time exceeds 30 FPS threshold"));
+            return false;
+        }
     }
     
-    if (!IsSystemRegistered(TEXT("SystemArchitect")))
+    return true;
+}
+
+void UEng_ArchitecturalComplianceComponent::ReportViolation(const FString& ViolationType, const FString& Description)
+{
+    FString ViolationMessage = FString::Printf(TEXT("[%s] %s: %s"), 
+                                               *GetOwner()->GetName(), 
+                                               *ViolationType, 
+                                               *Description);
+    
+    ViolationHistory.Add(ViolationMessage);
+    
+    UE_LOG(LogEngineArchitect, Warning, TEXT("Architectural Violation: %s"), *ViolationMessage);
+    
+    // Broadcast to architecture subsystem
+    if (UEng_CoreArchitectureSubsystem* ArchSubsystem = GetWorld()->GetGameInstance()->GetSubsystem<UEng_CoreArchitectureSubsystem>())
     {
-        ArchitecturalViolations.Add(TEXT("SystemArchitect system not registered"));
+        ArchSubsystem->OnArchitecturalViolation.Broadcast(ViolationMessage);
+    }
+}
+
+void UEng_ArchitecturalComplianceComponent::ValidateNamingConventions()
+{
+    FString ActorName = GetOwner()->GetName();
+    
+    // Check for proper prefixing based on module type
+    bool bValidPrefix = false;
+    switch (AssignedModule)
+    {
+        case EEng_ModuleType::Physics:
+            bValidPrefix = ActorName.StartsWith(TEXT("Phys_")) || ActorName.StartsWith(TEXT("Core_"));
+            break;
+        case EEng_ModuleType::Character:
+            bValidPrefix = ActorName.StartsWith(TEXT("Char_")) || ActorName.StartsWith(TEXT("Player_"));
+            break;
+        case EEng_ModuleType::AI:
+            bValidPrefix = ActorName.StartsWith(TEXT("AI_")) || ActorName.StartsWith(TEXT("NPC_"));
+            break;
+        default:
+            bValidPrefix = true; // Allow other modules for now
+            break;
     }
     
-    if (!IsSystemRegistered(TEXT("GameModeArchitect")))
+    if (!bValidPrefix && bEnforceStrictCompliance)
     {
-        ArchitecturalViolations.Add(TEXT("GameModeArchitect system not registered"));
+        ReportViolation(TEXT("Naming"), TEXT("Actor name does not follow module naming conventions"));
     }
 }
 
-void UEng_CoreArchitecture::StartSystemTimer(const FString& SystemName)
+void UEng_ArchitecturalComplianceComponent::ValidateComponentStructure()
 {
-    SystemInitTimes.Add(SystemName, FPlatformTime::Seconds());
+    // Check component count and types
+    TArray<UActorComponent*> Components = GetOwner()->GetComponents().Array();
+    
+    if (Components.Num() > 20) // Arbitrary limit for demonstration
+    {
+        ReportViolation(TEXT("Structure"), TEXT("Actor has too many components (>20)"));
+    }
+    
+    // Check for required components based on module type
+    if (AssignedModule == EEng_ModuleType::Physics)
+    {
+        bool bHasPhysicsComponent = false;
+        for (UActorComponent* Component : Components)
+        {
+            if (Cast<UPrimitiveComponent>(Component))
+            {
+                bHasPhysicsComponent = true;
+                break;
+            }
+        }
+        
+        if (!bHasPhysicsComponent)
+        {
+            ReportViolation(TEXT("Structure"), TEXT("Physics module actor missing primitive component"));
+        }
+    }
 }
 
-void UEng_CoreArchitecture::EndSystemTimer(const FString& SystemName)
+void UEng_ArchitecturalComplianceComponent::ValidatePerformanceImpact()
 {
-    if (float* StartTime = SystemInitTimes.Find(SystemName))
+    // Simple performance validation
+    if (!CheckPerformanceCompliance())
     {
-        *StartTime = FPlatformTime::Seconds() - *StartTime;
+        ReportViolation(TEXT("Performance"), TEXT("Actor contributing to performance issues"));
+    }
+    
+    // Check tick frequency
+    if (PrimaryComponentTick.TickInterval < 0.1f && bEnforceStrictCompliance)
+    {
+        ReportViolation(TEXT("Performance"), TEXT("Component ticking too frequently (<0.1s)"));
     }
 }
