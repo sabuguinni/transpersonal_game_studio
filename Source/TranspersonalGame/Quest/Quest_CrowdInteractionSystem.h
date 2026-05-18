@@ -1,88 +1,170 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/GameInstanceSubsystem.h"
+#include "GameFramework/Actor.h"
 #include "Components/ActorComponent.h"
-#include "Engine/World.h"
-#include "../Crowd/Crowd_MassEntityManager.h"
-#include "../SharedTypes.h"
+#include "Engine/DataTable.h"
+#include "../Shared/SharedTypes.h"
 #include "Quest_CrowdInteractionSystem.generated.h"
 
-// Quest trigger types for crowd interactions
+// Forward declarations
+class UCrowd_MassEntityProcessor;
+class UQuest_MissionObjectiveSystem;
+
 UENUM(BlueprintType)
-enum class EQuest_CrowdTriggerType : uint8
+enum class EQuest_CrowdInteractionType : uint8
 {
-    DensityThreshold     UMETA(DisplayName = "Crowd Density Threshold"),
-    EntityBehaviorChange UMETA(DisplayName = "Entity Behavior Change"),
-    CrowdMovement        UMETA(DisplayName = "Crowd Movement Pattern"),
-    EntityProximity      UMETA(DisplayName = "Entity Proximity to Player"),
-    CrowdDispersion      UMETA(DisplayName = "Crowd Dispersion Event")
+    EscortMission,
+    CrowdControl,
+    CelebrationEvent,
+    PanicResponse,
+    Migration,
+    Festival,
+    Emergency,
+    TradeGathering
 };
 
-// Crowd quest objective types
-UENUM(BlueprintType)
-enum class EQuest_CrowdObjective : uint8
-{
-    FollowCrowd          UMETA(DisplayName = "Follow Crowd Movement"),
-    AvoidCrowd           UMETA(DisplayName = "Avoid Crowd Areas"),
-    InteractWithEntity   UMETA(DisplayName = "Interact with Specific Entity"),
-    InfluenceBehavior    UMETA(DisplayName = "Influence Crowd Behavior"),
-    EscortEntity         UMETA(DisplayName = "Escort Entity Through Crowd")
-};
-
-// Crowd interaction quest data
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FQuest_CrowdInteractionData
+struct TRANSPERSONALGAME_API FQuest_CrowdInteractionData : public FTableRowBase
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    FString QuestID;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Interaction")
+    EQuest_CrowdInteractionType InteractionType;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    EQuest_CrowdTriggerType TriggerType;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Interaction")
+    FString InteractionName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    EQuest_CrowdObjective ObjectiveType;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Interaction")
+    FString Description;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    float TriggerThreshold;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Interaction")
+    int32 RequiredCrowdSize;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    FVector TargetLocation;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Interaction")
     float InteractionRadius;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    int32 RequiredEntityCount;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Interaction")
+    float Duration;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    bool bIsCompleted;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Interaction")
+    int32 ExperienceReward;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    float TimeLimit;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Interaction")
+    TArray<FString> RequiredItems;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    float ElapsedTime;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Interaction")
+    bool bIsRepeatable;
 
     FQuest_CrowdInteractionData()
     {
-        QuestID = TEXT("");
-        TriggerType = EQuest_CrowdTriggerType::DensityThreshold;
-        ObjectiveType = EQuest_CrowdObjective::FollowCrowd;
-        TriggerThreshold = 50.0f;
-        TargetLocation = FVector::ZeroVector;
+        InteractionType = EQuest_CrowdInteractionType::EscortMission;
+        InteractionName = TEXT("Default Interaction");
+        Description = TEXT("Default crowd interaction");
+        RequiredCrowdSize = 10;
         InteractionRadius = 1000.0f;
-        RequiredEntityCount = 5;
-        bIsCompleted = false;
-        TimeLimit = 300.0f;
-        ElapsedTime = 0.0f;
+        Duration = 60.0f;
+        ExperienceReward = 100;
+        bIsRepeatable = true;
     }
 };
 
-// Quest component for crowd interaction tracking
-UCLASS(ClassGroup=(Quest), meta=(BlueprintSpawnableComponent))
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FQuest_ActiveCrowdInteraction
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Active Interaction")
+    FQuest_CrowdInteractionData InteractionData;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Active Interaction")
+    FVector TargetLocation;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Active Interaction")
+    float TimeRemaining;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Active Interaction")
+    int32 CurrentCrowdSize;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Active Interaction")
+    bool bIsActive;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Active Interaction")
+    TArray<AActor*> ParticipatingCrowdActors;
+
+    FQuest_ActiveCrowdInteraction()
+    {
+        TargetLocation = FVector::ZeroVector;
+        TimeRemaining = 0.0f;
+        CurrentCrowdSize = 0;
+        bIsActive = false;
+    }
+};
+
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API AQuest_CrowdInteractionManager : public AActor
+{
+    GENERATED_BODY()
+
+public:
+    AQuest_CrowdInteractionManager();
+
+protected:
+    virtual void BeginPlay() override;
+    virtual void Tick(float DeltaTime) override;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Interaction")
+    UDataTable* CrowdInteractionDataTable;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Interaction")
+    TArray<FQuest_ActiveCrowdInteraction> ActiveInteractions;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Interaction")
+    float InteractionCheckRadius;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Interaction")
+    float InteractionCheckInterval;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Interaction")
+    int32 MaxSimultaneousInteractions;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Interaction")
+    bool bDebugMode;
+
+private:
+    float LastInteractionCheckTime;
+    TArray<AActor*> NearbyPlayerActors;
+
+public:
+    UFUNCTION(BlueprintCallable, Category = "Crowd Interaction")
+    bool StartCrowdInteraction(EQuest_CrowdInteractionType InteractionType, FVector Location);
+
+    UFUNCTION(BlueprintCallable, Category = "Crowd Interaction")
+    void EndCrowdInteraction(int32 InteractionIndex);
+
+    UFUNCTION(BlueprintCallable, Category = "Crowd Interaction")
+    TArray<AActor*> GetCrowdActorsInRadius(FVector Location, float Radius);
+
+    UFUNCTION(BlueprintCallable, Category = "Crowd Interaction")
+    bool CanStartInteraction(EQuest_CrowdInteractionType InteractionType, FVector Location);
+
+    UFUNCTION(BlueprintCallable, Category = "Crowd Interaction")
+    void UpdateCrowdBehaviorForInteraction(const FQuest_ActiveCrowdInteraction& Interaction);
+
+    UFUNCTION(BlueprintCallable, Category = "Crowd Interaction")
+    int32 GetActiveCrowdInteractionCount() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Crowd Interaction")
+    FQuest_CrowdInteractionData GetInteractionDataByType(EQuest_CrowdInteractionType InteractionType);
+
+protected:
+    void CheckForNewInteractionOpportunities();
+    void UpdateActiveInteractions(float DeltaTime);
+    void ProcessInteractionCompletion(int32 InteractionIndex);
+    void TriggerCrowdResponse(const FQuest_ActiveCrowdInteraction& Interaction);
+};
+
+UCLASS(BlueprintType, ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
 class TRANSPERSONALGAME_API UQuest_CrowdInteractionComponent : public UActorComponent
 {
     GENERATED_BODY()
@@ -92,89 +174,42 @@ public:
 
 protected:
     virtual void BeginPlay() override;
-
-public:
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    // Crowd interaction quest management
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    TArray<FQuest_CrowdInteractionData> ActiveCrowdQuests;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Interaction")
+    bool bCanParticipateInInteractions;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    ACrowd_MassEntityManager* CrowdManager;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Interaction")
+    TArray<EQuest_CrowdInteractionType> SupportedInteractionTypes;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    float CrowdCheckInterval;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Interaction")
+    float InteractionInfluenceRadius;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    float LastCrowdCheck;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Interaction")
+    int32 InteractionPriority;
 
-    // Quest functions
-    UFUNCTION(BlueprintCallable, Category = "Quest")
-    void StartCrowdQuest(const FQuest_CrowdInteractionData& QuestData);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Interaction")
+    bool bIsCurrentlyParticipating;
 
-    UFUNCTION(BlueprintCallable, Category = "Quest")
-    void CompleteCrowdQuest(const FString& QuestID);
-
-    UFUNCTION(BlueprintCallable, Category = "Quest")
-    bool CheckCrowdDensityTrigger(const FQuest_CrowdInteractionData& Quest);
-
-    UFUNCTION(BlueprintCallable, Category = "Quest")
-    bool CheckEntityProximityTrigger(const FQuest_CrowdInteractionData& Quest);
-
-    UFUNCTION(BlueprintCallable, Category = "Quest")
-    void UpdateCrowdQuestProgress(float DeltaTime);
-
-    UFUNCTION(BlueprintCallable, Category = "Quest")
-    int32 GetNearbyEntityCount(const FVector& Location, float Radius);
-
-private:
-    void FindCrowdManager();
-    void ProcessCrowdTriggers();
-};
-
-// Game instance subsystem for crowd quest management
-UCLASS()
-class TRANSPERSONALGAME_API UQuest_CrowdInteractionSubsystem : public UGameInstanceSubsystem
-{
-    GENERATED_BODY()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Interaction")
+    EQuest_CrowdInteractionType CurrentInteractionType;
 
 public:
-    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    UFUNCTION(BlueprintCallable, Category = "Crowd Interaction")
+    bool CanParticipateInInteraction(EQuest_CrowdInteractionType InteractionType) const;
 
-    // Global crowd quest tracking
-    UPROPERTY(BlueprintReadOnly, Category = "Quest")
-    TArray<FQuest_CrowdInteractionData> GlobalCrowdQuests;
+    UFUNCTION(BlueprintCallable, Category = "Crowd Interaction")
+    void JoinCrowdInteraction(EQuest_CrowdInteractionType InteractionType, FVector InteractionLocation);
 
-    UPROPERTY(BlueprintReadOnly, Category = "Quest")
-    int32 CompletedCrowdQuests;
+    UFUNCTION(BlueprintCallable, Category = "Crowd Interaction")
+    void LeaveCrowdInteraction();
 
-    UPROPERTY(BlueprintReadOnly, Category = "Quest")
-    float TotalCrowdInteractionTime;
+    UFUNCTION(BlueprintCallable, Category = "Crowd Interaction")
+    void SetInteractionBehavior(EQuest_CrowdInteractionType InteractionType);
 
-    // Quest management functions
-    UFUNCTION(BlueprintCallable, Category = "Quest")
-    void RegisterCrowdQuest(const FQuest_CrowdInteractionData& QuestData);
+    UFUNCTION(BlueprintCallable, Category = "Crowd Interaction")
+    bool IsParticipatingInInteraction() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Quest")
-    void UnregisterCrowdQuest(const FString& QuestID);
-
-    UFUNCTION(BlueprintCallable, Category = "Quest")
-    FQuest_CrowdInteractionData GetCrowdQuestByID(const FString& QuestID);
-
-    UFUNCTION(BlueprintCallable, Category = "Quest")
-    TArray<FQuest_CrowdInteractionData> GetActiveCrowdQuests();
-
-    UFUNCTION(BlueprintCallable, Category = "Quest")
-    bool HasActiveCrowdQuest(const FString& QuestID);
-
-    // Crowd quest templates
-    UFUNCTION(BlueprintCallable, Category = "Quest")
-    FQuest_CrowdInteractionData CreateFollowCrowdQuest(const FVector& StartLocation, float Duration);
-
-    UFUNCTION(BlueprintCallable, Category = "Quest")
-    FQuest_CrowdInteractionData CreateAvoidCrowdQuest(const FVector& DangerZone, float Radius);
-
-    UFUNCTION(BlueprintCallable, Category = "Quest")
-    FQuest_CrowdInteractionData CreateEntityInteractionQuest(const FVector& TargetLocation, int32 EntityCount);
+    UFUNCTION(BlueprintCallable, Category = "Crowd Interaction")
+    EQuest_CrowdInteractionType GetCurrentInteractionType() const;
 };
