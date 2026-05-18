@@ -1,284 +1,199 @@
 #include "ArchitecturalStructureManager.h"
 #include "Engine/Engine.h"
-#include "Engine/World.h"
 #include "Components/StaticMeshComponent.h"
-#include "Components/BoxComponent.h"
 #include "Materials/MaterialInterface.h"
 #include "Engine/StaticMesh.h"
-#include "UObject/ConstructorHelpers.h"
-#include "Math/UnrealMathUtility.h"
 
-AArchitecturalStructure::AArchitecturalStructure()
+AArchitecturalStructureManager::AArchitecturalStructureManager()
 {
-    PrimaryActorTick.bCanEverTick = false;
+    PrimaryActorTick.bCanEverTick = true;
 
-    // Create root component
-    RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootComponent"));
+    // Create root scene component
+    RootSceneComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootSceneComponent"));
+    RootComponent = RootSceneComponent;
 
     // Create structure mesh component
-    StructureMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("StructureMesh"));
-    StructureMesh->SetupAttachment(RootComponent);
-    StructureMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-    StructureMesh->SetCollisionObjectType(ECollisionChannel::ECC_WorldStatic);
+    StructureMeshComponent = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("StructureMeshComponent"));
+    StructureMeshComponent->SetupAttachment(RootComponent);
 
-    // Create interaction volume
-    InteractionVolume = CreateDefaultSubobject<UBoxComponent>(TEXT("InteractionVolume"));
-    InteractionVolume->SetupAttachment(RootComponent);
-    InteractionVolume->SetBoxExtent(FVector(200.0f, 200.0f, 300.0f));
-    InteractionVolume->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
-    InteractionVolume->SetCollisionObjectType(ECollisionChannel::ECC_WorldDynamic);
-
-    // Initialize default values
-    StructureType = EArch_StructureType::Pillar;
-    StructureData.StructureName = TEXT("Ancient Pillar");
-    StructureData.BiomeType = EBiomeType::Savanna;
-    StructureData.AgeYears = 1000.0f;
+    // Initialize default structure data
+    StructureData.StructureType = EArch_StructureType::StonePillar;
+    StructureData.SpawnLocation = FVector::ZeroVector;
+    StructureData.SpawnRotation = FRotator::ZeroRotator;
     StructureData.WeatheringLevel = 0.5f;
+    StructureData.bHasTribalMarkings = false;
 }
 
-void AArchitecturalStructure::BeginPlay()
+void AArchitecturalStructureManager::BeginPlay()
 {
     Super::BeginPlay();
 
-    // Update structure data with current transform
-    StructureData.Location = GetActorLocation();
-    StructureData.Rotation = GetActorRotation();
-
-    // Apply initial weathering based on age
-    ApplyWeathering(StructureData.WeatheringLevel);
+    // Initialize structure with default data
+    InitializeStructure(StructureData);
+    
+    UE_LOG(LogTemp, Warning, TEXT("ArchitecturalStructureManager initialized at location: %s"), 
+           *GetActorLocation().ToString());
 }
 
-void AArchitecturalStructure::SetStructureType(EArch_StructureType NewType)
+void AArchitecturalStructureManager::Tick(float DeltaTime)
 {
-    StructureType = NewType;
-
-    // Update structure name based on type
-    switch (StructureType)
-    {
-    case EArch_StructureType::Pillar:
-        StructureData.StructureName = TEXT("Stone Pillar");
-        break;
-    case EArch_StructureType::Archway:
-        StructureData.StructureName = TEXT("Ancient Archway");
-        break;
-    case EArch_StructureType::Platform:
-        StructureData.StructureName = TEXT("Stone Platform");
-        break;
-    case EArch_StructureType::Ruins:
-        StructureData.StructureName = TEXT("Ancient Ruins");
-        break;
-    case EArch_StructureType::Shelter:
-        StructureData.StructureName = TEXT("Cave Shelter");
-        break;
-    case EArch_StructureType::Monument:
-        StructureData.StructureName = TEXT("Stone Monument");
-        break;
-    }
+    Super::Tick(DeltaTime);
 }
 
-void AArchitecturalStructure::ApplyWeathering(float WeatheringAmount)
+void AArchitecturalStructureManager::InitializeStructure(const FArch_StructureData& InStructureData)
+{
+    StructureData = InStructureData;
+    
+    // Set location and rotation
+    SetActorLocation(StructureData.SpawnLocation);
+    SetActorRotation(StructureData.SpawnRotation);
+    
+    // Update mesh based on structure type
+    UpdateStructureMesh();
+    
+    // Apply weathering
+    ApplyWeatheringMaterial();
+    
+    // Add tribal markings if needed
+    if (StructureData.bHasTribalMarkings)
+    {
+        AddTribalMarkings(true);
+    }
+    
+    // Trigger blueprint event
+    OnStructureInitialized();
+    
+    UE_LOG(LogTemp, Log, TEXT("Structure initialized: Type=%d, Location=%s, Weathering=%f"), 
+           (int32)StructureData.StructureType, 
+           *StructureData.SpawnLocation.ToString(), 
+           StructureData.WeatheringLevel);
+}
+
+void AArchitecturalStructureManager::SetStructureType(EArch_StructureType NewType)
+{
+    StructureData.StructureType = NewType;
+    UpdateStructureMesh();
+    
+    UE_LOG(LogTemp, Log, TEXT("Structure type changed to: %d"), (int32)NewType);
+}
+
+void AArchitecturalStructureManager::ApplyWeathering(float WeatheringAmount)
 {
     StructureData.WeatheringLevel = FMath::Clamp(WeatheringAmount, 0.0f, 1.0f);
-
-    // Apply weathered materials based on weathering level
-    if (StructureMesh && WeatheredStoneMaterial)
-    {
-        if (StructureData.WeatheringLevel > 0.7f && MossyMaterial)
-        {
-            StructureMesh->SetMaterial(0, MossyMaterial);
-        }
-        else
-        {
-            StructureMesh->SetMaterial(0, WeatheredStoneMaterial);
-        }
-    }
-}
-
-void AArchitecturalStructure::SetBiomeAdaptation(EBiomeType BiomeType)
-{
-    StructureData.BiomeType = BiomeType;
-
-    // Adjust weathering based on biome conditions
-    switch (BiomeType)
-    {
-    case EBiomeType::Swamp:
-        StructureData.WeatheringLevel += 0.2f; // High humidity increases weathering
-        break;
-    case EBiomeType::Forest:
-        StructureData.WeatheringLevel += 0.15f; // Moisture and organic growth
-        break;
-    case EBiomeType::Desert:
-        StructureData.WeatheringLevel += 0.1f; // Sand erosion
-        break;
-    case EBiomeType::Mountain:
-        StructureData.WeatheringLevel += 0.05f; // Cold and wind erosion
-        break;
-    case EBiomeType::Savanna:
-    default:
-        // Moderate weathering in savanna
-        break;
-    }
-
-    ApplyWeathering(StructureData.WeatheringLevel);
-}
-
-UArchitecturalStructureManager::UArchitecturalStructureManager()
-{
-    // Initialize default structure class
-    StructureClass = AArchitecturalStructure::StaticClass();
-}
-
-void UArchitecturalStructureManager::InitializeStructureManager()
-{
-    UE_LOG(LogTemp, Log, TEXT("ArchitecturalStructureManager initialized"));
-    ManagedStructures.Empty();
-}
-
-AArchitecturalStructure* UArchitecturalStructureManager::SpawnStructure(EArch_StructureType StructureType, FVector Location, FRotator Rotation, EBiomeType BiomeType)
-{
-    if (!StructureClass)
-    {
-        UE_LOG(LogTemp, Error, TEXT("StructureClass not set in ArchitecturalStructureManager"));
-        return nullptr;
-    }
-
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        UE_LOG(LogTemp, Error, TEXT("No valid world found for structure spawning"));
-        return nullptr;
-    }
-
-    // Spawn the structure
-    FActorSpawnParameters SpawnParams;
-    SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
-
-    AArchitecturalStructure* NewStructure = World->SpawnActor<AArchitecturalStructure>(StructureClass, Location, Rotation, SpawnParams);
+    ApplyWeatheringMaterial();
     
-    if (NewStructure)
-    {
-        // Configure the structure
-        NewStructure->SetStructureType(StructureType);
-        NewStructure->SetBiomeAdaptation(BiomeType);
-        
-        // Set up biome-specific materials
-        SetupBiomeSpecificMaterials(NewStructure, BiomeType);
-        
-        // Add to managed structures
-        ManagedStructures.Add(NewStructure);
-        
-        UE_LOG(LogTemp, Log, TEXT("Spawned architectural structure at location: %s"), *Location.ToString());
-    }
-
-    return NewStructure;
+    // Trigger blueprint event
+    OnWeatheringApplied(StructureData.WeatheringLevel);
+    
+    UE_LOG(LogTemp, Log, TEXT("Weathering applied: %f"), StructureData.WeatheringLevel);
 }
 
-void UArchitecturalStructureManager::PopulateBiomeWithStructures(EBiomeType BiomeType, int32 StructureCount)
+void AArchitecturalStructureManager::AddTribalMarkings(bool bEnable)
 {
-    for (int32 i = 0; i < StructureCount; i++)
-    {
-        FVector SpawnLocation = GetRandomLocationInBiome(BiomeType);
-        FRotator SpawnRotation = FRotator(0.0f, FMath::RandRange(0.0f, 360.0f), 0.0f);
-        
-        // Randomly select structure type
-        EArch_StructureType RandomType = static_cast<EArch_StructureType>(FMath::RandRange(0, 5));
-        
-        SpawnStructure(RandomType, SpawnLocation, SpawnRotation, BiomeType);
-    }
+    StructureData.bHasTribalMarkings = bEnable;
     
-    UE_LOG(LogTemp, Log, TEXT("Populated biome with %d architectural structures"), StructureCount);
-}
-
-TArray<AArchitecturalStructure*> UArchitecturalStructureManager::GetStructuresInBiome(EBiomeType BiomeType)
-{
-    TArray<AArchitecturalStructure*> BiomeStructures;
-    
-    for (AArchitecturalStructure* Structure : ManagedStructures)
+    // This would typically modify material parameters or swap materials
+    if (StructureMeshComponent && StructureMeshComponent->GetMaterial(0))
     {
-        if (Structure && Structure->GetStructureData().BiomeType == BiomeType)
+        UMaterialInstanceDynamic* DynamicMaterial = StructureMeshComponent->CreateDynamicMaterialInstance(0);
+        if (DynamicMaterial)
         {
-            BiomeStructures.Add(Structure);
+            DynamicMaterial->SetScalarParameterValue(TEXT("TribalMarkings"), bEnable ? 1.0f : 0.0f);
         }
     }
     
-    return BiomeStructures;
+    UE_LOG(LogTemp, Log, TEXT("Tribal markings %s"), bEnable ? TEXT("enabled") : TEXT("disabled"));
 }
 
-void UArchitecturalStructureManager::ApplyGlobalWeathering(float WeatheringFactor)
+FVector AArchitecturalStructureManager::GetStructureLocation() const
 {
-    for (AArchitecturalStructure* Structure : ManagedStructures)
-    {
-        if (Structure)
-        {
-            float CurrentWeathering = Structure->GetStructureData().WeatheringLevel;
-            Structure->ApplyWeathering(CurrentWeathering + WeatheringFactor);
-        }
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("Applied global weathering factor: %f to %d structures"), WeatheringFactor, ManagedStructures.Num());
+    return StructureData.SpawnLocation;
 }
 
-void UArchitecturalStructureManager::SetupBiomeSpecificMaterials(AArchitecturalStructure* Structure, EBiomeType BiomeType)
+EArch_StructureType AArchitecturalStructureManager::GetStructureType() const
 {
-    if (!Structure)
+    return StructureData.StructureType;
+}
+
+void AArchitecturalStructureManager::UpdateStructureMesh()
+{
+    if (!StructureMeshComponent)
     {
         return;
     }
-
-    // Apply biome-specific aging and materials
-    switch (BiomeType)
+    
+    UStaticMesh* NewMesh = GetMeshForStructureType(StructureData.StructureType);
+    if (NewMesh)
     {
-    case EBiomeType::Swamp:
-        Structure->ApplyWeathering(0.8f); // Heavy moss and algae growth
-        break;
-    case EBiomeType::Forest:
-        Structure->ApplyWeathering(0.6f); // Moderate moss and lichen
-        break;
-    case EBiomeType::Desert:
-        Structure->ApplyWeathering(0.3f); // Sand-blasted but preserved
-        break;
-    case EBiomeType::Mountain:
-        Structure->ApplyWeathering(0.4f); // Wind and frost weathering
-        break;
-    case EBiomeType::Savanna:
-    default:
-        Structure->ApplyWeathering(0.5f); // Balanced weathering
-        break;
+        StructureMeshComponent->SetStaticMesh(NewMesh);
+        UE_LOG(LogTemp, Log, TEXT("Updated structure mesh for type: %d"), (int32)StructureData.StructureType);
+    }
+    else
+    {
+        UE_LOG(LogTemp, Warning, TEXT("No mesh found for structure type: %d"), (int32)StructureData.StructureType);
     }
 }
 
-FVector UArchitecturalStructureManager::GetRandomLocationInBiome(EBiomeType BiomeType)
+void AArchitecturalStructureManager::ApplyWeatheringMaterial()
 {
-    FVector BaseLocation;
-    float SpreadRadius = 10000.0f; // 10km spread within biome
-    
-    // Get biome center coordinates
-    switch (BiomeType)
+    if (!StructureMeshComponent)
     {
-    case EBiomeType::Savanna:
-        BaseLocation = FVector(0.0f, 0.0f, 100.0f);
-        break;
-    case EBiomeType::Swamp:
-        BaseLocation = FVector(-50000.0f, -45000.0f, 100.0f);
-        break;
-    case EBiomeType::Forest:
-        BaseLocation = FVector(-45000.0f, 40000.0f, 100.0f);
-        break;
-    case EBiomeType::Desert:
-        BaseLocation = FVector(55000.0f, 0.0f, 100.0f);
-        break;
-    case EBiomeType::Mountain:
-        BaseLocation = FVector(40000.0f, 50000.0f, 100.0f);
-        break;
-    default:
-        BaseLocation = FVector::ZeroVector;
-        break;
+        return;
     }
     
-    // Add random offset within biome
-    float RandomX = FMath::RandRange(-SpreadRadius, SpreadRadius);
-    float RandomY = FMath::RandRange(-SpreadRadius, SpreadRadius);
-    float RandomZ = FMath::RandRange(50.0f, 200.0f); // Vary height slightly
+    UMaterialInterface* WeatheredMaterial = GetWeatheredMaterial(StructureData.WeatheringLevel);
+    if (WeatheredMaterial)
+    {
+        StructureMeshComponent->SetMaterial(0, WeatheredMaterial);
+        UE_LOG(LogTemp, Log, TEXT("Applied weathered material with level: %f"), StructureData.WeatheringLevel);
+    }
+    else
+    {
+        // Create dynamic material instance to control weathering
+        UMaterialInstanceDynamic* DynamicMaterial = StructureMeshComponent->CreateDynamicMaterialInstance(0);
+        if (DynamicMaterial)
+        {
+            DynamicMaterial->SetScalarParameterValue(TEXT("WeatheringLevel"), StructureData.WeatheringLevel);
+            DynamicMaterial->SetScalarParameterValue(TEXT("MossAmount"), StructureData.WeatheringLevel * 0.8f);
+            DynamicMaterial->SetScalarParameterValue(TEXT("Roughness"), 0.3f + (StructureData.WeatheringLevel * 0.5f));
+        }
+    }
+}
+
+UStaticMesh* AArchitecturalStructureManager::GetMeshForStructureType(EArch_StructureType Type)
+{
+    switch (Type)
+    {
+        case EArch_StructureType::StonePillar:
+            return PillarMeshes.Num() > 0 ? PillarMeshes[0] : nullptr;
+            
+        case EArch_StructureType::RockFormation:
+            return RockFormationMeshes.Num() > 0 ? RockFormationMeshes[0] : nullptr;
+            
+        case EArch_StructureType::CaveEntrance:
+            return RockFormationMeshes.Num() > 1 ? RockFormationMeshes[1] : nullptr;
+            
+        case EArch_StructureType::AncientRuin:
+            return PillarMeshes.Num() > 1 ? PillarMeshes[1] : nullptr;
+            
+        case EArch_StructureType::TribalMarker:
+            return PillarMeshes.Num() > 2 ? PillarMeshes[2] : nullptr;
+            
+        default:
+            return nullptr;
+    }
+}
+
+UMaterialInterface* AArchitecturalStructureManager::GetWeatheredMaterial(float WeatheringLevel)
+{
+    if (WeatheredMaterials.Num() == 0)
+    {
+        return nullptr;
+    }
     
-    return BaseLocation + FVector(RandomX, RandomY, RandomZ);
+    // Select material based on weathering level
+    int32 MaterialIndex = FMath::FloorToInt(WeatheringLevel * WeatheredMaterials.Num());
+    MaterialIndex = FMath::Clamp(MaterialIndex, 0, WeatheredMaterials.Num() - 1);
+    
+    return WeatheredMaterials[MaterialIndex];
 }
