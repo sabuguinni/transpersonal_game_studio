@@ -1,75 +1,77 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Components/ActorComponent.h"
 #include "Engine/World.h"
-#include "Components/PrimitiveComponent.h"
-#include "Engine/CollisionProfile.h"
-#include "SharedTypes.h"
+#include "Components/ActorComponent.h"
+#include "Engine/Engine.h"
 #include "Perf_CollisionOptimizer.generated.h"
 
+UENUM(BlueprintType)
+enum class EPerf_CollisionLOD : uint8
+{
+    Full        UMETA(DisplayName = "Full Collision"),
+    Simplified  UMETA(DisplayName = "Simplified Collision"),
+    Bounds      UMETA(DisplayName = "Bounds Only"),
+    Disabled    UMETA(DisplayName = "Disabled")
+};
+
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FPerf_CollisionMetrics
+struct FPerf_CollisionProfile
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Collision Metrics")
-    int32 TotalCollisionActors;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision Performance")
+    FString ProfileName;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Collision Metrics")
-    int32 ComplexCollisionActors;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision Performance")
+    float MaxTraceDistance;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Collision Metrics")
-    int32 SimpleCollisionActors;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision Performance")
+    int32 MaxSimultaneousTraces;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Collision Metrics")
-    float AverageCollisionChecksPerFrame;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision Performance")
+    float LODDistance;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Collision Metrics")
-    float CollisionCPUTime;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision Performance")
+    EPerf_CollisionLOD CollisionLOD;
 
-    FPerf_CollisionMetrics()
+    FPerf_CollisionProfile()
     {
-        TotalCollisionActors = 0;
-        ComplexCollisionActors = 0;
-        SimpleCollisionActors = 0;
-        AverageCollisionChecksPerFrame = 0.0f;
-        CollisionCPUTime = 0.0f;
+        ProfileName = TEXT("Default");
+        MaxTraceDistance = 10000.0f;
+        MaxSimultaneousTraces = 100;
+        LODDistance = 5000.0f;
+        CollisionLOD = EPerf_CollisionLOD::Full;
     }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FPerf_CollisionLODSettings
+struct FPerf_CollisionStats
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision LOD")
-    float HighDetailDistance;
+    UPROPERTY(BlueprintReadOnly, Category = "Performance Stats")
+    int32 ActiveTraces;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision LOD")
-    float MediumDetailDistance;
+    UPROPERTY(BlueprintReadOnly, Category = "Performance Stats")
+    float AverageTraceTime;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision LOD")
-    float LowDetailDistance;
+    UPROPERTY(BlueprintReadOnly, Category = "Performance Stats")
+    int32 TracesPerFrame;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision LOD")
-    float CullingDistance;
+    UPROPERTY(BlueprintReadOnly, Category = "Performance Stats")
+    float CollisionBudgetUsed;
 
-    FPerf_CollisionLODSettings()
+    FPerf_CollisionStats()
     {
-        HighDetailDistance = 1000.0f;
-        MediumDetailDistance = 2500.0f;
-        LowDetailDistance = 5000.0f;
-        CullingDistance = 10000.0f;
+        ActiveTraces = 0;
+        AverageTraceTime = 0.0f;
+        TracesPerFrame = 0;
+        CollisionBudgetUsed = 0.0f;
     }
 };
 
-/**
- * Performance optimizer for collision detection systems
- * Manages collision complexity based on distance and importance
- * Implements LOD system for collision shapes and detection
- */
-UCLASS(ClassGroup=(Performance), meta=(BlueprintSpawnableComponent))
+UCLASS(ClassGroup=(TranspersonalGame), meta=(BlueprintSpawnableComponent))
 class TRANSPERSONALGAME_API UPerf_CollisionOptimizer : public UActorComponent
 {
     GENERATED_BODY()
@@ -82,90 +84,75 @@ protected:
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 public:
-    // Core optimization functions
-    UFUNCTION(BlueprintCallable, Category = "Collision Optimization")
-    void OptimizeCollisionForActor(AActor* Actor, float DistanceToPlayer);
+    // Performance settings
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance Settings")
+    float CollisionBudgetMS;
 
-    UFUNCTION(BlueprintCallable, Category = "Collision Optimization")
-    void UpdateCollisionLOD(AActor* Actor, EPerf_LODLevel LODLevel);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance Settings")
+    int32 MaxTracesPerFrame;
 
-    UFUNCTION(BlueprintCallable, Category = "Collision Optimization")
-    void BatchOptimizeCollisions(const TArray<AActor*>& Actors);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance Settings")
+    float AdaptiveLODThreshold;
 
-    // Performance analysis
-    UFUNCTION(BlueprintCallable, Category = "Performance Analysis")
-    FPerf_CollisionMetrics AnalyzeCollisionPerformance();
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance Settings")
+    bool bEnableAdaptiveLOD;
 
-    UFUNCTION(BlueprintCallable, Category = "Performance Analysis")
-    void ProfileCollisionSystem(float Duration);
+    // Collision profiles
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision Profiles")
+    TArray<FPerf_CollisionProfile> CollisionProfiles;
 
-    // LOD management
-    UFUNCTION(BlueprintCallable, Category = "LOD Management")
-    EPerf_LODLevel CalculateCollisionLOD(float Distance, bool bIsImportant = false);
-
-    UFUNCTION(BlueprintCallable, Category = "LOD Management")
-    void SetCollisionLODSettings(const FPerf_CollisionLODSettings& NewSettings);
-
-    // Culling and optimization
-    UFUNCTION(BlueprintCallable, Category = "Culling")
-    void CullDistantCollisions(float MaxDistance);
-
-    UFUNCTION(BlueprintCallable, Category = "Culling")
-    void EnableCollisionBatching(bool bEnable);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision Profiles")
+    FString ActiveProfileName;
 
     // Performance monitoring
-    UFUNCTION(BlueprintCallable, Category = "Monitoring")
-    float GetCollisionCPUTime() const { return CollisionCPUTime; }
+    UPROPERTY(BlueprintReadOnly, Category = "Performance Stats")
+    FPerf_CollisionStats CurrentStats;
 
-    UFUNCTION(BlueprintCallable, Category = "Monitoring")
-    int32 GetActiveCollisionCount() const { return ActiveCollisionCount; }
+    UPROPERTY(BlueprintReadOnly, Category = "Performance Stats")
+    TArray<float> FrameTimeHistory;
 
-    UFUNCTION(BlueprintCallable, Category = "Monitoring")
-    bool IsCollisionPerformanceOptimal() const;
+    // Optimization methods
+    UFUNCTION(BlueprintCallable, Category = "Collision Optimization")
+    void SetCollisionProfile(const FString& ProfileName);
 
-protected:
-    // Settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
-    FPerf_CollisionLODSettings LODSettings;
+    UFUNCTION(BlueprintCallable, Category = "Collision Optimization")
+    FPerf_CollisionProfile GetActiveProfile() const;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
-    float OptimizationUpdateInterval;
+    UFUNCTION(BlueprintCallable, Category = "Collision Optimization")
+    void OptimizeCollisionForActor(AActor* Actor, float Distance);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
-    int32 MaxCollisionsPerFrame;
+    UFUNCTION(BlueprintCallable, Category = "Collision Optimization")
+    bool ShouldPerformTrace(const FVector& Start, const FVector& End);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
-    bool bEnableCollisionBatching;
+    UFUNCTION(BlueprintCallable, Category = "Collision Optimization")
+    void RegisterTrace(float TraceTime);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
-    bool bEnableDistanceCulling;
+    UFUNCTION(BlueprintCallable, Category = "Collision Optimization")
+    void UpdatePerformanceStats();
 
-    // Performance tracking
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float CollisionCPUTime;
+    UFUNCTION(BlueprintCallable, Category = "Collision Optimization")
+    void AdaptLODBasedOnPerformance();
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    int32 ActiveCollisionCount;
+    // Debug and monitoring
+    UFUNCTION(BlueprintCallable, Category = "Debug")
+    void DrawCollisionDebugInfo();
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    int32 CulledCollisionCount;
+    UFUNCTION(BlueprintCallable, Category = "Debug")
+    FString GetPerformanceReport() const;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float AverageFrameTime;
-
-    // Internal state
-    float LastOptimizationTime;
-    TArray<TWeakObjectPtr<AActor>> TrackedActors;
-    TMap<AActor*, EPerf_LODLevel> ActorLODMap;
-    
-    // Performance targets
-    static constexpr float TARGET_COLLISION_CPU_TIME = 2.0f; // 2ms for 60fps
-    static constexpr int32 MAX_COLLISION_ACTORS = 2000;
+    UFUNCTION(CallInEditor, Category = "Debug")
+    void RunCollisionBenchmark();
 
 private:
-    void UpdateCollisionComplexity(UPrimitiveComponent* Component, EPerf_LODLevel LODLevel);
-    void DisableCollisionForActor(AActor* Actor);
-    void EnableCollisionForActor(AActor* Actor);
-    float CalculateCollisionImportance(AActor* Actor);
-    void OptimizeCollisionChannels(UPrimitiveComponent* Component);
+    // Internal tracking
+    TArray<float> TraceTimings;
+    int32 CurrentFrameTraces;
+    float LastFrameTime;
+    float CollisionBudgetUsed;
+
+    // Helper methods
+    void InitializeDefaultProfiles();
+    FPerf_CollisionProfile* FindProfile(const FString& ProfileName);
+    void UpdateFrameStats(float DeltaTime);
+    EPerf_CollisionLOD CalculateOptimalLOD(float Distance, float CurrentFrameTime);
 };
