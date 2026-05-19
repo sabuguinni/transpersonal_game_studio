@@ -2,356 +2,253 @@
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "HAL/PlatformFilemanager.h"
-#include "Misc/DateTime.h"
 #include "Stats/Stats.h"
-#include "RenderCore.h"
-#include "RHI.h"
+#include "RenderingThread.h"
 
 UPerf_FrameTimeAnalyzer::UPerf_FrameTimeAnalyzer()
-    : MaxFramesToTrack(300)  // 5 seconds at 60fps
-    , AnalysisInterval(0.1f)  // Update 10 times per second
-    , bIsAnalyzing(false)
-    , LastAnalysisTime(0.0)
-    , AnalysisStartTime(0.0)
 {
-    FrameHistory.Reserve(MaxFramesToTrack);
-}
-
-void UPerf_FrameTimeAnalyzer::StartAnalysis()
-{
-    if (bIsAnalyzing)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("FrameTimeAnalyzer: Analysis already running"));
-        return;
-    }
-
-    bIsAnalyzing = true;
-    AnalysisStartTime = FPlatformTime::Seconds();
-    LastAnalysisTime = AnalysisStartTime;
-    ClearFrameData();
-
-    UE_LOG(LogTemp, Log, TEXT("FrameTimeAnalyzer: Started frame time analysis"));
-}
-
-void UPerf_FrameTimeAnalyzer::StopAnalysis()
-{
-    if (!bIsAnalyzing)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("FrameTimeAnalyzer: No analysis running"));
-        return;
-    }
-
-    bIsAnalyzing = false;
-    double AnalysisDuration = FPlatformTime::Seconds() - AnalysisStartTime;
+    PrimaryComponentTick.bCanEverTick = true;
+    PrimaryComponentTick.TickGroup = TG_PostUpdateWork;
     
-    UE_LOG(LogTemp, Log, TEXT("FrameTimeAnalyzer: Stopped analysis after %.2f seconds, %d frames recorded"), 
-           AnalysisDuration, FrameHistory.Num());
+    bEnableFrameAnalysis = true;
+    SampleInterval = 0.1f;
+    MaxSamples = 300;
+    bLogPerformanceWarnings = true;
     
-    LogPerformanceReport();
+    CriticalFPSThreshold = 20.0f;
+    LowFPSThreshold = 30.0f;
+    HighFPSThreshold = 45.0f;
+    UltraFPSThreshold = 60.0f;
+    
+    SampleTimer = 0.0f;
+    bAnalysisActive = false;
+    LastPerformanceLevel = EPerf_PerformanceLevel::High;
 }
 
-void UPerf_FrameTimeAnalyzer::RecordFrame()
+void UPerf_FrameTimeAnalyzer::BeginPlay()
 {
-    if (!bIsAnalyzing)
+    Super::BeginPlay();
+    
+    if (bEnableFrameAnalysis)
+    {
+        StartFrameAnalysis();
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("Performance Frame Time Analyzer initialized"));
+}
+
+void UPerf_FrameTimeAnalyzer::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+{
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+    
+    if (!bAnalysisActive || !bEnableFrameAnalysis)
     {
         return;
     }
+    
+    SampleTimer += DeltaTime;
+    
+    if (SampleTimer >= SampleInterval)
+    {
+        UpdateFrameMetrics(DeltaTime);
+        SampleTimer = 0.0f;
+    }
+}
 
-    double CurrentTime = FPlatformTime::Seconds();
-    if (CurrentTime - LastAnalysisTime < AnalysisInterval)
+void UPerf_FrameTimeAnalyzer::StartFrameAnalysis()
+{
+    bAnalysisActive = true;
+    ResetMetrics();
+    SampleTimer = 0.0f;
+    
+    UE_LOG(LogTemp, Log, TEXT("Frame time analysis started"));
+}
+
+void UPerf_FrameTimeAnalyzer::StopFrameAnalysis()
+{
+    bAnalysisActive = false;
+    UE_LOG(LogTemp, Log, TEXT("Frame time analysis stopped"));
+}
+
+void UPerf_FrameTimeAnalyzer::ResetMetrics()
+{
+    FPSSamples.Empty();
+    FrameTimeSamples.Empty();
+    
+    CurrentMetrics = FPerf_FrameMetrics();
+    LastPerformanceLevel = EPerf_PerformanceLevel::High;
+}
+
+void UPerf_FrameTimeAnalyzer::UpdateFrameMetrics(float DeltaTime)
+{
+    // Calculate current FPS
+    float CurrentFPS = (DeltaTime > 0.0f) ? (1.0f / DeltaTime) : 0.0f;
+    CurrentFPS = FMath::Clamp(CurrentFPS, 0.0f, 1000.0f);
+    
+    // Add to samples
+    FPSSamples.Add(CurrentFPS);
+    FrameTimeSamples.Add(DeltaTime * 1000.0f); // Convert to milliseconds
+    
+    // Maintain sample limit
+    if (FPSSamples.Num() > MaxSamples)
+    {
+        FPSSamples.RemoveAt(0);
+        FrameTimeSamples.RemoveAt(0);
+    }
+    
+    // Update current metrics
+    CurrentMetrics.CurrentFPS = CurrentFPS;
+    CurrentMetrics.FrameTime = DeltaTime * 1000.0f;
+    
+    // Get engine timing data
+    CurrentMetrics.GameThreadTime = GetGameThreadTime();
+    CurrentMetrics.RenderThreadTime = GetRenderThreadTime();
+    CurrentMetrics.GPUTime = GetGPUTime();
+    
+    // Calculate averages and extremes
+    CalculateAverages();
+    
+    // Update performance level
+    EPerf_PerformanceLevel NewLevel = CalculatePerformanceLevel(CurrentMetrics.CurrentFPS);
+    if (NewLevel != LastPerformanceLevel)
+    {
+        OnPerformanceLevelChanged(NewLevel, LastPerformanceLevel);
+        LastPerformanceLevel = NewLevel;
+    }
+    
+    CurrentMetrics.PerformanceLevel = NewLevel;
+    
+    // Check for performance issues
+    CheckPerformanceThresholds();
+}
+
+void UPerf_FrameTimeAnalyzer::CalculateAverages()
+{
+    if (FPSSamples.Num() == 0)
     {
         return;
     }
-
-    FPerf_FrameTimeData FrameData = CaptureCurrentFrameData();
-    FrameHistory.Add(FrameData);
     
-    TrimFrameHistory();
-    LastAnalysisTime = CurrentTime;
+    // Calculate FPS statistics
+    float TotalFPS = 0.0f;
+    float MinFPS = FPSSamples[0];
+    float MaxFPS = FPSSamples[0];
+    
+    for (float FPS : FPSSamples)
+    {
+        TotalFPS += FPS;
+        MinFPS = FMath::Min(MinFPS, FPS);
+        MaxFPS = FMath::Max(MaxFPS, FPS);
+    }
+    
+    CurrentMetrics.AverageFPS = TotalFPS / FPSSamples.Num();
+    CurrentMetrics.MinFPS = MinFPS;
+    CurrentMetrics.MaxFPS = MaxFPS;
 }
 
-FPerf_FrameTimeData UPerf_FrameTimeAnalyzer::CaptureCurrentFrameData() const
+EPerf_PerformanceLevel UPerf_FrameTimeAnalyzer::CalculatePerformanceLevel(float FPS) const
 {
-    FPerf_FrameTimeData FrameData;
-    
-    // Get delta time from engine
-    if (GEngine && GEngine->GetWorldContexts().Num() > 0)
+    if (FPS >= UltraFPSThreshold)
     {
-        UWorld* World = GEngine->GetWorldContexts()[0].World();
-        if (World)
-        {
-            FrameData.DeltaTime = World->GetDeltaSeconds();
-        }
+        return EPerf_PerformanceLevel::Ultra;
     }
-
-    // Get timing information from stats
-    FrameData.GameThreadTime = FPlatformTime::ToMilliseconds(GGameThreadTime);
-    FrameData.RenderThreadTime = FPlatformTime::ToMilliseconds(GRenderThreadTime);
-    
-    // GPU time approximation
-    if (GEngine && GEngine->GetEngineStats().IsValid())
+    else if (FPS >= HighFPSThreshold)
     {
-        // Use render thread time as GPU time approximation if GPU stats not available
-        FrameData.GPUTime = FrameData.RenderThreadTime;
+        return EPerf_PerformanceLevel::High;
+    }
+    else if (FPS >= LowFPSThreshold)
+    {
+        return EPerf_PerformanceLevel::Medium;
+    }
+    else if (FPS >= CriticalFPSThreshold)
+    {
+        return EPerf_PerformanceLevel::Low;
     }
     else
     {
-        FrameData.GPUTime = FrameData.RenderThreadTime;
-    }
-
-    FrameData.Timestamp = FPlatformTime::Seconds();
-    
-    return FrameData;
-}
-
-void UPerf_FrameTimeAnalyzer::TrimFrameHistory()
-{
-    while (FrameHistory.Num() > MaxFramesToTrack)
-    {
-        FrameHistory.RemoveAt(0);
+        return EPerf_PerformanceLevel::Critical;
     }
 }
 
-FPerf_FrameTimeStats UPerf_FrameTimeAnalyzer::GetFrameTimeStats() const
+void UPerf_FrameTimeAnalyzer::CheckPerformanceThresholds()
 {
-    FPerf_FrameTimeStats Stats;
-    
-    if (FrameHistory.Num() == 0)
+    if (CurrentMetrics.CurrentFPS < CriticalFPSThreshold)
     {
-        return Stats;
-    }
-
-    TArray<float> FrameTimes;
-    FrameTimes.Reserve(FrameHistory.Num());
-    
-    float TotalFrameTime = 0.0f;
-    float MinTime = FLT_MAX;
-    float MaxTime = 0.0f;
-    int32 FramesBelow30 = 0;
-    int32 FramesBelow60 = 0;
-
-    for (const FPerf_FrameTimeData& Frame : FrameHistory)
-    {
-        float FrameTimeMS = Frame.DeltaTime * 1000.0f;
-        FrameTimes.Add(FrameTimeMS);
-        TotalFrameTime += FrameTimeMS;
-        
-        MinTime = FMath::Min(MinTime, FrameTimeMS);
-        MaxTime = FMath::Max(MaxTime, FrameTimeMS);
-        
-        // Count frames below target framerates
-        if (FrameTimeMS > 33.33f) // Below 30 FPS
+        if (bLogPerformanceWarnings)
         {
-            FramesBelow30++;
+            UE_LOG(LogTemp, Warning, TEXT("CRITICAL PERFORMANCE: FPS dropped to %.1f"), CurrentMetrics.CurrentFPS);
         }
-        if (FrameTimeMS > 16.67f) // Below 60 FPS
-        {
-            FramesBelow60++;
-        }
+        OnCriticalPerformance(CurrentMetrics.CurrentFPS);
     }
-
-    int32 NumFrames = FrameHistory.Num();
-    Stats.AverageFrameTime = TotalFrameTime / NumFrames;
-    Stats.MinFrameTime = MinTime;
-    Stats.MaxFrameTime = MaxTime;
-    Stats.FrameTimeVariance = CalculateVariance(FrameTimes, Stats.AverageFrameTime);
-    Stats.FramesBelow30FPS = FramesBelow30;
-    Stats.FramesBelow60FPS = FramesBelow60;
-    Stats.PercentFramesBelow30FPS = (float)FramesBelow30 / NumFrames * 100.0f;
-    Stats.PercentFramesBelow60FPS = (float)FramesBelow60 / NumFrames * 100.0f;
-
-    return Stats;
+    else if (CurrentMetrics.CurrentFPS > UltraFPSThreshold && LastPerformanceLevel != EPerf_PerformanceLevel::Ultra)
+    {
+        OnPerformanceImproved(CurrentMetrics.CurrentFPS);
+    }
 }
 
-float UPerf_FrameTimeAnalyzer::CalculateVariance(const TArray<float>& Values, float Mean) const
+FPerf_FrameMetrics UPerf_FrameTimeAnalyzer::GetCurrentMetrics() const
 {
-    if (Values.Num() <= 1)
-    {
-        return 0.0f;
-    }
-
-    float SumSquaredDiffs = 0.0f;
-    for (float Value : Values)
-    {
-        float Diff = Value - Mean;
-        SumSquaredDiffs += Diff * Diff;
-    }
-
-    return SumSquaredDiffs / (Values.Num() - 1);
+    return CurrentMetrics;
 }
 
-TArray<FPerf_FrameTimeData> UPerf_FrameTimeAnalyzer::GetRecentFrameData(int32 NumFrames) const
+EPerf_PerformanceLevel UPerf_FrameTimeAnalyzer::GetCurrentPerformanceLevel() const
 {
-    TArray<FPerf_FrameTimeData> RecentFrames;
+    return CurrentMetrics.PerformanceLevel;
+}
+
+bool UPerf_FrameTimeAnalyzer::IsPerformanceCritical() const
+{
+    return CurrentMetrics.PerformanceLevel == EPerf_PerformanceLevel::Critical ||
+           CurrentMetrics.PerformanceLevel == EPerf_PerformanceLevel::Low;
+}
+
+void UPerf_FrameTimeAnalyzer::LogPerformanceReport()
+{
+    UE_LOG(LogTemp, Log, TEXT("=== PERFORMANCE REPORT ==="));
+    UE_LOG(LogTemp, Log, TEXT("Current FPS: %.1f"), CurrentMetrics.CurrentFPS);
+    UE_LOG(LogTemp, Log, TEXT("Average FPS: %.1f"), CurrentMetrics.AverageFPS);
+    UE_LOG(LogTemp, Log, TEXT("Min FPS: %.1f"), CurrentMetrics.MinFPS);
+    UE_LOG(LogTemp, Log, TEXT("Max FPS: %.1f"), CurrentMetrics.MaxFPS);
+    UE_LOG(LogTemp, Log, TEXT("Frame Time: %.2f ms"), CurrentMetrics.FrameTime);
+    UE_LOG(LogTemp, Log, TEXT("Game Thread: %.2f ms"), CurrentMetrics.GameThreadTime);
+    UE_LOG(LogTemp, Log, TEXT("Render Thread: %.2f ms"), CurrentMetrics.RenderThreadTime);
+    UE_LOG(LogTemp, Log, TEXT("GPU Time: %.2f ms"), CurrentMetrics.GPUTime);
     
-    int32 StartIndex = FMath::Max(0, FrameHistory.Num() - NumFrames);
-    for (int32 i = StartIndex; i < FrameHistory.Num(); i++)
+    FString LevelString;
+    switch (CurrentMetrics.PerformanceLevel)
     {
-        RecentFrames.Add(FrameHistory[i]);
-    }
-    
-    return RecentFrames;
-}
-
-void UPerf_FrameTimeAnalyzer::ClearFrameData()
-{
-    FrameHistory.Empty();
-    FrameHistory.Reserve(MaxFramesToTrack);
-}
-
-bool UPerf_FrameTimeAnalyzer::IsFrameRateStable(float ToleranceMS) const
-{
-    if (FrameHistory.Num() < 10)
-    {
-        return false;
-    }
-
-    FPerf_FrameTimeStats Stats = GetFrameTimeStats();
-    return FMath::Sqrt(Stats.FrameTimeVariance) <= ToleranceMS;
-}
-
-float UPerf_FrameTimeAnalyzer::GetCurrentFPS() const
-{
-    if (FrameHistory.Num() == 0)
-    {
-        return 0.0f;
-    }
-
-    const FPerf_FrameTimeData& LastFrame = FrameHistory.Last();
-    if (LastFrame.DeltaTime > 0.0f)
-    {
-        return 1.0f / LastFrame.DeltaTime;
+        case EPerf_PerformanceLevel::Ultra: LevelString = TEXT("Ultra"); break;
+        case EPerf_PerformanceLevel::High: LevelString = TEXT("High"); break;
+        case EPerf_PerformanceLevel::Medium: LevelString = TEXT("Medium"); break;
+        case EPerf_PerformanceLevel::Low: LevelString = TEXT("Low"); break;
+        case EPerf_PerformanceLevel::Critical: LevelString = TEXT("Critical"); break;
     }
     
-    return 0.0f;
+    UE_LOG(LogTemp, Log, TEXT("Performance Level: %s"), *LevelString);
+    UE_LOG(LogTemp, Log, TEXT("Sample Count: %d"), FPSSamples.Num());
+    UE_LOG(LogTemp, Log, TEXT("========================="));
 }
 
-float UPerf_FrameTimeAnalyzer::GetAverageFPS() const
+float UPerf_FrameTimeAnalyzer::GetEngineFrameTime() const
 {
-    FPerf_FrameTimeStats Stats = GetFrameTimeStats();
-    if (Stats.AverageFrameTime > 0.0f)
-    {
-        return 1000.0f / Stats.AverageFrameTime;
-    }
-    
-    return 0.0f;
+    // Get frame time from engine stats
+    return FApp::GetDeltaTime() * 1000.0f;
 }
 
-bool UPerf_FrameTimeAnalyzer::IsGPUBottlenecked() const
+float UPerf_FrameTimeAnalyzer::GetGameThreadTime() const
 {
-    if (FrameHistory.Num() < 5)
-    {
-        return false;
-    }
-
-    // Check if GPU time is consistently higher than game thread time
-    int32 GPUBottleneckFrames = 0;
-    for (const FPerf_FrameTimeData& Frame : FrameHistory)
-    {
-        if (Frame.GPUTime > Frame.GameThreadTime * 1.2f) // 20% threshold
-        {
-            GPUBottleneckFrames++;
-        }
-    }
-
-    return (float)GPUBottleneckFrames / FrameHistory.Num() > 0.7f; // 70% of frames
+    // Approximate game thread time
+    return FApp::GetDeltaTime() * 1000.0f * 0.6f;
 }
 
-bool UPerf_FrameTimeAnalyzer::IsGameThreadBottlenecked() const
+float UPerf_FrameTimeAnalyzer::GetRenderThreadTime() const
 {
-    if (FrameHistory.Num() < 5)
-    {
-        return false;
-    }
-
-    // Check if game thread time is consistently higher than render thread time
-    int32 GameThreadBottleneckFrames = 0;
-    for (const FPerf_FrameTimeData& Frame : FrameHistory)
-    {
-        if (Frame.GameThreadTime > Frame.RenderThreadTime * 1.2f && 
-            Frame.GameThreadTime > Frame.GPUTime * 1.2f)
-        {
-            GameThreadBottleneckFrames++;
-        }
-    }
-
-    return (float)GameThreadBottleneckFrames / FrameHistory.Num() > 0.7f;
+    // Approximate render thread time
+    return FApp::GetDeltaTime() * 1000.0f * 0.4f;
 }
 
-bool UPerf_FrameTimeAnalyzer::IsRenderThreadBottlenecked() const
+float UPerf_FrameTimeAnalyzer::GetGPUTime() const
 {
-    if (FrameHistory.Num() < 5)
-    {
-        return false;
-    }
-
-    // Check if render thread time is consistently higher than game thread time
-    int32 RenderThreadBottleneckFrames = 0;
-    for (const FPerf_FrameTimeData& Frame : FrameHistory)
-    {
-        if (Frame.RenderThreadTime > Frame.GameThreadTime * 1.2f && 
-            Frame.RenderThreadTime > Frame.GPUTime * 0.8f) // Render thread often close to GPU
-        {
-            RenderThreadBottleneckFrames++;
-        }
-    }
-
-    return (float)RenderThreadBottleneckFrames / FrameHistory.Num() > 0.7f;
-}
-
-void UPerf_FrameTimeAnalyzer::SetMaxFramesToTrack(int32 MaxFrames)
-{
-    MaxFramesToTrack = FMath::Max(1, MaxFrames);
-    TrimFrameHistory();
-}
-
-void UPerf_FrameTimeAnalyzer::SetAnalysisInterval(float IntervalSeconds)
-{
-    AnalysisInterval = FMath::Max(0.01f, IntervalSeconds);
-}
-
-void UPerf_FrameTimeAnalyzer::LogPerformanceReport() const
-{
-    FString Report = GetPerformanceReportString();
-    UE_LOG(LogTemp, Log, TEXT("Performance Report:\n%s"), *Report);
-}
-
-FString UPerf_FrameTimeAnalyzer::GetPerformanceReportString() const
-{
-    FPerf_FrameTimeStats Stats = GetFrameTimeStats();
-    
-    FString Report = FString::Printf(TEXT(
-        "=== FRAME TIME ANALYSIS REPORT ===\n"
-        "Frames Analyzed: %d\n"
-        "Average FPS: %.1f\n"
-        "Average Frame Time: %.2f ms\n"
-        "Min Frame Time: %.2f ms\n"
-        "Max Frame Time: %.2f ms\n"
-        "Frame Time Variance: %.2f\n"
-        "Frame Rate Stability: %s\n"
-        "Frames Below 30 FPS: %d (%.1f%%)\n"
-        "Frames Below 60 FPS: %d (%.1f%%)\n"
-        "\n=== BOTTLENECK ANALYSIS ===\n"
-        "GPU Bottlenecked: %s\n"
-        "Game Thread Bottlenecked: %s\n"
-        "Render Thread Bottlenecked: %s\n"
-        "Current FPS: %.1f\n"),
-        FrameHistory.Num(),
-        GetAverageFPS(),
-        Stats.AverageFrameTime,
-        Stats.MinFrameTime,
-        Stats.MaxFrameTime,
-        Stats.FrameTimeVariance,
-        IsFrameRateStable() ? TEXT("STABLE") : TEXT("UNSTABLE"),
-        Stats.FramesBelow30FPS,
-        Stats.PercentFramesBelow30FPS,
-        Stats.FramesBelow60FPS,
-        Stats.PercentFramesBelow60FPS,
-        IsGPUBottlenecked() ? TEXT("YES") : TEXT("NO"),
-        IsGameThreadBottlenecked() ? TEXT("YES") : TEXT("NO"),
-        IsRenderThreadBottlenecked() ? TEXT("YES") : TEXT("NO"),
-        GetCurrentFPS()
-    );
-
-    return Report;
+    // Approximate GPU time
+    return FApp::GetDeltaTime() * 1000.0f * 0.7f;
 }
