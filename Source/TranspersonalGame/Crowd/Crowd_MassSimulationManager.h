@@ -1,162 +1,102 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "GameFramework/Actor.h"
 #include "Engine/World.h"
-#include "GameFramework/GameModeBase.h"
-#include "MassEntitySubsystem.h"
-#include "MassSpawnerSubsystem.h"
-#include "MassSimulationSubsystem.h"
-#include "MassEntityTypes.h"
-#include "MassEntityTemplate.h"
-#include "MassProcessor.h"
-#include "MassCommonFragments.h"
-#include "MassMovementFragments.h"
-#include "MassRepresentationFragments.h"
 #include "Components/StaticMeshComponent.h"
-#include "Engine/StaticMesh.h"
-#include "TranspersonalGame/TranspersonalGame.h"
 #include "Crowd_MassSimulationManager.generated.h"
 
-// Mass Entity fragments for crowd simulation
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FCrowd_MovementFragment : public FMassFragment
+UENUM(BlueprintType)
+enum class ECrowd_HerdBehavior : uint8
 {
-    GENERATED_BODY()
+    Grazing         UMETA(DisplayName = "Grazing"),
+    Migration       UMETA(DisplayName = "Migration"), 
+    Flocking        UMETA(DisplayName = "Flocking"),
+    DefensiveCircle UMETA(DisplayName = "Defensive Circle"),
+    Territorial     UMETA(DisplayName = "Territorial"),
+    Hunting         UMETA(DisplayName = "Hunting")
+};
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
-    FVector TargetLocation = FVector::ZeroVector;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
-    float MovementSpeed = 150.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
-    float WanderRadius = 1000.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
-    float FlockingStrength = 0.5f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
-    float SeparationDistance = 200.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
-    bool bIsWandering = true;
+UENUM(BlueprintType)
+enum class ECrowd_DinosaurSpecies : uint8
+{
+    Triceratops     UMETA(DisplayName = "Triceratops"),
+    Parasaurolophus UMETA(DisplayName = "Parasaurolophus"),
+    Brachiosaurus   UMETA(DisplayName = "Brachiosaurus"),
+    Ankylosaurus    UMETA(DisplayName = "Ankylosaurus"),
+    Velociraptor    UMETA(DisplayName = "Velociraptor"),
+    TRex            UMETA(DisplayName = "T-Rex"),
+    Protoceratops   UMETA(DisplayName = "Protoceratops"),
+    Pachycephalo    UMETA(DisplayName = "Pachycephalo")
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FCrowd_BehaviorFragment : public FMassFragment
+struct TRANSPERSONALGAME_API FCrowd_HerdConfiguration
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
-    float AggressionLevel = 0.3f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Herd Config")
+    ECrowd_DinosaurSpecies Species = ECrowd_DinosaurSpecies::Triceratops;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
-    float FearLevel = 0.2f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Herd Config")
+    ECrowd_HerdBehavior Behavior = ECrowd_HerdBehavior::Grazing;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
-    float CuriosityLevel = 0.5f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Herd Config")
+    int32 HerdSize = 20;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
-    float SocialRadius = 500.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Herd Config")
+    float FormationRadius = 500.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
-    int32 GroupID = 0;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
-    bool bIsGroupLeader = false;
-};
-
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FCrowd_SpeciesFragment : public FMassFragment
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Species")
-    FString SpeciesName = TEXT("Generic");
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Species")
-    float BodySize = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Species")
-    bool bIsCarnivore = false;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Species")
-    bool bIsHerbivore = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Species")
-    float MaxHealth = 100.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Species")
-    float CurrentHealth = 100.0f;
-};
-
-// Mass Entity processor for crowd movement
-UCLASS()
-class TRANSPERSONALGAME_API UCrowd_MovementProcessor : public UMassProcessor
-{
-    GENERATED_BODY()
-
-public:
-    UCrowd_MovementProcessor();
-
-protected:
-    virtual void ConfigureQueries() override;
-    virtual void Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context) override;
-
-private:
-    FMassEntityQuery EntityQuery;
-};
-
-// Mass Entity processor for crowd behavior
-UCLASS()
-class TRANSPERSONALGAME_API UCrowd_BehaviorProcessor : public UMassProcessor
-{
-    GENERATED_BODY()
-
-public:
-    UCrowd_BehaviorProcessor();
-
-protected:
-    virtual void ConfigureQueries() override;
-    virtual void Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context) override;
-
-private:
-    FMassEntityQuery EntityQuery;
-    float LastBehaviorUpdate = 0.0f;
-};
-
-// Mass Entity spawning configuration
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FCrowd_SpawnConfig
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Herd Config")
     FVector SpawnCenter = FVector::ZeroVector;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn")
-    float SpawnRadius = 5000.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Herd Config")
+    float MovementSpeed = 100.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn")
-    int32 MaxEntities = 1000;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Herd Config")
+    bool bHasSocialHierarchy = true;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn")
-    FString BiomeName = TEXT("Savana");
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn")
-    TArray<FString> SpeciesTypes;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn")
-    float LODDistance1 = 2000.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn")
-    float LODDistance2 = 5000.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn")
-    float LODDistance3 = 10000.0f;
+    FCrowd_HerdConfiguration()
+    {
+        Species = ECrowd_DinosaurSpecies::Triceratops;
+        Behavior = ECrowd_HerdBehavior::Grazing;
+        HerdSize = 20;
+        FormationRadius = 500.0f;
+        SpawnCenter = FVector::ZeroVector;
+        MovementSpeed = 100.0f;
+        bHasSocialHierarchy = true;
+    }
 };
 
-// Main crowd simulation manager
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FCrowd_BiomePopulation
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    FString BiomeName;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    FVector BiomeCenter = FVector::ZeroVector;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    float BiomeRadius = 10000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    TArray<FCrowd_HerdConfiguration> HerdConfigurations;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    int32 TotalPopulation = 0;
+
+    FCrowd_BiomePopulation()
+    {
+        BiomeName = TEXT("Unknown");
+        BiomeCenter = FVector::ZeroVector;
+        BiomeRadius = 10000.0f;
+        TotalPopulation = 0;
+    }
+};
+
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API ACrowd_MassSimulationManager : public AActor
 {
@@ -167,74 +107,88 @@ public:
 
 protected:
     virtual void BeginPlay() override;
-    virtual void Tick(float DeltaTime) override;
 
 public:
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Simulation")
-    FCrowd_SpawnConfig SavanaConfig;
+    virtual void Tick(float DeltaTime) override;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Simulation")
-    FCrowd_SpawnConfig PantanoConfig;
+    // Core Mass Simulation Properties
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mass Simulation")
+    TArray<FCrowd_BiomePopulation> BiomePopulations;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Simulation")
-    FCrowd_SpawnConfig FlorestaConfig;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mass Simulation")
+    int32 MaxSimultaneousEntities = 50000;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Simulation")
-    FCrowd_SpawnConfig DesertoConfig;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mass Simulation")
+    float SimulationRadius = 100000.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Simulation")
-    FCrowd_SpawnConfig MontanhaConfig;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mass Simulation")
     bool bEnableLODSystem = true;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float UpdateFrequency = 0.1f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mass Simulation")
+    float LODDistance1 = 5000.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 MaxSimulationEntities = 50000;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mass Simulation")
+    float LODDistance2 = 15000.0f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Runtime")
-    int32 CurrentEntityCount = 0;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mass Simulation")
+    float LODDistance3 = 50000.0f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Runtime")
-    float LastUpdateTime = 0.0f;
-
-    // Core simulation methods
+    // Crowd Behavior Functions
     UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    void InitializeCrowdSimulation();
+    void InitializeBiomePopulations();
 
     UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    void SpawnCrowdInBiome(const FCrowd_SpawnConfig& Config);
+    void SpawnHerdInBiome(const FCrowd_HerdConfiguration& HerdConfig, const FString& BiomeName);
 
     UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    void UpdateCrowdLOD(const FVector& PlayerLocation);
+    void CreateMigrationPattern(ECrowd_DinosaurSpecies Species, const FVector& StartLocation, const FVector& EndLocation);
 
     UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    void SetCrowdDensity(const FString& BiomeName, float DensityMultiplier);
+    void TriggerDefensiveBehavior(const FVector& ThreatLocation, float ThreatRadius);
+
+    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
+    void UpdateFlockingBehavior(const TArray<AActor*>& FlockMembers, float DeltaTime);
+
+    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
+    void SetHerdBehavior(const FString& HerdID, ECrowd_HerdBehavior NewBehavior);
+
+    // LOD and Performance Functions
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void UpdateLODLevels(const FVector& PlayerLocation);
 
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    void OptimizeCrowdPerformance();
+    int32 GetActiveEntityCount() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Debug")
-    void DebugCrowdStats();
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void OptimizeSimulationPerformance();
+
+    // Biome Management
+    UFUNCTION(BlueprintCallable, Category = "Biome Management")
+    void RegisterBiome(const FString& BiomeName, const FVector& Center, float Radius);
+
+    UFUNCTION(BlueprintCallable, Category = "Biome Management")
+    FCrowd_BiomePopulation* GetBiomePopulation(const FString& BiomeName);
+
+    UFUNCTION(BlueprintCallable, Category = "Biome Management")
+    void PopulateBiomeWithSpecies(const FString& BiomeName, ECrowd_DinosaurSpecies Species, int32 Count);
 
 private:
+    // Internal tracking
     UPROPERTY()
-    class UMassEntitySubsystem* MassEntitySubsystem;
+    TMap<FString, int32> ActiveHerds;
 
     UPROPERTY()
-    class UMassSpawnerSubsystem* MassSpawnerSubsystem;
+    TArray<AActor*> ManagedActors;
 
     UPROPERTY()
-    class UMassSimulationSubsystem* MassSimulationSubsystem;
+    float LastLODUpdateTime;
 
-    TArray<FMassEntityHandle> SpawnedEntities;
-    TMap<FString, int32> BiomeEntityCounts;
-    
-    void SetupBiomeConfigs();
-    void CreateEntityTemplate(const FString& SpeciesName);
-    void ProcessCrowdMovement(float DeltaTime);
-    void ProcessCrowdBehavior(float DeltaTime);
-    void UpdatePerformanceMetrics();
+    UPROPERTY()
+    FVector LastPlayerLocation;
+
+    // Helper functions
+    FString GetSpeciesMeshPath(ECrowd_DinosaurSpecies Species) const;
+    FVector CalculateFlockingForce(AActor* Agent, const TArray<AActor*>& Neighbors) const;
+    void ApplyHierarchyScaling(AActor* Actor, int32 HierarchyLevel) const;
+    bool IsWithinBiome(const FVector& Location, const FCrowd_BiomePopulation& Biome) const;
 };
