@@ -6,146 +6,10 @@
 #include "SharedTypes.h"
 #include "EngineArchitecturalCore.generated.h"
 
-DECLARE_LOG_CATEGORY_EXTERN(LogEngineArchitect, Log, All);
-
 /**
- * Core Engine Architectural System
- * Defines and enforces technical standards across all game systems
- * Manages system registration, validation, and performance monitoring
- * 
- * ARCHITECTURAL PRINCIPLES:
- * 1. Modular Design - Each system is self-contained with clear interfaces
- * 2. Performance First - 60fps PC / 30fps Console targets enforced
- * 3. Scalability - Support for 8km worlds and 50k AI agents
- * 4. Data-Driven - Configuration over hard-coding
- * 5. Fail-Safe - Graceful degradation when systems fail
- */
-
-UENUM(BlueprintType)
-enum class EEng_SystemPriority : uint8
-{
-    Critical = 0,    // Core engine systems (Physics, Rendering)
-    High = 1,        // Gameplay systems (Character, AI)
-    Medium = 2,      // Quality of life (Audio, VFX)
-    Low = 3,         // Optional features (Debug, Analytics)
-    Background = 4   // Non-essential (Telemetry, Logging)
-};
-
-UENUM(BlueprintType)
-enum class EEng_SystemStatus : uint8
-{
-    Uninitialized = 0,
-    Initializing = 1,
-    Running = 2,
-    Degraded = 3,    // Running but with reduced functionality
-    Failed = 4,
-    ShuttingDown = 5
-};
-
-UENUM(BlueprintType)
-enum class EEng_PerformanceTier : uint8
-{
-    Ultra = 0,       // High-end PC (RTX 4080+, 32GB+ RAM)
-    High = 1,        // Mid-range PC (RTX 3070+, 16GB+ RAM)
-    Medium = 2,      // Console equivalent (PS5/Xbox Series X)
-    Low = 3,         // Console equivalent (PS5/Xbox Series S)
-    Minimum = 4      // Lowest supported spec
-};
-
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEng_SystemInfo
-{
-    GENERATED_BODY()
-
-    UPROPERTY(BlueprintReadOnly, Category = "System")
-    FString SystemName;
-
-    UPROPERTY(BlueprintReadOnly, Category = "System")
-    EEng_SystemPriority Priority;
-
-    UPROPERTY(BlueprintReadOnly, Category = "System")
-    EEng_SystemStatus Status;
-
-    UPROPERTY(BlueprintReadOnly, Category = "System")
-    float InitializationTime;
-
-    UPROPERTY(BlueprintReadOnly, Category = "System")
-    float LastUpdateTime;
-
-    UPROPERTY(BlueprintReadOnly, Category = "System")
-    int32 MemoryUsageMB;
-
-    UPROPERTY(BlueprintReadOnly, Category = "System")
-    bool bIsPerformanceCritical;
-
-    FEng_SystemInfo()
-    {
-        SystemName = TEXT("Unknown");
-        Priority = EEng_SystemPriority::Medium;
-        Status = EEng_SystemStatus::Uninitialized;
-        InitializationTime = 0.0f;
-        LastUpdateTime = 0.0f;
-        MemoryUsageMB = 0;
-        bIsPerformanceCritical = false;
-    }
-};
-
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEng_PerformanceMetrics
-{
-    GENERATED_BODY()
-
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float CurrentFPS;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float AverageFPS;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float FrameTimeMS;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float GameThreadTimeMS;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float RenderThreadTimeMS;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    int32 DrawCalls;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    int32 Triangles;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    int32 MemoryUsageMB;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    int32 ActiveActors;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    int32 ActiveAIAgents;
-
-    FEng_PerformanceMetrics()
-    {
-        CurrentFPS = 0.0f;
-        AverageFPS = 0.0f;
-        FrameTimeMS = 0.0f;
-        GameThreadTimeMS = 0.0f;
-        RenderThreadTimeMS = 0.0f;
-        DrawCalls = 0;
-        Triangles = 0;
-        MemoryUsageMB = 0;
-        ActiveActors = 0;
-        ActiveAIAgents = 0;
-    }
-};
-
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FEng_OnSystemStatusChanged, FString, SystemName, EEng_SystemStatus, NewStatus);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FEng_OnPerformanceAlert, FString, AlertMessage);
-
-/**
- * Engine Architectural Core Subsystem
- * Manages all game systems and enforces architectural standards
+ * Engine Architectural Core - Central coordination system for all engine-level architecture
+ * Ensures compliance with architectural standards across all game systems
+ * Manages module dependencies, performance constraints, and system integration
  */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UEngineArchitecturalCore : public UGameInstanceSubsystem
@@ -159,139 +23,136 @@ public:
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
-    // System Registration
+    // Core Architecture Management
     UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    bool RegisterSystem(const FString& SystemName, EEng_SystemPriority Priority, bool bIsPerformanceCritical = false);
-
-    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    bool UnregisterSystem(const FString& SystemName);
+    void InitializeArchitecturalSystems();
 
     UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    void UpdateSystemStatus(const FString& SystemName, EEng_SystemStatus NewStatus);
+    void ValidateSystemCompliance();
 
-    // System Query
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Engine Architecture")
-    bool IsSystemRegistered(const FString& SystemName) const;
+    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
+    void RegisterSystemModule(const FString& ModuleName, int32 Priority);
 
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Engine Architecture")
-    EEng_SystemStatus GetSystemStatus(const FString& SystemName) const;
+    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
+    void UnregisterSystemModule(const FString& ModuleName);
 
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Engine Architecture")
-    TArray<FEng_SystemInfo> GetAllSystemInfo() const;
-
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Engine Architecture")
-    TArray<FString> GetSystemsByPriority(EEng_SystemPriority Priority) const;
-
-    // Performance Monitoring
+    // Performance Management
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    FEng_PerformanceMetrics GetCurrentPerformanceMetrics() const;
+    void SetPerformanceTarget(float TargetFPS, float MaxMemoryMB);
 
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    void SetPerformanceTier(EEng_PerformanceTier NewTier);
-
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Performance")
-    EEng_PerformanceTier GetCurrentPerformanceTier() const { return CurrentPerformanceTier; }
+    bool CheckPerformanceCompliance();
 
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    void EnablePerformanceMonitoring(bool bEnable);
+    void OptimizeSystemLoad();
 
-    // Architectural Validation
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    bool ValidateSystemArchitecture();
+    // Module Integration
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    void ValidateModuleDependencies();
 
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    TArray<FString> GetArchitecturalViolations() const;
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    void ResolveModuleConflicts();
 
-    // Events
-    UPROPERTY(BlueprintAssignable, Category = "Events")
-    FEng_OnSystemStatusChanged OnSystemStatusChanged;
+    // Biome System Integration
+    UFUNCTION(BlueprintCallable, Category = "Biome Architecture")
+    void InitializeBiomeArchitecture();
 
-    UPROPERTY(BlueprintAssignable, Category = "Events")
-    FEng_OnPerformanceAlert OnPerformanceAlert;
-
-    // Static Access
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Engine Architecture", meta = (CallInEditor = true))
-    static UEngineArchitecturalCore* GetEngineArchitecturalCore(const UObject* WorldContext);
+    UFUNCTION(BlueprintCallable, Category = "Biome Architecture")
+    void ValidateBiomeSystemIntegration();
 
 protected:
-    // System Management
-    UPROPERTY()
-    TMap<FString, FEng_SystemInfo> RegisteredSystems;
+    // System Registry
+    UPROPERTY(BlueprintReadOnly, Category = "Architecture")
+    TMap<FString, int32> RegisteredModules;
 
-    UPROPERTY()
-    EEng_PerformanceTier CurrentPerformanceTier;
+    UPROPERTY(BlueprintReadOnly, Category = "Architecture")
+    TArray<FString> SystemLoadOrder;
 
-    UPROPERTY()
-    bool bPerformanceMonitoringEnabled;
+    // Performance Constraints
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float TargetFrameRate = 60.0f;
 
-    // Performance Tracking
-    UPROPERTY()
-    TArray<float> FrameTimeHistory;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float MaxMemoryUsageMB = 8192.0f;
 
-    UPROPERTY()
-    float PerformanceUpdateInterval;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float CurrentFrameRate = 0.0f;
 
-    UPROPERTY()
-    float LastPerformanceUpdate;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float CurrentMemoryUsageMB = 0.0f;
 
-    // Architectural Rules
-    TArray<FString> ArchitecturalViolations;
+    // Architecture State
+    UPROPERTY(BlueprintReadOnly, Category = "Architecture")
+    bool bSystemsInitialized = false;
 
-    // Internal Methods
+    UPROPERTY(BlueprintReadOnly, Category = "Architecture")
+    bool bComplianceValidated = false;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Architecture")
+    int32 ActiveSystemCount = 0;
+
+private:
+    // Internal validation methods
+    void ValidatePhysicsIntegration();
+    void ValidateWorldGenerationIntegration();
+    void ValidateCharacterSystemIntegration();
+    void ValidateAISystemIntegration();
+
+    // Performance monitoring
     void UpdatePerformanceMetrics();
-    void CheckPerformanceThresholds();
-    void ValidateSystemDependencies();
-    void EnforceArchitecturalStandards();
+    void CheckMemoryUsage();
+    void CheckFrameRate();
 
-    // Performance Thresholds
-    static constexpr float TARGET_FPS_PC = 60.0f;
-    static constexpr float TARGET_FPS_CONSOLE = 30.0f;
-    static constexpr float CRITICAL_FRAME_TIME_MS = 33.33f; // 30 FPS
-    static constexpr int32 MAX_MEMORY_USAGE_MB = 6144; // 6GB
-    static constexpr int32 MAX_DRAW_CALLS = 5000;
-    static constexpr int32 MAX_AI_AGENTS = 50000;
+    // System coordination
+    void InitializeSystemLoadOrder();
+    void LoadSystemsInOrder();
+    void ValidateSystemInterfaces();
 };
 
 /**
- * Engine Architectural Standards
- * Static class that defines the technical standards all systems must follow
+ * Engine Architecture Configuration
+ * Defines architectural standards and constraints for the entire game
  */
-UCLASS(BlueprintType)
-class TRANSPERSONALGAME_API UEngineArchitecturalStandards : public UBlueprintFunctionLibrary
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FEngineArchitectureConfig
 {
     GENERATED_BODY()
 
-public:
-    // System Naming Standards
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Standards")
-    static bool IsValidSystemName(const FString& SystemName);
+    // Performance Targets
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float TargetFPS_PC = 60.0f;
 
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Standards")
-    static FString GenerateSystemName(const FString& Category, const FString& Function);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float TargetFPS_Console = 30.0f;
 
-    // Performance Standards
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Standards")
-    static float GetTargetFrameRate(EEng_PerformanceTier Tier);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float MaxMemoryUsage_PC = 8192.0f;
 
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Standards")
-    static int32 GetMaxMemoryBudget(EEng_PerformanceTier Tier);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float MaxMemoryUsage_Console = 4096.0f;
 
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Standards")
-    static int32 GetMaxDrawCalls(EEng_PerformanceTier Tier);
+    // System Constraints
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Systems")
+    int32 MaxConcurrentPhysicsObjects = 10000;
 
-    // Architectural Rules
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Standards")
-    static bool ValidateModuleDependency(const FString& FromModule, const FString& ToModule);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Systems")
+    int32 MaxConcurrentAIAgents = 5000;
 
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Standards")
-    static TArray<FString> GetAllowedDependencies(const FString& ModuleName);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Systems")
+    int32 MaxWorldPartitionCells = 100;
 
-    // World Standards
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Standards")
-    static bool RequiresWorldPartition(float WorldSizeKM);
+    // Quality Settings
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quality")
+    int32 PhysicsLODLevels = 3;
 
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Standards")
-    static int32 GetRecommendedLODLevels(EEng_PerformanceTier Tier);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quality")
+    int32 RenderingLODLevels = 5;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quality")
+    int32 AudioLODLevels = 3;
+
+    FEngineArchitectureConfig()
+    {
+        // Default constructor
+    }
 };
-
-#include "EngineArchitecturalCore.generated.h"
