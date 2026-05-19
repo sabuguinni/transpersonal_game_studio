@@ -1,332 +1,305 @@
 #include "Narr_StoryManager.h"
 #include "Engine/Engine.h"
-#include "Components/AudioComponent.h"
-#include "Engine/TriggerBox.h"
 #include "Kismet/GameplayStatics.h"
+#include "HAL/FileManager.h"
+#include "Misc/FileHelper.h"
 #include "Engine/World.h"
 
-ANarr_StoryManager::ANarr_StoryManager()
+UNarr_StoryManager::UNarr_StoryManager()
 {
-    PrimaryActorTick.bCanEverTick = true;
-    
-    // Initialize audio component
-    AudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("AudioComponent"));
-    RootComponent = AudioComponent;
-    
-    // Initialize narrative context
-    NarrativeContext = FNarr_NarrativeContext();
-    
-    // Initialize timer
-    StoryUpdateTimer = 0.0f;
+    bInDialogue = false;
+    CurrentDialogueTreeID = TEXT("");
+    CurrentNodeID = TEXT("");
 }
 
-void ANarr_StoryManager::BeginPlay()
+void UNarr_StoryManager::Initialize(FSubsystemCollectionBase& Collection)
 {
-    Super::BeginPlay();
+    Super::Initialize(Collection);
     
-    // Initialize story events
-    InitializeStoryEvents();
+    UE_LOG(LogTemp, Log, TEXT("Story Manager initialized"));
     
-    // Find narrative triggers in the level
-    TArray<AActor*> FoundTriggers;
-    UGameplayStatics::GetAllActorsOfClass(GetWorld(), ATriggerBox::StaticClass(), FoundTriggers);
+    // Initialize story progress
+    StoryProgress = FNarr_StoryProgress();
     
-    for (AActor* Actor : FoundTriggers)
-    {
-        ATriggerBox* TriggerBox = Cast<ATriggerBox>(Actor);
-        if (TriggerBox && TriggerBox->GetName().Contains(TEXT("Narrative")))
-        {
-            NarrativeTriggers.Add(TriggerBox);
-            UE_LOG(LogTemp, Log, TEXT("Found narrative trigger: %s"), *TriggerBox->GetName());
-        }
-    }
+    // Load dialogue database
+    LoadDialogueDatabase();
     
-    UE_LOG(LogTemp, Log, TEXT("StoryManager initialized with %d triggers"), NarrativeTriggers.Num());
+    // Load saved story progress
+    LoadStoryProgress();
 }
 
-void ANarr_StoryManager::Tick(float DeltaTime)
+void UNarr_StoryManager::Deinitialize()
 {
-    Super::Tick(DeltaTime);
-    
-    StoryUpdateTimer += DeltaTime;
-    
-    if (StoryUpdateTimer >= StoryUpdateInterval)
+    SaveStoryProgress();
+    Super::Deinitialize();
+}
+
+void UNarr_StoryManager::AdvanceChapter(ENarr_StoryChapter NewChapter)
+{
+    if (CanAccessChapter(NewChapter))
     {
-        CheckTriggerConditions();
-        ProcessPendingEvents();
-        EvaluateStoryProgression();
+        StoryProgress.CurrentChapter = NewChapter;
+        StoryProgress.ChapterProgress = 0;
         
-        StoryUpdateTimer = 0.0f;
-    }
-}
-
-void ANarr_StoryManager::InitializeStoryEvents()
-{
-    StoryEvents.Empty();
-    
-    // Introduction events
-    FNarr_StoryEvent IntroEvent;
-    IntroEvent.EventID = TEXT("INTRO_AWAKENING");
-    IntroEvent.DialogueText = TEXT("You awaken in an unfamiliar world. The air is thick and humid. Strange sounds echo from the dense vegetation around you.");
-    IntroEvent.TriggerType = ENarr_TriggerType::Discovery;
-    IntroEvent.Priority = 10.0f;
-    IntroEvent.bHasBeenTriggered = false;
-    StoryEvents.Add(IntroEvent);
-    
-    // First dinosaur encounter
-    FNarr_StoryEvent FirstDinoEvent;
-    FirstDinoEvent.EventID = TEXT("FIRST_DINOSAUR");
-    FirstDinoEvent.DialogueText = TEXT("Movement in the undergrowth. Something massive. Your heart pounds as you realize you're not alone in this ancient world.");
-    FirstDinoEvent.TriggerType = ENarr_TriggerType::Discovery;
-    FirstDinoEvent.Priority = 9.0f;
-    FirstDinoEvent.bHasBeenTriggered = false;
-    StoryEvents.Add(FirstDinoEvent);
-    
-    // Danger zone warning
-    FNarr_StoryEvent DangerEvent;
-    DangerEvent.EventID = TEXT("DANGER_ZONE");
-    DangerEvent.DialogueText = TEXT("The scent of predators hangs heavy in the air. Every instinct screams danger. This is not a place for the unwary.");
-    DangerEvent.TriggerType = ENarr_TriggerType::Danger;
-    DangerEvent.Priority = 8.0f;
-    DangerEvent.bHasBeenTriggered = false;
-    StoryEvents.Add(DangerEvent);
-    
-    // Safe zone discovery
-    FNarr_StoryEvent SafeEvent;
-    SafeEvent.EventID = TEXT("SAFE_HAVEN");
-    SafeEvent.DialogueText = TEXT("Higher ground offers respite. From here, you can observe the valley below and plan your next move carefully.");
-    SafeEvent.TriggerType = ENarr_TriggerType::Safety;
-    SafeEvent.Priority = 7.0f;
-    SafeEvent.bHasBeenTriggered = false;
-    StoryEvents.Add(SafeEvent);
-    
-    // Survival milestone
-    FNarr_StoryEvent SurvivalEvent;
-    SurvivalEvent.EventID = TEXT("FIRST_DAY");
-    SurvivalEvent.DialogueText = TEXT("One day survived. Each moment in this primordial world is a victory against impossible odds.");
-    SurvivalEvent.TriggerType = ENarr_TriggerType::Achievement;
-    SurvivalEvent.Priority = 6.0f;
-    SurvivalEvent.bHasBeenTriggered = false;
-    StoryEvents.Add(SurvivalEvent);
-    
-    UE_LOG(LogTemp, Log, TEXT("Initialized %d story events"), StoryEvents.Num());
-}
-
-void ANarr_StoryManager::TriggerStoryEvent(const FString& EventID, ENarr_TriggerType TriggerType)
-{
-    for (FNarr_StoryEvent& Event : StoryEvents)
-    {
-        if (Event.EventID == EventID && !Event.bHasBeenTriggered)
+        UE_LOG(LogTemp, Log, TEXT("Story chapter advanced to: %d"), (int32)NewChapter);
+        
+        // Trigger chapter-specific events
+        switch (NewChapter)
         {
-            Event.bHasBeenTriggered = true;
-            NarrativeContext.CompletedEvents.Add(EventID);
-            
-            // Play narrative audio if available
-            PlayNarrativeAudio(EventID);
-            
-            // Log the event
-            UE_LOG(LogTemp, Log, TEXT("Story Event Triggered: %s - %s"), *EventID, *Event.DialogueText);
-            
-            // Display on screen for debugging
-            if (GEngine)
-            {
-                GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Yellow, 
-                    FString::Printf(TEXT("NARRATIVE: %s"), *Event.DialogueText));
-            }
-            
+        case ENarr_StoryChapter::FirstHunt:
+            TriggerStoryEvent(TEXT("FirstHuntUnlocked"));
+            break;
+        case ENarr_StoryChapter::TribalContact:
+            TriggerStoryEvent(TEXT("TribalContactAvailable"));
+            break;
+        case ENarr_StoryChapter::TerritoryWars:
+            TriggerStoryEvent(TEXT("TerritoryWarsBegin"));
+            break;
+        case ENarr_StoryChapter::AlphaChallenge:
+            TriggerStoryEvent(TEXT("AlphaChallengeUnlocked"));
+            break;
+        case ENarr_StoryChapter::Exodus:
+            TriggerStoryEvent(TEXT("ExodusPathOpened"));
             break;
         }
-    }
-}
-
-void ANarr_StoryManager::AdvanceStoryState(ENarr_StoryState NewState)
-{
-    if (NewState != NarrativeContext.CurrentState)
-    {
-        ENarr_StoryState PreviousState = NarrativeContext.CurrentState;
-        NarrativeContext.CurrentState = NewState;
         
-        UE_LOG(LogTemp, Log, TEXT("Story state advanced from %d to %d"), 
-            (int32)PreviousState, (int32)NewState);
+        SaveStoryProgress();
+    }
+}
+
+void UNarr_StoryManager::TriggerStoryEvent(const FString& EventID)
+{
+    if (!HasCompletedEvent(EventID))
+    {
+        StoryProgress.CompletedEvents.Add(EventID);
+        StoryProgress.ChapterProgress++;
         
-        // Trigger state-specific events
-        switch (NewState)
-        {
-            case ENarr_StoryState::FirstContact:
-                TriggerStoryEvent(TEXT("FIRST_DINOSAUR"), ENarr_TriggerType::Discovery);
-                break;
-            case ENarr_StoryState::Survival:
-                TriggerStoryEvent(TEXT("FIRST_DAY"), ENarr_TriggerType::Achievement);
-                break;
-            default:
-                break;
-        }
-    }
-}
-
-void ANarr_StoryManager::RegisterDinosaurEncounter(const FString& DinosaurType)
-{
-    NarrativeContext.DinosaurEncounters++;
-    
-    UE_LOG(LogTemp, Log, TEXT("Dinosaur encounter registered: %s (Total: %d)"), 
-        *DinosaurType, NarrativeContext.DinosaurEncounters);
-    
-    // Trigger first contact if this is the first encounter
-    if (NarrativeContext.DinosaurEncounters == 1 && 
-        NarrativeContext.CurrentState == ENarr_StoryState::Exploration)
-    {
-        AdvanceStoryState(ENarr_StoryState::FirstContact);
-    }
-}
-
-void ANarr_StoryManager::UpdateSurvivalMetrics(float HealthPercent, float HungerPercent, float ThirstPercent)
-{
-    // Calculate survival score based on player condition
-    float ConditionScore = (HealthPercent + (100.0f - HungerPercent) + (100.0f - ThirstPercent)) / 3.0f;
-    NarrativeContext.SurvivalScore = FMath::Max(NarrativeContext.SurvivalScore, ConditionScore);
-    
-    // Check for critical conditions
-    if (HealthPercent < 25.0f || HungerPercent > 80.0f || ThirstPercent > 80.0f)
-    {
-        if (!IsEventCompleted(TEXT("CRITICAL_CONDITION")))
-        {
-            TriggerStoryEvent(TEXT("CRITICAL_CONDITION"), ENarr_TriggerType::Danger);
-        }
-    }
-}
-
-bool ANarr_StoryManager::IsEventCompleted(const FString& EventID) const
-{
-    return NarrativeContext.CompletedEvents.Contains(EventID);
-}
-
-FNarr_StoryEvent ANarr_StoryManager::GetNextPendingEvent() const
-{
-    FNarr_StoryEvent BestEvent;
-    float HighestPriority = -1.0f;
-    
-    for (const FNarr_StoryEvent& Event : StoryEvents)
-    {
-        if (!Event.bHasBeenTriggered && Event.Priority > HighestPriority)
-        {
-            BestEvent = Event;
-            HighestPriority = Event.Priority;
-        }
-    }
-    
-    return BestEvent;
-}
-
-void ANarr_StoryManager::PlayNarrativeAudio(const FString& EventID)
-{
-    // Find the event and play its audio
-    for (const FNarr_StoryEvent& Event : StoryEvents)
-    {
-        if (Event.EventID == EventID && Event.VoiceClip.IsValid())
-        {
-            if (AudioComponent && Event.VoiceClip.LoadSynchronous())
-            {
-                AudioComponent->SetSound(Event.VoiceClip.Get());
-                AudioComponent->Play();
-                UE_LOG(LogTemp, Log, TEXT("Playing narrative audio for: %s"), *EventID);
-            }
-            break;
-        }
-    }
-}
-
-void ANarr_StoryManager::CheckTriggerConditions()
-{
-    // Check if player is in any narrative trigger zones
-    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
-    if (!PlayerPawn) return;
-    
-    for (ATriggerBox* Trigger : NarrativeTriggers)
-    {
-        if (!Trigger) continue;
+        UE_LOG(LogTemp, Log, TEXT("Story event triggered: %s"), *EventID);
         
-        // Check if player is overlapping with trigger
-        TArray<AActor*> OverlappingActors;
-        Trigger->GetOverlappingActors(OverlappingActors, APawn::StaticClass());
+        // Handle special events
+        if (EventID == TEXT("TribalFirstContact"))
+        {
+            StoryProgress.bHasMetTribe = true;
+            ModifyRelationship(TEXT("TribalElder"), 10);
+        }
+        else if (EventID == TEXT("AlphaKilled"))
+        {
+            StoryProgress.bHasKilledAlpha = true;
+            ModifyRelationship(TEXT("TribalElder"), 25);
+            ModifyRelationship(TEXT("TribalWarrior"), 15);
+        }
         
-        for (AActor* Actor : OverlappingActors)
+        SaveStoryProgress();
+    }
+}
+
+bool UNarr_StoryManager::HasCompletedEvent(const FString& EventID) const
+{
+    return StoryProgress.CompletedEvents.Contains(EventID);
+}
+
+ENarr_StoryChapter UNarr_StoryManager::GetCurrentChapter() const
+{
+    return StoryProgress.CurrentChapter;
+}
+
+void UNarr_StoryManager::ModifyRelationship(const FString& CharacterName, int32 Delta)
+{
+    int32* CurrentLevel = StoryProgress.CharacterRelationships.Find(CharacterName);
+    if (CurrentLevel)
+    {
+        *CurrentLevel = FMath::Clamp(*CurrentLevel + Delta, -100, 100);
+    }
+    else
+    {
+        StoryProgress.CharacterRelationships.Add(CharacterName, FMath::Clamp(Delta, -100, 100));
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("Relationship with %s modified by %d, new level: %d"), 
+           *CharacterName, Delta, GetRelationshipLevel(CharacterName));
+}
+
+int32 UNarr_StoryManager::GetRelationshipLevel(const FString& CharacterName) const
+{
+    const int32* Level = StoryProgress.CharacterRelationships.Find(CharacterName);
+    return Level ? *Level : 0;
+}
+
+ENarr_DialogueState UNarr_StoryManager::GetDialogueState(const FString& CharacterName) const
+{
+    return CalculateDialogueState(CharacterName);
+}
+
+void UNarr_StoryManager::StartDialogue(const FString& CharacterName, const FString& DialogueTreeID)
+{
+    CurrentDialogueTreeID = DialogueTreeID;
+    CurrentNodeID = DialogueTreeID + TEXT("_Start");
+    bInDialogue = true;
+    
+    UE_LOG(LogTemp, Log, TEXT("Started dialogue with %s, tree: %s"), *CharacterName, *DialogueTreeID);
+}
+
+FNarr_DialogueNode UNarr_StoryManager::GetCurrentDialogueNode() const
+{
+    if (bInDialogue && !CurrentNodeID.IsEmpty())
+    {
+        const FNarr_DialogueNode* Node = DialogueDatabase.Find(CurrentNodeID);
+        if (Node)
         {
-            if (Actor == PlayerPawn)
-            {
-                FString TriggerName = Trigger->GetName();
-                
-                // Trigger appropriate events based on trigger name
-                if (TriggerName.Contains(TEXT("Discovery")) && !IsEventCompleted(TEXT("FIRST_DINOSAUR")))
-                {
-                    TriggerStoryEvent(TEXT("FIRST_DINOSAUR"), ENarr_TriggerType::Discovery);
-                }
-                else if (TriggerName.Contains(TEXT("Danger")) && !IsEventCompleted(TEXT("DANGER_ZONE")))
-                {
-                    TriggerStoryEvent(TEXT("DANGER_ZONE"), ENarr_TriggerType::Danger);
-                }
-                else if (TriggerName.Contains(TEXT("Safe")) && !IsEventCompleted(TEXT("SAFE_HAVEN")))
-                {
-                    TriggerStoryEvent(TEXT("SAFE_HAVEN"), ENarr_TriggerType::Safety);
-                }
-                break;
-            }
+            return *Node;
         }
     }
+    
+    return FNarr_DialogueNode();
 }
 
-void ANarr_StoryManager::ProcessPendingEvents()
+void UNarr_StoryManager::SelectDialogueOption(int32 OptionIndex)
 {
-    // Process any time-based or condition-based events
-    if (NarrativeContext.CurrentState == ENarr_StoryState::Introduction && 
-        !IsEventCompleted(TEXT("INTRO_AWAKENING")))
+    if (!bInDialogue) return;
+    
+    const FNarr_DialogueNode* CurrentNode = DialogueDatabase.Find(CurrentNodeID);
+    if (CurrentNode && CurrentNode->NextNodeIDs.IsValidIndex(OptionIndex))
     {
-        TriggerStoryEvent(TEXT("INTRO_AWAKENING"), ENarr_TriggerType::Discovery);
+        CurrentNodeID = CurrentNode->NextNodeIDs[OptionIndex];
+        
+        // Check if this is an end node
+        if (CurrentNodeID.Contains(TEXT("_End")) || CurrentNodeID.IsEmpty())
+        {
+            EndDialogue();
+        }
+        
+        UE_LOG(LogTemp, Log, TEXT("Selected dialogue option %d, next node: %s"), OptionIndex, *CurrentNodeID);
     }
 }
 
-void ANarr_StoryManager::EvaluateStoryProgression()
+bool UNarr_StoryManager::IsInDialogue() const
 {
-    // Check if we should advance to the next story state
-    if (ShouldAdvanceToNextState())
+    return bInDialogue;
+}
+
+void UNarr_StoryManager::EndDialogue()
+{
+    bInDialogue = false;
+    CurrentDialogueTreeID = TEXT("");
+    CurrentNodeID = TEXT("");
+    
+    UE_LOG(LogTemp, Log, TEXT("Dialogue ended"));
+}
+
+int32 UNarr_StoryManager::GetSurvivalDays() const
+{
+    return StoryProgress.SurvivalDays;
+}
+
+void UNarr_StoryManager::IncrementSurvivalDay()
+{
+    StoryProgress.SurvivalDays++;
+    
+    // Trigger survival milestone events
+    if (StoryProgress.SurvivalDays == 1)
     {
-        switch (NarrativeContext.CurrentState)
+        TriggerStoryEvent(TEXT("FirstDaySurvived"));
+    }
+    else if (StoryProgress.SurvivalDays == 7)
+    {
+        TriggerStoryEvent(TEXT("WeekSurvived"));
+        if (GetCurrentChapter() == ENarr_StoryChapter::Awakening)
         {
-            case ENarr_StoryState::Introduction:
-                if (IsEventCompleted(TEXT("INTRO_AWAKENING")))
-                {
-                    AdvanceStoryState(ENarr_StoryState::Exploration);
-                }
-                break;
-            case ENarr_StoryState::Exploration:
-                if (NarrativeContext.DinosaurEncounters > 0)
-                {
-                    AdvanceStoryState(ENarr_StoryState::FirstContact);
-                }
-                break;
-            case ENarr_StoryState::FirstContact:
-                if (NarrativeContext.SurvivalScore > 50.0f)
-                {
-                    AdvanceStoryState(ENarr_StoryState::Survival);
-                }
-                break;
-            default:
-                break;
+            AdvanceChapter(ENarr_StoryChapter::FirstHunt);
         }
     }
+    else if (StoryProgress.SurvivalDays == 30)
+    {
+        TriggerStoryEvent(TEXT("MonthSurvived"));
+    }
+    
+    SaveStoryProgress();
 }
 
-bool ANarr_StoryManager::ShouldAdvanceToNextState() const
+bool UNarr_StoryManager::CanAccessChapter(ENarr_StoryChapter Chapter) const
 {
-    // Simple progression logic based on completed events and metrics
-    switch (NarrativeContext.CurrentState)
+    switch (Chapter)
     {
-        case ENarr_StoryState::Introduction:
-            return IsEventCompleted(TEXT("INTRO_AWAKENING"));
-        case ENarr_StoryState::Exploration:
-            return NarrativeContext.DinosaurEncounters > 0;
-        case ENarr_StoryState::FirstContact:
-            return NarrativeContext.SurvivalScore > 50.0f;
-        default:
-            return false;
+    case ENarr_StoryChapter::Awakening:
+        return true;
+    case ENarr_StoryChapter::FirstHunt:
+        return StoryProgress.SurvivalDays >= 7;
+    case ENarr_StoryChapter::TribalContact:
+        return HasCompletedEvent(TEXT("FirstHuntCompleted"));
+    case ENarr_StoryChapter::TerritoryWars:
+        return StoryProgress.bHasMetTribe;
+    case ENarr_StoryChapter::AlphaChallenge:
+        return HasCompletedEvent(TEXT("TerritoryEstablished"));
+    case ENarr_StoryChapter::Exodus:
+        return StoryProgress.bHasKilledAlpha;
+    default:
+        return false;
+    }
+}
+
+void UNarr_StoryManager::LoadDialogueDatabase()
+{
+    // Initialize basic dialogue nodes
+    FNarr_DialogueNode ElderGreeting;
+    ElderGreeting.SpeakerName = TEXT("Tribal Elder");
+    ElderGreeting.DialogueText = TEXT("You have survived the wilderness longer than most. Perhaps you are worthy of our tribe's knowledge.");
+    ElderGreeting.RequiredState = ENarr_DialogueState::Neutral;
+    ElderGreeting.PlayerResponses.Add(TEXT("I seek only to survive."));
+    ElderGreeting.PlayerResponses.Add(TEXT("Teach me your ways."));
+    ElderGreeting.PlayerResponses.Add(TEXT("I need nothing from you."));
+    ElderGreeting.NextNodeIDs.Add(TEXT("Elder_Respect"));
+    ElderGreeting.NextNodeIDs.Add(TEXT("Elder_Teaching"));
+    ElderGreeting.NextNodeIDs.Add(TEXT("Elder_Dismissal"));
+    DialogueDatabase.Add(TEXT("Elder_Start"), ElderGreeting);
+    
+    FNarr_DialogueNode ScoutWarning;
+    ScoutWarning.SpeakerName = TEXT("Tribal Scout");
+    ScoutWarning.DialogueText = TEXT("The hunting grounds to the north are dangerous. A great predator has claimed that territory.");
+    ScoutWarning.RequiredState = ENarr_DialogueState::Friendly;
+    ScoutWarning.PlayerResponses.Add(TEXT("I can handle myself."));
+    ScoutWarning.PlayerResponses.Add(TEXT("Tell me more about this predator."));
+    ScoutWarning.NextNodeIDs.Add(TEXT("Scout_Confident"));
+    ScoutWarning.NextNodeIDs.Add(TEXT("Scout_Information"));
+    DialogueDatabase.Add(TEXT("Scout_Start"), ScoutWarning);
+    
+    UE_LOG(LogTemp, Log, TEXT("Dialogue database loaded with %d nodes"), DialogueDatabase.Num());
+}
+
+void UNarr_StoryManager::SaveStoryProgress()
+{
+    // In a real implementation, this would save to a file or game save system
+    UE_LOG(LogTemp, Log, TEXT("Story progress saved - Chapter: %d, Days: %d"), 
+           (int32)StoryProgress.CurrentChapter, StoryProgress.SurvivalDays);
+}
+
+void UNarr_StoryManager::LoadStoryProgress()
+{
+    // In a real implementation, this would load from a saved file
+    UE_LOG(LogTemp, Log, TEXT("Story progress loaded"));
+}
+
+ENarr_DialogueState UNarr_StoryManager::CalculateDialogueState(const FString& CharacterName) const
+{
+    int32 RelationshipLevel = GetRelationshipLevel(CharacterName);
+    
+    if (RelationshipLevel >= 50)
+    {
+        return ENarr_DialogueState::Respectful;
+    }
+    else if (RelationshipLevel >= 20)
+    {
+        return ENarr_DialogueState::Friendly;
+    }
+    else if (RelationshipLevel <= -20)
+    {
+        return ENarr_DialogueState::Hostile;
+    }
+    else if (RelationshipLevel <= -5)
+    {
+        return ENarr_DialogueState::Cautious;
+    }
+    else
+    {
+        return ENarr_DialogueState::Neutral;
     }
 }
