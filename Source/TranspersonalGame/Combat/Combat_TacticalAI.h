@@ -7,69 +7,68 @@
 #include "SharedTypes.h"
 #include "Combat_TacticalAI.generated.h"
 
-// Forward declarations
-class UCombat_DamageSystem;
-class ANPC_DinosaurAI;
-
 UENUM(BlueprintType)
 enum class ECombat_TacticalState : uint8
 {
-    Idle        UMETA(DisplayName = "Idle"),
     Patrol      UMETA(DisplayName = "Patrol"),
-    Alert       UMETA(DisplayName = "Alert"),
     Hunting     UMETA(DisplayName = "Hunting"),
+    Stalking    UMETA(DisplayName = "Stalking"),
     Attacking   UMETA(DisplayName = "Attacking"),
-    Fleeing     UMETA(DisplayName = "Fleeing"),
-    Circling    UMETA(DisplayName = "Circling"),
+    Retreating  UMETA(DisplayName = "Retreating"),
+    Territorial UMETA(DisplayName = "Territorial"),
+    PackHunt    UMETA(DisplayName = "Pack Hunt"),
     Ambush      UMETA(DisplayName = "Ambush")
 };
 
 UENUM(BlueprintType)
-enum class ECombat_AttackPattern : uint8
+enum class ECombat_ThreatLevel : uint8
 {
-    Direct      UMETA(DisplayName = "Direct Assault"),
-    Flanking    UMETA(DisplayName = "Flanking"),
-    Ambush      UMETA(DisplayName = "Ambush"),
-    PackHunt    UMETA(DisplayName = "Pack Hunt"),
-    Retreat     UMETA(DisplayName = "Tactical Retreat"),
-    Circle      UMETA(DisplayName = "Circle Strafe")
+    None        UMETA(DisplayName = "None"),
+    Low         UMETA(DisplayName = "Low"),
+    Medium      UMETA(DisplayName = "Medium"),
+    High        UMETA(DisplayName = "High"),
+    Critical    UMETA(DisplayName = "Critical")
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FCombat_TacticalData
+struct FCombat_TacticalData
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tactical AI")
-    float AggressionLevel = 0.5f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+    ECombat_TacticalState CurrentState;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tactical AI")
-    float CautiousLevel = 0.3f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+    ECombat_ThreatLevel ThreatLevel;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tactical AI")
-    float PackCoordination = 0.7f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+    float AggressionLevel;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tactical AI")
-    float TerritorialRadius = 2000.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+    float TerritoryRadius;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tactical AI")
-    float DetectionRange = 1500.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+    float DetectionRange;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tactical AI")
-    float AttackRange = 300.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+    float AttackRange;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tactical AI")
-    float FleeHealthThreshold = 0.25f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+    bool bIsPackLeader;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+    bool bCanCallForHelp;
 
     FCombat_TacticalData()
     {
+        CurrentState = ECombat_TacticalState::Patrol;
+        ThreatLevel = ECombat_ThreatLevel::None;
         AggressionLevel = 0.5f;
-        CautiousLevel = 0.3f;
-        PackCoordination = 0.7f;
-        TerritorialRadius = 2000.0f;
+        TerritoryRadius = 2000.0f;
         DetectionRange = 1500.0f;
         AttackRange = 300.0f;
-        FleeHealthThreshold = 0.25f;
+        bIsPackLeader = false;
+        bCanCallForHelp = true;
     }
 };
 
@@ -87,115 +86,111 @@ protected:
 public:
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    // Core tactical AI functions
+    // Core tactical functions
     UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    void UpdateTacticalState();
+    void UpdateTacticalState(float DeltaTime);
 
     UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    void SetTarget(AActor* NewTarget);
+    void SetTacticalState(ECombat_TacticalState NewState);
 
     UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    void ExecuteAttackPattern(ECombat_AttackPattern Pattern);
+    ECombat_TacticalState GetTacticalState() const { return TacticalData.CurrentState; }
+
+    // Threat assessment
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    void AssessThreat(AActor* PotentialThreat);
 
     UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    bool ShouldEngageTarget(AActor* PotentialTarget);
+    ECombat_ThreatLevel CalculateThreatLevel(AActor* Target);
 
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    void UpdateThreatLevel(ECombat_ThreatLevel NewLevel);
+
+    // Pack coordination
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    void SetPackLeader(bool bIsLeader);
+
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    void CoordinatePackAttack(const TArray<AActor*>& PackMembers, AActor* Target);
+
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    void CallForPackSupport();
+
+    // Tactical maneuvers
     UFUNCTION(BlueprintCallable, Category = "Combat AI")
     FVector CalculateFlankingPosition(AActor* Target);
 
     UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    void CoordinateWithPack();
+    FVector CalculateAmbushPosition(AActor* Target);
 
     UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    void InitiateCombat();
+    bool ShouldRetreat();
 
     UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    void EndCombat();
+    void ExecuteRetreat();
 
-    // Pack behavior functions
-    UFUNCTION(BlueprintCallable, Category = "Pack AI")
-    void JoinPack(UCombat_TacticalAI* PackLeader);
+    // Territory management
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    bool IsInTerritory(FVector Position);
 
-    UFUNCTION(BlueprintCallable, Category = "Pack AI")
-    void LeavePack();
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    void DefendTerritory();
 
-    UFUNCTION(BlueprintCallable, Category = "Pack AI")
-    bool IsPackLeader() const;
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    void PatrolTerritory();
 
-    // Getters
-    UFUNCTION(BlueprintPure, Category = "Combat AI")
-    ECombat_TacticalState GetCurrentState() const { return CurrentState; }
+    // Combat execution
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    void InitiateAttack(AActor* Target);
 
-    UFUNCTION(BlueprintPure, Category = "Combat AI")
-    AActor* GetCurrentTarget() const { return CurrentTarget; }
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    void ExecuteCombatAction();
 
-    UFUNCTION(BlueprintPure, Category = "Combat AI")
-    float GetDistanceToTarget() const;
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    bool CanAttackTarget(AActor* Target);
+
+    // Getters/Setters
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    void SetTacticalData(const FCombat_TacticalData& NewData) { TacticalData = NewData; }
+
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    FCombat_TacticalData GetTacticalData() const { return TacticalData; }
 
 protected:
-    // Core state
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat AI")
-    ECombat_TacticalState CurrentState;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI", meta = (AllowPrivateAccess = "true"))
+    FCombat_TacticalData TacticalData;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat AI")
-    ECombat_AttackPattern CurrentPattern;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat AI")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI", meta = (AllowPrivateAccess = "true"))
     AActor* CurrentTarget;
 
-    // Tactical configuration
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
-    FCombat_TacticalData TacticalConfig;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI", meta = (AllowPrivateAccess = "true"))
+    TArray<AActor*> PackMembers;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
-    bool bIsPackAnimal;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI", meta = (AllowPrivateAccess = "true"))
+    FVector TerritoryCenter;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
-    bool bIsApexPredator;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
-    bool bIsHerbivore;
-
-    // Pack system
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Pack AI")
-    TArray<UCombat_TacticalAI*> PackMembers;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Pack AI")
-    UCombat_TacticalAI* PackLeader;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Pack AI")
-    bool bIsInPack;
-
-    // Timers and cooldowns
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat AI")
-    float StateTimer;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat AI")
-    float AttackCooldown;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat AI")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI", meta = (AllowPrivateAccess = "true"))
     float LastAttackTime;
 
-    // Internal functions
-    void UpdateIdleState();
-    void UpdatePatrolState();
-    void UpdateAlertState();
-    void UpdateHuntingState();
-    void UpdateAttackingState();
-    void UpdateFleeingState();
-    void UpdateCirclingState();
-    void UpdateAmbushState();
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI", meta = (AllowPrivateAccess = "true"))
+    float AttackCooldown;
 
-    bool CanSeeTarget(AActor* Target);
-    bool IsTargetInRange(AActor* Target, float Range);
-    void MoveTowardsTarget(float DeltaTime);
-    void ExecuteDirectAttack();
-    void ExecuteFlankingAttack();
-    void ExecuteAmbushAttack();
-    void ExecutePackHunt();
-    void ExecuteTacticalRetreat();
-    void ExecuteCircleStrafe();
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI", meta = (AllowPrivateAccess = "true"))
+    float StateChangeTimer;
 
-    FVector GetRandomPatrolPoint();
-    void BroadcastToPackMembers(const FString& Message);
+private:
+    void UpdatePatrolBehavior(float DeltaTime);
+    void UpdateHuntingBehavior(float DeltaTime);
+    void UpdateStalkingBehavior(float DeltaTime);
+    void UpdateAttackingBehavior(float DeltaTime);
+    void UpdateRetreatingBehavior(float DeltaTime);
+    void UpdateTerritorialBehavior(float DeltaTime);
+    void UpdatePackHuntBehavior(float DeltaTime);
+    void UpdateAmbushBehavior(float DeltaTime);
+
+    AActor* FindNearestThreat();
+    bool IsTargetVisible(AActor* Target);
+    float GetDistanceToTarget(AActor* Target);
 };
+
+#include "Combat_TacticalAI.generated.h"
