@@ -1,409 +1,245 @@
 #include "Anim_CharacterAnimationController.h"
-#include "GameFramework/Character.h"
-#include "GameFramework/CharacterMovementComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Animation/AnimInstance.h"
-#include "Animation/AnimMontage.h"
-#include "Animation/BlendSpace.h"
-#include "Engine/World.h"
-#include "DrawDebugHelpers.h"
-#include "Kismet/KismetMathLibrary.h"
+#include "GameFramework/Character.h"
+#include "GameFramework/CharacterMovementComponent.h"
+#include "Engine/Engine.h"
 
 UAnim_CharacterAnimationController::UAnim_CharacterAnimationController()
 {
     PrimaryComponentTick.bCanEverTick = true;
     PrimaryComponentTick.TickGroup = TG_PrePhysics;
-
-    // Initialize default values
-    CurrentMovementState = EAnim_MovementState::Idle;
-    PreviousMovementState = EAnim_MovementState::Idle;
-    CurrentEmotionalState = EAnim_EmotionalState::Calm;
-    PreviousEmotionalState = EAnim_EmotionalState::Calm;
-
-    bEnableFootIK = true;
-    bEnableLookAtIK = false;
-    FootIKTraceDistance = 50.0f;
-    LeftFootBoneName = TEXT("foot_l");
-    RightFootBoneName = TEXT("foot_r");
-
-    DefaultBlendTime = 0.3f;
-    MovementStateBlendTime = 0.2f;
-    EmotionalStateBlendTime = 0.5f;
-
-    LastMovementUpdateTime = 0.0f;
-    StateChangeTimer = 0.0f;
-    bIsBlending = false;
-    LookAtTarget = nullptr;
+    
+    // Initialize movement data
+    MovementData = FAnim_MovementData();
+    
+    // Initialize state tracking
+    StateTransitionAlpha = 0.0f;
+    TimeSinceLastStateChange = 0.0f;
+    
+    // Initialize references
+    CharacterMesh = nullptr;
+    AnimInstance = nullptr;
+    
+    // Initialize animation assets to null
+    MovementBlendSpace = nullptr;
+    JumpMontage = nullptr;
+    AttackMontage = nullptr;
+    DeathMontage = nullptr;
 }
 
 void UAnim_CharacterAnimationController::BeginPlay()
 {
     Super::BeginPlay();
     
-    InitializeReferences();
+    // Get reference to character's mesh component
+    if (AActor* Owner = GetOwner())
+    {
+        if (ACharacter* Character = Cast<ACharacter>(Owner))
+        {
+            CharacterMesh = Character->GetMesh();
+            if (CharacterMesh)
+            {
+                AnimInstance = CharacterMesh->GetAnimInstance();
+                UE_LOG(LogTemp, Log, TEXT("Animation Controller: Found character mesh and anim instance"));
+            }
+            else
+            {
+                UE_LOG(LogTemp, Warning, TEXT("Animation Controller: Character mesh not found"));
+            }
+        }
+        else
+        {
+            UE_LOG(LogTemp, Warning, TEXT("Animation Controller: Owner is not a Character"));
+        }
+    }
+    
+    // Validate animation assets
+    ValidateAnimationAssets();
 }
 
 void UAnim_CharacterAnimationController::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-
-    if (!OwnerCharacter || !MovementComponent || !MeshComponent)
-    {
-        return;
-    }
-
-    // Update movement data
-    UpdateMovementData();
-
-    // Update animation state
-    UpdateAnimationState();
-
-    // Update IK systems
-    if (bEnableFootIK)
-    {
-        UpdateFootIK();
-    }
-
-    if (bEnableLookAtIK && LookAtTarget)
-    {
-        UpdateLookAtIK();
-    }
-
-    // Update timers
-    StateChangeTimer += DeltaTime;
-    LastMovementUpdateTime += DeltaTime;
-}
-
-void UAnim_CharacterAnimationController::InitializeReferences()
-{
-    OwnerCharacter = Cast<ACharacter>(GetOwner());
-    if (OwnerCharacter)
-    {
-        MovementComponent = OwnerCharacter->GetCharacterMovement();
-        MeshComponent = OwnerCharacter->GetMesh();
-        
-        if (MeshComponent)
-        {
-            AnimInstance = MeshComponent->GetAnimInstance();
-        }
-    }
-}
-
-void UAnim_CharacterAnimationController::UpdateMovementData()
-{
-    if (!MovementComponent)
-    {
-        return;
-    }
-
-    // Get velocity and calculate speed
-    MovementData.Velocity = MovementComponent->Velocity;
-    MovementData.Speed = MovementData.Velocity.Size();
     
-    // Calculate movement direction relative to character forward
-    if (MovementData.Speed > 0.1f)
+    // Update state transition timing
+    UpdateStateTransition(DeltaTime);
+    
+    // Auto-update movement data from character if available
+    if (AActor* Owner = GetOwner())
     {
-        FVector ForwardVector = OwnerCharacter->GetActorForwardVector();
-        FVector VelocityNormalized = MovementData.Velocity.GetSafeNormal();
-        MovementData.Direction = FMath::RadiansToDegrees(FMath::Acos(FVector::DotProduct(ForwardVector, VelocityNormalized)));
-        
-        // Determine if moving left or right
-        FVector RightVector = OwnerCharacter->GetActorRightVector();
-        float RightDot = FVector::DotProduct(RightVector, VelocityNormalized);
-        if (RightDot < 0.0f)
+        if (ACharacter* Character = Cast<ACharacter>(Owner))
         {
-            MovementData.Direction *= -1.0f;
+            if (UCharacterMovementComponent* MovementComp = Character->GetCharacterMovement())
+            {
+                // Calculate speed and direction
+                FVector Velocity = MovementComp->Velocity;
+                float CurrentSpeed = Velocity.Size();
+                float CurrentDirection = 0.0f;
+                
+                if (CurrentSpeed > 0.1f)
+                {
+                    FVector Forward = Character->GetActorForwardVector();
+                    FVector Right = Character->GetActorRightVector();
+                    
+                    FVector NormalizedVelocity = Velocity.GetSafeNormal();
+                    float ForwardDot = FVector::DotProduct(Forward, NormalizedVelocity);
+                    float RightDot = FVector::DotProduct(Right, NormalizedVelocity);
+                    
+                    CurrentDirection = FMath::RadiansToDegrees(FMath::Atan2(RightDot, ForwardDot));
+                }
+                
+                // Update movement data
+                bool bInAir = MovementComp->IsFalling();
+                bool bCrouching = MovementComp->IsCrouching();
+                
+                UpdateMovementData(CurrentSpeed, CurrentDirection, bInAir, bCrouching);
+                
+                // Auto-determine character state based on movement
+                ECharacterState NewState = ECharacterState::Idle;
+                
+                if (bInAir)
+                {
+                    NewState = ECharacterState::Jumping;
+                }
+                else if (CurrentSpeed > 0.1f)
+                {
+                    if (CurrentSpeed > 400.0f) // Running threshold
+                    {
+                        NewState = ECharacterState::Running;
+                        MovementData.bIsRunning = true;
+                    }
+                    else
+                    {
+                        NewState = ECharacterState::Walking;
+                        MovementData.bIsRunning = false;
+                    }
+                }
+                else
+                {
+                    NewState = ECharacterState::Idle;
+                    MovementData.bIsRunning = false;
+                }
+                
+                if (MovementData.CharacterState != NewState)
+                {
+                    SetCharacterState(NewState);
+                }
+            }
         }
+    }
+}
+
+void UAnim_CharacterAnimationController::UpdateMovementData(float NewSpeed, float NewDirection, bool bInAir, bool bCrouching)
+{
+    MovementData.Speed = NewSpeed;
+    MovementData.Direction = NewDirection;
+    MovementData.bIsInAir = bInAir;
+    MovementData.bIsCrouching = bCrouching;
+    
+    // Log movement data for debugging
+    UE_LOG(LogTemp, VeryVerbose, TEXT("Movement Data - Speed: %.2f, Direction: %.2f, InAir: %s, Crouching: %s"), 
+           NewSpeed, NewDirection, bInAir ? TEXT("true") : TEXT("false"), bCrouching ? TEXT("true") : TEXT("false"));
+}
+
+void UAnim_CharacterAnimationController::SetCharacterState(ECharacterState NewState)
+{
+    if (MovementData.CharacterState != NewState)
+    {
+        ECharacterState OldState = MovementData.CharacterState;
+        MovementData.CharacterState = NewState;
+        TimeSinceLastStateChange = 0.0f;
+        StateTransitionAlpha = 0.0f;
+        
+        UE_LOG(LogTemp, Log, TEXT("Character State Changed: %d -> %d"), (int32)OldState, (int32)NewState);
+        
+        // Handle state-specific logic
+        switch (NewState)
+        {
+            case ECharacterState::Jumping:
+                if (JumpMontage && AnimInstance)
+                {
+                    PlayAnimationMontage(JumpMontage);
+                }
+                break;
+                
+            case ECharacterState::Dead:
+                if (DeathMontage && AnimInstance)
+                {
+                    PlayAnimationMontage(DeathMontage);
+                }
+                break;
+                
+            default:
+                break;
+        }
+    }
+}
+
+void UAnim_CharacterAnimationController::PlayAnimationMontage(UAnimMontage* Montage, float PlayRate)
+{
+    if (Montage && AnimInstance)
+    {
+        AnimInstance->Montage_Play(Montage, PlayRate);
+        UE_LOG(LogTemp, Log, TEXT("Playing animation montage: %s"), *Montage->GetName());
     }
     else
     {
-        MovementData.Direction = 0.0f;
+        UE_LOG(LogTemp, Warning, TEXT("Cannot play montage - Montage or AnimInstance is null"));
     }
+}
 
-    // Update movement flags
-    MovementData.bIsMoving = MovementData.Speed > 5.0f;
-    MovementData.bIsInAir = MovementComponent->IsFalling();
-    MovementData.bIsCrouching = MovementComponent->IsCrouching();
+void UAnim_CharacterAnimationController::StopAnimationMontage(UAnimMontage* Montage)
+{
+    if (Montage && AnimInstance)
+    {
+        AnimInstance->Montage_Stop(0.2f, Montage);
+        UE_LOG(LogTemp, Log, TEXT("Stopping animation montage: %s"), *Montage->GetName());
+    }
+}
+
+void UAnim_CharacterAnimationController::UpdateStateTransition(float DeltaTime)
+{
+    TimeSinceLastStateChange += DeltaTime;
     
-    // Calculate input magnitude
-    FVector InputVector = MovementComponent->GetCurrentAcceleration();
-    MovementData.MovementInputMagnitude = FMath::Clamp(InputVector.Size() / MovementComponent->GetMaxAcceleration(), 0.0f, 1.0f);
+    // Calculate transition alpha (0 to 1 over 0.5 seconds)
+    StateTransitionAlpha = FMath::Clamp(TimeSinceLastStateChange / 0.5f, 0.0f, 1.0f);
 }
 
-void UAnim_CharacterAnimationController::UpdateAnimationState()
+void UAnim_CharacterAnimationController::ValidateAnimationAssets()
 {
-    EAnim_MovementState NewMovementState = CalculateMovementState();
+    int32 MissingAssets = 0;
     
-    if (NewMovementState != CurrentMovementState)
+    if (!MovementBlendSpace)
     {
-        SetMovementState(NewMovementState);
+        UE_LOG(LogTemp, Warning, TEXT("MovementBlendSpace is not assigned"));
+        MissingAssets++;
     }
-}
-
-EAnim_MovementState UAnim_CharacterAnimationController::CalculateMovementState()
-{
-    if (!MovementComponent)
-    {
-        return EAnim_MovementState::Idle;
-    }
-
-    // Check for air states first
-    if (MovementData.bIsInAir)
-    {
-        if (MovementData.Velocity.Z > 0.0f)
-        {
-            return EAnim_MovementState::Jumping;
-        }
-        else
-        {
-            return EAnim_MovementState::Falling;
-        }
-    }
-
-    // Check for crouching
-    if (MovementData.bIsCrouching)
-    {
-        return EAnim_MovementState::Crouching;
-    }
-
-    // Check for swimming
-    if (MovementComponent->IsSwimming())
-    {
-        return EAnim_MovementState::Swimming;
-    }
-
-    // Ground movement states
-    if (MovementData.bIsMoving)
-    {
-        // Determine if running or walking based on speed
-        float WalkThreshold = MovementComponent->MaxWalkSpeed * 0.6f;
-        if (MovementData.Speed > WalkThreshold)
-        {
-            return EAnim_MovementState::Running;
-        }
-        else
-        {
-            return EAnim_MovementState::Walking;
-        }
-    }
-
-    return EAnim_MovementState::Idle;
-}
-
-void UAnim_CharacterAnimationController::SetMovementState(EAnim_MovementState NewState)
-{
-    if (CurrentMovementState == NewState)
-    {
-        return;
-    }
-
-    PreviousMovementState = CurrentMovementState;
-    CurrentMovementState = NewState;
-    StateChangeTimer = 0.0f;
-
-    // Trigger Blueprint event
-    OnMovementStateChanged(PreviousMovementState, CurrentMovementState);
-
-    // Handle specific state transitions
-    switch (CurrentMovementState)
-    {
-        case EAnim_MovementState::Jumping:
-            if (AnimationSet.JumpMontage)
-            {
-                PlayMontage(AnimationSet.JumpMontage);
-            }
-            break;
-            
-        case EAnim_MovementState::Falling:
-            // Stop jump montage if playing
-            if (AnimationSet.JumpMontage && IsPlayingMontage())
-            {
-                StopMontage(AnimationSet.JumpMontage);
-            }
-            break;
-            
-        case EAnim_MovementState::Crouching:
-            if (AnimationSet.CrouchMontage)
-            {
-                PlayMontage(AnimationSet.CrouchMontage);
-            }
-            break;
-    }
-}
-
-void UAnim_CharacterAnimationController::SetEmotionalState(EAnim_EmotionalState NewState)
-{
-    if (CurrentEmotionalState == NewState)
-    {
-        return;
-    }
-
-    PreviousEmotionalState = CurrentEmotionalState;
-    CurrentEmotionalState = NewState;
-
-    // Trigger Blueprint event
-    OnEmotionalStateChanged(PreviousEmotionalState, CurrentEmotionalState);
-
-    // Play emotional animation if available
-    if (AnimationSet.EmotionalMontages.IsValidIndex((int32)NewState))
-    {
-        UAnimMontage* EmotionalMontage = AnimationSet.EmotionalMontages[(int32)NewState];
-        if (EmotionalMontage)
-        {
-            PlayMontage(EmotionalMontage, 1.0f);
-        }
-    }
-}
-
-void UAnim_CharacterAnimationController::PlayMontage(UAnimMontage* Montage, float PlayRate)
-{
-    if (!AnimInstance || !Montage)
-    {
-        return;
-    }
-
-    AnimInstance->Montage_Play(Montage, PlayRate);
-    OnMontageStarted(Montage);
-}
-
-void UAnim_CharacterAnimationController::StopMontage(UAnimMontage* Montage)
-{
-    if (!AnimInstance || !Montage)
-    {
-        return;
-    }
-
-    AnimInstance->Montage_Stop(DefaultBlendTime, Montage);
-    OnMontageEnded(Montage);
-}
-
-void UAnim_CharacterAnimationController::BlendToMovementState(EAnim_MovementState TargetState, float BlendTime)
-{
-    if (TargetState == CurrentMovementState)
-    {
-        return;
-    }
-
-    bIsBlending = true;
     
-    // Set the target state
-    SetMovementState(TargetState);
-    
-    // Custom blending logic can be implemented here
-    // For now, we rely on the animation blueprint to handle blending
-}
-
-void UAnim_CharacterAnimationController::BlendToEmotionalState(EAnim_EmotionalState TargetState, float BlendTime)
-{
-    if (TargetState == CurrentEmotionalState)
+    if (!JumpMontage)
     {
-        return;
+        UE_LOG(LogTemp, Warning, TEXT("JumpMontage is not assigned"));
+        MissingAssets++;
     }
-
-    // Set the target state with custom blend time
-    SetEmotionalState(TargetState);
-}
-
-void UAnim_CharacterAnimationController::EnableFootIK(bool bEnable)
-{
-    bEnableFootIK = bEnable;
-}
-
-void UAnim_CharacterAnimationController::EnableLookAtIK(bool bEnable, AActor* TargetActor)
-{
-    bEnableLookAtIK = bEnable;
-    LookAtTarget = TargetActor;
-}
-
-void UAnim_CharacterAnimationController::UpdateFootIK()
-{
-    if (!MeshComponent || !OwnerCharacter)
+    
+    if (!AttackMontage)
     {
-        return;
+        UE_LOG(LogTemp, Warning, TEXT("AttackMontage is not assigned"));
+        MissingAssets++;
     }
-
-    // Perform foot IK traces for both feet
-    float LeftFootOffset = 0.0f;
-    float RightFootOffset = 0.0f;
-
-    PerformFootIKTrace(LeftFootBoneName, LeftFootOffset);
-    PerformFootIKTrace(RightFootBoneName, RightFootOffset);
-
-    // Apply IK offsets through animation blueprint
-    // This would typically be done through animation blueprint variables
-    // For now, we store the values for Blueprint access
-}
-
-void UAnim_CharacterAnimationController::UpdateLookAtIK()
-{
-    if (!LookAtTarget || !MeshComponent)
+    
+    if (!DeathMontage)
     {
-        return;
+        UE_LOG(LogTemp, Warning, TEXT("DeathMontage is not assigned"));
+        MissingAssets++;
     }
-
-    FVector LookDirection = CalculateLookAtDirection();
     
-    // Apply look-at rotation through animation blueprint
-    // This would typically modify bone transforms in the animation blueprint
-}
-
-void UAnim_CharacterAnimationController::PerformFootIKTrace(const FName& BoneName, float& OutOffset)
-{
-    if (!MeshComponent || !OwnerCharacter)
+    if (MissingAssets > 0)
     {
-        OutOffset = 0.0f;
-        return;
-    }
-
-    // Get bone location in world space
-    FVector BoneLocation = MeshComponent->GetBoneLocation(BoneName);
-    
-    // Trace downward from bone location
-    FVector TraceStart = BoneLocation + FVector(0, 0, 20.0f);
-    FVector TraceEnd = BoneLocation - FVector(0, 0, FootIKTraceDistance);
-    
-    FHitResult HitResult;
-    FCollisionQueryParams QueryParams;
-    QueryParams.AddIgnoredActor(OwnerCharacter);
-    
-    bool bHit = GetWorld()->LineTraceSingleByChannel(
-        HitResult,
-        TraceStart,
-        TraceEnd,
-        ECC_WorldStatic,
-        QueryParams
-    );
-
-    if (bHit)
-    {
-        // Calculate offset needed to place foot on ground
-        OutOffset = HitResult.Location.Z - BoneLocation.Z;
+        UE_LOG(LogTemp, Warning, TEXT("Animation Controller: %d animation assets are missing"), MissingAssets);
     }
     else
     {
-        OutOffset = 0.0f;
+        UE_LOG(LogTemp, Log, TEXT("Animation Controller: All animation assets validated"));
     }
-}
-
-FVector UAnim_CharacterAnimationController::CalculateLookAtDirection()
-{
-    if (!LookAtTarget || !OwnerCharacter)
-    {
-        return FVector::ForwardVector;
-    }
-
-    FVector OwnerLocation = OwnerCharacter->GetActorLocation();
-    FVector TargetLocation = LookAtTarget->GetActorLocation();
-    
-    return (TargetLocation - OwnerLocation).GetSafeNormal();
-}
-
-bool UAnim_CharacterAnimationController::IsPlayingMontage() const
-{
-    if (!AnimInstance)
-    {
-        return false;
-    }
-
-    return AnimInstance->IsAnyMontagePlaying();
 }
