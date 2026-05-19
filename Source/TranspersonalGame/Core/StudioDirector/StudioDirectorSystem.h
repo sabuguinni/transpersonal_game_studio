@@ -1,161 +1,181 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Engine/GameInstanceSubsystem.h"
 #include "Engine/World.h"
-#include "GameFramework/GameModeBase.h"
-#include "Components/ActorComponent.h"
 #include "StudioDirectorSystem.generated.h"
 
-/**
- * Studio Director System - Coordinates all game systems and agent outputs
- * Manages the integration of 19 specialized agent outputs into cohesive gameplay
- */
+UENUM(BlueprintType)
+enum class EDir_AgentStatus : uint8
+{
+    Idle UMETA(DisplayName = "Idle"),
+    Working UMETA(DisplayName = "Working"),
+    Completed UMETA(DisplayName = "Completed"),
+    Error UMETA(DisplayName = "Error"),
+    Blocked UMETA(DisplayName = "Blocked")
+};
+
+UENUM(BlueprintType)
+enum class EDir_AgentType : uint8
+{
+    StudioDirector UMETA(DisplayName = "Studio Director"),
+    EngineArchitect UMETA(DisplayName = "Engine Architect"),
+    CoreSystems UMETA(DisplayName = "Core Systems"),
+    Performance UMETA(DisplayName = "Performance Optimizer"),
+    WorldGenerator UMETA(DisplayName = "World Generator"),
+    EnvironmentArtist UMETA(DisplayName = "Environment Artist"),
+    Architecture UMETA(DisplayName = "Architecture & Interior"),
+    Lighting UMETA(DisplayName = "Lighting & Atmosphere"),
+    CharacterArtist UMETA(DisplayName = "Character Artist"),
+    Animation UMETA(DisplayName = "Animation"),
+    NPCBehavior UMETA(DisplayName = "NPC Behavior"),
+    CombatAI UMETA(DisplayName = "Combat & Enemy AI"),
+    CrowdSimulation UMETA(DisplayName = "Crowd & Traffic"),
+    QuestDesigner UMETA(DisplayName = "Quest & Mission Designer"),
+    Narrative UMETA(DisplayName = "Narrative & Dialogue"),
+    Audio UMETA(DisplayName = "Audio"),
+    VFX UMETA(DisplayName = "VFX"),
+    QA UMETA(DisplayName = "QA & Testing"),
+    Integration UMETA(DisplayName = "Integration & Build")
+};
 
 USTRUCT(BlueprintType)
-struct FDir_AgentStatus
+struct FDir_AgentInfo
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Agent Status")
-    FString AgentName;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent")
+    int32 AgentID;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Agent Status")
-    bool bIsActive;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent")
+    EDir_AgentType AgentType;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Agent Status")
-    float LastUpdateTime;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent")
+    EDir_AgentStatus Status;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Agent Status")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent")
     FString CurrentTask;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Agent Status")
-    int32 CompletedCycles;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent")
+    float ProgressPercentage;
 
-    FDir_AgentStatus()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent")
+    FString LastOutput;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent")
+    FDateTime LastUpdate;
+
+    FDir_AgentInfo()
     {
-        AgentName = TEXT("Unknown");
-        bIsActive = false;
-        LastUpdateTime = 0.0f;
-        CurrentTask = TEXT("Idle");
-        CompletedCycles = 0;
+        AgentID = 0;
+        AgentType = EDir_AgentType::StudioDirector;
+        Status = EDir_AgentStatus::Idle;
+        CurrentTask = TEXT("Waiting for tasks");
+        ProgressPercentage = 0.0f;
+        LastOutput = TEXT("");
+        LastUpdate = FDateTime::Now();
     }
 };
 
 USTRUCT(BlueprintType)
-struct FDir_BiomeCoordination
+struct FDir_ProductionMetrics
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Biome")
-    FString BiomeName;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Metrics")
+    int32 TotalActorsInLevel;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Biome")
-    FVector CenterLocation;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Metrics")
+    int32 DinosaurActors;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Biome")
-    float Radius;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Metrics")
+    int32 EnvironmentActors;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Biome")
-    TArray<FString> AssignedAgents;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Metrics")
+    int32 CharacterActors;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Biome")
-    bool bIsReady;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Metrics")
+    float LevelCompletionPercentage;
 
-    FDir_BiomeCoordination()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Metrics")
+    FString CurrentBuildStatus;
+
+    FDir_ProductionMetrics()
     {
-        BiomeName = TEXT("Unknown");
-        CenterLocation = FVector::ZeroVector;
-        Radius = 5000.0f;
-        bIsReady = false;
+        TotalActorsInLevel = 0;
+        DinosaurActors = 0;
+        EnvironmentActors = 0;
+        CharacterActors = 0;
+        LevelCompletionPercentage = 0.0f;
+        CurrentBuildStatus = TEXT("In Development");
     }
 };
 
+/**
+ * Studio Director System - Coordinates the 19-agent development pipeline
+ * Tracks agent status, manages production metrics, and ensures milestone completion
+ */
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UStudioDirectorComponent : public UActorComponent
+class TRANSPERSONALGAME_API UStudioDirectorSystem : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
 public:
-    UStudioDirectorComponent();
-
-protected:
-    virtual void BeginPlay() override;
-
-public:
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+    // USubsystem interface
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
 
     // Agent Management
-    UPROPERTY(BlueprintReadOnly, Category = "Studio Director")
-    TArray<FDir_AgentStatus> AgentStatuses;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Studio Director")
-    TArray<FDir_BiomeCoordination> BiomeCoordinations;
-
-    // Core coordination functions
     UFUNCTION(BlueprintCallable, Category = "Studio Director")
-    void InitializeAgentCoordination();
+    void InitializeAgents();
 
     UFUNCTION(BlueprintCallable, Category = "Studio Director")
-    void UpdateAgentStatus(const FString& AgentName, const FString& Task, bool bActive);
+    void UpdateAgentStatus(int32 AgentID, EDir_AgentStatus NewStatus, const FString& TaskDescription);
 
     UFUNCTION(BlueprintCallable, Category = "Studio Director")
-    void RegisterBiome(const FString& BiomeName, FVector Location, float BiomeRadius);
+    FDir_AgentInfo GetAgentInfo(int32 AgentID) const;
 
     UFUNCTION(BlueprintCallable, Category = "Studio Director")
-    bool ValidateGameplayReadiness();
+    TArray<FDir_AgentInfo> GetAllAgents() const;
+
+    // Production Metrics
+    UFUNCTION(BlueprintCallable, Category = "Studio Director")
+    void UpdateProductionMetrics();
 
     UFUNCTION(BlueprintCallable, Category = "Studio Director")
-    void CoordinateAgentTasks();
+    FDir_ProductionMetrics GetProductionMetrics() const;
 
-    // Asset pipeline coordination
+    // Milestone Tracking
     UFUNCTION(BlueprintCallable, Category = "Studio Director")
-    void ValidateAssetPipeline();
+    bool IsMilestone1Complete() const;
 
     UFUNCTION(BlueprintCallable, Category = "Studio Director")
-    void CheckBiomeReadiness();
+    float GetMilestone1Progress() const;
 
-    // Debug and monitoring
-    UFUNCTION(BlueprintCallable, Category = "Studio Director", CallInEditor)
-    void DebugPrintAgentStatuses();
+    // Task Coordination
+    UFUNCTION(BlueprintCallable, Category = "Studio Director")
+    void DispatchTaskToAgent(int32 AgentID, const FString& TaskDescription);
 
-    UFUNCTION(BlueprintCallable, Category = "Studio Director", CallInEditor)
-    void ValidateMinPlayableMap();
-
-private:
-    // Internal coordination state
-    float LastCoordinationUpdate;
-    bool bSystemInitialized;
-
-    // Helper functions
-    void SetupDefaultAgents();
-    void SetupDefaultBiomes();
-    FDir_AgentStatus* FindAgentStatus(const FString& AgentName);
-    FDir_BiomeCoordination* FindBiome(const FString& BiomeName);
-};
-
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API AStudioDirectorActor : public AActor
-{
-    GENERATED_BODY()
-
-public:
-    AStudioDirectorActor();
+    UFUNCTION(BlueprintCallable, Category = "Studio Director")
+    bool CanAgentProceed(int32 AgentID) const;
 
 protected:
-    virtual void BeginPlay() override;
+    UPROPERTY(BlueprintReadOnly, Category = "Studio Director")
+    TArray<FDir_AgentInfo> Agents;
 
-public:
-    virtual void Tick(float DeltaTime) override;
+    UPROPERTY(BlueprintReadOnly, Category = "Studio Director")
+    FDir_ProductionMetrics CurrentMetrics;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Studio Director")
-    UStudioDirectorComponent* DirectorComponent;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Studio Director")
+    bool bMilestone1Completed;
 
-    // Command and control interface
-    UFUNCTION(BlueprintCallable, Category = "Studio Director")
-    void ExecuteAgentCoordination();
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Studio Director")
+    FString CurrentCycleID;
 
-    UFUNCTION(BlueprintCallable, Category = "Studio Director")
-    void MonitorGameplayState();
+private:
+    void SetupAgentDependencies();
+    void ValidateAgentChain();
+    int32 CountActorsByType(const FString& ActorType) const;
 };
 
 #include "StudioDirectorSystem.generated.h"
