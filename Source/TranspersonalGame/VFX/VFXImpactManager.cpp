@@ -1,149 +1,194 @@
 #include "VFXImpactManager.h"
 #include "Engine/Engine.h"
+#include "Engine/World.h"
 #include "Particles/ParticleSystem.h"
+#include "Particles/ParticleSystemComponent.h"
 #include "Kismet/GameplayStatics.h"
 #include "Components/SceneComponent.h"
 
-AVFX_ImpactManager::AVFX_ImpactManager()
+UVFX_ImpactManager::UVFX_ImpactManager()
 {
-    PrimaryActorTick.bCanEverTick = false;
-
-    // Create root scene component
-    RootSceneComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootScene"));
-    RootComponent = RootSceneComponent;
-
-    // Create particle system components
-    DustParticleComponent = CreateDefaultSubobject<UParticleSystemComponent>(TEXT("DustParticles"));
-    DustParticleComponent->SetupAttachment(RootComponent);
-    DustParticleComponent->bAutoActivate = false;
-
-    BloodParticleComponent = CreateDefaultSubobject<UParticleSystemComponent>(TEXT("BloodParticles"));
-    BloodParticleComponent->SetupAttachment(RootComponent);
-    BloodParticleComponent->bAutoActivate = false;
-
-    // Initialize VFX settings
-    FootstepDustIntensity = 1.0f;
-    BloodSplatterScale = 1.0f;
-    EnvironmentalDustRadius = 200.0f;
-
-    // Initialize footstep scale map
-    FootstepScaleMap.Add(EDinosaurSpecies::TRex, 3.0f);
-    FootstepScaleMap.Add(EDinosaurSpecies::Velociraptor, 0.8f);
-    FootstepScaleMap.Add(EDinosaurSpecies::Triceratops, 2.5f);
-    FootstepScaleMap.Add(EDinosaurSpecies::Brachiosaurus, 4.0f);
-    FootstepScaleMap.Add(EDinosaurSpecies::Ankylosaurus, 2.0f);
+    PrimaryComponentTick.bCanEverTick = true;
+    PrimaryComponentTick.bStartWithTickEnabled = true;
+    
+    // Initialize default values
+    MaxActiveParticles = 50;
+    ParticleLifetime = 5.0f;
+    bEnableVFXLOD = true;
+    
+    // Initialize particle system pointers to null
+    FootstepDustSystem = nullptr;
+    BloodSplatterSystem = nullptr;
+    DustCloudSystem = nullptr;
+    RockDebrisSystem = nullptr;
 }
 
-void AVFX_ImpactManager::BeginPlay()
+void UVFX_ImpactManager::BeginPlay()
 {
     Super::BeginPlay();
-    InitializeParticleSystems();
-}
-
-void AVFX_ImpactManager::InitializeParticleSystems()
-{
-    // Load default particle systems if available
-    if (DustParticleComponent)
-    {
-        DustParticleComponent->SetWorldScale3D(FVector(FootstepDustIntensity));
-    }
-
-    if (BloodParticleComponent)
-    {
-        BloodParticleComponent->SetWorldScale3D(FVector(BloodSplatterScale));
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("VFX Impact Manager initialized with particle systems"));
-}
-
-void AVFX_ImpactManager::TriggerFootstepImpact(const FVFX_ImpactData& ImpactData)
-{
-    if (!DustParticleComponent)
-    {
-        return;
-    }
-
-    // Configure VFX based on dinosaur species
-    ConfigureFootstepVFX(ImpactData.DinosaurType);
-
-    // Set particle system location and rotation
-    FVector ParticleLocation = ImpactData.ImpactLocation;
-    FRotator ParticleRotation = FRotationMatrix::MakeFromZ(ImpactData.ImpactNormal).Rotator();
-
-    DustParticleComponent->SetWorldLocationAndRotation(ParticleLocation, ParticleRotation);
-
-    // Scale based on impact force and dinosaur size
-    float* SpeciesScale = FootstepScaleMap.Find(ImpactData.DinosaurType);
-    float FinalScale = SpeciesScale ? (*SpeciesScale * ImpactData.ImpactForce) : ImpactData.ImpactForce;
     
-    DustParticleComponent->SetWorldScale3D(FVector(FinalScale));
-
-    // Activate particle system
-    DustParticleComponent->ActivateSystem();
-
-    UE_LOG(LogTemp, Log, TEXT("Footstep impact VFX triggered at location: %s"), 
-           *ImpactData.ImpactLocation.ToString());
-}
-
-void AVFX_ImpactManager::TriggerBloodSplatter(const FVector& Location, float Intensity)
-{
-    if (!BloodParticleComponent)
+    // Try to load default particle systems from engine content
+    // These are fallback systems in case custom ones aren't set
+    if (!FootstepDustSystem)
     {
-        return;
+        FootstepDustSystem = LoadObject<UParticleSystem>(nullptr, TEXT("/Engine/VFX/P_Explosion.P_Explosion"));
     }
-
-    BloodParticleComponent->SetWorldLocation(Location);
-    BloodParticleComponent->SetWorldScale3D(FVector(Intensity * BloodSplatterScale));
-    BloodParticleComponent->ActivateSystem();
-
-    UE_LOG(LogTemp, Log, TEXT("Blood splatter VFX triggered at location: %s"), *Location.ToString());
-}
-
-void AVFX_ImpactManager::TriggerEnvironmentalDust(const FVector& Location, float Radius)
-{
-    if (!DustParticleComponent)
+    
+    if (!DustCloudSystem)
     {
-        return;
+        DustCloudSystem = LoadObject<UParticleSystem>(nullptr, TEXT("/Engine/VFX/P_Smoke.P_Smoke"));
     }
-
-    DustParticleComponent->SetWorldLocation(Location);
-    float Scale = Radius / EnvironmentalDustRadius;
-    DustParticleComponent->SetWorldScale3D(FVector(Scale));
-    DustParticleComponent->ActivateSystem();
-
-    UE_LOG(LogTemp, Log, TEXT("Environmental dust VFX triggered at location: %s with radius: %f"), 
-           *Location.ToString(), Radius);
+    
+    UE_LOG(LogTemp, Warning, TEXT("VFX Impact Manager initialized with %d max particles"), MaxActiveParticles);
 }
 
-void AVFX_ImpactManager::SetDinosaurFootstepScale(EDinosaurSpecies Species, float Scale)
+void UVFX_ImpactManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
-    FootstepScaleMap.Add(Species, Scale);
-    UE_LOG(LogTemp, Log, TEXT("Footstep scale set for species %d: %f"), 
-           static_cast<int32>(Species), Scale);
-}
-
-void AVFX_ImpactManager::ConfigureFootstepVFX(EDinosaurSpecies Species)
-{
-    // Configure particle parameters based on dinosaur species
-    switch (Species)
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+    
+    // Clean up finished particle components
+    for (int32 i = ActiveParticleComponents.Num() - 1; i >= 0; i--)
     {
-        case EDinosaurSpecies::TRex:
-            FootstepDustIntensity = 3.0f;
+        if (ActiveParticleComponents[i] && !ActiveParticleComponents[i]->IsActive())
+        {
+            ActiveParticleComponents[i]->DestroyComponent();
+            ActiveParticleComponents.RemoveAt(i);
+        }
+    }
+    
+    // Enforce maximum particle limit for performance
+    while (ActiveParticleComponents.Num() > MaxActiveParticles)
+    {
+        if (ActiveParticleComponents[0])
+        {
+            ActiveParticleComponents[0]->DeactivateSystem();
+            ActiveParticleComponents[0]->DestroyComponent();
+        }
+        ActiveParticleComponents.RemoveAt(0);
+    }
+}
+
+void UVFX_ImpactManager::CreateImpactEffect(const FVFX_ImpactData& ImpactData)
+{
+    switch (ImpactData.ImpactType)
+    {
+        case EVFX_ImpactType::DinosaurFootstep:
+            CreateDinosaurFootstepEffect(ImpactData.ImpactLocation, ImpactData.ParticleScale);
             break;
-        case EDinosaurSpecies::Velociraptor:
-            FootstepDustIntensity = 0.8f;
+            
+        case EVFX_ImpactType::BloodSplatter:
+            CreateBloodSplatterEffect(ImpactData.ImpactLocation, ImpactData.ImpactNormal);
             break;
-        case EDinosaurSpecies::Triceratops:
-            FootstepDustIntensity = 2.5f;
+            
+        case EVFX_ImpactType::DustCloud:
+            CreateDustCloudEffect(ImpactData.ImpactLocation, ImpactData.ImpactForce);
             break;
-        case EDinosaurSpecies::Brachiosaurus:
-            FootstepDustIntensity = 4.0f;
+            
+        case EVFX_ImpactType::RockImpact:
+            if (RockDebrisSystem)
+            {
+                SpawnParticleEffect(RockDebrisSystem, ImpactData.ImpactLocation, FRotator::ZeroRotator, ImpactData.ParticleScale);
+            }
             break;
-        case EDinosaurSpecies::Ankylosaurus:
-            FootstepDustIntensity = 2.0f;
-            break;
+            
         default:
-            FootstepDustIntensity = 1.0f;
+            CreateDustCloudEffect(ImpactData.ImpactLocation, ImpactData.ImpactForce);
             break;
+    }
+}
+
+void UVFX_ImpactManager::CreateDinosaurFootstepEffect(FVector Location, float DinosaurSize)
+{
+    if (!FootstepDustSystem)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("FootstepDustSystem not set, using fallback"));
+        return;
+    }
+    
+    // Scale effect based on dinosaur size
+    float EffectScale = FMath::Clamp(DinosaurSize, 0.5f, 3.0f);
+    
+    // Spawn dust cloud at ground level
+    FVector GroundLocation = Location;
+    GroundLocation.Z -= 50.0f; // Offset to ground
+    
+    SpawnParticleEffect(FootstepDustSystem, GroundLocation, FRotator::ZeroRotator, EffectScale);
+    
+    // Add screen shake for large dinosaurs
+    if (DinosaurSize > 2.0f)
+    {
+        UGameplayStatics::PlayWorldCameraShake(
+            GetWorld(),
+            nullptr, // Use default camera shake class
+            Location,
+            100.0f,  // Inner radius
+            1000.0f, // Outer radius
+            1.0f,    // Falloff
+            false    // Orient shake towards epicenter
+        );
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("Dinosaur footstep VFX created at %s with scale %f"), *Location.ToString(), EffectScale);
+}
+
+void UVFX_ImpactManager::CreateBloodSplatterEffect(FVector Location, FVector Direction)
+{
+    if (!BloodSplatterSystem)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("BloodSplatterSystem not set"));
+        return;
+    }
+    
+    // Calculate rotation from direction vector
+    FRotator EffectRotation = Direction.Rotation();
+    
+    SpawnParticleEffect(BloodSplatterSystem, Location, EffectRotation, 1.0f);
+    
+    UE_LOG(LogTemp, Log, TEXT("Blood splatter VFX created at %s"), *Location.ToString());
+}
+
+void UVFX_ImpactManager::CreateDustCloudEffect(FVector Location, float Intensity)
+{
+    if (!DustCloudSystem)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("DustCloudSystem not set"));
+        return;
+    }
+    
+    float EffectScale = FMath::Clamp(Intensity, 0.1f, 2.0f);
+    
+    SpawnParticleEffect(DustCloudSystem, Location, FRotator::ZeroRotator, EffectScale);
+    
+    UE_LOG(LogTemp, Log, TEXT("Dust cloud VFX created at %s with intensity %f"), *Location.ToString(), Intensity);
+}
+
+void UVFX_ImpactManager::SpawnParticleEffect(UParticleSystem* ParticleSystem, const FVector& Location, const FRotator& Rotation, float Scale)
+{
+    if (!ParticleSystem || !GetWorld())
+    {
+        return;
+    }
+    
+    // Use UGameplayStatics for one-shot effects
+    UParticleSystemComponent* ParticleComp = UGameplayStatics::SpawnEmitterAtLocation(
+        GetWorld(),
+        ParticleSystem,
+        Location,
+        Rotation,
+        FVector(Scale),
+        true, // Auto destroy
+        EPSCPoolMethod::None,
+        true  // Auto activate
+    );
+    
+    if (ParticleComp)
+    {
+        // Add to active list for tracking
+        ActiveParticleComponents.Add(ParticleComp);
+        
+        // Set lifetime
+        ParticleComp->SetFloatParameter(FName("Lifetime"), ParticleLifetime);
+        
+        UE_LOG(LogTemp, Log, TEXT("Particle effect spawned at %s"), *Location.ToString());
     }
 }
