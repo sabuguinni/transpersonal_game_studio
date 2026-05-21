@@ -4,89 +4,77 @@
 #include "Engine/World.h"
 #include "Components/ActorComponent.h"
 #include "Engine/StaticMeshActor.h"
+#include "Engine/SkeletalMeshActor.h"
 #include "SharedTypes.h"
 #include "World_BiomePopulator.generated.h"
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FWorld_BiomeData
+struct TRANSPERSONALGAME_API FWorld_BiomeSpawnData
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    EBiomeType BiomeType;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    FVector CenterLocation;
+    FVector Center;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
     float Radius;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    int32 TargetActorCount;
+    EBiomeType BiomeType;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    TArray<TSoftObjectPtr<UStaticMesh>> VegetationAssets;
+    int32 MaxDinosaurs;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    TArray<TSoftObjectPtr<UStaticMesh>> TerrainAssets;
+    int32 MaxTerrainFeatures;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float VegetationDensity;
+    TArray<FString> AllowedDinosaurTypes;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float TerrainFeatureDensity;
-
-    FWorld_BiomeData()
+    FWorld_BiomeSpawnData()
     {
-        BiomeType = EBiomeType::Savana;
-        CenterLocation = FVector::ZeroVector;
+        Center = FVector::ZeroVector;
         Radius = 10000.0f;
-        TargetActorCount = 500;
-        VegetationDensity = 0.7f;
-        TerrainFeatureDensity = 0.3f;
+        BiomeType = EBiomeType::Savana;
+        MaxDinosaurs = 5;
+        MaxTerrainFeatures = 20;
     }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FWorld_SpawnPattern
+struct TRANSPERSONALGAME_API FWorld_DinosaurSpawnConfig
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn")
-    float MinDistance;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur")
+    FString DinosaurName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn")
-    float MaxDistance;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur")
+    FString AssetPath;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn")
-    float ClusterRadius;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur")
+    float SpawnWeight;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn")
-    int32 ClusterSize;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur")
+    FVector MinScale;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn")
-    float RandomRotation;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur")
+    FVector MaxScale;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn")
-    float ScaleVariation;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur")
+    TArray<EBiomeType> PreferredBiomes;
 
-    FWorld_SpawnPattern()
+    FWorld_DinosaurSpawnConfig()
     {
-        MinDistance = 500.0f;
-        MaxDistance = 2000.0f;
-        ClusterRadius = 1000.0f;
-        ClusterSize = 5;
-        RandomRotation = 360.0f;
-        ScaleVariation = 0.2f;
+        DinosaurName = TEXT("Unknown");
+        AssetPath = TEXT("");
+        SpawnWeight = 1.0f;
+        MinScale = FVector(0.8f, 0.8f, 0.8f);
+        MaxScale = FVector(1.2f, 1.2f, 1.2f);
     }
 };
 
-/**
- * Biome Populator Component
- * Handles procedural population of biomes with vegetation, terrain features, and environmental actors
- * Integrates with the 3D asset pipeline for dynamic content generation
- */
-UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
+UCLASS(BlueprintType, Blueprintable, meta = (BlueprintSpawnableComponent))
 class TRANSPERSONALGAME_API UWorld_BiomePopulator : public UActorComponent
 {
     GENERATED_BODY()
@@ -100,90 +88,90 @@ protected:
 public:
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    // Biome Configuration
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biomes")
-    TArray<FWorld_BiomeData> BiomeConfigurations;
+    // Biome configuration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World Generation")
+    TArray<FWorld_BiomeSpawnData> BiomeConfigurations;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawning")
-    FWorld_SpawnPattern DefaultSpawnPattern;
+    // Dinosaur spawn configurations
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World Generation")
+    TArray<FWorld_DinosaurSpawnConfig> DinosaurConfigurations;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 MaxActorsPerFrame;
+    // Population settings
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Population")
+    bool bAutoPopulateOnBeginPlay;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Population")
     float PopulationRadius;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    bool bUseAsyncSpawning;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Population")
+    int32 MaxActorsPerBiome;
 
-    // Runtime State
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Population")
+    float MinSpawnDistance;
+
+    // Runtime tracking
     UPROPERTY(BlueprintReadOnly, Category = "Runtime")
     TArray<AActor*> SpawnedActors;
 
     UPROPERTY(BlueprintReadOnly, Category = "Runtime")
-    int32 TotalActorsSpawned;
+    int32 TotalSpawnedCount;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Runtime")
-    bool bPopulationComplete;
-
-    // Core Functions
-    UFUNCTION(BlueprintCallable, Category = "Biome Population")
+    // Core population methods
+    UFUNCTION(BlueprintCallable, Category = "World Generation")
     void PopulateAllBiomes();
 
-    UFUNCTION(BlueprintCallable, Category = "Biome Population")
-    void PopulateBiome(EBiomeType BiomeType);
+    UFUNCTION(BlueprintCallable, Category = "World Generation")
+    void PopulateBiome(const FWorld_BiomeSpawnData& BiomeData);
 
-    UFUNCTION(BlueprintCallable, Category = "Biome Population")
-    void ClearBiome(EBiomeType BiomeType);
+    UFUNCTION(BlueprintCallable, Category = "World Generation")
+    AActor* SpawnDinosaurInBiome(const FWorld_BiomeSpawnData& BiomeData, const FString& DinosaurType);
 
-    UFUNCTION(BlueprintCallable, Category = "Biome Population")
-    void ClearAllBiomes();
+    UFUNCTION(BlueprintCallable, Category = "World Generation")
+    AActor* SpawnTerrainFeatureInBiome(const FWorld_BiomeSpawnData& BiomeData, const FString& FeatureType);
 
-    // Asset Management
-    UFUNCTION(BlueprintCallable, Category = "Asset Management")
-    void LoadBiomeAssets(EBiomeType BiomeType);
+    // Utility methods
+    UFUNCTION(BlueprintCallable, Category = "World Generation")
+    FVector GetRandomPositionInBiome(const FWorld_BiomeSpawnData& BiomeData) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Asset Management")
-    TArray<UStaticMesh*> GetAvailableAssetsForBiome(EBiomeType BiomeType);
+    UFUNCTION(BlueprintCallable, Category = "World Generation")
+    bool IsPositionValidForSpawn(const FVector& Position, float CheckRadius = 500.0f) const;
 
-    // Spawn Functions
-    UFUNCTION(BlueprintCallable, Category = "Spawning")
-    AActor* SpawnActorInBiome(UStaticMesh* Mesh, const FVector& Location, EBiomeType BiomeType);
+    UFUNCTION(BlueprintCallable, Category = "World Generation")
+    void ClearSpawnedActors();
 
-    UFUNCTION(BlueprintCallable, Category = "Spawning")
-    TArray<FVector> GenerateSpawnLocations(const FWorld_BiomeData& BiomeData, int32 Count);
+    UFUNCTION(BlueprintCallable, Category = "World Generation")
+    TArray<FString> GetAvailableDinosaursForBiome(EBiomeType BiomeType) const;
 
-    // Validation and Metrics
-    UFUNCTION(BlueprintCallable, Category = "Validation")
-    int32 GetActorCountInBiome(EBiomeType BiomeType);
+    // Configuration methods
+    UFUNCTION(BlueprintCallable, Category = "Configuration")
+    void InitializeDefaultBiomes();
 
-    UFUNCTION(BlueprintCallable, Category = "Validation")
-    bool ValidateBiomePopulation(EBiomeType BiomeType);
+    UFUNCTION(BlueprintCallable, Category = "Configuration")
+    void InitializeDefaultDinosaurs();
 
-    UFUNCTION(BlueprintCallable, Category = "Validation")
-    FString GetPopulationReport();
+    UFUNCTION(BlueprintCallable, Category = "Configuration")
+    void AddBiomeConfiguration(const FWorld_BiomeSpawnData& NewBiome);
 
-    // Performance Optimization
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void OptimizeBiomeActors(EBiomeType BiomeType);
+    UFUNCTION(BlueprintCallable, Category = "Configuration")
+    void AddDinosaurConfiguration(const FWorld_DinosaurSpawnConfig& NewDinosaur);
 
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void SetLODDistances(AActor* Actor, float LOD1Distance, float LOD2Distance);
+    // Debug and validation
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Debug")
+    void ValidateConfiguration();
+
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Debug")
+    void TestSpawnSingleDinosaur();
+
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Debug")
+    void DebugDrawBiomeBounds();
 
 private:
-    // Internal Functions
-    void InitializeBiomeConfigurations();
-    FVector GetRandomLocationInBiome(const FWorld_BiomeData& BiomeData);
-    bool IsValidSpawnLocation(const FVector& Location, const FWorld_BiomeData& BiomeData);
-    void ApplyBiomeSpecificSettings(AActor* Actor, EBiomeType BiomeType);
+    // Internal helpers
+    FWorld_DinosaurSpawnConfig* FindDinosaurConfig(const FString& DinosaurName);
+    float CalculateSpawnWeight(const FWorld_DinosaurSpawnConfig& Config, EBiomeType BiomeType) const;
+    FString SelectRandomDinosaurForBiome(EBiomeType BiomeType) const;
     
-    // Async Spawning
-    void ProcessAsyncSpawning();
-    TArray<FVector> PendingSpawnLocations;
-    TArray<UStaticMesh*> PendingSpawnMeshes;
-    int32 CurrentSpawnIndex;
-    
-    // Performance Tracking
-    float LastSpawnTime;
-    int32 ActorsSpawnedThisFrame;
+    // Spawn validation
+    bool ValidateSpawnLocation(const FVector& Location, const FWorld_BiomeSpawnData& BiomeData) const;
+    void AdjustActorForBiome(AActor* Actor, const FWorld_BiomeSpawnData& BiomeData) const;
 };
