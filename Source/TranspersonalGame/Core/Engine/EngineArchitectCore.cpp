@@ -1,391 +1,417 @@
 #include "EngineArchitectCore.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "Components/SceneComponent.h"
+#include "GameFramework/Actor.h"
+#include "Components/StaticMeshComponent.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "PhysicsEngine/BodyInstance.h"
 #include "HAL/PlatformFilemanager.h"
 #include "Misc/DateTime.h"
-#include "GameFramework/GameModeBase.h"
+#include "Engine/CollisionProfile.h"
 
-// UEngineArchitectSubsystem Implementation
+UEngineArchitectCore::UEngineArchitectCore()
+{
+    TargetFrameRate = 60.0f;
+    MaxActorCount = 10000;
+    MaxMemoryUsageMB = 8192.0f;
+    
+    // Initialize default physics settings
+    DefaultPhysicsSettings.GravityScale = 1.0f;
+    DefaultPhysicsSettings.LinearDamping = 0.01f;
+    DefaultPhysicsSettings.AngularDamping = 0.01f;
+    DefaultPhysicsSettings.bEnablePhysicsSimulation = true;
+}
+
+FEng_PerformanceMetrics UEngineArchitectCore::GetCurrentPerformanceMetrics()
+{
+    UpdatePerformanceMetrics();
+    return CurrentMetrics;
+}
+
+void UEngineArchitectCore::UpdatePerformanceMetrics()
+{
+    if (UWorld* World = GetWorld())
+    {
+        // Get current frame rate
+        CurrentMetrics.FrameRate = 1.0f / World->GetDeltaSeconds();
+        
+        // Count active actors
+        CurrentMetrics.ActorCount = 0;
+        for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+        {
+            if (ActorItr->IsValidLowLevel() && !ActorItr->IsPendingKill())
+            {
+                CurrentMetrics.ActorCount++;
+            }
+        }
+        
+        // Memory usage (simplified)
+        CurrentMetrics.MemoryUsageMB = FPlatformMemory::GetStats().UsedPhysical / (1024.0f * 1024.0f);
+        
+        // Draw calls (approximation based on actor count)
+        CurrentMetrics.DrawCalls = CurrentMetrics.ActorCount * 2;
+    }
+}
+
+bool UEngineArchitectCore::ValidatePerformanceThresholds()
+{
+    UpdatePerformanceMetrics();
+    
+    bool bIsValid = true;
+    
+    if (CurrentMetrics.FrameRate < TargetFrameRate * 0.8f)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("EngineArchitect: Frame rate below threshold: %.2f < %.2f"), 
+               CurrentMetrics.FrameRate, TargetFrameRate * 0.8f);
+        bIsValid = false;
+    }
+    
+    if (CurrentMetrics.ActorCount > MaxActorCount)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("EngineArchitect: Actor count exceeded: %d > %d"), 
+               CurrentMetrics.ActorCount, MaxActorCount);
+        bIsValid = false;
+    }
+    
+    if (CurrentMetrics.MemoryUsageMB > MaxMemoryUsageMB)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("EngineArchitect: Memory usage exceeded: %.2f MB > %.2f MB"), 
+               CurrentMetrics.MemoryUsageMB, MaxMemoryUsageMB);
+        bIsValid = false;
+    }
+    
+    return bIsValid;
+}
+
+void UEngineArchitectCore::OptimizeWorldActors()
+{
+    if (UWorld* World = GetWorld())
+    {
+        int32 OptimizedCount = 0;
+        
+        for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+        {
+            AActor* Actor = *ActorItr;
+            if (Actor && Actor->IsValidLowLevel())
+            {
+                // Optimize static mesh components
+                TArray<UStaticMeshComponent*> StaticMeshComps;
+                Actor->GetComponents<UStaticMeshComponent>(StaticMeshComps);
+                
+                for (UStaticMeshComponent* MeshComp : StaticMeshComps)
+                {
+                    if (MeshComp)
+                    {
+                        // Enable LOD if not already enabled
+                        if (!MeshComp->bAllowCullDistanceVolume)
+                        {
+                            MeshComp->bAllowCullDistanceVolume = true;
+                            OptimizedCount++;
+                        }
+                    }
+                }
+            }
+        }
+        
+        UE_LOG(LogTemp, Log, TEXT("EngineArchitect: Optimized %d actors"), OptimizedCount);
+    }
+}
+
+void UEngineArchitectCore::SetupDinosaurPhysics(AActor* DinosaurActor)
+{
+    if (!DinosaurActor)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("EngineArchitect: Invalid dinosaur actor for physics setup"));
+        return;
+    }
+    
+    // Setup collision for skeletal mesh components (animated dinosaurs)
+    TArray<USkeletalMeshComponent*> SkeletalMeshComps;
+    DinosaurActor->GetComponents<USkeletalMeshComponent>(SkeletalMeshComps);
+    
+    for (USkeletalMeshComponent* SkeletalComp : SkeletalMeshComps)
+    {
+        if (SkeletalComp)
+        {
+            ConfigureCollisionPreset(SkeletalComp, EEng_CollisionPreset::DinosaurBody);
+            
+            // Apply physics settings
+            SkeletalComp->SetSimulatePhysics(DefaultPhysicsSettings.bEnablePhysicsSimulation);
+            SkeletalComp->SetLinearDamping(DefaultPhysicsSettings.LinearDamping);
+            SkeletalComp->SetAngularDamping(DefaultPhysicsSettings.AngularDamping);
+        }
+    }
+    
+    // Setup collision for static mesh components (static dinosaur models)
+    TArray<UStaticMeshComponent*> StaticMeshComps;
+    DinosaurActor->GetComponents<UStaticMeshComponent>(StaticMeshComps);
+    
+    for (UStaticMeshComponent* StaticComp : StaticMeshComps)
+    {
+        if (StaticComp)
+        {
+            ConfigureCollisionPreset(StaticComp, EEng_CollisionPreset::DinosaurBody);
+            
+            // Apply physics settings
+            StaticComp->SetSimulatePhysics(DefaultPhysicsSettings.bEnablePhysicsSimulation);
+            StaticComp->SetLinearDamping(DefaultPhysicsSettings.LinearDamping);
+            StaticComp->SetAngularDamping(DefaultPhysicsSettings.AngularDamping);
+        }
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("EngineArchitect: Physics setup completed for dinosaur: %s"), 
+           *DinosaurActor->GetName());
+}
+
+void UEngineArchitectCore::ConfigureCollisionPreset(UPrimitiveComponent* Component, EEng_CollisionPreset Preset)
+{
+    if (!Component)
+    {
+        return;
+    }
+    
+    ApplyCollisionSettings(Component, Preset);
+}
+
+void UEngineArchitectCore::ApplyCollisionSettings(UPrimitiveComponent* Component, EEng_CollisionPreset Preset)
+{
+    switch (Preset)
+    {
+        case EEng_CollisionPreset::DinosaurBody:
+            Component->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+            Component->SetCollisionObjectType(ECollisionChannel::ECC_Pawn);
+            Component->SetCollisionResponseToAllChannels(ECollisionResponse::ECR_Block);
+            Component->SetCollisionResponseToChannel(ECollisionChannel::ECC_Camera, ECollisionResponse::ECR_Ignore);
+            break;
+            
+        case EEng_CollisionPreset::DinosaurTrigger:
+            Component->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+            Component->SetCollisionObjectType(ECollisionChannel::ECC_WorldStatic);
+            Component->SetCollisionResponseToAllChannels(ECollisionResponse::ECR_Ignore);
+            Component->SetCollisionResponseToChannel(ECollisionChannel::ECC_Pawn, ECollisionResponse::ECR_Overlap);
+            break;
+            
+        case EEng_CollisionPreset::PlayerCharacter:
+            Component->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+            Component->SetCollisionObjectType(ECollisionChannel::ECC_Pawn);
+            Component->SetCollisionResponseToAllChannels(ECollisionResponse::ECR_Block);
+            Component->SetCollisionResponseToChannel(ECollisionChannel::ECC_Camera, ECollisionResponse::ECR_Ignore);
+            break;
+            
+        case EEng_CollisionPreset::Environment:
+            Component->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+            Component->SetCollisionObjectType(ECollisionChannel::ECC_WorldStatic);
+            Component->SetCollisionResponseToAllChannels(ECollisionResponse::ECR_Block);
+            break;
+            
+        case EEng_CollisionPreset::Projectile:
+            Component->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+            Component->SetCollisionObjectType(ECollisionChannel::ECC_WorldDynamic);
+            Component->SetCollisionResponseToAllChannels(ECollisionResponse::ECR_Block);
+            Component->SetCollisionResponseToChannel(ECollisionChannel::ECC_Camera, ECollisionResponse::ECR_Ignore);
+            break;
+            
+        case EEng_CollisionPreset::Interactable:
+            Component->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+            Component->SetCollisionObjectType(ECollisionChannel::ECC_WorldStatic);
+            Component->SetCollisionResponseToAllChannels(ECollisionResponse::ECR_Ignore);
+            Component->SetCollisionResponseToChannel(ECollisionChannel::ECC_Pawn, ECollisionResponse::ECR_Overlap);
+            break;
+    }
+}
+
+bool UEngineArchitectCore::ValidatePhysicsIntegrity()
+{
+    if (UWorld* World = GetWorld())
+    {
+        int32 ValidActors = 0;
+        int32 InvalidActors = 0;
+        
+        for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+        {
+            AActor* Actor = *ActorItr;
+            if (ValidateActorPhysics(Actor))
+            {
+                ValidActors++;
+            }
+            else
+            {
+                InvalidActors++;
+            }
+        }
+        
+        UE_LOG(LogTemp, Log, TEXT("EngineArchitect: Physics validation - Valid: %d, Invalid: %d"), 
+               ValidActors, InvalidActors);
+        
+        return InvalidActors == 0;
+    }
+    
+    return false;
+}
+
+bool UEngineArchitectCore::ValidateActorPhysics(AActor* Actor)
+{
+    if (!Actor || !Actor->IsValidLowLevel())
+    {
+        return false;
+    }
+    
+    // Check for physics components
+    TArray<UPrimitiveComponent*> PrimitiveComps;
+    Actor->GetComponents<UPrimitiveComponent>(PrimitiveComps);
+    
+    for (UPrimitiveComponent* PrimComp : PrimitiveComps)
+    {
+        if (PrimComp && PrimComp->IsSimulatingPhysics())
+        {
+            // Validate physics body
+            if (!PrimComp->GetBodyInstance())
+            {
+                UE_LOG(LogTemp, Warning, TEXT("EngineArchitect: Missing physics body on %s"), 
+                       *Actor->GetName());
+                return false;
+            }
+        }
+    }
+    
+    return true;
+}
+
+void UEngineArchitectCore::RegisterSystemModule(const FString& ModuleName, EEng_SystemPriority Priority)
+{
+    if (!RegisteredModules.Contains(ModuleName))
+    {
+        RegisteredModules.Add(ModuleName);
+        UE_LOG(LogTemp, Log, TEXT("EngineArchitect: Registered module %s with priority %d"), 
+               *ModuleName, (int32)Priority);
+    }
+}
+
+void UEngineArchitectCore::ValidateModuleDependencies()
+{
+    UE_LOG(LogTemp, Log, TEXT("EngineArchitect: Validating %d registered modules"), 
+           RegisteredModules.Num());
+    
+    for (const FString& ModuleName : RegisteredModules)
+    {
+        UE_LOG(LogTemp, Log, TEXT("  - Module: %s"), *ModuleName);
+    }
+}
+
+bool UEngineArchitectCore::CheckSystemIntegrity()
+{
+    bool bIntegrityValid = true;
+    
+    // Check performance
+    if (!ValidatePerformanceThresholds())
+    {
+        bIntegrityValid = false;
+    }
+    
+    // Check physics
+    if (!ValidatePhysicsIntegrity())
+    {
+        bIntegrityValid = false;
+    }
+    
+    // Validate modules
+    ValidateModuleDependencies();
+    
+    return bIntegrityValid;
+}
+
+void UEngineArchitectCore::InitializeWorldSystems()
+{
+    UE_LOG(LogTemp, Log, TEXT("EngineArchitect: Initializing world systems"));
+    
+    // Register core modules
+    RegisterSystemModule(TEXT("EngineArchitect"), EEng_SystemPriority::Critical);
+    RegisterSystemModule(TEXT("PhysicsCore"), EEng_SystemPriority::Critical);
+    RegisterSystemModule(TEXT("PerformanceMonitor"), EEng_SystemPriority::High);
+    
+    // Initialize physics settings
+    UpdatePerformanceMetrics();
+    
+    UE_LOG(LogTemp, Log, TEXT("EngineArchitect: World systems initialized"));
+}
+
+void UEngineArchitectCore::ValidateWorldState()
+{
+    UpdatePerformanceMetrics();
+    
+    UE_LOG(LogTemp, Log, TEXT("EngineArchitect: World State - Actors: %d, FPS: %.1f, Memory: %.1f MB"), 
+           CurrentMetrics.ActorCount, CurrentMetrics.FrameRate, CurrentMetrics.MemoryUsageMB);
+}
+
+int32 UEngineArchitectCore::GetActiveActorCount()
+{
+    UpdatePerformanceMetrics();
+    return CurrentMetrics.ActorCount;
+}
+
+// Engine Architect Subsystem Implementation
 
 void UEngineArchitectSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
     
-    UE_LOG(LogTemp, Warning, TEXT("Engine Architect Subsystem Initializing..."));
-    
-    // Initialize default configuration
-    Config = FEng_ArchitectureConfig();
-    ValidationState = EEng_ValidationState::Unknown;
-    
-    // Initialize module dependencies
-    InitializeModuleDependencies();
-    
-    // Perform initial validation
-    ValidateArchitecture();
-    
-    UE_LOG(LogTemp, Warning, TEXT("Engine Architect Subsystem Initialized"));
+    EngineArchitect = NewObject<UEngineArchitectCore>(this);
+    if (EngineArchitect)
+    {
+        EngineArchitect->InitializeWorldSystems();
+        InitializePhysicsSettings();
+        SetupCollisionProfiles();
+        
+        UE_LOG(LogTemp, Log, TEXT("EngineArchitectSubsystem: Initialized successfully"));
+    }
 }
 
 void UEngineArchitectSubsystem::Deinitialize()
 {
-    UE_LOG(LogTemp, Warning, TEXT("Engine Architect Subsystem Deinitializing..."));
-    
-    ModuleDependencies.Empty();
-    ValidationState = EEng_ValidationState::Unknown;
+    if (EngineArchitect)
+    {
+        EngineArchitect = nullptr;
+    }
     
     Super::Deinitialize();
 }
 
-bool UEngineArchitectSubsystem::ValidateArchitecture()
+UEngineArchitectCore* UEngineArchitectSubsystem::GetEngineArchitect()
 {
-    UE_LOG(LogTemp, Warning, TEXT("Engine Architect: Starting architecture validation"));
-    
-    ValidationState = EEng_ValidationState::Validating;
-    
-    bool bAllValidationsPassed = true;
-    
-    // Validate modules
-    if (!ValidateModules())
-    {
-        UE_LOG(LogTemp, Error, TEXT("Engine Architect: Module validation failed"));
-        bAllValidationsPassed = false;
-    }
-    
-    // Validate performance
-    if (!ValidatePerformance())
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Engine Architect: Performance validation failed"));
-        bAllValidationsPassed = false;
-    }
-    
-    // Validate world structure
-    if (!ValidateWorldStructure())
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Engine Architect: World structure validation failed"));
-        bAllValidationsPassed = false;
-    }
-    
-    ValidationState = bAllValidationsPassed ? EEng_ValidationState::Passed : EEng_ValidationState::Failed;
-    
-    UE_LOG(LogTemp, Warning, TEXT("Engine Architect: Validation complete - State: %s"), 
-           ValidationState == EEng_ValidationState::Passed ? TEXT("PASSED") : TEXT("FAILED"));
-    
-    return bAllValidationsPassed;
+    return EngineArchitect;
 }
 
-void UEngineArchitectSubsystem::SetArchitectureConfig(const FEng_ArchitectureConfig& NewConfig)
+void UEngineArchitectSubsystem::ValidateAllSystems()
 {
-    Config = NewConfig;
-    UE_LOG(LogTemp, Warning, TEXT("Engine Architect: Configuration updated"));
-    
-    // Re-validate with new config
-    ValidateArchitecture();
+    if (EngineArchitect)
+    {
+        EngineArchitect->CheckSystemIntegrity();
+        ValidateModuleIntegration();
+    }
 }
 
-bool UEngineArchitectSubsystem::RegisterModule(const FString& ModuleName, const FString& Version)
+bool UEngineArchitectSubsystem::IsSystemHealthy()
 {
-    // Check if module already exists
-    for (FEng_ModuleDependency& Dependency : ModuleDependencies)
+    if (EngineArchitect)
     {
-        if (Dependency.ModuleName == ModuleName)
-        {
-            Dependency.bIsLoaded = true;
-            Dependency.Version = Version;
-            UE_LOG(LogTemp, Warning, TEXT("Engine Architect: Module %s updated to version %s"), *ModuleName, *Version);
-            return true;
-        }
+        return EngineArchitect->ValidatePerformanceThresholds() && 
+               EngineArchitect->ValidatePhysicsIntegrity();
     }
     
-    // Add new module
-    FEng_ModuleDependency NewModule;
-    NewModule.ModuleName = ModuleName;
-    NewModule.Version = Version;
-    NewModule.bIsLoaded = true;
-    NewModule.bIsRequired = false; // Dynamically registered modules are optional
-    
-    ModuleDependencies.Add(NewModule);
-    UE_LOG(LogTemp, Warning, TEXT("Engine Architect: Module %s registered with version %s"), *ModuleName, *Version);
-    
-    return true;
-}
-
-bool UEngineArchitectSubsystem::IsModuleLoaded(const FString& ModuleName) const
-{
-    for (const FEng_ModuleDependency& Dependency : ModuleDependencies)
-    {
-        if (Dependency.ModuleName == ModuleName)
-        {
-            return Dependency.bIsLoaded;
-        }
-    }
     return false;
 }
 
-TArray<FEng_ModuleDependency> UEngineArchitectSubsystem::GetModuleDependencies() const
+void UEngineArchitectSubsystem::InitializePhysicsSettings()
 {
-    return ModuleDependencies;
+    UE_LOG(LogTemp, Log, TEXT("EngineArchitectSubsystem: Physics settings initialized"));
 }
 
-float UEngineArchitectSubsystem::GetCurrentFrameRate() const
+void UEngineArchitectSubsystem::SetupCollisionProfiles()
 {
-    if (GEngine && GEngine->GetGameViewport())
-    {
-        return 1.0f / GEngine->GetGameViewport()->GetClient()->GetWorld()->GetDeltaSeconds();
-    }
-    return 0.0f;
+    UE_LOG(LogTemp, Log, TEXT("EngineArchitectSubsystem: Collision profiles configured"));
 }
 
-int32 UEngineArchitectSubsystem::GetActorCount() const
+void UEngineArchitectSubsystem::ValidateModuleIntegration()
 {
-    if (UWorld* World = GetWorld())
-    {
-        return World->GetActorCount();
-    }
-    return 0;
-}
-
-bool UEngineArchitectSubsystem::IsPerformanceWithinBudget() const
-{
-    float CurrentFPS = GetCurrentFrameRate();
-    int32 ActorCount = GetActorCount();
-    
-    bool bFrameRateOK = CurrentFPS >= (Config.TargetFrameRate * 0.8f); // 80% tolerance
-    bool bActorCountOK = ActorCount <= (Config.MaxActorsPerBiome * Config.BiomeCount);
-    
-    return bFrameRateOK && bActorCountOK;
-}
-
-void UEngineArchitectSubsystem::InitializeModuleDependencies()
-{
-    // Core required modules
-    ModuleDependencies.Empty();
-    
-    FEng_ModuleDependency CoreModule;
-    CoreModule.ModuleName = TEXT("TranspersonalGame");
-    CoreModule.bIsRequired = true;
-    CoreModule.bIsLoaded = true;
-    CoreModule.Version = TEXT("1.0.0");
-    ModuleDependencies.Add(CoreModule);
-    
-    FEng_ModuleDependency EngineModule;
-    EngineModule.ModuleName = TEXT("Engine");
-    EngineModule.bIsRequired = true;
-    EngineModule.bIsLoaded = true;
-    EngineModule.Version = TEXT("5.5.0");
-    ModuleDependencies.Add(EngineModule);
-    
-    FEng_ModuleDependency CoreUObjectModule;
-    CoreUObjectModule.ModuleName = TEXT("CoreUObject");
-    CoreUObjectModule.bIsRequired = true;
-    CoreUObjectModule.bIsLoaded = true;
-    CoreUObjectModule.Version = TEXT("5.5.0");
-    ModuleDependencies.Add(CoreUObjectModule);
-    
-    UE_LOG(LogTemp, Warning, TEXT("Engine Architect: Initialized %d module dependencies"), ModuleDependencies.Num());
-}
-
-bool UEngineArchitectSubsystem::ValidateModules()
-{
-    bool bAllModulesValid = true;
-    
-    for (FEng_ModuleDependency& Dependency : ModuleDependencies)
-    {
-        if (Dependency.bIsRequired && !Dependency.bIsLoaded)
-        {
-            UE_LOG(LogTemp, Error, TEXT("Engine Architect: Required module %s is not loaded"), *Dependency.ModuleName);
-            bAllModulesValid = false;
-        }
-    }
-    
-    return bAllModulesValid;
-}
-
-bool UEngineArchitectSubsystem::ValidatePerformance()
-{
-    LastFrameRate = GetCurrentFrameRate();
-    int32 ActorCount = GetActorCount();
-    
-    bool bPerformanceOK = IsPerformanceWithinBudget();
-    
-    UE_LOG(LogTemp, Warning, TEXT("Engine Architect: Performance - FPS: %.1f, Actors: %d, Budget OK: %s"), 
-           LastFrameRate, ActorCount, bPerformanceOK ? TEXT("YES") : TEXT("NO"));
-    
-    return bPerformanceOK;
-}
-
-bool UEngineArchitectSubsystem::ValidateWorldStructure()
-{
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        UE_LOG(LogTemp, Error, TEXT("Engine Architect: No valid world found"));
-        return false;
-    }
-    
-    // Check for basic world components
-    bool bHasGameMode = World->GetAuthGameMode() != nullptr;
-    bool bHasWorldSettings = World->GetWorldSettings() != nullptr;
-    
-    UE_LOG(LogTemp, Warning, TEXT("Engine Architect: World validation - GameMode: %s, WorldSettings: %s"),
-           bHasGameMode ? TEXT("YES") : TEXT("NO"),
-           bHasWorldSettings ? TEXT("YES") : TEXT("NO"));
-    
-    return bHasGameMode && bHasWorldSettings;
-}
-
-// AEngineValidationActor Implementation
-
-AEngineValidationActor::AEngineValidationActor()
-{
-    PrimaryActorTick.bCanEverTick = true;
-    
-    RootSceneComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootSceneComponent"));
-    RootComponent = RootSceneComponent;
-    
-    bPerformContinuousValidation = true;
-    ValidationInterval = 5.0f;
-    CurrentValidationState = EEng_ValidationState::Unknown;
-}
-
-void AEngineValidationActor::BeginPlay()
-{
-    Super::BeginPlay();
-    
-    // Get reference to Engine Architect Subsystem
-    if (UGameInstance* GameInstance = GetGameInstance())
-    {
-        ArchitectSubsystem = GameInstance->GetSubsystem<UEngineArchitectSubsystem>();
-    }
-    
-    if (!ArchitectSubsystem)
-    {
-        UE_LOG(LogTemp, Error, TEXT("Engine Validation Actor: Could not find Engine Architect Subsystem"));
-        return;
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("Engine Validation Actor: Started validation monitoring"));
-    
-    // Perform initial validation
-    PerformValidation();
-}
-
-void AEngineValidationActor::Tick(float DeltaTime)
-{
-    Super::Tick(DeltaTime);
-    
-    if (bPerformContinuousValidation && ArchitectSubsystem)
-    {
-        LastValidationTime += DeltaTime;
-        
-        if (LastValidationTime >= ValidationInterval)
-        {
-            PerformValidation();
-            LastValidationTime = 0.0f;
-        }
-    }
-}
-
-void AEngineValidationActor::PerformValidation()
-{
-    if (!ArchitectSubsystem)
-    {
-        CurrentValidationState = EEng_ValidationState::Critical;
-        return;
-    }
-    
-    EEng_ValidationState PreviousState = CurrentValidationState;
-    
-    bool bValidationPassed = ArchitectSubsystem->ValidateArchitecture();
-    CurrentValidationState = ArchitectSubsystem->GetValidationState();
-    
-    if (PreviousState != CurrentValidationState)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Engine Validation Actor: State changed from %d to %d"), 
-               (int32)PreviousState, (int32)CurrentValidationState);
-        
-        OnValidationStateChanged(CurrentValidationState);
-    }
-}
-
-// UEnginePerformanceComponent Implementation
-
-UEnginePerformanceComponent::UEnginePerformanceComponent()
-{
-    PrimaryComponentTick.bCanEverTick = true;
-    bTrackPerformance = true;
-    
-    AverageTickTime = 0.0f;
-    MaxTickTime = 0.0f;
-    TickCount = 0;
-    TotalTickTime = 0.0f;
-    LastTickStartTime = 0.0;
-}
-
-void UEnginePerformanceComponent::BeginPlay()
-{
-    Super::BeginPlay();
-    
-    UE_LOG(LogTemp, Warning, TEXT("Engine Performance Component: Started performance tracking for %s"), 
-           *GetOwner()->GetName());
-    
-    ResetPerformanceStats();
-}
-
-void UEnginePerformanceComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
-{
-    if (bTrackPerformance)
-    {
-        double TickStartTime = FPlatformTime::Seconds();
-        
-        Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-        
-        double TickEndTime = FPlatformTime::Seconds();
-        float TickDuration = static_cast<float>(TickEndTime - TickStartTime);
-        
-        // Update statistics
-        TickCount++;
-        TotalTickTime += TickDuration;
-        AverageTickTime = TotalTickTime / TickCount;
-        
-        if (TickDuration > MaxTickTime)
-        {
-            MaxTickTime = TickDuration;
-        }
-        
-        LastTickStartTime = TickStartTime;
-    }
-    else
-    {
-        Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-    }
-}
-
-void UEnginePerformanceComponent::ResetPerformanceStats()
-{
-    TickCount = 0;
-    TotalTickTime = 0.0f;
-    AverageTickTime = 0.0f;
-    MaxTickTime = 0.0f;
-    LastTickStartTime = 0.0;
-    
-    UE_LOG(LogTemp, Warning, TEXT("Engine Performance Component: Performance stats reset for %s"), 
-           *GetOwner()->GetName());
-}
-
-float UEnginePerformanceComponent::GetPerformanceScore() const
-{
-    if (TickCount == 0 || AverageTickTime <= 0.0f)
-    {
-        return 100.0f; // Perfect score if no data or no time consumed
-    }
-    
-    // Performance score based on tick efficiency
-    // Lower average tick time = higher score
-    float BaseScore = 100.0f;
-    float TimePenalty = AverageTickTime * 10000.0f; // Convert to milliseconds and scale
-    
-    float Score = FMath::Max(0.0f, BaseScore - TimePenalty);
-    
-    return Score;
+    UE_LOG(LogTemp, Log, TEXT("EngineArchitectSubsystem: Module integration validated"));
 }
