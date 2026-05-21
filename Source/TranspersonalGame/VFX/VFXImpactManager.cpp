@@ -1,161 +1,149 @@
 #include "VFXImpactManager.h"
-#include "NiagaraFunctionLibrary.h"
-#include "Kismet/GameplayStatics.h"
 #include "Engine/Engine.h"
-#include "Engine/World.h"
+#include "Particles/ParticleSystem.h"
+#include "Kismet/GameplayStatics.h"
+#include "Components/SceneComponent.h"
 
 AVFX_ImpactManager::AVFX_ImpactManager()
 {
     PrimaryActorTick.bCanEverTick = false;
 
-    // Create Niagara component
-    ActiveVFXComponent = CreateDefaultSubobject<UNiagaraComponent>(TEXT("ActiveVFXComponent"));
-    RootComponent = ActiveVFXComponent;
+    // Create root scene component
+    RootSceneComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootScene"));
+    RootComponent = RootSceneComponent;
 
-    // Create audio component
-    ImpactAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("ImpactAudioComponent"));
-    ImpactAudioComponent->SetupAttachment(RootComponent);
-    ImpactAudioComponent->bAutoActivate = false;
+    // Create particle system components
+    DustParticleComponent = CreateDefaultSubobject<UParticleSystemComponent>(TEXT("DustParticles"));
+    DustParticleComponent->SetupAttachment(RootComponent);
+    DustParticleComponent->bAutoActivate = false;
+
+    BloodParticleComponent = CreateDefaultSubobject<UParticleSystemComponent>(TEXT("BloodParticles"));
+    BloodParticleComponent->SetupAttachment(RootComponent);
+    BloodParticleComponent->bAutoActivate = false;
+
+    // Initialize VFX settings
+    FootstepDustIntensity = 1.0f;
+    BloodSplatterScale = 1.0f;
+    EnvironmentalDustRadius = 200.0f;
+
+    // Initialize footstep scale map
+    FootstepScaleMap.Add(EDinosaurSpecies::TRex, 3.0f);
+    FootstepScaleMap.Add(EDinosaurSpecies::Velociraptor, 0.8f);
+    FootstepScaleMap.Add(EDinosaurSpecies::Triceratops, 2.5f);
+    FootstepScaleMap.Add(EDinosaurSpecies::Brachiosaurus, 4.0f);
+    FootstepScaleMap.Add(EDinosaurSpecies::Ankylosaurus, 2.0f);
 }
 
 void AVFX_ImpactManager::BeginPlay()
 {
     Super::BeginPlay();
-    LoadDefaultVFXSystems();
+    InitializeParticleSystems();
 }
 
-void AVFX_ImpactManager::LoadDefaultVFXSystems()
+void AVFX_ImpactManager::InitializeParticleSystems()
 {
-    // Load T-Rex footstep VFX
-    FVFX_ImpactData FootstepData;
-    FootstepData.VFXSystem = TSoftObjectPtr<UNiagaraSystem>(FSoftObjectPath(TEXT("/Game/VFX/NS_Dino_TRexFootstep")));
-    FootstepData.VFXScale = 2.0f;
-    FootstepData.SoundVolume = 0.8f;
-    ImpactVFXMap.Add(EVFX_ImpactType::FootstepDust, FootstepData);
-
-    // Load blood splatter VFX
-    FVFX_ImpactData BloodData;
-    BloodData.VFXSystem = TSoftObjectPtr<UNiagaraSystem>(FSoftObjectPath(TEXT("/Game/VFX/NS_Combat_BloodSplatter")));
-    BloodData.VFXScale = 1.5f;
-    BloodData.SoundVolume = 0.6f;
-    ImpactVFXMap.Add(EVFX_ImpactType::BloodSplatter, BloodData);
-
-    // Load campfire smoke VFX for environmental effects
-    FVFX_ImpactData EnvironmentData;
-    EnvironmentData.VFXSystem = TSoftObjectPtr<UNiagaraSystem>(FSoftObjectPath(TEXT("/Game/VFX/NS_Environment_CampfireSmoke")));
-    EnvironmentData.VFXScale = 1.0f;
-    EnvironmentData.SoundVolume = 0.4f;
-    ImpactVFXMap.Add(EVFX_ImpactType::RockImpact, EnvironmentData);
-}
-
-void AVFX_ImpactManager::PlayImpactVFX(EVFX_ImpactType ImpactType, const FVector& Location, const FRotator& Rotation, float ScaleMultiplier)
-{
-    if (!ImpactVFXMap.Contains(ImpactType))
+    // Load default particle systems if available
+    if (DustParticleComponent)
     {
-        UE_LOG(LogTemp, Warning, TEXT("VFX Impact Manager: No VFX data for impact type %d"), (int32)ImpactType);
-        return;
+        DustParticleComponent->SetWorldScale3D(FVector(FootstepDustIntensity));
     }
 
-    const FVFX_ImpactData& ImpactData = ImpactVFXMap[ImpactType];
-
-    // Load and spawn VFX system
-    if (!ImpactData.VFXSystem.IsNull())
+    if (BloodParticleComponent)
     {
-        UNiagaraSystem* VFXSystem = ImpactData.VFXSystem.LoadSynchronous();
-        if (VFXSystem)
-        {
-            float FinalScale = ImpactData.VFXScale * ScaleMultiplier;
-            SpawnVFXAtLocation(VFXSystem, Location, Rotation, FinalScale);
-        }
+        BloodParticleComponent->SetWorldScale3D(FVector(BloodSplatterScale));
     }
 
-    // Play impact sound
-    if (!ImpactData.ImpactSound.IsNull())
-    {
-        USoundBase* Sound = ImpactData.ImpactSound.LoadSynchronous();
-        if (Sound)
-        {
-            PlaySoundAtLocation(Sound, Location, ImpactData.SoundVolume);
-        }
-    }
+    UE_LOG(LogTemp, Log, TEXT("VFX Impact Manager initialized with particle systems"));
 }
 
-void AVFX_ImpactManager::StopAllVFX()
+void AVFX_ImpactManager::TriggerFootstepImpact(const FVFX_ImpactData& ImpactData)
 {
-    if (ActiveVFXComponent && ActiveVFXComponent->IsActive())
-    {
-        ActiveVFXComponent->Deactivate();
-    }
-
-    if (ImpactAudioComponent && ImpactAudioComponent->IsPlaying())
-    {
-        ImpactAudioComponent->Stop();
-    }
-}
-
-void AVFX_ImpactManager::SetupImpactData(EVFX_ImpactType ImpactType, UNiagaraSystem* VFXSystem, USoundBase* Sound, float Scale, float Volume)
-{
-    FVFX_ImpactData NewData;
-    NewData.VFXSystem = VFXSystem;
-    NewData.ImpactSound = Sound;
-    NewData.VFXScale = Scale;
-    NewData.SoundVolume = Volume;
-
-    ImpactVFXMap.Add(ImpactType, NewData);
-}
-
-bool AVFX_ImpactManager::HasImpactData(EVFX_ImpactType ImpactType) const
-{
-    return ImpactVFXMap.Contains(ImpactType);
-}
-
-void AVFX_ImpactManager::InitializeDefaultVFX()
-{
-    LoadDefaultVFXSystems();
-    UE_LOG(LogTemp, Log, TEXT("VFX Impact Manager: Default VFX systems initialized"));
-}
-
-void AVFX_ImpactManager::SpawnVFXAtLocation(UNiagaraSystem* VFXSystem, const FVector& Location, const FRotator& Rotation, float Scale)
-{
-    if (!VFXSystem || !GetWorld())
+    if (!DustParticleComponent)
     {
         return;
     }
 
-    UNiagaraComponent* SpawnedVFX = UNiagaraFunctionLibrary::SpawnSystemAtLocation(
-        GetWorld(),
-        VFXSystem,
-        Location,
-        Rotation,
-        FVector(Scale),
-        true,
-        true,
-        ENCPoolMethod::None,
-        true
-    );
+    // Configure VFX based on dinosaur species
+    ConfigureFootstepVFX(ImpactData.DinosaurType);
 
-    if (SpawnedVFX)
-    {
-        UE_LOG(LogTemp, Log, TEXT("VFX spawned at location: %s"), *Location.ToString());
-    }
+    // Set particle system location and rotation
+    FVector ParticleLocation = ImpactData.ImpactLocation;
+    FRotator ParticleRotation = FRotationMatrix::MakeFromZ(ImpactData.ImpactNormal).Rotator();
+
+    DustParticleComponent->SetWorldLocationAndRotation(ParticleLocation, ParticleRotation);
+
+    // Scale based on impact force and dinosaur size
+    float* SpeciesScale = FootstepScaleMap.Find(ImpactData.DinosaurType);
+    float FinalScale = SpeciesScale ? (*SpeciesScale * ImpactData.ImpactForce) : ImpactData.ImpactForce;
+    
+    DustParticleComponent->SetWorldScale3D(FVector(FinalScale));
+
+    // Activate particle system
+    DustParticleComponent->ActivateSystem();
+
+    UE_LOG(LogTemp, Log, TEXT("Footstep impact VFX triggered at location: %s"), 
+           *ImpactData.ImpactLocation.ToString());
 }
 
-void AVFX_ImpactManager::PlaySoundAtLocation(USoundBase* Sound, const FVector& Location, float Volume)
+void AVFX_ImpactManager::TriggerBloodSplatter(const FVector& Location, float Intensity)
 {
-    if (!Sound || !GetWorld())
+    if (!BloodParticleComponent)
     {
         return;
     }
 
-    UGameplayStatics::PlaySoundAtLocation(
-        GetWorld(),
-        Sound,
-        Location,
-        Volume,
-        1.0f,
-        0.0f,
-        nullptr,
-        nullptr,
-        true
-    );
+    BloodParticleComponent->SetWorldLocation(Location);
+    BloodParticleComponent->SetWorldScale3D(FVector(Intensity * BloodSplatterScale));
+    BloodParticleComponent->ActivateSystem();
+
+    UE_LOG(LogTemp, Log, TEXT("Blood splatter VFX triggered at location: %s"), *Location.ToString());
+}
+
+void AVFX_ImpactManager::TriggerEnvironmentalDust(const FVector& Location, float Radius)
+{
+    if (!DustParticleComponent)
+    {
+        return;
+    }
+
+    DustParticleComponent->SetWorldLocation(Location);
+    float Scale = Radius / EnvironmentalDustRadius;
+    DustParticleComponent->SetWorldScale3D(FVector(Scale));
+    DustParticleComponent->ActivateSystem();
+
+    UE_LOG(LogTemp, Log, TEXT("Environmental dust VFX triggered at location: %s with radius: %f"), 
+           *Location.ToString(), Radius);
+}
+
+void AVFX_ImpactManager::SetDinosaurFootstepScale(EDinosaurSpecies Species, float Scale)
+{
+    FootstepScaleMap.Add(Species, Scale);
+    UE_LOG(LogTemp, Log, TEXT("Footstep scale set for species %d: %f"), 
+           static_cast<int32>(Species), Scale);
+}
+
+void AVFX_ImpactManager::ConfigureFootstepVFX(EDinosaurSpecies Species)
+{
+    // Configure particle parameters based on dinosaur species
+    switch (Species)
+    {
+        case EDinosaurSpecies::TRex:
+            FootstepDustIntensity = 3.0f;
+            break;
+        case EDinosaurSpecies::Velociraptor:
+            FootstepDustIntensity = 0.8f;
+            break;
+        case EDinosaurSpecies::Triceratops:
+            FootstepDustIntensity = 2.5f;
+            break;
+        case EDinosaurSpecies::Brachiosaurus:
+            FootstepDustIntensity = 4.0f;
+            break;
+        case EDinosaurSpecies::Ankylosaurus:
+            FootstepDustIntensity = 2.0f;
+            break;
+        default:
+            FootstepDustIntensity = 1.0f;
+            break;
+    }
 }
