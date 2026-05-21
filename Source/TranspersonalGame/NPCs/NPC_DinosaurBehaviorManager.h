@@ -5,32 +5,30 @@
 #include "Components/ActorComponent.h"
 #include "Engine/World.h"
 #include "TimerManager.h"
-#include "GameFramework/Pawn.h"
-#include "GameFramework/Character.h"
+#include "../SharedTypes.h"
 #include "NPC_DinosaurBehaviorManager.generated.h"
 
 UENUM(BlueprintType)
 enum class ENPC_DinosaurState : uint8
 {
-    Idle        UMETA(DisplayName = "Idle"),
-    Patrolling  UMETA(DisplayName = "Patrolling"),
-    Hunting     UMETA(DisplayName = "Hunting"),
-    Feeding     UMETA(DisplayName = "Feeding"),
-    Fleeing     UMETA(DisplayName = "Fleeing"),
-    Sleeping    UMETA(DisplayName = "Sleeping"),
-    Territorial UMETA(DisplayName = "Territorial"),
-    PackHunt    UMETA(DisplayName = "Pack Hunt")
+    Idle,
+    Patrolling,
+    Hunting,
+    Fleeing,
+    Feeding,
+    Sleeping,
+    Territorial
 };
 
 UENUM(BlueprintType)
 enum class ENPC_DinosaurSpecies : uint8
 {
-    TRex         UMETA(DisplayName = "T-Rex"),
-    Velociraptor UMETA(DisplayName = "Velociraptor"),
-    Triceratops  UMETA(DisplayName = "Triceratops"),
-    Brachiosaurus UMETA(DisplayName = "Brachiosaurus"),
-    Ankylosaurus UMETA(DisplayName = "Ankylosaurus"),
-    Parasaurolophus UMETA(DisplayName = "Parasaurolophus")
+    TRex,
+    Velociraptor,
+    Triceratops,
+    Brachiosaurus,
+    Ankylosaurus,
+    Parasaurolophus
 };
 
 USTRUCT(BlueprintType)
@@ -42,41 +40,19 @@ struct FNPC_DinosaurStats
     float Health = 100.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
-    float MaxHealth = 100.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
     float Hunger = 50.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
     float Aggression = 30.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
-    float Fear = 10.0f;
+    float Fear = 0.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
     float Stamina = 100.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
-    float Speed = 600.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
-    float DetectionRange = 3000.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
-    float AttackRange = 500.0f;
-
-    FNPC_DinosaurStats()
-    {
-        Health = 100.0f;
-        MaxHealth = 100.0f;
-        Hunger = 50.0f;
-        Aggression = 30.0f;
-        Fear = 10.0f;
-        Stamina = 100.0f;
-        Speed = 600.0f;
-        DetectionRange = 3000.0f;
-        AttackRange = 500.0f;
-    }
+    float TerritorialRadius = 5000.0f;
 };
 
 USTRUCT(BlueprintType)
@@ -94,21 +70,10 @@ struct FNPC_DinosaurMemory
     float TimeSincePlayerSeen = 0.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory")
-    TArray<AActor*> PackMembers;
+    TArray<AActor*> KnownThreats;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory")
-    FVector TerritoryCenter = FVector::ZeroVector;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory")
-    float TerritoryRadius = 5000.0f;
-
-    FNPC_DinosaurMemory()
-    {
-        LastKnownPlayerLocation = FVector::ZeroVector;
-        TimeSincePlayerSeen = 0.0f;
-        TerritoryCenter = FVector::ZeroVector;
-        TerritoryRadius = 5000.0f;
-    }
+    FVector HomeTerritory = FVector::ZeroVector;
 };
 
 UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
@@ -121,79 +86,60 @@ public:
 
 protected:
     virtual void BeginPlay() override;
-
-public:
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
+public:
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur Behavior")
     ENPC_DinosaurSpecies Species = ENPC_DinosaurSpecies::TRex;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur Behavior")
     ENPC_DinosaurState CurrentState = ENPC_DinosaurState::Idle;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur Behavior")
     FNPC_DinosaurStats Stats;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur Behavior")
     FNPC_DinosaurMemory Memory;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
-    bool bIsPackHunter = false;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur Behavior")
+    float DetectionRadius = 3000.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
-    bool bIsTerritorial = true;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur Behavior")
+    float AttackRange = 500.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
-    float StateChangeTimer = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur Behavior")
+    float MovementSpeed = 600.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
-    float BehaviorUpdateInterval = 1.0f;
+    UFUNCTION(BlueprintCallable, Category = "Dinosaur Behavior")
+    void SetBehaviorState(ENPC_DinosaurState NewState);
 
-    // Behavior functions
-    UFUNCTION(BlueprintCallable, Category = "Behavior")
-    void SetState(ENPC_DinosaurState NewState);
-
-    UFUNCTION(BlueprintCallable, Category = "Behavior")
-    void UpdateBehavior(float DeltaTime);
-
-    UFUNCTION(BlueprintCallable, Category = "Behavior")
+    UFUNCTION(BlueprintCallable, Category = "Dinosaur Behavior")
     bool CanSeePlayer();
 
-    UFUNCTION(BlueprintCallable, Category = "Behavior")
-    AActor* FindNearestPlayer();
-
-    UFUNCTION(BlueprintCallable, Category = "Behavior")
-    void StartPatrolling();
-
-    UFUNCTION(BlueprintCallable, Category = "Behavior")
+    UFUNCTION(BlueprintCallable, Category = "Dinosaur Behavior")
     void StartHunting(AActor* Target);
 
-    UFUNCTION(BlueprintCallable, Category = "Behavior")
-    void StartFleeing();
+    UFUNCTION(BlueprintCallable, Category = "Dinosaur Behavior")
+    void StartPatrolling();
 
-    UFUNCTION(BlueprintCallable, Category = "Behavior")
-    void InitializeSpeciesStats();
+    UFUNCTION(BlueprintCallable, Category = "Dinosaur Behavior")
+    void UpdateStats(float DeltaTime);
 
 private:
     FTimerHandle BehaviorUpdateTimer;
     AActor* CurrentTarget = nullptr;
-    int32 CurrentPatrolIndex = 0;
+    FVector CurrentDestination = FVector::ZeroVector;
     
-    void ExecuteIdleBehavior(float DeltaTime);
-    void ExecutePatrolBehavior(float DeltaTime);
-    void ExecuteHuntingBehavior(float DeltaTime);
-    void ExecuteFeedingBehavior(float DeltaTime);
-    void ExecuteFleeingBehavior(float DeltaTime);
-    void ExecuteSleepingBehavior(float DeltaTime);
-    void ExecuteTerritorialBehavior(float DeltaTime);
-    void ExecutePackHuntBehavior(float DeltaTime);
-    
+    void UpdateBehavior();
+    void ProcessIdleState();
+    void ProcessPatrolState();
+    void ProcessHuntingState();
+    void ProcessFleeingState();
+    AActor* FindNearestPlayer();
     void MoveToLocation(FVector TargetLocation);
-    bool IsAtLocation(FVector Location, float Tolerance = 200.0f);
-    void GeneratePatrolPoints();
 };
 
-UCLASS()
+UCLASS(Blueprintable)
 class TRANSPERSONALGAME_API ANPC_DinosaurBehaviorManager : public AActor
 {
     GENERATED_BODY()
@@ -203,39 +149,37 @@ public:
 
 protected:
     virtual void BeginPlay() override;
-
-public:
     virtual void Tick(float DeltaTime) override;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Manager")
+public:
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior Manager")
     TArray<AActor*> ManagedDinosaurs;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Manager")
-    float GlobalBehaviorUpdateInterval = 2.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior Manager")
+    float GlobalAggressionMultiplier = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Manager")
-    int32 MaxActiveBehaviors = 50;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior Manager")
+    bool bEnablePackBehavior = true;
 
-    UFUNCTION(BlueprintCallable, Category = "Manager")
-    void RegisterDinosaur(AActor* Dinosaur);
+    UFUNCTION(BlueprintCallable, Category = "Behavior Manager")
+    void RegisterDinosaur(AActor* DinosaurActor);
 
-    UFUNCTION(BlueprintCallable, Category = "Manager")
-    void UnregisterDinosaur(AActor* Dinosaur);
+    UFUNCTION(BlueprintCallable, Category = "Behavior Manager")
+    void UnregisterDinosaur(AActor* DinosaurActor);
 
-    UFUNCTION(BlueprintCallable, Category = "Manager")
-    void UpdateAllBehaviors();
+    UFUNCTION(BlueprintCallable, Category = "Behavior Manager")
+    void UpdateGlobalBehavior();
 
-    UFUNCTION(BlueprintCallable, Category = "Manager")
-    TArray<AActor*> GetDinosaursInRange(FVector Location, float Range);
+    UFUNCTION(BlueprintCallable, Category = "Behavior Manager")
+    TArray<AActor*> GetDinosaursInRadius(FVector Center, float Radius);
 
-    UFUNCTION(BlueprintCallable, Category = "Manager")
-    void SetGlobalAggressionLevel(float AggressionMultiplier);
+    UFUNCTION(BlueprintCallable, Category = "Behavior Manager")
+    void TriggerTerritorialResponse(FVector Location, float Radius);
 
 private:
     FTimerHandle GlobalUpdateTimer;
-    float GlobalAggressionMultiplier = 1.0f;
     
-    void OptimizeBehaviorUpdates();
-    void HandlePackBehavior();
-    void HandleTerritorialConflicts();
+    void ProcessPackBehavior();
+    void ProcessTerritorialBehavior();
+    void UpdateDinosaurInteractions();
 };
