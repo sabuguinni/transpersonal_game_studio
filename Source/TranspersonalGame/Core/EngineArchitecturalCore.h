@@ -1,15 +1,17 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/GameInstanceSubsystem.h"
+#include "Subsystems/GameInstanceSubsystem.h"
 #include "Engine/World.h"
 #include "SharedTypes.h"
 #include "EngineArchitecturalCore.generated.h"
 
+DECLARE_LOG_CATEGORY_EXTERN(LogEngineArchitecture, Log, All);
+
 /**
- * Engine Architectural Core - Central coordination system for all engine-level architecture
- * Ensures compliance with architectural standards across all game systems
- * Manages module dependencies, performance constraints, and system integration
+ * Engine Architectural Core Subsystem
+ * Central authority for all architectural decisions, module coordination, and system integration
+ * Enforces architectural standards across all game systems
  */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UEngineArchitecturalCore : public UGameInstanceSubsystem
@@ -23,136 +25,102 @@ public:
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
-    // Core Architecture Management
+    // Core architectural management
     UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    void InitializeArchitecturalSystems();
+    bool RegisterModule(const FString& ModuleName, const FString& ModuleVersion);
 
     UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    void ValidateSystemCompliance();
+    bool ValidateModuleDependencies(const FString& ModuleName);
 
     UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    void RegisterSystemModule(const FString& ModuleName, int32 Priority);
+    bool EnforcePerformanceConstraints();
 
     UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    void UnregisterSystemModule(const FString& ModuleName);
+    void RunArchitecturalCompliance();
 
-    // Performance Management
+    // Performance monitoring
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    void SetPerformanceTarget(float TargetFPS, float MaxMemoryMB);
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    bool CheckPerformanceCompliance();
+    float GetCurrentFrameTime() const;
 
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    void OptimizeSystemLoad();
+    int32 GetActiveActorCount() const;
 
-    // Module Integration
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    float GetMemoryUsageMB() const;
+
+    // Module coordination
+    UFUNCTION(BlueprintCallable, Category = "Module Management")
+    TArray<FString> GetRegisteredModules() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Module Management")
+    bool IsModuleLoaded(const FString& ModuleName) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Module Management")
+    void ReloadModule(const FString& ModuleName);
+
+    // System integration validation
     UFUNCTION(BlueprintCallable, Category = "Integration")
-    void ValidateModuleDependencies();
+    bool ValidateSystemIntegration();
 
     UFUNCTION(BlueprintCallable, Category = "Integration")
-    void ResolveModuleConflicts();
+    void LogSystemStatus();
 
-    // Biome System Integration
-    UFUNCTION(BlueprintCallable, Category = "Biome Architecture")
-    void InitializeBiomeArchitecture();
+    // Architectural constraints enforcement
+    UFUNCTION(BlueprintCallable, Category = "Constraints")
+    bool EnforceWorldPartitionLimits();
 
-    UFUNCTION(BlueprintCallable, Category = "Biome Architecture")
-    void ValidateBiomeSystemIntegration();
+    UFUNCTION(BlueprintCallable, Category = "Constraints")
+    bool ValidateActorLimits();
+
+    UFUNCTION(BlueprintCallable, Category = "Constraints")
+    bool CheckMemoryConstraints();
 
 protected:
-    // System Registry
-    UPROPERTY(BlueprintReadOnly, Category = "Architecture")
-    TMap<FString, int32> RegisteredModules;
+    // Registered modules tracking
+    UPROPERTY(BlueprintReadOnly, Category = "Modules")
+    TMap<FString, FString> RegisteredModules;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Architecture")
-    TArray<FString> SystemLoadOrder;
-
-    // Performance Constraints
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    // Performance metrics
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
     float TargetFrameRate = 60.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    int32 MaxActorsPerLevel = 50000;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
     float MaxMemoryUsageMB = 8192.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float CurrentFrameRate = 0.0f;
+    // Architectural validation flags
+    UPROPERTY(BlueprintReadOnly, Category = "Validation")
+    bool bArchitecturalComplianceEnabled = true;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float CurrentMemoryUsageMB = 0.0f;
+    UPROPERTY(BlueprintReadOnly, Category = "Validation")
+    bool bPerformanceMonitoringEnabled = true;
 
-    // Architecture State
-    UPROPERTY(BlueprintReadOnly, Category = "Architecture")
-    bool bSystemsInitialized = false;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Architecture")
-    bool bComplianceValidated = false;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Architecture")
-    int32 ActiveSystemCount = 0;
+    UPROPERTY(BlueprintReadOnly, Category = "Validation")
+    bool bModuleDependencyCheckEnabled = true;
 
 private:
     // Internal validation methods
-    void ValidatePhysicsIntegration();
-    void ValidateWorldGenerationIntegration();
-    void ValidateCharacterSystemIntegration();
-    void ValidateAISystemIntegration();
+    bool ValidatePhysicsIntegration();
+    bool ValidateWorldGeneration();
+    bool ValidateCharacterSystems();
+    bool ValidateBiomeManagement();
+    bool ValidateAudioSystems();
+    bool ValidateVFXSystems();
+    bool ValidateNPCBehavior();
+    bool ValidateCombatSystems();
+    bool ValidateQuestSystems();
+    bool ValidateNarrativeSystems();
 
-    // Performance monitoring
-    void UpdatePerformanceMetrics();
-    void CheckMemoryUsage();
-    void CheckFrameRate();
+    // Performance tracking
+    float LastFrameTime = 0.0f;
+    int32 LastActorCount = 0;
+    float LastMemoryUsage = 0.0f;
 
-    // System coordination
-    void InitializeSystemLoadOrder();
-    void LoadSystemsInOrder();
-    void ValidateSystemInterfaces();
-};
-
-/**
- * Engine Architecture Configuration
- * Defines architectural standards and constraints for the entire game
- */
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEngineArchitectureConfig
-{
-    GENERATED_BODY()
-
-    // Performance Targets
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float TargetFPS_PC = 60.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float TargetFPS_Console = 30.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float MaxMemoryUsage_PC = 8192.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float MaxMemoryUsage_Console = 4096.0f;
-
-    // System Constraints
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Systems")
-    int32 MaxConcurrentPhysicsObjects = 10000;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Systems")
-    int32 MaxConcurrentAIAgents = 5000;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Systems")
-    int32 MaxWorldPartitionCells = 100;
-
-    // Quality Settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quality")
-    int32 PhysicsLODLevels = 3;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quality")
-    int32 RenderingLODLevels = 5;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quality")
-    int32 AudioLODLevels = 3;
-
-    FEngineArchitectureConfig()
-    {
-        // Default constructor
-    }
+    // Module dependency validation
+    TMap<FString, TArray<FString>> ModuleDependencies;
+    
+    // System status tracking
+    TMap<FString, bool> SystemStatusMap;
 };
