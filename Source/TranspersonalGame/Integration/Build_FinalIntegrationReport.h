@@ -1,10 +1,49 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/World.h"
-#include "GameFramework/Actor.h"
-#include "Components/ActorComponent.h"
+#include "Engine/GameInstanceSubsystem.h"
 #include "Build_FinalIntegrationReport.generated.h"
+
+UENUM(BlueprintType)
+enum class EBuild_IntegrationStatus : uint8
+{
+    Unknown         UMETA(DisplayName = "Unknown"),
+    Initializing    UMETA(DisplayName = "Initializing"),
+    Testing         UMETA(DisplayName = "Testing"),
+    Validating      UMETA(DisplayName = "Validating"),
+    Complete        UMETA(DisplayName = "Complete"),
+    Failed          UMETA(DisplayName = "Failed")
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FBuild_SystemValidationResult
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    FString SystemName;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    bool bIsLoaded;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    bool bIsCompiled;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    FString ErrorMessage;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    float ValidationScore;
+
+    FBuild_SystemValidationResult()
+    {
+        SystemName = TEXT("");
+        bIsLoaded = false;
+        bIsCompiled = false;
+        ErrorMessage = TEXT("");
+        ValidationScore = 0.0f;
+    }
+};
 
 USTRUCT(BlueprintType)
 struct TRANSPERSONALGAME_API FBuild_IntegrationMetrics
@@ -12,107 +51,85 @@ struct TRANSPERSONALGAME_API FBuild_IntegrationMetrics
     GENERATED_BODY()
 
     UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    int32 TotalActorsInLevel = 0;
+    int32 TotalActorCount;
 
     UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    int32 DinosaurActorCount = 0;
+    int32 DinosaurActorCount;
 
     UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    int32 CharacterActorCount = 0;
+    int32 LoadedSystemCount;
 
     UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    int32 StaticMeshAssetCount = 0;
+    int32 FailedSystemCount;
 
     UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    int32 DinosaurPackAssetCount = 0;
+    float OverallBuildScore;
 
     UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    bool bModuleLoadingSuccessful = false;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    bool bLevelSavedSuccessfully = false;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    FString BuildStatus = TEXT("Unknown");
-
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    FDateTime ValidationTimestamp;
+    EBuild_IntegrationStatus BuildStatus;
 
     FBuild_IntegrationMetrics()
     {
-        ValidationTimestamp = FDateTime::Now();
-        BuildStatus = TEXT("Pending");
+        TotalActorCount = 0;
+        DinosaurActorCount = 0;
+        LoadedSystemCount = 0;
+        FailedSystemCount = 0;
+        OverallBuildScore = 0.0f;
+        BuildStatus = EBuild_IntegrationStatus::Unknown;
     }
 };
 
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FBuild_BiomeValidation
-{
-    GENERATED_BODY()
-
-    UPROPERTY(BlueprintReadOnly, Category = "Biomes")
-    FString BiomeName = TEXT("");
-
-    UPROPERTY(BlueprintReadOnly, Category = "Biomes")
-    FVector BiomeLocation = FVector::ZeroVector;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Biomes")
-    int32 ActorCount = 0;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Biomes")
-    bool bPopulated = false;
-
-    FBuild_BiomeValidation()
-    {
-        BiomeName = TEXT("Unknown");
-        bPopulated = false;
-    }
-
-    FBuild_BiomeValidation(const FString& InBiomeName, const FVector& InLocation)
-        : BiomeName(InBiomeName), BiomeLocation(InLocation), ActorCount(0), bPopulated(false)
-    {
-    }
-};
-
+/**
+ * Final Integration Report System
+ * Provides comprehensive build validation and system health monitoring
+ * Used by Integration Agent #19 to validate all agent outputs
+ */
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UBuild_FinalIntegrationReport : public UObject
+class TRANSPERSONALGAME_API UBuild_FinalIntegrationReport : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
 public:
     UBuild_FinalIntegrationReport();
 
-    UPROPERTY(BlueprintReadOnly, Category = "Integration Report")
-    FBuild_IntegrationMetrics IntegrationMetrics;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Integration Report")
-    TArray<FBuild_BiomeValidation> BiomeValidations;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Integration Report")
-    TArray<FString> LoadedClasses;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Integration Report")
-    TArray<FString> FailedClasses;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Integration Report")
-    FString FinalBuildStatus = TEXT("Unknown");
+    // USubsystem interface
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
 
     UFUNCTION(BlueprintCallable, Category = "Integration")
-    void GenerateIntegrationReport(UWorld* World);
+    void RunFullIntegrationValidation();
 
     UFUNCTION(BlueprintCallable, Category = "Integration")
-    void ValidateBiomePopulation(UWorld* World);
+    FBuild_IntegrationMetrics GetCurrentBuildMetrics() const;
 
     UFUNCTION(BlueprintCallable, Category = "Integration")
-    void ValidateModuleLoading();
+    TArray<FBuild_SystemValidationResult> GetSystemValidationResults() const;
 
     UFUNCTION(BlueprintCallable, Category = "Integration")
-    bool IsIntegrationSuccessful() const;
+    bool ValidateSystemClass(const FString& ClassPath);
 
     UFUNCTION(BlueprintCallable, Category = "Integration")
-    FString GetDetailedReport() const;
+    void GenerateIntegrationReport();
+
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    float CalculateBuildScore() const;
+
+protected:
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    FBuild_IntegrationMetrics CurrentMetrics;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    TArray<FBuild_SystemValidationResult> ValidationResults;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    TArray<FString> CriticalSystemPaths;
 
 private:
-    void InitializeBiomeValidations();
-    void CountActorsInBiome(UWorld* World, FBuild_BiomeValidation& BiomeValidation);
+    void InitializeCriticalSystems();
+    void ValidateActorCounts();
+    void ValidateSystemLoading();
+    void UpdateBuildStatus();
+    void LogIntegrationResults();
 };
+
+#include "Build_FinalIntegrationReport.generated.h"
