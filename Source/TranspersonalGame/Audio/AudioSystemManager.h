@@ -1,100 +1,214 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
+#include "Subsystems/GameInstanceSubsystem.h"
+#include "Engine/Engine.h"
 #include "Components/AudioComponent.h"
 #include "Sound/SoundCue.h"
-#include "Engine/World.h"
+#include "Sound/SoundWave.h"
 #include "AudioSystemManager.generated.h"
 
 UENUM(BlueprintType)
 enum class EAudio_AudioType : uint8
 {
+    SFX,
+    Music,
     Ambient,
-    Footsteps,
-    Damage,
-    Environmental,
-    Dinosaur
+    Voice,
+    UI
+};
+
+UENUM(BlueprintType)
+enum class EAudio_BiomeAmbient : uint8
+{
+    Savana,
+    Forest,
+    Desert,
+    Mountain,
+    Swamp
 };
 
 USTRUCT(BlueprintType)
-struct FAudio_SoundEntry
+struct FAudio_SoundData
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    TSoftObjectPtr<USoundBase> SoundAsset;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
     EAudio_AudioType AudioType;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    TSoftObjectPtr<USoundCue> SoundCue;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    float Volume;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float Volume = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    float Pitch;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float Pitch = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    bool bLooping;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    bool bShouldLoop = false;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    float FadeInTime;
 
-    FAudio_SoundEntry()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    float FadeOutTime;
+
+    FAudio_SoundData()
     {
-        AudioType = EAudio_AudioType::Ambient;
         Volume = 1.0f;
         Pitch = 1.0f;
-        bShouldLoop = false;
+        bLooping = false;
+        FadeInTime = 0.0f;
+        FadeOutTime = 0.0f;
+        AudioType = EAudio_AudioType::SFX;
+    }
+};
+
+USTRUCT(BlueprintType)
+struct FAudio_ProximityAudioData
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Proximity Audio")
+    TSoftObjectPtr<USoundBase> ProximitySound;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Proximity Audio")
+    float TriggerDistance;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Proximity Audio")
+    float MaxDistance;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Proximity Audio")
+    float VolumeMultiplier;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Proximity Audio")
+    bool bUseDistanceAttenuation;
+
+    FAudio_ProximityAudioData()
+    {
+        TriggerDistance = 1000.0f;
+        MaxDistance = 5000.0f;
+        VolumeMultiplier = 1.0f;
+        bUseDistanceAttenuation = true;
     }
 };
 
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API AAudio_AudioSystemManager : public AActor
+class TRANSPERSONALGAME_API UAudioSystemManager : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
 public:
-    AAudio_AudioSystemManager();
+    UAudioSystemManager();
+
+    // Subsystem interface
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
+
+    // Core audio playback
+    UFUNCTION(BlueprintCallable, Category = "Audio System")
+    UAudioComponent* PlaySound2D(USoundBase* Sound, float VolumeMultiplier = 1.0f, float PitchMultiplier = 1.0f, bool bPersistent = false);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio System")
+    UAudioComponent* PlaySoundAtLocation(const UObject* WorldContext, USoundBase* Sound, FVector Location, FRotator Rotation = FRotator::ZeroRotator, float VolumeMultiplier = 1.0f, float PitchMultiplier = 1.0f, float StartTime = 0.0f);
+
+    // Proximity audio system
+    UFUNCTION(BlueprintCallable, Category = "Audio System")
+    void RegisterProximityAudio(AActor* SourceActor, const FAudio_ProximityAudioData& AudioData);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio System")
+    void UnregisterProximityAudio(AActor* SourceActor);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio System")
+    void UpdateProximityAudio(APawn* Listener);
+
+    // Biome ambient audio
+    UFUNCTION(BlueprintCallable, Category = "Audio System")
+    void SetBiomeAmbient(EAudio_BiomeAmbient BiomeType, float FadeTime = 2.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio System")
+    void StopBiomeAmbient(float FadeTime = 2.0f);
+
+    // Damage audio feedback
+    UFUNCTION(BlueprintCallable, Category = "Audio System")
+    void PlayDamageAudio(float DamageAmount, FVector HitLocation);
+
+    // T-Rex proximity audio
+    UFUNCTION(BlueprintCallable, Category = "Audio System")
+    void PlayTRexFootstepAudio(FVector TRexLocation, float Intensity = 1.0f);
+
+    // Day/Night cycle audio
+    UFUNCTION(BlueprintCallable, Category = "Audio System")
+    void TransitionToDayAudio(float TransitionTime = 5.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio System")
+    void TransitionToNightAudio(float TransitionTime = 5.0f);
+
+    // Master volume controls
+    UFUNCTION(BlueprintCallable, Category = "Audio System")
+    void SetMasterVolume(float Volume);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio System")
+    void SetSFXVolume(float Volume);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio System")
+    void SetMusicVolume(float Volume);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio System")
+    void SetAmbientVolume(float Volume);
 
 protected:
-    virtual void BeginPlay() override;
+    // Audio component management
+    UPROPERTY()
+    TArray<UAudioComponent*> ActiveAudioComponents;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio System")
-    class UAudioComponent* PrimaryAudioComponent;
+    UPROPERTY()
+    TMap<TWeakObjectPtr<AActor>, FAudio_ProximityAudioData> ProximityAudioMap;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Library")
-    TArray<FAudio_SoundEntry> AudioLibrary;
+    // Biome ambient audio
+    UPROPERTY()
+    UAudioComponent* CurrentBiomeAmbient;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Settings")
-    float MasterVolume = 1.0f;
+    UPROPERTY()
+    TMap<EAudio_BiomeAmbient, TSoftObjectPtr<USoundBase>> BiomeAmbientSounds;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Settings")
-    float AmbientVolume = 0.7f;
+    // Damage audio
+    UPROPERTY()
+    TSoftObjectPtr<USoundBase> DamageAudioSound;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Settings")
-    float EffectsVolume = 1.0f;
+    // T-Rex audio
+    UPROPERTY()
+    TSoftObjectPtr<USoundBase> TRexFootstepSound;
 
-public:
-    UFUNCTION(BlueprintCallable, Category = "Audio System")
-    void PlayAudioByType(EAudio_AudioType AudioType, FVector Location = FVector::ZeroVector);
+    // Day/Night audio
+    UPROPERTY()
+    UAudioComponent* DayAmbientComponent;
 
-    UFUNCTION(BlueprintCallable, Category = "Audio System")
-    void StopAudioByType(EAudio_AudioType AudioType);
+    UPROPERTY()
+    UAudioComponent* NightAmbientComponent;
 
-    UFUNCTION(BlueprintCallable, Category = "Audio System")
-    void SetMasterVolume(float NewVolume);
+    UPROPERTY()
+    TSoftObjectPtr<USoundBase> DayAmbientSound;
 
-    UFUNCTION(BlueprintCallable, Category = "Audio System")
-    void PlayFootstepAudio(FVector FootstepLocation, float Intensity = 1.0f);
+    UPROPERTY()
+    TSoftObjectPtr<USoundBase> NightAmbientSound;
 
-    UFUNCTION(BlueprintCallable, Category = "Audio System")
-    void PlayDamageAudio(FVector DamageLocation);
+    // Volume settings
+    UPROPERTY()
+    float MasterVolume;
 
-    UFUNCTION(BlueprintCallable, Category = "Audio System")
-    void PlayAmbientAudio(EAudio_AudioType EnvironmentType);
+    UPROPERTY()
+    float SFXVolume;
+
+    UPROPERTY()
+    float MusicVolume;
+
+    UPROPERTY()
+    float AmbientVolume;
 
 private:
-    UPROPERTY()
-    TMap<EAudio_AudioType, UAudioComponent*> ActiveAudioComponents;
-
-    void InitializeAudioLibrary();
-    UAudioComponent* CreateAudioComponent(const FAudio_SoundEntry& SoundEntry);
+    void CleanupFinishedComponents();
+    void LoadDefaultAudioAssets();
+    float CalculateDistanceAttenuation(float Distance, float MaxDistance) const;
 };
