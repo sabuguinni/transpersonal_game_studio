@@ -1,167 +1,241 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/GameInstanceSubsystem.h"
 #include "Engine/World.h"
+#include "Engine/GameInstance.h"
+#include "Subsystems/GameInstanceSubsystem.h"
 #include "Subsystems/WorldSubsystem.h"
-#include "../../SharedTypes.h"
+#include "Components/ActorComponent.h"
+#include "GameFramework/Actor.h"
 #include "EngineArchitectCore.generated.h"
 
-class UBiomeManager;
-class UPhysicsSystemManager;
-class UPerformanceMonitor;
+// Forward declarations
+class UEngineArchitectSubsystem;
+class AEngineValidationActor;
 
 /**
- * Core Engine Architecture Management System
- * Defines and enforces architectural rules across all game systems
- * Manages module dependencies, performance constraints, and integration protocols
+ * Engine Architecture Configuration
+ * Defines core technical rules and constraints for all game systems
  */
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UEngineArchitectCore : public UGameInstanceSubsystem
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FEng_ArchitectureConfig
+{
+    GENERATED_BODY()
+
+    // Performance budgets
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance")
+    int32 MaxActorsPerBiome = 500;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance")
+    int32 MaxDinosaurCount = 50;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance")
+    float TargetFrameRate = 60.0f;
+
+    // World constraints
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "World")
+    float WorldSizeKm = 16.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "World")
+    bool bUseWorldPartition = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "World")
+    int32 BiomeCount = 5;
+
+    FEng_ArchitectureConfig()
+    {
+        MaxActorsPerBiome = 500;
+        MaxDinosaurCount = 50;
+        TargetFrameRate = 60.0f;
+        WorldSizeKm = 16.0f;
+        bUseWorldPartition = true;
+        BiomeCount = 5;
+    }
+};
+
+/**
+ * Engine validation states
+ */
+UENUM(BlueprintType)
+enum class EEng_ValidationState : uint8
+{
+    Unknown     UMETA(DisplayName = "Unknown"),
+    Validating  UMETA(DisplayName = "Validating"),
+    Passed      UMETA(DisplayName = "Passed"),
+    Failed      UMETA(DisplayName = "Failed"),
+    Critical    UMETA(DisplayName = "Critical Error")
+};
+
+/**
+ * Module dependency tracking
+ */
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FEng_ModuleDependency
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Module")
+    FString ModuleName;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Module")
+    bool bIsRequired = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Module")
+    bool bIsLoaded = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Module")
+    FString Version;
+
+    FEng_ModuleDependency()
+    {
+        ModuleName = TEXT("");
+        bIsRequired = true;
+        bIsLoaded = false;
+        Version = TEXT("1.0.0");
+    }
+};
+
+/**
+ * Engine Architect Subsystem
+ * Manages technical architecture validation and enforcement
+ */
+UCLASS(BlueprintType)
+class TRANSPERSONALGAME_API UEngineArchitectSubsystem : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
 public:
-    UEngineArchitectCore();
-
-    // USubsystem Interface
+    // Subsystem interface
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
-    // Module Registration System
+    // Architecture validation
     UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    bool RegisterModule(const FString& ModuleName, int32 Priority, const TArray<FString>& Dependencies);
+    bool ValidateArchitecture();
 
     UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    bool UnregisterModule(const FString& ModuleName);
+    EEng_ValidationState GetValidationState() const { return ValidationState; }
 
     UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    bool IsModuleRegistered(const FString& ModuleName) const;
-
-    // Performance Constraint Enforcement
-    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    void SetPerformanceConstraint(EEng_PerformanceLevel Level, float MaxFrameTime, int32 MaxActors);
+    FEng_ArchitectureConfig GetArchitectureConfig() const { return Config; }
 
     UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    bool ValidatePerformanceCompliance() const;
+    void SetArchitectureConfig(const FEng_ArchitectureConfig& NewConfig);
 
-    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    FEng_PerformanceMetrics GetCurrentPerformanceMetrics() const;
+    // Module management
+    UFUNCTION(BlueprintCallable, Category = "Module Management")
+    bool RegisterModule(const FString& ModuleName, const FString& Version);
 
-    // System Integration Management
-    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    void ValidateSystemIntegration();
+    UFUNCTION(BlueprintCallable, Category = "Module Management")
+    bool IsModuleLoaded(const FString& ModuleName) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    bool CanSystemsIntegrate(const FString& SystemA, const FString& SystemB) const;
+    UFUNCTION(BlueprintCallable, Category = "Module Management")
+    TArray<FEng_ModuleDependency> GetModuleDependencies() const;
 
-    // Architecture Compliance
-    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    TArray<FString> GetArchitecturalViolations() const;
+    // Performance monitoring
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    float GetCurrentFrameRate() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    void EnforceArchitecturalRules();
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    int32 GetActorCount() const;
 
-    // Module Dependency Chain
-    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    TArray<FString> GetModuleDependencyChain(const FString& ModuleName) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    bool ValidateDependencyChain() const;
-
-    // Critical System Monitoring
-    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    void MonitorCriticalSystems();
-
-    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    bool IsCriticalSystemHealthy(const FString& SystemName) const;
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    bool IsPerformanceWithinBudget() const;
 
 protected:
-    // Module Registry
-    UPROPERTY(BlueprintReadOnly, Category = "Engine Architecture", meta = (AllowPrivateAccess = "true"))
-    TMap<FString, FEng_ModuleInfo> RegisteredModules;
+    UPROPERTY()
+    FEng_ArchitectureConfig Config;
 
-    // Performance Constraints
-    UPROPERTY(BlueprintReadOnly, Category = "Engine Architecture", meta = (AllowPrivateAccess = "true"))
-    TMap<EEng_PerformanceLevel, FEng_PerformanceConstraints> PerformanceConstraints;
+    UPROPERTY()
+    EEng_ValidationState ValidationState = EEng_ValidationState::Unknown;
 
-    // System Integration Rules
-    UPROPERTY(BlueprintReadOnly, Category = "Engine Architecture", meta = (AllowPrivateAccess = "true"))
-    TMap<FString, TArray<FString>> SystemCompatibilityMatrix;
+    UPROPERTY()
+    TArray<FEng_ModuleDependency> ModuleDependencies;
 
-    // Architectural Violations
-    UPROPERTY(BlueprintReadOnly, Category = "Engine Architecture", meta = (AllowPrivateAccess = "true"))
-    TArray<FString> CurrentViolations;
-
-    // Critical System Status
-    UPROPERTY(BlueprintReadOnly, Category = "Engine Architecture", meta = (AllowPrivateAccess = "true"))
-    TMap<FString, bool> CriticalSystemStatus;
-
-    // Performance Monitoring
-    UPROPERTY(BlueprintReadOnly, Category = "Engine Architecture", meta = (AllowPrivateAccess = "true"))
-    FEng_PerformanceMetrics LastPerformanceCheck;
+    UPROPERTY()
+    float LastFrameRate = 0.0f;
 
 private:
-    // Internal validation methods
-    void ValidateModuleDependencies();
-    void CheckPerformanceThresholds();
-    void UpdateSystemCompatibility();
-    void LogArchitecturalEvent(const FString& Event, const FString& Details);
-
-    // Timer handles
-    FTimerHandle PerformanceMonitorTimer;
-    FTimerHandle SystemValidationTimer;
-
-    // Constants
-    static constexpr float PERFORMANCE_CHECK_INTERVAL = 5.0f;
-    static constexpr float SYSTEM_VALIDATION_INTERVAL = 10.0f;
-    static constexpr int32 MAX_ARCHITECTURAL_VIOLATIONS = 10;
+    void InitializeModuleDependencies();
+    bool ValidateModules();
+    bool ValidatePerformance();
+    bool ValidateWorldStructure();
 };
 
 /**
- * World-specific Engine Architecture Subsystem
- * Manages world-level architectural concerns and validation
+ * Engine Validation Actor
+ * Placed in levels to perform runtime architecture validation
  */
-UCLASS(BlueprintType)
-class TRANSPERSONALGAME_API UEngineArchitectWorldSubsystem : public UWorldSubsystem
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API AEngineValidationActor : public AActor
 {
     GENERATED_BODY()
 
 public:
-    UEngineArchitectWorldSubsystem();
-
-    // USubsystem Interface
-    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
-    virtual void OnWorldBeginPlay(UWorld& InWorld) override;
-
-    // World-level Architecture Management
-    UFUNCTION(BlueprintCallable, Category = "World Architecture")
-    void ValidateWorldArchitecture();
-
-    UFUNCTION(BlueprintCallable, Category = "World Architecture")
-    bool IsWorldArchitectureValid() const;
-
-    UFUNCTION(BlueprintCallable, Category = "World Architecture")
-    void EnforceWorldConstraints();
-
-    // Biome Architecture Validation
-    UFUNCTION(BlueprintCallable, Category = "World Architecture")
-    bool ValidateBiomeArchitecture(EEng_BiomeType BiomeType) const;
-
-    UFUNCTION(BlueprintCallable, Category = "World Architecture")
-    void OptimizeBiomePerformance(EEng_BiomeType BiomeType);
+    AEngineValidationActor();
 
 protected:
-    UPROPERTY(BlueprintReadOnly, Category = "World Architecture", meta = (AllowPrivateAccess = "true"))
-    bool bWorldArchitectureValid;
+    virtual void BeginPlay() override;
+    virtual void Tick(float DeltaTime) override;
 
-    UPROPERTY(BlueprintReadOnly, Category = "World Architecture", meta = (AllowPrivateAccess = "true"))
-    TArray<FString> WorldArchitectureIssues;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    class USceneComponent* RootSceneComponent;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Validation")
+    bool bPerformContinuousValidation = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Validation")
+    float ValidationInterval = 5.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Validation")
+    EEng_ValidationState CurrentValidationState = EEng_ValidationState::Unknown;
+
+    UFUNCTION(BlueprintCallable, Category = "Validation")
+    void PerformValidation();
+
+    UFUNCTION(BlueprintImplementableEvent, Category = "Validation")
+    void OnValidationStateChanged(EEng_ValidationState NewState);
 
 private:
-    void CheckWorldLevelConstraints();
-    void ValidateActorDistribution();
-    void MonitorWorldPerformance();
+    float LastValidationTime = 0.0f;
+    UEngineArchitectSubsystem* ArchitectSubsystem = nullptr;
 };
 
-#include "EngineArchitectCore.generated.h"
+/**
+ * Engine Performance Monitor Component
+ * Tracks performance metrics for individual actors
+ */
+UCLASS(BlueprintType, Blueprintable, meta = (BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UEnginePerformanceComponent : public UActorComponent
+{
+    GENERATED_BODY()
+
+public:
+    UEnginePerformanceComponent();
+
+protected:
+    virtual void BeginPlay() override;
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    bool bTrackPerformance = true;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float AverageTickTime = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float MaxTickTime = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    int32 TickCount = 0;
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void ResetPerformanceStats();
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    float GetPerformanceScore() const;
+
+private:
+    float TotalTickTime = 0.0f;
+    double LastTickStartTime = 0.0;
+};
