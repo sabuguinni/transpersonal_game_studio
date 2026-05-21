@@ -1,535 +1,391 @@
 #include "EngineArchitectCore.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "TimerManager.h"
-#include "Kismet/GameplayStatics.h"
-#include "Engine/GameInstance.h"
+#include "Components/SceneComponent.h"
 #include "HAL/PlatformFilemanager.h"
 #include "Misc/DateTime.h"
+#include "GameFramework/GameModeBase.h"
 
-UEngineArchitectCore::UEngineArchitectCore()
-{
-    // Initialize default performance constraints
-    FEng_PerformanceConstraints PCConstraints;
-    PCConstraints.MaxFrameTime = 16.67f; // 60 FPS
-    PCConstraints.MaxActors = 10000;
-    PCConstraints.MaxMemoryMB = 4096;
-    PCConstraints.MaxDrawCalls = 2000;
-    PerformanceConstraints.Add(EEng_PerformanceLevel::PC_High, PCConstraints);
+// UEngineArchitectSubsystem Implementation
 
-    FEng_PerformanceConstraints ConsoleConstraints;
-    ConsoleConstraints.MaxFrameTime = 33.33f; // 30 FPS
-    ConsoleConstraints.MaxActors = 5000;
-    ConsoleConstraints.MaxMemoryMB = 2048;
-    ConsoleConstraints.MaxDrawCalls = 1000;
-    PerformanceConstraints.Add(EEng_PerformanceLevel::Console, ConsoleConstraints);
-
-    // Initialize critical system status
-    CriticalSystemStatus.Add(TEXT("Physics"), true);
-    CriticalSystemStatus.Add(TEXT("Rendering"), true);
-    CriticalSystemStatus.Add(TEXT("Audio"), true);
-    CriticalSystemStatus.Add(TEXT("WorldGeneration"), true);
-    CriticalSystemStatus.Add(TEXT("AI"), true);
-
-    // Initialize performance metrics
-    LastPerformanceCheck.FrameTime = 0.0f;
-    LastPerformanceCheck.ActorCount = 0;
-    LastPerformanceCheck.MemoryUsageMB = 0.0f;
-    LastPerformanceCheck.DrawCalls = 0;
-    LastPerformanceCheck.Timestamp = FDateTime::Now();
-}
-
-void UEngineArchitectCore::Initialize(FSubsystemCollectionBase& Collection)
+void UEngineArchitectSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
-
-    UE_LOG(LogTemp, Warning, TEXT("EngineArchitectCore: Initializing architectural management system"));
-
-    // Start performance monitoring
-    if (UWorld* World = GetWorld())
-    {
-        World->GetTimerManager().SetTimer(
-            PerformanceMonitorTimer,
-            this,
-            &UEngineArchitectCore::CheckPerformanceThresholds,
-            PERFORMANCE_CHECK_INTERVAL,
-            true
-        );
-
-        World->GetTimerManager().SetTimer(
-            SystemValidationTimer,
-            this,
-            &UEngineArchitectCore::ValidateModuleDependencies,
-            SYSTEM_VALIDATION_INTERVAL,
-            true
-        );
-    }
-
-    // Register core modules
-    RegisterModule(TEXT("Core"), 0, {});
-    RegisterModule(TEXT("Physics"), 1, {TEXT("Core")});
-    RegisterModule(TEXT("Rendering"), 1, {TEXT("Core")});
-    RegisterModule(TEXT("WorldGeneration"), 2, {TEXT("Core"), TEXT("Physics")});
-    RegisterModule(TEXT("AI"), 3, {TEXT("Core"), TEXT("Physics"), TEXT("WorldGeneration")});
-    RegisterModule(TEXT("Audio"), 2, {TEXT("Core")});
-
-    LogArchitecturalEvent(TEXT("Initialization"), TEXT("Engine Architecture Core initialized successfully"));
+    
+    UE_LOG(LogTemp, Warning, TEXT("Engine Architect Subsystem Initializing..."));
+    
+    // Initialize default configuration
+    Config = FEng_ArchitectureConfig();
+    ValidationState = EEng_ValidationState::Unknown;
+    
+    // Initialize module dependencies
+    InitializeModuleDependencies();
+    
+    // Perform initial validation
+    ValidateArchitecture();
+    
+    UE_LOG(LogTemp, Warning, TEXT("Engine Architect Subsystem Initialized"));
 }
 
-void UEngineArchitectCore::Deinitialize()
+void UEngineArchitectSubsystem::Deinitialize()
 {
-    if (UWorld* World = GetWorld())
-    {
-        World->GetTimerManager().ClearTimer(PerformanceMonitorTimer);
-        World->GetTimerManager().ClearTimer(SystemValidationTimer);
-    }
-
-    LogArchitecturalEvent(TEXT("Shutdown"), TEXT("Engine Architecture Core shutting down"));
+    UE_LOG(LogTemp, Warning, TEXT("Engine Architect Subsystem Deinitializing..."));
+    
+    ModuleDependencies.Empty();
+    ValidationState = EEng_ValidationState::Unknown;
+    
     Super::Deinitialize();
 }
 
-bool UEngineArchitectCore::RegisterModule(const FString& ModuleName, int32 Priority, const TArray<FString>& Dependencies)
+bool UEngineArchitectSubsystem::ValidateArchitecture()
 {
-    if (RegisteredModules.Contains(ModuleName))
+    UE_LOG(LogTemp, Warning, TEXT("Engine Architect: Starting architecture validation"));
+    
+    ValidationState = EEng_ValidationState::Validating;
+    
+    bool bAllValidationsPassed = true;
+    
+    // Validate modules
+    if (!ValidateModules())
     {
-        UE_LOG(LogTemp, Warning, TEXT("EngineArchitectCore: Module %s already registered"), *ModuleName);
-        return false;
+        UE_LOG(LogTemp, Error, TEXT("Engine Architect: Module validation failed"));
+        bAllValidationsPassed = false;
     }
+    
+    // Validate performance
+    if (!ValidatePerformance())
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Engine Architect: Performance validation failed"));
+        bAllValidationsPassed = false;
+    }
+    
+    // Validate world structure
+    if (!ValidateWorldStructure())
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Engine Architect: World structure validation failed"));
+        bAllValidationsPassed = false;
+    }
+    
+    ValidationState = bAllValidationsPassed ? EEng_ValidationState::Passed : EEng_ValidationState::Failed;
+    
+    UE_LOG(LogTemp, Warning, TEXT("Engine Architect: Validation complete - State: %s"), 
+           ValidationState == EEng_ValidationState::Passed ? TEXT("PASSED") : TEXT("FAILED"));
+    
+    return bAllValidationsPassed;
+}
 
-    FEng_ModuleInfo ModuleInfo;
-    ModuleInfo.ModuleName = ModuleName;
-    ModuleInfo.Priority = Priority;
-    ModuleInfo.Dependencies = Dependencies;
-    ModuleInfo.bIsActive = true;
-    ModuleInfo.LastValidation = FDateTime::Now();
+void UEngineArchitectSubsystem::SetArchitectureConfig(const FEng_ArchitectureConfig& NewConfig)
+{
+    Config = NewConfig;
+    UE_LOG(LogTemp, Warning, TEXT("Engine Architect: Configuration updated"));
+    
+    // Re-validate with new config
+    ValidateArchitecture();
+}
 
-    RegisteredModules.Add(ModuleName, ModuleInfo);
-
-    LogArchitecturalEvent(TEXT("ModuleRegistration"), FString::Printf(TEXT("Module %s registered with priority %d"), *ModuleName, Priority));
+bool UEngineArchitectSubsystem::RegisterModule(const FString& ModuleName, const FString& Version)
+{
+    // Check if module already exists
+    for (FEng_ModuleDependency& Dependency : ModuleDependencies)
+    {
+        if (Dependency.ModuleName == ModuleName)
+        {
+            Dependency.bIsLoaded = true;
+            Dependency.Version = Version;
+            UE_LOG(LogTemp, Warning, TEXT("Engine Architect: Module %s updated to version %s"), *ModuleName, *Version);
+            return true;
+        }
+    }
+    
+    // Add new module
+    FEng_ModuleDependency NewModule;
+    NewModule.ModuleName = ModuleName;
+    NewModule.Version = Version;
+    NewModule.bIsLoaded = true;
+    NewModule.bIsRequired = false; // Dynamically registered modules are optional
+    
+    ModuleDependencies.Add(NewModule);
+    UE_LOG(LogTemp, Warning, TEXT("Engine Architect: Module %s registered with version %s"), *ModuleName, *Version);
+    
     return true;
 }
 
-bool UEngineArchitectCore::UnregisterModule(const FString& ModuleName)
+bool UEngineArchitectSubsystem::IsModuleLoaded(const FString& ModuleName) const
 {
-    if (!RegisteredModules.Contains(ModuleName))
+    for (const FEng_ModuleDependency& Dependency : ModuleDependencies)
     {
-        return false;
-    }
-
-    RegisteredModules.Remove(ModuleName);
-    LogArchitecturalEvent(TEXT("ModuleUnregistration"), FString::Printf(TEXT("Module %s unregistered"), *ModuleName));
-    return true;
-}
-
-bool UEngineArchitectCore::IsModuleRegistered(const FString& ModuleName) const
-{
-    return RegisteredModules.Contains(ModuleName);
-}
-
-void UEngineArchitectCore::SetPerformanceConstraint(EEng_PerformanceLevel Level, float MaxFrameTime, int32 MaxActors)
-{
-    FEng_PerformanceConstraints Constraints;
-    Constraints.MaxFrameTime = MaxFrameTime;
-    Constraints.MaxActors = MaxActors;
-    Constraints.MaxMemoryMB = 4096; // Default
-    Constraints.MaxDrawCalls = 2000; // Default
-
-    PerformanceConstraints.Add(Level, Constraints);
-    LogArchitecturalEvent(TEXT("PerformanceConstraint"), FString::Printf(TEXT("Set constraint for level %d: %.2fms, %d actors"), (int32)Level, MaxFrameTime, MaxActors));
-}
-
-bool UEngineArchitectCore::ValidatePerformanceCompliance() const
-{
-    // Check against PC_High constraints by default
-    const FEng_PerformanceConstraints* Constraints = PerformanceConstraints.Find(EEng_PerformanceLevel::PC_High);
-    if (!Constraints)
-    {
-        return false;
-    }
-
-    bool bCompliant = true;
-    if (LastPerformanceCheck.FrameTime > Constraints->MaxFrameTime)
-    {
-        bCompliant = false;
-    }
-    if (LastPerformanceCheck.ActorCount > Constraints->MaxActors)
-    {
-        bCompliant = false;
-    }
-    if (LastPerformanceCheck.MemoryUsageMB > Constraints->MaxMemoryMB)
-    {
-        bCompliant = false;
-    }
-
-    return bCompliant;
-}
-
-FEng_PerformanceMetrics UEngineArchitectCore::GetCurrentPerformanceMetrics() const
-{
-    return LastPerformanceCheck;
-}
-
-void UEngineArchitectCore::ValidateSystemIntegration()
-{
-    CurrentViolations.Empty();
-
-    // Check module dependency chains
-    for (const auto& ModulePair : RegisteredModules)
-    {
-        const FEng_ModuleInfo& ModuleInfo = ModulePair.Value;
-        for (const FString& Dependency : ModuleInfo.Dependencies)
+        if (Dependency.ModuleName == ModuleName)
         {
-            if (!IsModuleRegistered(Dependency))
-            {
-                CurrentViolations.Add(FString::Printf(TEXT("Module %s depends on unregistered module %s"), *ModuleInfo.ModuleName, *Dependency));
-            }
+            return Dependency.bIsLoaded;
         }
     }
+    return false;
+}
 
-    // Check critical system health
-    for (const auto& SystemPair : CriticalSystemStatus)
+TArray<FEng_ModuleDependency> UEngineArchitectSubsystem::GetModuleDependencies() const
+{
+    return ModuleDependencies;
+}
+
+float UEngineArchitectSubsystem::GetCurrentFrameRate() const
+{
+    if (GEngine && GEngine->GetGameViewport())
     {
-        if (!SystemPair.Value)
-        {
-            CurrentViolations.Add(FString::Printf(TEXT("Critical system %s is unhealthy"), *SystemPair.Key));
-        }
+        return 1.0f / GEngine->GetGameViewport()->GetClient()->GetWorld()->GetDeltaSeconds();
     }
-
-    LogArchitecturalEvent(TEXT("SystemValidation"), FString::Printf(TEXT("Found %d architectural violations"), CurrentViolations.Num()));
+    return 0.0f;
 }
 
-bool UEngineArchitectCore::CanSystemsIntegrate(const FString& SystemA, const FString& SystemB) const
+int32 UEngineArchitectSubsystem::GetActorCount() const
 {
-    // Check if systems are compatible based on compatibility matrix
-    const TArray<FString>* CompatibleSystems = SystemCompatibilityMatrix.Find(SystemA);
-    if (CompatibleSystems)
-    {
-        return CompatibleSystems->Contains(SystemB);
-    }
-
-    // Default to compatible if no specific rules defined
-    return true;
-}
-
-TArray<FString> UEngineArchitectCore::GetArchitecturalViolations() const
-{
-    return CurrentViolations;
-}
-
-void UEngineArchitectCore::EnforceArchitecturalRules()
-{
-    ValidateSystemIntegration();
-
-    if (CurrentViolations.Num() > MAX_ARCHITECTURAL_VIOLATIONS)
-    {
-        UE_LOG(LogTemp, Error, TEXT("EngineArchitectCore: Too many architectural violations (%d), enforcing emergency constraints"), CurrentViolations.Num());
-        
-        // Emergency performance constraints
-        SetPerformanceConstraint(EEng_PerformanceLevel::PC_High, 20.0f, 5000);
-        SetPerformanceConstraint(EEng_PerformanceLevel::Console, 40.0f, 2500);
-    }
-}
-
-TArray<FString> UEngineArchitectCore::GetModuleDependencyChain(const FString& ModuleName) const
-{
-    TArray<FString> DependencyChain;
-    TArray<FString> ToProcess;
-    TSet<FString> Processed;
-
-    ToProcess.Add(ModuleName);
-
-    while (ToProcess.Num() > 0)
-    {
-        FString CurrentModule = ToProcess.Pop();
-        if (Processed.Contains(CurrentModule))
-        {
-            continue;
-        }
-
-        Processed.Add(CurrentModule);
-        DependencyChain.Add(CurrentModule);
-
-        const FEng_ModuleInfo* ModuleInfo = RegisteredModules.Find(CurrentModule);
-        if (ModuleInfo)
-        {
-            for (const FString& Dependency : ModuleInfo->Dependencies)
-            {
-                if (!Processed.Contains(Dependency))
-                {
-                    ToProcess.Add(Dependency);
-                }
-            }
-        }
-    }
-
-    return DependencyChain;
-}
-
-bool UEngineArchitectCore::ValidateDependencyChain() const
-{
-    for (const auto& ModulePair : RegisteredModules)
-    {
-        TArray<FString> Chain = GetModuleDependencyChain(ModulePair.Key);
-        
-        // Check for circular dependencies
-        TSet<FString> Visited;
-        for (const FString& Module : Chain)
-        {
-            if (Visited.Contains(Module))
-            {
-                UE_LOG(LogTemp, Error, TEXT("EngineArchitectCore: Circular dependency detected in module %s"), *ModulePair.Key);
-                return false;
-            }
-            Visited.Add(Module);
-        }
-    }
-
-    return true;
-}
-
-void UEngineArchitectCore::MonitorCriticalSystems()
-{
-    // Update critical system status based on actual system health
     if (UWorld* World = GetWorld())
     {
-        // Check physics system
-        bool bPhysicsHealthy = World->GetPhysicsScene() != nullptr;
-        CriticalSystemStatus.Add(TEXT("Physics"), bPhysicsHealthy);
-
-        // Check world generation
-        int32 ActorCount = 0;
-        if (World)
-        {
-            for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
-            {
-                ActorCount++;
-            }
-        }
-        bool bWorldGenHealthy = ActorCount > 0;
-        CriticalSystemStatus.Add(TEXT("WorldGeneration"), bWorldGenHealthy);
-
-        // Update performance metrics
-        LastPerformanceCheck.ActorCount = ActorCount;
-        LastPerformanceCheck.Timestamp = FDateTime::Now();
+        return World->GetActorCount();
     }
+    return 0;
 }
 
-bool UEngineArchitectCore::IsCriticalSystemHealthy(const FString& SystemName) const
+bool UEngineArchitectSubsystem::IsPerformanceWithinBudget() const
 {
-    const bool* Status = CriticalSystemStatus.Find(SystemName);
-    return Status ? *Status : false;
+    float CurrentFPS = GetCurrentFrameRate();
+    int32 ActorCount = GetActorCount();
+    
+    bool bFrameRateOK = CurrentFPS >= (Config.TargetFrameRate * 0.8f); // 80% tolerance
+    bool bActorCountOK = ActorCount <= (Config.MaxActorsPerBiome * Config.BiomeCount);
+    
+    return bFrameRateOK && bActorCountOK;
 }
 
-void UEngineArchitectCore::ValidateModuleDependencies()
+void UEngineArchitectSubsystem::InitializeModuleDependencies()
 {
-    ValidateSystemIntegration();
-    MonitorCriticalSystems();
+    // Core required modules
+    ModuleDependencies.Empty();
+    
+    FEng_ModuleDependency CoreModule;
+    CoreModule.ModuleName = TEXT("TranspersonalGame");
+    CoreModule.bIsRequired = true;
+    CoreModule.bIsLoaded = true;
+    CoreModule.Version = TEXT("1.0.0");
+    ModuleDependencies.Add(CoreModule);
+    
+    FEng_ModuleDependency EngineModule;
+    EngineModule.ModuleName = TEXT("Engine");
+    EngineModule.bIsRequired = true;
+    EngineModule.bIsLoaded = true;
+    EngineModule.Version = TEXT("5.5.0");
+    ModuleDependencies.Add(EngineModule);
+    
+    FEng_ModuleDependency CoreUObjectModule;
+    CoreUObjectModule.ModuleName = TEXT("CoreUObject");
+    CoreUObjectModule.bIsRequired = true;
+    CoreUObjectModule.bIsLoaded = true;
+    CoreUObjectModule.Version = TEXT("5.5.0");
+    ModuleDependencies.Add(CoreUObjectModule);
+    
+    UE_LOG(LogTemp, Warning, TEXT("Engine Architect: Initialized %d module dependencies"), ModuleDependencies.Num());
 }
 
-void UEngineArchitectCore::CheckPerformanceThresholds()
+bool UEngineArchitectSubsystem::ValidateModules()
 {
-    // Update current performance metrics
-    if (UWorld* World = GetWorld())
+    bool bAllModulesValid = true;
+    
+    for (FEng_ModuleDependency& Dependency : ModuleDependencies)
     {
-        // Get frame time
-        LastPerformanceCheck.FrameTime = FApp::GetDeltaTime() * 1000.0f; // Convert to milliseconds
-
-        // Count actors
-        int32 ActorCount = 0;
-        for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+        if (Dependency.bIsRequired && !Dependency.bIsLoaded)
         {
-            ActorCount++;
-        }
-        LastPerformanceCheck.ActorCount = ActorCount;
-
-        // Estimate memory usage (simplified)
-        LastPerformanceCheck.MemoryUsageMB = FPlatformMemory::GetStats().UsedPhysical / (1024 * 1024);
-
-        LastPerformanceCheck.Timestamp = FDateTime::Now();
-    }
-
-    // Validate performance compliance
-    if (!ValidatePerformanceCompliance())
-    {
-        LogArchitecturalEvent(TEXT("PerformanceViolation"), TEXT("Performance thresholds exceeded"));
-    }
-}
-
-void UEngineArchitectCore::UpdateSystemCompatibility()
-{
-    // Define system compatibility rules
-    SystemCompatibilityMatrix.Empty();
-    
-    SystemCompatibilityMatrix.Add(TEXT("Physics"), {TEXT("WorldGeneration"), TEXT("AI"), TEXT("Combat")});
-    SystemCompatibilityMatrix.Add(TEXT("WorldGeneration"), {TEXT("Environment"), TEXT("Foliage"), TEXT("Lighting")});
-    SystemCompatibilityMatrix.Add(TEXT("AI"), {TEXT("Combat"), TEXT("NPC"), TEXT("Crowd")});
-    SystemCompatibilityMatrix.Add(TEXT("Audio"), {TEXT("Environment"), TEXT("Combat"), TEXT("UI")});
-}
-
-void UEngineArchitectCore::LogArchitecturalEvent(const FString& Event, const FString& Details)
-{
-    FString LogMessage = FString::Printf(TEXT("[EngineArchitect] %s: %s"), *Event, *Details);
-    UE_LOG(LogTemp, Log, TEXT("%s"), *LogMessage);
-}
-
-// World Subsystem Implementation
-UEngineArchitectWorldSubsystem::UEngineArchitectWorldSubsystem()
-    : bWorldArchitectureValid(false)
-{
-}
-
-void UEngineArchitectWorldSubsystem::Initialize(FSubsystemCollectionBase& Collection)
-{
-    Super::Initialize(Collection);
-    UE_LOG(LogTemp, Warning, TEXT("EngineArchitectWorldSubsystem: Initializing world-level architecture management"));
-}
-
-void UEngineArchitectWorldSubsystem::OnWorldBeginPlay(UWorld& InWorld)
-{
-    Super::OnWorldBeginPlay(InWorld);
-    ValidateWorldArchitecture();
-}
-
-void UEngineArchitectWorldSubsystem::ValidateWorldArchitecture()
-{
-    WorldArchitectureIssues.Empty();
-    
-    CheckWorldLevelConstraints();
-    ValidateActorDistribution();
-    MonitorWorldPerformance();
-    
-    bWorldArchitectureValid = (WorldArchitectureIssues.Num() == 0);
-    
-    UE_LOG(LogTemp, Log, TEXT("EngineArchitectWorldSubsystem: World architecture validation complete. Valid: %s, Issues: %d"), 
-           bWorldArchitectureValid ? TEXT("true") : TEXT("false"), 
-           WorldArchitectureIssues.Num());
-}
-
-bool UEngineArchitectWorldSubsystem::IsWorldArchitectureValid() const
-{
-    return bWorldArchitectureValid;
-}
-
-void UEngineArchitectWorldSubsystem::EnforceWorldConstraints()
-{
-    if (!bWorldArchitectureValid)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("EngineArchitectWorldSubsystem: Enforcing world constraints due to architectural issues"));
-        
-        // Implement constraint enforcement logic
-        for (const FString& Issue : WorldArchitectureIssues)
-        {
-            UE_LOG(LogTemp, Warning, TEXT("World Architecture Issue: %s"), *Issue);
+            UE_LOG(LogTemp, Error, TEXT("Engine Architect: Required module %s is not loaded"), *Dependency.ModuleName);
+            bAllModulesValid = false;
         }
     }
+    
+    return bAllModulesValid;
 }
 
-bool UEngineArchitectWorldSubsystem::ValidateBiomeArchitecture(EEng_BiomeType BiomeType) const
+bool UEngineArchitectSubsystem::ValidatePerformance()
 {
-    // Validate biome-specific architectural constraints
+    LastFrameRate = GetCurrentFrameRate();
+    int32 ActorCount = GetActorCount();
+    
+    bool bPerformanceOK = IsPerformanceWithinBudget();
+    
+    UE_LOG(LogTemp, Warning, TEXT("Engine Architect: Performance - FPS: %.1f, Actors: %d, Budget OK: %s"), 
+           LastFrameRate, ActorCount, bPerformanceOK ? TEXT("YES") : TEXT("NO"));
+    
+    return bPerformanceOK;
+}
+
+bool UEngineArchitectSubsystem::ValidateWorldStructure()
+{
     UWorld* World = GetWorld();
     if (!World)
     {
+        UE_LOG(LogTemp, Error, TEXT("Engine Architect: No valid world found"));
         return false;
     }
+    
+    // Check for basic world components
+    bool bHasGameMode = World->GetAuthGameMode() != nullptr;
+    bool bHasWorldSettings = World->GetWorldSettings() != nullptr;
+    
+    UE_LOG(LogTemp, Warning, TEXT("Engine Architect: World validation - GameMode: %s, WorldSettings: %s"),
+           bHasGameMode ? TEXT("YES") : TEXT("NO"),
+           bHasWorldSettings ? TEXT("YES") : TEXT("NO"));
+    
+    return bHasGameMode && bHasWorldSettings;
+}
 
-    // Count actors in biome area (simplified validation)
-    int32 BiomeActorCount = 0;
-    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+// AEngineValidationActor Implementation
+
+AEngineValidationActor::AEngineValidationActor()
+{
+    PrimaryActorTick.bCanEverTick = true;
+    
+    RootSceneComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootSceneComponent"));
+    RootComponent = RootSceneComponent;
+    
+    bPerformContinuousValidation = true;
+    ValidationInterval = 5.0f;
+    CurrentValidationState = EEng_ValidationState::Unknown;
+}
+
+void AEngineValidationActor::BeginPlay()
+{
+    Super::BeginPlay();
+    
+    // Get reference to Engine Architect Subsystem
+    if (UGameInstance* GameInstance = GetGameInstance())
     {
-        BiomeActorCount++;
+        ArchitectSubsystem = GameInstance->GetSubsystem<UEngineArchitectSubsystem>();
     }
-
-    // Basic validation - each biome should have reasonable actor count
-    const int32 MinActorsPerBiome = 10;
-    const int32 MaxActorsPerBiome = 2000;
     
-    return (BiomeActorCount >= MinActorsPerBiome && BiomeActorCount <= MaxActorsPerBiome);
-}
-
-void UEngineArchitectWorldSubsystem::OptimizeBiomePerformance(EEng_BiomeType BiomeType)
-{
-    UE_LOG(LogTemp, Log, TEXT("EngineArchitectWorldSubsystem: Optimizing performance for biome type %d"), (int32)BiomeType);
-    
-    // Implement biome-specific performance optimizations
-    // This would include LOD adjustments, culling optimizations, etc.
-}
-
-void UEngineArchitectWorldSubsystem::CheckWorldLevelConstraints()
-{
-    UWorld* World = GetWorld();
-    if (!World)
+    if (!ArchitectSubsystem)
     {
-        WorldArchitectureIssues.Add(TEXT("World reference is null"));
+        UE_LOG(LogTemp, Error, TEXT("Engine Validation Actor: Could not find Engine Architect Subsystem"));
         return;
     }
-
-    // Check world size constraints
-    FVector WorldOrigin, WorldBounds;
-    World->GetWorldBounds(WorldOrigin, WorldBounds);
     
-    const float MaxWorldSize = 1000000.0f; // 10km
-    if (WorldBounds.Size() > MaxWorldSize)
-    {
-        WorldArchitectureIssues.Add(FString::Printf(TEXT("World size exceeds maximum: %.2f > %.2f"), WorldBounds.Size(), MaxWorldSize));
-    }
+    UE_LOG(LogTemp, Warning, TEXT("Engine Validation Actor: Started validation monitoring"));
+    
+    // Perform initial validation
+    PerformValidation();
 }
 
-void UEngineArchitectWorldSubsystem::ValidateActorDistribution()
+void AEngineValidationActor::Tick(float DeltaTime)
 {
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        return;
-    }
-
-    // Count actors by type and validate distribution
-    TMap<FString, int32> ActorCounts;
+    Super::Tick(DeltaTime);
     
-    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+    if (bPerformContinuousValidation && ArchitectSubsystem)
     {
-        AActor* Actor = *ActorItr;
-        if (Actor)
+        LastValidationTime += DeltaTime;
+        
+        if (LastValidationTime >= ValidationInterval)
         {
-            FString ActorClass = Actor->GetClass()->GetName();
-            int32* Count = ActorCounts.Find(ActorClass);
-            if (Count)
-            {
-                (*Count)++;
-            }
-            else
-            {
-                ActorCounts.Add(ActorClass, 1);
-            }
-        }
-    }
-
-    // Validate reasonable distribution
-    const int32 MaxActorsPerType = 5000;
-    for (const auto& CountPair : ActorCounts)
-    {
-        if (CountPair.Value > MaxActorsPerType)
-        {
-            WorldArchitectureIssues.Add(FString::Printf(TEXT("Too many actors of type %s: %d > %d"), *CountPair.Key, CountPair.Value, MaxActorsPerType));
+            PerformValidation();
+            LastValidationTime = 0.0f;
         }
     }
 }
 
-void UEngineArchitectWorldSubsystem::MonitorWorldPerformance()
+void AEngineValidationActor::PerformValidation()
 {
-    // Monitor world-level performance metrics
-    UWorld* World = GetWorld();
-    if (!World)
+    if (!ArchitectSubsystem)
     {
+        CurrentValidationState = EEng_ValidationState::Critical;
         return;
     }
-
-    // Check frame time
-    float CurrentFrameTime = FApp::GetDeltaTime() * 1000.0f;
-    const float MaxFrameTime = 33.33f; // 30 FPS minimum
     
-    if (CurrentFrameTime > MaxFrameTime)
+    EEng_ValidationState PreviousState = CurrentValidationState;
+    
+    bool bValidationPassed = ArchitectSubsystem->ValidateArchitecture();
+    CurrentValidationState = ArchitectSubsystem->GetValidationState();
+    
+    if (PreviousState != CurrentValidationState)
     {
-        WorldArchitectureIssues.Add(FString::Printf(TEXT("Frame time exceeds threshold: %.2fms > %.2fms"), CurrentFrameTime, MaxFrameTime));
+        UE_LOG(LogTemp, Warning, TEXT("Engine Validation Actor: State changed from %d to %d"), 
+               (int32)PreviousState, (int32)CurrentValidationState);
+        
+        OnValidationStateChanged(CurrentValidationState);
     }
+}
+
+// UEnginePerformanceComponent Implementation
+
+UEnginePerformanceComponent::UEnginePerformanceComponent()
+{
+    PrimaryComponentTick.bCanEverTick = true;
+    bTrackPerformance = true;
+    
+    AverageTickTime = 0.0f;
+    MaxTickTime = 0.0f;
+    TickCount = 0;
+    TotalTickTime = 0.0f;
+    LastTickStartTime = 0.0;
+}
+
+void UEnginePerformanceComponent::BeginPlay()
+{
+    Super::BeginPlay();
+    
+    UE_LOG(LogTemp, Warning, TEXT("Engine Performance Component: Started performance tracking for %s"), 
+           *GetOwner()->GetName());
+    
+    ResetPerformanceStats();
+}
+
+void UEnginePerformanceComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+{
+    if (bTrackPerformance)
+    {
+        double TickStartTime = FPlatformTime::Seconds();
+        
+        Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+        
+        double TickEndTime = FPlatformTime::Seconds();
+        float TickDuration = static_cast<float>(TickEndTime - TickStartTime);
+        
+        // Update statistics
+        TickCount++;
+        TotalTickTime += TickDuration;
+        AverageTickTime = TotalTickTime / TickCount;
+        
+        if (TickDuration > MaxTickTime)
+        {
+            MaxTickTime = TickDuration;
+        }
+        
+        LastTickStartTime = TickStartTime;
+    }
+    else
+    {
+        Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+    }
+}
+
+void UEnginePerformanceComponent::ResetPerformanceStats()
+{
+    TickCount = 0;
+    TotalTickTime = 0.0f;
+    AverageTickTime = 0.0f;
+    MaxTickTime = 0.0f;
+    LastTickStartTime = 0.0;
+    
+    UE_LOG(LogTemp, Warning, TEXT("Engine Performance Component: Performance stats reset for %s"), 
+           *GetOwner()->GetName());
+}
+
+float UEnginePerformanceComponent::GetPerformanceScore() const
+{
+    if (TickCount == 0 || AverageTickTime <= 0.0f)
+    {
+        return 100.0f; // Perfect score if no data or no time consumed
+    }
+    
+    // Performance score based on tick efficiency
+    // Lower average tick time = higher score
+    float BaseScore = 100.0f;
+    float TimePenalty = AverageTickTime * 10000.0f; // Convert to milliseconds and scale
+    
+    float Score = FMath::Max(0.0f, BaseScore - TimePenalty);
+    
+    return Score;
 }
