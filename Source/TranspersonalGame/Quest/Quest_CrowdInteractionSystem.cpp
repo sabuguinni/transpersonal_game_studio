@@ -3,493 +3,393 @@
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/Pawn.h"
-#include "Components/SphereComponent.h"
 #include "Kismet/GameplayStatics.h"
-#include "DrawDebugHelpers.h"
+#include "Components/StaticMeshComponent.h"
+#include "Engine/StaticMesh.h"
+#include "UObject/ConstructorHelpers.h"
 
-AQuest_CrowdInteractionManager::AQuest_CrowdInteractionManager()
-{
-    PrimaryActorTick.bCanEverTick = true;
-    
-    InteractionCheckRadius = 5000.0f;
-    InteractionCheckInterval = 2.0f;
-    MaxSimultaneousInteractions = 3;
-    bDebugMode = false;
-    LastInteractionCheckTime = 0.0f;
-    
-    // Set default location in Savana biome
-    SetActorLocation(FVector(0.0f, 0.0f, 100.0f));
-}
-
-void AQuest_CrowdInteractionManager::BeginPlay()
-{
-    Super::BeginPlay();
-    
-    UE_LOG(LogTemp, Warning, TEXT("Quest Crowd Interaction Manager initialized at location: %s"), 
-           *GetActorLocation().ToString());
-    
-    // Initialize interaction data if not set
-    if (!CrowdInteractionDataTable)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("CrowdInteractionDataTable not set, using default interactions"));
-    }
-    
-    // Clear any existing active interactions
-    ActiveInteractions.Empty();
-}
-
-void AQuest_CrowdInteractionManager::Tick(float DeltaTime)
-{
-    Super::Tick(DeltaTime);
-    
-    // Check for new interaction opportunities periodically
-    if (GetWorld()->GetTimeSeconds() - LastInteractionCheckTime > InteractionCheckInterval)
-    {
-        CheckForNewInteractionOpportunities();
-        LastInteractionCheckTime = GetWorld()->GetTimeSeconds();
-    }
-    
-    // Update all active interactions
-    UpdateActiveInteractions(DeltaTime);
-    
-    // Debug visualization
-    if (bDebugMode)
-    {
-        DrawDebugSphere(GetWorld(), GetActorLocation(), InteractionCheckRadius, 32, FColor::Blue, false, 1.0f);
-        
-        for (int32 i = 0; i < ActiveInteractions.Num(); i++)
-        {
-            const FQuest_ActiveCrowdInteraction& Interaction = ActiveInteractions[i];
-            if (Interaction.bIsActive)
-            {
-                DrawDebugSphere(GetWorld(), Interaction.TargetLocation, 
-                               Interaction.InteractionData.InteractionRadius, 16, FColor::Green, false, 1.0f);
-            }
-        }
-    }
-}
-
-bool AQuest_CrowdInteractionManager::StartCrowdInteraction(EQuest_CrowdInteractionType InteractionType, FVector Location)
-{
-    // Check if we can start a new interaction
-    if (ActiveInteractions.Num() >= MaxSimultaneousInteractions)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Cannot start new crowd interaction: maximum simultaneous interactions reached"));
-        return false;
-    }
-    
-    if (!CanStartInteraction(InteractionType, Location))
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Cannot start crowd interaction: requirements not met"));
-        return false;
-    }
-    
-    // Get interaction data
-    FQuest_CrowdInteractionData InteractionData = GetInteractionDataByType(InteractionType);
-    
-    // Get crowd actors in range
-    TArray<AActor*> CrowdActors = GetCrowdActorsInRadius(Location, InteractionData.InteractionRadius);
-    
-    if (CrowdActors.Num() < InteractionData.RequiredCrowdSize)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Not enough crowd actors for interaction: %d required, %d found"), 
-               InteractionData.RequiredCrowdSize, CrowdActors.Num());
-        return false;
-    }
-    
-    // Create new active interaction
-    FQuest_ActiveCrowdInteraction NewInteraction;
-    NewInteraction.InteractionData = InteractionData;
-    NewInteraction.TargetLocation = Location;
-    NewInteraction.TimeRemaining = InteractionData.Duration;
-    NewInteraction.CurrentCrowdSize = CrowdActors.Num();
-    NewInteraction.bIsActive = true;
-    NewInteraction.ParticipatingCrowdActors = CrowdActors;
-    
-    ActiveInteractions.Add(NewInteraction);
-    
-    // Update crowd behavior for this interaction
-    UpdateCrowdBehaviorForInteraction(NewInteraction);
-    
-    UE_LOG(LogTemp, Warning, TEXT("Started crowd interaction: %s at location %s with %d participants"), 
-           *InteractionData.InteractionName, *Location.ToString(), CrowdActors.Num());
-    
-    return true;
-}
-
-void AQuest_CrowdInteractionManager::EndCrowdInteraction(int32 InteractionIndex)
-{
-    if (InteractionIndex >= 0 && InteractionIndex < ActiveInteractions.Num())
-    {
-        FQuest_ActiveCrowdInteraction& Interaction = ActiveInteractions[InteractionIndex];
-        
-        if (Interaction.bIsActive)
-        {
-            // Reset crowd behavior for participating actors
-            for (AActor* CrowdActor : Interaction.ParticipatingCrowdActors)
-            {
-                if (IsValid(CrowdActor))
-                {
-                    UQuest_CrowdInteractionComponent* InteractionComp = 
-                        CrowdActor->FindComponentByClass<UQuest_CrowdInteractionComponent>();
-                    if (InteractionComp)
-                    {
-                        InteractionComp->LeaveCrowdInteraction();
-                    }
-                }
-            }
-            
-            UE_LOG(LogTemp, Warning, TEXT("Ended crowd interaction: %s"), 
-                   *Interaction.InteractionData.InteractionName);
-            
-            // Mark as inactive
-            Interaction.bIsActive = false;
-        }
-        
-        // Remove from active interactions
-        ActiveInteractions.RemoveAt(InteractionIndex);
-    }
-}
-
-TArray<AActor*> AQuest_CrowdInteractionManager::GetCrowdActorsInRadius(FVector Location, float Radius)
-{
-    TArray<AActor*> CrowdActors;
-    TArray<AActor*> AllActors;
-    
-    UGameplayStatics::GetAllActorsOfClass(GetWorld(), AActor::StaticClass(), AllActors);
-    
-    for (AActor* Actor : AllActors)
-    {
-        if (IsValid(Actor))
-        {
-            // Check if actor has crowd interaction component
-            UQuest_CrowdInteractionComponent* InteractionComp = 
-                Actor->FindComponentByClass<UQuest_CrowdInteractionComponent>();
-            
-            if (InteractionComp && InteractionComp->CanParticipateInInteraction(EQuest_CrowdInteractionType::EscortMission))
-            {
-                float Distance = FVector::Dist(Actor->GetActorLocation(), Location);
-                if (Distance <= Radius)
-                {
-                    CrowdActors.Add(Actor);
-                }
-            }
-        }
-    }
-    
-    return CrowdActors;
-}
-
-bool AQuest_CrowdInteractionManager::CanStartInteraction(EQuest_CrowdInteractionType InteractionType, FVector Location)
-{
-    // Check if location is valid
-    if (Location == FVector::ZeroVector)
-    {
-        return false;
-    }
-    
-    // Check if there are enough crowd actors nearby
-    FQuest_CrowdInteractionData InteractionData = GetInteractionDataByType(InteractionType);
-    TArray<AActor*> CrowdActors = GetCrowdActorsInRadius(Location, InteractionData.InteractionRadius);
-    
-    return CrowdActors.Num() >= InteractionData.RequiredCrowdSize;
-}
-
-void AQuest_CrowdInteractionManager::UpdateCrowdBehaviorForInteraction(const FQuest_ActiveCrowdInteraction& Interaction)
-{
-    for (AActor* CrowdActor : Interaction.ParticipatingCrowdActors)
-    {
-        if (IsValid(CrowdActor))
-        {
-            UQuest_CrowdInteractionComponent* InteractionComp = 
-                CrowdActor->FindComponentByClass<UQuest_CrowdInteractionComponent>();
-            if (InteractionComp)
-            {
-                InteractionComp->JoinCrowdInteraction(Interaction.InteractionData.InteractionType, 
-                                                    Interaction.TargetLocation);
-            }
-        }
-    }
-}
-
-int32 AQuest_CrowdInteractionManager::GetActiveCrowdInteractionCount() const
-{
-    int32 ActiveCount = 0;
-    for (const FQuest_ActiveCrowdInteraction& Interaction : ActiveInteractions)
-    {
-        if (Interaction.bIsActive)
-        {
-            ActiveCount++;
-        }
-    }
-    return ActiveCount;
-}
-
-FQuest_CrowdInteractionData AQuest_CrowdInteractionManager::GetInteractionDataByType(EQuest_CrowdInteractionType InteractionType)
-{
-    FQuest_CrowdInteractionData DefaultData;
-    
-    // Set default data based on interaction type
-    switch (InteractionType)
-    {
-        case EQuest_CrowdInteractionType::EscortMission:
-            DefaultData.InteractionName = TEXT("Escort Mission");
-            DefaultData.Description = TEXT("Guide a group of people to safety");
-            DefaultData.RequiredCrowdSize = 5;
-            DefaultData.InteractionRadius = 1500.0f;
-            DefaultData.Duration = 120.0f;
-            DefaultData.ExperienceReward = 200;
-            break;
-            
-        case EQuest_CrowdInteractionType::CrowdControl:
-            DefaultData.InteractionName = TEXT("Crowd Control");
-            DefaultData.Description = TEXT("Manage a large gathering of people");
-            DefaultData.RequiredCrowdSize = 15;
-            DefaultData.InteractionRadius = 2000.0f;
-            DefaultData.Duration = 90.0f;
-            DefaultData.ExperienceReward = 150;
-            break;
-            
-        case EQuest_CrowdInteractionType::CelebrationEvent:
-            DefaultData.InteractionName = TEXT("Celebration Event");
-            DefaultData.Description = TEXT("Organize a tribal celebration");
-            DefaultData.RequiredCrowdSize = 20;
-            DefaultData.InteractionRadius = 2500.0f;
-            DefaultData.Duration = 180.0f;
-            DefaultData.ExperienceReward = 300;
-            break;
-            
-        case EQuest_CrowdInteractionType::PanicResponse:
-            DefaultData.InteractionName = TEXT("Panic Response");
-            DefaultData.Description = TEXT("Calm panicked crowd during emergency");
-            DefaultData.RequiredCrowdSize = 10;
-            DefaultData.InteractionRadius = 1000.0f;
-            DefaultData.Duration = 60.0f;
-            DefaultData.ExperienceReward = 250;
-            break;
-            
-        default:
-            DefaultData.InteractionName = TEXT("Generic Interaction");
-            DefaultData.Description = TEXT("Basic crowd interaction");
-            DefaultData.RequiredCrowdSize = 5;
-            DefaultData.InteractionRadius = 1000.0f;
-            DefaultData.Duration = 60.0f;
-            DefaultData.ExperienceReward = 100;
-            break;
-    }
-    
-    DefaultData.InteractionType = InteractionType;
-    DefaultData.bIsRepeatable = true;
-    
-    return DefaultData;
-}
-
-void AQuest_CrowdInteractionManager::CheckForNewInteractionOpportunities()
-{
-    // Get player location for proximity checks
-    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
-    if (!IsValid(PlayerPawn))
-    {
-        return;
-    }
-    
-    FVector PlayerLocation = PlayerPawn->GetActorLocation();
-    
-    // Check if player is within interaction check radius
-    float DistanceToPlayer = FVector::Dist(GetActorLocation(), PlayerLocation);
-    if (DistanceToPlayer > InteractionCheckRadius)
-    {
-        return;
-    }
-    
-    // Check for escort mission opportunities
-    if (CanStartInteraction(EQuest_CrowdInteractionType::EscortMission, PlayerLocation))
-    {
-        // Could trigger escort mission here based on game conditions
-        UE_LOG(LogTemp, Log, TEXT("Escort mission opportunity detected near player"));
-    }
-    
-    // Check for crowd control opportunities
-    if (CanStartInteraction(EQuest_CrowdInteractionType::CrowdControl, PlayerLocation))
-    {
-        UE_LOG(LogTemp, Log, TEXT("Crowd control opportunity detected near player"));
-    }
-}
-
-void AQuest_CrowdInteractionManager::UpdateActiveInteractions(float DeltaTime)
-{
-    for (int32 i = ActiveInteractions.Num() - 1; i >= 0; i--)
-    {
-        FQuest_ActiveCrowdInteraction& Interaction = ActiveInteractions[i];
-        
-        if (Interaction.bIsActive)
-        {
-            // Update time remaining
-            Interaction.TimeRemaining -= DeltaTime;
-            
-            // Check if interaction should end
-            if (Interaction.TimeRemaining <= 0.0f)
-            {
-                ProcessInteractionCompletion(i);
-            }
-            else
-            {
-                // Update crowd behavior periodically
-                TriggerCrowdResponse(Interaction);
-            }
-        }
-    }
-}
-
-void AQuest_CrowdInteractionManager::ProcessInteractionCompletion(int32 InteractionIndex)
-{
-    if (InteractionIndex >= 0 && InteractionIndex < ActiveInteractions.Num())
-    {
-        const FQuest_ActiveCrowdInteraction& Interaction = ActiveInteractions[InteractionIndex];
-        
-        UE_LOG(LogTemp, Warning, TEXT("Completed crowd interaction: %s. Awarding %d experience."), 
-               *Interaction.InteractionData.InteractionName, 
-               Interaction.InteractionData.ExperienceReward);
-        
-        // Award experience to player
-        APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
-        if (IsValid(PlayerPawn))
-        {
-            // Could integrate with character progression system here
-        }
-        
-        EndCrowdInteraction(InteractionIndex);
-    }
-}
-
-void AQuest_CrowdInteractionManager::TriggerCrowdResponse(const FQuest_ActiveCrowdInteraction& Interaction)
-{
-    // Update behavior of participating crowd actors based on interaction type
-    for (AActor* CrowdActor : Interaction.ParticipatingCrowdActors)
-    {
-        if (IsValid(CrowdActor))
-        {
-            UQuest_CrowdInteractionComponent* InteractionComp = 
-                CrowdActor->FindComponentByClass<UQuest_CrowdInteractionComponent>();
-            if (InteractionComp)
-            {
-                InteractionComp->SetInteractionBehavior(Interaction.InteractionData.InteractionType);
-            }
-        }
-    }
-}
-
-// UQuest_CrowdInteractionComponent Implementation
-
-UQuest_CrowdInteractionComponent::UQuest_CrowdInteractionComponent()
+UQuest_CrowdInteractionSystem::UQuest_CrowdInteractionSystem()
 {
     PrimaryComponentTick.bCanEverTick = true;
     
-    bCanParticipateInInteractions = true;
-    InteractionInfluenceRadius = 500.0f;
-    InteractionPriority = 1;
-    bIsCurrentlyParticipating = false;
-    CurrentInteractionType = EQuest_CrowdInteractionType::EscortMission;
-    
-    // Add all interaction types as supported by default
-    SupportedInteractionTypes.Add(EQuest_CrowdInteractionType::EscortMission);
-    SupportedInteractionTypes.Add(EQuest_CrowdInteractionType::CrowdControl);
-    SupportedInteractionTypes.Add(EQuest_CrowdInteractionType::CelebrationEvent);
-    SupportedInteractionTypes.Add(EQuest_CrowdInteractionType::PanicResponse);
+    DetectionRadius = 2000.0f;
+    CompletionThreshold = 100.0f;
+    CurrentProgress = 0.0f;
+    CurrentObjective = TEXT("Find and observe dinosaur herds");
+    bQuestActive = false;
+    LastKnownHerdLocation = FVector::ZeroVector;
+    InteractionTimer = 0.0f;
 }
 
-void UQuest_CrowdInteractionComponent::BeginPlay()
+void UQuest_CrowdInteractionSystem::BeginPlay()
 {
     Super::BeginPlay();
     
-    UE_LOG(LogTemp, Log, TEXT("Quest Crowd Interaction Component initialized on actor: %s"), 
-           *GetOwner()->GetName());
+    UE_LOG(LogTemp, Warning, TEXT("Quest_CrowdInteractionSystem: Component initialized"));
+    
+    // Initialize quest data
+    InteractionData.InteractionType = TEXT("Herd Observation");
+    InteractionData.RequiredCrowdSize = 10;
+    InteractionData.InteractionRadius = 1500.0f;
+    InteractionData.bIsCompleted = false;
 }
 
-void UQuest_CrowdInteractionComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
-                                                    FActorComponentTickFunction* ThisTickFunction)
+void UQuest_CrowdInteractionSystem::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
     
-    // Update interaction behavior if currently participating
-    if (bIsCurrentlyParticipating)
+    if (bQuestActive)
     {
-        // Could update movement or behavior based on current interaction type
-        SetInteractionBehavior(CurrentInteractionType);
+        UpdateQuestProgress(DeltaTime);
+        CheckProximityToHerd();
+        AnalyzeCrowdBehavior();
+        
+        InteractionTimer += DeltaTime;
+        
+        if (ValidateQuestCompletion())
+        {
+            CompleteCrowdInteraction();
+        }
     }
 }
 
-bool UQuest_CrowdInteractionComponent::CanParticipateInInteraction(EQuest_CrowdInteractionType InteractionType) const
+void UQuest_CrowdInteractionSystem::InitializeCrowdQuest(const FString& QuestType, int32 CrowdSize, const FVector& Location)
 {
-    if (!bCanParticipateInInteractions || bIsCurrentlyParticipating)
+    InteractionData.InteractionType = QuestType;
+    InteractionData.RequiredCrowdSize = CrowdSize;
+    InteractionData.TargetLocation = Location;
+    InteractionData.bIsCompleted = false;
+    
+    bQuestActive = true;
+    CurrentProgress = 0.0f;
+    InteractionTimer = 0.0f;
+    
+    if (QuestType == TEXT("Migration"))
     {
-        return false;
+        CurrentObjective = FString::Printf(TEXT("Follow %d dinosaurs during migration"), CrowdSize);
+    }
+    else if (QuestType == TEXT("Feeding"))
+    {
+        CurrentObjective = FString::Printf(TEXT("Observe %d dinosaurs feeding behavior"), CrowdSize);
+    }
+    else if (QuestType == TEXT("Territorial"))
+    {
+        CurrentObjective = FString::Printf(TEXT("Study %d dinosaurs territorial display"), CrowdSize);
+    }
+    else
+    {
+        CurrentObjective = FString::Printf(TEXT("Observe %d dinosaurs in their natural behavior"), CrowdSize);
     }
     
-    return SupportedInteractionTypes.Contains(InteractionType);
+    UE_LOG(LogTemp, Warning, TEXT("Quest_CrowdInteractionSystem: Quest initialized - %s"), *CurrentObjective);
 }
 
-void UQuest_CrowdInteractionComponent::JoinCrowdInteraction(EQuest_CrowdInteractionType InteractionType, 
-                                                           FVector InteractionLocation)
+bool UQuest_CrowdInteractionSystem::CheckCrowdInteraction(const FVector& PlayerLocation)
 {
-    if (CanParticipateInInteraction(InteractionType))
+    int32 NearbyDinosaurs = CountNearbyDinosaurs(PlayerLocation, DetectionRadius);
+    
+    if (NearbyDinosaurs >= InteractionData.RequiredCrowdSize)
     {
-        bIsCurrentlyParticipating = true;
-        CurrentInteractionType = InteractionType;
+        float DistanceToTarget = FVector::Dist(PlayerLocation, InteractionData.TargetLocation);
         
-        UE_LOG(LogTemp, Log, TEXT("Actor %s joined crowd interaction: %d"), 
-               *GetOwner()->GetName(), (int32)InteractionType);
+        if (DistanceToTarget <= InteractionData.InteractionRadius)
+        {
+            CurrentProgress = FMath::Min(CurrentProgress + 5.0f, CompletionThreshold);
+            LastKnownHerdLocation = PlayerLocation;
+            
+            UE_LOG(LogTemp, Warning, TEXT("Quest_CrowdInteractionSystem: Crowd interaction progress: %.1f%%"), 
+                   (CurrentProgress / CompletionThreshold) * 100.0f);
+            
+            return true;
+        }
+    }
+    
+    return false;
+}
+
+void UQuest_CrowdInteractionSystem::CompleteCrowdInteraction()
+{
+    if (!InteractionData.bIsCompleted)
+    {
+        InteractionData.bIsCompleted = true;
+        bQuestActive = false;
+        CurrentProgress = CompletionThreshold;
         
-        SetInteractionBehavior(InteractionType);
+        CurrentObjective = TEXT("Quest Completed: Return to camp");
+        
+        UE_LOG(LogTemp, Warning, TEXT("Quest_CrowdInteractionSystem: Crowd interaction quest completed!"));
+        
+        // Award experience and resources
+        if (UWorld* World = GetWorld())
+        {
+            if (APlayerController* PC = World->GetFirstPlayerController())
+            {
+                if (APawn* PlayerPawn = PC->GetPawn())
+                {
+                    // Quest completion rewards would be handled here
+                    UE_LOG(LogTemp, Warning, TEXT("Quest_CrowdInteractionSystem: Awarding quest rewards"));
+                }
+            }
+        }
     }
 }
 
-void UQuest_CrowdInteractionComponent::LeaveCrowdInteraction()
+void UQuest_CrowdInteractionSystem::UpdateCrowdObjective(const FString& NewObjective)
 {
-    if (bIsCurrentlyParticipating)
+    CurrentObjective = NewObjective;
+    UE_LOG(LogTemp, Warning, TEXT("Quest_CrowdInteractionSystem: Objective updated - %s"), *NewObjective);
+}
+
+int32 UQuest_CrowdInteractionSystem::CountNearbyDinosaurs(const FVector& Location, float Radius)
+{
+    int32 Count = 0;
+    
+    if (UWorld* World = GetWorld())
     {
-        bIsCurrentlyParticipating = false;
+        TArray<AActor*> FoundActors;
+        UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), FoundActors);
         
-        UE_LOG(LogTemp, Log, TEXT("Actor %s left crowd interaction"), *GetOwner()->GetName());
+        for (AActor* Actor : FoundActors)
+        {
+            if (Actor && Actor->GetActorLabel().Contains(TEXT("Dino")) || 
+                Actor->GetActorLabel().Contains(TEXT("Triceratops")) ||
+                Actor->GetActorLabel().Contains(TEXT("Brachiosaurus")) ||
+                Actor->GetActorLabel().Contains(TEXT("Parasaurolophus")) ||
+                Actor->GetActorLabel().Contains(TEXT("Ankylosaurus")))
+            {
+                float Distance = FVector::Dist(Location, Actor->GetActorLocation());
+                if (Distance <= Radius)
+                {
+                    Count++;
+                    
+                    // Track this actor for quest purposes
+                    if (!TrackedCrowdActors.Contains(Actor))
+                    {
+                        TrackedCrowdActors.Add(Actor);
+                    }
+                }
+            }
+        }
+    }
+    
+    return Count;
+}
+
+bool UQuest_CrowdInteractionSystem::ValidateHerdBehavior(const FVector& HerdCenter)
+{
+    int32 HerdSize = CountNearbyDinosaurs(HerdCenter, 3000.0f);
+    
+    if (HerdSize >= 5)
+    {
+        // Check if dinosaurs are moving in similar direction (basic flocking)
+        bool bValidFlocking = true;
         
-        // Reset to default behavior
-        SetInteractionBehavior(EQuest_CrowdInteractionType::EscortMission);
+        // Simple validation - in a real implementation, this would check velocity vectors
+        if (TrackedCrowdActors.Num() >= 3)
+        {
+            FVector AveragePosition = FVector::ZeroVector;
+            for (AActor* Actor : TrackedCrowdActors)
+            {
+                if (Actor)
+                {
+                    AveragePosition += Actor->GetActorLocation();
+                }
+            }
+            AveragePosition /= TrackedCrowdActors.Num();
+            
+            // Check if herd is reasonably clustered
+            float AverageDistance = 0.0f;
+            for (AActor* Actor : TrackedCrowdActors)
+            {
+                if (Actor)
+                {
+                    AverageDistance += FVector::Dist(Actor->GetActorLocation(), AveragePosition);
+                }
+            }
+            AverageDistance /= TrackedCrowdActors.Num();
+            
+            bValidFlocking = (AverageDistance < 2000.0f); // Herd is clustered within 20m average
+        }
+        
+        return bValidFlocking;
+    }
+    
+    return false;
+}
+
+void UQuest_CrowdInteractionSystem::TrackMigrationPattern(const FVector& StartPoint, const FVector& EndPoint)
+{
+    float MigrationDistance = FVector::Dist(StartPoint, EndPoint);
+    
+    if (MigrationDistance > 5000.0f) // Significant migration distance
+    {
+        CurrentProgress += 15.0f; // Bonus progress for tracking migration
+        
+        UE_LOG(LogTemp, Warning, TEXT("Quest_CrowdInteractionSystem: Migration pattern tracked - Distance: %.1f"), 
+               MigrationDistance);
+        
+        // Update objective to reflect migration tracking
+        CurrentObjective = FString::Printf(TEXT("Migration tracked: %.0fm distance"), MigrationDistance);
     }
 }
 
-void UQuest_CrowdInteractionComponent::SetInteractionBehavior(EQuest_CrowdInteractionType InteractionType)
+float UQuest_CrowdInteractionSystem::GetInteractionProgress() const
 {
-    // Modify actor behavior based on interaction type
-    switch (InteractionType)
+    return (CurrentProgress / CompletionThreshold) * 100.0f;
+}
+
+FString UQuest_CrowdInteractionSystem::GetCurrentObjective() const
+{
+    return CurrentObjective;
+}
+
+void UQuest_CrowdInteractionSystem::UpdateQuestProgress(float DeltaTime)
+{
+    if (UWorld* World = GetWorld())
     {
-        case EQuest_CrowdInteractionType::EscortMission:
-            // Set following behavior
-            break;
-            
-        case EQuest_CrowdInteractionType::CrowdControl:
-            // Set orderly movement behavior
-            break;
-            
-        case EQuest_CrowdInteractionType::CelebrationEvent:
-            // Set celebration behavior (dancing, cheering)
-            break;
-            
-        case EQuest_CrowdInteractionType::PanicResponse:
-            // Set calm/fleeing behavior
-            break;
-            
-        default:
-            // Default behavior
-            break;
+        if (APlayerController* PC = World->GetFirstPlayerController())
+        {
+            if (APawn* PlayerPawn = PC->GetPawn())
+            {
+                FVector PlayerLocation = PlayerPawn->GetActorLocation();
+                CheckCrowdInteraction(PlayerLocation);
+            }
+        }
     }
 }
 
-bool UQuest_CrowdInteractionComponent::IsParticipatingInInteraction() const
+void UQuest_CrowdInteractionSystem::CheckProximityToHerd()
 {
-    return bIsCurrentlyParticipating;
+    if (TrackedCrowdActors.Num() > 0)
+    {
+        // Calculate herd center
+        FVector HerdCenter = FVector::ZeroVector;
+        int32 ValidActors = 0;
+        
+        for (AActor* Actor : TrackedCrowdActors)
+        {
+            if (Actor && IsValid(Actor))
+            {
+                HerdCenter += Actor->GetActorLocation();
+                ValidActors++;
+            }
+        }
+        
+        if (ValidActors > 0)
+        {
+            HerdCenter /= ValidActors;
+            LastKnownHerdLocation = HerdCenter;
+            
+            // Validate herd behavior for quest progression
+            if (ValidateHerdBehavior(HerdCenter))
+            {
+                CurrentProgress += 2.0f; // Gradual progress for sustained observation
+            }
+        }
+    }
 }
 
-EQuest_CrowdInteractionType UQuest_CrowdInteractionComponent::GetCurrentInteractionType() const
+void UQuest_CrowdInteractionSystem::AnalyzeCrowdBehavior()
 {
-    return CurrentInteractionType;
+    if (TrackedCrowdActors.Num() >= InteractionData.RequiredCrowdSize)
+    {
+        // Analyze different behavior patterns
+        if (InteractionData.InteractionType == TEXT("Feeding"))
+        {
+            // Check if dinosaurs are stationary (feeding behavior)
+            bool bFeedingBehavior = true;
+            // In real implementation, check velocity of tracked actors
+            
+            if (bFeedingBehavior)
+            {
+                CurrentProgress += 1.0f;
+                CurrentObjective = TEXT("Observing feeding behavior - Stay quiet");
+            }
+        }
+        else if (InteractionData.InteractionType == TEXT("Migration"))
+        {
+            // Check if herd is moving in coordinated direction
+            if (LastKnownHerdLocation != FVector::ZeroVector)
+            {
+                // Track migration progress
+                CurrentProgress += 1.5f;
+                CurrentObjective = TEXT("Following migration - Maintain distance");
+            }
+        }
+        else if (InteractionData.InteractionType == TEXT("Territorial"))
+        {
+            // Check for aggressive posturing or territorial displays
+            CurrentProgress += 1.2f;
+            CurrentObjective = TEXT("Observing territorial behavior - Keep safe distance");
+        }
+    }
+}
+
+bool UQuest_CrowdInteractionSystem::ValidateQuestCompletion()
+{
+    return (CurrentProgress >= CompletionThreshold && InteractionTimer > 30.0f); // Minimum 30 seconds observation
+}
+
+// Quest Marker Implementation
+AQuest_CrowdInteractionMarker::AQuest_CrowdInteractionMarker()
+{
+    PrimaryActorTick.bCanEverTick = false;
+    
+    // Create marker mesh component
+    MarkerMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("MarkerMesh"));
+    RootComponent = MarkerMesh;
+    
+    // Set default properties
+    QuestTitle = TEXT("Herd Observation");
+    QuestDescription = TEXT("Study dinosaur crowd behavior in their natural habitat");
+    TargetBiome = EBiomeType::Savana;
+    bIsActive = true;
+    
+    // Try to load a basic mesh for the marker
+    static ConstructorHelpers::FObjectFinder<UStaticMesh> SphereMesh(TEXT("/Engine/BasicShapes/Sphere"));
+    if (SphereMesh.Succeeded())
+    {
+        MarkerMesh->SetStaticMesh(SphereMesh.Object);
+        MarkerMesh->SetWorldScale3D(FVector(2.0f, 2.0f, 2.0f));
+    }
+}
+
+void AQuest_CrowdInteractionMarker::BeginPlay()
+{
+    Super::BeginPlay();
+    
+    UE_LOG(LogTemp, Warning, TEXT("Quest_CrowdInteractionMarker: Marker spawned - %s"), *QuestTitle);
+    
+    if (bIsActive)
+    {
+        ActivateQuestMarker();
+    }
+}
+
+void AQuest_CrowdInteractionMarker::ActivateQuestMarker()
+{
+    bIsActive = true;
+    
+    if (MarkerMesh)
+    {
+        MarkerMesh->SetVisibility(true);
+        MarkerMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+    }
+    
+    UE_LOG(LogTemp, Warning, TEXT("Quest_CrowdInteractionMarker: Quest marker activated"));
+    OnQuestActivated();
+}
+
+void AQuest_CrowdInteractionMarker::DeactivateQuestMarker()
+{
+    bIsActive = false;
+    
+    if (MarkerMesh)
+    {
+        MarkerMesh->SetVisibility(false);
+        MarkerMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    }
+    
+    UE_LOG(LogTemp, Warning, TEXT("Quest_CrowdInteractionMarker: Quest marker deactivated"));
+    OnQuestCompleted();
 }
