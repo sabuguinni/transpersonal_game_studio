@@ -1,147 +1,140 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
+#include "Components/ActorComponent.h"
+#include "Engine/StaticMeshActor.h"
 #include "Components/StaticMeshComponent.h"
-#include "Components/SceneComponent.h"
 #include "Engine/Engine.h"
 #include "Arch_ShelterSystem.generated.h"
 
 UENUM(BlueprintType)
 enum class EArch_ShelterType : uint8
 {
-    None            UMETA(DisplayName = "None"),
-    StoneHut        UMETA(DisplayName = "Stone Hut"),
-    WoodLean        UMETA(DisplayName = "Wood Lean-to"),
     CaveEntrance    UMETA(DisplayName = "Cave Entrance"),
-    BoneFrame       UMETA(DisplayName = "Bone Frame"),
-    HideWall        UMETA(DisplayName = "Hide Wall")
+    StoneShelter    UMETA(DisplayName = "Stone Shelter"),
+    RockOverhang    UMETA(DisplayName = "Rock Overhang"),
+    BoneHut         UMETA(DisplayName = "Bone Hut"),
+    HideTent        UMETA(DisplayName = "Hide Tent")
 };
 
 UENUM(BlueprintType)
-enum class EArch_ShelterState : uint8
+enum class EArch_ShelterCondition : uint8
 {
-    Intact          UMETA(DisplayName = "Intact"),
+    Pristine        UMETA(DisplayName = "Pristine"),
+    WellMaintained  UMETA(DisplayName = "Well Maintained"),
     Weathered       UMETA(DisplayName = "Weathered"),
     Damaged         UMETA(DisplayName = "Damaged"),
-    Ruined          UMETA(DisplayName = "Ruined"),
-    Collapsed       UMETA(DisplayName = "Collapsed")
+    Ruined          UMETA(DisplayName = "Ruined")
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FArch_ShelterConfig
+struct TRANSPERSONALGAME_API FArch_ShelterProperties
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter")
-    EArch_ShelterType ShelterType = EArch_ShelterType::StoneHut;
+    EArch_ShelterType ShelterType = EArch_ShelterType::CaveEntrance;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter")
-    EArch_ShelterState CurrentState = EArch_ShelterState::Intact;
+    EArch_ShelterCondition Condition = EArch_ShelterCondition::Weathered;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter")
-    float StructuralIntegrity = 100.0f;
+    float ProtectionLevel = 0.7f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter")
-    float WeatherResistance = 80.0f;
+    float Capacity = 4.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter")
-    float InsulationValue = 60.0f;
+    bool bHasFirePit = true;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter")
-    int32 MaxOccupants = 2;
+    bool bHasToolStorage = false;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter")
-    bool bHasFirePit = false;
+    float StructuralIntegrity = 0.8f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter")
-    bool bHasStorageArea = false;
-
-    FArch_ShelterConfig()
+    FArch_ShelterProperties()
     {
-        ShelterType = EArch_ShelterType::StoneHut;
-        CurrentState = EArch_ShelterState::Intact;
-        StructuralIntegrity = 100.0f;
-        WeatherResistance = 80.0f;
-        InsulationValue = 60.0f;
-        MaxOccupants = 2;
-        bHasFirePit = false;
-        bHasStorageArea = false;
+        ShelterType = EArch_ShelterType::CaveEntrance;
+        Condition = EArch_ShelterCondition::Weathered;
+        ProtectionLevel = 0.7f;
+        Capacity = 4.0f;
+        bHasFirePit = true;
+        bHasToolStorage = false;
+        StructuralIntegrity = 0.8f;
     }
 };
 
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API AArch_ShelterSystem : public AActor
+UCLASS(ClassGroup=(TranspersonalGame), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UArch_ShelterSystem : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    AArch_ShelterSystem();
+    UArch_ShelterSystem();
 
 protected:
     virtual void BeginPlay() override;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter Properties")
+    FArch_ShelterProperties ShelterData;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter Properties")
+    TArray<AActor*> InteriorObjects;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter Properties")
+    float WeatheringRate = 0.01f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter Properties")
+    float LastMaintenanceTime = 0.0f;
+
 public:
-    virtual void Tick(float DeltaTime) override;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    USceneComponent* RootSceneComponent;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    UStaticMeshComponent* WallMesh;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    UStaticMeshComponent* RoofMesh;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    UStaticMeshComponent* FloorMesh;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter Configuration")
-    FArch_ShelterConfig ShelterConfig;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather")
-    float WeatherDamageRate = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather")
-    float RepairEfficiency = 5.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Occupancy")
-    TArray<AActor*> CurrentOccupants;
-
-    // Core shelter functionality
-    UFUNCTION(BlueprintCallable, Category = "Shelter")
-    void InitializeShelter(EArch_ShelterType NewType);
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
     UFUNCTION(BlueprintCallable, Category = "Shelter")
-    void ApplyWeatherDamage(float DamageAmount);
+    void InitializeShelter(EArch_ShelterType InType, EArch_ShelterCondition InCondition);
+
+    UFUNCTION(BlueprintCallable, Category = "Shelter")
+    bool CanProvideProtection() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Shelter")
+    float GetProtectionLevel() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Shelter")
+    void ApplyWeathering(float DeltaTime);
 
     UFUNCTION(BlueprintCallable, Category = "Shelter")
     void RepairShelter(float RepairAmount);
 
     UFUNCTION(BlueprintCallable, Category = "Shelter")
-    bool CanEnterShelter(AActor* Actor);
+    void AddInteriorObject(AActor* Object);
 
     UFUNCTION(BlueprintCallable, Category = "Shelter")
-    void EnterShelter(AActor* Actor);
+    void RemoveInteriorObject(AActor* Object);
 
     UFUNCTION(BlueprintCallable, Category = "Shelter")
-    void ExitShelter(AActor* Actor);
+    TArray<AActor*> GetInteriorObjects() const;
 
     UFUNCTION(BlueprintCallable, Category = "Shelter")
-    float GetShelterEffectiveness() const;
+    bool HasFirePit() const;
 
     UFUNCTION(BlueprintCallable, Category = "Shelter")
-    void UpdateShelterState();
+    bool HasToolStorage() const;
 
     UFUNCTION(BlueprintCallable, Category = "Shelter")
-    void SetFirePit(bool bEnabled);
+    float GetStructuralIntegrity() const;
 
     UFUNCTION(BlueprintCallable, Category = "Shelter")
-    void SetStorageArea(bool bEnabled);
+    void SetShelterCondition(EArch_ShelterCondition NewCondition);
+
+    UFUNCTION(BlueprintCallable, Category = "Shelter")
+    EArch_ShelterCondition GetShelterCondition() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Shelter")
+    FString GetShelterDescription() const;
 
 private:
-    void UpdateMeshVisibility();
-    void ApplyStateEffects();
-    float CalculateWeatherProtection() const;
-    void ProcessDegradation(float DeltaTime);
+    void UpdateShelterAppearance();
+    void CheckStructuralIntegrity();
+    float CalculateProtectionFromCondition() const;
 };
