@@ -4,81 +4,105 @@
 #include "GameFramework/Actor.h"
 #include "Components/StaticMeshComponent.h"
 #include "Particles/ParticleSystemComponent.h"
+#include "Engine/World.h"
 #include "SharedTypes.h"
 #include "VFXImpactManager.generated.h"
 
+UENUM(BlueprintType)
+enum class EVFX_ImpactType : uint8
+{
+    DinosaurFootstep    UMETA(DisplayName = "Dinosaur Footstep"),
+    BloodSplatter      UMETA(DisplayName = "Blood Splatter"),
+    RockImpact         UMETA(DisplayName = "Rock Impact"),
+    WaterSplash        UMETA(DisplayName = "Water Splash"),
+    DustCloud          UMETA(DisplayName = "Dust Cloud")
+};
+
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FVFX_ImpactData
+struct FVFX_ImpactData
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Impact")
-    FVector ImpactLocation;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+    EVFX_ImpactType ImpactType = EVFX_ImpactType::DinosaurFootstep;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Impact")
-    FVector ImpactNormal;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+    FVector ImpactLocation = FVector::ZeroVector;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Impact")
-    float ImpactForce;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+    FVector ImpactNormal = FVector::UpVector;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Impact")
-    EDinosaurSpecies DinosaurType;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+    float ImpactForce = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+    float ParticleScale = 1.0f;
 
     FVFX_ImpactData()
     {
+        ImpactType = EVFX_ImpactType::DinosaurFootstep;
         ImpactLocation = FVector::ZeroVector;
         ImpactNormal = FVector::UpVector;
         ImpactForce = 1.0f;
-        DinosaurType = EDinosaurSpecies::TRex;
+        ParticleScale = 1.0f;
     }
 };
 
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API AVFX_ImpactManager : public AActor
+class TRANSPERSONALGAME_API UVFX_ImpactManager : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    AVFX_ImpactManager();
+    UVFX_ImpactManager();
 
 protected:
     virtual void BeginPlay() override;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    USceneComponent* RootSceneComponent;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "VFX")
-    UParticleSystemComponent* DustParticleComponent;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "VFX")
-    UParticleSystemComponent* BloodParticleComponent;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Settings")
-    float FootstepDustIntensity;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Settings")
-    float BloodSplatterScale;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Settings")
-    float EnvironmentalDustRadius;
-
 public:
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+
+    // Main VFX creation functions
     UFUNCTION(BlueprintCallable, Category = "VFX Impact")
-    void TriggerFootstepImpact(const FVFX_ImpactData& ImpactData);
+    void CreateImpactEffect(const FVFX_ImpactData& ImpactData);
 
     UFUNCTION(BlueprintCallable, Category = "VFX Impact")
-    void TriggerBloodSplatter(const FVector& Location, float Intensity);
+    void CreateDinosaurFootstepEffect(FVector Location, float DinosaurSize = 1.0f);
 
     UFUNCTION(BlueprintCallable, Category = "VFX Impact")
-    void TriggerEnvironmentalDust(const FVector& Location, float Radius);
+    void CreateBloodSplatterEffect(FVector Location, FVector Direction);
 
     UFUNCTION(BlueprintCallable, Category = "VFX Impact")
-    void SetDinosaurFootstepScale(EDinosaurSpecies Species, float Scale);
+    void CreateDustCloudEffect(FVector Location, float Intensity = 1.0f);
 
-private:
-    void InitializeParticleSystems();
-    void ConfigureFootstepVFX(EDinosaurSpecies Species);
-    
+    // Particle system references
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Systems")
+    class UParticleSystem* FootstepDustSystem;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Systems")
+    class UParticleSystem* BloodSplatterSystem;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Systems")
+    class UParticleSystem* DustCloudSystem;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Systems")
+    class UParticleSystem* RockDebrisSystem;
+
+protected:
+    // Internal helper functions
+    void SpawnParticleEffect(UParticleSystem* ParticleSystem, const FVector& Location, const FRotator& Rotation = FRotator::ZeroRotator, float Scale = 1.0f);
+
+    // VFX pools for performance
     UPROPERTY()
-    TMap<EDinosaurSpecies, float> FootstepScaleMap;
+    TArray<UParticleSystemComponent*> ActiveParticleComponents;
+
+    // Configuration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Config", meta = (AllowPrivateAccess = "true"))
+    int32 MaxActiveParticles = 50;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Config", meta = (AllowPrivateAccess = "true"))
+    float ParticleLifetime = 5.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Config", meta = (AllowPrivateAccess = "true"))
+    bool bEnableVFXLOD = true;
 };
