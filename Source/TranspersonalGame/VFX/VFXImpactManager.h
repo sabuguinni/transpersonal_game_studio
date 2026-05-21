@@ -2,43 +2,34 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
-#include "NiagaraSystem.h"
-#include "NiagaraComponent.h"
-#include "Components/AudioComponent.h"
-#include "Engine/World.h"
+#include "Components/StaticMeshComponent.h"
+#include "Particles/ParticleSystemComponent.h"
+#include "SharedTypes.h"
 #include "VFXImpactManager.generated.h"
 
-UENUM(BlueprintType)
-enum class EVFX_ImpactType : uint8
-{
-    FootstepDust,
-    BloodSplatter,
-    RockImpact,
-    WaterSplash,
-    ClawStrike
-};
-
 USTRUCT(BlueprintType)
-struct FVFX_ImpactData
+struct TRANSPERSONALGAME_API FVFX_ImpactData
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
-    TSoftObjectPtr<UNiagaraSystem> VFXSystem;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Impact")
+    FVector ImpactLocation;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
-    TSoftObjectPtr<USoundBase> ImpactSound;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Impact")
+    FVector ImpactNormal;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
-    float VFXScale = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Impact")
+    float ImpactForce;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
-    float SoundVolume = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Impact")
+    EDinosaurSpecies DinosaurType;
 
     FVFX_ImpactData()
     {
-        VFXScale = 1.0f;
-        SoundVolume = 1.0f;
+        ImpactLocation = FVector::ZeroVector;
+        ImpactNormal = FVector::UpVector;
+        ImpactForce = 1.0f;
+        DinosaurType = EDinosaurSpecies::TRex;
     }
 };
 
@@ -53,33 +44,41 @@ public:
 protected:
     virtual void BeginPlay() override;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Impact", meta = (AllowPrivateAccess = "true"))
-    TMap<EVFX_ImpactType, FVFX_ImpactData> ImpactVFXMap;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    USceneComponent* RootSceneComponent;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components", meta = (AllowPrivateAccess = "true"))
-    UNiagaraComponent* ActiveVFXComponent;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "VFX")
+    UParticleSystemComponent* DustParticleComponent;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components", meta = (AllowPrivateAccess = "true"))
-    UAudioComponent* ImpactAudioComponent;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "VFX")
+    UParticleSystemComponent* BloodParticleComponent;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Settings")
+    float FootstepDustIntensity;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Settings")
+    float BloodSplatterScale;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Settings")
+    float EnvironmentalDustRadius;
 
 public:
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    void PlayImpactVFX(EVFX_ImpactType ImpactType, const FVector& Location, const FRotator& Rotation = FRotator::ZeroRotator, float ScaleMultiplier = 1.0f);
+    UFUNCTION(BlueprintCallable, Category = "VFX Impact")
+    void TriggerFootstepImpact(const FVFX_ImpactData& ImpactData);
 
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    void StopAllVFX();
+    UFUNCTION(BlueprintCallable, Category = "VFX Impact")
+    void TriggerBloodSplatter(const FVector& Location, float Intensity);
 
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    void SetupImpactData(EVFX_ImpactType ImpactType, UNiagaraSystem* VFXSystem, USoundBase* Sound, float Scale = 1.0f, float Volume = 1.0f);
+    UFUNCTION(BlueprintCallable, Category = "VFX Impact")
+    void TriggerEnvironmentalDust(const FVector& Location, float Radius);
 
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    bool HasImpactData(EVFX_ImpactType ImpactType) const;
-
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "VFX")
-    void InitializeDefaultVFX();
+    UFUNCTION(BlueprintCallable, Category = "VFX Impact")
+    void SetDinosaurFootstepScale(EDinosaurSpecies Species, float Scale);
 
 private:
-    void LoadDefaultVFXSystems();
-    void SpawnVFXAtLocation(UNiagaraSystem* VFXSystem, const FVector& Location, const FRotator& Rotation, float Scale);
-    void PlaySoundAtLocation(USoundBase* Sound, const FVector& Location, float Volume);
+    void InitializeParticleSystems();
+    void ConfigureFootstepVFX(EDinosaurSpecies Species);
+    
+    UPROPERTY()
+    TMap<EDinosaurSpecies, float> FootstepScaleMap;
 };
