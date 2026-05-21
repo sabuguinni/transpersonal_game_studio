@@ -3,17 +3,16 @@
 #include "CoreMinimal.h"
 #include "Engine/GameInstanceSubsystem.h"
 #include "Engine/DataTable.h"
-#include "../SharedTypes.h"
+#include "SharedTypes.h"
 #include "DialogueManager.generated.h"
 
-// Forward declarations
-class UDialogueNode;
-class ANarrativeNPC;
-
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FNarr_DialogueLine
+struct TRANSPERSONALGAME_API FNarr_DialogueEntry
 {
     GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    FString DialogueID;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
     FString SpeakerName;
@@ -22,66 +21,63 @@ struct TRANSPERSONALGAME_API FNarr_DialogueLine
     FText DialogueText;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    FString VoiceClipPath;
+    FString AudioPath;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    TArray<FString> ResponseOptions;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    TArray<FString> NextDialogueIDs;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    ENarr_DialogueContext Context;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
     float DisplayDuration;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    TArray<FString> PlayerResponseOptions;
-
-    FNarr_DialogueLine()
+    FNarr_DialogueEntry()
     {
-        SpeakerName = TEXT("");
-        DialogueText = FText::GetEmpty();
-        VoiceClipPath = TEXT("");
-        DisplayDuration = 3.0f;
+        DialogueID = TEXT("");
+        SpeakerName = TEXT("Narrator");
+        DialogueText = FText::FromString(TEXT(""));
+        AudioPath = TEXT("");
+        Context = ENarr_DialogueContext::Narration;
+        DisplayDuration = 5.0f;
     }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FNarr_DialogueTree
+struct TRANSPERSONALGAME_API FNarr_DialogueSequence
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    FString TreeID;
+    FString SequenceID;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    FString NPCName;
+    TArray<FNarr_DialogueEntry> DialogueEntries;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    TArray<FNarr_DialogueLine> DialogueLines;
+    ENarr_QuestType TriggerQuestType;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    bool bIsQuestRelated;
+    bool bIsRepeatable;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    FString AssociatedQuestID;
+    int32 Priority;
 
-    FNarr_DialogueTree()
+    FNarr_DialogueSequence()
     {
-        TreeID = TEXT("");
-        NPCName = TEXT("");
-        bIsQuestRelated = false;
-        AssociatedQuestID = TEXT("");
+        SequenceID = TEXT("");
+        TriggerQuestType = ENarr_QuestType::Exploration;
+        bIsRepeatable = false;
+        Priority = 1;
     }
 };
 
-UENUM(BlueprintType)
-enum class ENarr_StoryPhase : uint8
-{
-    Introduction     UMETA(DisplayName = "Introduction"),
-    EarlyExploration UMETA(DisplayName = "Early Exploration"),
-    FirstHunt        UMETA(DisplayName = "First Hunt"),
-    TribeBuilding    UMETA(DisplayName = "Tribe Building"),
-    ApexPredator     UMETA(DisplayName = "Apex Predator"),
-    Mastery          UMETA(DisplayName = "Mastery")
-};
-
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnDialogueStarted, const FString&, NPCName, const FString&, DialogueTreeID);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnDialogueEnded, const FString&, DialogueTreeID);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnStoryPhaseChanged, ENarr_StoryPhase, OldPhase, ENarr_StoryPhase, NewPhase);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnDialogueStarted, const FString&, DialogueID, const FText&, DialogueText);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnDialogueCompleted, const FString&, SequenceID);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnDialogueResponseSelected, const FString&, DialogueID, int32, ResponseIndex, const FString&, NextDialogueID);
 
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UDialogueManager : public UGameInstanceSubsystem
@@ -96,97 +92,101 @@ public:
     virtual void Deinitialize() override;
 
     // Dialogue management
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void StartDialogue(const FString& NPCName, const FString& DialogueTreeID);
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    void StartDialogueSequence(const FString& SequenceID);
 
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void EndDialogue();
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    void PlayDialogueEntry(const FString& DialogueID);
 
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    bool IsDialogueActive() const;
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    void SelectDialogueResponse(int32 ResponseIndex);
 
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    FNarr_DialogueLine GetCurrentDialogueLine() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void AdvanceDialogue(int32 ResponseIndex = 0);
-
-    // Dialogue tree management
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void RegisterDialogueTree(const FNarr_DialogueTree& DialogueTree);
-
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    FNarr_DialogueTree GetDialogueTree(const FString& TreeID) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    TArray<FString> GetAvailableDialogues(const FString& NPCName) const;
-
-    // Story progression
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void SetStoryPhase(ENarr_StoryPhase NewPhase);
-
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    ENarr_StoryPhase GetCurrentStoryPhase() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void UpdateStoryProgress(const FString& EventName, float ProgressValue);
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    void StopCurrentDialogue();
 
     // Quest integration
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void OnQuestCompleted(const FString& QuestID);
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    void TriggerQuestDialogue(ENarr_QuestType QuestType, const FVector& Location);
 
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void OnQuestStarted(const FString& QuestID);
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    void RegisterQuestCompletion(ENarr_QuestType QuestType, bool bSuccess);
 
-    // Character development tracking
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void TrackPlayerAction(const FString& ActionType, const FString& ActionData);
+    // Dialogue data management
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    void LoadDialogueData();
 
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    int32 GetPlayerActionCount(const FString& ActionType) const;
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    void AddDialogueSequence(const FNarr_DialogueSequence& Sequence);
+
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    FNarr_DialogueSequence GetDialogueSequence(const FString& SequenceID) const;
+
+    // Audio integration
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    void PlayDialogueAudio(const FString& AudioPath);
+
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    void StopDialogueAudio();
+
+    // Getters
+    UFUNCTION(BlueprintPure, Category = "Dialogue")
+    bool IsDialogueActive() const { return bIsDialogueActive; }
+
+    UFUNCTION(BlueprintPure, Category = "Dialogue")
+    FString GetCurrentDialogueID() const { return CurrentDialogueID; }
+
+    UFUNCTION(BlueprintPure, Category = "Dialogue")
+    FNarr_DialogueEntry GetCurrentDialogueEntry() const { return CurrentDialogueEntry; }
 
     // Events
-    UPROPERTY(BlueprintAssignable, Category = "Narrative")
+    UPROPERTY(BlueprintAssignable, Category = "Dialogue Events")
     FOnDialogueStarted OnDialogueStarted;
 
-    UPROPERTY(BlueprintAssignable, Category = "Narrative")
-    FOnDialogueEnded OnDialogueEnded;
+    UPROPERTY(BlueprintAssignable, Category = "Dialogue Events")
+    FOnDialogueCompleted OnDialogueCompleted;
 
-    UPROPERTY(BlueprintAssignable, Category = "Narrative")
-    FOnStoryPhaseChanged OnStoryPhaseChanged;
+    UPROPERTY(BlueprintAssignable, Category = "Dialogue Events")
+    FOnDialogueResponseSelected OnDialogueResponseSelected;
 
 protected:
-    // Current dialogue state
-    UPROPERTY(BlueprintReadOnly, Category = "Dialogue")
+    // Dialogue state
+    UPROPERTY(BlueprintReadOnly, Category = "Dialogue", meta = (AllowPrivateAccess = "true"))
     bool bIsDialogueActive;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Dialogue")
-    FString CurrentNPCName;
+    UPROPERTY(BlueprintReadOnly, Category = "Dialogue", meta = (AllowPrivateAccess = "true"))
+    FString CurrentDialogueID;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Dialogue")
-    FString CurrentDialogueTreeID;
+    UPROPERTY(BlueprintReadOnly, Category = "Dialogue", meta = (AllowPrivateAccess = "true"))
+    FString CurrentSequenceID;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Dialogue")
+    UPROPERTY(BlueprintReadOnly, Category = "Dialogue", meta = (AllowPrivateAccess = "true"))
+    FNarr_DialogueEntry CurrentDialogueEntry;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Dialogue", meta = (AllowPrivateAccess = "true"))
     int32 CurrentDialogueIndex;
 
-    // Dialogue storage
-    UPROPERTY(BlueprintReadOnly, Category = "Dialogue")
-    TMap<FString, FNarr_DialogueTree> DialogueTrees;
+    // Dialogue data
+    UPROPERTY(BlueprintReadOnly, Category = "Dialogue", meta = (AllowPrivateAccess = "true"))
+    TMap<FString, FNarr_DialogueSequence> DialogueSequences;
 
-    // Story progression
-    UPROPERTY(BlueprintReadOnly, Category = "Story")
-    ENarr_StoryPhase CurrentStoryPhase;
+    UPROPERTY(BlueprintReadOnly, Category = "Dialogue", meta = (AllowPrivateAccess = "true"))
+    TArray<FString> CompletedSequences;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Story")
-    TMap<FString, float> StoryProgressValues;
+    // Audio components
+    UPROPERTY(BlueprintReadOnly, Category = "Audio", meta = (AllowPrivateAccess = "true"))
+    class UAudioComponent* DialogueAudioComponent;
 
-    // Player action tracking
-    UPROPERTY(BlueprintReadOnly, Category = "Character")
-    TMap<FString, int32> PlayerActionCounts;
+    // Timer handles
+    FTimerHandle DialogueTimerHandle;
 
-    // Helper methods
+private:
+    // Internal dialogue flow
+    void ProcessNextDialogue();
+    void CompleteDialogueSequence();
     void InitializeDefaultDialogues();
-    void CreateSurvivalDialogues();
-    void CreateQuestDialogues();
-    bool ValidateDialogueTree(const FNarr_DialogueTree& DialogueTree) const;
+    
+    // Quest dialogue mapping
+    TMap<ENarr_QuestType, TArray<FString>> QuestDialogueMap;
 };
+
+#include "DialogueManager.generated.h"
