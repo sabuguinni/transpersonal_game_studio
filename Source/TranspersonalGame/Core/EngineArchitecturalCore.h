@@ -1,17 +1,113 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Subsystems/GameInstanceSubsystem.h"
 #include "Engine/World.h"
+#include "Subsystems/GameInstanceSubsystem.h"
+#include "Engine/Engine.h"
+#include "UObject/ObjectMacros.h"
 #include "SharedTypes.h"
 #include "EngineArchitecturalCore.generated.h"
 
-DECLARE_LOG_CATEGORY_EXTERN(LogEngineArchitecture, Log, All);
+class UCore_PhysicsManager;
+class UCore_CollisionManager;
+class UBiomeManager;
 
 /**
- * Engine Architectural Core Subsystem
- * Central authority for all architectural decisions, module coordination, and system integration
- * Enforces architectural standards across all game systems
+ * Architectural compliance levels for system validation
+ */
+UENUM(BlueprintType)
+enum class EEng_ArchitecturalCompliance : uint8
+{
+    NonCompliant    UMETA(DisplayName = "Non-Compliant"),
+    BasicCompliance UMETA(DisplayName = "Basic Compliance"),
+    FullCompliance  UMETA(DisplayName = "Full Compliance"),
+    ExemplarCompliance UMETA(DisplayName = "Exemplar Compliance")
+};
+
+/**
+ * Performance tier classifications for system optimization
+ */
+UENUM(BlueprintType)
+enum class EEng_PerformanceTier : uint8
+{
+    Critical        UMETA(DisplayName = "Critical Performance"),
+    High            UMETA(DisplayName = "High Performance"),
+    Standard        UMETA(DisplayName = "Standard Performance"),
+    Background      UMETA(DisplayName = "Background Performance")
+};
+
+/**
+ * Module dependency validation results
+ */
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FEng_ModuleDependencyStatus
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadOnly, Category = "Module Status")
+    FString ModuleName;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Module Status")
+    bool bIsLoaded;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Module Status")
+    bool bHasValidDependencies;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Module Status")
+    TArray<FString> MissingDependencies;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Module Status")
+    EEng_ArchitecturalCompliance ComplianceLevel;
+
+    FEng_ModuleDependencyStatus()
+        : bIsLoaded(false)
+        , bHasValidDependencies(false)
+        , ComplianceLevel(EEng_ArchitecturalCompliance::NonCompliant)
+    {}
+};
+
+/**
+ * System performance metrics for architectural monitoring
+ */
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FEng_SystemPerformanceMetrics
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    FString SystemName;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float AverageFrameTime;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float PeakFrameTime;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    int32 ActiveComponents;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float MemoryUsageMB;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    EEng_PerformanceTier PerformanceTier;
+
+    FEng_SystemPerformanceMetrics()
+        : AverageFrameTime(0.0f)
+        , PeakFrameTime(0.0f)
+        , ActiveComponents(0)
+        , MemoryUsageMB(0.0f)
+        , PerformanceTier(EEng_PerformanceTier::Standard)
+    {}
+};
+
+/**
+ * Central Engine Architectural Core Subsystem
+ * 
+ * This subsystem serves as the architectural backbone of the entire game,
+ * managing module dependencies, performance constraints, and system integration.
+ * It enforces architectural standards across all game systems and provides
+ * centralized monitoring and validation capabilities.
  */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UEngineArchitecturalCore : public UGameInstanceSubsystem
@@ -24,103 +120,123 @@ public:
     // USubsystem interface
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
+    virtual bool ShouldCreateSubsystem(UObject* Outer) const override;
 
-    // Core architectural management
+    /**
+     * Register a system module with the architectural core
+     * @param ModuleName Name of the module to register
+     * @param Dependencies List of required dependencies
+     * @param PerformanceTier Performance classification for this module
+     */
     UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    bool RegisterModule(const FString& ModuleName, const FString& ModuleVersion);
+    bool RegisterSystemModule(const FString& ModuleName, const TArray<FString>& Dependencies, EEng_PerformanceTier PerformanceTier);
 
+    /**
+     * Validate all registered modules and their dependencies
+     * @return Array of module status information
+     */
     UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    bool ValidateModuleDependencies(const FString& ModuleName);
+    TArray<FEng_ModuleDependencyStatus> ValidateModuleDependencies();
 
+    /**
+     * Get current performance metrics for all registered systems
+     * @return Array of performance metrics
+     */
     UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    bool EnforcePerformanceConstraints();
+    TArray<FEng_SystemPerformanceMetrics> GetSystemPerformanceMetrics();
 
+    /**
+     * Force architectural compliance check on all systems
+     * @return Overall compliance level of the architecture
+     */
     UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    void RunArchitecturalCompliance();
+    EEng_ArchitecturalCompliance ValidateArchitecturalCompliance();
 
-    // Performance monitoring
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    float GetCurrentFrameTime() const;
+    /**
+     * Initialize core physics systems with proper architectural integration
+     */
+    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
+    void InitializeCorePhysicsSystems();
 
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    int32 GetActiveActorCount() const;
+    /**
+     * Setup collision systems for spawned dinosaurs
+     */
+    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
+    void SetupDinosaurCollisionSystems();
 
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    float GetMemoryUsageMB() const;
+    /**
+     * Validate and optimize performance for current world state
+     */
+    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
+    void OptimizeWorldPerformance();
 
-    // Module coordination
-    UFUNCTION(BlueprintCallable, Category = "Module Management")
-    TArray<FString> GetRegisteredModules() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Module Management")
-    bool IsModuleLoaded(const FString& ModuleName) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Module Management")
-    void ReloadModule(const FString& ModuleName);
-
-    // System integration validation
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    bool ValidateSystemIntegration();
-
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    void LogSystemStatus();
-
-    // Architectural constraints enforcement
-    UFUNCTION(BlueprintCallable, Category = "Constraints")
-    bool EnforceWorldPartitionLimits();
-
-    UFUNCTION(BlueprintCallable, Category = "Constraints")
-    bool ValidateActorLimits();
-
-    UFUNCTION(BlueprintCallable, Category = "Constraints")
-    bool CheckMemoryConstraints();
+    /**
+     * Get architectural health status
+     */
+    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
+    bool IsArchitectureHealthy() const;
 
 protected:
-    // Registered modules tracking
-    UPROPERTY(BlueprintReadOnly, Category = "Modules")
-    TMap<FString, FString> RegisteredModules;
+    /**
+     * Registered system modules and their metadata
+     */
+    UPROPERTY(BlueprintReadOnly, Category = "Architecture", meta = (AllowPrivateAccess = "true"))
+    TMap<FString, FEng_ModuleDependencyStatus> RegisteredModules;
 
-    // Performance metrics
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float TargetFrameRate = 60.0f;
+    /**
+     * Performance metrics cache
+     */
+    UPROPERTY(BlueprintReadOnly, Category = "Architecture", meta = (AllowPrivateAccess = "true"))
+    TMap<FString, FEng_SystemPerformanceMetrics> PerformanceMetrics;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    int32 MaxActorsPerLevel = 50000;
+    /**
+     * Core physics manager reference
+     */
+    UPROPERTY(BlueprintReadOnly, Category = "Architecture", meta = (AllowPrivateAccess = "true"))
+    TObjectPtr<UCore_PhysicsManager> PhysicsManager;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float MaxMemoryUsageMB = 8192.0f;
+    /**
+     * Collision system manager reference
+     */
+    UPROPERTY(BlueprintReadOnly, Category = "Architecture", meta = (AllowPrivateAccess = "true"))
+    TObjectPtr<UCore_CollisionManager> CollisionManager;
 
-    // Architectural validation flags
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    bool bArchitecturalComplianceEnabled = true;
+    /**
+     * Biome management system reference
+     */
+    UPROPERTY(BlueprintReadOnly, Category = "Architecture", meta = (AllowPrivateAccess = "true"))
+    TObjectPtr<UBiomeManager> BiomeManager;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    bool bPerformanceMonitoringEnabled = true;
+    /**
+     * Overall architectural health status
+     */
+    UPROPERTY(BlueprintReadOnly, Category = "Architecture", meta = (AllowPrivateAccess = "true"))
+    bool bArchitectureHealthy;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    bool bModuleDependencyCheckEnabled = true;
+    /**
+     * Last validation timestamp
+     */
+    UPROPERTY(BlueprintReadOnly, Category = "Architecture", meta = (AllowPrivateAccess = "true"))
+    float LastValidationTime;
 
 private:
-    // Internal validation methods
-    bool ValidatePhysicsIntegration();
-    bool ValidateWorldGeneration();
-    bool ValidateCharacterSystems();
-    bool ValidateBiomeManagement();
-    bool ValidateAudioSystems();
-    bool ValidateVFXSystems();
-    bool ValidateNPCBehavior();
-    bool ValidateCombatSystems();
-    bool ValidateQuestSystems();
-    bool ValidateNarrativeSystems();
+    /**
+     * Internal validation of module dependencies
+     */
+    bool ValidateModuleDependency(const FString& ModuleName, const TArray<FString>& Dependencies);
 
-    // Performance tracking
-    float LastFrameTime = 0.0f;
-    int32 LastActorCount = 0;
-    float LastMemoryUsage = 0.0f;
+    /**
+     * Update performance metrics for a specific system
+     */
+    void UpdateSystemPerformanceMetrics(const FString& SystemName);
 
-    // Module dependency validation
-    TMap<FString, TArray<FString>> ModuleDependencies;
-    
-    // System status tracking
-    TMap<FString, bool> SystemStatusMap;
+    /**
+     * Initialize architectural standards and constraints
+     */
+    void InitializeArchitecturalStandards();
+
+    /**
+     * Validate system integration points
+     */
+    bool ValidateSystemIntegration();
 };
