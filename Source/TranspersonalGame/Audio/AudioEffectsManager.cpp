@@ -1,260 +1,273 @@
 #include "AudioEffectsManager.h"
-#include "Components/AudioComponent.h"
-#include "Particles/ParticleSystemComponent.h"
+#include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "Engine/DirectionalLight.h"
-#include "Kismet/GameplayStatics.h"
-#include "Camera/PlayerCameraManager.h"
 #include "GameFramework/PlayerController.h"
+#include "Camera/PlayerCameraManager.h"
+#include "Components/AudioComponent.h"
+#include "Kismet/GameplayStatics.h"
+#include "Particles/ParticleSystemComponent.h"
+#include "Engine/DirectionalLight.h"
+#include "Components/DirectionalLightComponent.h"
 #include "Math/UnrealMathUtility.h"
 
-AAudioEffectsManager::AAudioEffectsManager()
+UAudioEffectsManager::UAudioEffectsManager()
 {
-    PrimaryActorTick.bCanEverTick = true;
+    // Initialize default configurations
+    DefaultShakeConfig.Intensity = 1.0f;
+    DefaultShakeConfig.Duration = 0.5f;
+    DefaultShakeConfig.Frequency = 10.0f;
+    DefaultShakeConfig.MaxDistance = 2000.0f;
 
-    // Create proximity audio component
-    ProximityAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("ProximityAudio"));
-    RootComponent = ProximityAudioComponent;
+    DefaultFlashConfig.FlashColor = FLinearColor::Red;
+    DefaultFlashConfig.FlashIntensity = 0.8f;
+    DefaultFlashConfig.FlashDuration = 0.3f;
+    DefaultFlashConfig.FadeOutTime = 0.2f;
 
-    // Create damage audio component
-    DamageAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("DamageAudio"));
-    DamageAudioComponent->SetupAttachment(RootComponent);
+    CurrentTimeOfDay = 12.0f;
+    DayNightSpeed = 1.0f;
+    CurrentBiome = TEXT("Savana");
 
-    // Create footstep dust particle component
-    FootstepDustComponent = CreateDefaultSubobject<UParticleSystemComponent>(TEXT("FootstepDust"));
-    FootstepDustComponent->SetupAttachment(RootComponent);
-    FootstepDustComponent->SetAutoActivate(false);
-
-    // Initialize effect settings
-    TRexShakeSettings.Intensity = 2.0f;
-    TRexShakeSettings.Duration = 3.0f;
-    TRexShakeSettings.Range = 2000.0f;
-    TRexShakeSettings.bEnabled = true;
-
-    DamageFlashSettings.Intensity = 1.5f;
-    DamageFlashSettings.Duration = 1.0f;
-    DamageFlashSettings.Range = 0.0f; // Screen effect, no range
-    DamageFlashSettings.bEnabled = true;
-
-    FootstepDustSettings.Intensity = 1.0f;
-    FootstepDustSettings.Duration = 2.0f;
-    FootstepDustSettings.Range = 500.0f;
-    FootstepDustSettings.bEnabled = true;
-}
-
-void AAudioEffectsManager::BeginPlay()
-{
-    Super::BeginPlay();
-    
     // Initialize audio components
-    if (ProximityAudioComponent)
-    {
-        ProximityAudioComponent->SetVolumeMultiplier(0.8f);
-        ProximityAudioComponent->SetPitchMultiplier(0.9f);
-    }
-
-    if (DamageAudioComponent)
-    {
-        DamageAudioComponent->SetVolumeMultiplier(1.0f);
-        DamageAudioComponent->SetPitchMultiplier(1.2f);
-    }
+    InitializeAudioComponents();
 }
 
-void AAudioEffectsManager::Tick(float DeltaTime)
+void UAudioEffectsManager::InitializeAudioComponents()
 {
-    Super::Tick(DeltaTime);
-
-    // Update damage flash timer
-    if (bDamageFlashActive)
-    {
-        DamageFlashTimer -= DeltaTime;
-        if (DamageFlashTimer <= 0.0f)
-        {
-            bDamageFlashActive = false;
-        }
-    }
-
-    // Update day/night cycle
-    CurrentTimeOfDay += DeltaTime * 0.1f; // Slow time progression
-    if (CurrentTimeOfDay >= 24.0f)
-    {
-        CurrentTimeOfDay = 0.0f;
-    }
-    RotateSunLight(CurrentTimeOfDay);
-}
-
-void AAudioEffectsManager::TriggerTRexProximityEffect(FVector TRexLocation, float Distance)
-{
-    if (!TRexShakeSettings.bEnabled || Distance > TRexShakeSettings.Range)
-    {
-        return;
-    }
-
-    // Calculate intensity based on distance
-    float DistanceRatio = FMath::Clamp(1.0f - (Distance / TRexShakeSettings.Range), 0.0f, 1.0f);
-    float EffectIntensity = TRexShakeSettings.Intensity * DistanceRatio;
-
-    // Trigger screen shake
-    UpdateScreenShakeIntensity(Distance);
-
-    // Play proximity warning sound
-    PlayProximityWarningSound(Distance);
-
-    // Create ground rumble particles
-    CreateFootstepDustParticles(TRexLocation, 5.0f); // Large creature size
-}
-
-void AAudioEffectsManager::TriggerDamageFlashEffect(float DamageAmount)
-{
-    if (!DamageFlashSettings.bEnabled)
-    {
-        return;
-    }
-
-    bDamageFlashActive = true;
-    DamageFlashTimer = DamageFlashSettings.Duration;
-
-    // Play damage sound
-    if (DamageAudioComponent)
-    {
-        float DamageIntensity = FMath::Clamp(DamageAmount / 100.0f, 0.1f, 2.0f);
-        DamageAudioComponent->SetVolumeMultiplier(DamageIntensity);
-        DamageAudioComponent->Play();
-    }
-}
-
-void AAudioEffectsManager::TriggerFootstepDustEffect(FVector FootstepLocation, float CreatureSize)
-{
-    if (!FootstepDustSettings.bEnabled)
-    {
-        return;
-    }
-
-    CreateFootstepDustParticles(FootstepLocation, CreatureSize);
-}
-
-void AAudioEffectsManager::UpdateDayNightCycle(float TimeOfDay)
-{
-    CurrentTimeOfDay = FMath::Fmod(TimeOfDay, 24.0f);
-    RotateSunLight(CurrentTimeOfDay);
-}
-
-void AAudioEffectsManager::SetEffectEnabled(EAudio_EffectType EffectType, bool bEnabled)
-{
-    switch (EffectType)
-    {
-        case EAudio_EffectType::ScreenShake:
-            TRexShakeSettings.bEnabled = bEnabled;
-            break;
-        case EAudio_EffectType::DamageFlash:
-            DamageFlashSettings.bEnabled = bEnabled;
-            break;
-        case EAudio_EffectType::FootstepDust:
-            FootstepDustSettings.bEnabled = bEnabled;
-            break;
-        case EAudio_EffectType::ProximityRumble:
-            TRexShakeSettings.bEnabled = bEnabled; // Same as screen shake
-            break;
-    }
-}
-
-void AAudioEffectsManager::UpdateScreenShakeIntensity(float Distance)
-{
-    if (!TRexCameraShakeClass)
-    {
-        return;
-    }
-
     UWorld* World = GetWorld();
     if (!World)
     {
         return;
     }
 
-    APlayerController* PC = World->GetFirstPlayerController();
+    // Create ambient audio components
+    DayAmbientComponent = NewObject<UAudioComponent>(this);
+    if (DayAmbientComponent)
+    {
+        DayAmbientComponent->bAutoActivate = false;
+        DayAmbientComponent->SetVolumeMultiplier(0.5f);
+    }
+
+    NightAmbientComponent = NewObject<UAudioComponent>(this);
+    if (NightAmbientComponent)
+    {
+        NightAmbientComponent->bAutoActivate = false;
+        NightAmbientComponent->SetVolumeMultiplier(0.3f);
+    }
+
+    WeatherAmbientComponent = NewObject<UAudioComponent>(this);
+    if (WeatherAmbientComponent)
+    {
+        WeatherAmbientComponent->bAutoActivate = false;
+        WeatherAmbientComponent->SetVolumeMultiplier(0.4f);
+    }
+}
+
+void UAudioEffectsManager::TriggerProximityShake(FVector SourceLocation, const FAudio_ScreenShakeConfig& Config)
+{
+    APlayerController* PC = GetLocalPlayerController();
     if (!PC || !PC->PlayerCameraManager)
     {
         return;
     }
 
-    // Calculate shake intensity based on distance
-    float DistanceRatio = FMath::Clamp(1.0f - (Distance / TRexShakeSettings.Range), 0.0f, 1.0f);
-    float ShakeScale = TRexShakeSettings.Intensity * DistanceRatio;
-
-    // Start camera shake
-    PC->PlayerCameraManager->StartCameraShake(TRexCameraShakeClass, ShakeScale);
-}
-
-void AAudioEffectsManager::PlayProximityWarningSound(float Distance)
-{
-    if (!ProximityAudioComponent)
+    // Calculate distance to player
+    APawn* PlayerPawn = PC->GetPawn();
+    if (!PlayerPawn)
     {
         return;
     }
 
-    // Adjust volume and pitch based on distance
-    float DistanceRatio = FMath::Clamp(1.0f - (Distance / TRexShakeSettings.Range), 0.0f, 1.0f);
-    float Volume = 0.3f + (0.7f * DistanceRatio);
-    float Pitch = 0.8f + (0.4f * DistanceRatio);
+    FVector PlayerLocation = PlayerPawn->GetActorLocation();
+    float Distance = FVector::Dist(SourceLocation, PlayerLocation);
 
-    ProximityAudioComponent->SetVolumeMultiplier(Volume);
-    ProximityAudioComponent->SetPitchMultiplier(Pitch);
-    ProximityAudioComponent->Play();
-}
-
-void AAudioEffectsManager::CreateFootstepDustParticles(FVector Location, float Size)
-{
-    if (!FootstepDustComponent)
+    if (Distance > Config.MaxDistance)
     {
         return;
     }
 
-    // Set particle location
-    FootstepDustComponent->SetWorldLocation(Location);
+    // Calculate intensity based on distance
+    float DistanceRatio = 1.0f - (Distance / Config.MaxDistance);
+    float AdjustedIntensity = Config.Intensity * DistanceRatio;
+
+    // Apply screen shake
+    if (AdjustedIntensity > 0.1f)
+    {
+        PC->PlayerCameraManager->StartCameraShake(nullptr, AdjustedIntensity);
+        
+        UE_LOG(LogTemp, Log, TEXT("AudioEffectsManager: Proximity shake triggered - Distance: %f, Intensity: %f"), Distance, AdjustedIntensity);
+    }
+}
+
+void UAudioEffectsManager::TriggerFootstepShake(FVector FootstepLocation, float DinosaurMass)
+{
+    // Calculate shake intensity based on dinosaur mass
+    float BaseIntensity = FMath::Clamp(DinosaurMass / 10000.0f, 0.1f, 2.0f);
     
-    // Scale particles based on creature size
-    float ParticleScale = FMath::Clamp(Size / 2.0f, 0.5f, 3.0f);
-    FootstepDustComponent->SetRelativeScale3D(FVector(ParticleScale));
+    FAudio_ScreenShakeConfig ShakeConfig;
+    ShakeConfig.Intensity = BaseIntensity;
+    ShakeConfig.Duration = 0.3f;
+    ShakeConfig.Frequency = 8.0f;
+    ShakeConfig.MaxDistance = 1500.0f;
 
-    // Activate particle system
-    FootstepDustComponent->Activate(true);
+    TriggerProximityShake(FootstepLocation, ShakeConfig);
+
+    // Play footstep sound
+    if (FootstepHeavySound)
+    {
+        UGameplayStatics::PlaySoundAtLocation(GetWorld(), FootstepHeavySound, FootstepLocation, 1.0f);
+    }
 }
 
-void AAudioEffectsManager::RotateSunLight(float TimeOfDay)
+void UAudioEffectsManager::TriggerDamageFlash(const FAudio_DamageFlashConfig& Config)
+{
+    APlayerController* PC = GetLocalPlayerController();
+    if (!PC)
+    {
+        return;
+    }
+
+    // Create damage flash effect (simplified implementation)
+    // In a full implementation, this would manipulate post-process materials
+    UE_LOG(LogTemp, Warning, TEXT("AudioEffectsManager: Damage flash triggered - Color: R=%f G=%f B=%f, Intensity: %f"), 
+           Config.FlashColor.R, Config.FlashColor.G, Config.FlashColor.B, Config.FlashIntensity);
+
+    // Play damage audio
+    if (DamageImpactSound)
+    {
+        UGameplayStatics::PlaySound2D(GetWorld(), DamageImpactSound, 0.8f);
+    }
+
+    if (HeartbeatIntenseSound)
+    {
+        UGameplayStatics::PlaySound2D(GetWorld(), HeartbeatIntenseSound, 0.6f);
+    }
+}
+
+void UAudioEffectsManager::PlayDamageAudio(USoundBase* DamageSound, float VolumeMultiplier)
+{
+    if (DamageSound)
+    {
+        UGameplayStatics::PlaySound2D(GetWorld(), DamageSound, VolumeMultiplier);
+    }
+}
+
+void UAudioEffectsManager::SpawnFootstepDust(FVector Location, FVector Normal, float ParticleScale)
+{
+    UWorld* World = GetWorld();
+    if (!World || !FootstepDustParticles)
+    {
+        return;
+    }
+
+    // Spawn dust particle system
+    UGameplayStatics::SpawnEmitterAtLocation(
+        World,
+        FootstepDustParticles,
+        Location,
+        Normal.Rotation(),
+        FVector(ParticleScale),
+        true
+    );
+
+    UE_LOG(LogTemp, Log, TEXT("AudioEffectsManager: Footstep dust spawned at location: %s"), *Location.ToString());
+}
+
+void UAudioEffectsManager::UpdateAmbientAudio(float TimeOfDay, FString BiomeName)
+{
+    CurrentTimeOfDay = TimeOfDay;
+    CurrentBiome = BiomeName;
+
+    // Calculate day/night audio mixing
+    float DayVolume = 0.0f;
+    float NightVolume = 0.0f;
+
+    if (TimeOfDay >= 6.0f && TimeOfDay <= 18.0f)
+    {
+        // Daytime (6 AM to 6 PM)
+        DayVolume = 1.0f;
+        NightVolume = 0.0f;
+    }
+    else if (TimeOfDay >= 18.0f && TimeOfDay <= 20.0f)
+    {
+        // Evening transition (6 PM to 8 PM)
+        float TransitionFactor = (TimeOfDay - 18.0f) / 2.0f;
+        DayVolume = 1.0f - TransitionFactor;
+        NightVolume = TransitionFactor;
+    }
+    else if (TimeOfDay >= 4.0f && TimeOfDay <= 6.0f)
+    {
+        // Morning transition (4 AM to 6 AM)
+        float TransitionFactor = (TimeOfDay - 4.0f) / 2.0f;
+        DayVolume = TransitionFactor;
+        NightVolume = 1.0f - TransitionFactor;
+    }
+    else
+    {
+        // Nighttime
+        DayVolume = 0.0f;
+        NightVolume = 1.0f;
+    }
+
+    // Apply volume changes
+    if (DayAmbientComponent)
+    {
+        DayAmbientComponent->SetVolumeMultiplier(DayVolume * 0.5f);
+    }
+
+    if (NightAmbientComponent)
+    {
+        NightAmbientComponent->SetVolumeMultiplier(NightVolume * 0.3f);
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("AudioEffectsManager: Ambient audio updated - Time: %f, Biome: %s, Day Volume: %f, Night Volume: %f"), 
+           TimeOfDay, *BiomeName, DayVolume, NightVolume);
+}
+
+void UAudioEffectsManager::SetDayNightCycleSpeed(float CycleSpeedMultiplier)
+{
+    DayNightSpeed = FMath::Clamp(CycleSpeedMultiplier, 0.1f, 10.0f);
+    UE_LOG(LogTemp, Log, TEXT("AudioEffectsManager: Day/Night cycle speed set to: %f"), DayNightSpeed);
+}
+
+APlayerController* UAudioEffectsManager::GetLocalPlayerController() const
 {
     UWorld* World = GetWorld();
     if (!World)
     {
-        return;
+        return nullptr;
     }
 
-    // Find directional light (sun)
-    TArray<AActor*> DirectionalLights;
-    UGameplayStatics::GetAllActorsOfClass(World, ADirectionalLight::StaticClass(), DirectionalLights);
+    return World->GetFirstPlayerController();
+}
 
-    if (DirectionalLights.Num() > 0)
+UWorld* UAudioEffectsManager::GetWorld() const
+{
+    if (HasAnyFlags(RF_ClassDefaultObject))
     {
-        ADirectionalLight* SunLight = Cast<ADirectionalLight>(DirectionalLights[0]);
-        if (SunLight)
-        {
-            // Calculate sun rotation based on time of day
-            float SunAngle = (TimeOfDay / 24.0f) * 360.0f - 90.0f; // -90 to start at horizon
-            FRotator SunRotation = FRotator(SunAngle, 0.0f, 0.0f);
-            SunLight->SetActorRotation(SunRotation);
-
-            // Adjust light intensity based on time
-            float LightIntensity = 1.0f;
-            if (TimeOfDay < 6.0f || TimeOfDay > 18.0f) // Night time
-            {
-                LightIntensity = 0.1f;
-            }
-            else if (TimeOfDay < 8.0f || TimeOfDay > 16.0f) // Dawn/dusk
-            {
-                float DawnDuskFactor = (TimeOfDay < 8.0f) ? (TimeOfDay - 6.0f) / 2.0f : (18.0f - TimeOfDay) / 2.0f;
-                LightIntensity = 0.1f + (0.9f * DawnDuskFactor);
-            }
-
-            SunLight->GetLightComponent()->SetIntensity(LightIntensity);
-        }
+        return nullptr;
     }
+
+    UObject* Outer = GetOuter();
+    while (Outer)
+    {
+        UWorld* World = Outer->GetWorld();
+        if (World)
+        {
+            return World;
+        }
+        Outer = Outer->GetOuter();
+    }
+
+    return GEngine ? GEngine->GetCurrentPlayWorld() : nullptr;
+}
+
+float UAudioEffectsManager::CalculateDistanceAttenuation(FVector SourceLocation, FVector ListenerLocation, float MaxDistance) const
+{
+    float Distance = FVector::Dist(SourceLocation, ListenerLocation);
+    if (Distance >= MaxDistance)
+    {
+        return 0.0f;
+    }
+    
+    return 1.0f - (Distance / MaxDistance);
 }
