@@ -7,35 +7,35 @@
 #include "NarrativeManager.generated.h"
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FNarr_DialogueEntry : public FTableRowBase
+struct TRANSPERSONALGAME_API FNarr_DialogueEntry
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dialogue")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
     FString DialogueID;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dialogue")
-    FText DialogueText;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dialogue")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
     FString SpeakerName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dialogue")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    FString DialogueText;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    FString AudioPath;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
     float Duration;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dialogue")
-    ENarr_DialogueType DialogueType;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dialogue")
-    TArray<FString> TriggerConditions;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    TArray<FString> Conditions;
 
     FNarr_DialogueEntry()
     {
         DialogueID = TEXT("");
-        DialogueText = FText::GetEmpty();
         SpeakerName = TEXT("");
+        DialogueText = TEXT("");
+        AudioPath = TEXT("");
         Duration = 3.0f;
-        DialogueType = ENarr_DialogueType::Narration;
     }
 };
 
@@ -44,98 +44,83 @@ struct TRANSPERSONALGAME_API FNarr_StoryBeat
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Story")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
     FString BeatID;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Story")
-    FText BeatTitle;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    FString Title;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Story")
-    FText BeatDescription;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    FString Description;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Story")
-    ENarr_StoryPhase Phase;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    TArray<FString> TriggerConditions;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Story")
-    TArray<FString> RequiredConditions;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    TArray<FString> DialogueSequence;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Story")
-    TArray<FString> UnlockedDialogues;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Story")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
     bool bIsCompleted;
 
     FNarr_StoryBeat()
     {
         BeatID = TEXT("");
-        BeatTitle = FText::GetEmpty();
-        BeatDescription = FText::GetEmpty();
-        Phase = ENarr_StoryPhase::Discovery;
+        Title = TEXT("");
+        Description = TEXT("");
         bIsCompleted = false;
     }
 };
 
-UCLASS()
+UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UNarrativeManager : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
 public:
+    UNarrativeManager();
+
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
-    // Dialogue System
     UFUNCTION(BlueprintCallable, Category = "Narrative")
     void TriggerDialogue(const FString& DialogueID, AActor* Speaker = nullptr);
 
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    bool IsDialogueAvailable(const FString& DialogueID) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void RegisterDialogueCondition(const FString& ConditionID, bool bValue);
-
-    // Story Progression
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void AdvanceStoryBeat(const FString& BeatID);
+    void TriggerStoryBeat(const FString& BeatID);
 
     UFUNCTION(BlueprintCallable, Category = "Narrative")
     bool IsStoryBeatCompleted(const FString& BeatID) const;
 
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    ENarr_StoryPhase GetCurrentStoryPhase() const;
-
-    // Environmental Narrative
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void TriggerEnvironmentalNarration(const FVector& Location, const FString& NarrationType);
+    void RegisterDialogueEntry(const FNarr_DialogueEntry& Entry);
 
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void SetNarrativeContext(ENarr_BiomeType Biome, ENarr_TimeOfDay TimeOfDay, ENarr_WeatherType Weather);
+    void RegisterStoryBeat(const FNarr_StoryBeat& Beat);
+
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    TArray<FString> GetActiveDialogues() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    void PlayNarrationAudio(const FString& AudioPath, float Volume = 1.0f);
 
 protected:
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Data")
-    class UDataTable* DialogueDataTable;
+    UPROPERTY(BlueprintReadOnly, Category = "Narrative")
+    TMap<FString, FNarr_DialogueEntry> DialogueDatabase;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Data")
-    TArray<FNarr_StoryBeat> StoryBeats;
+    UPROPERTY(BlueprintReadOnly, Category = "Narrative")
+    TMap<FString, FNarr_StoryBeat> StoryBeats;
 
-    UPROPERTY(BlueprintReadOnly, Category = "State")
-    TMap<FString, bool> DialogueConditions;
+    UPROPERTY(BlueprintReadOnly, Category = "Narrative")
+    TArray<FString> ActiveDialogues;
 
-    UPROPERTY(BlueprintReadOnly, Category = "State")
-    ENarr_StoryPhase CurrentStoryPhase;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Context")
-    ENarr_BiomeType CurrentBiome;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Context")
-    ENarr_TimeOfDay CurrentTimeOfDay;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Context")
-    ENarr_WeatherType CurrentWeather;
+    UPROPERTY(BlueprintReadOnly, Category = "Narrative")
+    FString CurrentStoryBeat;
 
 private:
+    void InitializeDefaultDialogues();
     void InitializeStoryBeats();
-    void LoadDialogueData();
-    bool EvaluateConditions(const TArray<FString>& Conditions) const;
-    void BroadcastDialogue(const FNarr_DialogueEntry& DialogueEntry, AActor* Speaker);
+    bool CheckConditions(const TArray<FString>& Conditions) const;
+    void ProcessDialogueSequence(const TArray<FString>& Sequence);
 };
+
+#include "NarrativeManager.generated.h"
