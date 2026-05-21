@@ -2,61 +2,63 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
-#include "Engine/Engine.h"
-#include "GameFramework/Actor.h"
+#include "Engine/TriggerSphere.h"
+#include "SharedTypes.h"
 #include "Combat_ThreatDetectionSystem.generated.h"
 
-UENUM(BlueprintType)
-enum class ECombat_ThreatLevel : uint8
-{
-    None        UMETA(DisplayName = "No Threat"),
-    Low         UMETA(DisplayName = "Low Threat"),
-    Medium      UMETA(DisplayName = "Medium Threat"),
-    High        UMETA(DisplayName = "High Threat"),
-    Critical    UMETA(DisplayName = "Critical Threat")
-};
-
-UENUM(BlueprintType)
-enum class ECombat_DetectionState : uint8
-{
-    Idle        UMETA(DisplayName = "Idle"),
-    Searching   UMETA(DisplayName = "Searching"),
-    Detected    UMETA(DisplayName = "Target Detected"),
-    Tracking    UMETA(DisplayName = "Tracking"),
-    Engaging    UMETA(DisplayName = "Engaging")
-};
-
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FCombat_ThreatInfo
+struct TRANSPERSONALGAME_API FCombat_ThreatLevel
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    AActor* ThreatActor;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Threat")
+    float ThreatRadius = 1000.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    ECombat_ThreatLevel ThreatLevel;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Threat")
+    float DamagePerSecond = 10.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float Distance;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Threat")
+    EThreatLevel Level = EThreatLevel::Low;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float LastSeenTime;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Threat")
+    FString ThreatName = TEXT("Unknown");
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FVector LastKnownLocation;
-
-    FCombat_ThreatInfo()
+    FCombat_ThreatLevel()
     {
-        ThreatActor = nullptr;
-        ThreatLevel = ECombat_ThreatLevel::None;
-        Distance = 0.0f;
-        LastSeenTime = 0.0f;
-        LastKnownLocation = FVector::ZeroVector;
+        ThreatRadius = 1000.0f;
+        DamagePerSecond = 10.0f;
+        Level = EThreatLevel::Low;
+        ThreatName = TEXT("Unknown");
     }
 };
 
-UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FCombat_DetectionData
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Detection")
+    AActor* ThreatActor = nullptr;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Detection")
+    float Distance = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Detection")
+    FVector Direction = FVector::ZeroVector;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Detection")
+    float DetectionTime = 0.0f;
+
+    FCombat_DetectionData()
+    {
+        ThreatActor = nullptr;
+        Distance = 0.0f;
+        Direction = FVector::ZeroVector;
+        DetectionTime = 0.0f;
+    }
+};
+
+UCLASS(ClassGroup=(Combat), meta=(BlueprintSpawnableComponent))
 class TRANSPERSONALGAME_API UCombat_ThreatDetectionSystem : public UActorComponent
 {
     GENERATED_BODY()
@@ -66,70 +68,70 @@ public:
 
 protected:
     virtual void BeginPlay() override;
-
-public:
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    // Detection Parameters
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Threat Detection")
-    float DetectionRadius = 1500.0f;
+    // Threat detection properties
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Detection", meta = (AllowPrivateAccess = "true"))
+    float ScanRadius = 5000.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Threat Detection")
-    float AttackRadius = 800.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Detection", meta = (AllowPrivateAccess = "true"))
+    float ScanInterval = 0.5f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Threat Detection")
-    float FieldOfView = 120.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Detection", meta = (AllowPrivateAccess = "true"))
+    TArray<FCombat_ThreatLevel> ThreatDatabase;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Threat Detection")
-    float DetectionUpdateRate = 0.2f;
+    UPROPERTY(BlueprintReadOnly, Category = "Detection", meta = (AllowPrivateAccess = "true"))
+    TArray<FCombat_DetectionData> ActiveThreats;
 
-    // Current State
-    UPROPERTY(BlueprintReadOnly, Category = "Threat Detection")
-    ECombat_DetectionState CurrentState;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Threat Detection")
-    TArray<FCombat_ThreatInfo> DetectedThreats;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Threat Detection")
-    AActor* PrimaryThreat;
-
-    // Detection Functions
-    UFUNCTION(BlueprintCallable, Category = "Threat Detection")
-    void UpdateThreatDetection();
-
-    UFUNCTION(BlueprintCallable, Category = "Threat Detection")
-    ECombat_ThreatLevel CalculateThreatLevel(AActor* ThreatActor, float Distance);
-
-    UFUNCTION(BlueprintCallable, Category = "Threat Detection")
-    bool IsActorInFieldOfView(AActor* TargetActor);
-
-    UFUNCTION(BlueprintCallable, Category = "Threat Detection")
-    void AddThreat(AActor* ThreatActor);
-
-    UFUNCTION(BlueprintCallable, Category = "Threat Detection")
-    void RemoveThreat(AActor* ThreatActor);
-
-    UFUNCTION(BlueprintCallable, Category = "Threat Detection")
-    FCombat_ThreatInfo GetHighestThreat();
-
-    // Events
-    DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnThreatDetected, AActor*, ThreatActor);
-    DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnThreatLost, AActor*, ThreatActor);
-    DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnThreatLevelChanged, ECombat_ThreatLevel, NewThreatLevel);
-
-    UPROPERTY(BlueprintAssignable)
-    FOnThreatDetected OnThreatDetected;
-
-    UPROPERTY(BlueprintAssignable)
-    FOnThreatLost OnThreatLost;
-
-    UPROPERTY(BlueprintAssignable)
-    FOnThreatLevelChanged OnThreatLevelChanged;
+    UPROPERTY(BlueprintReadOnly, Category = "Detection", meta = (AllowPrivateAccess = "true"))
+    EThreatLevel CurrentThreatLevel = EThreatLevel::None;
 
 private:
-    float LastDetectionUpdate;
-    ECombat_ThreatLevel LastThreatLevel;
+    float LastScanTime = 0.0f;
+    class ATranspersonalCharacter* PlayerCharacter = nullptr;
 
-    void CleanupOldThreats();
-    bool CanSeeActor(AActor* TargetActor);
+public:
+    // Threat detection methods
+    UFUNCTION(BlueprintCallable, Category = "Combat")
+    void ScanForThreats();
+
+    UFUNCTION(BlueprintCallable, Category = "Combat")
+    FCombat_ThreatLevel GetThreatLevel(AActor* Actor) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Combat")
+    bool IsActorThreat(AActor* Actor) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Combat")
+    FVector GetNearestThreatDirection() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Combat")
+    float GetNearestThreatDistance() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Combat")
+    void AddThreatType(const FCombat_ThreatLevel& NewThreat);
+
+    UFUNCTION(BlueprintCallable, Category = "Combat")
+    void ClearThreats();
+
+    // Events
+    UFUNCTION(BlueprintImplementableEvent, Category = "Combat")
+    void OnThreatDetected(const FCombat_DetectionData& ThreatData);
+
+    UFUNCTION(BlueprintImplementableEvent, Category = "Combat")
+    void OnThreatLevelChanged(EThreatLevel NewLevel);
+
+    UFUNCTION(BlueprintImplementableEvent, Category = "Combat")
+    void OnThreatLost(AActor* ThreatActor);
+
+    // Getters
+    UFUNCTION(BlueprintPure, Category = "Combat")
+    FORCEINLINE TArray<FCombat_DetectionData> GetActiveThreats() const { return ActiveThreats; }
+
+    UFUNCTION(BlueprintPure, Category = "Combat")
+    FORCEINLINE EThreatLevel GetCurrentThreatLevel() const { return CurrentThreatLevel; }
+
+    UFUNCTION(BlueprintPure, Category = "Combat")
+    FORCEINLINE float GetScanRadius() const { return ScanRadius; }
 };
+
+#include "Combat_ThreatDetectionSystem.generated.h"
