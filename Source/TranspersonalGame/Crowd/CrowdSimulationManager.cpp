@@ -1,252 +1,205 @@
 #include "CrowdSimulationManager.h"
+#include "Engine/World.h"
+#include "Engine/Engine.h"
+#include "Kismet/GameplayStatics.h"
 #include "MassEntitySubsystem.h"
 #include "MassSpawnerSubsystem.h"
-#include "MassSimulationSubsystem.h"
-#include "Engine/World.h"
-#include "GameFramework/PlayerController.h"
-#include "Kismet/GameplayStatics.h"
 
 ACrowdSimulationManager::ACrowdSimulationManager()
 {
     PrimaryActorTick.bCanEverTick = true;
-    PrimaryActorTick.TickInterval = 0.1f; // 10 FPS for management logic
     
-    CurrentSeasonTime = 0.0f;
-    ActiveEntityCount = 0;
-    LastPerformanceCheck = 0.0f;
-    AverageFrameTime = 16.67f; // Target 60 FPS
+    MaxCrowdSize = 50000;
+    CrowdDensity = 1.0f;
+    LODDistance1 = 5000.0f;
+    LODDistance2 = 15000.0f;
+    CullingDistance = 25000.0f;
+    
+    MassEntitySubsystem = nullptr;
 }
 
 void ACrowdSimulationManager::BeginPlay()
 {
     Super::BeginPlay();
     
-    // Get Mass subsystems
-    UWorld* World = GetWorld();
-    if (World)
-    {
-        MassEntitySubsystem = World->GetSubsystem<UMassEntitySubsystem>();
-        MassSpawnerSubsystem = World->GetSubsystem<UMassSpawnerSubsystem>();
-        MassSimulationSubsystem = World->GetSubsystem<UMassSimulationSubsystem>();
-    }
+    InitializeMassEntity();
     
-    // Initialize migration waypoints if empty
-    if (MigrationWaypoints.Num() == 0)
-    {
-        // Default circular migration pattern
-        float Radius = 5000.0f;
-        int32 WaypointCount = 8;
-        FVector Center = GetActorLocation();
-        
-        for (int32 i = 0; i < WaypointCount; i++)
-        {
-            float Angle = (2.0f * PI * i) / WaypointCount;
-            FVector Waypoint = Center + FVector(
-                FMath::Cos(Angle) * Radius,
-                FMath::Sin(Angle) * Radius,
-                0.0f
-            );
-            MigrationWaypoints.Add(Waypoint);
-        }
-    }
+    // Create initial herds in different biomes
+    SpawnHerd(EDinosaurSpecies::Triceratops, FVector(0, 0, 100), 50);
+    SpawnHerd(EDinosaurSpecies::Parasaurolophus, FVector(-45000, 40000, 100), 30);
+    SpawnHerd(EDinosaurSpecies::Brachiosaurus, FVector(-45000, 40000, 100), 15);
     
-    UE_LOG(LogTemp, Warning, TEXT("CrowdSimulationManager initialized with %d migration waypoints"), MigrationWaypoints.Num());
+    UE_LOG(LogTemp, Warning, TEXT("CrowdSimulationManager initialized with %d herds"), ActiveHerds.Num());
 }
 
 void ACrowdSimulationManager::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
     
-    // Update seasonal cycle
-    CurrentSeasonTime += DeltaTime;
-    if (CurrentSeasonTime >= SeasonalCycleLength)
+    // Update all active herds
+    for (int32 i = 0; i < ActiveHerds.Num(); i++)
     {
-        CurrentSeasonTime = 0.0f;
-        // Trigger seasonal migration
-        SetMigrationActive(true);
+        UpdateHerdBehavior(i, DeltaTime);
     }
     
-    // Performance monitoring
-    LastPerformanceCheck += DeltaTime;
-    if (LastPerformanceCheck >= 1.0f) // Check every second
-    {
-        LastPerformanceCheck = 0.0f;
-        
-        // Calculate average frame time
-        AverageFrameTime = (AverageFrameTime * 0.9f) + (DeltaTime * 1000.0f * 0.1f);
-        
-        // Adaptive LOD based on performance
-        if (AverageFrameTime > 20.0f) // Below 50 FPS
-        {
-            // Reduce simulation complexity
-            MaxSimultaneousEntities = FMath::Max(MaxSimultaneousEntities - 1000, 10000);
-            UE_LOG(LogTemp, Warning, TEXT("Performance issue detected. Reducing max entities to %d"), MaxSimultaneousEntities);
-        }
-        else if (AverageFrameTime < 14.0f) // Above 70 FPS
-        {
-            // Increase simulation complexity
-            MaxSimultaneousEntities = FMath::Min(MaxSimultaneousEntities + 500, 50000);
-        }
-    }
-    
-    // Update active entity count from Mass subsystem
-    if (MassEntitySubsystem)
-    {
-        ActiveEntityCount = MassEntitySubsystem->GetNumEntities();
-    }
+    // Update LOD system
+    UpdateLOD();
 }
 
-void ACrowdSimulationManager::SpawnHerd(FVector Location, int32 HerdSize, TSubclassOf<class ADinosaur> DinosaurClass)
+void ACrowdSimulationManager::InitializeMassEntity()
 {
-    if (!MassSpawnerSubsystem || !DinosaurClass)
+    if (UWorld* World = GetWorld())
     {
-        UE_LOG(LogTemp, Error, TEXT("Cannot spawn herd: Missing subsystem or dinosaur class"));
-        return;
-    }
-    
-    // Check if we're at entity limit
-    if (ActiveEntityCount + HerdSize > MaxSimultaneousEntities)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Cannot spawn herd: Would exceed entity limit (%d + %d > %d)"), 
-               ActiveEntityCount, HerdSize, MaxSimultaneousEntities);
-        return;
-    }
-    
-    // Spawn entities in a natural formation
-    float SpreadRadius = FMath::Sqrt(HerdSize) * 50.0f; // Spread based on herd size
-    
-    for (int32 i = 0; i < HerdSize; i++)
-    {
-        // Random position within spread radius
-        FVector RandomOffset = FVector(
-            FMath::RandRange(-SpreadRadius, SpreadRadius),
-            FMath::RandRange(-SpreadRadius, SpreadRadius),
-            0.0f
-        );
-        
-        FVector SpawnLocation = Location + RandomOffset;
-        
-        // TODO: Use Mass spawning system here
-        // This is a placeholder for the actual Mass Entity spawning
-        UE_LOG(LogTemp, Log, TEXT("Spawning herd member %d at location %s"), i, *SpawnLocation.ToString());
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("Spawned herd of %d entities at %s"), HerdSize, *Location.ToString());
-}
-
-void ACrowdSimulationManager::SpawnFlock(FVector Location, int32 FlockSize, TSubclassOf<class AFlyingDinosaur> FlyingDinosaurClass)
-{
-    if (!MassSpawnerSubsystem || !FlyingDinosaurClass)
-    {
-        UE_LOG(LogTemp, Error, TEXT("Cannot spawn flock: Missing subsystem or flying dinosaur class"));
-        return;
-    }
-    
-    if (ActiveEntityCount + FlockSize > MaxSimultaneousEntities)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Cannot spawn flock: Would exceed entity limit"));
-        return;
-    }
-    
-    // Spawn flying entities in V-formation
-    float FormationSpacing = 100.0f;
-    FVector LeaderPosition = Location;
-    
-    for (int32 i = 0; i < FlockSize; i++)
-    {
-        FVector SpawnLocation;
-        
-        if (i == 0)
+        MassEntitySubsystem = World->GetSubsystem<UMassEntitySubsystem>();
+        if (MassEntitySubsystem)
         {
-            // Leader at front
-            SpawnLocation = LeaderPosition;
+            UE_LOG(LogTemp, Warning, TEXT("Mass Entity subsystem initialized successfully"));
         }
         else
         {
-            // Formation based on index
-            int32 Side = (i % 2 == 0) ? 1 : -1; // Alternate sides
-            int32 Row = (i + 1) / 2;
-            
-            SpawnLocation = LeaderPosition + FVector(
-                -Row * FormationSpacing * 0.8f, // Slightly behind
-                Side * Row * FormationSpacing,   // To the side
-                FMath::RandRange(-50.0f, 50.0f) // Small height variation
-            );
+            UE_LOG(LogTemp, Error, TEXT("Failed to get Mass Entity subsystem"));
         }
-        
-        // TODO: Use Mass spawning system for flying entities
-        UE_LOG(LogTemp, Log, TEXT("Spawning flock member %d at location %s"), i, *SpawnLocation.ToString());
     }
-    
-    UE_LOG(LogTemp, Warning, TEXT("Spawned flock of %d entities at %s"), FlockSize, *Location.ToString());
 }
 
-void ACrowdSimulationManager::SpawnPack(FVector Location, int32 PackSize, TSubclassOf<class APredatorDinosaur> PredatorClass)
+void ACrowdSimulationManager::SpawnHerd(EDinosaurSpecies Species, FVector Location, int32 HerdSize)
 {
-    if (!MassSpawnerSubsystem || !PredatorClass)
+    FCrowd_HerdData NewHerd;
+    NewHerd.Species = Species;
+    NewHerd.HerdCenter = Location;
+    NewHerd.HerdSize = HerdSize;
+    NewHerd.HerdRadius = FMath::Sqrt(HerdSize) * 100.0f; // Scale radius with herd size
+    
+    // Create Mass Entity representation
+    CreateHerdEntity(NewHerd);
+    
+    ActiveHerds.Add(NewHerd);
+    
+    UE_LOG(LogTemp, Warning, TEXT("Spawned herd of %d %s at location %s"), 
+           HerdSize, 
+           *UEnum::GetValueAsString(Species),
+           *Location.ToString());
+}
+
+void ACrowdSimulationManager::CreateHerdEntity(const FCrowd_HerdData& HerdData)
+{
+    if (!MassEntitySubsystem)
     {
-        UE_LOG(LogTemp, Error, TEXT("Cannot spawn pack: Missing subsystem or predator class"));
         return;
     }
     
-    if (ActiveEntityCount + PackSize > MaxSimultaneousEntities)
+    // Create entities for each herd member
+    for (int32 i = 0; i < HerdData.HerdSize; i++)
     {
-        UE_LOG(LogTemp, Warning, TEXT("Cannot spawn pack: Would exceed entity limit"));
-        return;
-    }
-    
-    // Spawn predators in hunting formation
-    float PackRadius = PackSize * 25.0f; // Tighter formation for predators
-    
-    for (int32 i = 0; i < PackSize; i++)
-    {
-        float Angle = (2.0f * PI * i) / PackSize;
-        FVector SpawnLocation = Location + FVector(
-            FMath::Cos(Angle) * PackRadius,
-            FMath::Sin(Angle) * PackRadius,
-            0.0f
+        // Generate random position within herd radius
+        FVector RandomOffset = FVector(
+            FMath::RandRange(-HerdData.HerdRadius, HerdData.HerdRadius),
+            FMath::RandRange(-HerdData.HerdRadius, HerdData.HerdRadius),
+            0
         );
         
-        // TODO: Use Mass spawning system for predators
-        UE_LOG(LogTemp, Log, TEXT("Spawning pack member %d at location %s"), i, *SpawnLocation.ToString());
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("Spawned pack of %d entities at %s"), PackSize, *Location.ToString());
-}
-
-void ACrowdSimulationManager::TriggerStampede(FVector ThreatLocation, float ThreatRadius)
-{
-    UE_LOG(LogTemp, Warning, TEXT("STAMPEDE TRIGGERED at %s with radius %f"), *ThreatLocation.ToString(), ThreatRadius);
-    
-    // TODO: Implement stampede behavior using Mass system
-    // This would involve:
-    // 1. Finding all herbivore entities within ThreatRadius
-    // 2. Setting their behavior state to "Fleeing"
-    // 3. Calculating flee direction away from ThreatLocation
-    // 4. Increasing movement speed temporarily
-    // 5. Adding panic spreading to nearby entities
-    
-    if (MassSimulationSubsystem)
-    {
-        // Placeholder for Mass system stampede logic
-        UE_LOG(LogTemp, Warning, TEXT("Mass simulation system will handle stampede behavior"));
+        FVector SpawnLocation = HerdData.HerdCenter + RandomOffset;
+        
+        // For now, we'll use a simplified approach without full Mass Entity setup
+        // In a full implementation, this would create Mass Entity archetypes
+        UE_LOG(LogTemp, Log, TEXT("Created herd member %d at %s"), i, *SpawnLocation.ToString());
     }
 }
 
-void ACrowdSimulationManager::SetMigrationActive(bool bActive)
+void ACrowdSimulationManager::StartMigration(int32 HerdIndex, const FCrowd_MigrationRoute& Route)
 {
-    UE_LOG(LogTemp, Warning, TEXT("Migration set to: %s"), bActive ? TEXT("ACTIVE") : TEXT("INACTIVE"));
-    
-    // TODO: Implement migration behavior using Mass system
-    // This would involve:
-    // 1. Setting migration waypoints for all herd entities
-    // 2. Changing movement patterns to follow migration routes
-    // 3. Coordinating multiple herds to move together
-    // 4. Handling seasonal timing and triggers
-    
-    if (bActive && MigrationWaypoints.Num() > 0)
+    if (ActiveHerds.IsValidIndex(HerdIndex))
     {
-        UE_LOG(LogTemp, Warning, TEXT("Starting migration with %d waypoints"), MigrationWaypoints.Num());
-        // Set all herds to follow migration pattern
+        MigrationRoutes.Add(Route);
+        UE_LOG(LogTemp, Warning, TEXT("Started migration for herd %d with %d waypoints"), 
+               HerdIndex, Route.Waypoints.Num());
     }
+}
+
+void ACrowdSimulationManager::UpdateHerdBehavior(int32 HerdIndex, float DeltaTime)
+{
+    if (!ActiveHerds.IsValidIndex(HerdIndex))
+    {
+        return;
+    }
+    
+    FCrowd_HerdData& Herd = ActiveHerds[HerdIndex];
+    
+    // Update herd movement
+    UpdateHerdMovement(Herd, DeltaTime);
+    
+    // Apply flocking behavior
+    ApplyFlockingBehavior(Herd);
+    
+    // Handle LOD for this herd
+    HandleCrowdLOD(Herd);
+}
+
+void ACrowdSimulationManager::UpdateHerdMovement(FCrowd_HerdData& HerdData, float DeltaTime)
+{
+    // Simple wandering behavior - move herd center slightly
+    FVector WanderDirection = FVector(
+        FMath::RandRange(-1.0f, 1.0f),
+        FMath::RandRange(-1.0f, 1.0f),
+        0
+    ).GetSafeNormal();
+    
+    float WanderSpeed = 50.0f; // Units per second
+    HerdData.HerdCenter += WanderDirection * WanderSpeed * DeltaTime;
+}
+
+void ACrowdSimulationManager::ApplyFlockingBehavior(FCrowd_HerdData& HerdData)
+{
+    // Implement basic flocking rules:
+    // 1. Separation - avoid crowding neighbors
+    // 2. Alignment - steer towards average heading of neighbors  
+    // 3. Cohesion - steer towards average position of neighbors
+    
+    // For now, just ensure herd stays within radius
+    // In full implementation, this would update individual entity positions
+}
+
+void ACrowdSimulationManager::HandleCrowdLOD(const FCrowd_HerdData& HerdData)
+{
+    if (APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0))
+    {
+        float DistanceToPlayer = FVector::Dist(PlayerPawn->GetActorLocation(), HerdData.HerdCenter);
+        
+        // Apply different LOD levels based on distance
+        if (DistanceToPlayer > CullingDistance)
+        {
+            // Cull completely - no rendering or simulation
+        }
+        else if (DistanceToPlayer > LODDistance2)
+        {
+            // LOD 2 - Very low detail, minimal simulation
+        }
+        else if (DistanceToPlayer > LODDistance1)
+        {
+            // LOD 1 - Medium detail
+        }
+        else
+        {
+            // LOD 0 - Full detail
+        }
+    }
+}
+
+void ACrowdSimulationManager::UpdateLOD()
+{
+    // Update LOD for all herds based on player distance
+    for (const FCrowd_HerdData& Herd : ActiveHerds)
+    {
+        HandleCrowdLOD(Herd);
+    }
+}
+
+int32 ACrowdSimulationManager::GetTotalCrowdCount() const
+{
+    int32 TotalCount = 0;
+    for (const FCrowd_HerdData& Herd : ActiveHerds)
+    {
+        TotalCount += Herd.HerdSize;
+    }
+    return TotalCount;
 }
