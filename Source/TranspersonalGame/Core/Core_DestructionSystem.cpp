@@ -1,195 +1,440 @@
 #include "Core_DestructionSystem.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "Components/StaticMeshComponent.h"
-#include "Engine/StaticMeshActor.h"
-#include "Kismet/GameplayStatics.h"
-#include "TimerManager.h"
+#include "Components/PrimitiveComponent.h"
 #include "PhysicsEngine/BodyInstance.h"
+#include "Chaos/ChaosGameplayEventDispatcher.h"
+#include "GeometryCollection/GeometryCollectionActor.h"
+#include "Field/FieldSystemActor.h"
+#include "DrawDebugHelpers.h"
+#include "TimerManager.h"
 
 UCore_DestructionSystem::UCore_DestructionSystem()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 0.1f; // 10 FPS for destruction checks
+    PrimaryComponentTick.TickGroup = TG_PostPhysics;
     
-    // Initialize destruction data
-    DestructionData = FCore_DestructionData();
-    CurrentHealth = DestructionData.HealthPoints;
-    FragmentLifetime = 10.0f;
-    bUsePhysicsFragments = true;
-    bIsDestroyed = false;
+    // Initialize destruction profile with default values
+    DestructionProfile.BreakThreshold = 1000.0f;
+    DestructionProfile.ImpactDamageMultiplier = 1.5f;
+    DestructionProfile.MaxFragments = 50;
+    DestructionProfile.FragmentLifetime = 30.0f;
+    DestructionProfile.bEnableDebris = true;
+    DestructionProfile.DebrisScale = 0.1f;
+    
+    bEnableDestruction = true;
+    bUseChaosPhysics = true;
+    bUseGeometryCollection = false;
+    MaxDestructionDistance = 10000.0f;
+    bShowDebugInfo = false;
+    bDrawDestructionSphere = true;
+    
+    TotalDestructionCount = 0;
+    AverageDestructionProcessTime = 0.0f;
 }
 
 void UCore_DestructionSystem::BeginPlay()
 {
     Super::BeginPlay();
     
-    CurrentHealth = DestructionData.HealthPoints;
-    InitializeFragmentMeshes();
+    InitializeDestructionSystem();
     
-    UE_LOG(LogTemp, Warning, TEXT("DestructionSystem initialized for %s - Health: %.1f"), 
-           GetOwner() ? *GetOwner()->GetName() : TEXT("Unknown"), CurrentHealth);
+    // Setup cleanup timer for expired fragments
+    if (GetWorld())
+    {
+        GetWorld()->GetTimerManager().SetTimer(
+            FragmentCleanupTimer,
+            this,
+            &UCore_DestructionSystem::CleanupExpiredFragments,
+            5.0f, // Every 5 seconds
+            true  // Looping
+        );
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("Core_DestructionSystem: BeginPlay completed"));
 }
 
 void UCore_DestructionSystem::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
     
-    // Check for fragment cleanup
-    if (SpawnedFragments.Num() > 0)
+    if (bShowDebugInfo)
     {
-        // Remove null fragments (destroyed by GC)
-        SpawnedFragments.RemoveAll([](AActor* Fragment) {
-            return !IsValid(Fragment);
-        });
+        DebugDrawDestructionInfo();
     }
 }
 
-void UCore_DestructionSystem::ApplyDamage(float DamageAmount, const FVector& ImpactPoint, const FVector& ImpactDirection)
+void UCore_DestructionSystem::InitializeDestructionSystem()
 {
-    if (bIsDestroyed || !CanBeDestroyed())
+    if (!bEnableDestruction)
     {
+        UE_LOG(LogTemp, Warning, TEXT("Core_DestructionSystem: Destruction disabled"));
         return;
     }
     
-    CurrentHealth = FMath::Max(0.0f, CurrentHealth - DamageAmount);
+    // Clear any existing data
+    ActiveFragments.Empty();
+    RecentDestructions.Empty();
     
-    // Broadcast damage event
-    OnDamageApplied.Broadcast(GetOwner(), DamageAmount, CurrentHealth);
-    
-    UE_LOG(LogTemp, Warning, TEXT("Damage applied to %s: %.1f damage, %.1f health remaining"), 
-           GetOwner() ? *GetOwner()->GetName() : TEXT("Unknown"), DamageAmount, CurrentHealth);
-    
-    // Check if destruction threshold reached
-    if (CurrentHealth <= 0.0f || DamageAmount >= DestructionData.DamageThreshold)
+    // Initialize Chaos Physics if enabled
+    if (bUseChaosPhysics)
     {
-        TriggerDestruction(ImpactPoint);
+        UE_LOG(LogTemp, Log, TEXT("Core_DestructionSystem: Chaos Physics enabled"));
     }
+    
+    // Initialize Geometry Collection if enabled
+    if (bUseGeometryCollection)
+    {
+        UE_LOG(LogTemp, Log, TEXT("Core_DestructionSystem: Geometry Collection enabled"));
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("Core_DestructionSystem: Initialization complete"));
 }
 
-void UCore_DestructionSystem::TriggerDestruction(const FVector& ExplosionCenter)
+bool UCore_DestructionSystem::ProcessImpactDestruction(AActor* TargetActor, const FVector& ImpactLocation, const FVector& ImpactVelocity, float DamageAmount)
 {
-    if (bIsDestroyed)
+    if (!TargetActor || !bEnableDestruction)
     {
-        return;
+        return false;
     }
     
-    bIsDestroyed = true;
+    float StartTime = FPlatformTime::Seconds();
+    
+    // Check if actor can be destroyed
+    if (!CanDestroyActor(TargetActor))
+    {
+        return false;
+    }
+    
+    // Calculate effective damage
+    float EffectiveDamage = DamageAmount * DestructionProfile.ImpactDamageMultiplier;
+    
+    // Check if damage exceeds break threshold
+    if (EffectiveDamage < DestructionProfile.BreakThreshold)
+    {
+        return false;
+    }
+    
+    // Calculate fragment count based on damage
+    int32 FragmentCount = FMath::Clamp(
+        FMath::FloorToInt(EffectiveDamage / DestructionProfile.BreakThreshold * 10),
+        1,
+        DestructionProfile.MaxFragments
+    );
+    
+    // Create destruction event
+    FCore_DestructionEvent DestructionEvent;
+    DestructionEvent.DestroyedActor = TargetActor;
+    DestructionEvent.ImpactLocation = ImpactLocation;
+    DestructionEvent.ImpactVelocity = ImpactVelocity;
+    DestructionEvent.DamageAmount = EffectiveDamage;
+    DestructionEvent.FragmentCount = FragmentCount;
     
     // Create fragments
-    CreateFragments(ExplosionCenter);
+    CreateDestructionFragments(TargetActor, ImpactLocation, FragmentCount);
+    
+    // Register the destruction event
+    RegisterDestructionEvent(DestructionEvent);
     
     // Broadcast destruction event
-    OnDestructionTriggered.Broadcast(GetOwner(), ExplosionCenter);
+    OnDestructionEvent.Broadcast(DestructionEvent);
     
-    UE_LOG(LogTemp, Warning, TEXT("Destruction triggered for %s at location %s"), 
-           GetOwner() ? *GetOwner()->GetName() : TEXT("Unknown"), *ExplosionCenter.ToString());
+    // Destroy the original actor
+    TargetActor->Destroy();
     
-    // Hide original actor
-    if (GetOwner())
-    {
-        GetOwner()->SetActorHiddenInGame(true);
-        GetOwner()->SetActorEnableCollision(false);
-        
-        // Schedule cleanup
-        GetWorld()->GetTimerManager().SetTimer(FragmentCleanupTimer, 
-            this, &UCore_DestructionSystem::CleanupFragments, FragmentLifetime, false);
-    }
+    // Update performance stats
+    float ProcessTime = FPlatformTime::Seconds() - StartTime;
+    UpdatePerformanceStats(ProcessTime);
+    
+    UE_LOG(LogTemp, Log, TEXT("Core_DestructionSystem: Processed destruction of %s with %d fragments"), 
+           *TargetActor->GetName(), FragmentCount);
+    
+    return true;
 }
 
-void UCore_DestructionSystem::CreateFragments(const FVector& ExplosionCenter)
+void UCore_DestructionSystem::CreateDestructionFragments(AActor* SourceActor, const FVector& ImpactLocation, int32 FragmentCount)
 {
-    if (FragmentMeshes.Num() == 0)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("No fragment meshes available for destruction"));
-        return;
-    }
-    
-    AActor* Owner = GetOwner();
-    if (!Owner)
+    if (!SourceActor || FragmentCount <= 0)
     {
         return;
     }
     
-    FVector OwnerLocation = Owner->GetActorLocation();
-    FVector OwnerBounds = Owner->GetActorBounds(false).BoxExtent;
-    
-    // Create fragments in a pattern around the explosion center
-    int32 FragmentsToCreate = FMath::Min(DestructionData.FragmentCount, FragmentMeshes.Num() * 4);
-    
-    for (int32 i = 0; i < FragmentsToCreate; i++)
+    // Get source actor's mesh component
+    UStaticMeshComponent* SourceMesh = SourceActor->FindComponentByClass<UStaticMeshComponent>();
+    if (!SourceMesh || !SourceMesh->GetStaticMesh())
     {
-        // Select random fragment mesh
-        UStaticMesh* FragmentMesh = FragmentMeshes[i % FragmentMeshes.Num()];
-        if (!FragmentMesh)
+        return;
+    }
+    
+    // Create physics fragments
+    CreatePhysicsFragments(SourceActor, ImpactLocation, FragmentCount);
+    
+    UE_LOG(LogTemp, Log, TEXT("Core_DestructionSystem: Created %d fragments for %s"), 
+           FragmentCount, *SourceActor->GetName());
+}
+
+void UCore_DestructionSystem::CreatePhysicsFragments(AActor* SourceActor, const FVector& ImpactLocation, int32 FragmentCount)
+{
+    UWorld* World = GetWorld();
+    if (!World || !SourceActor)
+    {
+        return;
+    }
+    
+    UStaticMeshComponent* SourceMesh = SourceActor->FindComponentByClass<UStaticMeshComponent>();
+    if (!SourceMesh)
+    {
+        return;
+    }
+    
+    FVector SourceLocation = SourceActor->GetActorLocation();
+    FVector SourceScale = SourceActor->GetActorScale3D();
+    
+    for (int32 i = 0; i < FragmentCount; ++i)
+    {
+        // Create fragment actor
+        AStaticMeshActor* Fragment = World->SpawnActor<AStaticMeshActor>();
+        if (!Fragment)
         {
             continue;
         }
         
-        // Calculate fragment spawn location
-        FVector RandomOffset = FVector(
-            FMath::RandRange(-OwnerBounds.X, OwnerBounds.X),
-            FMath::RandRange(-OwnerBounds.Y, OwnerBounds.Y),
-            FMath::RandRange(-OwnerBounds.Z, OwnerBounds.Z)
-        );
-        FVector FragmentLocation = OwnerLocation + RandomOffset;
-        
-        // Calculate explosion velocity
-        FVector ExplosionDirection = (FragmentLocation - ExplosionCenter).GetSafeNormal();
-        FVector ExplosionVelocity = ExplosionDirection * FMath::RandRange(200.0f, DestructionData.ExplosionForce);
-        
-        // Create fragment
-        AActor* Fragment = CreateFragment(FragmentMesh, FragmentLocation, ExplosionVelocity);
-        if (Fragment)
+        // Setup fragment mesh
+        UStaticMeshComponent* FragmentMesh = Fragment->GetStaticMeshComponent();
+        if (FragmentMesh)
         {
-            SpawnedFragments.Add(Fragment);
+            FragmentMesh->SetStaticMesh(SourceMesh->GetStaticMesh());
+            FragmentMesh->SetMaterial(0, SourceMesh->GetMaterial(0));
+            
+            // Scale down fragment
+            float FragmentScale = DestructionProfile.DebrisScale * FMath::RandRange(0.5f, 1.5f);
+            Fragment->SetActorScale3D(SourceScale * FragmentScale);
+            
+            // Position fragment near impact location
+            FVector FragmentLocation = ImpactLocation + FMath::VRand() * 100.0f;
+            Fragment->SetActorLocation(FragmentLocation);
+            
+            // Enable physics
+            FragmentMesh->SetSimulatePhysics(true);
+            FragmentMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+            FragmentMesh->SetCollisionObjectType(ECollisionChannel::ECC_WorldDynamic);
+            
+            // Apply random impulse
+            FVector RandomImpulse = FMath::VRand() * FMath::RandRange(500.0f, 2000.0f);
+            FragmentMesh->AddImpulse(RandomImpulse);
+            
+            // Set fragment lifetime
+            Fragment->SetLifeSpan(DestructionProfile.FragmentLifetime);
+            
+            // Add to active fragments
+            ActiveFragments.Add(Fragment);
+        }
+    }
+}
+
+void UCore_DestructionSystem::ApplyDestructionForce(const FVector& ForceLocation, float ForceRadius, float ForceStrength)
+{
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        return;
+    }
+    
+    // Find all actors within force radius
+    TArray<AActor*> OverlappingActors;
+    UKismetSystemLibrary::SphereOverlapActors(
+        World,
+        ForceLocation,
+        ForceRadius,
+        TArray<TEnumAsByte<EObjectTypeQuery>>(),
+        AStaticMeshActor::StaticClass(),
+        TArray<AActor*>(),
+        OverlappingActors
+    );
+    
+    for (AActor* Actor : OverlappingActors)
+    {
+        if (UStaticMeshComponent* MeshComp = Actor->FindComponentByClass<UStaticMeshComponent>())
+        {
+            if (MeshComp->IsSimulatingPhysics())
+            {
+                FVector ForceDirection = (Actor->GetActorLocation() - ForceLocation).GetSafeNormal();
+                float Distance = FVector::Dist(Actor->GetActorLocation(), ForceLocation);
+                float ForceMagnitude = ForceStrength * (1.0f - Distance / ForceRadius);
+                
+                MeshComp->AddImpulse(ForceDirection * ForceMagnitude);
+            }
         }
     }
     
-    UE_LOG(LogTemp, Warning, TEXT("Created %d fragments for destruction"), SpawnedFragments.Num());
+    UE_LOG(LogTemp, Log, TEXT("Core_DestructionSystem: Applied destruction force to %d actors"), 
+           OverlappingActors.Num());
 }
 
-AActor* UCore_DestructionSystem::CreateFragment(UStaticMesh* FragmentMesh, const FVector& Location, const FVector& Velocity)
+void UCore_DestructionSystem::SetDestructionProfile(const FCore_DestructionProfile& NewProfile)
 {
-    if (!FragmentMesh || !GetWorld())
+    DestructionProfile = NewProfile;
+    UE_LOG(LogTemp, Log, TEXT("Core_DestructionSystem: Destruction profile updated"));
+}
+
+void UCore_DestructionSystem::CleanupExpiredFragments()
+{
+    int32 RemovedCount = 0;
+    
+    for (int32 i = ActiveFragments.Num() - 1; i >= 0; --i)
     {
-        return nullptr;
+        if (!IsValid(ActiveFragments[i]))
+        {
+            ActiveFragments.RemoveAt(i);
+            RemovedCount++;
+        }
     }
     
-    // Spawn static mesh actor for fragment
-    AStaticMeshActor* Fragment = GetWorld()->SpawnActor<AStaticMeshActor>(Location, FRotator::ZeroRotator);
-    if (!Fragment)
+    if (RemovedCount > 0)
     {
-        return nullptr;
+        UE_LOG(LogTemp, Log, TEXT("Core_DestructionSystem: Cleaned up %d expired fragments"), RemovedCount);
+    }
+}
+
+void UCore_DestructionSystem::EnableChaosDestruction(AActor* TargetActor)
+{
+    if (!TargetActor || !bUseChaosPhysics)
+    {
+        return;
     }
     
-    // Configure fragment
-    Fragment->SetActorLabel(FString::Printf(TEXT("Fragment_%s_%d"), 
-        GetOwner() ? *GetOwner()->GetName() : TEXT("Unknown"), SpawnedFragments.Num()));
-    
-    UStaticMeshComponent* MeshComp = Fragment->GetStaticMeshComponent();
+    UStaticMeshComponent* MeshComp = TargetActor->FindComponentByClass<UStaticMeshComponent>();
     if (MeshComp)
     {
-        MeshComp->SetStaticMesh(FragmentMesh);
-        
-        if (bUsePhysicsFragments)
+        ConfigureChaosBreaking(MeshComp, DestructionProfile.BreakThreshold);
+        UE_LOG(LogTemp, Log, TEXT("Core_DestructionSystem: Enabled Chaos destruction for %s"), 
+               *TargetActor->GetName());
+    }
+}
+
+void UCore_DestructionSystem::ConfigureChaosBreaking(UStaticMeshComponent* MeshComponent, float BreakThreshold)
+{
+    if (!MeshComponent)
+    {
+        return;
+    }
+    
+    // Enable physics simulation
+    MeshComponent->SetSimulatePhysics(true);
+    MeshComponent->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+    
+    // Configure breaking parameters
+    FBodyInstance* BodyInstance = MeshComponent->GetBodyInstance();
+    if (BodyInstance)
+    {
+        BodyInstance->bNotifyRigidBodyCollision = true;
+        // Additional Chaos-specific configuration would go here
+    }
+}
+
+void UCore_DestructionSystem::SetupGeometryCollection(AActor* TargetActor, UGeometryCollection* GeometryCollection)
+{
+    if (!TargetActor || !GeometryCollection || !bUseGeometryCollection)
+    {
+        return;
+    }
+    
+    // This would setup Geometry Collection component
+    // Implementation depends on specific Geometry Collection setup
+    UE_LOG(LogTemp, Log, TEXT("Core_DestructionSystem: Geometry Collection setup for %s"), 
+           *TargetActor->GetName());
+}
+
+void UCore_DestructionSystem::TriggerGeometryCollectionBreak(AActor* TargetActor, const FVector& BreakLocation)
+{
+    if (!TargetActor || !bUseGeometryCollection)
+    {
+        return;
+    }
+    
+    // Trigger Geometry Collection breaking at specified location
+    UE_LOG(LogTemp, Log, TEXT("Core_DestructionSystem: Triggered Geometry Collection break for %s"), 
+           *TargetActor->GetName());
+}
+
+void UCore_DestructionSystem::CreateDestructionField(const FVector& FieldLocation, float FieldRadius, float FieldStrength)
+{
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        return;
+    }
+    
+    // Create Field System actor for destruction field
+    AFieldSystemActor* FieldActor = World->SpawnActor<AFieldSystemActor>();
+    if (FieldActor)
+    {
+        FieldActor->SetActorLocation(FieldLocation);
+        // Configure field parameters
+        UE_LOG(LogTemp, Log, TEXT("Core_DestructionSystem: Created destruction field at %s"), 
+               *FieldLocation.ToString());
+    }
+}
+
+void UCore_DestructionSystem::DebugDrawDestructionInfo()
+{
+    UWorld* World = GetWorld();
+    if (!World || !bShowDebugInfo)
+    {
+        return;
+    }
+    
+    // Draw active fragments
+    for (AActor* Fragment : ActiveFragments)
+    {
+        if (IsValid(Fragment))
         {
-            ApplyFragmentPhysics(Fragment, Location - Velocity.GetSafeNormal() * 100.0f);
-            
-            // Apply initial velocity
-            MeshComp->SetPhysicsLinearVelocity(Velocity);
-            MeshComp->SetPhysicsAngularVelocityInRadians(FVector(
-                FMath::RandRange(-10.0f, 10.0f),
-                FMath::RandRange(-10.0f, 10.0f),
-                FMath::RandRange(-10.0f, 10.0f)
-            ));
+            DrawDebugSphere(World, Fragment->GetActorLocation(), 50.0f, 12, FColor::Red, false, 0.1f);
         }
     }
     
-    return Fragment;
+    // Draw destruction sphere if enabled
+    if (bDrawDestructionSphere && GetOwner())
+    {
+        DrawDebugSphere(World, GetOwner()->GetActorLocation(), MaxDestructionDistance, 24, FColor::Orange, false, 0.1f);
+    }
 }
 
-void UCore_DestructionSystem::ApplyFragmentPhysics(AActor* Fragment, const FVector& ExplosionCenter)
+void UCore_DestructionSystem::GetDestructionStats(int32& TotalDestructions, int32& ActiveFragments_Out, float& AverageProcessTime)
+{
+    TotalDestructions = TotalDestructionCount;
+    ActiveFragments_Out = ActiveFragments.Num();
+    AverageProcessTime = AverageDestructionProcessTime;
+}
+
+bool UCore_DestructionSystem::CanDestroyActor(AActor* Actor) const
+{
+    if (!Actor || !bEnableDestruction)
+    {
+        return false;
+    }
+    
+    // Check distance from owner
+    if (GetOwner())
+    {
+        float Distance = FVector::Dist(GetOwner()->GetActorLocation(), Actor->GetActorLocation());
+        if (Distance > MaxDestructionDistance)
+        {
+            return false;
+        }
+    }
+    
+    // Check if actor has a mesh component
+    UStaticMeshComponent* MeshComp = Actor->FindComponentByClass<UStaticMeshComponent>();
+    if (!MeshComp)
+    {
+        return false;
+    }
+    
+    return true;
+}
+
+void UCore_DestructionSystem::ApplyFragmentPhysics(AActor* Fragment, const FVector& ImpactVelocity)
 {
     if (!Fragment)
     {
@@ -197,70 +442,38 @@ void UCore_DestructionSystem::ApplyFragmentPhysics(AActor* Fragment, const FVect
     }
     
     UStaticMeshComponent* MeshComp = Fragment->FindComponentByClass<UStaticMeshComponent>();
-    if (MeshComp)
+    if (MeshComp && MeshComp->IsSimulatingPhysics())
     {
-        MeshComp->SetSimulatePhysics(true);
-        MeshComp->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-        MeshComp->SetCollisionResponseToAllChannels(ECR_Block);
-        MeshComp->SetCollisionResponseToChannel(ECC_Pawn, ECR_Ignore);
+        FVector RandomizedVelocity = ImpactVelocity + FMath::VRand() * 500.0f;
+        MeshComp->SetPhysicsLinearVelocity(RandomizedVelocity);
         
-        // Set physics properties
-        if (MeshComp->GetBodyInstance())
-        {
-            MeshComp->GetBodyInstance()->SetMassOverride(FMath::RandRange(10.0f, 50.0f));
-            MeshComp->GetBodyInstance()->SetLinearDamping(0.5f);
-            MeshComp->GetBodyInstance()->SetAngularDamping(0.5f);
-        }
+        FVector RandomAngularVelocity = FMath::VRand() * 10.0f;
+        MeshComp->SetPhysicsAngularVelocityInRadians(RandomAngularVelocity);
     }
 }
 
-void UCore_DestructionSystem::CleanupFragments()
+void UCore_DestructionSystem::RegisterDestructionEvent(const FCore_DestructionEvent& Event)
 {
-    for (AActor* Fragment : SpawnedFragments)
+    RecentDestructions.Add(Event);
+    
+    // Keep only recent events (last 100)
+    if (RecentDestructions.Num() > 100)
     {
-        if (IsValid(Fragment))
-        {
-            Fragment->Destroy();
-        }
+        RecentDestructions.RemoveAt(0);
     }
     
-    SpawnedFragments.Empty();
-    
-    // Destroy the original actor
-    if (GetOwner())
+    TotalDestructionCount++;
+}
+
+void UCore_DestructionSystem::UpdatePerformanceStats(float ProcessTime)
+{
+    // Update rolling average
+    if (TotalDestructionCount == 1)
     {
-        GetOwner()->Destroy();
+        AverageDestructionProcessTime = ProcessTime;
     }
-    
-    UE_LOG(LogTemp, Warning, TEXT("Destruction cleanup completed"));
-}
-
-bool UCore_DestructionSystem::CanBeDestroyed() const
-{
-    return DestructionData.bCanBeDestroyed && !bIsDestroyed;
-}
-
-float UCore_DestructionSystem::GetHealthPercentage() const
-{
-    if (DestructionData.HealthPoints <= 0.0f)
+    else
     {
-        return 0.0f;
-    }
-    
-    return CurrentHealth / DestructionData.HealthPoints;
-}
-
-void UCore_DestructionSystem::InitializeFragmentMeshes()
-{
-    // If no fragment meshes specified, try to use default cube fragments
-    if (FragmentMeshes.Num() == 0)
-    {
-        // Try to load default engine cube mesh for fragments
-        UStaticMesh* CubeMesh = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube"));
-        if (CubeMesh)
-        {
-            FragmentMeshes.Add(CubeMesh);
-            UE_LOG(LogTemp, Warning, TEXT("Using default cube mesh for destruction fragments"));
-        }
+        AverageDestructionProcessTime = (AverageDestructionProcessTime * 0.9f) + (ProcessTime * 0.1f);
     }
 }
