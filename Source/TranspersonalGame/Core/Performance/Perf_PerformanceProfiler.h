@@ -2,211 +2,163 @@
 
 #include "CoreMinimal.h"
 #include "Engine/World.h"
+#include "GameFramework/Actor.h"
+#include "Components/ActorComponent.h"
 #include "Engine/Engine.h"
-#include "GameFramework/GameModeBase.h"
-#include "Subsystems/GameInstanceSubsystem.h"
-#include "HAL/IConsoleManager.h"
-#include "Stats/Stats.h"
+#include "HAL/PlatformFilemanager.h"
 #include "Perf_PerformanceProfiler.generated.h"
 
 UENUM(BlueprintType)
-enum class EPerf_ProfilerCategory : uint8
+enum class EPerf_PerformanceLevel : uint8
 {
-    Rendering       UMETA(DisplayName = "Rendering"),
-    Physics         UMETA(DisplayName = "Physics"),
-    AI              UMETA(DisplayName = "AI"),
-    Animation       UMETA(DisplayName = "Animation"),
-    Audio           UMETA(DisplayName = "Audio"),
-    Gameplay        UMETA(DisplayName = "Gameplay"),
-    Memory          UMETA(DisplayName = "Memory"),
-    Network         UMETA(DisplayName = "Network")
+    Critical    UMETA(DisplayName = "Critical (<20 FPS)"),
+    Low         UMETA(DisplayName = "Low (20-30 FPS)"),
+    Medium      UMETA(DisplayName = "Medium (30-45 FPS)"),
+    High        UMETA(DisplayName = "High (45-60 FPS)"),
+    Ultra       UMETA(DisplayName = "Ultra (60+ FPS)")
 };
 
 USTRUCT(BlueprintType)
-struct FPerf_ProfilerSample
+struct TRANSPERSONALGAME_API FPerf_PerformanceMetrics
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Profiling")
-    FString SampleName;
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float CurrentFPS = 0.0f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Profiling")
-    float ExecutionTimeMS = 0.0f;
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float AverageFrameTime = 0.0f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Profiling")
-    EPerf_ProfilerCategory Category = EPerf_ProfilerCategory::Gameplay;
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float GameThreadTime = 0.0f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Profiling")
-    float Timestamp = 0.0f;
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float RenderThreadTime = 0.0f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Profiling")
-    int32 CallCount = 0;
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    int32 DrawCalls = 0;
 
-    FPerf_ProfilerSample()
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    int32 TriangleCount = 0;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float MemoryUsageMB = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    EPerf_PerformanceLevel PerformanceLevel = EPerf_PerformanceLevel::Medium;
+
+    FPerf_PerformanceMetrics()
     {
-        SampleName = TEXT("Unknown");
-        ExecutionTimeMS = 0.0f;
-        Category = EPerf_ProfilerCategory::Gameplay;
-        Timestamp = 0.0f;
-        CallCount = 0;
-    }
-
-    FPerf_ProfilerSample(const FString& InName, float InTime, EPerf_ProfilerCategory InCategory)
-    {
-        SampleName = InName;
-        ExecutionTimeMS = InTime;
-        Category = InCategory;
-        Timestamp = FPlatformTime::Seconds();
-        CallCount = 1;
-    }
-};
-
-USTRUCT(BlueprintType)
-struct FPerf_ProfilerReport
-{
-    GENERATED_BODY()
-
-    UPROPERTY(BlueprintReadOnly, Category = "Profiling")
-    TArray<FPerf_ProfilerSample> Samples;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Profiling")
-    float TotalFrameTime = 0.0f;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Profiling")
-    float AverageFPS = 0.0f;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Profiling")
-    int32 TotalSamples = 0;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Profiling")
-    float ReportDuration = 0.0f;
-
-    FPerf_ProfilerReport()
-    {
-        TotalFrameTime = 0.0f;
-        AverageFPS = 60.0f;
-        TotalSamples = 0;
-        ReportDuration = 0.0f;
+        CurrentFPS = 60.0f;
+        AverageFrameTime = 16.67f;
+        GameThreadTime = 8.0f;
+        RenderThreadTime = 12.0f;
+        DrawCalls = 0;
+        TriangleCount = 0;
+        MemoryUsageMB = 0.0f;
+        PerformanceLevel = EPerf_PerformanceLevel::Medium;
     }
 };
 
-UCLASS(BlueprintType)
-class TRANSPERSONALGAME_API UPerf_PerformanceProfiler : public UGameInstanceSubsystem
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnPerformanceLevelChanged, EPerf_PerformanceLevel, NewLevel);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnFrameTimeSpike, float, SpikeTime);
+
+UCLASS(ClassGroup=(Performance), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UPerf_PerformanceProfiler : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
     UPerf_PerformanceProfiler();
 
-    // Subsystem interface
-    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
-    virtual void Deinitialize() override;
+protected:
+    virtual void BeginPlay() override;
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    // Profiling controls
-    UFUNCTION(BlueprintCallable, Category = "Performance Profiling")
+public:
+    // Configuration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance Settings")
+    float SamplingInterval = 0.1f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance Settings")
+    int32 SampleHistorySize = 60;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance Settings")
+    bool bEnableAutomaticProfiling = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance Settings")
+    bool bLogPerformanceWarnings = true;
+
+    // Performance Thresholds
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance Thresholds")
+    float CriticalFPSThreshold = 20.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance Thresholds")
+    float LowFPSThreshold = 30.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance Thresholds")
+    float MediumFPSThreshold = 45.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance Thresholds")
+    float HighFPSThreshold = 60.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance Thresholds")
+    float FrameTimeSpikeThreshold = 33.33f; // 30 FPS equivalent
+
+    // Current Metrics
+    UPROPERTY(BlueprintReadOnly, Category = "Performance Data")
+    FPerf_PerformanceMetrics CurrentMetrics;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Performance Data")
+    TArray<float> FrameTimeHistory;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Performance Data")
+    TArray<float> FPSHistory;
+
+    // Events
+    UPROPERTY(BlueprintAssignable, Category = "Performance Events")
+    FOnPerformanceLevelChanged OnPerformanceLevelChanged;
+
+    UPROPERTY(BlueprintAssignable, Category = "Performance Events")
+    FOnFrameTimeSpike OnFrameTimeSpike;
+
+    // Blueprint Functions
+    UFUNCTION(BlueprintCallable, Category = "Performance")
     void StartProfiling();
 
-    UFUNCTION(BlueprintCallable, Category = "Performance Profiling")
+    UFUNCTION(BlueprintCallable, Category = "Performance")
     void StopProfiling();
 
-    UFUNCTION(BlueprintCallable, Category = "Performance Profiling")
-    void PauseProfiling();
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void ResetMetrics();
 
-    UFUNCTION(BlueprintCallable, Category = "Performance Profiling")
-    void ResumeProfiling();
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    FPerf_PerformanceMetrics GetCurrentMetrics() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Performance Profiling")
-    bool IsProfilingActive() const { return bIsProfilingActive; }
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    float GetAverageFPS() const;
 
-    // Sample recording
-    UFUNCTION(BlueprintCallable, Category = "Performance Profiling")
-    void RecordSample(const FString& SampleName, float ExecutionTime, EPerf_ProfilerCategory Category);
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    float GetAverageFrameTime() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Performance Profiling")
-    void BeginSample(const FString& SampleName, EPerf_ProfilerCategory Category);
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    EPerf_PerformanceLevel GetCurrentPerformanceLevel() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Performance Profiling")
-    void EndSample(const FString& SampleName);
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void LogPerformanceReport();
 
-    // Report generation
-    UFUNCTION(BlueprintCallable, Category = "Performance Profiling")
-    FPerf_ProfilerReport GenerateReport();
-
-    UFUNCTION(BlueprintCallable, Category = "Performance Profiling")
-    void ClearSamples();
-
-    UFUNCTION(BlueprintCallable, Category = "Performance Profiling")
-    void ExportReportToFile(const FString& FilePath);
-
-    // Analysis functions
-    UFUNCTION(BlueprintCallable, Category = "Performance Profiling")
-    TArray<FPerf_ProfilerSample> GetSamplesByCategory(EPerf_ProfilerCategory Category);
-
-    UFUNCTION(BlueprintCallable, Category = "Performance Profiling")
-    float GetAverageExecutionTime(const FString& SampleName);
-
-    UFUNCTION(BlueprintCallable, Category = "Performance Profiling")
-    FPerf_ProfilerSample GetWorstPerformingSample();
-
-    UFUNCTION(BlueprintCallable, Category = "Performance Profiling")
-    TArray<FPerf_ProfilerSample> GetTopWorstSamples(int32 Count = 10);
-
-    // Configuration
-    UFUNCTION(BlueprintCallable, Category = "Performance Profiling")
-    void SetMaxSampleCount(int32 MaxCount);
-
-    UFUNCTION(BlueprintCallable, Category = "Performance Profiling")
-    void SetProfilingDuration(float Duration);
-
-    UFUNCTION(BlueprintCallable, Category = "Performance Profiling")
-    void EnableCategoryProfiling(EPerf_ProfilerCategory Category, bool bEnabled);
-
-protected:
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
-    bool bIsProfilingActive = false;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
-    bool bIsPaused = false;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
-    int32 MaxSampleCount = 10000;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
-    float ProfilingDuration = 60.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
-    bool bAutoExportReports = false;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
-    FString ReportExportPath = TEXT("Saved/Profiling/");
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void SavePerformanceReport(const FString& FilePath);
 
 private:
-    TArray<FPerf_ProfilerSample> ProfileSamples;
-    TMap<FString, double> ActiveSamples;
-    TMap<EPerf_ProfilerCategory, bool> CategoryEnabled;
-    
-    float ProfilingStartTime = 0.0f;
-    float LastReportTime = 0.0f;
-    
-    void InitializeCategorySettings();
-    void CleanupOldSamples();
-    FString GenerateReportString(const FPerf_ProfilerReport& Report);
-    void LogProfilingResults();
+    float TimeSinceLastSample = 0.0f;
+    bool bIsProfiling = false;
+    EPerf_PerformanceLevel LastPerformanceLevel = EPerf_PerformanceLevel::Medium;
+
+    void UpdatePerformanceMetrics();
+    void UpdatePerformanceLevel();
+    void AddFrameTimeSample(float FrameTime);
+    void CheckForFrameTimeSpikes(float FrameTime);
+    EPerf_PerformanceLevel CalculatePerformanceLevel(float FPS) const;
+    void TriggerPerformanceLevelChange(EPerf_PerformanceLevel NewLevel);
 };
-
-// Helper macros for easy profiling
-#define PERF_PROFILE_SCOPE(Name, Category) \
-    UPerf_PerformanceProfiler* Profiler = GetGameInstance()->GetSubsystem<UPerf_PerformanceProfiler>(); \
-    if (Profiler && Profiler->IsProfilingActive()) \
-    { \
-        Profiler->BeginSample(Name, Category); \
-    } \
-    ON_SCOPE_EXIT \
-    { \
-        if (Profiler && Profiler->IsProfilingActive()) \
-        { \
-            Profiler->EndSample(Name); \
-        } \
-    };
-
-#define PERF_PROFILE_FUNCTION(Category) PERF_PROFILE_SCOPE(__FUNCTION__, Category)
