@@ -1,262 +1,204 @@
 #include "NarrativeManager.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "GameFramework/PlayerController.h"
 #include "Components/AudioComponent.h"
 #include "Sound/SoundBase.h"
-#include "Engine/DataTable.h"
+#include "Kismet/GameplayStatics.h"
+
+UNarrativeManager::UNarrativeManager()
+{
+    CurrentStoryBeat = TEXT("intro");
+}
 
 void UNarrativeManager::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
     
-    UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Initializing narrative subsystem"));
+    UE_LOG(LogTemp, Warning, TEXT("NarrativeManager: Initializing narrative system"));
     
-    CurrentStoryPhase = ENarr_StoryPhase::Discovery;
-    CurrentBiome = ENarr_BiomeType::Savana;
-    CurrentTimeOfDay = ENarr_TimeOfDay::Dawn;
-    CurrentWeather = ENarr_WeatherType::Clear;
-    
+    InitializeDefaultDialogues();
     InitializeStoryBeats();
-    LoadDialogueData();
-    
-    // Register initial dialogue conditions
-    RegisterDialogueCondition(TEXT("GameStarted"), true);
-    RegisterDialogueCondition(TEXT("FirstDinosaurSeen"), false);
-    RegisterDialogueCondition(TEXT("FirstNightSurvived"), false);
-    RegisterDialogueCondition(TEXT("WaterFound"), false);
-    RegisterDialogueCondition(TEXT("ShelterBuilt"), false);
-    
-    UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Initialization complete"));
 }
 
 void UNarrativeManager::Deinitialize()
 {
-    DialogueConditions.Empty();
+    DialogueDatabase.Empty();
     StoryBeats.Empty();
+    ActiveDialogues.Empty();
     
     Super::Deinitialize();
 }
 
 void UNarrativeManager::TriggerDialogue(const FString& DialogueID, AActor* Speaker)
 {
-    if (!IsDialogueAvailable(DialogueID))
+    if (DialogueDatabase.Contains(DialogueID))
     {
-        UE_LOG(LogTemp, Warning, TEXT("NarrativeManager: Dialogue %s not available"), *DialogueID);
-        return;
-    }
-    
-    if (!DialogueDataTable)
-    {
-        UE_LOG(LogTemp, Error, TEXT("NarrativeManager: No dialogue data table set"));
-        return;
-    }
-    
-    FNarr_DialogueEntry* DialogueEntry = DialogueDataTable->FindRow<FNarr_DialogueEntry>(FName(*DialogueID), TEXT(""));
-    if (!DialogueEntry)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("NarrativeManager: Dialogue entry %s not found in data table"), *DialogueID);
-        return;
-    }
-    
-    BroadcastDialogue(*DialogueEntry, Speaker);
-    
-    UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Triggered dialogue %s"), *DialogueID);
-}
-
-bool UNarrativeManager::IsDialogueAvailable(const FString& DialogueID) const
-{
-    if (!DialogueDataTable)
-    {
-        return false;
-    }
-    
-    FNarr_DialogueEntry* DialogueEntry = DialogueDataTable->FindRow<FNarr_DialogueEntry>(FName(*DialogueID), TEXT(""));
-    if (!DialogueEntry)
-    {
-        return false;
-    }
-    
-    return EvaluateConditions(DialogueEntry->TriggerConditions);
-}
-
-void UNarrativeManager::RegisterDialogueCondition(const FString& ConditionID, bool bValue)
-{
-    DialogueConditions.Add(ConditionID, bValue);
-    
-    UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Registered condition %s = %s"), 
-           *ConditionID, bValue ? TEXT("true") : TEXT("false"));
-    
-    // Check if this condition unlocks new story beats
-    for (FNarr_StoryBeat& Beat : StoryBeats)
-    {
-        if (!Beat.bIsCompleted && Beat.RequiredConditions.Contains(ConditionID))
+        const FNarr_DialogueEntry& Entry = DialogueDatabase[DialogueID];
+        
+        if (CheckConditions(Entry.Conditions))
         {
-            if (EvaluateConditions(Beat.RequiredConditions))
+            ActiveDialogues.AddUnique(DialogueID);
+            
+            UE_LOG(LogTemp, Warning, TEXT("NarrativeManager: Triggering dialogue - %s: %s"), 
+                   *Entry.SpeakerName, *Entry.DialogueText);
+            
+            // Play audio if available
+            if (!Entry.AudioPath.IsEmpty())
             {
-                AdvanceStoryBeat(Beat.BeatID);
+                PlayNarrationAudio(Entry.AudioPath);
+            }
+            
+            // Display text (in a real implementation, this would trigger UI)
+            if (GEngine)
+            {
+                GEngine->AddOnScreenDebugMessage(-1, Entry.Duration, FColor::Yellow,
+                    FString::Printf(TEXT("%s: %s"), *Entry.SpeakerName, *Entry.DialogueText));
             }
         }
     }
+    else
+    {
+        UE_LOG(LogTemp, Error, TEXT("NarrativeManager: Dialogue ID not found - %s"), *DialogueID);
+    }
 }
 
-void UNarrativeManager::AdvanceStoryBeat(const FString& BeatID)
+void UNarrativeManager::TriggerStoryBeat(const FString& BeatID)
 {
-    FNarr_StoryBeat* Beat = StoryBeats.FindByPredicate([&BeatID](const FNarr_StoryBeat& B) {
-        return B.BeatID == BeatID;
-    });
-    
-    if (!Beat)
+    if (StoryBeats.Contains(BeatID))
     {
-        UE_LOG(LogTemp, Warning, TEXT("NarrativeManager: Story beat %s not found"), *BeatID);
-        return;
+        FNarr_StoryBeat& Beat = StoryBeats[BeatID];
+        
+        if (!Beat.bIsCompleted && CheckConditions(Beat.TriggerConditions))
+        {
+            CurrentStoryBeat = BeatID;
+            Beat.bIsCompleted = true;
+            
+            UE_LOG(LogTemp, Warning, TEXT("NarrativeManager: Story beat triggered - %s"), *Beat.Title);
+            
+            // Process dialogue sequence
+            ProcessDialogueSequence(Beat.DialogueSequence);
+        }
     }
-    
-    if (Beat->bIsCompleted)
-    {
-        UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Story beat %s already completed"), *BeatID);
-        return;
-    }
-    
-    Beat->bIsCompleted = true;
-    CurrentStoryPhase = Beat->Phase;
-    
-    // Unlock associated dialogues
-    for (const FString& DialogueID : Beat->UnlockedDialogues)
-    {
-        RegisterDialogueCondition(DialogueID + TEXT("_Unlocked"), true);
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Advanced story beat %s, phase now %d"), 
-           *BeatID, static_cast<int32>(CurrentStoryPhase));
 }
 
 bool UNarrativeManager::IsStoryBeatCompleted(const FString& BeatID) const
 {
-    const FNarr_StoryBeat* Beat = StoryBeats.FindByPredicate([&BeatID](const FNarr_StoryBeat& B) {
-        return B.BeatID == BeatID;
-    });
-    
-    return Beat ? Beat->bIsCompleted : false;
+    if (StoryBeats.Contains(BeatID))
+    {
+        return StoryBeats[BeatID].bIsCompleted;
+    }
+    return false;
 }
 
-ENarr_StoryPhase UNarrativeManager::GetCurrentStoryPhase() const
+void UNarrativeManager::RegisterDialogueEntry(const FNarr_DialogueEntry& Entry)
 {
-    return CurrentStoryPhase;
+    DialogueDatabase.Add(Entry.DialogueID, Entry);
+    UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Registered dialogue - %s"), *Entry.DialogueID);
 }
 
-void UNarrativeManager::TriggerEnvironmentalNarration(const FVector& Location, const FString& NarrationType)
+void UNarrativeManager::RegisterStoryBeat(const FNarr_StoryBeat& Beat)
 {
-    FString ContextualDialogueID;
-    
-    // Generate contextual dialogue based on biome and situation
-    if (CurrentBiome == ENarr_BiomeType::Savana)
-    {
-        if (NarrationType == TEXT("DangerDetected"))
-        {
-            ContextualDialogueID = TEXT("Savana_Danger_Warning");
-        }
-        else if (NarrationType == TEXT("ResourceFound"))
-        {
-            ContextualDialogueID = TEXT("Savana_Resource_Found");
-        }
-    }
-    else if (CurrentBiome == ENarr_BiomeType::Forest)
-    {
-        if (NarrationType == TEXT("DangerDetected"))
-        {
-            ContextualDialogueID = TEXT("Forest_Danger_Warning");
-        }
-    }
-    
-    if (!ContextualDialogueID.IsEmpty())
-    {
-        TriggerDialogue(ContextualDialogueID);
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Environmental narration triggered at %s"), 
-           *Location.ToString());
+    StoryBeats.Add(Beat.BeatID, Beat);
+    UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Registered story beat - %s"), *Beat.BeatID);
 }
 
-void UNarrativeManager::SetNarrativeContext(ENarr_BiomeType Biome, ENarr_TimeOfDay TimeOfDay, ENarr_WeatherType Weather)
+TArray<FString> UNarrativeManager::GetActiveDialogues() const
 {
-    CurrentBiome = Biome;
-    CurrentTimeOfDay = TimeOfDay;
-    CurrentWeather = Weather;
+    return ActiveDialogues;
+}
+
+void UNarrativeManager::PlayNarrationAudio(const FString& AudioPath, float Volume)
+{
+    if (AudioPath.IsEmpty()) return;
     
-    UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Context updated - Biome: %d, Time: %d, Weather: %d"), 
-           static_cast<int32>(Biome), static_cast<int32>(TimeOfDay), static_cast<int32>(Weather));
+    UWorld* World = GetWorld();
+    if (!World) return;
+    
+    // In a real implementation, this would load and play the audio file
+    UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Playing audio - %s at volume %f"), *AudioPath, Volume);
+}
+
+void UNarrativeManager::InitializeDefaultDialogues()
+{
+    // Survival introduction
+    FNarr_DialogueEntry IntroDialogue;
+    IntroDialogue.DialogueID = TEXT("intro_welcome");
+    IntroDialogue.SpeakerName = TEXT("Narrator");
+    IntroDialogue.DialogueText = TEXT("Welcome to the prehistoric wilderness. Your survival depends on wit, courage, and understanding the ancient laws of this land.");
+    IntroDialogue.Duration = 5.0f;
+    RegisterDialogueEntry(IntroDialogue);
+    
+    // Danger warning
+    FNarr_DialogueEntry DangerDialogue;
+    DangerDialogue.DialogueID = TEXT("danger_predator");
+    DangerDialogue.SpeakerName = TEXT("Survival Instinct");
+    DangerDialogue.DialogueText = TEXT("Predator scent detected. Move carefully and stay alert. Your life depends on it.");
+    DangerDialogue.Duration = 3.0f;
+    RegisterDialogueEntry(DangerDialogue);
+    
+    // Resource discovery
+    FNarr_DialogueEntry ResourceDialogue;
+    ResourceDialogue.DialogueID = TEXT("discovery_resource");
+    ResourceDialogue.SpeakerName = TEXT("Explorer");
+    ResourceDialogue.DialogueText = TEXT("These materials could be useful. Gather what you can - resources are scarce in this harsh world.");
+    ResourceDialogue.Duration = 4.0f;
+    RegisterDialogueEntry(ResourceDialogue);
+    
+    // Shelter advice
+    FNarr_DialogueEntry ShelterDialogue;
+    ShelterDialogue.DialogueID = TEXT("advice_shelter");
+    ShelterDialogue.SpeakerName = TEXT("Survivor");
+    ShelterDialogue.DialogueText = TEXT("Night falls quickly here. Find or build shelter before darkness brings the apex predators.");
+    ShelterDialogue.Duration = 4.0f;
+    RegisterDialogueEntry(ShelterDialogue);
 }
 
 void UNarrativeManager::InitializeStoryBeats()
 {
-    // Discovery Phase
-    FNarr_StoryBeat FirstAwakening;
-    FirstAwakening.BeatID = TEXT("FirstAwakening");
-    FirstAwakening.BeatTitle = FText::FromString(TEXT("First Light"));
-    FirstAwakening.BeatDescription = FText::FromString(TEXT("You awaken in an unfamiliar world"));
-    FirstAwakening.Phase = ENarr_StoryPhase::Discovery;
-    FirstAwakening.RequiredConditions.Add(TEXT("GameStarted"));
-    FirstAwakening.UnlockedDialogues.Add(TEXT("Valley_Intro"));
-    StoryBeats.Add(FirstAwakening);
+    // First survival
+    FNarr_StoryBeat FirstSurvival;
+    FirstSurvival.BeatID = TEXT("first_survival");
+    FirstSurvival.Title = TEXT("First Day");
+    FirstSurvival.Description = TEXT("Survive your first day in the prehistoric world");
+    FirstSurvival.DialogueSequence.Add(TEXT("intro_welcome"));
+    FirstSurvival.DialogueSequence.Add(TEXT("advice_shelter"));
+    RegisterStoryBeat(FirstSurvival);
     
-    // Survival Phase
-    FNarr_StoryBeat FirstEncounter;
-    FirstEncounter.BeatID = TEXT("FirstDinosaurEncounter");
-    FirstEncounter.BeatTitle = FText::FromString(TEXT("Ancient Predators"));
-    FirstEncounter.BeatDescription = FText::FromString(TEXT("Your first encounter with the apex predators of this world"));
-    FirstEncounter.Phase = ENarr_StoryPhase::Survival;
-    FirstEncounter.RequiredConditions.Add(TEXT("FirstDinosaurSeen"));
-    FirstEncounter.UnlockedDialogues.Add(TEXT("Predator_Warning"));
-    StoryBeats.Add(FirstEncounter);
+    // Predator encounter
+    FNarr_StoryBeat PredatorEncounter;
+    PredatorEncounter.BeatID = TEXT("predator_encounter");
+    PredatorEncounter.Title = TEXT("First Hunt");
+    PredatorEncounter.Description = TEXT("Encounter your first major predator");
+    PredatorEncounter.DialogueSequence.Add(TEXT("danger_predator"));
+    RegisterStoryBeat(PredatorEncounter);
     
-    // Adaptation Phase
-    FNarr_StoryBeat BasicSurvival;
-    BasicSurvival.BeatID = TEXT("BasicSurvivalMastery");
-    BasicSurvival.BeatTitle = FText::FromString(TEXT("Learning to Survive"));
-    BasicSurvival.BeatDescription = FText::FromString(TEXT("You begin to understand the rhythms of this dangerous world"));
-    BasicSurvival.Phase = ENarr_StoryPhase::Adaptation;
-    BasicSurvival.RequiredConditions.Add(TEXT("WaterFound"));
-    BasicSurvival.RequiredConditions.Add(TEXT("ShelterBuilt"));
-    BasicSurvival.UnlockedDialogues.Add(TEXT("Survival_Mastery"));
-    StoryBeats.Add(BasicSurvival);
-    
-    UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Initialized %d story beats"), StoryBeats.Num());
+    // Resource mastery
+    FNarr_StoryBeat ResourceMastery;
+    ResourceMastery.BeatID = TEXT("resource_mastery");
+    ResourceMastery.Title = TEXT("Gatherer's Wisdom");
+    ResourceMastery.Description = TEXT("Learn to identify and gather essential resources");
+    ResourceMastery.DialogueSequence.Add(TEXT("discovery_resource"));
+    RegisterStoryBeat(ResourceMastery);
 }
 
-void UNarrativeManager::LoadDialogueData()
+bool UNarrativeManager::CheckConditions(const TArray<FString>& Conditions) const
 {
-    // In a full implementation, this would load from a data table asset
-    // For now, we set up the system to be ready for data table integration
-    
-    UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Dialogue data system ready"));
-}
-
-bool UNarrativeManager::EvaluateConditions(const TArray<FString>& Conditions) const
-{
+    // Simple condition checking - in a real implementation, this would check game state
     for (const FString& Condition : Conditions)
     {
-        const bool* ConditionValue = DialogueConditions.Find(Condition);
-        if (!ConditionValue || !(*ConditionValue))
+        if (Condition == TEXT("always_true"))
         {
-            return false;
+            continue;
         }
+        // Add more condition checks as needed
     }
-    
     return true;
 }
 
-void UNarrativeManager::BroadcastDialogue(const FNarr_DialogueEntry& DialogueEntry, AActor* Speaker)
+void UNarrativeManager::ProcessDialogueSequence(const TArray<FString>& Sequence)
 {
-    // In a full implementation, this would trigger UI display, audio playback, etc.
-    // For now, we log the dialogue
-    
-    FString SpeakerName = Speaker ? Speaker->GetName() : DialogueEntry.SpeakerName;
-    
-    UE_LOG(LogTemp, Log, TEXT("DIALOGUE [%s]: %s"), 
-           *SpeakerName, *DialogueEntry.DialogueText.ToString());
-    
-    // Broadcast to UI system (when implemented)
-    // Trigger audio playback (when implemented)
-    // Handle dialogue type-specific behavior
+    for (const FString& DialogueID : Sequence)
+    {
+        TriggerDialogue(DialogueID);
+    }
 }
