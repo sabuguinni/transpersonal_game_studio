@@ -2,189 +2,135 @@
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "GameFramework/Character.h"
+#include "Kismet/GameplayStatics.h"
 #include "Components/BoxComponent.h"
-#include "Materials/MaterialInterface.h"
-#include "Engine/StaticMesh.h"
-#include "TimerManager.h"
 
 ADialogueTrigger::ADialogueTrigger()
 {
     PrimaryActorTick.bCanEverTick = false;
 
     // Initialize default values
-    DialogueID = TEXT("");
-    StoryBeatID = TEXT("");
-    TriggerType = ENarr_TriggerType::OnEnter;
-    bOneTimeOnly = true;
-    bRequiresPlayerOnly = true;
-    DelayBeforeTrigger = 0.0f;
+    EventID = TEXT("");
+    bTriggerOnce = true;
+    bRequirePlayerCharacter = true;
+    CooldownTime = 5.0f;
     bHasTriggered = false;
+    LastTriggerTime = 0.0f;
+    NarrativeManager = nullptr;
 
-    // Create visual indicator component
-    VisualIndicator = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("VisualIndicator"));
-    if (VisualIndicator)
-    {
-        VisualIndicator->SetupAttachment(RootComponent);
-        VisualIndicator->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-        VisualIndicator->SetVisibility(true);
-    }
-
-    // Setup collision
+    // Set up collision
     GetCollisionComponent()->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
     GetCollisionComponent()->SetCollisionResponseToAllChannels(ECR_Ignore);
-    GetCollisionComponent()->SetCollisionResponseToChannel(ECC_Pawn, ECR_Overlap);
+    GetCollisionComponent()->SetCollisionResponseToChannel(ECC_Pawn, ECR_Block);
 }
 
 void ADialogueTrigger::BeginPlay()
 {
     Super::BeginPlay();
-
-    // Get narrative manager
-    if (UGameInstance* GameInstance = GetGameInstance())
-    {
-        NarrativeManager = GameInstance->GetSubsystem<UNarrativeManager>();
-    }
-
-    // Setup overlap events
+    
+    InitializeNarrativeManager();
+    
+    // Bind overlap events
     OnActorBeginOverlap.AddDynamic(this, &ADialogueTrigger::OnOverlapBegin);
-    OnActorEndOverlap.AddDynamic(this, &ADialogueTrigger::OnOverlapEnd);
-
-    // Setup visual indicator
-    SetupVisualIndicator();
-
-    UE_LOG(LogTemp, Log, TEXT("DialogueTrigger: %s initialized with DialogueID: %s"), 
-           *GetActorLabel(), *DialogueID);
+    
+    UE_LOG(LogTemp, Log, TEXT("DialogueTrigger initialized with EventID: %s"), *EventID);
 }
 
 void ADialogueTrigger::OnOverlapBegin(UPrimitiveComponent* OverlappedComp, AActor* OtherActor, 
-                                     UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, 
-                                     bool bFromSweep, const FHitResult& SweepResult)
+                                    UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, 
+                                    bool bFromSweep, const FHitResult& SweepResult)
 {
-    if (TriggerType == ENarr_TriggerType::OnEnter)
-    {
-        ExecuteTrigger(OtherActor);
-    }
-}
-
-void ADialogueTrigger::OnOverlapEnd(UPrimitiveComponent* OverlappedComp, AActor* OtherActor, 
-                                   UPrimitiveComponent* OtherComp, int32 OtherBodyIndex)
-{
-    if (TriggerType == ENarr_TriggerType::OnExit)
-    {
-        ExecuteTrigger(OtherActor);
-    }
-}
-
-void ADialogueTrigger::ExecuteTrigger(AActor* TriggeringActor)
-{
-    // Check if already triggered and one-time only
-    if (bHasTriggered && bOneTimeOnly)
+    if (!CanTrigger())
     {
         return;
     }
 
-    // Check trigger conditions
-    if (!CheckTriggerConditions(TriggeringActor))
+    // Check if it's the player character (if required)
+    if (bRequirePlayerCharacter)
     {
-        return;
+        ACharacter* PlayerCharacter = UGameplayStatics::GetPlayerCharacter(GetWorld(), 0);
+        if (OtherActor != PlayerCharacter)
+        {
+            return;
+        }
     }
 
-    // Handle delay
-    if (DelayBeforeTrigger > 0.0f)
-    {
-        GetWorldTimerManager().SetTimer(DelayTimerHandle, this, 
-                                       &ADialogueTrigger::DelayedTriggerExecution, 
-                                       DelayBeforeTrigger, false);
-    }
-    else
-    {
-        DelayedTriggerExecution();
-    }
-}
+    UE_LOG(LogTemp, Log, TEXT("DialogueTrigger activated by: %s"), 
+           OtherActor ? *OtherActor->GetName() : TEXT("Unknown"));
 
-void ADialogueTrigger::DelayedTriggerExecution()
-{
-    if (!NarrativeManager)
+    // Trigger the narrative event
+    if (NarrativeManager && !EventID.IsEmpty())
     {
-        UE_LOG(LogTemp, Error, TEXT("DialogueTrigger: NarrativeManager not found"));
-        return;
+        NarrativeManager->TriggerStoryEvent(EventID);
     }
 
-    // Trigger dialogue
-    if (!DialogueID.IsEmpty())
+    // Play custom dialogues if any
+    if (CustomDialogues.Num() > 0 && NarrativeManager)
     {
-        NarrativeManager->TriggerDialogue(DialogueID, this);
-        UE_LOG(LogTemp, Warning, TEXT("DialogueTrigger: Triggered dialogue - %s"), *DialogueID);
+        for (const FNarr_DialogueEntry& Dialogue : CustomDialogues)
+        {
+            NarrativeManager->PlayDialogue(Dialogue);
+        }
     }
 
-    // Trigger story beat
-    if (!StoryBeatID.IsEmpty())
-    {
-        NarrativeManager->TriggerStoryBeat(StoryBeatID);
-        UE_LOG(LogTemp, Warning, TEXT("DialogueTrigger: Triggered story beat - %s"), *StoryBeatID);
-    }
-
-    // Mark as triggered
+    // Update trigger state
     bHasTriggered = true;
+    LastTriggerTime = GetWorld()->GetTimeSeconds();
 
-    // Hide visual indicator if one-time only
-    if (bOneTimeOnly && VisualIndicator)
+    // Destroy if one-time trigger
+    if (bTriggerOnce)
     {
-        VisualIndicator->SetVisibility(false);
+        SetActorHiddenInGame(true);
+        SetActorEnableCollision(false);
+        
+        // Schedule destruction after a short delay
+        FTimerHandle DestroyTimer;
+        GetWorld()->GetTimerManager().SetTimer(DestroyTimer, [this]()
+        {
+            Destroy();
+        }, 1.0f, false);
     }
 }
 
-bool ADialogueTrigger::CheckTriggerConditions(AActor* TriggeringActor) const
+void ADialogueTrigger::InitializeNarrativeManager()
 {
-    // Check if player only requirement
-    if (bRequiresPlayerOnly)
+    if (UGameInstance* GameInstance = GetGameInstance())
     {
-        ACharacter* Character = Cast<ACharacter>(TriggeringActor);
-        if (!Character || !Character->IsPlayerControlled())
+        NarrativeManager = GameInstance->GetSubsystem<UNarrativeManager>();
+        if (NarrativeManager)
+        {
+            UE_LOG(LogTemp, Log, TEXT("NarrativeManager found and connected"));
+        }
+        else
+        {
+            UE_LOG(LogTemp, Warning, TEXT("NarrativeManager not found"));
+        }
+    }
+}
+
+bool ADialogueTrigger::CanTrigger() const
+{
+    // Check if already triggered (for one-time triggers)
+    if (bTriggerOnce && bHasTriggered)
+    {
+        return false;
+    }
+
+    // Check cooldown
+    if (CooldownTime > 0.0f)
+    {
+        float CurrentTime = GetWorld()->GetTimeSeconds();
+        if (CurrentTime - LastTriggerTime < CooldownTime)
         {
             return false;
         }
     }
 
-    // Check required conditions
-    if (NarrativeManager)
+    // Check if narrative manager is available
+    if (!NarrativeManager)
     {
-        for (const FString& Condition : RequiredConditions)
-        {
-            // Simple condition checking - extend as needed
-            if (Condition == TEXT("first_time") && bHasTriggered)
-            {
-                return false;
-            }
-            // Add more condition checks here
-        }
+        return false;
     }
 
     return true;
-}
-
-void ADialogueTrigger::SetupVisualIndicator()
-{
-    if (!VisualIndicator)
-    {
-        return;
-    }
-
-    // Try to load a simple mesh for the indicator
-    static ConstructorHelpers::FObjectFinder<UStaticMesh> SphereMesh(TEXT("/Engine/BasicShapes/Sphere"));
-    if (SphereMesh.Succeeded())
-    {
-        VisualIndicator->SetStaticMesh(SphereMesh.Object);
-        VisualIndicator->SetRelativeScale3D(FVector(0.5f, 0.5f, 0.5f));
-        VisualIndicator->SetRelativeLocation(FVector(0, 0, 100));
-    }
-
-    // Set material color based on trigger type
-    UMaterialInterface* Material = nullptr;
-    static ConstructorHelpers::FObjectFinder<UMaterialInterface> DefaultMaterial(TEXT("/Engine/BasicShapes/BasicShapeMaterial"));
-    if (DefaultMaterial.Succeeded())
-    {
-        Material = DefaultMaterial.Object;
-        VisualIndicator->SetMaterial(0, Material);
-    }
 }
