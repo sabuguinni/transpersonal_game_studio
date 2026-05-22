@@ -1,199 +1,177 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/World.h"
-#include "Components/StaticMeshComponent.h"
-#include "Components/PrimitiveComponent.h"
+#include "Engine/Engine.h"
+#include "Components/ActorComponent.h"
 #include "Engine/HitResult.h"
+#include "CollisionQueryParams.h"
+#include "Engine/World.h"
 #include "GameFramework/Actor.h"
-#include "Subsystems/WorldSubsystem.h"
-#include "../../SharedTypes.h"
 #include "Core_CollisionSystem.generated.h"
 
+UENUM(BlueprintType)
+enum class ECore_CollisionType : uint8
+{
+    None = 0,
+    Static = 1,
+    Dynamic = 2,
+    Kinematic = 3,
+    Trigger = 4,
+    Destructible = 5
+};
+
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FCore_CollisionProfile
+struct FCore_CollisionData
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision")
-    FName ProfileName;
+    ECore_CollisionType CollisionType = ECore_CollisionType::Static;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision")
-    TEnumAsByte<ECollisionEnabled::Type> CollisionEnabled;
+    float Mass = 1.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision")
-    TEnumAsByte<ECollisionResponse> ObjectType;
+    float Friction = 0.7f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision")
-    bool bGenerateOverlapEvents;
+    float Restitution = 0.3f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision")
-    bool bCanCharacterStepUpOn;
+    bool bGenerateHitEvents = true;
 
-    FCore_CollisionProfile()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision")
+    bool bCanEverAffectNavigation = true;
+
+    FCore_CollisionData()
     {
-        ProfileName = NAME_None;
-        CollisionEnabled = ECollisionEnabled::QueryAndPhysics;
-        ObjectType = ECR_WorldStatic;
-        bGenerateOverlapEvents = true;
-        bCanCharacterStepUpOn = true;
+        CollisionType = ECore_CollisionType::Static;
+        Mass = 1.0f;
+        Friction = 0.7f;
+        Restitution = 0.3f;
+        bGenerateHitEvents = true;
+        bCanEverAffectNavigation = true;
     }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FCore_CollisionEvent
+struct FCore_CollisionEvent
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Collision")
-    AActor* Actor1;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision Event")
+    AActor* HitActor = nullptr;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Collision")
-    AActor* Actor2;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision Event")
+    FVector ImpactPoint = FVector::ZeroVector;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Collision")
-    FVector ImpactPoint;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision Event")
+    FVector ImpactNormal = FVector::ZeroVector;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Collision")
-    FVector ImpactNormal;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision Event")
+    float ImpactForce = 0.0f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Collision")
-    float ImpactVelocity;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Collision")
-    float Timestamp;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision Event")
+    float Timestamp = 0.0f;
 
     FCore_CollisionEvent()
     {
-        Actor1 = nullptr;
-        Actor2 = nullptr;
+        HitActor = nullptr;
         ImpactPoint = FVector::ZeroVector;
-        ImpactNormal = FVector::UpVector;
-        ImpactVelocity = 0.0f;
+        ImpactNormal = FVector::ZeroVector;
+        ImpactForce = 0.0f;
         Timestamp = 0.0f;
     }
 };
 
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnCollisionEvent, const FCore_CollisionEvent&, CollisionEvent);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnCore_CollisionEvent, const FCore_CollisionEvent&, CollisionEvent, AActor*, OtherActor);
 
 /**
- * Core Collision System - Manages collision detection, response, and optimization
- * Handles collision profiles, event broadcasting, and performance monitoring
+ * Core Collision System - Manages collision detection and response for all game objects
+ * Handles static/dynamic collisions, trigger events, and physics interactions
  */
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UCore_CollisionSystem : public UWorldSubsystem
+UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent), BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API UCore_CollisionSystem : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
     UCore_CollisionSystem();
 
-    // Subsystem overrides
-    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
-    virtual void Deinitialize() override;
-    virtual void Tick(float DeltaTime) override;
-    virtual bool ShouldCreateSubsystem(UObject* Outer) const override { return true; }
+protected:
+    virtual void BeginPlay() override;
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    // Collision profile management
+public:
+    // Collision Configuration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision System")
+    FCore_CollisionData CollisionData;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision System")
+    bool bEnableCollisionSystem = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision System")
+    float CollisionCheckRadius = 100.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision System")
+    float MaxCollisionForce = 1000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision System")
+    TArray<TEnumAsByte<EObjectTypeQuery>> CollisionObjectTypes;
+
+    // Events
+    UPROPERTY(BlueprintAssignable, Category = "Collision Events")
+    FOnCore_CollisionEvent OnCollisionDetected;
+
+    // Core Functions
     UFUNCTION(BlueprintCallable, Category = "Collision System")
-    void RegisterCollisionProfile(const FCore_CollisionProfile& Profile);
-
-    UFUNCTION(BlueprintCallable, Category = "Collision System")
-    bool ApplyCollisionProfile(UPrimitiveComponent* Component, const FName& ProfileName);
-
-    UFUNCTION(BlueprintCallable, Category = "Collision System")
-    FCore_CollisionProfile GetCollisionProfile(const FName& ProfileName) const;
-
-    // Collision detection
-    UFUNCTION(BlueprintCallable, Category = "Collision System")
-    bool LineTrace(const FVector& Start, const FVector& End, FHitResult& OutHit, 
-                   ECollisionChannel TraceChannel = ECC_Visibility, 
-                   const TArray<AActor*>& ActorsToIgnore = TArray<AActor*>()) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Collision System")
-    bool SphereTrace(const FVector& Start, const FVector& End, float Radius, 
-                     FHitResult& OutHit, ECollisionChannel TraceChannel = ECC_Visibility,
-                     const TArray<AActor*>& ActorsToIgnore = TArray<AActor*>()) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Collision System")
-    bool BoxTrace(const FVector& Start, const FVector& End, const FVector& HalfSize,
-                  const FRotator& Orientation, FHitResult& OutHit,
-                  ECollisionChannel TraceChannel = ECC_Visibility,
-                  const TArray<AActor*>& ActorsToIgnore = TArray<AActor*>()) const;
-
-    // Overlap detection
-    UFUNCTION(BlueprintCallable, Category = "Collision System")
-    TArray<AActor*> GetOverlappingActors(const FVector& Location, float Radius,
-                                         ECollisionChannel ObjectType = ECC_Pawn) const;
-
-    // Event handling
-    UPROPERTY(BlueprintAssignable, Category = "Collision System")
-    FOnCollisionEvent OnCollisionDetected;
+    void InitializeCollisionSystem();
 
     UFUNCTION(BlueprintCallable, Category = "Collision System")
-    void BroadcastCollisionEvent(const FCore_CollisionEvent& Event);
-
-    // Performance monitoring
-    UFUNCTION(BlueprintCallable, Category = "Collision System")
-    void EnableCollisionOptimization(bool bEnable);
+    void SetCollisionType(ECore_CollisionType NewType);
 
     UFUNCTION(BlueprintCallable, Category = "Collision System")
-    void SetCollisionLODDistance(float Distance);
+    bool CheckCollisionAtLocation(const FVector& Location, float Radius = 50.0f);
 
     UFUNCTION(BlueprintCallable, Category = "Collision System")
-    int32 GetActiveCollisionCount() const;
+    TArray<AActor*> GetOverlappingActors(float Radius = 100.0f);
 
     UFUNCTION(BlueprintCallable, Category = "Collision System")
-    float GetCollisionPerformanceMetric() const;
-
-    // Debugging
-    UFUNCTION(BlueprintCallable, Category = "Collision System", CallInEditor = true)
-    void DebugDrawCollisionShapes(bool bEnable);
+    void ApplyImpactForce(const FVector& ImpactPoint, const FVector& Force);
 
     UFUNCTION(BlueprintCallable, Category = "Collision System")
-    void LogCollisionStats() const;
+    void RegisterCollisionEvent(AActor* HitActor, const FVector& ImpactPoint, const FVector& ImpactNormal, float Force);
+
+    UFUNCTION(BlueprintCallable, Category = "Collision System")
+    void EnableCollisionSystem(bool bEnable);
+
+    UFUNCTION(BlueprintCallable, Category = "Collision System")
+    void UpdateCollisionProperties();
+
+    // Collision Response
+    UFUNCTION(BlueprintCallable, Category = "Collision Response")
+    void HandleStaticCollision(const FHitResult& HitResult);
+
+    UFUNCTION(BlueprintCallable, Category = "Collision Response")
+    void HandleDynamicCollision(const FHitResult& HitResult, float ImpactVelocity);
+
+    UFUNCTION(BlueprintCallable, Category = "Collision Response")
+    void HandleTriggerCollision(AActor* TriggerActor);
 
 protected:
-    // Collision profiles registry
+    // Internal collision tracking
     UPROPERTY()
-    TMap<FName, FCore_CollisionProfile> CollisionProfiles;
+    TArray<FCore_CollisionEvent> RecentCollisions;
 
-    // Performance settings
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance", meta = (AllowPrivateAccess = "true"))
-    bool bOptimizationEnabled;
+    UPROPERTY()
+    float LastCollisionTime = 0.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance", meta = (AllowPrivateAccess = "true"))
-    float CollisionLODDistance;
+    UPROPERTY()
+    int32 CollisionEventCount = 0;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance", meta = (AllowPrivateAccess = "true"))
-    int32 MaxActiveCollisions;
-
-    // Statistics
-    UPROPERTY(BlueprintReadOnly, Category = "Statistics", meta = (AllowPrivateAccess = "true"))
-    int32 CollisionEventsThisFrame;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Statistics", meta = (AllowPrivateAccess = "true"))
-    float AverageCollisionProcessingTime;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Statistics", meta = (AllowPrivateAccess = "true"))
-    int32 TotalCollisionEvents;
-
-    // Debug settings
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Debug", meta = (AllowPrivateAccess = "true"))
-    bool bDebugDrawEnabled;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Debug", meta = (AllowPrivateAccess = "true"))
-    float DebugDrawDuration;
-
-private:
-    // Internal methods
-    void InitializeDefaultProfiles();
-    void UpdatePerformanceMetrics(float DeltaTime);
-    void OptimizeCollisions();
-    bool ShouldProcessCollision(const FVector& Location) const;
-
-    // Performance tracking
-    float CollisionProcessingTimeAccumulator;
-    int32 CollisionProcessingFrameCount;
-    TArray<float> RecentCollisionTimes;
+    // Helper functions
+    void ProcessCollisionQueue();
+    void CleanupOldCollisions();
+    float CalculateImpactForce(const FVector& Velocity, float Mass);
+    bool IsValidCollisionTarget(AActor* Actor);
 };
