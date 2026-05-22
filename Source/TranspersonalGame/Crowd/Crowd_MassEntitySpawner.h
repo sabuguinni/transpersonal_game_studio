@@ -3,61 +3,65 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "MassEntityTypes.h"
-#include "MassSpawnerTypes.h"
 #include "MassEntitySubsystem.h"
-#include "Engine/World.h"
+#include "MassSpawnerSubsystem.h"
+#include "MassCommonTypes.h"
 #include "Components/StaticMeshComponent.h"
+#include "Engine/StaticMesh.h"
 #include "Crowd_MassEntitySpawner.generated.h"
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FCrowd_SpawnParameters
+struct TRANSPERSONALGAME_API FCrowd_SpawnConfig
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn Settings")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn Config")
     int32 MaxEntities = 1000;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn Settings")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn Config")
     float SpawnRadius = 5000.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn Settings")
-    float MinSpawnDistance = 100.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn Settings")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn Config")
     FVector SpawnCenter = FVector::ZeroVector;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn Settings")
-    bool bEnableLOD = true;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn Config")
+    float MinSpawnDistance = 100.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn Settings")
-    float LODDistance1 = 1000.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn Config")
+    bool bUseRandomHeight = true;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn Settings")
-    float LODDistance2 = 3000.0f;
+    FCrowd_SpawnConfig()
+    {
+        MaxEntities = 1000;
+        SpawnRadius = 5000.0f;
+        SpawnCenter = FVector::ZeroVector;
+        MinSpawnDistance = 100.0f;
+        bUseRandomHeight = true;
+    }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FCrowd_EntityBehavior
+struct TRANSPERSONALGAME_API FCrowd_BiomeSpawnData
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
-    float MovementSpeed = 200.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    FString BiomeName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
-    float WanderRadius = 500.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    FVector BiomeCenter;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
-    float FlockingStrength = 0.5f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    FCrowd_SpawnConfig SpawnConfig;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
-    float AvoidanceRadius = 150.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    TArray<TSoftObjectPtr<UStaticMesh>> CrowdMeshes;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
-    bool bEnableFlocking = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
-    bool bEnableObstacleAvoidance = true;
+    FCrowd_BiomeSpawnData()
+    {
+        BiomeName = TEXT("DefaultBiome");
+        BiomeCenter = FVector::ZeroVector;
+    }
 };
 
 UCLASS(BlueprintType, Blueprintable)
@@ -70,50 +74,61 @@ public:
 
 protected:
     virtual void BeginPlay() override;
+    virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 public:
     virtual void Tick(float DeltaTime) override;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mass Spawning")
-    FCrowd_SpawnParameters SpawnParameters;
+    TArray<FCrowd_BiomeSpawnData> BiomeSpawnData;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mass Spawning")
-    FCrowd_EntityBehavior EntityBehavior;
+    bool bAutoSpawnOnBeginPlay = true;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    UStaticMeshComponent* VisualizationMesh;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mass Spawning")
+    float UpdateInterval = 1.0f;
 
-    UFUNCTION(BlueprintCallable, Category = "Mass Spawning")
-    void SpawnMassEntities();
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mass Spawning")
+    int32 MaxTotalEntities = 5000;
 
-    UFUNCTION(BlueprintCallable, Category = "Mass Spawning")
-    void DespawnAllEntities();
-
-    UFUNCTION(BlueprintCallable, Category = "Mass Spawning")
-    void UpdateLODSettings();
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Mass Spawning")
+    int32 CurrentEntityCount = 0;
 
     UFUNCTION(BlueprintCallable, Category = "Mass Spawning")
-    int32 GetActiveEntityCount() const;
+    void SpawnEntitiesInBiome(const FString& BiomeName);
 
     UFUNCTION(BlueprintCallable, Category = "Mass Spawning")
-    void SetSpawnCenter(const FVector& NewCenter);
+    void SpawnEntitiesInAllBiomes();
+
+    UFUNCTION(BlueprintCallable, Category = "Mass Spawning")
+    void ClearAllEntities();
+
+    UFUNCTION(BlueprintCallable, Category = "Mass Spawning")
+    void SetBiomeSpawnConfig(const FString& BiomeName, const FCrowd_SpawnConfig& NewConfig);
+
+    UFUNCTION(BlueprintCallable, Category = "Mass Spawning")
+    int32 GetEntityCountInBiome(const FString& BiomeName) const;
 
 protected:
-    UPROPERTY()
-    TArray<FMassEntityHandle> SpawnedEntities;
+    UFUNCTION()
+    void InitializeBiomes();
 
-    UPROPERTY()
-    UMassEntitySubsystem* MassEntitySubsystem;
+    UFUNCTION()
+    void SpawnEntitiesAtLocation(const FVector& Location, int32 Count, const TArray<TSoftObjectPtr<UStaticMesh>>& Meshes);
 
-    void InitializeMassSystem();
-    void CreateEntityArchetype();
-    FVector GetRandomSpawnLocation() const;
+    UFUNCTION()
+    FVector GetRandomSpawnLocation(const FCrowd_SpawnConfig& Config) const;
+
+    UFUNCTION()
     bool IsValidSpawnLocation(const FVector& Location) const;
-    void UpdateEntityBehaviors();
 
 private:
-    FMassArchetypeHandle EntityArchetype;
-    bool bIsInitialized = false;
+    UPROPERTY()
+    class UMassEntitySubsystem* MassEntitySubsystem;
+
+    UPROPERTY()
+    TMap<FString, TArray<FMassEntityHandle>> BiomeEntityMap;
+
     float LastUpdateTime = 0.0f;
-    const float UpdateInterval = 0.1f;
+    bool bIsInitialized = false;
 };
