@@ -1,138 +1,182 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Subsystems/GameInstanceSubsystem.h"
-#include "Engine/Engine.h"
-#include "SharedTypes.h"
+#include "GameFramework/Actor.h"
+#include "Engine/World.h"
+#include "Components/StaticMeshComponent.h"
+#include "Components/SphereComponent.h"
+#include "GameFramework/Character.h"
+#include "../SharedTypes.h"
 #include "Quest_DinosaurHuntManager.generated.h"
 
-// Forward declarations
-class ATranspersonalCharacter;
-
 USTRUCT(BlueprintType)
-struct FQuest_DinosaurHuntData
+struct TRANSPERSONALGAME_API FQuest_HuntTarget
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hunt")
-    EDinosaurSpecies TargetSpecies;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hunt Target")
+    FString DinosaurSpecies;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hunt")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hunt Target")
+    FVector TargetLocation;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hunt Target")
+    float DifficultyLevel;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hunt Target")
     int32 RequiredKills;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hunt")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hunt Target")
     int32 CurrentKills;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hunt")
-    float TimeLimit;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hunt Target")
+    bool bIsCompleted;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hunt")
-    float ElapsedTime;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hunt")
-    bool bIsActive;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hunt")
-    FString QuestName;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hunt")
-    FString Description;
-
-    FQuest_DinosaurHuntData()
+    FQuest_HuntTarget()
     {
-        TargetSpecies = EDinosaurSpecies::Raptor;
+        DinosaurSpecies = TEXT("Unknown");
+        TargetLocation = FVector::ZeroVector;
+        DifficultyLevel = 1.0f;
         RequiredKills = 1;
         CurrentKills = 0;
-        TimeLimit = 600.0f; // 10 minutes
-        ElapsedTime = 0.0f;
-        bIsActive = false;
-        QuestName = TEXT("Hunt Quest");
-        Description = TEXT("Hunt target dinosaur");
+        bIsCompleted = false;
+    }
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FQuest_HuntReward
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hunt Reward")
+    FString RewardType;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hunt Reward")
+    int32 ExperiencePoints;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hunt Reward")
+    TArray<FString> CraftingMaterials;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hunt Reward")
+    float SurvivalBonus;
+
+    FQuest_HuntReward()
+    {
+        RewardType = TEXT("Basic");
+        ExperiencePoints = 100;
+        SurvivalBonus = 0.1f;
     }
 };
 
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UQuest_DinosaurHuntManager : public UGameInstanceSubsystem
+class TRANSPERSONALGAME_API AQuest_DinosaurHuntManager : public AActor
 {
     GENERATED_BODY()
 
 public:
-    UQuest_DinosaurHuntManager();
-
-    // Subsystem interface
-    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
-    virtual void Deinitialize() override;
-
-    // Quest management
-    UFUNCTION(BlueprintCallable, Category = "Quest Hunt")
-    void StartHuntQuest(EDinosaurSpecies Species, int32 KillCount, float TimeLimit, const FString& QuestName);
-
-    UFUNCTION(BlueprintCallable, Category = "Quest Hunt")
-    void CompleteHuntQuest();
-
-    UFUNCTION(BlueprintCallable, Category = "Quest Hunt")
-    void CancelHuntQuest();
-
-    UFUNCTION(BlueprintCallable, Category = "Quest Hunt")
-    void RegisterDinosaurKill(EDinosaurSpecies Species, ATranspersonalCharacter* Hunter);
-
-    UFUNCTION(BlueprintCallable, Category = "Quest Hunt")
-    bool IsHuntQuestActive() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Quest Hunt")
-    FQuest_DinosaurHuntData GetCurrentHuntQuest() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Quest Hunt")
-    float GetHuntQuestProgress() const;
-
-    // Quest creation helpers
-    UFUNCTION(BlueprintCallable, Category = "Quest Hunt")
-    void CreateRaptorHuntQuest();
-
-    UFUNCTION(BlueprintCallable, Category = "Quest Hunt")
-    void CreateTRexHuntQuest();
-
-    UFUNCTION(BlueprintCallable, Category = "Quest Hunt")
-    void CreateTriceratopsHuntQuest();
-
-    UFUNCTION(BlueprintCallable, Category = "Quest Hunt")
-    void CreateBrachiosaurusHuntQuest();
-
-    // Events
-    DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnHuntQuestStarted, EDinosaurSpecies, Species, FString, QuestName);
-    DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnHuntQuestCompleted, EDinosaurSpecies, Species, int32, KillCount);
-    DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnHuntQuestFailed, FString, Reason);
-    DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnDinosaurKilled, EDinosaurSpecies, Species, int32, CurrentKills, int32, RequiredKills);
-
-    UPROPERTY(BlueprintAssignable, Category = "Quest Events")
-    FOnHuntQuestStarted OnHuntQuestStarted;
-
-    UPROPERTY(BlueprintAssignable, Category = "Quest Events")
-    FOnHuntQuestCompleted OnHuntQuestCompleted;
-
-    UPROPERTY(BlueprintAssignable, Category = "Quest Events")
-    FOnHuntQuestFailed OnHuntQuestFailed;
-
-    UPROPERTY(BlueprintAssignable, Category = "Quest Events")
-    FOnDinosaurKilled OnDinosaurKilled;
+    AQuest_DinosaurHuntManager();
 
 protected:
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest State")
-    FQuest_DinosaurHuntData CurrentHuntQuest;
+    virtual void BeginPlay() override;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Config")
-    TMap<EDinosaurSpecies, int32> DinosaurDifficultyScores;
+public:
+    virtual void Tick(float DeltaTime) override;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Config")
-    float BaseTimeLimit;
+    // Core hunt management
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hunt Management")
+    TArray<FQuest_HuntTarget> ActiveHuntTargets;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Config")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hunt Management")
+    TArray<FQuest_HuntTarget> CompletedHuntTargets;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hunt Management")
     int32 MaxActiveHunts;
 
-private:
-    void UpdateQuestTimer();
-    void CheckQuestCompletion();
-    void InitializeDifficultyScores();
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hunt Management")
+    float HuntDetectionRadius;
 
-    FTimerHandle QuestTimerHandle;
+    // Biome-specific hunting
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Hunting")
+    TMap<FString, TArray<FString>> BiomeDinosaurSpecies;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Hunting")
+    TMap<FString, FVector> BiomeHuntingZones;
+
+    // Player tracking
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Player Tracking")
+    ACharacter* PlayerCharacter;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Player Tracking")
+    FVector LastPlayerLocation;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Player Tracking")
+    float PlayerTrackingUpdateInterval;
+
+    // Hunt progression
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hunt Progression")
+    int32 TotalHuntsCompleted;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hunt Progression")
+    float HuntDifficultyMultiplier;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hunt Progression")
+    TArray<FQuest_HuntReward> HuntRewards;
+
+    // Hunt functions
+    UFUNCTION(BlueprintCallable, Category = "Hunt Management")
+    void StartNewHunt(const FString& DinosaurSpecies, const FVector& TargetLocation, int32 RequiredKills = 1);
+
+    UFUNCTION(BlueprintCallable, Category = "Hunt Management")
+    void RegisterDinosaurKill(const FString& DinosaurSpecies, const FVector& KillLocation);
+
+    UFUNCTION(BlueprintCallable, Category = "Hunt Management")
+    bool IsHuntCompleted(const FString& DinosaurSpecies);
+
+    UFUNCTION(BlueprintCallable, Category = "Hunt Management")
+    void CompleteHunt(const FString& DinosaurSpecies);
+
+    // Biome hunting
+    UFUNCTION(BlueprintCallable, Category = "Biome Hunting")
+    void InitializeBiomeHunts();
+
+    UFUNCTION(BlueprintCallable, Category = "Biome Hunting")
+    TArray<FString> GetAvailableHuntsInBiome(const FString& BiomeName);
+
+    UFUNCTION(BlueprintCallable, Category = "Biome Hunting")
+    void StartBiomeHunt(const FString& BiomeName, const FString& DinosaurSpecies);
+
+    // Player interaction
+    UFUNCTION(BlueprintCallable, Category = "Player Interaction")
+    void UpdatePlayerLocation();
+
+    UFUNCTION(BlueprintCallable, Category = "Player Interaction")
+    FString GetNearestBiome(const FVector& PlayerLocation);
+
+    UFUNCTION(BlueprintCallable, Category = "Player Interaction")
+    TArray<FQuest_HuntTarget> GetActiveHuntsNearPlayer(float SearchRadius = 10000.0f);
+
+    // Reward system
+    UFUNCTION(BlueprintCallable, Category = "Reward System")
+    void GrantHuntReward(const FQuest_HuntTarget& CompletedHunt);
+
+    UFUNCTION(BlueprintCallable, Category = "Reward System")
+    void CalculateHuntDifficulty(FQuest_HuntTarget& HuntTarget);
+
+    // Debug and testing
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Debug")
+    void DebugSpawnHuntTargets();
+
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Debug")
+    void DebugPrintActiveHunts();
+
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Debug")
+    void DebugClearAllHunts();
+
+private:
+    float PlayerTrackingTimer;
+    
+    void UpdateHuntProgress(float DeltaTime);
+    void CheckHuntCompletion();
+    void SpawnHuntMarkers();
+    void UpdateBiomeHuntAvailability();
 };
