@@ -1,333 +1,388 @@
 #include "NarrativeDialogueManager.h"
-#include "Quest/QuestManager.h"
-#include "Crowd/CrowdSimulationManager.h"
 #include "Engine/World.h"
+#include "GameFramework/Pawn.h"
 #include "Kismet/GameplayStatics.h"
 #include "Components/AudioComponent.h"
-#include "Sound/SoundCue.h"
+#include "Engine/Engine.h"
 
 UNarrativeDialogueManager::UNarrativeDialogueManager()
 {
-    QuestManagerRef = nullptr;
-    CrowdManagerRef = nullptr;
+    PrimaryComponentTick.bCanEverTick = true;
+    PrimaryComponentTick.TickInterval = 0.5f; // Check every 0.5 seconds
+    
+    // Initialize default values
+    bIsDialogueActive = false;
+    DialogueTimer = 0.0f;
+    ProximityCheckRadius = 2000.0f;
+    PlayerPawn = nullptr;
+    DialogueAudioComponent = nullptr;
+    CurrentDialogueID = TEXT("");
 }
 
-void UNarrativeDialogueManager::Initialize(FSubsystemCollectionBase& Collection)
+void UNarrativeDialogueManager::BeginPlay()
 {
-    Super::Initialize(Collection);
+    Super::BeginPlay();
     
-    UE_LOG(LogTemp, Log, TEXT("NarrativeDialogueManager: Initializing dialogue system"));
+    // Find player pawn
+    PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
     
-    InitializeDialogueSystem();
-}
-
-void UNarrativeDialogueManager::Deinitialize()
-{
-    DialogueDatabase.Empty();
-    QuestDialogues.Empty();
-    UnlockedDialogues.Empty();
-    
-    QuestManagerRef = nullptr;
-    CrowdManagerRef = nullptr;
-    
-    Super::Deinitialize();
-}
-
-void UNarrativeDialogueManager::InitializeDialogueSystem()
-{
-    UE_LOG(LogTemp, Log, TEXT("NarrativeDialogueManager: Loading dialogue database"));
-    
-    LoadDialogueDatabase();
-    SetupBiomeDialogues();
-    SetupMigrationDialogues();
-    SetupPredatorDialogues();
-    
-    // Initialize narrative context
-    CurrentContext = FNarr_NarrativeContext();
-    CurrentContext.CurrentBiome = ENarr_BiomeType::Savana;
-    CurrentContext.SurvivalTime = 0.0f;
-    
-    // Unlock initial dialogues
-    UnlockDialogue("intro_valley");
-    UnlockDialogue("survival_basics");
-    
-    UE_LOG(LogTemp, Log, TEXT("NarrativeDialogueManager: Dialogue system initialized with %d entries"), DialogueDatabase.Num());
-}
-
-void UNarrativeDialogueManager::LoadDialogueDatabase()
-{
-    // Load core narrative dialogues
-    DialogueDatabase.Add("intro_valley", CreateDialogueEntry(
-        "intro_valley", 
-        "Valley Narrator", 
-        "The ancient valley holds many secrets, survivor. Listen carefully to the wind - it carries the scent of predators and the distant calls of the great herds.",
-        "/Game/Audio/Narrative/valley_intro.wav"
-    ));
-    
-    DialogueDatabase.Add("survival_basics", CreateDialogueEntry(
-        "survival_basics",
-        "Survival Guide",
-        "Your survival depends on understanding the patterns of this prehistoric world. Watch for signs, listen for warnings, and always have an escape route.",
-        "/Game/Audio/Narrative/survival_guide.wav"
-    ));
-    
-    DialogueDatabase.Add("first_dinosaur", CreateDialogueEntry(
-        "first_dinosaur",
-        "Valley Narrator",
-        "You are not alone in this valley. The giants that ruled this world still walk among us. Observe them, learn their ways, but keep your distance.",
-        "/Game/Audio/Narrative/first_dinosaur.wav"
-    ));
-}
-
-void UNarrativeDialogueManager::SetupBiomeDialogues()
-{
-    // Savana biome dialogues
-    DialogueDatabase.Add("savana_entry", CreateDialogueEntry(
-        "savana_entry",
-        "Territory Scout",
-        "The open plains offer visibility but little shelter. Predators can spot you from great distances here. Move quickly between cover points.",
-        "/Game/Audio/Narrative/savana_warning.wav"
-    ));
-    
-    // Forest biome dialogues
-    DialogueDatabase.Add("forest_entry", CreateDialogueEntry(
-        "forest_entry",
-        "Forest Guide",
-        "The dense canopy provides shelter but conceals many dangers. Listen for the snap of branches - it may be your only warning of an approaching predator.",
-        "/Game/Audio/Narrative/forest_warning.wav"
-    ));
-    
-    // Desert biome dialogues
-    DialogueDatabase.Add("desert_entry", CreateDialogueEntry(
-        "desert_entry",
-        "Desert Survivor",
-        "Water is life in these barren lands. Follow the ancient riverbeds and watch for signs of underground springs. The desert keeps its secrets well.",
-        "/Game/Audio/Narrative/desert_warning.wav"
-    ));
-}
-
-void UNarrativeDialogueManager::SetupMigrationDialogues()
-{
-    DialogueDatabase.Add("migration_detected", CreateDialogueEntry(
-        "migration_detected",
-        "Migration Guide",
-        "The great herds are on the move! Their ancient instincts guide them to safety. Follow their trails to discover water sources and safe passages.",
-        "/Game/Audio/Narrative/migration_start.wav"
-    ));
-    
-    DialogueDatabase.Add("migration_complete", CreateDialogueEntry(
-        "migration_complete",
-        "Migration Guide",
-        "The migration is complete. You have witnessed one of nature's greatest spectacles. The knowledge of their routes will serve you well.",
-        "/Game/Audio/Narrative/migration_complete.wav"
-    ));
-}
-
-void UNarrativeDialogueManager::SetupPredatorDialogues()
-{
-    DialogueDatabase.Add("pack_hunters", CreateDialogueEntry(
-        "pack_hunters",
-        "Survival Guide",
-        "Warning! Pack hunters detected in the eastern ravines. Their coordinated movements suggest they are tracking prey. Stay low and move carefully.",
-        "/Game/Audio/Narrative/pack_warning.wav"
-    ));
-    
-    DialogueDatabase.Add("apex_territory", CreateDialogueEntry(
-        "apex_territory",
-        "Territory Scout",
-        "Territory marked by the apex predator. Fresh claw marks indicate a T-Rex has claimed this hunting ground. Find an alternate route immediately.",
-        "/Game/Audio/Narrative/apex_warning.wav"
-    ));
-}
-
-FNarr_DialogueEntry UNarrativeDialogueManager::GetDialogueForContext(const FNarr_NarrativeContext& Context)
-{
-    // Priority-based dialogue selection
-    if (Context.bInDanger && IsDialogueUnlocked("pack_hunters"))
+    // Create audio component for dialogue playback
+    DialogueAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("DialogueAudio"));
+    if (DialogueAudioComponent)
     {
-        return DialogueDatabase["pack_hunters"];
+        DialogueAudioComponent->bAutoActivate = false;
+        DialogueAudioComponent->SetVolumeMultiplier(0.8f);
     }
     
-    // Biome-specific dialogues
-    FString BiomeDialogueID;
-    switch (Context.CurrentBiome)
-    {
-        case ENarr_BiomeType::Savana:
-            BiomeDialogueID = "savana_entry";
-            break;
-        case ENarr_BiomeType::Floresta:
-            BiomeDialogueID = "forest_entry";
-            break;
-        case ENarr_BiomeType::Deserto:
-            BiomeDialogueID = "desert_entry";
-            break;
-        default:
-            BiomeDialogueID = "intro_valley";
-            break;
-    }
+    // Initialize default dialogue entries and narrative events
+    InitializeDefaultDialogue();
+    InitializeDefaultNarrativeEvents();
     
-    if (IsDialogueUnlocked(BiomeDialogueID))
-    {
-        return DialogueDatabase[BiomeDialogueID];
-    }
-    
-    // Default to intro dialogue
-    return DialogueDatabase["intro_valley"];
+    UE_LOG(LogTemp, Log, TEXT("NarrativeDialogueManager initialized with %d dialogue entries and %d narrative events"), 
+           DialogueDatabase.Num(), NarrativeEvents.Num());
 }
 
-void UNarrativeDialogueManager::TriggerContextualDialogue(ENarr_BiomeType Biome, const FString& EventType)
+void UNarrativeDialogueManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
-    CurrentContext.CurrentBiome = Biome;
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
     
-    if (EventType == "Migration")
+    // Update dialogue timer if dialogue is active
+    if (bIsDialogueActive)
     {
-        UnlockDialogue("migration_detected");
-        FNarr_DialogueEntry DialogueEntry = DialogueDatabase["migration_detected"];
-        PlayDialogueAudio(DialogueEntry.AudioPath);
-    }
-    else if (EventType == "PredatorPack")
-    {
-        CurrentContext.bInDanger = true;
-        UnlockDialogue("pack_hunters");
-        FNarr_DialogueEntry DialogueEntry = DialogueDatabase["pack_hunters"];
-        PlayDialogueAudio(DialogueEntry.AudioPath);
-    }
-    else if (EventType == "ApexTerritory")
-    {
-        CurrentContext.bInDanger = true;
-        UnlockDialogue("apex_territory");
-        FNarr_DialogueEntry DialogueEntry = DialogueDatabase["apex_territory"];
-        PlayDialogueAudio(DialogueEntry.AudioPath);
+        UpdateDialogueTimer(DeltaTime);
     }
     
-    UE_LOG(LogTemp, Log, TEXT("NarrativeDialogueManager: Triggered contextual dialogue for %s in biome %d"), *EventType, (int32)Biome);
+    // Check for proximity-based narrative triggers
+    CheckProximityTriggers();
+    
+    // Process any queued narrative events
+    ProcessNarrativeQueue();
 }
 
-void UNarrativeDialogueManager::UpdateNarrativeContext(const FNarr_NarrativeContext& NewContext)
+void UNarrativeDialogueManager::TriggerDialogue(const FString& DialogueID)
 {
-    CurrentContext = NewContext;
-    
-    // Unlock progression-based dialogues
-    if (CurrentContext.DinosaursSeen >= 1 && !IsDialogueUnlocked("first_dinosaur"))
+    FNarr_DialogueEntry* Entry = FindDialogueEntry(DialogueID);
+    if (!Entry)
     {
-        UnlockDialogue("first_dinosaur");
+        UE_LOG(LogTemp, Warning, TEXT("Dialogue entry not found: %s"), *DialogueID);
+        return;
     }
     
-    if (CurrentContext.QuestsCompleted >= 1 && !IsDialogueUnlocked("migration_complete"))
+    // Stop any current dialogue
+    StopCurrentDialogue();
+    
+    // Start new dialogue
+    CurrentDialogueID = DialogueID;
+    bIsDialogueActive = true;
+    DialogueTimer = Entry->Duration;
+    
+    // Display dialogue text (would integrate with UI system)
+    if (GEngine)
     {
-        UnlockDialogue("migration_complete");
+        FString DisplayText = FString::Printf(TEXT("%s: %s"), *Entry->SpeakerName, *Entry->DialogueText);
+        GEngine->AddOnScreenDebugMessage(-1, Entry->Duration, FColor::Cyan, DisplayText);
     }
+    
+    // Play audio if available (would integrate with audio system)
+    if (DialogueAudioComponent && !Entry->AudioPath.IsEmpty())
+    {
+        // Load and play audio file (placeholder for actual audio loading)
+        UE_LOG(LogTemp, Log, TEXT("Playing dialogue audio: %s"), *Entry->AudioPath);
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("Triggered dialogue: %s - %s"), *Entry->SpeakerName, *Entry->DialogueText);
 }
 
-void UNarrativeDialogueManager::RegisterQuestDialogue(const FString& QuestID, const TArray<FNarr_DialogueEntry>& DialogueEntries)
+void UNarrativeDialogueManager::StopCurrentDialogue()
 {
-    QuestDialogues.Add(QuestID, DialogueEntries);
-    
-    // Add to main database for easy access
-    for (const FNarr_DialogueEntry& Entry : DialogueEntries)
-    {
-        DialogueDatabase.Add(Entry.DialogueID, Entry);
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("NarrativeDialogueManager: Registered %d dialogue entries for quest %s"), DialogueEntries.Num(), *QuestID);
-}
-
-TArray<FNarr_DialogueEntry> UNarrativeDialogueManager::GetQuestDialogue(const FString& QuestID)
-{
-    if (QuestDialogues.Contains(QuestID))
-    {
-        return QuestDialogues[QuestID];
-    }
-    
-    return TArray<FNarr_DialogueEntry>();
-}
-
-void UNarrativeDialogueManager::OnHerdMigrationDetected(ENarr_BiomeType FromBiome, ENarr_BiomeType ToBiome, int32 HerdSize)
-{
-    UE_LOG(LogTemp, Log, TEXT("NarrativeDialogueManager: Herd migration detected - %d animals from biome %d to %d"), HerdSize, (int32)FromBiome, (int32)ToBiome);
-    
-    TriggerContextualDialogue(FromBiome, "Migration");
-    
-    // Update context
-    CurrentContext.CurrentBiome = FromBiome;
-    CurrentContext.bInDanger = false; // Migrations are generally safe events
-}
-
-void UNarrativeDialogueManager::OnPredatorEncounter(const FString& PredatorType, ENarr_BiomeType Biome)
-{
-    UE_LOG(LogTemp, Log, TEXT("NarrativeDialogueManager: Predator encounter - %s in biome %d"), *PredatorType, (int32)Biome);
-    
-    if (PredatorType.Contains("Pack") || PredatorType.Contains("Raptor"))
-    {
-        TriggerContextualDialogue(Biome, "PredatorPack");
-    }
-    else if (PredatorType.Contains("TRex") || PredatorType.Contains("Apex"))
-    {
-        TriggerContextualDialogue(Biome, "ApexTerritory");
-    }
-}
-
-void UNarrativeDialogueManager::PlayDialogueAudio(const FString& AudioPath)
-{
-    if (AudioPath.IsEmpty())
+    if (!bIsDialogueActive)
     {
         return;
     }
     
-    UWorld* World = GetWorld();
-    if (!World)
+    bIsDialogueActive = false;
+    DialogueTimer = 0.0f;
+    CurrentDialogueID = TEXT("");
+    
+    // Stop audio playback
+    if (DialogueAudioComponent && DialogueAudioComponent->IsPlaying())
+    {
+        DialogueAudioComponent->Stop();
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("Stopped current dialogue"));
+}
+
+bool UNarrativeDialogueManager::IsDialogueActive() const
+{
+    return bIsDialogueActive;
+}
+
+FNarr_DialogueEntry UNarrativeDialogueManager::GetDialogueEntry(const FString& DialogueID)
+{
+    FNarr_DialogueEntry* Entry = FindDialogueEntry(DialogueID);
+    if (Entry)
+    {
+        return *Entry;
+    }
+    
+    // Return empty entry if not found
+    return FNarr_DialogueEntry();
+}
+
+void UNarrativeDialogueManager::TriggerNarrativeEvent(const FString& EventID)
+{
+    FNarr_NarrativeEvent* Event = FindNarrativeEvent(EventID);
+    if (!Event)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Narrative event not found: %s"), *EventID);
+        return;
+    }
+    
+    if (Event->bIsTriggered)
+    {
+        UE_LOG(LogTemp, Log, TEXT("Narrative event already triggered: %s"), *EventID);
+        return;
+    }
+    
+    // Mark event as triggered
+    Event->bIsTriggered = true;
+    
+    // Play dialogue sequence
+    for (const FNarr_DialogueEntry& DialogueEntry : Event->DialogueSequence)
+    {
+        TriggerDialogue(DialogueEntry.DialogueID);
+        // In a real implementation, we'd queue these with proper timing
+        break; // For now, just play the first one
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("Triggered narrative event: %s"), *EventID);
+}
+
+void UNarrativeDialogueManager::CheckProximityTriggers()
+{
+    if (!PlayerPawn)
     {
         return;
     }
     
-    // Load and play audio
-    USoundBase* DialogueSound = LoadObject<USoundBase>(nullptr, *AudioPath);
-    if (DialogueSound)
+    FVector PlayerLocation = PlayerPawn->GetActorLocation();
+    
+    for (FNarr_NarrativeEvent& Event : NarrativeEvents)
     {
-        UGameplayStatics::PlaySound2D(World, DialogueSound);
-        UE_LOG(LogTemp, Log, TEXT("NarrativeDialogueManager: Playing dialogue audio: %s"), *AudioPath);
+        if (Event.bIsTriggered)
+        {
+            continue;
+        }
+        
+        float Distance = FVector::Dist(PlayerLocation, Event.TriggerLocation);
+        if (Distance <= Event.TriggerRadius)
+        {
+            TriggerNarrativeEvent(Event.EventID);
+        }
+    }
+}
+
+void UNarrativeDialogueManager::RegisterNarrativeEvent(const FNarr_NarrativeEvent& NewEvent)
+{
+    NarrativeEvents.Add(NewEvent);
+    UE_LOG(LogTemp, Log, TEXT("Registered narrative event: %s"), *NewEvent.EventID);
+}
+
+void UNarrativeDialogueManager::OnQuestStarted(const FString& QuestID)
+{
+    FString DialogueID = FString::Printf(TEXT("quest_start_%s"), *QuestID);
+    TriggerDialogue(DialogueID);
+    UE_LOG(LogTemp, Log, TEXT("Quest started narrative trigger: %s"), *QuestID);
+}
+
+void UNarrativeDialogueManager::OnQuestCompleted(const FString& QuestID)
+{
+    FString DialogueID = FString::Printf(TEXT("quest_complete_%s"), *QuestID);
+    TriggerDialogue(DialogueID);
+    UE_LOG(LogTemp, Log, TEXT("Quest completed narrative trigger: %s"), *QuestID);
+}
+
+void UNarrativeDialogueManager::OnQuestObjectiveUpdated(const FString& QuestID, const FString& ObjectiveID)
+{
+    FString DialogueID = FString::Printf(TEXT("quest_objective_%s_%s"), *QuestID, *ObjectiveID);
+    TriggerDialogue(DialogueID);
+    UE_LOG(LogTemp, Log, TEXT("Quest objective updated narrative trigger: %s - %s"), *QuestID, *ObjectiveID);
+}
+
+void UNarrativeDialogueManager::OnPlayerHealthLow()
+{
+    TriggerDialogue(TEXT("survival_health_low"));
+}
+
+void UNarrativeDialogueManager::OnPlayerHungerHigh()
+{
+    TriggerDialogue(TEXT("survival_hunger_high"));
+}
+
+void UNarrativeDialogueManager::OnPlayerThirstHigh()
+{
+    TriggerDialogue(TEXT("survival_thirst_high"));
+}
+
+void UNarrativeDialogueManager::OnDangerDetected(const FString& DangerType)
+{
+    FString DialogueID = FString::Printf(TEXT("danger_%s"), *DangerType);
+    TriggerDialogue(DialogueID);
+}
+
+void UNarrativeDialogueManager::OnDinosaurSighted(const FString& DinosaurType, float Distance)
+{
+    FString DialogueID;
+    if (Distance < 1000.0f)
+    {
+        DialogueID = FString::Printf(TEXT("dino_close_%s"), *DinosaurType);
     }
     else
     {
-        UE_LOG(LogTemp, Warning, TEXT("NarrativeDialogueManager: Failed to load audio: %s"), *AudioPath);
+        DialogueID = FString::Printf(TEXT("dino_distant_%s"), *DinosaurType);
     }
+    TriggerDialogue(DialogueID);
 }
 
-bool UNarrativeDialogueManager::IsDialogueAudioPlaying() const
+void UNarrativeDialogueManager::OnDinosaurAggressive(const FString& DinosaurType)
 {
-    // Simple implementation - in full system would track active audio components
-    return false;
+    FString DialogueID = FString::Printf(TEXT("dino_aggressive_%s"), *DinosaurType);
+    TriggerDialogue(DialogueID);
 }
 
-void UNarrativeDialogueManager::UnlockDialogue(const FString& DialogueID)
+void UNarrativeDialogueManager::OnDinosaurFleeing(const FString& DinosaurType)
 {
-    if (!UnlockedDialogues.Contains(DialogueID))
+    FString DialogueID = FString::Printf(TEXT("dino_fleeing_%s"), *DinosaurType);
+    TriggerDialogue(DialogueID);
+}
+
+void UNarrativeDialogueManager::UpdateDialogueTimer(float DeltaTime)
+{
+    if (DialogueTimer > 0.0f)
     {
-        UnlockedDialogues.Add(DialogueID);
-        UE_LOG(LogTemp, Log, TEXT("NarrativeDialogueManager: Unlocked dialogue: %s"), *DialogueID);
+        DialogueTimer -= DeltaTime;
+        if (DialogueTimer <= 0.0f)
+        {
+            StopCurrentDialogue();
+        }
     }
 }
 
-bool UNarrativeDialogueManager::IsDialogueUnlocked(const FString& DialogueID) const
+void UNarrativeDialogueManager::ProcessNarrativeQueue()
 {
-    return UnlockedDialogues.Contains(DialogueID);
+    // Placeholder for processing queued narrative events
+    // In a full implementation, this would handle timed sequences
 }
 
-float UNarrativeDialogueManager::GetNarrativeProgress() const
+FNarr_DialogueEntry* UNarrativeDialogueManager::FindDialogueEntry(const FString& DialogueID)
 {
-    float MaxProgress = 10.0f; // Total expected unlocked dialogues
-    float CurrentProgress = FMath::Min((float)UnlockedDialogues.Num(), MaxProgress);
-    return CurrentProgress / MaxProgress;
+    for (FNarr_DialogueEntry& Entry : DialogueDatabase)
+    {
+        if (Entry.DialogueID == DialogueID)
+        {
+            return &Entry;
+        }
+    }
+    return nullptr;
 }
 
-FNarr_DialogueEntry UNarrativeDialogueManager::CreateDialogueEntry(const FString& ID, const FString& Speaker, const FString& Text, const FString& Audio)
+FNarr_NarrativeEvent* UNarrativeDialogueManager::FindNarrativeEvent(const FString& EventID)
 {
-    FNarr_DialogueEntry Entry;
-    Entry.DialogueID = ID;
-    Entry.SpeakerName = Speaker;
-    Entry.DialogueText = Text;
-    Entry.AudioPath = Audio;
-    Entry.RequiredBiome = ENarr_BiomeType::Savana; // Default
+    for (FNarr_NarrativeEvent& Event : NarrativeEvents)
+    {
+        if (Event.EventID == EventID)
+        {
+            return &Event;
+        }
+    }
+    return nullptr;
+}
+
+void UNarrativeDialogueManager::InitializeDefaultDialogue()
+{
+    // Survival context dialogues
+    FNarr_DialogueEntry HealthLowEntry;
+    HealthLowEntry.DialogueID = TEXT("survival_health_low");
+    HealthLowEntry.SpeakerName = TEXT("Survival Instinct");
+    HealthLowEntry.DialogueText = TEXT("Your wounds are severe. Find shelter and tend to your injuries before it's too late.");
+    HealthLowEntry.Duration = 4.0f;
+    DialogueDatabase.Add(HealthLowEntry);
+
+    FNarr_DialogueEntry HungerHighEntry;
+    HungerHighEntry.DialogueID = TEXT("survival_hunger_high");
+    HungerHighEntry.SpeakerName = TEXT("Survival Instinct");
+    HungerHighEntry.DialogueText = TEXT("Hunger gnaws at your strength. Hunt for food or gather edible plants quickly.");
+    HungerHighEntry.Duration = 4.0f;
+    DialogueDatabase.Add(HungerHighEntry);
+
+    FNarr_DialogueEntry ThirstHighEntry;
+    ThirstHighEntry.DialogueID = TEXT("survival_thirst_high");
+    ThirstHighEntry.SpeakerName = TEXT("Survival Instinct");
+    ThirstHighEntry.DialogueText = TEXT("Your throat burns with thirst. Locate fresh water before dehydration weakens you further.");
+    ThirstHighEntry.Duration = 4.0f;
+    DialogueDatabase.Add(ThirstHighEntry);
+
+    // Dinosaur encounter dialogues
+    FNarr_DialogueEntry TRexCloseEntry;
+    TRexCloseEntry.DialogueID = TEXT("dino_close_trex");
+    TRexCloseEntry.SpeakerName = TEXT("Primal Fear");
+    TRexCloseEntry.DialogueText = TEXT("The apex predator is near. Move slowly, avoid sudden movements, and pray it hasn't caught your scent.");
+    TRexCloseEntry.Duration = 5.0f;
+    DialogueDatabase.Add(TRexCloseEntry);
+
+    FNarr_DialogueEntry RaptorAggressiveEntry;
+    RaptorAggressiveEntry.DialogueID = TEXT("dino_aggressive_raptor");
+    RaptorAggressiveEntry.SpeakerName = TEXT("Tactical Mind");
+    RaptorAggressiveEntry.DialogueText = TEXT("Pack hunters closing in. They're testing your defenses. Find high ground or prepare to fight.");
+    RaptorAggressiveEntry.Duration = 4.5f;
+    DialogueDatabase.Add(RaptorAggressiveEntry);
+
+    // Quest-related dialogues
+    FNarr_DialogueEntry QuestHerdStudyEntry;
+    QuestHerdStudyEntry.DialogueID = TEXT("quest_start_herd_study");
+    QuestHerdStudyEntry.SpeakerName = TEXT("Research Protocol");
+    QuestHerdStudyEntry.DialogueText = TEXT("Begin behavioral observation of herbivore herds. Document their migration patterns and social structures.");
+    QuestHerdStudyEntry.Duration = 5.0f;
+    QuestHerdStudyEntry.bIsQuestRelated = true;
+    DialogueDatabase.Add(QuestHerdStudyEntry);
+
+    UE_LOG(LogTemp, Log, TEXT("Initialized %d default dialogue entries"), DialogueDatabase.Num());
+}
+
+void UNarrativeDialogueManager::InitializeDefaultNarrativeEvents()
+{
+    // Valley entrance narrative event
+    FNarr_NarrativeEvent ValleyEntranceEvent;
+    ValleyEntranceEvent.EventID = TEXT("valley_entrance");
+    ValleyEntranceEvent.EventDescription = TEXT("Player enters the ancient valley");
+    ValleyEntranceEvent.TriggerLocation = FVector(0.0f, 0.0f, 0.0f); // Savana center
+    ValleyEntranceEvent.TriggerRadius = 1500.0f;
     
-    return Entry;
+    FNarr_DialogueEntry ValleyDialogue;
+    ValleyDialogue.DialogueID = TEXT("valley_entrance_dialogue");
+    ValleyDialogue.SpeakerName = TEXT("Ancient Valley");
+    ValleyDialogue.DialogueText = TEXT("You stand at the threshold of an ancient world. The air itself whispers of primordial dangers and forgotten secrets.");
+    ValleyDialogue.Duration = 6.0f;
+    ValleyEntranceEvent.DialogueSequence.Add(ValleyDialogue);
+    
+    NarrativeEvents.Add(ValleyEntranceEvent);
+
+    // Forest edge narrative event
+    FNarr_NarrativeEvent ForestEdgeEvent;
+    ForestEdgeEvent.EventID = TEXT("forest_edge");
+    ForestEdgeEvent.EventDescription = TEXT("Player approaches the dense forest");
+    ForestEdgeEvent.TriggerLocation = FVector(-45000.0f, 40000.0f, 0.0f); // Forest biome
+    ForestEdgeEvent.TriggerRadius = 2000.0f;
+    
+    FNarr_DialogueEntry ForestDialogue;
+    ForestDialogue.DialogueID = TEXT("forest_edge_dialogue");
+    ForestDialogue.SpeakerName = TEXT("Forest Whisper");
+    ForestDialogue.DialogueText = TEXT("The forest canopy blocks the sun, creating a world of shadows. Predators lurk in the undergrowth.");
+    ForestDialogue.Duration = 5.0f;
+    ForestEdgeEvent.DialogueSequence.Add(ForestDialogue);
+    
+    NarrativeEvents.Add(ForestEdgeEvent);
+
+    UE_LOG(LogTemp, Log, TEXT("Initialized %d default narrative events"), NarrativeEvents.Num());
 }
