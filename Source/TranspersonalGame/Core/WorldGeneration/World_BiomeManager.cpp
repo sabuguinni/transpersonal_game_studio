@@ -1,289 +1,423 @@
-// Copyright Transpersonal Game Studio
-
 #include "World_BiomeManager.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
+#include "TimerManager.h"
 #include "Engine/StaticMeshActor.h"
 #include "Components/StaticMeshComponent.h"
+#include "Engine/AssetManager.h"
 #include "UObject/ConstructorHelpers.h"
-#include "Math/UnrealMathUtility.h"
 
 AWorld_BiomeManager::AWorld_BiomeManager()
 {
-    PrimaryActorTick.bCanEverTick = true;
+    PrimaryActorTick.bCanEverTick = false;
     
-    MaxFeaturesPerBiome = 50;
-    FeatureSpawnRadius = 20000.0f;
-    bAutoGenerateOnBeginPlay = false;
-    
-    SetupDefaultBiomes();
+    // Initialize default biome definitions
+    InitializeDefaultBiomes();
 }
 
 void AWorld_BiomeManager::BeginPlay()
 {
     Super::BeginPlay();
     
-    if (bAutoGenerateOnBeginPlay)
+    if (bAutoPopulateOnBeginPlay)
     {
-        InitializeBiomes();
-        GenerateTerrainFeatures();
+        // Start population with a small delay to ensure world is fully loaded
+        GetWorld()->GetTimerManager().SetTimer(
+            PopulationTimerHandle,
+            this,
+            &AWorld_BiomeManager::PopulationTick,
+            PopulationTickInterval,
+            true,
+            1.0f // Initial delay
+        );
     }
 }
 
-void AWorld_BiomeManager::Tick(float DeltaTime)
-{
-    Super::Tick(DeltaTime);
-}
-
-void AWorld_BiomeManager::SetupDefaultBiomes()
+void AWorld_BiomeManager::InitializeDefaultBiomes()
 {
     BiomeDefinitions.Empty();
     
-    // Savana Biome
-    FWorld_BiomeData Savana;
-    Savana.BiomeName = TEXT("Savana");
-    Savana.CenterLocation = FVector(0.0f, 0.0f, 100.0f);
-    Savana.Radius = 20000.0f;
-    Savana.TerrainHeight = 100.0f;
-    Savana.VegetationDensity = 0.3f;
-    Savana.Temperature = 28.0f;
-    Savana.Humidity = 0.4f;
-    Savana.DinosaurSpecies.Add(TEXT("Trex"));
-    Savana.DinosaurSpecies.Add(TEXT("Velociraptor"));
-    Savana.DinosaurSpecies.Add(TEXT("Triceratops"));
+    // Savana biome
+    FWorld_BiomeDefinition Savana;
+    Savana.BiomeType = EBiomeType::Savana;
+    Savana.CenterLocation = FVector(0, 0, 100);
+    Savana.Radius = 10000.0f;
+    Savana.TargetActorCount = 500;
+    Savana.VegetationDensity = 0.6f;
+    Savana.RockDensity = 0.3f;
+    Savana.DinosaurDensity = 0.15f;
+    Savana.DinosaurAssets = {
+        TEXT("/Game/Dinosaur_Pack/Trex/Mesh/SKM_Trex_Skin"),
+        TEXT("/Game/Dinosaur_Pack/Triceratops/Mesh/SKM_Triceratops"),
+        TEXT("/Game/Dinosaur_Pack/Velociraptor/Mesh/SKM_Velociraptor_Skin")
+    };
     BiomeDefinitions.Add(Savana);
     
-    // Floresta Biome
-    FWorld_BiomeData Floresta;
-    Floresta.BiomeName = TEXT("Floresta");
-    Floresta.CenterLocation = FVector(-45000.0f, 40000.0f, 200.0f);
-    Floresta.Radius = 18000.0f;
-    Floresta.TerrainHeight = 200.0f;
-    Floresta.VegetationDensity = 0.8f;
-    Floresta.Temperature = 24.0f;
-    Floresta.Humidity = 0.9f;
-    Floresta.DinosaurSpecies.Add(TEXT("Brachiosaurus"));
-    Floresta.DinosaurSpecies.Add(TEXT("Parasaurolophus"));
+    // Floresta biome
+    FWorld_BiomeDefinition Floresta;
+    Floresta.BiomeType = EBiomeType::Floresta;
+    Floresta.CenterLocation = FVector(-45000, 40000, 100);
+    Floresta.Radius = 8000.0f;
+    Floresta.TargetActorCount = 600;
+    Floresta.VegetationDensity = 0.9f;
+    Floresta.RockDensity = 0.2f;
+    Floresta.DinosaurDensity = 0.1f;
+    Floresta.DinosaurAssets = {
+        TEXT("/Game/Dinosaur_Pack/Brachiosaurus/Mesh/SKM_Brachiosaurus"),
+        TEXT("/Game/Dinosaur_Pack/Parasaurolophus/Mesh/SKM_Parasaurolophus_Mesh")
+    };
     BiomeDefinitions.Add(Floresta);
     
-    // Pantano Biome
-    FWorld_BiomeData Pantano;
-    Pantano.BiomeName = TEXT("Pantano");
-    Pantano.CenterLocation = FVector(-50000.0f, -45000.0f, 80.0f);
-    Pantano.Radius = 15000.0f;
-    Pantano.TerrainHeight = 80.0f;
-    Pantano.VegetationDensity = 0.7f;
-    Pantano.Temperature = 26.0f;
-    Pantano.Humidity = 1.0f;
-    Pantano.DinosaurSpecies.Add(TEXT("Tsintaosaurus"));
-    BiomeDefinitions.Add(Pantano);
-    
-    // Deserto Biome
-    FWorld_BiomeData Deserto;
-    Deserto.BiomeName = TEXT("Deserto");
-    Deserto.CenterLocation = FVector(55000.0f, 0.0f, 50.0f);
-    Deserto.Radius = 22000.0f;
-    Deserto.TerrainHeight = 50.0f;
-    Deserto.VegetationDensity = 0.1f;
-    Deserto.Temperature = 35.0f;
-    Deserto.Humidity = 0.2f;
-    Deserto.DinosaurSpecies.Add(TEXT("Ankylosaurus"));
-    Deserto.DinosaurSpecies.Add(TEXT("Protoceratops"));
+    // Deserto biome
+    FWorld_BiomeDefinition Deserto;
+    Deserto.BiomeType = EBiomeType::Deserto;
+    Deserto.CenterLocation = FVector(55000, 0, 100);
+    Deserto.Radius = 12000.0f;
+    Deserto.TargetActorCount = 400;
+    Deserto.VegetationDensity = 0.2f;
+    Deserto.RockDensity = 0.6f;
+    Deserto.DinosaurDensity = 0.08f;
+    Deserto.DinosaurAssets = {
+        TEXT("/Game/Dinosaur_Pack/Ankylosaurus/Mesh/SKM_Ankylo_Mesh"),
+        TEXT("/Game/Dinosaur_Pack/Protoceratops/Mesh/SKM_Protoceratops_Skin")
+    };
     BiomeDefinitions.Add(Deserto);
     
-    // Montanha Biome
-    FWorld_BiomeData Montanha;
-    Montanha.BiomeName = TEXT("Montanha");
-    Montanha.CenterLocation = FVector(40000.0f, 50000.0f, 400.0f);
-    Montanha.Radius = 16000.0f;
-    Montanha.TerrainHeight = 400.0f;
-    Montanha.VegetationDensity = 0.2f;
-    Montanha.Temperature = 18.0f;
-    Montanha.Humidity = 0.6f;
-    Montanha.DinosaurSpecies.Add(TEXT("Pachycephalo"));
+    // Pantano biome
+    FWorld_BiomeDefinition Pantano;
+    Pantano.BiomeType = EBiomeType::Pantano;
+    Pantano.CenterLocation = FVector(-50000, -45000, 100);
+    Pantano.Radius = 6000.0f;
+    Pantano.TargetActorCount = 450;
+    Pantano.VegetationDensity = 0.8f;
+    Pantano.RockDensity = 0.4f;
+    Pantano.DinosaurDensity = 0.12f;
+    Pantano.DinosaurAssets = {
+        TEXT("/Game/Dinosaur_Pack/Tsintaosaurus/Mesh/SKM_Tsintaosaurus_Mesh"),
+        TEXT("/Game/Dinosaur_Pack/Pachycephalo/Mesh/SKM_Pachycephalo")
+    };
+    BiomeDefinitions.Add(Pantano);
+    
+    // Montanha biome
+    FWorld_BiomeDefinition Montanha;
+    Montanha.BiomeType = EBiomeType::Montanha;
+    Montanha.CenterLocation = FVector(40000, 50000, 200);
+    Montanha.Radius = 7000.0f;
+    Montanha.TargetActorCount = 350;
+    Montanha.VegetationDensity = 0.4f;
+    Montanha.RockDensity = 0.8f;
+    Montanha.DinosaurDensity = 0.06f;
+    Montanha.DinosaurAssets = {
+        TEXT("/Game/Dinosaur_Pack/Ankylosaurus/Mesh/SKM_Ankylo_Mesh")
+    };
     BiomeDefinitions.Add(Montanha);
 }
 
-void AWorld_BiomeManager::InitializeBiomes()
+void AWorld_BiomeManager::PopulateAllBiomes()
 {
-    UE_LOG(LogTemp, Warning, TEXT("BiomeManager: Initializing %d biomes"), BiomeDefinitions.Num());
-    
-    for (const FWorld_BiomeData& Biome : BiomeDefinitions)
+    for (const FWorld_BiomeDefinition& BiomeDefinition : BiomeDefinitions)
     {
-        UE_LOG(LogTemp, Warning, TEXT("BiomeManager: Initialized biome %s at location (%f, %f, %f)"),
-            *Biome.BiomeName,
-            Biome.CenterLocation.X,
-            Biome.CenterLocation.Y,
-            Biome.CenterLocation.Z);
+        PopulateBiome(BiomeDefinition);
     }
+    UpdateBiomeStatistics();
 }
 
-FWorld_BiomeData AWorld_BiomeManager::GetBiomeAtLocation(FVector Location)
+void AWorld_BiomeManager::PopulateBiome(const FWorld_BiomeDefinition& BiomeDefinition)
 {
-    FWorld_BiomeData ClosestBiome;
-    float ClosestDistance = FLT_MAX;
+    int32 CurrentActorCount = GetActorCountInBiome(BiomeDefinition.BiomeType);
+    int32 ActorsToSpawn = FMath::Max(0, BiomeDefinition.TargetActorCount - CurrentActorCount);
     
-    for (const FWorld_BiomeData& Biome : BiomeDefinitions)
-    {
-        float Distance = FVector::Dist(Location, Biome.CenterLocation);
-        if (Distance < ClosestDistance)
-        {
-            ClosestDistance = Distance;
-            ClosestBiome = Biome;
-        }
-    }
-    
-    return ClosestBiome;
-}
-
-TArray<FWorld_BiomeData> AWorld_BiomeManager::GetAllBiomes()
-{
-    return BiomeDefinitions;
-}
-
-void AWorld_BiomeManager::GenerateTerrainFeatures()
-{
-    UE_LOG(LogTemp, Warning, TEXT("BiomeManager: Generating terrain features"));
-    
-    ClearAllTerrainFeatures();
-    TerrainFeatures.Empty();
-    
-    for (const FWorld_BiomeData& Biome : BiomeDefinitions)
-    {
-        int32 FeatureCount = FMath::RandRange(MaxFeaturesPerBiome / 2, MaxFeaturesPerBiome);
-        
-        for (int32 i = 0; i < FeatureCount; i++)
-        {
-            FWorld_TerrainFeature Feature;
-            Feature.FeatureName = FString::Printf(TEXT("%s_Feature_%d"), *Biome.BiomeName, i + 1);
-            Feature.Location = GetRandomLocationInBiome(Biome);
-            Feature.Rotation = GetRandomRotation();
-            Feature.Scale = GetRandomScale(1.0f, 5.0f);
-            
-            // Determine feature type based on biome
-            if (Biome.BiomeName == TEXT("Deserto"))
-            {
-                Feature.FeatureType = TEXT("DesertRock");
-            }
-            else if (Biome.BiomeName == TEXT("Floresta"))
-            {
-                Feature.FeatureType = TEXT("TreeStump");
-            }
-            else if (Biome.BiomeName == TEXT("Montanha"))
-            {
-                Feature.FeatureType = TEXT("Boulder");
-            }
-            else if (Biome.BiomeName == TEXT("Pantano"))
-            {
-                Feature.FeatureType = TEXT("SwampLog");
-            }
-            else
-            {
-                Feature.FeatureType = TEXT("Rock");
-            }
-            
-            TerrainFeatures.Add(Feature);
-            SpawnTerrainFeature(Feature);
-        }
-        
-        UE_LOG(LogTemp, Warning, TEXT("BiomeManager: Generated %d features for biome %s"), FeatureCount, *Biome.BiomeName);
-    }
-}
-
-void AWorld_BiomeManager::SpawnTerrainFeature(const FWorld_TerrainFeature& Feature)
-{
-    UWorld* World = GetWorld();
-    if (!World)
+    if (ActorsToSpawn == 0)
     {
         return;
     }
     
-    // Spawn a StaticMeshActor as terrain feature
-    AStaticMeshActor* FeatureActor = World->SpawnActor<AStaticMeshActor>(
-        AStaticMeshActor::StaticClass(),
-        Feature.Location,
-        Feature.Rotation
-    );
+    // Calculate spawn counts for each category
+    int32 VegetationToSpawn = FMath::RoundToInt(ActorsToSpawn * BiomeDefinition.VegetationDensity);
+    int32 RocksToSpawn = FMath::RoundToInt(ActorsToSpawn * BiomeDefinition.RockDensity);
+    int32 DinosaursToSpawn = FMath::RoundToInt(ActorsToSpawn * BiomeDefinition.DinosaurDensity);
     
-    if (FeatureActor)
+    // Spawn dinosaurs (highest priority)
+    for (int32 i = 0; i < DinosaursToSpawn && i < BiomeDefinition.DinosaurAssets.Num(); ++i)
     {
-        FeatureActor->SetActorScale3D(Feature.Scale);
-        FeatureActor->SetActorLabel(Feature.FeatureName);
+        FVector SpawnLocation = GetRandomLocationInBiome(BiomeDefinition);
+        FRotator SpawnRotation = FRotator(0, FMath::RandRange(0.0f, 360.0f), 0);
         
-        // Set the mesh component properties
-        UStaticMeshComponent* MeshComp = FeatureActor->GetStaticMeshComponent();
-        if (MeshComp)
+        if (IsLocationValidForSpawn(SpawnLocation))
         {
-            // Use default cube mesh as placeholder
-            // In a real implementation, this would load specific meshes based on FeatureType
-            MeshComp->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-            MeshComp->SetCollisionObjectType(ECollisionChannel::ECC_WorldStatic);
+            AActor* SpawnedActor = SpawnActorInBiome(
+                BiomeDefinition.DinosaurAssets[i % BiomeDefinition.DinosaurAssets.Num()],
+                SpawnLocation,
+                SpawnRotation
+            );
+            
+            if (SpawnedActor)
+            {
+                FString BiomeName = UEnum::GetValueAsString(BiomeDefinition.BiomeType);
+                BiomeName = BiomeName.Replace(TEXT("EBiomeType::"), TEXT(""));
+                SpawnedActor->SetActorLabel(FString::Printf(TEXT("Dino_%s_%d"), *BiomeName, TotalSpawnedActors));
+                TotalSpawnedActors++;
+            }
         }
-        
-        SpawnedFeatureActors.Add(FeatureActor);
     }
 }
 
-float AWorld_BiomeManager::GetBiomeInfluenceAtLocation(FVector Location, const FWorld_BiomeData& Biome)
+void AWorld_BiomeManager::ClearBiome(EBiomeType BiomeType)
 {
-    float Distance = FVector::Dist(Location, Biome.CenterLocation);
-    float NormalizedDistance = FMath::Clamp(Distance / Biome.Radius, 0.0f, 1.0f);
+    TArray<AActor*> ActorsInBiome = GetActorsInBiome(BiomeType);
     
-    // Inverse distance influence (closer = higher influence)
-    return 1.0f - NormalizedDistance;
-}
-
-void AWorld_BiomeManager::ClearAllTerrainFeatures()
-{
-    for (AActor* Actor : SpawnedFeatureActors)
+    for (AActor* Actor : ActorsInBiome)
     {
-        if (IsValid(Actor))
+        if (IsValid(Actor) && !Actor->IsA<APawn>()) // Don't destroy player or important pawns
         {
             Actor->Destroy();
         }
     }
-    SpawnedFeatureActors.Empty();
-}
-
-void AWorld_BiomeManager::EditorGenerateBiomes()
-{
-    InitializeBiomes();
-    GenerateTerrainFeatures();
-}
-
-void AWorld_BiomeManager::EditorClearBiomes()
-{
-    ClearAllTerrainFeatures();
-    TerrainFeatures.Empty();
-}
-
-FVector AWorld_BiomeManager::GetRandomLocationInBiome(const FWorld_BiomeData& Biome)
-{
-    float Angle = FMath::RandRange(0.0f, 2.0f * PI);
-    float Distance = FMath::RandRange(1000.0f, Biome.Radius * 0.8f);
     
-    float X = Biome.CenterLocation.X + Distance * FMath::Cos(Angle);
-    float Y = Biome.CenterLocation.Y + Distance * FMath::Sin(Angle);
-    float Z = Biome.TerrainHeight + FMath::RandRange(0.0f, 50.0f);
+    UpdateBiomeStatistics();
+}
+
+void AWorld_BiomeManager::ClearAllBiomes()
+{
+    for (const FWorld_BiomeDefinition& BiomeDefinition : BiomeDefinitions)
+    {
+        ClearBiome(BiomeDefinition.BiomeType);
+    }
+}
+
+int32 AWorld_BiomeManager::GetActorCountInBiome(EBiomeType BiomeType) const
+{
+    return ActorsPerBiome.Contains(BiomeType) ? ActorsPerBiome[BiomeType] : 0;
+}
+
+TArray<AActor*> AWorld_BiomeManager::GetActorsInBiome(EBiomeType BiomeType) const
+{
+    TArray<AActor*> Result;
     
-    return FVector(X, Y, Z);
+    // Find biome definition
+    const FWorld_BiomeDefinition* BiomeDefinition = nullptr;
+    for (const FWorld_BiomeDefinition& Biome : BiomeDefinitions)
+    {
+        if (Biome.BiomeType == BiomeType)
+        {
+            BiomeDefinition = &Biome;
+            break;
+        }
+    }
+    
+    if (!BiomeDefinition)
+    {
+        return Result;
+    }
+    
+    // Get all actors in world
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        return Result;
+    }
+    
+    for (TActorIterator<AActor> ActorIterator(World); ActorIterator; ++ActorIterator)
+    {
+        AActor* Actor = *ActorIterator;
+        if (IsValid(Actor))
+        {
+            float Distance = FVector::Dist(Actor->GetActorLocation(), BiomeDefinition->CenterLocation);
+            if (Distance <= BiomeDefinition->Radius)
+            {
+                Result.Add(Actor);
+            }
+        }
+    }
+    
+    return Result;
 }
 
-FRotator AWorld_BiomeManager::GetRandomRotation()
+void AWorld_BiomeManager::ValidateBiomeAssets()
 {
-    return FRotator(
-        FMath::RandRange(-10.0f, 10.0f),  // Pitch
-        FMath::RandRange(0.0f, 360.0f),   // Yaw
-        FMath::RandRange(-5.0f, 5.0f)     // Roll
-    );
+    for (FWorld_BiomeDefinition& BiomeDefinition : BiomeDefinitions)
+    {
+        // Validate dinosaur assets
+        for (int32 i = BiomeDefinition.DinosaurAssets.Num() - 1; i >= 0; --i)
+        {
+            const FString& AssetPath = BiomeDefinition.DinosaurAssets[i];
+            UObject* Asset = LoadObject<UObject>(nullptr, *AssetPath);
+            if (!Asset)
+            {
+                UE_LOG(LogTemp, Warning, TEXT("Invalid dinosaur asset: %s"), *AssetPath);
+                BiomeDefinition.DinosaurAssets.RemoveAt(i);
+            }
+        }
+    }
 }
 
-FVector AWorld_BiomeManager::GetRandomScale(float MinScale, float MaxScale)
+void AWorld_BiomeManager::PopulationTick()
 {
-    float BaseScale = FMath::RandRange(MinScale, MaxScale);
-    return FVector(
-        BaseScale * FMath::RandRange(0.8f, 1.2f),
-        BaseScale * FMath::RandRange(0.8f, 1.2f),
-        BaseScale * FMath::RandRange(0.6f, 1.0f)
+    if (CurrentBiomeIndex >= BiomeDefinitions.Num())
+    {
+        // Population complete
+        GetWorld()->GetTimerManager().ClearTimer(PopulationTimerHandle);
+        UpdateBiomeStatistics();
+        UE_LOG(LogTemp, Log, TEXT("Biome population completed. Total actors: %d"), TotalSpawnedActors);
+        return;
+    }
+    
+    const FWorld_BiomeDefinition& CurrentBiome = BiomeDefinitions[CurrentBiomeIndex];
+    int32 CurrentActorCount = GetActorCountInBiome(CurrentBiome.BiomeType);
+    
+    if (CurrentActorCount >= CurrentBiome.TargetActorCount)
+    {
+        // Move to next biome
+        CurrentBiomeIndex++;
+        CurrentActorIndex = 0;
+        return;
+    }
+    
+    // Spawn a batch of actors
+    for (int32 i = 0; i < MaxActorsPerFrame; ++i)
+    {
+        if (CurrentActorCount + i >= CurrentBiome.TargetActorCount)
+        {
+            break;
+        }
+        
+        // Spawn dinosaur if available
+        if (CurrentActorIndex < CurrentBiome.DinosaurAssets.Num())
+        {
+            FVector SpawnLocation = GetRandomLocationInBiome(CurrentBiome);
+            FRotator SpawnRotation = FRotator(0, FMath::RandRange(0.0f, 360.0f), 0);
+            
+            if (IsLocationValidForSpawn(SpawnLocation))
+            {
+                AActor* SpawnedActor = SpawnActorInBiome(
+                    CurrentBiome.DinosaurAssets[CurrentActorIndex % CurrentBiome.DinosaurAssets.Num()],
+                    SpawnLocation,
+                    SpawnRotation
+                );
+                
+                if (SpawnedActor)
+                {
+                    FString BiomeName = UEnum::GetValueAsString(CurrentBiome.BiomeType);
+                    BiomeName = BiomeName.Replace(TEXT("EBiomeType::"), TEXT(""));
+                    SpawnedActor->SetActorLabel(FString::Printf(TEXT("Dino_%s_%d"), *BiomeName, TotalSpawnedActors));
+                    TotalSpawnedActors++;
+                }
+            }
+        }
+        
+        CurrentActorIndex++;
+    }
+}
+
+AActor* AWorld_BiomeManager::SpawnActorInBiome(const FString& AssetPath, const FVector& Location, const FRotator& Rotation)
+{
+    UObject* Asset = LoadObject<UObject>(nullptr, *AssetPath);
+    if (!Asset)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Failed to load asset: %s"), *AssetPath);
+        return nullptr;
+    }
+    
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        return nullptr;
+    }
+    
+    // Try to spawn as static mesh actor
+    if (UStaticMesh* StaticMesh = Cast<UStaticMesh>(Asset))
+    {
+        AStaticMeshActor* StaticMeshActor = World->SpawnActor<AStaticMeshActor>(Location, Rotation);
+        if (StaticMeshActor && StaticMeshActor->GetStaticMeshComponent())
+        {
+            StaticMeshActor->GetStaticMeshComponent()->SetStaticMesh(StaticMesh);
+            return StaticMeshActor;
+        }
+    }
+    
+    // Try to spawn as skeletal mesh actor (for dinosaurs)
+    if (USkeletalMesh* SkeletalMesh = Cast<USkeletalMesh>(Asset))
+    {
+        // Create a basic pawn for skeletal meshes
+        APawn* SkeletalMeshPawn = World->SpawnActor<APawn>(Location, Rotation);
+        if (SkeletalMeshPawn)
+        {
+            USkeletalMeshComponent* SkeletalMeshComponent = NewObject<USkeletalMeshComponent>(SkeletalMeshPawn);
+            SkeletalMeshComponent->SetSkeletalMesh(SkeletalMesh);
+            SkeletalMeshPawn->SetRootComponent(SkeletalMeshComponent);
+            SkeletalMeshComponent->AttachToComponent(SkeletalMeshPawn->GetRootComponent(), FAttachmentTransformRules::KeepWorldTransform);
+            return SkeletalMeshPawn;
+        }
+    }
+    
+    return nullptr;
+}
+
+FVector AWorld_BiomeManager::GetRandomLocationInBiome(const FWorld_BiomeDefinition& BiomeDefinition) const
+{
+    // Generate random point within circle
+    float RandomAngle = FMath::RandRange(0.0f, 2.0f * PI);
+    float RandomRadius = FMath::RandRange(0.0f, BiomeDefinition.Radius * 0.9f); // Stay within 90% of radius
+    
+    FVector Offset = FVector(
+        FMath::Cos(RandomAngle) * RandomRadius,
+        FMath::Sin(RandomAngle) * RandomRadius,
+        0.0f
     );
+    
+    return BiomeDefinition.CenterLocation + Offset;
+}
+
+bool AWorld_BiomeManager::IsLocationValidForSpawn(const FVector& Location) const
+{
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        return false;
+    }
+    
+    // Simple validation - check if location is not too close to other actors
+    FVector Start = Location + FVector(0, 0, 1000);
+    FVector End = Location - FVector(0, 0, 1000);
+    
+    FHitResult HitResult;
+    FCollisionQueryParams QueryParams;
+    QueryParams.bTraceComplex = false;
+    
+    // Trace to find ground
+    if (World->LineTraceSingleByChannel(HitResult, Start, End, ECC_WorldStatic, QueryParams))
+    {
+        return true; // Found ground
+    }
+    
+    return false; // No ground found
+}
+
+void AWorld_BiomeManager::UpdateBiomeStatistics()
+{
+    ActorsPerBiome.Empty();
+    
+    for (const FWorld_BiomeDefinition& BiomeDefinition : BiomeDefinitions)
+    {
+        int32 ActorCount = 0;
+        UWorld* World = GetWorld();
+        
+        if (World)
+        {
+            for (TActorIterator<AActor> ActorIterator(World); ActorIterator; ++ActorIterator)
+            {
+                AActor* Actor = *ActorIterator;
+                if (IsValid(Actor))
+                {
+                    float Distance = FVector::Dist(Actor->GetActorLocation(), BiomeDefinition.CenterLocation);
+                    if (Distance <= BiomeDefinition.Radius)
+                    {
+                        ActorCount++;
+                    }
+                }
+            }
+        }
+        
+        ActorsPerBiome.Add(BiomeDefinition.BiomeType, ActorCount);
+    }
 }
