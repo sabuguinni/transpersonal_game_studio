@@ -2,81 +2,74 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "Engine/World.h"
 #include "Components/StaticMeshComponent.h"
-#include "Engine/StaticMesh.h"
 #include "SharedTypes.h"
 #include "World_ProceduralBiomeSystem.generated.h"
 
-UENUM(BlueprintType)
-enum class EWorld_BiomeType : uint8
-{
-    Savana      UMETA(DisplayName = "Savana"),
-    Pantano     UMETA(DisplayName = "Pantano"),
-    Floresta    UMETA(DisplayName = "Floresta"),
-    Deserto     UMETA(DisplayName = "Deserto"),
-    Montanha    UMETA(DisplayName = "Montanha")
-};
-
 USTRUCT(BlueprintType)
-struct FWorld_BiomeConfig
+struct TRANSPERSONALGAME_API FWorld_BiomeDefinition
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    EWorld_BiomeType BiomeType = EWorld_BiomeType::Savana;
+    FString BiomeName;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    FVector CenterLocation = FVector::ZeroVector;
+    FVector CenterLocation;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float Radius = 10000.0f;
+    float Radius;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    int32 TargetActorCount = 500;
+    TArray<FString> DinosaurAssetPaths;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float VegetationDensity = 0.7f;
+    TArray<FString> VegetationTypes;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float RockDensity = 0.3f;
+    float DinosaurDensity;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float TerrainRoughness = 0.5f;
+    float VegetationDensity;
 
-    FWorld_BiomeConfig()
+    FWorld_BiomeDefinition()
     {
-        BiomeType = EWorld_BiomeType::Savana;
+        BiomeName = TEXT("DefaultBiome");
         CenterLocation = FVector::ZeroVector;
         Radius = 10000.0f;
-        TargetActorCount = 500;
-        VegetationDensity = 0.7f;
-        RockDensity = 0.3f;
-        TerrainRoughness = 0.5f;
+        DinosaurDensity = 0.1f;
+        VegetationDensity = 0.5f;
     }
 };
 
 USTRUCT(BlueprintType)
-struct FWorld_ProceduralAsset
+struct TRANSPERSONALGAME_API FWorld_SpawnedActorInfo
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Asset")
-    TSoftObjectPtr<UStaticMesh> AssetMesh;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn")
+    AActor* SpawnedActor;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Asset")
-    FVector ScaleRange = FVector(0.8f, 1.2f, 1.0f);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn")
+    FString BiomeName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Asset")
-    float SpawnWeight = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn")
+    FString ActorType;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Asset")
-    bool bRandomRotation = true;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn")
+    FVector SpawnLocation;
 
-    FWorld_ProceduralAsset()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn")
+    float DistanceFromPlayer;
+
+    FWorld_SpawnedActorInfo()
     {
-        ScaleRange = FVector(0.8f, 1.2f, 1.0f);
-        SpawnWeight = 1.0f;
-        bRandomRotation = true;
+        SpawnedActor = nullptr;
+        BiomeName = TEXT("Unknown");
+        ActorType = TEXT("Unknown");
+        SpawnLocation = FVector::ZeroVector;
+        DistanceFromPlayer = 0.0f;
     }
 };
 
@@ -94,61 +87,75 @@ protected:
 public:
     virtual void Tick(float DeltaTime) override;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome System")
-    TArray<FWorld_BiomeConfig> BiomeConfigs;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Assets")
-    TMap<EWorld_BiomeType, TArray<FWorld_ProceduralAsset>> BiomeAssets;
+    // Core biome management
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biomes")
+    TArray<FWorld_BiomeDefinition> BiomeDefinitions;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 MaxActorsPerFrame = 10;
+    int32 MaxActiveActors;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float GenerationRadius = 50000.0f;
+    float UpdateInterval;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    bool bUsePerformanceBudget = true;
+    float CullingDistance;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Status")
-    int32 TotalGeneratedActors = 0;
+    // Spawned actor tracking
+    UPROPERTY(BlueprintReadOnly, Category = "Runtime")
+    TArray<FWorld_SpawnedActorInfo> SpawnedActors;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Status")
-    bool bGenerationComplete = false;
+    UPROPERTY(BlueprintReadOnly, Category = "Runtime")
+    int32 TotalSpawnedCount;
 
-    UFUNCTION(BlueprintCallable, Category = "Biome System")
-    void InitializeBiomes();
+    // Biome population functions
+    UFUNCTION(BlueprintCallable, Category = "Biome Generation")
+    void PopulateAllBiomes();
 
-    UFUNCTION(BlueprintCallable, Category = "Biome System")
-    void GenerateBiome(EWorld_BiomeType BiomeType);
+    UFUNCTION(BlueprintCallable, Category = "Biome Generation")
+    void PopulateBiome(const FWorld_BiomeDefinition& BiomeData);
 
-    UFUNCTION(BlueprintCallable, Category = "Biome System")
-    void PopulateBiomeWithAssets(const FWorld_BiomeConfig& BiomeConfig);
+    UFUNCTION(BlueprintCallable, Category = "Biome Generation")
+    AActor* SpawnDinosaurInBiome(const FString& AssetPath, const FVector& Location, const FString& BiomeName);
 
-    UFUNCTION(BlueprintCallable, Category = "Biome System")
-    FVector GetRandomLocationInBiome(const FWorld_BiomeConfig& BiomeConfig);
+    UFUNCTION(BlueprintCallable, Category = "Biome Generation")
+    AActor* SpawnVegetationInBiome(const FString& VegetationType, const FVector& Location, const FString& BiomeName);
 
-    UFUNCTION(BlueprintCallable, Category = "Biome System")
-    AActor* SpawnProceduralAsset(const FWorld_ProceduralAsset& Asset, const FVector& Location, EWorld_BiomeType BiomeType);
-
-    UFUNCTION(BlueprintCallable, Category = "Biome System")
-    void ClearBiome(EWorld_BiomeType BiomeType);
+    // Performance management
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void OptimizeActorsByDistance();
 
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    void SetPerformanceBudget(int32 MaxActors, float UpdateRadius);
+    void CullDistantActors();
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    FVector GetPlayerLocation() const;
+
+    // Utility functions
+    UFUNCTION(BlueprintCallable, Category = "Utility")
+    FWorld_BiomeDefinition* GetBiomeAtLocation(const FVector& Location);
+
+    UFUNCTION(BlueprintCallable, Category = "Utility")
+    TArray<AActor*> GetActorsInBiome(const FString& BiomeName) const;
 
     UFUNCTION(BlueprintCallable, Category = "Debug")
-    void DebugBiomeStatus();
+    void PrintBiomeStatistics() const;
+
+    // Editor functions
+    UFUNCTION(CallInEditor, Category = "Editor")
+    void InitializeDefaultBiomes();
+
+    UFUNCTION(CallInEditor, Category = "Editor")
+    void ClearAllSpawnedActors();
 
 private:
-    void SetupDefaultBiomeConfigs();
-    void LoadBiomeAssets();
-    bool IsLocationValid(const FVector& Location, const FWorld_BiomeConfig& BiomeConfig);
-    float GetTerrainHeight(const FVector& Location);
+    // Internal state
+    float LastUpdateTime;
+    int32 CurrentSpawnIndex;
+    bool bIsPopulating;
 
-    UPROPERTY()
-    TArray<AActor*> GeneratedActors;
-
-    int32 CurrentGenerationIndex = 0;
-    bool bIsGenerating = false;
-    float LastGenerationTime = 0.0f;
+    // Helper functions
+    FVector GenerateRandomLocationInBiome(const FWorld_BiomeDefinition& Biome) const;
+    bool IsLocationValidForSpawn(const FVector& Location) const;
+    void RegisterSpawnedActor(AActor* Actor, const FString& BiomeName, const FString& ActorType, const FVector& Location);
+    void UpdateActorDistances();
 };
