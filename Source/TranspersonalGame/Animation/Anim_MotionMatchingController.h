@@ -1,106 +1,84 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Components/ActorComponent.h"
-#include "Engine/Engine.h"
 #include "Animation/AnimInstance.h"
-#include "Animation/AnimMontage.h"
-#include "Animation/BlendSpace.h"
+#include "Engine/Engine.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
+#include "../Shared/SharedTypes.h"
 #include "Anim_MotionMatchingController.generated.h"
 
-UENUM(BlueprintType)
-enum class EAnim_MovementState : uint8
-{
-    Idle        UMETA(DisplayName = "Idle"),
-    Walking     UMETA(DisplayName = "Walking"),
-    Running     UMETA(DisplayName = "Running"),
-    Jumping     UMETA(DisplayName = "Jumping"),
-    Falling     UMETA(DisplayName = "Falling"),
-    Landing     UMETA(DisplayName = "Landing"),
-    Crouching   UMETA(DisplayName = "Crouching"),
-    Crawling    UMETA(DisplayName = "Crawling")
-};
-
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FAnim_MotionMatchingData
+struct TRANSPERSONALGAME_API FAnim_MotionData
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
-    float Velocity;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion")
+    FVector Velocity;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion")
+    float Speed;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion")
     float Direction;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
-    float Acceleration;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion")
+    bool bIsInAir;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
-    bool bIsOnGround;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion")
     bool bIsCrouching;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
-    EAnim_MovementState CurrentState;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion")
+    EAnim_MovementState MovementState;
 
-    FAnim_MotionMatchingData()
+    FAnim_MotionData()
     {
-        Velocity = 0.0f;
+        Velocity = FVector::ZeroVector;
+        Speed = 0.0f;
         Direction = 0.0f;
-        Acceleration = 0.0f;
-        bIsOnGround = true;
+        bIsInAir = false;
         bIsCrouching = false;
-        CurrentState = EAnim_MovementState::Idle;
+        MovementState = EAnim_MovementState::Idle;
     }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FAnim_IKFootData
+struct TRANSPERSONALGAME_API FAnim_MotionMatchingSettings
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK")
-    FVector LeftFootLocation;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
+    float VelocityWeight;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK")
-    FVector RightFootLocation;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
+    float DirectionWeight;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK")
-    FRotator LeftFootRotation;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
+    float PoseWeight;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK")
-    FRotator RightFootRotation;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
+    float TrajectoryWeight;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK")
-    float LeftFootAlpha;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
+    int32 SearchFrameCount;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK")
-    float RightFootAlpha;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
+    float BlendTime;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK")
-    float HipOffset;
-
-    FAnim_IKFootData()
+    FAnim_MotionMatchingSettings()
     {
-        LeftFootLocation = FVector::ZeroVector;
-        RightFootLocation = FVector::ZeroVector;
-        LeftFootRotation = FRotator::ZeroRotator;
-        RightFootRotation = FRotator::ZeroRotator;
-        LeftFootAlpha = 0.0f;
-        RightFootAlpha = 0.0f;
-        HipOffset = 0.0f;
+        VelocityWeight = 1.0f;
+        DirectionWeight = 0.8f;
+        PoseWeight = 0.6f;
+        TrajectoryWeight = 1.2f;
+        SearchFrameCount = 30;
+        BlendTime = 0.2f;
     }
 };
 
-/**
- * Motion Matching Controller for fluid character animation
- * Handles advanced animation blending, IK foot placement, and state transitions
- */
-UCLASS(ClassGroup=(Animation), meta=(BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UAnim_MotionMatchingController : public UActorComponent
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API UAnim_MotionMatchingController : public UAnimInstance
 {
     GENERATED_BODY()
 
@@ -108,111 +86,110 @@ public:
     UAnim_MotionMatchingController();
 
 protected:
-    virtual void BeginPlay() override;
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+    virtual void NativeInitializeAnimation() override;
+    virtual void NativeUpdateAnimation(float DeltaTimeX) override;
 
-public:
-    // Motion Matching Properties
+    UPROPERTY(BlueprintReadOnly, Category = "Character")
+    class ACharacter* OwnerCharacter;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Character")
+    class UCharacterMovementComponent* MovementComponent;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Motion Data")
+    FAnim_MotionData CurrentMotionData;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Motion Data")
+    FAnim_MotionData PreviousMotionData;
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
-    FAnim_MotionMatchingData MotionData;
+    FAnim_MotionMatchingSettings MotionMatchingSettings;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
-    float BlendTime;
+    // Movement State Variables
+    UPROPERTY(BlueprintReadOnly, Category = "Movement")
+    bool bIsMoving;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
-    float StateChangeThreshold;
+    UPROPERTY(BlueprintReadOnly, Category = "Movement")
+    bool bIsWalking;
 
-    // IK Properties
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK")
-    FAnim_IKFootData FootIKData;
+    UPROPERTY(BlueprintReadOnly, Category = "Movement")
+    bool bIsRunning;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK")
-    float IKTraceDistance;
+    UPROPERTY(BlueprintReadOnly, Category = "Movement")
+    bool bIsSprinting;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK")
-    float IKInterpSpeed;
+    UPROPERTY(BlueprintReadOnly, Category = "Movement")
+    bool bIsJumping;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK")
-    bool bEnableFootIK;
+    UPROPERTY(BlueprintReadOnly, Category = "Movement")
+    bool bIsFalling;
 
-    // Animation Assets
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Assets")
-    TObjectPtr<UAnimMontage> IdleMontage;
+    UPROPERTY(BlueprintReadOnly, Category = "Movement")
+    bool bIsLanding;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Assets")
-    TObjectPtr<UAnimMontage> WalkMontage;
+    UPROPERTY(BlueprintReadOnly, Category = "Movement")
+    bool bIsClimbing;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Assets")
-    TObjectPtr<UAnimMontage> RunMontage;
+    UPROPERTY(BlueprintReadOnly, Category = "Movement")
+    bool bIsSwimming;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Assets")
-    TObjectPtr<UAnimMontage> JumpMontage;
+    // Speed Thresholds
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Speed Thresholds")
+    float WalkSpeedThreshold;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Assets")
-    TObjectPtr<UBlendSpace> LocomotionBlendSpace;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Speed Thresholds")
+    float RunSpeedThreshold;
 
-    // Component References
-    UPROPERTY(BlueprintReadOnly, Category = "Components", meta = (AllowPrivateAccess = "true"))
-    TObjectPtr<USkeletalMeshComponent> MeshComponent;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Speed Thresholds")
+    float SprintSpeedThreshold;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Components", meta = (AllowPrivateAccess = "true"))
-    TObjectPtr<UCharacterMovementComponent> MovementComponent;
+    // Animation Blend Values
+    UPROPERTY(BlueprintReadOnly, Category = "Animation Blends")
+    float ForwardBackwardBlend;
 
-public:
+    UPROPERTY(BlueprintReadOnly, Category = "Animation Blends")
+    float LeftRightBlend;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Animation Blends")
+    float MovementBlend;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Animation Blends")
+    float SpeedBlend;
+
     // Motion Matching Functions
     UFUNCTION(BlueprintCallable, Category = "Motion Matching")
-    void UpdateMotionMatchingData();
+    void UpdateMotionData();
 
     UFUNCTION(BlueprintCallable, Category = "Motion Matching")
-    void TransitionToState(EAnim_MovementState NewState);
+    void CalculateMovementBlends();
 
     UFUNCTION(BlueprintCallable, Category = "Motion Matching")
-    EAnim_MovementState GetCurrentMovementState() const;
+    void UpdateMovementStates();
 
     UFUNCTION(BlueprintCallable, Category = "Motion Matching")
-    float GetMovementSpeed() const;
+    FAnim_MotionData GetBestMotionMatch(const FAnim_MotionData& TargetMotion);
 
     UFUNCTION(BlueprintCallable, Category = "Motion Matching")
-    float GetMovementDirection() const;
-
-    // IK Functions
-    UFUNCTION(BlueprintCallable, Category = "IK")
-    void UpdateFootIK();
-
-    UFUNCTION(BlueprintCallable, Category = "IK")
-    void PerformFootTrace(const FVector& FootLocation, const FName& SocketName, FVector& OutLocation, FRotator& OutRotation, float& OutAlpha);
-
-    UFUNCTION(BlueprintCallable, Category = "IK")
-    void SetFootIKEnabled(bool bEnabled);
-
-    // Animation Control Functions
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    void PlayAnimationMontage(UAnimMontage* Montage, float PlayRate = 1.0f);
-
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    void StopAnimationMontage(UAnimMontage* Montage);
-
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    bool IsPlayingMontage(UAnimMontage* Montage) const;
+    float CalculateMotionScore(const FAnim_MotionData& Motion1, const FAnim_MotionData& Motion2);
 
     // Utility Functions
-    UFUNCTION(BlueprintCallable, Category = "Utility")
-    void InitializeComponents();
+    UFUNCTION(BlueprintPure, Category = "Animation Utils")
+    float GetMovementDirection() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Utility")
-    void ResetAnimationState();
+    UFUNCTION(BlueprintPure, Category = "Animation Utils")
+    bool ShouldTransitionToState(EAnim_MovementState NewState) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Animation Utils")
+    void SetMovementState(EAnim_MovementState NewState);
 
 private:
-    // Internal state tracking
-    EAnim_MovementState PreviousState;
-    float StateTransitionTimer;
-    bool bIsInitialized;
+    void InitializeSpeedThresholds();
+    void UpdateCharacterReferences();
+    float CalculateDirectionAngle() const;
+    void SmoothBlendValues(float DeltaTime);
 
-    // IK calculation helpers
-    void CalculateFootIKOffset(const FVector& FootLocation, const FName& SocketName, FVector& OutOffset, FRotator& OutRotation);
-    float CalculateHipOffset();
-    
-    // Motion matching helpers
-    EAnim_MovementState DetermineMovementState();
-    void SmoothStateTransition(float DeltaTime);
+    // Internal state tracking
+    float StateTransitionTimer;
+    float BlendSmoothingSpeed;
+    bool bWasMovingLastFrame;
+    FVector LastVelocity;
 };
