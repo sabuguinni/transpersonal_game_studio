@@ -1,24 +1,30 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Engine/World.h"
 #include "GameFramework/Actor.h"
-#include "Engine/StaticMeshActor.h"
-#include "Components/DirectionalLightComponent.h"
-#include "Components/ExponentialHeightFogComponent.h"
-#include "Components/SkyAtmosphereComponent.h"
-#include "Engine/DirectionalLight.h"
-#include "Engine/ExponentialHeightFog.h"
-#include "Engine/SkyAtmosphere.h"
-#include "../Core/SharedTypes.h"
+#include "Components/StaticMeshComponent.h"
+#include "Engine/StaticMesh.h"
+#include "SharedTypes.h"
 #include "EnvironmentManager.generated.h"
 
+UENUM(BlueprintType)
+enum class EEnvArt_BiomeType : uint8
+{
+    Savana      UMETA(DisplayName = "Savana"),
+    Floresta    UMETA(DisplayName = "Floresta"), 
+    Pantano     UMETA(DisplayName = "Pantano"),
+    Deserto     UMETA(DisplayName = "Deserto"),
+    Montanha    UMETA(DisplayName = "Montanha")
+};
+
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEnvArt_BiomeData
+struct TRANSPERSONALGAME_API FEnvArt_BiomeCoordinates
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    EBiomeType BiomeType;
+    EEnvArt_BiomeType BiomeType;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
     FVector CenterLocation;
@@ -26,52 +32,40 @@ struct TRANSPERSONALGAME_API FEnvArt_BiomeData
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
     float Radius;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    TArray<TSoftObjectPtr<UStaticMesh>> EnvironmentProps;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    FLinearColor AmbientColor;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float FogDensity;
-
-    FEnvArt_BiomeData()
+    FEnvArt_BiomeCoordinates()
     {
-        BiomeType = EBiomeType::Savana;
+        BiomeType = EEnvArt_BiomeType::Savana;
         CenterLocation = FVector::ZeroVector;
         Radius = 10000.0f;
-        AmbientColor = FLinearColor::White;
-        FogDensity = 0.02f;
     }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEnvArt_LightingSettings
+struct TRANSPERSONALGAME_API FEnvArt_EnvironmentAsset
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
-    float SunIntensity;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Asset")
+    FString AssetName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
-    FLinearColor SunColor;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Asset")
+    TSoftObjectPtr<UStaticMesh> MeshAsset;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
-    FRotator SunRotation;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Asset")
+    EEnvArt_BiomeType PreferredBiome;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
-    float SkyAtmosphereMultiplier;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Asset")
+    float SpawnDensity;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
-    float FogHeightFalloff;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Asset")
+    FVector ScaleRange;
 
-    FEnvArt_LightingSettings()
+    FEnvArt_EnvironmentAsset()
     {
-        SunIntensity = 3.0f;
-        SunColor = FLinearColor(1.0f, 0.9f, 0.7f, 1.0f);
-        SunRotation = FRotator(-15.0f, 45.0f, 0.0f);
-        SkyAtmosphereMultiplier = 1.0f;
-        FogHeightFalloff = 0.2f;
+        AssetName = TEXT("DefaultAsset");
+        PreferredBiome = EEnvArt_BiomeType::Savana;
+        SpawnDensity = 1.0f;
+        ScaleRange = FVector(0.8f, 1.2f, 1.0f);
     }
 };
 
@@ -86,62 +80,42 @@ public:
 protected:
     virtual void BeginPlay() override;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment", meta = (AllowPrivateAccess = "true"))
-    TArray<FEnvArt_BiomeData> BiomeConfigurations;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment")
+    TArray<FEnvArt_BiomeCoordinates> BiomeDefinitions;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting", meta = (AllowPrivateAccess = "true"))
-    FEnvArt_LightingSettings LightingSettings;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment")
+    TArray<FEnvArt_EnvironmentAsset> EnvironmentAssets;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components", meta = (AllowPrivateAccess = "true"))
-    class USceneComponent* RootSceneComponent;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment")
+    int32 AssetsPerBiome;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment")
+    float SpawnRadius;
 
 public:
-    virtual void Tick(float DeltaTime) override;
+    UFUNCTION(BlueprintCallable, Category = "Environment")
+    void PopulateBiome(EEnvArt_BiomeType BiomeType, int32 AssetCount = 100);
 
     UFUNCTION(BlueprintCallable, Category = "Environment")
-    void InitializeBiomes();
+    void PopulateAllBiomes();
 
     UFUNCTION(BlueprintCallable, Category = "Environment")
-    void SpawnEnvironmentProps();
+    FVector GetBiomeCenter(EEnvArt_BiomeType BiomeType) const;
 
     UFUNCTION(BlueprintCallable, Category = "Environment")
-    void UpdateLighting();
+    void SetGoldenHourLighting();
 
     UFUNCTION(BlueprintCallable, Category = "Environment")
-    void SetTimeOfDay(float TimeHours);
-
-    UFUNCTION(BlueprintCallable, Category = "Environment")
-    EBiomeType GetBiomeAtLocation(const FVector& Location) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Environment")
-    void ApplyBiomeAtmosphere(EBiomeType BiomeType);
+    void AddVolumetricFog();
 
     UFUNCTION(BlueprintCallable, CallInEditor, Category = "Environment")
-    void EditorSpawnTestProps();
+    void InitializeBiomeDefinitions();
 
-protected:
-    UFUNCTION()
-    void SpawnPropsForBiome(const FEnvArt_BiomeData& BiomeData);
-
-    UFUNCTION()
-    void UpdateSunPosition(float TimeHours);
-
-    UFUNCTION()
-    void UpdateFogSettings(EBiomeType BiomeType);
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Environment")
+    void DiscoverEnvironmentAssets();
 
 private:
-    UPROPERTY()
-    TArray<AStaticMeshActor*> SpawnedProps;
-
-    UPROPERTY()
-    ADirectionalLight* SunLight;
-
-    UPROPERTY()
-    AExponentialHeightFog* HeightFog;
-
-    UPROPERTY()
-    ASkyAtmosphere* SkyAtmosphere;
-
-    float CurrentTimeOfDay;
-    bool bInitialized;
+    void SpawnAssetAtLocation(const FEnvArt_EnvironmentAsset& Asset, const FVector& Location, const FRotator& Rotation);
+    FVector GetRandomLocationInBiome(const FEnvArt_BiomeCoordinates& Biome) const;
+    FRotator GetRandomRotation() const;
 };
