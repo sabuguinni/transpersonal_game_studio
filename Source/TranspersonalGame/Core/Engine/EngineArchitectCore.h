@@ -4,101 +4,17 @@
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "GameFramework/GameModeBase.h"
-#include "GameFramework/PlayerController.h"
 #include "Components/ActorComponent.h"
 #include "Subsystems/GameInstanceSubsystem.h"
-#include "Subsystems/WorldSubsystem.h"
+#include "../../SharedTypes.h"
 #include "EngineArchitectCore.generated.h"
-
-class UTranspersonalGameInstance;
-class ATranspersonalGameMode;
-class ATranspersonalCharacter;
-
-UENUM(BlueprintType)
-enum class EEng_SystemPriority : uint8
-{
-    Critical = 0,
-    High = 1,
-    Medium = 2,
-    Low = 3
-};
-
-UENUM(BlueprintType)
-enum class EEng_ModuleState : uint8
-{
-    Uninitialized = 0,
-    Initializing = 1,
-    Active = 2,
-    Error = 3,
-    Shutdown = 4
-};
-
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEng_SystemInfo
-{
-    GENERATED_BODY()
-
-    UPROPERTY(BlueprintReadOnly, Category = "System")
-    FString SystemName;
-
-    UPROPERTY(BlueprintReadOnly, Category = "System")
-    EEng_SystemPriority Priority;
-
-    UPROPERTY(BlueprintReadOnly, Category = "System")
-    EEng_ModuleState State;
-
-    UPROPERTY(BlueprintReadOnly, Category = "System")
-    float LastUpdateTime;
-
-    UPROPERTY(BlueprintReadOnly, Category = "System")
-    int32 ErrorCount;
-
-    FEng_SystemInfo()
-    {
-        SystemName = TEXT("Unknown");
-        Priority = EEng_SystemPriority::Medium;
-        State = EEng_ModuleState::Uninitialized;
-        LastUpdateTime = 0.0f;
-        ErrorCount = 0;
-    }
-};
-
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEng_PerformanceMetrics
-{
-    GENERATED_BODY()
-
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float FrameRate;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float FrameTime;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    int32 ActorCount;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    int32 ComponentCount;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float MemoryUsageMB;
-
-    FEng_PerformanceMetrics()
-    {
-        FrameRate = 0.0f;
-        FrameTime = 0.0f;
-        ActorCount = 0;
-        ComponentCount = 0;
-        MemoryUsageMB = 0.0f;
-    }
-};
 
 /**
  * Engine Architect Core System
- * Manages the technical architecture and system coordination for the entire game
- * Validates module dependencies, performance metrics, and system integrity
+ * Manages technical architecture, compilation validation, and module integrity
+ * Ensures all systems follow established architectural patterns
  */
-UCLASS(BlueprintType, Blueprintable)
+UCLASS(BlueprintType, Blueprintable, meta = (DisplayName = "Engine Architect Core"))
 class TRANSPERSONALGAME_API UEngineArchitectCore : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
@@ -106,111 +22,180 @@ class TRANSPERSONALGAME_API UEngineArchitectCore : public UGameInstanceSubsystem
 public:
     UEngineArchitectCore();
 
-    // USubsystem interface
+    // Subsystem lifecycle
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
-    // System Registration
+    // Architecture validation
     UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    void RegisterSystem(const FString& SystemName, EEng_SystemPriority Priority);
-
-    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    void UnregisterSystem(const FString& SystemName);
+    bool ValidateModuleIntegrity();
 
     UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    bool IsSystemRegistered(const FString& SystemName) const;
-
-    // System State Management
-    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    void SetSystemState(const FString& SystemName, EEng_ModuleState NewState);
+    bool CheckCompilationStatus();
 
     UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    EEng_ModuleState GetSystemState(const FString& SystemName) const;
+    void EnforceArchitecturalRules();
+
+    // Performance monitoring
+    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
+    FString GetSystemPerformanceReport();
 
     UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    TArray<FEng_SystemInfo> GetAllSystemInfo() const;
+    void OptimizeMemoryUsage();
 
-    // Performance Monitoring
+    // Module dependency management
     UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    FEng_PerformanceMetrics GetCurrentPerformanceMetrics() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    void UpdatePerformanceMetrics();
-
-    // Validation
-    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    bool ValidateSystemIntegrity();
+    TArray<FString> GetModuleDependencies();
 
     UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    TArray<FString> GetSystemErrors() const;
-
-    // Debug
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Engine Architecture")
-    void LogSystemStatus();
-
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Engine Architecture")
-    void ForceSystemValidation();
+    bool ValidateModuleDependencies();
 
 protected:
-    UPROPERTY(BlueprintReadOnly, Category = "Systems")
-    TMap<FString, FEng_SystemInfo> RegisteredSystems;
+    // Core architecture properties
+    UPROPERTY(BlueprintReadOnly, Category = "Architecture", meta = (AllowPrivateAccess = "true"))
+    bool bModuleIntegrityValid;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    FEng_PerformanceMetrics CurrentMetrics;
+    UPROPERTY(BlueprintReadOnly, Category = "Architecture", meta = (AllowPrivateAccess = "true"))
+    bool bCompilationStatusClean;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    TArray<FString> ValidationErrors;
+    UPROPERTY(BlueprintReadOnly, Category = "Architecture", meta = (AllowPrivateAccess = "true"))
+    float MemoryUsageThreshold;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Configuration")
-    float PerformanceUpdateInterval;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Configuration")
-    float MaxAllowedFrameTime;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Configuration")
+    UPROPERTY(BlueprintReadOnly, Category = "Architecture", meta = (AllowPrivateAccess = "true"))
     int32 MaxActorCount;
 
-private:
-    FTimerHandle PerformanceTimerHandle;
+    UPROPERTY(BlueprintReadOnly, Category = "Architecture", meta = (AllowPrivateAccess = "true"))
+    TArray<FString> CriticalModules;
 
-    void InitializeDefaultSystems();
-    void ValidateCoreSystems();
-    void CheckPerformanceThresholds();
-    void LogError(const FString& ErrorMessage);
+    UPROPERTY(BlueprintReadOnly, Category = "Architecture", meta = (AllowPrivateAccess = "true"))
+    TArray<FString> ValidationErrors;
+
+private:
+    // Internal validation methods
+    bool ValidateClassDefinitions();
+    bool ValidateHeaderIncludes();
+    bool CheckForCircularDependencies();
+    void LogArchitecturalViolation(const FString& Violation);
+    void CleanupOrphanedReferences();
+
+    // Performance monitoring
+    float LastMemoryCheck;
+    int32 LastActorCount;
+    FDateTime LastValidationTime;
 };
 
 /**
- * Engine Architect Component
- * Can be attached to actors that need direct access to engine architecture data
+ * Architecture Rule Enforcement Component
+ * Attached to critical game objects to enforce architectural compliance
  */
-UCLASS(BlueprintType, Blueprintable, ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UEngineArchitectComponent : public UActorComponent
+UCLASS(BlueprintType, ClassGroup = (Custom), meta = (BlueprintSpawnableComponent, DisplayName = "Architecture Enforcer"))
+class TRANSPERSONALGAME_API UArchitectureEnforcerComponent : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    UEngineArchitectComponent();
+    UArchitectureEnforcerComponent();
 
     virtual void BeginPlay() override;
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    UEngineArchitectCore* GetEngineCore() const;
+    // Rule enforcement
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    void EnforceNamingConventions();
 
-    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    bool IsSystemHealthy(const FString& SystemName) const;
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    void ValidateComponentHierarchy();
 
-    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    float GetCurrentFrameRate() const;
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    bool CheckPerformanceCompliance();
 
 protected:
-    UPROPERTY(BlueprintReadOnly, Category = "Monitoring")
-    bool bMonitorPerformance;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
+    bool bEnforceNamingRules;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Monitoring")
-    float MonitoringInterval;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
+    bool bValidateHierarchy;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
+    float PerformanceCheckInterval;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Architecture", meta = (AllowPrivateAccess = "true"))
+    TArray<FString> RuleViolations;
 
 private:
-    float LastMonitoringTime;
-    UEngineArchitectCore* CachedEngineCore;
+    float LastPerformanceCheck;
+    void CheckOwnerCompliance();
+};
+
+/**
+ * Technical Debt Tracker
+ * Monitors and reports technical debt accumulation
+ */
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FEng_TechnicalDebtEntry
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Technical Debt")
+    FString ModuleName;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Technical Debt")
+    FString DebtDescription;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Technical Debt")
+    EEng_DebtSeverity Severity;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Technical Debt")
+    FDateTime CreatedDate;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Technical Debt")
+    float EstimatedFixTime;
+
+    FEng_TechnicalDebtEntry()
+    {
+        ModuleName = TEXT("");
+        DebtDescription = TEXT("");
+        Severity = EEng_DebtSeverity::Low;
+        CreatedDate = FDateTime::Now();
+        EstimatedFixTime = 1.0f;
+    }
+};
+
+/**
+ * Architecture Compliance Manager
+ * Singleton that enforces architectural standards across all modules
+ */
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API UArchitectureComplianceManager : public UObject
+{
+    GENERATED_BODY()
+
+public:
+    UArchitectureComplianceManager();
+
+    UFUNCTION(BlueprintCallable, Category = "Architecture Compliance", CallInEditor)
+    static UArchitectureComplianceManager* GetInstance();
+
+    UFUNCTION(BlueprintCallable, Category = "Architecture Compliance")
+    void RegisterTechnicalDebt(const FEng_TechnicalDebtEntry& DebtEntry);
+
+    UFUNCTION(BlueprintCallable, Category = "Architecture Compliance")
+    TArray<FEng_TechnicalDebtEntry> GetTechnicalDebtReport();
+
+    UFUNCTION(BlueprintCallable, Category = "Architecture Compliance")
+    void ClearResolvedDebt(const FString& ModuleName);
+
+    UFUNCTION(BlueprintCallable, Category = "Architecture Compliance")
+    float CalculateTotalDebtScore();
+
+protected:
+    UPROPERTY(BlueprintReadOnly, Category = "Compliance", meta = (AllowPrivateAccess = "true"))
+    TArray<FEng_TechnicalDebtEntry> TechnicalDebtEntries;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Compliance", meta = (AllowPrivateAccess = "true"))
+    TMap<FString, int32> ModuleViolationCounts;
+
+private:
+    static UArchitectureComplianceManager* Instance;
+    void InitializeComplianceRules();
 };
