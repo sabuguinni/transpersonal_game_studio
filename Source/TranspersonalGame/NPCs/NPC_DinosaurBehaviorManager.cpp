@@ -1,734 +1,543 @@
 #include "NPC_DinosaurBehaviorManager.h"
-#include "AIController.h"
-#include "BehaviorTree/BehaviorTreeComponent.h"
-#include "BehaviorTree/BlackboardComponent.h"
-#include "Perception/AIPerceptionComponent.h"
-#include "Perception/AISightConfig.h"
-#include "GameFramework/Character.h"
-#include "GameFramework/CharacterMovementComponent.h"
+#include "Engine/Engine.h"
 #include "Engine/World.h"
+#include "GameFramework/Pawn.h"
+#include "GameFramework/PlayerController.h"
 #include "Kismet/GameplayStatics.h"
-#include "NavigationSystem.h"
-#include "Components/AudioComponent.h"
-#include "Sound/SoundCue.h"
+#include "Kismet/KismetMathLibrary.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Animation/AnimInstance.h"
+#include "Animation/Anim_BlendSpaceController.h"
+#include "DrawDebugHelpers.h"
 
 UNPC_DinosaurBehaviorManager::UNPC_DinosaurBehaviorManager()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 0.1f; // Update 10 times per second
-
-    // Initialize AI Perception Component
-    AIPerceptionComponent = CreateDefaultSubobject<UAIPerceptionComponent>(TEXT("AIPerceptionComponent"));
+    PrimaryComponentTick.TickInterval = 0.1f; // 10 FPS for behavior updates
     
-    // Configure sight perception
-    UAISightConfig* SightConfig = CreateDefaultSubobject<UAISightConfig>(TEXT("SightConfig"));
-    if (SightConfig)
-    {
-        SightConfig->SightRadius = 1500.0f;
-        SightConfig->LoseSightRadius = 1600.0f;
-        SightConfig->PeripheralVisionAngleDegrees = 90.0f;
-        SightConfig->DetectionByAffiliation.bDetectNeutrals = true;
-        SightConfig->DetectionByAffiliation.bDetectFriendlies = true;
-        SightConfig->DetectionByAffiliation.bDetectEnemies = true;
-        
-        AIPerceptionComponent->ConfigureSense(*SightConfig);
-        AIPerceptionComponent->SetDominantSense(SightConfig->GetSenseImplementation());
-    }
-
     // Initialize default stats
-    Stats.Health = 100.0f;
-    Stats.MaxHealth = 100.0f;
-    Stats.Hunger = 50.0f;
-    Stats.Stamina = 100.0f;
-    Stats.Aggression = 30.0f;
-    Stats.Fear = 0.0f;
-    Stats.TerritorialRadius = 2000.0f;
-    Stats.DetectionRange = 1500.0f;
-    Stats.AttackRange = 300.0f;
-    Stats.MovementSpeed = 400.0f;
-
+    DinosaurStats.Health = 100.0f;
+    DinosaurStats.Hunger = 50.0f;
+    DinosaurStats.Aggression = 30.0f;
+    DinosaurStats.Fear = 10.0f;
+    DinosaurStats.MovementSpeed = 400.0f;
+    DinosaurStats.DetectionRange = 3000.0f;
+    DinosaurStats.AttackRange = 500.0f;
+    
     // Initialize memory
-    Memory.PatrolPoints.Empty();
-    Memory.LastKnownPlayerLocation = FVector::ZeroVector;
-    Memory.LastPlayerSightTime = 0.0f;
-    Memory.HomeLocation = FVector::ZeroVector;
-    Memory.KnownThreats.Empty();
-    Memory.KnownFood.Empty();
-    Memory.LastFeedTime = 0.0f;
-    Memory.LastRestTime = 0.0f;
-
-    // Initialize pack behavior
-    PackMembers.Empty();
-    bIsPackLeader = false;
-    PackLeader = nullptr;
-
-    // Initialize time
-    CurrentTimeOfDay = 0.0f;
-    DayDuration = 1200.0f; // 20 minutes per day
-
-    // Initialize state
+    DinosaurMemory.LastPlayerLocation = FVector::ZeroVector;
+    DinosaurMemory.LastPlayerSeen = 0.0f;
+    DinosaurMemory.HomeLocation = FVector::ZeroVector;
+    DinosaurMemory.CurrentPatrolIndex = 0;
+    
+    // Behavior config
+    StateUpdateInterval = 1.0f;
+    HungerDecayRate = 5.0f;
+    MemoryDuration = 30.0f;
+    bIsPackHunter = false;
+    
+    // Player tracking
+    PlayerPawn = nullptr;
+    DistanceToPlayer = 0.0f;
+    bPlayerInSight = false;
+    
+    // Animation
+    AnimationInstance = nullptr;
+    BlendSpaceController = nullptr;
+    
     CurrentState = ENPC_DinosaurState::Idle;
     Species = ENPC_DinosaurSpecies::TRex;
-
-    // Internal variables
-    StateTimer = 0.0f;
-    LastUpdateTime = 0.0f;
-    bIsInitialized = false;
-    AIControllerRef = nullptr;
-    PlayerPawn = nullptr;
 }
 
 void UNPC_DinosaurBehaviorManager::BeginPlay()
 {
     Super::BeginPlay();
     
-    InitializeAI();
-    InitializeSpeciesTraits();
-    
-    // Set home location to current location
-    Memory.HomeLocation = GetOwner()->GetActorLocation();
-    
-    // Generate initial patrol points
-    for (int32 i = 0; i < 5; i++)
+    // Initialize home location
+    if (GetOwner())
     {
-        FVector PatrolPoint = GetRandomPatrolPoint();
-        Memory.PatrolPoints.Add(PatrolPoint);
+        DinosaurMemory.HomeLocation = GetOwner()->GetActorLocation();
     }
     
-    bIsInitialized = true;
-    UE_LOG(LogTemp, Warning, TEXT("Dinosaur Behavior Manager initialized for %s"), *GetOwner()->GetName());
+    // Configure species-specific behavior
+    InitializeSpeciesDefaults();
+    
+    // Initialize patrol points
+    InitializePatrolPoints();
+    
+    // Find player pawn
+    PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
+    
+    // Setup animation references
+    if (GetOwner())
+    {
+        if (USkeletalMeshComponent* MeshComp = GetOwner()->FindComponentByClass<USkeletalMeshComponent>())
+        {
+            AnimationInstance = MeshComp->GetAnimInstance();
+            if (AnimationInstance)
+            {
+                BlendSpaceController = Cast<UAnim_BlendSpaceController>(AnimationInstance);
+            }
+        }
+    }
+    
+    // Start behavior update timer
+    GetWorld()->GetTimerManager().SetTimer(BehaviorUpdateTimer, this, &UNPC_DinosaurBehaviorManager::UpdateBehaviorLogic, StateUpdateInterval, true);
+    
+    // Start hunger update timer
+    GetWorld()->GetTimerManager().SetTimer(HungerUpdateTimer, [this]()
+    {
+        UpdateHungerSystem(HungerDecayRate);
+    }, 1.0f, true);
+    
+    UE_LOG(LogTemp, Warning, TEXT("DinosaurBehaviorManager initialized for %s"), *GetOwner()->GetName());
 }
 
 void UNPC_DinosaurBehaviorManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-
-    if (!bIsInitialized)
-        return;
-
-    // Update time tracking
-    LastUpdateTime += DeltaTime;
-    StateTimer += DeltaTime;
-    UpdateTimeOfDay(DeltaTime);
-
-    // Core updates
-    UpdateStats(DeltaTime);
-    UpdatePerception(DeltaTime);
-    ProcessDailyRoutine(DeltaTime);
-    ProcessSpeciesSpecificBehavior(DeltaTime);
-    HandlePackCommunication();
-    UpdateBlackboard();
-
-    // State management
-    if (LastUpdateTime >= 0.5f) // Update every 0.5 seconds
-    {
-        HandleStateTransition();
-        LastUpdateTime = 0.0f;
-    }
+    
+    // Update player tracking
+    CheckPlayerProximity();
+    
+    // Update memory
+    UpdateMemory();
+    
+    // Update animation state
+    UpdateAnimationState();
+    
+    LastBehaviorUpdate += DeltaTime;
 }
 
-void UNPC_DinosaurBehaviorManager::SetState(ENPC_DinosaurState NewState)
+void UNPC_DinosaurBehaviorManager::SetDinosaurState(ENPC_DinosaurState NewState)
 {
     if (CurrentState != NewState)
     {
         ENPC_DinosaurState PreviousState = CurrentState;
         CurrentState = NewState;
-        StateTimer = 0.0f;
         
-        UE_LOG(LogTemp, Log, TEXT("%s changed state from %d to %d"), 
-               *GetOwner()->GetName(), (int32)PreviousState, (int32)NewState);
+        UE_LOG(LogTemp, Log, TEXT("%s state changed from %d to %d"), 
+               *GetOwner()->GetName(), 
+               (int32)PreviousState, 
+               (int32)CurrentState);
         
-        // Handle state entry logic
-        switch (NewState)
+        // Trigger state-specific initialization
+        switch (CurrentState)
         {
             case ENPC_DinosaurState::Patrolling:
-                PatrolArea();
+                InitializePatrolPoints();
                 break;
             case ENPC_DinosaurState::Hunting:
-                PlayDinosaurSound("Roar");
+                DinosaurStats.Aggression = FMath::Min(DinosaurStats.Aggression + 20.0f, 100.0f);
                 break;
             case ENPC_DinosaurState::Fleeing:
-                PlayDinosaurSound("Fear");
+                DinosaurStats.Fear = FMath::Min(DinosaurStats.Fear + 30.0f, 100.0f);
                 break;
-            case ENPC_DinosaurState::Sleeping:
-                ReturnToHome();
-                break;
-            default:
+            case ENPC_DinosaurState::Feeding:
+                DinosaurStats.Hunger = FMath::Max(DinosaurStats.Hunger - 25.0f, 0.0f);
                 break;
         }
     }
 }
 
-void UNPC_DinosaurBehaviorManager::UpdateStats(float DeltaTime)
+void UNPC_DinosaurBehaviorManager::UpdateBehaviorLogic()
 {
-    // Update hunger over time
-    Stats.Hunger = FMath::Max(0.0f, Stats.Hunger - (DeltaTime * 2.0f));
+    if (!GetOwner() || !PlayerPawn)
+        return;
     
-    // Update stamina regeneration
-    if (CurrentState == ENPC_DinosaurState::Idle || CurrentState == ENPC_DinosaurState::Sleeping)
+    // Species-specific behavior updates
+    switch (Species)
     {
-        Stats.Stamina = FMath::Min(100.0f, Stats.Stamina + (DeltaTime * 10.0f));
+        case ENPC_DinosaurSpecies::TRex:
+            UpdateTRexBehavior();
+            break;
+        case ENPC_DinosaurSpecies::Velociraptor:
+            UpdateVelociraptorBehavior();
+            break;
+        case ENPC_DinosaurSpecies::Triceratops:
+        case ENPC_DinosaurSpecies::Brachiosaurus:
+        case ENPC_DinosaurSpecies::Ankylosaurus:
+        case ENPC_DinosaurSpecies::Parasaurolophus:
+            UpdateHerbivoreBehavior();
+            break;
+    }
+    
+    // State-specific behavior updates
+    switch (CurrentState)
+    {
+        case ENPC_DinosaurState::Idle:
+            UpdateIdleBehavior();
+            break;
+        case ENPC_DinosaurState::Patrolling:
+            UpdatePatrolBehavior();
+            break;
+        case ENPC_DinosaurState::Hunting:
+            UpdateHuntingBehavior();
+            break;
+    }
+}
+
+void UNPC_DinosaurBehaviorManager::CheckPlayerProximity()
+{
+    if (!PlayerPawn || !GetOwner())
+    {
+        bPlayerInSight = false;
+        DistanceToPlayer = 0.0f;
+        return;
+    }
+    
+    FVector OwnerLocation = GetOwner()->GetActorLocation();
+    FVector PlayerLocation = PlayerPawn->GetActorLocation();
+    DistanceToPlayer = FVector::Dist(OwnerLocation, PlayerLocation);
+    
+    // Check if player is within detection range
+    if (DistanceToPlayer <= DinosaurStats.DetectionRange)
+    {
+        // Check line of sight
+        bPlayerInSight = LineOfSightToPlayer();
+        
+        if (bPlayerInSight)
+        {
+            DinosaurMemory.LastPlayerLocation = PlayerLocation;
+            DinosaurMemory.LastPlayerSeen = GetWorld()->GetTimeSeconds();
+        }
     }
     else
     {
-        Stats.Stamina = FMath::Max(0.0f, Stats.Stamina - (DeltaTime * 5.0f));
-    }
-    
-    // Update fear decay
-    Stats.Fear = FMath::Max(0.0f, Stats.Fear - (DeltaTime * 3.0f));
-    
-    // Health regeneration when well-fed and rested
-    if (Stats.Hunger > 70.0f && Stats.Stamina > 80.0f && Stats.Health < Stats.MaxHealth)
-    {
-        Stats.Health = FMath::Min(Stats.MaxHealth, Stats.Health + (DeltaTime * 1.0f));
+        bPlayerInSight = false;
     }
 }
 
-void UNPC_DinosaurBehaviorManager::ProcessDailyRoutine(float DeltaTime)
+void UNPC_DinosaurBehaviorManager::UpdatePatrolBehavior()
 {
-    float TimeOfDayNormalized = CurrentTimeOfDay / DayDuration;
+    if (DinosaurMemory.PatrolPoints.Num() == 0)
+        return;
     
-    // Morning (0.0 - 0.3): Active hunting/feeding
-    if (TimeOfDayNormalized >= 0.0f && TimeOfDayNormalized < 0.3f)
+    FVector CurrentLocation = GetOwner()->GetActorLocation();
+    FVector TargetPoint = DinosaurMemory.PatrolPoints[DinosaurMemory.CurrentPatrolIndex];
+    
+    float DistanceToTarget = FVector::Dist(CurrentLocation, TargetPoint);
+    
+    // If close to patrol point, move to next one
+    if (DistanceToTarget < 500.0f)
     {
-        if (Stats.Hunger < 40.0f && CurrentState != ENPC_DinosaurState::Hunting)
-        {
-            SetState(ENPC_DinosaurState::Hunting);
-        }
+        DinosaurMemory.CurrentPatrolIndex = (DinosaurMemory.CurrentPatrolIndex + 1) % DinosaurMemory.PatrolPoints.Num();
     }
-    // Midday (0.3 - 0.7): Patrolling/territorial
-    else if (TimeOfDayNormalized >= 0.3f && TimeOfDayNormalized < 0.7f)
+    
+    // Check if player detected during patrol
+    if (bPlayerInSight && DistanceToPlayer < DinosaurStats.DetectionRange)
     {
-        if (CurrentState == ENPC_DinosaurState::Idle)
+        if (Species == ENPC_DinosaurSpecies::TRex || Species == ENPC_DinosaurSpecies::Velociraptor)
         {
-            SetState(ENPC_DinosaurState::Patrolling);
+            SetDinosaurState(ENPC_DinosaurState::Hunting);
         }
-    }
-    // Evening (0.7 - 0.9): Return to territory
-    else if (TimeOfDayNormalized >= 0.7f && TimeOfDayNormalized < 0.9f)
-    {
-        if (FVector::Dist(GetOwner()->GetActorLocation(), Memory.HomeLocation) > Stats.TerritorialRadius)
+        else
         {
-            ReturnToHome();
-        }
-    }
-    // Night (0.9 - 1.0): Sleep/rest
-    else
-    {
-        if (CurrentState != ENPC_DinosaurState::Sleeping && Stats.Stamina < 30.0f)
-        {
-            SetState(ENPC_DinosaurState::Sleeping);
+            SetDinosaurState(ENPC_DinosaurState::Fleeing);
         }
     }
 }
 
-bool UNPC_DinosaurBehaviorManager::CanSeePlayer()
+void UNPC_DinosaurBehaviorManager::UpdateHuntingBehavior()
 {
-    if (!PlayerPawn)
+    if (!bPlayerInSight && !IsPlayerRemembered())
     {
-        PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
+        SetDinosaurState(ENPC_DinosaurState::Patrolling);
+        return;
     }
     
-    if (!PlayerPawn)
+    FVector TargetLocation = bPlayerInSight ? PlayerPawn->GetActorLocation() : DinosaurMemory.LastPlayerLocation;
+    
+    // If close enough to attack
+    if (DistanceToPlayer < DinosaurStats.AttackRange && bPlayerInSight)
+    {
+        SetDinosaurState(ENPC_DinosaurState::Aggressive);
+        TriggerAnimationEvent("Attack");
+    }
+    
+    // Update aggression based on hunt duration
+    DinosaurStats.Aggression = FMath::Min(DinosaurStats.Aggression + 1.0f, 100.0f);
+}
+
+void UNPC_DinosaurBehaviorManager::UpdateIdleBehavior()
+{
+    // Random chance to start patrolling
+    if (FMath::RandRange(0.0f, 1.0f) < 0.1f)
+    {
+        SetDinosaurState(ENPC_DinosaurState::Patrolling);
+    }
+    
+    // Check for player
+    if (bPlayerInSight)
+    {
+        if (Species == ENPC_DinosaurSpecies::TRex || Species == ENPC_DinosaurSpecies::Velociraptor)
+        {
+            SetDinosaurState(ENPC_DinosaurState::Hunting);
+        }
+        else if (DistanceToPlayer < 1500.0f)
+        {
+            SetDinosaurState(ENPC_DinosaurState::Fleeing);
+        }
+    }
+    
+    // Check hunger
+    if (DinosaurStats.Hunger > 80.0f)
+    {
+        SetDinosaurState(ENPC_DinosaurState::Feeding);
+    }
+}
+
+void UNPC_DinosaurBehaviorManager::InitializePatrolPoints()
+{
+    DinosaurMemory.PatrolPoints.Empty();
+    FVector HomeLocation = DinosaurMemory.HomeLocation;
+    
+    // Create patrol points in a circle around home
+    int32 NumPoints = FMath::RandRange(3, 6);
+    float PatrolRadius = DinosaurStats.DetectionRange * 0.5f;
+    
+    for (int32 i = 0; i < NumPoints; i++)
+    {
+        float Angle = (2.0f * PI * i) / NumPoints;
+        FVector Offset = FVector(FMath::Cos(Angle) * PatrolRadius, FMath::Sin(Angle) * PatrolRadius, 0.0f);
+        DinosaurMemory.PatrolPoints.Add(HomeLocation + Offset);
+    }
+    
+    DinosaurMemory.CurrentPatrolIndex = 0;
+}
+
+FVector UNPC_DinosaurBehaviorManager::GetNextPatrolPoint()
+{
+    if (DinosaurMemory.PatrolPoints.Num() == 0)
+        return DinosaurMemory.HomeLocation;
+    
+    return DinosaurMemory.PatrolPoints[DinosaurMemory.CurrentPatrolIndex];
+}
+
+void UNPC_DinosaurBehaviorManager::UpdateMemory()
+{
+    float CurrentTime = GetWorld()->GetTimeSeconds();
+    
+    // Forget player if not seen for too long
+    if (CurrentTime - DinosaurMemory.LastPlayerSeen > MemoryDuration)
+    {
+        DinosaurMemory.LastPlayerLocation = FVector::ZeroVector;
+    }
+}
+
+bool UNPC_DinosaurBehaviorManager::IsPlayerRemembered() const
+{
+    float CurrentTime = GetWorld()->GetTimeSeconds();
+    return (CurrentTime - DinosaurMemory.LastPlayerSeen) < MemoryDuration;
+}
+
+void UNPC_DinosaurBehaviorManager::ConfigureForSpecies(ENPC_DinosaurSpecies NewSpecies)
+{
+    Species = NewSpecies;
+    InitializeSpeciesDefaults();
+}
+
+void UNPC_DinosaurBehaviorManager::UpdateTRexBehavior()
+{
+    // T-Rex is aggressive and territorial
+    if (bPlayerInSight && DistanceToPlayer < DinosaurStats.DetectionRange)
+    {
+        if (CurrentState != ENPC_DinosaurState::Hunting && CurrentState != ENPC_DinosaurState::Aggressive)
+        {
+            SetDinosaurState(ENPC_DinosaurState::Hunting);
+        }
+    }
+    
+    // T-Rex doesn't flee easily
+    DinosaurStats.Fear = FMath::Max(DinosaurStats.Fear - 1.0f, 0.0f);
+}
+
+void UNPC_DinosaurBehaviorManager::UpdateVelociraptorBehavior()
+{
+    // Velociraptors are pack hunters - more aggressive in groups
+    if (bIsPackHunter)
+    {
+        DinosaurStats.Aggression = FMath::Min(DinosaurStats.Aggression + 2.0f, 100.0f);
+    }
+    
+    // Fast and cunning - larger detection range
+    DinosaurStats.DetectionRange = 4000.0f;
+    DinosaurStats.MovementSpeed = 600.0f;
+}
+
+void UNPC_DinosaurBehaviorManager::UpdateHerbivoreBehavior()
+{
+    // Herbivores are generally peaceful but defensive
+    if (bPlayerInSight && DistanceToPlayer < 1000.0f)
+    {
+        if (DinosaurStats.Fear > 50.0f)
+        {
+            SetDinosaurState(ENPC_DinosaurState::Fleeing);
+        }
+        else if (DistanceToPlayer < 300.0f)
+        {
+            // Defensive behavior - stand ground
+            SetDinosaurState(ENPC_DinosaurState::Aggressive);
+        }
+    }
+    
+    // Herbivores spend more time feeding
+    if (DinosaurStats.Hunger > 60.0f && CurrentState == ENPC_DinosaurState::Idle)
+    {
+        SetDinosaurState(ENPC_DinosaurState::Feeding);
+    }
+}
+
+void UNPC_DinosaurBehaviorManager::UpdateAnimationState()
+{
+    if (!BlendSpaceController)
+        return;
+    
+    // Set animation speed based on current state
+    switch (CurrentState)
+    {
+        case ENPC_DinosaurState::Idle:
+            SetAnimationSpeed(0.0f);
+            break;
+        case ENPC_DinosaurState::Patrolling:
+            SetAnimationSpeed(DinosaurStats.MovementSpeed * 0.3f);
+            break;
+        case ENPC_DinosaurState::Hunting:
+            SetAnimationSpeed(DinosaurStats.MovementSpeed * 0.8f);
+            break;
+        case ENPC_DinosaurState::Fleeing:
+            SetAnimationSpeed(DinosaurStats.MovementSpeed);
+            break;
+        case ENPC_DinosaurState::Feeding:
+            SetAnimationSpeed(0.0f);
+            TriggerAnimationEvent("Feed");
+            break;
+        case ENPC_DinosaurState::Aggressive:
+            SetAnimationSpeed(0.0f);
+            TriggerAnimationEvent("Roar");
+            break;
+    }
+}
+
+void UNPC_DinosaurBehaviorManager::SetAnimationSpeed(float Speed)
+{
+    if (BlendSpaceController)
+    {
+        // Integration with blend space controller from Animation Agent
+        // This would set the speed parameter in the blend space
+    }
+}
+
+void UNPC_DinosaurBehaviorManager::TriggerAnimationEvent(const FString& EventName)
+{
+    UE_LOG(LogTemp, Log, TEXT("%s triggered animation event: %s"), *GetOwner()->GetName(), *EventName);
+}
+
+void UNPC_DinosaurBehaviorManager::InitializeSpeciesDefaults()
+{
+    switch (Species)
+    {
+        case ENPC_DinosaurSpecies::TRex:
+            DinosaurStats.Health = 200.0f;
+            DinosaurStats.Aggression = 80.0f;
+            DinosaurStats.Fear = 5.0f;
+            DinosaurStats.MovementSpeed = 500.0f;
+            DinosaurStats.DetectionRange = 5000.0f;
+            DinosaurStats.AttackRange = 800.0f;
+            bIsPackHunter = false;
+            break;
+            
+        case ENPC_DinosaurSpecies::Velociraptor:
+            DinosaurStats.Health = 80.0f;
+            DinosaurStats.Aggression = 70.0f;
+            DinosaurStats.Fear = 20.0f;
+            DinosaurStats.MovementSpeed = 700.0f;
+            DinosaurStats.DetectionRange = 4000.0f;
+            DinosaurStats.AttackRange = 400.0f;
+            bIsPackHunter = true;
+            break;
+            
+        case ENPC_DinosaurSpecies::Triceratops:
+            DinosaurStats.Health = 180.0f;
+            DinosaurStats.Aggression = 30.0f;
+            DinosaurStats.Fear = 40.0f;
+            DinosaurStats.MovementSpeed = 300.0f;
+            DinosaurStats.DetectionRange = 2500.0f;
+            DinosaurStats.AttackRange = 600.0f;
+            bIsPackHunter = false;
+            break;
+            
+        case ENPC_DinosaurSpecies::Brachiosaurus:
+            DinosaurStats.Health = 300.0f;
+            DinosaurStats.Aggression = 10.0f;
+            DinosaurStats.Fear = 60.0f;
+            DinosaurStats.MovementSpeed = 200.0f;
+            DinosaurStats.DetectionRange = 3000.0f;
+            DinosaurStats.AttackRange = 1000.0f;
+            bIsPackHunter = false;
+            break;
+            
+        default:
+            // Default herbivore stats
+            DinosaurStats.Health = 120.0f;
+            DinosaurStats.Aggression = 25.0f;
+            DinosaurStats.Fear = 50.0f;
+            DinosaurStats.MovementSpeed = 350.0f;
+            DinosaurStats.DetectionRange = 2000.0f;
+            DinosaurStats.AttackRange = 500.0f;
+            bIsPackHunter = false;
+            break;
+    }
+}
+
+void UNPC_DinosaurBehaviorManager::UpdateHungerSystem(float DeltaTime)
+{
+    DinosaurStats.Hunger = FMath::Min(DinosaurStats.Hunger + DeltaTime, 100.0f);
+    
+    // Hunger affects behavior
+    if (DinosaurStats.Hunger > 80.0f)
+    {
+        DinosaurStats.Aggression = FMath::Min(DinosaurStats.Aggression + 5.0f, 100.0f);
+    }
+}
+
+bool UNPC_DinosaurBehaviorManager::LineOfSightToPlayer() const
+{
+    if (!PlayerPawn || !GetOwner())
         return false;
     
-    float DistanceToPlayer = FVector::Dist(GetOwner()->GetActorLocation(), PlayerPawn->GetActorLocation());
-    
-    if (DistanceToPlayer > Stats.DetectionRange)
-        return false;
-    
-    // Line of sight check
-    FHitResult HitResult;
     FVector StartLocation = GetOwner()->GetActorLocation();
     FVector EndLocation = PlayerPawn->GetActorLocation();
+    
+    FHitResult HitResult;
+    FCollisionQueryParams QueryParams;
+    QueryParams.AddIgnoredActor(GetOwner());
+    QueryParams.AddIgnoredActor(PlayerPawn);
     
     bool bHit = GetWorld()->LineTraceSingleByChannel(
         HitResult,
         StartLocation,
         EndLocation,
-        ECollisionChannel::ECC_Visibility
+        ECollisionChannel::ECC_Visibility,
+        QueryParams
     );
     
-    return !bHit || HitResult.GetActor() == PlayerPawn;
+    return !bHit;
 }
 
-AActor* UNPC_DinosaurBehaviorManager::FindNearestThreat()
+FVector UNPC_DinosaurBehaviorManager::CalculateFleeDirection() const
 {
-    AActor* NearestThreat = nullptr;
-    float NearestDistance = Stats.DetectionRange;
+    if (!PlayerPawn || !GetOwner())
+        return FVector::ZeroVector;
     
-    for (AActor* Threat : Memory.KnownThreats)
-    {
-        if (!IsValid(Threat))
-            continue;
-            
-        float Distance = FVector::Dist(GetOwner()->GetActorLocation(), Threat->GetActorLocation());
-        if (Distance < NearestDistance)
-        {
-            NearestDistance = Distance;
-            NearestThreat = Threat;
-        }
-    }
+    FVector OwnerLocation = GetOwner()->GetActorLocation();
+    FVector PlayerLocation = PlayerPawn->GetActorLocation();
     
-    return NearestThreat;
-}
-
-AActor* UNPC_DinosaurBehaviorManager::FindNearestFood()
-{
-    AActor* NearestFood = nullptr;
-    float NearestDistance = Stats.DetectionRange;
+    // Flee in opposite direction from player
+    FVector FleeDirection = (OwnerLocation - PlayerLocation).GetSafeNormal();
     
-    for (AActor* Food : Memory.KnownFood)
-    {
-        if (!IsValid(Food))
-            continue;
-            
-        float Distance = FVector::Dist(GetOwner()->GetActorLocation(), Food->GetActorLocation());
-        if (Distance < NearestDistance)
-        {
-            NearestDistance = Distance;
-            NearestFood = Food;
-        }
-    }
+    // Add some randomness
+    FleeDirection += FVector(FMath::RandRange(-0.3f, 0.3f), FMath::RandRange(-0.3f, 0.3f), 0.0f);
     
-    return NearestFood;
-}
-
-void UNPC_DinosaurBehaviorManager::UpdateMemory(AActor* Actor, bool bIsThreat)
-{
-    if (!IsValid(Actor))
-        return;
-    
-    if (bIsThreat)
-    {
-        Memory.KnownThreats.AddUnique(Actor);
-        if (Actor == PlayerPawn)
-        {
-            Memory.LastKnownPlayerLocation = Actor->GetActorLocation();
-            Memory.LastPlayerSightTime = GetWorld()->GetTimeSeconds();
-        }
-    }
-    else
-    {
-        Memory.KnownFood.AddUnique(Actor);
-    }
-}
-
-void UNPC_DinosaurBehaviorManager::MoveToLocation(FVector TargetLocation)
-{
-    if (!AIControllerRef)
-        return;
-    
-    // Use AI controller to move to location
-    AIControllerRef->MoveToLocation(TargetLocation, Stats.AttackRange);
-}
-
-void UNPC_DinosaurBehaviorManager::PatrolArea()
-{
-    if (Memory.PatrolPoints.Num() == 0)
-        return;
-    
-    // Find nearest patrol point
-    FVector CurrentLocation = GetOwner()->GetActorLocation();
-    FVector NearestPatrolPoint = Memory.PatrolPoints[0];
-    float NearestDistance = FVector::Dist(CurrentLocation, NearestPatrolPoint);
-    
-    for (const FVector& PatrolPoint : Memory.PatrolPoints)
-    {
-        float Distance = FVector::Dist(CurrentLocation, PatrolPoint);
-        if (Distance < NearestDistance)
-        {
-            NearestDistance = Distance;
-            NearestPatrolPoint = PatrolPoint;
-        }
-    }
-    
-    MoveToLocation(NearestPatrolPoint);
-}
-
-void UNPC_DinosaurBehaviorManager::ReturnToHome()
-{
-    MoveToLocation(Memory.HomeLocation);
-}
-
-void UNPC_DinosaurBehaviorManager::AttackTarget(AActor* Target)
-{
-    if (!IsValid(Target) || !IsInAttackRange(Target))
-        return;
-    
-    // Apply damage to target
-    if (ACharacter* TargetCharacter = Cast<ACharacter>(Target))
-    {
-        float Damage = 25.0f; // Base damage
-        
-        // Species-specific damage modifiers
-        switch (Species)
-        {
-            case ENPC_DinosaurSpecies::TRex:
-                Damage *= 3.0f;
-                break;
-            case ENPC_DinosaurSpecies::Velociraptor:
-                Damage *= 1.5f;
-                break;
-            case ENPC_DinosaurSpecies::Triceratops:
-                Damage *= 2.0f;
-                break;
-            default:
-                break;
-        }
-        
-        // Apply damage (would need damage system implementation)
-        UE_LOG(LogTemp, Warning, TEXT("%s attacks %s for %f damage"), 
-               *GetOwner()->GetName(), *Target->GetName(), Damage);
-        
-        PlayDinosaurSound("Attack");
-    }
-}
-
-void UNPC_DinosaurBehaviorManager::FleeFromThreat(AActor* Threat)
-{
-    if (!IsValid(Threat))
-        return;
-    
-    FVector ThreatLocation = Threat->GetActorLocation();
-    FVector CurrentLocation = GetOwner()->GetActorLocation();
-    FVector FleeDirection = (CurrentLocation - ThreatLocation).GetSafeNormal();
-    FVector FleeLocation = CurrentLocation + (FleeDirection * 2000.0f);
-    
-    MoveToLocation(FleeLocation);
-    Stats.Fear = FMath::Min(100.0f, Stats.Fear + 20.0f);
-}
-
-bool UNPC_DinosaurBehaviorManager::IsInAttackRange(AActor* Target)
-{
-    if (!IsValid(Target))
-        return false;
-    
-    float Distance = FVector::Dist(GetOwner()->GetActorLocation(), Target->GetActorLocation());
-    return Distance <= Stats.AttackRange;
-}
-
-void UNPC_DinosaurBehaviorManager::InitializeSpeciesTraits()
-{
-    switch (Species)
-    {
-        case ENPC_DinosaurSpecies::TRex:
-            Stats.MaxHealth = 300.0f;
-            Stats.Health = 300.0f;
-            Stats.Aggression = 80.0f;
-            Stats.AttackRange = 400.0f;
-            Stats.MovementSpeed = 600.0f;
-            Stats.DetectionRange = 2000.0f;
-            break;
-            
-        case ENPC_DinosaurSpecies::Velociraptor:
-            Stats.MaxHealth = 80.0f;
-            Stats.Health = 80.0f;
-            Stats.Aggression = 90.0f;
-            Stats.AttackRange = 200.0f;
-            Stats.MovementSpeed = 800.0f;
-            Stats.DetectionRange = 1800.0f;
-            break;
-            
-        case ENPC_DinosaurSpecies::Triceratops:
-            Stats.MaxHealth = 250.0f;
-            Stats.Health = 250.0f;
-            Stats.Aggression = 40.0f;
-            Stats.AttackRange = 300.0f;
-            Stats.MovementSpeed = 400.0f;
-            Stats.DetectionRange = 1200.0f;
-            break;
-            
-        case ENPC_DinosaurSpecies::Brachiosaurus:
-            Stats.MaxHealth = 500.0f;
-            Stats.Health = 500.0f;
-            Stats.Aggression = 10.0f;
-            Stats.AttackRange = 500.0f;
-            Stats.MovementSpeed = 200.0f;
-            Stats.DetectionRange = 1000.0f;
-            break;
-            
-        default:
-            // Default stats already set in constructor
-            break;
-    }
-}
-
-void UNPC_DinosaurBehaviorManager::ApplySpeciesBehavior()
-{
-    // Species-specific behavior logic
-    switch (Species)
-    {
-        case ENPC_DinosaurSpecies::Velociraptor:
-            // Pack hunting behavior
-            if (PackMembers.Num() > 0 && CanSeePlayer())
-            {
-                CoordinatePackHunt(PlayerPawn);
-            }
-            break;
-            
-        case ENPC_DinosaurSpecies::Brachiosaurus:
-            // Peaceful herbivore - flee from threats
-            if (AActor* Threat = FindNearestThreat())
-            {
-                SetState(ENPC_DinosaurState::Fleeing);
-                FleeFromThreat(Threat);
-            }
-            break;
-            
-        case ENPC_DinosaurSpecies::TRex:
-            // Apex predator - aggressive territorial behavior
-            if (Stats.Aggression > 60.0f && CanSeePlayer())
-            {
-                SetState(ENPC_DinosaurState::Hunting);
-            }
-            break;
-            
-        default:
-            break;
-    }
-}
-
-float UNPC_DinosaurBehaviorManager::GetDistanceToPlayer()
-{
-    if (!PlayerPawn)
-    {
-        PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
-    }
-    
-    if (!PlayerPawn)
-        return -1.0f;
-    
-    return FVector::Dist(GetOwner()->GetActorLocation(), PlayerPawn->GetActorLocation());
-}
-
-bool UNPC_DinosaurBehaviorManager::IsNightTime()
-{
-    float TimeOfDayNormalized = CurrentTimeOfDay / DayDuration;
-    return TimeOfDayNormalized >= 0.9f || TimeOfDayNormalized < 0.1f;
-}
-
-FVector UNPC_DinosaurBehaviorManager::GetRandomPatrolPoint()
-{
-    FVector BaseLocation = Memory.HomeLocation;
-    float Radius = Stats.TerritorialRadius * 0.8f; // Stay within 80% of territorial radius
-    
-    float RandomAngle = FMath::RandRange(0.0f, 2.0f * PI);
-    float RandomDistance = FMath::RandRange(Radius * 0.3f, Radius);
-    
-    FVector RandomPoint = BaseLocation + FVector(
-        FMath::Cos(RandomAngle) * RandomDistance,
-        FMath::Sin(RandomAngle) * RandomDistance,
-        0.0f
-    );
-    
-    return RandomPoint;
-}
-
-void UNPC_DinosaurBehaviorManager::PlayDinosaurSound(const FString& SoundType)
-{
-    // Log sound for now - would integrate with audio system
-    UE_LOG(LogTemp, Log, TEXT("%s plays %s sound"), *GetOwner()->GetName(), *SoundType);
-}
-
-void UNPC_DinosaurBehaviorManager::JoinPack(UNPC_DinosaurBehaviorManager* Leader)
-{
-    if (!Leader || Leader == this)
-        return;
-    
-    PackLeader = Leader;
-    Leader->PackMembers.AddUnique(this);
-    bIsPackLeader = false;
-    
-    UE_LOG(LogTemp, Log, TEXT("%s joined pack led by %s"), 
-           *GetOwner()->GetName(), *Leader->GetOwner()->GetName());
-}
-
-void UNPC_DinosaurBehaviorManager::LeavePack()
-{
-    if (PackLeader)
-    {
-        PackLeader->PackMembers.Remove(this);
-        PackLeader = nullptr;
-    }
-    
-    // Disband pack if leader leaves
-    if (bIsPackLeader)
-    {
-        for (UNPC_DinosaurBehaviorManager* Member : PackMembers)
-        {
-            if (Member)
-            {
-                Member->PackLeader = nullptr;
-            }
-        }
-        PackMembers.Empty();
-        bIsPackLeader = false;
-    }
-}
-
-void UNPC_DinosaurBehaviorManager::CoordinatePackHunt(AActor* Target)
-{
-    if (!bIsPackLeader || !IsValid(Target))
-        return;
-    
-    // Coordinate pack attack
-    for (UNPC_DinosaurBehaviorManager* Member : PackMembers)
-    {
-        if (Member && Member->CurrentState != ENPC_DinosaurState::Hunting)
-        {
-            Member->SetState(ENPC_DinosaurState::Hunting);
-            Member->UpdateMemory(Target, true);
-        }
-    }
-}
-
-void UNPC_DinosaurBehaviorManager::InitializeAI()
-{
-    AIControllerRef = Cast<AAIController>(GetOwner()->GetInstigatorController());
-    if (!AIControllerRef)
-    {
-        // Try to get AI controller from pawn
-        if (APawn* OwnerPawn = Cast<APawn>(GetOwner()))
-        {
-            AIControllerRef = Cast<AAIController>(OwnerPawn->GetController());
-        }
-    }
-    
-    PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
-}
-
-void UNPC_DinosaurBehaviorManager::UpdatePerception(float DeltaTime)
-{
-    if (!AIPerceptionComponent)
-        return;
-    
-    // Check for player visibility
-    if (CanSeePlayer())
-    {
-        UpdateMemory(PlayerPawn, true);
-        
-        // React based on species and stats
-        float PlayerDistance = GetDistanceToPlayer();
-        if (PlayerDistance < Stats.AttackRange && Stats.Aggression > 50.0f)
-        {
-            SetState(ENPC_DinosaurState::Hunting);
-        }
-        else if (Stats.Fear > 30.0f)
-        {
-            SetState(ENPC_DinosaurState::Fleeing);
-        }
-    }
-}
-
-void UNPC_DinosaurBehaviorManager::HandleStateTransition()
-{
-    // State transition logic based on current conditions
-    switch (CurrentState)
-    {
-        case ENPC_DinosaurState::Idle:
-            if (Stats.Hunger < 30.0f)
-            {
-                SetState(ENPC_DinosaurState::Hunting);
-            }
-            else if (StateTimer > 10.0f) // Idle for 10 seconds
-            {
-                SetState(ENPC_DinosaurState::Patrolling);
-            }
-            break;
-            
-        case ENPC_DinosaurState::Patrolling:
-            if (CanSeePlayer() && Stats.Aggression > 40.0f)
-            {
-                SetState(ENPC_DinosaurState::Hunting);
-            }
-            else if (StateTimer > 30.0f) // Patrol for 30 seconds
-            {
-                SetState(ENPC_DinosaurState::Idle);
-            }
-            break;
-            
-        case ENPC_DinosaurState::Hunting:
-            if (Stats.Fear > 50.0f)
-            {
-                SetState(ENPC_DinosaurState::Fleeing);
-            }
-            else if (!CanSeePlayer() && StateTimer > 15.0f)
-            {
-                SetState(ENPC_DinosaurState::Patrolling);
-            }
-            break;
-            
-        case ENPC_DinosaurState::Fleeing:
-            if (Stats.Fear < 20.0f && StateTimer > 10.0f)
-            {
-                SetState(ENPC_DinosaurState::Idle);
-            }
-            break;
-            
-        case ENPC_DinosaurState::Sleeping:
-            if (Stats.Stamina > 80.0f || !IsNightTime())
-            {
-                SetState(ENPC_DinosaurState::Idle);
-            }
-            break;
-            
-        default:
-            break;
-    }
-}
-
-void UNPC_DinosaurBehaviorManager::UpdateBlackboard()
-{
-    if (!BlackboardComponent)
-        return;
-    
-    // Update blackboard values for behavior tree
-    BlackboardComponent->SetValueAsEnum(TEXT("CurrentState"), (uint8)CurrentState);
-    BlackboardComponent->SetValueAsFloat(TEXT("Health"), Stats.Health);
-    BlackboardComponent->SetValueAsFloat(TEXT("Hunger"), Stats.Hunger);
-    BlackboardComponent->SetValueAsFloat(TEXT("Fear"), Stats.Fear);
-    BlackboardComponent->SetValueAsVector(TEXT("HomeLocation"), Memory.HomeLocation);
-    
-    if (PlayerPawn)
-    {
-        BlackboardComponent->SetValueAsVector(TEXT("PlayerLocation"), PlayerPawn->GetActorLocation());
-        BlackboardComponent->SetValueAsFloat(TEXT("PlayerDistance"), GetDistanceToPlayer());
-    }
-}
-
-void UNPC_DinosaurBehaviorManager::ProcessSpeciesSpecificBehavior(float DeltaTime)
-{
-    ApplySpeciesBehavior();
-}
-
-void UNPC_DinosaurBehaviorManager::HandlePackCommunication()
-{
-    // Pack communication logic
-    if (Species == ENPC_DinosaurSpecies::Velociraptor && PackMembers.Num() > 0)
-    {
-        // Share threat information with pack
-        if (Memory.KnownThreats.Num() > 0)
-        {
-            for (UNPC_DinosaurBehaviorManager* Member : PackMembers)
-            {
-                if (Member)
-                {
-                    for (AActor* Threat : Memory.KnownThreats)
-                    {
-                        Member->UpdateMemory(Threat, true);
-                    }
-                }
-            }
-        }
-    }
-}
-
-void UNPC_DinosaurBehaviorManager::UpdateTimeOfDay(float DeltaTime)
-{
-    CurrentTimeOfDay += DeltaTime;
-    if (CurrentTimeOfDay >= DayDuration)
-    {
-        CurrentTimeOfDay = 0.0f;
-    }
+    return FleeDirection.GetSafeNormal();
 }
