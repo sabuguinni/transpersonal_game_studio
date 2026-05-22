@@ -8,85 +8,81 @@
 #include "SharedTypes.h"
 #include "World_AdvancedBiomeSystem.generated.h"
 
+UENUM(BlueprintType)
+enum class EWorld_BiomeType : uint8
+{
+    Savana      UMETA(DisplayName = "Savana"),
+    Pantano     UMETA(DisplayName = "Pantano"),
+    Floresta    UMETA(DisplayName = "Floresta"),
+    Deserto     UMETA(DisplayName = "Deserto"),
+    Montanha    UMETA(DisplayName = "Montanha")
+};
+
 USTRUCT(BlueprintType)
 struct TRANSPERSONALGAME_API FWorld_BiomeConfiguration
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Config")
-    EBiomeType BiomeType = EBiomeType::Savana;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    EWorld_BiomeType BiomeType = EWorld_BiomeType::Savana;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Config")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
     FVector CenterLocation = FVector::ZeroVector;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Config")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
     float BiomeRadius = 25000.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Config")
-    int32 VegetationDensity = 500;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    int32 TargetActorCount = 500;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Config")
-    int32 RockDensity = 200;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    float VegetationDensity = 0.8f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Config")
-    int32 DinosaurCount = 15;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    float RockDensity = 0.3f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Config")
-    TArray<FString> VegetationAssets;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    float DinosaurSpawnChance = 0.1f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Config")
-    TArray<FString> RockAssets;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Config")
-    TArray<FString> DinosaurAssets;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Config")
-    float TemperatureRange = 25.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Config")
-    float HumidityLevel = 0.5f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    TArray<FString> PreferredDinosaurSpecies;
 
     FWorld_BiomeConfiguration()
     {
-        VegetationAssets = {
-            TEXT("/Game/LandscapePackOne/Meshes/SM_Tree_01"),
-            TEXT("/Game/LandscapePackOne/Meshes/SM_Tree_02"),
-            TEXT("/Game/LandscapePackOne/Meshes/SM_Bush_01")
-        };
-        
-        RockAssets = {
-            TEXT("/Game/LandscapePackOne/Meshes/SM_Rock_01"),
-            TEXT("/Game/LandscapePackOne/Meshes/SM_Rock_02")
-        };
-        
-        DinosaurAssets = {
-            TEXT("/Game/Dinosaur_Pack/Trex/Mesh/SKM_Trex_Skin"),
-            TEXT("/Game/Dinosaur_Pack/Velociraptor/Mesh/SKM_Velociraptor_Skin")
-        };
+        PreferredDinosaurSpecies.Add("Trex");
+        PreferredDinosaurSpecies.Add("Velociraptor");
     }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FWorld_SpawnResult
+struct TRANSPERSONALGAME_API FWorld_ProceduralSpawnData
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Spawn Result")
-    int32 VegetationSpawned = 0;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn")
+    FVector SpawnLocation = FVector::ZeroVector;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Spawn Result")
-    int32 RocksSpawned = 0;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn")
+    FRotator SpawnRotation = FRotator::ZeroRotator;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Spawn Result")
-    int32 DinosaursSpawned = 0;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn")
+    FString AssetPath;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Spawn Result")
-    float ExecutionTime = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn")
+    FString ActorLabel;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Spawn Result")
-    bool bSuccess = false;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn")
+    EWorld_BiomeType TargetBiome = EWorld_BiomeType::Savana;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn")
+    bool bApplyLODOptimization = true;
 };
 
+/**
+ * Advanced Biome System for Procedural World Generation
+ * Manages 5 distinct biomes with realistic population distribution
+ * Integrates with Performance LOD system for optimal rendering
+ */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API AWorld_AdvancedBiomeSystem : public AActor
 {
@@ -98,64 +94,95 @@ public:
 protected:
     virtual void BeginPlay() override;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    class USceneComponent* RootSceneComponent;
+public:
+    virtual void Tick(float DeltaTime) override;
 
+    // Biome Configuration
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome System")
     TArray<FWorld_BiomeConfiguration> BiomeConfigurations;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Biome System")
-    TArray<FWorld_SpawnResult> SpawnResults;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome System")
+    bool bAutoPopulateBiomes = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome System")
+    float PopulationUpdateInterval = 5.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 MaxActorsPerFrame = 50;
+    bool bUseLODOptimization = true;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float SpawnDelay = 0.1f;
+    int32 MaxActorsPerFrame = 10;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Status")
-    bool bIsGenerating = false;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Status")
-    int32 CurrentBiomeIndex = 0;
-
-public:
+    // Core Functions
     UFUNCTION(BlueprintCallable, Category = "Biome System")
-    void InitializeAllBiomes();
+    void InitializeBiomes();
 
     UFUNCTION(BlueprintCallable, Category = "Biome System")
-    void GenerateBiome(const FWorld_BiomeConfiguration& Config);
+    void PopulateBiome(EWorld_BiomeType BiomeType);
 
     UFUNCTION(BlueprintCallable, Category = "Biome System")
-    FWorld_SpawnResult PopulateBiomeArea(const FWorld_BiomeConfiguration& Config);
+    void PopulateAllBiomes();
 
     UFUNCTION(BlueprintCallable, Category = "Biome System")
-    void SpawnVegetationInArea(const FVector& Center, float Radius, const TArray<FString>& Assets, int32 Count);
+    FWorld_BiomeConfiguration GetBiomeConfiguration(EWorld_BiomeType BiomeType) const;
 
     UFUNCTION(BlueprintCallable, Category = "Biome System")
-    void SpawnRocksInArea(const FVector& Center, float Radius, const TArray<FString>& Assets, int32 Count);
+    int32 GetActorCountInBiome(EWorld_BiomeType BiomeType) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Biome System")
-    void SpawnDinosaursInArea(const FVector& Center, float Radius, const TArray<FString>& Assets, int32 Count);
+    UFUNCTION(BlueprintCallable, Category = "Spawning")
+    AActor* SpawnProceduralActor(const FWorld_ProceduralSpawnData& SpawnData);
 
-    UFUNCTION(BlueprintCallable, Category = "Biome System")
-    FVector GetRandomLocationInRadius(const FVector& Center, float Radius);
+    UFUNCTION(BlueprintCallable, Category = "Spawning")
+    void SpawnDinosaurInBiome(EWorld_BiomeType BiomeType, const FString& DinosaurSpecies);
 
-    UFUNCTION(BlueprintCallable, Category = "Biome System")
-    bool IsLocationValid(const FVector& Location);
+    UFUNCTION(BlueprintCallable, Category = "Spawning")
+    void SpawnVegetationInBiome(EWorld_BiomeType BiomeType, int32 Count);
 
-    UFUNCTION(BlueprintCallable, Category = "Biome System", CallInEditor)
-    void SetupDefaultBiomes();
+    UFUNCTION(BlueprintCallable, Category = "Spawning")
+    void SpawnRocksInBiome(EWorld_BiomeType BiomeType, int32 Count);
 
-    UFUNCTION(BlueprintCallable, Category = "Biome System", CallInEditor)
-    void ClearAllBiomeActors();
+    // Utility Functions
+    UFUNCTION(BlueprintCallable, Category = "Utility")
+    FVector GetRandomLocationInBiome(EWorld_BiomeType BiomeType) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Debug")
-    void LogBiomeStatus();
+    UFUNCTION(BlueprintCallable, Category = "Utility")
+    EWorld_BiomeType GetBiomeAtLocation(const FVector& Location) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Utility")
+    bool IsLocationInBiome(const FVector& Location, EWorld_BiomeType BiomeType) const;
+
+    // Performance Integration
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void RegisterActorWithLODManager(AActor* Actor);
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void OptimizeAllBiomeActors();
+
+    // Editor Functions
+    UFUNCTION(CallInEditor, Category = "Editor")
+    void EditorPopulateAllBiomes();
+
+    UFUNCTION(CallInEditor, Category = "Editor")
+    void EditorClearAllBiomes();
+
+    UFUNCTION(CallInEditor, Category = "Editor")
+    void EditorValidateBiomePopulation();
 
 private:
-    void CreateDefaultBiomeConfigurations();
-    AActor* SpawnActorFromAssetPath(const FString& AssetPath, const FVector& Location, const FRotator& Rotation = FRotator::ZeroRotator);
-    FTimerHandle GenerationTimerHandle;
-    void ContinueGeneration();
+    // Internal state
+    float LastPopulationUpdate = 0.0f;
+    int32 CurrentProcessingBiome = 0;
+    bool bIsPopulating = false;
+
+    // Asset paths for procedural spawning
+    TArray<FString> VegetationAssetPaths;
+    TArray<FString> RockAssetPaths;
+    TArray<FString> DinosaurAssetPaths;
+
+    // Helper functions
+    void InitializeAssetPaths();
+    void ProcessBiomePopulation();
+    FVector GetValidSpawnLocation(const FVector& BaseLocation, float Radius) const;
+    bool ValidateAssetPath(const FString& AssetPath) const;
+    void ApplyBiomeSpecificSettings(AActor* Actor, EWorld_BiomeType BiomeType);
 };
