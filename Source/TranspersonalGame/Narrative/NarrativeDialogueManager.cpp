@@ -1,178 +1,270 @@
 #include "NarrativeDialogueManager.h"
-#include "Engine/DataTable.h"
 #include "Engine/World.h"
+#include "Engine/Engine.h"
 #include "Kismet/GameplayStatics.h"
+#include "Components/AudioComponent.h"
+#include "Sound/SoundBase.h"
 
 UNarrativeDialogueManager::UNarrativeDialogueManager()
 {
-    DialogueDataTable = nullptr;
+    CurrentContext = ENarr_NarrativeContext::Exploration;
+    LastNarrativeTime = 0.0f;
+    NarrativeCooldown = 5.0f;
 }
 
 void UNarrativeDialogueManager::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
     
-    LoadDialogueData();
+    UE_LOG(LogTemp, Warning, TEXT("NarrativeDialogueManager: Initializing narrative system"));
     
-    // Initialize default context
-    CurrentContext.CurrentBiome = ENarr_BiomeType::Savana;
-    CurrentContext.TimeOfDay = ENarr_TimeOfDay::Day;
-    CurrentContext.ThreatLevel = 0.0f;
-    CurrentContext.SurvivalDays = 0;
+    LoadDefaultDialogues();
+    LoadDefaultNarrativeEvents();
     
-    UE_LOG(LogTemp, Warning, TEXT("NarrativeDialogueManager initialized"));
+    // Initialize story flags
+    StoryFlags.Add("FirstPlay", true);
+    StoryFlags.Add("TutorialComplete", false);
+    StoryFlags.Add("FirstDinosaurSeen", false);
+    StoryFlags.Add("FirstCombat", false);
+    StoryFlags.Add("SavanaExplored", false);
+    StoryFlags.Add("ForestExplored", false);
 }
 
 void UNarrativeDialogueManager::Deinitialize()
 {
-    PlayedDialogues.Empty();
+    DialogueDatabase.Empty();
+    NarrativeEvents.Empty();
+    StoryFlags.Empty();
+    
     Super::Deinitialize();
 }
 
-void UNarrativeDialogueManager::LoadDialogueData()
+void UNarrativeDialogueManager::PlayDialogue(const FString& DialogueID, AActor* Speaker)
 {
-    // In a real implementation, this would load from a DataTable asset
-    // For now, we'll create some default entries programmatically
-    UE_LOG(LogTemp, Warning, TEXT("Loading dialogue data..."));
-}
-
-void UNarrativeDialogueManager::TriggerDialogue(const FString& DialogueID, const FNarr_NarrativeContext& Context)
-{
-    if (!DialogueDataTable)
+    if (!CanPlayNarrative())
     {
-        UE_LOG(LogTemp, Warning, TEXT("No dialogue data table found"));
         return;
     }
 
-    FNarr_DialogueEntry* Entry = DialogueDataTable->FindRow<FNarr_DialogueEntry>(FName(*DialogueID), TEXT(""));
+    const FNarr_DialogueEntry* Entry = DialogueDatabase.Find(DialogueID);
     if (!Entry)
     {
-        UE_LOG(LogTemp, Warning, TEXT("Dialogue entry not found: %s"), *DialogueID);
+        UE_LOG(LogTemp, Warning, TEXT("NarrativeDialogueManager: Dialogue not found: %s"), *DialogueID);
         return;
     }
 
-    if (ShouldPlayDialogue(*Entry, Context))
+    // Check required flags
+    for (const FString& Flag : Entry->RequiredFlags)
     {
-        OnDialogueTriggered.Broadcast(*Entry, Context);
-        
-        if (!Entry->bIsRepeatable)
+        if (!GetStoryFlag(Flag))
         {
-            PlayedDialogues.AddUnique(DialogueID);
+            UE_LOG(LogTemp, Log, TEXT("NarrativeDialogueManager: Dialogue %s blocked by flag: %s"), *DialogueID, *Flag);
+            return;
         }
-        
-        UE_LOG(LogTemp, Log, TEXT("Triggered dialogue: %s - %s"), *Entry->SpeakerName.ToString(), *Entry->DialogueText.ToString());
     }
+
+    // Display dialogue text
+    if (GEngine)
+    {
+        FString DisplayText = FString::Printf(TEXT("%s: %s"), *Entry->SpeakerName, *Entry->DialogueText.ToString());
+        GEngine->AddOnScreenDebugMessage(-1, Entry->Duration, FColor::Yellow, DisplayText);
+    }
+
+    // Play audio if available
+    if (!Entry->AudioPath.IsEmpty())
+    {
+        PlayAudioForDialogue(Entry->AudioPath);
+    }
+
+    // Set flags
+    for (const FString& Flag : Entry->SetFlags)
+    {
+        SetStoryFlag(Flag, true);
+    }
+
+    LastNarrativeTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
+    
+    UE_LOG(LogTemp, Log, TEXT("NarrativeDialogueManager: Played dialogue: %s"), *DialogueID);
 }
 
-void UNarrativeDialogueManager::TriggerContextualDialogue(ENarr_DialogueTrigger TriggerType, const FNarr_NarrativeContext& Context)
+void UNarrativeDialogueManager::RegisterDialogueEntry(const FNarr_DialogueEntry& Entry)
 {
-    TArray<FNarr_DialogueEntry> ContextualDialogues = GetContextualDialogues(TriggerType, Context);
-    
-    if (ContextualDialogues.Num() == 0)
+    DialogueDatabase.Add(Entry.DialogueID, Entry);
+    UE_LOG(LogTemp, Log, TEXT("NarrativeDialogueManager: Registered dialogue: %s"), *Entry.DialogueID);
+}
+
+bool UNarrativeDialogueManager::HasDialogue(const FString& DialogueID) const
+{
+    return DialogueDatabase.Contains(DialogueID);
+}
+
+void UNarrativeDialogueManager::TriggerNarrativeEvent(const FString& EventID, ENarr_NarrativeContext Context)
+{
+    if (!CanPlayNarrative())
     {
         return;
     }
 
-    // Sort by priority and select the highest priority dialogue
-    ContextualDialogues.Sort([&](const FNarr_DialogueEntry& A, const FNarr_DialogueEntry& B) {
-        float PriorityA = CalculateDialoguePriority(A, Context);
-        float PriorityB = CalculateDialoguePriority(B, Context);
-        return PriorityA > PriorityB;
-    });
-
-    const FNarr_DialogueEntry& SelectedDialogue = ContextualDialogues[0];
-    TriggerDialogue(SelectedDialogue.DialogueID, Context);
-}
-
-void UNarrativeDialogueManager::UpdateNarrativeContext(const FNarr_NarrativeContext& NewContext)
-{
-    FNarr_NarrativeContext PreviousContext = CurrentContext;
-    CurrentContext = NewContext;
-
-    // Check for context changes that should trigger dialogue
-    if (PreviousContext.CurrentBiome != NewContext.CurrentBiome)
+    const FNarr_NarrativeEvent* Event = NarrativeEvents.Find(EventID);
+    if (!Event)
     {
-        TriggerContextualDialogue(ENarr_DialogueTrigger::BiomeEnter, NewContext);
+        UE_LOG(LogTemp, Warning, TEXT("NarrativeDialogueManager: Narrative event not found: %s"), *EventID);
+        return;
     }
 
-    if (PreviousContext.ThreatLevel < 0.5f && NewContext.ThreatLevel >= 0.5f)
+    // Check context relevance
+    if (Event->Context != ENarr_NarrativeContext::Any && Event->Context != Context)
     {
-        TriggerContextualDialogue(ENarr_DialogueTrigger::ThreatDetected, NewContext);
+        return;
     }
 
-    if (PreviousContext.TimeOfDay != NewContext.TimeOfDay)
+    // Display narrative text
+    if (GEngine)
     {
-        TriggerContextualDialogue(ENarr_DialogueTrigger::TimeChange, NewContext);
-    }
-}
-
-FNarr_DialogueEntry UNarrativeDialogueManager::GetDialogueEntry(const FString& DialogueID) const
-{
-    if (!DialogueDataTable)
-    {
-        return FNarr_DialogueEntry();
+        GEngine->AddOnScreenDebugMessage(-1, 4.0f, FColor::Cyan, Event->EventText.ToString());
     }
 
-    FNarr_DialogueEntry* Entry = DialogueDataTable->FindRow<FNarr_DialogueEntry>(FName(*DialogueID), TEXT(""));
-    if (Entry)
-    {
-        return *Entry;
-    }
-
-    return FNarr_DialogueEntry();
-}
-
-TArray<FNarr_DialogueEntry> UNarrativeDialogueManager::GetContextualDialogues(ENarr_DialogueTrigger TriggerType, const FNarr_NarrativeContext& Context) const
-{
-    TArray<FNarr_DialogueEntry> Result;
+    LastNarrativeTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
     
-    if (!DialogueDataTable)
-    {
-        return Result;
-    }
-
-    // Get all dialogue entries
-    TArray<FNarr_DialogueEntry*> AllEntries;
-    DialogueDataTable->GetAllRows<FNarr_DialogueEntry>(TEXT(""), AllEntries);
-
-    for (FNarr_DialogueEntry* Entry : AllEntries)
-    {
-        if (Entry && Entry->TriggerType == TriggerType && ShouldPlayDialogue(*Entry, Context))
-        {
-            Result.Add(*Entry);
-        }
-    }
-
-    return Result;
+    UE_LOG(LogTemp, Log, TEXT("NarrativeDialogueManager: Triggered narrative event: %s"), *EventID);
 }
 
-bool UNarrativeDialogueManager::ShouldPlayDialogue(const FNarr_DialogueEntry& Entry, const FNarr_NarrativeContext& Context) const
+void UNarrativeDialogueManager::RegisterNarrativeEvent(const FNarr_NarrativeEvent& Event)
 {
-    // Check if dialogue was already played and is not repeatable
-    if (!Entry.bIsRepeatable && PlayedDialogues.Contains(Entry.DialogueID))
+    NarrativeEvents.Add(Event.EventID, Event);
+    UE_LOG(LogTemp, Log, TEXT("NarrativeDialogueManager: Registered narrative event: %s"), *Event.EventID);
+}
+
+void UNarrativeDialogueManager::SetStoryFlag(const FString& FlagName, bool bValue)
+{
+    StoryFlags.Add(FlagName, bValue);
+    UE_LOG(LogTemp, Log, TEXT("NarrativeDialogueManager: Set story flag %s = %s"), *FlagName, bValue ? TEXT("true") : TEXT("false"));
+}
+
+bool UNarrativeDialogueManager::GetStoryFlag(const FString& FlagName) const
+{
+    const bool* Flag = StoryFlags.Find(FlagName);
+    return Flag ? *Flag : false;
+}
+
+void UNarrativeDialogueManager::ClearStoryFlag(const FString& FlagName)
+{
+    StoryFlags.Remove(FlagName);
+    UE_LOG(LogTemp, Log, TEXT("NarrativeDialogueManager: Cleared story flag: %s"), *FlagName);
+}
+
+void UNarrativeDialogueManager::UpdateNarrativeContext(ENarr_NarrativeContext NewContext)
+{
+    if (CurrentContext != NewContext)
+    {
+        CurrentContext = NewContext;
+        UE_LOG(LogTemp, Log, TEXT("NarrativeDialogueManager: Context changed to: %d"), (int32)NewContext);
+    }
+}
+
+void UNarrativeDialogueManager::OnPlayerHealthCritical()
+{
+    TriggerNarrativeEvent("HealthCritical", ENarr_NarrativeContext::Combat);
+}
+
+void UNarrativeDialogueManager::OnDinosaurEncounter(const FString& DinosaurType, float Distance)
+{
+    if (!GetStoryFlag("FirstDinosaurSeen"))
+    {
+        SetStoryFlag("FirstDinosaurSeen", true);
+        TriggerNarrativeEvent("FirstDinosaurSighting", ENarr_NarrativeContext::Exploration);
+    }
+    
+    if (Distance < 500.0f)
+    {
+        FString EventID = FString::Printf(TEXT("DinosaurClose_%s"), *DinosaurType);
+        TriggerNarrativeEvent(EventID, ENarr_NarrativeContext::Combat);
+    }
+}
+
+void UNarrativeDialogueManager::OnBiomeEntered(const FString& BiomeName)
+{
+    FString FlagName = FString::Printf(TEXT("%sExplored"), *BiomeName);
+    if (!GetStoryFlag(FlagName))
+    {
+        SetStoryFlag(FlagName, true);
+        
+        FString EventID = FString::Printf(TEXT("Enter_%s"), *BiomeName);
+        TriggerNarrativeEvent(EventID, ENarr_NarrativeContext::Exploration);
+    }
+}
+
+void UNarrativeDialogueManager::LoadDefaultDialogues()
+{
+    // Tutorial dialogues
+    FNarr_DialogueEntry TutorialStart;
+    TutorialStart.DialogueID = "Tutorial_Start";
+    TutorialStart.SpeakerName = "Narrator";
+    TutorialStart.DialogueText = FText::FromString("Welcome to the Cretaceous period. Your survival depends on understanding this ancient world.");
+    TutorialStart.Duration = 4.0f;
+    TutorialStart.SetFlags.Add("TutorialStarted");
+    RegisterDialogueEntry(TutorialStart);
+
+    // Combat dialogues
+    FNarr_DialogueEntry CombatWarning;
+    CombatWarning.DialogueID = "Combat_Warning";
+    CombatWarning.SpeakerName = "Instinct";
+    CombatWarning.DialogueText = FText::FromString("Danger approaches. Trust your instincts and prepare for battle.");
+    CombatWarning.Duration = 3.0f;
+    RegisterDialogueEntry(CombatWarning);
+
+    // Discovery dialogues
+    FNarr_DialogueEntry FirstTool;
+    FirstTool.DialogueID = "Discovery_FirstTool";
+    FirstTool.SpeakerName = "Narrator";
+    FirstTool.DialogueText = FText::FromString("Stone and bone - the building blocks of survival. Craft wisely.");
+    FirstTool.Duration = 3.5f;
+    RegisterDialogueEntry(FirstTool);
+}
+
+void UNarrativeDialogueManager::LoadDefaultNarrativeEvents()
+{
+    // Exploration events
+    FNarr_NarrativeEvent ValleyEntry;
+    ValleyEntry.EventID = "Enter_Valley";
+    ValleyEntry.EventText = FText::FromString("The ancient valley stretches before you, filled with both wonder and peril.");
+    ValleyEntry.Context = ENarr_NarrativeContext::Exploration;
+    ValleyEntry.Priority = 1.0f;
+    RegisterNarrativeEvent(ValleyEntry);
+
+    // Combat events
+    FNarr_NarrativeEvent HealthCritical;
+    HealthCritical.EventID = "HealthCritical";
+    HealthCritical.EventText = FText::FromString("Your body weakens. Find shelter and tend to your wounds before it's too late.");
+    HealthCritical.Context = ENarr_NarrativeContext::Combat;
+    HealthCritical.Priority = 3.0f;
+    RegisterNarrativeEvent(HealthCritical);
+
+    // Discovery events
+    FNarr_NarrativeEvent FirstDinosaur;
+    FirstDinosaur.EventID = "FirstDinosaurSighting";
+    FirstDinosaur.EventText = FText::FromString("A magnificent creature from Earth's distant past. Observe carefully - knowledge is survival.");
+    FirstDinosaur.Context = ENarr_NarrativeContext::Exploration;
+    FirstDinosaur.Priority = 2.0f;
+    RegisterNarrativeEvent(FirstDinosaur);
+}
+
+bool UNarrativeDialogueManager::CanPlayNarrative() const
+{
+    if (!GetWorld())
     {
         return false;
     }
 
-    // Add contextual checks here based on biome, threat level, etc.
-    // For now, allow all dialogues
-    return true;
+    float CurrentTime = GetWorld()->GetTimeSeconds();
+    return (CurrentTime - LastNarrativeTime) >= NarrativeCooldown;
 }
 
-float UNarrativeDialogueManager::CalculateDialoguePriority(const FNarr_DialogueEntry& Entry, const FNarr_NarrativeContext& Context) const
+void UNarrativeDialogueManager::PlayAudioForDialogue(const FString& AudioPath)
 {
-    float Priority = Entry.Priority;
-
-    // Increase priority based on context relevance
-    if (Context.ThreatLevel > 0.7f && Entry.DialogueID.Contains(TEXT("threat")))
-    {
-        Priority += 2.0f;
-    }
-
-    if (Context.SurvivalDays == 0 && Entry.DialogueID.Contains(TEXT("tutorial")))
-    {
-        Priority += 1.5f;
-    }
-
-    return Priority;
+    // Load and play audio - implementation depends on audio system
+    UE_LOG(LogTemp, Log, TEXT("NarrativeDialogueManager: Playing audio: %s"), *AudioPath);
+    
+    // For now, just log the audio path
+    // In a full implementation, this would load and play the actual audio file
 }
