@@ -2,148 +2,124 @@
 
 #include "CoreMinimal.h"
 #include "Engine/GameInstanceSubsystem.h"
-#include "SharedTypes.h"
 #include "BuildIntegrationReport.generated.h"
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FBuild_CompilationResult
+struct TRANSPERSONALGAME_API FBuild_SystemStatus
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Build")
-    bool bCompilationSuccessful = false;
+    UPROPERTY(BlueprintReadOnly, Category = "Build Status")
+    FString SystemName;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Build")
-    int32 ErrorCount = 0;
+    UPROPERTY(BlueprintReadOnly, Category = "Build Status")
+    bool bIsCompiled;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Build")
-    int32 WarningCount = 0;
+    UPROPERTY(BlueprintReadOnly, Category = "Build Status")
+    bool bIsLoaded;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Build")
-    TArray<FString> ErrorMessages;
+    UPROPERTY(BlueprintReadOnly, Category = "Build Status")
+    int32 ActorCount;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Build")
-    TArray<FString> WarningMessages;
+    UPROPERTY(BlueprintReadOnly, Category = "Build Status")
+    FString LastError;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Build")
-    float CompilationTimeSeconds = 0.0f;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Build")
-    FString BuildConfiguration;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Build")
-    FDateTime CompilationTimestamp;
+    FBuild_SystemStatus()
+    {
+        SystemName = TEXT("");
+        bIsCompiled = false;
+        bIsLoaded = false;
+        ActorCount = 0;
+        LastError = TEXT("");
+    }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FBuild_ModuleIntegrationStatus
+struct TRANSPERSONALGAME_API FBuild_IntegrationReport
 {
     GENERATED_BODY()
 
     UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    FString ModuleName;
+    FString CycleId;
 
     UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    bool bIsLoaded = false;
+    FDateTime ReportTime;
 
     UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    bool bHasValidClasses = false;
+    int32 TotalSourceFiles;
 
     UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    int32 ClassCount = 0;
+    int32 CompiledBinaries;
 
     UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    TArray<FString> LoadedClasses;
+    int32 LoadedClasses;
 
     UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    TArray<FString> FailedClasses;
+    int32 TotalActors;
 
     UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    bool bHasDependencyIssues = false;
+    int32 DinosaurActors;
 
     UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    TArray<FString> MissingDependencies;
+    int32 EnvironmentActors;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    TArray<FBuild_SystemStatus> SystemStatuses;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    bool bMapSaved;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    bool bAllSystemsOperational;
+
+    FBuild_IntegrationReport()
+    {
+        CycleId = TEXT("");
+        ReportTime = FDateTime::Now();
+        TotalSourceFiles = 0;
+        CompiledBinaries = 0;
+        LoadedClasses = 0;
+        TotalActors = 0;
+        DinosaurActors = 0;
+        EnvironmentActors = 0;
+        bMapSaved = false;
+        bAllSystemsOperational = false;
+    }
 };
 
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FBuild_SystemIntegrationReport
-{
-    GENERATED_BODY()
-
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    FBuild_CompilationResult CompilationResult;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    TArray<FBuild_ModuleIntegrationStatus> ModuleStatuses;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    bool bAllSystemsIntegrated = false;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    int32 TotalModulesChecked = 0;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    int32 SuccessfulModules = 0;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    int32 FailedModules = 0;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    FString OverallStatus;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    TArray<FString> CriticalIssues;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    TArray<FString> Recommendations;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    FDateTime ReportGeneratedAt;
-};
-
-UCLASS(BlueprintType)
-class TRANSPERSONALGAME_API UBuildIntegrationReportSubsystem : public UGameInstanceSubsystem
+/**
+ * Build Integration Report Subsystem
+ * Tracks compilation status, system health, and integration metrics
+ */
+UCLASS()
+class TRANSPERSONALGAME_API UBuildIntegrationReport : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
 public:
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
-    virtual void Deinitialize() override;
 
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    FBuild_SystemIntegrationReport GenerateIntegrationReport();
+    FBuild_IntegrationReport GenerateIntegrationReport(const FString& CycleId);
 
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    bool ValidateModuleIntegration(const FString& ModuleName, FBuild_ModuleIntegrationStatus& OutStatus);
+    bool ValidateSystemIntegration();
 
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    bool CheckCompilationStatus(FBuild_CompilationResult& OutResult);
+    TArray<FBuild_SystemStatus> GetSystemStatuses();
 
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    void SaveReportToFile(const FBuild_SystemIntegrationReport& Report, const FString& FilePath);
-
-    UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    TArray<FString> GetAvailableModules() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    bool IsModuleLoaded(const FString& ModuleName) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    void RefreshModuleStatus();
+    void LogIntegrationMetrics(const FBuild_IntegrationReport& Report);
 
 protected:
     UPROPERTY()
-    FBuild_SystemIntegrationReport LastGeneratedReport;
+    TArray<FBuild_IntegrationReport> ReportHistory;
 
     UPROPERTY()
-    TMap<FString, FBuild_ModuleIntegrationStatus> CachedModuleStatuses;
-
-    UPROPERTY()
-    bool bReportCacheValid = false;
+    FBuild_IntegrationReport LastReport;
 
 private:
-    void ValidateAllModules();
-    void CheckClassAvailability(const FString& ModuleName, FBuild_ModuleIntegrationStatus& Status);
-    void AnalyzeDependencies(const FString& ModuleName, FBuild_ModuleIntegrationStatus& Status);
-    FString GetModuleStatusSummary(const FBuild_ModuleIntegrationStatus& Status) const;
+    FBuild_SystemStatus CheckSystemStatus(const FString& SystemName, const FString& ClassPath);
+    int32 CountActorsByType(const FString& ActorType);
+    bool ValidateMapPersistence();
 };
