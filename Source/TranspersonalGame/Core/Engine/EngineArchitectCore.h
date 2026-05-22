@@ -4,21 +4,64 @@
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "GameFramework/GameModeBase.h"
-#include "GameFramework/Character.h"
 #include "GameFramework/PlayerController.h"
-#include "Components/StaticMeshComponent.h"
-#include "Components/SkeletalMeshComponent.h"
-#include "PhysicsEngine/BodySetup.h"
-#include "CollisionQueryParams.h"
-#include "Engine/CollisionProfile.h"
-#include "../../SharedTypes.h"
+#include "Components/ActorComponent.h"
+#include "Subsystems/GameInstanceSubsystem.h"
+#include "Subsystems/WorldSubsystem.h"
 #include "EngineArchitectCore.generated.h"
 
-/**
- * Engine Architect Core System
- * Defines the fundamental technical architecture for the Transpersonal Game Studio
- * Establishes physics, collision, performance, and system integration rules
- */
+class UTranspersonalGameInstance;
+class ATranspersonalGameMode;
+class ATranspersonalCharacter;
+
+UENUM(BlueprintType)
+enum class EEng_SystemPriority : uint8
+{
+    Critical = 0,
+    High = 1,
+    Medium = 2,
+    Low = 3
+};
+
+UENUM(BlueprintType)
+enum class EEng_ModuleState : uint8
+{
+    Uninitialized = 0,
+    Initializing = 1,
+    Active = 2,
+    Error = 3,
+    Shutdown = 4
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FEng_SystemInfo
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadOnly, Category = "System")
+    FString SystemName;
+
+    UPROPERTY(BlueprintReadOnly, Category = "System")
+    EEng_SystemPriority Priority;
+
+    UPROPERTY(BlueprintReadOnly, Category = "System")
+    EEng_ModuleState State;
+
+    UPROPERTY(BlueprintReadOnly, Category = "System")
+    float LastUpdateTime;
+
+    UPROPERTY(BlueprintReadOnly, Category = "System")
+    int32 ErrorCount;
+
+    FEng_SystemInfo()
+    {
+        SystemName = TEXT("Unknown");
+        Priority = EEng_SystemPriority::Medium;
+        State = EEng_ModuleState::Uninitialized;
+        LastUpdateTime = 0.0f;
+        ErrorCount = 0;
+    }
+};
 
 USTRUCT(BlueprintType)
 struct TRANSPERSONALGAME_API FEng_PerformanceMetrics
@@ -29,174 +72,145 @@ struct TRANSPERSONALGAME_API FEng_PerformanceMetrics
     float FrameRate;
 
     UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float FrameTime;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
     int32 ActorCount;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    int32 ComponentCount;
 
     UPROPERTY(BlueprintReadOnly, Category = "Performance")
     float MemoryUsageMB;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    int32 DrawCalls;
-
     FEng_PerformanceMetrics()
     {
-        FrameRate = 60.0f;
+        FrameRate = 0.0f;
+        FrameTime = 0.0f;
         ActorCount = 0;
+        ComponentCount = 0;
         MemoryUsageMB = 0.0f;
-        DrawCalls = 0;
     }
-};
-
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEng_PhysicsSettings
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
-    float GravityScale;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
-    float LinearDamping;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
-    float AngularDamping;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
-    bool bEnablePhysicsSimulation;
-
-    FEng_PhysicsSettings()
-    {
-        GravityScale = 1.0f;
-        LinearDamping = 0.01f;
-        AngularDamping = 0.01f;
-        bEnablePhysicsSimulation = true;
-    }
-};
-
-UENUM(BlueprintType)
-enum class EEng_CollisionPreset : uint8
-{
-    DinosaurBody        UMETA(DisplayName = "Dinosaur Body"),
-    DinosaurTrigger     UMETA(DisplayName = "Dinosaur Trigger Zone"),
-    PlayerCharacter     UMETA(DisplayName = "Player Character"),
-    Environment         UMETA(DisplayName = "Environment"),
-    Projectile          UMETA(DisplayName = "Projectile"),
-    Interactable        UMETA(DisplayName = "Interactable Object")
-};
-
-UENUM(BlueprintType)
-enum class EEng_SystemPriority : uint8
-{
-    Critical            UMETA(DisplayName = "Critical"),
-    High                UMETA(DisplayName = "High"),
-    Normal              UMETA(DisplayName = "Normal"),
-    Low                 UMETA(DisplayName = "Low")
 };
 
 /**
- * Core Engine Architecture Manager
- * Manages performance, physics, and system integration across all game modules
+ * Engine Architect Core System
+ * Manages the technical architecture and system coordination for the entire game
+ * Validates module dependencies, performance metrics, and system integrity
  */
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UEngineArchitectCore : public UObject
+class TRANSPERSONALGAME_API UEngineArchitectCore : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
 public:
     UEngineArchitectCore();
 
-    // Performance Management
+    // USubsystem interface
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
+
+    // System Registration
     UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    FEng_PerformanceMetrics GetCurrentPerformanceMetrics();
+    void RegisterSystem(const FString& SystemName, EEng_SystemPriority Priority);
 
     UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    bool ValidatePerformanceThresholds();
+    void UnregisterSystem(const FString& SystemName);
 
     UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    void OptimizeWorldActors();
+    bool IsSystemRegistered(const FString& SystemName) const;
 
-    // Physics Integration
+    // System State Management
     UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    void SetupDinosaurPhysics(AActor* DinosaurActor);
-
-    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    void ConfigureCollisionPreset(UPrimitiveComponent* Component, EEng_CollisionPreset Preset);
+    void SetSystemState(const FString& SystemName, EEng_ModuleState NewState);
 
     UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    bool ValidatePhysicsIntegrity();
-
-    // System Architecture
-    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    void RegisterSystemModule(const FString& ModuleName, EEng_SystemPriority Priority);
+    EEng_ModuleState GetSystemState(const FString& SystemName) const;
 
     UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    void ValidateModuleDependencies();
+    TArray<FEng_SystemInfo> GetAllSystemInfo() const;
+
+    // Performance Monitoring
+    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
+    FEng_PerformanceMetrics GetCurrentPerformanceMetrics() const;
 
     UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    bool CheckSystemIntegrity();
+    void UpdatePerformanceMetrics();
 
-    // World State Management
+    // Validation
     UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    void InitializeWorldSystems();
-
-    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    void ValidateWorldState();
+    bool ValidateSystemIntegrity();
 
     UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    int32 GetActiveActorCount();
+    TArray<FString> GetSystemErrors() const;
+
+    // Debug
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Engine Architecture")
+    void LogSystemStatus();
+
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Engine Architecture")
+    void ForceSystemValidation();
 
 protected:
-    UPROPERTY(BlueprintReadOnly, Category = "Engine Architecture")
+    UPROPERTY(BlueprintReadOnly, Category = "Systems")
+    TMap<FString, FEng_SystemInfo> RegisteredSystems;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
     FEng_PerformanceMetrics CurrentMetrics;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Engine Architecture")
-    FEng_PhysicsSettings DefaultPhysicsSettings;
+    UPROPERTY(BlueprintReadOnly, Category = "Validation")
+    TArray<FString> ValidationErrors;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Engine Architecture")
-    TArray<FString> RegisteredModules;
+    UPROPERTY(BlueprintReadOnly, Category = "Configuration")
+    float PerformanceUpdateInterval;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Engine Architecture")
-    float TargetFrameRate;
+    UPROPERTY(BlueprintReadOnly, Category = "Configuration")
+    float MaxAllowedFrameTime;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Engine Architecture")
+    UPROPERTY(BlueprintReadOnly, Category = "Configuration")
     int32 MaxActorCount;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Engine Architecture")
-    float MaxMemoryUsageMB;
-
 private:
-    void UpdatePerformanceMetrics();
-    void ApplyCollisionSettings(UPrimitiveComponent* Component, EEng_CollisionPreset Preset);
-    bool ValidateActorPhysics(AActor* Actor);
+    FTimerHandle PerformanceTimerHandle;
+
+    void InitializeDefaultSystems();
+    void ValidateCoreSystems();
+    void CheckPerformanceThresholds();
+    void LogError(const FString& ErrorMessage);
 };
 
 /**
- * Engine Architect Subsystem
- * World subsystem that manages engine architecture across the entire game world
+ * Engine Architect Component
+ * Can be attached to actors that need direct access to engine architecture data
  */
-UCLASS()
-class TRANSPERSONALGAME_API UEngineArchitectSubsystem : public UWorldSubsystem
+UCLASS(BlueprintType, Blueprintable, ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UEngineArchitectComponent : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
-    virtual void Deinitialize() override;
+    UEngineArchitectComponent();
+
+    virtual void BeginPlay() override;
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
     UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    UEngineArchitectCore* GetEngineArchitect();
+    UEngineArchitectCore* GetEngineCore() const;
 
     UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    void ValidateAllSystems();
+    bool IsSystemHealthy(const FString& SystemName) const;
 
     UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    bool IsSystemHealthy();
+    float GetCurrentFrameRate() const;
 
 protected:
-    UPROPERTY()
-    UEngineArchitectCore* EngineArchitect;
+    UPROPERTY(BlueprintReadOnly, Category = "Monitoring")
+    bool bMonitorPerformance;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Monitoring")
+    float MonitoringInterval;
 
 private:
-    void InitializePhysicsSettings();
-    void SetupCollisionProfiles();
-    void ValidateModuleIntegration();
+    float LastMonitoringTime;
+    UEngineArchitectCore* CachedEngineCore;
 };
