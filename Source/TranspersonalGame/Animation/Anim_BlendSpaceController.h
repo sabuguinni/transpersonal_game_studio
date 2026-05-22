@@ -1,10 +1,12 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Components/ActorComponent.h"
-#include "Animation/BlendSpace.h"
-#include "Animation/BlendSpace1D.h"
+#include "Animation/AnimInstance.h"
 #include "Engine/Engine.h"
+#include "GameFramework/Character.h"
+#include "GameFramework/CharacterMovementComponent.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "../SharedTypes.h"
 #include "Anim_BlendSpaceController.generated.h"
 
 USTRUCT(BlueprintType)
@@ -19,21 +21,25 @@ struct TRANSPERSONALGAME_API FAnim_BlendSpaceData
     float Direction = 0.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Blend Space")
-    float Lean = 0.0f;
+    float LeanAngle = 0.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Blend Space")
-    float Turn = 0.0f;
+    bool bIsMoving = false;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Blend Space")
-    float Slope = 0.0f;
+    bool bIsFalling = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Blend Space")
+    bool bIsJumping = false;
 
     FAnim_BlendSpaceData()
     {
         Speed = 0.0f;
         Direction = 0.0f;
-        Lean = 0.0f;
-        Turn = 0.0f;
-        Slope = 0.0f;
+        LeanAngle = 0.0f;
+        bIsMoving = false;
+        bIsFalling = false;
+        bIsJumping = false;
     }
 };
 
@@ -43,40 +49,41 @@ struct TRANSPERSONALGAME_API FAnim_BlendSpaceSettings
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Blend Space Settings")
-    float SpeedSmoothingRate = 5.0f;
+    float SpeedSmoothingRate = 10.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Blend Space Settings")
-    float DirectionSmoothingRate = 8.0f;
+    float DirectionSmoothingRate = 15.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Blend Space Settings")
-    float LeanSmoothingRate = 6.0f;
+    float LeanSmoothingRate = 8.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Blend Space Settings")
-    float TurnSmoothingRate = 4.0f;
+    float MinMovementSpeed = 10.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Blend Space Settings")
-    float MaxLeanAngle = 15.0f;
+    float MaxLeanAngle = 45.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Blend Space Settings")
-    float MaxTurnRate = 180.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Blend Space Settings")
-    float SlopeDetectionDistance = 200.0f;
+    bool bUseAcceleration = true;
 
     FAnim_BlendSpaceSettings()
     {
-        SpeedSmoothingRate = 5.0f;
-        DirectionSmoothingRate = 8.0f;
-        LeanSmoothingRate = 6.0f;
-        TurnSmoothingRate = 4.0f;
-        MaxLeanAngle = 15.0f;
-        MaxTurnRate = 180.0f;
-        SlopeDetectionDistance = 200.0f;
+        SpeedSmoothingRate = 10.0f;
+        DirectionSmoothingRate = 15.0f;
+        LeanSmoothingRate = 8.0f;
+        MinMovementSpeed = 10.0f;
+        MaxLeanAngle = 45.0f;
+        bUseAcceleration = true;
     }
 };
 
-UCLASS(ClassGroup=(Animation), meta=(BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UAnim_BlendSpaceController : public UActorComponent
+/**
+ * Advanced Blend Space Animation Controller for TranspersonalGame
+ * Handles 2D blend space calculations for locomotion animation
+ * Supports speed/direction blending with smooth transitions
+ */
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API UAnim_BlendSpaceController : public UAnimInstance
 {
     GENERATED_BODY()
 
@@ -84,117 +91,94 @@ public:
     UAnim_BlendSpaceController();
 
 protected:
-    virtual void BeginPlay() override;
+    // Animation Blueprint Interface
+    virtual void NativeInitializeAnimation() override;
+    virtual void NativeUpdateAnimation(float DeltaTimeX) override;
+
+    // Blend Space Data
+    UPROPERTY(BlueprintReadOnly, Category = "Blend Space", meta = (AllowPrivateAccess = "true"))
+    FAnim_BlendSpaceData BlendSpaceData;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Blend Space Settings", meta = (AllowPrivateAccess = "true"))
+    FAnim_BlendSpaceSettings BlendSpaceSettings;
+
+    // Character References
+    UPROPERTY(BlueprintReadOnly, Category = "Character", meta = (AllowPrivateAccess = "true"))
+    ACharacter* OwnerCharacter;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Character", meta = (AllowPrivateAccess = "true"))
+    UCharacterMovementComponent* MovementComponent;
+
+    // Animation State Tracking
+    UPROPERTY(BlueprintReadOnly, Category = "Animation State", meta = (AllowPrivateAccess = "true"))
+    FVector Velocity;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Animation State", meta = (AllowPrivateAccess = "true"))
+    FVector Acceleration;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Animation State", meta = (AllowPrivateAccess = "true"))
+    float GroundSpeed;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Animation State", meta = (AllowPrivateAccess = "true"))
+    bool bShouldMove;
+
+    // Smoothed Values
+    UPROPERTY(BlueprintReadOnly, Category = "Smoothed Values", meta = (AllowPrivateAccess = "true"))
+    float SmoothedSpeed;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Smoothed Values", meta = (AllowPrivateAccess = "true"))
+    float SmoothedDirection;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Smoothed Values", meta = (AllowPrivateAccess = "true"))
+    float SmoothedLeanAngle;
 
 public:
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
-
-    // Blend space data access
-    UFUNCTION(BlueprintPure, Category = "Blend Space")
-    FAnim_BlendSpaceData GetBlendSpaceData() const { return CurrentBlendData; }
-
-    UFUNCTION(BlueprintPure, Category = "Blend Space")
-    float GetSpeed() const { return CurrentBlendData.Speed; }
-
-    UFUNCTION(BlueprintPure, Category = "Blend Space")
-    float GetDirection() const { return CurrentBlendData.Direction; }
-
-    UFUNCTION(BlueprintPure, Category = "Blend Space")
-    float GetLean() const { return CurrentBlendData.Lean; }
-
-    UFUNCTION(BlueprintPure, Category = "Blend Space")
-    float GetTurn() const { return CurrentBlendData.Turn; }
-
-    UFUNCTION(BlueprintPure, Category = "Blend Space")
-    float GetSlope() const { return CurrentBlendData.Slope; }
-
-    // Manual overrides
+    // Blend Space Calculation Functions
     UFUNCTION(BlueprintCallable, Category = "Blend Space")
-    void SetSpeedOverride(float Speed, float Duration = 0.0f);
+    void UpdateBlendSpaceValues(float DeltaTime);
 
     UFUNCTION(BlueprintCallable, Category = "Blend Space")
-    void SetDirectionOverride(float Direction, float Duration = 0.0f);
+    void CalculateSpeedAndDirection();
 
     UFUNCTION(BlueprintCallable, Category = "Blend Space")
-    void ClearOverrides();
+    void CalculateLeanAngle();
 
-    // Configuration
     UFUNCTION(BlueprintCallable, Category = "Blend Space")
+    float GetBlendSpaceSpeed() const { return BlendSpaceData.Speed; }
+
+    UFUNCTION(BlueprintCallable, Category = "Blend Space")
+    float GetBlendSpaceDirection() const { return BlendSpaceData.Direction; }
+
+    UFUNCTION(BlueprintCallable, Category = "Blend Space")
+    float GetBlendSpaceLeanAngle() const { return BlendSpaceData.LeanAngle; }
+
+    // State Query Functions
+    UFUNCTION(BlueprintCallable, Category = "Animation State")
+    bool IsMoving() const { return BlendSpaceData.bIsMoving; }
+
+    UFUNCTION(BlueprintCallable, Category = "Animation State")
+    bool IsFalling() const { return BlendSpaceData.bIsFalling; }
+
+    UFUNCTION(BlueprintCallable, Category = "Animation State")
+    bool IsJumping() const { return BlendSpaceData.bIsJumping; }
+
+    // Configuration Functions
+    UFUNCTION(BlueprintCallable, Category = "Configuration")
     void SetBlendSpaceSettings(const FAnim_BlendSpaceSettings& NewSettings);
 
-    UFUNCTION(BlueprintPure, Category = "Blend Space")
-    FAnim_BlendSpaceSettings GetBlendSpaceSettings() const { return Settings; }
+    UFUNCTION(BlueprintCallable, Category = "Configuration")
+    FAnim_BlendSpaceSettings GetBlendSpaceSettings() const { return BlendSpaceSettings; }
 
-    // Utility functions
-    UFUNCTION(BlueprintCallable, Category = "Blend Space")
-    void ResetBlendData();
-
-    UFUNCTION(BlueprintCallable, Category = "Blend Space")
-    void SetSmoothingEnabled(bool bEnabled);
-
-protected:
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Blend Space")
-    FAnim_BlendSpaceData CurrentBlendData;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Blend Space")
-    FAnim_BlendSpaceData TargetBlendData;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Blend Space Settings")
-    FAnim_BlendSpaceSettings Settings;
-
-    // Component references
-    UPROPERTY()
-    class ACharacter* OwnerCharacter;
-
-    UPROPERTY()
-    class UCharacterMovementComponent* MovementComponent;
-
-    UPROPERTY()
-    class UAnim_StateManager* StateManager;
-
-    // Override system
-    UPROPERTY()
-    bool bSpeedOverride = false;
-
-    UPROPERTY()
-    bool bDirectionOverride = false;
-
-    UPROPERTY()
-    float SpeedOverrideValue = 0.0f;
-
-    UPROPERTY()
-    float DirectionOverrideValue = 0.0f;
-
-    UPROPERTY()
-    float SpeedOverrideEndTime = 0.0f;
-
-    UPROPERTY()
-    float DirectionOverrideEndTime = 0.0f;
-
-    // Smoothing control
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Blend Space Settings")
-    bool bSmoothingEnabled = true;
-
-    // Previous frame data for calculations
-    UPROPERTY()
-    FVector PreviousVelocity;
-
-    UPROPERTY()
-    FRotator PreviousRotation;
-
-    UPROPERTY()
-    float PreviousSpeed = 0.0f;
+    // Debug Functions
+    UFUNCTION(BlueprintCallable, Category = "Debug")
+    void LogBlendSpaceData() const;
 
 private:
-    void CacheComponentReferences();
-    void UpdateTargetBlendData();
-    void SmoothBlendData(float DeltaTime);
-    void UpdateSpeedAndDirection();
-    void UpdateLeanAndTurn(float DeltaTime);
-    void UpdateSlope();
-    void ProcessOverrides();
-    float CalculateDirectionFromVelocity(const FVector& Velocity, const FRotator& ActorRotation) const;
-    float CalculateLeanFromAcceleration(const FVector& Acceleration) const;
-    float CalculateTurnRate(const FRotator& CurrentRotation, const FRotator& PreviousRotation, float DeltaTime) const;
-    float SmoothDamp(float Current, float Target, float SmoothTime, float DeltaTime) const;
+    // Internal Calculation Helpers
+    void UpdateCharacterReferences();
+    void UpdateMovementData();
+    void SmoothValues(float DeltaTime);
+    float CalculateDirectionFromVelocity() const;
+    float CalculateLeanFromAcceleration() const;
+    bool ShouldCharacterMove() const;
 };
