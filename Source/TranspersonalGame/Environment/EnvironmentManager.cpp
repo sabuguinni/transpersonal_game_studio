@@ -1,247 +1,274 @@
 #include "EnvironmentManager.h"
 #include "Engine/World.h"
-#include "Engine/StaticMeshActor.h"
-#include "Components/StaticMeshComponent.h"
+#include "Engine/Engine.h"
+#include "Components/DirectionalLightComponent.h"
+#include "Components/ExponentialHeightFogComponent.h"
 #include "Engine/DirectionalLight.h"
 #include "Engine/ExponentialHeightFog.h"
-#include "Engine/SkyAtmosphere.h"
 #include "Kismet/GameplayStatics.h"
-#include "UObject/ConstructorHelpers.h"
+#include "Math/UnrealMathUtility.h"
+#include "Engine/StaticMeshActor.h"
 
 AEnvironmentManager::AEnvironmentManager()
 {
-    PrimaryActorTick.bCanEverTick = true;
-    
-    RootSceneComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootScene"));
-    RootComponent = RootSceneComponent;
-
-    CurrentTimeOfDay = 12.0f; // Noon
-    bInitialized = false;
-
-    // Initialize default biome configurations
-    BiomeConfigurations.SetNum(5);
-    
-    // Savana biome
-    BiomeConfigurations[0].BiomeType = EBiomeType::Savana;
-    BiomeConfigurations[0].CenterLocation = FVector(0.0f, 0.0f, 100.0f);
-    BiomeConfigurations[0].Radius = 15000.0f;
-    BiomeConfigurations[0].AmbientColor = FLinearColor(1.0f, 0.95f, 0.8f, 1.0f);
-    BiomeConfigurations[0].FogDensity = 0.01f;
-
-    // Floresta biome
-    BiomeConfigurations[1].BiomeType = EBiomeType::Floresta;
-    BiomeConfigurations[1].CenterLocation = FVector(-45000.0f, 40000.0f, 100.0f);
-    BiomeConfigurations[1].Radius = 12000.0f;
-    BiomeConfigurations[1].AmbientColor = FLinearColor(0.7f, 1.0f, 0.7f, 1.0f);
-    BiomeConfigurations[1].FogDensity = 0.05f;
-
-    // Deserto biome
-    BiomeConfigurations[2].BiomeType = EBiomeType::Deserto;
-    BiomeConfigurations[2].CenterLocation = FVector(55000.0f, 0.0f, 100.0f);
-    BiomeConfigurations[2].Radius = 18000.0f;
-    BiomeConfigurations[2].AmbientColor = FLinearColor(1.0f, 0.9f, 0.6f, 1.0f);
-    BiomeConfigurations[2].FogDensity = 0.008f;
-
-    // Pantano biome
-    BiomeConfigurations[3].BiomeType = EBiomeType::Pantano;
-    BiomeConfigurations[3].CenterLocation = FVector(-50000.0f, -45000.0f, 50.0f);
-    BiomeConfigurations[3].Radius = 10000.0f;
-    BiomeConfigurations[3].AmbientColor = FLinearColor(0.8f, 1.0f, 0.9f, 1.0f);
-    BiomeConfigurations[3].FogDensity = 0.08f;
-
-    // Montanha biome
-    BiomeConfigurations[4].BiomeType = EBiomeType::Montanha;
-    BiomeConfigurations[4].CenterLocation = FVector(40000.0f, 50000.0f, 500.0f);
-    BiomeConfigurations[4].Radius = 14000.0f;
-    BiomeConfigurations[4].AmbientColor = FLinearColor(0.9f, 0.9f, 1.0f, 1.0f);
-    BiomeConfigurations[4].FogDensity = 0.03f;
+    PrimaryActorTick.bCanEverTick = false;
+    AssetsPerBiome = 500;
+    SpawnRadius = 10000.0f;
 }
 
 void AEnvironmentManager::BeginPlay()
 {
     Super::BeginPlay();
     
-    InitializeBiomes();
-    UpdateLighting();
-}
-
-void AEnvironmentManager::Tick(float DeltaTime)
-{
-    Super::Tick(DeltaTime);
-    
-    // Update time of day slowly
-    CurrentTimeOfDay += DeltaTime * 0.01f; // Very slow day/night cycle
-    if (CurrentTimeOfDay >= 24.0f)
+    // Initialize biome definitions if empty
+    if (BiomeDefinitions.Num() == 0)
     {
-        CurrentTimeOfDay = 0.0f;
+        InitializeBiomeDefinitions();
     }
     
-    UpdateSunPosition(CurrentTimeOfDay);
+    // Discover available assets if empty
+    if (EnvironmentAssets.Num() == 0)
+    {
+        DiscoverEnvironmentAssets();
+    }
 }
 
-void AEnvironmentManager::InitializeBiomes()
+void AEnvironmentManager::InitializeBiomeDefinitions()
 {
-    if (bInitialized)
+    BiomeDefinitions.Empty();
+    
+    // Savana biome
+    FEnvArt_BiomeCoordinates Savana;
+    Savana.BiomeType = EEnvArt_BiomeType::Savana;
+    Savana.CenterLocation = FVector(0.0f, 0.0f, 100.0f);
+    Savana.Radius = 15000.0f;
+    BiomeDefinitions.Add(Savana);
+    
+    // Floresta biome
+    FEnvArt_BiomeCoordinates Floresta;
+    Floresta.BiomeType = EEnvArt_BiomeType::Floresta;
+    Floresta.CenterLocation = FVector(-45000.0f, 40000.0f, 100.0f);
+    Floresta.Radius = 12000.0f;
+    BiomeDefinitions.Add(Floresta);
+    
+    // Pantano biome
+    FEnvArt_BiomeCoordinates Pantano;
+    Pantano.BiomeType = EEnvArt_BiomeType::Pantano;
+    Pantano.CenterLocation = FVector(-50000.0f, -45000.0f, 50.0f);
+    Pantano.Radius = 10000.0f;
+    BiomeDefinitions.Add(Pantano);
+    
+    // Deserto biome
+    FEnvArt_BiomeCoordinates Deserto;
+    Deserto.BiomeType = EEnvArt_BiomeType::Deserto;
+    Deserto.CenterLocation = FVector(55000.0f, 0.0f, 200.0f);
+    Deserto.Radius = 18000.0f;
+    BiomeDefinitions.Add(Deserto);
+    
+    // Montanha biome
+    FEnvArt_BiomeCoordinates Montanha;
+    Montanha.BiomeType = EEnvArt_BiomeType::Montanha;
+    Montanha.CenterLocation = FVector(40000.0f, 50000.0f, 500.0f);
+    Montanha.Radius = 14000.0f;
+    BiomeDefinitions.Add(Montanha);
+    
+    UE_LOG(LogTemp, Warning, TEXT("EnvironmentManager: Initialized %d biome definitions"), BiomeDefinitions.Num());
+}
+
+void AEnvironmentManager::DiscoverEnvironmentAssets()
+{
+    EnvironmentAssets.Empty();
+    
+    // Add placeholder assets - these would be discovered from Content Browser in a real implementation
+    FEnvArt_EnvironmentAsset TreeAsset;
+    TreeAsset.AssetName = TEXT("Forest_Tree");
+    TreeAsset.PreferredBiome = EEnvArt_BiomeType::Floresta;
+    TreeAsset.SpawnDensity = 2.0f;
+    TreeAsset.ScaleRange = FVector(0.8f, 1.5f, 1.0f);
+    EnvironmentAssets.Add(TreeAsset);
+    
+    FEnvArt_EnvironmentAsset RockAsset;
+    RockAsset.AssetName = TEXT("Savana_Rock");
+    RockAsset.PreferredBiome = EEnvArt_BiomeType::Savana;
+    RockAsset.SpawnDensity = 1.5f;
+    RockAsset.ScaleRange = FVector(0.5f, 2.0f, 1.0f);
+    EnvironmentAssets.Add(RockAsset);
+    
+    FEnvArt_EnvironmentAsset LogAsset;
+    LogAsset.AssetName = TEXT("Fallen_Log");
+    LogAsset.PreferredBiome = EEnvArt_BiomeType::Floresta;
+    LogAsset.SpawnDensity = 0.8f;
+    LogAsset.ScaleRange = FVector(0.7f, 1.3f, 1.0f);
+    EnvironmentAssets.Add(LogAsset);
+    
+    UE_LOG(LogTemp, Warning, TEXT("EnvironmentManager: Discovered %d environment assets"), EnvironmentAssets.Num());
+}
+
+void AEnvironmentManager::PopulateBiome(EEnvArt_BiomeType BiomeType, int32 AssetCount)
+{
+    const FEnvArt_BiomeCoordinates* TargetBiome = nullptr;
+    for (const auto& Biome : BiomeDefinitions)
     {
+        if (Biome.BiomeType == BiomeType)
+        {
+            TargetBiome = &Biome;
+            break;
+        }
+    }
+    
+    if (!TargetBiome)
+    {
+        UE_LOG(LogTemp, Error, TEXT("EnvironmentManager: Biome type not found"));
         return;
     }
-
-    // Find existing lighting actors
-    TArray<AActor*> FoundActors;
-    UGameplayStatics::GetAllActorsOfClass(GetWorld(), ADirectionalLight::StaticClass(), FoundActors);
-    if (FoundActors.Num() > 0)
-    {
-        SunLight = Cast<ADirectionalLight>(FoundActors[0]);
-    }
-
-    UGameplayStatics::GetAllActorsOfClass(GetWorld(), AExponentialHeightFog::StaticClass(), FoundActors);
-    if (FoundActors.Num() > 0)
-    {
-        HeightFog = Cast<AExponentialHeightFog>(FoundActors[0]);
-    }
-
-    UGameplayStatics::GetAllActorsOfClass(GetWorld(), ASkyAtmosphere::StaticClass(), FoundActors);
-    if (FoundActors.Num() > 0)
-    {
-        SkyAtmosphere = Cast<ASkyAtmosphere>(FoundActors[0]);
-    }
-
-    SpawnEnvironmentProps();
-    bInitialized = true;
-}
-
-void AEnvironmentManager::SpawnEnvironmentProps()
-{
-    for (const FEnvArt_BiomeData& BiomeData : BiomeConfigurations)
-    {
-        SpawnPropsForBiome(BiomeData);
-    }
-}
-
-void AEnvironmentManager::SpawnPropsForBiome(const FEnvArt_BiomeData& BiomeData)
-{
-    // Spawn props in a circle around the biome center
-    int32 PropCount = 20; // Number of props per biome
-    float AngleStep = 360.0f / PropCount;
     
-    for (int32 i = 0; i < PropCount; ++i)
+    // Filter assets for this biome
+    TArray<FEnvArt_EnvironmentAsset> BiomeAssets;
+    for (const auto& Asset : EnvironmentAssets)
     {
-        float Angle = i * AngleStep;
-        float RadiusVariation = FMath::RandRange(0.3f, 0.8f) * BiomeData.Radius;
+        if (Asset.PreferredBiome == BiomeType)
+        {
+            BiomeAssets.Add(Asset);
+        }
+    }
+    
+    if (BiomeAssets.Num() == 0)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("EnvironmentManager: No assets found for biome"));
+        return;
+    }
+    
+    // Spawn assets
+    int32 SpawnedCount = 0;
+    for (int32 i = 0; i < AssetCount; ++i)
+    {
+        const FEnvArt_EnvironmentAsset& Asset = BiomeAssets[FMath::RandRange(0, BiomeAssets.Num() - 1)];
+        FVector SpawnLocation = GetRandomLocationInBiome(*TargetBiome);
+        FRotator SpawnRotation = GetRandomRotation();
         
-        FVector SpawnLocation = BiomeData.CenterLocation;
-        SpawnLocation.X += FMath::Cos(FMath::DegreesToRadians(Angle)) * RadiusVariation;
-        SpawnLocation.Y += FMath::Sin(FMath::DegreesToRadians(Angle)) * RadiusVariation;
-        SpawnLocation.Z += FMath::RandRange(-50.0f, 100.0f);
-
-        // Create a basic static mesh actor as placeholder
-        AStaticMeshActor* PropActor = GetWorld()->SpawnActor<AStaticMeshActor>(SpawnLocation, FRotator::ZeroRotator);
-        if (PropActor)
-        {
-            FString BiomeName = UEnum::GetValueAsString(BiomeData.BiomeType);
-            PropActor->SetActorLabel(FString::Printf(TEXT("EnvProp_%s_%03d"), *BiomeName, i));
-            SpawnedProps.Add(PropActor);
-        }
+        SpawnAssetAtLocation(Asset, SpawnLocation, SpawnRotation);
+        SpawnedCount++;
     }
-}
-
-void AEnvironmentManager::UpdateLighting()
-{
-    if (SunLight && SunLight->GetLightComponent())
-    {
-        UDirectionalLightComponent* LightComp = SunLight->GetLightComponent();
-        LightComp->SetIntensity(LightingSettings.SunIntensity);
-        LightComp->SetLightColor(LightingSettings.SunColor);
-        SunLight->SetActorRotation(LightingSettings.SunRotation);
-    }
-
-    if (SkyAtmosphere && SkyAtmosphere->GetComponent())
-    {
-        USkyAtmosphereComponent* SkyComp = SkyAtmosphere->GetComponent();
-        SkyComp->SetAtmosphereHeight(60.0f);
-    }
-}
-
-void AEnvironmentManager::SetTimeOfDay(float TimeHours)
-{
-    CurrentTimeOfDay = FMath::Clamp(TimeHours, 0.0f, 24.0f);
-    UpdateSunPosition(CurrentTimeOfDay);
-}
-
-void AEnvironmentManager::UpdateSunPosition(float TimeHours)
-{
-    if (!SunLight)
-    {
-        return;
-    }
-
-    // Calculate sun position based on time
-    float SunAngle = (TimeHours - 6.0f) * 15.0f; // 15 degrees per hour, sunrise at 6 AM
-    float Elevation = FMath::Sin(FMath::DegreesToRadians(SunAngle)) * 90.0f;
-    float Azimuth = (TimeHours / 24.0f) * 360.0f;
-
-    FRotator SunRotation = FRotator(-Elevation, Azimuth, 0.0f);
-    SunLight->SetActorRotation(SunRotation);
-
-    // Adjust sun intensity based on elevation
-    if (SunLight->GetLightComponent())
-    {
-        float IntensityMultiplier = FMath::Max(0.1f, FMath::Sin(FMath::DegreesToRadians(SunAngle)));
-        SunLight->GetLightComponent()->SetIntensity(LightingSettings.SunIntensity * IntensityMultiplier);
-    }
-}
-
-EBiomeType AEnvironmentManager::GetBiomeAtLocation(const FVector& Location) const
-{
-    float ClosestDistance = FLT_MAX;
-    EBiomeType ClosestBiome = EBiomeType::Savana;
-
-    for (const FEnvArt_BiomeData& BiomeData : BiomeConfigurations)
-    {
-        float Distance = FVector::Dist2D(Location, BiomeData.CenterLocation);
-        if (Distance < ClosestDistance)
-        {
-            ClosestDistance = Distance;
-            ClosestBiome = BiomeData.BiomeType;
-        }
-    }
-
-    return ClosestBiome;
-}
-
-void AEnvironmentManager::ApplyBiomeAtmosphere(EBiomeType BiomeType)
-{
-    for (const FEnvArt_BiomeData& BiomeData : BiomeConfigurations)
-    {
-        if (BiomeData.BiomeType == BiomeType)
-        {
-            UpdateFogSettings(BiomeType);
-            break;
-        }
-    }
-}
-
-void AEnvironmentManager::UpdateFogSettings(EBiomeType BiomeType)
-{
-    if (!HeightFog || !HeightFog->GetComponent())
-    {
-        return;
-    }
-
-    UExponentialHeightFogComponent* FogComp = HeightFog->GetComponent();
     
-    for (const FEnvArt_BiomeData& BiomeData : BiomeConfigurations)
+    UE_LOG(LogTemp, Warning, TEXT("EnvironmentManager: Spawned %d assets in biome"), SpawnedCount);
+}
+
+void AEnvironmentManager::PopulateAllBiomes()
+{
+    for (const auto& Biome : BiomeDefinitions)
     {
-        if (BiomeData.BiomeType == BiomeType)
+        PopulateBiome(Biome.BiomeType, AssetsPerBiome);
+    }
+}
+
+FVector AEnvironmentManager::GetBiomeCenter(EEnvArt_BiomeType BiomeType) const
+{
+    for (const auto& Biome : BiomeDefinitions)
+    {
+        if (Biome.BiomeType == BiomeType)
         {
-            FogComp->SetFogDensity(BiomeData.FogDensity);
-            FogComp->SetFogInscatteringColor(BiomeData.AmbientColor);
+            return Biome.CenterLocation;
+        }
+    }
+    return FVector::ZeroVector;
+}
+
+void AEnvironmentManager::SetGoldenHourLighting()
+{
+    UWorld* World = GetWorld();
+    if (!World) return;
+    
+    // Find directional light
+    TArray<AActor*> DirectionalLights;
+    UGameplayStatics::GetAllActorsOfClass(World, ADirectionalLight::StaticClass(), DirectionalLights);
+    
+    for (AActor* LightActor : DirectionalLights)
+    {
+        ADirectionalLight* DirLight = Cast<ADirectionalLight>(LightActor);
+        if (DirLight && DirLight->GetLightComponent())
+        {
+            // Set golden hour rotation (low sun angle)
+            DirLight->SetActorRotation(FRotator(-15.0f, 45.0f, 0.0f));
+            
+            // Set warm golden color
+            DirLight->GetLightComponent()->SetLightColor(FLinearColor(1.0f, 0.9f, 0.7f, 1.0f));
+            DirLight->GetLightComponent()->SetIntensity(3.5f);
+            
+            UE_LOG(LogTemp, Warning, TEXT("EnvironmentManager: Applied golden hour lighting"));
             break;
         }
     }
 }
 
-void AEnvironmentManager::EditorSpawnTestProps()
+void AEnvironmentManager::AddVolumetricFog()
 {
-    SpawnEnvironmentProps();
+    UWorld* World = GetWorld();
+    if (!World) return;
+    
+    // Find exponential height fog
+    TArray<AActor*> FogActors;
+    UGameplayStatics::GetAllActorsOfClass(World, AExponentialHeightFog::StaticClass(), FogActors);
+    
+    for (AActor* FogActor : FogActors)
+    {
+        AExponentialHeightFog* HeightFog = Cast<AExponentialHeightFog>(FogActor);
+        if (HeightFog && HeightFog->GetComponent())
+        {
+            UExponentialHeightFogComponent* FogComp = HeightFog->GetComponent();
+            
+            // Set atmospheric fog parameters
+            FogComp->SetFogDensity(0.02f);
+            FogComp->SetFogHeightFalloff(0.2f);
+            FogComp->SetFogMaxOpacity(0.8f);
+            FogComp->SetStartDistance(1000.0f);
+            FogComp->SetFogCutoffDistance(50000.0f);
+            
+            // Set warm fog color
+            FogComp->SetFogInscatteringColor(FLinearColor(0.9f, 0.8f, 0.6f, 1.0f));
+            
+            UE_LOG(LogTemp, Warning, TEXT("EnvironmentManager: Applied volumetric fog"));
+            break;
+        }
+    }
+}
+
+void AEnvironmentManager::SpawnAssetAtLocation(const FEnvArt_EnvironmentAsset& Asset, const FVector& Location, const FRotator& Rotation)
+{
+    UWorld* World = GetWorld();
+    if (!World) return;
+    
+    // In a real implementation, this would load the actual mesh asset
+    // For now, we'll create a placeholder static mesh actor
+    AStaticMeshActor* SpawnedActor = World->SpawnActor<AStaticMeshActor>(Location, Rotation);
+    if (SpawnedActor)
+    {
+        SpawnedActor->SetActorLabel(FString::Printf(TEXT("%s_%d"), *Asset.AssetName, FMath::RandRange(1000, 9999)));
+        
+        // Apply random scale within range
+        float RandomScale = FMath::RandRange(Asset.ScaleRange.X, Asset.ScaleRange.Y);
+        SpawnedActor->SetActorScale3D(FVector(RandomScale));
+    }
+}
+
+FVector AEnvironmentManager::GetRandomLocationInBiome(const FEnvArt_BiomeCoordinates& Biome) const
+{
+    // Generate random point within biome radius
+    float RandomAngle = FMath::RandRange(0.0f, 2.0f * PI);
+    float RandomRadius = FMath::RandRange(0.0f, Biome.Radius);
+    
+    FVector Offset;
+    Offset.X = FMath::Cos(RandomAngle) * RandomRadius;
+    Offset.Y = FMath::Sin(RandomAngle) * RandomRadius;
+    Offset.Z = FMath::RandRange(-100.0f, 100.0f); // Small height variation
+    
+    return Biome.CenterLocation + Offset;
+}
+
+FRotator AEnvironmentManager::GetRandomRotation() const
+{
+    return FRotator(
+        FMath::RandRange(-10.0f, 10.0f), // Small pitch variation
+        FMath::RandRange(0.0f, 360.0f),  // Random yaw
+        FMath::RandRange(-5.0f, 5.0f)    // Small roll variation
+    );
 }
