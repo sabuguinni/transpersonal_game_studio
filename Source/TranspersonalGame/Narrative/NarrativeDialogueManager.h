@@ -7,69 +7,72 @@
 #include "NarrativeDialogueManager.generated.h"
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FNarr_DialogueEntry : public FTableRowBase
+struct TRANSPERSONALGAME_API FNarr_DialogueEntry
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dialogue")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
     FString DialogueID;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dialogue")
-    FText SpeakerName;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    FString SpeakerName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dialogue")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
     FText DialogueText;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dialogue")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
     FString AudioPath;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dialogue")
-    ENarr_DialogueTrigger TriggerType;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    float Duration;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dialogue")
-    float Priority;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    TArray<FString> RequiredFlags;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dialogue")
-    bool bIsRepeatable;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    TArray<FString> SetFlags;
 
     FNarr_DialogueEntry()
-        : Priority(1.0f)
-        , bIsRepeatable(false)
-        , TriggerType(ENarr_DialogueTrigger::Manual)
-    {}
+    {
+        DialogueID = "";
+        SpeakerName = "";
+        DialogueText = FText::GetEmpty();
+        AudioPath = "";
+        Duration = 3.0f;
+    }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FNarr_NarrativeContext
+struct TRANSPERSONALGAME_API FNarr_NarrativeEvent
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Context")
-    ENarr_BiomeType CurrentBiome;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    FString EventID;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Context")
-    ENarr_TimeOfDay TimeOfDay;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    FText EventText;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Context")
-    float ThreatLevel;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    ENarr_NarrativeContext Context;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Context")
-    TArray<FString> ActiveQuests;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    float Priority;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Context")
-    int32 SurvivalDays;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    bool bIsRepeatable;
 
-    FNarr_NarrativeContext()
-        : CurrentBiome(ENarr_BiomeType::Savana)
-        , TimeOfDay(ENarr_TimeOfDay::Day)
-        , ThreatLevel(0.0f)
-        , SurvivalDays(0)
-    {}
+    FNarr_NarrativeEvent()
+    {
+        EventID = "";
+        EventText = FText::GetEmpty();
+        Context = ENarr_NarrativeContext::Exploration;
+        Priority = 1.0f;
+        bIsRepeatable = false;
+    }
 };
 
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnDialogueTriggered, const FNarr_DialogueEntry&, DialogueEntry, const FNarr_NarrativeContext&, Context);
-
-UCLASS(BlueprintType)
+UCLASS()
 class TRANSPERSONALGAME_API UNarrativeDialogueManager : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
@@ -81,36 +84,72 @@ public:
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
+    // Dialogue system
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void TriggerDialogue(const FString& DialogueID, const FNarr_NarrativeContext& Context);
+    void PlayDialogue(const FString& DialogueID, AActor* Speaker = nullptr);
 
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void TriggerContextualDialogue(ENarr_DialogueTrigger TriggerType, const FNarr_NarrativeContext& Context);
+    void RegisterDialogueEntry(const FNarr_DialogueEntry& Entry);
 
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void UpdateNarrativeContext(const FNarr_NarrativeContext& NewContext);
+    bool HasDialogue(const FString& DialogueID) const;
+
+    // Narrative events
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    void TriggerNarrativeEvent(const FString& EventID, ENarr_NarrativeContext Context = ENarr_NarrativeContext::Exploration);
 
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    FNarr_DialogueEntry GetDialogueEntry(const FString& DialogueID) const;
+    void RegisterNarrativeEvent(const FNarr_NarrativeEvent& Event);
+
+    // Flag system for story progression
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    void SetStoryFlag(const FString& FlagName, bool bValue = true);
 
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    TArray<FNarr_DialogueEntry> GetContextualDialogues(ENarr_DialogueTrigger TriggerType, const FNarr_NarrativeContext& Context) const;
+    bool GetStoryFlag(const FString& FlagName) const;
 
-    UPROPERTY(BlueprintAssignable, Category = "Events")
-    FOnDialogueTriggered OnDialogueTriggered;
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    void ClearStoryFlag(const FString& FlagName);
+
+    // Context-aware narrative
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    void UpdateNarrativeContext(ENarr_NarrativeContext NewContext);
+
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    ENarr_NarrativeContext GetCurrentNarrativeContext() const { return CurrentContext; }
+
+    // Survival narrative integration
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    void OnPlayerHealthCritical();
+
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    void OnDinosaurEncounter(const FString& DinosaurType, float Distance);
+
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    void OnBiomeEntered(const FString& BiomeName);
 
 protected:
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Data")
-    class UDataTable* DialogueDataTable;
+    UPROPERTY()
+    TMap<FString, FNarr_DialogueEntry> DialogueDatabase;
 
-    UPROPERTY(BlueprintReadOnly, Category = "State")
-    FNarr_NarrativeContext CurrentContext;
+    UPROPERTY()
+    TMap<FString, FNarr_NarrativeEvent> NarrativeEvents;
 
-    UPROPERTY(BlueprintReadOnly, Category = "State")
-    TArray<FString> PlayedDialogues;
+    UPROPERTY()
+    TMap<FString, bool> StoryFlags;
+
+    UPROPERTY()
+    ENarr_NarrativeContext CurrentContext;
+
+    UPROPERTY()
+    float LastNarrativeTime;
+
+    UPROPERTY()
+    float NarrativeCooldown;
 
 private:
-    void LoadDialogueData();
-    bool ShouldPlayDialogue(const FNarr_DialogueEntry& Entry, const FNarr_NarrativeContext& Context) const;
-    float CalculateDialoguePriority(const FNarr_DialogueEntry& Entry, const FNarr_NarrativeContext& Context) const;
+    void LoadDefaultDialogues();
+    void LoadDefaultNarrativeEvents();
+    bool CanPlayNarrative() const;
+    void PlayAudioForDialogue(const FString& AudioPath);
 };
