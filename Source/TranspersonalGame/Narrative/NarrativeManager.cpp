@@ -1,204 +1,187 @@
 #include "NarrativeManager.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "Components/AudioComponent.h"
-#include "Sound/SoundBase.h"
 #include "Kismet/GameplayStatics.h"
 
 UNarrativeManager::UNarrativeManager()
 {
-    CurrentStoryBeat = TEXT("intro");
+    bIsDialogueActive = false;
 }
 
 void UNarrativeManager::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
     
-    UE_LOG(LogTemp, Warning, TEXT("NarrativeManager: Initializing narrative system"));
+    InitializeDefaultEvents();
+    LoadStoryData();
     
-    InitializeDefaultDialogues();
-    InitializeStoryBeats();
+    UE_LOG(LogTemp, Log, TEXT("NarrativeManager initialized with %d story events"), StoryEvents.Num());
 }
 
 void UNarrativeManager::Deinitialize()
 {
-    DialogueDatabase.Empty();
-    StoryBeats.Empty();
-    ActiveDialogues.Empty();
+    SaveStoryProgress();
+    StoryEvents.Empty();
     
     Super::Deinitialize();
 }
 
-void UNarrativeManager::TriggerDialogue(const FString& DialogueID, AActor* Speaker)
+void UNarrativeManager::TriggerStoryEvent(const FString& EventID)
 {
-    if (DialogueDatabase.Contains(DialogueID))
+    for (FNarr_StoryEvent& Event : StoryEvents)
     {
-        const FNarr_DialogueEntry& Entry = DialogueDatabase[DialogueID];
-        
-        if (CheckConditions(Entry.Conditions))
+        if (Event.EventID == EventID && !Event.bIsCompleted)
         {
-            ActiveDialogues.AddUnique(DialogueID);
+            UE_LOG(LogTemp, Log, TEXT("Triggering story event: %s"), *EventID);
             
-            UE_LOG(LogTemp, Warning, TEXT("NarrativeManager: Triggering dialogue - %s: %s"), 
-                   *Entry.SpeakerName, *Entry.DialogueText);
-            
-            // Play audio if available
-            if (!Entry.AudioPath.IsEmpty())
+            // Play all dialogues in sequence
+            for (const FNarr_DialogueEntry& Dialogue : Event.Dialogues)
             {
-                PlayNarrationAudio(Entry.AudioPath);
+                PlayDialogue(Dialogue);
             }
             
-            // Display text (in a real implementation, this would trigger UI)
-            if (GEngine)
-            {
-                GEngine->AddOnScreenDebugMessage(-1, Entry.Duration, FColor::Yellow,
-                    FString::Printf(TEXT("%s: %s"), *Entry.SpeakerName, *Entry.DialogueText));
-            }
-        }
-    }
-    else
-    {
-        UE_LOG(LogTemp, Error, TEXT("NarrativeManager: Dialogue ID not found - %s"), *DialogueID);
-    }
-}
-
-void UNarrativeManager::TriggerStoryBeat(const FString& BeatID)
-{
-    if (StoryBeats.Contains(BeatID))
-    {
-        FNarr_StoryBeat& Beat = StoryBeats[BeatID];
-        
-        if (!Beat.bIsCompleted && CheckConditions(Beat.TriggerConditions))
-        {
-            CurrentStoryBeat = BeatID;
-            Beat.bIsCompleted = true;
-            
-            UE_LOG(LogTemp, Warning, TEXT("NarrativeManager: Story beat triggered - %s"), *Beat.Title);
-            
-            // Process dialogue sequence
-            ProcessDialogueSequence(Beat.DialogueSequence);
+            // Mark event as completed
+            Event.bIsCompleted = true;
+            break;
         }
     }
 }
 
-bool UNarrativeManager::IsStoryBeatCompleted(const FString& BeatID) const
+void UNarrativeManager::PlayDialogue(const FNarr_DialogueEntry& DialogueEntry)
 {
-    if (StoryBeats.Contains(BeatID))
+    CurrentDialogue = DialogueEntry;
+    bIsDialogueActive = true;
+    
+    UE_LOG(LogTemp, Log, TEXT("Playing dialogue - Speaker: %s, Text: %s"), 
+           *DialogueEntry.SpeakerName, *DialogueEntry.DialogueText);
+    
+    // Display dialogue on screen (basic implementation)
+    if (GEngine)
     {
-        return StoryBeats[BeatID].bIsCompleted;
+        FString DisplayText = DialogueEntry.bIsNarration ? 
+            DialogueEntry.DialogueText : 
+            FString::Printf(TEXT("%s: %s"), *DialogueEntry.SpeakerName, *DialogueEntry.DialogueText);
+            
+        GEngine->AddOnScreenDebugMessage(-1, DialogueEntry.Duration, FColor::Yellow, DisplayText);
+    }
+    
+    // Schedule dialogue end
+    FTimerHandle TimerHandle;
+    GetWorld()->GetTimerManager().SetTimer(TimerHandle, [this]()
+    {
+        bIsDialogueActive = false;
+    }, DialogueEntry.Duration, false);
+}
+
+void UNarrativeManager::RegisterStoryEvent(const FNarr_StoryEvent& NewEvent)
+{
+    // Check if event already exists
+    for (const FNarr_StoryEvent& ExistingEvent : StoryEvents)
+    {
+        if (ExistingEvent.EventID == NewEvent.EventID)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("Story event %s already exists"), *NewEvent.EventID);
+            return;
+        }
+    }
+    
+    StoryEvents.Add(NewEvent);
+    UE_LOG(LogTemp, Log, TEXT("Registered new story event: %s"), *NewEvent.EventID);
+}
+
+bool UNarrativeManager::IsEventCompleted(const FString& EventID) const
+{
+    for (const FNarr_StoryEvent& Event : StoryEvents)
+    {
+        if (Event.EventID == EventID)
+        {
+            return Event.bIsCompleted;
+        }
     }
     return false;
 }
 
-void UNarrativeManager::RegisterDialogueEntry(const FNarr_DialogueEntry& Entry)
+void UNarrativeManager::SetEventCompleted(const FString& EventID, bool bCompleted)
 {
-    DialogueDatabase.Add(Entry.DialogueID, Entry);
-    UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Registered dialogue - %s"), *Entry.DialogueID);
-}
-
-void UNarrativeManager::RegisterStoryBeat(const FNarr_StoryBeat& Beat)
-{
-    StoryBeats.Add(Beat.BeatID, Beat);
-    UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Registered story beat - %s"), *Beat.BeatID);
-}
-
-TArray<FString> UNarrativeManager::GetActiveDialogues() const
-{
-    return ActiveDialogues;
-}
-
-void UNarrativeManager::PlayNarrationAudio(const FString& AudioPath, float Volume)
-{
-    if (AudioPath.IsEmpty()) return;
-    
-    UWorld* World = GetWorld();
-    if (!World) return;
-    
-    // In a real implementation, this would load and play the audio file
-    UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Playing audio - %s at volume %f"), *AudioPath, Volume);
-}
-
-void UNarrativeManager::InitializeDefaultDialogues()
-{
-    // Survival introduction
-    FNarr_DialogueEntry IntroDialogue;
-    IntroDialogue.DialogueID = TEXT("intro_welcome");
-    IntroDialogue.SpeakerName = TEXT("Narrator");
-    IntroDialogue.DialogueText = TEXT("Welcome to the prehistoric wilderness. Your survival depends on wit, courage, and understanding the ancient laws of this land.");
-    IntroDialogue.Duration = 5.0f;
-    RegisterDialogueEntry(IntroDialogue);
-    
-    // Danger warning
-    FNarr_DialogueEntry DangerDialogue;
-    DangerDialogue.DialogueID = TEXT("danger_predator");
-    DangerDialogue.SpeakerName = TEXT("Survival Instinct");
-    DangerDialogue.DialogueText = TEXT("Predator scent detected. Move carefully and stay alert. Your life depends on it.");
-    DangerDialogue.Duration = 3.0f;
-    RegisterDialogueEntry(DangerDialogue);
-    
-    // Resource discovery
-    FNarr_DialogueEntry ResourceDialogue;
-    ResourceDialogue.DialogueID = TEXT("discovery_resource");
-    ResourceDialogue.SpeakerName = TEXT("Explorer");
-    ResourceDialogue.DialogueText = TEXT("These materials could be useful. Gather what you can - resources are scarce in this harsh world.");
-    ResourceDialogue.Duration = 4.0f;
-    RegisterDialogueEntry(ResourceDialogue);
-    
-    // Shelter advice
-    FNarr_DialogueEntry ShelterDialogue;
-    ShelterDialogue.DialogueID = TEXT("advice_shelter");
-    ShelterDialogue.SpeakerName = TEXT("Survivor");
-    ShelterDialogue.DialogueText = TEXT("Night falls quickly here. Find or build shelter before darkness brings the apex predators.");
-    ShelterDialogue.Duration = 4.0f;
-    RegisterDialogueEntry(ShelterDialogue);
-}
-
-void UNarrativeManager::InitializeStoryBeats()
-{
-    // First survival
-    FNarr_StoryBeat FirstSurvival;
-    FirstSurvival.BeatID = TEXT("first_survival");
-    FirstSurvival.Title = TEXT("First Day");
-    FirstSurvival.Description = TEXT("Survive your first day in the prehistoric world");
-    FirstSurvival.DialogueSequence.Add(TEXT("intro_welcome"));
-    FirstSurvival.DialogueSequence.Add(TEXT("advice_shelter"));
-    RegisterStoryBeat(FirstSurvival);
-    
-    // Predator encounter
-    FNarr_StoryBeat PredatorEncounter;
-    PredatorEncounter.BeatID = TEXT("predator_encounter");
-    PredatorEncounter.Title = TEXT("First Hunt");
-    PredatorEncounter.Description = TEXT("Encounter your first major predator");
-    PredatorEncounter.DialogueSequence.Add(TEXT("danger_predator"));
-    RegisterStoryBeat(PredatorEncounter);
-    
-    // Resource mastery
-    FNarr_StoryBeat ResourceMastery;
-    ResourceMastery.BeatID = TEXT("resource_mastery");
-    ResourceMastery.Title = TEXT("Gatherer's Wisdom");
-    ResourceMastery.Description = TEXT("Learn to identify and gather essential resources");
-    ResourceMastery.DialogueSequence.Add(TEXT("discovery_resource"));
-    RegisterStoryBeat(ResourceMastery);
-}
-
-bool UNarrativeManager::CheckConditions(const TArray<FString>& Conditions) const
-{
-    // Simple condition checking - in a real implementation, this would check game state
-    for (const FString& Condition : Conditions)
+    for (FNarr_StoryEvent& Event : StoryEvents)
     {
-        if (Condition == TEXT("always_true"))
+        if (Event.EventID == EventID)
         {
-            continue;
+            Event.bIsCompleted = bCompleted;
+            UE_LOG(LogTemp, Log, TEXT("Set event %s completed: %s"), *EventID, bCompleted ? TEXT("true") : TEXT("false"));
+            break;
         }
-        // Add more condition checks as needed
     }
-    return true;
 }
 
-void UNarrativeManager::ProcessDialogueSequence(const TArray<FString>& Sequence)
+TArray<FNarr_StoryEvent> UNarrativeManager::GetActiveEvents() const
 {
-    for (const FString& DialogueID : Sequence)
+    TArray<FNarr_StoryEvent> ActiveEvents;
+    
+    for (const FNarr_StoryEvent& Event : StoryEvents)
     {
-        TriggerDialogue(DialogueID);
+        if (!Event.bIsCompleted)
+        {
+            ActiveEvents.Add(Event);
+        }
     }
+    
+    return ActiveEvents;
+}
+
+void UNarrativeManager::InitializeDefaultEvents()
+{
+    // First Contact Event
+    FNarr_StoryEvent FirstContactEvent;
+    FirstContactEvent.EventID = TEXT("first_contact");
+    FirstContactEvent.EventDescription = TEXT("Player's first encounter with the prehistoric world");
+    
+    FNarr_DialogueEntry NarratorIntro;
+    NarratorIntro.SpeakerName = TEXT("Narrator");
+    NarratorIntro.DialogueText = TEXT("The ancient valley holds many secrets, survivor. Listen carefully to the wind - it carries the scent of predators and the promise of shelter.");
+    NarratorIntro.Duration = 5.0f;
+    NarratorIntro.bIsNarration = true;
+    FirstContactEvent.Dialogues.Add(NarratorIntro);
+    
+    RegisterStoryEvent(FirstContactEvent);
+    
+    // Predator Warning Event
+    FNarr_StoryEvent PredatorEvent;
+    PredatorEvent.EventID = TEXT("predator_warning");
+    PredatorEvent.EventDescription = TEXT("Warning about nearby predators");
+    
+    FNarr_DialogueEntry Warning;
+    Warning.SpeakerName = TEXT("Survival Guide");
+    Warning.DialogueText = TEXT("Warning! Pack hunters detected in the eastern ravines. Their coordinated movements suggest they are tracking prey. Find high ground immediately.");
+    Warning.Duration = 4.0f;
+    Warning.bIsNarration = false;
+    PredatorEvent.Dialogues.Add(Warning);
+    
+    RegisterStoryEvent(PredatorEvent);
+    
+    // Resource Discovery Event
+    FNarr_StoryEvent ResourceEvent;
+    ResourceEvent.EventID = TEXT("resource_discovery");
+    ResourceEvent.EventDescription = TEXT("Discovery of essential survival resources");
+    
+    FNarr_DialogueEntry ResourceTip;
+    ResourceTip.SpeakerName = TEXT("Narrator");
+    ResourceTip.DialogueText = TEXT("Fresh water flows from the rocky outcrop ahead. Mark this location well - survival depends on knowing where life-giving resources can be found.");
+    ResourceTip.Duration = 4.5f;
+    ResourceTip.bIsNarration = true;
+    ResourceEvent.Dialogues.Add(ResourceTip);
+    
+    RegisterStoryEvent(ResourceEvent);
+}
+
+void UNarrativeManager::LoadStoryData()
+{
+    // TODO: Implement save/load system for story progress
+    UE_LOG(LogTemp, Log, TEXT("Story data loading not yet implemented"));
+}
+
+void UNarrativeManager::SaveStoryProgress()
+{
+    // TODO: Implement save system for story progress
+    UE_LOG(LogTemp, Log, TEXT("Story progress saving not yet implemented"));
 }
