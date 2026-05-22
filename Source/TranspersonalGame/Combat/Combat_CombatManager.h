@@ -1,107 +1,102 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/GameModeBase.h"
+#include "Subsystems/GameInstanceSubsystem.h"
 #include "Engine/World.h"
-#include "TimerManager.h"
+#include "GameFramework/Actor.h"
 #include "SharedTypes.h"
 #include "Combat_CombatManager.generated.h"
 
-class APawn;
-class ACharacter;
-class UBehaviorTreeComponent;
-
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnCombatStateChanged, APawn*, Attacker, APawn*, Target);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnDamageDealt, APawn*, Attacker, APawn*, Victim, float, Damage);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnCombatEvent, AActor*, Attacker, AActor*, Target, float, Damage);
 
 /**
- * Central combat management system for dinosaur AI and player combat
- * Handles combat state tracking, damage calculation, and AI coordination
+ * Combat Manager - Central system for managing all combat interactions
+ * Handles damage dealing, combat state tracking, and combat events
  */
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UCombat_CombatManager : public UObject
+class TRANSPERSONALGAME_API UCombat_CombatManager : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
 public:
     UCombat_CombatManager();
 
-    // Core combat management
+    // Subsystem interface
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
+
+    // Combat management functions
     UFUNCTION(BlueprintCallable, Category = "Combat")
-    void InitializeCombatManager(UWorld* InWorld);
+    void RegisterCombatant(AActor* Actor, ECombat_CombatantType CombatantType);
 
     UFUNCTION(BlueprintCallable, Category = "Combat")
-    void RegisterCombatant(APawn* Combatant, ECombat_CombatRole Role);
+    void UnregisterCombatant(AActor* Actor);
 
     UFUNCTION(BlueprintCallable, Category = "Combat")
-    void UnregisterCombatant(APawn* Combatant);
+    bool DealDamage(AActor* Attacker, AActor* Target, float Damage, const FVector& HitLocation);
 
     UFUNCTION(BlueprintCallable, Category = "Combat")
-    bool StartCombat(APawn* Attacker, APawn* Target);
+    void StartCombat(AActor* Initiator, AActor* Target);
 
     UFUNCTION(BlueprintCallable, Category = "Combat")
-    void EndCombat(APawn* Combatant);
+    void EndCombat(AActor* Actor);
 
     UFUNCTION(BlueprintCallable, Category = "Combat")
-    float CalculateDamage(APawn* Attacker, APawn* Target, ECombat_AttackType AttackType);
+    bool IsInCombat(AActor* Actor) const;
 
     UFUNCTION(BlueprintCallable, Category = "Combat")
-    void ApplyDamage(APawn* Attacker, APawn* Target, float Damage);
+    TArray<AActor*> GetCombatantsInRange(const FVector& Location, float Radius, ECombat_CombatantType CombatantType = ECombat_CombatantType::Any) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Combat")
+    AActor* FindNearestEnemy(AActor* Searcher, float MaxRange = 2000.0f) const;
 
     // Combat state queries
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Combat")
-    bool IsInCombat(APawn* Combatant) const;
-
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Combat")
-    APawn* GetCombatTarget(APawn* Combatant) const;
-
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Combat")
-    TArray<APawn*> GetNearbyEnemies(APawn* Combatant, float Radius) const;
-
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Combat")
-    float GetCombatThreatLevel(APawn* Combatant) const;
-
-    // AI coordination
     UFUNCTION(BlueprintCallable, Category = "Combat")
-    void CoordinatePackAttack(const TArray<APawn*>& PackMembers, APawn* Target);
+    int32 GetActiveCombatCount() const;
 
     UFUNCTION(BlueprintCallable, Category = "Combat")
-    void UpdateCombatAI(float DeltaTime);
+    TArray<AActor*> GetAllCombatants() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Combat")
+    ECombat_CombatantType GetCombatantType(AActor* Actor) const;
 
     // Events
     UPROPERTY(BlueprintAssignable, Category = "Combat Events")
-    FOnCombatStateChanged OnCombatStarted;
+    FOnCombatEvent OnCombatStarted;
 
     UPROPERTY(BlueprintAssignable, Category = "Combat Events")
-    FOnCombatStateChanged OnCombatEnded;
+    FOnCombatEvent OnDamageDealt;
 
     UPROPERTY(BlueprintAssignable, Category = "Combat Events")
-    FOnDamageDealt OnDamageDealt;
+    FOnCombatEvent OnCombatEnded;
 
 protected:
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat")
-    UWorld* CombatWorld;
+    // Combat tracking
+    UPROPERTY()
+    TMap<AActor*, ECombat_CombatantType> RegisteredCombatants;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat")
-    TMap<APawn*, ECombat_CombatRole> RegisteredCombatants;
+    UPROPERTY()
+    TSet<AActor*> ActorsInCombat;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat")
-    TMap<APawn*, APawn*> CombatPairs;
+    UPROPERTY()
+    TMap<AActor*, float> LastCombatTime;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat")
-    TMap<APawn*, float> CombatTimers;
+    // Configuration
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat Settings")
+    float CombatTimeoutDuration;
 
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat Settings")
-    float BaseDamageMultiplier = 1.0f;
+    float DefaultDamageMultiplier;
 
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat Settings")
-    float CombatTimeout = 30.0f;
-
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat Settings")
-    float PackCoordinationRadius = 1500.0f;
+    bool bEnableCombatLogging;
 
 private:
+    // Internal functions
     void CleanupExpiredCombat();
-    float CalculateSpeciesDamageModifier(APawn* Attacker, APawn* Target);
-    void NotifyAIOfCombatState(APawn* Combatant, bool bInCombat);
+    bool CanDealDamage(AActor* Attacker, AActor* Target) const;
+    void BroadcastCombatEvent(const FOnCombatEvent& Event, AActor* Attacker, AActor* Target, float Damage);
+
+    // Timer handle for cleanup
+    FTimerHandle CleanupTimerHandle;
 };
