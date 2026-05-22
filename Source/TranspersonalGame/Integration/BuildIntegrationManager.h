@@ -3,7 +3,6 @@
 #include "CoreMinimal.h"
 #include "Engine/GameInstanceSubsystem.h"
 #include "Engine/World.h"
-#include "Components/ActorComponent.h"
 #include "BuildIntegrationManager.generated.h"
 
 UENUM(BlueprintType)
@@ -17,7 +16,7 @@ enum class EBuild_IntegrationStatus : uint8
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FBuild_SystemStatus
+struct TRANSPERSONALGAME_API FBuild_SystemReport
 {
     GENERATED_BODY()
 
@@ -31,62 +30,54 @@ struct TRANSPERSONALGAME_API FBuild_SystemStatus
     int32 ActorCount;
 
     UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    FString LastError;
+    FString ErrorMessage;
 
     UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    float LastCheckTime;
+    float ValidationTime;
 
-    FBuild_SystemStatus()
+    FBuild_SystemReport()
     {
         SystemName = TEXT("");
         Status = EBuild_IntegrationStatus::Pending;
         ActorCount = 0;
-        LastError = TEXT("");
-        LastCheckTime = 0.0f;
+        ErrorMessage = TEXT("");
+        ValidationTime = 0.0f;
     }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FBuild_PerformanceMetrics
+struct TRANSPERSONALGAME_API FBuild_BiomeValidation
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    int32 TotalActors;
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    FString BiomeName;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    int32 StaticMeshActors;
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    FVector BiomeCenter;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    int32 SkeletalMeshActors;
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    int32 ActorsInBiome;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    int32 ParticleSystemActors;
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    int32 DinosaurCount;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    int32 LightActors;
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    int32 EnvironmentCount;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float EstimatedFrameTime;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    bool bPerformanceWarning;
-
-    FBuild_PerformanceMetrics()
+    FBuild_BiomeValidation()
     {
-        TotalActors = 0;
-        StaticMeshActors = 0;
-        SkeletalMeshActors = 0;
-        ParticleSystemActors = 0;
-        LightActors = 0;
-        EstimatedFrameTime = 0.0f;
-        bPerformanceWarning = false;
+        BiomeName = TEXT("");
+        BiomeCenter = FVector::ZeroVector;
+        ActorsInBiome = 0;
+        DinosaurCount = 0;
+        EnvironmentCount = 0;
     }
 };
 
 /**
  * Build Integration Manager - Coordinates integration between all game systems
- * Validates cross-system dependencies, monitors performance, and ensures build coherence
+ * Validates cross-system compatibility and maintains build stability
  */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UBuildIntegrationManager : public UGameInstanceSubsystem
@@ -96,95 +87,82 @@ class TRANSPERSONALGAME_API UBuildIntegrationManager : public UGameInstanceSubsy
 public:
     UBuildIntegrationManager();
 
-    // Subsystem interface
+    // USubsystem interface
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
     // Integration validation
     UFUNCTION(BlueprintCallable, Category = "Integration")
-    void ValidateAllSystems();
+    bool ValidateAllSystems();
 
     UFUNCTION(BlueprintCallable, Category = "Integration")
-    void ValidateSystemIntegration(const FString& SystemName);
+    bool ValidateSystemIntegration(const FString& SystemName);
 
     UFUNCTION(BlueprintCallable, Category = "Integration")
-    bool CheckCrossSystemDependencies();
+    TArray<FBuild_SystemReport> GetSystemReports() const;
 
-    // Performance monitoring
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    FBuild_PerformanceMetrics GetPerformanceMetrics();
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void MonitorFrameRate();
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    bool IsPerformanceAcceptable();
-
-    // Build validation
-    UFUNCTION(BlueprintCallable, Category = "Build")
-    void ValidateBuildIntegrity();
-
-    UFUNCTION(BlueprintCallable, Category = "Build")
-    bool CheckModuleCompilation();
-
-    UFUNCTION(BlueprintCallable, Category = "Build")
-    void GenerateIntegrationReport();
-
-    // System status
+    // Biome validation
     UFUNCTION(BlueprintCallable, Category = "Integration")
-    TArray<FBuild_SystemStatus> GetSystemStatuses();
+    bool ValidateBiomeDistribution();
 
     UFUNCTION(BlueprintCallable, Category = "Integration")
-    FBuild_SystemStatus GetSystemStatus(const FString& SystemName);
+    TArray<FBuild_BiomeValidation> GetBiomeValidation() const;
+
+    // Actor management
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    int32 GetTotalActorCount() const;
 
     UFUNCTION(BlueprintCallable, Category = "Integration")
-    void UpdateSystemStatus(const FString& SystemName, EBuild_IntegrationStatus Status, const FString& ErrorMessage = TEXT(""));
+    int32 GetActorCountByType(const FString& ActorType) const;
+
+    // Build status
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    EBuild_IntegrationStatus GetOverallBuildStatus() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    FString GetBuildStatusMessage() const;
 
     // Map persistence
     UFUNCTION(BlueprintCallable, Category = "Integration")
-    bool SaveMapSafely();
+    bool SaveCurrentMap();
 
     UFUNCTION(BlueprintCallable, Category = "Integration")
-    void BackupCurrentState();
+    bool LoadMap(const FString& MapPath);
+
+    // Performance monitoring
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    float GetFrameRate() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    float GetMemoryUsageMB() const;
 
 protected:
-    // System tracking
-    UPROPERTY(BlueprintReadOnly, Category = "Integration", meta = (AllowPrivateAccess = "true"))
-    TMap<FString, FBuild_SystemStatus> SystemStatuses;
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    TArray<FBuild_SystemReport> SystemReports;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance", meta = (AllowPrivateAccess = "true"))
-    FBuild_PerformanceMetrics CurrentMetrics;
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    TArray<FBuild_BiomeValidation> BiomeValidations;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Integration", meta = (AllowPrivateAccess = "true"))
-    bool bIntegrationValid;
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    EBuild_IntegrationStatus OverallStatus;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Integration", meta = (AllowPrivateAccess = "true"))
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    FString StatusMessage;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
     float LastValidationTime;
-
-    // Critical system names
-    UPROPERTY(BlueprintReadOnly, Category = "Integration", meta = (AllowPrivateAccess = "true"))
-    TArray<FString> CriticalSystems;
 
 private:
     // Internal validation methods
-    void ValidateCharacterSystem();
-    void ValidateDinosaurSystem();
-    void ValidateWorldGenSystem();
-    void ValidateAudioSystem();
-    void ValidateVFXSystem();
-    void ValidatePhysicsSystem();
+    bool ValidateWorldGeneration();
+    bool ValidateCharacterSystems();
+    bool ValidateDinosaurSystems();
+    bool ValidateVFXSystems();
+    bool ValidateAudioSystems();
+    bool ValidateQuestSystems();
 
-    // Performance helpers
-    void CalculatePerformanceMetrics();
-    void CheckActorCounts();
-    void ValidateMemoryUsage();
-
-    // Integration helpers
-    void CheckSystemDependencies(const FString& SystemName);
-    void ValidateComponentIntegration();
-    void CheckSubsystemHealth();
-
-    // Timers
-    FTimerHandle ValidationTimerHandle;
-    FTimerHandle PerformanceTimerHandle;
+    // Helper methods
+    void UpdateSystemReport(const FString& SystemName, EBuild_IntegrationStatus Status, const FString& Message = TEXT(""));
+    void CalculateOverallStatus();
+    FVector GetBiomeCenter(const FString& BiomeName) const;
 };
