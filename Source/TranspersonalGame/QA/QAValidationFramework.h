@@ -16,32 +16,28 @@ enum class EQA_ValidationResult : uint8
 };
 
 USTRUCT(BlueprintType)
-struct FQA_ValidationTest
+struct FQA_TestResult
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA")
+    UPROPERTY(BlueprintReadOnly, Category = "QA")
     FString TestName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA")
-    FString TestDescription;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA")
+    UPROPERTY(BlueprintReadOnly, Category = "QA")
     EQA_ValidationResult Result;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA")
-    FString ErrorMessage;
+    UPROPERTY(BlueprintReadOnly, Category = "QA")
+    FString Message;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA")
-    float ExecutionTimeMs;
+    UPROPERTY(BlueprintReadOnly, Category = "QA")
+    float ExecutionTime;
 
-    FQA_ValidationTest()
+    FQA_TestResult()
     {
         TestName = TEXT("");
-        TestDescription = TEXT("");
         Result = EQA_ValidationResult::Skipped;
-        ErrorMessage = TEXT("");
-        ExecutionTimeMs = 0.0f;
+        Message = TEXT("");
+        ExecutionTime = 0.0f;
     }
 };
 
@@ -50,34 +46,30 @@ struct FQA_SystemReport
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA")
+    UPROPERTY(BlueprintReadOnly, Category = "QA")
     FString SystemName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA")
-    TArray<FQA_ValidationTest> Tests;
+    UPROPERTY(BlueprintReadOnly, Category = "QA")
+    int32 ActorCount;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA")
-    int32 PassCount;
+    UPROPERTY(BlueprintReadOnly, Category = "QA")
+    int32 PassedTests;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA")
-    int32 FailCount;
+    UPROPERTY(BlueprintReadOnly, Category = "QA")
+    int32 FailedTests;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA")
-    int32 WarningCount;
+    UPROPERTY(BlueprintReadOnly, Category = "QA")
+    TArray<FQA_TestResult> TestResults;
 
     FQA_SystemReport()
     {
         SystemName = TEXT("");
-        PassCount = 0;
-        FailCount = 0;
-        WarningCount = 0;
+        ActorCount = 0;
+        PassedTests = 0;
+        FailedTests = 0;
     }
 };
 
-/**
- * QA Validation Framework - Comprehensive testing system for TranspersonalGame
- * Validates all game systems, assets, and performance metrics
- */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API AQAValidationFramework : public AActor
 {
@@ -89,84 +81,60 @@ public:
 protected:
     virtual void BeginPlay() override;
 
-public:
-    virtual void Tick(float DeltaTime) override;
-
-    // Core validation functions
-    UFUNCTION(BlueprintCallable, Category = "QA", CallInEditor)
-    void RunFullValidation();
-
-    UFUNCTION(BlueprintCallable, Category = "QA", CallInEditor)
-    void ValidateVFXSystems();
-
-    UFUNCTION(BlueprintCallable, Category = "QA", CallInEditor)
-    void ValidateCharacterSystems();
-
-    UFUNCTION(BlueprintCallable, Category = "QA", CallInEditor)
-    void ValidatePhysicsSystems();
-
-    UFUNCTION(BlueprintCallable, Category = "QA", CallInEditor)
-    void ValidateDinosaurAssets();
-
-    UFUNCTION(BlueprintCallable, Category = "QA", CallInEditor)
-    void ValidateWorldGeneration();
-
-    UFUNCTION(BlueprintCallable, Category = "QA", CallInEditor)
-    void ValidatePerformanceMetrics();
-
-    UFUNCTION(BlueprintCallable, Category = "QA", CallInEditor)
-    void GenerateValidationReport();
-
-    // Utility functions
-    UFUNCTION(BlueprintCallable, Category = "QA")
-    FQA_ValidationTest CreateTest(const FString& TestName, const FString& Description);
-
-    UFUNCTION(BlueprintCallable, Category = "QA")
-    void CompleteTest(UPARAM(ref) FQA_ValidationTest& Test, EQA_ValidationResult Result, const FString& ErrorMessage = TEXT(""));
-
-    UFUNCTION(BlueprintCallable, Category = "QA")
-    int32 GetTotalActorCount();
-
-    UFUNCTION(BlueprintCallable, Category = "QA")
-    float GetMemoryUsagePercent();
-
-protected:
-    // Validation data
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "QA")
+    UPROPERTY(BlueprintReadOnly, Category = "QA Validation")
     TArray<FQA_SystemReport> SystemReports;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "QA")
-    int32 TotalTests;
+    UPROPERTY(BlueprintReadOnly, Category = "QA Validation")
+    int32 TotalActorsInScene;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "QA")
-    int32 TotalPasses;
+    UPROPERTY(BlueprintReadOnly, Category = "QA Validation")
+    int32 TotalTestsPassed;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "QA")
-    int32 TotalFailures;
+    UPROPERTY(BlueprintReadOnly, Category = "QA Validation")
+    int32 TotalTestsFailed;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "QA")
-    int32 TotalWarnings;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "QA")
+    UPROPERTY(BlueprintReadOnly, Category = "QA Validation")
     float ValidationStartTime;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "QA")
-    bool bValidationInProgress;
+public:
+    UFUNCTION(BlueprintCallable, Category = "QA Validation")
+    void RunFullValidation();
 
-    // Performance thresholds
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA|Performance")
-    int32 MaxActorCount;
+    UFUNCTION(BlueprintCallable, Category = "QA Validation")
+    void ValidateCharacterSystem();
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA|Performance")
-    float MaxMemoryUsagePercent;
+    UFUNCTION(BlueprintCallable, Category = "QA Validation")
+    void ValidatePhysicsSystem();
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA|Performance")
-    float MaxFrameTimeMs;
+    UFUNCTION(BlueprintCallable, Category = "QA Validation")
+    void ValidateVFXSystem();
+
+    UFUNCTION(BlueprintCallable, Category = "QA Validation")
+    void ValidateAudioSystem();
+
+    UFUNCTION(BlueprintCallable, Category = "QA Validation")
+    void ValidateWorldGeneration();
+
+    UFUNCTION(BlueprintCallable, Category = "QA Validation")
+    void ValidateDinosaurSystem();
+
+    UFUNCTION(BlueprintCallable, Category = "QA Validation")
+    FQA_TestResult TestClassLoading(const FString& ClassName, const FString& ModulePath);
+
+    UFUNCTION(BlueprintCallable, Category = "QA Validation")
+    FQA_TestResult TestActorSpawning(UClass* ActorClass, const FVector& SpawnLocation);
+
+    UFUNCTION(BlueprintCallable, Category = "QA Validation")
+    void GenerateValidationReport();
+
+    UFUNCTION(BlueprintCallable, Category = "QA Validation")
+    void SaveValidationResults();
+
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "QA Validation")
+    void RunEditorValidation();
 
 private:
-    // Internal validation helpers
-    bool ValidateClassLoading(const FString& ClassName, const FString& ClassPath);
-    bool ValidateActorSpawning(UClass* ActorClass, const FVector& Location);
-    bool ValidateAssetLoading(const FString& AssetPath);
-    void LogValidationResult(const FQA_ValidationTest& Test);
+    FQA_TestResult CreateTestResult(const FString& TestName, EQA_ValidationResult Result, const FString& Message);
+    void AddSystemReport(const FString& SystemName, const TArray<FQA_TestResult>& Tests);
+    int32 CountActorsByKeyword(const FString& Keyword);
 };
