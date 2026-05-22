@@ -1,24 +1,25 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/GameInstanceSubsystem.h"
-#include "Engine/Engine.h"
-#include "Sound/SoundCue.h"
+#include "Engine/GameInstance.h"
 #include "Components/AudioComponent.h"
+#include "Sound/SoundCue.h"
+#include "Sound/SoundWave.h"
+#include "Engine/World.h"
 #include "AudioSystemManager.generated.h"
 
 UENUM(BlueprintType)
-enum class EAudio_AudioType : uint8
+enum class EAudio_SoundType : uint8
 {
-    SFX,
     Music,
-    Ambience,
+    SFX,
+    Ambient,
     Voice,
     UI
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FAudio_SoundEntry
+struct TRANSPERSONALGAME_API FAudio_SoundInstance
 {
     GENERATED_BODY()
 
@@ -26,10 +27,7 @@ struct TRANSPERSONALGAME_API FAudio_SoundEntry
     FString SoundID;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    TSoftObjectPtr<USoundCue> SoundCue;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    EAudio_AudioType AudioType;
+    EAudio_SoundType SoundType;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     float Volume = 1.0f;
@@ -40,13 +38,17 @@ struct TRANSPERSONALGAME_API FAudio_SoundEntry
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     bool bLooping = false;
 
-    FAudio_SoundEntry()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FVector Location = FVector::ZeroVector;
+
+    FAudio_SoundInstance()
     {
         SoundID = TEXT("");
-        AudioType = EAudio_AudioType::SFX;
+        SoundType = EAudio_SoundType::SFX;
         Volume = 1.0f;
         Pitch = 1.0f;
         bLooping = false;
+        Location = FVector::ZeroVector;
     }
 };
 
@@ -56,14 +58,17 @@ class TRANSPERSONALGAME_API UAudioSystemManager : public UGameInstanceSubsystem
     GENERATED_BODY()
 
 public:
+    UAudioSystemManager();
+
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
+    // Core audio functions
     UFUNCTION(BlueprintCallable, Category = "Audio System")
-    void PlaySound(const FString& SoundID, FVector Location = FVector::ZeroVector, float VolumeMultiplier = 1.0f);
+    void PlaySound2D(const FString& SoundID, EAudio_SoundType SoundType, float Volume = 1.0f, float Pitch = 1.0f);
 
     UFUNCTION(BlueprintCallable, Category = "Audio System")
-    void PlaySoundAtLocation(const FString& SoundID, FVector Location, float VolumeMultiplier = 1.0f);
+    void PlaySound3D(const FString& SoundID, const FVector& Location, EAudio_SoundType SoundType, float Volume = 1.0f, float Pitch = 1.0f);
 
     UFUNCTION(BlueprintCallable, Category = "Audio System")
     void StopSound(const FString& SoundID);
@@ -75,48 +80,55 @@ public:
     void SetMasterVolume(float Volume);
 
     UFUNCTION(BlueprintCallable, Category = "Audio System")
-    void SetAudioTypeVolume(EAudio_AudioType AudioType, float Volume);
+    void SetCategoryVolume(EAudio_SoundType SoundType, float Volume);
 
-    UFUNCTION(BlueprintCallable, Category = "Audio System")
-    void RegisterSound(const FString& SoundID, USoundCue* SoundCue, EAudio_AudioType AudioType);
+    // Screen shake audio feedback
+    UFUNCTION(BlueprintCallable, Category = "Audio Effects")
+    void TriggerScreenShakeAudio(float Intensity, const FVector& EpicenterLocation);
 
-    UFUNCTION(BlueprintCallable, Category = "Audio System")
-    void LoadAudioDatabase();
+    // Damage audio feedback
+    UFUNCTION(BlueprintCallable, Category = "Audio Effects")
+    void PlayDamageAudio(float DamageAmount, const FVector& HitLocation);
 
-    // Prehistoric-specific audio functions
-    UFUNCTION(BlueprintCallable, Category = "Prehistoric Audio")
-    void PlayDinosaurRoar(const FString& DinosaurType, FVector Location);
+    // Footstep system
+    UFUNCTION(BlueprintCallable, Category = "Audio Effects")
+    void PlayFootstepAudio(const FVector& FootLocation, float CreatureSize, const FString& SurfaceType);
 
-    UFUNCTION(BlueprintCallable, Category = "Prehistoric Audio")
-    void PlayFootstepSound(const FString& SurfaceType, FVector Location, float Weight = 1.0f);
-
-    UFUNCTION(BlueprintCallable, Category = "Prehistoric Audio")
-    void PlayAmbienceForBiome(const FString& BiomeType);
-
-    UFUNCTION(BlueprintCallable, Category = "Prehistoric Audio")
-    void PlayWeatherAudio(const FString& WeatherType, float Intensity = 1.0f);
+    // Day/night ambient transition
+    UFUNCTION(BlueprintCallable, Category = "Audio Effects")
+    void TransitionToTimeOfDay(float TimeOfDay);
 
 protected:
-    UPROPERTY()
-    TMap<FString, FAudio_SoundEntry> SoundDatabase;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio System")
+    TMap<FString, TSoftObjectPtr<USoundBase>> SoundLibrary;
 
-    UPROPERTY()
-    TMap<FString, UAudioComponent*> ActiveAudioComponents;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio System")
+    TMap<EAudio_SoundType, float> CategoryVolumes;
 
-    UPROPERTY()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio System")
     float MasterVolume = 1.0f;
 
-    UPROPERTY()
-    TMap<EAudio_AudioType, float> AudioTypeVolumes;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio System")
+    TMap<FString, UAudioComponent*> ActiveSounds;
 
-    UPROPERTY()
-    UAudioComponent* CurrentAmbienceComponent;
+    // Audio effect components
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Effects")
+    TSoftObjectPtr<USoundBase> ScreenShakeSound;
 
-    UPROPERTY()
-    UAudioComponent* CurrentMusicComponent;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Effects")
+    TSoftObjectPtr<USoundBase> DamageSound;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Effects")
+    TSoftObjectPtr<USoundBase> FootstepSound;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Effects")
+    TSoftObjectPtr<USoundBase> DayAmbient;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Effects")
+    TSoftObjectPtr<USoundBase> NightAmbient;
 
 private:
-    void InitializeAudioTypeVolumes();
-    void CleanupInactiveComponents();
-    UAudioComponent* CreateAudioComponent(const FAudio_SoundEntry& SoundEntry, FVector Location);
+    void InitializeSoundLibrary();
+    void InitializeCategoryVolumes();
+    UAudioComponent* CreateAudioComponent(const FVector& Location = FVector::ZeroVector);
 };
