@@ -3,177 +3,198 @@
 #include "CoreMinimal.h"
 #include "Engine/GameInstanceSubsystem.h"
 #include "Engine/World.h"
-#include "GameFramework/GameModeBase.h"
-#include "SharedTypes.h"
+#include "Subsystems/WorldSubsystem.h"
+#include "Components/ActorComponent.h"
+#include "GameFramework/Actor.h"
+#include "../../SharedTypes.h"
 #include "EngineArchitectCore.generated.h"
 
-DECLARE_LOG_CATEGORY_EXTERN(LogEngineArchitect, Log, All);
+/**
+ * Engine Architect Core System - Technical Architecture Foundation
+ * Defines the core technical rules and systems that all other agents must follow
+ * Implements John Carmack's principle: "Elegant architecture is necessity, not aesthetic"
+ */
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FEng_SystemMetrics
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadOnly, Category = "Engine Metrics")
+    int32 TotalActors = 0;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Engine Metrics")
+    float FrameRate = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Engine Metrics")
+    float MemoryUsageMB = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Engine Metrics")
+    int32 ActiveComponents = 0;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Engine Metrics")
+    bool bPerformanceTarget = true;
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FEng_ArchitectureRule
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadOnly, Category = "Architecture")
+    FString RuleName;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Architecture")
+    FString Description;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Architecture")
+    bool bMandatory = true;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Architecture")
+    int32 Priority = 1;
+};
+
+UENUM(BlueprintType)
+enum class EEng_SystemPriority : uint8
+{
+    Critical    UMETA(DisplayName = "Critical"),
+    High        UMETA(DisplayName = "High"),
+    Medium      UMETA(DisplayName = "Medium"),
+    Low         UMETA(DisplayName = "Low")
+};
+
+UENUM(BlueprintType)
+enum class EEng_ValidationStatus : uint8
+{
+    Passed      UMETA(DisplayName = "Passed"),
+    Warning     UMETA(DisplayName = "Warning"),
+    Failed      UMETA(DisplayName = "Failed"),
+    Pending     UMETA(DisplayName = "Pending")
+};
 
 /**
- * Core Engine Architecture System
- * Defines the fundamental technical rules and constraints for all game systems
- * Enforces performance budgets, memory limits, and system integration patterns
+ * Engine Architect Core Component - Attached to critical game systems
  */
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UEngineArchitectCore : public UGameInstanceSubsystem
+UCLASS(BlueprintType, Blueprintable, ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UEng_ArchitectComponent : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    UEngineArchitectCore();
+    UEng_ArchitectComponent();
 
-    // USubsystem interface
+protected:
+    virtual void BeginPlay() override;
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+
+public:
+    UPROPERTY(BlueprintReadOnly, Category = "Engine Architecture")
+    FEng_SystemMetrics CurrentMetrics;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Engine Architecture")
+    TArray<FEng_ArchitectureRule> ActiveRules;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Engine Architecture")
+    EEng_SystemPriority SystemPriority = EEng_SystemPriority::Medium;
+
+    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
+    void ValidateSystemPerformance();
+
+    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
+    bool CheckArchitectureCompliance();
+
+    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
+    void RegisterSystemRule(const FString& RuleName, const FString& Description, bool bMandatory = true);
+
+private:
+    void UpdateMetrics();
+    void EnforcePerformanceTargets();
+};
+
+/**
+ * Engine Architect World Subsystem - Global architecture enforcement
+ */
+UCLASS()
+class TRANSPERSONALGAME_API UEng_ArchitectWorldSubsystem : public UWorldSubsystem
+{
+    GENERATED_BODY()
+
+public:
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
-    // Core Architecture Rules
-    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    bool ValidateSystemPerformance(const FString& SystemName, float DeltaTime);
-
-    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    void RegisterSystemModule(const FString& ModuleName, int32 Priority);
-
-    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    bool CanSpawnActor(UClass* ActorClass, const FVector& Location);
-
-    // Memory Management
-    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    float GetMemoryUsagePercent() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    int32 GetActiveActorCount() const;
-
-    // World Partition Management
-    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    bool IsWorldPartitionRequired() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    void SetWorldBounds(const FBox& NewBounds);
-
-    // Performance Budgets
-    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    void SetPerformanceBudget(const FString& SystemName, float MaxFrameTime);
-
-    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    bool IsWithinPerformanceBudget(const FString& SystemName, float CurrentTime);
-
 protected:
-    // Core Architecture Properties
-    UPROPERTY(BlueprintReadOnly, Category = "Architecture", meta = (AllowPrivateAccess = "true"))
-    TMap<FString, int32> RegisteredModules;
+    virtual void OnWorldBeginPlay(UWorld& InWorld) override;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Architecture", meta = (AllowPrivateAccess = "true"))
-    TMap<FString, float> PerformanceBudgets;
+public:
+    UPROPERTY(BlueprintReadOnly, Category = "Global Architecture")
+    TArray<FEng_ArchitectureRule> GlobalRules;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Architecture", meta = (AllowPrivateAccess = "true"))
-    FBox WorldBounds;
+    UPROPERTY(BlueprintReadOnly, Category = "Global Architecture")
+    FEng_SystemMetrics GlobalMetrics;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Architecture", meta = (AllowPrivateAccess = "true"))
-    bool bWorldPartitionEnabled;
+    UFUNCTION(BlueprintCallable, Category = "Global Architecture")
+    void EnforceGlobalRules();
 
-    UPROPERTY(BlueprintReadOnly, Category = "Architecture", meta = (AllowPrivateAccess = "true"))
-    int32 MaxActorsPerBiome;
+    UFUNCTION(BlueprintCallable, Category = "Global Architecture")
+    EEng_ValidationStatus ValidateWorldArchitecture();
 
-    UPROPERTY(BlueprintReadOnly, Category = "Architecture", meta = (AllowPrivateAccess = "true"))
-    float MemoryBudgetMB;
+    UFUNCTION(BlueprintCallable, Category = "Global Architecture")
+    void RegisterCriticalSystem(AActor* SystemActor, EEng_SystemPriority Priority);
+
+    UFUNCTION(BlueprintCallable, Category = "Global Architecture")
+    TArray<AActor*> GetRegisteredSystems() const;
 
 private:
-    // Internal tracking
-    TMap<FString, float> SystemFrameTimes;
-    float LastMemoryCheck;
-    int32 LastActorCount;
+    UPROPERTY()
+    TArray<AActor*> RegisteredSystems;
 
-    // Architecture validation
-    bool ValidateModuleDependencies();
-    void InitializePerformanceBudgets();
-    void CheckMemoryThresholds();
+    void InitializeArchitectureRules();
+    void MonitorSystemPerformance();
 };
 
 /**
- * Engine Architecture Rules Enforcer
- * Static class that enforces architectural constraints across all systems
+ * Engine Architect Manager Actor - Central architecture coordination
  */
-UCLASS(BlueprintType, Abstract)
-class TRANSPERSONALGAME_API UEngineRulesEnforcer : public UBlueprintFunctionLibrary
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API AEng_ArchitectManager : public AActor
 {
     GENERATED_BODY()
 
 public:
-    // World Partition Rules
-    UFUNCTION(BlueprintCallable, Category = "Architecture Rules")
-    static bool IsWorldSizeValid(float WorldSizeKm);
+    AEng_ArchitectManager();
 
-    UFUNCTION(BlueprintCallable, Category = "Architecture Rules")
-    static bool RequiresWorldPartition(float WorldSizeKm);
+protected:
+    virtual void BeginPlay() override;
+    virtual void Tick(float DeltaTime) override;
 
-    // Actor Spawning Rules
-    UFUNCTION(BlueprintCallable, Category = "Architecture Rules")
-    static bool CanSpawnActorAtLocation(UClass* ActorClass, const FVector& Location, UWorld* World);
+public:
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    class UEng_ArchitectComponent* ArchitectComponent;
 
-    UFUNCTION(BlueprintCallable, Category = "Architecture Rules")
-    static int32 GetMaxActorsForBiome(EEng_BiomeType BiomeType);
+    UPROPERTY(BlueprintReadWrite, Category = "Architecture Management")
+    bool bEnforcePerformanceTargets = true;
 
-    // Performance Rules
-    UFUNCTION(BlueprintCallable, Category = "Architecture Rules")
-    static bool IsFrameTimeAcceptable(float FrameTime);
+    UPROPERTY(BlueprintReadWrite, Category = "Architecture Management")
+    float TargetFrameRate = 60.0f;
 
-    UFUNCTION(BlueprintCallable, Category = "Architecture Rules")
-    static float GetTargetFrameTime();
+    UPROPERTY(BlueprintReadWrite, Category = "Architecture Management")
+    float MaxMemoryUsageMB = 4096.0f;
 
-    // Memory Rules
-    UFUNCTION(BlueprintCallable, Category = "Architecture Rules")
-    static bool IsMemoryUsageAcceptable(float MemoryUsageMB);
+    UFUNCTION(BlueprintCallable, Category = "Architecture Management")
+    void InitializeEngineArchitecture();
 
-    UFUNCTION(BlueprintCallable, Category = "Architecture Rules")
-    static float GetMaxMemoryBudget();
+    UFUNCTION(BlueprintCallable, Category = "Architecture Management")
+    void ValidateAllSystems();
 
-    // Module Integration Rules
-    UFUNCTION(BlueprintCallable, Category = "Architecture Rules")
-    static bool CanModuleAccessOther(const FString& RequesterModule, const FString& TargetModule);
+    UFUNCTION(BlueprintCallable, Category = "Architecture Management")
+    void EnforceArchitecturalStandards();
 
-    UFUNCTION(BlueprintCallable, Category = "Architecture Rules")
-    static TArray<FString> GetModuleDependencies(const FString& ModuleName);
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Architecture Management")
+    void RunArchitectureAudit();
 
 private:
-    // Architecture constants
-    static constexpr float WORLD_PARTITION_THRESHOLD_KM = 4.0f;
-    static constexpr float TARGET_FRAME_TIME_MS = 16.67f; // 60 FPS
-    static constexpr float MAX_MEMORY_BUDGET_MB = 8192.0f; // 8GB
-    static constexpr int32 MAX_ACTORS_PER_BIOME = 1000;
+    void SetupCoreRules();
+    void MonitorSystemHealth();
+    bool ValidateModuleDependencies();
 };
-
-/**
- * System Module Registration
- * Used by all agent systems to register with the core architecture
- */
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEng_SystemModule
-{
-    GENERATED_BODY()
-
-    UPROPERTY(BlueprintReadWrite, Category = "System Module")
-    FString ModuleName;
-
-    UPROPERTY(BlueprintReadWrite, Category = "System Module")
-    int32 Priority;
-
-    UPROPERTY(BlueprintReadWrite, Category = "System Module")
-    TArray<FString> Dependencies;
-
-    UPROPERTY(BlueprintReadWrite, Category = "System Module")
-    float FrameTimeBudget;
-
-    UPROPERTY(BlueprintReadWrite, Category = "System Module")
-    bool bRequiresWorldPartition;
-
-    FEng_SystemModule()
-    {
-        ModuleName = TEXT("");
-        Priority = 0;
-        Dependencies = TArray<FString>();
-        FrameTimeBudget = 1.0f;
-        bRequiresWorldPartition = false;
-    }
-};
-
-#include "EngineArchitectCore.generated.h"
