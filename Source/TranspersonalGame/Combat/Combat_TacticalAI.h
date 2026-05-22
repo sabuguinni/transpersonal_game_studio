@@ -1,155 +1,177 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Components/ActorComponent.h"
+#include "Engine/Engine.h"
+#include "GameFramework/Pawn.h"
 #include "AIController.h"
 #include "BehaviorTree/BehaviorTreeComponent.h"
 #include "BehaviorTree/BlackboardComponent.h"
 #include "Perception/AIPerceptionComponent.h"
-#include "Perception/AISenseConfig_Sight.h"
-#include "Perception/AISenseConfig_Hearing.h"
-#include "../SharedTypes.h"
+#include "Perception/AISightConfig.h"
 #include "Combat_TacticalAI.generated.h"
 
+UENUM(BlueprintType)
+enum class ECombat_TacticalState : uint8
+{
+    Idle        UMETA(DisplayName = "Idle"),
+    Hunting     UMETA(DisplayName = "Hunting"),
+    Stalking    UMETA(DisplayName = "Stalking"),
+    Attacking   UMETA(DisplayName = "Attacking"),
+    Flanking    UMETA(DisplayName = "Flanking"),
+    Retreating  UMETA(DisplayName = "Retreating"),
+    Ambushing   UMETA(DisplayName = "Ambushing")
+};
+
+UENUM(BlueprintType)
+enum class ECombat_DinosaurType : uint8
+{
+    Predator    UMETA(DisplayName = "Predator"),
+    Herbivore   UMETA(DisplayName = "Herbivore"),
+    Scavenger   UMETA(DisplayName = "Scavenger"),
+    PackHunter  UMETA(DisplayName = "Pack Hunter")
+};
+
 USTRUCT(BlueprintType)
-struct FCombat_TacticalState
+struct FCombat_TacticalData
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat State")
-    ECombat_AIBehavior CurrentBehavior = ECombat_AIBehavior::Patrol;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+    float AttackRange = 300.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat State")
-    float AggressionLevel = 0.5f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+    float FlankingDistance = 500.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat State")
-    float FearLevel = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+    float RetreatHealthThreshold = 0.3f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat State")
-    float HealthPercentage = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+    float AmbushWaitTime = 5.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat State")
-    FVector LastKnownPlayerLocation = FVector::ZeroVector;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+    int32 PackSize = 3;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat State")
-    float TimeSinceLastPlayerSighting = 0.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat State")
-    bool bIsInCombat = false;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat State")
-    bool bCanSeePlayer = false;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat State")
-    float DistanceToPlayer = 0.0f;
+    FCombat_TacticalData()
+    {
+        AttackRange = 300.0f;
+        FlankingDistance = 500.0f;
+        RetreatHealthThreshold = 0.3f;
+        AmbushWaitTime = 5.0f;
+        PackSize = 3;
+    }
 };
 
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API ACombat_TacticalAI : public AAIController
+UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UCombat_TacticalAI : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    ACombat_TacticalAI();
+    UCombat_TacticalAI();
 
 protected:
     virtual void BeginPlay() override;
-    virtual void Tick(float DeltaTime) override;
-    virtual void OnPossess(APawn* InPawn) override;
-
-    // AI Components
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI Components")
-    class UBehaviorTreeComponent* BehaviorTreeComponent;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI Components")
-    class UBlackboardComponent* BlackboardComponent;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI Components")
-    class UAIPerceptionComponent* AIPerceptionComponent;
-
-    // Behavior Tree Asset
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI Behavior")
-    class UBehaviorTree* BehaviorTreeAsset;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI Behavior")
-    class UBlackboardData* BlackboardAsset;
-
-    // Tactical State
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat State")
-    FCombat_TacticalState TacticalState;
-
-    // Combat Parameters
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Parameters")
-    float SightRadius = 2000.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Parameters")
-    float HearingRadius = 1500.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Parameters")
-    float AttackRange = 300.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Parameters")
-    float FleeHealthThreshold = 0.25f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Parameters")
-    float AggressionDecayRate = 0.1f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Parameters")
-    float FearDecayRate = 0.05f;
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 public:
-    // Tactical Decision Making
+    // Core tactical functions
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    void InitializeTacticalAI(ECombat_DinosaurType DinosaurType, const FCombat_TacticalData& TacticalData);
+
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    void SetTarget(APawn* NewTarget);
+
     UFUNCTION(BlueprintCallable, Category = "Combat AI")
     void UpdateTacticalState();
 
     UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    ECombat_AIBehavior DetermineBestBehavior();
+    void ExecuteTacticalBehavior(float DeltaTime);
+
+    // Tactical behaviors
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    void ExecuteHuntingBehavior();
 
     UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    void ExecuteTacticalBehavior(ECombat_AIBehavior NewBehavior);
+    void ExecuteStalkingBehavior();
 
-    // Combat Actions
-    UFUNCTION(BlueprintCallable, Category = "Combat Actions")
-    void InitiateAttack();
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    void ExecuteAttackBehavior();
 
-    UFUNCTION(BlueprintCallable, Category = "Combat Actions")
-    void InitiateFlee();
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    void ExecuteFlankingBehavior();
 
-    UFUNCTION(BlueprintCallable, Category = "Combat Actions")
-    void InitiateHunt();
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    void ExecuteRetreatBehavior();
 
-    UFUNCTION(BlueprintCallable, Category = "Combat Actions")
-    void InitiatePatrol();
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    void ExecuteAmbushBehavior();
 
-    // Perception Events
-    UFUNCTION()
-    void OnPlayerSighted(AActor* Actor, FAIStimulus Stimulus);
+    // Pack coordination
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    void CoordinatePackAttack();
 
-    UFUNCTION()
-    void OnPlayerLost(AActor* Actor, FAIStimulus Stimulus);
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    void JoinPackFormation();
 
-    // State Queries
-    UFUNCTION(BlueprintPure, Category = "Combat State")
-    bool IsPlayerInAttackRange() const;
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    TArray<UCombat_TacticalAI*> GetNearbyPackMembers(float SearchRadius = 1000.0f);
 
-    UFUNCTION(BlueprintPure, Category = "Combat State")
-    bool ShouldFlee() const;
+    // Utility functions
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    float GetDistanceToTarget() const;
 
-    UFUNCTION(BlueprintPure, Category = "Combat State")
-    bool ShouldAttack() const;
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    bool IsTargetInAttackRange() const;
 
-    UFUNCTION(BlueprintPure, Category = "Combat State")
-    FVector GetOptimalAttackPosition() const;
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    bool ShouldRetreat() const;
 
-    UFUNCTION(BlueprintPure, Category = "Combat State")
-    FVector GetFleeDirection() const;
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    FVector CalculateFlankingPosition() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    bool HasClearLineOfSight() const;
 
 protected:
-    void SetupAIPerception();
-    void UpdateBlackboard();
-    void CalculateAggressionAndFear();
-    
-    // Tactical positioning
-    FVector FindFlankingPosition();
-    FVector FindAmbushPosition();
-    bool HasClearLineOfSight(const FVector& TargetLocation) const;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
+    ECombat_TacticalState CurrentState;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
+    ECombat_DinosaurType DinosaurType;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
+    FCombat_TacticalData TacticalData;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Combat AI")
+    APawn* CurrentTarget;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Combat AI")
+    AAIController* AIController;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Combat AI")
+    UBlackboardComponent* BlackboardComponent;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
+    float StateChangeTimer;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
+    float LastAttackTime;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
+    FVector LastKnownTargetLocation;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
+    bool bIsInPack;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
+    TArray<UCombat_TacticalAI*> PackMembers;
+
+private:
+    void UpdateBlackboardValues();
+    void HandleStateTransition(ECombat_TacticalState NewState);
+    bool ValidateTarget() const;
+    FVector GetRandomFlankingPosition() const;
 };
+
+#include "Combat_TacticalAI.generated.h"
