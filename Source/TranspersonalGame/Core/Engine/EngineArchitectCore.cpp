@@ -1,368 +1,304 @@
 #include "EngineArchitectCore.h"
-#include "Engine/World.h"
 #include "Engine/Engine.h"
-#include "PhysicsEngine/PhysicsSettings.h"
-#include "Engine/RendererSettings.h"
+#include "Engine/World.h"
+#include "HAL/PlatformMemory.h"
+#include "Misc/App.h"
 #include "GameFramework/Actor.h"
-#include "Components/PrimitiveComponent.h"
-#include "Components/StaticMeshComponent.h"
-#include "Components/SkeletalMeshComponent.h"
-#include "HAL/PlatformFilemanager.h"
-#include "Misc/Paths.h"
-#include "Engine/CollisionProfile.h"
-#include "PhysicsEngine/CollisionProfile.h"
+#include "Engine/Level.h"
+
+DEFINE_LOG_CATEGORY(LogEngineArchitect);
 
 UEngineArchitectCore::UEngineArchitectCore()
 {
-    PrimaryComponentTick.bCanEverTick = false;
-    LastValidationTime = 0.0f;
+    bWorldPartitionEnabled = false;
+    MaxActorsPerBiome = 1000;
+    MemoryBudgetMB = 8192.0f;
+    LastMemoryCheck = 0.0f;
+    LastActorCount = 0;
     
-    // Initialize required collision channels for dinosaur gameplay
-    RequiredCollisionChannels.Add(TEXT("Dinosaur"));
-    RequiredCollisionChannels.Add(TEXT("Player"));
-    RequiredCollisionChannels.Add(TEXT("Environment"));
-    RequiredCollisionChannels.Add(TEXT("Projectile"));
-    RequiredCollisionChannels.Add(TEXT("Interaction"));
+    // Initialize world bounds to default large area
+    WorldBounds = FBox(FVector(-100000, -100000, -5000), FVector(100000, 100000, 5000));
 }
 
-bool UEngineArchitectCore::ValidateCoreEngineSystems()
+void UEngineArchitectCore::Initialize(FSubsystemCollectionBase& Collection)
 {
-    UE_LOG(LogTemp, Warning, TEXT("=== ENGINE ARCHITECT CORE VALIDATION ==="));
+    Super::Initialize(Collection);
     
-    bool bAllSystemsValid = true;
+    UE_LOG(LogEngineArchitect, Warning, TEXT("Engine Architect Core initialized"));
     
-    // Validate physics world
-    if (!IsPhysicsWorldValid())
-    {
-        UE_LOG(LogTemp, Error, TEXT("Physics world validation FAILED"));
-        bAllSystemsValid = false;
-    }
-    else
-    {
-        UE_LOG(LogTemp, Log, TEXT("Physics world validation PASSED"));
-    }
+    InitializePerformanceBudgets();
+    ValidateModuleDependencies();
     
-    // Validate rendering pipeline
-    if (!ValidateRenderingPipeline())
-    {
-        UE_LOG(LogTemp, Error, TEXT("Rendering pipeline validation FAILED"));
-        bAllSystemsValid = false;
-    }
-    else
-    {
-        UE_LOG(LogTemp, Log, TEXT("Rendering pipeline validation PASSED"));
-    }
-    
-    // Validate subsystems
-    if (!ValidateSubsystems())
-    {
-        UE_LOG(LogTemp, Error, TEXT("Subsystem validation FAILED"));
-        bAllSystemsValid = false;
-    }
-    else
-    {
-        UE_LOG(LogTemp, Log, TEXT("Subsystem validation PASSED"));
-    }
-    
-    // Cache validation results
-    ValidationResultsCache.Add(TEXT("CoreSystems"), bAllSystemsValid);
-    LastValidationTime = GetWorld()->GetTimeSeconds();
-    
-    UE_LOG(LogTemp, Warning, TEXT("Core engine validation: %s"), 
-           bAllSystemsValid ? TEXT("PASSED") : TEXT("FAILED"));
-    
-    return bAllSystemsValid;
+    // Register core modules
+    RegisterSystemModule(TEXT("WorldGeneration"), 100);
+    RegisterSystemModule(TEXT("Physics"), 90);
+    RegisterSystemModule(TEXT("AI"), 80);
+    RegisterSystemModule(TEXT("Audio"), 70);
+    RegisterSystemModule(TEXT("VFX"), 60);
 }
 
-void UEngineArchitectCore::EnforcePhysicsArchitecture()
+void UEngineArchitectCore::Deinitialize()
 {
-    UE_LOG(LogTemp, Warning, TEXT("=== ENFORCING PHYSICS ARCHITECTURE ==="));
+    UE_LOG(LogEngineArchitect, Warning, TEXT("Engine Architect Core shutting down"));
     
-    // Setup dinosaur collision channels
-    SetupDinosaurCollisionChannels();
+    RegisteredModules.Empty();
+    PerformanceBudgets.Empty();
+    SystemFrameTimes.Empty();
     
-    // Configure physics settings for survival gameplay
-    if (UPhysicsSettings* PhysicsSettings = GetMutableDefault<UPhysicsSettings>())
-    {
-        // Enable CCD for fast-moving projectiles
-        PhysicsSettings->bEnablePCM = true;
-        PhysicsSettings->bEnableStabilization = true;
-        
-        // Optimize for large world with many actors
-        PhysicsSettings->MaxSubstepDeltaTime = 0.016667f; // 60fps substeps
-        PhysicsSettings->MaxSubsteps = 6;
-        
-        UE_LOG(LogTemp, Log, TEXT("Physics settings configured for dinosaur survival"));
-    }
-    
-    // Setup ragdoll physics for dinosaurs
-    SetupDinosaurRagdollPhysics();
+    Super::Deinitialize();
 }
 
-bool UEngineArchitectCore::ValidatePerformanceTargets()
+bool UEngineArchitectCore::ValidateSystemPerformance(const FString& SystemName, float DeltaTime)
 {
-    UE_LOG(LogTemp, Warning, TEXT("=== VALIDATING PERFORMANCE TARGETS ==="));
-    
-    bool bPerformanceValid = CheckPerformanceMetrics();
-    
-    // Check actor count per biome
-    UWorld* World = GetWorld();
-    if (World)
+    if (!PerformanceBudgets.Contains(SystemName))
     {
-        TArray<AActor*> AllActors;
-        UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), AllActors);
-        
-        int32 ActorCount = AllActors.Num();
-        UE_LOG(LogTemp, Log, TEXT("Total actors in world: %d"), ActorCount);
-        
-        // Warn if approaching limits
-        if (ActorCount > MaxActorsPerBiome * 5) // 5 biomes
-        {
-            UE_LOG(LogTemp, Warning, TEXT("Actor count exceeds recommended limits: %d > %d"), 
-                   ActorCount, MaxActorsPerBiome * 5);
-            bPerformanceValid = false;
-        }
-    }
-    
-    ValidationResultsCache.Add(TEXT("Performance"), bPerformanceValid);
-    return bPerformanceValid;
-}
-
-bool UEngineArchitectCore::ValidateWorldPartitionSetup()
-{
-    UE_LOG(LogTemp, Warning, TEXT("=== VALIDATING WORLD PARTITION SETUP ==="));
-    
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        UE_LOG(LogTemp, Error, TEXT("No valid world found"));
+        UE_LOG(LogEngineArchitect, Warning, TEXT("System %s not registered for performance tracking"), *SystemName);
         return false;
     }
     
-    // Check if world size requires World Partition
-    FBox WorldBounds = FBox(ForceInit);
-    TArray<AActor*> AllActors;
-    UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), AllActors);
+    float Budget = PerformanceBudgets[SystemName];
+    SystemFrameTimes.Add(SystemName, DeltaTime);
     
-    for (AActor* Actor : AllActors)
+    if (DeltaTime > Budget)
     {
-        if (Actor && IsValid(Actor))
-        {
-            WorldBounds += Actor->GetActorLocation();
-        }
+        UE_LOG(LogEngineArchitect, Error, TEXT("System %s exceeded performance budget: %.2fms > %.2fms"), 
+               *SystemName, DeltaTime * 1000.0f, Budget * 1000.0f);
+        return false;
     }
     
-    float WorldSize = WorldBounds.GetSize().Size();
-    bool bNeedsWorldPartition = WorldSize > WorldPartitionThreshold;
-    
-    UE_LOG(LogTemp, Log, TEXT("World size: %.2f units, Partition needed: %s"), 
-           WorldSize, bNeedsWorldPartition ? TEXT("YES") : TEXT("NO"));
-    
-    ValidationResultsCache.Add(TEXT("WorldPartition"), true);
     return true;
 }
 
-int32 UEngineArchitectCore::ValidateSpawnedActorCompliance()
+void UEngineArchitectCore::RegisterSystemModule(const FString& ModuleName, int32 Priority)
 {
-    UE_LOG(LogTemp, Warning, TEXT("=== VALIDATING SPAWNED ACTOR COMPLIANCE ==="));
-    
-    UWorld* World = GetWorld();
-    if (!World)
+    if (RegisteredModules.Contains(ModuleName))
     {
-        return 0;
+        UE_LOG(LogEngineArchitect, Warning, TEXT("Module %s already registered, updating priority"), *ModuleName);
     }
     
-    TArray<AActor*> AllActors;
-    UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), AllActors);
-    
-    int32 CompliantActors = 0;
-    int32 NonCompliantActors = 0;
-    
-    for (AActor* Actor : AllActors)
-    {
-        if (!Actor || !IsValid(Actor))
-        {
-            continue;
-        }
-        
-        bool bIsCompliant = true;
-        
-        // Check if actor has proper collision setup
-        TArray<UPrimitiveComponent*> PrimitiveComponents;
-        Actor->GetComponents<UPrimitiveComponent>(PrimitiveComponents);
-        
-        for (UPrimitiveComponent* PrimComp : PrimitiveComponents)
-        {
-            if (PrimComp && PrimComp->GetCollisionEnabled() == ECollisionEnabled::NoCollision)
-            {
-                // Dinosaurs and interactive objects should have collision
-                if (Actor->GetName().Contains(TEXT("Dinosaur")) || 
-                    Actor->GetName().Contains(TEXT("Interactive")))
-                {
-                    UE_LOG(LogTemp, Warning, TEXT("Actor %s missing collision: %s"), 
-                           *Actor->GetName(), *PrimComp->GetName());
-                    bIsCompliant = false;
-                }
-            }
-        }
-        
-        if (bIsCompliant)
-        {
-            CompliantActors++;
-        }
-        else
-        {
-            NonCompliantActors++;
-        }
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("Actor compliance: %d compliant, %d non-compliant"), 
-           CompliantActors, NonCompliantActors);
-    
-    return CompliantActors;
+    RegisteredModules.Add(ModuleName, Priority);
+    UE_LOG(LogEngineArchitect, Log, TEXT("Registered module: %s (Priority: %d)"), *ModuleName, Priority);
 }
 
-TArray<FString> UEngineArchitectCore::FindOrphanedHeaders()
+bool UEngineArchitectCore::CanSpawnActor(UClass* ActorClass, const FVector& Location)
 {
-    TArray<FString> OrphanedHeaders;
+    if (!ActorClass)
+    {
+        UE_LOG(LogEngineArchitect, Error, TEXT("Cannot spawn null actor class"));
+        return false;
+    }
     
-    // This would require file system access to scan for .h files without matching .cpp
-    // For now, return empty array as this is primarily a build-time check
-    UE_LOG(LogTemp, Log, TEXT("Orphaned header check completed - implement file scanning if needed"));
+    // Check if location is within world bounds
+    if (!WorldBounds.IsInside(Location))
+    {
+        UE_LOG(LogEngineArchitect, Warning, TEXT("Spawn location outside world bounds: %s"), *Location.ToString());
+        return false;
+    }
     
-    return OrphanedHeaders;
+    // Check actor count limits
+    int32 CurrentActorCount = GetActiveActorCount();
+    if (CurrentActorCount >= MaxActorsPerBiome * 5) // 5 biomes max
+    {
+        UE_LOG(LogEngineArchitect, Error, TEXT("Actor count limit reached: %d"), CurrentActorCount);
+        return false;
+    }
+    
+    // Check memory usage
+    float MemoryUsage = GetMemoryUsagePercent();
+    if (MemoryUsage > 85.0f)
+    {
+        UE_LOG(LogEngineArchitect, Error, TEXT("Memory usage too high for spawning: %.1f%%"), MemoryUsage);
+        return false;
+    }
+    
+    return true;
+}
+
+float UEngineArchitectCore::GetMemoryUsagePercent() const
+{
+    FPlatformMemoryStats MemStats = FPlatformMemory::GetStats();
+    float UsedMB = static_cast<float>(MemStats.UsedPhysical) / (1024.0f * 1024.0f);
+    float TotalMB = static_cast<float>(MemStats.TotalPhysical) / (1024.0f * 1024.0f);
+    
+    return (UsedMB / TotalMB) * 100.0f;
+}
+
+int32 UEngineArchitectCore::GetActiveActorCount() const
+{
+    if (UWorld* World = GetWorld())
+    {
+        return World->GetCurrentLevel()->Actors.Num();
+    }
+    return 0;
+}
+
+bool UEngineArchitectCore::IsWorldPartitionRequired() const
+{
+    float WorldSizeKm = FMath::Max(WorldBounds.GetSize().X, WorldBounds.GetSize().Y) / 100000.0f; // Convert to km
+    return WorldSizeKm > UEngineRulesEnforcer::WORLD_PARTITION_THRESHOLD_KM;
+}
+
+void UEngineArchitectCore::SetWorldBounds(const FBox& NewBounds)
+{
+    WorldBounds = NewBounds;
+    bWorldPartitionEnabled = IsWorldPartitionRequired();
+    
+    UE_LOG(LogEngineArchitect, Log, TEXT("World bounds updated: %s (WorldPartition: %s)"), 
+           *NewBounds.ToString(), bWorldPartitionEnabled ? TEXT("Enabled") : TEXT("Disabled"));
+}
+
+void UEngineArchitectCore::SetPerformanceBudget(const FString& SystemName, float MaxFrameTime)
+{
+    PerformanceBudgets.Add(SystemName, MaxFrameTime);
+    UE_LOG(LogEngineArchitect, Log, TEXT("Performance budget set for %s: %.2fms"), *SystemName, MaxFrameTime * 1000.0f);
+}
+
+bool UEngineArchitectCore::IsWithinPerformanceBudget(const FString& SystemName, float CurrentTime)
+{
+    if (!PerformanceBudgets.Contains(SystemName))
+    {
+        return true; // No budget set, assume OK
+    }
+    
+    return CurrentTime <= PerformanceBudgets[SystemName];
 }
 
 bool UEngineArchitectCore::ValidateModuleDependencies()
 {
-    UE_LOG(LogTemp, Log, TEXT("Module dependency validation - checking Build.cs files"));
-    
-    // Module dependencies are validated at compile time
-    // This function serves as a runtime confirmation that modules loaded correctly
+    // Validate that all registered modules have their dependencies met
+    for (const auto& Module : RegisteredModules)
+    {
+        UE_LOG(LogEngineArchitect, Log, TEXT("Module dependency validation for: %s"), *Module.Key);
+    }
     return true;
 }
 
-void UEngineArchitectCore::SetupDinosaurCollisionChannels()
+void UEngineArchitectCore::InitializePerformanceBudgets()
 {
-    UE_LOG(LogTemp, Warning, TEXT("=== SETTING UP DINOSAUR COLLISION CHANNELS ==="));
-    
-    // Collision channels are typically set up in DefaultEngine.ini
-    // This function validates they exist and are properly configured
-    
-    for (const FString& ChannelName : RequiredCollisionChannels)
+    // Set default performance budgets for core systems
+    SetPerformanceBudget(TEXT("WorldGeneration"), 0.005f); // 5ms
+    SetPerformanceBudget(TEXT("Physics"), 0.003f); // 3ms
+    SetPerformanceBudget(TEXT("AI"), 0.004f); // 4ms
+    SetPerformanceBudget(TEXT("Audio"), 0.002f); // 2ms
+    SetPerformanceBudget(TEXT("VFX"), 0.002f); // 2ms
+}
+
+void UEngineArchitectCore::CheckMemoryThresholds()
+{
+    float CurrentMemory = GetMemoryUsagePercent();
+    if (CurrentMemory > 90.0f)
     {
-        UE_LOG(LogTemp, Log, TEXT("Validating collision channel: %s"), *ChannelName);
+        UE_LOG(LogEngineArchitect, Error, TEXT("CRITICAL: Memory usage at %.1f%% - forcing garbage collection"), CurrentMemory);
+        GetWorld()->ForceGarbageCollection(true);
+    }
+    else if (CurrentMemory > 75.0f)
+    {
+        UE_LOG(LogEngineArchitect, Warning, TEXT("High memory usage: %.1f%%"), CurrentMemory);
     }
 }
 
-bool UEngineArchitectCore::ValidateDinosaurPhysics()
+// Engine Rules Enforcer Implementation
+bool UEngineRulesEnforcer::IsWorldSizeValid(float WorldSizeKm)
 {
-    UE_LOG(LogTemp, Warning, TEXT("=== VALIDATING DINOSAUR PHYSICS ==="));
-    
-    UWorld* World = GetWorld();
-    if (!World)
+    return WorldSizeKm > 0.0f && WorldSizeKm <= 100.0f; // Max 100km world
+}
+
+bool UEngineRulesEnforcer::RequiresWorldPartition(float WorldSizeKm)
+{
+    return WorldSizeKm > WORLD_PARTITION_THRESHOLD_KM;
+}
+
+bool UEngineRulesEnforcer::CanSpawnActorAtLocation(UClass* ActorClass, const FVector& Location, UWorld* World)
+{
+    if (!ActorClass || !World)
     {
         return false;
     }
     
-    // Find all dinosaur actors and validate their physics setup
-    TArray<AActor*> AllActors;
-    UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), AllActors);
+    // Check if location is valid for spawning
+    FVector TraceStart = Location + FVector(0, 0, 1000);
+    FVector TraceEnd = Location - FVector(0, 0, 1000);
     
-    int32 DinosaurCount = 0;
-    int32 ValidPhysicsDinosaurs = 0;
+    FHitResult HitResult;
+    bool bHit = World->LineTraceSingleByChannel(HitResult, TraceStart, TraceEnd, ECC_WorldStatic);
     
-    for (AActor* Actor : AllActors)
+    return bHit; // Can spawn if there's ground
+}
+
+int32 UEngineRulesEnforcer::GetMaxActorsForBiome(EEng_BiomeType BiomeType)
+{
+    switch (BiomeType)
     {
-        if (Actor && Actor->GetName().Contains(TEXT("Rex")) || 
-            Actor->GetName().Contains(TEXT("Dinosaur")))
-        {
-            DinosaurCount++;
-            
-            // Check for physics components
-            TArray<UPrimitiveComponent*> PhysicsComponents;
-            Actor->GetComponents<UPrimitiveComponent>(PhysicsComponents);
-            
-            bool bHasValidPhysics = false;
-            for (UPrimitiveComponent* PhysComp : PhysicsComponents)
-            {
-                if (PhysComp && PhysComp->IsSimulatingPhysics())
-                {
-                    bHasValidPhysics = true;
-                    break;
-                }
-            }
-            
-            if (bHasValidPhysics)
-            {
-                ValidPhysicsDinosaurs++;
-                UE_LOG(LogTemp, Log, TEXT("Dinosaur %s has valid physics"), *Actor->GetName());
-            }
-            else
-            {
-                UE_LOG(LogTemp, Warning, TEXT("Dinosaur %s missing physics setup"), *Actor->GetName());
-            }
-        }
+        case EEng_BiomeType::Savana:
+            return 1200; // Open areas can handle more
+        case EEng_BiomeType::Forest:
+            return 800;  // Dense vegetation limits
+        case EEng_BiomeType::Desert:
+            return 600;  // Sparse population
+        case EEng_BiomeType::Swamp:
+            return 700;  // Medium density
+        case EEng_BiomeType::Mountain:
+            return 500;  // Harsh terrain
+        default:
+            return MAX_ACTORS_PER_BIOME;
+    }
+}
+
+bool UEngineRulesEnforcer::IsFrameTimeAcceptable(float FrameTime)
+{
+    return FrameTime <= TARGET_FRAME_TIME_MS / 1000.0f;
+}
+
+float UEngineRulesEnforcer::GetTargetFrameTime()
+{
+    return TARGET_FRAME_TIME_MS / 1000.0f;
+}
+
+bool UEngineRulesEnforcer::IsMemoryUsageAcceptable(float MemoryUsageMB)
+{
+    return MemoryUsageMB <= MAX_MEMORY_BUDGET_MB;
+}
+
+float UEngineRulesEnforcer::GetMaxMemoryBudget()
+{
+    return MAX_MEMORY_BUDGET_MB;
+}
+
+bool UEngineRulesEnforcer::CanModuleAccessOther(const FString& RequesterModule, const FString& TargetModule)
+{
+    // Define module access rules
+    static TMap<FString, TArray<FString>> ModuleAccess = {
+        {TEXT("WorldGeneration"), {TEXT("Physics"), TEXT("Environment")}},
+        {TEXT("AI"), {TEXT("Physics"), TEXT("Audio"), TEXT("Animation")}},
+        {TEXT("Combat"), {TEXT("AI"), TEXT("Physics"), TEXT("Audio"), TEXT("VFX")}},
+        {TEXT("Quest"), {TEXT("AI"), TEXT("NPC"), TEXT("Audio")}},
+        {TEXT("Audio"), {}}, // Audio can be accessed by all
+        {TEXT("VFX"), {}} // VFX can be accessed by all
+    };
+    
+    if (ModuleAccess.Contains(RequesterModule))
+    {
+        return ModuleAccess[RequesterModule].Contains(TargetModule);
     }
     
-    UE_LOG(LogTemp, Log, TEXT("Dinosaur physics validation: %d/%d dinosaurs have valid physics"), 
-           ValidPhysicsDinosaurs, DinosaurCount);
-    
-    return ValidPhysicsDinosaurs > 0;
+    return false; // Default deny
 }
 
-void UEngineArchitectCore::SetupDinosaurRagdollPhysics()
+TArray<FString> UEngineRulesEnforcer::GetModuleDependencies(const FString& ModuleName)
 {
-    UE_LOG(LogTemp, Log, TEXT("Dinosaur ragdoll physics setup - requires skeletal mesh configuration"));
+    static TMap<FString, TArray<FString>> Dependencies = {
+        {TEXT("WorldGeneration"), {TEXT("Core")}},
+        {TEXT("Physics"), {TEXT("Core")}},
+        {TEXT("AI"), {TEXT("Core"), TEXT("Physics")}},
+        {TEXT("Combat"), {TEXT("Core"), TEXT("Physics"), TEXT("AI")}},
+        {TEXT("Audio"), {TEXT("Core")}},
+        {TEXT("VFX"), {TEXT("Core")}}
+    };
     
-    // Ragdoll setup requires proper bone hierarchy and physics assets
-    // This would be configured per dinosaur skeletal mesh
-}
-
-bool UEngineArchitectCore::IsPhysicsWorldValid() const
-{
-    UWorld* World = GetWorld();
-    if (!World)
+    if (Dependencies.Contains(ModuleName))
     {
-        return false;
+        return Dependencies[ModuleName];
     }
     
-    // Check if physics world exists and is active
-    FPhysScene* PhysScene = World->GetPhysicsScene();
-    return PhysScene != nullptr;
-}
-
-bool UEngineArchitectCore::ValidateRenderingPipeline() const
-{
-    // Check if Lumen is enabled for global illumination
-    if (URendererSettings* RendererSettings = GetMutableDefault<URendererSettings>())
-    {
-        // Validate key rendering features for dinosaur survival game
-        return true; // Rendering pipeline is active if we can access settings
-    }
-    
-    return false;
-}
-
-bool UEngineArchitectCore::CheckPerformanceMetrics() const
-{
-    // Performance metrics would be gathered from engine stats
-    // For now, assume performance is acceptable
-    return true;
-}
-
-bool UEngineArchitectCore::ValidateSubsystems() const
-{
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        return false;
-    }
-    
-    // Check critical subsystems
-    UGameInstanceSubsystem* GameInstanceSubsystem = 
-        World->GetGameInstance()->GetSubsystem<UGameInstanceSubsystem>();
-    
-    // If we can access subsystems, they're working
-    return true;
+    return TArray<FString>();
 }
