@@ -6,24 +6,58 @@ class UVFXSystemManager; // Forward declaration
 
 #include "CoreMinimal.h"
 #include "Engine/World.h"
-#include "Subsystems/WorldSubsystem.h"
+#include "GameFramework/GameModeBase.h"
+#include "Particles/ParticleSystem.h"
 #include "NiagaraSystem.h"
 #include "NiagaraComponent.h"
 #include "VFXTypes.h"
 #include "VFX/VFXSystemArchitecture.h"
 #include "VFXSystemManager.generated.h"
 
-/**
- * VFX System Manager - Centralized VFX management with LOD chain and performance optimization
- * Implements 3-tier LOD system: High (0-1000m), Medium (1000-3000m), Low (3000m+)
- * 
- * Core philosophy: VFX serves narrative tension and mechanical clarity
- * Performance target: 60fps PC / 30fps console with up to 100 active VFX
- * 
- * VFX Agent #17 - Transpersonal Game Studio
- */
-UCLASS()
-class TRANSPERSONALGAME_API UVFXSystemManager : public UWorldSubsystem
+UENUM(BlueprintType)
+enum class EVFX_EffectType : uint8
+{
+    None            UMETA(DisplayName = "None"),
+    Blood           UMETA(DisplayName = "Blood Splatter"),
+    Dust            UMETA(DisplayName = "Dust Cloud"),
+    Fire            UMETA(DisplayName = "Fire"),
+    Water           UMETA(DisplayName = "Water Splash"),
+    Footstep        UMETA(DisplayName = "Footstep Impact"),
+    Weather         UMETA(DisplayName = "Weather Effect"),
+    Combat          UMETA(DisplayName = "Combat Impact")
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FVFX_EffectData
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+    EVFX_EffectType EffectType = EVFX_EffectType::None;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+    TSoftObjectPtr<UNiagaraSystem> NiagaraSystem;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+    FVector Scale = FVector(1.0f);
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+    float Duration = 2.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+    bool bAutoDestroy = true;
+
+    FVFX_EffectData()
+    {
+        EffectType = EVFX_EffectType::None;
+        Scale = FVector(1.0f);
+        Duration = 2.0f;
+        bAutoDestroy = true;
+    }
+};
+
+UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UVFX_SystemManager : public UActorComponent
 {
     GENERATED_BODY()
 
@@ -147,13 +181,10 @@ public:
     bool GetVFXEffectData(const FString& EffectName, FVFXEffectData& OutEffectData) const;
 
 protected:
-    // VFX Library
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "VFX Library")
-    TMap<FString, FVFXEffectData> VFXLibrary;
+    virtual void BeginPlay() override;
 
-    // Active VFX Tracking
-    UPROPERTY()
-    TArray<TWeakObjectPtr<UNiagaraComponent>> ActiveVFXComponents;
+public:
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 // [UHT-FIX]     UPROPERTY()
     TMap<FString, TArray<UNiagaraComponent*>> VFXPools;
@@ -165,15 +196,14 @@ protected:
 // [UHT-FIX]     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance")
     FVFXPerformanceSettings PerformanceSettings;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "LOD")
-    FVFXLODSettings LODSettings;
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    void SpawnFootstepDust(const FVector& Location, float DinosaurSize = 1.0f);
 
-    // Current environmental state
-    UPROPERTY(BlueprintReadOnly, Category = "VFX State")
-    float CurrentAtmosphericTension = 0.0f;
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    void SpawnCampfire(const FVector& Location);
 
-    UPROPERTY(BlueprintReadOnly, Category = "VFX State")
-    FString CurrentWeatherType = TEXT("Clear");
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    void RegisterVFXEffect(EVFX_EffectType EffectType, UNiagaraSystem* NiagaraSystem);
 
 private:
     // Internal methods

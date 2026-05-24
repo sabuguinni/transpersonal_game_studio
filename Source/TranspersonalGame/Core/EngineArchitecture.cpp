@@ -3,7 +3,11 @@
 #include "Engine/World.h"
 #include "GameFramework/GameModeBase.h"
 
-DEFINE_LOG_CATEGORY_STATIC(LogEngineArchitecture, Log, All);
+UEngineArchitecture::UEngineArchitecture()
+{
+    CurrentFrameRate = 60.0f;
+    MemoryUsageMB = 0.0f;
+}
 
 UEngineArchitecture::UEngineArchitecture()
 {
@@ -22,8 +26,10 @@ void UEngineArchitecture::BeginPlay()
 
 void UEngineArchitecture::ValidateCoreArchitecture()
 {
-    UWorld* World = GetWorld();
-    if (!World)
+    bool bIsValid = true;
+    
+    // Check for orphan headers
+    if (!CheckForOrphanHeaders())
     {
         UE_LOG(LogEngineArchitecture, Error, TEXT("World is null - critical architecture failure"));
         return;

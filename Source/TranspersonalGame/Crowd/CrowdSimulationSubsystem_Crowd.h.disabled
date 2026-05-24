@@ -2,21 +2,17 @@
 
 #include "CoreMinimal.h"
 #include "Subsystems/WorldSubsystem.h"
-#include "MassEntityTypes.h"
-#include "MassCommonTypes.h"
 #include "Engine/World.h"
 #include "CrowdSimulationSubsystem_Crowd.generated.h"
 
-class UMassEntitySubsystem;
-class UMassSpawnerSubsystem;
-struct FMassEntityHandle;
-
-DECLARE_LOG_CATEGORY_EXTERN(LogCrowdSimulation, Log, All);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FCrowdEventDelegate, int32, CrowdID, ECrowd_BehaviorState, NewState);
 
 
 #if 0 // HEADER_DISABLED
 /**
- * Types of dinosaur crowd behaviors
+ * Crowd Simulation Subsystem for managing large-scale prehistoric tribal populations
+ * Supports up to 50,000 simultaneous agents using Mass Entity framework
+ * Handles tribal settlements, gathering groups, hunting parties, and migration patterns
  */
 UENUM(BlueprintType)
 enum class EDinosaurCrowdType : uint8
@@ -124,28 +120,34 @@ class TRANSPERSONALGAME_API UCrowd_CrowdSimulationSubsystem : public UWorldSubsy
     GENERATED_BODY()
 
 public:
+    UCrowdSimulationSubsystem();
+
     // USubsystem interface
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
     virtual bool ShouldCreateSubsystem(UObject* Outer) const override;
 
-    // Crowd management
+    // Crowd Management
     UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    void SpawnDinosaurCrowd(const FVector& Location, const FDinosaurCrowdParams& Params, int32 GroupSize = 0);
+    int32 SpawnCrowdGroup(FVector Location, ECrowd_GroupType GroupType, int32 AgentCount);
 
     UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    void TriggerPanicBehavior(const FVector& ThreatLocation, float PanicRadius = 2000.0f);
+    void DespawnCrowdGroup(int32 CrowdID);
 
     UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    void StartMigrationEvent(int32 RouteIndex);
+    void SetCrowdBehavior(int32 CrowdID, ECrowd_BehaviorState NewBehavior);
 
     UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    void StopMigrationEvent(int32 RouteIndex);
+    void MoveCrowdToLocation(int32 CrowdID, FVector TargetLocation);
 
-    // Configuration
+    // LOD Management
+    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
+    void UpdateCrowdLOD(FVector PlayerLocation);
+
     UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
     void SetGlobalCrowdDensity(float DensityMultiplier);
 
+    // Query Functions
     UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
     void RegisterMigrationRoute(const FCrowd_MigrationRoute_DD8& Route);
 
@@ -154,52 +156,51 @@ public:
     int32 GetActiveCrowdCount() const;
 
     UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    TArray<FVector> GetNearbyGroupCenters(const FVector& Location, float Radius) const;
+    int32 GetTotalActiveAgents() const;
 
     UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    bool IsLocationInMigrationPath(const FVector& Location) const;
+    ECrowd_BehaviorState GetCrowdBehavior(int32 CrowdID) const;
+
+    // Events
+    UPROPERTY(BlueprintAssignable, Category = "Crowd Events")
+    FCrowdEventDelegate OnCrowdBehaviorChanged;
+
+    UPROPERTY(BlueprintAssignable, Category = "Crowd Events")
+    FCrowdEventDelegate OnCrowdGroupSpawned;
+
+    UPROPERTY(BlueprintAssignable, Category = "Crowd Events")
+    FCrowdEventDelegate OnCrowdGroupDespawned;
 
 protected:
-    // Mass Entity integration
-    UPROPERTY()
-    TObjectPtr<UMassEntitySubsystem> MassEntitySubsystem;
+    // Crowd Group Data
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Crowd Data")
+    TMap<int32, FCrowd_GroupData> ActiveCrowdGroups;
 
-    UPROPERTY()
-    TObjectPtr<UMassSpawnerSubsystem> MassSpawnerSubsystem;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Settings")
+    int32 MaxConcurrentAgents;
 
-    // Crowd tracking
-    UPROPERTY()
-    TArray<FMassEntityHandle> ActiveCrowds;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Settings")
+    float LODUpdateInterval;
 
-    UPROPERTY()
-    TMap<FMassEntityHandle, FDinosaurCrowdParams> CrowdParameters;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Settings")
+    float HighDetailRadius;
 
     // Migration system
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Migration")
     TArray<FCrowd_MigrationRoute_DD8> MigrationRoutes;
 
-    UPROPERTY()
-    TArray<int32> ActiveMigrations;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Settings")
+    float LowDetailRadius;
 
-    // Global settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
-    float GlobalDensityMultiplier = 1.0f;
+    // Performance Settings
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    bool bEnableMassEntityIntegration;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
-    int32 MaxSimultaneousCrowds = 20;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    bool bEnableOcclusionCulling;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
-    float CrowdUpdateFrequency = 0.1f;
-
-    // Internal functions
-    void UpdateCrowdBehaviors(float DeltaTime);
-    void ProcessMigrations(float DeltaTime);
-    void CleanupInactiveCrowds();
-    
-    FVector CalculateFlockingForce(const FMassEntityHandle& Entity, const FDinosaurCrowdParams& Params);
-    FVector CalculateCohesion(const FMassEntityHandle& Entity, const TArray<FMassEntityHandle>& Neighbors);
-    FVector CalculateSeparation(const FMassEntityHandle& Entity, const TArray<FMassEntityHandle>& Neighbors, float SeparationRadius);
-    FVector CalculateAlignment(const FMassEntityHandle& Entity, const TArray<FMassEntityHandle>& Neighbors);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float CullingDistance;
 
 private:
     FTimerHandle CrowdUpdateTimer;

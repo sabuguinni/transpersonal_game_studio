@@ -108,8 +108,8 @@ struct FDinosaurRoutine
 };
 
 /**
- * Advanced AI Controller for dinosaur NPCs with sophisticated behavior trees,
- * memory systems, social interactions, and daily routines
+ * AI Controller for dinosaur NPCs with advanced behavior trees and perception
+ * Handles territorial behavior, pack dynamics, and threat assessment
  */
 #if 0 // HEADER_DISABLED - references disabled class
 UCLASS(BlueprintType, Blueprintable)
@@ -125,64 +125,69 @@ protected:
     virtual void Tick(float DeltaTime);
     virtual void OnPossess(APawn* InPawn) override;
 
-    // Core AI Components
+    // AI Components
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI")
-    class UDinosaurMemoryComponent* MemoryComponent;
+    class UBehaviorTreeComponent* BehaviorTreeComponent;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI")
-    class UDinosaurSocialComponent* SocialComponent;
+    class UBlackboardComponent* BlackboardComponent;
 
-    // Behavior Tree Assets
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI")
-    UBehaviorTree* BehaviorTree;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI")
+    class UAIPerceptionComponent* PerceptionComponent;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI")
-    UBlackboardData* BlackboardAsset;
+    // Behavior Trees
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI")
+    class UBehaviorTree* DefaultBehaviorTree;
 
-    // Dinosaur Characteristics
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur")
-    EDinosaurPersonality Personality;
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI")
+    class UBehaviorTree* CombatBehaviorTree;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur")
     FAI_DinosaurNeeds CurrentNeeds;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur")
-    FDinosaurRoutine DailyRoutine;
+    // Blackboard Data
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI")
+    class UBlackboardData* DinosaurBlackboard;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur")
-    float AggressionLevel = 0.5f;
+    // AI Behavior Settings
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI Behavior")
+    ENPC_DinosaurSpecies DinosaurSpecies;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur")
-    float CuriosityLevel = 0.5f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI Behavior")
+    float TerritorialRadius;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur")
-    float FearLevel = 0.3f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI Behavior")
+    float AggressionLevel;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur")
-    float TerritorialRadius = 1000.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI Behavior")
+    float PackLoyalty;
 
-    // Perception Configuration
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Perception")
-    float SightRadius = 2000.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI Behavior")
+    bool bIsPackLeader;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Perception")
-    float HearingRadius = 1500.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI Behavior")
+    bool bIsAlphaSpecimen;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Perception")
-    float PeripheralVisionAngleDegrees = 90.0f;
+    // Perception Settings
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI Perception")
+    float SightRadius;
 
     // Current State
     UPROPERTY(BlueprintReadOnly, Category = "State")
     EAI_DinosaurBehaviorState_A3C CurrentBehaviorState;
 
-    UPROPERTY(BlueprintReadOnly, Category = "State")
-    AActor* CurrentTarget;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI Perception")
+    float PeripheralVisionAngle;
 
-    UPROPERTY(BlueprintReadOnly, Category = "State")
-    FVector CurrentDestination;
+    // Memory System
+    UPROPERTY(BlueprintReadOnly, Category = "AI Memory")
+    TArray<FNPC_ThreatMemory> ThreatMemories;
 
-    UPROPERTY(BlueprintReadOnly, Category = "State")
-    float StateTimer;
+    UPROPERTY(BlueprintReadOnly, Category = "AI Memory")
+    TArray<FNPC_LocationMemory> LocationMemories;
+
+    UPROPERTY(BlueprintReadOnly, Category = "AI Memory")
+    TArray<AActor*> PackMembers;
 
 public:
     // Behavior State Management
@@ -192,26 +197,46 @@ public:
     UFUNCTION(BlueprintPure, Category = "AI")
     EAI_DinosaurBehaviorState_A3C GetBehaviorState() const { return CurrentBehaviorState; }
 
-    // Need Management
-    UFUNCTION(BlueprintCallable, Category = "AI")
-    void UpdateNeeds(float DeltaTime);
+    UFUNCTION(BlueprintCallable, Category = "AI Behavior")
+    void SwitchToFlockingMode();
 
-    UFUNCTION(BlueprintPure, Category = "AI")
-    float GetHighestNeed() const;
+    UFUNCTION(BlueprintCallable, Category = "AI Behavior")
+    void SwitchToDefaultMode();
 
-    UFUNCTION(BlueprintPure, Category = "AI")
-    bool IsNeedCritical(float Threshold = 20.0f) const;
+    // Threat Assessment
+    UFUNCTION(BlueprintCallable, Category = "AI Threat")
+    void AssessThreat(AActor* ThreatActor);
 
-    // Routine Management
-    UFUNCTION(BlueprintCallable, Category = "AI")
-    FVector GetNearestLocationOfType(const TArray<FVector>& Locations) const;
+    UFUNCTION(BlueprintCallable, Category = "AI Threat")
+    bool IsActorThreat(AActor* Actor) const;
 
-    UFUNCTION(BlueprintCallable, Category = "AI")
-    void UpdateDailyRoutine();
+    UFUNCTION(BlueprintCallable, Category = "AI Threat")
+    float CalculateThreatLevel(AActor* Actor) const;
 
-    UFUNCTION(BlueprintPure, Category = "AI")
-    bool IsTimeForActivity(float StartTime, float EndTime) const;
+    // Pack Behavior
+    UFUNCTION(BlueprintCallable, Category = "AI Pack")
+    void RegisterPackMember(AActor* PackMember);
 
+    UFUNCTION(BlueprintCallable, Category = "AI Pack")
+    void RemovePackMember(AActor* PackMember);
+
+    UFUNCTION(BlueprintCallable, Category = "AI Pack")
+    void CallForBackup(AActor* Threat);
+
+    UFUNCTION(BlueprintCallable, Category = "AI Pack")
+    void RespondToPackCall(AActor* PackLeader, AActor* Threat);
+
+    // Memory Management
+    UFUNCTION(BlueprintCallable, Category = "AI Memory")
+    void RememberThreat(AActor* ThreatActor, float ThreatLevel);
+
+    UFUNCTION(BlueprintCallable, Category = "AI Memory")
+    void RememberLocation(FVector Location, ENPC_LocationImportance Importance);
+
+    UFUNCTION(BlueprintCallable, Category = "AI Memory")
+    void ForgetOldMemories();
+
+protected:
     // Perception Events
     UFUNCTION()
     void OnPerceptionUpdated(const TArray<AActor*>& UpdatedActors);
@@ -219,44 +244,15 @@ public:
     UFUNCTION()
     void OnTargetPerceptionUpdated(AActor* Actor, FAIStimulus Stimulus);
 
-    // Social Behavior
-    UFUNCTION(BlueprintCallable, Category = "Social")
-    void InitiateSocialInteraction(AActor* OtherDinosaur);
-
-    UFUNCTION(BlueprintCallable, Category = "Social")
-    bool CanInteractWith(AActor* OtherActor) const;
-
-    // Memory Access
-    UFUNCTION(BlueprintPure, Category = "Memory")
-    bool HasMemoryOf(AActor* Actor) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Memory")
-    void RememberLocation(FVector Location, const FString& LocationType);
-
-    UFUNCTION(BlueprintCallable, Category = "Memory")
-    FVector RecallLocationOfType(const FString& LocationType) const;
-
-    // Debugging
-    UFUNCTION(BlueprintCallable, Category = "Debug")
-    void DebugDrawBehaviorInfo() const;
-
-protected:
-    // Internal behavior logic
-    void InitializePerception();
+    // Behavior Tree Helpers
     void InitializeBehaviorTree();
-    void UpdateBlackboard();
-    void ProcessEmergentBehavior();
-    
-    // Need decay rates
-    float HungerDecayRate = 5.0f;
-    float ThirstDecayRate = 8.0f;
-    float EnergyDecayRate = 3.0f;
-    float SafetyRecoveryRate = 2.0f;
+    void ConfigurePerception();
+    void SetupBlackboardValues();
 
-    // Timers
-    float NeedUpdateTimer = 0.0f;
-    float RoutineUpdateTimer = 0.0f;
-    float PerceptionUpdateTimer = 0.0f;
+    // Species-specific behavior initialization
+    void ConfigureTRexBehavior();
+    void ConfigureRaptorBehavior();
+    void ConfigureHerbivoreBehavior();
 
 
     // Cached references

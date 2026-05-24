@@ -2,16 +2,70 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "Components/ActorComponent.h"
+#include "Engine/World.h"
+#include "MassEntityTypes.h"
 #include "MassEntitySubsystem.h"
-#include "MassSpawnerSubsystem.h"
-#include "MassSimulationSubsystem.h"
+#include "MassSpawnerTypes.h"
+#include "MassCommonTypes.h"
+#include "../SharedTypes.h"
 #include "CrowdSimulationManager.generated.h"
 
-/**
- * Central manager for crowd simulation in the prehistoric world
- * Handles herds, flocks, and pack behaviors using Mass AI
- */
-UCLASS()
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FCrowd_HerdData
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Herd")
+    TArray<FMassEntityHandle> HerdMembers;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Herd")
+    FVector HerdCenter;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Herd")
+    float HerdRadius;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Herd")
+    EDinosaurSpecies Species;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Herd")
+    int32 HerdSize;
+
+    FCrowd_HerdData()
+    {
+        HerdCenter = FVector::ZeroVector;
+        HerdRadius = 1000.0f;
+        Species = EDinosaurSpecies::Triceratops;
+        HerdSize = 0;
+    }
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FCrowd_MigrationRoute
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Migration")
+    TArray<FVector> Waypoints;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Migration")
+    float MigrationSpeed;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Migration")
+    EBiomeType StartBiome;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Migration")
+    EBiomeType EndBiome;
+
+    FCrowd_MigrationRoute()
+    {
+        MigrationSpeed = 200.0f;
+        StartBiome = EBiomeType::Savana;
+        EndBiome = EBiomeType::Forest;
+    }
+};
+
+UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API ACrowdSimulationManager : public AActor
 {
     GENERATED_BODY()
@@ -23,38 +77,44 @@ protected:
     virtual void BeginPlay() override;
     virtual void Tick(float DeltaTime);
 
-    // Core simulation parameters
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Simulation")
-    int32 MaxSimultaneousEntities = 50000;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Simulation")
-    float SimulationRadius = 10000.0f; // 10km radius around player
+    int32 MaxCrowdSize;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Simulation")
-    float LODUpdateFrequency = 0.5f; // Update LOD twice per second
+    float CrowdDensity;
 
-    // Herd behavior settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Herd Behavior")
-    float HerdCohesionRadius = 500.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Herd Behavior")
-    float HerdSeparationRadius = 100.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Herd Behavior")
-    float HerdAlignmentRadius = 300.0f;
-
-    // Migration patterns
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Migration")
-    TArray<FVector> MigrationWaypoints;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Simulation")
+    TArray<FCrowd_HerdData> ActiveHerds;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Migration")
-    float MigrationSpeed = 200.0f; // cm/s
+    TArray<FCrowd_MigrationRoute> MigrationRoutes;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Migration")
-    float SeasonalCycleLength = 1800.0f; // 30 minutes = 1 season
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float LODDistance1;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float LODDistance2;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float CullingDistance;
+
+public:
+    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
+    void SpawnHerd(EDinosaurSpecies Species, FVector Location, int32 HerdSize);
+
+    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
+    void StartMigration(int32 HerdIndex, const FCrowd_MigrationRoute& Route);
+
+    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
+    void UpdateHerdBehavior(int32 HerdIndex, float DeltaTime);
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void UpdateLOD();
+
+    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
+    int32 GetTotalCrowdCount() const;
 
 private:
-    // Mass Entity components
     UPROPERTY()
     class UMassEntitySubsystem* MassEntitySubsystem;
 

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Components/ActorComponent.h"
 #include "Engine/Engine.h"
 #include "BehaviorTree/BehaviorTree.h"
 #include "BehaviorTree/BlackboardComponent.h"
@@ -14,24 +15,13 @@
 UENUM(BlueprintType)
 enum class EAI_DinosaurSpecies_ABB : uint8
 {
-    // Herbívoros Pequenos (Domesticáveis)
-    Compsognathus     UMETA(DisplayName = "Compsognathus"),
-    Parasaurolophus   UMETA(DisplayName = "Parasaurolophus"),
-    Triceratops       UMETA(DisplayName = "Triceratops"),
-    
-    // Herbívoros Grandes (Neutros)
-    Brachiosaurus     UMETA(DisplayName = "Brachiosaurus"),
-    Diplodocus        UMETA(DisplayName = "Diplodocus"),
-    Stegosaurus       UMETA(DisplayName = "Stegosaurus"),
-    
-    // Carnívoros Pequenos (Agressivos)
-    Velociraptor      UMETA(DisplayName = "Velociraptor"),
-    Deinonychus       UMETA(DisplayName = "Deinonychus"),
-    
-    // Carnívoros Grandes (Apex Predators)
-    TyrannosaurusRex  UMETA(DisplayName = "Tyrannosaurus Rex"),
-    Allosaurus        UMETA(DisplayName = "Allosaurus"),
-    Spinosaurus       UMETA(DisplayName = "Spinosaurus")
+    Peaceful        UMETA(DisplayName = "Peaceful"),
+    Aggressive      UMETA(DisplayName = "Aggressive"), 
+    Curious         UMETA(DisplayName = "Curious"),
+    Fearful         UMETA(DisplayName = "Fearful"),
+    Territorial     UMETA(DisplayName = "Territorial"),
+    Social          UMETA(DisplayName = "Social"),
+    Solitary        UMETA(DisplayName = "Solitary")
 };
 
 UENUM(BlueprintType)
@@ -68,31 +58,26 @@ struct FAI_DinosaurPersonality_ABB
 {
     GENERATED_BODY()
 
-    // Traços de personalidade base (0.0 a 1.0)
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float Aggressiveness = 0.5f;
-    
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float Curiosity = 0.5f;
-    
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float Fearfulness = 0.5f;
-    
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float Sociability = 0.5f;
-    
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float TerritorialInstinct = 0.5f;
-    
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float Intelligence = 0.5f;
-    
-    // Preferências comportamentais
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float PreferredActivityTime = 0.5f; // 0.0 = nocturno, 0.5 = crepuscular, 1.0 = diurno
-    
+    TArray<AActor*> KnownActors;
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float SocialGroupPreference = 0.5f; // 0.0 = solitário, 1.0 = altamente social
+    TArray<FVector> InterestingLocations;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    TMap<AActor*, float> ActorThreatLevels;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float LastPlayerInteractionTime;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bPlayerIsKnown;
+
+    FNPCMemory()
+    {
+        LastPlayerInteractionTime = 0.0f;
+        bPlayerIsKnown = false;
+    }
 };
 
 USTRUCT(BlueprintType)
@@ -100,20 +85,18 @@ struct FAI_DinosaurMemory
 {
     GENERATED_BODY()
 
-    // Memória de localizações importantes
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    TArray<FVector> KnownWaterSources;
-    
+    float StartTime; // Hour of day (0-24)
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    TArray<FVector> KnownFoodSources;
-    
+    float Duration; // Duration in hours
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    TArray<FVector> SafeRestingSpots;
-    
+    ENPCState Activity;
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    TArray<FVector> DangerousAreas;
-    
-    // Memória de outros actores
+    FVector TargetLocation;
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     TMap<AActor*, float> KnownActorsThreatLevel; // -1.0 (amigo) a 1.0 (inimigo)
     
@@ -179,12 +162,12 @@ struct FAI_DinosaurNeeds_ABB
  * Integra Behavior Trees, memória persistente, personalidade e necessidades
  */
 UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UNPCBehaviorComponent : public UActorComponent
+class TRANSPERSONALGAME_API UNPCBehaviorSystem : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    UNPCBehaviorComponent();
+    UNPCBehaviorSystem();
 
 protected:
     virtual void BeginPlay() override;
@@ -290,21 +273,106 @@ public:
     UFUNCTION(BlueprintCallable, Category = "AI Utils")
     bool ShouldInvestigateActor(AActor* Actor) const;
 
-private:
-    // === FUNÇÕES INTERNAS ===
-    void InitializePersonality();
-    void InitializeSpeciesDefaults();
-    void ProcessDailyRoutine();
-    void DecayNeeds(float DeltaTime);
-    void UpdateMemoryDecay(float DeltaTime);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Behavior")
+    ENPCState CurrentState;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Behavior")
+    FString NPCName;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Behavior")
+    int32 NPCAge;
+
+    // Behavior Tree Integration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI")
+    class UBehaviorTree* BehaviorTree;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI")
+    class UBlackboardAsset* BlackboardAsset;
+
+    // Memory System
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory")
+    FNPCMemory NPCMemory;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory")
+    float MemoryRetentionTime;
+
+    // Daily Routine System
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Routine")
+    TArray<FNPCRoutine> DailyRoutines;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Routine")
+    bool bFollowDailyRoutine;
+
+    // Social System
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Social")
+    TArray<AActor*> KnownNPCs;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Social")
+    TMap<AActor*, float> RelationshipValues; // -1.0 (enemy) to 1.0 (friend)
+
+    // Perception Settings
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Perception")
+    float SightRadius;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Perception")
+    float HearingRadius;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Perception")
+    float PeripheralVisionAngle;
+
+    // Behavior Functions
+    UFUNCTION(BlueprintCallable, Category = "NPC Behavior")
+    void SetNPCState(ENPCState NewState);
+
+    UFUNCTION(BlueprintCallable, Category = "NPC Behavior")
+    ENPCState GetCurrentState() const { return CurrentState; }
+
+    UFUNCTION(BlueprintCallable, Category = "Memory")
+    void RememberActor(AActor* Actor, float ThreatLevel = 0.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "Memory")
+    void ForgetActor(AActor* Actor);
+
+    UFUNCTION(BlueprintCallable, Category = "Memory")
+    bool IsActorKnown(AActor* Actor) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Routine")
+    FNPCRoutine GetCurrentRoutine() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Routine")
+    void AddRoutine(const FNPCRoutine& NewRoutine);
+
+    UFUNCTION(BlueprintCallable, Category = "Social")
+    void UpdateRelationship(AActor* OtherActor, float RelationshipChange);
+
+    UFUNCTION(BlueprintCallable, Category = "Social")
+    float GetRelationshipValue(AActor* OtherActor) const;
+
+    // AI Integration
+    UFUNCTION(BlueprintCallable, Category = "AI")
+    void StartBehaviorTree();
+
+    UFUNCTION(BlueprintCallable, Category = "AI")
+    void StopBehaviorTree();
+
+    UFUNCTION(BlueprintCallable, Category = "AI")
+    void UpdateBlackboardValues();
+
+protected:
+    // Internal Functions
+    void UpdateDailyRoutine();
+    void ProcessMemory(float DeltaTime);
+    void HandlePerception();
+    float GetCurrentTimeOfDay() const;
     
-    // === VARIÁVEIS INTERNAS ===
-    float LastRoutineUpdate = 0.0f;
-    float LastNeedsUpdate = 0.0f;
-    float LastMemoryUpdate = 0.0f;
+    // Timers
+    float MemoryCleanupTimer;
+    float RoutineUpdateTimer;
     
-    // Timers para diferentes sistemas
-    const float RoutineUpdateInterval = 30.0f; // Actualizar rotina a cada 30 segundos
-    const float NeedsUpdateInterval = 60.0f;   // Actualizar necessidades a cada minuto
-    const float MemoryUpdateInterval = 120.0f; // Limpar memória a cada 2 minutos
+    // References
+    UPROPERTY()
+    class AAIController* NPCAIController;
+    
+    UPROPERTY()
+    class UBlackboardComponent* BlackboardComponent;
 };

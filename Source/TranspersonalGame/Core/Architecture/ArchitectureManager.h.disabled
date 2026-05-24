@@ -1,5 +1,3 @@
-// Copyright Transpersonal Game Studio. All Rights Reserved.
-
 #pragma once
 #ifndef FWORLDGENPARAMS_DEFINED
 #define FWORLDGENPARAMS_DEFINED
@@ -187,37 +185,30 @@ enum class EInteriorObjectType : uint8
 
 /** Building component data */
 USTRUCT(BlueprintType)
-struct FBuildingComponent
+struct FArch_ShelterData
 {
     GENERATED_BODY()
 
-    /** Component mesh */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Component")
-    TSoftObjectPtr<UStaticMesh> ComponentMesh;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter")
+    EArch_ShelterType ShelterType;
 
-    /** Material for this component */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Component")
-    TSoftObjectPtr<UMaterialInterface> ComponentMaterial;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter")
+    FVector Location;
 
-    /** Component type name */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Component")
-    FString ComponentName = "Wall";
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter")
+    FRotator Rotation;
 
-    /** Snap points for connecting to other components */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Connection")
-    TArray<FVector> SnapPoints;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter")
+    float InteriorRadius;
 
-    /** Compatible connection types */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Connection")
-    TArray<FString> CompatibleConnections;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter")
+    bool bHasCampfire;
 
-    /** Size in building grid units */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dimensions")
-    FIntVector GridSize = FIntVector(1, 1, 1);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter")
+    float SafetyLevel;
 
-    /** Structural integrity value */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    float StructuralIntegrity = 100.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter")
+    int32 MaxOccupants;
 
     /** Weather resistance */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Durability")
@@ -236,190 +227,8 @@ struct FBuildingComponent
     float DecayRate = 0.1f;
 };
 
-/** Interior decoration profile */
-USTRUCT(BlueprintType)
-struct FInteriorProfile
-{
-    GENERATED_BODY()
-
-    /** Type of inhabitant */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Inhabitant")
-    EInhabitantType InhabitantType = EInhabitantType::SmallFamily;
-
-    /** Number of occupants */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Inhabitant")
-    int32 OccupantCount = 3;
-
-    /** How long was this place inhabited? */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "History")
-    float InhabitationDuration = 2.0f; // years
-
-    /** How long since abandonment? */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "History")
-    float AbandonmentTime = 0.5f; // years
-
-    /** Reason for abandonment */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "History")
-    FString AbandonmentReason = "Unknown";
-
-    /** Wealth level (affects object quality) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Social")
-    float WealthLevel = 0.5f; // 0-1 scale
-
-    /** Skill level (affects tool sophistication) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Social")
-    float SkillLevel = 0.5f; // 0-1 scale
-
-    /** Primary activities performed here */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Activities")
-    TArray<FString> PrimaryActivities;
-
-    /** Seasonal occupation pattern */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Temporal")
-    FString SeasonalPattern = "Year-round";
-
-    /** Objects that should be present */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Objects")
-    TMap<EInteriorObjectType, int32> RequiredObjects;
-
-    /** Objects that might be present */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Objects")
-    TMap<EInteriorObjectType, float> OptionalObjects; // probability 0-1
-
-    /** Specific story elements to include */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    TArray<FString> StoryElements;
-
-    /** Wear patterns to apply */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Aging")
-    TArray<FString> WearPatterns;
-};
-
-/** Structure blueprint data */
-USTRUCT(BlueprintType)
-struct FStructureBlueprint
-{
-    GENERATED_BODY()
-
-    /** Structure type */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    EStructureType StructureType = EStructureType::PrimitiveHut;
-
-    /** Display name */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    FString StructureName = "Primitive Hut";
-
-    /** Description */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    FString Description = "A simple dwelling made from available materials";
-
-    /** Building components required */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Construction")
-    TArray<FBuildingComponent> RequiredComponents;
-
-    /** Optional components */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Construction")
-    TArray<FBuildingComponent> OptionalComponents;
-
-    /** Foundation requirements */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Placement")
-    FString FoundationType = "Level Ground";
-
-    /** Minimum terrain slope for placement */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Placement")
-    float MinSlope = 0.0f;
-
-    /** Maximum terrain slope for placement */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Placement")
-    float MaxSlope = 15.0f;
-
-    /** Preferred biomes for this structure */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment")
-    TArray<EBiomeType> PreferredBiomes;
-
-    /** Distance from water preference */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment")
-    FVector2D WaterDistanceRange = FVector2D(50.0f, 500.0f);
-
-    /** Typical interior profile */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interior")
-    FInteriorProfile TypicalInterior;
-
-    /** Construction difficulty (affects placement frequency) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rarity")
-    float ConstructionDifficulty = 1.0f;
-
-    /** Cultural significance (affects placement near other structures) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Social")
-    float CulturalSignificance = 1.0f;
-};
-
-/** Interior object asset data */
-USTRUCT(BlueprintType)
-struct FInteriorObjectAsset
-{
-    GENERATED_BODY()
-
-    /** Object mesh */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Asset")
-    TSoftObjectPtr<UStaticMesh> ObjectMesh;
-
-    /** Material variations */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Asset")
-    TArray<TSoftObjectPtr<UMaterialInterface>> MaterialVariations;
-
-    /** Object type */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Classification")
-    EInteriorObjectType ObjectType = EInteriorObjectType::StoneTools;
-
-    /** Object name */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Classification")
-    FString ObjectName = "Stone Tool";
-
-    /** Scale variation range */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Variation")
-    FVector2D ScaleRange = FVector2D(0.8f, 1.2f);
-
-    /** Rotation variation (degrees) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Variation")
-    float RotationVariation = 360.0f;
-
-    /** Placement rules */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Placement")
-    TArray<FString> PlacementRules;
-
-    /** Required nearby objects */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Context")
-    TArray<EInteriorObjectType> RequiredNearbyObjects;
-
-    /** Incompatible objects (won't place near these) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Context")
-    TArray<EInteriorObjectType> IncompatibleObjects;
-
-    /** Story weight (importance for narrative) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    float StoryWeight = 1.0f;
-
-    /** Interaction possibilities */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interaction")
-    TArray<FString> PossibleInteractions;
-
-    /** Condition when placed */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "State")
-    EStructureCondition InitialCondition = EStructureCondition::WellMaintained;
-
-    /** Can this object decay? */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Aging")
-    bool bCanDecay = true;
-
-    /** Decay rate per year */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Aging")
-    float DecayRate = 0.2f;
-};
-
-/** Main Architecture Manager class */
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UArchitectureManager : public UGameInstanceSubsystem
+class TRANSPERSONALGAME_API AArch_PrimitiveShelter : public AActor
 {
     GENERATED_BODY()
 
@@ -536,64 +345,94 @@ public:
 protected:
     virtual void BeginPlay() override;
 
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    UStaticMeshComponent* ShelterMesh;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    UBoxComponent* InteriorTrigger;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    UPointLightComponent* CampfireLight;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter")
+    FArch_ShelterData ShelterData;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter")
+    bool bIsOccupied;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter")
+    TArray<AActor*> CurrentOccupants;
+
 public:
-    /** Structure type */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    EStructureType StructureType = EStructureType::PrimitiveHut;
+    UFUNCTION(BlueprintCallable, Category = "Shelter")
+    void SetShelterType(EArch_ShelterType NewType);
 
-    /** Current condition */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    EStructureCondition CurrentCondition = EStructureCondition::WellMaintained;
+    UFUNCTION(BlueprintCallable, Category = "Shelter")
+    bool CanEnterShelter(AActor* Actor);
 
-    /** Interior profile used for this structure */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interior")
-    FInteriorProfile InteriorProfile;
+    UFUNCTION(BlueprintCallable, Category = "Shelter")
+    void EnterShelter(AActor* Actor);
 
-    /** Age of structure in years */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Aging")
-    float StructureAge = 0.0f;
+    UFUNCTION(BlueprintCallable, Category = "Shelter")
+    void ExitShelter(AActor* Actor);
 
-    /** Time since abandonment */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Aging")
-    float AbandonmentTime = 0.0f;
+    UFUNCTION(BlueprintCallable, Category = "Shelter")
+    float GetSafetyLevel() const { return ShelterData.SafetyLevel; }
 
-    /** Building components */
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    TArray<class UStaticMeshComponent*> BuildingComponents;
-
-    /** Interior objects */
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    TArray<class UStaticMeshComponent*> InteriorObjects;
-
-    /** Collision component for interior space */
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    class UBoxComponent* InteriorBounds;
-
-    /** Apply aging effects */
-    UFUNCTION(BlueprintCallable, Category = "Aging")
-    void ApplyAgingEffects(float TimeYears);
-
-    /** Get interior bounds */
-    UFUNCTION(BlueprintCallable, Category = "Interior")
-    FBox GetInteriorBounds() const;
-
-    /** Check if point is inside structure */
-    UFUNCTION(BlueprintCallable, Category = "Interior")
-    bool IsPointInside(const FVector& Point) const;
-
-    /** Get all interior objects of specific type */
-    UFUNCTION(BlueprintCallable, Category = "Interior")
-    TArray<class UStaticMeshComponent*> GetInteriorObjectsOfType(EInteriorObjectType ObjectType) const;
+    UFUNCTION(BlueprintCallable, Category = "Shelter")
+    bool HasCampfire() const { return ShelterData.bHasCampfire; }
 
 protected:
-    /** Update visual condition based on age and damage */
-    void UpdateVisualCondition();
+    UFUNCTION()
+    void OnInteriorEnter(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, 
+                        UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, 
+                        bool bFromSweep, const FHitResult& SweepResult);
 
-    /** Apply material aging effects */
-    void ApplyMaterialAging(float AgingFactor);
+    UFUNCTION()
+    void OnInteriorExit(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, 
+                       UPrimitiveComponent* OtherComp, int32 OtherBodyIndex);
 
-    /** Update structural integrity */
-    void UpdateStructuralIntegrity();
+    void UpdateCampfireLight();
+    void ConfigureShelterMesh();
+};
+
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API UArch_ArchitectureManager : public UGameInstanceSubsystem
+{
+    GENERATED_BODY()
+
+public:
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
+
+protected:
+    UPROPERTY()
+    TArray<AArch_PrimitiveShelter*> RegisteredShelters;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
+    TMap<EArch_ShelterType, UStaticMesh*> ShelterMeshes;
+
+public:
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    AArch_PrimitiveShelter* CreateShelter(EArch_ShelterType ShelterType, FVector Location, FRotator Rotation);
+
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    void RegisterShelter(AArch_PrimitiveShelter* Shelter);
+
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    void UnregisterShelter(AArch_PrimitiveShelter* Shelter);
+
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    TArray<AArch_PrimitiveShelter*> GetNearbyShelters(FVector Location, float Radius);
+
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    AArch_PrimitiveShelter* FindClosestShelter(FVector Location, EArch_ShelterType ShelterType = EArch_ShelterType::None);
+
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    void LoadDefaultShelterMeshes();
+
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Architecture")
+    void SpawnTestShelters();
 
 private:
     /** Material instances for aging effects */

@@ -1,19 +1,23 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/World.h"
+#include "Engine/GameInstanceSubsystem.h"
 #include "Subsystems/WorldSubsystem.h"
-#include "Engine/Engine.h"
-#include "RenderingThread.h"
+#include "Engine/World.h"
 #include "Stats/Stats.h"
-#include "HAL/IConsoleManager.h"
+#include "../../SharedTypes.h"
 #include "PerformanceArchitecture.generated.h"
 
-DECLARE_LOG_CATEGORY_EXTERN(LogPerformanceArchitecture, Log, All);
+// Performance monitoring stats
+DECLARE_STATS_GROUP(TEXT("TranspersonalGame_Performance"), STATGROUP_TranspersonalPerf, STATCAT_Advanced);
+DECLARE_CYCLE_STAT(TEXT("Frame Time"), STAT_FrameTime, STATGROUP_TranspersonalPerf);
+DECLARE_CYCLE_STAT(TEXT("AI Update"), STAT_AIUpdate, STATGROUP_TranspersonalPerf);
+DECLARE_CYCLE_STAT(TEXT("World Generation"), STAT_WorldGen, STATGROUP_TranspersonalPerf);
+DECLARE_CYCLE_STAT(TEXT("Crowd Simulation"), STAT_CrowdSim, STATGROUP_TranspersonalPerf);
 
 /**
- * Performance monitoring and optimization system
- * Ensures 60fps on PC and 30fps on console as per technical requirements
+ * Performance Budget Tracker
+ * Tracks CPU and memory usage per system to enforce architectural limits
  */
 USTRUCT(BlueprintType)
 struct TRANSPERSONALGAME_API FCore_PerformanceMetrics
@@ -63,32 +67,36 @@ struct TRANSPERSONALGAME_API FPerformanceTargets
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float TargetFPS = 60.0f;
+    FString SystemName;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float MaxFrameTime = 16.67f; // 60fps = 16.67ms
+    float CPUBudgetMS;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float MaxGPUTime = 12.0f;
+    float MemoryBudgetMB;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float MaxGameThreadTime = 10.0f;
+    float CurrentCPUUsageMS;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 MaxDrawCalls = 3000;
+    float CurrentMemoryUsageMB;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 MaxTriangles = 10000000; // 10M triangles with Nanite
+    bool bIsOverBudget;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float MaxMemoryUsageMB = 8192.0f; // 8GB
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 MaxNaniteInstances = 1000000; // 1M Nanite instances
+    FEng_PerformanceBudget()
+    {
+        SystemName = TEXT("Unknown");
+        CPUBudgetMS = 1.0f;
+        MemoryBudgetMB = 100.0f;
+        CurrentCPUUsageMS = 0.0f;
+        CurrentMemoryUsageMB = 0.0f;
+        bIsOverBudget = false;
+    }
 };
 
 /**
- * LOD management for performance optimization
+ * LOD Configuration for different performance targets
  */
 USTRUCT(BlueprintType)
 struct TRANSPERSONALGAME_API FCore_LODSettings_73E
@@ -96,39 +104,32 @@ struct TRANSPERSONALGAME_API FCore_LODSettings_73E
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
-    float NaniteLODBias = 0.0f;
+    TArray<float> LODDistances;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
-    float ShadowLODBias = 0.0f;
+    int32 MaxLODLevel;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
-    float ParticleLODBias = 0.0f;
+    float CullingDistance;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
-    float FoliageLODBias = 0.0f;
+    bool bUseAggressiveCulling;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
-    int32 MaxShadowResolution = 4096;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
-    int32 MaxTextureResolution = 4096;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
-    bool bEnableNaniteHLOD = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
-    bool bEnableLumenGI = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
-    bool bEnableVirtualShadowMaps = true;
+    FEng_LODConfiguration()
+    {
+        LODDistances = {1000.0f, 2500.0f, 5000.0f};
+        MaxLODLevel = 3;
+        CullingDistance = 10000.0f;
+        bUseAggressiveCulling = false;
+    }
 };
 
 /**
- * Performance Architecture Subsystem
- * Manages performance monitoring and automatic optimization
+ * Core Performance Architecture Manager
+ * Enforces performance budgets and optimizations across all game systems
  */
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UPerformanceArchitecture : public UWorldSubsystem
+class TRANSPERSONALGAME_API UPerformanceArchitecture : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
@@ -138,22 +139,23 @@ public:
     // USubsystem interface
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
-    virtual bool ShouldCreateSubsystem(UObject* Outer) const override;
+    virtual void Tick(float DeltaTime) override;
+    virtual bool ShouldCreateSubsystem(UObject* Outer) const override { return true; }
 
-    // Performance monitoring
+    // Performance Budget Management
     UFUNCTION(BlueprintCallable, Category = "Performance")
     FCore_PerformanceMetrics GetCurrentMetrics() const;
 
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    void SetPerformanceTargets(const FPerformanceTargets& NewTargets);
+    void UpdateSystemUsage(const FString& SystemName, float CPUUsageMS, float MemoryUsageMB);
 
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    FPerformanceTargets GetPerformanceTargets() const;
+    bool IsSystemOverBudget(const FString& SystemName) const;
 
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    bool IsPerformanceTargetMet() const;
+    FEng_PerformanceBudget GetSystemBudget(const FString& SystemName) const;
 
-    // LOD management
+    // Performance Target Management
     UFUNCTION(BlueprintCallable, Category = "Performance")
     void SetLODSettings(const FCore_LODSettings_73E& NewSettings);
 
@@ -161,132 +163,138 @@ public:
     FCore_LODSettings_73E GetLODSettings() const;
 
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    void ApplyPerformanceOptimizations();
+    void ApplyLODConfiguration(const FEng_LODConfiguration& Config);
 
-    // Platform detection
+    // Performance Monitoring
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    void SetupForPlatform();
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    bool IsConsole() const;
+    float GetCurrentFrameTime() const { return CurrentFrameTimeMS; }
 
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    bool IsPC() const;
-
-    // Memory management
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void ForceGarbageCollection();
+    float GetAverageFrameTime() const { return AverageFrameTimeMS; }
 
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    float GetMemoryUsageMB() const;
+    float GetMemoryUsage() const { return CurrentMemoryUsageMB; }
 
-    // Nanite optimization
+    // Performance Optimization
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    void OptimizeNaniteSettings();
+    void OptimizeForTarget();
 
-    // Lumen optimization
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    void OptimizeLumenSettings();
+    void EnablePerformanceMode(bool bEnable);
 
-    // Virtual Shadow Maps optimization
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    void OptimizeVSMSettings();
+    TArray<FString> GetOverBudgetSystems() const;
 
 protected:
-    // Performance monitoring timer
-    UPROPERTY()
-    FTimerHandle PerformanceMonitorTimer;
+    // Performance Budgets
+    UPROPERTY(BlueprintReadOnly, Category = "Performance", meta = (AllowPrivateAccess = "true"))
+    TMap<FString, FEng_PerformanceBudget> SystemBudgets;
 
     // Current performance metrics
     UPROPERTY(BlueprintReadOnly, Category = "Performance")
     FCore_PerformanceMetrics CurrentMetrics;
 
-    // Performance targets
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    FPerformanceTargets PerformanceTargets;
+    UPROPERTY(BlueprintReadOnly, Category = "Performance", meta = (AllowPrivateAccess = "true"))
+    float CurrentFrameTimeMS;
 
     // LOD settings
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
     FCore_LODSettings_73E LODSettings;
 
-    // Auto-optimization settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    bool bEnableAutoOptimization = true;
+    UPROPERTY(BlueprintReadOnly, Category = "Performance", meta = (AllowPrivateAccess = "true"))
+    float CurrentMemoryUsageMB;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float PerformanceCheckInterval = 1.0f;
+    UPROPERTY(BlueprintReadOnly, Category = "Performance", meta = (AllowPrivateAccess = "true"))
+    float TargetFrameTimeMS;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 FramesBelowTargetThreshold = 60; // 1 second at 60fps
+    // LOD Configurations
+    UPROPERTY(BlueprintReadOnly, Category = "Performance", meta = (AllowPrivateAccess = "true"))
+    TMap<EEng_PerformanceTarget, FEng_LODConfiguration> LODConfigurations;
 
-    // Performance history
-    UPROPERTY()
-    TArray<float> FrameTimeHistory;
+    // Performance Settings
+    UPROPERTY(BlueprintReadOnly, Category = "Performance", meta = (AllowPrivateAccess = "true"))
+    bool bPerformanceModeEnabled;
 
-    UPROPERTY()
-    int32 FramesBelowTarget = 0;
+    UPROPERTY(BlueprintReadOnly, Category = "Performance", meta = (AllowPrivateAccess = "true"))
+    bool bMonitoringEnabled;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Performance", meta = (AllowPrivateAccess = "true"))
+    float MonitoringInterval;
 
 private:
-    // Internal monitoring functions
-    void UpdatePerformanceMetrics();
-    void CheckPerformanceTargets();
-    void AutoOptimize();
+    // Frame time tracking
+    TArray<float> FrameTimeHistory;
+    int32 FrameTimeHistoryIndex;
+    static const int32 FrameTimeHistorySize = 60; // 1 second at 60fps
+
+    // Performance monitoring
+    float LastMonitoringTime;
     
-    // Platform-specific optimizations
-    void ApplyConsoleOptimizations();
-    void ApplyPCOptimizations();
-    
-    // Specific system optimizations
-    void OptimizeForFrameRate(float TargetFrameTime);
-    void ReduceRenderingLoad();
-    void OptimizeMemoryUsage();
-    
-    // Console variable management
-    void SetConsoleVariable(const FString& VariableName, float Value);
-    void SetConsoleVariable(const FString& VariableName, int32 Value);
-    void SetConsoleVariable(const FString& VariableName, bool bValue);
+    void InitializePerformanceBudgets();
+    void InitializeLODConfigurations();
+    void UpdateFrameTimeTracking(float DeltaTime);
+    void MonitorPerformance();
+    void ApplyPerformanceOptimizations();
+    bool ShouldOptimizeForPerformance() const;
 };
 
 /**
- * Performance monitoring component for actors
+ * World-specific performance manager
+ * Handles per-world performance optimizations and culling
  */
-UCLASS(BlueprintType, Blueprintable, ClassGroup=(Performance), meta=(BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UPerformanceMonitorComponent : public UActorComponent
+UCLASS(BlueprintType)
+class TRANSPERSONALGAME_API UWorldPerformanceManager : public UWorldSubsystem
 {
     GENERATED_BODY()
 
 public:
-    UPerformanceMonitorComponent();
+    UWorldPerformanceManager();
 
-    virtual void BeginPlay() override;
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+    // USubsystem interface
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void PostInitialize() override;
+    virtual void Tick(float DeltaTime) override;
+    virtual bool ShouldCreateSubsystem(UObject* Outer) const override { return true; }
 
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void EnablePerformanceMonitoring(bool bEnable);
+    // World Performance Management
+    UFUNCTION(BlueprintCallable, Category = "World Performance")
+    void OptimizeWorldForPerformance();
 
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    float GetActorRenderCost() const;
+    UFUNCTION(BlueprintCallable, Category = "World Performance")
+    void SetCullingDistance(float Distance);
 
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    int32 GetActorTriangleCount() const;
+    UFUNCTION(BlueprintCallable, Category = "World Performance")
+    void UpdateActorLOD(AActor* Actor);
 
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    bool ShouldReduceLOD() const;
+    UFUNCTION(BlueprintCallable, Category = "World Performance")
+    void CullDistantActors();
+
+    // Actor Performance Management
+    UFUNCTION(BlueprintCallable, Category = "World Performance")
+    void RegisterPerformanceActor(AActor* Actor);
+
+    UFUNCTION(BlueprintCallable, Category = "World Performance")
+    void UnregisterPerformanceActor(AActor* Actor);
+
+    UFUNCTION(BlueprintCallable, Category = "World Performance")
+    int32 GetActiveActorCount() const { return ManagedActors.Num(); }
 
 protected:
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    bool bMonitorPerformance = true;
+    UPROPERTY(BlueprintReadOnly, Category = "World Performance", meta = (AllowPrivateAccess = "true"))
+    TArray<TWeakObjectPtr<AActor>> ManagedActors;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float PerformanceThreshold = 16.67f; // 60fps target
+    UPROPERTY(BlueprintReadOnly, Category = "World Performance", meta = (AllowPrivateAccess = "true"))
+    float CullingDistance;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float LastFrameRenderTime = 0.0f;
+    UPROPERTY(BlueprintReadOnly, Category = "World Performance", meta = (AllowPrivateAccess = "true"))
+    float LastCullingUpdate;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    int32 TriangleCount = 0;
+    UPROPERTY(BlueprintReadOnly, Category = "World Performance", meta = (AllowPrivateAccess = "true"))
+    float CullingUpdateInterval;
 
 private:
-    void UpdateRenderCost();
-    void CheckLODRequirements();
+    void InitializeWorldPerformance();
+    void UpdateManagedActors(float DeltaTime);
+    void CleanupInvalidActors();
+    float GetDistanceToPlayer(AActor* Actor) const;
 };

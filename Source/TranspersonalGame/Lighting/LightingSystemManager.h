@@ -1,10 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
-#include "Components/DirectionalLightComponent.h"
-#include "Components/SkyAtmosphereComponent.h"
-#include "Components/ExponentialHeightFogComponent.h"
+#include "Engine/World.h"
 #include "Engine/DirectionalLight.h"
 #include "Components/SkyAtmosphereComponent.h"
 #include "Engine/ExponentialHeightFog.h"
@@ -14,13 +11,7 @@
 UENUM(BlueprintType)
 enum class ELight_TimeOfDay_B3E : uint8
 {
-    Dawn = 0,
-    Morning,
-    Noon,
-    Afternoon,
-    Dusk,
-    Night
-};
+    GENERATED_BODY()
 
 UENUM(BlueprintType)
 enum class ELight_WeatherState_B3E : uint8
@@ -33,7 +24,7 @@ enum class ELight_WeatherState_B3E : uint8
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FLightingPreset
+struct TRANSPERSONALGAME_API FLight_WeatherSettings
 {
     GENERATED_BODY()
 
@@ -101,36 +92,42 @@ protected:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather")
     ELight_WeatherState_B3E CurrentWeatherState = ELight_WeatherState_B3E::Clear;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float WeatherTransitionSpeed = 0.5f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather")
+    float RainIntensity = 0.0f;
 
     // Lighting presets for different times of day
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting Presets")
     TMap<ELight_TimeOfDay_B3E, FLightingPreset> LightingPresets;
 
-    // Interior lighting settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interior Lighting")
-    float CaveLightIntensity = 500.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather")
+    FLinearColor WeatherTint = FLinearColor::White;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interior Lighting")
-    FLinearColor CaveLightColor = FLinearColor(1.0f, 0.7f, 0.4f, 1.0f);
+    FLight_WeatherSettings()
+    {
+        CloudCoverage = 0.0f;
+        RainIntensity = 0.0f;
+        WindStrength = 1.0f;
+        WeatherTint = FLinearColor::White;
+    }
+};
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interior Lighting")
-    float CaveLightRadius = 800.0f;
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API ULightingSystemManager : public UWorldSubsystem
+{
+    GENERATED_BODY()
 
 public:
-    // Day/Night cycle functions
-    UFUNCTION(BlueprintCallable, Category = "Day/Night Cycle")
-    void SetTimeOfDay(float NewTime);
+    ULightingSystemManager();
 
-    UFUNCTION(BlueprintCallable, Category = "Day/Night Cycle")
-    float GetTimeOfDay() const { return CurrentTimeOfDay; }
+    // USubsystem interface
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
 
     UFUNCTION(BlueprintCallable, Category = "Day/Night Cycle")
     ELight_TimeOfDay_B3E GetCurrentTimeOfDayEnum() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Day/Night Cycle")
-    void SetDayNightCycleSpeed(float NewSpeed);
+    UFUNCTION(BlueprintCallable, Category = "Lighting System")
+    void ApplyAtmosphericCorrection();
 
     // Weather control functions
     UFUNCTION(BlueprintCallable, Category = "Weather")
@@ -146,30 +143,54 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Lighting")
     void InterpolateLightingPresets(ELight_TimeOfDay_B3E FromTime, ELight_TimeOfDay_B3E ToTime, float Alpha);
 
-    // Interior lighting functions
-    UFUNCTION(BlueprintCallable, Category = "Interior Lighting")
-    class APointLight* CreateCaveLight(FVector Location, float Intensity = 500.0f);
+    UFUNCTION(BlueprintCallable, Category = "Lighting System")
+    void FindOrCreateFog();
 
-    UFUNCTION(BlueprintCallable, Category = "Interior Lighting")
-    class ASpotLight* CreateCaveEntranceLight(FVector Location, FRotator Rotation);
+    UFUNCTION(BlueprintCallable, Category = "Lighting System")
+    void ConfigurePostProcessing();
 
-    // Atmospheric effects
-    UFUNCTION(BlueprintCallable, Category = "Atmospheric Effects")
-    void UpdateAtmosphericFog(float Density, FLinearColor Color, float HeightFalloff);
+    // Biome-specific lighting
+    UFUNCTION(BlueprintCallable, Category = "Lighting System")
+    void ApplyBiomeLighting(EBiomeType BiomeType, const FVector& PlayerLocation);
 
-    UFUNCTION(BlueprintCallable, Category = "Atmospheric Effects")
-    void UpdateVolumetricClouds(float Coverage, float Density);
+    UFUNCTION(BlueprintCallable, Category = "Lighting System")
+    void SetInteriorLighting(bool bIsInterior, float AmbientMultiplier = 0.3f);
 
-    // Lumen configuration
-    UFUNCTION(BlueprintCallable, Category = "Lumen")
-    void ConfigureLumenSettings(bool bEnableGI = true, bool bEnableReflections = true);
+    // Getters
+    UFUNCTION(BlueprintPure, Category = "Lighting System")
+    float GetCurrentTimeOfDay() const { return CurrentTimeOfDay; }
+
+    UFUNCTION(BlueprintPure, Category = "Lighting System")
+    FLight_TimeOfDaySettings GetCurrentLightingSettings() const { return CurrentLightingSettings; }
+
+protected:
+    UPROPERTY(BlueprintReadOnly, Category = "Lighting System")
+    float CurrentTimeOfDay = 12.0f; // Noon
+
+    UPROPERTY(BlueprintReadOnly, Category = "Lighting System")
+    FLight_TimeOfDaySettings CurrentLightingSettings;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Lighting System")
+    FLight_WeatherSettings CurrentWeatherSettings;
+
+    // Actor references
+    UPROPERTY(BlueprintReadOnly, Category = "Lighting Actors")
+    ADirectionalLight* SunLight;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Lighting Actors")
+    ASkyAtmosphere* SkyAtmosphereActor;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Lighting Actors")
+    AExponentialHeightFog* FogActor;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Lighting Actors")
+    APostProcessVolume* PostProcessVolume;
 
 private:
-    void InitializeLightingSystem();
-    void UpdateDayNightCycle(float DeltaTime);
-    void UpdateWeatherSystem(float DeltaTime);
-    void UpdateSunPosition();
-    void InitializeLightingPresets();
+    void UpdateSunLighting();
+    void UpdateAtmosphere();
+    void UpdateFog();
+    void UpdatePostProcessing();
     
     // Weather transition variables
     ELight_WeatherState_B3E TargetWeatherState;

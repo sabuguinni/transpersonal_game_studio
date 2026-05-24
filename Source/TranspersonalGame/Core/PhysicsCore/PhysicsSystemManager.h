@@ -3,59 +3,42 @@
 #include "CoreMinimal.h"
 #include "Engine/World.h"
 #include "Components/ActorComponent.h"
+#include "GameFramework/Character.h"
+#include "Components/CapsuleComponent.h"
+#include "Components/SkeletalMeshComponent.h"
 #include "Engine/Engine.h"
 #include "PhysicsEngine/PhysicsSettings.h"
+#include "Subsystems/WorldSubsystem.h"
+#include "../SharedTypes.h"
 #include "PhysicsSystemManager.generated.h"
 
-class UAdvancedCollisionComponent;
-class URagdollPhysicsComponent;
-class UDestructionComponent;
-
 /**
- * @class UPhysicsSystemManager
- * @brief Central manager for all physics systems in the Transpersonal Game
- * 
- * This component manages the lifecycle and coordination of all physics subsystems:
- * - Advanced collision detection and response
- * - Ragdoll physics for characters and creatures
- * - Environmental destruction systems
- * - Performance optimization for physics calculations
- * 
- * Design Philosophy:
- * - Physics is the emotional signature of the game world
- * - Every physics interaction must feel believable and consistent
- * - Performance is not a feature, it's a requirement
- * 
- * @author Core Systems Programmer #03
- * @date 2024
+ * Core Physics System Manager
+ * Handles ragdoll physics, destruction, and enhanced movement for TranspersonalGame
+ * Implements realistic physics simulation for prehistoric survival gameplay
  */
-UCLASS(ClassGroup=(TranspersonalGame), meta=(BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UPhysicsSystemManager : public UActorComponent
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API UPhysicsSystemManager : public UWorldSubsystem
 {
     GENERATED_BODY()
 
 public:
     UPhysicsSystemManager();
 
-protected:
-    virtual void BeginPlay() override;
-    virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+    // USubsystem interface
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
+    virtual bool ShouldCreateSubsystem(UObject* Outer) const override;
 
-public:
-    /**
-     * Initialize all physics subsystems
-     * Called during BeginPlay to set up the physics environment
-     */
+    // Core Physics Management
     UFUNCTION(BlueprintCallable, Category = "Physics System")
-    void InitializePhysicsSystems();
+    void InitializePhysicsSystem();
 
-    /**
-     * Shutdown all physics subsystems gracefully
-     * Ensures proper cleanup of physics resources
-     */
+    UFUNCTION(BlueprintCallable, Category = "Physics System") 
+    void ShutdownPhysicsSystem();
+
     UFUNCTION(BlueprintCallable, Category = "Physics System")
-    void ShutdownPhysicsSystems();
+    bool IsPhysicsSystemActive() const { return bPhysicsSystemActive; }
 
     /**
      * Register a collision component with the physics system
@@ -99,19 +82,12 @@ public:
 // [UHT-FIX]     UFUNCTION(BlueprintCallable, Category = "Physics System")
     void UnregisterDestructionComponent(UDestructionComponent* DestructionComponent);
 
-    /**
-     * Get the current physics performance metrics
-     * @return Struct containing performance data
-     */
-    UFUNCTION(BlueprintCallable, Category = "Physics System")
-    FString GetPhysicsPerformanceMetrics() const;
+    // Collision Management
+    UFUNCTION(BlueprintCallable, Category = "Collision Physics")
+    void SetupCollisionForActor(AActor* Actor, ECore_CollisionType CollisionType);
 
-    /**
-     * Enable or disable physics system optimizations
-     * @param bEnable Whether to enable optimizations
-     */
-    UFUNCTION(BlueprintCallable, Category = "Physics System")
-    void SetPhysicsOptimizationsEnabled(bool bEnable);
+    UFUNCTION(BlueprintCallable, Category = "Collision Physics")
+    void EnablePhysicsSimulation(AActor* Actor, bool bEnable);
 
     /**
      * Get the singleton instance of the physics system manager
@@ -122,16 +98,49 @@ public:
     static UPhysicsSystemManager* GetPhysicsSystemManager(UWorld* World);
 
 protected:
-    /**
-     * Update physics performance monitoring
-     * @param DeltaTime Time since last update
-     */
-    void UpdatePerformanceMetrics(float DeltaTime);
+    // Core System State
+    UPROPERTY(BlueprintReadOnly, Category = "Physics System")
+    bool bPhysicsSystemActive;
 
-    /**
-     * Apply physics optimizations based on current performance
-     */
-    void ApplyPhysicsOptimizations();
+    UPROPERTY(BlueprintReadOnly, Category = "Physics System")
+    float PhysicsSystemVersion;
+
+    // Ragdoll Management
+    UPROPERTY(BlueprintReadOnly, Category = "Ragdoll Physics")
+    TArray<TWeakObjectPtr<ACharacter>> ActiveRagdollCharacters;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll Physics")
+    float RagdollActivationForce;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll Physics")
+    float RagdollDeactivationDelay;
+
+    // Physics Performance Settings
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Performance")
+    int32 MaxActivePhysicsObjects;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Performance")
+    float PhysicsTickRate;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Performance")
+    bool bEnablePhysicsOptimization;
+
+    // Collision Settings
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision Physics")
+    float DefaultCollisionRadius;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision Physics")
+    float DefaultMass;
+
+    // Destruction Settings
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Destruction Physics")
+    float MinDestructionForce;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Destruction Physics")
+    int32 MaxDebrisCount;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Destruction Physics")
+    float DebrisLifetime;
 
 protected:
     /** Array of registered collision components */

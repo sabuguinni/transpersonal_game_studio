@@ -1,5 +1,3 @@
-// Copyright Transpersonal Game Studio. All Rights Reserved.
-
 #pragma once
 // DISABLED: // DISABLED: #include "TranspersonalGameSharedTypes.h"
 
@@ -10,14 +8,57 @@
 #include "GameplayTagContainer.h"
 #include "NarrativeManager.generated.h"
 
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnNarrativeEvent, const FNarrativeEvent&, Event, float, EmotionalImpact);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnDialogueTriggered, const FDialogueLine&, Line, AActor*, Speaker, AActor*, Listener);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnStoryBeatCompleted, const FStoryBeat&, Beat);
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FNarr_DialogueEntry
+{
+    GENERATED_BODY()
 
-/**
- * Central narrative system that manages story progression, emotional arcs, and dialogue
- * Based on Robert McKee's pressure-driven storytelling and Kojima's gameplay-narrative integration
- */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    FString SpeakerName;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    FString DialogueText;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    float Duration;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    bool bIsNarration;
+
+    FNarr_DialogueEntry()
+    {
+        SpeakerName = TEXT("");
+        DialogueText = TEXT("");
+        Duration = 3.0f;
+        bIsNarration = false;
+    }
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FNarr_StoryEvent
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    FString EventID;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    FString EventDescription;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    TArray<FNarr_DialogueEntry> Dialogues;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    bool bIsCompleted;
+
+    FNarr_StoryEvent()
+    {
+        EventID = TEXT("");
+        EventDescription = TEXT("");
+        bIsCompleted = false;
+    }
+};
+
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UNarrativeManager : public UGameInstanceSubsystem
 {
@@ -26,101 +67,39 @@ class TRANSPERSONALGAME_API UNarrativeManager : public UGameInstanceSubsystem
 public:
     UNarrativeManager();
 
-    // USubsystem interface
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
-    // Core Narrative Functions
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void TriggerNarrativeEvent(const FString& EventID, AActor* Instigator = nullptr);
-
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void PlayDialogue(const FString& LineID, AActor* Speaker, AActor* Listener = nullptr);
+    void TriggerStoryEvent(const FString& EventID);
 
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void CompleteStoryBeat(const FString& BeatID);
+    void PlayDialogue(const FNarr_DialogueEntry& DialogueEntry);
 
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    bool IsStoryBeatCompleted(const FString& BeatID) const;
+    void RegisterStoryEvent(const FNarr_StoryEvent& NewEvent);
 
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    float GetCurrentEmotionalState() const { return CurrentEmotionalState; }
+    bool IsEventCompleted(const FString& EventID) const;
 
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    EEmotionalTone GetDominantEmotionalTone() const { return DominantTone; }
-
-    // Story Progression
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    TArray<FStoryBeat> GetAvailableStoryBeats() const;
+    void SetEventCompleted(const FString& EventID, bool bCompleted);
 
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void UpdateEmotionalState(EEmotionalTone NewTone, float Intensity);
-
-    // Dialogue System
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    FDialogueLine GetDialogueForContext(const FString& SpeakerID, EDialogueContext Context) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    bool CanTriggerDialogue(const FString& LineID, AActor* Speaker, AActor* Listener) const;
-
-    // Memory System - tracks player's narrative choices
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void RecordPlayerChoice(const FString& ChoiceID, const FString& ChoiceValue);
-
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    FString GetPlayerChoice(const FString& ChoiceID) const;
-
-    // Events
-    UPROPERTY(BlueprintAssignable, Category = "Narrative")
-    FOnNarrativeEvent OnNarrativeEvent;
-
-    UPROPERTY(BlueprintAssignable, Category = "Narrative")
-    FOnDialogueTriggered OnDialogueTriggered;
-
-    UPROPERTY(BlueprintAssignable, Category = "Narrative")
-    FOnStoryBeatCompleted OnStoryBeatCompleted;
+    TArray<FNarr_StoryEvent> GetActiveEvents() const;
 
 protected:
-    // Data Tables
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Data")
-    TObjectPtr<UDataTable> NarrativeEventsTable;
+    UPROPERTY(BlueprintReadOnly, Category = "Narrative")
+    TArray<FNarr_StoryEvent> StoryEvents;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Data")
-    TObjectPtr<UDataTable> DialogueTable;
+    UPROPERTY(BlueprintReadOnly, Category = "Narrative")
+    FNarr_DialogueEntry CurrentDialogue;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Data")
-    TObjectPtr<UDataTable> StoryBeatsTable;
-
-    // Current State
-    UPROPERTY(BlueprintReadOnly, Category = "State")
-    float CurrentEmotionalState;
-
-    UPROPERTY(BlueprintReadOnly, Category = "State")
-    EEmotionalTone DominantTone;
-
-    UPROPERTY(BlueprintReadOnly, Category = "State")
-    TSet<FString> CompletedStoryBeats;
-
-    UPROPERTY(BlueprintReadOnly, Category = "State")
-    TSet<FString> TriggeredEvents;
-
-    // Player Memory System
-    UPROPERTY(BlueprintReadOnly, Category = "State")
-    TMap<FString, FString> PlayerChoices;
-
-    // Emotional Arc Tracking
-    UPROPERTY(BlueprintReadOnly, Category = "State")
-    TArray<float> EmotionalHistory;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Config")
-    int32 MaxEmotionalHistorySize;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Config")
-    float EmotionalDecayRate;
+    UPROPERTY(BlueprintReadOnly, Category = "Narrative")
+    bool bIsDialogueActive;
 
 private:
-    void InitializeDataTables();
-    void UpdateEmotionalHistory(float NewValue);
-    bool EvaluateNarrativeConditions(const FGameplayTagContainer& RequiredTags) const;
-    void ProcessEmotionalImpact(float Impact, EEmotionalTone Tone);
+    void InitializeDefaultEvents();
+    void LoadStoryData();
+    void SaveStoryProgress();
 };

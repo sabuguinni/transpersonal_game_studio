@@ -1,15 +1,13 @@
-// Copyright Transpersonal Game Studio. All Rights Reserved.
-
 #pragma once
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "Components/DirectionalLightComponent.h"
+#include "Components/SkyLightComponent.h"
+#include "Components/StaticMeshComponent.h"
 #include "Engine/DirectionalLight.h"
 #include "Engine/SkyLight.h"
-#include "Engine/ExponentialHeightFog.h"
-#include "Components/SkyAtmosphereComponent.h"
-#include "Components/VolumetricCloudComponent.h"
-#include "Components/TimelineComponent.h"
+#include "Engine/PostProcessVolume.h"
 #include "DynamicLightingSystem.generated.h"
 
 UENUM(BlueprintType)
@@ -50,29 +48,33 @@ struct FLight_LightingState
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FLinearColor SunColor = FLinearColor::White;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
+    FLinearColor SunColor;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float SunIntensity = 3.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
+    float SunIntensity;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FRotator SunRotation = FRotator::ZeroRotator;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
+    FRotator SunRotation;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FLinearColor SkyColor = FLinearColor(0.3f, 0.6f, 1.0f);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
+    FLinearColor SkyColor;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FLinearColor FogColor = FLinearColor(0.5f, 0.6f, 0.7f);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
+    float SkyIntensity;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float FogDensity = 0.02f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
+    float FogDensity;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float CloudCoverage = 0.5f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float AtmosphereIntensity = 1.0f;
+    FLight_LightingPreset()
+    {
+        SunColor = FLinearColor(1.0f, 0.95f, 0.9f, 1.0f);
+        SunIntensity = 5.0f;
+        SunRotation = FRotator(-45.0f, 0.0f, 0.0f);
+        SkyColor = FLinearColor(0.5f, 0.7f, 1.0f, 1.0f);
+        SkyIntensity = 1.0f;
+        FogDensity = 0.02f;
+    }
 };
 
 USTRUCT(BlueprintType)
@@ -196,8 +198,42 @@ protected:
     FOnEmotionalToneChanged OnEmotionalToneChanged;
 
 public:
-    // Time of Day Functions
-    UFUNCTION(BlueprintCallable, Category = "Time of Day")
+    virtual void Tick(float DeltaTime) override;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    UDirectionalLightComponent* SunLightComponent;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    USkyLightComponent* SkyLightComponent;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Time")
+    float TimeOfDay;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Time")
+    float DayDurationMinutes;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Time")
+    bool bEnableDayNightCycle;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting Presets")
+    FLight_LightingPreset DawnPreset;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting Presets")
+    FLight_LightingPreset MorningPreset;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting Presets")
+    FLight_LightingPreset MiddayPreset;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting Presets")
+    FLight_LightingPreset AfternoonPreset;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting Presets")
+    FLight_LightingPreset DuskPreset;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting Presets")
+    FLight_LightingPreset NightPreset;
+
+    UFUNCTION(BlueprintCallable, Category = "Lighting")
     void SetTimeOfDay(float NewTimeOfDay);
 
     UFUNCTION(BlueprintCallable, Category = "Time of Day")
@@ -225,13 +261,13 @@ public:
 
     // Lighting Control Functions
     UFUNCTION(BlueprintCallable, Category = "Lighting")
-    void UpdateSunPosition();
+    void SetLightingPreset(ELight_TimeOfDay TimeOfDay);
 
     UFUNCTION(BlueprintCallable, Category = "Lighting")
-    void UpdateAtmosphereSettings();
+    ELight_TimeOfDay GetCurrentTimeOfDay() const;
 
     UFUNCTION(BlueprintCallable, Category = "Lighting")
-    void UpdateFogSettings();
+    void UpdateLighting();
 
     UFUNCTION(BlueprintCallable, Category = "Lighting")
     void UpdateCloudSettings();

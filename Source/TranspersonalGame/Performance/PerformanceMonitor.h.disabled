@@ -1,32 +1,20 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Components/ActorComponent.h"
+#include "GameFramework/Actor.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "HAL/PlatformFileManager.h"
 #include "Misc/DateTime.h"
-#include "Stats/Stats.h"
-#include "RHI.h"
 #include "PerformanceMonitor.generated.h"
 
-// Forward declarations
-class UStaticMeshComponent;
-class USkeletalMeshComponent;
-
-// Enums for performance monitoring
 UENUM(BlueprintType)
-enum class EPerformanceMetric : uint8
+enum class EPerf_PerformanceLevel : uint8
 {
-    FrameRate           UMETA(DisplayName = "Frame Rate"),
-    GameThreadTime      UMETA(DisplayName = "Game Thread Time"),
-    RenderThreadTime    UMETA(DisplayName = "Render Thread Time"),
-    GPUTime             UMETA(DisplayName = "GPU Time"),
-    PhysicsTime         UMETA(DisplayName = "Physics Time"),
-    MemoryUsage         UMETA(DisplayName = "Memory Usage"),
-    DrawCalls           UMETA(DisplayName = "Draw Calls"),
-    Triangles           UMETA(DisplayName = "Triangle Count"),
-    CollisionQueries    UMETA(DisplayName = "Collision Queries")
+    Low         UMETA(DisplayName = "Low"),
+    Medium      UMETA(DisplayName = "Medium"), 
+    High        UMETA(DisplayName = "High"),
+    Ultra       UMETA(DisplayName = "Ultra")
 };
 
 UENUM(BlueprintType)
@@ -51,24 +39,18 @@ enum class EPlatformTarget : uint8
 
 // Structs for performance data
 USTRUCT(BlueprintType)
-struct FPerformanceSnapshot
+struct FPerf_PerformanceMetrics
 {
     GENERATED_BODY()
 
     UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float FrameRate = 0.0f;
+    float CurrentFPS = 0.0f;
 
     UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float GameThreadTime = 0.0f;
+    float AverageFrameTime = 0.0f;
 
     UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float RenderThreadTime = 0.0f;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float GPUTime = 0.0f;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float PhysicsTime = 0.0f;
+    float GPUFrameTime = 0.0f;
 
     UPROPERTY(BlueprintReadOnly, Category = "Performance")
     float MemoryUsageMB = 0.0f;
@@ -80,7 +62,7 @@ struct FPerformanceSnapshot
     int32 TriangleCount = 0;
 
     UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    int32 CollisionQueries = 0;
+    EPerf_PerformanceLevel QualityLevel = EPerf_PerformanceLevel::Medium;
 
     UPROPERTY(BlueprintReadOnly, Category = "Performance")
     FDateTime Timestamp;
@@ -266,50 +248,32 @@ public:
     void LogPerformanceSnapshot() const;
 
 protected:
-    // Internal state
-    UPROPERTY()
-    bool bIsMonitoring = false;
+    virtual void BeginPlay() override;
+    virtual void Tick(float DeltaTime) override;
 
-    UPROPERTY()
-    float LastMonitorTime = 0.0f;
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    FPerf_PerformanceMetrics CurrentMetrics;
 
-    UPROPERTY()
-    float LastFrameTime = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float UpdateInterval = 1.0f;
 
-    UPROPERTY()
-    int32 FrameCounter = 0;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    bool bEnableAutoQualityAdjustment = true;
 
-    UPROPERTY()
-    TArray<float> RecentFrameTimes;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float TargetFPS = 60.0f;
 
-    // Core methods
-    void InitializePerformanceMonitor();
-    void UpdatePerformanceSnapshot();
-    void AnalyzePerformance();
-    void CheckThresholds();
-    void DetectHitches(float DeltaTime);
-    void UpdatePerformanceLevel();
-    void ApplyPlatformOptimizations();
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float MinAcceptableFPS = 30.0f;
 
-    // Performance measurement methods
-    float MeasureFrameRate() const;
-    float MeasureGameThreadTime() const;
-    float MeasureRenderThreadTime() const;
-    float MeasureGPUTime() const;
-    float MeasurePhysicsTime() const;
-    float MeasureMemoryUsage() const;
-    int32 MeasureDrawCalls() const;
-    int32 MeasureTriangleCount() const;
-    int32 MeasureCollisionQueries() const;
+private:
+    float TimeSinceLastUpdate = 0.0f;
+    TArray<float> FrameTimeHistory;
+    int32 MaxHistorySize = 60;
 
-    // Optimization methods
-    void OptimizeForPC();
-    void OptimizeForConsole();
-    void OptimizeForMobile();
-    void ApplyLODOptimization(float PerformanceRatio);
-    void ApplyShadowOptimization(float PerformanceRatio);
-    void ApplyPhysicsOptimization(float PerformanceRatio);
-    void ApplyRenderingOptimization(float PerformanceRatio);
+public:
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    FPerf_PerformanceMetrics GetCurrentMetrics() const;
 
     // Utility methods
     EPerf_PerformanceLevel_F1C CalculatePerformanceLevel(float FrameRate) const;

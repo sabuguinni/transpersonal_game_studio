@@ -1,63 +1,91 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
-#include "MassEntitySubsystem.h"
-#include "MassSpawnerSubsystem.h"
-#include "MassSimulationSubsystem.h"
 #include "Engine/World.h"
 #include "CrowdSimulationManager_CrowdSimulation.generated.h"
 
-UENUM(BlueprintType)
-enum class ECrowdType : uint8
-{
-    HerbivoreHerd,      // Manadas de herbívoros (Triceratops, Parasaurolophus)
-    PredatorPack,       // Grupos de predadores (Velociraptors, Dilophosaurus)
-    ScavengerGroup,     // Grupos de carniceiros (Compsognathus)
-    FlyingFlock,        // Bandos voadores (Pteranodon)
-    AquaticSchool,      // Cardumes aquáticos (Plesiosaurs)
-    SolitaryGiant,      // Gigantes solitários (T-Rex, Brachiosaurus)
-    MixedEcosystem      // Ecossistemas mistos
-};
-
-UENUM(BlueprintType)
-enum class ECrowdBehaviorState : uint8
-{
-    Grazing,            // Pastando/alimentando
-    Migrating,          // Migrando entre zonas
-    Fleeing,            // Fugindo de predadores
-    Hunting,            // Caçando (predadores)
-    Resting,            // Descansando
-    Socializing,        // Interação social
-    AlertToPlayer,      // Alerta à presença do jogador
-    PanickedByPlayer    // Pânico causado pelo jogador
-};
+// Forward declarations
+class ACrowdAgent;
+class UCrowdBehaviorComponent;
 
 USTRUCT(BlueprintType)
-struct FCrowdSpawnParameters
+struct TRANSPERSONALGAME_API FCrowd_AgentData
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    ECrowdType CrowdType = ECrowdType::HerbivoreHerd;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent")
+    FVector Position = FVector::ZeroVector;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    int32 MinGroupSize = 5;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent")
+    FVector Velocity = FVector::ZeroVector;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    int32 MaxGroupSize = 25;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent")
+    FVector Destination = FVector::ZeroVector;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float SpawnRadius = 2000.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent")
+    float Speed = 150.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float GroupCohesionRadius = 500.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent")
+    float MaxSpeed = 300.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float PlayerDetectionRange = 1500.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent")
+    float SeparationRadius = 100.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float FleeDistance = 3000.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent")
+    float AlignmentRadius = 200.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent")
+    float CohesionRadius = 300.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent")
+    bool bIsActive = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent")
+    int32 GroupID = 0;
+
+    FCrowd_AgentData()
+    {
+        Position = FVector::ZeroVector;
+        Velocity = FVector::ZeroVector;
+        Destination = FVector::ZeroVector;
+        Speed = 150.0f;
+        MaxSpeed = 300.0f;
+        SeparationRadius = 100.0f;
+        AlignmentRadius = 200.0f;
+        CohesionRadius = 300.0f;
+        bIsActive = true;
+        GroupID = 0;
+    }
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FCrowd_FlockingParameters
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flocking")
+    float SeparationWeight = 2.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flocking")
+    float AlignmentWeight = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flocking")
+    float CohesionWeight = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flocking")
+    float AvoidanceWeight = 3.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flocking")
+    float SeekWeight = 2.0f;
+
+    FCrowd_FlockingParameters()
+    {
+        SeparationWeight = 2.0f;
+        AlignmentWeight = 1.0f;
+        CohesionWeight = 1.0f;
+        AvoidanceWeight = 3.0f;
+        SeekWeight = 2.0f;
+    }
 };
 
 UCLASS()
@@ -74,74 +102,38 @@ protected:
 
     // Mass Entity System Integration
     UPROPERTY()
-    class UMassEntitySubsystem* MassEntitySubsystem;
+    TArray<FCrowd_AgentData> CrowdAgents;
 
     UPROPERTY()
-    class UMassSpawnerSubsystem* MassSpawnerSubsystem;
+    TMap<int32, AActor*> AgentActors;
 
-    UPROPERTY()
-    class UMassSimulationSubsystem* MassSimulationSubsystem;
-
-    // Crowd Configuration
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Settings")
-    TArray<FCrowdSpawnParameters> CrowdConfigurations;
+    FCrowd_FlockingParameters FlockingParams;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 MaxSimultaneousAgents = 50000;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Settings")
+    int32 MaxAgents = 1000;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float SimulationRadius = 10000.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Settings")
+    float UpdateFrequency = 60.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float LODDistance1 = 2000.0f; // Full simulation
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Settings")
+    float CullingDistance = 5000.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float LODDistance2 = 5000.0f; // Reduced simulation
+    // Internal state
+    int32 NextAgentID;
+    float LastUpdateTime;
+    bool bIsInitialized;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float LODDistance3 = 10000.0f; // Minimal simulation
+    // Core flocking algorithms
+    FVector CalculateSeparation(const FCrowd_AgentData& Agent, const TArray<FCrowd_AgentData>& Neighbors);
+    FVector CalculateAlignment(const FCrowd_AgentData& Agent, const TArray<FCrowd_AgentData>& Neighbors);
+    FVector CalculateCohesion(const FCrowd_AgentData& Agent, const TArray<FCrowd_AgentData>& Neighbors);
+    FVector CalculateSeek(const FCrowd_AgentData& Agent, const FVector& Target);
+    FVector CalculateAvoidance(const FCrowd_AgentData& Agent);
 
-    // Player Interaction
-    UPROPERTY()
-    class APawn* PlayerPawn;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Player Interaction")
-    float PlayerInfluenceRadius = 2000.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Player Interaction")
-    float PlayerThreatLevel = 1.0f;
-
-public:
-    // Public Interface
-    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    void SpawnCrowdGroup(const FCrowdSpawnParameters& Parameters, const FVector& Location);
-
-    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    void DespawnCrowdGroup(int32 GroupID);
-
-    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    void SetPlayerThreatLevel(float NewThreatLevel);
-
-    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    void TriggerMassFleeResponse(const FVector& ThreatLocation, float ThreatRadius);
-
-    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    TArray<FVector> GetNearbyHerdLocations(const FVector& QueryLocation, float Radius);
-
-protected:
-    // Internal Methods
-    void InitializeMassEntitySystem();
-    void UpdateCrowdBehaviors(float DeltaTime);
-    void ProcessPlayerInteractions(float DeltaTime);
-    void ManageLODSystem(float DeltaTime);
-    void UpdateEcosystemDynamics(float DeltaTime);
-
-private:
-    // Tracking
-    TArray<int32> ActiveCrowdGroups;
-    TMap<int32, ECrowdBehaviorState> GroupBehaviorStates;
-    TMap<int32, FVector> GroupCenterLocations;
-    
-    float LastPlayerPositionUpdate = 0.0f;
-    FVector LastKnownPlayerPosition = FVector::ZeroVector;
+    // Utility functions
+    TArray<FCrowd_AgentData> GetNeighbors(const FCrowd_AgentData& Agent, float Radius);
+    void UpdateAgentPosition(FCrowd_AgentData& Agent, float DeltaTime);
+    bool IsValidLocation(const FVector& Location);
+    AActor* SpawnAgentActor(const FVector& Location);
 };
