@@ -116,32 +116,22 @@ class UE5RemoteControl:
             return False
 
     def execute_python(self, script: str) -> dict:
-        """Execute a Python script in the UE5 Editor.
-        
-        Uses remote/object/call to invoke KismetSystemLibrary::ExecuteConsoleCommand
-        with the 'py' console command prefix, which executes Python code.
-        
-        For multi-line scripts, writes to a temp file first then executes it.
+        """Execute a Python script in the UE5 Editor as a single block.
+
+        Uses PythonScriptLibrary.ExecutePythonCommand which executes the entire
+        script as one unit, preserving state between lines (import unreal works).
         """
-        lines = script.strip().split('\n')
-        
-        if len(lines) == 1 and len(script) < 500:
-            # Simple single-line: use py "code" console command
-            console_cmd = f'py {script}'
-            return self._execute_console_command(console_cmd)
-        else:
-            # Multi-line: execute line by line via py console command
-            results = []
-            for line in lines:
-                line = line.strip()
-                if not line or line.startswith('#'):
-                    continue
-                console_cmd = f'py {line}'
-                r = self._execute_console_command(console_cmd)
-                results.append(r)
-            if results:
-                return results[-1]
-            return {"status_code": 200, "body": "No executable lines"}
+        # Send entire script as one command via PythonScriptLibrary
+        r = self.session.put(
+            f"{self.base_url}/remote/object/call",
+            json={
+                "objectPath": "/Script/PythonScriptPlugin.Default__PythonScriptLibrary",
+                "functionName": "ExecutePythonCommand",
+                "parameters": {"PythonCommand": script}
+            },
+            timeout=120,
+        )
+        return {"status_code": r.status_code, "body": r.text}
 
     def _execute_console_command(self, command: str) -> dict:
         """Execute a console command via remote/object/call on KismetSystemLibrary."""
