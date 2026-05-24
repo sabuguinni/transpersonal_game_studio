@@ -2,249 +2,253 @@
 #include "Engine/World.h"
 #include "Engine/Engine.h"
 #include "HAL/PlatformMemory.h"
-#include "HAL/PlatformProcess.h"
+#include "UObject/UObjectGlobals.h"
+#include "Engine/AssetManager.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/SkeletalMeshComponent.h"
-#include "Engine/StaticMeshActor.h"
-#include "Animation/SkeletalMeshActor.h"
-#include "UObject/UObjectGlobals.h"
 
 UPerf_MemoryManager::UPerf_MemoryManager()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 1.0f; // Check every second
+    PrimaryComponentTick.TickInterval = 1.0f;
+    bAutoActivate = true;
 }
 
 void UPerf_MemoryManager::BeginPlay()
 {
     Super::BeginPlay();
     
-    UE_LOG(LogTemp, Log, TEXT("Perf_MemoryManager initialized - Auto optimization: %s"), 
-           bAutoOptimizeMemory ? TEXT("Enabled") : TEXT("Disabled"));
+    // Initialize memory tracking
+    UpdateMemoryStats();
     
-    // Initial memory check
-    UpdateMemoryLevel();
+    UE_LOG(LogTemp, Log, TEXT("Performance Memory Manager initialized"));
+    UE_LOG(LogTemp, Log, TEXT("Initial memory usage: %.1f MB (%.1f%%)"), 
+           CachedMemoryStats.UsedMemoryMB, CachedMemoryStats.MemoryUsagePercent);
 }
 
 void UPerf_MemoryManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
     
-    LastMemoryCheck += DeltaTime;
+    if (!bMemoryTrackingEnabled)
+    {
+        return;
+    }
     
+    LastMemoryCheck += DeltaTime;
     if (LastMemoryCheck >= MemoryCheckInterval)
     {
+        UpdateMemoryStats();
+        HandleMemoryPressure(CachedMemoryStats.MemoryPressure);
         LastMemoryCheck = 0.0f;
-        UpdateMemoryLevel();
-        
-        if (bAutoOptimizeMemory && CurrentMemoryLevel >= EPerf_MemoryLevel::High)
-        {
-            HandleMemoryPressure();
-        }
     }
 }
 
 FPerf_MemoryStats UPerf_MemoryManager::GetCurrentMemoryStats()
 {
-    FPerf_MemoryStats Stats;
-    
-    // Get platform memory stats
-    FPlatformMemoryStats MemStats = FPlatformMemory::GetStats();
-    
-    Stats.UsedMemoryMB = MemStats.UsedPhysical / (1024.0f * 1024.0f);
-    Stats.AvailableMemoryMB = MemStats.AvailablePhysical / (1024.0f * 1024.0f);
-    Stats.MemoryUsagePercent = GetSystemMemoryUsagePercent();
-    Stats.MemoryLevel = CurrentMemoryLevel;
-    
-    // Count active objects
-    if (UWorld* World = GetWorld())
-    {
-        Stats.ActiveActorCount = World->GetActorCount();
-        
-        // Count components
-        int32 ComponentCount = 0;
-        for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
-        {
-            AActor* Actor = *ActorItr;
-            if (Actor)
-            {
-                ComponentCount += Actor->GetRootComponent() ? Actor->GetRootComponent()->GetAttachChildren().Num() + 1 : 0;
-            }
-        }
-        Stats.ActiveComponentCount = ComponentCount;
-    }
-    
-    return Stats;
+    UpdateMemoryStats();
+    return CachedMemoryStats;
+}
+
+bool UPerf_MemoryManager::IsMemoryPressureHigh() const
+{
+    return CachedMemoryStats.MemoryPressure == EPerf_MemoryPressure::High || 
+           CachedMemoryStats.MemoryPressure == EPerf_MemoryPressure::Critical;
 }
 
 void UPerf_MemoryManager::ForceGarbageCollection()
 {
-    UE_LOG(LogTemp, Warning, TEXT("Perf_MemoryManager: Forcing garbage collection"));
+    UE_LOG(LogTemp, Warning, TEXT("Forcing garbage collection - Memory usage: %.1f%%"), 
+           CachedMemoryStats.MemoryUsagePercent);
     
     CollectGarbage(GARBAGE_COLLECTION_KEEPFLAGS);
     
-    float MemoryAfter = GetSystemMemoryUsagePercent();
-    UE_LOG(LogTemp, Log, TEXT("Garbage collection complete - Memory usage: %.1f%%"), MemoryAfter);
+    // Update stats after GC
+    UpdateMemoryStats();
+    
+    UE_LOG(LogTemp, Log, TEXT("Garbage collection complete - New memory usage: %.1f%%"), 
+           CachedMemoryStats.MemoryUsagePercent);
 }
 
 void UPerf_MemoryManager::OptimizeMemoryUsage()
 {
-    float MemoryBefore = GetSystemMemoryUsagePercent();
+    UE_LOG(LogTemp, Log, TEXT("Starting memory optimization"));
     
-    UE_LOG(LogTemp, Warning, TEXT("Perf_MemoryManager: Starting memory optimization"));
-    
-    // Clear unused assets
-    ClearUnusedAssets();
-    
-    // Reduce LOD if memory is critical
-    if (CurrentMemoryLevel == EPerf_MemoryLevel::Critical)
+    // Step 1: Unload unused assets
+    if (bAutoUnloadAssets)
     {
-        ReduceActorLOD();
-        DisableNonEssentialComponents();
+        UnloadUnusedAssets();
     }
     
-    // Force garbage collection
+    // Step 2: Force garbage collection
     if (bAutoGarbageCollection)
     {
         ForceGarbageCollection();
     }
     
-    float MemoryAfter = GetSystemMemoryUsagePercent();
-    float MemorySaved = MemoryBefore - MemoryAfter;
-    
-    if (MemorySaved > 0.0f)
-    {
-        OnMemoryOptimized.Broadcast(MemorySaved);
-        UE_LOG(LogTemp, Log, TEXT("Memory optimization complete - Saved %.1f%% memory"), MemorySaved);
-    }
-}
-
-void UPerf_MemoryManager::ClearUnusedAssets()
-{
-    UE_LOG(LogTemp, Log, TEXT("Clearing unused assets"));
-    
-    // This would normally clear asset caches and unused textures
-    // In a real implementation, we'd interface with the asset manager
-    CollectGarbage(GARBAGE_COLLECTION_KEEPFLAGS);
-}
-
-void UPerf_MemoryManager::ReduceActorLOD()
-{
-    UE_LOG(LogTemp, Log, TEXT("Reducing actor LOD levels"));
-    
+    // Step 3: Optimize actor count if needed
     UWorld* World = GetWorld();
-    if (!World) return;
-    
-    int32 OptimizedActors = 0;
-    
-    for (TActorIterator<AStaticMeshActor> ActorItr(World); ActorItr; ++ActorItr)
+    if (World && CachedMemoryStats.ActiveActorCount > MaxActiveActors)
     {
-        AStaticMeshActor* MeshActor = *ActorItr;
-        if (MeshActor && MeshActor->GetStaticMeshComponent())
-        {
-            UStaticMeshComponent* MeshComp = MeshActor->GetStaticMeshComponent();
-            
-            // Force lower LOD
-            MeshComp->SetForcedLodModel(2); // Use LOD level 2
-            OptimizedActors++;
-        }
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("Reduced LOD for %d static mesh actors"), OptimizedActors);
-}
-
-void UPerf_MemoryManager::DisableNonEssentialComponents()
-{
-    UE_LOG(LogTemp, Log, TEXT("Disabling non-essential components"));
-    
-    UWorld* World = GetWorld();
-    if (!World) return;
-    
-    int32 DisabledComponents = 0;
-    
-    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
-    {
-        AActor* Actor = *ActorItr;
-        if (!Actor) continue;
+        UE_LOG(LogTemp, Warning, TEXT("High actor count detected: %d (max: %d)"), 
+               CachedMemoryStats.ActiveActorCount, MaxActiveActors);
         
-        // Disable particle systems and audio components on distant actors
-        FVector PlayerLocation = FVector::ZeroVector;
-        if (APawn* PlayerPawn = World->GetFirstPlayerController()->GetPawn())
-        {
-            PlayerLocation = PlayerPawn->GetActorLocation();
-        }
-        
-        float Distance = FVector::Dist(Actor->GetActorLocation(), PlayerLocation);
-        if (Distance > 5000.0f) // 50 meters
-        {
-            // Disable tick on distant actors
-            Actor->SetActorTickEnabled(false);
-            DisabledComponents++;
-        }
+        // Could implement actor culling/pooling here
+        PerformMemoryOptimization();
     }
     
-    UE_LOG(LogTemp, Log, TEXT("Disabled tick on %d distant actors"), DisabledComponents);
+    UpdateMemoryStats();
+    UE_LOG(LogTemp, Log, TEXT("Memory optimization complete - Usage: %.1f%%"), 
+           CachedMemoryStats.MemoryUsagePercent);
 }
 
-void UPerf_MemoryManager::UpdateMemoryLevel()
+void UPerf_MemoryManager::SetMemoryThresholds(float MediumThreshold, float HighThreshold, float CriticalThreshold)
 {
-    float MemoryUsage = GetSystemMemoryUsagePercent();
-    EPerf_MemoryLevel NewLevel;
+    MediumPressureThreshold = FMath::Clamp(MediumThreshold, 0.0f, 100.0f);
+    HighPressureThreshold = FMath::Clamp(HighThreshold, 0.0f, 100.0f);
+    CriticalPressureThreshold = FMath::Clamp(CriticalThreshold, 0.0f, 100.0f);
     
-    if (MemoryUsage >= MemoryCriticalThreshold)
-    {
-        NewLevel = EPerf_MemoryLevel::Critical;
-    }
-    else if (MemoryUsage >= MemoryWarningThreshold)
-    {
-        NewLevel = EPerf_MemoryLevel::High;
-    }
-    else if (MemoryUsage >= 50.0f)
-    {
-        NewLevel = EPerf_MemoryLevel::Medium;
-    }
-    else
-    {
-        NewLevel = EPerf_MemoryLevel::Low;
-    }
+    UE_LOG(LogTemp, Log, TEXT("Memory thresholds updated: Medium=%.1f%%, High=%.1f%%, Critical=%.1f%%"),
+           MediumPressureThreshold, HighPressureThreshold, CriticalPressureThreshold);
+}
+
+void UPerf_MemoryManager::UnloadUnusedAssets()
+{
+    UE_LOG(LogTemp, Log, TEXT("Unloading unused assets"));
     
-    if (NewLevel != CurrentMemoryLevel)
+    // Use engine's asset management to unload unused assets
+    if (UAssetManager* AssetManager = UAssetManager::GetIfValid())
     {
-        CurrentMemoryLevel = NewLevel;
-        OnMemoryLevelChanged.Broadcast(CurrentMemoryLevel);
-        
-        UE_LOG(LogTemp, Log, TEXT("Memory level changed to: %d (%.1f%% usage)"), 
-               (int32)CurrentMemoryLevel, MemoryUsage);
+        // This would typically involve more sophisticated asset tracking
+        // For now, we'll rely on the garbage collector
+        CollectGarbage(GARBAGE_COLLECTION_KEEPFLAGS);
     }
 }
 
-void UPerf_MemoryManager::HandleMemoryPressure()
+void UPerf_MemoryManager::PreloadCriticalAssets()
 {
-    UE_LOG(LogTemp, Warning, TEXT("Handling memory pressure - Level: %d"), (int32)CurrentMemoryLevel);
+    UE_LOG(LogTemp, Log, TEXT("Preloading critical assets"));
     
-    switch (CurrentMemoryLevel)
-    {
-        case EPerf_MemoryLevel::High:
-            ClearUnusedAssets();
-            break;
-            
-        case EPerf_MemoryLevel::Critical:
-            OptimizeMemoryUsage();
-            break;
-            
-        default:
-            break;
-    }
+    // This would typically preload essential game assets
+    // Implementation depends on specific game requirements
 }
 
-float UPerf_MemoryManager::GetSystemMemoryUsagePercent()
+void UPerf_MemoryManager::LogMemoryReport()
 {
+    UpdateMemoryStats();
+    
+    UE_LOG(LogTemp, Warning, TEXT("=== MEMORY REPORT ==="));
+    UE_LOG(LogTemp, Warning, TEXT("Used Memory: %.1f MB"), CachedMemoryStats.UsedMemoryMB);
+    UE_LOG(LogTemp, Warning, TEXT("Available Memory: %.1f MB"), CachedMemoryStats.AvailableMemoryMB);
+    UE_LOG(LogTemp, Warning, TEXT("Total Memory: %.1f MB"), CachedMemoryStats.TotalMemoryMB);
+    UE_LOG(LogTemp, Warning, TEXT("Usage Percentage: %.1f%%"), CachedMemoryStats.MemoryUsagePercent);
+    UE_LOG(LogTemp, Warning, TEXT("Memory Pressure: %s"), 
+           CachedMemoryStats.MemoryPressure == EPerf_MemoryPressure::Low ? TEXT("Low") :
+           CachedMemoryStats.MemoryPressure == EPerf_MemoryPressure::Medium ? TEXT("Medium") :
+           CachedMemoryStats.MemoryPressure == EPerf_MemoryPressure::High ? TEXT("High") : TEXT("Critical"));
+    UE_LOG(LogTemp, Warning, TEXT("Active Actors: %d"), CachedMemoryStats.ActiveActorCount);
+    UE_LOG(LogTemp, Warning, TEXT("Loaded Assets: %d"), CachedMemoryStats.LoadedAssetCount);
+    UE_LOG(LogTemp, Warning, TEXT("=================="));
+}
+
+void UPerf_MemoryManager::EnableMemoryTracking(bool bEnable)
+{
+    bMemoryTrackingEnabled = bEnable;
+    UE_LOG(LogTemp, Log, TEXT("Memory tracking %s"), bEnable ? TEXT("enabled") : TEXT("disabled"));
+}
+
+void UPerf_MemoryManager::UpdateMemoryStats()
+{
+    // Get platform memory stats
     FPlatformMemoryStats MemStats = FPlatformMemory::GetStats();
     
-    if (MemStats.TotalPhysical > 0)
+    CachedMemoryStats.UsedMemoryMB = MemStats.UsedPhysical / (1024.0f * 1024.0f);
+    CachedMemoryStats.AvailableMemoryMB = MemStats.AvailablePhysical / (1024.0f * 1024.0f);
+    CachedMemoryStats.TotalMemoryMB = MemStats.TotalPhysical / (1024.0f * 1024.0f);
+    
+    if (CachedMemoryStats.TotalMemoryMB > 0.0f)
     {
-        return (float(MemStats.UsedPhysical) / float(MemStats.TotalPhysical)) * 100.0f;
+        CachedMemoryStats.MemoryUsagePercent = (CachedMemoryStats.UsedMemoryMB / CachedMemoryStats.TotalMemoryMB) * 100.0f;
     }
     
-    return 0.0f;
+    CachedMemoryStats.MemoryPressure = CalculateMemoryPressure(CachedMemoryStats.MemoryUsagePercent);
+    
+    // Count active actors
+    UWorld* World = GetWorld();
+    if (World)
+    {
+        CachedMemoryStats.ActiveActorCount = World->GetActorCount();
+    }
+    
+    // Estimate loaded assets (simplified)
+    CachedMemoryStats.LoadedAssetCount = GUObjectArray.GetObjectArrayNum();
+}
+
+EPerf_MemoryPressure UPerf_MemoryManager::CalculateMemoryPressure(float UsagePercent)
+{
+    if (UsagePercent >= CriticalPressureThreshold)
+    {
+        return EPerf_MemoryPressure::Critical;
+    }
+    else if (UsagePercent >= HighPressureThreshold)
+    {
+        return EPerf_MemoryPressure::High;
+    }
+    else if (UsagePercent >= MediumPressureThreshold)
+    {
+        return EPerf_MemoryPressure::Medium;
+    }
+    
+    return EPerf_MemoryPressure::Low;
+}
+
+void UPerf_MemoryManager::HandleMemoryPressure(EPerf_MemoryPressure Pressure)
+{
+    static EPerf_MemoryPressure LastPressure = EPerf_MemoryPressure::Low;
+    
+    // Only act if pressure level changed
+    if (Pressure != LastPressure)
+    {
+        switch (Pressure)
+        {
+            case EPerf_MemoryPressure::Medium:
+                UE_LOG(LogTemp, Warning, TEXT("Medium memory pressure detected (%.1f%%)"), 
+                       CachedMemoryStats.MemoryUsagePercent);
+                break;
+                
+            case EPerf_MemoryPressure::High:
+                UE_LOG(LogTemp, Warning, TEXT("High memory pressure detected (%.1f%%) - Starting optimization"), 
+                       CachedMemoryStats.MemoryUsagePercent);
+                if (bAutoUnloadAssets)
+                {
+                    UnloadUnusedAssets();
+                }
+                break;
+                
+            case EPerf_MemoryPressure::Critical:
+                UE_LOG(LogTemp, Error, TEXT("CRITICAL memory pressure detected (%.1f%%) - Emergency optimization"), 
+                       CachedMemoryStats.MemoryUsagePercent);
+                OptimizeMemoryUsage();
+                break;
+                
+            default:
+                break;
+        }
+        
+        LastPressure = Pressure;
+    }
+}
+
+void UPerf_MemoryManager::PerformMemoryOptimization()
+{
+    UE_LOG(LogTemp, Log, TEXT("Performing advanced memory optimization"));
+    
+    // This could include more aggressive optimization strategies:
+    // - Actor pooling
+    // - Texture streaming optimization  
+    // - Mesh LOD adjustments
+    // - Component deactivation
+    
+    // For now, just force garbage collection
+    ForceGarbageCollection();
 }
