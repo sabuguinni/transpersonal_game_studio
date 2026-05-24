@@ -5,7 +5,7 @@
 #include "Engine/Engine.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
-#include "Components/CapsuleComponent.h"
+#include "Components/SkeletalMeshComponent.h"
 #include "Anim_CharacterAnimInstance.generated.h"
 
 UENUM(BlueprintType)
@@ -18,9 +18,7 @@ enum class EAnim_MovementState : uint8
     Jumping     UMETA(DisplayName = "Jumping"),
     Falling     UMETA(DisplayName = "Falling"),
     Landing     UMETA(DisplayName = "Landing"),
-    Crouching   UMETA(DisplayName = "Crouching"),
-    Swimming    UMETA(DisplayName = "Swimming"),
-    Climbing    UMETA(DisplayName = "Climbing")
+    Crouching   UMETA(DisplayName = "Crouching")
 };
 
 USTRUCT(BlueprintType)
@@ -41,23 +39,29 @@ struct FAnim_MovementData
     bool bIsInAir = false;
 
     UPROPERTY(BlueprintReadOnly, Category = "Movement")
-    bool bIsCrouching = false;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Movement")
-    bool bIsAccelerating = false;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Movement")
-    float GroundDistance = 0.0f;
+    bool bIsMoving = false;
 
     UPROPERTY(BlueprintReadOnly, Category = "Movement")
     EAnim_MovementState MovementState = EAnim_MovementState::Idle;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Movement")
+    float LeanAngle = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Movement")
+    bool bIsCrouched = false;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Movement")
+    float AimPitch = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Movement")
+    float AimYaw = 0.0f;
 };
 
 /**
- * Professional Animation Instance for TranspersonalCharacter
- * Handles all character animation states and transitions
+ * Core animation instance for TranspersonalCharacter
+ * Handles movement state detection, blend space calculations, and animation transitions
  */
-UCLASS(Blueprintable, BlueprintType)
+UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UAnim_CharacterAnimInstance : public UAnimInstance
 {
     GENERATED_BODY()
@@ -66,79 +70,103 @@ public:
     UAnim_CharacterAnimInstance();
 
 protected:
+    // Animation Blueprint Event Graph functions
     virtual void NativeInitializeAnimation() override;
-    virtual void NativeUpdateAnimation(float DeltaTime) override;
+    virtual void NativeUpdateAnimation(float DeltaTimeX) override;
 
-    // Movement Data
-    UPROPERTY(BlueprintReadOnly, Category = "Animation Data", meta = (AllowPrivateAccess = "true"))
-    FAnim_MovementData MovementData;
-
-    // Character References
-    UPROPERTY(BlueprintReadOnly, Category = "References", meta = (AllowPrivateAccess = "true"))
-    class ACharacter* OwningCharacter;
-
-    UPROPERTY(BlueprintReadOnly, Category = "References", meta = (AllowPrivateAccess = "true"))
-    class UCharacterMovementComponent* CharacterMovement;
-
-    // Animation Properties
-    UPROPERTY(BlueprintReadOnly, Category = "Animation", meta = (AllowPrivateAccess = "true"))
-    float WalkSpeedThreshold = 150.0f;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Animation", meta = (AllowPrivateAccess = "true"))
-    float RunSpeedThreshold = 300.0f;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Animation", meta = (AllowPrivateAccess = "true"))
-    float SprintSpeedThreshold = 500.0f;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Animation", meta = (AllowPrivateAccess = "true"))
-    float JumpingThreshold = 200.0f;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Animation", meta = (AllowPrivateAccess = "true"))
-    float LandingThreshold = -200.0f;
-
-    // State Transition Smoothing
-    UPROPERTY(BlueprintReadOnly, Category = "Animation", meta = (AllowPrivateAccess = "true"))
-    float StateTransitionSpeed = 5.0f;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Animation", meta = (AllowPrivateAccess = "true"))
-    float SpeedSmoothingRate = 10.0f;
-
-private:
-    // Internal state tracking
-    EAnim_MovementState PreviousMovementState;
-    float SmoothedSpeed;
-    float StateTransitionAlpha;
-
-    // Update functions
+    // Movement data calculation
+    UFUNCTION(BlueprintCallable, Category = "Animation")
     void UpdateMovementData(float DeltaTime);
+
+    UFUNCTION(BlueprintCallable, Category = "Animation")
     void UpdateMovementState();
-    void UpdateGroundDistance();
-    EAnim_MovementState CalculateMovementState() const;
-    float CalculateDirection() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    void UpdateBlendSpaceValues();
+
+    // State detection helpers
+    UFUNCTION(BlueprintPure, Category = "Animation")
+    bool ShouldEnterIdleState() const;
+
+    UFUNCTION(BlueprintPure, Category = "Animation")
+    bool ShouldEnterMovementState() const;
+
+    UFUNCTION(BlueprintPure, Category = "Animation")
+    bool ShouldEnterJumpState() const;
+
+    UFUNCTION(BlueprintPure, Category = "Animation")
+    bool ShouldEnterFallState() const;
 
 public:
-    // Blueprint accessible getters
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    FORCEINLINE float GetSpeed() const { return MovementData.Speed; }
+    // Main movement data structure
+    UPROPERTY(BlueprintReadOnly, Category = "Movement Data", meta = (AllowPrivateAccess = "true"))
+    FAnim_MovementData MovementData;
 
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    FORCEINLINE float GetDirection() const { return MovementData.Direction; }
+    // Character reference
+    UPROPERTY(BlueprintReadOnly, Category = "Character", meta = (AllowPrivateAccess = "true"))
+    ACharacter* OwnerCharacter;
 
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    FORCEINLINE bool IsInAir() const { return MovementData.bIsInAir; }
+    // Movement component reference
+    UPROPERTY(BlueprintReadOnly, Category = "Character", meta = (AllowPrivateAccess = "true"))
+    UCharacterMovementComponent* MovementComponent;
 
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    FORCEINLINE bool IsCrouching() const { return MovementData.bIsCrouching; }
+    // Animation settings
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Settings")
+    float SpeedSmoothingRate = 10.0f;
 
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    FORCEINLINE bool IsAccelerating() const { return MovementData.bIsAccelerating; }
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Settings")
+    float DirectionSmoothingRate = 15.0f;
 
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    FORCEINLINE EAnim_MovementState GetMovementState() const { return MovementData.MovementState; }
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Settings")
+    float LeanSmoothingRate = 8.0f;
 
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    FORCEINLINE float GetGroundDistance() const { return MovementData.GroundDistance; }
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Settings")
+    float WalkSpeedThreshold = 50.0f;
 
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    FORCEINLINE float GetSmoothedSpeed() const { return SmoothedSpeed; }
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Settings")
+    float RunSpeedThreshold = 300.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Settings")
+    float SprintSpeedThreshold = 600.0f;
+
+    // Jump and fall detection
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Settings")
+    float JumpVelocityThreshold = 100.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Settings")
+    float FallVelocityThreshold = -100.0f;
+
+    // Aim offset values
+    UPROPERTY(BlueprintReadOnly, Category = "Aim Offset")
+    float AimOffsetPitch = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Aim Offset")
+    float AimOffsetYaw = 0.0f;
+
+    // Animation state booleans for state machine
+    UPROPERTY(BlueprintReadOnly, Category = "Animation States")
+    bool bShouldEnterIdle = false;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Animation States")
+    bool bShouldEnterMovement = false;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Animation States")
+    bool bShouldEnterJump = false;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Animation States")
+    bool bShouldEnterFall = false;
+
+private:
+    // Smoothed values for blend spaces
+    float SmoothedSpeed = 0.0f;
+    float SmoothedDirection = 0.0f;
+    float SmoothedLeanAngle = 0.0f;
+    
+    // Previous frame values for delta calculations
+    FVector PreviousVelocity = FVector::ZeroVector;
+    EAnim_MovementState PreviousMovementState = EAnim_MovementState::Idle;
+    
+    // Timing for state transitions
+    float TimeInCurrentState = 0.0f;
+    float MinStateTime = 0.1f; // Minimum time to stay in a state before transitioning
 };
