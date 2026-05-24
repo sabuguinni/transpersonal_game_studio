@@ -1,431 +1,451 @@
 #include "World_ProceduralBiomeSystem.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "Engine/StaticMeshActor.h"
+#include "Engine/StaticMesh.h"
 #include "Components/StaticMeshComponent.h"
-#include "GameFramework/PlayerController.h"
-#include "GameFramework/Pawn.h"
+#include "Engine/StaticMeshActor.h"
 #include "Kismet/GameplayStatics.h"
-#include "Engine/AssetManager.h"
-#include "UObject/ConstructorHelpers.h"
+#include "TimerManager.h"
+#include "Math/UnrealMathUtility.h"
 
-AWorld_ProceduralBiomeSystem::AWorld_ProceduralBiomeSystem()
+UWorld_ProceduralBiomeSystem::UWorld_ProceduralBiomeSystem()
 {
-    PrimaryActorTick.bCanEverTick = true;
-    
-    // Performance settings
-    MaxActiveActors = 500;
-    UpdateInterval = 2.0f;
-    CullingDistance = 50000.0f;
-    
-    // Runtime state
-    TotalSpawnedCount = 0;
-    LastUpdateTime = 0.0f;
+    PrimaryComponentTick.bCanEverTick = false;
+    bAutoPopulateBiomes = true;
+    PopulationUpdateInterval = 30.0f;
+    MaxActorsPerBiome = 500;
+    CullingDistance = 2000000.0f; // 20km
+    MaxSpawnsPerFrame = 5;
     CurrentSpawnIndex = 0;
-    bIsPopulating = false;
-    
-    // Initialize default biomes
-    InitializeDefaultBiomes();
+    LastUpdateTime = 0.0f;
 }
 
-void AWorld_ProceduralBiomeSystem::BeginPlay()
+void UWorld_ProceduralBiomeSystem::BeginPlay()
 {
     Super::BeginPlay();
     
-    UE_LOG(LogTemp, Warning, TEXT("ProceduralBiomeSystem: BeginPlay - Initializing biome system"));
+    SetupDefaultBiomes();
     
-    // Start biome population after a short delay
-    FTimerHandle PopulationTimer;
-    GetWorld()->GetTimerManager().SetTimer(PopulationTimer, this, &AWorld_ProceduralBiomeSystem::PopulateAllBiomes, 3.0f, false);
-}
-
-void AWorld_ProceduralBiomeSystem::Tick(float DeltaTime)
-{
-    Super::Tick(DeltaTime);
-    
-    LastUpdateTime += DeltaTime;
-    
-    // Periodic optimization
-    if (LastUpdateTime >= UpdateInterval)
+    if (bAutoPopulateBiomes)
     {
-        UpdateActorDistances();
-        OptimizeActorsByDistance();
-        LastUpdateTime = 0.0f;
+        InitializeBiomes();
+        
+        // Start population update timer
+        if (UWorld* World = GetWorld())
+        {
+            World->GetTimerManager().SetTimer(
+                PopulationTimerHandle,
+                this,
+                &UWorld_ProceduralBiomeSystem::UpdatePopulation,
+                PopulationUpdateInterval,
+                true
+            );
+        }
     }
 }
 
-void AWorld_ProceduralBiomeSystem::InitializeDefaultBiomes()
+void UWorld_ProceduralBiomeSystem::SetupDefaultBiomes()
 {
-    BiomeDefinitions.Empty();
+    BiomeConfigs.Empty();
     
     // Savana biome
-    FWorld_BiomeDefinition Savana;
+    FWorld_BiomeConfig Savana;
     Savana.BiomeName = TEXT("Savana");
-    Savana.CenterLocation = FVector(0.0f, 0.0f, 0.0f);
-    Savana.Radius = 15000.0f;
+    Savana.CenterLocation = FVector(0.0f, 0.0f, 100.0f);
+    Savana.Radius = 1000000.0f;
+    Savana.MaxDinosaurs = 15;
+    Savana.MaxTerrainFeatures = 100;
     Savana.DinosaurAssetPaths.Add(TEXT("/Game/Dinosaur_Pack/Trex/Mesh/SKM_Trex_Skin"));
+    Savana.DinosaurAssetPaths.Add(TEXT("/Game/Dinosaur_Pack/Velociraptor/Mesh/SKM_Velociraptor_Skin"));
     Savana.DinosaurAssetPaths.Add(TEXT("/Game/Dinosaur_Pack/Triceratops/Mesh/SKM_Triceratops"));
-    Savana.VegetationTypes.Add(TEXT("SavanaTree"));
-    Savana.VegetationTypes.Add(TEXT("SavanaGrass"));
-    Savana.DinosaurDensity = 0.15f;
-    Savana.VegetationDensity = 0.3f;
-    BiomeDefinitions.Add(Savana);
+    Savana.TerrainAssetPaths.Add(TEXT("/Engine/BasicShapes/Cube"));
+    Savana.TerrainAssetPaths.Add(TEXT("/Engine/BasicShapes/Cylinder"));
+    BiomeConfigs.Add(Savana);
     
     // Floresta biome
-    FWorld_BiomeDefinition Floresta;
+    FWorld_BiomeConfig Floresta;
     Floresta.BiomeName = TEXT("Floresta");
-    Floresta.CenterLocation = FVector(-45000.0f, 40000.0f, 0.0f);
-    Floresta.Radius = 18000.0f;
+    Floresta.CenterLocation = FVector(-45000.0f, 40000.0f, 100.0f);
+    Floresta.Radius = 800000.0f;
+    Floresta.MaxDinosaurs = 12;
+    Floresta.MaxTerrainFeatures = 150;
     Floresta.DinosaurAssetPaths.Add(TEXT("/Game/Dinosaur_Pack/Brachiosaurus/Mesh/SKM_Brachiosaurus"));
     Floresta.DinosaurAssetPaths.Add(TEXT("/Game/Dinosaur_Pack/Parasaurolophus/Mesh/SKM_Parasaurolophus_Mesh"));
-    Floresta.VegetationTypes.Add(TEXT("ForestTree"));
-    Floresta.VegetationTypes.Add(TEXT("Fern"));
-    Floresta.DinosaurDensity = 0.12f;
-    Floresta.VegetationDensity = 0.8f;
-    BiomeDefinitions.Add(Floresta);
-    
-    // Deserto biome
-    FWorld_BiomeDefinition Deserto;
-    Deserto.BiomeName = TEXT("Deserto");
-    Deserto.CenterLocation = FVector(55000.0f, 0.0f, 0.0f);
-    Deserto.Radius = 12000.0f;
-    Deserto.DinosaurAssetPaths.Add(TEXT("/Game/Dinosaur_Pack/Ankylosaurus/Mesh/SKM_Ankylo_Mesh"));
-    Deserto.VegetationTypes.Add(TEXT("Cactus"));
-    Deserto.VegetationTypes.Add(TEXT("DeadTree"));
-    Deserto.DinosaurDensity = 0.08f;
-    Deserto.VegetationDensity = 0.2f;
-    BiomeDefinitions.Add(Deserto);
+    Floresta.TerrainAssetPaths.Add(TEXT("/Engine/BasicShapes/Cylinder"));
+    Floresta.TerrainAssetPaths.Add(TEXT("/Engine/BasicShapes/Sphere"));
+    BiomeConfigs.Add(Floresta);
     
     // Pantano biome
-    FWorld_BiomeDefinition Pantano;
+    FWorld_BiomeConfig Pantano;
     Pantano.BiomeName = TEXT("Pantano");
-    Pantano.CenterLocation = FVector(-50000.0f, -45000.0f, 0.0f);
-    Pantano.Radius = 14000.0f;
-    Pantano.DinosaurAssetPaths.Add(TEXT("/Game/Dinosaur_Pack/Velociraptor/Mesh/SKM_Velociraptor_Skin"));
-    Pantano.VegetationTypes.Add(TEXT("SwampTree"));
-    Pantano.VegetationTypes.Add(TEXT("Moss"));
-    Pantano.DinosaurDensity = 0.2f;
-    Pantano.VegetationDensity = 0.6f;
-    BiomeDefinitions.Add(Pantano);
+    Pantano.CenterLocation = FVector(-50000.0f, -45000.0f, 100.0f);
+    Pantano.Radius = 600000.0f;
+    Pantano.MaxDinosaurs = 8;
+    Pantano.MaxTerrainFeatures = 80;
+    Pantano.DinosaurAssetPaths.Add(TEXT("/Game/Dinosaur_Pack/Ankylosaurus/Mesh/SKM_Ankylo_Mesh"));
+    Pantano.DinosaurAssetPaths.Add(TEXT("/Game/Dinosaur_Pack/Protoceratops/Mesh/SKM_Protoceratops_Skin"));
+    Pantano.TerrainAssetPaths.Add(TEXT("/Engine/BasicShapes/Plane"));
+    BiomeConfigs.Add(Pantano);
+    
+    // Deserto biome
+    FWorld_BiomeConfig Deserto;
+    Deserto.BiomeName = TEXT("Deserto");
+    Deserto.CenterLocation = FVector(55000.0f, 0.0f, 100.0f);
+    Deserto.Radius = 900000.0f;
+    Deserto.MaxDinosaurs = 6;
+    Deserto.MaxTerrainFeatures = 60;
+    Deserto.DinosaurAssetPaths.Add(TEXT("/Game/Dinosaur_Pack/Pachycephalo/Mesh/SKM_Pachycephalo"));
+    Deserto.TerrainAssetPaths.Add(TEXT("/Engine/BasicShapes/Cube"));
+    BiomeConfigs.Add(Deserto);
     
     // Montanha biome
-    FWorld_BiomeDefinition Montanha;
+    FWorld_BiomeConfig Montanha;
     Montanha.BiomeName = TEXT("Montanha");
-    Montanha.CenterLocation = FVector(40000.0f, 50000.0f, 0.0f);
-    Montanha.Radius = 16000.0f;
-    Montanha.DinosaurAssetPaths.Add(TEXT("/Game/Dinosaur_Pack/Pachycephalo/Mesh/SKM_Pachycephalo"));
-    Montanha.VegetationTypes.Add(TEXT("PineTree"));
-    Montanha.VegetationTypes.Add(TEXT("Rock"));
-    Montanha.DinosaurDensity = 0.1f;
-    Montanha.VegetationDensity = 0.4f;
-    BiomeDefinitions.Add(Montanha);
-    
-    UE_LOG(LogTemp, Warning, TEXT("ProceduralBiomeSystem: Initialized %d biomes"), BiomeDefinitions.Num());
+    Montanha.CenterLocation = FVector(40000.0f, 50000.0f, 100.0f);
+    Montanha.Radius = 700000.0f;
+    Montanha.MaxDinosaurs = 10;
+    Montanha.MaxTerrainFeatures = 120;
+    Montanha.DinosaurAssetPaths.Add(TEXT("/Game/Dinosaur_Pack/Tsintaosaurus/Mesh/SKM_Tsintaosaurus_Mesh"));
+    Montanha.TerrainAssetPaths.Add(TEXT("/Engine/BasicShapes/Sphere"));
+    Montanha.TerrainAssetPaths.Add(TEXT("/Engine/BasicShapes/Cube"));
+    BiomeConfigs.Add(Montanha);
 }
 
-void AWorld_ProceduralBiomeSystem::PopulateAllBiomes()
+void UWorld_ProceduralBiomeSystem::InitializeBiomes()
 {
-    if (bIsPopulating)
+    UE_LOG(LogTemp, Warning, TEXT("ProceduralBiomeSystem: Initializing %d biomes"), BiomeConfigs.Num());
+    
+    for (const FWorld_BiomeConfig& BiomeConfig : BiomeConfigs)
     {
-        UE_LOG(LogTemp, Warning, TEXT("ProceduralBiomeSystem: Already populating, skipping"));
+        UE_LOG(LogTemp, Warning, TEXT("Biome %s initialized at location %s"), 
+               *BiomeConfig.BiomeName, 
+               *BiomeConfig.CenterLocation.ToString());
+    }
+}
+
+void UWorld_ProceduralBiomeSystem::PopulateBiome(const FString& BiomeName)
+{
+    FWorld_BiomeConfig* BiomeConfig = BiomeConfigs.FindByPredicate([BiomeName](const FWorld_BiomeConfig& Config)
+    {
+        return Config.BiomeName == BiomeName;
+    });
+    
+    if (!BiomeConfig)
+    {
+        UE_LOG(LogTemp, Error, TEXT("Biome %s not found"), *BiomeName);
         return;
     }
     
-    bIsPopulating = true;
-    UE_LOG(LogTemp, Warning, TEXT("ProceduralBiomeSystem: Starting biome population"));
+    int32 CurrentPopulation = GetBiomePopulation(BiomeName);
+    int32 TargetPopulation = BiomeConfig->MaxDinosaurs + BiomeConfig->MaxTerrainFeatures;
     
-    for (const FWorld_BiomeDefinition& Biome : BiomeDefinitions)
+    if (CurrentPopulation >= TargetPopulation)
     {
-        PopulateBiome(Biome);
-    }
-    
-    bIsPopulating = false;
-    UE_LOG(LogTemp, Warning, TEXT("ProceduralBiomeSystem: Biome population complete - %d actors spawned"), TotalSpawnedCount);
-}
-
-void AWorld_ProceduralBiomeSystem::PopulateBiome(const FWorld_BiomeDefinition& BiomeData)
-{
-    if (TotalSpawnedCount >= MaxActiveActors)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("ProceduralBiomeSystem: Max actors reached, skipping biome %s"), *BiomeData.BiomeName);
         return;
     }
-    
-    UE_LOG(LogTemp, Warning, TEXT("ProceduralBiomeSystem: Populating biome %s"), *BiomeData.BiomeName);
-    
-    // Calculate spawn counts based on density and performance limits
-    int32 MaxDinosInBiome = FMath::Min(5, MaxActiveActors - TotalSpawnedCount);
-    int32 MaxVegetationInBiome = FMath::Min(15, MaxActiveActors - TotalSpawnedCount - MaxDinosInBiome);
     
     // Spawn dinosaurs
-    for (int32 i = 0; i < MaxDinosInBiome && i < BiomeData.DinosaurAssetPaths.Num(); ++i)
+    int32 DinosaurCount = GetActorsInBiome(BiomeName).Num();
+    if (DinosaurCount < BiomeConfig->MaxDinosaurs && BiomeConfig->DinosaurAssetPaths.Num() > 0)
     {
-        if (TotalSpawnedCount >= MaxActiveActors) break;
+        int32 SpawnsNeeded = FMath::Min(MaxSpawnsPerFrame, BiomeConfig->MaxDinosaurs - DinosaurCount);
         
-        const FString& DinoPath = BiomeData.DinosaurAssetPaths[i % BiomeData.DinosaurAssetPaths.Num()];
-        FVector SpawnLocation = GenerateRandomLocationInBiome(BiomeData);
-        
-        AActor* DinoActor = SpawnDinosaurInBiome(DinoPath, SpawnLocation, BiomeData.BiomeName);
-        if (DinoActor)
+        for (int32 i = 0; i < SpawnsNeeded; i++)
         {
-            UE_LOG(LogTemp, Warning, TEXT("ProceduralBiomeSystem: Spawned dinosaur %s in %s"), *DinoActor->GetName(), *BiomeData.BiomeName);
+            FString AssetPath = BiomeConfig->DinosaurAssetPaths[FMath::RandRange(0, BiomeConfig->DinosaurAssetPaths.Num() - 1)];
+            SpawnActorInBiome(BiomeName, AssetPath);
         }
     }
     
-    // Spawn vegetation clusters
-    for (int32 i = 0; i < MaxVegetationInBiome; ++i)
+    // Spawn terrain features
+    int32 TerrainCount = GetActorsInBiome(BiomeName).Num() - DinosaurCount;
+    if (TerrainCount < BiomeConfig->MaxTerrainFeatures && BiomeConfig->TerrainAssetPaths.Num() > 0)
     {
-        if (TotalSpawnedCount >= MaxActiveActors) break;
+        int32 SpawnsNeeded = FMath::Min(MaxSpawnsPerFrame, BiomeConfig->MaxTerrainFeatures - TerrainCount);
         
-        FVector SpawnLocation = GenerateRandomLocationInBiome(BiomeData);
-        const FString& VegType = BiomeData.VegetationTypes.Num() > 0 ? 
-            BiomeData.VegetationTypes[i % BiomeData.VegetationTypes.Num()] : TEXT("DefaultVegetation");
-        
-        AActor* VegActor = SpawnVegetationInBiome(VegType, SpawnLocation, BiomeData.BiomeName);
-        if (VegActor)
+        for (int32 i = 0; i < SpawnsNeeded; i++)
         {
-            UE_LOG(LogTemp, Log, TEXT("ProceduralBiomeSystem: Spawned vegetation in %s"), *BiomeData.BiomeName);
+            FString AssetPath = BiomeConfig->TerrainAssetPaths[FMath::RandRange(0, BiomeConfig->TerrainAssetPaths.Num() - 1)];
+            FVector Offset = FVector(0.0f, 0.0f, -50.0f); // Terrain features slightly below ground
+            SpawnActorInBiome(BiomeName, AssetPath, Offset);
         }
     }
 }
 
-AActor* AWorld_ProceduralBiomeSystem::SpawnDinosaurInBiome(const FString& AssetPath, const FVector& Location, const FString& BiomeName)
+void UWorld_ProceduralBiomeSystem::PopulateAllBiomes()
 {
-    if (!GetWorld()) return nullptr;
-    
-    // Try to load the dinosaur mesh asset
-    UObject* LoadedAsset = nullptr;
-    
-    // Load asset using soft object path
-    FSoftObjectPath SoftPath(AssetPath);
-    LoadedAsset = SoftPath.TryLoad();
-    
-    if (!LoadedAsset)
+    for (const FWorld_BiomeConfig& BiomeConfig : BiomeConfigs)
     {
-        UE_LOG(LogTemp, Warning, TEXT("ProceduralBiomeSystem: Failed to load dinosaur asset: %s"), *AssetPath);
-        return nullptr;
+        PopulateBiome(BiomeConfig.BiomeName);
     }
-    
-    // Spawn StaticMeshActor and set the mesh
-    AStaticMeshActor* MeshActor = GetWorld()->SpawnActor<AStaticMeshActor>(Location, FRotator::ZeroRotator);
-    if (MeshActor && MeshActor->GetStaticMeshComponent())
-    {
-        if (UStaticMesh* StaticMesh = Cast<UStaticMesh>(LoadedAsset))
-        {
-            MeshActor->GetStaticMeshComponent()->SetStaticMesh(StaticMesh);
-        }
-        
-        // Set actor label
-        FString DinoType = AssetPath;
-        DinoType = DinoType.Replace(TEXT("/Game/Dinosaur_Pack/"), TEXT(""));
-        DinoType = DinoType.Replace(TEXT("/Mesh/SKM_"), TEXT(""));
-        DinoType = DinoType.Replace(TEXT("_Skin"), TEXT(""));
-        DinoType = DinoType.Replace(TEXT("_Mesh"), TEXT(""));
-        
-        FString ActorLabel = FString::Printf(TEXT("%s_%s_%03d"), *DinoType, *BiomeName, TotalSpawnedCount);
-        MeshActor->SetActorLabel(ActorLabel);
-        
-        // Register the spawned actor
-        RegisterSpawnedActor(MeshActor, BiomeName, TEXT("Dinosaur"), Location);
-        
-        return MeshActor;
-    }
-    
-    return nullptr;
 }
 
-AActor* AWorld_ProceduralBiomeSystem::SpawnVegetationInBiome(const FString& VegetationType, const FVector& Location, const FString& BiomeName)
+int32 UWorld_ProceduralBiomeSystem::GetBiomePopulation(const FString& BiomeName) const
 {
-    if (!GetWorld()) return nullptr;
-    
-    // Spawn basic vegetation using StaticMeshActor
-    AStaticMeshActor* VegActor = GetWorld()->SpawnActor<AStaticMeshActor>(Location, FRotator::ZeroRotator);
-    if (VegActor)
+    int32 Count = 0;
+    for (const FWorld_SpawnedActor& SpawnedActor : SpawnedActors)
     {
-        // Set random scale for variety
-        float Scale = FMath::RandRange(0.5f, 2.0f);
-        VegActor->SetActorScale3D(FVector(Scale, Scale, Scale));
-        
-        FString ActorLabel = FString::Printf(TEXT("%s_%s_%03d"), *VegetationType, *BiomeName, TotalSpawnedCount);
-        VegActor->SetActorLabel(ActorLabel);
-        
-        // Register the spawned actor
-        RegisterSpawnedActor(VegActor, BiomeName, TEXT("Vegetation"), Location);
-        
-        return VegActor;
+        if (SpawnedActor.BiomeName == BiomeName && SpawnedActor.ActorRef.IsValid())
+        {
+            Count++;
+        }
     }
-    
-    return nullptr;
+    return Count;
 }
 
-void AWorld_ProceduralBiomeSystem::OptimizeActorsByDistance()
+FWorld_BiomeConfig UWorld_ProceduralBiomeSystem::GetBiomeConfig(const FString& BiomeName) const
 {
-    FVector PlayerLocation = GetPlayerLocation();
-    
-    for (FWorld_SpawnedActorInfo& ActorInfo : SpawnedActors)
+    for (const FWorld_BiomeConfig& Config : BiomeConfigs)
     {
-        if (!ActorInfo.SpawnedActor || !IsValid(ActorInfo.SpawnedActor)) continue;
-        
-        float Distance = FVector::Dist(PlayerLocation, ActorInfo.SpawnedActor->GetActorLocation());
-        ActorInfo.DistanceFromPlayer = Distance;
-        
-        // Simple LOD based on distance
-        if (Distance > CullingDistance * 0.8f)
+        if (Config.BiomeName == BiomeName)
         {
-            // Very far - minimal detail
-            ActorInfo.SpawnedActor->SetActorHiddenInGame(true);
-        }
-        else if (Distance > CullingDistance * 0.5f)
-        {
-            // Far - reduced detail
-            ActorInfo.SpawnedActor->SetActorHiddenInGame(false);
-            ActorInfo.SpawnedActor->SetActorTickEnabled(false);
-        }
-        else
-        {
-            // Near - full detail
-            ActorInfo.SpawnedActor->SetActorHiddenInGame(false);
-            ActorInfo.SpawnedActor->SetActorTickEnabled(true);
+            return Config;
         }
     }
+    return FWorld_BiomeConfig();
 }
 
-void AWorld_ProceduralBiomeSystem::CullDistantActors()
-{
-    FVector PlayerLocation = GetPlayerLocation();
-    
-    for (int32 i = SpawnedActors.Num() - 1; i >= 0; --i)
-    {
-        FWorld_SpawnedActorInfo& ActorInfo = SpawnedActors[i];
-        
-        if (!ActorInfo.SpawnedActor || !IsValid(ActorInfo.SpawnedActor))
-        {
-            SpawnedActors.RemoveAt(i);
-            continue;
-        }
-        
-        float Distance = FVector::Dist(PlayerLocation, ActorInfo.SpawnedActor->GetActorLocation());
-        
-        if (Distance > CullingDistance)
-        {
-            ActorInfo.SpawnedActor->Destroy();
-            SpawnedActors.RemoveAt(i);
-            TotalSpawnedCount--;
-        }
-    }
-}
-
-FVector AWorld_ProceduralBiomeSystem::GetPlayerLocation() const
-{
-    if (GetWorld())
-    {
-        APlayerController* PC = GetWorld()->GetFirstPlayerController();
-        if (PC && PC->GetPawn())
-        {
-            return PC->GetPawn()->GetActorLocation();
-        }
-    }
-    return FVector::ZeroVector;
-}
-
-FWorld_BiomeDefinition* AWorld_ProceduralBiomeSystem::GetBiomeAtLocation(const FVector& Location)
-{
-    for (FWorld_BiomeDefinition& Biome : BiomeDefinitions)
-    {
-        float Distance = FVector::Dist2D(Location, Biome.CenterLocation);
-        if (Distance <= Biome.Radius)
-        {
-            return &Biome;
-        }
-    }
-    return nullptr;
-}
-
-TArray<AActor*> AWorld_ProceduralBiomeSystem::GetActorsInBiome(const FString& BiomeName) const
+TArray<AActor*> UWorld_ProceduralBiomeSystem::GetActorsInBiome(const FString& BiomeName) const
 {
     TArray<AActor*> BiomeActors;
     
-    for (const FWorld_SpawnedActorInfo& ActorInfo : SpawnedActors)
+    for (const FWorld_SpawnedActor& SpawnedActor : SpawnedActors)
     {
-        if (ActorInfo.BiomeName == BiomeName && ActorInfo.SpawnedActor && IsValid(ActorInfo.SpawnedActor))
+        if (SpawnedActor.BiomeName == BiomeName && SpawnedActor.ActorRef.IsValid())
         {
-            BiomeActors.Add(ActorInfo.SpawnedActor);
+            if (AActor* Actor = SpawnedActor.ActorRef.Get())
+            {
+                BiomeActors.Add(Actor);
+            }
         }
     }
     
     return BiomeActors;
 }
 
-void AWorld_ProceduralBiomeSystem::PrintBiomeStatistics() const
+AActor* UWorld_ProceduralBiomeSystem::SpawnActorInBiome(const FString& BiomeName, const FString& AssetPath, const FVector& Offset)
 {
-    UE_LOG(LogTemp, Warning, TEXT("=== BIOME STATISTICS ==="));
-    UE_LOG(LogTemp, Warning, TEXT("Total Spawned Actors: %d"), TotalSpawnedCount);
-    
-    for (const FWorld_BiomeDefinition& Biome : BiomeDefinitions)
+    FWorld_BiomeConfig BiomeConfig = GetBiomeConfig(BiomeName);
+    if (BiomeConfig.BiomeName.IsEmpty())
     {
-        TArray<AActor*> BiomeActors = GetActorsInBiome(Biome.BiomeName);
-        UE_LOG(LogTemp, Warning, TEXT("Biome %s: %d actors"), *Biome.BiomeName, BiomeActors.Num());
+        return nullptr;
     }
+    
+    FVector SpawnLocation = GetRandomLocationInBiome(BiomeConfig) + Offset;
+    
+    if (!IsLocationValid(SpawnLocation, BiomeName))
+    {
+        return nullptr;
+    }
+    
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        return nullptr;
+    }
+    
+    // Try to load the asset
+    UObject* Asset = StaticLoadObject(UObject::StaticClass(), nullptr, *AssetPath);
+    if (!Asset)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Failed to load asset: %s"), *AssetPath);
+        return nullptr;
+    }
+    
+    // Spawn static mesh actor
+    FActorSpawnParameters SpawnParams;
+    SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
+    
+    AStaticMeshActor* SpawnedActor = World->SpawnActor<AStaticMeshActor>(SpawnLocation, FRotator::ZeroRotator, SpawnParams);
+    if (!SpawnedActor)
+    {
+        return nullptr;
+    }
+    
+    // Set the mesh
+    if (UStaticMesh* StaticMesh = Cast<UStaticMesh>(Asset))
+    {
+        SpawnedActor->GetStaticMeshComponent()->SetStaticMesh(StaticMesh);
+    }
+    
+    // Set random scale for variety
+    float Scale = FMath::RandRange(0.8f, 1.5f);
+    SpawnedActor->SetActorScale3D(FVector(Scale));
+    
+    // Set label
+    FString ActorType = AssetPath.Contains(TEXT("Dinosaur")) ? TEXT("Dinosaur") : TEXT("Terrain");
+    SpawnedActor->SetActorLabel(FString::Printf(TEXT("%s_%s_%d"), *ActorType, *BiomeName, SpawnedActors.Num()));
+    
+    // Register the spawned actor
+    RegisterSpawnedActor(SpawnedActor, BiomeName, ActorType);
+    
+    UE_LOG(LogTemp, Log, TEXT("Spawned %s in %s at %s"), *ActorType, *BiomeName, *SpawnLocation.ToString());
+    
+    return SpawnedActor;
 }
 
-void AWorld_ProceduralBiomeSystem::ClearAllSpawnedActors()
+void UWorld_ProceduralBiomeSystem::ClearBiome(const FString& BiomeName)
 {
-    for (const FWorld_SpawnedActorInfo& ActorInfo : SpawnedActors)
+    TArray<AActor*> ActorsToDestroy = GetActorsInBiome(BiomeName);
+    
+    for (AActor* Actor : ActorsToDestroy)
     {
-        if (ActorInfo.SpawnedActor && IsValid(ActorInfo.SpawnedActor))
+        if (IsValid(Actor))
         {
-            ActorInfo.SpawnedActor->Destroy();
+            Actor->Destroy();
         }
     }
     
-    SpawnedActors.Empty();
-    TotalSpawnedCount = 0;
+    // Remove from spawned actors list
+    SpawnedActors.RemoveAll([BiomeName](const FWorld_SpawnedActor& SpawnedActor)
+    {
+        return SpawnedActor.BiomeName == BiomeName;
+    });
     
-    UE_LOG(LogTemp, Warning, TEXT("ProceduralBiomeSystem: All spawned actors cleared"));
+    UE_LOG(LogTemp, Warning, TEXT("Cleared biome %s - destroyed %d actors"), *BiomeName, ActorsToDestroy.Num());
 }
 
-FVector AWorld_ProceduralBiomeSystem::GenerateRandomLocationInBiome(const FWorld_BiomeDefinition& Biome) const
+void UWorld_ProceduralBiomeSystem::ClearAllBiomes()
 {
-    float Angle = FMath::RandRange(0.0f, 2.0f * PI);
-    float Distance = FMath::RandRange(0.0f, Biome.Radius * 0.8f);
-    
-    float X = Biome.CenterLocation.X + Distance * FMath::Cos(Angle);
-    float Y = Biome.CenterLocation.Y + Distance * FMath::Sin(Angle);
-    float Z = 100.0f; // Ground level
-    
-    return FVector(X, Y, Z);
+    for (const FWorld_BiomeConfig& BiomeConfig : BiomeConfigs)
+    {
+        ClearBiome(BiomeConfig.BiomeName);
+    }
 }
 
-bool AWorld_ProceduralBiomeSystem::IsLocationValidForSpawn(const FVector& Location) const
+void UWorld_ProceduralBiomeSystem::UpdateActorCulling()
 {
-    // Basic validation - can be expanded with terrain checks
+    if (!GetWorld())
+    {
+        return;
+    }
+    
+    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
+    if (!PlayerPawn)
+    {
+        return;
+    }
+    
+    FVector PlayerLocation = PlayerPawn->GetActorLocation();
+    
+    for (FWorld_SpawnedActor& SpawnedActor : SpawnedActors)
+    {
+        if (AActor* Actor = SpawnedActor.ActorRef.Get())
+        {
+            float Distance = FVector::Dist(PlayerLocation, Actor->GetActorLocation());
+            bool bShouldBeVisible = Distance <= CullingDistance;
+            
+            Actor->SetActorHiddenInGame(!bShouldBeVisible);
+            Actor->SetActorEnableCollision(bShouldBeVisible);
+        }
+    }
+}
+
+void UWorld_ProceduralBiomeSystem::OptimizeBiomePerformance()
+{
+    CleanupInvalidActors();
+    UpdateActorCulling();
+    
+    // Log performance stats
+    int32 TotalActors = SpawnedActors.Num();
+    int32 ValidActors = 0;
+    
+    for (const FWorld_SpawnedActor& SpawnedActor : SpawnedActors)
+    {
+        if (SpawnedActor.ActorRef.IsValid())
+        {
+            ValidActors++;
+        }
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("BiomeSystem Performance: %d/%d valid actors"), ValidActors, TotalActors);
+}
+
+void UWorld_ProceduralBiomeSystem::EditorPopulateBiomes()
+{
+    PopulateAllBiomes();
+}
+
+void UWorld_ProceduralBiomeSystem::EditorClearBiomes()
+{
+    ClearAllBiomes();
+}
+
+void UWorld_ProceduralBiomeSystem::EditorValidateBiomes()
+{
+    UE_LOG(LogTemp, Warning, TEXT("=== BIOME VALIDATION ==="));
+    
+    for (const FWorld_BiomeConfig& BiomeConfig : BiomeConfigs)
+    {
+        int32 Population = GetBiomePopulation(BiomeConfig.BiomeName);
+        UE_LOG(LogTemp, Warning, TEXT("Biome %s: %d/%d actors"), 
+               *BiomeConfig.BiomeName, 
+               Population, 
+               BiomeConfig.MaxDinosaurs + BiomeConfig.MaxTerrainFeatures);
+    }
+    
+    OptimizeBiomePerformance();
+}
+
+void UWorld_ProceduralBiomeSystem::UpdatePopulation()
+{
+    float CurrentTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
+    LastUpdateTime = CurrentTime;
+    
+    // Update one biome per tick to spread the load
+    if (BiomeConfigs.IsValidIndex(CurrentSpawnIndex))
+    {
+        PopulateBiome(BiomeConfigs[CurrentSpawnIndex].BiomeName);
+        CurrentSpawnIndex = (CurrentSpawnIndex + 1) % BiomeConfigs.Num();
+    }
+    
+    // Periodic optimization
+    if (FMath::RandRange(0, 10) == 0)
+    {
+        OptimizeBiomePerformance();
+    }
+}
+
+FVector UWorld_ProceduralBiomeSystem::GetRandomLocationInBiome(const FWorld_BiomeConfig& BiomeConfig) const
+{
+    float RandomRadius = FMath::RandRange(0.0f, BiomeConfig.Radius * 0.8f);
+    float RandomAngle = FMath::RandRange(0.0f, 2.0f * PI);
+    
+    FVector Offset;
+    Offset.X = RandomRadius * FMath::Cos(RandomAngle);
+    Offset.Y = RandomRadius * FMath::Sin(RandomAngle);
+    Offset.Z = 0.0f;
+    
+    return BiomeConfig.CenterLocation + Offset;
+}
+
+bool UWorld_ProceduralBiomeSystem::IsLocationValid(const FVector& Location, const FString& BiomeName) const
+{
+    // Basic validation - could be expanded with terrain checks
     return true;
 }
 
-void AWorld_ProceduralBiomeSystem::RegisterSpawnedActor(AActor* Actor, const FString& BiomeName, const FString& ActorType, const FVector& Location)
+void UWorld_ProceduralBiomeSystem::RegisterSpawnedActor(AActor* Actor, const FString& BiomeName, const FString& ActorType)
 {
-    if (!Actor) return;
+    if (!Actor)
+    {
+        return;
+    }
     
-    FWorld_SpawnedActorInfo NewInfo;
-    NewInfo.SpawnedActor = Actor;
-    NewInfo.BiomeName = BiomeName;
-    NewInfo.ActorType = ActorType;
-    NewInfo.SpawnLocation = Location;
-    NewInfo.DistanceFromPlayer = 0.0f;
+    FWorld_SpawnedActor NewSpawnedActor;
+    NewSpawnedActor.ActorRef = Actor;
+    NewSpawnedActor.BiomeName = BiomeName;
+    NewSpawnedActor.ActorType = ActorType;
+    NewSpawnedActor.SpawnLocation = Actor->GetActorLocation();
+    NewSpawnedActor.SpawnTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
     
-    SpawnedActors.Add(NewInfo);
-    TotalSpawnedCount++;
+    SpawnedActors.Add(NewSpawnedActor);
 }
 
-void AWorld_ProceduralBiomeSystem::UpdateActorDistances()
+void UWorld_ProceduralBiomeSystem::CleanupInvalidActors()
 {
-    FVector PlayerLocation = GetPlayerLocation();
-    
-    for (FWorld_SpawnedActorInfo& ActorInfo : SpawnedActors)
+    SpawnedActors.RemoveAll([](const FWorld_SpawnedActor& SpawnedActor)
     {
-        if (ActorInfo.SpawnedActor && IsValid(ActorInfo.SpawnedActor))
-        {
-            ActorInfo.DistanceFromPlayer = FVector::Dist(PlayerLocation, ActorInfo.SpawnedActor->GetActorLocation());
-        }
-    }
+        return !SpawnedActor.ActorRef.IsValid();
+    });
 }
