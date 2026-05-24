@@ -8,12 +8,12 @@
 #include "Perf_MemoryManager.generated.h"
 
 UENUM(BlueprintType)
-enum class EPerf_MemoryLevel : uint8
+enum class EPerf_MemoryPressure : uint8
 {
-    Low         UMETA(DisplayName = "Low Memory"),
-    Medium      UMETA(DisplayName = "Medium Memory"),
-    High        UMETA(DisplayName = "High Memory"),
-    Critical    UMETA(DisplayName = "Critical Memory")
+    Low         UMETA(DisplayName = "Low Memory Pressure"),
+    Medium      UMETA(DisplayName = "Medium Memory Pressure"),
+    High        UMETA(DisplayName = "High Memory Pressure"),
+    Critical    UMETA(DisplayName = "Critical Memory Pressure")
 };
 
 USTRUCT(BlueprintType)
@@ -21,23 +21,26 @@ struct TRANSPERSONALGAME_API FPerf_MemoryStats
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Memory")
+    UPROPERTY(BlueprintReadOnly, Category = "Memory Stats")
     float UsedMemoryMB = 0.0f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Memory")
+    UPROPERTY(BlueprintReadOnly, Category = "Memory Stats")
     float AvailableMemoryMB = 0.0f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Memory")
+    UPROPERTY(BlueprintReadOnly, Category = "Memory Stats")
+    float TotalMemoryMB = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Memory Stats")
     float MemoryUsagePercent = 0.0f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Memory")
+    UPROPERTY(BlueprintReadOnly, Category = "Memory Stats")
+    EPerf_MemoryPressure MemoryPressure = EPerf_MemoryPressure::Low;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Memory Stats")
     int32 ActiveActorCount = 0;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Memory")
-    int32 ActiveComponentCount = 0;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Memory")
-    EPerf_MemoryLevel MemoryLevel = EPerf_MemoryLevel::Low;
+    UPROPERTY(BlueprintReadOnly, Category = "Memory Stats")
+    int32 LoadedAssetCount = 0;
 };
 
 UCLASS(ClassGroup=(Performance), meta=(BlueprintSpawnableComponent))
@@ -50,13 +53,15 @@ public:
 
 protected:
     virtual void BeginPlay() override;
-
-public:
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    // Memory monitoring
+public:
+    // Memory monitoring functions
     UFUNCTION(BlueprintCallable, Category = "Performance|Memory")
     FPerf_MemoryStats GetCurrentMemoryStats();
+
+    UFUNCTION(BlueprintCallable, Category = "Performance|Memory")
+    bool IsMemoryPressureHigh() const;
 
     UFUNCTION(BlueprintCallable, Category = "Performance|Memory")
     void ForceGarbageCollection();
@@ -64,47 +69,56 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Performance|Memory")
     void OptimizeMemoryUsage();
 
-    // Memory thresholds
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Memory", meta = (ClampMin = "50.0", ClampMax = "95.0"))
-    float MemoryWarningThreshold = 75.0f;
+    // Memory threshold management
+    UFUNCTION(BlueprintCallable, Category = "Performance|Memory")
+    void SetMemoryThresholds(float MediumThreshold, float HighThreshold, float CriticalThreshold);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Memory", meta = (ClampMin = "80.0", ClampMax = "99.0"))
-    float MemoryCriticalThreshold = 90.0f;
+    // Asset management for memory optimization
+    UFUNCTION(BlueprintCallable, Category = "Performance|Memory")
+    void UnloadUnusedAssets();
 
-    // Auto-optimization settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Memory")
-    bool bAutoOptimizeMemory = true;
+    UFUNCTION(BlueprintCallable, Category = "Performance|Memory")
+    void PreloadCriticalAssets();
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Memory", meta = (ClampMin = "1.0", ClampMax = "30.0"))
-    float MemoryCheckInterval = 5.0f;
+    // Debug and monitoring
+    UFUNCTION(BlueprintCallable, Category = "Performance|Memory", CallInEditor)
+    void LogMemoryReport();
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Memory")
+    UFUNCTION(BlueprintCallable, Category = "Performance|Memory")
+    void EnableMemoryTracking(bool bEnable);
+
+protected:
+    // Configuration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory Thresholds", meta = (ClampMin = "0.0", ClampMax = "100.0"))
+    float MediumPressureThreshold = 60.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory Thresholds", meta = (ClampMin = "0.0", ClampMax = "100.0"))
+    float HighPressureThreshold = 80.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory Thresholds", meta = (ClampMin = "0.0", ClampMax = "100.0"))
+    float CriticalPressureThreshold = 95.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory Management")
+    float MemoryCheckInterval = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory Management")
     bool bAutoGarbageCollection = true;
 
-    // Memory optimization actions
-    UFUNCTION(BlueprintCallable, Category = "Performance|Memory")
-    void ClearUnusedAssets();
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory Management")
+    bool bAutoUnloadAssets = true;
 
-    UFUNCTION(BlueprintCallable, Category = "Performance|Memory")
-    void ReduceActorLOD();
-
-    UFUNCTION(BlueprintCallable, Category = "Performance|Memory")
-    void DisableNonEssentialComponents();
-
-    // Events
-    DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnMemoryLevelChanged, EPerf_MemoryLevel, NewLevel);
-    UPROPERTY(BlueprintAssignable, Category = "Performance|Memory")
-    FOnMemoryLevelChanged OnMemoryLevelChanged;
-
-    DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnMemoryOptimized, float, MemorySavedMB);
-    UPROPERTY(BlueprintAssignable, Category = "Performance|Memory")
-    FOnMemoryOptimized OnMemoryOptimized;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory Management")
+    int32 MaxActiveActors = 20000;
 
 private:
+    // Internal state
     float LastMemoryCheck = 0.0f;
-    EPerf_MemoryLevel CurrentMemoryLevel = EPerf_MemoryLevel::Low;
-    
-    void UpdateMemoryLevel();
-    void HandleMemoryPressure();
-    float GetSystemMemoryUsagePercent();
+    FPerf_MemoryStats CachedMemoryStats;
+    bool bMemoryTrackingEnabled = true;
+
+    // Internal functions
+    void UpdateMemoryStats();
+    EPerf_MemoryPressure CalculateMemoryPressure(float UsagePercent);
+    void HandleMemoryPressure(EPerf_MemoryPressure Pressure);
+    void PerformMemoryOptimization();
 };
