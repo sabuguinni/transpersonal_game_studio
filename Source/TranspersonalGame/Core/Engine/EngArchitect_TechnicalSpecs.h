@@ -1,154 +1,179 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/Engine.h"
-#include "UObject/NoExportTypes.h"
+#include "Engine/World.h"
+#include "Components/ActorComponent.h"
 #include "EngArchitect_TechnicalSpecs.generated.h"
 
 /**
- * ENGINE ARCHITECT TECHNICAL SPECIFICATIONS
- * Defines core architecture standards for all agents in the production chain
- * Agent #02 - Engine Architect - Cycle PROD_CYCLE_AUTO_20260525_002
+ * ENGINE ARCHITECT TECHNICAL SPECIFICATIONS v2.0
+ * Core architectural patterns and constraints for all TranspersonalGame systems
+ * Created by Agent #2 - Engine Architect
  */
 
-UENUM(BlueprintType)
-enum class EEng_SystemPriority : uint8
-{
-    Critical    UMETA(DisplayName = "Critical"),
-    High        UMETA(DisplayName = "High"),
-    Medium      UMETA(DisplayName = "Medium"),
-    Low         UMETA(DisplayName = "Low")
-};
-
-UENUM(BlueprintType)
-enum class EEng_ModuleStatus : uint8
-{
-    NotStarted  UMETA(DisplayName = "Not Started"),
-    InProgress  UMETA(DisplayName = "In Progress"),
-    Testing     UMETA(DisplayName = "Testing"),
-    Complete    UMETA(DisplayName = "Complete"),
-    Blocked     UMETA(DisplayName = "Blocked")
-};
-
+// CORE PERFORMANCE CONSTRAINTS
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEng_SystemSpec
+struct TRANSPERSONALGAME_API FEng_PerformanceSpecs
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System")
-    FString SystemName;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System")
-    EEng_SystemPriority Priority;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System")
-    EEng_ModuleStatus Status;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System")
-    int32 AgentResponsible;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System")
-    TArray<FString> Dependencies;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float MaxFrameTime;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 MaxMemoryMB;
-
-    FEng_SystemSpec()
-    {
-        SystemName = TEXT("Unnamed System");
-        Priority = EEng_SystemPriority::Medium;
-        Status = EEng_ModuleStatus::NotStarted;
-        AgentResponsible = 0;
-        MaxFrameTime = 16.67f; // 60 FPS target
-        MaxMemoryMB = 512;
-    }
+    // Target framerate requirements
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance")
+    int32 TargetFPS_PC = 60;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance")
+    int32 TargetFPS_Console = 30;
+    
+    // Actor limits per biome
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance")
+    int32 MaxActorsPerBiome = 2000;
+    
+    // Dinosaur simulation limits
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance")
+    int32 MaxSimultaneousDinosaurs = 50;
+    
+    // LOD distances
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance")
+    float DinosaurLOD0_Distance = 1000.0f;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance")
+    float DinosaurLOD1_Distance = 2500.0f;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance")
+    float DinosaurCull_Distance = 5000.0f;
 };
 
+// BIOME COORDINATE SYSTEM
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEng_CompilationRules
+struct TRANSPERSONALGAME_API FEng_BiomeCoordinates
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rules")
-    bool bEnforceUE55Compatibility;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "World")
+    FVector Savana = FVector(0.0f, 0.0f, 100.0f);
+    
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "World")
+    FVector Pantano = FVector(-50000.0f, -45000.0f, 50.0f);
+    
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "World")
+    FVector Floresta = FVector(-45000.0f, 40000.0f, 150.0f);
+    
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "World")
+    FVector Deserto = FVector(55000.0f, 0.0f, 200.0f);
+    
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "World")
+    FVector Montanha = FVector(40000.0f, 50000.0f, 800.0f);
+};
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rules")
-    bool bRequireMatchingCppFiles;
+// SURVIVAL SYSTEM ARCHITECTURE
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FEng_SurvivalSpecs
+{
+    GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rules")
-    bool bEnforceNamingConventions;
+    // Core survival stats ranges
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Survival")
+    float MaxHealth = 100.0f;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Survival")
+    float MaxHunger = 100.0f;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Survival")
+    float MaxThirst = 100.0f;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Survival")
+    float MaxStamina = 100.0f;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Survival")
+    float MaxFear = 100.0f;
+    
+    // Decay rates per second
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Survival")
+    float HungerDecayRate = 0.1f;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Survival")
+    float ThirstDecayRate = 0.15f;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Survival")
+    float StaminaRegenRate = 2.0f;
+};
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rules")
-    bool bRequireSharedTypesUsage;
+// DINOSAUR BEHAVIOR ARCHITECTURE
+UENUM(BlueprintType)
+enum class EEng_DinosaurThreatLevel : uint8
+{
+    Passive     UMETA(DisplayName = "Passive"),
+    Territorial UMETA(DisplayName = "Territorial"), 
+    Aggressive  UMETA(DisplayName = "Aggressive"),
+    Apex        UMETA(DisplayName = "Apex Predator")
+};
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 MaxIncludeDepth;
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FEng_DinosaurSpecs
+{
+    GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float MaxCompileTimeSeconds;
-
-    FEng_CompilationRules()
-    {
-        bEnforceUE55Compatibility = true;
-        bRequireMatchingCppFiles = true;
-        bEnforceNamingConventions = true;
-        bRequireSharedTypesUsage = true;
-        MaxIncludeDepth = 10;
-        MaxCompileTimeSeconds = 30.0f;
-    }
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dinosaur")
+    FString SpeciesName;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dinosaur")
+    EEng_DinosaurThreatLevel ThreatLevel = EEng_DinosaurThreatLevel::Passive;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dinosaur")
+    float DetectionRange = 1500.0f;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dinosaur")
+    float AttackRange = 300.0f;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dinosaur")
+    float MovementSpeed = 400.0f;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dinosaur")
+    float Health = 200.0f;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dinosaur")
+    float Damage = 25.0f;
 };
 
 /**
  * Engine Architect Core Component
- * Manages technical specifications and architecture validation
+ * Enforces technical specifications across all game systems
  */
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UEngArchitect_TechnicalSpecs : public UObject
+UCLASS(ClassGroup=(TranspersonalGame), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UEngArchitect_TechnicalSpecs : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
     UEngArchitect_TechnicalSpecs();
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    TArray<FEng_SystemSpec> SystemSpecifications;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Compilation")
-    FEng_CompilationRules CompilationRules;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float TargetFrameRate;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 MaxActorsPerBiome;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 MaxTotalActors;
-
-    // Architecture validation functions
-    UFUNCTION(BlueprintCallable, Category = "Validation")
-    bool ValidateSystemDependencies();
-
-    UFUNCTION(BlueprintCallable, Category = "Validation")
-    bool CheckCompilationCompliance();
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    bool ValidatePerformanceTargets();
-
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void RegisterSystemSpec(const FEng_SystemSpec& NewSpec);
-
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    FEng_SystemSpec GetSystemSpec(const FString& SystemName);
-
 protected:
-    UPROPERTY()
-    TMap<FString, FEng_SystemSpec> SystemRegistry;
+    virtual void BeginPlay() override;
 
-    void InitializeDefaultSpecs();
-    bool ValidateAgentChain();
-    bool CheckModuleDependencies();
+public:
+    // Core specifications
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Architecture")
+    FEng_PerformanceSpecs PerformanceSpecs;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Architecture")
+    FEng_BiomeCoordinates BiomeCoordinates;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Architecture")
+    FEng_SurvivalSpecs SurvivalSpecs;
+
+    // Validation functions
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    bool ValidatePerformanceMetrics();
+    
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    FVector GetBiomeCenter(const FString& BiomeName);
+    
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    bool IsLocationInBiome(const FVector& Location, const FString& BiomeName);
+    
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Architecture")
+    void ValidateWorldSetup();
+    
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Architecture") 
+    void EnforceArchitecturalConstraints();
 };
