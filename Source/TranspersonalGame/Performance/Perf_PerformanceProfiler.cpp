@@ -6,97 +6,82 @@
 #include "Components/SkeletalMeshComponent.h"
 #include "HAL/PlatformFilemanager.h"
 #include "Misc/DateTime.h"
+#include "Stats/Stats.h"
 
 UPerf_PerformanceProfiler::UPerf_PerformanceProfiler()
 {
     PrimaryComponentTick.bCanEverTick = true;
     PrimaryComponentTick.TickInterval = 0.1f; // Update 10 times per second
-    
-    ProfilerMode = EPerf_ProfilerMode::Basic;
-    UpdateInterval = 1.0f;
-    bEnableDetailedProfiling = false;
-    bLogPerformanceWarnings = true;
-    FPSWarningThreshold = 30.0f;
-    MemoryWarningThresholdMB = 2048.0f;
-    
-    bIsProfilingActive = false;
-    TimeSinceLastUpdate = 0.0f;
-    TotalFPSSum = 0.0f;
-    FPSHistoryCount = 0;
-    
-    // Initialize FPS history array
-    FPSHistory.Reserve(60); // Store 60 seconds of FPS data
+
+    // Default performance targets
+    TargetFPS_PC = 60.0f;
+    TargetFPS_Console = 30.0f;
+    MaxMemoryUsageMB = 8192.0f; // 8GB
+    MaxActorCount = 10000;
+
+    // Initialize profiling state
+    bIsProfiling = false;
+    CurrentProfilingLevel = EPerf_ProfilingLevel::Basic;
+    FrameHistorySize = 60; // 6 seconds of history at 10Hz
+    ProfilingTimer = 0.0f;
+    ProfilingInterval = 1.0f; // Log every second
 }
 
 void UPerf_PerformanceProfiler::BeginPlay()
 {
     Super::BeginPlay();
     
-    if (ProfilerMode != EPerf_ProfilerMode::Disabled)
-    {
-        StartProfiling();
-    }
+    // Initialize frame time history
+    FrameTimeHistory.Reserve(FrameHistorySize);
     
-    UE_LOG(LogTemp, Log, TEXT("Performance Profiler initialized - Mode: %d"), (int32)ProfilerMode);
+    // Start profiling automatically
+    StartProfiling();
+    
+    UE_LOG(LogTemp, Log, TEXT("Performance Profiler initialized"));
 }
 
 void UPerf_PerformanceProfiler::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-    
-    if (!bIsProfilingActive || ProfilerMode == EPerf_ProfilerMode::Disabled)
-    {
+
+    if (!bIsProfiling)
         return;
-    }
-    
-    TimeSinceLastUpdate += DeltaTime;
-    
-    if (TimeSinceLastUpdate >= UpdateInterval)
+
+    // Update performance metrics
+    UpdateMetrics(DeltaTime);
+
+    // Periodic logging
+    ProfilingTimer += DeltaTime;
+    if (ProfilingTimer >= ProfilingInterval)
     {
-        UpdatePerformanceMetrics();
+        ProfilingTimer = 0.0f;
         
-        if (bEnableDetailedProfiling)
+        if (CurrentProfilingLevel >= EPerf_ProfilingLevel::Basic)
         {
-            CollectActorPerformanceData();
+            LogPerformanceReport();
         }
-        
-        CheckPerformanceThresholds();
-        TimeSinceLastUpdate = 0.0f;
+
+        // Auto-optimize if performance is poor
+        if (!IsPerformanceAcceptable())
+        {
+            OptimizePerformance();
+        }
     }
 }
 
 void UPerf_PerformanceProfiler::StartProfiling()
 {
-    if (bIsProfilingActive)
-    {
-        return;
-    }
-    
-    bIsProfilingActive = true;
-    ResetMetrics();
+    bIsProfiling = true;
+    FrameTimeHistory.Empty();
+    ProfilingTimer = 0.0f;
     
     UE_LOG(LogTemp, Log, TEXT("Performance profiling started"));
 }
 
 void UPerf_PerformanceProfiler::StopProfiling()
 {
-    if (!bIsProfilingActive)
-    {
-        return;
-    }
-    
-    bIsProfilingActive = false;
+    bIsProfiling = false;
     UE_LOG(LogTemp, Log, TEXT("Performance profiling stopped"));
-}
-
-void UPerf_PerformanceProfiler::ResetMetrics()
-{
-    CurrentMetrics = FPerf_PerformanceMetrics();
-    ActorPerformanceData.Empty();
-    FPSHistory.Empty();
-    TotalFPSSum = 0.0f;
-    FPSHistoryCount = 0;
-    TimeSinceLastUpdate = 0.0f;
 }
 
 FPerf_PerformanceMetrics UPerf_PerformanceProfiler::GetCurrentMetrics() const
@@ -104,305 +89,233 @@ FPerf_PerformanceMetrics UPerf_PerformanceProfiler::GetCurrentMetrics() const
     return CurrentMetrics;
 }
 
-TArray<FPerf_ActorPerformanceData> UPerf_PerformanceProfiler::GetActorPerformanceData() const
+void UPerf_PerformanceProfiler::SetProfilingLevel(EPerf_ProfilingLevel NewLevel)
 {
-    return ActorPerformanceData;
+    CurrentProfilingLevel = NewLevel;
+    UE_LOG(LogTemp, Log, TEXT("Profiling level set to: %d"), (int32)NewLevel);
 }
 
-void UPerf_PerformanceProfiler::SetProfilerMode(EPerf_ProfilerMode NewMode)
+void UPerf_PerformanceProfiler::LogPerformanceReport()
 {
-    ProfilerMode = NewMode;
+    UE_LOG(LogTemp, Log, TEXT("=== PERFORMANCE REPORT ==="));
+    UE_LOG(LogTemp, Log, TEXT("FPS: %.1f | Frame Time: %.2fms"), CurrentMetrics.CurrentFPS, CurrentMetrics.AverageFrameTime);
+    UE_LOG(LogTemp, Log, TEXT("Memory: %.1fMB | Actors: %d"), CurrentMetrics.MemoryUsageMB, CurrentMetrics.ActorCount);
+    UE_LOG(LogTemp, Log, TEXT("CPU Time: %.2fms | GPU Time: %.2fms"), CurrentMetrics.CPUTime, CurrentMetrics.GPUTime);
     
-    if (NewMode == EPerf_ProfilerMode::Disabled)
+    if (!IsPerformanceAcceptable())
     {
-        StopProfiling();
+        UE_LOG(LogTemp, Warning, TEXT("PERFORMANCE WARNING: Below target thresholds"));
     }
-    else if (!bIsProfilingActive)
+}
+
+void UPerf_PerformanceProfiler::OptimizeActorLOD(AActor* Actor, float Distance)
+{
+    if (!Actor)
+        return;
+
+    // Get static mesh components
+    TArray<UStaticMeshComponent*> StaticMeshes;
+    Actor->GetComponents<UStaticMeshComponent>(StaticMeshes);
+
+    for (UStaticMeshComponent* MeshComp : StaticMeshes)
     {
-        StartProfiling();
+        if (MeshComp && MeshComp->GetStaticMesh())
+        {
+            // Set LOD based on distance
+            int32 ForcedLOD = -1; // Auto LOD
+            
+            if (Distance > 5000.0f)
+            {
+                ForcedLOD = 3; // Lowest detail
+            }
+            else if (Distance > 2000.0f)
+            {
+                ForcedLOD = 2;
+            }
+            else if (Distance > 1000.0f)
+            {
+                ForcedLOD = 1;
+            }
+            
+            MeshComp->SetForcedLodModel(ForcedLOD);
+        }
+    }
+
+    // Get skeletal mesh components (for dinosaurs)
+    TArray<USkeletalMeshComponent*> SkeletalMeshes;
+    Actor->GetComponents<USkeletalMeshComponent>(SkeletalMeshes);
+
+    for (USkeletalMeshComponent* SkelMeshComp : SkeletalMeshes)
+    {
+        if (SkelMeshComp && SkelMeshComp->GetSkeletalMeshAsset())
+        {
+            // Reduce animation update rate for distant actors
+            if (Distance > 3000.0f)
+            {
+                SkelMeshComp->SetComponentTickEnabled(false);
+            }
+            else if (Distance > 1500.0f)
+            {
+                SkelMeshComp->SetComponentTickInterval(0.1f); // 10 FPS animation
+            }
+            else
+            {
+                SkelMeshComp->SetComponentTickInterval(0.0f); // Full rate
+                SkelMeshComp->SetComponentTickEnabled(true);
+            }
+        }
+    }
+}
+
+void UPerf_PerformanceProfiler::CullDistantActors(float CullDistance)
+{
+    UWorld* World = GetWorld();
+    if (!World)
+        return;
+
+    APawn* PlayerPawn = World->GetFirstPlayerController()->GetPawn();
+    if (!PlayerPawn)
+        return;
+
+    FVector PlayerLocation = PlayerPawn->GetActorLocation();
+    
+    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+    {
+        AActor* Actor = *ActorItr;
+        if (!Actor || Actor == PlayerPawn)
+            continue;
+
+        float Distance = FVector::Dist(PlayerLocation, Actor->GetActorLocation());
+        
+        if (Distance > CullDistance)
+        {
+            // Hide distant actors
+            Actor->SetActorHiddenInGame(true);
+            Actor->SetActorTickEnabled(false);
+        }
+        else
+        {
+            // Show nearby actors
+            Actor->SetActorHiddenInGame(false);
+            Actor->SetActorTickEnabled(true);
+            
+            // Apply LOD optimization
+            OptimizeActorLOD(Actor, Distance);
+        }
     }
 }
 
 bool UPerf_PerformanceProfiler::IsPerformanceAcceptable() const
 {
-    return CurrentMetrics.CurrentFPS >= FPSWarningThreshold && 
-           CurrentMetrics.MemoryUsageMB <= MemoryWarningThresholdMB;
+    // Check FPS target (PC vs Console detection would be more complex in real implementation)
+    float TargetFPS = TargetFPS_PC; // Assume PC for now
+    
+    bool FPSAcceptable = CurrentMetrics.CurrentFPS >= (TargetFPS * 0.9f); // 90% of target
+    bool MemoryAcceptable = CurrentMetrics.MemoryUsageMB <= MaxMemoryUsageMB;
+    bool ActorCountAcceptable = CurrentMetrics.ActorCount <= MaxActorCount;
+    
+    return FPSAcceptable && MemoryAcceptable && ActorCountAcceptable;
+}
+
+void UPerf_PerformanceProfiler::UpdateMetrics(float DeltaTime)
+{
+    // Update frame time history
+    FrameTimeHistory.Add(DeltaTime);
+    if (FrameTimeHistory.Num() > FrameHistorySize)
+    {
+        FrameTimeHistory.RemoveAt(0);
+    }
+
+    // Calculate current FPS
+    CurrentMetrics.CurrentFPS = DeltaTime > 0.0f ? 1.0f / DeltaTime : 0.0f;
+    CurrentMetrics.AverageFrameTime = CalculateAverageFrameTime() * 1000.0f; // Convert to milliseconds
+
+    // Collect metrics based on profiling level
+    switch (CurrentProfilingLevel)
+    {
+        case EPerf_ProfilingLevel::Basic:
+            CollectBasicMetrics();
+            break;
+        case EPerf_ProfilingLevel::Detailed:
+            CollectDetailedMetrics();
+            break;
+        case EPerf_ProfilingLevel::Advanced:
+            CollectAdvancedMetrics();
+            break;
+        default:
+            break;
+    }
+}
+
+void UPerf_PerformanceProfiler::CollectBasicMetrics()
+{
+    UWorld* World = GetWorld();
+    if (!World)
+        return;
+
+    // Count actors
+    CurrentMetrics.ActorCount = 0;
+    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+    {
+        CurrentMetrics.ActorCount++;
+    }
+
+    // Basic memory estimation (simplified)
+    CurrentMetrics.MemoryUsageMB = CurrentMetrics.ActorCount * 0.1f; // Rough estimate
+}
+
+void UPerf_PerformanceProfiler::CollectDetailedMetrics()
+{
+    CollectBasicMetrics();
+    
+    // More detailed memory calculation would require platform-specific code
+    CurrentMetrics.MemoryUsageMB = CurrentMetrics.ActorCount * 0.15f; // Slightly more detailed estimate
+    
+    // Estimate draw calls (simplified)
+    CurrentMetrics.DrawCalls = CurrentMetrics.ActorCount / 2; // Rough estimate
+}
+
+void UPerf_PerformanceProfiler::CollectAdvancedMetrics()
+{
+    CollectDetailedMetrics();
+    
+    // Advanced metrics would require engine stats integration
+    CurrentMetrics.CPUTime = CurrentMetrics.AverageFrameTime * 0.7f; // Estimate 70% CPU
+    CurrentMetrics.GPUTime = CurrentMetrics.AverageFrameTime * 0.3f; // Estimate 30% GPU
+}
+
+float UPerf_PerformanceProfiler::CalculateAverageFrameTime() const
+{
+    if (FrameTimeHistory.Num() == 0)
+        return 0.0f;
+
+    float Sum = 0.0f;
+    for (float FrameTime : FrameTimeHistory)
+    {
+        Sum += FrameTime;
+    }
+
+    return Sum / FrameTimeHistory.Num();
 }
 
 void UPerf_PerformanceProfiler::OptimizePerformance()
 {
-    if (!GetWorld())
+    UE_LOG(LogTemp, Warning, TEXT("Auto-optimization triggered due to poor performance"));
+    
+    // Cull distant actors aggressively
+    CullDistantActors(5000.0f);
+    
+    // Reduce tick rates for non-critical actors
+    UWorld* World = GetWorld();
+    if (World)
     {
-        return;
-    }
-    
-    // Force garbage collection
-    GEngine->ForceGarbageCollection(true);
-    
-    // Get all actors for optimization
-    TArray<AActor*> AllActors;
-    UGameplayStatics::GetAllActorsOfClass(GetWorld(), AActor::StaticClass(), AllActors);
-    
-    int32 OptimizedActors = 0;
-    
-    for (AActor* Actor : AllActors)
-    {
-        if (!Actor)
+        for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
         {
-            continue;
-        }
-        
-        // Optimize static mesh components
-        TArray<UStaticMeshComponent*> StaticMeshComponents;
-        Actor->GetComponents<UStaticMeshComponent>(StaticMeshComponents);
-        
-        for (UStaticMeshComponent* MeshComp : StaticMeshComponents)
-        {
-            if (MeshComp && MeshComp->GetStaticMesh())
+            AActor* Actor = *ActorItr;
+            if (Actor && !Actor->IsA<APawn>()) // Don't affect player or important pawns
             {
-                // Enable LOD if not already enabled
-                if (!MeshComp->bOverrideLightMapRes)
-                {
-                    MeshComp->bOverrideLightMapRes = true;
-                    MeshComp->OverriddenLightMapRes = 32; // Lower resolution for performance
-                    OptimizedActors++;
-                }
+                Actor->SetActorTickInterval(0.1f); // Reduce to 10 FPS
             }
         }
-        
-        // Optimize skeletal mesh components
-        TArray<USkeletalMeshComponent*> SkeletalMeshComponents;
-        Actor->GetComponents<USkeletalMeshComponent>(SkeletalMeshComponents);
-        
-        for (USkeletalMeshComponent* SkeletalComp : SkeletalMeshComponents)
-        {
-            if (SkeletalComp)
-            {
-                // Reduce update rate for distant actors
-                float DistanceToPlayer = 10000.0f; // Default large distance
-                
-                if (GetWorld()->GetFirstPlayerController() && GetWorld()->GetFirstPlayerController()->GetPawn())
-                {
-                    FVector PlayerLocation = GetWorld()->GetFirstPlayerController()->GetPawn()->GetActorLocation();
-                    DistanceToPlayer = FVector::Dist(Actor->GetActorLocation(), PlayerLocation);
-                }
-                
-                if (DistanceToPlayer > 5000.0f)
-                {
-                    SkeletalComp->SetComponentTickInterval(0.2f); // Reduce tick rate for distant actors
-                    OptimizedActors++;
-                }
-            }
-        }
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("Performance optimization completed - %d actors optimized"), OptimizedActors);
-}
-
-void UPerf_PerformanceProfiler::RunPerformanceTest()
-{
-    if (!GetWorld())
-    {
-        return;
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("=== PERFORMANCE TEST STARTED ==="));
-    
-    // Test 1: Actor count
-    TArray<AActor*> AllActors;
-    UGameplayStatics::GetAllActorsOfClass(GetWorld(), AActor::StaticClass(), AllActors);
-    UE_LOG(LogTemp, Warning, TEXT("Total Actors: %d"), AllActors.Num());
-    
-    // Test 2: Memory usage estimation
-    SIZE_T MemoryUsage = GEngine->GetWorldContextFromWorld(GetWorld())->World()->GetOutermost()->GetResourceSizeBytes(EResourceSizeMode::EstimatedTotal);
-    float MemoryMB = MemoryUsage / (1024.0f * 1024.0f);
-    UE_LOG(LogTemp, Warning, TEXT("Estimated Memory Usage: %.2f MB"), MemoryMB);
-    
-    // Test 3: Mesh complexity
-    int32 TotalTriangles = 0;
-    int32 StaticMeshCount = 0;
-    int32 SkeletalMeshCount = 0;
-    
-    for (AActor* Actor : AllActors)
-    {
-        if (!Actor)
-        {
-            continue;
-        }
-        
-        TArray<UStaticMeshComponent*> StaticMeshComponents;
-        Actor->GetComponents<UStaticMeshComponent>(StaticMeshComponents);
-        StaticMeshCount += StaticMeshComponents.Num();
-        
-        TArray<USkeletalMeshComponent*> SkeletalMeshComponents;
-        Actor->GetComponents<USkeletalMeshComponent>(SkeletalMeshComponents);
-        SkeletalMeshCount += SkeletalMeshComponents.Num();
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("Static Mesh Components: %d"), StaticMeshCount);
-    UE_LOG(LogTemp, Warning, TEXT("Skeletal Mesh Components: %d"), SkeletalMeshCount);
-    
-    // Test 4: Performance recommendations
-    if (AllActors.Num() > 10000)
-    {
-        UE_LOG(LogTemp, Error, TEXT("WARNING: High actor count may impact performance"));
-    }
-    
-    if (MemoryMB > 2048.0f)
-    {
-        UE_LOG(LogTemp, Error, TEXT("WARNING: High memory usage detected"));
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("=== PERFORMANCE TEST COMPLETED ==="));
-}
-
-void UPerf_PerformanceProfiler::UpdatePerformanceMetrics()
-{
-    if (!GetWorld())
-    {
-        return;
-    }
-    
-    // Calculate current FPS
-    float DeltaTime = GetWorld()->GetDeltaSeconds();
-    CurrentMetrics.CurrentFPS = (DeltaTime > 0.0f) ? (1.0f / DeltaTime) : 0.0f;
-    
-    // Update FPS history
-    UpdateFPSHistory(CurrentMetrics.CurrentFPS);
-    
-    // Calculate average FPS
-    CurrentMetrics.AverageFPS = CalculateAverageFPS();
-    
-    // Update min/max FPS
-    if (FPSHistoryCount == 1)
-    {
-        CurrentMetrics.MinFPS = CurrentMetrics.CurrentFPS;
-        CurrentMetrics.MaxFPS = CurrentMetrics.CurrentFPS;
-    }
-    else
-    {
-        CurrentMetrics.MinFPS = FMath::Min(CurrentMetrics.MinFPS, CurrentMetrics.CurrentFPS);
-        CurrentMetrics.MaxFPS = FMath::Max(CurrentMetrics.MaxFPS, CurrentMetrics.CurrentFPS);
-    }
-    
-    // Update actor count
-    TArray<AActor*> AllActors;
-    UGameplayStatics::GetAllActorsOfClass(GetWorld(), AActor::StaticClass(), AllActors);
-    CurrentMetrics.ActorCount = AllActors.Num();
-    
-    // Estimate memory usage
-    SIZE_T MemoryUsage = GEngine->GetWorldContextFromWorld(GetWorld())->World()->GetOutermost()->GetResourceSizeBytes(EResourceSizeMode::EstimatedTotal);
-    CurrentMetrics.MemoryUsageMB = MemoryUsage / (1024.0f * 1024.0f);
-    
-    // Estimate draw calls (simplified)
-    CurrentMetrics.DrawCalls = CurrentMetrics.ActorCount / 2; // Rough estimation
-}
-
-void UPerf_PerformanceProfiler::CollectActorPerformanceData()
-{
-    if (!GetWorld())
-    {
-        return;
-    }
-    
-    ActorPerformanceData.Empty();
-    
-    TArray<AActor*> AllActors;
-    UGameplayStatics::GetAllActorsOfClass(GetWorld(), AActor::StaticClass(), AllActors);
-    
-    for (AActor* Actor : AllActors)
-    {
-        if (!Actor)
-        {
-            continue;
-        }
-        
-        FPerf_ActorPerformanceData ActorData;
-        ActorData.ActorName = Actor->GetName();
-        
-        // Check if actor has mesh components (performance critical)
-        TArray<UMeshComponent*> MeshComponents;
-        Actor->GetComponents<UMeshComponent>(MeshComponents);
-        
-        if (MeshComponents.Num() > 0)
-        {
-            ActorData.bIsPerformanceCritical = true;
-            ActorData.TriangleCount = MeshComponents.Num() * 1000; // Rough estimation
-        }
-        
-        // Estimate render time based on distance and complexity
-        if (GetWorld()->GetFirstPlayerController() && GetWorld()->GetFirstPlayerController()->GetPawn())
-        {
-            FVector PlayerLocation = GetWorld()->GetFirstPlayerController()->GetPawn()->GetActorLocation();
-            float Distance = FVector::Dist(Actor->GetActorLocation(), PlayerLocation);
-            ActorData.RenderTime = (Distance < 1000.0f) ? 0.5f : 0.1f; // Simplified estimation
-        }
-        
-        ActorPerformanceData.Add(ActorData);
-        
-        // Limit data collection to prevent performance impact
-        if (ActorPerformanceData.Num() >= 100)
-        {
-            break;
-        }
-    }
-}
-
-void UPerf_PerformanceProfiler::CheckPerformanceThresholds()
-{
-    if (!bLogPerformanceWarnings)
-    {
-        return;
-    }
-    
-    if (CurrentMetrics.CurrentFPS < FPSWarningThreshold)
-    {
-        LogPerformanceWarning(FString::Printf(TEXT("Low FPS detected: %.1f (threshold: %.1f)"), 
-                                            CurrentMetrics.CurrentFPS, FPSWarningThreshold));
-    }
-    
-    if (CurrentMetrics.MemoryUsageMB > MemoryWarningThresholdMB)
-    {
-        LogPerformanceWarning(FString::Printf(TEXT("High memory usage: %.1f MB (threshold: %.1f MB)"), 
-                                            CurrentMetrics.MemoryUsageMB, MemoryWarningThresholdMB));
-    }
-    
-    if (CurrentMetrics.ActorCount > 15000)
-    {
-        LogPerformanceWarning(FString::Printf(TEXT("High actor count: %d"), CurrentMetrics.ActorCount));
-    }
-}
-
-void UPerf_PerformanceProfiler::LogPerformanceWarning(const FString& Warning)
-{
-    UE_LOG(LogTemp, Warning, TEXT("[PERFORMANCE WARNING] %s"), *Warning);
-}
-
-float UPerf_PerformanceProfiler::CalculateAverageFPS() const
-{
-    if (FPSHistoryCount == 0)
-    {
-        return 0.0f;
-    }
-    
-    return TotalFPSSum / FPSHistoryCount;
-}
-
-void UPerf_PerformanceProfiler::UpdateFPSHistory(float NewFPS)
-{
-    // Add to running total
-    TotalFPSSum += NewFPS;
-    FPSHistoryCount++;
-    
-    // Add to history array
-    FPSHistory.Add(NewFPS);
-    
-    // Keep only last 60 entries (60 seconds of data)
-    if (FPSHistory.Num() > 60)
-    {
-        float RemovedFPS = FPSHistory[0];
-        FPSHistory.RemoveAt(0);
-        TotalFPSSum -= RemovedFPS;
-        FPSHistoryCount--;
     }
 }
