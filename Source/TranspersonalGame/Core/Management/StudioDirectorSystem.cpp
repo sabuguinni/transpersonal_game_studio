@@ -1,238 +1,235 @@
 #include "StudioDirectorSystem.h"
-#include "Engine/World.h"
 #include "Engine/Engine.h"
-#include "Kismet/GameplayStatics.h"
-#include "Engine/LevelStreaming.h"
-#include "HAL/PlatformFilemanager.h"
-#include "Misc/DateTime.h"
+#include "Engine/World.h"
+#include "UObject/ConstructorHelpers.h"
 
-UStudioDirectorSystem::UStudioDirectorSystem()
+AStudioDirectorSystem::AStudioDirectorSystem()
 {
+    PrimaryActorTick.bCanEverTick = true;
+
+    RootSceneComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootSceneComponent"));
+    RootComponent = RootSceneComponent;
+
+    TotalAgents = 19;
     CurrentCycleID = TEXT("");
-    CycleStartTime = 0.0f;
 }
 
-void UStudioDirectorSystem::Initialize(FSubsystemCollectionBase& Collection)
+void AStudioDirectorSystem::BeginPlay()
 {
-    Super::Initialize(Collection);
+    Super::BeginPlay();
     
-    UE_LOG(LogTemp, Warning, TEXT("Studio Director System Initialized"));
+    InitializeAgentStatuses();
+    SetupDefaultTasks();
     
-    // Initialize agent chain and production tracking
-    InitializeAgentChain();
-    InitializeProductionCycle();
+    UE_LOG(LogTemp, Warning, TEXT("Studio Director System initialized with %d agents"), TotalAgents);
 }
 
-void UStudioDirectorSystem::Deinitialize()
+void AStudioDirectorSystem::Tick(float DeltaTime)
 {
-    // Log final production metrics
-    FDir_ProductionMetrics FinalMetrics = GetProductionMetrics();
-    UE_LOG(LogTemp, Warning, TEXT("Studio Director System Shutdown - Final Metrics: %d actors, %d errors"), 
-           FinalMetrics.TotalActorsInLevel, FinalMetrics.CompilationErrors);
+    Super::Tick(DeltaTime);
     
-    Super::Deinitialize();
+    // Update production metrics every frame
+    float OverallProgress = GetOverallProgress();
+    if (OverallProgress > 0.0f)
+    {
+        // Log progress periodically
+        static float LastLogTime = 0.0f;
+        LastLogTime += DeltaTime;
+        if (LastLogTime > 5.0f) // Log every 5 seconds
+        {
+            UE_LOG(LogTemp, Log, TEXT("Production Progress: %.1f%%"), OverallProgress);
+            LastLogTime = 0.0f;
+        }
+    }
 }
 
-void UStudioDirectorSystem::InitializeProductionCycle()
+void AStudioDirectorSystem::InitializeProductionCycle(const FString& CycleID)
 {
-    // Generate cycle ID with timestamp
-    FDateTime Now = FDateTime::Now();
-    CurrentCycleID = FString::Printf(TEXT("PROD_CYCLE_%s"), *Now.ToString(TEXT("%Y%m%d_%H%M")));
-    CycleStartTime = FPlatformTime::Seconds();
+    CurrentCycleID = CycleID;
     
-    // Clear previous cycle data
-    PendingTasks.Empty();
-    CompletedTasks.Empty();
+    // Reset all tasks
+    ActiveTasks.Empty();
     
-    // Update initial metrics
-    UpdateProductionMetrics();
+    // Reset agent statuses
+    for (FDir_AgentStatus& Status : AgentStatuses)
+    {
+        Status.CurrentTask = TEXT("Waiting for assignment");
+        Status.CompletionPercentage = 0.0f;
+        Status.bActive = false;
+    }
     
-    UE_LOG(LogTemp, Warning, TEXT("Production Cycle Initialized: %s"), *CurrentCycleID);
-    LogProductionEvent(TEXT("CYCLE_START"), CurrentCycleID);
+    SetupDefaultTasks();
+    
+    UE_LOG(LogTemp, Warning, TEXT("Production Cycle %s initialized"), *CycleID);
 }
 
-void UStudioDirectorSystem::QueueAgentTask(const FString& AgentName, const FString& TaskDescription, 
-                                          EDir_AgentPriority Priority, const TArray<FString>& Deliverables)
+void AStudioDirectorSystem::AssignTaskToAgent(int32 AgentNumber, const FString& TaskDescription, const FString& Priority)
 {
-    FDir_AgentTask NewTask;
-    NewTask.AgentName = AgentName;
-    NewTask.TaskDescription = TaskDescription;
+    // Create new task
+    FDir_ProductionTask NewTask;
+    NewTask.TaskName = TaskDescription;
+    NewTask.AgentNumber = AgentNumber;
     NewTask.Priority = Priority;
-    NewTask.RequiredDeliverables = Deliverables;
-    NewTask.EstimatedDuration = 300.0f; // 5 minutes default
-    NewTask.bIsBlocking = (Priority == EDir_AgentPriority::Critical);
+    NewTask.bCompleted = false;
     
-    // Insert based on priority
-    int32 InsertIndex = PendingTasks.Num();
-    for (int32 i = 0; i < PendingTasks.Num(); i++)
+    ActiveTasks.Add(NewTask);
+    
+    // Update agent status
+    UpdateAgentStatus(AgentNumber, TaskDescription, 0.0f);
+    
+    UE_LOG(LogTemp, Log, TEXT("Task assigned to Agent #%d: %s"), AgentNumber, *TaskDescription);
+}
+
+void AStudioDirectorSystem::UpdateAgentStatus(int32 AgentNumber, const FString& CurrentTask, float Completion)
+{
+    for (FDir_AgentStatus& Status : AgentStatuses)
     {
-        if (PendingTasks[i].Priority > Priority)
+        if (Status.AgentNumber == AgentNumber)
         {
-            InsertIndex = i;
+            Status.CurrentTask = CurrentTask;
+            Status.CompletionPercentage = FMath::Clamp(Completion, 0.0f, 100.0f);
+            Status.bActive = (Completion < 100.0f);
             break;
         }
     }
-    
-    PendingTasks.Insert(NewTask, InsertIndex);
-    
-    UE_LOG(LogTemp, Warning, TEXT("Queued task for %s: %s"), *AgentName, *TaskDescription);
-    LogProductionEvent(TEXT("TASK_QUEUED"), FString::Printf(TEXT("%s: %s"), *AgentName, *TaskDescription));
 }
 
-FDir_ProductionMetrics UStudioDirectorSystem::GetProductionMetrics() const
+void AStudioDirectorSystem::CompleteTask(const FString& TaskName)
 {
-    return CurrentMetrics;
-}
-
-void UStudioDirectorSystem::CompleteAgentTask(const FString& AgentName, bool bSuccess)
-{
-    // Find and move task from pending to completed
-    for (int32 i = PendingTasks.Num() - 1; i >= 0; i--)
+    for (FDir_ProductionTask& Task : ActiveTasks)
     {
-        if (PendingTasks[i].AgentName == AgentName)
+        if (Task.TaskName == TaskName)
         {
-            FDir_AgentTask CompletedTask = PendingTasks[i];
-            PendingTasks.RemoveAt(i);
-            CompletedTasks.Add(CompletedTask);
-            
-            UE_LOG(LogTemp, Warning, TEXT("Agent %s completed task: %s"), 
-                   *AgentName, bSuccess ? TEXT("SUCCESS") : TEXT("FAILED"));
-            
-            LogProductionEvent(TEXT("TASK_COMPLETED"), 
-                             FString::Printf(TEXT("%s: %s"), *AgentName, bSuccess ? TEXT("SUCCESS") : TEXT("FAILED")));
+            Task.bCompleted = true;
+            UpdateAgentStatus(Task.AgentNumber, TEXT("Task completed"), 100.0f);
+            UE_LOG(LogTemp, Warning, TEXT("Task completed: %s"), *TaskName);
             break;
         }
     }
-    
-    // Update metrics after task completion
-    UpdateProductionMetrics();
 }
 
-bool UStudioDirectorSystem::IsMinPlayableMapReady() const
+TArray<FDir_ProductionTask> AStudioDirectorSystem::GetPendingTasks() const
 {
-    if (UWorld* World = GetWorld())
+    TArray<FDir_ProductionTask> PendingTasks;
+    
+    for (const FDir_ProductionTask& Task : ActiveTasks)
     {
-        // Check for essential components
-        TArray<AActor*> PlayerStarts;
-        UGameplayStatics::GetAllActorsOfClass(World, APlayerStart::StaticClass(), PlayerStarts);
-        
-        TArray<AActor*> Landscapes;
-        UGameplayStatics::GetAllActorsOfClass(World, ALandscape::StaticClass(), Landscapes);
-        
-        // Minimum requirements for playable map
-        bool bHasPlayerStart = PlayerStarts.Num() > 0;
-        bool bHasLandscape = Landscapes.Num() > 0;
-        bool bHasLighting = World->GetDefaultBrush() != nullptr;
-        
-        return bHasPlayerStart && bHasLandscape && bHasLighting;
+        if (!Task.bCompleted)
+        {
+            PendingTasks.Add(Task);
+        }
     }
     
-    return false;
+    return PendingTasks;
 }
 
-bool UStudioDirectorSystem::ValidateProjectState() const
+FDir_AgentStatus AStudioDirectorSystem::GetAgentStatus(int32 AgentNumber) const
 {
-    if (UWorld* World = GetWorld())
+    for (const FDir_AgentStatus& Status : AgentStatuses)
     {
-        // Check actor count is reasonable
-        TArray<AActor*> AllActors;
-        UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), AllActors);
-        
-        bool bActorCountValid = AllActors.Num() > 0 && AllActors.Num() < 50000; // Reasonable range
-        bool bWorldValid = World->GetName().Contains(TEXT("MinPlayableMap"));
-        
-        return bActorCountValid && bWorldValid;
+        if (Status.AgentNumber == AgentNumber)
+        {
+            return Status;
+        }
     }
     
-    return false;
+    return FDir_AgentStatus(); // Return default if not found
 }
 
-FString UStudioDirectorSystem::GetNextAgent(const FString& CurrentAgent) const
+float AStudioDirectorSystem::GetOverallProgress() const
 {
-    int32 CurrentIndex = AgentChain.Find(CurrentAgent);
-    if (CurrentIndex != INDEX_NONE && CurrentIndex < AgentChain.Num() - 1)
+    if (ActiveTasks.Num() == 0)
     {
-        return AgentChain[CurrentIndex + 1];
+        return 0.0f;
     }
     
-    // Return first agent if at end or not found
-    return AgentChain.Num() > 0 ? AgentChain[0] : TEXT("Engine Architect");
-}
-
-void UStudioDirectorSystem::EmergencyStopProduction(const FString& Reason)
-{
-    UE_LOG(LogTemp, Error, TEXT("EMERGENCY PRODUCTION STOP: %s"), *Reason);
-    
-    // Clear all pending tasks
-    PendingTasks.Empty();
-    
-    // Log emergency stop
-    LogProductionEvent(TEXT("EMERGENCY_STOP"), Reason);
-    
-    // Update metrics to reflect emergency state
-    CurrentMetrics.CompilationErrors = 999;
-    CurrentMetrics.bMinPlayableMapReady = false;
-}
-
-void UStudioDirectorSystem::UpdateProductionMetrics()
-{
-    if (UWorld* World = GetWorld())
+    int32 CompletedTasks = 0;
+    for (const FDir_ProductionTask& Task : ActiveTasks)
     {
-        // Count total actors
-        TArray<AActor*> AllActors;
-        UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), AllActors);
-        CurrentMetrics.TotalActorsInLevel = AllActors.Num();
-        
-        // Update timing
-        CurrentMetrics.CycleExecutionTime = FPlatformTime::Seconds() - CycleStartTime;
-        
-        // Update agent count
-        CurrentMetrics.ActiveAgentCount = PendingTasks.Num();
-        
-        // Check map readiness
-        CurrentMetrics.bMinPlayableMapReady = IsMinPlayableMapReady();
-        
-        // Compilation errors would be set externally
-        // CurrentMetrics.CompilationErrors remains as previously set
+        if (Task.bCompleted)
+        {
+            CompletedTasks++;
+        }
     }
+    
+    return (float)CompletedTasks / (float)ActiveTasks.Num() * 100.0f;
 }
 
-void UStudioDirectorSystem::InitializeAgentChain()
+void AStudioDirectorSystem::SpawnDinosaursInBiomes()
 {
-    AgentChain.Empty();
-    AgentChain.Add(TEXT("Studio Director"));
-    AgentChain.Add(TEXT("Engine Architect"));
-    AgentChain.Add(TEXT("Core Systems Programmer"));
-    AgentChain.Add(TEXT("Performance Optimizer"));
-    AgentChain.Add(TEXT("Procedural World Generator"));
-    AgentChain.Add(TEXT("Environment Artist"));
-    AgentChain.Add(TEXT("Architecture & Interior Agent"));
-    AgentChain.Add(TEXT("Lighting & Atmosphere Agent"));
-    AgentChain.Add(TEXT("Character Artist Agent"));
-    AgentChain.Add(TEXT("Animation Agent"));
-    AgentChain.Add(TEXT("NPC Behavior Agent"));
-    AgentChain.Add(TEXT("Combat & Enemy AI Agent"));
-    AgentChain.Add(TEXT("Crowd & Traffic Simulation"));
-    AgentChain.Add(TEXT("Quest & Mission Designer"));
-    AgentChain.Add(TEXT("Narrative & Dialogue Agent"));
-    AgentChain.Add(TEXT("Audio Agent"));
-    AgentChain.Add(TEXT("VFX Agent"));
-    AgentChain.Add(TEXT("QA & Testing Agent"));
-    AgentChain.Add(TEXT("Integration & Build Agent"));
+    UE_LOG(LogTemp, Warning, TEXT("Spawning dinosaurs in biomes - Studio Director override"));
     
-    UE_LOG(LogTemp, Warning, TEXT("Agent chain initialized with %d agents"), AgentChain.Num());
+    // This function can be called from Blueprint or editor
+    // Implementation would spawn dinosaurs using UE5 Python bridge
 }
 
-void UStudioDirectorSystem::LogProductionEvent(const FString& Event, const FString& Details)
+void AStudioDirectorSystem::ValidateMinPlayableMap()
 {
-    FDateTime Now = FDateTime::Now();
-    FString LogEntry = FString::Printf(TEXT("[%s] %s: %s"), 
-                                      *Now.ToString(TEXT("%H:%M:%S")), 
-                                      *Event, 
-                                      *Details);
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        UE_LOG(LogTemp, Error, TEXT("No valid world found"));
+        return;
+    }
     
-    UE_LOG(LogTemp, Warning, TEXT("PRODUCTION LOG: %s"), *LogEntry);
+    int32 ActorCount = 0;
+    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+    {
+        ActorCount++;
+    }
     
-    // In a full implementation, this would write to a production log file
-    // For now, we use UE_LOG for immediate visibility
+    UE_LOG(LogTemp, Warning, TEXT("MinPlayableMap validation: %d actors found"), ActorCount);
+}
+
+void AStudioDirectorSystem::SetupDefaultTasks()
+{
+    // Priority tasks for playable prototype
+    AssignTaskToAgent(2, TEXT("Define core architecture and compilation rules"), TEXT("Critical"));
+    AssignTaskToAgent(3, TEXT("Implement character movement and physics"), TEXT("Critical"));
+    AssignTaskToAgent(5, TEXT("Generate terrain with height variation"), TEXT("High"));
+    AssignTaskToAgent(9, TEXT("Create playable character with survival stats"), TEXT("Critical"));
+    AssignTaskToAgent(10, TEXT("Add character animations and IK"), TEXT("High"));
+    AssignTaskToAgent(12, TEXT("Implement basic dinosaur AI and combat"), TEXT("High"));
+    AssignTaskToAgent(15, TEXT("Write survival game narrative framework"), TEXT("Medium"));
+    AssignTaskToAgent(16, TEXT("Add ambient sounds and music"), TEXT("Medium"));
+    AssignTaskToAgent(18, TEXT("Test playable prototype"), TEXT("Critical"));
+}
+
+void AStudioDirectorSystem::InitializeAgentStatuses()
+{
+    AgentStatuses.Empty();
+    
+    TArray<FString> AgentNames = {
+        TEXT("Studio Director"),
+        TEXT("Engine Architect"),
+        TEXT("Core Systems Programmer"),
+        TEXT("Performance Optimizer"),
+        TEXT("Procedural World Generator"),
+        TEXT("Environment Artist"),
+        TEXT("Architecture & Interior Agent"),
+        TEXT("Lighting & Atmosphere Agent"),
+        TEXT("Character Artist Agent"),
+        TEXT("Animation Agent"),
+        TEXT("NPC Behavior Agent"),
+        TEXT("Combat & Enemy AI Agent"),
+        TEXT("Crowd & Traffic Simulation"),
+        TEXT("Quest & Mission Designer"),
+        TEXT("Narrative & Dialogue Agent"),
+        TEXT("Audio Agent"),
+        TEXT("VFX Agent"),
+        TEXT("QA & Testing Agent"),
+        TEXT("Integration & Build Agent")
+    };
+    
+    for (int32 i = 0; i < AgentNames.Num(); i++)
+    {
+        FDir_AgentStatus Status;
+        Status.AgentNumber = i + 1;
+        Status.AgentName = AgentNames[i];
+        Status.CurrentTask = TEXT("Waiting for assignment");
+        Status.CompletionPercentage = 0.0f;
+        Status.bActive = false;
+        
+        AgentStatuses.Add(Status);
+    }
 }
