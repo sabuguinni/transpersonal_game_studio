@@ -1,481 +1,282 @@
 #include "Combat_PackHuntingAI.h"
-#include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "GameFramework/Pawn.h"
+#include "Engine/Engine.h"
 #include "Kismet/GameplayStatics.h"
-#include "Kismet/KismetMathLibrary.h"
+#include "GameFramework/Pawn.h"
 #include "DrawDebugHelpers.h"
 
 UCombat_PackHuntingAI::UCombat_PackHuntingAI()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 0.1f;
-
-    // Initialize pack settings
-    bIsPackLeader = false;
-    MyPackRole = ECombat_PackRole::Beta;
-    CurrentHuntPhase = ECombat_HuntPhase::Idle;
     
-    // Hunt parameters
-    FlankingDistance = 800.0f;
-    CoordinationRadius = 1500.0f;
-    AttackSignalDelay = 2.0f;
-    MaxHuntDuration = 60.0f;
-    
-    // Timers
-    HuntStartTime = 0.0f;
+    PackRadius = 2000.0f;
+    HuntingRange = 8000.0f;
+    CurrentTarget = nullptr;
+    bIsHunting = false;
+    bIsAlpha = false;
     LastCoordinationUpdate = 0.0f;
-    PositionUpdateInterval = 1.0f;
-    
-    AssignedHuntPosition = FVector::ZeroVector;
+    CoordinationInterval = 2.0f;
 }
 
 void UCombat_PackHuntingAI::BeginPlay()
 {
     Super::BeginPlay();
     
-    UE_LOG(LogTemp, Log, TEXT("Combat_PackHuntingAI: Component initialized for %s"), 
-           GetOwner() ? *GetOwner()->GetName() : TEXT("Unknown"));
+    InitializePack();
+    
+    if (GetOwner())
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Pack Hunting AI initialized for: %s"), *GetOwner()->GetName());
+    }
 }
 
 void UCombat_PackHuntingAI::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
-    if (!GetOwner())
-        return;
+    if (!GetOwner()) return;
 
-    // Update hunt phases and coordination
-    UpdateHuntPhase(DeltaTime);
-    
-    if (bIsPackLeader)
-    {
-        UpdatePackCoordination(DeltaTime);
-        CleanupInvalidMembers();
-    }
-    
-    UpdateTargetTracking(DeltaTime);
-    ExecuteRoleBasedBehavior(DeltaTime);
-}
-
-void UCombat_PackHuntingAI::InitializeAsPackLeader()
-{
-    bIsPackLeader = true;
-    MyPackRole = ECombat_PackRole::Alpha;
-    PackLeaderRef = nullptr;
-    
-    UE_LOG(LogTemp, Log, TEXT("Combat_PackHuntingAI: %s initialized as pack leader"), 
-           GetOwner() ? *GetOwner()->GetName() : TEXT("Unknown"));
-}
-
-void UCombat_PackHuntingAI::JoinPack(UCombat_PackHuntingAI* PackLeader, ECombat_PackRole AssignedRole)
-{
-    if (!PackLeader || !PackLeader->IsValidLowLevel())
-        return;
-
-    bIsPackLeader = false;
-    MyPackRole = AssignedRole;
-    PackLeaderRef = PackLeader;
-    
-    // Clear any existing pack members if we were a leader
-    PackMembers.Empty();
-    
-    UE_LOG(LogTemp, Log, TEXT("Combat_PackHuntingAI: %s joined pack with role %d"), 
-           GetOwner() ? *GetOwner()->GetName() : TEXT("Unknown"), (int32)AssignedRole);
-}
-
-void UCombat_PackHuntingAI::AddPackMember(APawn* NewMember, ECombat_PackRole Role)
-{
-    if (!bIsPackLeader || !NewMember || !NewMember->IsValidLowLevel())
-        return;
-
-    // Check if member already exists
-    for (const FCombat_PackMember& Member : PackMembers)
-    {
-        if (Member.MemberPawn.Get() == NewMember)
-            return;
-    }
-
-    FCombat_PackMember NewPackMember;
-    NewPackMember.MemberPawn = NewMember;
-    NewPackMember.Role = Role;
-    NewPackMember.AssignedPosition = FVector::ZeroVector;
-    NewPackMember.DistanceFromTarget = 0.0f;
-    NewPackMember.bInPosition = false;
-
-    PackMembers.Add(NewPackMember);
-    
-    UE_LOG(LogTemp, Log, TEXT("Combat_PackHuntingAI: Added pack member %s with role %d"), 
-           *NewMember->GetName(), (int32)Role);
-}
-
-void UCombat_PackHuntingAI::RemovePackMember(APawn* Member)
-{
-    if (!bIsPackLeader || !Member)
-        return;
-
-    PackMembers.RemoveAll([Member](const FCombat_PackMember& PackMember)
-    {
-        return PackMember.MemberPawn.Get() == Member;
-    });
-    
-    UE_LOG(LogTemp, Log, TEXT("Combat_PackHuntingAI: Removed pack member %s"), *Member->GetName());
-}
-
-void UCombat_PackHuntingAI::SetHuntTarget(APawn* Target)
-{
-    if (!Target || !Target->IsValidLowLevel())
-        return;
-
-    CurrentTarget.TargetPawn = Target;
-    CurrentTarget.LastKnownPosition = Target->GetActorLocation();
-    CurrentTarget.ThreatLevel = 1.0f;
-    CurrentTarget.TimeSinceLastSeen = 0.0f;
-    CurrentTarget.bIsValidTarget = true;
-    
-    if (CurrentHuntPhase == ECombat_HuntPhase::Idle)
-    {
-        HandlePhaseTransition(ECombat_HuntPhase::Stalking);
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("Combat_PackHuntingAI: Hunt target set to %s"), *Target->GetName());
-}
-
-void UCombat_PackHuntingAI::ClearHuntTarget()
-{
-    CurrentTarget.TargetPawn = nullptr;
-    CurrentTarget.bIsValidTarget = false;
-    HandlePhaseTransition(ECombat_HuntPhase::Idle);
-    
-    UE_LOG(LogTemp, Log, TEXT("Combat_PackHuntingAI: Hunt target cleared"));
-}
-
-APawn* UCombat_PackHuntingAI::GetCurrentTarget() const
-{
-    return CurrentTarget.TargetPawn.Get();
-}
-
-void UCombat_PackHuntingAI::StartCoordinatedHunt()
-{
-    if (!bIsPackLeader || !CurrentTarget.bIsValidTarget)
-        return;
-
-    HandlePhaseTransition(ECombat_HuntPhase::Positioning);
-    CalculatePackPositions();
-    BroadcastToPackMembers(TEXT("COORDINATE_HUNT"));
-    
-    HuntStartTime = GetWorld()->GetTimeSeconds();
-    
-    UE_LOG(LogTemp, Log, TEXT("Combat_PackHuntingAI: Coordinated hunt started"));
-}
-
-void UCombat_PackHuntingAI::ExecutePackAttack()
-{
-    if (!bIsPackLeader || CurrentHuntPhase != ECombat_HuntPhase::Positioning)
-        return;
-
-    if (!IsPackInPosition())
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Combat_PackHuntingAI: Pack not in position for attack"));
-        return;
-    }
-
-    HandlePhaseTransition(ECombat_HuntPhase::Coordinated);
-    BroadcastToPackMembers(TEXT("EXECUTE_ATTACK"));
-    
-    UE_LOG(LogTemp, Log, TEXT("Combat_PackHuntingAI: Pack attack executed"));
-}
-
-void UCombat_PackHuntingAI::OrderRetreat()
-{
-    HandlePhaseTransition(ECombat_HuntPhase::Retreat);
-    BroadcastToPackMembers(TEXT("RETREAT"));
-    
-    UE_LOG(LogTemp, Log, TEXT("Combat_PackHuntingAI: Retreat ordered"));
-}
-
-FVector UCombat_PackHuntingAI::CalculateFlankingPosition(ECombat_PackRole Role, const FVector& TargetLocation)
-{
-    if (!GetOwner())
-        return FVector::ZeroVector;
-
-    FVector OwnerLocation = GetOwner()->GetActorLocation();
-    FVector DirectionToTarget = (TargetLocation - OwnerLocation).GetSafeNormal();
-    
-    float AngleOffset = 0.0f;
-    float DistanceMultiplier = 1.0f;
-    
-    switch (Role)
-    {
-        case ECombat_PackRole::Alpha:
-            AngleOffset = 0.0f;
-            DistanceMultiplier = 0.8f;
-            break;
-        case ECombat_PackRole::Beta:
-            AngleOffset = 120.0f;
-            DistanceMultiplier = 1.0f;
-            break;
-        case ECombat_PackRole::Gamma:
-            AngleOffset = -120.0f;
-            DistanceMultiplier = 1.0f;
-            break;
-        case ECombat_PackRole::Scout:
-            AngleOffset = 180.0f;
-            DistanceMultiplier = 1.5f;
-            break;
-        case ECombat_PackRole::Ambusher:
-            AngleOffset = 60.0f;
-            DistanceMultiplier = 1.2f;
-            break;
-    }
-    
-    // Calculate flanking position
-    FVector FlankDirection = DirectionToTarget.RotateAngleAxis(AngleOffset, FVector::UpVector);
-    FVector FlankPosition = TargetLocation + (FlankDirection * FlankingDistance * DistanceMultiplier);
-    
-    return FlankPosition;
-}
-
-bool UCombat_PackHuntingAI::IsPackInPosition() const
-{
-    if (!bIsPackLeader)
-        return true;
-
-    for (const FCombat_PackMember& Member : PackMembers)
-    {
-        if (!Member.bInPosition)
-            return false;
-    }
-    
-    return true;
-}
-
-void UCombat_PackHuntingAI::BroadcastToPackMembers(const FString& Command)
-{
-    if (!bIsPackLeader)
-        return;
-
-    for (const FCombat_PackMember& Member : PackMembers)
-    {
-        if (APawn* MemberPawn = Member.MemberPawn.Get())
-        {
-            if (UCombat_PackHuntingAI* MemberAI = MemberPawn->FindComponentByClass<UCombat_PackHuntingAI>())
-            {
-                MemberAI->ReceivePackCommand(Command, this);
-            }
-        }
-    }
-}
-
-void UCombat_PackHuntingAI::ReceivePackCommand(const FString& Command, UCombat_PackHuntingAI* Sender)
-{
-    if (bIsPackLeader || !Sender)
-        return;
-
-    if (Command == TEXT("COORDINATE_HUNT"))
-    {
-        HandlePhaseTransition(ECombat_HuntPhase::Positioning);
-        if (CurrentTarget.bIsValidTarget)
-        {
-            AssignedHuntPosition = CalculateFlankingPosition(MyPackRole, CurrentTarget.LastKnownPosition);
-        }
-    }
-    else if (Command == TEXT("EXECUTE_ATTACK"))
-    {
-        HandlePhaseTransition(ECombat_HuntPhase::Coordinated);
-    }
-    else if (Command == TEXT("RETREAT"))
-    {
-        HandlePhaseTransition(ECombat_HuntPhase::Retreat);
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("Combat_PackHuntingAI: %s received command: %s"), 
-           GetOwner() ? *GetOwner()->GetName() : TEXT("Unknown"), *Command);
-}
-
-void UCombat_PackHuntingAI::UpdateHuntPhase(float DeltaTime)
-{
     float CurrentTime = GetWorld()->GetTimeSeconds();
     
-    switch (CurrentHuntPhase)
+    // Update pack coordination
+    if (CurrentTime - LastCoordinationUpdate >= CoordinationInterval)
     {
-        case ECombat_HuntPhase::Stalking:
-            if (bIsPackLeader && PackMembers.Num() > 0)
+        if (bIsAlpha)
+        {
+            if (!CurrentTarget)
             {
-                StartCoordinatedHunt();
+                CurrentTarget = FindNearestThreat();
             }
-            break;
             
-        case ECombat_HuntPhase::Positioning:
-            if (bIsPackLeader && IsPackInPosition())
+            if (CurrentTarget)
             {
-                if (CurrentTime - HuntStartTime > AttackSignalDelay)
+                if (!bIsHunting)
                 {
-                    ExecutePackAttack();
+                    StartHunt(CurrentTarget);
+                }
+                ExecutePackTactics();
+            }
+        }
+        
+        UpdatePackFormation();
+        LastCoordinationUpdate = CurrentTime;
+    }
+}
+
+void UCombat_PackHuntingAI::InitializePack()
+{
+    // Check if this is the alpha (first spawned or designated leader)
+    if (GetOwner() && GetOwner()->GetName().Contains("Pack_1"))
+    {
+        bIsAlpha = true;
+        UE_LOG(LogTemp, Warning, TEXT("Pack Alpha initialized: %s"), *GetOwner()->GetName());
+    }
+    
+    // Find nearby pack members
+    if (bIsAlpha)
+    {
+        TArray<AActor*> FoundActors;
+        UGameplayStatics::GetAllActorsOfClass(GetWorld(), APawn::StaticClass(), FoundActors);
+        
+        for (AActor* Actor : FoundActors)
+        {
+            if (Actor == GetOwner()) continue;
+            
+            if (Actor->GetName().Contains("Velociraptor_Pack"))
+            {
+                float Distance = FVector::Dist(GetOwner()->GetActorLocation(), Actor->GetActorLocation());
+                if (Distance <= PackRadius)
+                {
+                    ECombat_PackRole Role = ECombat_PackRole::Hunter;
+                    if (Actor->GetName().Contains("Pack_2"))
+                    {
+                        Role = ECombat_PackRole::Flanker;
+                    }
+                    else if (Actor->GetName().Contains("Pack_3"))
+                    {
+                        Role = ECombat_PackRole::Scout;
+                    }
+                    
+                    AddPackMember(Actor, Role);
                 }
             }
-            break;
-            
-        case ECombat_HuntPhase::Coordinated:
-            if (CurrentTime - HuntStartTime > MaxHuntDuration)
-            {
-                OrderRetreat();
-            }
-            break;
-            
-        case ECombat_HuntPhase::Retreat:
-            if (CurrentTime - HuntStartTime > 10.0f)
-            {
-                HandlePhaseTransition(ECombat_HuntPhase::Idle);
-            }
-            break;
-    }
-}
-
-void UCombat_PackHuntingAI::UpdatePackCoordination(float DeltaTime)
-{
-    if (!bIsPackLeader)
-        return;
-
-    float CurrentTime = GetWorld()->GetTimeSeconds();
-    if (CurrentTime - LastCoordinationUpdate < PositionUpdateInterval)
-        return;
-
-    LastCoordinationUpdate = CurrentTime;
-    
-    // Update pack member positions and status
-    for (FCombat_PackMember& Member : PackMembers)
-    {
-        if (APawn* MemberPawn = Member.MemberPawn.Get())
-        {
-            FVector MemberLocation = MemberPawn->GetActorLocation();
-            Member.DistanceFromTarget = FVector::Dist(MemberLocation, Member.AssignedPosition);
-            Member.bInPosition = Member.DistanceFromTarget < 200.0f;
         }
     }
 }
 
-void UCombat_PackHuntingAI::UpdateTargetTracking(float DeltaTime)
+void UCombat_PackHuntingAI::AddPackMember(AActor* NewMember, ECombat_PackRole Role)
 {
-    if (!CurrentTarget.bIsValidTarget)
-        return;
-
-    if (APawn* Target = CurrentTarget.TargetPawn.Get())
-    {
-        CurrentTarget.LastKnownPosition = Target->GetActorLocation();
-        CurrentTarget.TimeSinceLastSeen = 0.0f;
-    }
-    else
-    {
-        CurrentTarget.TimeSinceLastSeen += DeltaTime;
-        if (CurrentTarget.TimeSinceLastSeen > 10.0f)
-        {
-            ClearHuntTarget();
-        }
-    }
-}
-
-void UCombat_PackHuntingAI::CalculatePackPositions()
-{
-    if (!bIsPackLeader || !CurrentTarget.bIsValidTarget)
-        return;
-
-    FVector TargetLocation = CurrentTarget.LastKnownPosition;
+    if (!NewMember) return;
     
-    for (FCombat_PackMember& Member : PackMembers)
-    {
-        Member.AssignedPosition = CalculateFlankingPosition(Member.Role, TargetLocation);
-        Member.bInPosition = false;
-    }
-}
-
-bool UCombat_PackHuntingAI::ValidateTarget()
-{
-    if (!CurrentTarget.bIsValidTarget)
-        return false;
-
-    APawn* Target = CurrentTarget.TargetPawn.Get();
-    if (!Target || !Target->IsValidLowLevel())
-    {
-        CurrentTarget.bIsValidTarget = false;
-        return false;
-    }
-
-    return true;
-}
-
-void UCombat_PackHuntingAI::HandlePhaseTransition(ECombat_HuntPhase NewPhase)
-{
-    if (CurrentHuntPhase == NewPhase)
-        return;
-
-    ECombat_HuntPhase OldPhase = CurrentHuntPhase;
-    CurrentHuntPhase = NewPhase;
+    FCombat_PackMember Member;
+    Member.Member = NewMember;
+    Member.Role = Role;
+    Member.bIsActive = true;
+    Member.AssignedPosition = NewMember->GetActorLocation();
     
-    UE_LOG(LogTemp, Log, TEXT("Combat_PackHuntingAI: Phase transition %d -> %d"), 
-           (int32)OldPhase, (int32)NewPhase);
-}
-
-void UCombat_PackHuntingAI::ExecuteRoleBasedBehavior(float DeltaTime)
-{
-    if (!GetOwner())
-        return;
-
-    switch (MyPackRole)
-    {
-        case ECombat_PackRole::Alpha:
-            // Alpha leads and makes decisions
-            if (bIsPackLeader && CurrentHuntPhase == ECombat_HuntPhase::Stalking)
-            {
-                // Look for opportunities to start coordinated hunt
-            }
-            break;
-            
-        case ECombat_PackRole::Beta:
-        case ECombat_PackRole::Gamma:
-            // Flankers move to assigned positions
-            if (CurrentHuntPhase == ECombat_HuntPhase::Positioning && AssignedHuntPosition != FVector::ZeroVector)
-            {
-                // Move towards assigned position (would integrate with movement system)
-            }
-            break;
-            
-        case ECombat_PackRole::Scout:
-            // Scout maintains distance and watches for threats
-            break;
-            
-        case ECombat_PackRole::Ambusher:
-            // Ambusher waits for optimal strike moment
-            break;
-    }
-}
-
-FVector UCombat_PackHuntingAI::GetOptimalAttackVector() const
-{
-    if (!CurrentTarget.bIsValidTarget || !GetOwner())
-        return FVector::ZeroVector;
-
-    FVector OwnerLocation = GetOwner()->GetActorLocation();
-    FVector TargetLocation = CurrentTarget.LastKnownPosition;
+    PackMembers.Add(Member);
     
-    return (TargetLocation - OwnerLocation).GetSafeNormal();
+    UE_LOG(LogTemp, Log, TEXT("Pack member added: %s with role %d"), *NewMember->GetName(), (int32)Role);
 }
 
-bool UCombat_PackHuntingAI::CanExecuteCoordinatedAttack() const
+void UCombat_PackHuntingAI::RemovePackMember(AActor* Member)
 {
-    return bIsPackLeader && 
-           CurrentHuntPhase == ECombat_HuntPhase::Positioning && 
-           IsPackInPosition() && 
-           CurrentTarget.bIsValidTarget;
-}
-
-void UCombat_PackHuntingAI::CleanupInvalidMembers()
-{
-    if (!bIsPackLeader)
-        return;
-
-    PackMembers.RemoveAll([](const FCombat_PackMember& Member)
-    {
-        return !Member.MemberPawn.IsValid() || !Member.MemberPawn.Get();
+    PackMembers.RemoveAll([Member](const FCombat_PackMember& PackMember) {
+        return PackMember.Member == Member;
     });
+}
+
+void UCombat_PackHuntingAI::StartHunt(AActor* Target)
+{
+    if (!Target || !bIsAlpha) return;
+    
+    CurrentTarget = Target;
+    bIsHunting = true;
+    
+    AssignFlankingPositions();
+    SendPackCommand("HUNT_START");
+    
+    UE_LOG(LogTemp, Warning, TEXT("Pack hunt started on target: %s"), *Target->GetName());
+}
+
+void UCombat_PackHuntingAI::ExecutePackTactics()
+{
+    if (!CurrentTarget || !bIsAlpha) return;
+    
+    FVector TargetLocation = CurrentTarget->GetActorLocation();
+    FVector AlphaLocation = GetOwner()->GetActorLocation();
+    
+    // Alpha approaches directly
+    FVector DirectionToTarget = (TargetLocation - AlphaLocation).GetSafeNormal();
+    FVector NewAlphaPos = AlphaLocation + DirectionToTarget * 150.0f * GetWorld()->GetDeltaSeconds();
+    GetOwner()->SetActorLocation(NewAlphaPos);
+    
+    // Coordinate pack member positions
+    for (int32 i = 0; i < PackMembers.Num(); i++)
+    {
+        FCombat_PackMember& Member = PackMembers[i];
+        if (!Member.Member || !Member.bIsActive) continue;
+        
+        FVector MemberLocation = Member.Member->GetActorLocation();
+        FVector TargetDirection = (TargetLocation - MemberLocation).GetSafeNormal();
+        
+        switch (Member.Role)
+        {
+            case ECombat_PackRole::Flanker:
+            {
+                // Circle around target
+                float Angle = FMath::Sin(GetWorld()->GetTimeSeconds() * 2.0f) * 90.0f;
+                FVector FlankDirection = TargetDirection.RotateAngleAxis(Angle, FVector::UpVector);
+                FVector FlankPos = TargetLocation + FlankDirection * 1200.0f;
+                Member.AssignedPosition = FlankPos;
+                break;
+            }
+            case ECombat_PackRole::Scout:
+            {
+                // Maintain distance and observe
+                FVector ScoutPos = TargetLocation + TargetDirection * -1500.0f;
+                Member.AssignedPosition = ScoutPos;
+                break;
+            }
+            default:
+            {
+                // Hunter - support alpha
+                FVector HunterPos = TargetLocation + TargetDirection * -800.0f;
+                Member.AssignedPosition = HunterPos;
+                break;
+            }
+        }
+        
+        // Move towards assigned position
+        FVector MoveDirection = (Member.AssignedPosition - MemberLocation).GetSafeNormal();
+        FVector NewPos = MemberLocation + MoveDirection * 200.0f * GetWorld()->GetDeltaSeconds();
+        Member.Member->SetActorLocation(NewPos);
+    }
+}
+
+void UCombat_PackHuntingAI::AssignFlankingPositions()
+{
+    if (!CurrentTarget) return;
+    
+    FVector TargetLocation = CurrentTarget->GetActorLocation();
+    
+    for (FCombat_PackMember& Member : PackMembers)
+    {
+        if (!Member.Member) continue;
+        
+        switch (Member.Role)
+        {
+            case ECombat_PackRole::Flanker:
+                Member.AssignedPosition = TargetLocation + FVector(1000, 1000, 0);
+                break;
+            case ECombat_PackRole::Scout:
+                Member.AssignedPosition = TargetLocation + FVector(-1500, 0, 0);
+                break;
+            default:
+                Member.AssignedPosition = TargetLocation + FVector(500, -500, 0);
+                break;
+        }
+    }
+}
+
+void UCombat_PackHuntingAI::CoordinateAttack()
+{
+    if (!bIsHunting || !CurrentTarget) return;
+    
+    // Simultaneous attack coordination
+    SendPackCommand("ATTACK_NOW");
+    
+    for (FCombat_PackMember& Member : PackMembers)
+    {
+        if (Member.Member && Member.bIsActive)
+        {
+            // Execute attack behavior
+            UE_LOG(LogTemp, Log, TEXT("Pack member %s executing coordinated attack"), *Member.Member->GetName());
+        }
+    }
+}
+
+AActor* UCombat_PackHuntingAI::FindNearestThreat()
+{
+    if (!GetOwner()) return nullptr;
+    
+    TArray<AActor*> FoundActors;
+    UGameplayStatics::GetAllActorsOfClass(GetWorld(), APawn::StaticClass(), FoundActors);
+    
+    AActor* NearestThreat = nullptr;
+    float NearestDistance = HuntingRange;
+    
+    for (AActor* Actor : FoundActors)
+    {
+        if (Actor == GetOwner()) continue;
+        
+        // Look for player character
+        if (Actor->GetName().Contains("Character"))
+        {
+            float Distance = FVector::Dist(GetOwner()->GetActorLocation(), Actor->GetActorLocation());
+            if (Distance < NearestDistance)
+            {
+                NearestDistance = Distance;
+                NearestThreat = Actor;
+            }
+        }
+    }
+    
+    return NearestThreat;
+}
+
+void UCombat_PackHuntingAI::UpdatePackFormation()
+{
+    // Remove inactive members
+    PackMembers.RemoveAll([](const FCombat_PackMember& Member) {
+        return !Member.Member || !IsValid(Member.Member);
+    });
+}
+
+void UCombat_PackHuntingAI::SendPackCommand(const FString& Command)
+{
+    UE_LOG(LogTemp, Log, TEXT("Pack Command: %s"), *Command);
+    
+    // In a full implementation, this would send signals to other pack members
+    // For now, it's logged for debugging
 }
