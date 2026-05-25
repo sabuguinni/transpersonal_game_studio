@@ -3,291 +3,234 @@
 #include "Engine/World.h"
 #include "TimerManager.h"
 #include "HAL/PlatformApplicationMisc.h"
+#include "RenderingThread.h"
 #include "Stats/Stats.h"
 
 UPerf_FrameRateManager::UPerf_FrameRateManager()
-    : bIsMonitoring(false)
-    , TargetFrameRate(60.0f)
-    , bDynamicQualityAdjustment(true)
-    , MonitoringInterval(0.1f)
-    , UltraThreshold(60.0f)
-    , HighThreshold(45.0f)
-    , MediumThreshold(30.0f)
-    , LowThreshold(20.0f)
 {
-    FrameRateHistory.Reserve(100); // Reserve space for 10 seconds of data at 0.1s intervals
+    CurrentTarget = EPerf_PerformanceTarget::PC_Ultra;
+    bIsMonitoring = false;
+    MonitoringDuration = 0.0f;
+    FrameCount = 0;
+    TotalFrameTime = 0.0f;
+    LastFrameTime = 0.0f;
+    
+    // Reserve space for frame history
+    FrameTimeHistory.Reserve(300); // 5 seconds at 60fps
 }
 
 void UPerf_FrameRateManager::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
     
-    UE_LOG(LogTemp, Log, TEXT("Perf_FrameRateManager initialized"));
+    UE_LOG(LogTemp, Log, TEXT("Performance Frame Rate Manager initialized"));
     
-    // Start monitoring automatically
-    StartFrameRateMonitoring();
+    // Set initial performance target based on platform
+    #if PLATFORM_WINDOWS || PLATFORM_MAC || PLATFORM_LINUX
+        SetPerformanceTarget(EPerf_PerformanceTarget::PC_Ultra);
+    #else
+        SetPerformanceTarget(EPerf_PerformanceTarget::Console);
+    #endif
+    
+    // Start monitoring by default
+    StartFrameMonitoring();
 }
 
 void UPerf_FrameRateManager::Deinitialize()
 {
-    StopFrameRateMonitoring();
+    StopFrameMonitoring();
     Super::Deinitialize();
 }
 
-void UPerf_FrameRateManager::StartFrameRateMonitoring()
+void UPerf_FrameRateManager::SetPerformanceTarget(EPerf_PerformanceTarget Target)
+{
+    CurrentTarget = Target;
+    
+    // Apply target-specific settings
+    float TargetFPS = GetTargetFPS();
+    
+    if (GEngine)
+    {
+        // Set max FPS
+        GEngine->SetMaxFPS(TargetFPS);
+        
+        // Configure VSync based on target
+        bool bUseVSync = (Target == EPerf_PerformanceTarget::PC_Ultra);
+        EnableVSync(bUseVSync);
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("Performance target set to %d (%.1f FPS)"), 
+           static_cast<int32>(Target), TargetFPS);
+}
+
+float UPerf_FrameRateManager::GetTargetFPS() const
+{
+    switch (CurrentTarget)
+    {
+        case EPerf_PerformanceTarget::PC_Ultra:
+            return 60.0f;
+        case EPerf_PerformanceTarget::PC_High:
+            return 45.0f;
+        case EPerf_PerformanceTarget::Console:
+            return 30.0f;
+        case EPerf_PerformanceTarget::Mobile:
+            return 24.0f;
+        default:
+            return 60.0f;
+    }
+}
+
+void UPerf_FrameRateManager::StartFrameMonitoring()
 {
     if (bIsMonitoring)
     {
         return;
     }
-
-    bIsMonitoring = true;
     
+    bIsMonitoring = true;
+    ResetMetrics();
+    
+    // Start timer for regular updates
     if (UWorld* World = GetWorld())
     {
         World->GetTimerManager().SetTimer(
-            MonitoringTimerHandle,
+            MonitoringTimer,
             this,
-            &UPerf_FrameRateManager::UpdateFrameRateData,
-            MonitoringInterval,
+            &UPerf_FrameRateManager::OnFrameTick,
+            0.1f, // Update every 100ms
             true
         );
-        
-        UE_LOG(LogTemp, Log, TEXT("Frame rate monitoring started"));
     }
+    
+    UE_LOG(LogTemp, Log, TEXT("Frame rate monitoring started"));
 }
 
-void UPerf_FrameRateManager::StopFrameRateMonitoring()
+void UPerf_FrameRateManager::StopFrameMonitoring()
 {
     if (!bIsMonitoring)
     {
         return;
     }
-
+    
     bIsMonitoring = false;
     
     if (UWorld* World = GetWorld())
     {
-        World->GetTimerManager().ClearTimer(MonitoringTimerHandle);
-        UE_LOG(LogTemp, Log, TEXT("Frame rate monitoring stopped"));
+        World->GetTimerManager().ClearTimer(MonitoringTimer);
     }
-}
-
-FPerf_FrameRateData UPerf_FrameRateManager::GetCurrentFrameRateData() const
-{
-    return CurrentFrameData;
-}
-
-EPerf_PerformanceLevel UPerf_FrameRateManager::GetCurrentPerformanceLevel() const
-{
-    return CurrentFrameData.PerformanceLevel;
-}
-
-void UPerf_FrameRateManager::SetTargetFrameRate(float TargetFPS)
-{
-    TargetFrameRate = FMath::Clamp(TargetFPS, 15.0f, 120.0f);
-    UE_LOG(LogTemp, Log, TEXT("Target frame rate set to: %.1f FPS"), TargetFrameRate);
-}
-
-void UPerf_FrameRateManager::EnableDynamicQualityAdjustment(bool bEnable)
-{
-    bDynamicQualityAdjustment = bEnable;
-    UE_LOG(LogTemp, Log, TEXT("Dynamic quality adjustment: %s"), bEnable ? TEXT("Enabled") : TEXT("Disabled"));
-}
-
-void UPerf_FrameRateManager::ForceQualityLevel(EPerf_PerformanceLevel Level)
-{
-    // Disable dynamic adjustment when forcing a specific level
-    bDynamicQualityAdjustment = false;
-    CurrentFrameData.PerformanceLevel = Level;
     
-    UE_LOG(LogTemp, Log, TEXT("Quality level forced to: %d"), (int32)Level);
+    UE_LOG(LogTemp, Log, TEXT("Frame rate monitoring stopped"));
 }
 
-void UPerf_FrameRateManager::SetPerformanceThresholds(float UltraFPS, float HighFPS, float MediumFPS, float LowFPS)
+void UPerf_FrameRateManager::ResetMetrics()
 {
-    UltraThreshold = UltraFPS;
-    HighThreshold = HighFPS;
-    MediumThreshold = MediumFPS;
-    LowThreshold = LowFPS;
-    
-    UE_LOG(LogTemp, Log, TEXT("Performance thresholds updated: Ultra=%.1f, High=%.1f, Medium=%.1f, Low=%.1f"), 
-           UltraFPS, HighFPS, MediumFPS, LowFPS);
+    CurrentMetrics = FPerf_FrameMetrics();
+    FrameTimeHistory.Empty();
+    FrameCount = 0;
+    TotalFrameTime = 0.0f;
+    MonitoringDuration = 0.0f;
 }
 
-void UPerf_FrameRateManager::ShowPerformanceStats()
-{
-    if (GEngine)
-    {
-        FString StatsMessage = FString::Printf(
-            TEXT("=== PERFORMANCE STATS ===\nCurrent FPS: %.1f\nAverage FPS: %.1f\nMin FPS: %.1f\nMax FPS: %.1f\nFrame Time: %.2fms\nPerformance Level: %d"),
-            CurrentFrameData.CurrentFPS,
-            CurrentFrameData.AverageFPS,
-            CurrentFrameData.MinFPS,
-            CurrentFrameData.MaxFPS,
-            CurrentFrameData.FrameTime,
-            (int32)CurrentFrameData.PerformanceLevel
-        );
-        
-        GEngine->AddOnScreenDebugMessage(-1, 10.0f, FColor::Yellow, StatsMessage);
-        UE_LOG(LogTemp, Warning, TEXT("%s"), *StatsMessage);
-    }
-}
-
-void UPerf_FrameRateManager::ResetFrameRateStats()
-{
-    FrameRateHistory.Empty();
-    CurrentFrameData = FPerf_FrameRateData();
-    UE_LOG(LogTemp, Log, TEXT("Frame rate statistics reset"));
-}
-
-void UPerf_FrameRateManager::UpdateFrameRateData()
+void UPerf_FrameRateManager::OnFrameTick()
 {
     if (!bIsMonitoring)
     {
         return;
     }
-
-    // Get current frame rate
-    float DeltaTime = GetWorld()->GetDeltaSeconds();
-    if (DeltaTime > 0.0f)
-    {
-        CurrentFrameData.CurrentFPS = 1.0f / DeltaTime;
-        CurrentFrameData.FrameTime = DeltaTime * 1000.0f; // Convert to milliseconds
-    }
     
-    // Add to history
-    FrameRateHistory.Add(CurrentFrameData.CurrentFPS);
-    
-    // Keep only last 100 samples (10 seconds at 0.1s intervals)
-    if (FrameRateHistory.Num() > 100)
-    {
-        FrameRateHistory.RemoveAt(0);
-    }
-    
-    // Calculate statistics
-    CalculateAverageFrameRate();
-    
-    // Update performance level
-    CurrentFrameData.PerformanceLevel = DeterminePerformanceLevel(CurrentFrameData.CurrentFPS);
-    
-    // Adjust quality if enabled
-    if (bDynamicQualityAdjustment)
-    {
-        AdjustQualityBasedOnPerformance();
-    }
-    
-    // Log performance data periodically
-    static int32 LogCounter = 0;
-    if (++LogCounter >= 50) // Log every 5 seconds
-    {
-        LogPerformanceData();
-        LogCounter = 0;
-    }
+    UpdateMetrics();
 }
 
-void UPerf_FrameRateManager::CalculateAverageFrameRate()
+void UPerf_FrameRateManager::UpdateMetrics()
 {
-    if (FrameRateHistory.Num() == 0)
+    if (!GEngine)
     {
         return;
     }
     
-    float Sum = 0.0f;
-    float Min = FrameRateHistory[0];
-    float Max = FrameRateHistory[0];
+    // Get current frame time
+    float CurrentFrameTime = FApp::GetDeltaTime();
     
-    for (float FPS : FrameRateHistory)
+    if (CurrentFrameTime > 0.0f)
     {
-        Sum += FPS;
-        Min = FMath::Min(Min, FPS);
-        Max = FMath::Max(Max, FPS);
-    }
-    
-    CurrentFrameData.AverageFPS = Sum / FrameRateHistory.Num();
-    CurrentFrameData.MinFPS = Min;
-    CurrentFrameData.MaxFPS = Max;
-}
-
-EPerf_PerformanceLevel UPerf_FrameRateManager::DeterminePerformanceLevel(float FPS) const
-{
-    if (FPS >= UltraThreshold)
-    {
-        return EPerf_PerformanceLevel::Ultra;
-    }
-    else if (FPS >= HighThreshold)
-    {
-        return EPerf_PerformanceLevel::High;
-    }
-    else if (FPS >= MediumThreshold)
-    {
-        return EPerf_PerformanceLevel::Medium;
-    }
-    else if (FPS >= LowThreshold)
-    {
-        return EPerf_PerformanceLevel::Low;
-    }
-    else
-    {
-        return EPerf_PerformanceLevel::Critical;
-    }
-}
-
-void UPerf_FrameRateManager::AdjustQualityBasedOnPerformance()
-{
-    static EPerf_PerformanceLevel LastLevel = EPerf_PerformanceLevel::Ultra;
-    EPerf_PerformanceLevel CurrentLevel = CurrentFrameData.PerformanceLevel;
-    
-    // Only adjust if performance level has changed
-    if (CurrentLevel != LastLevel)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Performance level changed from %d to %d - adjusting quality"), 
-               (int32)LastLevel, (int32)CurrentLevel);
+        // Calculate current FPS
+        CurrentMetrics.CurrentFPS = 1.0f / CurrentFrameTime;
+        CurrentMetrics.FrameTime = CurrentFrameTime * 1000.0f; // Convert to milliseconds
         
-        // Apply quality adjustments based on performance level
-        if (UWorld* World = GetWorld())
+        // Update history
+        FrameTimeHistory.Add(CurrentFrameTime);
+        if (FrameTimeHistory.Num() > 300) // Keep last 5 seconds at 60fps
         {
-            switch (CurrentLevel)
-            {
-                case EPerf_PerformanceLevel::Critical:
-                    // Aggressive optimizations
-                    World->Exec(World, TEXT("r.ViewDistanceScale 0.5"));
-                    World->Exec(World, TEXT("r.SkeletalMeshLODBias 2"));
-                    World->Exec(World, TEXT("r.StaticMeshLODBias 2"));
-                    break;
-                    
-                case EPerf_PerformanceLevel::Low:
-                    World->Exec(World, TEXT("r.ViewDistanceScale 0.7"));
-                    World->Exec(World, TEXT("r.SkeletalMeshLODBias 1"));
-                    World->Exec(World, TEXT("r.StaticMeshLODBias 1"));
-                    break;
-                    
-                case EPerf_PerformanceLevel::Medium:
-                    World->Exec(World, TEXT("r.ViewDistanceScale 0.85"));
-                    World->Exec(World, TEXT("r.SkeletalMeshLODBias 0"));
-                    World->Exec(World, TEXT("r.StaticMeshLODBias 0"));
-                    break;
-                    
-                case EPerf_PerformanceLevel::High:
-                case EPerf_PerformanceLevel::Ultra:
-                    World->Exec(World, TEXT("r.ViewDistanceScale 1.0"));
-                    World->Exec(World, TEXT("r.SkeletalMeshLODBias -1"));
-                    World->Exec(World, TEXT("r.StaticMeshLODBias -1"));
-                    break;
-            }
+            FrameTimeHistory.RemoveAt(0);
         }
         
-        LastLevel = CurrentLevel;
+        // Update min/max
+        if (CurrentMetrics.CurrentFPS < CurrentMetrics.MinFPS)
+        {
+            CurrentMetrics.MinFPS = CurrentMetrics.CurrentFPS;
+        }
+        if (CurrentMetrics.CurrentFPS > CurrentMetrics.MaxFPS)
+        {
+            CurrentMetrics.MaxFPS = CurrentMetrics.CurrentFPS;
+        }
+        
+        // Calculate average
+        CurrentMetrics.AverageFPS = CalculateAverageFPS();
+        
+        // Count dropped frames (frames below target)
+        float TargetFPS = GetTargetFPS();
+        if (CurrentMetrics.CurrentFPS < TargetFPS * 0.9f) // 10% tolerance
+        {
+            CurrentMetrics.DroppedFrames++;
+        }
+        
+        FrameCount++;
+        TotalFrameTime += CurrentFrameTime;
+        MonitoringDuration += CurrentFrameTime;
     }
 }
 
-void UPerf_FrameRateManager::LogPerformanceData() const
+float UPerf_FrameRateManager::CalculateAverageFPS() const
 {
-    UE_LOG(LogTemp, Log, TEXT("Performance Monitor - FPS: %.1f (Avg: %.1f, Min: %.1f, Max: %.1f) | Level: %d | Frame Time: %.2fms"),
-           CurrentFrameData.CurrentFPS,
-           CurrentFrameData.AverageFPS,
-           CurrentFrameData.MinFPS,
-           CurrentFrameData.MaxFPS,
-           (int32)CurrentFrameData.PerformanceLevel,
-           CurrentFrameData.FrameTime);
+    if (FrameTimeHistory.Num() == 0)
+    {
+        return 0.0f;
+    }
+    
+    float TotalTime = 0.0f;
+    for (float FrameTime : FrameTimeHistory)
+    {
+        TotalTime += FrameTime;
+    }
+    
+    return FrameTimeHistory.Num() / TotalTime;
+}
+
+bool UPerf_FrameRateManager::IsPerformanceAcceptable() const
+{
+    float TargetFPS = GetTargetFPS();
+    float Tolerance = TargetFPS * 0.1f; // 10% tolerance
+    
+    return CurrentMetrics.AverageFPS >= (TargetFPS - Tolerance);
+}
+
+void UPerf_FrameRateManager::EnableVSync(bool bEnable)
+{
+    if (GEngine)
+    {
+        // Set VSync via console command
+        FString Command = FString::Printf(TEXT("r.VSync %d"), bEnable ? 1 : 0);
+        GEngine->Exec(GetWorld(), *Command);
+        
+        UE_LOG(LogTemp, Log, TEXT("VSync %s"), bEnable ? TEXT("enabled") : TEXT("disabled"));
+    }
+}
+
+void UPerf_FrameRateManager::SetMaxFPS(int32 MaxFPS)
+{
+    if (GEngine)
+    {
+        GEngine->SetMaxFPS(static_cast<float>(MaxFPS));
+        UE_LOG(LogTemp, Log, TEXT("Max FPS set to %d"), MaxFPS);
+    }
 }
