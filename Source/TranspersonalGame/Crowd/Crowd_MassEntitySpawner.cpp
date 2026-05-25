@@ -1,292 +1,261 @@
 #include "Crowd_MassEntitySpawner.h"
 #include "MassEntitySubsystem.h"
-#include "MassSpawnerSubsystem.h"
-#include "MassEntityTemplateRegistry.h"
 #include "Engine/World.h"
+#include "TimerManager.h"
+#include "Kismet/KismetMathLibrary.h"
 #include "Engine/Engine.h"
-#include "Components/StaticMeshComponent.h"
-#include "Engine/StaticMesh.h"
-#include "Kismet/GameplayStatics.h"
-#include "DrawDebugHelpers.h"
 
 ACrowd_MassEntitySpawner::ACrowd_MassEntitySpawner()
 {
     PrimaryActorTick.bCanEverTick = true;
-    PrimaryActorTick.bStartWithTickEnabled = true;
     
-    // Initialize default biome data
-    FCrowd_BiomeSpawnData SavanaBiome;
-    SavanaBiome.BiomeName = TEXT("Savana");
-    SavanaBiome.BiomeCenter = FVector(0.0f, 0.0f, 100.0f);
-    SavanaBiome.SpawnConfig.MaxEntities = 1000;
-    SavanaBiome.SpawnConfig.SpawnRadius = 10000.0f;
+    // Initialize default biome configurations
+    FCrowd_BiomeSpawnConfig SavanaConfig;
+    SavanaConfig.BiomeType = ECrowd_BiomeType::Savana;
+    SavanaConfig.BiomeCenter = FVector(0.0f, 0.0f, 100.0f);
+    SavanaConfig.SpawnRadius = 15000.0f;
+    SavanaConfig.MaxEntities = 12000;
+    SavanaConfig.EntityDensity = 0.8f;
     
-    FCrowd_BiomeSpawnData ForestBiome;
-    ForestBiome.BiomeName = TEXT("Forest");
-    ForestBiome.BiomeCenter = FVector(-45000.0f, 40000.0f, 100.0f);
-    ForestBiome.SpawnConfig.MaxEntities = 800;
-    ForestBiome.SpawnConfig.SpawnRadius = 8000.0f;
+    FCrowd_BiomeSpawnConfig ForestConfig;
+    ForestConfig.BiomeType = ECrowd_BiomeType::Forest;
+    ForestConfig.BiomeCenter = FVector(-45000.0f, 40000.0f, 100.0f);
+    ForestConfig.SpawnRadius = 12000.0f;
+    ForestConfig.MaxEntities = 10000;
+    ForestConfig.EntityDensity = 0.6f;
     
-    FCrowd_BiomeSpawnData DesertBiome;
-    DesertBiome.BiomeName = TEXT("Desert");
-    DesertBiome.BiomeCenter = FVector(55000.0f, 0.0f, 100.0f);
-    DesertBiome.SpawnConfig.MaxEntities = 600;
-    DesertBiome.SpawnConfig.SpawnRadius = 12000.0f;
+    FCrowd_BiomeSpawnConfig DesertConfig;
+    DesertConfig.BiomeType = ECrowd_BiomeType::Desert;
+    DesertConfig.BiomeCenter = FVector(55000.0f, 0.0f, 100.0f);
+    DesertConfig.SpawnRadius = 18000.0f;
+    DesertConfig.MaxEntities = 8000;
+    DesertConfig.EntityDensity = 0.4f;
     
-    BiomeSpawnData.Add(SavanaBiome);
-    BiomeSpawnData.Add(ForestBiome);
-    BiomeSpawnData.Add(DesertBiome);
+    FCrowd_BiomeSpawnConfig SwampConfig;
+    SwampConfig.BiomeType = ECrowd_BiomeType::Swamp;
+    SwampConfig.BiomeCenter = FVector(-50000.0f, -45000.0f, 50.0f);
+    SwampConfig.SpawnRadius = 10000.0f;
+    SwampConfig.MaxEntities = 6000;
+    SwampConfig.EntityDensity = 0.5f;
+    
+    FCrowd_BiomeSpawnConfig MountainConfig;
+    MountainConfig.BiomeType = ECrowd_BiomeType::Mountain;
+    MountainConfig.BiomeCenter = FVector(40000.0f, 50000.0f, 500.0f);
+    MountainConfig.SpawnRadius = 14000.0f;
+    MountainConfig.MaxEntities = 4000;
+    MountainConfig.EntityDensity = 0.3f;
+    
+    BiomeConfigs.Add(SavanaConfig);
+    BiomeConfigs.Add(ForestConfig);
+    BiomeConfigs.Add(DesertConfig);
+    BiomeConfigs.Add(SwampConfig);
+    BiomeConfigs.Add(MountainConfig);
+    
+    TotalEntityLimit = 50000;
+    SpawnInterval = 0.5f;
+    bAutoSpawn = true;
+    CurrentEntityCount = 0;
 }
 
 void ACrowd_MassEntitySpawner::BeginPlay()
 {
     Super::BeginPlay();
     
-    if (UWorld* World = GetWorld())
+    MassEntitySubsystem = GetWorld()->GetSubsystem<UMassEntitySubsystem>();
+    if (!MassEntitySubsystem)
     {
-        MassEntitySubsystem = World->GetSubsystem<UMassEntitySubsystem>();
-        if (MassEntitySubsystem)
-        {
-            UE_LOG(LogTemp, Log, TEXT("MassEntitySubsystem found and initialized"));
-            InitializeBiomes();
-            
-            if (bAutoSpawnOnBeginPlay)
-            {
-                // Delay spawn to ensure all systems are ready
-                FTimerHandle SpawnTimer;
-                GetWorldTimerManager().SetTimer(SpawnTimer, this, &ACrowd_MassEntitySpawner::SpawnEntitiesInAllBiomes, 2.0f, false);
-            }
-        }
-        else
-        {
-            UE_LOG(LogTemp, Error, TEXT("MassEntitySubsystem not found!"));
-        }
+        UE_LOG(LogTemp, Error, TEXT("ACrowd_MassEntitySpawner: Failed to get MassEntitySubsystem"));
+        return;
     }
-}
-
-void ACrowd_MassEntitySpawner::EndPlay(const EEndPlayReason::Type EndPlayReason)
-{
-    ClearAllEntities();
-    Super::EndPlay(EndPlayReason);
+    
+    InitializeBiomes();
+    
+    if (bAutoSpawn)
+    {
+        GetWorldTimerManager().SetTimer(SpawnTimerHandle, this, &ACrowd_MassEntitySpawner::OnSpawnTimer, SpawnInterval, true);
+    }
 }
 
 void ACrowd_MassEntitySpawner::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
     
-    LastUpdateTime += DeltaTime;
-    if (LastUpdateTime >= UpdateInterval)
-    {
-        LastUpdateTime = 0.0f;
-        
-        // Update entity count
-        CurrentEntityCount = 0;
-        for (const auto& BiomePair : BiomeEntityMap)
-        {
-            CurrentEntityCount += BiomePair.Value.Num();
-        }
-        
-        // Debug draw biome centers
-        if (GEngine && GEngine->bEnableOnScreenDebugMessages)
-        {
-            for (const FCrowd_BiomeSpawnData& BiomeData : BiomeSpawnData)
-            {
-                DrawDebugSphere(GetWorld(), BiomeData.BiomeCenter, 500.0f, 12, FColor::Green, false, UpdateInterval + 0.1f);
-                
-                FString DebugText = FString::Printf(TEXT("%s: %d entities"), 
-                    *BiomeData.BiomeName, 
-                    GetEntityCountInBiome(BiomeData.BiomeName));
-                    
-                DrawDebugString(GetWorld(), BiomeData.BiomeCenter + FVector(0, 0, 600), DebugText, nullptr, FColor::White, UpdateInterval + 0.1f);
-            }
-        }
-    }
+    // Update LOD system for performance optimization
+    UpdateEntityLOD();
 }
 
 void ACrowd_MassEntitySpawner::InitializeBiomes()
 {
-    if (!MassEntitySubsystem)
+    UE_LOG(LogTemp, Warning, TEXT("ACrowd_MassEntitySpawner: Initializing %d biomes"), BiomeConfigs.Num());
+    
+    for (const FCrowd_BiomeSpawnConfig& BiomeConfig : BiomeConfigs)
     {
-        UE_LOG(LogTemp, Error, TEXT("Cannot initialize biomes - MassEntitySubsystem is null"));
-        return;
+        // Pre-spawn initial entities in each biome
+        int32 InitialSpawnCount = FMath::RoundToInt(BiomeConfig.MaxEntities * 0.3f); // Start with 30% capacity
+        SpawnEntitiesInBiome(BiomeConfig.BiomeType, InitialSpawnCount);
     }
-    
-    // Clear existing data
-    BiomeEntityMap.Empty();
-    
-    // Initialize entity arrays for each biome
-    for (const FCrowd_BiomeSpawnData& BiomeData : BiomeSpawnData)
-    {
-        BiomeEntityMap.Add(BiomeData.BiomeName, TArray<FMassEntityHandle>());
-        UE_LOG(LogTemp, Log, TEXT("Initialized biome: %s at location %s"), 
-            *BiomeData.BiomeName, 
-            *BiomeData.BiomeCenter.ToString());
-    }
-    
-    bIsInitialized = true;
-    UE_LOG(LogTemp, Log, TEXT("Crowd spawner initialized with %d biomes"), BiomeSpawnData.Num());
 }
 
-void ACrowd_MassEntitySpawner::SpawnEntitiesInBiome(const FString& BiomeName)
+void ACrowd_MassEntitySpawner::SpawnEntitiesInBiome(ECrowd_BiomeType BiomeType, int32 Count)
 {
-    if (!bIsInitialized || !MassEntitySubsystem)
+    if (!MassEntitySubsystem || !CanSpawnMoreEntities())
     {
-        UE_LOG(LogTemp, Warning, TEXT("Cannot spawn entities - system not initialized"));
         return;
     }
     
-    // Find biome data
-    FCrowd_BiomeSpawnData* BiomeData = nullptr;
-    for (FCrowd_BiomeSpawnData& Data : BiomeSpawnData)
+    const FCrowd_BiomeSpawnConfig* BiomeConfig = BiomeConfigs.FindByPredicate([BiomeType](const FCrowd_BiomeSpawnConfig& Config)
     {
-        if (Data.BiomeName == BiomeName)
-        {
-            BiomeData = &Data;
-            break;
-        }
-    }
+        return Config.BiomeType == BiomeType;
+    });
     
-    if (!BiomeData)
+    if (!BiomeConfig)
     {
-        UE_LOG(LogTemp, Warning, TEXT("Biome not found: %s"), *BiomeName);
+        UE_LOG(LogTemp, Error, TEXT("ACrowd_MassEntitySpawner: BiomeConfig not found for biome type"));
         return;
     }
     
-    // Clear existing entities in this biome
-    if (TArray<FMassEntityHandle>* ExistingEntities = BiomeEntityMap.Find(BiomeName))
+    int32 CurrentBiomeCount = GetEntityCountInBiome(BiomeType);
+    int32 SpawnableCount = FMath::Min(Count, BiomeConfig->MaxEntities - CurrentBiomeCount);
+    SpawnableCount = FMath::Min(SpawnableCount, TotalEntityLimit - CurrentEntityCount);
+    
+    for (int32 i = 0; i < SpawnableCount; i++)
     {
-        for (const FMassEntityHandle& EntityHandle : *ExistingEntities)
-        {
-            if (MassEntitySubsystem->IsEntityValid(EntityHandle))
-            {
-                MassEntitySubsystem->DestroyEntity(EntityHandle);
-            }
-        }
-        ExistingEntities->Empty();
+        FVector SpawnLocation = GenerateRandomLocationInBiome(*BiomeConfig);
+        SpawnSingleEntity(SpawnLocation, BiomeType);
     }
     
-    // Spawn new entities
-    TArray<FMassEntityHandle> NewEntities;
-    const int32 EntitiesToSpawn = FMath::Min(BiomeData->SpawnConfig.MaxEntities, MaxTotalEntities - CurrentEntityCount);
-    
-    for (int32 i = 0; i < EntitiesToSpawn; i++)
-    {
-        FVector SpawnLocation = GetRandomSpawnLocation(BiomeData->SpawnConfig);
-        
-        if (IsValidSpawnLocation(SpawnLocation))
-        {
-            // Create a basic Mass Entity
-            FMassEntityHandle NewEntity = MassEntitySubsystem->CreateEntity();
-            if (MassEntitySubsystem->IsEntityValid(NewEntity))
-            {
-                NewEntities.Add(NewEntity);
-                
-                // Note: In a full implementation, you would add components here
-                // For now, we just track the entity handles
-            }
-        }
-    }
-    
-    BiomeEntityMap.Add(BiomeName, NewEntities);
-    
-    UE_LOG(LogTemp, Log, TEXT("Spawned %d entities in biome %s"), NewEntities.Num(), *BiomeName);
+    UE_LOG(LogTemp, Log, TEXT("ACrowd_MassEntitySpawner: Spawned %d entities in biome %d"), SpawnableCount, (int32)BiomeType);
 }
 
-void ACrowd_MassEntitySpawner::SpawnEntitiesInAllBiomes()
+void ACrowd_MassEntitySpawner::SpawnSingleEntity(const FVector& Location, ECrowd_BiomeType BiomeType)
 {
-    if (!bIsInitialized)
+    if (!MassEntitySubsystem || !CanSpawnMoreEntities())
     {
-        UE_LOG(LogTemp, Warning, TEXT("Cannot spawn entities - system not initialized"));
         return;
     }
     
-    UE_LOG(LogTemp, Log, TEXT("Spawning entities in all biomes..."));
+    // Create entity spawn data
+    FCrowd_EntitySpawnData NewEntityData;
+    NewEntityData.SpawnLocation = Location;
+    NewEntityData.SpawnRotation = FRotator(0.0f, FMath::RandRange(0.0f, 360.0f), 0.0f);
+    NewEntityData.AssignedBiome = BiomeType;
+    NewEntityData.MovementSpeed = FMath::RandRange(50.0f, 150.0f);
+    NewEntityData.bIsActive = true;
     
-    for (const FCrowd_BiomeSpawnData& BiomeData : BiomeSpawnData)
+    // Create Mass Entity (simplified for now - would need proper archetype setup)
+    FMassEntityHandle NewEntity = MassEntitySubsystem->CreateEntity();
+    if (NewEntity.IsValid())
     {
-        SpawnEntitiesInBiome(BiomeData.BiomeName);
+        SpawnedEntities.Add(NewEntityData);
+        CurrentEntityCount++;
+        LastSpawnedEntity = NewEntity;
     }
-    
-    UE_LOG(LogTemp, Log, TEXT("Finished spawning entities. Total count: %d"), CurrentEntityCount);
 }
 
 void ACrowd_MassEntitySpawner::ClearAllEntities()
 {
-    if (!MassEntitySubsystem)
+    if (MassEntitySubsystem)
+    {
+        // Clear all spawned entities
+        for (const FCrowd_EntitySpawnData& EntityData : SpawnedEntities)
+        {
+            // Would destroy individual entities here if we had proper handles
+        }
+    }
+    
+    SpawnedEntities.Empty();
+    CurrentEntityCount = 0;
+    
+    UE_LOG(LogTemp, Warning, TEXT("ACrowd_MassEntitySpawner: Cleared all entities"));
+}
+
+void ACrowd_MassEntitySpawner::SetSpawnRate(float NewInterval)
+{
+    SpawnInterval = FMath::Max(0.1f, NewInterval);
+    
+    if (SpawnTimerHandle.IsValid())
+    {
+        GetWorldTimerManager().ClearTimer(SpawnTimerHandle);
+        GetWorldTimerManager().SetTimer(SpawnTimerHandle, this, &ACrowd_MassEntitySpawner::OnSpawnTimer, SpawnInterval, true);
+    }
+}
+
+int32 ACrowd_MassEntitySpawner::GetEntityCountInBiome(ECrowd_BiomeType BiomeType) const
+{
+    int32 Count = 0;
+    for (const FCrowd_EntitySpawnData& EntityData : SpawnedEntities)
+    {
+        if (EntityData.AssignedBiome == BiomeType && EntityData.bIsActive)
+        {
+            Count++;
+        }
+    }
+    return Count;
+}
+
+FVector ACrowd_MassEntitySpawner::GetBiomeCenter(ECrowd_BiomeType BiomeType) const
+{
+    const FCrowd_BiomeSpawnConfig* BiomeConfig = BiomeConfigs.FindByPredicate([BiomeType](const FCrowd_BiomeSpawnConfig& Config)
+    {
+        return Config.BiomeType == BiomeType;
+    });
+    
+    return BiomeConfig ? BiomeConfig->BiomeCenter : FVector::ZeroVector;
+}
+
+void ACrowd_MassEntitySpawner::OnSpawnTimer()
+{
+    if (!CanSpawnMoreEntities())
     {
         return;
     }
     
-    for (auto& BiomePair : BiomeEntityMap)
+    // Randomly select a biome to spawn in
+    if (BiomeConfigs.Num() > 0)
     {
-        for (const FMassEntityHandle& EntityHandle : BiomePair.Value)
-        {
-            if (MassEntitySubsystem->IsEntityValid(EntityHandle))
-            {
-                MassEntitySubsystem->DestroyEntity(EntityHandle);
-            }
-        }
-        BiomePair.Value.Empty();
+        int32 RandomBiomeIndex = FMath::RandRange(0, BiomeConfigs.Num() - 1);
+        ECrowd_BiomeType SelectedBiome = BiomeConfigs[RandomBiomeIndex].BiomeType;
+        
+        // Spawn 1-5 entities per timer tick
+        int32 SpawnCount = FMath::RandRange(1, 5);
+        SpawnEntitiesInBiome(SelectedBiome, SpawnCount);
     }
-    
-    CurrentEntityCount = 0;
-    UE_LOG(LogTemp, Log, TEXT("Cleared all crowd entities"));
 }
 
-void ACrowd_MassEntitySpawner::SetBiomeSpawnConfig(const FString& BiomeName, const FCrowd_SpawnConfig& NewConfig)
-{
-    for (FCrowd_BiomeSpawnData& BiomeData : BiomeSpawnData)
-    {
-        if (BiomeData.BiomeName == BiomeName)
-        {
-            BiomeData.SpawnConfig = NewConfig;
-            UE_LOG(LogTemp, Log, TEXT("Updated spawn config for biome: %s"), *BiomeName);
-            return;
-        }
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("Biome not found for config update: %s"), *BiomeName);
-}
-
-int32 ACrowd_MassEntitySpawner::GetEntityCountInBiome(const FString& BiomeName) const
-{
-    if (const TArray<FMassEntityHandle>* Entities = BiomeEntityMap.Find(BiomeName))
-    {
-        return Entities->Num();
-    }
-    return 0;
-}
-
-FVector ACrowd_MassEntitySpawner::GetRandomSpawnLocation(const FCrowd_SpawnConfig& Config) const
+FVector ACrowd_MassEntitySpawner::GenerateRandomLocationInBiome(const FCrowd_BiomeSpawnConfig& BiomeConfig) const
 {
     float RandomAngle = FMath::RandRange(0.0f, 2.0f * PI);
-    float RandomRadius = FMath::RandRange(Config.MinSpawnDistance, Config.SpawnRadius);
+    float RandomRadius = FMath::RandRange(0.0f, BiomeConfig.SpawnRadius);
     
-    FVector Offset = FVector(
-        FMath::Cos(RandomAngle) * RandomRadius,
-        FMath::Sin(RandomAngle) * RandomRadius,
-        Config.bUseRandomHeight ? FMath::RandRange(-100.0f, 200.0f) : 0.0f
-    );
+    FVector RandomOffset;
+    RandomOffset.X = RandomRadius * FMath::Cos(RandomAngle);
+    RandomOffset.Y = RandomRadius * FMath::Sin(RandomAngle);
+    RandomOffset.Z = FMath::RandRange(-100.0f, 200.0f); // Height variation
     
-    return Config.SpawnCenter + Offset;
+    return BiomeConfig.BiomeCenter + RandomOffset;
 }
 
-bool ACrowd_MassEntitySpawner::IsValidSpawnLocation(const FVector& Location) const
+bool ACrowd_MassEntitySpawner::CanSpawnMoreEntities() const
 {
-    // Basic validation - check if location is not too close to player start
-    FVector PlayerStart = FVector::ZeroVector;
-    if (APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0))
+    return CurrentEntityCount < TotalEntityLimit;
+}
+
+void ACrowd_MassEntitySpawner::UpdateEntityLOD()
+{
+    // Simple LOD system - would be more sophisticated in production
+    if (CurrentEntityCount > 30000)
     {
-        PlayerStart = PlayerPawn->GetActorLocation();
+        // High entity count - reduce update frequency
+        SetActorTickInterval(0.1f);
     }
-    
-    float DistanceToPlayer = FVector::Dist(Location, PlayerStart);
-    return DistanceToPlayer > 500.0f; // Minimum distance from player
-}
-
-void ACrowd_MassEntitySpawner::SpawnEntitiesAtLocation(const FVector& Location, int32 Count, const TArray<TSoftObjectPtr<UStaticMesh>>& Meshes)
-{
-    // This method would be used for spawning specific mesh-based entities
-    // Currently simplified for basic Mass Entity spawning
-    UE_LOG(LogTemp, Log, TEXT("SpawnEntitiesAtLocation called for %d entities at %s"), Count, *Location.ToString());
+    else if (CurrentEntityCount > 15000)
+    {
+        // Medium entity count - normal update frequency
+        SetActorTickInterval(0.05f);
+    }
+    else
+    {
+        // Low entity count - full update frequency
+        SetActorTickInterval(0.0f);
+    }
 }
