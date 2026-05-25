@@ -1,22 +1,23 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/GameInstanceSubsystem.h"
 #include "Engine/World.h"
+#include "Engine/Engine.h"
+#include "GameFramework/GameModeBase.h"
+#include "Subsystems/GameInstanceSubsystem.h"
 #include "Perf_FrameRateManager.generated.h"
 
 UENUM(BlueprintType)
-enum class EPerf_PerformanceLevel : uint8
+enum class EPerf_PerformanceTarget : uint8
 {
-    Ultra     UMETA(DisplayName = "Ultra (60+ FPS)"),
-    High      UMETA(DisplayName = "High (45-60 FPS)"),
-    Medium    UMETA(DisplayName = "Medium (30-45 FPS)"),
-    Low       UMETA(DisplayName = "Low (20-30 FPS)"),
-    Critical  UMETA(DisplayName = "Critical (<20 FPS)")
+    PC_Ultra = 0    UMETA(DisplayName = "PC Ultra (60 FPS)"),
+    PC_High = 1     UMETA(DisplayName = "PC High (45 FPS)"),
+    Console = 2     UMETA(DisplayName = "Console (30 FPS)"),
+    Mobile = 3      UMETA(DisplayName = "Mobile (24 FPS)")
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FPerf_FrameRateData
+struct TRANSPERSONALGAME_API FPerf_FrameMetrics
 {
     GENERATED_BODY()
 
@@ -33,27 +34,20 @@ struct TRANSPERSONALGAME_API FPerf_FrameRateData
     float MaxFPS;
 
     UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    EPerf_PerformanceLevel PerformanceLevel;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
     float FrameTime;
 
     UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float GameThreadTime;
+    int32 DroppedFrames;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float RenderThreadTime;
-
-    FPerf_FrameRateData()
-        : CurrentFPS(60.0f)
-        , AverageFPS(60.0f)
-        , MinFPS(60.0f)
-        , MaxFPS(60.0f)
-        , PerformanceLevel(EPerf_PerformanceLevel::Ultra)
-        , FrameTime(16.67f)
-        , GameThreadTime(8.0f)
-        , RenderThreadTime(8.0f)
-    {}
+    FPerf_FrameMetrics()
+    {
+        CurrentFPS = 0.0f;
+        AverageFPS = 0.0f;
+        MinFPS = 999.0f;
+        MaxFPS = 0.0f;
+        FrameTime = 0.0f;
+        DroppedFrames = 0;
+    }
 };
 
 UCLASS(BlueprintType, Blueprintable)
@@ -68,74 +62,66 @@ public:
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
-    // Frame rate monitoring
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    void StartFrameRateMonitoring();
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void StopFrameRateMonitoring();
+    void SetPerformanceTarget(EPerf_PerformanceTarget Target);
 
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    FPerf_FrameRateData GetCurrentFrameRateData() const;
+    EPerf_PerformanceTarget GetPerformanceTarget() const { return CurrentTarget; }
 
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    EPerf_PerformanceLevel GetCurrentPerformanceLevel() const;
-
-    // Dynamic quality adjustment
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void SetTargetFrameRate(float TargetFPS);
+    FPerf_FrameMetrics GetCurrentMetrics() const { return CurrentMetrics; }
 
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    void EnableDynamicQualityAdjustment(bool bEnable);
+    void StartFrameMonitoring();
 
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    void ForceQualityLevel(EPerf_PerformanceLevel Level);
+    void StopFrameMonitoring();
 
-    // Performance thresholds
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    void SetPerformanceThresholds(float UltraFPS, float HighFPS, float MediumFPS, float LowFPS);
+    bool IsMonitoring() const { return bIsMonitoring; }
 
-    // Console commands
-    UFUNCTION(CallInEditor, Category = "Performance")
-    void ShowPerformanceStats();
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void ResetMetrics();
 
-    UFUNCTION(CallInEditor, Category = "Performance")
-    void ResetFrameRateStats();
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    float GetTargetFPS() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    bool IsPerformanceAcceptable() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void EnableVSync(bool bEnable);
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void SetMaxFPS(int32 MaxFPS);
 
 protected:
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance")
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    EPerf_PerformanceTarget CurrentTarget;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    FPerf_FrameMetrics CurrentMetrics;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
     bool bIsMonitoring;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance")
-    float TargetFrameRate;
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float MonitoringDuration;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance")
-    bool bDynamicQualityAdjustment;
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    int32 FrameCount;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance")
-    float MonitoringInterval;
-
-    // Performance thresholds
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Thresholds")
-    float UltraThreshold;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Thresholds")
-    float HighThreshold;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Thresholds")
-    float MediumThreshold;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Thresholds")
-    float LowThreshold;
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float TotalFrameTime;
 
 private:
-    FPerf_FrameRateData CurrentFrameData;
-    TArray<float> FrameRateHistory;
-    FTimerHandle MonitoringTimerHandle;
-    
-    void UpdateFrameRateData();
-    void CalculateAverageFrameRate();
-    EPerf_PerformanceLevel DeterminePerformanceLevel(float FPS) const;
-    void AdjustQualityBasedOnPerformance();
-    void LogPerformanceData() const;
+    FTimerHandle MonitoringTimer;
+    TArray<float> FrameTimeHistory;
+    float LastFrameTime;
+
+    void UpdateMetrics();
+    void OnFrameTick();
+    float CalculateAverageFPS() const;
 };
+
+#include "Perf_FrameRateManager.generated.h"
