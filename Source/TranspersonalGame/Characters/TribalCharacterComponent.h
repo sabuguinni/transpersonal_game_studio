@@ -2,82 +2,93 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
-#include "Engine/Engine.h"
+#include "Engine/DataTable.h"
+#include "Materials/MaterialInterface.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "../SharedTypes.h"
 #include "TribalCharacterComponent.generated.h"
 
 UENUM(BlueprintType)
-enum class EChar_TribalRole : uint8
-{
-    Hunter      UMETA(DisplayName = "Hunter"),
-    Gatherer    UMETA(DisplayName = "Gatherer"),
-    Shaman      UMETA(DisplayName = "Shaman"),
-    Warrior     UMETA(DisplayName = "Warrior"),
-    Elder       UMETA(DisplayName = "Elder"),
-    Child       UMETA(DisplayName = "Child")
-};
-
-UENUM(BlueprintType)
 enum class EChar_SkinTone : uint8
 {
-    Light       UMETA(DisplayName = "Light"),
-    Medium      UMETA(DisplayName = "Medium"),
-    Dark        UMETA(DisplayName = "Dark"),
-    Bronze      UMETA(DisplayName = "Bronze"),
-    Weathered   UMETA(DisplayName = "Weathered")
+    PaleTanned      UMETA(DisplayName = "Pale Tanned"),
+    MediumTanned    UMETA(DisplayName = "Medium Tanned"),
+    DarkTanned      UMETA(DisplayName = "Dark Tanned"),
+    WeatheredBronze UMETA(DisplayName = "Weathered Bronze"),
+    DeepBronze      UMETA(DisplayName = "Deep Bronze")
 };
 
 UENUM(BlueprintType)
-enum class EChar_BodyBuild : uint8
+enum class EChar_BodyType : uint8
 {
-    Lean        UMETA(DisplayName = "Lean"),
-    Muscular    UMETA(DisplayName = "Muscular"),
-    Stocky      UMETA(DisplayName = "Stocky"),
-    Elderly     UMETA(DisplayName = "Elderly"),
-    Child       UMETA(DisplayName = "Child")
+    Lean        UMETA(DisplayName = "Lean Hunter"),
+    Athletic    UMETA(DisplayName = "Athletic Survivor"),
+    Muscular    UMETA(DisplayName = "Muscular Warrior"),
+    Stocky      UMETA(DisplayName = "Stocky Gatherer"),
+    Weathered   UMETA(DisplayName = "Weathered Elder")
+};
+
+UENUM(BlueprintType)
+enum class EChar_ClothingStyle : uint8
+{
+    Minimal     UMETA(DisplayName = "Minimal Hide"),
+    Hunter      UMETA(DisplayName = "Hunter Garb"),
+    Gatherer    UMETA(DisplayName = "Gatherer Wraps"),
+    Warrior     UMETA(DisplayName = "Warrior Armor"),
+    Shaman      UMETA(DisplayName = "Ritual Garments")
+};
+
+UENUM(BlueprintType)
+enum class EChar_TribalMarking : uint8
+{
+    None        UMETA(DisplayName = "No Markings"),
+    Dots        UMETA(DisplayName = "Dot Patterns"),
+    Lines       UMETA(DisplayName = "Line Patterns"),
+    Spirals     UMETA(DisplayName = "Spiral Designs"),
+    Animals     UMETA(DisplayName = "Animal Symbols"),
+    Handprints  UMETA(DisplayName = "Handprint Marks")
 };
 
 USTRUCT(BlueprintType)
-struct FChar_TribalAppearance
+struct FChar_AppearanceData
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
-    EChar_SkinTone SkinTone = EChar_SkinTone::Medium;
+    EChar_SkinTone SkinTone = EChar_SkinTone::MediumTanned;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
-    EChar_BodyBuild BodyBuild = EChar_BodyBuild::Muscular;
+    EChar_BodyType BodyType = EChar_BodyType::Athletic;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
-    FLinearColor SkinColor = FLinearColor(0.8f, 0.6f, 0.4f, 1.0f);
+    EChar_ClothingStyle ClothingStyle = EChar_ClothingStyle::Hunter;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
-    bool bHasTribalScars = true;
+    EChar_TribalMarking TribalMarking = EChar_TribalMarking::None;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float ScarIntensity = 0.3f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float WeatheringIntensity = 0.5f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float MuscleDefinition = 0.7f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
-    bool bHasBoneJewelry = true;
+    FLinearColor TribalMarkingColor = FLinearColor(0.8f, 0.3f, 0.1f, 1.0f);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
-    bool bHasFeathers = false;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
-    float MuscleMass = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
-    float Age = 25.0f;
-
-    FChar_TribalAppearance()
+    FChar_AppearanceData()
     {
-        SkinTone = EChar_SkinTone::Medium;
-        BodyBuild = EChar_BodyBuild::Muscular;
-        SkinColor = FLinearColor(0.8f, 0.6f, 0.4f, 1.0f);
-        bHasTribalScars = true;
-        bHasBoneJewelry = true;
-        bHasFeathers = false;
-        MuscleMass = 1.0f;
-        Age = 25.0f;
+        SkinTone = EChar_SkinTone::MediumTanned;
+        BodyType = EChar_BodyType::Athletic;
+        ClothingStyle = EChar_ClothingStyle::Hunter;
+        TribalMarking = EChar_TribalMarking::None;
+        ScarIntensity = 0.3f;
+        WeatheringIntensity = 0.5f;
+        MuscleDefinition = 0.7f;
+        TribalMarkingColor = FLinearColor(0.8f, 0.3f, 0.1f, 1.0f);
     }
 };
 
@@ -92,71 +103,56 @@ public:
 protected:
     virtual void BeginPlay() override;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Appearance")
+    FChar_AppearanceData AppearanceData;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Materials")
+    TObjectPtr<UMaterialInterface> BaseSkinMaterial;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Materials")
+    TObjectPtr<UMaterialInterface> BaseClothingMaterial;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Materials", meta = (AllowPrivateAccess = "true"))
+    TObjectPtr<UMaterialInstanceDynamic> DynamicSkinMaterial;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Materials", meta = (AllowPrivateAccess = "true"))
+    TObjectPtr<UMaterialInstanceDynamic> DynamicClothingMaterial;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mesh")
+    TObjectPtr<USkeletalMeshComponent> CharacterMesh;
+
 public:
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+    UFUNCTION(BlueprintCallable, Category = "Character Appearance")
+    void ApplyAppearance(const FChar_AppearanceData& NewAppearance);
 
-    // Character appearance and role
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
-    EChar_TribalRole TribalRole = EChar_TribalRole::Hunter;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
-    FChar_TribalAppearance Appearance;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
-    FString CharacterName = TEXT("Tribal Hunter");
-
-    // Character stats
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
-    float Strength = 75.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
-    float Agility = 60.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
-    float Wisdom = 45.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
-    float SurvivalSkill = 80.0f;
-
-    // Equipment and tools
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Equipment")
-    TArray<FString> EquippedTools;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Equipment")
-    FString PrimaryWeapon = TEXT("Stone Spear");
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Equipment")
-    FString ClothingStyle = TEXT("Hide Wrap");
-
-    // Character customization functions
-    UFUNCTION(BlueprintCallable, Category = "Character")
+    UFUNCTION(BlueprintCallable, Category = "Character Appearance")
     void RandomizeAppearance();
 
-    UFUNCTION(BlueprintCallable, Category = "Character")
-    void SetTribalRole(EChar_TribalRole NewRole);
+    UFUNCTION(BlueprintCallable, Category = "Character Appearance")
+    FChar_AppearanceData GetAppearanceData() const { return AppearanceData; }
 
-    UFUNCTION(BlueprintCallable, Category = "Character")
-    void ApplyAppearanceToMesh(USkeletalMeshComponent* MeshComponent);
+    UFUNCTION(BlueprintCallable, Category = "Character Appearance")
+    void SetSkinTone(EChar_SkinTone NewSkinTone);
 
-    UFUNCTION(BlueprintCallable, Category = "Character")
-    void UpdateCharacterStats();
+    UFUNCTION(BlueprintCallable, Category = "Character Appearance")
+    void SetBodyType(EChar_BodyType NewBodyType);
 
-    UFUNCTION(BlueprintCallable, Category = "Character")
-    FString GetRoleDescription() const;
+    UFUNCTION(BlueprintCallable, Category = "Character Appearance")
+    void SetClothingStyle(EChar_ClothingStyle NewClothingStyle);
 
-    UFUNCTION(BlueprintCallable, Category = "Character")
-    TArray<FString> GetAppropriateTools() const;
+    UFUNCTION(BlueprintCallable, Category = "Character Appearance")
+    void SetTribalMarking(EChar_TribalMarking NewMarking, FLinearColor MarkingColor);
+
+    UFUNCTION(BlueprintCallable, Category = "Character Appearance")
+    void UpdateMaterialParameters();
+
+    UFUNCTION(CallInEditor, Category = "Character Appearance")
+    void PreviewRandomAppearance();
 
 private:
-    // Internal appearance management
-    void ApplySkinTone(USkeletalMeshComponent* MeshComponent);
-    void ApplyBodyModifications(USkeletalMeshComponent* MeshComponent);
-    void UpdateEquipmentForRole();
-    
-    // Material instances for customization
-    UPROPERTY()
-    UMaterialInstanceDynamic* SkinMaterial;
-
-    UPROPERTY()
-    UMaterialInstanceDynamic* ClothingMaterial;
+    void InitializeMaterials();
+    void UpdateSkinMaterial();
+    void UpdateClothingMaterial();
+    FLinearColor GetSkinToneColor(EChar_SkinTone SkinTone) const;
+    float GetBodyTypeScale(EChar_BodyType BodyType) const;
 };
