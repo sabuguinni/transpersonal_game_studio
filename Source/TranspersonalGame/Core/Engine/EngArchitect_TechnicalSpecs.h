@@ -1,180 +1,154 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/GameInstanceSubsystem.h"
-#include "SharedTypes.h"
+#include "Engine/Engine.h"
+#include "UObject/NoExportTypes.h"
 #include "EngArchitect_TechnicalSpecs.generated.h"
 
 /**
- * Engine Architect Technical Specifications
- * Defines the core technical architecture and constraints for the entire game
- * All agents must follow these specifications - violations will cause compilation errors
+ * ENGINE ARCHITECT TECHNICAL SPECIFICATIONS
+ * Defines core architecture standards for all agents in the production chain
+ * Agent #02 - Engine Architect - Cycle PROD_CYCLE_AUTO_20260525_002
  */
 
 UENUM(BlueprintType)
-enum class EEng_PerformanceTarget : uint8
+enum class EEng_SystemPriority : uint8
 {
-    PC_60FPS        UMETA(DisplayName = "PC 60 FPS"),
-    Console_30FPS   UMETA(DisplayName = "Console 30 FPS"),
-    Mobile_30FPS    UMETA(DisplayName = "Mobile 30 FPS")
+    Critical    UMETA(DisplayName = "Critical"),
+    High        UMETA(DisplayName = "High"),
+    Medium      UMETA(DisplayName = "Medium"),
+    Low         UMETA(DisplayName = "Low")
 };
 
 UENUM(BlueprintType)
-enum class EEng_WorldPartitionMode : uint8
+enum class EEng_ModuleStatus : uint8
 {
-    Disabled        UMETA(DisplayName = "Disabled"),
-    Standard        UMETA(DisplayName = "Standard 4km²"),
-    Large           UMETA(DisplayName = "Large 16km²"),
-    Massive         UMETA(DisplayName = "Massive 64km²")
-};
-
-UENUM(BlueprintType)
-enum class EEng_LODLevel : uint8
-{
-    LOD0_High       UMETA(DisplayName = "LOD0 High Quality"),
-    LOD1_Medium     UMETA(DisplayName = "LOD1 Medium Quality"),
-    LOD2_Low        UMETA(DisplayName = "LOD2 Low Quality"),
-    LOD3_Culled     UMETA(DisplayName = "LOD3 Culled")
+    NotStarted  UMETA(DisplayName = "Not Started"),
+    InProgress  UMETA(DisplayName = "In Progress"),
+    Testing     UMETA(DisplayName = "Testing"),
+    Complete    UMETA(DisplayName = "Complete"),
+    Blocked     UMETA(DisplayName = "Blocked")
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEng_PerformanceConstraints
+struct TRANSPERSONALGAME_API FEng_SystemSpec
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 MaxActorsPerFrame = 10000;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System")
+    FString SystemName;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System")
+    EEng_SystemPriority Priority;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System")
+    EEng_ModuleStatus Status;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System")
+    int32 AgentResponsible;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System")
+    TArray<FString> Dependencies;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 MaxTrianglesPerFrame = 2000000;
+    float MaxFrameTime;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float MaxFrameTimeMS = 16.67f; // 60 FPS target
+    int32 MaxMemoryMB;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 MaxCrowdAgents = 50000;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float CullingDistance = 10000.0f;
-
-    FEng_PerformanceConstraints()
+    FEng_SystemSpec()
     {
-        MaxActorsPerFrame = 10000;
-        MaxTrianglesPerFrame = 2000000;
-        MaxFrameTimeMS = 16.67f;
-        MaxCrowdAgents = 50000;
-        CullingDistance = 10000.0f;
+        SystemName = TEXT("Unnamed System");
+        Priority = EEng_SystemPriority::Medium;
+        Status = EEng_ModuleStatus::NotStarted;
+        AgentResponsible = 0;
+        MaxFrameTime = 16.67f; // 60 FPS target
+        MaxMemoryMB = 512;
     }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEng_ModuleArchitecture
+struct TRANSPERSONALGAME_API FEng_CompilationRules
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    FString ModuleName;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rules")
+    bool bEnforceUE55Compatibility;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    TArray<FString> Dependencies;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rules")
+    bool bRequireMatchingCppFiles;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    bool bIsCore = false;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rules")
+    bool bEnforceNamingConventions;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    bool bRequiresWorldPartition = false;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rules")
+    bool bRequireSharedTypesUsage;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    EEng_PerformanceTarget TargetPerformance = EEng_PerformanceTarget::PC_60FPS;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    int32 MaxIncludeDepth;
 
-    FEng_ModuleArchitecture()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float MaxCompileTimeSeconds;
+
+    FEng_CompilationRules()
     {
-        ModuleName = TEXT("");
-        bIsCore = false;
-        bRequiresWorldPartition = false;
-        TargetPerformance = EEng_PerformanceTarget::PC_60FPS;
+        bEnforceUE55Compatibility = true;
+        bRequireMatchingCppFiles = true;
+        bEnforceNamingConventions = true;
+        bRequireSharedTypesUsage = true;
+        MaxIncludeDepth = 10;
+        MaxCompileTimeSeconds = 30.0f;
     }
 };
 
 /**
- * Engine Architect Technical Specifications Subsystem
- * Enforces technical constraints and architecture rules across all game systems
+ * Engine Architect Core Component
+ * Manages technical specifications and architecture validation
  */
-UCLASS()
-class TRANSPERSONALGAME_API UEngArchitect_TechnicalSpecs : public UGameInstanceSubsystem
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API UEngArchitect_TechnicalSpecs : public UObject
 {
     GENERATED_BODY()
 
 public:
-    // USubsystem interface
-    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
-    virtual void Deinitialize() override;
+    UEngArchitect_TechnicalSpecs();
 
-    // Core Architecture Enforcement
-    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    bool ValidateModuleArchitecture(const FEng_ModuleArchitecture& Module);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
+    TArray<FEng_SystemSpec> SystemSpecifications;
 
-    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    bool EnforcePerformanceConstraints(const FEng_PerformanceConstraints& Constraints);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Compilation")
+    FEng_CompilationRules CompilationRules;
 
-    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    void SetWorldPartitionMode(EEng_WorldPartitionMode Mode);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float TargetFrameRate;
 
-    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    EEng_WorldPartitionMode GetWorldPartitionMode() const { return CurrentWorldPartitionMode; }
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    int32 MaxActorsPerBiome;
 
-    // Performance Monitoring
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    int32 MaxTotalActors;
+
+    // Architecture validation functions
+    UFUNCTION(BlueprintCallable, Category = "Validation")
+    bool ValidateSystemDependencies();
+
+    UFUNCTION(BlueprintCallable, Category = "Validation")
+    bool CheckCompilationCompliance();
+
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    float GetCurrentFrameTime() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    int32 GetCurrentActorCount() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    bool IsPerformanceWithinLimits() const;
-
-    // LOD Management
-    UFUNCTION(BlueprintCallable, Category = "LOD")
-    EEng_LODLevel CalculateLODLevel(float Distance) const;
-
-    UFUNCTION(BlueprintCallable, Category = "LOD")
-    void SetLODDistances(float LOD1Distance, float LOD2Distance, float CullDistance);
-
-    // Module Registration
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void RegisterModule(const FEng_ModuleArchitecture& Module);
+    bool ValidatePerformanceTargets();
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    TArray<FEng_ModuleArchitecture> GetRegisteredModules() const { return RegisteredModules; }
+    void RegisterSystemSpec(const FEng_SystemSpec& NewSpec);
 
-    // Critical Architecture Rules (MANDATORY)
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Architecture")
-    void EnforceArchitectureRules();
-
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Architecture")
-    void ValidateAllModules();
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    FEng_SystemSpec GetSystemSpec(const FString& SystemName);
 
 protected:
     UPROPERTY()
-    TArray<FEng_ModuleArchitecture> RegisteredModules;
+    TMap<FString, FEng_SystemSpec> SystemRegistry;
 
-    UPROPERTY()
-    FEng_PerformanceConstraints CurrentConstraints;
-
-    UPROPERTY()
-    EEng_WorldPartitionMode CurrentWorldPartitionMode = EEng_WorldPartitionMode::Standard;
-
-    UPROPERTY()
-    float LOD1Distance = 2000.0f;
-
-    UPROPERTY()
-    float LOD2Distance = 5000.0f;
-
-    UPROPERTY()
-    float CullDistance = 10000.0f;
-
-private:
-    void InitializeDefaultConstraints();
-    void ValidateSystemRequirements();
-    bool CheckModuleDependencies(const FEng_ModuleArchitecture& Module);
+    void InitializeDefaultSpecs();
+    bool ValidateAgentChain();
+    bool CheckModuleDependencies();
 };
