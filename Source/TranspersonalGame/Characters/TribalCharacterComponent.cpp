@@ -1,226 +1,202 @@
 #include "TribalCharacterComponent.h"
-#include "Components/SkeletalMeshComponent.h"
-#include "Materials/MaterialInstanceDynamic.h"
 #include "Engine/Engine.h"
-#include "Math/UnrealMathUtility.h"
+#include "Materials/MaterialInstanceDynamic.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Kismet/KismetMathLibrary.h"
 
 UTribalCharacterComponent::UTribalCharacterComponent()
 {
     PrimaryComponentTick.bCanEverTick = false;
     
-    // Initialize default appearance
-    AppearanceData = FChar_AppearanceData();
-    
-    // Initialize pointers
-    BaseSkinMaterial = nullptr;
-    BaseClothingMaterial = nullptr;
-    DynamicSkinMaterial = nullptr;
-    DynamicClothingMaterial = nullptr;
     CharacterMesh = nullptr;
+    BaseMaterial = nullptr;
+    DynamicMaterial = nullptr;
+    
+    // Initialize default appearance
+    CurrentAppearance = FChar_TribalAppearance();
 }
 
 void UTribalCharacterComponent::BeginPlay()
 {
     Super::BeginPlay();
     
-    // Find the character mesh component on the owner
-    if (AActor* Owner = GetOwner())
+    // Find the character mesh component if not set
+    if (!CharacterMesh)
     {
-        CharacterMesh = Owner->FindComponentByClass<USkeletalMeshComponent>();
+        CharacterMesh = GetOwner()->FindComponentByClass<USkeletalMeshComponent>();
     }
     
-    InitializeMaterials();
-    ApplyAppearance(AppearanceData);
+    InitializeMaterial();
+    ApplyAppearance(CurrentAppearance);
 }
 
-void UTribalCharacterComponent::ApplyAppearance(const FChar_AppearanceData& NewAppearance)
+void UTribalCharacterComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
-    AppearanceData = NewAppearance;
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+}
+
+void UTribalCharacterComponent::ApplyAppearance(const FChar_TribalAppearance& NewAppearance)
+{
+    CurrentAppearance = NewAppearance;
     UpdateMaterialParameters();
     
-    UE_LOG(LogTemp, Log, TEXT("Applied appearance: SkinTone=%d, BodyType=%d, ClothingStyle=%d"), 
-           (int32)AppearanceData.SkinTone, (int32)AppearanceData.BodyType, (int32)AppearanceData.ClothingStyle);
+    UE_LOG(LogTemp, Log, TEXT("Applied tribal appearance: SkinTone=%d, BodyBuild=%d, ClothingStyle=%d"), 
+           (int32)NewAppearance.SkinTone, (int32)NewAppearance.BodyBuild, (int32)NewAppearance.ClothingStyle);
 }
 
 void UTribalCharacterComponent::RandomizeAppearance()
 {
-    // Randomize all appearance parameters
-    AppearanceData.SkinTone = static_cast<EChar_SkinTone>(FMath::RandRange(0, 4));
-    AppearanceData.BodyType = static_cast<EChar_BodyType>(FMath::RandRange(0, 4));
-    AppearanceData.ClothingStyle = static_cast<EChar_ClothingStyle>(FMath::RandRange(0, 4));
-    AppearanceData.TribalMarking = static_cast<EChar_TribalMarking>(FMath::RandRange(0, 5));
+    FChar_TribalAppearance RandomAppearance;
     
-    AppearanceData.ScarIntensity = FMath::RandRange(0.0f, 0.8f);
-    AppearanceData.WeatheringIntensity = FMath::RandRange(0.2f, 0.9f);
-    AppearanceData.MuscleDefinition = FMath::RandRange(0.4f, 1.0f);
+    // Randomize skin tone
+    int32 SkinToneIndex = FMath::RandRange(0, 3);
+    RandomAppearance.SkinTone = static_cast<EChar_SkinTone>(SkinToneIndex);
     
-    // Random tribal marking color (earth tones)
-    float Hue = FMath::RandRange(0.0f, 60.0f); // Red to yellow range
-    float Saturation = FMath::RandRange(0.6f, 1.0f);
-    float Value = FMath::RandRange(0.3f, 0.8f);
-    AppearanceData.TribalMarkingColor = FLinearColor::MakeFromHSV8(Hue, Saturation * 255, Value * 255);
+    // Randomize body build
+    int32 BodyBuildIndex = FMath::RandRange(0, 3);
+    RandomAppearance.BodyBuild = static_cast<EChar_BodyBuild>(BodyBuildIndex);
     
-    ApplyAppearance(AppearanceData);
+    // Randomize clothing style
+    int32 ClothingIndex = FMath::RandRange(0, 3);
+    RandomAppearance.ClothingStyle = static_cast<EChar_ClothingStyle>(ClothingIndex);
+    
+    // Randomize features
+    RandomAppearance.bHasTribalMarkings = FMath::RandBool();
+    RandomAppearance.bHasBattleScars = FMath::RandRange(0, 100) < 30; // 30% chance
+    RandomAppearance.bHasFeatherHeadband = FMath::RandBool();
+    RandomAppearance.bHasBoneJewelry = FMath::RandRange(0, 100) < 70; // 70% chance
+    
+    // Randomize weathering
+    RandomAppearance.DirtLevel = FMath::RandRange(0.1f, 0.8f);
+    RandomAppearance.WeatheringLevel = FMath::RandRange(0.2f, 0.9f);
+    
+    ApplyAppearance(RandomAppearance);
 }
 
-void UTribalCharacterComponent::SetSkinTone(EChar_SkinTone NewSkinTone)
+void UTribalCharacterComponent::UpdateSkinTone(EChar_SkinTone NewSkinTone)
 {
-    AppearanceData.SkinTone = NewSkinTone;
-    UpdateSkinMaterial();
-}
-
-void UTribalCharacterComponent::SetBodyType(EChar_BodyType NewBodyType)
-{
-    AppearanceData.BodyType = NewBodyType;
+    CurrentAppearance.SkinTone = NewSkinTone;
     UpdateMaterialParameters();
 }
 
-void UTribalCharacterComponent::SetClothingStyle(EChar_ClothingStyle NewClothingStyle)
+void UTribalCharacterComponent::UpdateBodyBuild(EChar_BodyBuild NewBodyBuild)
 {
-    AppearanceData.ClothingStyle = NewClothingStyle;
-    UpdateClothingMaterial();
+    CurrentAppearance.BodyBuild = NewBodyBuild;
+    
+    if (CharacterMesh)
+    {
+        float Scale = GetBodyBuildScale(NewBodyBuild);
+        FVector CurrentScale = CharacterMesh->GetComponentScale();
+        CharacterMesh->SetWorldScale3D(FVector(CurrentScale.X * Scale, CurrentScale.Y * Scale, CurrentScale.Z));
+    }
 }
 
-void UTribalCharacterComponent::SetTribalMarking(EChar_TribalMarking NewMarking, FLinearColor MarkingColor)
+void UTribalCharacterComponent::UpdateClothingStyle(EChar_ClothingStyle NewClothingStyle)
 {
-    AppearanceData.TribalMarking = NewMarking;
-    AppearanceData.TribalMarkingColor = MarkingColor;
-    UpdateSkinMaterial();
+    CurrentAppearance.ClothingStyle = NewClothingStyle;
+    UpdateMaterialParameters();
 }
 
-void UTribalCharacterComponent::UpdateMaterialParameters()
+void UTribalCharacterComponent::SetTribalMarkings(bool bEnabled)
 {
-    UpdateSkinMaterial();
-    UpdateClothingMaterial();
+    CurrentAppearance.bHasTribalMarkings = bEnabled;
+    UpdateMaterialParameters();
+}
+
+void UTribalCharacterComponent::SetBattleScars(bool bEnabled)
+{
+    CurrentAppearance.bHasBattleScars = bEnabled;
+    UpdateMaterialParameters();
+}
+
+void UTribalCharacterComponent::SetDirtLevel(float NewDirtLevel)
+{
+    CurrentAppearance.DirtLevel = FMath::Clamp(NewDirtLevel, 0.0f, 1.0f);
+    UpdateMaterialParameters();
+}
+
+void UTribalCharacterComponent::SetWeatheringLevel(float NewWeatheringLevel)
+{
+    CurrentAppearance.WeatheringLevel = FMath::Clamp(NewWeatheringLevel, 0.0f, 1.0f);
+    UpdateMaterialParameters();
 }
 
 void UTribalCharacterComponent::PreviewRandomAppearance()
 {
     RandomizeAppearance();
-    UE_LOG(LogTemp, Warning, TEXT("Previewing random appearance for %s"), 
-           GetOwner() ? *GetOwner()->GetName() : TEXT("Unknown"));
+    UE_LOG(LogTemp, Warning, TEXT("Previewing random tribal appearance in editor"));
 }
 
-void UTribalCharacterComponent::InitializeMaterials()
+void UTribalCharacterComponent::InitializeMaterial()
 {
-    if (!CharacterMesh)
+    if (CharacterMesh && BaseMaterial)
     {
-        UE_LOG(LogTemp, Warning, TEXT("CharacterMesh not found for TribalCharacterComponent"));
-        return;
-    }
-    
-    // Create dynamic material instances if base materials are set
-    if (BaseSkinMaterial)
-    {
-        DynamicSkinMaterial = UMaterialInstanceDynamic::Create(BaseSkinMaterial, this);
-        if (DynamicSkinMaterial)
+        DynamicMaterial = UMaterialInstanceDynamic::Create(BaseMaterial, this);
+        if (DynamicMaterial)
         {
-            CharacterMesh->SetMaterial(0, DynamicSkinMaterial); // Assuming skin is material slot 0
-        }
-    }
-    
-    if (BaseClothingMaterial)
-    {
-        DynamicClothingMaterial = UMaterialInstanceDynamic::Create(BaseClothingMaterial, this);
-        if (DynamicClothingMaterial)
-        {
-            CharacterMesh->SetMaterial(1, DynamicClothingMaterial); // Assuming clothing is material slot 1
+            CharacterMesh->SetMaterial(0, DynamicMaterial);
+            UE_LOG(LogTemp, Log, TEXT("Initialized dynamic material for tribal character"));
         }
     }
 }
 
-void UTribalCharacterComponent::UpdateSkinMaterial()
+void UTribalCharacterComponent::UpdateMaterialParameters()
 {
-    if (!DynamicSkinMaterial)
-        return;
-    
-    // Set skin tone color
-    FLinearColor SkinColor = GetSkinToneColor(AppearanceData.SkinTone);
-    DynamicSkinMaterial->SetVectorParameterValue(TEXT("SkinColor"), SkinColor);
-    
-    // Set weathering and scars
-    DynamicSkinMaterial->SetScalarParameterValue(TEXT("WeatheringIntensity"), AppearanceData.WeatheringIntensity);
-    DynamicSkinMaterial->SetScalarParameterValue(TEXT("ScarIntensity"), AppearanceData.ScarIntensity);
-    DynamicSkinMaterial->SetScalarParameterValue(TEXT("MuscleDefinition"), AppearanceData.MuscleDefinition);
-    
-    // Set tribal marking parameters
-    DynamicSkinMaterial->SetScalarParameterValue(TEXT("TribalMarkingType"), static_cast<float>((int32)AppearanceData.TribalMarking));
-    DynamicSkinMaterial->SetVectorParameterValue(TEXT("TribalMarkingColor"), AppearanceData.TribalMarkingColor);
-    
-    // Body type scaling
-    float BodyScale = GetBodyTypeScale(AppearanceData.BodyType);
-    DynamicSkinMaterial->SetScalarParameterValue(TEXT("BodyScale"), BodyScale);
-}
-
-void UTribalCharacterComponent::UpdateClothingMaterial()
-{
-    if (!DynamicClothingMaterial)
-        return;
-    
-    // Set clothing style parameters
-    DynamicClothingMaterial->SetScalarParameterValue(TEXT("ClothingStyle"), static_cast<float>((int32)AppearanceData.ClothingStyle));
-    DynamicClothingMaterial->SetScalarParameterValue(TEXT("WeatheringIntensity"), AppearanceData.WeatheringIntensity);
-    
-    // Clothing color based on style
-    FLinearColor ClothingColor;
-    switch (AppearanceData.ClothingStyle)
+    if (!DynamicMaterial)
     {
-        case EChar_ClothingStyle::Minimal:
-            ClothingColor = FLinearColor(0.6f, 0.4f, 0.2f, 1.0f); // Brown leather
-            break;
-        case EChar_ClothingStyle::Hunter:
-            ClothingColor = FLinearColor(0.4f, 0.3f, 0.2f, 1.0f); // Dark brown
-            break;
-        case EChar_ClothingStyle::Gatherer:
-            ClothingColor = FLinearColor(0.5f, 0.5f, 0.3f, 1.0f); // Olive
-            break;
-        case EChar_ClothingStyle::Warrior:
-            ClothingColor = FLinearColor(0.3f, 0.2f, 0.1f, 1.0f); // Dark leather
-            break;
-        case EChar_ClothingStyle::Shaman:
-            ClothingColor = FLinearColor(0.7f, 0.5f, 0.3f, 1.0f); // Lighter ceremonial
-            break;
-        default:
-            ClothingColor = FLinearColor(0.5f, 0.4f, 0.3f, 1.0f);
-            break;
+        return;
     }
     
-    DynamicClothingMaterial->SetVectorParameterValue(TEXT("ClothingColor"), ClothingColor);
+    // Update skin tone
+    FLinearColor SkinColor = GetSkinToneColor(CurrentAppearance.SkinTone);
+    DynamicMaterial->SetVectorParameterValue(TEXT("SkinColor"), SkinColor);
+    
+    // Update tribal markings
+    DynamicMaterial->SetScalarParameterValue(TEXT("TribalMarkings"), CurrentAppearance.bHasTribalMarkings ? 1.0f : 0.0f);
+    
+    // Update battle scars
+    DynamicMaterial->SetScalarParameterValue(TEXT("BattleScars"), CurrentAppearance.bHasBattleScars ? 1.0f : 0.0f);
+    
+    // Update dirt and weathering
+    DynamicMaterial->SetScalarParameterValue(TEXT("DirtLevel"), CurrentAppearance.DirtLevel);
+    DynamicMaterial->SetScalarParameterValue(TEXT("WeatheringLevel"), CurrentAppearance.WeatheringLevel);
+    
+    // Update clothing style (affects material blend)
+    float ClothingBlend = static_cast<float>(CurrentAppearance.ClothingStyle) / 3.0f;
+    DynamicMaterial->SetScalarParameterValue(TEXT("ClothingStyle"), ClothingBlend);
+    
+    UE_LOG(LogTemp, Log, TEXT("Updated tribal character material parameters"));
 }
 
-FLinearColor UTribalCharacterComponent::GetSkinToneColor(EChar_SkinTone SkinTone) const
+FLinearColor UTribalCharacterComponent::GetSkinToneColor(EChar_SkinTone SkinTone)
 {
     switch (SkinTone)
     {
-        case EChar_SkinTone::PaleTanned:
-            return FLinearColor(0.9f, 0.7f, 0.6f, 1.0f);
-        case EChar_SkinTone::MediumTanned:
-            return FLinearColor(0.8f, 0.6f, 0.4f, 1.0f);
-        case EChar_SkinTone::DarkTanned:
-            return FLinearColor(0.6f, 0.4f, 0.3f, 1.0f);
-        case EChar_SkinTone::WeatheredBronze:
+        case EChar_SkinTone::Light:
+            return FLinearColor(0.9f, 0.8f, 0.7f, 1.0f);
+        case EChar_SkinTone::Medium:
+            return FLinearColor(0.7f, 0.6f, 0.5f, 1.0f);
+        case EChar_SkinTone::Dark:
             return FLinearColor(0.5f, 0.4f, 0.3f, 1.0f);
-        case EChar_SkinTone::DeepBronze:
-            return FLinearColor(0.4f, 0.3f, 0.2f, 1.0f);
+        case EChar_SkinTone::Weathered:
+            return FLinearColor(0.6f, 0.5f, 0.4f, 1.0f);
         default:
-            return FLinearColor(0.8f, 0.6f, 0.4f, 1.0f);
+            return FLinearColor(0.7f, 0.6f, 0.5f, 1.0f);
     }
 }
 
-float UTribalCharacterComponent::GetBodyTypeScale(EChar_BodyType BodyType) const
+float UTribalCharacterComponent::GetBodyBuildScale(EChar_BodyBuild BodyBuild)
 {
-    switch (BodyType)
+    switch (BodyBuild)
     {
-        case EChar_BodyType::Lean:
+        case EChar_BodyBuild::Lean:
             return 0.9f;
-        case EChar_BodyType::Athletic:
+        case EChar_BodyBuild::Athletic:
             return 1.0f;
-        case EChar_BodyType::Muscular:
+        case EChar_BodyBuild::Muscular:
             return 1.1f;
-        case EChar_BodyType::Stocky:
+        case EChar_BodyBuild::Stocky:
             return 1.05f;
-        case EChar_BodyType::Weathered:
-            return 0.95f;
         default:
             return 1.0f;
     }
