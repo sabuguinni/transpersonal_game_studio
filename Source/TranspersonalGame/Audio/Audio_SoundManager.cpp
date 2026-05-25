@@ -1,344 +1,228 @@
 #include "Audio_SoundManager.h"
-#include "Engine/Engine.h"
-#include "Kismet/GameplayStatics.h"
-#include "Components/AudioComponent.h"
-#include "Sound/SoundCue.h"
 #include "Engine/World.h"
-#include "TimerManager.h"
+#include "Kismet/GameplayStatics.h"
+#include "Sound/SoundCue.h"
+#include "Components/AudioComponent.h"
 
-AAudio_SoundManager::AAudio_SoundManager()
+UAudio_SoundManager::UAudio_SoundManager()
 {
-    PrimaryActorTick.bCanEverTick = true;
-
-    // Create Audio Components
-    AmbientAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("AmbientAudioComponent"));
-    RootComponent = AmbientAudioComponent;
-    AmbientAudioComponent->bAutoActivate = false;
-
-    EffectsAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("EffectsAudioComponent"));
-    EffectsAudioComponent->SetupAttachment(RootComponent);
-    EffectsAudioComponent->bAutoActivate = false;
-
-    NarrationAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("NarrationAudioComponent"));
-    NarrationAudioComponent->SetupAttachment(RootComponent);
-    NarrationAudioComponent->bAutoActivate = false;
-
-    // Initialize default values
-    CurrentBiome = EAudio_BiomeType::Savana;
-    bIsAmbientPlaying = false;
     MasterVolume = 1.0f;
-    AmbientVolume = 0.8f;
-    EffectsVolume = 1.0f;
-    NarrationVolume = 0.9f;
+    AmbientAudioComponent = nullptr;
 }
 
-void AAudio_SoundManager::BeginPlay()
+void UAudio_SoundManager::Initialize(FSubsystemCollectionBase& Collection)
 {
-    Super::BeginPlay();
-
-    // Initialize configurations
-    InitializeBiomeConfigs();
-    InitializeFootstepConfigs();
-
-    // Start biome detection timer
-    GetWorldTimerManager().SetTimer(BiomeCheckTimer, this, &AAudio_SoundManager::CheckBiomeChange, 2.0f, true);
-
-    // Start with default biome audio
-    PlayAmbientAudio(CurrentBiome);
-
-    UE_LOG(LogTemp, Warning, TEXT("Audio_SoundManager: BeginPlay completed"));
-}
-
-void AAudio_SoundManager::Tick(float DeltaTime)
-{
-    Super::Tick(DeltaTime);
-}
-
-void AAudio_SoundManager::SetCurrentBiome(EAudio_BiomeType NewBiome)
-{
-    if (CurrentBiome != NewBiome)
-    {
-        CurrentBiome = NewBiome;
-        PlayAmbientAudio(NewBiome);
-        UE_LOG(LogTemp, Warning, TEXT("Audio_SoundManager: Biome changed to %d"), (int32)NewBiome);
-    }
-}
-
-void AAudio_SoundManager::PlayAmbientAudio(EAudio_BiomeType BiomeType)
-{
-    if (!BiomeAudioConfigs.Contains(BiomeType))
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Audio_SoundManager: No audio config for biome %d"), (int32)BiomeType);
-        return;
-    }
-
-    const FAudio_BiomeAudioConfig& Config = BiomeAudioConfigs[BiomeType];
+    Super::Initialize(Collection);
     
-    // Stop current ambient audio
-    StopAmbientAudio();
-
-    // Play new ambient loop if available
-    if (Config.AmbientLoop && AmbientAudioComponent)
-    {
-        AmbientAudioComponent->SetSound(Config.AmbientLoop);
-        AmbientAudioComponent->SetVolumeMultiplier(Config.AmbientVolume * AmbientVolume * MasterVolume);
-        AmbientAudioComponent->Play();
-        bIsAmbientPlaying = true;
-
-        UE_LOG(LogTemp, Warning, TEXT("Audio_SoundManager: Playing ambient audio for biome %d"), (int32)BiomeType);
-    }
-
-    // Setup random sound timer
-    if (Config.RandomSounds.Num() > 0)
-    {
-        GetWorldTimerManager().ClearTimer(RandomSoundTimer);
-        GetWorldTimerManager().SetTimer(RandomSoundTimer, this, &AAudio_SoundManager::PlayRandomBiomeSound, Config.RandomSoundInterval, true);
-    }
+    InitializeCategoryVolumes();
+    InitializeDefaultSounds();
+    
+    UE_LOG(LogTemp, Warning, TEXT("Audio_SoundManager initialized"));
 }
 
-void AAudio_SoundManager::StopAmbientAudio()
+void UAudio_SoundManager::Deinitialize()
 {
-    if (AmbientAudioComponent && bIsAmbientPlaying)
+    StopAllSounds();
+    
+    if (AmbientAudioComponent && IsValid(AmbientAudioComponent))
     {
         AmbientAudioComponent->Stop();
-        bIsAmbientPlaying = false;
+        AmbientAudioComponent = nullptr;
     }
-
-    GetWorldTimerManager().ClearTimer(RandomSoundTimer);
+    
+    ActiveAudioComponents.Empty();
+    
+    Super::Deinitialize();
 }
 
-void AAudio_SoundManager::PlayFootstepSound(const FString& SurfaceType, const FVector& Location)
+void UAudio_SoundManager::InitializeCategoryVolumes()
 {
-    if (!FootstepConfigs.Contains(SurfaceType))
+    CategoryVolumes.Add(EAudio_SoundCategory::Ambient, 0.7f);
+    CategoryVolumes.Add(EAudio_SoundCategory::Combat, 1.0f);
+    CategoryVolumes.Add(EAudio_SoundCategory::Footsteps, 0.8f);
+    CategoryVolumes.Add(EAudio_SoundCategory::DinosaurRoars, 1.0f);
+    CategoryVolumes.Add(EAudio_SoundCategory::Weather, 0.6f);
+    CategoryVolumes.Add(EAudio_SoundCategory::Narration, 0.9f);
+}
+
+void UAudio_SoundManager::InitializeDefaultSounds()
+{
+    // Register default prehistoric survival sounds
+    FAudio_SoundEntry TRexRoar;
+    TRexRoar.Category = EAudio_SoundCategory::DinosaurRoars;
+    TRexRoar.Volume = 1.0f;
+    TRexRoar.Pitch = 1.0f;
+    TRexRoar.bLooping = false;
+    RegisterSound(TEXT("TRexRoar"), TRexRoar);
+    
+    FAudio_SoundEntry RaptorGrowl;
+    RaptorGrowl.Category = EAudio_SoundCategory::DinosaurRoars;
+    RaptorGrowl.Volume = 0.8f;
+    RaptorGrowl.Pitch = 1.2f;
+    RaptorGrowl.bLooping = false;
+    RegisterSound(TEXT("RaptorGrowl"), RaptorGrowl);
+    
+    FAudio_SoundEntry ForestAmbient;
+    ForestAmbient.Category = EAudio_SoundCategory::Ambient;
+    ForestAmbient.Volume = 0.5f;
+    ForestAmbient.Pitch = 1.0f;
+    ForestAmbient.bLooping = true;
+    RegisterSound(TEXT("ForestAmbient"), ForestAmbient);
+    
+    FAudio_SoundEntry FootstepDirt;
+    FootstepDirt.Category = EAudio_SoundCategory::Footsteps;
+    FootstepDirt.Volume = 0.6f;
+    FootstepDirt.Pitch = 1.0f;
+    FootstepDirt.bLooping = false;
+    RegisterSound(TEXT("FootstepDirt"), FootstepDirt);
+}
+
+void UAudio_SoundManager::PlaySound(const FString& SoundName, const FVector& Location)
+{
+    PlaySoundAtLocation(SoundName, Location, 1.0f);
+}
+
+void UAudio_SoundManager::PlaySoundAtLocation(const FString& SoundName, const FVector& Location, float VolumeMultiplier)
+{
+    if (!RegisteredSounds.Contains(SoundName))
     {
-        UE_LOG(LogTemp, Warning, TEXT("Audio_SoundManager: No footstep config for surface %s"), *SurfaceType);
+        UE_LOG(LogTemp, Warning, TEXT("Sound not found: %s"), *SoundName);
         return;
     }
-
-    const FAudio_FootstepConfig& Config = FootstepConfigs[SurfaceType];
     
-    if (Config.FootstepSound && EffectsAudioComponent)
+    const FAudio_SoundEntry& SoundEntry = RegisteredSounds[SoundName];
+    
+    if (!SoundEntry.SoundCue.IsValid())
     {
-        EffectsAudioComponent->SetSound(Config.FootstepSound);
-        EffectsAudioComponent->SetVolumeMultiplier(Config.VolumeMultiplier * EffectsVolume * MasterVolume);
+        UE_LOG(LogTemp, Warning, TEXT("Invalid sound cue for: %s"), *SoundName);
+        return;
+    }
+    
+    UAudioComponent* AudioComp = CreateAudioComponent(SoundEntry, Location);
+    if (AudioComp)
+    {
+        float FinalVolume = SoundEntry.Volume * VolumeMultiplier * MasterVolume;
+        if (CategoryVolumes.Contains(SoundEntry.Category))
+        {
+            FinalVolume *= CategoryVolumes[SoundEntry.Category];
+        }
         
-        // Add pitch variation
-        float PitchVariation = FMath::RandRange(-Config.PitchVariation, Config.PitchVariation);
-        EffectsAudioComponent->SetPitchMultiplier(1.0f + PitchVariation);
+        AudioComp->SetVolumeMultiplier(FinalVolume);
+        AudioComp->SetPitchMultiplier(SoundEntry.Pitch);
+        AudioComp->Play();
         
-        EffectsAudioComponent->Play();
-        
-        UE_LOG(LogTemp, Log, TEXT("Audio_SoundManager: Playing footstep sound for surface %s"), *SurfaceType);
+        if (!SoundEntry.bLooping)
+        {
+            ActiveAudioComponents.Add(SoundName, AudioComp);
+        }
     }
 }
 
-void AAudio_SoundManager::PlayCreatureSound(TObjectPtr<USoundCue> CreatureSound, const FVector& Location, float Volume)
+void UAudio_SoundManager::StopSound(const FString& SoundName)
 {
-    if (CreatureSound)
+    if (ActiveAudioComponents.Contains(SoundName))
     {
-        UGameplayStatics::PlaySoundAtLocation(this, CreatureSound, Location, Volume * EffectsVolume * MasterVolume);
-        UE_LOG(LogTemp, Log, TEXT("Audio_SoundManager: Playing creature sound at location"));
+        UAudioComponent* AudioComp = ActiveAudioComponents[SoundName];
+        if (IsValid(AudioComp))
+        {
+            AudioComp->Stop();
+        }
+        ActiveAudioComponents.Remove(SoundName);
     }
 }
 
-void AAudio_SoundManager::PlayNarration(TObjectPtr<USoundCue> NarrationSound)
+void UAudio_SoundManager::StopAllSounds()
 {
-    if (NarrationSound && NarrationAudioComponent)
+    for (auto& Pair : ActiveAudioComponents)
     {
-        NarrationAudioComponent->SetSound(NarrationSound);
-        NarrationAudioComponent->SetVolumeMultiplier(NarrationVolume * MasterVolume);
-        NarrationAudioComponent->Play();
-        
-        UE_LOG(LogTemp, Warning, TEXT("Audio_SoundManager: Playing narration"));
+        if (IsValid(Pair.Value))
+        {
+            Pair.Value->Stop();
+        }
     }
+    ActiveAudioComponents.Empty();
 }
 
-void AAudio_SoundManager::StopNarration()
-{
-    if (NarrationAudioComponent)
-    {
-        NarrationAudioComponent->Stop();
-    }
-}
-
-EAudio_BiomeType AAudio_SoundManager::DetectCurrentBiome(const FVector& PlayerLocation)
-{
-    // Biome detection based on coordinates from memory ID 709
-    // Savana (0,0), Pantano (-50000,-45000), Floresta (-45000,40000), Deserto (55000,0), Montanha (40000,50000)
-    
-    float X = PlayerLocation.X;
-    float Y = PlayerLocation.Y;
-    
-    // Calculate distances to each biome center
-    float DistToSavana = FVector::Dist2D(PlayerLocation, FVector(0, 0, 0));
-    float DistToPantano = FVector::Dist2D(PlayerLocation, FVector(-50000, -45000, 0));
-    float DistToFloresta = FVector::Dist2D(PlayerLocation, FVector(-45000, 40000, 0));
-    float DistToDeserto = FVector::Dist2D(PlayerLocation, FVector(55000, 0, 0));
-    float DistToMontanha = FVector::Dist2D(PlayerLocation, FVector(40000, 50000, 0));
-    
-    // Find closest biome
-    float MinDistance = DistToSavana;
-    EAudio_BiomeType ClosestBiome = EAudio_BiomeType::Savana;
-    
-    if (DistToPantano < MinDistance)
-    {
-        MinDistance = DistToPantano;
-        ClosestBiome = EAudio_BiomeType::Pantano;
-    }
-    
-    if (DistToFloresta < MinDistance)
-    {
-        MinDistance = DistToFloresta;
-        ClosestBiome = EAudio_BiomeType::Floresta;
-    }
-    
-    if (DistToDeserto < MinDistance)
-    {
-        MinDistance = DistToDeserto;
-        ClosestBiome = EAudio_BiomeType::Deserto;
-    }
-    
-    if (DistToMontanha < MinDistance)
-    {
-        MinDistance = DistToMontanha;
-        ClosestBiome = EAudio_BiomeType::Montanha;
-    }
-    
-    return ClosestBiome;
-}
-
-void AAudio_SoundManager::SetMasterVolume(float Volume)
+void UAudio_SoundManager::SetMasterVolume(float Volume)
 {
     MasterVolume = FMath::Clamp(Volume, 0.0f, 1.0f);
-    
-    // Update all active audio components
-    if (AmbientAudioComponent && bIsAmbientPlaying)
-    {
-        const FAudio_BiomeAudioConfig& Config = BiomeAudioConfigs[CurrentBiome];
-        AmbientAudioComponent->SetVolumeMultiplier(Config.AmbientVolume * AmbientVolume * MasterVolume);
-    }
 }
 
-void AAudio_SoundManager::SetAmbientVolume(float Volume)
+void UAudio_SoundManager::SetCategoryVolume(EAudio_SoundCategory Category, float Volume)
 {
-    AmbientVolume = FMath::Clamp(Volume, 0.0f, 1.0f);
-    
-    if (AmbientAudioComponent && bIsAmbientPlaying)
-    {
-        const FAudio_BiomeAudioConfig& Config = BiomeAudioConfigs[CurrentBiome];
-        AmbientAudioComponent->SetVolumeMultiplier(Config.AmbientVolume * AmbientVolume * MasterVolume);
-    }
+    CategoryVolumes.Add(Category, FMath::Clamp(Volume, 0.0f, 1.0f));
 }
 
-void AAudio_SoundManager::SetEffectsVolume(float Volume)
+void UAudio_SoundManager::RegisterSound(const FString& SoundName, const FAudio_SoundEntry& SoundEntry)
 {
-    EffectsVolume = FMath::Clamp(Volume, 0.0f, 1.0f);
+    RegisteredSounds.Add(SoundName, SoundEntry);
 }
 
-void AAudio_SoundManager::PlayRandomBiomeSound()
+void UAudio_SoundManager::PlayDinosaurRoar(const FString& DinosaurType, const FVector& Location)
 {
-    if (!BiomeAudioConfigs.Contains(CurrentBiome))
-    {
-        return;
-    }
+    FString SoundName = DinosaurType + TEXT("Roar");
+    PlaySoundAtLocation(SoundName, Location, 1.0f);
+}
 
-    const FAudio_BiomeAudioConfig& Config = BiomeAudioConfigs[CurrentBiome];
+void UAudio_SoundManager::PlayFootstepSound(const FString& SurfaceType, const FVector& Location)
+{
+    FString SoundName = TEXT("Footstep") + SurfaceType;
+    PlaySoundAtLocation(SoundName, Location, 0.8f);
+}
+
+void UAudio_SoundManager::PlayAmbientLoop(const FString& BiomeName)
+{
+    StopAmbientLoop();
     
-    if (Config.RandomSounds.Num() > 0 && FMath::RandRange(0.0f, 1.0f) < Config.RandomSoundChance)
+    FString AmbientSoundName = BiomeName + TEXT("Ambient");
+    if (RegisteredSounds.Contains(AmbientSoundName))
     {
-        int32 RandomIndex = FMath::RandRange(0, Config.RandomSounds.Num() - 1);
-        TObjectPtr<USoundCue> RandomSound = Config.RandomSounds[RandomIndex];
+        const FAudio_SoundEntry& SoundEntry = RegisteredSounds[AmbientSoundName];
+        AmbientAudioComponent = CreateAudioComponent(SoundEntry, FVector::ZeroVector);
         
-        if (RandomSound)
+        if (AmbientAudioComponent)
         {
-            UGameplayStatics::PlaySound2D(this, RandomSound, EffectsVolume * MasterVolume);
-            UE_LOG(LogTemp, Log, TEXT("Audio_SoundManager: Playing random biome sound"));
+            float FinalVolume = SoundEntry.Volume * MasterVolume;
+            if (CategoryVolumes.Contains(EAudio_SoundCategory::Ambient))
+            {
+                FinalVolume *= CategoryVolumes[EAudio_SoundCategory::Ambient];
+            }
+            
+            AmbientAudioComponent->SetVolumeMultiplier(FinalVolume);
+            AmbientAudioComponent->Play();
         }
     }
 }
 
-void AAudio_SoundManager::CheckBiomeChange()
+void UAudio_SoundManager::StopAmbientLoop()
 {
-    // Get player location
-    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(this, 0);
-    if (PlayerPawn)
+    if (AmbientAudioComponent && IsValid(AmbientAudioComponent))
     {
-        FVector PlayerLocation = PlayerPawn->GetActorLocation();
-        EAudio_BiomeType DetectedBiome = DetectCurrentBiome(PlayerLocation);
-        
-        if (DetectedBiome != CurrentBiome)
-        {
-            SetCurrentBiome(DetectedBiome);
-        }
+        AmbientAudioComponent->Stop();
+        AmbientAudioComponent = nullptr;
     }
 }
 
-void AAudio_SoundManager::InitializeBiomeConfigs()
+UAudioComponent* UAudio_SoundManager::CreateAudioComponent(const FAudio_SoundEntry& SoundEntry, const FVector& Location)
 {
-    // Initialize default biome configurations
-    // Note: Sound assets will need to be assigned in Blueprint or loaded from content
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        return nullptr;
+    }
     
-    FAudio_BiomeAudioConfig SavanaConfig;
-    SavanaConfig.AmbientVolume = 0.7f;
-    SavanaConfig.RandomSoundInterval = 20.0f;
-    SavanaConfig.RandomSoundChance = 0.25f;
-    BiomeAudioConfigs.Add(EAudio_BiomeType::Savana, SavanaConfig);
+    UAudioComponent* AudioComp = UGameplayStatics::SpawnSoundAtLocation(
+        World,
+        SoundEntry.SoundCue.Get(),
+        Location,
+        FRotator::ZeroRotator,
+        1.0f,
+        1.0f,
+        0.0f,
+        nullptr,
+        nullptr,
+        false
+    );
     
-    FAudio_BiomeAudioConfig PantanoConfig;
-    PantanoConfig.AmbientVolume = 0.8f;
-    PantanoConfig.RandomSoundInterval = 15.0f;
-    PantanoConfig.RandomSoundChance = 0.4f;
-    BiomeAudioConfigs.Add(EAudio_BiomeType::Pantano, PantanoConfig);
-    
-    FAudio_BiomeAudioConfig FlorestaConfig;
-    FlorestaConfig.AmbientVolume = 0.9f;
-    FlorestaConfig.RandomSoundInterval = 12.0f;
-    FlorestaConfig.RandomSoundChance = 0.5f;
-    BiomeAudioConfigs.Add(EAudio_BiomeType::Floresta, FlorestaConfig);
-    
-    FAudio_BiomeAudioConfig DesertoConfig;
-    DesertoConfig.AmbientVolume = 0.5f;
-    DesertoConfig.RandomSoundInterval = 30.0f;
-    DesertoConfig.RandomSoundChance = 0.15f;
-    BiomeAudioConfigs.Add(EAudio_BiomeType::Deserto, DesertoConfig);
-    
-    FAudio_BiomeAudioConfig MontanhaConfig;
-    MontanhaConfig.AmbientVolume = 0.6f;
-    MontanhaConfig.RandomSoundInterval = 25.0f;
-    MontanhaConfig.RandomSoundChance = 0.2f;
-    BiomeAudioConfigs.Add(EAudio_BiomeType::Montanha, MontanhaConfig);
-    
-    UE_LOG(LogTemp, Warning, TEXT("Audio_SoundManager: Biome configs initialized"));
-}
-
-void AAudio_SoundManager::InitializeFootstepConfigs()
-{
-    // Initialize footstep configurations for different surface types
-    
-    FAudio_FootstepConfig GrassConfig;
-    GrassConfig.VolumeMultiplier = 0.8f;
-    GrassConfig.PitchVariation = 0.15f;
-    FootstepConfigs.Add(TEXT("Grass"), GrassConfig);
-    
-    FAudio_FootstepConfig DirtConfig;
-    DirtConfig.VolumeMultiplier = 1.0f;
-    DirtConfig.PitchVariation = 0.2f;
-    FootstepConfigs.Add(TEXT("Dirt"), DirtConfig);
-    
-    FAudio_FootstepConfig StoneConfig;
-    StoneConfig.VolumeMultiplier = 1.2f;
-    StoneConfig.PitchVariation = 0.1f;
-    FootstepConfigs.Add(TEXT("Stone"), StoneConfig);
-    
-    FAudio_FootstepConfig WaterConfig;
-    WaterConfig.VolumeMultiplier = 0.9f;
-    WaterConfig.PitchVariation = 0.25f;
-    FootstepConfigs.Add(TEXT("Water"), WaterConfig);
-    
-    FAudio_FootstepConfig SandConfig;
-    SandConfig.VolumeMultiplier = 0.7f;
-    SandConfig.PitchVariation = 0.3f;
-    FootstepConfigs.Add(TEXT("Sand"), SandConfig);
-    
-    UE_LOG(LogTemp, Warning, TEXT("Audio_SoundManager: Footstep configs initialized"));
+    return AudioComp;
 }
