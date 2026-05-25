@@ -2,51 +2,84 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
-#include "Components/ExponentialHeightFogComponent.h"
 #include "Components/DirectionalLightComponent.h"
-#include "Particles/ParticleSystemComponent.h"
+#include "Components/SkyLightComponent.h"
+#include "Components/ExponentialHeightFogComponent.h"
 #include "Engine/DirectionalLight.h"
+#include "Engine/SkyLight.h"
 #include "Engine/ExponentialHeightFog.h"
+#include "SharedTypes.h"
 #include "EnvArt_AtmosphericManager.generated.h"
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FEnvArt_TimeOfDaySettings
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Time of Day")
+    float SunAngle = -20.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Time of Day")
+    float SunAzimuth = 45.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Time of Day")
+    float SunIntensity = 3.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Time of Day")
+    FLinearColor SunColor = FLinearColor(1.0f, 0.8f, 0.6f, 1.0f);
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Time of Day")
+    float SkyLightIntensity = 1.5f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Time of Day")
+    FLinearColor SkyLightColor = FLinearColor(0.4f, 0.6f, 1.0f, 1.0f);
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FEnvArt_FogSettings
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fog")
+    float FogDensity = 0.02f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fog")
+    float FogHeightFalloff = 0.2f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fog")
+    float FogMaxOpacity = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fog")
+    float StartDistance = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fog")
+    FLinearColor FogInscatteringColor = FLinearColor(0.4f, 0.5f, 0.6f, 1.0f);
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fog")
+    FLinearColor DirectionalInscatteringColor = FLinearColor(1.0f, 0.8f, 0.4f, 1.0f);
+};
 
 USTRUCT(BlueprintType)
 struct TRANSPERSONALGAME_API FEnvArt_BiomeAtmosphere
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmosphere")
-    FLinearColor FogColor = FLinearColor(0.7f, 0.8f, 0.6f, 1.0f);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Atmosphere")
+    EBiomeType BiomeType = EBiomeType::Savana;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmosphere")
-    float FogDensity = 0.02f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Atmosphere")
+    FEnvArt_TimeOfDaySettings TimeOfDay;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmosphere")
-    float FogHeightFalloff = 0.2f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Atmosphere")
+    FEnvArt_FogSettings FogSettings;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmosphere")
-    FLinearColor LightColor = FLinearColor(1.0f, 0.9f, 0.7f, 1.0f);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Atmosphere")
+    float WindStrength = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmosphere")
-    float LightIntensity = 3.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmosphere")
-    FRotator SunAngle = FRotator(-30.0f, 45.0f, 0.0f);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Atmosphere")
+    FVector WindDirection = FVector(1.0f, 0.0f, 0.0f);
 };
 
-UENUM(BlueprintType)
-enum class EEnvArt_BiomeType : uint8
-{
-    Savana,
-    Pantano,
-    Floresta,
-    Deserto,
-    Montanha
-};
-
-/**
- * Manages atmospheric effects and lighting for different Cretaceous biomes
- * Creates immersive prehistoric environments with proper lighting and fog
- */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API AEnvArt_AtmosphericManager : public AActor
 {
@@ -58,52 +91,65 @@ public:
 protected:
     virtual void BeginPlay() override;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+public:
+    virtual void Tick(float DeltaTime) override;
+
+    // Atmospheric components
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Atmosphere", meta = (AllowPrivateAccess = "true"))
     class USceneComponent* RootSceneComponent;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmosphere")
-    TMap<EEnvArt_BiomeType, FEnvArt_BiomeAtmosphere> BiomeAtmospheres;
+    // Biome atmosphere settings
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Settings")
+    TArray<FEnvArt_BiomeAtmosphere> BiomeAtmospheres;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmosphere")
-    EEnvArt_BiomeType CurrentBiome = EEnvArt_BiomeType::Savana;
+    // Current atmosphere state
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Current State")
+    EBiomeType CurrentBiome = EBiomeType::Savana;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmosphere")
-    float AtmosphereTransitionTime = 5.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Current State")
+    float TimeOfDay = 0.5f; // 0.0 = midnight, 0.5 = noon, 1.0 = midnight
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmosphere")
-    bool bEnableVolumetricFog = true;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Current State")
+    float DayDuration = 1200.0f; // seconds for full day cycle
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmosphere")
-    bool bEnableAtmosphericParticles = true;
+    // Light references
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Light References")
+    class ADirectionalLight* SunLight;
 
-public:
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Light References")
+    class ASkyLight* SkyLight;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Light References")
+    class AExponentialHeightFog* HeightFog;
+
+    // Functions
     UFUNCTION(BlueprintCallable, Category = "Atmosphere")
-    void SetBiomeAtmosphere(EEnvArt_BiomeType BiomeType);
-
-    UFUNCTION(BlueprintCallable, Category = "Atmosphere")
-    void CreateVolumetricFog(const FVector& Location, const FEnvArt_BiomeAtmosphere& Atmosphere);
-
-    UFUNCTION(BlueprintCallable, Category = "Atmosphere")
-    void CreateAtmosphericParticles(const FVector& Location, EEnvArt_BiomeType BiomeType);
-
-    UFUNCTION(BlueprintCallable, Category = "Atmosphere")
-    void UpdateDirectionalLighting(const FEnvArt_BiomeAtmosphere& Atmosphere);
-
-    UFUNCTION(BlueprintCallable, Category = "Atmosphere")
-    FEnvArt_BiomeAtmosphere GetBiomeAtmosphere(EEnvArt_BiomeType BiomeType) const;
+    void SetBiomeAtmosphere(EBiomeType NewBiome);
 
     UFUNCTION(BlueprintCallable, Category = "Atmosphere")
-    void InitializeBiomeAtmospheres();
+    void SetTimeOfDay(float NewTimeOfDay);
 
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Atmosphere")
-    void ApplyCurrentAtmosphere();
+    UFUNCTION(BlueprintCallable, Category = "Atmosphere")
+    void UpdateSunPosition();
+
+    UFUNCTION(BlueprintCallable, Category = "Atmosphere")
+    void UpdateFogSettings();
+
+    UFUNCTION(BlueprintCallable, Category = "Atmosphere")
+    void UpdateSkyLighting();
+
+    UFUNCTION(BlueprintCallable, Category = "Atmosphere", CallInEditor = true)
+    void FindLightActors();
+
+    UFUNCTION(BlueprintCallable, Category = "Atmosphere", CallInEditor = true)
+    void ApplyGoldenHourLighting();
+
+    UFUNCTION(BlueprintCallable, Category = "Atmosphere", CallInEditor = true)
+    void SetupVolumetricFog();
 
 private:
-    void SetupDefaultAtmospheres();
-    
-    UPROPERTY()
-    TArray<class AExponentialHeightFog*> SpawnedFogActors;
-
-    UPROPERTY()
-    TArray<class AEmitter*> SpawnedParticleActors;
+    void InitializeBiomeSettings();
+    FEnvArt_BiomeAtmosphere* GetCurrentBiomeSettings();
+    float CalculateSunAngle(float TimeOfDay) const;
+    FLinearColor InterpolateSunColor(float TimeOfDay) const;
 };
