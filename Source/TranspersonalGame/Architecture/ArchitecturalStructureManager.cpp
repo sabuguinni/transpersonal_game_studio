@@ -1,209 +1,276 @@
 #include "ArchitecturalStructureManager.h"
 #include "Engine/Engine.h"
-#include "Materials/Material.h"
-#include "Engine/StaticMesh.h"
+#include "Engine/World.h"
 #include "Components/StaticMeshComponent.h"
+#include "Engine/StaticMesh.h"
+#include "UObject/ConstructorHelpers.h"
+#include "Kismet/GameplayStatics.h"
+#include "Math/UnrealMathUtility.h"
 
-UArchitecturalStructureManager::UArchitecturalStructureManager()
+AArch_StructureActor::AArch_StructureActor()
 {
-    PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 1.0f; // Tick every second for performance
-    
-    StructureData = FArch_StructureData();
-    InteriorSpaces.Empty();
-    StructureMesh = nullptr;
-    WeatheredMaterial = nullptr;
-    StructuralIntegrity = 100.0f;
-    bIsHistoricalSite = false;
+    PrimaryActorTick.bCanEverTick = true;
+
+    StructureMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("StructureMesh"));
+    RootComponent = StructureMesh;
+
+    StructureType = EArch_StructureType::Dwelling;
+    StructureData.StructureHealth = 100.0f;
+    StructureData.bIsHabitable = true;
 }
 
-void UArchitecturalStructureManager::BeginPlay()
+void AArch_StructureActor::BeginPlay()
 {
     Super::BeginPlay();
     
-    // Initialize default structure if not set
-    if (StructureData.StructureType == EArch_StructureType::None)
+    if (UArchitecturalStructureManager* ArchManager = GetWorld()->GetSubsystem<UArchitecturalStructureManager>())
     {
-        InitializeStructure(EArch_StructureType::StoneArch, EArch_ConstructionMaterial::Limestone, FVector(400.0f, 100.0f, 600.0f));
+        ArchManager->RegisterStructure(this);
     }
-    
-    UE_LOG(LogTemp, Log, TEXT("ArchitecturalStructureManager initialized for %s"), 
-           GetOwner() ? *GetOwner()->GetName() : TEXT("Unknown"));
 }
 
-void UArchitecturalStructureManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void AArch_StructureActor::Tick(float DeltaTime)
 {
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+    Super::Tick(DeltaTime);
     
-    // Update structural integrity over time
-    UpdateStructuralIntegrity(DeltaTime);
-    
-    // Process natural weathering
-    ProcessWeathering(DeltaTime);
-}
-
-void UArchitecturalStructureManager::InitializeStructure(EArch_StructureType InType, EArch_ConstructionMaterial InMaterial, FVector InDimensions)
-{
-    StructureData.StructureType = InType;
-    StructureData.Material = InMaterial;
-    StructureData.Dimensions = InDimensions;
-    StructureData.Age = 0.0f;
-    StructureData.WeatheringLevel = 0.0f;
-    StructureData.bHasMossGrowth = false;
-    StructureData.bIsRuined = false;
-    
-    StructuralIntegrity = 100.0f;
-    
-    // Set appropriate material based on construction material
-    WeatheredMaterial = GetMaterialForType(InMaterial);
-    
-    UE_LOG(LogTemp, Log, TEXT("Structure initialized: Type=%d, Material=%d, Dimensions=%s"), 
-           (int32)InType, (int32)InMaterial, *InDimensions.ToString());
-}
-
-void UArchitecturalStructureManager::AddInteriorSpace(const FArch_InteriorSpace& NewSpace)
-{
-    InteriorSpaces.Add(NewSpace);
-    
-    UE_LOG(LogTemp, Log, TEXT("Added interior space: %s with dimensions %s"), 
-           *NewSpace.SpaceName, *NewSpace.SpaceDimensions.ToString());
-}
-
-void UArchitecturalStructureManager::ApplyWeathering(float WeatheringAmount)
-{
-    StructureData.WeatheringLevel = FMath::Clamp(StructureData.WeatheringLevel + WeatheringAmount, 0.0f, 100.0f);
-    
-    // Apply moss growth if weathering is significant
-    if (StructureData.WeatheringLevel > 30.0f && !StructureData.bHasMossGrowth)
+    // Weather damage simulation
+    if (StructureData.StructureHealth > 0.0f)
     {
-        SetMossGrowth(true);
+        float WeatherDamage = DeltaTime * 0.001f; // Very slow degradation
+        StructureData.StructureHealth = FMath::Max(0.0f, StructureData.StructureHealth - WeatherDamage);
     }
-    
-    // Mark as ruined if heavily weathered
-    if (StructureData.WeatheringLevel > 80.0f)
-    {
-        StructureData.bIsRuined = true;
-        StructuralIntegrity = FMath::Min(StructuralIntegrity, 25.0f);
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("Applied weathering: %f, Total weathering: %f"), 
-           WeatheringAmount, StructureData.WeatheringLevel);
 }
 
-void UArchitecturalStructureManager::SetMossGrowth(bool bEnabled)
+void AArch_StructureActor::InitializeStructure(const FArch_StructureData& InStructureData, EArch_StructureType InType)
 {
-    StructureData.bHasMossGrowth = bEnabled;
+    StructureData = InStructureData;
+    StructureType = InType;
     
-    // Update visual appearance if owner has static mesh component
-    if (AActor* Owner = GetOwner())
+    SetActorLocation(StructureData.Location);
+    SetActorRotation(StructureData.Rotation);
+    
+    if (StructureMesh)
     {
-        if (UStaticMeshComponent* MeshComp = Owner->FindComponentByClass<UStaticMeshComponent>())
+        // Set material based on structure type
+        switch (StructureType)
         {
-            if (WeatheredMaterial)
+        case EArch_StructureType::Dwelling:
+            StructureData.bIsHabitable = true;
+            break;
+        case EArch_StructureType::Ruins:
+            StructureData.StructureHealth *= 0.3f; // Ruins are damaged
+            StructureData.bIsHabitable = false;
+            break;
+        default:
+            break;
+        }
+    }
+}
+
+bool AArch_StructureActor::CanPlayerEnter() const
+{
+    return StructureData.bIsHabitable && StructureData.StructureHealth > 25.0f;
+}
+
+void AArch_StructureActor::DamageStructure(float DamageAmount)
+{
+    StructureData.StructureHealth = FMath::Max(0.0f, StructureData.StructureHealth - DamageAmount);
+    
+    if (StructureData.StructureHealth <= 0.0f)
+    {
+        StructureData.bIsHabitable = false;
+        // Could trigger collapse effects here
+    }
+}
+
+void UArchitecturalStructureManager::Initialize(FSubsystemCollectionBase& Collection)
+{
+    Super::Initialize(Collection);
+    
+    ManagedStructures.Empty();
+    BiomeStructures.Empty();
+    
+    UE_LOG(LogTemp, Warning, TEXT("ArchitecturalStructureManager initialized"));
+}
+
+void UArchitecturalStructureManager::Deinitialize()
+{
+    ManagedStructures.Empty();
+    BiomeStructures.Empty();
+    
+    Super::Deinitialize();
+}
+
+AArch_StructureActor* UArchitecturalStructureManager::SpawnStructure(const FArch_StructureData& StructureData, EArch_StructureType StructureType)
+{
+    if (!GetWorld())
+    {
+        return nullptr;
+    }
+    
+    FActorSpawnParameters SpawnParams;
+    SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
+    
+    AArch_StructureActor* NewStructure = GetWorld()->SpawnActor<AArch_StructureActor>(
+        AArch_StructureActor::StaticClass(),
+        StructureData.Location,
+        StructureData.Rotation,
+        SpawnParams
+    );
+    
+    if (NewStructure)
+    {
+        NewStructure->InitializeStructure(StructureData, StructureType);
+        RegisterStructure(NewStructure);
+        
+        UE_LOG(LogTemp, Warning, TEXT("Spawned structure: %s at %s"), 
+               *StructureData.StructureName, 
+               *StructureData.Location.ToString());
+    }
+    
+    return NewStructure;
+}
+
+void UArchitecturalStructureManager::PopulateBiomeWithStructures(EBiomeType BiomeType, int32 StructureCount)
+{
+    if (!GetWorld())
+    {
+        return;
+    }
+    
+    FVector BiomeCenter;
+    switch (BiomeType)
+    {
+    case EBiomeType::Savana:
+        BiomeCenter = FVector(0, 0, 100);
+        break;
+    case EBiomeType::Pantano:
+        BiomeCenter = FVector(-50000, -45000, 100);
+        break;
+    case EBiomeType::Floresta:
+        BiomeCenter = FVector(-45000, 40000, 100);
+        break;
+    case EBiomeType::Deserto:
+        BiomeCenter = FVector(55000, 0, 100);
+        break;
+    case EBiomeType::Montanha:
+        BiomeCenter = FVector(40000, 50000, 100);
+        break;
+    default:
+        BiomeCenter = FVector::ZeroVector;
+        break;
+    }
+    
+    for (int32 i = 0; i < StructureCount; ++i)
+    {
+        FArch_StructureData NewStructureData;
+        
+        // Random position within biome radius
+        float Angle = FMath::RandRange(0.0f, 2.0f * PI);
+        float Distance = FMath::RandRange(500.0f, 5000.0f);
+        
+        NewStructureData.Location = BiomeCenter + FVector(
+            FMath::Cos(Angle) * Distance,
+            FMath::Sin(Angle) * Distance,
+            FMath::RandRange(-50.0f, 200.0f)
+        );
+        
+        NewStructureData.Rotation = FRotator(0, FMath::RandRange(0.0f, 360.0f), 0);
+        NewStructureData.BiomeType = BiomeType;
+        NewStructureData.StructureName = FString::Printf(TEXT("Structure_%s_%d"), 
+                                                        *UEnum::GetValueAsString(BiomeType), i);
+        
+        // Vary structure types based on biome
+        EArch_StructureType StructureType = EArch_StructureType::Dwelling;
+        if (BiomeType == EBiomeType::Deserto)
+        {
+            StructureType = (FMath::RandRange(0, 100) < 30) ? EArch_StructureType::Ruins : EArch_StructureType::Storage;
+        }
+        else if (BiomeType == EBiomeType::Montanha)
+        {
+            StructureType = EArch_StructureType::Defensive;
+        }
+        
+        SpawnStructure(NewStructureData, StructureType);
+    }
+    
+    UE_LOG(LogTemp, Warning, TEXT("Populated %s biome with %d structures"), 
+           *UEnum::GetValueAsString(BiomeType), StructureCount);
+}
+
+TArray<AArch_StructureActor*> UArchitecturalStructureManager::GetStructuresInRadius(FVector Location, float Radius)
+{
+    TArray<AArch_StructureActor*> NearbyStructures;
+    
+    for (AArch_StructureActor* Structure : ManagedStructures)
+    {
+        if (IsValid(Structure))
+        {
+            float Distance = FVector::Dist(Structure->GetActorLocation(), Location);
+            if (Distance <= Radius)
             {
-                MeshComp->SetMaterial(0, WeatheredMaterial);
+                NearbyStructures.Add(Structure);
             }
         }
     }
     
-    UE_LOG(LogTemp, Log, TEXT("Moss growth %s"), bEnabled ? TEXT("enabled") : TEXT("disabled"));
+    return NearbyStructures;
 }
 
-void UArchitecturalStructureManager::RepairStructure(float RepairAmount)
+void UArchitecturalStructureManager::RegisterStructure(AArch_StructureActor* Structure)
 {
-    StructuralIntegrity = FMath::Clamp(StructuralIntegrity + RepairAmount, 0.0f, 100.0f);
-    
-    // Reduce weathering with repairs
-    StructureData.WeatheringLevel = FMath::Max(StructureData.WeatheringLevel - (RepairAmount * 0.5f), 0.0f);
-    
-    // Remove ruined status if sufficiently repaired
-    if (StructuralIntegrity > 50.0f)
+    if (IsValid(Structure) && !ManagedStructures.Contains(Structure))
     {
-        StructureData.bIsRuined = false;
+        ManagedStructures.Add(Structure);
+        
+        FArch_StructureData StructureData = Structure->GetStructureData();
+        if (!BiomeStructures.Contains(StructureData.BiomeType))
+        {
+            BiomeStructures.Add(StructureData.BiomeType, TArray<FArch_StructureData>());
+        }
+        BiomeStructures[StructureData.BiomeType].Add(StructureData);
     }
-    
-    UE_LOG(LogTemp, Log, TEXT("Structure repaired by %f, Integrity now: %f"), 
-           RepairAmount, StructuralIntegrity);
 }
 
-void UArchitecturalStructureManager::UpdateStructuralIntegrity(float DeltaTime)
+void UArchitecturalStructureManager::UnregisterStructure(AArch_StructureActor* Structure)
 {
-    // Gradual decay over time (very slow for stone structures)
-    float DecayRate = 0.001f; // 0.1% per second
-    
-    // Faster decay for wooden structures
-    if (StructureData.Material == EArch_ConstructionMaterial::Wood)
+    if (IsValid(Structure))
     {
-        DecayRate = 0.005f;
+        ManagedStructures.Remove(Structure);
+        
+        FArch_StructureData StructureData = Structure->GetStructureData();
+        if (BiomeStructures.Contains(StructureData.BiomeType))
+        {
+            BiomeStructures[StructureData.BiomeType].RemoveAll([&](const FArch_StructureData& Data)
+            {
+                return Data.StructureName == StructureData.StructureName;
+            });
+        }
     }
-    
-    // Slower decay for historical sites (better preservation)
-    if (bIsHistoricalSite)
-    {
-        DecayRate *= 0.1f;
-    }
-    
-    StructuralIntegrity = FMath::Max(StructuralIntegrity - (DecayRate * DeltaTime), 0.0f);
-    
-    // Age the structure
-    StructureData.Age += DeltaTime;
 }
 
-void UArchitecturalStructureManager::ProcessWeathering(float DeltaTime)
+void UArchitecturalStructureManager::GenerateArchitecturalLayout()
 {
-    // Environmental weathering based on age and exposure
-    float WeatheringRate = 0.0005f; // Base weathering rate
+    UE_LOG(LogTemp, Warning, TEXT("Generating architectural layout for all biomes"));
     
-    // Faster weathering for certain materials
-    switch (StructureData.Material)
+    // Clear existing structures
+    for (AArch_StructureActor* Structure : ManagedStructures)
     {
-        case EArch_ConstructionMaterial::Wood:
-            WeatheringRate *= 3.0f;
-            break;
-        case EArch_ConstructionMaterial::Clay:
-            WeatheringRate *= 2.0f;
-            break;
-        case EArch_ConstructionMaterial::Limestone:
-            WeatheringRate *= 1.5f;
-            break;
-        case EArch_ConstructionMaterial::Granite:
-            WeatheringRate *= 0.5f;
-            break;
-        default:
-            break;
+        if (IsValid(Structure))
+        {
+            Structure->Destroy();
+        }
     }
+    ManagedStructures.Empty();
+    BiomeStructures.Empty();
     
-    ApplyWeathering(WeatheringRate * DeltaTime);
-}
-
-UMaterialInterface* UArchitecturalStructureManager::GetMaterialForType(EArch_ConstructionMaterial MaterialType)
-{
-    // In a real implementation, this would load appropriate materials from content
-    // For now, return nullptr and let the default material system handle it
+    // Populate each biome with structures
+    PopulateBiomeWithStructures(EBiomeType::Savana, 15);
+    PopulateBiomeWithStructures(EBiomeType::Pantano, 8);
+    PopulateBiomeWithStructures(EBiomeType::Floresta, 12);
+    PopulateBiomeWithStructures(EBiomeType::Deserto, 6);
+    PopulateBiomeWithStructures(EBiomeType::Montanha, 10);
     
-    switch (MaterialType)
-    {
-        case EArch_ConstructionMaterial::Limestone:
-            // Would load limestone material
-            break;
-        case EArch_ConstructionMaterial::Sandstone:
-            // Would load sandstone material
-            break;
-        case EArch_ConstructionMaterial::Basalt:
-            // Would load basalt material
-            break;
-        case EArch_ConstructionMaterial::Granite:
-            // Would load granite material
-            break;
-        case EArch_ConstructionMaterial::Wood:
-            // Would load weathered wood material
-            break;
-        case EArch_ConstructionMaterial::Clay:
-            // Would load clay/adobe material
-            break;
-        default:
-            break;
-    }
-    
-    return nullptr;
+    UE_LOG(LogTemp, Warning, TEXT("Architectural layout generation complete. Total structures: %d"), 
+           ManagedStructures.Num());
 }
