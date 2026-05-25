@@ -1,6 +1,6 @@
 #include "ProductionCoordinator.h"
 #include "Engine/Engine.h"
-#include "Engine/World.h"
+#include "Misc/DateTime.h"
 
 UProductionCoordinator::UProductionCoordinator()
 {
@@ -11,257 +11,347 @@ void UProductionCoordinator::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
     
-    InitializeAgentChain();
+    UE_LOG(LogTemp, Warning, TEXT("ProductionCoordinator: Initializing 19-agent development pipeline"));
     
-    UE_LOG(LogTemp, Warning, TEXT("ProductionCoordinator initialized - Studio Director ready"));
+    // Initialize agent registry
+    RegisterAgent(TEXT("Studio Director"), 1);
+    RegisterAgent(TEXT("Engine Architect"), 2);
+    RegisterAgent(TEXT("Core Systems Programmer"), 3);
+    RegisterAgent(TEXT("Performance Optimizer"), 4);
+    RegisterAgent(TEXT("Procedural World Generator"), 5);
+    RegisterAgent(TEXT("Environment Artist"), 6);
+    RegisterAgent(TEXT("Architecture & Interior Agent"), 7);
+    RegisterAgent(TEXT("Lighting & Atmosphere Agent"), 8);
+    RegisterAgent(TEXT("Character Artist Agent"), 9);
+    RegisterAgent(TEXT("Animation Agent"), 10);
+    RegisterAgent(TEXT("NPC Behavior Agent"), 11);
+    RegisterAgent(TEXT("Combat & Enemy AI Agent"), 12);
+    RegisterAgent(TEXT("Crowd & Traffic Simulation"), 13);
+    RegisterAgent(TEXT("Quest & Mission Designer"), 14);
+    RegisterAgent(TEXT("Narrative & Dialogue Agent"), 15);
+    RegisterAgent(TEXT("Audio Agent"), 16);
+    RegisterAgent(TEXT("VFX Agent"), 17);
+    RegisterAgent(TEXT("QA & Testing Agent"), 18);
+    RegisterAgent(TEXT("Integration & Build Agent"), 19);
     
-    // Set initial milestone
-    SetCurrentMilestone(TEXT("Milestone 1 - Walk Around"));
-    
-    // Log startup
-    LogProductionEvent(TEXT("Production Coordinator System Online - 19 Agent Chain Ready"));
+    SetCurrentMilestone(TEXT("Playable Prototype - Walk Around"));
+    UpdateMetrics();
 }
 
 void UProductionCoordinator::Deinitialize()
 {
-    ActiveTasks.Empty();
-    ProductionLog.Empty();
-    
+    UE_LOG(LogTemp, Warning, TEXT("ProductionCoordinator: Shutting down"));
     Super::Deinitialize();
 }
 
-void UProductionCoordinator::InitializeAgentChain()
+void UProductionCoordinator::RegisterAgent(const FString& AgentName, int32 AgentNumber)
 {
-    // Define the 19-agent production chain
-    AgentChainOrder.Empty();
-    AgentChainOrder.Add(TEXT("Studio Director"), 1);
-    AgentChainOrder.Add(TEXT("Engine Architect"), 2);
-    AgentChainOrder.Add(TEXT("Core Systems Programmer"), 3);
-    AgentChainOrder.Add(TEXT("Performance Optimizer"), 4);
-    AgentChainOrder.Add(TEXT("Procedural World Generator"), 5);
-    AgentChainOrder.Add(TEXT("Environment Artist"), 6);
-    AgentChainOrder.Add(TEXT("Architecture & Interior Agent"), 7);
-    AgentChainOrder.Add(TEXT("Lighting & Atmosphere Agent"), 8);
-    AgentChainOrder.Add(TEXT("Character Artist Agent"), 9);
-    AgentChainOrder.Add(TEXT("Animation Agent"), 10);
-    AgentChainOrder.Add(TEXT("NPC Behavior Agent"), 11);
-    AgentChainOrder.Add(TEXT("Combat & Enemy AI Agent"), 12);
-    AgentChainOrder.Add(TEXT("Crowd & Traffic Simulation"), 13);
-    AgentChainOrder.Add(TEXT("Quest & Mission Designer"), 14);
-    AgentChainOrder.Add(TEXT("Narrative & Dialogue Agent"), 15);
-    AgentChainOrder.Add(TEXT("Audio Agent"), 16);
-    AgentChainOrder.Add(TEXT("VFX Agent"), 17);
-    AgentChainOrder.Add(TEXT("QA & Testing Agent"), 18);
-    AgentChainOrder.Add(TEXT("Integration & Build Agent"), 19);
+    AgentNumbers.Add(AgentName, AgentNumber);
+    AgentStatuses.Add(AgentName, EDir_AgentStatus::Idle);
+    AgentTasks.Add(AgentName, TArray<FDir_AgentTask>());
+    
+    UE_LOG(LogTemp, Log, TEXT("ProductionCoordinator: Registered Agent #%d - %s"), AgentNumber, *AgentName);
 }
 
-void UProductionCoordinator::AssignTask(const FString& AgentName, const FString& TaskDescription, float Priority)
+void UProductionCoordinator::AssignTask(const FString& AgentName, const FDir_AgentTask& Task)
 {
-    FDir_AgentTask NewTask;
-    NewTask.AgentName = AgentName;
-    NewTask.TaskDescription = TaskDescription;
-    NewTask.Priority = Priority;
-    NewTask.Status = EDir_AgentStatus::Working;
-    NewTask.StartTime = FDateTime::Now();
-    NewTask.DeadlineTime = FDateTime::Now() + FTimespan::FromHours(2);
-    
-    ActiveTasks.Add(NewTask);
-    UpdateMetrics();
-    
-    FString LogMessage = FString::Printf(TEXT("TASK ASSIGNED: %s -> %s (Priority: %.1f)"), 
-        *AgentName, *TaskDescription, Priority);
-    LogProductionEvent(LogMessage);
-    
-    UE_LOG(LogTemp, Warning, TEXT("Task assigned to %s: %s"), *AgentName, *TaskDescription);
-}
-
-void UProductionCoordinator::UpdateTaskStatus(const FString& AgentName, EDir_AgentStatus NewStatus)
-{
-    for (FDir_AgentTask& Task : ActiveTasks)
+    if (!AgentTasks.Contains(AgentName))
     {
-        if (Task.AgentName == AgentName && Task.Status == EDir_AgentStatus::Working)
+        UE_LOG(LogTemp, Error, TEXT("ProductionCoordinator: Agent %s not found"), *AgentName);
+        return;
+    }
+    
+    // Check if agent is blocked
+    if (AgentStatuses[AgentName] == EDir_AgentStatus::Blocked)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("ProductionCoordinator: Agent %s is blocked - %s"), 
+               *AgentName, *BlockedReasons.FindRef(AgentName));
+        return;
+    }
+    
+    // Check dependencies
+    if (!CheckDependencies(Task))
+    {
+        UE_LOG(LogTemp, Warning, TEXT("ProductionCoordinator: Task dependencies not met for %s"), *AgentName);
+        return;
+    }
+    
+    AgentTasks[AgentName].Add(Task);
+    AgentStatuses[AgentName] = EDir_AgentStatus::Working;
+    
+    LogTaskUpdate(AgentName, Task.TaskDescription, EDir_AgentStatus::Working);
+    UpdateMetrics();
+}
+
+void UProductionCoordinator::UpdateTaskStatus(const FString& AgentName, const FString& TaskDescription, EDir_AgentStatus NewStatus)
+{
+    if (!AgentTasks.Contains(AgentName))
+    {
+        return;
+    }
+    
+    TArray<FDir_AgentTask>& Tasks = AgentTasks[AgentName];
+    for (FDir_AgentTask& Task : Tasks)
+    {
+        if (Task.TaskDescription == TaskDescription)
         {
             Task.Status = NewStatus;
-            
-            FString StatusString;
-            switch (NewStatus)
-            {
-                case EDir_AgentStatus::Completed: StatusString = TEXT("COMPLETED"); break;
-                case EDir_AgentStatus::Failed: StatusString = TEXT("FAILED"); break;
-                case EDir_AgentStatus::Blocked: StatusString = TEXT("BLOCKED"); break;
-                default: StatusString = TEXT("UNKNOWN"); break;
-            }
-            
-            FString LogMessage = FString::Printf(TEXT("TASK UPDATE: %s -> %s"), 
-                *AgentName, *StatusString);
-            LogProductionEvent(LogMessage);
-            
+            LogTaskUpdate(AgentName, TaskDescription, NewStatus);
             break;
         }
     }
     
-    UpdateMetrics();
-}
-
-TArray<FDir_AgentTask> UProductionCoordinator::GetTasksForAgent(const FString& AgentName)
-{
-    TArray<FDir_AgentTask> AgentTasks;
+    // Update agent status based on tasks
+    bool bHasWorkingTasks = false;
+    bool bAllCompleted = true;
     
-    for (const FDir_AgentTask& Task : ActiveTasks)
+    for (const FDir_AgentTask& Task : Tasks)
     {
-        if (Task.AgentName == AgentName)
+        if (Task.Status == EDir_AgentStatus::Working)
         {
-            AgentTasks.Add(Task);
+            bHasWorkingTasks = true;
+            bAllCompleted = false;
+        }
+        else if (Task.Status != EDir_AgentStatus::Completed)
+        {
+            bAllCompleted = false;
         }
     }
     
-    return AgentTasks;
-}
-
-TArray<FDir_AgentTask> UProductionCoordinator::GetAllTasks()
-{
-    return ActiveTasks;
-}
-
-FDir_ProductionMetrics UProductionCoordinator::GetProductionMetrics()
-{
-    UpdateMetrics();
-    return CurrentMetrics;
-}
-
-void UProductionCoordinator::UpdateMetrics()
-{
-    CurrentMetrics.TotalTasks = ActiveTasks.Num();
-    CurrentMetrics.CompletedTasks = 0;
-    CurrentMetrics.FailedTasks = 0;
-    
-    for (const FDir_AgentTask& Task : ActiveTasks)
+    if (bHasWorkingTasks)
     {
-        if (Task.Status == EDir_AgentStatus::Completed)
-        {
-            CurrentMetrics.CompletedTasks++;
-        }
-        else if (Task.Status == EDir_AgentStatus::Failed)
-        {
-            CurrentMetrics.FailedTasks++;
-        }
+        AgentStatuses[AgentName] = EDir_AgentStatus::Working;
     }
-    
-    if (CurrentMetrics.TotalTasks > 0)
+    else if (bAllCompleted && Tasks.Num() > 0)
     {
-        CurrentMetrics.OverallProgress = (float)CurrentMetrics.CompletedTasks / (float)CurrentMetrics.TotalTasks * 100.0f;
+        AgentStatuses[AgentName] = EDir_AgentStatus::Completed;
     }
     else
     {
-        CurrentMetrics.OverallProgress = 0.0f;
+        AgentStatuses[AgentName] = EDir_AgentStatus::Idle;
+    }
+    
+    UpdateMetrics();
+}
+
+bool UProductionCoordinator::CanAgentStart(const FString& AgentName) const
+{
+    if (!AgentStatuses.Contains(AgentName))
+    {
+        return false;
+    }
+    
+    EDir_AgentStatus Status = AgentStatuses[AgentName];
+    return Status == EDir_AgentStatus::Idle || Status == EDir_AgentStatus::Completed;
+}
+
+TArray<FDir_AgentTask> UProductionCoordinator::GetPendingTasks() const
+{
+    TArray<FDir_AgentTask> PendingTasks;
+    
+    for (const auto& AgentTaskPair : AgentTasks)
+    {
+        for (const FDir_AgentTask& Task : AgentTaskPair.Value)
+        {
+            if (Task.Status == EDir_AgentStatus::Idle || Task.Status == EDir_AgentStatus::Working)
+            {
+                PendingTasks.Add(Task);
+            }
+        }
+    }
+    
+    return PendingTasks;
+}
+
+FDir_ProductionMetrics UProductionCoordinator::GetProductionMetrics() const
+{
+    return CurrentMetrics;
+}
+
+void UProductionCoordinator::SetHighPriorityTask(const FString& AgentName, const FString& TaskDescription)
+{
+    if (!AgentTasks.Contains(AgentName))
+    {
+        return;
+    }
+    
+    TArray<FDir_AgentTask>& Tasks = AgentTasks[AgentName];
+    for (FDir_AgentTask& Task : Tasks)
+    {
+        if (Task.TaskDescription == TaskDescription)
+        {
+            Task.Priority = 10.0f; // Max priority
+            UE_LOG(LogTemp, Warning, TEXT("ProductionCoordinator: Set HIGH PRIORITY - %s: %s"), 
+                   *AgentName, *TaskDescription);
+            break;
+        }
     }
 }
 
-void UProductionCoordinator::LogProductionEvent(const FString& EventDescription)
+void UProductionCoordinator::BlockAgent(const FString& AgentName, const FString& Reason)
 {
-    FString TimestampedEvent = FString::Printf(TEXT("[%s] %s"), 
-        *FDateTime::Now().ToString(), *EventDescription);
-    
-    ProductionLog.Add(TimestampedEvent);
-    
-    // Keep only last 100 events to prevent memory bloat
-    if (ProductionLog.Num() > 100)
+    if (AgentStatuses.Contains(AgentName))
     {
-        ProductionLog.RemoveAt(0);
+        AgentStatuses[AgentName] = EDir_AgentStatus::Blocked;
+        BlockedReasons.Add(AgentName, Reason);
+        UE_LOG(LogTemp, Error, TEXT("ProductionCoordinator: BLOCKED %s - %s"), *AgentName, *Reason);
+        UpdateMetrics();
     }
-    
-    UE_LOG(LogTemp, Log, TEXT("PRODUCTION LOG: %s"), *EventDescription);
+}
+
+void UProductionCoordinator::UnblockAgent(const FString& AgentName)
+{
+    if (AgentStatuses.Contains(AgentName))
+    {
+        AgentStatuses[AgentName] = EDir_AgentStatus::Idle;
+        BlockedReasons.Remove(AgentName);
+        UE_LOG(LogTemp, Warning, TEXT("ProductionCoordinator: UNBLOCKED %s"), *AgentName);
+        UpdateMetrics();
+    }
 }
 
 void UProductionCoordinator::SetCurrentMilestone(const FString& MilestoneName)
 {
     CurrentMetrics.CurrentMilestone = MilestoneName;
-    
-    FString LogMessage = FString::Printf(TEXT("MILESTONE SET: %s"), *MilestoneName);
-    LogProductionEvent(LogMessage);
+    UE_LOG(LogTemp, Warning, TEXT("ProductionCoordinator: Current Milestone - %s"), *MilestoneName);
 }
 
-bool UProductionCoordinator::IsMilestoneComplete(const FString& MilestoneName)
+float UProductionCoordinator::CalculateOverallProgress() const
 {
-    if (MilestoneName == TEXT("Milestone 1 - Walk Around"))
+    int32 TotalTasks = 0;
+    int32 CompletedTasks = 0;
+    
+    for (const auto& AgentTaskPair : AgentTasks)
     {
-        // Check if core playable prototype requirements are met
-        int32 CoreSystemsComplete = 0;
+        for (const FDir_AgentTask& Task : AgentTaskPair.Value)
+        {
+            TotalTasks++;
+            if (Task.Status == EDir_AgentStatus::Completed)
+            {
+                CompletedTasks++;
+            }
+        }
+    }
+    
+    return TotalTasks > 0 ? (float)CompletedTasks / (float)TotalTasks * 100.0f : 0.0f;
+}
+
+void UProductionCoordinator::PrintProductionStatus()
+{
+    UE_LOG(LogTemp, Warning, TEXT("=== PRODUCTION STATUS ==="));
+    UE_LOG(LogTemp, Warning, TEXT("Milestone: %s"), *CurrentMetrics.CurrentMilestone);
+    UE_LOG(LogTemp, Warning, TEXT("Progress: %.1f%%"), CurrentMetrics.OverallProgress);
+    UE_LOG(LogTemp, Warning, TEXT("Active Agents: %d/%d"), CurrentMetrics.ActiveAgents, CurrentMetrics.TotalAgents);
+    
+    for (const auto& AgentStatusPair : AgentStatuses)
+    {
+        FString StatusText;
+        switch (AgentStatusPair.Value)
+        {
+            case EDir_AgentStatus::Idle: StatusText = TEXT("IDLE"); break;
+            case EDir_AgentStatus::Working: StatusText = TEXT("WORKING"); break;
+            case EDir_AgentStatus::Completed: StatusText = TEXT("COMPLETED"); break;
+            case EDir_AgentStatus::Failed: StatusText = TEXT("FAILED"); break;
+            case EDir_AgentStatus::Blocked: StatusText = TEXT("BLOCKED"); break;
+        }
         
-        for (const FDir_AgentTask& Task : ActiveTasks)
+        int32 AgentNumber = AgentNumbers.FindRef(AgentStatusPair.Key);
+        UE_LOG(LogTemp, Warning, TEXT("Agent #%d %s: %s"), AgentNumber, *AgentStatusPair.Key, *StatusText);
+    }
+}
+
+void UProductionCoordinator::ResetAllTasks()
+{
+    for (auto& AgentTaskPair : AgentTasks)
+    {
+        AgentTaskPair.Value.Empty();
+    }
+    
+    for (auto& AgentStatusPair : AgentStatuses)
+    {
+        AgentStatusPair.Value = EDir_AgentStatus::Idle;
+    }
+    
+    BlockedReasons.Empty();
+    UpdateMetrics();
+    
+    UE_LOG(LogTemp, Warning, TEXT("ProductionCoordinator: All tasks reset"));
+}
+
+void UProductionCoordinator::UpdateMetrics()
+{
+    CurrentMetrics.TotalAgents = AgentStatuses.Num();
+    CurrentMetrics.ActiveAgents = 0;
+    CurrentMetrics.CompletedTasks = 0;
+    CurrentMetrics.FailedTasks = 0;
+    
+    for (const auto& AgentStatusPair : AgentStatuses)
+    {
+        if (AgentStatusPair.Value == EDir_AgentStatus::Working)
+        {
+            CurrentMetrics.ActiveAgents++;
+        }
+    }
+    
+    for (const auto& AgentTaskPair : AgentTasks)
+    {
+        for (const FDir_AgentTask& Task : AgentTaskPair.Value)
         {
             if (Task.Status == EDir_AgentStatus::Completed)
             {
-                if (Task.AgentName.Contains(TEXT("Character")) || 
-                    Task.AgentName.Contains(TEXT("Movement")) ||
-                    Task.AgentName.Contains(TEXT("Camera")))
-                {
-                    CoreSystemsComplete++;
-                }
+                CurrentMetrics.CompletedTasks++;
+            }
+            else if (Task.Status == EDir_AgentStatus::Failed)
+            {
+                CurrentMetrics.FailedTasks++;
             }
         }
-        
-        return CoreSystemsComplete >= 3; // Minimum viable prototype
     }
     
-    return false;
+    CurrentMetrics.OverallProgress = CalculateOverallProgress();
 }
 
-void UProductionCoordinator::TriggerNextAgent(const FString& CurrentAgent)
+bool UProductionCoordinator::CheckDependencies(const FDir_AgentTask& Task) const
 {
-    FString NextAgent = GetNextAgentInChain(CurrentAgent);
-    
-    if (!NextAgent.IsEmpty())
+    for (const FString& Dependency : Task.Dependencies)
     {
-        FString LogMessage = FString::Printf(TEXT("CHAIN TRIGGER: %s -> %s"), 
-            *CurrentAgent, *NextAgent);
-        LogProductionEvent(LogMessage);
+        bool bDependencyMet = false;
         
-        // Auto-assign next agent task based on chain position
-        FString NextTaskDescription = FString::Printf(TEXT("Continue production chain from %s"), *CurrentAgent);
-        AssignTask(NextAgent, NextTaskDescription, 5.0f); // High priority for chain continuity
-    }
-}
-
-FString UProductionCoordinator::GetNextAgentInChain(const FString& CurrentAgent)
-{
-    int32* CurrentOrder = AgentChainOrder.Find(CurrentAgent);
-    if (!CurrentOrder)
-    {
-        return TEXT("");
-    }
-    
-    int32 NextOrder = *CurrentOrder + 1;
-    if (NextOrder > 19)
-    {
-        return TEXT("Studio Director"); // Loop back to start
-    }
-    
-    for (const TPair<FString, int32>& AgentPair : AgentChainOrder)
-    {
-        if (AgentPair.Value == NextOrder)
+        for (const auto& AgentTaskPair : AgentTasks)
         {
-            return AgentPair.Key;
+            for (const FDir_AgentTask& ExistingTask : AgentTaskPair.Value)
+            {
+                if (ExistingTask.TaskDescription.Contains(Dependency) && 
+                    ExistingTask.Status == EDir_AgentStatus::Completed)
+                {
+                    bDependencyMet = true;
+                    break;
+                }
+            }
+            if (bDependencyMet) break;
+        }
+        
+        if (!bDependencyMet)
+        {
+            return false;
         }
     }
     
-    return TEXT("");
+    return true;
 }
 
-void UProductionCoordinator::ValidateTaskDependencies()
+void UProductionCoordinator::LogTaskUpdate(const FString& AgentName, const FString& TaskDescription, EDir_AgentStatus Status)
 {
-    // Check for blocked tasks that can now proceed
-    for (FDir_AgentTask& Task : ActiveTasks)
+    FString StatusText;
+    switch (Status)
     {
-        if (Task.Status == EDir_AgentStatus::Blocked)
-        {
-            // Simple dependency resolution - if previous agent in chain is complete
-            FString PreviousAgent = GetNextAgentInChain(Task.AgentName); // This gets next, we need previous
-            // Implementation would check if dependencies are resolved
-            
-            // For now, just log the check
-            FString LogMessage = FString::Printf(TEXT("DEPENDENCY CHECK: %s"), *Task.AgentName);
-            LogProductionEvent(LogMessage);
-        }
+        case EDir_AgentStatus::Idle: StatusText = TEXT("IDLE"); break;
+        case EDir_AgentStatus::Working: StatusText = TEXT("WORKING"); break;
+        case EDir_AgentStatus::Completed: StatusText = TEXT("COMPLETED"); break;
+        case EDir_AgentStatus::Failed: StatusText = TEXT("FAILED"); break;
+        case EDir_AgentStatus::Blocked: StatusText = TEXT("BLOCKED"); break;
     }
+    
+    UE_LOG(LogTemp, Warning, TEXT("ProductionCoordinator: %s - %s [%s]"), 
+           *AgentName, *TaskDescription, *StatusText);
 }
