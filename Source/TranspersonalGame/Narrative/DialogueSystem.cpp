@@ -1,233 +1,137 @@
 #include "DialogueSystem.h"
 #include "Engine/Engine.h"
-#include "Engine/DataTable.h"
+#include "Kismet/GameplayStatics.h"
 
 UDialogueSystem::UDialogueSystem()
 {
     PrimaryComponentTick.bCanEverTick = false;
-    CurrentTreeIndex = -1;
-    CurrentNodeIndex = -1;
-    bDialogueActive = false;
+    CurrentDialogueIndex = 0;
+    bIsDialogueActive = false;
 }
 
 void UDialogueSystem::BeginPlay()
 {
     Super::BeginPlay();
-    InitializeDefaultDialogues();
+    LoadNarrativeData();
 }
 
-void UDialogueSystem::InitializeDefaultDialogues()
+void UDialogueSystem::StartDialogue(const FString& EventID)
 {
-    // Create survival tutorial dialogue tree
-    FNarr_DialogueTree SurvivalTutorial;
-    SurvivalTutorial.TreeName = TEXT("SurvivalTutorial");
-    SurvivalTutorial.StartNodeID = 0;
-
-    // Node 0: Elder introduction
-    FNarr_DialogueNode IntroNode;
-    IntroNode.SpeakerName = TEXT("Tribal Elder");
-    IntroNode.DialogueText = TEXT("Welcome, young survivor. The ancient valley is dangerous, but knowledge will keep you alive.");
-    IntroNode.ResponseOptions.Add(TEXT("Tell me about the dangers"));
-    IntroNode.ResponseOptions.Add(TEXT("How do I find food?"));
-    IntroNode.NextNodeIDs.Add(1);
-    IntroNode.NextNodeIDs.Add(2);
-    IntroNode.bIsEndNode = false;
-    SurvivalTutorial.DialogueNodes.Add(IntroNode);
-
-    // Node 1: Danger warning
-    FNarr_DialogueNode DangerNode;
-    DangerNode.SpeakerName = TEXT("Tribal Elder");
-    DangerNode.DialogueText = TEXT("The great predators hunt in packs. Listen for their calls and watch for movement in the grass.");
-    DangerNode.ResponseOptions.Add(TEXT("What about the Thunder Lizard?"));
-    DangerNode.ResponseOptions.Add(TEXT("I understand"));
-    DangerNode.NextNodeIDs.Add(3);
-    DangerNode.NextNodeIDs.Add(4);
-    DangerNode.bIsEndNode = false;
-    SurvivalTutorial.DialogueNodes.Add(DangerNode);
-
-    // Node 2: Food advice
-    FNarr_DialogueNode FoodNode;
-    FoodNode.SpeakerName = TEXT("Tribal Elder");
-    FoodNode.DialogueText = TEXT("Follow the herbivore herds to water sources. Gather berries and roots, but test small amounts first.");
-    FoodNode.ResponseOptions.Add(TEXT("Thank you for the wisdom"));
-    FoodNode.NextNodeIDs.Add(4);
-    FoodNode.bIsEndNode = false;
-    SurvivalTutorial.DialogueNodes.Add(FoodNode);
-
-    // Node 3: T-Rex warning
-    FNarr_DialogueNode TRexNode;
-    TRexNode.SpeakerName = TEXT("Tribal Elder");
-    TRexNode.DialogueText = TEXT("The Thunder Lizard is the apex predator. When you hear its roar, find shelter immediately. Do not attempt to fight it.");
-    TRexNode.ResponseOptions.Add(TEXT("I will remember"));
-    TRexNode.NextNodeIDs.Add(4);
-    TRexNode.bIsEndNode = false;
-    SurvivalTutorial.DialogueNodes.Add(TRexNode);
-
-    // Node 4: Farewell
-    FNarr_DialogueNode FarewellNode;
-    FarewellNode.SpeakerName = TEXT("Tribal Elder");
-    FarewellNode.DialogueText = TEXT("May the spirits of your ancestors guide your path. Survive, and perhaps we will meet again.");
-    FarewellNode.bIsEndNode = true;
-    SurvivalTutorial.DialogueNodes.Add(FarewellNode);
-
-    DialogueTrees.Add(SurvivalTutorial);
-
-    // Create hunting dialogue tree
-    FNarr_DialogueTree HuntingDialogue;
-    HuntingDialogue.TreeName = TEXT("HuntingTips");
-    HuntingDialogue.StartNodeID = 0;
-
-    // Hunting intro node
-    FNarr_DialogueNode HuntIntroNode;
-    HuntIntroNode.SpeakerName = TEXT("Wise Hunter");
-    HuntIntroNode.DialogueText = TEXT("The hunt requires patience and cunning. What would you learn?");
-    HuntIntroNode.ResponseOptions.Add(TEXT("How to track prey"));
-    HuntIntroNode.ResponseOptions.Add(TEXT("Weapon crafting"));
-    HuntIntroNode.NextNodeIDs.Add(1);
-    HuntIntroNode.NextNodeIDs.Add(2);
-    HuntIntroNode.bIsEndNode = false;
-    HuntingDialogue.DialogueNodes.Add(HuntIntroNode);
-
-    // Tracking node
-    FNarr_DialogueNode TrackingNode;
-    TrackingNode.SpeakerName = TEXT("Wise Hunter");
-    TrackingNode.DialogueText = TEXT("Look for broken branches, footprints in mud, and disturbed vegetation. The wind carries scents - use it wisely.");
-    TrackingNode.ResponseOptions.Add(TEXT("What about predator signs?"));
-    TrackingNode.NextNodeIDs.Add(3);
-    TrackingNode.bIsEndNode = false;
-    HuntingDialogue.DialogueNodes.Add(TrackingNode);
-
-    // Weapon crafting node
-    FNarr_DialogueNode WeaponNode;
-    WeaponNode.SpeakerName = TEXT("Wise Hunter");
-    WeaponNode.DialogueText = TEXT("Sharp stones make good spear tips. Bind them with plant fibers. A well-crafted spear can save your life.");
-    WeaponNode.ResponseOptions.Add(TEXT("Thank you for the knowledge"));
-    WeaponNode.NextNodeIDs.Add(4);
-    WeaponNode.bIsEndNode = false;
-    HuntingDialogue.DialogueNodes.Add(WeaponNode);
-
-    // Predator warning node
-    FNarr_DialogueNode PredatorNode;
-    PredatorNode.SpeakerName = TEXT("Wise Hunter");
-    PredatorNode.DialogueText = TEXT("Claw marks on trees, territorial scent markings, and silence where birds should sing - these warn of nearby predators.");
-    PredatorNode.ResponseOptions.Add(TEXT("I will watch for these signs"));
-    PredatorNode.NextNodeIDs.Add(4);
-    PredatorNode.bIsEndNode = false;
-    HuntingDialogue.DialogueNodes.Add(PredatorNode);
-
-    // Hunt farewell
-    FNarr_DialogueNode HuntFarewellNode;
-    HuntFarewellNode.SpeakerName = TEXT("Wise Hunter");
-    HuntFarewellNode.DialogueText = TEXT("Hunt with honor, take only what you need, and respect the balance of nature.");
-    HuntFarewellNode.bIsEndNode = true;
-    HuntingDialogue.DialogueNodes.Add(HuntFarewellNode);
-
-    DialogueTrees.Add(HuntingDialogue);
-}
-
-bool UDialogueSystem::StartDialogue(const FString& TreeName)
-{
-    int32 TreeIndex = FindTreeByName(TreeName);
-    if (TreeIndex == -1)
+    for (const FNarr_NarrativeEvent& Event : NarrativeEvents)
     {
-        UE_LOG(LogTemp, Warning, TEXT("Dialogue tree not found: %s"), *TreeName);
-        return false;
+        if (Event.EventID == EventID && Event.DialogueSequence.Num() > 0)
+        {
+            DialogueEntries = Event.DialogueSequence;
+            CurrentDialogueIndex = 0;
+            bIsDialogueActive = true;
+            
+            UE_LOG(LogTemp, Warning, TEXT("Started dialogue for event: %s"), *EventID);
+            return;
+        }
+    }
+    
+    UE_LOG(LogTemp, Warning, TEXT("Dialogue event not found: %s"), *EventID);
+}
+
+void UDialogueSystem::NextDialogue()
+{
+    if (!bIsDialogueActive || DialogueEntries.Num() == 0)
+    {
+        return;
     }
 
-    CurrentTreeIndex = TreeIndex;
-    CurrentNodeIndex = DialogueTrees[TreeIndex].StartNodeID;
-    bDialogueActive = true;
-
-    UE_LOG(LogTemp, Log, TEXT("Started dialogue tree: %s"), *TreeName);
-    return true;
+    CurrentDialogueIndex++;
+    
+    if (CurrentDialogueIndex >= DialogueEntries.Num())
+    {
+        EndDialogue();
+    }
+    else
+    {
+        UE_LOG(LogTemp, Log, TEXT("Advanced to dialogue index: %d"), CurrentDialogueIndex);
+    }
 }
 
 void UDialogueSystem::EndDialogue()
 {
-    CurrentTreeIndex = -1;
-    CurrentNodeIndex = -1;
-    bDialogueActive = false;
+    bIsDialogueActive = false;
+    CurrentDialogueIndex = 0;
+    DialogueEntries.Empty();
+    
     UE_LOG(LogTemp, Log, TEXT("Dialogue ended"));
 }
 
-FNarr_DialogueNode UDialogueSystem::GetCurrentNode()
+FNarr_DialogueEntry UDialogueSystem::GetCurrentDialogue() const
 {
-    if (!bDialogueActive || CurrentTreeIndex == -1 || CurrentNodeIndex == -1)
+    if (bIsDialogueActive && DialogueEntries.IsValidIndex(CurrentDialogueIndex))
     {
-        return FNarr_DialogueNode();
+        return DialogueEntries[CurrentDialogueIndex];
     }
-
-    if (DialogueTrees.IsValidIndex(CurrentTreeIndex) && 
-        DialogueTrees[CurrentTreeIndex].DialogueNodes.IsValidIndex(CurrentNodeIndex))
-    {
-        return DialogueTrees[CurrentTreeIndex].DialogueNodes[CurrentNodeIndex];
-    }
-
-    return FNarr_DialogueNode();
-}
-
-bool UDialogueSystem::SelectResponse(int32 ResponseIndex)
-{
-    if (!bDialogueActive || CurrentTreeIndex == -1 || CurrentNodeIndex == -1)
-    {
-        return false;
-    }
-
-    FNarr_DialogueNode CurrentNode = GetCurrentNode();
-    if (!CurrentNode.NextNodeIDs.IsValidIndex(ResponseIndex))
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Invalid response index: %d"), ResponseIndex);
-        return false;
-    }
-
-    CurrentNodeIndex = CurrentNode.NextNodeIDs[ResponseIndex];
     
-    // Check if we've reached an end node
-    FNarr_DialogueNode NextNode = GetCurrentNode();
-    if (NextNode.bIsEndNode)
-    {
-        UE_LOG(LogTemp, Log, TEXT("Reached end node, dialogue will end"));
-    }
-
-    return true;
+    return FNarr_DialogueEntry();
 }
 
-void UDialogueSystem::AddDialogueTree(const FNarr_DialogueTree& NewTree)
+void UDialogueSystem::TriggerNarrativeEvent(const FString& EventID, const FVector& PlayerLocation)
 {
-    DialogueTrees.Add(NewTree);
-    UE_LOG(LogTemp, Log, TEXT("Added dialogue tree: %s"), *NewTree.TreeName);
-}
-
-TArray<FString> UDialogueSystem::GetAvailableDialogueTrees()
-{
-    TArray<FString> TreeNames;
-    for (const FNarr_DialogueTree& Tree : DialogueTrees)
+    for (FNarr_NarrativeEvent& Event : NarrativeEvents)
     {
-        TreeNames.Add(Tree.TreeName);
-    }
-    return TreeNames;
-}
-
-void UDialogueSystem::LoadDialogueFromDataTable(UDataTable* DialogueDataTable)
-{
-    if (!DialogueDataTable)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("DialogueDataTable is null"));
-        return;
-    }
-
-    // Implementation for loading from data table would go here
-    UE_LOG(LogTemp, Log, TEXT("Loading dialogue from data table"));
-}
-
-int32 UDialogueSystem::FindTreeByName(const FString& TreeName)
-{
-    for (int32 i = 0; i < DialogueTrees.Num(); i++)
-    {
-        if (DialogueTrees[i].TreeName == TreeName)
+        if (Event.EventID == EventID && !Event.bIsTriggered)
         {
-            return i;
+            Event.bIsTriggered = true;
+            StartDialogue(EventID);
+            
+            UE_LOG(LogTemp, Warning, TEXT("Triggered narrative event: %s at location: %s"), 
+                *EventID, *PlayerLocation.ToString());
+            return;
         }
     }
-    return -1;
+}
+
+void UDialogueSystem::AddDialogueEntry(const FNarr_DialogueEntry& NewEntry)
+{
+    DialogueEntries.Add(NewEntry);
+    UE_LOG(LogTemp, Log, TEXT("Added dialogue entry from: %s"), *NewEntry.SpeakerName);
+}
+
+void UDialogueSystem::LoadNarrativeData()
+{
+    // Initialize with basic survival narrative events
+    FNarr_NarrativeEvent IntroEvent;
+    IntroEvent.EventID = TEXT("game_intro");
+    IntroEvent.EventDescription = FText::FromString(TEXT("Player awakens in the prehistoric valley"));
+    IntroEvent.bIsTriggered = false;
+    IntroEvent.TriggerRadius = 1000.0f;
+
+    FNarr_DialogueEntry IntroDialogue;
+    IntroDialogue.SpeakerName = TEXT("Narrator");
+    IntroDialogue.DialogueText = FText::FromString(TEXT("The ancient valley holds many secrets, survivor. Listen carefully to the wind - it carries the scent of predators and the promise of danger."));
+    IntroDialogue.AudioURL = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1779676657904_Narrator.mp3");
+    IntroDialogue.Duration = 17.0f;
+
+    IntroEvent.DialogueSequence.Add(IntroDialogue);
+    RegisterNarrativeEvent(IntroEvent);
+
+    // Pack hunter warning event
+    FNarr_NarrativeEvent PackWarningEvent;
+    PackWarningEvent.EventID = TEXT("pack_hunter_warning");
+    PackWarningEvent.EventDescription = FText::FromString(TEXT("Player enters raptor territory"));
+    PackWarningEvent.bIsTriggered = false;
+    PackWarningEvent.TriggerRadius = 2000.0f;
+
+    FNarr_DialogueEntry WarningDialogue;
+    WarningDialogue.SpeakerName = TEXT("SurvivalGuide");
+    WarningDialogue.DialogueText = FText::FromString(TEXT("Warning! Pack hunters detected in the eastern ravines. Their coordinated movements suggest they are tracking prey."));
+    WarningDialogue.AudioURL = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1779676664062_SurvivalGuide.mp3");
+    WarningDialogue.Duration = 15.0f;
+
+    PackWarningEvent.DialogueSequence.Add(WarningDialogue);
+    RegisterNarrativeEvent(PackWarningEvent);
+
+    UE_LOG(LogTemp, Warning, TEXT("Loaded %d narrative events"), NarrativeEvents.Num());
+}
+
+void UDialogueSystem::RegisterNarrativeEvent(const FNarr_NarrativeEvent& Event)
+{
+    NarrativeEvents.Add(Event);
+    UE_LOG(LogTemp, Log, TEXT("Registered narrative event: %s"), *Event.EventID);
 }
