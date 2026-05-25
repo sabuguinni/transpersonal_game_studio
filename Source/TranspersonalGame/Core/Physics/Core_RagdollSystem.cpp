@@ -1,235 +1,301 @@
 #include "Core_RagdollSystem.h"
-#include "Engine/World.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "PhysicsEngine/PhysicsAsset.h"
-#include "Animation/AnimInstance.h"
-#include "GameFramework/Character.h"
-#include "Engine/Engine.h"
+#include "Engine/World.h"
+#include "TimerManager.h"
+
+DEFINE_LOG_CATEGORY(LogRagdollSystem);
 
 UCore_RagdollSystem::UCore_RagdollSystem()
 {
-    // Default ragdoll physics settings
-    DefaultRagdollMass = 100.0f;
-    DefaultLinearDamping = 0.1f;
-    DefaultAngularDamping = 0.1f;
-    bEnableGravity = true;
-
-    // Dinosaur mass settings (realistic prehistoric weights)
-    TRexMass = 7000.0f;        // 7 tons
-    VelociraptorMass = 15.0f;  // 15 kg
-    BrachiosaurusMass = 50000.0f; // 50 tons
-
-    // Initialize dinosaur mass overrides
-    DinosaurMassOverrides.Add(TEXT("TRex"), TRexMass);
-    DinosaurMassOverrides.Add(TEXT("Velociraptor"), VelociraptorMass);
-    DinosaurMassOverrides.Add(TEXT("Brachiosaurus"), BrachiosaurusMass);
-    DinosaurMassOverrides.Add(TEXT("Triceratops"), 12000.0f); // 12 tons
-    DinosaurMassOverrides.Add(TEXT("Ankylosaurus"), 6000.0f); // 6 tons
+    MeshComponent = nullptr;
+    bRagdollActive = false;
+    CurrentTransition = ECore_RagdollTransition::None;
+    RagdollActiveTime = 0.0f;
+    OriginalCollisionResponse = ECR_Block;
+    bOriginalSimulatePhysics = false;
+    
+    // Default ragdoll configuration
+    RagdollConfig = FCore_RagdollConfig();
 }
 
-void UCore_RagdollSystem::EnableRagdoll(USkeletalMeshComponent* SkeletalMesh)
+void UCore_RagdollSystem::InitializeRagdoll(USkeletalMeshComponent* InMeshComponent, const FCore_RagdollConfig& InConfig)
 {
-    if (!SkeletalMesh || !SkeletalMesh->GetPhysicsAsset())
+    if (!InMeshComponent)
     {
-        UE_LOG(LogTemp, Warning, TEXT("Core_RagdollSystem: Cannot enable ragdoll - invalid mesh or physics asset"));
+        UE_LOG(LogRagdollSystem, Error, TEXT("InitializeRagdoll: Invalid mesh component"));
         return;
     }
 
-    // Store current animation state
-    StoreAnimationState(SkeletalMesh);
+    MeshComponent = InMeshComponent;
+    RagdollConfig = InConfig;
+    
+    // Store original settings
+    OriginalCollisionResponse = MeshComponent->GetCollisionResponseToChannel(ECC_Pawn);
+    bOriginalSimulatePhysics = MeshComponent->IsSimulatingPhysics();
+    
+    UE_LOG(LogRagdollSystem, Log, TEXT("Ragdoll system initialized for mesh: %s"), 
+           *MeshComponent->GetName());
+}
 
+void UCore_RagdollSystem::ActivateRagdoll(ECore_RagdollTransition TransitionType, const FVector& ImpactForce, const FVector& ImpactLocation)
+{
+    if (!ValidateRagdollSetup())
+    {
+        UE_LOG(LogRagdollSystem, Error, TEXT("ActivateRagdoll: Invalid ragdoll setup"));
+        return;
+    }
+
+    if (bRagdollActive)
+    {
+        UE_LOG(LogRagdollSystem, Warning, TEXT("ActivateRagdoll: Ragdoll already active"));
+        return;
+    }
+
+    CurrentTransition = TransitionType;
+    bRagdollActive = true;
+    RagdollActiveTime = 0.0f;
+
+    // Disable animation blueprint
+    MeshComponent->SetAnimationMode(EAnimationMode::AnimationSingleNode);
+    
     // Enable physics simulation
-    SkeletalMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-    SkeletalMesh->SetSimulatePhysics(true);
-    SkeletalMesh->SetCollisionResponseToAllChannels(ECR_Block);
-
-    // Configure ragdoll physics properties
-    ConfigureRagdollPhysics(SkeletalMesh);
-
-    UE_LOG(LogTemp, Log, TEXT("Core_RagdollSystem: Ragdoll enabled for %s"), 
-           SkeletalMesh->GetOwner() ? *SkeletalMesh->GetOwner()->GetName() : TEXT("Unknown"));
+    MeshComponent->SetSimulatePhysics(true);
+    MeshComponent->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+    MeshComponent->SetCollisionResponseToChannel(ECC_Pawn, RagdollConfig.CollisionResponse);
+    
+    // Configure physics bodies
+    ConfigurePhysicsBodies();
+    
+    // Apply transition-specific settings
+    ApplyTransitionSettings(TransitionType);
+    
+    // Apply impact force if provided
+    if (!ImpactForce.IsZero())
+    {
+        ApplyImpactForce(ImpactForce, ImpactLocation);
+    }
+    
+    UE_LOG(LogRagdollSystem, Log, TEXT("Ragdoll activated with transition type: %d"), 
+           static_cast<int32>(TransitionType));
 }
 
-void UCore_RagdollSystem::DisableRagdoll(USkeletalMeshComponent* SkeletalMesh)
+void UCore_RagdollSystem::DeactivateRagdoll()
 {
-    if (!SkeletalMesh)
+    if (!bRagdollActive || !MeshComponent)
     {
         return;
     }
-
-    // Disable physics simulation
-    SkeletalMesh->SetSimulatePhysics(false);
-    SkeletalMesh->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
 
     // Restore animation state
-    RestoreAnimationState(SkeletalMesh);
-
-    UE_LOG(LogTemp, Log, TEXT("Core_RagdollSystem: Ragdoll disabled for %s"), 
-           SkeletalMesh->GetOwner() ? *SkeletalMesh->GetOwner()->GetName() : TEXT("Unknown"));
+    RestoreAnimationState();
+    
+    bRagdollActive = false;
+    CurrentTransition = ECore_RagdollTransition::None;
+    RagdollActiveTime = 0.0f;
+    
+    UE_LOG(LogRagdollSystem, Log, TEXT("Ragdoll deactivated"));
 }
 
-bool UCore_RagdollSystem::IsRagdollActive(USkeletalMeshComponent* SkeletalMesh) const
+void UCore_RagdollSystem::ForceCleanup()
 {
-    if (!SkeletalMesh)
+    if (!MeshComponent)
     {
-        return false;
-    }
-
-    return SkeletalMesh->IsSimulatingPhysics();
-}
-
-void UCore_RagdollSystem::EnableDinosaurRagdoll(ACharacter* DinosaurCharacter, float ImpactForce)
-{
-    if (!DinosaurCharacter)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Core_RagdollSystem: Invalid dinosaur character"));
         return;
     }
 
-    USkeletalMeshComponent* SkeletalMesh = DinosaurCharacter->GetMesh();
-    if (!SkeletalMesh)
+    DeactivateRagdoll();
+    
+    // Additional cleanup if needed
+    if (AActor* Owner = MeshComponent->GetOwner())
     {
-        UE_LOG(LogTemp, Warning, TEXT("Core_RagdollSystem: Dinosaur has no skeletal mesh"));
+        Owner->Destroy();
+    }
+    
+    UE_LOG(LogRagdollSystem, Log, TEXT("Ragdoll force cleanup completed"));
+}
+
+void UCore_RagdollSystem::UpdateRagdoll(float DeltaTime)
+{
+    if (!bRagdollActive)
+    {
         return;
     }
 
-    // Determine dinosaur type from actor name for mass override
-    FString ActorName = DinosaurCharacter->GetName();
-    float DinosaurMass = DefaultRagdollMass;
-
-    for (const auto& MassOverride : DinosaurMassOverrides)
+    RagdollActiveTime += DeltaTime;
+    
+    // Handle cleanup timer
+    HandleCleanupTimer(DeltaTime);
+    
+    // Update physics properties if needed
+    if (MeshComponent && MeshComponent->IsSimulatingPhysics())
     {
-        if (ActorName.Contains(MassOverride.Key))
+        // Apply continuous damping
+        TArray<FName> BoneNames;
+        MeshComponent->GetBoneNames(BoneNames);
+        
+        for (const FName& BoneName : BoneNames)
         {
-            DinosaurMass = MassOverride.Value;
-            break;
-        }
-    }
-
-    // Set dinosaur-specific properties before enabling ragdoll
-    SetDinosaurRagdollProperties(SkeletalMesh, DinosaurMass, DefaultLinearDamping);
-
-    // Enable ragdoll
-    EnableRagdoll(SkeletalMesh);
-
-    // Apply impact force if specified
-    if (ImpactForce > 0.0f)
-    {
-        FVector ImpactDirection = DinosaurCharacter->GetActorForwardVector();
-        ApplyRagdollImpulse(SkeletalMesh, ImpactDirection * ImpactForce, TEXT("spine_01"));
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("Core_RagdollSystem: Dinosaur ragdoll enabled - %s (Mass: %.1f)"), 
-           *ActorName, DinosaurMass);
-}
-
-void UCore_RagdollSystem::SetDinosaurRagdollProperties(USkeletalMeshComponent* SkeletalMesh, float Mass, float Damping)
-{
-    if (!SkeletalMesh || !SkeletalMesh->GetPhysicsAsset())
-    {
-        return;
-    }
-
-    // Set mass and damping for all bodies in the physics asset
-    TArray<FName> BoneNames;
-    SkeletalMesh->GetBoneNames(BoneNames);
-
-    for (const FName& BoneName : BoneNames)
-    {
-        if (SkeletalMesh->GetBodyInstance(BoneName))
-        {
-            FBodyInstance* BodyInstance = SkeletalMesh->GetBodyInstance(BoneName);
-            if (BodyInstance)
+            if (FBodyInstance* BodyInstance = MeshComponent->GetBodyInstance(BoneName))
             {
-                BodyInstance->SetMassOverride(Mass / BoneNames.Num()); // Distribute mass
-                BodyInstance->LinearDamping = Damping;
-                BodyInstance->AngularDamping = Damping;
-                BodyInstance->bEnableGravity = bEnableGravity;
+                BodyInstance->SetLinearDamping(RagdollConfig.LinearDamping);
+                BodyInstance->SetAngularDamping(RagdollConfig.AngularDamping);
+                BodyInstance->SetMaxAngularVelocityInRadians(FMath::DegreesToRadians(RagdollConfig.MaxAngularVelocity));
             }
         }
     }
 }
 
-void UCore_RagdollSystem::ApplyRagdollImpulse(USkeletalMeshComponent* SkeletalMesh, FVector Impulse, FName BoneName)
+void UCore_RagdollSystem::SetRagdollConfig(const FCore_RagdollConfig& NewConfig)
 {
-    if (!SkeletalMesh || !IsRagdollActive(SkeletalMesh))
+    RagdollConfig = NewConfig;
+    
+    // Apply new configuration if ragdoll is active
+    if (bRagdollActive)
+    {
+        ConfigurePhysicsBodies();
+    }
+    
+    UE_LOG(LogRagdollSystem, Log, TEXT("Ragdoll configuration updated"));
+}
+
+void UCore_RagdollSystem::ApplyTransitionSettings(ECore_RagdollTransition TransitionType)
+{
+    if (!MeshComponent)
     {
         return;
     }
 
-    if (BoneName == NAME_None)
+    switch (TransitionType)
     {
-        // Apply to root body
-        SkeletalMesh->AddImpulse(Impulse);
+        case ECore_RagdollTransition::InstantDeath:
+            // Immediate full ragdoll activation
+            MeshComponent->SetAllBodiesSimulatePhysics(true);
+            break;
+            
+        case ECore_RagdollTransition::GradualCollapse:
+            // Start with upper body, gradually enable lower body
+            MeshComponent->SetAllBodiesSimulatePhysics(false);
+            // Enable spine and head first
+            MeshComponent->SetBodyNotifyRigidBodyCollision(FName("spine_01"), true);
+            MeshComponent->SetBodyNotifyRigidBodyCollision(FName("head"), true);
+            break;
+            
+        case ECore_RagdollTransition::ImpactDeath:
+            // Full ragdoll with high initial velocity
+            MeshComponent->SetAllBodiesSimulatePhysics(true);
+            // Impact settings will be applied separately
+            break;
+            
+        case ECore_RagdollTransition::Unconscious:
+            // Partial ragdoll - keep some constraint
+            MeshComponent->SetAllBodiesSimulatePhysics(true);
+            // Reduce mass scale for lighter feel
+            break;
+            
+        default:
+            MeshComponent->SetAllBodiesSimulatePhysics(true);
+            break;
+    }
+}
+
+void UCore_RagdollSystem::ConfigurePhysicsBodies()
+{
+    if (!MeshComponent || !MeshComponent->GetPhysicsAsset())
+    {
+        return;
+    }
+
+    // Configure all physics bodies
+    TArray<FName> BoneNames;
+    MeshComponent->GetBoneNames(BoneNames);
+    
+    for (const FName& BoneName : BoneNames)
+    {
+        if (FBodyInstance* BodyInstance = MeshComponent->GetBodyInstance(BoneName))
+        {
+            // Apply mass scaling
+            BodyInstance->SetMassScale(RagdollConfig.MassScale);
+            
+            // Apply damping
+            BodyInstance->SetLinearDamping(RagdollConfig.LinearDamping);
+            BodyInstance->SetAngularDamping(RagdollConfig.AngularDamping);
+            
+            // Set max angular velocity
+            BodyInstance->SetMaxAngularVelocityInRadians(FMath::DegreesToRadians(RagdollConfig.MaxAngularVelocity));
+            
+            // Enable collision
+            BodyInstance->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+        }
+    }
+    
+    UE_LOG(LogRagdollSystem, Log, TEXT("Physics bodies configured for %d bones"), BoneNames.Num());
+}
+
+void UCore_RagdollSystem::RestoreAnimationState()
+{
+    if (!MeshComponent)
+    {
+        return;
+    }
+
+    // Disable physics simulation
+    MeshComponent->SetSimulatePhysics(bOriginalSimulatePhysics);
+    MeshComponent->SetAllBodiesSimulatePhysics(false);
+    
+    // Restore collision settings
+    MeshComponent->SetCollisionResponseToChannel(ECC_Pawn, OriginalCollisionResponse);
+    
+    // Re-enable animation blueprint
+    MeshComponent->SetAnimationMode(EAnimationMode::AnimationBlueprint);
+    
+    UE_LOG(LogRagdollSystem, Log, TEXT("Animation state restored"));
+}
+
+void UCore_RagdollSystem::HandleCleanupTimer(float DeltaTime)
+{
+    if (RagdollActiveTime >= RagdollConfig.CleanupTime && RagdollConfig.CleanupTime > 0.0f)
+    {
+        // Time to clean up the ragdoll
+        ForceCleanup();
+    }
+}
+
+void UCore_RagdollSystem::ApplyImpactForce(const FVector& Force, const FVector& Location)
+{
+    if (!MeshComponent || !MeshComponent->IsSimulatingPhysics())
+    {
+        return;
+    }
+
+    // Apply force to the closest bone
+    FName ClosestBone = MeshComponent->FindClosestBone(Location);
+    if (ClosestBone != NAME_None)
+    {
+        MeshComponent->AddImpulseAtLocation(Force, Location, ClosestBone);
+        UE_LOG(LogRagdollSystem, Log, TEXT("Impact force applied to bone: %s"), *ClosestBone.ToString());
     }
     else
     {
-        // Apply to specific bone
-        SkeletalMesh->AddImpulseAtLocation(Impulse, SkeletalMesh->GetBoneLocation(BoneName), BoneName);
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("Core_RagdollSystem: Applied impulse %.1f to bone %s"), 
-           Impulse.Size(), *BoneName.ToString());
-}
-
-void UCore_RagdollSystem::ApplyRadialImpulse(USkeletalMeshComponent* SkeletalMesh, FVector Origin, float Radius, float Strength)
-{
-    if (!SkeletalMesh || !IsRagdollActive(SkeletalMesh))
-    {
-        return;
-    }
-
-    SkeletalMesh->AddRadialImpulse(Origin, Radius, Strength, RIF_Linear, true);
-
-    UE_LOG(LogTemp, Log, TEXT("Core_RagdollSystem: Applied radial impulse - Radius: %.1f, Strength: %.1f"), 
-           Radius, Strength);
-}
-
-void UCore_RagdollSystem::ConfigureRagdollPhysics(USkeletalMeshComponent* SkeletalMesh)
-{
-    if (!SkeletalMesh)
-    {
-        return;
-    }
-
-    // Set collision properties
-    SkeletalMesh->SetCollisionObjectType(ECC_Pawn);
-    SkeletalMesh->SetCollisionResponseToChannel(ECC_WorldStatic, ECR_Block);
-    SkeletalMesh->SetCollisionResponseToChannel(ECC_WorldDynamic, ECR_Block);
-    SkeletalMesh->SetCollisionResponseToChannel(ECC_Pawn, ECR_Block);
-
-    // Enable complex collision for detailed physics
-    SkeletalMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-    SkeletalMesh->SetNotifyRigidBodyCollision(true);
-}
-
-void UCore_RagdollSystem::StoreAnimationState(USkeletalMeshComponent* SkeletalMesh)
-{
-    if (!SkeletalMesh)
-    {
-        return;
-    }
-
-    UAnimInstance* AnimInstance = SkeletalMesh->GetAnimInstance();
-    if (AnimInstance)
-    {
-        StoredAnimInstances.Add(SkeletalMesh, AnimInstance);
+        // Fallback: apply to root bone
+        MeshComponent->AddImpulse(Force);
+        UE_LOG(LogRagdollSystem, Log, TEXT("Impact force applied to root"));
     }
 }
 
-void UCore_RagdollSystem::RestoreAnimationState(USkeletalMeshComponent* SkeletalMesh)
+bool UCore_RagdollSystem::ValidateRagdollSetup() const
 {
-    if (!SkeletalMesh)
+    if (!MeshComponent)
     {
-        return;
+        UE_LOG(LogRagdollSystem, Error, TEXT("ValidateRagdollSetup: No mesh component"));
+        return false;
     }
 
-    if (UAnimInstance** StoredAnimInstance = StoredAnimInstances.Find(SkeletalMesh))
+    if (!MeshComponent->GetPhysicsAsset())
     {
-        if (*StoredAnimInstance)
-        {
-            SkeletalMesh->SetAnimInstanceClass((*StoredAnimInstance)->GetClass());
-        }
-        StoredAnimInstances.Remove(SkeletalMesh);
+        UE_LOG(LogRagdollSystem, Error, TEXT("ValidateRagdollSetup: No physics asset on mesh component"));
+        return false;
     }
+
+    return true;
 }
