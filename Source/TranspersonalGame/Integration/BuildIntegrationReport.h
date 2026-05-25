@@ -1,36 +1,47 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/GameInstanceSubsystem.h"
+#include "Engine/Engine.h"
+#include "UObject/NoExportTypes.h"
 #include "BuildIntegrationReport.generated.h"
+
+UENUM(BlueprintType)
+enum class EBuild_IntegrationStatus : uint8
+{
+    Unknown         UMETA(DisplayName = "Unknown"),
+    Success         UMETA(DisplayName = "Success"),
+    Warning         UMETA(DisplayName = "Warning"),
+    Failed          UMETA(DisplayName = "Failed"),
+    Critical        UMETA(DisplayName = "Critical")
+};
 
 USTRUCT(BlueprintType)
 struct TRANSPERSONALGAME_API FBuild_SystemStatus
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Build Status")
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
     FString SystemName;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Build Status")
-    bool bIsCompiled;
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    EBuild_IntegrationStatus Status;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Build Status")
-    bool bIsLoaded;
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    FString StatusMessage;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Build Status")
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
     int32 ActorCount;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Build Status")
-    FString LastError;
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    float PerformanceScore;
 
     FBuild_SystemStatus()
     {
         SystemName = TEXT("");
-        bIsCompiled = false;
-        bIsLoaded = false;
+        Status = EBuild_IntegrationStatus::Unknown;
+        StatusMessage = TEXT("");
         ActorCount = 0;
-        LastError = TEXT("");
+        PerformanceScore = 0.0f;
     }
 };
 
@@ -40,86 +51,85 @@ struct TRANSPERSONALGAME_API FBuild_IntegrationReport
     GENERATED_BODY()
 
     UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    FString CycleId;
+    FDateTime ReportTimestamp;
 
     UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    FDateTime ReportTime;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    int32 TotalSourceFiles;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    int32 CompiledBinaries;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    int32 LoadedClasses;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    int32 TotalActors;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    int32 DinosaurActors;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    int32 EnvironmentActors;
+    EBuild_IntegrationStatus OverallStatus;
 
     UPROPERTY(BlueprintReadOnly, Category = "Integration")
     TArray<FBuild_SystemStatus> SystemStatuses;
 
     UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    bool bMapSaved;
+    int32 TotalActorCount;
 
     UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    bool bAllSystemsOperational;
+    int32 LoadedClassCount;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    int32 ExpectedClassCount;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    float OverallPerformanceScore;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    TArray<FString> CriticalIssues;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    TArray<FString> Warnings;
 
     FBuild_IntegrationReport()
     {
-        CycleId = TEXT("");
-        ReportTime = FDateTime::Now();
-        TotalSourceFiles = 0;
-        CompiledBinaries = 0;
-        LoadedClasses = 0;
-        TotalActors = 0;
-        DinosaurActors = 0;
-        EnvironmentActors = 0;
-        bMapSaved = false;
-        bAllSystemsOperational = false;
+        ReportTimestamp = FDateTime::Now();
+        OverallStatus = EBuild_IntegrationStatus::Unknown;
+        TotalActorCount = 0;
+        LoadedClassCount = 0;
+        ExpectedClassCount = 0;
+        OverallPerformanceScore = 0.0f;
     }
 };
 
 /**
- * Build Integration Report Subsystem
- * Tracks compilation status, system health, and integration metrics
+ * Build Integration Report Manager
+ * Handles validation and reporting of cross-system integration status
  */
-UCLASS()
-class TRANSPERSONALGAME_API UBuildIntegrationReport : public UGameInstanceSubsystem
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API UBuildIntegrationReportManager : public UObject
 {
     GENERATED_BODY()
 
 public:
-    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    UBuildIntegrationReportManager();
 
-    UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    FBuild_IntegrationReport GenerateIntegrationReport(const FString& CycleId);
+    UFUNCTION(BlueprintCallable, Category = "Integration", CallInEditor = true)
+    FBuild_IntegrationReport GenerateIntegrationReport();
 
-    UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    bool ValidateSystemIntegration();
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    EBuild_IntegrationStatus ValidateSystemIntegration(const FString& SystemName);
 
-    UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    TArray<FBuild_SystemStatus> GetSystemStatuses();
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    bool ValidateCoreClasses();
 
-    UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    void LogIntegrationMetrics(const FBuild_IntegrationReport& Report);
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    float CalculatePerformanceScore();
+
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    TArray<FString> GetCriticalIssues();
 
 protected:
-    UPROPERTY()
-    TArray<FBuild_IntegrationReport> ReportHistory;
-
-    UPROPERTY()
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
     FBuild_IntegrationReport LastReport;
 
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    TArray<FString> CoreClassPaths;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    TMap<FString, EBuild_IntegrationStatus> SystemStatusCache;
+
 private:
-    FBuild_SystemStatus CheckSystemStatus(const FString& SystemName, const FString& ClassPath);
-    int32 CountActorsByType(const FString& ActorType);
-    bool ValidateMapPersistence();
+    void InitializeCoreClassPaths();
+    FBuild_SystemStatus ValidateWorldGeneration();
+    FBuild_SystemStatus ValidateCharacterSystems();
+    FBuild_SystemStatus ValidateDinosaurSystems();
+    FBuild_SystemStatus ValidateVFXSystems();
+    FBuild_SystemStatus ValidateAudioSystems();
 };
