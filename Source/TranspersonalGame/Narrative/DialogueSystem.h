@@ -1,14 +1,14 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/World.h"
+#include "Engine/GameInstance.h"
 #include "Components/ActorComponent.h"
 #include "Engine/DataTable.h"
-#include "../SharedTypes.h"
+#include "SharedTypes.h"
 #include "DialogueSystem.generated.h"
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FNarr_DialogueNode
+struct TRANSPERSONALGAME_API FNarr_DialogueEntry
 {
     GENERATED_BODY()
 
@@ -16,47 +16,52 @@ struct TRANSPERSONALGAME_API FNarr_DialogueNode
     FString SpeakerName;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    FString DialogueText;
+    FText DialogueText;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    FString AudioURL;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    float Duration;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
     TArray<FString> ResponseOptions;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    TArray<int32> NextNodeIDs;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    bool bIsEndNode;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    FString AudioAssetPath;
-
-    FNarr_DialogueNode()
+    FNarr_DialogueEntry()
     {
         SpeakerName = TEXT("");
-        DialogueText = TEXT("");
-        bIsEndNode = false;
-        AudioAssetPath = TEXT("");
+        DialogueText = FText::GetEmpty();
+        AudioURL = TEXT("");
+        Duration = 0.0f;
     }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FNarr_DialogueTree
+struct TRANSPERSONALGAME_API FNarr_NarrativeEvent
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    FString TreeName;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    FString EventID;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    TArray<FNarr_DialogueNode> DialogueNodes;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    FText EventDescription;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    int32 StartNodeID;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    TArray<FNarr_DialogueEntry> DialogueSequence;
 
-    FNarr_DialogueTree()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    bool bIsTriggered;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    float TriggerRadius;
+
+    FNarr_NarrativeEvent()
     {
-        TreeName = TEXT("");
-        StartNodeID = 0;
+        EventID = TEXT("");
+        EventDescription = FText::GetEmpty();
+        bIsTriggered = false;
+        TriggerRadius = 500.0f;
     }
 };
 
@@ -72,43 +77,42 @@ protected:
     virtual void BeginPlay() override;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    TArray<FNarr_DialogueTree> DialogueTrees;
+    TArray<FNarr_DialogueEntry> DialogueEntries;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Dialogue")
-    int32 CurrentTreeIndex;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    TArray<FNarr_NarrativeEvent> NarrativeEvents;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Dialogue")
-    int32 CurrentNodeIndex;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    int32 CurrentDialogueIndex;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Dialogue")
-    bool bDialogueActive;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    bool bIsDialogueActive;
 
 public:
     UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    bool StartDialogue(const FString& TreeName);
+    void StartDialogue(const FString& EventID);
+
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    void NextDialogue();
 
     UFUNCTION(BlueprintCallable, Category = "Dialogue")
     void EndDialogue();
 
     UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    FNarr_DialogueNode GetCurrentNode();
+    FNarr_DialogueEntry GetCurrentDialogue() const;
 
     UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    bool SelectResponse(int32 ResponseIndex);
+    void TriggerNarrativeEvent(const FString& EventID, const FVector& PlayerLocation);
 
     UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    void AddDialogueTree(const FNarr_DialogueTree& NewTree);
+    void AddDialogueEntry(const FNarr_DialogueEntry& NewEntry);
 
     UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    TArray<FString> GetAvailableDialogueTrees();
-
-    UFUNCTION(BlueprintPure, Category = "Dialogue")
-    bool IsDialogueActive() const { return bDialogueActive; }
+    void LoadNarrativeData();
 
     UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    void LoadDialogueFromDataTable(class UDataTable* DialogueDataTable);
+    bool IsDialogueActive() const { return bIsDialogueActive; }
 
-private:
-    void InitializeDefaultDialogues();
-    int32 FindTreeByName(const FString& TreeName);
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    void RegisterNarrativeEvent(const FNarr_NarrativeEvent& Event);
 };
