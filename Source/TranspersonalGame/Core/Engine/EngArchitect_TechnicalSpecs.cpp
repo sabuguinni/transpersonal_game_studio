@@ -1,252 +1,176 @@
 #include "EngArchitect_TechnicalSpecs.h"
 #include "Engine/Engine.h"
-#include "HAL/Platform.h"
+#include "Engine/World.h"
+#include "EngineUtils.h"
+#include "Components/StaticMeshComponent.h"
 
 UEngArchitect_TechnicalSpecs::UEngArchitect_TechnicalSpecs()
 {
-    TargetFrameRate = 60.0f;
-    MaxActorsPerBiome = 500;
-    MaxTotalActors = 20000;
+    PrimaryComponentTick.bCanEverTick = false;
     
-    InitializeDefaultSpecs();
+    // Initialize default specifications
+    PerformanceSpecs = FEng_PerformanceSpecs();
+    BiomeCoordinates = FEng_BiomeCoordinates();
+    SurvivalSpecs = FEng_SurvivalSpecs();
 }
 
-void UEngArchitect_TechnicalSpecs::InitializeDefaultSpecs()
+void UEngArchitect_TechnicalSpecs::BeginPlay()
 {
-    SystemSpecifications.Empty();
-    SystemRegistry.Empty();
-
-    // Core Systems (Agent #03)
-    FEng_SystemSpec CoreSystemsSpec;
-    CoreSystemsSpec.SystemName = TEXT("Core Systems");
-    CoreSystemsSpec.Priority = EEng_SystemPriority::Critical;
-    CoreSystemsSpec.Status = EEng_ModuleStatus::InProgress;
-    CoreSystemsSpec.AgentResponsible = 3;
-    CoreSystemsSpec.Dependencies.Add(TEXT("Engine Architecture"));
-    CoreSystemsSpec.MaxFrameTime = 5.0f;
-    CoreSystemsSpec.MaxMemoryMB = 256;
-    RegisterSystemSpec(CoreSystemsSpec);
-
-    // World Generation (Agent #05)
-    FEng_SystemSpec WorldGenSpec;
-    WorldGenSpec.SystemName = TEXT("World Generation");
-    WorldGenSpec.Priority = EEng_SystemPriority::Critical;
-    WorldGenSpec.Status = EEng_ModuleStatus::NotStarted;
-    WorldGenSpec.AgentResponsible = 5;
-    WorldGenSpec.Dependencies.Add(TEXT("Core Systems"));
-    WorldGenSpec.MaxFrameTime = 8.0f;
-    WorldGenSpec.MaxMemoryMB = 1024;
-    RegisterSystemSpec(WorldGenSpec);
-
-    // Character System (Agent #09)
-    FEng_SystemSpec CharacterSpec;
-    CharacterSpec.SystemName = TEXT("Character System");
-    CharacterSpec.Priority = EEng_SystemPriority::High;
-    CharacterSpec.Status = EEng_ModuleStatus::NotStarted;
-    CharacterSpec.AgentResponsible = 9;
-    CharacterSpec.Dependencies.Add(TEXT("Core Systems"));
-    CharacterSpec.MaxFrameTime = 4.0f;
-    CharacterSpec.MaxMemoryMB = 512;
-    RegisterSystemSpec(CharacterSpec);
-
-    // Dinosaur AI (Agent #12)
-    FEng_SystemSpec DinosaurAISpec;
-    DinosaurAISpec.SystemName = TEXT("Dinosaur AI");
-    DinosaurAISpec.Priority = EEng_SystemPriority::High;
-    DinosaurAISpec.Status = EEng_ModuleStatus::NotStarted;
-    DinosaurAISpec.AgentResponsible = 12;
-    DinosaurAISpec.Dependencies.Add(TEXT("Character System"));
-    DinosaurAISpec.Dependencies.Add(TEXT("World Generation"));
-    DinosaurAISpec.MaxFrameTime = 6.0f;
-    DinosaurAISpec.MaxMemoryMB = 768;
-    RegisterSystemSpec(DinosaurAISpec);
-
-    // Survival Systems
-    FEng_SystemSpec SurvivalSpec;
-    SurvivalSpec.SystemName = TEXT("Survival Systems");
-    SurvivalSpec.Priority = EEng_SystemPriority::High;
-    SurvivalSpec.Status = EEng_ModuleStatus::NotStarted;
-    SurvivalSpec.AgentResponsible = 14;
-    SurvivalSpec.Dependencies.Add(TEXT("Character System"));
-    SurvivalSpec.MaxFrameTime = 3.0f;
-    SurvivalSpec.MaxMemoryMB = 256;
-    RegisterSystemSpec(SurvivalSpec);
-
-    UE_LOG(LogTemp, Warning, TEXT("Engine Architect: Initialized %d system specifications"), SystemSpecifications.Num());
+    Super::BeginPlay();
+    
+    UE_LOG(LogTemp, Warning, TEXT("Engine Architect Technical Specs initialized"));
+    ValidatePerformanceMetrics();
 }
 
-bool UEngArchitect_TechnicalSpecs::ValidateSystemDependencies()
+bool UEngArchitect_TechnicalSpecs::ValidatePerformanceMetrics()
 {
-    bool bAllValid = true;
-
-    for (const FEng_SystemSpec& Spec : SystemSpecifications)
+    if (!GetWorld())
     {
-        for (const FString& Dependency : Spec.Dependencies)
+        UE_LOG(LogTemp, Error, TEXT("EngArchitect: No world context for performance validation"));
+        return false;
+    }
+    
+    // Count total actors in world
+    int32 TotalActors = 0;
+    for (TActorIterator<AActor> ActorItr(GetWorld()); ActorItr; ++ActorItr)
+    {
+        TotalActors++;
+    }
+    
+    UE_LOG(LogTemp, Warning, TEXT("EngArchitect Performance Check: %d total actors in world"), TotalActors);
+    
+    // Validate against performance specs
+    bool bPerformanceOK = true;
+    
+    if (TotalActors > (PerformanceSpecs.MaxActorsPerBiome * 5)) // 5 biomes
+    {
+        UE_LOG(LogTemp, Error, TEXT("EngArchitect: Actor count exceeds maximum (%d > %d)"), 
+               TotalActors, PerformanceSpecs.MaxActorsPerBiome * 5);
+        bPerformanceOK = false;
+    }
+    
+    // Check current framerate (if available)
+    float CurrentFPS = 1.0f / GetWorld()->GetDeltaSeconds();
+    if (CurrentFPS < PerformanceSpecs.TargetFPS_PC * 0.8f) // 80% threshold
+    {
+        UE_LOG(LogTemp, Warning, TEXT("EngArchitect: FPS below target (%.1f < %d)"), 
+               CurrentFPS, PerformanceSpecs.TargetFPS_PC);
+    }
+    
+    return bPerformanceOK;
+}
+
+FVector UEngArchitect_TechnicalSpecs::GetBiomeCenter(const FString& BiomeName)
+{
+    if (BiomeName == TEXT("Savana"))
+        return BiomeCoordinates.Savana;
+    else if (BiomeName == TEXT("Pantano"))
+        return BiomeCoordinates.Pantano;
+    else if (BiomeName == TEXT("Floresta"))
+        return BiomeCoordinates.Floresta;
+    else if (BiomeName == TEXT("Deserto"))
+        return BiomeCoordinates.Deserto;
+    else if (BiomeName == TEXT("Montanha"))
+        return BiomeCoordinates.Montanha;
+    
+    UE_LOG(LogTemp, Warning, TEXT("EngArchitect: Unknown biome name '%s', returning Savana"), *BiomeName);
+    return BiomeCoordinates.Savana;
+}
+
+bool UEngArchitect_TechnicalSpecs::IsLocationInBiome(const FVector& Location, const FString& BiomeName)
+{
+    FVector BiomeCenter = GetBiomeCenter(BiomeName);
+    float BiomeRadius = 20000.0f; // 20km radius per biome
+    
+    float Distance = FVector::Dist2D(Location, BiomeCenter);
+    return Distance <= BiomeRadius;
+}
+
+void UEngArchitect_TechnicalSpecs::ValidateWorldSetup()
+{
+    if (!GetWorld())
+    {
+        UE_LOG(LogTemp, Error, TEXT("EngArchitect: No world context for validation"));
+        return;
+    }
+    
+    UE_LOG(LogTemp, Warning, TEXT("=== ENGINE ARCHITECT WORLD VALIDATION ==="));
+    
+    // Check biome population
+    TArray<FString> BiomeNames = {TEXT("Savana"), TEXT("Pantano"), TEXT("Floresta"), TEXT("Deserto"), TEXT("Montanha")};
+    
+    for (const FString& BiomeName : BiomeNames)
+    {
+        FVector BiomeCenter = GetBiomeCenter(BiomeName);
+        int32 ActorsInBiome = 0;
+        
+        for (TActorIterator<AActor> ActorItr(GetWorld()); ActorItr; ++ActorItr)
         {
-            if (!SystemRegistry.Contains(Dependency))
+            AActor* Actor = *ActorItr;
+            if (IsLocationInBiome(Actor->GetActorLocation(), BiomeName))
             {
-                UE_LOG(LogTemp, Error, TEXT("System '%s' has unresolved dependency: '%s'"), 
-                    *Spec.SystemName, *Dependency);
-                bAllValid = false;
+                ActorsInBiome++;
+            }
+        }
+        
+        UE_LOG(LogTemp, Warning, TEXT("Biome %s: %d actors at center (%.0f, %.0f, %.0f)"), 
+               *BiomeName, ActorsInBiome, BiomeCenter.X, BiomeCenter.Y, BiomeCenter.Z);
+    }
+    
+    // Count dinosaurs specifically
+    int32 DinosaurCount = 0;
+    for (TActorIterator<AActor> ActorItr(GetWorld()); ActorItr; ++ActorItr)
+    {
+        AActor* Actor = *ActorItr;
+        FString ActorLabel = Actor->GetActorLabel();
+        if (ActorLabel.Contains(TEXT("Rex")) || ActorLabel.Contains(TEXT("raptor")) || 
+            ActorLabel.Contains(TEXT("Brachio")) || ActorLabel.Contains(TEXT("Tricera")))
+        {
+            DinosaurCount++;
+            UE_LOG(LogTemp, Warning, TEXT("Found dinosaur: %s at (%.0f, %.0f, %.0f)"), 
+                   *ActorLabel, Actor->GetActorLocation().X, Actor->GetActorLocation().Y, Actor->GetActorLocation().Z);
+        }
+    }
+    
+    UE_LOG(LogTemp, Warning, TEXT("Total dinosaurs in world: %d"), DinosaurCount);
+    UE_LOG(LogTemp, Warning, TEXT("=== VALIDATION COMPLETE ==="));
+}
+
+void UEngArchitect_TechnicalSpecs::EnforceArchitecturalConstraints()
+{
+    if (!GetWorld())
+    {
+        UE_LOG(LogTemp, Error, TEXT("EngArchitect: No world context for constraint enforcement"));
+        return;
+    }
+    
+    UE_LOG(LogTemp, Warning, TEXT("=== ENFORCING ARCHITECTURAL CONSTRAINTS ==="));
+    
+    // Remove excess actors if over limit
+    int32 TotalActors = 0;
+    TArray<AActor*> AllActors;
+    
+    for (TActorIterator<AActor> ActorItr(GetWorld()); ActorItr; ++ActorItr)
+    {
+        AllActors.Add(*ActorItr);
+        TotalActors++;
+    }
+    
+    int32 MaxAllowedActors = PerformanceSpecs.MaxActorsPerBiome * 5;
+    if (TotalActors > MaxAllowedActors)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("EngArchitect: Removing %d excess actors"), TotalActors - MaxAllowedActors);
+        
+        // Remove actors starting from the end (usually less important)
+        for (int32 i = AllActors.Num() - 1; i >= MaxAllowedActors; i--)
+        {
+            if (AllActors[i] && !AllActors[i]->GetActorLabel().Contains(TEXT("Rex")) && 
+                !AllActors[i]->GetActorLabel().Contains(TEXT("raptor"))) // Preserve dinosaurs
+            {
+                AllActors[i]->Destroy();
             }
         }
     }
-
-    if (bAllValid)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Engine Architect: All system dependencies validated successfully"));
-    }
-
-    return bAllValid;
-}
-
-bool UEngArchitect_TechnicalSpecs::CheckCompilationCompliance()
-{
-    bool bCompliant = true;
-
-    // Check UE5.5 compatibility
-    if (!CompilationRules.bEnforceUE55Compatibility)
-    {
-        UE_LOG(LogTemp, Error, TEXT("UE5.5 compatibility enforcement is disabled"));
-        bCompliant = false;
-    }
-
-    // Check matching .cpp files requirement
-    if (!CompilationRules.bRequireMatchingCppFiles)
-    {
-        UE_LOG(LogTemp, Error, TEXT("Matching .cpp files requirement is disabled"));
-        bCompliant = false;
-    }
-
-    // Check naming conventions
-    if (!CompilationRules.bEnforceNamingConventions)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Naming conventions enforcement is disabled"));
-    }
-
-    // Check SharedTypes usage
-    if (!CompilationRules.bRequireSharedTypesUsage)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("SharedTypes usage requirement is disabled"));
-    }
-
-    if (bCompliant)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Engine Architect: Compilation compliance check passed"));
-    }
-
-    return bCompliant;
-}
-
-bool UEngArchitect_TechnicalSpecs::ValidatePerformanceTargets()
-{
-    bool bValid = true;
-    float TotalFrameTime = 0.0f;
-    int32 TotalMemory = 0;
-
-    for (const FEng_SystemSpec& Spec : SystemSpecifications)
-    {
-        TotalFrameTime += Spec.MaxFrameTime;
-        TotalMemory += Spec.MaxMemoryMB;
-    }
-
-    float TargetFrameTime = 1000.0f / TargetFrameRate; // Convert to milliseconds
-
-    if (TotalFrameTime > TargetFrameTime)
-    {
-        UE_LOG(LogTemp, Error, TEXT("Total system frame time (%.2fms) exceeds target (%.2fms)"), 
-            TotalFrameTime, TargetFrameTime);
-        bValid = false;
-    }
-
-    if (TotalMemory > 4096) // 4GB limit
-    {
-        UE_LOG(LogTemp, Error, TEXT("Total system memory (%dMB) exceeds 4GB limit"), TotalMemory);
-        bValid = false;
-    }
-
-    if (bValid)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Engine Architect: Performance targets validated - Frame: %.2fms, Memory: %dMB"), 
-            TotalFrameTime, TotalMemory);
-    }
-
-    return bValid;
-}
-
-void UEngArchitect_TechnicalSpecs::RegisterSystemSpec(const FEng_SystemSpec& NewSpec)
-{
-    SystemSpecifications.Add(NewSpec);
-    SystemRegistry.Add(NewSpec.SystemName, NewSpec);
     
-    UE_LOG(LogTemp, Warning, TEXT("Engine Architect: Registered system '%s' (Agent %d, Priority %d)"), 
-        *NewSpec.SystemName, NewSpec.AgentResponsible, (int32)NewSpec.Priority);
-}
-
-FEng_SystemSpec UEngArchitect_TechnicalSpecs::GetSystemSpec(const FString& SystemName)
-{
-    if (SystemRegistry.Contains(SystemName))
-    {
-        return SystemRegistry[SystemName];
-    }
-
-    UE_LOG(LogTemp, Warning, TEXT("System spec not found: %s"), *SystemName);
-    return FEng_SystemSpec();
-}
-
-bool UEngArchitect_TechnicalSpecs::ValidateAgentChain()
-{
-    // Validate agent dependency chain: 02 -> 03 -> 05 -> 06 -> 07 -> 08 -> 09 -> 10 -> 11 -> 12 -> 13 -> 14 -> 15 -> 16 -> 17 -> 18 -> 19
-    TArray<int32> RequiredAgents = {2, 3, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19};
-    TSet<int32> RegisteredAgents;
-
-    for (const FEng_SystemSpec& Spec : SystemSpecifications)
-    {
-        RegisteredAgents.Add(Spec.AgentResponsible);
-    }
-
-    bool bChainValid = true;
-    for (int32 AgentNum : RequiredAgents)
-    {
-        if (!RegisteredAgents.Contains(AgentNum))
-        {
-            UE_LOG(LogTemp, Warning, TEXT("Agent #%d not registered in system specs"), AgentNum);
-            // Not marking as invalid since agents register progressively
-        }
-    }
-
-    return bChainValid;
-}
-
-bool UEngArchitect_TechnicalSpecs::CheckModuleDependencies()
-{
-    // Check that all required UE5 modules are available
-    TArray<FString> RequiredModules = {
-        TEXT("Core"),
-        TEXT("CoreUObject"),
-        TEXT("Engine"),
-        TEXT("UnrealEd"),
-        TEXT("ToolMenus"),
-        TEXT("EditorStyle"),
-        TEXT("EditorWidgets"),
-        TEXT("PropertyEditor"),
-        TEXT("Slate"),
-        TEXT("SlateCore"),
-        TEXT("InputCore"),
-        TEXT("RenderCore"),
-        TEXT("RHI"),
-        TEXT("NavigationSystem"),
-        TEXT("AIModule"),
-        TEXT("GameplayTasks"),
-        TEXT("UMG"),
-        TEXT("Niagara"),
-        TEXT("Landscape"),
-        TEXT("Foliage")
-    };
-
-    // In a real implementation, this would check module availability
-    // For now, we assume all modules are available in UE5.5
-    UE_LOG(LogTemp, Warning, TEXT("Engine Architect: Module dependency check completed"));
-    
-    return true;
+    UE_LOG(LogTemp, Warning, TEXT("EngArchitect: Constraints enforced. Final actor count: %d"), TotalActors);
 }
