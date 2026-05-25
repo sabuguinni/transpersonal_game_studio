@@ -1,91 +1,139 @@
 #include "Core_DestructionSystem.h"
-#include "Engine/World.h"
-#include "Engine/StaticMeshActor.h"
-#include "Components/StaticMeshComponent.h"
-#include "Kismet/GameplayStatics.h"
-#include "Kismet/KismetMathLibrary.h"
 #include "Engine/Engine.h"
+#include "Engine/World.h"
+#include "Components/StaticMeshComponent.h"
+#include "Engine/StaticMeshActor.h"
+#include "Particles/ParticleSystemComponent.h"
+#include "NiagaraComponent.h"
+#include "NiagaraFunctionLibrary.h"
+#include "Kismet/GameplayStatics.h"
+#include "Components/PrimitiveComponent.h"
 #include "TimerManager.h"
-#include "PhysicsEngine/RadialForceComponent.h"
+
+DEFINE_LOG_CATEGORY(LogDestructionSystem);
 
 UCore_DestructionSystem::UCore_DestructionSystem()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 0.1f;
+    PrimaryComponentTick.bStartWithTickEnabled = true;
 
     // Default destruction settings
-    DestructionType = ECore_DestructionType::Fracture;
-    FragmentLifetime = 10.0f;
-    MaxFragments = 20;
-    FragmentScaleVariation = 0.3f;
-    FragmentMass = 1.0f;
-    ExplosionForce = 1000.0f;
-    ExplosionRadius = 500.0f;
-    bUseRadialDamage = true;
-    bSpawnDebris = true;
-    SoundVolumeMultiplier = 1.0f;
+    MaterialType = ECore_MaterialType::Wood;
+    DestructionThreshold = 100.0f;
+    MaxHealth = 100.0f;
+    CurrentHealth = 100.0f;
+    bCanBeDestroyed = true;
+    bCreateDebris = true;
+    MaxDebrisCount = 8;
+    DebrisLifetime = 30.0f;
 
-    // Initialize destruction data
-    DestructionData.Health = 100.0f;
-    DestructionData.MaxHealth = 100.0f;
-    DestructionData.bCanBeDestroyed = true;
-    DestructionData.DestructionForceThreshold = 500.0f;
+    // Physics settings
+    DebrisMass = 10.0f;
+    DebrisBounciness = 0.3f;
+    DebrisFriction = 0.7f;
+
+    // Internal state
+    bIsDestroyed = false;
+    DestructionTime = 0.0f;
 }
 
 void UCore_DestructionSystem::BeginPlay()
 {
     Super::BeginPlay();
-    
-    // Initialize destruction system
-    bIsDestroyed = false;
-    CurrentDestructionStage = 0;
-    
-    // Set up cleanup timer
-    if (GetWorld())
-    {
-        GetWorld()->GetTimerManager().SetTimer(
-            FragmentCleanupTimer,
-            this,
-            &UCore_DestructionSystem::CleanupFragments,
-            FragmentLifetime,
-            true
-        );
-    }
+    InitializeDestructionSystem();
 }
 
 void UCore_DestructionSystem::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-    
-    // Update destruction stage based on health
-    UpdateDestructionStage();
+
+    if (bIsDestroyed)
+    {
+        DestructionTime += DeltaTime;
+    }
 }
 
-void UCore_DestructionSystem::ApplyDamage(float DamageAmount, const FVector& ImpactLocation, const FVector& ImpactForce)
+void UCore_DestructionSystem::InitializeDestructionSystem()
 {
-    if (!DestructionData.bCanBeDestroyed || bIsDestroyed)
+    UE_LOG(LogDestructionSystem, Log, TEXT("Initializing Destruction System for %s"), 
+           GetOwner() ? *GetOwner()->GetName() : TEXT("Unknown"));
+
+    // Set up material-specific defaults
+    switch (MaterialType)
+    {
+        case ECore_MaterialType::Wood:
+            DestructionThreshold = 80.0f;
+            MaxDebrisCount = 6;
+            DebrisMass = 5.0f;
+            break;
+        case ECore_MaterialType::Stone:
+            DestructionThreshold = 150.0f;
+            MaxDebrisCount = 10;
+            DebrisMass = 20.0f;
+            break;
+        case ECore_MaterialType::Glass:
+            DestructionThreshold = 30.0f;
+            MaxDebrisCount = 15;
+            DebrisMass = 2.0f;
+            break;
+        case ECore_MaterialType::Metal:
+            DestructionThreshold = 200.0f;
+            MaxDebrisCount = 4;
+            DebrisMass = 30.0f;
+            break;
+        case ECore_MaterialType::Bone:
+            DestructionThreshold = 60.0f;
+            MaxDebrisCount = 8;
+            DebrisMass = 3.0f;
+            break;
+        case ECore_MaterialType::Flesh:
+            DestructionThreshold = 40.0f;
+            MaxDebrisCount = 0; // No debris for flesh
+            bCreateDebris = false;
+            break;
+        case ECore_MaterialType::Ice:
+            DestructionThreshold = 50.0f;
+            MaxDebrisCount = 12;
+            DebrisMass = 8.0f;
+            break;
+        case ECore_MaterialType::Crystal:
+            DestructionThreshold = 70.0f;
+            MaxDebrisCount = 20;
+            DebrisMass = 4.0f;
+            break;
+    }
+
+    CurrentHealth = MaxHealth;
+}
+
+void UCore_DestructionSystem::TakeDamage(float DamageAmount, const FVector& ImpactLocation, const FVector& ImpactDirection, AActor* DamageCauser)
+{
+    if (!bCanBeDestroyed || bIsDestroyed)
     {
         return;
     }
 
-    // Apply damage
-    DestructionData.Health = FMath::Max(0.0f, DestructionData.Health - DamageAmount);
+    CurrentHealth -= DamageAmount;
     
-    // Check if force threshold is exceeded
-    float ForceStrength = ImpactForce.Size();
-    if (ForceStrength >= DestructionData.DestructionForceThreshold)
+    UE_LOG(LogDestructionSystem, Log, TEXT("%s took %.1f damage, health: %.1f/%.1f"), 
+           GetOwner() ? *GetOwner()->GetName() : TEXT("Unknown"), 
+           DamageAmount, CurrentHealth, MaxHealth);
+
+    if (CurrentHealth <= 0.0f)
     {
-        TriggerDestruction(ImpactLocation, ForceStrength);
-    }
-    
-    // Trigger destruction if health is depleted
-    if (DestructionData.Health <= 0.0f)
-    {
-        TriggerDestruction(ImpactLocation, ForceStrength);
+        FCore_DestructionEvent DestructionEvent;
+        DestructionEvent.DestructionType = (DamageAmount >= DestructionThreshold) ? 
+            ECore_DestructionType::Explode : ECore_DestructionType::Crumble;
+        DestructionEvent.ImpactLocation = ImpactLocation;
+        DestructionEvent.ImpactDirection = ImpactDirection;
+        DestructionEvent.ImpactForce = DamageAmount;
+        DestructionEvent.InstigatorActor = DamageCauser;
+
+        DestroyObject(DestructionEvent);
     }
 }
 
-void UCore_DestructionSystem::TriggerDestruction(const FVector& DestructionLocation, float Force)
+void UCore_DestructionSystem::DestroyObject(const FCore_DestructionEvent& DestructionEvent)
 {
     if (bIsDestroyed)
     {
@@ -94,135 +142,79 @@ void UCore_DestructionSystem::TriggerDestruction(const FVector& DestructionLocat
 
     bIsDestroyed = true;
     
-    // Play destruction effects
-    PlayDestructionEffects(DestructionLocation);
-    
-    // Create fragments based on destruction type
-    int32 NumFragments = FMath::Min(MaxFragments, FMath::RandRange(8, MaxFragments));
-    CreateFragments(DestructionLocation, NumFragments);
-    
-    // Apply radial damage if enabled
-    if (bUseRadialDamage && GetWorld())
+    UE_LOG(LogDestructionSystem, Log, TEXT("Destroying object %s with type %d"), 
+           GetOwner() ? *GetOwner()->GetName() : TEXT("Unknown"), 
+           (int32)DestructionEvent.DestructionType);
+
+    // Apply material-specific destruction
+    ApplyMaterialSpecificDestruction(MaterialType, DestructionEvent);
+
+    // Create debris if enabled
+    if (bCreateDebris && MaxDebrisCount > 0)
     {
-        UGameplayStatics::ApplyRadialDamage(
-            GetWorld(),
-            Force * 0.1f,
-            DestructionLocation,
-            ExplosionRadius,
-            nullptr,
-            TArray<AActor*>(),
-            GetOwner(),
-            nullptr,
-            true
-        );
+        CreateDebris(DestructionEvent.ImpactLocation, DestructionEvent.ImpactDirection, DestructionEvent.ImpactForce);
     }
-    
-    // Hide or destroy the original actor
+
+    // Play destruction effects
+    PlayDestructionEffects(DestructionEvent.ImpactLocation);
+
+    // Hide or replace the original mesh
     if (AActor* Owner = GetOwner())
     {
-        Owner->SetActorHiddenInGame(true);
-        Owner->SetActorEnableCollision(false);
-    }
-}
-
-void UCore_DestructionSystem::CreateFragments(const FVector& Origin, int32 NumFragments)
-{
-    if (!GetWorld() || !bSpawnDebris)
-    {
-        return;
-    }
-
-    AActor* Owner = GetOwner();
-    if (!Owner)
-    {
-        return;
-    }
-
-    // Get the original mesh component
-    UStaticMeshComponent* OriginalMesh = Owner->FindComponentByClass<UStaticMeshComponent>();
-    if (!OriginalMesh || !OriginalMesh->GetStaticMesh())
-    {
-        return;
-    }
-
-    for (int32 i = 0; i < NumFragments; i++)
-    {
-        // Generate random fragment properties
-        FVector FragmentLocation = Origin + FMath::VRand() * 100.0f;
-        FVector FragmentVelocity = FMath::VRand() * ExplosionForce * FMath::RandRange(0.5f, 1.5f);
-        float FragmentScale = FMath::RandRange(0.1f, 0.5f) * (1.0f + FMath::RandRange(-FragmentScaleVariation, FragmentScaleVariation));
-        
-        // Create fragment
-        UStaticMeshComponent* Fragment = CreateFragment(FragmentLocation, FragmentVelocity, FragmentScale);
-        if (Fragment)
+        if (UStaticMeshComponent* MeshComp = Owner->FindComponentByClass<UStaticMeshComponent>())
         {
-            SpawnedFragments.Add(Fragment);
-            
-            // Set fragment material if available
-            if (FragmentMaterial)
+            if (DestroyedMesh)
             {
-                Fragment->SetMaterial(0, FragmentMaterial);
+                MeshComp->SetStaticMesh(DestroyedMesh);
             }
-            else if (OriginalMesh->GetMaterial(0))
+            else
             {
-                Fragment->SetMaterial(0, OriginalMesh->GetMaterial(0));
+                MeshComp->SetVisibility(false);
             }
         }
     }
+
+    // Set cleanup timer
+    if (DebrisLifetime > 0.0f)
+    {
+        GetWorld()->GetTimerManager().SetTimer(
+            DebrisCleanupTimer,
+            this,
+            &UCore_DestructionSystem::CleanupDebris,
+            DebrisLifetime,
+            false
+        );
+    }
 }
 
-UStaticMeshComponent* UCore_DestructionSystem::CreateFragment(const FVector& Location, const FVector& Velocity, float Scale)
+void UCore_DestructionSystem::CreateDebris(const FVector& ImpactLocation, const FVector& ImpactDirection, float ImpactForce)
 {
-    if (!GetWorld())
+    if (!GetWorld() || DebrisMeshes.Num() == 0)
     {
-        return nullptr;
+        return;
     }
 
-    // Spawn fragment actor
-    AStaticMeshActor* FragmentActor = GetWorld()->SpawnActor<AStaticMeshActor>(
-        AStaticMeshActor::StaticClass(),
-        Location,
-        FRotator::ZeroRotator
-    );
-
-    if (!FragmentActor)
-    {
-        return nullptr;
-    }
-
-    UStaticMeshComponent* FragmentMesh = FragmentActor->GetStaticMeshComponent();
-    if (!FragmentMesh)
-    {
-        FragmentActor->Destroy();
-        return nullptr;
-    }
-
-    // Get original mesh
-    AActor* Owner = GetOwner();
-    if (Owner)
-    {
-        UStaticMeshComponent* OriginalMesh = Owner->FindComponentByClass<UStaticMeshComponent>();
-        if (OriginalMesh && OriginalMesh->GetStaticMesh())
-        {
-            FragmentMesh->SetStaticMesh(OriginalMesh->GetStaticMesh());
-        }
-    }
-
-    // Set fragment properties
-    FragmentMesh->SetWorldScale3D(FVector(Scale));
-    FragmentMesh->SetSimulatePhysics(true);
-    FragmentMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-    FragmentMesh->SetCollisionObjectType(ECollisionChannel::ECC_WorldDynamic);
-    FragmentMesh->SetMassOverrideInKg(NAME_None, FragmentMass * Scale, true);
-
-    // Apply initial velocity
-    FragmentMesh->AddImpulse(Velocity * FragmentMass * Scale, NAME_None, true);
+    int32 DebrisToSpawn = FMath::Min(MaxDebrisCount, DebrisMeshes.Num());
     
-    // Add random angular velocity
-    FVector AngularVelocity = FMath::VRand() * 360.0f;
-    FragmentMesh->AddAngularImpulseInDegrees(AngularVelocity, NAME_None, true);
+    for (int32 i = 0; i < DebrisToSpawn; i++)
+    {
+        if (DebrisMeshes[i])
+        {
+            // Calculate spawn location with some randomness
+            FVector SpawnLocation = ImpactLocation + FVector(
+                FMath::RandRange(-50.0f, 50.0f),
+                FMath::RandRange(-50.0f, 50.0f),
+                FMath::RandRange(0.0f, 25.0f)
+            );
 
-    return FragmentMesh;
+            // Calculate velocity based on impact direction and force
+            FVector Velocity = CalculateDebrisVelocity(ImpactDirection, ImpactForce);
+            
+            SpawnDebrisActor(SpawnLocation, Velocity, DebrisMeshes[i]);
+        }
+    }
+
+    UE_LOG(LogDestructionSystem, Log, TEXT("Created %d debris pieces"), DebrisToSpawn);
 }
 
 void UCore_DestructionSystem::PlayDestructionEffects(const FVector& Location)
@@ -232,222 +224,153 @@ void UCore_DestructionSystem::PlayDestructionEffects(const FVector& Location)
         return;
     }
 
-    // Play particle effect
-    if (DestructionParticles)
-    {
-        UGameplayStatics::SpawnEmitterAtLocation(
-            GetWorld(),
-            DestructionParticles,
-            Location,
-            FRotator::ZeroRotator,
-            FVector(1.0f),
-            true
-        );
-    }
-
     // Play destruction sound
     if (DestructionSound)
     {
-        UGameplayStatics::PlaySoundAtLocation(
-            GetWorld(),
-            DestructionSound,
-            Location,
-            SoundVolumeMultiplier
-        );
-    }
-}
-
-void UCore_DestructionSystem::CleanupFragments()
-{
-    // Remove old fragments
-    for (int32 i = SpawnedFragments.Num() - 1; i >= 0; i--)
-    {
-        if (!IsValid(SpawnedFragments[i]) || !IsValid(SpawnedFragments[i]->GetOwner()))
-        {
-            SpawnedFragments.RemoveAt(i);
-            continue;
-        }
-
-        // Check if fragment should be cleaned up based on lifetime
-        AActor* FragmentActor = SpawnedFragments[i]->GetOwner();
-        if (FragmentActor && (GetWorld()->GetTimeSeconds() - FragmentActor->GetActorTimestamp()) > FragmentLifetime)
-        {
-            FragmentActor->Destroy();
-            SpawnedFragments.RemoveAt(i);
-        }
-    }
-}
-
-void UCore_DestructionSystem::UpdateDestructionStage()
-{
-    if (bIsDestroyed)
-    {
-        return;
+        UGameplayStatics::PlaySoundAtLocation(GetWorld(), DestructionSound, Location);
     }
 
-    float HealthPercentage = GetHealthPercentage();
-    int32 NewStage = 0;
-
-    // Determine destruction stage based on health
-    if (HealthPercentage > 0.75f)
+    // Play particle effect
+    if (DestructionEffect)
     {
-        NewStage = 0; // Pristine
-    }
-    else if (HealthPercentage > 0.5f)
-    {
-        NewStage = 1; // Slightly damaged
-    }
-    else if (HealthPercentage > 0.25f)
-    {
-        NewStage = 2; // Moderately damaged
-    }
-    else
-    {
-        NewStage = 3; // Heavily damaged
+        UGameplayStatics::SpawnEmitterAtLocation(GetWorld(), DestructionEffect, Location);
     }
 
-    if (NewStage != CurrentDestructionStage)
+    // Play Niagara effect
+    if (DestructionNiagara)
     {
-        CurrentDestructionStage = NewStage;
-        
-        // Apply visual changes based on destruction stage
-        if (DestructionData.DestructionStages.IsValidIndex(CurrentDestructionStage))
-        {
-            AActor* Owner = GetOwner();
-            if (Owner)
-            {
-                UStaticMeshComponent* MeshComp = Owner->FindComponentByClass<UStaticMeshComponent>();
-                if (MeshComp && DestructionData.DestructionStages[CurrentDestructionStage])
-                {
-                    MeshComp->SetStaticMesh(DestructionData.DestructionStages[CurrentDestructionStage]);
-                }
-            }
-        }
+        UNiagaraFunctionLibrary::SpawnSystemAtLocation(GetWorld(), DestructionNiagara, Location);
     }
-}
-
-void UCore_DestructionSystem::SetDestructionType(ECore_DestructionType NewType)
-{
-    DestructionType = NewType;
-    
-    // Adjust parameters based on destruction type
-    switch (DestructionType)
-    {
-        case ECore_DestructionType::Fracture:
-            MaxFragments = 15;
-            ExplosionForce = 800.0f;
-            FragmentScaleVariation = 0.3f;
-            break;
-            
-        case ECore_DestructionType::Shatter:
-            MaxFragments = 25;
-            ExplosionForce = 1200.0f;
-            FragmentScaleVariation = 0.5f;
-            break;
-            
-        case ECore_DestructionType::Crumble:
-            MaxFragments = 30;
-            ExplosionForce = 400.0f;
-            FragmentScaleVariation = 0.2f;
-            break;
-            
-        case ECore_DestructionType::Explode:
-            MaxFragments = 20;
-            ExplosionForce = 2000.0f;
-            FragmentScaleVariation = 0.4f;
-            bUseRadialDamage = true;
-            break;
-            
-        case ECore_DestructionType::Dissolve:
-            MaxFragments = 5;
-            ExplosionForce = 100.0f;
-            FragmentScaleVariation = 0.1f;
-            break;
-            
-        default:
-            break;
-    }
-}
-
-bool UCore_DestructionSystem::CanBeDestroyed() const
-{
-    return DestructionData.bCanBeDestroyed && !bIsDestroyed;
 }
 
 float UCore_DestructionSystem::GetHealthPercentage() const
 {
-    if (DestructionData.MaxHealth <= 0.0f)
+    return MaxHealth > 0.0f ? (CurrentHealth / MaxHealth) : 0.0f;
+}
+
+bool UCore_DestructionSystem::IsDestroyed() const
+{
+    return bIsDestroyed;
+}
+
+bool UCore_DestructionSystem::CanTakeDamage() const
+{
+    return bCanBeDestroyed && !bIsDestroyed;
+}
+
+void UCore_DestructionSystem::ApplyMaterialSpecificDestruction(ECore_MaterialType Material, const FCore_DestructionEvent& Event)
+{
+    switch (Material)
     {
-        return 0.0f;
+        case ECore_MaterialType::Wood:
+            // Wood splinters and breaks apart
+            UE_LOG(LogDestructionSystem, Log, TEXT("Applying wood destruction pattern"));
+            break;
+        case ECore_MaterialType::Stone:
+            // Stone crumbles into chunks
+            UE_LOG(LogDestructionSystem, Log, TEXT("Applying stone destruction pattern"));
+            break;
+        case ECore_MaterialType::Glass:
+            // Glass shatters into many small pieces
+            UE_LOG(LogDestructionSystem, Log, TEXT("Applying glass destruction pattern"));
+            break;
+        case ECore_MaterialType::Metal:
+            // Metal dents and tears
+            UE_LOG(LogDestructionSystem, Log, TEXT("Applying metal destruction pattern"));
+            break;
+        case ECore_MaterialType::Bone:
+            // Bone fractures and splinters
+            UE_LOG(LogDestructionSystem, Log, TEXT("Applying bone destruction pattern"));
+            break;
+        case ECore_MaterialType::Flesh:
+            // Flesh tears and bleeds
+            UE_LOG(LogDestructionSystem, Log, TEXT("Applying flesh destruction pattern"));
+            break;
+        case ECore_MaterialType::Ice:
+            // Ice shatters and melts
+            UE_LOG(LogDestructionSystem, Log, TEXT("Applying ice destruction pattern"));
+            break;
+        case ECore_MaterialType::Crystal:
+            // Crystal fractures with prismatic effects
+            UE_LOG(LogDestructionSystem, Log, TEXT("Applying crystal destruction pattern"));
+            break;
+    }
+}
+
+FVector UCore_DestructionSystem::CalculateDebrisVelocity(const FVector& ImpactDirection, float Force) const
+{
+    // Base velocity from impact direction
+    FVector BaseVelocity = ImpactDirection.GetSafeNormal() * FMath::Sqrt(Force) * 10.0f;
+    
+    // Add random spread
+    FVector RandomSpread = FVector(
+        FMath::RandRange(-1.0f, 1.0f),
+        FMath::RandRange(-1.0f, 1.0f),
+        FMath::RandRange(0.2f, 1.0f)
+    ) * 200.0f;
+    
+    return BaseVelocity + RandomSpread;
+}
+
+void UCore_DestructionSystem::SpawnDebrisActor(const FVector& Location, const FVector& Velocity, UStaticMesh* DebrisMesh)
+{
+    if (!GetWorld() || !DebrisMesh)
+    {
+        return;
+    }
+
+    // Spawn debris actor
+    FActorSpawnParameters SpawnParams;
+    SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
+    
+    AStaticMeshActor* DebrisActor = GetWorld()->SpawnActor<AStaticMeshActor>(Location, FRotator::ZeroRotator, SpawnParams);
+    
+    if (DebrisActor)
+    {
+        // Set up mesh
+        UStaticMeshComponent* MeshComp = DebrisActor->GetStaticMeshComponent();
+        if (MeshComp)
+        {
+            MeshComp->SetStaticMesh(DebrisMesh);
+            
+            // Enable physics
+            MeshComp->SetSimulatePhysics(true);
+            MeshComp->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+            
+            // Set physics properties
+            MeshComp->SetMassOverrideInKg(NAME_None, DebrisMass);
+            
+            // Apply initial velocity
+            MeshComp->SetPhysicsLinearVelocity(Velocity);
+            
+            // Add random angular velocity
+            FVector AngularVelocity = FVector(
+                FMath::RandRange(-360.0f, 360.0f),
+                FMath::RandRange(-360.0f, 360.0f),
+                FMath::RandRange(-360.0f, 360.0f)
+            );
+            MeshComp->SetPhysicsAngularVelocityInDegrees(AngularVelocity);
+        }
+        
+        // Store reference for cleanup
+        SpawnedDebris.Add(DebrisActor);
+        
+        // Set debris to destroy itself after lifetime
+        DebrisActor->SetLifeSpan(DebrisLifetime);
+    }
+}
+
+void UCore_DestructionSystem::CleanupDebris()
+{
+    UE_LOG(LogDestructionSystem, Log, TEXT("Cleaning up %d debris pieces"), SpawnedDebris.Num());
+    
+    for (AActor* DebrisActor : SpawnedDebris)
+    {
+        if (IsValid(DebrisActor))
+        {
+            DebrisActor->Destroy();
+        }
     }
     
-    return DestructionData.Health / DestructionData.MaxHealth;
-}
-
-void UCore_DestructionSystem::SetupDinosaurDestruction(float DinosaurMass, ECore_DestructionType Type)
-{
-    SetDestructionType(Type);
-    
-    // Scale destruction parameters based on dinosaur mass
-    float MassScale = FMath::Clamp(DinosaurMass / 1000.0f, 0.1f, 10.0f); // Normalize to 1000kg baseline
-    
-    DestructionData.Health = 50.0f * MassScale;
-    DestructionData.MaxHealth = DestructionData.Health;
-    DestructionData.DestructionForceThreshold = 300.0f * MassScale;
-    
-    ExplosionForce = 1000.0f * MassScale;
-    ExplosionRadius = 300.0f * FMath::Sqrt(MassScale);
-    MaxFragments = FMath::Clamp(FMath::RoundToInt(15.0f * MassScale), 5, 40);
-    FragmentMass = 10.0f * MassScale;
-}
-
-void UCore_DestructionSystem::ApplyDinosaurImpact(float DinosaurMass, const FVector& ImpactVelocity)
-{
-    // Calculate impact force based on mass and velocity
-    float ImpactForce = DinosaurMass * ImpactVelocity.Size();
-    float DamageAmount = ImpactForce * 0.01f; // Convert force to damage
-    
-    ApplyDamage(DamageAmount, GetOwner()->GetActorLocation(), ImpactVelocity * DinosaurMass);
-}
-
-void UCore_DestructionSystem::SetupTreeDestruction()
-{
-    SetDestructionType(ECore_DestructionType::Fracture);
-    
-    DestructionData.Health = 150.0f;
-    DestructionData.MaxHealth = 150.0f;
-    DestructionData.DestructionForceThreshold = 800.0f;
-    
-    MaxFragments = 12;
-    ExplosionForce = 600.0f;
-    FragmentMass = 5.0f;
-    FragmentScaleVariation = 0.4f;
-}
-
-void UCore_DestructionSystem::SetupRockDestruction()
-{
-    SetDestructionType(ECore_DestructionType::Shatter);
-    
-    DestructionData.Health = 300.0f;
-    DestructionData.MaxHealth = 300.0f;
-    DestructionData.DestructionForceThreshold = 1200.0f;
-    
-    MaxFragments = 20;
-    ExplosionForce = 1000.0f;
-    FragmentMass = 15.0f;
-    FragmentScaleVariation = 0.3f;
-}
-
-void UCore_DestructionSystem::SetupStructureDestruction()
-{
-    SetDestructionType(ECore_DestructionType::Crumble);
-    
-    DestructionData.Health = 500.0f;
-    DestructionData.MaxHealth = 500.0f;
-    DestructionData.DestructionForceThreshold = 1500.0f;
-    
-    MaxFragments = 25;
-    ExplosionForce = 800.0f;
-    FragmentMass = 20.0f;
-    FragmentScaleVariation = 0.35f;
+    SpawnedDebris.Empty();
 }
