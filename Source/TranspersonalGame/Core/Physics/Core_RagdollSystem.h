@@ -1,18 +1,78 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/World.h"
-#include "Components/SkeletalMeshComponent.h"
+#include "UObject/NoExportTypes.h"
 #include "Engine/Engine.h"
+#include "Components/SkeletalMeshComponent.h"
 #include "PhysicsEngine/PhysicsAsset.h"
-#include "Animation/AnimInstance.h"
-#include "GameFramework/Character.h"
 #include "Core_RagdollSystem.generated.h"
 
+DECLARE_LOG_CATEGORY_EXTERN(LogRagdollSystem, Log, All);
+
 /**
- * Core Ragdoll Physics System
- * Handles realistic ragdoll physics for dinosaurs and characters
- * Manages death animations, physics transitions, and body simulation
+ * Ragdoll transition types for different death scenarios
+ */
+UENUM(BlueprintType)
+enum class ECore_RagdollTransition : uint8
+{
+    None            UMETA(DisplayName = "None"),
+    InstantDeath    UMETA(DisplayName = "Instant Death"),
+    GradualCollapse UMETA(DisplayName = "Gradual Collapse"),
+    ImpactDeath     UMETA(DisplayName = "Impact Death"),
+    Unconscious     UMETA(DisplayName = "Unconscious")
+};
+
+/**
+ * Ragdoll physics configuration for different character types
+ */
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FCore_RagdollConfig
+{
+    GENERATED_BODY()
+
+    /** Mass scale for ragdoll physics */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
+    float MassScale;
+
+    /** Linear damping for ragdoll bodies */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
+    float LinearDamping;
+
+    /** Angular damping for ragdoll bodies */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
+    float AngularDamping;
+
+    /** Maximum angular velocity */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
+    float MaxAngularVelocity;
+
+    /** Collision response for ragdoll */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision")
+    TEnumAsByte<ECollisionResponse> CollisionResponse;
+
+    /** Time before ragdoll cleanup */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lifecycle")
+    float CleanupTime;
+
+    FCore_RagdollConfig()
+    {
+        MassScale = 1.0f;
+        LinearDamping = 0.1f;
+        AngularDamping = 0.1f;
+        MaxAngularVelocity = 3600.0f;
+        CollisionResponse = ECR_Block;
+        CleanupTime = 30.0f;
+    }
+};
+
+/**
+ * Core Ragdoll System - Manages realistic physics-based character death and unconsciousness
+ * 
+ * Handles the transition from animated character to physics-driven ragdoll for:
+ * - Character death scenarios (instant, gradual, impact-based)
+ * - Unconsciousness states with recovery potential
+ * - Dinosaur death physics with species-specific configurations
+ * - Performance optimization through LOD and cleanup systems
  */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UCore_RagdollSystem : public UObject
@@ -22,64 +82,127 @@ class TRANSPERSONALGAME_API UCore_RagdollSystem : public UObject
 public:
     UCore_RagdollSystem();
 
-    // Core ragdoll functions
-    UFUNCTION(BlueprintCallable, Category = "Core Physics|Ragdoll")
-    void EnableRagdoll(USkeletalMeshComponent* SkeletalMesh);
+    /**
+     * Initialize ragdoll system with character mesh component
+     * @param InMeshComponent - The skeletal mesh component to manage
+     * @param InConfig - Ragdoll configuration settings
+     */
+    UFUNCTION(BlueprintCallable, Category = "Ragdoll System")
+    void InitializeRagdoll(USkeletalMeshComponent* InMeshComponent, const FCore_RagdollConfig& InConfig);
 
-    UFUNCTION(BlueprintCallable, Category = "Core Physics|Ragdoll")
-    void DisableRagdoll(USkeletalMeshComponent* SkeletalMesh);
+    /**
+     * Activate ragdoll physics with specified transition type
+     * @param TransitionType - How the ragdoll should activate
+     * @param ImpactForce - Optional force to apply during activation
+     * @param ImpactLocation - World location where force should be applied
+     */
+    UFUNCTION(BlueprintCallable, Category = "Ragdoll System")
+    void ActivateRagdoll(ECore_RagdollTransition TransitionType, const FVector& ImpactForce = FVector::ZeroVector, const FVector& ImpactLocation = FVector::ZeroVector);
 
-    UFUNCTION(BlueprintCallable, Category = "Core Physics|Ragdoll")
-    bool IsRagdollActive(USkeletalMeshComponent* SkeletalMesh) const;
+    /**
+     * Deactivate ragdoll and return to animated state (for unconsciousness recovery)
+     */
+    UFUNCTION(BlueprintCallable, Category = "Ragdoll System")
+    void DeactivateRagdoll();
 
-    // Dinosaur-specific ragdoll
-    UFUNCTION(BlueprintCallable, Category = "Core Physics|Dinosaur")
-    void EnableDinosaurRagdoll(ACharacter* DinosaurCharacter, float ImpactForce = 1000.0f);
+    /**
+     * Check if ragdoll is currently active
+     */
+    UFUNCTION(BlueprintPure, Category = "Ragdoll System")
+    bool IsRagdollActive() const { return bRagdollActive; }
 
-    UFUNCTION(BlueprintCallable, Category = "Core Physics|Dinosaur")
-    void SetDinosaurRagdollProperties(USkeletalMeshComponent* SkeletalMesh, float Mass = 500.0f, float Damping = 0.1f);
+    /**
+     * Get current ragdoll transition type
+     */
+    UFUNCTION(BlueprintPure, Category = "Ragdoll System")
+    ECore_RagdollTransition GetTransitionType() const { return CurrentTransition; }
 
-    // Physics impulse and forces
-    UFUNCTION(BlueprintCallable, Category = "Core Physics|Forces")
-    void ApplyRagdollImpulse(USkeletalMeshComponent* SkeletalMesh, FVector Impulse, FName BoneName = NAME_None);
+    /**
+     * Force cleanup of ragdoll (immediate removal)
+     */
+    UFUNCTION(BlueprintCallable, Category = "Ragdoll System")
+    void ForceCleanup();
 
-    UFUNCTION(BlueprintCallable, Category = "Core Physics|Forces")
-    void ApplyRadialImpulse(USkeletalMeshComponent* SkeletalMesh, FVector Origin, float Radius, float Strength);
+    /**
+     * Update ragdoll system (called from tick)
+     * @param DeltaTime - Time since last update
+     */
+    UFUNCTION(BlueprintCallable, Category = "Ragdoll System")
+    void UpdateRagdoll(float DeltaTime);
+
+    /**
+     * Set ragdoll configuration at runtime
+     * @param NewConfig - New configuration to apply
+     */
+    UFUNCTION(BlueprintCallable, Category = "Ragdoll System")
+    void SetRagdollConfig(const FCore_RagdollConfig& NewConfig);
+
+    /**
+     * Get current ragdoll configuration
+     */
+    UFUNCTION(BlueprintPure, Category = "Ragdoll System")
+    FCore_RagdollConfig GetRagdollConfig() const { return RagdollConfig; }
 
 protected:
-    // Ragdoll configuration
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll Settings")
-    float DefaultRagdollMass;
+    /** Skeletal mesh component being managed */
+    UPROPERTY(BlueprintReadOnly, Category = "Components")
+    TObjectPtr<USkeletalMeshComponent> MeshComponent;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll Settings")
-    float DefaultLinearDamping;
+    /** Current ragdoll configuration */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
+    FCore_RagdollConfig RagdollConfig;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll Settings")
-    float DefaultAngularDamping;
+    /** Whether ragdoll is currently active */
+    UPROPERTY(BlueprintReadOnly, Category = "State")
+    bool bRagdollActive;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll Settings")
-    bool bEnableGravity;
+    /** Current transition type */
+    UPROPERTY(BlueprintReadOnly, Category = "State")
+    ECore_RagdollTransition CurrentTransition;
 
-    // Dinosaur-specific settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur Physics")
-    TMap<FString, float> DinosaurMassOverrides;
+    /** Time since ragdoll activation */
+    UPROPERTY(BlueprintReadOnly, Category = "State")
+    float RagdollActiveTime;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur Physics")
-    float TRexMass;
+    /** Original collision settings (for restoration) */
+    UPROPERTY()
+    TEnumAsByte<ECollisionResponse> OriginalCollisionResponse;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur Physics")
-    float VelociraptorMass;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur Physics")
-    float BrachiosaurusMass;
+    /** Original physics settings (for restoration) */
+    UPROPERTY()
+    bool bOriginalSimulatePhysics;
 
 private:
-    // Internal ragdoll management
-    void ConfigureRagdollPhysics(USkeletalMeshComponent* SkeletalMesh);
-    void StoreAnimationState(USkeletalMeshComponent* SkeletalMesh);
-    void RestoreAnimationState(USkeletalMeshComponent* SkeletalMesh);
+    /**
+     * Apply physics settings based on transition type
+     * @param TransitionType - The type of ragdoll transition
+     */
+    void ApplyTransitionSettings(ECore_RagdollTransition TransitionType);
 
-    // Stored animation states
-    UPROPERTY()
-    TMap<USkeletalMeshComponent*, UAnimInstance*> StoredAnimInstances;
+    /**
+     * Configure physics bodies for ragdoll
+     */
+    void ConfigurePhysicsBodies();
+
+    /**
+     * Restore original animation state
+     */
+    void RestoreAnimationState();
+
+    /**
+     * Handle cleanup timer
+     */
+    void HandleCleanupTimer(float DeltaTime);
+
+    /**
+     * Apply impact force to ragdoll
+     * @param Force - Force vector to apply
+     * @param Location - World location to apply force
+     */
+    void ApplyImpactForce(const FVector& Force, const FVector& Location);
+
+    /**
+     * Validate mesh component and physics asset
+     */
+    bool ValidateRagdollSetup() const;
 };
