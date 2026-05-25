@@ -1,17 +1,22 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Engine/GameInstance.h"
 #include "Components/ActorComponent.h"
-#include "Engine/Engine.h"
+#include "SharedTypes.h"
 #include "Narr_DialogueSystem.generated.h"
 
 UENUM(BlueprintType)
-enum class ENarr_DialogueState : uint8
+enum class ENarr_DialogueType : uint8
 {
-    Idle,
-    Speaking,
-    WaitingForResponse,
-    Completed
+    None = 0,
+    QuestBriefing,
+    SurvivalTip,
+    DangerWarning,
+    ResourceInfo,
+    TerritoryInfo,
+    CombatAdvice,
+    WeatherAlert
 };
 
 USTRUCT(BlueprintType)
@@ -26,17 +31,21 @@ struct FNarr_DialogueLine
     FString DialogueText;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    FString AudioPath;
+    ENarr_DialogueType DialogueType;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    float Duration;
+    float DisplayDuration;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    FString AudioURL;
 
     FNarr_DialogueLine()
     {
         SpeakerName = TEXT("Unknown");
         DialogueText = TEXT("");
-        AudioPath = TEXT("");
-        Duration = 3.0f;
+        DialogueType = ENarr_DialogueType::None;
+        DisplayDuration = 3.0f;
+        AudioURL = TEXT("");
     }
 };
 
@@ -52,16 +61,16 @@ struct FNarr_DialogueSequence
     TArray<FNarr_DialogueLine> DialogueLines;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    bool bIsQuestRelated;
+    bool bIsRepeatable;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    FString QuestID;
+    int32 Priority;
 
     FNarr_DialogueSequence()
     {
-        SequenceID = TEXT("Default");
-        bIsQuestRelated = false;
-        QuestID = TEXT("");
+        SequenceID = TEXT("");
+        bIsRepeatable = false;
+        Priority = 0;
     }
 };
 
@@ -79,58 +88,49 @@ protected:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue System")
     TArray<FNarr_DialogueSequence> DialogueSequences;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Dialogue System")
-    ENarr_DialogueState CurrentState;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue System")
+    FNarr_DialogueSequence CurrentSequence;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Dialogue System")
-    FString CurrentSequenceID;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Dialogue System")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue System")
     int32 CurrentLineIndex;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue System")
-    float DialogueRange;
+    bool bIsDialogueActive;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue System")
-    bool bAutoAdvance;
+    float DefaultDisplayDuration;
 
 public:
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+    UFUNCTION(BlueprintCallable, Category = "Dialogue System")
+    void StartDialogueSequence(const FString& SequenceID);
 
     UFUNCTION(BlueprintCallable, Category = "Dialogue System")
-    bool StartDialogue(const FString& SequenceID);
+    void StopCurrentDialogue();
 
     UFUNCTION(BlueprintCallable, Category = "Dialogue System")
-    void AdvanceDialogue();
-
-    UFUNCTION(BlueprintCallable, Category = "Dialogue System")
-    void StopDialogue();
-
-    UFUNCTION(BlueprintCallable, Category = "Dialogue System")
-    bool AddDialogueSequence(const FNarr_DialogueSequence& NewSequence);
+    void NextDialogueLine();
 
     UFUNCTION(BlueprintCallable, Category = "Dialogue System")
     FNarr_DialogueLine GetCurrentDialogueLine() const;
 
     UFUNCTION(BlueprintCallable, Category = "Dialogue System")
-    bool IsPlayerInRange() const;
+    bool IsDialogueActive() const { return bIsDialogueActive; }
 
-    UFUNCTION(BlueprintPure, Category = "Dialogue System")
-    bool IsDialogueActive() const { return CurrentState != ENarr_DialogueState::Idle; }
+    UFUNCTION(BlueprintCallable, Category = "Dialogue System")
+    void AddDialogueSequence(const FNarr_DialogueSequence& NewSequence);
 
-    UFUNCTION(BlueprintImplementableEvent, Category = "Dialogue System")
-    void OnDialogueStarted(const FString& SequenceID);
+    UFUNCTION(BlueprintCallable, Category = "Dialogue System")
+    void TriggerSurvivalTip(const FString& TipText);
 
-    UFUNCTION(BlueprintImplementableEvent, Category = "Dialogue System")
-    void OnDialogueLineChanged(const FNarr_DialogueLine& DialogueLine);
+    UFUNCTION(BlueprintCallable, Category = "Dialogue System")
+    void TriggerDangerWarning(const FString& WarningText);
 
-    UFUNCTION(BlueprintImplementableEvent, Category = "Dialogue System")
-    void OnDialogueCompleted(const FString& SequenceID);
+    UFUNCTION(BlueprintCallable, Category = "Dialogue System")
+    void TriggerQuestBriefing(const FString& QuestText);
 
 private:
-    float CurrentLineTimer;
-    AActor* PlayerActor;
-
-    void UpdatePlayerReference();
-    void ProcessCurrentLine(float DeltaTime);
+    void InitializeDefaultDialogues();
+    void CreateSurvivalDialogues();
+    void CreateDangerWarnings();
+    void CreateQuestBriefings();
 };
