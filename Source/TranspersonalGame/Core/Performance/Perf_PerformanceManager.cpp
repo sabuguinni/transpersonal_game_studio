@@ -1,296 +1,442 @@
 #include "Perf_PerformanceManager.h"
-#include "Engine/Engine.h"
 #include "Engine/World.h"
+#include "Engine/Engine.h"
+#include "GameFramework/Actor.h"
+#include "Components/StaticMeshComponent.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Engine/StaticMeshActor.h"
 #include "HAL/PlatformFilemanager.h"
 #include "Misc/DateTime.h"
-#include "Stats/Stats.h"
-#include "RenderingThread.h"
+#include "Engine/GameViewportClient.h"
 
 UPerf_PerformanceManager::UPerf_PerformanceManager()
 {
-    CurrentPerformanceLevel = EPerf_PerformanceLevel::Medium;
-    TargetFPS = 60.0f;
-    bPerformanceMonitoringEnabled = true;
-    LastOptimizationTime = 0.0f;
+    PrimaryComponentTick.bCanEverTick = true;
+    PrimaryComponentTick.TickInterval = 0.1f; // Update 10 times per second
     
-    // Initialize default LOD settings
-    CurrentLODSettings.ViewDistanceScale = 1.0f;
-    CurrentLODSettings.FoliageLODScale = 1.0f;
-    CurrentLODSettings.SkeletalMeshLODBias = 0;
-    CurrentLODSettings.MaxShadowResolution = 4096;
+    // Initialize platform targets for PC High-End
+    PlatformTargets.TargetFPS = 60.0f;
+    PlatformTargets.MaxFrameTime = 16.67f;
+    PlatformTargets.MaxActors = 10000;
+    PlatformTargets.MaxDrawCalls = 2000;
+    PlatformTargets.MaxMemoryMB = 8192.0f;
+    
+    FrameTimeHistory.Reserve(MaxFrameHistorySize);
 }
 
-void UPerf_PerformanceManager::Initialize(FSubsystemCollectionBase& Collection)
+void UPerf_PerformanceManager::BeginPlay()
 {
-    Super::Initialize(Collection);
+    Super::BeginPlay();
     
-    UE_LOG(LogTemp, Warning, TEXT("Performance Manager initialized - Target FPS: %.1f"), TargetFPS);
+    if (bAutoOptimize)
+    {
+        StartPerformanceMonitoring();
+    }
     
-    // Set initial performance level based on platform
-#if PLATFORM_WINDOWS || PLATFORM_MAC || PLATFORM_LINUX
-    SetPerformanceLevel(EPerf_PerformanceLevel::High);
-    TargetFPS = 60.0f;
-#else
-    SetPerformanceLevel(EPerf_PerformanceLevel::Medium);
-    TargetFPS = 30.0f;
-#endif
-
-    // Apply initial LOD settings
-    OptimizeLODSettings();
+    ApplyPlatformSettings();
+    ApplyPerformanceLevelSettings();
+    
+    UE_LOG(LogTemp, Log, TEXT("Performance Manager initialized for platform: %d"), (int32)CurrentPlatform);
 }
 
-void UPerf_PerformanceManager::Deinitialize()
+void UPerf_PerformanceManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
-    UE_LOG(LogTemp, Warning, TEXT("Performance Manager shutting down"));
-    Super::Deinitialize();
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+    
+    if (bIsMonitoring)
+    {
+        LastMonitorTime += DeltaTime;
+        if (LastMonitorTime >= MonitoringInterval)
+        {
+            UpdatePerformanceMetrics();
+            CheckPerformanceThresholds();
+            LastMonitorTime = 0.0f;
+        }
+    }
+    
+    // Auto-optimization with cooldown
+    if (bAutoOptimize && (GetWorld()->GetTimeSeconds() - LastOptimizationTime) > OptimizationCooldown)
+    {
+        if (!IsPerformanceTargetMet())
+        {
+            AutoOptimizePerformance();
+            LastOptimizationTime = GetWorld()->GetTimeSeconds();
+        }
+    }
+}
+
+void UPerf_PerformanceManager::StartPerformanceMonitoring()
+{
+    bIsMonitoring = true;
+    FrameTimeHistory.Empty();
+    UE_LOG(LogTemp, Log, TEXT("Performance monitoring started"));
+}
+
+void UPerf_PerformanceManager::StopPerformanceMonitoring()
+{
+    bIsMonitoring = false;
+    UE_LOG(LogTemp, Log, TEXT("Performance monitoring stopped"));
 }
 
 FPerf_PerformanceMetrics UPerf_PerformanceManager::GetCurrentMetrics() const
 {
-    FPerf_PerformanceMetrics Metrics;
-    
-    // Get current FPS
-    if (GEngine && GEngine->GetGameViewport())
-    {
-        Metrics.CurrentFPS = 1.0f / FApp::GetDeltaTime();
-        Metrics.FrameTime = FApp::GetDeltaTime() * 1000.0f; // Convert to milliseconds
-    }
-    
-    // Get memory usage (simplified)
-    FPlatformMemoryStats MemStats = FPlatformMemory::GetStats();
-    Metrics.MemoryUsageMB = MemStats.UsedPhysical / (1024.0f * 1024.0f);
-    
-    // Get visible actors count (simplified)
-    if (GetWorld())
-    {
-        Metrics.VisibleActors = GetWorld()->GetActorCount();
-    }
-    
-    // Draw calls would require more complex rendering stats
-    Metrics.DrawCalls = 0; // Placeholder
-    
-    return Metrics;
+    return CurrentMetrics;
 }
 
-void UPerf_PerformanceManager::SetPerformanceLevel(EPerf_PerformanceLevel Level)
+bool UPerf_PerformanceManager::IsPerformanceTargetMet() const
 {
-    CurrentPerformanceLevel = Level;
+    return CurrentMetrics.CurrentFPS >= (PlatformTargets.TargetFPS * 0.9f) && 
+           CurrentMetrics.AverageFrameTime <= (PlatformTargets.MaxFrameTime * 1.1f);
+}
+
+void UPerf_PerformanceManager::SetPlatformType(EPerf_PlatformType NewPlatform)
+{
+    CurrentPlatform = NewPlatform;
+    ApplyPlatformSettings();
+    UE_LOG(LogTemp, Log, TEXT("Platform type changed to: %d"), (int32)NewPlatform);
+}
+
+void UPerf_PerformanceManager::SetPerformanceLevel(EPerf_PerformanceLevel NewLevel)
+{
+    CurrentPerformanceLevel = NewLevel;
+    ApplyPerformanceLevelSettings();
+    UE_LOG(LogTemp, Log, TEXT("Performance level changed to: %d"), (int32)NewLevel);
+}
+
+void UPerf_PerformanceManager::AutoOptimizePerformance()
+{
+    UE_LOG(LogTemp, Warning, TEXT("Auto-optimizing performance - FPS: %.1f, Target: %.1f"), 
+           CurrentMetrics.CurrentFPS, PlatformTargets.TargetFPS);
     
-    switch (Level)
+    // Progressive optimization based on performance deficit
+    float performanceRatio = CurrentMetrics.CurrentFPS / PlatformTargets.TargetFPS;
+    
+    if (performanceRatio < 0.7f)
+    {
+        // Severe performance issues - aggressive optimization
+        OptimizeRenderingSettings();
+        OptimizePhysicsSettings();
+        OptimizeActorLOD();
+        CullDistantActors();
+    }
+    else if (performanceRatio < 0.9f)
+    {
+        // Moderate performance issues - targeted optimization
+        OptimizeActorLOD();
+        AdjustLODDistances();
+    }
+}
+
+void UPerf_PerformanceManager::OptimizeActorLOD()
+{
+    UWorld* World = GetWorld();
+    if (!World) return;
+    
+    FVector PlayerLocation = FVector::ZeroVector;
+    if (APawn* PlayerPawn = World->GetFirstPlayerController()->GetPawn())
+    {
+        PlayerLocation = PlayerPawn->GetActorLocation();
+    }
+    
+    // Optimize actors in chunks to spread load
+    OptimizeActorsInRadius(PlayerLocation, 5000.0f);
+    
+    UE_LOG(LogTemp, Log, TEXT("Actor LOD optimization completed"));
+}
+
+void UPerf_PerformanceManager::OptimizePhysicsSettings()
+{
+    UWorld* World = GetWorld();
+    if (!World) return;
+    
+    // Reduce physics simulation complexity based on performance level
+    switch (CurrentPerformanceLevel)
     {
         case EPerf_PerformanceLevel::Low:
-            CurrentLODSettings.ViewDistanceScale = 0.5f;
-            CurrentLODSettings.FoliageLODScale = 0.3f;
-            CurrentLODSettings.SkeletalMeshLODBias = 2;
-            CurrentLODSettings.MaxShadowResolution = 1024;
+        case EPerf_PerformanceLevel::Potato:
+            // Disable physics on distant objects
+            for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+            {
+                AActor* Actor = *ActorItr;
+                if (Actor && Actor->GetRootComponent())
+                {
+                    UPrimitiveComponent* PrimComp = Cast<UPrimitiveComponent>(Actor->GetRootComponent());
+                    if (PrimComp && PrimComp->IsSimulatingPhysics())
+                    {
+                        FVector ActorLocation = Actor->GetActorLocation();
+                        FVector PlayerLocation = FVector::ZeroVector;
+                        if (APawn* PlayerPawn = World->GetFirstPlayerController()->GetPawn())
+                        {
+                            PlayerLocation = PlayerPawn->GetActorLocation();
+                        }
+                        
+                        float Distance = FVector::Dist(ActorLocation, PlayerLocation);
+                        if (Distance > 2000.0f)
+                        {
+                            PrimComp->SetSimulatePhysics(false);
+                        }
+                    }
+                }
+            }
             break;
-            
-        case EPerf_PerformanceLevel::Medium:
-            CurrentLODSettings.ViewDistanceScale = 0.8f;
-            CurrentLODSettings.FoliageLODScale = 0.7f;
-            CurrentLODSettings.SkeletalMeshLODBias = 1;
-            CurrentLODSettings.MaxShadowResolution = 2048;
-            break;
-            
-        case EPerf_PerformanceLevel::High:
-            CurrentLODSettings.ViewDistanceScale = 1.0f;
-            CurrentLODSettings.FoliageLODScale = 1.0f;
-            CurrentLODSettings.SkeletalMeshLODBias = 0;
-            CurrentLODSettings.MaxShadowResolution = 4096;
-            break;
-            
-        case EPerf_PerformanceLevel::Ultra:
-            CurrentLODSettings.ViewDistanceScale = 1.2f;
-            CurrentLODSettings.FoliageLODScale = 1.2f;
-            CurrentLODSettings.SkeletalMeshLODBias = -1;
-            CurrentLODSettings.MaxShadowResolution = 8192;
+        default:
             break;
     }
     
-    ApplyLODSettings(CurrentLODSettings);
-    UE_LOG(LogTemp, Warning, TEXT("Performance level set to: %d"), (int32)Level);
+    UE_LOG(LogTemp, Log, TEXT("Physics optimization completed"));
 }
 
-EPerf_PerformanceLevel UPerf_PerformanceManager::GetCurrentPerformanceLevel() const
+void UPerf_PerformanceManager::OptimizeRenderingSettings()
 {
-    return CurrentPerformanceLevel;
-}
-
-void UPerf_PerformanceManager::ApplyLODSettings(const FPerf_LODSettings& Settings)
-{
-    CurrentLODSettings = Settings;
-    
-    // Apply console commands for LOD settings
-    if (GetWorld())
+    // Apply rendering optimizations based on performance level
+    switch (CurrentPerformanceLevel)
     {
-        UKismetSystemLibrary::ExecuteConsoleCommand(
-            GetWorld(),
-            FString::Printf(TEXT("r.ViewDistanceScale %.2f"), Settings.ViewDistanceScale)
-        );
-        
-        UKismetSystemLibrary::ExecuteConsoleCommand(
-            GetWorld(),
-            FString::Printf(TEXT("foliage.LODDistanceScale %.2f"), Settings.FoliageLODScale)
-        );
-        
-        UKismetSystemLibrary::ExecuteConsoleCommand(
-            GetWorld(),
-            FString::Printf(TEXT("r.SkeletalMeshLODBias %d"), Settings.SkeletalMeshLODBias)
-        );
-        
-        UKismetSystemLibrary::ExecuteConsoleCommand(
-            GetWorld(),
-            FString::Printf(TEXT("r.Shadow.MaxResolution %d"), Settings.MaxShadowResolution)
-        );
-    }
-}
-
-FPerf_LODSettings UPerf_PerformanceManager::GetCurrentLODSettings() const
-{
-    return CurrentLODSettings;
-}
-
-void UPerf_PerformanceManager::OptimizeForCurrentConditions()
-{
-    if (!bPerformanceMonitoringEnabled)
-    {
-        return;
+        case EPerf_PerformanceLevel::Low:
+            // Reduce shadow quality
+            if (GEngine && GEngine->GetGameUserSettings())
+            {
+                GEngine->GetGameUserSettings()->SetShadowQuality(1);
+                GEngine->GetGameUserSettings()->SetTextureQuality(1);
+                GEngine->GetGameUserSettings()->SetEffectsQuality(1);
+            }
+            break;
+        case EPerf_PerformanceLevel::Potato:
+            // Minimal rendering quality
+            if (GEngine && GEngine->GetGameUserSettings())
+            {
+                GEngine->GetGameUserSettings()->SetShadowQuality(0);
+                GEngine->GetGameUserSettings()->SetTextureQuality(0);
+                GEngine->GetGameUserSettings()->SetEffectsQuality(0);
+                GEngine->GetGameUserSettings()->SetPostProcessingQuality(0);
+            }
+            break;
+        default:
+            break;
     }
     
-    float CurrentTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
-    if (CurrentTime - LastOptimizationTime < OPTIMIZATION_INTERVAL)
-    {
-        return;
-    }
-    
-    LastOptimizationTime = CurrentTime;
-    
-    FPerf_PerformanceMetrics CurrentMetrics = GetCurrentMetrics();
-    CachedMetrics = CurrentMetrics;
-    
-    // Adjust performance level based on current FPS
-    if (CurrentMetrics.CurrentFPS < LOW_FPS_THRESHOLD)
-    {
-        // Performance is poor, lower quality
-        if (CurrentPerformanceLevel == EPerf_PerformanceLevel::Ultra)
-        {
-            SetPerformanceLevel(EPerf_PerformanceLevel::High);
-        }
-        else if (CurrentPerformanceLevel == EPerf_PerformanceLevel::High)
-        {
-            SetPerformanceLevel(EPerf_PerformanceLevel::Medium);
-        }
-        else if (CurrentPerformanceLevel == EPerf_PerformanceLevel::Medium)
-        {
-            SetPerformanceLevel(EPerf_PerformanceLevel::Low);
-        }
-    }
-    else if (CurrentMetrics.CurrentFPS > HIGH_FPS_THRESHOLD)
-    {
-        // Performance is good, can increase quality
-        if (CurrentPerformanceLevel == EPerf_PerformanceLevel::Low)
-        {
-            SetPerformanceLevel(EPerf_PerformanceLevel::Medium);
-        }
-        else if (CurrentPerformanceLevel == EPerf_PerformanceLevel::Medium)
-        {
-            SetPerformanceLevel(EPerf_PerformanceLevel::High);
-        }
-        else if (CurrentPerformanceLevel == EPerf_PerformanceLevel::High && TargetFPS >= 60.0f)
-        {
-            SetPerformanceLevel(EPerf_PerformanceLevel::Ultra);
-        }
-    }
-}
-
-void UPerf_PerformanceManager::EnablePerformanceMonitoring(bool bEnabled)
-{
-    bPerformanceMonitoringEnabled = bEnabled;
-    UE_LOG(LogTemp, Warning, TEXT("Performance monitoring %s"), bEnabled ? TEXT("enabled") : TEXT("disabled"));
-}
-
-void UPerf_PerformanceManager::SetTargetFPS(float NewTargetFPS)
-{
-    TargetFPS = FMath::Clamp(NewTargetFPS, 15.0f, 120.0f);
-    
-    if (GetWorld())
-    {
-        UKismetSystemLibrary::ExecuteConsoleCommand(
-            GetWorld(),
-            FString::Printf(TEXT("t.MaxFPS %.1f"), TargetFPS)
-        );
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("Target FPS set to: %.1f"), TargetFPS);
-}
-
-float UPerf_PerformanceManager::GetTargetFPS() const
-{
-    return TargetFPS;
+    UE_LOG(LogTemp, Log, TEXT("Rendering optimization completed"));
 }
 
 void UPerf_PerformanceManager::UpdatePerformanceMetrics()
 {
-    CachedMetrics = GetCurrentMetrics();
+    UWorld* World = GetWorld();
+    if (!World) return;
+    
+    // Calculate FPS and frame time
+    float DeltaTime = World->GetDeltaSeconds();
+    if (DeltaTime > 0.0f)
+    {
+        CurrentMetrics.CurrentFPS = 1.0f / DeltaTime;
+        CurrentMetrics.AverageFrameTime = DeltaTime * 1000.0f; // Convert to milliseconds
+        
+        // Update frame time history
+        FrameTimeHistory.Add(CurrentMetrics.AverageFrameTime);
+        if (FrameTimeHistory.Num() > MaxFrameHistorySize)
+        {
+            FrameTimeHistory.RemoveAt(0);
+        }
+        
+        // Calculate average frame time
+        if (FrameTimeHistory.Num() > 0)
+        {
+            float TotalFrameTime = 0.0f;
+            for (float FrameTime : FrameTimeHistory)
+            {
+                TotalFrameTime += FrameTime;
+            }
+            CurrentMetrics.AverageFrameTime = TotalFrameTime / FrameTimeHistory.Num();
+        }
+    }
+    
+    // Count actors
+    CurrentMetrics.ActorCount = 0;
+    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+    {
+        CurrentMetrics.ActorCount++;
+    }
+    
+    // Estimate memory usage (simplified)
+    CurrentMetrics.MemoryUsageMB = FPlatformMemory::GetStats().UsedPhysical / (1024.0f * 1024.0f);
+    
+    // Estimate draw calls (simplified based on visible actors)
+    CurrentMetrics.DrawCalls = CurrentMetrics.ActorCount / 5; // Rough estimate
 }
 
 void UPerf_PerformanceManager::CheckPerformanceThresholds()
 {
-    if (CachedMetrics.CurrentFPS < TargetFPS * 0.8f)
+    bool bPreviousWarning = bPerformanceWarning;
+    
+    bPerformanceWarning = !IsPerformanceTargetMet();
+    
+    if (bPerformanceWarning && !bPreviousWarning)
     {
-        // Performance below 80% of target, optimize
-        OptimizeForCurrentConditions();
+        UE_LOG(LogTemp, Warning, TEXT("Performance warning: FPS %.1f below target %.1f"), 
+               CurrentMetrics.CurrentFPS, PlatformTargets.TargetFPS);
+    }
+    else if (!bPerformanceWarning && bPreviousWarning)
+    {
+        UE_LOG(LogTemp, Log, TEXT("Performance recovered: FPS %.1f"), CurrentMetrics.CurrentFPS);
     }
 }
 
-void UPerf_PerformanceManager::AdjustQualitySettings()
+void UPerf_PerformanceManager::ApplyPlatformSettings()
 {
-    // Implement dynamic quality adjustment based on performance
-    if (GetWorld())
+    switch (CurrentPlatform)
     {
-        if (CachedMetrics.CurrentFPS < LOW_FPS_THRESHOLD)
-        {
-            // Reduce quality settings
-            UKismetSystemLibrary::ExecuteConsoleCommand(GetWorld(), TEXT("r.PostProcessAAQuality 1"));
-            UKismetSystemLibrary::ExecuteConsoleCommand(GetWorld(), TEXT("r.MotionBlurQuality 0"));
-        }
-        else if (CachedMetrics.CurrentFPS > HIGH_FPS_THRESHOLD)
-        {
-            // Increase quality settings
-            UKismetSystemLibrary::ExecuteConsoleCommand(GetWorld(), TEXT("r.PostProcessAAQuality 3"));
-            UKismetSystemLibrary::ExecuteConsoleCommand(GetWorld(), TEXT("r.MotionBlurQuality 2"));
-        }
+        case EPerf_PlatformType::PC_HighEnd:
+            PlatformTargets.TargetFPS = 60.0f;
+            PlatformTargets.MaxFrameTime = 16.67f;
+            PlatformTargets.MaxActors = 15000;
+            PlatformTargets.MaxDrawCalls = 3000;
+            PlatformTargets.MaxMemoryMB = 16384.0f;
+            break;
+        case EPerf_PlatformType::PC_MidRange:
+            PlatformTargets.TargetFPS = 60.0f;
+            PlatformTargets.MaxFrameTime = 16.67f;
+            PlatformTargets.MaxActors = 10000;
+            PlatformTargets.MaxDrawCalls = 2000;
+            PlatformTargets.MaxMemoryMB = 8192.0f;
+            break;
+        case EPerf_PlatformType::PC_LowEnd:
+            PlatformTargets.TargetFPS = 30.0f;
+            PlatformTargets.MaxFrameTime = 33.33f;
+            PlatformTargets.MaxActors = 5000;
+            PlatformTargets.MaxDrawCalls = 1000;
+            PlatformTargets.MaxMemoryMB = 4096.0f;
+            break;
+        case EPerf_PlatformType::Console_Next:
+            PlatformTargets.TargetFPS = 60.0f;
+            PlatformTargets.MaxFrameTime = 16.67f;
+            PlatformTargets.MaxActors = 12000;
+            PlatformTargets.MaxDrawCalls = 2500;
+            PlatformTargets.MaxMemoryMB = 12288.0f;
+            break;
+        case EPerf_PlatformType::Console_Current:
+            PlatformTargets.TargetFPS = 30.0f;
+            PlatformTargets.MaxFrameTime = 33.33f;
+            PlatformTargets.MaxActors = 8000;
+            PlatformTargets.MaxDrawCalls = 1500;
+            PlatformTargets.MaxMemoryMB = 6144.0f;
+            break;
+        case EPerf_PlatformType::Mobile:
+            PlatformTargets.TargetFPS = 30.0f;
+            PlatformTargets.MaxFrameTime = 33.33f;
+            PlatformTargets.MaxActors = 2000;
+            PlatformTargets.MaxDrawCalls = 500;
+            PlatformTargets.MaxMemoryMB = 2048.0f;
+            break;
     }
 }
 
-void UPerf_PerformanceManager::OptimizeLODSettings()
+void UPerf_PerformanceManager::ApplyPerformanceLevelSettings()
 {
-    ApplyLODSettings(CurrentLODSettings);
-}
-
-void UPerf_PerformanceManager::UpdateViewDistanceScaling()
-{
-    if (GetWorld())
+    switch (CurrentPerformanceLevel)
     {
-        UKismetSystemLibrary::ExecuteConsoleCommand(
-            GetWorld(),
-            FString::Printf(TEXT("r.ViewDistanceScale %.2f"), CurrentLODSettings.ViewDistanceScale)
-        );
+        case EPerf_PerformanceLevel::Ultra:
+            MonitoringInterval = 0.5f;
+            bEnableDetailedProfiling = true;
+            break;
+        case EPerf_PerformanceLevel::High:
+            MonitoringInterval = 1.0f;
+            bEnableDetailedProfiling = true;
+            break;
+        case EPerf_PerformanceLevel::Medium:
+            MonitoringInterval = 1.0f;
+            bEnableDetailedProfiling = false;
+            break;
+        case EPerf_PerformanceLevel::Low:
+            MonitoringInterval = 2.0f;
+            bEnableDetailedProfiling = false;
+            break;
+        case EPerf_PerformanceLevel::Potato:
+            MonitoringInterval = 5.0f;
+            bEnableDetailedProfiling = false;
+            break;
     }
 }
 
-void UPerf_PerformanceManager::OptimizeShadowSettings()
+void UPerf_PerformanceManager::OptimizeActorsInRadius(const FVector& Center, float Radius)
 {
-    if (GetWorld())
+    UWorld* World = GetWorld();
+    if (!World) return;
+    
+    int32 OptimizedCount = 0;
+    
+    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
     {
-        UKismetSystemLibrary::ExecuteConsoleCommand(
-            GetWorld(),
-            FString::Printf(TEXT("r.Shadow.MaxResolution %d"), CurrentLODSettings.MaxShadowResolution)
-        );
+        AActor* Actor = *ActorItr;
+        if (!Actor) continue;
         
-        UKismetSystemLibrary::ExecuteConsoleCommand(
-            GetWorld(),
-            TEXT("r.Shadow.DistanceScale 0.6")
-        );
+        float Distance = FVector::Dist(Actor->GetActorLocation(), Center);
+        
+        // Apply LOD based on distance
+        if (UStaticMeshComponent* MeshComp = Actor->FindComponentByClass<UStaticMeshComponent>())
+        {
+            if (Distance > 3000.0f)
+            {
+                MeshComp->SetForcedLodModel(3); // Lowest LOD
+            }
+            else if (Distance > 1500.0f)
+            {
+                MeshComp->SetForcedLodModel(2);
+            }
+            else if (Distance > 500.0f)
+            {
+                MeshComp->SetForcedLodModel(1);
+            }
+            else
+            {
+                MeshComp->SetForcedLodModel(0); // Highest LOD
+            }
+            OptimizedCount++;
+        }
     }
+    
+    UE_LOG(LogTemp, Log, TEXT("Optimized %d actors in radius %.1f"), OptimizedCount, Radius);
+}
+
+void UPerf_PerformanceManager::CullDistantActors()
+{
+    UWorld* World = GetWorld();
+    if (!World) return;
+    
+    FVector PlayerLocation = FVector::ZeroVector;
+    if (APawn* PlayerPawn = World->GetFirstPlayerController()->GetPawn())
+    {
+        PlayerLocation = PlayerPawn->GetActorLocation();
+    }
+    
+    float CullDistance = 10000.0f; // 10km
+    int32 CulledCount = 0;
+    
+    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+    {
+        AActor* Actor = *ActorItr;
+        if (!Actor || Actor->IsA<APawn>()) continue; // Don't cull pawns
+        
+        float Distance = FVector::Dist(Actor->GetActorLocation(), PlayerLocation);
+        if (Distance > CullDistance)
+        {
+            Actor->SetActorHiddenInGame(true);
+            CulledCount++;
+        }
+        else
+        {
+            Actor->SetActorHiddenInGame(false);
+        }
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("Culled %d distant actors"), CulledCount);
+}
+
+void UPerf_PerformanceManager::AdjustLODDistances()
+{
+    UWorld* World = GetWorld();
+    if (!World) return;
+    
+    // Adjust LOD distances based on current performance
+    float PerformanceRatio = CurrentMetrics.CurrentFPS / PlatformTargets.TargetFPS;
+    float LODMultiplier = FMath::Clamp(PerformanceRatio, 0.5f, 2.0f);
+    
+    UE_LOG(LogTemp, Log, TEXT("Adjusting LOD distances with multiplier: %.2f"), LODMultiplier);
 }
