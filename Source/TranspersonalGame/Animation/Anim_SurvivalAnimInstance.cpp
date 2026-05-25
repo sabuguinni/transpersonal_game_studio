@@ -2,41 +2,48 @@
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "Kismet/KismetSystemLibrary.h"
 #include "Engine/World.h"
-#include "Kismet/KismetMathLibrary.h"
 #include "DrawDebugHelpers.h"
 
 UAnim_SurvivalAnimInstance::UAnim_SurvivalAnimInstance()
 {
-    MovementState = EAnim_MovementState::Idle;
-    ActionState = EAnim_ActionState::None;
+    CurrentMovementState = EAnim_MovementState::Idle;
+    CurrentSurvivalAction = EAnim_SurvivalAction::None;
     
-    WalkSpeedThreshold = 100.0f;
-    RunSpeedThreshold = 300.0f;
-    SprintSpeedThreshold = 500.0f;
-    FootstepInterval = 0.5f;
+    MovementSpeed = 0.0f;
+    MovementDirection = 0.0f;
+    bIsMoving = false;
+    bIsInAir = false;
+    bIsCrouching = false;
+    bIsClimbing = false;
+    bIsSwimming = false;
     
-    MovementBlendAlpha = 0.0f;
-    ActionBlendAlpha = 0.0f;
-    FootIKAlpha = 1.0f;
+    bIsHunting = false;
+    bIsGathering = false;
+    bIsCrafting = false;
+    bIsInCombat = false;
+    StaminaLevel = 100.0f;
+    HealthLevel = 100.0f;
     
-    LeftFootOffset = FVector::ZeroVector;
-    RightFootOffset = FVector::ZeroVector;
+    OwningCharacter = nullptr;
+    MovementComponent = nullptr;
+    
+    LocomotionBlendSpace = nullptr;
+    IdleAnimation = nullptr;
+    JumpStartAnimation = nullptr;
+    JumpLoopAnimation = nullptr;
+    JumpEndAnimation = nullptr;
 }
 
 void UAnim_SurvivalAnimInstance::NativeInitializeAnimation()
 {
     Super::NativeInitializeAnimation();
     
-    OwnerCharacter = Cast<ACharacter>(GetOwningActor());
-    if (OwnerCharacter)
+    OwningCharacter = Cast<ACharacter>(GetOwningActor());
+    if (OwningCharacter)
     {
-        MovementComponent = OwnerCharacter->GetCharacterMovement();
-        UE_LOG(LogTemp, Log, TEXT("SurvivalAnimInstance: Initialized for character %s"), *OwnerCharacter->GetName());
-    }
-    else
-    {
-        UE_LOG(LogTemp, Warning, TEXT("SurvivalAnimInstance: Failed to get owner character"));
+        MovementComponent = OwningCharacter->GetCharacterMovement();
     }
 }
 
@@ -44,207 +51,273 @@ void UAnim_SurvivalAnimInstance::NativeUpdateAnimation(float DeltaTimeX)
 {
     Super::NativeUpdateAnimation(DeltaTimeX);
     
-    if (!OwnerCharacter || !MovementComponent)
+    if (!OwningCharacter || !MovementComponent)
     {
         return;
     }
     
-    UpdateMotionData(DeltaTimeX);
     UpdateMovementState();
-    UpdateActionState();
-    UpdateFootIK();
-    
-    LastUpdateTime += DeltaTimeX;
-}
-
-void UAnim_SurvivalAnimInstance::UpdateMotionData(float DeltaTime)
-{
-    if (!OwnerCharacter || !MovementComponent)
-    {
-        return;
-    }
-    
-    // Update basic motion data
-    MotionData.Velocity = MovementComponent->Velocity;
-    MotionData.Speed = MotionData.Velocity.Size();
-    MotionData.Direction = CalculateDirectionAngle();
-    MotionData.bIsInAir = MovementComponent->IsFalling();
-    MotionData.bIsCrouching = MovementComponent->IsCrouching();
-    
-    // Calculate acceleration
-    if (DeltaTime > 0.0f)
-    {
-        MotionData.Acceleration = (MotionData.Velocity - LastVelocity) / DeltaTime;
-    }
-    
-    // Update footstep timing
-    if (MotionData.Speed > WalkSpeedThreshold && !MotionData.bIsInAir)
-    {
-        MotionData.TimeSinceLastFootstep += DeltaTime;
-        if (MotionData.TimeSinceLastFootstep >= FootstepInterval)
-        {
-            MotionData.TimeSinceLastFootstep = 0.0f;
-            // Trigger footstep event here if needed
-        }
-    }
-    else
-    {
-        MotionData.TimeSinceLastFootstep = 0.0f;
-    }
-    
-    LastVelocity = MotionData.Velocity;
+    UpdateMotionMatchingData();
+    UpdateIKFootPlacement();
 }
 
 void UAnim_SurvivalAnimInstance::UpdateMovementState()
 {
-    EAnim_MovementState NewState = CalculateMovementState();
-    
-    if (NewState != MovementState)
+    if (!OwningCharacter || !MovementComponent)
     {
-        MovementState = NewState;
-        
-        // Update blend alpha based on state
-        switch (MovementState)
-        {
-            case EAnim_MovementState::Idle:
-                MovementBlendAlpha = 0.0f;
-                break;
-            case EAnim_MovementState::Walking:
-                MovementBlendAlpha = 0.25f;
-                break;
-            case EAnim_MovementState::Running:
-                MovementBlendAlpha = 0.5f;
-                break;
-            case EAnim_MovementState::Sprinting:
-                MovementBlendAlpha = 1.0f;
-                break;
-            case EAnim_MovementState::Crouching:
-                MovementBlendAlpha = 0.3f;
-                break;
-            default:
-                MovementBlendAlpha = 0.0f;
-                break;
-        }
-    }
-}
-
-void UAnim_SurvivalAnimInstance::UpdateActionState()
-{
-    // Action state updates would be driven by gameplay systems
-    // For now, maintain current state
-    ActionBlendAlpha = (ActionState != EAnim_ActionState::None) ? 1.0f : 0.0f;
-}
-
-void UAnim_SurvivalAnimInstance::UpdateFootIK()
-{
-    if (!OwnerCharacter || MotionData.bIsInAir)
-    {
-        LeftFootOffset = FVector::ZeroVector;
-        RightFootOffset = FVector::ZeroVector;
         return;
     }
     
-    // Perform IK traces for both feet
-    PerformFootIKTrace(TEXT("foot_l"), LeftFootOffset);
-    PerformFootIKTrace(TEXT("foot_r"), RightFootOffset);
-}
-
-EAnim_MovementState UAnim_SurvivalAnimInstance::CalculateMovementState() const
-{
-    if (!OwnerCharacter || !MovementComponent)
-    {
-        return EAnim_MovementState::Idle;
-    }
+    // Get movement data
+    FVector Velocity = MovementComponent->Velocity;
+    MovementSpeed = Velocity.Size();
+    bIsMoving = MovementSpeed > 3.0f;
+    bIsInAir = MovementComponent->IsFalling();
+    bIsCrouching = MovementComponent->IsCrouching();
     
-    if (MotionData.bIsInAir)
+    // Calculate movement direction relative to actor
+    if (bIsMoving)
     {
-        if (MotionData.Velocity.Z > 0.0f)
+        FVector ForwardVector = OwningCharacter->GetActorForwardVector();
+        FVector NormalizedVelocity = Velocity.GetSafeNormal();
+        MovementDirection = FMath::RadiansToDegrees(FMath::Acos(FVector::DotProduct(ForwardVector, NormalizedVelocity)));
+        
+        // Determine if moving left or right
+        FVector RightVector = OwningCharacter->GetActorRightVector();
+        float RightDot = FVector::DotProduct(RightVector, NormalizedVelocity);
+        if (RightDot < 0.0f)
         {
-            return EAnim_MovementState::Jumping;
+            MovementDirection = -MovementDirection;
         }
-        else
-        {
-            return EAnim_MovementState::Falling;
-        }
-    }
-    
-    if (MotionData.bIsCrouching)
-    {
-        return EAnim_MovementState::Crouching;
-    }
-    
-    if (MotionData.Speed < WalkSpeedThreshold)
-    {
-        return EAnim_MovementState::Idle;
-    }
-    else if (MotionData.Speed < RunSpeedThreshold)
-    {
-        return EAnim_MovementState::Walking;
-    }
-    else if (MotionData.Speed < SprintSpeedThreshold)
-    {
-        return EAnim_MovementState::Running;
     }
     else
     {
-        return EAnim_MovementState::Sprinting;
+        MovementDirection = 0.0f;
+    }
+    
+    // Update movement state
+    if (bIsInAir)
+    {
+        if (Velocity.Z > 0.0f)
+        {
+            CurrentMovementState = EAnim_MovementState::Jumping;
+        }
+        else
+        {
+            CurrentMovementState = EAnim_MovementState::Falling;
+        }
+    }
+    else if (bIsCrouching)
+    {
+        CurrentMovementState = EAnim_MovementState::Crouching;
+    }
+    else if (bIsMoving)
+    {
+        // Determine movement speed state
+        float MaxWalkSpeed = MovementComponent->MaxWalkSpeed;
+        float SpeedRatio = MovementSpeed / MaxWalkSpeed;
+        
+        if (SpeedRatio > 0.8f)
+        {
+            CurrentMovementState = EAnim_MovementState::Sprinting;
+        }
+        else if (SpeedRatio > 0.4f)
+        {
+            CurrentMovementState = EAnim_MovementState::Running;
+        }
+        else
+        {
+            CurrentMovementState = EAnim_MovementState::Walking;
+        }
+    }
+    else
+    {
+        CurrentMovementState = EAnim_MovementState::Idle;
     }
 }
 
-float UAnim_SurvivalAnimInstance::CalculateDirectionAngle() const
+void UAnim_SurvivalAnimInstance::UpdateMotionMatchingData()
 {
-    if (!OwnerCharacter || MotionData.Speed < 1.0f)
+    if (!OwningCharacter || !MovementComponent)
     {
-        return 0.0f;
-    }
-    
-    FVector ForwardVector = OwnerCharacter->GetActorForwardVector();
-    FVector VelocityNormalized = MotionData.Velocity.GetSafeNormal();
-    
-    float DotProduct = FVector::DotProduct(ForwardVector, VelocityNormalized);
-    float CrossProduct = FVector::CrossProduct(ForwardVector, VelocityNormalized).Z;
-    
-    return FMath::Atan2(CrossProduct, DotProduct) * (180.0f / PI);
-}
-
-void UAnim_SurvivalAnimInstance::PerformFootIKTrace(const FName& SocketName, FVector& OutOffset)
-{
-    if (!OwnerCharacter)
-    {
-        OutOffset = FVector::ZeroVector;
         return;
     }
     
-    USkeletalMeshComponent* MeshComp = OwnerCharacter->GetMesh();
+    // Update motion matching data structure
+    MotionData.Velocity = MovementComponent->Velocity;
+    MotionData.Acceleration = MovementComponent->GetCurrentAcceleration();
+    MotionData.Speed = MovementSpeed;
+    MotionData.Direction = MovementDirection;
+    MotionData.bIsMoving = bIsMoving;
+    MotionData.bIsInAir = bIsInAir;
+    MotionData.bIsCrouching = bIsCrouching;
+}
+
+void UAnim_SurvivalAnimInstance::UpdateIKFootPlacement()
+{
+    if (!OwningCharacter)
+    {
+        return;
+    }
+    
+    // Perform foot IK calculations
+    CalculateFootIK(TEXT("foot_l"), TEXT("ik_foot_l"), IKData.LeftFootAlpha, IKData.LeftFootLocation, IKData.LeftFootRotation);
+    CalculateFootIK(TEXT("foot_r"), TEXT("ik_foot_r"), IKData.RightFootAlpha, IKData.RightFootLocation, IKData.RightFootRotation);
+    
+    // Calculate hip offset based on foot positions
+    float LeftFootDistance = IKData.LeftFootLocation.Z;
+    float RightFootDistance = IKData.RightFootLocation.Z;
+    IKData.HipOffset = FMath::Min(LeftFootDistance, RightFootDistance);
+}
+
+void UAnim_SurvivalAnimInstance::CalculateFootIK(const FName& FootBoneName, const FName& IKBoneName, float& FootAlpha, FVector& FootLocation, FRotator& FootRotation)
+{
+    if (!OwningCharacter)
+    {
+        FootAlpha = 0.0f;
+        FootLocation = FVector::ZeroVector;
+        FootRotation = FRotator::ZeroRotator;
+        return;
+    }
+    
+    USkeletalMeshComponent* MeshComp = OwningCharacter->GetMesh();
     if (!MeshComp)
     {
-        OutOffset = FVector::ZeroVector;
+        FootAlpha = 0.0f;
         return;
     }
     
-    FVector SocketLocation = MeshComp->GetSocketLocation(SocketName);
-    FVector TraceStart = SocketLocation + FVector(0, 0, 50.0f);
-    FVector TraceEnd = SocketLocation - FVector(0, 0, 100.0f);
+    // Get foot bone location in world space
+    FVector FootBoneLocation = MeshComp->GetBoneLocation(FootBoneName, EBoneSpaces::WorldSpace);
+    
+    // Perform line trace downward from foot
+    float TraceDistance = 50.0f;
+    FVector TraceStart = FootBoneLocation + FVector(0.0f, 0.0f, 20.0f);
+    FVector TraceEnd = FootBoneLocation - FVector(0.0f, 0.0f, TraceDistance);
     
     FHitResult HitResult;
     FCollisionQueryParams QueryParams;
-    QueryParams.AddIgnoredActor(OwnerCharacter);
+    QueryParams.AddIgnoredActor(OwningCharacter);
     
     bool bHit = GetWorld()->LineTraceSingleByChannel(
         HitResult,
         TraceStart,
         TraceEnd,
-        ECC_WorldStatic,
+        ECC_Visibility,
         QueryParams
     );
     
     if (bHit)
     {
-        float IKOffset = (HitResult.Location.Z - SocketLocation.Z) + 5.0f; // Small offset to avoid clipping
-        OutOffset = FVector(0, 0, FMath::Clamp(IKOffset, -50.0f, 50.0f));
+        // Calculate foot adjustment
+        float DistanceToGround = FVector::Dist(FootBoneLocation, HitResult.Location);
+        FootLocation = HitResult.Location;
+        FootRotation = FRotationMatrix::MakeFromZ(HitResult.Normal).Rotator();
+        FootAlpha = FMath::Clamp(1.0f - (DistanceToGround / TraceDistance), 0.0f, 1.0f);
     }
     else
     {
-        OutOffset = FVector::ZeroVector;
+        FootAlpha = 0.0f;
+        FootLocation = FVector::ZeroVector;
+        FootRotation = FRotator::ZeroRotator;
     }
+}
+
+FVector UAnim_SurvivalAnimInstance::PerformLineTrace(const FVector& StartLocation, float TraceDistance) const
+{
+    if (!GetWorld())
+    {
+        return FVector::ZeroVector;
+    }
+    
+    FVector TraceEnd = StartLocation - FVector(0.0f, 0.0f, TraceDistance);
+    FHitResult HitResult;
+    FCollisionQueryParams QueryParams;
+    QueryParams.AddIgnoredActor(OwningCharacter);
+    
+    bool bHit = GetWorld()->LineTraceSingleByChannel(
+        HitResult,
+        StartLocation,
+        TraceEnd,
+        ECC_Visibility,
+        QueryParams
+    );
+    
+    return bHit ? HitResult.Location : TraceEnd;
+}
+
+void UAnim_SurvivalAnimInstance::PlaySurvivalAction(EAnim_SurvivalAction Action)
+{
+    CurrentSurvivalAction = Action;
+    
+    // Update survival action flags
+    bIsHunting = (Action == EAnim_SurvivalAction::Hunting);
+    bIsGathering = (Action == EAnim_SurvivalAction::Gathering);
+    bIsCrafting = (Action == EAnim_SurvivalAction::Crafting);
+    bIsInCombat = (Action == EAnim_SurvivalAction::Combat);
+    
+    // Play corresponding montage if available
+    if (SurvivalActionMontages.Contains(Action))
+    {
+        UAnimMontage* Montage = SurvivalActionMontages[Action];
+        if (Montage)
+        {
+            Montage_Play(Montage);
+        }
+    }
+}
+
+void UAnim_SurvivalAnimInstance::StopSurvivalAction()
+{
+    CurrentSurvivalAction = EAnim_SurvivalAction::None;
+    bIsHunting = false;
+    bIsGathering = false;
+    bIsCrafting = false;
+    bIsInCombat = false;
+    
+    // Stop any playing montage
+    if (IsAnyMontagePlaying())
+    {
+        Montage_Stop(0.2f);
+    }
+}
+
+bool UAnim_SurvivalAnimInstance::IsSurvivalActionPlaying() const
+{
+    return CurrentSurvivalAction != EAnim_SurvivalAction::None;
+}
+
+void UAnim_SurvivalAnimInstance::SetMovementState(EAnim_MovementState NewState)
+{
+    CurrentMovementState = NewState;
+}
+
+void UAnim_SurvivalAnimInstance::EnableFootIK(bool bEnable)
+{
+    if (!bEnable)
+    {
+        IKData.LeftFootAlpha = 0.0f;
+        IKData.RightFootAlpha = 0.0f;
+        IKData.HipOffset = 0.0f;
+    }
+}
+
+float UAnim_SurvivalAnimInstance::GetMovementSpeedRatio() const
+{
+    if (!MovementComponent)
+    {
+        return 0.0f;
+    }
+    
+    return MovementSpeed / MovementComponent->MaxWalkSpeed;
+}
+
+FVector UAnim_SurvivalAnimInstance::GetMovementDirection() const
+{
+    if (!OwningCharacter || !bIsMoving)
+    {
+        return FVector::ZeroVector;
+    }
+    
+    return OwningCharacter->GetActorTransform().InverseTransformVectorNoScale(MovementComponent->Velocity.GetSafeNormal());
 }
