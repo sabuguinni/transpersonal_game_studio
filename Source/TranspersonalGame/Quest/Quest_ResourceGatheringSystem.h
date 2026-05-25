@@ -1,10 +1,10 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
-#include "Components/StaticMeshComponent.h"
-#include "Components/SphereComponent.h"
 #include "Engine/Engine.h"
+#include "Components/ActorComponent.h"
+#include "Engine/World.h"
+#include "GameFramework/Actor.h"
 #include "Quest_ResourceGatheringSystem.generated.h"
 
 UENUM(BlueprintType)
@@ -12,13 +12,14 @@ enum class EQuest_ResourceType : uint8
 {
     Stone       UMETA(DisplayName = "Stone"),
     Wood        UMETA(DisplayName = "Wood"),
-    Plant       UMETA(DisplayName = "Plant Fiber"),
-    Water       UMETA(DisplayName = "Water"),
-    Bone        UMETA(DisplayName = "Bone")
+    Plant       UMETA(DisplayName = "Plant"),
+    Bone        UMETA(DisplayName = "Bone"),
+    Hide        UMETA(DisplayName = "Hide"),
+    Water       UMETA(DisplayName = "Water")
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FQuest_ResourceData
+struct FQuest_ResourceRequirement
 {
     GENERATED_BODY()
 
@@ -26,130 +27,94 @@ struct TRANSPERSONALGAME_API FQuest_ResourceData
     EQuest_ResourceType ResourceType;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    int32 Quantity;
+    int32 RequiredAmount;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FString ResourceName;
+    int32 CurrentAmount;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float RespawnTime;
-
-    FQuest_ResourceData()
+    FQuest_ResourceRequirement()
     {
         ResourceType = EQuest_ResourceType::Stone;
-        Quantity = 1;
-        ResourceName = TEXT("Stone");
-        RespawnTime = 30.0f;
+        RequiredAmount = 1;
+        CurrentAmount = 0;
     }
 };
 
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API AQuest_ResourceNode : public AActor
+USTRUCT(BlueprintType)
+struct FQuest_GatheringMission
 {
     GENERATED_BODY()
 
-public:
-    AQuest_ResourceNode();
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FString MissionName;
 
-protected:
-    virtual void BeginPlay() override;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FString Description;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    UStaticMeshComponent* ResourceMesh;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    TArray<FQuest_ResourceRequirement> Requirements;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    USphereComponent* InteractionSphere;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float TimeLimit;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Resource")
-    FQuest_ResourceData ResourceData;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bIsActive;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Resource")
-    bool bIsHarvestable;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bIsCompleted;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Resource")
-    float HarvestTime;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Quest Resource")
-    bool bIsBeingHarvested;
-
-    FTimerHandle RespawnTimerHandle;
-
-public:
-    virtual void Tick(float DeltaTime) override;
-
-    UFUNCTION(BlueprintCallable, Category = "Quest Resource")
-    bool CanHarvest() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Quest Resource")
-    void StartHarvest(AActor* Harvester);
-
-    UFUNCTION(BlueprintCallable, Category = "Quest Resource")
-    void CompleteHarvest();
-
-    UFUNCTION(BlueprintCallable, Category = "Quest Resource")
-    void SetResourceType(EQuest_ResourceType NewType, int32 NewQuantity);
-
-    UFUNCTION(BlueprintImplementableEvent, Category = "Quest Resource")
-    void OnResourceHarvested(AActor* Harvester, const FQuest_ResourceData& Resource);
-
-    UFUNCTION(BlueprintImplementableEvent, Category = "Quest Resource")
-    void OnResourceRespawned();
-
-protected:
-    UFUNCTION()
-    void OnInteractionSphereBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult);
-
-    void RespawnResource();
-    void SetupResourceMesh();
+    FQuest_GatheringMission()
+    {
+        MissionName = TEXT("Gather Resources");
+        Description = TEXT("Collect the required resources to survive");
+        TimeLimit = 300.0f;
+        bIsActive = false;
+        bIsCompleted = false;
+    }
 };
 
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UQuest_ResourceGatheringSystem : public UObject
+UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UQuest_ResourceGatheringSystem : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
     UQuest_ResourceGatheringSystem();
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest System")
-    TArray<FQuest_ResourceData> RequiredResources;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Quest System")
-    TMap<EQuest_ResourceType, int32> CollectedResources;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest System")
-    FString QuestTitle;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest System")
-    FString QuestDescription;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Quest System")
-    bool bQuestCompleted;
-
-    UFUNCTION(BlueprintCallable, Category = "Quest System")
-    void InitializeGatheringQuest(const TArray<FQuest_ResourceData>& Resources);
-
-    UFUNCTION(BlueprintCallable, Category = "Quest System")
-    bool AddResource(EQuest_ResourceType ResourceType, int32 Quantity);
-
-    UFUNCTION(BlueprintCallable, Category = "Quest System")
-    bool IsQuestComplete() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Quest System")
-    float GetQuestProgress() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Quest System")
-    FString GetProgressText() const;
-
-    UFUNCTION(BlueprintImplementableEvent, Category = "Quest System")
-    void OnQuestCompleted();
-
-    UFUNCTION(BlueprintImplementableEvent, Category = "Quest System")
-    void OnResourceAdded(EQuest_ResourceType ResourceType, int32 NewQuantity, int32 RequiredQuantity);
-
-    UFUNCTION(BlueprintCallable, Category = "Quest System")
-    void SpawnResourceNodes(UWorld* World, const TArray<FVector>& Locations);
-
 protected:
-    void CheckQuestCompletion();
+    virtual void BeginPlay() override;
+
+public:
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest System")
+    TArray<FQuest_GatheringMission> ActiveMissions;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest System")
+    TArray<FQuest_GatheringMission> CompletedMissions;
+
+    UFUNCTION(BlueprintCallable, Category = "Quest System")
+    void StartGatheringMission(const FString& MissionName, const TArray<FQuest_ResourceRequirement>& Requirements, float TimeLimit);
+
+    UFUNCTION(BlueprintCallable, Category = "Quest System")
+    void AddResource(EQuest_ResourceType ResourceType, int32 Amount);
+
+    UFUNCTION(BlueprintCallable, Category = "Quest System")
+    bool CheckMissionCompletion(const FString& MissionName);
+
+    UFUNCTION(BlueprintCallable, Category = "Quest System")
+    void CompleteMission(const FString& MissionName);
+
+    UFUNCTION(BlueprintCallable, Category = "Quest System")
+    FQuest_GatheringMission GetActiveMission(const FString& MissionName);
+
+    UFUNCTION(BlueprintCallable, Category = "Quest System")
+    TArray<FQuest_GatheringMission> GetAllActiveMissions();
+
+    UFUNCTION(BlueprintCallable, Category = "Quest System")
+    void CreateBasicSurvivalMissions();
+
+private:
+    void UpdateMissionTimers(float DeltaTime);
+    void CheckAllMissionsCompletion();
 };
