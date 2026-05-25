@@ -1,17 +1,17 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
 #include "Engine/World.h"
-#include "Components/StaticMeshComponent.h"
+#include "Components/ActorComponent.h"
 #include "QA_ValidationFramework.generated.h"
 
 UENUM(BlueprintType)
 enum class EQA_ValidationResult : uint8
 {
     Pass        UMETA(DisplayName = "Pass"),
-    Warning     UMETA(DisplayName = "Warning"), 
     Fail        UMETA(DisplayName = "Fail"),
+    Warning     UMETA(DisplayName = "Warning"),
+    Error       UMETA(DisplayName = "Error"),
     NotTested   UMETA(DisplayName = "Not Tested")
 };
 
@@ -42,7 +42,7 @@ struct FQA_TestResult
 };
 
 USTRUCT(BlueprintType)
-struct FQA_SystemValidation
+struct FQA_SystemHealth
 {
     GENERATED_BODY()
 
@@ -50,128 +50,110 @@ struct FQA_SystemValidation
     FString SystemName;
 
     UPROPERTY(BlueprintReadOnly, Category = "QA")
-    TArray<FQA_TestResult> TestResults;
+    bool bIsOperational;
 
     UPROPERTY(BlueprintReadOnly, Category = "QA")
-    int32 PassCount;
+    int32 ActorCount;
 
     UPROPERTY(BlueprintReadOnly, Category = "QA")
-    int32 WarningCount;
+    TArray<FString> Issues;
 
-    UPROPERTY(BlueprintReadOnly, Category = "QA")
-    int32 FailCount;
-
-    FQA_SystemValidation()
+    FQA_SystemHealth()
     {
         SystemName = TEXT("");
-        PassCount = 0;
-        WarningCount = 0;
-        FailCount = 0;
+        bIsOperational = false;
+        ActorCount = 0;
     }
 };
 
 /**
- * QA Validation Framework - Comprehensive testing system for all game components
- * Validates character systems, VFX, physics, biomes, dinosaurs, and performance
+ * QA Validation Framework - Comprehensive testing system for TranspersonalGame
+ * Validates all game systems, actors, and performance metrics
  */
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API AQA_ValidationFramework : public AActor
+UCLASS(BlueprintType, Blueprintable, meta = (BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UQA_ValidationFramework : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    AQA_ValidationFramework();
+    UQA_ValidationFramework();
 
 protected:
     virtual void BeginPlay() override;
 
 public:
-    // Core validation properties
-    UPROPERTY(BlueprintReadOnly, Category = "QA Validation")
-    TArray<FQA_SystemValidation> SystemValidations;
+    // Core validation functions
+    UFUNCTION(BlueprintCallable, Category = "QA", CallInEditor)
+    void RunFullValidationSuite();
 
-    UPROPERTY(BlueprintReadOnly, Category = "QA Validation")
-    int32 TotalActorCount;
+    UFUNCTION(BlueprintCallable, Category = "QA", CallInEditor)
+    void ValidateCharacterSystems();
 
-    UPROPERTY(BlueprintReadOnly, Category = "QA Validation")
-    float MemoryUsagePercent;
+    UFUNCTION(BlueprintCallable, Category = "QA", CallInEditor)
+    void ValidateDinosaurSystems();
 
-    UPROPERTY(BlueprintReadOnly, Category = "QA Validation")
-    bool bAllCriticalSystemsPass;
+    UFUNCTION(BlueprintCallable, Category = "QA", CallInEditor)
+    void ValidatePhysicsSystems();
 
-    // Biome validation
-    UPROPERTY(BlueprintReadOnly, Category = "QA Biomes")
-    TMap<FString, int32> BiomeActorCounts;
+    UFUNCTION(BlueprintCallable, Category = "QA", CallInEditor)
+    void ValidateVFXSystems();
 
-    UPROPERTY(BlueprintReadOnly, Category = "QA Biomes")
-    int32 MinimumActorsPerBiome;
+    UFUNCTION(BlueprintCallable, Category = "QA", CallInEditor)
+    void ValidateWorldGeneration();
 
-    // Performance thresholds
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Performance")
-    float MaxMemoryUsagePercent;
+    UFUNCTION(BlueprintCallable, Category = "QA", CallInEditor)
+    void ValidatePerformanceMetrics();
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Performance")
-    int32 MaxActorCount;
+    // System health monitoring
+    UFUNCTION(BlueprintCallable, Category = "QA")
+    TArray<FQA_SystemHealth> GetSystemHealthReport();
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Performance")
-    float MaxFrameTime;
+    UFUNCTION(BlueprintCallable, Category = "QA")
+    float GetOverallQAScore();
 
-    // Validation methods
-    UFUNCTION(BlueprintCallable, Category = "QA Validation")
-    void RunFullValidation();
+    UFUNCTION(BlueprintCallable, Category = "QA")
+    bool IsSystemReadyForIntegration();
 
-    UFUNCTION(BlueprintCallable, Category = "QA Validation")
-    FQA_SystemValidation ValidateCharacterSystem();
+    // Test result management
+    UFUNCTION(BlueprintCallable, Category = "QA")
+    TArray<FQA_TestResult> GetTestResults() const { return TestResults; }
 
-    UFUNCTION(BlueprintCallable, Category = "QA Validation")
-    FQA_SystemValidation ValidateVFXSystem();
+    UFUNCTION(BlueprintCallable, Category = "QA")
+    void ClearTestResults();
 
-    UFUNCTION(BlueprintCallable, Category = "QA Validation")
-    FQA_SystemValidation ValidatePhysicsSystem();
+    UFUNCTION(BlueprintCallable, Category = "QA")
+    void ExportTestResultsToLog();
 
-    UFUNCTION(BlueprintCallable, Category = "QA Validation")
-    FQA_SystemValidation ValidateBiomeSystem();
+protected:
+    // Internal validation helpers
+    FQA_TestResult ValidateClassLoading(const FString& ClassName, const FString& ClassPath);
+    FQA_TestResult ValidateActorSpawning(UClass* ActorClass, const FVector& Location);
+    FQA_TestResult ValidateComponentAttachment(AActor* Actor, UClass* ComponentClass);
+    FQA_TestResult ValidateBiomeDistribution();
+    FQA_TestResult ValidateActorPerformance();
 
-    UFUNCTION(BlueprintCallable, Category = "QA Validation")
-    FQA_SystemValidation ValidateDinosaurSystem();
+    // Test result storage
+    UPROPERTY(BlueprintReadOnly, Category = "QA")
+    TArray<FQA_TestResult> TestResults;
 
-    UFUNCTION(BlueprintCallable, Category = "QA Validation")
-    FQA_SystemValidation ValidatePerformanceSystem();
+    UPROPERTY(BlueprintReadOnly, Category = "QA")
+    TArray<FQA_SystemHealth> SystemHealthData;
 
-    UFUNCTION(BlueprintCallable, Category = "QA Validation")
-    FQA_SystemValidation ValidateLightingSystem();
+    // Configuration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA")
+    bool bAutoRunOnBeginPlay;
 
-    UFUNCTION(BlueprintCallable, Category = "QA Validation")
-    FQA_SystemValidation ValidateNavigationSystem();
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA")
+    bool bVerboseLogging;
 
-    // Utility methods
-    UFUNCTION(BlueprintCallable, Category = "QA Validation")
-    FString GenerateValidationReport();
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA")
+    float PerformanceThresholdFPS;
 
-    UFUNCTION(BlueprintCallable, Category = "QA Validation")
-    void SaveValidationReport(const FString& FilePath);
-
-    UFUNCTION(BlueprintCallable, Category = "QA Validation")
-    bool CheckBiomePopulation(const FString& BiomeName, const FVector& BiomeCenter, float BiomeRange);
-
-    UFUNCTION(BlueprintCallable, Category = "QA Validation")
-    TArray<AActor*> GetActorsInBiome(const FVector& BiomeCenter, float BiomeRange);
-
-    UFUNCTION(BlueprintCallable, Category = "QA Validation")
-    float GetCurrentMemoryUsage();
-
-    UFUNCTION(BlueprintCallable, Category = "QA Validation")
-    void LogTestResult(const FQA_TestResult& TestResult);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA")
+    int32 MaxActorCountThreshold;
 
 private:
-    // Internal validation helpers
-    FQA_TestResult CreateTestResult(const FString& TestName, EQA_ValidationResult Result, const FString& Details, float ExecutionTime = 0.0f);
-    
-    void UpdateSystemCounts(FQA_SystemValidation& SystemValidation);
-    
-    bool ValidateClassExists(const FString& ClassName);
-    
-    TArray<AActor*> GetActorsOfType(const FString& ActorType);
-    
-    FString GetBiomeForLocation(const FVector& Location);
+    void AddTestResult(const FString& TestName, EQA_ValidationResult Result, const FString& Details, float ExecutionTime = 0.0f);
+    void LogTestResult(const FQA_TestResult& Result);
+    float CalculateQAScore();
 };
