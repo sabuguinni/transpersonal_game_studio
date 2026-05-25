@@ -1,57 +1,21 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/World.h"
 #include "Components/ActorComponent.h"
-#include "Engine/StaticMeshActor.h"
+#include "Engine/World.h"
 #include "Components/StaticMeshComponent.h"
+#include "Components/PrimitiveComponent.h"
+#include "GameFramework/Actor.h"
+#include "SharedTypes.h"
 #include "Perf_LODManager.generated.h"
 
-UENUM(BlueprintType)
-enum class EPerf_LODLevel : uint8
-{
-    LOD0_HighDetail     UMETA(DisplayName = "LOD0 - High Detail"),
-    LOD1_MediumDetail   UMETA(DisplayName = "LOD1 - Medium Detail"), 
-    LOD2_LowDetail      UMETA(DisplayName = "LOD2 - Low Detail"),
-    LOD3_VeryLowDetail  UMETA(DisplayName = "LOD3 - Very Low Detail"),
-    LOD_Culled          UMETA(DisplayName = "Culled - Not Rendered")
-};
-
-USTRUCT(BlueprintType)
-struct FPerf_LODSettings
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD Settings")
-    float LOD0Distance = 500.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD Settings")
-    float LOD1Distance = 1500.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD Settings")
-    float LOD2Distance = 3000.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD Settings")
-    float LOD3Distance = 5000.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD Settings")
-    float CullDistance = 8000.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD Settings")
-    bool bEnableAutomaticLOD = true;
-
-    FPerf_LODSettings()
-    {
-        LOD0Distance = 500.0f;
-        LOD1Distance = 1500.0f;
-        LOD2Distance = 3000.0f;
-        LOD3Distance = 5000.0f;
-        CullDistance = 8000.0f;
-        bEnableAutomaticLOD = true;
-    }
-};
-
-UCLASS(ClassGroup=(Performance), meta=(BlueprintSpawnableComponent))
+/**
+ * Advanced LOD (Level of Detail) Management System
+ * Optimizes rendering performance by dynamically adjusting mesh detail based on distance
+ * Implements biome-based culling zones and performance monitoring
+ * Ensures 60fps on PC and 30fps on Console platforms
+ */
+UCLASS(BlueprintType, Blueprintable, ClassGroup=(Performance), meta=(BlueprintSpawnableComponent))
 class TRANSPERSONALGAME_API UPerf_LODManager : public UActorComponent
 {
     GENERATED_BODY()
@@ -64,70 +28,117 @@ protected:
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 public:
-    // LOD Management
-    UFUNCTION(BlueprintCallable, Category = "Performance|LOD")
-    void UpdateLODForAllActors();
+    // LOD Distance Settings
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD Settings")
+    float HighDetailDistance = 2000.0f;  // 20 meters
 
-    UFUNCTION(BlueprintCallable, Category = "Performance|LOD")
-    void SetLODForActor(AActor* Actor, EPerf_LODLevel LODLevel);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD Settings")
+    float MediumDetailDistance = 5000.0f;  // 50 meters
 
-    UFUNCTION(BlueprintCallable, Category = "Performance|LOD")
-    EPerf_LODLevel CalculateLODLevel(AActor* Actor, const FVector& ViewerLocation) const;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD Settings")
+    float LowDetailDistance = 10000.0f;  // 100 meters
 
-    UFUNCTION(BlueprintCallable, Category = "Performance|LOD")
-    float GetDistanceToViewer(AActor* Actor) const;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD Settings")
+    float CullingDistance = 20000.0f;  // 200 meters
 
-    // LOD Settings
-    UFUNCTION(BlueprintCallable, Category = "Performance|LOD")
-    void SetLODSettings(const FPerf_LODSettings& NewSettings);
+    // Performance Targets
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float TargetFPS_PC = 60.0f;
 
-    UFUNCTION(BlueprintPure, Category = "Performance|LOD")
-    FPerf_LODSettings GetLODSettings() const { return LODSettings; }
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float TargetFPS_Console = 30.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    int32 MaxVisibleActors = 1000;
+
+    // Biome Culling Zones
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Culling")
+    TArray<FBiomeZone> BiomeZones;
+
+    // LOD Management Functions
+    UFUNCTION(BlueprintCallable, Category = "LOD Management")
+    void OptimizeActorLOD(AActor* Actor, float DistanceToPlayer);
+
+    UFUNCTION(BlueprintCallable, Category = "LOD Management")
+    void SetActorLODLevel(AActor* Actor, int32 LODLevel);
+
+    UFUNCTION(BlueprintCallable, Category = "LOD Management")
+    void EnableDistanceCulling(AActor* Actor, float MaxDistance);
+
+    UFUNCTION(BlueprintCallable, Category = "LOD Management")
+    void OptimizeDinosaurActors();
 
     // Performance Monitoring
-    UFUNCTION(BlueprintCallable, Category = "Performance|LOD")
-    void EnableLODDebugging(bool bEnable);
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    float GetCurrentFPS() const;
 
-    UFUNCTION(BlueprintPure, Category = "Performance|LOD")
-    int32 GetManagedActorCount() const { return ManagedActors.Num(); }
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    int32 GetVisibleActorCount() const;
 
-    UFUNCTION(BlueprintPure, Category = "Performance|LOD")
-    int32 GetCulledActorCount() const;
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    bool IsPerformanceTargetMet() const;
 
-    // Optimization
-    UFUNCTION(BlueprintCallable, Category = "Performance|LOD")
-    void RegisterActorForLOD(AActor* Actor);
+    // Zone Management
+    UFUNCTION(BlueprintCallable, Category = "Zone Management")
+    void InitializeBiomeZones();
 
-    UFUNCTION(BlueprintCallable, Category = "Performance|LOD")
-    void UnregisterActorFromLOD(AActor* Actor);
+    UFUNCTION(BlueprintCallable, Category = "Zone Management")
+    FBiomeZone GetNearestBiomeZone(FVector Location) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Performance|LOD")
-    void OptimizeForFrameRate(float TargetFrameRate);
+    UFUNCTION(BlueprintCallable, Category = "Zone Management")
+    void OptimizeZoneActors(const FBiomeZone& Zone);
 
-protected:
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD Settings")
-    FPerf_LODSettings LODSettings;
+    // Memory Optimization
+    UFUNCTION(BlueprintCallable, Category = "Memory")
+    void RunGarbageCollection();
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float UpdateFrequency = 0.1f;
+    UFUNCTION(BlueprintCallable, Category = "Memory")
+    void OptimizeStreamingPool();
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    bool bDebugLOD = false;
+    // Debug and Testing
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Debug")
+    void GeneratePerformanceReport();
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 MaxActorsPerFrame = 50;
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Debug")
+    void SpawnPerformanceTestObjects();
+
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Debug")
+    void ValidatePerformanceTargets();
 
 private:
+    // Internal tracking
     UPROPERTY()
-    TArray<TWeakObjectPtr<AActor>> ManagedActors;
+    TArray<AActor*> ManagedActors;
 
     UPROPERTY()
-    TMap<TWeakObjectPtr<AActor>, EPerf_LODLevel> CurrentLODLevels;
+    TArray<AActor*> DinosaurActors;
 
-    float LastUpdateTime;
-    int32 CurrentUpdateIndex;
+    UPROPERTY()
+    float LastFrameTime;
 
-    void UpdateLODForActorBatch();
-    void ApplyLODToStaticMesh(UStaticMeshComponent* MeshComp, EPerf_LODLevel LODLevel);
-    FVector GetViewerLocation() const;
+    UPROPERTY()
+    int32 CurrentVisibleActors;
+
+    // Performance metrics
+    UPROPERTY()
+    float AverageFrameTime;
+
+    UPROPERTY()
+    TArray<float> FrameTimeHistory;
+
+    UPROPERTY()
+    int32 MaxFrameHistorySize = 60;  // 1 second at 60fps
+
+    // Internal functions
+    void UpdateFrameTimeHistory(float DeltaTime);
+    void UpdateVisibleActorCount();
+    void ApplyLODOptimizations();
+    void CheckPerformanceThresholds();
+    int32 CalculateLODLevel(float Distance) const;
+    void CullDistantActors();
+    void OptimizePhysicsComponents();
+    
+    // Platform detection
+    bool IsRunningOnConsole() const;
+    float GetTargetFPS() const;
 };
