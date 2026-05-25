@@ -5,71 +5,78 @@
 #include "Components/ActorComponent.h"
 #include "Engine/StaticMeshActor.h"
 #include "Components/StaticMeshComponent.h"
-#include "../../SharedTypes.h"
+#include "Engine/StaticMesh.h"
+#include "SharedTypes.h"
 #include "World_ProceduralBiomeSystem.generated.h"
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FWorld_BiomeConfig
+struct TRANSPERSONALGAME_API FWorld_BiomeConfiguration
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    FString BiomeName;
+    FVector BiomeCenter;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    FVector CenterLocation;
+    float BiomeRadius;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float Radius;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    int32 MaxDinosaurs;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    int32 MaxTerrainFeatures;
+    EBiomeType BiomeType;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
     TArray<FString> DinosaurAssetPaths;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    TArray<FString> TerrainAssetPaths;
+    int32 DinosaurDensity;
 
-    FWorld_BiomeConfig()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    int32 TerrainFeatureDensity;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    float TemperatureRange;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    float HumidityLevel;
+
+    FWorld_BiomeConfiguration()
     {
-        BiomeName = TEXT("Default");
-        CenterLocation = FVector::ZeroVector;
-        Radius = 1000000.0f; // 10km
-        MaxDinosaurs = 10;
-        MaxTerrainFeatures = 50;
+        BiomeCenter = FVector::ZeroVector;
+        BiomeRadius = 5000.0f;
+        BiomeType = EBiomeType::Savana;
+        DinosaurDensity = 5;
+        TerrainFeatureDensity = 20;
+        TemperatureRange = 25.0f;
+        HumidityLevel = 0.5f;
     }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FWorld_SpawnedActor
+struct TRANSPERSONALGAME_API FWorld_TerrainFeature
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn")
-    TSoftObjectPtr<AActor> ActorRef;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
+    FVector Location;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn")
-    FString BiomeName;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
+    FRotator Rotation;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn")
-    FString ActorType;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
+    FVector Scale;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn")
-    FVector SpawnLocation;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
+    ETerrainFeatureType FeatureType;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn")
-    float SpawnTime;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
+    FString AssetPath;
 
-    FWorld_SpawnedActor()
+    FWorld_TerrainFeature()
     {
-        BiomeName = TEXT("Unknown");
-        ActorType = TEXT("Unknown");
-        SpawnLocation = FVector::ZeroVector;
-        SpawnTime = 0.0f;
+        Location = FVector::ZeroVector;
+        Rotation = FRotator::ZeroRotator;
+        Scale = FVector::OneVector;
+        FeatureType = ETerrainFeatureType::Rock;
+        AssetPath = TEXT("");
     }
 };
 
@@ -84,80 +91,79 @@ public:
 protected:
     virtual void BeginPlay() override;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biomes")
-    TArray<FWorld_BiomeConfig> BiomeConfigs;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawning")
-    TArray<FWorld_SpawnedActor> SpawnedActors;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
-    bool bAutoPopulateBiomes;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
-    float PopulationUpdateInterval;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
-    int32 MaxActorsPerBiome;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float CullingDistance;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 MaxSpawnsPerFrame;
-
-private:
-    FTimerHandle PopulationTimerHandle;
-    int32 CurrentSpawnIndex;
-    float LastUpdateTime;
-
 public:
-    UFUNCTION(BlueprintCallable, Category = "Biomes")
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+
+    // Biome Management
+    UFUNCTION(BlueprintCallable, Category = "Biome System")
     void InitializeBiomes();
 
-    UFUNCTION(BlueprintCallable, Category = "Biomes")
-    void PopulateBiome(const FString& BiomeName);
+    UFUNCTION(BlueprintCallable, Category = "Biome System")
+    void PopulateBiome(const FWorld_BiomeConfiguration& BiomeConfig);
 
-    UFUNCTION(BlueprintCallable, Category = "Biomes")
-    void PopulateAllBiomes();
+    UFUNCTION(BlueprintCallable, Category = "Biome System")
+    void ClearBiome(EBiomeType BiomeType);
 
-    UFUNCTION(BlueprintCallable, Category = "Biomes")
-    int32 GetBiomePopulation(const FString& BiomeName) const;
+    UFUNCTION(BlueprintCallable, Category = "Biome System")
+    EBiomeType GetBiomeAtLocation(const FVector& Location) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Biomes")
-    FWorld_BiomeConfig GetBiomeConfig(const FString& BiomeName) const;
+    // Dinosaur Population
+    UFUNCTION(BlueprintCallable, Category = "Dinosaur System")
+    void SpawnDinosaursInBiome(const FWorld_BiomeConfiguration& BiomeConfig);
 
-    UFUNCTION(BlueprintCallable, Category = "Biomes")
-    TArray<AActor*> GetActorsInBiome(const FString& BiomeName) const;
+    UFUNCTION(BlueprintCallable, Category = "Dinosaur System")
+    AActor* SpawnDinosaurAtLocation(const FString& AssetPath, const FVector& Location, const FRotator& Rotation);
 
-    UFUNCTION(BlueprintCallable, Category = "Spawning")
-    AActor* SpawnActorInBiome(const FString& BiomeName, const FString& AssetPath, const FVector& Offset = FVector::ZeroVector);
+    // Terrain Features
+    UFUNCTION(BlueprintCallable, Category = "Terrain System")
+    void GenerateTerrainFeatures(const FWorld_BiomeConfiguration& BiomeConfig);
 
-    UFUNCTION(BlueprintCallable, Category = "Spawning")
-    void ClearBiome(const FString& BiomeName);
+    UFUNCTION(BlueprintCallable, Category = "Terrain System")
+    AActor* SpawnTerrainFeature(const FWorld_TerrainFeature& Feature);
 
-    UFUNCTION(BlueprintCallable, Category = "Spawning")
-    void ClearAllBiomes();
+    // Performance Optimization
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void OptimizeBiomePerformance(const FVector& PlayerLocation, float CullingDistance);
 
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    void UpdateActorCulling();
+    void SetLODDistances(float StaticMeshLOD, float SkeletalMeshLOD);
 
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void OptimizeBiomePerformance();
+    // Environmental Effects
+    UFUNCTION(BlueprintCallable, Category = "Environment")
+    void ApplyBiomeEnvironmentalEffects(EBiomeType BiomeType);
 
-    UFUNCTION(CallInEditor, Category = "Editor")
-    void EditorPopulateBiomes();
+    UFUNCTION(BlueprintCallable, Category = "Environment")
+    void UpdateWeatherSystem(float DeltaTime);
 
-    UFUNCTION(CallInEditor, Category = "Editor")
-    void EditorClearBiomes();
+protected:
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Configuration")
+    TArray<FWorld_BiomeConfiguration> BiomeConfigurations;
 
-    UFUNCTION(CallInEditor, Category = "Editor")
-    void EditorValidateBiomes();
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float StaticMeshCullingDistance;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float SkeletalMeshCullingDistance;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    bool bEnablePerformanceOptimization;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment")
+    float EnvironmentalUpdateInterval;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment")
+    float WeatherTransitionSpeed;
 
 private:
-    void UpdatePopulation();
-    FVector GetRandomLocationInBiome(const FWorld_BiomeConfig& BiomeConfig) const;
-    bool IsLocationValid(const FVector& Location, const FString& BiomeName) const;
-    void SetupDefaultBiomes();
-    void RegisterSpawnedActor(AActor* Actor, const FString& BiomeName, const FString& ActorType);
+    // Internal state
+    TArray<AActor*> SpawnedDinosaurs;
+    TArray<AActor*> SpawnedTerrainFeatures;
+    float LastEnvironmentalUpdate;
+    
+    // Helper functions
+    FVector GenerateRandomLocationInBiome(const FVector& BiomeCenter, float BiomeRadius) const;
+    FRotator GenerateRandomRotation() const;
+    FVector GenerateRandomScale(float MinScale = 0.5f, float MaxScale = 2.0f) const;
+    bool IsLocationValid(const FVector& Location) const;
     void CleanupInvalidActors();
 };
