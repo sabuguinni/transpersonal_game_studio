@@ -2,52 +2,12 @@
 
 #include "CoreMinimal.h"
 #include "Engine/GameInstanceSubsystem.h"
-#include "Engine/World.h"
+#include "SharedTypes.h"
 #include "BuildIntegrationManager.generated.h"
 
-UENUM(BlueprintType)
-enum class EBuild_SystemStatus : uint8
-{
-    Unknown     UMETA(DisplayName = "Unknown"),
-    Loading     UMETA(DisplayName = "Loading"),
-    Ready       UMETA(DisplayName = "Ready"),
-    Error       UMETA(DisplayName = "Error"),
-    Disabled    UMETA(DisplayName = "Disabled")
-};
-
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FBuild_SystemReport
-{
-    GENERATED_BODY()
-
-    UPROPERTY(BlueprintReadOnly, Category = "System Report")
-    FString SystemName;
-
-    UPROPERTY(BlueprintReadOnly, Category = "System Report")
-    EBuild_SystemStatus Status;
-
-    UPROPERTY(BlueprintReadOnly, Category = "System Report")
-    int32 ActorCount;
-
-    UPROPERTY(BlueprintReadOnly, Category = "System Report")
-    FString LastError;
-
-    UPROPERTY(BlueprintReadOnly, Category = "System Report")
-    float PerformanceScore;
-
-    FBuild_SystemReport()
-    {
-        SystemName = TEXT("");
-        Status = EBuild_SystemStatus::Unknown;
-        ActorCount = 0;
-        LastError = TEXT("");
-        PerformanceScore = 0.0f;
-    }
-};
-
 /**
- * Build Integration Manager - Coordinates all game systems and validates integration
- * Ensures all agent outputs work together cohesively
+ * Build Integration Manager - Handles cross-system integration and build validation
+ * Ensures all game systems work together correctly and maintains build stability
  */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UBuildIntegrationManager : public UGameInstanceSubsystem
@@ -57,7 +17,7 @@ class TRANSPERSONALGAME_API UBuildIntegrationManager : public UGameInstanceSubsy
 public:
     UBuildIntegrationManager();
 
-    // USubsystem interface
+    // Subsystem interface
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
@@ -66,57 +26,79 @@ public:
     bool ValidateAllSystems();
 
     UFUNCTION(BlueprintCallable, Category = "Integration")
-    TArray<FBuild_SystemReport> GetSystemReports();
+    bool ValidateActorCounts();
 
     UFUNCTION(BlueprintCallable, Category = "Integration")
-    bool SaveMapSafely(const FString& MapPath);
+    bool ValidatePerformance();
 
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    int32 GetTotalActorCount();
+    // Build management
+    UFUNCTION(BlueprintCallable, Category = "Build")
+    void SaveCurrentBuild();
 
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    void PerformGarbageCollection();
+    UFUNCTION(BlueprintCallable, Category = "Build")
+    bool LoadBuild(const FString& BuildName);
 
-    // System status tracking
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    void RegisterSystemStatus(const FString& SystemName, EBuild_SystemStatus Status, int32 ActorCount = 0);
+    UFUNCTION(BlueprintCallable, Category = "Build")
+    TArray<FString> GetAvailableBuilds();
 
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    EBuild_SystemStatus GetSystemStatus(const FString& SystemName);
+    // System monitoring
+    UFUNCTION(BlueprintCallable, Category = "Monitoring")
+    FBuild_SystemStatus GetSystemStatus();
 
-    // Performance monitoring
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    float GetOverallPerformanceScore();
+    UFUNCTION(BlueprintCallable, Category = "Monitoring")
+    void LogSystemMetrics();
 
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    bool IsSystemOverloaded();
+    UFUNCTION(BlueprintCallable, Category = "Monitoring")
+    void OptimizeMemory();
 
 protected:
-    // System tracking
+    // Integration state
     UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    TMap<FString, FBuild_SystemReport> SystemReports;
+    bool bSystemsValidated;
 
     UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    bool bAllSystemsValid;
+    int32 TotalActorCount;
 
     UPROPERTY(BlueprintReadOnly, Category = "Integration")
     float LastValidationTime;
 
-    // Performance thresholds
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 MaxActorCount;
+    // Performance metrics
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float CurrentFPS;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float PerformanceThreshold;
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float MemoryUsageMB;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    int32 DrawCalls;
+
+    // Build tracking
+    UPROPERTY(BlueprintReadOnly, Category = "Build")
+    FString CurrentBuildVersion;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Build")
+    TArray<FString> BuildHistory;
 
 private:
     // Internal validation methods
-    bool ValidateCharacterSystem();
-    bool ValidateDinosaurSystem();
-    bool ValidateEnvironmentSystem();
-    bool ValidateAudioSystem();
-    bool ValidateVFXSystem();
-    
-    void UpdateSystemReport(const FString& SystemName, EBuild_SystemStatus Status, int32 ActorCount, const FString& ErrorMessage = TEXT(""));
-    float CalculatePerformanceScore();
+    bool ValidateCharacterSystems();
+    bool ValidateDinosaurSystems();
+    bool ValidateEnvironmentSystems();
+    bool ValidateAudioSystems();
+    bool ValidateVFXSystems();
+
+    // Performance monitoring
+    void UpdatePerformanceMetrics();
+    void CheckMemoryUsage();
+    void OptimizeActorCounts();
+
+    // Build utilities
+    void CreateBuildSnapshot();
+    void CleanupOldBuilds();
+    void ValidateBuildIntegrity();
+
+    // Timer handles
+    FTimerHandle ValidationTimerHandle;
+    FTimerHandle PerformanceTimerHandle;
+    FTimerHandle BuildTimerHandle;
 };
