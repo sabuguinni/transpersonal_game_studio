@@ -1,44 +1,27 @@
 #include "Core_CollisionSystem.h"
 #include "Engine/World.h"
-#include "Engine/Engine.h"
-#include "Components/StaticMeshComponent.h"
-#include "Components/PrimitiveComponent.h"
-#include "GameFramework/Actor.h"
-#include "Kismet/GameplayStatics.h"
 #include "DrawDebugHelpers.h"
+#include "Components/StaticMeshComponent.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "GameFramework/Actor.h"
 
 UCore_CollisionSystem::UCore_CollisionSystem()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 0.016f; // 60 FPS
+    PrimaryComponentTick.bStartWithTickEnabled = true;
     
-    // Initialize collision data
-    CollisionData.CollisionType = ECore_CollisionType::Static;
-    CollisionData.Mass = 1.0f;
-    CollisionData.Friction = 0.7f;
-    CollisionData.Restitution = 0.3f;
-    CollisionData.bGenerateHitEvents = true;
-    CollisionData.bCanEverAffectNavigation = true;
-    
-    bEnableCollisionSystem = true;
-    CollisionCheckRadius = 100.0f;
-    MaxCollisionForce = 1000.0f;
-    LastCollisionTime = 0.0f;
-    CollisionEventCount = 0;
-    
-    // Setup default collision object types
-    CollisionObjectTypes.Add(UEngineTypes::ConvertToObjectType(ECC_WorldStatic));
-    CollisionObjectTypes.Add(UEngineTypes::ConvertToObjectType(ECC_WorldDynamic));
-    CollisionObjectTypes.Add(UEngineTypes::ConvertToObjectType(ECC_Pawn));
+    CurrentCollisionType = ECore_CollisionType::Environment;
+    bCollisionEnabled = true;
+    MinImpactForceThreshold = 100.0f;
+    MaxTraceDistance = 10000.0f;
+    bDebugTraces = false;
 }
 
 void UCore_CollisionSystem::BeginPlay()
 {
     Super::BeginPlay();
     
-    InitializeCollisionSystem();
-    
-    UE_LOG(LogTemp, Warning, TEXT("Core_CollisionSystem initialized for actor: %s"), 
+    UE_LOG(LogTemp, Log, TEXT("Core_CollisionSystem initialized for actor: %s"), 
            GetOwner() ? *GetOwner()->GetName() : TEXT("Unknown"));
 }
 
@@ -46,332 +29,247 @@ void UCore_CollisionSystem::TickComponent(float DeltaTime, ELevelTick TickType, 
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
     
-    if (!bEnableCollisionSystem || !GetOwner())
-    {
+    // Continuous collision monitoring if needed
+    if (!bCollisionEnabled)
         return;
-    }
-    
-    // Process collision events
-    ProcessCollisionQueue();
-    
-    // Cleanup old collision events
-    CleanupOldCollisions();
-    
-    // Perform collision checks if dynamic
-    if (CollisionData.CollisionType == ECore_CollisionType::Dynamic)
-    {
-        FVector ActorLocation = GetOwner()->GetActorLocation();
-        TArray<AActor*> OverlappingActors = GetOverlappingActors(CollisionCheckRadius);
-        
-        for (AActor* Actor : OverlappingActors)
-        {
-            if (IsValidCollisionTarget(Actor))
-            {
-                FVector ImpactPoint = (ActorLocation + Actor->GetActorLocation()) * 0.5f;
-                FVector ImpactNormal = (ActorLocation - Actor->GetActorLocation()).GetSafeNormal();
-                float Distance = FVector::Dist(ActorLocation, Actor->GetActorLocation());
-                
-                if (Distance < CollisionCheckRadius)
-                {
-                    float Force = FMath::Clamp((CollisionCheckRadius - Distance) / CollisionCheckRadius * MaxCollisionForce, 0.0f, MaxCollisionForce);
-                    RegisterCollisionEvent(Actor, ImpactPoint, ImpactNormal, Force);
-                }
-            }
-        }
-    }
 }
 
-void UCore_CollisionSystem::InitializeCollisionSystem()
+bool UCore_CollisionSystem::PerformLineTrace(const FVector& Start, const FVector& End, FHitResult& OutHit, ECore_CollisionType TraceType)
 {
-    if (!GetOwner())
+    if (!bCollisionEnabled || !GetWorld())
+        return false;
+
+    FCollisionQueryParams QueryParams = CreateQueryParams(TraceType);
+    ECollisionChannel TraceChannel = GetCollisionChannelFromType(TraceType);
+    
+    bool bHit = GetWorld()->LineTraceSingleByChannel(
+        OutHit,
+        Start,
+        End,
+        TraceChannel,
+        QueryParams
+    );
+
+    if (bDebugTraces)
     {
-        UE_LOG(LogTemp, Error, TEXT("Core_CollisionSystem: No owner actor found"));
+        FColor TraceColor = bHit ? FColor::Red : FColor::Green;
+        DrawDebugLine(GetWorld(), Start, End, TraceColor, false, 1.0f, 0, 2.0f);
+        
+        if (bHit)
+        {
+            DrawDebugSphere(GetWorld(), OutHit.ImpactPoint, 25.0f, 12, FColor::Red, false, 1.0f);
+        }
+    }
+
+    if (bHit)
+    {
+        float ImpactForce = FVector::Dist(Start, End) * 10.0f; // Simple force calculation
+        ProcessCollisionEvent(OutHit, ImpactForce);
+    }
+
+    return bHit;
+}
+
+bool UCore_CollisionSystem::PerformSphereTrace(const FVector& Center, float Radius, FHitResult& OutHit, ECore_CollisionType TraceType)
+{
+    if (!bCollisionEnabled || !GetWorld())
+        return false;
+
+    FCollisionQueryParams QueryParams = CreateQueryParams(TraceType);
+    ECollisionChannel TraceChannel = GetCollisionChannelFromType(TraceType);
+    
+    bool bHit = GetWorld()->SweepSingleByChannel(
+        OutHit,
+        Center,
+        Center + FVector(0, 0, 1), // Small sweep distance
+        FQuat::Identity,
+        TraceChannel,
+        FCollisionShape::MakeSphere(Radius),
+        QueryParams
+    );
+
+    if (bDebugTraces)
+    {
+        FColor TraceColor = bHit ? FColor::Red : FColor::Green;
+        DrawDebugSphere(GetWorld(), Center, Radius, 12, TraceColor, false, 1.0f);
+    }
+
+    if (bHit)
+    {
+        float ImpactForce = Radius * 50.0f; // Force based on sphere size
+        ProcessCollisionEvent(OutHit, ImpactForce);
+    }
+
+    return bHit;
+}
+
+bool UCore_CollisionSystem::PerformBoxTrace(const FVector& Center, const FVector& HalfExtents, const FRotator& Rotation, FHitResult& OutHit, ECore_CollisionType TraceType)
+{
+    if (!bCollisionEnabled || !GetWorld())
+        return false;
+
+    FCollisionQueryParams QueryParams = CreateQueryParams(TraceType);
+    ECollisionChannel TraceChannel = GetCollisionChannelFromType(TraceType);
+    
+    bool bHit = GetWorld()->SweepSingleByChannel(
+        OutHit,
+        Center,
+        Center + FVector(0, 0, 1), // Small sweep distance
+        Rotation.Quaternion(),
+        TraceChannel,
+        FCollisionShape::MakeBox(HalfExtents),
+        QueryParams
+    );
+
+    if (bDebugTraces)
+    {
+        FColor TraceColor = bHit ? FColor::Red : FColor::Green;
+        DrawDebugBox(GetWorld(), Center, HalfExtents, Rotation.Quaternion(), TraceColor, false, 1.0f);
+    }
+
+    if (bHit)
+    {
+        float ImpactForce = HalfExtents.Size() * 25.0f; // Force based on box size
+        ProcessCollisionEvent(OutHit, ImpactForce);
+    }
+
+    return bHit;
+}
+
+void UCore_CollisionSystem::ProcessCollisionEvent(const FHitResult& HitResult, float ImpactForce)
+{
+    if (ImpactForce < MinImpactForceThreshold)
         return;
-    }
-    
-    // Configure collision on owner's mesh component
-    UStaticMeshComponent* MeshComp = GetOwner()->FindComponentByClass<UStaticMeshComponent>();
-    if (MeshComp)
-    {
-        UpdateCollisionProperties();
-        UE_LOG(LogTemp, Log, TEXT("Core_CollisionSystem: Collision properties updated for %s"), *GetOwner()->GetName());
-    }
-    
-    RecentCollisions.Empty();
-    CollisionEventCount = 0;
-    LastCollisionTime = GetWorld()->GetTimeSeconds();
+
+    FCore_CollisionData CollisionData;
+    CollisionData.CollisionType = CurrentCollisionType;
+    CollisionData.ImpactForce = ImpactForce;
+    CollisionData.ImpactLocation = HitResult.ImpactPoint;
+    CollisionData.ImpactNormal = HitResult.ImpactNormal;
+    CollisionData.HitActor = HitResult.GetActor();
+    CollisionData.HitComponent = HitResult.GetComponent();
+
+    // Broadcast collision event
+    OnCollisionDetected.Broadcast(CollisionData, HitResult);
+
+    // Handle collision response
+    HandleCollisionResponse(CollisionData);
+
+    UE_LOG(LogTemp, Log, TEXT("Collision detected: Force=%.2f, Actor=%s"), 
+           ImpactForce, 
+           CollisionData.HitActor ? *CollisionData.HitActor->GetName() : TEXT("None"));
 }
 
 void UCore_CollisionSystem::SetCollisionType(ECore_CollisionType NewType)
 {
-    CollisionData.CollisionType = NewType;
-    UpdateCollisionProperties();
-    
-    UE_LOG(LogTemp, Log, TEXT("Core_CollisionSystem: Collision type changed to %d for %s"), 
-           (int32)NewType, GetOwner() ? *GetOwner()->GetName() : TEXT("Unknown"));
+    CurrentCollisionType = NewType;
+    UE_LOG(LogTemp, Log, TEXT("Collision type changed to: %d"), (int32)NewType);
 }
 
-bool UCore_CollisionSystem::CheckCollisionAtLocation(const FVector& Location, float Radius)
+void UCore_CollisionSystem::EnableCollisionDetection(bool bEnable)
 {
-    if (!GetWorld())
-    {
-        return false;
-    }
-    
-    FCollisionQueryParams QueryParams;
-    QueryParams.AddIgnoredActor(GetOwner());
-    QueryParams.bTraceComplex = false;
-    QueryParams.bReturnPhysicalMaterial = false;
-    
-    TArray<FOverlapResult> OverlapResults;
-    bool bHasOverlap = GetWorld()->OverlapMultiByObjectType(
-        OverlapResults,
-        Location,
-        FQuat::Identity,
-        FCollisionObjectQueryParams(CollisionObjectTypes),
-        FCollisionShape::MakeSphere(Radius),
-        QueryParams
-    );
-    
-    return bHasOverlap && OverlapResults.Num() > 0;
+    bCollisionEnabled = bEnable;
+    UE_LOG(LogTemp, Log, TEXT("Collision detection %s"), bEnable ? TEXT("enabled") : TEXT("disabled"));
 }
 
-TArray<AActor*> UCore_CollisionSystem::GetOverlappingActors(float Radius)
+void UCore_CollisionSystem::ApplyImpactForce(UPrimitiveComponent* Component, const FVector& Force, const FVector& Location)
 {
-    TArray<AActor*> OverlappingActors;
-    
-    if (!GetOwner() || !GetWorld())
-    {
-        return OverlappingActors;
-    }
-    
-    FVector ActorLocation = GetOwner()->GetActorLocation();
-    
-    FCollisionQueryParams QueryParams;
-    QueryParams.AddIgnoredActor(GetOwner());
-    QueryParams.bTraceComplex = false;
-    
-    TArray<FOverlapResult> OverlapResults;
-    bool bHasOverlap = GetWorld()->OverlapMultiByObjectType(
-        OverlapResults,
-        ActorLocation,
-        FQuat::Identity,
-        FCollisionObjectQueryParams(CollisionObjectTypes),
-        FCollisionShape::MakeSphere(Radius),
-        QueryParams
-    );
-    
-    if (bHasOverlap)
-    {
-        for (const FOverlapResult& Result : OverlapResults)
-        {
-            if (Result.GetActor() && IsValidCollisionTarget(Result.GetActor()))
-            {
-                OverlappingActors.AddUnique(Result.GetActor());
-            }
-        }
-    }
-    
-    return OverlappingActors;
-}
-
-void UCore_CollisionSystem::ApplyImpactForce(const FVector& ImpactPoint, const FVector& Force)
-{
-    if (!GetOwner())
-    {
+    if (!Component || !Component->IsSimulatingPhysics())
         return;
-    }
+
+    Component->AddImpulseAtLocation(Force, Location);
     
-    UStaticMeshComponent* MeshComp = GetOwner()->FindComponentByClass<UStaticMeshComponent>();
-    if (MeshComp && MeshComp->IsSimulatingPhysics())
+    UE_LOG(LogTemp, Log, TEXT("Applied impact force: %.2f at location: %s"), 
+           Force.Size(), *Location.ToString());
+}
+
+void UCore_CollisionSystem::SetPhysicsProperties(UPrimitiveComponent* Component, float Mass, float LinearDamping, float AngularDamping)
+{
+    if (!Component)
+        return;
+
+    FBodyInstance* BodyInstance = Component->GetBodyInstance();
+    if (BodyInstance)
     {
-        MeshComp->AddImpulseAtLocation(Force, ImpactPoint);
+        BodyInstance->SetMassOverride(Mass);
+        BodyInstance->LinearDamping = LinearDamping;
+        BodyInstance->AngularDamping = AngularDamping;
+        BodyInstance->UpdateMassProperties();
         
-        UE_LOG(LogTemp, Log, TEXT("Core_CollisionSystem: Applied impact force %s at %s"), 
-               *Force.ToString(), *ImpactPoint.ToString());
+        UE_LOG(LogTemp, Log, TEXT("Physics properties updated: Mass=%.2f, LinearDamp=%.2f, AngularDamp=%.2f"), 
+               Mass, LinearDamping, AngularDamping);
     }
 }
 
-void UCore_CollisionSystem::RegisterCollisionEvent(AActor* HitActor, const FVector& ImpactPoint, const FVector& ImpactNormal, float Force)
+void UCore_CollisionSystem::HandleCollisionResponse(const FCore_CollisionData& CollisionData)
 {
-    if (!HitActor)
-    {
-        return;
-    }
-    
-    FCore_CollisionEvent NewEvent;
-    NewEvent.HitActor = HitActor;
-    NewEvent.ImpactPoint = ImpactPoint;
-    NewEvent.ImpactNormal = ImpactNormal;
-    NewEvent.ImpactForce = Force;
-    NewEvent.Timestamp = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
-    
-    RecentCollisions.Add(NewEvent);
-    CollisionEventCount++;
-    LastCollisionTime = NewEvent.Timestamp;
-    
-    // Broadcast collision event
-    OnCollisionDetected.Broadcast(NewEvent, HitActor);
-    
-    // Handle collision response based on type
-    FHitResult HitResult;
-    HitResult.ImpactPoint = ImpactPoint;
-    HitResult.ImpactNormal = ImpactNormal;
-    HitResult.GetActor() = HitActor;
-    
+    // Handle different collision types
     switch (CollisionData.CollisionType)
     {
-        case ECore_CollisionType::Static:
-            HandleStaticCollision(HitResult);
+        case ECore_CollisionType::Player:
+            // Player collision response
+            if (CollisionData.ImpactForce > 500.0f)
+            {
+                UE_LOG(LogTemp, Warning, TEXT("High impact player collision: %.2f"), CollisionData.ImpactForce);
+            }
             break;
-        case ECore_CollisionType::Dynamic:
-            HandleDynamicCollision(HitResult, Force);
+
+        case ECore_CollisionType::Dinosaur:
+            // Dinosaur collision response
+            if (CollisionData.HitComponent && CollisionData.ImpactForce > 300.0f)
+            {
+                ApplyImpactForce(CollisionData.HitComponent, 
+                               CollisionData.ImpactNormal * CollisionData.ImpactForce * 0.5f, 
+                               CollisionData.ImpactLocation);
+            }
             break;
-        case ECore_CollisionType::Trigger:
-            HandleTriggerCollision(HitActor);
+
+        case ECore_CollisionType::Environment:
+            // Environmental collision response
             break;
+
+        case ECore_CollisionType::Projectile:
+            // Projectile collision response
+            if (CollisionData.HitActor)
+            {
+                UE_LOG(LogTemp, Log, TEXT("Projectile hit: %s"), *CollisionData.HitActor->GetName());
+            }
+            break;
+
         default:
             break;
     }
-    
-    UE_LOG(LogTemp, Log, TEXT("Core_CollisionSystem: Collision registered with %s, Force: %f"), 
-           *HitActor->GetName(), Force);
 }
 
-void UCore_CollisionSystem::EnableCollisionSystem(bool bEnable)
+ECollisionChannel UCore_CollisionSystem::GetCollisionChannelFromType(ECore_CollisionType Type)
 {
-    bEnableCollisionSystem = bEnable;
-    SetComponentTickEnabled(bEnable);
-    
-    UE_LOG(LogTemp, Log, TEXT("Core_CollisionSystem: System %s for %s"), 
-           bEnable ? TEXT("enabled") : TEXT("disabled"), 
-           GetOwner() ? *GetOwner()->GetName() : TEXT("Unknown"));
-}
-
-void UCore_CollisionSystem::UpdateCollisionProperties()
-{
-    if (!GetOwner())
+    switch (Type)
     {
-        return;
-    }
-    
-    UStaticMeshComponent* MeshComp = GetOwner()->FindComponentByClass<UStaticMeshComponent>();
-    if (!MeshComp)
-    {
-        return;
-    }
-    
-    // Set collision based on collision type
-    switch (CollisionData.CollisionType)
-    {
-        case ECore_CollisionType::Static:
-            MeshComp->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-            MeshComp->SetCollisionObjectType(ECC_WorldStatic);
-            MeshComp->SetSimulatePhysics(false);
-            break;
-            
-        case ECore_CollisionType::Dynamic:
-            MeshComp->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-            MeshComp->SetCollisionObjectType(ECC_WorldDynamic);
-            MeshComp->SetSimulatePhysics(true);
-            MeshComp->SetMassOverrideInKg(NAME_None, CollisionData.Mass, true);
-            break;
-            
-        case ECore_CollisionType::Kinematic:
-            MeshComp->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-            MeshComp->SetCollisionObjectType(ECC_WorldDynamic);
-            MeshComp->SetSimulatePhysics(false);
-            break;
-            
-        case ECore_CollisionType::Trigger:
-            MeshComp->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
-            MeshComp->SetCollisionObjectType(ECC_WorldDynamic);
-            MeshComp->SetSimulatePhysics(false);
-            MeshComp->SetCollisionResponseToAllChannels(ECR_Overlap);
-            break;
-            
-        case ECore_CollisionType::None:
-            MeshComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-            MeshComp->SetSimulatePhysics(false);
-            break;
-    }
-    
-    // Set physics material properties
-    if (MeshComp->GetBodyInstance())
-    {
-        MeshComp->GetBodyInstance()->SetPhysMaterialOverride(nullptr);
-        // Note: In a full implementation, you'd create and assign a physics material here
+        case ECore_CollisionType::Player:
+            return ECC_Pawn;
+        case ECore_CollisionType::Dinosaur:
+            return ECC_Pawn;
+        case ECore_CollisionType::Environment:
+            return ECC_WorldStatic;
+        case ECore_CollisionType::Projectile:
+            return ECC_WorldDynamic;
+        case ECore_CollisionType::Debris:
+            return ECC_WorldDynamic;
+        case ECore_CollisionType::Water:
+            return ECC_WorldStatic;
+        case ECore_CollisionType::Vegetation:
+            return ECC_WorldStatic;
+        default:
+            return ECC_WorldStatic;
     }
 }
 
-void UCore_CollisionSystem::HandleStaticCollision(const FHitResult& HitResult)
+FCollisionQueryParams UCore_CollisionSystem::CreateQueryParams(ECore_CollisionType TraceType)
 {
-    // Static objects don't move, but can generate sound/particles
-    UE_LOG(LogTemp, Log, TEXT("Core_CollisionSystem: Static collision handled"));
-}
-
-void UCore_CollisionSystem::HandleDynamicCollision(const FHitResult& HitResult, float ImpactVelocity)
-{
-    if (!GetOwner())
-    {
-        return;
-    }
+    FCollisionQueryParams QueryParams;
+    QueryParams.AddIgnoredActor(GetOwner());
+    QueryParams.bTraceComplex = true;
+    QueryParams.bReturnPhysicalMaterial = true;
     
-    // Calculate and apply response force
-    FVector ResponseForce = HitResult.ImpactNormal * ImpactVelocity * CollisionData.Mass * CollisionData.Restitution;
-    ApplyImpactForce(HitResult.ImpactPoint, ResponseForce);
-    
-    UE_LOG(LogTemp, Log, TEXT("Core_CollisionSystem: Dynamic collision handled, Response Force: %s"), 
-           *ResponseForce.ToString());
-}
-
-void UCore_CollisionSystem::HandleTriggerCollision(AActor* TriggerActor)
-{
-    // Trigger events for gameplay systems
-    UE_LOG(LogTemp, Log, TEXT("Core_CollisionSystem: Trigger collision with %s"), 
-           TriggerActor ? *TriggerActor->GetName() : TEXT("Unknown"));
-}
-
-void UCore_CollisionSystem::ProcessCollisionQueue()
-{
-    // Process any queued collision events
-    // This could be expanded to handle delayed collision responses
-}
-
-void UCore_CollisionSystem::CleanupOldCollisions()
-{
-    if (!GetWorld())
-    {
-        return;
-    }
-    
-    float CurrentTime = GetWorld()->GetTimeSeconds();
-    float MaxAge = 5.0f; // Keep collision events for 5 seconds
-    
-    RecentCollisions.RemoveAll([CurrentTime, MaxAge](const FCore_CollisionEvent& Event)
-    {
-        return (CurrentTime - Event.Timestamp) > MaxAge;
-    });
-}
-
-float UCore_CollisionSystem::CalculateImpactForce(const FVector& Velocity, float Mass)
-{
-    return Velocity.Size() * Mass;
-}
-
-bool UCore_CollisionSystem::IsValidCollisionTarget(AActor* Actor)
-{
-    if (!Actor || Actor == GetOwner())
-    {
-        return false;
-    }
-    
-    // Check if actor has collision components
-    UPrimitiveComponent* PrimComp = Actor->FindComponentByClass<UPrimitiveComponent>();
-    if (!PrimComp || PrimComp->GetCollisionEnabled() == ECollisionEnabled::NoCollision)
-    {
-        return false;
-    }
-    
-    return true;
+    return QueryParams;
 }
