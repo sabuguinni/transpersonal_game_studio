@@ -2,15 +2,15 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
-#include "Engine/World.h"
+#include "Engine/Engine.h"
 #include "QATestManager.generated.h"
 
 UENUM(BlueprintType)
 enum class EQA_TestResult : uint8
 {
     NotRun      UMETA(DisplayName = "Not Run"),
-    Pass        UMETA(DisplayName = "Pass"),
-    Fail        UMETA(DisplayName = "Fail"),
+    Passed      UMETA(DisplayName = "Passed"),
+    Failed      UMETA(DisplayName = "Failed"),
     Warning     UMETA(DisplayName = "Warning")
 };
 
@@ -55,61 +55,69 @@ public:
 protected:
     virtual void BeginPlay() override;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Testing")
-    TArray<FQA_TestCase> TestCases;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Testing")
-    bool bAutoRunTests;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Testing")
-    float TestInterval;
-
-    UPROPERTY(BlueprintReadOnly, Category = "QA Testing")
-    int32 PassedTests;
-
-    UPROPERTY(BlueprintReadOnly, Category = "QA Testing")
-    int32 FailedTests;
-
-    UPROPERTY(BlueprintReadOnly, Category = "QA Testing")
-    int32 WarningTests;
-
 public:
+    virtual void Tick(float DeltaTime) override;
+
+    // Test execution functions
     UFUNCTION(BlueprintCallable, Category = "QA Testing")
     void RunAllTests();
 
     UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    void RunSingleTest(const FString& TestName);
+    void RunClassCompilationTests();
 
     UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    void ClearTestResults();
+    void RunAssetValidationTests();
 
     UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    FQA_TestCase GetTestResult(const FString& TestName);
+    void RunPerformanceTests();
 
     UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    TArray<FQA_TestCase> GetAllTestResults();
+    void RunIntegrationTests();
 
     UFUNCTION(BlueprintCallable, Category = "QA Testing")
     void GenerateTestReport();
 
-protected:
-    UFUNCTION(BlueprintImplementableEvent, Category = "QA Testing")
-    void OnTestCompleted(const FQA_TestCase& TestCase);
+    // Test result accessors
+    UFUNCTION(BlueprintPure, Category = "QA Testing")
+    TArray<FQA_TestCase> GetTestResults() const { return TestResults; }
 
-    UFUNCTION(BlueprintImplementableEvent, Category = "QA Testing")
-    void OnAllTestsCompleted();
+    UFUNCTION(BlueprintPure, Category = "QA Testing")
+    int32 GetPassedTestCount() const;
+
+    UFUNCTION(BlueprintPure, Category = "QA Testing")
+    int32 GetFailedTestCount() const;
+
+    UFUNCTION(BlueprintPure, Category = "QA Testing")
+    float GetOverallTestScore() const;
+
+protected:
+    // Test data
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "QA Testing")
+    TArray<FQA_TestCase> TestResults;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Testing")
+    bool bAutoRunTestsOnBeginPlay;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Testing")
+    float TestRunInterval;
+
+    // Performance thresholds
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Performance")
+    int32 MaxActorCount;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Performance")
+    float MaxFrameTime;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Performance")
+    int32 MinBiomeActorCount;
 
 private:
-    void TestCharacterSystem();
-    void TestDinosaurSystem();
-    void TestVFXSystem();
-    void TestPerformance();
-    void TestAssetLoading();
-    void TestIntegration();
+    // Helper functions
+    void AddTestResult(const FString& TestName, const FString& Description, EQA_TestResult Result, const FString& ErrorMsg = TEXT(""));
+    void LogTestResult(const FQA_TestCase& TestCase);
+    bool ValidateClassExists(const FString& ClassName);
+    bool ValidateAssetExists(const FString& AssetPath);
+    int32 CountActorsInBiome(const FVector& BiomeCenter, float Radius);
 
-    void AddTestResult(const FString& TestName, const FString& Description, 
-                      EQA_TestResult Result, const FString& ErrorMessage = TEXT(""), 
-                      float ExecutionTime = 0.0f);
-
-    FTimerHandle TestTimerHandle;
+    float LastTestRunTime;
 };
