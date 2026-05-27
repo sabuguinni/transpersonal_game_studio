@@ -1,85 +1,18 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "UObject/NoExportTypes.h"
-#include "Engine/Engine.h"
 #include "Animation/AnimInstance.h"
-#include "Animation/AnimMontage.h"
-#include "Animation/BlendSpace.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
-#include "../SharedTypes.h"
+#include "Engine/Engine.h"
+#include "SharedTypes.h"
 #include "Anim_CharacterAnimController.generated.h"
 
-UENUM(BlueprintType)
-enum class EAnim_MovementState : uint8
-{
-    Idle        UMETA(DisplayName = "Idle"),
-    Walking     UMETA(DisplayName = "Walking"),
-    Running     UMETA(DisplayName = "Running"),
-    Sprinting   UMETA(DisplayName = "Sprinting"),
-    Crouching   UMETA(DisplayName = "Crouching"),
-    Jumping     UMETA(DisplayName = "Jumping"),
-    Falling     UMETA(DisplayName = "Falling"),
-    Landing     UMETA(DisplayName = "Landing"),
-    Swimming    UMETA(DisplayName = "Swimming"),
-    Climbing    UMETA(DisplayName = "Climbing")
-};
-
-UENUM(BlueprintType)
-enum class EAnim_ActionState : uint8
-{
-    None        UMETA(DisplayName = "None"),
-    Gathering   UMETA(DisplayName = "Gathering"),
-    Crafting    UMETA(DisplayName = "Crafting"),
-    Hunting     UMETA(DisplayName = "Hunting"),
-    Building    UMETA(DisplayName = "Building"),
-    Eating      UMETA(DisplayName = "Eating"),
-    Drinking    UMETA(DisplayName = "Drinking"),
-    Fighting    UMETA(DisplayName = "Fighting"),
-    Throwing    UMETA(DisplayName = "Throwing"),
-    Sleeping    UMETA(DisplayName = "Sleeping")
-};
-
-USTRUCT(BlueprintType)
-struct FAnim_FootIKData
-{
-    GENERATED_BODY()
-
-    UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Foot IK")
-    FVector LeftFootLocation;
-
-    UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Foot IK")
-    FVector RightFootLocation;
-
-    UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Foot IK")
-    FRotator LeftFootRotation;
-
-    UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Foot IK")
-    FRotator RightFootRotation;
-
-    UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Foot IK")
-    float LeftFootAlpha;
-
-    UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Foot IK")
-    float RightFootAlpha;
-
-    UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Foot IK")
-    float HipOffset;
-
-    FAnim_FootIKData()
-    {
-        LeftFootLocation = FVector::ZeroVector;
-        RightFootLocation = FVector::ZeroVector;
-        LeftFootRotation = FRotator::ZeroRotator;
-        RightFootRotation = FRotator::ZeroRotator;
-        LeftFootAlpha = 0.0f;
-        RightFootAlpha = 0.0f;
-        HipOffset = 0.0f;
-    }
-};
-
+/**
+ * Main animation controller for tribal character movement and combat
+ * Handles motion matching, IK foot placement, and survival animations
+ */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UAnim_CharacterAnimController : public UAnimInstance
 {
@@ -91,91 +24,114 @@ public:
     virtual void NativeInitializeAnimation() override;
     virtual void NativeUpdateAnimation(float DeltaTimeX) override;
 
-    // Movement State Management
+    // Movement State
+    UPROPERTY(BlueprintReadOnly, Category = "Movement")
+    float Speed;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Movement")
+    float Direction;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Movement")
+    bool bIsInAir;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Movement")
+    bool bIsAccelerating;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Movement")
+    bool bIsCrouching;
+
+    // Combat State
+    UPROPERTY(BlueprintReadOnly, Category = "Combat")
+    bool bIsHoldingWeapon;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Combat")
+    EAnim_WeaponType CurrentWeaponType;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Combat")
+    bool bIsAttacking;
+
+    // Survival State
+    UPROPERTY(BlueprintReadOnly, Category = "Survival")
+    float HealthPercentage;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Survival")
+    float StaminaPercentage;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Survival")
+    bool bIsInjured;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Survival")
+    EAnim_EmotionalState EmotionalState;
+
+    // IK Foot Placement
+    UPROPERTY(BlueprintReadOnly, Category = "IK")
+    float LeftFootIKOffset;
+
+    UPROPERTY(BlueprintReadOnly, Category = "IK")
+    float RightFootIKOffset;
+
+    UPROPERTY(BlueprintReadOnly, Category = "IK")
+    FRotator LeftFootIKRotation;
+
+    UPROPERTY(BlueprintReadOnly, Category = "IK")
+    FRotator RightFootIKRotation;
+
+    // Motion Matching
+    UPROPERTY(BlueprintReadOnly, Category = "MotionMatching")
+    float MotionMatchingWeight;
+
+    UPROPERTY(BlueprintReadOnly, Category = "MotionMatching")
+    FVector DesiredVelocity;
+
+    UPROPERTY(BlueprintReadOnly, Category = "MotionMatching")
+    float TurnInPlaceAngle;
+
+protected:
+    // Character reference
+    UPROPERTY(BlueprintReadOnly, Category = "Character")
+    class ACharacter* OwningCharacter;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Character")
+    class UCharacterMovementComponent* CharacterMovement;
+
+    // IK Functions
+    UFUNCTION(BlueprintCallable, Category = "IK")
+    void CalculateFootIK();
+
+    UFUNCTION(BlueprintCallable, Category = "IK")
+    float GetFootIKOffset(FName SocketName, float TraceDistance = 50.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "IK")
+    FRotator GetFootIKRotation(FName SocketName);
+
+    // Motion Matching Functions
+    UFUNCTION(BlueprintCallable, Category = "MotionMatching")
+    void UpdateMotionMatching();
+
+    UFUNCTION(BlueprintCallable, Category = "MotionMatching")
+    float CalculateMotionMatchingScore(const FVector& CurrentVelocity, const FVector& TargetVelocity);
+
+    // Animation State Functions
     UFUNCTION(BlueprintCallable, Category = "Animation")
     void UpdateMovementState();
 
     UFUNCTION(BlueprintCallable, Category = "Animation")
-    void SetActionState(EAnim_ActionState NewState);
+    void UpdateCombatState();
 
     UFUNCTION(BlueprintCallable, Category = "Animation")
-    void PlayActionMontage(UAnimMontage* Montage, float PlayRate = 1.0f);
-
-    // Foot IK System
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    void UpdateFootIK(float DeltaTime);
-
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    FVector PerformFootTrace(FName SocketName, float TraceDistance = 50.0f);
-
-protected:
-    // Character Reference
-    UPROPERTY(BlueprintReadOnly, Category = "Animation")
-    ACharacter* OwnerCharacter;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Animation")
-    UCharacterMovementComponent* MovementComponent;
-
-    // Movement Variables
-    UPROPERTY(BlueprintReadOnly, Category = "Animation")
-    float Speed;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Animation")
-    float Direction;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Animation")
-    bool bIsInAir;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Animation")
-    bool bIsCrouching;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Animation")
-    bool bIsAccelerating;
-
-    // State Variables
-    UPROPERTY(BlueprintReadOnly, Category = "Animation")
-    EAnim_MovementState CurrentMovementState;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Animation")
-    EAnim_ActionState CurrentActionState;
-
-    // Animation Assets
-    UPROPERTY(BlueprintReadOnly, EditAnywhere, Category = "Animation Assets")
-    UBlendSpace* MovementBlendSpace;
-
-    UPROPERTY(BlueprintReadOnly, EditAnywhere, Category = "Animation Assets")
-    UAnimMontage* JumpMontage;
-
-    UPROPERTY(BlueprintReadOnly, EditAnywhere, Category = "Animation Assets")
-    UAnimMontage* LandMontage;
-
-    UPROPERTY(BlueprintReadOnly, EditAnywhere, Category = "Animation Assets")
-    TMap<EAnim_ActionState, UAnimMontage*> ActionMontages;
-
-    // Foot IK
-    UPROPERTY(BlueprintReadOnly, Category = "Animation")
-    FAnim_FootIKData FootIKData;
-
-    UPROPERTY(BlueprintReadOnly, EditAnywhere, Category = "Foot IK")
-    float FootIKTraceDistance;
-
-    UPROPERTY(BlueprintReadOnly, EditAnywhere, Category = "Foot IK")
-    float FootIKInterpSpeed;
-
-    UPROPERTY(BlueprintReadOnly, EditAnywhere, Category = "Foot IK")
-    bool bEnableFootIK;
-
-    // Animation Smoothing
-    UPROPERTY(BlueprintReadOnly, EditAnywhere, Category = "Animation")
-    float SpeedSmoothingRate;
-
-    UPROPERTY(BlueprintReadOnly, EditAnywhere, Category = "Animation")
-    float DirectionSmoothingRate;
+    void UpdateSurvivalState();
 
 private:
-    // Internal state tracking
-    float LastSpeed;
-    float LastDirection;
-    float StateTransitionTimer;
-    bool bWasInAir;
+    // IK Settings
+    float IKTraceDistance;
+    float IKInterpSpeed;
+    
+    // Motion Matching Settings
+    float MotionMatchingThreshold;
+    float VelocityMatchWeight;
+    float DirectionMatchWeight;
+    
+    // Animation Smoothing
+    float SpeedSmoothingRate;
+    float DirectionSmoothingRate;
 };
