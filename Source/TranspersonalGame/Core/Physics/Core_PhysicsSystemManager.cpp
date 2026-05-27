@@ -1,464 +1,329 @@
 #include "Core_PhysicsSystemManager.h"
-#include "Engine/World.h"
-#include "GameFramework/Character.h"
-#include "Components/SkeletalMeshComponent.h"
-#include "Components/StaticMeshComponent.h"
+#include "Core_CollisionSystem.h"
+#include "Core_RagdollSystem.h"
+#include "Core_DestructionSystem.h"
 #include "Engine/Engine.h"
+#include "Engine/World.h"
 #include "PhysicsEngine/PhysicsSettings.h"
-#include "Kismet/GameplayStatics.h"
 #include "DrawDebugHelpers.h"
-
-DEFINE_LOG_CATEGORY(LogCorePhysics);
 
 UCore_PhysicsSystemManager::UCore_PhysicsSystemManager()
 {
-    PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 0.016f; // 60 FPS tick rate
-    
     // Initialize default physics settings
     GlobalGravityScale = 1.0f;
-    DefaultLinearDamping = 0.1f;
-    DefaultAngularDamping = 0.1f;
+    GlobalPhysicsTimeStep = 0.016667f; // 60 FPS
+    MaxPhysicsSubSteps = 6;
     bEnablePhysicsSimulation = true;
     
-    // Collision settings
-    bEnableComplexCollision = true;
-    CollisionTolerance = 0.1f;
-    MaxCollisionIterations = 8;
-    
-    // Ragdoll settings
-    bEnableRagdollPhysics = true;
-    RagdollBlendWeight = 1.0f;
-    RagdollLifetime = 30.0f;
-    
-    // Destruction settings
-    bEnableDestruction = true;
-    DestructionThreshold = 1000.0f;
-    MaxDestructionParticles = 100;
+    // Performance settings
+    MaxActiveRagdolls = 10;
+    MaxDestructionObjects = 50;
+    PhysicsUpdateDistance = 5000.0f;
     
     // Internal state
     LastPhysicsUpdateTime = 0.0f;
-    PhysicsObjectCount = 0;
+    CurrentActiveRagdolls = 0;
+    CurrentDestructionObjects = 0;
+    bSystemsInitialized = false;
+    
+    // System references
+    CollisionSystem = nullptr;
+    RagdollSystem = nullptr;
+    DestructionSystem = nullptr;
 }
 
-void UCore_PhysicsSystemManager::BeginPlay()
+void UCore_PhysicsSystemManager::Initialize(FSubsystemCollectionBase& Collection)
 {
-    Super::BeginPlay();
+    Super::Initialize(Collection);
     
-    UE_LOG(LogCorePhysics, Log, TEXT("Core Physics System Manager initialized"));
+    UE_LOG(LogTemp, Warning, TEXT("PhysicsSystemManager: Initializing physics subsystem"));
     
-    InitializePhysicsSystem();
+    // Create and initialize physics systems
+    CreatePhysicsSystems();
+    ConfigurePhysicsSettings();
+    RegisterPhysicsEvents();
     
-    // Bind to physics events
-    if (AActor* Owner = GetOwner())
+    bSystemsInitialized = true;
+    
+    UE_LOG(LogTemp, Warning, TEXT("PhysicsSystemManager: Physics subsystem initialized successfully"));
+}
+
+void UCore_PhysicsSystemManager::Deinitialize()
+{
+    UE_LOG(LogTemp, Warning, TEXT("PhysicsSystemManager: Shutting down physics subsystem"));
+    
+    ShutdownPhysicsSystems();
+    
+    // Clear system references
+    CollisionSystem = nullptr;
+    RagdollSystem = nullptr;
+    DestructionSystem = nullptr;
+    
+    bSystemsInitialized = false;
+    
+    Super::Deinitialize();
+}
+
+void UCore_PhysicsSystemManager::InitializePhysicsSystems()
+{
+    if (bSystemsInitialized)
     {
-        Owner->OnActorHit.AddDynamic(this, &UCore_PhysicsSystemManager::OnActorHit);
-        Owner->OnActorBeginOverlap.AddDynamic(this, &UCore_PhysicsSystemManager::OnActorBeginOverlap);
-        Owner->OnActorEndOverlap.AddDynamic(this, &UCore_PhysicsSystemManager::OnActorEndOverlap);
+        UE_LOG(LogTemp, Warning, TEXT("PhysicsSystemManager: Systems already initialized"));
+        return;
     }
+    
+    CreatePhysicsSystems();
+    ConfigurePhysicsSettings();
+    RegisterPhysicsEvents();
+    
+    bSystemsInitialized = true;
+    
+    UE_LOG(LogTemp, Warning, TEXT("PhysicsSystemManager: Physics systems initialized"));
 }
 
-void UCore_PhysicsSystemManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void UCore_PhysicsSystemManager::ShutdownPhysicsSystems()
 {
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-    
-    if (!bEnablePhysicsSimulation)
+    if (!bSystemsInitialized)
     {
         return;
     }
     
-    // Update tracked actors
-    UpdateTrackedActors();
-    
-    // Process ragdoll characters
-    ProcessRagdollCharacters(DeltaTime);
-    
-    // Monitor performance
-    MonitorPerformance();
-    
-    // Cleanup destroyed actors
-    CleanupDestroyedActors();
-    
-    LastPhysicsUpdateTime = GetWorld()->GetTimeSeconds();
-}
-
-void UCore_PhysicsSystemManager::InitializePhysicsSystem()
-{
-    UE_LOG(LogCorePhysics, Log, TEXT("Initializing physics system with gravity scale: %f"), GlobalGravityScale);
-    
-    if (UWorld* World = GetWorld())
+    // Shutdown individual systems
+    if (CollisionSystem)
     {
-        // Set global physics settings
-        if (UPhysicsSettings* PhysicsSettings = UPhysicsSettings::Get())
-        {
-            PhysicsSettings->DefaultGravityZ = -980.0f * GlobalGravityScale;
-            PhysicsSettings->DefaultTerminalVelocity = 4000.0f;
-            PhysicsSettings->DefaultFluidFriction = 0.3f;
-        }
-        
-        // Initialize physics scene
-        World->GetPhysicsScene()->SetGravityZ(-980.0f * GlobalGravityScale);
+        CollisionSystem->ConditionalBeginDestroy();
     }
     
-    TrackedPhysicsActors.Empty();
-    RagdollCharacters.Empty();
-    PhysicsObjectCount = 0;
+    if (RagdollSystem)
+    {
+        RagdollSystem->ConditionalBeginDestroy();
+    }
+    
+    if (DestructionSystem)
+    {
+        DestructionSystem->ConditionalBeginDestroy();
+    }
+    
+    bSystemsInitialized = false;
+    
+    UE_LOG(LogTemp, Warning, TEXT("PhysicsSystemManager: Physics systems shut down"));
 }
 
-void UCore_PhysicsSystemManager::UpdatePhysicsSettings()
+void UCore_PhysicsSystemManager::UpdatePhysicsSystems(float DeltaTime)
 {
-    if (UWorld* World = GetWorld())
+    if (!bSystemsInitialized || !bEnablePhysicsSimulation)
     {
-        World->GetPhysicsScene()->SetGravityZ(-980.0f * GlobalGravityScale);
-        
-        UE_LOG(LogCorePhysics, Log, TEXT("Updated physics settings - Gravity: %f"), GlobalGravityScale);
+        return;
+    }
+    
+    LastPhysicsUpdateTime = DeltaTime;
+    
+    // Update individual physics systems
+    if (CollisionSystem)
+    {
+        CollisionSystem->UpdateCollisionSystem(DeltaTime);
+    }
+    
+    if (RagdollSystem)
+    {
+        RagdollSystem->UpdateRagdollSystem(DeltaTime);
+        CurrentActiveRagdolls = RagdollSystem->GetActiveRagdollCount();
+    }
+    
+    if (DestructionSystem)
+    {
+        DestructionSystem->UpdateDestructionSystem(DeltaTime);
+        CurrentDestructionObjects = DestructionSystem->GetActiveDestructionCount();
+    }
+    
+    // Performance monitoring
+    if (CurrentActiveRagdolls > MaxActiveRagdolls)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("PhysicsSystemManager: Ragdoll limit exceeded (%d/%d)"), 
+               CurrentActiveRagdolls, MaxActiveRagdolls);
+    }
+    
+    if (CurrentDestructionObjects > MaxDestructionObjects)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("PhysicsSystemManager: Destruction object limit exceeded (%d/%d)"), 
+               CurrentDestructionObjects, MaxDestructionObjects);
     }
 }
 
-void UCore_PhysicsSystemManager::SetGlobalGravity(float NewGravity)
+void UCore_PhysicsSystemManager::CreatePhysicsSystems()
 {
-    GlobalGravityScale = NewGravity;
-    UpdatePhysicsSettings();
-}
-
-void UCore_PhysicsSystemManager::EnablePhysicsSimulation(bool bEnable)
-{
-    bEnablePhysicsSimulation = bEnable;
-    
-    UE_LOG(LogCorePhysics, Log, TEXT("Physics simulation %s"), 
-           bEnable ? TEXT("enabled") : TEXT("disabled"));
-}
-
-bool UCore_PhysicsSystemManager::CheckCollisionAtLocation(FVector Location, float Radius)
-{
-    if (!GetWorld())
+    // Create collision system
+    CollisionSystem = NewObject<UCore_CollisionSystem>(this);
+    if (CollisionSystem)
     {
-        return false;
+        UE_LOG(LogTemp, Warning, TEXT("PhysicsSystemManager: Collision system created"));
     }
     
-    FCollisionQueryParams QueryParams;
-    QueryParams.bTraceComplex = bEnableComplexCollision;
-    QueryParams.AddIgnoredActor(GetOwner());
+    // Create ragdoll system
+    RagdollSystem = NewObject<UCore_RagdollSystem>(this);
+    if (RagdollSystem)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("PhysicsSystemManager: Ragdoll system created"));
+    }
     
-    return GetWorld()->OverlapBlockingTestByChannel(
-        Location,
-        FQuat::Identity,
-        ECollisionChannel::ECC_WorldStatic,
-        FCollisionShape::MakeSphere(Radius),
-        QueryParams
-    );
+    // Create destruction system
+    DestructionSystem = NewObject<UCore_DestructionSystem>(this);
+    if (DestructionSystem)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("PhysicsSystemManager: Destruction system created"));
+    }
 }
 
-TArray<AActor*> UCore_PhysicsSystemManager::GetOverlappingActors(FVector Location, float Radius)
+void UCore_PhysicsSystemManager::ConfigurePhysicsSettings()
 {
-    TArray<AActor*> OverlappingActors;
-    
-    if (!GetWorld())
+    UWorld* World = GetWorld();
+    if (World)
     {
-        return OverlappingActors;
+        ApplyWorldPhysicsSettings(World);
     }
     
-    TArray<FOverlapResult> OverlapResults;
-    FCollisionQueryParams QueryParams;
-    QueryParams.bTraceComplex = bEnableComplexCollision;
-    QueryParams.AddIgnoredActor(GetOwner());
-    
-    bool bHit = GetWorld()->OverlapMultiByChannel(
-        OverlapResults,
-        Location,
-        FQuat::Identity,
-        ECollisionChannel::ECC_WorldDynamic,
-        FCollisionShape::MakeSphere(Radius),
-        QueryParams
-    );
-    
-    if (bHit)
+    // Configure global physics settings
+    if (UPhysicsSettings* PhysicsSettings = UPhysicsSettings::Get())
     {
-        for (const FOverlapResult& Result : OverlapResults)
-        {
-            if (Result.GetActor())
-            {
-                OverlappingActors.Add(Result.GetActor());
-            }
-        }
+        PhysicsSettings->DefaultGravityZ = -980.0f * GlobalGravityScale;
+        PhysicsSettings->MaxSubstepDeltaTime = GlobalPhysicsTimeStep;
+        PhysicsSettings->MaxSubsteps = MaxPhysicsSubSteps;
     }
     
-    return OverlappingActors;
+    UE_LOG(LogTemp, Warning, TEXT("PhysicsSystemManager: Physics settings configured"));
 }
 
-void UCore_PhysicsSystemManager::SetCollisionResponseForActor(AActor* Actor, ECollisionResponse Response)
+void UCore_PhysicsSystemManager::RegisterPhysicsEvents()
+{
+    // Bind event handlers
+    OnLargeImpact.AddDynamic(this, &UCore_PhysicsSystemManager::HandleLargeImpact);
+    OnObjectDestroyed.AddDynamic(this, &UCore_PhysicsSystemManager::HandleObjectDestruction);
+    OnRagdollActivated.AddDynamic(this, &UCore_PhysicsSystemManager::HandleRagdollActivation);
+    
+    UE_LOG(LogTemp, Warning, TEXT("PhysicsSystemManager: Physics events registered"));
+}
+
+void UCore_PhysicsSystemManager::ApplyWorldPhysicsSettings(UWorld* World)
+{
+    if (!World)
+    {
+        return;
+    }
+    
+    // Apply world-specific physics settings
+    World->GetWorldSettings()->GlobalGravityZ = -980.0f * GlobalGravityScale;
+    
+    UE_LOG(LogTemp, Warning, TEXT("PhysicsSystemManager: World physics settings applied"));
+}
+
+void UCore_PhysicsSystemManager::RestoreWorldPhysicsSettings(UWorld* World)
+{
+    if (!World)
+    {
+        return;
+    }
+    
+    // Restore default physics settings
+    World->GetWorldSettings()->GlobalGravityZ = -980.0f;
+    
+    UE_LOG(LogTemp, Warning, TEXT("PhysicsSystemManager: World physics settings restored"));
+}
+
+int32 UCore_PhysicsSystemManager::GetActiveRagdollCount() const
+{
+    return CurrentActiveRagdolls;
+}
+
+int32 UCore_PhysicsSystemManager::GetActiveDestructionCount() const
+{
+    return CurrentDestructionObjects;
+}
+
+float UCore_PhysicsSystemManager::GetCurrentPhysicsLoad() const
+{
+    float RagdollLoad = static_cast<float>(CurrentActiveRagdolls) / static_cast<float>(MaxActiveRagdolls);
+    float DestructionLoad = static_cast<float>(CurrentDestructionObjects) / static_cast<float>(MaxDestructionObjects);
+    
+    return FMath::Max(RagdollLoad, DestructionLoad);
+}
+
+void UCore_PhysicsSystemManager::DebugDrawPhysicsInfo()
+{
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        return;
+    }
+    
+    FVector PlayerLocation = FVector::ZeroVector;
+    if (APawn* PlayerPawn = World->GetFirstPlayerController()->GetPawn())
+    {
+        PlayerLocation = PlayerPawn->GetActorLocation();
+    }
+    
+    // Draw physics system status
+    FString DebugText = FString::Printf(TEXT("Physics Systems Status:\nRagdolls: %d/%d\nDestruction: %d/%d\nLoad: %.2f%%"),
+        CurrentActiveRagdolls, MaxActiveRagdolls,
+        CurrentDestructionObjects, MaxDestructionObjects,
+        GetCurrentPhysicsLoad() * 100.0f);
+    
+    DrawDebugString(World, PlayerLocation + FVector(0, 0, 200), DebugText, nullptr, FColor::Yellow, 0.0f);
+    
+    UE_LOG(LogTemp, Warning, TEXT("PhysicsSystemManager: Debug info drawn"));
+}
+
+void UCore_PhysicsSystemManager::LogPhysicsStats()
+{
+    UE_LOG(LogTemp, Warning, TEXT("=== Physics System Statistics ==="));
+    UE_LOG(LogTemp, Warning, TEXT("Active Ragdolls: %d/%d"), CurrentActiveRagdolls, MaxActiveRagdolls);
+    UE_LOG(LogTemp, Warning, TEXT("Active Destruction Objects: %d/%d"), CurrentDestructionObjects, MaxDestructionObjects);
+    UE_LOG(LogTemp, Warning, TEXT("Physics Load: %.2f%%"), GetCurrentPhysicsLoad() * 100.0f);
+    UE_LOG(LogTemp, Warning, TEXT("Last Update Time: %.4f ms"), LastPhysicsUpdateTime * 1000.0f);
+    UE_LOG(LogTemp, Warning, TEXT("Systems Initialized: %s"), bSystemsInitialized ? TEXT("Yes") : TEXT("No"));
+    UE_LOG(LogTemp, Warning, TEXT("Physics Simulation Enabled: %s"), bEnablePhysicsSimulation ? TEXT("Yes") : TEXT("No"));
+    UE_LOG(LogTemp, Warning, TEXT("================================"));
+}
+
+void UCore_PhysicsSystemManager::HandleLargeImpact(AActor* Actor, const FVector& ImpactLocation)
 {
     if (!Actor)
     {
         return;
     }
     
-    if (UStaticMeshComponent* StaticMesh = Actor->FindComponentByClass<UStaticMeshComponent>())
-    {
-        StaticMesh->SetCollisionResponseToAllChannels(Response);
-    }
+    UE_LOG(LogTemp, Warning, TEXT("PhysicsSystemManager: Large impact detected on %s at %s"), 
+           *Actor->GetName(), *ImpactLocation.ToString());
     
-    if (USkeletalMeshComponent* SkeletalMesh = Actor->FindComponentByClass<USkeletalMeshComponent>())
-    {
-        SkeletalMesh->SetCollisionResponseToAllChannels(Response);
-    }
+    // Handle large impact effects
+    // This could trigger screen shake, sound effects, particle effects, etc.
 }
 
-void UCore_PhysicsSystemManager::EnableRagdollForCharacter(ACharacter* Character)
+void UCore_PhysicsSystemManager::HandleObjectDestruction(AActor* Actor, const FVector& DestructionLocation)
 {
-    if (!Character || !bEnableRagdollPhysics)
+    if (!Actor)
     {
         return;
     }
     
-    if (USkeletalMeshComponent* Mesh = Character->GetMesh())
-    {
-        Mesh->SetSimulatePhysics(true);
-        Mesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-        Mesh->SetCollisionResponseToAllChannels(ECR_Block);
-        
-        RagdollCharacters.AddUnique(Character);
-        
-        UE_LOG(LogCorePhysics, Log, TEXT("Enabled ragdoll for character: %s"), 
-               *Character->GetName());
-    }
+    UE_LOG(LogTemp, Warning, TEXT("PhysicsSystemManager: Object destroyed: %s at %s"), 
+           *Actor->GetName(), *DestructionLocation.ToString());
+    
+    // Handle destruction effects
+    // This could spawn debris, play destruction sounds, create particle effects, etc.
 }
 
-void UCore_PhysicsSystemManager::DisableRagdollForCharacter(ACharacter* Character)
+void UCore_PhysicsSystemManager::HandleRagdollActivation(AActor* Actor, const FVector& ActivationLocation)
 {
-    if (!Character)
+    if (!Actor)
     {
         return;
     }
     
-    if (USkeletalMeshComponent* Mesh = Character->GetMesh())
-    {
-        Mesh->SetSimulatePhysics(false);
-        Mesh->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
-        
-        RagdollCharacters.Remove(Character);
-        
-        UE_LOG(LogCorePhysics, Log, TEXT("Disabled ragdoll for character: %s"), 
-               *Character->GetName());
-    }
-}
-
-void UCore_PhysicsSystemManager::SetRagdollBlendWeight(ACharacter* Character, float Weight)
-{
-    if (!Character)
-    {
-        return;
-    }
+    UE_LOG(LogTemp, Warning, TEXT("PhysicsSystemManager: Ragdoll activated on %s at %s"), 
+           *Actor->GetName(), *ActivationLocation.ToString());
     
-    RagdollBlendWeight = FMath::Clamp(Weight, 0.0f, 1.0f);
+    CurrentActiveRagdolls++;
     
-    if (USkeletalMeshComponent* Mesh = Character->GetMesh())
-    {
-        // Apply blend weight to ragdoll simulation
-        Mesh->SetAllBodiesPhysicsBlendWeight(RagdollBlendWeight);
-    }
-}
-
-void UCore_PhysicsSystemManager::DestroyActor(AActor* Actor, FVector ImpactLocation, float Force)
-{
-    if (!Actor || !bEnableDestruction)
-    {
-        return;
-    }
-    
-    // Create destruction effect
-    CreateDestructionEffect(ImpactLocation, Force / DestructionThreshold);
-    
-    // Apply impulse before destruction
-    if (UStaticMeshComponent* StaticMesh = Actor->FindComponentByClass<UStaticMeshComponent>())
-    {
-        FVector ImpulseDirection = (Actor->GetActorLocation() - ImpactLocation).GetSafeNormal();
-        StaticMesh->AddImpulseAtLocation(ImpulseDirection * Force, ImpactLocation);
-    }
-    
-    // Schedule destruction
-    Actor->SetLifeSpan(0.1f);
-    
-    UE_LOG(LogCorePhysics, Log, TEXT("Destroyed actor: %s with force: %f"), 
-           *Actor->GetName(), Force);
-}
-
-void UCore_PhysicsSystemManager::CreateDestructionEffect(FVector Location, float Intensity)
-{
-    if (!GetWorld())
-    {
-        return;
-    }
-    
-    // Create particle effect for destruction
-    // Note: This would typically spawn a Niagara system
-    UE_LOG(LogCorePhysics, Log, TEXT("Created destruction effect at location: %s with intensity: %f"), 
-           *Location.ToString(), Intensity);
-    
-    // Draw debug sphere for visualization
-    DrawDebugSphere(GetWorld(), Location, 100.0f * Intensity, 12, FColor::Orange, false, 2.0f);
-}
-
-bool UCore_PhysicsSystemManager::CanActorBeDestroyed(AActor* Actor)
-{
-    if (!Actor || !bEnableDestruction)
-    {
-        return false;
-    }
-    
-    // Check if actor has destructible components
-    return Actor->FindComponentByClass<UStaticMeshComponent>() != nullptr;
-}
-
-float UCore_PhysicsSystemManager::GetPhysicsFrameTime() const
-{
-    if (UWorld* World = GetWorld())
-    {
-        return World->GetDeltaSeconds();
-    }
-    return 0.0f;
-}
-
-int32 UCore_PhysicsSystemManager::GetActivePhysicsObjects() const
-{
-    return PhysicsObjectCount;
-}
-
-void UCore_PhysicsSystemManager::OptimizePhysicsPerformance()
-{
-    // Remove invalid actors from tracking
-    TrackedPhysicsActors.RemoveAll([](AActor* Actor) {
-        return !IsValid(Actor);
-    });
-    
-    // Limit ragdoll characters
-    if (RagdollCharacters.Num() > 10)
-    {
-        // Remove oldest ragdoll characters
-        for (int32 i = 0; i < RagdollCharacters.Num() - 10; i++)
-        {
-            if (ACharacter* Character = RagdollCharacters[i])
-            {
-                DisableRagdollForCharacter(Character);
-            }
-        }
-    }
-    
-    UE_LOG(LogCorePhysics, Log, TEXT("Optimized physics performance - Active objects: %d"), 
-           PhysicsObjectCount);
-}
-
-void UCore_PhysicsSystemManager::UpdateTrackedActors()
-{
-    if (!GetWorld())
-    {
-        return;
-    }
-    
-    // Count active physics objects
-    PhysicsObjectCount = 0;
-    
-    for (AActor* Actor : TrackedPhysicsActors)
-    {
-        if (IsValid(Actor))
-        {
-            if (UStaticMeshComponent* StaticMesh = Actor->FindComponentByClass<UStaticMeshComponent>())
-            {
-                if (StaticMesh->IsSimulatingPhysics())
-                {
-                    PhysicsObjectCount++;
-                }
-            }
-        }
-    }
-}
-
-void UCore_PhysicsSystemManager::ProcessRagdollCharacters(float DeltaTime)
-{
-    for (int32 i = RagdollCharacters.Num() - 1; i >= 0; i--)
-    {
-        ACharacter* Character = RagdollCharacters[i];
-        if (!IsValid(Character))
-        {
-            RagdollCharacters.RemoveAt(i);
-            continue;
-        }
-        
-        // Check ragdoll lifetime
-        float TimeSinceRagdoll = GetWorld()->GetTimeSeconds() - LastPhysicsUpdateTime;
-        if (TimeSinceRagdoll > RagdollLifetime)
-        {
-            DisableRagdollForCharacter(Character);
-        }
-    }
-}
-
-void UCore_PhysicsSystemManager::MonitorPerformance()
-{
-    float CurrentTime = GetWorld()->GetTimeSeconds();
-    float FrameTime = CurrentTime - LastPhysicsUpdateTime;
-    
-    // If frame time is too high, optimize
-    if (FrameTime > 0.033f) // 30 FPS threshold
-    {
-        OptimizePhysicsPerformance();
-    }
-}
-
-void UCore_PhysicsSystemManager::CleanupDestroyedActors()
-{
-    TrackedPhysicsActors.RemoveAll([](AActor* Actor) {
-        return !IsValid(Actor) || Actor->IsPendingKill();
-    });
-    
-    RagdollCharacters.RemoveAll([](ACharacter* Character) {
-        return !IsValid(Character) || Character->IsPendingKill();
-    });
-}
-
-void UCore_PhysicsSystemManager::OnActorHit(AActor* SelfActor, AActor* OtherActor, FVector NormalImpulse, const FHitResult& Hit)
-{
-    if (!SelfActor || !OtherActor)
-    {
-        return;
-    }
-    
-    float ImpactForce = NormalImpulse.Size();
-    
-    UE_LOG(LogCorePhysics, Log, TEXT("Actor hit: %s hit %s with force: %f"), 
-           *SelfActor->GetName(), *OtherActor->GetName(), ImpactForce);
-    
-    // Check for destruction
-    if (ImpactForce > DestructionThreshold && CanActorBeDestroyed(OtherActor))
-    {
-        DestroyActor(OtherActor, Hit.Location, ImpactForce);
-    }
-}
-
-void UCore_PhysicsSystemManager::OnActorBeginOverlap(AActor* OverlappedActor, AActor* OtherActor)
-{
-    if (!OverlappedActor || !OtherActor)
-    {
-        return;
-    }
-    
-    // Track physics actors
-    if (UStaticMeshComponent* StaticMesh = OtherActor->FindComponentByClass<UStaticMeshComponent>())
-    {
-        if (StaticMesh->IsSimulatingPhysics())
-        {
-            TrackedPhysicsActors.AddUnique(OtherActor);
-        }
-    }
-}
-
-void UCore_PhysicsSystemManager::OnActorEndOverlap(AActor* OverlappedActor, AActor* OtherActor)
-{
-    if (!OverlappedActor || !OtherActor)
-    {
-        return;
-    }
-    
-    // Remove from tracking
-    TrackedPhysicsActors.Remove(OtherActor);
+    // Handle ragdoll activation effects
+    // This could play death sounds, trigger AI reactions, etc.
 }
