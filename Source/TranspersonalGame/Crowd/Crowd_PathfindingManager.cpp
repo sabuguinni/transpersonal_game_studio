@@ -2,111 +2,122 @@
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "NavigationSystem.h"
-#include "NavMesh/RecastNavMesh.h"
-#include "AI/NavigationSystemBase.h"
+#include "AI/Navigation/NavigationTypes.h"
+#include "AI/Navigation/RecastNavMesh.h"
+#include "Kismet/GameplayStatics.h"
 #include "TimerManager.h"
-#include "Kismet/KismetMathLibrary.h"
-
-const float UCrowd_PathfindingManager::PATHFINDING_UPDATE_INTERVAL = 0.1f;
-const float UCrowd_PathfindingManager::DENSITY_DECAY_RATE = 0.95f;
-const int32 UCrowd_PathfindingManager::MAX_ACTIVE_REQUESTS = 100;
 
 UCrowd_PathfindingManager::UCrowd_PathfindingManager()
 {
-    NextRequestID = 1;
     NavSystem = nullptr;
+    MaxConcurrentRequests = 100;
+    PathfindingTimeSlice = 0.016f; // 16ms per frame
+    bUseAsyncPathfinding = true;
+    CrowdDensityThreshold = 5.0f;
+    AvoidanceStrength = 2.0f;
+    NextRequestID = 1;
 }
 
 void UCrowd_PathfindingManager::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
     
-    UE_LOG(LogTemp, Warning, TEXT("UCrowd_PathfindingManager::Initialize - Starting pathfinding manager"));
+    UE_LOG(LogTemp, Warning, TEXT("Crowd_PathfindingManager: Initializing pathfinding subsystem"));
     
-    UWorld* World = GetWorld();
-    if (World)
+    // Get navigation system reference
+    if (UWorld* World = GetWorld())
     {
         NavSystem = FNavigationSystem::GetCurrent<UNavigationSystemV1>(World);
         if (NavSystem)
         {
-            UE_LOG(LogTemp, Warning, TEXT("Navigation system found and initialized"));
+            UE_LOG(LogTemp, Warning, TEXT("Crowd_PathfindingManager: Navigation system found"));
         }
         else
         {
-            UE_LOG(LogTemp, Error, TEXT("Navigation system not found - pathfinding will be limited"));
+            UE_LOG(LogTemp, Error, TEXT("Crowd_PathfindingManager: No navigation system found"));
         }
         
-        // Start pathfinding update timer
-        World->GetTimerManager().SetTimer(
-            PathfindingTimerHandle,
-            this,
-            &UCrowd_PathfindingManager::ProcessPathfindingRequests,
-            PATHFINDING_UPDATE_INTERVAL,
-            true
-        );
-        
-        // Start density update timer
-        World->GetTimerManager().SetTimer(
-            DensityUpdateTimerHandle,
-            this,
-            &UCrowd_PathfindingManager::UpdateCrowdDensityGrid,
-            1.0f,
-            true
-        );
+        // Start async processing timer
+        if (bUseAsyncPathfinding)
+        {
+            World->GetTimerManager().SetTimer(
+                PathfindingTimerHandle,
+                this,
+                &UCrowd_PathfindingManager::ProcessPendingRequests,
+                PathfindingTimeSlice,
+                true
+            );
+        }
     }
 }
 
 void UCrowd_PathfindingManager::Deinitialize()
 {
-    UWorld* World = GetWorld();
-    if (World)
+    if (UWorld* World = GetWorld())
     {
         World->GetTimerManager().ClearTimer(PathfindingTimerHandle);
-        World->GetTimerManager().ClearTimer(DensityUpdateTimerHandle);
     }
     
-    ActiveRequests.Empty();
+    PendingRequests.Empty();
     CompletedPaths.Empty();
-    CrowdDensityMap.Empty();
+    
+    UE_LOG(LogTemp, Warning, TEXT("Crowd_PathfindingManager: Subsystem deinitialized"));
     
     Super::Deinitialize();
 }
 
-bool UCrowd_PathfindingManager::ShouldCreateSubsystem(UObject* Outer) const
+bool UCrowd_PathfindingManager::FindPath(const FCrowd_PathRequest& Request, TArray<FVector>& OutPath)
 {
+    OutPath.Empty();
+    
+    if (!ValidatePathRequest(Request))
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Crowd_PathfindingManager: Invalid path request"));
+        return false;
+    }
+    
+    return ProcessPathRequest(Request, OutPath);
+}
+
+bool UCrowd_PathfindingManager::FindPathAsync(const FCrowd_PathRequest& Request, int32& OutRequestID)
+{
+    if (!ValidatePathRequest(Request))
+    {
+        OutRequestID = -1;
+        return false;
+    }
+    
+    if (PendingRequests.Num() >= MaxConcurrentRequests)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Crowd_PathfindingManager: Too many pending requests"));
+        OutRequestID = -1;
+        return false;
+    }
+    
+    FCrowd_PathRequest NewRequest = Request;
+    NewRequest.RequestID = NextRequestID++;
+    OutRequestID = NewRequest.RequestID;
+    
+    // Insert high priority requests at the front
+    if (NewRequest.bHighPriority)
+    {
+        PendingRequests.Insert(NewRequest, 0);
+    }
+    else
+    {
+        PendingRequests.Add(NewRequest);
+    }
+    
     return true;
 }
 
-int32 UCrowd_PathfindingManager::RequestPath(const FVector& StartLocation, const FVector& TargetLocation, float AgentRadius)
+bool UCrowd_PathfindingManager::GetAsyncPathResult(int32 RequestID, TArray<FVector>& OutPath)
 {
-    if (ActiveRequests.Num() >= MAX_ACTIVE_REQUESTS)
+    OutPath.Empty();
+    
+    if (TArray<FVector>* FoundPath = CompletedPaths.Find(RequestID))
     {
-        UE_LOG(LogTemp, Warning, TEXT("Too many active pathfinding requests - rejecting new request"));
-        return -1;
-    }
-    
-    FCrowd_PathfindingRequest NewRequest;
-    NewRequest.StartLocation = StartLocation;
-    NewRequest.TargetLocation = TargetLocation;
-    NewRequest.AgentRadius = AgentRadius;
-    NewRequest.RequestID = NextRequestID++;
-    NewRequest.bIsCompleted = false;
-    
-    ActiveRequests.Add(NewRequest);
-    
-    UE_LOG(LogTemp, Log, TEXT("Pathfinding request %d queued from %s to %s"), 
-           NewRequest.RequestID, 
-           *StartLocation.ToString(), 
-           *TargetLocation.ToString());
-    
-    return NewRequest.RequestID;
-}
-
-bool UCrowd_PathfindingManager::GetPathResult(int32 RequestID, TArray<FVector>& OutPath)
-{
-    if (CompletedPaths.Contains(RequestID))
-    {
-        OutPath = CompletedPaths[RequestID];
+        OutPath = *FoundPath;
         CompletedPaths.Remove(RequestID);
         return true;
     }
@@ -114,206 +125,161 @@ bool UCrowd_PathfindingManager::GetPathResult(int32 RequestID, TArray<FVector>& 
     return false;
 }
 
-void UCrowd_PathfindingManager::CancelPathRequest(int32 RequestID)
+bool UCrowd_PathfindingManager::FindCrowdSafePath(const FVector& Start, const FVector& End, float CrowdRadius, TArray<FVector>& OutPath)
 {
-    ActiveRequests.RemoveAll([RequestID](const FCrowd_PathfindingRequest& Request)
-    {
-        return Request.RequestID == RequestID;
-    });
+    OutPath.Empty();
     
-    CompletedPaths.Remove(RequestID);
-}
-
-bool UCrowd_PathfindingManager::IsPathValid(const TArray<FVector>& Path)
-{
-    if (Path.Num() < 2)
+    if (!NavSystem)
     {
         return false;
     }
     
-    if (!NavSystem)
-    {
-        return true; // Assume valid if no nav system
-    }
+    // Check if start and end locations are in crowded areas
+    FVector SafeStart = Start;
+    FVector SafeEnd = End;
     
-    // Check if all points are on navmesh
-    for (const FVector& Point : Path)
+    if (IsCrowdedArea(Start, CrowdRadius))
     {
-        FNavLocation NavLoc;
-        if (!NavSystem->ProjectPointToNavigation(Point, NavLoc, FVector(100.0f, 100.0f, 100.0f)))
+        if (!AvoidCrowdedAreas(Start, CrowdRadius * 2.0f, SafeStart))
         {
-            return false;
+            SafeStart = Start; // Fallback to original
         }
     }
     
-    return true;
-}
-
-FVector UCrowd_PathfindingManager::GetRandomReachablePoint(const FVector& Origin, float Radius)
-{
-    if (!NavSystem)
+    if (IsCrowdedArea(End, CrowdRadius))
     {
-        // Fallback: random point in circle
-        FVector2D RandomCircle = FMath::RandPointInCircle(Radius);
-        return Origin + FVector(RandomCircle.X, RandomCircle.Y, 0.0f);
-    }
-    
-    FNavLocation RandomNavLoc;
-    if (NavSystem->GetRandomReachablePointInRadius(Origin, Radius, RandomNavLoc))
-    {
-        return RandomNavLoc.Location;
-    }
-    
-    return Origin;
-}
-
-void UCrowd_PathfindingManager::UpdateNavMeshData()
-{
-    if (NavSystem)
-    {
-        // Force navmesh rebuild if needed
-        NavSystem->Build();
-        UE_LOG(LogTemp, Log, TEXT("NavMesh data updated"));
-    }
-}
-
-bool UCrowd_PathfindingManager::CanReachLocation(const FVector& StartLocation, const FVector& TargetLocation)
-{
-    if (!NavSystem)
-    {
-        return true; // Assume reachable if no nav system
-    }
-    
-    FPathFindingQuery Query;
-    Query.StartLocation = StartLocation;
-    Query.EndLocation = TargetLocation;
-    Query.NavData = NavSystem->GetDefaultNavDataInstance();
-    
-    FPathFindingResult Result = NavSystem->FindPathSync(Query);
-    return Result.IsSuccessful();
-}
-
-void UCrowd_PathfindingManager::RegisterCrowdDensity(const FVector& Location, int32 AgentCount)
-{
-    FVector QuantizedLoc = QuantizeLocation(Location);
-    
-    if (CrowdDensityMap.Contains(QuantizedLoc))
-    {
-        CrowdDensityMap[QuantizedLoc] += AgentCount;
-    }
-    else
-    {
-        CrowdDensityMap.Add(QuantizedLoc, AgentCount);
-    }
-}
-
-float UCrowd_PathfindingManager::GetCrowdDensityAtLocation(const FVector& Location)
-{
-    FVector QuantizedLoc = QuantizeLocation(Location);
-    
-    if (CrowdDensityMap.Contains(QuantizedLoc))
-    {
-        return CrowdDensityMap[QuantizedLoc];
-    }
-    
-    return 0.0f;
-}
-
-FVector UCrowd_PathfindingManager::GetFlowDirection(const FVector& Location)
-{
-    FVector FlowDirection = FVector::ZeroVector;
-    float TotalWeight = 0.0f;
-    
-    // Sample surrounding density to determine flow
-    for (int32 X = -1; X <= 1; X++)
-    {
-        for (int32 Y = -1; Y <= 1; Y++)
+        if (!AvoidCrowdedAreas(End, CrowdRadius * 2.0f, SafeEnd))
         {
-            if (X == 0 && Y == 0) continue;
-            
-            FVector SampleLoc = Location + FVector(X * 100.0f, Y * 100.0f, 0.0f);
-            float Density = GetCrowdDensityAtLocation(SampleLoc);
-            
-            if (Density > 0.0f)
-            {
-                FVector Direction = (SampleLoc - Location).GetSafeNormal();
-                FlowDirection += Direction * Density;
-                TotalWeight += Density;
-            }
+            SafeEnd = End; // Fallback to original
         }
     }
     
-    if (TotalWeight > 0.0f)
-    {
-        FlowDirection /= TotalWeight;
-    }
+    // Create path request with adjusted locations
+    FCrowd_PathRequest Request;
+    Request.StartLocation = SafeStart;
+    Request.EndLocation = SafeEnd;
+    Request.MaxSearchDistance = FVector::Dist(SafeStart, SafeEnd) * 2.0f;
     
-    return FlowDirection.GetSafeNormal();
+    return ProcessPathRequest(Request, OutPath);
 }
 
-void UCrowd_PathfindingManager::ProcessPathfindingRequests()
+bool UCrowd_PathfindingManager::AvoidCrowdedAreas(const FVector& Location, float AvoidanceRadius, FVector& OutSafeLocation)
 {
-    if (ActiveRequests.Num() == 0)
+    if (!NavSystem)
     {
-        return;
+        OutSafeLocation = Location;
+        return false;
     }
     
-    // Process up to 5 requests per frame to avoid hitches
-    int32 ProcessedCount = 0;
-    const int32 MaxProcessPerFrame = 5;
+    // Try multiple directions to find a safe location
+    const int32 NumDirections = 8;
+    const float AngleStep = 360.0f / NumDirections;
     
-    for (int32 i = ActiveRequests.Num() - 1; i >= 0 && ProcessedCount < MaxProcessPerFrame; i--)
+    for (int32 i = 0; i < NumDirections; i++)
     {
-        FCrowd_PathfindingRequest& Request = ActiveRequests[i];
+        float Angle = i * AngleStep;
+        FVector Direction = FVector(
+            FMath::Cos(FMath::DegreesToRadians(Angle)),
+            FMath::Sin(FMath::DegreesToRadians(Angle)),
+            0.0f
+        );
         
-        if (!Request.bIsCompleted)
+        FVector TestLocation = Location + (Direction * AvoidanceRadius);
+        
+        if (IsLocationNavigable(TestLocation) && !IsCrowdedArea(TestLocation, AvoidanceRadius * 0.5f))
         {
-            TArray<FVector> ResultPath;
-            if (FindPathInternal(Request, ResultPath))
-            {
-                CompletedPaths.Add(Request.RequestID, ResultPath);
-                Request.bIsCompleted = true;
-                
-                UE_LOG(LogTemp, Log, TEXT("Pathfinding request %d completed with %d waypoints"), 
-                       Request.RequestID, ResultPath.Num());
-            }
-            else
-            {
-                // Failed - create simple straight line path
-                TArray<FVector> FallbackPath;
-                FallbackPath.Add(Request.StartLocation);
-                FallbackPath.Add(Request.TargetLocation);
-                CompletedPaths.Add(Request.RequestID, FallbackPath);
-                Request.bIsCompleted = true;
-                
-                UE_LOG(LogTemp, Warning, TEXT("Pathfinding request %d failed - using fallback straight line"), 
-                       Request.RequestID);
-            }
-            
-            ProcessedCount++;
+            OutSafeLocation = TestLocation;
+            return true;
         }
     }
     
-    // Remove completed requests
-    ActiveRequests.RemoveAll([](const FCrowd_PathfindingRequest& Request)
-    {
-        return Request.bIsCompleted;
-    });
-    
-    // Clean up old completed paths
-    CleanupCompletedRequests();
+    OutSafeLocation = Location;
+    return false;
 }
 
-bool UCrowd_PathfindingManager::FindPathInternal(const FCrowd_PathfindingRequest& Request, TArray<FVector>& OutPath)
+bool UCrowd_PathfindingManager::IsLocationNavigable(const FVector& Location)
 {
     if (!NavSystem)
     {
         return false;
     }
     
+    FNavLocation NavLocation;
+    return NavSystem->ProjectPointToNavigation(Location, NavLocation, FVector(100.0f, 100.0f, 500.0f));
+}
+
+bool UCrowd_PathfindingManager::GetRandomNavigableLocation(const FVector& Origin, float Radius, FVector& OutLocation)
+{
+    if (!NavSystem)
+    {
+        OutLocation = Origin;
+        return false;
+    }
+    
+    FNavLocation NavLocation;
+    bool bFound = NavSystem->GetRandomReachablePointInRadius(Origin, Radius, NavLocation);
+    
+    if (bFound)
+    {
+        OutLocation = NavLocation.Location;
+        return true;
+    }
+    
+    OutLocation = Origin;
+    return false;
+}
+
+void UCrowd_PathfindingManager::SetMaxConcurrentRequests(int32 MaxRequests)
+{
+    MaxConcurrentRequests = FMath::Max(1, MaxRequests);
+    
+    // Trim pending requests if necessary
+    if (PendingRequests.Num() > MaxConcurrentRequests)
+    {
+        PendingRequests.SetNum(MaxConcurrentRequests);
+    }
+}
+
+int32 UCrowd_PathfindingManager::GetPendingRequestCount() const
+{
+    return PendingRequests.Num();
+}
+
+void UCrowd_PathfindingManager::ClearAllRequests()
+{
+    PendingRequests.Empty();
+    CompletedPaths.Empty();
+    UE_LOG(LogTemp, Warning, TEXT("Crowd_PathfindingManager: All requests cleared"));
+}
+
+bool UCrowd_PathfindingManager::ProcessPathRequest(const FCrowd_PathRequest& Request, TArray<FVector>& OutPath)
+{
+    OutPath.Empty();
+    
+    if (!NavSystem)
+    {
+        return false;
+    }
+    
+    // Project start and end points to navigation mesh
+    FNavLocation StartNavLocation, EndNavLocation;
+    
+    if (!NavSystem->ProjectPointToNavigation(Request.StartLocation, StartNavLocation))
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Crowd_PathfindingManager: Cannot project start location to navmesh"));
+        return false;
+    }
+    
+    if (!NavSystem->ProjectPointToNavigation(Request.EndLocation, EndNavLocation))
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Crowd_PathfindingManager: Cannot project end location to navmesh"));
+        return false;
+    }
+    
+    // Find path using navigation system
     FPathFindingQuery Query;
-    Query.StartLocation = Request.StartLocation;
-    Query.EndLocation = Request.TargetLocation;
+    Query.StartLocation = StartNavLocation.Location;
+    Query.EndLocation = EndNavLocation.Location;
     Query.NavData = NavSystem->GetDefaultNavDataInstance();
     
     FPathFindingResult Result = NavSystem->FindPathSync(Query);
@@ -321,7 +287,6 @@ bool UCrowd_PathfindingManager::FindPathInternal(const FCrowd_PathfindingRequest
     if (Result.IsSuccessful() && Result.Path.IsValid())
     {
         const TArray<FNavPathPoint>& PathPoints = Result.Path->GetPathPoints();
-        OutPath.Reserve(PathPoints.Num());
         
         for (const FNavPathPoint& Point : PathPoints)
         {
@@ -334,64 +299,96 @@ bool UCrowd_PathfindingManager::FindPathInternal(const FCrowd_PathfindingRequest
     return false;
 }
 
+bool UCrowd_PathfindingManager::ValidatePathRequest(const FCrowd_PathRequest& Request)
+{
+    // Check if locations are valid
+    if (Request.StartLocation.IsZero() || Request.EndLocation.IsZero())
+    {
+        return false;
+    }
+    
+    // Check distance
+    float Distance = FVector::Dist(Request.StartLocation, Request.EndLocation);
+    if (Distance > Request.MaxSearchDistance)
+    {
+        return false;
+    }
+    
+    return true;
+}
+
+void UCrowd_PathfindingManager::ProcessPendingRequests()
+{
+    if (PendingRequests.Num() == 0)
+    {
+        return;
+    }
+    
+    // Process one request per frame to maintain performance
+    FCrowd_PathRequest Request = PendingRequests[0];
+    PendingRequests.RemoveAt(0);
+    
+    TArray<FVector> ResultPath;
+    if (ProcessPathRequest(Request, ResultPath))
+    {
+        CompletedPaths.Add(Request.RequestID, ResultPath);
+    }
+    
+    // Cleanup old completed paths periodically
+    static int32 CleanupCounter = 0;
+    if (++CleanupCounter >= 100)
+    {
+        CleanupCompletedRequests();
+        CleanupCounter = 0;
+    }
+}
+
+float UCrowd_PathfindingManager::CalculateCrowdDensity(const FVector& Location, float Radius)
+{
+    if (!GetWorld())
+    {
+        return 0.0f;
+    }
+    
+    // Count nearby pawns/actors
+    TArray<AActor*> NearbyActors;
+    UGameplayStatics::GetAllActorsOfClass(GetWorld(), APawn::StaticClass(), NearbyActors);
+    
+    int32 CrowdCount = 0;
+    for (AActor* Actor : NearbyActors)
+    {
+        if (Actor && FVector::Dist(Actor->GetActorLocation(), Location) <= Radius)
+        {
+            CrowdCount++;
+        }
+    }
+    
+    // Calculate density (actors per square meter)
+    float Area = PI * Radius * Radius / 10000.0f; // Convert to square meters
+    return CrowdCount / FMath::Max(Area, 1.0f);
+}
+
+bool UCrowd_PathfindingManager::IsCrowdedArea(const FVector& Location, float Radius)
+{
+    float Density = CalculateCrowdDensity(Location, Radius);
+    return Density > CrowdDensityThreshold;
+}
+
 void UCrowd_PathfindingManager::CleanupCompletedRequests()
 {
-    // Remove paths older than 30 seconds
-    const float MaxAge = 30.0f;
-    UWorld* World = GetWorld();
-    if (!World) return;
+    // Remove old completed paths to prevent memory bloat
+    const int32 MaxCompletedPaths = 50;
     
-    float CurrentTime = World->GetTimeSeconds();
-    
-    // This is a simplified cleanup - in a real implementation, 
-    // you'd track creation time for each path
-    if (CompletedPaths.Num() > 200)
+    if (CompletedPaths.Num() > MaxCompletedPaths)
     {
-        // Remove oldest 50% of paths
+        // Remove oldest entries (simple cleanup - could be improved with timestamps)
         TArray<int32> Keys;
         CompletedPaths.GetKeys(Keys);
         
-        int32 RemoveCount = Keys.Num() / 2;
-        for (int32 i = 0; i < RemoveCount; i++)
+        int32 ToRemove = CompletedPaths.Num() - MaxCompletedPaths;
+        for (int32 i = 0; i < ToRemove && i < Keys.Num(); i++)
         {
             CompletedPaths.Remove(Keys[i]);
         }
-    }
-}
-
-FVector UCrowd_PathfindingManager::QuantizeLocation(const FVector& Location, float GridSize)
-{
-    return FVector(
-        FMath::RoundToFloat(Location.X / GridSize) * GridSize,
-        FMath::RoundToFloat(Location.Y / GridSize) * GridSize,
-        FMath::RoundToFloat(Location.Z / GridSize) * GridSize
-    );
-}
-
-void UCrowd_PathfindingManager::UpdateCrowdDensityGrid()
-{
-    // Decay all density values
-    for (auto& Pair : CrowdDensityMap)
-    {
-        Pair.Value *= DENSITY_DECAY_RATE;
-    }
-    
-    // Remove very low density entries
-    for (auto It = CrowdDensityMap.CreateIterator(); It; ++It)
-    {
-        if (It.Value() < 0.1f)
-        {
-            It.RemoveCurrent();
-        }
-    }
-}
-
-void UCrowd_PathfindingManager::DecayCrowdDensity(float DeltaTime)
-{
-    float DecayFactor = FMath::Pow(DENSITY_DECAY_RATE, DeltaTime);
-    
-    for (auto& Pair : CrowdDensityMap)
-    {
-        Pair.Value *= DecayFactor;
     }
 }
