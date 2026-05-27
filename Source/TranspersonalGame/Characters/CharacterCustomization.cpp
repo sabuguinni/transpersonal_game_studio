@@ -1,127 +1,218 @@
 #include "CharacterCustomization.h"
-#include "TranspersonalCharacter.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "Engine/SkeletalMesh.h"
+#include "Materials/MaterialInterface.h"
 #include "Materials/MaterialInstanceDynamic.h"
+#include "GameFramework/Character.h"
 #include "Engine/Engine.h"
 
-UCharacterCustomization::UCharacterCustomization()
+UCharacterCustomizationComponent::UCharacterCustomizationComponent()
 {
-    CharacterName = TEXT("Tribal Hunter");
-    BodyType = EChar_BodyType::Athletic;
-    SkinTone = EChar_SkinTone::Tan;
-    BaseMesh = nullptr;
-    SkinMaterial = nullptr;
-    WeaponMesh = nullptr;
-
-    // Initialize default clothing sets
-    FChar_ClothingSet HunterSet;
-    HunterSet.ClothingName = TEXT("Hunter");
-    AvailableClothing.Add(HunterSet);
-
-    FChar_ClothingSet GathererSet;
-    GathererSet.ClothingName = TEXT("Gatherer");
-    AvailableClothing.Add(GathererSet);
-
-    FChar_ClothingSet ShamanSet;
-    ShamanSet.ClothingName = TEXT("Shaman");
-    AvailableClothing.Add(ShamanSet);
+    PrimaryComponentTick.bCanEverTick = false;
+    CachedMeshComponent = nullptr;
 }
 
-void UCharacterCustomization::ApplyCustomizationToCharacter(ATranspersonalCharacter* Character)
+void UCharacterCustomizationComponent::BeginPlay()
 {
-    if (!Character)
+    Super::BeginPlay();
+    
+    // Cache the skeletal mesh component
+    if (AActor* Owner = GetOwner())
     {
-        UE_LOG(LogTemp, Warning, TEXT("CharacterCustomization: Invalid character reference"));
+        CachedMeshComponent = Owner->FindComponentByClass<USkeletalMeshComponent>();
+        if (CachedMeshComponent)
+        {
+            ApplyCustomization();
+        }
+        else
+        {
+            UE_LOG(LogTemp, Warning, TEXT("CharacterCustomizationComponent: No SkeletalMeshComponent found on owner"));
+        }
+    }
+}
+
+void UCharacterCustomizationComponent::ApplyCustomization()
+{
+    if (!CachedMeshComponent)
+    {
+        if (AActor* Owner = GetOwner())
+        {
+            CachedMeshComponent = Owner->FindComponentByClass<USkeletalMeshComponent>();
+        }
+    }
+
+    if (CachedMeshComponent)
+    {
+        UpdateMeshAndMaterials();
+        UpdateBodyMorphTargets();
+    }
+}
+
+void UCharacterCustomizationComponent::SetBodyType(EChar_BodyType NewBodyType)
+{
+    CustomizationData.BodyType = NewBodyType;
+    ApplyCustomization();
+}
+
+void UCharacterCustomizationComponent::SetSkinTone(EChar_SkinTone NewSkinTone)
+{
+    CustomizationData.SkinTone = NewSkinTone;
+    ApplySkinMaterial();
+}
+
+void UCharacterCustomizationComponent::SetClothingSet(EChar_ClothingSet NewClothingSet)
+{
+    CustomizationData.ClothingSet = NewClothingSet;
+    ApplyClothingMaterial();
+}
+
+void UCharacterCustomizationComponent::RandomizeAppearance()
+{
+    // Randomize body type
+    int32 BodyTypeIndex = FMath::RandRange(0, 3);
+    CustomizationData.BodyType = static_cast<EChar_BodyType>(BodyTypeIndex);
+    
+    // Randomize skin tone
+    int32 SkinToneIndex = FMath::RandRange(0, 5);
+    CustomizationData.SkinTone = static_cast<EChar_SkinTone>(SkinToneIndex);
+    
+    // Randomize clothing set
+    int32 ClothingIndex = FMath::RandRange(0, 4);
+    CustomizationData.ClothingSet = static_cast<EChar_ClothingSet>(ClothingIndex);
+    
+    // Randomize physical attributes
+    CustomizationData.MuscleDefinition = FMath::FRandRange(0.2f, 0.9f);
+    CustomizationData.BodyFat = FMath::FRandRange(0.1f, 0.6f);
+    CustomizationData.ScarIntensity = FMath::FRandRange(0.0f, 0.8f);
+    CustomizationData.WeatheringLevel = FMath::FRandRange(0.2f, 0.8f);
+    
+    ApplyCustomization();
+}
+
+void UCharacterCustomizationComponent::UpdateMeshAndMaterials()
+{
+    if (!CachedMeshComponent || !CustomizationAsset.IsValid())
+    {
         return;
     }
 
-    USkeletalMeshComponent* MeshComp = Character->GetMesh();
-    if (!MeshComp)
+    UChar_CustomizationAsset* Asset = CustomizationAsset.LoadSynchronous();
+    if (!Asset)
     {
-        UE_LOG(LogTemp, Warning, TEXT("CharacterCustomization: Character has no mesh component"));
+        UE_LOG(LogTemp, Warning, TEXT("CharacterCustomizationComponent: CustomizationAsset is null"));
         return;
     }
 
-    // Apply base mesh if available
-    if (BaseMesh)
+    // Update mesh based on body type
+    if (Asset->BodyMeshes.Contains(CustomizationData.BodyType))
     {
-        MeshComp->SetSkeletalMesh(BaseMesh);
-        UE_LOG(LogTemp, Log, TEXT("CharacterCustomization: Applied base mesh %s"), *BaseMesh->GetName());
+        TSoftObjectPtr<USkeletalMesh> MeshPtr = Asset->BodyMeshes[CustomizationData.BodyType];
+        if (USkeletalMesh* NewMesh = MeshPtr.LoadSynchronous())
+        {
+            CachedMeshComponent->SetSkeletalMesh(NewMesh);
+        }
     }
 
-    // Apply skin material
-    if (SkinMaterial)
+    // Apply materials
+    ApplySkinMaterial();
+    ApplyClothingMaterial();
+}
+
+void UCharacterCustomizationComponent::ApplySkinMaterial()
+{
+    if (!CachedMeshComponent || !CustomizationAsset.IsValid())
     {
-        UMaterialInstanceDynamic* DynamicMaterial = UMaterialInstanceDynamic::Create(SkinMaterial, Character);
+        return;
+    }
+
+    UChar_CustomizationAsset* Asset = CustomizationAsset.LoadSynchronous();
+    if (!Asset || !Asset->SkinMaterials.Contains(CustomizationData.SkinTone))
+    {
+        return;
+    }
+
+    TSoftObjectPtr<UMaterialInterface> MaterialPtr = Asset->SkinMaterials[CustomizationData.SkinTone];
+    if (UMaterialInterface* SkinMaterial = MaterialPtr.LoadSynchronous())
+    {
+        // Create dynamic material instance for runtime parameter adjustment
+        UMaterialInstanceDynamic* DynamicMaterial = UMaterialInstanceDynamic::Create(SkinMaterial, this);
         if (DynamicMaterial)
         {
-            // Adjust material parameters based on skin tone
-            switch (SkinTone)
-            {
-                case EChar_SkinTone::Fair:
-                    DynamicMaterial->SetScalarParameterValue(TEXT("SkinTone"), 0.2f);
-                    break;
-                case EChar_SkinTone::Medium:
-                    DynamicMaterial->SetScalarParameterValue(TEXT("SkinTone"), 0.4f);
-                    break;
-                case EChar_SkinTone::Tan:
-                    DynamicMaterial->SetScalarParameterValue(TEXT("SkinTone"), 0.6f);
-                    break;
-                case EChar_SkinTone::Dark:
-                    DynamicMaterial->SetScalarParameterValue(TEXT("SkinTone"), 0.8f);
-                    break;
-                case EChar_SkinTone::Weathered:
-                    DynamicMaterial->SetScalarParameterValue(TEXT("SkinTone"), 0.5f);
-                    DynamicMaterial->SetScalarParameterValue(TEXT("Weathering"), 0.8f);
-                    break;
-            }
-
-            MeshComp->SetMaterial(0, DynamicMaterial);
-            UE_LOG(LogTemp, Log, TEXT("CharacterCustomization: Applied skin material with tone %d"), (int32)SkinTone);
+            // Apply weathering and scar parameters
+            DynamicMaterial->SetScalarParameterValue(TEXT("WeatheringLevel"), CustomizationData.WeatheringLevel);
+            DynamicMaterial->SetScalarParameterValue(TEXT("ScarIntensity"), CustomizationData.ScarIntensity);
+            DynamicMaterial->SetScalarParameterValue(TEXT("MuscleDefinition"), CustomizationData.MuscleDefinition);
+            
+            // Apply to skin material slots (typically 0 for body)
+            CachedMeshComponent->SetMaterial(0, DynamicMaterial);
         }
     }
-
-    // Apply body type scaling
-    FVector BodyScale = FVector(1.0f);
-    switch (BodyType)
-    {
-        case EChar_BodyType::Athletic:
-            BodyScale = FVector(1.0f, 1.0f, 1.0f);
-            break;
-        case EChar_BodyType::Muscular:
-            BodyScale = FVector(1.1f, 1.05f, 1.0f);
-            break;
-        case EChar_BodyType::Lean:
-            BodyScale = FVector(0.95f, 0.95f, 1.0f);
-            break;
-        case EChar_BodyType::Stocky:
-            BodyScale = FVector(1.05f, 1.1f, 0.98f);
-            break;
-    }
-    
-    MeshComp->SetRelativeScale3D(BodyScale);
-    UE_LOG(LogTemp, Log, TEXT("CharacterCustomization: Applied body type %d with scale %s"), 
-           (int32)BodyType, *BodyScale.ToString());
-
-    UE_LOG(LogTemp, Log, TEXT("CharacterCustomization: Successfully applied customization '%s' to character"), 
-           *CharacterName);
 }
 
-FChar_ClothingSet UCharacterCustomization::GetClothingByName(const FString& ClothingName) const
+void UCharacterCustomizationComponent::ApplyClothingMaterial()
 {
-    for (const FChar_ClothingSet& ClothingSet : AvailableClothing)
+    if (!CachedMeshComponent || !CustomizationAsset.IsValid())
     {
-        if (ClothingSet.ClothingName.Equals(ClothingName, ESearchCase::IgnoreCase))
+        return;
+    }
+
+    UChar_CustomizationAsset* Asset = CustomizationAsset.LoadSynchronous();
+    if (!Asset || !Asset->ClothingMaterials.Contains(CustomizationData.ClothingSet))
+    {
+        return;
+    }
+
+    TSoftObjectPtr<UMaterialInterface> MaterialPtr = Asset->ClothingMaterials[CustomizationData.ClothingSet];
+    if (UMaterialInterface* ClothingMaterial = MaterialPtr.LoadSynchronous())
+    {
+        // Create dynamic material instance
+        UMaterialInstanceDynamic* DynamicMaterial = UMaterialInstanceDynamic::Create(ClothingMaterial, this);
+        if (DynamicMaterial)
         {
-            return ClothingSet;
+            // Apply weathering to clothing as well
+            DynamicMaterial->SetScalarParameterValue(TEXT("WeatheringLevel"), CustomizationData.WeatheringLevel);
+            
+            // Apply to clothing material slots (typically 1+ for clothing pieces)
+            for (int32 MaterialIndex = 1; MaterialIndex < CachedMeshComponent->GetNumMaterials(); ++MaterialIndex)
+            {
+                CachedMeshComponent->SetMaterial(MaterialIndex, DynamicMaterial);
+            }
         }
     }
+}
 
-    // Return default if not found
-    if (AvailableClothing.Num() > 0)
+void UCharacterCustomizationComponent::UpdateBodyMorphTargets()
+{
+    if (!CachedMeshComponent)
     {
-        return AvailableClothing[0];
+        return;
     }
 
-    return FChar_ClothingSet();
+    // Apply morph targets based on body type and physical attributes
+    switch (CustomizationData.BodyType)
+    {
+        case EChar_BodyType::Lean:
+            CachedMeshComponent->SetMorphTarget(TEXT("BodyFat"), FMath::Clamp(CustomizationData.BodyFat * 0.5f, 0.0f, 0.3f));
+            CachedMeshComponent->SetMorphTarget(TEXT("Muscle"), FMath::Clamp(CustomizationData.MuscleDefinition * 0.6f, 0.0f, 0.6f));
+            break;
+            
+        case EChar_BodyType::Athletic:
+            CachedMeshComponent->SetMorphTarget(TEXT("BodyFat"), FMath::Clamp(CustomizationData.BodyFat * 0.7f, 0.0f, 0.4f));
+            CachedMeshComponent->SetMorphTarget(TEXT("Muscle"), FMath::Clamp(CustomizationData.MuscleDefinition * 0.8f, 0.0f, 0.8f));
+            break;
+            
+        case EChar_BodyType::Muscular:
+            CachedMeshComponent->SetMorphTarget(TEXT("BodyFat"), FMath::Clamp(CustomizationData.BodyFat * 0.6f, 0.0f, 0.4f));
+            CachedMeshComponent->SetMorphTarget(TEXT("Muscle"), FMath::Clamp(CustomizationData.MuscleDefinition, 0.6f, 1.0f));
+            break;
+            
+        case EChar_BodyType::Heavy:
+            CachedMeshComponent->SetMorphTarget(TEXT("BodyFat"), FMath::Clamp(CustomizationData.BodyFat, 0.4f, 1.0f));
+            CachedMeshComponent->SetMorphTarget(TEXT("Muscle"), FMath::Clamp(CustomizationData.MuscleDefinition * 0.7f, 0.0f, 0.7f));
+            break;
+    }
+
+    // Apply additional morph targets for tribal characteristics
+    CachedMeshComponent->SetMorphTarget(TEXT("Weathering"), CustomizationData.WeatheringLevel);
+    CachedMeshComponent->SetMorphTarget(TEXT("BattleScars"), CustomizationData.ScarIntensity);
 }
