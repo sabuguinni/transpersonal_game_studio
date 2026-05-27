@@ -1,127 +1,156 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/World.h"
+#include "Components/ActorComponent.h"
 #include "Engine/Engine.h"
-#include "GameFramework/GameModeBase.h"
-#include "Subsystems/GameInstanceSubsystem.h"
+#include "HAL/IConsoleManager.h"
 #include "Perf_FrameRateManager.generated.h"
 
-UENUM(BlueprintType)
-enum class EPerf_PerformanceTarget : uint8
-{
-    PC_Ultra = 0    UMETA(DisplayName = "PC Ultra (60 FPS)"),
-    PC_High = 1     UMETA(DisplayName = "PC High (45 FPS)"),
-    Console = 2     UMETA(DisplayName = "Console (30 FPS)"),
-    Mobile = 3      UMETA(DisplayName = "Mobile (24 FPS)")
-};
-
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FPerf_FrameMetrics
+struct TRANSPERSONALGAME_API FPerf_FrameData
 {
     GENERATED_BODY()
 
     UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float CurrentFPS;
+    float DeltaTime = 0.0f;
 
     UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float AverageFPS;
+    float FrameRate = 0.0f;
 
     UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float MinFPS;
+    int32 ActorCount = 0;
 
     UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float MaxFPS;
+    int32 PhysicsActorCount = 0;
 
     UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float FrameTime;
+    float GameThreadTime = 0.0f;
 
     UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    int32 DroppedFrames;
+    float RenderThreadTime = 0.0f;
 
-    FPerf_FrameMetrics()
+    FPerf_FrameData()
     {
-        CurrentFPS = 0.0f;
-        AverageFPS = 0.0f;
-        MinFPS = 999.0f;
-        MaxFPS = 0.0f;
-        FrameTime = 0.0f;
-        DroppedFrames = 0;
+        DeltaTime = 0.0f;
+        FrameRate = 0.0f;
+        ActorCount = 0;
+        PhysicsActorCount = 0;
+        GameThreadTime = 0.0f;
+        RenderThreadTime = 0.0f;
     }
 };
 
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UPerf_FrameRateManager : public UGameInstanceSubsystem
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FPerf_PerformanceSettings
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float TargetFrameRate = 60.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float MinFrameRate = 30.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    int32 MaxPhysicsActors = 100;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float PhysicsCullingDistance = 5000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    bool bEnableAutomaticOptimization = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    bool bEnableFrameRateSmoothing = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float OptimizationThreshold = 0.8f;
+
+    FPerf_PerformanceSettings()
+    {
+        TargetFrameRate = 60.0f;
+        MinFrameRate = 30.0f;
+        MaxPhysicsActors = 100;
+        PhysicsCullingDistance = 5000.0f;
+        bEnableAutomaticOptimization = true;
+        bEnableFrameRateSmoothing = true;
+        OptimizationThreshold = 0.8f;
+    }
+};
+
+UCLASS(ClassGroup=(Performance), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UPerf_FrameRateManager : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
     UPerf_FrameRateManager();
 
-    // USubsystem interface
-    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
-    virtual void Deinitialize() override;
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void SetPerformanceTarget(EPerf_PerformanceTarget Target);
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    EPerf_PerformanceTarget GetPerformanceTarget() const { return CurrentTarget; }
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    FPerf_FrameMetrics GetCurrentMetrics() const { return CurrentMetrics; }
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void StartFrameMonitoring();
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void StopFrameMonitoring();
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    bool IsMonitoring() const { return bIsMonitoring; }
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void ResetMetrics();
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    float GetTargetFPS() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    bool IsPerformanceAcceptable() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void EnableVSync(bool bEnable);
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void SetMaxFPS(int32 MaxFPS);
-
 protected:
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    EPerf_PerformanceTarget CurrentTarget;
+    virtual void BeginPlay() override;
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    FPerf_FrameMetrics CurrentMetrics;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance Settings")
+    FPerf_PerformanceSettings PerformanceSettings;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    bool bIsMonitoring;
+    UPROPERTY(BlueprintReadOnly, Category = "Performance Data")
+    FPerf_FrameData CurrentFrameData;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float MonitoringDuration;
+    UPROPERTY(BlueprintReadOnly, Category = "Performance Data")
+    TArray<FPerf_FrameData> FrameHistory;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    int32 FrameCount;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance Settings")
+    int32 FrameHistorySize = 60;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float TotalFrameTime;
+    UPROPERTY(BlueprintReadOnly, Category = "Performance Data")
+    bool bIsPerformanceCritical = false;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Performance Data")
+    float AverageFrameRate = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Performance Data")
+    float MinFrameRateRecorded = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Performance Data")
+    float MaxFrameRateRecorded = 0.0f;
 
 private:
-    FTimerHandle MonitoringTimer;
-    TArray<float> FrameTimeHistory;
-    float LastFrameTime;
+    float FrameRateAccumulator = 0.0f;
+    int32 FrameCount = 0;
+    float LastOptimizationTime = 0.0f;
+    static constexpr float OptimizationInterval = 1.0f;
 
-    void UpdateMetrics();
-    void OnFrameTick();
-    float CalculateAverageFPS() const;
+public:
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void SetTargetFrameRate(float NewTargetFrameRate);
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void EnableAutomaticOptimization(bool bEnable);
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    FPerf_FrameData GetCurrentFrameData() const { return CurrentFrameData; }
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    float GetAverageFrameRate() const { return AverageFrameRate; }
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    bool IsPerformanceCritical() const { return bIsPerformanceCritical; }
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void ResetPerformanceStats();
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void ForceOptimizationPass();
+
+    UFUNCTION(CallInEditor, Category = "Performance")
+    void TestPerformanceBaseline();
+
+private:
+    void UpdateFrameData(float DeltaTime);
+    void UpdateFrameHistory();
+    void CheckPerformanceThresholds();
+    void ApplyAutomaticOptimizations();
+    void OptimizePhysicsActors();
+    void OptimizeRenderingSettings();
+    void LogPerformanceWarning(const FString& Warning);
 };
-
-#include "Perf_FrameRateManager.generated.h"
