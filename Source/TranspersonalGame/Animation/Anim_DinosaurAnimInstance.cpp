@@ -3,356 +3,392 @@
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Components/SkeletalMeshComponent.h"
-#include "Animation/AnimMontage.h"
-#include "Kismet/KismetMathLibrary.h"
 #include "Engine/World.h"
+#include "DrawDebugHelpers.h"
+#include "Kismet/KismetMathLibrary.h"
 
 UAnim_DinosaurAnimInstance::UAnim_DinosaurAnimInstance()
 {
-    // Initialize default values
-    DinosaurData.Speed = 0.0f;
-    DinosaurData.Direction = 0.0f;
-    DinosaurData.CurrentState = EAnim_DinosaurState::Idle;
-    DinosaurData.Species = EAnim_DinosaurSpecies::TRex;
-    DinosaurData.bIsAggressive = false;
-    DinosaurData.HealthPercent = 1.0f;
-    DinosaurData.HungerLevel = 0.5f;
-    DinosaurData.AlertLevel = 0.0f;
+    // Initialize animation blending values
+    IdleToWalkBlend = 0.0f;
+    WalkToRunBlend = 0.0f;
+    AttackIntensity = 0.0f;
+    FeedingBlend = 0.0f;
 
-    bIsInAir = false;
-    bIsMoving = false;
-    bShouldPlayIdleVariation = false;
+    // Initialize IK values
+    LeftFootIKOffset = FVector::ZeroVector;
+    RightFootIKOffset = FVector::ZeroVector;
+    LeftFootIKRotation = FRotator::ZeroRotator;
+    RightFootIKRotation = FRotator::ZeroRotator;
+    HeadLookAtAlpha = 0.0f;
+    HeadLookAtTarget = FVector::ZeroVector;
 
-    IdleTimer = 0.0f;
-    StateChangeTimer = 0.0f;
-    LastAttackTime = 0.0f;
+    // Initialize species parameters
+    TailSwayIntensity = 1.0f;
+    NeckFlexibility = 1.0f;
+    BodyMassScale = 1.0f;
+
+    // Initialize timing
+    LastUpdateTime = 0.0f;
+    AnimationDeltaTime = 0.0f;
+
+    // Initialize cached references
+    OwningPawn = nullptr;
+    MovementComponent = nullptr;
+    MeshComponent = nullptr;
 }
 
 void UAnim_DinosaurAnimInstance::NativeInitializeAnimation()
 {
     Super::NativeInitializeAnimation();
 
-    // Get owner pawn and movement component
-    OwnerPawn = TryGetPawnOwner();
-    if (OwnerPawn)
+    // Cache pawn and component references
+    OwningPawn = TryGetPawnOwner();
+    if (OwningPawn)
     {
-        if (ACharacter* Character = Cast<ACharacter>(OwnerPawn))
+        if (ACharacter* Character = Cast<ACharacter>(OwningPawn))
         {
             MovementComponent = Character->GetCharacterMovement();
         }
+        MeshComponent = OwningPawn->FindComponentByClass<USkeletalMeshComponent>();
+    }
 
-        // Initialize species based on pawn class name
-        FString PawnName = OwnerPawn->GetClass()->GetName();
-        if (PawnName.Contains(TEXT("TRex")))
+    // Initialize behavior data based on pawn type
+    if (OwningPawn)
+    {
+        FString PawnName = OwningPawn->GetName();
+        
+        // Determine species from pawn name or class
+        if (PawnName.Contains("TRex") || PawnName.Contains("Tyrannosaurus"))
         {
-            DinosaurData.Species = EAnim_DinosaurSpecies::TRex;
+            BehaviorData.Species = EAnim_DinosaurSpecies::TRex;
+            BodyMassScale = 2.0f;
+            TailSwayIntensity = 0.8f;
+            NeckFlexibility = 0.6f;
         }
-        else if (PawnName.Contains(TEXT("Velociraptor")))
+        else if (PawnName.Contains("Velociraptor"))
         {
-            DinosaurData.Species = EAnim_DinosaurSpecies::Velociraptor;
+            BehaviorData.Species = EAnim_DinosaurSpecies::Velociraptor;
+            BodyMassScale = 0.4f;
+            TailSwayIntensity = 1.5f;
+            NeckFlexibility = 1.2f;
         }
-        else if (PawnName.Contains(TEXT("Triceratops")))
+        else if (PawnName.Contains("Triceratops"))
         {
-            DinosaurData.Species = EAnim_DinosaurSpecies::Triceratops;
+            BehaviorData.Species = EAnim_DinosaurSpecies::Triceratops;
+            BodyMassScale = 1.8f;
+            TailSwayIntensity = 0.5f;
+            NeckFlexibility = 0.4f;
         }
-        else if (PawnName.Contains(TEXT("Brachiosaurus")))
+        else if (PawnName.Contains("Brachiosaurus"))
         {
-            DinosaurData.Species = EAnim_DinosaurSpecies::Brachiosaurus;
-        }
-        else if (PawnName.Contains(TEXT("Ankylosaurus")))
-        {
-            DinosaurData.Species = EAnim_DinosaurSpecies::Ankylosaurus;
-        }
-        else if (PawnName.Contains(TEXT("Parasaurolophus")))
-        {
-            DinosaurData.Species = EAnim_DinosaurSpecies::Parasaurolophus;
+            BehaviorData.Species = EAnim_DinosaurSpecies::Brachiosaurus;
+            BodyMassScale = 3.0f;
+            TailSwayIntensity = 0.3f;
+            NeckFlexibility = 1.8f;
         }
     }
 
-    UE_LOG(LogTemp, Warning, TEXT("DinosaurAnimInstance initialized for species: %d"), (int32)DinosaurData.Species);
+    UE_LOG(LogAnimation, Log, TEXT("DinosaurAnimInstance initialized for species: %d"), (int32)BehaviorData.Species);
 }
 
 void UAnim_DinosaurAnimInstance::NativeUpdateAnimation(float DeltaTimeX)
 {
     Super::NativeUpdateAnimation(DeltaTimeX);
 
-    if (!OwnerPawn)
+    AnimationDeltaTime = DeltaTimeX;
+    
+    if (!OwningPawn)
     {
         return;
     }
 
-    // Update timers
-    IdleTimer += DeltaTimeX;
-    StateChangeTimer += DeltaTimeX;
+    // Update all animation data
+    UpdateMotionData(DeltaTimeX);
+    UpdateBehaviorData(DeltaTimeX);
+    UpdateFootIK(DeltaTimeX);
+    UpdateHeadTracking(DeltaTimeX);
+    UpdateSpeciesParameters(DeltaTimeX);
 
-    // Update movement data
-    UpdateMovementData();
-
-    // Update state logic
-    UpdateStateLogic();
-
-    // Update species-specific behavior
-    UpdateSpeciesSpecificBehavior();
-
-    // Update idle variation logic
-    bShouldPlayIdleVariation = (IdleTimer > 5.0f && DinosaurData.CurrentState == EAnim_DinosaurState::Idle);
-    if (bShouldPlayIdleVariation)
-    {
-        IdleTimer = 0.0f;
-    }
+    LastUpdateTime = GetWorld()->GetTimeSeconds();
 }
 
-void UAnim_DinosaurAnimInstance::UpdateMovementData()
+void UAnim_DinosaurAnimInstance::UpdateMotionData(float DeltaTime)
 {
-    if (!OwnerPawn)
+    if (!OwningPawn || !MovementComponent)
     {
         return;
     }
 
-    // Get velocity and calculate speed
-    FVector Velocity = OwnerPawn->GetVelocity();
-    DinosaurData.Speed = Velocity.Size();
-    bIsMoving = DinosaurData.Speed > 10.0f;
-
-    // Calculate movement direction relative to actor rotation
-    if (bIsMoving)
+    // Get velocity and speed
+    MotionData.Velocity = MovementComponent->Velocity;
+    MotionData.Speed = MotionData.Velocity.Size();
+    
+    // Calculate movement direction relative to actor forward
+    if (MotionData.Speed > 1.0f)
     {
-        FVector ForwardVector = OwnerPawn->GetActorForwardVector();
-        FVector VelocityNormalized = Velocity.GetSafeNormal();
-        DinosaurData.Direction = FVector::DotProduct(ForwardVector, VelocityNormalized);
+        FVector ForwardVector = OwningPawn->GetActorForwardVector();
+        FVector VelocityNormalized = MotionData.Velocity.GetSafeNormal();
+        MotionData.Direction = FVector::DotProduct(ForwardVector, VelocityNormalized);
+        MotionData.bIsMoving = true;
     }
     else
     {
-        DinosaurData.Direction = 0.0f;
+        MotionData.Direction = 0.0f;
+        MotionData.bIsMoving = false;
     }
 
-    // Check if in air (for flying species or jumping)
-    if (MovementComponent)
+    // Check if grounded
+    MotionData.bIsGrounded = MovementComponent->IsMovingOnGround();
+    
+    // Calculate ground distance for landing detection
+    if (!MotionData.bIsGrounded)
     {
-        bIsInAir = MovementComponent->IsFalling();
+        FVector StartLocation = OwningPawn->GetActorLocation();
+        FVector EndLocation = StartLocation - FVector(0, 0, 1000.0f);
+        
+        FHitResult HitResult;
+        FCollisionQueryParams QueryParams;
+        QueryParams.AddIgnoredActor(OwningPawn);
+        
+        if (GetWorld()->LineTraceSingleByChannel(HitResult, StartLocation, EndLocation, ECC_WorldStatic, QueryParams))
+        {
+            MotionData.GroundDistance = HitResult.Distance;
+        }
+        else
+        {
+            MotionData.GroundDistance = 1000.0f;
+        }
+    }
+    else
+    {
+        MotionData.GroundDistance = 0.0f;
+    }
+
+    // Update animation blending based on speed
+    float SpeedThresholds[3] = { 50.0f, 200.0f, 400.0f }; // Idle, Walk, Run thresholds
+    
+    if (MotionData.Speed < SpeedThresholds[0])
+    {
+        IdleToWalkBlend = FMath::FInterpTo(IdleToWalkBlend, 0.0f, DeltaTime, 5.0f);
+    }
+    else if (MotionData.Speed < SpeedThresholds[1])
+    {
+        IdleToWalkBlend = FMath::FInterpTo(IdleToWalkBlend, 1.0f, DeltaTime, 5.0f);
+        WalkToRunBlend = FMath::FInterpTo(WalkToRunBlend, 0.0f, DeltaTime, 5.0f);
+    }
+    else
+    {
+        IdleToWalkBlend = 1.0f;
+        float RunBlendAlpha = FMath::Clamp((MotionData.Speed - SpeedThresholds[1]) / (SpeedThresholds[2] - SpeedThresholds[1]), 0.0f, 1.0f);
+        WalkToRunBlend = FMath::FInterpTo(WalkToRunBlend, RunBlendAlpha, DeltaTime, 3.0f);
     }
 }
 
-void UAnim_DinosaurAnimInstance::UpdateStateLogic()
+void UAnim_DinosaurAnimInstance::UpdateBehaviorData(float DeltaTime)
 {
-    EAnim_DinosaurState PreviousState = DinosaurData.CurrentState;
-
-    // State machine logic
-    switch (DinosaurData.CurrentState)
+    if (!OwningPawn)
     {
-        case EAnim_DinosaurState::Idle:
-            if (bIsMoving)
-            {
-                if (DinosaurData.Speed > 300.0f)
-                {
-                    DinosaurData.CurrentState = EAnim_DinosaurState::Running;
-                }
-                else
-                {
-                    DinosaurData.CurrentState = EAnim_DinosaurState::Walking;
-                }
-            }
-            else if (DinosaurData.AlertLevel > 0.7f)
-            {
-                DinosaurData.CurrentState = EAnim_DinosaurState::Alert;
-            }
-            else if (DinosaurData.HungerLevel > 0.8f && StateChangeTimer > 3.0f)
-            {
-                DinosaurData.CurrentState = EAnim_DinosaurState::Eating;
-            }
-            break;
-
-        case EAnim_DinosaurState::Walking:
-            if (!bIsMoving)
-            {
-                DinosaurData.CurrentState = EAnim_DinosaurState::Idle;
-            }
-            else if (DinosaurData.Speed > 300.0f)
-            {
-                DinosaurData.CurrentState = EAnim_DinosaurState::Running;
-            }
-            else if (DinosaurData.bIsAggressive && StateChangeTimer > 2.0f)
-            {
-                DinosaurData.CurrentState = EAnim_DinosaurState::Attacking;
-            }
-            break;
-
-        case EAnim_DinosaurState::Running:
-            if (!bIsMoving)
-            {
-                DinosaurData.CurrentState = EAnim_DinosaurState::Idle;
-            }
-            else if (DinosaurData.Speed < 200.0f)
-            {
-                DinosaurData.CurrentState = EAnim_DinosaurState::Walking;
-            }
-            break;
-
-        case EAnim_DinosaurState::Alert:
-            if (DinosaurData.AlertLevel < 0.3f)
-            {
-                DinosaurData.CurrentState = EAnim_DinosaurState::Idle;
-            }
-            else if (DinosaurData.bIsAggressive)
-            {
-                DinosaurData.CurrentState = EAnim_DinosaurState::Attacking;
-            }
-            break;
-
-        case EAnim_DinosaurState::Eating:
-            if (StateChangeTimer > 5.0f)
-            {
-                DinosaurData.CurrentState = EAnim_DinosaurState::Idle;
-                DinosaurData.HungerLevel = FMath::Max(0.0f, DinosaurData.HungerLevel - 0.3f);
-            }
-            break;
-
-        case EAnim_DinosaurState::Attacking:
-            if (StateChangeTimer > 3.0f)
-            {
-                DinosaurData.CurrentState = EAnim_DinosaurState::Idle;
-                DinosaurData.bIsAggressive = false;
-            }
-            break;
-
-        case EAnim_DinosaurState::Roaring:
-            if (StateChangeTimer > 2.0f)
-            {
-                DinosaurData.CurrentState = EAnim_DinosaurState::Idle;
-            }
-            break;
-
-        case EAnim_DinosaurState::Sleeping:
-            if (DinosaurData.AlertLevel > 0.5f || StateChangeTimer > 10.0f)
-            {
-                DinosaurData.CurrentState = EAnim_DinosaurState::Idle;
-            }
-            break;
-
-        case EAnim_DinosaurState::Dead:
-            // Dead state is permanent
-            break;
+        return;
     }
 
-    // Reset timer if state changed
-    if (PreviousState != DinosaurData.CurrentState)
+    // Simple state machine based on motion and external factors
+    EAnim_DinosaurState NewState = BehaviorData.CurrentState;
+
+    if (MotionData.bIsMoving)
     {
-        StateChangeTimer = 0.0f;
-        UE_LOG(LogTemp, Log, TEXT("Dinosaur state changed from %d to %d"), (int32)PreviousState, (int32)DinosaurData.CurrentState);
+        if (MotionData.Speed > 300.0f)
+        {
+            NewState = EAnim_DinosaurState::Running;
+        }
+        else if (MotionData.Speed > 50.0f)
+        {
+            NewState = EAnim_DinosaurState::Walking;
+        }
+        else
+        {
+            NewState = EAnim_DinosaurState::Roaming;
+        }
+    }
+    else
+    {
+        NewState = EAnim_DinosaurState::Idle;
+    }
+
+    // Smooth state transitions
+    if (NewState != BehaviorData.CurrentState)
+    {
+        BehaviorData.CurrentState = NewState;
+    }
+
+    // Update behavior parameters
+    BehaviorData.AggressionLevel = FMath::FInterpTo(BehaviorData.AggressionLevel, 
+        BehaviorData.bHasTarget ? 1.0f : 0.0f, DeltaTime, 2.0f);
+
+    // Update feeding blend based on state
+    if (BehaviorData.CurrentState == EAnim_DinosaurState::Feeding)
+    {
+        FeedingBlend = FMath::FInterpTo(FeedingBlend, 1.0f, DeltaTime, 3.0f);
+    }
+    else
+    {
+        FeedingBlend = FMath::FInterpTo(FeedingBlend, 0.0f, DeltaTime, 5.0f);
+    }
+
+    // Update attack intensity
+    if (BehaviorData.CurrentState == EAnim_DinosaurState::Attacking)
+    {
+        AttackIntensity = FMath::FInterpTo(AttackIntensity, 1.0f, DeltaTime, 8.0f);
+    }
+    else
+    {
+        AttackIntensity = FMath::FInterpTo(AttackIntensity, 0.0f, DeltaTime, 4.0f);
     }
 }
 
-void UAnim_DinosaurAnimInstance::UpdateSpeciesSpecificBehavior()
+void UAnim_DinosaurAnimInstance::UpdateFootIK(float DeltaTime)
 {
-    // Species-specific behavior modifications
-    switch (DinosaurData.Species)
+    if (!OwningPawn || !MeshComponent || !MotionData.bIsGrounded)
+    {
+        // Reset IK when not grounded
+        LeftFootIKOffset = FVector::ZeroVector;
+        RightFootIKOffset = FVector::ZeroVector;
+        LeftFootIKRotation = FRotator::ZeroRotator;
+        RightFootIKRotation = FRotator::ZeroRotator;
+        return;
+    }
+
+    // Trace for left foot
+    FVector LeftFootTrace = TraceFootIK(FName("foot_l"), 100.0f);
+    if (!LeftFootTrace.IsZero())
+    {
+        LeftFootIKOffset = FMath::VInterpTo(LeftFootIKOffset, LeftFootTrace, DeltaTime, 10.0f);
+    }
+
+    // Trace for right foot
+    FVector RightFootTrace = TraceFootIK(FName("foot_r"), 100.0f);
+    if (!RightFootTrace.IsZero())
+    {
+        RightFootIKOffset = FMath::VInterpTo(RightFootIKOffset, RightFootTrace, DeltaTime, 10.0f);
+    }
+
+    // Calculate foot rotations based on ground normal
+    // This would require more complex ground normal calculation in a real implementation
+    LeftFootIKRotation = FMath::RInterpTo(LeftFootIKRotation, FRotator::ZeroRotator, DeltaTime, 8.0f);
+    RightFootIKRotation = FMath::RInterpTo(RightFootIKRotation, FRotator::ZeroRotator, DeltaTime, 8.0f);
+}
+
+void UAnim_DinosaurAnimInstance::UpdateHeadTracking(float DeltaTime)
+{
+    if (!OwningPawn)
+    {
+        return;
+    }
+
+    // Simple head tracking - look at player if nearby
+    if (GetWorld())
+    {
+        APawn* PlayerPawn = GetWorld()->GetFirstPlayerController()->GetPawn();
+        if (PlayerPawn)
+        {
+            float DistanceToPlayer = FVector::Dist(OwningPawn->GetActorLocation(), PlayerPawn->GetActorLocation());
+            
+            if (DistanceToPlayer < 2000.0f && DistanceToPlayer > 100.0f)
+            {
+                HeadLookAtTarget = PlayerPawn->GetActorLocation();
+                HeadLookAtAlpha = FMath::FInterpTo(HeadLookAtAlpha, 1.0f, DeltaTime, 2.0f);
+            }
+            else
+            {
+                HeadLookAtAlpha = FMath::FInterpTo(HeadLookAtAlpha, 0.0f, DeltaTime, 3.0f);
+            }
+        }
+    }
+}
+
+void UAnim_DinosaurAnimInstance::UpdateSpeciesParameters(float DeltaTime)
+{
+    // Species-specific animation adjustments
+    switch (BehaviorData.Species)
     {
         case EAnim_DinosaurSpecies::TRex:
-            // T-Rex is more aggressive and has slower movements but higher damage
-            if (DinosaurData.AlertLevel > 0.4f)
-            {
-                DinosaurData.bIsAggressive = true;
-            }
+            // Heavy, powerful movements
+            TailSwayIntensity = FMath::FInterpTo(TailSwayIntensity, 0.8f * MotionData.Speed / 400.0f, DeltaTime, 2.0f);
             break;
-
+            
         case EAnim_DinosaurSpecies::Velociraptor:
-            // Velociraptors are pack hunters, more alert and agile
-            DinosaurData.AlertLevel = FMath::Min(1.0f, DinosaurData.AlertLevel + 0.01f);
+            // Quick, agile movements
+            TailSwayIntensity = FMath::FInterpTo(TailSwayIntensity, 1.5f * MotionData.Speed / 400.0f, DeltaTime, 5.0f);
             break;
-
-        case EAnim_DinosaurSpecies::Triceratops:
-            // Triceratops are defensive herbivores
-            if (DinosaurData.AlertLevel > 0.6f)
-            {
-                DinosaurData.bIsAggressive = true; // Defensive aggression
-            }
-            break;
-
+            
         case EAnim_DinosaurSpecies::Brachiosaurus:
-            // Brachiosaurus are peaceful giants, slow to anger
-            DinosaurData.AlertLevel = FMath::Max(0.0f, DinosaurData.AlertLevel - 0.005f);
-            DinosaurData.HungerLevel = FMath::Min(1.0f, DinosaurData.HungerLevel + 0.02f);
+            // Slow, graceful movements
+            TailSwayIntensity = FMath::FInterpTo(TailSwayIntensity, 0.3f * MotionData.Speed / 200.0f, DeltaTime, 1.0f);
             break;
-
-        case EAnim_DinosaurSpecies::Ankylosaurus:
-            // Ankylosaurus are heavily armored, defensive
-            if (DinosaurData.HealthPercent < 0.5f)
-            {
-                DinosaurData.bIsAggressive = true;
-            }
-            break;
-
-        case EAnim_DinosaurSpecies::Parasaurolophus:
-            // Parasaurolophus are social herbivores, communicate through roaring
-            if (StateChangeTimer > 8.0f && DinosaurData.CurrentState == EAnim_DinosaurState::Idle)
-            {
-                SetDinosaurState(EAnim_DinosaurState::Roaring);
-            }
+            
+        default:
+            TailSwayIntensity = FMath::FInterpTo(TailSwayIntensity, 1.0f * MotionData.Speed / 300.0f, DeltaTime, 3.0f);
             break;
     }
+
+    // Clamp values
+    TailSwayIntensity = FMath::Clamp(TailSwayIntensity, 0.0f, 2.0f);
 }
 
-void UAnim_DinosaurAnimInstance::PlayAttackAnimation()
+FVector UAnim_DinosaurAnimInstance::TraceFootIK(const FName& SocketName, float TraceDistance)
 {
-    if (AttackMontage && CanPlayMontage())
+    if (!MeshComponent || !OwningPawn)
     {
-        Montage_Play(AttackMontage);
-        SetDinosaurState(EAnim_DinosaurState::Attacking);
-        LastAttackTime = GetWorld()->GetTimeSeconds();
-        UE_LOG(LogTemp, Log, TEXT("Playing attack animation for dinosaur"));
+        return FVector::ZeroVector;
     }
-}
 
-void UAnim_DinosaurAnimInstance::PlayRoarAnimation()
-{
-    if (RoarMontage && CanPlayMontage())
+    // Get socket location
+    FVector SocketLocation = MeshComponent->GetSocketLocation(SocketName);
+    if (SocketLocation.IsZero())
     {
-        Montage_Play(RoarMontage);
-        SetDinosaurState(EAnim_DinosaurState::Roaring);
-        UE_LOG(LogTemp, Log, TEXT("Playing roar animation for dinosaur"));
+        return FVector::ZeroVector;
     }
-}
 
-void UAnim_DinosaurAnimInstance::PlayEatAnimation()
-{
-    if (EatMontage && CanPlayMontage())
+    // Trace downward from socket
+    FVector StartLocation = SocketLocation;
+    FVector EndLocation = StartLocation - FVector(0, 0, TraceDistance);
+    
+    FHitResult HitResult;
+    FCollisionQueryParams QueryParams;
+    QueryParams.AddIgnoredActor(OwningPawn);
+    
+    if (GetWorld()->LineTraceSingleByChannel(HitResult, StartLocation, EndLocation, ECC_WorldStatic, QueryParams))
     {
-        Montage_Play(EatMontage);
-        SetDinosaurState(EAnim_DinosaurState::Eating);
-        UE_LOG(LogTemp, Log, TEXT("Playing eat animation for dinosaur"));
+        // Calculate offset needed to place foot on ground
+        float GroundHeight = HitResult.ImpactPoint.Z;
+        float SocketHeight = SocketLocation.Z;
+        float OffsetZ = GroundHeight - SocketHeight;
+        
+        return FVector(0, 0, OffsetZ);
     }
+    
+    return FVector::ZeroVector;
 }
 
-void UAnim_DinosaurAnimInstance::PlayDeathAnimation()
+FRotator UAnim_DinosaurAnimInstance::CalculateFootRotation(const FVector& ImpactNormal)
 {
-    if (DeathMontage && CanPlayMontage())
+    // Calculate rotation to align foot with ground normal
+    FVector UpVector = FVector::UpVector;
+    FVector RightVector = FVector::CrossProduct(UpVector, ImpactNormal).GetSafeNormal();
+    FVector ForwardVector = FVector::CrossProduct(ImpactNormal, RightVector).GetSafeNormal();
+    
+    return UKismetMathLibrary::MakeRotationFromAxes(ForwardVector, RightVector, ImpactNormal);
+}
+
+FVector UAnim_DinosaurAnimInstance::CalculateHeadLookAt(const FVector& TargetLocation)
+{
+    if (!OwningPawn)
     {
-        Montage_Play(DeathMontage);
-        SetDinosaurState(EAnim_DinosaurState::Dead);
-        DinosaurData.HealthPercent = 0.0f;
-        UE_LOG(LogTemp, Log, TEXT("Playing death animation for dinosaur"));
+        return FVector::ZeroVector;
     }
-}
 
-void UAnim_DinosaurAnimInstance::SetDinosaurState(EAnim_DinosaurState NewState)
-{
-    if (DinosaurData.CurrentState != NewState)
-    {
-        DinosaurData.CurrentState = NewState;
-        StateChangeTimer = 0.0f;
-        UE_LOG(LogTemp, Log, TEXT("Dinosaur state manually set to: %d"), (int32)NewState);
-    }
-}
-
-void UAnim_DinosaurAnimInstance::SetDinosaurSpecies(EAnim_DinosaurSpecies NewSpecies)
-{
-    DinosaurData.Species = NewSpecies;
-    UE_LOG(LogTemp, Log, TEXT("Dinosaur species set to: %d"), (int32)NewSpecies);
-}
-
-void UAnim_DinosaurAnimInstance::SetAggressionLevel(float AggressionLevel)
-{
-    DinosaurData.bIsAggressive = AggressionLevel > 0.5f;
-    DinosaurData.AlertLevel = FMath::Clamp(AggressionLevel, 0.0f, 1.0f);
-    UE_LOG(LogTemp, Log, TEXT("Dinosaur aggression level set to: %f"), AggressionLevel);
+    FVector HeadLocation = OwningPawn->GetActorLocation() + FVector(0, 0, 100); // Approximate head height
+    FVector LookDirection = (TargetLocation - HeadLocation).GetSafeNormal();
+    
+    return LookDirection;
 }
