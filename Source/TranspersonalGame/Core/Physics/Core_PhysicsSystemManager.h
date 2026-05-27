@@ -1,165 +1,154 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Subsystems/GameInstanceSubsystem.h"
 #include "Engine/World.h"
 #include "Components/ActorComponent.h"
-#include "Engine/Engine.h"
-#include "PhysicsEngine/PhysicsSettings.h"
 #include "Core_PhysicsSystemManager.generated.h"
 
-DECLARE_LOG_CATEGORY_EXTERN(LogCorePhysics, Log, All);
+class UCore_CollisionSystem;
+class UCore_RagdollSystem;
+class UCore_DestructionSystem;
 
 /**
- * Core Physics System Manager
+ * Physics System Manager - Core physics subsystem
  * 
- * Manages the core physics systems for the Transpersonal Game:
- * - Dynamic physics simulation for realistic object interactions
- * - Collision detection and response for survival gameplay
- * - Ragdoll physics for character death and impact
- * - Destruction system for environmental breakables
+ * Manages all physics-related systems in the game:
+ * - Collision detection and response
+ * - Ragdoll physics for characters
+ * - Destruction physics for objects
+ * - Environmental physics interactions
  * 
- * Design Philosophy:
- * - Physics should feel weighty and realistic (Casey Muratori approach)
- * - Performance is critical - no frame drops during physics events
- * - Predictable behavior for gameplay mechanics
+ * This system ensures consistent physics behavior across
+ * all game objects and provides centralized physics configuration.
  */
-UCLASS(BlueprintType, Blueprintable, ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UCore_PhysicsSystemManager : public UActorComponent
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API UCore_PhysicsSystemManager : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
 public:
     UCore_PhysicsSystemManager();
 
-protected:
-    virtual void BeginPlay() override;
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+    // USubsystem interface
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
 
-public:
-    // Physics Configuration
+    // Physics System Management
+    UFUNCTION(BlueprintCallable, Category = "Physics")
+    void InitializePhysicsSystems();
+
+    UFUNCTION(BlueprintCallable, Category = "Physics")
+    void ShutdownPhysicsSystems();
+
+    UFUNCTION(BlueprintCallable, Category = "Physics")
+    void UpdatePhysicsSystems(float DeltaTime);
+
+    // Global Physics Settings
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Settings")
     float GlobalGravityScale;
-    
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Settings")
-    float DefaultLinearDamping;
-    
+    float GlobalPhysicsTimeStep;
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Settings")
-    float DefaultAngularDamping;
-    
+    int32 MaxPhysicsSubSteps;
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Settings")
     bool bEnablePhysicsSimulation;
-    
-    // Collision Settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision")
-    bool bEnableComplexCollision;
-    
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision")
-    float CollisionTolerance;
-    
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision")
-    int32 MaxCollisionIterations;
-    
-    // Ragdoll Settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll")
-    bool bEnableRagdollPhysics;
-    
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll")
-    float RagdollBlendWeight;
-    
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll")
-    float RagdollLifetime;
-    
-    // Destruction Settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Destruction")
-    bool bEnableDestruction;
-    
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Destruction")
-    float DestructionThreshold;
-    
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Destruction")
-    int32 MaxDestructionParticles;
 
-public:
-    // Physics Management Functions
-    UFUNCTION(BlueprintCallable, Category = "Physics")
-    void InitializePhysicsSystem();
-    
-    UFUNCTION(BlueprintCallable, Category = "Physics")
-    void UpdatePhysicsSettings();
-    
-    UFUNCTION(BlueprintCallable, Category = "Physics")
-    void SetGlobalGravity(float NewGravity);
-    
-    UFUNCTION(BlueprintCallable, Category = "Physics")
-    void EnablePhysicsSimulation(bool bEnable);
-    
-    // Collision Functions
-    UFUNCTION(BlueprintCallable, Category = "Collision")
-    bool CheckCollisionAtLocation(FVector Location, float Radius);
-    
-    UFUNCTION(BlueprintCallable, Category = "Collision")
-    TArray<AActor*> GetOverlappingActors(FVector Location, float Radius);
-    
-    UFUNCTION(BlueprintCallable, Category = "Collision")
-    void SetCollisionResponseForActor(AActor* Actor, ECollisionResponse Response);
-    
-    // Ragdoll Functions
-    UFUNCTION(BlueprintCallable, Category = "Ragdoll")
-    void EnableRagdollForCharacter(ACharacter* Character);
-    
-    UFUNCTION(BlueprintCallable, Category = "Ragdoll")
-    void DisableRagdollForCharacter(ACharacter* Character);
-    
-    UFUNCTION(BlueprintCallable, Category = "Ragdoll")
-    void SetRagdollBlendWeight(ACharacter* Character, float Weight);
-    
-    // Destruction Functions
-    UFUNCTION(BlueprintCallable, Category = "Destruction")
-    void DestroyActor(AActor* Actor, FVector ImpactLocation, float Force);
-    
-    UFUNCTION(BlueprintCallable, Category = "Destruction")
-    void CreateDestructionEffect(FVector Location, float Intensity);
-    
-    UFUNCTION(BlueprintCallable, Category = "Destruction")
-    bool CanActorBeDestroyed(AActor* Actor);
+    // Performance Settings
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    int32 MaxActiveRagdolls;
 
-    // Performance Monitoring
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    float GetPhysicsFrameTime() const;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    int32 MaxDestructionObjects;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float PhysicsUpdateDistance;
+
+    // System References
+    UPROPERTY(BlueprintReadOnly, Category = "Systems")
+    UCore_CollisionSystem* CollisionSystem;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Systems")
+    UCore_RagdollSystem* RagdollSystem;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Systems")
+    UCore_DestructionSystem* DestructionSystem;
+
+    // Physics Events
+    DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnPhysicsEvent, AActor*, Actor, FVector, ImpactLocation);
     
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    int32 GetActivePhysicsObjects() const;
-    
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void OptimizePhysicsPerformance();
+    UPROPERTY(BlueprintAssignable, Category = "Events")
+    FOnPhysicsEvent OnLargeImpact;
+
+    UPROPERTY(BlueprintAssignable, Category = "Events")
+    FOnPhysicsEvent OnObjectDestroyed;
+
+    UPROPERTY(BlueprintAssignable, Category = "Events")
+    FOnPhysicsEvent OnRagdollActivated;
+
+    // Physics Queries
+    UFUNCTION(BlueprintCallable, Category = "Physics Queries")
+    bool IsPhysicsEnabled() const { return bEnablePhysicsSimulation; }
+
+    UFUNCTION(BlueprintCallable, Category = "Physics Queries")
+    int32 GetActiveRagdollCount() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Physics Queries")
+    int32 GetActiveDestructionCount() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Physics Queries")
+    float GetCurrentPhysicsLoad() const;
+
+    // System Access
+    UFUNCTION(BlueprintPure, Category = "System Access")
+    UCore_CollisionSystem* GetCollisionSystem() const { return CollisionSystem; }
+
+    UFUNCTION(BlueprintPure, Category = "System Access")
+    UCore_RagdollSystem* GetRagdollSystem() const { return RagdollSystem; }
+
+    UFUNCTION(BlueprintPure, Category = "System Access")
+    UCore_DestructionSystem* GetDestructionSystem() const { return DestructionSystem; }
+
+    // Debug Functions
+    UFUNCTION(BlueprintCallable, Category = "Debug", CallInEditor)
+    void DebugDrawPhysicsInfo();
+
+    UFUNCTION(BlueprintCallable, Category = "Debug", CallInEditor)
+    void LogPhysicsStats();
 
 protected:
-    // Internal Physics State
-    UPROPERTY()
-    TArray<AActor*> TrackedPhysicsActors;
-    
-    UPROPERTY()
-    TArray<ACharacter*> RagdollCharacters;
-    
+    // Internal Management
+    void CreatePhysicsSystems();
+    void ConfigurePhysicsSettings();
+    void RegisterPhysicsEvents();
+
+    // Performance Monitoring
     UPROPERTY()
     float LastPhysicsUpdateTime;
-    
+
     UPROPERTY()
-    int32 PhysicsObjectCount;
-    
-    // Internal Functions
-    void UpdateTrackedActors();
-    void ProcessRagdollCharacters(float DeltaTime);
-    void MonitorPerformance();
-    void CleanupDestroyedActors();
-    
-    // Physics Event Handlers
+    int32 CurrentActiveRagdolls;
+
+    UPROPERTY()
+    int32 CurrentDestructionObjects;
+
+    UPROPERTY()
+    bool bSystemsInitialized;
+
+    // Physics World Settings
+    void ApplyWorldPhysicsSettings(UWorld* World);
+    void RestoreWorldPhysicsSettings(UWorld* World);
+
+    // Event Handlers
     UFUNCTION()
-    void OnActorHit(AActor* SelfActor, AActor* OtherActor, FVector NormalImpulse, const FHitResult& Hit);
-    
+    void HandleLargeImpact(AActor* Actor, const FVector& ImpactLocation);
+
     UFUNCTION()
-    void OnActorBeginOverlap(AActor* OverlappedActor, AActor* OtherActor);
-    
+    void HandleObjectDestruction(AActor* Actor, const FVector& DestructionLocation);
+
     UFUNCTION()
-    void OnActorEndOverlap(AActor* OverlappedActor, AActor* OtherActor);
+    void HandleRagdollActivation(AActor* Actor, const FVector& ActivationLocation);
 };
