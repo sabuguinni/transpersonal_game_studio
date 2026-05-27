@@ -2,303 +2,319 @@
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Components/SkeletalMeshComponent.h"
-#include "Engine/World.h"
 #include "Kismet/KismetMathLibrary.h"
-#include "Kismet/KismetSystemLibrary.h"
+#include "Engine/World.h"
+#include "DrawDebugHelpers.h"
 
 UAnim_CharacterAnimController::UAnim_CharacterAnimController()
 {
-    OwnerCharacter = nullptr;
-    MovementComponent = nullptr;
-    
+    // Initialize movement variables
     Speed = 0.0f;
     Direction = 0.0f;
     bIsInAir = false;
-    bIsCrouching = false;
     bIsAccelerating = false;
+    bIsCrouching = false;
     
-    CurrentMovementState = EAnim_MovementState::Idle;
-    CurrentActionState = EAnim_ActionState::None;
+    // Initialize combat variables
+    bIsHoldingWeapon = false;
+    CurrentWeaponType = EAnim_WeaponType::None;
+    bIsAttacking = false;
     
-    MovementBlendSpace = nullptr;
-    JumpMontage = nullptr;
-    LandMontage = nullptr;
+    // Initialize survival variables
+    HealthPercentage = 100.0f;
+    StaminaPercentage = 100.0f;
+    bIsInjured = false;
+    EmotionalState = EAnim_EmotionalState::Calm;
     
-    FootIKTraceDistance = 50.0f;
-    FootIKInterpSpeed = 15.0f;
-    bEnableFootIK = true;
+    // Initialize IK variables
+    LeftFootIKOffset = 0.0f;
+    RightFootIKOffset = 0.0f;
+    LeftFootIKRotation = FRotator::ZeroRotator;
+    RightFootIKRotation = FRotator::ZeroRotator;
     
+    // Initialize motion matching variables
+    MotionMatchingWeight = 1.0f;
+    DesiredVelocity = FVector::ZeroVector;
+    TurnInPlaceAngle = 0.0f;
+    
+    // IK Settings
+    IKTraceDistance = 50.0f;
+    IKInterpSpeed = 15.0f;
+    
+    // Motion Matching Settings
+    MotionMatchingThreshold = 0.8f;
+    VelocityMatchWeight = 0.7f;
+    DirectionMatchWeight = 0.3f;
+    
+    // Animation Smoothing
     SpeedSmoothingRate = 10.0f;
-    DirectionSmoothingRate = 15.0f;
-    
-    LastSpeed = 0.0f;
-    LastDirection = 0.0f;
-    StateTransitionTimer = 0.0f;
-    bWasInAir = false;
+    DirectionSmoothingRate = 8.0f;
 }
 
 void UAnim_CharacterAnimController::NativeInitializeAnimation()
 {
     Super::NativeInitializeAnimation();
     
-    OwnerCharacter = Cast<ACharacter>(GetOwningActor());
-    if (OwnerCharacter)
+    // Get character reference
+    OwningCharacter = Cast<ACharacter>(GetOwningActor());
+    if (OwningCharacter)
     {
-        MovementComponent = OwnerCharacter->GetCharacterMovement();
+        CharacterMovement = OwningCharacter->GetCharacterMovement();
     }
-    
-    // Initialize action montages map
-    ActionMontages.Empty();
-    
-    UE_LOG(LogTemp, Warning, TEXT("Animation Controller initialized for character: %s"), 
-           OwnerCharacter ? *OwnerCharacter->GetName() : TEXT("None"));
 }
 
 void UAnim_CharacterAnimController::NativeUpdateAnimation(float DeltaTimeX)
 {
     Super::NativeUpdateAnimation(DeltaTimeX);
     
-    if (!OwnerCharacter || !MovementComponent)
+    if (!OwningCharacter || !CharacterMovement)
     {
         return;
     }
     
-    // Update basic movement variables
-    FVector Velocity = MovementComponent->Velocity;
-    float CurrentSpeed = Velocity.Size2D();
-    
-    // Smooth speed changes
-    Speed = FMath::FInterpTo(LastSpeed, CurrentSpeed, DeltaTimeX, SpeedSmoothingRate);
-    LastSpeed = Speed;
-    
-    // Calculate direction relative to character forward
-    if (Speed > 1.0f)
-    {
-        FVector ForwardVector = OwnerCharacter->GetActorForwardVector();
-        FVector RightVector = OwnerCharacter->GetActorRightVector();
-        
-        FVector NormalizedVelocity = Velocity.GetSafeNormal2D();
-        
-        float ForwardDot = FVector::DotProduct(ForwardVector, NormalizedVelocity);
-        float RightDot = FVector::DotProduct(RightVector, NormalizedVelocity);
-        
-        float TargetDirection = FMath::RadiansToDegrees(FMath::Atan2(RightDot, ForwardDot));
-        Direction = FMath::FInterpTo(LastDirection, TargetDirection, DeltaTimeX, DirectionSmoothingRate);
-        LastDirection = Direction;
-    }
-    
-    // Update state flags
-    bIsInAir = MovementComponent->IsFalling();
-    bIsCrouching = MovementComponent->IsCrouching();
-    bIsAccelerating = MovementComponent->GetCurrentAcceleration().SizeSquared() > 0.0f;
-    
-    // Handle landing detection
-    if (bWasInAir && !bIsInAir && LandMontage)
-    {
-        PlayActionMontage(LandMontage, 1.0f);
-    }
-    bWasInAir = bIsInAir;
-    
-    // Update movement state
+    // Update all animation states
     UpdateMovementState();
-    
-    // Update foot IK if enabled
-    if (bEnableFootIK)
-    {
-        UpdateFootIK(DeltaTimeX);
-    }
-    
-    // Update state transition timer
-    StateTransitionTimer += DeltaTimeX;
+    UpdateCombatState();
+    UpdateSurvivalState();
+    CalculateFootIK();
+    UpdateMotionMatching();
 }
 
 void UAnim_CharacterAnimController::UpdateMovementState()
 {
-    if (!MovementComponent)
+    if (!OwningCharacter || !CharacterMovement)
     {
         return;
     }
     
-    EAnim_MovementState NewState = CurrentMovementState;
+    // Calculate speed
+    FVector Velocity = OwningCharacter->GetVelocity();
+    float NewSpeed = Velocity.Size2D();
+    Speed = FMath::FInterpTo(Speed, NewSpeed, GetWorld()->GetDeltaSeconds(), SpeedSmoothingRate);
     
-    if (bIsInAir)
+    // Calculate direction
+    if (Speed > 0.1f)
     {
-        if (MovementComponent->Velocity.Z > 0)
-        {
-            NewState = EAnim_MovementState::Jumping;
-        }
-        else
-        {
-            NewState = EAnim_MovementState::Falling;
-        }
+        FVector Forward = OwningCharacter->GetActorForwardVector();
+        FVector VelocityNormalized = Velocity.GetSafeNormal2D();
+        float DotProduct = FVector::DotProduct(Forward, VelocityNormalized);
+        float CrossProduct = FVector::CrossProduct(Forward, VelocityNormalized).Z;
+        
+        float NewDirection = FMath::Atan2(CrossProduct, DotProduct) * (180.0f / PI);
+        Direction = FMath::FInterpTo(Direction, NewDirection, GetWorld()->GetDeltaSeconds(), DirectionSmoothingRate);
     }
-    else if (bIsCrouching)
+    
+    // Update movement flags
+    bIsInAir = CharacterMovement->IsFalling();
+    bIsAccelerating = CharacterMovement->GetCurrentAcceleration().SizeSquared() > 0.0f;
+    bIsCrouching = CharacterMovement->IsCrouching();
+    
+    // Update desired velocity for motion matching
+    DesiredVelocity = CharacterMovement->GetCurrentAcceleration().GetSafeNormal() * CharacterMovement->GetMaxSpeed();
+}
+
+void UAnim_CharacterAnimController::UpdateCombatState()
+{
+    // This would typically check weapon component or combat system
+    // For now, using placeholder logic
+    
+    // Check if character is holding a weapon (placeholder)
+    // bIsHoldingWeapon = OwningCharacter->HasWeapon();
+    
+    // Update weapon type based on equipped weapon
+    // CurrentWeaponType = OwningCharacter->GetWeaponType();
+    
+    // Check if currently attacking
+    // bIsAttacking = OwningCharacter->IsAttacking();
+}
+
+void UAnim_CharacterAnimController::UpdateSurvivalState()
+{
+    // This would typically interface with survival stats component
+    // For now, using placeholder logic
+    
+    // Get health percentage from character
+    // HealthPercentage = OwningCharacter->GetHealthPercentage();
+    
+    // Get stamina percentage
+    // StaminaPercentage = OwningCharacter->GetStaminaPercentage();
+    
+    // Determine if injured
+    bIsInjured = HealthPercentage < 50.0f;
+    
+    // Update emotional state based on survival conditions
+    if (HealthPercentage < 25.0f)
     {
-        NewState = EAnim_MovementState::Crouching;
+        EmotionalState = EAnim_EmotionalState::Panicked;
     }
-    else if (Speed < 1.0f)
+    else if (HealthPercentage < 50.0f)
     {
-        NewState = EAnim_MovementState::Idle;
+        EmotionalState = EAnim_EmotionalState::Fearful;
     }
-    else if (Speed < 150.0f)
+    else if (StaminaPercentage < 30.0f)
     {
-        NewState = EAnim_MovementState::Walking;
-    }
-    else if (Speed < 400.0f)
-    {
-        NewState = EAnim_MovementState::Running;
+        EmotionalState = EAnim_EmotionalState::Tired;
     }
     else
     {
-        NewState = EAnim_MovementState::Sprinting;
-    }
-    
-    if (NewState != CurrentMovementState)
-    {
-        CurrentMovementState = NewState;
-        StateTransitionTimer = 0.0f;
-        
-        // Handle special state transitions
-        if (CurrentMovementState == EAnim_MovementState::Jumping && JumpMontage)
-        {
-            PlayActionMontage(JumpMontage, 1.0f);
-        }
+        EmotionalState = EAnim_EmotionalState::Calm;
     }
 }
 
-void UAnim_CharacterAnimController::SetActionState(EAnim_ActionState NewState)
+void UAnim_CharacterAnimController::CalculateFootIK()
 {
-    if (CurrentActionState != NewState)
+    if (!OwningCharacter)
     {
-        CurrentActionState = NewState;
-        
-        // Play corresponding montage if available
-        if (ActionMontages.Contains(NewState))
-        {
-            UAnimMontage* Montage = ActionMontages[NewState];
-            if (Montage)
-            {
-                PlayActionMontage(Montage, 1.0f);
-            }
-        }
-        
-        UE_LOG(LogTemp, Log, TEXT("Action state changed to: %d"), (int32)NewState);
-    }
-}
-
-void UAnim_CharacterAnimController::PlayActionMontage(UAnimMontage* Montage, float PlayRate)
-{
-    if (Montage && GetOwningComponent())
-    {
-        GetOwningComponent()->GetAnimInstance()->Montage_Play(Montage, PlayRate);
-        UE_LOG(LogTemp, Log, TEXT("Playing montage: %s"), *Montage->GetName());
-    }
-}
-
-void UAnim_CharacterAnimController::UpdateFootIK(float DeltaTime)
-{
-    if (!OwnerCharacter || bIsInAir)
-    {
-        // Reset IK when in air
-        FootIKData.LeftFootAlpha = FMath::FInterpTo(FootIKData.LeftFootAlpha, 0.0f, DeltaTime, FootIKInterpSpeed);
-        FootIKData.RightFootAlpha = FMath::FInterpTo(FootIKData.RightFootAlpha, 0.0f, DeltaTime, FootIKInterpSpeed);
-        FootIKData.HipOffset = FMath::FInterpTo(FootIKData.HipOffset, 0.0f, DeltaTime, FootIKInterpSpeed);
         return;
     }
     
-    // Perform foot traces
-    FVector LeftFootHit = PerformFootTrace(TEXT("foot_l"), FootIKTraceDistance);
-    FVector RightFootHit = PerformFootTrace(TEXT("foot_r"), FootIKTraceDistance);
+    // Calculate IK for left foot
+    float NewLeftFootOffset = GetFootIKOffset(TEXT("foot_l"), IKTraceDistance);
+    LeftFootIKOffset = FMath::FInterpTo(LeftFootIKOffset, NewLeftFootOffset, GetWorld()->GetDeltaSeconds(), IKInterpSpeed);
+    LeftFootIKRotation = GetFootIKRotation(TEXT("foot_l"));
     
-    // Calculate foot positions and rotations
-    FVector CharacterLocation = OwnerCharacter->GetActorLocation();
-    
-    // Left foot IK
-    if (LeftFootHit != FVector::ZeroVector)
-    {
-        FootIKData.LeftFootLocation = LeftFootHit;
-        FootIKData.LeftFootAlpha = FMath::FInterpTo(FootIKData.LeftFootAlpha, 1.0f, DeltaTime, FootIKInterpSpeed);
-        
-        // Calculate foot rotation based on ground normal
-        FVector GroundNormal = FVector::UpVector; // Simplified - would need actual surface normal
-        FootIKData.LeftFootRotation = UKismetMathLibrary::MakeRotFromZX(GroundNormal, OwnerCharacter->GetActorForwardVector());
-    }
-    else
-    {
-        FootIKData.LeftFootAlpha = FMath::FInterpTo(FootIKData.LeftFootAlpha, 0.0f, DeltaTime, FootIKInterpSpeed);
-    }
-    
-    // Right foot IK
-    if (RightFootHit != FVector::ZeroVector)
-    {
-        FootIKData.RightFootLocation = RightFootHit;
-        FootIKData.RightFootAlpha = FMath::FInterpTo(FootIKData.RightFootAlpha, 1.0f, DeltaTime, FootIKInterpSpeed);
-        
-        FVector GroundNormal = FVector::UpVector;
-        FootIKData.RightFootRotation = UKismetMathLibrary::MakeRotFromZX(GroundNormal, OwnerCharacter->GetActorForwardVector());
-    }
-    else
-    {
-        FootIKData.RightFootAlpha = FMath::FInterpTo(FootIKData.RightFootAlpha, 0.0f, DeltaTime, FootIKInterpSpeed);
-    }
-    
-    // Calculate hip offset to keep character grounded
-    float LeftOffset = (LeftFootHit != FVector::ZeroVector) ? (LeftFootHit.Z - CharacterLocation.Z) : 0.0f;
-    float RightOffset = (RightFootHit != FVector::ZeroVector) ? (RightFootHit.Z - CharacterLocation.Z) : 0.0f;
-    float TargetHipOffset = FMath::Min(LeftOffset, RightOffset);
-    
-    FootIKData.HipOffset = FMath::FInterpTo(FootIKData.HipOffset, TargetHipOffset, DeltaTime, FootIKInterpSpeed);
+    // Calculate IK for right foot
+    float NewRightFootOffset = GetFootIKOffset(TEXT("foot_r"), IKTraceDistance);
+    RightFootIKOffset = FMath::FInterpTo(RightFootIKOffset, NewRightFootOffset, GetWorld()->GetDeltaSeconds(), IKInterpSpeed);
+    RightFootIKRotation = GetFootIKRotation(TEXT("foot_r"));
 }
 
-FVector UAnim_CharacterAnimController::PerformFootTrace(FName SocketName, float TraceDistance)
+float UAnim_CharacterAnimController::GetFootIKOffset(FName SocketName, float TraceDistance)
 {
-    if (!OwnerCharacter)
+    if (!OwningCharacter)
     {
-        return FVector::ZeroVector;
+        return 0.0f;
     }
     
-    USkeletalMeshComponent* MeshComp = OwnerCharacter->GetMesh();
+    USkeletalMeshComponent* MeshComp = OwningCharacter->GetMesh();
     if (!MeshComp)
     {
-        return FVector::ZeroVector;
+        return 0.0f;
     }
     
+    // Get foot socket location
     FVector SocketLocation = MeshComp->GetSocketLocation(SocketName);
-    if (SocketLocation == FVector::ZeroVector)
-    {
-        // Fallback to approximate foot positions if sockets don't exist
-        FVector CharacterLocation = OwnerCharacter->GetActorLocation();
-        FVector RightVector = OwnerCharacter->GetActorRightVector();
-        
-        if (SocketName == TEXT("foot_l"))
-        {
-            SocketLocation = CharacterLocation - (RightVector * 20.0f);
-        }
-        else
-        {
-            SocketLocation = CharacterLocation + (RightVector * 20.0f);
-        }
-    }
+    FVector StartTrace = SocketLocation;
+    FVector EndTrace = StartTrace - FVector(0, 0, TraceDistance);
     
-    FVector TraceStart = SocketLocation + FVector(0, 0, 20.0f);
-    FVector TraceEnd = SocketLocation - FVector(0, 0, TraceDistance);
-    
+    // Perform line trace
     FHitResult HitResult;
     FCollisionQueryParams QueryParams;
-    QueryParams.AddIgnoredActor(OwnerCharacter);
+    QueryParams.AddIgnoredActor(OwningCharacter);
     
     bool bHit = GetWorld()->LineTraceSingleByChannel(
         HitResult,
-        TraceStart,
-        TraceEnd,
-        ECC_WorldStatic,
+        StartTrace,
+        EndTrace,
+        ECollisionChannel::ECC_Visibility,
         QueryParams
     );
     
     if (bHit)
     {
-        return HitResult.Location;
+        // Calculate offset needed to place foot on ground
+        float DistanceToGround = (StartTrace - HitResult.Location).Z;
+        return DistanceToGround - (TraceDistance * 0.5f);
     }
     
-    return FVector::ZeroVector;
+    return 0.0f;
+}
+
+FRotator UAnim_CharacterAnimController::GetFootIKRotation(FName SocketName)
+{
+    if (!OwningCharacter)
+    {
+        return FRotator::ZeroRotator;
+    }
+    
+    USkeletalMeshComponent* MeshComp = OwningCharacter->GetMesh();
+    if (!MeshComp)
+    {
+        return FRotator::ZeroRotator;
+    }
+    
+    // Get foot socket location
+    FVector SocketLocation = MeshComp->GetSocketLocation(SocketName);
+    FVector StartTrace = SocketLocation;
+    FVector EndTrace = StartTrace - FVector(0, 0, IKTraceDistance);
+    
+    // Perform line trace
+    FHitResult HitResult;
+    FCollisionQueryParams QueryParams;
+    QueryParams.AddIgnoredActor(OwningCharacter);
+    
+    bool bHit = GetWorld()->LineTraceSingleByChannel(
+        HitResult,
+        StartTrace,
+        EndTrace,
+        ECollisionChannel::ECC_Visibility,
+        QueryParams
+    );
+    
+    if (bHit)
+    {
+        // Calculate rotation to align foot with surface normal
+        FVector SurfaceNormal = HitResult.Normal;
+        FVector ForwardVector = OwningCharacter->GetActorForwardVector();
+        FVector RightVector = FVector::CrossProduct(SurfaceNormal, ForwardVector).GetSafeNormal();
+        ForwardVector = FVector::CrossProduct(RightVector, SurfaceNormal).GetSafeNormal();
+        
+        return UKismetMathLibrary::MakeRotFromXZ(ForwardVector, SurfaceNormal);
+    }
+    
+    return FRotator::ZeroRotator;
+}
+
+void UAnim_CharacterAnimController::UpdateMotionMatching()
+{
+    if (!OwningCharacter)
+    {
+        return;
+    }
+    
+    // Calculate current velocity
+    FVector CurrentVelocity = OwningCharacter->GetVelocity();
+    
+    // Calculate motion matching score
+    float MatchScore = CalculateMotionMatchingScore(CurrentVelocity, DesiredVelocity);
+    
+    // Update motion matching weight based on score
+    MotionMatchingWeight = FMath::Clamp(MatchScore, 0.0f, 1.0f);
+    
+    // Calculate turn in place angle
+    if (Speed < 10.0f && bIsAccelerating)
+    {
+        FVector InputDirection = CharacterMovement->GetCurrentAcceleration().GetSafeNormal();
+        FVector ForwardDirection = OwningCharacter->GetActorForwardVector();
+        
+        float DotProduct = FVector::DotProduct(ForwardDirection, InputDirection);
+        float CrossProduct = FVector::CrossProduct(ForwardDirection, InputDirection).Z;
+        
+        TurnInPlaceAngle = FMath::Atan2(CrossProduct, DotProduct) * (180.0f / PI);
+    }
+    else
+    {
+        TurnInPlaceAngle = 0.0f;
+    }
+}
+
+float UAnim_CharacterAnimController::CalculateMotionMatchingScore(const FVector& CurrentVelocity, const FVector& TargetVelocity)
+{
+    // Calculate velocity similarity
+    float VelocityDifference = FVector::Dist(CurrentVelocity, TargetVelocity);
+    float MaxVelocity = FMath::Max(CurrentVelocity.Size(), TargetVelocity.Size());
+    float VelocityScore = MaxVelocity > 0.0f ? (1.0f - (VelocityDifference / MaxVelocity)) : 1.0f;
+    
+    // Calculate direction similarity
+    float DirectionScore = 1.0f;
+    if (CurrentVelocity.SizeSquared() > 0.0f && TargetVelocity.SizeSquared() > 0.0f)
+    {
+        DirectionScore = FVector::DotProduct(CurrentVelocity.GetSafeNormal(), TargetVelocity.GetSafeNormal());
+        DirectionScore = (DirectionScore + 1.0f) * 0.5f; // Normalize to 0-1 range
+    }
+    
+    // Combine scores with weights
+    float FinalScore = (VelocityScore * VelocityMatchWeight) + (DirectionScore * DirectionMatchWeight);
+    
+    return FMath::Clamp(FinalScore, 0.0f, 1.0f);
 }
