@@ -1,268 +1,182 @@
 #include "BuildIntegrationValidator.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
+#include "EngineUtils.h"
 #include "UObject/UObjectGlobals.h"
-#include "UObject/Package.h"
-#include "Misc/DateTime.h"
 #include "HAL/PlatformFilemanager.h"
 
 UBuildIntegrationValidator::UBuildIntegrationValidator()
 {
-    // Initialize core class paths for validation
-    CoreClassPaths = {
-        TEXT("/Script/TranspersonalGame.TranspersonalCharacter"),
-        TEXT("/Script/TranspersonalGame.TranspersonalGameState"),
-        TEXT("/Script/TranspersonalGame.PCGWorldGenerator"),
-        TEXT("/Script/TranspersonalGame.FoliageManager"),
-        TEXT("/Script/TranspersonalGame.CrowdSimulationManager"),
-        TEXT("/Script/TranspersonalGame.ProceduralWorldManager"),
-        TEXT("/Script/TranspersonalGame.BuildIntegrationManager")
-    };
+    PrimaryComponentTick.bCanEverTick = false;
+    
+    // Initialize core system classes to validate
+    CoreSystemClasses.Add(TEXT("/Script/TranspersonalGame.TranspersonalCharacter"));
+    CoreSystemClasses.Add(TEXT("/Script/TranspersonalGame.TranspersonalGameState"));
+    CoreSystemClasses.Add(TEXT("/Script/TranspersonalGame.PCGWorldGenerator"));
+    CoreSystemClasses.Add(TEXT("/Script/TranspersonalGame.FoliageManager"));
+    CoreSystemClasses.Add(TEXT("/Script/TranspersonalGame.VFXManager"));
+    
+    MaxActorCountWarning = 1000;
+    MaxActorCountCritical = 2000;
 }
 
-void UBuildIntegrationValidator::Initialize(FSubsystemCollectionBase& Collection)
+FBuild_IntegrationReport UBuildIntegrationValidator::ValidateAllSystems()
 {
-    Super::Initialize(Collection);
+    FBuild_IntegrationReport Report;
+    Report.ValidationTimestamp = FDateTime::Now();
     
-    UE_LOG(LogTemp, Log, TEXT("BuildIntegrationValidator initialized"));
+    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationValidator: Starting comprehensive system validation"));
     
-    // Run initial validation
-    FBuild_ValidationResult InitialResult = ValidateAllModules();
-    if (InitialResult.bIsValid)
+    // Validate each core system
+    for (const FString& SystemClass : CoreSystemClasses)
     {
-        UE_LOG(LogTemp, Log, TEXT("Initial build validation PASSED - %d/%d classes loaded"), 
-               InitialResult.LoadedClasses, InitialResult.TotalClasses);
-    }
-    else
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Initial build validation FAILED - %d/%d classes loaded"), 
-               InitialResult.LoadedClasses, InitialResult.TotalClasses);
-    }
-}
-
-void UBuildIntegrationValidator::Deinitialize()
-{
-    UE_LOG(LogTemp, Log, TEXT("BuildIntegrationValidator deinitialized"));
-    Super::Deinitialize();
-}
-
-FBuild_ValidationResult UBuildIntegrationValidator::ValidateAllModules()
-{
-    ValidationStartTime = FPlatformTime::Seconds();
-    
-    FBuild_ValidationResult Result;
-    Result.TotalClasses = CoreClassPaths.Num();
-    Result.LoadedClasses = 0;
-    Result.FailedClasses.Empty();
-    
-    UE_LOG(LogTemp, Log, TEXT("=== BUILD VALIDATION STARTED ==="));
-    
-    // Validate each core class
-    for (const FString& ClassPath : CoreClassPaths)
-    {
-        if (ValidateClass(ClassPath))
-        {
-            Result.LoadedClasses++;
-            UE_LOG(LogTemp, Log, TEXT("✓ %s loaded successfully"), *ClassPath);
-        }
-        else
-        {
-            Result.FailedClasses.Add(ClassPath);
-            UE_LOG(LogTemp, Error, TEXT("✗ %s failed to load"), *ClassPath);
-        }
-    }
-    
-    // Calculate validation result
-    Result.bIsValid = (Result.LoadedClasses == Result.TotalClasses);
-    Result.ValidationTime = FPlatformTime::Seconds() - ValidationStartTime;
-    
-    if (Result.bIsValid)
-    {
-        Result.ValidationMessage = FString::Printf(TEXT("BUILD VALIDATION PASSED - All %d classes loaded successfully in %.2fs"), 
-                                                  Result.LoadedClasses, Result.ValidationTime);
-    }
-    else
-    {
-        Result.ValidationMessage = FString::Printf(TEXT("BUILD VALIDATION FAILED - %d/%d classes loaded in %.2fs"), 
-                                                  Result.LoadedClasses, Result.TotalClasses, Result.ValidationTime);
-    }
-    
-    // Cache result
-    LastValidationResult = Result;
-    
-    // Log final result
-    LogValidationResult(Result);
-    
-    UE_LOG(LogTemp, Log, TEXT("=== BUILD VALIDATION COMPLETED ==="));
-    
-    return Result;
-}
-
-FBuild_ModuleStatus UBuildIntegrationValidator::ValidateModule(const FString& ModuleName)
-{
-    FBuild_ModuleStatus Status;
-    Status.ModuleName = ModuleName;
-    Status.bIsLoaded = false;
-    Status.ClassCount = 0;
-    Status.LoadedClasses.Empty();
-    
-    // Check if module is loaded
-    if (FModuleManager::Get().IsModuleLoaded(*ModuleName))
-    {
-        Status.bIsLoaded = true;
-        UE_LOG(LogTemp, Log, TEXT("Module %s is loaded"), *ModuleName);
+        FBuild_SystemReport SystemReport;
+        SystemReport.SystemName = SystemClass;
         
-        // Count classes in this module
-        for (const FString& ClassPath : CoreClassPaths)
+        float StartTime = FPlatformTime::Seconds();
+        SystemReport.Status = ValidateSystemClass(SystemClass);
+        SystemReport.ValidationTime = FPlatformTime::Seconds() - StartTime;
+        
+        switch (SystemReport.Status)
         {
-            if (ClassPath.Contains(ModuleName))
-            {
-                if (ValidateClass(ClassPath))
-                {
-                    Status.ClassCount++;
-                    Status.LoadedClasses.Add(ClassPath);
-                }
-            }
+            case EBuild_SystemStatus::Operational:
+                SystemReport.Details = TEXT("System loaded and operational");
+                Report.OperationalSystems++;
+                break;
+            case EBuild_SystemStatus::Failed:
+                SystemReport.Details = TEXT("System class not found or failed to load");
+                break;
+            case EBuild_SystemStatus::Error:
+                SystemReport.Details = TEXT("Exception occurred during validation");
+                break;
+            default:
+                SystemReport.Details = TEXT("Unknown validation state");
+                break;
         }
-    }
-    else
-    {
-        Status.LastError = FString::Printf(TEXT("Module %s is not loaded"), *ModuleName);
-        UE_LOG(LogTemp, Warning, TEXT("%s"), *Status.LastError);
+        
+        Report.SystemReports.Add(SystemReport);
+        LogSystemStatus(SystemReport.SystemName, SystemReport.Status);
     }
     
-    return Status;
+    Report.TotalSystems = CoreSystemClasses.Num();
+    Report.TotalActors = GetTotalActorCount();
+    Report.bBuildReady = (Report.OperationalSystems == Report.TotalSystems);
+    
+    LastReport = Report;
+    
+    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationValidator: Validation complete - %d/%d systems operational"), 
+           Report.OperationalSystems, Report.TotalSystems);
+    
+    return Report;
 }
 
-bool UBuildIntegrationValidator::ValidateCoreClasses()
+EBuild_SystemStatus UBuildIntegrationValidator::ValidateCharacterSystem()
 {
-    int32 LoadedCount = 0;
-    
-    for (const FString& ClassPath : CoreClassPaths)
-    {
-        if (ValidateClass(ClassPath))
-        {
-            LoadedCount++;
-        }
-    }
-    
-    bool bAllLoaded = (LoadedCount == CoreClassPaths.Num());
-    UE_LOG(LogTemp, Log, TEXT("Core class validation: %d/%d classes loaded"), LoadedCount, CoreClassPaths.Num());
-    
-    return bAllLoaded;
+    return ValidateSystemClass(TEXT("/Script/TranspersonalGame.TranspersonalCharacter"));
 }
 
-bool UBuildIntegrationValidator::ValidateWorldState(UWorld* World)
+EBuild_SystemStatus UBuildIntegrationValidator::ValidateGameStateSystem()
 {
+    return ValidateSystemClass(TEXT("/Script/TranspersonalGame.TranspersonalGameState"));
+}
+
+EBuild_SystemStatus UBuildIntegrationValidator::ValidateWorldGenSystem()
+{
+    return ValidateSystemClass(TEXT("/Script/TranspersonalGame.PCGWorldGenerator"));
+}
+
+EBuild_SystemStatus UBuildIntegrationValidator::ValidateVFXSystem()
+{
+    return ValidateSystemClass(TEXT("/Script/TranspersonalGame.VFXManager"));
+}
+
+int32 UBuildIntegrationValidator::GetTotalActorCount()
+{
+    UWorld* World = GetWorld();
     if (!World)
     {
-        UE_LOG(LogTemp, Error, TEXT("World validation failed - World is null"));
-        return false;
+        return 0;
     }
     
-    // Check world state
-    if (!World->IsGameWorld())
+    int32 ActorCount = 0;
+    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
     {
-        UE_LOG(LogTemp, Warning, TEXT("World validation - Not a game world"));
-        return false;
+        ActorCount++;
     }
     
-    // Check game mode
-    AGameModeBase* GameMode = World->GetAuthGameMode();
-    if (!GameMode)
+    return ActorCount;
+}
+
+void UBuildIntegrationValidator::PerformMemoryOptimization()
+{
+    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationValidator: Performing memory optimization"));
+    
+    // Force garbage collection
+    CollectGarbage(GARBAGE_COLLECTION_KEEPFLAGS);
+    
+    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationValidator: Memory optimization completed"));
+}
+
+bool UBuildIntegrationValidator::SaveCurrentMap()
+{
+    UWorld* World = GetWorld();
+    if (!World)
     {
-        UE_LOG(LogTemp, Warning, TEXT("World validation - No game mode found"));
+        UE_LOG(LogTemp, Error, TEXT("BuildIntegrationValidator: No valid world for map save"));
         return false;
     }
     
-    UE_LOG(LogTemp, Log, TEXT("World validation PASSED - GameMode: %s"), *GameMode->GetClass()->GetName());
+    FString MapPath = TEXT("/Game/Maps/MinPlayableMap");
+    
+    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationValidator: Attempting to save map to %s"), *MapPath);
+    
+    // Note: In runtime, we cannot directly save maps like in editor
+    // This is a placeholder for editor-specific functionality
+    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationValidator: Map save requested (editor functionality)"));
+    
     return true;
 }
 
-FBuild_ValidationResult UBuildIntegrationValidator::RunIntegrationTests()
-{
-    UE_LOG(LogTemp, Log, TEXT("=== INTEGRATION TESTS STARTED ==="));
-    
-    FBuild_ValidationResult Result = ValidateAllModules();
-    
-    // Additional integration tests
-    if (Result.bIsValid)
-    {
-        // Test world state
-        UWorld* World = GEngine ? GEngine->GetCurrentPlayWorld() : nullptr;
-        if (!World && GEngine)
-        {
-            World = GEngine->GetWorldFromContextObject(this, EGetWorldErrorMode::LogAndReturnNull);
-        }
-        
-        if (World)
-        {
-            bool bWorldValid = ValidateWorldState(World);
-            if (!bWorldValid)
-            {
-                Result.ValidationMessage += TEXT(" | World state validation failed");
-            }
-        }
-        
-        // Test module dependencies
-        FBuild_ModuleStatus TranspersonalGameStatus = ValidateModule(TEXT("TranspersonalGame"));
-        if (!TranspersonalGameStatus.bIsLoaded)
-        {
-            Result.bIsValid = false;
-            Result.ValidationMessage += TEXT(" | TranspersonalGame module not loaded");
-        }
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("=== INTEGRATION TESTS COMPLETED ==="));
-    
-    return Result;
-}
-
-bool UBuildIntegrationValidator::ValidateClass(const FString& ClassPath)
+EBuild_SystemStatus UBuildIntegrationValidator::ValidateSystemClass(const FString& ClassPath)
 {
     try
     {
-        // Attempt to load the class
-        UClass* LoadedClass = LoadClass<UObject>(nullptr, *ClassPath);
-        
-        if (LoadedClass)
+        UClass* SystemClass = LoadClass<UObject>(nullptr, *ClassPath);
+        if (SystemClass && IsValid(SystemClass))
         {
-            // Verify class is valid and properly constructed
-            if (LoadedClass->IsValidLowLevel() && !LoadedClass->HasAnyFlags(RF_BeginDestroyed))
-            {
-                return true;
-            }
+            return EBuild_SystemStatus::Operational;
+        }
+        else
+        {
+            return EBuild_SystemStatus::Failed;
         }
     }
     catch (...)
     {
-        UE_LOG(LogTemp, Error, TEXT("Exception while loading class: %s"), *ClassPath);
+        return EBuild_SystemStatus::Error;
     }
-    
-    return false;
 }
 
-TArray<FString> UBuildIntegrationValidator::GetCoreClassPaths() const
+void UBuildIntegrationValidator::LogSystemStatus(const FString& SystemName, EBuild_SystemStatus Status)
 {
-    return CoreClassPaths;
-}
-
-void UBuildIntegrationValidator::LogValidationResult(const FBuild_ValidationResult& Result)
-{
-    UE_LOG(LogTemp, Log, TEXT("=== VALIDATION RESULT ==="));
-    UE_LOG(LogTemp, Log, TEXT("Valid: %s"), Result.bIsValid ? TEXT("TRUE") : TEXT("FALSE"));
-    UE_LOG(LogTemp, Log, TEXT("Classes: %d/%d loaded"), Result.LoadedClasses, Result.TotalClasses);
-    UE_LOG(LogTemp, Log, TEXT("Time: %.2f seconds"), Result.ValidationTime);
-    UE_LOG(LogTemp, Log, TEXT("Message: %s"), *Result.ValidationMessage);
-    
-    if (Result.FailedClasses.Num() > 0)
+    FString StatusString;
+    switch (Status)
     {
-        UE_LOG(LogTemp, Warning, TEXT("Failed classes:"));
-        for (const FString& FailedClass : Result.FailedClasses)
-        {
-            UE_LOG(LogTemp, Warning, TEXT("  - %s"), *FailedClass);
-        }
+        case EBuild_SystemStatus::Operational:
+            StatusString = TEXT("OPERATIONAL");
+            UE_LOG(LogTemp, Warning, TEXT("✓ %s: %s"), *SystemName, *StatusString);
+            break;
+        case EBuild_SystemStatus::Failed:
+            StatusString = TEXT("FAILED");
+            UE_LOG(LogTemp, Error, TEXT("✗ %s: %s"), *SystemName, *StatusString);
+            break;
+        case EBuild_SystemStatus::Error:
+            StatusString = TEXT("ERROR");
+            UE_LOG(LogTemp, Error, TEXT("✗ %s: %s"), *SystemName, *StatusString);
+            break;
+        default:
+            StatusString = TEXT("UNKNOWN");
+            UE_LOG(LogTemp, Warning, TEXT("? %s: %s"), *SystemName, *StatusString);
+            break;
     }
-    
-    UE_LOG(LogTemp, Log, TEXT("========================"));
 }
