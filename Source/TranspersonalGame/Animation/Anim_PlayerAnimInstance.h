@@ -3,60 +3,47 @@
 #include "CoreMinimal.h"
 #include "Animation/AnimInstance.h"
 #include "Engine/Engine.h"
+#include "Components/CapsuleComponent.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
+#include "Kismet/KismetMathLibrary.h"
 #include "Anim_PlayerAnimInstance.generated.h"
 
 UENUM(BlueprintType)
-enum class EAnim_LocomotionState : uint8
+enum class EAnim_PlayerMovementState : uint8
 {
     Idle        UMETA(DisplayName = "Idle"),
     Walking     UMETA(DisplayName = "Walking"),
     Running     UMETA(DisplayName = "Running"),
     Jumping     UMETA(DisplayName = "Jumping"),
     Falling     UMETA(DisplayName = "Falling"),
-    Landing     UMETA(DisplayName = "Landing"),
-    Crouching   UMETA(DisplayName = "Crouching")
+    Crouching   UMETA(DisplayName = "Crouching"),
+    Swimming    UMETA(DisplayName = "Swimming"),
+    Climbing    UMETA(DisplayName = "Climbing")
 };
 
-USTRUCT(BlueprintType)
-struct FAnim_MovementData
+UENUM(BlueprintType)
+enum class EAnim_PlayerCombatState : uint8
 {
-    GENERATED_BODY()
-
-    UPROPERTY(BlueprintReadOnly, Category = "Movement")
-    float Speed = 0.0f;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Movement")
-    float Direction = 0.0f;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Movement")
-    bool bIsInAir = false;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Movement")
-    bool bIsCrouching = false;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Movement")
-    float JumpHeight = 0.0f;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Movement")
-    EAnim_LocomotionState LocomotionState = EAnim_LocomotionState::Idle;
-
-    FAnim_MovementData()
-    {
-        Speed = 0.0f;
-        Direction = 0.0f;
-        bIsInAir = false;
-        bIsCrouching = false;
-        JumpHeight = 0.0f;
-        LocomotionState = EAnim_LocomotionState::Idle;
-    }
+    None            UMETA(DisplayName = "None"),
+    Armed           UMETA(DisplayName = "Armed"),
+    Attacking       UMETA(DisplayName = "Attacking"),
+    Blocking        UMETA(DisplayName = "Blocking"),
+    Dodging         UMETA(DisplayName = "Dodging"),
+    Stunned         UMETA(DisplayName = "Stunned")
 };
 
-/**
- * Animation Instance for TranspersonalCharacter
- * Handles locomotion state machine and movement blending
- */
+UENUM(BlueprintType)
+enum class EAnim_PlayerEmotionalState : uint8
+{
+    Calm        UMETA(DisplayName = "Calm"),
+    Alert       UMETA(DisplayName = "Alert"),
+    Afraid      UMETA(DisplayName = "Afraid"),
+    Aggressive  UMETA(DisplayName = "Aggressive"),
+    Exhausted   UMETA(DisplayName = "Exhausted"),
+    Injured     UMETA(DisplayName = "Injured")
+};
+
 UCLASS(Blueprintable, BlueprintType)
 class TRANSPERSONALGAME_API UAnim_PlayerAnimInstance : public UAnimInstance
 {
@@ -66,76 +53,130 @@ public:
     UAnim_PlayerAnimInstance();
 
 protected:
-    // Animation Blueprint Interface
     virtual void NativeInitializeAnimation() override;
     virtual void NativeUpdateAnimation(float DeltaTimeX) override;
 
-    // Movement Data
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|Movement", meta = (AllowPrivateAccess = "true"))
-    FAnim_MovementData MovementData;
+    // Movement State Variables
+    UPROPERTY(BlueprintReadOnly, Category = "Movement", meta = (AllowPrivateAccess = "true"))
+    EAnim_PlayerMovementState MovementState;
 
-    // Character Reference
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|Character", meta = (AllowPrivateAccess = "true"))
-    ACharacter* OwningCharacter;
+    UPROPERTY(BlueprintReadOnly, Category = "Movement", meta = (AllowPrivateAccess = "true"))
+    float Speed;
 
-    // Movement Component Reference
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|Character", meta = (AllowPrivateAccess = "true"))
-    UCharacterMovementComponent* MovementComponent;
+    UPROPERTY(BlueprintReadOnly, Category = "Movement", meta = (AllowPrivateAccess = "true"))
+    float Direction;
 
-    // Animation Properties
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|Properties", meta = (AllowPrivateAccess = "true"))
-    float WalkThreshold = 50.0f;
+    UPROPERTY(BlueprintReadOnly, Category = "Movement", meta = (AllowPrivateAccess = "true"))
+    bool bIsInAir;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|Properties", meta = (AllowPrivateAccess = "true"))
-    float RunThreshold = 300.0f;
+    UPROPERTY(BlueprintReadOnly, Category = "Movement", meta = (AllowPrivateAccess = "true"))
+    bool bIsCrouching;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|Properties", meta = (AllowPrivateAccess = "true"))
-    float JumpThreshold = 100.0f;
+    UPROPERTY(BlueprintReadOnly, Category = "Movement", meta = (AllowPrivateAccess = "true"))
+    float Pitch;
 
-    // State Management
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|State", meta = (AllowPrivateAccess = "true"))
-    bool bWasInAirLastFrame = false;
+    UPROPERTY(BlueprintReadOnly, Category = "Movement", meta = (AllowPrivateAccess = "true"))
+    float Yaw;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|State", meta = (AllowPrivateAccess = "true"))
-    float TimeInCurrentState = 0.0f;
+    UPROPERTY(BlueprintReadOnly, Category = "Movement", meta = (AllowPrivateAccess = "true"))
+    float Roll;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|State", meta = (AllowPrivateAccess = "true"))
-    EAnim_LocomotionState PreviousState = EAnim_LocomotionState::Idle;
+    // Combat State Variables
+    UPROPERTY(BlueprintReadOnly, Category = "Combat", meta = (AllowPrivateAccess = "true"))
+    EAnim_PlayerCombatState CombatState;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Combat", meta = (AllowPrivateAccess = "true"))
+    bool bIsArmed;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Combat", meta = (AllowPrivateAccess = "true"))
+    bool bIsAttacking;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Combat", meta = (AllowPrivateAccess = "true"))
+    bool bIsBlocking;
+
+    // Survival State Variables
+    UPROPERTY(BlueprintReadOnly, Category = "Survival", meta = (AllowPrivateAccess = "true"))
+    EAnim_PlayerEmotionalState EmotionalState;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Survival", meta = (AllowPrivateAccess = "true"))
+    float HealthPercentage;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Survival", meta = (AllowPrivateAccess = "true"))
+    float StaminaPercentage;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Survival", meta = (AllowPrivateAccess = "true"))
+    float FearLevel;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Survival", meta = (AllowPrivateAccess = "true"))
+    float HungerLevel;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Survival", meta = (AllowPrivateAccess = "true"))
+    float ThirstLevel;
+
+    // IK Foot Placement Variables
+    UPROPERTY(BlueprintReadOnly, Category = "IK", meta = (AllowPrivateAccess = "true"))
+    float LeftFootIKOffset;
+
+    UPROPERTY(BlueprintReadOnly, Category = "IK", meta = (AllowPrivateAccess = "true"))
+    float RightFootIKOffset;
+
+    UPROPERTY(BlueprintReadOnly, Category = "IK", meta = (AllowPrivateAccess = "true"))
+    FRotator LeftFootIKRotation;
+
+    UPROPERTY(BlueprintReadOnly, Category = "IK", meta = (AllowPrivateAccess = "true"))
+    FRotator RightFootIKRotation;
+
+    UPROPERTY(BlueprintReadOnly, Category = "IK", meta = (AllowPrivateAccess = "true"))
+    float PelvisIKOffset;
+
+    // Animation Blending Variables
+    UPROPERTY(BlueprintReadOnly, Category = "Blending", meta = (AllowPrivateAccess = "true"))
+    float IdleToWalkBlend;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Blending", meta = (AllowPrivateAccess = "true"))
+    float WalkToRunBlend;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Blending", meta = (AllowPrivateAccess = "true"))
+    float CombatBlend;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Blending", meta = (AllowPrivateAccess = "true"))
+    float EmotionalBlend;
 
 private:
-    // Update Functions
-    void UpdateMovementData(float DeltaTime);
-    void UpdateLocomotionState();
-    void UpdateCharacterReferences();
+    // Cached references
+    UPROPERTY()
+    class ACharacter* OwnerCharacter;
 
-    // State Transition Logic
-    bool ShouldTransitionToIdle() const;
-    bool ShouldTransitionToWalking() const;
-    bool ShouldTransitionToRunning() const;
-    bool ShouldTransitionToJumping() const;
-    bool ShouldTransitionToFalling() const;
-    bool ShouldTransitionToLanding() const;
+    UPROPERTY()
+    class UCharacterMovementComponent* MovementComponent;
 
-public:
-    // Blueprint Callable Functions
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    EAnim_LocomotionState GetCurrentLocomotionState() const { return MovementData.LocomotionState; }
+    // Helper functions
+    void UpdateMovementState();
+    void UpdateCombatState();
+    void UpdateSurvivalState();
+    void UpdateIKFootPlacement();
+    void UpdateAnimationBlending();
 
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    float GetMovementSpeed() const { return MovementData.Speed; }
+    // IK Helper functions
+    float PerformFootTrace(FName SocketName, float& FootIKOffset, FRotator& FootIKRotation);
+    void UpdatePelvisIK();
 
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    float GetMovementDirection() const { return MovementData.Direction; }
+    // State transition helpers
+    bool ShouldEnterCombatState() const;
+    bool ShouldExitCombatState() const;
+    EAnim_PlayerEmotionalState CalculateEmotionalState() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    bool IsInAir() const { return MovementData.bIsInAir; }
+    // Animation speed modifiers
+    float CalculateAnimationSpeedMultiplier() const;
+    float GetStaminaSpeedModifier() const;
+    float GetHealthSpeedModifier() const;
+    float GetFearSpeedModifier() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    bool IsCrouching() const { return MovementData.bIsCrouching; }
-
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    void ForceLocomotionState(EAnim_LocomotionState NewState);
-
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    void ResetAnimationState();
+    // Constants
+    static constexpr float WALK_SPEED_THRESHOLD = 150.0f;
+    static constexpr float RUN_SPEED_THRESHOLD = 400.0f;
+    static constexpr float IK_TRACE_DISTANCE = 50.0f;
+    static constexpr float IK_INTERPOLATION_SPEED = 15.0f;
+    static constexpr float COMBAT_TRANSITION_SPEED = 8.0f;
+    static constexpr float EMOTIONAL_TRANSITION_SPEED = 3.0f;
 };
