@@ -1,243 +1,208 @@
 #include "EnvArt_AtmosphereController.h"
-#include "Engine/DirectionalLight.h"
-#include "Engine/SkyLight.h"
-#include "Engine/ExponentialHeightFog.h"
-#include "Components/DirectionalLightComponent.h"
-#include "Components/SkyLightComponent.h"
-#include "Components/ExponentialHeightFogComponent.h"
+#include "Components/SceneComponent.h"
 #include "Engine/World.h"
+#include "Engine/DirectionalLight.h"
+#include "Engine/ExponentialHeightFog.h"
 #include "Kismet/GameplayStatics.h"
-#include "Math/UnrealMathUtility.h"
+#include "Components/DirectionalLightComponent.h"
+#include "Components/ExponentialHeightFogComponent.h"
 
 AEnvArt_AtmosphereController::AEnvArt_AtmosphereController()
 {
     PrimaryActorTick.bCanEverTick = true;
-    
-    // Set default atmosphere settings for Cretaceous period
-    AtmosphereSettings.SunIntensity = 3.5f;
-    AtmosphereSettings.SunColor = FLinearColor(1.0f, 0.95f, 0.8f, 1.0f);
-    AtmosphereSettings.SunAngle = 35.0f; // Golden hour angle
-    AtmosphereSettings.FogDensity = 0.015f;
-    AtmosphereSettings.FogColor = FLinearColor(0.85f, 0.9f, 0.95f, 1.0f);
-    AtmosphereSettings.FogHeightFalloff = 0.15f;
-    
+
+    RootSceneComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootScene"));
+    RootComponent = RootSceneComponent;
+
+    // Initialize default values
     CurrentTimeOfDay = EEnvArt_TimeOfDay::Afternoon;
-    TimeOfDaySpeed = 0.1f; // Slow time progression
-    CurrentTimeValue = 0.6f; // Start at afternoon
+    TimeOfDayProgress = 0.0f;
+    bEnableVolumetricFog = true;
+    bEnableGodRays = true;
+    ParticleIntensity = 0.5f;
+
+    InitializeLightingPresets();
 }
 
 void AEnvArt_AtmosphereController::BeginPlay()
 {
     Super::BeginPlay();
     
-    // Find existing lighting actors in the level
-    TArray<AActor*> FoundActors;
-    UGameplayStatics::GetAllActorsOfClass(GetWorld(), ADirectionalLight::StaticClass(), FoundActors);
-    if (FoundActors.Num() > 0)
-    {
-        SunLight = Cast<ADirectionalLight>(FoundActors[0]);
-    }
-    
-    FoundActors.Empty();
-    UGameplayStatics::GetAllActorsOfClass(GetWorld(), ASkyLight::StaticClass(), FoundActors);
-    if (FoundActors.Num() > 0)
-    {
-        SkyLight = Cast<ASkyLight>(FoundActors[0]);
-    }
-    
-    FoundActors.Empty();
-    UGameplayStatics::GetAllActorsOfClass(GetWorld(), AExponentialHeightFog::StaticClass(), FoundActors);
-    if (FoundActors.Num() > 0)
-    {
-        HeightFog = Cast<AExponentialHeightFog>(FoundActors[0]);
-    }
-    
-    // Apply initial Cretaceous atmosphere
-    SetCretaceousAtmosphere();
+    FindLightingActors();
+    SetGoldenHourLighting();
 }
 
 void AEnvArt_AtmosphereController::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
-    
-    // Update time of day
-    CurrentTimeValue += (TimeOfDaySpeed * DeltaTime) / 86400.0f; // 24 hours in seconds
-    if (CurrentTimeValue >= 1.0f)
+
+    // Auto-update lighting if needed
+    if (TimeOfDayProgress > 0.0f)
     {
-        CurrentTimeValue = 0.0f;
+        UpdateLighting();
     }
-    
-    // Update time of day enum based on current value
-    if (CurrentTimeValue < 0.1f || CurrentTimeValue > 0.9f)
+}
+
+void AEnvArt_AtmosphereController::InitializeLightingPresets()
+{
+    LightingPresets.Empty();
+
+    // Dawn
+    FEnvArt_LightingSettings DawnSettings;
+    DawnSettings.SunRotation = FRotator(-10.0f, 80.0f, 0.0f);
+    DawnSettings.SunColor = FLinearColor(1.0f, 0.8f, 0.6f, 1.0f);
+    DawnSettings.SunIntensity = 2.0f;
+    DawnSettings.FogDensity = 0.05f;
+    DawnSettings.FogInscatteringColor = FLinearColor(0.9f, 0.7f, 0.6f, 1.0f);
+    DawnSettings.AtmosphereHaziness = 0.6f;
+    LightingPresets.Add(EEnvArt_TimeOfDay::Dawn, DawnSettings);
+
+    // Morning
+    FEnvArt_LightingSettings MorningSettings;
+    MorningSettings.SunRotation = FRotator(20.0f, 120.0f, 0.0f);
+    MorningSettings.SunColor = FLinearColor(1.0f, 0.95f, 0.8f, 1.0f);
+    MorningSettings.SunIntensity = 4.0f;
+    MorningSettings.FogDensity = 0.03f;
+    MorningSettings.FogInscatteringColor = FLinearColor(0.8f, 0.9f, 1.0f, 1.0f);
+    MorningSettings.AtmosphereHaziness = 0.3f;
+    LightingPresets.Add(EEnvArt_TimeOfDay::Morning, MorningSettings);
+
+    // Noon
+    FEnvArt_LightingSettings NoonSettings;
+    NoonSettings.SunRotation = FRotator(80.0f, 180.0f, 0.0f);
+    NoonSettings.SunColor = FLinearColor(1.0f, 1.0f, 0.95f, 1.0f);
+    NoonSettings.SunIntensity = 6.0f;
+    NoonSettings.FogDensity = 0.01f;
+    NoonSettings.FogInscatteringColor = FLinearColor(0.7f, 0.8f, 1.0f, 1.0f);
+    NoonSettings.AtmosphereHaziness = 0.2f;
+    LightingPresets.Add(EEnvArt_TimeOfDay::Noon, NoonSettings);
+
+    // Afternoon (Golden Hour)
+    FEnvArt_LightingSettings AfternoonSettings;
+    AfternoonSettings.SunRotation = FRotator(15.0f, 240.0f, 0.0f);
+    AfternoonSettings.SunColor = FLinearColor(1.0f, 0.9f, 0.7f, 1.0f);
+    AfternoonSettings.SunIntensity = 3.5f;
+    AfternoonSettings.FogDensity = 0.025f;
+    AfternoonSettings.FogInscatteringColor = FLinearColor(1.0f, 0.8f, 0.6f, 1.0f);
+    AfternoonSettings.AtmosphereHaziness = 0.5f;
+    LightingPresets.Add(EEnvArt_TimeOfDay::Afternoon, AfternoonSettings);
+
+    // Dusk
+    FEnvArt_LightingSettings DuskSettings;
+    DuskSettings.SunRotation = FRotator(-5.0f, 280.0f, 0.0f);
+    DuskSettings.SunColor = FLinearColor(1.0f, 0.7f, 0.5f, 1.0f);
+    DuskSettings.SunIntensity = 1.5f;
+    DuskSettings.FogDensity = 0.04f;
+    DuskSettings.FogInscatteringColor = FLinearColor(0.8f, 0.6f, 0.7f, 1.0f);
+    DuskSettings.AtmosphereHaziness = 0.7f;
+    LightingPresets.Add(EEnvArt_TimeOfDay::Dusk, DuskSettings);
+
+    // Night
+    FEnvArt_LightingSettings NightSettings;
+    NightSettings.SunRotation = FRotator(-45.0f, 0.0f, 0.0f);
+    NightSettings.SunColor = FLinearColor(0.3f, 0.4f, 0.6f, 1.0f);
+    NightSettings.SunIntensity = 0.1f;
+    NightSettings.FogDensity = 0.02f;
+    NightSettings.FogInscatteringColor = FLinearColor(0.2f, 0.3f, 0.5f, 1.0f);
+    NightSettings.AtmosphereHaziness = 0.8f;
+    LightingPresets.Add(EEnvArt_TimeOfDay::Night, NightSettings);
+}
+
+void AEnvArt_AtmosphereController::FindLightingActors()
+{
+    UWorld* World = GetWorld();
+    if (!World) return;
+
+    // Find directional light (sun)
+    TArray<AActor*> DirectionalLights;
+    UGameplayStatics::GetAllActorsOfClass(World, ADirectionalLight::StaticClass(), DirectionalLights);
+    if (DirectionalLights.Num() > 0)
     {
-        CurrentTimeOfDay = EEnvArt_TimeOfDay::Night;
+        SunLight = Cast<ADirectionalLight>(DirectionalLights[0]);
     }
-    else if (CurrentTimeValue < 0.2f)
+
+    // Find fog actor
+    TArray<AActor*> FogActors;
+    UGameplayStatics::GetAllActorsOfClass(World, AExponentialHeightFog::StaticClass(), FogActors);
+    if (FogActors.Num() > 0)
     {
-        CurrentTimeOfDay = EEnvArt_TimeOfDay::Dawn;
+        AtmosphericFog = Cast<AExponentialHeightFog>(FogActors[0]);
     }
-    else if (CurrentTimeValue < 0.4f)
-    {
-        CurrentTimeOfDay = EEnvArt_TimeOfDay::Morning;
-    }
-    else if (CurrentTimeValue < 0.6f)
-    {
-        CurrentTimeOfDay = EEnvArt_TimeOfDay::Noon;
-    }
-    else if (CurrentTimeValue < 0.8f)
-    {
-        CurrentTimeOfDay = EEnvArt_TimeOfDay::Afternoon;
-    }
-    else
-    {
-        CurrentTimeOfDay = EEnvArt_TimeOfDay::Dusk;
-    }
-    
-    UpdateAtmosphere();
 }
 
 void AEnvArt_AtmosphereController::SetTimeOfDay(EEnvArt_TimeOfDay NewTimeOfDay)
 {
     CurrentTimeOfDay = NewTimeOfDay;
-    
-    // Set corresponding time value
-    switch (NewTimeOfDay)
-    {
-        case EEnvArt_TimeOfDay::Dawn:
-            CurrentTimeValue = 0.15f;
-            break;
-        case EEnvArt_TimeOfDay::Morning:
-            CurrentTimeValue = 0.3f;
-            break;
-        case EEnvArt_TimeOfDay::Noon:
-            CurrentTimeValue = 0.5f;
-            break;
-        case EEnvArt_TimeOfDay::Afternoon:
-            CurrentTimeValue = 0.7f;
-            break;
-        case EEnvArt_TimeOfDay::Dusk:
-            CurrentTimeValue = 0.85f;
-            break;
-        case EEnvArt_TimeOfDay::Night:
-            CurrentTimeValue = 0.0f;
-            break;
-    }
-    
-    UpdateAtmosphere();
-}
-
-void AEnvArt_AtmosphereController::UpdateAtmosphere()
-{
-    UpdateSunPosition();
-    UpdateFogSettings();
-    UpdateSkyLightSettings();
+    UpdateLighting();
 }
 
 void AEnvArt_AtmosphereController::SetGoldenHourLighting()
 {
-    AtmosphereSettings.SunIntensity = 4.0f;
-    AtmosphereSettings.SunColor = FLinearColor(1.0f, 0.8f, 0.6f, 1.0f); // Warm golden color
-    AtmosphereSettings.SunAngle = 25.0f; // Low angle for golden hour
-    AtmosphereSettings.FogDensity = 0.025f; // More atmospheric fog
-    AtmosphereSettings.FogColor = FLinearColor(0.9f, 0.8f, 0.7f, 1.0f); // Warm fog
-    
-    UpdateAtmosphere();
+    SetTimeOfDay(EEnvArt_TimeOfDay::Afternoon);
 }
 
-void AEnvArt_AtmosphereController::SetCretaceousAtmosphere()
+void AEnvArt_AtmosphereController::UpdateLighting()
 {
-    // Cretaceous period had higher CO2 levels, warmer climate, and lush vegetation
-    AtmosphereSettings.SunIntensity = 3.5f;
-    AtmosphereSettings.SunColor = FLinearColor(1.0f, 0.95f, 0.85f, 1.0f); // Slightly warm sunlight
-    AtmosphereSettings.SunAngle = 45.0f; // Tropical latitude angle
-    AtmosphereSettings.FogDensity = 0.02f; // Humid atmosphere
-    AtmosphereSettings.FogColor = FLinearColor(0.8f, 0.9f, 0.95f, 1.0f); // Slightly blue-tinted humid air
-    AtmosphereSettings.FogHeightFalloff = 0.1f; // Dense low-lying humidity
-    
-    UpdateAtmosphere();
+    if (!LightingPresets.Contains(CurrentTimeOfDay)) return;
+
+    FEnvArt_LightingSettings Settings = LightingPresets[CurrentTimeOfDay];
+    ApplyLightingSettings(Settings);
 }
 
-void AEnvArt_AtmosphereController::UpdateSunPosition()
+FEnvArt_LightingSettings AEnvArt_AtmosphereController::GetCurrentLightingSettings() const
 {
-    if (!SunLight || !SunLight->GetLightComponent())
+    if (LightingPresets.Contains(CurrentTimeOfDay))
     {
-        return;
+        return LightingPresets[CurrentTimeOfDay];
     }
-    
-    UDirectionalLightComponent* LightComponent = SunLight->GetLightComponent();
-    
-    // Calculate sun position based on time of day
-    float SunElevation = FMath::Sin(CurrentTimeValue * PI) * 90.0f; // 0-90 degrees
-    float SunAzimuth = (CurrentTimeValue - 0.25f) * 360.0f; // East to West
-    
-    // Apply atmosphere settings
-    SunElevation = FMath::Max(AtmosphereSettings.SunAngle, SunElevation);
-    
-    FRotator SunRotation = FRotator(-SunElevation, SunAzimuth, 0.0f);
-    SunLight->SetActorRotation(SunRotation);
-    
-    // Update sun intensity and color based on time
-    float IntensityMultiplier = FMath::Max(0.1f, FMath::Sin(CurrentTimeValue * PI));
-    LightComponent->SetIntensity(AtmosphereSettings.SunIntensity * IntensityMultiplier);
-    LightComponent->SetLightColor(AtmosphereSettings.SunColor);
+    return FEnvArt_LightingSettings();
 }
 
-void AEnvArt_AtmosphereController::UpdateFogSettings()
+void AEnvArt_AtmosphereController::ApplyLightingSettings(const FEnvArt_LightingSettings& Settings)
 {
-    if (!HeightFog || !HeightFog->GetComponent())
+    // Apply sun lighting
+    if (SunLight.IsValid())
     {
-        return;
+        ADirectionalLight* Sun = SunLight.Get();
+        Sun->SetActorRotation(Settings.SunRotation);
+        
+        UDirectionalLightComponent* LightComp = Sun->GetLightComponent();
+        if (LightComp)
+        {
+            LightComp->SetLightColor(Settings.SunColor);
+            LightComp->SetIntensity(Settings.SunIntensity);
+        }
     }
-    
-    UExponentialHeightFogComponent* FogComponent = HeightFog->GetComponent();
-    
-    // Apply atmosphere fog settings
-    FogComponent->SetFogDensity(AtmosphereSettings.FogDensity);
-    FogComponent->SetFogInscatteringColor(AtmosphereSettings.FogColor);
-    FogComponent->SetFogHeightFalloff(AtmosphereSettings.FogHeightFalloff);
-    
-    // Adjust fog based on time of day
-    float TimeMultiplier = 1.0f;
-    if (CurrentTimeOfDay == EEnvArt_TimeOfDay::Dawn || CurrentTimeOfDay == EEnvArt_TimeOfDay::Dusk)
+
+    // Apply fog settings
+    if (AtmosphericFog.IsValid())
     {
-        TimeMultiplier = 1.5f; // More atmospheric during golden hours
+        AExponentialHeightFog* Fog = AtmosphericFog.Get();
+        UExponentialHeightFogComponent* FogComp = Fog->GetComponent();
+        if (FogComp)
+        {
+            FogComp->SetFogDensity(Settings.FogDensity);
+            FogComp->SetFogInscatteringColor(Settings.FogInscatteringColor);
+            FogComp->SetVolumetricFog(bEnableVolumetricFog);
+        }
     }
-    else if (CurrentTimeOfDay == EEnvArt_TimeOfDay::Night)
-    {
-        TimeMultiplier = 0.7f; // Less visible fog at night
-    }
-    
-    FogComponent->SetFogDensity(AtmosphereSettings.FogDensity * TimeMultiplier);
 }
 
-void AEnvArt_AtmosphereController::UpdateSkyLightSettings()
+void AEnvArt_AtmosphereController::InterpolateLighting(const FEnvArt_LightingSettings& From, const FEnvArt_LightingSettings& To, float Alpha)
 {
-    if (!SkyLight || !SkyLight->GetLightComponent())
-    {
-        return;
-    }
+    FEnvArt_LightingSettings InterpolatedSettings;
     
-    USkyLightComponent* SkyComponent = SkyLight->GetLightComponent();
+    // Interpolate rotation
+    InterpolatedSettings.SunRotation = FMath::Lerp(From.SunRotation, To.SunRotation, Alpha);
     
-    // Update sky light intensity based on time of day
-    float SkyIntensity = 1.0f;
-    switch (CurrentTimeOfDay)
-    {
-        case EEnvArt_TimeOfDay::Dawn:
-        case EEnvArt_TimeOfDay::Dusk:
-            SkyIntensity = 0.8f;
-            break;
-        case EEnvArt_TimeOfDay::Night:
-            SkyIntensity = 0.3f;
-            break;
-        case EEnvArt_TimeOfDay::Noon:
-            SkyIntensity = 1.2f;
-            break;
-        default:
-            SkyIntensity = 1.0f;
-            break;
-    }
+    // Interpolate colors
+    InterpolatedSettings.SunColor = FMath::Lerp(From.SunColor, To.SunColor, Alpha);
+    InterpolatedSettings.FogInscatteringColor = FMath::Lerp(From.FogInscatteringColor, To.FogInscatteringColor, Alpha);
     
-    SkyComponent->SetIntensity(SkyIntensity);
-    SkyComponent->RecaptureSky();
+    // Interpolate scalars
+    InterpolatedSettings.SunIntensity = FMath::Lerp(From.SunIntensity, To.SunIntensity, Alpha);
+    InterpolatedSettings.FogDensity = FMath::Lerp(From.FogDensity, To.FogDensity, Alpha);
+    InterpolatedSettings.AtmosphereHaziness = FMath::Lerp(From.AtmosphereHaziness, To.AtmosphereHaziness, Alpha);
+    
+    ApplyLightingSettings(InterpolatedSettings);
 }
