@@ -1,22 +1,13 @@
 #include "Crowd_MassSimulationSubsystem.h"
 #include "Engine/World.h"
-#include "Engine/Engine.h"
-#include "MassEntitySubsystem.h"
-#include "MassSpawnerSubsystem.h"
-#include "MassCommonFragments.h"
-#include "MassMovementFragments.h"
-#include "MassRepresentationFragments.h"
-#include "Components/StaticMeshComponent.h"
-#include "Engine/StaticMeshActor.h"
+#include "Kismet/KismetMathLibrary.h"
 
 UCrowd_MassSimulationSubsystem::UCrowd_MassSimulationSubsystem()
 {
-    bCrowdSimulationEnabled = true;
-    SimulationUpdateRate = 0.1f;
-    MaxTotalCrowdEntities = 50000;
-    CrowdEntityLifespan = 300.0f;
-    CurrentEntityCount = 0;
-    LastUpdateTime = 0.0f;
+    MaxCrowdAgents = 1000;
+    AgentSeparationRadius = 100.0f;
+    MaxSpeed = 200.0f;
+    bIsInitialized = false;
 }
 
 void UCrowd_MassSimulationSubsystem::Initialize(FSubsystemCollectionBase& Collection)
@@ -24,294 +15,167 @@ void UCrowd_MassSimulationSubsystem::Initialize(FSubsystemCollectionBase& Collec
     Super::Initialize(Collection);
     
     UE_LOG(LogTemp, Warning, TEXT("Crowd Mass Simulation Subsystem Initialized"));
-    
-    // Initialize default biome configurations
-    BiomeConfigurations.Empty();
-    
-    // Savana biome
-    FCrowd_BiomeConfig SavanaConfig;
-    SavanaConfig.BiomeType = EBiomeType::Savana;
-    SavanaConfig.BiomeCenter = FVector(0.0f, 0.0f, 100.0f);
-    SavanaConfig.BiomeRadius = 5000.0f;
-    SavanaConfig.MaxCrowdEntities = 2000;
-    SavanaConfig.EntityDensity = 0.15f;
-    BiomeConfigurations.Add(SavanaConfig);
-    
-    // Forest biome
-    FCrowd_BiomeConfig ForestConfig;
-    ForestConfig.BiomeType = EBiomeType::Forest;
-    ForestConfig.BiomeCenter = FVector(-45000.0f, 40000.0f, 100.0f);
-    ForestConfig.BiomeRadius = 4000.0f;
-    ForestConfig.MaxCrowdEntities = 1500;
-    ForestConfig.EntityDensity = 0.12f;
-    BiomeConfigurations.Add(ForestConfig);
-    
-    // Desert biome
-    FCrowd_BiomeConfig DesertConfig;
-    DesertConfig.BiomeType = EBiomeType::Desert;
-    DesertConfig.BiomeCenter = FVector(55000.0f, 0.0f, 100.0f);
-    DesertConfig.BiomeRadius = 6000.0f;
-    DesertConfig.MaxCrowdEntities = 800;
-    DesertConfig.EntityDensity = 0.08f;
-    BiomeConfigurations.Add(DesertConfig);
-    
-    // Initialize Mass Entity system
-    InitializeMassEntitySystem();
+    InitializeMassSimulation();
 }
 
 void UCrowd_MassSimulationSubsystem::Deinitialize()
 {
-    ClearAllCrowdEntities();
-    MassEntitySubsystem = nullptr;
+    CrowdAgents.Empty();
+    bIsInitialized = false;
     
     UE_LOG(LogTemp, Warning, TEXT("Crowd Mass Simulation Subsystem Deinitialized"));
-    
     Super::Deinitialize();
 }
 
-bool UCrowd_MassSimulationSubsystem::ShouldCreateSubsystem(UObject* Outer) const
+void UCrowd_MassSimulationSubsystem::InitializeMassSimulation()
 {
-    return Super::ShouldCreateSubsystem(Outer);
+    if (bIsInitialized)
+    {
+        return;
+    }
+
+    CrowdAgents.Reserve(MaxCrowdAgents);
+    GlobalTarget = FVector(0.0f, 0.0f, 100.0f);
+    bIsInitialized = true;
+
+    UE_LOG(LogTemp, Warning, TEXT("Mass Simulation initialized with capacity: %d"), MaxCrowdAgents);
 }
 
-void UCrowd_MassSimulationSubsystem::InitializeMassEntitySystem()
+void UCrowd_MassSimulationSubsystem::SpawnCrowdAgents(int32 NumAgents, FVector SpawnCenter, float SpawnRadius)
 {
-    UWorld* World = GetWorld();
-    if (!World)
+    if (!bIsInitialized)
     {
-        UE_LOG(LogTemp, Error, TEXT("Crowd Simulation: No valid world found"));
-        return;
+        InitializeMassSimulation();
     }
-    
-    MassEntitySubsystem = World->GetSubsystem<UMassEntitySubsystem>();
-    if (!MassEntitySubsystem)
-    {
-        UE_LOG(LogTemp, Error, TEXT("Crowd Simulation: Mass Entity Subsystem not available"));
-        return;
-    }
-    
-    CreateMassEntityArchetype();
-    
-    UE_LOG(LogTemp, Warning, TEXT("Crowd Simulation: Mass Entity system initialized"));
-}
 
-void UCrowd_MassSimulationSubsystem::CreateMassEntityArchetype()
-{
-    if (!MassEntitySubsystem)
+    int32 AgentsToSpawn = FMath::Min(NumAgents, MaxCrowdAgents - CrowdAgents.Num());
+    
+    for (int32 i = 0; i < AgentsToSpawn; i++)
     {
-        return;
-    }
-    
-    // Create archetype with basic fragments for crowd entities
-    FMassArchetypeCompositionDescriptor Descriptor;
-    Descriptor.Fragments.Add<FTransformFragment>();
-    Descriptor.Fragments.Add<FMassVelocityFragment>();
-    Descriptor.Fragments.Add<FMassForceFragment>();
-    
-    CrowdArchetype = MassEntitySubsystem->CreateArchetype(Descriptor);
-    
-    UE_LOG(LogTemp, Warning, TEXT("Crowd Simulation: Mass Entity archetype created"));
-}
-
-void UCrowd_MassSimulationSubsystem::SpawnCrowdEntitiesInBiome(EBiomeType BiomeType, int32 EntityCount)
-{
-    if (!MassEntitySubsystem || !bCrowdSimulationEnabled)
-    {
-        return;
-    }
-    
-    FVector BiomeCenter = GetBiomeCenter(BiomeType);
-    float SpawnRadius = 2000.0f;
-    
-    for (int32 i = 0; i < EntityCount && CurrentEntityCount < MaxTotalCrowdEntities; i++)
-    {
-        // Generate random position within biome
-        float Angle = FMath::RandRange(0.0f, 2.0f * PI);
-        float Distance = FMath::RandRange(100.0f, SpawnRadius);
+        FCrowd_AgentData NewAgent;
         
-        FVector SpawnLocation = BiomeCenter + FVector(
+        // Random spawn position within radius
+        float Angle = FMath::RandRange(0.0f, 2.0f * PI);
+        float Distance = FMath::RandRange(0.0f, SpawnRadius);
+        
+        NewAgent.Location = SpawnCenter + FVector(
             FMath::Cos(Angle) * Distance,
             FMath::Sin(Angle) * Distance,
-            FMath::RandRange(-50.0f, 50.0f)
+            0.0f
         );
         
-        SpawnEntityAtLocation(SpawnLocation, BiomeType);
+        NewAgent.Velocity = FVector::ZeroVector;
+        NewAgent.Speed = FMath::RandRange(100.0f, MaxSpeed);
+        NewAgent.TargetLocation = GlobalTarget;
+        NewAgent.AgentID = CrowdAgents.Num() + i;
+        NewAgent.bIsActive = true;
+        
+        CrowdAgents.Add(NewAgent);
     }
-    
-    UE_LOG(LogTemp, Warning, TEXT("Crowd Simulation: Spawned %d entities in biome %d"), EntityCount, (int32)BiomeType);
-}
 
-void UCrowd_MassSimulationSubsystem::SpawnEntityAtLocation(const FVector& Location, EBiomeType BiomeType)
-{
-    if (!MassEntitySubsystem)
-    {
-        return;
-    }
-    
-    // Create new Mass Entity
-    FMassEntityHandle Entity = MassEntitySubsystem->CreateEntity(CrowdArchetype);
-    if (!Entity.IsValid())
-    {
-        return;
-    }
-    
-    // Set initial transform
-    FTransformFragment* TransformFragment = MassEntitySubsystem->GetFragmentDataPtr<FTransformFragment>(Entity);
-    if (TransformFragment)
-    {
-        TransformFragment->GetMutableTransform().SetLocation(Location);
-        TransformFragment->GetMutableTransform().SetRotation(FQuat::Identity);
-        TransformFragment->GetMutableTransform().SetScale3D(FVector::OneVector);
-    }
-    
-    // Set initial velocity
-    FMassVelocityFragment* VelocityFragment = MassEntitySubsystem->GetFragmentDataPtr<FMassVelocityFragment>(Entity);
-    if (VelocityFragment)
-    {
-        VelocityFragment->Value = FVector::ZeroVector;
-    }
-    
-    // Create entity config
-    FCrowd_EntityConfig EntityConfig;
-    EntityConfig.SpawnLocation = Location;
-    EntityConfig.BiomeType = BiomeType;
-    EntityConfig.MovementSpeed = FMath::RandRange(100.0f, 200.0f);
-    EntityConfig.WanderRadius = FMath::RandRange(500.0f, 1500.0f);
-    EntityConfig.bIsActive = true;
-    
-    ActiveCrowdEntities.Add(EntityConfig);
-    CurrentEntityCount++;
+    UE_LOG(LogTemp, Warning, TEXT("Spawned %d crowd agents. Total: %d"), AgentsToSpawn, CrowdAgents.Num());
 }
 
 void UCrowd_MassSimulationSubsystem::UpdateCrowdSimulation(float DeltaTime)
 {
-    if (!bCrowdSimulationEnabled || !MassEntitySubsystem)
+    if (!bIsInitialized || CrowdAgents.Num() == 0)
     {
         return;
     }
-    
-    LastUpdateTime += DeltaTime;
-    
-    // Update at specified rate
-    if (LastUpdateTime >= SimulationUpdateRate)
+
+    for (FCrowd_AgentData& Agent : CrowdAgents)
     {
-        UpdateEntityMovement(LastUpdateTime);
-        CleanupExpiredEntities();
-        LastUpdateTime = 0.0f;
+        if (Agent.bIsActive)
+        {
+            UpdateAgentMovement(Agent, DeltaTime);
+        }
     }
 }
 
-void UCrowd_MassSimulationSubsystem::UpdateEntityMovement(float DeltaTime)
+void UCrowd_MassSimulationSubsystem::SetCrowdTarget(FVector NewTarget)
 {
-    // Mass Entity movement updates would be handled by Mass processors
-    // This is a simplified update for demonstration
+    GlobalTarget = NewTarget;
     
-    for (FCrowd_EntityConfig& EntityConfig : ActiveCrowdEntities)
+    for (FCrowd_AgentData& Agent : CrowdAgents)
     {
-        if (!EntityConfig.bIsActive)
-        {
-            continue;
-        }
-        
-        // Simple wander behavior
-        FVector RandomDirection = FVector(
-            FMath::RandRange(-1.0f, 1.0f),
-            FMath::RandRange(-1.0f, 1.0f),
-            0.0f
-        ).GetSafeNormal();
-        
-        FVector NewLocation = EntityConfig.SpawnLocation + RandomDirection * EntityConfig.MovementSpeed * DeltaTime;
-        EntityConfig.SpawnLocation = NewLocation;
+        Agent.TargetLocation = GlobalTarget;
     }
+
+    UE_LOG(LogTemp, Log, TEXT("Crowd target set to: %s"), *GlobalTarget.ToString());
 }
 
-void UCrowd_MassSimulationSubsystem::CleanupExpiredEntities()
+int32 UCrowd_MassSimulationSubsystem::GetActiveCrowdCount() const
 {
-    // Remove entities that are too far from their biome or inactive
-    ActiveCrowdEntities.RemoveAll([this](const FCrowd_EntityConfig& EntityConfig)
+    int32 ActiveCount = 0;
+    for (const FCrowd_AgentData& Agent : CrowdAgents)
     {
-        if (!EntityConfig.bIsActive)
+        if (Agent.bIsActive)
         {
-            CurrentEntityCount--;
-            return true;
+            ActiveCount++;
         }
-        
-        FVector BiomeCenter = GetBiomeCenter(EntityConfig.BiomeType);
-        float Distance = FVector::Dist(EntityConfig.SpawnLocation, BiomeCenter);
-        
-        if (Distance > EntityConfig.WanderRadius * 2.0f)
-        {
-            CurrentEntityCount--;
-            return true;
-        }
-        
-        return false;
-    });
+    }
+    return ActiveCount;
 }
 
-void UCrowd_MassSimulationSubsystem::SetBiomeConfiguration(const TArray<FCrowd_BiomeConfig>& BiomeConfigs)
+void UCrowd_MassSimulationSubsystem::UpdateAgentMovement(FCrowd_AgentData& Agent, float DeltaTime)
 {
-    BiomeConfigurations = BiomeConfigs;
-    UE_LOG(LogTemp, Warning, TEXT("Crowd Simulation: Updated biome configurations"));
-}
-
-int32 UCrowd_MassSimulationSubsystem::GetActiveCrowdEntityCount() const
-{
-    return CurrentEntityCount;
-}
-
-void UCrowd_MassSimulationSubsystem::EnableCrowdSimulation(bool bEnabled)
-{
-    bCrowdSimulationEnabled = bEnabled;
-    UE_LOG(LogTemp, Warning, TEXT("Crowd Simulation: %s"), bEnabled ? TEXT("Enabled") : TEXT("Disabled"));
-}
-
-void UCrowd_MassSimulationSubsystem::ClearAllCrowdEntities()
-{
-    ActiveCrowdEntities.Empty();
-    CurrentEntityCount = 0;
-    UE_LOG(LogTemp, Warning, TEXT("Crowd Simulation: All entities cleared"));
-}
-
-void UCrowd_MassSimulationSubsystem::ConfigureSavanaCrowd()
-{
-    SpawnCrowdEntitiesInBiome(EBiomeType::Savana, 500);
-}
-
-void UCrowd_MassSimulationSubsystem::ConfigureForestCrowd()
-{
-    SpawnCrowdEntitiesInBiome(EBiomeType::Forest, 300);
-}
-
-void UCrowd_MassSimulationSubsystem::ConfigureDesertCrowd()
-{
-    SpawnCrowdEntitiesInBiome(EBiomeType::Desert, 200);
-}
-
-FVector UCrowd_MassSimulationSubsystem::GetBiomeCenter(EBiomeType BiomeType) const
-{
-    for (const FCrowd_BiomeConfig& Config : BiomeConfigurations)
+    FVector SteeringForce = CalculateSteeringForce(Agent);
+    
+    // Apply steering force to velocity
+    Agent.Velocity += SteeringForce * DeltaTime;
+    
+    // Limit velocity to max speed
+    if (Agent.Velocity.Size() > Agent.Speed)
     {
-        if (Config.BiomeType == BiomeType)
+        Agent.Velocity = Agent.Velocity.GetSafeNormal() * Agent.Speed;
+    }
+    
+    // Update position
+    Agent.Location += Agent.Velocity * DeltaTime;
+}
+
+FVector UCrowd_MassSimulationSubsystem::CalculateSteeringForce(const FCrowd_AgentData& Agent)
+{
+    FVector SeekForce = CalculateSeekForce(Agent);
+    FVector SeparationForce = CalculateSeparationForce(Agent);
+    
+    // Combine forces with weights
+    FVector TotalForce = SeekForce * 0.6f + SeparationForce * 0.4f;
+    
+    return TotalForce;
+}
+
+FVector UCrowd_MassSimulationSubsystem::CalculateSeekForce(const FCrowd_AgentData& Agent)
+{
+    FVector DesiredVelocity = (Agent.TargetLocation - Agent.Location).GetSafeNormal() * Agent.Speed;
+    return DesiredVelocity - Agent.Velocity;
+}
+
+FVector UCrowd_MassSimulationSubsystem::CalculateSeparationForce(const FCrowd_AgentData& Agent)
+{
+    FVector SeparationForce = FVector::ZeroVector;
+    int32 NeighborCount = 0;
+    
+    for (const FCrowd_AgentData& OtherAgent : CrowdAgents)
+    {
+        if (OtherAgent.AgentID != Agent.AgentID && OtherAgent.bIsActive)
         {
-            return Config.BiomeCenter;
+            float Distance = FVector::Dist(Agent.Location, OtherAgent.Location);
+            
+            if (Distance < AgentSeparationRadius && Distance > 0.0f)
+            {
+                FVector AwayVector = (Agent.Location - OtherAgent.Location).GetSafeNormal();
+                SeparationForce += AwayVector / Distance; // Closer agents have stronger repulsion
+                NeighborCount++;
+            }
         }
     }
     
-    // Default fallback coordinates
-    switch (BiomeType)
+    if (NeighborCount > 0)
     {
-        case EBiomeType::Savana:
-            return FVector(0.0f, 0.0f, 100.0f);
-        case EBiomeType::Forest:
-            return FVector(-45000.0f, 40000.0f, 100.0f);
-        case EBiomeType::Desert:
-            return FVector(55000.0f, 0.0f, 100.0f);
-        case EBiomeType::Mountain:
-            return FVector(40000.0f, 50000.0f, 100.0f);
-        case EBiomeType::Swamp:
-            return FVector(-50000.0f, -45000.0f, 100.0f);
-        default:
-            return FVector::ZeroVector;
+        SeparationForce /= NeighborCount;
+        SeparationForce = SeparationForce.GetSafeNormal() * Agent.Speed;
     }
+    
+    return SeparationForce;
 }
