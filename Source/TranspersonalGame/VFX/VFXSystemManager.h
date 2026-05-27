@@ -3,54 +3,51 @@
 #include "CoreMinimal.h"
 #include "Engine/World.h"
 #include "Components/ActorComponent.h"
-#include "NiagaraSystem.h"
-#include "NiagaraComponent.h"
 #include "Particles/ParticleSystemComponent.h"
+#include "SharedTypes.h"
 #include "VFXSystemManager.generated.h"
 
 UENUM(BlueprintType)
 enum class EVFX_EffectType : uint8
 {
-    Fire_Campfire,
-    Dust_Footstep,
-    Water_Splash,
-    Blood_Impact,
-    Breath_Vapor,
-    Volcanic_Ash,
-    Rain_Heavy,
-    Wind_Particles
+    None = 0,
+    DinosaurFootstep,
+    DinosaurBreath,
+    WaterSplash,
+    DustCloud,
+    BloodSpray,
+    CampfireFire,
+    CampfireSmoke,
+    RainDrops,
+    VolcanicAsh,
+    WindParticles
 };
 
 USTRUCT(BlueprintType)
-struct FVFX_EffectData
+struct TRANSPERSONALGAME_API FVFX_EffectData
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    EVFX_EffectType EffectType;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+    EVFX_EffectType EffectType = EVFX_EffectType::None;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    TSoftObjectPtr<UNiagaraSystem> NiagaraSystem;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+    FVector Location = FVector::ZeroVector;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FVector Scale;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+    FRotator Rotation = FRotator::ZeroRotator;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float Duration;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+    float Scale = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    bool bAutoDestroy;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+    float Duration = 3.0f;
 
-    FVFX_EffectData()
-    {
-        EffectType = EVFX_EffectType::Fire_Campfire;
-        Scale = FVector(1.0f);
-        Duration = 5.0f;
-        bAutoDestroy = true;
-    }
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+    bool bAutoDestroy = true;
 };
 
-UCLASS(BlueprintType, Blueprintable, meta = (BlueprintSpawnableComponent))
+UCLASS(BlueprintType, Blueprintable, ClassGroup=(VFX))
 class TRANSPERSONALGAME_API UVFX_SystemManager : public UActorComponent
 {
     GENERATED_BODY()
@@ -60,36 +57,50 @@ public:
 
 protected:
     virtual void BeginPlay() override;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
-    TArray<FVFX_EffectData> EffectDatabase;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "VFX")
-    TArray<UNiagaraComponent*> ActiveEffects;
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 public:
     UFUNCTION(BlueprintCallable, Category = "VFX")
-    UNiagaraComponent* SpawnVFXEffect(EVFX_EffectType EffectType, FVector Location, FRotator Rotation = FRotator::ZeroRotator, FVector Scale = FVector(1.0f));
+    void SpawnEffect(EVFX_EffectType EffectType, FVector Location, FRotator Rotation = FRotator::ZeroRotator, float Scale = 1.0f);
 
     UFUNCTION(BlueprintCallable, Category = "VFX")
-    void StopVFXEffect(UNiagaraComponent* Effect);
+    void SpawnDinosaurFootstepEffect(FVector ImpactLocation, float DinosaurSize = 1.0f);
 
     UFUNCTION(BlueprintCallable, Category = "VFX")
-    void StopAllEffects();
+    void SpawnWaterSplashEffect(FVector WaterLocation, float SplashIntensity = 1.0f);
 
     UFUNCTION(BlueprintCallable, Category = "VFX")
-    UNiagaraComponent* SpawnDinosaurBreathEffect(FVector Location, FRotator Direction);
+    void SpawnBloodEffect(FVector HitLocation, FVector HitDirection);
 
     UFUNCTION(BlueprintCallable, Category = "VFX")
-    UNiagaraComponent* SpawnFootstepDustEffect(FVector Location, float DinosaurSize = 1.0f);
+    void SpawnCampfireEffect(FVector FireLocation);
 
     UFUNCTION(BlueprintCallable, Category = "VFX")
-    UNiagaraComponent* SpawnCampfireEffect(FVector Location);
+    void CleanupExpiredEffects();
 
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    void InitializeEffectDatabase();
+protected:
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Settings")
+    float EffectCleanupInterval = 5.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Settings")
+    int32 MaxActiveEffects = 50;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Settings")
+    bool bEnableVFXLOD = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Settings")
+    float LODDistanceNear = 1000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Settings")
+    float LODDistanceFar = 5000.0f;
 
 private:
-    FVFX_EffectData* FindEffectData(EVFX_EffectType EffectType);
-    void CleanupDestroyedEffects();
+    UPROPERTY()
+    TArray<UParticleSystemComponent*> ActiveEffects;
+
+    float CleanupTimer = 0.0f;
+
+    UParticleSystemComponent* CreateParticleEffect(EVFX_EffectType EffectType, const FVFX_EffectData& EffectData);
+    void UpdateEffectLOD(UParticleSystemComponent* Effect, float DistanceToPlayer);
+    float GetDistanceToPlayer(FVector EffectLocation);
 };
