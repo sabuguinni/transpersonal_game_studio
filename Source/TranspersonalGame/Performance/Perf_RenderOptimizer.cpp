@@ -1,280 +1,374 @@
 #include "Perf_RenderOptimizer.h"
 #include "Engine/World.h"
 #include "Engine/Engine.h"
-#include "Components/StaticMeshComponent.h"
-#include "Engine/StaticMeshActor.h"
-#include "Materials/MaterialInterface.h"
-#include "Engine/GameViewportClient.h"
+#include "GameFramework/Pawn.h"
 #include "Kismet/GameplayStatics.h"
+#include "Components/StaticMeshComponent.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Engine/StaticMeshActor.h"
 
 UPerf_RenderOptimizer::UPerf_RenderOptimizer()
 {
     PrimaryComponentTick.bCanEverTick = true;
     PrimaryComponentTick.TickInterval = 0.1f; // Update 10 times per second
     
-    // Initialize frame time history
-    FrameTimeHistory.SetNum(MaxFrameTimeHistory);
-    for (int32 i = 0; i < MaxFrameTimeHistory; i++)
+    // Initialize default settings
+    LODSettings = FPerf_LODSettings();
+    TargetFrameRate = 60.0f;
+    MinFrameRate = 30.0f;
+    bAutoAdjustLOD = true;
+    bEnableRenderOptimization = true;
+    
+    // Initialize stats
+    RenderStats = FPerf_RenderStats();
+    
+    // Initialize performance tracking
+    LastFrameRate = 60.0f;
+    for (int32 i = 0; i < 10; i++)
     {
-        FrameTimeHistory[i] = 16.67f; // Default to 60 FPS
+        FrameRateHistory[i] = 60.0f;
     }
+    FrameHistoryIndex = 0;
+    bOptimizationActive = false;
+    LastOptimizationTime = 0.0f;
+    OptimizationInterval = 1.0f;
 }
 
 void UPerf_RenderOptimizer::BeginPlay()
 {
     Super::BeginPlay();
     
-    // Cache static mesh actors for optimization
-    UWorld* World = GetWorld();
-    if (World)
-    {
-        for (TActorIterator<AStaticMeshActor> ActorItr(World); ActorItr; ++ActorItr)
-        {
-            AStaticMeshActor* StaticMeshActor = *ActorItr;
-            if (StaticMeshActor && IsValid(StaticMeshActor))
-            {
-                CachedStaticMeshActors.Add(StaticMeshActor);
-                
-                UStaticMeshComponent* MeshComp = StaticMeshActor->GetStaticMeshComponent();
-                if (MeshComp && IsValid(MeshComp))
-                {
-                    CachedMeshComponents.Add(MeshComp);
-                }
-            }
-        }
-        
-        UE_LOG(LogTemp, Warning, TEXT("RenderOptimizer: Cached %d static mesh actors"), CachedStaticMeshActors.Num());
-    }
+    UE_LOG(LogTemp, Warning, TEXT("Render Optimizer initialized for %s"), 
+           GetOwner() ? *GetOwner()->GetName() : TEXT("Unknown"));
     
-    // Apply initial optimization
-    OptimizeRenderingForPerformance();
+    // Start optimization
+    bOptimizationActive = true;
 }
 
 void UPerf_RenderOptimizer::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
     
-    float CurrentTime = GetWorld()->GetTimeSeconds();
-    
-    // Update metrics every frame
-    UpdateRenderMetrics();
-    
-    // Apply optimizations at specified interval
-    if (bAutoOptimizeEnabled && (CurrentTime - LastOptimizationTime) >= OptimizationUpdateInterval)
+    if (!bEnableRenderOptimization || !bOptimizationActive)
     {
-        OptimizeRenderingForPerformance();
+        return;
+    }
+    
+    // Update frame rate tracking
+    float CurrentFrameRate = 1.0f / DeltaTime;
+    FrameRateHistory[FrameHistoryIndex] = CurrentFrameRate;
+    FrameHistoryIndex = (FrameHistoryIndex + 1) % 10;
+    
+    // Calculate average frame rate
+    float AverageFrameRate = 0.0f;
+    for (int32 i = 0; i < 10; i++)
+    {
+        AverageFrameRate += FrameRateHistory[i];
+    }
+    AverageFrameRate /= 10.0f;
+    LastFrameRate = AverageFrameRate;
+    
+    // Auto-adjust LOD if enabled
+    if (bAutoAdjustLOD)
+    {
+        AutoAdjustLODSettings(AverageFrameRate);
+    }
+    
+    // Periodic optimization
+    float CurrentTime = GetWorld()->GetTimeSeconds();
+    if (CurrentTime - LastOptimizationTime >= OptimizationInterval)
+    {
+        UpdateRenderStats();
         LastOptimizationTime = CurrentTime;
     }
-}
-
-void UPerf_RenderOptimizer::UpdateRenderMetrics()
-{
-    // Update frame time history
-    float CurrentFrameTime = FApp::GetDeltaTime() * 1000.0f; // Convert to milliseconds
-    FrameTimeHistory[FrameTimeHistoryIndex] = CurrentFrameTime;
-    FrameTimeHistoryIndex = (FrameTimeHistoryIndex + 1) % MaxFrameTimeHistory;
     
-    // Calculate average frame time
-    float TotalFrameTime = 0.0f;
-    for (float FrameTime : FrameTimeHistory)
+    // Optimize owner actor if it exists
+    if (GetOwner())
     {
-        TotalFrameTime += FrameTime;
+        OptimizeRenderingForActor(GetOwner());
     }
-    CurrentMetrics.GPUFrameTime = TotalFrameTime / MaxFrameTimeHistory;
-    
-    // Estimate render metrics (simplified for performance)
-    CurrentMetrics.VisibleActors = CachedStaticMeshActors.Num();
-    CurrentMetrics.CurrentDrawCalls = FMath::Min(CurrentMetrics.VisibleActors * 2, RenderSettings.MaxDrawCalls);
-    CurrentMetrics.CurrentTriangles = FMath::Min(CurrentMetrics.VisibleActors * 1000, RenderSettings.MaxTriangles);
 }
 
-void UPerf_RenderOptimizer::OptimizeRenderingForPerformance()
+void UPerf_RenderOptimizer::OptimizeRenderingForActor(AActor* Actor)
+{
+    if (!Actor || !bEnableRenderOptimization)
+    {
+        return;
+    }
+    
+    float Distance = GetDistanceToPlayer(Actor);
+    int32 OptimalLOD = GetOptimalLODLevel(Distance);
+    
+    // Apply LOD to static meshes
+    TArray<UStaticMeshComponent*> StaticMeshes;
+    Actor->GetComponents<UStaticMeshComponent>(StaticMeshes);
+    for (UStaticMeshComponent* MeshComp : StaticMeshes)
+    {
+        OptimizeStaticMesh(MeshComp, Distance);
+    }
+    
+    // Apply LOD to skeletal meshes
+    TArray<USkeletalMeshComponent*> SkeletalMeshes;
+    Actor->GetComponents<USkeletalMeshComponent>(SkeletalMeshes);
+    for (USkeletalMeshComponent* MeshComp : SkeletalMeshes)
+    {
+        OptimizeSkeletalMesh(MeshComp, Distance);
+    }
+    
+    // Update visibility based on distance
+    UpdateActorVisibility(Actor, Distance);
+}
+
+void UPerf_RenderOptimizer::SetLODForActor(AActor* Actor, int32 LODLevel)
+{
+    if (!Actor)
+    {
+        return;
+    }
+    
+    // Set LOD for static meshes
+    TArray<UStaticMeshComponent*> StaticMeshes;
+    Actor->GetComponents<UStaticMeshComponent>(StaticMeshes);
+    for (UStaticMeshComponent* MeshComp : StaticMeshes)
+    {
+        if (MeshComp && MeshComp->GetStaticMesh())
+        {
+            MeshComp->SetForcedLodModel(LODLevel + 1); // UE5 uses 1-based LOD indexing
+        }
+    }
+    
+    // Set LOD for skeletal meshes
+    TArray<USkeletalMeshComponent*> SkeletalMeshes;
+    Actor->GetComponents<USkeletalMeshComponent>(SkeletalMeshes);
+    for (USkeletalMeshComponent* MeshComp : SkeletalMeshes)
+    {
+        if (MeshComp && MeshComp->GetSkeletalMeshAsset())
+        {
+            MeshComp->SetForcedLOD(LODLevel + 1); // UE5 uses 1-based LOD indexing
+        }
+    }
+}
+
+void UPerf_RenderOptimizer::CullActorByDistance(AActor* Actor, bool bShouldCull)
+{
+    if (!Actor)
+    {
+        return;
+    }
+    
+    Actor->SetActorHiddenInGame(bShouldCull);
+    Actor->SetActorEnableCollision(!bShouldCull);
+    Actor->SetActorTickEnabled(!bShouldCull);
+}
+
+void UPerf_RenderOptimizer::UpdateRenderStats()
 {
     if (!GetWorld())
     {
         return;
     }
     
-    // Check if we need to optimize based on current performance
-    CheckRenderBudget();
+    // Reset stats
+    RenderStats.VisibleActors = 0;
+    RenderStats.CulledActors = 0;
+    RenderStats.LOD0Actors = 0;
+    RenderStats.LOD1Actors = 0;
+    RenderStats.LOD2Actors = 0;
+    RenderStats.AverageDrawDistance = 0.0f;
     
-    // Apply various optimization techniques
-    ApplyLODOptimizations();
-    UpdateCullingDistances();
-    OptimizeStaticMeshLODs();
-    UpdateInstancedRendering();
+    float TotalDistance = 0.0f;
+    int32 TotalActors = 0;
     
-    UE_LOG(LogTemp, Log, TEXT("RenderOptimizer: Applied optimizations - DrawCalls: %d, Triangles: %d"), 
-           CurrentMetrics.CurrentDrawCalls, CurrentMetrics.CurrentTriangles);
-}
-
-void UPerf_RenderOptimizer::SetRenderQuality(EPerformanceLevel Quality)
-{
-    switch (Quality)
+    // Iterate through all actors in the world
+    for (TActorIterator<AActor> ActorItr(GetWorld()); ActorItr; ++ActorItr)
     {
-        case EPerformanceLevel::Ultra:
-            RenderSettings.ViewDistanceScale = 1.0f;
-            RenderSettings.MaxDrawCalls = 3000;
-            RenderSettings.MaxTriangles = 1000000;
-            CullingDistanceMultiplier = 1.0f;
-            break;
-            
-        case EPerformanceLevel::High:
-            RenderSettings.ViewDistanceScale = 0.8f;
-            RenderSettings.MaxDrawCalls = 2000;
-            RenderSettings.MaxTriangles = 500000;
-            CullingDistanceMultiplier = 0.8f;
-            break;
-            
-        case EPerformanceLevel::Medium:
-            RenderSettings.ViewDistanceScale = 0.6f;
-            RenderSettings.MaxDrawCalls = 1500;
-            RenderSettings.MaxTriangles = 300000;
-            CullingDistanceMultiplier = 0.6f;
-            break;
-            
-        case EPerformanceLevel::Low:
-            RenderSettings.ViewDistanceScale = 0.4f;
-            RenderSettings.MaxDrawCalls = 1000;
-            RenderSettings.MaxTriangles = 150000;
-            CullingDistanceMultiplier = 0.4f;
-            break;
-    }
-    
-    // Apply the new settings immediately
-    OptimizeRenderingForPerformance();
-}
-
-void UPerf_RenderOptimizer::UpdateCullingDistances()
-{
-    for (TWeakObjectPtr<UStaticMeshComponent> MeshCompPtr : CachedMeshComponents)
-    {
-        if (UStaticMeshComponent* MeshComp = MeshCompPtr.Get())
+        AActor* Actor = *ActorItr;
+        if (!Actor || Actor->IsA<APawn>())
         {
-            // Adjust cull distance based on performance level
-            float BaseCullDistance = MeshComp->GetCachedMaxDrawDistance();
-            if (BaseCullDistance <= 0.0f)
-            {
-                BaseCullDistance = 10000.0f; // Default cull distance
-            }
-            
-            float NewCullDistance = BaseCullDistance * CullingDistanceMultiplier;
-            MeshComp->SetCachedMaxDrawDistance(NewCullDistance);
+            continue;
         }
-    }
-}
-
-void UPerf_RenderOptimizer::OptimizeStaticMeshLODs()
-{
-    for (TWeakObjectPtr<UStaticMeshComponent> MeshCompPtr : CachedMeshComponents)
-    {
-        if (UStaticMeshComponent* MeshComp = MeshCompPtr.Get())
+        
+        float Distance = GetDistanceToPlayer(Actor);
+        TotalDistance += Distance;
+        TotalActors++;
+        
+        // Check visibility
+        if (Actor->IsHidden())
         {
-            // Force LOD based on distance and performance settings
-            if (AActor* Owner = MeshComp->GetOwner())
+            RenderStats.CulledActors++;
+        }
+        else
+        {
+            RenderStats.VisibleActors++;
+            
+            // Determine LOD level
+            int32 LODLevel = GetOptimalLODLevel(Distance);
+            switch (LODLevel)
             {
-                FVector ActorLocation = Owner->GetActorLocation();
-                FVector ViewLocation = FVector::ZeroVector;
-                
-                // Get player location for distance calculation
-                if (APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0))
-                {
-                    ViewLocation = PlayerPawn->GetActorLocation();
-                }
-                
-                float Distance = FVector::Dist(ActorLocation, ViewLocation);
-                
-                // Set forced LOD based on distance and performance settings
-                int32 ForcedLOD = -1; // -1 means automatic
-                
-                if (Distance > LOD2Distance * CullingDistanceMultiplier)
-                {
-                    ForcedLOD = 2; // Lowest detail
-                }
-                else if (Distance > LOD1Distance * CullingDistanceMultiplier)
-                {
-                    ForcedLOD = 1; // Medium detail
-                }
-                else if (Distance > LOD0Distance * CullingDistanceMultiplier)
-                {
-                    ForcedLOD = 0; // High detail
-                }
-                
-                if (ForcedLOD >= 0)
-                {
-                    MeshComp->SetForcedLodModel(ForcedLOD + 1); // UE5 uses 1-based LOD indices
-                }
-                else
-                {
-                    MeshComp->SetForcedLodModel(0); // Automatic LOD selection
-                }
+                case 0:
+                    RenderStats.LOD0Actors++;
+                    break;
+                case 1:
+                    RenderStats.LOD1Actors++;
+                    break;
+                case 2:
+                    RenderStats.LOD2Actors++;
+                    break;
             }
         }
     }
+    
+    if (TotalActors > 0)
+    {
+        RenderStats.AverageDrawDistance = TotalDistance / TotalActors;
+    }
+    
+    RenderStats.RenderThreadTime = LastFrameRate > 0.0f ? (1000.0f / LastFrameRate) : 0.0f;
 }
 
-void UPerf_RenderOptimizer::ApplyLODOptimizations()
+void UPerf_RenderOptimizer::AutoAdjustLODSettings(float CurrentFrameRate)
 {
-    // This would typically involve more complex LOD management
-    // For now, we'll focus on distance-based optimizations
-    OptimizeStaticMeshLODs();
+    if (CurrentFrameRate < MinFrameRate)
+    {
+        // Performance is poor, increase culling distances
+        LODSettings.LOD0Distance *= 0.9f;
+        LODSettings.LOD1Distance *= 0.9f;
+        LODSettings.LOD2Distance *= 0.9f;
+        LODSettings.CullDistance *= 0.8f;
+        
+        UE_LOG(LogTemp, Warning, TEXT("Performance poor (%.1f fps), reducing LOD distances"), CurrentFrameRate);
+    }
+    else if (CurrentFrameRate > TargetFrameRate * 1.1f)
+    {
+        // Performance is good, we can increase quality
+        LODSettings.LOD0Distance *= 1.05f;
+        LODSettings.LOD1Distance *= 1.05f;
+        LODSettings.LOD2Distance *= 1.05f;
+        LODSettings.CullDistance *= 1.1f;
+        
+        // Clamp to reasonable maximums
+        LODSettings.LOD0Distance = FMath::Min(LODSettings.LOD0Distance, 2000.0f);
+        LODSettings.LOD1Distance = FMath::Min(LODSettings.LOD1Distance, 5000.0f);
+        LODSettings.LOD2Distance = FMath::Min(LODSettings.LOD2Distance, 10000.0f);
+        LODSettings.CullDistance = FMath::Min(LODSettings.CullDistance, 20000.0f);
+    }
 }
 
-void UPerf_RenderOptimizer::OptimizeMaterialComplexity()
+float UPerf_RenderOptimizer::GetDistanceToPlayer(AActor* Actor) const
 {
-    // Material complexity optimization would go here
-    // This is a placeholder for future implementation
+    if (!Actor || !GetWorld())
+    {
+        return 0.0f;
+    }
+    
+    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
+    if (!PlayerPawn)
+    {
+        return 0.0f;
+    }
+    
+    return FVector::Dist(Actor->GetActorLocation(), PlayerPawn->GetActorLocation());
 }
 
-void UPerf_RenderOptimizer::UpdateInstancedRendering()
+int32 UPerf_RenderOptimizer::GetOptimalLODLevel(float Distance) const
 {
-    if (!RenderSettings.bEnableInstancing)
+    if (Distance <= LODSettings.LOD0Distance)
+    {
+        return 0;
+    }
+    else if (Distance <= LODSettings.LOD1Distance)
+    {
+        return 1;
+    }
+    else if (Distance <= LODSettings.LOD2Distance)
+    {
+        return 2;
+    }
+    else
+    {
+        return 3; // Maximum LOD or cull
+    }
+}
+
+void UPerf_RenderOptimizer::ApplyOptimizationToAllActors()
+{
+    if (!GetWorld())
+    {
+        UE_LOG(LogTemp, Error, TEXT("Cannot apply optimization - no world context"));
+        return;
+    }
+    
+    int32 OptimizedCount = 0;
+    
+    for (TActorIterator<AActor> ActorItr(GetWorld()); ActorItr; ++ActorItr)
+    {
+        AActor* Actor = *ActorItr;
+        if (Actor && !Actor->IsA<APawn>())
+        {
+            OptimizeRenderingForActor(Actor);
+            OptimizedCount++;
+        }
+    }
+    
+    UE_LOG(LogTemp, Warning, TEXT("Applied render optimization to %d actors"), OptimizedCount);
+    UpdateRenderStats();
+}
+
+void UPerf_RenderOptimizer::OptimizeStaticMesh(UStaticMeshComponent* MeshComp, float Distance)
+{
+    if (!MeshComp || !MeshComp->GetStaticMesh())
     {
         return;
     }
     
-    // Instanced rendering optimization would go here
-    // This is a placeholder for future implementation
+    int32 LODLevel = GetOptimalLODLevel(Distance);
+    
+    if (LODLevel >= 3 && LODSettings.bEnableDistanceCulling)
+    {
+        // Cull the component
+        MeshComp->SetVisibility(false);
+        MeshComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    }
+    else
+    {
+        // Set appropriate LOD
+        MeshComp->SetVisibility(true);
+        MeshComp->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+        MeshComp->SetForcedLodModel(LODLevel + 1);
+    }
 }
 
-void UPerf_RenderOptimizer::CheckRenderBudget()
+void UPerf_RenderOptimizer::OptimizeSkeletalMesh(USkeletalMeshComponent* MeshComp, float Distance)
 {
-    // Check if we're exceeding our render budget
-    if (CurrentMetrics.CurrentDrawCalls > RenderSettings.MaxDrawCalls)
+    if (!MeshComp || !MeshComp->GetSkeletalMeshAsset())
     {
-        // Reduce quality to meet budget
-        CullingDistanceMultiplier = FMath::Max(0.2f, CullingDistanceMultiplier * 0.9f);
-        UE_LOG(LogTemp, Warning, TEXT("RenderOptimizer: Reducing cull distance to meet draw call budget"));
+        return;
     }
     
-    if (CurrentMetrics.CurrentTriangles > RenderSettings.MaxTriangles)
+    int32 LODLevel = GetOptimalLODLevel(Distance);
+    
+    if (LODLevel >= 3 && LODSettings.bEnableDistanceCulling)
     {
-        // Force higher LODs to reduce triangle count
-        LOD0Distance = FMath::Max(500.0f, LOD0Distance * 0.9f);
-        LOD1Distance = FMath::Max(1000.0f, LOD1Distance * 0.9f);
-        UE_LOG(LogTemp, Warning, TEXT("RenderOptimizer: Reducing LOD distances to meet triangle budget"));
+        // Cull the component
+        MeshComp->SetVisibility(false);
+        MeshComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    }
+    else
+    {
+        // Set appropriate LOD
+        MeshComp->SetVisibility(true);
+        MeshComp->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+        MeshComp->SetForcedLOD(LODLevel + 1);
     }
 }
 
-FPerf_RenderMetrics UPerf_RenderOptimizer::GetCurrentRenderMetrics() const
+void UPerf_RenderOptimizer::UpdateActorVisibility(AActor* Actor, float Distance)
 {
-    return CurrentMetrics;
-}
-
-void UPerf_RenderOptimizer::SetViewDistanceScale(float Scale)
-{
-    RenderSettings.ViewDistanceScale = FMath::Clamp(Scale, 0.1f, 2.0f);
-    CullingDistanceMultiplier = RenderSettings.ViewDistanceScale;
-    UpdateCullingDistances();
-}
-
-void UPerf_RenderOptimizer::EnableDynamicBatching(bool bEnable)
-{
-    RenderSettings.bEnableDynamicBatching = bEnable;
-    // Dynamic batching settings would be applied here
-}
-
-void UPerf_RenderOptimizer::SetMaxDrawCalls(int32 MaxCalls)
-{
-    RenderSettings.MaxDrawCalls = FMath::Max(100, MaxCalls);
+    if (!Actor)
+    {
+        return;
+    }
+    
+    bool bShouldCull = Distance > LODSettings.CullDistance && LODSettings.bEnableDistanceCulling;
+    CullActorByDistance(Actor, bShouldCull);
 }
