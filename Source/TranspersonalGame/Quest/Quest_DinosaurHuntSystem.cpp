@@ -1,440 +1,234 @@
 #include "Quest_DinosaurHuntSystem.h"
-#include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "GameFramework/PlayerController.h"
+#include "TimerManager.h"
+#include "Engine/Engine.h"
 #include "Kismet/GameplayStatics.h"
-#include "Components/StaticMeshComponent.h"
 
 UQuest_DinosaurHuntSystem::UQuest_DinosaurHuntSystem()
 {
-    PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 1.0f;
-
-    // Initialize hunt configuration
-    MaxHuntDistance = 50000.0f;
-    TrackingUpdateInterval = 5.0f;
-    bShowHuntMarkers = true;
-
-    // Initialize reward multipliers
-    MeatMultiplier = 1.0f;
-    BoneMultiplier = 1.0f;
-    HideMultiplier = 1.0f;
-
-    // Initialize calculated rewards
-    CalculatedMeatReward = 0;
-    CalculatedBoneReward = 0;
-    CalculatedHideReward = 0;
-
-    TrackingTimer = 0.0f;
+    PrimaryComponentTick.bCanEverTick = false;
+    HuntDetectionRadius = 5000.0f;
+    bAutoTrackNearbyDinosaurs = true;
 }
 
 void UQuest_DinosaurHuntSystem::BeginPlay()
 {
     Super::BeginPlay();
-    
-    UE_LOG(LogTemp, Log, TEXT("Quest_DinosaurHuntSystem: Hunt system initialized"));
-    
-    // Initialize current mission with default values
-    CurrentMission = FQuest_HuntMission();
-    CurrentMission.MissionName = TEXT("No Active Hunt");
-    CurrentMission.bIsActive = false;
-    CurrentMission.bIsCompleted = false;
+    CreateBasicHuntMissions();
 }
 
-void UQuest_DinosaurHuntSystem::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void UQuest_DinosaurHuntSystem::StartDinosaurHunt(const FQuest_DinosaurTarget& Target)
 {
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-
-    if (CurrentMission.bIsActive && !CurrentMission.bIsCompleted)
+    if (CurrentHunt.bHuntActive)
     {
-        UpdateHuntTimer(DeltaTime);
-        
-        TrackingTimer += DeltaTime;
-        if (TrackingTimer >= TrackingUpdateInterval)
-        {
-            TrackingTimer = 0.0f;
-            // Update target tracking logic here
-        }
-    }
-}
-
-void UQuest_DinosaurHuntSystem::StartHuntMission(EQuest_DinosaurSpecies Species, EQuest_HuntDifficulty Difficulty, FVector TargetLocation)
-{
-    if (CurrentMission.bIsActive)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Quest_DinosaurHuntSystem: Cannot start new hunt - mission already active"));
+        UE_LOG(LogTemp, Warning, TEXT("Hunt already active! End current hunt first."));
         return;
     }
 
-    // Initialize new hunt mission
-    CurrentMission = FQuest_HuntMission();
-    CurrentMission.MissionName = FString::Printf(TEXT("Hunt %s"), *GetSpeciesDisplayName(Species));
-    CurrentMission.Target.Species = Species;
-    CurrentMission.Target.LastKnownLocation = TargetLocation;
-    CurrentMission.Difficulty = Difficulty;
-    CurrentMission.StartLocation = GetOwner()->GetActorLocation();
-    CurrentMission.bIsActive = true;
-    CurrentMission.bIsCompleted = false;
+    CurrentHunt.bHuntActive = true;
+    CurrentHunt.CurrentKills = 0;
+    CurrentHunt.TimeRemaining = Target.TimeLimit;
+    CurrentHunt.TrackedDinosaurs.Empty();
 
-    // Scale difficulty based on species
-    ScaleDifficultyBySpecies(Species);
-
-    // Set required tools based on difficulty
-    CurrentMission.RequiredTools.Empty();
-    switch (Difficulty)
+    // Start hunt timer
+    if (Target.TimeLimit > 0.0f)
     {
-        case EQuest_HuntDifficulty::Scavenge:
-            CurrentMission.RequiredTools.Add(TEXT("Stone Knife"));
-            CurrentMission.TimeLimit = 900.0f; // 15 minutes
-            break;
-        case EQuest_HuntDifficulty::Ambush:
-            CurrentMission.RequiredTools.Add(TEXT("Spear"));
-            CurrentMission.RequiredTools.Add(TEXT("Stone Axe"));
-            CurrentMission.TimeLimit = 1200.0f; // 20 minutes
-            break;
-        case EQuest_HuntDifficulty::Hunt:
-            CurrentMission.RequiredTools.Add(TEXT("Spear"));
-            CurrentMission.RequiredTools.Add(TEXT("Bow"));
-            CurrentMission.RequiredTools.Add(TEXT("Stone Arrows"));
-            CurrentMission.TimeLimit = 1800.0f; // 30 minutes
-            break;
-        case EQuest_HuntDifficulty::PackHunt:
-            CurrentMission.RequiredTools.Add(TEXT("Spear"));
-            CurrentMission.RequiredTools.Add(TEXT("Bow"));
-            CurrentMission.RequiredTools.Add(TEXT("Stone Arrows"));
-            CurrentMission.RequiredTools.Add(TEXT("Trap"));
-            CurrentMission.TimeLimit = 2400.0f; // 40 minutes
-            break;
-        case EQuest_HuntDifficulty::ApexPredator:
-            CurrentMission.RequiredTools.Add(TEXT("Reinforced Spear"));
-            CurrentMission.RequiredTools.Add(TEXT("Composite Bow"));
-            CurrentMission.RequiredTools.Add(TEXT("Poison Arrows"));
-            CurrentMission.RequiredTools.Add(TEXT("Pit Trap"));
-            CurrentMission.TimeLimit = 3600.0f; // 60 minutes
-            break;
+        GetWorld()->GetTimerManager().SetTimer(
+            HuntTimerHandle,
+            this,
+            &UQuest_DinosaurHuntSystem::OnHuntTimerExpired,
+            Target.TimeLimit,
+            false
+        );
     }
 
-    CurrentMission.RemainingTime = CurrentMission.TimeLimit;
+    // Scan for nearby dinosaurs if auto-tracking enabled
+    if (bAutoTrackNearbyDinosaurs)
+    {
+        ScanForNearbyDinosaurs();
+    }
 
-    UE_LOG(LogTemp, Log, TEXT("Quest_DinosaurHuntSystem: Started hunt mission - %s"), *CurrentMission.MissionName);
+    OnHuntStarted(Target);
+    UE_LOG(LogTemp, Log, TEXT("Dinosaur hunt started: %s"), 
+           *UEnum::GetValueAsString(Target.Species));
+}
+
+void UQuest_DinosaurHuntSystem::EndCurrentHunt(bool bSuccess)
+{
+    if (!CurrentHunt.bHuntActive)
+    {
+        return;
+    }
+
+    // Clear timer
+    if (HuntTimerHandle.IsValid())
+    {
+        GetWorld()->GetTimerManager().ClearTimer(HuntTimerHandle);
+    }
+
+    int32 FinalKillCount = CurrentHunt.CurrentKills;
+    CurrentHunt.bHuntActive = false;
+    CurrentHunt.CurrentKills = 0;
+    CurrentHunt.TimeRemaining = 0.0f;
+    CurrentHunt.TrackedDinosaurs.Empty();
+
+    OnHuntCompleted(bSuccess, FinalKillCount);
+    UE_LOG(LogTemp, Log, TEXT("Hunt ended. Success: %s, Kills: %d"), 
+           bSuccess ? TEXT("true") : TEXT("false"), FinalKillCount);
+}
+
+void UQuest_DinosaurHuntSystem::RegisterDinosaurKill(AActor* DinosaurActor)
+{
+    if (!CurrentHunt.bHuntActive || !DinosaurActor)
+    {
+        return;
+    }
+
+    CurrentHunt.CurrentKills++;
+    OnDinosaurKilled(DinosaurActor);
     
-    // Calculate potential rewards
-    CalculateHuntRewards();
-}
-
-void UQuest_DinosaurHuntSystem::CompleteHuntMission()
-{
-    if (!CurrentMission.bIsActive)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Quest_DinosaurHuntSystem: No active hunt to complete"));
-        return;
-    }
-
-    CurrentMission.bIsCompleted = true;
-    CurrentMission.bIsActive = false;
-
-    UE_LOG(LogTemp, Log, TEXT("Quest_DinosaurHuntSystem: Hunt mission completed - %s"), *CurrentMission.MissionName);
-    UE_LOG(LogTemp, Log, TEXT("Quest_DinosaurHuntSystem: Rewards - Meat: %d, Bone: %d, Hide: %d"), 
-           CalculatedMeatReward, CalculatedBoneReward, CalculatedHideReward);
-}
-
-void UQuest_DinosaurHuntSystem::CancelHuntMission()
-{
-    if (!CurrentMission.bIsActive)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Quest_DinosaurHuntSystem: No active hunt to cancel"));
-        return;
-    }
-
-    CurrentMission.bIsActive = false;
-    CurrentMission.bIsCompleted = false;
-    CurrentMission.MissionName = TEXT("Hunt Cancelled");
-
-    UE_LOG(LogTemp, Log, TEXT("Quest_DinosaurHuntSystem: Hunt mission cancelled"));
+    UE_LOG(LogTemp, Log, TEXT("Dinosaur killed! Total kills: %d"), CurrentHunt.CurrentKills);
+    
+    CheckHuntCompletion();
 }
 
 bool UQuest_DinosaurHuntSystem::IsHuntActive() const
 {
-    return CurrentMission.bIsActive;
+    return CurrentHunt.bHuntActive;
 }
 
-float UQuest_DinosaurHuntSystem::GetRemainingTime() const
+FQuest_HuntProgress UQuest_DinosaurHuntSystem::GetCurrentHuntProgress() const
 {
-    return CurrentMission.RemainingTime;
+    return CurrentHunt;
 }
 
-void UQuest_DinosaurHuntSystem::UpdateTargetLocation(FVector NewLocation)
+TArray<FQuest_DinosaurTarget> UQuest_DinosaurHuntSystem::GetAvailableHunts() const
 {
-    if (CurrentMission.bIsActive)
-    {
-        CurrentMission.Target.LastKnownLocation = NewLocation;
-        UE_LOG(LogTemp, Log, TEXT("Quest_DinosaurHuntSystem: Target location updated"));
-    }
+    return AvailableHunts;
 }
 
-FVector UQuest_DinosaurHuntSystem::GetTargetLocation() const
+void UQuest_DinosaurHuntSystem::CreateBasicHuntMissions()
 {
-    return CurrentMission.Target.LastKnownLocation;
+    AvailableHunts.Empty();
+
+    // Easy Raptor Hunt
+    FQuest_DinosaurTarget RaptorHunt;
+    RaptorHunt.Species = EQuest_DinosaurSpecies::Raptor;
+    RaptorHunt.RequiredKills = 2;
+    RaptorHunt.Difficulty = EQuest_HuntDifficulty::Easy;
+    RaptorHunt.HuntLocation = FVector(1000, 1000, 100); // Savana
+    RaptorHunt.TimeLimit = 600.0f; // 10 minutes
+    AvailableHunts.Add(RaptorHunt);
+
+    // Medium Triceratops Hunt
+    FQuest_DinosaurTarget TriceratopsHunt;
+    TriceratopsHunt.Species = EQuest_DinosaurSpecies::Triceratops;
+    TriceratopsHunt.RequiredKills = 1;
+    TriceratopsHunt.Difficulty = EQuest_HuntDifficulty::Medium;
+    TriceratopsHunt.HuntLocation = FVector(5000, 5000, 100); // Savana
+    TriceratopsHunt.TimeLimit = 900.0f; // 15 minutes
+    AvailableHunts.Add(TriceratopsHunt);
+
+    // Hard Ankylosaurus Hunt
+    FQuest_DinosaurTarget AnkyloHunt;
+    AnkyloHunt.Species = EQuest_DinosaurSpecies::Ankylo;
+    AnkyloHunt.RequiredKills = 1;
+    AnkyloHunt.Difficulty = EQuest_HuntDifficulty::Hard;
+    AnkyloHunt.HuntLocation = FVector(-45000, 40000, 100); // Forest
+    AnkyloHunt.TimeLimit = 1200.0f; // 20 minutes
+    AvailableHunts.Add(AnkyloHunt);
+
+    // Legendary T-Rex Hunt
+    FQuest_DinosaurTarget TRexHunt;
+    TRexHunt.Species = EQuest_DinosaurSpecies::TRex;
+    TRexHunt.RequiredKills = 1;
+    TRexHunt.Difficulty = EQuest_HuntDifficulty::Legendary;
+    TRexHunt.HuntLocation = FVector(10000, 10000, 100); // Savana
+    TRexHunt.TimeLimit = 1800.0f; // 30 minutes
+    AvailableHunts.Add(TRexHunt);
+
+    UE_LOG(LogTemp, Log, TEXT("Created %d basic hunt missions"), AvailableHunts.Num());
 }
 
-float UQuest_DinosaurHuntSystem::GetDistanceToTarget() const
+void UQuest_DinosaurHuntSystem::ScanForNearbyDinosaurs()
 {
-    if (!GetOwner())
-    {
-        return -1.0f;
-    }
-
-    FVector PlayerLocation = GetOwner()->GetActorLocation();
-    FVector TargetLocation = CurrentMission.Target.LastKnownLocation;
-    
-    return FVector::Dist(PlayerLocation, TargetLocation);
-}
-
-bool UQuest_DinosaurHuntSystem::ValidateHuntSuccess(AActor* KilledDinosaur)
-{
-    if (!CurrentMission.bIsActive || !KilledDinosaur)
-    {
-        return false;
-    }
-
-    // Check if the killed dinosaur matches the target species
-    FString DinosaurName = KilledDinosaur->GetName();
-    FString TargetSpecies = GetSpeciesDisplayName(CurrentMission.Target.Species);
-
-    // Simple name matching - in a real implementation, you'd check the dinosaur's species component
-    bool bSpeciesMatch = DinosaurName.Contains(TargetSpecies);
-
-    if (bSpeciesMatch)
-    {
-        UE_LOG(LogTemp, Log, TEXT("Quest_DinosaurHuntSystem: Hunt target validated - %s"), *DinosaurName);
-        return true;
-    }
-
-    UE_LOG(LogTemp, Warning, TEXT("Quest_DinosaurHuntSystem: Hunt target mismatch - killed %s, needed %s"), 
-           *DinosaurName, *TargetSpecies);
-    return false;
-}
-
-bool UQuest_DinosaurHuntSystem::CheckRequiredTools()
-{
-    // In a real implementation, this would check the player's inventory
-    // For now, we'll assume the player has the tools if they started the hunt
-    return true;
-}
-
-void UQuest_DinosaurHuntSystem::ScaleDifficultyBySpecies(EQuest_DinosaurSpecies Species)
-{
-    switch (Species)
-    {
-        case EQuest_DinosaurSpecies::TRex:
-            CurrentMission.Target.ThreatLevel = 10.0f;
-            CurrentMission.Target.PackSize = 1;
-            CurrentMission.Target.TrackingRadius = 8000.0f;
-            break;
-        case EQuest_DinosaurSpecies::Velociraptor:
-            CurrentMission.Target.ThreatLevel = 7.0f;
-            CurrentMission.Target.PackSize = 3;
-            CurrentMission.Target.TrackingRadius = 6000.0f;
-            break;
-        case EQuest_DinosaurSpecies::Triceratops:
-            CurrentMission.Target.ThreatLevel = 6.0f;
-            CurrentMission.Target.PackSize = 2;
-            CurrentMission.Target.TrackingRadius = 5000.0f;
-            break;
-        case EQuest_DinosaurSpecies::Brachiosaurus:
-            CurrentMission.Target.ThreatLevel = 4.0f;
-            CurrentMission.Target.PackSize = 1;
-            CurrentMission.Target.TrackingRadius = 10000.0f;
-            break;
-        case EQuest_DinosaurSpecies::Ankylosaurus:
-            CurrentMission.Target.ThreatLevel = 5.0f;
-            CurrentMission.Target.PackSize = 1;
-            CurrentMission.Target.TrackingRadius = 4000.0f;
-            break;
-        case EQuest_DinosaurSpecies::Parasaurolophus:
-            CurrentMission.Target.ThreatLevel = 3.0f;
-            CurrentMission.Target.PackSize = 4;
-            CurrentMission.Target.TrackingRadius = 7000.0f;
-            break;
-        default:
-            CurrentMission.Target.ThreatLevel = 5.0f;
-            CurrentMission.Target.PackSize = 1;
-            CurrentMission.Target.TrackingRadius = 5000.0f;
-            break;
-    }
-}
-
-FString UQuest_DinosaurHuntSystem::GetHuntInstructions() const
-{
-    if (!CurrentMission.bIsActive)
-    {
-        return TEXT("No active hunt mission");
-    }
-
-    FString Instructions = FString::Printf(TEXT("Hunt Mission: %s\n"), *CurrentMission.MissionName);
-    Instructions += FString::Printf(TEXT("Target: %s\n"), *GetSpeciesDisplayName(CurrentMission.Target.Species));
-    Instructions += FString::Printf(TEXT("Difficulty: %s\n"), *GetDifficultyDisplayName(CurrentMission.Difficulty));
-    Instructions += FString::Printf(TEXT("Time Remaining: %.0f seconds\n"), CurrentMission.RemainingTime);
-    Instructions += FString::Printf(TEXT("Distance to Target: %.0fm\n"), GetDistanceToTarget());
-    
-    Instructions += TEXT("Required Tools:\n");
-    for (const FString& Tool : CurrentMission.RequiredTools)
-    {
-        Instructions += FString::Printf(TEXT("- %s\n"), *Tool);
-    }
-
-    return Instructions;
-}
-
-void UQuest_DinosaurHuntSystem::CalculateHuntRewards()
-{
-    if (!CurrentMission.bIsActive)
+    if (!GetWorld())
     {
         return;
     }
 
-    // Base rewards by species
-    int32 BaseMeat = 10;
-    int32 BaseBone = 5;
-    int32 BaseHide = 3;
-
-    switch (CurrentMission.Target.Species)
+    AActor* Owner = GetOwner();
+    if (!Owner)
     {
-        case EQuest_DinosaurSpecies::TRex:
-            BaseMeat = 100;
-            BaseBone = 50;
-            BaseHide = 25;
-            break;
-        case EQuest_DinosaurSpecies::Velociraptor:
-            BaseMeat = 30;
-            BaseBone = 15;
-            BaseHide = 10;
-            break;
-        case EQuest_DinosaurSpecies::Triceratops:
-            BaseMeat = 80;
-            BaseBone = 40;
-            BaseHide = 20;
-            break;
-        case EQuest_DinosaurSpecies::Brachiosaurus:
-            BaseMeat = 150;
-            BaseBone = 75;
-            BaseHide = 35;
-            break;
-        case EQuest_DinosaurSpecies::Ankylosaurus:
-            BaseMeat = 60;
-            BaseBone = 30;
-            BaseHide = 15;
-            break;
-        case EQuest_DinosaurSpecies::Parasaurolophus:
-            BaseMeat = 40;
-            BaseBone = 20;
-            BaseHide = 12;
-            break;
+        return;
     }
 
-    // Apply difficulty multiplier
-    float DifficultyMultiplier = 1.0f;
-    switch (CurrentMission.Difficulty)
+    FVector OwnerLocation = Owner->GetActorLocation();
+    TArray<AActor*> FoundActors;
+    
+    // Get all actors in the world
+    UGameplayStatics::GetAllActorsOfClass(GetWorld(), AActor::StaticClass(), FoundActors);
+    
+    CurrentHunt.TrackedDinosaurs.Empty();
+    
+    for (AActor* Actor : FoundActors)
     {
-        case EQuest_HuntDifficulty::Scavenge:
-            DifficultyMultiplier = 0.5f;
-            break;
-        case EQuest_HuntDifficulty::Ambush:
-            DifficultyMultiplier = 0.8f;
-            break;
-        case EQuest_HuntDifficulty::Hunt:
-            DifficultyMultiplier = 1.0f;
-            break;
-        case EQuest_HuntDifficulty::PackHunt:
-            DifficultyMultiplier = 1.5f;
-            break;
-        case EQuest_HuntDifficulty::ApexPredator:
-            DifficultyMultiplier = 2.0f;
-            break;
-    }
-
-    // Calculate final rewards
-    CalculatedMeatReward = FMath::RoundToInt(BaseMeat * DifficultyMultiplier * MeatMultiplier);
-    CalculatedBoneReward = FMath::RoundToInt(BaseBone * DifficultyMultiplier * BoneMultiplier);
-    CalculatedHideReward = FMath::RoundToInt(BaseHide * DifficultyMultiplier * HideMultiplier);
-}
-
-int32 UQuest_DinosaurHuntSystem::GetMeatReward() const
-{
-    return CalculatedMeatReward;
-}
-
-int32 UQuest_DinosaurHuntSystem::GetBoneReward() const
-{
-    return CalculatedBoneReward;
-}
-
-int32 UQuest_DinosaurHuntSystem::GetHideReward() const
-{
-    return CalculatedHideReward;
-}
-
-void UQuest_DinosaurHuntSystem::UpdateHuntTimer(float DeltaTime)
-{
-    if (CurrentMission.bIsActive && !CurrentMission.bIsCompleted)
-    {
-        CurrentMission.RemainingTime -= DeltaTime;
-        
-        if (CurrentMission.RemainingTime <= 0.0f)
+        if (!Actor)
         {
-            CheckHuntTimeout();
+            continue;
+        }
+        
+        FString ActorName = Actor->GetName();
+        
+        // Check if actor is a dinosaur (simple name-based check)
+        if (ActorName.Contains(TEXT("Rex")) || 
+            ActorName.Contains(TEXT("Raptor")) || 
+            ActorName.Contains(TEXT("Triceratops")) ||
+            ActorName.Contains(TEXT("Ankylo")) ||
+            ActorName.Contains(TEXT("Brachio")))
+        {
+            float Distance = FVector::Dist(OwnerLocation, Actor->GetActorLocation());
+            if (Distance <= HuntDetectionRadius)
+            {
+                CurrentHunt.TrackedDinosaurs.Add(Actor);
+            }
         }
     }
+    
+    UE_LOG(LogTemp, Log, TEXT("Scanned and found %d nearby dinosaurs"), 
+           CurrentHunt.TrackedDinosaurs.Num());
 }
 
-void UQuest_DinosaurHuntSystem::CheckHuntTimeout()
+void UQuest_DinosaurHuntSystem::OnHuntTimerExpired()
 {
-    if (CurrentMission.RemainingTime <= 0.0f)
+    UE_LOG(LogTemp, Warning, TEXT("Hunt timer expired!"));
+    EndCurrentHunt(false); // Failed due to timeout
+}
+
+void UQuest_DinosaurHuntSystem::UpdateHuntProgress()
+{
+    if (!CurrentHunt.bHuntActive)
     {
-        CurrentMission.bIsActive = false;
-        CurrentMission.bIsCompleted = false;
-        CurrentMission.MissionName = TEXT("Hunt Failed - Time Expired");
-        
-        UE_LOG(LogTemp, Warning, TEXT("Quest_DinosaurHuntSystem: Hunt mission failed - time expired"));
+        return;
+    }
+
+    // Update remaining time
+    if (HuntTimerHandle.IsValid())
+    {
+        CurrentHunt.TimeRemaining = GetWorld()->GetTimerManager().GetTimerRemaining(HuntTimerHandle);
     }
 }
 
-FString UQuest_DinosaurHuntSystem::GetSpeciesDisplayName(EQuest_DinosaurSpecies Species) const
+void UQuest_DinosaurHuntSystem::CheckHuntCompletion()
 {
-    switch (Species)
+    if (!CurrentHunt.bHuntActive)
     {
-        case EQuest_DinosaurSpecies::TRex:
-            return TEXT("T-Rex");
-        case EQuest_DinosaurSpecies::Velociraptor:
-            return TEXT("Velociraptor");
-        case EQuest_DinosaurSpecies::Triceratops:
-            return TEXT("Triceratops");
-        case EQuest_DinosaurSpecies::Brachiosaurus:
-            return TEXT("Brachiosaurus");
-        case EQuest_DinosaurSpecies::Ankylosaurus:
-            return TEXT("Ankylosaurus");
-        case EQuest_DinosaurSpecies::Parasaurolophus:
-            return TEXT("Parasaurolophus");
-        default:
-            return TEXT("Unknown");
+        return;
     }
-}
 
-FString UQuest_DinosaurHuntSystem::GetDifficultyDisplayName(EQuest_HuntDifficulty Difficulty) const
-{
-    switch (Difficulty)
+    // For now, simple completion check - this would be expanded to check specific targets
+    if (CurrentHunt.CurrentKills >= 1) // Basic completion threshold
     {
-        case EQuest_HuntDifficulty::Scavenge:
-            return TEXT("Scavenge");
-        case EQuest_HuntDifficulty::Ambush:
-            return TEXT("Ambush");
-        case EQuest_HuntDifficulty::Hunt:
-            return TEXT("Hunt");
-        case EQuest_HuntDifficulty::PackHunt:
-            return TEXT("Pack Hunt");
-        case EQuest_HuntDifficulty::ApexPredator:
-            return TEXT("Apex Predator");
-        default:
-            return TEXT("Unknown");
+        EndCurrentHunt(true);
     }
 }
