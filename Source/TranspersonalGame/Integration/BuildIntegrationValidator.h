@@ -2,155 +2,126 @@
 
 #include "CoreMinimal.h"
 #include "Engine/World.h"
-#include "GameFramework/GameModeBase.h"
-#include "Subsystems/GameInstanceSubsystem.h"
-#include "SharedTypes.h"
+#include "GameFramework/Actor.h"
+#include "Components/ActorComponent.h"
 #include "BuildIntegrationValidator.generated.h"
 
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FBuild_ValidationResult
+UENUM(BlueprintType)
+enum class EBuild_SystemStatus : uint8
 {
-    GENERATED_BODY()
-
-    UPROPERTY(BlueprintReadOnly, Category = "Build Validation")
-    bool bIsValid = false;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Build Validation")
-    int32 LoadedClasses = 0;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Build Validation")
-    int32 TotalClasses = 0;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Build Validation")
-    TArray<FString> FailedClasses;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Build Validation")
-    FString ValidationMessage;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Build Validation")
-    float ValidationTime = 0.0f;
+    Unknown     UMETA(DisplayName = "Unknown"),
+    Operational UMETA(DisplayName = "Operational"),
+    Failed      UMETA(DisplayName = "Failed"),
+    Error       UMETA(DisplayName = "Error")
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FBuild_ModuleStatus
+struct TRANSPERSONALGAME_API FBuild_SystemReport
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Module Status")
-    FString ModuleName;
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    FString SystemName;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Module Status")
-    bool bIsLoaded = false;
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    EBuild_SystemStatus Status;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Module Status")
-    int32 ClassCount = 0;
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    FString Details;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Module Status")
-    TArray<FString> LoadedClasses;
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    float ValidationTime;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Module Status")
-    FString LastError;
+    FBuild_SystemReport()
+    {
+        SystemName = TEXT("");
+        Status = EBuild_SystemStatus::Unknown;
+        Details = TEXT("");
+        ValidationTime = 0.0f;
+    }
 };
 
-/**
- * Build Integration Validator - Validates module loading, class registration, and system integration
- * Ensures all C++ classes are properly compiled and accessible to the UE5 reflection system
- */
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FBuild_IntegrationReport
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    TArray<FBuild_SystemReport> SystemReports;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    int32 TotalActors;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    int32 OperationalSystems;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    int32 TotalSystems;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    bool bBuildReady;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    FDateTime ValidationTimestamp;
+
+    FBuild_IntegrationReport()
+    {
+        TotalActors = 0;
+        OperationalSystems = 0;
+        TotalSystems = 0;
+        bBuildReady = false;
+        ValidationTimestamp = FDateTime::Now();
+    }
+};
+
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UBuildIntegrationValidator : public UGameInstanceSubsystem
+class TRANSPERSONALGAME_API UBuildIntegrationValidator : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
     UBuildIntegrationValidator();
 
-    // USubsystem interface
-    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
-    virtual void Deinitialize() override;
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    FBuild_IntegrationReport ValidateAllSystems();
 
-    /**
-     * Validates all core game modules and classes
-     * @return Validation result with detailed status
-     */
-    UFUNCTION(BlueprintCallable, Category = "Build Validation")
-    FBuild_ValidationResult ValidateAllModules();
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    EBuild_SystemStatus ValidateCharacterSystem();
 
-    /**
-     * Validates a specific module by name
-     * @param ModuleName Name of the module to validate
-     * @return Module status with loading information
-     */
-    UFUNCTION(BlueprintCallable, Category = "Build Validation")
-    FBuild_ModuleStatus ValidateModule(const FString& ModuleName);
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    EBuild_SystemStatus ValidateGameStateSystem();
 
-    /**
-     * Validates core game classes are properly loaded
-     * @return True if all core classes are accessible
-     */
-    UFUNCTION(BlueprintCallable, Category = "Build Validation")
-    bool ValidateCoreClasses();
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    EBuild_SystemStatus ValidateWorldGenSystem();
 
-    /**
-     * Validates world state and actor spawning capabilities
-     * @param World World context for validation
-     * @return True if world state is valid for gameplay
-     */
-    UFUNCTION(BlueprintCallable, Category = "Build Validation")
-    bool ValidateWorldState(UWorld* World);
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    EBuild_SystemStatus ValidateVFXSystem();
 
-    /**
-     * Runs comprehensive integration tests
-     * @return Detailed validation result
-     */
-    UFUNCTION(BlueprintCallable, Category = "Build Validation")
-    FBuild_ValidationResult RunIntegrationTests();
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    int32 GetTotalActorCount();
 
-    /**
-     * Gets the last validation result
-     * @return Cached validation result
-     */
-    UFUNCTION(BlueprintPure, Category = "Build Validation")
-    FBuild_ValidationResult GetLastValidationResult() const { return LastValidationResult; }
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    void PerformMemoryOptimization();
 
-    /**
-     * Checks if the build is in a valid state for gameplay
-     * @return True if build is ready for gameplay testing
-     */
-    UFUNCTION(BlueprintPure, Category = "Build Validation")
-    bool IsBuildValid() const { return LastValidationResult.bIsValid; }
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    bool SaveCurrentMap();
 
 protected:
-    /**
-     * Validates a single class by path
-     * @param ClassPath Full path to the class (e.g., "/Script/TranspersonalGame.TranspersonalCharacter")
-     * @return True if class loads successfully
-     */
-    bool ValidateClass(const FString& ClassPath);
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    FBuild_IntegrationReport LastReport;
 
-    /**
-     * Gets list of core classes that must be validated
-     * @return Array of class paths for validation
-     */
-    TArray<FString> GetCoreClassPaths() const;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration")
+    TArray<FString> CoreSystemClasses;
 
-    /**
-     * Logs validation results to console and file
-     * @param Result Validation result to log
-     */
-    void LogValidationResult(const FBuild_ValidationResult& Result);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration")
+    int32 MaxActorCountWarning;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration")
+    int32 MaxActorCountCritical;
 
 private:
-    /** Cached last validation result */
-    UPROPERTY()
-    FBuild_ValidationResult LastValidationResult;
-
-    /** Module status cache */
-    UPROPERTY()
-    TArray<FBuild_ModuleStatus> ModuleStatusCache;
-
-    /** Validation start time for performance tracking */
-    double ValidationStartTime = 0.0;
-
-    /** Core class paths for validation */
-    TArray<FString> CoreClassPaths;
+    EBuild_SystemStatus ValidateSystemClass(const FString& ClassPath);
+    void LogSystemStatus(const FString& SystemName, EBuild_SystemStatus Status);
 };
+
+#include "BuildIntegrationValidator.generated.h"
