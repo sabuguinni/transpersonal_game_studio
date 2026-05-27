@@ -5,59 +5,34 @@
 #include "MassEntityTypes.h"
 #include "MassSpawnerTypes.h"
 #include "MassEntitySubsystem.h"
-#include "Engine/World.h"
+#include "Components/StaticMeshComponent.h"
+#include "Engine/StaticMesh.h"
 #include "Crowd_MassEntitySpawner.generated.h"
 
-UENUM(BlueprintType)
-enum class ECrowd_BiomeType : uint8
-{
-    Savana UMETA(DisplayName = "Savana"),
-    Forest UMETA(DisplayName = "Forest"),
-    Desert UMETA(DisplayName = "Desert"),
-    Swamp UMETA(DisplayName = "Swamp"),
-    Mountain UMETA(DisplayName = "Mountain")
-};
-
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FCrowd_BiomeSpawnConfig
+struct FCrowd_SpawnSettings
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Config")
-    ECrowd_BiomeType BiomeType = ECrowd_BiomeType::Savana;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Spawning")
+    int32 MaxEntities = 1000;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Config")
-    FVector BiomeCenter = FVector::ZeroVector;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Spawning")
+    float SpawnRadius = 5000.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Config")
-    float SpawnRadius = 10000.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Spawning")
+    float MinSpawnDistance = 100.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Config")
-    int32 MaxEntities = 5000;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Spawning")
+    bool bSpawnOnBeginPlay = true;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Config")
-    float EntityDensity = 0.5f;
-};
-
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FCrowd_EntitySpawnData
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Entity Data")
-    FVector SpawnLocation = FVector::ZeroVector;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Entity Data")
-    FRotator SpawnRotation = FRotator::ZeroRotator;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Entity Data")
-    ECrowd_BiomeType AssignedBiome = ECrowd_BiomeType::Savana;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Entity Data")
-    float MovementSpeed = 100.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Entity Data")
-    bool bIsActive = true;
+    FCrowd_SpawnSettings()
+    {
+        MaxEntities = 1000;
+        SpawnRadius = 5000.0f;
+        MinSpawnDistance = 100.0f;
+        bSpawnOnBeginPlay = true;
+    }
 };
 
 UCLASS(BlueprintType, Blueprintable)
@@ -70,60 +45,44 @@ public:
 
 protected:
     virtual void BeginPlay() override;
-    virtual void Tick(float DeltaTime) override;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mass Spawning")
-    TArray<FCrowd_BiomeSpawnConfig> BiomeConfigs;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mass Spawning")
-    int32 TotalEntityLimit = 50000;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mass Spawning")
-    float SpawnInterval = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mass Spawning")
-    bool bAutoSpawn = true;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Runtime Data")
-    TArray<FCrowd_EntitySpawnData> SpawnedEntities;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Runtime Data")
-    int32 CurrentEntityCount = 0;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Runtime Data")
-    FMassEntityHandle LastSpawnedEntity;
-
-private:
-    FTimerHandle SpawnTimerHandle;
-    class UMassEntitySubsystem* MassEntitySubsystem;
 
 public:
-    UFUNCTION(BlueprintCallable, Category = "Mass Spawning")
-    void InitializeBiomes();
+    virtual void Tick(float DeltaTime) override;
 
-    UFUNCTION(BlueprintCallable, Category = "Mass Spawning")
-    void SpawnEntitiesInBiome(ECrowd_BiomeType BiomeType, int32 Count);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Spawning")
+    FCrowd_SpawnSettings SpawnSettings;
 
-    UFUNCTION(BlueprintCallable, Category = "Mass Spawning")
-    void SpawnSingleEntity(const FVector& Location, ECrowd_BiomeType BiomeType);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Spawning")
+    UStaticMesh* CrowdMemberMesh;
 
-    UFUNCTION(BlueprintCallable, Category = "Mass Spawning")
-    void ClearAllEntities();
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Crowd Spawning")
+    UStaticMeshComponent* SpawnerMesh;
 
-    UFUNCTION(BlueprintCallable, Category = "Mass Spawning")
-    void SetSpawnRate(float NewInterval);
+    UFUNCTION(BlueprintCallable, Category = "Crowd Spawning")
+    void SpawnCrowdEntities();
 
-    UFUNCTION(BlueprintPure, Category = "Mass Spawning")
-    int32 GetEntityCountInBiome(ECrowd_BiomeType BiomeType) const;
+    UFUNCTION(BlueprintCallable, Category = "Crowd Spawning")
+    void DespawnAllEntities();
 
-    UFUNCTION(BlueprintPure, Category = "Mass Spawning")
-    FVector GetBiomeCenter(ECrowd_BiomeType BiomeType) const;
+    UFUNCTION(BlueprintCallable, Category = "Crowd Spawning")
+    int32 GetActiveEntityCount() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Crowd Spawning", CallInEditor)
+    void TestSpawnSingleEntity();
 
 protected:
-    UFUNCTION()
-    void OnSpawnTimer();
+    UPROPERTY()
+    TArray<FMassEntityHandle> SpawnedEntities;
 
-    FVector GenerateRandomLocationInBiome(const FCrowd_BiomeSpawnConfig& BiomeConfig) const;
-    bool CanSpawnMoreEntities() const;
-    void UpdateEntityLOD();
+    UPROPERTY()
+    class UMassEntitySubsystem* MassEntitySubsystem;
+
+    void InitializeMassSystem();
+    FVector GetRandomSpawnLocation() const;
+    bool IsValidSpawnLocation(const FVector& Location) const;
+    void CleanupInvalidEntities();
+
+private:
+    float LastSpawnTime;
+    bool bMassSystemInitialized;
 };
