@@ -1,76 +1,69 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/GameInstance.h"
+#include "Engine/World.h"
+#include "GameFramework/GameModeBase.h"
 #include "Components/ActorComponent.h"
-#include "SharedTypes.h"
+#include "Engine/Engine.h"
 #include "Narr_DialogueSystem.generated.h"
 
 UENUM(BlueprintType)
-enum class ENarr_DialogueType : uint8
+enum class ENarr_DialogueTrigger : uint8
 {
     None = 0,
-    QuestBriefing,
-    SurvivalTip,
-    DangerWarning,
-    ResourceInfo,
-    TerritoryInfo,
-    CombatAdvice,
-    WeatherAlert
+    LowHealth,
+    Hunger,
+    Thirst,
+    DinosaurNearby,
+    CombatWarning,
+    Discovery,
+    FireLit,
+    NightFall,
+    DayBreak,
+    WeatherChange,
+    MAX UMETA(Hidden)
+};
+
+UENUM(BlueprintType)
+enum class ENarr_DialoguePriority : uint8
+{
+    Low = 0,
+    Normal = 1,
+    High = 2,
+    Critical = 3
 };
 
 USTRUCT(BlueprintType)
-struct FNarr_DialogueLine
+struct FNarr_DialogueEntry
 {
     GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    FString SpeakerName;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
     FString DialogueText;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    ENarr_DialogueType DialogueType;
+    ENarr_DialogueTrigger TriggerType;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    float DisplayDuration;
+    ENarr_DialoguePriority Priority;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    FString AudioURL;
-
-    FNarr_DialogueLine()
-    {
-        SpeakerName = TEXT("Unknown");
-        DialogueText = TEXT("");
-        DialogueType = ENarr_DialogueType::None;
-        DisplayDuration = 3.0f;
-        AudioURL = TEXT("");
-    }
-};
-
-USTRUCT(BlueprintType)
-struct FNarr_DialogueSequence
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    FString SequenceID;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    TArray<FNarr_DialogueLine> DialogueLines;
+    float CooldownTime;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
     bool bIsRepeatable;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    int32 Priority;
+    FString AudioFilePath;
 
-    FNarr_DialogueSequence()
+    FNarr_DialogueEntry()
     {
-        SequenceID = TEXT("");
-        bIsRepeatable = false;
-        Priority = 0;
+        DialogueText = TEXT("");
+        TriggerType = ENarr_DialogueTrigger::None;
+        Priority = ENarr_DialoguePriority::Normal;
+        CooldownTime = 30.0f;
+        bIsRepeatable = true;
+        AudioFilePath = TEXT("");
     }
 };
 
@@ -85,52 +78,40 @@ public:
 protected:
     virtual void BeginPlay() override;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue System")
-    TArray<FNarr_DialogueSequence> DialogueSequences;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue System")
-    FNarr_DialogueSequence CurrentSequence;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue System")
-    int32 CurrentLineIndex;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue System")
-    bool bIsDialogueActive;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue System")
-    float DefaultDisplayDuration;
-
 public:
-    UFUNCTION(BlueprintCallable, Category = "Dialogue System")
-    void StartDialogueSequence(const FString& SequenceID);
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    UFUNCTION(BlueprintCallable, Category = "Dialogue System")
-    void StopCurrentDialogue();
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    void TriggerDialogue(ENarr_DialogueTrigger TriggerType, float HealthPercent = 1.0f, float HungerLevel = 0.0f, float ThirstLevel = 0.0f);
 
-    UFUNCTION(BlueprintCallable, Category = "Dialogue System")
-    void NextDialogueLine();
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    void AddDialogueEntry(const FNarr_DialogueEntry& NewEntry);
 
-    UFUNCTION(BlueprintCallable, Category = "Dialogue System")
-    FNarr_DialogueLine GetCurrentDialogueLine() const;
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    void PlayDialogue(const FString& DialogueText, ENarr_DialoguePriority Priority = ENarr_DialoguePriority::Normal);
 
-    UFUNCTION(BlueprintCallable, Category = "Dialogue System")
-    bool IsDialogueActive() const { return bIsDialogueActive; }
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    bool IsDialogueOnCooldown(ENarr_DialogueTrigger TriggerType) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Dialogue System")
-    void AddDialogueSequence(const FNarr_DialogueSequence& NewSequence);
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    void SetDialogueCooldown(ENarr_DialogueTrigger TriggerType, float CooldownTime);
 
-    UFUNCTION(BlueprintCallable, Category = "Dialogue System")
-    void TriggerSurvivalTip(const FString& TipText);
+protected:
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    TArray<FNarr_DialogueEntry> DialogueEntries;
 
-    UFUNCTION(BlueprintCallable, Category = "Dialogue System")
-    void TriggerDangerWarning(const FString& WarningText);
+    UPROPERTY(BlueprintReadOnly, Category = "Narrative")
+    TMap<ENarr_DialogueTrigger, float> DialogueCooldowns;
 
-    UFUNCTION(BlueprintCallable, Category = "Dialogue System")
-    void TriggerQuestBriefing(const FString& QuestText);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    float DefaultCooldownTime;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    bool bEnableDebugOutput;
 
 private:
     void InitializeDefaultDialogues();
-    void CreateSurvivalDialogues();
-    void CreateDangerWarnings();
-    void CreateQuestBriefings();
+    FNarr_DialogueEntry* FindBestDialogue(ENarr_DialogueTrigger TriggerType, float HealthPercent, float HungerLevel, float ThirstLevel);
+    void UpdateCooldowns(float DeltaTime);
+    void LogDialogue(const FString& DialogueText, ENarr_DialogueTrigger TriggerType) const;
 };
