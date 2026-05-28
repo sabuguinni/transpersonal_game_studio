@@ -3,9 +3,11 @@
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
 #include "Engine/Engine.h"
-#include "Engine/World.h"
-#include "Components/SkeletalMeshComponent.h"
 #include "Animation/AnimInstance.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Engine/World.h"
+#include "CollisionQueryParams.h"
+#include "DrawDebugHelpers.h"
 #include "Anim_FootIKSystem.generated.h"
 
 USTRUCT(BlueprintType)
@@ -13,45 +15,28 @@ struct TRANSPERSONALGAME_API FAnim_FootIKData
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Foot IK")
-    FVector LeftFootLocation;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Foot IK")
+    FVector FootLocation;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Foot IK")
-    FVector RightFootLocation;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Foot IK")
+    FRotator FootRotation;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Foot IK")
-    FRotator LeftFootRotation;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Foot IK")
+    float IKAlpha;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Foot IK")
-    FRotator RightFootRotation;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Foot IK")
-    float LeftFootIKAlpha;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Foot IK")
-    float RightFootIKAlpha;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Foot IK")
-    float HipOffset;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Foot IK")
+    float DistanceFromGround;
 
     FAnim_FootIKData()
     {
-        LeftFootLocation = FVector::ZeroVector;
-        RightFootLocation = FVector::ZeroVector;
-        LeftFootRotation = FRotator::ZeroRotator;
-        RightFootRotation = FRotator::ZeroRotator;
-        LeftFootIKAlpha = 0.0f;
-        RightFootIKAlpha = 0.0f;
-        HipOffset = 0.0f;
+        FootLocation = FVector::ZeroVector;
+        FootRotation = FRotator::ZeroRotator;
+        IKAlpha = 0.0f;
+        DistanceFromGround = 0.0f;
     }
 };
 
-/**
- * Foot IK System for realistic character ground adaptation
- * Implements two-bone IK for feet to adapt to uneven terrain
- * Based on RDR2's character grounding system principles
- */
-UCLASS(BlueprintType, ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
+UCLASS(ClassGroup=(Animation), meta=(BlueprintSpawnableComponent))
 class TRANSPERSONALGAME_API UAnim_FootIKSystem : public UActorComponent
 {
     GENERATED_BODY()
@@ -59,25 +44,20 @@ class TRANSPERSONALGAME_API UAnim_FootIKSystem : public UActorComponent
 public:
     UAnim_FootIKSystem();
 
+protected:
     virtual void BeginPlay() override;
+
+public:
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    // Get current IK data for animation blueprint
+    // Core IK calculation
     UFUNCTION(BlueprintCallable, Category = "Foot IK")
-    FAnim_FootIKData GetFootIKData() const { return FootIKData; }
-
-    // Enable/disable foot IK
-    UFUNCTION(BlueprintCallable, Category = "Foot IK")
-    void SetFootIKEnabled(bool bEnabled);
+    FAnim_FootIKData CalculateFootIK(const FName& SocketName, const FVector& RootLocation);
 
     UFUNCTION(BlueprintCallable, Category = "Foot IK")
-    bool IsFootIKEnabled() const { return bFootIKEnabled; }
+    void UpdateFootIK(float DeltaTime);
 
-protected:
-    // IK configuration
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Foot IK Settings")
-    bool bFootIKEnabled;
-
+    // Configuration
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Foot IK Settings")
     float TraceDistance;
 
@@ -85,40 +65,33 @@ protected:
     float IKInterpSpeed;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Foot IK Settings")
-    float HipOffsetInterpSpeed;
+    float MaxFootOffset;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Foot IK Settings")
-    float MaxHipOffset;
-
-    // Bone names for IK
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Foot IK Settings")
-    FName LeftFootBoneName;
+    bool bEnableFootIK;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Foot IK Settings")
-    FName RightFootBoneName;
+    bool bShowDebugTraces;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Foot IK Settings")
-    FName HipBoneName;
+    // Foot data
+    UPROPERTY(BlueprintReadOnly, Category = "Foot IK Data")
+    FAnim_FootIKData LeftFootIK;
 
-    // Current IK data
-    UPROPERTY(BlueprintReadOnly, Category = "Foot IK")
-    FAnim_FootIKData FootIKData;
+    UPROPERTY(BlueprintReadOnly, Category = "Foot IK Data")
+    FAnim_FootIKData RightFootIK;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Foot IK Data")
+    float HipOffset;
 
 private:
-    // Component references
     UPROPERTY()
-    class ACharacter* OwningCharacter;
+    USkeletalMeshComponent* OwnerMesh;
 
-    UPROPERTY()
-    class USkeletalMeshComponent* SkeletalMeshComponent;
+    FVector LastRootLocation;
+    float CurrentHipOffset;
 
-    // IK calculation methods
-    void UpdateFootIK(float DeltaTime);
-    FVector PerformFootTrace(const FVector& FootLocation, bool& bHitGround, FRotator& GroundRotation);
-    float CalculateHipOffset(const FVector& LeftFootTarget, const FVector& RightFootTarget);
+    // Helper functions
+    FHitResult PerformFootTrace(const FVector& StartLocation, const FVector& EndLocation);
     FRotator CalculateFootRotationFromNormal(const FVector& Normal);
-    
-    // Helper methods
-    FVector GetBoneWorldLocation(const FName& BoneName) const;
-    bool IsCharacterMoving() const;
+    void UpdateHipOffset(float DeltaTime);
 };
