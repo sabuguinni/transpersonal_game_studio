@@ -1,52 +1,38 @@
 #include "BuildIntegrationManager.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "Engine/GameInstance.h"
-#include "TimerManager.h"
-#include "HAL/PlatformFilemanager.h"
-#include "Misc/FileHelper.h"
-#include "Misc/DateTime.h"
-#include "Stats/Stats.h"
-#include "Engine/StaticMeshActor.h"
-#include "GameFramework/PlayerStart.h"
-#include "Components/LightComponent.h"
+#include "EngineUtils.h"
+#include "Kismet/GameplayStatics.h"
+#include "TranspersonalGame/Character/TranspersonalCharacter.h"
+#include "TranspersonalGame/Core/TranspersonalGameState.h"
+#include "TranspersonalGame/WorldGeneration/PCGWorldGenerator.h"
+#include "TranspersonalGame/VFX/VFX_ImpactManager.h"
+#include "TranspersonalGame/AI/DinosaurTRex.h"
+#include "TranspersonalGame/AI/DinosaurCombatAIController.h"
+#include "TranspersonalGame/Environment/FoliageManager.h"
+#include "TranspersonalGame/AI/CrowdSimulationManager.h"
 
 UBuildIntegrationManager::UBuildIntegrationManager()
 {
-    bSystemsValidated = false;
-    TotalActorCount = 0;
+    bAllSystemsReady = false;
     LastValidationTime = 0.0f;
-    CurrentFPS = 0.0f;
-    MemoryUsageMB = 0.0f;
-    DrawCalls = 0;
-    CurrentBuildVersion = TEXT("1.0.0");
 }
 
 void UBuildIntegrationManager::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
     
-    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Initializing integration subsystem"));
+    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Initializing..."));
     
-    // Start periodic validation
-    if (UWorld* World = GetWorld())
-    {
-        World->GetTimerManager().SetTimer(
-            ValidationTimerHandle,
-            this,
-            &UBuildIntegrationManager::ValidateAllSystems,
-            30.0f, // Every 30 seconds
-            true
-        );
-        
-        World->GetTimerManager().SetTimer(
-            PerformanceTimerHandle,
-            this,
-            &UBuildIntegrationManager::UpdatePerformanceMetrics,
-            5.0f, // Every 5 seconds
-            true
-        );
-    }
+    // Register core systems
+    RegisterSystem(TEXT("Character"), ATranspersonalCharacter::StaticClass());
+    RegisterSystem(TEXT("GameState"), ATranspersonalGameState::StaticClass());
+    RegisterSystem(TEXT("WorldGeneration"), APCGWorldGenerator::StaticClass());
+    RegisterSystem(TEXT("VFX"), UVFX_ImpactManager::StaticClass());
+    RegisterSystem(TEXT("DinosaurAI"), ADinosaurTRex::StaticClass());
+    RegisterSystem(TEXT("CombatAI"), ADinosaurCombatAIController::StaticClass());
+    RegisterSystem(TEXT("Foliage"), UFoliageManager::StaticClass());
+    RegisterSystem(TEXT("CrowdSim"), UCrowdSimulationManager::StaticClass());
     
     // Initial validation
     ValidateAllSystems();
@@ -54,286 +40,283 @@ void UBuildIntegrationManager::Initialize(FSubsystemCollectionBase& Collection)
 
 void UBuildIntegrationManager::Deinitialize()
 {
-    if (UWorld* World = GetWorld())
-    {
-        World->GetTimerManager().ClearTimer(ValidationTimerHandle);
-        World->GetTimerManager().ClearTimer(PerformanceTimerHandle);
-        World->GetTimerManager().ClearTimer(BuildTimerHandle);
-    }
-    
+    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Shutting down..."));
+    SystemRegistry.Empty();
     Super::Deinitialize();
 }
 
-bool UBuildIntegrationManager::ValidateAllSystems()
+void UBuildIntegrationManager::ValidateAllSystems()
 {
-    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Starting system validation"));
+    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Validating all systems..."));
     
-    bool bAllValid = true;
+    LastValidationTime = FPlatformTime::Seconds();
     
-    // Validate core systems
-    bAllValid &= ValidateCharacterSystems();
-    bAllValid &= ValidateDinosaurSystems();
-    bAllValid &= ValidateEnvironmentSystems();
-    bAllValid &= ValidateAudioSystems();
-    bAllValid &= ValidateVFXSystems();
+    ValidateCharacterSystem();
+    ValidateWorldGeneration();
+    ValidateVFXSystem();
+    ValidateDinosaurAI();
+    ValidateCrowdSimulation();
+    ValidateFoliageSystem();
     
-    // Validate actor counts
-    bAllValid &= ValidateActorCounts();
+    // Check if all systems are ready
+    bAllSystemsReady = true;
+    for (const auto& SystemPair : SystemRegistry)
+    {
+        if (SystemPair.Value.Status != EBuild_SystemStatus::Ready)
+        {
+            bAllSystemsReady = false;
+            break;
+        }
+    }
     
-    // Validate performance
-    bAllValid &= ValidatePerformance();
-    
-    bSystemsValidated = bAllValid;
-    LastValidationTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
-    
-    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: System validation %s"), 
-           bAllValid ? TEXT("PASSED") : TEXT("FAILED"));
-    
-    return bAllValid;
+    LogSystemStatus();
 }
 
-bool UBuildIntegrationManager::ValidateActorCounts()
+void UBuildIntegrationManager::ValidateCharacterSystem()
 {
     UWorld* World = GetWorld();
     if (!World)
     {
-        return false;
+        UpdateSystemStatus(TEXT("Character"), EBuild_SystemStatus::Error, TEXT("No world context"));
+        return;
     }
     
-    TArray<AActor*> AllActors;
-    UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), AllActors);
-    TotalActorCount = AllActors.Num();
-    
-    // Count specific actor types
-    TArray<AActor*> PlayerStarts;
-    UGameplayStatics::GetAllActorsOfClass(World, APlayerStart::StaticClass(), PlayerStarts);
-    
-    TArray<AActor*> StaticMeshes;
-    UGameplayStatics::GetAllActorsOfClass(World, AStaticMeshActor::StaticClass(), StaticMeshes);
-    
-    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Actor counts - Total: %d, PlayerStarts: %d, StaticMeshes: %d"),
-           TotalActorCount, PlayerStarts.Num(), StaticMeshes.Num());
-    
-    // Validation criteria
-    bool bValid = true;
-    if (PlayerStarts.Num() == 0)
+    // Check for TranspersonalCharacter in world
+    int32 CharacterCount = 0;
+    for (TActorIterator<ATranspersonalCharacter> ActorItr(World); ActorItr; ++ActorItr)
     {
-        UE_LOG(LogTemp, Error, TEXT("BuildIntegrationManager: No PlayerStart found!"));
-        bValid = false;
+        CharacterCount++;
     }
     
-    if (TotalActorCount > 50000)
+    if (CharacterCount > 0)
     {
-        UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: High actor count detected: %d"), TotalActorCount);
-        OptimizeActorCounts();
+        UpdateSystemStatus(TEXT("Character"), EBuild_SystemStatus::Ready);
+        SystemRegistry[TEXT("Character")].ActorCount = CharacterCount;
     }
-    
-    return bValid;
-}
-
-bool UBuildIntegrationManager::ValidatePerformance()
-{
-    UpdatePerformanceMetrics();
-    
-    bool bValid = true;
-    
-    // Check FPS
-    if (CurrentFPS < 30.0f && CurrentFPS > 0.0f)
+    else
     {
-        UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Low FPS detected: %.2f"), CurrentFPS);
-        bValid = false;
-    }
-    
-    // Check memory usage
-    if (MemoryUsageMB > 8192.0f) // 8GB limit
-    {
-        UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: High memory usage: %.2f MB"), MemoryUsageMB);
-        OptimizeMemory();
-    }
-    
-    return bValid;
-}
-
-void UBuildIntegrationManager::SaveCurrentBuild()
-{
-    FString BuildName = FString::Printf(TEXT("Build_%s"), *FDateTime::Now().ToString());
-    
-    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Saving build: %s"), *BuildName);
-    
-    CreateBuildSnapshot();
-    BuildHistory.Add(BuildName);
-    
-    // Keep only last 10 builds
-    if (BuildHistory.Num() > 10)
-    {
-        BuildHistory.RemoveAt(0);
+        UpdateSystemStatus(TEXT("Character"), EBuild_SystemStatus::Loading, TEXT("No character actors found"));
     }
 }
 
-bool UBuildIntegrationManager::LoadBuild(const FString& BuildName)
-{
-    if (!BuildHistory.Contains(BuildName))
-    {
-        UE_LOG(LogTemp, Error, TEXT("BuildIntegrationManager: Build not found: %s"), *BuildName);
-        return false;
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Loading build: %s"), *BuildName);
-    
-    // Implementation would load the specific build state
-    CurrentBuildVersion = BuildName;
-    return true;
-}
-
-TArray<FString> UBuildIntegrationManager::GetAvailableBuilds()
-{
-    return BuildHistory;
-}
-
-FBuild_SystemStatus UBuildIntegrationManager::GetSystemStatus()
-{
-    FBuild_SystemStatus Status;
-    Status.bSystemsValid = bSystemsValidated;
-    Status.ActorCount = TotalActorCount;
-    Status.FPS = CurrentFPS;
-    Status.MemoryUsageMB = MemoryUsageMB;
-    Status.LastValidationTime = LastValidationTime;
-    Status.BuildVersion = CurrentBuildVersion;
-    
-    return Status;
-}
-
-void UBuildIntegrationManager::LogSystemMetrics()
-{
-    UE_LOG(LogTemp, Warning, TEXT("=== BUILD INTEGRATION METRICS ==="));
-    UE_LOG(LogTemp, Warning, TEXT("Systems Validated: %s"), bSystemsValidated ? TEXT("YES") : TEXT("NO"));
-    UE_LOG(LogTemp, Warning, TEXT("Total Actors: %d"), TotalActorCount);
-    UE_LOG(LogTemp, Warning, TEXT("Current FPS: %.2f"), CurrentFPS);
-    UE_LOG(LogTemp, Warning, TEXT("Memory Usage: %.2f MB"), MemoryUsageMB);
-    UE_LOG(LogTemp, Warning, TEXT("Build Version: %s"), *CurrentBuildVersion);
-    UE_LOG(LogTemp, Warning, TEXT("Last Validation: %.2f seconds ago"), 
-           GetWorld() ? GetWorld()->GetTimeSeconds() - LastValidationTime : 0.0f);
-}
-
-void UBuildIntegrationManager::OptimizeMemory()
-{
-    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Starting memory optimization"));
-    
-    // Force garbage collection
-    GEngine->ForceGarbageCollection(true);
-    
-    // Update metrics after optimization
-    CheckMemoryUsage();
-    
-    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Memory optimization complete"));
-}
-
-bool UBuildIntegrationManager::ValidateCharacterSystems()
-{
-    // Check if TranspersonalCharacter class exists and is functional
-    UClass* CharacterClass = FindObject<UClass>(ANY_PACKAGE, TEXT("TranspersonalCharacter"));
-    bool bValid = (CharacterClass != nullptr);
-    
-    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Character systems %s"), 
-           bValid ? TEXT("VALID") : TEXT("INVALID"));
-    
-    return bValid;
-}
-
-bool UBuildIntegrationManager::ValidateDinosaurSystems()
-{
-    // Check for dinosaur-related classes
-    UClass* DinosaurClass = FindObject<UClass>(ANY_PACKAGE, TEXT("DinosaurTRex"));
-    bool bValid = (DinosaurClass != nullptr);
-    
-    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Dinosaur systems %s"), 
-           bValid ? TEXT("VALID") : TEXT("INVALID"));
-    
-    return bValid;
-}
-
-bool UBuildIntegrationManager::ValidateEnvironmentSystems()
+void UBuildIntegrationManager::ValidateWorldGeneration()
 {
     UWorld* World = GetWorld();
     if (!World)
     {
-        return false;
+        UpdateSystemStatus(TEXT("WorldGeneration"), EBuild_SystemStatus::Error, TEXT("No world context"));
+        return;
     }
     
-    // Check for environment actors
-    TArray<AActor*> StaticMeshes;
-    UGameplayStatics::GetAllActorsOfClass(World, AStaticMeshActor::StaticClass(), StaticMeshes);
+    // Check for PCG World Generator
+    int32 GeneratorCount = 0;
+    for (TActorIterator<APCGWorldGenerator> ActorItr(World); ActorItr; ++ActorItr)
+    {
+        GeneratorCount++;
+    }
     
-    bool bValid = StaticMeshes.Num() > 0;
-    
-    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Environment systems %s (%d meshes)"), 
-           bValid ? TEXT("VALID") : TEXT("INVALID"), StaticMeshes.Num());
-    
-    return bValid;
+    if (GeneratorCount > 0)
+    {
+        UpdateSystemStatus(TEXT("WorldGeneration"), EBuild_SystemStatus::Ready);
+        SystemRegistry[TEXT("WorldGeneration")].ActorCount = GeneratorCount;
+    }
+    else
+    {
+        UpdateSystemStatus(TEXT("WorldGeneration"), EBuild_SystemStatus::Loading, TEXT("No world generators found"));
+    }
 }
 
-bool UBuildIntegrationManager::ValidateAudioSystems()
+void UBuildIntegrationManager::ValidateVFXSystem()
 {
-    // Basic audio system validation
-    bool bValid = GEngine && GEngine->GetAudioDeviceManager();
-    
-    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Audio systems %s"), 
-           bValid ? TEXT("VALID") : TEXT("INVALID"));
-    
-    return bValid;
+    // Check if VFX_ImpactManager class exists
+    UClass* VFXClass = UVFX_ImpactManager::StaticClass();
+    if (VFXClass)
+    {
+        UpdateSystemStatus(TEXT("VFX"), EBuild_SystemStatus::Ready);
+    }
+    else
+    {
+        UpdateSystemStatus(TEXT("VFX"), EBuild_SystemStatus::Error, TEXT("VFX_ImpactManager class not found"));
+    }
 }
 
-bool UBuildIntegrationManager::ValidateVFXSystems()
+void UBuildIntegrationManager::ValidateDinosaurAI()
 {
-    // Basic VFX system validation
-    bool bValid = true; // Assume valid for now
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        UpdateSystemStatus(TEXT("DinosaurAI"), EBuild_SystemStatus::Error, TEXT("No world context"));
+        return;
+    }
     
-    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: VFX systems %s"), 
-           bValid ? TEXT("VALID") : TEXT("INVALID"));
+    // Check for dinosaur actors
+    int32 DinosaurCount = 0;
+    for (TActorIterator<ADinosaurTRex> ActorItr(World); ActorItr; ++ActorItr)
+    {
+        DinosaurCount++;
+    }
     
-    return bValid;
+    if (DinosaurCount > 0)
+    {
+        UpdateSystemStatus(TEXT("DinosaurAI"), EBuild_SystemStatus::Ready);
+        SystemRegistry[TEXT("DinosaurAI")].ActorCount = DinosaurCount;
+    }
+    else
+    {
+        UpdateSystemStatus(TEXT("DinosaurAI"), EBuild_SystemStatus::Loading, TEXT("No dinosaur actors found"));
+    }
 }
 
-void UBuildIntegrationManager::UpdatePerformanceMetrics()
+void UBuildIntegrationManager::ValidateCrowdSimulation()
 {
-    // Update FPS
-    CurrentFPS = 1.0f / FApp::GetDeltaTime();
+    // Check if CrowdSimulationManager class exists
+    UClass* CrowdClass = UCrowdSimulationManager::StaticClass();
+    if (CrowdClass)
+    {
+        UpdateSystemStatus(TEXT("CrowdSim"), EBuild_SystemStatus::Ready);
+    }
+    else
+    {
+        UpdateSystemStatus(TEXT("CrowdSim"), EBuild_SystemStatus::Error, TEXT("CrowdSimulationManager class not found"));
+    }
+}
+
+void UBuildIntegrationManager::ValidateFoliageSystem()
+{
+    // Check if FoliageManager class exists
+    UClass* FoliageClass = UFoliageManager::StaticClass();
+    if (FoliageClass)
+    {
+        UpdateSystemStatus(TEXT("Foliage"), EBuild_SystemStatus::Ready);
+    }
+    else
+    {
+        UpdateSystemStatus(TEXT("Foliage"), EBuild_SystemStatus::Error, TEXT("FoliageManager class not found"));
+    }
+}
+
+void UBuildIntegrationManager::RegisterSystem(const FString& SystemName, UClass* SystemClass)
+{
+    FBuild_SystemInfo NewSystem;
+    NewSystem.SystemName = SystemName;
+    NewSystem.Status = SystemClass ? EBuild_SystemStatus::Loading : EBuild_SystemStatus::Error;
+    NewSystem.ErrorMessage = SystemClass ? TEXT("") : TEXT("Class not found");
+    NewSystem.ActorCount = 0;
+    NewSystem.LastUpdateTime = FPlatformTime::Seconds();
     
-    // Update memory usage
-    CheckMemoryUsage();
+    SystemRegistry.Add(SystemName, NewSystem);
+}
+
+void UBuildIntegrationManager::UpdateSystemStatus(const FString& SystemName, EBuild_SystemStatus NewStatus, const FString& ErrorMsg)
+{
+    if (SystemRegistry.Contains(SystemName))
+    {
+        SystemRegistry[SystemName].Status = NewStatus;
+        SystemRegistry[SystemName].ErrorMessage = ErrorMsg;
+        SystemRegistry[SystemName].LastUpdateTime = FPlatformTime::Seconds();
+    }
+}
+
+bool UBuildIntegrationManager::IsSystemReady(const FString& SystemName) const
+{
+    if (SystemRegistry.Contains(SystemName))
+    {
+        return SystemRegistry[SystemName].Status == EBuild_SystemStatus::Ready;
+    }
+    return false;
+}
+
+TArray<FBuild_SystemInfo> UBuildIntegrationManager::GetSystemStatus() const
+{
+    TArray<FBuild_SystemInfo> StatusArray;
+    for (const auto& SystemPair : SystemRegistry)
+    {
+        StatusArray.Add(SystemPair.Value);
+    }
+    return StatusArray;
+}
+
+int32 UBuildIntegrationManager::GetTotalActorCount() const
+{
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        return 0;
+    }
     
-    // Update draw calls (simplified)
-    DrawCalls = 1000; // Placeholder value
-}
-
-void UBuildIntegrationManager::CheckMemoryUsage()
-{
-    FPlatformMemoryStats MemStats = FPlatformMemory::GetStats();
-    MemoryUsageMB = MemStats.UsedPhysical / (1024.0f * 1024.0f);
-}
-
-void UBuildIntegrationManager::OptimizeActorCounts()
-{
-    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Optimizing actor counts"));
+    int32 TotalCount = 0;
+    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+    {
+        TotalCount++;
+    }
     
-    // Implementation would remove unnecessary actors or optimize LODs
-    // For now, just log the action
+    return TotalCount;
 }
 
-void UBuildIntegrationManager::CreateBuildSnapshot()
+void UBuildIntegrationManager::SaveMapSafely()
 {
-    // Implementation would save current world state
-    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Creating build snapshot"));
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        UE_LOG(LogTemp, Error, TEXT("BuildIntegrationManager: Cannot save - no world context"));
+        return;
+    }
+    
+    FString MapPath = TEXT("/Game/Maps/MinPlayableMap");
+    bool bSaveResult = false;
+    
+    // Use the safe save method
+    if (GEngine && GEngine->GetEditorSubsystem<UEditorLoadingAndSavingUtils>())
+    {
+        bSaveResult = UEditorLoadingAndSavingUtils::SaveMap(World, MapPath);
+    }
+    
+    if (bSaveResult)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Map saved successfully to %s"), *MapPath);
+    }
+    else
+    {
+        UE_LOG(LogTemp, Error, TEXT("BuildIntegrationManager: Failed to save map to %s"), *MapPath);
+    }
 }
 
-void UBuildIntegrationManager::CleanupOldBuilds()
+bool UBuildIntegrationManager::CompileAndValidateModule(const FString& ModuleName)
 {
-    // Implementation would clean up old build files
-    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Cleaning up old builds"));
+    // This would trigger module recompilation in a real scenario
+    // For now, just validate that the module classes are loadable
+    
+    if (ModuleName == TEXT("TranspersonalGame"))
+    {
+        ValidateAllSystems();
+        return bAllSystemsReady;
+    }
+    
+    return false;
 }
 
-void UBuildIntegrationManager::ValidateBuildIntegrity()
+void UBuildIntegrationManager::LogSystemStatus() const
 {
-    // Implementation would validate build file integrity
-    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Validating build integrity"));
+    UE_LOG(LogTemp, Warning, TEXT("=== BUILD INTEGRATION STATUS ==="));
+    UE_LOG(LogTemp, Warning, TEXT("All Systems Ready: %s"), bAllSystemsReady ? TEXT("YES") : TEXT("NO"));
+    UE_LOG(LogTemp, Warning, TEXT("Total Actors: %d"), GetTotalActorCount());
+    
+    for (const auto& SystemPair : SystemRegistry)
+    {
+        const FBuild_SystemInfo& Info = SystemPair.Value;
+        FString StatusStr;
+        switch (Info.Status)
+        {
+            case EBuild_SystemStatus::Ready: StatusStr = TEXT("READY"); break;
+            case EBuild_SystemStatus::Loading: StatusStr = TEXT("LOADING"); break;
+            case EBuild_SystemStatus::Error: StatusStr = TEXT("ERROR"); break;
+            case EBuild_SystemStatus::Disabled: StatusStr = TEXT("DISABLED"); break;
+            default: StatusStr = TEXT("UNKNOWN"); break;
+        }
+        
+        UE_LOG(LogTemp, Warning, TEXT("System [%s]: %s (Actors: %d) %s"), 
+               *Info.SystemName, *StatusStr, Info.ActorCount, 
+               Info.ErrorMessage.IsEmpty() ? TEXT("") : *FString::Printf(TEXT("- %s"), *Info.ErrorMessage));
+    }
+    UE_LOG(LogTemp, Warning, TEXT("=== END STATUS ==="));
 }
