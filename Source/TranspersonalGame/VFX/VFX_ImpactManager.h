@@ -1,79 +1,125 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Components/ActorComponent.h"
-#include "Engine/Engine.h"
+#include "GameFramework/Actor.h"
+#include "Components/StaticMeshComponent.h"
 #include "Particles/ParticleSystemComponent.h"
+#include "NiagaraComponent.h"
+#include "NiagaraSystem.h"
+#include "Engine/World.h"
+#include "SharedTypes.h"
 #include "VFX_ImpactManager.generated.h"
 
-UENUM(BlueprintType)
-enum class EVFX_ImpactType : uint8
-{
-    Blood       UMETA(DisplayName = "Blood"),
-    Dust        UMETA(DisplayName = "Dust"),
-    Rock        UMETA(DisplayName = "Rock"),
-    Water       UMETA(DisplayName = "Water"),
-    Mud         UMETA(DisplayName = "Mud")
-};
-
 USTRUCT(BlueprintType)
-struct FVFX_ImpactData
+struct TRANSPERSONALGAME_API FVFX_ImpactData
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
-    class UParticleSystem* ParticleEffect;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Impact")
+    TSoftObjectPtr<UNiagaraSystem> DustEffect;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
-    FVector Scale;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Impact")
+    TSoftObjectPtr<UNiagaraSystem> BloodEffect;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
-    float Duration;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Impact")
+    TSoftObjectPtr<UNiagaraSystem> WaterSplashEffect;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Impact")
+    float EffectScale;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Impact")
+    float EffectDuration;
 
     FVFX_ImpactData()
     {
-        ParticleEffect = nullptr;
-        Scale = FVector(1.0f);
-        Duration = 2.0f;
+        EffectScale = 1.0f;
+        EffectDuration = 2.0f;
     }
 };
 
-UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UVFX_ImpactManager : public UActorComponent
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FVFX_EnvironmentData
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Environment")
+    TSoftObjectPtr<UNiagaraSystem> CampfireEffect;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Environment")
+    TSoftObjectPtr<UNiagaraSystem> RainEffect;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Environment")
+    TSoftObjectPtr<UNiagaraSystem> FogEffect;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Environment")
+    TSoftObjectPtr<UNiagaraSystem> VolcanicAshEffect;
+
+    FVFX_EnvironmentData()
+    {
+    }
+};
+
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API AVFX_ImpactManager : public AActor
 {
     GENERATED_BODY()
 
 public:
-    UVFX_ImpactManager();
+    AVFX_ImpactManager();
 
 protected:
     virtual void BeginPlay() override;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Impact")
-    TMap<EVFX_ImpactType, FVFX_ImpactData> ImpactEffects;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "VFX Components")
+    USceneComponent* RootSceneComponent;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Impact")
-    float DefaultEffectDuration;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Settings")
+    FVFX_ImpactData ImpactSettings;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Impact")
-    bool bAutoCleanupEffects;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Settings")
+    FVFX_EnvironmentData EnvironmentSettings;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Settings")
+    bool bEnableVFXLOD;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Settings")
+    float VFXCullingDistance;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Settings")
+    int32 MaxActiveEffects;
+
+    TArray<UNiagaraComponent*> ActiveEffects;
 
 public:
-    UFUNCTION(BlueprintCallable, Category = "VFX Impact")
-    void SpawnImpactEffect(EVFX_ImpactType ImpactType, FVector Location, FRotator Rotation = FRotator::ZeroRotator);
+    virtual void Tick(float DeltaTime) override;
 
     UFUNCTION(BlueprintCallable, Category = "VFX Impact")
-    void SpawnBloodSplatter(FVector Location, FVector ImpactDirection, float Intensity = 1.0f);
+    void SpawnDustImpact(const FVector& Location, float Scale = 1.0f);
 
     UFUNCTION(BlueprintCallable, Category = "VFX Impact")
-    void SpawnDustCloud(FVector Location, float Size = 1.0f);
+    void SpawnBloodImpact(const FVector& Location, const FVector& Direction, float Scale = 1.0f);
 
     UFUNCTION(BlueprintCallable, Category = "VFX Impact")
-    void InitializeDefaultEffects();
+    void SpawnWaterSplash(const FVector& Location, float Scale = 1.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "VFX Environment")
+    void SpawnCampfire(const FVector& Location);
+
+    UFUNCTION(BlueprintCallable, Category = "VFX Environment")
+    void SpawnRainEffect(const FVector& Location, float Intensity = 1.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "VFX Environment")
+    void SpawnVolcanicAsh(const FVector& Location, float Scale = 1.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "VFX Management")
+    void CleanupExpiredEffects();
+
+    UFUNCTION(BlueprintCallable, Category = "VFX Management")
+    void SetVFXQuality(int32 QualityLevel);
 
 private:
-    UPROPERTY()
-    TArray<UParticleSystemComponent*> ActiveEffects;
-
-    void CleanupExpiredEffects();
+    void InitializeVFXAssets();
+    UNiagaraComponent* CreateNiagaraEffect(UNiagaraSystem* System, const FVector& Location, const FRotator& Rotation = FRotator::ZeroRotator);
+    bool IsWithinCullingDistance(const FVector& Location) const;
+    void ApplyLODSettings(UNiagaraComponent* Effect, float Distance) const;
 };
