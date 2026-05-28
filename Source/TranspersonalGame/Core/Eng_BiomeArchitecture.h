@@ -98,13 +98,13 @@ public:
      * Initializes the 5-biome world structure with correct coordinates
      * Savanna (0,0), Swamp (-50000,-45000), Forest (-45000,40000), Desert (55000,0), Mountains (40000,50000)
      */
-    UFUNCTION(BlueprintCallable, Category = "Biome Architecture", CallInEditor = true)
+    UFUNCTION(BlueprintCallable, Category = "Biome Architecture", CallInEditor)
     void InitializeBiomeStructure();
 
     /**
      * Validates that all biomes meet the minimum actor count requirement (500+ actors each)
      */
-    UFUNCTION(BlueprintCallable, Category = "Biome Architecture", CallInEditor = true)
+    UFUNCTION(BlueprintCallable, Category = "Biome Architecture", CallInEditor)
     FEng_BiomeValidationReport ValidateBiomePopulation();
 
     /**
@@ -140,7 +140,7 @@ public:
     /**
      * Spawns a validation marker at each biome center for visualization
      */
-    UFUNCTION(BlueprintCallable, Category = "Biome Architecture", CallInEditor = true)
+    UFUNCTION(BlueprintCallable, Category = "Biome Architecture", CallInEditor)
     void SpawnBiomeMarkers();
 
 protected:

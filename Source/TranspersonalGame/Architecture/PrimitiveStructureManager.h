@@ -84,7 +84,7 @@ protected:
     float InteractionRange;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    bool bCanProvideShel ter;
+    bool bCanProvideShelter;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
     float ShelterEffectiveness;

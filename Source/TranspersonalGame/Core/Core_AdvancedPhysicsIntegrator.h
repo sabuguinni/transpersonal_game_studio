@@ -146,7 +146,7 @@ public:
     void UpdatePhysicalMaterialProperties(ECore_BiomePhysicsType BiomeType, const FCore_BiomePhysicsProperties& Properties);
 
     // Debug and Validation
-    UFUNCTION(BlueprintCallable, Category = "Debug", CallInEditor = true)
+    UFUNCTION(BlueprintCallable, Category = "Debug", CallInEditor)
     void ValidatePhysicsIntegration();
 
     UFUNCTION(BlueprintCallable, Category = "Debug")

@@ -5,7 +5,6 @@
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
 #include "SharedTypes.h"
-#include "Combat_EncounterManager.generated.h"
 
 UENUM(BlueprintType)
 enum class ECombat_EncounterType : uint8
@@ -140,4 +139,4 @@ private:
     void BroadcastEncounterEvent(const FString& EventName, const FCombat_EncounterData& Data);
 };
 
-#include "Combat_EncounterManager.generated.h"
+#include "Combat_EncounterManager.generated.h"#include "Combat_EncounterManager.generated.h"

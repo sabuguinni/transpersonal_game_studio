@@ -6,7 +6,6 @@
 #include "Components/SkeletalMeshComponent.h"
 #include "Animation/AnimInstance.h"
 #include "Engine/World.h"
-#include "Anim_TerrainAdaptation.generated.h"
 
 // Forward declarations
 class ACharacter;
@@ -232,4 +231,4 @@ private:
     float UpdateInterval = 0.016f; // ~60fps
 };
 
-#include "Anim_TerrainAdaptation.generated.h"
+#include "Anim_TerrainAdaptation.generated.h"#include "Anim_TerrainAdaptation.generated.h"

@@ -8,7 +8,6 @@
 #include "Components/ExponentialHeightFogComponent.h"
 #include "Engine/PostProcessVolume.h"
 #include "TimerManager.h"
-#include "DynamicLightingManager.generated.h"
 
 USTRUCT(BlueprintType)
 struct FLight_BiomeLightingSettings
@@ -139,4 +138,4 @@ private:
     float LastUpdateTime = 0.0f;
 };
 
-#include "DynamicLightingManager.generated.h"
+#include "DynamicLightingManager.generated.h"#include "DynamicLightingManager.generated.h"

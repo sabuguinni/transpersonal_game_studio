@@ -6,7 +6,6 @@
 #include "GameFramework/Pawn.h"
 #include "GameFramework/Character.h"
 #include "Components/SphereComponent.h"
-#include "Combat_AdvancedAIBehavior.generated.h"
 
 UENUM(BlueprintType)
 enum class ECombat_AIBehaviorState : uint8
@@ -245,4 +244,4 @@ private:
     FVector CalculatePackFormationPosition();
 };
 
-#include "Combat_AdvancedAIBehavior.generated.h"
+#include "Combat_AdvancedAIBehavior.generated.h"#include "Combat_AdvancedAIBehavior.generated.h"

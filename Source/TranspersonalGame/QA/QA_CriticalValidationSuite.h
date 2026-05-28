@@ -25,6 +25,7 @@
 #include "HAL/PlatformFilemanager.h"
 #include "Misc/FileHelper.h"
 #include "Misc/DateTime.h"
+#include "QA_CriticalValidationSuite.generated.h"
 
 /**
  * Critical validation suite for QA Agent

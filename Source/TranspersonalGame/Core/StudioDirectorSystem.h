@@ -3,7 +3,6 @@
 #include "CoreMinimal.h"
 #include "Engine/GameInstanceSubsystem.h"
 #include "Engine/World.h"
-#include "StudioDirectorSystem.generated.h"
 
 USTRUCT(BlueprintType)
 struct FDir_AgentStatus
@@ -149,4 +148,4 @@ private:
     void CheckMemoryUsage();
 };
 
-#include "StudioDirectorSystem.generated.h"
+#include "StudioDirectorSystem.generated.h"#include "StudioDirectorSystem.generated.h"

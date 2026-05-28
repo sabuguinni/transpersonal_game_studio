@@ -64,7 +64,7 @@ public:
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
     // Core validation functions
-    UFUNCTION(BlueprintCallable, Category = "QA", CallInEditor = true)
+    UFUNCTION(BlueprintCallable, Category = "QA", CallInEditor)
     bool ValidateAllSystems();
 
     UFUNCTION(BlueprintCallable, Category = "QA")

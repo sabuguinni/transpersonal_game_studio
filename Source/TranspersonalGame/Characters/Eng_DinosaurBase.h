@@ -6,7 +6,6 @@
 #include "Components/SphereComponent.h"
 #include "GameFramework/FloatingPawnMovement.h"
 #include "SharedTypes.h"
-#include "Eng_DinosaurBase.generated.h"
 
 USTRUCT(BlueprintType)
 struct TRANSPERSONALGAME_API FEng_DinosaurStats
@@ -173,4 +172,4 @@ private:
     FVector LastKnownTargetLocation = FVector::ZeroVector;
 };
 
-#include "Eng_DinosaurBase.generated.h"
+#include "Eng_DinosaurBase.generated.h"#include "Eng_DinosaurBase.generated.h"

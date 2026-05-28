@@ -6,7 +6,6 @@
 #include "Components/SkyAtmosphereComponent.h"
 #include "Components/ExponentialHeightFogComponent.h"
 #include "Engine/PostProcessVolume.h"
-#include "Light_TimeOfDayManager.generated.h"
 
 UENUM(BlueprintType)
 enum class ELight_TimeOfDay : uint8
@@ -143,4 +142,4 @@ private:
     float GetTimeAlpha(float StartHour, float EndHour, float CurrentHour) const;
 };
 
-#include "Light_TimeOfDayManager.generated.h"
+#include "Light_TimeOfDayManager.generated.h"#include "Light_TimeOfDayManager.generated.h"

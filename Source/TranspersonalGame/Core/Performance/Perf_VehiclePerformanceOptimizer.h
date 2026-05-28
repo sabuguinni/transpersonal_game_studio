@@ -153,10 +153,10 @@ public:
     void UnregisterVehicle(AActor* VehicleActor);
 
     // Performance testing
-    UFUNCTION(BlueprintCallable, Category = "Vehicle Performance", CallInEditor = true)
+    UFUNCTION(BlueprintCallable, Category = "Vehicle Performance", CallInEditor)
     void RunVehiclePerformanceTest();
 
-    UFUNCTION(BlueprintCallable, Category = "Vehicle Performance", CallInEditor = true)
+    UFUNCTION(BlueprintCallable, Category = "Vehicle Performance", CallInEditor)
     void GeneratePerformanceReport();
 
 protected:

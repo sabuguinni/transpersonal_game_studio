@@ -4,7 +4,6 @@
 #include "Engine/Engine.h"
 #include "Components/ActorComponent.h"
 #include "GameFramework/Actor.h"
-#include "CrowdSimulationTypes.generated.h"
 
 UENUM(BlueprintType)
 enum class ECrowd_AgentState : uint8
@@ -145,4 +144,4 @@ struct TRANSPERSONALGAME_API FCrowd_LODSettings
     }
 };
 
-#include "CrowdSimulationTypes.generated.h"
+#include "CrowdSimulationTypes.generated.h"#include "CrowdSimulationTypes.generated.h"

@@ -11,7 +11,6 @@
 #include "Engine/World.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/Pawn.h"
-#include "Combat_DinosaurAI.generated.h"
 
 UENUM(BlueprintType)
 enum class ECombat_DinosaurState : uint8
@@ -225,4 +224,4 @@ private:
     void SetupBlackboard();
 };
 
-#include "Combat_DinosaurAI.generated.h"
+#include "Combat_DinosaurAI.generated.h"#include "Combat_DinosaurAI.generated.h"

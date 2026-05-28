@@ -203,7 +203,7 @@ public:
     void ResetEventStatistics();
 
     // Debug and Visualization
-    UFUNCTION(BlueprintCallable, Category = "Physics Events", CallInEditor = true)
+    UFUNCTION(BlueprintCallable, Category = "Physics Events", CallInEditor)
     void DebugDrawEvents(float Duration = 5.0f);
 
     UFUNCTION(BlueprintCallable, Category = "Physics Events")

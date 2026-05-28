@@ -4,7 +4,6 @@
 #include "Components/ActorComponent.h"
 #include "Engine/SkeletalMesh.h"
 #include "Materials/MaterialInterface.h"
-#include "Char_PlayerCustomization.generated.h"
 
 UENUM(BlueprintType)
 enum class EChar_BodyType : uint8
@@ -139,4 +138,4 @@ protected:
     USkeletalMeshComponent* GetCharacterMesh() const;
 };
 
-#include "Char_PlayerCustomization.generated.h"
+#include "Char_PlayerCustomization.generated.h"#include "Char_PlayerCustomization.generated.h"

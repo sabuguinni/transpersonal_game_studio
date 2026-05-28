@@ -49,7 +49,7 @@ public:
     int32 GetActiveActorCount();
 
     // Debug and Development
-    UFUNCTION(BlueprintCallable, Category = "Game Director", CallInEditor = true)
+    UFUNCTION(BlueprintCallable, Category = "Game Director", CallInEditor)
     void RunDiagnostics();
 
     UFUNCTION(BlueprintCallable, Category = "Game Director")

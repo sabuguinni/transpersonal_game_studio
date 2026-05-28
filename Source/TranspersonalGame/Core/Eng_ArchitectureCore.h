@@ -160,7 +160,7 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
     bool EnforceModuleStandards(const FString& ModuleName);
 
-    UFUNCTION(BlueprintCallable, Category = "Engine Architecture", CallInEditor = true)
+    UFUNCTION(BlueprintCallable, Category = "Engine Architecture", CallInEditor)
     void ValidateProjectArchitecture();
 
 protected:

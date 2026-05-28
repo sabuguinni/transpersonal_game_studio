@@ -4,7 +4,6 @@
 #include "Engine/GameInstanceSubsystem.h"
 #include "Engine/DataTable.h"
 #include "StudioDirectorTaskManager.generated.h"
-
 UENUM(BlueprintType)
 enum class EDir_AgentPriority : uint8
 {
@@ -199,4 +198,3 @@ private:
     void GenerateProductionReport();
 };
 
-#include "StudioDirectorTaskManager.generated.h"

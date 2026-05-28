@@ -4,7 +4,6 @@
 #include "GameFramework/Actor.h"
 #include "Components/TextRenderComponent.h"
 #include "Engine/Engine.h"
-#include "Dir_MilestoneTracker.generated.h"
 
 UENUM(BlueprintType)
 enum class EDir_MilestoneStatus : uint8
@@ -151,4 +150,4 @@ private:
     FString GenerateProgressReport();
 };
 
-#include "Dir_MilestoneTracker.generated.h"
+#include "Dir_MilestoneTracker.generated.h"#include "Dir_MilestoneTracker.generated.h"

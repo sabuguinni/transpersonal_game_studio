@@ -4,7 +4,6 @@
 #include "Components/ActorComponent.h"
 #include "Engine/TriggerVolume.h"
 #include "GameFramework/Actor.h"
-#include "Quest_EnvironmentalTriggerSystem.generated.h"
 
 UENUM(BlueprintType)
 enum class EQuest_EnvironmentalTriggerType : uint8
@@ -157,4 +156,4 @@ protected:
                             UPrimitiveComponent* OtherComp, int32 OtherBodyIndex);
 };
 
-#include "Quest_EnvironmentalTriggerSystem.generated.h"
+#include "Quest_EnvironmentalTriggerSystem.generated.h"#include "Quest_EnvironmentalTriggerSystem.generated.h"

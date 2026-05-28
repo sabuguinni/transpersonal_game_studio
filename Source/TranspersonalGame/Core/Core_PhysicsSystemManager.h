@@ -83,7 +83,7 @@ public:
     FOnActorDestroyed OnActorDestroyed;
 
     // Debug Functions
-    UFUNCTION(BlueprintCallable, Category = "Physics Debug", CallInEditor = true)
+    UFUNCTION(BlueprintCallable, Category = "Physics Debug", CallInEditor)
     void DebugShowPhysicsInfo();
 
     UFUNCTION(BlueprintCallable, Category = "Physics Debug")

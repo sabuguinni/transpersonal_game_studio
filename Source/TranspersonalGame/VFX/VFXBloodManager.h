@@ -6,7 +6,6 @@
 #include "Particles/ParticleSystemComponent.h"
 #include "NiagaraComponent.h"
 #include "NiagaraSystem.h"
-#include "VFXBloodManager.generated.h"
 
 UENUM(BlueprintType)
 enum class EVFX_BloodIntensity : uint8
@@ -103,4 +102,4 @@ private:
     void SpawnBloodParticles(FVector Location, FVector Normal, UParticleSystem* ParticleSystem);
 };
 
-#include "VFXBloodManager.generated.h"
+#include "VFXBloodManager.generated.h"#include "VFXBloodManager.generated.h"

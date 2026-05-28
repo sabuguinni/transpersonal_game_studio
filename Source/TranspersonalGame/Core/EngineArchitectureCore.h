@@ -46,7 +46,7 @@ public:
     FEnginePerformanceMetrics GetPerformanceMetrics() const;
 
     /** Force garbage collection and memory cleanup */
-    UFUNCTION(BlueprintCallable, Category = "Engine Architecture", CallInEditor = true)
+    UFUNCTION(BlueprintCallable, Category = "Engine Architecture", CallInEditor)
     void ForceMemoryCleanup();
 
 protected:

@@ -5,7 +5,6 @@
 #include "Engine/World.h"
 #include "GameFramework/Pawn.h"
 #include "SharedTypes.h"
-#include "Combat_PackHuntingAI.generated.h"
 
 UENUM(BlueprintType)
 enum class ECombat_PackRole : uint8
@@ -221,4 +220,4 @@ private:
     void CleanupInvalidMembers();
 };
 
-#include "Combat_PackHuntingAI.generated.h"
+#include "Combat_PackHuntingAI.generated.h"#include "Combat_PackHuntingAI.generated.h"

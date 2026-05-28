@@ -119,7 +119,7 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Physics Debug")
     void AnalyzePhysicsState();
 
-    UFUNCTION(BlueprintCallable, Category = "Physics Debug", CallInEditor = true)
+    UFUNCTION(BlueprintCallable, Category = "Physics Debug", CallInEditor)
     void RunPhysicsValidation();
 
 private:

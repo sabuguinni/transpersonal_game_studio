@@ -287,21 +287,21 @@ class TRANSPERSONALGAME_API UPerf_ProfilerBlueprintLibrary : public UBlueprintFu
     GENERATED_BODY()
 
 public:
-    UFUNCTION(BlueprintCallable, Category = "Performance", CallInEditor = true)
+    UFUNCTION(BlueprintCallable, Category = "Performance", CallInEditor)
     static UPerf_RealTimeProfiler* GetRealTimeProfiler(const UObject* WorldContext);
 
-    UFUNCTION(BlueprintCallable, Category = "Performance", CallInEditor = true)
+    UFUNCTION(BlueprintCallable, Category = "Performance", CallInEditor)
     static void StartGlobalProfiling(const UObject* WorldContext, EPerf_ProfilerMode Mode = EPerf_ProfilerMode::Basic);
 
-    UFUNCTION(BlueprintCallable, Category = "Performance", CallInEditor = true)
+    UFUNCTION(BlueprintCallable, Category = "Performance", CallInEditor)
     static void StopGlobalProfiling(const UObject* WorldContext);
 
-    UFUNCTION(BlueprintCallable, Category = "Performance", CallInEditor = true)
+    UFUNCTION(BlueprintCallable, Category = "Performance", CallInEditor)
     static float GetCurrentFPS(const UObject* WorldContext);
 
-    UFUNCTION(BlueprintCallable, Category = "Performance", CallInEditor = true)
+    UFUNCTION(BlueprintCallable, Category = "Performance", CallInEditor)
     static float GetCurrentFrameTime(const UObject* WorldContext);
 
-    UFUNCTION(BlueprintCallable, Category = "Performance", CallInEditor = true)
+    UFUNCTION(BlueprintCallable, Category = "Performance", CallInEditor)
     static bool HasPerformanceProblems(const UObject* WorldContext);
 };

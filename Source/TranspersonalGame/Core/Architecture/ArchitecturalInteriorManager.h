@@ -146,7 +146,7 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Interior Management")
     float GetShelterProtectionValue() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Interior Management", CallInEditor = true)
+    UFUNCTION(BlueprintCallable, Category = "Interior Management", CallInEditor)
     void PreviewInteriorLayout();
 
     UFUNCTION(BlueprintCallable, Category = "Interior Management")

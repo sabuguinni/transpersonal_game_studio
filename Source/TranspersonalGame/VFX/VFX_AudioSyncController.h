@@ -6,7 +6,6 @@
 #include "Particles/ParticleSystemComponent.h"
 #include "Components/AudioComponent.h"
 #include "VFX_AudioSyncController.generated.h"
-
 UENUM(BlueprintType)
 enum class EVFX_AudioSyncType : uint8
 {
@@ -129,4 +128,3 @@ private:
     void SmoothIntensityTransition(float DeltaTime);
 };
 
-#include "VFX_AudioSyncController.generated.h"

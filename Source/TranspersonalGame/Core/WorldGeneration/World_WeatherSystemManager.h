@@ -244,33 +244,27 @@ protected:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Config")
     TMap<EWorld_WeatherState, FWorld_WeatherAudioConfig> WeatherAudioConfigs;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio Components")
-    UPROPERTY(meta = (AllowPrivateAccess = "true"))
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio Components", meta = (AllowPrivateAccess = "true"))
     TObjectPtr<UAudioComponent> AmbientAudioComponent;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio Components")
-    UPROPERTY(meta = (AllowPrivateAccess = "true"))
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio Components", meta = (AllowPrivateAccess = "true"))
     TObjectPtr<UAudioComponent> IntensityAudioComponent;
 
     // VFX configuration
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Config")
     TMap<EWorld_WeatherState, FWorld_WeatherVFXConfig> WeatherVFXConfigs;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "VFX Components")
-    UPROPERTY(meta = (AllowPrivateAccess = "true"))
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "VFX Components", meta = (AllowPrivateAccess = "true"))
     TObjectPtr<UParticleSystemComponent> WeatherParticleComponent;
 
     // Lighting references
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Lighting")
-    UPROPERTY(meta = (AllowPrivateAccess = "true"))
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Lighting", meta = (AllowPrivateAccess = "true"))
     TObjectPtr<ADirectionalLight> SunLight;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Lighting")
-    UPROPERTY(meta = (AllowPrivateAccess = "true"))
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Lighting", meta = (AllowPrivateAccess = "true"))
     TObjectPtr<ASkyLight> SkyLight;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Lighting")
-    UPROPERTY(meta = (AllowPrivateAccess = "true"))
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Lighting", meta = (AllowPrivateAccess = "true"))
     TObjectPtr<AExponentialHeightFog> HeightFog;
 
     // Timing and state management

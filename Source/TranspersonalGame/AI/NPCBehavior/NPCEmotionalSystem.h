@@ -3,7 +3,6 @@
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
 #include "Engine/Engine.h"
-#include "NPCEmotionalSystem.generated.h"
 
 UENUM(BlueprintType)
 enum class ENPC_EmotionalState : uint8
@@ -163,4 +162,4 @@ private:
     float LastMemoryCleanup;
 };
 
-#include "NPCEmotionalSystem.generated.h"
+#include "NPCEmotionalSystem.generated.h"#include "NPCEmotionalSystem.generated.h"

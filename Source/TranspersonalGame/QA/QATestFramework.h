@@ -226,6 +226,11 @@ private:
     TestResult.Timestamp = FDateTime::Now(); \
     float StartTime = FPlatformTime::Seconds();
 
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API AQA_TestActor : public AActor
+{
+    GENERATED_BODY()
+
 public:
     AQA_TestActor();
 

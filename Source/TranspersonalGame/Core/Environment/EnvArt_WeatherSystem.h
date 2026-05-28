@@ -100,16 +100,16 @@ public:
     void UpdateSunPosition();
 
     // Manual Controls
-    UFUNCTION(BlueprintCallable, Category = "Lighting", CallInEditor = true)
+    UFUNCTION(BlueprintCallable, Category = "Lighting", CallInEditor)
     void SetSunIntensity(float Intensity);
 
-    UFUNCTION(BlueprintCallable, Category = "Lighting", CallInEditor = true)
+    UFUNCTION(BlueprintCallable, Category = "Lighting", CallInEditor)
     void SetFogDensity(float Density);
 
-    UFUNCTION(BlueprintCallable, Category = "Effects", CallInEditor = true)
+    UFUNCTION(BlueprintCallable, Category = "Effects", CallInEditor)
     void ToggleRainEffects();
 
-    UFUNCTION(BlueprintCallable, Category = "Weather", CallInEditor = true)
+    UFUNCTION(BlueprintCallable, Category = "Weather", CallInEditor)
     void ApplyPresetWeather();
 
 protected:

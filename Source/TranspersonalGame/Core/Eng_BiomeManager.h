@@ -4,7 +4,6 @@
 #include "Engine/World.h"
 #include "Subsystems/WorldSubsystem.h"
 #include "SharedTypes.h"
-#include "Eng_BiomeManager.generated.h"
 
 USTRUCT(BlueprintType)
 struct TRANSPERSONALGAME_API FEng_BiomeData
@@ -107,4 +106,4 @@ private:
     float CalculateDistanceToBiome(const FVector& WorldLocation, const FEng_BiomeData& BiomeData) const;
 };
 
-#include "Eng_BiomeManager.generated.h"
+#include "Eng_BiomeManager.generated.h"#include "Eng_BiomeManager.generated.h"

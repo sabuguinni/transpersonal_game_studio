@@ -4,7 +4,6 @@
 #include "GameFramework/Actor.h"
 #include "Components/ActorComponent.h"
 #include "Engine/TriggerBox.h"
-#include "Quest_SurvivalObjectiveSystem.generated.h"
 
 UENUM(BlueprintType)
 enum class EQuest_SurvivalObjectiveType : uint8
@@ -236,4 +235,4 @@ public:
     void OnPlayerExitedTrigger();
 };
 
-#include "Quest_SurvivalObjectiveSystem.generated.h"
+#include "Quest_SurvivalObjectiveSystem.generated.h"#include "Quest_SurvivalObjectiveSystem.generated.h"

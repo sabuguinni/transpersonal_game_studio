@@ -2,7 +2,6 @@
 
 #include "CoreMinimal.h"
 #include "Engine/GameInstanceSubsystem.h"
-#include "Build_FinalIntegrationReport.generated.h"
 
 UENUM(BlueprintType)
 enum class EBuild_IntegrationStatus : uint8
@@ -132,4 +131,4 @@ private:
     void LogIntegrationResults();
 };
 
-#include "Build_FinalIntegrationReport.generated.h"
+#include "Build_FinalIntegrationReport.generated.h"#include "Build_FinalIntegrationReport.generated.h"

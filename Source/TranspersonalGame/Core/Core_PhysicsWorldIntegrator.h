@@ -213,7 +213,7 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Debug")
     void DrawPhysicsDebugInfo();
 
-    UFUNCTION(BlueprintCallable, Category = "Debug", CallInEditor = true)
+    UFUNCTION(BlueprintCallable, Category = "Debug", CallInEditor)
     void ValidatePhysicsIntegration();
 
 protected:

@@ -5,7 +5,6 @@
 #include "Engine/TriggerSphere.h"
 #include "SharedTypes.h"
 #include "Combat_ThreatDetectionSystem.generated.h"
-
 USTRUCT(BlueprintType)
 struct TRANSPERSONALGAME_API FCombat_ThreatLevel
 {
@@ -134,4 +133,3 @@ public:
     FORCEINLINE float GetScanRadius() const { return ScanRadius; }
 };
 
-#include "Combat_ThreatDetectionSystem.generated.h"

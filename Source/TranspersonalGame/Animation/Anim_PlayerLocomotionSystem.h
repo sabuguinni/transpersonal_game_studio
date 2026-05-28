@@ -8,7 +8,6 @@
 #include "Animation/BlendSpace.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
-#include "Anim_PlayerLocomotionSystem.generated.h"
 
 UENUM(BlueprintType)
 enum class EAnim_LocomotionState : uint8
@@ -133,4 +132,4 @@ private:
     float CalculateMovementDirection() const;
 };
 
-#include "Anim_PlayerLocomotionSystem.generated.h"
+#include "Anim_PlayerLocomotionSystem.generated.h"#include "Anim_PlayerLocomotionSystem.generated.h"

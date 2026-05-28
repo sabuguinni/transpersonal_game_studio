@@ -5,7 +5,6 @@
 #include "Engine/Engine.h"
 #include "RHI.h"
 #include "RenderingThread.h"
-#include "Perf_RenderingOptimizer.generated.h"
 
 UENUM(BlueprintType)
 enum class EPerf_RenderQuality : uint8
@@ -212,4 +211,4 @@ private:
     FTimerHandle OptimizationTimerHandle;
 };
 
-#include "Perf_RenderingOptimizer.generated.h"
+#include "Perf_RenderingOptimizer.generated.h"#include "Perf_RenderingOptimizer.generated.h"

@@ -63,7 +63,7 @@ public:
      * Validates that all .h files have corresponding .cpp files
      * Returns detailed report of missing files and compilation status
      */
-    UFUNCTION(BlueprintCallable, Category = "Engine Architecture", CallInEditor = true)
+    UFUNCTION(BlueprintCallable, Category = "Engine Architecture", CallInEditor)
     FEng_CompilationReport ValidateCompilation();
 
     /**
@@ -75,7 +75,7 @@ public:
     /**
      * Forces recompilation of the TranspersonalGame module
      */
-    UFUNCTION(BlueprintCallable, Category = "Engine Architecture", CallInEditor = true)
+    UFUNCTION(BlueprintCallable, Category = "Engine Architecture", CallInEditor)
     bool ForceRecompile();
 
     /**

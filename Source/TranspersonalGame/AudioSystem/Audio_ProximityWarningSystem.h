@@ -6,7 +6,6 @@
 #include "Components/AudioComponent.h"
 #include "Engine/Engine.h"
 #include "Audio_ProximityWarningSystem.generated.h"
-
 UENUM(BlueprintType)
 enum class EAudio_ThreatLevel : uint8
 {
@@ -137,4 +136,3 @@ private:
     float ScanInterval;
 };
 
-#include "Audio_ProximityWarningSystem.generated.h"

@@ -8,7 +8,6 @@
 #include "Components/StaticMeshComponent.h"
 #include "Components/SphereComponent.h"
 #include "SharedTypes.h"
-#include "Quest_MissionSystem.generated.h"
 
 // Forward declarations
 class AQuest_MissionActor;
@@ -276,4 +275,4 @@ protected:
     FString GenerateUniqueMissionID();
 };
 
-#include "Quest_MissionSystem.generated.h"
+#include "Quest_MissionSystem.generated.h"#include "Quest_MissionSystem.generated.h"

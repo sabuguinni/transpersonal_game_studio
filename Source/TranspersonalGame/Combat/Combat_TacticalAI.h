@@ -9,7 +9,6 @@
 #include "BehaviorTree/BlackboardComponent.h"
 #include "Perception/AIPerceptionComponent.h"
 #include "Perception/AISightConfig.h"
-#include "Combat_TacticalAI.generated.h"
 
 UENUM(BlueprintType)
 enum class ECombat_TacticalState : uint8
@@ -174,4 +173,4 @@ private:
     FVector GetRandomFlankingPosition() const;
 };
 
-#include "Combat_TacticalAI.generated.h"
+#include "Combat_TacticalAI.generated.h"#include "Combat_TacticalAI.generated.h"

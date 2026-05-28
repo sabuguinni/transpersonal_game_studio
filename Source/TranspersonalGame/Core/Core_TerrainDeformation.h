@@ -8,7 +8,6 @@
 #include "Landscape/Landscape.h"
 #include "LandscapeProxy.h"
 #include "SharedTypes.h"
-#include "Core_TerrainDeformation.generated.h"
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnTerrainDeformed, FVector, Location, float, Radius, float, Intensity);
 
@@ -143,7 +142,7 @@ public:
     virtual void Deinitialize() override;
 
     /** Get the terrain deformation manager instance */
-    UFUNCTION(BlueprintCallable, Category = "Terrain Deformation", CallInEditor = true)
+    UFUNCTION(BlueprintCallable, Category = "Terrain Deformation", CallInEditor)
     static UCore_TerrainDeformationManager* GetTerrainDeformationManager(const UObject* WorldContext);
 
     /** Register terrain deformation component */
@@ -188,4 +187,4 @@ private:
     void CleanupInvalidComponents();
 };
 
-#include "Core_TerrainDeformation.generated.h"
+#include "Core_TerrainDeformation.generated.h"#include "Core_TerrainDeformation.generated.h"

@@ -3,7 +3,6 @@
 #include "CoreMinimal.h"
 #include "Engine/GameInstanceSubsystem.h"
 #include "Engine/Engine.h"
-#include "Perf_QualityScaler.generated.h"
 
 UENUM(BlueprintType)
 enum class EPerf_QualityLevel : uint8
@@ -180,4 +179,4 @@ private:
     bool bPendingQualityDecrease = false;
 };
 
-#include "Perf_QualityScaler.generated.h"
+#include "Perf_QualityScaler.generated.h"#include "Perf_QualityScaler.generated.h"

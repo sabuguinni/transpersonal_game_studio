@@ -3,7 +3,6 @@
 #include "CoreMinimal.h"
 #include "Engine/GameInstanceSubsystem.h"
 #include "Engine/Engine.h"
-#include "Perf_FrameRateController.generated.h"
 
 UENUM(BlueprintType)
 enum class EPerf_FrameRateTarget : uint8
@@ -117,4 +116,4 @@ private:
     int32 FrameCounter;
 };
 
-#include "Perf_FrameRateController.generated.h"
+#include "Perf_FrameRateController.generated.h"#include "Perf_FrameRateController.generated.h"

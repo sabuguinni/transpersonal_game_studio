@@ -127,23 +127,23 @@ public:
     virtual void Deinitialize() override;
 
     // Core Landscape Creation Functions
-    UFUNCTION(BlueprintCallable, Category = "Massive Landscape", CallInEditor = true)
+    UFUNCTION(BlueprintCallable, Category = "Massive Landscape", CallInEditor)
     bool CreateMassiveLandscape(const FWorld_LandscapeCreationConfig& Config);
 
-    UFUNCTION(BlueprintCallable, Category = "Massive Landscape", CallInEditor = true)
+    UFUNCTION(BlueprintCallable, Category = "Massive Landscape", CallInEditor)
     bool CreateNativeLandscape(const FWorld_LandscapeCreationConfig& Config);
 
-    UFUNCTION(BlueprintCallable, Category = "Massive Landscape", CallInEditor = true)
+    UFUNCTION(BlueprintCallable, Category = "Massive Landscape", CallInEditor)
     bool CreateStaticMeshTerrain(const FWorld_LandscapeCreationConfig& Config);
 
-    UFUNCTION(BlueprintCallable, Category = "Massive Landscape", CallInEditor = true)
+    UFUNCTION(BlueprintCallable, Category = "Massive Landscape", CallInEditor)
     bool CreateHybridLandscape(const FWorld_LandscapeCreationConfig& Config);
 
     // Biome Zone Management
-    UFUNCTION(BlueprintCallable, Category = "Biome Zones", CallInEditor = true)
+    UFUNCTION(BlueprintCallable, Category = "Biome Zones", CallInEditor)
     void CreateBiomeZones(const TArray<FWorld_BiomeZoneConfig>& BiomeConfigs);
 
-    UFUNCTION(BlueprintCallable, Category = "Biome Zones", CallInEditor = true)
+    UFUNCTION(BlueprintCallable, Category = "Biome Zones", CallInEditor)
     void CreateDefaultBiomeLayout();
 
     UFUNCTION(BlueprintCallable, Category = "Biome Zones")

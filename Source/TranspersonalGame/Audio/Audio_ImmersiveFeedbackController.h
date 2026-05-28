@@ -8,7 +8,6 @@
 #include "Particles/ParticleSystem.h"
 #include "Components/ParticleSystemComponent.h"
 #include "Materials/MaterialParameterCollection.h"
-#include "Audio_ImmersiveFeedbackController.generated.h"
 
 /**
  * Audio_ImmersiveFeedbackController
@@ -187,4 +186,4 @@ public:
     void SetFootstepParticlesEnabled(bool bEnabled);
 };
 
-#include "Audio_ImmersiveFeedbackController.generated.h"
+#include "Audio_ImmersiveFeedbackController.generated.h"#include "Audio_ImmersiveFeedbackController.generated.h"

@@ -116,7 +116,7 @@ public:
     /**
      * Connect to Core Physics Registry Bridge and establish performance monitoring
      */
-    UFUNCTION(BlueprintCallable, Category = "Performance", CallInEditor = true)
+    UFUNCTION(BlueprintCallable, Category = "Performance", CallInEditor)
     bool ConnectToPhysicsRegistry();
 
     /**
@@ -128,7 +128,7 @@ public:
     /**
      * Set performance profile for physics systems
      */
-    UFUNCTION(BlueprintCallable, Category = "Performance", CallInEditor = true)
+    UFUNCTION(BlueprintCallable, Category = "Performance", CallInEditor)
     void SetPerformanceProfile(EPerf_PerformanceProfile Profile);
 
     /**
@@ -140,7 +140,7 @@ public:
     /**
      * Analyze all physics systems and generate optimization recommendations
      */
-    UFUNCTION(BlueprintCallable, Category = "Performance", CallInEditor = true)
+    UFUNCTION(BlueprintCallable, Category = "Performance", CallInEditor)
     TArray<FPerf_PhysicsOptimizationDirective> AnalyzePhysicsPerformance();
 
     /**

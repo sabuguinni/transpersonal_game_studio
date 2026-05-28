@@ -177,10 +177,10 @@ public:
     void ClearSystemErrors(EEng_SystemType SystemType);
 
     // Debug and Diagnostics
-    UFUNCTION(BlueprintCallable, Category = "Debug", CallInEditor = true)
+    UFUNCTION(BlueprintCallable, Category = "Debug", CallInEditor)
     void PrintSystemStatus() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Debug", CallInEditor = true)
+    UFUNCTION(BlueprintCallable, Category = "Debug", CallInEditor)
     void ValidateArchitecture() const;
 
 protected:

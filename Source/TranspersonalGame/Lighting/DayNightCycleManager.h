@@ -6,7 +6,6 @@
 #include "Components/SkyAtmosphereComponent.h"
 #include "Components/ExponentialHeightFogComponent.h"
 #include "Engine/PostProcessVolume.h"
-#include "DayNightCycleManager.generated.h"
 
 UENUM(BlueprintType)
 enum class ELight_TimeOfDay : uint8
@@ -134,4 +133,4 @@ private:
     float LastUpdateTime = 0.0f;
 };
 
-#include "DayNightCycleManager.generated.h"
+#include "DayNightCycleManager.generated.h"#include "DayNightCycleManager.generated.h"

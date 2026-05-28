@@ -5,7 +5,6 @@
 #include "Components/SphereComponent.h"
 #include "Components/AudioComponent.h"
 #include "Engine/Engine.h"
-#include "Audio_ProximityTrigger.generated.h"
 
 UENUM(BlueprintType)
 enum class EAudio_TriggerType : uint8
@@ -120,4 +119,4 @@ private:
     float StartVolume = 0.0f;
 };
 
-#include "Audio_ProximityTrigger.generated.h"
+#include "Audio_ProximityTrigger.generated.h"#include "Audio_ProximityTrigger.generated.h"

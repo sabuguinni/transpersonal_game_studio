@@ -11,7 +11,13 @@
 UENUM(BlueprintType)
 enum class ELight_TimeOfDay_B3E : uint8
 {
-    GENERATED_BODY()
+    Dawn = 0,
+    Morning,
+    Midday,
+    Afternoon,
+    Dusk,
+    Night
+};
 
 UENUM(BlueprintType)
 enum class ELight_WeatherState_B3E : uint8

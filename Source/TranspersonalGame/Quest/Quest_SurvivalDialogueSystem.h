@@ -6,7 +6,6 @@
 #include "Components/StaticMeshComponent.h"
 #include "Engine/TriggerSphere.h"
 #include "../SharedTypes.h"
-#include "Quest_SurvivalDialogueSystem.generated.h"
 
 UENUM(BlueprintType)
 enum class EQuest_NPCRole : uint8
@@ -256,4 +255,4 @@ protected:
     void OnTriggerBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComponent, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult);
 };
 
-#include "Quest_SurvivalDialogueSystem.generated.h"
+#include "Quest_SurvivalDialogueSystem.generated.h"#include "Quest_SurvivalDialogueSystem.generated.h"

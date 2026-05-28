@@ -4,7 +4,6 @@
 #include "GameFramework/Actor.h"
 #include "Components/ActorComponent.h"
 #include "Engine/World.h"
-#include "PhysicsLODManager.generated.h"
 
 /**
  * Physics Level of Detail system for performance optimization
@@ -205,4 +204,4 @@ private:
     void CleanupInvalidObjects();
 };
 
-#include "PhysicsLODManager.generated.h"
+#include "PhysicsLODManager.generated.h"#include "PhysicsLODManager.generated.h"

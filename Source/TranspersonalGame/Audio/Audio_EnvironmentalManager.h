@@ -5,7 +5,6 @@
 #include "Components/AudioComponent.h"
 #include "Engine/World.h"
 #include "TimerManager.h"
-#include "Audio_EnvironmentalManager.generated.h"
 
 UENUM(BlueprintType)
 enum class EAudio_EnvironmentType : uint8
@@ -183,4 +182,4 @@ private:
     void SetupRandomEventTimer();
 };
 
-#include "Audio_EnvironmentalManager.generated.h"
+#include "Audio_EnvironmentalManager.generated.h"#include "Audio_EnvironmentalManager.generated.h"

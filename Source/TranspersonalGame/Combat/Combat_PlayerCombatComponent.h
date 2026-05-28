@@ -4,7 +4,6 @@
 #include "Components/ActorComponent.h"
 #include "Engine/Engine.h"
 #include "GameFramework/Character.h"
-#include "Combat_PlayerCombatComponent.generated.h"
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnPlayerDamaged, float, Damage, AActor*, DamageSource);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnPlayerDeath, AActor*, Killer);
@@ -162,4 +161,4 @@ protected:
     AActor* GetOwnerCharacter() const;
 };
 
-#include "Combat_PlayerCombatComponent.generated.h"
+#include "Combat_PlayerCombatComponent.generated.h"#include "Combat_PlayerCombatComponent.generated.h"

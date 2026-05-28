@@ -198,6 +198,6 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Core Systems Performance Integration")
     void EnableAdaptiveOptimization(bool bEnable);
 
-    UFUNCTION(BlueprintCallable, Category = "Core Systems Performance Integration", CallInEditor = true)
+    UFUNCTION(BlueprintCallable, Category = "Core Systems Performance Integration", CallInEditor)
     void RunCoreSystemsPerformanceTest();
 };

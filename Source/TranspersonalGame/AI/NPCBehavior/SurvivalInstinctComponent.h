@@ -4,7 +4,6 @@
 #include "Components/ActorComponent.h"
 #include "Engine/Engine.h"
 #include "GameFramework/Pawn.h"
-#include "SurvivalInstinctComponent.generated.h"
 
 UENUM(BlueprintType)
 enum class ENPC_SurvivalState : uint8
@@ -147,4 +146,4 @@ private:
     bool bIsInitialized;
 };
 
-#include "SurvivalInstinctComponent.generated.h"
+#include "SurvivalInstinctComponent.generated.h"#include "SurvivalInstinctComponent.generated.h"

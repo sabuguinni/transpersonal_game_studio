@@ -4,7 +4,6 @@
 #include "Components/ActorComponent.h"
 #include "Engine/DataTable.h"
 #include "Sound/SoundBase.h"
-#include "Narr_VoicelineController.generated.h"
 
 UENUM(BlueprintType)
 enum class ENarr_VoicelineType : uint8
@@ -199,4 +198,4 @@ protected:
     FNarr_VoicelineData* FindVoicelineByType(ENarr_VoicelineType VoicelineType, ENarr_VoicelinePriority MinPriority);
 };
 
-#include "Narr_VoicelineController.generated.h"
+#include "Narr_VoicelineController.generated.h"#include "Narr_VoicelineController.generated.h"

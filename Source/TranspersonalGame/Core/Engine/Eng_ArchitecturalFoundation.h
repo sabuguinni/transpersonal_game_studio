@@ -184,10 +184,10 @@ public:
     void ShutdownAllSystems();
 
     // Editor Tools
-    UFUNCTION(BlueprintCallable, CallInEditor = true, Category = "Architecture")
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Architecture")
     void ValidateArchitecture();
 
-    UFUNCTION(BlueprintCallable, CallInEditor = true, Category = "Architecture")
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Architecture")
     void GenerateSystemReport();
 
 protected:

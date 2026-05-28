@@ -105,10 +105,10 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Biome Spawning")
     void SetupDefaultBiomeConfigs();
 
-    UFUNCTION(BlueprintCallable, Category = "Biome Spawning", CallInEditor = true)
+    UFUNCTION(BlueprintCallable, Category = "Biome Spawning", CallInEditor)
     void EditorSpawnBiomeAssets();
 
-    UFUNCTION(BlueprintCallable, Category = "Biome Spawning", CallInEditor = true)
+    UFUNCTION(BlueprintCallable, Category = "Biome Spawning", CallInEditor)
     void EditorClearAssets();
 
 protected:

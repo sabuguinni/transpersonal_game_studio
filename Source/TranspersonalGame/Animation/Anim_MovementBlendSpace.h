@@ -4,7 +4,6 @@
 #include "Engine/BlendSpace1D.h"
 #include "Animation/AnimInstance.h"
 #include "Components/ActorComponent.h"
-#include "Anim_MovementBlendSpace.generated.h"
 
 /**
  * Movement Blend Space Controller for Transpersonal Character
@@ -141,4 +140,4 @@ struct TRANSPERSONALGAME_API FAnim_MovementData
     }
 };
 
-#include "Anim_MovementBlendSpace.generated.h"
+#include "Anim_MovementBlendSpace.generated.h"#include "Anim_MovementBlendSpace.generated.h"

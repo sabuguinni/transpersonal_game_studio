@@ -5,7 +5,6 @@
 #include "Engine/World.h"
 #include "Subsystems/WorldSubsystem.h"
 #include "Eng_MasterArchitect.generated.h"
-
 UENUM(BlueprintType)
 enum class EEng_SystemState : uint8
 {
@@ -250,4 +249,3 @@ private:
     void InitializeAudioSystems();
 };
 
-#include "Eng_MasterArchitect.generated.h"

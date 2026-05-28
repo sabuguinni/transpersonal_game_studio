@@ -7,7 +7,6 @@
 #include "Components/AudioComponent.h"
 #include "Components/InstancedStaticMeshComponent.h"
 #include "Engine/DataTable.h"
-#include "World_UndergroundSystem.generated.h"
 
 UENUM(BlueprintType)
 enum class EWorld_UndergroundType : uint8
@@ -315,4 +314,4 @@ private:
     bool bDangerLevelDirty;
 };
 
-#include "World_UndergroundSystem.generated.h"
+#include "World_UndergroundSystem.generated.h"#include "World_UndergroundSystem.generated.h"

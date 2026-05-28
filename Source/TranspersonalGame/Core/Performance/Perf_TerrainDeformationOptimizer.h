@@ -233,10 +233,10 @@ public:
     void OptimizeLandscapeComponents(ALandscape* Landscape);
 
     // Debug and profiling
-    UFUNCTION(BlueprintCallable, Category = "Debug", CallInEditor = true)
+    UFUNCTION(BlueprintCallable, Category = "Debug", CallInEditor)
     void PrintPerformanceReport();
 
-    UFUNCTION(BlueprintCallable, Category = "Debug", CallInEditor = true)
+    UFUNCTION(BlueprintCallable, Category = "Debug", CallInEditor)
     void ResetPerformanceCounters();
 
     UFUNCTION(BlueprintCallable, Category = "Debug")

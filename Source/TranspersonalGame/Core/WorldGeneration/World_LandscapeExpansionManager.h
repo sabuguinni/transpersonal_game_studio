@@ -5,7 +5,6 @@
 #include "Engine/World.h"
 #include "SharedTypes.h"
 #include "World_LandscapeExpansionManager.generated.h"
-
 UENUM(BlueprintType)
 enum class EWorld_TerrainType : uint8
 {
@@ -99,4 +98,3 @@ private:
                                    int32 Index, const FString& BiomeName);
 };
 
-#include "World_LandscapeExpansionManager.generated.h"

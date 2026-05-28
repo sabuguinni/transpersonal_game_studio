@@ -5,7 +5,6 @@
 #include "Engine/Engine.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Animation/AnimInstance.h"
-#include "Anim_CharacterMovementComponent.generated.h"
 
 UENUM(BlueprintType)
 enum class EAnim_MovementState : uint8
@@ -128,4 +127,4 @@ private:
     virtual void OnLanded(const FHitResult& Hit) override;
 };
 
-#include "Anim_CharacterMovementComponent.generated.h"
+#include "Anim_CharacterMovementComponent.generated.h"#include "Anim_CharacterMovementComponent.generated.h"

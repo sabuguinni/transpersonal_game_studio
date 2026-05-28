@@ -4,7 +4,6 @@
 #include "Components/ActorComponent.h"
 #include "Engine/TriggerBox.h"
 #include "SharedTypes.h"
-#include "Narr_ContextualDialogue.generated.h"
 
 UENUM(BlueprintType)
 enum class ENarr_DialogueContext : uint8
@@ -120,4 +119,4 @@ private:
     void CheckPlayerSurvivalStats();
 };
 
-#include "Narr_ContextualDialogue.generated.h"
+#include "Narr_ContextualDialogue.generated.h"#include "Narr_ContextualDialogue.generated.h"

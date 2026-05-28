@@ -4,7 +4,6 @@
 #include "Components/ActorComponent.h"
 #include "Engine/TriggerVolume.h"
 #include "GameFramework/Pawn.h"
-#include "Combat_ThreatDetection.generated.h"
 
 UENUM(BlueprintType)
 enum class ECombat_ThreatLevel : uint8
@@ -149,4 +148,4 @@ private:
     void BroadcastThreatEvents();
 };
 
-#include "Combat_ThreatDetection.generated.h"
+#include "Combat_ThreatDetection.generated.h"#include "Combat_ThreatDetection.generated.h"

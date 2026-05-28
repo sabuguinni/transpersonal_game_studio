@@ -8,7 +8,6 @@
 #include "Camera/CameraComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Engine/Engine.h"
-#include "Char_TribalCharacter.generated.h"
 
 UENUM(BlueprintType)
 enum class EChar_TribalType : uint8
@@ -268,4 +267,4 @@ private:
     void ApplyClothingToMesh();
 };
 
-#include "Char_TribalCharacter.generated.h"
+#include "Char_TribalCharacter.generated.h"#include "Char_TribalCharacter.generated.h"

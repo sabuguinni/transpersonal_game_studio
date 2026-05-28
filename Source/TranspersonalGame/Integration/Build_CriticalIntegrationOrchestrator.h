@@ -77,49 +77,49 @@ public:
     virtual void Deinitialize() override;
 
     // Core Integration Functions
-    UFUNCTION(BlueprintCallable, Category = "Integration", CallInEditor = true)
+    UFUNCTION(BlueprintCallable, Category = "Integration", CallInEditor)
     FBuild_IntegrationStatus ValidateFullSystemIntegration();
 
-    UFUNCTION(BlueprintCallable, Category = "Integration", CallInEditor = true)
+    UFUNCTION(BlueprintCallable, Category = "Integration", CallInEditor)
     bool ValidateAllModulesLoaded();
 
-    UFUNCTION(BlueprintCallable, Category = "Integration", CallInEditor = true)
+    UFUNCTION(BlueprintCallable, Category = "Integration", CallInEditor)
     TArray<FBuild_ModuleValidationResult> ValidateModuleHealth();
 
-    UFUNCTION(BlueprintCallable, Category = "Integration", CallInEditor = true)
+    UFUNCTION(BlueprintCallable, Category = "Integration", CallInEditor)
     bool ValidateCoreSystemsActive();
 
-    UFUNCTION(BlueprintCallable, Category = "Integration", CallInEditor = true)
+    UFUNCTION(BlueprintCallable, Category = "Integration", CallInEditor)
     bool ValidateBuildIntegrity();
 
     // Critical System Validation
-    UFUNCTION(BlueprintCallable, Category = "Integration", CallInEditor = true)
+    UFUNCTION(BlueprintCallable, Category = "Integration", CallInEditor)
     bool ValidateWorldGeneration();
 
-    UFUNCTION(BlueprintCallable, Category = "Integration", CallInEditor = true)
+    UFUNCTION(BlueprintCallable, Category = "Integration", CallInEditor)
     bool ValidateCharacterSystems();
 
-    UFUNCTION(BlueprintCallable, Category = "Integration", CallInEditor = true)
+    UFUNCTION(BlueprintCallable, Category = "Integration", CallInEditor)
     bool ValidateAISystems();
 
-    UFUNCTION(BlueprintCallable, Category = "Integration", CallInEditor = true)
+    UFUNCTION(BlueprintCallable, Category = "Integration", CallInEditor)
     bool ValidateVFXSystems();
 
     // Integration Reporting
-    UFUNCTION(BlueprintCallable, Category = "Integration", CallInEditor = true)
+    UFUNCTION(BlueprintCallable, Category = "Integration", CallInEditor)
     FString GenerateIntegrationReport();
 
-    UFUNCTION(BlueprintCallable, Category = "Integration", CallInEditor = true)
+    UFUNCTION(BlueprintCallable, Category = "Integration", CallInEditor)
     void LogCriticalIntegrationStatus();
 
-    UFUNCTION(BlueprintCallable, Category = "Integration", CallInEditor = true)
+    UFUNCTION(BlueprintCallable, Category = "Integration", CallInEditor)
     bool SaveIntegrationReport(const FString& ReportPath);
 
     // Emergency Recovery
-    UFUNCTION(BlueprintCallable, Category = "Integration", CallInEditor = true)
+    UFUNCTION(BlueprintCallable, Category = "Integration", CallInEditor)
     bool AttemptSystemRecovery();
 
-    UFUNCTION(BlueprintCallable, Category = "Integration", CallInEditor = true)
+    UFUNCTION(BlueprintCallable, Category = "Integration", CallInEditor)
     void TriggerEmergencyValidation();
 
 protected:

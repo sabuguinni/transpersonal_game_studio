@@ -171,7 +171,7 @@ public:
     void SetAlertThreshold(ECore_PhysicsPerformanceLevel Level, bool bEnabled);
 
     // Debug and visualization
-    UFUNCTION(BlueprintCallable, Category = "Physics Performance", CallInEditor = true)
+    UFUNCTION(BlueprintCallable, Category = "Physics Performance", CallInEditor)
     void DrawPerformanceGraph() const;
 
     UFUNCTION(BlueprintCallable, Category = "Physics Performance")

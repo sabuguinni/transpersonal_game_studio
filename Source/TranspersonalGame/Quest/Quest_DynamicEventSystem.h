@@ -6,7 +6,6 @@
 #include "Components/StaticMeshComponent.h"
 #include "Components/TextRenderComponent.h"
 #include "Engine/TimerHandle.h"
-#include "Quest_DynamicEventSystem.generated.h"
 
 // Event types for dynamic quest generation
 UENUM(BlueprintType)
@@ -213,4 +212,4 @@ protected:
     void UpdateEventText();
 };
 
-#include "Quest_DynamicEventSystem.generated.h"
+#include "Quest_DynamicEventSystem.generated.h"#include "Quest_DynamicEventSystem.generated.h"

@@ -5,7 +5,6 @@
 #include "Engine/Engine.h"
 #include "PhysicalMaterials/PhysicalMaterial.h"
 #include "Components/ActorComponent.h"
-#include "Core_MaterialPhysics.generated.h"
 
 /**
  * Physical material types for different terrain and object surfaces
@@ -152,4 +151,4 @@ private:
     void CreatePhysicalMaterial();
 };
 
-#include "Core_MaterialPhysics.generated.h"
+#include "Core_MaterialPhysics.generated.h"#include "Core_MaterialPhysics.generated.h"

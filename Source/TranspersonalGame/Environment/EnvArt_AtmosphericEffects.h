@@ -127,7 +127,7 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Atmosphere")
     void UpdateAmbientSounds();
 
-    UFUNCTION(BlueprintCallable, Category = "Atmosphere", CallInEditor = true)
+    UFUNCTION(BlueprintCallable, Category = "Atmosphere", CallInEditor)
     void RefreshAtmosphericEffects();
 
     UFUNCTION(BlueprintCallable, Category = "Atmosphere")

@@ -6,7 +6,6 @@
 #include "BehaviorTree/BlackboardComponent.h"
 #include "AIController.h"
 #include "Engine/World.h"
-#include "NPC_BehaviorTreeComponent.generated.h"
 
 UENUM(BlueprintType)
 enum class ENPC_BehaviorState : uint8
@@ -135,4 +134,4 @@ private:
     AActor* FindNearestPlayer();
 };
 
-#include "NPC_BehaviorTreeComponent.generated.h"
+#include "NPC_BehaviorTreeComponent.generated.h"#include "NPC_BehaviorTreeComponent.generated.h"

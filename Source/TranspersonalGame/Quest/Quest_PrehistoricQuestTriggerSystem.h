@@ -126,10 +126,10 @@ public:
     void ClearAllTriggers();
 
     // Debug functions
-    UFUNCTION(BlueprintCallable, Category = "Quest Trigger", CallInEditor = true)
+    UFUNCTION(BlueprintCallable, Category = "Quest Trigger", CallInEditor)
     void DebugPrintActiveTriggers();
 
-    UFUNCTION(BlueprintCallable, Category = "Quest Trigger", CallInEditor = true)
+    UFUNCTION(BlueprintCallable, Category = "Quest Trigger", CallInEditor)
     void TestLocationTrigger(const FVector& TestLocation, float TestRadius);
 
 protected:

@@ -114,7 +114,7 @@ public:
     TArray<FSystemIntegrationPattern> GetIntegrationPatternsForSystem(const FString& SystemName) const;
 
     /** Force architectural compliance check on all systems */
-    UFUNCTION(BlueprintCallable, Category = "Architecture", CallInEditor = true)
+    UFUNCTION(BlueprintCallable, Category = "Architecture", CallInEditor)
     void EnforceArchitecturalCompliance();
 
 protected:

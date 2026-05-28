@@ -4,7 +4,6 @@
 #include "Engine/GameInstanceSubsystem.h"
 #include "Eng_ArchitecturalFramework.h"
 #include "Eng_CompilationManager.generated.h"
-
 // ============================================================================
 // COMPILATION MANAGEMENT SYSTEM - AGENT #2
 // Handles orphaned headers, missing implementations, and build validation
@@ -273,4 +272,3 @@ private:
     FString CreateBasicFunctionImplementation(const FString& FunctionDeclaration);
 };
 
-#include "Eng_CompilationManager.generated.h"

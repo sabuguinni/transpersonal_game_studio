@@ -4,7 +4,6 @@
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
 #include "Components/ActorComponent.h"
-#include "ProductionCoordinator.generated.h"
 
 /**
  * Studio Director's Production Coordination System
@@ -261,4 +260,4 @@ protected:
     static ADir_ProductionCoordinatorActor* Instance;
 };
 
-#include "ProductionCoordinator.generated.h"
+#include "ProductionCoordinator.generated.h"#include "ProductionCoordinator.generated.h"

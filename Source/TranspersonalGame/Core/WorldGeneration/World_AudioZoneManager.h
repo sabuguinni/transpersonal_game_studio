@@ -5,7 +5,6 @@
 #include "Engine/AudioVolume.h"
 #include "Sound/AmbientSound.h"
 #include "Components/AudioComponent.h"
-#include "World_AudioZoneManager.generated.h"
 
 UENUM(BlueprintType)
 enum class EWorld_BiomeAudioType : uint8
@@ -130,4 +129,4 @@ private:
     void InitializeDefaultBiomeZones();
 };
 
-#include "World_AudioZoneManager.generated.h"
+#include "World_AudioZoneManager.generated.h"#include "World_AudioZoneManager.generated.h"

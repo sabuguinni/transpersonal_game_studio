@@ -5,7 +5,6 @@
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/Engine.h"
-#include "TribalCharacter.generated.h"
 
 UENUM(BlueprintType)
 enum class EChar_TribalRole : uint8
@@ -119,4 +118,4 @@ public:
     void SetupDefaultEquipment();
 };
 
-#include "TribalCharacter.generated.h"
+#include "TribalCharacter.generated.h"#include "TribalCharacter.generated.h"

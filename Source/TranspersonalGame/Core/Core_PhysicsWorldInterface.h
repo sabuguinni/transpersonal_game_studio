@@ -161,7 +161,7 @@ public:
     bool IsContinuousCollisionDetectionEnabled() const { return WorldConfig.bEnableCCD; }
 
     // Debug Functionality
-    UFUNCTION(BlueprintCallable, Category = "Physics World", CallInEditor = true)
+    UFUNCTION(BlueprintCallable, Category = "Physics World", CallInEditor)
     void DebugDrawPhysicsWorld();
 
     UFUNCTION(BlueprintCallable, Category = "Physics World")

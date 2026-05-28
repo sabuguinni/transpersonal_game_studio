@@ -6,7 +6,6 @@
 #include "Subsystems/WorldSubsystem.h"
 #include "SharedTypes.h"
 #include "Eng_TechnicalArchitecture.generated.h"
-
 // Forward declarations
 class UBiomeManager;
 class UCore_PhysicsManager;
@@ -178,10 +177,10 @@ public:
     void ValidateCrossSystemDependencies();
 
     // Debug and Diagnostics
-    UFUNCTION(BlueprintCallable, Category = "Debug", CallInEditor = true)
+    UFUNCTION(BlueprintCallable, Category = "Debug", CallInEditor)
     void PrintArchitecturalStatus();
 
-    UFUNCTION(BlueprintCallable, Category = "Debug", CallInEditor = true)
+    UFUNCTION(BlueprintCallable, Category = "Debug", CallInEditor)
     void GenerateSystemReport();
 
 protected:
@@ -276,4 +275,3 @@ private:
     void ValidateNavMesh();
 };
 
-#include "Eng_TechnicalArchitecture.generated.h"

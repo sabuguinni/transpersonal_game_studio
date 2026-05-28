@@ -6,7 +6,6 @@
 #include "Animation/AnimInstance.h"
 #include "Animation/AnimMontage.h"
 #include "Animation/BlendSpace.h"
-#include "DinosaurAnimController.generated.h"
 
 UENUM(BlueprintType)
 enum class EAnim_DinosaurState : uint8
@@ -159,4 +158,4 @@ private:
     FAnim_DinosaurAnimationSet* GetCurrentAnimationSet();
 };
 
-#include "DinosaurAnimController.generated.h"
+#include "DinosaurAnimController.generated.h"#include "DinosaurAnimController.generated.h"

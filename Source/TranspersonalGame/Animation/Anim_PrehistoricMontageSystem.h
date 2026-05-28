@@ -205,7 +205,7 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Utility")
     void CreateDefaultActionSequences();
 
-    UFUNCTION(BlueprintCallable, Category = "Utility", CallInEditor = true)
+    UFUNCTION(BlueprintCallable, Category = "Utility", CallInEditor)
     void TestPrehistoricActions();
 
 protected:

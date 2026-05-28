@@ -4,7 +4,6 @@
 #include "GameFramework/Actor.h"
 #include "Engine/Engine.h"
 #include "SharedTypes.h"
-#include "ProductionPipeline.generated.h"
 
 UENUM(BlueprintType)
 enum class EDir_ProductionStage : uint8
@@ -188,4 +187,4 @@ private:
     float LastUpdateTime;
 };
 
-#include "ProductionPipeline.generated.h"
+#include "ProductionPipeline.generated.h"#include "ProductionPipeline.generated.h"

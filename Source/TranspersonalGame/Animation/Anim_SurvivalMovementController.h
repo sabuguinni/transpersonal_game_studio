@@ -187,7 +187,7 @@ public:
     void AdaptToWeatherConditions(float Temperature, float Humidity, bool bIsRaining);
 
     // Debug and Visualization
-    UFUNCTION(BlueprintCallable, Category = "Debug", CallInEditor = true)
+    UFUNCTION(BlueprintCallable, Category = "Debug", CallInEditor)
     void DebugCurrentMovementState();
 
     UFUNCTION(BlueprintCallable, Category = "Debug")

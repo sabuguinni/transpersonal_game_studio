@@ -7,7 +7,6 @@
 #include "Subsystems/WorldSubsystem.h"
 #include "SharedTypes.h"
 #include "Eng_SystemArchitect.generated.h"
-
 // Forward declarations
 class UEng_ArchitectureCore;
 class UCore_PhysicsManager;
@@ -250,4 +249,3 @@ private:
     void WorldSystemUpdateTick();
 };
 
-#include "Eng_SystemArchitect.generated.h"

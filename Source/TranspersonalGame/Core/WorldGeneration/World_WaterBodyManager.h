@@ -5,7 +5,6 @@
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
 #include "Materials/MaterialInterface.h"
-#include "World_WaterBodyManager.generated.h"
 
 UENUM(BlueprintType)
 enum class EWorld_WaterBodyType : uint8
@@ -121,4 +120,4 @@ private:
     bool IsValidWaterLocation(const FVector& Location) const;
 };
 
-#include "World_WaterBodyManager.generated.h"
+#include "World_WaterBodyManager.generated.h"#include "World_WaterBodyManager.generated.h"

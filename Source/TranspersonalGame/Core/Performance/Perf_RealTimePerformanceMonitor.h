@@ -172,10 +172,10 @@ public:
     void SetDynamicCullingEnabled(bool bEnabled);
 
     // Debug and logging
-    UFUNCTION(BlueprintCallable, Category = "Performance Monitor", CallInEditor = true)
+    UFUNCTION(BlueprintCallable, Category = "Performance Monitor", CallInEditor)
     void LogPerformanceReport();
 
-    UFUNCTION(BlueprintCallable, Category = "Performance Monitor", CallInEditor = true)
+    UFUNCTION(BlueprintCallable, Category = "Performance Monitor", CallInEditor)
     void ExportPerformanceData(const FString& FilePath);
 
     // Events

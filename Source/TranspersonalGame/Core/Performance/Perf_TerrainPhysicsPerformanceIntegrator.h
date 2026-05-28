@@ -150,7 +150,7 @@ public:
     bool IsPerformanceOptimal() const;
 
     // Debug and visualization
-    UFUNCTION(BlueprintCallable, Category = "Debug", CallInEditor = true)
+    UFUNCTION(BlueprintCallable, Category = "Debug", CallInEditor)
     void DebugTerrainPerformance();
 
     UFUNCTION(BlueprintCallable, Category = "Debug")

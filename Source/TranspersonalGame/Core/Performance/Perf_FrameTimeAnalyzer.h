@@ -5,7 +5,6 @@
 #include "Engine/Engine.h"
 #include "Components/ActorComponent.h"
 #include "Perf_FrameTimeAnalyzer.generated.h"
-
 UENUM(BlueprintType)
 enum class EPerf_PerformanceLevel : uint8
 {
@@ -154,4 +153,3 @@ private:
     float GetGPUTime() const;
 };
 
-#include "Perf_FrameTimeAnalyzer.generated.h"

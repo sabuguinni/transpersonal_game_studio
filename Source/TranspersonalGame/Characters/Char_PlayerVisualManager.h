@@ -111,7 +111,7 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Player Visual")
     bool IsVisualConfigurationValid() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Player Visual", CallInEditor = true)
+    UFUNCTION(BlueprintCallable, Category = "Player Visual", CallInEditor)
     void PreviewConfiguration();
 
 protected:

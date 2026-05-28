@@ -124,7 +124,7 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Engine Architect")
     bool ValidateCriticalSystems();
 
-    UFUNCTION(BlueprintCallable, Category = "Engine Architect", CallInEditor = true)
+    UFUNCTION(BlueprintCallable, Category = "Engine Architect", CallInEditor)
     void RunFullArchitectureAudit();
 
 protected:

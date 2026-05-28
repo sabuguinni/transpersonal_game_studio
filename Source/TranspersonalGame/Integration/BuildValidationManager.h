@@ -100,37 +100,37 @@ public:
      * Executa validação completa do projeto
      * Detecta headers órfãos, actores duplicados, problemas de compilação
      */
-    UFUNCTION(BlueprintCallable, Category = "Build Validation", CallInEditor = true)
+    UFUNCTION(BlueprintCallable, Category = "Build Validation", CallInEditor)
     FBuild_ValidationReport RunFullValidation();
 
     /**
      * Detecta headers sem implementação correspondente
      */
-    UFUNCTION(BlueprintCallable, Category = "Build Validation", CallInEditor = true)
+    UFUNCTION(BlueprintCallable, Category = "Build Validation", CallInEditor)
     TArray<FString> DetectOrphanHeaders();
 
     /**
      * Remove actores duplicados do MinPlayableMap
      */
-    UFUNCTION(BlueprintCallable, Category = "Build Validation", CallInEditor = true)
+    UFUNCTION(BlueprintCallable, Category = "Build Validation", CallInEditor)
     int32 CleanDuplicateActors();
 
     /**
      * Testa compilação via UnrealBuildTool
      */
-    UFUNCTION(BlueprintCallable, Category = "Build Validation", CallInEditor = true)
+    UFUNCTION(BlueprintCallable, Category = "Build Validation", CallInEditor)
     bool TestCompilation();
 
     /**
      * Valida distribuição de actores pelos 5 biomas
      */
-    UFUNCTION(BlueprintCallable, Category = "Build Validation", CallInEditor = true)
+    UFUNCTION(BlueprintCallable, Category = "Build Validation", CallInEditor)
     bool ValidateBiomeDistribution();
 
     /**
      * Gera relatório detalhado de validação
      */
-    UFUNCTION(BlueprintCallable, Category = "Build Validation", CallInEditor = true)
+    UFUNCTION(BlueprintCallable, Category = "Build Validation", CallInEditor)
     FString GenerateValidationReport(const FBuild_ValidationReport& Report);
 
 protected:

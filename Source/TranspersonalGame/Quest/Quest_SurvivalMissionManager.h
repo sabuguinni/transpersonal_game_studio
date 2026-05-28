@@ -128,13 +128,13 @@ public:
     void RegisterToolCrafting(const FString& ToolType);
 
     // Debug and testing
-    UFUNCTION(BlueprintCallable, Category = "Survival Missions", CallInEditor = true)
+    UFUNCTION(BlueprintCallable, Category = "Survival Missions", CallInEditor)
     void CreateTestSurvivalMissions();
 
-    UFUNCTION(BlueprintCallable, Category = "Survival Missions", CallInEditor = true)
+    UFUNCTION(BlueprintCallable, Category = "Survival Missions", CallInEditor)
     void ClearAllMissions();
 
-    UFUNCTION(BlueprintCallable, Category = "Survival Missions", CallInEditor = true)
+    UFUNCTION(BlueprintCallable, Category = "Survival Missions", CallInEditor)
     void LogMissionStatus();
 
 protected:

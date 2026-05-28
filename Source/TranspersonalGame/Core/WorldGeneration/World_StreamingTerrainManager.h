@@ -172,10 +172,10 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Streaming Terrain")
     void OptimizeMemoryUsage();
 
-    UFUNCTION(BlueprintCallable, Category = "Performance", CallInEditor = true)
+    UFUNCTION(BlueprintCallable, Category = "Performance", CallInEditor)
     void AnalyzeStreamingPerformance();
 
-    UFUNCTION(BlueprintCallable, Category = "Debug", CallInEditor = true)
+    UFUNCTION(BlueprintCallable, Category = "Debug", CallInEditor)
     void DebugDrawChunkGrid();
 
     UFUNCTION(BlueprintCallable, Category = "Debug")

@@ -4,7 +4,6 @@
 #include "Engine/Engine.h"
 #include "Components/ActorComponent.h"
 #include "TimerManager.h"
-#include "Core_SurvivalSystem.generated.h"
 
 UENUM(BlueprintType)
 enum class ECore_SurvivalStat : uint8
@@ -195,4 +194,4 @@ private:
     void BroadcastStateChange(ECore_SurvivalState NewState);
 };
 
-#include "Core_SurvivalSystem.generated.h"
+#include "Core_SurvivalSystem.generated.h"#include "Core_SurvivalSystem.generated.h"
