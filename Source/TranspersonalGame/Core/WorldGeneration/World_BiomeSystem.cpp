@@ -1,332 +1,232 @@
 #include "World_BiomeSystem.h"
-#include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "Components/StaticMeshComponent.h"
-#include "Engine/StaticMeshActor.h"
-#include "Materials/MaterialInterface.h"
+#include "Engine/Engine.h"
 #include "Kismet/GameplayStatics.h"
-#include "Kismet/KismetMathLibrary.h"
-#include "Engine/StaticMesh.h"
+#include "Engine/DirectionalLight.h"
+#include "Components/LightComponent.h"
 
-AWorld_BiomeSystem::AWorld_BiomeSystem()
+UWorld_BiomeSystem::UWorld_BiomeSystem()
 {
-    PrimaryActorTick.bCanEverTick = true;
-
-    // Create root component
-    RootSceneComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootSceneComponent"));
-    RootComponent = RootSceneComponent;
-
-    // Initialize default settings
-    WorldSize = 20000.0f;
-    BiomeTransitionSmoothness = 5;
-    VegetationSpawnRadius = 1000.0f;
-    MaxVegetationPerBiome = 50;
-    bAutoSpawnVegetation = true;
-    bBiomesInitialized = false;
-
-    // Setup default biomes
-    SetupDefaultBiomes();
+    PrimaryComponentTick.bCanEverTick = true;
+    PrimaryComponentTick.TickGroup = TG_PostPhysics;
+    
+    // Initialize default weather
+    CurrentWeather = FWorld_WeatherData();
+    TimeOfDay = 12.0f;
+    DayDuration = 1200.0f;
 }
 
-void AWorld_BiomeSystem::BeginPlay()
+void UWorld_BiomeSystem::BeginPlay()
 {
     Super::BeginPlay();
-
-    if (!bBiomesInitialized)
-    {
-        InitializeBiomes();
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("World_BiomeSystem: BeginPlay completed"));
-}
-
-void AWorld_BiomeSystem::Tick(float DeltaTime)
-{
-    Super::Tick(DeltaTime);
-
-    // Optional: Update biome effects over time
-    // Currently passive system, but could add dynamic weather, seasonal changes, etc.
-}
-
-void AWorld_BiomeSystem::SetupDefaultBiomes()
-{
-    BiomeConfigs.Empty();
-
-    // Swamp Biome
-    FWorld_BiomeConfig SwampConfig;
-    SwampConfig.BiomeType = EWorld_BiomeType::Swamp;
-    SwampConfig.AmbientColor = FLinearColor(0.4f, 0.6f, 0.3f, 1.0f); // Greenish tint
-    SwampConfig.Temperature = 25.0f;
-    SwampConfig.Humidity = 0.9f;
-    SwampConfig.VegetationDensity = 1.5f;
-    BiomeConfigs.Add(SwampConfig);
-
-    // Forest Biome
-    FWorld_BiomeConfig ForestConfig;
-    ForestConfig.BiomeType = EWorld_BiomeType::Forest;
-    ForestConfig.AmbientColor = FLinearColor(0.6f, 0.8f, 0.4f, 1.0f); // Green tint
-    ForestConfig.Temperature = 18.0f;
-    ForestConfig.Humidity = 0.7f;
-    ForestConfig.VegetationDensity = 2.0f;
-    BiomeConfigs.Add(ForestConfig);
-
-    // Savanna Biome
-    FWorld_BiomeConfig SavannaConfig;
-    SavannaConfig.BiomeType = EWorld_BiomeType::Savanna;
-    SavannaConfig.AmbientColor = FLinearColor(1.0f, 0.9f, 0.6f, 1.0f); // Golden tint
-    SavannaConfig.Temperature = 28.0f;
-    SavannaConfig.Humidity = 0.4f;
-    SavannaConfig.VegetationDensity = 0.6f;
-    BiomeConfigs.Add(SavannaConfig);
-
-    // Desert Biome
-    FWorld_BiomeConfig DesertConfig;
-    DesertConfig.BiomeType = EWorld_BiomeType::Desert;
-    DesertConfig.AmbientColor = FLinearColor(1.0f, 0.8f, 0.5f, 1.0f); // Sandy tint
-    DesertConfig.Temperature = 35.0f;
-    DesertConfig.Humidity = 0.1f;
-    DesertConfig.VegetationDensity = 0.2f;
-    BiomeConfigs.Add(DesertConfig);
-
-    // Snowy Mountain Biome
-    FWorld_BiomeConfig MountainConfig;
-    MountainConfig.BiomeType = EWorld_BiomeType::SnowyMountain;
-    MountainConfig.AmbientColor = FLinearColor(0.8f, 0.9f, 1.0f, 1.0f); // Bluish tint
-    MountainConfig.Temperature = -5.0f;
-    MountainConfig.Humidity = 0.3f;
-    MountainConfig.VegetationDensity = 0.3f;
-    BiomeConfigs.Add(MountainConfig);
-
-    UE_LOG(LogTemp, Log, TEXT("World_BiomeSystem: Setup %d default biome configurations"), BiomeConfigs.Num());
-}
-
-void AWorld_BiomeSystem::InitializeBiomes()
-{
-    if (bBiomesInitialized)
-    {
-        return;
-    }
-
-    // Create default biome zones if none exist
+    
+    // Initialize default biomes if none exist
     if (BiomeZones.Num() == 0)
     {
-        // Central Forest
-        CreateBiomeZone(FVector(0, 0, 0), 3000.0f, EWorld_BiomeType::Forest);
-        
-        // Swamp to the north
-        CreateBiomeZone(FVector(0, 8000, 0), 4000.0f, EWorld_BiomeType::Swamp);
-        
-        // Savanna to the south
-        CreateBiomeZone(FVector(0, -8000, 0), 4000.0f, EWorld_BiomeType::Savanna);
-        
-        // Desert to the east
-        CreateBiomeZone(FVector(8000, 0, 0), 3500.0f, EWorld_BiomeType::Desert);
-        
-        // Snowy mountains to the west
-        CreateBiomeZone(FVector(-8000, 0, 0), 3500.0f, EWorld_BiomeType::SnowyMountain);
+        InitializeDefaultBiomes();
     }
-
-    // Spawn initial vegetation if enabled
-    if (bAutoSpawnVegetation)
-    {
-        for (const FWorld_BiomeZone& Zone : BiomeZones)
-        {
-            SpawnVegetationInBiome(Zone.BiomeType, Zone.Center, Zone.Radius * 0.8f);
-        }
-    }
-
-    bBiomesInitialized = true;
-    UE_LOG(LogTemp, Log, TEXT("World_BiomeSystem: Biomes initialized with %d zones"), BiomeZones.Num());
+    
+    UE_LOG(LogTemp, Warning, TEXT("BiomeSystem: Initialized with %d biomes"), BiomeZones.Num());
 }
 
-EWorld_BiomeType AWorld_BiomeSystem::GetBiomeAtLocation(const FVector& Location) const
+void UWorld_BiomeSystem::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
-    if (BiomeZones.Num() == 0)
-    {
-        return EWorld_BiomeType::Forest; // Default fallback
-    }
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+    
+    UpdateDayNightCycle(DeltaTime);
+    UpdateWeatherSystem(DeltaTime);
+}
 
+EWorld_BiomeType UWorld_BiomeSystem::GetBiomeAtLocation(const FVector& Location) const
+{
     float MaxInfluence = 0.0f;
-    EWorld_BiomeType DominantBiome = EWorld_BiomeType::Forest;
-
-    for (const FWorld_BiomeZone& Zone : BiomeZones)
+    EWorld_BiomeType DominantBiome = EWorld_BiomeType::Savana;
+    
+    for (const FWorld_BiomeData& Biome : BiomeZones)
     {
-        float Influence = CalculateBiomeInfluence(Location, Zone);
+        float Influence = CalculateBiomeInfluence(Location, Biome);
         if (Influence > MaxInfluence)
         {
             MaxInfluence = Influence;
-            DominantBiome = Zone.BiomeType;
+            DominantBiome = Biome.BiomeType;
         }
     }
-
+    
     return DominantBiome;
 }
 
-FWorld_BiomeConfig AWorld_BiomeSystem::GetBiomeConfig(EWorld_BiomeType BiomeType) const
+FWorld_BiomeData UWorld_BiomeSystem::GetBiomeData(EWorld_BiomeType BiomeType) const
 {
-    for (const FWorld_BiomeConfig& Config : BiomeConfigs)
+    for (const FWorld_BiomeData& Biome : BiomeZones)
     {
-        if (Config.BiomeType == BiomeType)
+        if (Biome.BiomeType == BiomeType)
         {
-            return Config;
+            return Biome;
         }
     }
-
-    // Return default forest config if not found
-    FWorld_BiomeConfig DefaultConfig;
-    DefaultConfig.BiomeType = EWorld_BiomeType::Forest;
-    return DefaultConfig;
+    
+    // Return default savana biome if not found
+    FWorld_BiomeData DefaultBiome;
+    DefaultBiome.BiomeType = EWorld_BiomeType::Savana;
+    return DefaultBiome;
 }
 
-void AWorld_BiomeSystem::SpawnVegetationInBiome(EWorld_BiomeType BiomeType, const FVector& Center, float Radius)
+void UWorld_BiomeSystem::SetWeather(const FWorld_WeatherData& NewWeather)
 {
-    FWorld_BiomeConfig Config = GetBiomeConfig(BiomeType);
-    
-    int32 VegetationCount = FMath::RoundToInt(MaxVegetationPerBiome * Config.VegetationDensity);
-    
-    for (int32 i = 0; i < VegetationCount; i++)
+    CurrentWeather = NewWeather;
+    UE_LOG(LogTemp, Log, TEXT("BiomeSystem: Weather updated - Rain: %.2f, Wind: %.2f"), 
+           NewWeather.RainIntensity, NewWeather.WindStrength);
+}
+
+void UWorld_BiomeSystem::SetTimeOfDay(float NewTime)
+{
+    TimeOfDay = FMath::Fmod(NewTime, 24.0f);
+    if (TimeOfDay < 0.0f)
     {
-        FVector SpawnLocation = GetRandomLocationInRadius(Center, Radius);
-        FRotator SpawnRotation = FRotator(0, FMath::RandRange(0.0f, 360.0f), 0);
-        
-        // For now, spawn basic cube meshes as vegetation placeholders
-        // In production, this would use the Config.VegetationMeshes array
-        UWorld* World = GetWorld();
-        if (World)
+        TimeOfDay += 24.0f;
+    }
+}
+
+void UWorld_BiomeSystem::InitializeDefaultBiomes()
+{
+    BiomeZones.Empty();
+    
+    // Savana biome (center)
+    FWorld_BiomeData SavanaBiome;
+    SavanaBiome.BiomeType = EWorld_BiomeType::Savana;
+    SavanaBiome.CenterLocation = FVector(0, 0, 100);
+    SavanaBiome.Radius = 15000.0f;
+    SavanaBiome.Temperature = 28.0f;
+    SavanaBiome.Humidity = 0.4f;
+    SavanaBiome.VegetationDensity = 0.3f;
+    BiomeZones.Add(SavanaBiome);
+    
+    // Forest biome (northwest)
+    FWorld_BiomeData ForestBiome;
+    ForestBiome.BiomeType = EWorld_BiomeType::Forest;
+    ForestBiome.CenterLocation = FVector(-45000, 40000, 150);
+    ForestBiome.Radius = 20000.0f;
+    ForestBiome.Temperature = 22.0f;
+    ForestBiome.Humidity = 0.8f;
+    ForestBiome.VegetationDensity = 0.9f;
+    BiomeZones.Add(ForestBiome);
+    
+    // Desert biome (southeast)
+    FWorld_BiomeData DesertBiome;
+    DesertBiome.BiomeType = EWorld_BiomeType::Desert;
+    DesertBiome.CenterLocation = FVector(50000, -40000, 50);
+    DesertBiome.Radius = 18000.0f;
+    DesertBiome.Temperature = 35.0f;
+    DesertBiome.Humidity = 0.1f;
+    DesertBiome.VegetationDensity = 0.1f;
+    BiomeZones.Add(DesertBiome);
+    
+    // Mountain biome (north)
+    FWorld_BiomeData MountainBiome;
+    MountainBiome.BiomeType = EWorld_BiomeType::Mountain;
+    MountainBiome.CenterLocation = FVector(0, 60000, 500);
+    MountainBiome.Radius = 12000.0f;
+    MountainBiome.Temperature = 15.0f;
+    MountainBiome.Humidity = 0.6f;
+    MountainBiome.VegetationDensity = 0.4f;
+    BiomeZones.Add(MountainBiome);
+    
+    // Swamp biome (southwest)
+    FWorld_BiomeData SwampBiome;
+    SwampBiome.BiomeType = EWorld_BiomeType::Swamp;
+    SwampBiome.CenterLocation = FVector(-30000, -30000, 80);
+    SwampBiome.Radius = 14000.0f;
+    SwampBiome.Temperature = 26.0f;
+    SwampBiome.Humidity = 0.95f;
+    SwampBiome.VegetationDensity = 0.7f;
+    BiomeZones.Add(SwampBiome);
+    
+    UE_LOG(LogTemp, Warning, TEXT("BiomeSystem: Initialized %d default biomes"), BiomeZones.Num());
+}
+
+void UWorld_BiomeSystem::SpawnBiomeMarkers()
+{
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        return;
+    }
+    
+    for (const FWorld_BiomeData& Biome : BiomeZones)
+    {
+        // This would be called from UE5 Python to actually spawn the markers
+        UE_LOG(LogTemp, Log, TEXT("BiomeSystem: Should spawn marker for %s at %s"), 
+               *UEnum::GetValueAsString(Biome.BiomeType), 
+               *Biome.CenterLocation.ToString());
+    }
+}
+
+void UWorld_BiomeSystem::UpdateDayNightCycle(float DeltaTime)
+{
+    // Advance time
+    TimeOfDay += (DeltaTime / DayDuration) * 24.0f;
+    if (TimeOfDay >= 24.0f)
+    {
+        TimeOfDay -= 24.0f;
+    }
+    
+    // Calculate sun intensity based on time
+    float SunIntensity = 1.0f;
+    if (TimeOfDay < 6.0f || TimeOfDay > 18.0f)
+    {
+        // Night time - reduce intensity
+        SunIntensity = 0.1f;
+    }
+    else if (TimeOfDay < 8.0f || TimeOfDay > 16.0f)
+    {
+        // Dawn/dusk - gradual transition
+        float Factor = (TimeOfDay < 8.0f) ? (TimeOfDay - 6.0f) / 2.0f : (18.0f - TimeOfDay) / 2.0f;
+        SunIntensity = FMath::Lerp(0.1f, 1.0f, Factor);
+    }
+    
+    // Find and update directional light
+    UWorld* World = GetWorld();
+    if (World)
+    {
+        for (TActorIterator<ADirectionalLight> ActorItr(World); ActorItr; ++ActorItr)
         {
-            AStaticMeshActor* VegetationActor = World->SpawnActor<AStaticMeshActor>(SpawnLocation, SpawnRotation);
-            if (VegetationActor)
+            ADirectionalLight* Light = *ActorItr;
+            if (Light && Light->GetLightComponent())
             {
-                // Set a basic cube mesh as placeholder
-                UStaticMeshComponent* MeshComp = VegetationActor->GetStaticMeshComponent();
-                if (MeshComp)
-                {
-                    // Load basic cube mesh
-                    UStaticMesh* CubeMesh = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube"));
-                    if (CubeMesh)
-                    {
-                        MeshComp->SetStaticMesh(CubeMesh);
-                        
-                        // Scale based on biome type
-                        FVector Scale = FVector(1.0f);
-                        switch (BiomeType)
-                        {
-                            case EWorld_BiomeType::Forest:
-                                Scale = FVector(0.5f, 0.5f, 2.0f); // Tall trees
-                                break;
-                            case EWorld_BiomeType::Swamp:
-                                Scale = FVector(0.3f, 0.3f, 1.5f); // Swamp trees
-                                break;
-                            case EWorld_BiomeType::Savanna:
-                                Scale = FVector(0.2f, 0.2f, 0.5f); // Grass/bushes
-                                break;
-                            case EWorld_BiomeType::Desert:
-                                Scale = FVector(0.1f, 0.1f, 1.0f); // Cacti
-                                break;
-                            case EWorld_BiomeType::SnowyMountain:
-                                Scale = FVector(0.4f, 0.4f, 1.8f); // Pine trees
-                                break;
-                        }
-                        VegetationActor->SetActorScale3D(Scale);
-                        
-                        // Set name for identification
-                        FString BiomeName = UEnum::GetValueAsString(BiomeType);
-                        VegetationActor->SetActorLabel(FString::Printf(TEXT("%s_Vegetation_%d"), *BiomeName, i));
-                        
-                        SpawnedVegetation.Add(VegetationActor);
-                    }
-                }
+                Light->GetLightComponent()->SetIntensity(SunIntensity * 3.0f);
+                break;
             }
         }
     }
-    
-    UE_LOG(LogTemp, Log, TEXT("World_BiomeSystem: Spawned %d vegetation items for %s biome"), 
-           VegetationCount, *UEnum::GetValueAsString(BiomeType));
 }
 
-void AWorld_BiomeSystem::CreateBiomeZone(const FVector& Center, float Radius, EWorld_BiomeType BiomeType)
+void UWorld_BiomeSystem::UpdateWeatherSystem(float DeltaTime)
 {
-    FWorld_BiomeZone NewZone;
-    NewZone.Center = Center;
-    NewZone.Radius = Radius;
-    NewZone.BiomeType = BiomeType;
-    NewZone.Influence = 1.0f;
+    // Simple weather progression - could be expanded
+    static float WeatherTimer = 0.0f;
+    WeatherTimer += DeltaTime;
     
-    BiomeZones.Add(NewZone);
-    
-    UE_LOG(LogTemp, Log, TEXT("World_BiomeSystem: Created biome zone %s at %s with radius %f"), 
-           *UEnum::GetValueAsString(BiomeType), *Center.ToString(), Radius);
-}
-
-void AWorld_BiomeSystem::RegenerateBiomes()
-{
-    ClearAllVegetation();
-    bBiomesInitialized = false;
-    InitializeBiomes();
-    
-    UE_LOG(LogTemp, Log, TEXT("World_BiomeSystem: Biomes regenerated"));
-}
-
-void AWorld_BiomeSystem::ClearAllVegetation()
-{
-    for (AActor* VegActor : SpawnedVegetation)
+    if (WeatherTimer > 300.0f) // Change weather every 5 minutes
     {
-        if (IsValid(VegActor))
-        {
-            VegActor->Destroy();
-        }
+        WeatherTimer = 0.0f;
+        
+        // Random weather changes
+        CurrentWeather.RainIntensity = FMath::RandRange(0.0f, 1.0f);
+        CurrentWeather.WindStrength = FMath::RandRange(0.0f, 2.0f);
+        CurrentWeather.CloudCoverage = FMath::RandRange(0.1f, 0.9f);
+        
+        UE_LOG(LogTemp, Log, TEXT("BiomeSystem: Weather changed - Rain: %.2f"), CurrentWeather.RainIntensity);
     }
-    SpawnedVegetation.Empty();
-    
-    UE_LOG(LogTemp, Log, TEXT("World_BiomeSystem: Cleared all vegetation"));
 }
 
-float AWorld_BiomeSystem::GetTemperatureAtLocation(const FVector& Location) const
+float UWorld_BiomeSystem::CalculateBiomeInfluence(const FVector& Location, const FWorld_BiomeData& Biome) const
 {
-    EWorld_BiomeType BiomeType = GetBiomeAtLocation(Location);
-    FWorld_BiomeConfig Config = GetBiomeConfig(BiomeType);
-    return Config.Temperature;
-}
-
-float AWorld_BiomeSystem::GetHumidityAtLocation(const FVector& Location) const
-{
-    EWorld_BiomeType BiomeType = GetBiomeAtLocation(Location);
-    FWorld_BiomeConfig Config = GetBiomeConfig(BiomeType);
-    return Config.Humidity;
-}
-
-FLinearColor AWorld_BiomeSystem::GetAmbientColorAtLocation(const FVector& Location) const
-{
-    EWorld_BiomeType BiomeType = GetBiomeAtLocation(Location);
-    FWorld_BiomeConfig Config = GetBiomeConfig(BiomeType);
-    return Config.AmbientColor;
-}
-
-FVector AWorld_BiomeSystem::GetRandomLocationInRadius(const FVector& Center, float Radius) const
-{
-    float RandomAngle = FMath::RandRange(0.0f, 2.0f * PI);
-    float RandomDistance = FMath::RandRange(0.0f, Radius);
-    
-    FVector Offset;
-    Offset.X = FMath::Cos(RandomAngle) * RandomDistance;
-    Offset.Y = FMath::Sin(RandomAngle) * RandomDistance;
-    Offset.Z = 0.0f; // Keep on ground level
-    
-    return Center + Offset;
-}
-
-float AWorld_BiomeSystem::CalculateBiomeInfluence(const FVector& Location, const FWorld_BiomeZone& Zone) const
-{
-    float Distance = FVector::Dist2D(Location, Zone.Center);
-    
-    if (Distance >= Zone.Radius)
+    float Distance = FVector::Dist(Location, Biome.CenterLocation);
+    if (Distance > Biome.Radius)
     {
         return 0.0f;
     }
     
     // Linear falloff from center to edge
-    float NormalizedDistance = Distance / Zone.Radius;
-    float Influence = (1.0f - NormalizedDistance) * Zone.Influence;
-    
-    return FMath::Clamp(Influence, 0.0f, 1.0f);
+    return 1.0f - (Distance / Biome.Radius);
 }
