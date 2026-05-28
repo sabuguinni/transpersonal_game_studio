@@ -1,249 +1,242 @@
 #include "Narr_DialogueSystem.h"
 #include "Engine/Engine.h"
+#include "Engine/World.h"
 #include "TimerManager.h"
 
 UNarr_DialogueSystem::UNarr_DialogueSystem()
 {
-    PrimaryComponentTick.bCanEverTick = false;
-    CurrentLineIndex = 0;
-    bIsDialogueActive = false;
-    DefaultDisplayDuration = 4.0f;
+    PrimaryComponentTick.bCanEverTick = true;
+    DefaultCooldownTime = 30.0f;
+    bEnableDebugOutput = true;
 }
 
 void UNarr_DialogueSystem::BeginPlay()
 {
     Super::BeginPlay();
     InitializeDefaultDialogues();
-}
-
-void UNarr_DialogueSystem::InitializeDefaultDialogues()
-{
-    CreateSurvivalDialogues();
-    CreateDangerWarnings();
-    CreateQuestBriefings();
-}
-
-void UNarr_DialogueSystem::CreateSurvivalDialogues()
-{
-    // Survival Tips Sequence
-    FNarr_DialogueSequence SurvivalTips;
-    SurvivalTips.SequenceID = TEXT("survival_tips");
-    SurvivalTips.bIsRepeatable = true;
-    SurvivalTips.Priority = 1;
-
-    FNarr_DialogueLine Tip1;
-    Tip1.SpeakerName = TEXT("Survival Guide");
-    Tip1.DialogueText = TEXT("Stay near water sources, but beware - predators hunt at watering holes.");
-    Tip1.DialogueType = ENarr_DialogueType::SurvivalTip;
-    Tip1.DisplayDuration = 5.0f;
-    SurvivalTips.DialogueLines.Add(Tip1);
-
-    FNarr_DialogueLine Tip2;
-    Tip2.SpeakerName = TEXT("Survival Guide");
-    Tip2.DialogueText = TEXT("Craft stone tools before venturing into dangerous territory.");
-    Tip2.DialogueType = ENarr_DialogueType::SurvivalTip;
-    Tip2.DisplayDuration = 4.0f;
-    SurvivalTips.DialogueLines.Add(Tip2);
-
-    FNarr_DialogueLine Tip3;
-    Tip3.SpeakerName = TEXT("Survival Guide");
-    Tip3.DialogueText = TEXT("High ground provides safety and better visibility of approaching threats.");
-    Tip3.DialogueType = ENarr_DialogueType::SurvivalTip;
-    Tip3.DisplayDuration = 4.5f;
-    SurvivalTips.DialogueLines.Add(Tip3);
-
-    DialogueSequences.Add(SurvivalTips);
-}
-
-void UNarr_DialogueSystem::CreateDangerWarnings()
-{
-    // Danger Warning Sequence
-    FNarr_DialogueSequence DangerWarnings;
-    DangerWarnings.SequenceID = TEXT("danger_warnings");
-    DangerWarnings.bIsRepeatable = true;
-    DangerWarnings.Priority = 3;
-
-    FNarr_DialogueLine Warning1;
-    Warning1.SpeakerName = TEXT("Alert System");
-    Warning1.DialogueText = TEXT("Predator scent detected! Move to safety immediately!");
-    Warning1.DialogueType = ENarr_DialogueType::DangerWarning;
-    Warning1.DisplayDuration = 3.0f;
-    DangerWarnings.DialogueLines.Add(Warning1);
-
-    FNarr_DialogueLine Warning2;
-    Warning2.SpeakerName = TEXT("Alert System");
-    Warning2.DialogueText = TEXT("Pack hunters in the area. Avoid open ground and seek elevated positions.");
-    Warning2.DialogueType = ENarr_DialogueType::DangerWarning;
-    Warning2.DisplayDuration = 4.0f;
-    DangerWarnings.DialogueLines.Add(Warning2);
-
-    FNarr_DialogueLine Warning3;
-    Warning3.SpeakerName = TEXT("Alert System");
-    Warning3.DialogueText = TEXT("Large predator approaching from the south. Take cover now!");
-    Warning3.DialogueType = ENarr_DialogueType::DangerWarning;
-    Warning3.DisplayDuration = 3.5f;
-    DangerWarnings.DialogueLines.Add(Warning3);
-
-    DialogueSequences.Add(DangerWarnings);
-}
-
-void UNarr_DialogueSystem::CreateQuestBriefings()
-{
-    // Quest Briefing Sequence
-    FNarr_DialogueSequence QuestBriefings;
-    QuestBriefings.SequenceID = TEXT("quest_briefings");
-    QuestBriefings.bIsRepeatable = false;
-    QuestBriefings.Priority = 2;
-
-    FNarr_DialogueLine Quest1;
-    Quest1.SpeakerName = TEXT("Mission Briefing");
-    Quest1.DialogueText = TEXT("Hunt Mission: Eliminate the velociraptor pack threatening our territory.");
-    Quest1.DialogueType = ENarr_DialogueType::QuestBriefing;
-    Quest1.DisplayDuration = 5.0f;
-    QuestBriefings.DialogueLines.Add(Quest1);
-
-    FNarr_DialogueLine Quest2;
-    Quest2.SpeakerName = TEXT("Mission Briefing");
-    Quest2.DialogueText = TEXT("Gather Mission: Collect stone and wood resources for shelter construction.");
-    Quest2.DialogueType = ENarr_DialogueType::QuestBriefing;
-    Quest2.DisplayDuration = 4.5f;
-    QuestBriefings.DialogueLines.Add(Quest2);
-
-    FNarr_DialogueLine Quest3;
-    Quest3.SpeakerName = TEXT("Mission Briefing");
-    Quest3.DialogueText = TEXT("Explore Mission: Scout the eastern valley for new resources and threats.");
-    Quest3.DialogueType = ENarr_DialogueType::QuestBriefing;
-    Quest3.DisplayDuration = 4.5f;
-    QuestBriefings.DialogueLines.Add(Quest3);
-
-    DialogueSequences.Add(QuestBriefings);
-}
-
-void UNarr_DialogueSystem::StartDialogueSequence(const FString& SequenceID)
-{
-    for (const FNarr_DialogueSequence& Sequence : DialogueSequences)
-    {
-        if (Sequence.SequenceID == SequenceID)
-        {
-            CurrentSequence = Sequence;
-            CurrentLineIndex = 0;
-            bIsDialogueActive = true;
-            
-            if (CurrentSequence.DialogueLines.Num() > 0)
-            {
-                FNarr_DialogueLine CurrentLine = CurrentSequence.DialogueLines[CurrentLineIndex];
-                UE_LOG(LogTemp, Warning, TEXT("Dialogue Started: %s - %s"), 
-                    *CurrentLine.SpeakerName, *CurrentLine.DialogueText);
-            }
-            return;
-        }
-    }
     
-    UE_LOG(LogTemp, Warning, TEXT("Dialogue sequence not found: %s"), *SequenceID);
+    if (bEnableDebugOutput)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Narrative Dialogue System initialized with %d entries"), DialogueEntries.Num());
+    }
 }
 
-void UNarr_DialogueSystem::StopCurrentDialogue()
+void UNarr_DialogueSystem::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
-    bIsDialogueActive = false;
-    CurrentLineIndex = 0;
-    CurrentSequence = FNarr_DialogueSequence();
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+    UpdateCooldowns(DeltaTime);
 }
 
-void UNarr_DialogueSystem::NextDialogueLine()
+void UNarr_DialogueSystem::TriggerDialogue(ENarr_DialogueTrigger TriggerType, float HealthPercent, float HungerLevel, float ThirstLevel)
 {
-    if (!bIsDialogueActive || CurrentSequence.DialogueLines.Num() == 0)
+    if (IsDialogueOnCooldown(TriggerType))
     {
         return;
     }
 
-    CurrentLineIndex++;
-    
-    if (CurrentLineIndex >= CurrentSequence.DialogueLines.Num())
+    FNarr_DialogueEntry* BestDialogue = FindBestDialogue(TriggerType, HealthPercent, HungerLevel, ThirstLevel);
+    if (BestDialogue)
     {
-        if (CurrentSequence.bIsRepeatable)
+        PlayDialogue(BestDialogue->DialogueText, BestDialogue->Priority);
+        SetDialogueCooldown(TriggerType, BestDialogue->CooldownTime);
+        
+        LogDialogue(BestDialogue->DialogueText, TriggerType);
+    }
+}
+
+void UNarr_DialogueSystem::AddDialogueEntry(const FNarr_DialogueEntry& NewEntry)
+{
+    DialogueEntries.Add(NewEntry);
+    
+    if (bEnableDebugOutput)
+    {
+        UE_LOG(LogTemp, Log, TEXT("Added dialogue entry: %s"), *NewEntry.DialogueText);
+    }
+}
+
+void UNarr_DialogueSystem::PlayDialogue(const FString& DialogueText, ENarr_DialoguePriority Priority)
+{
+    if (GEngine)
+    {
+        FColor DisplayColor = FColor::White;
+        switch (Priority)
         {
-            CurrentLineIndex = 0;
+            case ENarr_DialoguePriority::Critical:
+                DisplayColor = FColor::Red;
+                break;
+            case ENarr_DialoguePriority::High:
+                DisplayColor = FColor::Orange;
+                break;
+            case ENarr_DialoguePriority::Normal:
+                DisplayColor = FColor::Yellow;
+                break;
+            case ENarr_DialoguePriority::Low:
+                DisplayColor = FColor::Green;
+                break;
         }
-        else
+        
+        float DisplayTime = 5.0f + (static_cast<int32>(Priority) * 2.0f);
+        GEngine->AddOnScreenDebugMessage(-1, DisplayTime, DisplayColor, DialogueText);
+    }
+}
+
+bool UNarr_DialogueSystem::IsDialogueOnCooldown(ENarr_DialogueTrigger TriggerType) const
+{
+    if (const float* CooldownTime = DialogueCooldowns.Find(TriggerType))
+    {
+        return *CooldownTime > 0.0f;
+    }
+    return false;
+}
+
+void UNarr_DialogueSystem::SetDialogueCooldown(ENarr_DialogueTrigger TriggerType, float CooldownTime)
+{
+    DialogueCooldowns.Add(TriggerType, CooldownTime);
+}
+
+void UNarr_DialogueSystem::InitializeDefaultDialogues()
+{
+    // Critical survival warnings
+    FNarr_DialogueEntry CriticalHealth;
+    CriticalHealth.DialogueText = TEXT("Your life force weakens! Find shelter and sustenance before the darkness claims you!");
+    CriticalHealth.TriggerType = ENarr_DialogueTrigger::LowHealth;
+    CriticalHealth.Priority = ENarr_DialoguePriority::Critical;
+    CriticalHealth.CooldownTime = 45.0f;
+    CriticalHealth.bIsRepeatable = true;
+    DialogueEntries.Add(CriticalHealth);
+
+    // Hunger warnings
+    FNarr_DialogueEntry HungerWarning;
+    HungerWarning.DialogueText = TEXT("Your stomach gnaws with emptiness. Hunt or gather, or weakness will make you prey.");
+    HungerWarning.TriggerType = ENarr_DialogueTrigger::Hunger;
+    HungerWarning.Priority = ENarr_DialoguePriority::High;
+    HungerWarning.CooldownTime = 60.0f;
+    HungerWarning.bIsRepeatable = true;
+    DialogueEntries.Add(HungerWarning);
+
+    // Thirst warnings
+    FNarr_DialogueEntry ThirstWarning;
+    ThirstWarning.DialogueText = TEXT("Your throat burns like desert sand. Seek water before your strength fails completely.");
+    ThirstWarning.TriggerType = ENarr_DialogueTrigger::Thirst;
+    ThirstWarning.Priority = ENarr_DialoguePriority::High;
+    ThirstWarning.CooldownTime = 50.0f;
+    ThirstWarning.bIsRepeatable = true;
+    DialogueEntries.Add(ThirstWarning);
+
+    // Dinosaur proximity warnings
+    FNarr_DialogueEntry DinosaurNear;
+    DinosaurNear.DialogueText = TEXT("Ancient predator stalks nearby! Move with caution or become its next meal.");
+    DinosaurNear.TriggerType = ENarr_DialogueTrigger::DinosaurNearby;
+    DinosaurNear.Priority = ENarr_DialoguePriority::Critical;
+    DinosaurNear.CooldownTime = 30.0f;
+    DinosaurNear.bIsRepeatable = true;
+    DialogueEntries.Add(DinosaurNear);
+
+    // Combat warnings
+    FNarr_DialogueEntry CombatAlert;
+    CombatAlert.DialogueText = TEXT("Battle approaches! Ready your primitive weapons and fight for survival!");
+    CombatAlert.TriggerType = ENarr_DialogueTrigger::CombatWarning;
+    CombatAlert.Priority = ENarr_DialoguePriority::Critical;
+    CombatAlert.CooldownTime = 20.0f;
+    CombatAlert.bIsRepeatable = true;
+    DialogueEntries.Add(CombatAlert);
+
+    // Discovery celebrations
+    FNarr_DialogueEntry Discovery;
+    Discovery.DialogueText = TEXT("You have uncovered ancient secrets! This knowledge will aid your survival.");
+    Discovery.TriggerType = ENarr_DialogueTrigger::Discovery;
+    Discovery.Priority = ENarr_DialoguePriority::Normal;
+    Discovery.CooldownTime = 15.0f;
+    Discovery.bIsRepeatable = true;
+    DialogueEntries.Add(Discovery);
+
+    // Fire discovery
+    FNarr_DialogueEntry FireLit;
+    FireLit.DialogueText = TEXT("Fire! The sacred flame burns bright, keeping the darkness and beasts at bay.");
+    FireLit.TriggerType = ENarr_DialogueTrigger::FireLit;
+    FireLit.Priority = ENarr_DialoguePriority::High;
+    FireLit.CooldownTime = 120.0f;
+    FireLit.bIsRepeatable = false;
+    DialogueEntries.Add(FireLit);
+
+    // Day/Night cycle
+    FNarr_DialogueEntry NightFall;
+    NightFall.DialogueText = TEXT("Darkness falls upon the prehistoric world. Predators hunt in shadow - stay vigilant.");
+    NightFall.TriggerType = ENarr_DialogueTrigger::NightFall;
+    NightFall.Priority = ENarr_DialoguePriority::Normal;
+    NightFall.CooldownTime = 600.0f; // 10 minutes
+    NightFall.bIsRepeatable = true;
+    DialogueEntries.Add(NightFall);
+
+    FNarr_DialogueEntry DayBreak;
+    DayBreak.DialogueText = TEXT("Dawn breaks over the ancient lands. A new day of survival begins.");
+    DayBreak.TriggerType = ENarr_DialogueTrigger::DayBreak;
+    DayBreak.Priority = ENarr_DialoguePriority::Low;
+    DayBreak.CooldownTime = 600.0f; // 10 minutes
+    DayBreak.bIsRepeatable = true;
+    DialogueEntries.Add(DayBreak);
+}
+
+FNarr_DialogueEntry* UNarr_DialogueSystem::FindBestDialogue(ENarr_DialogueTrigger TriggerType, float HealthPercent, float HungerLevel, float ThirstLevel)
+{
+    TArray<FNarr_DialogueEntry*> MatchingDialogues;
+    
+    for (FNarr_DialogueEntry& Entry : DialogueEntries)
+    {
+        if (Entry.TriggerType == TriggerType)
         {
-            StopCurrentDialogue();
-            return;
+            // Additional context-based filtering
+            bool bContextMatch = true;
+            
+            if (TriggerType == ENarr_DialogueTrigger::LowHealth && HealthPercent > 0.3f)
+            {
+                bContextMatch = false;
+            }
+            else if (TriggerType == ENarr_DialogueTrigger::Hunger && HungerLevel < 0.7f)
+            {
+                bContextMatch = false;
+            }
+            else if (TriggerType == ENarr_DialogueTrigger::Thirst && ThirstLevel < 0.7f)
+            {
+                bContextMatch = false;
+            }
+            
+            if (bContextMatch)
+            {
+                MatchingDialogues.Add(&Entry);
+            }
         }
     }
-
-    FNarr_DialogueLine CurrentLine = CurrentSequence.DialogueLines[CurrentLineIndex];
-    UE_LOG(LogTemp, Warning, TEXT("Next Dialogue: %s - %s"), 
-        *CurrentLine.SpeakerName, *CurrentLine.DialogueText);
-}
-
-FNarr_DialogueLine UNarr_DialogueSystem::GetCurrentDialogueLine() const
-{
-    if (bIsDialogueActive && CurrentSequence.DialogueLines.IsValidIndex(CurrentLineIndex))
+    
+    if (MatchingDialogues.Num() == 0)
     {
-        return CurrentSequence.DialogueLines[CurrentLineIndex];
+        return nullptr;
     }
     
-    return FNarr_DialogueLine();
+    // Sort by priority (highest first)
+    MatchingDialogues.Sort([](const FNarr_DialogueEntry& A, const FNarr_DialogueEntry& B) {
+        return static_cast<int32>(A.Priority) > static_cast<int32>(B.Priority);
+    });
+    
+    return MatchingDialogues[0];
 }
 
-void UNarr_DialogueSystem::AddDialogueSequence(const FNarr_DialogueSequence& NewSequence)
+void UNarr_DialogueSystem::UpdateCooldowns(float DeltaTime)
 {
-    DialogueSequences.Add(NewSequence);
+    for (auto& CooldownPair : DialogueCooldowns)
+    {
+        if (CooldownPair.Value > 0.0f)
+        {
+            CooldownPair.Value = FMath::Max(0.0f, CooldownPair.Value - DeltaTime);
+        }
+    }
 }
 
-void UNarr_DialogueSystem::TriggerSurvivalTip(const FString& TipText)
+void UNarr_DialogueSystem::LogDialogue(const FString& DialogueText, ENarr_DialogueTrigger TriggerType) const
 {
-    FNarr_DialogueSequence TipSequence;
-    TipSequence.SequenceID = TEXT("dynamic_tip");
-    TipSequence.bIsRepeatable = false;
-    TipSequence.Priority = 1;
-
-    FNarr_DialogueLine Tip;
-    Tip.SpeakerName = TEXT("Survival Guide");
-    Tip.DialogueText = TipText;
-    Tip.DialogueType = ENarr_DialogueType::SurvivalTip;
-    Tip.DisplayDuration = 4.0f;
-    TipSequence.DialogueLines.Add(Tip);
-
-    CurrentSequence = TipSequence;
-    CurrentLineIndex = 0;
-    bIsDialogueActive = true;
-}
-
-void UNarr_DialogueSystem::TriggerDangerWarning(const FString& WarningText)
-{
-    FNarr_DialogueSequence WarningSequence;
-    WarningSequence.SequenceID = TEXT("dynamic_warning");
-    WarningSequence.bIsRepeatable = false;
-    WarningSequence.Priority = 3;
-
-    FNarr_DialogueLine Warning;
-    Warning.SpeakerName = TEXT("Alert System");
-    Warning.DialogueText = WarningText;
-    Warning.DialogueType = ENarr_DialogueType::DangerWarning;
-    Warning.DisplayDuration = 3.0f;
-    WarningSequence.DialogueLines.Add(Warning);
-
-    CurrentSequence = WarningSequence;
-    CurrentLineIndex = 0;
-    bIsDialogueActive = true;
-}
-
-void UNarr_DialogueSystem::TriggerQuestBriefing(const FString& QuestText)
-{
-    FNarr_DialogueSequence QuestSequence;
-    QuestSequence.SequenceID = TEXT("dynamic_quest");
-    QuestSequence.bIsRepeatable = false;
-    QuestSequence.Priority = 2;
-
-    FNarr_DialogueLine Quest;
-    Quest.SpeakerName = TEXT("Mission Briefing");
-    Quest.DialogueText = QuestText;
-    Quest.DialogueType = ENarr_DialogueType::QuestBriefing;
-    Quest.DisplayDuration = 5.0f;
-    QuestSequence.DialogueLines.Add(Quest);
-
-    CurrentSequence = QuestSequence;
-    CurrentLineIndex = 0;
-    bIsDialogueActive = true;
+    if (bEnableDebugOutput)
+    {
+        FString TriggerName = UEnum::GetValueAsString(TriggerType);
+        UE_LOG(LogTemp, Warning, TEXT("NARRATIVE [%s]: %s"), *TriggerName, *DialogueText);
+    }
 }
