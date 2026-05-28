@@ -1,312 +1,229 @@
 #include "Narr_DialogueManager.h"
-#include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "GameFramework/Pawn.h"
+#include "Engine/Engine.h"
 #include "Kismet/GameplayStatics.h"
+#include "Components/AudioComponent.h"
+
+UNarr_DialogueManager::UNarr_DialogueManager()
+{
+    CurrentContext = FNarr_DialogueContext();
+    DialogueDatabase.Empty();
+    LastPlayedTimes.Empty();
+}
 
 void UNarr_DialogueManager::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
     
-    bIsDialogueActive = false;
-    CurrentNPCName = TEXT("");
-    CurrentDialogueIndex = 0;
-    CurrentPlayerPawn = nullptr;
+    UE_LOG(LogTemp, Warning, TEXT("Narr_DialogueManager: Initializing narrative dialogue system"));
     
-    InitializeDefaultNPCs();
     InitializeDefaultDialogues();
     
-    UE_LOG(LogTemp, Warning, TEXT("Narrative Dialogue Manager initialized"));
-}
-
-void UNarr_DialogueManager::Deinitialize()
-{
-    EndDialogue();
-    RegisteredNPCs.Empty();
-    DialogueTrees.Empty();
-    
-    Super::Deinitialize();
-}
-
-bool UNarr_DialogueManager::StartDialogue(const FString& NPCName, APawn* PlayerPawn)
-{
-    if (bIsDialogueActive)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Cannot start dialogue - already in dialogue"));
-        return false;
-    }
-    
-    if (!RegisteredNPCs.Contains(NPCName))
-    {
-        UE_LOG(LogTemp, Warning, TEXT("NPC not found: %s"), *NPCName);
-        return false;
-    }
-    
-    if (!DialogueTrees.Contains(NPCName))
-    {
-        UE_LOG(LogTemp, Warning, TEXT("No dialogue tree for NPC: %s"), *NPCName);
-        return false;
-    }
-    
-    bIsDialogueActive = true;
-    CurrentNPCName = NPCName;
-    CurrentDialogueIndex = 0;
-    CurrentPlayerPawn = PlayerPawn;
-    
-    UE_LOG(LogTemp, Warning, TEXT("Started dialogue with: %s"), *NPCName);
-    return true;
-}
-
-void UNarr_DialogueManager::EndDialogue()
-{
-    if (!bIsDialogueActive)
-    {
-        return;
-    }
-    
-    bIsDialogueActive = false;
-    CurrentNPCName = TEXT("");
-    CurrentDialogueIndex = 0;
-    CurrentPlayerPawn = nullptr;
-    
-    UE_LOG(LogTemp, Warning, TEXT("Dialogue ended"));
-}
-
-FNarr_DialogueLine UNarr_DialogueManager::GetCurrentDialogueLine() const
-{
-    if (!bIsDialogueActive || !DialogueTrees.Contains(CurrentNPCName))
-    {
-        return FNarr_DialogueLine();
-    }
-    
-    const FNarr_DialogueTree& Tree = DialogueTrees[CurrentNPCName];
-    if (Tree.DialogueLines.IsValidIndex(CurrentDialogueIndex))
-    {
-        return Tree.DialogueLines[CurrentDialogueIndex];
-    }
-    
-    return FNarr_DialogueLine();
-}
-
-void UNarr_DialogueManager::AdvanceDialogue(int32 ResponseIndex)
-{
-    if (!bIsDialogueActive || !DialogueTrees.Contains(CurrentNPCName))
-    {
-        return;
-    }
-    
-    const FNarr_DialogueTree& Tree = DialogueTrees[CurrentNPCName];
-    CurrentDialogueIndex++;
-    
-    if (CurrentDialogueIndex >= Tree.DialogueLines.Num())
-    {
-        EndDialogue();
-    }
-}
-
-void UNarr_DialogueManager::RegisterNPC(const FNarr_NPCProfile& NPCProfile)
-{
-    if (NPCProfile.NPCName.IsEmpty())
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Cannot register NPC with empty name"));
-        return;
-    }
-    
-    RegisteredNPCs.Add(NPCProfile.NPCName, NPCProfile);
-    UE_LOG(LogTemp, Warning, TEXT("Registered NPC: %s"), *NPCProfile.NPCName);
-}
-
-FNarr_NPCProfile UNarr_DialogueManager::GetNPCProfile(const FString& NPCName) const
-{
-    if (RegisteredNPCs.Contains(NPCName))
-    {
-        return RegisteredNPCs[NPCName];
-    }
-    
-    return FNarr_NPCProfile();
-}
-
-TArray<FString> UNarr_DialogueManager::GetNearbyNPCs(const FVector& PlayerLocation, float SearchRadius) const
-{
-    TArray<FString> NearbyNPCs;
-    
-    for (const auto& NPCPair : RegisteredNPCs)
-    {
-        const FNarr_NPCProfile& Profile = NPCPair.Value;
-        float Distance = FVector::Dist(PlayerLocation, Profile.HomeLocation);
-        
-        if (Distance <= SearchRadius)
-        {
-            NearbyNPCs.Add(Profile.NPCName);
-        }
-    }
-    
-    return NearbyNPCs;
-}
-
-void UNarr_DialogueManager::LoadDialogueTree(const FNarr_DialogueTree& DialogueTree)
-{
-    if (!ValidateDialogueTree(DialogueTree))
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Invalid dialogue tree for: %s"), *DialogueTree.NPCName);
-        return;
-    }
-    
-    DialogueTrees.Add(DialogueTree.NPCName, DialogueTree);
-    UE_LOG(LogTemp, Warning, TEXT("Loaded dialogue tree for: %s"), *DialogueTree.NPCName);
-}
-
-FNarr_DialogueTree UNarr_DialogueManager::GetDialogueTree(const FString& NPCName) const
-{
-    if (DialogueTrees.Contains(NPCName))
-    {
-        return DialogueTrees[NPCName];
-    }
-    
-    return FNarr_DialogueTree();
-}
-
-void UNarr_DialogueManager::TriggerQuestDialogue(const FString& QuestID, const FString& NPCName)
-{
-    if (!DialogueTrees.Contains(NPCName))
-    {
-        UE_LOG(LogTemp, Warning, TEXT("No dialogue tree for quest NPC: %s"), *NPCName);
-        return;
-    }
-    
-    const FNarr_DialogueTree& Tree = DialogueTrees[NPCName];
-    if (Tree.bIsQuestRelated && Tree.QuestID == QuestID)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Triggered quest dialogue: %s for NPC: %s"), *QuestID, *NPCName);
-    }
-}
-
-bool UNarr_DialogueManager::HasQuestDialogue(const FString& QuestID) const
-{
-    for (const auto& TreePair : DialogueTrees)
-    {
-        const FNarr_DialogueTree& Tree = TreePair.Value;
-        if (Tree.bIsQuestRelated && Tree.QuestID == QuestID)
-        {
-            return true;
-        }
-    }
-    
-    return false;
-}
-
-void UNarr_DialogueManager::InitializeDefaultNPCs()
-{
-    // Tribal Elder
-    FNarr_NPCProfile TribalElder;
-    TribalElder.NPCName = TEXT("TribalElder");
-    TribalElder.Personality = ENarr_NPCPersonality::Wise_Elder;
-    TribalElder.BackgroundStory = TEXT("Ancient keeper of tribal wisdom, survivor of countless hunts and dangers. Speaks in riddles and warnings about the great predators.");
-    TribalElder.SpecialKnowledge.Add(TEXT("Dinosaur behavior patterns"));
-    TribalElder.SpecialKnowledge.Add(TEXT("Ancient hunting techniques"));
-    TribalElder.SpecialKnowledge.Add(TEXT("Survival wisdom"));
-    TribalElder.HomeLocation = FVector(2000, 0, 100);
-    RegisterNPC(TribalElder);
-    
-    // Quest Giver
-    FNarr_NPCProfile QuestGiver;
-    QuestGiver.NPCName = TEXT("QuestGiver");
-    QuestGiver.Personality = ENarr_NPCPersonality::Practical_Guide;
-    QuestGiver.BackgroundStory = TEXT("Experienced hunter who coordinates resource gathering for the tribe. Practical and direct in speech, focused on survival needs.");
-    QuestGiver.SpecialKnowledge.Add(TEXT("Resource locations"));
-    QuestGiver.SpecialKnowledge.Add(TEXT("Crafting techniques"));
-    QuestGiver.SpecialKnowledge.Add(TEXT("Territory mapping"));
-    QuestGiver.HomeLocation = FVector(-2000, 1000, 100);
-    RegisterNPC(QuestGiver);
-    
-    // Bone Reader
-    FNarr_NPCProfile BoneReader;
-    BoneReader.NPCName = TEXT("BoneReader");
-    BoneReader.Personality = ENarr_NPCPersonality::Mystic_Reader;
-    BoneReader.BackgroundStory = TEXT("Studies the remains of great beasts to understand their behavior and weaknesses. Speaks of bones as teachers and guides.");
-    BoneReader.SpecialKnowledge.Add(TEXT("Dinosaur anatomy"));
-    BoneReader.SpecialKnowledge.Add(TEXT("Combat strategies"));
-    BoneReader.SpecialKnowledge.Add(TEXT("Bone crafting"));
-    BoneReader.HomeLocation = FVector(0, 2000, 100);
-    RegisterNPC(BoneReader);
-    
-    // Tracking Mentor
-    FNarr_NPCProfile TrackingMentor;
-    TrackingMentor.NPCName = TEXT("TrackingMentor");
-    TrackingMentor.Personality = ENarr_NPCPersonality::Cautious_Scout;
-    TrackingMentor.BackgroundStory = TEXT("Master tracker who teaches the art of reading signs and avoiding predators. Cautious but knowledgeable about safe paths.");
-    TrackingMentor.SpecialKnowledge.Add(TEXT("Tracking techniques"));
-    TrackingMentor.SpecialKnowledge.Add(TEXT("Predator avoidance"));
-    TrackingMentor.SpecialKnowledge.Add(TEXT("Safe routes"));
-    TrackingMentor.HomeLocation = FVector(1500, -1500, 100);
-    RegisterNPC(TrackingMentor);
+    UE_LOG(LogTemp, Warning, TEXT("Narr_DialogueManager: Loaded %d dialogue lines"), DialogueDatabase.Num());
 }
 
 void UNarr_DialogueManager::InitializeDefaultDialogues()
 {
-    // Tribal Elder dialogue tree
-    FNarr_DialogueTree ElderTree;
-    ElderTree.TreeID = TEXT("TribalElder_Main");
-    ElderTree.NPCName = TEXT("TribalElder");
-    ElderTree.bIsQuestRelated = false;
-    
-    FNarr_DialogueLine ElderLine1;
-    ElderLine1.SpeakerName = TEXT("Tribal Elder");
-    ElderLine1.DialogueText = TEXT("The ancient hunters speak of the Great Hunt - when the earth trembles beneath the Thunder Lizard's feet and the sky darkens with the wings of death.");
-    ElderLine1.AudioPath = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1778900005029_TribalElder.mp3");
-    ElderLine1.Duration = 22.0f;
-    ElderLine1.PlayerResponses.Add(TEXT("Tell me about the Thunder Lizard"));
-    ElderLine1.PlayerResponses.Add(TEXT("How do I survive the pack hunters?"));
-    
-    FNarr_DialogueLine ElderLine2;
-    ElderLine2.SpeakerName = TEXT("Tribal Elder");
-    ElderLine2.DialogueText = TEXT("Listen well, young one, for survival depends on reading the signs. The pack hunters move in shadows, testing our defenses.");
-    ElderLine2.Duration = 15.0f;
-    ElderLine2.PlayerResponses.Add(TEXT("What signs should I watch for?"));
-    ElderLine2.PlayerResponses.Add(TEXT("Thank you for the wisdom"));
-    
-    ElderTree.DialogueLines.Add(ElderLine1);
-    ElderTree.DialogueLines.Add(ElderLine2);
-    LoadDialogueTree(ElderTree);
-    
-    // Quest Giver dialogue tree
-    FNarr_DialogueTree QuestTree;
-    QuestTree.TreeID = TEXT("QuestGiver_ResourceGathering");
-    QuestTree.NPCName = TEXT("QuestGiver");
-    QuestTree.bIsQuestRelated = true;
-    QuestTree.QuestID = TEXT("ResourceGathering_Stone");
-    
-    FNarr_DialogueLine QuestLine1;
-    QuestLine1.SpeakerName = TEXT("Quest Giver");
-    QuestLine1.DialogueText = TEXT("Hunter, you have proven yourself worthy. The resources you gather feed our tribe and strengthen our defenses.");
-    QuestLine1.AudioPath = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1778900011245_QuestGiver.mp3");
-    QuestLine1.Duration = 20.0f;
-    QuestLine1.PlayerResponses.Add(TEXT("What resources do you need?"));
-    QuestLine1.PlayerResponses.Add(TEXT("I'm ready for a mission"));
-    
-    QuestTree.DialogueLines.Add(QuestLine1);
-    LoadDialogueTree(QuestTree);
+    // Survival warning dialogues
+    FNarr_DialogueLine LowHealthWarning;
+    LowHealthWarning.DialogueText = TEXT("Your wounds bleed freely. Find shelter and rest, or death will claim you.");
+    LowHealthWarning.Speaker = ENarr_SpeakerType::Narrator;
+    LowHealthWarning.TriggerCondition = ENarr_DialogueTrigger::LowHealth;
+    LowHealthWarning.Priority = 10.0f;
+    LowHealthWarning.bIsRepeatable = true;
+    LowHealthWarning.CooldownTime = 60.0f;
+    RegisterDialogueLine(LowHealthWarning);
+
+    FNarr_DialogueLine HungerWarning;
+    HungerWarning.DialogueText = TEXT("Your stomach gnaws with hunger. Hunt or gather food before weakness takes hold.");
+    HungerWarning.Speaker = ENarr_SpeakerType::Narrator;
+    HungerWarning.TriggerCondition = ENarr_DialogueTrigger::Survival_Hunger;
+    HungerWarning.Priority = 8.0f;
+    HungerWarning.bIsRepeatable = true;
+    HungerWarning.CooldownTime = 45.0f;
+    RegisterDialogueLine(HungerWarning);
+
+    FNarr_DialogueLine ThirstWarning;
+    ThirstWarning.DialogueText = TEXT("Your throat burns with thirst. Seek water or perish under the merciless sun.");
+    ThirstWarning.Speaker = ENarr_SpeakerType::Narrator;
+    ThirstWarning.TriggerCondition = ENarr_DialogueTrigger::Survival_Thirst;
+    ThirstWarning.Priority = 9.0f;
+    ThirstWarning.bIsRepeatable = true;
+    ThirstWarning.CooldownTime = 40.0f;
+    RegisterDialogueLine(ThirstWarning);
+
+    // Dinosaur encounter dialogues
+    FNarr_DialogueLine TRexWarning;
+    TRexWarning.DialogueText = TEXT("The earth trembles. A massive predator approaches. Hide or prepare for the fight of your life.");
+    TRexWarning.Speaker = ENarr_SpeakerType::Warning;
+    TRexWarning.TriggerCondition = ENarr_DialogueTrigger::DinosaurNearby;
+    TRexWarning.Priority = 15.0f;
+    TRexWarning.bIsRepeatable = true;
+    TRexWarning.CooldownTime = 120.0f;
+    RegisterDialogueLine(TRexWarning);
+
+    FNarr_DialogueLine RaptorWarning;
+    RaptorWarning.DialogueText = TEXT("Clever hunters stalk through the undergrowth. They hunt in packs. Watch your back.");
+    RaptorWarning.Speaker = ENarr_SpeakerType::Warning;
+    RaptorWarning.TriggerCondition = ENarr_DialogueTrigger::DinosaurNearby;
+    RaptorWarning.Priority = 12.0f;
+    RaptorWarning.bIsRepeatable = true;
+    RaptorWarning.CooldownTime = 90.0f;
+    RegisterDialogueLine(RaptorWarning);
+
+    // Tribal elder wisdom
+    FNarr_DialogueLine ElderWisdom1;
+    ElderWisdom1.DialogueText = TEXT("Fire keeps the darkness at bay. Sharp stone cuts deep. These truths have kept our people alive.");
+    ElderWisdom1.Speaker = ENarr_SpeakerType::TribalElder;
+    ElderWisdom1.TriggerCondition = ENarr_DialogueTrigger::FirstEncounter;
+    ElderWisdom1.Priority = 5.0f;
+    ElderWisdom1.bIsRepeatable = false;
+    ElderWisdom1.CooldownTime = 0.0f;
+    RegisterDialogueLine(ElderWisdom1);
+
+    FNarr_DialogueLine ElderWisdom2;
+    ElderWisdom2.DialogueText = TEXT("The great beasts have ruled this land since time began. Respect their power or become their prey.");
+    ElderWisdom2.Speaker = ENarr_SpeakerType::TribalElder;
+    ElderWisdom2.TriggerCondition = ENarr_DialogueTrigger::Discovery;
+    ElderWisdom2.Priority = 6.0f;
+    ElderWisdom2.bIsRepeatable = true;
+    ElderWisdom2.CooldownTime = 300.0f;
+    RegisterDialogueLine(ElderWisdom2);
+
+    // Discovery dialogues
+    FNarr_DialogueLine ResourceDiscovery;
+    ResourceDiscovery.DialogueText = TEXT("Useful materials lie scattered here. Gather what you can - survival depends on preparation.");
+    ResourceDiscovery.Speaker = ENarr_SpeakerType::PlayerThought;
+    ResourceDiscovery.TriggerCondition = ENarr_DialogueTrigger::Discovery;
+    ResourceDiscovery.Priority = 4.0f;
+    ResourceDiscovery.bIsRepeatable = true;
+    ResourceDiscovery.CooldownTime = 30.0f;
+    RegisterDialogueLine(ResourceDiscovery);
 }
 
-bool UNarr_DialogueManager::ValidateDialogueTree(const FNarr_DialogueTree& Tree) const
+void UNarr_DialogueManager::TriggerDialogue(ENarr_DialogueTrigger TriggerType, const FNarr_DialogueContext& Context)
 {
-    if (Tree.NPCName.IsEmpty() || Tree.TreeID.IsEmpty())
-    {
-        return false;
-    }
+    UpdateContext(Context);
     
-    if (Tree.DialogueLines.Num() == 0)
-    {
-        return false;
-    }
+    FNarr_DialogueLine* BestDialogue = FindBestDialogue(TriggerType, Context);
     
-    for (const FNarr_DialogueLine& Line : Tree.DialogueLines)
+    if (BestDialogue && CanPlayDialogue(*BestDialogue))
     {
-        if (Line.DialogueText.IsEmpty())
+        PlayDialogue(*BestDialogue);
+    }
+}
+
+void UNarr_DialogueManager::RegisterDialogueLine(const FNarr_DialogueLine& DialogueLine)
+{
+    DialogueDatabase.Add(DialogueLine);
+    UE_LOG(LogTemp, Log, TEXT("Narr_DialogueManager: Registered dialogue line: %s"), *DialogueLine.DialogueText);
+}
+
+void UNarr_DialogueManager::PlayDialogue(const FNarr_DialogueLine& DialogueLine)
+{
+    FString DialogueKey = FString::Printf(TEXT("%s_%s"), 
+        *UEnum::GetValueAsString(DialogueLine.Speaker),
+        *DialogueLine.DialogueText.Left(20));
+    
+    LastPlayedTimes.Add(DialogueKey, GetWorld()->GetTimeSeconds());
+    
+    UE_LOG(LogTemp, Warning, TEXT("Narr_DialogueManager: Playing dialogue - %s: %s"), 
+        *UEnum::GetValueAsString(DialogueLine.Speaker), 
+        *DialogueLine.DialogueText);
+    
+    OnDialogueTriggered(DialogueLine);
+    
+    // Play audio if available
+    if (DialogueLine.VoiceAudio.IsValid())
+    {
+        UGameplayStatics::PlaySound2D(GetWorld(), DialogueLine.VoiceAudio.LoadSynchronous());
+    }
+}
+
+bool UNarr_DialogueManager::CanPlayDialogue(const FNarr_DialogueLine& DialogueLine) const
+{
+    if (!DialogueLine.bIsRepeatable)
+    {
+        FString DialogueKey = FString::Printf(TEXT("%s_%s"), 
+            *UEnum::GetValueAsString(DialogueLine.Speaker),
+            *DialogueLine.DialogueText.Left(20));
+        
+        if (LastPlayedTimes.Contains(DialogueKey))
         {
             return false;
         }
     }
     
-    return true;
+    if (DialogueLine.CooldownTime > 0.0f)
+    {
+        FString DialogueKey = FString::Printf(TEXT("%s_%s"), 
+            *UEnum::GetValueAsString(DialogueLine.Speaker),
+            *DialogueLine.DialogueText.Left(20));
+        
+        if (const float* LastPlayTime = LastPlayedTimes.Find(DialogueKey))
+        {
+            float CurrentTime = GetWorld()->GetTimeSeconds();
+            if (CurrentTime - *LastPlayTime < DialogueLine.CooldownTime)
+            {
+                return false;
+            }
+        }
+    }
+    
+    return EvaluateTriggerCondition(DialogueLine, CurrentContext);
+}
+
+void UNarr_DialogueManager::UpdateContext(const FNarr_DialogueContext& NewContext)
+{
+    CurrentContext = NewContext;
+    OnContextChanged(NewContext);
+}
+
+bool UNarr_DialogueManager::EvaluateTriggerCondition(const FNarr_DialogueLine& DialogueLine, const FNarr_DialogueContext& Context) const
+{
+    switch (DialogueLine.TriggerCondition)
+    {
+        case ENarr_DialogueTrigger::LowHealth:
+            return Context.PlayerHealthPercent < 30.0f;
+            
+        case ENarr_DialogueTrigger::Survival_Hunger:
+            return Context.PlayerHungerLevel > 70.0f;
+            
+        case ENarr_DialogueTrigger::Survival_Thirst:
+            return Context.PlayerThirstLevel > 80.0f;
+            
+        case ENarr_DialogueTrigger::DinosaurNearby:
+            return Context.bDinosaurNearby && Context.DinosaurDistance < 2000.0f;
+            
+        case ENarr_DialogueTrigger::Combat_Warning:
+            return Context.bDinosaurNearby && Context.DinosaurDistance < 1000.0f;
+            
+        case ENarr_DialogueTrigger::Discovery:
+        case ENarr_DialogueTrigger::FirstEncounter:
+        case ENarr_DialogueTrigger::QuestComplete:
+        case ENarr_DialogueTrigger::PlayerApproach:
+            return true;
+            
+        default:
+            return false;
+    }
+}
+
+FNarr_DialogueLine* UNarr_DialogueManager::FindBestDialogue(ENarr_DialogueTrigger TriggerType, const FNarr_DialogueContext& Context)
+{
+    FNarr_DialogueLine* BestDialogue = nullptr;
+    float HighestPriority = -1.0f;
+    
+    for (FNarr_DialogueLine& DialogueLine : DialogueDatabase)
+    {
+        if (DialogueLine.TriggerCondition == TriggerType && 
+            EvaluateTriggerCondition(DialogueLine, Context) &&
+            DialogueLine.Priority > HighestPriority)
+        {
+            BestDialogue = &DialogueLine;
+            HighestPriority = DialogueLine.Priority;
+        }
+    }
+    
+    return BestDialogue;
 }
