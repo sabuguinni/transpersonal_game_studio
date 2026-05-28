@@ -1,389 +1,306 @@
 #include "Crowd_MassSimulationManager.h"
-#include "Engine/World.h"
 #include "Engine/Engine.h"
-#include "GameFramework/Pawn.h"
-#include "Components/StaticMeshComponent.h"
+#include "Engine/World.h"
 #include "Kismet/GameplayStatics.h"
-#include "MassEntitySubsystem.h"
-#include "MassSpawnerSubsystem.h"
+#include "NavigationSystem.h"
+#include "AI/NavigationSystemBase.h"
 #include "DrawDebugHelpers.h"
 
-UCrowd_MassSimulationManager::UCrowd_MassSimulationManager()
+ACrowd_MassSimulationManager::ACrowd_MassSimulationManager()
 {
-    PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 0.1f;
-    
-    // Initialize default configuration
-    EntityConfig.MaxEntities = 1000;
-    EntityConfig.SpawnRadius = 5000.0f;
-    EntityConfig.MovementSpeed = 200.0f;
-    EntityConfig.WanderRadius = 1000.0f;
-    
-    UpdateFrequency = 0.1f;
-    CullDistance = 10000.0f;
-    TotalActiveEntities = 0;
-    bSimulationActive = false;
-    LastUpdateTime = 0.0f;
-    MassEntitySubsystem = nullptr;
+    PrimaryActorTick.bCanEverTick = true;
+    PrimaryActorTick.TickInterval = 0.033f; // 30 FPS update
+
+    // Initialize default settings
+    SimulationSettings.MaxEntities = 50000;
+    SimulationSettings.SpawnRadius = 10000.0f;
+    SimulationSettings.UpdateFrequency = 30.0f;
+    SimulationSettings.bEnableLODSystem = true;
+    SimulationSettings.LODDistance1 = 1000.0f;
+    SimulationSettings.LODDistance2 = 5000.0f;
+    SimulationSettings.LODDistance3 = 15000.0f;
+
+    CurrentEntityCount = 0;
+    bSimulationInitialized = false;
+    EntityManager = nullptr;
 }
 
-void UCrowd_MassSimulationManager::BeginPlay()
+void ACrowd_MassSimulationManager::BeginPlay()
 {
     Super::BeginPlay();
     
-    // Get Mass Entity subsystem reference
-    if (UWorld* World = GetWorld())
-    {
-        MassEntitySubsystem = World->GetSubsystem<UMassEntitySubsystem>();
-        if (MassEntitySubsystem)
-        {
-            UE_LOG(LogTemp, Log, TEXT("Crowd_MassSimulationManager: Mass Entity Subsystem initialized"));
-        }
-        else
-        {
-            UE_LOG(LogTemp, Warning, TEXT("Crowd_MassSimulationManager: Failed to get Mass Entity Subsystem"));
-        }
-    }
+    UE_LOG(LogTemp, Warning, TEXT("Crowd Mass Simulation Manager - BeginPlay"));
     
-    // Initialize biome populations
-    InitializeBiomePopulations();
-    
-    // Start simulation
+    // Initialize the simulation system
     InitializeMassSimulation();
 }
 
-void UCrowd_MassSimulationManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void ACrowd_MassSimulationManager::Tick(float DeltaTime)
 {
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-    
-    if (bSimulationActive)
+    Super::Tick(DeltaTime);
+
+    if (!bSimulationInitialized)
     {
-        LastUpdateTime += DeltaTime;
+        return;
+    }
+
+    // Update simulation at specified frequency
+    LastUpdateTime += DeltaTime;
+    if (LastUpdateTime >= (1.0f / SimulationSettings.UpdateFrequency))
+    {
+        UpdateEntityMovement(DeltaTime);
         
-        if (LastUpdateTime >= UpdateFrequency)
+        if (SimulationSettings.bEnableLODSystem)
         {
-            UpdateCrowdBehavior(DeltaTime);
-            UpdateLODLevels();
-            CullDistantEntities();
-            LastUpdateTime = 0.0f;
+            ProcessLODSystem();
+        }
+        
+        LastUpdateTime = 0.0f;
+    }
+}
+
+void ACrowd_MassSimulationManager::InitializeMassSimulation()
+{
+    UE_LOG(LogTemp, Warning, TEXT("Initializing Mass Simulation System"));
+    
+    // Clear existing entities
+    ActiveEntities.Empty();
+    CurrentEntityCount = 0;
+    
+    // Initialize entity manager
+    UWorld* World = GetWorld();
+    if (World)
+    {
+        // Reserve memory for maximum entities
+        ActiveEntities.Reserve(SimulationSettings.MaxEntities);
+        bSimulationInitialized = true;
+        
+        UE_LOG(LogTemp, Warning, TEXT("Mass Simulation initialized - Max Entities: %d"), SimulationSettings.MaxEntities);
+    }
+    else
+    {
+        UE_LOG(LogTemp, Error, TEXT("Failed to initialize Mass Simulation - No valid world"));
+    }
+}
+
+void ACrowd_MassSimulationManager::SpawnEntities(int32 Count, FVector CenterLocation)
+{
+    if (!bSimulationInitialized)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Cannot spawn entities - Simulation not initialized"));
+        return;
+    }
+
+    // Clamp spawn count to available slots
+    int32 AvailableSlots = SimulationSettings.MaxEntities - CurrentEntityCount;
+    int32 ActualSpawnCount = FMath::Min(Count, AvailableSlots);
+    
+    UE_LOG(LogTemp, Warning, TEXT("Spawning %d entities at location: %s"), ActualSpawnCount, *CenterLocation.ToString());
+
+    for (int32 i = 0; i < ActualSpawnCount; i++)
+    {
+        FCrowd_EntityData NewEntity;
+        
+        // Generate random spawn location
+        FVector SpawnLocation = GetRandomSpawnLocation(CenterLocation, SimulationSettings.SpawnRadius);
+        
+        if (IsValidSpawnLocation(SpawnLocation))
+        {
+            NewEntity.Position = SpawnLocation;
+            NewEntity.Velocity = FVector::ZeroVector;
+            NewEntity.MovementSpeed = FMath::RandRange(200.0f, 400.0f);
+            NewEntity.LODLevel = 0;
+            NewEntity.bIsActive = true;
+            
+            ActiveEntities.Add(NewEntity);
+            CurrentEntityCount++;
+        }
+    }
+    
+    UE_LOG(LogTemp, Warning, TEXT("Successfully spawned %d entities. Total active: %d"), ActualSpawnCount, CurrentEntityCount);
+}
+
+void ACrowd_MassSimulationManager::UpdateEntityLOD()
+{
+    if (!bSimulationInitialized)
+    {
+        return;
+    }
+
+    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
+    if (!PlayerPawn)
+    {
+        return;
+    }
+
+    FVector PlayerLocation = PlayerPawn->GetActorLocation();
+
+    for (FCrowd_EntityData& Entity : ActiveEntities)
+    {
+        if (!Entity.bIsActive)
+        {
+            continue;
+        }
+
+        float Distance = FVector::Dist(Entity.Position, PlayerLocation);
+        
+        // Determine LOD level based on distance
+        if (Distance <= SimulationSettings.LODDistance1)
+        {
+            Entity.LODLevel = 0; // Highest detail
+        }
+        else if (Distance <= SimulationSettings.LODDistance2)
+        {
+            Entity.LODLevel = 1; // Medium detail
+        }
+        else if (Distance <= SimulationSettings.LODDistance3)
+        {
+            Entity.LODLevel = 2; // Low detail
+        }
+        else
+        {
+            Entity.LODLevel = 3; // Culled/Invisible
         }
     }
 }
 
-void UCrowd_MassSimulationManager::InitializeMassSimulation()
+void ACrowd_MassSimulationManager::SetSimulationSettings(const FCrowd_SimulationSettings& NewSettings)
 {
-    if (!MassEntitySubsystem)
+    SimulationSettings = NewSettings;
+    
+    // Adjust tick interval based on update frequency
+    if (SimulationSettings.UpdateFrequency > 0.0f)
     {
-        UE_LOG(LogTemp, Error, TEXT("Crowd_MassSimulationManager: Cannot initialize - Mass Entity Subsystem not available"));
-        return;
+        PrimaryActorTick.TickInterval = 1.0f / SimulationSettings.UpdateFrequency;
     }
     
-    bSimulationActive = true;
-    TotalActiveEntities = 0;
-    
-    // Populate default biomes
-    PopulateBiome(EBiomeType::Savanna, 200);
-    PopulateBiome(EBiomeType::Forest, 150);
-    PopulateBiome(EBiomeType::Desert, 100);
-    PopulateBiome(EBiomeType::Swamp, 120);
-    PopulateBiome(EBiomeType::Mountain, 80);
-    
-    UE_LOG(LogTemp, Log, TEXT("Crowd_MassSimulationManager: Mass simulation initialized with %d total entities"), TotalActiveEntities);
+    UE_LOG(LogTemp, Warning, TEXT("Simulation settings updated - Max Entities: %d, Update Freq: %.2f"), 
+           SimulationSettings.MaxEntities, SimulationSettings.UpdateFrequency);
 }
 
-void UCrowd_MassSimulationManager::SpawnCrowdEntities(const FVector& Location, int32 Count)
+void ACrowd_MassSimulationManager::ClearAllEntities()
 {
-    if (!MassEntitySubsystem || Count <= 0)
+    ActiveEntities.Empty();
+    CurrentEntityCount = 0;
+    
+    UE_LOG(LogTemp, Warning, TEXT("All entities cleared from simulation"));
+}
+
+float ACrowd_MassSimulationManager::GetPerformanceMetric() const
+{
+    if (SimulationSettings.MaxEntities <= 0)
     {
-        return;
+        return 0.0f;
     }
     
+    return (float)CurrentEntityCount / (float)SimulationSettings.MaxEntities;
+}
+
+void ACrowd_MassSimulationManager::UpdateEntityMovement(float DeltaTime)
+{
+    for (FCrowd_EntityData& Entity : ActiveEntities)
+    {
+        if (!Entity.bIsActive || Entity.LODLevel >= 3)
+        {
+            continue; // Skip inactive or culled entities
+        }
+        
+        // Simple movement pattern - random walk
+        FVector RandomDirection = FVector(
+            FMath::RandRange(-1.0f, 1.0f),
+            FMath::RandRange(-1.0f, 1.0f),
+            0.0f
+        ).GetSafeNormal();
+        
+        Entity.Velocity = RandomDirection * Entity.MovementSpeed;
+        Entity.Position += Entity.Velocity * DeltaTime;
+        
+        // Keep entities within simulation bounds
+        FVector ManagerLocation = GetActorLocation();
+        float MaxDistance = SimulationSettings.SpawnRadius * 1.5f;
+        
+        if (FVector::Dist2D(Entity.Position, ManagerLocation) > MaxDistance)
+        {
+            FVector DirectionToCenter = (ManagerLocation - Entity.Position).GetSafeNormal();
+            Entity.Velocity = DirectionToCenter * Entity.MovementSpeed;
+        }
+    }
+}
+
+void ACrowd_MassSimulationManager::ProcessLODSystem()
+{
+    UpdateEntityLOD();
+    
+    // Count entities by LOD level for performance monitoring
+    int32 LODCounts[4] = {0, 0, 0, 0};
+    
+    for (const FCrowd_EntityData& Entity : ActiveEntities)
+    {
+        if (Entity.bIsActive && Entity.LODLevel >= 0 && Entity.LODLevel < 4)
+        {
+            LODCounts[Entity.LODLevel]++;
+        }
+    }
+    
+    // Optional: Log LOD distribution for debugging
+    static float LastLODLogTime = 0.0f;
+    LastLODLogTime += GetWorld()->GetDeltaSeconds();
+    
+    if (LastLODLogTime >= 5.0f) // Log every 5 seconds
+    {
+        UE_LOG(LogTemp, Log, TEXT("LOD Distribution - L0:%d L1:%d L2:%d L3:%d"), 
+               LODCounts[0], LODCounts[1], LODCounts[2], LODCounts[3]);
+        LastLODLogTime = 0.0f;
+    }
+}
+
+FVector ACrowd_MassSimulationManager::GetRandomSpawnLocation(FVector Center, float Radius)
+{
+    // Generate random point in circle
+    float Angle = FMath::RandRange(0.0f, 2.0f * PI);
+    float Distance = FMath::RandRange(0.0f, Radius);
+    
+    FVector RandomOffset = FVector(
+        FMath::Cos(Angle) * Distance,
+        FMath::Sin(Angle) * Distance,
+        0.0f
+    );
+    
+    FVector SpawnLocation = Center + RandomOffset;
+    
+    // Trace to ground
+    FHitResult HitResult;
+    FVector TraceStart = SpawnLocation + FVector(0, 0, 1000.0f);
+    FVector TraceEnd = SpawnLocation - FVector(0, 0, 1000.0f);
+    
+    if (GetWorld()->LineTraceSingleByChannel(HitResult, TraceStart, TraceEnd, ECC_WorldStatic))
+    {
+        SpawnLocation.Z = HitResult.Location.Z + 100.0f; // Offset above ground
+    }
+    
+    return SpawnLocation;
+}
+
+bool ACrowd_MassSimulationManager::IsValidSpawnLocation(FVector Location)
+{
+    // Basic validation - check if location is within world bounds
     UWorld* World = GetWorld();
     if (!World)
     {
-        return;
+        return false;
     }
     
-    // Spawn entities in a radius around the location
-    for (int32 i = 0; i < Count; ++i)
+    // Check if location is too close to other important actors
+    TArray<AActor*> NearbyActors;
+    UGameplayStatics::GetAllActorsOfClass(World, APawn::StaticClass(), NearbyActors);
+    
+    for (AActor* Actor : NearbyActors)
     {
-        // Generate random position within spawn radius
-        float Angle = FMath::RandRange(0.0f, 2.0f * PI);
-        float Distance = FMath::RandRange(100.0f, EntityConfig.SpawnRadius);
-        
-        FVector SpawnLocation = Location + FVector(
-            FMath::Cos(Angle) * Distance,
-            FMath::Sin(Angle) * Distance,
-            0.0f
-        );
-        
-        // Adjust Z to ground level
-        SpawnLocation.Z = Location.Z;
-        
-        // For now, spawn basic pawns as crowd entities
-        // TODO: Replace with Mass Entity spawning when Mass framework is fully integrated
-        if (APawn* CrowdEntity = World->SpawnActor<APawn>(SpawnLocation, FRotator::ZeroRotator))
+        if (FVector::Dist(Location, Actor->GetActorLocation()) < 500.0f)
         {
-            CrowdEntity->Tags.Add(FName("CrowdEntity"));
-            TotalActiveEntities++;
+            return false; // Too close to existing pawn
         }
     }
     
-    UE_LOG(LogTemp, Log, TEXT("Crowd_MassSimulationManager: Spawned %d crowd entities at %s"), Count, *Location.ToString());
-}
-
-void UCrowd_MassSimulationManager::UpdateCrowdBehavior(float DeltaTime)
-{
-    if (!bSimulationActive)
-    {
-        return;
-    }
-    
-    // Update entity movement
-    UpdateEntityMovement(DeltaTime);
-    
-    // Update biome populations
-    UpdateBiomePopulations();
-}
-
-void UCrowd_MassSimulationManager::SetCrowdDestination(const FVector& Destination)
-{
-    // TODO: Implement crowd pathfinding to destination
-    // For now, log the destination change
-    UE_LOG(LogTemp, Log, TEXT("Crowd_MassSimulationManager: Setting crowd destination to %s"), *Destination.ToString());
-}
-
-void UCrowd_MassSimulationManager::PopulateBiome(EBiomeType BiomeType, int32 EntityCount)
-{
-    FVector BiomeCenter = GetRandomPositionInBiome(BiomeType);
-    
-    // Find or create biome population entry
-    FCrowd_BiomePopulation* BiomePopulation = nullptr;
-    for (FCrowd_BiomePopulation& Population : BiomePopulations)
-    {
-        if (Population.BiomeType == BiomeType)
-        {
-            BiomePopulation = &Population;
-            break;
-        }
-    }
-    
-    if (!BiomePopulation)
-    {
-        FCrowd_BiomePopulation NewPopulation;
-        NewPopulation.BiomeType = BiomeType;
-        NewPopulation.BiomeCenter = BiomeCenter;
-        NewPopulation.PopulationDensity = EntityCount;
-        BiomePopulations.Add(NewPopulation);
-        BiomePopulation = &BiomePopulations.Last();
-    }
-    
-    // Spawn entities in this biome
-    SpawnCrowdEntities(BiomeCenter, EntityCount);
-    
-    UE_LOG(LogTemp, Log, TEXT("Crowd_MassSimulationManager: Populated biome %d with %d entities"), 
-           (int32)BiomeType, EntityCount);
-}
-
-void UCrowd_MassSimulationManager::UpdateBiomePopulations()
-{
-    for (FCrowd_BiomePopulation& Population : BiomePopulations)
-    {
-        // TODO: Implement biome-specific behavior updates
-        // For now, just maintain population counts
-    }
-}
-
-void UCrowd_MassSimulationManager::UpdateLODLevels()
-{
-    if (!GetWorld())
-    {
-        return;
-    }
-    
-    // Get player location for LOD calculations
-    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
-    if (!PlayerPawn)
-    {
-        return;
-    }
-    
-    FVector PlayerLocation = PlayerPawn->GetActorLocation();
-    
-    // TODO: Implement proper Mass Entity LOD system
-    // For now, use basic distance-based culling
-    ProcessLODUpdates();
-}
-
-void UCrowd_MassSimulationManager::CullDistantEntities()
-{
-    if (!GetWorld())
-    {
-        return;
-    }
-    
-    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
-    if (!PlayerPawn)
-    {
-        return;
-    }
-    
-    FVector PlayerLocation = PlayerPawn->GetActorLocation();
-    
-    // Find and cull distant crowd entities
-    TArray<AActor*> CrowdEntities;
-    UGameplayStatics::GetAllActorsWithTag(GetWorld(), FName("CrowdEntity"), CrowdEntities);
-    
-    int32 CulledCount = 0;
-    for (AActor* Entity : CrowdEntities)
-    {
-        if (Entity && FVector::Dist(Entity->GetActorLocation(), PlayerLocation) > CullDistance)
-        {
-            Entity->Destroy();
-            CulledCount++;
-            TotalActiveEntities--;
-        }
-    }
-    
-    if (CulledCount > 0)
-    {
-        UE_LOG(LogTemp, Log, TEXT("Crowd_MassSimulationManager: Culled %d distant entities"), CulledCount);
-    }
-}
-
-int32 UCrowd_MassSimulationManager::GetActiveEntityCount() const
-{
-    return TotalActiveEntities;
-}
-
-TArray<FVector> UCrowd_MassSimulationManager::GetEntityPositions() const
-{
-    TArray<FVector> Positions;
-    
-    if (UWorld* World = GetWorld())
-    {
-        TArray<AActor*> CrowdEntities;
-        UGameplayStatics::GetAllActorsWithTag(World, FName("CrowdEntity"), CrowdEntities);
-        
-        for (AActor* Entity : CrowdEntities)
-        {
-            if (Entity)
-            {
-                Positions.Add(Entity->GetActorLocation());
-            }
-        }
-    }
-    
-    return Positions;
-}
-
-void UCrowd_MassSimulationManager::DebugSpawnTestCrowd()
-{
-    if (UWorld* World = GetWorld())
-    {
-        FVector SpawnLocation = FVector(0.0f, 0.0f, 100.0f);
-        SpawnCrowdEntities(SpawnLocation, 50);
-        
-        UE_LOG(LogTemp, Warning, TEXT("Crowd_MassSimulationManager: DEBUG - Spawned test crowd of 50 entities"));
-    }
-}
-
-void UCrowd_MassSimulationManager::InitializeBiomePopulations()
-{
-    BiomePopulations.Empty();
-    
-    // Initialize biome population configurations
-    FCrowd_BiomePopulation SavannaPopulation;
-    SavannaPopulation.BiomeType = EBiomeType::Savanna;
-    SavannaPopulation.BiomeCenter = FVector(0.0f, 0.0f, 100.0f);
-    SavannaPopulation.PopulationDensity = 200;
-    BiomePopulations.Add(SavannaPopulation);
-    
-    FCrowd_BiomePopulation ForestPopulation;
-    ForestPopulation.BiomeType = EBiomeType::Forest;
-    ForestPopulation.BiomeCenter = FVector(-45000.0f, 40000.0f, 100.0f);
-    ForestPopulation.PopulationDensity = 150;
-    BiomePopulations.Add(ForestPopulation);
-    
-    FCrowd_BiomePopulation DesertPopulation;
-    DesertPopulation.BiomeType = EBiomeType::Desert;
-    DesertPopulation.BiomeCenter = FVector(55000.0f, 0.0f, 100.0f);
-    DesertPopulation.PopulationDensity = 100;
-    BiomePopulations.Add(DesertPopulation);
-    
-    FCrowd_BiomePopulation SwampPopulation;
-    SwampPopulation.BiomeType = EBiomeType::Swamp;
-    SwampPopulation.BiomeCenter = FVector(-50000.0f, -45000.0f, 100.0f);
-    SwampPopulation.PopulationDensity = 120;
-    BiomePopulations.Add(SwampPopulation);
-    
-    FCrowd_BiomePopulation MountainPopulation;
-    MountainPopulation.BiomeType = EBiomeType::Mountain;
-    MountainPopulation.BiomeCenter = FVector(40000.0f, 50000.0f, 100.0f);
-    MountainPopulation.PopulationDensity = 80;
-    BiomePopulations.Add(MountainPopulation);
-}
-
-void UCrowd_MassSimulationManager::UpdateEntityMovement(float DeltaTime)
-{
-    if (!GetWorld())
-    {
-        return;
-    }
-    
-    TArray<AActor*> CrowdEntities;
-    UGameplayStatics::GetAllActorsWithTag(GetWorld(), FName("CrowdEntity"), CrowdEntities);
-    
-    for (AActor* Entity : CrowdEntities)
-    {
-        if (Entity)
-        {
-            // Simple wandering behavior
-            FVector CurrentLocation = Entity->GetActorLocation();
-            FVector RandomDirection = FMath::VRand();
-            RandomDirection.Z = 0.0f; // Keep on ground
-            RandomDirection.Normalize();
-            
-            FVector NewLocation = CurrentLocation + (RandomDirection * EntityConfig.MovementSpeed * DeltaTime);
-            Entity->SetActorLocation(NewLocation);
-        }
-    }
-}
-
-void UCrowd_MassSimulationManager::ProcessLODUpdates()
-{
-    // TODO: Implement proper Mass Entity LOD processing
-    // This is a placeholder for the LOD system
-}
-
-FVector UCrowd_MassSimulationManager::GetRandomPositionInBiome(EBiomeType BiomeType) const
-{
-    switch (BiomeType)
-    {
-        case EBiomeType::Savanna:
-            return FVector(0.0f, 0.0f, 100.0f);
-        case EBiomeType::Forest:
-            return FVector(-45000.0f, 40000.0f, 100.0f);
-        case EBiomeType::Desert:
-            return FVector(55000.0f, 0.0f, 100.0f);
-        case EBiomeType::Swamp:
-            return FVector(-50000.0f, -45000.0f, 100.0f);
-        case EBiomeType::Mountain:
-            return FVector(40000.0f, 50000.0f, 100.0f);
-        default:
-            return FVector::ZeroVector;
-    }
-}
-
-bool UCrowd_MassSimulationManager::IsEntityInCullRange(const FVector& EntityPosition) const
-{
-    if (UWorld* World = GetWorld())
-    {
-        if (APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(World, 0))
-        {
-            float Distance = FVector::Dist(EntityPosition, PlayerPawn->GetActorLocation());
-            return Distance <= CullDistance;
-        }
-    }
-    return false;
+    return true;
 }
