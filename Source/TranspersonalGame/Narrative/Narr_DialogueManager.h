@@ -1,178 +1,162 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/GameInstanceSubsystem.h"
+#include "GameFramework/GameInstanceSubsystem.h"
 #include "Engine/DataTable.h"
-#include "SharedTypes.h"
+#include "Sound/SoundCue.h"
 #include "Narr_DialogueManager.generated.h"
+
+UENUM(BlueprintType)
+enum class ENarr_DialogueTrigger : uint8
+{
+    None = 0,
+    PlayerApproach = 1,
+    LowHealth = 2,
+    DinosaurNearby = 3,
+    FirstEncounter = 4,
+    QuestComplete = 5,
+    Survival_Hunger = 6,
+    Survival_Thirst = 7,
+    Combat_Warning = 8,
+    Discovery = 9
+};
+
+UENUM(BlueprintType)
+enum class ENarr_SpeakerType : uint8
+{
+    None = 0,
+    Narrator = 1,
+    TribalElder = 2,
+    Hunter = 3,
+    Scout = 4,
+    Shaman = 5,
+    PlayerThought = 6,
+    Warning = 7
+};
 
 USTRUCT(BlueprintType)
 struct TRANSPERSONALGAME_API FNarr_DialogueLine
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dialogue")
-    FString SpeakerName;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dialogue")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
     FString DialogueText;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dialogue")
-    FString AudioPath;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    ENarr_SpeakerType Speaker;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dialogue")
-    float Duration;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    ENarr_DialogueTrigger TriggerCondition;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dialogue")
-    TArray<FString> PlayerResponses;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float Priority;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bIsRepeatable;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float CooldownTime;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    TSoftObjectPtr<USoundCue> VoiceAudio;
 
     FNarr_DialogueLine()
     {
-        SpeakerName = TEXT("");
         DialogueText = TEXT("");
-        AudioPath = TEXT("");
-        Duration = 0.0f;
+        Speaker = ENarr_SpeakerType::None;
+        TriggerCondition = ENarr_DialogueTrigger::None;
+        Priority = 1.0f;
+        bIsRepeatable = true;
+        CooldownTime = 30.0f;
+        VoiceAudio = nullptr;
     }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FNarr_DialogueTree
+struct TRANSPERSONALGAME_API FNarr_DialogueContext
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dialogue")
-    FString TreeID;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float PlayerHealthPercent;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dialogue")
-    FString NPCName;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float PlayerHungerLevel;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dialogue")
-    TArray<FNarr_DialogueLine> DialogueLines;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float PlayerThirstLevel;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dialogue")
-    bool bIsQuestRelated;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bDinosaurNearby;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dialogue")
-    FString QuestID;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float DinosaurDistance;
 
-    FNarr_DialogueTree()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FString DinosaurType;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FString CurrentBiome;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float TimeOfDay;
+
+    FNarr_DialogueContext()
     {
-        TreeID = TEXT("");
-        NPCName = TEXT("");
-        bIsQuestRelated = false;
-        QuestID = TEXT("");
+        PlayerHealthPercent = 100.0f;
+        PlayerHungerLevel = 0.0f;
+        PlayerThirstLevel = 0.0f;
+        bDinosaurNearby = false;
+        DinosaurDistance = 0.0f;
+        DinosaurType = TEXT("");
+        CurrentBiome = TEXT("Savana");
+        TimeOfDay = 12.0f;
     }
 };
 
-UENUM(BlueprintType)
-enum class ENarr_NPCPersonality : uint8
-{
-    Wise_Elder      UMETA(DisplayName = "Wise Elder"),
-    Practical_Guide UMETA(DisplayName = "Practical Guide"),
-    Cautious_Scout  UMETA(DisplayName = "Cautious Scout"),
-    Bold_Hunter     UMETA(DisplayName = "Bold Hunter"),
-    Mystic_Reader   UMETA(DisplayName = "Mystic Reader")
-};
-
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FNarr_NPCProfile
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "NPC")
-    FString NPCName;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "NPC")
-    ENarr_NPCPersonality Personality;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "NPC")
-    FString BackgroundStory;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "NPC")
-    TArray<FString> SpecialKnowledge;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "NPC")
-    FVector HomeLocation;
-
-    FNarr_NPCProfile()
-    {
-        NPCName = TEXT("");
-        Personality = ENarr_NPCPersonality::Wise_Elder;
-        BackgroundStory = TEXT("");
-        HomeLocation = FVector::ZeroVector;
-    }
-};
-
-UCLASS()
+UCLASS(BlueprintType)
 class TRANSPERSONALGAME_API UNarr_DialogueManager : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
 public:
+    UNarr_DialogueManager();
+
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
-    virtual void Deinitialize() override;
 
-    // Core dialogue functions
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    bool StartDialogue(const FString& NPCName, class APawn* PlayerPawn);
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    void TriggerDialogue(ENarr_DialogueTrigger TriggerType, const FNarr_DialogueContext& Context);
 
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    void EndDialogue();
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    void RegisterDialogueLine(const FNarr_DialogueLine& DialogueLine);
 
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    bool IsInDialogue() const { return bIsDialogueActive; }
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    void PlayDialogue(const FNarr_DialogueLine& DialogueLine);
 
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    FNarr_DialogueLine GetCurrentDialogueLine() const;
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    bool CanPlayDialogue(const FNarr_DialogueLine& DialogueLine) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    void AdvanceDialogue(int32 ResponseIndex = 0);
-
-    // NPC management
-    UFUNCTION(BlueprintCallable, Category = "NPC")
-    void RegisterNPC(const FNarr_NPCProfile& NPCProfile);
-
-    UFUNCTION(BlueprintCallable, Category = "NPC")
-    FNarr_NPCProfile GetNPCProfile(const FString& NPCName) const;
-
-    UFUNCTION(BlueprintCallable, Category = "NPC")
-    TArray<FString> GetNearbyNPCs(const FVector& PlayerLocation, float SearchRadius = 1000.0f) const;
-
-    // Dialogue tree management
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    void LoadDialogueTree(const FNarr_DialogueTree& DialogueTree);
-
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    FNarr_DialogueTree GetDialogueTree(const FString& NPCName) const;
-
-    // Quest integration
-    UFUNCTION(BlueprintCallable, Category = "Quest")
-    void TriggerQuestDialogue(const FString& QuestID, const FString& NPCName);
-
-    UFUNCTION(BlueprintCallable, Category = "Quest")
-    bool HasQuestDialogue(const FString& QuestID) const;
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    void UpdateContext(const FNarr_DialogueContext& NewContext);
 
 protected:
-    UPROPERTY()
-    TMap<FString, FNarr_NPCProfile> RegisteredNPCs;
+    UPROPERTY(BlueprintReadOnly, Category = "Narrative")
+    TArray<FNarr_DialogueLine> DialogueDatabase;
 
-    UPROPERTY()
-    TMap<FString, FNarr_DialogueTree> DialogueTrees;
+    UPROPERTY(BlueprintReadOnly, Category = "Narrative")
+    FNarr_DialogueContext CurrentContext;
 
-    UPROPERTY()
-    bool bIsDialogueActive;
+    UPROPERTY(BlueprintReadOnly, Category = "Narrative")
+    TMap<FString, float> LastPlayedTimes;
 
-    UPROPERTY()
-    FString CurrentNPCName;
+    UFUNCTION(BlueprintImplementableEvent, Category = "Narrative")
+    void OnDialogueTriggered(const FNarr_DialogueLine& DialogueLine);
 
-    UPROPERTY()
-    int32 CurrentDialogueIndex;
-
-    UPROPERTY()
-    class APawn* CurrentPlayerPawn;
+    UFUNCTION(BlueprintImplementableEvent, Category = "Narrative")
+    void OnContextChanged(const FNarr_DialogueContext& NewContext);
 
 private:
-    void InitializeDefaultNPCs();
     void InitializeDefaultDialogues();
-    bool ValidateDialogueTree(const FNarr_DialogueTree& Tree) const;
+    bool EvaluateTriggerCondition(const FNarr_DialogueLine& DialogueLine, const FNarr_DialogueContext& Context) const;
+    FNarr_DialogueLine* FindBestDialogue(ENarr_DialogueTrigger TriggerType, const FNarr_DialogueContext& Context);
 };
