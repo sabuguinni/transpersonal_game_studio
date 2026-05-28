@@ -1,288 +1,358 @@
 #include "Perf_OptimizationManager.h"
-#include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "GameFramework/Actor.h"
-#include "Components/PrimitiveComponent.h"
+#include "Engine/Engine.h"
+#include "GameFramework/PlayerController.h"
+#include "GameFramework/Pawn.h"
+#include "Components/StaticMeshComponent.h"
+#include "Components/SkeletalMeshComponent.h"
 #include "HAL/PlatformFilemanager.h"
-#include "Misc/DateTime.h"
-#include "Engine/Console.h"
+#include "Kismet/GameplayStatics.h"
 
-APerf_OptimizationManager::APerf_OptimizationManager()
+UPerf_OptimizationManager::UPerf_OptimizationManager()
 {
-    PrimaryActorTick.bCanEverTick = true;
-    PrimaryActorTick.TickInterval = 0.1f; // 10 FPS for performance monitoring
+    PrimaryComponentTick.bCanEverTick = true;
+    PrimaryComponentTick.TickInterval = 0.1f; // Update 10 times per second
     
-    SetActorTickEnabled(true);
-    
-    // Initialize default settings
-    OptimizationSettings.TargetFrameRate = 60.0f;
-    OptimizationSettings.MinFrameRate = 30.0f;
-    OptimizationSettings.MaxPhysicsActors = 500;
-    OptimizationSettings.ViewDistanceScale = 1.0f;
-    OptimizationSettings.ShadowResolution = 2048;
-    OptimizationSettings.bEnableAutomaticOptimization = true;
-    
-    MetricsUpdateInterval = 1.0f;
-    bEnableDebugDisplay = true;
-    
-    FrameRateHistory.Reserve(MaxHistorySize);
+    LastUpdateTime = 0.0f;
+    FrameCounter = 0;
+    FPSHistory.Reserve(100); // Keep last 100 FPS samples
 }
 
-void APerf_OptimizationManager::BeginPlay()
+void UPerf_OptimizationManager::BeginPlay()
 {
     Super::BeginPlay();
     
-    UE_LOG(LogTemp, Log, TEXT("Performance Optimization Manager started"));
-    
-    // Apply initial optimization settings
+    // Initialize performance monitoring
+    LastUpdateTime = GetWorld()->GetTimeSeconds();
     ApplyOptimizationSettings();
     
-    // Start performance monitoring
-    UpdatePerformanceMetrics();
+    UE_LOG(LogTemp, Warning, TEXT("Performance Optimization Manager initialized"));
 }
 
-void APerf_OptimizationManager::Tick(float DeltaTime)
+void UPerf_OptimizationManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
-    Super::Tick(DeltaTime);
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
     
-    LastMetricsUpdate += DeltaTime;
+    FrameCounter++;
     
-    if (LastMetricsUpdate >= MetricsUpdateInterval)
+    // Update metrics every 0.5 seconds
+    float CurrentTime = GetWorld()->GetTimeSeconds();
+    if (CurrentTime - LastUpdateTime >= 0.5f)
     {
         UpdatePerformanceMetrics();
-        
-        if (OptimizationSettings.bEnableAutomaticOptimization)
-        {
-            ApplyAutomaticOptimizations();
-        }
-        
-        if (bEnableDebugDisplay)
-        {
-            DisplayDebugInfo();
-        }
-        
-        LastMetricsUpdate = 0.0f;
+        CheckPerformanceThresholds();
+        LastUpdateTime = CurrentTime;
     }
 }
 
-void APerf_OptimizationManager::UpdatePerformanceMetrics()
+void UPerf_OptimizationManager::UpdatePerformanceMetrics()
 {
     if (!GetWorld())
     {
         return;
     }
+
+    // Calculate current FPS
+    float DeltaTime = GetWorld()->GetDeltaSeconds();
+    CurrentMetrics.CurrentFPS = DeltaTime > 0.0f ? 1.0f / DeltaTime : 0.0f;
     
-    // Calculate frame rate metrics
-    CalculateFrameRateMetrics();
-    
-    // Count physics actors
-    CountPhysicsActors();
-    
-    // Update memory metrics
-    UpdateMemoryMetrics();
-    
-    // Count total actors
+    // Add to history and calculate average
+    FPSHistory.Add(CurrentMetrics.CurrentFPS);
+    if (FPSHistory.Num() > 100)
+    {
+        FPSHistory.RemoveAt(0);
+    }
+    CalculateAverageFPS();
+
+    // Count actors
     TArray<AActor*> AllActors;
     UGameplayStatics::GetAllActorsOfClass(GetWorld(), AActor::StaticClass(), AllActors);
-    CurrentMetrics.TotalActorCount = AllActors.Num();
-}
+    CurrentMetrics.ActiveActorCount = AllActors.Num();
 
-void APerf_OptimizationManager::CalculateFrameRateMetrics()
-{
-    if (GEngine && GEngine->GetGameViewport())
-    {
-        float CurrentFPS = 1.0f / GetWorld()->GetDeltaSeconds();
-        CurrentMetrics.CurrentFPS = CurrentFPS;
-        
-        // Add to history
-        FrameRateHistory.Add(CurrentFPS);
-        if (FrameRateHistory.Num() > MaxHistorySize)
-        {
-            FrameRateHistory.RemoveAt(0);
-        }
-        
-        // Calculate average
-        if (FrameRateHistory.Num() > 0)
-        {
-            float Total = 0.0f;
-            for (float FPS : FrameRateHistory)
-            {
-                Total += FPS;
-            }
-            CurrentMetrics.AverageFPS = Total / FrameRateHistory.Num();
-        }
-    }
-}
-
-void APerf_OptimizationManager::CountPhysicsActors()
-{
-    if (!GetWorld())
-    {
-        return;
-    }
-    
+    // Count physics actors
     int32 PhysicsCount = 0;
-    
-    for (TActorIterator<AActor> ActorItr(GetWorld()); ActorItr; ++ActorItr)
+    for (AActor* Actor : AllActors)
     {
-        AActor* Actor = *ActorItr;
-        if (Actor && Actor->GetRootComponent())
+        if (Actor)
         {
-            UPrimitiveComponent* PrimComp = Cast<UPrimitiveComponent>(Actor->GetRootComponent());
-            if (PrimComp && PrimComp->IsSimulatingPhysics())
+            UStaticMeshComponent* StaticMesh = Actor->FindComponentByClass<UStaticMeshComponent>();
+            if (StaticMesh && StaticMesh->IsSimulatingPhysics())
             {
                 PhysicsCount++;
             }
         }
     }
     
-    CurrentMetrics.ActivePhysicsActors = PhysicsCount;
+    CurrentMetrics.PhysicsActorCount = PhysicsCount;
+    CurrentMetrics.PhysicsActorRatio = CurrentMetrics.ActiveActorCount > 0 ? 
+        (float)PhysicsCount / (float)CurrentMetrics.ActiveActorCount * 100.0f : 0.0f;
+
+    // Memory usage (approximate)
+    CurrentMetrics.MemoryUsageMB = FPlatformMemory::GetStats().UsedPhysical / (1024.0f * 1024.0f);
 }
 
-void APerf_OptimizationManager::UpdateMemoryMetrics()
-{
-    // Get memory stats
-    FPlatformMemoryStats MemStats = FPlatformMemory::GetStats();
-    CurrentMetrics.MemoryUsageMB = MemStats.UsedPhysical / (1024.0f * 1024.0f);
-    
-    // GPU memory is harder to get, approximate
-    CurrentMetrics.GPUMemoryUsageMB = CurrentMetrics.MemoryUsageMB * 0.3f; // Rough estimate
-}
-
-void APerf_OptimizationManager::ApplyOptimizationSettings()
+void UPerf_OptimizationManager::OptimizeScene()
 {
     if (!GetWorld())
     {
         return;
     }
-    
-    UConsole* Console = GEngine->GetGameViewport()->ViewportConsole;
-    if (Console)
-    {
-        // Apply view distance scaling
-        FString ViewDistanceCmd = FString::Printf(TEXT("r.ViewDistanceScale %f"), OptimizationSettings.ViewDistanceScale);
-        Console->ConsoleCommand(*ViewDistanceCmd);
-        
-        // Apply shadow resolution
-        FString ShadowCmd = FString::Printf(TEXT("r.Shadow.MaxResolution %d"), OptimizationSettings.ShadowResolution);
-        Console->ConsoleCommand(*ShadowCmd);
-        
-        // Apply frame rate target
-        FString FrameRateCmd = FString::Printf(TEXT("t.MaxFPS %f"), OptimizationSettings.TargetFrameRate);
-        Console->ConsoleCommand(*FrameRateCmd);
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("Applied optimization settings: ViewDistance=%.2f, ShadowRes=%d, TargetFPS=%.1f"),
-        OptimizationSettings.ViewDistanceScale, OptimizationSettings.ShadowResolution, OptimizationSettings.TargetFrameRate);
-}
 
-void APerf_OptimizationManager::SetTargetFrameRate(float NewTargetFPS)
-{
-    OptimizationSettings.TargetFrameRate = FMath::Clamp(NewTargetFPS, 30.0f, 120.0f);
-    ApplyOptimizationSettings();
-}
+    UE_LOG(LogTemp, Warning, TEXT("Running scene optimization..."));
 
-void APerf_OptimizationManager::EnableAutomaticOptimization(bool bEnable)
-{
-    OptimizationSettings.bEnableAutomaticOptimization = bEnable;
-    UE_LOG(LogTemp, Log, TEXT("Automatic optimization %s"), bEnable ? TEXT("enabled") : TEXT("disabled"));
-}
-
-void APerf_OptimizationManager::OptimizePhysicsActors()
-{
-    if (!GetWorld())
-    {
-        return;
-    }
+    // Cull distant actors
+    CullDistantActors();
     
-    if (CurrentMetrics.ActivePhysicsActors > OptimizationSettings.MaxPhysicsActors)
+    // Optimize physics actors
+    OptimizePhysicsActors();
+    
+    // Apply LOD optimizations
+    if (OptimizationSettings.bEnableAutoLOD)
     {
-        int32 ActorsToDisable = CurrentMetrics.ActivePhysicsActors - OptimizationSettings.MaxPhysicsActors;
-        int32 DisabledCount = 0;
-        
-        for (TActorIterator<AActor> ActorItr(GetWorld()); ActorItr && DisabledCount < ActorsToDisable; ++ActorItr)
+        APlayerController* PC = GetWorld()->GetFirstPlayerController();
+        if (PC && PC->GetPawn())
         {
-            AActor* Actor = *ActorItr;
-            if (Actor && Actor->GetRootComponent())
+            FVector PlayerLocation = PC->GetPawn()->GetActorLocation();
+            TArray<AActor*> AllActors;
+            UGameplayStatics::GetAllActorsOfClass(GetWorld(), AActor::StaticClass(), AllActors);
+            
+            for (AActor* Actor : AllActors)
             {
-                UPrimitiveComponent* PrimComp = Cast<UPrimitiveComponent>(Actor->GetRootComponent());
-                if (PrimComp && PrimComp->IsSimulatingPhysics())
+                if (Actor && Actor != PC->GetPawn())
                 {
-                    // Disable physics for distant or less important actors
-                    FVector PlayerLocation = GetWorld()->GetFirstPlayerController()->GetPawn()->GetActorLocation();
-                    float Distance = FVector::Dist(Actor->GetActorLocation(), PlayerLocation);
-                    
-                    if (Distance > 5000.0f) // 50 meters
-                    {
-                        PrimComp->SetSimulatePhysics(false);
-                        DisabledCount++;
-                    }
+                    float Distance = FVector::Dist(PlayerLocation, Actor->GetActorLocation());
+                    OptimizeActorLOD(Actor, Distance);
                 }
             }
         }
-        
-        UE_LOG(LogTemp, Log, TEXT("Optimized physics: disabled %d actors"), DisabledCount);
     }
+
+    UE_LOG(LogTemp, Warning, TEXT("Scene optimization complete"));
 }
 
-void APerf_OptimizationManager::OptimizeRenderingSettings()
+void UPerf_OptimizationManager::SetOptimizationLevel(EPerf_OptimizationLevel NewLevel)
 {
-    if (CurrentMetrics.CurrentFPS < OptimizationSettings.MinFrameRate)
+    OptimizationSettings.OptimizationLevel = NewLevel;
+    
+    // Adjust settings based on optimization level
+    switch (NewLevel)
     {
-        // Reduce quality settings
-        OptimizationSettings.ViewDistanceScale = FMath::Max(0.5f, OptimizationSettings.ViewDistanceScale - 0.1f);
-        OptimizationSettings.ShadowResolution = FMath::Max(512, OptimizationSettings.ShadowResolution - 256);
-        
-        ApplyOptimizationSettings();
-        
-        UE_LOG(LogTemp, Log, TEXT("Applied emergency optimization: ViewDistance=%.2f, ShadowRes=%d"),
-            OptimizationSettings.ViewDistanceScale, OptimizationSettings.ShadowResolution);
+        case EPerf_OptimizationLevel::Low:
+            OptimizationSettings.MaxActiveActors = 500;
+            OptimizationSettings.CullingDistance = 5000.0f;
+            OptimizationSettings.MaxPhysicsActorRatio = 5.0f;
+            break;
+        case EPerf_OptimizationLevel::Medium:
+            OptimizationSettings.MaxActiveActors = 1500;
+            OptimizationSettings.CullingDistance = 8000.0f;
+            OptimizationSettings.MaxPhysicsActorRatio = 10.0f;
+            break;
+        case EPerf_OptimizationLevel::High:
+            OptimizationSettings.MaxActiveActors = 3000;
+            OptimizationSettings.CullingDistance = 12000.0f;
+            OptimizationSettings.MaxPhysicsActorRatio = 15.0f;
+            break;
+        case EPerf_OptimizationLevel::Ultra:
+            OptimizationSettings.MaxActiveActors = 5000;
+            OptimizationSettings.CullingDistance = 20000.0f;
+            OptimizationSettings.MaxPhysicsActorRatio = 20.0f;
+            break;
     }
-}
-
-void APerf_OptimizationManager::ResetToDefaultSettings()
-{
-    OptimizationSettings.TargetFrameRate = 60.0f;
-    OptimizationSettings.MinFrameRate = 30.0f;
-    OptimizationSettings.MaxPhysicsActors = 500;
-    OptimizationSettings.ViewDistanceScale = 1.0f;
-    OptimizationSettings.ShadowResolution = 2048;
-    OptimizationSettings.bEnableAutomaticOptimization = true;
     
     ApplyOptimizationSettings();
-    
-    UE_LOG(LogTemp, Log, TEXT("Reset to default optimization settings"));
+    UE_LOG(LogTemp, Warning, TEXT("Optimization level set to: %d"), (int32)NewLevel);
 }
 
-void APerf_OptimizationManager::ApplyAutomaticOptimizations()
+bool UPerf_OptimizationManager::IsPerformanceAcceptable() const
 {
-    // Check if frame rate is below minimum
-    if (CurrentMetrics.CurrentFPS < OptimizationSettings.MinFrameRate)
+    // Check if performance meets minimum requirements
+    bool bFPSAcceptable = CurrentMetrics.AverageFPS >= 30.0f; // Minimum 30 FPS
+    bool bActorCountAcceptable = CurrentMetrics.ActiveActorCount <= OptimizationSettings.MaxActiveActors;
+    bool bPhysicsRatioAcceptable = CurrentMetrics.PhysicsActorRatio <= OptimizationSettings.MaxPhysicsActorRatio;
+    
+    return bFPSAcceptable && bActorCountAcceptable && bPhysicsRatioAcceptable;
+}
+
+void UPerf_OptimizationManager::CullDistantActors()
+{
+    if (!GetWorld())
     {
-        OptimizeRenderingSettings();
-        OptimizePhysicsActors();
+        return;
+    }
+
+    APlayerController* PC = GetWorld()->GetFirstPlayerController();
+    if (!PC || !PC->GetPawn())
+    {
+        return;
+    }
+
+    FVector PlayerLocation = PC->GetPawn()->GetActorLocation();
+    TArray<AActor*> AllActors;
+    UGameplayStatics::GetAllActorsOfClass(GetWorld(), AActor::StaticClass(), AllActors);
+    
+    int32 CulledCount = 0;
+    for (AActor* Actor : AllActors)
+    {
+        if (Actor && Actor != PC->GetPawn())
+        {
+            float Distance = FVector::Dist(PlayerLocation, Actor->GetActorLocation());
+            if (Distance > OptimizationSettings.CullingDistance)
+            {
+                Actor->SetActorHiddenInGame(true);
+                Actor->SetActorEnableCollision(false);
+                CulledCount++;
+            }
+            else
+            {
+                Actor->SetActorHiddenInGame(false);
+                Actor->SetActorEnableCollision(true);
+            }
+        }
     }
     
-    // Check if too many physics actors
-    if (CurrentMetrics.ActivePhysicsActors > OptimizationSettings.MaxPhysicsActors)
+    UE_LOG(LogTemp, Warning, TEXT("Culled %d distant actors"), CulledCount);
+}
+
+void UPerf_OptimizationManager::OptimizePhysicsActors()
+{
+    if (!GetWorld())
     {
-        OptimizePhysicsActors();
+        return;
+    }
+
+    TArray<AActor*> AllActors;
+    UGameplayStatics::GetAllActorsOfClass(GetWorld(), AActor::StaticClass(), AllActors);
+    
+    int32 OptimizedCount = 0;
+    for (AActor* Actor : AllActors)
+    {
+        if (Actor)
+        {
+            UStaticMeshComponent* StaticMesh = Actor->FindComponentByClass<UStaticMeshComponent>();
+            if (StaticMesh && StaticMesh->IsSimulatingPhysics())
+            {
+                // Optimize physics settings for performance
+                StaticMesh->SetNotifyRigidBodyCollision(false);
+                StaticMesh->SetGenerateOverlapEvents(false);
+                OptimizedCount++;
+            }
+        }
+    }
+    
+    UE_LOG(LogTemp, Warning, TEXT("Optimized %d physics actors"), OptimizedCount);
+}
+
+void UPerf_OptimizationManager::RunPerformanceAnalysis()
+{
+    UE_LOG(LogTemp, Warning, TEXT("=== PERFORMANCE ANALYSIS ==="));
+    UE_LOG(LogTemp, Warning, TEXT("Current FPS: %.1f"), CurrentMetrics.CurrentFPS);
+    UE_LOG(LogTemp, Warning, TEXT("Average FPS: %.1f"), CurrentMetrics.AverageFPS);
+    UE_LOG(LogTemp, Warning, TEXT("Active Actors: %d"), CurrentMetrics.ActiveActorCount);
+    UE_LOG(LogTemp, Warning, TEXT("Physics Actors: %d (%.1f%%)"), CurrentMetrics.PhysicsActorCount, CurrentMetrics.PhysicsActorRatio);
+    UE_LOG(LogTemp, Warning, TEXT("Memory Usage: %.1f MB"), CurrentMetrics.MemoryUsageMB);
+    UE_LOG(LogTemp, Warning, TEXT("Performance Acceptable: %s"), IsPerformanceAcceptable() ? TEXT("YES") : TEXT("NO"));
+    UE_LOG(LogTemp, Warning, TEXT("============================"));
+}
+
+void UPerf_OptimizationManager::CalculateAverageFPS()
+{
+    if (FPSHistory.Num() == 0)
+    {
+        CurrentMetrics.AverageFPS = 0.0f;
+        return;
+    }
+
+    float Sum = 0.0f;
+    for (float FPS : FPSHistory)
+    {
+        Sum += FPS;
+    }
+    CurrentMetrics.AverageFPS = Sum / FPSHistory.Num();
+}
+
+void UPerf_OptimizationManager::CheckPerformanceThresholds()
+{
+    if (!IsPerformanceAcceptable())
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Performance below threshold - triggering optimization"));
+        OptimizeScene();
     }
 }
 
-void APerf_OptimizationManager::DisplayDebugInfo()
+void UPerf_OptimizationManager::ApplyOptimizationSettings()
 {
+    // Apply console commands for performance
     if (GEngine)
     {
-        FString DebugText = FString::Printf(
-            TEXT("Performance Monitor | FPS: %.1f (Avg: %.1f) | Physics Actors: %d | Total Actors: %d | Memory: %.1f MB"),
-            CurrentMetrics.CurrentFPS,
-            CurrentMetrics.AverageFPS,
-            CurrentMetrics.ActivePhysicsActors,
-            CurrentMetrics.TotalActorCount,
-            CurrentMetrics.MemoryUsageMB
-        );
-        
-        GEngine->AddOnScreenDebugMessage(-1, 0.1f, FColor::Green, DebugText);
+        switch (OptimizationSettings.OptimizationLevel)
+        {
+            case EPerf_OptimizationLevel::Low:
+                GEngine->Exec(GetWorld(), TEXT("r.ViewDistanceScale 0.5"));
+                GEngine->Exec(GetWorld(), TEXT("r.ShadowQuality 1"));
+                break;
+            case EPerf_OptimizationLevel::Medium:
+                GEngine->Exec(GetWorld(), TEXT("r.ViewDistanceScale 0.75"));
+                GEngine->Exec(GetWorld(), TEXT("r.ShadowQuality 2"));
+                break;
+            case EPerf_OptimizationLevel::High:
+                GEngine->Exec(GetWorld(), TEXT("r.ViewDistanceScale 1.0"));
+                GEngine->Exec(GetWorld(), TEXT("r.ShadowQuality 3"));
+                break;
+            case EPerf_OptimizationLevel::Ultra:
+                GEngine->Exec(GetWorld(), TEXT("r.ViewDistanceScale 1.25"));
+                GEngine->Exec(GetWorld(), TEXT("r.ShadowQuality 4"));
+                break;
+        }
+    }
+}
+
+TArray<AActor*> UPerf_OptimizationManager::GetActorsInRadius(FVector Center, float Radius)
+{
+    TArray<AActor*> ActorsInRadius;
+    TArray<AActor*> AllActors;
+    UGameplayStatics::GetAllActorsOfClass(GetWorld(), AActor::StaticClass(), AllActors);
+    
+    for (AActor* Actor : AllActors)
+    {
+        if (Actor)
+        {
+            float Distance = FVector::Dist(Center, Actor->GetActorLocation());
+            if (Distance <= Radius)
+            {
+                ActorsInRadius.Add(Actor);
+            }
+        }
+    }
+    
+    return ActorsInRadius;
+}
+
+void UPerf_OptimizationManager::OptimizeActorLOD(AActor* Actor, float Distance)
+{
+    if (!Actor)
+    {
+        return;
+    }
+
+    // Simple distance-based LOD optimization
+    UStaticMeshComponent* StaticMesh = Actor->FindComponentByClass<UStaticMeshComponent>();
+    if (StaticMesh)
+    {
+        if (Distance > 5000.0f)
+        {
+            StaticMesh->SetForcedLodModel(3); // Lowest LOD
+        }
+        else if (Distance > 2000.0f)
+        {
+            StaticMesh->SetForcedLodModel(2); // Medium LOD
+        }
+        else if (Distance > 1000.0f)
+        {
+            StaticMesh->SetForcedLodModel(1); // High LOD
+        }
+        else
+        {
+            StaticMesh->SetForcedLodModel(0); // Highest LOD
+        }
     }
 }
