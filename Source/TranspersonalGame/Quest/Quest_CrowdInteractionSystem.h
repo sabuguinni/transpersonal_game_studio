@@ -1,159 +1,121 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Components/ActorComponent.h"
-#include "Engine/TriggerVolume.h"
-#include "Engine/World.h"
 #include "GameFramework/Actor.h"
-#include "Components/StaticMeshComponent.h"
+#include "Engine/World.h"
+#include "Components/ActorComponent.h"
 #include "SharedTypes.h"
 #include "Quest_CrowdInteractionSystem.generated.h"
 
+UENUM(BlueprintType)
+enum class EQuest_CrowdMissionType : uint8
+{
+    HerdProtection,
+    MigrationGuide,
+    PredatorDistraction,
+    ResourceGathering,
+    TerritoryDefense
+};
+
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FQuest_CrowdInteractionData
+struct FQuest_CrowdObjective
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Interaction")
-    FString InteractionType;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    FString ObjectiveName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Interaction")
-    int32 RequiredCrowdSize;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    EQuest_CrowdMissionType MissionType;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Interaction")
-    float InteractionRadius;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    int32 TargetCrowdSize;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Interaction")
-    bool bIsCompleted;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Interaction")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
     FVector TargetLocation;
 
-    FQuest_CrowdInteractionData()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    float CompletionRadius;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    float TimeLimit;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    bool bIsCompleted;
+
+    FQuest_CrowdObjective()
     {
-        InteractionType = TEXT("Observe");
-        RequiredCrowdSize = 5;
-        InteractionRadius = 1000.0f;
-        bIsCompleted = false;
+        ObjectiveName = TEXT("Default Objective");
+        MissionType = EQuest_CrowdMissionType::HerdProtection;
+        TargetCrowdSize = 10;
         TargetLocation = FVector::ZeroVector;
+        CompletionRadius = 2000.0f;
+        TimeLimit = 300.0f;
+        bIsCompleted = false;
     }
 };
 
-UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UQuest_CrowdInteractionSystem : public UActorComponent
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API AQuest_CrowdInteractionSystem : public AActor
 {
     GENERATED_BODY()
 
 public:
-    UQuest_CrowdInteractionSystem();
+    AQuest_CrowdInteractionSystem();
 
 protected:
     virtual void BeginPlay() override;
 
-public:
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest System")
+    TArray<FQuest_CrowdObjective> ActiveObjectives;
 
-    // Core crowd interaction functionality
-    UFUNCTION(BlueprintCallable, Category = "Quest Crowd Interaction")
-    void InitializeCrowdQuest(const FString& QuestType, int32 CrowdSize, const FVector& Location);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest System")
+    int32 MaxSimultaneousObjectives;
 
-    UFUNCTION(BlueprintCallable, Category = "Quest Crowd Interaction")
-    bool CheckCrowdInteraction(const FVector& PlayerLocation);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest System")
+    float ObjectiveCheckInterval;
 
-    UFUNCTION(BlueprintCallable, Category = "Quest Crowd Interaction")
-    void CompleteCrowdInteraction();
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest System")
+    bool bSystemEnabled;
 
-    UFUNCTION(BlueprintCallable, Category = "Quest Crowd Interaction")
-    void UpdateCrowdObjective(const FString& NewObjective);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest System")
+    FVector PlayerLastKnownPosition;
 
-    // Crowd behavior analysis
-    UFUNCTION(BlueprintCallable, Category = "Quest Crowd Interaction")
-    int32 CountNearbyDinosaurs(const FVector& Location, float Radius);
-
-    UFUNCTION(BlueprintCallable, Category = "Quest Crowd Interaction")
-    bool ValidateHerdBehavior(const FVector& HerdCenter);
-
-    UFUNCTION(BlueprintCallable, Category = "Quest Crowd Interaction")
-    void TrackMigrationPattern(const FVector& StartPoint, const FVector& EndPoint);
-
-    // Quest progression
-    UFUNCTION(BlueprintCallable, Category = "Quest Crowd Interaction")
-    float GetInteractionProgress() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Quest Crowd Interaction")
-    FString GetCurrentObjective() const;
-
-protected:
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Data")
-    FQuest_CrowdInteractionData InteractionData;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Settings")
-    float DetectionRadius;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Settings")
-    float CompletionThreshold;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Progress")
-    float CurrentProgress;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Progress")
-    FString CurrentObjective;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Progress")
-    bool bQuestActive;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Tracking")
-    TArray<AActor*> TrackedCrowdActors;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Tracking")
-    FVector LastKnownHerdLocation;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Tracking")
-    float InteractionTimer;
-
-private:
-    void UpdateQuestProgress(float DeltaTime);
-    void CheckProximityToHerd();
-    void AnalyzeCrowdBehavior();
-    bool ValidateQuestCompletion();
-};
-
-UCLASS()
-class TRANSPERSONALGAME_API AQuest_CrowdInteractionMarker : public AActor
-{
-    GENERATED_BODY()
+    FTimerHandle ObjectiveUpdateTimer;
 
 public:
-    AQuest_CrowdInteractionMarker();
+    virtual void Tick(float DeltaTime) override;
 
-protected:
-    virtual void BeginPlay() override;
+    UFUNCTION(BlueprintCallable, Category = "Quest System")
+    void StartCrowdMission(EQuest_CrowdMissionType MissionType, FVector TargetLocation, int32 CrowdSize = 20);
 
-public:
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    UStaticMeshComponent* MarkerMesh;
+    UFUNCTION(BlueprintCallable, Category = "Quest System")
+    void CompleteObjective(int32 ObjectiveIndex);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Marker")
-    FString QuestTitle;
+    UFUNCTION(BlueprintCallable, Category = "Quest System")
+    bool CheckObjectiveCompletion(const FQuest_CrowdObjective& Objective);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Marker")
-    FString QuestDescription;
+    UFUNCTION(BlueprintCallable, Category = "Quest System")
+    void UpdateObjectiveProgress();
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Marker")
-    EBiomeType TargetBiome;
+    UFUNCTION(BlueprintCallable, Category = "Quest System")
+    TArray<AActor*> GetCrowdActorsInRadius(FVector Center, float Radius);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Marker")
-    bool bIsActive;
+    UFUNCTION(BlueprintCallable, Category = "Quest System")
+    void CreateHerdProtectionMission();
 
-    UFUNCTION(BlueprintCallable, Category = "Quest Marker")
-    void ActivateQuestMarker();
+    UFUNCTION(BlueprintCallable, Category = "Quest System")
+    void CreateMigrationGuideMission();
 
-    UFUNCTION(BlueprintCallable, Category = "Quest Marker")
-    void DeactivateQuestMarker();
+    UFUNCTION(BlueprintCallable, Category = "Quest System")
+    void CreatePredatorDistractionMission();
 
-    UFUNCTION(BlueprintImplementableEvent, Category = "Quest Events")
-    void OnQuestActivated();
+    UFUNCTION(BlueprintCallable, Category = "Quest System")
+    int32 GetActiveMissionCount() const;
 
-    UFUNCTION(BlueprintImplementableEvent, Category = "Quest Events")
-    void OnQuestCompleted();
+    UFUNCTION(BlueprintCallable, Category = "Quest System")
+    void ClearAllObjectives();
+
+    UFUNCTION(BlueprintCallable, Category = "Quest System")
+    FString GetMissionStatusReport();
 };
