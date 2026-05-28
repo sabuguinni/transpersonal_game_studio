@@ -4,81 +4,59 @@
 #include "Components/ActorComponent.h"
 #include "Engine/Engine.h"
 #include "Components/StaticMeshComponent.h"
+#include "Components/PrimitiveComponent.h"
+#include "Engine/World.h"
+#include "TimerManager.h"
 #include "Core_DestructionSystem.generated.h"
 
-DECLARE_LOG_CATEGORY_EXTERN(LogDestructionSystem, Log, All);
-
-/**
- * Destruction Types for different destruction scenarios
- */
 UENUM(BlueprintType)
 enum class ECore_DestructionType : uint8
 {
-    None            UMETA(DisplayName = "No Destruction"),
-    Simple          UMETA(DisplayName = "Simple Break"),
-    Shatter         UMETA(DisplayName = "Shatter Into Pieces"),
-    Crumble         UMETA(DisplayName = "Crumble Down"),
-    Explode         UMETA(DisplayName = "Explosive Destruction"),
-    Burn            UMETA(DisplayName = "Fire Destruction")
+    None            UMETA(DisplayName = "None"),
+    Fracture        UMETA(DisplayName = "Fracture"),
+    Shatter         UMETA(DisplayName = "Shatter"),
+    Crumble         UMETA(DisplayName = "Crumble"),
+    Explode         UMETA(DisplayName = "Explode"),
+    Burn            UMETA(DisplayName = "Burn")
 };
 
-/**
- * Destruction Material Types
- */
-UENUM(BlueprintType)
-enum class ECore_MaterialType : uint8
-{
-    Wood            UMETA(DisplayName = "Wood"),
-    Stone           UMETA(DisplayName = "Stone"),
-    Metal           UMETA(DisplayName = "Metal"),
-    Glass           UMETA(DisplayName = "Glass"),
-    Bone            UMETA(DisplayName = "Bone"),
-    Flesh           UMETA(DisplayName = "Flesh"),
-    Ice             UMETA(DisplayName = "Ice"),
-    Crystal         UMETA(DisplayName = "Crystal")
-};
-
-/**
- * Destruction Event Data
- */
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FCore_DestructionEvent
+struct FCore_DestructionSettings
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Destruction")
-    ECore_DestructionType DestructionType;
+    ECore_DestructionType DestructionType = ECore_DestructionType::Fracture;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Destruction", meta = (ClampMin = "0.0", ClampMax = "10000.0"))
+    float DestructionThreshold = 500.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Destruction", meta = (ClampMin = "1", ClampMax = "50"))
+    int32 FragmentCount = 8;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Destruction", meta = (ClampMin = "0.0", ClampMax = "1000.0"))
+    float FragmentLifetime = 10.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Destruction")
-    FVector ImpactLocation;
+    bool bCreateDebris = true;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Destruction")
-    FVector ImpactDirection;
+    bool bApplyImpulseToFragments = true;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Destruction")
-    float ImpactForce;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Destruction")
-    AActor* InstigatorActor;
-
-    FCore_DestructionEvent()
+    FCore_DestructionSettings()
     {
-        DestructionType = ECore_DestructionType::None;
-        ImpactLocation = FVector::ZeroVector;
-        ImpactDirection = FVector::ForwardVector;
-        ImpactForce = 0.0f;
-        InstigatorActor = nullptr;
+        DestructionType = ECore_DestructionType::Fracture;
+        DestructionThreshold = 500.0f;
+        FragmentCount = 8;
+        FragmentLifetime = 10.0f;
+        bCreateDebris = true;
+        bApplyImpulseToFragments = true;
     }
 };
 
-/**
- * Core Destruction System Component
- * 
- * Handles realistic destruction of objects in the prehistoric world.
- * Supports different material types and destruction patterns.
- * Integrates with physics system for realistic debris behavior.
- */
-UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FCore_OnDestruction, AActor*, DestroyedActor, const FVector&, ImpactLocation);
+
+UCLASS(ClassGroup=(TranspersonalGame), meta=(BlueprintSpawnableComponent))
 class TRANSPERSONALGAME_API UCore_DestructionSystem : public UActorComponent
 {
     GENERATED_BODY()
@@ -88,101 +66,62 @@ public:
 
 protected:
     virtual void BeginPlay() override;
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 public:
-    // Destruction Properties
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+
+    // Destruction Settings
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Destruction Settings")
-    ECore_MaterialType MaterialType;
+    FCore_DestructionSettings DestructionSettings;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Destruction Settings")
-    float DestructionThreshold;
+    // Health and Damage
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Health", meta = (ClampMin = "0.0", ClampMax = "10000.0"))
+    float MaxHealth = 1000.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Destruction Settings")
-    float MaxHealth;
+    UPROPERTY(BlueprintReadOnly, Category = "Health")
+    float CurrentHealth = 1000.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Destruction Settings")
-    float CurrentHealth;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Health")
+    bool bCanBeDestroyed = true;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Destruction Settings")
-    bool bCanBeDestroyed;
+    // Events
+    UPROPERTY(BlueprintAssignable, Category = "Events")
+    FCore_OnDestruction OnDestruction;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Destruction Settings")
-    bool bCreateDebris;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Destruction Settings")
-    int32 MaxDebrisCount;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Destruction Settings")
-    float DebrisLifetime;
-
-    // Destruction Meshes
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Destruction Meshes")
-    TArray<UStaticMesh*> DebrisMeshes;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Destruction Meshes")
-    UStaticMesh* DestroyedMesh;
-
-    // Physics Settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
-    float DebrisMass;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
-    float DebrisBounciness;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
-    float DebrisFriction;
-
-    // Sound and Effects
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    class USoundBase* DestructionSound;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Effects")
-    class UParticleSystem* DestructionEffect;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Effects")
-    class UNiagaraSystem* DestructionNiagara;
-
-    // Destruction Functions
+    // Main Functions
     UFUNCTION(BlueprintCallable, Category = "Destruction")
-    void TakeDamage(float DamageAmount, const FVector& ImpactLocation, const FVector& ImpactDirection, AActor* DamageCauser);
+    void ApplyDamage(float DamageAmount, const FVector& ImpactLocation, const FVector& ImpactDirection);
 
     UFUNCTION(BlueprintCallable, Category = "Destruction")
-    void DestroyObject(const FCore_DestructionEvent& DestructionEvent);
+    void TriggerDestruction(const FVector& ImpactLocation, const FVector& ImpactDirection);
 
     UFUNCTION(BlueprintCallable, Category = "Destruction")
-    void CreateDebris(const FVector& ImpactLocation, const FVector& ImpactDirection, float ImpactForce);
+    void CreateFragments(const FVector& ImpactLocation, const FVector& ImpactDirection);
 
     UFUNCTION(BlueprintCallable, Category = "Destruction")
-    void PlayDestructionEffects(const FVector& Location);
+    void SetDestructionSettings(const FCore_DestructionSettings& NewSettings);
 
-    // Utility Functions
     UFUNCTION(BlueprintPure, Category = "Destruction")
     float GetHealthPercentage() const;
 
     UFUNCTION(BlueprintPure, Category = "Destruction")
     bool IsDestroyed() const;
 
-    UFUNCTION(BlueprintPure, Category = "Destruction")
-    bool CanTakeDamage() const;
-
-    // Material-specific destruction patterns
-    UFUNCTION(BlueprintCallable, Category = "Destruction")
-    void ApplyMaterialSpecificDestruction(ECore_MaterialType Material, const FCore_DestructionEvent& Event);
-
-protected:
-    // Internal Functions
-    void InitializeDestructionSystem();
-    void CleanupDebris();
-    FVector CalculateDebrisVelocity(const FVector& ImpactDirection, float Force) const;
-    void SpawnDebrisActor(const FVector& Location, const FVector& Velocity, UStaticMesh* DebrisMesh);
+    // Collision Response
+    UFUNCTION()
+    void OnHit(UPrimitiveComponent* HitComponent, AActor* OtherActor, UPrimitiveComponent* OtherComponent, FVector NormalImpulse, const FHitResult& Hit);
 
 private:
-    // Internal State
-    bool bIsDestroyed;
-    TArray<AActor*> SpawnedDebris;
-    float DestructionTime;
+    UPROPERTY()
+    bool bIsDestroyed = false;
 
-    // Cleanup timer
-    FTimerHandle DebrisCleanupTimer;
+    UPROPERTY()
+    TArray<AActor*> CreatedFragments;
+
+    FTimerHandle CleanupTimerHandle;
+
+    void InitializeDestruction();
+    void CleanupFragments();
+    AActor* CreateFragment(const FVector& Location, const FVector& Velocity, float Scale);
+    void SetupCollisionResponse();
 };
