@@ -5,7 +5,17 @@
 #include "GameFramework/Actor.h"
 #include "Components/ActorComponent.h"
 #include "Engine/Engine.h"
+#include "HAL/Platform.h"
 #include "Perf_OptimizationManager.generated.h"
+
+UENUM(BlueprintType)
+enum class EPerf_OptimizationLevel : uint8
+{
+    Low         UMETA(DisplayName = "Low Quality"),
+    Medium      UMETA(DisplayName = "Medium Quality"),
+    High        UMETA(DisplayName = "High Quality"),
+    Ultra       UMETA(DisplayName = "Ultra Quality")
+};
 
 USTRUCT(BlueprintType)
 struct TRANSPERSONALGAME_API FPerf_OptimizationSettings
@@ -13,126 +23,121 @@ struct TRANSPERSONALGAME_API FPerf_OptimizationSettings
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float TargetFrameRate = 60.0f;
+    float MaxPhysicsActorRatio;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float MinFrameRate = 30.0f;
+    int32 MaxActiveActors;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 MaxPhysicsActors = 500;
+    float CullingDistance;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float ViewDistanceScale = 1.0f;
+    bool bEnableAutoLOD;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 ShadowResolution = 2048;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    bool bEnableAutomaticOptimization = true;
+    EPerf_OptimizationLevel OptimizationLevel;
 
     FPerf_OptimizationSettings()
     {
-        TargetFrameRate = 60.0f;
-        MinFrameRate = 30.0f;
-        MaxPhysicsActors = 500;
-        ViewDistanceScale = 1.0f;
-        ShadowResolution = 2048;
-        bEnableAutomaticOptimization = true;
+        MaxPhysicsActorRatio = 15.0f;
+        MaxActiveActors = 2000;
+        CullingDistance = 10000.0f;
+        bEnableAutoLOD = true;
+        OptimizationLevel = EPerf_OptimizationLevel::Medium;
     }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FPerf_SystemMetrics
+struct TRANSPERSONALGAME_API FPerf_PerformanceMetrics
 {
     GENERATED_BODY()
 
     UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float CurrentFPS = 0.0f;
+    float CurrentFPS;
 
     UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float AverageFPS = 0.0f;
+    float AverageFPS;
 
     UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    int32 ActivePhysicsActors = 0;
+    int32 ActiveActorCount;
 
     UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    int32 TotalActorCount = 0;
+    int32 PhysicsActorCount;
 
     UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float MemoryUsageMB = 0.0f;
+    float PhysicsActorRatio;
 
     UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float GPUMemoryUsageMB = 0.0f;
+    float MemoryUsageMB;
 
-    FPerf_SystemMetrics()
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float DrawCallCount;
+
+    FPerf_PerformanceMetrics()
     {
         CurrentFPS = 0.0f;
         AverageFPS = 0.0f;
-        ActivePhysicsActors = 0;
-        TotalActorCount = 0;
+        ActiveActorCount = 0;
+        PhysicsActorCount = 0;
+        PhysicsActorRatio = 0.0f;
         MemoryUsageMB = 0.0f;
-        GPUMemoryUsageMB = 0.0f;
+        DrawCallCount = 0.0f;
     }
 };
 
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API APerf_OptimizationManager : public AActor
+UCLASS(ClassGroup=(Performance), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UPerf_OptimizationManager : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    APerf_OptimizationManager();
+    UPerf_OptimizationManager();
 
 protected:
     virtual void BeginPlay() override;
-    virtual void Tick(float DeltaTime) override;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    FPerf_OptimizationSettings OptimizationSettings;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    FPerf_SystemMetrics CurrentMetrics;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float MetricsUpdateInterval = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    bool bEnableDebugDisplay = true;
-
-private:
-    float LastMetricsUpdate = 0.0f;
-    TArray<float> FrameRateHistory;
-    int32 MaxHistorySize = 60;
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 public:
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance Settings")
+    FPerf_OptimizationSettings OptimizationSettings;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Performance Metrics")
+    FPerf_PerformanceMetrics CurrentMetrics;
+
     UFUNCTION(BlueprintCallable, Category = "Performance")
     void UpdatePerformanceMetrics();
 
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    void ApplyOptimizationSettings();
+    void OptimizeScene();
 
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    void SetTargetFrameRate(float NewTargetFPS);
+    void SetOptimizationLevel(EPerf_OptimizationLevel NewLevel);
 
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    void EnableAutomaticOptimization(bool bEnable);
+    bool IsPerformanceAcceptable() const;
 
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    FPerf_SystemMetrics GetCurrentMetrics() const { return CurrentMetrics; }
+    void CullDistantActors();
 
     UFUNCTION(BlueprintCallable, Category = "Performance")
     void OptimizePhysicsActors();
 
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void OptimizeRenderingSettings();
+    UFUNCTION(BlueprintCallable, Category = "Performance", CallInEditor = true)
+    void RunPerformanceAnalysis();
 
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void ResetToDefaultSettings();
+private:
+    UPROPERTY()
+    TArray<float> FPSHistory;
 
-protected:
-    void CalculateFrameRateMetrics();
-    void CountPhysicsActors();
-    void UpdateMemoryMetrics();
-    void ApplyAutomaticOptimizations();
-    void DisplayDebugInfo();
+    UPROPERTY()
+    float LastUpdateTime;
+
+    UPROPERTY()
+    int32 FrameCounter;
+
+    void CalculateAverageFPS();
+    void CheckPerformanceThresholds();
+    void ApplyOptimizationSettings();
+    TArray<AActor*> GetActorsInRadius(FVector Center, float Radius);
+    void OptimizeActorLOD(AActor* Actor, float Distance);
 };
