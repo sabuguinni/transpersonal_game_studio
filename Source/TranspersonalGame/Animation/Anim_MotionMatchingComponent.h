@@ -6,76 +6,62 @@
 #include "Animation/AnimInstance.h"
 #include "Animation/AnimMontage.h"
 #include "Animation/BlendSpace.h"
-#include "SharedTypes.h"
+#include "GameFramework/CharacterMovementComponent.h"
 #include "Anim_MotionMatchingComponent.generated.h"
 
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FAnim_MotionMatchingData
+UENUM(BlueprintType)
+enum class EAnim_MovementState : uint8
 {
-    GENERATED_BODY()
+    Idle        UMETA(DisplayName = "Idle"),
+    Walking     UMETA(DisplayName = "Walking"),
+    Running     UMETA(DisplayName = "Running"),
+    Jumping     UMETA(DisplayName = "Jumping"),
+    Falling     UMETA(DisplayName = "Falling"),
+    Crouching   UMETA(DisplayName = "Crouching"),
+    Combat      UMETA(DisplayName = "Combat"),
+    Gathering   UMETA(DisplayName = "Gathering"),
+    Crafting    UMETA(DisplayName = "Crafting")
+};
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
-    float Velocity;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
-    float Acceleration;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
-    FVector Direction;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
-    float TurnRate;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
-    bool bIsGrounded;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
-    float GroundSlope;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
-    ESurvivalActionState ActionState;
-
-    FAnim_MotionMatchingData()
-    {
-        Velocity = 0.0f;
-        Acceleration = 0.0f;
-        Direction = FVector::ZeroVector;
-        TurnRate = 0.0f;
-        bIsGrounded = true;
-        GroundSlope = 0.0f;
-        ActionState = ESurvivalActionState::Idle;
-    }
+UENUM(BlueprintType)
+enum class EAnim_EmotionalState : uint8
+{
+    Calm        UMETA(DisplayName = "Calm"),
+    Alert       UMETA(DisplayName = "Alert"),
+    Fearful     UMETA(DisplayName = "Fearful"),
+    Aggressive  UMETA(DisplayName = "Aggressive"),
+    Exhausted   UMETA(DisplayName = "Exhausted"),
+    Injured     UMETA(DisplayName = "Injured")
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FAnim_PoseSearchData
+struct TRANSPERSONALGAME_API FAnim_MotionData
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pose Search")
-    TArray<FVector> BonePositions;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion")
+    float Speed = 0.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pose Search")
-    TArray<FVector> BoneVelocities;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion")
+    float Direction = 0.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pose Search")
-    TArray<FQuat> BoneRotations;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion")
+    bool bIsInAir = false;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pose Search")
-    float PoseScore;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion")
+    bool bIsCrouching = false;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pose Search")
-    int32 AnimationIndex;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion")
+    float Acceleration = 0.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pose Search")
-    float TimeStamp;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion")
+    FVector Velocity = FVector::ZeroVector;
 
-    FAnim_PoseSearchData()
-    {
-        PoseScore = 0.0f;
-        AnimationIndex = -1;
-        TimeStamp = 0.0f;
-    }
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion")
+    EAnim_MovementState MovementState = EAnim_MovementState::Idle;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion")
+    EAnim_EmotionalState EmotionalState = EAnim_EmotionalState::Calm;
 };
 
 UCLASS(ClassGroup=(Animation), meta=(BlueprintSpawnableComponent))
@@ -88,99 +74,78 @@ public:
 
 protected:
     virtual void BeginPlay() override;
-
-public:
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    // Motion Matching Configuration
+public:
+    // Motion matching parameters
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
-    float TrajectoryTimeHorizon;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
-    float HistoryTimeHorizon;
+    float WalkThreshold = 50.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
-    int32 MaxPoseSearchResults;
+    float RunThreshold = 300.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
-    float PoseMatchingThreshold;
+    float BlendTime = 0.2f;
 
-    // Current Motion Data
-    UPROPERTY(BlueprintReadOnly, Category = "Motion Matching")
-    FAnim_MotionMatchingData CurrentMotionData;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
+    float DirectionSmoothingSpeed = 10.0f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Motion Matching")
-    TArray<FAnim_PoseSearchData> PoseSearchHistory;
-
-    // Animation Assets
+    // Animation assets
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Assets")
-    TArray<class UAnimSequence*> MotionDatabase;
+    TObjectPtr<UBlendSpace> MovementBlendSpace;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Assets")
-    class UBlendSpace* MovementBlendSpace;
+    TObjectPtr<UAnimMontage> JumpMontage;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Assets")
-    TMap<ESurvivalActionState, class UAnimMontage*> ActionMontages;
+    TObjectPtr<UAnimMontage> CombatMontage;
 
-    // Motion Matching Functions
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Assets")
+    TObjectPtr<UAnimMontage> GatheringMontage;
+
+    // Current motion data
+    UPROPERTY(BlueprintReadOnly, Category = "Motion Data")
+    FAnim_MotionData CurrentMotionData;
+
+    // Component references
+    UPROPERTY()
+    TObjectPtr<UCharacterMovementComponent> MovementComponent;
+
+    UPROPERTY()
+    TObjectPtr<UAnimInstance> AnimInstance;
+
+public:
+    // Public interface
     UFUNCTION(BlueprintCallable, Category = "Motion Matching")
-    void UpdateMotionData(float Velocity, FVector Direction, float Acceleration);
+    void UpdateMotionData();
 
     UFUNCTION(BlueprintCallable, Category = "Motion Matching")
-    FAnim_PoseSearchData FindBestPoseMatch(const FAnim_MotionMatchingData& TargetMotion);
+    void SetEmotionalState(EAnim_EmotionalState NewState);
 
     UFUNCTION(BlueprintCallable, Category = "Motion Matching")
-    void PlayActionMontage(ESurvivalActionState ActionState);
+    void PlayMontage(UAnimMontage* Montage, float PlayRate = 1.0f);
 
     UFUNCTION(BlueprintCallable, Category = "Motion Matching")
-    void StopActionMontage();
+    void TriggerJump();
 
     UFUNCTION(BlueprintCallable, Category = "Motion Matching")
-    bool IsActionMontageActive() const;
+    void TriggerCombatAction();
 
-    // IK and Foot Placement
-    UFUNCTION(BlueprintCallable, Category = "IK")
-    void UpdateFootIK(float DeltaTime);
+    UFUNCTION(BlueprintCallable, Category = "Motion Matching")
+    void TriggerGatheringAction();
 
-    UFUNCTION(BlueprintCallable, Category = "IK")
-    FVector GetFootPlacementLocation(bool bIsLeftFoot) const;
+    UFUNCTION(BlueprintPure, Category = "Motion Matching")
+    EAnim_MovementState GetCurrentMovementState() const { return CurrentMotionData.MovementState; }
 
-    UFUNCTION(BlueprintCallable, Category = "IK")
-    float GetFootIKAlpha(bool bIsLeftFoot) const;
+    UFUNCTION(BlueprintPure, Category = "Motion Matching")
+    EAnim_EmotionalState GetCurrentEmotionalState() const { return CurrentMotionData.EmotionalState; }
 
 private:
-    // Internal Motion Matching
-    void AnalyzeCurrentPose();
-    float CalculatePoseScore(const FAnim_PoseSearchData& PoseA, const FAnim_PoseSearchData& PoseB) const;
-    void UpdateTrajectoryPrediction(float DeltaTime);
+    void InitializeComponents();
+    void CalculateMovementState();
+    void UpdateBlendSpaceParameters();
+    void SmoothDirectionChange(float DeltaTime);
 
-    // IK Data
-    UPROPERTY()
-    float LeftFootIKAlpha;
-
-    UPROPERTY()
-    float RightFootIKAlpha;
-
-    UPROPERTY()
-    FVector LeftFootIKLocation;
-
-    UPROPERTY()
-    FVector RightFootIKLocation;
-
-    // Component References
-    UPROPERTY()
-    class USkeletalMeshComponent* SkeletalMeshComponent;
-
-    UPROPERTY()
-    class UCharacterMovementComponent* MovementComponent;
-
-    // Motion Matching State
-    UPROPERTY()
-    float LastUpdateTime;
-
-    UPROPERTY()
-    TArray<FVector> TrajectoryHistory;
-
-    UPROPERTY()
-    TArray<FVector> TrajectoryPrediction;
+    float SmoothedDirection = 0.0f;
+    float LastUpdateTime = 0.0f;
 };
