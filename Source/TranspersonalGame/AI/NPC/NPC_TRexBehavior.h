@@ -1,134 +1,157 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Character.h"
-#include "NPC_DinosaurAIController.h"
-#include "Components/StaticMeshComponent.h"
-#include "Components/SkeletalMeshComponent.h"
-#include "Components/CapsuleComponent.h"
+#include "GameFramework/Actor.h"
+#include "Components/ActorComponent.h"
+#include "NPC_DinosaurBehaviorTree.h"
+#include "TranspersonalGame/TranspersonalGame.h"
 #include "NPC_TRexBehavior.generated.h"
-
-UENUM(BlueprintType)
-enum class ENPC_TRexBehaviorMode : uint8
-{
-    Passive UMETA(DisplayName = "Passive"),
-    Territorial UMETA(DisplayName = "Territorial"),
-    Aggressive UMETA(DisplayName = "Aggressive"),
-    Apex UMETA(DisplayName = "Apex Predator")
-};
 
 USTRUCT(BlueprintType)
 struct FNPC_TRexStats
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "T-Rex Stats")
-    float AttackDamage = 75.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
+    float Health;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "T-Rex Stats")
-    float MovementSpeed = 600.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
+    float MaxHealth;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "T-Rex Stats")
-    float TerritoryRadius = 5000.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
+    float Hunger;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "T-Rex Stats")
-    float HuntingRange = 3000.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
+    float Stamina;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "T-Rex Stats")
-    float RoarCooldown = 15.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
+    float Aggression;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "T-Rex Stats")
-    float ChargeSpeed = 1200.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
+    float TerritorialInstinct;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "T-Rex Stats")
-    float BiteDamage = 100.0f;
+    FNPC_TRexStats()
+    {
+        Health = 100.0f;
+        MaxHealth = 100.0f;
+        Hunger = 50.0f;
+        Stamina = 100.0f;
+        Aggression = 75.0f;
+        TerritorialInstinct = 90.0f;
+    }
 };
 
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API ANPC_TRexBehavior : public ACharacter
+UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UNPC_TRexBehavior : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    ANPC_TRexBehavior();
+    UNPC_TRexBehavior();
 
 protected:
     virtual void BeginPlay() override;
-    virtual void Tick(float DeltaTime) override;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    class USkeletalMeshComponent* TRexMesh;
+public:
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "T-Rex Behavior")
-    ENPC_TRexBehaviorMode BehaviorMode;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "T-Rex Behavior")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "T-Rex Stats")
     FNPC_TRexStats TRexStats;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "T-Rex Behavior")
+    UNPC_DinosaurBehaviorTree* BehaviorTree;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "T-Rex Behavior")
+    float PatrolRadius;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "T-Rex Behavior")
+    float ChaseDistance;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "T-Rex Behavior")
+    float AttackDistance;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "T-Rex Behavior")
+    float RoarCooldown;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "T-Rex Behavior")
     float LastRoarTime;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "T-Rex Behavior")
-    bool bIsCharging;
+    bool bIsHunting;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "T-Rex Behavior")
-    bool bIsInTerritory;
+    bool bIsFeeding;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "T-Rex Behavior")
-    FVector TerritoryCenter;
+    class APawn* CurrentTarget;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "T-Rex Behavior")
-    TArray<FVector> PatrolPoints;
+    FVector HomeTerritory;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "T-Rex Behavior")
-    int32 CurrentPatrolIndex;
-
-public:
     UFUNCTION(BlueprintCallable, Category = "T-Rex Behavior")
-    void SetBehaviorMode(ENPC_TRexBehaviorMode NewMode);
+    void StartHunting(APawn* Target);
+
+    UFUNCTION(BlueprintCallable, Category = "T-Rex Behavior")
+    void StopHunting();
+
+    UFUNCTION(BlueprintCallable, Category = "T-Rex Behavior")
+    void StartFeeding();
+
+    UFUNCTION(BlueprintCallable, Category = "T-Rex Behavior")
+    void StopFeeding();
 
     UFUNCTION(BlueprintCallable, Category = "T-Rex Behavior")
     void PerformRoar();
 
     UFUNCTION(BlueprintCallable, Category = "T-Rex Behavior")
-    void StartCharge(AActor* Target);
+    bool CanAttack();
 
     UFUNCTION(BlueprintCallable, Category = "T-Rex Behavior")
-    void StopCharge();
+    bool IsInAttackRange(APawn* Target);
 
     UFUNCTION(BlueprintCallable, Category = "T-Rex Behavior")
-    void PerformBiteAttack(AActor* Target);
+    bool IsInChaseRange(APawn* Target);
 
     UFUNCTION(BlueprintCallable, Category = "T-Rex Behavior")
-    bool IsPlayerInTerritory(AActor* Player) const;
+    void UpdateHunger(float DeltaTime);
 
     UFUNCTION(BlueprintCallable, Category = "T-Rex Behavior")
-    void SetupPatrolRoute();
+    void UpdateStamina(float DeltaTime);
 
     UFUNCTION(BlueprintCallable, Category = "T-Rex Behavior")
-    FVector GetNextPatrolPoint();
+    void TakeDamage(float Damage);
 
     UFUNCTION(BlueprintCallable, Category = "T-Rex Behavior")
-    void OnPlayerDetected(AActor* Player);
+    FVector GetRandomPatrolPoint();
 
     UFUNCTION(BlueprintCallable, Category = "T-Rex Behavior")
-    void OnPlayerLost();
+    void SetHomeTerritory(FVector Location);
+
+    UFUNCTION(BlueprintCallable, Category = "T-Rex Behavior")
+    bool IsInHomeTerritory();
 
 protected:
-    void UpdateBehaviorBasedOnMode(float DeltaTime);
-    void HandlePassiveBehavior(float DeltaTime);
-    void HandleTerritorialBehavior(float DeltaTime);
-    void HandleAggressiveBehavior(float DeltaTime);
-    void HandleApexBehavior(float DeltaTime);
-    
-    bool CanPerformRoar() const;
-    void ApplyChargeMovement(float DeltaTime);
-    float CalculateDistanceToPlayer() const;
-    AActor* FindNearestPlayer() const;
+    UPROPERTY()
+    float HungerDecayRate;
 
-private:
-    AActor* CurrentTarget;
-    FVector ChargeDirection;
-    float ChargeStartTime;
-    float MaxChargeTime = 3.0f;
+    UPROPERTY()
+    float StaminaRecoveryRate;
+
+    UPROPERTY()
+    float StaminaDrainRate;
+
+    UPROPERTY()
+    float AggressionModifier;
+
+    UFUNCTION()
+    void OnTargetLost();
+
+    UFUNCTION()
+    void OnTerritoryViolated();
+
+    UFUNCTION()
+    APawn* FindNearestPlayer();
+
+    UFUNCTION()
+    void UpdateBehaviorState();
 };
