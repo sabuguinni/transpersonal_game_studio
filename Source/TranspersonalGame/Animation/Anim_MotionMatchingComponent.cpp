@@ -1,318 +1,152 @@
 #include "Anim_MotionMatchingComponent.h"
-#include "Animation/AnimSequence.h"
-#include "Animation/Skeleton.h"
-#include "Engine/World.h"
-#include "DrawDebugHelpers.h"
-#include "Kismet/KismetMathLibrary.h"
+#include "GameFramework/Character.h"
+#include "GameFramework/CharacterMovementComponent.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Animation/AnimInstance.h"
 
 UAnim_MotionMatchingComponent::UAnim_MotionMatchingComponent()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickGroup = TG_PrePhysics;
+    PrimaryComponentTick.bStartWithTickEnabled = true;
 
-    // Default settings
-    SearchRadius = 1000.0f;
-    MinimumMatchThreshold = 0.7f;
-    bEnableDebugDrawing = false;
-    UpdateFrequency = 30.0f;
-    
-    // Runtime initialization
-    CurrentBestFrameIndex = -1;
-    CurrentMatchScore = 0.0f;
-    LastUpdateTime = 0.0f;
-    bIsInitialized = false;
-    bMotionMatchingEnabled = true;
-    AccumulatedTime = 0.0f;
+    // Initialize motion data
+    CurrentMotionData = FAnim_MotionData();
+    PreviousMotionData = FAnim_MotionData();
+
+    // Initialize thresholds
+    WalkThreshold = 50.0f;
+    RunThreshold = 300.0f;
+    MotionSmoothingSpeed = 10.0f;
+
+    // Initialize animation assets to null
+    IdleAnimation = nullptr;
+    MovementBlendSpace = nullptr;
+    JumpStartAnimation = nullptr;
+    JumpLoopAnimation = nullptr;
+    JumpEndAnimation = nullptr;
 }
 
 void UAnim_MotionMatchingComponent::BeginPlay()
 {
     Super::BeginPlay();
     
-    UE_LOG(LogTemp, Log, TEXT("MotionMatchingComponent: BeginPlay for %s"), 
-           *GetOwner()->GetName());
-    
-    // Initialize component
-    bIsInitialized = true;
-    LastUpdateTime = GetWorld()->GetTimeSeconds();
-    
-    // Build default database if we have source animations
-    if (MotionDatabase.SourceAnimations.Num() > 0)
-    {
-        BuildMotionDatabase(MotionDatabase.SourceAnimations);
-    }
+    UE_LOG(LogTemp, Warning, TEXT("Motion Matching Component initialized for %s"), 
+           GetOwner() ? *GetOwner()->GetName() : TEXT("Unknown"));
 }
 
 void UAnim_MotionMatchingComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-    
-    if (!bIsInitialized || !bMotionMatchingEnabled)
-    {
-        return;
-    }
-    
-    AccumulatedTime += DeltaTime;
-    
-    // Update at specified frequency
-    float UpdateInterval = 1.0f / UpdateFrequency;
-    if (AccumulatedTime >= UpdateInterval)
-    {
-        UpdateInternalState(AccumulatedTime);
-        AccumulatedTime = 0.0f;
-    }
-    
-    // Draw debug information
-    if (bEnableDebugDrawing)
-    {
-        DrawDebugMotionData();
-    }
-}
 
-int32 UAnim_MotionMatchingComponent::FindBestMotionMatch(const FAnim_MotionQuery& Query)
-{
-    if (MotionDatabase.MotionFrames.Num() == 0)
+    // Auto-update motion data from character movement
+    if (ACharacter* Character = Cast<ACharacter>(GetOwner()))
     {
-        return -1;
-    }
-    
-    int32 BestFrameIndex = -1;
-    float BestScore = -1.0f;
-    
-    // Search through all frames in the database
-    for (int32 i = 0; i < MotionDatabase.MotionFrames.Num(); ++i)
-    {
-        const FAnim_MotionFrame& Frame = MotionDatabase.MotionFrames[i];
-        float Score = CalculateMotionScore(Frame, Query);
-        
-        if (Score > BestScore && Score >= MinimumMatchThreshold)
+        if (UCharacterMovementComponent* MovementComp = Character->GetCharacterMovement())
         {
-            BestScore = Score;
-            BestFrameIndex = i;
+            FVector Velocity = MovementComp->Velocity;
+            float Speed = Velocity.Size2D();
+            float Direction = 0.0f;
+            
+            // Calculate direction relative to character forward
+            if (Speed > 0.1f)
+            {
+                FVector ForwardVector = Character->GetActorForwardVector();
+                FVector VelocityNormalized = Velocity.GetSafeNormal2D();
+                Direction = FMath::Atan2(
+                    FVector::CrossProduct(ForwardVector, VelocityNormalized).Z,
+                    FVector::DotProduct(ForwardVector, VelocityNormalized)
+                ) * 180.0f / PI;
+            }
+
+            bool bInAir = MovementComp->IsFalling();
+            bool bCrouching = MovementComp->IsCrouching();
+
+            UpdateMotionData(Speed, Direction, bInAir, bCrouching);
         }
     }
+
+    // Smooth motion data
+    SmoothMotionData(DeltaTime);
     
-    // Update current best match
-    CurrentBestFrameIndex = BestFrameIndex;
-    CurrentMatchScore = BestScore;
-    
-    return BestFrameIndex;
+    // Calculate movement state
+    CalculateMovementState();
 }
 
-float UAnim_MotionMatchingComponent::CalculateMotionScore(const FAnim_MotionFrame& Frame, const FAnim_MotionQuery& Query)
+void UAnim_MotionMatchingComponent::UpdateMotionData(float Speed, float Direction, bool bInAir, bool bCrouching)
 {
-    float VelocityScore = CalculateVelocityScore(Frame, Query);
-    float DirectionScore = CalculateDirectionScore(Frame, Query);
-    float PositionScore = CalculatePositionScore(Frame, Query);
+    PreviousMotionData = CurrentMotionData;
     
-    // Weighted combination of scores
-    float TotalScore = (VelocityScore * Query.VelocityWeight) +
-                      (DirectionScore * Query.DirectionWeight) +
-                      (PositionScore * Query.PositionWeight);
-    
-    // Normalize by total weight
-    float TotalWeight = Query.VelocityWeight + Query.DirectionWeight + Query.PositionWeight;
-    if (TotalWeight > 0.0f)
+    CurrentMotionData.Speed = Speed;
+    CurrentMotionData.Direction = Direction;
+    CurrentMotionData.bIsInAir = bInAir;
+    CurrentMotionData.bIsCrouching = bCrouching;
+}
+
+EAnim_MovementState UAnim_MotionMatchingComponent::GetCurrentMovementState() const
+{
+    return CurrentMotionData.MovementState;
+}
+
+FAnim_MotionData UAnim_MotionMatchingComponent::GetMotionData() const
+{
+    return CurrentMotionData;
+}
+
+void UAnim_MotionMatchingComponent::SetMovementState(EAnim_MovementState NewState)
+{
+    if (CurrentMotionData.MovementState != NewState)
     {
-        TotalScore /= TotalWeight;
-    }
-    
-    return FMath::Clamp(TotalScore, 0.0f, 1.0f);
-}
-
-void UAnim_MotionMatchingComponent::UpdateMotionQuery(FVector DesiredVelocity, FVector CurrentPosition, FRotator CurrentRotation)
-{
-    CurrentQuery.DesiredVelocity = DesiredVelocity;
-    CurrentQuery.DesiredSpeed = DesiredVelocity.Size();
-    CurrentQuery.DesiredDirection = DesiredVelocity.GetSafeNormal();
-    CurrentQuery.CurrentPosition = CurrentPosition;
-    CurrentQuery.CurrentRotation = CurrentRotation;
-}
-
-FAnim_MotionFrame UAnim_MotionMatchingComponent::GetMotionFrame(int32 FrameIndex)
-{
-    if (IsValidFrameIndex(FrameIndex))
-    {
-        return MotionDatabase.MotionFrames[FrameIndex];
-    }
-    
-    return FAnim_MotionFrame();
-}
-
-bool UAnim_MotionMatchingComponent::IsValidFrameIndex(int32 FrameIndex)
-{
-    return FrameIndex >= 0 && FrameIndex < MotionDatabase.MotionFrames.Num();
-}
-
-void UAnim_MotionMatchingComponent::BuildMotionDatabase(const TArray<UAnimSequence*>& Animations)
-{
-    UE_LOG(LogTemp, Log, TEXT("MotionMatchingComponent: Building database with %d animations"), 
-           Animations.Num());
-    
-    ClearMotionDatabase();
-    
-    for (UAnimSequence* Animation : Animations)
-    {
-        if (Animation)
-        {
-            AddAnimationToDatabase(Animation);
-        }
-    }
-    
-    MotionDatabase.SourceAnimations = Animations;
-    
-    UE_LOG(LogTemp, Log, TEXT("MotionMatchingComponent: Database built with %d frames"), 
-           MotionDatabase.MotionFrames.Num());
-}
-
-void UAnim_MotionMatchingComponent::AddAnimationToDatabase(UAnimSequence* Animation)
-{
-    if (!Animation)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("MotionMatchingComponent: Null animation provided"));
-        return;
-    }
-    
-    ExtractMotionFramesFromAnimation(Animation);
-}
-
-void UAnim_MotionMatchingComponent::ClearMotionDatabase()
-{
-    MotionDatabase.MotionFrames.Empty();
-    MotionDatabase.DatabaseDuration = 0.0f;
-    CurrentBestFrameIndex = -1;
-    CurrentMatchScore = 0.0f;
-}
-
-void UAnim_MotionMatchingComponent::SetMotionMatchingEnabled(bool bEnabled)
-{
-    bMotionMatchingEnabled = bEnabled;
-    
-    UE_LOG(LogTemp, Log, TEXT("MotionMatchingComponent: Motion matching %s"), 
-           bEnabled ? TEXT("enabled") : TEXT("disabled"));
-}
-
-bool UAnim_MotionMatchingComponent::IsMotionMatchingEnabled() const
-{
-    return bMotionMatchingEnabled;
-}
-
-void UAnim_MotionMatchingComponent::DrawDebugMotionData()
-{
-    if (!GetWorld() || CurrentBestFrameIndex < 0)
-    {
-        return;
-    }
-    
-    FVector OwnerLocation = GetOwner()->GetActorLocation();
-    
-    // Draw current query
-    DrawDebugSphere(GetWorld(), OwnerLocation, 50.0f, 12, FColor::Blue, false, 0.1f);
-    DrawDebugDirectionalArrow(GetWorld(), OwnerLocation, 
-                             OwnerLocation + CurrentQuery.DesiredVelocity, 
-                             20.0f, FColor::Green, false, 0.1f);
-    
-    // Draw best match information
-    if (IsValidFrameIndex(CurrentBestFrameIndex))
-    {
-        const FAnim_MotionFrame& BestFrame = MotionDatabase.MotionFrames[CurrentBestFrameIndex];
-        FVector DebugLocation = OwnerLocation + FVector(0, 0, 100);
-        
-        DrawDebugString(GetWorld(), DebugLocation, 
-                       FString::Printf(TEXT("Best Match: %s (Score: %.2f)"), 
-                                     *BestFrame.AnimationName, CurrentMatchScore),
-                       nullptr, FColor::White, 0.1f);
+        UE_LOG(LogTemp, Log, TEXT("Movement state changed from %d to %d"), 
+               (int32)CurrentMotionData.MovementState, (int32)NewState);
+        CurrentMotionData.MovementState = NewState;
     }
 }
 
-void UAnim_MotionMatchingComponent::ExtractMotionFramesFromAnimation(UAnimSequence* Animation)
+void UAnim_MotionMatchingComponent::CalculateMovementState()
 {
-    if (!Animation)
+    EAnim_MovementState NewState = EAnim_MovementState::Idle;
+
+    if (CurrentMotionData.bIsInAir)
     {
-        return;
+        NewState = EAnim_MovementState::Falling;
     }
-    
-    float AnimDuration = Animation->GetPlayLength();
-    float FrameTime = 1.0f / MotionDatabase.FramesPerSecond;
-    int32 NumFrames = FMath::FloorToInt(AnimDuration / FrameTime);
-    
-    UE_LOG(LogTemp, Log, TEXT("MotionMatchingComponent: Extracting %d frames from %s"), 
-           NumFrames, *Animation->GetName());
-    
-    for (int32 i = 0; i < NumFrames; ++i)
+    else if (CurrentMotionData.bIsCrouching)
     {
-        float Time = i * FrameTime;
-        
-        FAnim_MotionFrame NewFrame;
-        NewFrame.TimeStamp = Time;
-        NewFrame.AnimationName = Animation->GetName();
-        
-        // For now, create placeholder data
-        // In a full implementation, you would extract actual bone transforms
-        // and root motion data from the animation sequence
-        NewFrame.RootPosition = FVector(0, 0, 0);
-        NewFrame.RootRotation = FRotator(0, 0, 0);
-        NewFrame.Velocity = FVector(100, 0, 0); // Placeholder velocity
-        NewFrame.Acceleration = FVector(0, 0, 0);
-        
-        MotionDatabase.MotionFrames.Add(NewFrame);
+        NewState = EAnim_MovementState::Crouching;
     }
-    
-    MotionDatabase.DatabaseDuration += AnimDuration;
+    else if (CurrentMotionData.Speed > RunThreshold)
+    {
+        NewState = EAnim_MovementState::Running;
+    }
+    else if (CurrentMotionData.Speed > WalkThreshold)
+    {
+        NewState = EAnim_MovementState::Walking;
+    }
+    else
+    {
+        NewState = EAnim_MovementState::Idle;
+    }
+
+    SetMovementState(NewState);
 }
 
-float UAnim_MotionMatchingComponent::CalculateVelocityScore(const FAnim_MotionFrame& Frame, const FAnim_MotionQuery& Query)
+void UAnim_MotionMatchingComponent::SmoothMotionData(float DeltaTime)
 {
-    float VelocityDifference = FVector::Dist(Frame.Velocity, Query.DesiredVelocity);
-    float MaxVelocity = FMath::Max(Frame.Velocity.Size(), Query.DesiredVelocity.Size());
+    float SmoothingFactor = FMath::Clamp(MotionSmoothingSpeed * DeltaTime, 0.0f, 1.0f);
     
-    if (MaxVelocity <= 0.0f)
-    {
-        return 1.0f; // Both velocities are zero
-    }
+    // Smooth speed changes
+    CurrentMotionData.Speed = FMath::FInterpTo(
+        PreviousMotionData.Speed, 
+        CurrentMotionData.Speed, 
+        DeltaTime, 
+        MotionSmoothingSpeed
+    );
     
-    float NormalizedDifference = VelocityDifference / MaxVelocity;
-    return FMath::Clamp(1.0f - NormalizedDifference, 0.0f, 1.0f);
-}
-
-float UAnim_MotionMatchingComponent::CalculateDirectionScore(const FAnim_MotionFrame& Frame, const FAnim_MotionQuery& Query)
-{
-    FVector FrameDirection = Frame.Velocity.GetSafeNormal();
-    FVector QueryDirection = Query.DesiredDirection;
-    
-    if (FrameDirection.IsZero() || QueryDirection.IsZero())
-    {
-        return 0.5f; // Neutral score for zero directions
-    }
-    
-    float DotProduct = FVector::DotProduct(FrameDirection, QueryDirection);
-    return FMath::Clamp((DotProduct + 1.0f) * 0.5f, 0.0f, 1.0f);
-}
-
-float UAnim_MotionMatchingComponent::CalculatePositionScore(const FAnim_MotionFrame& Frame, const FAnim_MotionQuery& Query)
-{
-    // For position matching, we might consider relative positions or trajectory matching
-    // For now, return a neutral score
-    return 0.5f;
-}
-
-void UAnim_MotionMatchingComponent::UpdateInternalState(float DeltaTime)
-{
-    LastUpdateTime = GetWorld()->GetTimeSeconds();
-    
-    // Update current query based on owner's state
-    if (GetOwner())
-    {
-        FVector CurrentLocation = GetOwner()->GetActorLocation();
-        FRotator CurrentRotation = GetOwner()->GetActorRotation();
-        
-        // For now, use a simple desired velocity
-        // In practice, this would come from player input or AI
-        FVector DesiredVel = GetOwner()->GetActorForwardVector() * 100.0f;
-        
-        UpdateMotionQuery(DesiredVel, CurrentLocation, CurrentRotation);
-        
-        // Find best match
-        FindBestMotionMatch(CurrentQuery);
-    }
+    // Smooth direction changes
+    CurrentMotionData.Direction = FMath::FInterpAngle(
+        PreviousMotionData.Direction,
+        CurrentMotionData.Direction,
+        DeltaTime,
+        MotionSmoothingSpeed
+    );
 }
