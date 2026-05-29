@@ -1,20 +1,25 @@
 #include "Combat_DamageSystem.h"
-#include "GameFramework/Actor.h"
 #include "Engine/World.h"
 #include "TimerManager.h"
+#include "Kismet/GameplayStatics.h"
 
 UCombat_DamageSystem::UCombat_DamageSystem()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.bStartWithTickEnabled = true;
+    PrimaryComponentTick.TickGroup = TG_PrePhysics;
     
     MaxHealth = 100.0f;
     CurrentHealth = MaxHealth;
+    DamageResistance = 0.0f;
     bCanTakeDamage = true;
-    DamageReduction = 0.0f;
     InvulnerabilityDuration = 0.5f;
-    bIsInvulnerable = false;
-    bIsDead = false;
+    LastDamageTime = -1.0f;
+    
+    // Initialize damage type resistances
+    DamageTypeResistances.Add(EDamageType::Physical, 0.0f);
+    DamageTypeResistances.Add(EDamageType::Fire, 0.0f);
+    DamageTypeResistances.Add(EDamageType::Ice, 0.0f);
+    DamageTypeResistances.Add(EDamageType::Poison, 0.0f);
 }
 
 void UCombat_DamageSystem::BeginPlay()
@@ -22,150 +27,105 @@ void UCombat_DamageSystem::BeginPlay()
     Super::BeginPlay();
     
     CurrentHealth = MaxHealth;
-    bIsDead = false;
-    bIsInvulnerable = false;
+    LastDamageTime = -1.0f;
 }
 
 void UCombat_DamageSystem::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
     
-    // Health regeneration could be added here if needed
+    // Update invulnerability state
+    if (LastDamageTime >= 0.0f)
+    {
+        float TimeSinceLastDamage = GetWorld()->GetTimeSeconds() - LastDamageTime;
+        if (TimeSinceLastDamage >= InvulnerabilityDuration)
+        {
+            bCanTakeDamage = true;
+        }
+    }
 }
 
-bool UCombat_DamageSystem::ApplyDamage(const FCombat_DamageInfo& DamageInfo)
+void UCombat_DamageSystem::ApplyDamage(const FCombat_DamageData& DamageData)
 {
-    if (!ShouldTakeDamage(DamageInfo))
+    if (!bCanTakeDamage || CurrentHealth <= 0.0f)
     {
-        return false;
+        return;
     }
-
-    float FinalDamage = CalculateFinalDamage(DamageInfo.DamageAmount);
+    
+    float FinalDamage = CalculateFinalDamage(DamageData.DamageAmount, DamageData.DamageType);
     
     CurrentHealth = FMath::Max(0.0f, CurrentHealth - FinalDamage);
+    LastDamageTime = GetWorld()->GetTimeSeconds();
+    bCanTakeDamage = false;
     
-    // Broadcast damage event
-    OnDamageTaken.Broadcast(FinalDamage, DamageInfo);
-    
-    // Trigger Blueprint event
-    OnHealthChanged(CurrentHealth, MaxHealth);
-    
-    // Apply invulnerability if configured
-    if (InvulnerabilityDuration > 0.0f)
-    {
-        SetInvulnerable(true);
-        GetWorld()->GetTimerManager().SetTimer(InvulnerabilityTimer, this, &UCombat_DamageSystem::EndInvulnerability, InvulnerabilityDuration, false);
-    }
+    // Fire damage taken event
+    OnDamageTaken(DamageData);
     
     // Check for death
-    if (CurrentHealth <= 0.0f && !bIsDead)
+    if (CurrentHealth <= 0.0f)
     {
-        Die();
+        HandleDeath(DamageData.DamageInstigator);
     }
     
-    return true;
+    UE_LOG(LogTemp, Log, TEXT("Damage Applied: %.1f (Final: %.1f) to %s. Health: %.1f/%.1f"), 
+           DamageData.DamageAmount, FinalDamage, 
+           *GetOwner()->GetName(), CurrentHealth, MaxHealth);
 }
 
-void UCombat_DamageSystem::Heal(float HealAmount)
+void UCombat_DamageSystem::ApplyDamageToTarget(AActor* Target, float Damage, EDamageType DamageType, AActor* Instigator)
 {
-    if (bIsDead || HealAmount <= 0.0f)
-    {
-        return;
-    }
-    
-    CurrentHealth = FMath::Min(MaxHealth, CurrentHealth + HealAmount);
-    OnHealthChanged(CurrentHealth, MaxHealth);
-}
-
-void UCombat_DamageSystem::SetMaxHealth(float NewMaxHealth)
-{
-    if (NewMaxHealth <= 0.0f)
+    if (!Target)
     {
         return;
     }
     
-    float HealthRatio = MaxHealth > 0.0f ? CurrentHealth / MaxHealth : 1.0f;
-    MaxHealth = NewMaxHealth;
-    CurrentHealth = MaxHealth * HealthRatio;
-    
-    OnHealthChanged(CurrentHealth, MaxHealth);
-}
-
-float UCombat_DamageSystem::GetHealthPercentage() const
-{
-    return MaxHealth > 0.0f ? CurrentHealth / MaxHealth : 0.0f;
-}
-
-void UCombat_DamageSystem::SetInvulnerable(bool bNewInvulnerable)
-{
-    bIsInvulnerable = bNewInvulnerable;
-    
-    if (!bNewInvulnerable && GetWorld())
+    UCombat_DamageSystem* TargetDamageSystem = Target->FindComponentByClass<UCombat_DamageSystem>();
+    if (TargetDamageSystem)
     {
-        GetWorld()->GetTimerManager().ClearTimer(InvulnerabilityTimer);
+        FCombat_DamageData DamageData;
+        DamageData.DamageAmount = Damage;
+        DamageData.DamageType = DamageType;
+        DamageData.ImpactLocation = Target->GetActorLocation();
+        DamageData.ImpactDirection = (Target->GetActorLocation() - Instigator->GetActorLocation()).GetSafeNormal();
+        DamageData.DamageInstigator = Instigator;
+        
+        TargetDamageSystem->ApplyDamage(DamageData);
     }
 }
 
-void UCombat_DamageSystem::AddDamageImmunity(EDamageType DamageType)
+void UCombat_DamageSystem::HandleDeath(AActor* Killer)
 {
-    DamageImmunities.AddUnique(DamageType);
-}
-
-void UCombat_DamageSystem::RemoveDamageImmunity(EDamageType DamageType)
-{
-    DamageImmunities.Remove(DamageType);
-}
-
-void UCombat_DamageSystem::EndInvulnerability()
-{
-    bIsInvulnerable = false;
-}
-
-void UCombat_DamageSystem::Die()
-{
-    if (bIsDead)
-    {
-        return;
-    }
+    UE_LOG(LogTemp, Warning, TEXT("%s has died! Killed by: %s"), 
+           *GetOwner()->GetName(), 
+           Killer ? *Killer->GetName() : TEXT("Unknown"));
     
-    bIsDead = true;
+    // Fire death event
+    OnDeath(Killer);
+    
+    // Disable further damage
     bCanTakeDamage = false;
-    CurrentHealth = 0.0f;
     
-    // Broadcast death event
-    OnDeath.Broadcast(GetOwner());
-    
-    // Trigger Blueprint event
-    OnActorDied();
+    // Optional: Destroy actor after delay or handle respawn
+    if (GetOwner())
+    {
+        GetOwner()->SetActorEnableCollision(false);
+        GetOwner()->SetActorHiddenInGame(true);
+    }
 }
 
-bool UCombat_DamageSystem::ShouldTakeDamage(const FCombat_DamageInfo& DamageInfo) const
+float UCombat_DamageSystem::CalculateFinalDamage(float BaseDamage, EDamageType DamageType)
 {
-    // Check basic conditions
-    if (!bCanTakeDamage || bIsDead || bIsInvulnerable)
+    float FinalDamage = BaseDamage;
+    
+    // Apply general damage resistance
+    FinalDamage *= (1.0f - FMath::Clamp(DamageResistance, 0.0f, 0.95f));
+    
+    // Apply damage type specific resistance
+    if (DamageTypeResistances.Contains(DamageType))
     {
-        return false;
+        float TypeResistance = DamageTypeResistances[DamageType];
+        FinalDamage *= (1.0f - FMath::Clamp(TypeResistance, 0.0f, 0.95f));
     }
     
-    // Check damage amount
-    if (DamageInfo.DamageAmount <= 0.0f)
-    {
-        return false;
-    }
-    
-    // Check immunities
-    if (DamageImmunities.Contains(DamageInfo.DamageType))
-    {
-        return false;
-    }
-    
-    return true;
-}
-
-float UCombat_DamageSystem::CalculateFinalDamage(float BaseDamage) const
-{
-    // Apply damage reduction
-    float FinalDamage = BaseDamage * (1.0f - FMath::Clamp(DamageReduction, 0.0f, 1.0f));
-    
-    return FMath::Max(0.0f, FinalDamage);
+    return FMath::Max(1.0f, FinalDamage); // Minimum 1 damage
 }
