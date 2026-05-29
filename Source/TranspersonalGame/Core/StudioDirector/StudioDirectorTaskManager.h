@@ -26,6 +26,7 @@ enum class EDir_TaskStatus : uint8
 UENUM(BlueprintType)
 enum class EDir_AgentType : uint8
 {
+    None = 0,
     EngineArchitect = 2,
     CoreSystems = 3,
     PerformanceOptimizer = 4,

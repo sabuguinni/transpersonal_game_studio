@@ -10,6 +10,7 @@
 UENUM(BlueprintType)
 enum class ENPC_SocialRank : uint8
 {
+    Unknown = 0,
     Child = 1,
     Gatherer = 2,
     Hunter = 3,
