@@ -6,104 +6,67 @@
 #include "SharedTypes.h"
 #include "NarrativeStoryManager.generated.h"
 
-// Story progression tracking
+// Story progression states for the main narrative
 UENUM(BlueprintType)
 enum class ENarr_StoryPhase : uint8
 {
-    Awakening,      // Player awakens alone, tutorial phase
-    Survival,       // Basic survival needs: water, food, shelter
-    Discovery,      // Finding signs of other survivors
-    Territory,      // Claiming and defending territory
-    Mastery,        // Advanced survival and leadership
-    Endgame         // Final story resolution
+    Awakening,      // Player awakens in prehistoric world
+    FirstContact,   // Encounters first dinosaurs
+    Survival,       // Learning basic survival skills
+    Discovery,      // Finding tribal remnants
+    Alliance,       // Building relationships with NPCs
+    Conflict,       // Major dinosaur threats emerge
+    Resolution      // Final story climax
 };
 
-// Story event types for narrative triggers
+// Critical story events that trigger narrative beats
 UENUM(BlueprintType)
-enum class ENarr_StoryEventType : uint8
+enum class ENarr_StoryEvent : uint8
 {
-    FirstWater,     // Player finds first water source
-    FirstHunt,      // Player kills first animal
-    FirstShelter,   // Player builds first shelter
-    FirstDanger,    // Player encounters major predator
-    FirstTribe,     // Player meets other survivors
-    TerritoryLost,  // Player's base is destroyed
-    MajorVictory    // Player defeats alpha predator
+    PlayerSpawned,
+    FirstDinosaurSighted,
+    FirstCraftingSuccess,
+    FirstNPCMet,
+    FirstCombatVictory,
+    TribeDiscovered,
+    AlphaRexEncounter,
+    StoryComplete
 };
 
-// Narrative context data for dialogue selection
+// Story data structure for data table
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FNarr_NarrativeContext
+struct TRANSPERSONALGAME_API FNarr_StoryBeat
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    ENarr_StoryPhase CurrentPhase = ENarr_StoryPhase::Awakening;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    ENarr_StoryEvent TriggerEvent;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    int32 DaysAlive = 0;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    FString NarrativeText;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    int32 AnimalsHunted = 0;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    FString VoiceOverFile;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    int32 PredatorsDefeated = 0;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    float Duration;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    bool bHasWater = false;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    bool bBlocksGameplay;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    bool bHasShelter = false;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    bool bMetOtherSurvivors = false;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float FearLevel = 0.5f; // 0.0 = fearless, 1.0 = terrified
-
-    FNarr_NarrativeContext()
+    FNarr_StoryBeat()
     {
-        CurrentPhase = ENarr_StoryPhase::Awakening;
-        DaysAlive = 0;
-        AnimalsHunted = 0;
-        PredatorsDefeated = 0;
-        bHasWater = false;
-        bHasShelter = false;
-        bMetOtherSurvivors = false;
-        FearLevel = 0.5f;
-    }
-};
-
-// Story event data for tracking progression
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FNarr_StoryEvent
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    ENarr_StoryEventType EventType;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FString EventDescription;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FDateTime EventTime;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FVector EventLocation;
-
-    FNarr_StoryEvent()
-    {
-        EventType = ENarr_StoryEventType::FirstWater;
-        EventDescription = TEXT("");
-        EventTime = FDateTime::Now();
-        EventLocation = FVector::ZeroVector;
+        TriggerEvent = ENarr_StoryEvent::PlayerSpawned;
+        NarrativeText = TEXT("Default narrative text");
+        VoiceOverFile = TEXT("");
+        Duration = 3.0f;
+        bBlocksGameplay = false;
     }
 };
 
 /**
- * Manages the overarching narrative progression and story context
- * Tracks player achievements and triggers appropriate story moments
+ * Central narrative manager that tracks story progression and triggers narrative beats
+ * Integrates with quest system and character development
  */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UNarrativeStoryManager : public UGameInstanceSubsystem
@@ -119,56 +82,66 @@ public:
 
     // Story progression
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void AdvanceStoryPhase(ENarr_StoryPhase NewPhase);
+    void TriggerStoryEvent(ENarr_StoryEvent Event);
 
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    ENarr_StoryPhase GetCurrentStoryPhase() const { return NarrativeContext.CurrentPhase; }
+    void AdvanceStoryPhase();
 
-    // Event tracking
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void RecordStoryEvent(ENarr_StoryEventType EventType, const FString& Description, const FVector& Location);
+    UFUNCTION(BlueprintPure, Category = "Narrative")
+    ENarr_StoryPhase GetCurrentStoryPhase() const { return CurrentStoryPhase; }
 
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    bool HasEventOccurred(ENarr_StoryEventType EventType) const;
+    UFUNCTION(BlueprintPure, Category = "Narrative")
+    bool HasEventTriggered(ENarr_StoryEvent Event) const;
 
-    // Context updates
+    // Narrative beats
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void UpdateSurvivalStats(bool bFoundWater, bool bBuiltShelter, int32 NewAnimalsHunted);
-
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void UpdateFearLevel(float NewFearLevel);
+    void PlayNarrativeBeat(const FNarr_StoryBeat& StoryBeat);
 
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void IncrementDaysAlive();
+    void SetStoryDataTable(UDataTable* DataTable);
 
-    // Context access
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    FNarr_NarrativeContext GetNarrativeContext() const { return NarrativeContext; }
+    // Story state queries
+    UFUNCTION(BlueprintPure, Category = "Narrative")
+    float GetStoryProgressPercent() const;
 
-    // Story triggers
+    UFUNCTION(BlueprintPure, Category = "Narrative")
+    FString GetCurrentNarrativeContext() const;
+
+    // Integration with other systems
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    FString GetContextualNarration() const;
+    void RegisterStoryEventListener(UObject* Listener);
 
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    bool ShouldTriggerStoryMoment() const;
+    void UnregisterStoryEventListener(UObject* Listener);
 
 protected:
-    // Current narrative state
-    UPROPERTY(BlueprintReadOnly, Category = "Narrative")
-    FNarr_NarrativeContext NarrativeContext;
+    // Current story state
+    UPROPERTY(BlueprintReadOnly, Category = "Story State")
+    ENarr_StoryPhase CurrentStoryPhase;
 
-    // Event history
-    UPROPERTY(BlueprintReadOnly, Category = "Narrative")
-    TArray<FNarr_StoryEvent> StoryEvents;
+    UPROPERTY(BlueprintReadOnly, Category = "Story State")
+    TArray<ENarr_StoryEvent> TriggeredEvents;
 
-    // Story phase descriptions
-    UPROPERTY(EditDefaultsOnly, Category = "Narrative")
-    TMap<ENarr_StoryPhase, FString> PhaseDescriptions;
+    UPROPERTY(BlueprintReadOnly, Category = "Story State")
+    float StoryStartTime;
 
-    // Initialize story data
-    void InitializeStoryData();
+    // Story configuration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
+    UDataTable* StoryBeatsDataTable;
 
-    // Helper functions
-    FString GetPhaseNarration(ENarr_StoryPhase Phase) const;
-    bool IsStoryEventRecent(ENarr_StoryEventType EventType, float HoursAgo = 1.0f) const;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
+    bool bAutoAdvancePhases;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
+    float NarrativeBeatDelay;
+
+    // Event listeners
+    UPROPERTY()
+    TArray<TWeakObjectPtr<UObject>> EventListeners;
+
+private:
+    void InitializeStoryBeats();
+    void BroadcastStoryEvent(ENarr_StoryEvent Event);
+    FNarr_StoryBeat* FindStoryBeatForEvent(ENarr_StoryEvent Event);
+    void UpdateStoryPhaseBasedOnEvents();
 };
