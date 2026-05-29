@@ -1,25 +1,23 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "GameFramework/Actor.h"
 #include "Components/ActorComponent.h"
 #include "Engine/World.h"
 #include "Particles/ParticleSystemComponent.h"
-#include "NiagaraComponent.h"
-#include "NiagaraSystem.h"
-#include "SharedTypes.h"
+#include "Components/PointLightComponent.h"
 #include "VFX_EnvironmentalEffectManager.generated.h"
 
 UENUM(BlueprintType)
-enum class EVFX_EnvironmentalType : uint8
+enum class EVFX_EnvironmentalEffectType : uint8
 {
-    CampfireSmoke,
-    MorningMist,
-    VolcanicAsh,
-    DustDevil,
-    RainDroplets,
-    WindParticles,
-    PollenDrift,
-    InsectSwarm
+    None            UMETA(DisplayName = "None"),
+    CampfireFire    UMETA(DisplayName = "Campfire Fire"),
+    FootstepDust    UMETA(DisplayName = "Footstep Dust"),
+    ForestFog       UMETA(DisplayName = "Forest Fog"),
+    DesertHaze      UMETA(DisplayName = "Desert Heat Haze"),
+    RainDroplets    UMETA(DisplayName = "Rain Droplets"),
+    WindParticles   UMETA(DisplayName = "Wind Particles")
 };
 
 USTRUCT(BlueprintType)
@@ -27,98 +25,128 @@ struct FVFX_EnvironmentalEffect
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    EVFX_EnvironmentalType EffectType;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+    EVFX_EnvironmentalEffectType EffectType = EVFX_EnvironmentalEffectType::None;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    TSoftObjectPtr<UNiagaraSystem> NiagaraSystem;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+    FVector Location = FVector::ZeroVector;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    TSoftObjectPtr<UParticleSystem> LegacyParticleSystem;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+    float Intensity = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float EffectRadius = 1000.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+    float Radius = 500.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float EffectIntensity = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+    float Duration = -1.0f; // -1 = infinite
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    bool bIsWeatherDependent = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    bool bIsTimeOfDayDependent = false;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+    bool bIsActive = true;
 
     FVFX_EnvironmentalEffect()
     {
-        EffectType = EVFX_EnvironmentalType::CampfireSmoke;
-        EffectRadius = 1000.0f;
-        EffectIntensity = 1.0f;
-        bIsWeatherDependent = true;
-        bIsTimeOfDayDependent = false;
+        EffectType = EVFX_EnvironmentalEffectType::None;
+        Location = FVector::ZeroVector;
+        Intensity = 1.0f;
+        Radius = 500.0f;
+        Duration = -1.0f;
+        bIsActive = true;
     }
 };
 
-UCLASS(ClassGroup=(VFX), meta=(BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UVFX_EnvironmentalEffectManager : public UActorComponent
+UCLASS(Blueprintable, BlueprintType, Category = "VFX")
+class TRANSPERSONALGAME_API AVFX_EnvironmentalEffectManager : public AActor
 {
     GENERATED_BODY()
 
 public:
-    UVFX_EnvironmentalEffectManager();
+    AVFX_EnvironmentalEffectManager();
 
 protected:
     virtual void BeginPlay() override;
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+    virtual void Tick(float DeltaTime) override;
+
+    // Environmental effects management
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Environmental")
+    TArray<FVFX_EnvironmentalEffect> ActiveEffects;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Environmental")
+    int32 MaxActiveEffects = 20;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Environmental")
+    float EffectUpdateInterval = 0.1f;
+
+    // Campfire system
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Campfire")
+    TArray<FVector> CampfireLocations;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Campfire")
+    float CampfireLightIntensity = 2000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Campfire")
+    FLinearColor CampfireLightColor = FLinearColor(1.0f, 0.6f, 0.2f, 1.0f);
+
+    // Atmospheric effects
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Atmosphere")
+    float ForestFogDensity = 0.3f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Atmosphere")
+    float DesertHazeDensity = 0.2f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Atmosphere")
+    float WindParticleIntensity = 1.0f;
+
+    // Performance settings
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Performance")
+    float LODDistanceNear = 1000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Performance")
+    float LODDistanceFar = 5000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Performance")
+    bool bEnableLODSystem = true;
+
+private:
+    float LastUpdateTime = 0.0f;
+    TArray<UParticleSystemComponent*> ParticleComponents;
+    TArray<UPointLightComponent*> LightComponents;
 
 public:
     // Environmental effect management
     UFUNCTION(BlueprintCallable, Category = "VFX Environmental")
-    void SpawnEnvironmentalEffect(EVFX_EnvironmentalType EffectType, FVector Location, float Intensity = 1.0f);
+    void CreateEnvironmentalEffect(EVFX_EnvironmentalEffectType EffectType, FVector Location, float Intensity = 1.0f, float Duration = -1.0f);
 
     UFUNCTION(BlueprintCallable, Category = "VFX Environmental")
-    void StopEnvironmentalEffect(EVFX_EnvironmentalType EffectType);
+    void RemoveEnvironmentalEffect(int32 EffectIndex);
 
     UFUNCTION(BlueprintCallable, Category = "VFX Environmental")
-    void UpdateWeatherEffects(EWeatherType WeatherType, float Intensity);
+    void UpdateEffectIntensity(int32 EffectIndex, float NewIntensity);
 
-    UFUNCTION(BlueprintCallable, Category = "VFX Environmental")
-    void UpdateTimeOfDayEffects(float TimeOfDay);
+    // Campfire system
+    UFUNCTION(BlueprintCallable, Category = "VFX Campfire")
+    void CreateCampfire(FVector Location);
 
-    UFUNCTION(BlueprintCallable, Category = "VFX Environmental")
-    void SetEffectQuality(int32 QualityLevel);
+    UFUNCTION(BlueprintCallable, Category = "VFX Campfire")
+    void ExtinguishCampfire(FVector Location, float SearchRadius = 100.0f);
+
+    // Footstep impact system
+    UFUNCTION(BlueprintCallable, Category = "VFX Impact")
+    void CreateFootstepImpact(FVector Location, float ImpactForce = 1.0f);
+
+    // Weather system integration
+    UFUNCTION(BlueprintCallable, Category = "VFX Weather")
+    void SetWeatherIntensity(float RainIntensity, float FogIntensity, float WindIntensity);
+
+    // Performance optimization
+    UFUNCTION(BlueprintCallable, Category = "VFX Performance")
+    void OptimizeEffectsForDistance(FVector PlayerLocation);
+
+    UFUNCTION(BlueprintCallable, Category = "VFX Performance")
+    void CleanupInactiveEffects();
 
 protected:
-    // Effect configuration
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Config")
-    TArray<FVFX_EnvironmentalEffect> EnvironmentalEffects;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Config")
-    int32 MaxActiveEffects = 20;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Config")
-    float EffectCullingDistance = 5000.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Config")
-    bool bUseNiagaraWhenAvailable = true;
-
-    // Runtime tracking
-    UPROPERTY()
-    TArray<UNiagaraComponent*> ActiveNiagaraComponents;
-
-    UPROPERTY()
-    TArray<UParticleSystemComponent*> ActiveParticleComponents;
-
-    UPROPERTY()
-    float LastWeatherUpdate = 0.0f;
-
-    UPROPERTY()
-    float LastTimeUpdate = 0.0f;
-
-private:
-    void InitializeEffectDatabase();
-    void CleanupInactiveEffects();
-    UNiagaraComponent* CreateNiagaraEffect(const FVFX_EnvironmentalEffect& Effect, FVector Location);
-    UParticleSystemComponent* CreateParticleEffect(const FVFX_EnvironmentalEffect& Effect, FVector Location);
-    bool ShouldEffectBeActive(const FVFX_EnvironmentalEffect& Effect) const;
-    float GetDistanceToPlayer() const;
+    void InitializeCampfires();
+    void UpdateEnvironmentalEffects(float DeltaTime);
+    float CalculateLODLevel(FVector EffectLocation, FVector PlayerLocation);
+    void ApplyLODToEffect(int32 EffectIndex, float LODLevel);
 };
