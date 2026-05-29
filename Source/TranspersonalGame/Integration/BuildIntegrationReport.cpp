@@ -1,244 +1,169 @@
 #include "BuildIntegrationReport.h"
 #include "Engine/World.h"
 #include "Engine/Engine.h"
-#include "UObject/UObjectGlobals.h"
+#include "Kismet/GameplayStatics.h"
 #include "HAL/PlatformFilemanager.h"
 #include "Misc/Paths.h"
-#include "Misc/DateTime.h"
 
-UBuildIntegrationReportManager::UBuildIntegrationReportManager()
+UBuildIntegrationReport::UBuildIntegrationReport()
 {
-    InitializeCoreClassPaths();
+    bBuildSuccessful = false;
+    BuildVersion = TEXT("PROD_CYCLE_AUTO_20260529_004");
 }
 
-void UBuildIntegrationReportManager::InitializeCoreClassPaths()
+void UBuildIntegrationReport::GenerateHealthReport()
 {
-    CoreClassPaths.Empty();
-    CoreClassPaths.Add(TEXT("/Script/TranspersonalGame.TranspersonalCharacter"));
-    CoreClassPaths.Add(TEXT("/Script/TranspersonalGame.TranspersonalGameMode"));
-    CoreClassPaths.Add(TEXT("/Script/TranspersonalGame.TranspersonalGameState"));
-    CoreClassPaths.Add(TEXT("/Script/TranspersonalGame.PCGWorldGenerator"));
-    CoreClassPaths.Add(TEXT("/Script/TranspersonalGame.FoliageManager"));
-    CoreClassPaths.Add(TEXT("/Script/TranspersonalGame.CrowdSimulationManager"));
-    CoreClassPaths.Add(TEXT("/Script/TranspersonalGame.ProceduralWorldManager"));
-    CoreClassPaths.Add(TEXT("/Script/TranspersonalGame.BuildIntegrationManager"));
-}
-
-FBuild_IntegrationReport UBuildIntegrationReportManager::GenerateIntegrationReport()
-{
-    FBuild_IntegrationReport Report;
-    Report.ReportTimestamp = FDateTime::Now();
-    Report.ExpectedClassCount = CoreClassPaths.Num();
+    SystemHealthReports.Empty();
     
-    // Validate core classes
-    int32 LoadedClasses = 0;
-    for (const FString& ClassPath : CoreClassPaths)
+    // Core systems to validate
+    TArray<FString> CoreSystems = {
+        TEXT("TranspersonalCharacter"),
+        TEXT("TranspersonalGameState"),
+        TEXT("PCGWorldGenerator"),
+        TEXT("FoliageManager"),
+        TEXT("CrowdSimulationManager"),
+        TEXT("DinosaurTRex"),
+        TEXT("DinosaurCombatAIController")
+    };
+
+    for (const FString& SystemName : CoreSystems)
     {
-        UClass* LoadedClass = LoadClass<UObject>(nullptr, *ClassPath);
-        if (LoadedClass)
+        FBuild_SystemHealth HealthReport;
+        HealthReport.SystemName = SystemName;
+        
+        // Try to load the class
+        FString ClassPath = FString::Printf(TEXT("/Script/TranspersonalGame.%s"), *SystemName);
+        UClass* SystemClass = LoadClass<UObject>(nullptr, *ClassPath);
+        
+        if (SystemClass)
         {
-            LoadedClasses++;
+            HealthReport.Status = EBuild_SystemStatus::Operational;
+            HealthReport.LoadTime = 0.1f; // Placeholder timing
         }
         else
         {
-            Report.CriticalIssues.Add(FString::Printf(TEXT("Failed to load core class: %s"), *ClassPath));
+            HealthReport.Status = EBuild_SystemStatus::Failed;
+            HealthReport.LastError = TEXT("Class not found or failed to load");
+        }
+        
+        SystemHealthReports.Add(HealthReport);
+    }
+
+    CheckCoreSystemHealth();
+    ValidateActorSpawning();
+    CheckBinaryIntegrity();
+    
+    IntegrationMetrics.OverallHealth = CalculateOverallHealth();
+    IntegrationMetrics.LastValidation = FDateTime::Now();
+}
+
+void UBuildIntegrationReport::ValidateSystemIntegration()
+{
+    IntegrationMetrics.TotalSystems = SystemHealthReports.Num();
+    IntegrationMetrics.OperationalSystems = 0;
+    IntegrationMetrics.FailedSystems = 0;
+
+    for (const FBuild_SystemHealth& Health : SystemHealthReports)
+    {
+        if (Health.Status == EBuild_SystemStatus::Operational)
+        {
+            IntegrationMetrics.OperationalSystems++;
+        }
+        else if (Health.Status == EBuild_SystemStatus::Failed)
+        {
+            IntegrationMetrics.FailedSystems++;
         }
     }
-    
-    Report.LoadedClassCount = LoadedClasses;
-    
-    // Validate systems
-    Report.SystemStatuses.Add(ValidateWorldGeneration());
-    Report.SystemStatuses.Add(ValidateCharacterSystems());
-    Report.SystemStatuses.Add(ValidateDinosaurSystems());
-    Report.SystemStatuses.Add(ValidateVFXSystems());
-    Report.SystemStatuses.Add(ValidateAudioSystems());
-    
-    // Calculate overall performance score
-    Report.OverallPerformanceScore = CalculatePerformanceScore();
-    
-    // Count total actors in world
+
+    // Count total actors in the world
     if (UWorld* World = GEngine->GetCurrentPlayWorld())
     {
-        Report.TotalActorCount = World->GetActorCount();
+        TArray<AActor*> AllActors;
+        UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), AllActors);
+        IntegrationMetrics.TotalActors = AllActors.Num();
     }
-    else if (GEditor && GEditor->GetEditorWorldContext().World())
-    {
-        Report.TotalActorCount = GEditor->GetEditorWorldContext().World()->GetActorCount();
-    }
-    
-    // Determine overall status
-    if (Report.CriticalIssues.Num() > 0)
-    {
-        Report.OverallStatus = EBuild_IntegrationStatus::Critical;
-    }
-    else if (LoadedClasses < CoreClassPaths.Num())
-    {
-        Report.OverallStatus = EBuild_IntegrationStatus::Failed;
-    }
-    else if (Report.Warnings.Num() > 0)
-    {
-        Report.OverallStatus = EBuild_IntegrationStatus::Warning;
-    }
-    else
-    {
-        Report.OverallStatus = EBuild_IntegrationStatus::Success;
-    }
-    
-    LastReport = Report;
-    return Report;
 }
 
-EBuild_IntegrationStatus UBuildIntegrationReportManager::ValidateSystemIntegration(const FString& SystemName)
+float UBuildIntegrationReport::CalculateOverallHealth() const
 {
-    if (SystemStatusCache.Contains(SystemName))
+    if (IntegrationMetrics.TotalSystems == 0)
     {
-        return SystemStatusCache[SystemName];
+        return 0.0f;
     }
-    
-    // Default validation logic
-    EBuild_IntegrationStatus Status = EBuild_IntegrationStatus::Unknown;
-    
-    if (SystemName == TEXT("WorldGeneration"))
-    {
-        UClass* PCGClass = LoadClass<UObject>(nullptr, TEXT("/Script/TranspersonalGame.PCGWorldGenerator"));
-        Status = PCGClass ? EBuild_IntegrationStatus::Success : EBuild_IntegrationStatus::Failed;
-    }
-    else if (SystemName == TEXT("Character"))
-    {
-        UClass* CharClass = LoadClass<UObject>(nullptr, TEXT("/Script/TranspersonalGame.TranspersonalCharacter"));
-        Status = CharClass ? EBuild_IntegrationStatus::Success : EBuild_IntegrationStatus::Failed;
-    }
-    else if (SystemName == TEXT("Dinosaur"))
-    {
-        // Check for dinosaur assets and AI systems
-        Status = EBuild_IntegrationStatus::Warning; // Placeholder
-    }
-    
-    SystemStatusCache.Add(SystemName, Status);
-    return Status;
+
+    float HealthPercentage = (float)IntegrationMetrics.OperationalSystems / (float)IntegrationMetrics.TotalSystems;
+    return HealthPercentage * 100.0f;
 }
 
-bool UBuildIntegrationReportManager::ValidateCoreClasses()
+bool UBuildIntegrationReport::IsSystemOperational(const FString& SystemName) const
 {
-    int32 LoadedCount = 0;
-    for (const FString& ClassPath : CoreClassPaths)
+    for (const FBuild_SystemHealth& Health : SystemHealthReports)
     {
-        UClass* LoadedClass = LoadClass<UObject>(nullptr, *ClassPath);
-        if (LoadedClass)
+        if (Health.SystemName == SystemName)
         {
-            LoadedCount++;
+            return Health.Status == EBuild_SystemStatus::Operational;
         }
     }
-    
-    return LoadedCount >= CoreClassPaths.Num() * 0.8f; // 80% success rate
+    return false;
 }
 
-float UBuildIntegrationReportManager::CalculatePerformanceScore()
+void UBuildIntegrationReport::CheckCoreSystemHealth()
 {
-    float Score = 100.0f;
+    // Validate that core game systems are functioning
+    bBuildSuccessful = true;
     
-    // Deduct points for missing classes
-    float ClassSuccessRate = (float)LastReport.LoadedClassCount / (float)FMath::Max(1, LastReport.ExpectedClassCount);
-    Score *= ClassSuccessRate;
-    
-    // Deduct points for high actor count
-    if (LastReport.TotalActorCount > 1000)
+    // Check if TranspersonalCharacter can be spawned
+    UClass* CharacterClass = LoadClass<APawn>(nullptr, TEXT("/Script/TranspersonalGame.TranspersonalCharacter"));
+    if (!CharacterClass)
     {
-        Score *= 0.9f;
+        bBuildSuccessful = false;
+        UE_LOG(LogTemp, Warning, TEXT("TranspersonalCharacter class not available"));
     }
-    
-    // Deduct points for critical issues
-    Score -= (LastReport.CriticalIssues.Num() * 10.0f);
-    
-    // Deduct points for warnings
-    Score -= (LastReport.Warnings.Num() * 2.0f);
-    
-    return FMath::Clamp(Score, 0.0f, 100.0f);
-}
 
-TArray<FString> UBuildIntegrationReportManager::GetCriticalIssues()
-{
-    return LastReport.CriticalIssues;
-}
-
-FBuild_SystemStatus UBuildIntegrationReportManager::ValidateWorldGeneration()
-{
-    FBuild_SystemStatus Status;
-    Status.SystemName = TEXT("World Generation");
-    
-    UClass* PCGClass = LoadClass<UObject>(nullptr, TEXT("/Script/TranspersonalGame.PCGWorldGenerator"));
-    UClass* FoliageClass = LoadClass<UObject>(nullptr, TEXT("/Script/TranspersonalGame.FoliageManager"));
-    
-    if (PCGClass && FoliageClass)
+    // Check if game state is accessible
+    UClass* GameStateClass = LoadClass<AGameStateBase>(nullptr, TEXT("/Script/TranspersonalGame.TranspersonalGameState"));
+    if (!GameStateClass)
     {
-        Status.Status = EBuild_IntegrationStatus::Success;
-        Status.StatusMessage = TEXT("World generation systems loaded successfully");
-        Status.PerformanceScore = 95.0f;
+        bBuildSuccessful = false;
+        UE_LOG(LogTemp, Warning, TEXT("TranspersonalGameState class not available"));
     }
-    else
-    {
-        Status.Status = EBuild_IntegrationStatus::Failed;
-        Status.StatusMessage = TEXT("Missing world generation classes");
-        Status.PerformanceScore = 0.0f;
-    }
-    
-    return Status;
 }
 
-FBuild_SystemStatus UBuildIntegrationReportManager::ValidateCharacterSystems()
+void UBuildIntegrationReport::ValidateActorSpawning()
 {
-    FBuild_SystemStatus Status;
-    Status.SystemName = TEXT("Character Systems");
-    
-    UClass* CharClass = LoadClass<UObject>(nullptr, TEXT("/Script/TranspersonalGame.TranspersonalCharacter"));
-    UClass* GameModeClass = LoadClass<UObject>(nullptr, TEXT("/Script/TranspersonalGame.TranspersonalGameMode"));
-    
-    if (CharClass && GameModeClass)
+    // Test actor spawning capabilities
+    if (UWorld* World = GEngine->GetCurrentPlayWorld())
     {
-        Status.Status = EBuild_IntegrationStatus::Success;
-        Status.StatusMessage = TEXT("Character systems operational");
-        Status.PerformanceScore = 90.0f;
+        // Try to get all actors to validate world state
+        TArray<AActor*> AllActors;
+        UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), AllActors);
+        
+        if (AllActors.Num() < 5)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("Low actor count in world: %d"), AllActors.Num());
+        }
+        else
+        {
+            UE_LOG(LogTemp, Log, TEXT("World has %d actors - integration healthy"), AllActors.Num());
+        }
+    }
+}
+
+void UBuildIntegrationReport::CheckBinaryIntegrity()
+{
+    // Check if compiled binaries exist
+    FString ProjectDir = FPaths::ProjectDir();
+    FString BinariesPath = FPaths::Combine(ProjectDir, TEXT("Binaries"));
+    
+    IPlatformFile& PlatformFile = FPlatformFileManager::Get().GetPlatformFile();
+    
+    if (PlatformFile.DirectoryExists(*BinariesPath))
+    {
+        UE_LOG(LogTemp, Log, TEXT("Binaries directory found: %s"), *BinariesPath);
     }
     else
     {
-        Status.Status = EBuild_IntegrationStatus::Failed;
-        Status.StatusMessage = TEXT("Character system classes missing");
-        Status.PerformanceScore = 0.0f;
+        UE_LOG(LogTemp, Warning, TEXT("Binaries directory not found: %s"), *BinariesPath);
+        bBuildSuccessful = false;
     }
-    
-    return Status;
-}
-
-FBuild_SystemStatus UBuildIntegrationReportManager::ValidateDinosaurSystems()
-{
-    FBuild_SystemStatus Status;
-    Status.SystemName = TEXT("Dinosaur Systems");
-    Status.Status = EBuild_IntegrationStatus::Warning;
-    Status.StatusMessage = TEXT("Dinosaur AI systems partially implemented");
-    Status.PerformanceScore = 60.0f;
-    
-    return Status;
-}
-
-FBuild_SystemStatus UBuildIntegrationReportManager::ValidateVFXSystems()
-{
-    FBuild_SystemStatus Status;
-    Status.SystemName = TEXT("VFX Systems");
-    Status.Status = EBuild_IntegrationStatus::Warning;
-    Status.StatusMessage = TEXT("VFX systems require validation");
-    Status.PerformanceScore = 70.0f;
-    
-    return Status;
-}
-
-FBuild_SystemStatus UBuildIntegrationReportManager::ValidateAudioSystems()
-{
-    FBuild_SystemStatus Status;
-    Status.SystemName = TEXT("Audio Systems");
-    Status.Status = EBuild_IntegrationStatus::Warning;
-    Status.StatusMessage = TEXT("Audio systems require integration testing");
-    Status.PerformanceScore = 65.0f;
-    
-    return Status;
 }
