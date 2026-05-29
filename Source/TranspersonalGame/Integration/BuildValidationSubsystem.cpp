@@ -1,193 +1,323 @@
 #include "BuildValidationSubsystem.h"
-#include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "BuildValidationActor.h"
+#include "Engine/Engine.h"
+#include "GameFramework/GameModeBase.h"
 #include "Kismet/GameplayStatics.h"
-#include "Engine/GameInstance.h"
+#include "TranspersonalGame/Core/TranspersonalGameState.h"
+#include "TranspersonalGame/Character/TranspersonalCharacter.h"
+#include "TranspersonalGame/AI/DinosaurTRex.h"
+#include "TranspersonalGame/AI/DinosaurCombatAIController.h"
+#include "TranspersonalGame/World/PCGWorldGenerator.h"
+#include "TranspersonalGame/Environment/FoliageManager.h"
+#include "TranspersonalGame/Crowd/CrowdSimulationManager.h"
+
+DEFINE_LOG_CATEGORY_STATIC(LogBuildValidation, Log, All);
 
 UBuildValidationSubsystem::UBuildValidationSubsystem()
 {
-    bIsValidationEnabled = true;
-    ValidationFrequency = 10.0f;
-    LastValidationTime = 0.0f;
-    OverallValidationScore = 0.0f;
-    ActiveValidationActors.Empty();
+    ValidationInterval = 30.0f;
 }
 
 void UBuildValidationSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
     
-    UE_LOG(LogTemp, Warning, TEXT("BuildValidationSubsystem: Initializing validation subsystem"));
+    UE_LOG(LogBuildValidation, Log, TEXT("BuildValidationSubsystem: Initializing build validation"));
     
-    // Initialize validation state
-    bIsValidationEnabled = true;
-    ValidationFrequency = 10.0f;
-    LastValidationTime = 0.0f;
-    OverallValidationScore = 0.0f;
+    // Start periodic validation timer
+    if (UWorld* World = GetWorld())
+    {
+        World->GetTimerManager().SetTimer(
+            ValidationTimerHandle,
+            this,
+            &UBuildValidationSubsystem::PerformPeriodicValidation,
+            ValidationInterval,
+            true
+        );
+    }
     
-    UE_LOG(LogTemp, Log, TEXT("BuildValidationSubsystem: Initialization complete"));
+    // Perform initial validation
+    ForceValidation();
 }
 
 void UBuildValidationSubsystem::Deinitialize()
 {
-    UE_LOG(LogTemp, Warning, TEXT("BuildValidationSubsystem: Deinitializing validation subsystem"));
-    
-    // Clear validation actors
-    ActiveValidationActors.Empty();
+    if (UWorld* World = GetWorld())
+    {
+        World->GetTimerManager().ClearTimer(ValidationTimerHandle);
+    }
     
     Super::Deinitialize();
 }
 
-bool UBuildValidationSubsystem::ShouldCreateSubsystem(UObject* Outer) const
+FBuild_ValidationMetrics UBuildValidationSubsystem::ValidateBuildHealth()
 {
-    return true;
+    FBuild_ValidationMetrics Metrics;
+    Metrics.LastValidationTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
+    
+    UE_LOG(LogBuildValidation, Log, TEXT("Starting comprehensive build validation"));
+    
+    // Clear previous errors
+    Metrics.ValidationErrors.Empty();
+    ModuleStatuses.Empty();
+    
+    // Validate all critical systems
+    ValidateCoreGameSystems(Metrics);
+    ValidateCharacterSystems(Metrics);
+    ValidateAISystems(Metrics);
+    ValidateWorldSystems(Metrics);
+    ValidateWorldActors(Metrics);
+    
+    // Calculate overall health
+    Metrics.bBuildHealthy = (Metrics.FailedModules == 0) && (Metrics.ValidationErrors.Num() == 0);
+    
+    // Store latest metrics
+    LatestMetrics = Metrics;
+    
+    UE_LOG(LogBuildValidation, Log, TEXT("Build validation complete: %s"), 
+           Metrics.bBuildHealthy ? TEXT("HEALTHY") : TEXT("ISSUES DETECTED"));
+    
+    return Metrics;
 }
 
-void UBuildValidationSubsystem::Tick(float DeltaTime)
+FBuild_ModuleStatus UBuildValidationSubsystem::ValidateModule(const FString& ModuleName)
 {
-    if (!bIsValidationEnabled)
-        return;
+    FBuild_ModuleStatus Status;
+    Status.ModuleName = ModuleName;
     
-    LastValidationTime += DeltaTime;
+    double StartTime = FPlatformTime::Seconds();
     
-    // Perform periodic validation
-    if (LastValidationTime >= ValidationFrequency)
+    try
     {
-        PerformSystemValidation();
-        LastValidationTime = 0.0f;
-    }
-}
-
-bool UBuildValidationSubsystem::IsTickable() const
-{
-    return bIsValidationEnabled;
-}
-
-TStatId UBuildValidationSubsystem::GetStatId() const
-{
-    RETURN_QUICK_DECLARE_CYCLE_STAT(UBuildValidationSubsystem, STATGROUP_Tickables);
-}
-
-void UBuildValidationSubsystem::PerformSystemValidation()
-{
-    UE_LOG(LogTemp, Log, TEXT("BuildValidationSubsystem: Performing system-wide validation"));
-    
-    float TotalScore = 0.0f;
-    int32 ValidActors = 0;
-    
-    // Validate all registered validation actors
-    for (TWeakObjectPtr<ABuildValidationActor> ActorPtr : ActiveValidationActors)
-    {
-        if (ActorPtr.IsValid())
+        // Try to load the class
+        FString ClassPath = FString::Printf(TEXT("/Script/TranspersonalGame.%s"), *ModuleName);
+        UClass* LoadedClass = LoadClass<UObject>(nullptr, *ClassPath);
+        
+        if (LoadedClass)
         {
-            ABuildValidationActor* Actor = ActorPtr.Get();
-            Actor->ForceValidation();
-            TotalScore += Actor->GetValidationScore();
-            ValidActors++;
+            Status.bIsLoaded = true;
+            Status.bHasErrors = false;
+            UE_LOG(LogBuildValidation, Log, TEXT("Module %s: LOADED"), *ModuleName);
+        }
+        else
+        {
+            Status.bIsLoaded = false;
+            Status.bHasErrors = true;
+            Status.ErrorMessage = TEXT("Class not found");
+            UE_LOG(LogBuildValidation, Warning, TEXT("Module %s: NOT FOUND"), *ModuleName);
         }
     }
-    
-    // Calculate overall score
-    if (ValidActors > 0)
+    catch (const std::exception& e)
     {
-        OverallValidationScore = TotalScore / ValidActors;
+        Status.bIsLoaded = false;
+        Status.bHasErrors = true;
+        Status.ErrorMessage = FString::Printf(TEXT("Exception: %s"), ANSI_TO_TCHAR(e.what()));
+        UE_LOG(LogBuildValidation, Error, TEXT("Module %s: EXCEPTION - %s"), *ModuleName, *Status.ErrorMessage);
+    }
+    
+    Status.LoadTime = FPlatformTime::Seconds() - StartTime;
+    return Status;
+}
+
+void UBuildValidationSubsystem::ForceValidation()
+{
+    ValidateBuildHealth();
+}
+
+void UBuildValidationSubsystem::ValidateCoreGameSystems(FBuild_ValidationMetrics& Metrics)
+{
+    // Validate TranspersonalGameState
+    FBuild_ModuleStatus GameStateStatus = ValidateModule(TEXT("TranspersonalGameState"));
+    ModuleStatuses.Add(GameStateStatus);
+    
+    if (!GameStateStatus.bIsLoaded)
+    {
+        Metrics.FailedModules++;
+        Metrics.ValidationErrors.Add(TEXT("TranspersonalGameState not loaded"));
     }
     else
     {
-        OverallValidationScore = 0.0f;
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("BuildValidationSubsystem: System validation complete - Score: %.1f%% (%d actors)"), 
-           OverallValidationScore, ValidActors);
-    
-    // Broadcast validation result
-    OnSystemValidationComplete.Broadcast(OverallValidationScore >= 75.0f, OverallValidationScore);
-}
-
-void UBuildValidationSubsystem::RegisterValidationActor(ABuildValidationActor* Actor)
-{
-    if (!Actor)
-    {
-        UE_LOG(LogTemp, Error, TEXT("BuildValidationSubsystem: Cannot register null validation actor"));
-        return;
-    }
-    
-    // Add to active actors list
-    ActiveValidationActors.AddUnique(Actor);
-    
-    UE_LOG(LogTemp, Log, TEXT("BuildValidationSubsystem: Registered validation actor '%s' (Total: %d)"), 
-           *Actor->GetName(), ActiveValidationActors.Num());
-}
-
-void UBuildValidationSubsystem::UnregisterValidationActor(ABuildValidationActor* Actor)
-{
-    if (!Actor)
-        return;
-    
-    // Remove from active actors list
-    ActiveValidationActors.RemoveAll([Actor](const TWeakObjectPtr<ABuildValidationActor>& Ptr) {
-        return Ptr.Get() == Actor;
-    });
-    
-    UE_LOG(LogTemp, Log, TEXT("BuildValidationSubsystem: Unregistered validation actor '%s' (Remaining: %d)"), 
-           *Actor->GetName(), ActiveValidationActors.Num());
-}
-
-void UBuildValidationSubsystem::SetValidationEnabled(bool bEnabled)
-{
-    bIsValidationEnabled = bEnabled;
-    UE_LOG(LogTemp, Warning, TEXT("BuildValidationSubsystem: Validation %s"), 
-           bEnabled ? TEXT("ENABLED") : TEXT("DISABLED"));
-}
-
-void UBuildValidationSubsystem::SetValidationFrequency(float Frequency)
-{
-    ValidationFrequency = FMath::Max(1.0f, Frequency);
-    UE_LOG(LogTemp, Log, TEXT("BuildValidationSubsystem: Validation frequency set to %.1f seconds"), ValidationFrequency);
-}
-
-float UBuildValidationSubsystem::GetOverallValidationScore() const
-{
-    return OverallValidationScore;
-}
-
-bool UBuildValidationSubsystem::IsSystemValidationPassing() const
-{
-    return OverallValidationScore >= 75.0f;
-}
-
-int32 UBuildValidationSubsystem::GetActiveValidationActorCount() const
-{
-    // Clean up invalid weak pointers and return count
-    int32 ValidCount = 0;
-    for (const TWeakObjectPtr<ABuildValidationActor>& ActorPtr : ActiveValidationActors)
-    {
-        if (ActorPtr.IsValid())
+        Metrics.CriticalSystemsOnline++;
+        
+        // Check if actually active in world
+        if (UWorld* World = GetWorld())
         {
-            ValidCount++;
-        }
-    }
-    return ValidCount;
-}
-
-void UBuildValidationSubsystem::ForceSystemValidation()
-{
-    UE_LOG(LogTemp, Warning, TEXT("BuildValidationSubsystem: Force system validation requested"));
-    PerformSystemValidation();
-}
-
-TArray<ABuildValidationActor*> UBuildValidationSubsystem::GetActiveValidationActors() const
-{
-    TArray<ABuildValidationActor*> ValidActors;
-    
-    for (const TWeakObjectPtr<ABuildValidationActor>& ActorPtr : ActiveValidationActors)
-    {
-        if (ActorPtr.IsValid())
-        {
-            ValidActors.Add(ActorPtr.Get());
+            AGameStateBase* GameState = World->GetGameState();
+            if (GameState && GameState->IsA<ATranspersonalGameState>())
+            {
+                UE_LOG(LogBuildValidation, Log, TEXT("TranspersonalGameState is active in world"));
+            }
+            else
+            {
+                Metrics.ValidationErrors.Add(TEXT("TranspersonalGameState not active in world"));
+            }
         }
     }
     
-    return ValidActors;
+    Metrics.TotalModulesLoaded++;
+}
+
+void UBuildValidationSubsystem::ValidateCharacterSystems(FBuild_ValidationMetrics& Metrics)
+{
+    // Validate TranspersonalCharacter
+    FBuild_ModuleStatus CharacterStatus = ValidateModule(TEXT("TranspersonalCharacter"));
+    ModuleStatuses.Add(CharacterStatus);
+    
+    if (!CharacterStatus.bIsLoaded)
+    {
+        Metrics.FailedModules++;
+        Metrics.ValidationErrors.Add(TEXT("TranspersonalCharacter not loaded"));
+    }
+    else
+    {
+        Metrics.CriticalSystemsOnline++;
+        
+        // Check for character instances in world
+        if (UWorld* World = GetWorld())
+        {
+            TArray<AActor*> Characters;
+            UGameplayStatics::GetAllActorsOfClass(World, ATranspersonalCharacter::StaticClass(), Characters);
+            UE_LOG(LogBuildValidation, Log, TEXT("Found %d TranspersonalCharacter instances"), Characters.Num());
+        }
+    }
+    
+    Metrics.TotalModulesLoaded++;
+}
+
+void UBuildValidationSubsystem::ValidateAISystems(FBuild_ValidationMetrics& Metrics)
+{
+    // Validate DinosaurTRex
+    FBuild_ModuleStatus TRexStatus = ValidateModule(TEXT("DinosaurTRex"));
+    ModuleStatuses.Add(TRexStatus);
+    
+    if (!TRexStatus.bIsLoaded)
+    {
+        Metrics.FailedModules++;
+        Metrics.ValidationErrors.Add(TEXT("DinosaurTRex not loaded"));
+    }
+    else
+    {
+        Metrics.CriticalSystemsOnline++;
+    }
+    
+    // Validate DinosaurCombatAIController
+    FBuild_ModuleStatus AIControllerStatus = ValidateModule(TEXT("DinosaurCombatAIController"));
+    ModuleStatuses.Add(AIControllerStatus);
+    
+    if (!AIControllerStatus.bIsLoaded)
+    {
+        Metrics.FailedModules++;
+        Metrics.ValidationErrors.Add(TEXT("DinosaurCombatAIController not loaded"));
+    }
+    else
+    {
+        Metrics.CriticalSystemsOnline++;
+    }
+    
+    Metrics.TotalModulesLoaded += 2;
+}
+
+void UBuildValidationSubsystem::ValidateWorldSystems(FBuild_ValidationMetrics& Metrics)
+{
+    // Validate PCGWorldGenerator
+    FBuild_ModuleStatus WorldGenStatus = ValidateModule(TEXT("PCGWorldGenerator"));
+    ModuleStatuses.Add(WorldGenStatus);
+    
+    if (!WorldGenStatus.bIsLoaded)
+    {
+        Metrics.FailedModules++;
+        Metrics.ValidationErrors.Add(TEXT("PCGWorldGenerator not loaded"));
+    }
+    else
+    {
+        Metrics.CriticalSystemsOnline++;
+    }
+    
+    // Validate FoliageManager
+    FBuild_ModuleStatus FoliageStatus = ValidateModule(TEXT("FoliageManager"));
+    ModuleStatuses.Add(FoliageStatus);
+    
+    if (!FoliageStatus.bIsLoaded)
+    {
+        Metrics.FailedModules++;
+        Metrics.ValidationErrors.Add(TEXT("FoliageManager not loaded"));
+    }
+    else
+    {
+        Metrics.CriticalSystemsOnline++;
+    }
+    
+    // Validate CrowdSimulationManager
+    FBuild_ModuleStatus CrowdStatus = ValidateModule(TEXT("CrowdSimulationManager"));
+    ModuleStatuses.Add(CrowdStatus);
+    
+    if (!CrowdStatus.bIsLoaded)
+    {
+        Metrics.FailedModules++;
+        Metrics.ValidationErrors.Add(TEXT("CrowdSimulationManager not loaded"));
+    }
+    else
+    {
+        Metrics.CriticalSystemsOnline++;
+    }
+    
+    Metrics.TotalModulesLoaded += 3;
+}
+
+void UBuildValidationSubsystem::ValidateWorldActors(FBuild_ValidationMetrics& Metrics)
+{
+    if (!GetWorld())
+    {
+        Metrics.ValidationErrors.Add(TEXT("No valid world for actor validation"));
+        return;
+    }
+    
+    // Count all actors
+    TArray<AActor*> AllActors;
+    UGameplayStatics::GetAllActorsOfClass(GetWorld(), AActor::StaticClass(), AllActors);
+    Metrics.TotalActorsInWorld = AllActors.Num();
+    
+    UE_LOG(LogBuildValidation, Log, TEXT("World contains %d total actors"), AllActors.Num());
+    
+    // Check for minimum required actors
+    if (AllActors.Num() < 10)
+    {
+        Metrics.ValidationErrors.Add(TEXT("World has too few actors - may be empty"));
+    }
+    
+    // Count specific actor types
+    int32 LightCount = 0;
+    int32 MeshCount = 0;
+    int32 DinosaurCount = 0;
+    
+    for (AActor* Actor : AllActors)
+    {
+        if (Actor->IsA<ALight>())
+        {
+            LightCount++;
+        }
+        else if (Actor->IsA<AStaticMeshActor>())
+        {
+            MeshCount++;
+        }
+        else if (Actor->IsA<ADinosaurTRex>())
+        {
+            DinosaurCount++;
+        }
+    }
+    
+    UE_LOG(LogBuildValidation, Log, TEXT("Actor breakdown: %d lights, %d meshes, %d dinosaurs"), 
+           LightCount, MeshCount, DinosaurCount);
+    
+    // Validate minimum world requirements
+    if (LightCount == 0)
+    {
+        Metrics.ValidationErrors.Add(TEXT("No lighting found in world"));
+    }
+}
+
+void UBuildValidationSubsystem::PerformPeriodicValidation()
+{
+    UE_LOG(LogBuildValidation, Log, TEXT("Performing periodic build validation"));
+    ValidateBuildHealth();
 }
