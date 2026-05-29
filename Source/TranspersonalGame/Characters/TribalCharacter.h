@@ -10,36 +10,40 @@
 UENUM(BlueprintType)
 enum class EChar_TribalRole : uint8
 {
+    Elder       UMETA(DisplayName = "Elder"),
     Hunter      UMETA(DisplayName = "Hunter"),
     Gatherer    UMETA(DisplayName = "Gatherer"),
-    Shaman      UMETA(DisplayName = "Shaman"),
-    Warrior     UMETA(DisplayName = "Warrior"),
-    Elder       UMETA(DisplayName = "Elder")
+    Crafter     UMETA(DisplayName = "Crafter"),
+    Scout       UMETA(DisplayName = "Scout")
 };
 
 USTRUCT(BlueprintType)
-struct FChar_TribalStats
+struct FChar_TribalAppearance
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal Stats")
-    float Strength = 50.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
+    float SkinTone = 0.5f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal Stats")
-    float Agility = 50.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
+    FLinearColor WarPaintColor = FLinearColor::Red;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal Stats")
-    float Wisdom = 50.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
+    bool bHasTribalMarkings = true;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal Stats")
-    float Survival = 50.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
+    bool bHasFeatherHeaddress = false;
 
-    FChar_TribalStats()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
+    bool bHasBoneAccessories = true;
+
+    FChar_TribalAppearance()
     {
-        Strength = 50.0f;
-        Agility = 50.0f;
-        Wisdom = 50.0f;
-        Survival = 50.0f;
+        SkinTone = 0.5f;
+        WarPaintColor = FLinearColor::Red;
+        bHasTribalMarkings = true;
+        bHasFeatherHeaddress = false;
+        bHasBoneAccessories = true;
     }
 };
 
@@ -54,69 +58,85 @@ public:
 protected:
     virtual void BeginPlay() override;
 
+public:
+    virtual void Tick(float DeltaTime) override;
+
+    // Tribal character properties
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal Character")
     EChar_TribalRole TribalRole = EChar_TribalRole::Hunter;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal Character")
-    FChar_TribalStats TribalStats;
+    FChar_TribalAppearance Appearance;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal Character")
-    FString CharacterName = TEXT("Unnamed Tribal");
+    FString CharacterName = TEXT("Tribal Member");
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal Character")
     int32 Age = 25;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal Character")
-    bool bIsMale = true;
+    float ExperienceLevel = 1.0f;
 
     // Equipment components
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Equipment")
-    UStaticMeshComponent* WeaponMesh;
+    class UStaticMeshComponent* WeaponMesh;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Equipment")
-    UStaticMeshComponent* ToolMesh;
+    class UStaticMeshComponent* AccessoryMesh;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
-    FLinearColor SkinTone = FLinearColor(0.8f, 0.6f, 0.4f, 1.0f);
+    // Interaction system
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interaction")
+    bool bCanInteract = true;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
-    FLinearColor TribalMarkingColor = FLinearColor(0.2f, 0.1f, 0.0f, 1.0f);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interaction")
+    float InteractionRange = 300.0f;
 
-public:
-    virtual void Tick(float DeltaTime) override;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interaction")
+    FString InteractionPrompt = TEXT("Talk to tribal member");
 
+    // Character behavior
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
+    bool bIsHostile = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
+    bool bIsFriendly = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
+    float TrustLevel = 0.5f;
+
+    // Functions
     UFUNCTION(BlueprintCallable, Category = "Tribal Character")
     void SetTribalRole(EChar_TribalRole NewRole);
 
     UFUNCTION(BlueprintCallable, Category = "Tribal Character")
-    EChar_TribalRole GetTribalRole() const { return TribalRole; }
+    void ApplyTribalAppearance(const FChar_TribalAppearance& NewAppearance);
 
     UFUNCTION(BlueprintCallable, Category = "Tribal Character")
-    void SetCharacterName(const FString& NewName);
+    void EquipWeapon(class UStaticMesh* WeaponMeshAsset);
 
     UFUNCTION(BlueprintCallable, Category = "Tribal Character")
-    FString GetCharacterName() const { return CharacterName; }
+    void EquipAccessory(class UStaticMesh* AccessoryMeshAsset);
 
-    UFUNCTION(BlueprintCallable, Category = "Tribal Character")
-    void ApplyTribalMarkings();
+    UFUNCTION(BlueprintCallable, Category = "Interaction")
+    bool CanPlayerInteract(class APawn* PlayerPawn) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Tribal Character")
-    void EquipWeapon(UStaticMesh* WeaponMeshAsset);
+    UFUNCTION(BlueprintImplementableEvent, Category = "Interaction")
+    void OnPlayerInteract(class APawn* PlayerPawn);
 
-    UFUNCTION(BlueprintCallable, Category = "Tribal Character")
-    void EquipTool(UStaticMesh* ToolMeshAsset);
+    UFUNCTION(BlueprintCallable, Category = "Behavior")
+    void ModifyTrustLevel(float DeltaTrust);
 
-    UFUNCTION(BlueprintPure, Category = "Tribal Character")
-    float GetStatValue(const FString& StatName) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Tribal Character")
-    void ModifyStatValue(const FString& StatName, float Delta);
-
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Tribal Character")
-    void RandomizeAppearance();
-
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Tribal Character")
+protected:
+    // Internal functions
     void SetupDefaultEquipment();
-};
+    void ConfigureAppearanceByRole();
+    void UpdateMaterialParameters();
 
-#include "TribalCharacter.generated.h"
+private:
+    // Cache for performance
+    UPROPERTY()
+    class UMaterialInstanceDynamic* DynamicSkinMaterial;
+
+    UPROPERTY()
+    class UMaterialInstanceDynamic* DynamicClothingMaterial;
+};
