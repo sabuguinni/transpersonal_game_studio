@@ -1,60 +1,67 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/GameInstanceSubsystem.h"
+#include "GameFramework/GameModeBase.h"
+#include "Engine/World.h"
 #include "Components/AudioComponent.h"
 #include "Sound/SoundCue.h"
-#include "Engine/Engine.h"
+#include "Sound/SoundWave.h"
+#include "Kismet/GameplayStatics.h"
 #include "Audio_SpatialAudioManager.generated.h"
 
 UENUM(BlueprintType)
-enum class EAudio_SoundCategory : uint8
+enum class EAudio_AudioCategory : uint8
 {
-    Ambient,
-    Dinosaur,
-    Player,
-    Environment,
-    Music,
-    UI,
-    Narration,
-    Combat
+    Ambient     UMETA(DisplayName = "Ambient"),
+    Dinosaur    UMETA(DisplayName = "Dinosaur"),
+    Player      UMETA(DisplayName = "Player"),
+    Environment UMETA(DisplayName = "Environment"),
+    Music       UMETA(DisplayName = "Music"),
+    UI          UMETA(DisplayName = "UI"),
+    Narration   UMETA(DisplayName = "Narration"),
+    Combat      UMETA(DisplayName = "Combat")
+};
+
+UENUM(BlueprintType)
+enum class EAudio_BiomeType : uint8
+{
+    Savana      UMETA(DisplayName = "Savana"),
+    Forest      UMETA(DisplayName = "Forest"),
+    Desert      UMETA(DisplayName = "Desert"),
+    Swamp       UMETA(DisplayName = "Swamp"),
+    Mountain    UMETA(DisplayName = "Mountain")
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FAudio_SpatialSound
+struct TRANSPERSONALGAME_API FAudio_SoundEntry
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    USoundCue* SoundCue;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    FString SoundName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FVector Location;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    TSoftObjectPtr<USoundWave> SoundAsset;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float MaxDistance;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    EAudio_AudioCategory Category;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float Volume;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    float Volume = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    EAudio_SoundCategory Category;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    float Pitch = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    bool bIsLooping;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    float AttenuationRadius = 1000.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    int32 Priority;
-
-    FAudio_SpatialSound()
+    FAudio_SoundEntry()
     {
-        SoundCue = nullptr;
-        Location = FVector::ZeroVector;
-        MaxDistance = 5000.0f;
+        SoundName = TEXT("");
+        Category = EAudio_AudioCategory::Ambient;
         Volume = 1.0f;
-        Category = EAudio_SoundCategory::Ambient;
-        bIsLooping = false;
-        Priority = 50;
+        Pitch = 1.0f;
+        AttenuationRadius = 1000.0f;
     }
 };
 
@@ -63,134 +70,98 @@ struct TRANSPERSONALGAME_API FAudio_BiomeAmbience
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FString BiomeName;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    EAudio_BiomeType BiomeType;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    TArray<USoundCue*> AmbientSounds;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    TArray<FAudio_SoundEntry> AmbientSounds;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float CrossfadeDistance;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    float BaseVolume = 0.7f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float BaseVolume;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    float FadeDistance = 2000.0f;
 
     FAudio_BiomeAmbience()
     {
-        BiomeName = TEXT("Default");
-        CrossfadeDistance = 10000.0f;
+        BiomeType = EAudio_BiomeType::Savana;
         BaseVolume = 0.7f;
+        FadeDistance = 2000.0f;
     }
 };
 
-/**
- * Spatial Audio Manager for prehistoric survival game
- * Handles 3D positioned audio, biome transitions, and distance-based attenuation
- */
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UAudio_SpatialAudioManager : public UGameInstanceSubsystem
+class TRANSPERSONALGAME_API UAudio_SpatialAudioManager : public UObject
 {
     GENERATED_BODY()
 
 public:
     UAudio_SpatialAudioManager();
 
-    // Subsystem interface
-    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
-    virtual void Deinitialize() override;
-
-    // Core audio functions
+    // Core audio management
     UFUNCTION(BlueprintCallable, Category = "Audio")
-    UAudioComponent* PlaySoundAtLocation(USoundCue* SoundCue, const FVector& Location, 
-        float Volume = 1.0f, float Pitch = 1.0f, bool bAutoDestroy = true);
+    void InitializeAudioSystem(UWorld* World);
 
     UFUNCTION(BlueprintCallable, Category = "Audio")
-    UAudioComponent* PlaySpatialSound(const FAudio_SpatialSound& SpatialSound);
+    void PlaySoundAtLocation(const FAudio_SoundEntry& SoundEntry, const FVector& Location);
 
     UFUNCTION(BlueprintCallable, Category = "Audio")
-    void StopSoundsByCategory(EAudio_SoundCategory Category);
+    void PlayNarrationSound(const FString& SoundName, USoundWave* SoundWave);
 
     UFUNCTION(BlueprintCallable, Category = "Audio")
-    void SetCategoryVolume(EAudio_SoundCategory Category, float Volume);
+    void StopAllSoundsInCategory(EAudio_AudioCategory Category);
+
+    // Biome-specific audio
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    void SetCurrentBiome(EAudio_BiomeType NewBiome, const FVector& PlayerLocation);
 
     UFUNCTION(BlueprintCallable, Category = "Audio")
-    float GetCategoryVolume(EAudio_SoundCategory Category) const;
-
-    // Biome audio management
-    UFUNCTION(BlueprintCallable, Category = "Audio")
-    void RegisterBiomeAmbience(const FAudio_BiomeAmbience& BiomeAmbience);
-
-    UFUNCTION(BlueprintCallable, Category = "Audio")
-    void UpdatePlayerLocation(const FVector& PlayerLocation);
-
-    UFUNCTION(BlueprintCallable, Category = "Audio")
-    void TransitionToBiome(const FString& BiomeName, float TransitionTime = 3.0f);
+    void UpdateBiomeAmbience(const FVector& PlayerLocation);
 
     // Dinosaur audio
     UFUNCTION(BlueprintCallable, Category = "Audio")
-    void PlayDinosaurSound(USoundCue* DinosaurSound, const FVector& DinosaurLocation, 
-        float ThreatLevel = 1.0f);
+    void PlayDinosaurSound(const FString& DinosaurType, const FVector& Location, float Intensity = 1.0f);
 
     UFUNCTION(BlueprintCallable, Category = "Audio")
-    void PlayFootstepSound(const FVector& Location, float CreatureSize = 1.0f);
+    void RegisterDinosaurActor(AActor* DinosaurActor, const FString& DinosaurType);
 
-    // Narration system
+    // Volume control
     UFUNCTION(BlueprintCallable, Category = "Audio")
-    void PlayNarration(USoundCue* NarrationSound, bool bPauseOtherAudio = false);
-
-    UFUNCTION(BlueprintCallable, Category = "Audio")
-    void StopNarration();
-
-    // Audio occlusion
-    UFUNCTION(BlueprintCallable, Category = "Audio")
-    float CalculateOcclusion(const FVector& SourceLocation, const FVector& ListenerLocation);
-
-    // Audio priority system
-    UFUNCTION(BlueprintCallable, Category = "Audio")
-    bool CanPlaySound(int32 Priority, EAudio_SoundCategory Category);
+    void SetCategoryVolume(EAudio_AudioCategory Category, float Volume);
 
     UFUNCTION(BlueprintCallable, Category = "Audio")
-    void CleanupFinishedSounds();
+    float GetCategoryVolume(EAudio_AudioCategory Category) const;
+
+    // Distance-based audio
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    float CalculateDistanceAttenuation(const FVector& SoundLocation, const FVector& ListenerLocation, float MaxDistance) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    bool IsLocationOccluded(const FVector& SoundLocation, const FVector& ListenerLocation) const;
 
 protected:
-    // Category volume controls
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Settings")
-    TMap<EAudio_SoundCategory, float> CategoryVolumes;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio", meta = (AllowPrivateAccess = "true"))
+    TArray<FAudio_BiomeAmbience> BiomeAmbiences;
 
-    // Biome management
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Audio")
-    TArray<FAudio_BiomeAmbience> RegisteredBiomes;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio", meta = (AllowPrivateAccess = "true"))
+    TMap<EAudio_AudioCategory, float> CategoryVolumes;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Audio")
-    FString CurrentBiome;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio", meta = (AllowPrivateAccess = "true"))
+    EAudio_BiomeType CurrentBiome;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Audio")
-    UAudioComponent* CurrentAmbienceComponent;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio", meta = (AllowPrivateAccess = "true"))
+    TArray<UAudioComponent*> ActiveAudioComponents;
 
-    // Active sounds tracking
-    UPROPERTY()
-    TArray<UAudioComponent*> ActiveSounds;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio", meta = (AllowPrivateAccess = "true"))
+    TMap<FString, TSoftObjectPtr<USoundWave>> DinosaurSounds;
 
-    // Player location for distance calculations
-    UPROPERTY()
-    FVector PlayerLocation;
-
-    // Narration control
-    UPROPERTY()
-    UAudioComponent* NarrationComponent;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Settings")
-    int32 MaxConcurrentSounds;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Settings")
-    float GlobalVolumeMultiplier;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Settings")
-    float OcclusionTraceDistance;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio", meta = (AllowPrivateAccess = "true"))
+    TMap<FString, TSoftObjectPtr<USoundWave>> NarrationSounds;
 
 private:
-    void InitializeCategoryVolumes();
-    FString DetermineBiomeFromLocation(const FVector& Location);
-    void UpdateAmbienceBasedOnLocation();
-    void RemoveFinishedComponent(UAudioComponent* Component);
+    void InitializeBiomeAmbiences();
+    void InitializeDinosaurSounds();
+    void InitializeNarrationSounds();
+    void CleanupInactiveComponents();
+    UAudioComponent* CreateAudioComponent(UWorld* World, const FVector& Location);
 };
