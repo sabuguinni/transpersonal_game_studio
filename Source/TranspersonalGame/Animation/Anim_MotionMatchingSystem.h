@@ -2,46 +2,39 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
-#include "Animation/AnimInstance.h"
+#include "Engine/Engine.h"
+#include "Animation/AnimSequence.h"
 #include "Animation/BlendSpace.h"
-#include "Engine/DataTable.h"
-#include "SharedTypes.h"
 #include "Anim_MotionMatchingSystem.generated.h"
-
-class USkeletalMeshComponent;
-class UAnimSequence;
 
 USTRUCT(BlueprintType)
 struct TRANSPERSONALGAME_API FAnim_MotionData
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Data")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion")
     FVector Velocity;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Data")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion")
+    FVector Acceleration;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion")
     float Speed;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Data")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion")
     float Direction;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Data")
-    bool bIsInAir;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Data")
-    bool bIsCrouching;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Data")
-    ESurvivalState SurvivalState;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion")
+    bool bIsMoving;
 
     FAnim_MotionData()
-        : Velocity(FVector::ZeroVector)
-        , Speed(0.0f)
-        , Direction(0.0f)
-        , bIsInAir(false)
-        , bIsCrouching(false)
-        , SurvivalState(ESurvivalState::Normal)
-    {}
+    {
+        Velocity = FVector::ZeroVector;
+        Acceleration = FVector::ZeroVector;
+        Speed = 0.0f;
+        Direction = 0.0f;
+        bIsMoving = false;
+    }
 };
 
 USTRUCT(BlueprintType)
@@ -49,27 +42,27 @@ struct TRANSPERSONALGAME_API FAnim_MotionClip
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Clip")
-    UAnimSequence* AnimSequence;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
+    TSoftObjectPtr<UAnimSequence> AnimSequence;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Clip")
-    float StartTime;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Clip")
-    float EndTime;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Clip")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion")
     FAnim_MotionData MotionData;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Clip")
-    float Quality;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
+    float StartTime;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
+    float EndTime;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quality")
+    float QualityScore;
 
     FAnim_MotionClip()
-        : AnimSequence(nullptr)
-        , StartTime(0.0f)
-        , EndTime(0.0f)
-        , Quality(1.0f)
-    {}
+    {
+        StartTime = 0.0f;
+        EndTime = 1.0f;
+        QualityScore = 1.0f;
+    }
 };
 
 UCLASS(ClassGroup=(Animation), meta=(BlueprintSpawnableComponent))
@@ -84,8 +77,6 @@ protected:
     virtual void BeginPlay() override;
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-public:
-    // Motion matching configuration
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
     TArray<FAnim_MotionClip> MotionDatabase;
 
@@ -96,48 +87,32 @@ public:
     float BlendTime;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
-    float UpdateFrequency;
+    bool bEnableMotionMatching;
 
-    // Current motion state
-    UPROPERTY(BlueprintReadOnly, Category = "Motion State")
+    UPROPERTY(BlueprintReadOnly, Category = "Current State")
     FAnim_MotionData CurrentMotionData;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Motion State")
-    FAnim_MotionClip* CurrentClip;
+    UPROPERTY(BlueprintReadOnly, Category = "Current State")
+    FAnim_MotionClip CurrentBestMatch;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Motion State")
-    float CurrentPlayTime;
-
-    // Component references
-    UPROPERTY(BlueprintReadOnly, Category = "Components")
-    USkeletalMeshComponent* SkeletalMeshComponent;
-
-    // Motion matching functions
+public:
     UFUNCTION(BlueprintCallable, Category = "Motion Matching")
-    void UpdateMotionData();
+    void UpdateMotionData(const FVector& InVelocity, const FVector& InAcceleration);
 
     UFUNCTION(BlueprintCallable, Category = "Motion Matching")
-    FAnim_MotionClip* FindBestMatchingClip(const FAnim_MotionData& TargetMotion);
+    FAnim_MotionClip FindBestMatch(const FAnim_MotionData& TargetMotion);
 
     UFUNCTION(BlueprintCallable, Category = "Motion Matching")
-    void PlayMotionClip(FAnim_MotionClip* Clip);
+    void AddMotionClip(UAnimSequence* AnimSequence, const FAnim_MotionData& MotionData, float StartTime = 0.0f, float EndTime = 1.0f);
 
     UFUNCTION(BlueprintCallable, Category = "Motion Matching")
-    float CalculateMotionDistance(const FAnim_MotionData& A, const FAnim_MotionData& B);
+    void ClearMotionDatabase();
 
-    UFUNCTION(BlueprintCallable, Category = "Motion Matching")
-    void AddMotionClip(UAnimSequence* Animation, float StartTime, float EndTime, const FAnim_MotionData& MotionData);
-
-    UFUNCTION(BlueprintCallable, Category = "Motion Matching")
-    void BuildMotionDatabase();
+    UFUNCTION(BlueprintPure, Category = "Motion Matching")
+    float CalculateMotionScore(const FAnim_MotionData& A, const FAnim_MotionData& B) const;
 
 private:
-    float LastUpdateTime;
-    bool bIsInitialized;
-
-    void InitializeComponent();
-    void UpdateCurrentMotion(float DeltaTime);
-    FVector GetCharacterVelocity() const;
-    bool IsCharacterInAir() const;
-    bool IsCharacterCrouching() const;
+    void InitializeDefaultMotions();
+    float CalculateVelocityScore(const FVector& A, const FVector& B) const;
+    float CalculateDirectionScore(float A, float B) const;
 };
