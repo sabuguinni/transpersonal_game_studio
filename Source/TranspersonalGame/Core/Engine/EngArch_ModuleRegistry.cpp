@@ -1,398 +1,414 @@
 #include "EngArch_ModuleRegistry.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "GameFramework/GameModeBase.h"
-#include "Subsystems/GameInstanceSubsystem.h"
+#include "HAL/PlatformFilemanager.h"
+#include "Misc/DateTime.h"
+#include "Stats/Stats.h"
 
 UEngArch_ModuleRegistry::UEngArch_ModuleRegistry()
 {
-    PrimaryComponentTick.bCanEverTick = false;
-    
-    // Initialize module status tracking
-    ModuleLoadOrder = {
-        EEng_ModuleType::Core,
-        EEng_ModuleType::Physics,
-        EEng_ModuleType::WorldGeneration,
-        EEng_ModuleType::Environment,
-        EEng_ModuleType::Character,
-        EEng_ModuleType::AI,
-        EEng_ModuleType::Combat,
-        EEng_ModuleType::Quest,
-        EEng_ModuleType::Audio,
-        EEng_ModuleType::VFX,
-        EEng_ModuleType::UI
-    };
-    
-    // Initialize all modules as unloaded
-    for (EEng_ModuleType ModuleType : ModuleLoadOrder)
-    {
-        FEng_ModuleInfo ModuleInfo;
-        ModuleInfo.ModuleType = ModuleType;
-        ModuleInfo.LoadStatus = EEng_ModuleStatus::Unloaded;
-        ModuleInfo.LoadPriority = GetModulePriority(ModuleType);
-        ModuleInfo.DependentModules = GetModuleDependencies(ModuleType);
-        
-        RegisteredModules.Add(ModuleType, ModuleInfo);
-    }
+    MaxFrameTime = 16.67f; // 60 FPS target
+    MaxDrawCalls = 2000;
+    MaxMemoryUsageMB = 4096.0f;
+    LastMetricsUpdate = 0.0f;
+    bInitializationOrderDirty = true;
 }
 
-void UEngArch_ModuleRegistry::BeginPlay()
+void UEngArch_ModuleRegistry::Initialize(FSubsystemCollectionBase& Collection)
 {
-    Super::BeginPlay();
+    Super::Initialize(Collection);
     
-    if (GetWorld())
-    {
-        UE_LOG(LogTemp, Warning, TEXT("EngArch_ModuleRegistry: Registry initialized"));
-        InitializeModuleRegistry();
-    }
+    UE_LOG(LogTemp, Warning, TEXT("EngArch_ModuleRegistry: Initializing module registry system"));
+    
+    InitializeCoreModules();
+    UpdatePerformanceMetrics();
+    
+    UE_LOG(LogTemp, Warning, TEXT("EngArch_ModuleRegistry: Registry initialized with %d core modules"), RegisteredModules.Num());
 }
 
-void UEngArch_ModuleRegistry::InitializeModuleRegistry()
+void UEngArch_ModuleRegistry::Deinitialize()
 {
-    // Validate all registered modules
-    for (auto& ModulePair : RegisteredModules)
-    {
-        ValidateModuleDependencies(ModulePair.Key);
-    }
+    UE_LOG(LogTemp, Warning, TEXT("EngArch_ModuleRegistry: Shutting down module registry"));
     
-    // Start loading core modules
-    LoadModule(EEng_ModuleType::Core);
+    RegisteredModules.Empty();
+    ModuleInitOrder.Empty();
     
-    UE_LOG(LogTemp, Warning, TEXT("EngArch_ModuleRegistry: %d modules registered"), RegisteredModules.Num());
+    Super::Deinitialize();
 }
 
-bool UEngArch_ModuleRegistry::LoadModule(EEng_ModuleType ModuleType)
+bool UEngArch_ModuleRegistry::RegisterModule(const FString& ModuleName, const FString& AgentResponsible, const TArray<FString>& Dependencies)
 {
-    FEng_ModuleInfo* ModuleInfo = RegisteredModules.Find(ModuleType);
-    if (!ModuleInfo)
+    if (ModuleName.IsEmpty())
     {
-        UE_LOG(LogTemp, Error, TEXT("EngArch_ModuleRegistry: Module %d not registered"), (int32)ModuleType);
+        UE_LOG(LogTemp, Error, TEXT("EngArch_ModuleRegistry: Cannot register module with empty name"));
         return false;
     }
-    
-    // Check if already loaded
-    if (ModuleInfo->LoadStatus == EEng_ModuleStatus::Loaded)
+
+    if (RegisteredModules.Contains(ModuleName))
     {
-        return true;
+        UE_LOG(LogTemp, Warning, TEXT("EngArch_ModuleRegistry: Module %s already registered, updating info"), *ModuleName);
     }
-    
-    // Check dependencies
-    for (EEng_ModuleType Dependency : ModuleInfo->DependentModules)
+
+    // Check for circular dependencies
+    if (CheckCircularDependencies(ModuleName, Dependencies))
     {
-        if (!IsModuleLoaded(Dependency))
-        {
-            UE_LOG(LogTemp, Warning, TEXT("EngArch_ModuleRegistry: Loading dependency %d for module %d"), (int32)Dependency, (int32)ModuleType);
-            if (!LoadModule(Dependency))
-            {
-                UE_LOG(LogTemp, Error, TEXT("EngArch_ModuleRegistry: Failed to load dependency %d"), (int32)Dependency);
-                return false;
-            }
-        }
+        UE_LOG(LogTemp, Error, TEXT("EngArch_ModuleRegistry: Circular dependency detected for module %s"), *ModuleName);
+        return false;
     }
-    
-    // Attempt to load the module
-    ModuleInfo->LoadStatus = EEng_ModuleStatus::Loading;
-    
-    bool bLoadSuccess = LoadModuleImplementation(ModuleType);
-    
-    if (bLoadSuccess)
+
+    FEng_ModuleInfo ModuleInfo;
+    ModuleInfo.ModuleName = ModuleName;
+    ModuleInfo.AgentResponsible = AgentResponsible;
+    ModuleInfo.Dependencies = Dependencies;
+    ModuleInfo.DependencyCount = Dependencies.Num();
+    ModuleInfo.Status = EEng_ModuleStatus::Registered;
+    ModuleInfo.InitializationTime = FPlatformTime::Seconds();
+
+    RegisteredModules.Add(ModuleName, ModuleInfo);
+    bInitializationOrderDirty = true;
+
+    UE_LOG(LogTemp, Log, TEXT("EngArch_ModuleRegistry: Registered module %s (Agent: %s, Dependencies: %d)"), 
+           *ModuleName, *AgentResponsible, Dependencies.Num());
+
+    return true;
+}
+
+bool UEngArch_ModuleRegistry::UnregisterModule(const FString& ModuleName)
+{
+    if (!RegisteredModules.Contains(ModuleName))
     {
-        ModuleInfo->LoadStatus = EEng_ModuleStatus::Loaded;
-        ModuleInfo->LoadTimestamp = FDateTime::Now();
+        UE_LOG(LogTemp, Warning, TEXT("EngArch_ModuleRegistry: Module %s not found for unregistration"), *ModuleName);
+        return false;
+    }
+
+    RegisteredModules.Remove(ModuleName);
+    bInitializationOrderDirty = true;
+
+    UE_LOG(LogTemp, Log, TEXT("EngArch_ModuleRegistry: Unregistered module %s"), *ModuleName);
+    return true;
+}
+
+void UEngArch_ModuleRegistry::SetModuleStatus(const FString& ModuleName, EEng_ModuleStatus NewStatus)
+{
+    if (FEng_ModuleInfo* ModuleInfo = RegisteredModules.Find(ModuleName))
+    {
+        EEng_ModuleStatus OldStatus = ModuleInfo->Status;
+        ModuleInfo->Status = NewStatus;
         
-        UE_LOG(LogTemp, Warning, TEXT("EngArch_ModuleRegistry: Module %d loaded successfully"), (int32)ModuleType);
-        
-        // Notify dependent modules
-        OnModuleLoaded.Broadcast(ModuleType);
-        
-        return true;
+        UE_LOG(LogTemp, Log, TEXT("EngArch_ModuleRegistry: Module %s status changed from %d to %d"), 
+               *ModuleName, (int32)OldStatus, (int32)NewStatus);
     }
     else
     {
-        ModuleInfo->LoadStatus = EEng_ModuleStatus::Failed;
-        UE_LOG(LogTemp, Error, TEXT("EngArch_ModuleRegistry: Module %d failed to load"), (int32)ModuleType);
-        return false;
+        UE_LOG(LogTemp, Warning, TEXT("EngArch_ModuleRegistry: Cannot set status for unknown module %s"), *ModuleName);
     }
 }
 
-bool UEngArch_ModuleRegistry::LoadModuleImplementation(EEng_ModuleType ModuleType)
+FEng_ModuleInfo UEngArch_ModuleRegistry::GetModuleInfo(const FString& ModuleName) const
 {
-    // Module-specific loading logic
-    switch (ModuleType)
+    if (const FEng_ModuleInfo* ModuleInfo = RegisteredModules.Find(ModuleName))
     {
-        case EEng_ModuleType::Core:
-            return LoadCoreModule();
-            
-        case EEng_ModuleType::Physics:
-            return LoadPhysicsModule();
-            
-        case EEng_ModuleType::WorldGeneration:
-            return LoadWorldGenerationModule();
-            
-        case EEng_ModuleType::Environment:
-            return LoadEnvironmentModule();
-            
-        case EEng_ModuleType::Character:
-            return LoadCharacterModule();
-            
-        case EEng_ModuleType::AI:
-            return LoadAIModule();
-            
-        case EEng_ModuleType::Combat:
-            return LoadCombatModule();
-            
-        case EEng_ModuleType::Quest:
-            return LoadQuestModule();
-            
-        case EEng_ModuleType::Audio:
-            return LoadAudioModule();
-            
-        case EEng_ModuleType::VFX:
-            return LoadVFXModule();
-            
-        case EEng_ModuleType::UI:
-            return LoadUIModule();
-            
-        default:
-            return false;
-    }
-}
-
-bool UEngArch_ModuleRegistry::LoadCoreModule()
-{
-    // Core module is always available
-    return true;
-}
-
-bool UEngArch_ModuleRegistry::LoadPhysicsModule()
-{
-    // Check if physics subsystems are available
-    if (GetWorld() && GetWorld()->GetPhysicsScene())
-    {
-        return true;
-    }
-    return false;
-}
-
-bool UEngArch_ModuleRegistry::LoadWorldGenerationModule()
-{
-    // Check for world generation components
-    return true; // Simplified for now
-}
-
-bool UEngArch_ModuleRegistry::LoadEnvironmentModule()
-{
-    // Check for environment systems
-    return true; // Simplified for now
-}
-
-bool UEngArch_ModuleRegistry::LoadCharacterModule()
-{
-    // Check for character systems
-    return true; // Simplified for now
-}
-
-bool UEngArch_ModuleRegistry::LoadAIModule()
-{
-    // Check for AI systems
-    return true; // Simplified for now
-}
-
-bool UEngArch_ModuleRegistry::LoadCombatModule()
-{
-    // Check for combat systems
-    return true; // Simplified for now
-}
-
-bool UEngArch_ModuleRegistry::LoadQuestModule()
-{
-    // Check for quest systems
-    return true; // Simplified for now
-}
-
-bool UEngArch_ModuleRegistry::LoadAudioModule()
-{
-    // Check for audio systems
-    return true; // Simplified for now
-}
-
-bool UEngArch_ModuleRegistry::LoadVFXModule()
-{
-    // Check for VFX systems
-    return true; // Simplified for now
-}
-
-bool UEngArch_ModuleRegistry::LoadUIModule()
-{
-    // Check for UI systems
-    return true; // Simplified for now
-}
-
-bool UEngArch_ModuleRegistry::UnloadModule(EEng_ModuleType ModuleType)
-{
-    FEng_ModuleInfo* ModuleInfo = RegisteredModules.Find(ModuleType);
-    if (!ModuleInfo || ModuleInfo->LoadStatus != EEng_ModuleStatus::Loaded)
-    {
-        return false;
+        return *ModuleInfo;
     }
     
-    // Check if other modules depend on this one
-    for (const auto& OtherModulePair : RegisteredModules)
-    {
-        if (OtherModulePair.Value.DependentModules.Contains(ModuleType) && 
-            OtherModulePair.Value.LoadStatus == EEng_ModuleStatus::Loaded)
-        {
-            UE_LOG(LogTemp, Error, TEXT("EngArch_ModuleRegistry: Cannot unload module %d - other modules depend on it"), (int32)ModuleType);
-            return false;
-        }
-    }
-    
-    ModuleInfo->LoadStatus = EEng_ModuleStatus::Unloaded;
-    OnModuleUnloaded.Broadcast(ModuleType);
-    
-    return true;
+    return FEng_ModuleInfo(); // Return default empty info
 }
 
-bool UEngArch_ModuleRegistry::IsModuleLoaded(EEng_ModuleType ModuleType) const
+TArray<FString> UEngArch_ModuleRegistry::GetAllModules() const
 {
-    const FEng_ModuleInfo* ModuleInfo = RegisteredModules.Find(ModuleType);
-    return ModuleInfo && ModuleInfo->LoadStatus == EEng_ModuleStatus::Loaded;
+    TArray<FString> ModuleNames;
+    RegisteredModules.GetKeys(ModuleNames);
+    return ModuleNames;
 }
 
-EEng_ModuleStatus UEngArch_ModuleRegistry::GetModuleStatus(EEng_ModuleType ModuleType) const
+TArray<FString> UEngArch_ModuleRegistry::GetModulesByStatus(EEng_ModuleStatus Status) const
 {
-    const FEng_ModuleInfo* ModuleInfo = RegisteredModules.Find(ModuleType);
-    return ModuleInfo ? ModuleInfo->LoadStatus : EEng_ModuleStatus::Unloaded;
-}
-
-TArray<EEng_ModuleType> UEngArch_ModuleRegistry::GetLoadedModules() const
-{
-    TArray<EEng_ModuleType> LoadedModules;
+    TArray<FString> FilteredModules;
     
     for (const auto& ModulePair : RegisteredModules)
     {
-        if (ModulePair.Value.LoadStatus == EEng_ModuleStatus::Loaded)
+        if (ModulePair.Value.Status == Status)
         {
-            LoadedModules.Add(ModulePair.Key);
+            FilteredModules.Add(ModulePair.Key);
         }
     }
     
-    return LoadedModules;
+    return FilteredModules;
 }
 
-bool UEngArch_ModuleRegistry::ValidateModuleDependencies(EEng_ModuleType ModuleType)
+TArray<FString> UEngArch_ModuleRegistry::GetModulesByAgent(const FString& AgentName) const
 {
-    const FEng_ModuleInfo* ModuleInfo = RegisteredModules.Find(ModuleType);
+    TArray<FString> FilteredModules;
+    
+    for (const auto& ModulePair : RegisteredModules)
+    {
+        if (ModulePair.Value.AgentResponsible == AgentName)
+        {
+            FilteredModules.Add(ModulePair.Key);
+        }
+    }
+    
+    return FilteredModules;
+}
+
+bool UEngArch_ModuleRegistry::ValidateDependencies(const FString& ModuleName) const
+{
+    const FEng_ModuleInfo* ModuleInfo = RegisteredModules.Find(ModuleName);
     if (!ModuleInfo)
     {
         return false;
     }
-    
-    // Check for circular dependencies
-    TArray<EEng_ModuleType> VisitedModules;
-    return ValidateModuleDependenciesRecursive(ModuleType, VisitedModules);
-}
 
-bool UEngArch_ModuleRegistry::ValidateModuleDependenciesRecursive(EEng_ModuleType ModuleType, TArray<EEng_ModuleType>& VisitedModules)
-{
-    if (VisitedModules.Contains(ModuleType))
+    for (const FString& Dependency : ModuleInfo->Dependencies)
     {
-        UE_LOG(LogTemp, Error, TEXT("EngArch_ModuleRegistry: Circular dependency detected for module %d"), (int32)ModuleType);
-        return false;
-    }
-    
-    VisitedModules.Add(ModuleType);
-    
-    const FEng_ModuleInfo* ModuleInfo = RegisteredModules.Find(ModuleType);
-    if (ModuleInfo)
-    {
-        for (EEng_ModuleType Dependency : ModuleInfo->DependentModules)
+        const FEng_ModuleInfo* DepInfo = RegisteredModules.Find(Dependency);
+        if (!DepInfo || DepInfo->Status != EEng_ModuleStatus::Active)
         {
-            if (!ValidateModuleDependenciesRecursive(Dependency, VisitedModules))
-            {
-                return false;
-            }
+            return false;
         }
     }
-    
-    VisitedModules.Remove(ModuleType);
+
     return true;
 }
 
-int32 UEngArch_ModuleRegistry::GetModulePriority(EEng_ModuleType ModuleType)
+TArray<FString> UEngArch_ModuleRegistry::GetUnmetDependencies(const FString& ModuleName) const
 {
-    switch (ModuleType)
+    TArray<FString> UnmetDeps;
+    
+    const FEng_ModuleInfo* ModuleInfo = RegisteredModules.Find(ModuleName);
+    if (!ModuleInfo)
     {
-        case EEng_ModuleType::Core: return 100;
-        case EEng_ModuleType::Physics: return 90;
-        case EEng_ModuleType::WorldGeneration: return 80;
-        case EEng_ModuleType::Environment: return 70;
-        case EEng_ModuleType::Character: return 60;
-        case EEng_ModuleType::AI: return 50;
-        case EEng_ModuleType::Combat: return 40;
-        case EEng_ModuleType::Quest: return 30;
-        case EEng_ModuleType::Audio: return 20;
-        case EEng_ModuleType::VFX: return 15;
-        case EEng_ModuleType::UI: return 10;
-        default: return 0;
+        return UnmetDeps;
+    }
+
+    for (const FString& Dependency : ModuleInfo->Dependencies)
+    {
+        const FEng_ModuleInfo* DepInfo = RegisteredModules.Find(Dependency);
+        if (!DepInfo || DepInfo->Status != EEng_ModuleStatus::Active)
+        {
+            UnmetDeps.Add(Dependency);
+        }
+    }
+
+    return UnmetDeps;
+}
+
+TArray<FString> UEngArch_ModuleRegistry::GetInitializationOrder() const
+{
+    if (bInitializationOrderDirty)
+    {
+        const_cast<UEngArch_ModuleRegistry*>(this)->RecalculateInitializationOrder();
+    }
+    
+    return ModuleInitOrder;
+}
+
+void UEngArch_ModuleRegistry::UpdatePerformanceMetrics()
+{
+    float CurrentTime = FPlatformTime::Seconds();
+    
+    // Update metrics every second
+    if (CurrentTime - LastMetricsUpdate < 1.0f)
+    {
+        return;
+    }
+
+    LastMetricsUpdate = CurrentTime;
+
+    // Get frame time from stats
+    CurrentMetrics.FrameTime = FPlatformTime::ToMilliseconds(FStats::GetStatValueFloat(STAT_FrameTime));
+    CurrentMetrics.GameThreadTime = FPlatformTime::ToMilliseconds(FStats::GetStatValueFloat(STAT_GameThreadTime));
+    CurrentMetrics.RenderThreadTime = FPlatformTime::ToMilliseconds(FStats::GetStatValueFloat(STAT_RenderThreadTime));
+
+    // Count active actors in world
+    if (UWorld* World = GetWorld())
+    {
+        CurrentMetrics.ActiveActors = World->GetActorCount();
+    }
+
+    // Memory usage (simplified)
+    FPlatformMemoryStats MemStats = FPlatformMemory::GetStats();
+    CurrentMetrics.MemoryUsageMB = MemStats.UsedPhysical / (1024.0f * 1024.0f);
+
+    // Draw calls would need RHI access, simplified for now
+    CurrentMetrics.DrawCalls = 0;
+}
+
+FEng_PerformanceMetrics UEngArch_ModuleRegistry::GetCurrentMetrics() const
+{
+    return CurrentMetrics;
+}
+
+bool UEngArch_ModuleRegistry::IsPerformanceWithinLimits() const
+{
+    return CurrentMetrics.FrameTime <= MaxFrameTime &&
+           CurrentMetrics.DrawCalls <= MaxDrawCalls &&
+           CurrentMetrics.MemoryUsageMB <= MaxMemoryUsageMB;
+}
+
+void UEngArch_ModuleRegistry::ValidateAllModules()
+{
+    UE_LOG(LogTemp, Warning, TEXT("EngArch_ModuleRegistry: Validating all %d registered modules"), RegisteredModules.Num());
+    
+    int32 ValidModules = 0;
+    int32 InvalidModules = 0;
+
+    for (const auto& ModulePair : RegisteredModules)
+    {
+        const FString& ModuleName = ModulePair.Key;
+        const FEng_ModuleInfo& ModuleInfo = ModulePair.Value;
+
+        bool bIsValid = ValidateDependencies(ModuleName);
+        if (bIsValid)
+        {
+            ValidModules++;
+            UE_LOG(LogTemp, Log, TEXT("  ✓ %s (Agent: %s)"), *ModuleName, *ModuleInfo.AgentResponsible);
+        }
+        else
+        {
+            InvalidModules++;
+            TArray<FString> UnmetDeps = GetUnmetDependencies(ModuleName);
+            FString DepList = FString::Join(UnmetDeps, TEXT(", "));
+            UE_LOG(LogTemp, Error, TEXT("  ✗ %s - Unmet dependencies: %s"), *ModuleName, *DepList);
+        }
+    }
+
+    UE_LOG(LogTemp, Warning, TEXT("EngArch_ModuleRegistry: Validation complete - %d valid, %d invalid modules"), 
+           ValidModules, InvalidModules);
+}
+
+void UEngArch_ModuleRegistry::PrintModuleStatus()
+{
+    UE_LOG(LogTemp, Warning, TEXT("=== MODULE REGISTRY STATUS ==="));
+    UE_LOG(LogTemp, Warning, TEXT("Total Modules: %d"), RegisteredModules.Num());
+
+    for (int32 StatusInt = 0; StatusInt <= (int32)EEng_ModuleStatus::Error; StatusInt++)
+    {
+        EEng_ModuleStatus Status = (EEng_ModuleStatus)StatusInt;
+        TArray<FString> ModulesWithStatus = GetModulesByStatus(Status);
+        
+        if (ModulesWithStatus.Num() > 0)
+        {
+            FString StatusName;
+            switch (Status)
+            {
+                case EEng_ModuleStatus::Uninitialized: StatusName = TEXT("Uninitialized"); break;
+                case EEng_ModuleStatus::Registered: StatusName = TEXT("Registered"); break;
+                case EEng_ModuleStatus::Initializing: StatusName = TEXT("Initializing"); break;
+                case EEng_ModuleStatus::Active: StatusName = TEXT("Active"); break;
+                case EEng_ModuleStatus::Suspended: StatusName = TEXT("Suspended"); break;
+                case EEng_ModuleStatus::Error: StatusName = TEXT("Error"); break;
+            }
+            
+            UE_LOG(LogTemp, Warning, TEXT("%s (%d): %s"), 
+                   *StatusName, ModulesWithStatus.Num(), *FString::Join(ModulesWithStatus, TEXT(", ")));
+        }
+    }
+
+    UpdatePerformanceMetrics();
+    UE_LOG(LogTemp, Warning, TEXT("Performance: %.2fms frame, %d actors, %.1fMB memory"), 
+           CurrentMetrics.FrameTime, CurrentMetrics.ActiveActors, CurrentMetrics.MemoryUsageMB);
+}
+
+void UEngArch_ModuleRegistry::ForceReloadModule(const FString& ModuleName)
+{
+    if (RegisteredModules.Contains(ModuleName))
+    {
+        SetModuleStatus(ModuleName, EEng_ModuleStatus::Initializing);
+        UE_LOG(LogTemp, Warning, TEXT("EngArch_ModuleRegistry: Force reloading module %s"), *ModuleName);
+        
+        // In a real implementation, this would trigger module reinitialization
+        // For now, just mark as active after a brief delay
+        SetModuleStatus(ModuleName, EEng_ModuleStatus::Active);
     }
 }
 
-TArray<EEng_ModuleType> UEngArch_ModuleRegistry::GetModuleDependencies(EEng_ModuleType ModuleType)
+void UEngArch_ModuleRegistry::InitializeCoreModules()
 {
-    TArray<EEng_ModuleType> Dependencies;
+    // Register essential core modules that should always be present
+    TArray<FString> EmptyDeps;
     
-    switch (ModuleType)
+    RegisterModule(TEXT("CoreEngine"), TEXT("Engine"), EmptyDeps);
+    SetModuleStatus(TEXT("CoreEngine"), EEng_ModuleStatus::Active);
+    
+    RegisterModule(TEXT("Physics"), TEXT("Agent03_CoreSystems"), EmptyDeps);
+    RegisterModule(TEXT("WorldGeneration"), TEXT("Agent05_WorldGenerator"), TArray<FString>{TEXT("CoreEngine")});
+    RegisterModule(TEXT("CharacterSystem"), TEXT("Agent09_CharacterArtist"), TArray<FString>{TEXT("Physics")});
+    RegisterModule(TEXT("DinosaurAI"), TEXT("Agent12_CombatAI"), TArray<FString>{TEXT("Physics"), TEXT("CharacterSystem")});
+    RegisterModule(TEXT("AudioSystem"), TEXT("Agent16_Audio"), TArray<FString>{TEXT("CoreEngine")});
+    
+    UE_LOG(LogTemp, Warning, TEXT("EngArch_ModuleRegistry: Initialized %d core modules"), RegisteredModules.Num());
+}
+
+bool UEngArch_ModuleRegistry::CheckCircularDependencies(const FString& ModuleName, const TArray<FString>& Dependencies) const
+{
+    // Simple circular dependency check - in production this would be more sophisticated
+    for (const FString& Dependency : Dependencies)
     {
-        case EEng_ModuleType::Physics:
-            Dependencies.Add(EEng_ModuleType::Core);
-            break;
-            
-        case EEng_ModuleType::WorldGeneration:
-            Dependencies.Add(EEng_ModuleType::Core);
-            Dependencies.Add(EEng_ModuleType::Physics);
-            break;
-            
-        case EEng_ModuleType::Environment:
-            Dependencies.Add(EEng_ModuleType::Core);
-            Dependencies.Add(EEng_ModuleType::WorldGeneration);
-            break;
-            
-        case EEng_ModuleType::Character:
-            Dependencies.Add(EEng_ModuleType::Core);
-            Dependencies.Add(EEng_ModuleType::Physics);
-            break;
-            
-        case EEng_ModuleType::AI:
-            Dependencies.Add(EEng_ModuleType::Core);
-            Dependencies.Add(EEng_ModuleType::Character);
-            break;
-            
-        case EEng_ModuleType::Combat:
-            Dependencies.Add(EEng_ModuleType::Core);
-            Dependencies.Add(EEng_ModuleType::Character);
-            Dependencies.Add(EEng_ModuleType::AI);
-            break;
-            
-        case EEng_ModuleType::Quest:
-            Dependencies.Add(EEng_ModuleType::Core);
-            Dependencies.Add(EEng_ModuleType::Character);
-            Dependencies.Add(EEng_ModuleType::AI);
-            break;
-            
-        case EEng_ModuleType::Audio:
-            Dependencies.Add(EEng_ModuleType::Core);
-            break;
-            
-        case EEng_ModuleType::VFX:
-            Dependencies.Add(EEng_ModuleType::Core);
-            break;
-            
-        case EEng_ModuleType::UI:
-            Dependencies.Add(EEng_ModuleType::Core);
-            Dependencies.Add(EEng_ModuleType::Character);
-            break;
+        if (Dependency == ModuleName)
+        {
+            return true; // Self-dependency
+        }
+        
+        // Check if dependency depends on this module
+        const FEng_ModuleInfo* DepInfo = RegisteredModules.Find(Dependency);
+        if (DepInfo && DepInfo->Dependencies.Contains(ModuleName))
+        {
+            return true; // Circular dependency
+        }
     }
     
-    return Dependencies;
+    return false;
+}
+
+void UEngArch_ModuleRegistry::RecalculateInitializationOrder()
+{
+    ModuleInitOrder.Empty();
+    TSet<FString> ProcessedModules;
+    TSet<FString> ProcessingModules;
+
+    // Topological sort to determine initialization order
+    TFunction<bool(const FString&)> VisitModule = [&](const FString& ModuleName) -> bool
+    {
+        if (ProcessedModules.Contains(ModuleName))
+        {
+            return true;
+        }
+        
+        if (ProcessingModules.Contains(ModuleName))
+        {
+            // Circular dependency detected
+            return false;
+        }
+        
+        ProcessingModules.Add(ModuleName);
+        
+        const FEng_ModuleInfo* ModuleInfo = RegisteredModules.Find(ModuleName);
+        if (ModuleInfo)
+        {
+            for (const FString& Dependency : ModuleInfo->Dependencies)
+            {
+                if (!VisitModule(Dependency))
+                {
+                    return false;
+                }
+            }
+        }
+        
+        ProcessingModules.Remove(ModuleName);
+        ProcessedModules.Add(ModuleName);
+        ModuleInitOrder.Add(ModuleName);
+        
+        return true;
+    };
+
+    for (const auto& ModulePair : RegisteredModules)
+    {
+        VisitModule(ModulePair.Key);
+    }
+
+    bInitializationOrderDirty = false;
+    
+    UE_LOG(LogTemp, Log, TEXT("EngArch_ModuleRegistry: Recalculated initialization order: %s"), 
+           *FString::Join(ModuleInitOrder, TEXT(" -> ")));
 }
