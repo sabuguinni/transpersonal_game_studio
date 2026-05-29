@@ -1,154 +1,172 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Components/ActorComponent.h"
-#include "Engine/World.h"
+#include "GameFramework/Actor.h"
+#include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMeshActor.h"
-#include "Landscape/Landscape.h"
-#include "Materials/MaterialInterface.h"
-#include "../SharedTypes.h"
+#include "SharedTypes.h"
 #include "World_TerrainGenerator.generated.h"
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FWorld_TerrainSettings
+struct TRANSPERSONALGAME_API FWorld_TerrainFeature
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
-    float HeightScale = 1000.0f;
+    EWorld_TerrainType TerrainType;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
-    float NoiseScale = 0.001f;
+    FVector Location;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
-    int32 TerrainSize = 2048;
+    FRotator Rotation;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
-    float WaterLevel = 100.0f;
+    FVector Scale;
 
-    FWorld_TerrainSettings()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
+    float Height;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
+    float Roughness;
+
+    FWorld_TerrainFeature()
     {
-        HeightScale = 1000.0f;
-        NoiseScale = 0.001f;
-        TerrainSize = 2048;
-        WaterLevel = 100.0f;
+        TerrainType = EWorld_TerrainType::Hill;
+        Location = FVector::ZeroVector;
+        Rotation = FRotator::ZeroRotator;
+        Scale = FVector::OneVector;
+        Height = 100.0f;
+        Roughness = 0.5f;
     }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FWorld_BiomeZone
+struct TRANSPERSONALGAME_API FWorld_WaterBody
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    EBiomeType BiomeType = EBiomeType::Savana;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water")
+    EWorld_WaterType WaterType;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    FVector CenterLocation = FVector::ZeroVector;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water")
+    FVector Location;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float Radius = 50000.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water")
+    FVector2D Size;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float HeightModifier = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water")
+    float Depth;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    TSoftObjectPtr<UMaterialInterface> TerrainMaterial;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water")
+    float FlowSpeed;
 
-    FWorld_BiomeZone()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water")
+    bool bIsSwimmable;
+
+    FWorld_WaterBody()
     {
-        BiomeType = EBiomeType::Savana;
-        CenterLocation = FVector::ZeroVector;
-        Radius = 50000.0f;
-        HeightModifier = 1.0f;
+        WaterType = EWorld_WaterType::Lake;
+        Location = FVector::ZeroVector;
+        Size = FVector2D(1000.0f, 1000.0f);
+        Depth = 200.0f;
+        FlowSpeed = 0.0f;
+        bIsSwimmable = true;
     }
 };
 
-UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UWorld_TerrainGenerator : public UActorComponent
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API AWorld_TerrainGenerator : public AActor
 {
     GENERATED_BODY()
 
 public:
-    UWorld_TerrainGenerator();
+    AWorld_TerrainGenerator();
 
 protected:
     virtual void BeginPlay() override;
 
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    USceneComponent* RootSceneComponent;
+
+    // Terrain generation parameters
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Generation")
+    int32 TerrainSeed;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Generation")
+    float TerrainScale;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Generation")
+    float MaxHeight;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Generation")
+    float NoiseFrequency;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Generation")
+    int32 TerrainResolution;
+
+    // Biome-specific terrain features
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Features")
+    TArray<FWorld_TerrainFeature> TerrainFeatures;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water Features")
+    TArray<FWorld_WaterBody> WaterBodies;
+
+    // Generation settings
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Generation")
+    bool bAutoGenerateOnBeginPlay;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Generation")
+    float MinFeatureDistance;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Generation")
+    int32 MaxFeaturesPerBiome;
+
 public:
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
-
     // Terrain generation methods
-    UFUNCTION(BlueprintCallable, Category = "World Generation")
-    void GenerateBaseTerrain();
+    UFUNCTION(BlueprintCallable, Category = "Terrain Generation")
+    void GenerateTerrainForBiome(EWorld_BiomeType BiomeType, FVector BiomeCenter, float BiomeRadius);
 
-    UFUNCTION(BlueprintCallable, Category = "World Generation")
-    void CreateBiomeZones();
+    UFUNCTION(BlueprintCallable, Category = "Terrain Generation")
+    void GenerateWaterFeatures(EWorld_BiomeType BiomeType, FVector BiomeCenter, float BiomeRadius);
 
-    UFUNCTION(BlueprintCallable, Category = "World Generation")
-    void GenerateWaterSystems();
+    UFUNCTION(BlueprintCallable, Category = "Terrain Generation")
+    void GenerateTerrainFeatures(EWorld_BiomeType BiomeType, FVector BiomeCenter, float BiomeRadius);
 
-    UFUNCTION(BlueprintCallable, Category = "World Generation")
-    void PlaceVegetation();
+    UFUNCTION(BlueprintCallable, Category = "Terrain Generation")
+    void ClearGeneratedTerrain();
 
-    UFUNCTION(BlueprintCallable, Category = "World Generation")
-    void SpawnDinosaurs();
+    UFUNCTION(BlueprintCallable, Category = "Terrain Generation")
+    FVector GetOptimalLocationForFeature(EWorld_TerrainType TerrainType, FVector BiomeCenter, float BiomeRadius);
 
-    // Utility methods
-    UFUNCTION(BlueprintCallable, Category = "World Generation")
-    EBiomeType GetBiomeAtLocation(const FVector& Location) const;
+    UFUNCTION(BlueprintCallable, Category = "Terrain Generation")
+    float CalculateTerrainHeight(FVector Location);
 
-    UFUNCTION(BlueprintCallable, Category = "World Generation")
-    float GetTerrainHeightAtLocation(const FVector& Location) const;
+    UFUNCTION(BlueprintCallable, Category = "Terrain Generation")
+    bool IsLocationSuitableForWater(FVector Location, float Radius);
 
-    UFUNCTION(BlueprintCallable, Category = "World Generation")
-    bool IsLocationInWater(const FVector& Location) const;
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Editor Tools")
+    void RegenerateAllTerrain();
 
-    UFUNCTION(BlueprintCallable, Category = "World Generation", CallInEditor)
-    void RegenerateWorld();
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Editor Tools")
+    void PreviewTerrainGeneration();
 
 protected:
-    // Configuration
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
-    FWorld_TerrainSettings TerrainSettings;
+    // Internal generation helpers
+    void GenerateHill(FVector Location, float Height, float Radius);
+    void GenerateValley(FVector Location, float Depth, float Radius);
+    void GenerateRockFormation(FVector Location, float Scale);
+    void GenerateWaterBody(FWorld_WaterBody WaterBodyData);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
-    TArray<FWorld_BiomeZone> BiomeZones;
+    // Noise generation
+    float GeneratePerlinNoise(float X, float Y, float Frequency);
+    float GenerateRidgedNoise(float X, float Y, float Frequency);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
-    bool bAutoGenerateOnPlay = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
-    bool bGenerateWater = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
-    bool bGenerateVegetation = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
-    bool bSpawnDinosaurs = true;
-
-    // Runtime data
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Runtime")
-    TArray<AActor*> GeneratedActors;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Runtime")
-    TArray<AActor*> SpawnedDinosaurs;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Runtime")
-    TArray<AActor*> WaterActors;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Runtime")
-    bool bWorldGenerated = false;
+    // Utility methods
+    bool IsValidTerrainLocation(FVector Location);
+    FVector SnapToTerrain(FVector Location);
 
 private:
-    // Internal generation methods
-    void SetupDefaultBiomes();
-    void CreateRiverSystem();
-    void SpawnBiomeVegetation(const FWorld_BiomeZone& Biome);
-    void SpawnDinosaursInBiome(const FWorld_BiomeZone& Biome);
-    AActor* SpawnDinosaurMesh(const FString& AssetPath, const FVector& Location, const FRotator& Rotation, const FString& Label);
-    
-    // Noise generation
-    float GeneratePerlinNoise(float X, float Y) const;
-    float GenerateRidgedNoise(float X, float Y) const;
+    TArray<AActor*> GeneratedActors;
+    bool bIsGenerating;
 };
