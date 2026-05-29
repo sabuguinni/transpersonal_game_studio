@@ -1,158 +1,103 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Engine/World.h"
 #include "Subsystems/WorldSubsystem.h"
-#include "MassEntityTypes.h"
 #include "MassEntitySubsystem.h"
-#include "MassSpawnerTypes.h"
+#include "MassSpawnerSubsystem.h"
+#include "MassSimulationSubsystem.h"
 #include "MassCommonFragments.h"
 #include "MassMovementFragments.h"
-#include "Engine/World.h"
-#include "Components/StaticMeshComponent.h"
+#include "MassEntityConfigAsset.h"
+#include "SharedTypes.h"
 #include "Crowd_MassEntitySubsystem.generated.h"
 
-// Forward declarations
-class UMassEntitySubsystem;
-class UMassSpawnerSubsystem;
-
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FCrowd_MovementFragment : public FMassFragment
+struct TRANSPERSONALGAME_API FCrowd_EntityConfig
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
-    FVector TargetLocation = FVector::ZeroVector;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Config")
+    int32 MaxEntities = 5000;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
-    float MovementSpeed = 150.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Config")
+    float SpawnRadius = 10000.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
-    float WanderRadius = 500.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Config")
+    float MovementSpeed = 300.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
-    float FlockingStrength = 0.3f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Config")
+    float LODDistance1 = 2000.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
-    float SeparationDistance = 100.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Config")
+    float LODDistance2 = 5000.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
-    bool bIsMoving = false;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Config")
+    float LODDistance3 = 10000.0f;
 
-    FCrowd_MovementFragment() = default;
+    FCrowd_EntityConfig()
+    {
+        MaxEntities = 5000;
+        SpawnRadius = 10000.0f;
+        MovementSpeed = 300.0f;
+        LODDistance1 = 2000.0f;
+        LODDistance2 = 5000.0f;
+        LODDistance3 = 10000.0f;
+    }
 };
 
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FCrowd_BehaviorFragment : public FMassFragment
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
-    float AggressionLevel = 0.1f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
-    float FearLevel = 0.5f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
-    float CuriosityLevel = 0.3f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
-    float HerdInstinct = 0.7f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
-    int32 BiomePreference = 0; // 0=Savana, 1=Forest, 2=Desert, 3=Swamp, 4=Mountain
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
-    bool bIsPredator = false;
-
-    FCrowd_BehaviorFragment() = default;
-};
-
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FCrowd_VisualFragment : public FMassFragment
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Visual")
-    TSoftObjectPtr<UStaticMesh> MeshAsset;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Visual")
-    FVector Scale = FVector(1.0f, 1.0f, 1.0f);
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Visual")
-    FRotator Rotation = FRotator::ZeroRotator;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Visual")
-    int32 LODLevel = 0;
-
-    FCrowd_VisualFragment() = default;
-};
-
-UCLASS(BlueprintType, Blueprintable)
+UCLASS()
 class TRANSPERSONALGAME_API UCrowd_MassEntitySubsystem : public UWorldSubsystem
 {
     GENERATED_BODY()
 
 public:
-    UCrowd_MassEntitySubsystem();
-
-    // USubsystem interface
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
-
-    // Mass Entity crowd simulation methods
-    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    void InitializeCrowdSimulation();
+    virtual bool ShouldCreateSubsystem(UObject* Outer) const override;
 
     UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    void SpawnCrowdEntities(int32 EntityCount, FVector SpawnCenter, float SpawnRadius);
+    void SpawnCrowdEntities(const FVector& Center, int32 Count, ECrowd_BiomeType BiomeType);
 
     UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    void UpdateCrowdBehavior(float DeltaTime);
+    void UpdateCrowdMovement(float DeltaTime);
 
     UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    void SetBiomePreferences(int32 BiomeIndex, float AggressionMod, float FearMod);
+    void SetCrowdConfig(const FCrowd_EntityConfig& NewConfig);
 
     UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    int32 GetActiveCrowdEntityCount() const;
+    int32 GetActiveEntityCount() const;
 
     UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    void ClearAllCrowdEntities();
+    void ClearAllEntities();
+
+    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
+    void SetLODDistances(float LOD1, float LOD2, float LOD3);
 
 protected:
-    // Mass Entity system references
     UPROPERTY()
-    TObjectPtr<UMassEntitySubsystem> MassEntitySubsystem;
+    FCrowd_EntityConfig CrowdConfig;
 
     UPROPERTY()
-    TObjectPtr<UMassSpawnerSubsystem> MassSpawnerSubsystem;
+    TArray<FMassEntityHandle> ActiveEntities;
 
-    // Crowd entity management
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Settings")
-    int32 MaxCrowdEntities = 50000;
+    UPROPERTY()
+    class UMassEntitySubsystem* MassEntitySubsystem;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Settings")
-    float UpdateFrequency = 0.1f;
+    UPROPERTY()
+    class UMassSpawnerSubsystem* MassSpawnerSubsystem;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Settings")
-    bool bEnableLODSystem = true;
+    UPROPERTY()
+    class UMassSimulationSubsystem* MassSimulationSubsystem;
 
-    // Biome-specific crowd parameters
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Settings")
-    TArray<FVector> BiomeCenters;
+    void InitializeMassFramework();
+    void CreateEntityArchetype();
+    void UpdateEntityLOD(const FMassEntityHandle& Entity, float DistanceToPlayer);
+    FVector GetRandomMovementTarget(const FVector& CurrentPosition);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Settings")
-    TArray<float> BiomeRadii;
-
-    // Entity archetype storage
-    TArray<FMassEntityHandle> CrowdEntities;
+private:
+    bool bIsInitialized;
     FMassArchetypeHandle CrowdArchetype;
-
-    // Internal methods
-    void CreateCrowdArchetype();
-    void ProcessCrowdMovement(float DeltaTime);
-    void ProcessCrowdBehavior(float DeltaTime);
-    void UpdateCrowdLOD();
-
-    // Timer for periodic updates
-    FTimerHandle CrowdUpdateTimer;
+    float LastUpdateTime;
+    int32 CurrentEntityCount;
 };
