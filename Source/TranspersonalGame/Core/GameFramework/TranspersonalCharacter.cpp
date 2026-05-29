@@ -1,5 +1,3 @@
-// Copyright Transpersonal Game Studio. All Rights Reserved.
-
 #include "TranspersonalCharacter.h"
 #include "Camera/CameraComponent.h"
 #include "Components/CapsuleComponent.h"
@@ -9,26 +7,28 @@
 #include "GameFramework/SpringArmComponent.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
-#include "Core/Physics/Core_RagdollSystem.h"
-#include "Core/Physics/Core_PhysicsSystemManager.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "TimerManager.h"
+#include "Kismet/GameplayStatics.h"
+#include "Core/Physics/Core_RagdollSystem.h"
+#include "Core/Physics/Core_PhysicsSystemManager.h"
 
 DEFINE_LOG_CATEGORY(LogTranspersonalCharacter);
 
 ATranspersonalCharacter::ATranspersonalCharacter()
 {
+    PrimaryActorTick.bCanEverTick = true;
+
     // Set size for collision capsule
     GetCapsuleComponent()->InitCapsuleSize(42.f, 96.0f);
-        
+
     // Don't rotate when the controller rotates. Let that just affect the camera.
     bUseControllerRotationPitch = false;
     bUseControllerRotationYaw = false;
     bUseControllerRotationRoll = false;
 
     // Configure character movement
-    GetCharacterMovement()->bOrientRotationToMovement = true; // Character moves in the direction of input...    
+    GetCharacterMovement()->bOrientRotationToMovement = true; // Character moves in the direction of input...
     GetCharacterMovement()->RotationRate = FRotator(0.0f, 500.0f, 0.0f); // ...at this rotation rate
 
     // Note: For faster iteration times these variables, and many more, can be tweaked in the Character Blueprint
@@ -42,7 +42,7 @@ ATranspersonalCharacter::ATranspersonalCharacter()
     // Create a camera boom (pulls in towards the player if there is a collision)
     CameraBoom = CreateDefaultSubobject<USpringArmComponent>(TEXT("CameraBoom"));
     CameraBoom->SetupAttachment(RootComponent);
-    CameraBoom->TargetArmLength = 400.0f; // The camera follows at this distance behind the character    
+    CameraBoom->TargetArmLength = 400.0f; // The camera follows at this distance behind the character
     CameraBoom->bUsePawnControlRotation = true; // Rotate the arm based on the controller
 
     // Create a follow camera
@@ -81,17 +81,13 @@ ATranspersonalCharacter::ATranspersonalCharacter()
     // Initialize Crafting System
     CraftingLevel = 1;
     CraftingExperience = 0.0f;
-    KnownRecipes.Add(TEXT("Stone Tool"));
-    KnownRecipes.Add(TEXT("Simple Shelter"));
-
-    // Set this character to call Tick() every frame
-    PrimaryActorTick.bCanEverTick = true;
+    KnownRecipes.Empty();
 }
 
 void ATranspersonalCharacter::BeginPlay()
 {
     Super::BeginPlay();
-    
+
     // Add Input Mapping Context
     if (APlayerController* PlayerController = Cast<APlayerController>(Controller))
     {
@@ -107,30 +103,26 @@ void ATranspersonalCharacter::BeginPlay()
     // Initialize Physics Components
     if (RagdollComponent)
     {
-        RagdollComponent->Initialize(GetMesh());
-        UE_LOG(LogTranspersonalCharacter, Log, TEXT("Ragdoll component initialized"));
+        RagdollComponent->InitializeRagdoll(GetMesh());
+        UE_LOG(LogTranspersonalCharacter, Log, TEXT("Ragdoll system initialized"));
     }
 
     if (PhysicsManager)
     {
-        PhysicsManager->InitializePhysicsSystem();
+        PhysicsManager->InitializePhysics();
         UE_LOG(LogTranspersonalCharacter, Log, TEXT("Physics manager initialized"));
     }
 
-    UE_LOG(LogTranspersonalCharacter, Log, TEXT("TranspersonalCharacter BeginPlay completed"));
+    UE_LOG(LogTranspersonalCharacter, Log, TEXT("TranspersonalCharacter initialized with survival stats and physics"));
 }
 
 void ATranspersonalCharacter::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
 
-    // Update survival mechanics
+    // Update survival systems
     UpdateSurvivalStats(DeltaTime);
-    
-    // Update fear system
     UpdateFearSystem(DeltaTime);
-
-    // Update physics state
     UpdatePhysicsState(DeltaTime);
 }
 
@@ -174,7 +166,7 @@ void ATranspersonalCharacter::SetupPlayerInputComponent(UInputComponent* PlayerI
             EnhancedInputComponent->BindAction(RunAction, ETriggerEvent::Completed, this, &ATranspersonalCharacter::StopRunning);
         }
 
-        // Interacting
+        // Interaction
         if (InteractAction)
         {
             EnhancedInputComponent->BindAction(InteractAction, ETriggerEvent::Triggered, this, &ATranspersonalCharacter::Interact);
@@ -193,7 +185,7 @@ void ATranspersonalCharacter::Move(const FInputActionValue& Value)
     // Input is a Vector2D
     FVector2D MovementVector = Value.Get<FVector2D>();
 
-    if (Controller != nullptr && !bIsRagdolled)
+    if (Controller != nullptr)
     {
         // Find out which way is forward
         const FRotator Rotation = Controller->GetControlRotation();
@@ -201,7 +193,7 @@ void ATranspersonalCharacter::Move(const FInputActionValue& Value)
 
         // Get forward vector
         const FVector ForwardDirection = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::X);
-    
+
         // Get right vector 
         const FVector RightDirection = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::Y);
 
@@ -209,11 +201,12 @@ void ATranspersonalCharacter::Move(const FInputActionValue& Value)
         AddMovementInput(ForwardDirection, MovementVector.Y);
         AddMovementInput(RightDirection, MovementVector.X);
 
-        // Consume stamina when moving
-        if (MovementVector.Size() > 0.1f)
+        // Consume stamina based on movement speed
+        float MovementIntensity = MovementVector.Size();
+        if (MovementIntensity > 0.1f)
         {
-            float StaminaCost = bIsRunning ? 20.0f : 5.0f;
-            ConsumeStamina(StaminaCost * GetWorld()->GetDeltaSeconds());
+            float StaminaCost = MovementIntensity * (bIsRunning ? 15.0f : 5.0f) * GetWorld()->GetDeltaSeconds();
+            ConsumeStamina(StaminaCost);
         }
     }
 }
@@ -223,7 +216,7 @@ void ATranspersonalCharacter::Look(const FInputActionValue& Value)
     // Input is a Vector2D
     FVector2D LookAxisVector = Value.Get<FVector2D>();
 
-    if (Controller != nullptr && !bIsRagdolled)
+    if (Controller != nullptr)
     {
         // Add yaw and pitch input to controller
         AddControllerYawInput(LookAxisVector.X);
@@ -233,28 +226,25 @@ void ATranspersonalCharacter::Look(const FInputActionValue& Value)
 
 void ATranspersonalCharacter::StartSneaking()
 {
-    if (!bIsRagdolled && Stamina > 10.0f)
-    {
-        bIsSneaking = true;
-        bIsRunning = false;
-        GetCharacterMovement()->MaxWalkSpeed = 150.0f;
-        UE_LOG(LogTranspersonalCharacter, Log, TEXT("Started sneaking"));
-    }
+    bIsSneaking = true;
+    bIsRunning = false; // Can't run while sneaking
+    GetCharacterMovement()->MaxWalkSpeed = 150.0f; // Slow movement
+    UE_LOG(LogTranspersonalCharacter, Log, TEXT("Started sneaking"));
 }
 
 void ATranspersonalCharacter::StopSneaking()
 {
     bIsSneaking = false;
-    GetCharacterMovement()->MaxWalkSpeed = bIsRunning ? 800.0f : 500.0f;
+    GetCharacterMovement()->MaxWalkSpeed = 500.0f; // Normal movement
     UE_LOG(LogTranspersonalCharacter, Log, TEXT("Stopped sneaking"));
 }
 
 void ATranspersonalCharacter::StartRunning()
 {
-    if (!bIsRagdolled && Stamina > 20.0f && !bIsSneaking)
+    if (Stamina > 10.0f && !bIsSneaking) // Need stamina to run
     {
         bIsRunning = true;
-        GetCharacterMovement()->MaxWalkSpeed = 800.0f;
+        GetCharacterMovement()->MaxWalkSpeed = 800.0f; // Fast movement
         UE_LOG(LogTranspersonalCharacter, Log, TEXT("Started running"));
     }
 }
@@ -262,7 +252,7 @@ void ATranspersonalCharacter::StartRunning()
 void ATranspersonalCharacter::StopRunning()
 {
     bIsRunning = false;
-    GetCharacterMovement()->MaxWalkSpeed = bIsSneaking ? 150.0f : 500.0f;
+    GetCharacterMovement()->MaxWalkSpeed = 500.0f; // Normal movement
     UE_LOG(LogTranspersonalCharacter, Log, TEXT("Stopped running"));
 }
 
@@ -274,33 +264,32 @@ void ATranspersonalCharacter::Interact()
 
 void ATranspersonalCharacter::OpenCraftingMenu()
 {
-    UE_LOG(LogTranspersonalCharacter, Log, TEXT("Crafting menu opened"));
+    UE_LOG(LogTranspersonalCharacter, Log, TEXT("Crafting menu requested"));
     // TODO: Implement crafting UI
 }
 
 void ATranspersonalCharacter::UpdateSurvivalStats(float DeltaTime)
 {
-    // Decrease hunger and thirst over time
+    // Gradually decrease hunger and thirst
     Hunger = FMath::Max(0.0f, Hunger - (2.0f * DeltaTime));
     Thirst = FMath::Max(0.0f, Thirst - (3.0f * DeltaTime));
 
-    // Regenerate stamina when not moving or running
-    if (GetVelocity().Size() < 10.0f && !bIsRunning)
+    // Stamina regeneration (slower when running)
+    if (!bIsRunning && Stamina < MaxStamina)
     {
-        RestoreStamina(25.0f * DeltaTime);
+        Stamina = FMath::Min(MaxStamina, Stamina + (20.0f * DeltaTime));
     }
 
-    // Health decreases if hunger or thirst are too low
-    if (Hunger <= 10.0f || Thirst <= 10.0f)
+    // Health effects from hunger/thirst
+    if (Hunger <= 0.0f || Thirst <= 0.0f)
     {
         Health = FMath::Max(0.0f, Health - (5.0f * DeltaTime));
     }
 
-    // Death check
-    if (Health <= 0.0f)
+    // Stop running if out of stamina
+    if (bIsRunning && Stamina <= 0.0f)
     {
-        UE_LOG(LogTranspersonalCharacter, Warning, TEXT("Character died from survival stats"));
-        // TODO: Implement death system
+        StopRunning();
     }
 }
 
@@ -310,7 +299,8 @@ void ATranspersonalCharacter::UpdateFearSystem(float DeltaTime)
 
     if (bNearbyThreat)
     {
-        IncreaseFear(30.0f * DeltaTime);
+        // Increase fear when threats are nearby
+        FearLevel = FMath::Min(MaxFearLevel, FearLevel + (30.0f * DeltaTime));
     }
     else
     {
@@ -321,76 +311,58 @@ void ATranspersonalCharacter::UpdateFearSystem(float DeltaTime)
     // High fear affects movement
     if (FearLevel > 80.0f)
     {
-        GetCharacterMovement()->MaxWalkSpeed = FMath::Max(100.0f, GetCharacterMovement()->MaxWalkSpeed * 0.7f);
+        // Shaky movement when very afraid
+        GetCharacterMovement()->MaxWalkSpeed = FMath::Max(200.0f, GetCharacterMovement()->MaxWalkSpeed * 0.7f);
     }
 }
 
 void ATranspersonalCharacter::UpdatePhysicsState(float DeltaTime)
 {
-    if (!bPhysicsEnabled)
-        return;
-
-    // Handle collision events
-    HandleCollisionEvents();
-
-    // Process ragdoll transitions
-    ProcessRagdollTransition();
-
-    // Update physics components
-    if (RagdollComponent)
+    if (PhysicsManager && bPhysicsEnabled)
     {
-        RagdollComponent->UpdateRagdoll(DeltaTime);
+        PhysicsManager->UpdatePhysics(DeltaTime);
     }
 
-    if (PhysicsManager)
+    if (RagdollComponent && bIsRagdolled)
     {
-        PhysicsManager->UpdatePhysicsSystem(DeltaTime);
+        ProcessRagdollTransition();
+    }
+
+    HandleCollisionEvents();
+}
+
+void ATranspersonalCharacter::CheckForThreats()
+{
+    // Simple threat detection - check for dinosaurs within range
+    TArray<AActor*> FoundActors;
+    UGameplayStatics::GetAllActorsWithTag(GetWorld(), FName("Dinosaur"), FoundActors);
+
+    bNearbyThreat = false;
+    float ThreatRange = 2000.0f; // 20 meters
+
+    for (AActor* Actor : FoundActors)
+    {
+        if (Actor && FVector::Dist(GetActorLocation(), Actor->GetActorLocation()) < ThreatRange)
+        {
+            bNearbyThreat = true;
+            break;
+        }
     }
 }
 
 void ATranspersonalCharacter::HandleCollisionEvents()
 {
-    // Check for high-impact collisions that might trigger ragdoll
-    if (GetVelocity().Size() > 1000.0f && !bIsRagdolled)
-    {
-        UE_LOG(LogTranspersonalCharacter, Log, TEXT("High velocity detected, considering ragdoll activation"));
-        // TODO: Implement collision-based ragdoll triggers
-    }
+    // TODO: Implement collision response with physics system
 }
 
 void ATranspersonalCharacter::ProcessRagdollTransition()
 {
-    if (bIsRagdolled && RagdollComponent)
+    if (RagdollComponent)
     {
-        // Check if we should recover from ragdoll
-        if (RagdollComponent->ShouldRecoverFromRagdoll())
+        // Check if we should exit ragdoll state
+        if (RagdollComponent->ShouldExitRagdoll())
         {
             DisableRagdoll();
-        }
-    }
-}
-
-void ATranspersonalCharacter::CheckForThreats()
-{
-    // Simple threat detection - check for nearby dinosaurs
-    bNearbyThreat = false;
-    
-    if (UWorld* World = GetWorld())
-    {
-        TArray<AActor*> FoundActors;
-        UGameplayStatics::GetAllActorsOfClass(World, APawn::class, FoundActors);
-        
-        for (AActor* Actor : FoundActors)
-        {
-            if (Actor != this && Actor->GetName().Contains(TEXT("Dinosaur")))
-            {
-                float Distance = FVector::Dist(GetActorLocation(), Actor->GetActorLocation());
-                if (Distance < 2000.0f) // 20 meter threat radius
-                {
-                    bNearbyThreat = true;
-                    break;
-                }
-            }
         }
     }
 }
@@ -399,16 +371,12 @@ void ATranspersonalCharacter::CheckForThreats()
 void ATranspersonalCharacter::ConsumeStamina(float Amount)
 {
     Stamina = FMath::Max(0.0f, Stamina - Amount);
-    
-    if (Stamina <= 0.0f && bIsRunning)
-    {
-        StopRunning();
-    }
 }
 
 void ATranspersonalCharacter::IncreaseFear(float Amount)
 {
     FearLevel = FMath::Min(MaxFearLevel, FearLevel + Amount);
+    UE_LOG(LogTranspersonalCharacter, Log, TEXT("Fear increased by %f, current level: %f"), Amount, FearLevel);
 }
 
 void ATranspersonalCharacter::RestoreHealth(float Amount)
@@ -456,34 +424,25 @@ void ATranspersonalCharacter::DisableRagdoll()
 
 void ATranspersonalCharacter::ApplyImpact(const FVector& ImpactForce, const FVector& ImpactLocation)
 {
-    if (PhysicsManager)
+    if (PhysicsManager && bPhysicsEnabled)
     {
         PhysicsManager->ApplyImpactForce(this, ImpactForce, ImpactLocation);
+        
+        // Strong impacts trigger ragdoll
+        if (ImpactForce.Size() > 5000.0f)
+        {
+            EnableRagdoll();
+            IncreaseFear(20.0f); // Being hit increases fear
+        }
     }
-
-    // High impact forces trigger ragdoll
-    if (ImpactForce.Size() > 500.0f)
-    {
-        EnableRagdoll();
-    }
-
-    UE_LOG(LogTranspersonalCharacter, Log, TEXT("Impact applied: Force=%s, Location=%s"), 
-           *ImpactForce.ToString(), *ImpactLocation.ToString());
 }
 
 void ATranspersonalCharacter::SetPhysicsEnabled(bool bEnabled)
 {
     bPhysicsEnabled = bEnabled;
-    
-    if (RagdollComponent)
-    {
-        RagdollComponent->SetEnabled(bEnabled);
-    }
-
     if (PhysicsManager)
     {
         PhysicsManager->SetPhysicsEnabled(bEnabled);
     }
-
     UE_LOG(LogTranspersonalCharacter, Log, TEXT("Physics enabled: %s"), bEnabled ? TEXT("true") : TEXT("false"));
 }
