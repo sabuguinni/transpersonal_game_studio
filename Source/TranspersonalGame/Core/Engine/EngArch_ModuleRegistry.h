@@ -2,88 +2,75 @@
 
 #include "CoreMinimal.h"
 #include "Engine/GameInstanceSubsystem.h"
+#include "Containers/Map.h"
 #include "SharedTypes.h"
 #include "EngArch_ModuleRegistry.generated.h"
 
-/**
- * Module Registry - Centralized type registration system to prevent
- * compilation conflicts between the 19 agents. Enforces unique naming
- * and provides shared type discovery across all game modules.
- */
-
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEng_RegisteredType
+struct TRANSPERSONALGAME_API FEng_ModuleInfo
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Type")
-    FString TypeName;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Type")
+    UPROPERTY(BlueprintReadOnly, Category = "Module")
     FString ModuleName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Type")
-    FString AgentOwner;
+    UPROPERTY(BlueprintReadOnly, Category = "Module")
+    EEng_ModuleStatus Status;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Type")
-    FString TypeCategory; // UCLASS, USTRUCT, UENUM, UFUNCTION
+    UPROPERTY(BlueprintReadOnly, Category = "Module")
+    float InitializationTime;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Type")
-    FString FilePath;
+    UPROPERTY(BlueprintReadOnly, Category = "Module")
+    int32 DependencyCount;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Type")
-    bool bIsSharedType = false;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Type")
-    float RegistrationTime = 0.0f;
-};
-
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEng_AgentModule
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent")
-    int32 AgentNumber = 0;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent")
-    FString AgentName;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent")
-    FString ModulePrefix;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent")
-    TArray<FString> RegisteredTypes;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent")
+    UPROPERTY(BlueprintReadOnly, Category = "Module")
     TArray<FString> Dependencies;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent")
-    bool bCanRegisterTypes = true;
+    UPROPERTY(BlueprintReadOnly, Category = "Module")
+    FString AgentResponsible;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent")
-    int32 TypeCount = 0;
+    FEng_ModuleInfo()
+    {
+        ModuleName = TEXT("");
+        Status = EEng_ModuleStatus::Uninitialized;
+        InitializationTime = 0.0f;
+        DependencyCount = 0;
+        AgentResponsible = TEXT("");
+    }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEng_ConflictReport
+struct TRANSPERSONALGAME_API FEng_PerformanceMetrics
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Conflict")
-    FString ConflictingTypeName;
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float FrameTime;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Conflict")
-    FString FirstAgent;
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float GameThreadTime;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Conflict")
-    FString SecondAgent;
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float RenderThreadTime;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Conflict")
-    FString ConflictType; // "DUPLICATE_NAME", "CIRCULAR_DEPENDENCY", "MISSING_DEPENDENCY"
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    int32 DrawCalls;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Conflict")
-    FString Resolution;
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    int32 ActiveActors;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float MemoryUsageMB;
+
+    FEng_PerformanceMetrics()
+    {
+        FrameTime = 0.0f;
+        GameThreadTime = 0.0f;
+        RenderThreadTime = 0.0f;
+        DrawCalls = 0;
+        ActiveActors = 0;
+        MemoryUsageMB = 0.0f;
+    }
 };
 
 UCLASS(BlueprintType, Blueprintable)
@@ -94,97 +81,88 @@ class TRANSPERSONALGAME_API UEngArch_ModuleRegistry : public UGameInstanceSubsys
 public:
     UEngArch_ModuleRegistry();
 
-    // Subsystem interface
+    // USubsystem interface
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
-    // Agent Registration
-    UFUNCTION(BlueprintCallable, Category = "Registry")
-    void RegisterAgent(int32 AgentNumber, const FString& AgentName, const FString& ModulePrefix);
+    // Module Registration
+    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
+    bool RegisterModule(const FString& ModuleName, const FString& AgentResponsible, const TArray<FString>& Dependencies);
 
-    UFUNCTION(BlueprintCallable, Category = "Registry")
-    bool IsAgentRegistered(int32 AgentNumber) const;
+    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
+    bool UnregisterModule(const FString& ModuleName);
 
-    UFUNCTION(BlueprintCallable, Category = "Registry")
-    FEng_AgentModule GetAgentModule(int32 AgentNumber) const;
+    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
+    void SetModuleStatus(const FString& ModuleName, EEng_ModuleStatus NewStatus);
 
-    UFUNCTION(BlueprintCallable, Category = "Registry")
-    TArray<FEng_AgentModule> GetAllAgentModules() const;
+    // Module Queries
+    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
+    FEng_ModuleInfo GetModuleInfo(const FString& ModuleName) const;
 
-    // Type Registration
-    UFUNCTION(BlueprintCallable, Category = "Types")
-    bool RegisterType(const FString& TypeName, const FString& ModuleName, int32 AgentNumber, 
-                     const FString& TypeCategory, const FString& FilePath, bool bIsShared = false);
+    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
+    TArray<FString> GetAllModules() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Types")
-    bool IsTypeRegistered(const FString& TypeName) const;
+    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
+    TArray<FString> GetModulesByStatus(EEng_ModuleStatus Status) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Types")
-    FEng_RegisteredType GetTypeInfo(const FString& TypeName) const;
+    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
+    TArray<FString> GetModulesByAgent(const FString& AgentName) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Types")
-    TArray<FEng_RegisteredType> GetTypesForAgent(int32 AgentNumber) const;
+    // Dependency Management
+    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
+    bool ValidateDependencies(const FString& ModuleName) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Types")
-    TArray<FEng_RegisteredType> GetSharedTypes() const;
+    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
+    TArray<FString> GetUnmetDependencies(const FString& ModuleName) const;
 
-    // Conflict Detection
-    UFUNCTION(BlueprintCallable, Category = "Validation")
-    TArray<FEng_ConflictReport> DetectConflicts() const;
+    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
+    TArray<FString> GetInitializationOrder() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Validation")
-    bool ValidateTypeRegistration(const FString& TypeName, int32 AgentNumber) const;
+    // Performance Monitoring
+    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
+    void UpdatePerformanceMetrics();
 
-    UFUNCTION(BlueprintCallable, Category = "Validation")
-    bool ValidateAgentDependencies(int32 AgentNumber) const;
+    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
+    FEng_PerformanceMetrics GetCurrentMetrics() const;
 
-    // Shared Types Management
-    UFUNCTION(BlueprintCallable, Category = "SharedTypes")
-    void RegisterSharedType(const FString& TypeName, const FString& TypeCategory);
+    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
+    bool IsPerformanceWithinLimits() const;
 
-    UFUNCTION(BlueprintCallable, Category = "SharedTypes")
-    bool IsSharedType(const FString& TypeName) const;
+    // Debug and Validation
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Engine Architecture")
+    void ValidateAllModules();
 
-    UFUNCTION(BlueprintCallable, Category = "SharedTypes")
-    void GenerateSharedTypesHeader();
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Engine Architecture")
+    void PrintModuleStatus();
 
-    // Build Integration
-    UFUNCTION(BlueprintCallable, Category = "Build")
-    TArray<FString> GetRequiredIncludes(int32 AgentNumber) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Build")
-    TArray<FString> GetModuleDependencies(int32 AgentNumber) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Build")
-    void ValidateModuleBuildFiles();
-
-    // Naming Conventions
-    UFUNCTION(BlueprintCallable, Category = "Naming")
-    FString GenerateUniqueTypeName(const FString& BaseName, int32 AgentNumber) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Naming")
-    bool ValidateNamingConvention(const FString& TypeName, int32 AgentNumber) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Naming")
-    FString GetAgentPrefix(int32 AgentNumber) const;
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Engine Architecture")
+    void ForceReloadModule(const FString& ModuleName);
 
 protected:
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Registry")
-    TArray<FEng_AgentModule> RegisteredAgents;
+    UPROPERTY()
+    TMap<FString, FEng_ModuleInfo> RegisteredModules;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Registry")
-    TArray<FEng_RegisteredType> RegisteredTypes;
+    UPROPERTY()
+    FEng_PerformanceMetrics CurrentMetrics;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Conflicts")
-    TArray<FEng_ConflictReport> DetectedConflicts;
+    UPROPERTY()
+    float LastMetricsUpdate;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "SharedTypes")
-    TArray<FString> SharedTypeNames;
+    // Performance Limits
+    UPROPERTY(EditAnywhere, Category = "Performance Limits")
+    float MaxFrameTime;
+
+    UPROPERTY(EditAnywhere, Category = "Performance Limits")
+    int32 MaxDrawCalls;
+
+    UPROPERTY(EditAnywhere, Category = "Performance Limits")
+    float MaxMemoryUsageMB;
 
 private:
-    void InitializeAgentPrefixes();
-    void RegisterCoreTypes();
-    void ValidateExistingTypes();
-    FString GetStandardPrefix(int32 AgentNumber) const;
-    bool CheckCircularDependency(int32 AgentNumber, TSet<int32>& VisitedAgents) const;
+    void InitializeCoreModules();
+    bool CheckCircularDependencies(const FString& ModuleName, const TArray<FString>& Dependencies) const;
+    void RecalculateInitializationOrder();
+    
+    TArray<FString> ModuleInitOrder;
+    bool bInitializationOrderDirty;
 };
