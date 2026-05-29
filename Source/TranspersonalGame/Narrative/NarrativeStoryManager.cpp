@@ -1,270 +1,239 @@
 #include "NarrativeStoryManager.h"
+#include "Engine/DataTable.h"
 #include "Engine/World.h"
-#include "Engine/GameInstance.h"
 #include "TimerManager.h"
+#include "Kismet/GameplayStatics.h"
 
 UNarrativeStoryManager::UNarrativeStoryManager()
 {
-    // Initialize narrative context to starting state
-    NarrativeContext = FNarr_NarrativeContext();
+    CurrentStoryPhase = ENarr_StoryPhase::Awakening;
+    StoryStartTime = 0.0f;
+    bAutoAdvancePhases = true;
+    NarrativeBeatDelay = 1.0f;
+    StoryBeatsDataTable = nullptr;
 }
 
 void UNarrativeStoryManager::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
     
-    InitializeStoryData();
+    StoryStartTime = FPlatformTime::Seconds();
+    CurrentStoryPhase = ENarr_StoryPhase::Awakening;
+    TriggeredEvents.Empty();
     
-    UE_LOG(LogTemp, Warning, TEXT("NarrativeStoryManager: Initialized - Starting story phase: Awakening"));
+    InitializeStoryBeats();
+    
+    UE_LOG(LogTemp, Warning, TEXT("NarrativeStoryManager initialized - Story begins"));
 }
 
 void UNarrativeStoryManager::Deinitialize()
 {
-    StoryEvents.Empty();
-    
+    EventListeners.Empty();
     Super::Deinitialize();
 }
 
-void UNarrativeStoryManager::InitializeStoryData()
+void UNarrativeStoryManager::TriggerStoryEvent(ENarr_StoryEvent Event)
 {
-    // Initialize phase descriptions for contextual narration
-    PhaseDescriptions.Empty();
+    if (HasEventTriggered(Event))
+    {
+        return; // Event already triggered
+    }
     
-    PhaseDescriptions.Add(ENarr_StoryPhase::Awakening, 
-        TEXT("You awaken in an unfamiliar world. The great cataclysm has separated you from your tribe."));
+    TriggeredEvents.Add(Event);
     
-    PhaseDescriptions.Add(ENarr_StoryPhase::Survival, 
-        TEXT("Your immediate needs are clear: water, food, and shelter. The predators will not wait."));
+    UE_LOG(LogTemp, Warning, TEXT("Story event triggered: %d"), (int32)Event);
     
-    PhaseDescriptions.Add(ENarr_StoryPhase::Discovery, 
-        TEXT("Signs of other survivors emerge. You are not alone in this ancient land."));
+    // Find and play corresponding narrative beat
+    FNarr_StoryBeat* StoryBeat = FindStoryBeatForEvent(Event);
+    if (StoryBeat)
+    {
+        PlayNarrativeBeat(*StoryBeat);
+    }
     
-    PhaseDescriptions.Add(ENarr_StoryPhase::Territory, 
-        TEXT("You have claimed your territory. Now you must defend it from those who would take it."));
+    // Update story phase if auto-advance is enabled
+    if (bAutoAdvancePhases)
+    {
+        UpdateStoryPhaseBasedOnEvents();
+    }
     
-    PhaseDescriptions.Add(ENarr_StoryPhase::Mastery, 
-        TEXT("You have become a master of survival. The land bends to your will."));
-    
-    PhaseDescriptions.Add(ENarr_StoryPhase::Endgame, 
-        TEXT("The final challenge awaits. Your journey through this prehistoric world nears its conclusion."));
-
-    // Record the awakening event
-    RecordStoryEvent(ENarr_StoryEventType::FirstWater, 
-        TEXT("Player awakens in prehistoric world"), 
-        FVector::ZeroVector);
+    // Broadcast to listeners
+    BroadcastStoryEvent(Event);
 }
 
-void UNarrativeStoryManager::AdvanceStoryPhase(ENarr_StoryPhase NewPhase)
+void UNarrativeStoryManager::AdvanceStoryPhase()
 {
-    if (NewPhase != NarrativeContext.CurrentPhase)
+    int32 CurrentPhaseInt = (int32)CurrentStoryPhase;
+    int32 MaxPhaseInt = (int32)ENarr_StoryPhase::Resolution;
+    
+    if (CurrentPhaseInt < MaxPhaseInt)
     {
-        ENarr_StoryPhase OldPhase = NarrativeContext.CurrentPhase;
-        NarrativeContext.CurrentPhase = NewPhase;
-        
-        UE_LOG(LogTemp, Warning, TEXT("NarrativeStoryManager: Story phase advanced from %d to %d"), 
-            (int32)OldPhase, (int32)NewPhase);
-        
-        // Trigger contextual narration for phase change
-        FString PhaseNarration = GetPhaseNarration(NewPhase);
-        UE_LOG(LogTemp, Warning, TEXT("NarrativeStoryManager: Phase narration: %s"), *PhaseNarration);
+        CurrentStoryPhase = (ENarr_StoryPhase)(CurrentPhaseInt + 1);
+        UE_LOG(LogTemp, Warning, TEXT("Story phase advanced to: %d"), CurrentPhaseInt + 1);
     }
 }
 
-void UNarrativeStoryManager::RecordStoryEvent(ENarr_StoryEventType EventType, const FString& Description, const FVector& Location)
+bool UNarrativeStoryManager::HasEventTriggered(ENarr_StoryEvent Event) const
 {
-    FNarr_StoryEvent NewEvent;
-    NewEvent.EventType = EventType;
-    NewEvent.EventDescription = Description;
-    NewEvent.EventTime = FDateTime::Now();
-    NewEvent.EventLocation = Location;
+    return TriggeredEvents.Contains(Event);
+}
+
+void UNarrativeStoryManager::PlayNarrativeBeat(const FNarr_StoryBeat& StoryBeat)
+{
+    UE_LOG(LogTemp, Warning, TEXT("Playing narrative beat: %s"), *StoryBeat.NarrativeText);
     
-    StoryEvents.Add(NewEvent);
+    // TODO: Integrate with UI system to display narrative text
+    // TODO: Integrate with audio system to play voice-over
     
-    UE_LOG(LogTemp, Warning, TEXT("NarrativeStoryManager: Story event recorded - %s at %s"), 
-        *Description, *Location.ToString());
-    
-    // Check for story phase advancement based on events
-    switch (EventType)
+    if (StoryBeat.bBlocksGameplay)
     {
-        case ENarr_StoryEventType::FirstWater:
-            if (NarrativeContext.CurrentPhase == ENarr_StoryPhase::Awakening)
-            {
-                AdvanceStoryPhase(ENarr_StoryPhase::Survival);
-            }
-            break;
-            
-        case ENarr_StoryEventType::FirstShelter:
-            if (NarrativeContext.bHasWater && NarrativeContext.AnimalsHunted > 0)
-            {
-                AdvanceStoryPhase(ENarr_StoryPhase::Discovery);
-            }
-            break;
-            
-        case ENarr_StoryEventType::FirstTribe:
-            AdvanceStoryPhase(ENarr_StoryPhase::Territory);
-            break;
-            
-        case ENarr_StoryEventType::MajorVictory:
-            if (NarrativeContext.PredatorsDefeated >= 3)
-            {
-                AdvanceStoryPhase(ENarr_StoryPhase::Mastery);
-            }
-            break;
+        // TODO: Pause game or show narrative overlay
     }
 }
 
-bool UNarrativeStoryManager::HasEventOccurred(ENarr_StoryEventType EventType) const
+void UNarrativeStoryManager::SetStoryDataTable(UDataTable* DataTable)
 {
-    for (const FNarr_StoryEvent& Event : StoryEvents)
+    StoryBeatsDataTable = DataTable;
+    InitializeStoryBeats();
+}
+
+float UNarrativeStoryManager::GetStoryProgressPercent() const
+{
+    int32 CurrentPhaseInt = (int32)CurrentStoryPhase;
+    int32 MaxPhaseInt = (int32)ENarr_StoryPhase::Resolution;
+    
+    return (float)CurrentPhaseInt / (float)MaxPhaseInt * 100.0f;
+}
+
+FString UNarrativeStoryManager::GetCurrentNarrativeContext() const
+{
+    switch (CurrentStoryPhase)
     {
-        if (Event.EventType == EventType)
+        case ENarr_StoryPhase::Awakening:
+            return TEXT("You awaken in a strange, primitive world. The air is thick with danger.");
+        case ENarr_StoryPhase::FirstContact:
+            return TEXT("Massive creatures roam these lands. You must learn to survive among them.");
+        case ENarr_StoryPhase::Survival:
+            return TEXT("Each day is a struggle. Food, shelter, and safety are your priorities.");
+        case ENarr_StoryPhase::Discovery:
+            return TEXT("Ancient ruins hint at others who came before. You are not alone.");
+        case ENarr_StoryPhase::Alliance:
+            return TEXT("Trust is earned through action. Allies can mean the difference between life and death.");
+        case ENarr_StoryPhase::Conflict:
+            return TEXT("The apex predators have taken notice. The real test begins now.");
+        case ENarr_StoryPhase::Resolution:
+            return TEXT("You have proven yourself worthy of this harsh world. Your legend begins.");
+        default:
+            return TEXT("Unknown phase");
+    }
+}
+
+void UNarrativeStoryManager::RegisterStoryEventListener(UObject* Listener)
+{
+    if (Listener)
+    {
+        EventListeners.AddUnique(TWeakObjectPtr<UObject>(Listener));
+    }
+}
+
+void UNarrativeStoryManager::UnregisterStoryEventListener(UObject* Listener)
+{
+    if (Listener)
+    {
+        EventListeners.Remove(TWeakObjectPtr<UObject>(Listener));
+    }
+}
+
+void UNarrativeStoryManager::InitializeStoryBeats()
+{
+    // Initialize default story beats if no data table is provided
+    if (!StoryBeatsDataTable)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("No story beats data table provided - using defaults"));
+        return;
+    }
+    
+    // TODO: Load story beats from data table
+    UE_LOG(LogTemp, Warning, TEXT("Story beats initialized from data table"));
+}
+
+void UNarrativeStoryManager::BroadcastStoryEvent(ENarr_StoryEvent Event)
+{
+    // Clean up invalid listeners
+    EventListeners.RemoveAll([](const TWeakObjectPtr<UObject>& Listener)
+    {
+        return !Listener.IsValid();
+    });
+    
+    // Broadcast to valid listeners
+    for (const TWeakObjectPtr<UObject>& Listener : EventListeners)
+    {
+        if (Listener.IsValid())
         {
-            return true;
+            // TODO: Call interface method on listener
+            UE_LOG(LogTemp, Log, TEXT("Broadcasting story event to listener"));
         }
     }
-    return false;
 }
 
-void UNarrativeStoryManager::UpdateSurvivalStats(bool bFoundWater, bool bBuiltShelter, int32 NewAnimalsHunted)
+FNarr_StoryBeat* UNarrativeStoryManager::FindStoryBeatForEvent(ENarr_StoryEvent Event)
 {
-    bool bWaterChanged = (bFoundWater != NarrativeContext.bHasWater);
-    bool bShelterChanged = (bBuiltShelter != NarrativeContext.bHasShelter);
-    
-    NarrativeContext.bHasWater = bFoundWater;
-    NarrativeContext.bHasShelter = bBuiltShelter;
-    NarrativeContext.AnimalsHunted = NewAnimalsHunted;
-    
-    // Record significant survival milestones
-    if (bWaterChanged && bFoundWater && !HasEventOccurred(ENarr_StoryEventType::FirstWater))
+    if (!StoryBeatsDataTable)
     {
-        RecordStoryEvent(ENarr_StoryEventType::FirstWater, 
-            TEXT("Player found first water source"), 
-            FVector::ZeroVector);
+        return nullptr;
     }
     
-    if (bShelterChanged && bBuiltShelter && !HasEventOccurred(ENarr_StoryEventType::FirstShelter))
-    {
-        RecordStoryEvent(ENarr_StoryEventType::FirstShelter, 
-            TEXT("Player built first shelter"), 
-            FVector::ZeroVector);
-    }
-    
-    if (NewAnimalsHunted > 0 && !HasEventOccurred(ENarr_StoryEventType::FirstHunt))
-    {
-        RecordStoryEvent(ENarr_StoryEventType::FirstHunt, 
-            TEXT("Player completed first successful hunt"), 
-            FVector::ZeroVector);
-    }
+    // TODO: Search data table for matching story beat
+    return nullptr;
 }
 
-void UNarrativeStoryManager::UpdateFearLevel(float NewFearLevel)
+void UNarrativeStoryManager::UpdateStoryPhaseBasedOnEvents()
 {
-    NarrativeContext.FearLevel = FMath::Clamp(NewFearLevel, 0.0f, 1.0f);
-    
-    UE_LOG(LogTemp, Warning, TEXT("NarrativeStoryManager: Fear level updated to %f"), 
-        NarrativeContext.FearLevel);
-}
-
-void UNarrativeStoryManager::IncrementDaysAlive()
-{
-    NarrativeContext.DaysAlive++;
-    
-    UE_LOG(LogTemp, Warning, TEXT("NarrativeStoryManager: Player has survived %d days"), 
-        NarrativeContext.DaysAlive);
-    
-    // Check for long-term survival milestones
-    if (NarrativeContext.DaysAlive == 7)
+    // Advance story phases based on triggered events
+    switch (CurrentStoryPhase)
     {
-        RecordStoryEvent(ENarr_StoryEventType::MajorVictory, 
-            TEXT("Player survived first week"), 
-            FVector::ZeroVector);
+        case ENarr_StoryPhase::Awakening:
+            if (HasEventTriggered(ENarr_StoryEvent::FirstDinosaurSighted))
+            {
+                AdvanceStoryPhase();
+            }
+            break;
+            
+        case ENarr_StoryPhase::FirstContact:
+            if (HasEventTriggered(ENarr_StoryEvent::FirstCraftingSuccess))
+            {
+                AdvanceStoryPhase();
+            }
+            break;
+            
+        case ENarr_StoryPhase::Survival:
+            if (HasEventTriggered(ENarr_StoryEvent::FirstNPCMet))
+            {
+                AdvanceStoryPhase();
+            }
+            break;
+            
+        case ENarr_StoryPhase::Discovery:
+            if (HasEventTriggered(ENarr_StoryEvent::TribeDiscovered))
+            {
+                AdvanceStoryPhase();
+            }
+            break;
+            
+        case ENarr_StoryPhase::Alliance:
+            if (HasEventTriggered(ENarr_StoryEvent::FirstCombatVictory))
+            {
+                AdvanceStoryPhase();
+            }
+            break;
+            
+        case ENarr_StoryPhase::Conflict:
+            if (HasEventTriggered(ENarr_StoryEvent::AlphaRexEncounter))
+            {
+                AdvanceStoryPhase();
+            }
+            break;
+            
+        default:
+            break;
     }
-    else if (NarrativeContext.DaysAlive == 30)
-    {
-        RecordStoryEvent(ENarr_StoryEventType::MajorVictory, 
-            TEXT("Player survived first month"), 
-            FVector::ZeroVector);
-    }
-}
-
-FString UNarrativeStoryManager::GetContextualNarration() const
-{
-    // Generate contextual narration based on current story state
-    FString BaseNarration = GetPhaseNarration(NarrativeContext.CurrentPhase);
-    
-    // Add context based on survival status
-    if (!NarrativeContext.bHasWater && NarrativeContext.DaysAlive > 0)
-    {
-        BaseNarration += TEXT(" Your thirst grows desperate.");
-    }
-    
-    if (!NarrativeContext.bHasShelter && NarrativeContext.DaysAlive > 1)
-    {
-        BaseNarration += TEXT(" The elements threaten your survival.");
-    }
-    
-    if (NarrativeContext.FearLevel > 0.8f)
-    {
-        BaseNarration += TEXT(" Terror grips your heart as predators circle.");
-    }
-    else if (NarrativeContext.FearLevel < 0.2f && NarrativeContext.PredatorsDefeated > 2)
-    {
-        BaseNarration += TEXT(" You have become the apex predator of these lands.");
-    }
-    
-    return BaseNarration;
-}
-
-bool UNarrativeStoryManager::ShouldTriggerStoryMoment() const
-{
-    // Trigger story moments based on recent events and context
-    
-    // First day survival milestone
-    if (NarrativeContext.DaysAlive == 1 && 
-        NarrativeContext.bHasWater && 
-        NarrativeContext.AnimalsHunted > 0)
-    {
-        return true;
-    }
-    
-    // Major predator encounter
-    if (NarrativeContext.FearLevel > 0.9f && 
-        !IsStoryEventRecent(ENarr_StoryEventType::FirstDanger, 2.0f))
-    {
-        return true;
-    }
-    
-    // Mastery achievement
-    if (NarrativeContext.PredatorsDefeated >= 5 && 
-        NarrativeContext.CurrentPhase != ENarr_StoryPhase::Mastery)
-    {
-        return true;
-    }
-    
-    return false;
-}
-
-FString UNarrativeStoryManager::GetPhaseNarration(ENarr_StoryPhase Phase) const
-{
-    if (const FString* Description = PhaseDescriptions.Find(Phase))
-    {
-        return *Description;
-    }
-    
-    return TEXT("Your journey continues through this ancient world.");
-}
-
-bool UNarrativeStoryManager::IsStoryEventRecent(ENarr_StoryEventType EventType, float HoursAgo) const
-{
-    FDateTime Threshold = FDateTime::Now() - FTimespan::FromHours(HoursAgo);
-    
-    for (const FNarr_StoryEvent& Event : StoryEvents)
-    {
-        if (Event.EventType == EventType && Event.EventTime > Threshold)
-        {
-            return true;
-        }
-    }
-    
-    return false;
 }
