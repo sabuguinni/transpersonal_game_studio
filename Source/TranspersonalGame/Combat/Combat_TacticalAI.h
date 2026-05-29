@@ -2,43 +2,64 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
-#include "Engine/Engine.h"
+#include "Engine/World.h"
+#include "GameFramework/Character.h"
+#include "GameFramework/Pawn.h"
+#include "Components/SphereComponent.h"
+#include "Kismet/GameplayStatics.h"
 #include "Combat_TacticalAI.generated.h"
 
 UENUM(BlueprintType)
 enum class ECombat_TacticalState : uint8
 {
     Idle UMETA(DisplayName = "Idle"),
-    Patrol UMETA(DisplayName = "Patrol"),
-    Hunt UMETA(DisplayName = "Hunt"),
-    Attack UMETA(DisplayName = "Attack"),
-    Retreat UMETA(DisplayName = "Retreat"),
-    Pack UMETA(DisplayName = "Pack Coordination")
+    Hunting UMETA(DisplayName = "Hunting"),
+    Stalking UMETA(DisplayName = "Stalking"),
+    Attacking UMETA(DisplayName = "Attacking"),
+    Retreating UMETA(DisplayName = "Retreating"),
+    Circling UMETA(DisplayName = "Circling")
+};
+
+UENUM(BlueprintType)
+enum class ECombat_DinosaurType : uint8
+{
+    Predator UMETA(DisplayName = "Predator"),
+    Herbivore UMETA(DisplayName = "Herbivore"),
+    Scavenger UMETA(DisplayName = "Scavenger"),
+    PackHunter UMETA(DisplayName = "Pack Hunter")
 };
 
 USTRUCT(BlueprintType)
-struct FCombat_ThreatAssessment
+struct FCombat_TacticalData
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Combat")
-    float ThreatLevel;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+    float DetectionRange = 2000.0f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Combat")
-    float Distance;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+    float AttackRange = 500.0f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Combat")
-    AActor* ThreatActor;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+    float RetreatHealthThreshold = 0.3f;
 
-    FCombat_ThreatAssessment()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+    float AggressionLevel = 0.7f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+    bool bCanPackHunt = false;
+
+    FCombat_TacticalData()
     {
-        ThreatLevel = 0.0f;
-        Distance = 0.0f;
-        ThreatActor = nullptr;
+        DetectionRange = 2000.0f;
+        AttackRange = 500.0f;
+        RetreatHealthThreshold = 0.3f;
+        AggressionLevel = 0.7f;
+        bCanPackHunt = false;
     }
 };
 
-UCLASS(ClassGroup=(Combat), meta=(BlueprintSpawnableComponent))
+UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent), BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UCombat_TacticalAI : public UActorComponent
 {
     GENERATED_BODY()
@@ -56,33 +77,58 @@ public:
     ECombat_TacticalState CurrentState;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
-    float DetectionRadius;
+    ECombat_DinosaurType DinosaurType;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
-    float AttackRange;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
-    float RetreatThreshold;
+    FCombat_TacticalData TacticalData;
 
     UPROPERTY(BlueprintReadOnly, Category = "Combat AI")
-    TArray<FCombat_ThreatAssessment> ThreatList;
+    AActor* CurrentTarget;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Combat AI")
+    float DistanceToTarget;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Combat AI")
+    float CurrentHealth;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Combat AI")
+    float MaxHealth;
 
     UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    void DetectThreats();
+    void SetTacticalState(ECombat_TacticalState NewState);
 
     UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    void UpdateTacticalState();
+    AActor* FindNearestPlayer();
 
     UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    void ExecuteAttackBehavior();
+    bool IsPlayerInRange(float Range);
 
     UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    void ExecuteRetreatBehavior();
+    void UpdateTacticalBehavior();
 
     UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    AActor* GetPrimaryThreat();
+    void ExecuteAttackPattern();
+
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    void ExecuteRetreatPattern();
+
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    void ExecuteCirclingPattern();
 
 private:
-    float LastThreatCheck;
-    float ThreatCheckInterval;
+    void UpdateTargetDistance();
+    void EvaluateHealthStatus();
+    bool ShouldRetreat();
+    bool ShouldAttack();
+    void HandleIdleState();
+    void HandleHuntingState();
+    void HandleStalkingState();
+    void HandleAttackingState();
+    void HandleRetreatingState();
+    void HandleCirclingState();
+
+    float LastStateChangeTime;
+    float StateChangeDelay;
+    FVector LastKnownPlayerPosition;
+    bool bHasLineOfSight;
 };
