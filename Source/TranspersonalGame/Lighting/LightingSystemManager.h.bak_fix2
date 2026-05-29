@@ -118,12 +118,12 @@ protected:
 };
 
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API ULightingSystemManagerObj : public UWorldSubsystem
+class TRANSPERSONALGAME_API ULightingSystemManager : public UWorldSubsystem
 {
     GENERATED_BODY()
 
 public:
-    ULightingSystemManagerObj();
+    ULightingSystemManager();
 
     // USubsystem interface
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;

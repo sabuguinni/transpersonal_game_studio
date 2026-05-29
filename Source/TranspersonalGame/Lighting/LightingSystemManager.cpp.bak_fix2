@@ -5,7 +5,7 @@
 #include "Kismet/GameplayStatics.h"
 #include "Components/StaticMeshComponent.h"
 
-ULightingSystemManagerObj::ULightingSystemManagerObj()
+ULightingSystemManager::ULightingSystemManager()
 {
     SunLight = nullptr;
     SkyAtmosphereActor = nullptr;
@@ -14,7 +14,7 @@ ULightingSystemManagerObj::ULightingSystemManagerObj()
     CurrentTimeOfDay = 12.0f;
 }
 
-void ULightingSystemManagerObj::Initialize(FSubsystemCollectionBase& Collection)
+void ULightingSystemManager::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
     UE_LOG(LogTemp, Warning, TEXT("LightingSystemManager initialized"));
@@ -27,11 +27,11 @@ void ULightingSystemManagerObj::Initialize(FSubsystemCollectionBase& Collection)
     if (UWorld* World = GetWorld())
     {
         FTimerHandle TimerHandle;
-        World->GetTimerManager().SetTimer(TimerHandle, this, &ULightingSystemManagerObj::InitializeLightingSystem, 1.0f, false);
+        World->GetTimerManager().SetTimer(TimerHandle, this, &ULightingSystemManager::InitializeLightingSystem, 1.0f, false);
     }
 }
 
-void ULightingSystemManagerObj::Deinitialize()
+void ULightingSystemManager::Deinitialize()
 {
     SunLight = nullptr;
     SkyAtmosphereActor = nullptr;
@@ -40,7 +40,7 @@ void ULightingSystemManagerObj::Deinitialize()
     Super::Deinitialize();
 }
 
-void ULightingSystemManagerObj::InitializeLightingSystem()
+void ULightingSystemManager::InitializeLightingSystem()
 {
     UE_LOG(LogTemp, Warning, TEXT("Initializing Lighting System"));
     
@@ -55,7 +55,7 @@ void ULightingSystemManagerObj::InitializeLightingSystem()
     UE_LOG(LogTemp, Warning, TEXT("Lighting System initialization complete"));
 }
 
-void ULightingSystemManagerObj::ApplyAtmosphericCorrection()
+void ULightingSystemManager::ApplyAtmosphericCorrection()
 {
     UE_LOG(LogTemp, Warning, TEXT("Applying atmospheric correction for Cretaceous period"));
     
@@ -106,7 +106,7 @@ void ULightingSystemManagerObj::ApplyAtmosphericCorrection()
     UpdatePostProcessing();
 }
 
-void ULightingSystemManagerObj::SetTimeOfDay(float TimeHours)
+void ULightingSystemManager::SetTimeOfDay(float TimeHours)
 {
     CurrentTimeOfDay = FMath::Clamp(TimeHours, 0.0f, 24.0f);
     
@@ -121,7 +121,7 @@ void ULightingSystemManagerObj::SetTimeOfDay(float TimeHours)
     UE_LOG(LogTemp, Log, TEXT("Time of day set to %.1f hours"), TimeHours);
 }
 
-void ULightingSystemManagerObj::SetWeatherConditions(const FLight_WeatherSettings& WeatherSettings)
+void ULightingSystemManager::SetWeatherConditions(const FLight_WeatherSettings& WeatherSettings)
 {
     CurrentWeatherSettings = WeatherSettings;
     
@@ -154,7 +154,7 @@ void ULightingSystemManagerObj::SetWeatherConditions(const FLight_WeatherSetting
            WeatherSettings.CloudCoverage, WeatherSettings.RainIntensity);
 }
 
-void ULightingSystemManagerObj::FindOrCreateSunLight()
+void ULightingSystemManager::FindOrCreateSunLight()
 {
     UWorld* World = GetWorld();
     if (!World) return;
@@ -179,7 +179,7 @@ void ULightingSystemManagerObj::FindOrCreateSunLight()
     }
 }
 
-void ULightingSystemManagerObj::FindOrCreateSkyAtmosphere()
+void ULightingSystemManager::FindOrCreateSkyAtmosphere()
 {
     UWorld* World = GetWorld();
     if (!World) return;
@@ -201,7 +201,7 @@ void ULightingSystemManagerObj::FindOrCreateSkyAtmosphere()
     }
 }
 
-void ULightingSystemManagerObj::FindOrCreateFog()
+void ULightingSystemManager::FindOrCreateFog()
 {
     UWorld* World = GetWorld();
     if (!World) return;
@@ -223,7 +223,7 @@ void ULightingSystemManagerObj::FindOrCreateFog()
     }
 }
 
-void ULightingSystemManagerObj::ConfigurePostProcessing()
+void ULightingSystemManager::ConfigurePostProcessing()
 {
     UWorld* World = GetWorld();
     if (!World) return;
@@ -251,7 +251,7 @@ void ULightingSystemManagerObj::ConfigurePostProcessing()
     UpdatePostProcessing();
 }
 
-void ULightingSystemManagerObj::ApplyBiomeLighting(EBiomeType BiomeType, const FVector& PlayerLocation)
+void ULightingSystemManager::ApplyBiomeLighting(EBiomeType BiomeType, const FVector& PlayerLocation)
 {
     FLight_TimeOfDaySettings BiomeSettings = GetBiomeLightingSettings(BiomeType);
     
@@ -265,7 +265,7 @@ void ULightingSystemManagerObj::ApplyBiomeLighting(EBiomeType BiomeType, const F
     UE_LOG(LogTemp, Log, TEXT("Applied biome lighting for type: %d"), (int32)BiomeType);
 }
 
-void ULightingSystemManagerObj::SetInteriorLighting(bool bIsInterior, float AmbientMultiplier)
+void ULightingSystemManager::SetInteriorLighting(bool bIsInterior, float AmbientMultiplier)
 {
     if (SunLight && SunLight->GetLightComponent())
     {
@@ -286,7 +286,7 @@ void ULightingSystemManagerObj::SetInteriorLighting(bool bIsInterior, float Ambi
     }
 }
 
-void ULightingSystemManagerObj::UpdateSunLighting()
+void ULightingSystemManager::UpdateSunLighting()
 {
     if (SunLight && SunLight->GetLightComponent())
     {
@@ -298,7 +298,7 @@ void ULightingSystemManagerObj::UpdateSunLighting()
     }
 }
 
-void ULightingSystemManagerObj::UpdateAtmosphere()
+void ULightingSystemManager::UpdateAtmosphere()
 {
     if (SkyAtmosphereActor)
     {
@@ -310,7 +310,7 @@ void ULightingSystemManagerObj::UpdateAtmosphere()
     }
 }
 
-void ULightingSystemManagerObj::UpdateFog()
+void ULightingSystemManager::UpdateFog()
 {
     if (FogActor)
     {
@@ -322,7 +322,7 @@ void ULightingSystemManagerObj::UpdateFog()
     }
 }
 
-void ULightingSystemManagerObj::UpdatePostProcessing()
+void ULightingSystemManager::UpdatePostProcessing()
 {
     if (PostProcessVolume)
     {
@@ -345,7 +345,7 @@ void ULightingSystemManagerObj::UpdatePostProcessing()
     }
 }
 
-FLight_TimeOfDaySettings ULightingSystemManagerObj::GetBiomeLightingSettings(EBiomeType BiomeType) const
+FLight_TimeOfDaySettings ULightingSystemManager::GetBiomeLightingSettings(EBiomeType BiomeType) const
 {
     FLight_TimeOfDaySettings BiomeSettings = CurrentLightingSettings;
     
@@ -376,7 +376,7 @@ FLight_TimeOfDaySettings ULightingSystemManagerObj::GetBiomeLightingSettings(EBi
     return BiomeSettings;
 }
 
-FLinearColor ULightingSystemManagerObj::InterpolateSunColor(float TimeHours) const
+FLinearColor ULightingSystemManager::InterpolateSunColor(float TimeHours) const
 {
     // Sunrise/sunset warm colors vs midday neutral
     if (TimeHours < 6.0f || TimeHours > 18.0f)
@@ -396,14 +396,14 @@ FLinearColor ULightingSystemManagerObj::InterpolateSunColor(float TimeHours) con
     }
 }
 
-float ULightingSystemManagerObj::InterpolateSunIntensity(float TimeHours) const
+float ULightingSystemManager::InterpolateSunIntensity(float TimeHours) const
 {
     // Peak intensity at noon, minimum at midnight
     float NormalizedTime = FMath::Abs(TimeHours - 12.0f) / 12.0f;
     return FMath::Lerp(5.0f, 0.1f, NormalizedTime);
 }
 
-FRotator ULightingSystemManagerObj::CalculateSunRotation(float TimeHours) const
+FRotator ULightingSystemManager::CalculateSunRotation(float TimeHours) const
 {
     // Simple sun arc calculation
     float SunAngle = (TimeHours - 6.0f) * 15.0f - 90.0f; // 15 degrees per hour

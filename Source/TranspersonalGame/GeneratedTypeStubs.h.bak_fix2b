@@ -4302,6 +4302,11 @@ struct TRANSPERSONALGAME_API FTerrainGenerationSettings
     GENERATED_BODY()
 };
 
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FTranspersonalArchitectureLimits
+{
+    GENERATED_BODY()
+};
 
 USTRUCT(BlueprintType)
 struct TRANSPERSONALGAME_API FTranspersonalCollisionProfile
