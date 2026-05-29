@@ -1,11 +1,14 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Components/ActorComponent.h"
-#include "NiagaraSystem.h"
+#include "GameFramework/Actor.h"
+#include "Components/StaticMeshComponent.h"
+#include "Particles/ParticleSystemComponent.h"
 #include "NiagaraComponent.h"
-#include "Engine/World.h"
-#include "SharedTypes.h"
+#include "NiagaraSystem.h"
+#include "Engine/TriggerBox.h"
+#include "Sound/SoundCue.h"
+#include "../SharedTypes.h"
 #include "VFX_FootstepManager.generated.h"
 
 USTRUCT(BlueprintType)
@@ -13,94 +16,131 @@ struct TRANSPERSONALGAME_API FVFX_FootstepData
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Footstep VFX")
-    TSoftObjectPtr<UNiagaraSystem> DustEffect;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+    FVector ImpactLocation = FVector::ZeroVector;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Footstep VFX")
-    float EffectScale = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+    float ImpactForce = 1000.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Footstep VFX")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+    EVFX_SurfaceType SurfaceType = EVFX_SurfaceType::Dirt;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
     float DustIntensity = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Footstep VFX")
-    FColor DustColor = FColor::White;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Footstep VFX")
-    float EffectDuration = 2.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+    bool bCreateCrack = false;
 
     FVFX_FootstepData()
     {
-        EffectScale = 1.0f;
+        ImpactLocation = FVector::ZeroVector;
+        ImpactForce = 1000.0f;
+        SurfaceType = EVFX_SurfaceType::Dirt;
         DustIntensity = 1.0f;
-        DustColor = FColor(139, 69, 19); // Brown dust color
-        EffectDuration = 2.0f;
+        bCreateCrack = false;
     }
 };
 
-UCLASS(ClassGroup=(VFX), meta=(BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UVFX_FootstepManager : public UActorComponent
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FVFX_EffectSettings
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+    class UNiagaraSystem* DustEffect = nullptr;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+    class UNiagaraSystem* RockDebrisEffect = nullptr;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+    class UNiagaraSystem* WaterSplashEffect = nullptr;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+    float EffectLifetime = 3.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+    int32 MaxActiveEffects = 50;
+
+    FVFX_EffectSettings()
+    {
+        DustEffect = nullptr;
+        RockDebrisEffect = nullptr;
+        WaterSplashEffect = nullptr;
+        EffectLifetime = 3.0f;
+        MaxActiveEffects = 50;
+    }
+};
+
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API AVFX_FootstepManager : public AActor
 {
     GENERATED_BODY()
 
 public:
-    UVFX_FootstepManager();
+    AVFX_FootstepManager();
 
 protected:
     virtual void BeginPlay() override;
+    virtual void Tick(float DeltaTime) override;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    class USceneComponent* RootSceneComponent;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Settings")
+    FVFX_EffectSettings EffectSettings;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Settings")
+    float MinImpactForce = 500.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Settings")
+    float MaxEffectDistance = 5000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Settings")
+    bool bEnableScreenShake = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Settings")
+    float ScreenShakeIntensity = 0.5f;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "VFX Runtime")
+    TArray<class UNiagaraComponent*> ActiveEffects;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "VFX Runtime")
+    int32 EffectCount = 0;
 
 public:
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
-
-    // Footstep VFX configurations for different dinosaur types
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Footstep VFX")
-    FVFX_FootstepData TRexFootstep;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Footstep VFX")
-    FVFX_FootstepData RaptorFootstep;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Footstep VFX")
-    FVFX_FootstepData BrachiosaurusFootstep;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Footstep VFX")
-    FVFX_FootstepData GenericFootstep;
-
-    // Main footstep trigger function
     UFUNCTION(BlueprintCallable, Category = "VFX")
-    void TriggerFootstepVFX(FVector Location, EDinosaurSpecies DinosaurType, float ImpactForce = 1.0f);
-
-    // Specialized footstep functions
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    void TriggerTRexFootstep(FVector Location, float ImpactForce = 1.0f);
+    void CreateFootstepEffect(const FVFX_FootstepData& FootstepData);
 
     UFUNCTION(BlueprintCallable, Category = "VFX")
-    void TriggerRaptorFootstep(FVector Location, float ImpactForce = 1.0f);
+    void CreateDustCloud(FVector Location, float Intensity = 1.0f);
 
     UFUNCTION(BlueprintCallable, Category = "VFX")
-    void TriggerBrachiosaurusFootstep(FVector Location, float ImpactForce = 1.0f);
+    void CreateRockDebris(FVector Location, float Force = 1000.0f);
 
-    // Environmental dust effects
     UFUNCTION(BlueprintCallable, Category = "VFX")
-    void TriggerEnvironmentalDust(FVector Location, FVector Direction, float Intensity = 1.0f);
+    void CreateWaterSplash(FVector Location, float Radius = 200.0f);
 
-    // Screen space effects integration
     UFUNCTION(BlueprintCallable, Category = "VFX")
-    void TriggerFootstepWithScreenShake(FVector Location, EDinosaurSpecies DinosaurType, float ImpactForce = 1.0f);
+    void CleanupOldEffects();
+
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    void SetEffectQuality(int32 QualityLevel);
+
+    UFUNCTION(BlueprintPure, Category = "VFX")
+    int32 GetActiveEffectCount() const { return ActiveEffects.Num(); }
+
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    void TriggerScreenShake(FVector Location, float Intensity);
 
 private:
-    // Internal VFX spawning
-    void SpawnFootstepEffect(const FVFX_FootstepData& FootstepData, FVector Location, float ImpactForce);
+    void InitializeEffectSystems();
+    void LoadDefaultEffects();
+    UNiagaraComponent* SpawnNiagaraEffect(UNiagaraSystem* System, FVector Location, FRotator Rotation = FRotator::ZeroRotator);
+    void RemoveExpiredEffects();
 
-    // Get footstep data by dinosaur type
-    FVFX_FootstepData GetFootstepDataForSpecies(EDinosaurSpecies Species);
-
-    // Active VFX tracking
     UPROPERTY()
-    TArray<UNiagaraComponent*> ActiveFootstepEffects;
+    TArray<float> EffectTimestamps;
 
-    // Cleanup timer
-    FTimerHandle CleanupTimerHandle;
-
-    // Cleanup finished effects
-    UFUNCTION()
-    void CleanupFinishedEffects();
+    float LastCleanupTime = 0.0f;
+    const float CleanupInterval = 1.0f;
 };
