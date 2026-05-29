@@ -5,7 +5,6 @@
 #include "Engine/Engine.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
-#include "Components/CapsuleComponent.h"
 #include "Anim_CharacterAnimInstance.generated.h"
 
 UENUM(BlueprintType)
@@ -16,8 +15,17 @@ enum class EAnim_MovementState : uint8
     Running     UMETA(DisplayName = "Running"),
     Jumping     UMETA(DisplayName = "Jumping"),
     Falling     UMETA(DisplayName = "Falling"),
-    Crouching   UMETA(DisplayName = "Crouching"),
-    Swimming    UMETA(DisplayName = "Swimming")
+    Crouching   UMETA(DisplayName = "Crouching")
+};
+
+UENUM(BlueprintType)
+enum class EAnim_CombatState : uint8
+{
+    None        UMETA(DisplayName = "None"),
+    Ready       UMETA(DisplayName = "Ready"),
+    Attacking   UMETA(DisplayName = "Attacking"),
+    Blocking    UMETA(DisplayName = "Blocking"),
+    Dodging     UMETA(DisplayName = "Dodging")
 };
 
 USTRUCT(BlueprintType)
@@ -26,31 +34,19 @@ struct TRANSPERSONALGAME_API FAnim_MovementData
     GENERATED_BODY()
 
     UPROPERTY(BlueprintReadOnly, Category = "Movement")
-    float Speed;
+    float Speed = 0.0f;
 
     UPROPERTY(BlueprintReadOnly, Category = "Movement")
-    float Direction;
+    float Direction = 0.0f;
 
     UPROPERTY(BlueprintReadOnly, Category = "Movement")
-    bool bIsInAir;
+    bool bIsInAir = false;
 
     UPROPERTY(BlueprintReadOnly, Category = "Movement")
-    bool bIsCrouching;
+    bool bIsCrouching = false;
 
     UPROPERTY(BlueprintReadOnly, Category = "Movement")
-    EAnim_MovementState MovementState;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Movement")
-    FVector Velocity;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Movement")
-    float GroundSpeed;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Movement")
-    float AimYaw;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Movement")
-    float AimPitch;
+    EAnim_MovementState MovementState = EAnim_MovementState::Idle;
 
     FAnim_MovementData()
     {
@@ -59,14 +55,10 @@ struct TRANSPERSONALGAME_API FAnim_MovementData
         bIsInAir = false;
         bIsCrouching = false;
         MovementState = EAnim_MovementState::Idle;
-        Velocity = FVector::ZeroVector;
-        GroundSpeed = 0.0f;
-        AimYaw = 0.0f;
-        AimPitch = 0.0f;
     }
 };
 
-UCLASS(BlueprintType, Blueprintable)
+UCLASS(Blueprintable, BlueprintType)
 class TRANSPERSONALGAME_API UAnim_CharacterAnimInstance : public UAnimInstance
 {
     GENERATED_BODY()
@@ -74,66 +66,34 @@ class TRANSPERSONALGAME_API UAnim_CharacterAnimInstance : public UAnimInstance
 public:
     UAnim_CharacterAnimInstance();
 
+protected:
     virtual void NativeInitializeAnimation() override;
     virtual void NativeUpdateAnimation(float DeltaTimeX) override;
 
-protected:
-    // Character reference
     UPROPERTY(BlueprintReadOnly, Category = "Character")
-    class ACharacter* OwningCharacter;
+    class ACharacter* OwnerCharacter;
 
-    // Movement component reference
     UPROPERTY(BlueprintReadOnly, Category = "Character")
     class UCharacterMovementComponent* MovementComponent;
 
-    // Movement data
-    UPROPERTY(BlueprintReadOnly, Category = "Movement Data", meta = (AllowPrivateAccess = "true"))
+    UPROPERTY(BlueprintReadOnly, Category = "Movement Data")
     FAnim_MovementData MovementData;
 
-    // Animation properties
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Settings")
-    float WalkSpeedThreshold;
+    UPROPERTY(BlueprintReadOnly, Category = "Combat")
+    EAnim_CombatState CombatState;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Settings")
-    float RunSpeedThreshold;
+    UPROPERTY(BlueprintReadOnly, Category = "Survival")
+    float HealthPercentage;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Settings")
-    float IdleThreshold;
+    UPROPERTY(BlueprintReadOnly, Category = "Survival")
+    float StaminaPercentage;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Settings")
-    float DirectionDeadZone;
-
-    // State tracking
-    UPROPERTY(BlueprintReadOnly, Category = "State")
-    bool bWasInAirLastFrame;
-
-    UPROPERTY(BlueprintReadOnly, Category = "State")
-    float TimeInCurrentState;
-
-    UPROPERTY(BlueprintReadOnly, Category = "State")
-    EAnim_MovementState PreviousMovementState;
-
-public:
-    // Getters for Blueprint access
-    UFUNCTION(BlueprintPure, Category = "Animation")
-    FAnim_MovementData GetMovementData() const { return MovementData; }
-
-    UFUNCTION(BlueprintPure, Category = "Animation")
-    EAnim_MovementState GetCurrentMovementState() const { return MovementData.MovementState; }
-
-    UFUNCTION(BlueprintPure, Category = "Animation")
-    bool IsMoving() const { return MovementData.Speed > IdleThreshold; }
-
-    UFUNCTION(BlueprintPure, Category = "Animation")
-    bool IsRunning() const { return MovementData.Speed > RunSpeedThreshold; }
-
-    UFUNCTION(BlueprintPure, Category = "Animation")
-    bool IsWalking() const { return MovementData.Speed > WalkSpeedThreshold && MovementData.Speed <= RunSpeedThreshold; }
+    UPROPERTY(BlueprintReadOnly, Category = "Survival")
+    float FearLevel;
 
 private:
-    void UpdateMovementData(float DeltaTime);
-    void UpdateMovementState();
-    void CalculateDirection();
-    void UpdateAimOffsets();
-    EAnim_MovementState DetermineMovementState() const;
+    void UpdateMovementData();
+    void UpdateCombatState();
+    void UpdateSurvivalData();
+    EAnim_MovementState CalculateMovementState();
 };
