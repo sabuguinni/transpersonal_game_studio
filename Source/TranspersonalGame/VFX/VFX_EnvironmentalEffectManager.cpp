@@ -1,319 +1,291 @@
 #include "VFX_EnvironmentalEffectManager.h"
-#include "Engine/World.h"
 #include "Engine/Engine.h"
-#include "Kismet/GameplayStatics.h"
-#include "NiagaraFunctionLibrary.h"
+#include "Engine/World.h"
+#include "Components/StaticMeshComponent.h"
 #include "Particles/ParticleSystemComponent.h"
-#include "Components/SceneComponent.h"
+#include "Components/PointLightComponent.h"
+#include "Kismet/GameplayStatics.h"
+#include "Engine/PointLight.h"
 
-UVFX_EnvironmentalEffectManager::UVFX_EnvironmentalEffectManager()
+AVFX_EnvironmentalEffectManager::AVFX_EnvironmentalEffectManager()
 {
-    PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 0.5f; // Update twice per second for performance
+    PrimaryActorTick.bCanEverTick = true;
     
+    // Initialize default campfire locations
+    CampfireLocations.Add(FVector(0.0f, 0.0f, 100.0f));           // Central camp
+    CampfireLocations.Add(FVector(-44000.0f, 39000.0f, 100.0f));  // Forest camp
+    CampfireLocations.Add(FVector(49000.0f, -39000.0f, 100.0f));  // Desert camp
+
+    // Performance settings
     MaxActiveEffects = 20;
-    EffectCullingDistance = 5000.0f;
-    bUseNiagaraWhenAvailable = true;
-    LastWeatherUpdate = 0.0f;
-    LastTimeUpdate = 0.0f;
+    EffectUpdateInterval = 0.1f;
+    LODDistanceNear = 1000.0f;
+    LODDistanceFar = 5000.0f;
+    bEnableLODSystem = true;
+
+    // Atmospheric settings
+    ForestFogDensity = 0.3f;
+    DesertHazeDensity = 0.2f;
+    WindParticleIntensity = 1.0f;
+
+    // Campfire settings
+    CampfireLightIntensity = 2000.0f;
+    CampfireLightColor = FLinearColor(1.0f, 0.6f, 0.2f, 1.0f);
 }
 
-void UVFX_EnvironmentalEffectManager::BeginPlay()
+void AVFX_EnvironmentalEffectManager::BeginPlay()
 {
     Super::BeginPlay();
-    InitializeEffectDatabase();
+    
+    InitializeCampfires();
+    
+    // Create initial atmospheric effects
+    CreateEnvironmentalEffect(EVFX_EnvironmentalEffectType::ForestFog, 
+        FVector(-45000.0f, 40000.0f, 200.0f), ForestFogDensity);
+    
+    CreateEnvironmentalEffect(EVFX_EnvironmentalEffectType::DesertHaze, 
+        FVector(50000.0f, -40000.0f, 150.0f), DesertHazeDensity);
+
+    UE_LOG(LogTemp, Warning, TEXT("VFX Environmental Effect Manager initialized with %d campfires"), CampfireLocations.Num());
 }
 
-void UVFX_EnvironmentalEffectManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void AVFX_EnvironmentalEffectManager::Tick(float DeltaTime)
 {
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+    Super::Tick(DeltaTime);
     
-    // Clean up effects that are too far from player or finished
-    CleanupInactiveEffects();
+    LastUpdateTime += DeltaTime;
     
-    // Update weather-dependent effects every 2 seconds
-    if (GetWorld()->GetTimeSeconds() - LastWeatherUpdate > 2.0f)
+    if (LastUpdateTime >= EffectUpdateInterval)
     {
-        LastWeatherUpdate = GetWorld()->GetTimeSeconds();
-        // Weather update logic would go here when weather system is implemented
+        UpdateEnvironmentalEffects(DeltaTime);
+        LastUpdateTime = 0.0f;
     }
-}
-
-void UVFX_EnvironmentalEffectManager::SpawnEnvironmentalEffect(EVFX_EnvironmentalType EffectType, FVector Location, float Intensity)
-{
-    // Check if we're at max capacity
-    if (ActiveNiagaraComponents.Num() + ActiveParticleComponents.Num() >= MaxActiveEffects)
+    
+    // Performance optimization
+    if (bEnableLODSystem)
     {
-        UE_LOG(LogTemp, Warning, TEXT("VFX_EnvironmentalEffectManager: Max effects reached, skipping spawn"));
-        return;
-    }
-
-    // Find effect configuration
-    FVFX_EnvironmentalEffect* FoundEffect = nullptr;
-    for (FVFX_EnvironmentalEffect& Effect : EnvironmentalEffects)
-    {
-        if (Effect.EffectType == EffectType)
+        APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
+        if (PlayerPawn)
         {
-            FoundEffect = &Effect;
-            break;
+            OptimizeEffectsForDistance(PlayerPawn->GetActorLocation());
         }
     }
+}
 
-    if (!FoundEffect)
+void AVFX_EnvironmentalEffectManager::CreateEnvironmentalEffect(EVFX_EnvironmentalEffectType EffectType, FVector Location, float Intensity, float Duration)
+{
+    if (ActiveEffects.Num() >= MaxActiveEffects)
     {
-        UE_LOG(LogTemp, Warning, TEXT("VFX_EnvironmentalEffectManager: Effect type not configured: %d"), (int32)EffectType);
-        return;
-    }
-
-    // Try Niagara first if available and preferred
-    if (bUseNiagaraWhenAvailable && FoundEffect->NiagaraSystem.IsValid())
-    {
-        UNiagaraComponent* NiagaraComp = CreateNiagaraEffect(*FoundEffect, Location);
-        if (NiagaraComp)
+        CleanupInactiveEffects();
+        
+        if (ActiveEffects.Num() >= MaxActiveEffects)
         {
-            ActiveNiagaraComponents.Add(NiagaraComp);
-            UE_LOG(LogTemp, Log, TEXT("VFX_EnvironmentalEffectManager: Spawned Niagara effect at %s"), *Location.ToString());
+            UE_LOG(LogTemp, Warning, TEXT("VFX: Maximum active effects reached, cannot create new effect"));
             return;
         }
     }
 
-    // Fall back to legacy particle system
-    if (FoundEffect->LegacyParticleSystem.IsValid())
+    FVFX_EnvironmentalEffect NewEffect;
+    NewEffect.EffectType = EffectType;
+    NewEffect.Location = Location;
+    NewEffect.Intensity = Intensity;
+    NewEffect.Duration = Duration;
+    NewEffect.bIsActive = true;
+
+    ActiveEffects.Add(NewEffect);
+
+    UE_LOG(LogTemp, Log, TEXT("VFX: Created environmental effect type %d at location %s"), 
+        (int32)EffectType, *Location.ToString());
+}
+
+void AVFX_EnvironmentalEffectManager::RemoveEnvironmentalEffect(int32 EffectIndex)
+{
+    if (EffectIndex >= 0 && EffectIndex < ActiveEffects.Num())
     {
-        UParticleSystemComponent* ParticleComp = CreateParticleEffect(*FoundEffect, Location);
-        if (ParticleComp)
+        ActiveEffects[EffectIndex].bIsActive = false;
+        UE_LOG(LogTemp, Log, TEXT("VFX: Deactivated environmental effect at index %d"), EffectIndex);
+    }
+}
+
+void AVFX_EnvironmentalEffectManager::UpdateEffectIntensity(int32 EffectIndex, float NewIntensity)
+{
+    if (EffectIndex >= 0 && EffectIndex < ActiveEffects.Num())
+    {
+        ActiveEffects[EffectIndex].Intensity = FMath::Clamp(NewIntensity, 0.0f, 2.0f);
+        UE_LOG(LogTemp, Log, TEXT("VFX: Updated effect intensity to %f"), NewIntensity);
+    }
+}
+
+void AVFX_EnvironmentalEffectManager::CreateCampfire(FVector Location)
+{
+    // Create campfire particle effect
+    CreateEnvironmentalEffect(EVFX_EnvironmentalEffectType::CampfireFire, Location, 1.0f, -1.0f);
+    
+    // Create point light for illumination
+    UWorld* World = GetWorld();
+    if (World)
+    {
+        FVector LightLocation = Location + FVector(0.0f, 0.0f, 50.0f);
+        APointLight* CampfireLight = World->SpawnActor<APointLight>(APointLight::StaticClass(), LightLocation, FRotator::ZeroRotator);
+        
+        if (CampfireLight)
         {
-            ActiveParticleComponents.Add(ParticleComp);
-            UE_LOG(LogTemp, Log, TEXT("VFX_EnvironmentalEffectManager: Spawned particle effect at %s"), *Location.ToString());
-        }
-    }
-}
-
-void UVFX_EnvironmentalEffectManager::StopEnvironmentalEffect(EVFX_EnvironmentalType EffectType)
-{
-    // Stop all effects of this type
-    for (int32 i = ActiveNiagaraComponents.Num() - 1; i >= 0; i--)
-    {
-        if (ActiveNiagaraComponents[i] && IsValid(ActiveNiagaraComponents[i]))
-        {
-            ActiveNiagaraComponents[i]->Deactivate();
-            ActiveNiagaraComponents.RemoveAt(i);
-        }
-    }
-
-    for (int32 i = ActiveParticleComponents.Num() - 1; i >= 0; i--)
-    {
-        if (ActiveParticleComponents[i] && IsValid(ActiveParticleComponents[i]))
-        {
-            ActiveParticleComponents[i]->Deactivate();
-            ActiveParticleComponents.RemoveAt(i);
-        }
-    }
-}
-
-void UVFX_EnvironmentalEffectManager::UpdateWeatherEffects(EWeatherType WeatherType, float Intensity)
-{
-    // Adjust environmental effects based on weather
-    switch (WeatherType)
-    {
-        case EWeatherType::Clear:
-            // Reduce mist, increase dust devils
-            break;
-        case EWeatherType::Rainy:
-            // Increase rain droplets, reduce dust
-            SpawnEnvironmentalEffect(EVFX_EnvironmentalType::RainDroplets, GetOwner()->GetActorLocation(), Intensity);
-            break;
-        case EWeatherType::Stormy:
-            // Increase wind particles, reduce visibility effects
-            SpawnEnvironmentalEffect(EVFX_EnvironmentalType::WindParticles, GetOwner()->GetActorLocation(), Intensity * 1.5f);
-            break;
-        case EWeatherType::Foggy:
-            // Increase mist effects
-            SpawnEnvironmentalEffect(EVFX_EnvironmentalType::MorningMist, GetOwner()->GetActorLocation(), Intensity);
-            break;
-    }
-}
-
-void UVFX_EnvironmentalEffectManager::UpdateTimeOfDayEffects(float TimeOfDay)
-{
-    // 0.0 = midnight, 0.5 = noon, 1.0 = midnight again
-    if (TimeOfDay >= 0.2f && TimeOfDay <= 0.4f) // Morning
-    {
-        SpawnEnvironmentalEffect(EVFX_EnvironmentalType::MorningMist, GetOwner()->GetActorLocation(), 0.8f);
-    }
-    else if (TimeOfDay >= 0.6f && TimeOfDay <= 0.8f) // Evening
-    {
-        SpawnEnvironmentalEffect(EVFX_EnvironmentalType::InsectSwarm, GetOwner()->GetActorLocation(), 0.6f);
-    }
-}
-
-void UVFX_EnvironmentalEffectManager::SetEffectQuality(int32 QualityLevel)
-{
-    // Adjust max effects and culling distance based on quality
-    switch (QualityLevel)
-    {
-        case 0: // Low
-            MaxActiveEffects = 10;
-            EffectCullingDistance = 2000.0f;
-            break;
-        case 1: // Medium
-            MaxActiveEffects = 20;
-            EffectCullingDistance = 5000.0f;
-            break;
-        case 2: // High
-            MaxActiveEffects = 40;
-            EffectCullingDistance = 8000.0f;
-            break;
-        default:
-            MaxActiveEffects = 20;
-            EffectCullingDistance = 5000.0f;
-            break;
-    }
-}
-
-void UVFX_EnvironmentalEffectManager::InitializeEffectDatabase()
-{
-    EnvironmentalEffects.Empty();
-
-    // Campfire smoke effect
-    FVFX_EnvironmentalEffect CampfireEffect;
-    CampfireEffect.EffectType = EVFX_EnvironmentalType::CampfireSmoke;
-    CampfireEffect.EffectRadius = 500.0f;
-    CampfireEffect.EffectIntensity = 1.0f;
-    CampfireEffect.bIsWeatherDependent = true;
-    CampfireEffect.bIsTimeOfDayDependent = false;
-    EnvironmentalEffects.Add(CampfireEffect);
-
-    // Morning mist effect
-    FVFX_EnvironmentalEffect MistEffect;
-    MistEffect.EffectType = EVFX_EnvironmentalType::MorningMist;
-    MistEffect.EffectRadius = 2000.0f;
-    MistEffect.EffectIntensity = 0.7f;
-    MistEffect.bIsWeatherDependent = true;
-    MistEffect.bIsTimeOfDayDependent = true;
-    EnvironmentalEffects.Add(MistEffect);
-
-    // Volcanic ash effect
-    FVFX_EnvironmentalEffect AshEffect;
-    AshEffect.EffectType = EVFX_EnvironmentalType::VolcanicAsh;
-    AshEffect.EffectRadius = 5000.0f;
-    AshEffect.EffectIntensity = 0.5f;
-    AshEffect.bIsWeatherDependent = false;
-    AshEffect.bIsTimeOfDayDependent = false;
-    EnvironmentalEffects.Add(AshEffect);
-
-    // Dust devil effect
-    FVFX_EnvironmentalEffect DustEffect;
-    DustEffect.EffectType = EVFX_EnvironmentalType::DustDevil;
-    DustEffect.EffectRadius = 1000.0f;
-    DustEffect.EffectIntensity = 1.2f;
-    DustEffect.bIsWeatherDependent = true;
-    DustEffect.bIsTimeOfDayDependent = false;
-    EnvironmentalEffects.Add(DustEffect);
-
-    UE_LOG(LogTemp, Log, TEXT("VFX_EnvironmentalEffectManager: Initialized %d environmental effects"), EnvironmentalEffects.Num());
-}
-
-void UVFX_EnvironmentalEffectManager::CleanupInactiveEffects()
-{
-    float PlayerDistance = GetDistanceToPlayer();
-
-    // Clean up Niagara components
-    for (int32 i = ActiveNiagaraComponents.Num() - 1; i >= 0; i--)
-    {
-        UNiagaraComponent* Comp = ActiveNiagaraComponents[i];
-        if (!Comp || !IsValid(Comp) || !Comp->IsActive() || PlayerDistance > EffectCullingDistance)
-        {
-            if (Comp && IsValid(Comp))
+            UPointLightComponent* LightComp = CampfireLight->GetPointLightComponent();
+            if (LightComp)
             {
-                Comp->Deactivate();
+                LightComp->SetLightColor(CampfireLightColor);
+                LightComp->SetIntensity(CampfireLightIntensity);
+                LightComp->SetAttenuationRadius(800.0f);
+                LightComp->SetSourceRadius(20.0f);
+                LightComp->SetSoftSourceRadius(40.0f);
             }
-            ActiveNiagaraComponents.RemoveAt(i);
+            
+            CampfireLight->SetActorLabel(FString::Printf(TEXT("CampfireLight_%d"), CampfireLocations.Num()));
+            LightComponents.Add(LightComp);
         }
     }
 
-    // Clean up particle components
-    for (int32 i = ActiveParticleComponents.Num() - 1; i >= 0; i--)
+    UE_LOG(LogTemp, Log, TEXT("VFX: Created campfire at location %s"), *Location.ToString());
+}
+
+void AVFX_EnvironmentalEffectManager::ExtinguishCampfire(FVector Location, float SearchRadius)
+{
+    for (int32 i = ActiveEffects.Num() - 1; i >= 0; --i)
     {
-        UParticleSystemComponent* Comp = ActiveParticleComponents[i];
-        if (!Comp || !IsValid(Comp) || !Comp->IsActive() || PlayerDistance > EffectCullingDistance)
+        if (ActiveEffects[i].EffectType == EVFX_EnvironmentalEffectType::CampfireFire)
         {
-            if (Comp && IsValid(Comp))
+            float Distance = FVector::Dist(ActiveEffects[i].Location, Location);
+            if (Distance <= SearchRadius)
             {
-                Comp->Deactivate();
+                RemoveEnvironmentalEffect(i);
+                UE_LOG(LogTemp, Log, TEXT("VFX: Extinguished campfire at distance %f"), Distance);
+                break;
             }
-            ActiveParticleComponents.RemoveAt(i);
         }
     }
 }
 
-UNiagaraComponent* UVFX_EnvironmentalEffectManager::CreateNiagaraEffect(const FVFX_EnvironmentalEffect& Effect, FVector Location)
+void AVFX_EnvironmentalEffectManager::CreateFootstepImpact(FVector Location, float ImpactForce)
 {
-    if (!Effect.NiagaraSystem.IsValid())
-    {
-        return nullptr;
-    }
-
-    UNiagaraComponent* NiagaraComp = UNiagaraFunctionLibrary::SpawnSystemAtLocation(
-        GetWorld(),
-        Effect.NiagaraSystem.Get(),
-        Location,
-        FRotator::ZeroRotator,
-        FVector::OneVector,
-        true,
-        true,
-        ENCPoolMethod::None,
-        true
-    );
-
-    if (NiagaraComp)
-    {
-        NiagaraComp->SetFloatParameter(TEXT("Intensity"), Effect.EffectIntensity);
-        NiagaraComp->SetFloatParameter(TEXT("Radius"), Effect.EffectRadius);
-    }
-
-    return NiagaraComp;
+    float EffectIntensity = FMath::Clamp(ImpactForce, 0.1f, 2.0f);
+    CreateEnvironmentalEffect(EVFX_EnvironmentalEffectType::FootstepDust, Location, EffectIntensity, 2.0f);
+    
+    UE_LOG(LogTemp, Log, TEXT("VFX: Created footstep impact at %s with force %f"), *Location.ToString(), ImpactForce);
 }
 
-UParticleSystemComponent* UVFX_EnvironmentalEffectManager::CreateParticleEffect(const FVFX_EnvironmentalEffect& Effect, FVector Location)
+void AVFX_EnvironmentalEffectManager::SetWeatherIntensity(float RainIntensity, float FogIntensity, float WindIntensity)
 {
-    if (!Effect.LegacyParticleSystem.IsValid())
+    // Update existing atmospheric effects
+    for (FVFX_EnvironmentalEffect& Effect : ActiveEffects)
     {
-        return nullptr;
+        switch (Effect.EffectType)
+        {
+            case EVFX_EnvironmentalEffectType::RainDroplets:
+                Effect.Intensity = FMath::Clamp(RainIntensity, 0.0f, 2.0f);
+                break;
+            case EVFX_EnvironmentalEffectType::ForestFog:
+            case EVFX_EnvironmentalEffectType::DesertHaze:
+                Effect.Intensity = FMath::Clamp(FogIntensity, 0.0f, 2.0f);
+                break;
+            case EVFX_EnvironmentalEffectType::WindParticles:
+                Effect.Intensity = FMath::Clamp(WindIntensity, 0.0f, 2.0f);
+                break;
+        }
     }
 
-    UParticleSystemComponent* ParticleComp = UGameplayStatics::SpawnEmitterAtLocation(
-        GetWorld(),
-        Effect.LegacyParticleSystem.Get(),
-        Location,
-        FRotator::ZeroRotator,
-        FVector::OneVector,
-        true,
-        EPSCPoolMethod::None,
-        true
-    );
-
-    return ParticleComp;
+    UE_LOG(LogTemp, Log, TEXT("VFX: Updated weather intensities - Rain: %f, Fog: %f, Wind: %f"), 
+        RainIntensity, FogIntensity, WindIntensity);
 }
 
-bool UVFX_EnvironmentalEffectManager::ShouldEffectBeActive(const FVFX_EnvironmentalEffect& Effect) const
+void AVFX_EnvironmentalEffectManager::OptimizeEffectsForDistance(FVector PlayerLocation)
 {
-    // Check distance to player
-    if (GetDistanceToPlayer() > EffectCullingDistance)
+    for (int32 i = 0; i < ActiveEffects.Num(); ++i)
     {
-        return false;
+        if (ActiveEffects[i].bIsActive)
+        {
+            float LODLevel = CalculateLODLevel(ActiveEffects[i].Location, PlayerLocation);
+            ApplyLODToEffect(i, LODLevel);
+        }
     }
-
-    // Weather and time-of-day checks would go here when those systems are implemented
-    return true;
 }
 
-float UVFX_EnvironmentalEffectManager::GetDistanceToPlayer() const
+void AVFX_EnvironmentalEffectManager::CleanupInactiveEffects()
 {
-    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
-    if (PlayerPawn && GetOwner())
+    for (int32 i = ActiveEffects.Num() - 1; i >= 0; --i)
     {
-        return FVector::Dist(PlayerPawn->GetActorLocation(), GetOwner()->GetActorLocation());
+        if (!ActiveEffects[i].bIsActive)
+        {
+            ActiveEffects.RemoveAt(i);
+        }
     }
-    return 0.0f;
+    
+    UE_LOG(LogTemp, Log, TEXT("VFX: Cleaned up inactive effects, %d effects remaining"), ActiveEffects.Num());
+}
+
+void AVFX_EnvironmentalEffectManager::InitializeCampfires()
+{
+    for (const FVector& Location : CampfireLocations)
+    {
+        CreateCampfire(Location);
+    }
+    
+    UE_LOG(LogTemp, Warning, TEXT("VFX: Initialized %d campfires"), CampfireLocations.Num());
+}
+
+void AVFX_EnvironmentalEffectManager::UpdateEnvironmentalEffects(float DeltaTime)
+{
+    for (int32 i = ActiveEffects.Num() - 1; i >= 0; --i)
+    {
+        FVFX_EnvironmentalEffect& Effect = ActiveEffects[i];
+        
+        if (!Effect.bIsActive)
+            continue;
+            
+        // Update duration-based effects
+        if (Effect.Duration > 0.0f)
+        {
+            Effect.Duration -= DeltaTime;
+            if (Effect.Duration <= 0.0f)
+            {
+                Effect.bIsActive = false;
+            }
+        }
+    }
+}
+
+float AVFX_EnvironmentalEffectManager::CalculateLODLevel(FVector EffectLocation, FVector PlayerLocation)
+{
+    float Distance = FVector::Dist(EffectLocation, PlayerLocation);
+    
+    if (Distance <= LODDistanceNear)
+    {
+        return 1.0f; // High quality
+    }
+    else if (Distance >= LODDistanceFar)
+    {
+        return 0.0f; // Disabled
+    }
+    else
+    {
+        // Linear interpolation between near and far distances
+        float Alpha = (Distance - LODDistanceNear) / (LODDistanceFar - LODDistanceNear);
+        return FMath::Lerp(1.0f, 0.0f, Alpha);
+    }
+}
+
+void AVFX_EnvironmentalEffectManager::ApplyLODToEffect(int32 EffectIndex, float LODLevel)
+{
+    if (EffectIndex >= 0 && EffectIndex < ActiveEffects.Num())
+    {
+        FVFX_EnvironmentalEffect& Effect = ActiveEffects[EffectIndex];
+        
+        // Adjust effect intensity based on LOD level
+        float AdjustedIntensity = Effect.Intensity * LODLevel;
+        
+        // Disable effect if LOD level is too low
+        if (LODLevel < 0.1f)
+        {
+            Effect.bIsActive = false;
+        }
+    }
 }
