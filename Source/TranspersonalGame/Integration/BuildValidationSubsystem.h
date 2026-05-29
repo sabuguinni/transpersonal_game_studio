@@ -7,26 +7,39 @@
 #include "BuildValidationSubsystem.generated.h"
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FBuild_ValidationResult
+struct TRANSPERSONALGAME_API FBuild_ValidationMetrics
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    bool bIsValid;
+    UPROPERTY(BlueprintReadOnly, Category = "Build Validation")
+    int32 TotalModulesLoaded = 0;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    TArray<FString> Errors;
+    UPROPERTY(BlueprintReadOnly, Category = "Build Validation")
+    int32 FailedModules = 0;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    TArray<FString> Warnings;
+    UPROPERTY(BlueprintReadOnly, Category = "Build Validation")
+    int32 TotalActorsInWorld = 0;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    float ValidationTime;
+    UPROPERTY(BlueprintReadOnly, Category = "Build Validation")
+    int32 CriticalSystemsOnline = 0;
 
-    FBuild_ValidationResult()
+    UPROPERTY(BlueprintReadOnly, Category = "Build Validation")
+    float LastValidationTime = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Build Validation")
+    bool bBuildHealthy = false;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Build Validation")
+    TArray<FString> ValidationErrors;
+
+    FBuild_ValidationMetrics()
     {
-        bIsValid = false;
-        ValidationTime = 0.0f;
+        TotalModulesLoaded = 0;
+        FailedModules = 0;
+        TotalActorsInWorld = 0;
+        CriticalSystemsOnline = 0;
+        LastValidationTime = 0.0f;
+        bBuildHealthy = false;
     }
 };
 
@@ -35,40 +48,35 @@ struct TRANSPERSONALGAME_API FBuild_ModuleStatus
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Module")
+    UPROPERTY(BlueprintReadOnly, Category = "Module Status")
     FString ModuleName;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Module")
-    bool bIsLoaded;
+    UPROPERTY(BlueprintReadOnly, Category = "Module Status")
+    bool bIsLoaded = false;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Module")
-    bool bHasErrors;
+    UPROPERTY(BlueprintReadOnly, Category = "Module Status")
+    bool bHasErrors = false;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Module")
-    int32 ClassCount;
+    UPROPERTY(BlueprintReadOnly, Category = "Module Status")
+    FString ErrorMessage;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Module")
-    TArray<FString> LoadedClasses;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Module")
-    TArray<FString> FailedClasses;
+    UPROPERTY(BlueprintReadOnly, Category = "Module Status")
+    float LoadTime = 0.0f;
 
     FBuild_ModuleStatus()
     {
         bIsLoaded = false;
         bHasErrors = false;
-        ClassCount = 0;
+        LoadTime = 0.0f;
     }
 };
 
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnValidationComplete, const FBuild_ValidationResult&, Result);
-
 /**
  * Build Validation Subsystem
- * Validates the integrity of the build, modules, and map state
- * Provides comprehensive validation for the Integration Agent
+ * Monitors the health of all game systems and provides real-time build validation
+ * Used by Integration Agent #19 to ensure all systems are properly integrated
  */
-UCLASS(BlueprintType, Blueprintable)
+UCLASS(BlueprintType)
 class TRANSPERSONALGAME_API UBuildValidationSubsystem : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
@@ -80,84 +88,94 @@ public:
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
-    // Validation functions
+    /**
+     * Perform comprehensive build validation
+     * Checks all critical systems and reports health status
+     */
     UFUNCTION(BlueprintCallable, Category = "Build Validation")
-    FBuild_ValidationResult ValidateFullBuild();
+    FBuild_ValidationMetrics ValidateBuildHealth();
 
+    /**
+     * Check if a specific module is loaded and functional
+     */
     UFUNCTION(BlueprintCallable, Category = "Build Validation")
-    FBuild_ValidationResult ValidateModules();
+    FBuild_ModuleStatus ValidateModule(const FString& ModuleName);
 
+    /**
+     * Get the latest validation metrics
+     */
     UFUNCTION(BlueprintCallable, Category = "Build Validation")
-    FBuild_ValidationResult ValidateMapIntegrity();
+    FBuild_ValidationMetrics GetLatestValidationMetrics() const { return LatestMetrics; }
 
+    /**
+     * Check if the build is currently healthy
+     */
     UFUNCTION(BlueprintCallable, Category = "Build Validation")
-    FBuild_ValidationResult ValidateClassLoading();
+    bool IsBuildHealthy() const { return LatestMetrics.bBuildHealthy; }
 
+    /**
+     * Force immediate validation (normally runs on timer)
+     */
     UFUNCTION(BlueprintCallable, Category = "Build Validation")
-    TArray<FBuild_ModuleStatus> GetModuleStatuses();
+    void ForceValidation();
 
-    // Utility functions
+    /**
+     * Get detailed status of all monitored modules
+     */
     UFUNCTION(BlueprintCallable, Category = "Build Validation")
-    bool IsClassLoaded(const FString& ClassName);
-
-    UFUNCTION(BlueprintCallable, Category = "Build Validation")
-    int32 GetActorCountByType(const FString& ActorType);
-
-    UFUNCTION(BlueprintCallable, Category = "Build Validation")
-    TArray<FString> GetDuplicateActors();
-
-    UFUNCTION(BlueprintCallable, Category = "Build Validation")
-    void CleanupDuplicates();
-
-    // Settings
-    UFUNCTION(BlueprintCallable, Category = "Build Validation")
-    void SetValidationEnabled(bool bEnabled);
-
-    UFUNCTION(BlueprintCallable, Category = "Build Validation")
-    bool IsValidationEnabled() const { return bValidationEnabled; }
-
-    // Events
-    UPROPERTY(BlueprintAssignable, Category = "Build Validation")
-    FOnValidationComplete OnValidationComplete;
-
-    // Auto-validation
-    UFUNCTION(BlueprintCallable, Category = "Build Validation")
-    void StartAutoValidation(float IntervalSeconds = 30.0f);
-
-    UFUNCTION(BlueprintCallable, Category = "Build Validation")
-    void StopAutoValidation();
+    TArray<FBuild_ModuleStatus> GetAllModuleStatuses() const { return ModuleStatuses; }
 
 protected:
-    // Internal validation functions
-    void ValidateTranspersonalGameModule(FBuild_ValidationResult& Result);
-    void ValidateCriticalClasses(FBuild_ValidationResult& Result);
-    void ValidateMapActors(FBuild_ValidationResult& Result);
-    void ValidateAssetReferences(FBuild_ValidationResult& Result);
+    /**
+     * Validate core game systems
+     */
+    void ValidateCoreGameSystems(FBuild_ValidationMetrics& Metrics);
 
-    // Timer callback
-    void OnAutoValidationTimer();
+    /**
+     * Validate character and player systems
+     */
+    void ValidateCharacterSystems(FBuild_ValidationMetrics& Metrics);
+
+    /**
+     * Validate AI and dinosaur systems
+     */
+    void ValidateAISystems(FBuild_ValidationMetrics& Metrics);
+
+    /**
+     * Validate world generation and environment systems
+     */
+    void ValidateWorldSystems(FBuild_ValidationMetrics& Metrics);
+
+    /**
+     * Count and categorize all actors in the current world
+     */
+    void ValidateWorldActors(FBuild_ValidationMetrics& Metrics);
+
+    /**
+     * Timer callback for periodic validation
+     */
+    void PerformPeriodicValidation();
 
 private:
     UPROPERTY()
-    bool bValidationEnabled;
+    FBuild_ValidationMetrics LatestMetrics;
 
     UPROPERTY()
-    bool bAutoValidationActive;
+    TArray<FBuild_ModuleStatus> ModuleStatuses;
 
-    UPROPERTY()
-    float AutoValidationInterval;
+    FTimerHandle ValidationTimerHandle;
 
-    UPROPERTY()
-    FTimerHandle AutoValidationTimer;
+    // Validation frequency (seconds)
+    float ValidationInterval = 30.0f;
 
-    UPROPERTY()
-    FBuild_ValidationResult LastValidationResult;
-
-    // Critical classes that must be loaded
-    UPROPERTY()
-    TArray<FString> CriticalClasses;
-
-    // Actor types that should not be duplicated
-    UPROPERTY()
-    TArray<FString> SingletonActorTypes;
+    // Critical modules that must be loaded
+    TArray<FString> CriticalModules = {
+        TEXT("TranspersonalCharacter"),
+        TEXT("TranspersonalGameState"),
+        TEXT("DinosaurTRex"),
+        TEXT("DinosaurCombatAIController"),
+        TEXT("PCGWorldGenerator"),
+        TEXT("FoliageManager"),
+        TEXT("CrowdSimulationManager")
+    };
 };
