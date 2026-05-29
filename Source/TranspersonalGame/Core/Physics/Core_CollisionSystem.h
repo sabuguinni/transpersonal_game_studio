@@ -1,104 +1,28 @@
-// Copyright Transpersonal Game Studio. All Rights Reserved.
-
 #pragma once
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
 #include "Engine/HitResult.h"
+#include "Core/SharedTypes.h"
 #include "Core_CollisionSystem.generated.h"
 
-DECLARE_LOG_CATEGORY_EXTERN(LogCollisionSystem, Log, All);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnCollisionDetected, AActor*, Actor1, AActor*, Actor2, const FHitResult&, HitResult);
 
 /**
- * Collision Event Types for the Core Collision System
- */
-UENUM(BlueprintType)
-enum class ECore_CollisionEventType : uint8
-{
-    None            UMETA(DisplayName = "None"),
-    CharacterHit    UMETA(DisplayName = "Character Hit"),
-    DinosaurImpact  UMETA(DisplayName = "Dinosaur Impact"),
-    ObjectCollision UMETA(DisplayName = "Object Collision"),
-    TerrainContact  UMETA(DisplayName = "Terrain Contact"),
-    WaterEntry      UMETA(DisplayName = "Water Entry"),
-    FallDamage      UMETA(DisplayName = "Fall Damage")
-};
-
-/**
- * Collision Response Types
- */
-UENUM(BlueprintType)
-enum class ECore_CollisionResponse : uint8
-{
-    Ignore      UMETA(DisplayName = "Ignore"),
-    Block       UMETA(DisplayName = "Block"),
-    Overlap     UMETA(DisplayName = "Overlap"),
-    Damage      UMETA(DisplayName = "Damage"),
-    Ragdoll     UMETA(DisplayName = "Trigger Ragdoll"),
-    Destruction UMETA(DisplayName = "Trigger Destruction")
-};
-
-/**
- * Collision Data Structure
- */
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FCore_CollisionData
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision")
-    ECore_CollisionEventType EventType;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision")
-    ECore_CollisionResponse ResponseType;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision")
-    FVector ImpactPoint;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision")
-    FVector ImpactNormal;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision")
-    float ImpactForce;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision")
-    AActor* HitActor;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision")
-    UPrimitiveComponent* HitComponent;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision")
-    float Timestamp;
-
-    FCore_CollisionData()
-    {
-        EventType = ECore_CollisionEventType::None;
-        ResponseType = ECore_CollisionResponse::Ignore;
-        ImpactPoint = FVector::ZeroVector;
-        ImpactNormal = FVector::ZeroVector;
-        ImpactForce = 0.0f;
-        HitActor = nullptr;
-        HitComponent = nullptr;
-        Timestamp = 0.0f;
-    }
-};
-
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnCollisionEvent, const FCore_CollisionData&, CollisionData);
-
-/**
- * Core Collision System Component
- * 
- * Handles all collision detection, response, and damage calculation for the game.
- * Integrates with physics system for realistic collision responses.
+ * Core Collision System - Advanced collision detection and response
  * 
  * Features:
- * - Multi-layered collision detection (character, dinosaur, environment)
- * - Dynamic collision response based on impact force and object types
- * - Integration with ragdoll and destruction systems
- * - Performance-optimized collision queries with spatial partitioning
- * - Realistic fall damage and impact calculations
+ * - Multi-layered collision detection (precise, approximate, bounds)
+ * - Dynamic collision response based on material properties
+ * - Performance optimization with spatial partitioning
+ * - Integration with physics and destruction systems
+ * 
+ * Design Philosophy:
+ * - Collision should feel realistic and responsive
+ * - Performance scales with scene complexity
+ * - Supports both gameplay and cinematic needs
  */
-UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
+UCLASS(ClassGroup=(Physics), meta=(BlueprintSpawnableComponent))
 class TRANSPERSONALGAME_API UCore_CollisionSystem : public UActorComponent
 {
     GENERATED_BODY()
@@ -110,132 +34,171 @@ protected:
     virtual void BeginPlay() override;
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-public:
     // Collision Detection Settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision Settings")
-    bool bEnableCollisionDetection;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision Detection")
+    bool bEnablePreciseCollision;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision Settings")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision Detection")
+    bool bEnableApproximateCollision;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision Detection")
+    bool bEnableBoundsCollision;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision Detection")
     float CollisionCheckRadius;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision Settings")
-    float MinImpactForceThreshold;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision Detection")
+    float CollisionUpdateFrequency;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision Settings")
-    float MaxImpactForceThreshold;
+    // Collision Response Settings
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision Response")
+    float DefaultBounciness;
 
-    // Damage Calculation Settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Damage Settings")
-    float FallDamageThreshold;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision Response")
+    float DefaultFriction;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Damage Settings")
-    float FallDamageMultiplier;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Damage Settings")
-    float ImpactDamageMultiplier;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision Response")
+    float DefaultDamping;
 
     // Performance Settings
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
     int32 MaxCollisionChecksPerFrame;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float CollisionUpdateInterval;
+    bool bUseSpatialPartitioning;
 
-    // Events
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float SpatialPartitionSize;
+
+    // LOD Settings
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
+    float HighDetailDistance;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
+    float MediumDetailDistance;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
+    float LowDetailDistance;
+
+    // Collision Events
     UPROPERTY(BlueprintAssignable, Category = "Events")
-    FOnCollisionEvent OnCollisionDetected;
+    FOnCollisionDetected OnCollisionDetected;
 
+    // Internal State
+    UPROPERTY()
+    TArray<AActor*> TrackedActors;
+
+    UPROPERTY()
+    TMap<AActor*, FVector> ActorVelocities;
+
+    UPROPERTY()
+    TMap<AActor*, float> LastCollisionTimes;
+
+    float CollisionTimer;
+    int32 CollisionChecksThisFrame;
+
+public:
     // Core Collision Functions
     UFUNCTION(BlueprintCallable, Category = "Collision")
-    bool DetectCollision(AActor* Actor, FCore_CollisionData& OutCollisionData);
+    void InitializeCollisionSystem();
 
     UFUNCTION(BlueprintCallable, Category = "Collision")
-    void ProcessCollisionResponse(const FCore_CollisionData& CollisionData);
+    void UpdateCollisionSystem(float DeltaTime);
 
     UFUNCTION(BlueprintCallable, Category = "Collision")
-    float CalculateImpactForce(const FVector& Velocity, float Mass, const FVector& Normal);
+    bool CheckCollision(AActor* Actor1, AActor* Actor2, FHitResult& OutHitResult);
 
     UFUNCTION(BlueprintCallable, Category = "Collision")
-    float CalculateFallDamage(float FallHeight, float CharacterMass);
+    void ProcessCollisionResponse(AActor* Actor1, AActor* Actor2, const FHitResult& HitResult);
+
+    // Actor Management
+    UFUNCTION(BlueprintCallable, Category = "Collision")
+    void RegisterActor(AActor* Actor);
 
     UFUNCTION(BlueprintCallable, Category = "Collision")
-    void RegisterCollisionEvent(const FCore_CollisionData& CollisionData);
+    void UnregisterActor(AActor* Actor);
 
-    // Collision Query Functions
-    UFUNCTION(BlueprintCallable, Category = "Collision Query")
-    TArray<AActor*> GetNearbyActors(const FVector& Location, float Radius, TSubclassOf<AActor> ActorClass = nullptr);
+    UFUNCTION(BlueprintCallable, Category = "Collision")
+    void ClearAllActors();
 
-    UFUNCTION(BlueprintCallable, Category = "Collision Query")
-    bool LineTraceForCollision(const FVector& Start, const FVector& End, FHitResult& OutHit, bool bIgnoreSelf = true);
+    // Collision Detection Methods
+    UFUNCTION(BlueprintCallable, Category = "Collision Detection")
+    bool PreciseCollisionCheck(AActor* Actor1, AActor* Actor2, FHitResult& OutHitResult);
 
-    UFUNCTION(BlueprintCallable, Category = "Collision Query")
-    bool SphereTraceForCollision(const FVector& Start, const FVector& End, float Radius, FHitResult& OutHit);
+    UFUNCTION(BlueprintCallable, Category = "Collision Detection")
+    bool ApproximateCollisionCheck(AActor* Actor1, AActor* Actor2);
 
-    // Collision Response Functions
+    UFUNCTION(BlueprintCallable, Category = "Collision Detection")
+    bool BoundsCollisionCheck(AActor* Actor1, AActor* Actor2);
+
+    // Collision Response Methods
     UFUNCTION(BlueprintCallable, Category = "Collision Response")
-    void ApplyCollisionDamage(AActor* Actor, float Damage, const FVector& ImpactPoint);
+    void ApplyCollisionForces(AActor* Actor1, AActor* Actor2, const FVector& CollisionNormal, float ImpactStrength);
 
     UFUNCTION(BlueprintCallable, Category = "Collision Response")
-    void TriggerRagdollFromCollision(AActor* Actor, const FVector& ImpactForce, const FVector& ImpactPoint);
+    void HandleMaterialInteraction(AActor* Actor1, AActor* Actor2, const FHitResult& HitResult);
 
     UFUNCTION(BlueprintCallable, Category = "Collision Response")
-    void TriggerDestructionFromCollision(AActor* Actor, float DestructionThreshold);
+    void ProcessDamageFromCollision(AActor* Actor1, AActor* Actor2, float ImpactStrength);
 
-    // System Management
-    UFUNCTION(BlueprintCallable, Category = "System")
-    void SetCollisionEnabled(bool bEnabled);
+    // Performance Optimization
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void UpdateSpatialPartitioning();
 
-    UFUNCTION(BlueprintCallable, Category = "System")
-    void ResetCollisionSystem();
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    TArray<AActor*> GetNearbyActors(const FVector& Location, float Radius);
 
-    UFUNCTION(BlueprintCallable, Category = "System")
-    void UpdateCollisionSettings(float NewRadius, float NewThreshold);
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    ECore_LODLevel GetCollisionLOD(AActor* Actor) const;
+
+    // Utility Functions
+    UFUNCTION(BlueprintCallable, Category = "Collision Utility")
+    float CalculateImpactStrength(const FVector& Velocity1, const FVector& Velocity2, float Mass1, float Mass2);
+
+    UFUNCTION(BlueprintCallable, Category = "Collision Utility")
+    FVector CalculateCollisionNormal(const FVector& Location1, const FVector& Location2);
+
+    UFUNCTION(BlueprintCallable, Category = "Collision Utility")
+    bool ShouldProcessCollision(AActor* Actor1, AActor* Actor2);
 
     // Debug Functions
-    UFUNCTION(BlueprintCallable, Category = "Debug", CallInEditor = true)
-    void DebugDrawCollisionSphere(float Duration = 5.0f);
+    UFUNCTION(BlueprintCallable, Category = "Debug", CallInEditor)
+    void DebugDrawCollisionBounds();
 
     UFUNCTION(BlueprintCallable, Category = "Debug")
     void LogCollisionStats();
 
+    UFUNCTION(BlueprintCallable, Category = "Debug")
+    void ToggleCollisionVisualization();
+
     // Getters
     UFUNCTION(BlueprintPure, Category = "Collision")
-    int32 GetActiveCollisionCount() const { return ActiveCollisions.Num(); }
+    int32 GetTrackedActorCount() const { return TrackedActors.Num(); }
 
     UFUNCTION(BlueprintPure, Category = "Collision")
-    float GetLastCollisionTime() const { return LastCollisionTime; }
+    bool IsCollisionSystemEnabled() const { return bEnablePreciseCollision || bEnableApproximateCollision || bEnableBoundsCollision; }
 
-    UFUNCTION(BlueprintPure, Category = "Collision")
-    bool IsCollisionSystemEnabled() const { return bEnableCollisionDetection; }
+    UFUNCTION(BlueprintPure, Category = "Performance")
+    int32 GetCollisionChecksThisFrame() const { return CollisionChecksThisFrame; }
 
 protected:
-    // Internal collision tracking
-    UPROPERTY()
-    TArray<FCore_CollisionData> ActiveCollisions;
+    // Internal Helper Functions
+    void UpdateActorVelocities(float DeltaTime);
+    void ProcessCollisionQueue();
+    void OptimizeCollisionChecks();
+    void UpdateCollisionLOD();
+    bool IsWithinCollisionRange(AActor* Actor1, AActor* Actor2) const;
+    void BroadcastCollisionEvent(AActor* Actor1, AActor* Actor2, const FHitResult& HitResult);
 
-    UPROPERTY()
-    TArray<FCore_CollisionData> CollisionHistory;
+    // Spatial Partitioning
+    TMap<FIntVector, TArray<AActor*>> SpatialGrid;
+    void UpdateSpatialGrid();
+    FIntVector GetGridCoordinate(const FVector& Location) const;
+    void AddActorToGrid(AActor* Actor, const FIntVector& GridCoord);
+    void RemoveActorFromGrid(AActor* Actor, const FIntVector& GridCoord);
 
-    // Performance tracking
-    float LastUpdateTime;
-    float LastCollisionTime;
-    int32 CollisionChecksThisFrame;
-
-    // Internal Functions
-    void UpdateCollisionDetection(float DeltaTime);
-    void ProcessActiveCollisions();
-    void CleanupOldCollisions();
-    bool ShouldProcessCollision(const FCore_CollisionData& CollisionData);
-    ECore_CollisionResponse DetermineCollisionResponse(AActor* Actor1, AActor* Actor2, float ImpactForce);
-    void OptimizeCollisionQueries();
-
-    // Collision Type Specific Functions
-    void HandleCharacterCollision(const FCore_CollisionData& CollisionData);
-    void HandleDinosaurCollision(const FCore_CollisionData& CollisionData);
-    void HandleEnvironmentCollision(const FCore_CollisionData& CollisionData);
-    void HandleTerrainCollision(const FCore_CollisionData& CollisionData);
-
-    // Performance Optimization
-    void UpdateSpatialPartitioning();
-    bool IsWithinPerformanceBudget() const;
+    // Performance Tracking
+    float LastPerformanceCheck;
+    int32 TotalCollisionChecks;
+    float AverageCollisionTime;
 };
