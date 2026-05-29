@@ -1,367 +1,323 @@
 #include "Audio_SpatialAudioManager.h"
 #include "Engine/World.h"
-#include "Engine/Engine.h"
 #include "Components/AudioComponent.h"
+#include "Sound/SoundWave.h"
 #include "Kismet/GameplayStatics.h"
-#include "Sound/SoundCue.h"
-#include "DrawDebugHelpers.h"
+#include "Engine/Engine.h"
 
 UAudio_SpatialAudioManager::UAudio_SpatialAudioManager()
 {
-    MaxConcurrentSounds = 32;
-    GlobalVolumeMultiplier = 1.0f;
-    OcclusionTraceDistance = 10000.0f;
-    CurrentBiome = TEXT("Savana");
-    PlayerLocation = FVector::ZeroVector;
-    CurrentAmbienceComponent = nullptr;
-    NarrationComponent = nullptr;
+    CurrentBiome = EAudio_BiomeType::Savana;
+    
+    // Initialize category volumes
+    CategoryVolumes.Add(EAudio_AudioCategory::Ambient, 0.7f);
+    CategoryVolumes.Add(EAudio_AudioCategory::Dinosaur, 0.8f);
+    CategoryVolumes.Add(EAudio_AudioCategory::Player, 1.0f);
+    CategoryVolumes.Add(EAudio_AudioCategory::Environment, 0.6f);
+    CategoryVolumes.Add(EAudio_AudioCategory::Music, 0.5f);
+    CategoryVolumes.Add(EAudio_AudioCategory::UI, 1.0f);
+    CategoryVolumes.Add(EAudio_AudioCategory::Narration, 0.9f);
+    CategoryVolumes.Add(EAudio_AudioCategory::Combat, 0.8f);
 }
 
-void UAudio_SpatialAudioManager::Initialize(FSubsystemCollectionBase& Collection)
+void UAudio_SpatialAudioManager::InitializeAudioSystem(UWorld* World)
 {
-    Super::Initialize(Collection);
-    
-    InitializeCategoryVolumes();
-    
-    UE_LOG(LogTemp, Warning, TEXT("Audio_SpatialAudioManager initialized"));
-}
-
-void UAudio_SpatialAudioManager::Deinitialize()
-{
-    // Clean up all active sounds
-    for (UAudioComponent* Component : ActiveSounds)
-    {
-        if (IsValid(Component))
-        {
-            Component->Stop();
-        }
-    }
-    ActiveSounds.Empty();
-    
-    if (IsValid(CurrentAmbienceComponent))
-    {
-        CurrentAmbienceComponent->Stop();
-        CurrentAmbienceComponent = nullptr;
-    }
-    
-    if (IsValid(NarrationComponent))
-    {
-        NarrationComponent->Stop();
-        NarrationComponent = nullptr;
-    }
-    
-    Super::Deinitialize();
-}
-
-void UAudio_SpatialAudioManager::InitializeCategoryVolumes()
-{
-    CategoryVolumes.Add(EAudio_SoundCategory::Ambient, 0.8f);
-    CategoryVolumes.Add(EAudio_SoundCategory::Dinosaur, 1.0f);
-    CategoryVolumes.Add(EAudio_SoundCategory::Player, 0.9f);
-    CategoryVolumes.Add(EAudio_SoundCategory::Environment, 0.7f);
-    CategoryVolumes.Add(EAudio_SoundCategory::Music, 0.6f);
-    CategoryVolumes.Add(EAudio_SoundCategory::UI, 0.8f);
-    CategoryVolumes.Add(EAudio_SoundCategory::Narration, 1.0f);
-    CategoryVolumes.Add(EAudio_SoundCategory::Combat, 1.0f);
-}
-
-UAudioComponent* UAudio_SpatialAudioManager::PlaySoundAtLocation(USoundCue* SoundCue, const FVector& Location, 
-    float Volume, float Pitch, bool bAutoDestroy)
-{
-    if (!SoundCue)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("PlaySoundAtLocation: SoundCue is null"));
-        return nullptr;
-    }
-    
-    UWorld* World = GetWorld();
     if (!World)
     {
-        UE_LOG(LogTemp, Warning, TEXT("PlaySoundAtLocation: World is null"));
-        return nullptr;
+        UE_LOG(LogTemp, Warning, TEXT("UAudio_SpatialAudioManager: World is null"));
+        return;
     }
+
+    InitializeBiomeAmbiences();
+    InitializeDinosaurSounds();
+    InitializeNarrationSounds();
     
-    // Check if we've reached max concurrent sounds
-    CleanupFinishedSounds();
-    if (ActiveSounds.Num() >= MaxConcurrentSounds)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("PlaySoundAtLocation: Max concurrent sounds reached"));
-        return nullptr;
-    }
-    
-    // Calculate distance-based volume
-    float Distance = FVector::Dist(Location, PlayerLocation);
-    float DistanceVolume = FMath::Clamp(1.0f - (Distance / 5000.0f), 0.0f, 1.0f);
-    float FinalVolume = Volume * DistanceVolume * GlobalVolumeMultiplier;
-    
-    UAudioComponent* AudioComponent = UGameplayStatics::SpawnSoundAtLocation(
-        World, SoundCue, Location, FRotator::ZeroRotator, FinalVolume, Pitch);
-    
-    if (AudioComponent)
-    {
-        ActiveSounds.Add(AudioComponent);
-        UE_LOG(LogTemp, Log, TEXT("PlaySoundAtLocation: Spawned audio at %s, Volume: %f"), 
-            *Location.ToString(), FinalVolume);
-    }
-    
-    return AudioComponent;
+    UE_LOG(LogTemp, Log, TEXT("UAudio_SpatialAudioManager: Audio system initialized"));
 }
 
-UAudioComponent* UAudio_SpatialAudioManager::PlaySpatialSound(const FAudio_SpatialSound& SpatialSound)
+void UAudio_SpatialAudioManager::PlaySoundAtLocation(const FAudio_SoundEntry& SoundEntry, const FVector& Location)
 {
-    if (!CanPlaySound(SpatialSound.Priority, SpatialSound.Category))
+    UWorld* World = GEngine->GetCurrentPlayWorld();
+    if (!World)
     {
-        return nullptr;
+        return;
     }
-    
-    float CategoryVolume = GetCategoryVolume(SpatialSound.Category);
-    float FinalVolume = SpatialSound.Volume * CategoryVolume;
-    
-    UAudioComponent* Component = PlaySoundAtLocation(SpatialSound.SoundCue, SpatialSound.Location, 
-        FinalVolume, 1.0f, !SpatialSound.bIsLooping);
-    
-    return Component;
+
+    USoundWave* SoundWave = SoundEntry.SoundAsset.LoadSynchronous();
+    if (!SoundWave)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("UAudio_SpatialAudioManager: Failed to load sound: %s"), *SoundEntry.SoundName);
+        return;
+    }
+
+    UAudioComponent* AudioComp = CreateAudioComponent(World, Location);
+    if (AudioComp)
+    {
+        AudioComp->SetSound(SoundWave);
+        
+        float CategoryVolume = GetCategoryVolume(SoundEntry.Category);
+        AudioComp->SetVolumeMultiplier(SoundEntry.Volume * CategoryVolume);
+        AudioComp->SetPitchMultiplier(SoundEntry.Pitch);
+        
+        AudioComp->Play();
+        ActiveAudioComponents.Add(AudioComp);
+        
+        UE_LOG(LogTemp, Log, TEXT("UAudio_SpatialAudioManager: Playing sound %s at location %s"), 
+               *SoundEntry.SoundName, *Location.ToString());
+    }
 }
 
-void UAudio_SpatialAudioManager::StopSoundsByCategory(EAudio_SoundCategory Category)
+void UAudio_SpatialAudioManager::PlayNarrationSound(const FString& SoundName, USoundWave* SoundWave)
 {
-    for (int32 i = ActiveSounds.Num() - 1; i >= 0; i--)
+    if (!SoundWave)
     {
-        UAudioComponent* Component = ActiveSounds[i];
-        if (IsValid(Component))
+        UE_LOG(LogTemp, Warning, TEXT("UAudio_SpatialAudioManager: Narration sound wave is null for %s"), *SoundName);
+        return;
+    }
+
+    UWorld* World = GEngine->GetCurrentPlayWorld();
+    if (!World)
+    {
+        return;
+    }
+
+    // Stop any existing narration
+    StopAllSoundsInCategory(EAudio_AudioCategory::Narration);
+
+    // Play new narration as 2D sound (not spatialized)
+    UGameplayStatics::PlaySound2D(World, SoundWave, GetCategoryVolume(EAudio_AudioCategory::Narration));
+    
+    // Store for future reference
+    NarrationSounds.Add(SoundName, SoundWave);
+    
+    UE_LOG(LogTemp, Log, TEXT("UAudio_SpatialAudioManager: Playing narration sound: %s"), *SoundName);
+}
+
+void UAudio_SpatialAudioManager::StopAllSoundsInCategory(EAudio_AudioCategory Category)
+{
+    for (int32 i = ActiveAudioComponents.Num() - 1; i >= 0; i--)
+    {
+        UAudioComponent* AudioComp = ActiveAudioComponents[i];
+        if (AudioComp && AudioComp->IsValidLowLevel())
         {
-            // Note: In a full implementation, you'd store category info with each component
-            Component->Stop();
-            ActiveSounds.RemoveAt(i);
+            // Note: In a full implementation, we'd track category per component
+            // For now, stop all active components when stopping narration
+            if (Category == EAudio_AudioCategory::Narration)
+            {
+                AudioComp->Stop();
+                ActiveAudioComponents.RemoveAt(i);
+            }
+        }
+        else
+        {
+            ActiveAudioComponents.RemoveAt(i);
+        }
+    }
+    
+    CleanupInactiveComponents();
+}
+
+void UAudio_SpatialAudioManager::SetCurrentBiome(EAudio_BiomeType NewBiome, const FVector& PlayerLocation)
+{
+    if (CurrentBiome != NewBiome)
+    {
+        CurrentBiome = NewBiome;
+        UpdateBiomeAmbience(PlayerLocation);
+        
+        UE_LOG(LogTemp, Log, TEXT("UAudio_SpatialAudioManager: Biome changed to %d"), (int32)NewBiome);
+    }
+}
+
+void UAudio_SpatialAudioManager::UpdateBiomeAmbience(const FVector& PlayerLocation)
+{
+    // Find current biome ambience
+    for (const FAudio_BiomeAmbience& BiomeAmbience : BiomeAmbiences)
+    {
+        if (BiomeAmbience.BiomeType == CurrentBiome)
+        {
+            // Play ambient sounds for this biome
+            for (const FAudio_SoundEntry& AmbientSound : BiomeAmbience.AmbientSounds)
+            {
+                // Offset sound location slightly from player
+                FVector SoundLocation = PlayerLocation + FVector(
+                    FMath::RandRange(-500.0f, 500.0f),
+                    FMath::RandRange(-500.0f, 500.0f),
+                    0.0f
+                );
+                
+                PlaySoundAtLocation(AmbientSound, SoundLocation);
+            }
+            break;
         }
     }
 }
 
-void UAudio_SpatialAudioManager::SetCategoryVolume(EAudio_SoundCategory Category, float Volume)
+void UAudio_SpatialAudioManager::PlayDinosaurSound(const FString& DinosaurType, const FVector& Location, float Intensity)
 {
-    CategoryVolumes.Add(Category, FMath::Clamp(Volume, 0.0f, 1.0f));
+    TSoftObjectPtr<USoundWave>* SoundPtr = DinosaurSounds.Find(DinosaurType);
+    if (SoundPtr && SoundPtr->IsValid())
+    {
+        FAudio_SoundEntry DinoSound;
+        DinoSound.SoundName = DinosaurType + TEXT("_Roar");
+        DinoSound.SoundAsset = *SoundPtr;
+        DinoSound.Category = EAudio_AudioCategory::Dinosaur;
+        DinoSound.Volume = FMath::Clamp(Intensity, 0.1f, 2.0f);
+        DinoSound.AttenuationRadius = 3000.0f; // Large radius for dinosaur sounds
+        
+        PlaySoundAtLocation(DinoSound, Location);
+    }
+    else
+    {
+        UE_LOG(LogTemp, Warning, TEXT("UAudio_SpatialAudioManager: No sound found for dinosaur type: %s"), *DinosaurType);
+    }
 }
 
-float UAudio_SpatialAudioManager::GetCategoryVolume(EAudio_SoundCategory Category) const
+void UAudio_SpatialAudioManager::RegisterDinosaurActor(AActor* DinosaurActor, const FString& DinosaurType)
+{
+    if (!DinosaurActor)
+    {
+        return;
+    }
+
+    // In a full implementation, we'd store actor references and update their audio dynamically
+    UE_LOG(LogTemp, Log, TEXT("UAudio_SpatialAudioManager: Registered dinosaur actor %s of type %s"), 
+           *DinosaurActor->GetName(), *DinosaurType);
+}
+
+void UAudio_SpatialAudioManager::SetCategoryVolume(EAudio_AudioCategory Category, float Volume)
+{
+    CategoryVolumes.Add(Category, FMath::Clamp(Volume, 0.0f, 1.0f));
+    UE_LOG(LogTemp, Log, TEXT("UAudio_SpatialAudioManager: Set category %d volume to %f"), (int32)Category, Volume);
+}
+
+float UAudio_SpatialAudioManager::GetCategoryVolume(EAudio_AudioCategory Category) const
 {
     const float* VolumePtr = CategoryVolumes.Find(Category);
     return VolumePtr ? *VolumePtr : 1.0f;
 }
 
-void UAudio_SpatialAudioManager::RegisterBiomeAmbience(const FAudio_BiomeAmbience& BiomeAmbience)
+float UAudio_SpatialAudioManager::CalculateDistanceAttenuation(const FVector& SoundLocation, const FVector& ListenerLocation, float MaxDistance) const
 {
-    RegisteredBiomes.Add(BiomeAmbience);
-    UE_LOG(LogTemp, Log, TEXT("RegisterBiomeAmbience: Registered biome %s"), *BiomeAmbience.BiomeName);
+    float Distance = FVector::Dist(SoundLocation, ListenerLocation);
+    if (Distance >= MaxDistance)
+    {
+        return 0.0f;
+    }
+    
+    // Linear attenuation
+    return 1.0f - (Distance / MaxDistance);
 }
 
-void UAudio_SpatialAudioManager::UpdatePlayerLocation(const FVector& NewPlayerLocation)
+bool UAudio_SpatialAudioManager::IsLocationOccluded(const FVector& SoundLocation, const FVector& ListenerLocation) const
 {
-    PlayerLocation = NewPlayerLocation;
-    UpdateAmbienceBasedOnLocation();
-}
-
-void UAudio_SpatialAudioManager::TransitionToBiome(const FString& BiomeName, float TransitionTime)
-{
-    if (CurrentBiome == BiomeName)
-    {
-        return;
-    }
-    
-    // Find the biome ambience
-    const FAudio_BiomeAmbience* BiomeAmbience = RegisteredBiomes.FindByPredicate(
-        [&BiomeName](const FAudio_BiomeAmbience& Biome)
-        {
-            return Biome.BiomeName == BiomeName;
-        });
-    
-    if (!BiomeAmbience)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("TransitionToBiome: Biome %s not found"), *BiomeName);
-        return;
-    }
-    
-    // Stop current ambience
-    if (IsValid(CurrentAmbienceComponent))
-    {
-        CurrentAmbienceComponent->FadeOut(TransitionTime, 0.0f);
-    }
-    
-    // Start new ambience
-    if (BiomeAmbience->AmbientSounds.Num() > 0)
-    {
-        USoundCue* NewAmbience = BiomeAmbience->AmbientSounds[0]; // Use first sound for now
-        if (NewAmbience)
-        {
-            CurrentAmbienceComponent = PlaySoundAtLocation(NewAmbience, PlayerLocation, 
-                BiomeAmbience->BaseVolume, 1.0f, false);
-            if (CurrentAmbienceComponent)
-            {
-                CurrentAmbienceComponent->FadeIn(TransitionTime, BiomeAmbience->BaseVolume);
-            }
-        }
-    }
-    
-    CurrentBiome = BiomeName;
-    UE_LOG(LogTemp, Log, TEXT("TransitionToBiome: Transitioned to %s"), *BiomeName);
-}
-
-void UAudio_SpatialAudioManager::PlayDinosaurSound(USoundCue* DinosaurSound, const FVector& DinosaurLocation, 
-    float ThreatLevel)
-{
-    if (!DinosaurSound)
-    {
-        return;
-    }
-    
-    float ThreatVolume = FMath::Clamp(ThreatLevel, 0.5f, 2.0f);
-    float CategoryVolume = GetCategoryVolume(EAudio_SoundCategory::Dinosaur);
-    float FinalVolume = ThreatVolume * CategoryVolume;
-    
-    UAudioComponent* Component = PlaySoundAtLocation(DinosaurSound, DinosaurLocation, FinalVolume);
-    
-    UE_LOG(LogTemp, Log, TEXT("PlayDinosaurSound: Played at %s, ThreatLevel: %f"), 
-        *DinosaurLocation.ToString(), ThreatLevel);
-}
-
-void UAudio_SpatialAudioManager::PlayFootstepSound(const FVector& Location, float CreatureSize)
-{
-    // In a full implementation, you'd have different footstep sounds based on size
-    float SizeVolume = FMath::Clamp(CreatureSize * 0.5f, 0.1f, 1.5f);
-    
-    // For now, just log the footstep
-    UE_LOG(LogTemp, Log, TEXT("PlayFootstepSound: Size %f at %s"), CreatureSize, *Location.ToString());
-}
-
-void UAudio_SpatialAudioManager::PlayNarration(USoundCue* NarrationSound, bool bPauseOtherAudio)
-{
-    if (!NarrationSound)
-    {
-        return;
-    }
-    
-    if (bPauseOtherAudio)
-    {
-        // Pause ambient and music
-        SetCategoryVolume(EAudio_SoundCategory::Ambient, 0.3f);
-        SetCategoryVolume(EAudio_SoundCategory::Music, 0.2f);
-    }
-    
-    // Stop previous narration
-    if (IsValid(NarrationComponent))
-    {
-        NarrationComponent->Stop();
-    }
-    
-    float NarrationVolume = GetCategoryVolume(EAudio_SoundCategory::Narration);
-    NarrationComponent = PlaySoundAtLocation(NarrationSound, PlayerLocation, NarrationVolume);
-    
-    UE_LOG(LogTemp, Log, TEXT("PlayNarration: Started narration"));
-}
-
-void UAudio_SpatialAudioManager::StopNarration()
-{
-    if (IsValid(NarrationComponent))
-    {
-        NarrationComponent->Stop();
-        NarrationComponent = nullptr;
-    }
-    
-    // Restore other audio volumes
-    SetCategoryVolume(EAudio_SoundCategory::Ambient, 0.8f);
-    SetCategoryVolume(EAudio_SoundCategory::Music, 0.6f);
-    
-    UE_LOG(LogTemp, Log, TEXT("StopNarration: Stopped narration"));
-}
-
-float UAudio_SpatialAudioManager::CalculateOcclusion(const FVector& SourceLocation, const FVector& ListenerLocation)
-{
-    UWorld* World = GetWorld();
+    UWorld* World = GEngine->GetCurrentPlayWorld();
     if (!World)
     {
-        return 1.0f;
+        return false;
     }
-    
+
     FHitResult HitResult;
     FCollisionQueryParams QueryParams;
     QueryParams.bTraceComplex = false;
-    
+    QueryParams.bReturnPhysicalMaterial = false;
+
     bool bHit = World->LineTraceSingleByChannel(
         HitResult,
-        SourceLocation,
+        SoundLocation,
         ListenerLocation,
-        ECC_WorldStatic,
+        ECollisionChannel::ECC_Visibility,
         QueryParams
     );
-    
-    if (bHit)
-    {
-        // Simple occlusion calculation
-        float Distance = FVector::Dist(SourceLocation, ListenerLocation);
-        float OcclusionFactor = FMath::Clamp(Distance / OcclusionTraceDistance, 0.3f, 1.0f);
-        return OcclusionFactor;
-    }
-    
-    return 1.0f; // No occlusion
+
+    return bHit;
 }
 
-bool UAudio_SpatialAudioManager::CanPlaySound(int32 Priority, EAudio_SoundCategory Category)
+void UAudio_SpatialAudioManager::InitializeBiomeAmbiences()
 {
-    CleanupFinishedSounds();
+    // Savana biome
+    FAudio_BiomeAmbience SavanaAmbience;
+    SavanaAmbience.BiomeType = EAudio_BiomeType::Savana;
+    SavanaAmbience.BaseVolume = 0.6f;
+    SavanaAmbience.FadeDistance = 1500.0f;
     
-    if (ActiveSounds.Num() < MaxConcurrentSounds)
-    {
-        return true;
-    }
+    FAudio_SoundEntry SavanaWind;
+    SavanaWind.SoundName = TEXT("SavanaWind");
+    SavanaWind.Category = EAudio_AudioCategory::Ambient;
+    SavanaWind.Volume = 0.4f;
+    SavanaWind.AttenuationRadius = 2000.0f;
+    SavanaAmbience.AmbientSounds.Add(SavanaWind);
     
-    // Check if we can replace a lower priority sound
-    // For now, just check count
-    return ActiveSounds.Num() < MaxConcurrentSounds;
+    BiomeAmbiences.Add(SavanaAmbience);
+
+    // Forest biome
+    FAudio_BiomeAmbience ForestAmbience;
+    ForestAmbience.BiomeType = EAudio_BiomeType::Forest;
+    ForestAmbience.BaseVolume = 0.7f;
+    ForestAmbience.FadeDistance = 1000.0f;
+    
+    FAudio_SoundEntry ForestBirds;
+    ForestBirds.SoundName = TEXT("ForestBirds");
+    ForestBirds.Category = EAudio_AudioCategory::Ambient;
+    ForestBirds.Volume = 0.5f;
+    ForestBirds.AttenuationRadius = 1500.0f;
+    ForestAmbience.AmbientSounds.Add(ForestBirds);
+    
+    BiomeAmbiences.Add(ForestAmbience);
+
+    UE_LOG(LogTemp, Log, TEXT("UAudio_SpatialAudioManager: Initialized %d biome ambiences"), BiomeAmbiences.Num());
 }
 
-void UAudio_SpatialAudioManager::CleanupFinishedSounds()
+void UAudio_SpatialAudioManager::InitializeDinosaurSounds()
 {
-    for (int32 i = ActiveSounds.Num() - 1; i >= 0; i--)
+    // These would be loaded from actual sound assets in a full implementation
+    // For now, we register the sound names for future asset loading
+    
+    DinosaurSounds.Add(TEXT("TRex"), nullptr);
+    DinosaurSounds.Add(TEXT("Velociraptor"), nullptr);
+    DinosaurSounds.Add(TEXT("Triceratops"), nullptr);
+    DinosaurSounds.Add(TEXT("Brachiosaurus"), nullptr);
+    
+    UE_LOG(LogTemp, Log, TEXT("UAudio_SpatialAudioManager: Initialized %d dinosaur sound entries"), DinosaurSounds.Num());
+}
+
+void UAudio_SpatialAudioManager::InitializeNarrationSounds()
+{
+    // Initialize with the narration sounds from Agent #15
+    NarrationSounds.Add(TEXT("TribalElder_Warning"), nullptr);
+    NarrationSounds.Add(TEXT("Shaman_Discovery"), nullptr);
+    NarrationSounds.Add(TEXT("ForestNarrator"), nullptr);
+    NarrationSounds.Add(TEXT("TRexEncounter"), nullptr);
+    
+    UE_LOG(LogTemp, Log, TEXT("UAudio_SpatialAudioManager: Initialized %d narration sound entries"), NarrationSounds.Num());
+}
+
+void UAudio_SpatialAudioManager::CleanupInactiveComponents()
+{
+    for (int32 i = ActiveAudioComponents.Num() - 1; i >= 0; i--)
     {
-        UAudioComponent* Component = ActiveSounds[i];
-        if (!IsValid(Component) || !Component->IsPlaying())
+        UAudioComponent* AudioComp = ActiveAudioComponents[i];
+        if (!AudioComp || !AudioComp->IsValidLowLevel() || !AudioComp->IsPlaying())
         {
-            ActiveSounds.RemoveAt(i);
+            ActiveAudioComponents.RemoveAt(i);
         }
     }
 }
 
-FString UAudio_SpatialAudioManager::DetermineBiomeFromLocation(const FVector& Location)
+UAudioComponent* UAudio_SpatialAudioManager::CreateAudioComponent(UWorld* World, const FVector& Location)
 {
-    // Biome detection based on coordinates from memory
-    if (Location.X >= -10000 && Location.X <= 10000 && Location.Y >= -10000 && Location.Y <= 10000)
+    if (!World)
     {
-        return TEXT("Savana");
+        return nullptr;
     }
-    else if (Location.X >= -60000 && Location.X <= -40000 && Location.Y >= -55000 && Location.Y <= -35000)
+
+    UAudioComponent* AudioComp = NewObject<UAudioComponent>(World);
+    if (AudioComp)
     {
-        return TEXT("Pantano");
-    }
-    else if (Location.X >= -55000 && Location.X <= -35000 && Location.Y >= 30000 && Location.Y <= 50000)
-    {
-        return TEXT("Floresta");
-    }
-    else if (Location.X >= 45000 && Location.X <= 65000 && Location.Y >= -10000 && Location.Y <= 10000)
-    {
-        return TEXT("Deserto");
-    }
-    else if (Location.X >= 30000 && Location.X <= 50000 && Location.Y >= 40000 && Location.Y <= 60000)
-    {
-        return TEXT("Montanha");
+        AudioComp->SetWorldLocation(Location);
+        AudioComp->bAutoDestroy = true;
+        AudioComp->bStopWhenOwnerDestroyed = true;
+        AudioComp->AttenuationSettings = nullptr; // Use default attenuation
     }
     
-    return TEXT("Savana"); // Default
-}
-
-void UAudio_SpatialAudioManager::UpdateAmbienceBasedOnLocation()
-{
-    FString NewBiome = DetermineBiomeFromLocation(PlayerLocation);
-    if (NewBiome != CurrentBiome)
-    {
-        TransitionToBiome(NewBiome, 2.0f);
-    }
+    return AudioComp;
 }
