@@ -2,11 +2,10 @@
 
 #include "CoreMinimal.h"
 #include "AIController.h"
-#include "BehaviorTree/BlackboardComponent.h"
-#include "BehaviorTree/BehaviorTreeComponent.h"
 #include "BehaviorTree/BehaviorTree.h"
+#include "BehaviorTree/BlackboardComponent.h"
 #include "Perception/AIPerceptionComponent.h"
-#include "Perception/AISenseConfig_Sight.h"
+#include "Perception/AISightConfig.h"
 #include "Combat_DinosaurAIController.generated.h"
 
 UCLASS(BlueprintType, Blueprintable)
@@ -21,56 +20,55 @@ protected:
     virtual void BeginPlay() override;
     virtual void OnPossess(APawn* InPawn) override;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI")
-    class UBehaviorTreeComponent* BehaviorTreeComponent;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI")
-    class UBlackboardComponent* BlackboardComponent;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI")
-    class UAIPerceptionComponent* AIPerceptionComponent;
-
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI")
-    class UBehaviorTree* BehaviorTree;
+    UBehaviorTree* BehaviorTreeAsset;
 
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI")
-    class UBlackboardData* BlackboardAsset;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI")
+    UAIPerceptionComponent* AIPerceptionComponent;
 
-    // Combat AI properties
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat", meta = (AllowPrivateAccess = "true"))
-    float DetectionRadius;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI")
+    UAISightConfig* SightConfig;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat", meta = (AllowPrivateAccess = "true"))
-    float AttackRange;
+    // Combat states
+    UPROPERTY(BlueprintReadWrite, Category = "Combat")
+    bool bIsInCombat;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat", meta = (AllowPrivateAccess = "true"))
-    float ChaseSpeed;
+    UPROPERTY(BlueprintReadWrite, Category = "Combat")
+    float CombatRange;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat", meta = (AllowPrivateAccess = "true"))
-    float PatrolSpeed;
+    UPROPERTY(BlueprintReadWrite, Category = "Combat")
+    float DetectionRange;
 
-    // AI behavior functions
-    UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    void StartHunting(AActor* Target);
+    UPROPERTY(BlueprintReadWrite, Category = "Combat")
+    float AttackCooldown;
 
-    UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    void StopHunting();
+    UPROPERTY(BlueprintReadWrite, Category = "Combat")
+    float LastAttackTime;
 
-    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    // AI Functions
+    UFUNCTION(BlueprintCallable, Category = "Combat")
     bool DetectPlayer();
 
-    UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    void AttackTarget();
+    UFUNCTION(BlueprintCallable, Category = "Combat")
+    void StartCombat(AActor* Target);
 
-    UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    void PatrolArea();
+    UFUNCTION(BlueprintCallable, Category = "Combat")
+    void EndCombat();
 
-private:
+    UFUNCTION(BlueprintCallable, Category = "Combat")
+    bool CanAttack() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Combat")
+    void PerformAttack();
+
+    // Perception callbacks
     UFUNCTION()
     void OnPerceptionUpdated(const TArray<AActor*>& UpdatedActors);
 
+private:
     AActor* CurrentTarget;
-    bool bIsHunting;
-    FVector PatrolCenter;
-    float PatrolRadius;
+    FTimerHandle CombatCheckTimer;
+    
+    void CombatTick();
+    void SetupPerception();
 };
