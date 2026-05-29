@@ -3,93 +3,132 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "Components/SphereComponent.h"
-#include "Engine/Engine.h"
+#include "Engine/World.h"
+#include "GameFramework/Character.h"
+#include "TimerManager.h"
 #include "Combat_DinosaurCombatSystem.generated.h"
 
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FCombat_DinosaurStats
+UENUM(BlueprintType)
+enum class ECombat_DinosaurCombatState : uint8
 {
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
-    float Health = 100.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
-    float AttackDamage = 25.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
-    float AttackRange = 300.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
-    float DetectionRadius = 2000.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
-    float MovementSpeed = 400.0f;
+	Idle UMETA(DisplayName = "Idle"),
+	Hunting UMETA(DisplayName = "Hunting"),
+	Attacking UMETA(DisplayName = "Attacking"),
+	Fleeing UMETA(DisplayName = "Fleeing"),
+	Feeding UMETA(DisplayName = "Feeding")
 };
 
-UENUM(BlueprintType)
-enum class ECombat_DinosaurState : uint8
+USTRUCT(BlueprintType)
+struct FCombat_DinosaurCombatStats
 {
-    Idle,
-    Patrolling,
-    Hunting,
-    Attacking,
-    Fleeing,
-    Dead
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Stats")
+	float Health = 100.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Stats")
+	float MaxHealth = 100.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Stats")
+	float AttackDamage = 25.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Stats")
+	float DetectionRadius = 5000.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Stats")
+	float AttackRange = 300.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Stats")
+	float MovementSpeed = 600.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Stats")
+	float AggressionLevel = 0.7f;
+
+	FCombat_DinosaurCombatStats()
+	{
+		Health = 100.0f;
+		MaxHealth = 100.0f;
+		AttackDamage = 25.0f;
+		DetectionRadius = 5000.0f;
+		AttackRange = 300.0f;
+		MovementSpeed = 600.0f;
+		AggressionLevel = 0.7f;
+	}
 };
 
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API ACombat_DinosaurCombatSystem : public AActor
 {
-    GENERATED_BODY()
+	GENERATED_BODY()
 
 public:
-    ACombat_DinosaurCombatSystem();
+	ACombat_DinosaurCombatSystem();
 
 protected:
-    virtual void BeginPlay() override;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    class USphereComponent* DetectionSphere;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
-    FCombat_DinosaurStats DinosaurStats;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
-    ECombat_DinosaurState CurrentState;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
-    AActor* TargetActor;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
-    float LastAttackTime;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
-    float AttackCooldown = 2.0f;
+	virtual void BeginPlay() override;
 
 public:
-    virtual void Tick(float DeltaTime) override;
+	virtual void Tick(float DeltaTime) override;
 
-    UFUNCTION(BlueprintCallable, Category = "Combat")
-    void SetCombatState(ECombat_DinosaurState NewState);
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat Components")
+	USphereComponent* DetectionSphere;
 
-    UFUNCTION(BlueprintCallable, Category = "Combat")
-    bool CanAttack() const;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Stats")
+	FCombat_DinosaurCombatStats CombatStats;
 
-    UFUNCTION(BlueprintCallable, Category = "Combat")
-    void PerformAttack();
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat State")
+	ECombat_DinosaurCombatState CurrentCombatState;
 
-    UFUNCTION(BlueprintCallable, Category = "Combat")
-    AActor* DetectNearbyPlayer();
+	UPROPERTY(BlueprintReadOnly, Category = "Combat Target")
+	AActor* CurrentTarget;
 
-    UFUNCTION(BlueprintCallable, Category = "Combat")
-    void MoveTowardsTarget(float DeltaTime);
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Settings")
+	bool bIsAggressive = true;
 
-    UFUNCTION(BlueprintCallable, Category = "Combat")
-    void TakeDamage(float Damage);
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Settings")
+	bool bCanFlee = false;
 
-    UFUNCTION()
-    void OnDetectionSphereBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult);
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Settings")
+	float FleeHealthThreshold = 20.0f;
+
+	UFUNCTION(BlueprintCallable, Category = "Combat Actions")
+	void StartHunting(AActor* Target);
+
+	UFUNCTION(BlueprintCallable, Category = "Combat Actions")
+	void AttackTarget();
+
+	UFUNCTION(BlueprintCallable, Category = "Combat Actions")
+	void FleeFromThreat();
+
+	UFUNCTION(BlueprintCallable, Category = "Combat Actions")
+	void TakeDamage(float DamageAmount, AActor* DamageSource);
+
+	UFUNCTION(BlueprintCallable, Category = "Combat Detection")
+	AActor* DetectNearbyPlayer();
+
+	UFUNCTION(BlueprintCallable, Category = "Combat Detection")
+	bool IsTargetInAttackRange();
+
+	UFUNCTION(BlueprintCallable, Category = "Combat State")
+	void SetCombatState(ECombat_DinosaurCombatState NewState);
+
+	UFUNCTION(BlueprintImplementableEvent, Category = "Combat Events")
+	void OnCombatStateChanged(ECombat_DinosaurCombatState OldState, ECombat_DinosaurCombatState NewState);
+
+	UFUNCTION(BlueprintImplementableEvent, Category = "Combat Events")
+	void OnTargetAcquired(AActor* Target);
+
+	UFUNCTION(BlueprintImplementableEvent, Category = "Combat Events")
+	void OnAttackExecuted(AActor* Target);
+
+private:
+	FTimerHandle AttackCooldownTimer;
+	float LastAttackTime = 0.0f;
+	float AttackCooldown = 2.0f;
+
+	void UpdateCombatBehavior();
+	void ProcessHuntingState();
+	void ProcessAttackingState();
+	void ProcessFleeingState();
+	bool CanAttack() const;
 };
-
-#include "Combat_DinosaurCombatSystem.generated.h"
