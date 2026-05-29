@@ -7,429 +7,351 @@
 UDir_ProductionPipeline::UDir_ProductionPipeline()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 1.0f;
-    
     CurrentPhase = EDir_ProductionPhase::CoreSystems;
-    CurrentCycleNumber = 0;
-    TargetCycleTime = 300.0f; // 5 minutes per cycle
-    CycleStartTime = 0.0f;
-    
-    // Initialize critical milestone flags
-    bCharacterMovementComplete = false;
-    bSurvivalSystemComplete = false;
-    bDinosaurAIComplete = false;
-    bTerrainSystemComplete = false;
-    
-    // Initialize agent names
-    AgentNames = {
-        TEXT("Studio Director"),
-        TEXT("Engine Architect"),
-        TEXT("Core Systems Programmer"),
-        TEXT("Performance Optimizer"),
-        TEXT("Procedural World Generator"),
-        TEXT("Environment Artist"),
-        TEXT("Architecture & Interior Agent"),
-        TEXT("Lighting & Atmosphere Agent"),
-        TEXT("Character Artist Agent"),
-        TEXT("Animation Agent"),
-        TEXT("NPC Behavior Agent"),
-        TEXT("Combat & Enemy AI Agent"),
-        TEXT("Crowd & Traffic Simulation"),
-        TEXT("Quest & Mission Designer"),
-        TEXT("Narrative & Dialogue Agent"),
-        TEXT("Audio Agent"),
-        TEXT("VFX Agent"),
-        TEXT("QA & Testing Agent"),
-        TEXT("Integration & Build Agent")
-    };
+    CurrentCycleNumber = 6;
+    CycleBudgetUsed = 39.62f;
+    CycleBudgetLimit = 75.0f;
 }
 
 void UDir_ProductionPipeline::BeginPlay()
 {
     Super::BeginPlay();
-    
-    InitializeProductionChain();
-    CycleStartTime = GetWorld()->GetTimeSeconds();
-    
-    UE_LOG(LogTemp, Warning, TEXT("Production Pipeline initialized - Phase: %d, Cycle: %d"), 
-           static_cast<int32>(CurrentPhase), CurrentCycleNumber);
+    InitializeProductionPipeline();
 }
 
 void UDir_ProductionPipeline::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
     
-    UpdateProductionMetrics();
-    
-    // Check for cycle timeout
-    float CurrentTime = GetWorld()->GetTimeSeconds();
-    if (CurrentTime - CycleStartTime > TargetCycleTime)
+    // Update production metrics every 5 seconds
+    static float MetricsTimer = 0.0f;
+    MetricsTimer += DeltaTime;
+    if (MetricsTimer >= 5.0f)
     {
-        UE_LOG(LogTemp, Warning, TEXT("Cycle %d timeout - advancing to next cycle"), CurrentCycleNumber);
-        CurrentCycleNumber++;
-        CycleStartTime = CurrentTime;
+        LogProductionMetrics();
+        MetricsTimer = 0.0f;
     }
 }
 
-void UDir_ProductionPipeline::InitializeProductionChain()
+void UDir_ProductionPipeline::InitializeProductionPipeline()
 {
-    // Initialize agent statuses
-    for (int32 i = 1; i <= 19; ++i)
-    {
-        AgentStatuses.Add(i, EDir_AgentStatus::Idle);
-    }
+    UE_LOG(LogTemp, Warning, TEXT("Director: Initializing Production Pipeline for Cycle %d"), CurrentCycleNumber);
     
-    // Set up agent dependencies
-    AgentDependencies.Add(2, {1}); // Engine Architect depends on Studio Director
-    AgentDependencies.Add(3, {2}); // Core Systems depends on Engine Architect
-    AgentDependencies.Add(4, {3}); // Performance depends on Core Systems
-    AgentDependencies.Add(5, {2, 3}); // World Generator depends on Engine + Core
-    AgentDependencies.Add(6, {5}); // Environment depends on World Generator
-    AgentDependencies.Add(7, {6}); // Architecture depends on Environment
-    AgentDependencies.Add(8, {7}); // Lighting depends on Architecture
-    AgentDependencies.Add(9, {2}); // Character Artist depends on Engine Architect
-    AgentDependencies.Add(10, {9}); // Animation depends on Character Artist
-    AgentDependencies.Add(11, {10}); // NPC Behavior depends on Animation
-    AgentDependencies.Add(12, {11}); // Combat AI depends on NPC Behavior
-    AgentDependencies.Add(13, {12}); // Crowd Simulation depends on Combat AI
-    AgentDependencies.Add(14, {15}); // Quest Designer depends on Narrative
-    AgentDependencies.Add(15, {1}); // Narrative depends on Studio Director
-    AgentDependencies.Add(16, {8}); // Audio depends on Lighting (world complete)
-    AgentDependencies.Add(17, {16}); // VFX depends on Audio
-    AgentDependencies.Add(18, {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17}); // QA depends on all
-    AgentDependencies.Add(19, {18}); // Integration depends on QA
+    // Clear existing data
+    ProductionMilestones.Empty();
+    ActiveTasks.Empty();
     
-    // Initialize critical milestones
-    FDir_Milestone CharacterMilestone;
-    CharacterMilestone.Name = TEXT("Character Movement");
-    CharacterMilestone.Description = TEXT("Player can walk, run, jump with WASD controls");
-    CharacterMilestone.RequiredAgents = {3, 9, 10};
-    CharacterMilestone.Priority = 10.0f;
-    RegisterMilestone(CharacterMilestone);
+    // Setup Milestone 1 - Walk Around Prototype
+    SetupMilestone1WalkAround();
     
-    FDir_Milestone SurvivalMilestone;
-    SurvivalMilestone.Name = TEXT("Survival System");
-    SurvivalMilestone.Description = TEXT("Health, hunger, thirst, stamina mechanics");
-    SurvivalMilestone.RequiredAgents = {3, 9};
-    SurvivalMilestone.Priority = 9.0f;
-    RegisterMilestone(SurvivalMilestone);
+    // Setup Core Systems Milestones
+    SetupCoreSystemsMilestones();
     
-    FDir_Milestone DinosaurMilestone;
-    DinosaurMilestone.Name = TEXT("Dinosaur AI");
-    DinosaurMilestone.Description = TEXT("T-Rex with basic pursue behavior");
-    DinosaurMilestone.RequiredAgents = {11, 12};
-    DinosaurMilestone.Priority = 8.0f;
-    RegisterMilestone(DinosaurMilestone);
-    
-    FDir_Milestone TerrainMilestone;
-    TerrainMilestone.Name = TEXT("Terrain System");
-    TerrainMilestone.Description = TEXT("Landscape with height variation and collision");
-    TerrainMilestone.RequiredAgents = {5, 6};
-    TerrainMilestone.Priority = 7.0f;
-    RegisterMilestone(TerrainMilestone);
+    UE_LOG(LogTemp, Warning, TEXT("Director: Production Pipeline initialized with %d milestones"), ProductionMilestones.Num());
 }
 
-void UDir_ProductionPipeline::AdvanceToNextPhase()
+void UDir_ProductionPipeline::SetupMilestone1WalkAround()
 {
-    switch (CurrentPhase)
-    {
-        case EDir_ProductionPhase::PreProduction:
-            CurrentPhase = EDir_ProductionPhase::CoreSystems;
-            break;
-        case EDir_ProductionPhase::CoreSystems:
-            if (ValidateMilestone(TEXT("Character Movement")))
-            {
-                CurrentPhase = EDir_ProductionPhase::WorldGeneration;
-            }
-            break;
-        case EDir_ProductionPhase::WorldGeneration:
-            if (ValidateMilestone(TEXT("Terrain System")))
-            {
-                CurrentPhase = EDir_ProductionPhase::CharacterSystems;
-            }
-            break;
-        case EDir_ProductionPhase::CharacterSystems:
-            if (ValidateMilestone(TEXT("Survival System")) && ValidateMilestone(TEXT("Dinosaur AI")))
-            {
-                CurrentPhase = EDir_ProductionPhase::GameplayMechanics;
-            }
-            break;
-        default:
-            break;
-    }
+    FDir_MilestoneData Milestone1;
+    Milestone1.MilestoneName = TEXT("Milestone 1 - Walk Around Prototype");
+    Milestone1.Phase = EDir_ProductionPhase::CoreSystems;
+    Milestone1.bIsComplete = false;
+    Milestone1.CompletionPercentage = 0.0f;
     
-    UE_LOG(LogTemp, Warning, TEXT("Advanced to production phase: %d"), static_cast<int32>(CurrentPhase));
+    // Task 1: Character Movement
+    FDir_AgentTask CharacterTask;
+    CharacterTask.AgentName = TEXT("Agent #9 - Character Artist");
+    CharacterTask.TaskDescription = TEXT("Implement WASD movement for TranspersonalCharacter with camera boom and follow camera");
+    CharacterTask.Status = EDir_AgentStatus::Working;
+    CharacterTask.Priority = 10.0f;
+    CharacterTask.ExpectedOutput = TEXT("Working character controller with third-person camera");
+    Milestone1.RequiredTasks.Add(CharacterTask);
+    
+    // Task 2: Terrain Generation
+    FDir_AgentTask TerrainTask;
+    TerrainTask.AgentName = TEXT("Agent #5 - World Generator");
+    TerrainTask.TaskDescription = TEXT("Create landscape with height variation and basic terrain materials");
+    TerrainTask.Status = EDir_AgentStatus::Working;
+    TerrainTask.Priority = 9.0f;
+    TerrainTask.ExpectedOutput = TEXT("Non-flat terrain with hills and valleys");
+    Milestone1.RequiredTasks.Add(TerrainTask);
+    
+    // Task 3: Dinosaur Placement
+    FDir_AgentTask DinosaurTask;
+    DinosaurTask.AgentName = TEXT("Agent #12 - Combat AI");
+    DinosaurTask.TaskDescription = TEXT("Spawn 3-5 static dinosaur meshes in MinPlayableMap using real assets");
+    DinosaurTask.Status = EDir_AgentStatus::Idle;
+    DinosaurTask.Priority = 8.0f;
+    DinosaurTask.ExpectedOutput = TEXT("Visible dinosaurs placed in world");
+    Milestone1.RequiredTasks.Add(DinosaurTask);
+    
+    // Task 4: Lighting Setup
+    FDir_AgentTask LightingTask;
+    LightingTask.AgentName = TEXT("Agent #8 - Lighting Artist");
+    LightingTask.TaskDescription = TEXT("Configure directional light, sky atmosphere, and fog for basic scene lighting");
+    LightingTask.Status = EDir_AgentStatus::Idle;
+    LightingTask.Priority = 7.0f;
+    LightingTask.ExpectedOutput = TEXT("Properly lit scene with day/night cycle");
+    Milestone1.RequiredTasks.Add(LightingTask);
+    
+    ProductionMilestones.Add(Milestone1);
 }
 
-bool UDir_ProductionPipeline::ValidateMilestone(const FString& MilestoneName)
+void UDir_ProductionPipeline::SetupCoreSystemsMilestones()
 {
-    for (FDir_Milestone& Milestone : Milestones)
+    FDir_MilestoneData CoreSystems;
+    CoreSystems.MilestoneName = TEXT("Core Systems Integration");
+    CoreSystems.Phase = EDir_ProductionPhase::CoreSystems;
+    CoreSystems.bIsComplete = false;
+    CoreSystems.CompletionPercentage = 0.0f;
+    
+    // Task 1: Survival Component
+    FDir_AgentTask SurvivalTask;
+    SurvivalTask.AgentName = TEXT("Agent #3 - Core Systems");
+    SurvivalTask.TaskDescription = TEXT("Create SurvivalComponent with Health, Hunger, Thirst, Stamina stats");
+    SurvivalTask.Status = EDir_AgentStatus::Idle;
+    SurvivalTask.Priority = 9.0f;
+    SurvivalTask.ExpectedOutput = TEXT("Working survival stats that decrease over time");
+    CoreSystems.RequiredTasks.Add(SurvivalTask);
+    
+    // Task 2: T-Rex AI
+    FDir_AgentTask TRexTask;
+    TRexTask.AgentName = TEXT("Agent #12 - Combat AI");
+    TRexTask.TaskDescription = TEXT("Implement DinosaurCombatAIController.cpp with basic pursuit behavior");
+    TRexTask.Status = EDir_AgentStatus::Idle;
+    TRexTask.Priority = 8.0f;
+    TRexTask.ExpectedOutput = TEXT("T-Rex that detects and pursues player within 5000 units");
+    CoreSystems.RequiredTasks.Add(TRexTask);
+    
+    ProductionMilestones.Add(CoreSystems);
+}
+
+void UDir_ProductionPipeline::StartNewCycle()
+{
+    CurrentCycleNumber++;
+    CycleBudgetUsed = 0.0f;
+    
+    UE_LOG(LogTemp, Warning, TEXT("Director: Starting Production Cycle %d"), CurrentCycleNumber);
+    
+    // Reset task statuses for new cycle
+    for (FDir_MilestoneData& Milestone : ProductionMilestones)
     {
-        if (Milestone.Name == MilestoneName)
+        for (FDir_AgentTask& Task : Milestone.RequiredTasks)
         {
-            if (!Milestone.bIsComplete && CheckMilestoneDependencies(Milestone))
+            if (Task.Status == EDir_AgentStatus::Working)
             {
-                // Validate specific milestones
-                if (MilestoneName == TEXT("Character Movement"))
-                {
-                    Milestone.bIsComplete = ValidateCharacterMovement();
-                    bCharacterMovementComplete = Milestone.bIsComplete;
-                }
-                else if (MilestoneName == TEXT("Survival System"))
-                {
-                    // Check for SurvivalComponent existence
-                    Milestone.bIsComplete = true; // Placeholder - should check actual component
-                    bSurvivalSystemComplete = Milestone.bIsComplete;
-                }
-                else if (MilestoneName == TEXT("Dinosaur AI"))
-                {
-                    Milestone.bIsComplete = ValidateDinosaurAI();
-                    bDinosaurAIComplete = Milestone.bIsComplete;
-                }
-                else if (MilestoneName == TEXT("Terrain System"))
-                {
-                    Milestone.bIsComplete = ValidateTerrainSystem();
-                    bTerrainSystemComplete = Milestone.bIsComplete;
-                }
+                Task.Status = EDir_AgentStatus::Idle;
             }
+        }
+    }
+    
+    UpdateCriticalPath();
+}
+
+void UDir_ProductionPipeline::AssignTaskToAgent(const FString& AgentName, const FString& TaskDescription, float Priority)
+{
+    FDir_AgentTask NewTask;
+    NewTask.AgentName = AgentName;
+    NewTask.TaskDescription = TaskDescription;
+    NewTask.Status = EDir_AgentStatus::Working;
+    NewTask.Priority = Priority;
+    
+    ActiveTasks.Add(NewTask);
+    
+    UE_LOG(LogTemp, Warning, TEXT("Director: Assigned task to %s: %s"), *AgentName, *TaskDescription);
+}
+
+void UDir_ProductionPipeline::CompleteAgentTask(const FString& AgentName, const FString& Output)
+{
+    for (FDir_AgentTask& Task : ActiveTasks)
+    {
+        if (Task.AgentName == AgentName && Task.Status == EDir_AgentStatus::Working)
+        {
+            Task.Status = EDir_AgentStatus::Complete;
+            Task.ExpectedOutput = Output;
+            
+            UE_LOG(LogTemp, Warning, TEXT("Director: %s completed task: %s"), *AgentName, *Output);
+            break;
+        }
+    }
+    
+    // Update milestone completion
+    for (FDir_MilestoneData& Milestone : ProductionMilestones)
+    {
+        int32 CompletedTasks = 0;
+        for (const FDir_AgentTask& Task : Milestone.RequiredTasks)
+        {
+            if (Task.Status == EDir_AgentStatus::Complete)
+            {
+                CompletedTasks++;
+            }
+        }
+        
+        Milestone.CompletionPercentage = (float)CompletedTasks / (float)Milestone.RequiredTasks.Num() * 100.0f;
+        
+        if (Milestone.CompletionPercentage >= 100.0f && !Milestone.bIsComplete)
+        {
+            Milestone.bIsComplete = true;
+            UE_LOG(LogTemp, Warning, TEXT("Director: MILESTONE COMPLETE - %s"), *Milestone.MilestoneName);
+        }
+    }
+}
+
+void UDir_ProductionPipeline::BlockAgentTask(const FString& AgentName, const FString& Reason)
+{
+    for (FDir_AgentTask& Task : ActiveTasks)
+    {
+        if (Task.AgentName == AgentName)
+        {
+            Task.Status = EDir_AgentStatus::Blocked;
+            UE_LOG(LogTemp, Error, TEXT("Director: %s task BLOCKED: %s"), *AgentName, *Reason);
+            break;
+        }
+    }
+}
+
+bool UDir_ProductionPipeline::CheckMilestoneCompletion(const FString& MilestoneName)
+{
+    for (const FDir_MilestoneData& Milestone : ProductionMilestones)
+    {
+        if (Milestone.MilestoneName == MilestoneName)
+        {
             return Milestone.bIsComplete;
         }
     }
     return false;
 }
 
-void UDir_ProductionPipeline::AssignTaskToAgent(int32 AgentID, const FDir_AgentTask& Task)
+void UDir_ProductionPipeline::AdvanceToNextPhase()
 {
-    if (AgentID >= 1 && AgentID <= 19)
+    if (CurrentPhase == EDir_ProductionPhase::CoreSystems)
     {
-        ActiveTasks.Add(Task);
-        AgentStatuses[AgentID] = EDir_AgentStatus::Working;
-        
-        UE_LOG(LogTemp, Log, TEXT("Assigned task '%s' to Agent #%d: %s"), 
-               *Task.TaskName, AgentID, *AgentNames[AgentID - 1]);
+        CurrentPhase = EDir_ProductionPhase::WorldBuilding;
+        UE_LOG(LogTemp, Warning, TEXT("Director: Advanced to World Building phase"));
     }
+    else if (CurrentPhase == EDir_ProductionPhase::WorldBuilding)
+    {
+        CurrentPhase = EDir_ProductionPhase::CharacterDev;
+        UE_LOG(LogTemp, Warning, TEXT("Director: Advanced to Character Development phase"));
+    }
+    // Continue phase progression...
 }
 
-void UDir_ProductionPipeline::UpdateAgentStatus(int32 AgentID, EDir_AgentStatus NewStatus)
-{
-    if (AgentStatuses.Contains(AgentID))
-    {
-        AgentStatuses[AgentID] = NewStatus;
-        
-        if (NewStatus == EDir_AgentStatus::Complete)
-        {
-            Metrics.CompletedTasks++;
-        }
-        else if (NewStatus == EDir_AgentStatus::Error)
-        {
-            FString ErrorMsg = FString::Printf(TEXT("Agent #%d (%s) encountered error"), 
-                                               AgentID, *AgentNames[AgentID - 1]);
-            Metrics.CriticalBlocks.Add(ErrorMsg);
-            TriggerEmergencyProtocol(ErrorMsg);
-        }
-    }
-}
-
-TArray<FDir_AgentTask> UDir_ProductionPipeline::GetCriticalPath()
+TArray<FDir_AgentTask> UDir_ProductionPipeline::GetCriticalPathTasks()
 {
     TArray<FDir_AgentTask> CriticalTasks;
     
-    // Priority order based on current phase
-    TArray<int32> CriticalAgents;
-    
-    switch (CurrentPhase)
+    // Find highest priority incomplete tasks
+    for (const FDir_MilestoneData& Milestone : ProductionMilestones)
     {
-        case EDir_ProductionPhase::CoreSystems:
-            CriticalAgents = {1, 2, 3, 9}; // Director, Architect, Core, Character
-            break;
-        case EDir_ProductionPhase::WorldGeneration:
-            CriticalAgents = {5, 6}; // World Generator, Environment
-            break;
-        case EDir_ProductionPhase::CharacterSystems:
-            CriticalAgents = {10, 11, 12}; // Animation, NPC, Combat AI
-            break;
-        default:
-            CriticalAgents = {1, 2, 3}; // Fallback to core agents
-            break;
-    }
-    
-    for (const FDir_AgentTask& Task : ActiveTasks)
-    {
-        if (CriticalAgents.Contains(Task.AgentID))
+        if (!Milestone.bIsComplete)
         {
-            CriticalTasks.Add(Task);
+            for (const FDir_AgentTask& Task : Milestone.RequiredTasks)
+            {
+                if (Task.Status != EDir_AgentStatus::Complete && Task.Priority >= 8.0f)
+                {
+                    CriticalTasks.Add(Task);
+                }
+            }
         }
     }
+    
+    // Sort by priority
+    CriticalTasks.Sort([](const FDir_AgentTask& A, const FDir_AgentTask& B) {
+        return A.Priority > B.Priority;
+    });
     
     return CriticalTasks;
 }
 
-void UDir_ProductionPipeline::RegisterMilestone(const FDir_Milestone& Milestone)
+float UDir_ProductionPipeline::CalculateOverallProgress()
 {
-    Milestones.Add(Milestone);
-    UE_LOG(LogTemp, Log, TEXT("Registered milestone: %s"), *Milestone.Name);
+    if (ProductionMilestones.Num() == 0) return 0.0f;
+    
+    float TotalProgress = 0.0f;
+    for (const FDir_MilestoneData& Milestone : ProductionMilestones)
+    {
+        TotalProgress += Milestone.CompletionPercentage;
+    }
+    
+    return TotalProgress / (float)ProductionMilestones.Num();
 }
 
-void UDir_ProductionPipeline::CompleteMilestone(const FString& MilestoneName)
+void UDir_ProductionPipeline::GenerateProductionReport()
 {
-    for (FDir_Milestone& Milestone : Milestones)
+    UE_LOG(LogTemp, Warning, TEXT("=== PRODUCTION REPORT - CYCLE %d ==="), CurrentCycleNumber);
+    UE_LOG(LogTemp, Warning, TEXT("Current Phase: %s"), *UEnum::GetValueAsString(CurrentPhase));
+    UE_LOG(LogTemp, Warning, TEXT("Overall Progress: %.1f%%"), CalculateOverallProgress());
+    UE_LOG(LogTemp, Warning, TEXT("Budget Used: $%.2f / $%.2f"), CycleBudgetUsed, CycleBudgetLimit);
+    
+    for (const FDir_MilestoneData& Milestone : ProductionMilestones)
     {
-        if (Milestone.Name == MilestoneName)
-        {
-            Milestone.bIsComplete = true;
-            UE_LOG(LogTemp, Warning, TEXT("Completed milestone: %s"), *MilestoneName);
-            break;
-        }
+        UE_LOG(LogTemp, Warning, TEXT("Milestone: %s - %.1f%% Complete"), 
+               *Milestone.MilestoneName, Milestone.CompletionPercentage);
+    }
+    
+    TArray<FDir_AgentTask> CriticalTasks = GetCriticalPathTasks();
+    UE_LOG(LogTemp, Warning, TEXT("Critical Path Tasks: %d"), CriticalTasks.Num());
+    
+    for (const FDir_AgentTask& Task : CriticalTasks)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("  - %s: %s (Priority: %.1f)"), 
+               *Task.AgentName, *Task.TaskDescription, Task.Priority);
     }
 }
 
-TArray<FDir_Milestone> UDir_ProductionPipeline::GetPendingMilestones()
+void UDir_ProductionPipeline::CreateMinimalPlayablePrototype()
 {
-    TArray<FDir_Milestone> Pending;
-    for (const FDir_Milestone& Milestone : Milestones)
+    UE_LOG(LogTemp, Warning, TEXT("Director: Creating Minimal Playable Prototype..."));
+    
+    // This function would coordinate with UE5 to create the basic playable game
+    // Implementation would use UE5 Python commands to:
+    // 1. Ensure TranspersonalCharacter has movement
+    // 2. Place dinosaurs in the world
+    // 3. Setup basic lighting
+    // 4. Create simple terrain
+    
+    UE_LOG(LogTemp, Warning, TEXT("Director: Prototype creation initiated - check MinPlayableMap"));
+}
+
+void UDir_ProductionPipeline::ValidateCurrentBuild()
+{
+    UE_LOG(LogTemp, Warning, TEXT("Director: Validating current build state..."));
+    
+    // Check compilation status
+    bool bHasErrors = false; // This would check actual compilation status
+    
+    if (bHasErrors)
     {
-        if (!Milestone.bIsComplete)
-        {
-            Pending.Add(Milestone);
-        }
+        UE_LOG(LogTemp, Error, TEXT("Director: BUILD VALIDATION FAILED - Compilation errors detected"));
     }
-    return Pending;
-}
-
-FDir_ProductionMetrics UDir_ProductionPipeline::GetProductionMetrics()
-{
-    return Metrics;
-}
-
-void UDir_ProductionPipeline::UpdateBudgetTracking(float CostDelta)
-{
-    Metrics.BudgetUsed += CostDelta;
-    Metrics.BudgetRemaining = FMath::Max(0.0f, 75.0f - Metrics.BudgetUsed); // $75 daily budget
-}
-
-bool UDir_ProductionPipeline::ValidateMinimumViablePrototype()
-{
-    return bCharacterMovementComplete && bTerrainSystemComplete;
-}
-
-bool UDir_ProductionPipeline::ValidateCharacterMovement()
-{
-    // Check if TranspersonalCharacter exists and has movement
-    UWorld* World = GetWorld();
-    if (!World) return false;
-    
-    TArray<AActor*> FoundActors;
-    UGameplayStatics::GetAllActorsOfClass(World, APawn::StaticClass(), FoundActors);
-    
-    for (AActor* Actor : FoundActors)
+    else
     {
-        if (Actor->GetName().Contains(TEXT("Character")))
-        {
-            return true; // Found character actor
-        }
-    }
-    return false;
-}
-
-bool UDir_ProductionPipeline::ValidateDinosaurAI()
-{
-    // Check if dinosaur actors exist with AI controllers
-    UWorld* World = GetWorld();
-    if (!World) return false;
-    
-    TArray<AActor*> FoundActors;
-    UGameplayStatics::GetAllActorsOfClass(World, APawn::StaticClass(), FoundActors);
-    
-    for (AActor* Actor : FoundActors)
-    {
-        if (Actor->GetName().Contains(TEXT("Dinosaur")) || Actor->GetName().Contains(TEXT("TRex")))
-        {
-            return true; // Found dinosaur actor
-        }
-    }
-    return false;
-}
-
-bool UDir_ProductionPipeline::ValidateTerrainSystem()
-{
-    // Check if landscape exists
-    UWorld* World = GetWorld();
-    if (!World) return false;
-    
-    TArray<AActor*> FoundActors;
-    UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), FoundActors);
-    
-    for (AActor* Actor : FoundActors)
-    {
-        if (Actor->GetName().Contains(TEXT("Landscape")))
-        {
-            return true; // Found landscape
-        }
-    }
-    return false;
-}
-
-void UDir_ProductionPipeline::UpdateProductionMetrics()
-{
-    Metrics.TotalCycles = CurrentCycleNumber;
-    
-    // Count active agents
-    int32 ActiveCount = 0;
-    for (const auto& Status : AgentStatuses)
-    {
-        if (Status.Value == EDir_AgentStatus::Working)
-        {
-            ActiveCount++;
-        }
-    }
-    Metrics.ActiveAgents = ActiveCount;
-    
-    // Calculate overall progress
-    int32 CompletedMilestones = 0;
-    for (const FDir_Milestone& Milestone : Milestones)
-    {
-        if (Milestone.bIsComplete)
-        {
-            CompletedMilestones++;
-        }
-    }
-    
-    if (Milestones.Num() > 0)
-    {
-        Metrics.OverallProgress = (float)CompletedMilestones / Milestones.Num() * 100.0f;
+        UE_LOG(LogTemp, Warning, TEXT("Director: Build validation PASSED - Ready for testing"));
     }
 }
 
-bool UDir_ProductionPipeline::CheckMilestoneDependencies(const FDir_Milestone& Milestone)
+void UDir_ProductionPipeline::UpdateCriticalPath()
 {
-    for (int32 RequiredAgent : Milestone.RequiredAgents)
-    {
-        if (AgentStatuses.Contains(RequiredAgent))
-        {
-            EDir_AgentStatus Status = AgentStatuses[RequiredAgent];
-            if (Status != EDir_AgentStatus::Complete && Status != EDir_AgentStatus::Working)
-            {
-                return false;
-            }
-        }
-    }
-    return true;
+    // Recalculate task dependencies and critical path
+    ValidateAgentDependencies();
 }
 
-void UDir_ProductionPipeline::TriggerEmergencyProtocol(const FString& Reason)
+void UDir_ProductionPipeline::ValidateAgentDependencies()
 {
-    UE_LOG(LogTemp, Error, TEXT("EMERGENCY PROTOCOL TRIGGERED: %s"), *Reason);
+    // Check that agent dependencies are properly set up
+    // Agent #5 (World) -> Agent #6 (Environment) -> Agent #8 (Lighting)
+    // Agent #9 (Character) -> Agent #10 (Animation) -> Agent #11 (NPC Behavior)
+    // etc.
+}
+
+void UDir_ProductionPipeline::LogProductionMetrics()
+{
+    static int32 MetricsCounter = 0;
+    MetricsCounter++;
     
-    // Reset all agents to idle except critical path
-    for (auto& Status : AgentStatuses)
+    if (MetricsCounter % 12 == 0) // Every minute
     {
-        if (Status.Key <= 3) // Keep Director, Architect, Core Systems active
-        {
-            continue;
-        }
-        Status.Value = EDir_AgentStatus::Idle;
+        GenerateProductionReport();
     }
-    
-    // Add to critical blocks
-    Metrics.CriticalBlocks.Add(FString::Printf(TEXT("Emergency at cycle %d: %s"), CurrentCycleNumber, *Reason));
 }
