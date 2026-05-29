@@ -1,55 +1,14 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/GameInstanceSubsystem.h"
+#include "Engine/World.h"
+#include "Subsystems/GameInstanceSubsystem.h"
 #include "EngArch_CompilationValidator.generated.h"
-
-UENUM(BlueprintType)
-enum class EEng_CompilationStatus : uint8
-{
-    Unknown,
-    Compiling,
-    Success,
-    Failed,
-    Warning
-};
-
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEng_CompilationResult
-{
-    GENERATED_BODY()
-
-    UPROPERTY(BlueprintReadOnly, Category = "Compilation")
-    EEng_CompilationStatus Status = EEng_CompilationStatus::Unknown;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Compilation")
-    FString ModuleName;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Compilation")
-    int32 ErrorCount = 0;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Compilation")
-    int32 WarningCount = 0;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Compilation")
-    TArray<FString> ErrorMessages;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Compilation")
-    float CompilationTime = 0.0f;
-
-    FEng_CompilationResult()
-    {
-        Status = EEng_CompilationStatus::Unknown;
-        ModuleName = TEXT("");
-        ErrorCount = 0;
-        WarningCount = 0;
-        CompilationTime = 0.0f;
-    }
-};
 
 /**
  * Engine Architect Compilation Validator
- * Validates C++ compilation status and manages build integrity
+ * Validates compilation status and module loading for all game systems
+ * Ensures architectural compliance across the entire codebase
  */
 UCLASS(BlueprintType)
 class TRANSPERSONALGAME_API UEngArch_CompilationValidator : public UGameInstanceSubsystem
@@ -57,49 +16,55 @@ class TRANSPERSONALGAME_API UEngArch_CompilationValidator : public UGameInstance
     GENERATED_BODY()
 
 public:
-    UEngArch_CompilationValidator();
-
-    // Subsystem interface
+    // USubsystem interface
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
-    // Compilation validation
+    /** Validate that all core modules are properly loaded and compiled */
     UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    FEng_CompilationResult ValidateModuleCompilation(const FString& ModuleName);
+    bool ValidateModuleCompilation();
 
+    /** Check if a specific class is properly loaded and accessible */
     UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    bool IsProjectCompiled() const;
+    bool ValidateClassLoading(const FString& ClassName);
 
+    /** Validate architectural compliance for the entire project */
     UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    TArray<FEng_CompilationResult> GetAllModuleStatus();
+    bool ValidateArchitecturalCompliance();
 
+    /** Get compilation status report */
     UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    void RefreshCompilationStatus();
+    FString GetCompilationStatusReport();
 
-    // Build management
-    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    bool TriggerHotReload();
-
-    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    void LogCompilationReport();
-
-    // Events
-    DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnCompilationComplete, FEng_CompilationResult, Result);
-    UPROPERTY(BlueprintAssignable, Category = "Engine Architecture")
-    FOnCompilationComplete OnCompilationComplete;
+    /** Force recompilation of specific modules */
+    UFUNCTION(BlueprintCallable, Category = "Engine Architecture", CallInEditor = true)
+    void ForceModuleRecompilation();
 
 protected:
-    UPROPERTY(BlueprintReadOnly, Category = "Engine Architecture")
-    TArray<FEng_CompilationResult> ModuleResults;
+    /** List of critical classes that must be available */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Validation")
+    TArray<FString> CriticalClasses;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Engine Architecture")
-    bool bIsValidatingCompilation = false;
+    /** Last validation timestamp */
+    UPROPERTY(BlueprintReadOnly, Category = "Status")
+    FDateTime LastValidationTime;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Engine Architecture")
-    float LastValidationTime = 0.0f;
+    /** Current validation status */
+    UPROPERTY(BlueprintReadOnly, Category = "Status")
+    bool bIsValidationPassing;
+
+    /** Detailed validation results */
+    UPROPERTY(BlueprintReadOnly, Category = "Status")
+    TMap<FString, bool> ValidationResults;
 
 private:
-    void ValidateAllModules();
-    FEng_CompilationResult ValidateSpecificModule(const FString& ModuleName);
-    void BroadcastCompilationResult(const FEng_CompilationResult& Result);
+    /** Internal validation helper functions */
+    bool ValidateTranspersonalGameModule();
+    bool ValidateCorePhysicsSystems();
+    bool ValidateCharacterSystems();
+    bool ValidateDinosaurSystems();
+    bool ValidateWorldGeneration();
+    
+    /** Log validation results */
+    void LogValidationResults();
 };
