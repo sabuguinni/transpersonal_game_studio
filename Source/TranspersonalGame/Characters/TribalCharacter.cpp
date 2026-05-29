@@ -1,42 +1,72 @@
 #include "TribalCharacter.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
-#include "Engine/Engine.h"
+#include "Components/CapsuleComponent.h"
+#include "GameFramework/CharacterMovementComponent.h"
 #include "Materials/MaterialInstanceDynamic.h"
+#include "Engine/StaticMesh.h"
+#include "Engine/Engine.h"
 
 ATribalCharacter::ATribalCharacter()
 {
     PrimaryActorTick.bCanEverTick = true;
+
+    // Configure character collision
+    GetCapsuleComponent()->SetCapsuleSize(42.0f, 96.0f);
+    GetCapsuleComponent()->SetCollisionResponseToChannel(ECollisionChannel::ECC_Camera, ECollisionResponse::ECR_Ignore);
+
+    // Configure character movement
+    GetCharacterMovement()->bOrientRotationToMovement = true;
+    GetCharacterMovement()->RotationRate = FRotator(0.0f, 540.0f, 0.0f);
+    GetCharacterMovement()->JumpZVelocity = 420.0f;
+    GetCharacterMovement()->AirControl = 0.2f;
+    GetCharacterMovement()->MaxWalkSpeed = 300.0f;
+
+    // Configure mesh
+    GetMesh()->SetRelativeLocation(FVector(0.0f, 0.0f, -96.0f));
+    GetMesh()->SetRelativeRotation(FRotator(0.0f, -90.0f, 0.0f));
 
     // Create weapon mesh component
     WeaponMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("WeaponMesh"));
     WeaponMesh->SetupAttachment(GetMesh(), TEXT("hand_r"));
     WeaponMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 
-    // Create tool mesh component
-    ToolMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("ToolMesh"));
-    ToolMesh->SetupAttachment(GetMesh(), TEXT("hand_l"));
-    ToolMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    // Create accessory mesh component
+    AccessoryMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("AccessoryMesh"));
+    AccessoryMesh->SetupAttachment(GetMesh(), TEXT("head"));
+    AccessoryMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 
-    // Set default character properties
-    CharacterName = TEXT("Tribal Hunter");
-    Age = 25;
-    bIsMale = true;
+    // Initialize default values
     TribalRole = EChar_TribalRole::Hunter;
+    CharacterName = TEXT("Tribal Member");
+    Age = 25;
+    ExperienceLevel = 1.0f;
+    bCanInteract = true;
+    InteractionRange = 300.0f;
+    InteractionPrompt = TEXT("Talk to tribal member");
+    bIsHostile = false;
+    bIsFriendly = true;
+    TrustLevel = 0.5f;
 
-    // Initialize tribal stats based on role
-    TribalStats.Strength = 60.0f;
-    TribalStats.Agility = 70.0f;
-    TribalStats.Wisdom = 40.0f;
-    TribalStats.Survival = 80.0f;
+    // Initialize appearance
+    Appearance.SkinTone = 0.5f;
+    Appearance.WarPaintColor = FLinearColor::Red;
+    Appearance.bHasTribalMarkings = true;
+    Appearance.bHasFeatherHeaddress = false;
+    Appearance.bHasBoneAccessories = true;
+
+    // Cache pointers
+    DynamicSkinMaterial = nullptr;
+    DynamicClothingMaterial = nullptr;
 }
 
 void ATribalCharacter::BeginPlay()
 {
     Super::BeginPlay();
     
-    ApplyTribalMarkings();
     SetupDefaultEquipment();
+    ConfigureAppearanceByRole();
+    UpdateMaterialParameters();
 }
 
 void ATribalCharacter::Tick(float DeltaTime)
@@ -47,72 +77,40 @@ void ATribalCharacter::Tick(float DeltaTime)
 void ATribalCharacter::SetTribalRole(EChar_TribalRole NewRole)
 {
     TribalRole = NewRole;
+    ConfigureAppearanceByRole();
     
-    // Adjust stats based on role
+    // Update character name based on role
     switch (TribalRole)
     {
-        case EChar_TribalRole::Hunter:
-            TribalStats.Strength = 60.0f;
-            TribalStats.Agility = 70.0f;
-            TribalStats.Wisdom = 40.0f;
-            TribalStats.Survival = 80.0f;
-            break;
-            
-        case EChar_TribalRole::Gatherer:
-            TribalStats.Strength = 40.0f;
-            TribalStats.Agility = 60.0f;
-            TribalStats.Wisdom = 70.0f;
-            TribalStats.Survival = 75.0f;
-            break;
-            
-        case EChar_TribalRole::Shaman:
-            TribalStats.Strength = 30.0f;
-            TribalStats.Agility = 40.0f;
-            TribalStats.Wisdom = 90.0f;
-            TribalStats.Survival = 60.0f;
-            break;
-            
-        case EChar_TribalRole::Warrior:
-            TribalStats.Strength = 80.0f;
-            TribalStats.Agility = 60.0f;
-            TribalStats.Wisdom = 30.0f;
-            TribalStats.Survival = 70.0f;
-            break;
-            
         case EChar_TribalRole::Elder:
-            TribalStats.Strength = 35.0f;
-            TribalStats.Agility = 30.0f;
-            TribalStats.Wisdom = 95.0f;
-            TribalStats.Survival = 85.0f;
+            CharacterName = TEXT("Tribal Elder");
+            ExperienceLevel = FMath::Max(ExperienceLevel, 8.0f);
+            Age = FMath::Max(Age, 50);
+            break;
+        case EChar_TribalRole::Hunter:
+            CharacterName = TEXT("Tribal Hunter");
+            ExperienceLevel = FMath::Max(ExperienceLevel, 3.0f);
+            break;
+        case EChar_TribalRole::Gatherer:
+            CharacterName = TEXT("Tribal Gatherer");
+            ExperienceLevel = FMath::Max(ExperienceLevel, 2.0f);
+            break;
+        case EChar_TribalRole::Crafter:
+            CharacterName = TEXT("Tribal Crafter");
+            ExperienceLevel = FMath::Max(ExperienceLevel, 4.0f);
+            break;
+        case EChar_TribalRole::Scout:
+            CharacterName = TEXT("Tribal Scout");
+            ExperienceLevel = FMath::Max(ExperienceLevel, 3.0f);
+            GetCharacterMovement()->MaxWalkSpeed = 400.0f; // Scouts are faster
             break;
     }
 }
 
-void ATribalCharacter::SetCharacterName(const FString& NewName)
+void ATribalCharacter::ApplyTribalAppearance(const FChar_TribalAppearance& NewAppearance)
 {
-    CharacterName = NewName;
-}
-
-void ATribalCharacter::ApplyTribalMarkings()
-{
-    USkeletalMeshComponent* MeshComp = GetMesh();
-    if (!MeshComp)
-    {
-        return;
-    }
-
-    // Create dynamic material instance for tribal markings
-    UMaterialInterface* BaseMaterial = MeshComp->GetMaterial(0);
-    if (BaseMaterial)
-    {
-        UMaterialInstanceDynamic* DynamicMaterial = UMaterialInstanceDynamic::Create(BaseMaterial, this);
-        if (DynamicMaterial)
-        {
-            DynamicMaterial->SetVectorParameterValue(TEXT("SkinTone"), SkinTone);
-            DynamicMaterial->SetVectorParameterValue(TEXT("TribalMarkingColor"), TribalMarkingColor);
-            MeshComp->SetMaterial(0, DynamicMaterial);
-        }
-    }
+    Appearance = NewAppearance;
+    UpdateMaterialParameters();
 }
 
 void ATribalCharacter::EquipWeapon(UStaticMesh* WeaponMeshAsset)
@@ -124,93 +122,143 @@ void ATribalCharacter::EquipWeapon(UStaticMesh* WeaponMeshAsset)
     }
 }
 
-void ATribalCharacter::EquipTool(UStaticMesh* ToolMeshAsset)
+void ATribalCharacter::EquipAccessory(UStaticMesh* AccessoryMeshAsset)
 {
-    if (ToolMesh && ToolMeshAsset)
+    if (AccessoryMesh && AccessoryMeshAsset)
     {
-        ToolMesh->SetStaticMesh(ToolMeshAsset);
-        ToolMesh->SetVisibility(true);
+        AccessoryMesh->SetStaticMesh(AccessoryMeshAsset);
+        AccessoryMesh->SetVisibility(true);
     }
 }
 
-float ATribalCharacter::GetStatValue(const FString& StatName) const
+bool ATribalCharacter::CanPlayerInteract(APawn* PlayerPawn) const
 {
-    if (StatName == TEXT("Strength"))
+    if (!bCanInteract || !PlayerPawn)
     {
-        return TribalStats.Strength;
+        return false;
     }
-    else if (StatName == TEXT("Agility"))
-    {
-        return TribalStats.Agility;
-    }
-    else if (StatName == TEXT("Wisdom"))
-    {
-        return TribalStats.Wisdom;
-    }
-    else if (StatName == TEXT("Survival"))
-    {
-        return TribalStats.Survival;
-    }
+
+    float Distance = FVector::Dist(GetActorLocation(), PlayerPawn->GetActorLocation());
+    return Distance <= InteractionRange;
+}
+
+void ATribalCharacter::ModifyTrustLevel(float DeltaTrust)
+{
+    TrustLevel = FMath::Clamp(TrustLevel + DeltaTrust, 0.0f, 1.0f);
     
-    return 0.0f;
-}
-
-void ATribalCharacter::ModifyStatValue(const FString& StatName, float Delta)
-{
-    if (StatName == TEXT("Strength"))
+    // Update behavior based on trust level
+    if (TrustLevel < 0.2f)
     {
-        TribalStats.Strength = FMath::Clamp(TribalStats.Strength + Delta, 0.0f, 100.0f);
+        bIsFriendly = false;
+        bIsHostile = true;
+        InteractionPrompt = TEXT("Hostile tribal member");
     }
-    else if (StatName == TEXT("Agility"))
+    else if (TrustLevel > 0.8f)
     {
-        TribalStats.Agility = FMath::Clamp(TribalStats.Agility + Delta, 0.0f, 100.0f);
+        bIsFriendly = true;
+        bIsHostile = false;
+        InteractionPrompt = TEXT("Friendly tribal member");
     }
-    else if (StatName == TEXT("Wisdom"))
+    else
     {
-        TribalStats.Wisdom = FMath::Clamp(TribalStats.Wisdom + Delta, 0.0f, 100.0f);
+        bIsFriendly = true;
+        bIsHostile = false;
+        InteractionPrompt = TEXT("Talk to tribal member");
     }
-    else if (StatName == TEXT("Survival"))
-    {
-        TribalStats.Survival = FMath::Clamp(TribalStats.Survival + Delta, 0.0f, 100.0f);
-    }
-}
-
-void ATribalCharacter::RandomizeAppearance()
-{
-    // Randomize skin tone
-    float Hue = FMath::RandRange(0.05f, 0.15f); // Brown to tan range
-    float Saturation = FMath::RandRange(0.3f, 0.7f);
-    float Value = FMath::RandRange(0.4f, 0.8f);
-    SkinTone = FLinearColor::MakeFromHSV8(Hue * 255, Saturation * 255, Value * 255);
-
-    // Randomize tribal marking color
-    TribalMarkingColor = FLinearColor(
-        FMath::RandRange(0.0f, 0.3f),
-        FMath::RandRange(0.0f, 0.2f),
-        FMath::RandRange(0.0f, 0.1f),
-        1.0f
-    );
-
-    // Randomize gender
-    bIsMale = FMath::RandBool();
-
-    // Randomize age
-    Age = FMath::RandRange(18, 60);
-
-    ApplyTribalMarkings();
 }
 
 void ATribalCharacter::SetupDefaultEquipment()
 {
-    // This will be called to set up default weapons and tools
-    // Implementation depends on available static mesh assets
-    if (WeaponMesh)
+    // Configure default equipment based on role
+    switch (TribalRole)
     {
-        WeaponMesh->SetVisibility(false); // Hide until weapon is equipped
+        case EChar_TribalRole::Elder:
+            // Elders have staffs and elaborate headdresses
+            Appearance.bHasFeatherHeaddress = true;
+            break;
+        case EChar_TribalRole::Hunter:
+            // Hunters have spears and minimal accessories for mobility
+            Appearance.bHasBoneAccessories = true;
+            Appearance.bHasFeatherHeaddress = false;
+            break;
+        case EChar_TribalRole::Gatherer:
+            // Gatherers have baskets and simple tools
+            Appearance.bHasBoneAccessories = false;
+            Appearance.bHasFeatherHeaddress = false;
+            break;
+        case EChar_TribalRole::Crafter:
+            // Crafters have tool belts and work accessories
+            Appearance.bHasBoneAccessories = true;
+            break;
+        case EChar_TribalRole::Scout:
+            // Scouts have minimal gear for speed
+            Appearance.bHasBoneAccessories = false;
+            Appearance.bHasFeatherHeaddress = false;
+            break;
     }
-    
-    if (ToolMesh)
+}
+
+void ATribalCharacter::ConfigureAppearanceByRole()
+{
+    // Configure appearance details based on role
+    switch (TribalRole)
     {
-        ToolMesh->SetVisibility(false); // Hide until tool is equipped
+        case EChar_TribalRole::Elder:
+            Appearance.SkinTone = 0.3f; // Weathered skin
+            Appearance.WarPaintColor = FLinearColor::Blue; // Wisdom markings
+            Appearance.bHasTribalMarkings = true;
+            break;
+        case EChar_TribalRole::Hunter:
+            Appearance.SkinTone = 0.6f; // Tanned from outdoor work
+            Appearance.WarPaintColor = FLinearColor::Red; // War paint
+            Appearance.bHasTribalMarkings = true;
+            break;
+        case EChar_TribalRole::Gatherer:
+            Appearance.SkinTone = 0.5f; // Normal skin tone
+            Appearance.WarPaintColor = FLinearColor::Green; // Nature markings
+            Appearance.bHasTribalMarkings = false;
+            break;
+        case EChar_TribalRole::Crafter:
+            Appearance.SkinTone = 0.4f; // Indoor work, less sun
+            Appearance.WarPaintColor = FLinearColor::Yellow; // Craft markings
+            Appearance.bHasTribalMarkings = true;
+            break;
+        case EChar_TribalRole::Scout:
+            Appearance.SkinTone = 0.7f; // Very tanned from travel
+            Appearance.WarPaintColor = FLinearColor::Black; // Camouflage markings
+            Appearance.bHasTribalMarkings = true;
+            break;
+    }
+}
+
+void ATribalCharacter::UpdateMaterialParameters()
+{
+    if (!GetMesh() || !GetMesh()->GetMaterial(0))
+    {
+        return;
+    }
+
+    // Create dynamic material instances if they don't exist
+    if (!DynamicSkinMaterial)
+    {
+        DynamicSkinMaterial = GetMesh()->CreateDynamicMaterialInstance(0);
+    }
+
+    if (DynamicSkinMaterial)
+    {
+        // Apply skin tone
+        DynamicSkinMaterial->SetScalarParameterValue(TEXT("SkinTone"), Appearance.SkinTone);
+        
+        // Apply war paint color
+        DynamicSkinMaterial->SetVectorParameterValue(TEXT("WarPaintColor"), Appearance.WarPaintColor);
+        
+        // Apply tribal markings visibility
+        DynamicSkinMaterial->SetScalarParameterValue(TEXT("TribalMarkings"), Appearance.bHasTribalMarkings ? 1.0f : 0.0f);
+    }
+
+    // Update accessory visibility
+    if (AccessoryMesh)
+    {
+        AccessoryMesh->SetVisibility(Appearance.bHasFeatherHeaddress || Appearance.bHasBoneAccessories);
     }
 }
