@@ -1,473 +1,362 @@
 #include "Quest_NPCInteractionManager.h"
 #include "Engine/World.h"
-#include "Engine/GameInstance.h"
+#include "Engine/Engine.h"
+#include "GameFramework/Actor.h"
 #include "Kismet/GameplayStatics.h"
-#include "GameFramework/PlayerController.h"
-#include "GameFramework/Character.h"
-#include "../Crowd/CrowdSimulationManager.h"
-#include "../Crowd/Crowd_PrehistoricNPCManager.h"
+#include "Math/UnrealMathUtility.h"
+#include "TranspersonalCharacter.h"
 
 UQuest_NPCInteractionManager::UQuest_NPCInteractionManager()
 {
-    CrowdManager = nullptr;
-    NPCManager = nullptr;
+    NPCUpdateInterval = 2.0f;
+    CurrentInteractingNPC = TEXT("");
 }
 
 void UQuest_NPCInteractionManager::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
     
-    UE_LOG(LogTemp, Warning, TEXT("Quest_NPCInteractionManager: Initializing NPC interaction system"));
+    InitializeTribalNPCDialogues();
     
-    // Initialize default data
-    InitializeDefaultInteractions();
-    CreateDefaultTribalQuests();
-    SetupDefaultDialogues();
-    
-    // Find crowd system reference
-    if (UWorld* World = GetWorld())
-    {
-        CrowdManager = Cast<ACrowdSimulationManager>(UGameplayStatics::GetActorOfClass(World, ACrowdSimulationManager::StaticClass()));
-        if (CrowdManager)
-        {
-            UE_LOG(LogTemp, Warning, TEXT("Quest_NPCInteractionManager: Found CrowdSimulationManager"));
-        }
-    }
+    UE_LOG(LogTemp, Warning, TEXT("Quest NPC Interaction Manager initialized"));
 }
 
 void UQuest_NPCInteractionManager::Deinitialize()
 {
     RegisteredNPCs.Empty();
-    TribalQuests.Empty();
-    QuestTimers.Empty();
-    InteractionCounts.Empty();
-    
-    CrowdManager = nullptr;
-    NPCManager = nullptr;
+    NPCBehaviorStates.Empty();
+    NPCDialogues.Empty();
+    CurrentInteractingNPC = TEXT("");
     
     Super::Deinitialize();
 }
 
-void UQuest_NPCInteractionManager::RegisterNPCForInteraction(const FString& NPCName, const FVector& Location, EQuest_NPCInteractionType InteractionType)
+void UQuest_NPCInteractionManager::RegisterNPC(const FString& NPCID, AActor* NPCActor, const FQuest_NPCBehaviorState& InitialState)
 {
-    FQuest_NPCInteractionData NewInteraction;
-    NewInteraction.NPCName = NPCName;
-    NewInteraction.NPCLocation = Location;
-    NewInteraction.InteractionType = InteractionType;
-    NewInteraction.bIsCompleted = false;
-    NewInteraction.InteractionRange = 500.0f;
-    
-    // Set appropriate dialogue based on interaction type
-    NewInteraction.DialogueText = GetNPCDialogue(NPCName, InteractionType);
-    
-    // Set default requirements and rewards based on interaction type
-    switch (InteractionType)
+    if (!NPCActor || NPCID.IsEmpty())
     {
-        case EQuest_NPCInteractionType::Trade:
-            NewInteraction.RequiredItems.Add(TEXT("Stone"));
-            NewInteraction.RewardItems.Add(TEXT("Food"));
-            break;
-        case EQuest_NPCInteractionType::Teaching:
-            NewInteraction.RequiredItems.Add(TEXT("Experience"));
-            NewInteraction.RewardItems.Add(TEXT("Skill_Crafting"));
-            break;
-        case EQuest_NPCInteractionType::Escort:
-            NewInteraction.RequiredItems.Add(TEXT("Protection"));
-            NewInteraction.RewardItems.Add(TEXT("Reputation"));
-            break;
-        default:
-            break;
+        UE_LOG(LogTemp, Error, TEXT("Cannot register NPC: Invalid actor or ID"));
+        return;
     }
+
+    RegisteredNPCs.Add(NPCID, NPCActor);
+    NPCBehaviorStates.Add(NPCID, InitialState);
     
-    RegisteredNPCs.Add(NewInteraction);
-    
-    UE_LOG(LogTemp, Warning, TEXT("Quest_NPCInteractionManager: Registered NPC %s for %s interaction at location %s"), 
-           *NPCName, 
-           *UEnum::GetValueAsString(InteractionType), 
-           *Location.ToString());
+    UE_LOG(LogTemp, Warning, TEXT("Registered NPC: %s"), *NPCID);
 }
 
-bool UQuest_NPCInteractionManager::StartNPCInteraction(const FString& NPCName, AActor* PlayerActor)
+void UQuest_NPCInteractionManager::UnregisterNPC(const FString& NPCID)
 {
-    if (!PlayerActor)
-    {
-        UE_LOG(LogTemp, Error, TEXT("Quest_NPCInteractionManager: Invalid player actor for interaction"));
-        return false;
-    }
+    RegisteredNPCs.Remove(NPCID);
+    NPCBehaviorStates.Remove(NPCID);
+    NPCDialogues.Remove(NPCID);
     
-    for (FQuest_NPCInteractionData& Interaction : RegisteredNPCs)
+    if (CurrentInteractingNPC == NPCID)
     {
-        if (Interaction.NPCName == NPCName && !Interaction.bIsCompleted)
-        {
-            float Distance = FVector::Dist(PlayerActor->GetActorLocation(), Interaction.NPCLocation);
-            
-            if (Distance <= Interaction.InteractionRange)
-            {
-                UE_LOG(LogTemp, Warning, TEXT("Quest_NPCInteractionManager: Starting interaction with %s - %s"), 
-                       *NPCName, *Interaction.DialogueText);
-                
-                // Increment interaction count
-                int32* Count = InteractionCounts.Find(NPCName);
-                if (Count)
-                {
-                    (*Count)++;
-                }
-                else
-                {
-                    InteractionCounts.Add(NPCName, 1);
-                }
-                
-                return true;
-            }
-            else
-            {
-                UE_LOG(LogTemp, Warning, TEXT("Quest_NPCInteractionManager: Player too far from %s (Distance: %f, Required: %f)"), 
-                       *NPCName, Distance, Interaction.InteractionRange);
-                return false;
-            }
-        }
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("Quest_NPCInteractionManager: NPC %s not found or already completed"), *NPCName);
-    return false;
-}
-
-void UQuest_NPCInteractionManager::CompleteNPCInteraction(const FString& NPCName)
-{
-    for (FQuest_NPCInteractionData& Interaction : RegisteredNPCs)
-    {
-        if (Interaction.NPCName == NPCName)
-        {
-            Interaction.bIsCompleted = true;
-            UE_LOG(LogTemp, Warning, TEXT("Quest_NPCInteractionManager: Completed interaction with %s"), *NPCName);
-            
-            // Check if this completes any tribal quests
-            for (FQuest_TribalQuestData& TribalQuest : TribalQuests)
-            {
-                if (TribalQuest.bQuestActive && TribalQuest.CurrentInteractionIndex < TribalQuest.InteractionChain.Num())
-                {
-                    if (TribalQuest.InteractionChain[TribalQuest.CurrentInteractionIndex].NPCName == NPCName)
-                    {
-                        AdvanceTribalQuest(TribalQuest.QuestName);
-                    }
-                }
-            }
-            break;
-        }
+        CurrentInteractingNPC = TEXT("");
     }
 }
 
-TArray<FQuest_NPCInteractionData> UQuest_NPCInteractionManager::GetAvailableInteractions() const
+bool UQuest_NPCInteractionManager::StartNPCInteraction(const FString& NPCID, ATranspersonalCharacter* Player)
 {
-    TArray<FQuest_NPCInteractionData> AvailableInteractions;
-    
-    for (const FQuest_NPCInteractionData& Interaction : RegisteredNPCs)
-    {
-        if (!Interaction.bIsCompleted)
-        {
-            AvailableInteractions.Add(Interaction);
-        }
-    }
-    
-    return AvailableInteractions;
-}
-
-FQuest_NPCInteractionData UQuest_NPCInteractionManager::GetNearestInteraction(const FVector& PlayerLocation, float MaxDistance) const
-{
-    FQuest_NPCInteractionData NearestInteraction;
-    float NearestDistance = MaxDistance;
-    bool bFoundInteraction = false;
-    
-    for (const FQuest_NPCInteractionData& Interaction : RegisteredNPCs)
-    {
-        if (!Interaction.bIsCompleted)
-        {
-            float Distance = FVector::Dist(PlayerLocation, Interaction.NPCLocation);
-            if (Distance < NearestDistance)
-            {
-                NearestDistance = Distance;
-                NearestInteraction = Interaction;
-                bFoundInteraction = true;
-            }
-        }
-    }
-    
-    if (!bFoundInteraction)
-    {
-        // Return default empty interaction
-        NearestInteraction.NPCName = TEXT("No NPC Found");
-        NearestInteraction.DialogueText = TEXT("No NPCs nearby.");
-    }
-    
-    return NearestInteraction;
-}
-
-void UQuest_NPCInteractionManager::CreateTribalQuest(const FString& QuestName, const FString& TribeName, const TArray<FQuest_NPCInteractionData>& InteractionChain)
-{
-    FQuest_TribalQuestData NewTribalQuest;
-    NewTribalQuest.QuestName = QuestName;
-    NewTribalQuest.TribeName = TribeName;
-    NewTribalQuest.InteractionChain = InteractionChain;
-    NewTribalQuest.CurrentInteractionIndex = 0;
-    NewTribalQuest.bQuestActive = false;
-    NewTribalQuest.QuestTimeLimit = 3600.0f; // 1 hour
-    
-    TribalQuests.Add(NewTribalQuest);
-    
-    UE_LOG(LogTemp, Warning, TEXT("Quest_NPCInteractionManager: Created tribal quest '%s' for tribe '%s' with %d interactions"), 
-           *QuestName, *TribeName, InteractionChain.Num());
-}
-
-bool UQuest_NPCInteractionManager::StartTribalQuest(const FString& QuestName)
-{
-    for (FQuest_TribalQuestData& TribalQuest : TribalQuests)
-    {
-        if (TribalQuest.QuestName == QuestName && !TribalQuest.bQuestActive)
-        {
-            TribalQuest.bQuestActive = true;
-            TribalQuest.CurrentInteractionIndex = 0;
-            
-            // Start quest timer
-            QuestTimers.Add(QuestName, 0.0f);
-            
-            UE_LOG(LogTemp, Warning, TEXT("Quest_NPCInteractionManager: Started tribal quest '%s'"), *QuestName);
-            return true;
-        }
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("Quest_NPCInteractionManager: Failed to start tribal quest '%s' - not found or already active"), *QuestName);
-    return false;
-}
-
-void UQuest_NPCInteractionManager::AdvanceTribalQuest(const FString& QuestName)
-{
-    for (FQuest_TribalQuestData& TribalQuest : TribalQuests)
-    {
-        if (TribalQuest.QuestName == QuestName && TribalQuest.bQuestActive)
-        {
-            TribalQuest.CurrentInteractionIndex++;
-            
-            if (TribalQuest.CurrentInteractionIndex >= TribalQuest.InteractionChain.Num())
-            {
-                // Quest completed
-                TribalQuest.bQuestActive = false;
-                QuestTimers.Remove(QuestName);
-                
-                UE_LOG(LogTemp, Warning, TEXT("Quest_NPCInteractionManager: Completed tribal quest '%s'"), *QuestName);
-            }
-            else
-            {
-                UE_LOG(LogTemp, Warning, TEXT("Quest_NPCInteractionManager: Advanced tribal quest '%s' to interaction %d/%d"), 
-                       *QuestName, TribalQuest.CurrentInteractionIndex + 1, TribalQuest.InteractionChain.Num());
-            }
-            break;
-        }
-    }
-}
-
-TArray<FQuest_TribalQuestData> UQuest_NPCInteractionManager::GetActiveTribalQuests() const
-{
-    TArray<FQuest_TribalQuestData> ActiveQuests;
-    
-    for (const FQuest_TribalQuestData& TribalQuest : TribalQuests)
-    {
-        if (TribalQuest.bQuestActive)
-        {
-            ActiveQuests.Add(TribalQuest);
-        }
-    }
-    
-    return ActiveQuests;
-}
-
-void UQuest_NPCInteractionManager::SyncWithCrowdSystem()
-{
-    if (CrowdManager)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Quest_NPCInteractionManager: Syncing with crowd simulation system"));
-        
-        // This would integrate with the crowd system to get NPC locations and states
-        // For now, we'll register some default NPCs based on crowd system data
-        SpawnQuestNPCs();
-    }
-    else
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Quest_NPCInteractionManager: CrowdManager not found, cannot sync"));
-    }
-}
-
-void UQuest_NPCInteractionManager::SpawnQuestNPCs()
-{
-    // Spawn quest-specific NPCs in different biomes
-    TArray<FVector> NPCSpawnLocations = {
-        FVector(0, 0, 100),           // Savanna center
-        FVector(-25000, -22500, 100), // Swamp area
-        FVector(-22500, 20000, 100),  // Forest area
-        FVector(27500, 0, 100),       // Desert area
-        FVector(20000, 25000, 200)    // Mountain area
-    };
-    
-    TArray<FString> NPCNames = {
-        TEXT("Tribal_Elder_Krog"),
-        TEXT("Swamp_Shaman_Nala"),
-        TEXT("Forest_Hunter_Thok"),
-        TEXT("Desert_Nomad_Zara"),
-        TEXT("Mountain_Guide_Brok")
-    };
-    
-    TArray<EQuest_NPCInteractionType> InteractionTypes = {
-        EQuest_NPCInteractionType::Teaching,
-        EQuest_NPCInteractionType::Information,
-        EQuest_NPCInteractionType::Trade,
-        EQuest_NPCInteractionType::Escort,
-        EQuest_NPCInteractionType::Alliance
-    };
-    
-    for (int32 i = 0; i < NPCSpawnLocations.Num() && i < NPCNames.Num(); i++)
-    {
-        RegisterNPCForInteraction(NPCNames[i], NPCSpawnLocations[i], InteractionTypes[i]);
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("Quest_NPCInteractionManager: Spawned %d quest NPCs"), NPCSpawnLocations.Num());
-}
-
-FString UQuest_NPCInteractionManager::GetNPCDialogue(const FString& NPCName, EQuest_NPCInteractionType InteractionType) const
-{
-    // Check for custom dialogue first
-    const FString* CustomDialogue = DefaultDialogues.Find(InteractionType);
-    if (CustomDialogue)
-    {
-        return *CustomDialogue;
-    }
-    
-    // Return default dialogue based on interaction type
-    switch (InteractionType)
-    {
-        case EQuest_NPCInteractionType::Trade:
-            return TEXT("I have resources to trade. What do you offer?");
-        case EQuest_NPCInteractionType::Information:
-            return TEXT("I know much about these lands. Ask me anything.");
-        case EQuest_NPCInteractionType::Escort:
-            return TEXT("The path ahead is dangerous. Will you guide me?");
-        case EQuest_NPCInteractionType::Rescue:
-            return TEXT("Help! I am trapped and need assistance!");
-        case EQuest_NPCInteractionType::Teaching:
-            return TEXT("I can teach you the old ways, if you are willing to learn.");
-        case EQuest_NPCInteractionType::Alliance:
-            return TEXT("Our tribes could be stronger together. What say you?");
-        case EQuest_NPCInteractionType::Warning:
-            return TEXT("Beware! Great danger approaches from the east!");
-        default:
-            return TEXT("Greetings, traveler.");
-    }
-}
-
-void UQuest_NPCInteractionManager::SetCustomDialogue(const FString& NPCName, const FString& CustomDialogue)
-{
-    // Find the NPC and set custom dialogue
-    for (FQuest_NPCInteractionData& Interaction : RegisteredNPCs)
-    {
-        if (Interaction.NPCName == NPCName)
-        {
-            Interaction.DialogueText = CustomDialogue;
-            UE_LOG(LogTemp, Warning, TEXT("Quest_NPCInteractionManager: Set custom dialogue for %s: %s"), *NPCName, *CustomDialogue);
-            break;
-        }
-    }
-}
-
-void UQuest_NPCInteractionManager::InitializeDefaultInteractions()
-{
-    // This will be called during initialization to set up default NPCs
-    RegisteredNPCs.Empty();
-    
-    UE_LOG(LogTemp, Warning, TEXT("Quest_NPCInteractionManager: Initialized default interactions"));
-}
-
-void UQuest_NPCInteractionManager::CreateDefaultTribalQuests()
-{
-    // Create a sample tribal quest chain
-    TArray<FQuest_NPCInteractionData> QuestChain;
-    
-    FQuest_NPCInteractionData Step1;
-    Step1.NPCName = TEXT("Tribal_Elder_Krog");
-    Step1.InteractionType = EQuest_NPCInteractionType::Information;
-    Step1.DialogueText = TEXT("The ancient hunting grounds hold many secrets.");
-    
-    FQuest_NPCInteractionData Step2;
-    Step2.NPCName = TEXT("Forest_Hunter_Thok");
-    Step2.InteractionType = EQuest_NPCInteractionType::Teaching;
-    Step2.DialogueText = TEXT("I will teach you to track the great beasts.");
-    
-    FQuest_NPCInteractionData Step3;
-    Step3.NPCName = TEXT("Tribal_Elder_Krog");
-    Step3.InteractionType = EQuest_NPCInteractionType::Alliance;
-    Step3.DialogueText = TEXT("You have proven yourself worthy. Join our tribe.");
-    
-    QuestChain.Add(Step1);
-    QuestChain.Add(Step2);
-    QuestChain.Add(Step3);
-    
-    CreateTribalQuest(TEXT("Path_of_the_Hunter"), TEXT("Stone_Spear_Tribe"), QuestChain);
-    
-    UE_LOG(LogTemp, Warning, TEXT("Quest_NPCInteractionManager: Created default tribal quest"));
-}
-
-bool UQuest_NPCInteractionManager::ValidateNPCInteraction(const FQuest_NPCInteractionData& InteractionData) const
-{
-    // Validate that the interaction data is complete and valid
-    if (InteractionData.NPCName.IsEmpty())
+    if (!RegisteredNPCs.Contains(NPCID) || !Player)
     {
         return false;
     }
-    
-    if (InteractionData.DialogueText.IsEmpty())
+
+    FQuest_NPCBehaviorState* NPCState = NPCBehaviorStates.Find(NPCID);
+    if (!NPCState || !NPCState->bIsInteractable)
     {
         return false;
     }
+
+    CurrentInteractingNPC = NPCID;
     
-    if (InteractionData.InteractionRange <= 0.0f)
-    {
-        return false;
-    }
+    // Stop NPC movement during interaction
+    NPCState->ActivityTimer = 0.0f;
     
+    UE_LOG(LogTemp, Warning, TEXT("Started interaction with NPC: %s"), *NPCID);
     return true;
 }
 
-void UQuest_NPCInteractionManager::UpdateQuestProgress()
+void UQuest_NPCInteractionManager::EndNPCInteraction(const FString& NPCID)
 {
-    // Update quest timers and check for time limits
-    for (auto& QuestTimer : QuestTimers)
+    if (CurrentInteractingNPC == NPCID)
     {
-        QuestTimer.Value += GetWorld()->GetDeltaSeconds();
+        CurrentInteractingNPC = TEXT("");
         
-        // Check if quest has exceeded time limit
-        for (FQuest_TribalQuestData& TribalQuest : TribalQuests)
+        // Resume NPC activity
+        FQuest_NPCBehaviorState* NPCState = NPCBehaviorStates.Find(NPCID);
+        if (NPCState)
         {
-            if (TribalQuest.QuestName == QuestTimer.Key && TribalQuest.bQuestActive)
-            {
-                if (QuestTimer.Value >= TribalQuest.QuestTimeLimit)
-                {
-                    // Quest failed due to time limit
-                    TribalQuest.bQuestActive = false;
-                    UE_LOG(LogTemp, Warning, TEXT("Quest_NPCInteractionManager: Quest '%s' failed due to time limit"), *TribalQuest.QuestName);
-                }
-            }
+            NPCState->ActivityTimer = FMath::RandRange(5.0f, 15.0f);
         }
+        
+        UE_LOG(LogTemp, Warning, TEXT("Ended interaction with NPC: %s"), *NPCID);
     }
 }
 
-void UQuest_NPCInteractionManager::SetupDefaultDialogues()
+FQuest_NPCDialogue UQuest_NPCInteractionManager::GetNPCDialogue(const FString& NPCID)
 {
-    DefaultDialogues.Empty();
+    if (NPCDialogues.Contains(NPCID))
+    {
+        return NPCDialogues[NPCID];
+    }
     
-    DefaultDialogues.Add(EQuest_NPCInteractionType::Trade, TEXT("I have goods to trade. Show me what you have."));
-    DefaultDialogues.Add(EQuest_NPCInteractionType::Information, TEXT("I have traveled far and seen much. What would you know?"));
-    DefaultDialogues.Add(EQuest_NPCInteractionType::Escort, TEXT("The journey is perilous alone. Will you accompany me?"));
-    DefaultDialogues.Add(EQuest_NPCInteractionType::Rescue, TEXT("Please help! I am in great danger!"));
-    DefaultDialogues.Add(EQuest_NPCInteractionType::Teaching, TEXT("The old knowledge must be preserved. Are you ready to learn?"));
-    DefaultDialogues.Add(EQuest_NPCInteractionType::Alliance, TEXT("Together we are stronger than apart. Will you join us?"));
-    DefaultDialogues.Add(EQuest_NPCInteractionType::Warning, TEXT("Danger stalks these lands! Heed my words!"));
+    // Return default dialogue for unregistered NPCs
+    FQuest_NPCDialogue DefaultDialogue;
+    DefaultDialogue.NPCName = TEXT("Tribal Hunter");
+    DefaultDialogue.DialogueText = TEXT("Greetings, survivor. The land is dangerous, but rich with resources.");
+    DefaultDialogue.PlayerResponses.Add(TEXT("What dangers should I watch for?"));
+    DefaultDialogue.PlayerResponses.Add(TEXT("Where can I find good hunting grounds?"));
+    DefaultDialogue.PlayerResponses.Add(TEXT("Farewell."));
     
-    UE_LOG(LogTemp, Warning, TEXT("Quest_NPCInteractionManager: Setup default dialogue templates"));
+    return DefaultDialogue;
+}
+
+void UQuest_NPCInteractionManager::UpdateNPCBehavior(const FString& NPCID, const FQuest_NPCBehaviorState& NewState)
+{
+    if (NPCBehaviorStates.Contains(NPCID))
+    {
+        NPCBehaviorStates[NPCID] = NewState;
+    }
+}
+
+TArray<FString> UQuest_NPCInteractionManager::GetNearbyInteractableNPCs(const FVector& PlayerLocation, float InteractionRadius)
+{
+    TArray<FString> NearbyNPCs;
+    
+    for (const auto& NPCPair : RegisteredNPCs)
+    {
+        AActor* NPCActor = NPCPair.Value;
+        if (!NPCActor)
+        {
+            continue;
+        }
+        
+        float Distance = FVector::Dist(PlayerLocation, NPCActor->GetActorLocation());
+        if (Distance <= InteractionRadius)
+        {
+            const FQuest_NPCBehaviorState* NPCState = NPCBehaviorStates.Find(NPCPair.Key);
+            if (NPCState && NPCState->bIsInteractable)
+            {
+                NearbyNPCs.Add(NPCPair.Key);
+            }
+        }
+    }
+    
+    return NearbyNPCs;
+}
+
+void UQuest_NPCInteractionManager::SetNPCQuestAvailability(const FString& NPCID, const FString& QuestID, bool bIsAvailable)
+{
+    FQuest_NPCBehaviorState* NPCState = NPCBehaviorStates.Find(NPCID);
+    if (!NPCState)
+    {
+        return;
+    }
+    
+    if (bIsAvailable)
+    {
+        NPCState->AvailableQuests.AddUnique(QuestID);
+    }
+    else
+    {
+        NPCState->AvailableQuests.Remove(QuestID);
+    }
+}
+
+bool UQuest_NPCInteractionManager::CanNPCGiveQuest(const FString& NPCID, const FString& QuestID)
+{
+    const FQuest_NPCBehaviorState* NPCState = NPCBehaviorStates.Find(NPCID);
+    if (!NPCState)
+    {
+        return false;
+    }
+    
+    return NPCState->AvailableQuests.Contains(QuestID);
+}
+
+void UQuest_NPCInteractionManager::ProcessNPCDailyRoutines(float DeltaTime)
+{
+    for (auto& NPCPair : NPCBehaviorStates)
+    {
+        UpdateNPCActivity(NPCPair.Key, DeltaTime);
+    }
+}
+
+void UQuest_NPCInteractionManager::SpawnTribalNPCs()
+{
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        return;
+    }
+    
+    // Spawn tribal NPCs at key locations
+    TArray<FVector> SpawnLocations = {
+        FVector(2000.0f, 2000.0f, 100.0f),    // Near player start
+        FVector(-1000.0f, 3000.0f, 100.0f),   // Hunting grounds
+        FVector(4000.0f, -1000.0f, 100.0f),   // Resource area
+        FVector(-2000.0f, -2000.0f, 100.0f),  // Safe camp
+        FVector(0.0f, 5000.0f, 100.0f)        // Trading post
+    };
+    
+    TArray<FString> NPCNames = {
+        TEXT("Kael_Hunter"),
+        TEXT("Nara_Gatherer"),
+        TEXT("Thok_Warrior"),
+        TEXT("Yuki_Elder"),
+        TEXT("Zara_Scout")
+    };
+    
+    for (int32 i = 0; i < SpawnLocations.Num() && i < NPCNames.Num(); i++)
+    {
+        FQuest_NPCBehaviorState NPCState;
+        NPCState.NPCID = NPCNames[i];
+        NPCState.CurrentActivity = static_cast<EQuestObjectiveType>(i % 3); // Cycle through activities
+        NPCState.TargetLocation = SpawnLocations[i];
+        NPCState.ActivityTimer = FMath::RandRange(10.0f, 30.0f);
+        NPCState.bIsInteractable = true;
+        
+        // Add quest availability based on NPC type
+        if (NPCNames[i].Contains(TEXT("Hunter")))
+        {
+            NPCState.AvailableQuests.Add(TEXT("Hunt_Raptor_Pack"));
+            NPCState.AvailableQuests.Add(TEXT("Track_Predator"));
+        }
+        else if (NPCNames[i].Contains(TEXT("Gatherer")))
+        {
+            NPCState.AvailableQuests.Add(TEXT("Gather_Rare_Plants"));
+            NPCState.AvailableQuests.Add(TEXT("Find_Water_Source"));
+        }
+        
+        // Register the NPC (actor will be spawned by UE5 command)
+        NPCBehaviorStates.Add(NPCNames[i], NPCState);
+        
+        UE_LOG(LogTemp, Warning, TEXT("Prepared tribal NPC: %s at location %s"), *NPCNames[i], *SpawnLocations[i].ToString());
+    }
+}
+
+void UQuest_NPCInteractionManager::InitializeTribalNPCDialogues()
+{
+    // Hunter NPC
+    FQuest_NPCDialogue HunterDialogue;
+    HunterDialogue.NPCName = TEXT("Kael the Hunter");
+    HunterDialogue.DialogueText = TEXT("The raptors have been more aggressive lately. We need skilled hunters to thin their numbers.");
+    HunterDialogue.PlayerResponses.Add(TEXT("I can help hunt the raptors."));
+    HunterDialogue.PlayerResponses.Add(TEXT("What weapons work best against them?"));
+    HunterDialogue.PlayerResponses.Add(TEXT("Where do they usually hunt?"));
+    HunterDialogue.bIsQuestGiver = true;
+    HunterDialogue.QuestID = TEXT("Hunt_Raptor_Pack");
+    NPCDialogues.Add(TEXT("Kael_Hunter"), HunterDialogue);
+    
+    // Gatherer NPC
+    FQuest_NPCDialogue GathererDialogue;
+    GathererDialogue.NPCName = TEXT("Nara the Gatherer");
+    GathererDialogue.DialogueText = TEXT("The healing plants near the river are running low. We need someone to venture into dangerous territory to find more.");
+    GathererDialogue.PlayerResponses.Add(TEXT("I'll search for the healing plants."));
+    GathererDialogue.PlayerResponses.Add(TEXT("What do these plants look like?"));
+    GathererDialogue.PlayerResponses.Add(TEXT("How dangerous is the area?"));
+    GathererDialogue.bIsQuestGiver = true;
+    GathererDialogue.QuestID = TEXT("Gather_Rare_Plants");
+    NPCDialogues.Add(TEXT("Nara_Gatherer"), GathererDialogue);
+    
+    // Warrior NPC
+    FQuest_NPCDialogue WarriorDialogue;
+    WarriorDialogue.NPCName = TEXT("Thok the Warrior");
+    WarriorDialogue.DialogueText = TEXT("Our camp needs defending. The great beasts grow bolder each day.");
+    WarriorDialogue.PlayerResponses.Add(TEXT("I'll help defend the camp."));
+    WarriorDialogue.PlayerResponses.Add(TEXT("What threatens us most?"));
+    WarriorDialogue.PlayerResponses.Add(TEXT("How can I prepare for battle?"));
+    WarriorDialogue.bIsQuestGiver = true;
+    WarriorDialogue.QuestID = TEXT("Defend_Camp");
+    NPCDialogues.Add(TEXT("Thok_Warrior"), WarriorDialogue);
+    
+    // Elder NPC
+    FQuest_NPCDialogue ElderDialogue;
+    ElderDialogue.NPCName = TEXT("Yuki the Elder");
+    ElderDialogue.DialogueText = TEXT("Young one, survival requires wisdom as much as strength. Learn the ways of this ancient land.");
+    ElderDialogue.PlayerResponses.Add(TEXT("Teach me about this land."));
+    ElderDialogue.PlayerResponses.Add(TEXT("What wisdom can you share?"));
+    ElderDialogue.PlayerResponses.Add(TEXT("I seek knowledge of the old ways."));
+    ElderDialogue.bIsQuestGiver = false;
+    NPCDialogues.Add(TEXT("Yuki_Elder"), ElderDialogue);
+    
+    // Scout NPC
+    FQuest_NPCDialogue ScoutDialogue;
+    ScoutDialogue.NPCName = TEXT("Zara the Scout");
+    ScoutDialogue.DialogueText = TEXT("I've seen strange movements in the distant valleys. Someone should investigate these new territories.");
+    ScoutDialogue.PlayerResponses.Add(TEXT("I'll explore the distant valleys."));
+    ScoutDialogue.PlayerResponses.Add(TEXT("What did you see out there?"));
+    ScoutDialogue.PlayerResponses.Add(TEXT("Is it safe to travel alone?"));
+    ScoutDialogue.bIsQuestGiver = true;
+    ScoutDialogue.QuestID = TEXT("Explore_Valley");
+    NPCDialogues.Add(TEXT("Zara_Scout"), ScoutDialogue);
+}
+
+void UQuest_NPCInteractionManager::UpdateNPCActivity(const FString& NPCID, float DeltaTime)
+{
+    FQuest_NPCBehaviorState* NPCState = NPCBehaviorStates.Find(NPCID);
+    AActor* NPCActor = RegisteredNPCs.FindRef(NPCID);
+    
+    if (!NPCState || !NPCActor)
+    {
+        return;
+    }
+    
+    // Skip update if NPC is currently being interacted with
+    if (CurrentInteractingNPC == NPCID)
+    {
+        return;
+    }
+    
+    NPCState->ActivityTimer -= DeltaTime;
+    
+    if (NPCState->ActivityTimer <= 0.0f)
+    {
+        // Change activity and set new target
+        FVector CurrentLocation = NPCActor->GetActorLocation();
+        
+        switch (NPCState->CurrentActivity)
+        {
+            case EQuestObjectiveType::Hunt:
+                NPCState->TargetLocation = GetRandomPatrolLocation(CurrentLocation, 1500.0f);
+                NPCState->ActivityTimer = FMath::RandRange(15.0f, 25.0f);
+                break;
+                
+            case EQuestObjectiveType::Gather:
+                NPCState->TargetLocation = GetRandomPatrolLocation(CurrentLocation, 800.0f);
+                NPCState->ActivityTimer = FMath::RandRange(20.0f, 35.0f);
+                break;
+                
+            case EQuestObjectiveType::Explore:
+                NPCState->TargetLocation = GetRandomPatrolLocation(CurrentLocation, 2000.0f);
+                NPCState->ActivityTimer = FMath::RandRange(30.0f, 45.0f);
+                break;
+                
+            default:
+                NPCState->TargetLocation = CurrentLocation;
+                NPCState->ActivityTimer = FMath::RandRange(10.0f, 20.0f);
+                break;
+        }
+        
+        // Cycle to next activity
+        int32 NextActivity = (static_cast<int32>(NPCState->CurrentActivity) + 1) % 3;
+        NPCState->CurrentActivity = static_cast<EQuestObjectiveType>(NextActivity);
+    }
+}
+
+FVector UQuest_NPCInteractionManager::GetRandomPatrolLocation(const FVector& BaseLocation, float PatrolRadius)
+{
+    float RandomAngle = FMath::RandRange(0.0f, 360.0f);
+    float RandomDistance = FMath::RandRange(PatrolRadius * 0.3f, PatrolRadius);
+    
+    FVector RandomDirection = FVector(
+        FMath::Cos(FMath::DegreesToRadians(RandomAngle)),
+        FMath::Sin(FMath::DegreesToRadians(RandomAngle)),
+        0.0f
+    );
+    
+    return BaseLocation + (RandomDirection * RandomDistance);
 }
