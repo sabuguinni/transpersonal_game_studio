@@ -1,177 +1,222 @@
 #include "VFX_ImpactManager.h"
-#include "Components/StaticMeshComponent.h"
-#include "Particles/ParticleSystemComponent.h"
 #include "Engine/Engine.h"
+#include "Particles/ParticleSystem.h"
+#include "UObject/ConstructorHelpers.h"
 #include "Engine/World.h"
 #include "TimerManager.h"
 
-UVFX_ImpactManager::UVFX_ImpactManager()
+AVFX_ImpactManager::AVFX_ImpactManager()
 {
-    PrimaryActorTick.bCanEverTick = true;
+    PrimaryActorTick.bCanEverTick = false;
 
-    // Create root mesh component
-    RootMeshComponent = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("RootMesh"));
-    RootComponent = RootMeshComponent;
-    RootMeshComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-    RootMeshComponent->SetVisibility(false);
+    // Create root component
+    RootSceneComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootScene"));
+    RootComponent = RootSceneComponent;
 
-    // Create dust particle component
+    // Create particle components
     DustParticleComponent = CreateDefaultSubobject<UParticleSystemComponent>(TEXT("DustParticles"));
     DustParticleComponent->SetupAttachment(RootComponent);
     DustParticleComponent->bAutoActivate = false;
 
-    // Create blood particle component
-    BloodParticleComponent = CreateDefaultSubobject<UParticleSystemComponent>(TEXT("BloodParticles"));
-    BloodParticleComponent->SetupAttachment(RootComponent);
-    BloodParticleComponent->bAutoActivate = false;
+    DebrisParticleComponent = CreateDefaultSubobject<UParticleSystemComponent>(TEXT("DebrisParticles"));
+    DebrisParticleComponent->SetupAttachment(RootComponent);
+    DebrisParticleComponent->bAutoActivate = false;
 
-    // Set default values
-    DefaultDustScale = 1.0f;
-    DefaultBloodScale = 0.8f;
-    bAutoCleanupEffects = true;
-    EffectLifetime = 5.0f;
-    CleanupTimer = 0.0f;
+    // Initialize default values
+    BaseImpactRadius = 200.0f;
+    MaxParticleCount = 100.0f;
+    EffectDuration = 3.0f;
+    bAutoTriggerOnSpawn = false;
+    CurrentBiome = EBiomeType::Savanna;
+
+    InitializeParticleComponents();
 }
 
-void UVFX_ImpactManager::BeginPlay()
+void AVFX_ImpactManager::BeginPlay()
 {
     Super::BeginPlay();
     
-    if (GEngine)
-    {
-        GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Green, TEXT("VFX Impact Manager initialized"));
-    }
-}
-
-void UVFX_ImpactManager::Tick(float DeltaTime)
-{
-    Super::Tick(DeltaTime);
-
-    if (bAutoCleanupEffects)
-    {
-        UpdateActiveEffects(DeltaTime);
-    }
-}
-
-void UVFX_ImpactManager::TriggerImpact(const FVFX_ImpactData& ImpactData)
-{
-    switch (ImpactData.ImpactType)
-    {
-        case EVFX_ImpactType::FootstepDust:
-            TriggerFootstepDust(ImpactData.ImpactLocation, ImpactData.ImpactIntensity);
-            break;
-        case EVFX_ImpactType::BloodSplatter:
-            TriggerBloodSplatter(ImpactData.ImpactLocation, ImpactData.ImpactIntensity);
-            break;
-        case EVFX_ImpactType::RockImpact:
-            CreateDustCloud(ImpactData.ImpactLocation, ImpactData.ImpactIntensity);
-            break;
-        case EVFX_ImpactType::WaterSplash:
-            // Water splash implementation
-            break;
-        case EVFX_ImpactType::FireSparks:
-            // Fire sparks implementation
-            break;
-    }
-
-    // Add to active impacts for tracking
-    ActiveImpacts.Add(ImpactData);
-
-    if (GEngine)
-    {
-        FString ImpactMsg = FString::Printf(TEXT("VFX Impact triggered at %s"), *ImpactData.ImpactLocation.ToString());
-        GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Yellow, ImpactMsg);
-    }
-}
-
-void UVFX_ImpactManager::TriggerFootstepDust(FVector Location, float Intensity)
-{
-    if (DustParticleComponent)
-    {
-        SetActorLocation(Location);
-        DustParticleComponent->SetWorldScale3D(FVector(Intensity * DefaultDustScale));
-        DustParticleComponent->ActivateSystem();
-
-        if (GEngine)
-        {
-            FString DustMsg = FString::Printf(TEXT("Footstep dust at %s, intensity: %.2f"), *Location.ToString(), Intensity);
-            GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Brown, DustMsg);
-        }
-    }
-}
-
-void UVFX_ImpactManager::TriggerBloodSplatter(FVector Location, float Intensity)
-{
-    if (BloodParticleComponent)
-    {
-        SetActorLocation(Location);
-        BloodParticleComponent->SetWorldScale3D(FVector(Intensity * DefaultBloodScale));
-        BloodParticleComponent->ActivateSystem();
-
-        if (GEngine)
-        {
-            FString BloodMsg = FString::Printf(TEXT("Blood splatter at %s, intensity: %.2f"), *Location.ToString(), Intensity);
-            GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Red, BloodMsg);
-        }
-    }
-}
-
-void UVFX_ImpactManager::CreateDustCloud(FVector Location, float Scale)
-{
-    if (DustParticleComponent)
-    {
-        SetActorLocation(Location);
-        DustParticleComponent->SetWorldScale3D(FVector(Scale * 1.5f));
-        DustParticleComponent->ActivateSystem();
-
-        if (GEngine)
-        {
-            FString CloudMsg = FString::Printf(TEXT("Dust cloud created at %s, scale: %.2f"), *Location.ToString(), Scale);
-            GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Orange, CloudMsg);
-        }
-    }
-}
-
-void UVFX_ImpactManager::StopAllEffects()
-{
-    if (DustParticleComponent)
-    {
-        DustParticleComponent->DeactivateSystem();
-    }
-
-    if (BloodParticleComponent)
-    {
-        BloodParticleComponent->DeactivateSystem();
-    }
-
-    ActiveImpacts.Empty();
-
-    if (GEngine)
-    {
-        GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Blue, TEXT("All VFX effects stopped"));
-    }
-}
-
-void UVFX_ImpactManager::UpdateActiveEffects(float DeltaTime)
-{
-    CleanupTimer += DeltaTime;
-
-    if (CleanupTimer >= 1.0f) // Check every second
-    {
-        CleanupExpiredEffects();
-        CleanupTimer = 0.0f;
-    }
-}
-
-void UVFX_ImpactManager::CleanupExpiredEffects()
-{
-    float CurrentTime = GetWorld()->GetTimeSeconds();
+    ConfigureParticlesForBiome();
     
-    for (int32 i = ActiveImpacts.Num() - 1; i >= 0; i--)
+    if (bAutoTriggerOnSpawn)
     {
-        if (CurrentTime - ActiveImpacts[i].Duration > EffectLifetime)
-        {
-            ActiveImpacts.RemoveAt(i);
-        }
+        FVFX_ImpactData DefaultImpact;
+        DefaultImpact.ImpactLocation = GetActorLocation();
+        DefaultImpact.ImpactForce = 1.0f;
+        DefaultImpact.BiomeType = CurrentBiome;
+        DefaultImpact.DinosaurSpecies = EDinosaurSpecies::TRex;
+        
+        TriggerFootstepImpact(DefaultImpact);
     }
+}
+
+void AVFX_ImpactManager::InitializeParticleComponents()
+{
+    if (DustParticleComponent)
+    {
+        DustParticleComponent->SetRelativeScale3D(FVector(1.0f, 1.0f, 1.0f));
+        DustParticleComponent->SetVisibility(true);
+    }
+
+    if (DebrisParticleComponent)
+    {
+        DebrisParticleComponent->SetRelativeScale3D(FVector(0.8f, 0.8f, 0.8f));
+        DebrisParticleComponent->SetVisibility(true);
+    }
+}
+
+void AVFX_ImpactManager::TriggerFootstepImpact(const FVFX_ImpactData& ImpactData)
+{
+    if (!DustParticleComponent || !DebrisParticleComponent)
+    {
+        return;
+    }
+
+    // Set biome type for proper particle configuration
+    SetBiomeType(ImpactData.BiomeType);
+    
+    // Scale effect based on dinosaur species
+    ScaleEffectForDinosaur(ImpactData.DinosaurSpecies);
+
+    // Set impact location
+    SetActorLocation(ImpactData.ImpactLocation);
+
+    // Activate particle effects
+    DustParticleComponent->Activate(true);
+    DebrisParticleComponent->Activate(true);
+
+    // Log impact for debugging
+    UE_LOG(LogTemp, Warning, TEXT("VFX Impact triggered at %s for %s in biome %d"), 
+           *ImpactData.ImpactLocation.ToString(),
+           *UEnum::GetValueAsString(ImpactData.DinosaurSpecies),
+           (int32)ImpactData.BiomeType);
+
+    // Auto-stop after duration
+    FTimerHandle TimerHandle;
+    GetWorld()->GetTimerManager().SetTimer(TimerHandle, this, &AVFX_ImpactManager::StopAllEffects, EffectDuration, false);
+}
+
+void AVFX_ImpactManager::TriggerDinosaurImpact(EDinosaurSpecies Species, FVector Location, float Force)
+{
+    FVFX_ImpactData ImpactData;
+    ImpactData.ImpactLocation = Location;
+    ImpactData.ImpactForce = Force;
+    ImpactData.BiomeType = CurrentBiome;
+    ImpactData.DinosaurSpecies = Species;
+
+    TriggerFootstepImpact(ImpactData);
+}
+
+void AVFX_ImpactManager::SetBiomeType(EBiomeType NewBiome)
+{
+    CurrentBiome = NewBiome;
+    ConfigureParticlesForBiome();
+}
+
+void AVFX_ImpactManager::ConfigureParticlesForBiome()
+{
+    if (!DustParticleComponent || !DebrisParticleComponent)
+    {
+        return;
+    }
+
+    // Configure particle colors and properties based on biome
+    switch (CurrentBiome)
+    {
+        case EBiomeType::Savanna:
+            // Yellow-brown dust for savanna
+            DustParticleComponent->SetColorParameter(FName("ParticleColor"), FLinearColor(0.8f, 0.6f, 0.3f, 1.0f));
+            break;
+            
+        case EBiomeType::Forest:
+            // Dark brown earth for forest
+            DustParticleComponent->SetColorParameter(FName("ParticleColor"), FLinearColor(0.4f, 0.3f, 0.2f, 1.0f));
+            break;
+            
+        case EBiomeType::Desert:
+            // Light sandy dust for desert
+            DustParticleComponent->SetColorParameter(FName("ParticleColor"), FLinearColor(0.9f, 0.8f, 0.6f, 1.0f));
+            break;
+            
+        case EBiomeType::Swamp:
+            // Dark muddy particles for swamp
+            DustParticleComponent->SetColorParameter(FName("ParticleColor"), FLinearColor(0.3f, 0.25f, 0.2f, 1.0f));
+            break;
+            
+        case EBiomeType::Mountain:
+            // Gray rocky dust for mountains
+            DustParticleComponent->SetColorParameter(FName("ParticleColor"), FLinearColor(0.6f, 0.6f, 0.6f, 1.0f));
+            break;
+    }
+}
+
+void AVFX_ImpactManager::ScaleEffectForDinosaur(EDinosaurSpecies Species)
+{
+    float ScaleFactor = 1.0f;
+    float ParticleMultiplier = 1.0f;
+
+    switch (Species)
+    {
+        case EDinosaurSpecies::TRex:
+            ScaleFactor = 2.5f;
+            ParticleMultiplier = 3.0f;
+            break;
+            
+        case EDinosaurSpecies::Brachiosaurus:
+            ScaleFactor = 3.0f;
+            ParticleMultiplier = 4.0f;
+            break;
+            
+        case EDinosaurSpecies::Triceratops:
+            ScaleFactor = 2.0f;
+            ParticleMultiplier = 2.5f;
+            break;
+            
+        case EDinosaurSpecies::Velociraptor:
+            ScaleFactor = 0.8f;
+            ParticleMultiplier = 0.6f;
+            break;
+            
+        case EDinosaurSpecies::Ankylosaurus:
+            ScaleFactor = 1.8f;
+            ParticleMultiplier = 2.0f;
+            break;
+            
+        default:
+            ScaleFactor = 1.0f;
+            ParticleMultiplier = 1.0f;
+            break;
+    }
+
+    // Apply scaling to particle components
+    if (DustParticleComponent)
+    {
+        DustParticleComponent->SetRelativeScale3D(FVector(ScaleFactor));
+        DustParticleComponent->SetFloatParameter(FName("ParticleCount"), MaxParticleCount * ParticleMultiplier);
+    }
+
+    if (DebrisParticleComponent)
+    {
+        DebrisParticleComponent->SetRelativeScale3D(FVector(ScaleFactor * 0.8f));
+        DebrisParticleComponent->SetFloatParameter(FName("ParticleCount"), MaxParticleCount * ParticleMultiplier * 0.5f);
+    }
+}
+
+void AVFX_ImpactManager::StopAllEffects()
+{
+    if (DustParticleComponent)
+    {
+        DustParticleComponent->Deactivate();
+    }
+
+    if (DebrisParticleComponent)
+    {
+        DebrisParticleComponent->Deactivate();
+    }
+}
+
+void AVFX_ImpactManager::SetupBiomeSpecificMaterials()
+{
+    // This method can be extended to load different particle materials
+    // based on biome type for more realistic effects
 }
