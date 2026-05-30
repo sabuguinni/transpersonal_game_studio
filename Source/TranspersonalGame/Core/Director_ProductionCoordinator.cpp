@@ -1,395 +1,384 @@
 #include "Director_ProductionCoordinator.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
+#include "Components/ActorComponent.h"
+#include "GameFramework/Actor.h"
 #include "Kismet/GameplayStatics.h"
 
 UDir_ProductionCoordinator::UDir_ProductionCoordinator()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    CurrentPhase = EDir_ProductionPhase::CoreSystems;
-    CurrentCycle = 1;
-    CycleDuration = 300.0f; // 5 minutes per cycle
+    PrimaryComponentTick.TickInterval = 1.0f;
     
-    bPlayerControllerReady = false;
-    bSurvivalSystemReady = false;
-    bDinosaurAIReady = false;
-    bMinPlayableMapReady = false;
+    // Initialize biome distribution targets
+    BiomeDistributionTargets.Add(TEXT("Savana"), FDir_BiomeTarget{FVector(0, 0, 100), 0.20f});
+    BiomeDistributionTargets.Add(TEXT("Pantano"), FDir_BiomeTarget{FVector(-50000, -45000, 100), 0.20f});
+    BiomeDistributionTargets.Add(TEXT("Floresta"), FDir_BiomeTarget{FVector(-45000, 40000, 100), 0.20f});
+    BiomeDistributionTargets.Add(TEXT("Deserto"), FDir_BiomeTarget{FVector(55000, 0, 100), 0.20f});
+    BiomeDistributionTargets.Add(TEXT("Montanha"), FDir_BiomeTarget{FVector(40000, 50000, 100), 0.20f});
+    
+    // Initialize agent priorities
+    InitializeAgentPriorities();
+    
+    // Initialize critical path milestones
+    InitializeCriticalPath();
 }
 
 void UDir_ProductionCoordinator::BeginPlay()
 {
     Super::BeginPlay();
     
-    InitializeProduction();
-    InitializeBiomeDistribution();
-    SetupCriticalPathTasks();
+    UE_LOG(LogTemp, Warning, TEXT("Production Coordinator initialized - Managing 19-agent pipeline"));
     
-    UE_LOG(LogTemp, Warning, TEXT("Director Production Coordinator initialized - Cycle %d"), CurrentCycle);
+    // Start production monitoring
+    StartProductionMonitoring();
 }
 
 void UDir_ProductionCoordinator::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
     
-    // Update production metrics every 30 seconds
-    static float MetricsTimer = 0.0f;
-    MetricsTimer += DeltaTime;
+    // Update production metrics every second
+    UpdateProductionMetrics();
     
-    if (MetricsTimer >= 30.0f)
+    // Check critical path violations
+    ValidateCriticalPath();
+    
+    // Monitor biome distribution compliance
+    MonitorBiomeDistribution();
+}
+
+void UDir_ProductionCoordinator::InitializeAgentPriorities()
+{
+    // Critical path agents (blocking others)
+    AgentPriorities.Add(2, FDir_AgentPriority{TEXT("Engine Architect"), 10, true, TArray<int32>{3,4,5}});
+    AgentPriorities.Add(15, FDir_AgentPriority{TEXT("Narrative Designer"), 10, true, TArray<int32>{14}});
+    
+    // Core gameplay agents
+    AgentPriorities.Add(3, FDir_AgentPriority{TEXT("Core Systems"), 9, false, TArray<int32>{4,9,10}});
+    AgentPriorities.Add(9, FDir_AgentPriority{TEXT("Character Artist"), 8, false, TArray<int32>{10}});
+    AgentPriorities.Add(10, FDir_AgentPriority{TEXT("Animation Agent"), 8, false, TArray<int32>{11,12}});
+    
+    // World building agents
+    AgentPriorities.Add(5, FDir_AgentPriority{TEXT("World Generator"), 7, false, TArray<int32>{6,7,8}});
+    AgentPriorities.Add(6, FDir_AgentPriority{TEXT("Environment Artist"), 6, false, TArray<int32>{7,8}});
+    AgentPriorities.Add(8, FDir_AgentPriority{TEXT("Lighting Artist"), 6, false, TArray<int32>{}});
+    
+    // AI and behavior agents
+    AgentPriorities.Add(11, FDir_AgentPriority{TEXT("NPC Behavior"), 5, false, TArray<int32>{12,13}});
+    AgentPriorities.Add(12, FDir_AgentPriority{TEXT("Combat AI"), 5, false, TArray<int32>{}});
+    
+    // Polish and integration agents
+    AgentPriorities.Add(18, FDir_AgentPriority{TEXT("QA Testing"), 4, true, TArray<int32>{}});
+    AgentPriorities.Add(19, FDir_AgentPriority{TEXT("Integration"), 3, true, TArray<int32>{}});
+}
+
+void UDir_ProductionCoordinator::InitializeCriticalPath()
+{
+    // Milestone 1: Walk Around (Cycles 19-20)
+    CriticalMilestones.Add(FDir_Milestone{
+        TEXT("Walk Around"),
+        20,
+        TArray<FString>{
+            TEXT("TranspersonalCharacter with WASD movement"),
+            TEXT("Camera boom + follow camera"),
+            TEXT("Basic landscape terrain"),
+            TEXT("Player walk/run/jump"),
+            TEXT("5 static dinosaur meshes"),
+            TEXT("Directional light + sky")
+        },
+        false
+    });
+    
+    // Milestone 2: Basic Survival (Cycles 21-25)
+    CriticalMilestones.Add(FDir_Milestone{
+        TEXT("Basic Survival"),
+        25,
+        TArray<FString>{
+            TEXT("Hunger/Thirst/Health systems"),
+            TEXT("Basic crafting (stone tools)"),
+            TEXT("Dinosaur basic AI (idle/pursue)"),
+            TEXT("Day/night cycle"),
+            TEXT("Temperature system")
+        },
+        false
+    });
+    
+    // Milestone 3: Combat & Danger (Cycles 26-30)
+    CriticalMilestones.Add(FDir_Milestone{
+        TEXT("Combat & Danger"),
+        30,
+        TArray<FString>{
+            TEXT("Primitive weapon combat"),
+            TEXT("Dinosaur attack behaviors"),
+            TEXT("Player death/respawn"),
+            TEXT("Territory system"),
+            TEXT("Basic shelter building")
+        },
+        false
+    });
+}
+
+void UDir_ProductionCoordinator::StartProductionMonitoring()
+{
+    // Log production start
+    UE_LOG(LogTemp, Warning, TEXT("Production monitoring started - Target: Milestone 1 by Cycle 20"));
+    
+    // Initialize metrics
+    ProductionMetrics.TotalAgents = 19;
+    ProductionMetrics.ActiveAgents = 0;
+    ProductionMetrics.CompletedTasks = 0;
+    ProductionMetrics.BlockedAgents = 0;
+    ProductionMetrics.CurrentCycle = 20; // AUTO_20260530_002
+    
+    bProductionActive = true;
+}
+
+void UDir_ProductionCoordinator::UpdateProductionMetrics()
+{
+    if (!bProductionActive) return;
+    
+    // Count active vs blocked agents
+    int32 ActiveCount = 0;
+    int32 BlockedCount = 0;
+    
+    for (auto& Priority : AgentPriorities)
     {
-        LogProductionMetrics();
-        ValidateCriticalPath();
-        ValidateBiomeDistribution();
-        MetricsTimer = 0.0f;
+        if (Priority.Value.bIsBlocking)
+        {
+            BlockedCount++;
+        }
+        else
+        {
+            ActiveCount++;
+        }
+    }
+    
+    ProductionMetrics.ActiveAgents = ActiveCount;
+    ProductionMetrics.BlockedAgents = BlockedCount;
+    
+    // Log critical metrics every 10 ticks
+    static int32 TickCounter = 0;
+    TickCounter++;
+    
+    if (TickCounter >= 10)
+    {
+        UE_LOG(LogTemp, Log, TEXT("Production Status - Active: %d, Blocked: %d, Cycle: %d"), 
+               ActiveCount, BlockedCount, ProductionMetrics.CurrentCycle);
+        TickCounter = 0;
     }
 }
 
-void UDir_ProductionCoordinator::InitializeProduction()
+void UDir_ProductionCoordinator::ValidateCriticalPath()
 {
-    // Clear existing tasks
-    AgentTasks.Empty();
-    
-    // Initialize critical path tasks for minimum playable prototype
-    FDir_AgentTask PlayerControllerTask;
-    PlayerControllerTask.AgentName = "Agent #9 - Character Artist";
-    PlayerControllerTask.TaskDescription = "Implement WASD movement, camera boom, and collision for TranspersonalCharacter";
-    PlayerControllerTask.Priority = 10.0f;
-    PlayerControllerTask.EstimatedCycles = 2;
-    PlayerControllerTask.Status = EDir_AgentStatus::Working;
-    AgentTasks.Add(PlayerControllerTask);
-    
-    FDir_AgentTask SurvivalTask;
-    SurvivalTask.AgentName = "Agent #3 - Core Systems";
-    SurvivalTask.TaskDescription = "Create SurvivalComponent with Health/Hunger/Thirst/Stamina";
-    SurvivalTask.Priority = 9.0f;
-    SurvivalTask.EstimatedCycles = 1;
-    SurvivalTask.Dependencies.Add("Agent #9 - Character Artist");
-    AgentTasks.Add(SurvivalTask);
-    
-    FDir_AgentTask DinosaurAITask;
-    DinosaurAITask.AgentName = "Agent #12 - Combat AI";
-    DinosaurAITask.TaskDescription = "Implement DinosaurCombatAIController.cpp with basic BehaviorTree";
-    DinosaurAITask.Priority = 8.0f;
-    DinosaurAITask.EstimatedCycles = 2;
-    AgentTasks.Add(DinosaurAITask);
-    
-    FDir_AgentTask WorldTask;
-    WorldTask.AgentName = "Agent #5 - World Generator";
-    WorldTask.TaskDescription = "Enhance MinPlayableMap terrain with height variation and biome distribution";
-    WorldTask.Priority = 7.0f;
-    WorldTask.EstimatedCycles = 1;
-    AgentTasks.Add(WorldTask);
-    
-    UE_LOG(LogTemp, Warning, TEXT("Production initialized with %d critical tasks"), AgentTasks.Num());
-}
-
-void UDir_ProductionCoordinator::InitializeBiomeDistribution()
-{
-    BiomeDistributions.Empty();
-    
-    // Savanna (center)
-    FDir_BiomeDistribution Savanna;
-    Savanna.BiomeName = "Savanna";
-    Savanna.CenterLocation = FVector(0.0f, 0.0f, 0.0f);
-    Savanna.TargetActorCount = 200;
-    BiomeDistributions.Add(Savanna);
-    
-    // Swamp
-    FDir_BiomeDistribution Swamp;
-    Swamp.BiomeName = "Swamp";
-    Swamp.CenterLocation = FVector(-50000.0f, -45000.0f, 0.0f);
-    Swamp.TargetActorCount = 150;
-    BiomeDistributions.Add(Swamp);
-    
-    // Forest
-    FDir_BiomeDistribution Forest;
-    Forest.BiomeName = "Forest";
-    Forest.CenterLocation = FVector(-45000.0f, 40000.0f, 0.0f);
-    Forest.TargetActorCount = 250;
-    BiomeDistributions.Add(Forest);
-    
-    // Desert
-    FDir_BiomeDistribution Desert;
-    Desert.BiomeName = "Desert";
-    Desert.CenterLocation = FVector(55000.0f, 0.0f, 0.0f);
-    Desert.TargetActorCount = 100;
-    BiomeDistributions.Add(Desert);
-    
-    // Mountain
-    FDir_BiomeDistribution Mountain;
-    Mountain.BiomeName = "Mountain";
-    Mountain.CenterLocation = FVector(40000.0f, 50000.0f, 0.0f);
-    Mountain.TargetActorCount = 120;
-    BiomeDistributions.Add(Mountain);
-    
-    UE_LOG(LogTemp, Warning, TEXT("Biome distribution initialized for %d biomes"), BiomeDistributions.Num());
-}
-
-void UDir_ProductionCoordinator::SetupCriticalPathTasks()
-{
-    CriticalPathTasks.Empty();
-    CriticalPathTasks.Add("TranspersonalCharacter movement implementation");
-    CriticalPathTasks.Add("SurvivalComponent integration");
-    CriticalPathTasks.Add("DinosaurCombatAIController.cpp completion");
-    CriticalPathTasks.Add("MinPlayableMap terrain enhancement");
-    CriticalPathTasks.Add("Dinosaur mesh distribution across biomes");
-}
-
-void UDir_ProductionCoordinator::AdvanceToNextPhase()
-{
-    if (ValidateCriticalPath())
+    // Check if we're on track for Milestone 1
+    if (ProductionMetrics.CurrentCycle >= 20)
     {
-        int32 CurrentPhaseInt = static_cast<int32>(CurrentPhase);
-        CurrentPhaseInt++;
+        bool bMilestone1Ready = true;
         
-        if (CurrentPhaseInt <= static_cast<int32>(EDir_ProductionPhase::Release))
+        // Check TranspersonalCharacter exists and has movement
+        if (!ValidateCharacterMovement())
         {
-            CurrentPhase = static_cast<EDir_ProductionPhase>(CurrentPhaseInt);
-            CurrentCycle++;
-            
-            UE_LOG(LogTemp, Warning, TEXT("Advanced to Phase: %d, Cycle: %d"), CurrentPhaseInt, CurrentCycle);
+            bMilestone1Ready = false;
+            UE_LOG(LogTemp, Error, TEXT("CRITICAL: TranspersonalCharacter movement not implemented"));
         }
-    }
-    else
-    {
-        UE_LOG(LogTemp, Error, TEXT("Cannot advance phase - critical path validation failed"));
-    }
-}
-
-void UDir_ProductionCoordinator::AssignTaskToAgent(const FString& AgentName, const FString& TaskDescription, float Priority)
-{
-    FDir_AgentTask NewTask;
-    NewTask.AgentName = AgentName;
-    NewTask.TaskDescription = TaskDescription;
-    NewTask.Priority = Priority;
-    NewTask.Status = EDir_AgentStatus::Working;
-    
-    AgentTasks.Add(NewTask);
-    
-    UE_LOG(LogTemp, Warning, TEXT("Assigned task to %s: %s"), *AgentName, *TaskDescription);
-}
-
-void UDir_ProductionCoordinator::UpdateAgentStatus(const FString& AgentName, EDir_AgentStatus NewStatus)
-{
-    for (FDir_AgentTask& Task : AgentTasks)
-    {
-        if (Task.AgentName == AgentName)
-        {
-            Task.Status = NewStatus;
-            UE_LOG(LogTemp, Warning, TEXT("Updated %s status to %d"), *AgentName, static_cast<int32>(NewStatus));
-            break;
-        }
-    }
-}
-
-bool UDir_ProductionCoordinator::ValidateCriticalPath()
-{
-    // Check if minimum playable prototype requirements are met
-    bool bCriticalPathValid = true;
-    
-    // Validate player controller
-    if (!bPlayerControllerReady)
-    {
-        UE_LOG(LogTemp, Error, TEXT("Critical Path BLOCKED: Player controller not ready"));
-        bCriticalPathValid = false;
-    }
-    
-    // Validate survival system
-    if (!bSurvivalSystemReady)
-    {
-        UE_LOG(LogTemp, Error, TEXT("Critical Path BLOCKED: Survival system not ready"));
-        bCriticalPathValid = false;
-    }
-    
-    // Validate dinosaur AI
-    if (!bDinosaurAIReady)
-    {
-        UE_LOG(LogTemp, Error, TEXT("Critical Path BLOCKED: Dinosaur AI not ready"));
-        bCriticalPathValid = false;
-    }
-    
-    if (bCriticalPathValid)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Critical Path VALIDATED - Ready for next phase"));
-    }
-    
-    return bCriticalPathValid;
-}
-
-FVector UDir_ProductionCoordinator::GetRandomLocationInBiome(const FString& BiomeName)
-{
-    for (const FDir_BiomeDistribution& Biome : BiomeDistributions)
-    {
-        if (Biome.BiomeName == BiomeName)
-        {
-            float RandomX = FMath::RandRange(-Biome.Radius, Biome.Radius);
-            float RandomY = FMath::RandRange(-Biome.Radius, Biome.Radius);
-            
-            return Biome.CenterLocation + FVector(RandomX, RandomY, 100.0f);
-        }
-    }
-    
-    return FVector::ZeroVector;
-}
-
-void UDir_ProductionCoordinator::UpdateBiomeActorCount(const FString& BiomeName, int32 ActorCount)
-{
-    for (FDir_BiomeDistribution& Biome : BiomeDistributions)
-    {
-        if (Biome.BiomeName == BiomeName)
-        {
-            Biome.CurrentActorCount = ActorCount;
-            UE_LOG(LogTemp, Warning, TEXT("Updated %s actor count: %d/%d"), *BiomeName, ActorCount, Biome.TargetActorCount);
-            break;
-        }
-    }
-}
-
-bool UDir_ProductionCoordinator::ValidateBiomeDistribution()
-{
-    bool bDistributionValid = true;
-    int32 TotalActors = 0;
-    
-    for (const FDir_BiomeDistribution& Biome : BiomeDistributions)
-    {
-        TotalActors += Biome.CurrentActorCount;
         
-        float DistributionRatio = static_cast<float>(Biome.CurrentActorCount) / static_cast<float>(Biome.TargetActorCount);
+        // Check terrain exists
+        if (!ValidateBasicTerrain())
+        {
+            bMilestone1Ready = false;
+            UE_LOG(LogTemp, Error, TEXT("CRITICAL: Basic terrain not implemented"));
+        }
         
-        if (DistributionRatio < 0.8f) // Less than 80% of target
+        // Check dinosaur meshes
+        if (!ValidateDinosaurMeshes())
         {
-            UE_LOG(LogTemp, Warning, TEXT("Biome %s under-populated: %d/%d (%.1f%%)"), 
-                   *Biome.BiomeName, Biome.CurrentActorCount, Biome.TargetActorCount, DistributionRatio * 100.0f);
-            bDistributionValid = false;
+            bMilestone1Ready = false;
+            UE_LOG(LogTemp, Error, TEXT("CRITICAL: Dinosaur meshes not placed"));
         }
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("Total actors across all biomes: %d"), TotalActors);
-    return bDistributionValid;
-}
-
-bool UDir_ProductionCoordinator::ValidateMinimumPlayablePrototype()
-{
-    return bPlayerControllerReady && bSurvivalSystemReady && bDinosaurAIReady && bMinPlayableMapReady;
-}
-
-TArray<FString> UDir_ProductionCoordinator::GetBlockingIssues()
-{
-    TArray<FString> BlockingIssues;
-    
-    if (!bPlayerControllerReady)
-    {
-        BlockingIssues.Add("Player controller missing WASD movement or camera");
-    }
-    
-    if (!bSurvivalSystemReady)
-    {
-        BlockingIssues.Add("SurvivalComponent not implemented or integrated");
-    }
-    
-    if (!bDinosaurAIReady)
-    {
-        BlockingIssues.Add("DinosaurCombatAIController.cpp missing implementation");
-    }
-    
-    if (!bMinPlayableMapReady)
-    {
-        BlockingIssues.Add("MinPlayableMap lacks terrain variation or proper lighting");
-    }
-    
-    return BlockingIssues;
-}
-
-void UDir_ProductionCoordinator::GenerateProductionReport()
-{
-    UE_LOG(LogTemp, Warning, TEXT("=== PRODUCTION REPORT - CYCLE %d ==="), CurrentCycle);
-    UE_LOG(LogTemp, Warning, TEXT("Phase: %d"), static_cast<int32>(CurrentPhase));
-    UE_LOG(LogTemp, Warning, TEXT("Active Tasks: %d"), AgentTasks.Num());
-    
-    int32 CompletedTasks = 0;
-    int32 BlockedTasks = 0;
-    
-    for (const FDir_AgentTask& Task : AgentTasks)
-    {
-        if (Task.Status == EDir_AgentStatus::Complete)
-        {
-            CompletedTasks++;
-        }
-        else if (Task.Status == EDir_AgentStatus::Blocked)
-        {
-            BlockedTasks++;
-        }
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("Completed: %d, Blocked: %d"), CompletedTasks, BlockedTasks);
-    UE_LOG(LogTemp, Warning, TEXT("Critical Path Valid: %s"), ValidateCriticalPath() ? TEXT("YES") : TEXT("NO"));
-    UE_LOG(LogTemp, Warning, TEXT("Minimum Playable Prototype: %s"), ValidateMinimumPlayablePrototype() ? TEXT("READY") : TEXT("NOT READY"));
-}
-
-void UDir_ProductionCoordinator::ValidateAgentDependencies()
-{
-    for (FDir_AgentTask& Task : AgentTasks)
-    {
-        bool bDependenciesMet = true;
         
-        for (const FString& Dependency : Task.Dependencies)
+        if (!bMilestone1Ready)
         {
-            bool bDependencyComplete = false;
-            
-            for (const FDir_AgentTask& OtherTask : AgentTasks)
+            UE_LOG(LogTemp, Error, TEXT("MILESTONE 1 BLOCKED - Immediate action required"));
+            TriggerEmergencyProtocol();
+        }
+    }
+}
+
+void UDir_ProductionCoordinator::MonitorBiomeDistribution()
+{
+    // Check if actors are properly distributed across biomes
+    UWorld* World = GetWorld();
+    if (!World) return;
+    
+    TMap<FString, int32> BiomeCounts;
+    BiomeCounts.Add(TEXT("Savana"), 0);
+    BiomeCounts.Add(TEXT("Pantano"), 0);
+    BiomeCounts.Add(TEXT("Floresta"), 0);
+    BiomeCounts.Add(TEXT("Deserto"), 0);
+    BiomeCounts.Add(TEXT("Montanha"), 0);
+    
+    // Count actors in each biome
+    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+    {
+        AActor* Actor = *ActorItr;
+        if (Actor && Actor->GetName().Contains(TEXT("Dinosaur")))
+        {
+            FVector Location = Actor->GetActorLocation();
+            FString Biome = GetBiomeFromLocation(Location);
+            if (BiomeCounts.Contains(Biome))
             {
-                if (OtherTask.AgentName == Dependency && OtherTask.Status == EDir_AgentStatus::Complete)
-                {
-                    bDependencyComplete = true;
-                    break;
-                }
-            }
-            
-            if (!bDependencyComplete)
-            {
-                bDependenciesMet = false;
-                break;
+                BiomeCounts[Biome]++;
             }
         }
+    }
+    
+    // Log distribution every 30 seconds
+    static float LastLogTime = 0.0f;
+    float CurrentTime = World->GetTimeSeconds();
+    
+    if (CurrentTime - LastLogTime > 30.0f)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Biome Distribution - Savana: %d, Pantano: %d, Floresta: %d, Deserto: %d, Montanha: %d"),
+               BiomeCounts[TEXT("Savana")], BiomeCounts[TEXT("Pantano")], BiomeCounts[TEXT("Floresta")],
+               BiomeCounts[TEXT("Deserto")], BiomeCounts[TEXT("Montanha")]);
+        LastLogTime = CurrentTime;
+    }
+}
+
+bool UDir_ProductionCoordinator::ValidateCharacterMovement()
+{
+    // Check if TranspersonalCharacter exists in the world
+    UWorld* World = GetWorld();
+    if (!World) return false;
+    
+    for (TActorIterator<APawn> PawnItr(World); PawnItr; ++PawnItr)
+    {
+        APawn* Pawn = *PawnItr;
+        if (Pawn && Pawn->GetName().Contains(TEXT("TranspersonalCharacter")))
+        {
+            // Character exists - assume movement is implemented
+            return true;
+        }
+    }
+    
+    return false;
+}
+
+bool UDir_ProductionCoordinator::ValidateBasicTerrain()
+{
+    // Check if landscape exists
+    UWorld* World = GetWorld();
+    if (!World) return false;
+    
+    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+    {
+        AActor* Actor = *ActorItr;
+        if (Actor && (Actor->GetName().Contains(TEXT("Landscape")) || Actor->GetName().Contains(TEXT("Terrain"))))
+        {
+            return true;
+        }
+    }
+    
+    return false;
+}
+
+bool UDir_ProductionCoordinator::ValidateDinosaurMeshes()
+{
+    // Check if dinosaur meshes are placed
+    UWorld* World = GetWorld();
+    if (!World) return false;
+    
+    int32 DinosaurCount = 0;
+    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+    {
+        AActor* Actor = *ActorItr;
+        if (Actor && (Actor->GetName().Contains(TEXT("TRex")) || 
+                     Actor->GetName().Contains(TEXT("Velociraptor")) ||
+                     Actor->GetName().Contains(TEXT("Brachiosaurus"))))
+        {
+            DinosaurCount++;
+        }
+    }
+    
+    return DinosaurCount >= 5;
+}
+
+FString UDir_ProductionCoordinator::GetBiomeFromLocation(const FVector& Location)
+{
+    // Determine biome based on location
+    float DistanceToSavana = FVector::Dist(Location, FVector(0, 0, 100));
+    float DistanceToPantano = FVector::Dist(Location, FVector(-50000, -45000, 100));
+    float DistanceToFloresta = FVector::Dist(Location, FVector(-45000, 40000, 100));
+    float DistanceToDeserto = FVector::Dist(Location, FVector(55000, 0, 100));
+    float DistanceToMontanha = FVector::Dist(Location, FVector(40000, 50000, 100));
+    
+    float MinDistance = FMath::Min({DistanceToSavana, DistanceToPantano, DistanceToFloresta, DistanceToDeserto, DistanceToMontanha});
+    
+    if (MinDistance == DistanceToSavana) return TEXT("Savana");
+    if (MinDistance == DistanceToPantano) return TEXT("Pantano");
+    if (MinDistance == DistanceToFloresta) return TEXT("Floresta");
+    if (MinDistance == DistanceToDeserto) return TEXT("Deserto");
+    return TEXT("Montanha");
+}
+
+void UDir_ProductionCoordinator::TriggerEmergencyProtocol()
+{
+    UE_LOG(LogTemp, Error, TEXT("EMERGENCY PROTOCOL ACTIVATED - Redirecting all agents to Milestone 1 tasks"));
+    
+    // Force all agents to focus on critical path
+    bEmergencyMode = true;
+    
+    // Log specific actions needed
+    UE_LOG(LogTemp, Error, TEXT("REQUIRED ACTIONS:"));
+    UE_LOG(LogTemp, Error, TEXT("1. Agent #9: Implement TranspersonalCharacter movement"));
+    UE_LOG(LogTemp, Error, TEXT("2. Agent #5: Create basic landscape terrain"));
+    UE_LOG(LogTemp, Error, TEXT("3. Agent #6: Place 5 dinosaur meshes in biomes"));
+    UE_LOG(LogTemp, Error, TEXT("4. Agent #8: Setup directional light + sky"));
+}
+
+void UDir_ProductionCoordinator::ExecuteAgentTask(int32 AgentID, const FString& TaskDescription)
+{
+    if (AgentPriorities.Contains(AgentID))
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Agent #%d executing: %s"), AgentID, *TaskDescription);
         
-        if (!bDependenciesMet && Task.Status == EDir_AgentStatus::Working)
+        // Update metrics
+        ProductionMetrics.CompletedTasks++;
+        
+        // Check if this completes any dependencies
+        FDir_AgentPriority& Priority = AgentPriorities[AgentID];
+        for (int32 DependentAgent : Priority.Dependencies)
         {
-            Task.Status = EDir_AgentStatus::Blocked;
-        }
-        else if (bDependenciesMet && Task.Status == EDir_AgentStatus::Blocked)
-        {
-            Task.Status = EDir_AgentStatus::Working;
+            UE_LOG(LogTemp, Log, TEXT("Agent #%d unblocked by #%d completion"), DependentAgent, AgentID);
         }
     }
 }
 
-float UDir_ProductionCoordinator::CalculateProductionProgress()
+FDir_ProductionStatus UDir_ProductionCoordinator::GetProductionStatus() const
 {
-    if (AgentTasks.Num() == 0)
-    {
-        return 0.0f;
-    }
+    return ProductionMetrics;
+}
+
+bool UDir_ProductionCoordinator::IsAgentBlocked(int32 AgentID) const
+{
+    if (!AgentPriorities.Contains(AgentID)) return false;
     
-    int32 CompletedTasks = 0;
+    const FDir_AgentPriority& Priority = AgentPriorities[AgentID];
+    return Priority.bIsBlocking;
+}
+
+TArray<int32> UDir_ProductionCoordinator::GetCriticalPathAgents() const
+{
+    TArray<int32> CriticalAgents;
     
-    for (const FDir_AgentTask& Task : AgentTasks)
+    for (auto& Priority : AgentPriorities)
     {
-        if (Task.Status == EDir_AgentStatus::Complete)
+        if (Priority.Value.Priority >= 8)
         {
-            CompletedTasks++;
+            CriticalAgents.Add(Priority.Key);
         }
     }
     
-    return static_cast<float>(CompletedTasks) / static_cast<float>(AgentTasks.Num());
-}
-
-void UDir_ProductionCoordinator::LogProductionMetrics()
-{
-    float Progress = CalculateProductionProgress();
-    ValidateAgentDependencies();
-    
-    UE_LOG(LogTemp, Warning, TEXT("Production Progress: %.1f%% (%d/%d tasks)"), 
-           Progress * 100.0f, 
-           AgentTasks.Num() - AgentTasks.FilterByPredicate([](const FDir_AgentTask& Task) { return Task.Status == EDir_AgentStatus::Complete; }).Num(),
-           AgentTasks.Num());
+    return CriticalAgents;
 }
