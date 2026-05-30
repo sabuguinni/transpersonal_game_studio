@@ -1,328 +1,282 @@
 #include "NarrativeDialogueManager.h"
-#include "NarrativeCharacterSystem.h"
 #include "Engine/Engine.h"
+#include "Kismet/GameplayStatics.h"
 
-UNarrativeDialogueManager::UNarrativeDialogueManager()
+void UNarrativeDialogueManager::Initialize(FSubsystemCollectionBase& Collection)
 {
-    PrimaryComponentTick.bCanEverTick = false;
-    CurrentNodeID = 0;
-    ActiveTreeID = TEXT("");
-    CharacterSystemRef = nullptr;
+    Super::Initialize(Collection);
+    
+    UE_LOG(LogTemp, Warning, TEXT("NarrativeDialogueManager: Initializing dialogue system"));
+    
+    LoadDialogueDatabase();
+    InitializeDefaultDialogues();
+    CreateNPCDialogueSets();
+    
+    UE_LOG(LogTemp, Warning, TEXT("NarrativeDialogueManager: Loaded %d dialogue entries"), DialogueDatabase.Num());
 }
 
-void UNarrativeDialogueManager::BeginPlay()
+FNarr_DialogueEntry UNarrativeDialogueManager::GetDialogueEntry(const FString& DialogueID)
 {
-    Super::BeginPlay();
-    
-    InitializeDefaultDialogueTrees();
-    
-    // Find character system reference
-    if (AActor* Owner = GetOwner())
+    if (DialogueDatabase.Contains(DialogueID))
     {
-        CharacterSystemRef = Owner->FindComponentByClass<UNarrativeCharacterSystem>();
-    }
-}
-
-bool UNarrativeDialogueManager::StartDialogue(const FString& TreeID, const FNarr_DialogueContext& Context)
-{
-    FNarr_DialogueTree* Tree = FindDialogueTree(TreeID);
-    if (!Tree)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Dialogue tree not found: %s"), *TreeID);
-        return false;
+        return DialogueDatabase[DialogueID];
     }
     
-    ActiveTreeID = TreeID;
-    CurrentNodeID = Tree->RootNodeID;
-    CurrentContext = Context;
-    
-    UE_LOG(LogTemp, Log, TEXT("Started dialogue tree: %s"), *TreeID);
-    return true;
+    UE_LOG(LogTemp, Warning, TEXT("NarrativeDialogueManager: Dialogue ID not found: %s"), *DialogueID);
+    return FNarr_DialogueEntry();
 }
 
-FNarr_DialogueNode UNarrativeDialogueManager::GetCurrentDialogueNode()
+TArray<FNarr_DialogueEntry> UNarrativeDialogueManager::GetNPCDialogues(const FString& NPCName, ENarr_DialogueContext Context)
 {
-    FNarr_DialogueNode* Node = FindDialogueNode(ActiveTreeID, CurrentNodeID);
-    if (Node)
+    TArray<FNarr_DialogueEntry> Result;
+    
+    if (NPCDialogueSets.Contains(NPCName))
     {
-        return *Node;
-    }
-    
-    return FNarr_DialogueNode();
-}
-
-bool UNarrativeDialogueManager::SelectPlayerResponse(int32 ResponseIndex)
-{
-    FNarr_DialogueNode* CurrentNode = FindDialogueNode(ActiveTreeID, CurrentNodeID);
-    if (!CurrentNode || ResponseIndex >= CurrentNode->NextNodeIDs.Num())
-    {
-        return false;
-    }
-    
-    CurrentNodeID = CurrentNode->NextNodeIDs[ResponseIndex];
-    
-    // Check if this is an end node
-    FNarr_DialogueNode* NextNode = FindDialogueNode(ActiveTreeID, CurrentNodeID);
-    if (!NextNode || NextNode->NextNodeIDs.Num() == 0)
-    {
-        EndDialogue();
-    }
-    
-    return true;
-}
-
-void UNarrativeDialogueManager::EndDialogue()
-{
-    ActiveTreeID = TEXT("");
-    CurrentNodeID = 0;
-    UE_LOG(LogTemp, Log, TEXT("Dialogue ended"));
-}
-
-void UNarrativeDialogueManager::UpdateDialogueContext(const FNarr_DialogueContext& NewContext)
-{
-    CurrentContext = NewContext;
-}
-
-TArray<FString> UNarrativeDialogueManager::GetContextualDialogue(ENarr_CharacterType CharacterType, const FNarr_DialogueContext& Context)
-{
-    TArray<FString> ContextualLines;
-    
-    // Generate contextual dialogue based on character type and current situation
-    switch (CharacterType)
-    {
-        case ENarr_CharacterType::TribalElder:
-            if (Context.PlayerFearLevel > 75.0f)
-            {
-                ContextualLines.Add(TEXT("I see fear in your eyes, young one. The great beasts command respect, not terror."));
-            }
-            if (Context.NearbyDinosaurs.Contains(ENarr_DinosaurSpecies::TRex))
-            {
-                ContextualLines.Add(TEXT("The thunder-foot walks near. Seek shelter until it passes."));
-            }
-            break;
-            
-        case ENarr_CharacterType::HerdTracker:
-            if (Context.CurrentBiome == ENarr_BiomeType::Floresta)
-            {
-                ContextualLines.Add(TEXT("The Brachiosaurus favor these ancient trees. Watch for their feeding patterns."));
-            }
-            if (Context.NearbyDinosaurs.Contains(ENarr_DinosaurSpecies::Triceratops))
-            {
-                ContextualLines.Add(TEXT("Three-horns are protective of their young. Approach with caution."));
-            }
-            break;
-            
-        case ENarr_CharacterType::SurvivalGuide:
-            if (Context.PlayerHealthLevel < 50.0f)
-            {
-                ContextualLines.Add(TEXT("Your body weakens. Find shelter and tend to your wounds."));
-            }
-            if (Context.CurrentBiome == ENarr_BiomeType::Deserto)
-            {
-                ContextualLines.Add(TEXT("The desert tests all who enter. Water is life here."));
-            }
-            break;
-    }
-    
-    return ContextualLines;
-}
-
-void UNarrativeDialogueManager::RegisterDialogueTree(const FNarr_DialogueTree& NewTree)
-{
-    // Remove existing tree with same ID
-    DialogueTrees.RemoveAll([&](const FNarr_DialogueTree& Tree) 
-    {
-        return Tree.TreeID == NewTree.TreeID;
-    });
-    
-    DialogueTrees.Add(NewTree);
-    UE_LOG(LogTemp, Log, TEXT("Registered dialogue tree: %s"), *NewTree.TreeID);
-}
-
-bool UNarrativeDialogueManager::IsDialogueActive() const
-{
-    return !ActiveTreeID.IsEmpty();
-}
-
-FString UNarrativeDialogueManager::GenerateContextualGreeting(ENarr_CharacterType CharacterType, const FNarr_DialogueContext& Context)
-{
-    FString Greeting;
-    
-    switch (CharacterType)
-    {
-        case ENarr_CharacterType::TribalElder:
-            if (Context.DaysInWorld < 3)
-            {
-                Greeting = TEXT("Welcome, new blood. The ancient world tests all who walk its paths.");
-            }
-            else
-            {
-                Greeting = TEXT("You have survived another day. The ancestors smile upon you.");
-            }
-            break;
-            
-        case ENarr_CharacterType::HerdTracker:
-            if (Context.CurrentBiome == ENarr_BiomeType::Savana)
-            {
-                Greeting = TEXT("The grasslands hold many secrets. What brings you to the Savana?");
-            }
-            else
-            {
-                Greeting = TEXT("A fellow tracker! Share what you have seen in your travels.");
-            }
-            break;
-            
-        case ENarr_CharacterType::SurvivalGuide:
-            if (Context.PlayerHealthLevel < 75.0f)
-            {
-                Greeting = TEXT("I see you carry wounds. Let me share what I know of healing.");
-            }
-            else
-            {
-                Greeting = TEXT("Strong and healthy - good. The wilderness respects the prepared.");
-            }
-            break;
-            
-        default:
-            Greeting = TEXT("Greetings, traveler.");
-            break;
-    }
-    
-    return Greeting;
-}
-
-void UNarrativeDialogueManager::InitializeDefaultDialogueTrees()
-{
-    // Elder Introduction Tree
-    FNarr_DialogueTree ElderIntroTree;
-    ElderIntroTree.TreeID = TEXT("elder_introduction");
-    ElderIntroTree.TreeName = TEXT("Elder Introduction");
-    ElderIntroTree.AssociatedCharacterType = ENarr_CharacterType::TribalElder;
-    ElderIntroTree.RootNodeID = 0;
-    
-    // Root node
-    FNarr_DialogueNode RootNode;
-    RootNode.DialogueText = TEXT("You have awakened in the time of giants. I am Keth, keeper of the old ways. Will you listen to the wisdom of ages?");
-    RootNode.SpeakerName = TEXT("Elder Keth");
-    RootNode.PlayerResponses.Add(TEXT("Yes, I need guidance."));
-    RootNode.PlayerResponses.Add(TEXT("I can survive on my own."));
-    RootNode.NextNodeIDs.Add(1);
-    RootNode.NextNodeIDs.Add(2);
-    RootNode.TriggerCondition = ENarr_DialogueTrigger::Always;
-    ElderIntroTree.DialogueNodes.Add(RootNode);
-    
-    // Guidance path
-    FNarr_DialogueNode GuidanceNode;
-    GuidanceNode.DialogueText = TEXT("Wise choice. The great beasts are not our enemies - they are teachers. Learn their ways, and you may yet thrive.");
-    GuidanceNode.SpeakerName = TEXT("Elder Keth");
-    GuidanceNode.PlayerResponses.Add(TEXT("What should I know first?"));
-    GuidanceNode.NextNodeIDs.Add(3);
-    ElderIntroTree.DialogueNodes.Add(GuidanceNode);
-    
-    // Rejection path
-    FNarr_DialogueNode RejectionNode;
-    RejectionNode.DialogueText = TEXT("Pride comes before the fall, young one. When you are ready to learn, return to me."));
-    RejectionNode.SpeakerName = TEXT("Elder Keth");
-    RejectionNode.PlayerResponses.Add(TEXT("I understand."));
-    RejectionNode.NextNodeIDs.Add(-1); // End dialogue
-    ElderIntroTree.DialogueNodes.Add(RejectionNode);
-    
-    // Teaching node
-    FNarr_DialogueNode TeachingNode;
-    TeachingNode.DialogueText = TEXT("First - respect the territory of others. The thunder-foot rules the mountains, the long-necks the forests. Learn their patterns, and you will know where safety lies."));
-    TeachingNode.SpeakerName = TEXT("Elder Keth");
-    TeachingNode.PlayerResponses.Add(TEXT("Thank you for the wisdom."));
-    TeachingNode.NextNodeIDs.Add(-1); // End dialogue
-    ElderIntroTree.DialogueNodes.Add(TeachingNode);
-    
-    RegisterDialogueTree(ElderIntroTree);
-    
-    // Tracker Herd Info Tree
-    FNarr_DialogueTree TrackerTree;
-    TrackerTree.TreeID = TEXT("tracker_herd_info");
-    TrackerTree.TreeName = TEXT("Herd Tracker Information");
-    TrackerTree.AssociatedCharacterType = ENarr_CharacterType::HerdTracker;
-    TrackerTree.RootNodeID = 0;
-    
-    FNarr_DialogueNode TrackerRoot;
-    TrackerRoot.DialogueText = TEXT("I have tracked the great herds across all five biomes. Each holds different dangers and opportunities.");
-    TrackerRoot.SpeakerName = TEXT("Tracker Naia");
-    TrackerRoot.PlayerResponses.Add(TEXT("Tell me about the herds."));
-    TrackerRoot.PlayerResponses.Add(TEXT("Which biome is safest?"));
-    TrackerRoot.NextNodeIDs.Add(1);
-    TrackerRoot.NextNodeIDs.Add(2);
-    TrackerTree.DialogueNodes.Add(TrackerRoot);
-    
-    FNarr_DialogueNode HerdInfo;
-    HerdInfo.DialogueText = TEXT("The three-horns gather in the Savana and Pantano. Long-necks prefer the Floresta. But beware - where prey gathers, predators follow."));
-    HerdInfo.SpeakerName = TEXT("Tracker Naia");
-    HerdInfo.PlayerResponses.Add(TEXT("What about predators?"));
-    HerdInfo.NextNodeIDs.Add(3);
-    TrackerTree.DialogueNodes.Add(HerdInfo);
-    
-    FNarr_DialogueNode SafetyInfo;
-    SafetyInfo.DialogueText = TEXT("No biome is truly safe, but the Floresta offers the most shelter. The great trees hide you from the thunder-foot's gaze."));
-    SafetyInfo.SpeakerName = TEXT("Tracker Naia");
-    SafetyInfo.PlayerResponses.Add(TEXT("Good to know."));
-    SafetyInfo.NextNodeIDs.Add(-1);
-    TrackerTree.DialogueNodes.Add(SafetyInfo);
-    
-    FNarr_DialogueNode PredatorInfo;
-    PredatorInfo.DialogueText = TEXT("The thunder-foot hunts alone but claims vast territory. The pack-hunters are smaller but cunning. Never let them surround you."));
-    PredatorInfo.SpeakerName = TEXT("Tracker Naia");
-    PredatorInfo.PlayerResponses.Add(TEXT("I'll remember that."));
-    PredatorInfo.NextNodeIDs.Add(-1);
-    TrackerTree.DialogueNodes.Add(PredatorInfo);
-    
-    RegisterDialogueTree(TrackerTree);
-    
-    UE_LOG(LogTemp, Log, TEXT("Initialized %d default dialogue trees"), DialogueTrees.Num());
-}
-
-bool UNarrativeDialogueManager::EvaluateDialogueTrigger(ENarr_DialogueTrigger Trigger, const FNarr_DialogueContext& Context)
-{
-    switch (Trigger)
-    {
-        case ENarr_DialogueTrigger::Always:
-            return true;
-            
-        case ENarr_DialogueTrigger::FirstMeeting:
-            return Context.DaysInWorld <= 1;
-            
-        case ENarr_DialogueTrigger::HighFear:
-            return Context.PlayerFearLevel > 75.0f;
-            
-        case ENarr_DialogueTrigger::LowHealth:
-            return Context.PlayerHealthLevel < 50.0f;
-            
-        case ENarr_DialogueTrigger::PredatorNearby:
-            return Context.NearbyDinosaurs.Contains(ENarr_DinosaurSpecies::TRex) || 
-                   Context.NearbyDinosaurs.Contains(ENarr_DinosaurSpecies::Velociraptor);
-            
-        default:
-            return false;
-    }
-}
-
-FNarr_DialogueTree* UNarrativeDialogueManager::FindDialogueTree(const FString& TreeID)
-{
-    for (FNarr_DialogueTree& Tree : DialogueTrees)
-    {
-        if (Tree.TreeID == TreeID)
+        const FNarr_NPCDialogueSet& DialogueSet = NPCDialogueSets[NPCName];
+        
+        switch (Context)
         {
-            return &Tree;
+            case ENarr_DialogueContext::Greeting:
+                Result = DialogueSet.GreetingDialogues;
+                break;
+            case ENarr_DialogueContext::Quest:
+                Result = DialogueSet.QuestDialogues;
+                break;
+            case ENarr_DialogueContext::Trading:
+                Result = DialogueSet.TradingDialogues;
+                break;
+            case ENarr_DialogueContext::Combat:
+                Result = DialogueSet.CombatDialogues;
+                break;
+            default:
+                Result = DialogueSet.GreetingDialogues;
+                break;
         }
     }
-    return nullptr;
+    
+    return Result;
 }
 
-FNarr_DialogueNode* UNarrativeDialogueManager::FindDialogueNode(const FString& TreeID, int32 NodeID)
+void UNarrativeDialogueManager::RegisterDialogueEntry(const FNarr_DialogueEntry& DialogueEntry)
 {
-    FNarr_DialogueTree* Tree = FindDialogueTree(TreeID);
-    if (!Tree || NodeID < 0 || NodeID >= Tree->DialogueNodes.Num())
+    DialogueDatabase.Add(DialogueEntry.DialogueID, DialogueEntry);
+    UE_LOG(LogTemp, Log, TEXT("NarrativeDialogueManager: Registered dialogue: %s"), *DialogueEntry.DialogueID);
+}
+
+void UNarrativeDialogueManager::TriggerDialogue(const FString& DialogueID, AActor* Speaker, AActor* Listener)
+{
+    if (!Speaker || !Listener)
     {
-        return nullptr;
+        UE_LOG(LogTemp, Warning, TEXT("NarrativeDialogueManager: Invalid speaker or listener for dialogue: %s"), *DialogueID);
+        return;
     }
     
-    return &Tree->DialogueNodes[NodeID];
+    FNarr_DialogueEntry DialogueEntry = GetDialogueEntry(DialogueID);
+    if (DialogueEntry.DialogueID.IsEmpty())
+    {
+        return;
+    }
+    
+    // Log dialogue trigger
+    UE_LOG(LogTemp, Log, TEXT("NarrativeDialogueManager: Triggering dialogue '%s' between %s and %s"), 
+           *DialogueID, *Speaker->GetName(), *Listener->GetName());
+    
+    // Here you would integrate with UI system to display dialogue
+    // For now, we'll just log the dialogue text
+    UE_LOG(LogTemp, Warning, TEXT("DIALOGUE [%s]: %s"), *DialogueEntry.SpeakerName, *DialogueEntry.DialogueText);
+}
+
+bool UNarrativeDialogueManager::IsDialogueAvailable(const FString& DialogueID, ENarr_BiomeType CurrentBiome, ENarr_StoryPhase CurrentPhase)
+{
+    FNarr_DialogueEntry DialogueEntry = GetDialogueEntry(DialogueID);
+    if (DialogueEntry.DialogueID.IsEmpty())
+    {
+        return false;
+    }
+    
+    // Check biome requirement
+    if (DialogueEntry.RequiredBiome != ENarr_BiomeType::Savanna && DialogueEntry.RequiredBiome != CurrentBiome)
+    {
+        return false;
+    }
+    
+    // Check story phase requirement
+    if (DialogueEntry.RequiredStoryPhase != ENarr_StoryPhase::Awakening && DialogueEntry.RequiredStoryPhase != CurrentPhase)
+    {
+        return false;
+    }
+    
+    return true;
+}
+
+void UNarrativeDialogueManager::LoadDialogueDatabase()
+{
+    DialogueDatabase.Empty();
+    NPCDialogueSets.Empty();
+    
+    UE_LOG(LogTemp, Log, TEXT("NarrativeDialogueManager: Loading dialogue database"));
+}
+
+FString UNarrativeDialogueManager::GetRandomDialogueByContext(ENarr_DialogueContext Context, ENarr_BiomeType Biome)
+{
+    TArray<FString> MatchingDialogues;
+    
+    for (const auto& DialoguePair : DialogueDatabase)
+    {
+        const FNarr_DialogueEntry& Entry = DialoguePair.Value;
+        
+        // Check if dialogue matches context and biome
+        bool bContextMatch = false;
+        switch (Context)
+        {
+            case ENarr_DialogueContext::Danger:
+                bContextMatch = Entry.DialogueText.Contains(TEXT("danger")) || Entry.DialogueText.Contains(TEXT("warning"));
+                break;
+            case ENarr_DialogueContext::Exploration:
+                bContextMatch = Entry.DialogueText.Contains(TEXT("explore")) || Entry.DialogueText.Contains(TEXT("discover"));
+                break;
+            case ENarr_DialogueContext::Survival:
+                bContextMatch = Entry.DialogueText.Contains(TEXT("survive")) || Entry.DialogueText.Contains(TEXT("endure"));
+                break;
+            default:
+                bContextMatch = true;
+                break;
+        }
+        
+        if (bContextMatch && (Entry.RequiredBiome == Biome || Entry.RequiredBiome == ENarr_BiomeType::Savanna))
+        {
+            MatchingDialogues.Add(Entry.DialogueID);
+        }
+    }
+    
+    if (MatchingDialogues.Num() > 0)
+    {
+        int32 RandomIndex = FMath::RandRange(0, MatchingDialogues.Num() - 1);
+        return MatchingDialogues[RandomIndex];
+    }
+    
+    return TEXT("");
+}
+
+void UNarrativeDialogueManager::InitializeDefaultDialogues()
+{
+    CreateSurvivalDialogues();
+    CreateDangerWarningDialogues();
+    CreateExplorationDialogues();
+}
+
+void UNarrativeDialogueManager::CreateSurvivalDialogues()
+{
+    // Savanna survival dialogues
+    FNarr_DialogueEntry SavannaSurvival;
+    SavannaSurvival.DialogueID = TEXT("SAVANNA_SURVIVAL_01");
+    SavannaSurvival.SpeakerName = TEXT("Survival Guide");
+    SavannaSurvival.DialogueText = TEXT("The savanna grasslands test your endurance. Find water sources and avoid the territorial herbivores during their feeding times.");
+    SavannaSurvival.RequiredBiome = ENarr_BiomeType::Savanna;
+    SavannaSurvival.RequiredStoryPhase = ENarr_StoryPhase::Awakening;
+    RegisterDialogueEntry(SavannaSurvival);
+    
+    // Forest survival dialogues
+    FNarr_DialogueEntry ForestSurvival;
+    ForestSurvival.DialogueID = TEXT("FOREST_SURVIVAL_01");
+    ForestSurvival.SpeakerName = TEXT("Forest Guide");
+    ForestSurvival.DialogueText = TEXT("The dense forest provides shelter but hides many dangers. Watch for predator tracks and listen for the calls of the great Brachiosaurus herds.");
+    ForestSurvival.RequiredBiome = ENarr_BiomeType::Forest;
+    ForestSurvival.RequiredStoryPhase = ENarr_StoryPhase::Exploration;
+    RegisterDialogueEntry(ForestSurvival);
+    
+    // Desert survival dialogues
+    FNarr_DialogueEntry DesertSurvival;
+    DesertSurvival.DialogueID = TEXT("DESERT_SURVIVAL_01");
+    DesertSurvival.SpeakerName = TEXT("Desert Wanderer");
+    DesertSurvival.DialogueText = TEXT("The desert heat is merciless. Travel during dawn and dusk. The sand hides ancient bones and precious resources for those brave enough to dig.");
+    DesertSurvival.RequiredBiome = ENarr_BiomeType::Desert;
+    DesertSurvival.RequiredStoryPhase = ENarr_StoryPhase::Adaptation;
+    RegisterDialogueEntry(DesertSurvival);
+}
+
+void UNarrativeDialogueManager::CreateDangerWarningDialogues()
+{
+    // T-Rex danger warning
+    FNarr_DialogueEntry TRexWarning;
+    TRexWarning.DialogueID = TEXT("DANGER_TREX_01");
+    TRexWarning.SpeakerName = TEXT("Danger Alert");
+    TRexWarning.DialogueText = TEXT("Massive predator detected! The T-Rex has caught your scent. Move slowly, avoid sudden movements, and find cover immediately.");
+    TRexWarning.RequiredBiome = ENarr_BiomeType::Savanna;
+    TRexWarning.RequiredStoryPhase = ENarr_StoryPhase::Awakening;
+    RegisterDialogueEntry(TRexWarning);
+    
+    // Velociraptor pack warning
+    FNarr_DialogueEntry RaptorWarning;
+    RaptorWarning.DialogueID = TEXT("DANGER_RAPTOR_01");
+    RaptorWarning.SpeakerName = TEXT("Pack Alert");
+    RaptorWarning.DialogueText = TEXT("Velociraptor pack nearby! They hunt in coordinated groups. Watch your flanks and never turn your back on them.");
+    RaptorWarning.RequiredBiome = ENarr_BiomeType::Forest;
+    RaptorWarning.RequiredStoryPhase = ENarr_StoryPhase::Conflict;
+    RegisterDialogueEntry(RaptorWarning);
+}
+
+void UNarrativeDialogueManager::CreateExplorationDialogues()
+{
+    // Brachiosaurus migration
+    FNarr_DialogueEntry BrachioMigration;
+    BrachioMigration.DialogueID = TEXT("EXPLORE_BRACHIO_01");
+    BrachioMigration.SpeakerName = TEXT("Migration Observer");
+    BrachioMigration.DialogueText = TEXT("The ancient Brachiosaurus herds are on the move. Follow their trails to discover new feeding grounds and fresh water sources.");
+    BrachioMigration.RequiredBiome = ENarr_BiomeType::Forest;
+    BrachioMigration.RequiredStoryPhase = ENarr_StoryPhase::Exploration;
+    RegisterDialogueEntry(BrachioMigration);
+    
+    // Resource discovery
+    FNarr_DialogueEntry ResourceDiscovery;
+    ResourceDiscovery.DialogueID = TEXT("EXPLORE_RESOURCES_01");
+    ResourceDiscovery.SpeakerName = TEXT("Resource Scout");
+    ResourceDiscovery.DialogueText = TEXT("Ancient bone deposits lie buried in this area. The minerals here could strengthen your tools and weapons if you know how to extract them.");
+    ResourceDiscovery.RequiredBiome = ENarr_BiomeType::Desert;
+    ResourceDiscovery.RequiredStoryPhase = ENarr_StoryPhase::Mastery;
+    RegisterDialogueEntry(ResourceDiscovery);
+}
+
+void UNarrativeDialogueManager::CreateNPCDialogueSets()
+{
+    // Tribal Elder NPC
+    FNarr_NPCDialogueSet TribalElder;
+    TribalElder.NPCName = TEXT("Tribal_Elder");
+    TribalElder.NPCType = ENarr_NPCType::QuestGiver;
+    
+    FNarr_DialogueEntry ElderGreeting;
+    ElderGreeting.DialogueID = TEXT("ELDER_GREETING_01");
+    ElderGreeting.SpeakerName = TEXT("Tribal Elder");
+    ElderGreeting.DialogueText = TEXT("Young hunter, you have survived your first days in this ancient world. But greater challenges await. Are you ready to prove yourself?");
+    ElderGreeting.RequiredStoryPhase = ENarr_StoryPhase::Awakening;
+    TribalElder.GreetingDialogues.Add(ElderGreeting);
+    
+    FNarr_DialogueEntry ElderQuest;
+    ElderQuest.DialogueID = TEXT("ELDER_QUEST_01");
+    ElderQuest.SpeakerName = TEXT("Tribal Elder");
+    ElderQuest.DialogueText = TEXT("The five sacred biomes must be explored. Each holds trials that will forge you into a true survivor. Begin with the savanna grasslands.");
+    ElderQuest.bIsQuestDialogue = true;
+    ElderQuest.QuestID = TEXT("BIOME_TRIALS");
+    TribalElder.QuestDialogues.Add(ElderQuest);
+    
+    NPCDialogueSets.Add(TribalElder.NPCName, TribalElder);
+    
+    // Trader NPC
+    FNarr_NPCDialogueSet Trader;
+    Trader.NPCName = TEXT("Resource_Trader");
+    Trader.NPCType = ENarr_NPCType::Trader;
+    
+    FNarr_DialogueEntry TraderGreeting;
+    TraderGreeting.DialogueID = TEXT("TRADER_GREETING_01");
+    TraderGreeting.SpeakerName = TEXT("Resource Trader");
+    TraderGreeting.DialogueText = TEXT("Ah, another survivor! I trade in rare materials and crafting components. What treasures have you found in your travels?");
+    Trader.GreetingDialogues.Add(TraderGreeting);
+    
+    FNarr_DialogueEntry TraderTrade;
+    TraderTrade.DialogueID = TEXT("TRADER_TRADE_01");
+    TraderTrade.SpeakerName = TEXT("Resource Trader");
+    TraderTrade.DialogueText = TEXT("Dinosaur bones, rare minerals, medicinal plants - I'll trade fairly for quality materials. What do you need for your next expedition?");
+    Trader.TradingDialogues.Add(TraderTrade);
+    
+    NPCDialogueSets.Add(Trader.NPCName, Trader);
 }
