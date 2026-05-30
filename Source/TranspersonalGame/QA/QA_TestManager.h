@@ -8,10 +8,10 @@
 UENUM(BlueprintType)
 enum class EQA_TestResult : uint8
 {
+    NotRun      UMETA(DisplayName = "Not Run"),
     Pass        UMETA(DisplayName = "Pass"),
     Fail        UMETA(DisplayName = "Fail"),
-    Warning     UMETA(DisplayName = "Warning"),
-    Pending     UMETA(DisplayName = "Pending")
+    Warning     UMETA(DisplayName = "Warning")
 };
 
 USTRUCT(BlueprintType)
@@ -19,26 +19,26 @@ struct FQA_TestCase
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Test")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Test")
     FString TestName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Test")
-    FString TestDescription;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Test")
+    FString Description;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Test")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Test")
     EQA_TestResult Result;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Test")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Test")
     FString ErrorMessage;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Test")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Test")
     float ExecutionTime;
 
     FQA_TestCase()
     {
         TestName = TEXT("");
-        TestDescription = TEXT("");
-        Result = EQA_TestResult::Pending;
+        Description = TEXT("");
+        Result = EQA_TestResult::NotRun;
         ErrorMessage = TEXT("");
         ExecutionTime = 0.0f;
     }
@@ -64,60 +64,50 @@ protected:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Testing")
     float TestInterval;
 
-    UPROPERTY(BlueprintReadOnly, Category = "QA Results")
-    int32 PassedTests;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Testing")
+    int32 MaxActorCount;
 
-    UPROPERTY(BlueprintReadOnly, Category = "QA Results")
-    int32 FailedTests;
-
-    UPROPERTY(BlueprintReadOnly, Category = "QA Results")
-    int32 WarningTests;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Testing")
+    float TargetFrameRate;
 
 public:
-    virtual void Tick(float DeltaTime) override;
-
     UFUNCTION(BlueprintCallable, Category = "QA Testing")
     void RunAllTests();
 
     UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    void RunSingleTest(const FString& TestName);
+    void RunPerformanceTest();
 
     UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    void AddTestCase(const FString& Name, const FString& Description);
+    void RunBiomeDistributionTest();
 
     UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    void ClearAllTests();
+    void RunModuleCompilationTest();
 
     UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    FQA_TestCase GetTestResult(const FString& TestName);
+    void RunAssetValidationTest();
 
     UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    void TestDinosaurSpawning();
+    FQA_TestCase CreateTestCase(const FString& Name, const FString& Description);
 
     UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    void TestVFXSystems();
+    void LogTestResult(const FQA_TestCase& TestCase);
 
     UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    void TestPlayerMovement();
+    void GenerateTestReport();
 
     UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    void TestPerformanceMetrics();
+    int32 GetActorCountInBiome(const FVector& BiomeCenter, float Radius);
 
     UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    void TestAssetLoading();
+    bool ValidateDinosaurAssets();
 
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "QA Testing")
-    void RunEditorTests();
+    UFUNCTION(BlueprintCallable, Category = "QA Testing")
+    bool CheckCriticalGameObjects();
 
 private:
     FTimerHandle TestTimerHandle;
-    int32 CurrentTestIndex;
-
-    void ExecuteNextTest();
-    void LogTestResult(const FQA_TestCase& TestCase);
-    bool ValidateActorCount();
-    bool ValidateClassCompilation();
-    bool ValidateAssetIntegrity();
+    
+    void ScheduleNextTest();
+    bool ValidateAssetPath(const FString& AssetPath);
+    float MeasureFrameRate();
 };
-
-#include "QA_TestManager.generated.h"
