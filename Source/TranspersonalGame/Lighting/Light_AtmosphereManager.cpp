@@ -1,260 +1,297 @@
 #include "Light_AtmosphereManager.h"
+#include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "Engine/DirectionalLight.h"
 #include "Engine/PointLight.h"
-#include "Engine/SkyAtmosphere.h"
-#include "Components/LightComponent.h"
-#include "Components/SkyAtmosphereComponent.h"
 #include "Kismet/GameplayStatics.h"
-#include "Engine/Engine.h"
+#include "Components/StaticMeshComponent.h"
 
-ULight_AtmosphereManager::ULight_AtmosphereManager()
+ALight_AtmosphereManager::ALight_AtmosphereManager()
 {
-    CurrentTimeOfDay = FLight_TimeOfDay();
-    bEnableDynamicTimeOfDay = false;
-    TimeProgressionSpeed = 1.0f;
+    PrimaryActorTick.bCanEverTick = true;
+
+    // Initialize default values
+    DayDuration = 1200.0f; // 20 minutes real time = 24 hours game time
+    CurrentTimeOfDay = 0.6f; // Start at late afternoon
+    CurrentPeriod = ELight_TimeOfDay::Afternoon;
+    CretaceousTemperature = 3200.0f;
+    CretaceousAmbientColor = FLinearColor(1.0f, 0.85f, 0.7f, 1.0f);
+    bEnableVolumetricFog = true;
+    bEnableLumenGI = true;
+
+    // Initialize biome atmosphere settings
+    BiomeSettings.Empty();
+    
+    // Savana
+    FLight_BiomeAtmosphere Savana;
+    Savana.BiomeName = TEXT("Savana");
+    Savana.BiomeCenter = FVector(0.0f, 0.0f, 0.0f);
+    Savana.AtmosphericColor = FLinearColor(1.0f, 0.9f, 0.7f, 1.0f);
+    Savana.FogDensity = 0.1f;
+    Savana.LightIntensity = 2.5f;
+    BiomeSettings.Add(Savana);
+
+    // Pantano
+    FLight_BiomeAtmosphere Pantano;
+    Pantano.BiomeName = TEXT("Pantano");
+    Pantano.BiomeCenter = FVector(-50000.0f, -45000.0f, 0.0f);
+    Pantano.AtmosphericColor = FLinearColor(0.6f, 0.8f, 0.5f, 1.0f);
+    Pantano.FogDensity = 0.25f;
+    Pantano.LightIntensity = 1.8f;
+    BiomeSettings.Add(Pantano);
+
+    // Floresta
+    FLight_BiomeAtmosphere Floresta;
+    Floresta.BiomeName = TEXT("Floresta");
+    Floresta.BiomeCenter = FVector(-45000.0f, 40000.0f, 0.0f);
+    Floresta.AtmosphericColor = FLinearColor(0.5f, 0.9f, 0.4f, 1.0f);
+    Floresta.FogDensity = 0.15f;
+    Floresta.LightIntensity = 2.0f;
+    BiomeSettings.Add(Floresta);
+
+    // Deserto
+    FLight_BiomeAtmosphere Deserto;
+    Deserto.BiomeName = TEXT("Deserto");
+    Deserto.BiomeCenter = FVector(55000.0f, 0.0f, 0.0f);
+    Deserto.AtmosphericColor = FLinearColor(1.0f, 0.8f, 0.5f, 1.0f);
+    Deserto.FogDensity = 0.05f;
+    Deserto.LightIntensity = 3.2f;
+    BiomeSettings.Add(Deserto);
+
+    // Montanha
+    FLight_BiomeAtmosphere Montanha;
+    Montanha.BiomeName = TEXT("Montanha");
+    Montanha.BiomeCenter = FVector(40000.0f, 50000.0f, 0.0f);
+    Montanha.AtmosphericColor = FLinearColor(0.8f, 0.8f, 1.0f, 1.0f);
+    Montanha.FogDensity = 0.2f;
+    Montanha.LightIntensity = 2.2f;
+    BiomeSettings.Add(Montanha);
 }
 
-void ULight_AtmosphereManager::Initialize(FSubsystemCollectionBase& Collection)
+void ALight_AtmosphereManager::BeginPlay()
 {
-    Super::Initialize(Collection);
+    Super::BeginPlay();
     
-    InitializeBiomeConfigs();
-    FindAtmosphericActors();
-    
-    UE_LOG(LogTemp, Warning, TEXT("Light_AtmosphereManager initialized for Cretaceous period lighting"));
+    InitializeBiomeAtmosphere();
+    SetCretaceousLighting();
+    ConfigureLumenSettings();
+    SpawnBiomeAtmosphericLights();
 }
 
-void ULight_AtmosphereManager::Deinitialize()
+void ALight_AtmosphereManager::Tick(float DeltaTime)
 {
-    SunLight.Reset();
-    SkyAtmosphere.Reset();
+    Super::Tick(DeltaTime);
     
-    Super::Deinitialize();
+    UpdateTimeOfDay(DeltaTime);
+    UpdateSunPosition();
+    UpdateAtmosphericProperties();
 }
 
-void ULight_AtmosphereManager::SetupCretaceousAtmosphere()
-{
-    FindAtmosphericActors();
-    
-    // Configure sun for late Cretaceous golden hour
-    if (SunLight.IsValid())
-    {
-        ULightComponent* LightComp = SunLight->GetLightComponent();
-        if (LightComp)
-        {
-            LightComp->SetTemperature(CurrentTimeOfDay.SunTemperature);
-            LightComp->SetIntensity(CurrentTimeOfDay.SunIntensity);
-            SunLight->SetActorRotation(CurrentTimeOfDay.SunRotation);
-            
-            UE_LOG(LogTemp, Warning, TEXT("Cretaceous sun configured: %fK, intensity %f"), 
-                CurrentTimeOfDay.SunTemperature, CurrentTimeOfDay.SunIntensity);
-        }
-    }
-    
-    // Configure atmospheric perspective
-    if (SkyAtmosphere.IsValid())
-    {
-        USkyAtmosphereComponent* AtmComp = SkyAtmosphere->GetSkyAtmosphereComponent();
-        if (AtmComp)
-        {
-            AtmComp->SetAtmosphereHeight(60.0f);
-            AtmComp->SetRayleighScatteringScale(0.8f);
-            
-            UE_LOG(LogTemp, Warning, TEXT("Atmospheric perspective configured for Cretaceous period"));
-        }
-    }
-}
-
-void ULight_AtmosphereManager::ConfigureBiomeSpecificLighting()
+void ALight_AtmosphereManager::InitializeBiomeAtmosphere()
 {
     UWorld* World = GetWorld();
     if (!World)
     {
+        UE_LOG(LogTemp, Warning, TEXT("Light_AtmosphereManager: World is null"));
         return;
     }
-    
-    // Create biome-specific ambient lighting
-    for (const FLight_BiomeConfig& BiomeConfig : BiomeConfigs)
-    {
-        CreateBiomeAmbientLight(BiomeConfig.BiomeType, BiomeConfig.BiomeCenter);
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("Biome-specific lighting configured for %d biomes"), BiomeConfigs.Num());
-}
 
-void ULight_AtmosphereManager::SetTimeOfDay(float Hour)
-{
-    CurrentTimeOfDay.CurrentHour = FMath::Clamp(Hour, 0.0f, 24.0f);
-    
-    // Calculate sun position based on time
-    float SunAngle = (Hour - 6.0f) * 15.0f; // 15 degrees per hour, sunrise at 6 AM
-    CurrentTimeOfDay.SunRotation = FRotator(-25.0f + FMath::Sin(FMath::DegreesToRadians(SunAngle)) * 60.0f, SunAngle, 0.0f);
-    
-    // Adjust sun intensity based on time
-    if (Hour >= 6.0f && Hour <= 18.0f) // Daytime
-    {
-        float DayProgress = (Hour - 6.0f) / 12.0f;
-        CurrentTimeOfDay.SunIntensity = FMath::Lerp(2.0f, 8.5f, FMath::Sin(DayProgress * PI));
-    }
-    else // Night
-    {
-        CurrentTimeOfDay.SunIntensity = 0.1f;
-    }
-    
-    SetupCretaceousAtmosphere();
-}
-
-void ULight_AtmosphereManager::EnableLumenGlobalIllumination()
-{
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        return;
-    }
-    
-    // Enable Lumen features via console commands
-    UKismetSystemLibrary::ExecuteConsoleCommand(World, TEXT("r.Lumen.GlobalIllumination 1"));
-    UKismetSystemLibrary::ExecuteConsoleCommand(World, TEXT("r.Lumen.Reflections 1"));
-    UKismetSystemLibrary::ExecuteConsoleCommand(World, TEXT("r.Lumen.ScreenProbeGather 1"));
-    UKismetSystemLibrary::ExecuteConsoleCommand(World, TEXT("r.Lumen.GlobalIllumination.MaxLuminance 100"));
-    
-    UE_LOG(LogTemp, Warning, TEXT("Lumen Global Illumination enhanced for prehistoric atmosphere"));
-}
-
-void ULight_AtmosphereManager::ConfigureVolumetricFog()
-{
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        return;
-    }
-    
-    // Enable volumetric fog for atmospheric depth
-    UKismetSystemLibrary::ExecuteConsoleCommand(World, TEXT("r.VolumetricFog 1"));
-    UKismetSystemLibrary::ExecuteConsoleCommand(World, TEXT("r.VolumetricFog.GridPixelSize 8"));
-    
-    UE_LOG(LogTemp, Warning, TEXT("Volumetric fog configured for Cretaceous atmosphere"));
-}
-
-void ULight_AtmosphereManager::CreateBiomeAmbientLight(ELight_BiomeType BiomeType, FVector Location)
-{
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        return;
-    }
-    
-    FLight_BiomeConfig BiomeConfig = GetBiomeConfig(BiomeType);
-    
-    // Spawn point light for biome-specific ambient lighting
-    FActorSpawnParameters SpawnParams;
-    SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-    
-    APointLight* BiomeLight = World->SpawnActor<APointLight>(APointLight::StaticClass(), Location, FRotator::ZeroRotator, SpawnParams);
-    if (BiomeLight)
-    {
-        ULightComponent* LightComp = BiomeLight->GetLightComponent();
-        if (LightComp)
-        {
-            LightComp->SetIntensity(BiomeConfig.LightIntensity);
-            LightComp->SetLightColor(BiomeConfig.AmbientColor);
-            LightComp->SetTemperature(BiomeConfig.LightTemperature);
-            LightComp->SetAttenuationRadius(15000.0f); // Large radius for biome coverage
-        }
-        
-        FString BiomeName = UEnum::GetValueAsString(BiomeConfig.BiomeType);
-        BiomeLight->SetActorLabel(FString::Printf(TEXT("%s_Ambient_Light"), *BiomeName));
-        
-        UE_LOG(LogTemp, Warning, TEXT("Created ambient light for biome: %s"), *BiomeName);
-    }
-}
-
-void ULight_AtmosphereManager::InitializeBiomeConfigs()
-{
-    BiomeConfigs.Empty();
-    
-    // Savana - Warm golden lighting
-    FLight_BiomeConfig SavanaConfig;
-    SavanaConfig.BiomeType = ELight_BiomeType::Savana;
-    SavanaConfig.BiomeCenter = FVector(0.0f, 0.0f, 0.0f);
-    SavanaConfig.AmbientColor = FLinearColor(1.0f, 0.9f, 0.7f, 1.0f);
-    SavanaConfig.LightIntensity = 3.0f;
-    SavanaConfig.LightTemperature = 3200.0f;
-    BiomeConfigs.Add(SavanaConfig);
-    
-    // Pantano - Cool misty lighting
-    FLight_BiomeConfig PantanoConfig;
-    PantanoConfig.BiomeType = ELight_BiomeType::Pantano;
-    PantanoConfig.BiomeCenter = FVector(-50000.0f, -45000.0f, 0.0f);
-    PantanoConfig.AmbientColor = FLinearColor(0.8f, 0.9f, 1.0f, 1.0f);
-    PantanoConfig.LightIntensity = 1.8f;
-    PantanoConfig.LightTemperature = 7000.0f;
-    BiomeConfigs.Add(PantanoConfig);
-    
-    // Floresta - Dappled green lighting
-    FLight_BiomeConfig FlorestaConfig;
-    FlorestaConfig.BiomeType = ELight_BiomeType::Floresta;
-    FlorestaConfig.BiomeCenter = FVector(-45000.0f, 40000.0f, 0.0f);
-    FlorestaConfig.AmbientColor = FLinearColor(0.9f, 1.0f, 0.8f, 1.0f);
-    FlorestaConfig.LightIntensity = 2.5f;
-    FlorestaConfig.LightTemperature = 5500.0f;
-    BiomeConfigs.Add(FlorestaConfig);
-    
-    // Deserto - Harsh bright lighting
-    FLight_BiomeConfig DesertoConfig;
-    DesertoConfig.BiomeType = ELight_BiomeType::Deserto;
-    DesertoConfig.BiomeCenter = FVector(55000.0f, 0.0f, 0.0f);
-    DesertoConfig.AmbientColor = FLinearColor(1.0f, 0.95f, 0.8f, 1.0f);
-    DesertoConfig.LightIntensity = 5.0f;
-    DesertoConfig.LightTemperature = 6500.0f;
-    BiomeConfigs.Add(DesertoConfig);
-    
-    // Montanha - Clear mountain lighting
-    FLight_BiomeConfig MontanhaConfig;
-    MontanhaConfig.BiomeType = ELight_BiomeType::Montanha;
-    MontanhaConfig.BiomeCenter = FVector(40000.0f, 50000.0f, 0.0f);
-    MontanhaConfig.AmbientColor = FLinearColor(0.95f, 0.95f, 1.0f, 1.0f);
-    MontanhaConfig.LightIntensity = 4.0f;
-    MontanhaConfig.LightTemperature = 6000.0f;
-    BiomeConfigs.Add(MontanhaConfig);
-}
-
-void ULight_AtmosphereManager::FindAtmosphericActors()
-{
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        return;
-    }
-    
     // Find directional light (sun)
-    TArray<AActor*> FoundLights;
-    UGameplayStatics::GetAllActorsOfClass(World, ADirectionalLight::StaticClass(), FoundLights);
-    if (FoundLights.Num() > 0)
-    {
-        SunLight = Cast<ADirectionalLight>(FoundLights[0]);
-    }
+    TArray<AActor*> FoundActors;
+    UGameplayStatics::GetAllActorsOfClass(World, ADirectionalLight::StaticClass(), FoundActors);
     
-    // Find sky atmosphere
-    TArray<AActor*> FoundAtmospheres;
-    UGameplayStatics::GetAllActorsOfClass(World, ASkyAtmosphere::StaticClass(), FoundAtmospheres);
-    if (FoundAtmospheres.Num() > 0)
+    if (FoundActors.Num() > 0)
     {
-        SkyAtmosphere = Cast<ASkyAtmosphere>(FoundAtmospheres[0]);
+        ADirectionalLight* DirectionalLightActor = Cast<ADirectionalLight>(FoundActors[0]);
+        if (DirectionalLightActor)
+        {
+            SunLight = DirectionalLightActor->GetLightComponent();
+            UE_LOG(LogTemp, Log, TEXT("Light_AtmosphereManager: Found directional light"));
+        }
     }
 }
 
-FLight_BiomeConfig ULight_AtmosphereManager::GetBiomeConfig(ELight_BiomeType BiomeType) const
+void ALight_AtmosphereManager::UpdateTimeOfDay(float DeltaTime)
 {
-    for (const FLight_BiomeConfig& Config : BiomeConfigs)
+    CurrentTimeOfDay += DeltaTime / DayDuration;
+    
+    if (CurrentTimeOfDay >= 1.0f)
     {
-        if (Config.BiomeType == BiomeType)
+        CurrentTimeOfDay -= 1.0f;
+    }
+    
+    CurrentPeriod = CalculateTimeOfDay(CurrentTimeOfDay);
+}
+
+void ALight_AtmosphereManager::SetCretaceousLighting()
+{
+    if (!SunLight)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Light_AtmosphereManager: SunLight is null"));
+        return;
+    }
+
+    // Configure Cretaceous period lighting
+    SunLight->SetIntensity(8.5f);
+    SunLight->SetLightColor(CretaceousAmbientColor);
+    SunLight->SetTemperature(CretaceousTemperature);
+    SunLight->SetUseTemperature(true);
+    SunLight->SetCastVolumetricShadow(true);
+    
+    UE_LOG(LogTemp, Log, TEXT("Light_AtmosphereManager: Cretaceous lighting configured"));
+}
+
+void ALight_AtmosphereManager::ConfigureLumenSettings()
+{
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        return;
+    }
+
+    if (bEnableLumenGI)
+    {
+        // Configure Lumen Global Illumination via console commands
+        UKismetSystemLibrary::ExecuteConsoleCommand(World, TEXT("r.Lumen.GlobalIllumination 1"));
+        UKismetSystemLibrary::ExecuteConsoleCommand(World, TEXT("r.Lumen.Reflections 1"));
+        UKismetSystemLibrary::ExecuteConsoleCommand(World, TEXT("r.Lumen.ScreenProbeGather 1"));
+        UKismetSystemLibrary::ExecuteConsoleCommand(World, TEXT("r.Lumen.RadianceCache 1"));
+    }
+
+    if (bEnableVolumetricFog)
+    {
+        UKismetSystemLibrary::ExecuteConsoleCommand(World, TEXT("r.VolumetricFog 1"));
+        UKismetSystemLibrary::ExecuteConsoleCommand(World, TEXT("r.VolumetricFog.GridPixelSize 8"));
+        UKismetSystemLibrary::ExecuteConsoleCommand(World, TEXT("r.Fog 1"));
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("Light_AtmosphereManager: Lumen and fog settings configured"));
+}
+
+void ALight_AtmosphereManager::SpawnBiomeAtmosphericLights()
+{
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        return;
+    }
+
+    BiomeAtmosphericLights.Empty();
+
+    for (const FLight_BiomeAtmosphere& Biome : BiomeSettings)
+    {
+        for (int32 i = 0; i < 3; i++)
         {
-            return Config;
+            FVector SpawnLocation = Biome.BiomeCenter;
+            SpawnLocation.X += FMath::RandRange(-8000.0f, 8000.0f);
+            SpawnLocation.Y += FMath::RandRange(-8000.0f, 8000.0f);
+            SpawnLocation.Z += FMath::RandRange(500.0f, 1500.0f);
+
+            FActorSpawnParameters SpawnParams;
+            SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+
+            APointLight* PointLightActor = World->SpawnActor<APointLight>(APointLight::StaticClass(), SpawnLocation, FRotator::ZeroRotator, SpawnParams);
+            
+            if (PointLightActor)
+            {
+                UPointLightComponent* PointLightComp = PointLightActor->GetPointLightComponent();
+                if (PointLightComp)
+                {
+                    PointLightComp->SetIntensity(Biome.LightIntensity);
+                    PointLightComp->SetLightColor(Biome.AtmosphericColor);
+                    PointLightComp->SetAttenuationRadius(5000.0f);
+                    PointLightComp->SetCastVolumetricShadow(true);
+                    
+                    BiomeAtmosphericLights.Add(PointLightComp);
+                }
+                
+                PointLightActor->SetActorLabel(FString::Printf(TEXT("AtmosphericLight_%s_%d"), *Biome.BiomeName, i));
+            }
         }
     }
     
-    // Return default config if not found
-    return FLight_BiomeConfig();
+    UE_LOG(LogTemp, Log, TEXT("Light_AtmosphereManager: Spawned %d atmospheric lights"), BiomeAtmosphericLights.Num());
+}
+
+FLight_BiomeAtmosphere ALight_AtmosphereManager::GetBiomeAtmosphereByLocation(FVector Location)
+{
+    float MinDistance = FLT_MAX;
+    FLight_BiomeAtmosphere ClosestBiome;
+
+    for (const FLight_BiomeAtmosphere& Biome : BiomeSettings)
+    {
+        float Distance = FVector::Dist(Location, Biome.BiomeCenter);
+        if (Distance < MinDistance)
+        {
+            MinDistance = Distance;
+            ClosestBiome = Biome;
+        }
+    }
+
+    return ClosestBiome;
+}
+
+void ALight_AtmosphereManager::UpdateSunPosition()
+{
+    if (!SunLight)
+    {
+        return;
+    }
+
+    // Calculate sun position based on time of day
+    float SunAngle = CurrentTimeOfDay * 360.0f - 90.0f; // -90 to start at dawn
+    float SunPitch = FMath::Sin(FMath::DegreesToRadians(SunAngle)) * 90.0f;
+    float SunYaw = 45.0f; // Fixed yaw for consistent shadows
+
+    // Clamp pitch for realistic sun movement
+    SunPitch = FMath::Clamp(SunPitch, -25.0f, 85.0f);
+
+    FRotator NewRotation(SunPitch, SunYaw, 0.0f);
+    GetOwner()->SetActorRotation(NewRotation);
+}
+
+void ALight_AtmosphereManager::UpdateAtmosphericProperties()
+{
+    if (!SunLight)
+    {
+        return;
+    }
+
+    // Adjust sun intensity based on time of day
+    float IntensityMultiplier = 1.0f;
+    
+    switch (CurrentPeriod)
+    {
+        case ELight_TimeOfDay::Dawn:
+            IntensityMultiplier = 0.3f;
+            break;
+        case ELight_TimeOfDay::Morning:
+            IntensityMultiplier = 0.7f;
+            break;
+        case ELight_TimeOfDay::Noon:
+            IntensityMultiplier = 1.0f;
+            break;
+        case ELight_TimeOfDay::Afternoon:
+            IntensityMultiplier = 0.8f;
+            break;
+        case ELight_TimeOfDay::Dusk:
+            IntensityMultiplier = 0.4f;
+            break;
+        case ELight_TimeOfDay::Night:
+            IntensityMultiplier = 0.1f;
+            break;
+    }
+
+    SunLight->SetIntensity(8.5f * IntensityMultiplier);
+}
+
+ELight_TimeOfDay ALight_AtmosphereManager::CalculateTimeOfDay(float TimeValue)
+{
+    if (TimeValue < 0.125f) return ELight_TimeOfDay::Night;
+    if (TimeValue < 0.25f) return ELight_TimeOfDay::Dawn;
+    if (TimeValue < 0.5f) return ELight_TimeOfDay::Morning;
+    if (TimeValue < 0.625f) return ELight_TimeOfDay::Noon;
+    if (TimeValue < 0.75f) return ELight_TimeOfDay::Afternoon;
+    if (TimeValue < 0.875f) return ELight_TimeOfDay::Dusk;
+    return ELight_TimeOfDay::Night;
 }
