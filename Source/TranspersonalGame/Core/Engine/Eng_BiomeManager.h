@@ -1,111 +1,67 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
 #include "Engine/World.h"
-#include "Components/StaticMeshComponent.h"
-#include "Components/SceneComponent.h"
-#include "../SharedTypes.h"
+#include "GameFramework/GameModeBase.h"
+#include "Subsystems/WorldSubsystem.h"
+#include "SharedTypes.h"
 #include "Eng_BiomeManager.generated.h"
 
-USTRUCT(BlueprintType)
-struct FEng_BiomeData
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    FString BiomeName;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    FVector BiomeCenter;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float BiomeRadius;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    EBiomeType BiomeType;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float Temperature;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float Humidity;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    TArray<FString> AllowedDinosaurTypes;
-
-    FEng_BiomeData()
-    {
-        BiomeName = TEXT("Unknown");
-        BiomeCenter = FVector::ZeroVector;
-        BiomeRadius = 15000.0f;
-        BiomeType = EBiomeType::Savanna;
-        Temperature = 25.0f;
-        Humidity = 50.0f;
-    }
-};
-
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API AEng_BiomeManager : public AActor
+class TRANSPERSONALGAME_API UEng_BiomeManager : public UWorldSubsystem
 {
     GENERATED_BODY()
 
 public:
-    AEng_BiomeManager();
+    UEng_BiomeManager();
+
+    // USubsystem interface
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
+
+    // Biome Management
+    UFUNCTION(BlueprintCallable, Category = "Biome System")
+    EBiomeType GetBiomeAtLocation(FVector WorldLocation) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Biome System")
+    FVector GetBiomeCenter(EBiomeType BiomeType) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Biome System")
+    TArray<FVector> GetSpawnPointsInBiome(EBiomeType BiomeType, int32 NumPoints) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Biome System")
+    void DistributeActorsAcrossBiomes(TArray<AActor*> ActorsToDistribute);
+
+    UFUNCTION(BlueprintCallable, Category = "Biome System")
+    bool IsLocationInBiome(FVector Location, EBiomeType BiomeType) const;
+
+    // Biome Configuration
+    UFUNCTION(BlueprintCallable, Category = "Biome System")
+    void SetBiomeRadius(float NewRadius);
+
+    UFUNCTION(BlueprintCallable, Category = "Biome System")
+    float GetBiomeRadius() const { return BiomeRadius; }
+
+    // Statistics and Validation
+    UFUNCTION(BlueprintCallable, Category = "Biome System")
+    int32 GetActorCountInBiome(EBiomeType BiomeType) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Biome System")
+    void ValidateBiomeDistribution();
 
 protected:
-    virtual void BeginPlay() override;
+    // Biome configuration
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Biome System", meta = (AllowPrivateAccess = "true"))
+    float BiomeRadius;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    USceneComponent* RootSceneComponent;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Biome System", meta = (AllowPrivateAccess = "true"))
+    TMap<EBiomeType, FVector> BiomeCenters;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome System")
-    TArray<FEng_BiomeData> BiomeDefinitions;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome System")
-    bool bAutoInitializeBiomes;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome System")
-    bool bDebugVisualization;
-
-public:
-    virtual void Tick(float DeltaTime) override;
-
-    UFUNCTION(BlueprintCallable, Category = "Biome System")
-    void InitializeDefaultBiomes();
-
-    UFUNCTION(BlueprintCallable, Category = "Biome System")
-    EBiomeType GetBiomeTypeAtLocation(const FVector& Location) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Biome System")
-    FEng_BiomeData GetBiomeDataAtLocation(const FVector& Location) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Biome System")
-    FVector GetRandomLocationInBiome(EBiomeType BiomeType) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Biome System")
-    TArray<FVector> GetDistributedSpawnLocations(int32 TotalCount) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Biome System")
-    bool IsDinosaurAllowedInBiome(const FString& DinosaurType, EBiomeType BiomeType) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Biome System")
-    void AddBiome(const FEng_BiomeData& NewBiome);
-
-    UFUNCTION(BlueprintCallable, Category = "Biome System")
-    void RemoveBiome(EBiomeType BiomeType);
-
-    UFUNCTION(BlueprintCallable, Category = "Biome System")
-    void UpdateBiomeData(EBiomeType BiomeType, const FEng_BiomeData& UpdatedData);
-
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Debug")
-    void DebugPrintBiomeInfo();
-
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Debug")
-    void CreateBiomeVisualizationActors();
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Biome System", meta = (AllowPrivateAccess = "true"))
+    TMap<EBiomeType, float> BiomeWeights;
 
 private:
-    void SetupDefaultBiomeData();
-    float CalculateDistanceToNearestBiome(const FVector& Location) const;
-    int32 FindBiomeIndex(EBiomeType BiomeType) const;
+    void InitializeBiomeCenters();
+    FVector GetRandomPointInBiome(EBiomeType BiomeType) const;
+    bool IsValidSpawnLocation(FVector Location) const;
 };
