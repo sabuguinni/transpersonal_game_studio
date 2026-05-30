@@ -1,15 +1,16 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/GameInstanceSubsystem.h"
 #include "Engine/World.h"
+#include "GameFramework/GameModeBase.h"
+#include "Components/ActorComponent.h"
 #include "QA_ValidationManager.generated.h"
 
 UENUM(BlueprintType)
 enum class EQA_ValidationResult : uint8
 {
     Pass        UMETA(DisplayName = "Pass"),
-    Warning     UMETA(DisplayName = "Warning"), 
+    Warning     UMETA(DisplayName = "Warning"),
     Fail        UMETA(DisplayName = "Fail"),
     Critical    UMETA(DisplayName = "Critical")
 };
@@ -41,63 +42,93 @@ struct FQA_ValidationReport
 };
 
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UQA_ValidationManager : public UGameInstanceSubsystem
+class TRANSPERSONALGAME_API UQA_ValidationManager : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
     UQA_ValidationManager();
 
-    // Subsystem interface
-    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
-    virtual void Deinitialize() override;
+protected:
+    virtual void BeginPlay() override;
+
+public:
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
     // Core validation functions
-    UFUNCTION(BlueprintCallable, Category = "QA", CallInEditor = true)
+    UFUNCTION(BlueprintCallable, Category = "QA", CallInEditor)
     void RunFullValidationSuite();
 
-    UFUNCTION(BlueprintCallable, Category = "QA", CallInEditor = true)
-    void ValidateActorDistribution();
+    UFUNCTION(BlueprintCallable, Category = "QA", CallInEditor)
+    void ValidatePerformance();
 
-    UFUNCTION(BlueprintCallable, Category = "QA", CallInEditor = true)
-    void ValidatePerformanceMetrics();
+    UFUNCTION(BlueprintCallable, Category = "QA", CallInEditor)
+    void ValidateDinosaurSystems();
 
-    UFUNCTION(BlueprintCallable, Category = "QA", CallInEditor = true)
-    void ValidateGameplaySystems();
+    UFUNCTION(BlueprintCallable, Category = "QA", CallInEditor)
+    void ValidateEnvironmentSystems();
 
-    UFUNCTION(BlueprintCallable, Category = "QA", CallInEditor = true)
-    void ValidateDinosaurAssets();
+    UFUNCTION(BlueprintCallable, Category = "QA", CallInEditor)
+    void ValidateAudioSystems();
 
-    UFUNCTION(BlueprintCallable, Category = "QA", CallInEditor = true)
+    UFUNCTION(BlueprintCallable, Category = "QA", CallInEditor)
     void ValidateVFXSystems();
 
-    // Report management
+    UFUNCTION(BlueprintCallable, Category = "QA", CallInEditor)
+    void ValidateAISystems();
+
+    UFUNCTION(BlueprintCallable, Category = "QA", CallInEditor)
+    void ValidateCharacterSystems();
+
+    UFUNCTION(BlueprintCallable, Category = "QA", CallInEditor)
+    void GenerateQAReport();
+
+    // Biome distribution validation
+    UFUNCTION(BlueprintCallable, Category = "QA", CallInEditor)
+    void ValidateBiomeDistribution();
+
+    // Performance monitoring
     UFUNCTION(BlueprintCallable, Category = "QA")
-    TArray<FQA_ValidationReport> GetValidationReports() const;
+    float GetCurrentFPS();
 
     UFUNCTION(BlueprintCallable, Category = "QA")
-    void ClearValidationReports();
+    int32 GetActorCount();
 
     UFUNCTION(BlueprintCallable, Category = "QA")
-    void ExportValidationReport(const FString& FilePath);
+    float GetMemoryUsage();
 
 protected:
     UPROPERTY(BlueprintReadOnly, Category = "QA")
     TArray<FQA_ValidationReport> ValidationReports;
 
-    UPROPERTY(BlueprintReadOnly, Category = "QA")
-    int32 TotalActorCount;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA")
+    bool bAutoRunValidation;
 
-    UPROPERTY(BlueprintReadOnly, Category = "QA")
-    int32 DinosaurCount;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA")
+    float ValidationInterval;
 
-    UPROPERTY(BlueprintReadOnly, Category = "QA")
-    float LastValidationTime;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA")
+    int32 MaxActorCountWarning;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA")
+    int32 MaxActorCountCritical;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA")
+    float MinFPSWarning;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA")
+    float MinFPSCritical;
 
 private:
-    void AddValidationReport(const FString& TestName, EQA_ValidationResult Result, const FString& Details, float ExecutionTime);
-    void ValidateBiomeDistribution();
-    void ValidateAssetLoading();
-    void ValidateClassCompilation();
-    bool IsActorInBiome(AActor* Actor, const FVector& BiomeCenter, float Radius = 20000.0f);
+    float LastValidationTime;
+    
+    // Helper functions
+    FQA_ValidationReport CreateReport(const FString& TestName, EQA_ValidationResult Result, const FString& Details, float ExecutionTime);
+    void LogValidationResult(const FQA_ValidationReport& Report);
+    bool ValidateClassLoading(const FString& ClassName, const FString& ClassPath);
+    bool ValidateAssetLoading(const FString& AssetPath);
+    int32 CountActorsOfType(const FString& ActorType);
+    void CheckBiomeActorDistribution();
 };
+
+#include "QA_ValidationManager.generated.h"
