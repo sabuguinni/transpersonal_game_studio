@@ -2,82 +2,69 @@
 
 #include "CoreMinimal.h"
 #include "Engine/Engine.h"
-#include "UObject/NoExportTypes.h"
+#include "GameFramework/GameModeBase.h"
 #include "BuildIntegrationReport.generated.h"
 
-UENUM(BlueprintType)
-enum class EBuild_IntegrationStatus : uint8
-{
-    Unknown = 0,
-    Operational = 1,
-    Warning = 2,
-    Critical = 3,
-    Failed = 4
-};
-
+/**
+ * Build Integration Report System
+ * Tracks compilation status, system health, and cross-module dependencies
+ */
 USTRUCT(BlueprintType)
 struct TRANSPERSONALGAME_API FBuild_SystemStatus
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    UPROPERTY(BlueprintReadOnly, Category = "Build")
     FString SystemName;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    EBuild_IntegrationStatus Status;
+    UPROPERTY(BlueprintReadOnly, Category = "Build")
+    bool bIsLoaded;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    int32 ActorCount;
+    UPROPERTY(BlueprintReadOnly, Category = "Build")
+    bool bIsCompiled;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    FString LastError;
+    UPROPERTY(BlueprintReadOnly, Category = "Build")
+    FString ErrorMessage;
 
     FBuild_SystemStatus()
     {
         SystemName = TEXT("");
-        Status = EBuild_IntegrationStatus::Unknown;
-        ActorCount = 0;
-        LastError = TEXT("");
+        bIsLoaded = false;
+        bIsCompiled = false;
+        ErrorMessage = TEXT("");
     }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FBuild_IntegrationData
+struct TRANSPERSONALGAME_API FBuild_PerformanceMetrics
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    TArray<FBuild_SystemStatus> SystemStatuses;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
     int32 TotalActors;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    int32 LoadedClasses;
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    int32 StaticMeshActors;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    int32 FailedClasses;
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    int32 SkeletalMeshActors;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    FDateTime LastValidation;
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    int32 LightActors;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    EBuild_IntegrationStatus OverallStatus;
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float EstimatedFrameTime;
 
-    FBuild_IntegrationData()
+    FBuild_PerformanceMetrics()
     {
         TotalActors = 0;
-        LoadedClasses = 0;
-        FailedClasses = 0;
-        LastValidation = FDateTime::Now();
-        OverallStatus = EBuild_IntegrationStatus::Unknown;
+        StaticMeshActors = 0;
+        SkeletalMeshActors = 0;
+        LightActors = 0;
+        EstimatedFrameTime = 0.0f;
     }
 };
 
-/**
- * Build Integration Report - Tracks system health and cross-module compatibility
- * Used by Agent #19 to validate that all agent outputs integrate correctly
- */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UBuildIntegrationReport : public UObject
 {
@@ -86,57 +73,34 @@ class TRANSPERSONALGAME_API UBuildIntegrationReport : public UObject
 public:
     UBuildIntegrationReport();
 
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    void ValidateAllSystems();
+    UPROPERTY(BlueprintReadOnly, Category = "Build")
+    TArray<FBuild_SystemStatus> SystemStatuses;
 
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    FBuild_IntegrationData GetIntegrationData() const;
+    UPROPERTY(BlueprintReadOnly, Category = "Build")
+    FBuild_PerformanceMetrics PerformanceMetrics;
 
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    EBuild_IntegrationStatus GetSystemStatus(const FString& SystemName) const;
+    UPROPERTY(BlueprintReadOnly, Category = "Build")
+    bool bBuildSuccessful;
 
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    void AddSystemStatus(const FString& SystemName, EBuild_IntegrationStatus Status, int32 ActorCount, const FString& ErrorMessage = TEXT(""));
+    UPROPERTY(BlueprintReadOnly, Category = "Build")
+    FDateTime LastBuildTime;
 
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    bool IsSystemOperational(const FString& SystemName) const;
+    UPROPERTY(BlueprintReadOnly, Category = "Build")
+    FString BuildVersion;
 
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    TArray<FString> GetFailedSystems() const;
+    UFUNCTION(BlueprintCallable, Category = "Build")
+    void GenerateReport();
 
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    void ClearReport();
+    UFUNCTION(BlueprintCallable, Category = "Build")
+    bool ValidateSystemIntegration();
 
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    FString GenerateReportSummary() const;
+    UFUNCTION(BlueprintCallable, Category = "Build")
+    void CheckPerformanceMetrics();
 
-protected:
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    FBuild_IntegrationData IntegrationData;
-
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    void ValidateCharacterSystem();
-
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    void ValidateWorldGeneration();
-
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    void ValidateDinosaurAI();
-
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    void ValidateVFXSystem();
-
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    void ValidateFoliageSystem();
-
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    void ValidateCrowdSimulation();
-
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    void ValidateAudioSystem();
+    UFUNCTION(BlueprintCallable, Category = "Build")
+    FString GetBuildSummary() const;
 
 private:
-    void UpdateOverallStatus();
-    bool ValidateClassLoading(const FString& ClassName);
-    int32 CountActorsOfType(const FString& ActorType);
+    void CheckSystemStatus(const FString& SystemName, UClass* SystemClass);
+    void ValidateCrossSystemDependencies();
 };
