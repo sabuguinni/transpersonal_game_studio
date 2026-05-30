@@ -3,14 +3,27 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "Components/StaticMeshComponent.h"
-#include "Engine/StaticMeshActor.h"
-#include "SharedTypes.h"
+#include "Engine/StaticMesh.h"
+#include "Materials/MaterialInterface.h"
 #include "World_WaterSystemManager.generated.h"
 
+UENUM(BlueprintType)
+enum class EWorld_WaterType : uint8
+{
+    River           UMETA(DisplayName = "River"),
+    Lake            UMETA(DisplayName = "Lake"),
+    Swamp           UMETA(DisplayName = "Swamp"),
+    Stream          UMETA(DisplayName = "Stream"),
+    Pond            UMETA(DisplayName = "Pond")
+};
+
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FWorld_WaterBody
+struct TRANSPERSONALGAME_API FWorld_WaterBodyData
 {
     GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water")
+    EWorld_WaterType WaterType;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water")
     FVector Location;
@@ -19,47 +32,22 @@ struct TRANSPERSONALGAME_API FWorld_WaterBody
     FVector Scale;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water")
-    EBiomeType BiomeType;
+    float Depth;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water")
-    float WaterDepth;
+    bool bHasCurrentFlow;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water")
-    bool bIsRiver;
+    FVector FlowDirection;
 
-    FWorld_WaterBody()
+    FWorld_WaterBodyData()
     {
+        WaterType = EWorld_WaterType::Lake;
         Location = FVector::ZeroVector;
-        Scale = FVector::OneVector;
-        BiomeType = EBiomeType::Grassland;
-        WaterDepth = 100.0f;
-        bIsRiver = false;
-    }
-};
-
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FWorld_RiverSegment
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "River")
-    FVector StartPoint;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "River")
-    FVector EndPoint;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "River")
-    float Width;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "River")
-    float FlowRate;
-
-    FWorld_RiverSegment()
-    {
-        StartPoint = FVector::ZeroVector;
-        EndPoint = FVector::ZeroVector;
-        Width = 500.0f;
-        FlowRate = 1.0f;
+        Scale = FVector(10.0f, 10.0f, 1.0f);
+        Depth = 100.0f;
+        bHasCurrentFlow = false;
+        FlowDirection = FVector::ForwardVector;
     }
 };
 
@@ -75,47 +63,63 @@ protected:
     virtual void BeginPlay() override;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    USceneComponent* RootSceneComponent;
+    class USceneComponent* RootSceneComponent;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water Bodies")
-    TArray<FWorld_WaterBody> WaterBodies;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water System")
+    TArray<FWorld_WaterBodyData> WaterBodies;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rivers")
-    TArray<FWorld_RiverSegment> RiverSegments;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water System")
+    UStaticMesh* WaterPlaneMesh;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water Settings")
-    float GlobalWaterLevel;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water System")
+    UMaterialInterface* WaterMaterial;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water Settings")
-    float WaterFlowSpeed;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water System")
+    float WaterLevel;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water Settings")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water System")
     bool bEnableWaterPhysics;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water System")
+    float WaterDensity;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water System")
+    float WaterViscosity;
+
 public:
-    UFUNCTION(BlueprintCallable, Category = "Water System")
-    void GenerateWaterBodies();
+    virtual void Tick(float DeltaTime) override;
 
     UFUNCTION(BlueprintCallable, Category = "Water System")
-    void CreateRiverSystem();
+    void CreateWaterBody(const FWorld_WaterBodyData& WaterData);
 
     UFUNCTION(BlueprintCallable, Category = "Water System")
-    void UpdateWaterLevels();
+    void RemoveWaterBody(int32 Index);
 
     UFUNCTION(BlueprintCallable, Category = "Water System")
-    FWorld_WaterBody CreateLakeAtLocation(FVector Location, EBiomeType BiomeType, float Size);
+    void UpdateWaterLevel(float NewLevel);
 
     UFUNCTION(BlueprintCallable, Category = "Water System")
-    void ConnectBiomesWithRiver(FVector StartBiome, FVector EndBiome);
+    bool IsLocationInWater(const FVector& Location) const;
 
     UFUNCTION(BlueprintCallable, Category = "Water System")
-    bool IsLocationNearWater(FVector Location, float Radius) const;
+    float GetWaterDepthAtLocation(const FVector& Location) const;
 
     UFUNCTION(BlueprintCallable, Category = "Water System")
-    float GetWaterDepthAtLocation(FVector Location) const;
+    FVector GetWaterFlowAtLocation(const FVector& Location) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Water System")
+    void GenerateBiomeWaterSystems();
+
+    UFUNCTION(BlueprintCallable, Category = "Water System")
+    void CreateRiverSystem(const FVector& StartLocation, const FVector& EndLocation, float Width = 500.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "Water System")
+    void CreateLakeSystem(const FVector& CenterLocation, float Radius = 2000.0f);
 
 private:
-    void SpawnWaterMeshAtLocation(const FWorld_WaterBody& WaterBody);
-    void CreateRiverMesh(const FWorld_RiverSegment& RiverSegment);
-    void SetupWaterMaterial(UStaticMeshComponent* WaterMesh);
+    TArray<UStaticMeshComponent*> WaterMeshComponents;
+
+    void SpawnWaterMesh(const FWorld_WaterBodyData& WaterData);
+    void UpdateWaterFlow(float DeltaTime);
+    void ApplyWaterPhysics();
 };
