@@ -1,54 +1,29 @@
 #include "Arch_StructureManager.h"
-#include "Components/StaticMeshComponent.h"
-#include "Components/SceneComponent.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "Math/UnrealMathUtility.h"
+#include "Engine/StaticMeshActor.h"
+#include "Components/StaticMeshComponent.h"
+#include "Kismet/KismetMathLibrary.h"
+#include "Engine/StaticMesh.h"
 
 AArch_StructureManager::AArch_StructureManager()
 {
-    PrimaryActorTick.bCanEverTick = true;
-
-    // Create root component
-    RootSceneComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootSceneComponent"));
-    RootComponent = RootSceneComponent;
-
-    // Create primary structure mesh
-    PrimaryStructureMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("PrimaryStructureMesh"));
-    PrimaryStructureMesh->SetupAttachment(RootComponent);
-
-    // Initialize biome locations (from memory ID 709)
-    BiomeLocations.Empty();
-    BiomeLocations.Add(FVector(0.0f, 0.0f, 100.0f)); // Savana
-    BiomeLocations.Add(FVector(-50000.0f, -45000.0f, 100.0f)); // Pantano
-    BiomeLocations.Add(FVector(-45000.0f, 40000.0f, 100.0f)); // Floresta
-    BiomeLocations.Add(FVector(55000.0f, 0.0f, 100.0f)); // Deserto
-    BiomeLocations.Add(FVector(40000.0f, 50000.0f, 100.0f)); // Montanha
-
-    // Initialize structure data
-    StructureData.StructureType = EArch_StructureType::Ruins;
-    StructureData.Location = FVector::ZeroVector;
-    StructureData.Rotation = FRotator::ZeroRotator;
-    StructureData.Scale = FVector::OneVector;
-    StructureData.WearLevel = 0.5f;
-    StructureData.bHasMossGrowth = true;
-    StructureData.bHasCarvedSymbols = false;
+    PrimaryActorTick.bCanEverTick = false;
+    
+    bAutoDistributeOnBeginPlay = true;
+    StructuresPerBiome = 5;
+    MinDistanceBetweenStructures = 2000.0f;
 }
 
 void AArch_StructureManager::BeginPlay()
 {
     Super::BeginPlay();
     
-    UpdateStructureMesh();
+    InitializeStructureMeshes();
     
-    if (StructureData.bHasMossGrowth)
+    if (bAutoDistributeOnBeginPlay)
     {
-        ApplyMossEffect();
-    }
-    
-    if (StructureData.bHasCarvedSymbols)
-    {
-        ApplyCarvedSymbols();
+        DistributeStructuresAcrossBiomes();
     }
 }
 
@@ -57,163 +32,231 @@ void AArch_StructureManager::Tick(float DeltaTime)
     Super::Tick(DeltaTime);
 }
 
-void AArch_StructureManager::SetStructureType(EArch_StructureType NewType)
+void AArch_StructureManager::SpawnStructureAtBiome(EArch_StructureType StructureType, EBiomeType BiomeType, int32 Count)
 {
-    StructureData.StructureType = NewType;
-    UpdateStructureMesh();
-}
-
-void AArch_StructureManager::ApplyWeatheringEffect(float WeatheringAmount)
-{
-    StructureData.WearLevel = FMath::Clamp(StructureData.WearLevel + WeatheringAmount, 0.0f, 1.0f);
-    
-    // Apply visual weathering effects
-    if (PrimaryStructureMesh && PrimaryStructureMesh->GetMaterial(0))
+    for (int32 i = 0; i < Count; i++)
     {
-        // Create dynamic material instance to modify weathering parameters
-        UMaterialInstanceDynamic* DynamicMaterial = PrimaryStructureMesh->CreateDynamicMaterialInstance(0);
-        if (DynamicMaterial)
-        {
-            DynamicMaterial->SetScalarParameterValue(TEXT("WeatheringLevel"), StructureData.WearLevel);
-            DynamicMaterial->SetScalarParameterValue(TEXT("MossAmount"), StructureData.bHasMossGrowth ? StructureData.WearLevel * 0.8f : 0.0f);
-        }
+        FArch_StructureSpawnData SpawnData;
+        SpawnData.StructureType = StructureType;
+        SpawnData.BiomeType = BiomeType;
+        SpawnData.SpawnLocation = GetRandomLocationInBiome(BiomeType);
+        SpawnData.SpawnRotation = FRotator(0.0f, FMath::RandRange(0.0f, 360.0f), 0.0f);
+        SpawnData.Scale = FVector(FMath::RandRange(0.8f, 1.2f));
+        
+        SpawnStructureAtLocation(SpawnData);
     }
 }
 
-void AArch_StructureManager::SpawnStructureAtBiome(int32 BiomeIndex, EArch_StructureType StructureType)
+void AArch_StructureManager::SpawnStructureAtLocation(const FArch_StructureSpawnData& SpawnData)
 {
-    if (BiomeIndex >= 0 && BiomeIndex < BiomeLocations.Num())
+    if (!IsLocationValid(SpawnData.SpawnLocation, MinDistanceBetweenStructures))
     {
-        FVector BiomeLocation = BiomeLocations[BiomeIndex];
+        return;
+    }
+    
+    UStaticMesh* Mesh = GetStructureMesh(SpawnData.StructureType);
+    if (!Mesh)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("No mesh found for structure type"));
+        return;
+    }
+    
+    AActor* SpawnedActor = SpawnStructureMesh(Mesh, SpawnData.SpawnLocation, SpawnData.SpawnRotation, SpawnData.Scale);
+    if (SpawnedActor)
+    {
+        SpawnedStructures.Add(SpawnedActor);
         
-        // Add random offset within biome area
-        FVector RandomOffset = FVector(
-            FMath::RandRange(-15000.0f, 15000.0f),
-            FMath::RandRange(-15000.0f, 15000.0f),
-            0.0f
-        );
+        // Set appropriate label
+        FString BiomeName = UEnum::GetValueAsString(SpawnData.BiomeType);
+        FString StructureName = UEnum::GetValueAsString(SpawnData.StructureType);
+        FString Label = FString::Printf(TEXT("%s_%s_%d"), *StructureName, *BiomeName, SpawnedStructures.Num());
+        SpawnedActor->SetActorLabel(Label);
         
-        FVector SpawnLocation = BiomeLocation + RandomOffset;
-        
-        // Set structure data
-        StructureData.StructureType = StructureType;
-        StructureData.Location = SpawnLocation;
-        StructureData.Rotation = FRotator(0.0f, FMath::RandRange(0.0f, 360.0f), 0.0f);
-        
-        // Move actor to new location
-        SetActorLocation(SpawnLocation);
-        SetActorRotation(StructureData.Rotation);
-        
-        UpdateStructureMesh();
-        
-        UE_LOG(LogTemp, Warning, TEXT("AArch_StructureManager: Spawned %s structure at biome %d: %s"), 
-               *UEnum::GetValueAsString(StructureType), BiomeIndex, *SpawnLocation.ToString());
+        UE_LOG(LogTemp, Log, TEXT("Spawned structure: %s at %s"), *Label, *SpawnData.SpawnLocation.ToString());
     }
 }
 
 void AArch_StructureManager::DistributeStructuresAcrossBiomes()
 {
-    for (int32 i = 0; i < BiomeLocations.Num(); ++i)
-    {
-        EArch_StructureType StructureType = static_cast<EArch_StructureType>(FMath::RandRange(0, 5));
-        SpawnStructureAtBiome(i, StructureType);
-    }
-}
-
-void AArch_StructureManager::GenerateRandomStructures()
-{
-    // Generate 3-5 random structures across biomes
-    int32 NumStructures = FMath::RandRange(3, 5);
+    // Clear existing structures
+    ClearAllStructures();
     
-    for (int32 i = 0; i < NumStructures; ++i)
-    {
-        int32 RandomBiome = FMath::RandRange(0, BiomeLocations.Num() - 1);
-        EArch_StructureType RandomType = static_cast<EArch_StructureType>(FMath::RandRange(0, 5));
-        
-        SpawnStructureAtBiome(RandomBiome, RandomType);
-    }
+    // Spawn structures in each biome
+    TArray<EBiomeType> Biomes = {
+        EBiomeType::Savana,
+        EBiomeType::Pantano,
+        EBiomeType::Floresta,
+        EBiomeType::Deserto,
+        EBiomeType::Montanha
+    };
     
-    UE_LOG(LogTemp, Warning, TEXT("AArch_StructureManager: Generated %d random structures"), NumStructures);
-}
-
-void AArch_StructureManager::SetStructureData(const FArch_StructureData& NewData)
-{
-    StructureData = NewData;
-    UpdateStructureMesh();
-    
-    if (StructureData.bHasMossGrowth)
+    for (EBiomeType Biome : Biomes)
     {
-        ApplyMossEffect();
-    }
-    
-    if (StructureData.bHasCarvedSymbols)
-    {
-        ApplyCarvedSymbols();
-    }
-}
-
-void AArch_StructureManager::UpdateStructureMesh()
-{
-    UStaticMesh* NewMesh = GetMeshForStructureType(StructureData.StructureType);
-    
-    if (NewMesh && PrimaryStructureMesh)
-    {
-        PrimaryStructureMesh->SetStaticMesh(NewMesh);
-        PrimaryStructureMesh->SetWorldScale3D(StructureData.Scale);
-        
-        // Apply weathering effect
-        ApplyWeatheringEffect(0.0f); // Refresh current weathering level
-    }
-}
-
-void AArch_StructureManager::ApplyMossEffect()
-{
-    if (PrimaryStructureMesh && PrimaryStructureMesh->GetMaterial(0))
-    {
-        UMaterialInstanceDynamic* DynamicMaterial = PrimaryStructureMesh->CreateDynamicMaterialInstance(0);
-        if (DynamicMaterial)
+        // Distribute different structure types per biome
+        switch (Biome)
         {
-            float MossAmount = StructureData.bHasMossGrowth ? FMath::RandRange(0.3f, 0.8f) : 0.0f;
-            DynamicMaterial->SetScalarParameterValue(TEXT("MossAmount"), MossAmount);
-            DynamicMaterial->SetVectorParameterValue(TEXT("MossColor"), FLinearColor(0.2f, 0.6f, 0.3f, 1.0f));
+            case EBiomeType::Savana:
+                SpawnStructureAtBiome(EArch_StructureType::StonePillar, Biome, 2);
+                SpawnStructureAtBiome(EArch_StructureType::TribalShelter, Biome, 3);
+                break;
+                
+            case EBiomeType::Pantano:
+                SpawnStructureAtBiome(EArch_StructureType::RockFormation, Biome, 3);
+                SpawnStructureAtBiome(EArch_StructureType::AncientRuins, Biome, 2);
+                break;
+                
+            case EBiomeType::Floresta:
+                SpawnStructureAtBiome(EArch_StructureType::TribalShelter, Biome, 4);
+                SpawnStructureAtBiome(EArch_StructureType::CaveEntrance, Biome, 1);
+                break;
+                
+            case EBiomeType::Deserto:
+                SpawnStructureAtBiome(EArch_StructureType::AncientRuins, Biome, 3);
+                SpawnStructureAtBiome(EArch_StructureType::RockFormation, Biome, 2);
+                break;
+                
+            case EBiomeType::Montanha:
+                SpawnStructureAtBiome(EArch_StructureType::CaveEntrance, Biome, 2);
+                SpawnStructureAtBiome(EArch_StructureType::StonePillar, Biome, 3);
+                break;
         }
     }
+    
+    UE_LOG(LogTemp, Log, TEXT("Distributed %d structures across all biomes"), SpawnedStructures.Num());
 }
 
-void AArch_StructureManager::ApplyCarvedSymbols()
+TArray<AActor*> AArch_StructureManager::GetStructuresInBiome(EBiomeType BiomeType)
 {
-    if (PrimaryStructureMesh && PrimaryStructureMesh->GetMaterial(0))
+    TArray<AActor*> BiomeStructures;
+    FVector BiomeCenter = GetBiomeCenter(BiomeType);
+    float BiomeRadius = 20000.0f; // 20km radius
+    
+    for (AActor* Structure : SpawnedStructures)
     {
-        UMaterialInstanceDynamic* DynamicMaterial = PrimaryStructureMesh->CreateDynamicMaterialInstance(0);
-        if (DynamicMaterial)
+        if (Structure && IsValid(Structure))
         {
-            float SymbolVisibility = StructureData.bHasCarvedSymbols ? 1.0f : 0.0f;
-            DynamicMaterial->SetScalarParameterValue(TEXT("SymbolVisibility"), SymbolVisibility);
+            float Distance = FVector::Dist(Structure->GetActorLocation(), BiomeCenter);
+            if (Distance <= BiomeRadius)
+            {
+                BiomeStructures.Add(Structure);
+            }
         }
     }
+    
+    return BiomeStructures;
 }
 
-UStaticMesh* AArch_StructureManager::GetMeshForStructureType(EArch_StructureType Type)
+void AArch_StructureManager::ClearAllStructures()
 {
-    // Return appropriate mesh based on structure type
-    // This would normally load from the mesh arrays, but for now return nullptr
-    // The actual meshes would be set in Blueprint or loaded from content
-    
-    switch (Type)
+    for (AActor* Structure : SpawnedStructures)
     {
-        case EArch_StructureType::Ruins:
-            return RuinsMeshes.Num() > 0 ? RuinsMeshes[0] : nullptr;
-        case EArch_StructureType::CaveDwelling:
-            return CaveDwellingMeshes.Num() > 0 ? CaveDwellingMeshes[0] : nullptr;
-        case EArch_StructureType::StonePillar:
-            return PillarMeshes.Num() > 0 ? PillarMeshes[0] : nullptr;
-        case EArch_StructureType::Archway:
-            return RuinsMeshes.Num() > 1 ? RuinsMeshes[1] : nullptr;
-        case EArch_StructureType::Platform:
-            return RuinsMeshes.Num() > 2 ? RuinsMeshes[2] : nullptr;
-        case EArch_StructureType::Shelter:
-            return CaveDwellingMeshes.Num() > 1 ? CaveDwellingMeshes[1] : nullptr;
-        default:
-            return nullptr;
+        if (Structure && IsValid(Structure))
+        {
+            Structure->Destroy();
+        }
     }
+    SpawnedStructures.Empty();
+}
+
+FVector AArch_StructureManager::GetBiomeCenter(EBiomeType BiomeType)
+{
+    switch (BiomeType)
+    {
+        case EBiomeType::Savana:    return FVector(0, 0, 0);
+        case EBiomeType::Pantano:   return FVector(-50000, -45000, 0);
+        case EBiomeType::Floresta:  return FVector(-45000, 40000, 0);
+        case EBiomeType::Deserto:   return FVector(55000, 0, 0);
+        case EBiomeType::Montanha:  return FVector(40000, 50000, 0);
+        default:                    return FVector::ZeroVector;
+    }
+}
+
+FVector AArch_StructureManager::GetRandomLocationInBiome(EBiomeType BiomeType, float Radius)
+{
+    FVector BiomeCenter = GetBiomeCenter(BiomeType);
+    
+    float RandomX = FMath::RandRange(-Radius, Radius);
+    float RandomY = FMath::RandRange(-Radius, Radius);
+    float RandomZ = FMath::RandRange(50.0f, 200.0f); // Slight height variation
+    
+    return BiomeCenter + FVector(RandomX, RandomY, RandomZ);
+}
+
+AActor* AArch_StructureManager::SpawnStructureMesh(UStaticMesh* Mesh, const FVector& Location, const FRotator& Rotation, const FVector& Scale)
+{
+    if (!Mesh || !GetWorld())
+    {
+        return nullptr;
+    }
+    
+    // Spawn StaticMeshActor
+    AStaticMeshActor* MeshActor = GetWorld()->SpawnActor<AStaticMeshActor>(AStaticMeshActor::StaticClass(), Location, Rotation);
+    if (MeshActor)
+    {
+        UStaticMeshComponent* MeshComponent = MeshActor->GetStaticMeshComponent();
+        if (MeshComponent)
+        {
+            MeshComponent->SetStaticMesh(Mesh);
+            MeshComponent->SetWorldScale3D(Scale);
+            MeshComponent->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+            MeshComponent->SetCollisionResponseToAllChannels(ECR_Block);
+        }
+    }
+    
+    return MeshActor;
+}
+
+bool AArch_StructureManager::IsLocationValid(const FVector& Location, float MinDistance)
+{
+    for (AActor* ExistingStructure : SpawnedStructures)
+    {
+        if (ExistingStructure && IsValid(ExistingStructure))
+        {
+            float Distance = FVector::Dist(Location, ExistingStructure->GetActorLocation());
+            if (Distance < MinDistance)
+            {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+UStaticMesh* AArch_StructureManager::GetStructureMesh(EArch_StructureType StructureType)
+{
+    if (StructureMeshes.Contains(StructureType))
+    {
+        TSoftObjectPtr<UStaticMesh> MeshPtr = StructureMeshes[StructureType];
+        if (MeshPtr.IsValid())
+        {
+            return MeshPtr.Get();
+        }
+        else if (!MeshPtr.IsNull())
+        {
+            return MeshPtr.LoadSynchronous();
+        }
+    }
+    
+    // Fallback to engine default cube
+    return LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube"));
+}
+
+void AArch_StructureManager::InitializeStructureMeshes()
+{
+    // Initialize with default engine meshes as fallbacks
+    // These can be replaced with proper assets when available
+    StructureMeshes.Add(EArch_StructureType::StonePillar, 
+        TSoftObjectPtr<UStaticMesh>(FSoftObjectPath(TEXT("/Engine/BasicShapes/Cylinder"))));
+    
+    StructureMeshes.Add(EArch_StructureType::RockFormation, 
+        TSoftObjectPtr<UStaticMesh>(FSoftObjectPath(TEXT("/Engine/BasicShapes/Cube"))));
+    
+    StructureMeshes.Add(EArch_StructureType::CaveEntrance, 
+        TSoftObjectPtr<UStaticMesh>(FSoftObjectPath(TEXT("/Engine/BasicShapes/Sphere"))));
+    
+    StructureMeshes.Add(EArch_StructureType::TribalShelter, 
+        TSoftObjectPtr<UStaticMesh>(FSoftObjectPath(TEXT("/Engine/BasicShapes/Wedge"))));
+    
+    StructureMeshes.Add(EArch_StructureType::AncientRuins, 
+        TSoftObjectPtr<UStaticMesh>(FSoftObjectPath(TEXT("/Engine/BasicShapes/Cube"))));
 }
