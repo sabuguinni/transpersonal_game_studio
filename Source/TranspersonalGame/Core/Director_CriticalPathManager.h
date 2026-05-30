@@ -1,39 +1,28 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "UObject/NoExportTypes.h"
-#include "Engine/World.h"
-#include "GameFramework/Actor.h"
+#include "Components/ActorComponent.h"
+#include "Engine/Engine.h"
 #include "Director_CriticalPathManager.generated.h"
-
-UENUM(BlueprintType)
-enum class EDir_CriticalPathPhase : uint8
-{
-    Phase1_CoreSystems     UMETA(DisplayName = "Phase 1: Core Systems"),
-    Phase2_Character       UMETA(DisplayName = "Phase 2: Character & Movement"),
-    Phase3_Environment     UMETA(DisplayName = "Phase 3: Environment & Terrain"),
-    Phase4_AI              UMETA(DisplayName = "Phase 4: AI & Dinosaurs"),
-    Phase5_Survival        UMETA(DisplayName = "Phase 5: Survival Systems"),
-    Phase6_Integration     UMETA(DisplayName = "Phase 6: Integration & Polish")
-};
-
-UENUM(BlueprintType)
-enum class EDir_TaskPriority : uint8
-{
-    Critical    UMETA(DisplayName = "Critical - Blocks Release"),
-    High        UMETA(DisplayName = "High - Major Feature"),
-    Medium      UMETA(DisplayName = "Medium - Enhancement"),
-    Low         UMETA(DisplayName = "Low - Polish")
-};
 
 UENUM(BlueprintType)
 enum class EDir_TaskStatus : uint8
 {
-    NotStarted  UMETA(DisplayName = "Not Started"),
-    InProgress  UMETA(DisplayName = "In Progress"),
-    Testing     UMETA(DisplayName = "Testing"),
-    Blocked     UMETA(DisplayName = "Blocked"),
-    Complete    UMETA(DisplayName = "Complete")
+    NotStarted      UMETA(DisplayName = "Not Started"),
+    InProgress      UMETA(DisplayName = "In Progress"),
+    Blocked         UMETA(DisplayName = "Blocked"),
+    Completed       UMETA(DisplayName = "Completed"),
+    Failed          UMETA(DisplayName = "Failed")
+};
+
+UENUM(BlueprintType)
+enum class EDir_MilestoneType : uint8
+{
+    WalkAround      UMETA(DisplayName = "Walk Around"),
+    BasicSurvival   UMETA(DisplayName = "Basic Survival"),
+    CombatDanger    UMETA(DisplayName = "Combat & Danger"),
+    WorldBuilding   UMETA(DisplayName = "World Building"),
+    Polish          UMETA(DisplayName = "Polish")
 };
 
 USTRUCT(BlueprintType)
@@ -45,187 +34,262 @@ struct FDir_CriticalTask
     FString TaskName;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Task")
-    FString Description;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Task")
-    int32 AgentID;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Task")
-    EDir_TaskPriority Priority;
+    int32 ResponsibleAgentID;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Task")
     EDir_TaskStatus Status;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Task")
-    EDir_CriticalPathPhase Phase;
+    int32 TargetCycle;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Task")
+    int32 Priority;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Task")
     TArray<int32> Dependencies;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Task")
-    float EstimatedHours;
+    FString FilePath;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Task")
-    float ActualHours;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Task")
-    FString BlockingIssue;
+    FString ValidationCriteria;
 
     FDir_CriticalTask()
     {
         TaskName = TEXT("");
-        Description = TEXT("");
-        AgentID = 0;
-        Priority = EDir_TaskPriority::Medium;
+        ResponsibleAgentID = 0;
         Status = EDir_TaskStatus::NotStarted;
-        Phase = EDir_CriticalPathPhase::Phase1_CoreSystems;
-        EstimatedHours = 0.0f;
-        ActualHours = 0.0f;
-        BlockingIssue = TEXT("");
+        TargetCycle = 0;
+        Priority = 0;
+        FilePath = TEXT("");
+        ValidationCriteria = TEXT("");
     }
 };
 
 USTRUCT(BlueprintType)
-struct FDir_PhaseMetrics
+struct FDir_MilestoneProgress
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Metrics")
-    EDir_CriticalPathPhase Phase;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Milestone")
+    EDir_MilestoneType Type;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Metrics")
-    int32 TotalTasks;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Milestone")
+    FString Name;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Metrics")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Milestone")
+    int32 TargetCycle;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Milestone")
     int32 CompletedTasks;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Metrics")
-    int32 BlockedTasks;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Milestone")
+    int32 TotalTasks;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Metrics")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Milestone")
     float CompletionPercentage;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Metrics")
-    float EstimatedRemainingHours;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Milestone")
+    bool bIsBlocked;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Metrics")
-    bool bCanStartNextPhase;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Milestone")
+    TArray<FString> BlockingReasons;
 
-    FDir_PhaseMetrics()
+    FDir_MilestoneProgress()
     {
-        Phase = EDir_CriticalPathPhase::Phase1_CoreSystems;
-        TotalTasks = 0;
+        Type = EDir_MilestoneType::WalkAround;
+        Name = TEXT("");
+        TargetCycle = 0;
         CompletedTasks = 0;
-        BlockedTasks = 0;
+        TotalTasks = 0;
         CompletionPercentage = 0.0f;
-        EstimatedRemainingHours = 0.0f;
-        bCanStartNextPhase = false;
+        bIsBlocked = false;
     }
 };
 
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UDir_CriticalPathManager : public UObject
+USTRUCT(BlueprintType)
+struct FDir_AgentWorkload
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent")
+    int32 AgentID;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent")
+    FString AgentName;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent")
+    int32 AssignedTasks;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent")
+    int32 CompletedTasks;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent")
+    int32 BlockedTasks;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent")
+    float WorkloadPercentage;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent")
+    bool bIsBottleneck;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent")
+    TArray<FString> CurrentTasks;
+
+    FDir_AgentWorkload()
+    {
+        AgentID = 0;
+        AgentName = TEXT("");
+        AssignedTasks = 0;
+        CompletedTasks = 0;
+        BlockedTasks = 0;
+        WorkloadPercentage = 0.0f;
+        bIsBottleneck = false;
+    }
+};
+
+/**
+ * Critical Path Manager - Tracks and manages the critical path for Milestone 1 completion
+ * Ensures all blocking tasks are identified and resolved for the "Walk Around" prototype
+ */
+UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UDir_CriticalPathManager : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
     UDir_CriticalPathManager();
 
-    // Core Critical Path Management
+protected:
+    virtual void BeginPlay() override;
+
+public:
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+
+    // Critical Path Management
     UFUNCTION(BlueprintCallable, Category = "Critical Path")
-    void InitializeCriticalPath();
+    void InitializeCriticalTasks();
 
     UFUNCTION(BlueprintCallable, Category = "Critical Path")
     void UpdateTaskStatus(const FString& TaskName, EDir_TaskStatus NewStatus);
 
     UFUNCTION(BlueprintCallable, Category = "Critical Path")
-    void BlockTask(const FString& TaskName, const FString& BlockingReason);
+    void ValidateCriticalPath();
 
     UFUNCTION(BlueprintCallable, Category = "Critical Path")
-    void UnblockTask(const FString& TaskName);
+    TArray<FDir_CriticalTask> GetBlockingTasks() const;
 
     UFUNCTION(BlueprintCallable, Category = "Critical Path")
-    bool CanAdvanceToPhase(EDir_CriticalPathPhase TargetPhase);
+    TArray<FDir_CriticalTask> GetCriticalPathTasks() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Critical Path")
-    void AdvanceToNextPhase();
+    // Milestone Management
+    UFUNCTION(BlueprintCallable, Category = "Milestone")
+    void UpdateMilestoneProgress();
 
-    // Task Management
-    UFUNCTION(BlueprintCallable, Category = "Tasks")
-    void AddCriticalTask(const FDir_CriticalTask& NewTask);
+    UFUNCTION(BlueprintCallable, Category = "Milestone")
+    FDir_MilestoneProgress GetCurrentMilestoneStatus() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Tasks")
-    TArray<FDir_CriticalTask> GetTasksForAgent(int32 AgentID);
+    UFUNCTION(BlueprintCallable, Category = "Milestone")
+    bool IsMilestoneOnTrack(EDir_MilestoneType MilestoneType) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Tasks")
-    TArray<FDir_CriticalTask> GetTasksForPhase(EDir_CriticalPathPhase Phase);
+    // Agent Workload Management
+    UFUNCTION(BlueprintCallable, Category = "Agent Management")
+    void AnalyzeAgentWorkloads();
 
-    UFUNCTION(BlueprintCallable, Category = "Tasks")
-    TArray<FDir_CriticalTask> GetBlockedTasks();
+    UFUNCTION(BlueprintCallable, Category = "Agent Management")
+    TArray<FDir_AgentWorkload> GetAgentWorkloads() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Tasks")
-    TArray<FDir_CriticalTask> GetCriticalTasks();
+    UFUNCTION(BlueprintCallable, Category = "Agent Management")
+    TArray<int32> GetBottleneckAgents() const;
 
-    // Metrics and Reporting
-    UFUNCTION(BlueprintCallable, Category = "Metrics")
-    FDir_PhaseMetrics GetPhaseMetrics(EDir_CriticalPathPhase Phase);
+    UFUNCTION(BlueprintCallable, Category = "Agent Management")
+    void RebalanceWorkload();
 
-    UFUNCTION(BlueprintCallable, Category = "Metrics")
-    TArray<FDir_PhaseMetrics> GetAllPhaseMetrics();
-
-    UFUNCTION(BlueprintCallable, Category = "Metrics")
-    float GetOverallCompletionPercentage();
-
-    UFUNCTION(BlueprintCallable, Category = "Metrics")
-    float GetProjectedCompletionHours();
-
-    // Agent Coordination
-    UFUNCTION(BlueprintCallable, Category = "Coordination")
-    TArray<int32> GetReadyAgents();
-
-    UFUNCTION(BlueprintCallable, Category = "Coordination")
-    TArray<int32> GetBlockedAgents();
-
-    UFUNCTION(BlueprintCallable, Category = "Coordination")
-    void AssignTaskToAgent(const FString& TaskName, int32 AgentID);
-
-    UFUNCTION(BlueprintCallable, Category = "Coordination")
-    void ReassignBlockedTasks();
-
-    // Critical Path Validation
+    // Validation and Monitoring
     UFUNCTION(BlueprintCallable, Category = "Validation")
-    bool ValidateCriticalPath();
+    bool ValidateTaskCompletion(const FString& TaskName);
 
     UFUNCTION(BlueprintCallable, Category = "Validation")
-    TArray<FString> GetCriticalPathViolations();
+    void RunCriticalPathDiagnostics();
 
     UFUNCTION(BlueprintCallable, Category = "Validation")
-    void GenerateCriticalPathReport();
+    void GenerateProgressReport();
+
+    // Emergency Protocols
+    UFUNCTION(BlueprintCallable, Category = "Emergency")
+    void TriggerCriticalPathEmergency();
+
+    UFUNCTION(BlueprintCallable, Category = "Emergency")
+    void EscalateMilestoneDelay();
+
+    UFUNCTION(BlueprintCallable, Category = "Emergency")
+    void ActivateAgentReallocation();
 
 protected:
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Critical Path")
+    // Core Data
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Critical Path")
     TArray<FDir_CriticalTask> CriticalTasks;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Critical Path")
-    EDir_CriticalPathPhase CurrentPhase;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Milestone")
+    TArray<FDir_MilestoneProgress> Milestones;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Critical Path")
-    TArray<FDir_PhaseMetrics> PhaseMetrics;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Agent Management")
+    TArray<FDir_AgentWorkload> AgentWorkloads;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Critical Path")
-    float TotalProjectHours;
+    // Configuration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
+    int32 CurrentCycle;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Critical Path")
-    float CompletedProjectHours;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
+    int32 Milestone1TargetCycle;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
+    float CriticalPathThreshold;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
+    bool bEmergencyMode;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
+    bool bAutoRebalance;
+
+    // Monitoring
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Monitoring")
+    float LastValidationTime;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Monitoring")
+    int32 TotalBlockingTasks;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Monitoring")
+    int32 CompletedCriticalTasks;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Monitoring")
+    float OverallProgress;
 
 private:
-    void CalculatePhaseMetrics(EDir_CriticalPathPhase Phase);
-    void UpdateDependencies();
-    bool CheckDependenciesComplete(const FDir_CriticalTask& Task);
-    void InitializePhase1Tasks();
-    void InitializePhase2Tasks();
-    void InitializePhase3Tasks();
-    void InitializePhase4Tasks();
-    void InitializePhase5Tasks();
-    void InitializePhase6Tasks();
+    // Internal Methods
+    void InitializeMilestone1Tasks();
+    void InitializeMilestone2Tasks();
+    void InitializeMilestone3Tasks();
+    
+    void UpdateTaskDependencies();
+    void CalculateCriticalPath();
+    void IdentifyBottlenecks();
+    
+    bool ValidateCharacterMovement();
+    bool ValidateTerrainGeneration();
+    bool ValidateDinosaurPlacement();
+    bool ValidateLightingSetup();
+    
+    void LogCriticalPathStatus();
+    void LogMilestoneProgress();
+    void LogAgentBottlenecks();
+    
+    FDir_CriticalTask* FindTaskByName(const FString& TaskName);
+    FDir_AgentWorkload* FindAgentWorkload(int32 AgentID);
+    
+    void RecalculateProgress();
+    void UpdateDependencyChain();
+    void ValidateFileExistence();
 };
+
+#include "Director_CriticalPathManager.generated.h"
