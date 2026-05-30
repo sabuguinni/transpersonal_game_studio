@@ -3,9 +3,9 @@
 #include "CoreMinimal.h"
 #include "Animation/AnimInstance.h"
 #include "Engine/Engine.h"
+#include "GameFramework/Pawn.h"
 #include "Components/SkeletalMeshComponent.h"
-#include "GameFramework/Character.h"
-#include "GameFramework/CharacterMovementComponent.h"
+#include "SharedTypes.h"
 #include "Anim_DinosaurAnimInstance.generated.h"
 
 UENUM(BlueprintType)
@@ -15,105 +15,83 @@ enum class EAnim_DinosaurState : uint8
     Walking     UMETA(DisplayName = "Walking"),
     Running     UMETA(DisplayName = "Running"),
     Attacking   UMETA(DisplayName = "Attacking"),
-    Feeding     UMETA(DisplayName = "Feeding"),
-    Roaming     UMETA(DisplayName = "Roaming"),
-    Aggressive  UMETA(DisplayName = "Aggressive"),
-    Fleeing     UMETA(DisplayName = "Fleeing"),
+    Eating      UMETA(DisplayName = "Eating"),
     Sleeping    UMETA(DisplayName = "Sleeping"),
+    Alert       UMETA(DisplayName = "Alert"),
+    Wounded     UMETA(DisplayName = "Wounded"),
     Dead        UMETA(DisplayName = "Dead")
 };
 
-UENUM(BlueprintType)
-enum class EAnim_DinosaurSpecies : uint8
-{
-    TRex            UMETA(DisplayName = "T-Rex"),
-    Velociraptor    UMETA(DisplayName = "Velociraptor"),
-    Triceratops     UMETA(DisplayName = "Triceratops"),
-    Brachiosaurus   UMETA(DisplayName = "Brachiosaurus"),
-    Ankylosaurus    UMETA(DisplayName = "Ankylosaurus"),
-    Parasaurolophus UMETA(DisplayName = "Parasaurolophus"),
-    Pachycephalo    UMETA(DisplayName = "Pachycephalo"),
-    Protoceratops   UMETA(DisplayName = "Protoceratops"),
-    Tsintaosaurus   UMETA(DisplayName = "Tsintaosaurus")
-};
-
 USTRUCT(BlueprintType)
-struct FAnim_DinosaurMotionData
+struct FAnim_DinosaurMovement
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Motion")
-    FVector Velocity;
+    UPROPERTY(BlueprintReadOnly, Category = "Movement")
+    float Speed = 0.0f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Motion")
-    float Speed;
+    UPROPERTY(BlueprintReadOnly, Category = "Movement")
+    float TurnRate = 0.0f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Motion")
-    float Direction;
+    UPROPERTY(BlueprintReadOnly, Category = "Movement")
+    bool bIsMoving = false;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Motion")
-    bool bIsMoving;
+    UPROPERTY(BlueprintReadOnly, Category = "Movement")
+    bool bIsTurning = false;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Motion")
-    bool bIsGrounded;
+    UPROPERTY(BlueprintReadOnly, Category = "State")
+    EAnim_DinosaurState CurrentState = EAnim_DinosaurState::Idle;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Motion")
-    float GroundDistance;
-
-    FAnim_DinosaurMotionData()
+    FAnim_DinosaurMovement()
     {
-        Velocity = FVector::ZeroVector;
         Speed = 0.0f;
-        Direction = 0.0f;
+        TurnRate = 0.0f;
         bIsMoving = false;
-        bIsGrounded = true;
-        GroundDistance = 0.0f;
+        bIsTurning = false;
+        CurrentState = EAnim_DinosaurState::Idle;
     }
 };
 
 USTRUCT(BlueprintType)
-struct FAnim_DinosaurBehaviorData
+struct FAnim_DinosaurBehavior
 {
     GENERATED_BODY()
 
     UPROPERTY(BlueprintReadOnly, Category = "Behavior")
-    EAnim_DinosaurState CurrentState;
+    float AggressionLevel = 0.0f;
 
     UPROPERTY(BlueprintReadOnly, Category = "Behavior")
-    EAnim_DinosaurSpecies Species;
+    float AlertnessLevel = 0.0f;
 
     UPROPERTY(BlueprintReadOnly, Category = "Behavior")
-    float AggressionLevel;
+    float HealthPercentage = 1.0f;
 
     UPROPERTY(BlueprintReadOnly, Category = "Behavior")
-    float HungerLevel;
+    bool bIsHunting = false;
 
     UPROPERTY(BlueprintReadOnly, Category = "Behavior")
-    float HealthPercentage;
+    bool bIsFeeding = false;
 
     UPROPERTY(BlueprintReadOnly, Category = "Behavior")
-    bool bIsHunting;
+    bool bIsResting = false;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Behavior")
-    bool bIsTerritory;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Behavior")
-    bool bHasTarget;
-
-    FAnim_DinosaurBehaviorData()
+    FAnim_DinosaurBehavior()
     {
-        CurrentState = EAnim_DinosaurState::Idle;
-        Species = EAnim_DinosaurSpecies::TRex;
         AggressionLevel = 0.0f;
-        HungerLevel = 0.5f;
+        AlertnessLevel = 0.0f;
         HealthPercentage = 1.0f;
         bIsHunting = false;
-        bIsTerritory = false;
-        bHasTarget = false;
+        bIsFeeding = false;
+        bIsResting = false;
     }
 };
 
-UCLASS(Blueprintable, BlueprintType)
+/**
+ * Animation Instance for dinosaur characters
+ * Handles species-specific animations and behavioral states
+ * Supports carnivore and herbivore animation patterns
+ */
+UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UAnim_DinosaurAnimInstance : public UAnimInstance
 {
     GENERATED_BODY()
@@ -121,82 +99,89 @@ class TRANSPERSONALGAME_API UAnim_DinosaurAnimInstance : public UAnimInstance
 public:
     UAnim_DinosaurAnimInstance();
 
-    virtual void NativeInitializeAnimation() override;
-    virtual void NativeUpdateAnimation(float DeltaTimeX) override;
-
-    // Animation State Properties
-    UPROPERTY(BlueprintReadOnly, Category = "Animation State")
-    FAnim_DinosaurMotionData MotionData;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Animation State")
-    FAnim_DinosaurBehaviorData BehaviorData;
-
-    // Animation Blending
-    UPROPERTY(BlueprintReadOnly, Category = "Animation Blending")
-    float IdleToWalkBlend;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Animation Blending")
-    float WalkToRunBlend;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Animation Blending")
-    float AttackIntensity;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Animation Blending")
-    float FeedingBlend;
-
-    // IK and Procedural Animation
-    UPROPERTY(BlueprintReadOnly, Category = "IK")
-    FVector LeftFootIKOffset;
-
-    UPROPERTY(BlueprintReadOnly, Category = "IK")
-    FVector RightFootIKOffset;
-
-    UPROPERTY(BlueprintReadOnly, Category = "IK")
-    FRotator LeftFootIKRotation;
-
-    UPROPERTY(BlueprintReadOnly, Category = "IK")
-    FRotator RightFootIKRotation;
-
-    UPROPERTY(BlueprintReadOnly, Category = "IK")
-    float HeadLookAtAlpha;
-
-    UPROPERTY(BlueprintReadOnly, Category = "IK")
-    FVector HeadLookAtTarget;
-
-    // Species-Specific Animation Parameters
-    UPROPERTY(BlueprintReadOnly, Category = "Species")
-    float TailSwayIntensity;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Species")
-    float NeckFlexibility;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Species")
-    float BodyMassScale;
-
 protected:
-    // Internal calculation methods
-    void UpdateMotionData(float DeltaTime);
-    void UpdateBehaviorData(float DeltaTime);
-    void UpdateFootIK(float DeltaTime);
-    void UpdateHeadTracking(float DeltaTime);
-    void UpdateSpeciesParameters(float DeltaTime);
+    virtual void NativeInitializeAnimation() override;
+    virtual void NativeUpdateAnimation(float DeltaTime) override;
 
-    // Cached references
-    UPROPERTY()
-    class APawn* OwningPawn;
+    // Movement and Behavior Data
+    UPROPERTY(BlueprintReadOnly, Category = "Movement", meta = (AllowPrivateAccess = "true"))
+    FAnim_DinosaurMovement MovementData;
 
-    UPROPERTY()
-    class UCharacterMovementComponent* MovementComponent;
+    UPROPERTY(BlueprintReadOnly, Category = "Behavior", meta = (AllowPrivateAccess = "true"))
+    FAnim_DinosaurBehavior BehaviorData;
 
-    UPROPERTY()
-    class USkeletalMeshComponent* MeshComponent;
+    // Owner Reference
+    UPROPERTY(BlueprintReadOnly, Category = "Character", meta = (AllowPrivateAccess = "true"))
+    APawn* OwnerPawn = nullptr;
 
-    // Animation timing
-    float LastUpdateTime;
-    float AnimationDeltaTime;
+    // Animation Settings
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Animation Settings", meta = (AllowPrivateAccess = "true"))
+    float WalkSpeedThreshold = 100.0f;
 
-    // IK calculation helpers
-    FVector TraceFootIK(const FName& SocketName, float TraceDistance = 50.0f);
-    FRotator CalculateFootRotation(const FVector& ImpactNormal);
-    FVector CalculateHeadLookAt(const FVector& TargetLocation);
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Animation Settings", meta = (AllowPrivateAccess = "true"))
+    float RunSpeedThreshold = 400.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Animation Settings", meta = (AllowPrivateAccess = "true"))
+    float TurnRateThreshold = 30.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Animation Settings", meta = (AllowPrivateAccess = "true"))
+    float StateTransitionSpeed = 5.0f;
+
+    // Species-specific settings
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Species", meta = (AllowPrivateAccess = "true"))
+    bool bIsCarnivore = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Species", meta = (AllowPrivateAccess = "true"))
+    bool bIsPackHunter = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Species", meta = (AllowPrivateAccess = "true"))
+    float SpeciesSize = 1.0f; // 0.5 = small, 1.0 = medium, 2.0 = large
+
+    // Animation Montages
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Montages", meta = (AllowPrivateAccess = "true"))
+    class UAnimMontage* AttackMontage = nullptr;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Montages", meta = (AllowPrivateAccess = "true"))
+    class UAnimMontage* RoarMontage = nullptr;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Montages", meta = (AllowPrivateAccess = "true"))
+    class UAnimMontage* DeathMontage = nullptr;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Montages", meta = (AllowPrivateAccess = "true"))
+    class UAnimMontage* EatMontage = nullptr;
+
+public:
+    // Animation Control Functions
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    void PlayAttackAnimation();
+
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    void PlayRoarAnimation();
+
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    void PlayDeathAnimation();
+
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    void PlayEatAnimation();
+
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    void SetDinosaurState(EAnim_DinosaurState NewState);
+
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    void SetAggressionLevel(float NewLevel);
+
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    void SetAlertness(float NewLevel);
+
+private:
+    void UpdateMovementValues(float DeltaTime);
+    void UpdateBehaviorValues(float DeltaTime);
+    void UpdateAnimationState(float DeltaTime);
+    EAnim_DinosaurState DetermineStateFromMovement();
+
+    // Smoothing variables
+    float LastSpeed = 0.0f;
+    float LastTurnRate = 0.0f;
+    EAnim_DinosaurState LastState = EAnim_DinosaurState::Idle;
+    float StateTransitionAlpha = 0.0f;
 };
