@@ -1,303 +1,186 @@
 #include "Eng_BiomeManager.h"
+#include "Engine/World.h"
 #include "Engine/Engine.h"
-#include "DrawDebugHelpers.h"
-#include "Components/StaticMeshComponent.h"
-#include "Engine/StaticMesh.h"
-#include "UObject/ConstructorHelpers.h"
-#include "Math/UnrealMathUtility.h"
+#include "Kismet/KismetMathLibrary.h"
 
-AEng_BiomeManager::AEng_BiomeManager()
+UEng_BiomeManager::UEng_BiomeManager()
 {
-    PrimaryActorTick.bCanEverTick = true;
-    
-    RootSceneComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootSceneComponent"));
-    RootComponent = RootSceneComponent;
-    
-    bAutoInitializeBiomes = true;
-    bDebugVisualization = false;
+    BiomeRadius = 15000.0f; // 15km radius per biome
 }
 
-void AEng_BiomeManager::BeginPlay()
+void UEng_BiomeManager::Initialize(FSubsystemCollectionBase& Collection)
 {
-    Super::BeginPlay();
-    
-    if (bAutoInitializeBiomes)
+    Super::Initialize(Collection);
+    InitializeBiomeCenters();
+    UE_LOG(LogTemp, Warning, TEXT("Eng_BiomeManager initialized with 5 biomes"));
+}
+
+void UEng_BiomeManager::Deinitialize()
+{
+    BiomeCenters.Empty();
+    BiomeWeights.Empty();
+    Super::Deinitialize();
+}
+
+void UEng_BiomeManager::InitializeBiomeCenters()
+{
+    // Initialize the 5 biome centers based on memory coordinates
+    BiomeCenters.Empty();
+    BiomeCenters.Add(EBiomeType::Savana, FVector(0.0f, 0.0f, 0.0f));
+    BiomeCenters.Add(EBiomeType::Pantano, FVector(-50000.0f, -45000.0f, 0.0f));
+    BiomeCenters.Add(EBiomeType::Floresta, FVector(-45000.0f, 40000.0f, 0.0f));
+    BiomeCenters.Add(EBiomeType::Deserto, FVector(55000.0f, 0.0f, 0.0f));
+    BiomeCenters.Add(EBiomeType::Montanha, FVector(40000.0f, 50000.0f, 0.0f));
+
+    // Set equal weights for distribution
+    BiomeWeights.Empty();
+    BiomeWeights.Add(EBiomeType::Savana, 0.2f);
+    BiomeWeights.Add(EBiomeType::Pantano, 0.2f);
+    BiomeWeights.Add(EBiomeType::Floresta, 0.2f);
+    BiomeWeights.Add(EBiomeType::Deserto, 0.2f);
+    BiomeWeights.Add(EBiomeType::Montanha, 0.2f);
+}
+
+EBiomeType UEng_BiomeManager::GetBiomeAtLocation(FVector WorldLocation) const
+{
+    float MinDistance = FLT_MAX;
+    EBiomeType ClosestBiome = EBiomeType::Savana;
+
+    for (const auto& BiomePair : BiomeCenters)
     {
-        InitializeDefaultBiomes();
-    }
-    
-    if (bDebugVisualization)
-    {
-        CreateBiomeVisualizationActors();
-    }
-}
-
-void AEng_BiomeManager::Tick(float DeltaTime)
-{
-    Super::Tick(DeltaTime);
-    
-    if (bDebugVisualization && GetWorld())
-    {
-        for (const FEng_BiomeData& Biome : BiomeDefinitions)
-        {
-            DrawDebugSphere(GetWorld(), Biome.BiomeCenter, Biome.BiomeRadius, 32, FColor::Green, false, -1.0f, 0, 100.0f);
-        }
-    }
-}
-
-void AEng_BiomeManager::InitializeDefaultBiomes()
-{
-    BiomeDefinitions.Empty();
-    SetupDefaultBiomeData();
-    
-    UE_LOG(LogTemp, Warning, TEXT("BiomeManager: Initialized %d default biomes"), BiomeDefinitions.Num());
-}
-
-void AEng_BiomeManager::SetupDefaultBiomeData()
-{
-    // Savanna Biome (0, 0)
-    FEng_BiomeData Savanna;
-    Savanna.BiomeName = TEXT("Savanna");
-    Savanna.BiomeCenter = FVector(0.0f, 0.0f, 100.0f);
-    Savanna.BiomeRadius = 15000.0f;
-    Savanna.BiomeType = EBiomeType::Savanna;
-    Savanna.Temperature = 28.0f;
-    Savanna.Humidity = 40.0f;
-    Savanna.AllowedDinosaurTypes.Add(TEXT("TRex"));
-    Savanna.AllowedDinosaurTypes.Add(TEXT("Triceratops"));
-    Savanna.AllowedDinosaurTypes.Add(TEXT("Velociraptor"));
-    BiomeDefinitions.Add(Savanna);
-    
-    // Swamp Biome (-50000, -45000)
-    FEng_BiomeData Swamp;
-    Swamp.BiomeName = TEXT("Swamp");
-    Swamp.BiomeCenter = FVector(-50000.0f, -45000.0f, 100.0f);
-    Swamp.BiomeRadius = 15000.0f;
-    Swamp.BiomeType = EBiomeType::Swamp;
-    Swamp.Temperature = 26.0f;
-    Swamp.Humidity = 85.0f;
-    Swamp.AllowedDinosaurTypes.Add(TEXT("Brachiosaurus"));
-    Swamp.AllowedDinosaurTypes.Add(TEXT("Parasaurolophus"));
-    Swamp.AllowedDinosaurTypes.Add(TEXT("Triceratops"));
-    BiomeDefinitions.Add(Swamp);
-    
-    // Forest Biome (-45000, 40000)
-    FEng_BiomeData Forest;
-    Forest.BiomeName = TEXT("Forest");
-    Forest.BiomeCenter = FVector(-45000.0f, 40000.0f, 100.0f);
-    Forest.BiomeRadius = 15000.0f;
-    Forest.BiomeType = EBiomeType::Forest;
-    Forest.Temperature = 22.0f;
-    Forest.Humidity = 70.0f;
-    Forest.AllowedDinosaurTypes.Add(TEXT("Brachiosaurus"));
-    Forest.AllowedDinosaurTypes.Add(TEXT("Velociraptor"));
-    Forest.AllowedDinosaurTypes.Add(TEXT("Ankylosaurus"));
-    BiomeDefinitions.Add(Forest);
-    
-    // Desert Biome (55000, 0)
-    FEng_BiomeData Desert;
-    Desert.BiomeName = TEXT("Desert");
-    Desert.BiomeCenter = FVector(55000.0f, 0.0f, 100.0f);
-    Desert.BiomeRadius = 15000.0f;
-    Desert.BiomeType = EBiomeType::Desert;
-    Desert.Temperature = 35.0f;
-    Desert.Humidity = 15.0f;
-    Desert.AllowedDinosaurTypes.Add(TEXT("TRex"));
-    Desert.AllowedDinosaurTypes.Add(TEXT("Protoceratops"));
-    Desert.AllowedDinosaurTypes.Add(TEXT("Pachycephalo"));
-    BiomeDefinitions.Add(Desert);
-    
-    // Mountain Biome (40000, 50000)
-    FEng_BiomeData Mountain;
-    Mountain.BiomeName = TEXT("Mountain");
-    Mountain.BiomeCenter = FVector(40000.0f, 50000.0f, 100.0f);
-    Mountain.BiomeRadius = 15000.0f;
-    Mountain.BiomeType = EBiomeType::Mountain;
-    Mountain.Temperature = 18.0f;
-    Mountain.Humidity = 60.0f;
-    Mountain.AllowedDinosaurTypes.Add(TEXT("Ankylosaurus"));
-    Mountain.AllowedDinosaurTypes.Add(TEXT("Tsintaosaurus"));
-    Mountain.AllowedDinosaurTypes.Add(TEXT("Velociraptor"));
-    BiomeDefinitions.Add(Mountain);
-}
-
-EBiomeType AEng_BiomeManager::GetBiomeTypeAtLocation(const FVector& Location) const
-{
-    float MinDistance = MAX_FLT;
-    EBiomeType ClosestBiome = EBiomeType::Savanna;
-    
-    for (const FEng_BiomeData& Biome : BiomeDefinitions)
-    {
-        float Distance = FVector::Dist(Location, Biome.BiomeCenter);
+        float Distance = FVector::Dist2D(WorldLocation, BiomePair.Value);
         if (Distance < MinDistance)
         {
             MinDistance = Distance;
-            ClosestBiome = Biome.BiomeType;
+            ClosestBiome = BiomePair.Key;
         }
     }
-    
+
     return ClosestBiome;
 }
 
-FEng_BiomeData AEng_BiomeManager::GetBiomeDataAtLocation(const FVector& Location) const
+FVector UEng_BiomeManager::GetBiomeCenter(EBiomeType BiomeType) const
 {
-    EBiomeType BiomeType = GetBiomeTypeAtLocation(Location);
-    
-    for (const FEng_BiomeData& Biome : BiomeDefinitions)
+    if (const FVector* Center = BiomeCenters.Find(BiomeType))
     {
-        if (Biome.BiomeType == BiomeType)
-        {
-            return Biome;
-        }
+        return *Center;
     }
-    
-    return FEng_BiomeData();
-}
-
-FVector AEng_BiomeManager::GetRandomLocationInBiome(EBiomeType BiomeType) const
-{
-    for (const FEng_BiomeData& Biome : BiomeDefinitions)
-    {
-        if (Biome.BiomeType == BiomeType)
-        {
-            float RandomX = FMath::RandRange(-Biome.BiomeRadius, Biome.BiomeRadius);
-            float RandomY = FMath::RandRange(-Biome.BiomeRadius, Biome.BiomeRadius);
-            return Biome.BiomeCenter + FVector(RandomX, RandomY, 0.0f);
-        }
-    }
-    
     return FVector::ZeroVector;
 }
 
-TArray<FVector> AEng_BiomeManager::GetDistributedSpawnLocations(int32 TotalCount) const
+TArray<FVector> UEng_BiomeManager::GetSpawnPointsInBiome(EBiomeType BiomeType, int32 NumPoints) const
 {
-    TArray<FVector> SpawnLocations;
-    
-    if (BiomeDefinitions.Num() == 0)
+    TArray<FVector> SpawnPoints;
+    FVector BiomeCenter = GetBiomeCenter(BiomeType);
+
+    for (int32 i = 0; i < NumPoints; i++)
     {
-        return SpawnLocations;
-    }
-    
-    int32 CountPerBiome = TotalCount / BiomeDefinitions.Num();
-    int32 Remainder = TotalCount % BiomeDefinitions.Num();
-    
-    for (int32 BiomeIndex = 0; BiomeIndex < BiomeDefinitions.Num(); BiomeIndex++)
-    {
-        const FEng_BiomeData& Biome = BiomeDefinitions[BiomeIndex];
-        int32 SpawnsForThisBiome = CountPerBiome + (BiomeIndex < Remainder ? 1 : 0);
-        
-        for (int32 SpawnIndex = 0; SpawnIndex < SpawnsForThisBiome; SpawnIndex++)
+        FVector RandomPoint = GetRandomPointInBiome(BiomeType);
+        if (IsValidSpawnLocation(RandomPoint))
         {
-            FVector SpawnLocation = GetRandomLocationInBiome(Biome.BiomeType);
-            SpawnLocations.Add(SpawnLocation);
+            SpawnPoints.Add(RandomPoint);
         }
     }
-    
-    return SpawnLocations;
+
+    return SpawnPoints;
 }
 
-bool AEng_BiomeManager::IsDinosaurAllowedInBiome(const FString& DinosaurType, EBiomeType BiomeType) const
+void UEng_BiomeManager::DistributeActorsAcrossBiomes(TArray<AActor*> ActorsToDistribute)
 {
-    for (const FEng_BiomeData& Biome : BiomeDefinitions)
-    {
-        if (Biome.BiomeType == BiomeType)
-        {
-            return Biome.AllowedDinosaurTypes.Contains(DinosaurType);
-        }
-    }
-    
-    return false;
-}
-
-void AEng_BiomeManager::AddBiome(const FEng_BiomeData& NewBiome)
-{
-    BiomeDefinitions.Add(NewBiome);
-    UE_LOG(LogTemp, Warning, TEXT("BiomeManager: Added biome %s"), *NewBiome.BiomeName);
-}
-
-void AEng_BiomeManager::RemoveBiome(EBiomeType BiomeType)
-{
-    int32 Index = FindBiomeIndex(BiomeType);
-    if (Index != INDEX_NONE)
-    {
-        BiomeDefinitions.RemoveAt(Index);
-        UE_LOG(LogTemp, Warning, TEXT("BiomeManager: Removed biome type %d"), (int32)BiomeType);
-    }
-}
-
-void AEng_BiomeManager::UpdateBiomeData(EBiomeType BiomeType, const FEng_BiomeData& UpdatedData)
-{
-    int32 Index = FindBiomeIndex(BiomeType);
-    if (Index != INDEX_NONE)
-    {
-        BiomeDefinitions[Index] = UpdatedData;
-        UE_LOG(LogTemp, Warning, TEXT("BiomeManager: Updated biome %s"), *UpdatedData.BiomeName);
-    }
-}
-
-void AEng_BiomeManager::DebugPrintBiomeInfo()
-{
-    UE_LOG(LogTemp, Warning, TEXT("=== BIOME MANAGER DEBUG INFO ==="));
-    UE_LOG(LogTemp, Warning, TEXT("Total Biomes: %d"), BiomeDefinitions.Num());
-    
-    for (int32 i = 0; i < BiomeDefinitions.Num(); i++)
-    {
-        const FEng_BiomeData& Biome = BiomeDefinitions[i];
-        UE_LOG(LogTemp, Warning, TEXT("Biome %d: %s at (%f, %f, %f) - Radius: %f"), 
-               i, *Biome.BiomeName, Biome.BiomeCenter.X, Biome.BiomeCenter.Y, Biome.BiomeCenter.Z, Biome.BiomeRadius);
-        UE_LOG(LogTemp, Warning, TEXT("  Temperature: %f, Humidity: %f"), Biome.Temperature, Biome.Humidity);
-        UE_LOG(LogTemp, Warning, TEXT("  Allowed Dinosaurs: %d"), Biome.AllowedDinosaurTypes.Num());
-    }
-}
-
-void AEng_BiomeManager::CreateBiomeVisualizationActors()
-{
-    if (!GetWorld())
+    if (ActorsToDistribute.Num() == 0)
     {
         return;
     }
-    
-    for (const FEng_BiomeData& Biome : BiomeDefinitions)
+
+    int32 ActorsPerBiome = ActorsToDistribute.Num() / 5;
+    int32 ActorIndex = 0;
+
+    // Distribute actors equally across biomes
+    for (const auto& BiomePair : BiomeCenters)
     {
-        AActor* VisualizationActor = GetWorld()->SpawnActor<AActor>();
-        if (VisualizationActor)
+        EBiomeType CurrentBiome = BiomePair.Key;
+        TArray<FVector> SpawnPoints = GetSpawnPointsInBiome(CurrentBiome, ActorsPerBiome);
+
+        for (int32 i = 0; i < ActorsPerBiome && ActorIndex < ActorsToDistribute.Num(); i++)
         {
-            VisualizationActor->SetActorLocation(Biome.BiomeCenter);
-            VisualizationActor->SetActorLabel(FString::Printf(TEXT("BiomeViz_%s"), *Biome.BiomeName));
-            
-            UStaticMeshComponent* MeshComp = NewObject<UStaticMeshComponent>(VisualizationActor);
-            VisualizationActor->SetRootComponent(MeshComp);
-            
-            UE_LOG(LogTemp, Warning, TEXT("Created visualization actor for biome: %s"), *Biome.BiomeName);
+            if (SpawnPoints.IsValidIndex(i) && ActorsToDistribute.IsValidIndex(ActorIndex))
+            {
+                AActor* Actor = ActorsToDistribute[ActorIndex];
+                if (Actor)
+                {
+                    Actor->SetActorLocation(SpawnPoints[i]);
+                    UE_LOG(LogTemp, Log, TEXT("Moved actor %s to biome %d at location %s"), 
+                           *Actor->GetName(), (int32)CurrentBiome, *SpawnPoints[i].ToString());
+                }
+                ActorIndex++;
+            }
         }
     }
 }
 
-float AEng_BiomeManager::CalculateDistanceToNearestBiome(const FVector& Location) const
+bool UEng_BiomeManager::IsLocationInBiome(FVector Location, EBiomeType BiomeType) const
 {
-    float MinDistance = MAX_FLT;
-    
-    for (const FEng_BiomeData& Biome : BiomeDefinitions)
-    {
-        float Distance = FVector::Dist(Location, Biome.BiomeCenter);
-        if (Distance < MinDistance)
-        {
-            MinDistance = Distance;
-        }
-    }
-    
-    return MinDistance;
+    FVector BiomeCenter = GetBiomeCenter(BiomeType);
+    float Distance = FVector::Dist2D(Location, BiomeCenter);
+    return Distance <= BiomeRadius;
 }
 
-int32 AEng_BiomeManager::FindBiomeIndex(EBiomeType BiomeType) const
+void UEng_BiomeManager::SetBiomeRadius(float NewRadius)
 {
-    for (int32 i = 0; i < BiomeDefinitions.Num(); i++)
+    BiomeRadius = FMath::Max(1000.0f, NewRadius); // Minimum 1km radius
+}
+
+int32 UEng_BiomeManager::GetActorCountInBiome(EBiomeType BiomeType) const
+{
+    if (!GetWorld())
     {
-        if (BiomeDefinitions[i].BiomeType == BiomeType)
+        return 0;
+    }
+
+    int32 Count = 0;
+    FVector BiomeCenter = GetBiomeCenter(BiomeType);
+
+    for (TActorIterator<AActor> ActorIterator(GetWorld()); ActorIterator; ++ActorIterator)
+    {
+        AActor* Actor = *ActorIterator;
+        if (Actor && IsLocationInBiome(Actor->GetActorLocation(), BiomeType))
         {
-            return i;
+            Count++;
         }
     }
+
+    return Count;
+}
+
+void UEng_BiomeManager::ValidateBiomeDistribution()
+{
+    UE_LOG(LogTemp, Warning, TEXT("=== BIOME DISTRIBUTION VALIDATION ==="));
     
-    return INDEX_NONE;
+    for (const auto& BiomePair : BiomeCenters)
+    {
+        EBiomeType BiomeType = BiomePair.Key;
+        int32 ActorCount = GetActorCountInBiome(BiomeType);
+        UE_LOG(LogTemp, Warning, TEXT("Biome %d: %d actors"), (int32)BiomeType, ActorCount);
+    }
+}
+
+FVector UEng_BiomeManager::GetRandomPointInBiome(EBiomeType BiomeType) const
+{
+    FVector BiomeCenter = GetBiomeCenter(BiomeType);
+    
+    // Generate random point within biome radius
+    float RandomAngle = FMath::RandRange(0.0f, 2.0f * PI);
+    float RandomDistance = FMath::RandRange(0.0f, BiomeRadius);
+    
+    float X = BiomeCenter.X + RandomDistance * FMath::Cos(RandomAngle);
+    float Y = BiomeCenter.Y + RandomDistance * FMath::Sin(RandomAngle);
+    float Z = BiomeCenter.Z + 100.0f; // Spawn slightly above ground
+    
+    return FVector(X, Y, Z);
+}
+
+bool UEng_BiomeManager::IsValidSpawnLocation(FVector Location) const
+{
+    // Basic validation - can be extended with terrain checks
+    return true;
 }
