@@ -3,19 +3,19 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "Components/StaticMeshComponent.h"
-#include "Engine/StaticMesh.h"
-#include "Materials/MaterialInterface.h"
-#include "../Core/SharedTypes.h"
+#include "Components/SceneComponent.h"
+#include "Engine/World.h"
 #include "Arch_StructureManager.generated.h"
 
 UENUM(BlueprintType)
 enum class EArch_StructureType : uint8
 {
-    StoneCircle     UMETA(DisplayName = "Stone Circle"),
-    CaveDwelling    UMETA(DisplayName = "Cave Dwelling"),
-    Platform        UMETA(DisplayName = "Platform"),
-    Archway         UMETA(DisplayName = "Archway"),
-    Pillar          UMETA(DisplayName = "Pillar")
+    Ruins,
+    CaveDwelling,
+    StonePillar,
+    Archway,
+    Platform,
+    Shelter
 };
 
 USTRUCT(BlueprintType)
@@ -24,27 +24,35 @@ struct FArch_StructureData
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    EArch_StructureType StructureType;
+    EArch_StructureType StructureType = EArch_StructureType::Ruins;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    FVector Location;
+    FVector Location = FVector::ZeroVector;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    FRotator Rotation;
+    FRotator Rotation = FRotator::ZeroRotator;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    FVector Scale;
+    FVector Scale = FVector::OneVector;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    EBiomeType BiomeType;
+    float WearLevel = 0.5f; // 0.0 = new, 1.0 = heavily weathered
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
+    bool bHasMossGrowth = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
+    bool bHasCarvedSymbols = false;
 
     FArch_StructureData()
     {
-        StructureType = EArch_StructureType::Platform;
+        StructureType = EArch_StructureType::Ruins;
         Location = FVector::ZeroVector;
         Rotation = FRotator::ZeroRotator;
         Scale = FVector::OneVector;
-        BiomeType = EBiomeType::Savanna;
+        WearLevel = 0.5f;
+        bHasMossGrowth = true;
+        bHasCarvedSymbols = false;
     }
 };
 
@@ -60,43 +68,60 @@ protected:
     virtual void BeginPlay() override;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    class USceneComponent* RootSceneComponent;
+    USceneComponent* RootSceneComponent;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    TArray<FArch_StructureData> StructureDatabase;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    UStaticMeshComponent* PrimaryStructureMesh;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    class UStaticMesh* DefaultStoneMesh;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure Data")
+    FArch_StructureData StructureData;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    class UMaterialInterface* StoneMaterial;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure Settings")
+    TArray<UStaticMesh*> RuinsMeshes;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    class UMaterialInterface* WeatheredStoneMaterial;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure Settings")
+    TArray<UStaticMesh*> CaveDwellingMeshes;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure Settings")
+    TArray<UStaticMesh*> PillarMeshes;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Distribution")
+    TArray<FVector> BiomeLocations;
 
 public:
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void CreateStructureAtBiome(EBiomeType BiomeType, EArch_StructureType StructureType, FVector Offset = FVector::ZeroVector);
+    virtual void Tick(float DeltaTime) override;
 
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void CreateStoneCircle(FVector CenterLocation, float Radius = 1500.0f, int32 NumStones = 8);
+    UFUNCTION(BlueprintCallable, Category = "Structure Management")
+    void SetStructureType(EArch_StructureType NewType);
 
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void CreatePlatform(FVector Location, FVector PlatformScale = FVector(8.0f, 8.0f, 0.5f));
+    UFUNCTION(BlueprintCallable, Category = "Structure Management")
+    void ApplyWeatheringEffect(float WeatheringAmount);
 
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void CreateArchway(FVector Location, FRotator Rotation = FRotator::ZeroRotator);
+    UFUNCTION(BlueprintCallable, Category = "Structure Management")
+    void SpawnStructureAtBiome(int32 BiomeIndex, EArch_StructureType StructureType);
 
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void PopulateAllBiomesWithStructures();
+    UFUNCTION(BlueprintCallable, Category = "Structure Management")
+    void DistributeStructuresAcrossBiomes();
 
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    FVector GetBiomeCoordinates(EBiomeType BiomeType);
+    UFUNCTION(BlueprintCallable, Category = "Structure Management", CallInEditor)
+    void GenerateRandomStructures();
 
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Architecture")
-    void GenerateStructuresInEditor();
+    UFUNCTION(BlueprintCallable, Category = "Structure Management")
+    FArch_StructureData GetStructureData() const { return StructureData; }
 
-private:
-    class UStaticMeshComponent* CreateStructureComponent(FVector Location, FRotator Rotation, FVector Scale);
-    void ApplyWeatheredMaterial(UStaticMeshComponent* MeshComponent, EBiomeType BiomeType);
+    UFUNCTION(BlueprintCallable, Category = "Structure Management")
+    void SetStructureData(const FArch_StructureData& NewData);
+
+protected:
+    UFUNCTION()
+    void UpdateStructureMesh();
+
+    UFUNCTION()
+    void ApplyMossEffect();
+
+    UFUNCTION()
+    void ApplyCarvedSymbols();
+
+    UFUNCTION()
+    UStaticMesh* GetMeshForStructureType(EArch_StructureType Type);
 };
