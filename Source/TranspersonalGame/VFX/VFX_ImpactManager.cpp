@@ -1,351 +1,177 @@
 #include "VFX_ImpactManager.h"
+#include "Components/StaticMeshComponent.h"
+#include "Particles/ParticleSystemComponent.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "TimerManager.h"
-#include "Kismet/GameplayStatics.h"
-#include "Camera/PlayerCameraManager.h"
 
-AVFX_ImpactManager::AVFX_ImpactManager()
+UVFX_ImpactManager::UVFX_ImpactManager()
 {
     PrimaryActorTick.bCanEverTick = true;
 
-    RootSceneComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootSceneComponent"));
-    RootComponent = RootSceneComponent;
+    // Create root mesh component
+    RootMeshComponent = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("RootMesh"));
+    RootComponent = RootMeshComponent;
+    RootMeshComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    RootMeshComponent->SetVisibility(false);
 
-    // Initialize VFX settings
-    bEnableVFXLOD = true;
-    VFXCullingDistance = 5000.0f;
-    MaxActiveEffects = 50;
+    // Create dust particle component
+    DustParticleComponent = CreateDefaultSubobject<UParticleSystemComponent>(TEXT("DustParticles"));
+    DustParticleComponent->SetupAttachment(RootComponent);
+    DustParticleComponent->bAutoActivate = false;
 
-    // Initialize impact settings
-    ImpactSettings.EffectScale = 1.0f;
-    ImpactSettings.EffectDuration = 2.0f;
+    // Create blood particle component
+    BloodParticleComponent = CreateDefaultSubobject<UParticleSystemComponent>(TEXT("BloodParticles"));
+    BloodParticleComponent->SetupAttachment(RootComponent);
+    BloodParticleComponent->bAutoActivate = false;
+
+    // Set default values
+    DefaultDustScale = 1.0f;
+    DefaultBloodScale = 0.8f;
+    bAutoCleanupEffects = true;
+    EffectLifetime = 5.0f;
+    CleanupTimer = 0.0f;
 }
 
-void AVFX_ImpactManager::BeginPlay()
+void UVFX_ImpactManager::BeginPlay()
 {
     Super::BeginPlay();
     
-    InitializeVFXAssets();
-    
-    UE_LOG(LogTemp, Warning, TEXT("VFX_ImpactManager initialized with LOD: %s, Max Effects: %d"), 
-           bEnableVFXLOD ? TEXT("Enabled") : TEXT("Disabled"), MaxActiveEffects);
+    if (GEngine)
+    {
+        GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Green, TEXT("VFX Impact Manager initialized"));
+    }
 }
 
-void AVFX_ImpactManager::Tick(float DeltaTime)
+void UVFX_ImpactManager::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
-    
-    // Cleanup expired effects every few seconds
-    static float CleanupTimer = 0.0f;
+
+    if (bAutoCleanupEffects)
+    {
+        UpdateActiveEffects(DeltaTime);
+    }
+}
+
+void UVFX_ImpactManager::TriggerImpact(const FVFX_ImpactData& ImpactData)
+{
+    switch (ImpactData.ImpactType)
+    {
+        case EVFX_ImpactType::FootstepDust:
+            TriggerFootstepDust(ImpactData.ImpactLocation, ImpactData.ImpactIntensity);
+            break;
+        case EVFX_ImpactType::BloodSplatter:
+            TriggerBloodSplatter(ImpactData.ImpactLocation, ImpactData.ImpactIntensity);
+            break;
+        case EVFX_ImpactType::RockImpact:
+            CreateDustCloud(ImpactData.ImpactLocation, ImpactData.ImpactIntensity);
+            break;
+        case EVFX_ImpactType::WaterSplash:
+            // Water splash implementation
+            break;
+        case EVFX_ImpactType::FireSparks:
+            // Fire sparks implementation
+            break;
+    }
+
+    // Add to active impacts for tracking
+    ActiveImpacts.Add(ImpactData);
+
+    if (GEngine)
+    {
+        FString ImpactMsg = FString::Printf(TEXT("VFX Impact triggered at %s"), *ImpactData.ImpactLocation.ToString());
+        GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Yellow, ImpactMsg);
+    }
+}
+
+void UVFX_ImpactManager::TriggerFootstepDust(FVector Location, float Intensity)
+{
+    if (DustParticleComponent)
+    {
+        SetActorLocation(Location);
+        DustParticleComponent->SetWorldScale3D(FVector(Intensity * DefaultDustScale));
+        DustParticleComponent->ActivateSystem();
+
+        if (GEngine)
+        {
+            FString DustMsg = FString::Printf(TEXT("Footstep dust at %s, intensity: %.2f"), *Location.ToString(), Intensity);
+            GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Brown, DustMsg);
+        }
+    }
+}
+
+void UVFX_ImpactManager::TriggerBloodSplatter(FVector Location, float Intensity)
+{
+    if (BloodParticleComponent)
+    {
+        SetActorLocation(Location);
+        BloodParticleComponent->SetWorldScale3D(FVector(Intensity * DefaultBloodScale));
+        BloodParticleComponent->ActivateSystem();
+
+        if (GEngine)
+        {
+            FString BloodMsg = FString::Printf(TEXT("Blood splatter at %s, intensity: %.2f"), *Location.ToString(), Intensity);
+            GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Red, BloodMsg);
+        }
+    }
+}
+
+void UVFX_ImpactManager::CreateDustCloud(FVector Location, float Scale)
+{
+    if (DustParticleComponent)
+    {
+        SetActorLocation(Location);
+        DustParticleComponent->SetWorldScale3D(FVector(Scale * 1.5f));
+        DustParticleComponent->ActivateSystem();
+
+        if (GEngine)
+        {
+            FString CloudMsg = FString::Printf(TEXT("Dust cloud created at %s, scale: %.2f"), *Location.ToString(), Scale);
+            GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Orange, CloudMsg);
+        }
+    }
+}
+
+void UVFX_ImpactManager::StopAllEffects()
+{
+    if (DustParticleComponent)
+    {
+        DustParticleComponent->DeactivateSystem();
+    }
+
+    if (BloodParticleComponent)
+    {
+        BloodParticleComponent->DeactivateSystem();
+    }
+
+    ActiveImpacts.Empty();
+
+    if (GEngine)
+    {
+        GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Blue, TEXT("All VFX effects stopped"));
+    }
+}
+
+void UVFX_ImpactManager::UpdateActiveEffects(float DeltaTime)
+{
     CleanupTimer += DeltaTime;
-    if (CleanupTimer >= 3.0f)
+
+    if (CleanupTimer >= 1.0f) // Check every second
     {
         CleanupExpiredEffects();
         CleanupTimer = 0.0f;
     }
 }
 
-void AVFX_ImpactManager::InitializeVFXAssets()
+void UVFX_ImpactManager::CleanupExpiredEffects()
 {
-    // Try to load default Niagara systems from Engine content
-    // These paths should exist in most UE5 installations
-    if (!ImpactSettings.DustEffect.IsValid())
-    {
-        UNiagaraSystem* DustSystem = LoadObject<UNiagaraSystem>(nullptr, TEXT("/Engine/VFX/Niagara/Systems/NS_DefaultDust"));
-        if (DustSystem)
-        {
-            ImpactSettings.DustEffect = DustSystem;
-            UE_LOG(LogTemp, Warning, TEXT("Loaded default dust effect"));
-        }
-    }
-
-    if (!ImpactSettings.BloodEffect.IsValid())
-    {
-        UNiagaraSystem* BloodSystem = LoadObject<UNiagaraSystem>(nullptr, TEXT("/Engine/VFX/Niagara/Systems/NS_DefaultBlood"));
-        if (BloodSystem)
-        {
-            ImpactSettings.BloodEffect = BloodSystem;
-            UE_LOG(LogTemp, Warning, TEXT("Loaded default blood effect"));
-        }
-    }
-
-    if (!EnvironmentSettings.CampfireEffect.IsValid())
-    {
-        UNiagaraSystem* FireSystem = LoadObject<UNiagaraSystem>(nullptr, TEXT("/Engine/VFX/Niagara/Systems/NS_DefaultFire"));
-        if (FireSystem)
-        {
-            EnvironmentSettings.CampfireEffect = FireSystem;
-            UE_LOG(LogTemp, Warning, TEXT("Loaded default fire effect"));
-        }
-    }
-
-    UE_LOG(LogTemp, Warning, TEXT("VFX asset initialization complete"));
-}
-
-void AVFX_ImpactManager::SpawnDustImpact(const FVector& Location, float Scale)
-{
-    if (!IsWithinCullingDistance(Location))
-    {
-        return;
-    }
-
-    if (ActiveEffects.Num() >= MaxActiveEffects)
-    {
-        CleanupExpiredEffects();
-        if (ActiveEffects.Num() >= MaxActiveEffects)
-        {
-            return; // Still at limit, skip this effect
-        }
-    }
-
-    UNiagaraSystem* DustSystem = ImpactSettings.DustEffect.LoadSynchronous();
-    if (DustSystem)
-    {
-        UNiagaraComponent* DustEffect = CreateNiagaraEffect(DustSystem, Location);
-        if (DustEffect)
-        {
-            DustEffect->SetFloatParameter(TEXT("Scale"), Scale * ImpactSettings.EffectScale);
-            DustEffect->SetFloatParameter(TEXT("Lifetime"), ImpactSettings.EffectDuration);
-            
-            // Apply LOD based on distance
-            float Distance = FVector::Dist(Location, GetActorLocation());
-            ApplyLODSettings(DustEffect, Distance);
-            
-            UE_LOG(LogTemp, Log, TEXT("Spawned dust impact at %s with scale %f"), *Location.ToString(), Scale);
-        }
-    }
-}
-
-void AVFX_ImpactManager::SpawnBloodImpact(const FVector& Location, const FVector& Direction, float Scale)
-{
-    if (!IsWithinCullingDistance(Location))
-    {
-        return;
-    }
-
-    if (ActiveEffects.Num() >= MaxActiveEffects)
-    {
-        CleanupExpiredEffects();
-        if (ActiveEffects.Num() >= MaxActiveEffects)
-        {
-            return;
-        }
-    }
-
-    UNiagaraSystem* BloodSystem = ImpactSettings.BloodEffect.LoadSynchronous();
-    if (BloodSystem)
-    {
-        FRotator BloodRotation = Direction.Rotation();
-        UNiagaraComponent* BloodEffect = CreateNiagaraEffect(BloodSystem, Location, BloodRotation);
-        if (BloodEffect)
-        {
-            BloodEffect->SetFloatParameter(TEXT("Scale"), Scale * ImpactSettings.EffectScale);
-            BloodEffect->SetVectorParameter(TEXT("Direction"), Direction);
-            
-            float Distance = FVector::Dist(Location, GetActorLocation());
-            ApplyLODSettings(BloodEffect, Distance);
-            
-            UE_LOG(LogTemp, Log, TEXT("Spawned blood impact at %s"), *Location.ToString());
-        }
-    }
-}
-
-void AVFX_ImpactManager::SpawnWaterSplash(const FVector& Location, float Scale)
-{
-    if (!IsWithinCullingDistance(Location))
-    {
-        return;
-    }
-
-    UNiagaraSystem* WaterSystem = ImpactSettings.WaterSplashEffect.LoadSynchronous();
-    if (WaterSystem)
-    {
-        UNiagaraComponent* WaterEffect = CreateNiagaraEffect(WaterSystem, Location);
-        if (WaterEffect)
-        {
-            WaterEffect->SetFloatParameter(TEXT("Scale"), Scale * ImpactSettings.EffectScale);
-            WaterEffect->SetFloatParameter(TEXT("SplashIntensity"), Scale);
-            
-            UE_LOG(LogTemp, Log, TEXT("Spawned water splash at %s"), *Location.ToString());
-        }
-    }
-}
-
-void AVFX_ImpactManager::SpawnCampfire(const FVector& Location)
-{
-    UNiagaraSystem* FireSystem = EnvironmentSettings.CampfireEffect.LoadSynchronous();
-    if (FireSystem)
-    {
-        UNiagaraComponent* FireEffect = CreateNiagaraEffect(FireSystem, Location);
-        if (FireEffect)
-        {
-            FireEffect->SetFloatParameter(TEXT("FireIntensity"), 1.0f);
-            FireEffect->SetFloatParameter(TEXT("SmokeAmount"), 0.8f);
-            
-            // Campfires are persistent, don't add to cleanup list
-            UE_LOG(LogTemp, Warning, TEXT("Spawned campfire at %s"), *Location.ToString());
-        }
-    }
-}
-
-void AVFX_ImpactManager::SpawnRainEffect(const FVector& Location, float Intensity)
-{
-    UNiagaraSystem* RainSystem = EnvironmentSettings.RainEffect.LoadSynchronous();
-    if (RainSystem)
-    {
-        UNiagaraComponent* RainEffect = CreateNiagaraEffect(RainSystem, Location);
-        if (RainEffect)
-        {
-            RainEffect->SetFloatParameter(TEXT("RainIntensity"), Intensity);
-            RainEffect->SetFloatParameter(TEXT("DropletSize"), FMath::Lerp(0.5f, 2.0f, Intensity));
-            
-            UE_LOG(LogTemp, Warning, TEXT("Spawned rain effect at %s with intensity %f"), *Location.ToString(), Intensity);
-        }
-    }
-}
-
-void AVFX_ImpactManager::SpawnVolcanicAsh(const FVector& Location, float Scale)
-{
-    UNiagaraSystem* AshSystem = EnvironmentSettings.VolcanicAshEffect.LoadSynchronous();
-    if (AshSystem)
-    {
-        UNiagaraComponent* AshEffect = CreateNiagaraEffect(AshSystem, Location);
-        if (AshEffect)
-        {
-            AshEffect->SetFloatParameter(TEXT("AshDensity"), Scale);
-            AshEffect->SetFloatParameter(TEXT("WindStrength"), 0.7f);
-            
-            UE_LOG(LogTemp, Warning, TEXT("Spawned volcanic ash at %s"), *Location.ToString());
-        }
-    }
-}
-
-void AVFX_ImpactManager::CleanupExpiredEffects()
-{
-    for (int32 i = ActiveEffects.Num() - 1; i >= 0; i--)
-    {
-        UNiagaraComponent* Effect = ActiveEffects[i];
-        if (!Effect || !IsValid(Effect) || !Effect->IsActive())
-        {
-            if (Effect && IsValid(Effect))
-            {
-                Effect->DestroyComponent();
-            }
-            ActiveEffects.RemoveAt(i);
-        }
-    }
+    float CurrentTime = GetWorld()->GetTimeSeconds();
     
-    UE_LOG(LogTemp, Log, TEXT("Cleaned up expired VFX. Active effects: %d"), ActiveEffects.Num());
-}
-
-void AVFX_ImpactManager::SetVFXQuality(int32 QualityLevel)
-{
-    // Quality levels: 0=Low, 1=Medium, 2=High, 3=Epic
-    switch (QualityLevel)
+    for (int32 i = ActiveImpacts.Num() - 1; i >= 0; i--)
     {
-        case 0: // Low
-            MaxActiveEffects = 20;
-            VFXCullingDistance = 2000.0f;
-            break;
-        case 1: // Medium
-            MaxActiveEffects = 35;
-            VFXCullingDistance = 3500.0f;
-            break;
-        case 2: // High
-            MaxActiveEffects = 50;
-            VFXCullingDistance = 5000.0f;
-            break;
-        case 3: // Epic
-            MaxActiveEffects = 100;
-            VFXCullingDistance = 8000.0f;
-            break;
-        default:
-            QualityLevel = 2; // Default to High
-            break;
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("VFX Quality set to %d - Max Effects: %d, Culling Distance: %f"), 
-           QualityLevel, MaxActiveEffects, VFXCullingDistance);
-}
-
-UNiagaraComponent* AVFX_ImpactManager::CreateNiagaraEffect(UNiagaraSystem* System, const FVector& Location, const FRotator& Rotation)
-{
-    if (!System)
-    {
-        return nullptr;
-    }
-
-    UNiagaraComponent* NiagaraComp = UGameplayStatics::SpawnEmitterAtLocation(
-        GetWorld(), 
-        System, 
-        Location, 
-        Rotation, 
-        FVector(1.0f), 
-        true, 
-        EPSCPoolMethod::None,
-        true
-    );
-
-    if (NiagaraComp)
-    {
-        ActiveEffects.Add(NiagaraComp);
-        
-        // Set auto-destroy timer
-        FTimerHandle TimerHandle;
-        GetWorld()->GetTimerManager().SetTimer(TimerHandle, [this, NiagaraComp]()
+        if (CurrentTime - ActiveImpacts[i].Duration > EffectLifetime)
         {
-            if (NiagaraComp && IsValid(NiagaraComp))
-            {
-                ActiveEffects.Remove(NiagaraComp);
-                NiagaraComp->DestroyComponent();
-            }
-        }, ImpactSettings.EffectDuration, false);
+            ActiveImpacts.RemoveAt(i);
+        }
     }
-
-    return NiagaraComp;
-}
-
-bool AVFX_ImpactManager::IsWithinCullingDistance(const FVector& Location) const
-{
-    if (!bEnableVFXLOD)
-    {
-        return true;
-    }
-
-    // Get player camera location for distance calculation
-    APlayerController* PC = GetWorld()->GetFirstPlayerController();
-    if (PC && PC->PlayerCameraManager)
-    {
-        FVector CameraLocation = PC->PlayerCameraManager->GetCameraLocation();
-        float Distance = FVector::Dist(CameraLocation, Location);
-        return Distance <= VFXCullingDistance;
-    }
-
-    return true;
-}
-
-void AVFX_ImpactManager::ApplyLODSettings(UNiagaraComponent* Effect, float Distance) const
-{
-    if (!Effect || !bEnableVFXLOD)
-    {
-        return;
-    }
-
-    float DistanceRatio = Distance / VFXCullingDistance;
-    
-    // Reduce particle count and quality based on distance
-    if (DistanceRatio > 0.7f)
-    {
-        // Far distance - low quality
-        Effect->SetFloatParameter(TEXT("ParticleScale"), 0.5f);
-        Effect->SetIntParameter(TEXT("ParticleCount"), 50);
-    }
-    else if (DistanceRatio > 0.4f)
-    {
-        // Medium distance - medium quality
-        Effect->SetFloatParameter(TEXT("ParticleScale"), 0.75f);
-        Effect->SetIntParameter(TEXT("ParticleCount"), 100);
-    }
-    // Close distance - full quality (no changes needed)
 }
