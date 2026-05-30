@@ -4,252 +4,99 @@
 #include "Components/SkeletalMeshComponent.h"
 #include "Animation/AnimInstance.h"
 #include "Animation/AnimMontage.h"
-#include "Animation/BlendSpace.h"
-#include "Engine/World.h"
-#include "DrawDebugHelpers.h"
-#include "Kismet/KismetMathLibrary.h"
+#include "Engine/Engine.h"
 
 UAnim_CharacterAnimController::UAnim_CharacterAnimController()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.bStartWithTickEnabled = true;
     
-    // Initialize IK settings
-    bEnableFootIK = true;
-    FootIKTraceDistance = 50.0f;
-    FootIKInterpSpeed = 15.0f;
-    LeftFootSocketName = TEXT("foot_l");
-    RightFootSocketName = TEXT("foot_r");
+    // Initialize animation properties
+    MovementSpeed = 0.0f;
+    MovementDirection = 0.0f;
+    bIsInAir = false;
+    bIsCrouching = false;
+    bIsRunning = false;
+    bIsInCombat = false;
     
-    // Initialize component references
-    OwnerCharacter = nullptr;
-    MovementComponent = nullptr;
-    MeshComponent = nullptr;
-    AnimInstance = nullptr;
+    // Initialize state tracking
+    CurrentMovementState = EAnim_MovementState::Idle;
+    CurrentCombatState = EAnim_CombatState::None;
+    CurrentEmotionalState = EAnim_EmotionalState::Neutral;
+    
+    BlendTimeRemaining = 0.0f;
+    CurrentAnimationTime = 0.0f;
 }
 
 void UAnim_CharacterAnimController::BeginPlay()
 {
     Super::BeginPlay();
     
-    CacheComponentReferences();
-    
-    // Initialize animation data
-    AnimData = FAnim_CharacterAnimData();
-    AnimData.MovementState = EAnim_MovementState::Idle;
-    AnimData.CombatState = EAnim_CombatState::None;
-    AnimData.EmotionalState = EAnim_EmotionalState::Calm;
+    InitializeAnimationReferences();
 }
 
 void UAnim_CharacterAnimController::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
     
-    if (!IsValidForAnimation())
+    if (OwnerCharacter && MovementComponent)
     {
-        return;
-    }
-    
-    UpdateMovementData(DeltaTime);
-    UpdateCombatData(DeltaTime);
-    UpdateEmotionalData(DeltaTime);
-    
-    if (bEnableFootIK)
-    {
-        UpdateFootIK(DeltaTime);
+        // Update movement properties
+        MovementSpeed = MovementComponent->Velocity.Size();
+        bIsInAir = MovementComponent->IsFalling();
+        bIsCrouching = OwnerCharacter->bIsCrouched;
+        bIsRunning = MovementSpeed > 300.0f; // Running threshold
+        
+        // Update animation states
+        UpdateMovementState(DeltaTime);
+        UpdateCombatState(DeltaTime);
+        BlendAnimations(DeltaTime);
+        
+        CurrentAnimationTime += DeltaTime;
     }
 }
 
-void UAnim_CharacterAnimController::CacheComponentReferences()
+void UAnim_CharacterAnimController::InitializeAnimationReferences()
 {
     OwnerCharacter = Cast<ACharacter>(GetOwner());
     if (OwnerCharacter)
     {
+        CharacterMesh = OwnerCharacter->GetMesh();
         MovementComponent = OwnerCharacter->GetCharacterMovement();
-        MeshComponent = OwnerCharacter->GetMesh();
-        if (MeshComponent)
+        
+        if (CharacterMesh)
         {
-            AnimInstance = MeshComponent->GetAnimInstance();
+            AnimInstance = CharacterMesh->GetAnimInstance();
         }
     }
 }
 
-bool UAnim_CharacterAnimController::IsValidForAnimation() const
+void UAnim_CharacterAnimController::UpdateMovementAnimations(float Speed, bool bInAir, bool bCrouching)
 {
-    return OwnerCharacter && MovementComponent && MeshComponent && AnimInstance;
-}
-
-void UAnim_CharacterAnimController::UpdateMovementData(float DeltaTime)
-{
-    if (!MovementComponent || !OwnerCharacter)
+    MovementSpeed = Speed;
+    bIsInAir = bInAir;
+    bIsCrouching = bCrouching;
+    
+    // Determine movement state based on parameters
+    if (bIsInAir)
     {
-        return;
+        CurrentMovementState = EAnim_MovementState::Jumping;
     }
-    
-    // Update speed
-    FVector Velocity = MovementComponent->Velocity;
-    AnimData.Speed = Velocity.Size2D();
-    
-    // Update direction
-    if (AnimData.Speed > 0.1f)
+    else if (bIsCrouching)
     {
-        FVector ForwardVector = OwnerCharacter->GetActorForwardVector();
-        FVector VelocityNormalized = Velocity.GetSafeNormal2D();
-        float DotProduct = FVector::DotProduct(ForwardVector, VelocityNormalized);
-        float CrossProduct = FVector::CrossProduct(ForwardVector, VelocityNormalized).Z;
-        AnimData.Direction = FMath::RadiansToDegrees(FMath::Atan2(CrossProduct, DotProduct));
+        CurrentMovementState = EAnim_MovementState::Crouching;
+    }
+    else if (Speed > 300.0f)
+    {
+        CurrentMovementState = EAnim_MovementState::Running;
+    }
+    else if (Speed > 50.0f)
+    {
+        CurrentMovementState = EAnim_MovementState::Walking;
     }
     else
     {
-        AnimData.Direction = 0.0f;
+        CurrentMovementState = EAnim_MovementState::Idle;
     }
-    
-    // Update air state
-    AnimData.bIsInAir = MovementComponent->IsFalling();
-    
-    // Update crouching state
-    AnimData.bIsCrouching = MovementComponent->IsCrouching();
-    
-    // Update movement state based on speed and conditions
-    if (AnimData.bIsInAir)
-    {
-        if (Velocity.Z > 0.0f)
-        {
-            AnimData.MovementState = EAnim_MovementState::Jumping;
-        }
-        else
-        {
-            AnimData.MovementState = EAnim_MovementState::Falling;
-        }
-    }
-    else if (AnimData.bIsCrouching)
-    {
-        AnimData.MovementState = EAnim_MovementState::Crouching;
-    }
-    else if (MovementComponent->IsSwimming())
-    {
-        AnimData.MovementState = EAnim_MovementState::Swimming;
-    }
-    else if (AnimData.Speed < 1.0f)
-    {
-        AnimData.MovementState = EAnim_MovementState::Idle;
-    }
-    else if (AnimData.Speed < 300.0f)
-    {
-        AnimData.MovementState = EAnim_MovementState::Walking;
-    }
-    else if (AnimData.Speed < 500.0f)
-    {
-        AnimData.MovementState = EAnim_MovementState::Running;
-    }
-    else
-    {
-        AnimData.MovementState = EAnim_MovementState::Sprinting;
-    }
-}
-
-void UAnim_CharacterAnimController::UpdateCombatData(float DeltaTime)
-{
-    // This would be updated based on combat system integration
-    // For now, maintain current combat state
-    
-    // Example logic for combat state transitions
-    if (AnimData.CombatState == EAnim_CombatState::Attacking)
-    {
-        // Check if attack animation is finished
-        if (AnimInstance && !AnimInstance->IsAnyMontagePlaying())
-        {
-            AnimData.CombatState = EAnim_CombatState::Ready;
-        }
-    }
-}
-
-void UAnim_CharacterAnimController::UpdateEmotionalData(float DeltaTime)
-{
-    // This would be updated based on survival/fear system integration
-    // For now, maintain current emotional state
-    
-    // Example logic for emotional state transitions
-    if (AnimData.EmotionalState == EAnim_EmotionalState::Fearful)
-    {
-        // Gradually return to calm state if no threats
-        // This would integrate with the fear system
-    }
-}
-
-void UAnim_CharacterAnimController::UpdateFootIK(float DeltaTime)
-{
-    if (!MeshComponent || !OwnerCharacter)
-    {
-        return;
-    }
-    
-    // Perform foot traces
-    FVector LeftFootTarget = PerformFootTrace(LeftFootSocketName, FootIKTraceDistance);
-    FVector RightFootTarget = PerformFootTrace(RightFootSocketName, FootIKTraceDistance);
-    
-    // Interpolate to smooth IK positions
-    AnimData.LeftFootIKLocation = FMath::VInterpTo(
-        AnimData.LeftFootIKLocation,
-        LeftFootTarget,
-        DeltaTime,
-        FootIKInterpSpeed
-    );
-    
-    AnimData.RightFootIKLocation = FMath::VInterpTo(
-        AnimData.RightFootIKLocation,
-        RightFootTarget,
-        DeltaTime,
-        FootIKInterpSpeed
-    );
-    
-    // Calculate pelvis offset to keep character grounded
-    float LeftOffset = AnimData.LeftFootIKLocation.Z;
-    float RightOffset = AnimData.RightFootIKLocation.Z;
-    float TargetPelvisOffset = FMath::Min(LeftOffset, RightOffset);
-    
-    AnimData.PelvisOffset = FMath::FInterpTo(
-        AnimData.PelvisOffset,
-        TargetPelvisOffset,
-        DeltaTime,
-        FootIKInterpSpeed
-    );
-}
-
-FVector UAnim_CharacterAnimController::PerformFootTrace(const FName& SocketName, float TraceDistance)
-{
-    if (!MeshComponent || !OwnerCharacter)
-    {
-        return FVector::ZeroVector;
-    }
-    
-    // Get socket location
-    FVector SocketLocation = MeshComponent->GetSocketLocation(SocketName);
-    
-    // Perform line trace downward
-    FVector StartLocation = SocketLocation + FVector(0, 0, 20.0f);
-    FVector EndLocation = SocketLocation - FVector(0, 0, TraceDistance);
-    
-    FHitResult HitResult;
-    FCollisionQueryParams QueryParams;
-    QueryParams.AddIgnoredActor(OwnerCharacter);
-    
-    bool bHit = GetWorld()->LineTraceSingleByChannel(
-        HitResult,
-        StartLocation,
-        EndLocation,
-        ECC_Visibility,
-        QueryParams
-    );
-    
-    if (bHit)
-    {
-        // Calculate offset from original socket position
-        float Offset = HitResult.Location.Z - SocketLocation.Z;
-        return FVector(0, 0, Offset);
-    }
-    
-    return FVector::ZeroVector;
 }
 
 void UAnim_CharacterAnimController::PlayMontage(UAnimMontage* Montage, float PlayRate)
@@ -257,6 +104,7 @@ void UAnim_CharacterAnimController::PlayMontage(UAnimMontage* Montage, float Pla
     if (AnimInstance && Montage)
     {
         AnimInstance->Montage_Play(Montage, PlayRate);
+        UE_LOG(LogTemp, Log, TEXT("Playing animation montage: %s"), *Montage->GetName());
     }
 }
 
@@ -265,45 +113,259 @@ void UAnim_CharacterAnimController::StopMontage(UAnimMontage* Montage)
     if (AnimInstance && Montage)
     {
         AnimInstance->Montage_Stop(0.2f, Montage);
+        UE_LOG(LogTemp, Log, TEXT("Stopping animation montage: %s"), *Montage->GetName());
     }
 }
 
-void UAnim_CharacterAnimController::SetMovementState(EAnim_MovementState NewState)
+void UAnim_CharacterAnimController::SetAnimationBlendWeight(const FString& AnimationName, float Weight)
 {
-    AnimData.MovementState = NewState;
+    if (AnimInstance)
+    {
+        // This would typically interact with blend spaces or animation blueprints
+        UE_LOG(LogTemp, Log, TEXT("Setting animation blend weight for %s: %f"), *AnimationName, Weight);
+    }
 }
 
-void UAnim_CharacterAnimController::SetCombatState(EAnim_CombatState NewState)
+void UAnim_CharacterAnimController::PlayAttackAnimation(EAnim_AttackType AttackType)
 {
-    AnimData.CombatState = NewState;
+    CurrentCombatState = EAnim_CombatState::Attacking;
     
-    // Trigger appropriate montages based on combat state
-    switch (NewState)
+    switch (AttackType)
     {
-        case EAnim_CombatState::Attacking:
+        case EAnim_AttackType::Light:
             if (AttackMontage)
             {
-                PlayMontage(AttackMontage);
+                PlayMontage(AttackMontage, 1.2f); // Faster for light attacks
             }
             break;
-        case EAnim_CombatState::Blocking:
-            if (BlockMontage)
+        case EAnim_AttackType::Heavy:
+            if (AttackMontage)
             {
-                PlayMontage(BlockMontage);
+                PlayMontage(AttackMontage, 0.8f); // Slower for heavy attacks
             }
             break;
-        case EAnim_CombatState::Dodging:
-            if (DodgeMontage)
+        case EAnim_AttackType::Ranged:
+            // Would use different montage for ranged attacks
+            if (AttackMontage)
             {
-                PlayMontage(DodgeMontage);
+                PlayMontage(AttackMontage, 1.0f);
+            }
+            break;
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("Playing attack animation: %d"), (int32)AttackType);
+}
+
+void UAnim_CharacterAnimController::PlayDefenseAnimation(bool bIsBlocking)
+{
+    if (bIsBlocking)
+    {
+        CurrentCombatState = EAnim_CombatState::Blocking;
+        if (DefenseMontage)
+        {
+            PlayMontage(DefenseMontage);
+        }
+    }
+    else
+    {
+        CurrentCombatState = EAnim_CombatState::None;
+        if (DefenseMontage)
+        {
+            StopMontage(DefenseMontage);
+        }
+    }
+}
+
+void UAnim_CharacterAnimController::PlayDodgeAnimation(EAnim_DodgeDirection Direction)
+{
+    CurrentCombatState = EAnim_CombatState::Dodging;
+    
+    // Different dodge animations based on direction
+    if (AttackMontage) // Using attack montage as placeholder
+    {
+        float PlayRate = 1.5f; // Dodges should be quick
+        PlayMontage(AttackMontage, PlayRate);
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("Playing dodge animation: %d"), (int32)Direction);
+}
+
+void UAnim_CharacterAnimController::PlayCraftingAnimation(EAnim_CraftingType CraftingType)
+{
+    switch (CraftingType)
+    {
+        case EAnim_CraftingType::ToolMaking:
+            if (CraftingMontage)
+            {
+                PlayMontage(CraftingMontage, 0.8f); // Slower, precise movements
+            }
+            break;
+        case EAnim_CraftingType::WeaponCrafting:
+            if (CraftingMontage)
+            {
+                PlayMontage(CraftingMontage, 1.0f);
+            }
+            break;
+        case EAnim_CraftingType::ShelterBuilding:
+            if (CraftingMontage)
+            {
+                PlayMontage(CraftingMontage, 0.9f);
+            }
+            break;
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("Playing crafting animation: %d"), (int32)CraftingType);
+}
+
+void UAnim_CharacterAnimController::PlayGatheringAnimation(EAnim_ResourceType ResourceType)
+{
+    switch (ResourceType)
+    {
+        case EAnim_ResourceType::Stone:
+            if (GatheringMontage)
+            {
+                PlayMontage(GatheringMontage, 1.1f); // Slightly faster for stone gathering
+            }
+            break;
+        case EAnim_ResourceType::Wood:
+            if (GatheringMontage)
+            {
+                PlayMontage(GatheringMontage, 0.9f); // Slower for wood chopping
+            }
+            break;
+        case EAnim_ResourceType::Food:
+            if (GatheringMontage)
+            {
+                PlayMontage(GatheringMontage, 1.2f); // Quick picking motions
+            }
+            break;
+        case EAnim_ResourceType::Water:
+            if (GatheringMontage)
+            {
+                PlayMontage(GatheringMontage, 1.0f);
+            }
+            break;
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("Playing gathering animation: %d"), (int32)ResourceType);
+}
+
+void UAnim_CharacterAnimController::PlayEmotionalAnimation(EAnim_EmotionalState EmotionalState)
+{
+    CurrentEmotionalState = EmotionalState;
+    
+    switch (EmotionalState)
+    {
+        case EAnim_EmotionalState::Fear:
+            // Fear animations would show trembling, defensive postures
+            if (DefenseMontage)
+            {
+                PlayMontage(DefenseMontage, 0.7f);
+            }
+            break;
+        case EAnim_EmotionalState::Aggressive:
+            // Aggressive animations would show threatening postures
+            if (AttackMontage)
+            {
+                PlayMontage(AttackMontage, 0.5f);
+            }
+            break;
+        case EAnim_EmotionalState::Tired:
+            // Tired animations would show slouched postures, slower movements
+            if (IdleMontage)
+            {
+                PlayMontage(IdleMontage, 0.6f);
+            }
+            break;
+        case EAnim_EmotionalState::Alert:
+            // Alert animations would show upright, scanning postures
+            if (IdleMontage)
+            {
+                PlayMontage(IdleMontage, 1.3f);
             }
             break;
         default:
+            // Neutral state
             break;
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("Playing emotional animation: %d"), (int32)EmotionalState);
+}
+
+void UAnim_CharacterAnimController::UpdateMovementState(float DeltaTime)
+{
+    // Smooth transitions between movement states
+    EAnim_MovementState NewState = CurrentMovementState;
+    
+    if (bIsInAir)
+    {
+        NewState = EAnim_MovementState::Jumping;
+    }
+    else if (bIsCrouching)
+    {
+        NewState = EAnim_MovementState::Crouching;
+    }
+    else if (MovementSpeed > 300.0f)
+    {
+        NewState = EAnim_MovementState::Running;
+    }
+    else if (MovementSpeed > 50.0f)
+    {
+        NewState = EAnim_MovementState::Walking;
+    }
+    else
+    {
+        NewState = EAnim_MovementState::Idle;
+    }
+    
+    // Handle state transitions
+    if (NewState != CurrentMovementState)
+    {
+        CurrentMovementState = NewState;
+        BlendTimeRemaining = 0.3f; // 300ms blend time
+        
+        // Play appropriate montage for new state
+        switch (CurrentMovementState)
+        {
+            case EAnim_MovementState::Idle:
+                if (IdleMontage) PlayMontage(IdleMontage);
+                break;
+            case EAnim_MovementState::Walking:
+                if (WalkMontage) PlayMontage(WalkMontage);
+                break;
+            case EAnim_MovementState::Running:
+                if (RunMontage) PlayMontage(RunMontage);
+                break;
+            case EAnim_MovementState::Jumping:
+                if (JumpMontage) PlayMontage(JumpMontage);
+                break;
+            default:
+                break;
+        }
     }
 }
 
-void UAnim_CharacterAnimController::SetEmotionalState(EAnim_EmotionalState NewState)
+void UAnim_CharacterAnimController::UpdateCombatState(float DeltaTime)
 {
-    AnimData.EmotionalState = NewState;
+    // Combat state management
+    if (CurrentCombatState != EAnim_CombatState::None)
+    {
+        // Auto-return to none state after combat actions complete
+        // This would typically be handled by animation notify events
+    }
+}
+
+void UAnim_CharacterAnimController::BlendAnimations(float DeltaTime)
+{
+    if (BlendTimeRemaining > 0.0f)
+    {
+        BlendTimeRemaining -= DeltaTime;
+        
+        // Calculate blend weight
+        float BlendWeight = FMath::Clamp(BlendTimeRemaining / 0.3f, 0.0f, 1.0f);
+        
+        // Apply blending logic here
+        // This would typically involve setting blend space parameters
+        // or animation blueprint variables
+    }
 }
