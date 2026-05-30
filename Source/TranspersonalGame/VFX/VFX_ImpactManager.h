@@ -4,100 +4,92 @@
 #include "GameFramework/Actor.h"
 #include "Components/StaticMeshComponent.h"
 #include "Particles/ParticleSystemComponent.h"
-#include "Engine/Engine.h"
+#include "Engine/World.h"
+#include "SharedTypes.h"
 #include "VFX_ImpactManager.generated.h"
 
-UENUM(BlueprintType)
-enum class EVFX_ImpactType : uint8
-{
-    FootstepDust    UMETA(DisplayName = "Footstep Dust"),
-    BloodSplatter   UMETA(DisplayName = "Blood Splatter"),
-    RockImpact      UMETA(DisplayName = "Rock Impact"),
-    WaterSplash     UMETA(DisplayName = "Water Splash"),
-    FireSparks      UMETA(DisplayName = "Fire Sparks")
-};
-
 USTRUCT(BlueprintType)
-struct FVFX_ImpactData
+struct TRANSPERSONALGAME_API FVFX_ImpactData
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Impact")
-    EVFX_ImpactType ImpactType = EVFX_ImpactType::FootstepDust;
+    FVector ImpactLocation;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Impact")
-    FVector ImpactLocation = FVector::ZeroVector;
+    float ImpactForce;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Impact")
-    float ImpactIntensity = 1.0f;
+    EBiomeType BiomeType;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Impact")
-    float Duration = 2.0f;
+    EDinosaurSpecies DinosaurSpecies;
 
     FVFX_ImpactData()
     {
-        ImpactType = EVFX_ImpactType::FootstepDust;
         ImpactLocation = FVector::ZeroVector;
-        ImpactIntensity = 1.0f;
-        Duration = 2.0f;
+        ImpactForce = 1.0f;
+        BiomeType = EBiomeType::Savanna;
+        DinosaurSpecies = EDinosaurSpecies::TRex;
     }
 };
 
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UVFX_ImpactManager : public AActor
+class TRANSPERSONALGAME_API AVFX_ImpactManager : public AActor
 {
     GENERATED_BODY()
 
 public:
-    UVFX_ImpactManager();
+    AVFX_ImpactManager();
 
 protected:
     virtual void BeginPlay() override;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "VFX Components")
-    UStaticMeshComponent* RootMeshComponent;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    USceneComponent* RootSceneComponent;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "VFX Components")
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
     UParticleSystemComponent* DustParticleComponent;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "VFX Components")
-    UParticleSystemComponent* BloodParticleComponent;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    UParticleSystemComponent* DebrisParticleComponent;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Settings")
+    float BaseImpactRadius;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Settings")
+    float MaxParticleCount;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Settings")
+    float EffectDuration;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Settings")
+    bool bAutoTriggerOnSpawn;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Settings")
+    EBiomeType CurrentBiome;
 
 public:
-    virtual void Tick(float DeltaTime) override;
+    UFUNCTION(BlueprintCallable, Category = "VFX Impact")
+    void TriggerFootstepImpact(const FVFX_ImpactData& ImpactData);
 
     UFUNCTION(BlueprintCallable, Category = "VFX Impact")
-    void TriggerImpact(const FVFX_ImpactData& ImpactData);
+    void TriggerDinosaurImpact(EDinosaurSpecies Species, FVector Location, float Force);
 
     UFUNCTION(BlueprintCallable, Category = "VFX Impact")
-    void TriggerFootstepDust(FVector Location, float Intensity = 1.0f);
-
-    UFUNCTION(BlueprintCallable, Category = "VFX Impact")
-    void TriggerBloodSplatter(FVector Location, float Intensity = 1.0f);
-
-    UFUNCTION(BlueprintCallable, Category = "VFX Impact")
-    void CreateDustCloud(FVector Location, float Scale = 1.0f);
+    void SetBiomeType(EBiomeType NewBiome);
 
     UFUNCTION(BlueprintCallable, Category = "VFX Impact")
     void StopAllEffects();
 
 protected:
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Settings")
-    float DefaultDustScale = 1.0f;
+    UFUNCTION()
+    void ConfigureParticlesForBiome();
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Settings")
-    float DefaultBloodScale = 0.8f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Settings")
-    bool bAutoCleanupEffects = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Settings")
-    float EffectLifetime = 5.0f;
+    UFUNCTION()
+    void ScaleEffectForDinosaur(EDinosaurSpecies Species);
 
 private:
-    TArray<FVFX_ImpactData> ActiveImpacts;
-    float CleanupTimer = 0.0f;
-
-    void UpdateActiveEffects(float DeltaTime);
-    void CleanupExpiredEffects();
+    void InitializeParticleComponents();
+    void SetupBiomeSpecificMaterials();
 };
