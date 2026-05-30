@@ -1,517 +1,292 @@
 #include "Director_CriticalPathManager.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "Misc/DateTime.h"
 
 UDir_CriticalPathManager::UDir_CriticalPathManager()
 {
-    CurrentPhase = EDir_CriticalPathPhase::Phase1_CoreSystems;
-    TotalProjectHours = 0.0f;
-    CompletedProjectHours = 0.0f;
+    PrimaryComponentTick.bCanEverTick = true;
+    PrimaryComponentTick.TickInterval = 5.0f; // Update every 5 seconds
+    
+    PlayablePrototypeProgress = 0.0f;
+    bMinimalPlayableReached = false;
+    bEnforceBiomeDistribution = true;
+}
+
+void UDir_CriticalPathManager::BeginPlay()
+{
+    Super::BeginPlay();
+    
+    InitializeCriticalPath();
+    InitializeBiomeTargets();
+    
+    UE_LOG(LogTemp, Warning, TEXT("Director_CriticalPathManager: Production pipeline initialized"));
+}
+
+void UDir_CriticalPathManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+{
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+    
+    UpdatePlayableProgress();
+    
+    // Log status every 30 seconds
+    static float LogTimer = 0.0f;
+    LogTimer += DeltaTime;
+    if (LogTimer >= 30.0f)
+    {
+        LogCriticalPathStatus();
+        LogBiomeDistribution();
+        LogTimer = 0.0f;
+    }
 }
 
 void UDir_CriticalPathManager::InitializeCriticalPath()
 {
-    UE_LOG(LogTemp, Warning, TEXT("Director_CriticalPathManager: Initializing Critical Path"));
+    CriticalPathTasks.Empty();
+    AgentStatusMap.Empty();
     
-    CriticalTasks.Empty();
-    PhaseMetrics.Empty();
+    SetupDefaultCriticalPath();
     
-    // Initialize all phases
-    InitializePhase1Tasks();
-    InitializePhase2Tasks();
-    InitializePhase3Tasks();
-    InitializePhase4Tasks();
-    InitializePhase5Tasks();
-    InitializePhase6Tasks();
+    UE_LOG(LogTemp, Warning, TEXT("Critical Path initialized with %d tasks"), CriticalPathTasks.Num());
+}
+
+void UDir_CriticalPathManager::SetupDefaultCriticalPath()
+{
+    // MILESTONE 1: Minimal Playable Prototype
+    FDir_CriticalPathTask Task1;
+    Task1.TaskName = TEXT("Character Movement System");
+    Task1.AgentID = 3; // Core Systems
+    Task1.Priority = EDir_CriticalPathPriority::Critical;
+    Task1.Status = EDir_AgentStatus::Working;
+    Task1.EstimatedCycles = 2.0f;
+    Task1.DeliverablePath = TEXT("Source/TranspersonalGame/Core/GameFramework/TranspersonalCharacter.cpp");
+    Task1.bIsPlayable = true;
+    CriticalPathTasks.Add(Task1);
     
-    // Calculate initial metrics
-    for (int32 i = 0; i < 6; i++)
+    FDir_CriticalPathTask Task2;
+    Task2.TaskName = TEXT("Survival Component");
+    Task2.AgentID = 3; // Core Systems
+    Task2.Priority = EDir_CriticalPathPriority::Critical;
+    Task2.Status = EDir_AgentStatus::Idle;
+    Task2.EstimatedCycles = 1.0f;
+    Task2.Dependencies.Add(0); // Depends on Character Movement
+    Task2.DeliverablePath = TEXT("Source/TranspersonalGame/Core/SurvivalComponent.cpp");
+    Task2.bIsPlayable = true;
+    CriticalPathTasks.Add(Task2);
+    
+    FDir_CriticalPathTask Task3;
+    Task3.TaskName = TEXT("T-Rex AI Controller");
+    Task3.AgentID = 12; // Combat AI
+    Task3.Priority = EDir_CriticalPathPriority::Critical;
+    Task3.Status = EDir_AgentStatus::Idle;
+    Task3.EstimatedCycles = 2.0f;
+    Task3.DeliverablePath = TEXT("Source/TranspersonalGame/AI/Combat/DinosaurCombatAIController.cpp");
+    Task3.bIsPlayable = true;
+    CriticalPathTasks.Add(Task3);
+    
+    FDir_CriticalPathTask Task4;
+    Task4.TaskName = TEXT("Dinosaur Spawning System");
+    Task4.AgentID = 5; // World Generator
+    Task4.Priority = EDir_CriticalPathPriority::Critical;
+    Task4.Status = EDir_AgentStatus::Idle;
+    Task4.EstimatedCycles = 1.0f;
+    Task4.DeliverablePath = TEXT("MinPlayableMap");
+    Task4.bIsPlayable = true;
+    CriticalPathTasks.Add(Task4);
+    
+    FDir_CriticalPathTask Task5;
+    Task5.TaskName = TEXT("Survival HUD");
+    Task5.AgentID = 14; // Quest Designer (UI)
+    Task5.Priority = EDir_CriticalPathPriority::High;
+    Task5.Status = EDir_AgentStatus::Idle;
+    Task5.EstimatedCycles = 1.0f;
+    Task5.Dependencies.Add(1); // Depends on Survival Component
+    Task5.DeliverablePath = TEXT("Source/TranspersonalGame/UI/SurvivalHUD.cpp");
+    Task5.bIsPlayable = true;
+    CriticalPathTasks.Add(Task5);
+    
+    // Initialize agent status map
+    for (int32 i = 1; i <= 19; ++i)
     {
-        EDir_CriticalPathPhase Phase = static_cast<EDir_CriticalPathPhase>(i);
-        CalculatePhaseMetrics(Phase);
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("Critical Path initialized with %d tasks"), CriticalTasks.Num());
-}
-
-void UDir_CriticalPathManager::InitializePhase1Tasks()
-{
-    // Phase 1: Core Systems (Agents #2-#4)
-    FDir_CriticalTask Task;
-    
-    // Agent #2 - Engine Architect
-    Task.TaskName = TEXT("Engine Architecture");
-    Task.Description = TEXT("Define core engine architecture and systems integration");
-    Task.AgentID = 2;
-    Task.Priority = EDir_TaskPriority::Critical;
-    Task.Status = EDir_TaskStatus::Complete;
-    Task.Phase = EDir_CriticalPathPhase::Phase1_CoreSystems;
-    Task.EstimatedHours = 8.0f;
-    Task.ActualHours = 8.0f;
-    AddCriticalTask(Task);
-    
-    // Agent #3 - Core Systems
-    Task.TaskName = TEXT("Physics Integration");
-    Task.Description = TEXT("Implement core physics, collision, and destruction systems");
-    Task.AgentID = 3;
-    Task.Priority = EDir_TaskPriority::Critical;
-    Task.Status = EDir_TaskStatus::Complete;
-    Task.Phase = EDir_CriticalPathPhase::Phase1_CoreSystems;
-    Task.Dependencies = {2};
-    Task.EstimatedHours = 12.0f;
-    Task.ActualHours = 12.0f;
-    AddCriticalTask(Task);
-    
-    // Agent #4 - Performance Optimizer
-    Task.TaskName = TEXT("Performance Framework");
-    Task.Description = TEXT("Establish performance monitoring and optimization systems");
-    Task.AgentID = 4;
-    Task.Priority = EDir_TaskPriority::High;
-    Task.Status = EDir_TaskStatus::Complete;
-    Task.Phase = EDir_CriticalPathPhase::Phase1_CoreSystems;
-    Task.Dependencies = {3};
-    Task.EstimatedHours = 6.0f;
-    Task.ActualHours = 6.0f;
-    AddCriticalTask(Task);
-}
-
-void UDir_CriticalPathManager::InitializePhase2Tasks()
-{
-    // Phase 2: Character & Movement (Agent #9-#10)
-    FDir_CriticalTask Task;
-    
-    // Agent #9 - Character Artist
-    Task.TaskName = TEXT("Player Character");
-    Task.Description = TEXT("Create playable character with WASD movement and third-person camera");
-    Task.AgentID = 9;
-    Task.Priority = EDir_TaskPriority::Critical;
-    Task.Status = EDir_TaskStatus::InProgress;
-    Task.Phase = EDir_CriticalPathPhase::Phase2_Character;
-    Task.Dependencies = {2, 3};
-    Task.EstimatedHours = 10.0f;
-    Task.ActualHours = 5.0f;
-    AddCriticalTask(Task);
-    
-    // Agent #10 - Animation
-    Task.TaskName = TEXT("Character Animation");
-    Task.Description = TEXT("Implement basic movement animations and IK foot placement");
-    Task.AgentID = 10;
-    Task.Priority = EDir_TaskPriority::High;
-    Task.Status = EDir_TaskStatus::NotStarted;
-    Task.Phase = EDir_CriticalPathPhase::Phase2_Character;
-    Task.Dependencies = {9};
-    Task.EstimatedHours = 8.0f;
-    Task.ActualHours = 0.0f;
-    AddCriticalTask(Task);
-}
-
-void UDir_CriticalPathManager::InitializePhase3Tasks()
-{
-    // Phase 3: Environment & Terrain (Agents #5-#8)
-    FDir_CriticalTask Task;
-    
-    // Agent #5 - World Generator
-    Task.TaskName = TEXT("Terrain Generation");
-    Task.Description = TEXT("Generate playable terrain with height variation and biomes");
-    Task.AgentID = 5;
-    Task.Priority = EDir_TaskPriority::Critical;
-    Task.Status = EDir_TaskStatus::InProgress;
-    Task.Phase = EDir_CriticalPathPhase::Phase3_Environment;
-    Task.Dependencies = {2, 3};
-    Task.EstimatedHours = 12.0f;
-    Task.ActualHours = 6.0f;
-    AddCriticalTask(Task);
-    
-    // Agent #6 - Environment Artist
-    Task.TaskName = TEXT("Environment Population");
-    Task.Description = TEXT("Populate world with vegetation, rocks, and environmental props");
-    Task.AgentID = 6;
-    Task.Priority = EDir_TaskPriority::High;
-    Task.Status = EDir_TaskStatus::NotStarted;
-    Task.Phase = EDir_CriticalPathPhase::Phase3_Environment;
-    Task.Dependencies = {5};
-    Task.EstimatedHours = 10.0f;
-    Task.ActualHours = 0.0f;
-    AddCriticalTask(Task);
-    
-    // Agent #8 - Lighting & Atmosphere
-    Task.TaskName = TEXT("Lighting System");
-    Task.Description = TEXT("Implement day/night cycle and atmospheric lighting");
-    Task.AgentID = 8;
-    Task.Priority = EDir_TaskPriority::Medium;
-    Task.Status = EDir_TaskStatus::NotStarted;
-    Task.Phase = EDir_CriticalPathPhase::Phase3_Environment;
-    Task.Dependencies = {5, 6};
-    Task.EstimatedHours = 8.0f;
-    Task.ActualHours = 0.0f;
-    AddCriticalTask(Task);
-}
-
-void UDir_CriticalPathManager::InitializePhase4Tasks()
-{
-    // Phase 4: AI & Dinosaurs (Agents #11-#13)
-    FDir_CriticalTask Task;
-    
-    // Agent #12 - Combat & Enemy AI
-    Task.TaskName = TEXT("Dinosaur AI");
-    Task.Description = TEXT("Implement basic dinosaur AI with detection and pursuit behavior");
-    Task.AgentID = 12;
-    Task.Priority = EDir_TaskPriority::Critical;
-    Task.Status = EDir_TaskStatus::NotStarted;
-    Task.Phase = EDir_CriticalPathPhase::Phase4_AI;
-    Task.Dependencies = {9, 5};
-    Task.EstimatedHours = 14.0f;
-    Task.ActualHours = 0.0f;
-    AddCriticalTask(Task);
-    
-    // Agent #11 - NPC Behavior
-    Task.TaskName = TEXT("Dinosaur Spawning");
-    Task.Description = TEXT("Spawn dinosaur actors in appropriate biome locations");
-    Task.AgentID = 11;
-    Task.Priority = EDir_TaskPriority::High;
-    Task.Status = EDir_TaskStatus::NotStarted;
-    Task.Phase = EDir_CriticalPathPhase::Phase4_AI;
-    Task.Dependencies = {5, 12};
-    Task.EstimatedHours = 6.0f;
-    Task.ActualHours = 0.0f;
-    AddCriticalTask(Task);
-}
-
-void UDir_CriticalPathManager::InitializePhase5Tasks()
-{
-    // Phase 5: Survival Systems (Agent #1 coordination)
-    FDir_CriticalTask Task;
-    
-    Task.TaskName = TEXT("Survival HUD");
-    Task.Description = TEXT("Implement survival stats display (health, hunger, thirst, stamina)");
-    Task.AgentID = 1;
-    Task.Priority = EDir_TaskPriority::Critical;
-    Task.Status = EDir_TaskStatus::Complete;
-    Task.Phase = EDir_CriticalPathPhase::Phase5_Survival;
-    Task.Dependencies = {9};
-    Task.EstimatedHours = 4.0f;
-    Task.ActualHours = 4.0f;
-    AddCriticalTask(Task);
-    
-    Task.TaskName = TEXT("Survival Mechanics");
-    Task.Description = TEXT("Implement hunger, thirst, and stamina depletion over time");
-    Task.AgentID = 1;
-    Task.Priority = EDir_TaskPriority::High;
-    Task.Status = EDir_TaskStatus::InProgress;
-    Task.Phase = EDir_CriticalPathPhase::Phase5_Survival;
-    Task.Dependencies = {9};
-    Task.EstimatedHours = 6.0f;
-    Task.ActualHours = 3.0f;
-    AddCriticalTask(Task);
-}
-
-void UDir_CriticalPathManager::InitializePhase6Tasks()
-{
-    // Phase 6: Integration & Polish (Agent #19)
-    FDir_CriticalTask Task;
-    
-    Task.TaskName = TEXT("Integration Testing");
-    Task.Description = TEXT("Test all systems integration and fix critical bugs");
-    Task.AgentID = 19;
-    Task.Priority = EDir_TaskPriority::Critical;
-    Task.Status = EDir_TaskStatus::NotStarted;
-    Task.Phase = EDir_CriticalPathPhase::Phase6_Integration;
-    Task.Dependencies = {9, 5, 12, 1};
-    Task.EstimatedHours = 8.0f;
-    Task.ActualHours = 0.0f;
-    AddCriticalTask(Task);
-}
-
-void UDir_CriticalPathManager::UpdateTaskStatus(const FString& TaskName, EDir_TaskStatus NewStatus)
-{
-    for (FDir_CriticalTask& Task : CriticalTasks)
-    {
-        if (Task.TaskName == TaskName)
-        {
-            Task.Status = NewStatus;
-            UE_LOG(LogTemp, Warning, TEXT("Task '%s' status updated to %d"), *TaskName, (int32)NewStatus);
-            
-            // Recalculate metrics for the task's phase
-            CalculatePhaseMetrics(Task.Phase);
-            break;
-        }
+        AgentStatusMap.Add(i, EDir_AgentStatus::Idle);
     }
 }
 
-void UDir_CriticalPathManager::BlockTask(const FString& TaskName, const FString& BlockingReason)
+void UDir_CriticalPathManager::UpdateTaskStatus(int32 AgentID, EDir_AgentStatus NewStatus)
 {
-    for (FDir_CriticalTask& Task : CriticalTasks)
-    {
-        if (Task.TaskName == TaskName)
-        {
-            Task.Status = EDir_TaskStatus::Blocked;
-            Task.BlockingIssue = BlockingReason;
-            UE_LOG(LogTemp, Error, TEXT("Task '%s' blocked: %s"), *TaskName, *BlockingReason);
-            
-            CalculatePhaseMetrics(Task.Phase);
-            break;
-        }
-    }
-}
-
-void UDir_CriticalPathManager::UnblockTask(const FString& TaskName)
-{
-    for (FDir_CriticalTask& Task : CriticalTasks)
-    {
-        if (Task.TaskName == TaskName && Task.Status == EDir_TaskStatus::Blocked)
-        {
-            Task.Status = EDir_TaskStatus::InProgress;
-            Task.BlockingIssue = TEXT("");
-            UE_LOG(LogTemp, Warning, TEXT("Task '%s' unblocked"), *TaskName);
-            
-            CalculatePhaseMetrics(Task.Phase);
-            break;
-        }
-    }
-}
-
-bool UDir_CriticalPathManager::CanAdvanceToPhase(EDir_CriticalPathPhase TargetPhase)
-{
-    if (TargetPhase <= CurrentPhase)
-    {
-        return true; // Already at or past this phase
-    }
+    AgentStatusMap.FindOrAdd(AgentID) = NewStatus;
     
-    // Check if previous phase is complete
-    EDir_CriticalPathPhase PreviousPhase = static_cast<EDir_CriticalPathPhase>((int32)TargetPhase - 1);
-    FDir_PhaseMetrics PrevMetrics = GetPhaseMetrics(PreviousPhase);
-    
-    return PrevMetrics.CompletionPercentage >= 80.0f && PrevMetrics.BlockedTasks == 0;
-}
-
-void UDir_CriticalPathManager::AdvanceToNextPhase()
-{
-    EDir_CriticalPathPhase NextPhase = static_cast<EDir_CriticalPathPhase>((int32)CurrentPhase + 1);
-    
-    if (CanAdvanceToPhase(NextPhase))
-    {
-        CurrentPhase = NextPhase;
-        UE_LOG(LogTemp, Warning, TEXT("Advanced to Phase %d"), (int32)CurrentPhase);
-    }
-    else
-    {
-        UE_LOG(LogTemp, Error, TEXT("Cannot advance to next phase - prerequisites not met"));
-    }
-}
-
-void UDir_CriticalPathManager::AddCriticalTask(const FDir_CriticalTask& NewTask)
-{
-    CriticalTasks.Add(NewTask);
-    TotalProjectHours += NewTask.EstimatedHours;
-}
-
-TArray<FDir_CriticalTask> UDir_CriticalPathManager::GetTasksForAgent(int32 AgentID)
-{
-    TArray<FDir_CriticalTask> AgentTasks;
-    
-    for (const FDir_CriticalTask& Task : CriticalTasks)
+    // Update tasks assigned to this agent
+    for (FDir_CriticalPathTask& Task : CriticalPathTasks)
     {
         if (Task.AgentID == AgentID)
         {
-            AgentTasks.Add(Task);
+            Task.Status = NewStatus;
         }
     }
     
-    return AgentTasks;
+    UE_LOG(LogTemp, Warning, TEXT("Agent %d status updated to %d"), AgentID, (int32)NewStatus);
 }
 
-TArray<FDir_CriticalTask> UDir_CriticalPathManager::GetTasksForPhase(EDir_CriticalPathPhase Phase)
+bool UDir_CriticalPathManager::CanAgentProceed(int32 AgentID)
 {
-    TArray<FDir_CriticalTask> PhaseTasks;
-    
-    for (const FDir_CriticalTask& Task : CriticalTasks)
+    // Check if agent is blocked
+    if (BlockedAgents.Contains(AgentID))
     {
-        if (Task.Phase == Phase)
+        return false;
+    }
+    
+    // Check if agent's tasks have satisfied dependencies
+    for (const FDir_CriticalPathTask& Task : CriticalPathTasks)
+    {
+        if (Task.AgentID == AgentID && Task.Status == EDir_AgentStatus::Idle)
         {
-            PhaseTasks.Add(Task);
+            return CheckTaskDependencies(Task);
         }
     }
     
-    return PhaseTasks;
+    return true;
 }
 
-TArray<FDir_CriticalTask> UDir_CriticalPathManager::GetBlockedTasks()
+bool UDir_CriticalPathManager::CheckTaskDependencies(const FDir_CriticalPathTask& Task)
 {
-    TArray<FDir_CriticalTask> BlockedTasks;
-    
-    for (const FDir_CriticalTask& Task : CriticalTasks)
+    for (int32 DepIndex : Task.Dependencies)
     {
-        if (Task.Status == EDir_TaskStatus::Blocked)
+        if (DepIndex >= 0 && DepIndex < CriticalPathTasks.Num())
         {
-            BlockedTasks.Add(Task);
+            const FDir_CriticalPathTask& DepTask = CriticalPathTasks[DepIndex];
+            if (DepTask.Status != EDir_AgentStatus::Complete)
+            {
+                return false;
+            }
         }
     }
-    
-    return BlockedTasks;
+    return true;
 }
 
-TArray<FDir_CriticalTask> UDir_CriticalPathManager::GetCriticalTasks()
+float UDir_CriticalPathManager::CalculatePlayableProgress()
 {
-    TArray<FDir_CriticalTask> CritTasks;
+    int32 CompletedPlayableTasks = 0;
+    int32 TotalPlayableTasks = 0;
     
-    for (const FDir_CriticalTask& Task : CriticalTasks)
+    for (const FDir_CriticalPathTask& Task : CriticalPathTasks)
     {
-        if (Task.Priority == EDir_TaskPriority::Critical)
+        if (Task.bIsPlayable)
         {
-            CritTasks.Add(Task);
+            TotalPlayableTasks++;
+            if (Task.Status == EDir_AgentStatus::Complete)
+            {
+                CompletedPlayableTasks++;
+            }
         }
     }
     
-    return CritTasks;
+    return TotalPlayableTasks > 0 ? (float)CompletedPlayableTasks / (float)TotalPlayableTasks * 100.0f : 0.0f;
 }
 
-FDir_PhaseMetrics UDir_CriticalPathManager::GetPhaseMetrics(EDir_CriticalPathPhase Phase)
+void UDir_CriticalPathManager::UpdatePlayableProgress()
 {
-    for (const FDir_PhaseMetrics& Metrics : PhaseMetrics)
-    {
-        if (Metrics.Phase == Phase)
-        {
-            return Metrics;
-        }
-    }
+    PlayablePrototypeProgress = CalculatePlayableProgress();
     
-    // If not found, calculate and return
-    CalculatePhaseMetrics(Phase);
-    return GetPhaseMetrics(Phase);
+    if (PlayablePrototypeProgress >= 80.0f && !bMinimalPlayableReached)
+    {
+        bMinimalPlayableReached = true;
+        UE_LOG(LogTemp, Warning, TEXT("MILESTONE REACHED: Minimal Playable Prototype at %.1f%% completion"), PlayablePrototypeProgress);
+    }
 }
 
-void UDir_CriticalPathManager::CalculatePhaseMetrics(EDir_CriticalPathPhase Phase)
+void UDir_CriticalPathManager::InitializeBiomeTargets()
 {
-    FDir_PhaseMetrics Metrics;
-    Metrics.Phase = Phase;
+    BiomeTargets.Empty();
+    SetupDefaultBiomeTargets();
+}
+
+void UDir_CriticalPathManager::SetupDefaultBiomeTargets()
+{
+    // Savana (0,0)
+    FDir_BiomeDistributionTarget Savana;
+    Savana.BiomeName = TEXT("Savana");
+    Savana.CenterLocation = FVector(0.0f, 0.0f, 100.0f);
+    Savana.DistributionPercentage = 20.0f;
+    BiomeTargets.Add(Savana);
     
-    TArray<FDir_CriticalTask> PhaseTasks = GetTasksForPhase(Phase);
+    // Pantano (-50000,-45000)
+    FDir_BiomeDistributionTarget Pantano;
+    Pantano.BiomeName = TEXT("Pantano");
+    Pantano.CenterLocation = FVector(-50000.0f, -45000.0f, 100.0f);
+    Pantano.DistributionPercentage = 20.0f;
+    BiomeTargets.Add(Pantano);
     
-    Metrics.TotalTasks = PhaseTasks.Num();
-    Metrics.CompletedTasks = 0;
-    Metrics.BlockedTasks = 0;
-    Metrics.EstimatedRemainingHours = 0.0f;
+    // Floresta (-45000,40000)
+    FDir_BiomeDistributionTarget Floresta;
+    Floresta.BiomeName = TEXT("Floresta");
+    Floresta.CenterLocation = FVector(-45000.0f, 40000.0f, 100.0f);
+    Floresta.DistributionPercentage = 20.0f;
+    BiomeTargets.Add(Floresta);
     
-    for (const FDir_CriticalTask& Task : PhaseTasks)
+    // Deserto (55000,0)
+    FDir_BiomeDistributionTarget Deserto;
+    Deserto.BiomeName = TEXT("Deserto");
+    Deserto.CenterLocation = FVector(55000.0f, 0.0f, 100.0f);
+    Deserto.DistributionPercentage = 20.0f;
+    BiomeTargets.Add(Deserto);
+    
+    // Montanha (40000,50000)
+    FDir_BiomeDistributionTarget Montanha;
+    Montanha.BiomeName = TEXT("Montanha");
+    Montanha.CenterLocation = FVector(40000.0f, 50000.0f, 100.0f);
+    Montanha.DistributionPercentage = 20.0f;
+    BiomeTargets.Add(Montanha);
+    
+    UE_LOG(LogTemp, Warning, TEXT("Biome targets initialized: %d biomes"), BiomeTargets.Num());
+}
+
+FVector UDir_CriticalPathManager::GetNextSpawnLocation(const FString& BiomeName)
+{
+    for (FDir_BiomeDistributionTarget& Biome : BiomeTargets)
     {
-        if (Task.Status == EDir_TaskStatus::Complete)
+        if (Biome.BiomeName == BiomeName)
         {
-            Metrics.CompletedTasks++;
-            CompletedProjectHours += Task.ActualHours;
-        }
-        else if (Task.Status == EDir_TaskStatus::Blocked)
-        {
-            Metrics.BlockedTasks++;
-            Metrics.EstimatedRemainingHours += Task.EstimatedHours - Task.ActualHours;
-        }
-        else
-        {
-            Metrics.EstimatedRemainingHours += Task.EstimatedHours - Task.ActualHours;
+            // Random offset within biome radius (15000 units)
+            float OffsetX = FMath::RandRange(-15000.0f, 15000.0f);
+            float OffsetY = FMath::RandRange(-15000.0f, 15000.0f);
+            
+            return Biome.CenterLocation + FVector(OffsetX, OffsetY, 0.0f);
         }
     }
     
-    Metrics.CompletionPercentage = Metrics.TotalTasks > 0 ? 
-        (float)Metrics.CompletedTasks / (float)Metrics.TotalTasks * 100.0f : 0.0f;
-    
-    Metrics.bCanStartNextPhase = Metrics.CompletionPercentage >= 80.0f && Metrics.BlockedTasks == 0;
-    
-    // Update or add metrics
-    bool bFound = false;
-    for (FDir_PhaseMetrics& ExistingMetrics : PhaseMetrics)
+    // Default to Savana if biome not found
+    return FVector(0.0f, 0.0f, 100.0f);
+}
+
+void UDir_CriticalPathManager::UpdateBiomeActorCount(const FString& BiomeName, int32 Delta)
+{
+    for (FDir_BiomeDistributionTarget& Biome : BiomeTargets)
     {
-        if (ExistingMetrics.Phase == Phase)
+        if (Biome.BiomeName == BiomeName)
         {
-            ExistingMetrics = Metrics;
-            bFound = true;
+            Biome.CurrentActorCount += Delta;
             break;
         }
     }
-    
-    if (!bFound)
-    {
-        PhaseMetrics.Add(Metrics);
-    }
 }
 
-TArray<FDir_PhaseMetrics> UDir_CriticalPathManager::GetAllPhaseMetrics()
+bool UDir_CriticalPathManager::IsBiomeDistributionBalanced()
 {
-    // Ensure all phases have calculated metrics
-    for (int32 i = 0; i < 6; i++)
+    if (!bEnforceBiomeDistribution) return true;
+    
+    int32 TotalActors = 0;
+    for (const FDir_BiomeDistributionTarget& Biome : BiomeTargets)
     {
-        EDir_CriticalPathPhase Phase = static_cast<EDir_CriticalPathPhase>(i);
-        CalculatePhaseMetrics(Phase);
+        TotalActors += Biome.CurrentActorCount;
     }
     
-    return PhaseMetrics;
-}
-
-float UDir_CriticalPathManager::GetOverallCompletionPercentage()
-{
-    return TotalProjectHours > 0.0f ? (CompletedProjectHours / TotalProjectHours) * 100.0f : 0.0f;
-}
-
-float UDir_CriticalPathManager::GetProjectedCompletionHours()
-{
-    float RemainingHours = 0.0f;
+    if (TotalActors == 0) return true;
     
-    for (const FDir_CriticalTask& Task : CriticalTasks)
+    // Check if any biome has more than 30% of total actors
+    for (const FDir_BiomeDistributionTarget& Biome : BiomeTargets)
     {
-        if (Task.Status != EDir_TaskStatus::Complete)
-        {
-            RemainingHours += Task.EstimatedHours - Task.ActualHours;
-        }
-    }
-    
-    return RemainingHours;
-}
-
-TArray<int32> UDir_CriticalPathManager::GetReadyAgents()
-{
-    TArray<int32> ReadyAgents;
-    
-    for (const FDir_CriticalTask& Task : CriticalTasks)
-    {
-        if (Task.Status == EDir_TaskStatus::NotStarted && CheckDependenciesComplete(Task))
-        {
-            ReadyAgents.AddUnique(Task.AgentID);
-        }
-    }
-    
-    return ReadyAgents;
-}
-
-TArray<int32> UDir_CriticalPathManager::GetBlockedAgents()
-{
-    TArray<int32> BlockedAgents;
-    
-    for (const FDir_CriticalTask& Task : CriticalTasks)
-    {
-        if (Task.Status == EDir_TaskStatus::Blocked)
-        {
-            BlockedAgents.AddUnique(Task.AgentID);
-        }
-    }
-    
-    return BlockedAgents;
-}
-
-bool UDir_CriticalPathManager::CheckDependenciesComplete(const FDir_CriticalTask& Task)
-{
-    for (int32 DepAgentID : Task.Dependencies)
-    {
-        bool bDependencyMet = false;
-        
-        for (const FDir_CriticalTask& DepTask : CriticalTasks)
-        {
-            if (DepTask.AgentID == DepAgentID && DepTask.Status == EDir_TaskStatus::Complete)
-            {
-                bDependencyMet = true;
-                break;
-            }
-        }
-        
-        if (!bDependencyMet)
+        float ActualPercentage = (float)Biome.CurrentActorCount / (float)TotalActors * 100.0f;
+        if (ActualPercentage > 30.0f)
         {
             return false;
         }
@@ -520,83 +295,117 @@ bool UDir_CriticalPathManager::CheckDependenciesComplete(const FDir_CriticalTask
     return true;
 }
 
-void UDir_CriticalPathManager::AssignTaskToAgent(const FString& TaskName, int32 AgentID)
+void UDir_CriticalPathManager::BlockAgent(int32 AgentID, const FString& Reason)
 {
-    for (FDir_CriticalTask& Task : CriticalTasks)
+    if (!BlockedAgents.Contains(AgentID))
     {
-        if (Task.TaskName == TaskName)
-        {
-            Task.AgentID = AgentID;
-            UE_LOG(LogTemp, Warning, TEXT("Task '%s' assigned to Agent %d"), *TaskName, AgentID);
-            break;
-        }
+        BlockedAgents.Add(AgentID);
+        UpdateTaskStatus(AgentID, EDir_AgentStatus::Blocked);
+        UE_LOG(LogTemp, Error, TEXT("Agent %d BLOCKED: %s"), AgentID, *Reason);
     }
 }
 
-void UDir_CriticalPathManager::ReassignBlockedTasks()
+void UDir_CriticalPathManager::UnblockAgent(int32 AgentID)
 {
-    TArray<FDir_CriticalTask> BlockedTasks = GetBlockedTasks();
-    
-    for (FDir_CriticalTask& Task : BlockedTasks)
-    {
-        // Simple reassignment logic - could be more sophisticated
-        if (Task.AgentID < 19)
-        {
-            Task.AgentID++;
-            Task.Status = EDir_TaskStatus::NotStarted;
-            Task.BlockingIssue = TEXT("");
-            UE_LOG(LogTemp, Warning, TEXT("Reassigned blocked task '%s' to Agent %d"), *Task.TaskName, Task.AgentID);
-        }
-    }
+    BlockedAgents.Remove(AgentID);
+    UpdateTaskStatus(AgentID, EDir_AgentStatus::Idle);
+    UE_LOG(LogTemp, Warning, TEXT("Agent %d UNBLOCKED"), AgentID);
 }
 
-bool UDir_CriticalPathManager::ValidateCriticalPath()
+TArray<int32> UDir_CriticalPathManager::GetReadyAgents()
 {
-    TArray<FString> Violations = GetCriticalPathViolations();
-    return Violations.Num() == 0;
-}
-
-TArray<FString> UDir_CriticalPathManager::GetCriticalPathViolations()
-{
-    TArray<FString> Violations;
+    TArray<int32> ReadyAgents;
     
-    // Check for circular dependencies
-    // Check for orphaned tasks
-    // Check for missing critical tasks
-    
-    TArray<FDir_CriticalTask> CriticalTasks = GetCriticalTasks();
-    for (const FDir_CriticalTask& Task : CriticalTasks)
+    for (int32 i = 1; i <= 19; ++i)
     {
-        if (Task.Status == EDir_TaskStatus::Blocked)
+        if (CanAgentProceed(i))
         {
-            Violations.Add(FString::Printf(TEXT("Critical task '%s' is blocked: %s"), *Task.TaskName, *Task.BlockingIssue));
+            ReadyAgents.Add(i);
         }
     }
     
-    return Violations;
+    return ReadyAgents;
 }
 
-void UDir_CriticalPathManager::GenerateCriticalPathReport()
+void UDir_CriticalPathManager::LogCriticalPathStatus()
 {
-    UE_LOG(LogTemp, Warning, TEXT("=== CRITICAL PATH REPORT ==="));
-    UE_LOG(LogTemp, Warning, TEXT("Current Phase: %d"), (int32)CurrentPhase);
-    UE_LOG(LogTemp, Warning, TEXT("Overall Completion: %.1f%%"), GetOverallCompletionPercentage());
-    UE_LOG(LogTemp, Warning, TEXT("Projected Remaining Hours: %.1f"), GetProjectedCompletionHours());
+    UE_LOG(LogTemp, Warning, TEXT("=== CRITICAL PATH STATUS ==="));
+    UE_LOG(LogTemp, Warning, TEXT("Playable Progress: %.1f%%"), PlayablePrototypeProgress);
+    UE_LOG(LogTemp, Warning, TEXT("Minimal Playable Reached: %s"), bMinimalPlayableReached ? TEXT("YES") : TEXT("NO"));
     
-    TArray<FDir_PhaseMetrics> AllMetrics = GetAllPhaseMetrics();
-    for (const FDir_PhaseMetrics& Metrics : AllMetrics)
+    for (int32 i = 0; i < CriticalPathTasks.Num(); ++i)
     {
-        UE_LOG(LogTemp, Warning, TEXT("Phase %d: %.1f%% complete, %d blocked"), 
-            (int32)Metrics.Phase, Metrics.CompletionPercentage, Metrics.BlockedTasks);
+        const FDir_CriticalPathTask& Task = CriticalPathTasks[i];
+        FString StatusStr;
+        switch (Task.Status)
+        {
+            case EDir_AgentStatus::Idle: StatusStr = TEXT("IDLE"); break;
+            case EDir_AgentStatus::Working: StatusStr = TEXT("WORKING"); break;
+            case EDir_AgentStatus::Blocked: StatusStr = TEXT("BLOCKED"); break;
+            case EDir_AgentStatus::Complete: StatusStr = TEXT("COMPLETE"); break;
+            case EDir_AgentStatus::Failed: StatusStr = TEXT("FAILED"); break;
+        }
+        
+        UE_LOG(LogTemp, Warning, TEXT("Task %d: %s [Agent %d] - %s"), 
+               i, *Task.TaskName, Task.AgentID, *StatusStr);
+    }
+}
+
+void UDir_CriticalPathManager::LogBiomeDistribution()
+{
+    UE_LOG(LogTemp, Warning, TEXT("=== BIOME DISTRIBUTION ==="));
+    
+    int32 TotalActors = 0;
+    for (const FDir_BiomeDistributionTarget& Biome : BiomeTargets)
+    {
+        TotalActors += Biome.CurrentActorCount;
     }
     
-    TArray<FString> Violations = GetCriticalPathViolations();
-    if (Violations.Num() > 0)
+    for (const FDir_BiomeDistributionTarget& Biome : BiomeTargets)
     {
-        UE_LOG(LogTemp, Error, TEXT("CRITICAL PATH VIOLATIONS:"));
-        for (const FString& Violation : Violations)
+        float ActualPercentage = TotalActors > 0 ? (float)Biome.CurrentActorCount / (float)TotalActors * 100.0f : 0.0f;
+        UE_LOG(LogTemp, Warning, TEXT("%s: %d actors (%.1f%% - Target: %.1f%%)"), 
+               *Biome.BiomeName, Biome.CurrentActorCount, ActualPercentage, Biome.DistributionPercentage);
+    }
+    
+    UE_LOG(LogTemp, Warning, TEXT("Distribution Balanced: %s"), IsBiomeDistributionBalanced() ? TEXT("YES") : TEXT("NO"));
+}
+
+void UDir_CriticalPathManager::ValidateProductionPipeline()
+{
+    UE_LOG(LogTemp, Warning, TEXT("=== PRODUCTION PIPELINE VALIDATION ==="));
+    
+    // Check critical path completion
+    int32 CriticalTasks = 0;
+    int32 CompletedCritical = 0;
+    
+    for (const FDir_CriticalPathTask& Task : CriticalPathTasks)
+    {
+        if (Task.Priority == EDir_CriticalPathPriority::Critical)
         {
-            UE_LOG(LogTemp, Error, TEXT("- %s"), *Violation);
+            CriticalTasks++;
+            if (Task.Status == EDir_AgentStatus::Complete)
+            {
+                CompletedCritical++;
+            }
         }
+    }
+    
+    UE_LOG(LogTemp, Warning, TEXT("Critical Tasks: %d/%d completed"), CompletedCritical, CriticalTasks);
+    
+    // Check blocked agents
+    if (BlockedAgents.Num() > 0)
+    {
+        UE_LOG(LogTemp, Error, TEXT("BLOCKED AGENTS: %d"), BlockedAgents.Num());
+        for (int32 AgentID : BlockedAgents)
+        {
+            UE_LOG(LogTemp, Error, TEXT("  - Agent %d"), AgentID);
+        }
+    }
+    
+    // Check biome distribution
+    if (!IsBiomeDistributionBalanced())
+    {
+        UE_LOG(LogTemp, Error, TEXT("BIOME DISTRIBUTION IMBALANCED - Enforcement Required"));
     }
 }
