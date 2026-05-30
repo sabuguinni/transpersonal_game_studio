@@ -2,25 +2,43 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
-#include "Components/DirectionalLightComponent.h"
-#include "Components/SkyAtmosphereComponent.h"
-#include "Components/ExponentialHeightFogComponent.h"
-#include "Components/PostProcessComponent.h"
 #include "Engine/DirectionalLight.h"
 #include "Engine/SkyAtmosphere.h"
 #include "Engine/ExponentialHeightFog.h"
 #include "Engine/PostProcessVolume.h"
+#include "Components/SkyAtmosphereComponent.h"
+#include "Components/ExponentialHeightFogComponent.h"
+#include "SharedTypes.h"
 #include "Light_AtmosphericManager.generated.h"
 
-UENUM(BlueprintType)
-enum class ELight_TimeOfDay : uint8
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FLight_BiomeLightingConfig
 {
-    Dawn        UMETA(DisplayName = "Dawn"),
-    Morning     UMETA(DisplayName = "Morning"),
-    Midday      UMETA(DisplayName = "Midday"),
-    Afternoon   UMETA(DisplayName = "Afternoon"),
-    Dusk        UMETA(DisplayName = "Dusk"),
-    Night       UMETA(DisplayName = "Night")
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Lighting")
+    FString BiomeName;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Lighting")
+    FVector BiomeCenter;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Lighting")
+    FLinearColor AmbientTint;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Lighting")
+    float AtmosphericDensity;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Lighting")
+    float FogIntensity;
+
+    FLight_BiomeLightingConfig()
+    {
+        BiomeName = TEXT("Default");
+        BiomeCenter = FVector::ZeroVector;
+        AmbientTint = FLinearColor::White;
+        AtmosphericDensity = 1.0f;
+        FogIntensity = 1.0f;
+    }
 };
 
 USTRUCT(BlueprintType)
@@ -28,36 +46,32 @@ struct TRANSPERSONALGAME_API FLight_CretaceousLightingSettings
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sun")
-    float SunIntensity = 5.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cretaceous Lighting")
+    float SunIntensity;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sun")
-    FLinearColor SunColor = FLinearColor(1.0f, 0.9f, 0.7f, 1.0f);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cretaceous Lighting")
+    float ColorTemperature;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sun")
-    float SunElevationAngle = -45.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cretaceous Lighting")
+    FLinearColor SunColor;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sun")
-    float SunAzimuthAngle = 135.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cretaceous Lighting")
+    FRotator SunAngle;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmosphere")
-    float RayleighScattering = 0.8f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cretaceous Lighting")
+    float AtmosphericScattering;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmosphere")
-    float MieScattering = 0.6f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fog")
-    float FogDensity = 0.02f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fog")
-    float FogHeightFalloff = 0.1f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fog")
-    FLinearColor FogColor = FLinearColor(0.9f, 0.85f, 0.7f, 1.0f);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cretaceous Lighting")
+    float VolumetricFogDensity;
 
     FLight_CretaceousLightingSettings()
     {
-        // Default Cretaceous period lighting
+        SunIntensity = 8.5f;
+        ColorTemperature = 3200.0f;
+        SunColor = FLinearColor(1.0f, 0.85f, 0.65f, 1.0f);
+        SunAngle = FRotator(-25.0f, 45.0f, 0.0f);
+        AtmosphericScattering = 0.8f;
+        VolumetricFogDensity = 0.02f;
     }
 };
 
@@ -72,68 +86,60 @@ public:
 protected:
     virtual void BeginPlay() override;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmospheric Lighting")
+    FLight_CretaceousLightingSettings CretaceousSettings;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmospheric Lighting")
+    TArray<FLight_BiomeLightingConfig> BiomeLightingConfigs;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Atmospheric Lighting")
+    ADirectionalLight* SunLight;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Atmospheric Lighting")
+    ASkyAtmosphere* SkyAtmosphere;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Atmospheric Lighting")
+    AExponentialHeightFog* HeightFog;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Atmospheric Lighting")
+    APostProcessVolume* PostProcessVolume;
+
 public:
     virtual void Tick(float DeltaTime) override;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Day/Night Cycle")
-    bool bEnableDayNightCycle = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Day/Night Cycle")
-    float DayDurationMinutes = 20.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Day/Night Cycle")
-    float CurrentTimeOfDay = 12.0f; // 0-24 hours
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
-    FLight_CretaceousLightingSettings CretaceousSettings;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Current State")
-    ELight_TimeOfDay CurrentPeriod = ELight_TimeOfDay::Midday;
-
-    // Actor references
-    UPROPERTY(BlueprintReadOnly, Category = "References")
-    class ADirectionalLight* SunActor;
-
-    UPROPERTY(BlueprintReadOnly, Category = "References")
-    class ASkyAtmosphere* AtmosphereActor;
-
-    UPROPERTY(BlueprintReadOnly, Category = "References")
-    class AExponentialHeightFog* FogActor;
-
-    UPROPERTY(BlueprintReadOnly, Category = "References")
-    class APostProcessVolume* PostProcessActor;
-
-    UFUNCTION(BlueprintCallable, Category = "Lighting")
-    void SetTimeOfDay(float Hours);
-
-    UFUNCTION(BlueprintCallable, Category = "Lighting")
+    UFUNCTION(BlueprintCallable, Category = "Atmospheric Lighting")
     void ApplyCretaceousLighting();
 
-    UFUNCTION(BlueprintCallable, Category = "Lighting")
-    void UpdateSunPosition();
+    UFUNCTION(BlueprintCallable, Category = "Atmospheric Lighting")
+    void ConfigureBiomeLighting();
 
-    UFUNCTION(BlueprintCallable, Category = "Lighting")
-    void UpdateAtmosphere();
+    UFUNCTION(BlueprintCallable, Category = "Atmospheric Lighting")
+    void EnhanceLumenGlobalIllumination();
 
-    UFUNCTION(BlueprintCallable, Category = "Lighting")
-    void UpdateFog();
+    UFUNCTION(BlueprintCallable, Category = "Atmospheric Lighting")
+    void SetupVolumetricFog();
 
-    UFUNCTION(BlueprintCallable, Category = "Lighting")
-    void UpdatePostProcess();
+    UFUNCTION(BlueprintCallable, Category = "Atmospheric Lighting")
+    void CreateDinosaurRimLighting();
 
-    UFUNCTION(BlueprintCallable, Category = "Lighting")
-    ELight_TimeOfDay GetCurrentTimeOfDayPeriod() const;
+    UFUNCTION(BlueprintCallable, Category = "Atmospheric Lighting")
+    void UpdateAtmosphericPerspective();
 
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Setup")
-    void FindLightingActors();
-
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Setup")
-    void CreateMissingLightingActors();
+    UFUNCTION(BlueprintCallable, Category = "Atmospheric Lighting", CallInEditor)
+    void InitializeAtmosphericSystem();
 
 private:
-    void UpdateDayNightCycle(float DeltaTime);
-    float CalculateSunElevation() const;
-    float CalculateSunAzimuth() const;
-    FLinearColor CalculateSunColor() const;
-    float CalculateSunIntensity() const;
+    void FindLightingComponents();
+    void SetupDefaultBiomeConfigs();
+    void CreateBiomeAtmosphericLights();
+    void ApplyLumenEnhancements();
+
+    UPROPERTY()
+    TArray<AActor*> BiomeAtmosphericLights;
+
+    UPROPERTY()
+    TArray<AActor*> DinosaurRimLights;
+
+    float TimeOfDay;
+    bool bIsInitialized;
 };
