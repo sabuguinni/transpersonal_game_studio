@@ -1,138 +1,123 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "GameFramework/Actor.h"
+#include "Components/DirectionalLightComponent.h"
+#include "Components/AtmosphericFogComponent.h"
+#include "Components/PointLightComponent.h"
 #include "Engine/World.h"
-#include "Engine/DirectionalLight.h"
-#include "Engine/PointLight.h"
-#include "Engine/SkyAtmosphere.h"
-#include "Components/LightComponent.h"
-#include "Components/SkyAtmosphereComponent.h"
-#include "Subsystems/WorldSubsystem.h"
 #include "Light_AtmosphereManager.generated.h"
 
-UENUM(BlueprintType)
-enum class ELight_BiomeType : uint8
-{
-    Savana      UMETA(DisplayName = "Savana"),
-    Pantano     UMETA(DisplayName = "Pantano"), 
-    Floresta    UMETA(DisplayName = "Floresta"),
-    Deserto     UMETA(DisplayName = "Deserto"),
-    Montanha    UMETA(DisplayName = "Montanha")
-};
-
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FLight_BiomeConfig
+struct TRANSPERSONALGAME_API FLight_BiomeAtmosphere
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Lighting")
-    ELight_BiomeType BiomeType = ELight_BiomeType::Savana;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Atmosphere")
+    FString BiomeName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Lighting")
-    FVector BiomeCenter = FVector::ZeroVector;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Atmosphere")
+    FVector BiomeCenter;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Lighting")
-    FLinearColor AmbientColor = FLinearColor::White;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Atmosphere")
+    FLinearColor AtmosphericColor;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Lighting")
-    float LightIntensity = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Atmosphere")
+    float FogDensity;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Lighting")
-    float LightTemperature = 6500.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Atmosphere")
+    float LightIntensity;
 
-    FLight_BiomeConfig()
+    FLight_BiomeAtmosphere()
     {
-        BiomeType = ELight_BiomeType::Savana;
+        BiomeName = TEXT("Unknown");
         BiomeCenter = FVector::ZeroVector;
-        AmbientColor = FLinearColor::White;
-        LightIntensity = 1.0f;
-        LightTemperature = 6500.0f;
+        AtmosphericColor = FLinearColor::White;
+        FogDensity = 0.1f;
+        LightIntensity = 2.0f;
     }
 };
 
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FLight_TimeOfDay
+UENUM(BlueprintType)
+enum class ELight_TimeOfDay : uint8
 {
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Time of Day", meta = (ClampMin = "0.0", ClampMax = "24.0"))
-    float CurrentHour = 14.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Time of Day")
-    float SunIntensity = 8.5f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Time of Day")
-    float SunTemperature = 3200.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Time of Day")
-    FRotator SunRotation = FRotator(-25.0f, 45.0f, 0.0f);
-
-    FLight_TimeOfDay()
-    {
-        CurrentHour = 14.0f;
-        SunIntensity = 8.5f;
-        SunTemperature = 3200.0f;
-        SunRotation = FRotator(-25.0f, 45.0f, 0.0f);
-    }
+    Dawn        UMETA(DisplayName = "Dawn"),
+    Morning     UMETA(DisplayName = "Morning"),
+    Noon        UMETA(DisplayName = "Noon"),
+    Afternoon   UMETA(DisplayName = "Afternoon"),
+    Dusk        UMETA(DisplayName = "Dusk"),
+    Night       UMETA(DisplayName = "Night")
 };
 
-/**
- * Manages atmospheric lighting and biome-specific illumination for the Cretaceous period setting
- */
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API ULight_AtmosphereManager : public UWorldSubsystem
+class TRANSPERSONALGAME_API ALight_AtmosphereManager : public AActor
 {
     GENERATED_BODY()
 
 public:
-    ULight_AtmosphereManager();
-
-    // USubsystem interface
-    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
-    virtual void Deinitialize() override;
-
-    UFUNCTION(BlueprintCallable, Category = "Atmospheric Lighting")
-    void SetupCretaceousAtmosphere();
-
-    UFUNCTION(BlueprintCallable, Category = "Atmospheric Lighting")
-    void ConfigureBiomeSpecificLighting();
-
-    UFUNCTION(BlueprintCallable, Category = "Atmospheric Lighting")
-    void SetTimeOfDay(float Hour);
-
-    UFUNCTION(BlueprintCallable, Category = "Atmospheric Lighting")
-    void EnableLumenGlobalIllumination();
-
-    UFUNCTION(BlueprintCallable, Category = "Atmospheric Lighting")
-    void ConfigureVolumetricFog();
-
-    UFUNCTION(BlueprintPure, Category = "Atmospheric Lighting")
-    FLight_TimeOfDay GetCurrentTimeOfDay() const { return CurrentTimeOfDay; }
-
-    UFUNCTION(BlueprintCallable, Category = "Atmospheric Lighting")
-    void CreateBiomeAmbientLight(ELight_BiomeType BiomeType, FVector Location);
+    ALight_AtmosphereManager();
 
 protected:
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmospheric Config")
-    FLight_TimeOfDay CurrentTimeOfDay;
+    virtual void BeginPlay() override;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmospheric Config")
-    TArray<FLight_BiomeConfig> BiomeConfigs;
+public:
+    virtual void Tick(float DeltaTime) override;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Atmospheric References")
-    TWeakObjectPtr<ADirectionalLight> SunLight;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmosphere")
+    TObjectPtr<UDirectionalLightComponent> SunLight;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Atmospheric References") 
-    TWeakObjectPtr<ASkyAtmosphere> SkyAtmosphere;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmosphere")
+    TObjectPtr<UAtmosphericFogComponent> AtmosphericFog;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmospheric Config")
-    bool bEnableDynamicTimeOfDay = false;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmosphere")
+    TArray<FLight_BiomeAtmosphere> BiomeSettings;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmospheric Config")
-    float TimeProgressionSpeed = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Day/Night Cycle")
+    float DayDuration;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Day/Night Cycle")
+    float CurrentTimeOfDay;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Day/Night Cycle")
+    ELight_TimeOfDay CurrentPeriod;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cretaceous Lighting")
+    float CretaceousTemperature;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cretaceous Lighting")
+    FLinearColor CretaceousAmbientColor;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmospheric Effects")
+    bool bEnableVolumetricFog;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmospheric Effects")
+    bool bEnableLumenGI;
+
+    UFUNCTION(BlueprintCallable, Category = "Atmosphere")
+    void InitializeBiomeAtmosphere();
+
+    UFUNCTION(BlueprintCallable, Category = "Atmosphere")
+    void UpdateTimeOfDay(float DeltaTime);
+
+    UFUNCTION(BlueprintCallable, Category = "Atmosphere")
+    void SetCretaceousLighting();
+
+    UFUNCTION(BlueprintCallable, Category = "Atmosphere")
+    void ConfigureLumenSettings();
+
+    UFUNCTION(BlueprintCallable, Category = "Atmosphere")
+    void SpawnBiomeAtmosphericLights();
+
+    UFUNCTION(BlueprintCallable, Category = "Atmosphere")
+    FLight_BiomeAtmosphere GetBiomeAtmosphereByLocation(FVector Location);
 
 private:
-    void InitializeBiomeConfigs();
-    void FindAtmosphericActors();
-    FLight_BiomeConfig GetBiomeConfig(ELight_BiomeType BiomeType) const;
+    UPROPERTY()
+    TArray<TObjectPtr<UPointLightComponent>> BiomeAtmosphericLights;
+
+    void UpdateSunPosition();
+    void UpdateAtmosphericProperties();
+    ELight_TimeOfDay CalculateTimeOfDay(float TimeValue);
 };
+
+#include "Light_AtmosphereManager.generated.h"
