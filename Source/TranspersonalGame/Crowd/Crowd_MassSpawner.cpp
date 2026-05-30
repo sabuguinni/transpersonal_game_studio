@@ -1,421 +1,296 @@
 #include "Crowd_MassSpawner.h"
-#include "Engine/Engine.h"
-#include "Engine/World.h"
-#include "GameFramework/Pawn.h"
-#include "GameFramework/PlayerController.h"
-#include "Kismet/GameplayStatics.h"
-#include "DrawDebugHelpers.h"
 #include "MassEntitySubsystem.h"
 #include "MassSpawnerSubsystem.h"
-#include "MassAgentComponent.h"
-#include "MassMovementFragments.h"
-#include "MassCommonFragments.h"
-#include "Math/UnrealMathUtility.h"
+#include "MassEntityTemplateRegistry.h"
+#include "Engine/World.h"
+#include "Components/StaticMeshComponent.h"
+#include "Engine/Engine.h"
 
 ACrowd_MassSpawner::ACrowd_MassSpawner()
 {
     PrimaryActorTick.bCanEverTick = true;
-    PrimaryActorTick.TickInterval = 0.1f; // Update 10 times per second
-    
-    // Initialize default values
-    MaxAgents = 10000;
-    SpawnRadius = 5000.0f;
-    AgentSpacing = 200.0f;
-    bAutoSpawn = true;
-    
-    // Agent type configuration
-    AgentTypes = {ECrowd_AgentType::Human, ECrowd_AgentType::Animal};
-    TypeWeights = {0.7f, 0.3f}; // 70% humans, 30% animals
-    
-    // LOD distances
-    HighDetailDistance = 1000.0f;
-    MediumDetailDistance = 3000.0f;
-    LowDetailDistance = 8000.0f;
-    
-    // Behavior defaults
-    MovementSpeed = 300.0f;
-    WanderRadius = 2000.0f;
-    bEnableFlocking = true;
-    FlockingRadius = 500.0f;
-    
-    // Performance tracking
-    LastSpawnTime = 0.0f;
-    FrameSpawnCount = 0;
-    
-    // Cached references
+    PrimaryActorTick.bStartWithTickEnabled = true;
+
+    // Create root component
+    RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootComponent"));
+
+    // Initialize default spawn config
+    SpawnConfig.MaxEntities = 1000;
+    SpawnConfig.SpawnRadius = 5000.0f;
+    SpawnConfig.BiomeType = ECrowd_BiomeType::Savana;
+    SpawnConfig.EntityType = ECrowd_EntityType::Herbivore;
+
+    CurrentEntityCount = 0;
+    bIsSpawning = false;
     MassEntitySubsystem = nullptr;
-    PlayerPawn = nullptr;
+    LastUpdateTime = 0.0f;
 }
 
 void ACrowd_MassSpawner::BeginPlay()
 {
     Super::BeginPlay();
-    
-    // Initialize Mass Entity system
-    InitializeMassEntitySystem();
-    
-    // Cache player reference
-    if (APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0))
+
+    // Get Mass Entity Subsystem
+    if (UWorld* World = GetWorld())
     {
-        PlayerPawn = PC->GetPawn();
+        MassEntitySubsystem = World->GetSubsystem<UMassEntitySubsystem>();
+        if (MassEntitySubsystem)
+        {
+            UE_LOG(LogTemp, Log, TEXT("Crowd_MassSpawner: Mass Entity Subsystem found"));
+        }
+        else
+        {
+            UE_LOG(LogTemp, Warning, TEXT("Crowd_MassSpawner: Mass Entity Subsystem not found"));
+        }
     }
-    
-    // Auto-spawn if enabled
-    if (bAutoSpawn)
+
+    // Initialize biome configs if empty
+    if (BiomeConfigs.Num() == 0)
     {
-        // Delay spawning to allow world to fully load
-        FTimerHandle SpawnTimer;
-        GetWorldTimerManager().SetTimer(SpawnTimer, this, &ACrowd_MassSpawner::SpawnCrowdAgents, 2.0f, false);
+        InitializeBiomeConfigs();
     }
-    
-    UE_LOG(LogTemp, Warning, TEXT("Crowd_MassSpawner: Initialized with MaxAgents=%d, SpawnRadius=%.1f"), MaxAgents, SpawnRadius);
+
+    // Start spawning after a short delay
+    FTimerHandle TimerHandle;
+    GetWorld()->GetTimerManager().SetTimer(TimerHandle, this, &ACrowd_MassSpawner::StartMassSpawning, 2.0f, false);
 }
 
 void ACrowd_MassSpawner::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
-    DespawnAllAgents();
+    StopMassSpawning();
     Super::EndPlay(EndPlayReason);
 }
 
 void ACrowd_MassSpawner::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
-    
-    // Update LOD for existing agents
-    UpdateAgentLOD();
-    
-    // Reset frame spawn counter
-    FrameSpawnCount = 0;
-}
 
-void ACrowd_MassSpawner::InitializeMassEntitySystem()
-{
-    if (UWorld* World = GetWorld())
+    if (bIsSpawning && GetWorld())
     {
-        MassEntitySubsystem = World->GetSubsystem<UMassEntitySubsystem>();
-        if (MassEntitySubsystem)
+        float CurrentTime = GetWorld()->GetTimeSeconds();
+        if (CurrentTime - LastUpdateTime >= UpdateInterval)
         {
-            CreateEntityTemplate();
-            RegisterEntityProcessors();
-            UE_LOG(LogTemp, Warning, TEXT("Crowd_MassSpawner: Mass Entity system initialized"));
-        }
-        else
-        {
-            UE_LOG(LogTemp, Error, TEXT("Crowd_MassSpawner: Failed to get MassEntitySubsystem"));
+            UpdateEntityCount();
+            LastUpdateTime = CurrentTime;
         }
     }
 }
 
-void ACrowd_MassSpawner::CreateEntityTemplate()
+void ACrowd_MassSpawner::StartMassSpawning()
 {
     if (!MassEntitySubsystem)
-        return;
-        
-    // Create entity archetype with required fragments
-    FMassArchetypeHandle ArchetypeHandle = MassEntitySubsystem->CreateArchetype({
-        FMassTransformFragment::StaticStruct(),
-        FMassVelocityFragment::StaticStruct(),
-        FMassForceFragment::StaticStruct()
-    });
-    
-    // Create template entity
-    EntityTemplate = MassEntitySubsystem->CreateEntity(ArchetypeHandle);
-    
-    UE_LOG(LogTemp, Warning, TEXT("Crowd_MassSpawner: Entity template created"));
-}
-
-void ACrowd_MassSpawner::RegisterEntityProcessors()
-{
-    // Entity processors will be registered by the Mass Entity framework
-    // This is handled automatically when entities are spawned
-    UE_LOG(LogTemp, Warning, TEXT("Crowd_MassSpawner: Entity processors registered"));
-}
-
-void ACrowd_MassSpawner::SpawnCrowdAgents()
-{
-    if (!MassEntitySubsystem || MaxAgents <= 0)
     {
-        UE_LOG(LogTemp, Warning, TEXT("Crowd_MassSpawner: Cannot spawn - invalid configuration"));
+        UE_LOG(LogTemp, Error, TEXT("Crowd_MassSpawner: Cannot start spawning - Mass Entity Subsystem not available"));
         return;
     }
-    
-    // Clear existing agents
-    DespawnAllAgents();
-    
-    UE_LOG(LogTemp, Warning, TEXT("Crowd_MassSpawner: Starting to spawn %d agents"), MaxAgents);
-    
-    int32 SpawnedCount = 0;
-    const float StartTime = FPlatformTime::Seconds();
-    
-    // Calculate grid dimensions for even distribution
-    const int32 GridSize = FMath::CeilToInt(FMath::Sqrt(MaxAgents));
-    const float GridSpacing = (SpawnRadius * 2.0f) / GridSize;
-    
-    for (int32 i = 0; i < MaxAgents && SpawnedCount < MaxAgents; ++i)
+
+    if (bIsSpawning)
     {
-        // Calculate grid position
-        const int32 GridX = i % GridSize;
-        const int32 GridY = i / GridSize;
-        
-        // Convert to world position
-        const FVector GridOffset = FVector(
-            (GridX - GridSize * 0.5f) * GridSpacing,
-            (GridY - GridSize * 0.5f) * GridSpacing,
-            0.0f
-        );
-        
-        const FVector SpawnLocation = GetActorLocation() + GridOffset + FVector(
-            FMath::RandRange(-AgentSpacing * 0.5f, AgentSpacing * 0.5f),
-            FMath::RandRange(-AgentSpacing * 0.5f, AgentSpacing * 0.5f),
-            0.0f
-        );
-        
-        // Select agent type
-        const ECrowd_AgentType AgentType = SelectRandomAgentType();
-        
-        // Spawn agent
-        SpawnAgentAtLocation(SpawnLocation, AgentType);
-        SpawnedCount++;
-        
-        // Limit spawns per frame for performance
-        FrameSpawnCount++;
-        if (FrameSpawnCount >= MaxSpawnsPerFrame)
+        UE_LOG(LogTemp, Warning, TEXT("Crowd_MassSpawner: Already spawning"));
+        return;
+    }
+
+    bIsSpawning = true;
+    UE_LOG(LogTemp, Log, TEXT("Crowd_MassSpawner: Starting mass spawning"));
+
+    // Distribute entities across all biomes
+    DistributeEntitiesAcrossBiomes();
+}
+
+void ACrowd_MassSpawner::StopMassSpawning()
+{
+    if (!bIsSpawning)
+    {
+        return;
+    }
+
+    bIsSpawning = false;
+    UE_LOG(LogTemp, Log, TEXT("Crowd_MassSpawner: Stopping mass spawning"));
+
+    // Clean up spawned entities
+    if (MassEntitySubsystem)
+    {
+        for (const FMassEntityHandle& EntityHandle : SpawnedEntities)
         {
-            // Continue spawning next frame
-            FTimerHandle ContinueSpawnTimer;
-            GetWorldTimerManager().SetTimer(ContinueSpawnTimer, [this, i]()
+            if (MassEntitySubsystem->IsEntityValid(EntityHandle))
             {
-                // Resume spawning from where we left off
-                for (int32 j = i + 1; j < MaxAgents; ++j)
-                {
-                    if (FrameSpawnCount >= MaxSpawnsPerFrame)
-                        break;
-                        
-                    const FVector Location = GetRandomSpawnLocation();
-                    const ECrowd_AgentType Type = SelectRandomAgentType();
-                    SpawnAgentAtLocation(Location, Type);
-                    FrameSpawnCount++;
-                }
-            }, 0.1f, false);
-            break;
+                MassEntitySubsystem->DestroyEntity(EntityHandle);
+            }
         }
+        SpawnedEntities.Empty();
     }
-    
-    const float ElapsedTime = FPlatformTime::Seconds() - StartTime;
-    UE_LOG(LogTemp, Warning, TEXT("Crowd_MassSpawner: Spawned %d agents in %.3f seconds"), SpawnedCount, ElapsedTime);
+
+    CurrentEntityCount = 0;
 }
 
-void ACrowd_MassSpawner::SpawnAgentAtLocation(const FVector& Location, ECrowd_AgentType AgentType)
+void ACrowd_MassSpawner::SpawnEntitiesInBiome(ECrowd_BiomeType BiomeType, int32 Count)
 {
-    if (!MassEntitySubsystem || !EntityTemplate.IsValid())
-        return;
-    
-    // Create new entity from template
-    FMassEntityHandle NewEntity = MassEntitySubsystem->CreateEntity(EntityTemplate);
-    
-    if (NewEntity.IsValid())
+    if (!MassEntitySubsystem || Count <= 0)
     {
-        // Set initial transform
-        if (FMassTransformFragment* TransformFragment = MassEntitySubsystem->GetFragmentDataPtr<FMassTransformFragment>(NewEntity))
-        {
-            TransformFragment->SetTransform(FTransform(Location));
-        }
-        
-        // Set initial velocity
-        if (FMassVelocityFragment* VelocityFragment = MassEntitySubsystem->GetFragmentDataPtr<FMassVelocityFragment>(NewEntity))
-        {
-            const FVector RandomVelocity = FVector(
-                FMath::RandRange(-MovementSpeed * 0.1f, MovementSpeed * 0.1f),
-                FMath::RandRange(-MovementSpeed * 0.1f, MovementSpeed * 0.1f),
-                0.0f
-            );
-            VelocityFragment->Value = RandomVelocity;
-        }
-        
-        SpawnedEntities.Add(NewEntity);
+        return;
     }
+
+    FVector BiomeCenter = GetBiomeCenterLocation(BiomeType);
+    
+    // Find config for this biome
+    FCrowd_SpawnConfig* Config = BiomeConfigs.FindByPredicate([BiomeType](const FCrowd_SpawnConfig& Cfg)
+    {
+        return Cfg.BiomeType == BiomeType;
+    });
+
+    if (!Config)
+    {
+        // Use default config
+        FCrowd_SpawnConfig DefaultConfig;
+        DefaultConfig.BiomeType = BiomeType;
+        DefaultConfig.MaxEntities = Count;
+        SpawnMassEntities(DefaultConfig, BiomeCenter);
+    }
+    else
+    {
+        // Use existing config but override count
+        FCrowd_SpawnConfig TempConfig = *Config;
+        TempConfig.MaxEntities = Count;
+        SpawnMassEntities(TempConfig, BiomeCenter);
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("Crowd_MassSpawner: Spawned %d entities in biome %d at location %s"), 
+           Count, (int32)BiomeType, *BiomeCenter.ToString());
 }
 
-void ACrowd_MassSpawner::DespawnAllAgents()
+void ACrowd_MassSpawner::DistributeEntitiesAcrossBiomes()
 {
     if (!MassEntitySubsystem)
+    {
         return;
-    
-    const int32 AgentCount = SpawnedEntities.Num();
-    
-    for (const FMassEntityHandle& Entity : SpawnedEntities)
-    {
-        if (Entity.IsValid())
-        {
-            MassEntitySubsystem->DestroyEntity(Entity);
-        }
     }
-    
-    SpawnedEntities.Empty();
-    
-    UE_LOG(LogTemp, Warning, TEXT("Crowd_MassSpawner: Despawned %d agents"), AgentCount);
+
+    // Distribute 20% to each biome as per memory requirements
+    int32 EntitiesPerBiome = SpawnConfig.MaxEntities / 5;
+
+    SpawnEntitiesInBiome(ECrowd_BiomeType::Savana, EntitiesPerBiome);
+    SpawnEntitiesInBiome(ECrowd_BiomeType::Pantano, EntitiesPerBiome);
+    SpawnEntitiesInBiome(ECrowd_BiomeType::Floresta, EntitiesPerBiome);
+    SpawnEntitiesInBiome(ECrowd_BiomeType::Deserto, EntitiesPerBiome);
+    SpawnEntitiesInBiome(ECrowd_BiomeType::Montanha, EntitiesPerBiome);
+
+    UE_LOG(LogTemp, Log, TEXT("Crowd_MassSpawner: Distributed %d entities across 5 biomes (%d each)"), 
+           SpawnConfig.MaxEntities, EntitiesPerBiome);
 }
 
-FVector ACrowd_MassSpawner::GetRandomSpawnLocation() const
+void ACrowd_MassSpawner::InitializeBiomeConfigs()
 {
-    const float Angle = FMath::RandRange(0.0f, 2.0f * PI);
-    const float Distance = FMath::RandRange(0.0f, SpawnRadius);
-    
-    return GetActorLocation() + FVector(
-        FMath::Cos(Angle) * Distance,
-        FMath::Sin(Angle) * Distance,
-        0.0f
-    );
-}
+    BiomeConfigs.Empty();
 
-ECrowd_AgentType ACrowd_MassSpawner::SelectRandomAgentType() const
-{
-    if (AgentTypes.Num() == 0)
-        return ECrowd_AgentType::Human;
-    
-    if (TypeWeights.Num() != AgentTypes.Num())
-        return AgentTypes[FMath::RandRange(0, AgentTypes.Num() - 1)];
-    
-    // Weighted selection
-    float TotalWeight = 0.0f;
-    for (float Weight : TypeWeights)
-    {
-        TotalWeight += Weight;
-    }
-    
-    const float RandomValue = FMath::RandRange(0.0f, TotalWeight);
-    float AccumulatedWeight = 0.0f;
-    
-    for (int32 i = 0; i < AgentTypes.Num(); ++i)
-    {
-        AccumulatedWeight += TypeWeights[i];
-        if (RandomValue <= AccumulatedWeight)
-        {
-            return AgentTypes[i];
-        }
-    }
-    
-    return AgentTypes.Last();
-}
+    // Create configs for each biome
+    TArray<ECrowd_BiomeType> Biomes = {
+        ECrowd_BiomeType::Savana,
+        ECrowd_BiomeType::Pantano,
+        ECrowd_BiomeType::Floresta,
+        ECrowd_BiomeType::Deserto,
+        ECrowd_BiomeType::Montanha
+    };
 
-void ACrowd_MassSpawner::UpdateAgentLOD()
-{
-    if (!PlayerPawn || SpawnedEntities.Num() == 0)
-        return;
-    
-    const FVector PlayerLocation = PlayerPawn->GetActorLocation();
-    
-    // Update LOD for a subset of agents each frame to spread the cost
-    static int32 LODUpdateIndex = 0;
-    const int32 AgentsPerFrame = FMath::Max(1, SpawnedEntities.Num() / 10); // Update 10% each frame
-    
-    for (int32 i = 0; i < AgentsPerFrame && LODUpdateIndex < SpawnedEntities.Num(); ++i, ++LODUpdateIndex)
+    for (ECrowd_BiomeType BiomeType : Biomes)
     {
-        const FMassEntityHandle& Entity = SpawnedEntities[LODUpdateIndex];
-        if (!Entity.IsValid())
-            continue;
+        FCrowd_SpawnConfig Config;
+        Config.BiomeType = BiomeType;
+        Config.MaxEntities = 200; // 200 per biome = 1000 total
+        Config.SpawnRadius = 15000.0f; // 15km radius per biome
         
-        if (const FMassTransformFragment* TransformFragment = MassEntitySubsystem->GetFragmentDataPtr<FMassTransformFragment>(Entity))
+        // Set entity type based on biome
+        switch (BiomeType)
         {
-            const float Distance = FVector::Dist(PlayerLocation, TransformFragment->GetTransform().GetLocation());
-            const ECrowd_LODLevel LODLevel = CalculateLODLevel(FVector(Distance, 0.0f, 0.0f));
-            
-            // LOD level would be applied to rendering/behavior processors
-            // This is handled by the Mass Entity framework automatically
+            case ECrowd_BiomeType::Savana:
+            case ECrowd_BiomeType::Floresta:
+                Config.EntityType = ECrowd_EntityType::Herbivore;
+                break;
+            case ECrowd_BiomeType::Pantano:
+            case ECrowd_BiomeType::Montanha:
+                Config.EntityType = ECrowd_EntityType::Carnivore;
+                break;
+            case ECrowd_BiomeType::Deserto:
+                Config.EntityType = ECrowd_EntityType::Scavenger;
+                break;
         }
+
+        BiomeConfigs.Add(Config);
     }
-    
-    // Reset index when we've processed all agents
-    if (LODUpdateIndex >= SpawnedEntities.Num())
+
+    UE_LOG(LogTemp, Log, TEXT("Crowd_MassSpawner: Initialized %d biome configs"), BiomeConfigs.Num());
+}
+
+void ACrowd_MassSpawner::SpawnMassEntities(const FCrowd_SpawnConfig& Config, const FVector& CenterLocation)
+{
+    if (!MassEntitySubsystem)
     {
-        LODUpdateIndex = 0;
+        return;
+    }
+
+    // Create entities in batches for performance
+    const int32 BatchSize = 100;
+    int32 RemainingEntities = Config.MaxEntities;
+
+    while (RemainingEntities > 0)
+    {
+        int32 CurrentBatchSize = FMath::Min(BatchSize, RemainingEntities);
+        
+        for (int32 i = 0; i < CurrentBatchSize; i++)
+        {
+            // Generate random position within spawn radius
+            FVector RandomOffset = FVector(
+                FMath::RandRange(-Config.SpawnRadius, Config.SpawnRadius),
+                FMath::RandRange(-Config.SpawnRadius, Config.SpawnRadius),
+                100.0f // Keep entities above ground
+            );
+            
+            FVector SpawnLocation = CenterLocation + RandomOffset;
+            
+            // Create mass entity (simplified for now)
+            FMassEntityHandle EntityHandle = MassEntitySubsystem->CreateEntity();
+            if (MassEntitySubsystem->IsEntityValid(EntityHandle))
+            {
+                SpawnedEntities.Add(EntityHandle);
+                CurrentEntityCount++;
+            }
+        }
+
+        RemainingEntities -= CurrentBatchSize;
     }
 }
 
-ECrowd_LODLevel ACrowd_MassSpawner::CalculateLODLevel(const FVector& AgentLocation) const
+FVector ACrowd_MassSpawner::GetBiomeCenterLocation(ECrowd_BiomeType BiomeType)
 {
-    if (!PlayerPawn)
-        return ECrowd_LODLevel::Disabled;
-    
-    const float Distance = FVector::Dist(PlayerPawn->GetActorLocation(), AgentLocation);
-    
-    if (Distance <= HighDetailDistance)
-        return ECrowd_LODLevel::High;
-    else if (Distance <= MediumDetailDistance)
-        return ECrowd_LODLevel::Medium;
-    else if (Distance <= LowDetailDistance)
-        return ECrowd_LODLevel::Low;
-    else
-        return ECrowd_LODLevel::Disabled;
+    // Biome coordinates from memory ID 709
+    switch (BiomeType)
+    {
+        case ECrowd_BiomeType::Savana:
+            return FVector(0.0f, 0.0f, 100.0f);
+        case ECrowd_BiomeType::Pantano:
+            return FVector(-50000.0f, -45000.0f, 100.0f);
+        case ECrowd_BiomeType::Floresta:
+            return FVector(-45000.0f, 40000.0f, 100.0f);
+        case ECrowd_BiomeType::Deserto:
+            return FVector(55000.0f, 0.0f, 100.0f);
+        case ECrowd_BiomeType::Montanha:
+            return FVector(40000.0f, 50000.0f, 100.0f);
+        default:
+            return FVector::ZeroVector;
+    }
 }
 
-void ACrowd_MassSpawner::SetAgentCount(int32 NewCount)
+void ACrowd_MassSpawner::UpdateEntityCount()
 {
-    MaxAgents = FMath::Max(0, NewCount);
-    UE_LOG(LogTemp, Warning, TEXT("Crowd_MassSpawner: Agent count set to %d"), MaxAgents);
-}
-
-int32 ACrowd_MassSpawner::GetActiveAgentCount() const
-{
-    return SpawnedEntities.Num();
-}
-
-void ACrowd_MassSpawner::UpdateLODDistances(float High, float Medium, float Low)
-{
-    HighDetailDistance = FMath::Max(0.0f, High);
-    MediumDetailDistance = FMath::Max(HighDetailDistance, Medium);
-    LowDetailDistance = FMath::Max(MediumDetailDistance, Low);
-    
-    UE_LOG(LogTemp, Warning, TEXT("Crowd_MassSpawner: LOD distances updated - High:%.1f, Medium:%.1f, Low:%.1f"), 
-           HighDetailDistance, MediumDetailDistance, LowDetailDistance);
-}
-
-void ACrowd_MassSpawner::SetMovementParameters(float Speed, float Radius)
-{
-    MovementSpeed = FMath::Max(0.0f, Speed);
-    WanderRadius = FMath::Max(0.0f, Radius);
-    
-    UE_LOG(LogTemp, Warning, TEXT("Crowd_MassSpawner: Movement parameters updated - Speed:%.1f, Radius:%.1f"), 
-           MovementSpeed, WanderRadius);
-}
-
-void ACrowd_MassSpawner::EnableFlocking(bool bEnable, float Radius)
-{
-    bEnableFlocking = bEnable;
-    FlockingRadius = FMath::Max(0.0f, Radius);
-    
-    UE_LOG(LogTemp, Warning, TEXT("Crowd_MassSpawner: Flocking %s with radius %.1f"), 
-           bEnableFlocking ? TEXT("enabled") : TEXT("disabled"), FlockingRadius);
-}
-
-void ACrowd_MassSpawner::DebugSpawnTestAgents()
-{
-    const int32 TestCount = FMath::Min(100, MaxAgents);
-    const int32 PreviousMax = MaxAgents;
-    
-    MaxAgents = TestCount;
-    SpawnCrowdAgents();
-    MaxAgents = PreviousMax;
-    
-    UE_LOG(LogTemp, Warning, TEXT("Crowd_MassSpawner: Debug spawned %d test agents"), TestCount);
-}
-
-void ACrowd_MassSpawner::DrawDebugInfo()
-{
-    if (!GetWorld())
+    if (!MassEntitySubsystem)
+    {
         return;
-    
-    const FVector Center = GetActorLocation();
-    
-    // Draw spawn radius
-    DrawDebugCircle(GetWorld(), Center, SpawnRadius, 32, FColor::Green, false, 1.0f, 0, 10.0f, FVector(0,1,0), FVector(1,0,0));
-    
-    // Draw LOD distance rings
-    DrawDebugCircle(GetWorld(), Center, HighDetailDistance, 32, FColor::Red, false, 1.0f, 0, 5.0f, FVector(0,1,0), FVector(1,0,0));
-    DrawDebugCircle(GetWorld(), Center, MediumDetailDistance, 32, FColor::Yellow, false, 1.0f, 0, 5.0f, FVector(0,1,0), FVector(1,0,0));
-    DrawDebugCircle(GetWorld(), Center, LowDetailDistance, 32, FColor::Blue, false, 1.0f, 0, 5.0f, FVector(0,1,0), FVector(1,0,0));
-    
-    // Draw agent count info
-    const FString InfoText = FString::Printf(TEXT("Active Agents: %d / %d"), GetActiveAgentCount(), MaxAgents);
-    DrawDebugString(GetWorld(), Center + FVector(0, 0, 200), InfoText, nullptr, FColor::White, 1.0f);
+    }
+
+    // Clean up invalid entities
+    SpawnedEntities.RemoveAll([this](const FMassEntityHandle& Handle)
+    {
+        return !MassEntitySubsystem->IsEntityValid(Handle);
+    });
+
+    CurrentEntityCount = SpawnedEntities.Num();
 }
