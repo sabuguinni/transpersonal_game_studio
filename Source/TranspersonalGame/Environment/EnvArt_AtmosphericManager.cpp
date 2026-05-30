@@ -1,267 +1,189 @@
 #include "EnvArt_AtmosphericManager.h"
-#include "Components/SceneComponent.h"
-#include "Engine/DirectionalLight.h"
-#include "Components/DirectionalLightComponent.h"
 #include "Components/ExponentialHeightFogComponent.h"
-#include "Particles/ParticleSystemComponent.h"
-#include "Components/AudioComponent.h"
-#include "Engine/Engine.h"
-#include "Kismet/KismetMathLibrary.h"
+#include "Components/SkyLightComponent.h"
+#include "Engine/World.h"
+#include "Kismet/GameplayStatics.h"
 
 AEnvArt_AtmosphericManager::AEnvArt_AtmosphericManager()
 {
     PrimaryActorTick.bCanEverTick = true;
 
-    // Create root component
-    RootSceneComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootComponent"));
-    RootComponent = RootSceneComponent;
-
-    // Create directional light for sun
-    SunLight = CreateDefaultSubobject<UDirectionalLightComponent>(TEXT("SunLight"));
-    SunLight->SetupAttachment(RootComponent);
-    SunLight->SetIntensity(3.0f);
-    SunLight->SetLightColor(FLinearColor::White);
-    SunLight->SetCastShadows(true);
-    SunLight->SetCastVolumetricShadow(true);
-
     // Create fog component
-    AtmosphericFog = CreateDefaultSubobject<UExponentialHeightFogComponent>(TEXT("AtmosphericFog"));
-    AtmosphericFog->SetupAttachment(RootComponent);
-    AtmosphericFog->SetFogDensity(0.02f);
-    AtmosphericFog->SetFogInscatteringColor(FLinearColor(0.8f, 0.9f, 1.0f, 1.0f));
+    FogComponent = CreateDefaultSubobject<UExponentialHeightFogComponent>(TEXT("FogComponent"));
+    RootComponent = FogComponent;
 
-    // Create particle system for dust/pollen
-    DustParticles = CreateDefaultSubobject<UParticleSystemComponent>(TEXT("DustParticles"));
-    DustParticles->SetupAttachment(RootComponent);
-    DustParticles->SetAutoActivate(true);
+    // Create sky light component
+    SkyLightComponent = CreateDefaultSubobject<USkyLightComponent>(TEXT("SkyLightComponent"));
+    SkyLightComponent->SetupAttachment(RootComponent);
 
-    // Create ambient audio
-    AmbientAudio = CreateDefaultSubobject<UAudioComponent>(TEXT("AmbientAudio"));
-    AmbientAudio->SetupAttachment(RootComponent);
-    AmbientAudio->SetVolumeMultiplier(0.5f);
-    AmbientAudio->bAutoActivate = true;
+    // Initialize default values
+    TimeOfDay = 12.0f; // Noon
+    bEnableDynamicWeather = true;
+    WeatherTransitionSpeed = 1.0f;
+    CurrentBiome = EBiomeType::Savanna;
+    AtmosphereBlendTime = 0.0f;
+    bIsTransitioning = false;
 
-    // Initialize default settings
-    AtmosphericSettings.SunColor = FLinearColor::White;
-    AtmosphericSettings.SunIntensity = 3.0f;
-    AtmosphericSettings.SunRotation = FRotator(-30.0f, 45.0f, 0.0f);
-    AtmosphericSettings.FogDensity = 0.02f;
-    AtmosphericSettings.FogColor = FLinearColor(0.8f, 0.9f, 1.0f, 1.0f);
-    AtmosphericSettings.ParticleSpawnRate = 10.0f;
-    AtmosphericSettings.AmbientVolume = 0.5f;
+    InitializeBiomeSettings();
 }
 
 void AEnvArt_AtmosphericManager::BeginPlay()
 {
     Super::BeginPlay();
     
-    // Apply initial atmosphere settings
-    LoadAtmospherePreset(CurrentAtmosphereType);
-    ApplyGoldenHourLighting();
-    
-    UE_LOG(LogTemp, Warning, TEXT("EnvArt_AtmosphericManager: Initialized with atmosphere type %d"), (int32)CurrentAtmosphereType);
+    // Set initial atmosphere based on current biome
+    SetBiomeAtmosphere(CurrentBiome);
 }
 
 void AEnvArt_AtmosphericManager::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
-    
-    // Update time of day
-    TimeOfDay += (DeltaTime / DayDuration) * 24.0f;
-    if (TimeOfDay >= 24.0f)
+
+    if (bEnableDynamicWeather)
     {
-        TimeOfDay -= 24.0f;
+        // Update time-based atmospheric changes
+        UpdateTimeOfDay(TimeOfDay + DeltaTime * 0.1f); // Slow time progression
     }
-    
-    UpdateSunPosition();
-    UpdateFogSettings();
-    UpdateParticleEffects();
+
+    if (bIsTransitioning)
+    {
+        AtmosphereBlendTime += DeltaTime * WeatherTransitionSpeed;
+        if (AtmosphereBlendTime >= 1.0f)
+        {
+            AtmosphereBlendTime = 1.0f;
+            bIsTransitioning = false;
+        }
+    }
 }
 
-void AEnvArt_AtmosphericManager::SetAtmosphereType(EEnvArt_AtmosphereType NewType)
+void AEnvArt_AtmosphericManager::SetBiomeAtmosphere(EBiomeType BiomeType)
 {
-    CurrentAtmosphereType = NewType;
-    LoadAtmospherePreset(NewType);
-    
-    UE_LOG(LogTemp, Warning, TEXT("EnvArt_AtmosphericManager: Changed atmosphere to type %d"), (int32)NewType);
+    if (BiomeAtmosphereSettings.Contains(BiomeType))
+    {
+        CurrentBiome = BiomeType;
+        const FEnvArt_BiomeAtmosphere& Settings = BiomeAtmosphereSettings[BiomeType];
+        
+        UpdateFogSettings(Settings);
+        UpdateSkyLightSettings(Settings);
+        
+        bIsTransitioning = true;
+        AtmosphereBlendTime = 0.0f;
+    }
 }
 
 void AEnvArt_AtmosphericManager::UpdateTimeOfDay(float NewTimeOfDay)
 {
-    TimeOfDay = FMath::Clamp(NewTimeOfDay, 0.0f, 24.0f);
-    UpdateSunPosition();
-}
-
-void AEnvArt_AtmosphericManager::ApplyGoldenHourLighting()
-{
-    // Golden hour is around 6-8 AM and 6-8 PM
-    float GoldenHourIntensity = 2.5f;
-    FLinearColor GoldenColor = FLinearColor(1.0f, 0.8f, 0.6f, 1.0f);
+    TimeOfDay = FMath::Fmod(NewTimeOfDay, 24.0f);
     
-    if (SunLight)
+    // Adjust atmosphere based on time of day
+    if (FogComponent)
     {
-        SunLight->SetIntensity(GoldenHourIntensity);
-        SunLight->SetLightColor(GoldenColor);
-        SunLight->SetRelativeRotation(FRotator(-15.0f, 45.0f, 0.0f));
-    }
-    
-    // Update fog for golden hour
-    if (AtmosphericFog)
-    {
-        AtmosphericFog->SetFogInscatteringColor(FLinearColor(1.0f, 0.9f, 0.7f, 1.0f));
-        AtmosphericFog->SetFogDensity(0.015f);
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("EnvArt_AtmosphericManager: Applied golden hour lighting"));
-}
-
-void AEnvArt_AtmosphericManager::SpawnVolumetricFog(FVector Location, float Radius)
-{
-    // Create localized fog effect
-    if (AtmosphericFog)
-    {
-        AtmosphericFog->SetWorldLocation(Location);
-        AtmosphericFog->SetFogDensity(AtmosphericSettings.FogDensity * 1.5f);
-        
-        UE_LOG(LogTemp, Warning, TEXT("EnvArt_AtmosphericManager: Spawned volumetric fog at location %s"), *Location.ToString());
-    }
-}
-
-void AEnvArt_AtmosphericManager::AddAmbientParticles(FVector Location, float Intensity)
-{
-    if (DustParticles)
-    {
-        DustParticles->SetWorldLocation(Location);
-        // Adjust particle spawn rate based on intensity
-        float NewSpawnRate = AtmosphericSettings.ParticleSpawnRate * Intensity;
-        
-        UE_LOG(LogTemp, Warning, TEXT("EnvArt_AtmosphericManager: Added ambient particles at %s with intensity %f"), *Location.ToString(), Intensity);
-    }
-}
-
-void AEnvArt_AtmosphericManager::UpdateSunPosition()
-{
-    if (SunLight)
-    {
-        // Calculate sun position based on time of day
-        float SunAngle = (TimeOfDay / 24.0f) * 360.0f - 90.0f; // -90 to start at sunrise
-        FRotator NewRotation = FRotator(SunAngle, AtmosphericSettings.SunRotation.Yaw, 0.0f);
-        SunLight->SetRelativeRotation(NewRotation);
-        
-        // Adjust intensity based on sun height
-        float IntensityMultiplier = FMath::Clamp(FMath::Sin(FMath::DegreesToRadians(SunAngle + 90.0f)), 0.1f, 1.0f);
-        SunLight->SetIntensity(AtmosphericSettings.SunIntensity * IntensityMultiplier);
-    }
-}
-
-void AEnvArt_AtmosphericManager::UpdateFogSettings()
-{
-    if (AtmosphericFog)
-    {
-        // Adjust fog based on time of day
-        float FogMultiplier = 1.0f;
-        if (TimeOfDay >= 6.0f && TimeOfDay <= 8.0f) // Morning fog
+        float TimeMultiplier = 1.0f;
+        if (TimeOfDay < 6.0f || TimeOfDay > 18.0f) // Night
         {
-            FogMultiplier = 1.5f;
+            TimeMultiplier = 0.3f;
         }
-        else if (TimeOfDay >= 18.0f && TimeOfDay <= 20.0f) // Evening fog
+        else if (TimeOfDay < 8.0f || TimeOfDay > 16.0f) // Dawn/Dusk
         {
-            FogMultiplier = 1.3f;
+            TimeMultiplier = 0.7f;
         }
         
-        AtmosphericFog->SetFogDensity(AtmosphericSettings.FogDensity * FogMultiplier);
+        FogComponent->SetFogDensity(FogComponent->GetFogDensity() * TimeMultiplier);
     }
 }
 
-void AEnvArt_AtmosphericManager::UpdateParticleEffects()
+void AEnvArt_AtmosphericManager::SetWeatherIntensity(float Intensity)
 {
-    if (DustParticles)
+    if (FogComponent)
     {
-        // Adjust particle effects based on atmosphere type and time
-        float ParticleMultiplier = 1.0f;
-        
-        switch (CurrentAtmosphereType)
-        {
-            case EEnvArt_AtmosphereType::Forest:
-                ParticleMultiplier = 0.8f; // Less dust in forest
-                break;
-            case EEnvArt_AtmosphereType::Desert:
-                ParticleMultiplier = 2.0f; // More dust in desert
-                break;
-            case EEnvArt_AtmosphereType::Savanna:
-                ParticleMultiplier = 1.2f; // Moderate dust
-                break;
-            case EEnvArt_AtmosphereType::Swamp:
-                ParticleMultiplier = 0.5f; // Humid, less particles
-                break;
-            case EEnvArt_AtmosphereType::Mountain:
-                ParticleMultiplier = 1.5f; // Wind-blown particles
-                break;
-        }
-        
-        // Apply time-based variation (more particles during day)
-        if (TimeOfDay >= 10.0f && TimeOfDay <= 16.0f)
-        {
-            ParticleMultiplier *= 1.3f;
-        }
+        float BaseDensity = BiomeAtmosphereSettings.Contains(CurrentBiome) ? 
+            BiomeAtmosphereSettings[CurrentBiome].FogDensity : 0.02f;
+        FogComponent->SetFogDensity(BaseDensity * FMath::Clamp(Intensity, 0.1f, 3.0f));
     }
 }
 
-void AEnvArt_AtmosphericManager::LoadAtmospherePreset(EEnvArt_AtmosphereType AtmosphereType)
+void AEnvArt_AtmosphericManager::RefreshAtmosphericSettings()
 {
-    switch (AtmosphereType)
+    SetBiomeAtmosphere(CurrentBiome);
+}
+
+void AEnvArt_AtmosphericManager::InitializeBiomeSettings()
+{
+    // Savanna atmosphere
+    FEnvArt_BiomeAtmosphere SavannaAtmosphere;
+    SavannaAtmosphere.FogColor = FLinearColor(0.8f, 0.7f, 0.5f, 1.0f);
+    SavannaAtmosphere.FogDensity = 0.01f;
+    SavannaAtmosphere.FogHeightFalloff = 0.1f;
+    SavannaAtmosphere.SkyLightColor = FLinearColor(1.0f, 0.95f, 0.8f, 1.0f);
+    SavannaAtmosphere.SkyLightIntensity = 1.2f;
+    BiomeAtmosphereSettings.Add(EBiomeType::Savanna, SavannaAtmosphere);
+
+    // Forest atmosphere
+    FEnvArt_BiomeAtmosphere ForestAtmosphere;
+    ForestAtmosphere.FogColor = FLinearColor(0.4f, 0.6f, 0.4f, 1.0f);
+    ForestAtmosphere.FogDensity = 0.03f;
+    ForestAtmosphere.FogHeightFalloff = 0.3f;
+    ForestAtmosphere.SkyLightColor = FLinearColor(0.7f, 0.9f, 0.7f, 1.0f);
+    ForestAtmosphere.SkyLightIntensity = 0.8f;
+    BiomeAtmosphereSettings.Add(EBiomeType::Forest, ForestAtmosphere);
+
+    // Swamp atmosphere
+    FEnvArt_BiomeAtmosphere SwampAtmosphere;
+    SwampAtmosphere.FogColor = FLinearColor(0.5f, 0.6f, 0.5f, 1.0f);
+    SwampAtmosphere.FogDensity = 0.05f;
+    SwampAtmosphere.FogHeightFalloff = 0.4f;
+    SwampAtmosphere.SkyLightColor = FLinearColor(0.6f, 0.7f, 0.6f, 1.0f);
+    SwampAtmosphere.SkyLightIntensity = 0.6f;
+    BiomeAtmosphereSettings.Add(EBiomeType::Swamp, SwampAtmosphere);
+
+    // Desert atmosphere
+    FEnvArt_BiomeAtmosphere DesertAtmosphere;
+    DesertAtmosphere.FogColor = FLinearColor(0.9f, 0.8f, 0.6f, 1.0f);
+    DesertAtmosphere.FogDensity = 0.008f;
+    DesertAtmosphere.FogHeightFalloff = 0.05f;
+    DesertAtmosphere.SkyLightColor = FLinearColor(1.0f, 0.9f, 0.7f, 1.0f);
+    DesertAtmosphere.SkyLightIntensity = 1.5f;
+    BiomeAtmosphereSettings.Add(EBiomeType::Desert, DesertAtmosphere);
+
+    // Mountain atmosphere
+    FEnvArt_BiomeAtmosphere MountainAtmosphere;
+    MountainAtmosphere.FogColor = FLinearColor(0.7f, 0.8f, 0.9f, 1.0f);
+    MountainAtmosphere.FogDensity = 0.02f;
+    MountainAtmosphere.FogHeightFalloff = 0.15f;
+    MountainAtmosphere.SkyLightColor = FLinearColor(0.8f, 0.9f, 1.0f, 1.0f);
+    MountainAtmosphere.SkyLightIntensity = 1.0f;
+    BiomeAtmosphereSettings.Add(EBiomeType::Mountain, MountainAtmosphere);
+}
+
+void AEnvArt_AtmosphericManager::UpdateFogSettings(const FEnvArt_BiomeAtmosphere& Settings)
+{
+    if (FogComponent)
     {
-        case EEnvArt_AtmosphereType::Forest:
-            AtmosphericSettings.SunColor = FLinearColor(0.9f, 1.0f, 0.8f, 1.0f);
-            AtmosphericSettings.SunIntensity = 2.5f;
-            AtmosphericSettings.FogColor = FLinearColor(0.7f, 0.9f, 0.7f, 1.0f);
-            AtmosphericSettings.FogDensity = 0.025f;
-            break;
-            
-        case EEnvArt_AtmosphereType::Desert:
-            AtmosphericSettings.SunColor = FLinearColor(1.0f, 0.9f, 0.7f, 1.0f);
-            AtmosphericSettings.SunIntensity = 4.0f;
-            AtmosphericSettings.FogColor = FLinearColor(1.0f, 0.8f, 0.6f, 1.0f);
-            AtmosphericSettings.FogDensity = 0.01f;
-            break;
-            
-        case EEnvArt_AtmosphereType::Savanna:
-            AtmosphericSettings.SunColor = FLinearColor(1.0f, 0.95f, 0.8f, 1.0f);
-            AtmosphericSettings.SunIntensity = 3.5f;
-            AtmosphericSettings.FogColor = FLinearColor(0.9f, 0.9f, 0.8f, 1.0f);
-            AtmosphericSettings.FogDensity = 0.015f;
-            break;
-            
-        case EEnvArt_AtmosphereType::Swamp:
-            AtmosphericSettings.SunColor = FLinearColor(0.8f, 0.9f, 0.7f, 1.0f);
-            AtmosphericSettings.SunIntensity = 2.0f;
-            AtmosphericSettings.FogColor = FLinearColor(0.6f, 0.8f, 0.6f, 1.0f);
-            AtmosphericSettings.FogDensity = 0.04f;
-            break;
-            
-        case EEnvArt_AtmosphereType::Mountain:
-            AtmosphericSettings.SunColor = FLinearColor(0.9f, 0.9f, 1.0f, 1.0f);
-            AtmosphericSettings.SunIntensity = 3.8f;
-            AtmosphericSettings.FogColor = FLinearColor(0.8f, 0.8f, 1.0f, 1.0f);
-            AtmosphericSettings.FogDensity = 0.008f;
-            break;
+        FogComponent->SetFogInscatteringColor(Settings.FogColor);
+        FogComponent->SetFogDensity(Settings.FogDensity);
+        FogComponent->SetFogHeightFalloff(Settings.FogHeightFalloff);
     }
+}
+
+void AEnvArt_AtmosphericManager::UpdateSkyLightSettings(const FEnvArt_BiomeAtmosphere& Settings)
+{
+    if (SkyLightComponent)
+    {
+        SkyLightComponent->SetLightColor(Settings.SkyLightColor);
+        SkyLightComponent->SetIntensity(Settings.SkyLightIntensity);
+        SkyLightComponent->RecaptureSky();
+    }
+}
+
+void AEnvArt_AtmosphericManager::InterpolateAtmosphere(const FEnvArt_BiomeAtmosphere& From, const FEnvArt_BiomeAtmosphere& To, float Alpha)
+{
+    FEnvArt_BiomeAtmosphere BlendedSettings;
+    BlendedSettings.FogColor = FMath::Lerp(From.FogColor, To.FogColor, Alpha);
+    BlendedSettings.FogDensity = FMath::Lerp(From.FogDensity, To.FogDensity, Alpha);
+    BlendedSettings.FogHeightFalloff = FMath::Lerp(From.FogHeightFalloff, To.FogHeightFalloff, Alpha);
+    BlendedSettings.SkyLightColor = FMath::Lerp(From.SkyLightColor, To.SkyLightColor, Alpha);
+    BlendedSettings.SkyLightIntensity = FMath::Lerp(From.SkyLightIntensity, To.SkyLightIntensity, Alpha);
     
-    // Apply the loaded settings
-    if (SunLight)
-    {
-        SunLight->SetLightColor(AtmosphericSettings.SunColor);
-        SunLight->SetIntensity(AtmosphericSettings.SunIntensity);
-    }
-    
-    if (AtmosphericFog)
-    {
-        AtmosphericFog->SetFogInscatteringColor(AtmosphericSettings.FogColor);
-        AtmosphericFog->SetFogDensity(AtmosphericSettings.FogDensity);
-    }
-    
-    if (AmbientAudio)
-    {
-        AmbientAudio->SetVolumeMultiplier(AtmosphericSettings.AmbientVolume);
-    }
+    UpdateFogSettings(BlendedSettings);
+    UpdateSkyLightSettings(BlendedSettings);
 }
