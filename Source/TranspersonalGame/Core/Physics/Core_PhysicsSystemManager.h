@@ -1,22 +1,19 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/World.h"
 #include "Components/ActorComponent.h"
-#include "PhysicsEngine/PhysicsSettings.h"
+#include "Engine/World.h"
+#include "Physics/PhysicsInterfaceCore.h"
+#include "Chaos/ChaosEngineInterface.h"
 #include "Core_PhysicsSystemManager.generated.h"
 
 UENUM(BlueprintType)
-enum class ECore_PhysicsLayer : uint8
+enum class ECore_PhysicsMode : uint8
 {
-    Default = 0,
-    Player = 1,
-    Dinosaur = 2,
-    Environment = 3,
-    Projectile = 4,
-    Debris = 5,
-    Water = 6,
-    Vegetation = 7
+    Standard        UMETA(DisplayName = "Standard Physics"),
+    HighPrecision   UMETA(DisplayName = "High Precision"),
+    Performance     UMETA(DisplayName = "Performance Mode"),
+    Cinematic       UMETA(DisplayName = "Cinematic Mode")
 };
 
 USTRUCT(BlueprintType)
@@ -24,23 +21,36 @@ struct FCore_PhysicsSettings
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
-    float Gravity = -980.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Settings")
+    float GravityScale = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Settings")
     float LinearDamping = 0.01f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
-    float AngularDamping = 0.05f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Settings")
+    float AngularDamping = 0.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
-    float MaxPhysicsStepDelta = 0.05f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Settings")
+    bool bEnableGravity = true;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
-    bool bEnableAsyncPhysics = true;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Settings")
+    bool bSimulatePhysics = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Settings")
+    ECore_PhysicsMode PhysicsMode = ECore_PhysicsMode::Standard;
+
+    FCore_PhysicsSettings()
+    {
+        GravityScale = 1.0f;
+        LinearDamping = 0.01f;
+        AngularDamping = 0.0f;
+        bEnableGravity = true;
+        bSimulatePhysics = true;
+        PhysicsMode = ECore_PhysicsMode::Standard;
+    }
 };
 
-UCLASS(BlueprintType, Blueprintable)
+UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent), BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UCore_PhysicsSystemManager : public UActorComponent
 {
     GENERATED_BODY()
@@ -50,45 +60,112 @@ public:
 
 protected:
     virtual void BeginPlay() override;
-
-public:
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    UFUNCTION(BlueprintCallable, Category = "Physics")
-    void InitializePhysicsSettings();
-
-    UFUNCTION(BlueprintCallable, Category = "Physics")
-    void SetGravityScale(float NewGravity);
-
-    UFUNCTION(BlueprintCallable, Category = "Physics")
-    void EnableRagdoll(AActor* Actor);
-
-    UFUNCTION(BlueprintCallable, Category = "Physics")
-    void DisableRagdoll(AActor* Actor);
-
-    UFUNCTION(BlueprintCallable, Category = "Physics")
-    bool IsActorInPhysicsLayer(AActor* Actor, ECore_PhysicsLayer Layer);
-
-    UFUNCTION(BlueprintCallable, Category = "Physics")
-    void SetActorPhysicsLayer(AActor* Actor, ECore_PhysicsLayer Layer);
-
-    UFUNCTION(BlueprintCallable, Category = "Physics")
-    TArray<AActor*> GetActorsInPhysicsLayer(ECore_PhysicsLayer Layer);
-
-protected:
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Settings")
+public:
+    // Physics Settings Management
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics System", meta = (AllowPrivateAccess = "true"))
     FCore_PhysicsSettings PhysicsSettings;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Physics State")
-    TArray<AActor*> RagdollActors;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics System", meta = (AllowPrivateAccess = "true"))
+    bool bAutoApplySettings = true;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Physics State")
-    TMap<ECore_PhysicsLayer, TArray<AActor*>> LayeredActors;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics System", meta = (AllowPrivateAccess = "true"))
+    float PhysicsUpdateRate = 60.0f;
+
+    // Collision Management
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision System", meta = (AllowPrivateAccess = "true"))
+    bool bEnableCollisionOptimization = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision System", meta = (AllowPrivateAccess = "true"))
+    float CollisionCheckDistance = 1000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision System", meta = (AllowPrivateAccess = "true"))
+    int32 MaxCollisionChecksPerFrame = 100;
+
+    // Ragdoll System Integration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll System", meta = (AllowPrivateAccess = "true"))
+    bool bEnableRagdollSystem = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll System", meta = (AllowPrivateAccess = "true"))
+    float RagdollActivationThreshold = 50.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll System", meta = (AllowPrivateAccess = "true"))
+    float RagdollDeactivationDelay = 5.0f;
+
+    // Destruction System
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Destruction System", meta = (AllowPrivateAccess = "true"))
+    bool bEnableDestructionSystem = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Destruction System", meta = (AllowPrivateAccess = "true"))
+    float DestructionForceThreshold = 100.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Destruction System", meta = (AllowPrivateAccess = "true"))
+    int32 MaxDestructibleObjects = 50;
+
+    // Performance Monitoring
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Performance", meta = (AllowPrivateAccess = "true"))
+    float CurrentPhysicsFrameTime = 0.0f;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Performance", meta = (AllowPrivateAccess = "true"))
+    int32 ActivePhysicsObjects = 0;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Performance", meta = (AllowPrivateAccess = "true"))
+    int32 ActiveCollisionChecks = 0;
+
+    // Blueprint Functions
+    UFUNCTION(BlueprintCallable, Category = "Physics System")
+    void ApplyPhysicsSettings();
+
+    UFUNCTION(BlueprintCallable, Category = "Physics System")
+    void SetPhysicsMode(ECore_PhysicsMode NewMode);
+
+    UFUNCTION(BlueprintCallable, Category = "Physics System")
+    void EnableRagdollForActor(AActor* TargetActor);
+
+    UFUNCTION(BlueprintCallable, Category = "Physics System")
+    void DisableRagdollForActor(AActor* TargetActor);
+
+    UFUNCTION(BlueprintCallable, Category = "Physics System")
+    void TriggerDestruction(AActor* TargetActor, FVector ImpactPoint, float Force);
+
+    UFUNCTION(BlueprintCallable, Category = "Physics System")
+    void OptimizePhysicsPerformance();
+
+    UFUNCTION(BlueprintPure, Category = "Physics System")
+    bool IsPhysicsObjectActive(AActor* TargetActor) const;
+
+    UFUNCTION(BlueprintPure, Category = "Physics System")
+    float GetPhysicsPerformanceScore() const;
+
+    // Event Delegates
+    DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnRagdollActivated, AActor*, Actor, float, ActivationForce);
+    DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnDestructionTriggered, AActor*, DestroyedActor);
+    DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnPhysicsPerformanceWarning, float, PerformanceScore);
+
+    UPROPERTY(BlueprintAssignable, Category = "Physics Events")
+    FOnRagdollActivated OnRagdollActivated;
+
+    UPROPERTY(BlueprintAssignable, Category = "Physics Events")
+    FOnDestructionTriggered OnDestructionTriggered;
+
+    UPROPERTY(BlueprintAssignable, Category = "Physics Events")
+    FOnPhysicsPerformanceWarning OnPhysicsPerformanceWarning;
 
 private:
-    void UpdatePhysicsLayers();
-    void ProcessRagdollActors(float DeltaTime);
-    void ValidatePhysicsSettings();
-};
+    // Internal tracking
+    TArray<TWeakObjectPtr<AActor>> TrackedPhysicsActors;
+    TArray<TWeakObjectPtr<AActor>> ActiveRagdollActors;
+    TArray<TWeakObjectPtr<AActor>> DestructibleActors;
 
-#include "Core_PhysicsSystemManager.generated.h"
+    float LastPerformanceCheck = 0.0f;
+    float PerformanceCheckInterval = 1.0f;
+
+    // Internal functions
+    void UpdatePhysicsTracking();
+    void CheckPerformance();
+    void CleanupInvalidActors();
+    void ProcessCollisionOptimization();
+    void UpdateRagdollStates();
+    void ProcessDestructionQueue();
+};
