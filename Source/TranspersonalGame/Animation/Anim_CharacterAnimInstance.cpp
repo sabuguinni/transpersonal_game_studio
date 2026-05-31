@@ -1,204 +1,157 @@
 #include "Anim_CharacterAnimInstance.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
-#include "Components/CapsuleComponent.h"
-#include "Kismet/KismetSystemLibrary.h"
-#include "Engine/World.h"
+#include "Kismet/KismetMathLibrary.h"
+#include "Animation/AnimSequence.h"
+#include "Animation/AnimMontage.h"
+#include "Engine/Engine.h"
 
 UAnim_CharacterAnimInstance::UAnim_CharacterAnimInstance()
 {
-    WalkSpeedThreshold = 150.0f;
-    RunSpeedThreshold = 300.0f;
-    DirectionDeadZone = 10.0f;
-    bEnableFootIK = true;
-    IKTraceDistance = 50.0f;
-    IKInterpSpeed = 15.0f;
-    
-    LastSpeed = 0.0f;
-    LastDirection = 0.0f;
-    LastLeanAmount = 0.0f;
-    HipOffset = 0.0f;
+	Speed = 0.0f;
+	bIsInAir = false;
+	bIsAccelerating = false;
+	bIsRunning = false;
+	Direction = 0.0f;
+	
+	WalkThreshold = 50.0f;
+	RunThreshold = 300.0f;
+	
+	Character = nullptr;
+	CharacterMovement = nullptr;
+	
+	IdleAnimation = nullptr;
+	WalkAnimation = nullptr;
+	RunAnimation = nullptr;
+	JumpAnimation = nullptr;
 }
 
 void UAnim_CharacterAnimInstance::NativeInitializeAnimation()
 {
-    Super::NativeInitializeAnimation();
-    
-    OwnerCharacter = Cast<ACharacter>(GetOwningActor());
-    if (OwnerCharacter)
-    {
-        MovementComponent = OwnerCharacter->GetCharacterMovement();
-        UE_LOG(LogTemp, Log, TEXT("Animation Instance initialized for character: %s"), *OwnerCharacter->GetName());
-    }
-    else
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Animation Instance failed to find owner character"));
-    }
+	Super::NativeInitializeAnimation();
+	
+	// Get reference to owning character
+	Character = Cast<ACharacter>(TryGetPawnOwner());
+	if (Character)
+	{
+		CharacterMovement = Character->GetCharacterMovement();
+		
+		if (GEngine)
+		{
+			GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Green, 
+				FString::Printf(TEXT("Animation Instance initialized for: %s"), *Character->GetName()));
+		}
+	}
+	else
+	{
+		if (GEngine)
+		{
+			GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red, 
+				TEXT("Failed to get Character reference in AnimInstance"));
+		}
+	}
 }
 
 void UAnim_CharacterAnimInstance::NativeUpdateAnimation(float DeltaTime)
 {
-    Super::NativeUpdateAnimation(DeltaTime);
-    
-    if (!OwnerCharacter || !MovementComponent)
-    {
-        return;
-    }
-    
-    UpdateMovementValues(DeltaTime);
-    
-    if (bEnableFootIK)
-    {
-        UpdateFootIK(DeltaTime);
-    }
+	Super::NativeUpdateAnimation(DeltaTime);
+	
+	if (Character && CharacterMovement)
+	{
+		UpdateAnimationProperties(DeltaTime);
+		SetAnimationState();
+	}
 }
 
-void UAnim_CharacterAnimInstance::UpdateMovementValues(float DeltaTime)
+void UAnim_CharacterAnimInstance::UpdateAnimationProperties(float DeltaTime)
 {
-    if (!OwnerCharacter || !MovementComponent)
-    {
-        return;
-    }
-    
-    // Get velocity and calculate speed
-    FVector Velocity = MovementComponent->Velocity;
-    float CurrentSpeed = Velocity.Size2D();
-    
-    // Smooth speed changes
-    MovementState.Speed = FMath::FInterpTo(LastSpeed, CurrentSpeed, DeltaTime, 8.0f);
-    LastSpeed = MovementState.Speed;
-    
-    // Calculate movement direction relative to character rotation
-    if (MovementState.Speed > DirectionDeadZone)
-    {
-        FVector ForwardVector = OwnerCharacter->GetActorForwardVector();
-        FVector VelocityNormalized = Velocity.GetSafeNormal2D();
-        
-        float DotProduct = FVector::DotProduct(ForwardVector, VelocityNormalized);
-        float CrossProduct = FVector::CrossProduct(ForwardVector, VelocityNormalized).Z;
-        
-        float CurrentDirection = FMath::Atan2(CrossProduct, DotProduct) * (180.0f / PI);
-        MovementState.Direction = FMath::FInterpTo(LastDirection, CurrentDirection, DeltaTime, 10.0f);
-        LastDirection = MovementState.Direction;
-        
-        // Calculate lean amount for turning
-        float TargetLean = FMath::Clamp(CrossProduct * MovementState.Speed * 0.01f, -45.0f, 45.0f);
-        MovementState.LeanAmount = FMath::FInterpTo(LastLeanAmount, TargetLean, DeltaTime, 5.0f);
-        LastLeanAmount = MovementState.LeanAmount;
-    }
-    else
-    {
-        MovementState.Direction = FMath::FInterpTo(LastDirection, 0.0f, DeltaTime, 10.0f);
-        MovementState.LeanAmount = FMath::FInterpTo(LastLeanAmount, 0.0f, DeltaTime, 5.0f);
-        LastDirection = MovementState.Direction;
-        LastLeanAmount = MovementState.LeanAmount;
-    }
-    
-    // Update movement state flags
-    MovementState.bIsInAir = MovementComponent->IsFalling();
-    MovementState.bIsCrouching = MovementComponent->IsCrouching();
-    MovementState.bIsAccelerating = MovementComponent->GetCurrentAcceleration().SizeSquared() > 0.0f;
+	if (!Character || !CharacterMovement)
+		return;
+	
+	// Get velocity and calculate speed
+	FVector Velocity = CharacterMovement->Velocity;
+	Speed = Velocity.Size();
+	
+	// Check if character is in air
+	bIsInAir = CharacterMovement->IsFalling();
+	
+	// Check if character is accelerating
+	FVector Acceleration = CharacterMovement->GetCurrentAcceleration();
+	bIsAccelerating = Acceleration.Size() > 0.0f;
+	
+	// Check if character is running (above run threshold)
+	bIsRunning = Speed > RunThreshold;
+	
+	// Calculate movement direction relative to character rotation
+	if (Speed > 0.0f)
+	{
+		FVector ForwardVector = Character->GetActorForwardVector();
+		FVector VelocityNormalized = Velocity.GetSafeNormal();
+		
+		// Get angle between forward vector and velocity
+		float DotProduct = FVector::DotProduct(ForwardVector, VelocityNormalized);
+		Direction = FMath::RadiansToDegrees(FMath::Acos(DotProduct));
+		
+		// Check if moving backwards
+		FVector RightVector = Character->GetActorRightVector();
+		float RightDot = FVector::DotProduct(RightVector, VelocityNormalized);
+		if (RightDot < 0.0f)
+		{
+			Direction *= -1.0f;
+		}
+	}
+	else
+	{
+		Direction = 0.0f;
+	}
 }
 
-void UAnim_CharacterAnimInstance::UpdateFootIK(float DeltaTime)
+void UAnim_CharacterAnimInstance::SetAnimationState()
 {
-    if (!OwnerCharacter || MovementState.bIsInAir)
-    {
-        // Reset IK when in air
-        LeftFootIK.IKAlpha = FMath::FInterpTo(LeftFootIK.IKAlpha, 0.0f, DeltaTime, IKInterpSpeed);
-        RightFootIK.IKAlpha = FMath::FInterpTo(RightFootIK.IKAlpha, 0.0f, DeltaTime, IKInterpSpeed);
-        HipOffset = FMath::FInterpTo(HipOffset, 0.0f, DeltaTime, IKInterpSpeed);
-        return;
-    }
-    
-    // Calculate IK for both feet
-    LeftFootIK = CalculateFootIK(FName("foot_l"), DeltaTime);
-    RightFootIK = CalculateFootIK(FName("foot_r"), DeltaTime);
-    
-    // Calculate hip offset to keep character level
-    float LeftOffset = LeftFootIK.FootLocation.Z;
-    float RightOffset = RightFootIK.FootLocation.Z;
-    float TargetHipOffset = FMath::Min(LeftOffset, RightOffset);
-    
-    HipOffset = FMath::FInterpTo(HipOffset, TargetHipOffset, DeltaTime, IKInterpSpeed);
-    
-    // Adjust foot positions relative to hip offset
-    LeftFootIK.FootLocation.Z -= HipOffset;
-    RightFootIK.FootLocation.Z -= HipOffset;
+	// Animation state logic is handled by the Animation Blueprint
+	// This function can be used for additional state management if needed
+	
+	// Debug output for animation states
+	if (GEngine && Character)
+	{
+		FString StateInfo = FString::Printf(TEXT("Speed: %.1f | InAir: %s | Accelerating: %s | Running: %s"), 
+			Speed, 
+			bIsInAir ? TEXT("Yes") : TEXT("No"),
+			bIsAccelerating ? TEXT("Yes") : TEXT("No"),
+			bIsRunning ? TEXT("Yes") : TEXT("No"));
+			
+		GEngine->AddOnScreenDebugMessage(1, 0.0f, FColor::Yellow, StateInfo);
+	}
 }
 
-FAnim_IKFootData UAnim_CharacterAnimInstance::CalculateFootIK(const FName& SocketName, float DeltaTime)
+void UAnim_CharacterAnimInstance::PlayJumpMontage()
 {
-    FAnim_IKFootData FootData;
-    
-    if (!OwnerCharacter)
-    {
-        return FootData;
-    }
-    
-    USkeletalMeshComponent* MeshComp = OwnerCharacter->GetMesh();
-    if (!MeshComp)
-    {
-        return FootData;
-    }
-    
-    // Get foot socket location
-    FVector SocketLocation = MeshComp->GetSocketLocation(SocketName);
-    FVector FootLocation = GetIKFootLocation(SocketLocation);
-    
-    // Perform line trace from foot to ground
-    FVector TraceStart = FootLocation + FVector(0, 0, 20.0f);
-    FVector TraceEnd = FootLocation - FVector(0, 0, IKTraceDistance);
-    
-    FHitResult HitResult;
-    TArray<AActor*> ActorsToIgnore;
-    ActorsToIgnore.Add(OwnerCharacter);
-    
-    bool bHit = UKismetSystemLibrary::LineTraceSingle(
-        GetWorld(),
-        TraceStart,
-        TraceEnd,
-        UEngineTypes::ConvertToTraceType(ECC_Visibility),
-        false,
-        ActorsToIgnore,
-        EDrawDebugTrace::None,
-        HitResult,
-        true
-    );
-    
-    if (bHit)
-    {
-        // Calculate foot adjustment
-        float ImpactDistance = (SocketLocation.Z - HitResult.ImpactPoint.Z);
-        FootData.FootLocation = FVector(0, 0, ImpactDistance);
-        FootData.FootRotation = GetIKFootRotation(HitResult.ImpactPoint, HitResult.ImpactNormal);
-        FootData.IKAlpha = FMath::FInterpTo(FootData.IKAlpha, 1.0f, DeltaTime, IKInterpSpeed);
-    }
-    else
-    {
-        // No ground found, disable IK
-        FootData.IKAlpha = FMath::FInterpTo(FootData.IKAlpha, 0.0f, DeltaTime, IKInterpSpeed);
-    }
-    
-    return FootData;
+	if (JumpAnimation)
+	{
+		// Create a montage from the jump animation if needed
+		// For now, just log that jump was triggered
+		if (GEngine)
+		{
+			GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Blue, TEXT("Jump animation triggered"));
+		}
+	}
 }
 
-FVector UAnim_CharacterAnimInstance::GetIKFootLocation(const FVector& FootLocation)
+void UAnim_CharacterAnimInstance::PlayLandMontage()
 {
-    // Transform foot location to world space for tracing
-    if (OwnerCharacter)
-    {
-        return OwnerCharacter->GetActorTransform().TransformPosition(FootLocation);
-    }
-    return FootLocation;
+	if (GEngine)
+	{
+		GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Blue, TEXT("Land animation triggered"));
+	}
 }
 
-FRotator UAnim_CharacterAnimInstance::GetIKFootRotation(const FVector& ImpactLocation, const FVector& ImpactNormal)
+void UAnim_CharacterAnimInstance::StopAllMontages()
 {
-    // Calculate foot rotation to align with ground normal
-    FVector ForwardVector = OwnerCharacter->GetActorForwardVector();
-    FVector RightVector = FVector::CrossProduct(ImpactNormal, ForwardVector).GetSafeNormal();
-    ForwardVector = FVector::CrossProduct(RightVector, ImpactNormal).GetSafeNormal();
-    
-    return UKismetMathLibrary::MakeRotationFromAxes(ForwardVector, RightVector, ImpactNormal);
+	// Stop all currently playing montages
+	Montage_Stop(0.2f);
+	
+	if (GEngine)
+	{
+		GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Orange, TEXT("All animation montages stopped"));
+	}
 }
