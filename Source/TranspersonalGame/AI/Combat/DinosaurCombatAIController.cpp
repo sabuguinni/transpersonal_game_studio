@@ -1,32 +1,31 @@
 #include "DinosaurCombatAIController.h"
-#include "BehaviorTree/BehaviorTree.h"
+#include "Engine/World.h"
+#include "Kismet/GameplayStatics.h"
+#include "GameFramework/Character.h"
+#include "GameFramework/Pawn.h"
+#include "Components/CapsuleComponent.h"
+#include "Engine/Engine.h"
 #include "BehaviorTree/BlackboardComponent.h"
+#include "BehaviorTree/BehaviorTree.h"
+#include "BehaviorTree/BehaviorTreeComponent.h"
 #include "Perception/AIPerceptionComponent.h"
 #include "Perception/AISenseConfig_Sight.h"
-#include "Engine/World.h"
-#include "GameFramework/Pawn.h"
-#include "GameFramework/Character.h"
-#include "Kismet/GameplayStatics.h"
-#include "Components/StaticMeshComponent.h"
-#include "Engine/Engine.h"
-#include "TranspersonalGame/Character/TranspersonalCharacter.h"
 
 ADinosaurCombatAIController::ADinosaurCombatAIController()
 {
     PrimaryActorTick.bCanEverTick = true;
     
-    // Create AI Perception Component
+    // Initialize AI Perception
     AIPerceptionComponent = CreateDefaultSubobject<UAIPerceptionComponent>(TEXT("AIPerceptionComponent"));
     
     // Configure sight sense
     UAISenseConfig_Sight* SightConfig = CreateDefaultSubobject<UAISenseConfig_Sight>(TEXT("SightConfig"));
     SightConfig->SightRadius = 5000.0f;
-    SightConfig->LoseSightRadius = 5500.0f;
+    SightConfig->LoseSightRadius = 6000.0f;
     SightConfig->PeripheralVisionAngleDegrees = 90.0f;
-    SightConfig->SetMaxAge(5.0f);
     SightConfig->DetectionByAffiliation.bDetectNeutrals = true;
-    SightConfig->DetectionByAffiliation.bDetectFriendlies = true;
     SightConfig->DetectionByAffiliation.bDetectEnemies = true;
+    SightConfig->DetectionByAffiliation.bDetectFriendlies = false;
     
     AIPerceptionComponent->ConfigureSense(*SightConfig);
     AIPerceptionComponent->SetDominantSense(SightConfig->GetSenseImplementation());
@@ -34,23 +33,39 @@ ADinosaurCombatAIController::ADinosaurCombatAIController()
     // Bind perception events
     AIPerceptionComponent->OnTargetPerceptionUpdated.AddDynamic(this, &ADinosaurCombatAIController::OnTargetPerceptionUpdated);
     
-    // Default values
-    DetectionRadius = 5000.0f;
-    AttackRange = 300.0f;
-    MovementSpeed = 600.0f;
-    bIsPlayerDetected = false;
+    // Initialize variables
     CurrentTarget = nullptr;
-    CombatState = ECombat_DinosaurCombatState::Idle;
+    AttackRange = 300.0f;
+    ChaseSpeed = 600.0f;
+    PatrolSpeed = 200.0f;
+    bIsChasing = false;
+    bIsAttacking = false;
+    LastKnownTargetLocation = FVector::ZeroVector;
 }
 
 void ADinosaurCombatAIController::BeginPlay()
 {
     Super::BeginPlay();
     
-    UE_LOG(LogTemp, Warning, TEXT("DinosaurCombatAIController: BeginPlay started"));
+    // Start behavior tree if available
+    if (BehaviorTreeAsset)
+    {
+        RunBehaviorTree(BehaviorTreeAsset);
+    }
     
-    // Start detection timer
-    GetWorld()->GetTimerManager().SetTimer(DetectionTimerHandle, this, &ADinosaurCombatAIController::DetectPlayer, 1.0f, true);
+    // Set initial patrol point
+    if (GetPawn())
+    {
+        PatrolStartLocation = GetPawn()->GetActorLocation();
+    }
+}
+
+void ADinosaurCombatAIController::Tick(float DeltaTime)
+{
+    Super::Tick(DeltaTime);
+    
+    // Update combat logic
+    UpdateCombatBehavior();
 }
 
 void ADinosaurCombatAIController::OnPossess(APawn* InPawn)
@@ -59,210 +74,231 @@ void ADinosaurCombatAIController::OnPossess(APawn* InPawn)
     
     if (InPawn)
     {
-        UE_LOG(LogTemp, Warning, TEXT("DinosaurCombatAIController: Possessing pawn %s"), *InPawn->GetName());
+        PatrolStartLocation = InPawn->GetActorLocation();
         
-        // Start behavior tree if available
+        // Start behavior tree
         if (BehaviorTreeAsset)
         {
             RunBehaviorTree(BehaviorTreeAsset);
-            UE_LOG(LogTemp, Warning, TEXT("DinosaurCombatAIController: Behavior tree started"));
-        }
-        else
-        {
-            UE_LOG(LogTemp, Warning, TEXT("DinosaurCombatAIController: No behavior tree assigned"));
         }
         
-        // Set initial blackboard values
-        if (GetBlackboardComponent())
-        {
-            GetBlackboardComponent()->SetValueAsEnum(TEXT("CombatState"), static_cast<uint8>(ECombat_DinosaurCombatState::Idle));
-            GetBlackboardComponent()->SetValueAsBool(TEXT("PlayerDetected"), false);
-        }
-    }
-}
-
-void ADinosaurCombatAIController::DetectPlayer()
-{
-    if (!GetPawn())
-        return;
-    
-    // Get player character
-    ATranspersonalCharacter* PlayerCharacter = Cast<ATranspersonalCharacter>(UGameplayStatics::GetPlayerCharacter(GetWorld(), 0));
-    if (!PlayerCharacter)
-        return;
-    
-    FVector DinosaurLocation = GetPawn()->GetActorLocation();
-    FVector PlayerLocation = PlayerCharacter->GetActorLocation();
-    float DistanceToPlayer = FVector::Dist(DinosaurLocation, PlayerLocation);
-    
-    // Check if player is within detection radius
-    if (DistanceToPlayer <= DetectionRadius)
-    {
-        // Perform line trace to check line of sight
-        FHitResult HitResult;
-        FVector Start = DinosaurLocation + FVector(0, 0, 100); // Offset for eye level
-        FVector End = PlayerLocation + FVector(0, 0, 100);
-        
-        FCollisionQueryParams QueryParams;
-        QueryParams.AddIgnoredActor(GetPawn());
-        QueryParams.AddIgnoredActor(PlayerCharacter);
-        
-        bool bHit = GetWorld()->LineTraceSingleByChannel(HitResult, Start, End, ECC_Visibility, QueryParams);
-        
-        if (!bHit || HitResult.GetActor() == PlayerCharacter)
-        {
-            // Player detected - start combat behavior
-            if (!bIsPlayerDetected)
-            {
-                bIsPlayerDetected = true;
-                CurrentTarget = PlayerCharacter;
-                CombatState = ECombat_DinosaurCombatState::Hunting;
-                
-                UE_LOG(LogTemp, Warning, TEXT("DinosaurCombatAIController: Player detected at distance %.2f"), DistanceToPlayer);
-                
-                // Update blackboard
-                if (GetBlackboardComponent())
-                {
-                    GetBlackboardComponent()->SetValueAsBool(TEXT("PlayerDetected"), true);
-                    GetBlackboardComponent()->SetValueAsObject(TEXT("TargetActor"), PlayerCharacter);
-                    GetBlackboardComponent()->SetValueAsEnum(TEXT("CombatState"), static_cast<uint8>(ECombat_DinosaurCombatState::Hunting));
-                }
-                
-                // Move towards player
-                MoveToPlayer();
-            }
-            else
-            {
-                // Continue tracking player
-                if (DistanceToPlayer <= AttackRange)
-                {
-                    CombatState = ECombat_DinosaurCombatState::Attacking;
-                    AttackPlayer();
-                }
-                else
-                {
-                    MoveToPlayer();
-                }
-            }
-        }
-    }
-    else if (bIsPlayerDetected && DistanceToPlayer > DetectionRadius * 1.2f)
-    {
-        // Player lost - return to idle
-        bIsPlayerDetected = false;
-        CurrentTarget = nullptr;
-        CombatState = ECombat_DinosaurCombatState::Idle;
-        
-        UE_LOG(LogTemp, Warning, TEXT("DinosaurCombatAIController: Player lost"));
-        
-        // Update blackboard
-        if (GetBlackboardComponent())
-        {
-            GetBlackboardComponent()->SetValueAsBool(TEXT("PlayerDetected"), false);
-            GetBlackboardComponent()->SetValueAsObject(TEXT("TargetActor"), nullptr);
-            GetBlackboardComponent()->SetValueAsEnum(TEXT("CombatState"), static_cast<uint8>(ECombat_DinosaurCombatState::Idle));
-        }
-        
-        // Stop movement
-        StopMovement();
-    }
-}
-
-void ADinosaurCombatAIController::MoveToPlayer()
-{
-    if (CurrentTarget && GetPawn())
-    {
-        // Use AI movement to move towards player
-        MoveToActor(CurrentTarget, AttackRange * 0.8f, true, true, false);
-        
-        UE_LOG(LogTemp, Log, TEXT("DinosaurCombatAIController: Moving to player"));
-    }
-}
-
-void ADinosaurCombatAIController::AttackPlayer()
-{
-    if (CurrentTarget && GetPawn())
-    {
-        // Stop movement for attack
-        StopMovement();
-        
-        // Face the target
-        FVector DirectionToTarget = (CurrentTarget->GetActorLocation() - GetPawn()->GetActorLocation()).GetSafeNormal();
-        FRotator TargetRotation = DirectionToTarget.Rotation();
-        GetPawn()->SetActorRotation(TargetRotation);
-        
-        // Trigger attack animation/damage
-        UE_LOG(LogTemp, Warning, TEXT("DinosaurCombatAIController: Attacking player!"));
-        
-        // Apply damage to player
-        if (ATranspersonalCharacter* Player = Cast<ATranspersonalCharacter>(CurrentTarget))
-        {
-            // Apply damage through the damage system
-            float DamageAmount = 25.0f;
-            UGameplayStatics::ApplyPointDamage(Player, DamageAmount, GetPawn()->GetActorLocation(), FHitResult(), this, GetPawn(), nullptr);
-        }
-        
-        // Set cooldown before next attack
-        GetWorld()->GetTimerManager().SetTimer(AttackCooldownHandle, [this]()
-        {
-            CombatState = ECombat_DinosaurCombatState::Hunting;
-        }, 2.0f, false);
+        UE_LOG(LogTemp, Warning, TEXT("DinosaurCombatAIController possessed pawn: %s"), *InPawn->GetName());
     }
 }
 
 void ADinosaurCombatAIController::OnTargetPerceptionUpdated(AActor* Actor, FAIStimulus Stimulus)
 {
-    if (ATranspersonalCharacter* PlayerCharacter = Cast<ATranspersonalCharacter>(Actor))
+    if (!Actor)
+    {
+        return;
+    }
+    
+    // Check if this is a player character
+    if (Actor->IsA<ACharacter>() && Actor->GetName().Contains("Character"))
     {
         if (Stimulus.WasSuccessfullySensed())
         {
-            UE_LOG(LogTemp, Warning, TEXT("DinosaurCombatAIController: Player sensed through AI Perception"));
+            // Target spotted
+            CurrentTarget = Actor;
+            LastKnownTargetLocation = Actor->GetActorLocation();
+            bIsChasing = true;
             
-            if (!bIsPlayerDetected)
+            // Update blackboard
+            if (GetBlackboardComponent())
             {
-                bIsPlayerDetected = true;
-                CurrentTarget = PlayerCharacter;
-                CombatState = ECombat_DinosaurCombatState::Hunting;
+                GetBlackboardComponent()->SetValueAsObject("TargetActor", CurrentTarget);
+                GetBlackboardComponent()->SetValueAsVector("TargetLocation", LastKnownTargetLocation);
+                GetBlackboardComponent()->SetValueAsBool("HasTarget", true);
+            }
+            
+            UE_LOG(LogTemp, Warning, TEXT("DinosaurCombatAI: Target acquired - %s"), *Actor->GetName());
+        }
+        else
+        {
+            // Target lost
+            if (CurrentTarget == Actor)
+            {
+                CurrentTarget = nullptr;
+                bIsChasing = false;
                 
                 // Update blackboard
                 if (GetBlackboardComponent())
                 {
-                    GetBlackboardComponent()->SetValueAsBool(TEXT("PlayerDetected"), true);
-                    GetBlackboardComponent()->SetValueAsObject(TEXT("TargetActor"), PlayerCharacter);
-                    GetBlackboardComponent()->SetValueAsEnum(TEXT("CombatState"), static_cast<uint8>(ECombat_DinosaurCombatState::Hunting));
+                    GetBlackboardComponent()->SetValueAsObject("TargetActor", nullptr);
+                    GetBlackboardComponent()->SetValueAsBool("HasTarget", false);
+                }
+                
+                UE_LOG(LogTemp, Warning, TEXT("DinosaurCombatAI: Target lost"));
+            }
+        }
+    }
+}
+
+void ADinosaurCombatAIController::UpdateCombatBehavior()
+{
+    if (!GetPawn())
+    {
+        return;
+    }
+    
+    if (CurrentTarget && IsValid(CurrentTarget))
+    {
+        float DistanceToTarget = FVector::Dist(GetPawn()->GetActorLocation(), CurrentTarget->GetActorLocation());
+        
+        if (DistanceToTarget <= AttackRange)
+        {
+            // In attack range - stop and attack
+            StopMovement();
+            PerformAttack();
+        }
+        else if (bIsChasing)
+        {
+            // Chase target
+            MoveToActor(CurrentTarget, AttackRange - 50.0f);
+        }
+    }
+    else if (!bIsChasing)
+    {
+        // No target - patrol
+        PerformPatrol();
+    }
+}
+
+void ADinosaurCombatAIController::PerformAttack()
+{
+    if (bIsAttacking)
+    {
+        return;
+    }
+    
+    bIsAttacking = true;
+    
+    // Face target
+    if (CurrentTarget && GetPawn())
+    {
+        FVector DirectionToTarget = (CurrentTarget->GetActorLocation() - GetPawn()->GetActorLocation()).GetSafeNormal();
+        FRotator TargetRotation = DirectionToTarget.Rotation();
+        GetPawn()->SetActorRotation(TargetRotation);
+        
+        UE_LOG(LogTemp, Warning, TEXT("DinosaurCombatAI: Attacking target!"));
+    }
+    
+    // Reset attack flag after delay
+    GetWorld()->GetTimerManager().SetTimer(AttackCooldownTimer, [this]()
+    {
+        bIsAttacking = false;
+    }, 2.0f, false);
+}
+
+void ADinosaurCombatAIController::PerformPatrol()
+{
+    if (!GetPawn())
+    {
+        return;
+    }
+    
+    FVector CurrentLocation = GetPawn()->GetActorLocation();
+    float DistanceFromStart = FVector::Dist(CurrentLocation, PatrolStartLocation);
+    
+    if (DistanceFromStart > 2000.0f)
+    {
+        // Return to start location
+        MoveToLocation(PatrolStartLocation);
+    }
+    else
+    {
+        // Random patrol within area
+        FVector RandomDirection = FMath::VRand();
+        RandomDirection.Z = 0.0f;
+        RandomDirection.Normalize();
+        
+        FVector PatrolTarget = PatrolStartLocation + (RandomDirection * FMath::RandRange(500.0f, 1500.0f));
+        MoveToLocation(PatrolTarget);
+    }
+}
+
+bool ADinosaurCombatAIController::DetectPlayer()
+{
+    if (!GetWorld())
+    {
+        return false;
+    }
+    
+    // Use sphere trace to detect player
+    FVector StartLocation = GetPawn() ? GetPawn()->GetActorLocation() : FVector::ZeroVector;
+    FVector EndLocation = StartLocation + FVector(0, 0, 100); // Small trace up
+    
+    TArray<FHitResult> HitResults;
+    FCollisionQueryParams QueryParams;
+    QueryParams.AddIgnoredActor(GetPawn());
+    
+    bool bHit = GetWorld()->SweepMultiByChannel(
+        HitResults,
+        StartLocation,
+        EndLocation,
+        FQuat::Identity,
+        ECollisionChannel::ECC_Pawn,
+        FCollisionShape::MakeSphere(5000.0f),
+        QueryParams
+    );
+    
+    if (bHit)
+    {
+        for (const FHitResult& Hit : HitResults)
+        {
+            if (Hit.GetActor() && Hit.GetActor()->IsA<ACharacter>())
+            {
+                if (Hit.GetActor()->GetName().Contains("Character"))
+                {
+                    CurrentTarget = Hit.GetActor();
+                    LastKnownTargetLocation = Hit.GetActor()->GetActorLocation();
+                    bIsChasing = true;
+                    
+                    UE_LOG(LogTemp, Warning, TEXT("DinosaurCombatAI: Player detected via sphere trace"));
+                    return true;
                 }
             }
         }
-        else
+    }
+    
+    return false;
+}
+
+void ADinosaurCombatAIController::SetCombatTarget(AActor* NewTarget)
+{
+    CurrentTarget = NewTarget;
+    if (NewTarget)
+    {
+        LastKnownTargetLocation = NewTarget->GetActorLocation();
+        bIsChasing = true;
+        
+        // Update blackboard
+        if (GetBlackboardComponent())
         {
-            UE_LOG(LogTemp, Warning, TEXT("DinosaurCombatAIController: Player lost through AI Perception"));
+            GetBlackboardComponent()->SetValueAsObject("TargetActor", CurrentTarget);
+            GetBlackboardComponent()->SetValueAsVector("TargetLocation", LastKnownTargetLocation);
+            GetBlackboardComponent()->SetValueAsBool("HasTarget", true);
         }
     }
-}
-
-void ADinosaurCombatAIController::SetCombatState(ECombat_DinosaurCombatState NewState)
-{
-    CombatState = NewState;
-    
-    if (GetBlackboardComponent())
+    else
     {
-        GetBlackboardComponent()->SetValueAsEnum(TEXT("CombatState"), static_cast<uint8>(NewState));
+        bIsChasing = false;
+        
+        // Update blackboard
+        if (GetBlackboardComponent())
+        {
+            GetBlackboardComponent()->SetValueAsObject("TargetActor", nullptr);
+            GetBlackboardComponent()->SetValueAsBool("HasTarget", false);
+        }
     }
-    
-    UE_LOG(LogTemp, Log, TEXT("DinosaurCombatAIController: Combat state changed to %d"), static_cast<int32>(NewState));
-}
-
-ECombat_DinosaurCombatState ADinosaurCombatAIController::GetCombatState() const
-{
-    return CombatState;
-}
-
-bool ADinosaurCombatAIController::IsPlayerDetected() const
-{
-    return bIsPlayerDetected;
 }
 
 AActor* ADinosaurCombatAIController::GetCurrentTarget() const
 {
     return CurrentTarget;
+}
+
+bool ADinosaurCombatAIController::IsInCombat() const
+{
+    return bIsChasing || bIsAttacking;
 }
