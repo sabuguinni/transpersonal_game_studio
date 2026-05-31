@@ -1,225 +1,181 @@
 #include "NarrativeDialogueSystem.h"
 #include "Engine/Engine.h"
-#include "Components/AudioComponent.h"
-#include "Sound/SoundWave.h"
-#include "Engine/World.h"
+#include "TimerManager.h"
 #include "Kismet/GameplayStatics.h"
-
-UNarrativeDialogueSystem::UNarrativeDialogueSystem()
-{
-    CurrentAudioComponent = nullptr;
-    bDialoguePlaying = false;
-}
+#include "Components/AudioComponent.h"
+#include "Sound/SoundCue.h"
 
 void UNarrativeDialogueSystem::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
     
-    InitializeDialogueLibraries();
+    bIsPlayingDialogue = false;
     
-    UE_LOG(LogTemp, Warning, TEXT("NarrativeDialogueSystem initialized"));
+    InitializeDialogueData();
+    InitializeSurvivalTips();
+    
+    UE_LOG(LogTemp, Log, TEXT("NarrativeDialogueSystem initialized with %d intro dialogues and %d survival tips"), 
+           IntroDialogues.Num(), SurvivalTips.Num());
 }
 
-void UNarrativeDialogueSystem::InitializeDialogueLibraries()
+void UNarrativeDialogueSystem::Deinitialize()
 {
-    // Quest Dialogue Library
-    FNarr_DialogueLine HuntQuest;
-    HuntQuest.DialogueText = TEXT("Hunt the great beast in the southern plains. Bring back its hide to prove your worth as a hunter.");
-    HuntQuest.DialogueType = ENarr_DialogueType::QuestGiver;
-    HuntQuest.Duration = 8.0f;
-    QuestDialogueLibrary.Add(TEXT("HuntTRex"), HuntQuest);
-
-    FNarr_DialogueLine CaveQuest;
-    CaveQuest.DialogueText = TEXT("The sacred cave holds ancient tools of our ancestors. Venture deep and gather the stone implements within.");
-    CaveQuest.DialogueType = ENarr_DialogueType::QuestGiver;
-    CaveQuest.Duration = 7.0f;
-    QuestDialogueLibrary.Add(TEXT("ExploreCave"), CaveQuest);
-
-    FNarr_DialogueLine GatherQuest;
-    GatherQuest.DialogueText = TEXT("The tribe needs food and materials. Gather berries from the forest and stones from the riverbank.");
-    GatherQuest.DialogueType = ENarr_DialogueType::QuestGiver;
-    GatherQuest.Duration = 6.0f;
-    QuestDialogueLibrary.Add(TEXT("GatherResources"), GatherQuest);
-
-    // Warning Dialogue Library
-    FNarr_DialogueLine TRexWarning;
-    TRexWarning.DialogueText = TEXT("Warning! A massive predator stalks these lands. Stay alert, primitive hunter. The thunder of its footsteps echoes through the valley.");
-    TRexWarning.DialogueType = ENarr_DialogueType::Warning;
-    TRexWarning.Duration = 9.0f;
-    WarningDialogueLibrary.Add(TEXT("TRex"), TRexWarning);
-
-    FNarr_DialogueLine RaptorWarning;
-    RaptorWarning.DialogueText = TEXT("Pack hunters approach! Velociraptors move like shadows through the tall grass. Keep your spear ready and watch your back.");
-    RaptorWarning.DialogueType = ENarr_DialogueType::Warning;
-    RaptorWarning.Duration = 8.0f;
-    WarningDialogueLibrary.Add(TEXT("Velociraptor"), RaptorWarning);
-
-    FNarr_DialogueLine StormWarning;
-    StormWarning.DialogueText = TEXT("Dark clouds gather on the horizon. Seek shelter quickly before the storm unleashes its fury upon the land.");
-    StormWarning.DialogueType = ENarr_DialogueType::Warning;
-    StormWarning.Duration = 7.0f;
-    WarningDialogueLibrary.Add(TEXT("Storm"), StormWarning);
-
-    // Discovery Dialogue Library
-    FNarr_DialogueLine FireDiscovery;
-    FireDiscovery.DialogueText = TEXT("You have discovered the sacred flame! This ancient knowledge will keep you warm and cook your food. Guard it well.");
-    FireDiscovery.DialogueType = ENarr_DialogueType::Discovery;
-    FireDiscovery.Duration = 8.0f;
-    DiscoveryDialogueLibrary.Add(TEXT("Fire"), FireDiscovery);
-
-    FNarr_DialogueLine CaveDiscovery;
-    CaveDiscovery.DialogueText = TEXT("A hidden cave reveals itself! Ancient paintings cover the walls, telling stories of those who came before.");
-    CaveDiscovery.DialogueType = ENarr_DialogueType::Discovery;
-    CaveDiscovery.Duration = 7.0f;
-    DiscoveryDialogueLibrary.Add(TEXT("Cave"), CaveDiscovery);
-
-    FNarr_DialogueLine ToolDiscovery;
-    ToolDiscovery.DialogueText = TEXT("Sharp stone and sturdy wood combine to create a powerful tool. With this spear, you can hunt and defend yourself.");
-    ToolDiscovery.DialogueType = ENarr_DialogueType::Discovery;
-    ToolDiscovery.Duration = 7.0f;
-    DiscoveryDialogueLibrary.Add(TEXT("Tool"), ToolDiscovery);
+    if (GetWorld() && GetWorld()->GetTimerManager().IsTimerActive(DialogueTimerHandle))
+    {
+        GetWorld()->GetTimerManager().ClearTimer(DialogueTimerHandle);
+    }
+    
+    Super::Deinitialize();
 }
 
-void UNarrativeDialogueSystem::PlayDialogue(const FString& NPCName, ENarr_DialogueType DialogueType)
+void UNarrativeDialogueSystem::PlayDialogueLine(const FNarr_DialogueLine& DialogueLine)
 {
-    if (bDialoguePlaying)
+    if (bIsPlayingDialogue)
     {
         StopCurrentDialogue();
     }
-
-    if (RegisteredNPCs.Contains(NPCName))
+    
+    CurrentDialogue = DialogueLine;
+    bIsPlayingDialogue = true;
+    
+    // Display text on screen
+    if (GEngine)
     {
-        const FNarr_NPCProfile& NPCProfile = RegisteredNPCs[NPCName];
-        
-        for (const FNarr_DialogueLine& Line : NPCProfile.DialogueLines)
+        FString DisplayText = FString::Printf(TEXT("%s: %s"), 
+                                            *DialogueLine.SpeakerName, 
+                                            *DialogueLine.DialogueText.ToString());
+        GEngine->AddOnScreenDebugMessage(-1, DialogueLine.DisplayDuration, FColor::Yellow, DisplayText);
+    }
+    
+    // Play audio if available
+    if (DialogueLine.VoiceAudio.IsValid())
+    {
+        USoundCue* SoundCue = DialogueLine.VoiceAudio.LoadSynchronous();
+        if (SoundCue && GetWorld())
         {
-            if (Line.DialogueType == DialogueType)
-            {
-                PlayAudioDialogue(Line);
-                UE_LOG(LogTemp, Warning, TEXT("Playing dialogue for %s: %s"), *NPCName, *Line.DialogueText);
-                return;
-            }
+            UGameplayStatics::PlaySound2D(GetWorld(), SoundCue);
         }
     }
-
-    UE_LOG(LogTemp, Warning, TEXT("No dialogue found for NPC: %s, Type: %d"), *NPCName, (int32)DialogueType);
-}
-
-void UNarrativeDialogueSystem::RegisterNPC(const FNarr_NPCProfile& NPCProfile)
-{
-    RegisteredNPCs.Add(NPCProfile.NPCName, NPCProfile);
-    UE_LOG(LogTemp, Warning, TEXT("Registered NPC: %s with %d dialogue lines"), *NPCProfile.NPCName, NPCProfile.DialogueLines.Num());
-}
-
-void UNarrativeDialogueSystem::TriggerQuestDialogue(const FString& QuestID, const FString& NPCName)
-{
-    if (QuestDialogueLibrary.Contains(QuestID))
+    
+    // Set timer to finish dialogue
+    if (GetWorld())
     {
-        const FNarr_DialogueLine& QuestLine = QuestDialogueLibrary[QuestID];
-        PlayAudioDialogue(QuestLine);
-        UE_LOG(LogTemp, Warning, TEXT("Quest dialogue triggered - %s: %s"), *QuestID, *QuestLine.DialogueText);
-    }
-    else
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Quest dialogue not found for ID: %s"), *QuestID);
+        GetWorld()->GetTimerManager().SetTimer(DialogueTimerHandle, 
+                                             this, 
+                                             &UNarrativeDialogueSystem::OnDialogueFinished, 
+                                             DialogueLine.DisplayDuration, 
+                                             false);
     }
 }
 
-void UNarrativeDialogueSystem::PlayWarningDialogue(const FString& ThreatType, const FVector& Location)
+void UNarrativeDialogueSystem::TriggerSurvivalTip(ENarr_DinosaurSpecies Species, float Distance)
 {
-    if (WarningDialogueLibrary.Contains(ThreatType))
+    for (const FNarr_SurvivalTip& Tip : SurvivalTips)
     {
-        const FNarr_DialogueLine& WarningLine = WarningDialogueLibrary[ThreatType];
-        PlayAudioDialogue(WarningLine);
-        UE_LOG(LogTemp, Warning, TEXT("Warning dialogue triggered - %s at location: %s"), *ThreatType, *Location.ToString());
-    }
-    else
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Warning dialogue not found for threat: %s"), *ThreatType);
+        if (Tip.TriggerSpecies == Species && Distance <= Tip.TriggerDistance)
+        {
+            FNarr_DialogueLine TipDialogue;
+            TipDialogue.SpeakerName = TEXT("Survival Guide");
+            TipDialogue.DialogueText = Tip.TipText;
+            TipDialogue.DisplayDuration = 4.0f;
+            TipDialogue.bIsNarration = true;
+            TipDialogue.VoiceAudio = Tip.WarningAudio;
+            
+            PlayDialogueLine(TipDialogue);
+            break;
+        }
     }
 }
 
-void UNarrativeDialogueSystem::PlayDiscoveryDialogue(const FString& DiscoveryType)
+void UNarrativeDialogueSystem::PlayNarration(const FText& NarrationText, float Duration)
 {
-    if (DiscoveryDialogueLibrary.Contains(DiscoveryType))
-    {
-        const FNarr_DialogueLine& DiscoveryLine = DiscoveryDialogueLibrary[DiscoveryType];
-        PlayAudioDialogue(DiscoveryLine);
-        UE_LOG(LogTemp, Warning, TEXT("Discovery dialogue triggered - %s: %s"), *DiscoveryType, *DiscoveryLine.DialogueText);
-    }
-    else
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Discovery dialogue not found for type: %s"), *DiscoveryType);
-    }
-}
-
-bool UNarrativeDialogueSystem::IsDialoguePlaying() const
-{
-    return bDialoguePlaying && CurrentAudioComponent && CurrentAudioComponent->IsPlaying();
+    FNarr_DialogueLine NarrationDialogue;
+    NarrationDialogue.SpeakerName = TEXT("Narrator");
+    NarrationDialogue.DialogueText = NarrationText;
+    NarrationDialogue.DisplayDuration = Duration;
+    NarrationDialogue.bIsNarration = true;
+    
+    PlayDialogueLine(NarrationDialogue);
 }
 
 void UNarrativeDialogueSystem::StopCurrentDialogue()
 {
-    if (CurrentAudioComponent && CurrentAudioComponent->IsPlaying())
+    if (GetWorld() && GetWorld()->GetTimerManager().IsTimerActive(DialogueTimerHandle))
     {
-        CurrentAudioComponent->Stop();
+        GetWorld()->GetTimerManager().ClearTimer(DialogueTimerHandle);
     }
-    bDialoguePlaying = false;
-    UE_LOG(LogTemp, Warning, TEXT("Dialogue stopped"));
+    
+    bIsPlayingDialogue = false;
+    CurrentDialogue = FNarr_DialogueLine();
 }
 
-FNarr_DialogueLine UNarrativeDialogueSystem::GetDialogueForType(ENarr_DialogueType DialogueType, const FString& Context)
+bool UNarrativeDialogueSystem::IsDialoguePlaying() const
 {
-    FNarr_DialogueLine DefaultLine;
-    DefaultLine.DialogueText = TEXT("...");
-    DefaultLine.DialogueType = DialogueType;
-    DefaultLine.Duration = 2.0f;
-
-    switch (DialogueType)
-    {
-        case ENarr_DialogueType::Warning:
-            if (WarningDialogueLibrary.Contains(Context))
-            {
-                return WarningDialogueLibrary[Context];
-            }
-            break;
-        case ENarr_DialogueType::Discovery:
-            if (DiscoveryDialogueLibrary.Contains(Context))
-            {
-                return DiscoveryDialogueLibrary[Context];
-            }
-            break;
-        case ENarr_DialogueType::QuestGiver:
-            if (QuestDialogueLibrary.Contains(Context))
-            {
-                return QuestDialogueLibrary[Context];
-            }
-            break;
-        default:
-            break;
-    }
-
-    return DefaultLine;
+    return bIsPlayingDialogue;
 }
 
-void UNarrativeDialogueSystem::PlayAudioDialogue(const FNarr_DialogueLine& DialogueLine)
+void UNarrativeDialogueSystem::OnDialogueFinished()
 {
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        UE_LOG(LogTemp, Error, TEXT("No world context for audio playback"));
-        return;
-    }
+    bIsPlayingDialogue = false;
+    CurrentDialogue = FNarr_DialogueLine();
+}
 
-    bDialoguePlaying = true;
+void UNarrativeDialogueSystem::InitializeDialogueData()
+{
+    IntroDialogues.Empty();
+    
+    // Intro sequence dialogues
+    FNarr_DialogueLine Intro1;
+    Intro1.SpeakerName = TEXT("Narrator");
+    Intro1.DialogueText = FText::FromString(TEXT("You wake in a world where giants roam. The age of dinosaurs has returned."));
+    Intro1.DisplayDuration = 5.0f;
+    Intro1.bIsNarration = true;
+    IntroDialogues.Add(Intro1);
+    
+    FNarr_DialogueLine Intro2;
+    Intro2.SpeakerName = TEXT("Narrator");
+    Intro2.DialogueText = FText::FromString(TEXT("Your survival depends on understanding these ancient predators and their territories."));
+    Intro2.DisplayDuration = 5.0f;
+    Intro2.bIsNarration = true;
+    IntroDialogues.Add(Intro2);
+    
+    FNarr_DialogueLine Intro3;
+    Intro3.SpeakerName = TEXT("Narrator");
+    Intro3.DialogueText = FText::FromString(TEXT("Learn their patterns. Respect their power. Adapt or perish."));
+    Intro3.DisplayDuration = 4.0f;
+    Intro3.bIsNarration = true;
+    IntroDialogues.Add(Intro3);
+}
 
-    // For now, just log the dialogue text since we don't have audio files loaded
-    UE_LOG(LogTemp, Warning, TEXT("DIALOGUE: %s"), *DialogueLine.DialogueText);
-
-    // Set a timer to mark dialogue as finished
-    FTimerHandle DialogueTimer;
-    World->GetTimerManager().SetTimer(DialogueTimer, [this]()
-    {
-        bDialoguePlaying = false;
-    }, DialogueLine.Duration, false);
+void UNarrativeDialogueSystem::InitializeSurvivalTips()
+{
+    SurvivalTips.Empty();
+    
+    // T-Rex survival tip
+    FNarr_SurvivalTip TRexTip;
+    TRexTip.TipText = FText::FromString(TEXT("T-Rex detected! Stay perfectly still. Their vision is based on movement."));
+    TRexTip.TriggerSpecies = ENarr_DinosaurSpecies::TRex;
+    TRexTip.TriggerDistance = 2000.0f;
+    SurvivalTips.Add(TRexTip);
+    
+    // Velociraptor survival tip
+    FNarr_SurvivalTip RaptorTip;
+    RaptorTip.TipText = FText::FromString(TEXT("Velociraptors hunt in packs. Watch for flanking maneuvers."));
+    RaptorTip.TriggerSpecies = ENarr_DinosaurSpecies::Velociraptor;
+    RaptorTip.TriggerDistance = 1500.0f;
+    SurvivalTips.Add(RaptorTip);
+    
+    // Brachiosaurus survival tip
+    FNarr_SurvivalTip BrachioTip;
+    BrachioTip.TipText = FText::FromString(TEXT("Brachiosaurus herds indicate fresh water nearby. Follow them to safety."));
+    BrachioTip.TriggerSpecies = ENarr_DinosaurSpecies::Brachiosaurus;
+    BrachioTip.TriggerDistance = 3000.0f;
+    SurvivalTips.Add(BrachioTip);
+    
+    // Triceratops survival tip
+    FNarr_SurvivalTip TriceratopsTip;
+    TriceratopsTip.TipText = FText::FromString(TEXT("Triceratops are territorial but predictable. Avoid their charging lanes."));
+    TriceratopsTip.TriggerSpecies = ENarr_DinosaurSpecies::Triceratops;
+    TriceratopsTip.TriggerDistance = 1200.0f;
+    SurvivalTips.Add(TriceratopsTip);
 }
