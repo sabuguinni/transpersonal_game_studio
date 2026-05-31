@@ -2,63 +2,77 @@
 
 #include "CoreMinimal.h"
 #include "Engine/GameInstanceSubsystem.h"
+#include "SharedTypes.h"
 #include "BuildIntegrationManager.generated.h"
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FBuild_SystemStatus
+struct TRANSPERSONALGAME_API FBuild_ModuleStatus
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
-    FString SystemName;
+    UPROPERTY(BlueprintReadOnly, Category = "Build")
+    FString ModuleName;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
-    bool bIsLoaded;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
+    UPROPERTY(BlueprintReadOnly, Category = "Build")
     bool bIsCompiled;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
+    UPROPERTY(BlueprintReadOnly, Category = "Build")
+    bool bHasErrors;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Build")
+    int32 ErrorCount;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Build")
     FString LastError;
 
-    FBuild_SystemStatus()
+    FBuild_ModuleStatus()
     {
-        SystemName = TEXT("");
-        bIsLoaded = false;
+        ModuleName = TEXT("");
         bIsCompiled = false;
+        bHasErrors = false;
+        ErrorCount = 0;
         LastError = TEXT("");
     }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FBuild_BiomeDistribution
+struct TRANSPERSONALGAME_API FBuild_SystemHealth
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
-    FString BiomeName;
+    UPROPERTY(BlueprintReadOnly, Category = "Build")
+    int32 TotalActors;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
-    FVector CenterLocation;
+    UPROPERTY(BlueprintReadOnly, Category = "Build")
+    int32 DinosaurCount;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
-    int32 ActorCount;
+    UPROPERTY(BlueprintReadOnly, Category = "Build")
+    int32 PropCount;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
-    float PerformanceScore;
+    UPROPERTY(BlueprintReadOnly, Category = "Build")
+    bool bWithinLimits;
 
-    FBuild_BiomeDistribution()
+    UPROPERTY(BlueprintReadOnly, Category = "Build")
+    float MemoryUsageMB;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Build")
+    bool bPerformanceGood;
+
+    FBuild_SystemHealth()
     {
-        BiomeName = TEXT("");
-        CenterLocation = FVector::ZeroVector;
-        ActorCount = 0;
-        PerformanceScore = 1.0f;
+        TotalActors = 0;
+        DinosaurCount = 0;
+        PropCount = 0;
+        bWithinLimits = true;
+        MemoryUsageMB = 0.0f;
+        bPerformanceGood = true;
     }
 };
 
 /**
- * Build Integration Manager - Coordinates all systems and validates integration
- * Agent #19 - Integration & Build Agent
+ * Build Integration Manager - Agent #19
+ * Orchestrates integration of all agent outputs into a coherent build
+ * Validates compilation, performance, and system health
  */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UBuildIntegrationManager : public UGameInstanceSubsystem
@@ -68,52 +82,63 @@ class TRANSPERSONALGAME_API UBuildIntegrationManager : public UGameInstanceSubsy
 public:
     UBuildIntegrationManager();
 
-    // USubsystem interface
+    // Subsystem interface
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
+    // Build validation
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    void ValidateAllSystems();
+    bool ValidateBuildIntegrity();
 
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    bool CheckSystemCompilation(const FString& SystemName);
+    FBuild_SystemHealth GetSystemHealth();
 
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    void ValidateBiomeDistribution();
+    TArray<FBuild_ModuleStatus> GetModuleStatuses();
+
+    // Actor management
+    UFUNCTION(BlueprintCallable, Category = "Build Integration")
+    bool EnforceActorLimits();
 
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    void SaveMapSafely();
+    void CleanupExcessActors();
+
+    // Performance monitoring
+    UFUNCTION(BlueprintCallable, Category = "Build Integration")
+    float GetCurrentMemoryUsage();
 
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    TArray<FBuild_SystemStatus> GetSystemStatusReport();
+    bool IsPerformanceAcceptable();
+
+    // Build reporting
+    UFUNCTION(BlueprintCallable, Category = "Build Integration")
+    FString GenerateBuildReport();
 
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    TArray<FBuild_BiomeDistribution> GetBiomeDistributionReport();
-
-    UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    void PerformIntegrationTest();
-
-    UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    bool IsGamePlayable();
+    void SaveBuildSnapshot();
 
 protected:
     UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
-    TArray<FBuild_SystemStatus> SystemStatuses;
+    FBuild_SystemHealth CurrentHealth;
 
     UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
-    TArray<FBuild_BiomeDistribution> BiomeDistributions;
+    TArray<FBuild_ModuleStatus> ModuleStatuses;
 
     UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
-    bool bAllSystemsOperational;
+    bool bBuildValid;
 
     UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
-    float LastValidationTime;
+    FDateTime LastValidationTime;
 
 private:
-    void InitializeBiomeData();
-    void CheckCoreClasses();
-    void ValidateActorDistribution();
-    void CheckPerformanceLimits();
+    void ValidateModules();
+    void CheckActorCounts();
+    void MonitorPerformance();
+    void UpdateHealthStatus();
+    
+    // Actor limits (from brain memories)
+    static constexpr int32 MAX_TOTAL_ACTORS = 8000;
+    static constexpr int32 MAX_DINOSAURS = 150;
+    static constexpr int32 MAX_PROPS_PER_BIOME = 1000;
+    static constexpr int32 MAX_TOTAL_PROPS = 5000;
 };
-
-#include "BuildIntegrationManager.generated.h"
