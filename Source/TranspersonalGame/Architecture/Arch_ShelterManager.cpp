@@ -2,7 +2,8 @@
 #include "Components/StaticMeshComponent.h"
 #include "Components/BoxComponent.h"
 #include "Engine/Engine.h"
-#include "GameFramework/Character.h"
+#include "Engine/StaticMesh.h"
+#include "UObject/ConstructorHelpers.h"
 
 AArch_ShelterManager::AArch_ShelterManager()
 {
@@ -14,33 +15,18 @@ AArch_ShelterManager::AArch_ShelterManager()
     // Create shelter mesh component
     ShelterMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("ShelterMesh"));
     ShelterMesh->SetupAttachment(RootComponent);
-    ShelterMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-    ShelterMesh->SetCollisionResponseToAllChannels(ECR_Block);
 
-    // Create interior volume for occupancy detection
-    InteriorVolume = CreateDefaultSubobject<UBoxComponent>(TEXT("InteriorVolume"));
-    InteriorVolume->SetupAttachment(RootComponent);
-    InteriorVolume->SetBoxExtent(FVector(300.0f, 300.0f, 200.0f));
-    InteriorVolume->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
-    InteriorVolume->SetCollisionResponseToAllChannels(ECR_Ignore);
-    InteriorVolume->SetCollisionResponseToChannel(ECC_Pawn, ECR_Overlap);
+    // Create protection zone
+    ProtectionZone = CreateDefaultSubobject<UBoxComponent>(TEXT("ProtectionZone"));
+    ProtectionZone->SetupAttachment(RootComponent);
+    ProtectionZone->SetBoxExtent(FVector(500.0f, 500.0f, 300.0f));
 
-    // Create fire pit component
-    FirePit = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("FirePit"));
-    FirePit->SetupAttachment(RootComponent);
-    FirePit->SetRelativeLocation(FVector(0.0f, 0.0f, -50.0f));
-    FirePit->SetVisibility(false);
+    // Initialize shelter data
+    ShelterData = FArch_ShelterData();
 
-    // Initialize shelter properties
-    ShelterData.ShelterType = EArch_ShelterType::Cave;
-    ShelterData.WeatherProtection = 0.8f;
-    ShelterData.TemperatureModifier = 5.0f;
-    ShelterData.MaxOccupants = 4;
-    ShelterData.bHasFire = false;
-    ShelterData.bIsOccupied = false;
-
-    InteriorTemperature = 20.0f;
-    ShelterIntegrity = 100.0f;
+    // Initialize components
+    InitializeShelterMesh();
+    SetupProtectionZone();
 }
 
 void AArch_ShelterManager::BeginPlay()
@@ -48,177 +34,147 @@ void AArch_ShelterManager::BeginPlay()
     Super::BeginPlay();
 
     // Bind overlap events
-    if (InteriorVolume)
+    if (ProtectionZone)
     {
-        InteriorVolume->OnComponentBeginOverlap.AddDynamic(this, &AArch_ShelterManager::OnInteriorVolumeBeginOverlap);
-        InteriorVolume->OnComponentEndOverlap.AddDynamic(this, &AArch_ShelterManager::OnInteriorVolumeEndOverlap);
+        ProtectionZone->OnComponentBeginOverlap.AddDynamic(this, &AArch_ShelterManager::OnProtectionZoneBeginOverlap);
+        ProtectionZone->OnComponentEndOverlap.AddDynamic(this, &AArch_ShelterManager::OnProtectionZoneEndOverlap);
     }
 
-    // Set initial fire state
-    if (FirePit)
-    {
-        FirePit->SetVisibility(ShelterData.bHasFire);
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("Shelter Manager initialized: Type=%d, Protection=%.2f"), 
-           (int32)ShelterData.ShelterType, ShelterData.WeatherProtection);
+    // Clear occupants array
+    CurrentOccupants.Empty();
 }
 
 void AArch_ShelterManager::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
 
-    UpdateShelterCondition(DeltaTime);
-
-    // Update fire duration
-    if (ShelterData.bHasFire)
+    // Update shelter effects for current occupants
+    for (AActor* Occupant : CurrentOccupants)
     {
-        FireBurnTime += DeltaTime;
-        if (FireBurnTime >= MaxFireDuration)
+        if (IsValid(Occupant))
         {
-            ExtinguishFire();
+            // Apply temperature bonus and weather protection
+            // This would integrate with the character's survival system
         }
     }
-
-    // Update interior temperature based on fire and occupancy
-    float TargetTemperature = 20.0f; // Base temperature
-    if (ShelterData.bHasFire)
-    {
-        TargetTemperature += 15.0f; // Fire adds warmth
-    }
-    if (CurrentOccupants.Num() > 0)
-    {
-        TargetTemperature += CurrentOccupants.Num() * 2.0f; // Body heat
-    }
-
-    InteriorTemperature = FMath::FInterpTo(InteriorTemperature, TargetTemperature, DeltaTime, 2.0f);
 }
 
-bool AArch_ShelterManager::EnterShelter(AActor* Occupant)
+void AArch_ShelterManager::InitializeShelterMesh()
 {
-    if (!Occupant || CurrentOccupants.Contains(Occupant))
+    if (ShelterMesh)
+    {
+        // Try to load a basic cube mesh as placeholder
+        static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeMeshAsset(TEXT("/Engine/BasicShapes/Cube"));
+        if (CubeMeshAsset.Succeeded())
+        {
+            ShelterMesh->SetStaticMesh(CubeMeshAsset.Object);
+            ShelterMesh->SetWorldScale3D(FVector(5.0f, 5.0f, 3.0f)); // Make it shelter-sized
+        }
+
+        // Set collision
+        ShelterMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+        ShelterMesh->SetCollisionObjectType(ECollisionChannel::ECC_WorldStatic);
+        ShelterMesh->SetCollisionResponseToAllChannels(ECollisionResponse::ECR_Block);
+    }
+}
+
+void AArch_ShelterManager::SetupProtectionZone()
+{
+    if (ProtectionZone)
+    {
+        // Set collision for overlap detection
+        ProtectionZone->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+        ProtectionZone->SetCollisionObjectType(ECollisionChannel::ECC_WorldStatic);
+        ProtectionZone->SetCollisionResponseToAllChannels(ECollisionResponse::ECR_Ignore);
+        ProtectionZone->SetCollisionResponseToChannel(ECollisionChannel::ECC_Pawn, ECollisionResponse::ECR_Overlap);
+
+        // Update box extent based on shelter data
+        ProtectionZone->SetBoxExtent(FVector(ShelterData.ProtectionRadius, ShelterData.ProtectionRadius, 300.0f));
+    }
+}
+
+bool AArch_ShelterManager::CanEnterShelter(AActor* Actor)
+{
+    if (!IsValid(Actor))
     {
         return false;
     }
 
+    // Check if shelter has space
     if (CurrentOccupants.Num() >= ShelterData.MaxOccupants)
     {
-        UE_LOG(LogTemp, Warning, TEXT("Shelter is at maximum capacity"));
         return false;
     }
 
-    CurrentOccupants.Add(Occupant);
-    ShelterData.bIsOccupied = true;
-
-    OnOccupantEntered(Occupant);
-    UE_LOG(LogTemp, Log, TEXT("Occupant entered shelter: %s"), *Occupant->GetName());
-
-    return true;
-}
-
-bool AArch_ShelterManager::ExitShelter(AActor* Occupant)
-{
-    if (!Occupant || !CurrentOccupants.Contains(Occupant))
+    // Check if actor is already in shelter
+    if (CurrentOccupants.Contains(Actor))
     {
         return false;
     }
 
-    CurrentOccupants.Remove(Occupant);
-    ShelterData.bIsOccupied = (CurrentOccupants.Num() > 0);
-
-    OnOccupantExited(Occupant);
-    UE_LOG(LogTemp, Log, TEXT("Occupant exited shelter: %s"), *Occupant->GetName());
-
     return true;
 }
 
-void AArch_ShelterManager::LightFire()
+void AArch_ShelterManager::EnterShelter(AActor* Actor)
 {
-    if (ShelterData.bHasFire)
+    if (CanEnterShelter(Actor))
     {
-        UE_LOG(LogTemp, Warning, TEXT("Fire is already lit"));
-        return;
-    }
-
-    ShelterData.bHasFire = true;
-    FireBurnTime = 0.0f;
-
-    if (FirePit)
-    {
-        FirePit->SetVisibility(true);
-    }
-
-    OnFireLit();
-    UE_LOG(LogTemp, Log, TEXT("Fire lit in shelter"));
-}
-
-void AArch_ShelterManager::ExtinguishFire()
-{
-    if (!ShelterData.bHasFire)
-    {
-        return;
-    }
-
-    ShelterData.bHasFire = false;
-    FireBurnTime = 0.0f;
-
-    if (FirePit)
-    {
-        FirePit->SetVisibility(false);
-    }
-
-    OnFireExtinguished();
-    UE_LOG(LogTemp, Log, TEXT("Fire extinguished in shelter"));
-}
-
-float AArch_ShelterManager::GetWeatherProtection() const
-{
-    return ShelterData.WeatherProtection * (ShelterIntegrity / 100.0f);
-}
-
-float AArch_ShelterManager::GetTemperatureModifier() const
-{
-    float Modifier = ShelterData.TemperatureModifier;
-    if (ShelterData.bHasFire)
-    {
-        Modifier += 10.0f;
-    }
-    return Modifier * (ShelterIntegrity / 100.0f);
-}
-
-bool AArch_ShelterManager::CanAccommodate(int32 AdditionalOccupants) const
-{
-    return (CurrentOccupants.Num() + AdditionalOccupants) <= ShelterData.MaxOccupants;
-}
-
-void AArch_ShelterManager::UpdateShelterCondition(float DeltaTime)
-{
-    // Gradual weather damage
-    if (ShelterIntegrity > 0.0f)
-    {
-        ShelterIntegrity -= WeatherDamageRate * DeltaTime;
-        ShelterIntegrity = FMath::Clamp(ShelterIntegrity, 0.0f, 100.0f);
-    }
-
-    // Repair when occupied (maintenance)
-    if (ShelterData.bIsOccupied && ShelterIntegrity < 100.0f)
-    {
-        ShelterIntegrity += RepairRate * DeltaTime;
-        ShelterIntegrity = FMath::Clamp(ShelterIntegrity, 0.0f, 100.0f);
+        CurrentOccupants.Add(Actor);
+        
+        if (GEngine)
+        {
+            GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Green, 
+                FString::Printf(TEXT("Actor %s entered shelter. Occupants: %d/%d"), 
+                *Actor->GetName(), CurrentOccupants.Num(), ShelterData.MaxOccupants));
+        }
     }
 }
 
-void AArch_ShelterManager::OnInteriorVolumeBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
+void AArch_ShelterManager::ExitShelter(AActor* Actor)
 {
-    if (OtherActor && OtherActor->IsA<ACharacter>())
+    if (CurrentOccupants.Contains(Actor))
     {
-        EnterShelter(OtherActor);
+        CurrentOccupants.Remove(Actor);
+        
+        if (GEngine)
+        {
+            GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Yellow, 
+                FString::Printf(TEXT("Actor %s exited shelter. Occupants: %d/%d"), 
+                *Actor->GetName(), CurrentOccupants.Num(), ShelterData.MaxOccupants));
+        }
     }
 }
 
-void AArch_ShelterManager::OnInteriorVolumeEndOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex)
+float AArch_ShelterManager::GetTemperatureBonus() const
 {
-    if (OtherActor && OtherActor->IsA<ACharacter>())
+    return ShelterData.TemperatureBonus;
+}
+
+bool AArch_ShelterManager::IsWeatherProtected() const
+{
+    return ShelterData.bProvidesWeatherProtection;
+}
+
+int32 AArch_ShelterManager::GetAvailableSpace() const
+{
+    return FMath::Max(0, ShelterData.MaxOccupants - CurrentOccupants.Num());
+}
+
+void AArch_ShelterManager::OnProtectionZoneBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
+{
+    if (IsValid(OtherActor) && OtherActor != this)
+    {
+        // Auto-enter shelter for pawns
+        if (OtherActor->IsA<APawn>())
+        {
+            EnterShelter(OtherActor);
+        }
+    }
+}
+
+void AArch_ShelterManager::OnProtectionZoneEndOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex)
+{
+    if (IsValid(OtherActor))
     {
         ExitShelter(OtherActor);
     }
