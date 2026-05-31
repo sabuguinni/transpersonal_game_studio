@@ -2,85 +2,47 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
-#include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "Materials/MaterialInterface.h"
 #include "Perf_RenderOptimizer.generated.h"
 
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FPerf_LODSettings
+UENUM(BlueprintType)
+enum class EPerf_RenderQuality : uint8
 {
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
-    float LOD0Distance = 1000.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
-    float LOD1Distance = 2500.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
-    float LOD2Distance = 5000.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
-    float CullDistance = 10000.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
-    bool bEnableDistanceCulling = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
-    bool bEnableOcclusionCulling = true;
-
-    FPerf_LODSettings()
-    {
-        LOD0Distance = 1000.0f;
-        LOD1Distance = 2500.0f;
-        LOD2Distance = 5000.0f;
-        CullDistance = 10000.0f;
-        bEnableDistanceCulling = true;
-        bEnableOcclusionCulling = true;
-    }
+    Ultra = 0,
+    High = 1,
+    Medium = 2,
+    Low = 3,
+    Minimal = 4
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FPerf_RenderStats
+struct FPerf_RenderProfile
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Stats")
-    int32 VisibleActors = 0;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Render Performance")
+    float MaxRenderDistance = 10000.0f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Stats")
-    int32 CulledActors = 0;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Render Performance")
+    int32 MaxDrawCalls = 2000;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Stats")
-    int32 LOD0Actors = 0;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Render Performance")
+    float LODBias = 0.0f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Stats")
-    int32 LOD1Actors = 0;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Render Performance")
+    bool bEnableDynamicLOD = true;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Stats")
-    int32 LOD2Actors = 0;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Render Performance")
+    float ShadowDistance = 5000.0f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Stats")
-    float AverageDrawDistance = 0.0f;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Stats")
-    float RenderThreadTime = 0.0f;
-
-    FPerf_RenderStats()
-    {
-        VisibleActors = 0;
-        CulledActors = 0;
-        LOD0Actors = 0;
-        LOD1Actors = 0;
-        LOD2Actors = 0;
-        AverageDrawDistance = 0.0f;
-        RenderThreadTime = 0.0f;
-    }
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Render Performance")
+    int32 MaxShadowCascades = 4;
 };
 
-UCLASS(ClassGroup=(Performance), meta=(BlueprintSpawnableComponent))
+UCLASS(ClassGroup=(TranspersonalGame), meta=(BlueprintSpawnableComponent))
 class TRANSPERSONALGAME_API UPerf_RenderOptimizer : public UActorComponent
 {
     GENERATED_BODY()
@@ -92,66 +54,50 @@ protected:
     virtual void BeginPlay() override;
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Render Performance")
+    FPerf_RenderProfile RenderProfile;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Render Performance")
+    EPerf_RenderQuality CurrentRenderQuality = EPerf_RenderQuality::High;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Render Performance")
+    int32 CurrentDrawCalls = 0;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Render Performance")
+    float CurrentGPUTime = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Render Performance")
+    int32 VisibleActorsCount = 0;
+
 public:
-    // LOD and culling settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Render Optimization")
-    FPerf_LODSettings LODSettings;
+    UFUNCTION(BlueprintCallable, Category = "Render Performance")
+    void OptimizeRenderingForPerformance();
 
-    // Performance targets
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float TargetFrameRate = 60.0f;
+    UFUNCTION(BlueprintCallable, Category = "Render Performance")
+    void SetRenderQuality(EPerf_RenderQuality NewQuality);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float MinFrameRate = 30.0f;
+    UFUNCTION(BlueprintCallable, Category = "Render Performance")
+    void UpdateRenderLOD();
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    bool bAutoAdjustLOD = true;
+    UFUNCTION(BlueprintCallable, Category = "Render Performance")
+    void CullDistantObjects();
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    bool bEnableRenderOptimization = true;
+    UFUNCTION(BlueprintCallable, Category = "Render Performance")
+    void OptimizeShadows();
 
-    // Render statistics
-    UPROPERTY(BlueprintReadOnly, Category = "Stats")
-    FPerf_RenderStats RenderStats;
+    UFUNCTION(BlueprintCallable, Category = "Render Performance")
+    void OptimizeMaterials();
 
-    // Optimization methods
-    UFUNCTION(BlueprintCallable, Category = "Render Optimization")
-    void OptimizeRenderingForActor(AActor* Actor);
+    UFUNCTION(BlueprintCallable, Category = "Render Performance")
+    int32 GetCurrentDrawCalls() const { return CurrentDrawCalls; }
 
-    UFUNCTION(BlueprintCallable, Category = "Render Optimization")
-    void SetLODForActor(AActor* Actor, int32 LODLevel);
-
-    UFUNCTION(BlueprintCallable, Category = "Render Optimization")
-    void CullActorByDistance(AActor* Actor, bool bShouldCull);
-
-    UFUNCTION(BlueprintCallable, Category = "Render Optimization")
-    void UpdateRenderStats();
-
-    UFUNCTION(BlueprintCallable, Category = "Render Optimization")
-    void AutoAdjustLODSettings(float CurrentFrameRate);
-
-    UFUNCTION(BlueprintCallable, Category = "Render Optimization")
-    float GetDistanceToPlayer(AActor* Actor) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Render Optimization")
-    int32 GetOptimalLODLevel(float Distance) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Render Optimization", CallInEditor = true)
-    void ApplyOptimizationToAllActors();
+    UFUNCTION(BlueprintCallable, Category = "Render Performance")
+    float GetCurrentGPUTime() const { return CurrentGPUTime; }
 
 private:
-    // Internal optimization methods
-    void OptimizeStaticMesh(UStaticMeshComponent* MeshComp, float Distance);
-    void OptimizeSkeletalMesh(USkeletalMeshComponent* MeshComp, float Distance);
-    void UpdateActorVisibility(AActor* Actor, float Distance);
-    
-    // Performance tracking
-    float LastFrameRate = 60.0f;
-    float FrameRateHistory[10] = {60.0f};
-    int32 FrameHistoryIndex = 0;
-    
-    // Optimization state
-    bool bOptimizationActive = false;
-    float LastOptimizationTime = 0.0f;
-    float OptimizationInterval = 1.0f;
+    void CountDrawCalls();
+    void ApplyRenderQualitySettings();
+    void OptimizeActorRendering(AActor* Actor, float Distance);
+    float CalculateDistanceToCamera(AActor* Actor);
+    void SetActorLOD(AActor* Actor, int32 LODLevel);
 };
