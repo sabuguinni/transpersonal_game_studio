@@ -1,126 +1,168 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Subsystems/GameInstanceSubsystem.h"
 #include "Engine/World.h"
-#include "../../SharedTypes.h"
+#include "Subsystems/WorldSubsystem.h"
+#include "Components/ActorComponent.h"
 #include "Eng_PerformanceMonitor.generated.h"
 
-/**
- * Engine Architect's Performance Monitoring System
- * Enforces critical performance limits and prevents system overload
- * Based on memory constraints from production cycles
- */
-UCLASS(BlueprintType)
-class TRANSPERSONALGAME_API UEng_PerformanceMonitor : public UGameInstanceSubsystem
+UENUM(BlueprintType)
+enum class EEng_PerformanceLevel : uint8
+{
+    Excellent = 0,  // 60+ FPS
+    Good = 1,       // 45-60 FPS
+    Fair = 2,       // 30-45 FPS
+    Poor = 3,       // 15-30 FPS
+    Critical = 4    // <15 FPS
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FEng_PerformanceMetrics
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float CurrentFPS;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float AverageFPS;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float MinFPS;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float MaxFPS;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float FrameTime;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    int32 DrawCalls;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    int32 TriangleCount;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float MemoryUsageMB;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    EEng_PerformanceLevel PerformanceLevel;
+
+    FEng_PerformanceMetrics()
+    {
+        CurrentFPS = 0.0f;
+        AverageFPS = 0.0f;
+        MinFPS = 0.0f;
+        MaxFPS = 0.0f;
+        FrameTime = 0.0f;
+        DrawCalls = 0;
+        TriangleCount = 0;
+        MemoryUsageMB = 0.0f;
+        PerformanceLevel = EEng_PerformanceLevel::Good;
+    }
+};
+
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API UEng_PerformanceMonitor : public UWorldSubsystem
 {
     GENERATED_BODY()
 
 public:
+    UEng_PerformanceMonitor();
+
+    // USubsystem interface
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
-
-    // Critical performance limits (from memory)
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance Limits")
-    int32 MaxTotalActors = 8000;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance Limits")
-    int32 MaxActorsPerBiome = 4000;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance Limits")
-    int32 MaxTotalDinosaurs = 150;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance Limits")
-    int32 MaxPropsPerBiome = 1000;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance Limits")
-    int32 MaxTotalProps = 5000;
-
-    // Species-specific limits
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur Limits")
-    int32 MaxTRex = 5;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur Limits")
-    int32 MaxVelociraptor = 20;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur Limits")
-    int32 MaxTriceratops = 15;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur Limits")
-    int32 MaxBrachiosaurus = 8;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur Limits")
-    int32 MaxAnkylosaurus = 10;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur Limits")
-    int32 MaxParasaurolophus = 15;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur Limits")
-    int32 MaxOtherSpecies = 10;
-
-    // Performance monitoring
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    bool IsWithinGlobalLimits();
+    virtual void Tick(float DeltaTime) override;
 
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    bool CanSpawnActor(EBiomeType TargetBiome);
+    FEng_PerformanceMetrics GetCurrentMetrics() const;
 
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    bool CanSpawnDinosaur(EDinosaurSpecies Species);
+    EEng_PerformanceLevel GetPerformanceLevel() const;
 
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    bool CanSpawnProp(EBiomeType TargetBiome);
+    void StartPerformanceMonitoring();
 
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    int32 GetCurrentActorCount();
+    void StopPerformanceMonitoring();
 
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    int32 GetCurrentDinosaurCount();
+    void ResetMetrics();
 
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    int32 GetSpeciesCount(EDinosaurSpecies Species);
+    bool IsMonitoringActive() const;
 
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    int32 GetActorCountInBiome(EBiomeType BiomeType);
-
-    // Cleanup operations
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void EnforceActorLimits();
+    void SetTargetFPS(float TargetFPS);
 
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    void CleanupExcessActors();
+    float GetTargetFPS() const;
 
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    void CleanupExcessDinosaurs();
-
-    // Performance reporting
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    FString GetPerformanceReport();
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    bool IsPerformanceCritical();
+    TArray<float> GetFPSHistory() const;
 
 protected:
-    // Internal monitoring
-    void UpdatePerformanceMetrics();
-    
-    // Cleanup helpers
-    void RemoveOldestActorsInBiome(EBiomeType BiomeType, int32 CountToRemove);
-    void RemoveExcessSpecies(EDinosaurSpecies Species, int32 MaxAllowed);
+    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
+    FEng_PerformanceMetrics CurrentMetrics;
 
-    // Biome center coordinates for distance calculations
-    FVector GetBiomeCenter(EBiomeType BiomeType);
+    UPROPERTY(BlueprintReadOnly, Category = "Settings")
+    bool bIsMonitoring;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Settings")
+    float TargetFrameRate;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Settings")
+    float MonitoringInterval;
+
+    UPROPERTY(BlueprintReadOnly, Category = "History")
+    TArray<float> FPSHistory;
+
+    UPROPERTY(BlueprintReadOnly, Category = "History")
+    int32 MaxHistorySize;
 
 private:
-    // Performance tracking
-    int32 LastActorCount = 0;
-    int32 LastDinosaurCount = 0;
-    float LastUpdateTime = 0.0f;
+    float LastMonitorTime;
+    float TotalFrameTime;
+    int32 FrameCount;
     
-    // Update frequency
-    float UpdateInterval = 5.0f;
-    
-    // Critical thresholds
-    float CriticalMemoryThreshold = 0.85f;
-    float CriticalActorThreshold = 0.9f;
+    void UpdateMetrics(float DeltaTime);
+    void CalculateAverages();
+    EEng_PerformanceLevel DeterminePerformanceLevel(float FPS) const;
+    void LogPerformanceWarning(const FString& Warning);
+};
+
+UCLASS(BlueprintType, ClassGroup=(Performance), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UEng_PerformanceComponent : public UActorComponent
+{
+    GENERATED_BODY()
+
+public:
+    UEng_PerformanceComponent();
+
+    virtual void BeginPlay() override;
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void EnablePerformanceTracking(bool bEnable);
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    float GetActorPerformanceCost() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void SetPerformanceBudget(float Budget);
+
+protected:
+    UPROPERTY(BlueprintReadWrite, Category = "Performance")
+    bool bTrackPerformance;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Performance")
+    float PerformanceBudget;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float CurrentPerformanceCost;
+
+private:
+    float LastTickTime;
+    void CalculatePerformanceCost(float DeltaTime);
 };
