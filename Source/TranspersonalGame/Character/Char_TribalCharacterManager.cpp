@@ -1,458 +1,231 @@
 #include "Char_TribalCharacterManager.h"
-#include "TranspersonalCharacter.h"
-#include "Engine/Engine.h"
 #include "Engine/World.h"
+#include "GameFramework/Character.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Engine/Engine.h"
 #include "Kismet/GameplayStatics.h"
-#include "Math/UnrealMathUtility.h"
-#include "Components/StaticMeshComponent.h"
-#include "Materials/MaterialInstanceDynamic.h"
 
-AChar_TribalCharacterManager::AChar_TribalCharacterManager()
+UChar_TribalCharacterManager::UChar_TribalCharacterManager()
 {
-    PrimaryActorTick.bCanEverTick = false;
+    MaxCharactersPerBiome = 5;
+    CharacterSpawnRadius = 15000.0f;
     
-    MaxCharactersPerBiome = 20;
-    CharacterSpawnRadius = 5000.0f;
-    
-    // Initialize component
-    RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootComponent"));
+    InitializeDefaultVariants();
+    InitializeBiomeAdaptations();
 }
 
-void AChar_TribalCharacterManager::BeginPlay()
+void UChar_TribalCharacterManager::InitializeDefaultVariants()
 {
-    Super::BeginPlay();
+    TribalVariants.Empty();
     
-    InitializeCharacterTemplates();
-    InitializeBiomeTemplates();
-    InitializeRoleDefaults();
+    // Savana Hunter - Earth tones, experienced tracker
+    TribalVariants.Add(CreateVariant(TEXT("Savana_Hunter"), FLinearColor(0.8f, 0.4f, 0.2f, 1.0f), 75.0f));
     
-    UE_LOG(LogTemp, Warning, TEXT("TribalCharacterManager: Initialized with %d character templates"), CharacterTemplates.Num());
+    // Swamp Gatherer - Green tones, plant knowledge
+    TribalVariants.Add(CreateVariant(TEXT("Swamp_Gatherer"), FLinearColor(0.2f, 0.6f, 0.3f, 1.0f), 60.0f));
+    
+    // Forest Scout - Brown/green camouflage, agile
+    TribalVariants.Add(CreateVariant(TEXT("Forest_Scout"), FLinearColor(0.4f, 0.6f, 0.2f, 1.0f), 80.0f));
+    
+    // Desert Nomad - Light colors, heat resistance
+    TribalVariants.Add(CreateVariant(TEXT("Desert_Nomad"), FLinearColor(0.9f, 0.8f, 0.6f, 1.0f), 70.0f));
+    
+    // Mountain Climber - Dark colors, cold resistance
+    TribalVariants.Add(CreateVariant(TEXT("Mountain_Climber"), FLinearColor(0.3f, 0.3f, 0.5f, 1.0f), 85.0f));
 }
 
-void AChar_TribalCharacterManager::Tick(float DeltaTime)
+void UChar_TribalCharacterManager::InitializeBiomeAdaptations()
 {
-    Super::Tick(DeltaTime);
+    BiomeAdaptations.Empty();
+    
+    // Savana adaptation
+    FChar_BiomeAdaptation SavanaAdapt;
+    SavanaAdapt.BiomeType = EBiomeType::Savanna;
+    SavanaAdapt.TemperatureResistance = 0.8f;
+    SavanaAdapt.HumidityTolerance = 0.3f;
+    SavanaAdapt.MovementSpeedModifier = 1.1f;
+    SavanaAdapt.PreferredEquipment.Add(TEXT("Spear"));
+    SavanaAdapt.PreferredEquipment.Add(TEXT("Leather_Armor"));
+    BiomeAdaptations.Add(SavanaAdapt);
+    
+    // Swamp adaptation
+    FChar_BiomeAdaptation SwampAdapt;
+    SwampAdapt.BiomeType = EBiomeType::Swamp;
+    SwampAdapt.TemperatureResistance = 0.6f;
+    SwampAdapt.HumidityTolerance = 0.9f;
+    SwampAdapt.MovementSpeedModifier = 0.9f;
+    SwampAdapt.PreferredEquipment.Add(TEXT("Blowgun"));
+    SwampAdapt.PreferredEquipment.Add(TEXT("Mud_Camouflage"));
+    BiomeAdaptations.Add(SwampAdapt);
+    
+    // Forest adaptation
+    FChar_BiomeAdaptation ForestAdapt;
+    ForestAdapt.BiomeType = EBiomeType::Forest;
+    ForestAdapt.TemperatureResistance = 0.7f;
+    ForestAdapt.HumidityTolerance = 0.7f;
+    ForestAdapt.MovementSpeedModifier = 1.2f;
+    ForestAdapt.PreferredEquipment.Add(TEXT("Bow"));
+    ForestAdapt.PreferredEquipment.Add(TEXT("Leaf_Cloak"));
+    BiomeAdaptations.Add(ForestAdapt);
+    
+    // Desert adaptation
+    FChar_BiomeAdaptation DesertAdapt;
+    DesertAdapt.BiomeType = EBiomeType::Desert;
+    DesertAdapt.TemperatureResistance = 0.9f;
+    DesertAdapt.HumidityTolerance = 0.2f;
+    DesertAdapt.MovementSpeedModifier = 1.0f;
+    DesertAdapt.PreferredEquipment.Add(TEXT("Sling"));
+    DesertAdapt.PreferredEquipment.Add(TEXT("Sand_Wraps"));
+    BiomeAdaptations.Add(DesertAdapt);
+    
+    // Mountain adaptation
+    FChar_BiomeAdaptation MountainAdapt;
+    MountainAdapt.BiomeType = EBiomeType::Mountain;
+    MountainAdapt.TemperatureResistance = 0.3f;
+    MountainAdapt.HumidityTolerance = 0.5f;
+    MountainAdapt.MovementSpeedModifier = 0.8f;
+    MountainAdapt.PreferredEquipment.Add(TEXT("Club"));
+    MountainAdapt.PreferredEquipment.Add(TEXT("Fur_Cloak"));
+    BiomeAdaptations.Add(MountainAdapt);
 }
 
-ATranspersonalCharacter* AChar_TribalCharacterManager::CreateTribalCharacter(const FChar_TribalAppearance& Appearance, EChar_TribalRole Role, const FVector& SpawnLocation)
+FChar_TribalVariant UChar_TribalCharacterManager::CreateVariant(const FString& Name, const FLinearColor& WarPaint, float Experience)
 {
-    if (!GetWorld())
+    FChar_TribalVariant Variant;
+    Variant.VariantName = Name;
+    Variant.WarPaintColor = WarPaint;
+    Variant.SurvivalExperience = Experience;
+    return Variant;
+}
+
+FChar_TribalVariant UChar_TribalCharacterManager::GetVariantForBiome(EBiomeType BiomeType)
+{
+    for (const FChar_TribalVariant& Variant : TribalVariants)
     {
-        UE_LOG(LogTemp, Error, TEXT("TribalCharacterManager: No valid world for character spawn"));
-        return nullptr;
+        if (Variant.VariantName.Contains(TEXT("Savana")) && BiomeType == EBiomeType::Savanna)
+            return Variant;
+        if (Variant.VariantName.Contains(TEXT("Swamp")) && BiomeType == EBiomeType::Swamp)
+            return Variant;
+        if (Variant.VariantName.Contains(TEXT("Forest")) && BiomeType == EBiomeType::Forest)
+            return Variant;
+        if (Variant.VariantName.Contains(TEXT("Desert")) && BiomeType == EBiomeType::Desert)
+            return Variant;
+        if (Variant.VariantName.Contains(TEXT("Mountain")) && BiomeType == EBiomeType::Mountain)
+            return Variant;
     }
+    
+    // Return default variant if no match found
+    return TribalVariants.Num() > 0 ? TribalVariants[0] : FChar_TribalVariant();
+}
 
-    // Spawn parameters
+void UChar_TribalCharacterManager::GenerateTribalCharacters(UWorld* World, const TArray<FVector>& BiomeLocations)
+{
+    if (!World || BiomeLocations.Num() == 0)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("TribalCharacterManager: Invalid world or biome locations"));
+        return;
+    }
+    
+    int32 BiomeIndex = 0;
+    for (const FVector& BiomeCenter : BiomeLocations)
+    {
+        EBiomeType CurrentBiome = static_cast<EBiomeType>(BiomeIndex % 5);
+        FChar_TribalVariant Variant = GetVariantForBiome(CurrentBiome);
+        
+        for (int32 i = 0; i < MaxCharactersPerBiome; i++)
+        {
+            // Random position within spawn radius
+            float Angle = FMath::RandRange(0.0f, 2.0f * PI);
+            float Distance = FMath::RandRange(0.0f, CharacterSpawnRadius);
+            
+            FVector SpawnLocation = BiomeCenter + FVector(
+                Distance * FMath::Cos(Angle),
+                Distance * FMath::Sin(Angle),
+                200.0f // Safe spawn height
+            );
+            
+            ACharacter* NewCharacter = SpawnTribalCharacter(World, SpawnLocation, Variant);
+            if (NewCharacter)
+            {
+                ApplyBiomeAdaptation(NewCharacter, CurrentBiome);
+                UE_LOG(LogTemp, Log, TEXT("Spawned tribal character: %s at biome %d"), *Variant.VariantName, BiomeIndex);
+            }
+        }
+        
+        BiomeIndex++;
+    }
+}
+
+ACharacter* UChar_TribalCharacterManager::SpawnTribalCharacter(UWorld* World, const FVector& Location, const FChar_TribalVariant& Variant)
+{
+    if (!World)
+        return nullptr;
+    
+    // Spawn basic character
     FActorSpawnParameters SpawnParams;
     SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
     
-    // Spawn the character
-    ATranspersonalCharacter* NewCharacter = GetWorld()->SpawnActor<ATranspersonalCharacter>(ATranspersonalCharacter::StaticClass(), SpawnLocation, FRotator::ZeroRotator, SpawnParams);
+    ACharacter* NewCharacter = World->SpawnActor<ACharacter>(ACharacter::StaticClass(), Location, FRotator::ZeroRotator, SpawnParams);
     
     if (NewCharacter)
     {
-        // Apply appearance customization
-        ApplyBiomeAdaptation(NewCharacter, Appearance.AdaptedBiome);
-        SetCharacterRole(NewCharacter, Role);
-        
-        // Generate personality based on role
-        FChar_PersonalityTraits Personality = GenerateRandomPersonality();
-        if (RolePersonalityDefaults.Contains(Role))
-        {
-            FChar_PersonalityTraits RoleDefault = RolePersonalityDefaults[Role];
-            // Blend random with role default (70% role, 30% random)
-            Personality.Courage = (RoleDefault.Courage * 0.7f) + (Personality.Courage * 0.3f);
-            Personality.Aggression = (RoleDefault.Aggression * 0.7f) + (Personality.Aggression * 0.3f);
-            Personality.Intelligence = (RoleDefault.Intelligence * 0.7f) + (Personality.Intelligence * 0.3f);
-            Personality.Social = (RoleDefault.Social * 0.7f) + (Personality.Social * 0.3f);
-            Personality.Curiosity = (RoleDefault.Curiosity * 0.7f) + (Personality.Curiosity * 0.3f);
-        }
-        
-        ApplyPersonalityTraits(NewCharacter, Personality);
-        
         // Set character label for identification
-        FString CharacterLabel = FString::Printf(TEXT("Tribal_%s_%s"), 
-            *UEnum::GetValueAsString(Role),
-            *UEnum::GetValueAsString(Appearance.AdaptedBiome));
-        NewCharacter->SetActorLabel(CharacterLabel);
+        NewCharacter->SetActorLabel(FString::Printf(TEXT("%s_%d"), *Variant.VariantName, FMath::RandRange(1, 999)));
         
-        // Track the character
-        ManagedCharacters.Add(NewCharacter);
-        
-        UE_LOG(LogTemp, Warning, TEXT("TribalCharacterManager: Created %s at %s"), *CharacterLabel, *SpawnLocation.ToString());
-        
-        return NewCharacter;
+        // Apply variant appearance
+        UpdateCharacterAppearance(NewCharacter, Variant);
     }
     
-    UE_LOG(LogTemp, Error, TEXT("TribalCharacterManager: Failed to spawn character"));
-    return nullptr;
+    return NewCharacter;
 }
 
-void AChar_TribalCharacterManager::GenerateRandomTribalCharacter(EBiomeType TargetBiome, const FVector& SpawnLocation)
-{
-    FChar_TribalAppearance RandomAppearance = GenerateRandomAppearance(TargetBiome);
-    
-    // Random role selection with biome preferences
-    TArray<EChar_TribalRole> PossibleRoles;
-    
-    switch (TargetBiome)
-    {
-        case EBiomeType::Savanna:
-            PossibleRoles = {EChar_TribalRole::Hunter, EChar_TribalRole::Scout, EChar_TribalRole::Gatherer};
-            break;
-        case EBiomeType::Swamp:
-            PossibleRoles = {EChar_TribalRole::Gatherer, EChar_TribalRole::Crafter, EChar_TribalRole::Shaman};
-            break;
-        case EBiomeType::Forest:
-            PossibleRoles = {EChar_TribalRole::Hunter, EChar_TribalRole::Gatherer, EChar_TribalRole::Crafter};
-            break;
-        case EBiomeType::Desert:
-            PossibleRoles = {EChar_TribalRole::Scout, EChar_TribalRole::Hunter, EChar_TribalRole::Elder};
-            break;
-        case EBiomeType::Mountain:
-            PossibleRoles = {EChar_TribalRole::Scout, EChar_TribalRole::Crafter, EChar_TribalRole::Elder};
-            break;
-        default:
-            PossibleRoles = {EChar_TribalRole::Hunter, EChar_TribalRole::Gatherer};
-            break;
-    }
-    
-    EChar_TribalRole SelectedRole = PossibleRoles[FMath::RandRange(0, PossibleRoles.Num() - 1)];
-    CreateTribalCharacter(RandomAppearance, SelectedRole, SpawnLocation);
-}
-
-void AChar_TribalCharacterManager::CreateTribalGroup(EBiomeType Biome, const FVector& CenterLocation, int32 GroupSize)
-{
-    for (int32 i = 0; i < GroupSize; i++)
-    {
-        // Random position around center
-        float Angle = (2.0f * PI * i) / GroupSize;
-        float Distance = FMath::RandRange(100.0f, 500.0f);
-        
-        FVector SpawnLocation = CenterLocation + FVector(
-            FMath::Cos(Angle) * Distance,
-            FMath::Sin(Angle) * Distance,
-            0.0f
-        );
-        
-        GenerateRandomTribalCharacter(Biome, SpawnLocation);
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("TribalCharacterManager: Created tribal group of %d characters in %s biome"), 
-        GroupSize, *UEnum::GetValueAsString(Biome));
-}
-
-void AChar_TribalCharacterManager::ApplyBiomeAdaptation(ATranspersonalCharacter* Character, EBiomeType Biome)
+void UChar_TribalCharacterManager::ApplyBiomeAdaptation(ACharacter* Character, EBiomeType BiomeType)
 {
     if (!Character)
-    {
         return;
+    
+    // Find matching biome adaptation
+    for (const FChar_BiomeAdaptation& Adaptation : BiomeAdaptations)
+    {
+        if (Adaptation.BiomeType == BiomeType)
+        {
+            // Apply movement speed modifier
+            if (Character->GetCharacterMovement())
+            {
+                float BaseSpeed = Character->GetCharacterMovement()->MaxWalkSpeed;
+                Character->GetCharacterMovement()->MaxWalkSpeed = BaseSpeed * Adaptation.MovementSpeedModifier;
+            }
+            
+            UE_LOG(LogTemp, Log, TEXT("Applied biome adaptation for %s: Speed modifier %.2f"), 
+                   *Character->GetActorLabel(), Adaptation.MovementSpeedModifier);
+            break;
+        }
     }
-    
-    // Apply biome-specific adaptations
-    FLinearColor AdaptedSkinTone = GetBiomeAdaptedSkinTone(Biome);
-    FString BiomeClothing = GetBiomeSpecificClothing(Biome);
-    
-    // Log the adaptation
-    UE_LOG(LogTemp, Log, TEXT("TribalCharacterManager: Applied %s biome adaptation to character"), 
-        *UEnum::GetValueAsString(Biome));
 }
 
-void AChar_TribalCharacterManager::SetCharacterRole(ATranspersonalCharacter* Character, EChar_TribalRole Role)
+void UChar_TribalCharacterManager::UpdateCharacterAppearance(ACharacter* Character, const FChar_TribalVariant& Variant)
 {
     if (!Character)
-    {
         return;
-    }
     
-    // Apply role-specific equipment and stats
-    FString RoleWeapon = GetRoleSpecificWeapon(Role);
-    TArray<FString> RoleAccessories = GetRoleSpecificAccessories(Role);
-    
-    UE_LOG(LogTemp, Log, TEXT("TribalCharacterManager: Set character role to %s"), 
-        *UEnum::GetValueAsString(Role));
-}
-
-void AChar_TribalCharacterManager::ApplyPersonalityTraits(ATranspersonalCharacter* Character, const FChar_PersonalityTraits& Traits)
-{
-    if (!Character)
-    {
+    USkeletalMeshComponent* MeshComp = Character->GetMesh();
+    if (!MeshComp)
         return;
-    }
     
-    // Apply personality traits to character behavior
-    UE_LOG(LogTemp, Log, TEXT("TribalCharacterManager: Applied personality traits (Courage: %.2f, Aggression: %.2f, Intelligence: %.2f)"), 
-        Traits.Courage, Traits.Aggression, Traits.Intelligence);
-}
-
-FChar_TribalAppearance AChar_TribalCharacterManager::GenerateRandomAppearance(EBiomeType Biome)
-{
-    FChar_TribalAppearance Appearance;
-    
-    // Random physical characteristics
-    Appearance.Height = FMath::RandRange(150.0f, 190.0f);
-    Appearance.Weight = FMath::RandRange(50.0f, 90.0f);
-    
-    // Biome-adapted appearance
-    Appearance.SkinTone = GetBiomeAdaptedSkinTone(Biome);
-    Appearance.HairColor = FLinearColor(
-        FMath::RandRange(0.1f, 0.4f),
-        FMath::RandRange(0.1f, 0.3f),
-        FMath::RandRange(0.05f, 0.2f),
-        1.0f
-    );
-    
-    Appearance.ClothingType = GetBiomeSpecificClothing(Biome);
-    Appearance.AdaptedBiome = Biome;
-    
-    return Appearance;
-}
-
-FChar_PersonalityTraits AChar_TribalCharacterManager::GenerateRandomPersonality()
-{
-    FChar_PersonalityTraits Traits;
-    
-    Traits.Courage = FMath::RandRange(0.2f, 0.9f);
-    Traits.Aggression = FMath::RandRange(0.1f, 0.7f);
-    Traits.Intelligence = FMath::RandRange(0.3f, 0.9f);
-    Traits.Social = FMath::RandRange(0.2f, 0.8f);
-    Traits.Curiosity = FMath::RandRange(0.1f, 0.8f);
-    
-    return Traits;
-}
-
-void AChar_TribalCharacterManager::TestCharacterCreation()
-{
-    if (!GetWorld())
+    // Apply custom mesh if available
+    if (Variant.CharacterMesh)
     {
-        UE_LOG(LogTemp, Error, TEXT("TribalCharacterManager: No world for testing"));
-        return;
+        MeshComp->SetSkeletalMesh(Variant.CharacterMesh);
     }
     
-    FVector TestLocation = GetActorLocation() + FVector(500.0f, 0.0f, 0.0f);
-    FChar_TribalAppearance TestAppearance = GenerateRandomAppearance(EBiomeType::Savanna);
-    
-    ATranspersonalCharacter* TestCharacter = CreateTribalCharacter(TestAppearance, EChar_TribalRole::Hunter, TestLocation);
-    
-    if (TestCharacter)
+    // Apply materials
+    for (int32 i = 0; i < Variant.SkinMaterials.Num() && i < MeshComp->GetNumMaterials(); i++)
     {
-        UE_LOG(LogTemp, Warning, TEXT("TribalCharacterManager: Test character created successfully"));
-    }
-}
-
-void AChar_TribalCharacterManager::SpawnTestCharactersInAllBiomes()
-{
-    // Biome coordinates from memory
-    TArray<TPair<EBiomeType, FVector>> BiomeLocations = {
-        {EBiomeType::Savanna, FVector(0.0f, 0.0f, 100.0f)},
-        {EBiomeType::Swamp, FVector(-50000.0f, -45000.0f, 100.0f)},
-        {EBiomeType::Forest, FVector(-45000.0f, 40000.0f, 100.0f)},
-        {EBiomeType::Desert, FVector(55000.0f, 0.0f, 100.0f)},
-        {EBiomeType::Mountain, FVector(40000.0f, 50000.0f, 100.0f)}
-    };
-    
-    for (const auto& BiomeLocation : BiomeLocations)
-    {
-        CreateTribalGroup(BiomeLocation.Key, BiomeLocation.Value, 3);
+        if (Variant.SkinMaterials[i])
+        {
+            MeshComp->SetMaterial(i, Variant.SkinMaterials[i]);
+        }
     }
     
-    UE_LOG(LogTemp, Warning, TEXT("TribalCharacterManager: Spawned test characters in all biomes"));
-}
-
-void AChar_TribalCharacterManager::InitializeCharacterTemplates()
-{
-    CharacterTemplates.Empty();
-    
-    // Create base templates for different character archetypes
-    for (int32 i = 0; i < 5; i++)
-    {
-        FChar_TribalAppearance Template;
-        Template.Height = 160.0f + (i * 5.0f);
-        Template.Weight = 60.0f + (i * 4.0f);
-        Template.SkinTone = FLinearColor(0.7f + (i * 0.05f), 0.5f + (i * 0.05f), 0.3f + (i * 0.05f), 1.0f);
-        CharacterTemplates.Add(Template);
-    }
-}
-
-void AChar_TribalCharacterManager::InitializeBiomeTemplates()
-{
-    BiomeSpecificTemplates.Empty();
-    
-    // Savanna template - sun-adapted
-    FChar_TribalAppearance SavannaTemplate;
-    SavannaTemplate.SkinTone = FLinearColor(0.6f, 0.4f, 0.2f, 1.0f);
-    SavannaTemplate.ClothingType = TEXT("Light Animal Hide");
-    BiomeSpecificTemplates.Add(EBiomeType::Savanna, SavannaTemplate);
-    
-    // Swamp template - moisture-adapted
-    FChar_TribalAppearance SwampTemplate;
-    SwampTemplate.SkinTone = FLinearColor(0.5f, 0.4f, 0.3f, 1.0f);
-    SwampTemplate.ClothingType = TEXT("Waterproof Plant Fiber");
-    BiomeSpecificTemplates.Add(EBiomeType::Swamp, SwampTemplate);
-    
-    // Forest template - camouflage-adapted
-    FChar_TribalAppearance ForestTemplate;
-    ForestTemplate.SkinTone = FLinearColor(0.7f, 0.5f, 0.3f, 1.0f);
-    ForestTemplate.ClothingType = TEXT("Leaf-Woven Garments");
-    BiomeSpecificTemplates.Add(EBiomeType::Forest, ForestTemplate);
-    
-    // Desert template - heat-adapted
-    FChar_TribalAppearance DesertTemplate;
-    DesertTemplate.SkinTone = FLinearColor(0.8f, 0.6f, 0.4f, 1.0f);
-    DesertTemplate.ClothingType = TEXT("Protective Wraps");
-    BiomeSpecificTemplates.Add(EBiomeType::Desert, DesertTemplate);
-    
-    // Mountain template - cold-adapted
-    FChar_TribalAppearance MountainTemplate;
-    MountainTemplate.SkinTone = FLinearColor(0.9f, 0.7f, 0.5f, 1.0f);
-    MountainTemplate.ClothingType = TEXT("Thick Fur Clothing");
-    BiomeSpecificTemplates.Add(EBiomeType::Mountain, MountainTemplate);
-}
-
-void AChar_TribalCharacterManager::InitializeRoleDefaults()
-{
-    RolePersonalityDefaults.Empty();
-    
-    // Hunter - high courage, moderate aggression
-    FChar_PersonalityTraits HunterTraits;
-    HunterTraits.Courage = 0.8f;
-    HunterTraits.Aggression = 0.6f;
-    HunterTraits.Intelligence = 0.6f;
-    HunterTraits.Social = 0.5f;
-    HunterTraits.Curiosity = 0.4f;
-    RolePersonalityDefaults.Add(EChar_TribalRole::Hunter, HunterTraits);
-    
-    // Gatherer - high intelligence, low aggression
-    FChar_PersonalityTraits GathererTraits;
-    GathererTraits.Courage = 0.5f;
-    GathererTraits.Aggression = 0.2f;
-    GathererTraits.Intelligence = 0.8f;
-    GathererTraits.Social = 0.7f;
-    GathererTraits.Curiosity = 0.9f;
-    RolePersonalityDefaults.Add(EChar_TribalRole::Gatherer, GathererTraits);
-    
-    // Crafter - high intelligence, low aggression
-    FChar_PersonalityTraits CrafterTraits;
-    CrafterTraits.Courage = 0.4f;
-    CrafterTraits.Aggression = 0.2f;
-    CrafterTraits.Intelligence = 0.9f;
-    CrafterTraits.Social = 0.6f;
-    CrafterTraits.Curiosity = 0.8f;
-    RolePersonalityDefaults.Add(EChar_TribalRole::Crafter, CrafterTraits);
-    
-    // Elder - high intelligence and social
-    FChar_PersonalityTraits ElderTraits;
-    ElderTraits.Courage = 0.7f;
-    ElderTraits.Aggression = 0.3f;
-    ElderTraits.Intelligence = 0.9f;
-    ElderTraits.Social = 0.9f;
-    ElderTraits.Curiosity = 0.6f;
-    RolePersonalityDefaults.Add(EChar_TribalRole::Elder, ElderTraits);
-    
-    // Scout - high courage and curiosity
-    FChar_PersonalityTraits ScoutTraits;
-    ScoutTraits.Courage = 0.9f;
-    ScoutTraits.Aggression = 0.4f;
-    ScoutTraits.Intelligence = 0.7f;
-    ScoutTraits.Social = 0.5f;
-    ScoutTraits.Curiosity = 0.9f;
-    RolePersonalityDefaults.Add(EChar_TribalRole::Scout, ScoutTraits);
-}
-
-FLinearColor AChar_TribalCharacterManager::GetBiomeAdaptedSkinTone(EBiomeType Biome)
-{
-    switch (Biome)
-    {
-        case EBiomeType::Savanna:
-            return FLinearColor(0.6f, 0.4f, 0.2f, 1.0f); // Darker, sun-adapted
-        case EBiomeType::Swamp:
-            return FLinearColor(0.5f, 0.4f, 0.3f, 1.0f); // Olive-toned
-        case EBiomeType::Forest:
-            return FLinearColor(0.7f, 0.5f, 0.3f, 1.0f); // Medium brown
-        case EBiomeType::Desert:
-            return FLinearColor(0.8f, 0.6f, 0.4f, 1.0f); // Tan, heat-adapted
-        case EBiomeType::Mountain:
-            return FLinearColor(0.9f, 0.7f, 0.5f, 1.0f); // Lighter, cold-adapted
-        default:
-            return FLinearColor(0.7f, 0.5f, 0.3f, 1.0f);
-    }
-}
-
-FString AChar_TribalCharacterManager::GetBiomeSpecificClothing(EBiomeType Biome)
-{
-    switch (Biome)
-    {
-        case EBiomeType::Savanna:
-            return TEXT("Light Animal Hide");
-        case EBiomeType::Swamp:
-            return TEXT("Waterproof Plant Fiber");
-        case EBiomeType::Forest:
-            return TEXT("Leaf-Woven Garments");
-        case EBiomeType::Desert:
-            return TEXT("Protective Wraps");
-        case EBiomeType::Mountain:
-            return TEXT("Thick Fur Clothing");
-        default:
-            return TEXT("Basic Animal Hide");
-    }
-}
-
-FString AChar_TribalCharacterManager::GetRoleSpecificWeapon(EChar_TribalRole Role)
-{
-    switch (Role)
-    {
-        case EChar_TribalRole::Hunter:
-            return TEXT("Stone-Tipped Spear");
-        case EChar_TribalRole::Gatherer:
-            return TEXT("Digging Stick");
-        case EChar_TribalRole::Crafter:
-            return TEXT("Stone Knife");
-        case EChar_TribalRole::Elder:
-            return TEXT("Ceremonial Staff");
-        case EChar_TribalRole::Scout:
-            return TEXT("Throwing Stones");
-        case EChar_TribalRole::Shaman:
-            return TEXT("Ritual Bone");
-        case EChar_TribalRole::Child:
-            return TEXT("Small Stick");
-        default:
-            return TEXT("Stone Tool");
-    }
-}
-
-TArray<FString> AChar_TribalCharacterManager::GetRoleSpecificAccessories(EChar_TribalRole Role)
-{
-    TArray<FString> Accessories;
-    
-    switch (Role)
-    {
-        case EChar_TribalRole::Hunter:
-            Accessories.Add(TEXT("Bone Necklace"));
-            Accessories.Add(TEXT("Feather Headdress"));
-            break;
-        case EChar_TribalRole::Gatherer:
-            Accessories.Add(TEXT("Woven Basket"));
-            Accessories.Add(TEXT("Seed Pouch"));
-            break;
-        case EChar_TribalRole::Crafter:
-            Accessories.Add(TEXT("Tool Belt"));
-            Accessories.Add(TEXT("Stone Collection"));
-            break;
-        case EChar_TribalRole::Elder:
-            Accessories.Add(TEXT("Wisdom Beads"));
-            Accessories.Add(TEXT("Elder Markings"));
-            break;
-        case EChar_TribalRole::Scout:
-            Accessories.Add(TEXT("Travel Pack"));
-            Accessories.Add(TEXT("Direction Stones"));
-            break;
-        case EChar_TribalRole::Shaman:
-            Accessories.Add(TEXT("Ritual Paint"));
-            Accessories.Add(TEXT("Sacred Symbols"));
-            break;
-        default:
-            break;
-    }
-    
-    return Accessories;
+    UE_LOG(LogTemp, Log, TEXT("Updated appearance for character: %s"), *Character->GetActorLabel());
 }
