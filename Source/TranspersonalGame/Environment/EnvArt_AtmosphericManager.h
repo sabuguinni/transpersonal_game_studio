@@ -3,39 +3,49 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "Components/ExponentialHeightFogComponent.h"
-#include "Components/SkyLightComponent.h"
-#include "Components/DirectionalLightComponent.h"
-#include "Engine/World.h"
+#include "Particles/ParticleSystemComponent.h"
+#include "Engine/DirectionalLight.h"
 #include "SharedTypes.h"
 #include "EnvArt_AtmosphericManager.generated.h"
 
+UENUM(BlueprintType)
+enum class EEnvArt_AtmosphericType : uint8
+{
+    None UMETA(DisplayName = "None"),
+    VolumericFog UMETA(DisplayName = "Volumetric Fog"),
+    DustParticles UMETA(DisplayName = "Dust Particles"),
+    PollenDrift UMETA(DisplayName = "Pollen Drift"),
+    MorningMist UMETA(DisplayName = "Morning Mist"),
+    HeatHaze UMETA(DisplayName = "Heat Haze")
+};
+
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEnvArt_BiomeAtmosphere
+struct TRANSPERSONALGAME_API FEnvArt_AtmosphericSettings
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmosphere")
-    FLinearColor FogColor;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmospheric")
+    EEnvArt_AtmosphericType AtmosphericType = EEnvArt_AtmosphericType::None;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmosphere")
-    float FogDensity;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmospheric")
+    float Intensity = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmosphere")
-    float FogHeightFalloff;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmospheric")
+    FLinearColor TintColor = FLinearColor::White;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmosphere")
-    FLinearColor SkyLightColor;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmospheric")
+    float VisibilityDistance = 10000.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmosphere")
-    float SkyLightIntensity;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmospheric")
+    bool bDynamicTimeOfDay = true;
 
-    FEnvArt_BiomeAtmosphere()
+    FEnvArt_AtmosphericSettings()
     {
-        FogColor = FLinearColor(0.5f, 0.6f, 0.7f, 1.0f);
-        FogDensity = 0.02f;
-        FogHeightFalloff = 0.2f;
-        SkyLightColor = FLinearColor(0.8f, 0.9f, 1.0f, 1.0f);
-        SkyLightIntensity = 1.0f;
+        AtmosphericType = EEnvArt_AtmosphericType::None;
+        Intensity = 1.0f;
+        TintColor = FLinearColor::White;
+        VisibilityDistance = 10000.0f;
+        bDynamicTimeOfDay = true;
     }
 };
 
@@ -50,46 +60,46 @@ public:
 protected:
     virtual void BeginPlay() override;
 
+public:
+    virtual void Tick(float DeltaTime) override;
+
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
     class UExponentialHeightFogComponent* FogComponent;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    class USkyLightComponent* SkyLightComponent;
+    class UParticleSystemComponent* ParticleComponent;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmosphere")
-    TMap<EBiomeType, FEnvArt_BiomeAtmosphere> BiomeAtmosphereSettings;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmospheric Settings")
+    FEnvArt_AtmosphericSettings AtmosphericSettings;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmosphere")
-    float TimeOfDay;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Integration")
+    EBiomeType TargetBiome = EBiomeType::Savanna;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmosphere")
-    bool bEnableDynamicWeather;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Time of Day")
+    float CurrentTimeOfDay = 12.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmosphere")
-    float WeatherTransitionSpeed;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Time of Day")
+    float TimeSpeed = 1.0f;
 
-public:
-    virtual void Tick(float DeltaTime) override;
+    UFUNCTION(BlueprintCallable, Category = "Atmospheric")
+    void SetAtmosphericType(EEnvArt_AtmosphericType NewType);
 
-    UFUNCTION(BlueprintCallable, Category = "Atmosphere")
-    void SetBiomeAtmosphere(EBiomeType BiomeType);
+    UFUNCTION(BlueprintCallable, Category = "Atmospheric")
+    void UpdateFogSettings(float NewIntensity, FLinearColor NewColor);
 
-    UFUNCTION(BlueprintCallable, Category = "Atmosphere")
-    void UpdateTimeOfDay(float NewTimeOfDay);
+    UFUNCTION(BlueprintCallable, Category = "Atmospheric")
+    void SetBiomeSpecificAtmosphere(EBiomeType Biome);
 
-    UFUNCTION(BlueprintCallable, Category = "Atmosphere")
-    void SetWeatherIntensity(float Intensity);
+    UFUNCTION(BlueprintCallable, Category = "Time")
+    void SetTimeOfDay(float NewTime);
 
-    UFUNCTION(BlueprintCallable, Category = "Atmosphere", CallInEditor)
-    void RefreshAtmosphericSettings();
+    UFUNCTION(BlueprintCallable, Category = "Time")
+    FLinearColor GetCurrentSunColor() const;
 
 private:
-    void InitializeBiomeSettings();
-    void UpdateFogSettings(const FEnvArt_BiomeAtmosphere& Settings);
-    void UpdateSkyLightSettings(const FEnvArt_BiomeAtmosphere& Settings);
-    void InterpolateAtmosphere(const FEnvArt_BiomeAtmosphere& From, const FEnvArt_BiomeAtmosphere& To, float Alpha);
-
-    EBiomeType CurrentBiome;
-    float AtmosphereBlendTime;
-    bool bIsTransitioning;
+    void UpdateTimeOfDay(float DeltaTime);
+    void ApplyBiomeAtmosphere();
+    void UpdateParticleEffects();
+    FLinearColor CalculateSunColor(float TimeOfDay) const;
+    float CalculateFogDensity(float TimeOfDay) const;
 };
