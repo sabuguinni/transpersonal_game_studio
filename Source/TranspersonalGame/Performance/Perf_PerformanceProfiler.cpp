@@ -1,161 +1,268 @@
 #include "Perf_PerformanceProfiler.h"
 #include "Engine/Engine.h"
-#include "Engine/World.h"
-#include "HAL/PlatformMemory.h"
+#include "HAL/PlatformFilemanager.h"
+#include "Misc/FileHelper.h"
+#include "Misc/Paths.h"
 #include "Stats/Stats.h"
 #include "RenderingThread.h"
+#include "HAL/PlatformMemory.h"
 
 UPerf_PerformanceProfiler::UPerf_PerformanceProfiler()
 {
-    PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 0.0f; // Tick every frame
-    
+    bIsProfilingActive = false;
     TargetFPS = 60.0f;
-    MinimumAcceptableFPS = 30.0f;
-    bIsProfilingActive = true;
-    ProfilingInterval = 1.0f;
-    
-    FPSSamples.Reserve(300); // 5 minutes at 1 sample per second
+    AverageFPS = 0.0f;
+    MinFPS = 999.0f;
+    MaxFPS = 0.0f;
+    FrameCount = 0;
+    TotalFrameTime = 0.0f;
 }
 
-void UPerf_PerformanceProfiler::BeginPlay()
+void UPerf_PerformanceProfiler::Initialize(FSubsystemCollectionBase& Collection)
 {
-    Super::BeginPlay();
+    Super::Initialize(Collection);
     
-    StartProfiling();
+    UE_LOG(LogTemp, Log, TEXT("Performance Profiler initialized"));
     
-    UE_LOG(LogTemp, Warning, TEXT("Performance Profiler started - Target FPS: %.1f"), TargetFPS);
+    // Initialize default metrics
+    PerformanceMetrics.Empty();
+    
+    FPerf_PerformanceMetric FPSMetric;
+    FPSMetric.MetricName = TEXT("FPS");
+    FPSMetric.Category = EPerf_ProfilerCategory::Rendering;
+    PerformanceMetrics.Add(TEXT("FPS"), FPSMetric);
+    
+    FPerf_PerformanceMetric FrameTimeMetric;
+    FrameTimeMetric.MetricName = TEXT("FrameTime");
+    FrameTimeMetric.Category = EPerf_ProfilerCategory::Rendering;
+    PerformanceMetrics.Add(TEXT("FrameTime"), FrameTimeMetric);
+    
+    FPerf_PerformanceMetric MemoryMetric;
+    MemoryMetric.MetricName = TEXT("MemoryUsage");
+    MemoryMetric.Category = EPerf_ProfilerCategory::Memory;
+    PerformanceMetrics.Add(TEXT("MemoryUsage"), MemoryMetric);
+    
+    FPerf_PerformanceMetric DrawCallMetric;
+    DrawCallMetric.MetricName = TEXT("DrawCalls");
+    DrawCallMetric.Category = EPerf_ProfilerCategory::Rendering;
+    PerformanceMetrics.Add(TEXT("DrawCalls"), DrawCallMetric);
 }
 
-void UPerf_PerformanceProfiler::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void UPerf_PerformanceProfiler::Deinitialize()
 {
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-    
-    if (bIsProfilingActive)
-    {
-        UpdateMetrics(DeltaTime);
-        
-        // Log performance report periodically
-        LastProfilingTime += DeltaTime;
-        if (LastProfilingTime >= ProfilingInterval)
-        {
-            LogPerformanceReport();
-            LastProfilingTime = 0.0f;
-        }
-    }
+    StopProfiling();
+    Super::Deinitialize();
 }
 
 void UPerf_PerformanceProfiler::StartProfiling()
 {
+    if (bIsProfilingActive)
+    {
+        return;
+    }
+    
     bIsProfilingActive = true;
-    ResetMetrics();
+    FrameCount = 0;
+    TotalFrameTime = 0.0f;
+    AverageFPS = 0.0f;
+    MinFPS = 999.0f;
+    MaxFPS = 0.0f;
+    
     UE_LOG(LogTemp, Log, TEXT("Performance profiling started"));
+    
+    // Start timer for regular updates
+    if (UWorld* World = GetWorld())
+    {
+        World->GetTimerManager().SetTimer(ProfilingTimerHandle, this, 
+            &UPerf_PerformanceProfiler::UpdateFrameData, 0.1f, true);
+    }
 }
 
 void UPerf_PerformanceProfiler::StopProfiling()
 {
+    if (!bIsProfilingActive)
+    {
+        return;
+    }
+    
     bIsProfilingActive = false;
+    
     UE_LOG(LogTemp, Log, TEXT("Performance profiling stopped"));
+    
+    // Clear timer
+    if (UWorld* World = GetWorld())
+    {
+        World->GetTimerManager().ClearTimer(ProfilingTimerHandle);
+    }
+    
+    // Calculate final averages
+    CalculateAverages();
 }
 
 void UPerf_PerformanceProfiler::ResetMetrics()
 {
-    FPSSamples.Empty();
     FrameCount = 0;
     TotalFrameTime = 0.0f;
-    LastProfilingTime = 0.0f;
+    AverageFPS = 0.0f;
+    MinFPS = 999.0f;
+    MaxFPS = 0.0f;
     
-    CurrentMetrics = FPerf_PerformanceMetrics();
+    for (auto& MetricPair : PerformanceMetrics)
+    {
+        MetricPair.Value.CurrentValue = 0.0f;
+        MetricPair.Value.AverageValue = 0.0f;
+        MetricPair.Value.MinValue = 0.0f;
+        MetricPair.Value.MaxValue = 0.0f;
+    }
     
     UE_LOG(LogTemp, Log, TEXT("Performance metrics reset"));
 }
 
-FPerf_PerformanceMetrics UPerf_PerformanceProfiler::GetCurrentMetrics() const
+TArray<FPerf_PerformanceMetric> UPerf_PerformanceProfiler::GetAllMetrics() const
 {
-    return CurrentMetrics;
+    TArray<FPerf_PerformanceMetric> Metrics;
+    for (const auto& MetricPair : PerformanceMetrics)
+    {
+        Metrics.Add(MetricPair.Value);
+    }
+    return Metrics;
 }
 
-void UPerf_PerformanceProfiler::LogPerformanceReport()
+FPerf_PerformanceMetric UPerf_PerformanceProfiler::GetMetric(const FString& MetricName) const
 {
-    if (!bIsProfilingActive) return;
+    if (const FPerf_PerformanceMetric* Metric = PerformanceMetrics.Find(MetricName))
+    {
+        return *Metric;
+    }
+    return FPerf_PerformanceMetric();
+}
+
+void UPerf_PerformanceProfiler::AddCustomMetric(const FString& MetricName, float Value, EPerf_ProfilerCategory Category)
+{
+    FPerf_PerformanceMetric* Metric = PerformanceMetrics.Find(MetricName);
+    if (!Metric)
+    {
+        FPerf_PerformanceMetric NewMetric;
+        NewMetric.MetricName = MetricName;
+        NewMetric.Category = Category;
+        NewMetric.CurrentValue = Value;
+        NewMetric.MinValue = Value;
+        NewMetric.MaxValue = Value;
+        NewMetric.AverageValue = Value;
+        NewMetric.LastUpdate = FDateTime::Now();
+        PerformanceMetrics.Add(MetricName, NewMetric);
+    }
+    else
+    {
+        Metric->CurrentValue = Value;
+        Metric->MinValue = FMath::Min(Metric->MinValue, Value);
+        Metric->MaxValue = FMath::Max(Metric->MaxValue, Value);
+        Metric->LastUpdate = FDateTime::Now();
+        
+        // Simple running average (could be improved with proper sample window)
+        static int32 SampleCount = 0;
+        SampleCount++;
+        Metric->AverageValue = (Metric->AverageValue * (SampleCount - 1) + Value) / SampleCount;
+    }
+}
+
+void UPerf_PerformanceProfiler::SaveProfileDataToFile(const FString& FileName)
+{
+    FString ProfileData = GetProfileDataAsString();
+    FString FilePath = FPaths::ProjectSavedDir() / TEXT("Performance") / FileName;
     
-    UE_LOG(LogTemp, Warning, TEXT("=== PERFORMANCE REPORT ==="));
-    UE_LOG(LogTemp, Warning, TEXT("Current FPS: %.1f"), CurrentMetrics.CurrentFPS);
-    UE_LOG(LogTemp, Warning, TEXT("Average FPS: %.1f"), CurrentMetrics.AverageFPS);
-    UE_LOG(LogTemp, Warning, TEXT("Min FPS: %.1f"), CurrentMetrics.MinFPS);
-    UE_LOG(LogTemp, Warning, TEXT("Max FPS: %.1f"), CurrentMetrics.MaxFPS);
-    UE_LOG(LogTemp, Warning, TEXT("Frame Time: %.2f ms"), CurrentMetrics.FrameTime);
-    UE_LOG(LogTemp, Warning, TEXT("Render Time: %.2f ms"), CurrentMetrics.RenderTime);
-    UE_LOG(LogTemp, Warning, TEXT("Draw Calls: %d"), CurrentMetrics.DrawCalls);
-    UE_LOG(LogTemp, Warning, TEXT("Triangles: %d"), CurrentMetrics.TriangleCount);
-    UE_LOG(LogTemp, Warning, TEXT("Memory Usage: %.1f MB"), CurrentMetrics.MemoryUsageMB);
-    
-    bool bPerformanceOK = IsPerformanceAcceptable();
-    UE_LOG(LogTemp, Warning, TEXT("Performance Status: %s"), bPerformanceOK ? TEXT("ACCEPTABLE") : TEXT("NEEDS OPTIMIZATION"));
+    if (!FFileHelper::SaveStringToFile(ProfileData, *FilePath))
+    {
+        UE_LOG(LogTemp, Error, TEXT("Failed to save performance data to file: %s"), *FilePath);
+    }
+    else
+    {
+        UE_LOG(LogTemp, Log, TEXT("Performance data saved to: %s"), *FilePath);
+    }
 }
 
 bool UPerf_PerformanceProfiler::IsPerformanceAcceptable() const
 {
-    return CurrentMetrics.CurrentFPS >= MinimumAcceptableFPS && 
-           CurrentMetrics.AverageFPS >= MinimumAcceptableFPS;
+    if (AverageFPS < TargetFPS * 0.8f) // 80% of target FPS
+    {
+        return false;
+    }
+    
+    if (CurrentFrameData.FrameTime > (1.0f / TargetFPS) * 1.5f) // 150% of target frame time
+    {
+        return false;
+    }
+    
+    return true;
 }
 
-void UPerf_PerformanceProfiler::SetTargetFPS(float NewTargetFPS)
+void UPerf_PerformanceProfiler::UpdateFrameData()
 {
-    TargetFPS = FMath::Clamp(NewTargetFPS, 15.0f, 240.0f);
-    UE_LOG(LogTemp, Log, TEXT("Target FPS set to: %.1f"), TargetFPS);
-}
-
-void UPerf_PerformanceProfiler::UpdateMetrics(float DeltaTime)
-{
-    if (DeltaTime <= 0.0f) return;
+    if (!bIsProfilingActive)
+    {
+        return;
+    }
     
-    // Calculate current FPS
-    CurrentMetrics.CurrentFPS = 1.0f / DeltaTime;
-    CurrentMetrics.FrameTime = DeltaTime * 1000.0f; // Convert to milliseconds
+    // Get current frame data
+    CurrentFrameData.FrameTime = FApp::GetDeltaTime();
+    CurrentFrameData.FPS = 1.0f / FMath::Max(CurrentFrameData.FrameTime, 0.001f);
     
-    // Update frame statistics
+    // Update FPS tracking
+    TotalFrameTime += CurrentFrameData.FrameTime;
     FrameCount++;
-    TotalFrameTime += DeltaTime;
-    FPSSamples.Add(CurrentMetrics.CurrentFPS);
     
-    // Keep only last 300 samples (5 minutes at 1 sample per second)
-    if (FPSSamples.Num() > 300)
-    {
-        FPSSamples.RemoveAt(0);
-    }
+    MinFPS = FMath::Min(MinFPS, CurrentFrameData.FPS);
+    MaxFPS = FMath::Max(MaxFPS, CurrentFrameData.FPS);
     
-    // Calculate average FPS
-    if (FrameCount > 0)
-    {
-        CurrentMetrics.AverageFPS = FrameCount / TotalFrameTime;
-    }
-    
-    // Calculate min/max FPS
-    if (FPSSamples.Num() > 0)
-    {
-        CurrentMetrics.MinFPS = *FMath::MinElement(FPSSamples);
-        CurrentMetrics.MaxFPS = *FMath::MaxElement(FPSSamples);
-    }
-    
-    // Collect additional stats
-    CollectRenderStats();
-    CollectMemoryStats();
-}
-
-void UPerf_PerformanceProfiler::CollectRenderStats()
-{
-    // Get render thread stats if available
-    CurrentMetrics.RenderTime = CurrentMetrics.FrameTime * 0.6f; // Estimate 60% of frame time
-    
-    // Estimate draw calls and triangles (these would need engine access for real values)
-    CurrentMetrics.DrawCalls = 500; // Placeholder - would need RHI stats
-    CurrentMetrics.TriangleCount = 50000; // Placeholder - would need render stats
-}
-
-void UPerf_PerformanceProfiler::CollectMemoryStats()
-{
     // Get memory usage
     FPlatformMemoryStats MemStats = FPlatformMemory::GetStats();
-    CurrentMetrics.MemoryUsageMB = MemStats.UsedPhysical / (1024.0f * 1024.0f);
+    CurrentFrameData.MemoryUsageMB = MemStats.UsedPhysical / (1024.0f * 1024.0f);
+    
+    // Update metrics
+    UpdateMetrics();
+}
+
+void UPerf_PerformanceProfiler::UpdateMetrics()
+{
+    // Update FPS metric
+    AddCustomMetric(TEXT("FPS"), CurrentFrameData.FPS, EPerf_ProfilerCategory::Rendering);
+    
+    // Update Frame Time metric
+    AddCustomMetric(TEXT("FrameTime"), CurrentFrameData.FrameTime * 1000.0f, EPerf_ProfilerCategory::Rendering);
+    
+    // Update Memory metric
+    AddCustomMetric(TEXT("MemoryUsage"), CurrentFrameData.MemoryUsageMB, EPerf_ProfilerCategory::Memory);
+    
+    // Update Draw Calls metric (placeholder - would need render thread access for real data)
+    AddCustomMetric(TEXT("DrawCalls"), CurrentFrameData.DrawCalls, EPerf_ProfilerCategory::Rendering);
+}
+
+void UPerf_PerformanceProfiler::CalculateAverages()
+{
+    if (FrameCount > 0)
+    {
+        AverageFPS = FrameCount / TotalFrameTime;
+    }
+}
+
+FString UPerf_PerformanceProfiler::GetProfileDataAsString() const
+{
+    FString ProfileData;
+    ProfileData += FString::Printf(TEXT("Performance Profile Data - %s\n"), *FDateTime::Now().ToString());
+    ProfileData += FString::Printf(TEXT("Target FPS: %.1f\n"), TargetFPS);
+    ProfileData += FString::Printf(TEXT("Average FPS: %.1f\n"), AverageFPS);
+    ProfileData += FString::Printf(TEXT("Min FPS: %.1f\n"), MinFPS);
+    ProfileData += FString::Printf(TEXT("Max FPS: %.1f\n"), MaxFPS);
+    ProfileData += FString::Printf(TEXT("Frame Count: %d\n"), FrameCount);
+    ProfileData += FString::Printf(TEXT("Total Time: %.2f seconds\n"), TotalFrameTime);
+    ProfileData += TEXT("\nDetailed Metrics:\n");
+    
+    for (const auto& MetricPair : PerformanceMetrics)
+    {
+        const FPerf_PerformanceMetric& Metric = MetricPair.Value;
+        ProfileData += FString::Printf(TEXT("%s: Current=%.2f, Avg=%.2f, Min=%.2f, Max=%.2f\n"),
+            *Metric.MetricName, Metric.CurrentValue, Metric.AverageValue, Metric.MinValue, Metric.MaxValue);
+    }
+    
+    return ProfileData;
 }
