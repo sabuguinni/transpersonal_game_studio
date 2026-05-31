@@ -1,263 +1,335 @@
 #include "Eng_ArchitectureManager.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "TimerManager.h"
+#include "GameFramework/Actor.h"
+#include "HAL/PlatformFilemanager.h"
+#include "Stats/Stats.h"
+#include "Engine/StaticMeshActor.h"
 
 UEng_ArchitectureManager::UEng_ArchitectureManager()
 {
-    bAutoInitializeSystems = true;
-    SystemInitializationTimeout = 30.0f;
-    bEnablePerformanceMonitoring = true;
-    bSystemsInitialized = false;
-    LastPerformanceUpdate = 0.0f;
+    bPerformanceMonitoringActive = false;
+    LastHealthCheckTime = 0.0f;
 }
 
 void UEng_ArchitectureManager::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
     
-    UE_LOG(LogTemp, Log, TEXT("ArchitectureManager: Initializing core architecture systems"));
+    UE_LOG(LogTemp, Warning, TEXT("ArchitectureManager: Initializing system architecture monitoring"));
     
-    // Initialize system ready states
-    SystemReadyStates.Empty();
-    SystemReadyStates.Add(TEXT("WorldGeneration"), false);
-    SystemReadyStates.Add(TEXT("CharacterSystems"), false);
-    SystemReadyStates.Add(TEXT("CombatSystems"), false);
-    SystemReadyStates.Add(TEXT("AISystems"), false);
-    SystemReadyStates.Add(TEXT("AudioSystems"), false);
-    SystemReadyStates.Add(TEXT("VFXSystems"), false);
+    // Start automatic performance monitoring
+    StartPerformanceMonitoring();
     
-    // Initialize performance metrics
-    PerformanceMetrics.Empty();
-    for (const auto& SystemPair : SystemReadyStates)
-    {
-        PerformanceMetrics.Add(SystemPair.Key, 60.0f); // Default 60 FPS target
-    }
+    // Validate initial system state
+    ValidateSystemIntegrity();
     
-    // Auto-initialize if enabled
-    if (bAutoInitializeSystems)
-    {
-        InitializeGameSystems();
-    }
+    // Log initial architecture state
+    LogSystemArchitecture();
 }
 
 void UEng_ArchitectureManager::Deinitialize()
 {
-    UE_LOG(LogTemp, Log, TEXT("ArchitectureManager: Deinitializing architecture systems"));
+    StopPerformanceMonitoring();
     
-    // Clean up all systems
-    SystemReadyStates.Empty();
-    PerformanceMetrics.Empty();
-    LoadedModuleNames.Empty();
-    ModulePriorities.Empty();
-    
-    bSystemsInitialized = false;
+    UE_LOG(LogTemp, Warning, TEXT("ArchitectureManager: Shutting down"));
     
     Super::Deinitialize();
 }
 
-bool UEng_ArchitectureManager::InitializeGameSystems()
+FEng_SystemPerformanceMetrics UEng_ArchitectureManager::GetCurrentPerformanceMetrics()
 {
-    UE_LOG(LogTemp, Log, TEXT("ArchitectureManager: Starting game systems initialization"));
+    UpdatePerformanceMetrics();
+    return LastPerformanceMetrics;
+}
+
+void UEng_ArchitectureManager::StartPerformanceMonitoring()
+{
+    bPerformanceMonitoringActive = true;
+    UE_LOG(LogTemp, Warning, TEXT("ArchitectureManager: Performance monitoring started"));
+}
+
+void UEng_ArchitectureManager::StopPerformanceMonitoring()
+{
+    bPerformanceMonitoringActive = false;
+    UE_LOG(LogTemp, Warning, TEXT("ArchitectureManager: Performance monitoring stopped"));
+}
+
+TArray<FEng_ModuleLoadInfo> UEng_ArchitectureManager::GetLoadedModuleInfo()
+{
+    TArray<FEng_ModuleLoadInfo> ModuleInfo;
     
-    if (bSystemsInitialized)
+    // Core modules to check
+    TArray<FString> CoreModules = {
+        TEXT("TranspersonalGame"),
+        TEXT("Engine"),
+        TEXT("Core"),
+        TEXT("CoreUObject"),
+        TEXT("RenderCore"),
+        TEXT("RHI")
+    };
+    
+    for (const FString& ModuleName : CoreModules)
     {
-        UE_LOG(LogTemp, Warning, TEXT("ArchitectureManager: Systems already initialized"));
-        return true;
+        FEng_ModuleLoadInfo Info;
+        Info.ModuleName = ModuleName;
+        Info.bIsLoaded = FModuleManager::Get().IsModuleLoaded(*ModuleName);
+        Info.LoadTime = 0.0f; // Would need profiling data
+        Info.ClassCount = 0; // Would need reflection data
+        
+        ModuleInfo.Add(Info);
     }
     
-    // Initialize systems in priority order
-    InitializeWorldGeneration();
-    InitializeCharacterSystems();
-    InitializeCombatSystems();
-    InitializeAISystems();
-    InitializeAudioSystems();
-    InitializeVFXSystems();
-    
-    bSystemsInitialized = true;
-    
-    UE_LOG(LogTemp, Log, TEXT("ArchitectureManager: Game systems initialization complete"));
-    return ValidateSystemIntegrity();
+    LoadedModules = ModuleInfo;
+    return ModuleInfo;
 }
 
 bool UEng_ArchitectureManager::ValidateSystemIntegrity()
 {
-    UE_LOG(LogTemp, Log, TEXT("ArchitectureManager: Validating system integrity"));
+    bool bSystemHealthy = true;
     
-    bool bAllSystemsReady = true;
-    
-    for (const auto& SystemPair : SystemReadyStates)
+    // Check memory usage
+    if (!CheckMemoryUsage())
     {
-        if (!SystemPair.Value)
-        {
-            UE_LOG(LogTemp, Warning, TEXT("ArchitectureManager: System %s is not ready"), *SystemPair.Key);
-            bAllSystemsReady = false;
-        }
+        UE_LOG(LogTemp, Error, TEXT("ArchitectureManager: Memory usage validation failed"));
+        bSystemHealthy = false;
     }
     
-    if (bAllSystemsReady)
+    // Check frame rate
+    if (!CheckFrameRate())
     {
-        UE_LOG(LogTemp, Log, TEXT("ArchitectureManager: All systems validated successfully"));
+        UE_LOG(LogTemp, Error, TEXT("ArchitectureManager: Frame rate validation failed"));
+        bSystemHealthy = false;
+    }
+    
+    // Check actor limits
+    if (!EnforceActorLimits())
+    {
+        UE_LOG(LogTemp, Error, TEXT("ArchitectureManager: Actor limit validation failed"));
+        bSystemHealthy = false;
+    }
+    
+    if (bSystemHealthy)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("ArchitectureManager: System integrity validation PASSED"));
     }
     else
     {
-        UE_LOG(LogTemp, Error, TEXT("ArchitectureManager: System integrity validation failed"));
+        UE_LOG(LogTemp, Error, TEXT("ArchitectureManager: System integrity validation FAILED"));
     }
     
-    return bAllSystemsReady;
+    return bSystemHealthy;
 }
 
-void UEng_ArchitectureManager::RegisterGameModule(const FString& ModuleName, int32 Priority)
+void UEng_ArchitectureManager::LogSystemArchitecture()
 {
-    UE_LOG(LogTemp, Log, TEXT("ArchitectureManager: Registering module %s with priority %d"), *ModuleName, Priority);
+    UE_LOG(LogTemp, Warning, TEXT("=== TRANSPERSONAL GAME ARCHITECTURE STATUS ==="));
     
-    if (!LoadedModuleNames.Contains(ModuleName))
+    // Log performance metrics
+    FEng_SystemPerformanceMetrics Metrics = GetCurrentPerformanceMetrics();
+    UE_LOG(LogTemp, Warning, TEXT("Performance: FrameTime=%.2fms, Actors=%d, Memory=%.1fMB"), 
+           Metrics.FrameTime, Metrics.ActorCount, Metrics.MemoryUsageMB);
+    
+    // Log module status
+    TArray<FEng_ModuleLoadInfo> Modules = GetLoadedModuleInfo();
+    for (const FEng_ModuleLoadInfo& Module : Modules)
     {
-        LoadedModuleNames.Add(ModuleName);
-        ModulePriorities.Add(ModuleName, Priority);
-        OnModuleLoaded(ModuleName);
-    }
-}
-
-bool UEng_ArchitectureManager::IsSystemReady(const FString& SystemName) const
-{
-    const bool* ReadyState = SystemReadyStates.Find(SystemName);
-    return ReadyState ? *ReadyState : false;
-}
-
-float UEng_ArchitectureManager::GetSystemPerformanceMetric(const FString& SystemName) const
-{
-    const float* Metric = PerformanceMetrics.Find(SystemName);
-    return Metric ? *Metric : 0.0f;
-}
-
-void UEng_ArchitectureManager::SetPerformanceTarget(const FString& SystemName, float TargetFPS)
-{
-    PerformanceMetrics.Add(SystemName, TargetFPS);
-    UE_LOG(LogTemp, Log, TEXT("ArchitectureManager: Set performance target for %s to %.2f FPS"), *SystemName, TargetFPS);
-}
-
-TArray<FString> UEng_ArchitectureManager::GetLoadedModules() const
-{
-    return LoadedModuleNames;
-}
-
-bool UEng_ArchitectureManager::UnloadModule(const FString& ModuleName)
-{
-    if (LoadedModuleNames.Contains(ModuleName))
-    {
-        LoadedModuleNames.Remove(ModuleName);
-        ModulePriorities.Remove(ModuleName);
-        OnModuleUnloaded(ModuleName);
-        UE_LOG(LogTemp, Log, TEXT("ArchitectureManager: Unloaded module %s"), *ModuleName);
-        return true;
+        UE_LOG(LogTemp, Warning, TEXT("Module: %s - %s"), 
+               *Module.ModuleName, Module.bIsLoaded ? TEXT("LOADED") : TEXT("NOT LOADED"));
     }
     
-    UE_LOG(LogTemp, Warning, TEXT("ArchitectureManager: Module %s not found for unloading"), *ModuleName);
-    return false;
+    UE_LOG(LogTemp, Warning, TEXT("=== END ARCHITECTURE STATUS ==="));
 }
 
-bool UEng_ArchitectureManager::ReloadModule(const FString& ModuleName)
+bool UEng_ArchitectureManager::EnforceActorLimits()
 {
-    UE_LOG(LogTemp, Log, TEXT("ArchitectureManager: Reloading module %s"), *ModuleName);
-    
-    if (UnloadModule(ModuleName))
-    {
-        return LoadGameModule(ModuleName);
-    }
-    
-    return false;
-}
-
-void UEng_ArchitectureManager::InitializeWorldGeneration()
-{
-    UE_LOG(LogTemp, Log, TEXT("ArchitectureManager: Initializing World Generation system"));
-    SystemReadyStates[TEXT("WorldGeneration")] = true;
-}
-
-void UEng_ArchitectureManager::InitializeCharacterSystems()
-{
-    UE_LOG(LogTemp, Log, TEXT("ArchitectureManager: Initializing Character Systems"));
-    SystemReadyStates[TEXT("CharacterSystems")] = true;
-}
-
-void UEng_ArchitectureManager::InitializeCombatSystems()
-{
-    UE_LOG(LogTemp, Log, TEXT("ArchitectureManager: Initializing Combat Systems"));
-    SystemReadyStates[TEXT("CombatSystems")] = true;
-}
-
-void UEng_ArchitectureManager::InitializeAISystems()
-{
-    UE_LOG(LogTemp, Log, TEXT("ArchitectureManager: Initializing AI Systems"));
-    SystemReadyStates[TEXT("AISystems")] = true;
-}
-
-void UEng_ArchitectureManager::InitializeAudioSystems()
-{
-    UE_LOG(LogTemp, Log, TEXT("ArchitectureManager: Initializing Audio Systems"));
-    SystemReadyStates[TEXT("AudioSystems")] = true;
-}
-
-void UEng_ArchitectureManager::InitializeVFXSystems()
-{
-    UE_LOG(LogTemp, Log, TEXT("ArchitectureManager: Initializing VFX Systems"));
-    SystemReadyStates[TEXT("VFXSystems")] = true;
-}
-
-void UEng_ArchitectureManager::UpdatePerformanceMetrics()
-{
-    if (!bEnablePerformanceMonitoring)
-    {
-        return;
-    }
-    
-    float CurrentTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
-    
-    if (CurrentTime - LastPerformanceUpdate >= 1.0f) // Update every second
-    {
-        // Update performance metrics for each system
-        for (auto& MetricPair : PerformanceMetrics)
-        {
-            // Simulate performance monitoring - in real implementation,
-            // this would gather actual performance data
-            float CurrentFPS = FMath::RandRange(55.0f, 65.0f);
-            MetricPair.Value = CurrentFPS;
-        }
-        
-        LastPerformanceUpdate = CurrentTime;
-    }
-}
-
-bool UEng_ArchitectureManager::ValidateSystemPerformance(const FString& SystemName) const
-{
-    const float* CurrentMetric = PerformanceMetrics.Find(SystemName);
-    if (!CurrentMetric)
+    UWorld* World = GetWorld();
+    if (!World)
     {
         return false;
     }
     
-    // Performance is valid if above 30 FPS minimum
-    return *CurrentMetric >= 30.0f;
+    int32 TotalActors = GetTotalActorCount();
+    
+    if (TotalActors > MAX_TOTAL_ACTORS)
+    {
+        UE_LOG(LogTemp, Error, TEXT("ArchitectureManager: CRITICAL - Actor count %d exceeds limit %d"), 
+               TotalActors, MAX_TOTAL_ACTORS);
+        
+        CleanupExcessActors();
+        return false;
+    }
+    
+    UE_LOG(LogTemp, Warning, TEXT("ArchitectureManager: Actor count OK - %d/%d"), TotalActors, MAX_TOTAL_ACTORS);
+    return true;
 }
 
-bool UEng_ArchitectureManager::LoadGameModule(const FString& ModuleName)
+int32 UEng_ArchitectureManager::GetTotalActorCount() const
 {
-    UE_LOG(LogTemp, Log, TEXT("ArchitectureManager: Loading game module %s"), *ModuleName);
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        return 0;
+    }
     
-    // In a real implementation, this would use the module loading system
-    // For now, we simulate successful loading
-    RegisterGameModule(ModuleName, 100);
+    int32 Count = 0;
+    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+    {
+        Count++;
+    }
+    
+    return Count;
+}
+
+int32 UEng_ArchitectureManager::GetBiomeActorCount(EBiomeType BiomeType) const
+{
+    // This would need biome position data to implement properly
+    // For now, return estimated count
+    int32 TotalActors = GetTotalActorCount();
+    return TotalActors / 5; // Assume equal distribution across 5 biomes
+}
+
+bool UEng_ArchitectureManager::CheckMemoryUsage()
+{
+    // Get basic memory stats
+    FPlatformMemoryStats MemStats = FPlatformMemory::GetStats();
+    
+    float UsedMemoryMB = MemStats.UsedPhysical / (1024.0f * 1024.0f);
+    float TotalMemoryMB = MemStats.TotalPhysical / (1024.0f * 1024.0f);
+    
+    float MemoryUsagePercent = (UsedMemoryMB / TotalMemoryMB) * 100.0f;
+    
+    UE_LOG(LogTemp, Warning, TEXT("ArchitectureManager: Memory usage %.1f%% (%.1fMB / %.1fMB)"), 
+           MemoryUsagePercent, UsedMemoryMB, TotalMemoryMB);
+    
+    // Warn if memory usage is high
+    if (MemoryUsagePercent > 85.0f)
+    {
+        UE_LOG(LogTemp, Error, TEXT("ArchitectureManager: HIGH MEMORY USAGE WARNING"));
+        return false;
+    }
     
     return true;
 }
 
-void UEng_ArchitectureManager::OnModuleLoaded(const FString& ModuleName)
+bool UEng_ArchitectureManager::CheckFrameRate()
 {
-    UE_LOG(LogTemp, Log, TEXT("ArchitectureManager: Module %s loaded successfully"), *ModuleName);
+    // Get current frame time
+    float CurrentFrameTime = FApp::GetDeltaTime() * 1000.0f; // Convert to ms
+    
+    UE_LOG(LogTemp, Warning, TEXT("ArchitectureManager: Current frame time %.2fms"), CurrentFrameTime);
+    
+    // Warn if frame time is too high (below 30 FPS)
+    if (CurrentFrameTime > 33.33f)
+    {
+        UE_LOG(LogTemp, Error, TEXT("ArchitectureManager: LOW FRAME RATE WARNING"));
+        return false;
+    }
+    
+    return true;
 }
 
-void UEng_ArchitectureManager::OnModuleUnloaded(const FString& ModuleName)
+void UEng_ArchitectureManager::GenerateArchitectureReport()
 {
-    UE_LOG(LogTemp, Log, TEXT("ArchitectureManager: Module %s unloaded successfully"), *ModuleName);
+    UE_LOG(LogTemp, Warning, TEXT("=== TRANSPERSONAL GAME ARCHITECTURE REPORT ==="));
+    
+    // System validation
+    bool bSystemHealthy = ValidateSystemIntegrity();
+    UE_LOG(LogTemp, Warning, TEXT("System Health: %s"), bSystemHealthy ? TEXT("HEALTHY") : TEXT("ISSUES DETECTED"));
+    
+    // Performance metrics
+    FEng_SystemPerformanceMetrics Metrics = GetCurrentPerformanceMetrics();
+    UE_LOG(LogTemp, Warning, TEXT("Performance Summary:"));
+    UE_LOG(LogTemp, Warning, TEXT("  Frame Time: %.2fms"), Metrics.FrameTime);
+    UE_LOG(LogTemp, Warning, TEXT("  Actor Count: %d/%d"), Metrics.ActorCount, MAX_TOTAL_ACTORS);
+    UE_LOG(LogTemp, Warning, TEXT("  Memory Usage: %.1fMB"), Metrics.MemoryUsageMB);
+    
+    // Module status
+    UE_LOG(LogTemp, Warning, TEXT("Module Status:"));
+    TArray<FEng_ModuleLoadInfo> Modules = GetLoadedModuleInfo();
+    for (const FEng_ModuleLoadInfo& Module : Modules)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("  %s: %s"), *Module.ModuleName, 
+               Module.bIsLoaded ? TEXT("OK") : TEXT("FAILED"));
+    }
+    
+    UE_LOG(LogTemp, Warning, TEXT("=== END ARCHITECTURE REPORT ==="));
+}
+
+void UEng_ArchitectureManager::UpdatePerformanceMetrics()
+{
+    LastPerformanceMetrics.FrameTime = FApp::GetDeltaTime() * 1000.0f;
+    LastPerformanceMetrics.ActorCount = GetTotalActorCount();
+    
+    // Get memory stats
+    FPlatformMemoryStats MemStats = FPlatformMemory::GetStats();
+    LastPerformanceMetrics.MemoryUsageMB = MemStats.UsedPhysical / (1024.0f * 1024.0f);
+    LastPerformanceMetrics.GPUMemoryUsageMB = 0.0f; // Would need GPU stats
+    
+    LastPerformanceMetrics.ComponentCount = 0; // Would need component iteration
+}
+
+void UEng_ArchitectureManager::CheckSystemHealth()
+{
+    if (!bPerformanceMonitoringActive)
+    {
+        return;
+    }
+    
+    float CurrentTime = FApp::GetCurrentTime();
+    if (CurrentTime - LastHealthCheckTime > 5.0f) // Check every 5 seconds
+    {
+        ValidateSystemIntegrity();
+        LastHealthCheckTime = CurrentTime;
+    }
+}
+
+void UEng_ArchitectureManager::ValidateActorCounts()
+{
+    int32 TotalActors = GetTotalActorCount();
+    
+    if (TotalActors > MAX_TOTAL_ACTORS)
+    {
+        UE_LOG(LogTemp, Error, TEXT("ArchitectureManager: Actor count exceeded - %d/%d"), 
+               TotalActors, MAX_TOTAL_ACTORS);
+        CleanupExcessActors();
+    }
+}
+
+void UEng_ArchitectureManager::CleanupExcessActors()
+{
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        return;
+    }
+    
+    TArray<AActor*> ActorsToDestroy;
+    
+    // Find non-essential actors to remove
+    for (TActorIterator<AStaticMeshActor> ActorItr(World); ActorItr; ++ActorItr)
+    {
+        AActor* Actor = *ActorItr;
+        if (Actor && !Actor->IsA<APawn>() && !Actor->GetName().Contains(TEXT("PlayerStart")))
+        {
+            ActorsToDestroy.Add(Actor);
+            
+            // Stop when we have enough to remove
+            if (ActorsToDestroy.Num() >= (GetTotalActorCount() - MAX_TOTAL_ACTORS))
+            {
+                break;
+            }
+        }
+    }
+    
+    // Destroy excess actors
+    for (AActor* Actor : ActorsToDestroy)
+    {
+        if (Actor)
+        {
+            Actor->Destroy();
+        }
+    }
+    
+    UE_LOG(LogTemp, Warning, TEXT("ArchitectureManager: Cleaned up %d excess actors"), ActorsToDestroy.Num());
 }
