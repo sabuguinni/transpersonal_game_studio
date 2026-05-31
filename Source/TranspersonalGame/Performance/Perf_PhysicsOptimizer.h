@@ -3,44 +3,42 @@
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
 #include "Engine/World.h"
+#include "Components/StaticMeshComponent.h"
 #include "Components/SkeletalMeshComponent.h"
-#include "PhysicsEngine/PhysicsAsset.h"
+#include "PhysicsEngine/BodyInstance.h"
 #include "Perf_PhysicsOptimizer.generated.h"
 
 UENUM(BlueprintType)
-enum class EPerf_PhysicsLOD : uint8
+enum class EPerf_PhysicsLODLevel : uint8
 {
-    Disabled    UMETA(DisplayName = "Disabled"),
-    Simplified  UMETA(DisplayName = "Simplified"),
-    Standard    UMETA(DisplayName = "Standard"),
-    Full        UMETA(DisplayName = "Full")
+    High = 0,
+    Medium = 1,
+    Low = 2,
+    Disabled = 3
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FPerf_PhysicsSettings
+struct FPerf_PhysicsProfile
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics LOD")
-    float FullPhysicsDistance = 1000.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Performance")
+    float MaxSimulationDistance = 5000.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics LOD")
-    float StandardPhysicsDistance = 2500.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Performance")
+    int32 MaxActivePhysicsBodies = 100;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics LOD")
-    float SimplifiedPhysicsDistance = 5000.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Performance")
+    float PhysicsTickRate = 60.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics LOD")
-    int32 MaxActiveRagdolls = 8;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Performance")
+    bool bEnableAdaptiveLOD = true;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics LOD")
-    float PhysicsUpdateRate = 60.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics LOD")
-    bool bEnableDistanceCulling = true;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Performance")
+    float LODUpdateInterval = 1.0f;
 };
 
-UCLASS(ClassGroup=(Performance), meta=(BlueprintSpawnableComponent))
+UCLASS(ClassGroup=(TranspersonalGame), meta=(BlueprintSpawnableComponent))
 class TRANSPERSONALGAME_API UPerf_PhysicsOptimizer : public UActorComponent
 {
     GENERATED_BODY()
@@ -52,75 +50,46 @@ protected:
     virtual void BeginPlay() override;
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Performance")
+    FPerf_PhysicsProfile PhysicsProfile;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Performance")
+    EPerf_PhysicsLODLevel CurrentLODLevel = EPerf_PhysicsLODLevel::High;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Physics Performance")
+    int32 ActivePhysicsBodiesCount = 0;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Physics Performance")
+    float LastLODUpdateTime = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Physics Performance")
+    float CurrentFrameTime = 0.0f;
+
 public:
-    // Physics LOD Management
-    UFUNCTION(BlueprintCallable, Category = "Physics Optimization")
-    void OptimizePhysicsForDistance(float PlayerDistance);
+    UFUNCTION(BlueprintCallable, Category = "Physics Performance")
+    void OptimizePhysicsForPerformance();
 
-    UFUNCTION(BlueprintCallable, Category = "Physics Optimization")
-    void SetPhysicsLOD(EPerf_PhysicsLOD NewLOD);
+    UFUNCTION(BlueprintCallable, Category = "Physics Performance")
+    void SetPhysicsLODLevel(EPerf_PhysicsLODLevel NewLODLevel);
 
-    UFUNCTION(BlueprintCallable, Category = "Physics Optimization")
-    EPerf_PhysicsLOD GetCurrentPhysicsLOD() const { return CurrentPhysicsLOD; }
+    UFUNCTION(BlueprintCallable, Category = "Physics Performance")
+    void UpdatePhysicsLOD();
 
-    // Ragdoll Optimization
-    UFUNCTION(BlueprintCallable, Category = "Physics Optimization")
-    void OptimizeRagdollPhysics(USkeletalMeshComponent* SkeletalMesh, float Distance);
+    UFUNCTION(BlueprintCallable, Category = "Physics Performance")
+    int32 GetActivePhysicsBodiesCount() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Physics Optimization")
-    void EnableRagdollOptimization(bool bEnable);
+    UFUNCTION(BlueprintCallable, Category = "Physics Performance")
+    void DisableDistantPhysics();
 
-    // Performance Monitoring
-    UFUNCTION(BlueprintCallable, Category = "Physics Optimization")
-    float GetPhysicsPerformanceMetric() const;
+    UFUNCTION(BlueprintCallable, Category = "Physics Performance")
+    void OptimizeCollisionComplexity();
 
-    UFUNCTION(BlueprintCallable, Category = "Physics Optimization")
-    int32 GetActiveRagdollCount() const;
-
-    // Collision Optimization
-    UFUNCTION(BlueprintCallable, Category = "Physics Optimization")
-    void OptimizeCollisionComplexity(float Distance);
-
-    UFUNCTION(BlueprintCallable, Category = "Physics Optimization")
-    void SetCollisionLOD(int32 LODLevel);
-
-    // Batch Operations
-    UFUNCTION(BlueprintCallable, Category = "Physics Optimization")
-    void OptimizeAllPhysicsActors();
-
-    UFUNCTION(BlueprintCallable, Category = "Physics Optimization")
-    void UpdatePhysicsLODForAllActors();
-
-    // Settings
-    UFUNCTION(BlueprintCallable, Category = "Physics Optimization")
-    void SetPhysicsSettings(const FPerf_PhysicsSettings& NewSettings);
-
-    UFUNCTION(BlueprintCallable, Category = "Physics Optimization")
-    FPerf_PhysicsSettings GetPhysicsSettings() const { return PhysicsSettings; }
-
-protected:
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Physics Settings")
-    FPerf_PhysicsSettings PhysicsSettings;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Physics State")
-    EPerf_PhysicsLOD CurrentPhysicsLOD;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Physics State")
-    int32 ActiveRagdollCount;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Physics State")
-    float LastOptimizationTime;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Physics State")
-    TArray<TWeakObjectPtr<USkeletalMeshComponent>> TrackedRagdolls;
+    UFUNCTION(BlueprintCallable, Category = "Physics Performance")
+    float GetCurrentFrameTime() const { return CurrentFrameTime; }
 
 private:
-    void UpdateRagdollTracking();
-    void ApplyPhysicsLOD(USkeletalMeshComponent* SkeletalMesh, EPerf_PhysicsLOD LODLevel);
+    void CountActivePhysicsBodies();
+    void ApplyLODSettings();
     float CalculateDistanceToPlayer(AActor* Actor);
-    void CleanupInvalidRagdolls();
-    void LimitActiveRagdolls();
-
-    float OptimizationUpdateInterval = 0.1f;
-    float LastUpdateTime = 0.0f;
+    void OptimizeActorPhysics(AActor* Actor, float Distance);
 };
