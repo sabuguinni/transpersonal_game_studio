@@ -1,19 +1,20 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
-#include "Components/SceneComponent.h"
 #include "Engine/World.h"
+#include "Subsystems/WorldSubsystem.h"
+#include "Engine/StaticMeshActor.h"
+#include "Components/StaticMeshComponent.h"
 #include "SharedTypes.h"
 #include "World_BiomeManager.generated.h"
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FWorld_BiomeData
+struct TRANSPERSONALGAME_API FWorld_BiomeConfig
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    EWorld_BiomeType BiomeType;
+    FString BiomeName;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
     FVector CenterLocation;
@@ -22,158 +23,62 @@ struct TRANSPERSONALGAME_API FWorld_BiomeData
     float Radius;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float Temperature;
+    float VegetationDensity;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float Humidity;
+    float RockDensity;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float Elevation;
+    int32 MaxActorsPerBiome;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    bool bHasWaterBodies;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    int32 VegetationDensity;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    TArray<FString> AvailableSpecies;
-
-    FWorld_BiomeData()
+    FWorld_BiomeConfig()
     {
-        BiomeType = EWorld_BiomeType::Savanna;
+        BiomeName = TEXT("Default");
         CenterLocation = FVector::ZeroVector;
-        Radius = 10000.0f;
-        Temperature = 25.0f;
-        Humidity = 50.0f;
-        Elevation = 100.0f;
-        bHasWaterBodies = true;
-        VegetationDensity = 50;
+        Radius = 15000.0f;
+        VegetationDensity = 0.5f;
+        RockDensity = 0.3f;
+        MaxActorsPerBiome = 1000;
     }
 };
 
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FWorld_WaterBodyData
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water")
-    EWorld_WaterType WaterType;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water")
-    FVector Location;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water")
-    FVector Scale;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water")
-    float FlowSpeed;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water")
-    float Depth;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water")
-    bool bIsDrinkable;
-
-    FWorld_WaterBodyData()
-    {
-        WaterType = EWorld_WaterType::River;
-        Location = FVector::ZeroVector;
-        Scale = FVector(1000.0f, 200.0f, 50.0f);
-        FlowSpeed = 100.0f;
-        Depth = 200.0f;
-        bIsDrinkable = true;
-    }
-};
-
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API AWorld_BiomeManager : public AActor
+UCLASS()
+class TRANSPERSONALGAME_API UWorld_BiomeManager : public UWorldSubsystem
 {
     GENERATED_BODY()
 
 public:
-    AWorld_BiomeManager();
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
+
+    UFUNCTION(BlueprintCallable, Category = "World Generation")
+    void InitializeBiomes();
+
+    UFUNCTION(BlueprintCallable, Category = "World Generation")
+    void PopulateBiome(const FString& BiomeName, int32 VegetationCount, int32 RockCount);
+
+    UFUNCTION(BlueprintCallable, Category = "World Generation")
+    FVector GetRandomLocationInBiome(const FString& BiomeName);
+
+    UFUNCTION(BlueprintCallable, Category = "World Generation")
+    int32 GetActorCountInBiome(const FString& BiomeName);
+
+    UFUNCTION(BlueprintCallable, Category = "World Generation")
+    void CleanupExcessActors();
+
+    UFUNCTION(BlueprintCallable, Category = "World Generation")
+    TArray<FString> GetAllBiomeNames();
 
 protected:
-    virtual void BeginPlay() override;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Biomes")
+    TArray<FWorld_BiomeConfig> BiomeConfigs;
 
-public:
-    virtual void Tick(float DeltaTime) override;
-
-    // Core biome management
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World Generation")
-    TArray<FWorld_BiomeData> BiomeRegions;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World Generation")
-    TArray<FWorld_WaterBodyData> WaterBodies;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World Generation")
-    float WorldSize;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World Generation")
-    int32 BiomeTransitionDistance;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World Generation")
-    bool bEnableProceduralGeneration;
-
-    // Biome detection and management
-    UFUNCTION(BlueprintCallable, Category = "Biome Management")
-    EWorld_BiomeType GetBiomeAtLocation(const FVector& Location);
-
-    UFUNCTION(BlueprintCallable, Category = "Biome Management")
-    FWorld_BiomeData GetBiomeData(EWorld_BiomeType BiomeType);
-
-    UFUNCTION(BlueprintCallable, Category = "Biome Management")
-    float GetTemperatureAtLocation(const FVector& Location);
-
-    UFUNCTION(BlueprintCallable, Category = "Biome Management")
-    float GetHumidityAtLocation(const FVector& Location);
-
-    UFUNCTION(BlueprintCallable, Category = "Biome Management")
-    bool IsLocationNearWater(const FVector& Location, float SearchRadius = 1000.0f);
-
-    // Procedural generation
-    UFUNCTION(BlueprintCallable, Category = "World Generation")
-    void GenerateWorldBiomes();
-
-    UFUNCTION(BlueprintCallable, Category = "World Generation")
-    void SpawnWaterBodies();
-
-    UFUNCTION(BlueprintCallable, Category = "World Generation")
-    void PopulateBiomeVegetation(EWorld_BiomeType BiomeType);
-
-    UFUNCTION(BlueprintCallable, Category = "World Generation")
-    void SpawnBiomeSpecificDinosaurs();
-
-    // Environmental effects
-    UFUNCTION(BlueprintCallable, Category = "Environment")
-    void UpdateEnvironmentalEffects();
-
-    UFUNCTION(BlueprintCallable, Category = "Environment")
-    void ApplyBiomeWeatherEffects(EWorld_BiomeType BiomeType);
-
-    // Debug and visualization
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Debug")
-    void DebugVisualizeBiomes();
-
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Debug")
-    void ClearDebugVisualization();
+    UPROPERTY()
+    TMap<FString, TArray<AActor*>> BiomeActors;
 
 private:
-    // Internal biome calculation
-    float CalculateBiomeInfluence(const FVector& Location, const FWorld_BiomeData& BiomeData);
-    FVector GetNearestWaterBody(const FVector& Location);
-    void InitializeDefaultBiomes();
-    void ValidateBiomeConfiguration();
-
-    // Component references
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components", meta = (AllowPrivateAccess = "true"))
-    USceneComponent* RootSceneComponent;
-
-    // Runtime state
-    UPROPERTY()
-    bool bBiomesInitialized;
-
-    UPROPERTY()
-    float LastUpdateTime;
+    void SetupDefaultBiomes();
+    AActor* SpawnVegetationActor(const FVector& Location);
+    AActor* SpawnRockActor(const FVector& Location);
+    bool IsLocationInBiome(const FVector& Location, const FWorld_BiomeConfig& Biome);
 };
