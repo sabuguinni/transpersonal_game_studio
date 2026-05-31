@@ -3,262 +3,347 @@
 #include "Engine/ExponentialHeightFog.h"
 #include "Components/ExponentialHeightFogComponent.h"
 #include "Kismet/GameplayStatics.h"
+#include "Engine/Engine.h"
 
-ALight_VolumetricFogManager::ALight_VolumetricFogManager()
+ULight_VolumetricFogManager::ULight_VolumetricFogManager()
 {
-    PrimaryActorTick.bCanEverTick = true;
-    PrimaryActorTick.TickInterval = 0.1f;
-
-    // Create fog component
-    FogComponent = CreateDefaultSubobject<UExponentialHeightFogComponent>(TEXT("FogComponent"));
-    RootComponent = FogComponent;
-
-    // Initialize default settings
-    TimeOfDayFogIntensityMultiplier = 1.0f;
-    WeatherFogIntensityMultiplier = 1.0f;
-    FogTransitionSpeed = 2.0f;
-    bEnableCretaceousAtmosphere = true;
-    CretaceousHumidityFactor = 1.5f;
-    FogUpdateInterval = 0.1f;
+    PrimaryComponentTick.bCanEverTick = true;
+    PrimaryComponentTick.TickInterval = 0.1f;
     
-    bIsTransitioning = false;
-    FogTransitionTime = 0.0f;
-    FogTransitionDuration = 0.0f;
-    LastFogUpdateTime = 0.0f;
+    HeightFogActor = nullptr;
+    HeightFogComponent = nullptr;
+    bFogSystemInitialized = false;
 }
 
-void ALight_VolumetricFogManager::BeginPlay()
+void ULight_VolumetricFogManager::BeginPlay()
 {
     Super::BeginPlay();
     
-    InitializeBiomeFogSettings();
-    
-    if (bEnableCretaceousAtmosphere)
-    {
-        ApplyCretaceousAtmosphericSettings();
-    }
-    
-    // Set initial fog settings for Savana biome
-    SetBiomeFog(EBiomeType::Savana);
+    InitializeFogSystem();
+    InitializeBiomeFogProfiles();
+    UpdateFogSettings();
 }
 
-void ALight_VolumetricFogManager::Tick(float DeltaTime)
+void ULight_VolumetricFogManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
-    Super::Tick(DeltaTime);
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
     
-    float CurrentTime = GetWorld()->GetTimeSeconds();
-    
-    // Update fog transition if active
-    if (bIsTransitioning)
+    if (!bFogSystemInitialized)
     {
-        UpdateFogTransition(DeltaTime);
-    }
-    
-    // Periodic fog updates based on interval
-    if (CurrentTime - LastFogUpdateTime >= FogUpdateInterval)
-    {
-        LastFogUpdateTime = CurrentTime;
-        
-        // Update fog based on time of day (simplified cycle)
-        float TimeOfDay = FMath::Fmod(CurrentTime / 60.0f, 24.0f); // 1 minute = 1 hour
-        UpdateFogForTimeOfDay(TimeOfDay);
-    }
-}
-
-void ALight_VolumetricFogManager::InitializeBiomeFogSettings()
-{
-    // Savana - Clear grassland with light morning mist
-    FLight_BiomeFogSettings SavanaFog;
-    SavanaFog.FogDensity = 0.015f;
-    SavanaFog.FogHeightFalloff = 0.3f;
-    SavanaFog.FogInscatteringColor = FLinearColor(0.8f, 0.7f, 0.5f, 1.0f);
-    SavanaFog.VolumetricFogScatteringDistribution = 0.1f;
-    SavanaFog.VolumetricFogExtinctionScale = 0.8f;
-    SavanaFog.VolumetricFogDistance = 8000.0f;
-    SavanaFog.VolumetricFogAlbedo = FLinearColor(1.0f, 0.95f, 0.85f, 1.0f);
-    BiomeFogSettings.Add(EBiomeType::Savana, SavanaFog);
-
-    // Pantano - Dense swamp mist with green tint
-    FLight_BiomeFogSettings PantanoFog;
-    PantanoFog.FogDensity = 0.08f;
-    PantanoFog.FogHeightFalloff = 0.15f;
-    PantanoFog.FogInscatteringColor = FLinearColor(0.4f, 0.7f, 0.5f, 1.0f);
-    PantanoFog.VolumetricFogScatteringDistribution = 0.4f;
-    PantanoFog.VolumetricFogExtinctionScale = 1.5f;
-    PantanoFog.VolumetricFogDistance = 4000.0f;
-    PantanoFog.VolumetricFogAlbedo = FLinearColor(0.8f, 1.0f, 0.9f, 1.0f);
-    BiomeFogSettings.Add(EBiomeType::Pantano, PantanoFog);
-
-    // Floresta - Dappled forest mist filtering through canopy
-    FLight_BiomeFogSettings FlorestaFog;
-    FlorestaFog.FogDensity = 0.04f;
-    FlorestaFog.FogHeightFalloff = 0.25f;
-    FlorestaFog.FogInscatteringColor = FLinearColor(0.5f, 0.8f, 0.6f, 1.0f);
-    FlorestaFog.VolumetricFogScatteringDistribution = 0.3f;
-    FlorestaFog.VolumetricFogExtinctionScale = 1.2f;
-    FlorestaFog.VolumetricFogDistance = 5000.0f;
-    FlorestaFog.VolumetricFogAlbedo = FLinearColor(0.9f, 1.0f, 0.95f, 1.0f);
-    BiomeFogSettings.Add(EBiomeType::Floresta, FlorestaFog);
-
-    // Deserto - Heat shimmer and dust particles
-    FLight_BiomeFogSettings DesertoFog;
-    DesertoFog.FogDensity = 0.01f;
-    DesertoFog.FogHeightFalloff = 0.5f;
-    DesertoFog.FogInscatteringColor = FLinearColor(1.0f, 0.8f, 0.6f, 1.0f);
-    DesertoFog.VolumetricFogScatteringDistribution = 0.05f;
-    DesertoFog.VolumetricFogExtinctionScale = 0.5f;
-    DesertoFog.VolumetricFogDistance = 12000.0f;
-    DesertoFog.VolumetricFogAlbedo = FLinearColor(1.0f, 0.9f, 0.8f, 1.0f);
-    BiomeFogSettings.Add(EBiomeType::Deserto, DesertoFog);
-
-    // Montanha - Cool mountain mist with blue tint
-    FLight_BiomeFogSettings MontanhaFog;
-    MontanhaFog.FogDensity = 0.06f;
-    MontanhaFog.FogHeightFalloff = 0.1f;
-    MontanhaFog.FogInscatteringColor = FLinearColor(0.6f, 0.7f, 1.0f, 1.0f);
-    MontanhaFog.VolumetricFogScatteringDistribution = 0.2f;
-    MontanhaFog.VolumetricFogExtinctionScale = 1.0f;
-    MontanhaFog.VolumetricFogDistance = 6000.0f;
-    MontanhaFog.VolumetricFogAlbedo = FLinearColor(0.95f, 0.98f, 1.0f, 1.0f);
-    BiomeFogSettings.Add(EBiomeType::Montanha, MontanhaFog);
-}
-
-void ALight_VolumetricFogManager::SetBiomeFog(EBiomeType BiomeType)
-{
-    if (BiomeFogSettings.Contains(BiomeType))
-    {
-        const FLight_BiomeFogSettings& Settings = BiomeFogSettings[BiomeType];
-        TransitionToFogSettings(Settings, FogTransitionSpeed);
-    }
-}
-
-void ALight_VolumetricFogManager::UpdateFogForTimeOfDay(float TimeOfDay)
-{
-    if (!FogComponent)
         return;
-
-    // Dawn (5-7): Increase fog density
-    // Day (7-17): Normal fog
-    // Dusk (17-19): Increase fog density
-    // Night (19-5): Moderate fog with cooler tint
-
-    float FogMultiplier = 1.0f;
+    }
     
-    if (TimeOfDay >= 5.0f && TimeOfDay <= 7.0f) // Dawn
+    // Auto-detect biome if enabled
+    if (bAutoDetectBiome)
     {
-        FogMultiplier = 1.5f;
+        DetectCurrentBiome();
     }
-    else if (TimeOfDay >= 17.0f && TimeOfDay <= 19.0f) // Dusk
-    {
-        FogMultiplier = 1.3f;
-    }
-    else if (TimeOfDay >= 19.0f || TimeOfDay <= 5.0f) // Night
-    {
-        FogMultiplier = 1.1f;
-    }
-
-    TimeOfDayFogIntensityMultiplier = FogMultiplier;
     
-    // Apply the multiplier to current settings
-    float AdjustedDensity = CurrentFogSettings.FogDensity * TimeOfDayFogIntensityMultiplier * WeatherFogIntensityMultiplier;
-    FogComponent->SetFogDensity(AdjustedDensity);
+    // Update fog if time or biome changed
+    if (CurrentTimeOfDay != LastTimeOfDay || CurrentBiome != LastBiome)
+    {
+        UpdateFogSettings();
+        LastTimeOfDay = CurrentTimeOfDay;
+        LastBiome = CurrentBiome;
+    }
 }
 
-void ALight_VolumetricFogManager::UpdateFogForWeather(EWeatherType WeatherType)
+void ULight_VolumetricFogManager::SetTimeOfDay(float NewTimeOfDay)
 {
-    switch (WeatherType)
+    CurrentTimeOfDay = FMath::Clamp(NewTimeOfDay, 0.0f, 24.0f);
+    UpdateFogSettings();
+}
+
+void ULight_VolumetricFogManager::SetCurrentBiome(EBiomeType NewBiome)
+{
+    CurrentBiome = NewBiome;
+    UpdateFogSettings();
+}
+
+void ULight_VolumetricFogManager::UpdateFogSettings()
+{
+    if (!HeightFogComponent || !bFogSystemInitialized)
     {
-        case EWeatherType::Clear:
-            WeatherFogIntensityMultiplier = 1.0f;
+        return;
+    }
+    
+    FLight_VolumetricFogSettings CurrentSettings = GetCurrentFogSettings();
+    ApplyFogSettingsToComponent(CurrentSettings);
+}
+
+FLight_VolumetricFogSettings ULight_VolumetricFogManager::GetCurrentFogSettings() const
+{
+    FLight_BiomeFogProfile* BiomeProfile = const_cast<ULight_VolumetricFogManager*>(this)->GetBiomeFogProfile(CurrentBiome);
+    if (!BiomeProfile)
+    {
+        return FLight_VolumetricFogSettings();
+    }
+    
+    EDayNightPhase CurrentPhase = GetCurrentDayNightPhase();
+    float TimeAlpha = GetTimeOfDayAlpha();
+    
+    FLight_VolumetricFogSettings ResultSettings;
+    
+    switch (CurrentPhase)
+    {
+        case EDayNightPhase::Dawn:
+            ResultSettings = InterpolateFogSettings(BiomeProfile->NightSettings, BiomeProfile->DaySettings, TimeAlpha);
             break;
-        case EWeatherType::Cloudy:
-            WeatherFogIntensityMultiplier = 1.2f;
+        case EDayNightPhase::Day:
+            ResultSettings = BiomeProfile->DaySettings;
             break;
-        case EWeatherType::Rainy:
-            WeatherFogIntensityMultiplier = 2.0f;
+        case EDayNightPhase::Dusk:
+            ResultSettings = InterpolateFogSettings(BiomeProfile->DaySettings, BiomeProfile->NightSettings, TimeAlpha);
             break;
-        case EWeatherType::Stormy:
-            WeatherFogIntensityMultiplier = 1.8f;
-            break;
-        case EWeatherType::Foggy:
-            WeatherFogIntensityMultiplier = 3.0f;
+        case EDayNightPhase::Night:
+            ResultSettings = BiomeProfile->NightSettings;
             break;
         default:
-            WeatherFogIntensityMultiplier = 1.0f;
+            ResultSettings = BiomeProfile->DaySettings;
             break;
+    }
+    
+    return ResultSettings;
+}
+
+void ULight_VolumetricFogManager::InitializeBiomeFogProfiles()
+{
+    BiomeFogProfiles.Empty();
+    
+    // Savana Profile
+    FLight_BiomeFogProfile SavanaProfile;
+    SavanaProfile.BiomeType = EBiomeType::Savana;
+    SavanaProfile.DaySettings.FogDensity = 0.01f;
+    SavanaProfile.DaySettings.FogInscatteringColor = FLinearColor(1.0f, 0.9f, 0.7f);
+    SavanaProfile.DaySettings.VolumetricFogDistance = 8000.0f;
+    SavanaProfile.NightSettings.FogDensity = 0.03f;
+    SavanaProfile.NightSettings.FogInscatteringColor = FLinearColor(0.3f, 0.4f, 0.7f);
+    SavanaProfile.NightSettings.VolumetricFogDistance = 5000.0f;
+    BiomeFogProfiles.Add(SavanaProfile);
+    
+    // Pantano Profile
+    FLight_BiomeFogProfile PantanoProfile;
+    PantanoProfile.BiomeType = EBiomeType::Pantano;
+    PantanoProfile.DaySettings.FogDensity = 0.08f;
+    PantanoProfile.DaySettings.FogInscatteringColor = FLinearColor(0.7f, 0.9f, 0.8f);
+    PantanoProfile.DaySettings.VolumetricFogDistance = 3000.0f;
+    PantanoProfile.NightSettings.FogDensity = 0.12f;
+    PantanoProfile.NightSettings.FogInscatteringColor = FLinearColor(0.2f, 0.5f, 0.4f);
+    PantanoProfile.NightSettings.VolumetricFogDistance = 2000.0f;
+    BiomeFogProfiles.Add(PantanoProfile);
+    
+    // Floresta Profile
+    FLight_BiomeFogProfile FlorestaProfile;
+    FlorestaProfile.BiomeType = EBiomeType::Floresta;
+    FlorestaProfile.DaySettings.FogDensity = 0.04f;
+    FlorestaProfile.DaySettings.FogInscatteringColor = FLinearColor(0.6f, 0.9f, 0.6f);
+    FlorestaProfile.DaySettings.VolumetricFogDistance = 4000.0f;
+    FlorestaProfile.NightSettings.FogDensity = 0.07f;
+    FlorestaProfile.NightSettings.FogInscatteringColor = FLinearColor(0.2f, 0.4f, 0.3f);
+    FlorestaProfile.NightSettings.VolumetricFogDistance = 2500.0f;
+    BiomeFogProfiles.Add(FlorestaProfile);
+    
+    // Deserto Profile
+    FLight_BiomeFogProfile DesertoProfile;
+    DesertoProfile.BiomeType = EBiomeType::Deserto;
+    DesertoProfile.DaySettings.FogDensity = 0.005f;
+    DesertoProfile.DaySettings.FogInscatteringColor = FLinearColor(1.0f, 0.8f, 0.6f);
+    DesertoProfile.DaySettings.VolumetricFogDistance = 12000.0f;
+    DesertoProfile.NightSettings.FogDensity = 0.02f;
+    DesertoProfile.NightSettings.FogInscatteringColor = FLinearColor(0.4f, 0.4f, 0.6f);
+    DesertoProfile.NightSettings.VolumetricFogDistance = 8000.0f;
+    BiomeFogProfiles.Add(DesertoProfile);
+    
+    // Montanha Profile
+    FLight_BiomeFogProfile MontanhaProfile;
+    MontanhaProfile.BiomeType = EBiomeType::Montanha;
+    MontanhaProfile.DaySettings.FogDensity = 0.06f;
+    MontanhaProfile.DaySettings.FogInscatteringColor = FLinearColor(0.8f, 0.9f, 1.0f);
+    MontanhaProfile.DaySettings.VolumetricFogDistance = 6000.0f;
+    MontanhaProfile.NightSettings.FogDensity = 0.09f;
+    MontanhaProfile.NightSettings.FogInscatteringColor = FLinearColor(0.3f, 0.4f, 0.6f);
+    MontanhaProfile.NightSettings.VolumetricFogDistance = 4000.0f;
+    BiomeFogProfiles.Add(MontanhaProfile);
+}
+
+void ULight_VolumetricFogManager::DetectCurrentBiome()
+{
+    // Simple biome detection based on actor location
+    if (AActor* Owner = GetOwner())
+    {
+        FVector Location = Owner->GetActorLocation();
+        
+        // Biome detection based on coordinates
+        if (FVector::Dist2D(Location, FVector(-50000, -45000, 0)) < BiomeDetectionRadius)
+        {
+            CurrentBiome = EBiomeType::Pantano;
+        }
+        else if (FVector::Dist2D(Location, FVector(-45000, 40000, 0)) < BiomeDetectionRadius)
+        {
+            CurrentBiome = EBiomeType::Floresta;
+        }
+        else if (FVector::Dist2D(Location, FVector(55000, 0, 0)) < BiomeDetectionRadius)
+        {
+            CurrentBiome = EBiomeType::Deserto;
+        }
+        else if (FVector::Dist2D(Location, FVector(40000, 50000, 0)) < BiomeDetectionRadius)
+        {
+            CurrentBiome = EBiomeType::Montanha;
+        }
+        else
+        {
+            CurrentBiome = EBiomeType::Savana;
+        }
     }
 }
 
-void ALight_VolumetricFogManager::ApplyCretaceousAtmosphericSettings()
+FLight_VolumetricFogSettings ULight_VolumetricFogManager::InterpolateFogSettings(const FLight_VolumetricFogSettings& SettingsA, const FLight_VolumetricFogSettings& SettingsB, float Alpha) const
 {
-    if (!FogComponent)
-        return;
-
-    // Cretaceous period had higher humidity and CO2 levels
-    // This creates a denser, more humid atmosphere
+    FLight_VolumetricFogSettings Result;
     
-    FogComponent->SetVolumetricFog(true);
-    FogComponent->SetVolumetricFogScatteringDistribution(0.2f);
-    FogComponent->SetVolumetricFogExtinctionScale(1.2f * CretaceousHumidityFactor);
-    FogComponent->SetVolumetricFogDistance(6000.0f);
-    FogComponent->SetVolumetricFogStaticLightingScatteringIntensity(1.0f);
-    FogComponent->SetVolumetricFogEmissive(FLinearColor(0.0f, 0.0f, 0.0f, 0.0f));
+    Result.FogDensity = FMath::Lerp(SettingsA.FogDensity, SettingsB.FogDensity, Alpha);
+    Result.FogHeightFalloff = FMath::Lerp(SettingsA.FogHeightFalloff, SettingsB.FogHeightFalloff, Alpha);
+    Result.FogMaxOpacity = FMath::Lerp(SettingsA.FogMaxOpacity, SettingsB.FogMaxOpacity, Alpha);
+    Result.StartDistance = FMath::Lerp(SettingsA.StartDistance, SettingsB.StartDistance, Alpha);
+    Result.FogCutoffDistance = FMath::Lerp(SettingsA.FogCutoffDistance, SettingsB.FogCutoffDistance, Alpha);
+    Result.FogInscatteringColor = FLinearColor::LerpUsingHSV(SettingsA.FogInscatteringColor, SettingsB.FogInscatteringColor, Alpha);
+    Result.FogAlbedo = FLinearColor::LerpUsingHSV(SettingsA.FogAlbedo, SettingsB.FogAlbedo, Alpha);
+    Result.VolumetricFogScatteringDistribution = FMath::Lerp(SettingsA.VolumetricFogScatteringDistribution, SettingsB.VolumetricFogScatteringDistribution, Alpha);
+    Result.VolumetricFogExtinctionScale = FMath::Lerp(SettingsA.VolumetricFogExtinctionScale, SettingsB.VolumetricFogExtinctionScale, Alpha);
+    Result.VolumetricFogDistance = FMath::Lerp(SettingsA.VolumetricFogDistance, SettingsB.VolumetricFogDistance, Alpha);
+    Result.VolumetricFogStaticLightingScatteringIntensity = FMath::Lerp(SettingsA.VolumetricFogStaticLightingScatteringIntensity, SettingsB.VolumetricFogStaticLightingScatteringIntensity, Alpha);
+    Result.bOverrideLightColorsWithFogInscatteringColors = Alpha > 0.5f ? SettingsB.bOverrideLightColorsWithFogInscatteringColors : SettingsA.bOverrideLightColorsWithFogInscatteringColors;
     
-    // Enhanced atmospheric scattering for prehistoric feel
-    FogComponent->SetFogMaxOpacity(0.8f);
-    FogComponent->SetStartDistance(0.0f);
-    FogComponent->SetFogCutoffDistance(0.0f);
+    return Result;
 }
 
-void ALight_VolumetricFogManager::TransitionToFogSettings(const FLight_BiomeFogSettings& TargetSettings, float TransitionDuration)
+void ULight_VolumetricFogManager::ApplyFogSettingsToComponent(const FLight_VolumetricFogSettings& Settings)
 {
-    if (!FogComponent)
-        return;
-
-    TargetFogSettings = TargetSettings;
-    FogTransitionDuration = TransitionDuration;
-    FogTransitionTime = 0.0f;
-    bIsTransitioning = true;
-}
-
-void ALight_VolumetricFogManager::UpdateFogTransition(float DeltaTime)
-{
-    if (!bIsTransitioning || !FogComponent)
-        return;
-
-    FogTransitionTime += DeltaTime;
-    float Alpha = FMath::Clamp(FogTransitionTime / FogTransitionDuration, 0.0f, 1.0f);
-    
-    // Smooth transition curve
-    Alpha = FMath::SmoothStep(0.0f, 1.0f, Alpha);
-    
-    // Interpolate fog settings
-    FLight_BiomeFogSettings InterpolatedSettings;
-    InterpolatedSettings.FogDensity = FMath::Lerp(CurrentFogSettings.FogDensity, TargetFogSettings.FogDensity, Alpha);
-    InterpolatedSettings.FogHeightFalloff = FMath::Lerp(CurrentFogSettings.FogHeightFalloff, TargetFogSettings.FogHeightFalloff, Alpha);
-    InterpolatedSettings.FogInscatteringColor = FMath::Lerp(CurrentFogSettings.FogInscatteringColor, TargetFogSettings.FogInscatteringColor, Alpha);
-    InterpolatedSettings.VolumetricFogScatteringDistribution = FMath::Lerp(CurrentFogSettings.VolumetricFogScatteringDistribution, TargetFogSettings.VolumetricFogScatteringDistribution, Alpha);
-    InterpolatedSettings.VolumetricFogExtinctionScale = FMath::Lerp(CurrentFogSettings.VolumetricFogExtinctionScale, TargetFogSettings.VolumetricFogExtinctionScale, Alpha);
-    InterpolatedSettings.VolumetricFogDistance = FMath::Lerp(CurrentFogSettings.VolumetricFogDistance, TargetFogSettings.VolumetricFogDistance, Alpha);
-    InterpolatedSettings.VolumetricFogAlbedo = FMath::Lerp(CurrentFogSettings.VolumetricFogAlbedo, TargetFogSettings.VolumetricFogAlbedo, Alpha);
-    
-    // Apply interpolated settings
-    float AdjustedDensity = InterpolatedSettings.FogDensity * TimeOfDayFogIntensityMultiplier * WeatherFogIntensityMultiplier;
-    FogComponent->SetFogDensity(AdjustedDensity);
-    FogComponent->SetFogHeightFalloff(InterpolatedSettings.FogHeightFalloff);
-    FogComponent->SetFogInscatteringColor(InterpolatedSettings.FogInscatteringColor);
-    FogComponent->SetVolumetricFogScatteringDistribution(InterpolatedSettings.VolumetricFogScatteringDistribution);
-    FogComponent->SetVolumetricFogExtinctionScale(InterpolatedSettings.VolumetricFogExtinctionScale);
-    FogComponent->SetVolumetricFogDistance(InterpolatedSettings.VolumetricFogDistance);
-    FogComponent->SetVolumetricFogAlbedo(InterpolatedSettings.VolumetricFogAlbedo);
-    
-    // Update current settings
-    CurrentFogSettings = InterpolatedSettings;
-    
-    // Check if transition is complete
-    if (Alpha >= 1.0f)
+    if (!HeightFogComponent)
     {
-        bIsTransitioning = false;
-        CurrentFogSettings = TargetFogSettings;
+        return;
+    }
+    
+    HeightFogComponent->SetFogDensity(Settings.FogDensity);
+    HeightFogComponent->SetFogHeightFalloff(Settings.FogHeightFalloff);
+    HeightFogComponent->SetFogMaxOpacity(Settings.FogMaxOpacity);
+    HeightFogComponent->SetStartDistance(Settings.StartDistance);
+    HeightFogComponent->SetFogCutoffDistance(Settings.FogCutoffDistance);
+    HeightFogComponent->SetFogInscatteringColor(Settings.FogInscatteringColor);
+    HeightFogComponent->SetVolumetricFogAlbedo(Settings.FogAlbedo);
+    HeightFogComponent->SetVolumetricFogScatteringDistribution(Settings.VolumetricFogScatteringDistribution);
+    HeightFogComponent->SetVolumetricFogExtinctionScale(Settings.VolumetricFogExtinctionScale);
+    HeightFogComponent->SetVolumetricFogDistance(Settings.VolumetricFogDistance);
+    HeightFogComponent->SetVolumetricFogStaticLightingScatteringIntensity(Settings.VolumetricFogStaticLightingScatteringIntensity);
+    HeightFogComponent->SetbOverrideLightColorsWithFogInscatteringColors(Settings.bOverrideLightColorsWithFogInscatteringColors);
+}
+
+void ULight_VolumetricFogManager::CreateHeightFogActor()
+{
+    if (UWorld* World = GetWorld())
+    {
+        HeightFogActor = World->SpawnActor<AExponentialHeightFog>();
+        if (HeightFogActor)
+        {
+            HeightFogComponent = HeightFogActor->GetComponent();
+            if (HeightFogComponent)
+            {
+                HeightFogComponent->SetVolumetricFog(true);
+                bFogSystemInitialized = true;
+            }
+        }
+    }
+}
+
+void ULight_VolumetricFogManager::EnableVolumetricFog(bool bEnable)
+{
+    if (HeightFogComponent)
+    {
+        HeightFogComponent->SetVolumetricFog(bEnable);
+    }
+}
+
+void ULight_VolumetricFogManager::SetFogDensityMultiplier(float Multiplier)
+{
+    if (HeightFogComponent)
+    {
+        FLight_VolumetricFogSettings CurrentSettings = GetCurrentFogSettings();
+        CurrentSettings.FogDensity *= Multiplier;
+        ApplyFogSettingsToComponent(CurrentSettings);
+    }
+}
+
+void ULight_VolumetricFogManager::InitializeFogSystem()
+{
+    // Find existing height fog actor or create new one
+    if (UWorld* World = GetWorld())
+    {
+        TArray<AActor*> FoundActors;
+        UGameplayStatics::GetAllActorsOfClass(World, AExponentialHeightFog::StaticClass(), FoundActors);
+        
+        if (FoundActors.Num() > 0)
+        {
+            HeightFogActor = Cast<AExponentialHeightFog>(FoundActors[0]);
+            if (HeightFogActor)
+            {
+                HeightFogComponent = HeightFogActor->GetComponent();
+                if (HeightFogComponent)
+                {
+                    HeightFogComponent->SetVolumetricFog(true);
+                    bFogSystemInitialized = true;
+                }
+            }
+        }
+        else
+        {
+            CreateHeightFogActor();
+        }
+    }
+}
+
+FLight_BiomeFogProfile* ULight_VolumetricFogManager::GetBiomeFogProfile(EBiomeType BiomeType)
+{
+    for (FLight_BiomeFogProfile& Profile : BiomeFogProfiles)
+    {
+        if (Profile.BiomeType == BiomeType)
+        {
+            return &Profile;
+        }
+    }
+    return nullptr;
+}
+
+float ULight_VolumetricFogManager::GetTimeOfDayAlpha() const
+{
+    EDayNightPhase CurrentPhase = GetCurrentDayNightPhase();
+    
+    switch (CurrentPhase)
+    {
+        case EDayNightPhase::Dawn:
+            return (CurrentTimeOfDay - 5.0f) / 2.0f; // 5-7 AM
+        case EDayNightPhase::Dusk:
+            return (CurrentTimeOfDay - 18.0f) / 2.0f; // 6-8 PM
+        default:
+            return 0.0f;
+    }
+}
+
+EDayNightPhase ULight_VolumetricFogManager::GetCurrentDayNightPhase() const
+{
+    if (CurrentTimeOfDay >= 5.0f && CurrentTimeOfDay < 7.0f)
+    {
+        return EDayNightPhase::Dawn;
+    }
+    else if (CurrentTimeOfDay >= 7.0f && CurrentTimeOfDay < 18.0f)
+    {
+        return EDayNightPhase::Day;
+    }
+    else if (CurrentTimeOfDay >= 18.0f && CurrentTimeOfDay < 20.0f)
+    {
+        return EDayNightPhase::Dusk;
+    }
+    else
+    {
+        return EDayNightPhase::Night;
     }
 }
