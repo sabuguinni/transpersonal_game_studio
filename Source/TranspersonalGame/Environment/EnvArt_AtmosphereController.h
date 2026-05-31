@@ -5,7 +5,10 @@
 #include "Components/DirectionalLightComponent.h"
 #include "Components/SkyLightComponent.h"
 #include "Components/ExponentialHeightFogComponent.h"
-#include "Engine/World.h"
+#include "Engine/DirectionalLight.h"
+#include "Engine/SkyLight.h"
+#include "Engine/ExponentialHeightFog.h"
+#include "TranspersonalGame/TranspersonalGame.h"
 #include "EnvArt_AtmosphereController.generated.h"
 
 UENUM(BlueprintType)
@@ -13,25 +16,31 @@ enum class EEnvArt_TimeOfDay : uint8
 {
     Dawn        UMETA(DisplayName = "Dawn"),
     Morning     UMETA(DisplayName = "Morning"),
-    Noon        UMETA(DisplayName = "Noon"),
+    Midday      UMETA(DisplayName = "Midday"),
     Afternoon   UMETA(DisplayName = "Afternoon"),
     Dusk        UMETA(DisplayName = "Dusk"),
     Night       UMETA(DisplayName = "Night")
 };
 
 USTRUCT(BlueprintType)
-struct FEnvArt_AtmosphereSettings
+struct FEnvArt_LightingSettings
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
-    FLinearColor SunColor = FLinearColor(1.0f, 0.9f, 0.7f, 1.0f);
+    FLinearColor SunColor = FLinearColor::White;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
     float SunIntensity = 3.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
     FRotator SunRotation = FRotator(-30.0f, 45.0f, 0.0f);
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
+    FLinearColor SkyColor = FLinearColor(0.2f, 0.4f, 0.8f, 1.0f);
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
+    float SkyIntensity = 1.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fog")
     FLinearColor FogColor = FLinearColor(0.8f, 0.9f, 1.0f, 1.0f);
@@ -41,12 +50,6 @@ struct FEnvArt_AtmosphereSettings
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fog")
     float FogHeightFalloff = 0.2f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sky")
-    FLinearColor SkyColor = FLinearColor(0.3f, 0.6f, 1.0f, 1.0f);
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sky")
-    float SkyIntensity = 1.0f;
 };
 
 UCLASS(BlueprintType, Blueprintable)
@@ -59,49 +62,67 @@ public:
 
 protected:
     virtual void BeginPlay() override;
-
-public:
     virtual void Tick(float DeltaTime) override;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    UDirectionalLightComponent* SunLight;
+    // Lighting settings for different times of day
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Time of Day")
+    TMap<EEnvArt_TimeOfDay, FEnvArt_LightingSettings> TimeOfDaySettings;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    USkyLightComponent* SkyLight;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    UExponentialHeightFogComponent* HeightFog;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmosphere")
+    // Current time of day
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Time of Day")
     EEnvArt_TimeOfDay CurrentTimeOfDay = EEnvArt_TimeOfDay::Morning;
 
+    // Day/night cycle duration in seconds
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Time of Day")
+    float DayCycleDuration = 1200.0f; // 20 minutes
+
+    // Auto-cycle through times of day
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Time of Day")
+    bool bEnableAutoCycle = true;
+
+    // References to lighting actors in the scene
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Scene References")
+    ADirectionalLight* SunLight;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Scene References")
+    ASkyLight* SkyLight;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Scene References")
+    AExponentialHeightFog* HeightFog;
+
+    // Atmosphere enhancement settings
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmosphere")
-    bool bEnableDynamicTimeOfDay = false;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmosphere", meta = (ClampMin = "0.1", ClampMax = "10.0"))
-    float TimeOfDaySpeed = 1.0f;
+    bool bEnableVolumetricFog = true;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmosphere")
-    TMap<EEnvArt_TimeOfDay, FEnvArt_AtmosphereSettings> AtmospherePresets;
+    bool bEnableGodRays = true;
 
-    UFUNCTION(BlueprintCallable, Category = "Atmosphere")
-    void SetTimeOfDay(EEnvArt_TimeOfDay NewTimeOfDay);
-
-    UFUNCTION(BlueprintCallable, Category = "Atmosphere")
-    void ApplyAtmosphereSettings(const FEnvArt_AtmosphereSettings& Settings);
-
-    UFUNCTION(BlueprintCallable, Category = "Atmosphere")
-    void CreateGoldenHourAtmosphere();
-
-    UFUNCTION(BlueprintCallable, Category = "Atmosphere")
-    void CreateMorningMistAtmosphere();
-
-    UFUNCTION(BlueprintCallable, Category = "Atmosphere")
-    void CreateDramaticStormAtmosphere();
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmosphere")
+    float AtmosphereIntensity = 1.0f;
 
 private:
-    void InitializeAtmospherePresets();
-    void UpdateDynamicTimeOfDay(float DeltaTime);
+    float CurrentCycleTime = 0.0f;
     
-    float CurrentTimeOfDayFloat = 0.0f;
+    void InitializeTimeOfDaySettings();
+    void UpdateLighting();
+    void FindSceneLightingActors();
+    FEnvArt_LightingSettings GetCurrentLightingSettings();
+    FEnvArt_LightingSettings InterpolateLightingSettings(const FEnvArt_LightingSettings& A, const FEnvArt_LightingSettings& B, float Alpha);
+
+public:
+    // Blueprint callable functions
+    UFUNCTION(BlueprintCallable, Category = "Atmosphere Control")
+    void SetTimeOfDay(EEnvArt_TimeOfDay NewTimeOfDay);
+
+    UFUNCTION(BlueprintCallable, Category = "Atmosphere Control")
+    void SetCycleSpeed(float NewDuration);
+
+    UFUNCTION(BlueprintCallable, Category = "Atmosphere Control")
+    void EnableGoldenHourLighting();
+
+    UFUNCTION(BlueprintCallable, Category = "Atmosphere Control")
+    void CreateAtmosphericParticles();
+
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Editor Tools")
+    void RefreshLightingReferences();
 };
