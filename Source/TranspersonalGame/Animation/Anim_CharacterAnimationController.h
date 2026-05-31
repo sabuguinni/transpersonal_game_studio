@@ -6,42 +6,8 @@
 #include "Animation/AnimMontage.h"
 #include "Animation/BlendSpace.h"
 #include "Engine/Engine.h"
-#include "../SharedTypes.h"
+#include "SharedTypes.h"
 #include "Anim_CharacterAnimationController.generated.h"
-
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FAnim_MovementData
-{
-    GENERATED_BODY()
-
-    UPROPERTY(BlueprintReadWrite, Category = "Movement")
-    float Speed = 0.0f;
-
-    UPROPERTY(BlueprintReadWrite, Category = "Movement")
-    float Direction = 0.0f;
-
-    UPROPERTY(BlueprintReadWrite, Category = "Movement")
-    bool bIsInAir = false;
-
-    UPROPERTY(BlueprintReadWrite, Category = "Movement")
-    bool bIsCrouching = false;
-
-    UPROPERTY(BlueprintReadWrite, Category = "Movement")
-    bool bIsRunning = false;
-
-    UPROPERTY(BlueprintReadWrite, Category = "Movement")
-    ECharacterState CharacterState = ECharacterState::Idle;
-
-    FAnim_MovementData()
-    {
-        Speed = 0.0f;
-        Direction = 0.0f;
-        bIsInAir = false;
-        bIsCrouching = false;
-        bIsRunning = false;
-        CharacterState = ECharacterState::Idle;
-    }
-};
 
 UCLASS(ClassGroup=(Animation), meta=(BlueprintSpawnableComponent))
 class TRANSPERSONALGAME_API UAnim_CharacterAnimationController : public UActorComponent
@@ -53,76 +19,121 @@ public:
 
 protected:
     virtual void BeginPlay() override;
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 public:
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+
     // Animation State Management
     UFUNCTION(BlueprintCallable, Category = "Animation")
-    void UpdateMovementData(float NewSpeed, float NewDirection, bool bInAir, bool bCrouching);
+    void SetMovementState(EAnim_MovementState NewState);
 
     UFUNCTION(BlueprintCallable, Category = "Animation")
-    void SetCharacterState(ECharacterState NewState);
+    void SetCombatState(EAnim_CombatState NewState);
 
     UFUNCTION(BlueprintCallable, Category = "Animation")
-    void PlayAnimationMontage(UAnimMontage* Montage, float PlayRate = 1.0f);
+    void PlayMontage(UAnimMontage* Montage, float PlayRate = 1.0f);
 
     UFUNCTION(BlueprintCallable, Category = "Animation")
-    void StopAnimationMontage(UAnimMontage* Montage);
+    void StopMontage(UAnimMontage* Montage);
 
-    // Getters for Animation Blueprint
-    UFUNCTION(BlueprintPure, Category = "Animation")
-    FAnim_MovementData GetMovementData() const { return MovementData; }
+    // Movement Animation Control
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    void UpdateMovementBlendSpace(float Speed, float Direction);
 
-    UFUNCTION(BlueprintPure, Category = "Animation")
-    float GetSpeed() const { return MovementData.Speed; }
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    void TriggerJumpAnimation();
 
-    UFUNCTION(BlueprintPure, Category = "Animation")
-    float GetDirection() const { return MovementData.Direction; }
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    void TriggerLandAnimation();
 
-    UFUNCTION(BlueprintPure, Category = "Animation")
-    bool IsInAir() const { return MovementData.bIsInAir; }
+    // Combat Animation Control
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    void TriggerAttackAnimation(EAnim_AttackType AttackType);
 
-    UFUNCTION(BlueprintPure, Category = "Animation")
-    bool IsCrouching() const { return MovementData.bIsCrouching; }
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    void TriggerBlockAnimation();
 
-    UFUNCTION(BlueprintPure, Category = "Animation")
-    ECharacterState GetCharacterState() const { return MovementData.CharacterState; }
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    void TriggerDodgeAnimation(EAnim_DodgeDirection Direction);
+
+    // Survival Animation Control
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    void TriggerCraftingAnimation();
+
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    void TriggerGatheringAnimation();
+
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    void TriggerClimbingAnimation(bool bIsClimbing);
 
 protected:
-    // Movement data tracking
-    UPROPERTY(BlueprintReadOnly, Category = "Animation")
-    FAnim_MovementData MovementData;
-
-    // Animation assets
+    // Animation Assets
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Assets")
-    UBlendSpace* MovementBlendSpace;
+    class UBlendSpace* MovementBlendSpace;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Assets")
     UAnimMontage* JumpMontage;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Assets")
-    UAnimMontage* AttackMontage;
+    UAnimMontage* LandMontage;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Assets")
-    UAnimMontage* DeathMontage;
+    UAnimMontage* AttackLightMontage;
 
-    // Animation state tracking
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Assets")
+    UAnimMontage* AttackHeavyMontage;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Assets")
+    UAnimMontage* BlockMontage;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Assets")
+    UAnimMontage* DodgeLeftMontage;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Assets")
+    UAnimMontage* DodgeRightMontage;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Assets")
+    UAnimMontage* CraftingMontage;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Assets")
+    UAnimMontage* GatheringMontage;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Assets")
+    UAnimMontage* ClimbingMontage;
+
+    // Animation State
     UPROPERTY(BlueprintReadOnly, Category = "Animation State")
-    float StateTransitionAlpha;
+    EAnim_MovementState CurrentMovementState;
 
     UPROPERTY(BlueprintReadOnly, Category = "Animation State")
-    float TimeSinceLastStateChange;
+    EAnim_CombatState CurrentCombatState;
 
-private:
-    // Internal state management
-    void UpdateStateTransition(float DeltaTime);
-    void ValidateAnimationAssets();
+    UPROPERTY(BlueprintReadOnly, Category = "Animation State")
+    float CurrentSpeed;
 
-    // Reference to character's mesh component
+    UPROPERTY(BlueprintReadOnly, Category = "Animation State")
+    float CurrentDirection;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Animation State")
+    bool bIsInAir;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Animation State")
+    bool bIsClimbing;
+
+    // Component References
     UPROPERTY()
-    class USkeletalMeshComponent* CharacterMesh;
+    class USkeletalMeshComponent* OwnerMesh;
 
-    // Reference to animation instance
     UPROPERTY()
     class UAnimInstance* AnimInstance;
+
+private:
+    // Internal state tracking
+    float LastMontagePlayTime;
+    UAnimMontage* CurrentlyPlayingMontage;
+
+    // Helper functions
+    void CacheComponentReferences();
+    bool IsValidAnimationAsset(UAnimationAsset* Asset) const;
+    void LogAnimationEvent(const FString& Event) const;
 };
