@@ -1,297 +1,226 @@
 #include "Perf_PhysicsOptimizer.h"
 #include "Engine/World.h"
-#include "GameFramework/Pawn.h"
-#include "Components/SkeletalMeshComponent.h"
-#include "PhysicsEngine/PhysicsAsset.h"
-#include "PhysicsEngine/BodySetup.h"
 #include "Engine/Engine.h"
-#include "Kismet/GameplayStatics.h"
+#include "GameFramework/Pawn.h"
+#include "GameFramework/PlayerController.h"
+#include "Components/PrimitiveComponent.h"
+#include "PhysicsEngine/BodyInstance.h"
 
 UPerf_PhysicsOptimizer::UPerf_PhysicsOptimizer()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 0.1f;
+    PrimaryComponentTick.TickInterval = 0.1f; // Update 10 times per second
     
-    CurrentPhysicsLOD = EPerf_PhysicsLOD::Standard;
-    ActiveRagdollCount = 0;
-    LastOptimizationTime = 0.0f;
+    // Default physics profile for 60fps target
+    PhysicsProfile.MaxSimulationDistance = 5000.0f;
+    PhysicsProfile.MaxActivePhysicsBodies = 100;
+    PhysicsProfile.PhysicsTickRate = 60.0f;
+    PhysicsProfile.bEnableAdaptiveLOD = true;
+    PhysicsProfile.LODUpdateInterval = 1.0f;
 }
 
 void UPerf_PhysicsOptimizer::BeginPlay()
 {
     Super::BeginPlay();
     
-    // Initialize physics settings
-    PhysicsSettings.FullPhysicsDistance = 1000.0f;
-    PhysicsSettings.StandardPhysicsDistance = 2500.0f;
-    PhysicsSettings.SimplifiedPhysicsDistance = 5000.0f;
-    PhysicsSettings.MaxActiveRagdolls = 8;
-    PhysicsSettings.PhysicsUpdateRate = 60.0f;
-    PhysicsSettings.bEnableDistanceCulling = true;
-    
-    UE_LOG(LogTemp, Warning, TEXT("Physics Optimizer initialized"));
+    UE_LOG(LogTemp, Warning, TEXT("Physics Optimizer initialized for performance target"));
+    OptimizePhysicsForPerformance();
 }
 
 void UPerf_PhysicsOptimizer::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
     
-    LastUpdateTime += DeltaTime;
-    if (LastUpdateTime >= OptimizationUpdateInterval)
+    CurrentFrameTime = DeltaTime;
+    
+    // Update LOD based on interval
+    if (PhysicsProfile.bEnableAdaptiveLOD)
     {
-        UpdateRagdollTracking();
-        CleanupInvalidRagdolls();
-        LimitActiveRagdolls();
-        
-        if (PhysicsSettings.bEnableDistanceCulling)
+        LastLODUpdateTime += DeltaTime;
+        if (LastLODUpdateTime >= PhysicsProfile.LODUpdateInterval)
         {
-            OptimizeAllPhysicsActors();
-        }
-        
-        LastUpdateTime = 0.0f;
-    }
-}
-
-void UPerf_PhysicsOptimizer::OptimizePhysicsForDistance(float PlayerDistance)
-{
-    EPerf_PhysicsLOD NewLOD = EPerf_PhysicsLOD::Disabled;
-    
-    if (PlayerDistance <= PhysicsSettings.FullPhysicsDistance)
-    {
-        NewLOD = EPerf_PhysicsLOD::Full;
-    }
-    else if (PlayerDistance <= PhysicsSettings.StandardPhysicsDistance)
-    {
-        NewLOD = EPerf_PhysicsLOD::Standard;
-    }
-    else if (PlayerDistance <= PhysicsSettings.SimplifiedPhysicsDistance)
-    {
-        NewLOD = EPerf_PhysicsLOD::Simplified;
-    }
-    
-    if (NewLOD != CurrentPhysicsLOD)
-    {
-        SetPhysicsLOD(NewLOD);
-    }
-}
-
-void UPerf_PhysicsOptimizer::SetPhysicsLOD(EPerf_PhysicsLOD NewLOD)
-{
-    CurrentPhysicsLOD = NewLOD;
-    
-    // Apply LOD to owner's skeletal mesh
-    if (AActor* Owner = GetOwner())
-    {
-        if (USkeletalMeshComponent* SkeletalMesh = Owner->FindComponentByClass<USkeletalMeshComponent>())
-        {
-            ApplyPhysicsLOD(SkeletalMesh, NewLOD);
+            UpdatePhysicsLOD();
+            LastLODUpdateTime = 0.0f;
         }
     }
+    
+    // Monitor frame time and adjust physics if needed
+    if (DeltaTime > 0.0166f) // Above 60fps threshold
+    {
+        DisableDistantPhysics();
+    }
 }
 
-void UPerf_PhysicsOptimizer::OptimizeRagdollPhysics(USkeletalMeshComponent* SkeletalMesh, float Distance)
+void UPerf_PhysicsOptimizer::OptimizePhysicsForPerformance()
 {
-    if (!SkeletalMesh || !IsValid(SkeletalMesh))
+    UWorld* World = GetWorld();
+    if (!World)
     {
         return;
     }
     
-    EPerf_PhysicsLOD LOD = EPerf_PhysicsLOD::Disabled;
+    // Count current active physics bodies
+    CountActivePhysicsBodies();
     
-    if (Distance <= PhysicsSettings.FullPhysicsDistance)
-    {
-        LOD = EPerf_PhysicsLOD::Full;
-    }
-    else if (Distance <= PhysicsSettings.StandardPhysicsDistance)
-    {
-        LOD = EPerf_PhysicsLOD::Standard;
-    }
-    else if (Distance <= PhysicsSettings.SimplifiedPhysicsDistance)
-    {
-        LOD = EPerf_PhysicsLOD::Simplified;
-    }
+    // Apply LOD settings based on performance
+    ApplyLODSettings();
     
-    ApplyPhysicsLOD(SkeletalMesh, LOD);
+    // Optimize collision complexity
+    OptimizeCollisionComplexity();
+    
+    UE_LOG(LogTemp, Warning, TEXT("Physics optimization complete. Active bodies: %d"), ActivePhysicsBodiesCount);
 }
 
-void UPerf_PhysicsOptimizer::EnableRagdollOptimization(bool bEnable)
+void UPerf_PhysicsOptimizer::SetPhysicsLODLevel(EPerf_PhysicsLODLevel NewLODLevel)
 {
-    PhysicsSettings.bEnableDistanceCulling = bEnable;
-    
-    if (!bEnable)
+    CurrentLODLevel = NewLODLevel;
+    ApplyLODSettings();
+}
+
+void UPerf_PhysicsOptimizer::UpdatePhysicsLOD()
+{
+    // Determine LOD level based on frame time
+    if (CurrentFrameTime > 0.0333f) // Below 30fps
     {
-        // Reset all tracked ragdolls to full physics
-        for (auto& RagdollPtr : TrackedRagdolls)
+        SetPhysicsLODLevel(EPerf_PhysicsLODLevel::Low);
+    }
+    else if (CurrentFrameTime > 0.0166f) // Below 60fps
+    {
+        SetPhysicsLODLevel(EPerf_PhysicsLODLevel::Medium);
+    }
+    else
+    {
+        SetPhysicsLODLevel(EPerf_PhysicsLODLevel::High);
+    }
+}
+
+int32 UPerf_PhysicsOptimizer::GetActivePhysicsBodiesCount() const
+{
+    return ActivePhysicsBodiesCount;
+}
+
+void UPerf_PhysicsOptimizer::DisableDistantPhysics()
+{
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        return;
+    }
+    
+    APawn* PlayerPawn = World->GetFirstPlayerController() ? World->GetFirstPlayerController()->GetPawn() : nullptr;
+    if (!PlayerPawn)
+    {
+        return;
+    }
+    
+    FVector PlayerLocation = PlayerPawn->GetActorLocation();
+    
+    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+    {
+        AActor* Actor = *ActorItr;
+        if (!Actor || Actor == PlayerPawn)
         {
-            if (RagdollPtr.IsValid())
-            {
-                ApplyPhysicsLOD(RagdollPtr.Get(), EPerf_PhysicsLOD::Full);
-            }
-        }
-    }
-}
-
-float UPerf_PhysicsOptimizer::GetPhysicsPerformanceMetric() const
-{
-    // Simple performance metric based on active ragdolls and physics complexity
-    float BaseMetric = 1.0f;
-    float RagdollPenalty = ActiveRagdollCount * 0.1f;
-    float LODBonus = 0.0f;
-    
-    switch (CurrentPhysicsLOD)
-    {
-        case EPerf_PhysicsLOD::Full:
-            LODBonus = 0.0f;
-            break;
-        case EPerf_PhysicsLOD::Standard:
-            LODBonus = 0.2f;
-            break;
-        case EPerf_PhysicsLOD::Simplified:
-            LODBonus = 0.4f;
-            break;
-        case EPerf_PhysicsLOD::Disabled:
-            LODBonus = 0.8f;
-            break;
-    }
-    
-    return FMath::Clamp(BaseMetric - RagdollPenalty + LODBonus, 0.0f, 1.0f);
-}
-
-int32 UPerf_PhysicsOptimizer::GetActiveRagdollCount() const
-{
-    return ActiveRagdollCount;
-}
-
-void UPerf_PhysicsOptimizer::OptimizeCollisionComplexity(float Distance)
-{
-    if (AActor* Owner = GetOwner())
-    {
-        if (USkeletalMeshComponent* SkeletalMesh = Owner->FindComponentByClass<USkeletalMeshComponent>())
-        {
-            ECollisionEnabled::Type CollisionType = ECollisionEnabled::QueryAndPhysics;
-            
-            if (Distance > PhysicsSettings.SimplifiedPhysicsDistance)
-            {
-                CollisionType = ECollisionEnabled::NoCollision;
-            }
-            else if (Distance > PhysicsSettings.StandardPhysicsDistance)
-            {
-                CollisionType = ECollisionEnabled::QueryOnly;
-            }
-            
-            SkeletalMesh->SetCollisionEnabled(CollisionType);
-        }
-    }
-}
-
-void UPerf_PhysicsOptimizer::SetCollisionLOD(int32 LODLevel)
-{
-    if (AActor* Owner = GetOwner())
-    {
-        if (USkeletalMeshComponent* SkeletalMesh = Owner->FindComponentByClass<USkeletalMeshComponent>())
-        {
-            // Force specific LOD level for collision
-            SkeletalMesh->SetForcedLOD(FMath::Clamp(LODLevel, 0, 3));
-        }
-    }
-}
-
-void UPerf_PhysicsOptimizer::OptimizeAllPhysicsActors()
-{
-    if (UWorld* World = GetWorld())
-    {
-        APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(World, 0);
-        if (!PlayerPawn)
-        {
-            return;
+            continue;
         }
         
-        FVector PlayerLocation = PlayerPawn->GetActorLocation();
-        
-        for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
-        {
-            AActor* Actor = *ActorItr;
-            if (!Actor || Actor == PlayerPawn)
-            {
-                continue;
-            }
-            
-            if (USkeletalMeshComponent* SkeletalMesh = Actor->FindComponentByClass<USkeletalMeshComponent>())
-            {
-                float Distance = FVector::Dist(PlayerLocation, Actor->GetActorLocation());
-                OptimizeRagdollPhysics(SkeletalMesh, Distance);
-            }
-        }
+        float Distance = FVector::Dist(PlayerLocation, Actor->GetActorLocation());
+        OptimizeActorPhysics(Actor, Distance);
     }
 }
 
-void UPerf_PhysicsOptimizer::UpdatePhysicsLODForAllActors()
+void UPerf_PhysicsOptimizer::OptimizeCollisionComplexity()
 {
-    OptimizeAllPhysicsActors();
-}
-
-void UPerf_PhysicsOptimizer::SetPhysicsSettings(const FPerf_PhysicsSettings& NewSettings)
-{
-    PhysicsSettings = NewSettings;
-    
-    // Apply new settings immediately
-    OptimizeAllPhysicsActors();
-}
-
-void UPerf_PhysicsOptimizer::UpdateRagdollTracking()
-{
-    if (UWorld* World = GetWorld())
+    UWorld* World = GetWorld();
+    if (!World)
     {
-        TrackedRagdolls.Empty();
-        ActiveRagdollCount = 0;
-        
-        for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+        return;
+    }
+    
+    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+    {
+        AActor* Actor = *ActorItr;
+        if (!Actor)
         {
-            AActor* Actor = *ActorItr;
-            if (!Actor)
+            continue;
+        }
+        
+        TArray<UPrimitiveComponent*> PrimitiveComponents;
+        Actor->GetComponents<UPrimitiveComponent>(PrimitiveComponents);
+        
+        for (UPrimitiveComponent* Component : PrimitiveComponents)
+        {
+            if (Component && Component->GetBodyInstance())
             {
-                continue;
-            }
-            
-            if (USkeletalMeshComponent* SkeletalMesh = Actor->FindComponentByClass<USkeletalMeshComponent>())
-            {
-                if (SkeletalMesh->IsSimulatingPhysics())
+                // Simplify collision for distant objects
+                float Distance = CalculateDistanceToPlayer(Actor);
+                if (Distance > PhysicsProfile.MaxSimulationDistance * 0.5f)
                 {
-                    TrackedRagdolls.Add(SkeletalMesh);
-                    ActiveRagdollCount++;
+                    Component->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
                 }
             }
         }
     }
 }
 
-void UPerf_PhysicsOptimizer::ApplyPhysicsLOD(USkeletalMeshComponent* SkeletalMesh, EPerf_PhysicsLOD LODLevel)
+void UPerf_PhysicsOptimizer::CountActivePhysicsBodies()
 {
-    if (!SkeletalMesh || !IsValid(SkeletalMesh))
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        ActivePhysicsBodiesCount = 0;
+        return;
+    }
+    
+    int32 Count = 0;
+    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+    {
+        AActor* Actor = *ActorItr;
+        if (!Actor)
+        {
+            continue;
+        }
+        
+        TArray<UPrimitiveComponent*> PrimitiveComponents;
+        Actor->GetComponents<UPrimitiveComponent>(PrimitiveComponents);
+        
+        for (UPrimitiveComponent* Component : PrimitiveComponents)
+        {
+            if (Component && Component->GetBodyInstance() && Component->IsSimulatingPhysics())
+            {
+                Count++;
+            }
+        }
+    }
+    
+    ActivePhysicsBodiesCount = Count;
+}
+
+void UPerf_PhysicsOptimizer::ApplyLODSettings()
+{
+    UWorld* World = GetWorld();
+    if (!World)
     {
         return;
     }
     
-    switch (LODLevel)
+    // Adjust physics settings based on LOD level
+    switch (CurrentLODLevel)
     {
-        case EPerf_PhysicsLOD::Full:
-            SkeletalMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-            SkeletalMesh->SetForcedLOD(-1); // Use automatic LOD
+        case EPerf_PhysicsLODLevel::High:
+            PhysicsProfile.PhysicsTickRate = 60.0f;
+            PhysicsProfile.MaxActivePhysicsBodies = 100;
             break;
-            
-        case EPerf_PhysicsLOD::Standard:
-            SkeletalMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-            SkeletalMesh->SetForcedLOD(1);
+        case EPerf_PhysicsLODLevel::Medium:
+            PhysicsProfile.PhysicsTickRate = 30.0f;
+            PhysicsProfile.MaxActivePhysicsBodies = 50;
             break;
-            
-        case EPerf_PhysicsLOD::Simplified:
-            SkeletalMesh->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
-            SkeletalMesh->SetForcedLOD(2);
+        case EPerf_PhysicsLODLevel::Low:
+            PhysicsProfile.PhysicsTickRate = 20.0f;
+            PhysicsProfile.MaxActivePhysicsBodies = 25;
             break;
-            
-        case EPerf_PhysicsLOD::Disabled:
-            SkeletalMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-            SkeletalMesh->SetForcedLOD(3);
+        case EPerf_PhysicsLODLevel::Disabled:
+            PhysicsProfile.PhysicsTickRate = 10.0f;
+            PhysicsProfile.MaxActivePhysicsBodies = 10;
             break;
     }
 }
@@ -300,63 +229,60 @@ float UPerf_PhysicsOptimizer::CalculateDistanceToPlayer(AActor* Actor)
 {
     if (!Actor)
     {
-        return 99999.0f;
+        return 0.0f;
     }
     
-    if (UWorld* World = GetWorld())
+    UWorld* World = GetWorld();
+    if (!World)
     {
-        if (APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(World, 0))
-        {
-            return FVector::Dist(PlayerPawn->GetActorLocation(), Actor->GetActorLocation());
-        }
+        return 0.0f;
     }
     
-    return 99999.0f;
-}
-
-void UPerf_PhysicsOptimizer::CleanupInvalidRagdolls()
-{
-    TrackedRagdolls.RemoveAll([](const TWeakObjectPtr<USkeletalMeshComponent>& Ptr)
+    APawn* PlayerPawn = World->GetFirstPlayerController() ? World->GetFirstPlayerController()->GetPawn() : nullptr;
+    if (!PlayerPawn)
     {
-        return !Ptr.IsValid();
-    });
+        return 0.0f;
+    }
     
-    ActiveRagdollCount = TrackedRagdolls.Num();
+    return FVector::Dist(PlayerPawn->GetActorLocation(), Actor->GetActorLocation());
 }
 
-void UPerf_PhysicsOptimizer::LimitActiveRagdolls()
+void UPerf_PhysicsOptimizer::OptimizeActorPhysics(AActor* Actor, float Distance)
 {
-    if (ActiveRagdollCount <= PhysicsSettings.MaxActiveRagdolls)
+    if (!Actor)
     {
         return;
     }
     
-    // Sort ragdolls by distance to player
-    if (UWorld* World = GetWorld())
+    TArray<UPrimitiveComponent*> PrimitiveComponents;
+    Actor->GetComponents<UPrimitiveComponent>(PrimitiveComponents);
+    
+    for (UPrimitiveComponent* Component : PrimitiveComponents)
     {
-        if (APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(World, 0))
+        if (!Component)
         {
-            FVector PlayerLocation = PlayerPawn->GetActorLocation();
-            
-            TrackedRagdolls.Sort([PlayerLocation](const TWeakObjectPtr<USkeletalMeshComponent>& A, const TWeakObjectPtr<USkeletalMeshComponent>& B)
+            continue;
+        }
+        
+        if (Distance > PhysicsProfile.MaxSimulationDistance)
+        {
+            // Disable physics simulation for very distant objects
+            Component->SetSimulatePhysics(false);
+        }
+        else if (Distance > PhysicsProfile.MaxSimulationDistance * 0.7f)
+        {
+            // Reduce physics complexity for distant objects
+            if (Component->GetBodyInstance())
             {
-                if (!A.IsValid() || !B.IsValid())
-                {
-                    return false;
-                }
-                
-                float DistA = FVector::Dist(PlayerLocation, A->GetOwner()->GetActorLocation());
-                float DistB = FVector::Dist(PlayerLocation, B->GetOwner()->GetActorLocation());
-                return DistA < DistB;
-            });
-            
-            // Disable physics for furthest ragdolls
-            for (int32 i = PhysicsSettings.MaxActiveRagdolls; i < TrackedRagdolls.Num(); i++)
+                Component->GetBodyInstance()->SetCollisionEnabled(ECE_QueryOnly);
+            }
+        }
+        else
+        {
+            // Enable full physics for nearby objects
+            if (Component->GetBodyInstance())
             {
-                if (TrackedRagdolls[i].IsValid())
-                {
-                    TrackedRagdolls[i]->SetSimulatePhysics(false);
-                }
+                Component->GetBodyInstance()->SetCollisionEnabled(ECE_QueryAndPhysics);
             }
         }
     }
