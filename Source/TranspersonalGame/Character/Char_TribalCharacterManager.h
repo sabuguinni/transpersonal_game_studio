@@ -1,184 +1,112 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
-#include "Components/SkeletalMeshComponent.h"
-#include "Engine/StaticMeshActor.h"
-#include "Materials/MaterialInstanceDynamic.h"
 #include "Engine/World.h"
-#include "SharedTypes.h"
+#include "GameFramework/Character.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Components/StaticMeshComponent.h"
+#include "Materials/MaterialInterface.h"
+#include "../SharedTypes.h"
 #include "Char_TribalCharacterManager.generated.h"
 
-// Tribal character appearance variations
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FChar_TribalAppearance
+struct TRANSPERSONALGAME_API FChar_TribalVariant
 {
     GENERATED_BODY()
 
-    // Physical characteristics
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
-    float Height;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal Variant")
+    FString VariantName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
-    float Weight;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal Variant")
+    USkeletalMesh* CharacterMesh;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
-    FLinearColor SkinTone;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal Variant")
+    TArray<UMaterialInterface*> SkinMaterials;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
-    FLinearColor HairColor;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal Variant")
+    TArray<UStaticMesh*> Equipment;
 
-    // Clothing and accessories
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Equipment")
-    FString ClothingType;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal Variant")
+    FLinearColor WarPaintColor;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Equipment")
-    FString WeaponType;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal Variant")
+    float SurvivalExperience;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Equipment")
-    TArray<FString> Accessories;
-
-    // Biome adaptation
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment")
-    EBiomeType AdaptedBiome;
-
-    FChar_TribalAppearance()
+    FChar_TribalVariant()
     {
-        Height = 170.0f;
-        Weight = 70.0f;
-        SkinTone = FLinearColor(0.8f, 0.6f, 0.4f, 1.0f);
-        HairColor = FLinearColor(0.3f, 0.2f, 0.1f, 1.0f);
-        ClothingType = TEXT("Animal Hide");
-        WeaponType = TEXT("Stone Spear");
-        AdaptedBiome = EBiomeType::Savanna;
+        VariantName = TEXT("Default_Tribal");
+        CharacterMesh = nullptr;
+        WarPaintColor = FLinearColor::Red;
+        SurvivalExperience = 50.0f;
     }
 };
 
-// Character role in tribal society
-UENUM(BlueprintType)
-enum class EChar_TribalRole : uint8
-{
-    Hunter      UMETA(DisplayName = "Hunter"),
-    Gatherer    UMETA(DisplayName = "Gatherer"),
-    Crafter     UMETA(DisplayName = "Crafter"),
-    Elder       UMETA(DisplayName = "Elder"),
-    Scout       UMETA(DisplayName = "Scout"),
-    Shaman      UMETA(DisplayName = "Shaman"),
-    Child       UMETA(DisplayName = "Child")
-};
-
-// Character personality traits
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FChar_PersonalityTraits
+struct TRANSPERSONALGAME_API FChar_BiomeAdaptation
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Personality", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float Courage;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Adaptation")
+    EBiomeType BiomeType;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Personality", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float Aggression;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Adaptation")
+    float TemperatureResistance;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Personality", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float Intelligence;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Adaptation")
+    float HumidityTolerance;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Personality", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float Social;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Adaptation")
+    TArray<FString> PreferredEquipment;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Personality", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float Curiosity;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Adaptation")
+    float MovementSpeedModifier;
 
-    FChar_PersonalityTraits()
+    FChar_BiomeAdaptation()
     {
-        Courage = 0.5f;
-        Aggression = 0.3f;
-        Intelligence = 0.6f;
-        Social = 0.7f;
-        Curiosity = 0.5f;
+        BiomeType = EBiomeType::Savanna;
+        TemperatureResistance = 0.5f;
+        HumidityTolerance = 0.5f;
+        MovementSpeedModifier = 1.0f;
     }
 };
 
-/**
- * Manages creation and customization of tribal characters for the Cretaceous survival world
- * Handles character appearance, role assignment, and biome-specific adaptations
- */
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API AChar_TribalCharacterManager : public AActor
+class TRANSPERSONALGAME_API UChar_TribalCharacterManager : public UObject
 {
     GENERATED_BODY()
 
 public:
-    AChar_TribalCharacterManager();
+    UChar_TribalCharacterManager();
 
-protected:
-    virtual void BeginPlay() override;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Variants")
+    TArray<FChar_TribalVariant> TribalVariants;
 
-public:
-    virtual void Tick(float DeltaTime) override;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Adaptations")
+    TArray<FChar_BiomeAdaptation> BiomeAdaptations;
 
-    // Character creation and management
-    UFUNCTION(BlueprintCallable, Category = "Character Creation")
-    class ATranspersonalCharacter* CreateTribalCharacter(const FChar_TribalAppearance& Appearance, EChar_TribalRole Role, const FVector& SpawnLocation);
-
-    UFUNCTION(BlueprintCallable, Category = "Character Creation")
-    void GenerateRandomTribalCharacter(EBiomeType TargetBiome, const FVector& SpawnLocation);
-
-    UFUNCTION(BlueprintCallable, Category = "Character Creation")
-    void CreateTribalGroup(EBiomeType Biome, const FVector& CenterLocation, int32 GroupSize = 5);
-
-    // Character customization
-    UFUNCTION(BlueprintCallable, Category = "Customization")
-    void ApplyBiomeAdaptation(class ATranspersonalCharacter* Character, EBiomeType Biome);
-
-    UFUNCTION(BlueprintCallable, Category = "Customization")
-    void SetCharacterRole(class ATranspersonalCharacter* Character, EChar_TribalRole Role);
-
-    UFUNCTION(BlueprintCallable, Category = "Customization")
-    void ApplyPersonalityTraits(class ATranspersonalCharacter* Character, const FChar_PersonalityTraits& Traits);
-
-    // Appearance generation
-    UFUNCTION(BlueprintCallable, Category = "Appearance")
-    FChar_TribalAppearance GenerateRandomAppearance(EBiomeType Biome);
-
-    UFUNCTION(BlueprintCallable, Category = "Appearance")
-    FChar_PersonalityTraits GenerateRandomPersonality();
-
-    // Character validation and testing
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Testing")
-    void TestCharacterCreation();
-
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Testing")
-    void SpawnTestCharactersInAllBiomes();
-
-protected:
-    // Character templates and presets
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Templates")
-    TArray<FChar_TribalAppearance> CharacterTemplates;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Templates")
-    TMap<EBiomeType, FChar_TribalAppearance> BiomeSpecificTemplates;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Templates")
-    TMap<EChar_TribalRole, FChar_PersonalityTraits> RolePersonalityDefaults;
-
-    // Spawned character tracking
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Management")
-    TArray<class ATranspersonalCharacter*> ManagedCharacters;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Generation")
     int32 MaxCharactersPerBiome;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Generation")
     float CharacterSpawnRadius;
 
+    UFUNCTION(BlueprintCallable, Category = "Character Management")
+    FChar_TribalVariant GetVariantForBiome(EBiomeType BiomeType);
+
+    UFUNCTION(BlueprintCallable, Category = "Character Management")
+    void GenerateTribalCharacters(UWorld* World, const TArray<FVector>& BiomeLocations);
+
+    UFUNCTION(BlueprintCallable, Category = "Character Management")
+    ACharacter* SpawnTribalCharacter(UWorld* World, const FVector& Location, const FChar_TribalVariant& Variant);
+
+    UFUNCTION(BlueprintCallable, Category = "Character Management")
+    void ApplyBiomeAdaptation(ACharacter* Character, EBiomeType BiomeType);
+
+    UFUNCTION(BlueprintCallable, Category = "Character Management")
+    void UpdateCharacterAppearance(ACharacter* Character, const FChar_TribalVariant& Variant);
+
 private:
-    // Internal helper functions
-    void InitializeCharacterTemplates();
-    void InitializeBiomeTemplates();
-    void InitializeRoleDefaults();
-    
-    FLinearColor GetBiomeAdaptedSkinTone(EBiomeType Biome);
-    FString GetBiomeSpecificClothing(EBiomeType Biome);
-    FString GetRoleSpecificWeapon(EChar_TribalRole Role);
-    TArray<FString> GetRoleSpecificAccessories(EChar_TribalRole Role);
+    void InitializeDefaultVariants();
+    void InitializeBiomeAdaptations();
+    FChar_TribalVariant CreateVariant(const FString& Name, const FLinearColor& WarPaint, float Experience);
 };
