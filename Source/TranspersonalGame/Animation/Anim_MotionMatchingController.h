@@ -4,182 +4,186 @@
 #include "UObject/NoExportTypes.h"
 #include "Engine/Engine.h"
 #include "Animation/AnimSequence.h"
-#include "Animation/PoseAsset.h"
-#include "Components/SkeletalMeshComponent.h"
+#include "Animation/AnimMontage.h"
 #include "Anim_MotionMatchingController.generated.h"
 
 /**
- * Motion data structure for storing animation poses and metadata
+ * Motion data structure for matching system
+ * Stores pose and trajectory information for realistic movement
  */
 USTRUCT(BlueprintType)
 struct TRANSPERSONALGAME_API FAnim_MotionData
 {
-	GENERATED_BODY()
+    GENERATED_BODY()
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Data")
-	class UAnimSequence* Animation;
+    // Current pose bone positions
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Data")
+    TArray<FVector> BonePositions;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Data")
-	float TimeStamp;
+    // Current pose bone velocities
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Data")
+    TArray<FVector> BoneVelocities;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Data")
-	FVector Velocity;
+    // Future trajectory points
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Data")
+    TArray<FVector> TrajectoryPoints;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Data")
-	FVector Acceleration;
+    // Future trajectory velocities
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Data")
+    TArray<FVector> TrajectoryVelocities;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Data")
-	float AngularVelocity;
+    // Animation sequence reference
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Data")
+    UAnimSequence* AnimSequence;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Data")
-	TArray<FTransform> BoneTransforms;
+    // Time in animation
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Data")
+    float AnimTime;
 
-	FAnim_MotionData()
-	{
-		Animation = nullptr;
-		TimeStamp = 0.0f;
-		Velocity = FVector::ZeroVector;
-		Acceleration = FVector::ZeroVector;
-		AngularVelocity = 0.0f;
-	}
+    // Quality score for this motion
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Data")
+    float MatchScore;
+
+    FAnim_MotionData()
+    {
+        AnimSequence = nullptr;
+        AnimTime = 0.0f;
+        MatchScore = 0.0f;
+    }
 };
 
 /**
- * Motion matching query structure for finding best animation match
- */
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FAnim_MotionQuery
-{
-	GENERATED_BODY()
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Query")
-	FVector DesiredVelocity;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Query")
-	FVector DesiredAcceleration;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Query")
-	float DesiredAngularVelocity;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Query")
-	TArray<FTransform> CurrentPose;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Query")
-	float VelocityWeight;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Query")
-	float AccelerationWeight;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Query")
-	float AngularWeight;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Query")
-	float PoseWeight;
-
-	FAnim_MotionQuery()
-	{
-		DesiredVelocity = FVector::ZeroVector;
-		DesiredAcceleration = FVector::ZeroVector;
-		DesiredAngularVelocity = 0.0f;
-		VelocityWeight = 1.0f;
-		AccelerationWeight = 0.5f;
-		AngularWeight = 0.3f;
-		PoseWeight = 0.8f;
-	}
-};
-
-/**
- * Motion Matching Controller for fluid character animations
- * Implements simplified motion matching system for natural movement
+ * Motion Matching Controller for realistic character animation
+ * Implements simplified motion matching for fluid character movement
+ * Based on research from "Motion Matching for Real-Time Character Animation"
  */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UAnim_MotionMatchingController : public UObject
 {
-	GENERATED_BODY()
+    GENERATED_BODY()
 
 public:
-	UAnim_MotionMatchingController();
+    UAnim_MotionMatchingController();
 
 protected:
-	// Motion database
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Database")
-	TArray<FAnim_MotionData> MotionDatabase;
+    // Motion database
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Database")
+    TArray<FAnim_MotionData> MotionDatabase;
 
-	// Current animation state
-	UPROPERTY(BlueprintReadOnly, Category = "Current State", meta = (AllowPrivateAccess = "true"))
-	int32 CurrentMotionIndex;
+    // Animation sequences for different movement types
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Sequences")
+    TArray<UAnimSequence*> IdleAnimations;
 
-	UPROPERTY(BlueprintReadOnly, Category = "Current State", meta = (AllowPrivateAccess = "true"))
-	float CurrentPlayTime;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Sequences")
+    TArray<UAnimSequence*> WalkAnimations;
 
-	UPROPERTY(BlueprintReadOnly, Category = "Current State", meta = (AllowPrivateAccess = "true"))
-	class UAnimSequence* CurrentAnimation;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Sequences")
+    TArray<UAnimSequence*> RunAnimations;
 
-	// Motion matching settings
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching Settings")
-	float SearchRadius;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Sequences")
+    TArray<UAnimSequence*> JumpAnimations;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching Settings")
-	float MinimumMatchScore;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Sequences")
+    TArray<UAnimSequence*> TurnAnimations;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching Settings")
-	float BlendTime;
+    // Current motion state
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Current State")
+    FAnim_MotionData CurrentMotion;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching Settings")
-	bool bEnableDebugOutput;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Current State")
+    UAnimSequence* CurrentAnimation;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Current State")
+    float CurrentAnimTime;
+
+    // Motion matching parameters
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
+    float PoseWeight;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
+    float TrajectoryWeight;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
+    float VelocityWeight;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
+    int32 TrajectoryPredictionFrames;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
+    float MatchThreshold;
+
+    // Bone indices for matching
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Bone Matching")
+    TArray<int32> ImportantBoneIndices;
 
 public:
-	// Motion matching interface
-	UFUNCTION(BlueprintCallable, Category = "Motion Matching")
-	void InitializeMotionDatabase();
+    // Initialization
+    UFUNCTION(BlueprintCallable, Category = "Motion Matching")
+    void InitializeMotionDatabase();
 
-	UFUNCTION(BlueprintCallable, Category = "Motion Matching")
-	void AddMotionData(UAnimSequence* Animation, float TimeStamp, const FVector& Velocity, const FVector& Acceleration);
+    UFUNCTION(BlueprintCallable, Category = "Motion Matching")
+    void BuildMotionDatabase();
 
-	UFUNCTION(BlueprintCallable, Category = "Motion Matching")
-	int32 FindBestMotionMatch(const FAnim_MotionQuery& Query);
+    // Motion matching functions
+    UFUNCTION(BlueprintCallable, Category = "Motion Matching")
+    FAnim_MotionData FindBestMotionMatch(const FVector& DesiredVelocity, const FVector& DesiredDirection);
 
-	UFUNCTION(BlueprintCallable, Category = "Motion Matching")
-	float CalculateMotionScore(const FAnim_MotionData& MotionData, const FAnim_MotionQuery& Query);
+    UFUNCTION(BlueprintCallable, Category = "Motion Matching")
+    float CalculateMotionScore(const FAnim_MotionData& MotionData, const FVector& DesiredVelocity, const FVector& DesiredDirection);
 
-	UFUNCTION(BlueprintCallable, Category = "Motion Matching")
-	void UpdateMotionMatching(float DeltaTime, const FAnim_MotionQuery& Query);
+    UFUNCTION(BlueprintCallable, Category = "Motion Matching")
+    void UpdateCurrentMotion(float DeltaTime);
 
-	// Animation control
-	UFUNCTION(BlueprintCallable, Category = "Animation Control")
-	void PlayMotion(int32 MotionIndex, float BlendInTime = 0.2f);
+    // Trajectory prediction
+    UFUNCTION(BlueprintCallable, Category = "Motion Matching")
+    TArray<FVector> PredictTrajectory(const FVector& CurrentVelocity, const FVector& DesiredVelocity, float PredictionTime);
 
-	UFUNCTION(BlueprintCallable, Category = "Animation Control")
-	void StopCurrentMotion();
+    UFUNCTION(BlueprintCallable, Category = "Motion Matching")
+    TArray<FVector> CalculateBonePoses(UAnimSequence* Animation, float Time);
 
-	UFUNCTION(BlueprintCallable, Category = "Animation Control")
-	bool IsMotionPlaying() const;
+    UFUNCTION(BlueprintCallable, Category = "Motion Matching")
+    TArray<FVector> CalculateBoneVelocities(UAnimSequence* Animation, float Time, float DeltaTime);
 
-	// Utility functions
-	UFUNCTION(BlueprintCallable, Category = "Motion Matching")
-	void ExtractPoseFromAnimation(UAnimSequence* Animation, float Time, TArray<FTransform>& OutPose);
+    // Animation blending
+    UFUNCTION(BlueprintCallable, Category = "Motion Matching")
+    void BlendToNewMotion(const FAnim_MotionData& NewMotion, float BlendTime);
 
-	UFUNCTION(BlueprintCallable, Category = "Motion Matching")
-	float CalculatePoseDistance(const TArray<FTransform>& PoseA, const TArray<FTransform>& PoseB);
+    UFUNCTION(BlueprintCallable, Category = "Motion Matching")
+    float CalculateBlendWeight(float BlendTime, float MaxBlendTime);
 
-	UFUNCTION(BlueprintCallable, Category = "Motion Matching")
-	void ClearMotionDatabase();
+    // Utility functions
+    UFUNCTION(BlueprintCallable, Category = "Motion Matching")
+    void AddAnimationToDatabase(UAnimSequence* Animation, const FString& MotionType);
 
-	// Getters
-	UFUNCTION(BlueprintPure, Category = "Motion Matching")
-	int32 GetCurrentMotionIndex() const { return CurrentMotionIndex; }
+    UFUNCTION(BlueprintCallable, Category = "Motion Matching")
+    void ClearMotionDatabase();
 
-	UFUNCTION(BlueprintPure, Category = "Motion Matching")
-	float GetCurrentPlayTime() const { return CurrentPlayTime; }
+    UFUNCTION(BlueprintCallable, Category = "Motion Matching")
+    int32 GetDatabaseSize() const { return MotionDatabase.Num(); }
 
-	UFUNCTION(BlueprintPure, Category = "Motion Matching")
-	UAnimSequence* GetCurrentAnimation() const { return CurrentAnimation; }
+    // Getters
+    UFUNCTION(BlueprintPure, Category = "Motion Matching")
+    UAnimSequence* GetCurrentAnimation() const { return CurrentAnimation; }
 
-	UFUNCTION(BlueprintPure, Category = "Motion Matching")
-	int32 GetMotionDatabaseSize() const { return MotionDatabase.Num(); }
+    UFUNCTION(BlueprintPure, Category = "Motion Matching")
+    float GetCurrentAnimTime() const { return CurrentAnimTime; }
 
-private:
-	// Internal helper functions
-	void LogDebugInfo(const FString& Message);
-	bool IsValidMotionIndex(int32 Index) const;
+    UFUNCTION(BlueprintPure, Category = "Motion Matching")
+    FAnim_MotionData GetCurrentMotion() const { return CurrentMotion; }
+
+    // Debug functions
+    UFUNCTION(BlueprintCallable, Category = "Debug")
+    void DebugDrawTrajectory(const TArray<FVector>& Trajectory, const FVector& WorldLocation);
+
+    UFUNCTION(BlueprintCallable, Category = "Debug")
+    void DebugPrintMotionInfo();
+
+protected:
+    // Internal helper functions
+    float CalculatePoseDistance(const TArray<FVector>& Pose1, const TArray<FVector>& Pose2);
+    float CalculateTrajectoryDistance(const TArray<FVector>& Trajectory1, const TArray<FVector>& Trajectory2);
+    float CalculateVelocityDistance(const TArray<FVector>& Velocity1, const TArray<FVector>& Velocity2);
+    
+    void ExtractMotionDataFromAnimation(UAnimSequence* Animation, float StartTime, float EndTime, int32 SampleRate);
+    void NormalizeMotionData(FAnim_MotionData& MotionData);
 };
