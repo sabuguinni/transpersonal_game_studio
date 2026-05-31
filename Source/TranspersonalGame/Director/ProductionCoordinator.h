@@ -1,43 +1,97 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "UObject/NoExportTypes.h"
 #include "Engine/World.h"
+#include "GameFramework/Actor.h"
 #include "Components/ActorComponent.h"
-#include "../SharedTypes.h"
+#include "Engine/Engine.h"
 #include "ProductionCoordinator.generated.h"
+
+UENUM(BlueprintType)
+enum class EDir_AgentStatus : uint8
+{
+    Idle UMETA(DisplayName = "Idle"),
+    Working UMETA(DisplayName = "Working"),
+    Completed UMETA(DisplayName = "Completed"),
+    Blocked UMETA(DisplayName = "Blocked"),
+    Failed UMETA(DisplayName = "Failed")
+};
+
+UENUM(BlueprintType)
+enum class EDir_BiomeType : uint8
+{
+    Savana UMETA(DisplayName = "Savana"),
+    Pantano UMETA(DisplayName = "Pantano"),
+    Floresta UMETA(DisplayName = "Floresta"),
+    Deserto UMETA(DisplayName = "Deserto"),
+    Montanha UMETA(DisplayName = "Montanha")
+};
+
+USTRUCT(BlueprintType)
+struct FDir_BiomeData
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    EDir_BiomeType BiomeType;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    FVector CenterLocation;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    int32 ActorCount;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    int32 MaxActors;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    float Radius;
+
+    FDir_BiomeData()
+    {
+        BiomeType = EDir_BiomeType::Savana;
+        CenterLocation = FVector::ZeroVector;
+        ActorCount = 0;
+        MaxActors = 4000;
+        Radius = 20000.0f;
+    }
+};
 
 USTRUCT(BlueprintType)
 struct FDir_AgentTask
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadWrite, Category = "Production")
-    int32 AgentNumber;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Task")
+    int32 AgentID;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Production")
-    FString TaskDescription;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Task")
+    FString AgentName;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Production")
-    EDir_Priority Priority;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Task")
+    EDir_AgentStatus Status;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Production")
-    FString RequiredDeliverables;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Task")
+    FString CurrentTask;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Production")
-    bool bIsCompleted;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Task")
+    float Progress;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Production")
-    float EstimatedHours;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Task")
+    FString LastOutput;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Task")
+    float EstimatedTimeRemaining;
 
     FDir_AgentTask()
     {
-        AgentNumber = 0;
-        TaskDescription = TEXT("");
-        Priority = EDir_Priority::Medium;
-        RequiredDeliverables = TEXT("");
-        bIsCompleted = false;
-        EstimatedHours = 1.0f;
+        AgentID = 0;
+        AgentName = TEXT("");
+        Status = EDir_AgentStatus::Idle;
+        CurrentTask = TEXT("");
+        Progress = 0.0f;
+        LastOutput = TEXT("");
+        EstimatedTimeRemaining = 0.0f;
     }
 };
 
@@ -46,94 +100,163 @@ struct FDir_ProductionMetrics
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadWrite, Category = "Metrics")
-    int32 TotalFilesCreated;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Metrics")
+    int32 TotalActorsInWorld;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Metrics")
-    int32 TotalUE5Commands;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Metrics")
+    int32 DinosaurActors;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Metrics")
-    int32 ActiveDinosaurs;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Metrics")
+    int32 EnvironmentActors;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Metrics")
-    float TerrainCoverage;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Metrics")
+    int32 LightingActors;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Metrics")
-    bool bPlayablePrototype;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Metrics")
+    float FrameRate;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Metrics")
+    float MemoryUsage;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Metrics")
+    int32 CompletedTasks;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Metrics")
+    int32 PendingTasks;
 
     FDir_ProductionMetrics()
     {
-        TotalFilesCreated = 0;
-        TotalUE5Commands = 0;
-        ActiveDinosaurs = 0;
-        TerrainCoverage = 0.0f;
-        bPlayablePrototype = false;
+        TotalActorsInWorld = 0;
+        DinosaurActors = 0;
+        EnvironmentActors = 0;
+        LightingActors = 0;
+        FrameRate = 60.0f;
+        MemoryUsage = 0.0f;
+        CompletedTasks = 0;
+        PendingTasks = 0;
     }
 };
 
 /**
- * Production Coordinator for Studio Director
- * Manages the 19-agent production pipeline and ensures milestone delivery
+ * Production Coordinator - Studio Director's central command system
+ * Manages the 19-agent pipeline, biome distribution, and production metrics
  */
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UDir_ProductionCoordinator : public UActorComponent
+class TRANSPERSONALGAME_API AProductionCoordinator : public AActor
 {
     GENERATED_BODY()
 
 public:
-    UDir_ProductionCoordinator();
+    AProductionCoordinator();
 
 protected:
     virtual void BeginPlay() override;
 
 public:
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+    virtual void Tick(float DeltaTime) override;
 
-    // Production Management
-    UFUNCTION(BlueprintCallable, Category = "Production")
-    void InitializeProductionPipeline();
-
-    UFUNCTION(BlueprintCallable, Category = "Production")
-    void AssignTaskToAgent(int32 AgentNumber, const FString& TaskDescription, EDir_Priority Priority);
-
-    UFUNCTION(BlueprintCallable, Category = "Production")
-    void MarkTaskCompleted(int32 AgentNumber);
-
-    UFUNCTION(BlueprintCallable, Category = "Production")
-    FDir_ProductionMetrics GetProductionMetrics() const;
-
-    // Milestone Tracking
-    UFUNCTION(BlueprintCallable, Category = "Milestones")
-    bool IsMilestone1Complete() const; // Walk Around prototype
-
-    UFUNCTION(BlueprintCallable, Category = "Milestones")
-    void ValidatePlayablePrototype();
-
-    // Agent Coordination
-    UFUNCTION(BlueprintCallable, Category = "Coordination")
-    TArray<FDir_AgentTask> GetPendingTasks() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Coordination")
-    void TriggerNextAgent();
-
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Debug")
-    void DebugPrintProductionStatus();
-
-protected:
-    UPROPERTY(BlueprintReadWrite, Category = "Production")
+    // Core Production Management
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production")
     TArray<FDir_AgentTask> AgentTasks;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Production")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production")
+    TArray<FDir_BiomeData> BiomeData;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production")
     FDir_ProductionMetrics CurrentMetrics;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Production")
-    int32 CurrentCycleNumber;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production")
+    int32 CurrentCycleID;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Production")
-    bool bPipelineActive;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production")
+    float CycleStartTime;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production")
+    bool bProductionActive;
+
+    // Agent Management Functions
+    UFUNCTION(BlueprintCallable, Category = "Production")
+    void InitializeAgentPipeline();
+
+    UFUNCTION(BlueprintCallable, Category = "Production")
+    void UpdateAgentStatus(int32 AgentID, EDir_AgentStatus NewStatus, const FString& TaskDescription);
+
+    UFUNCTION(BlueprintCallable, Category = "Production")
+    FDir_AgentTask GetAgentTask(int32 AgentID);
+
+    UFUNCTION(BlueprintCallable, Category = "Production")
+    TArray<FDir_AgentTask> GetActiveAgents();
+
+    UFUNCTION(BlueprintCallable, Category = "Production")
+    bool IsAgentBlocked(int32 AgentID);
+
+    // Biome Management Functions
+    UFUNCTION(BlueprintCallable, Category = "Biomes")
+    void InitializeBiomes();
+
+    UFUNCTION(BlueprintCallable, Category = "Biomes")
+    FVector GetBiomeSpawnLocation(EDir_BiomeType BiomeType);
+
+    UFUNCTION(BlueprintCallable, Category = "Biomes")
+    bool CanSpawnInBiome(EDir_BiomeType BiomeType);
+
+    UFUNCTION(BlueprintCallable, Category = "Biomes")
+    void UpdateBiomeActorCount(EDir_BiomeType BiomeType, int32 NewCount);
+
+    UFUNCTION(BlueprintCallable, Category = "Biomes")
+    EDir_BiomeType GetLeastPopulatedBiome();
+
+    // Production Metrics Functions
+    UFUNCTION(BlueprintCallable, Category = "Metrics")
+    void UpdateProductionMetrics();
+
+    UFUNCTION(BlueprintCallable, Category = "Metrics")
+    FDir_ProductionMetrics GetCurrentMetrics();
+
+    UFUNCTION(BlueprintCallable, Category = "Metrics")
+    bool IsActorLimitExceeded();
+
+    UFUNCTION(BlueprintCallable, Category = "Metrics")
+    void CleanupExcessActors();
+
+    // Critical Path Management
+    UFUNCTION(BlueprintCallable, Category = "CriticalPath")
+    void StartNewCycle();
+
+    UFUNCTION(BlueprintCallable, Category = "CriticalPath")
+    void CompleteCycle();
+
+    UFUNCTION(BlueprintCallable, Category = "CriticalPath")
+    float GetCycleProgress();
+
+    UFUNCTION(BlueprintCallable, Category = "CriticalPath")
+    TArray<int32> GetBlockedAgents();
+
+    // Emergency Functions
+    UFUNCTION(BlueprintCallable, Category = "Emergency")
+    void EmergencyStop();
+
+    UFUNCTION(BlueprintCallable, Category = "Emergency")
+    void ForceAgentReset(int32 AgentID);
+
+    UFUNCTION(BlueprintCallable, Category = "Emergency")
+    void ClearAllBiomes();
+
+    // Debug and Monitoring
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Debug")
+    void LogProductionStatus();
+
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Debug")
+    void ValidateWorldState();
+
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Debug")
+    void GenerateProductionReport();
 
 private:
-    void UpdateProductionMetrics();
-    void CheckMilestoneProgress();
-    void LogProductionStatus();
+    // Internal helper functions
+    void ValidateBiomeDistribution();
+    void CheckAgentDependencies();
+    void UpdateCycleTimer();
+    FString GetAgentNameByID(int32 AgentID);
+    void LogBiomeStatus();
 };
