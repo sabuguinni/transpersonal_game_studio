@@ -3,10 +3,15 @@
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
 #include "Engine/Engine.h"
+#include "Engine/World.h"
+#include "GameFramework/Actor.h"
 #include "Components/StaticMeshComponent.h"
-#include "Components/SkeletalMeshComponent.h"
-#include "PhysicsEngine/DestructibleActor.h"
-#include "PhysicsEngine/DestructibleComponent.h"
+#include "Components/PrimitiveComponent.h"
+#include "Engine/StaticMesh.h"
+#include "Materials/MaterialInterface.h"
+#include "PhysicsEngine/BodyInstance.h"
+#include "Chaos/ChaosEngineInterface.h"
+#include "GeometryCollection/GeometryCollectionComponent.h"
 #include "Core_DestructionSystem.generated.h"
 
 UENUM(BlueprintType)
@@ -19,76 +24,37 @@ enum class ECore_DestructionType : uint8
     Explode         UMETA(DisplayName = "Explode")
 };
 
-UENUM(BlueprintType)
-enum class ECore_DestructionState : uint8
-{
-    Intact          UMETA(DisplayName = "Intact"),
-    Damaged         UMETA(DisplayName = "Damaged"),
-    Destroyed       UMETA(DisplayName = "Destroyed"),
-    Rebuilding      UMETA(DisplayName = "Rebuilding")
-};
-
 USTRUCT(BlueprintType)
-struct FCore_DestructionSettings
+struct TRANSPERSONALGAME_API FCore_DestructionData
 {
     GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Destruction")
+    ECore_DestructionType DestructionType = ECore_DestructionType::Fracture;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Destruction")
     float DestructionThreshold = 100.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Destruction")
-    float ImpactMultiplier = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Destruction")
-    int32 MaxFragments = 50;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Destruction")
     float FragmentLifetime = 10.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Destruction")
+    int32 MaxFragments = 20;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Destruction")
     bool bAutoCleanup = true;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Destruction")
-    ECore_DestructionType DestructionType = ECore_DestructionType::Fracture;
-
-    FCore_DestructionSettings()
+    FCore_DestructionData()
     {
-        DestructionThreshold = 100.0f;
-        ImpactMultiplier = 1.0f;
-        MaxFragments = 50;
-        FragmentLifetime = 10.0f;
-        bAutoCleanup = true;
         DestructionType = ECore_DestructionType::Fracture;
+        DestructionThreshold = 100.0f;
+        FragmentLifetime = 10.0f;
+        MaxFragments = 20;
+        bAutoCleanup = true;
     }
 };
 
-USTRUCT(BlueprintType)
-struct FCore_DestructionFragment
-{
-    GENERATED_BODY()
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Fragment")
-    AActor* FragmentActor;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Fragment")
-    FVector InitialVelocity;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Fragment")
-    float CreationTime;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Fragment")
-    bool bIsActive;
-
-    FCore_DestructionFragment()
-    {
-        FragmentActor = nullptr;
-        InitialVelocity = FVector::ZeroVector;
-        CreationTime = 0.0f;
-        bIsActive = false;
-    }
-};
-
-UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent), BlueprintType, Blueprintable)
+UCLASS(ClassGroup=(TranspersonalGame), meta=(BlueprintSpawnableComponent))
 class TRANSPERSONALGAME_API UCore_DestructionSystem : public UActorComponent
 {
     GENERATED_BODY()
@@ -101,90 +67,83 @@ protected:
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 public:
-    // Destruction Control Functions
+    // Core destruction properties
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Destruction Settings")
+    FCore_DestructionData DestructionData;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Destruction Settings")
+    bool bCanBeDestroyed = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Destruction Settings")
+    float CurrentDamage = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Destruction Settings")
+    TArray<UStaticMesh*> FragmentMeshes;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Destruction Settings")
+    UMaterialInterface* FragmentMaterial;
+
+    // Destruction state tracking
+    UPROPERTY(BlueprintReadOnly, Category = "Destruction State")
+    bool bIsDestroyed = false;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Destruction State")
+    TArray<AActor*> SpawnedFragments;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Destruction State")
+    float TimeSinceDestruction = 0.0f;
+
+    // Core destruction functions
     UFUNCTION(BlueprintCallable, Category = "Destruction")
-    void TriggerDestruction(float ImpactForce = 0.0f, FVector ImpactLocation = FVector::ZeroVector, FVector ImpactDirection = FVector::ZeroVector);
+    void ApplyDamage(float DamageAmount, const FVector& ImpactPoint = FVector::ZeroVector, const FVector& ImpactNormal = FVector::UpVector);
 
     UFUNCTION(BlueprintCallable, Category = "Destruction")
-    void ApplyDamage(float DamageAmount, FVector ImpactLocation = FVector::ZeroVector);
+    void TriggerDestruction(const FVector& ImpactPoint = FVector::ZeroVector, const FVector& ImpactForce = FVector::ZeroVector);
 
-    UFUNCTION(BlueprintCallable, Category = "Destruction")
-    void RestoreObject();
-
-    UFUNCTION(BlueprintPure, Category = "Destruction")
-    ECore_DestructionState GetDestructionState() const { return CurrentState; }
-
-    UFUNCTION(BlueprintPure, Category = "Destruction")
-    float GetDamageAccumulated() const { return AccumulatedDamage; }
-
-    UFUNCTION(BlueprintPure, Category = "Destruction")
-    bool IsDestroyed() const { return CurrentState == ECore_DestructionState::Destroyed; }
-
-    // Configuration
-    UFUNCTION(BlueprintCallable, Category = "Destruction")
-    void SetDestructionSettings(const FCore_DestructionSettings& NewSettings);
-
-    UFUNCTION(BlueprintPure, Category = "Destruction")
-    FCore_DestructionSettings GetDestructionSettings() const { return Settings; }
-
-    // Fragment Management
     UFUNCTION(BlueprintCallable, Category = "Destruction")
     void CleanupFragments();
 
-    UFUNCTION(BlueprintPure, Category = "Destruction")
-    TArray<FCore_DestructionFragment> GetActiveFragments() const { return ActiveFragments; }
+    UFUNCTION(BlueprintCallable, Category = "Destruction")
+    bool CanBeDestroyed() const;
 
-    UFUNCTION(BlueprintPure, Category = "Destruction")
-    int32 GetFragmentCount() const { return ActiveFragments.Num(); }
+    UFUNCTION(BlueprintCallable, Category = "Destruction")
+    float GetDestructionProgress() const;
 
-    // Event Delegates
-    DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnDestructionStateChanged, ECore_DestructionState, NewState);
+    // Fragment management
+    UFUNCTION(BlueprintCallable, Category = "Destruction")
+    void SpawnFragments(const FVector& ImpactPoint, const FVector& ImpactForce);
+
+    UFUNCTION(BlueprintCallable, Category = "Destruction")
+    AActor* CreateFragment(UStaticMesh* FragmentMesh, const FVector& Location, const FRotator& Rotation, const FVector& Velocity);
+
+    // Destruction validation
+    UFUNCTION(BlueprintCallable, Category = "Destruction")
+    bool ValidateDestructionSetup() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Destruction")
+    void InitializeDestruction();
+
+    // Events
+    DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnDestructionTriggered, AActor*, DestroyedActor, FVector, ImpactPoint);
+    DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnFragmentSpawned, AActor*, Fragment);
+    DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnDestructionComplete);
+
     UPROPERTY(BlueprintAssignable, Category = "Destruction Events")
-    FOnDestructionStateChanged OnDestructionStateChanged;
+    FOnDestructionTriggered OnDestructionTriggered;
 
-    DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnObjectDestroyed, float, ImpactForce, FVector, ImpactLocation, FVector, ImpactDirection);
     UPROPERTY(BlueprintAssignable, Category = "Destruction Events")
-    FOnObjectDestroyed OnObjectDestroyed;
+    FOnFragmentSpawned OnFragmentSpawned;
 
-    DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnObjectRestored);
     UPROPERTY(BlueprintAssignable, Category = "Destruction Events")
-    FOnObjectRestored OnObjectRestored;
-
-protected:
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Destruction")
-    ECore_DestructionState CurrentState;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Destruction")
-    FCore_DestructionSettings Settings;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Destruction")
-    float AccumulatedDamage;
-
-    UPROPERTY()
-    UStaticMeshComponent* StaticMeshComp;
-
-    UPROPERTY()
-    USkeletalMeshComponent* SkeletalMeshComp;
-
-    UPROPERTY()
-    UStaticMesh* OriginalMesh;
-
-    UPROPERTY()
-    USkeletalMesh* OriginalSkeletalMesh;
-
-    UPROPERTY()
-    TArray<FCore_DestructionFragment> ActiveFragments;
-
-    UPROPERTY()
-    FTransform OriginalTransform;
+    FOnDestructionComplete OnDestructionComplete;
 
 private:
-    void InitializeDestructionSystem();
-    void CreateFragments(float ImpactForce, FVector ImpactLocation, FVector ImpactDirection);
-    void UpdateFragments(float DeltaTime);
-    void SetDestructionState(ECore_DestructionState NewState);
-    void HideOriginalMesh();
-    void ShowOriginalMesh();
-    void BroadcastStateChange(ECore_DestructionState NewState);
-    AActor* CreateFragment(FVector Location, FVector Velocity, UStaticMesh* FragmentMesh);
+    // Internal state
+    bool bInitialized = false;
+    float FragmentCleanupTimer = 0.0f;
+    
+    // Helper functions
+    void UpdateFragmentCleanup(float DeltaTime);
+    FVector CalculateFragmentVelocity(const FVector& ImpactPoint, const FVector& FragmentLocation, const FVector& ImpactForce) const;
+    void SetupFragmentPhysics(AActor* Fragment, const FVector& Velocity) const;
 };
