@@ -1,9 +1,9 @@
 #include "Narr_DialogueSystem.h"
-#include "Engine/Engine.h"
-#include "Components/StaticMeshComponent.h"
 #include "Components/SphereComponent.h"
+#include "Components/StaticMeshComponent.h"
+#include "Engine/Engine.h"
 #include "GameFramework/Character.h"
-#include "UObject/ConstructorHelpers.h"
+#include "Kismet/GameplayStatics.h"
 
 ANarr_DialogueSystem::ANarr_DialogueSystem()
 {
@@ -12,285 +12,222 @@ ANarr_DialogueSystem::ANarr_DialogueSystem()
     // Create root component
     RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootComponent"));
 
-    // Create mesh component
-    MeshComponent = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("MeshComponent"));
-    MeshComponent->SetupAttachment(RootComponent);
-
     // Create trigger sphere
     TriggerSphere = CreateDefaultSubobject<USphereComponent>(TEXT("TriggerSphere"));
     TriggerSphere->SetupAttachment(RootComponent);
-    TriggerSphere->SetSphereRadius(500.0f);
+    TriggerSphere->SetSphereRadius(300.0f);
     TriggerSphere->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
     TriggerSphere->SetCollisionResponseToAllChannels(ECR_Ignore);
     TriggerSphere->SetCollisionResponseToChannel(ECC_Pawn, ECR_Overlap);
 
-    // Bind overlap events
-    TriggerSphere->OnComponentBeginOverlap.AddDynamic(this, &ANarr_DialogueSystem::OnTriggerEnter);
+    // Create visual mesh
+    VisualMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("VisualMesh"));
+    VisualMesh->SetupAttachment(RootComponent);
+    VisualMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 
     // Initialize properties
-    TriggerRadius = 500.0f;
-    bAutoTrigger = true;
-    bDialogueActive = false;
-    CurrentSequenceIndex = -1;
-    CurrentLineIndex = -1;
+    NPCName = TEXT("Tribal Elder");
+    NPCType = ENarr_DialogueType::Tribal;
+    bCanRepeatDialogue = true;
+    InteractionRange = 300.0f;
+    bHasBeenTriggered = false;
+    CurrentDialogueIndex = 0;
 
-    // Set default mesh if available
-    static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeMesh(TEXT("/Engine/BasicShapes/Cube"));
-    if (CubeMesh.Succeeded() && MeshComponent)
-    {
-        MeshComponent->SetStaticMesh(CubeMesh.Object);
-        MeshComponent->SetWorldScale3D(FVector(0.5f, 0.5f, 2.0f));
-    }
+    // Bind overlap events
+    TriggerSphere->OnComponentBeginOverlap.AddDynamic(this, &ANarr_DialogueSystem::OnTriggerEnter);
+    TriggerSphere->OnComponentEndOverlap.AddDynamic(this, &ANarr_DialogueSystem::OnTriggerExit);
 }
 
 void ANarr_DialogueSystem::BeginPlay()
 {
     Super::BeginPlay();
     
-    InitializeDefaultDialogues();
-    
-    if (TriggerSphere)
-    {
-        TriggerSphere->SetSphereRadius(TriggerRadius);
-    }
+    InitializeDialogueLines();
 }
 
 void ANarr_DialogueSystem::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
+}
 
-    // Handle dialogue timing and auto-progression
-    if (bDialogueActive && CurrentSequenceIndex >= 0 && CurrentLineIndex >= 0)
+void ANarr_DialogueSystem::InitializeDialogueLines()
+{
+    DialogueLines.Empty();
+
+    switch (NPCType)
     {
-        if (DialogueSequences.IsValidIndex(CurrentSequenceIndex))
-        {
-            const FNarr_DialogueSequence& CurrentSequence = DialogueSequences[CurrentSequenceIndex];
-            if (CurrentSequence.DialogueLines.IsValidIndex(CurrentLineIndex))
-            {
-                const FNarr_DialogueLine& CurrentLine = CurrentSequence.DialogueLines[CurrentLineIndex];
-                
-                // Auto-advance non-choice dialogue lines
-                if (!CurrentLine.bIsPlayerChoice)
-                {
-                    static float DialogueTimer = 0.0f;
-                    DialogueTimer += DeltaTime;
-                    
-                    if (DialogueTimer >= CurrentLine.Duration)
-                    {
-                        DialogueTimer = 0.0f;
-                        NextDialogueLine();
-                    }
-                }
-            }
-        }
+        case ENarr_DialogueType::Tribal:
+            SetupTribalDialogue();
+            break;
+        case ENarr_DialogueType::Warning:
+            SetupSurvivalWarnings();
+            break;
+        default:
+            SetupTribalDialogue();
+            break;
     }
 }
 
-void ANarr_DialogueSystem::StartDialogue(const FString& SequenceID)
+void ANarr_DialogueSystem::SetupTribalDialogue()
 {
-    if (bDialogueActive)
-    {
-        return; // Already in dialogue
-    }
+    FNarr_DialogueLine Line1;
+    Line1.SpeakerName = NPCName;
+    Line1.DialogueText = TEXT("Greetings, survivor. The ancient ways teach us to read the signs of the great beasts.");
+    Line1.DialogueType = ENarr_DialogueType::Tribal;
+    Line1.Duration = 4.0f;
+    Line1.bRequiresTrigger = false;
+    DialogueLines.Add(Line1);
 
-    FNarr_DialogueSequence* Sequence = FindDialogueSequence(SequenceID);
-    if (!Sequence || Sequence->DialogueLines.Num() == 0)
+    FNarr_DialogueLine Line2;
+    Line2.SpeakerName = NPCName;
+    Line2.DialogueText = TEXT("The thunder lizard marks its territory with deep footprints. Follow them to find water, but beware its wrath.");
+    Line2.DialogueType = ENarr_DialogueType::Lore;
+    Line2.Duration = 5.0f;
+    Line2.bRequiresTrigger = false;
+    DialogueLines.Add(Line2);
+
+    FNarr_DialogueLine Line3;
+    Line3.SpeakerName = NPCName;
+    Line3.DialogueText = TEXT("The pack hunters work together. If you see one, there are always more watching from the shadows.");
+    Line3.DialogueType = ENarr_DialogueType::Warning;
+    Line3.Duration = 4.5f;
+    Line3.bRequiresTrigger = false;
+    DialogueLines.Add(Line3);
+
+    FNarr_DialogueLine Line4;
+    Line4.SpeakerName = NPCName;
+    Line4.DialogueText = TEXT("Our ancestors left markings on the sacred stones. Learn their wisdom, and you may yet survive this harsh world.");
+    Line4.DialogueType = ENarr_DialogueType::Lore;
+    Line4.Duration = 5.5f;
+    Line4.bRequiresTrigger = false;
+    DialogueLines.Add(Line4);
+}
+
+void ANarr_DialogueSystem::SetupSurvivalWarnings()
+{
+    FNarr_DialogueLine Warning1;
+    Warning1.SpeakerName = TEXT("Survival Instinct");
+    Warning1.DialogueText = TEXT("Danger detected. Large predator approaching from the north. Seek high ground immediately.");
+    Warning1.DialogueType = ENarr_DialogueType::Warning;
+    Warning1.Duration = 3.5f;
+    Warning1.bRequiresTrigger = true;
+    DialogueLines.Add(Warning1);
+
+    FNarr_DialogueLine Warning2;
+    Warning2.SpeakerName = TEXT("Survival Instinct");
+    Warning2.DialogueText = TEXT("Pack hunters detected. Multiple threats converging on your position. Find cover or prepare to fight.");
+    Warning2.DialogueType = ENarr_DialogueType::Warning;
+    Warning2.Duration = 4.0f;
+    Warning2.bRequiresTrigger = true;
+    DialogueLines.Add(Warning2);
+
+    FNarr_DialogueLine Warning3;
+    Warning3.SpeakerName = TEXT("Survival Instinct");
+    Warning3.DialogueText = TEXT("Safe zone identified. Large herbivore presence indicates no immediate predator threat in this area.");
+    Warning3.DialogueType = ENarr_DialogueType::Tutorial;
+    Warning3.Duration = 4.5f;
+    Warning3.bRequiresTrigger = true;
+    DialogueLines.Add(Warning3);
+}
+
+void ANarr_DialogueSystem::TriggerDialogue()
+{
+    if (DialogueLines.Num() == 0)
     {
-        UE_LOG(LogTemp, Warning, TEXT("DialogueSystem: Sequence '%s' not found or empty"), *SequenceID);
         return;
     }
 
-    // Find sequence index
-    for (int32 i = 0; i < DialogueSequences.Num(); i++)
+    if (!bHasBeenTriggered || bCanRepeatDialogue)
     {
-        if (DialogueSequences[i].SequenceID == SequenceID)
-        {
-            CurrentSequenceIndex = i;
-            break;
-        }
-    }
+        bHasBeenTriggered = true;
+        CurrentDialogueIndex = 0;
 
-    if (CurrentSequenceIndex >= 0)
-    {
-        bDialogueActive = true;
-        CurrentLineIndex = 0;
-        
-        OnDialogueStarted(SequenceID);
-        OnDialogueLineChanged(Sequence->DialogueLines[0]);
-        
-        UE_LOG(LogTemp, Log, TEXT("DialogueSystem: Started dialogue sequence '%s'"), *SequenceID);
+        FNarr_DialogueLine CurrentLine = GetCurrentDialogue();
+        OnDialogueTriggered(CurrentLine);
+
+        // Log dialogue for debugging
+        if (GEngine)
+        {
+            FString LogMessage = FString::Printf(TEXT("[%s]: %s"), *CurrentLine.SpeakerName, *CurrentLine.DialogueText);
+            GEngine->AddOnScreenDebugMessage(-1, CurrentLine.Duration, FColor::Yellow, LogMessage);
+        }
     }
 }
 
 void ANarr_DialogueSystem::NextDialogueLine()
 {
-    if (!bDialogueActive || CurrentSequenceIndex < 0)
+    if (HasMoreDialogue())
     {
-        return;
-    }
-
-    if (!DialogueSequences.IsValidIndex(CurrentSequenceIndex))
-    {
-        EndDialogue();
-        return;
-    }
-
-    const FNarr_DialogueSequence& CurrentSequence = DialogueSequences[CurrentSequenceIndex];
-    CurrentLineIndex++;
-
-    if (CurrentLineIndex >= CurrentSequence.DialogueLines.Num())
-    {
-        // End of sequence
-        EndDialogue();
-    }
-    else
-    {
-        // Continue to next line
-        const FNarr_DialogueLine& NextLine = CurrentSequence.DialogueLines[CurrentLineIndex];
-        OnDialogueLineChanged(NextLine);
-        
-        UE_LOG(LogTemp, Log, TEXT("DialogueSystem: Advanced to line %d: %s"), 
-               CurrentLineIndex, *NextLine.DialogueText);
-    }
-}
-
-void ANarr_DialogueSystem::EndDialogue()
-{
-    if (!bDialogueActive)
-    {
-        return;
-    }
-
-    bDialogueActive = false;
-    CurrentSequenceIndex = -1;
-    CurrentLineIndex = -1;
-    
-    OnDialogueEnded();
-    
-    UE_LOG(LogTemp, Log, TEXT("DialogueSystem: Dialogue ended"));
-}
-
-FNarr_DialogueLine ANarr_DialogueSystem::GetCurrentDialogueLine()
-{
-    if (bDialogueActive && CurrentSequenceIndex >= 0 && CurrentLineIndex >= 0)
-    {
-        if (DialogueSequences.IsValidIndex(CurrentSequenceIndex))
+        CurrentDialogueIndex++;
+        if (CurrentDialogueIndex < DialogueLines.Num())
         {
-            const FNarr_DialogueSequence& CurrentSequence = DialogueSequences[CurrentSequenceIndex];
-            if (CurrentSequence.DialogueLines.IsValidIndex(CurrentLineIndex))
+            FNarr_DialogueLine CurrentLine = GetCurrentDialogue();
+            OnDialogueTriggered(CurrentLine);
+
+            // Log dialogue for debugging
+            if (GEngine)
             {
-                return CurrentSequence.DialogueLines[CurrentLineIndex];
+                FString LogMessage = FString::Printf(TEXT("[%s]: %s"), *CurrentLine.SpeakerName, *CurrentLine.DialogueText);
+                GEngine->AddOnScreenDebugMessage(-1, CurrentLine.Duration, FColor::Yellow, LogMessage);
             }
         }
     }
-
-    return FNarr_DialogueLine(); // Return default empty line
-}
-
-bool ANarr_DialogueSystem::IsDialogueActive() const
-{
-    return bDialogueActive;
-}
-
-void ANarr_DialogueSystem::AddDialogueSequence(const FNarr_DialogueSequence& NewSequence)
-{
-    DialogueSequences.Add(NewSequence);
-    UE_LOG(LogTemp, Log, TEXT("DialogueSystem: Added dialogue sequence '%s'"), *NewSequence.SequenceID);
-}
-
-void ANarr_DialogueSystem::OnTriggerEnter(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, 
-                                        UPrimitiveComponent* OtherComponent, int32 OtherBodyIndex, 
-                                        bool bFromSweep, const FHitResult& SweepResult)
-{
-    if (!bAutoTrigger || bDialogueActive)
+    else
     {
-        return;
-    }
-
-    // Check if the overlapping actor is a character (player)
-    ACharacter* Character = Cast<ACharacter>(OtherActor);
-    if (Character && DialogueSequences.Num() > 0)
-    {
-        // Start the first available dialogue sequence
-        StartDialogue(DialogueSequences[0].SequenceID);
-    }
-}
-
-void ANarr_DialogueSystem::InitializeDefaultDialogues()
-{
-    // Create default survival-focused dialogue sequences
-    
-    // Danger Warning Sequence
-    FNarr_DialogueSequence DangerSequence;
-    DangerSequence.SequenceID = TEXT("DangerWarning");
-    DangerSequence.bRepeatable = true;
-    DangerSequence.Priority = 10;
-
-    FNarr_DialogueLine DangerLine1;
-    DangerLine1.SpeakerName = TEXT("Survivor's Instinct");
-    DangerLine1.DialogueText = TEXT("Something is wrong here. The air is too quiet.");
-    DangerLine1.Duration = 3.0f;
-    DangerSequence.DialogueLines.Add(DangerLine1);
-
-    FNarr_DialogueLine DangerLine2;
-    DangerLine2.SpeakerName = TEXT("Survivor's Instinct");
-    DangerLine2.DialogueText = TEXT("Predators may be nearby. Stay alert and move carefully.");
-    DangerLine2.Duration = 4.0f;
-    DangerSequence.DialogueLines.Add(DangerLine2);
-
-    DialogueSequences.Add(DangerSequence);
-
-    // Discovery Sequence
-    FNarr_DialogueSequence DiscoverySequence;
-    DiscoverySequence.SequenceID = TEXT("Discovery");
-    DiscoverySequence.bRepeatable = false;
-    DiscoverySequence.Priority = 5;
-
-    FNarr_DialogueLine DiscoveryLine1;
-    DiscoveryLine1.SpeakerName = TEXT("Explorer");
-    DiscoveryLine1.DialogueText = TEXT("These markings... they're ancient. Someone was here before us.");
-    DiscoveryLine1.Duration = 4.0f;
-    DiscoverySequence.DialogueLines.Add(DiscoveryLine1);
-
-    FNarr_DialogueLine DiscoveryLine2;
-    DiscoveryLine2.SpeakerName = TEXT("Explorer");
-    DiscoveryLine2.DialogueText = TEXT("The tools are primitive but effective. We can learn from this.");
-    DiscoveryLine2.Duration = 3.5f;
-    DiscoverySequence.DialogueLines.Add(DiscoveryLine2);
-
-    DialogueSequences.Add(DiscoverySequence);
-
-    // Resource Found Sequence
-    FNarr_DialogueSequence ResourceSequence;
-    ResourceSequence.SequenceID = TEXT("ResourceFound");
-    ResourceSequence.bRepeatable = true;
-    ResourceSequence.Priority = 3;
-
-    FNarr_DialogueLine ResourceLine1;
-    ResourceLine1.SpeakerName = TEXT("Gatherer");
-    ResourceLine1.DialogueText = TEXT("Fresh water and edible plants. This location is valuable.");
-    ResourceLine1.Duration = 3.0f;
-    ResourceSequence.DialogueLines.Add(ResourceLine1);
-
-    FNarr_DialogueLine ResourceLine2;
-    ResourceLine2.SpeakerName = TEXT("Gatherer");
-    ResourceLine2.DialogueText = TEXT("Mark this place. We'll need to return here often.");
-    ResourceLine2.Duration = 3.0f;
-    ResourceSequence.DialogueLines.Add(ResourceLine2);
-
-    DialogueSequences.Add(ResourceSequence);
-
-    UE_LOG(LogTemp, Log, TEXT("DialogueSystem: Initialized %d default dialogue sequences"), DialogueSequences.Num());
-}
-
-FNarr_DialogueSequence* ANarr_DialogueSystem::FindDialogueSequence(const FString& SequenceID)
-{
-    for (FNarr_DialogueSequence& Sequence : DialogueSequences)
-    {
-        if (Sequence.SequenceID == SequenceID)
+        OnDialogueCompleted();
+        if (bCanRepeatDialogue)
         {
-            return &Sequence;
+            CurrentDialogueIndex = 0;
         }
     }
-    return nullptr;
+}
+
+FNarr_DialogueLine ANarr_DialogueSystem::GetCurrentDialogue() const
+{
+    if (DialogueLines.IsValidIndex(CurrentDialogueIndex))
+    {
+        return DialogueLines[CurrentDialogueIndex];
+    }
+    
+    return FNarr_DialogueLine();
+}
+
+bool ANarr_DialogueSystem::HasMoreDialogue() const
+{
+    return CurrentDialogueIndex < DialogueLines.Num() - 1;
+}
+
+void ANarr_DialogueSystem::ResetDialogue()
+{
+    bHasBeenTriggered = false;
+    CurrentDialogueIndex = 0;
+}
+
+void ANarr_DialogueSystem::OnTriggerEnter(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComponent, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
+{
+    if (OtherActor && OtherActor->IsA<ACharacter>())
+    {
+        // Check if it's the player character
+        ACharacter* PlayerCharacter = UGameplayStatics::GetPlayerCharacter(GetWorld(), 0);
+        if (OtherActor == PlayerCharacter)
+        {
+            TriggerDialogue();
+        }
+    }
+}
+
+void ANarr_DialogueSystem::OnTriggerExit(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComponent, int32 OtherBodyIndex)
+{
+    if (OtherActor && OtherActor->IsA<ACharacter>())
+    {
+        ACharacter* PlayerCharacter = UGameplayStatics::GetPlayerCharacter(GetWorld(), 0);
+        if (OtherActor == PlayerCharacter)
+        {
+            // Player left trigger area - could implement dialogue interruption here
+            if (GEngine)
+            {
+                GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Red, TEXT("Left dialogue area"));
+            }
+        }
+    }
 }
