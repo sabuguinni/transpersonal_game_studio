@@ -1,152 +1,159 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/GameInstanceSubsystem.h"
+#include "Engine/Engine.h"
+#include "UObject/NoExportTypes.h"
 #include "Build_IntegrationReport.generated.h"
 
 UENUM(BlueprintType)
-enum class EBuild_SystemStatus : uint8
+enum class EBuild_ValidationStatus : uint8
 {
     Unknown     UMETA(DisplayName = "Unknown"),
-    Loading     UMETA(DisplayName = "Loading"),
-    Operational UMETA(DisplayName = "Operational"),
+    Pending     UMETA(DisplayName = "Pending"),
+    InProgress  UMETA(DisplayName = "In Progress"),
+    Passed      UMETA(DisplayName = "Passed"),
     Failed      UMETA(DisplayName = "Failed"),
-    Disabled    UMETA(DisplayName = "Disabled")
+    Blocked     UMETA(DisplayName = "Blocked")
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FBuild_SystemInfo
+struct TRANSPERSONALGAME_API FBuild_ModuleStatus
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "System")
-    FString SystemName;
+    UPROPERTY(BlueprintReadOnly, Category = "Module")
+    FString ModuleName;
 
-    UPROPERTY(BlueprintReadOnly, Category = "System")
-    EBuild_SystemStatus Status;
+    UPROPERTY(BlueprintReadOnly, Category = "Module")
+    EBuild_ValidationStatus CompilationStatus;
 
-    UPROPERTY(BlueprintReadOnly, Category = "System")
-    FString ClassName;
+    UPROPERTY(BlueprintReadOnly, Category = "Module")
+    EBuild_ValidationStatus LinkingStatus;
 
-    UPROPERTY(BlueprintReadOnly, Category = "System")
-    bool bIsLoaded;
+    UPROPERTY(BlueprintReadOnly, Category = "Module")
+    EBuild_ValidationStatus RuntimeStatus;
 
-    UPROPERTY(BlueprintReadOnly, Category = "System")
-    FString ErrorMessage;
+    UPROPERTY(BlueprintReadOnly, Category = "Module")
+    int32 ClassCount;
 
-    FBuild_SystemInfo()
+    UPROPERTY(BlueprintReadOnly, Category = "Module")
+    int32 ErrorCount;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Module")
+    TArray<FString> ErrorMessages;
+
+    FBuild_ModuleStatus()
     {
-        SystemName = TEXT("");
-        Status = EBuild_SystemStatus::Unknown;
-        ClassName = TEXT("");
-        bIsLoaded = false;
-        ErrorMessage = TEXT("");
+        ModuleName = TEXT("");
+        CompilationStatus = EBuild_ValidationStatus::Unknown;
+        LinkingStatus = EBuild_ValidationStatus::Unknown;
+        RuntimeStatus = EBuild_ValidationStatus::Unknown;
+        ClassCount = 0;
+        ErrorCount = 0;
     }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FBuild_PerformanceMetrics
+struct TRANSPERSONALGAME_API FBuild_IntegrationMetrics
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
+    int32 TotalModules;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
+    int32 CompiledModules;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
+    int32 FailedModules;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
+    int32 TotalClasses;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
+    int32 LoadedClasses;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
     int32 TotalActors;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    int32 DinosaurActors;
+    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
+    float BuildTime;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    int32 VFXActors;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    int32 StaticMeshActors;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float FrameTime;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
     float MemoryUsage;
 
-    FBuild_PerformanceMetrics()
+    FBuild_IntegrationMetrics()
     {
+        TotalModules = 0;
+        CompiledModules = 0;
+        FailedModules = 0;
+        TotalClasses = 0;
+        LoadedClasses = 0;
         TotalActors = 0;
-        DinosaurActors = 0;
-        VFXActors = 0;
-        StaticMeshActors = 0;
-        FrameTime = 0.0f;
+        BuildTime = 0.0f;
         MemoryUsage = 0.0f;
     }
 };
 
-/**
- * Integration Report Subsystem
- * Monitors system health, compilation status, and cross-system compatibility
- */
-UCLASS(BlueprintType)
-class TRANSPERSONALGAME_API UBuild_IntegrationReport : public UGameInstanceSubsystem
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API UBuild_IntegrationReport : public UObject
 {
     GENERATED_BODY()
 
 public:
-    // USubsystem interface
-    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
-    virtual void Deinitialize() override;
+    UBuild_IntegrationReport();
 
-    // System monitoring
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    void ValidateAllSystems();
+    UPROPERTY(BlueprintReadOnly, Category = "Report")
+    FDateTime ReportTimestamp;
 
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    TArray<FBuild_SystemInfo> GetSystemStatus();
+    UPROPERTY(BlueprintReadOnly, Category = "Report")
+    FString CycleID;
 
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    FBuild_PerformanceMetrics GetPerformanceMetrics();
+    UPROPERTY(BlueprintReadOnly, Category = "Report")
+    EBuild_ValidationStatus OverallStatus;
 
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    bool IsSystemOperational(const FString& SystemName);
+    UPROPERTY(BlueprintReadOnly, Category = "Report")
+    FBuild_IntegrationMetrics Metrics;
 
-    // Cross-system validation
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    bool ValidateCharacterVFXIntegration();
+    UPROPERTY(BlueprintReadOnly, Category = "Report")
+    TArray<FBuild_ModuleStatus> ModuleStatuses;
 
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    bool ValidateDinosaurAIIntegration();
+    UPROPERTY(BlueprintReadOnly, Category = "Report")
+    TArray<FString> CriticalErrors;
 
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    bool ValidateWorldFoliageIntegration();
+    UPROPERTY(BlueprintReadOnly, Category = "Report")
+    TArray<FString> Warnings;
 
-    // Build validation
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    bool CheckCompilationStatus();
+    UPROPERTY(BlueprintReadOnly, Category = "Report")
+    TArray<FString> Recommendations;
 
     UFUNCTION(BlueprintCallable, Category = "Integration")
-    TArray<FString> GetCompilationErrors();
-
-    // Report generation
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    FString GenerateIntegrationReport();
+    void GenerateReport();
 
     UFUNCTION(BlueprintCallable, Category = "Integration")
-    void SaveIntegrationReport(const FString& ReportPath);
+    bool ValidateModuleIntegrity(const FString& ModuleName);
 
-protected:
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    TArray<FBuild_SystemInfo> SystemInfoArray;
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    FBuild_ModuleStatus GetModuleStatus(const FString& ModuleName);
 
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    FBuild_PerformanceMetrics CurrentMetrics;
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    void AddCriticalError(const FString& ErrorMessage);
 
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    TArray<FString> CompilationErrors;
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    void AddWarning(const FString& WarningMessage);
 
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    bool bAllSystemsOperational;
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    void AddRecommendation(const FString& RecommendationMessage);
+
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    bool IsSystemHealthy();
+
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    float GetOverallHealthScore();
 
 private:
-    void ValidateSystem(const FString& SystemName, const FString& ClassName);
-    void UpdatePerformanceMetrics();
-    void CheckCrossSystemCompatibility();
-    
-    // Core systems to monitor
-    TArray<TPair<FString, FString>> CoreSystems;
+    void ValidateAllModules();
+    void CalculateMetrics();
+    void CheckSystemHealth();
+    void GenerateRecommendations();
 };
