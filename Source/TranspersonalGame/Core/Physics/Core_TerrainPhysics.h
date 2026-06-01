@@ -1,86 +1,145 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Components/ActorComponent.h"
-#include "Engine/Engine.h"
+#include "Engine/World.h"
+#include "GameFramework/Actor.h"
+#include "Components/StaticMeshComponent.h"
 #include "Landscape/Landscape.h"
-#include "PhysicsEngine/PhysicsSettings.h"
 #include "Core_TerrainPhysics.generated.h"
 
-USTRUCT(BlueprintType)
-struct FCore_TerrainPhysicsData
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Physics")
-    float SurfaceFriction = 0.7f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Physics")
-    float Bounciness = 0.1f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Physics")
-    float Density = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Physics")
-    bool bEnableComplexCollision = true;
-
-    FCore_TerrainPhysicsData()
-    {
-        SurfaceFriction = 0.7f;
-        Bounciness = 0.1f;
-        Density = 1.0f;
-        bEnableComplexCollision = true;
-    }
-};
-
-UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UCore_TerrainPhysics : public UActorComponent
+/**
+ * Core Terrain Physics System
+ * Handles terrain-specific physics: ground detection, slope calculations, surface materials
+ * Manages interaction between characters/objects and terrain surfaces
+ */
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API UCore_TerrainPhysics : public UObject
 {
     GENERATED_BODY()
 
 public:
     UCore_TerrainPhysics();
 
+    // Terrain Detection
+    UFUNCTION(BlueprintCallable, Category = "Core Terrain Physics")
+    bool GetGroundInfo(FVector Location, FHitResult& GroundHit, float TraceDistance = 1000.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "Core Terrain Physics")
+    float GetSlopeAngle(FVector Location);
+
+    UFUNCTION(BlueprintCallable, Category = "Core Terrain Physics")
+    FVector GetSurfaceNormal(FVector Location);
+
+    UFUNCTION(BlueprintCallable, Category = "Core Terrain Physics")
+    bool IsLocationOnSteepSlope(FVector Location, float MaxSlopeAngle = 45.0f);
+
+    // Surface Material Detection
+    UFUNCTION(BlueprintCallable, Category = "Core Terrain Physics|Materials")
+    class UPhysicalMaterial* GetSurfaceMaterial(FVector Location);
+
+    UFUNCTION(BlueprintCallable, Category = "Core Terrain Physics|Materials")
+    float GetSurfaceFriction(FVector Location);
+
+    UFUNCTION(BlueprintCallable, Category = "Core Terrain Physics|Materials")
+    bool IsSurfaceWalkable(FVector Location);
+
+    // Terrain Modification
+    UFUNCTION(BlueprintCallable, Category = "Core Terrain Physics|Modification")
+    void CreateCrater(FVector Location, float Radius, float Depth);
+
+    UFUNCTION(BlueprintCallable, Category = "Core Terrain Physics|Modification")
+    void FlattenTerrain(FVector Location, float Radius);
+
+    UFUNCTION(BlueprintCallable, Category = "Core Terrain Physics|Modification")
+    void RaiseTerrain(FVector Location, float Radius, float Height);
+
+    // Character Terrain Interaction
+    UFUNCTION(BlueprintCallable, Category = "Core Terrain Physics|Character")
+    void ApplyTerrainEffectsToCharacter(class ACharacter* Character);
+
+    UFUNCTION(BlueprintCallable, Category = "Core Terrain Physics|Character")
+    float GetMovementSpeedModifier(class ACharacter* Character);
+
+    UFUNCTION(BlueprintCallable, Category = "Core Terrain Physics|Character")
+    bool ShouldCharacterSlide(class ACharacter* Character);
+
+    // Environmental Effects
+    UFUNCTION(BlueprintCallable, Category = "Core Terrain Physics|Environment")
+    void SimulateErosion(FVector Location, float Intensity);
+
+    UFUNCTION(BlueprintCallable, Category = "Core Terrain Physics|Environment")
+    void ApplyWeatherEffects(FVector Location, float WetnessFactor);
+
+    UFUNCTION(BlueprintCallable, Category = "Core Terrain Physics|Environment")
+    void UpdateTerrainStability();
+
 protected:
-    virtual void BeginPlay() override;
+    // Terrain Detection Settings
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Detection")
+    float GroundTraceDistance;
 
-public:
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Detection")
+    float SlopeDetectionRadius;
 
-    // Terrain physics configuration
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Physics")
-    FCore_TerrainPhysicsData TerrainData;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Detection")
+    TArray<TEnumAsByte<EObjectTypeQuery>> TerrainObjectTypes;
 
-    // Landscape reference
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Physics")
-    ALandscape* LandscapeActor;
+    // Surface Material Settings
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Materials")
+    TMap<class UPhysicalMaterial*, float> MaterialFrictionMap;
 
-    // Physics material for terrain
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Physics")
-    class UPhysicalMaterial* TerrainPhysicsMaterial;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Materials")
+    TMap<class UPhysicalMaterial*, float> MaterialSpeedModifiers;
 
-    // Functions
-    UFUNCTION(BlueprintCallable, Category = "Terrain Physics")
-    void InitializeTerrainPhysics();
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Materials")
+    float DefaultFriction;
 
-    UFUNCTION(BlueprintCallable, Category = "Terrain Physics")
-    void UpdateTerrainPhysics();
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Materials")
+    float DefaultSpeedModifier;
 
-    UFUNCTION(BlueprintCallable, Category = "Terrain Physics")
-    float GetTerrainHeightAtLocation(const FVector& WorldLocation);
+    // Slope Settings
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slope Physics")
+    float MaxWalkableSlope;
 
-    UFUNCTION(BlueprintCallable, Category = "Terrain Physics")
-    FVector GetTerrainNormalAtLocation(const FVector& WorldLocation);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slope Physics")
+    float SlideThreshold;
 
-    UFUNCTION(BlueprintCallable, Category = "Terrain Physics")
-    void ApplyTerrainForces(AActor* Actor, const FVector& Location);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slope Physics")
+    float SlideForceMultiplier;
 
-    UFUNCTION(BlueprintCallable, Category = "Terrain Physics")
-    bool IsLocationOnTerrain(const FVector& WorldLocation);
+    // Terrain Modification Settings
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Modification")
+    bool bAllowTerrainModification;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Modification")
+    float MaxModificationRadius;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Modification")
+    float MaxModificationDepth;
+
+    // Environmental Settings
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environmental Effects")
+    bool bEnableErosion;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environmental Effects")
+    float ErosionRate;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environmental Effects")
+    bool bEnableWeatherEffects;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environmental Effects")
+    float WeatherEffectStrength;
 
 private:
-    // Internal terrain physics calculations
-    void CalculateTerrainInteraction(AActor* Actor);
-    void UpdatePhysicsMaterial();
-    void SetupLandscapeCollision();
+    // Cached terrain references
+    TWeakObjectPtr<class ALandscape> CachedLandscape;
+    TArray<TWeakObjectPtr<AActor>> TerrainActors;
+
+    // Helper functions
+    bool FindLandscapeInWorld();
+    void CacheTerrainActors();
+    FVector CalculateSlideDirection(FVector Location, FVector SurfaceNormal);
+    float CalculateDistanceToTerrain(FVector Location);
+    bool IsLocationInWater(FVector Location);
+    void UpdateMaterialCache();
 };
