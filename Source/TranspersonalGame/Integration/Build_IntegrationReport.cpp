@@ -1,298 +1,238 @@
 #include "Build_IntegrationReport.h"
-#include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "Engine/GameInstance.h"
+#include "Engine/Engine.h"
 #include "HAL/PlatformFilemanager.h"
-#include "Misc/FileHelper.h"
 #include "Misc/DateTime.h"
+#include "Misc/Paths.h"
 #include "UObject/UObjectGlobals.h"
+#include "UObject/Package.h"
 
-void UBuild_IntegrationReport::Initialize(FSubsystemCollectionBase& Collection)
+UBuild_IntegrationReport::UBuild_IntegrationReport()
 {
-    Super::Initialize(Collection);
-    
-    // Initialize core systems to monitor
-    CoreSystems.Empty();
-    CoreSystems.Add(TPair<FString, FString>(TEXT("Character System"), TEXT("TranspersonalCharacter")));
-    CoreSystems.Add(TPair<FString, FString>(TEXT("Game State"), TEXT("TranspersonalGameState")));
-    CoreSystems.Add(TPair<FString, FString>(TEXT("World Generation"), TEXT("PCGWorldGenerator")));
-    CoreSystems.Add(TPair<FString, FString>(TEXT("Foliage Manager"), TEXT("FoliageManager")));
-    CoreSystems.Add(TPair<FString, FString>(TEXT("Crowd Simulation"), TEXT("CrowdSimulationManager")));
-    CoreSystems.Add(TPair<FString, FString>(TEXT("Dinosaur AI"), TEXT("DinosaurCombatAIController")));
-    CoreSystems.Add(TPair<FString, FString>(TEXT("Dinosaur TRex"), TEXT("DinosaurTRex")));
-    CoreSystems.Add(TPair<FString, FString>(TEXT("VFX Manager"), TEXT("VFX_ImpactManager")));
-    CoreSystems.Add(TPair<FString, FString>(TEXT("QA Manager"), TEXT("QA_TestManager")));
-    
-    // Initialize system status
-    SystemInfoArray.Empty();
-    bAllSystemsOperational = false;
-    
-    UE_LOG(LogTemp, Log, TEXT("Build_IntegrationReport: Initialized with %d core systems"), CoreSystems.Num());
+    ReportTimestamp = FDateTime::Now();
+    CycleID = TEXT("UNKNOWN");
+    OverallStatus = EBuild_ValidationStatus::Unknown;
 }
 
-void UBuild_IntegrationReport::Deinitialize()
+void UBuild_IntegrationReport::GenerateReport()
 {
-    SystemInfoArray.Empty();
-    CoreSystems.Empty();
-    CompilationErrors.Empty();
+    UE_LOG(LogTemp, Log, TEXT("Build_IntegrationReport: Starting report generation"));
     
-    Super::Deinitialize();
+    ReportTimestamp = FDateTime::Now();
+    CriticalErrors.Empty();
+    Warnings.Empty();
+    Recommendations.Empty();
+    ModuleStatuses.Empty();
+
+    // Validate all modules
+    ValidateAllModules();
+    
+    // Calculate metrics
+    CalculateMetrics();
+    
+    // Check system health
+    CheckSystemHealth();
+    
+    // Generate recommendations
+    GenerateRecommendations();
+
+    UE_LOG(LogTemp, Log, TEXT("Build_IntegrationReport: Report generation complete"));
 }
 
-void UBuild_IntegrationReport::ValidateAllSystems()
+bool UBuild_IntegrationReport::ValidateModuleIntegrity(const FString& ModuleName)
 {
-    SystemInfoArray.Empty();
-    CompilationErrors.Empty();
+    FBuild_ModuleStatus ModuleStatus;
+    ModuleStatus.ModuleName = ModuleName;
     
-    int32 OperationalCount = 0;
+    // Check if module classes can be loaded
+    FString ClassPath = FString::Printf(TEXT("/Script/TranspersonalGame.%s"), *ModuleName);
+    UClass* TestClass = LoadClass<UObject>(nullptr, *ClassPath);
     
-    // Validate each core system
-    for (const auto& SystemPair : CoreSystems)
+    if (TestClass)
     {
-        ValidateSystem(SystemPair.Key, SystemPair.Value);
-        
-        // Check if system is operational
-        if (SystemInfoArray.Num() > 0)
-        {
-            const FBuild_SystemInfo& LastSystem = SystemInfoArray.Last();
-            if (LastSystem.Status == EBuild_SystemStatus::Operational)
-            {
-                OperationalCount++;
-            }
-        }
-    }
-    
-    // Update overall status
-    bAllSystemsOperational = (OperationalCount == CoreSystems.Num());
-    
-    // Update performance metrics
-    UpdatePerformanceMetrics();
-    
-    // Check cross-system compatibility
-    CheckCrossSystemCompatibility();
-    
-    UE_LOG(LogTemp, Log, TEXT("Build_IntegrationReport: Validated %d systems, %d operational"), 
-           CoreSystems.Num(), OperationalCount);
-}
-
-void UBuild_IntegrationReport::ValidateSystem(const FString& SystemName, const FString& ClassName)
-{
-    FBuild_SystemInfo SystemInfo;
-    SystemInfo.SystemName = SystemName;
-    SystemInfo.ClassName = ClassName;
-    SystemInfo.Status = EBuild_SystemStatus::Loading;
-    
-    // Try to load the class
-    FString ClassPath = FString::Printf(TEXT("/Script/TranspersonalGame.%s"), *ClassName);
-    UClass* LoadedClass = LoadClass<UObject>(nullptr, *ClassPath);
-    
-    if (LoadedClass)
-    {
-        SystemInfo.bIsLoaded = true;
-        SystemInfo.Status = EBuild_SystemStatus::Operational;
-        SystemInfo.ErrorMessage = TEXT("");
+        ModuleStatus.CompilationStatus = EBuild_ValidationStatus::Passed;
+        ModuleStatus.LinkingStatus = EBuild_ValidationStatus::Passed;
+        ModuleStatus.RuntimeStatus = EBuild_ValidationStatus::Passed;
+        ModuleStatus.ClassCount = 1;
+        ModuleStatus.ErrorCount = 0;
     }
     else
     {
-        SystemInfo.bIsLoaded = false;
-        SystemInfo.Status = EBuild_SystemStatus::Failed;
-        SystemInfo.ErrorMessage = FString::Printf(TEXT("Failed to load class: %s"), *ClassPath);
-        
-        // Add to compilation errors
-        CompilationErrors.Add(SystemInfo.ErrorMessage);
+        ModuleStatus.CompilationStatus = EBuild_ValidationStatus::Failed;
+        ModuleStatus.LinkingStatus = EBuild_ValidationStatus::Failed;
+        ModuleStatus.RuntimeStatus = EBuild_ValidationStatus::Failed;
+        ModuleStatus.ClassCount = 0;
+        ModuleStatus.ErrorCount = 1;
+        ModuleStatus.ErrorMessages.Add(FString::Printf(TEXT("Failed to load class: %s"), *ClassPath));
     }
-    
-    SystemInfoArray.Add(SystemInfo);
+
+    ModuleStatuses.Add(ModuleStatus);
+    return ModuleStatus.CompilationStatus == EBuild_ValidationStatus::Passed;
 }
 
-TArray<FBuild_SystemInfo> UBuild_IntegrationReport::GetSystemStatus()
+FBuild_ModuleStatus UBuild_IntegrationReport::GetModuleStatus(const FString& ModuleName)
 {
-    return SystemInfoArray;
-}
-
-FBuild_PerformanceMetrics UBuild_IntegrationReport::GetPerformanceMetrics()
-{
-    UpdatePerformanceMetrics();
-    return CurrentMetrics;
-}
-
-bool UBuild_IntegrationReport::IsSystemOperational(const FString& SystemName)
-{
-    for (const FBuild_SystemInfo& SystemInfo : SystemInfoArray)
+    for (const FBuild_ModuleStatus& Status : ModuleStatuses)
     {
-        if (SystemInfo.SystemName == SystemName)
+        if (Status.ModuleName == ModuleName)
         {
-            return SystemInfo.Status == EBuild_SystemStatus::Operational;
-        }
-    }
-    return false;
-}
-
-bool UBuild_IntegrationReport::ValidateCharacterVFXIntegration()
-{
-    bool bCharacterLoaded = IsSystemOperational(TEXT("Character System"));
-    bool bVFXLoaded = IsSystemOperational(TEXT("VFX Manager"));
-    
-    return bCharacterLoaded && bVFXLoaded;
-}
-
-bool UBuild_IntegrationReport::ValidateDinosaurAIIntegration()
-{
-    bool bDinosaurLoaded = IsSystemOperational(TEXT("Dinosaur TRex"));
-    bool bAILoaded = IsSystemOperational(TEXT("Dinosaur AI"));
-    
-    return bDinosaurLoaded && bAILoaded;
-}
-
-bool UBuild_IntegrationReport::ValidateWorldFoliageIntegration()
-{
-    bool bWorldLoaded = IsSystemOperational(TEXT("World Generation"));
-    bool bFoliageLoaded = IsSystemOperational(TEXT("Foliage Manager"));
-    
-    return bWorldLoaded && bFoliageLoaded;
-}
-
-bool UBuild_IntegrationReport::CheckCompilationStatus()
-{
-    // Check if all systems loaded successfully
-    return bAllSystemsOperational && CompilationErrors.Num() == 0;
-}
-
-TArray<FString> UBuild_IntegrationReport::GetCompilationErrors()
-{
-    return CompilationErrors;
-}
-
-FString UBuild_IntegrationReport::GenerateIntegrationReport()
-{
-    FString Report;
-    FDateTime CurrentTime = FDateTime::Now();
-    
-    Report += FString::Printf(TEXT("=== TRANSPERSONAL GAME INTEGRATION REPORT ===\n"));
-    Report += FString::Printf(TEXT("Generated: %s\n\n"), *CurrentTime.ToString());
-    
-    // Overall status
-    Report += FString::Printf(TEXT("OVERALL STATUS: %s\n"), 
-                             bAllSystemsOperational ? TEXT("OPERATIONAL") : TEXT("ISSUES DETECTED"));
-    Report += FString::Printf(TEXT("Systems Monitored: %d\n"), CoreSystems.Num());
-    
-    int32 OperationalCount = 0;
-    for (const FBuild_SystemInfo& SystemInfo : SystemInfoArray)
-    {
-        if (SystemInfo.Status == EBuild_SystemStatus::Operational)
-        {
-            OperationalCount++;
-        }
-    }
-    Report += FString::Printf(TEXT("Systems Operational: %d/%d\n\n"), OperationalCount, SystemInfoArray.Num());
-    
-    // System details
-    Report += TEXT("=== SYSTEM STATUS ===\n");
-    for (const FBuild_SystemInfo& SystemInfo : SystemInfoArray)
-    {
-        FString StatusText;
-        switch (SystemInfo.Status)
-        {
-            case EBuild_SystemStatus::Operational: StatusText = TEXT("✓ OPERATIONAL"); break;
-            case EBuild_SystemStatus::Failed: StatusText = TEXT("✗ FAILED"); break;
-            case EBuild_SystemStatus::Loading: StatusText = TEXT("⟳ LOADING"); break;
-            case EBuild_SystemStatus::Disabled: StatusText = TEXT("⊘ DISABLED"); break;
-            default: StatusText = TEXT("? UNKNOWN"); break;
-        }
-        
-        Report += FString::Printf(TEXT("%-20s: %s\n"), *SystemInfo.SystemName, *StatusText);
-        if (!SystemInfo.ErrorMessage.IsEmpty())
-        {
-            Report += FString::Printf(TEXT("  Error: %s\n"), *SystemInfo.ErrorMessage);
+            return Status;
         }
     }
     
-    // Performance metrics
-    Report += TEXT("\n=== PERFORMANCE METRICS ===\n");
-    Report += FString::Printf(TEXT("Total Actors: %d\n"), CurrentMetrics.TotalActors);
-    Report += FString::Printf(TEXT("Dinosaur Actors: %d\n"), CurrentMetrics.DinosaurActors);
-    Report += FString::Printf(TEXT("VFX Actors: %d\n"), CurrentMetrics.VFXActors);
-    Report += FString::Printf(TEXT("Static Mesh Actors: %d\n"), CurrentMetrics.StaticMeshActors);
-    
-    // Cross-system integration
-    Report += TEXT("\n=== CROSS-SYSTEM INTEGRATION ===\n");
-    Report += FString::Printf(TEXT("Character-VFX: %s\n"), 
-                             ValidateCharacterVFXIntegration() ? TEXT("✓ COMPATIBLE") : TEXT("✗ FAILED"));
-    Report += FString::Printf(TEXT("Dinosaur-AI: %s\n"), 
-                             ValidateDinosaurAIIntegration() ? TEXT("✓ COMPATIBLE") : TEXT("✗ FAILED"));
-    Report += FString::Printf(TEXT("World-Foliage: %s\n"), 
-                             ValidateWorldFoliageIntegration() ? TEXT("✓ COMPATIBLE") : TEXT("✗ FAILED"));
-    
-    // Compilation errors
-    if (CompilationErrors.Num() > 0)
-    {
-        Report += TEXT("\n=== COMPILATION ERRORS ===\n");
-        for (const FString& Error : CompilationErrors)
-        {
-            Report += FString::Printf(TEXT("- %s\n"), *Error);
-        }
-    }
-    
-    Report += TEXT("\n=== END REPORT ===\n");
-    
-    return Report;
+    // Return default status if not found
+    FBuild_ModuleStatus DefaultStatus;
+    DefaultStatus.ModuleName = ModuleName;
+    DefaultStatus.CompilationStatus = EBuild_ValidationStatus::Unknown;
+    return DefaultStatus;
 }
 
-void UBuild_IntegrationReport::SaveIntegrationReport(const FString& ReportPath)
+void UBuild_IntegrationReport::AddCriticalError(const FString& ErrorMessage)
 {
-    FString Report = GenerateIntegrationReport();
-    
-    if (!FFileHelper::SaveStringToFile(Report, *ReportPath))
+    CriticalErrors.AddUnique(ErrorMessage);
+    UE_LOG(LogTemp, Error, TEXT("Build_IntegrationReport: Critical Error - %s"), *ErrorMessage);
+}
+
+void UBuild_IntegrationReport::AddWarning(const FString& WarningMessage)
+{
+    Warnings.AddUnique(WarningMessage);
+    UE_LOG(LogTemp, Warning, TEXT("Build_IntegrationReport: Warning - %s"), *WarningMessage);
+}
+
+void UBuild_IntegrationReport::AddRecommendation(const FString& RecommendationMessage)
+{
+    Recommendations.AddUnique(RecommendationMessage);
+    UE_LOG(LogTemp, Log, TEXT("Build_IntegrationReport: Recommendation - %s"), *RecommendationMessage);
+}
+
+bool UBuild_IntegrationReport::IsSystemHealthy()
+{
+    return CriticalErrors.Num() == 0 && 
+           OverallStatus == EBuild_ValidationStatus::Passed &&
+           Metrics.FailedModules == 0;
+}
+
+float UBuild_IntegrationReport::GetOverallHealthScore()
+{
+    if (Metrics.TotalModules == 0)
     {
-        UE_LOG(LogTemp, Error, TEXT("Build_IntegrationReport: Failed to save report to %s"), *ReportPath);
+        return 0.0f;
+    }
+
+    float CompilationScore = (float)Metrics.CompiledModules / (float)Metrics.TotalModules;
+    float ErrorPenalty = FMath::Min(1.0f, (float)CriticalErrors.Num() * 0.1f);
+    float WarningPenalty = FMath::Min(0.5f, (float)Warnings.Num() * 0.05f);
+
+    return FMath::Max(0.0f, CompilationScore - ErrorPenalty - WarningPenalty);
+}
+
+void UBuild_IntegrationReport::ValidateAllModules()
+{
+    TArray<FString> CoreModules = {
+        TEXT("TranspersonalCharacter"),
+        TEXT("TranspersonalGameState"),
+        TEXT("PCGWorldGenerator"),
+        TEXT("FoliageManager"),
+        TEXT("CrowdSimulationManager"),
+        TEXT("ProceduralWorldManager"),
+        TEXT("BuildIntegrationManager")
+    };
+
+    for (const FString& ModuleName : CoreModules)
+    {
+        ValidateModuleIntegrity(ModuleName);
+    }
+}
+
+void UBuild_IntegrationReport::CalculateMetrics()
+{
+    Metrics.TotalModules = ModuleStatuses.Num();
+    Metrics.CompiledModules = 0;
+    Metrics.FailedModules = 0;
+    Metrics.TotalClasses = 0;
+    Metrics.LoadedClasses = 0;
+
+    for (const FBuild_ModuleStatus& Status : ModuleStatuses)
+    {
+        if (Status.CompilationStatus == EBuild_ValidationStatus::Passed)
+        {
+            Metrics.CompiledModules++;
+        }
+        else
+        {
+            Metrics.FailedModules++;
+        }
+
+        Metrics.TotalClasses += Status.ClassCount;
+        if (Status.RuntimeStatus == EBuild_ValidationStatus::Passed)
+        {
+            Metrics.LoadedClasses += Status.ClassCount;
+        }
+    }
+
+    // Get actor count from current world
+    if (UWorld* World = GEngine->GetWorldFromContextObject(this, EGetWorldErrorMode::LogAndReturnNull))
+    {
+        Metrics.TotalActors = World->GetActorCount();
+    }
+
+    Metrics.BuildTime = 0.0f; // Would need to be tracked externally
+    Metrics.MemoryUsage = FPlatformMemory::GetStats().UsedPhysical / (1024.0f * 1024.0f); // MB
+}
+
+void UBuild_IntegrationReport::CheckSystemHealth()
+{
+    if (Metrics.FailedModules > 0)
+    {
+        OverallStatus = EBuild_ValidationStatus::Failed;
+        AddCriticalError(FString::Printf(TEXT("System has %d failed modules"), Metrics.FailedModules));
+    }
+    else if (Metrics.CompiledModules == Metrics.TotalModules)
+    {
+        OverallStatus = EBuild_ValidationStatus::Passed;
     }
     else
     {
-        UE_LOG(LogTemp, Log, TEXT("Build_IntegrationReport: Report saved to %s"), *ReportPath);
+        OverallStatus = EBuild_ValidationStatus::InProgress;
+        AddWarning(TEXT("Some modules are still being validated"));
+    }
+
+    // Check memory usage
+    if (Metrics.MemoryUsage > 8192.0f) // 8GB
+    {
+        AddWarning(FString::Printf(TEXT("High memory usage: %.2f MB"), Metrics.MemoryUsage));
+    }
+
+    // Check actor count
+    if (Metrics.TotalActors > 20000)
+    {
+        AddCriticalError(FString::Printf(TEXT("Actor count exceeds limit: %d > 20000"), Metrics.TotalActors));
+    }
+    else if (Metrics.TotalActors > 15000)
+    {
+        AddWarning(FString::Printf(TEXT("Actor count approaching limit: %d"), Metrics.TotalActors));
     }
 }
 
-void UBuild_IntegrationReport::UpdatePerformanceMetrics()
+void UBuild_IntegrationReport::GenerateRecommendations()
 {
-    CurrentMetrics = FBuild_PerformanceMetrics();
-    
-    // Get world and count actors
-    UWorld* World = GetWorld();
-    if (!World)
+    if (Metrics.FailedModules > 0)
     {
-        return;
+        AddRecommendation(TEXT("Review failed module compilation errors and fix missing dependencies"));
     }
-    
-    // Count actors by type
-    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
-    {
-        AActor* Actor = *ActorItr;
-        if (!Actor)
-        {
-            continue;
-        }
-        
-        CurrentMetrics.TotalActors++;
-        
-        FString ClassName = Actor->GetClass()->GetName();
-        
-        if (ClassName.Contains(TEXT("Dinosaur")))
-        {
-            CurrentMetrics.DinosaurActors++;
-        }
-        else if (ClassName.Contains(TEXT("VFX")) || ClassName.Contains(TEXT("Niagara")))
-        {
-            CurrentMetrics.VFXActors++;
-        }
-        else if (ClassName.Contains(TEXT("StaticMesh")))
-        {
-            CurrentMetrics.StaticMeshActors++;
-        }
-    }
-}
 
-void UBuild_IntegrationReport::CheckCrossSystemCompatibility()
-{
-    // Additional cross-system validation logic can be added here
-    // For now, we rely on the individual validation functions
+    if (Metrics.TotalActors > 15000)
+    {
+        AddRecommendation(TEXT("Consider implementing actor pooling or LOD systems to reduce actor count"));
+    }
+
+    if (Metrics.MemoryUsage > 4096.0f)
+    {
+        AddRecommendation(TEXT("Optimize memory usage by reducing texture sizes or implementing streaming"));
+    }
+
+    if (CriticalErrors.Num() == 0 && Warnings.Num() == 0)
+    {
+        AddRecommendation(TEXT("System is healthy - continue with planned development"));
+    }
 }
