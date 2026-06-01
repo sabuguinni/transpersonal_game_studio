@@ -1,346 +1,290 @@
 #include "Narr_DialogueSystem.h"
 #include "Engine/Engine.h"
-#include "Engine/World.h"
-#include "GameFramework/PlayerController.h"
-#include "Kismet/GameplayStatics.h"
-#include "Sound/SoundCue.h"
-#include "Components/AudioComponent.h"
+#include "Components/SphereComponent.h"
+#include "Components/StaticMeshComponent.h"
+#include "GameFramework/Character.h"
+#include "UObject/ConstructorHelpers.h"
 
-UNarr_DialogueSystem::UNarr_DialogueSystem()
+ANarr_DialogueSystem::ANarr_DialogueSystem()
 {
-    CurrentPlayingDialogue = "";
-    DialogueStartTime = 0.0f;
+    PrimaryActorTick.bCanEverTick = true;
+
+    // Create root component
+    RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootComponent"));
+
+    // Create dialogue mesh component
+    DialogueMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("DialogueMesh"));
+    DialogueMesh->SetupAttachment(RootComponent);
+
+    // Create interaction sphere
+    InteractionSphere = CreateDefaultSubobject<USphereComponent>(TEXT("InteractionSphere"));
+    InteractionSphere->SetupAttachment(RootComponent);
+    InteractionSphere->SetSphereRadius(500.0f);
+
+    // Set default values
+    InteractionRange = 500.0f;
+    NPCName = TEXT("Survivor");
+    CurrentBiome = ENarr_BiomeType::Savana;
+    CurrentDialogueIndex = 0;
+    bIsInDialogue = false;
+    CurrentPlayer = nullptr;
+
+    // Bind overlap events
+    InteractionSphere->OnComponentBeginOverlap.AddDynamic(this, &ANarr_DialogueSystem::OnInteractionSphereBeginOverlap);
+    InteractionSphere->OnComponentEndOverlap.AddDynamic(this, &ANarr_DialogueSystem::OnInteractionSphereEndOverlap);
 }
 
-void UNarr_DialogueSystem::Initialize(FSubsystemCollectionBase& Collection)
+void ANarr_DialogueSystem::BeginPlay()
 {
-    Super::Initialize(Collection);
+    Super::BeginPlay();
     
-    UE_LOG(LogTemp, Warning, TEXT("Narrative Dialogue System Initialized"));
-    
-    InitializeDefaultDialogues();
-    InitializeStoryProgression();
+    InitializeDialogueEntries();
+    InitializeStoryPoints();
 }
 
-void UNarr_DialogueSystem::Deinitialize()
+void ANarr_DialogueSystem::Tick(float DeltaTime)
 {
-    StopCurrentDialogue();
-    DialogueDatabase.Empty();
-    StoryProgressMap.Empty();
-    
-    Super::Deinitialize();
-}
+    Super::Tick(DeltaTime);
 
-void UNarr_DialogueSystem::TriggerDialogue(const FString& DialogueID, AActor* Speaker, AActor* Listener)
-{
-    if (!IsDialogueAvailable(DialogueID))
+    // Update dialogue system logic here if needed
+    if (bIsInDialogue && CurrentPlayer)
     {
-        UE_LOG(LogTemp, Warning, TEXT("Dialogue %s not available or not found"), *DialogueID);
+        // Check if player is still in range
+        float Distance = FVector::Dist(GetActorLocation(), CurrentPlayer->GetActorLocation());
+        if (Distance > InteractionRange * 1.5f)
+        {
+            EndDialogue();
+        }
+    }
+}
+
+void ANarr_DialogueSystem::StartDialogue(AActor* Player)
+{
+    if (!Player || bIsInDialogue)
+    {
         return;
     }
 
-    FNarr_DialogueEntry DialogueEntry = GetDialogue(DialogueID);
-    
-    if (!CheckDialoguePrerequisites(DialogueEntry))
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Dialogue %s prerequisites not met"), *DialogueID);
-        return;
-    }
+    CurrentPlayer = Player;
+    bIsInDialogue = true;
+    CurrentDialogueIndex = 0;
 
-    // Stop current dialogue if playing
-    StopCurrentDialogue();
-
-    // Set current dialogue
-    CurrentPlayingDialogue = DialogueID;
-    DialogueStartTime = GetWorld()->GetTimeSeconds();
-
-    // Display dialogue text (in a real implementation, this would trigger UI)
+    // Log dialogue start
     if (GEngine)
     {
-        FString DisplayText = FString::Printf(TEXT("[%s]: %s"), 
-            *UEnum::GetValueAsString(DialogueEntry.SpeakerType), 
-            *DialogueEntry.DialogueText.ToString());
-        
-        GEngine->AddOnScreenDebugMessage(-1, DialogueEntry.Duration, FColor::Yellow, DisplayText);
+        FString Message = FString::Printf(TEXT("Starting dialogue with %s"), *NPCName);
+        GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Green, Message);
     }
 
-    // Play audio if available
-    if (!DialogueEntry.AudioFilePath.IsEmpty())
+    // Get appropriate dialogue for current biome
+    TArray<FNarr_DialogueEntry> BiomeDialogue = GetDialogueForBiome(CurrentBiome);
+    if (BiomeDialogue.Num() > 0)
     {
-        PlayDialogueAudio(DialogueID);
-    }
-
-    // Log dialogue trigger
-    UE_LOG(LogTemp, Log, TEXT("Triggered dialogue: %s by %s"), 
-        *DialogueID, 
-        *UEnum::GetValueAsString(DialogueEntry.SpeakerType));
-
-    // Schedule dialogue completion
-    FTimerHandle DialogueTimer;
-    GetWorld()->GetTimerManager().SetTimer(DialogueTimer, 
-        FTimerDelegate::CreateLambda([this, DialogueID]()
+        FNarr_DialogueEntry CurrentEntry = BiomeDialogue[0];
+        if (GEngine)
         {
-            OnDialogueCompleted(DialogueID);
-        }), 
-        DialogueEntry.Duration, false);
-}
-
-bool UNarr_DialogueSystem::IsDialogueAvailable(const FString& DialogueID) const
-{
-    return DialogueDatabase.Contains(DialogueID);
-}
-
-void UNarr_DialogueSystem::RegisterDialogue(const FNarr_DialogueEntry& DialogueEntry)
-{
-    DialogueDatabase.Add(DialogueEntry.DialogueID, DialogueEntry);
-    UE_LOG(LogTemp, Log, TEXT("Registered dialogue: %s"), *DialogueEntry.DialogueID);
-}
-
-FNarr_DialogueEntry UNarr_DialogueSystem::GetDialogue(const FString& DialogueID) const
-{
-    if (const FNarr_DialogueEntry* FoundDialogue = DialogueDatabase.Find(DialogueID))
-    {
-        return *FoundDialogue;
+            FString DialogueMessage = FString::Printf(TEXT("%s: %s"), *CurrentEntry.SpeakerName, *CurrentEntry.DialogueText);
+            GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Yellow, DialogueMessage);
+        }
     }
+}
+
+void ANarr_DialogueSystem::EndDialogue()
+{
+    if (!bIsInDialogue)
+    {
+        return;
+    }
+
+    bIsInDialogue = false;
+    CurrentPlayer = nullptr;
+    CurrentDialogueIndex = 0;
+
+    if (GEngine)
+    {
+        GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Red, TEXT("Dialogue ended"));
+    }
+}
+
+FNarr_DialogueEntry ANarr_DialogueSystem::GetCurrentDialogue() const
+{
+    TArray<FNarr_DialogueEntry> BiomeDialogue = GetDialogueForBiome(CurrentBiome);
     
-    return FNarr_DialogueEntry();
+    if (BiomeDialogue.IsValidIndex(CurrentDialogueIndex))
+    {
+        return BiomeDialogue[CurrentDialogueIndex];
+    }
+
+    // Return default dialogue if none found
+    FNarr_DialogueEntry DefaultEntry;
+    DefaultEntry.SpeakerName = NPCName;
+    DefaultEntry.DialogueText = TEXT("The wilderness is dangerous. Stay alert, survivor.");
+    return DefaultEntry;
 }
 
-void UNarr_DialogueSystem::AdvanceStory(const FString& StoryID)
+void ANarr_DialogueSystem::ProgressStory(const FString& StoryPointID)
 {
-    if (FNarr_StoryProgress* StoryProgress = StoryProgressMap.Find(StoryID))
+    for (FNarr_StoryProgression& StoryPoint : StoryPoints)
     {
-        if (!StoryProgress->bIsCompleted && StoryProgress->CurrentStep < StoryProgress->TotalSteps)
+        if (StoryPoint.StoryPointID == StoryPointID && !StoryPoint.bIsCompleted)
         {
-            StoryProgress->CurrentStep++;
+            StoryPoint.bIsCompleted = true;
             
-            if (StoryProgress->CurrentStep >= StoryProgress->TotalSteps)
+            if (GEngine)
             {
-                CompleteStory(StoryID);
+                FString Message = FString::Printf(TEXT("Story Progress: %s completed!"), *StoryPoint.Description);
+                GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Cyan, Message);
             }
-            
-            UE_LOG(LogTemp, Log, TEXT("Advanced story %s to step %d/%d"), 
-                *StoryID, StoryProgress->CurrentStep, StoryProgress->TotalSteps);
-        }
-    }
-}
-
-void UNarr_DialogueSystem::SetStoryProgress(const FString& StoryID, int32 NewStep)
-{
-    if (FNarr_StoryProgress* StoryProgress = StoryProgressMap.Find(StoryID))
-    {
-        StoryProgress->CurrentStep = FMath::Clamp(NewStep, 0, StoryProgress->TotalSteps);
-        
-        if (StoryProgress->CurrentStep >= StoryProgress->TotalSteps)
-        {
-            CompleteStory(StoryID);
-        }
-        
-        UE_LOG(LogTemp, Log, TEXT("Set story %s progress to %d/%d"), 
-            *StoryID, StoryProgress->CurrentStep, StoryProgress->TotalSteps);
-    }
-}
-
-FNarr_StoryProgress UNarr_DialogueSystem::GetStoryProgress(const FString& StoryID) const
-{
-    if (const FNarr_StoryProgress* FoundProgress = StoryProgressMap.Find(StoryID))
-    {
-        return *FoundProgress;
-    }
-    
-    return FNarr_StoryProgress();
-}
-
-void UNarr_DialogueSystem::CompleteStory(const FString& StoryID)
-{
-    if (FNarr_StoryProgress* StoryProgress = StoryProgressMap.Find(StoryID))
-    {
-        StoryProgress->bIsCompleted = true;
-        StoryProgress->CurrentStep = StoryProgress->TotalSteps;
-        
-        UE_LOG(LogTemp, Warning, TEXT("Story completed: %s"), *StoryID);
-        
-        // Unlock related dialogues
-        for (const FString& UnlockedDialogue : StoryProgress->UnlockedDialogues)
-        {
-            // Mark dialogue as available (implementation depends on dialogue availability system)
-            UE_LOG(LogTemp, Log, TEXT("Unlocked dialogue: %s"), *UnlockedDialogue);
-        }
-    }
-}
-
-void UNarr_DialogueSystem::TriggerContextDialogue(ENarr_DialogueType DialogueType, const FVector& Location)
-{
-    // Find appropriate dialogue based on context
-    for (const auto& DialoguePair : DialogueDatabase)
-    {
-        const FNarr_DialogueEntry& Dialogue = DialoguePair.Value;
-        
-        if (Dialogue.DialogueType == DialogueType && CheckDialoguePrerequisites(Dialogue))
-        {
-            TriggerDialogue(Dialogue.DialogueID);
             break;
         }
     }
 }
 
-void UNarr_DialogueSystem::TriggerNPCDialogue(ENarr_NPCType NPCType, const FString& Context)
+bool ANarr_DialogueSystem::IsStoryPointCompleted(const FString& StoryPointID) const
 {
-    // Find dialogue for specific NPC type
-    for (const auto& DialoguePair : DialogueDatabase)
+    for (const FNarr_StoryProgression& StoryPoint : StoryPoints)
     {
-        const FNarr_DialogueEntry& Dialogue = DialoguePair.Value;
-        
-        if (Dialogue.SpeakerType == NPCType && CheckDialoguePrerequisites(Dialogue))
+        if (StoryPoint.StoryPointID == StoryPointID)
         {
-            TriggerDialogue(Dialogue.DialogueID);
-            break;
+            return StoryPoint.bIsCompleted;
         }
     }
+    return false;
 }
 
-void UNarr_DialogueSystem::PlayDialogueAudio(const FString& DialogueID)
+void ANarr_DialogueSystem::AddDialogueEntry(const FNarr_DialogueEntry& NewEntry)
 {
-    if (const FNarr_DialogueEntry* DialogueEntry = DialogueDatabase.Find(DialogueID))
+    DialogueEntries.Add(NewEntry);
+}
+
+TArray<FNarr_DialogueEntry> ANarr_DialogueSystem::GetDialogueForBiome(ENarr_BiomeType Biome) const
+{
+    TArray<FNarr_DialogueEntry> BiomeSpecificDialogue;
+    
+    for (const FNarr_DialogueEntry& Entry : DialogueEntries)
     {
-        // In a full implementation, this would load and play the audio file
-        UE_LOG(LogTemp, Log, TEXT("Playing audio for dialogue: %s (File: %s)"), 
-            *DialogueID, *DialogueEntry->AudioFilePath);
-    }
-}
-
-void UNarr_DialogueSystem::StopCurrentDialogue()
-{
-    if (!CurrentPlayingDialogue.IsEmpty())
-    {
-        UE_LOG(LogTemp, Log, TEXT("Stopping dialogue: %s"), *CurrentPlayingDialogue);
-        CurrentPlayingDialogue = "";
-        DialogueStartTime = 0.0f;
-    }
-}
-
-void UNarr_DialogueSystem::InitializeDefaultDialogues()
-{
-    // Tutorial dialogues
-    FNarr_DialogueEntry TutorialStart;
-    TutorialStart.DialogueID = "TUTORIAL_START";
-    TutorialStart.DialogueText = FText::FromString("Welcome, survivor. This harsh world will test every instinct you possess. Learn quickly, or perish.");
-    TutorialStart.DialogueType = ENarr_DialogueType::Tutorial;
-    TutorialStart.SpeakerType = ENarr_NPCType::Survivor;
-    TutorialStart.Duration = 5.0f;
-    TutorialStart.bIsRepeatable = false;
-    RegisterDialogue(TutorialStart);
-
-    // Warning dialogues
-    FNarr_DialogueEntry DangerWarning;
-    DangerWarning.DialogueID = "DANGER_TREX";
-    DangerWarning.DialogueText = FText::FromString("Massive predator detected. T-Rex territory ahead. Proceed with extreme caution.");
-    DangerWarning.DialogueType = ENarr_DialogueType::Warning;
-    DangerWarning.SpeakerType = ENarr_NPCType::Scout;
-    DangerWarning.Duration = 4.0f;
-    DangerWarning.bIsRepeatable = true;
-    RegisterDialogue(DangerWarning);
-
-    // Discovery dialogues
-    FNarr_DialogueEntry ForestDiscovery;
-    ForestDiscovery.DialogueID = "DISCOVERY_FOREST";
-    ForestDiscovery.DialogueText = FText::FromString("Ancient forest discovered. Rich resources await, but dangerous creatures lurk in the shadows.");
-    ForestDiscovery.DialogueType = ENarr_DialogueType::Discovery;
-    ForestDiscovery.SpeakerType = ENarr_NPCType::Scout;
-    ForestDiscovery.Duration = 4.5f;
-    ForestDiscovery.bIsRepeatable = false;
-    RegisterDialogue(ForestDiscovery);
-
-    // NPC dialogues
-    FNarr_DialogueEntry ElderWisdom;
-    ElderWisdom.DialogueID = "ELDER_WISDOM";
-    ElderWisdom.DialogueText = FText::FromString("The old ways teach us: respect the land, fear the apex predators, and never hunt alone.");
-    ElderWisdom.DialogueType = ENarr_DialogueType::Story;
-    ElderWisdom.SpeakerType = ENarr_NPCType::TribalElder;
-    ElderWisdom.Duration = 6.0f;
-    ElderWisdom.bIsRepeatable = true;
-    RegisterDialogue(ElderWisdom);
-
-    // Combat dialogues
-    FNarr_DialogueEntry CombatAdvice;
-    CombatAdvice.DialogueID = "COMBAT_ADVICE";
-    CombatAdvice.DialogueText = FText::FromString("Raptors hunt in packs. Use terrain to your advantage. Strike fast, retreat faster.");
-    CombatAdvice.DialogueType = ENarr_DialogueType::Combat;
-    CombatAdvice.SpeakerType = ENarr_NPCType::Hunter;
-    CombatAdvice.Duration = 5.0f;
-    CombatAdvice.bIsRepeatable = true;
-    RegisterDialogue(CombatAdvice);
-
-    UE_LOG(LogTemp, Warning, TEXT("Initialized %d default dialogues"), DialogueDatabase.Num());
-}
-
-void UNarr_DialogueSystem::InitializeStoryProgression()
-{
-    // Main survival story
-    FNarr_StoryProgress SurvivalStory;
-    SurvivalStory.StoryID = "MAIN_SURVIVAL";
-    SurvivalStory.StoryTitle = FText::FromString("Prehistoric Survival");
-    SurvivalStory.StoryDescription = FText::FromString("Survive in the dangerous prehistoric world and establish your place in the ecosystem.");
-    SurvivalStory.TotalSteps = 10;
-    SurvivalStory.UnlockedDialogues.Add("ELDER_WISDOM");
-    SurvivalStory.UnlockedDialogues.Add("COMBAT_ADVICE");
-    StoryProgressMap.Add(SurvivalStory.StoryID, SurvivalStory);
-
-    // Tribal contact story
-    FNarr_StoryProgress TribalStory;
-    TribalStory.StoryID = "TRIBAL_CONTACT";
-    TribalStory.StoryTitle = FText::FromString("First Contact");
-    TribalStory.StoryDescription = FText::FromString("Establish contact with other survivors and learn their ways.");
-    TribalStory.TotalSteps = 5;
-    TribalStory.UnlockedDialogues.Add("ELDER_WISDOM");
-    StoryProgressMap.Add(TribalStory.StoryID, TribalStory);
-
-    // Territory exploration story
-    FNarr_StoryProgress ExplorationStory;
-    ExplorationStory.StoryID = "TERRITORY_EXPLORATION";
-    ExplorationStory.StoryTitle = FText::FromString("Uncharted Lands");
-    ExplorationStory.StoryDescription = FText::FromString("Explore the five great biomes and discover their secrets.");
-    ExplorationStory.TotalSteps = 5;
-    ExplorationStory.UnlockedDialogues.Add("DISCOVERY_FOREST");
-    StoryProgressMap.Add(ExplorationStory.StoryID, ExplorationStory);
-
-    UE_LOG(LogTemp, Warning, TEXT("Initialized %d story progressions"), StoryProgressMap.Num());
-}
-
-bool UNarr_DialogueSystem::CheckDialoguePrerequisites(const FNarr_DialogueEntry& DialogueEntry) const
-{
-    // Check if all prerequisites are met
-    for (const FString& Prerequisite : DialogueEntry.Prerequisites)
-    {
-        // In a full implementation, this would check various game state conditions
-        // For now, we'll assume all prerequisites are met
-        UE_LOG(LogTemp, Log, TEXT("Checking prerequisite: %s"), *Prerequisite);
+        if (Entry.RequiredBiome == Biome)
+        {
+            BiomeSpecificDialogue.Add(Entry);
+        }
     }
     
-    return true;
+    return BiomeSpecificDialogue;
 }
 
-void UNarr_DialogueSystem::OnDialogueCompleted(const FString& DialogueID)
+void ANarr_DialogueSystem::OnInteractionSphereBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
 {
-    if (CurrentPlayingDialogue == DialogueID)
+    if (OtherActor && OtherActor->IsA<ACharacter>())
     {
-        CurrentPlayingDialogue = "";
-        DialogueStartTime = 0.0f;
-        
-        UE_LOG(LogTemp, Log, TEXT("Dialogue completed: %s"), *DialogueID);
-        
-        // Trigger any follow-up events based on dialogue completion
-        if (DialogueID == "TUTORIAL_START")
+        if (GEngine)
         {
-            AdvanceStory("MAIN_SURVIVAL");
-        }
-        else if (DialogueID == "ELDER_WISDOM")
-        {
-            AdvanceStory("TRIBAL_CONTACT");
-        }
-        else if (DialogueID == "DISCOVERY_FOREST")
-        {
-            AdvanceStory("TERRITORY_EXPLORATION");
+            FString Message = FString::Printf(TEXT("Press E to talk to %s"), *NPCName);
+            GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::White, Message);
         }
     }
+}
+
+void ANarr_DialogueSystem::OnInteractionSphereEndOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex)
+{
+    if (OtherActor && OtherActor == CurrentPlayer)
+    {
+        EndDialogue();
+    }
+}
+
+void ANarr_DialogueSystem::InitializeDialogueEntries()
+{
+    DialogueEntries.Empty();
+
+    // Savana dialogue
+    DialogueEntries.Add(CreateDialogueEntry(TEXT("Kora"), TEXT("Welcome to the Savana, survivor. The grasslands stretch endlessly, but beware - predators hunt here."), ENarr_BiomeType::Savana, 0.2f));
+    DialogueEntries.Add(CreateDialogueEntry(TEXT("Kora"), TEXT("The Triceratops herds migrate through these plains. Follow them to find water sources."), ENarr_BiomeType::Savana, 0.5f));
+
+    // Pantano dialogue
+    DialogueEntries.Add(CreateDialogueEntry(TEXT("Marsh Guide"), TEXT("The swamplands are treacherous. Watch for quicksand and stay on solid ground."), ENarr_BiomeType::Pantano, -0.3f));
+    DialogueEntries.Add(CreateDialogueEntry(TEXT("Marsh Guide"), TEXT("Ancient creatures lurk beneath the murky waters. Never drink directly from the swamp."), ENarr_BiomeType::Pantano, -0.5f));
+
+    // Floresta dialogue
+    DialogueEntries.Add(CreateDialogueEntry(TEXT("Forest Ranger"), TEXT("The forest provides shelter and resources, but visibility is limited. Listen for danger."), ENarr_BiomeType::Floresta, 0.1f));
+    DialogueEntries.Add(CreateDialogueEntry(TEXT("Forest Ranger"), TEXT("Brachiosaurus feed on the tallest trees. They're gentle unless threatened."), ENarr_BiomeType::Floresta, 0.4f));
+
+    // Deserto dialogue
+    DialogueEntries.Add(CreateDialogueEntry(TEXT("Desert Nomad"), TEXT("Water is life in the desert. Conserve every drop and seek shade during the heat."), ENarr_BiomeType::Deserto, -0.2f));
+    DialogueEntries.Add(CreateDialogueEntry(TEXT("Desert Nomad"), TEXT("The sand hides many secrets. Look for rock formations that offer protection."), ENarr_BiomeType::Deserto, 0.0f));
+
+    // Montanha dialogue
+    DialogueEntries.Add(CreateDialogueEntry(TEXT("Mountain Climber"), TEXT("The peaks are cold and unforgiving. Prepare for harsh weather and thin air."), ENarr_BiomeType::Montanha, -0.1f));
+    DialogueEntries.Add(CreateDialogueEntry(TEXT("Mountain Climber"), TEXT("Caves in the mountains offer shelter, but some are home to dangerous predators."), ENarr_BiomeType::Montanha, -0.4f));
+}
+
+void ANarr_DialogueSystem::InitializeStoryPoints()
+{
+    StoryPoints.Empty();
+
+    FNarr_StoryProgression TutorialStart;
+    TutorialStart.StoryPointID = TEXT("Tutorial_Start");
+    TutorialStart.Description = TEXT("Learn basic survival skills");
+    TutorialStart.bIsCompleted = false;
+    TutorialStart.CompletionReward = 10.0f;
+    StoryPoints.Add(TutorialStart);
+
+    FNarr_StoryProgression FirstHunt;
+    FirstHunt.StoryPointID = TEXT("First_Hunt");
+    FirstHunt.Description = TEXT("Successfully track and observe your first dinosaur");
+    FirstHunt.bIsCompleted = false;
+    FirstHunt.Prerequisites.Add(TEXT("Tutorial_Start"));
+    FirstHunt.CompletionReward = 25.0f;
+    StoryPoints.Add(FirstHunt);
+
+    FNarr_StoryProgression TribeDiscovery;
+    TribeDiscovery.StoryPointID = TEXT("Tribe_Discovery");
+    TribeDiscovery.Description = TEXT("Find other survivors and establish contact");
+    TribeDiscovery.bIsCompleted = false;
+    TribeDiscovery.Prerequisites.Add(TEXT("First_Hunt"));
+    TribeDiscovery.CompletionReward = 50.0f;
+    StoryPoints.Add(TribeDiscovery);
+
+    FNarr_StoryProgression AncientRuins;
+    AncientRuins.StoryPointID = TEXT("Ancient_Ruins");
+    AncientRuins.Description = TEXT("Discover prehistoric artifacts and ancient knowledge");
+    AncientRuins.bIsCompleted = false;
+    AncientRuins.Prerequisites.Add(TEXT("Tribe_Discovery"));
+    AncientRuins.CompletionReward = 75.0f;
+    StoryPoints.Add(AncientRuins);
+
+    FNarr_StoryProgression FinalChallenge;
+    FinalChallenge.StoryPointID = TEXT("Final_Challenge");
+    FinalChallenge.Description = TEXT("Confront the apex predator and prove your mastery");
+    FinalChallenge.bIsCompleted = false;
+    FinalChallenge.Prerequisites.Add(TEXT("Ancient_Ruins"));
+    FinalChallenge.CompletionReward = 100.0f;
+    StoryPoints.Add(FinalChallenge);
+}
+
+FNarr_DialogueEntry ANarr_DialogueSystem::CreateDialogueEntry(const FString& Speaker, const FString& Text, ENarr_BiomeType Biome, float Tone)
+{
+    FNarr_DialogueEntry Entry;
+    Entry.SpeakerName = Speaker;
+    Entry.DialogueText = Text;
+    Entry.RequiredBiome = Biome;
+    Entry.EmotionalTone = Tone;
+    
+    // Add some context-appropriate responses
+    if (Tone < -0.3f)
+    {
+        Entry.PlayerResponses.Add(TEXT("I understand the danger."));
+        Entry.PlayerResponses.Add(TEXT("How can I stay safe?"));
+    }
+    else if (Tone > 0.3f)
+    {
+        Entry.PlayerResponses.Add(TEXT("Thank you for the guidance."));
+        Entry.PlayerResponses.Add(TEXT("Tell me more."));
+    }
+    else
+    {
+        Entry.PlayerResponses.Add(TEXT("I see."));
+        Entry.PlayerResponses.Add(TEXT("What else should I know?"));
+    }
+    
+    return Entry;
 }
