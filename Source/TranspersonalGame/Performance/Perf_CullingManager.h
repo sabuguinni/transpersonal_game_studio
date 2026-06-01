@@ -1,108 +1,111 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
-#include "Components/StaticMeshComponent.h"
-#include "Components/SceneComponent.h"
+#include "Engine/Engine.h"
+#include "Components/ActorComponent.h"
 #include "Engine/World.h"
+#include "GameFramework/Actor.h"
 #include "Perf_CullingManager.generated.h"
 
 UENUM(BlueprintType)
 enum class EPerf_CullingType : uint8
 {
-    Distance        UMETA(DisplayName = "Distance Culling"),
-    Frustum         UMETA(DisplayName = "Frustum Culling"),
-    Occlusion       UMETA(DisplayName = "Occlusion Culling"),
-    LOD             UMETA(DisplayName = "LOD Culling")
+    Distance UMETA(DisplayName = "Distance Culling"),
+    Frustum UMETA(DisplayName = "Frustum Culling"),
+    Occlusion UMETA(DisplayName = "Occlusion Culling"),
+    LOD UMETA(DisplayName = "LOD Culling"),
+    Performance UMETA(DisplayName = "Performance Culling")
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FPerf_CullingSettings
+struct FPerf_CullingSettings
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Culling")
-    bool bEnableDistanceCulling;
+    float MaxDrawDistance = 10000.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Culling")
-    float MaxRenderDistance;
+    float FrustumCullingMargin = 100.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Culling")
-    bool bEnableFrustumCulling;
+    bool bEnableOcclusionCulling = true;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Culling")
-    bool bEnableOcclusionCulling;
+    int32 MaxVisibleActors = 5000;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Culling")
-    float OcclusionCheckFrequency;
-
-    FPerf_CullingSettings()
-    {
-        bEnableDistanceCulling = true;
-        MaxRenderDistance = 10000.0f;
-        bEnableFrustumCulling = true;
-        bEnableOcclusionCulling = true;
-        OcclusionCheckFrequency = 0.5f;
-    }
+    float PerformanceCullingThreshold = 30.0f;
 };
 
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API APerf_CullingManager : public AActor
+UCLASS(ClassGroup=(Performance), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UPerf_CullingManager : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    APerf_CullingManager();
+    UPerf_CullingManager();
 
 protected:
     virtual void BeginPlay() override;
-    virtual void Tick(float DeltaTime) override;
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 public:
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void RegisterActorForCulling(AActor* Actor, float CullingDistance = 5000.0f);
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void UnregisterActorFromCulling(AActor* Actor);
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void SetCullingSettings(const FPerf_CullingSettings& NewSettings);
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    FPerf_CullingSettings GetCullingSettings() const { return CullingSettings; }
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void ForceUpdateCulling();
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    int32 GetCulledActorCount() const { return CulledActors.Num(); }
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    int32 GetVisibleActorCount() const { return RegisteredActors.Num() - CulledActors.Num(); }
-
-protected:
-    void UpdateDistanceCulling();
-    void UpdateFrustumCulling();
-    void UpdateOcclusionCulling();
-    
-    bool IsActorInCameraFrustum(AActor* Actor) const;
-    bool IsActorOccluded(AActor* Actor) const;
-    
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Culling Settings")
     FPerf_CullingSettings CullingSettings;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    TArray<AActor*> RegisteredActors;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Culling Settings")
+    bool bEnableCulling = true;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    TMap<AActor*, float> ActorCullingDistances;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Culling Settings")
+    float CullingUpdateInterval = 0.1f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    TArray<AActor*> CulledActors;
+    UPROPERTY(BlueprintReadOnly, Category = "Performance Stats")
+    int32 TotalActors = 0;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float LastOcclusionCheck;
+    UPROPERTY(BlueprintReadOnly, Category = "Performance Stats")
+    int32 CulledActors = 0;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    int32 CullingUpdateCounter;
+    UPROPERTY(BlueprintReadOnly, Category = "Performance Stats")
+    int32 VisibleActors = 0;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Performance Stats")
+    float LastCullingTime = 0.0f;
+
+    UFUNCTION(BlueprintCallable, Category = "Culling")
+    void UpdateCulling();
+
+    UFUNCTION(BlueprintCallable, Category = "Culling")
+    void SetCullingEnabled(bool bEnabled);
+
+    UFUNCTION(BlueprintCallable, Category = "Culling")
+    bool IsActorCulled(AActor* Actor) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Culling")
+    void CullActor(AActor* Actor, EPerf_CullingType CullingType);
+
+    UFUNCTION(BlueprintCallable, Category = "Culling")
+    void UnCullActor(AActor* Actor);
+
+    UFUNCTION(BlueprintCallable, Category = "Culling")
+    TArray<AActor*> GetCulledActors() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Culling")
+    TArray<AActor*> GetVisibleActors() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    float GetCullingEfficiency() const;
+
+private:
+    float LastUpdateTime = 0.0f;
+    TArray<AActor*> CulledActorsList;
+    TArray<AActor*> VisibleActorsList;
+    
+    bool ShouldCullByDistance(AActor* Actor) const;
+    bool ShouldCullByFrustum(AActor* Actor) const;
+    bool ShouldCullByOcclusion(AActor* Actor) const;
+    bool ShouldCullByPerformance(AActor* Actor) const;
+    
+    void UpdateActorVisibility(AActor* Actor, bool bVisible);
+    FVector GetPlayerLocation() const;
 };
