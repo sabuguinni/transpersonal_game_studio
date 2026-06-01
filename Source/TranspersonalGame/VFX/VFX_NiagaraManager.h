@@ -2,21 +2,22 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "Engine/World.h"
 #include "Components/StaticMeshComponent.h"
-#include "Engine/PointLight.h"
-#include "Particles/ParticleSystemComponent.h"
+#include "NiagaraComponent.h"
+#include "NiagaraSystem.h"
 #include "VFX_NiagaraManager.generated.h"
 
 UENUM(BlueprintType)
 enum class EVFX_EffectType : uint8
 {
-    Fire_Campfire,
-    Dust_Footstep,
-    Blood_Impact,
-    Water_Splash,
-    Smoke_Ambient,
-    Rain_Weather,
-    Wind_Particles
+    None = 0,
+    FootstepDust,
+    CampfireFire,
+    BloodImpact,
+    WeatherRain,
+    WeaponSpark,
+    BreathVapor
 };
 
 USTRUCT(BlueprintType)
@@ -24,28 +25,27 @@ struct FVFX_EffectData
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    EVFX_EffectType EffectType;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+    EVFX_EffectType EffectType = EVFX_EffectType::None;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FVector Location;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+    TSoftObjectPtr<UNiagaraSystem> NiagaraSystem;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FRotator Rotation;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+    float Duration = 2.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float Intensity;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+    float Scale = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float Duration;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+    bool bAutoDestroy = true;
 
     FVFX_EffectData()
     {
-        EffectType = EVFX_EffectType::Fire_Campfire;
-        Location = FVector::ZeroVector;
-        Rotation = FRotator::ZeroRotator;
-        Intensity = 1.0f;
-        Duration = 5.0f;
+        EffectType = EVFX_EffectType::None;
+        Duration = 2.0f;
+        Scale = 1.0f;
+        bAutoDestroy = true;
     }
 };
 
@@ -59,53 +59,63 @@ public:
 
 protected:
     virtual void BeginPlay() override;
-    virtual void Tick(float DeltaTime) override;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "VFX Components")
-    USceneComponent* RootSceneComponent;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Settings")
-    TArray<FVFX_EffectData> ActiveEffects;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Settings")
-    float EffectUpdateInterval;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Settings")
-    int32 MaxActiveEffects;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Performance")
-    float LODDistance1;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Performance")
-    float LODDistance2;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Performance")
-    float LODDistance3;
 
 public:
-    UFUNCTION(BlueprintCallable, Category = "VFX Control")
-    void SpawnEffect(EVFX_EffectType EffectType, FVector Location, FRotator Rotation = FRotator::ZeroRotator, float Intensity = 1.0f, float Duration = 5.0f);
+    virtual void Tick(float DeltaTime) override;
 
-    UFUNCTION(BlueprintCallable, Category = "VFX Control")
-    void StopEffect(EVFX_EffectType EffectType, FVector Location);
+    // VFX Effect Registry
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Registry")
+    TMap<EVFX_EffectType, FVFX_EffectData> EffectRegistry;
 
-    UFUNCTION(BlueprintCallable, Category = "VFX Control")
-    void StopAllEffects();
+    // Active VFX Components
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "VFX Active")
+    TArray<UNiagaraComponent*> ActiveEffects;
 
-    UFUNCTION(BlueprintCallable, Category = "VFX Performance")
-    void UpdateLODLevels();
+    // VFX Spawning Functions
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    UNiagaraComponent* SpawnVFXAtLocation(EVFX_EffectType EffectType, FVector Location, FRotator Rotation = FRotator::ZeroRotator);
 
-    UFUNCTION(BlueprintCallable, Category = "VFX Performance")
-    float GetDistanceToPlayer() const;
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    UNiagaraComponent* SpawnVFXAttached(EVFX_EffectType EffectType, USceneComponent* AttachTo, FName SocketName = NAME_None);
+
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    void StopVFXEffect(UNiagaraComponent* Effect);
+
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    void StopAllVFXEffects();
+
+    // Prehistoric-specific VFX
+    UFUNCTION(BlueprintCallable, Category = "VFX Prehistoric")
+    void PlayFootstepDust(FVector Location, float DinosaurSize = 1.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "VFX Prehistoric")
+    void PlayCampfireEffect(FVector Location);
+
+    UFUNCTION(BlueprintCallable, Category = "VFX Prehistoric")
+    void PlayBloodImpact(FVector Location, FVector ImpactNormal);
+
+    UFUNCTION(BlueprintCallable, Category = "VFX Prehistoric")
+    void PlayWeatherRain(bool bEnable);
+
+    UFUNCTION(BlueprintCallable, Category = "VFX Prehistoric")
+    void PlayBreathVapor(FVector Location, float Temperature);
+
+    // VFX Management
+    UFUNCTION(BlueprintCallable, Category = "VFX Management")
+    void RegisterEffect(EVFX_EffectType EffectType, UNiagaraSystem* NiagaraSystem, float Duration = 2.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "VFX Management")
+    void CleanupExpiredEffects();
+
+    UFUNCTION(BlueprintCallable, Category = "VFX Management")
+    int32 GetActiveEffectCount() const;
 
 private:
-    void CleanupExpiredEffects();
-    void CreateFireEffect(const FVFX_EffectData& EffectData);
-    void CreateDustEffect(const FVFX_EffectData& EffectData);
-    void CreateBloodEffect(const FVFX_EffectData& EffectData);
-    void CreateWaterEffect(const FVFX_EffectData& EffectData);
-
-    float LastUpdateTime;
-    TArray<UParticleSystemComponent*> ParticleComponents;
-    TArray<UPointLightComponent*> LightComponents;
+    // Internal management
+    void InitializeEffectRegistry();
+    void UpdateActiveEffects(float DeltaTime);
+    
+    // Cleanup timer
+    float CleanupTimer = 0.0f;
+    float CleanupInterval = 5.0f;
 };
