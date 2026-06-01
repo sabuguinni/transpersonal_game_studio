@@ -1,199 +1,139 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "AIController.h"
-#include "BehaviorTree/BehaviorTreeComponent.h"
-#include "BehaviorTree/BlackboardComponent.h"
-#include "Perception/AIPerceptionComponent.h"
-#include "Perception/AISenseConfig_Sight.h"
-#include "Perception/AISenseConfig_Hearing.h"
-#include "Engine/Engine.h"
-#include "TranspersonalGame/TranspersonalGame.h"
+#include "Components/ActorComponent.h"
+#include "Engine/World.h"
+#include "GameFramework/Character.h"
+#include "GameFramework/PlayerController.h"
+#include "Kismet/GameplayStatics.h"
+#include "Components/SphereComponent.h"
+#include "../../SharedTypes.h"
 #include "NPC_TRexBehavior.generated.h"
 
-UENUM(BlueprintType)
-enum class ENPC_TRexState : uint8
-{
-	Patrolling		UMETA(DisplayName = "Patrolling"),
-	Hunting			UMETA(DisplayName = "Hunting"), 
-	Attacking		UMETA(DisplayName = "Attacking"),
-	Feeding			UMETA(DisplayName = "Feeding"),
-	Resting			UMETA(DisplayName = "Resting")
-};
-
-USTRUCT(BlueprintType)
-struct FNPC_TRexStats
-{
-	GENERATED_BODY()
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "T-Rex Stats")
-	float PatrolRadius = 5000.0f;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "T-Rex Stats")
-	float DetectionRange = 3000.0f;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "T-Rex Stats")
-	float AttackRange = 300.0f;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "T-Rex Stats")
-	float MovementSpeed = 600.0f;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "T-Rex Stats")
-	float HuntingSpeed = 900.0f;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "T-Rex Stats")
-	float AttackDamage = 75.0f;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "T-Rex Stats")
-	float RestDuration = 30.0f;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "T-Rex Stats")
-	float FeedingDuration = 15.0f;
-
-	FNPC_TRexStats()
-	{
-		PatrolRadius = 5000.0f;
-		DetectionRange = 3000.0f;
-		AttackRange = 300.0f;
-		MovementSpeed = 600.0f;
-		HuntingSpeed = 900.0f;
-		AttackDamage = 75.0f;
-		RestDuration = 30.0f;
-		FeedingDuration = 15.0f;
-	}
-};
-
 /**
- * T-Rex AI Controller with sophisticated hunting behavior
- * Patrols territory, hunts prey, and exhibits realistic predator behavior
+ * T-Rex Behavior Component - Implements territorial patrol and hunting behavior
+ * Manages T-Rex AI states: Patrol, Hunt, Attack, Return to Territory
+ * Realistic predator behavior based on paleontological research
  */
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API ANPC_TRexBehavior : public AAIController
+UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UNPC_TRexBehavior : public UActorComponent
 {
 	GENERATED_BODY()
 
 public:
-	ANPC_TRexBehavior();
+	UNPC_TRexBehavior();
 
 protected:
 	virtual void BeginPlay() override;
-	virtual void Tick(float DeltaTime) override;
-	virtual void OnPossess(APawn* InPawn) override;
-
-	// AI Components
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI Components")
-	class UBehaviorTreeComponent* BehaviorTreeComponent;
-
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI Components") 
-	class UBlackboardComponent* BlackboardComponent;
-
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI Components")
-	class UAIPerceptionComponent* AIPerceptionComponent;
-
-	// Behavior Tree Asset
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI Behavior")
-	class UBehaviorTree* TRexBehaviorTree;
-
-	// T-Rex Stats
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "T-Rex Behavior")
-	FNPC_TRexStats TRexStats;
-
-	// Current State
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "T-Rex State")
-	ENPC_TRexState CurrentState;
-
-	// Territory Center
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "T-Rex Territory")
-	FVector TerritoryCenter;
-
-	// Current Target
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "T-Rex Hunting")
-	AActor* CurrentTarget;
-
-	// Patrol Points
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "T-Rex Patrol")
-	TArray<FVector> PatrolPoints;
-
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "T-Rex Patrol")
-	int32 CurrentPatrolIndex;
-
-	// Timers
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "T-Rex Timers")
-	float StateTimer;
-
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "T-Rex Timers")
-	float LastAttackTime;
 
 public:
-	// Behavior Functions
-	UFUNCTION(BlueprintCallable, Category = "T-Rex Behavior")
-	void SetState(ENPC_TRexState NewState);
+	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-	UFUNCTION(BlueprintCallable, Category = "T-Rex Behavior") 
-	void StartPatrolling();
-
+	// Core behavior methods
 	UFUNCTION(BlueprintCallable, Category = "T-Rex Behavior")
-	void StartHunting(AActor* Target);
+	void InitializeBehavior(FVector TerritoryCenter, float TerritoryRadius);
 
 	UFUNCTION(BlueprintCallable, Category = "T-Rex Behavior")
-	void StartAttacking();
+	void UpdateBehaviorState();
 
 	UFUNCTION(BlueprintCallable, Category = "T-Rex Behavior")
-	void StartFeeding();
+	void SetTarget(AActor* NewTarget);
 
 	UFUNCTION(BlueprintCallable, Category = "T-Rex Behavior")
-	void StartResting();
+	void ClearTarget();
 
-	// Territory Management
-	UFUNCTION(BlueprintCallable, Category = "T-Rex Territory")
-	void SetTerritoryCenter(FVector NewCenter);
+	// State queries
+	UFUNCTION(BlueprintPure, Category = "T-Rex Behavior")
+	ENPC_DinosaurState GetCurrentState() const { return CurrentState; }
 
-	UFUNCTION(BlueprintCallable, Category = "T-Rex Territory")
-	void GeneratePatrolPoints();
+	UFUNCTION(BlueprintPure, Category = "T-Rex Behavior")
+	AActor* GetCurrentTarget() const { return CurrentTarget; }
 
-	UFUNCTION(BlueprintCallable, Category = "T-Rex Territory")
-	bool IsInTerritory(FVector Location) const;
+	UFUNCTION(BlueprintPure, Category = "T-Rex Behavior")
+	float GetDistanceToTarget() const;
 
-	// Target Detection
-	UFUNCTION(BlueprintCallable, Category = "T-Rex Detection")
-	AActor* FindNearestPrey();
-
-	UFUNCTION(BlueprintCallable, Category = "T-Rex Detection")
-	float GetDistanceToTarget(AActor* Target) const;
-
-	UFUNCTION(BlueprintCallable, Category = "T-Rex Detection")
-	bool CanSeeTarget(AActor* Target) const;
-
-	// Combat
-	UFUNCTION(BlueprintCallable, Category = "T-Rex Combat")
-	void PerformAttack();
-
-	UFUNCTION(BlueprintCallable, Category = "T-Rex Combat")
-	bool IsInAttackRange(AActor* Target) const;
-
-	// Movement
-	UFUNCTION(BlueprintCallable, Category = "T-Rex Movement")
-	void MoveToNextPatrolPoint();
-
-	UFUNCTION(BlueprintCallable, Category = "T-Rex Movement")
-	void SetMovementSpeed(float Speed);
+	UFUNCTION(BlueprintPure, Category = "T-Rex Behavior")
+	bool IsInTerritory() const;
 
 protected:
-	// AI Perception Callbacks
-	UFUNCTION()
-	void OnPerceptionUpdated(const TArray<AActor*>& UpdatedActors);
+	// Behavior state machine
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "T-Rex Behavior")
+	ENPC_DinosaurState CurrentState;
 
-	// State Update Functions
-	void UpdatePatrolling(float DeltaTime);
-	void UpdateHunting(float DeltaTime);
-	void UpdateAttacking(float DeltaTime);
-	void UpdateFeeding(float DeltaTime);
-	void UpdateResting(float DeltaTime);
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "T-Rex Behavior")
+	ENPC_DinosaurState PreviousState;
 
-	// Utility Functions
-	FVector GetRandomPatrolPoint() const;
-	bool ShouldRest() const;
-	bool ShouldFeed() const;
-	void SetupAIPerception();
-	void SetupBlackboard();
+	// Territory settings
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Territory", meta = (AllowPrivateAccess = "true"))
+	FVector TerritoryCenter;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Territory", meta = (AllowPrivateAccess = "true"))
+	float TerritoryRadius;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Territory", meta = (AllowPrivateAccess = "true"))
+	float PatrolRadius;
+
+	// Detection ranges
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Detection", meta = (AllowPrivateAccess = "true"))
+	float DetectionRange;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Detection", meta = (AllowPrivateAccess = "true"))
+	float AttackRange;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Detection", meta = (AllowPrivateAccess = "true"))
+	float ChaseRange;
+
+	// Current target and patrol
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Targeting")
+	AActor* CurrentTarget;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Patrol")
+	FVector CurrentPatrolPoint;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Patrol")
+	FVector NextPatrolPoint;
+
+	// Timers and cooldowns
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Timing")
+	float StateChangeTime;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Timing", meta = (AllowPrivateAccess = "true"))
+	float PatrolPointReachThreshold;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Timing", meta = (AllowPrivateAccess = "true"))
+	float AttackCooldown;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Timing")
+	float LastAttackTime;
+
+	// Movement speeds
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement", meta = (AllowPrivateAccess = "true"))
+	float PatrolSpeed;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement", meta = (AllowPrivateAccess = "true"))
+	float ChaseSpeed;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement", meta = (AllowPrivateAccess = "true"))
+	float AttackSpeed;
+
+private:
+	// Internal behavior methods
+	void HandlePatrolState();
+	void HandleHuntState();
+	void HandleAttackState();
+	void HandleReturnState();
+
+	// Utility methods
+	FVector GenerateRandomPatrolPoint();
+	AActor* FindNearestPlayer();
+	bool CanAttackTarget() const;
+	void MoveToLocation(FVector TargetLocation, float Speed);
+	void RotateTowardsTarget(AActor* Target, float DeltaTime);
+
+	// State transition methods
+	void TransitionToState(ENPC_DinosaurState NewState);
+	bool ShouldTransitionToHunt() const;
+	bool ShouldTransitionToAttack() const;
+	bool ShouldTransitionToReturn() const;
+	bool ShouldTransitionToPatrol() const;
 };
