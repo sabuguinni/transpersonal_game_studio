@@ -11,36 +11,32 @@
 UAnim_PlayerAnimationManager::UAnim_PlayerAnimationManager()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.bStartWithTickEnabled = true;
+    PrimaryComponentTick.TickGroup = TG_PrePhysics;
     
     // Initialize default values
-    PreviousState = EAnim_PlayerState::Idle;
-    StateChangeTimer = 0.0f;
-    MinStateChangeDuration = 0.1f;
+    CurrentMovementState = EAnim_MovementState::Idle;
+    PreviousMovementState = EAnim_MovementState::Idle;
+    BlendSpaceSmoothingSpeed = 5.0f;
+    StateTransitionTime = 0.2f;
+    bEnableRootMotion = true;
+    TimeSinceLastStateChange = 0.0f;
+    bIsInitialized = false;
     
-    // Initialize pointers
+    // Initialize references
     OwnerCharacter = nullptr;
-    MovementComponent = nullptr;
-    MeshComponent = nullptr;
+    CharacterMesh = nullptr;
+    CharacterMovement = nullptr;
     AnimInstance = nullptr;
-    
-    // Initialize animation assets
-    LocomotionBlendSpace = nullptr;
-    JumpMontage = nullptr;
-    CraftingMontage = nullptr;
-    GatheringMontage = nullptr;
-    CombatMontage = nullptr;
 }
 
 void UAnim_PlayerAnimationManager::BeginPlay()
 {
     Super::BeginPlay();
     
-    CacheComponents();
-    
-    if (OwnerCharacter)
+    // Auto-initialize with owner if it's a character
+    if (ACharacter* Character = Cast<ACharacter>(GetOwner()))
     {
-        UE_LOG(LogTemp, Log, TEXT("PlayerAnimationManager initialized for character: %s"), *OwnerCharacter->GetName());
+        InitializeWithCharacter(Character);
     }
 }
 
@@ -48,250 +44,225 @@ void UAnim_PlayerAnimationManager::TickComponent(float DeltaTime, ELevelTick Tic
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
     
-    StateChangeTimer += DeltaTime;
-    
-    UpdateAnimationData();
-    UpdateBlendSpaceParameters();
-}
-
-void UAnim_PlayerAnimationManager::CacheComponents()
-{
-    OwnerCharacter = Cast<ACharacter>(GetOwner());
-    
-    if (OwnerCharacter)
+    if (bIsInitialized)
     {
-        MovementComponent = OwnerCharacter->GetCharacterMovement();
-        MeshComponent = OwnerCharacter->GetMesh();
-        
-        if (MeshComponent)
-        {
-            AnimInstance = MeshComponent->GetAnimInstance();
-        }
+        UpdateMovementAnimations(DeltaTime);
+        SmoothBlendSpaceInputs(DeltaTime);
+        TimeSinceLastStateChange += DeltaTime;
     }
 }
 
-void UAnim_PlayerAnimationManager::UpdateAnimationData()
+void UAnim_PlayerAnimationManager::InitializeWithCharacter(ACharacter* Character)
 {
-    if (!OwnerCharacter || !MovementComponent)
+    if (!Character)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("UAnim_PlayerAnimationManager: Cannot initialize with null character"));
+        return;
+    }
+    
+    OwnerCharacter = Character;
+    CharacterMesh = Character->GetMesh();
+    CharacterMovement = Character->GetCharacterMovement();
+    
+    if (CharacterMesh)
+    {
+        AnimInstance = CharacterMesh->GetAnimInstance();
+        bIsInitialized = true;
+        
+        UE_LOG(LogTemp, Log, TEXT("UAnim_PlayerAnimationManager: Successfully initialized with character %s"), 
+               *Character->GetName());
+    }
+    else
+    {
+        UE_LOG(LogTemp, Warning, TEXT("UAnim_PlayerAnimationManager: Character has no skeletal mesh component"));
+    }
+}
+
+void UAnim_PlayerAnimationManager::SetMovementState(EAnim_MovementState NewState)
+{
+    if (NewState != CurrentMovementState && ShouldTransitionToState(NewState))
+    {
+        HandleStateTransition(NewState);
+    }
+}
+
+void UAnim_PlayerAnimationManager::HandleStateTransition(EAnim_MovementState NewState)
+{
+    PreviousMovementState = CurrentMovementState;
+    CurrentMovementState = NewState;
+    TimeSinceLastStateChange = 0.0f;
+    
+    // Broadcast state change event
+    OnAnimationStateChanged.Broadcast(NewState);
+    
+    UE_LOG(LogTemp, Log, TEXT("UAnim_PlayerAnimationManager: State transition from %d to %d"), 
+           (int32)PreviousMovementState, (int32)CurrentMovementState);
+}
+
+bool UAnim_PlayerAnimationManager::ShouldTransitionToState(EAnim_MovementState NewState) const
+{
+    // Prevent rapid state changes
+    if (TimeSinceLastStateChange < StateTransitionTime)
+    {
+        return false;
+    }
+    
+    // Add specific transition rules here if needed
+    return true;
+}
+
+void UAnim_PlayerAnimationManager::UpdateMovementAnimations(float DeltaTime)
+{
+    if (!CharacterMovement || !OwnerCharacter)
     {
         return;
     }
     
-    // Update basic movement data
-    FVector Velocity = OwnerCharacter->GetVelocity();
-    AnimationData.Speed = Velocity.Size();
+    // Calculate movement parameters
+    FVector Velocity = CharacterMovement->Velocity;
+    float Speed = Velocity.Size();
+    float MaxWalkSpeed = CharacterMovement->MaxWalkSpeed;
     
-    // Calculate direction relative to character's forward vector
-    if (AnimationData.Speed > 0.1f)
+    // Determine movement state based on character state
+    EAnim_MovementState NewState = EAnim_MovementState::Idle;
+    
+    if (CharacterMovement->IsFalling())
     {
-        FVector ForwardVector = OwnerCharacter->GetActorForwardVector();
-        FVector VelocityNormalized = Velocity.GetSafeNormal();
-        AnimationData.Direction = FMath::Atan2(
-            FVector::CrossProduct(ForwardVector, VelocityNormalized).Z,
-            FVector::DotProduct(ForwardVector, VelocityNormalized)
-        ) * 180.0f / PI;
+        if (Velocity.Z > 0)
+        {
+            NewState = EAnim_MovementState::JumpStart;
+        }
+        else
+        {
+            NewState = EAnim_MovementState::JumpLoop;
+        }
+    }
+    else if (CharacterMovement->IsCrouching())
+    {
+        if (Speed > 10.0f)
+        {
+            NewState = EAnim_MovementState::CrouchWalk;
+        }
+        else
+        {
+            NewState = EAnim_MovementState::CrouchIdle;
+        }
+    }
+    else if (Speed > MaxWalkSpeed * 0.8f)
+    {
+        NewState = EAnim_MovementState::Running;
+    }
+    else if (Speed > 10.0f)
+    {
+        NewState = EAnim_MovementState::Walking;
     }
     else
     {
-        AnimationData.Direction = 0.0f;
+        NewState = EAnim_MovementState::Idle;
     }
     
-    // Update movement state
-    AnimationData.bIsInAir = MovementComponent->IsFalling();
-    AnimationData.bIsCrouching = MovementComponent->IsCrouching();
+    // Update state
+    UpdateMovementStateFromCharacter();
+    SetMovementState(NewState);
     
-    // Calculate and update player state
-    EAnim_PlayerState NewState = CalculatePlayerState();
-    if (NewState != AnimationData.CurrentState && StateChangeTimer >= MinStateChangeDuration)
-    {
-        HandleStateTransition(NewState);
-    }
+    // Update blend space input
+    float NormalizedSpeed = FMath::Clamp(Speed / MaxWalkSpeed, 0.0f, 2.0f);
+    
+    // Calculate direction relative to character forward
+    FVector ForwardVector = OwnerCharacter->GetActorForwardVector();
+    FVector RightVector = OwnerCharacter->GetActorRightVector();
+    
+    FVector NormalizedVelocity = Velocity.GetSafeNormal();
+    float ForwardAmount = FVector::DotProduct(NormalizedVelocity, ForwardVector);
+    float RightAmount = FVector::DotProduct(NormalizedVelocity, RightVector);
+    
+    float Direction = UKismetMathLibrary::Atan2(RightAmount, ForwardAmount) * 180.0f / PI;
+    
+    UpdateBlendSpaceInput(NormalizedSpeed, Direction);
 }
 
-EAnim_PlayerState UAnim_PlayerAnimationManager::CalculatePlayerState() const
+void UAnim_PlayerAnimationManager::UpdateMovementStateFromCharacter()
 {
-    if (!OwnerCharacter || !MovementComponent)
-    {
-        return EAnim_PlayerState::Idle;
-    }
+    // This method can be overridden for custom state logic
+    // Base implementation relies on UpdateMovementAnimations
+}
+
+void UAnim_PlayerAnimationManager::UpdateBlendSpaceInput(float Speed, float Direction)
+{
+    BlendSpaceInput.Speed = Speed;
+    BlendSpaceInput.Direction = Direction;
     
-    // Check for air states first
-    if (AnimationData.bIsInAir)
+    // Calculate lean angle based on movement
+    if (CharacterMovement)
     {
-        if (MovementComponent->Velocity.Z > 0)
+        FVector Acceleration = CharacterMovement->GetCurrentAcceleration();
+        float AccelMagnitude = Acceleration.Size();
+        
+        if (AccelMagnitude > 0.0f)
         {
-            return EAnim_PlayerState::Jumping;
+            FVector RightVector = OwnerCharacter->GetActorRightVector();
+            float LeanAmount = FVector::DotProduct(Acceleration.GetSafeNormal(), RightVector);
+            BlendSpaceInput.LeanAngle = FMath::Clamp(LeanAmount * 45.0f, -45.0f, 45.0f);
         }
         else
         {
-            return EAnim_PlayerState::Falling;
+            BlendSpaceInput.LeanAngle = 0.0f;
         }
-    }
-    
-    // Check for crouching
-    if (AnimationData.bIsCrouching)
-    {
-        return EAnim_PlayerState::Crouching;
-    }
-    
-    // Check for movement states
-    if (AnimationData.Speed > 0.1f)
-    {
-        if (AnimationData.Speed > 300.0f) // Running threshold
-        {
-            return EAnim_PlayerState::Running;
-        }
-        else
-        {
-            return EAnim_PlayerState::Walking;
-        }
-    }
-    
-    // Default to idle
-    return EAnim_PlayerState::Idle;
-}
-
-void UAnim_PlayerAnimationManager::HandleStateTransition(EAnim_PlayerState NewState)
-{
-    EAnim_PlayerState OldState = AnimationData.CurrentState;
-    AnimationData.CurrentState = NewState;
-    PreviousState = OldState;
-    StateChangeTimer = 0.0f;
-    
-    // Trigger Blueprint event
-    OnStateChanged(OldState, NewState);
-    
-    UE_LOG(LogTemp, Log, TEXT("Player state changed from %d to %d"), (int32)OldState, (int32)NewState);
-}
-
-void UAnim_PlayerAnimationManager::SetPlayerState(EAnim_PlayerState NewState)
-{
-    if (NewState != AnimationData.CurrentState)
-    {
-        HandleStateTransition(NewState);
     }
 }
 
-void UAnim_PlayerAnimationManager::SetMovementDirection(const FVector& MovementInput)
+void UAnim_PlayerAnimationManager::SmoothBlendSpaceInputs(float DeltaTime)
 {
-    AnimationData.MovementDirection = CalculateMovementDirection(MovementInput);
-}
-
-EAnim_MovementDirection UAnim_PlayerAnimationManager::CalculateMovementDirection(const FVector& MovementInput) const
-{
-    if (MovementInput.IsNearlyZero())
-    {
-        return EAnim_MovementDirection::Forward;
-    }
+    // Smooth the blend space inputs for more natural animation transitions
+    float SmoothingFactor = FMath::Clamp(BlendSpaceSmoothingSpeed * DeltaTime, 0.0f, 1.0f);
     
-    float ForwardInput = MovementInput.X;
-    float RightInput = MovementInput.Y;
-    
-    // Determine primary direction
-    if (FMath::Abs(ForwardInput) > FMath::Abs(RightInput))
-    {
-        if (ForwardInput > 0)
-        {
-            if (RightInput > 0.3f)
-                return EAnim_MovementDirection::ForwardRight;
-            else if (RightInput < -0.3f)
-                return EAnim_MovementDirection::ForwardLeft;
-            else
-                return EAnim_MovementDirection::Forward;
-        }
-        else
-        {
-            if (RightInput > 0.3f)
-                return EAnim_MovementDirection::BackwardRight;
-            else if (RightInput < -0.3f)
-                return EAnim_MovementDirection::BackwardLeft;
-            else
-                return EAnim_MovementDirection::Backward;
-        }
-    }
-    else
-    {
-        if (RightInput > 0)
-            return EAnim_MovementDirection::Right;
-        else
-            return EAnim_MovementDirection::Left;
-    }
-}
-
-void UAnim_PlayerAnimationManager::UpdateSurvivalStats(float Health, float Stamina, float Fear)
-{
-    AnimationData.HealthPercentage = FMath::Clamp(Health, 0.0f, 1.0f);
-    AnimationData.StaminaPercentage = FMath::Clamp(Stamina, 0.0f, 1.0f);
-    AnimationData.FearLevel = FMath::Clamp(Fear, 0.0f, 1.0f);
-    
-    // Update state based on survival stats
-    if (AnimationData.HealthPercentage < 0.3f)
-    {
-        SetPlayerState(EAnim_PlayerState::Injured);
-    }
-    else if (AnimationData.StaminaPercentage < 0.1f)
-    {
-        SetPlayerState(EAnim_PlayerState::Exhausted);
-    }
-    else if (AnimationData.FearLevel > 0.7f)
-    {
-        SetPlayerState(EAnim_PlayerState::Afraid);
-    }
+    // This could be expanded to smooth all blend space inputs
+    // For now, we keep the direct assignment for responsiveness
 }
 
 void UAnim_PlayerAnimationManager::PlayMontage(UAnimMontage* Montage, float PlayRate)
 {
     if (!Montage || !AnimInstance)
     {
+        UE_LOG(LogTemp, Warning, TEXT("UAnim_PlayerAnimationManager: Cannot play montage - invalid montage or anim instance"));
         return;
     }
     
-    if (!IsPlayingMontage(Montage))
+    float MontageLength = AnimInstance->Montage_Play(Montage, PlayRate);
+    
+    if (MontageLength > 0.0f)
     {
-        AnimInstance->Montage_Play(Montage, PlayRate);
-        OnMontageStarted(Montage);
-        
-        UE_LOG(LogTemp, Log, TEXT("Playing montage: %s"), *Montage->GetName());
+        UE_LOG(LogTemp, Log, TEXT("UAnim_PlayerAnimationManager: Playing montage %s (length: %f)"), 
+               *Montage->GetName(), MontageLength);
+    }
+    else
+    {
+        UE_LOG(LogTemp, Warning, TEXT("UAnim_PlayerAnimationManager: Failed to play montage %s"), 
+               *Montage->GetName());
     }
 }
 
 void UAnim_PlayerAnimationManager::StopMontage(UAnimMontage* Montage)
 {
-    if (!Montage || !AnimInstance)
+    if (!AnimInstance)
     {
         return;
     }
     
-    if (IsPlayingMontage(Montage))
+    if (Montage)
     {
         AnimInstance->Montage_Stop(0.2f, Montage);
-        OnMontageEnded(Montage);
-        
-        UE_LOG(LogTemp, Log, TEXT("Stopped montage: %s"), *Montage->GetName());
+        UE_LOG(LogTemp, Log, TEXT("UAnim_PlayerAnimationManager: Stopped specific montage %s"), *Montage->GetName());
+    }
+    else
+    {
+        AnimInstance->StopAllMontages(0.2f);
+        UE_LOG(LogTemp, Log, TEXT("UAnim_PlayerAnimationManager: Stopped all montages"));
     }
 }
 
-bool UAnim_PlayerAnimationManager::IsPlayingMontage(UAnimMontage* Montage) const
+void UAnim_PlayerAnimationManager::SetAnimationSet(const FAnim_AnimationSet& NewAnimationSet)
 {
-    if (!Montage || !AnimInstance)
-    {
-        return false;
-    }
-    
-    return AnimInstance->Montage_IsPlaying(Montage);
-}
-
-void UAnim_PlayerAnimationManager::UpdateBlendSpaceParameters()
-{
-    if (!AnimInstance || !LocomotionBlendSpace)
-    {
-        return;
-    }
-    
-    // Update blend space parameters based on current animation data
-    // This would typically be done in the Animation Blueprint,
-    // but we can set up the data here for Blueprint consumption
-    
-    // The actual blend space parameter setting would be done
-    // in the Animation Blueprint using the AnimationData struct
+    AnimationSet = NewAnimationSet;
+    UE_LOG(LogTemp, Log, TEXT("UAnim_PlayerAnimationManager: Animation set updated"));
 }
