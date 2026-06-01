@@ -2,139 +2,67 @@
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
-#include "Kismet/GameplayStatics.h"
+#include "GameFramework/Actor.h"
+
+const float ADir_ProductionCoordinator::MetricsUpdateInterval = 5.0f;
 
 ADir_ProductionCoordinator::ADir_ProductionCoordinator()
 {
-    PrimaryActorTick.bCanEverTick = false;
+    PrimaryActorTick.bCanEverTick = true;
 
-    // Create root component
     RootSceneComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootSceneComponent"));
     RootComponent = RootSceneComponent;
 
-    // Initialize production settings
-    CurrentPhase = EDir_ProductionPhase::MinimumViablePrototype;
-    
-    // Initialize critical path flags
-    bPlayerCharacterExists = false;
-    bTerrainGenerated = false;
-    bDinosaursSpawned = false;
-    bSurvivalHUDActive = false;
-    bBasicLightingSetup = false;
+    // Initialize metrics
+    TotalActorsInWorld = 0;
+    DinosaurCount = 0;
+    EnvironmentPropsCount = 0;
+    LastMetricsUpdate = 0.0f;
 
-    // Set actor limits from Hugo's directives
-    MaxTotalActors = 8000;
-    MaxDinosaurs = 150;
-    MaxPropsPerBiome = 1000;
+    // Set up initial milestone
+    InitializePlayablePrototypeMilestone();
 }
 
 void ADir_ProductionCoordinator::BeginPlay()
 {
     Super::BeginPlay();
     
-    InitializeBiomes();
-    InitializeProductionTasks();
-    UpdateProductionStatus();
+    UE_LOG(LogTemp, Warning, TEXT("Studio Director Production Coordinator initialized"));
+    UpdateWorldMetrics();
     
-    UE_LOG(LogTemp, Warning, TEXT("Production Coordinator initialized - Phase: %d"), (int32)CurrentPhase);
+    // Dispatch initial critical tasks
+    DispatchTaskToAgent(TEXT("Agent02_EngineArchitect"), TEXT("Validate core systems compilation"), 10, FVector(1000, 0, 200));
+    DispatchTaskToAgent(TEXT("Agent05_WorldGenerator"), TEXT("Create realistic terrain with biomes"), 9, FVector(2000, 0, 200));
+    DispatchTaskToAgent(TEXT("Agent09_CharacterArtist"), TEXT("Implement playable character with movement"), 9, FVector(3000, 0, 200));
+    DispatchTaskToAgent(TEXT("Agent10_AnimationAgent"), TEXT("Add character animations and dinosaur basic AI"), 8, FVector(4000, 0, 200));
+    DispatchTaskToAgent(TEXT("Agent12_CombatAI"), TEXT("Implement survival HUD and basic combat"), 8, FVector(5000, 0, 200));
 }
 
-void ADir_ProductionCoordinator::InitializeBiomes()
+void ADir_ProductionCoordinator::Tick(float DeltaTime)
 {
-    BiomeStatuses.Empty();
+    Super::Tick(DeltaTime);
 
-    // Initialize the 5 biomes from Hugo's specifications
-    FDir_BiomeStatus Savana;
-    Savana.BiomeName = TEXT("Savana");
-    Savana.CenterLocation = FVector(0, 0, 0);
-    BiomeStatuses.Add(Savana);
-
-    FDir_BiomeStatus Pantano;
-    Pantano.BiomeName = TEXT("Pantano");
-    Pantano.CenterLocation = FVector(-50000, -45000, 0);
-    BiomeStatuses.Add(Pantano);
-
-    FDir_BiomeStatus Floresta;
-    Floresta.BiomeName = TEXT("Floresta");
-    Floresta.CenterLocation = FVector(-45000, 40000, 0);
-    BiomeStatuses.Add(Floresta);
-
-    FDir_BiomeStatus Deserto;
-    Deserto.BiomeName = TEXT("Deserto");
-    Deserto.CenterLocation = FVector(55000, 0, 0);
-    BiomeStatuses.Add(Deserto);
-
-    FDir_BiomeStatus Montanha;
-    Montanha.BiomeName = TEXT("Montanha");
-    Montanha.CenterLocation = FVector(40000, 50000, 0);
-    BiomeStatuses.Add(Montanha);
-}
-
-void ADir_ProductionCoordinator::InitializeProductionTasks()
-{
-    ActiveTasks.Empty();
-
-    // Critical path tasks for Minimum Viable Prototype
-    FDir_AgentTask CharacterTask;
-    CharacterTask.AgentName = TEXT("Agent #9 - Character Artist");
-    CharacterTask.TaskDescription = TEXT("Ensure TranspersonalCharacter has movement, camera, and survival stats");
-    CharacterTask.Priority = 10;
-    CharacterTask.EstimatedHours = 2.0f;
-    ActiveTasks.Add(CharacterTask);
-
-    FDir_AgentTask TerrainTask;
-    TerrainTask.AgentName = TEXT("Agent #5 - World Generator");
-    TerrainTask.TaskDescription = TEXT("Generate varied terrain with hills and valleys in all 5 biomes");
-    TerrainTask.Priority = 9;
-    TerrainTask.EstimatedHours = 3.0f;
-    ActiveTasks.Add(TerrainTask);
-
-    FDir_AgentTask DinosaurTask;
-    DinosaurTask.AgentName = TEXT("Agent #12 - Combat AI");
-    DinosaurTask.TaskDescription = TEXT("Place 150 dinosaurs distributed across biomes with basic AI");
-    DinosaurTask.Priority = 8;
-    DinosaurTask.EstimatedHours = 4.0f;
-    ActiveTasks.Add(DinosaurTask);
-
-    FDir_AgentTask HUDTask;
-    HUDTask.AgentName = TEXT("Agent #14 - Quest Designer");
-    HUDTask.TaskDescription = TEXT("Implement survival HUD showing health/hunger/thirst/stamina bars");
-    HUDTask.Priority = 7;
-    HUDTask.EstimatedHours = 2.5f;
-    ActiveTasks.Add(HUDTask);
-
-    FDir_AgentTask LightingTask;
-    LightingTask.AgentName = TEXT("Agent #8 - Lighting Artist");
-    LightingTask.TaskDescription = TEXT("Setup sun, sky atmosphere, and basic fog for all biomes");
-    LightingTask.Priority = 6;
-    LightingTask.EstimatedHours = 1.5f;
-    ActiveTasks.Add(LightingTask);
-}
-
-void ADir_ProductionCoordinator::UpdateProductionStatus()
-{
-    ValidateCriticalPath();
-    UpdateBiomeStatuses();
-    
-    if (IsWithinActorLimits() == false)
+    LastMetricsUpdate += DeltaTime;
+    if (LastMetricsUpdate >= MetricsUpdateInterval)
     {
-        UE_LOG(LogTemp, Error, TEXT("ACTOR LIMIT EXCEEDED - Enforcing limits"));
-        EnforceActorLimits();
+        UpdateWorldMetrics();
+        ValidateAgentOutputs();
+        LastMetricsUpdate = 0.0f;
     }
 }
 
-void ADir_ProductionCoordinator::AssignTaskToAgent(const FString& AgentName, const FString& TaskDesc, int32 Priority)
+void ADir_ProductionCoordinator::DispatchTaskToAgent(const FString& AgentName, const FString& TaskDescription, int32 Priority, FVector Location)
 {
     FDir_AgentTask NewTask;
     NewTask.AgentName = AgentName;
-    NewTask.TaskDescription = TaskDesc;
+    NewTask.TaskDescription = TaskDescription;
     NewTask.Priority = Priority;
     NewTask.bIsCompleted = false;
-    NewTask.EstimatedHours = 2.0f;
-    
+    NewTask.TaskLocation = Location;
+
     ActiveTasks.Add(NewTask);
-    
-    UE_LOG(LogTemp, Warning, TEXT("Task assigned to %s: %s (Priority: %d)"), *AgentName, *TaskDesc, Priority);
+
+    UE_LOG(LogTemp, Warning, TEXT("Task dispatched to %s: %s (Priority: %d)"), *AgentName, *TaskDescription, Priority);
 }
 
 void ADir_ProductionCoordinator::CompleteAgentTask(const FString& AgentName)
@@ -148,227 +76,242 @@ void ADir_ProductionCoordinator::CompleteAgentTask(const FString& AgentName)
             break;
         }
     }
+
+    // Update milestone progress
+    float NewProgress = GetMilestoneProgress();
+    CurrentMilestone.CompletionPercentage = NewProgress;
 }
 
-float ADir_ProductionCoordinator::GetOverallProgress() const
+float ADir_ProductionCoordinator::GetMilestoneProgress() const
 {
     if (ActiveTasks.Num() == 0)
+    {
         return 0.0f;
+    }
 
     int32 CompletedTasks = 0;
     for (const FDir_AgentTask& Task : ActiveTasks)
     {
         if (Task.bIsCompleted)
+        {
             CompletedTasks++;
+        }
     }
 
     return (float)CompletedTasks / (float)ActiveTasks.Num() * 100.0f;
 }
 
-void ADir_ProductionCoordinator::ValidateCriticalPath()
+void ADir_ProductionCoordinator::UpdateWorldMetrics()
 {
-    UWorld* World = GetWorld();
-    if (!World) return;
-
-    // Check for player character
-    bPlayerCharacterExists = false;
-    for (TActorIterator<APawn> ActorItr(World); ActorItr; ++ActorItr)
+    if (!GetWorld())
     {
-        APawn* Pawn = *ActorItr;
-        if (Pawn && Pawn->GetClass()->GetName().Contains(TEXT("TranspersonalCharacter")))
-        {
-            bPlayerCharacterExists = true;
-            break;
-        }
+        return;
     }
 
-    // Check for terrain (landscape actors)
-    bTerrainGenerated = false;
-    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+    TotalActorsInWorld = 0;
+    DinosaurCount = 0;
+    EnvironmentPropsCount = 0;
+
+    for (TActorIterator<AActor> ActorItr(GetWorld()); ActorItr; ++ActorItr)
     {
         AActor* Actor = *ActorItr;
-        if (Actor && Actor->GetClass()->GetName().Contains(TEXT("Landscape")))
+        if (!Actor)
         {
-            bTerrainGenerated = true;
-            break;
+            continue;
+        }
+
+        TotalActorsInWorld++;
+
+        FString ActorName = Actor->GetName().ToLower();
+        FString ActorLabel = Actor->GetActorLabel().ToLower();
+
+        // Count dinosaurs
+        if (ActorName.Contains(TEXT("trex")) || ActorName.Contains(TEXT("veloci")) || 
+            ActorName.Contains(TEXT("tricera")) || ActorName.Contains(TEXT("brachi")) ||
+            ActorLabel.Contains(TEXT("trex")) || ActorLabel.Contains(TEXT("veloci")) ||
+            ActorLabel.Contains(TEXT("tricera")) || ActorLabel.Contains(TEXT("brachi")))
+        {
+            DinosaurCount++;
+        }
+
+        // Count environment props
+        if (ActorName.Contains(TEXT("tree")) || ActorName.Contains(TEXT("rock")) ||
+            ActorName.Contains(TEXT("bush")) || ActorName.Contains(TEXT("grass")) ||
+            ActorLabel.Contains(TEXT("tree")) || ActorLabel.Contains(TEXT("rock")) ||
+            ActorLabel.Contains(TEXT("bush")) || ActorLabel.Contains(TEXT("grass")))
+        {
+            EnvironmentPropsCount++;
         }
     }
 
-    // Check for dinosaurs
-    bDinosaursSpawned = false;
-    int32 DinoCount = 0;
-    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+    UE_LOG(LogTemp, Log, TEXT("World Metrics - Total: %d, Dinosaurs: %d, Props: %d"), 
+           TotalActorsInWorld, DinosaurCount, EnvironmentPropsCount);
+}
+
+TArray<FDir_AgentTask> ADir_ProductionCoordinator::GetHighPriorityTasks() const
+{
+    TArray<FDir_AgentTask> HighPriorityTasks;
+
+    for (const FDir_AgentTask& Task : ActiveTasks)
+    {
+        if (!Task.bIsCompleted && Task.Priority >= 8)
+        {
+            HighPriorityTasks.Add(Task);
+        }
+    }
+
+    // Sort by priority (highest first)
+    HighPriorityTasks.Sort([](const FDir_AgentTask& A, const FDir_AgentTask& B) {
+        return A.Priority > B.Priority;
+    });
+
+    return HighPriorityTasks;
+}
+
+void ADir_ProductionCoordinator::SetCurrentMilestone(const FString& MilestoneName, const TArray<FDir_AgentTask>& RequiredTasks)
+{
+    CurrentMilestone.MilestoneName = MilestoneName;
+    CurrentMilestone.RequiredTasks = RequiredTasks;
+    CurrentMilestone.CompletionPercentage = 0.0f;
+    CurrentMilestone.bIsCriticalPath = true;
+
+    UE_LOG(LogTemp, Warning, TEXT("New milestone set: %s with %d required tasks"), *MilestoneName, RequiredTasks.Num());
+}
+
+bool ADir_ProductionCoordinator::IsMilestoneComplete() const
+{
+    return CurrentMilestone.CompletionPercentage >= 100.0f;
+}
+
+bool ADir_ProductionCoordinator::ValidatePlayablePrototype() const
+{
+    // Check for minimum viable playable elements
+    bool bHasCharacter = false;
+    bool bHasTerrain = false;
+    bool bHasDinosaurs = false;
+    bool bHasLighting = false;
+
+    if (!GetWorld())
+    {
+        return false;
+    }
+
+    for (TActorIterator<AActor> ActorItr(GetWorld()); ActorItr; ++ActorItr)
     {
         AActor* Actor = *ActorItr;
-        if (Actor)
+        if (!Actor)
         {
-            FString ActorName = Actor->GetName().ToLower();
-            if (ActorName.Contains(TEXT("trex")) || ActorName.Contains(TEXT("veloci")) || 
-                ActorName.Contains(TEXT("tricera")) || ActorName.Contains(TEXT("brachi")))
-            {
-                DinoCount++;
-            }
+            continue;
+        }
+
+        FString ActorName = Actor->GetName().ToLower();
+        FString ActorLabel = Actor->GetActorLabel().ToLower();
+
+        if (ActorName.Contains(TEXT("character")) || ActorLabel.Contains(TEXT("character")))
+        {
+            bHasCharacter = true;
+        }
+
+        if (ActorName.Contains(TEXT("landscape")) || ActorLabel.Contains(TEXT("terrain")))
+        {
+            bHasTerrain = true;
+        }
+
+        if (ActorName.Contains(TEXT("trex")) || ActorName.Contains(TEXT("veloci")) ||
+            ActorLabel.Contains(TEXT("trex")) || ActorLabel.Contains(TEXT("veloci")))
+        {
+            bHasDinosaurs = true;
+        }
+
+        if (ActorName.Contains(TEXT("light")) || ActorLabel.Contains(TEXT("sun")))
+        {
+            bHasLighting = true;
         }
     }
-    bDinosaursSpawned = (DinoCount > 0);
 
-    // Check for lighting
-    bBasicLightingSetup = false;
-    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+    bool bIsPlayable = bHasCharacter && bHasTerrain && bHasDinosaurs && bHasLighting;
+    
+    UE_LOG(LogTemp, Warning, TEXT("Playable Prototype Validation - Character: %s, Terrain: %s, Dinosaurs: %s, Lighting: %s, Overall: %s"),
+           bHasCharacter ? TEXT("OK") : TEXT("MISSING"),
+           bHasTerrain ? TEXT("OK") : TEXT("MISSING"),
+           bHasDinosaurs ? TEXT("OK") : TEXT("MISSING"),
+           bHasLighting ? TEXT("OK") : TEXT("MISSING"),
+           bIsPlayable ? TEXT("VALID") : TEXT("INCOMPLETE"));
+
+    return bIsPlayable;
+}
+
+FString ADir_ProductionCoordinator::GetProductionStatusReport() const
+{
+    FString Report = FString::Printf(TEXT("=== PRODUCTION STATUS REPORT ===\n"));
+    Report += FString::Printf(TEXT("Current Milestone: %s (%.1f%% complete)\n"), 
+                             *CurrentMilestone.MilestoneName, CurrentMilestone.CompletionPercentage);
+    Report += FString::Printf(TEXT("World Metrics - Total Actors: %d, Dinosaurs: %d, Props: %d\n"), 
+                             TotalActorsInWorld, DinosaurCount, EnvironmentPropsCount);
+    
+    Report += TEXT("\nActive Tasks:\n");
+    for (const FDir_AgentTask& Task : ActiveTasks)
     {
-        AActor* Actor = *ActorItr;
-        if (Actor && (Actor->GetClass()->GetName().Contains(TEXT("DirectionalLight")) ||
-                     Actor->GetClass()->GetName().Contains(TEXT("SkyAtmosphere"))))
-        {
-            bBasicLightingSetup = true;
-            break;
-        }
+        FString Status = Task.bIsCompleted ? TEXT("COMPLETE") : TEXT("PENDING");
+        Report += FString::Printf(TEXT("- %s: %s [%s] (Priority: %d)\n"), 
+                                 *Task.AgentName, *Task.TaskDescription, *Status, Task.Priority);
     }
+
+    bool bPlayable = ValidatePlayablePrototype();
+    Report += FString::Printf(TEXT("\nPlayable Prototype Status: %s\n"), 
+                             bPlayable ? TEXT("READY") : TEXT("INCOMPLETE"));
+
+    return Report;
 }
 
-bool ADir_ProductionCoordinator::IsMinimumViablePrototypeReady() const
+void ADir_ProductionCoordinator::InitializePlayablePrototypeMilestone()
 {
-    return bPlayerCharacterExists && bTerrainGenerated && bDinosaursSpawned && bBasicLightingSetup;
+    CurrentMilestone.MilestoneName = TEXT("Playable Prototype - Walk Around");
+    CurrentMilestone.CompletionPercentage = 0.0f;
+    CurrentMilestone.bIsCriticalPath = true;
+
+    // Define required tasks for playable prototype
+    TArray<FDir_AgentTask> RequiredTasks;
+    
+    FDir_AgentTask Task1;
+    Task1.AgentName = TEXT("Agent02_EngineArchitect");
+    Task1.TaskDescription = TEXT("Core systems compilation and validation");
+    Task1.Priority = 10;
+    RequiredTasks.Add(Task1);
+
+    FDir_AgentTask Task2;
+    Task2.AgentName = TEXT("Agent05_WorldGenerator");
+    Task2.TaskDescription = TEXT("Realistic terrain with biomes");
+    Task2.Priority = 9;
+    RequiredTasks.Add(Task2);
+
+    FDir_AgentTask Task3;
+    Task3.AgentName = TEXT("Agent09_CharacterArtist");
+    Task3.TaskDescription = TEXT("Playable character implementation");
+    Task3.Priority = 9;
+    RequiredTasks.Add(Task3);
+
+    CurrentMilestone.RequiredTasks = RequiredTasks;
 }
 
-void ADir_ProductionCoordinator::UpdateBiomeStatuses()
+void ADir_ProductionCoordinator::ValidateAgentOutputs()
 {
-    UWorld* World = GetWorld();
-    if (!World) return;
-
-    for (FDir_BiomeStatus& Biome : BiomeStatuses)
+    // Validate that agents are producing actual implementations, not just headers
+    TArray<FDir_AgentTask> HighPriorityTasks = GetHighPriorityTasks();
+    
+    if (HighPriorityTasks.Num() > 3)
     {
-        Biome.ActorCount = 0;
-        Biome.DinosaurCount = 0;
-
-        for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
-        {
-            AActor* Actor = *ActorItr;
-            if (!Actor) continue;
-
-            FVector ActorLocation = Actor->GetActorLocation();
-            float Distance = FVector::Dist2D(ActorLocation, Biome.CenterLocation);
-
-            if (Distance <= 20000.0f) // Within biome radius
-            {
-                Biome.ActorCount++;
-
-                FString ActorName = Actor->GetName().ToLower();
-                if (ActorName.Contains(TEXT("trex")) || ActorName.Contains(TEXT("veloci")) || 
-                    ActorName.Contains(TEXT("tricera")) || ActorName.Contains(TEXT("brachi")))
-                {
-                    Biome.DinosaurCount++;
-                }
-            }
-        }
-
-        Biome.bIsOverLimit = (Biome.ActorCount > MaxPropsPerBiome);
+        UE_LOG(LogTemp, Warning, TEXT("WARNING: %d high-priority tasks pending - potential bottleneck"), HighPriorityTasks.Num());
     }
-}
 
-FVector ADir_ProductionCoordinator::GetOptimalSpawnLocationForBiome(const FString& BiomeName)
-{
-    FDir_BiomeStatus* Biome = FindBiomeStatus(BiomeName);
-    if (!Biome) return FVector::ZeroVector;
-
-    // Return center with slight random offset
-    FVector SpawnLocation = Biome->CenterLocation;
-    SpawnLocation.X += FMath::RandRange(-5000.0f, 5000.0f);
-    SpawnLocation.Y += FMath::RandRange(-5000.0f, 5000.0f);
-    SpawnLocation.Z = 100.0f; // Safe height above ground
-
-    return SpawnLocation;
-}
-
-bool ADir_ProductionCoordinator::CanSpawnInBiome(const FString& BiomeName) const
-{
-    const FDir_BiomeStatus* Biome = FindBiomeStatus(BiomeName);
-    if (!Biome) return false;
-
-    return !Biome->bIsOverLimit;
-}
-
-bool ADir_ProductionCoordinator::IsWithinActorLimits() const
-{
-    return (GetCurrentActorCount() <= MaxTotalActors) && (GetCurrentDinosaurCount() <= MaxDinosaurs);
-}
-
-void ADir_ProductionCoordinator::EnforceActorLimits()
-{
-    UWorld* World = GetWorld();
-    if (!World) return;
-
-    int32 CurrentActors = GetCurrentActorCount();
-    if (CurrentActors > MaxTotalActors)
+    // Check for actor count limits
+    if (TotalActorsInWorld > 8000)
     {
-        int32 ToDelete = CurrentActors - MaxTotalActors;
-        UE_LOG(LogTemp, Error, TEXT("Deleting %d excess actors (Current: %d, Max: %d)"), ToDelete, CurrentActors, MaxTotalActors);
-
-        // Delete oldest non-essential actors first
-        TArray<AActor*> ActorsToDelete;
-        for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
-        {
-            AActor* Actor = *ActorItr;
-            if (Actor && !Actor->GetClass()->GetName().Contains(TEXT("PlayerStart")) &&
-                !Actor->GetClass()->GetName().Contains(TEXT("TranspersonalCharacter")))
-            {
-                ActorsToDelete.Add(Actor);
-                if (ActorsToDelete.Num() >= ToDelete)
-                    break;
-            }
-        }
-
-        for (AActor* Actor : ActorsToDelete)
-        {
-            Actor->Destroy();
-        }
+        UE_LOG(LogTemp, Error, TEXT("CRITICAL: Actor count (%d) exceeds limit (8000) - performance risk"), TotalActorsInWorld);
     }
-}
 
-int32 ADir_ProductionCoordinator::GetCurrentActorCount() const
-{
-    UWorld* World = GetWorld();
-    if (!World) return 0;
-
-    int32 Count = 0;
-    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+    if (DinosaurCount > 150)
     {
-        Count++;
+        UE_LOG(LogTemp, Error, TEXT("CRITICAL: Dinosaur count (%d) exceeds realistic limit (150)"), DinosaurCount);
     }
-    return Count;
-}
-
-int32 ADir_ProductionCoordinator::GetCurrentDinosaurCount() const
-{
-    UWorld* World = GetWorld();
-    if (!World) return 0;
-
-    int32 Count = 0;
-    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
-    {
-        AActor* Actor = *ActorItr;
-        if (Actor)
-        {
-            FString ActorName = Actor->GetName().ToLower();
-            if (ActorName.Contains(TEXT("trex")) || ActorName.Contains(TEXT("veloci")) || 
-                ActorName.Contains(TEXT("tricera")) || ActorName.Contains(TEXT("brachi")) ||
-                ActorName.Contains(TEXT("ankylo")) || ActorName.Contains(TEXT("parasauro")))
-            {
-                Count++;
-            }
-        }
-    }
-    return Count;
-}
-
-FDir_BiomeStatus* ADir_ProductionCoordinator::FindBiomeStatus(const FString& BiomeName)
-{
-    for (FDir_BiomeStatus& Biome : BiomeStatuses)
-    {
-        if (Biome.BiomeName == BiomeName)
-        {
-            return &Biome;
-        }
-    }
-    return nullptr;
 }
