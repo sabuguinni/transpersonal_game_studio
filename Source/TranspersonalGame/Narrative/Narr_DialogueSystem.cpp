@@ -1,339 +1,346 @@
 #include "Narr_DialogueSystem.h"
 #include "Engine/Engine.h"
+#include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
-#include "GameFramework/Pawn.h"
-#include "Components/StaticMeshComponent.h"
-#include "Engine/StaticMesh.h"
-#include "UObject/ConstructorHelpers.h"
-#include "Components/BoxComponent.h"
 #include "Kismet/GameplayStatics.h"
+#include "Sound/SoundCue.h"
+#include "Components/AudioComponent.h"
 
-// UNarr_DialogueComponent Implementation
-UNarr_DialogueComponent::UNarr_DialogueComponent()
+UNarr_DialogueSystem::UNarr_DialogueSystem()
 {
-    PrimaryComponentTick.bCanEverTick = true;
-    
-    TriggerRadius = 500.0f;
-    bIsActive = true;
-    bIsPlaying = false;
-    CurrentLineIndex = 0;
-    CurrentLineTimer = 0.0f;
-    PlayerActor = nullptr;
+    CurrentPlayingDialogue = "";
+    DialogueStartTime = 0.0f;
 }
 
-void UNarr_DialogueComponent::BeginPlay()
+void UNarr_DialogueSystem::Initialize(FSubsystemCollectionBase& Collection)
 {
-    Super::BeginPlay();
+    Super::Initialize(Collection);
     
-    // Find player actor
-    if (UWorld* World = GetWorld())
+    UE_LOG(LogTemp, Warning, TEXT("Narrative Dialogue System Initialized"));
+    
+    InitializeDefaultDialogues();
+    InitializeStoryProgression();
+}
+
+void UNarr_DialogueSystem::Deinitialize()
+{
+    StopCurrentDialogue();
+    DialogueDatabase.Empty();
+    StoryProgressMap.Empty();
+    
+    Super::Deinitialize();
+}
+
+void UNarr_DialogueSystem::TriggerDialogue(const FString& DialogueID, AActor* Speaker, AActor* Listener)
+{
+    if (!IsDialogueAvailable(DialogueID))
     {
-        if (APlayerController* PC = World->GetFirstPlayerController())
-        {
-            PlayerActor = PC->GetPawn();
-        }
-    }
-}
-
-void UNarr_DialogueComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
-{
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-    
-    if (bIsActive && !bIsPlaying)
-    {
-        CheckPlayerProximity();
-    }
-    
-    if (bIsPlaying)
-    {
-        UpdateDialogueDisplay();
-        
-        if (DialogueSequence.bAutoAdvance)
-        {
-            CurrentLineTimer += DeltaTime;
-            if (CurrentLineTimer >= DialogueSequence.AutoAdvanceDelay)
-            {
-                NextLine();
-            }
-        }
-    }
-}
-
-void UNarr_DialogueComponent::StartDialogue()
-{
-    if (DialogueSequence.DialogueLines.Num() > 0)
-    {
-        bIsPlaying = true;
-        CurrentLineIndex = 0;
-        CurrentLineTimer = 0.0f;
-        
-        UE_LOG(LogTemp, Log, TEXT("Dialogue started with %d lines"), DialogueSequence.DialogueLines.Num());
-    }
-}
-
-void UNarr_DialogueComponent::StopDialogue()
-{
-    bIsPlaying = false;
-    CurrentLineIndex = 0;
-    CurrentLineTimer = 0.0f;
-    
-    UE_LOG(LogTemp, Log, TEXT("Dialogue stopped"));
-}
-
-void UNarr_DialogueComponent::NextLine()
-{
-    if (HasMoreLines())
-    {
-        CurrentLineIndex++;
-        CurrentLineTimer = 0.0f;
-        
-        if (!HasMoreLines())
-        {
-            StopDialogue();
-        }
-    }
-}
-
-void UNarr_DialogueComponent::AddDialogueLine(const FString& Speaker, const FString& Text, ENarr_DialogueType Type)
-{
-    FNarr_DialogueLine NewLine;
-    NewLine.SpeakerName = Speaker;
-    NewLine.DialogueText = Text;
-    NewLine.DialogueType = Type;
-    NewLine.DisplayDuration = 3.0f;
-    
-    DialogueSequence.DialogueLines.Add(NewLine);
-}
-
-FNarr_DialogueLine UNarr_DialogueComponent::GetCurrentLine() const
-{
-    if (CurrentLineIndex >= 0 && CurrentLineIndex < DialogueSequence.DialogueLines.Num())
-    {
-        return DialogueSequence.DialogueLines[CurrentLineIndex];
-    }
-    
-    return FNarr_DialogueLine();
-}
-
-bool UNarr_DialogueComponent::HasMoreLines() const
-{
-    return CurrentLineIndex < DialogueSequence.DialogueLines.Num() - 1;
-}
-
-void UNarr_DialogueComponent::CheckPlayerProximity()
-{
-    if (!PlayerActor || !GetOwner())
+        UE_LOG(LogTemp, Warning, TEXT("Dialogue %s not available or not found"), *DialogueID);
         return;
-    
-    float Distance = FVector::Dist(GetOwner()->GetActorLocation(), PlayerActor->GetActorLocation());
-    
-    if (Distance <= TriggerRadius)
-    {
-        StartDialogue();
     }
-}
 
-void UNarr_DialogueComponent::UpdateDialogueDisplay()
-{
-    if (bIsPlaying && CurrentLineIndex < DialogueSequence.DialogueLines.Num())
+    FNarr_DialogueEntry DialogueEntry = GetDialogue(DialogueID);
+    
+    if (!CheckDialoguePrerequisites(DialogueEntry))
     {
-        FNarr_DialogueLine CurrentLine = GetCurrentLine();
+        UE_LOG(LogTemp, Warning, TEXT("Dialogue %s prerequisites not met"), *DialogueID);
+        return;
+    }
+
+    // Stop current dialogue if playing
+    StopCurrentDialogue();
+
+    // Set current dialogue
+    CurrentPlayingDialogue = DialogueID;
+    DialogueStartTime = GetWorld()->GetTimeSeconds();
+
+    // Display dialogue text (in a real implementation, this would trigger UI)
+    if (GEngine)
+    {
+        FString DisplayText = FString::Printf(TEXT("[%s]: %s"), 
+            *UEnum::GetValueAsString(DialogueEntry.SpeakerType), 
+            *DialogueEntry.DialogueText.ToString());
         
-        // Display dialogue on screen
-        if (GEngine)
-        {
-            FString DisplayText = FString::Printf(TEXT("%s: %s"), *CurrentLine.SpeakerName, *CurrentLine.DialogueText);
-            GEngine->AddOnScreenDebugMessage(-1, 0.1f, FColor::White, DisplayText);
-        }
+        GEngine->AddOnScreenDebugMessage(-1, DialogueEntry.Duration, FColor::Yellow, DisplayText);
     }
-}
 
-// ANarr_DialogueTrigger Implementation
-ANarr_DialogueTrigger::ANarr_DialogueTrigger()
-{
-    PrimaryActorTick.bCanEverTick = false;
-    
-    bTriggerOnce = true;
-    bRequirePlayerInput = false;
-    bHasTriggered = false;
-    
-    OnActorBeginOverlap.AddDynamic(this, &ANarr_DialogueTrigger::OnActorBeginOverlap);
-    OnActorEndOverlap.AddDynamic(this, &ANarr_DialogueTrigger::OnActorEndOverlap);
-}
-
-void ANarr_DialogueTrigger::BeginPlay()
-{
-    Super::BeginPlay();
-}
-
-void ANarr_DialogueTrigger::OnActorBeginOverlap(AActor* OverlappedActor, AActor* OtherActor)
-{
-    if (!bHasTriggered || !bTriggerOnce)
+    // Play audio if available
+    if (!DialogueEntry.AudioFilePath.IsEmpty())
     {
-        if (OtherActor && OtherActor->IsA<APawn>())
-        {
-            TriggerDialogue(OtherActor);
-        }
+        PlayDialogueAudio(DialogueID);
     }
-}
 
-void ANarr_DialogueTrigger::OnActorEndOverlap(AActor* OverlappedActor, AActor* OtherActor)
-{
-    // Handle overlap end if needed
-}
+    // Log dialogue trigger
+    UE_LOG(LogTemp, Log, TEXT("Triggered dialogue: %s by %s"), 
+        *DialogueID, 
+        *UEnum::GetValueAsString(DialogueEntry.SpeakerType));
 
-void ANarr_DialogueTrigger::TriggerDialogue(AActor* TriggeringActor)
-{
-    if (TriggerDialogue.DialogueLines.Num() > 0)
-    {
-        bHasTriggered = true;
-        
-        // Display dialogue lines
-        for (int32 i = 0; i < TriggerDialogue.DialogueLines.Num(); i++)
+    // Schedule dialogue completion
+    FTimerHandle DialogueTimer;
+    GetWorld()->GetTimerManager().SetTimer(DialogueTimer, 
+        FTimerDelegate::CreateLambda([this, DialogueID]()
         {
-            FNarr_DialogueLine Line = TriggerDialogue.DialogueLines[i];
+            OnDialogueCompleted(DialogueID);
+        }), 
+        DialogueEntry.Duration, false);
+}
+
+bool UNarr_DialogueSystem::IsDialogueAvailable(const FString& DialogueID) const
+{
+    return DialogueDatabase.Contains(DialogueID);
+}
+
+void UNarr_DialogueSystem::RegisterDialogue(const FNarr_DialogueEntry& DialogueEntry)
+{
+    DialogueDatabase.Add(DialogueEntry.DialogueID, DialogueEntry);
+    UE_LOG(LogTemp, Log, TEXT("Registered dialogue: %s"), *DialogueEntry.DialogueID);
+}
+
+FNarr_DialogueEntry UNarr_DialogueSystem::GetDialogue(const FString& DialogueID) const
+{
+    if (const FNarr_DialogueEntry* FoundDialogue = DialogueDatabase.Find(DialogueID))
+    {
+        return *FoundDialogue;
+    }
+    
+    return FNarr_DialogueEntry();
+}
+
+void UNarr_DialogueSystem::AdvanceStory(const FString& StoryID)
+{
+    if (FNarr_StoryProgress* StoryProgress = StoryProgressMap.Find(StoryID))
+    {
+        if (!StoryProgress->bIsCompleted && StoryProgress->CurrentStep < StoryProgress->TotalSteps)
+        {
+            StoryProgress->CurrentStep++;
             
-            if (GEngine)
+            if (StoryProgress->CurrentStep >= StoryProgress->TotalSteps)
             {
-                FString DisplayText = FString::Printf(TEXT("%s: %s"), *Line.SpeakerName, *Line.DialogueText);
-                GEngine->AddOnScreenDebugMessage(-1, Line.DisplayDuration, FColor::Yellow, DisplayText);
+                CompleteStory(StoryID);
             }
             
-            UE_LOG(LogTemp, Log, TEXT("Dialogue Trigger: %s - %s"), *Line.SpeakerName, *Line.DialogueText);
+            UE_LOG(LogTemp, Log, TEXT("Advanced story %s to step %d/%d"), 
+                *StoryID, StoryProgress->CurrentStep, StoryProgress->TotalSteps);
         }
     }
 }
 
-void ANarr_DialogueTrigger::ResetTrigger()
+void UNarr_DialogueSystem::SetStoryProgress(const FString& StoryID, int32 NewStep)
 {
-    bHasTriggered = false;
-}
-
-// ANarr_NarrativeNPC Implementation
-ANarr_NarrativeNPC::ANarr_NarrativeNPC()
-{
-    PrimaryActorTick.bCanEverTick = true;
-    
-    // Create mesh component
-    MeshComponent = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("MeshComponent"));
-    RootComponent = MeshComponent;
-    
-    // Create dialogue component
-    DialogueComponent = CreateDefaultSubobject<UNarr_DialogueComponent>(TEXT("DialogueComponent"));
-    
-    // Set default values
-    NPCName = TEXT("Tribal Member");
-    NPCRole = TEXT("Survivor");
-    InteractionRange = 300.0f;
-    bPlayerInRange = false;
-    
-    // Load default mesh (cube for placeholder)
-    static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeMeshAsset(TEXT("/Engine/BasicShapes/Cube"));
-    if (CubeMeshAsset.Succeeded())
+    if (FNarr_StoryProgress* StoryProgress = StoryProgressMap.Find(StoryID))
     {
-        MeshComponent->SetStaticMesh(CubeMeshAsset.Object);
-        MeshComponent->SetWorldScale3D(FVector(1.0f, 1.0f, 2.0f)); // Make it person-sized
-    }
-}
-
-void ANarr_NarrativeNPC::BeginPlay()
-{
-    Super::BeginPlay();
-    
-    SetupDefaultDialogue();
-}
-
-void ANarr_NarrativeNPC::Tick(float DeltaTime)
-{
-    Super::Tick(DeltaTime);
-    
-    CheckPlayerDistance();
-}
-
-void ANarr_NarrativeNPC::StartConversation(AActor* Player)
-{
-    if (DialogueComponent)
-    {
-        DialogueComponent->StartDialogue();
-        UE_LOG(LogTemp, Log, TEXT("NPC %s started conversation"), *NPCName);
-    }
-}
-
-void ANarr_NarrativeNPC::EndConversation()
-{
-    if (DialogueComponent)
-    {
-        DialogueComponent->StopDialogue();
-        UE_LOG(LogTemp, Log, TEXT("NPC %s ended conversation"), *NPCName);
-    }
-}
-
-void ANarr_NarrativeNPC::AddGreeting(const FString& Greeting)
-{
-    GreetingLines.Add(Greeting);
-}
-
-void ANarr_NarrativeNPC::AddInformation(const FString& Information)
-{
-    InformationLines.Add(Information);
-}
-
-void ANarr_NarrativeNPC::CheckPlayerDistance()
-{
-    if (UWorld* World = GetWorld())
-    {
-        if (APlayerController* PC = World->GetFirstPlayerController())
+        StoryProgress->CurrentStep = FMath::Clamp(NewStep, 0, StoryProgress->TotalSteps);
+        
+        if (StoryProgress->CurrentStep >= StoryProgress->TotalSteps)
         {
-            if (APawn* Player = PC->GetPawn())
-            {
-                float Distance = FVector::Dist(GetActorLocation(), Player->GetActorLocation());
-                bool bWasInRange = bPlayerInRange;
-                bPlayerInRange = Distance <= InteractionRange;
-                
-                // Player just entered range
-                if (bPlayerInRange && !bWasInRange)
-                {
-                    StartConversation(Player);
-                }
-                // Player just left range
-                else if (!bPlayerInRange && bWasInRange)
-                {
-                    EndConversation();
-                }
-            }
-        }
-    }
-}
-
-void ANarr_NarrativeNPC::SetupDefaultDialogue()
-{
-    if (DialogueComponent)
-    {
-        // Add default greetings
-        if (GreetingLines.Num() == 0)
-        {
-            GreetingLines.Add(TEXT("Greetings, stranger. These lands are dangerous."));
-            GreetingLines.Add(TEXT("Stay alert. The predators hunt at dusk."));
-            GreetingLines.Add(TEXT("Welcome to our territory, traveler."));
+            CompleteStory(StoryID);
         }
         
-        // Add default information
-        if (InformationLines.Num() == 0)
-        {
-            InformationLines.Add(TEXT("The T-Rex roams the eastern plains."));
-            InformationLines.Add(TEXT("Fresh water can be found near the great trees."));
-            InformationLines.Add(TEXT("Avoid the swamplands after dark."));
-        }
+        UE_LOG(LogTemp, Log, TEXT("Set story %s progress to %d/%d"), 
+            *StoryID, StoryProgress->CurrentStep, StoryProgress->TotalSteps);
+    }
+}
+
+FNarr_StoryProgress UNarr_DialogueSystem::GetStoryProgress(const FString& StoryID) const
+{
+    if (const FNarr_StoryProgress* FoundProgress = StoryProgressMap.Find(StoryID))
+    {
+        return *FoundProgress;
+    }
+    
+    return FNarr_StoryProgress();
+}
+
+void UNarr_DialogueSystem::CompleteStory(const FString& StoryID)
+{
+    if (FNarr_StoryProgress* StoryProgress = StoryProgressMap.Find(StoryID))
+    {
+        StoryProgress->bIsCompleted = true;
+        StoryProgress->CurrentStep = StoryProgress->TotalSteps;
         
-        // Setup dialogue sequence
-        for (const FString& Greeting : GreetingLines)
-        {
-            DialogueComponent->AddDialogueLine(NPCName, Greeting, ENarr_DialogueType::Information);
-        }
+        UE_LOG(LogTemp, Warning, TEXT("Story completed: %s"), *StoryID);
         
-        for (const FString& Info : InformationLines)
+        // Unlock related dialogues
+        for (const FString& UnlockedDialogue : StoryProgress->UnlockedDialogues)
         {
-            DialogueComponent->AddDialogueLine(NPCName, Info, ENarr_DialogueType::Information);
+            // Mark dialogue as available (implementation depends on dialogue availability system)
+            UE_LOG(LogTemp, Log, TEXT("Unlocked dialogue: %s"), *UnlockedDialogue);
+        }
+    }
+}
+
+void UNarr_DialogueSystem::TriggerContextDialogue(ENarr_DialogueType DialogueType, const FVector& Location)
+{
+    // Find appropriate dialogue based on context
+    for (const auto& DialoguePair : DialogueDatabase)
+    {
+        const FNarr_DialogueEntry& Dialogue = DialoguePair.Value;
+        
+        if (Dialogue.DialogueType == DialogueType && CheckDialoguePrerequisites(Dialogue))
+        {
+            TriggerDialogue(Dialogue.DialogueID);
+            break;
+        }
+    }
+}
+
+void UNarr_DialogueSystem::TriggerNPCDialogue(ENarr_NPCType NPCType, const FString& Context)
+{
+    // Find dialogue for specific NPC type
+    for (const auto& DialoguePair : DialogueDatabase)
+    {
+        const FNarr_DialogueEntry& Dialogue = DialoguePair.Value;
+        
+        if (Dialogue.SpeakerType == NPCType && CheckDialoguePrerequisites(Dialogue))
+        {
+            TriggerDialogue(Dialogue.DialogueID);
+            break;
+        }
+    }
+}
+
+void UNarr_DialogueSystem::PlayDialogueAudio(const FString& DialogueID)
+{
+    if (const FNarr_DialogueEntry* DialogueEntry = DialogueDatabase.Find(DialogueID))
+    {
+        // In a full implementation, this would load and play the audio file
+        UE_LOG(LogTemp, Log, TEXT("Playing audio for dialogue: %s (File: %s)"), 
+            *DialogueID, *DialogueEntry->AudioFilePath);
+    }
+}
+
+void UNarr_DialogueSystem::StopCurrentDialogue()
+{
+    if (!CurrentPlayingDialogue.IsEmpty())
+    {
+        UE_LOG(LogTemp, Log, TEXT("Stopping dialogue: %s"), *CurrentPlayingDialogue);
+        CurrentPlayingDialogue = "";
+        DialogueStartTime = 0.0f;
+    }
+}
+
+void UNarr_DialogueSystem::InitializeDefaultDialogues()
+{
+    // Tutorial dialogues
+    FNarr_DialogueEntry TutorialStart;
+    TutorialStart.DialogueID = "TUTORIAL_START";
+    TutorialStart.DialogueText = FText::FromString("Welcome, survivor. This harsh world will test every instinct you possess. Learn quickly, or perish.");
+    TutorialStart.DialogueType = ENarr_DialogueType::Tutorial;
+    TutorialStart.SpeakerType = ENarr_NPCType::Survivor;
+    TutorialStart.Duration = 5.0f;
+    TutorialStart.bIsRepeatable = false;
+    RegisterDialogue(TutorialStart);
+
+    // Warning dialogues
+    FNarr_DialogueEntry DangerWarning;
+    DangerWarning.DialogueID = "DANGER_TREX";
+    DangerWarning.DialogueText = FText::FromString("Massive predator detected. T-Rex territory ahead. Proceed with extreme caution.");
+    DangerWarning.DialogueType = ENarr_DialogueType::Warning;
+    DangerWarning.SpeakerType = ENarr_NPCType::Scout;
+    DangerWarning.Duration = 4.0f;
+    DangerWarning.bIsRepeatable = true;
+    RegisterDialogue(DangerWarning);
+
+    // Discovery dialogues
+    FNarr_DialogueEntry ForestDiscovery;
+    ForestDiscovery.DialogueID = "DISCOVERY_FOREST";
+    ForestDiscovery.DialogueText = FText::FromString("Ancient forest discovered. Rich resources await, but dangerous creatures lurk in the shadows.");
+    ForestDiscovery.DialogueType = ENarr_DialogueType::Discovery;
+    ForestDiscovery.SpeakerType = ENarr_NPCType::Scout;
+    ForestDiscovery.Duration = 4.5f;
+    ForestDiscovery.bIsRepeatable = false;
+    RegisterDialogue(ForestDiscovery);
+
+    // NPC dialogues
+    FNarr_DialogueEntry ElderWisdom;
+    ElderWisdom.DialogueID = "ELDER_WISDOM";
+    ElderWisdom.DialogueText = FText::FromString("The old ways teach us: respect the land, fear the apex predators, and never hunt alone.");
+    ElderWisdom.DialogueType = ENarr_DialogueType::Story;
+    ElderWisdom.SpeakerType = ENarr_NPCType::TribalElder;
+    ElderWisdom.Duration = 6.0f;
+    ElderWisdom.bIsRepeatable = true;
+    RegisterDialogue(ElderWisdom);
+
+    // Combat dialogues
+    FNarr_DialogueEntry CombatAdvice;
+    CombatAdvice.DialogueID = "COMBAT_ADVICE";
+    CombatAdvice.DialogueText = FText::FromString("Raptors hunt in packs. Use terrain to your advantage. Strike fast, retreat faster.");
+    CombatAdvice.DialogueType = ENarr_DialogueType::Combat;
+    CombatAdvice.SpeakerType = ENarr_NPCType::Hunter;
+    CombatAdvice.Duration = 5.0f;
+    CombatAdvice.bIsRepeatable = true;
+    RegisterDialogue(CombatAdvice);
+
+    UE_LOG(LogTemp, Warning, TEXT("Initialized %d default dialogues"), DialogueDatabase.Num());
+}
+
+void UNarr_DialogueSystem::InitializeStoryProgression()
+{
+    // Main survival story
+    FNarr_StoryProgress SurvivalStory;
+    SurvivalStory.StoryID = "MAIN_SURVIVAL";
+    SurvivalStory.StoryTitle = FText::FromString("Prehistoric Survival");
+    SurvivalStory.StoryDescription = FText::FromString("Survive in the dangerous prehistoric world and establish your place in the ecosystem.");
+    SurvivalStory.TotalSteps = 10;
+    SurvivalStory.UnlockedDialogues.Add("ELDER_WISDOM");
+    SurvivalStory.UnlockedDialogues.Add("COMBAT_ADVICE");
+    StoryProgressMap.Add(SurvivalStory.StoryID, SurvivalStory);
+
+    // Tribal contact story
+    FNarr_StoryProgress TribalStory;
+    TribalStory.StoryID = "TRIBAL_CONTACT";
+    TribalStory.StoryTitle = FText::FromString("First Contact");
+    TribalStory.StoryDescription = FText::FromString("Establish contact with other survivors and learn their ways.");
+    TribalStory.TotalSteps = 5;
+    TribalStory.UnlockedDialogues.Add("ELDER_WISDOM");
+    StoryProgressMap.Add(TribalStory.StoryID, TribalStory);
+
+    // Territory exploration story
+    FNarr_StoryProgress ExplorationStory;
+    ExplorationStory.StoryID = "TERRITORY_EXPLORATION";
+    ExplorationStory.StoryTitle = FText::FromString("Uncharted Lands");
+    ExplorationStory.StoryDescription = FText::FromString("Explore the five great biomes and discover their secrets.");
+    ExplorationStory.TotalSteps = 5;
+    ExplorationStory.UnlockedDialogues.Add("DISCOVERY_FOREST");
+    StoryProgressMap.Add(ExplorationStory.StoryID, ExplorationStory);
+
+    UE_LOG(LogTemp, Warning, TEXT("Initialized %d story progressions"), StoryProgressMap.Num());
+}
+
+bool UNarr_DialogueSystem::CheckDialoguePrerequisites(const FNarr_DialogueEntry& DialogueEntry) const
+{
+    // Check if all prerequisites are met
+    for (const FString& Prerequisite : DialogueEntry.Prerequisites)
+    {
+        // In a full implementation, this would check various game state conditions
+        // For now, we'll assume all prerequisites are met
+        UE_LOG(LogTemp, Log, TEXT("Checking prerequisite: %s"), *Prerequisite);
+    }
+    
+    return true;
+}
+
+void UNarr_DialogueSystem::OnDialogueCompleted(const FString& DialogueID)
+{
+    if (CurrentPlayingDialogue == DialogueID)
+    {
+        CurrentPlayingDialogue = "";
+        DialogueStartTime = 0.0f;
+        
+        UE_LOG(LogTemp, Log, TEXT("Dialogue completed: %s"), *DialogueID);
+        
+        // Trigger any follow-up events based on dialogue completion
+        if (DialogueID == "TUTORIAL_START")
+        {
+            AdvanceStory("MAIN_SURVIVAL");
+        }
+        else if (DialogueID == "ELDER_WISDOM")
+        {
+            AdvanceStory("TRIBAL_CONTACT");
+        }
+        else if (DialogueID == "DISCOVERY_FOREST")
+        {
+            AdvanceStory("TERRITORY_EXPLORATION");
         }
     }
 }
