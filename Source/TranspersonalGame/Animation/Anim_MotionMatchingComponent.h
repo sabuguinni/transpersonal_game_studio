@@ -2,12 +2,10 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
-#include "Engine/Engine.h"
 #include "Animation/AnimInstance.h"
 #include "Animation/AnimMontage.h"
 #include "Animation/BlendSpace.h"
-#include "GameFramework/Character.h"
-#include "GameFramework/CharacterMovementComponent.h"
+#include "Engine/Engine.h"
 #include "Anim_MotionMatchingComponent.generated.h"
 
 UENUM(BlueprintType)
@@ -25,15 +23,16 @@ enum class EAnim_MovementState : uint8
 };
 
 UENUM(BlueprintType)
-enum class EAnim_CombatState : uint8
+enum class EAnim_ActionState : uint8
 {
     None            UMETA(DisplayName = "None"),
-    Ready           UMETA(DisplayName = "Ready"),
-    Attacking       UMETA(DisplayName = "Attacking"),
-    Blocking        UMETA(DisplayName = "Blocking"),
-    Dodging         UMETA(DisplayName = "Dodging"),
-    Stunned         UMETA(DisplayName = "Stunned"),
-    Dead            UMETA(DisplayName = "Dead")
+    Crafting        UMETA(DisplayName = "Crafting"),
+    Gathering       UMETA(DisplayName = "Gathering"),
+    Combat          UMETA(DisplayName = "Combat"),
+    Eating          UMETA(DisplayName = "Eating"),
+    Drinking        UMETA(DisplayName = "Drinking"),
+    Building        UMETA(DisplayName = "Building"),
+    Climbing        UMETA(DisplayName = "Climbing")
 };
 
 USTRUCT(BlueprintType)
@@ -42,31 +41,32 @@ struct TRANSPERSONALGAME_API FAnim_MotionData
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion")
-    float Speed = 0.0f;
+    float Speed;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion")
-    float Direction = 0.0f;
+    float Direction;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion")
-    FVector Velocity = FVector::ZeroVector;
+    FVector Velocity;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion")
-    FVector Acceleration = FVector::ZeroVector;
+    bool bIsOnGround;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion")
-    bool bIsInAir = false;
+    bool bIsMoving;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion")
-    bool bIsMoving = false;
+    float TimeSinceLastMove;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion")
-    float TimeSinceLastMovement = 0.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion")
-    EAnim_MovementState MovementState = EAnim_MovementState::Idle;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion")
-    EAnim_CombatState CombatState = EAnim_CombatState::None;
+    FAnim_MotionData()
+    {
+        Speed = 0.0f;
+        Direction = 0.0f;
+        Velocity = FVector::ZeroVector;
+        bIsOnGround = true;
+        bIsMoving = false;
+        TimeSinceLastMove = 0.0f;
+    }
 };
 
 UCLASS(ClassGroup=(Animation), meta=(BlueprintSpawnableComponent))
@@ -83,7 +83,7 @@ protected:
 public:
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    // Motion data analysis
+    // Motion Matching Core Functions
     UFUNCTION(BlueprintCallable, Category = "Motion Matching")
     void UpdateMotionData(float DeltaTime);
 
@@ -91,79 +91,96 @@ public:
     FAnim_MotionData GetCurrentMotionData() const { return CurrentMotionData; }
 
     UFUNCTION(BlueprintCallable, Category = "Motion Matching")
-    EAnim_MovementState GetMovementState() const { return CurrentMotionData.MovementState; }
+    EAnim_MovementState GetCurrentMovementState() const { return CurrentMovementState; }
 
     UFUNCTION(BlueprintCallable, Category = "Motion Matching")
-    EAnim_CombatState GetCombatState() const { return CurrentMotionData.CombatState; }
+    EAnim_ActionState GetCurrentActionState() const { return CurrentActionState; }
 
-    // Animation selection
+    // State Management
     UFUNCTION(BlueprintCallable, Category = "Motion Matching")
-    UAnimSequence* SelectBestAnimation();
-
-    UFUNCTION(BlueprintCallable, Category = "Motion Matching")
-    void SetCombatState(EAnim_CombatState NewState);
-
-    // Transition handling
-    UFUNCTION(BlueprintCallable, Category = "Motion Matching")
-    bool CanTransitionTo(EAnim_MovementState NewState) const;
+    void SetMovementState(EAnim_MovementState NewState);
 
     UFUNCTION(BlueprintCallable, Category = "Motion Matching")
-    float GetTransitionBlendTime(EAnim_MovementState FromState, EAnim_MovementState ToState) const;
+    void SetActionState(EAnim_ActionState NewState);
+
+    // Animation Blending
+    UFUNCTION(BlueprintCallable, Category = "Motion Matching")
+    float GetBlendWeight(EAnim_MovementState State) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Motion Matching")
+    void UpdateBlendWeights(float DeltaTime);
+
+    // Terrain Adaptation
+    UFUNCTION(BlueprintCallable, Category = "Motion Matching")
+    void AdaptToTerrain();
+
+    UFUNCTION(BlueprintCallable, Category = "Motion Matching")
+    float GetTerrainSlope() const { return TerrainSlope; }
 
 protected:
-    // Character reference
-    UPROPERTY(BlueprintReadOnly, Category = "References")
-    ACharacter* OwnerCharacter;
-
-    UPROPERTY(BlueprintReadOnly, Category = "References")
-    UCharacterMovementComponent* MovementComponent;
-
-    // Current motion data
-    UPROPERTY(BlueprintReadOnly, Category = "Motion Data")
+    // Core Motion Data
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Motion Data")
     FAnim_MotionData CurrentMotionData;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Motion Data")
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Motion Data")
     FAnim_MotionData PreviousMotionData;
 
-    // Animation assets
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Assets")
-    TMap<EAnim_MovementState, UAnimSequence*> MovementAnimations;
+    // State Management
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "State")
+    EAnim_MovementState CurrentMovementState;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Assets")
-    TMap<EAnim_CombatState, UAnimSequence*> CombatAnimations;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "State")
+    EAnim_MovementState PreviousMovementState;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Assets")
-    UBlendSpace* MovementBlendSpace;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "State")
+    EAnim_ActionState CurrentActionState;
 
-    // Thresholds
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Thresholds", meta = (ClampMin = "0.0", ClampMax = "1000.0"))
-    float WalkSpeedThreshold = 150.0f;
+    // Blend Weights for smooth transitions
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Blending")
+    TMap<EAnim_MovementState, float> BlendWeights;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Thresholds", meta = (ClampMin = "0.0", ClampMax = "1000.0"))
-    float RunSpeedThreshold = 400.0f;
+    // Terrain Adaptation
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Terrain")
+    float TerrainSlope;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Thresholds", meta = (ClampMin = "0.0", ClampMax = "1000.0"))
-    float SprintSpeedThreshold = 600.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
+    float MaxTerrainAdaptationAngle;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Thresholds", meta = (ClampMin = "0.0", ClampMax = "10.0"))
-    float IdleTimeThreshold = 2.0f;
+    // Animation References
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
+    class UBlendSpace* MovementBlendSpace;
 
-    // Transition settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Transitions", meta = (ClampMin = "0.0", ClampMax = "2.0"))
-    float DefaultTransitionTime = 0.25f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
+    class UAnimMontage* JumpMontage;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Transitions", meta = (ClampMin = "0.0", ClampMax = "2.0"))
-    float CombatTransitionTime = 0.15f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
+    class UAnimMontage* LandingMontage;
+
+    // Timing and Smoothing
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
+    float StateTransitionSpeed;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
+    float BlendSmoothingSpeed;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
+    float MinMovementThreshold;
 
 private:
     // Internal state tracking
-    float TimeSinceStateChange = 0.0f;
-    EAnim_MovementState LastMovementState = EAnim_MovementState::Idle;
-    EAnim_CombatState LastCombatState = EAnim_CombatState::None;
+    float StateTransitionTimer;
+    bool bPendingStateChange;
+    EAnim_MovementState PendingMovementState;
+
+    // Cached references
+    class ACharacter* OwnerCharacter;
+    class UCharacterMovementComponent* MovementComponent;
+    class USkeletalMeshComponent* MeshComponent;
 
     // Helper functions
-    void AnalyzeMovementState(float DeltaTime);
-    void UpdateVelocityData();
-    bool IsCharacterInAir() const;
-    float CalculateMovementDirection() const;
+    void InitializeBlendWeights();
+    void UpdateCharacterReferences();
+    EAnim_MovementState CalculateMovementState() const;
+    void PerformTerrainTrace();
+    float CalculateBlendAlpha(float CurrentValue, float TargetValue, float DeltaTime) const;
 };
