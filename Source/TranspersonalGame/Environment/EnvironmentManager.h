@@ -2,120 +2,200 @@
 
 #include "CoreMinimal.h"
 #include "Engine/World.h"
-#include "GameFramework/Actor.h"
+#include "Components/ActorComponent.h"
+#include "Engine/DirectionalLight.h"
+#include "Components/DirectionalLightComponent.h"
+#include "Engine/ExponentialHeightFog.h"
+#include "Components/ExponentialHeightFogComponent.h"
+#include "Engine/StaticMeshActor.h"
 #include "Components/StaticMeshComponent.h"
-#include "Engine/StaticMesh.h"
-#include "SharedTypes.h"
+#include "Materials/MaterialInterface.h"
+#include "Kismet/GameplayStatics.h"
+#include "Math/UnrealMathUtility.h"
 #include "EnvironmentManager.generated.h"
 
 UENUM(BlueprintType)
 enum class EEnvArt_BiomeType : uint8
 {
-    Savana      UMETA(DisplayName = "Savana"),
-    Floresta    UMETA(DisplayName = "Floresta"), 
-    Pantano     UMETA(DisplayName = "Pantano"),
-    Deserto     UMETA(DisplayName = "Deserto"),
-    Montanha    UMETA(DisplayName = "Montanha")
+    Savanna     UMETA(DisplayName = "Savanna"),
+    Swamp       UMETA(DisplayName = "Swamp"),
+    Forest      UMETA(DisplayName = "Forest"),
+    Desert      UMETA(DisplayName = "Desert"),
+    Mountain    UMETA(DisplayName = "Mountain")
+};
+
+UENUM(BlueprintType)
+enum class EEnvArt_TimeOfDay : uint8
+{
+    Dawn        UMETA(DisplayName = "Dawn"),
+    Morning     UMETA(DisplayName = "Morning"),
+    Noon        UMETA(DisplayName = "Noon"),
+    Afternoon   UMETA(DisplayName = "Afternoon"),
+    Dusk        UMETA(DisplayName = "Dusk"),
+    Night       UMETA(DisplayName = "Night")
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEnvArt_BiomeCoordinates
+struct FEnvArt_BiomeSettings
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    EEnvArt_BiomeType BiomeType;
+    EEnvArt_BiomeType BiomeType = EEnvArt_BiomeType::Savanna;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    FVector CenterLocation;
+    FVector CenterLocation = FVector::ZeroVector;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float Radius;
+    float Radius = 15000.0f;
 
-    FEnvArt_BiomeCoordinates()
-    {
-        BiomeType = EEnvArt_BiomeType::Savana;
-        CenterLocation = FVector::ZeroVector;
-        Radius = 10000.0f;
-    }
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Props")
+    int32 MaxPropsPerBiome = 1000;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Props")
+    float PropDensity = 0.1f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
+    FLinearColor AmbientColor = FLinearColor(0.3f, 0.3f, 0.4f, 1.0f);
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fog")
+    float FogDensity = 0.02f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fog")
+    FLinearColor FogColor = FLinearColor(0.7f, 0.7f, 0.8f, 1.0f);
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEnvArt_EnvironmentAsset
+struct FEnvArt_LightingSettings
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Asset")
-    FString AssetName;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sun")
+    FRotator SunRotation = FRotator(-15.0f, 45.0f, 0.0f);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Asset")
-    TSoftObjectPtr<UStaticMesh> MeshAsset;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sun")
+    FLinearColor SunColor = FLinearColor(1.0f, 0.8f, 0.6f, 1.0f);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Asset")
-    EEnvArt_BiomeType PreferredBiome;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sun")
+    float SunIntensity = 3.5f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Asset")
-    float SpawnDensity;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmosphere")
+    bool bVolumetricFog = true;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Asset")
-    FVector ScaleRange;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmosphere")
+    float AtmosphericDensity = 0.02f;
 
-    FEnvArt_EnvironmentAsset()
-    {
-        AssetName = TEXT("DefaultAsset");
-        PreferredBiome = EEnvArt_BiomeType::Savana;
-        SpawnDensity = 1.0f;
-        ScaleRange = FVector(0.8f, 1.2f, 1.0f);
-    }
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmosphere")
+    FLinearColor ScatteringColor = FLinearColor(0.9f, 0.7f, 0.5f, 1.0f);
 };
 
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API AEnvironmentManager : public AActor
+/**
+ * Environment Manager - Handles atmospheric lighting, biome-specific props, and visual storytelling
+ * Responsible for creating immersive prehistoric environments that feel lived-in and authentic
+ */
+UCLASS(BlueprintType, Blueprintable, ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UEnvironmentManager : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    AEnvironmentManager();
+    UEnvironmentManager();
 
 protected:
     virtual void BeginPlay() override;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment")
-    TArray<FEnvArt_BiomeCoordinates> BiomeDefinitions;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment")
-    TArray<FEnvArt_EnvironmentAsset> EnvironmentAssets;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment")
-    int32 AssetsPerBiome;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment")
-    float SpawnRadius;
-
 public:
-    UFUNCTION(BlueprintCallable, Category = "Environment")
-    void PopulateBiome(EEnvArt_BiomeType BiomeType, int32 AssetCount = 100);
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
+    // Core Environment Management
     UFUNCTION(BlueprintCallable, Category = "Environment")
-    void PopulateAllBiomes();
-
-    UFUNCTION(BlueprintCallable, Category = "Environment")
-    FVector GetBiomeCenter(EEnvArt_BiomeType BiomeType) const;
+    void InitializeEnvironment();
 
     UFUNCTION(BlueprintCallable, Category = "Environment")
-    void SetGoldenHourLighting();
+    void SetupBiomes();
 
     UFUNCTION(BlueprintCallable, Category = "Environment")
-    void AddVolumetricFog();
+    void PopulateBiomeWithProps(EEnvArt_BiomeType BiomeType, int32 PropCount);
 
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Environment")
-    void InitializeBiomeDefinitions();
+    // Lighting and Atmosphere
+    UFUNCTION(BlueprintCallable, Category = "Lighting")
+    void SetTimeOfDay(EEnvArt_TimeOfDay TimeOfDay);
 
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Environment")
-    void DiscoverEnvironmentAssets();
+    UFUNCTION(BlueprintCallable, Category = "Lighting")
+    void UpdateSunPosition(float TimeOfDayNormalized);
+
+    UFUNCTION(BlueprintCallable, Category = "Lighting")
+    void ConfigureAtmosphericLighting(const FEnvArt_LightingSettings& Settings);
+
+    UFUNCTION(BlueprintCallable, Category = "Lighting")
+    void SetupVolumetricFog();
+
+    // Biome Management
+    UFUNCTION(BlueprintCallable, Category = "Biome")
+    EEnvArt_BiomeType GetBiomeAtLocation(const FVector& Location) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Biome")
+    FEnvArt_BiomeSettings GetBiomeSettings(EEnvArt_BiomeType BiomeType) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Biome")
+    void UpdateBiomeSettings(EEnvArt_BiomeType BiomeType, const FEnvArt_BiomeSettings& NewSettings);
+
+    // Prop Management
+    UFUNCTION(BlueprintCallable, Category = "Props")
+    void SpawnEnvironmentProp(const FVector& Location, EEnvArt_BiomeType BiomeType);
+
+    UFUNCTION(BlueprintCallable, Category = "Props")
+    void CleanupExcessProps();
+
+    UFUNCTION(BlueprintCallable, Category = "Props")
+    int32 GetTotalActorCount() const;
+
+    // Visual Storytelling
+    UFUNCTION(BlueprintCallable, Category = "Storytelling")
+    void CreateNarrativeCluster(const FVector& Location, const FString& StoryTheme);
+
+    UFUNCTION(BlueprintCallable, Category = "Storytelling")
+    void PlaceAbandonedCampsite(const FVector& Location);
+
+    UFUNCTION(BlueprintCallable, Category = "Storytelling")
+    void CreateDinosaurNest(const FVector& Location, const FString& DinosaurType);
+
+protected:
+    // Configuration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
+    TMap<EEnvArt_BiomeType, FEnvArt_BiomeSettings> BiomeSettings;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
+    FEnvArt_LightingSettings CurrentLightingSettings;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
+    EEnvArt_TimeOfDay CurrentTimeOfDay = EEnvArt_TimeOfDay::Afternoon;
+
+    // Actor References
+    UPROPERTY(BlueprintReadOnly, Category = "References")
+    ADirectionalLight* SunLight;
+
+    UPROPERTY(BlueprintReadOnly, Category = "References")
+    AExponentialHeightFog* AtmosphericFog;
+
+    UPROPERTY(BlueprintReadOnly, Category = "References")
+    TArray<AActor*> SpawnedProps;
+
+    // Limits and Constraints
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Limits")
+    int32 MaxTotalActors = 8000;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Limits")
+    int32 MaxPropsPerBiome = 1000;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Limits")
+    int32 MaxTotalProps = 5000;
 
 private:
-    void SpawnAssetAtLocation(const FEnvArt_EnvironmentAsset& Asset, const FVector& Location, const FRotator& Rotation);
-    FVector GetRandomLocationInBiome(const FEnvArt_BiomeCoordinates& Biome) const;
-    FRotator GetRandomRotation() const;
+    // Internal helper functions
+    void InitializeBiomeDefaults();
+    FVector GetRandomLocationInBiome(EEnvArt_BiomeType BiomeType) const;
+    void ApplyBiomeSpecificMaterials(AActor* PropActor, EEnvArt_BiomeType BiomeType);
+    bool IsLocationSuitableForProp(const FVector& Location) const;
+    void RemoveOldestProps(int32 CountToRemove);
 };
