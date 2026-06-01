@@ -2,12 +2,25 @@
 
 #include "CoreMinimal.h"
 #include "Engine/GameInstanceSubsystem.h"
-#include "Components/ActorComponent.h"
-#include "../SharedTypes.h"
+#include "Engine/DataTable.h"
+#include "Kismet/GameplayStatics.h"
 #include "Quest_DialogueSystem.generated.h"
 
+// Forward declarations
+class APlayerController;
+class APawn;
+
+UENUM(BlueprintType)
+enum class EQuest_DialogueState : uint8
+{
+    None UMETA(DisplayName = "None"),
+    Active UMETA(DisplayName = "Active"),
+    Completed UMETA(DisplayName = "Completed"),
+    Failed UMETA(DisplayName = "Failed")
+};
+
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FQuest_DialogueNode
+struct TRANSPERSONALGAME_API FQuest_DialogueEntry
 {
     GENERATED_BODY()
 
@@ -15,150 +28,138 @@ struct TRANSPERSONALGAME_API FQuest_DialogueNode
     FString SpeakerName;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    FString DialogueText;
+    FText DialogueText;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    TArray<FString> PlayerResponses;
+    float Duration;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    TArray<int32> NextNodeIndices;
+    bool bRequiresPlayerResponse;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    bool bIsQuestGiver;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    FString QuestID;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    float EmotionIntensity;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    ESurvivalThreat ThreatLevel;
-
-    FQuest_DialogueNode()
+    FQuest_DialogueEntry()
     {
         SpeakerName = TEXT("Unknown");
-        DialogueText = TEXT("");
-        bIsQuestGiver = false;
-        QuestID = TEXT("");
-        EmotionIntensity = 0.5f;
-        ThreatLevel = ESurvivalThreat::None;
+        DialogueText = FText::FromString(TEXT("..."));
+        Duration = 3.0f;
+        bRequiresPlayerResponse = false;
     }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FQuest_DialogueTree
+struct TRANSPERSONALGAME_API FQuest_DialogueChoice
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    FString TreeID;
+    FText ChoiceText;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    TArray<FQuest_DialogueNode> DialogueNodes;
+    int32 NextDialogueID;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    int32 CurrentNodeIndex;
+    bool bEndsDialogue;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    bool bIsCompleted;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    EBiomeType AssociatedBiome;
-
-    FQuest_DialogueTree()
+    FQuest_DialogueChoice()
     {
-        TreeID = TEXT("");
-        CurrentNodeIndex = 0;
-        bIsCompleted = false;
-        AssociatedBiome = EBiomeType::Savanna;
+        ChoiceText = FText::FromString(TEXT("Continue"));
+        NextDialogueID = -1;
+        bEndsDialogue = false;
     }
 };
 
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UQuest_DialogueComponent : public UActorComponent
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FQuest_DialogueNode : public FTableRowBase
 {
     GENERATED_BODY()
 
-public:
-    UQuest_DialogueComponent();
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    int32 DialogueID;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    FQuest_DialogueTree DialogueTree;
+    FQuest_DialogueEntry DialogueEntry;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    bool bCanInteract;
+    TArray<FQuest_DialogueChoice> Choices;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    float InteractionRange;
+    FString QuestID;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    FString NPCName;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    ESurvivalRole NPCRole;
-
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    bool StartDialogue(AActor* PlayerActor);
-
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    FQuest_DialogueNode GetCurrentDialogueNode();
-
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    bool SelectPlayerResponse(int32 ResponseIndex);
-
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    bool IsDialogueActive();
-
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    void EndDialogue();
-
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    TArray<FString> GetAvailableResponses();
-
-protected:
-    virtual void BeginPlay() override;
-
-private:
-    bool bDialogueActive;
-    AActor* CurrentPlayer;
+    FQuest_DialogueNode()
+    {
+        DialogueID = 0;
+        QuestID = TEXT("");
+    }
 };
 
-UCLASS()
-class TRANSPERSONALGAME_API UQuest_DialogueSubsystem : public UGameInstanceSubsystem
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FQuest_OnDialogueStarted, const FString&, NPCName, const FText&, FirstLine);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FQuest_OnDialogueEnded);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FQuest_OnDialogueChoice, int32, ChoiceIndex, const FText&, ChoiceText);
+
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API UQuest_DialogueSystem : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
 public:
+    UQuest_DialogueSystem();
+
+    // Subsystem interface
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue System")
-    TMap<FString, FQuest_DialogueTree> GlobalDialogueTrees;
+    // Dialogue management
+    UFUNCTION(BlueprintCallable, Category = "Quest Dialogue")
+    bool StartDialogue(const FString& NPCName, int32 StartingDialogueID);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue System")
-    TArray<FString> CompletedDialogues;
+    UFUNCTION(BlueprintCallable, Category = "Quest Dialogue")
+    void EndDialogue();
 
-    UFUNCTION(BlueprintCallable, Category = "Dialogue System")
-    void RegisterDialogueTree(const FString& TreeID, const FQuest_DialogueTree& Tree);
+    UFUNCTION(BlueprintCallable, Category = "Quest Dialogue")
+    void SelectDialogueChoice(int32 ChoiceIndex);
 
-    UFUNCTION(BlueprintCallable, Category = "Dialogue System")
-    FQuest_DialogueTree GetDialogueTree(const FString& TreeID);
+    UFUNCTION(BlueprintCallable, Category = "Quest Dialogue")
+    bool IsDialogueActive() const { return CurrentDialogueState != EQuest_DialogueState::None; }
 
-    UFUNCTION(BlueprintCallable, Category = "Dialogue System")
-    void MarkDialogueCompleted(const FString& TreeID);
+    UFUNCTION(BlueprintCallable, Category = "Quest Dialogue")
+    FQuest_DialogueNode GetCurrentDialogueNode() const { return CurrentDialogueNode; }
 
-    UFUNCTION(BlueprintCallable, Category = "Dialogue System")
-    bool IsDialogueCompleted(const FString& TreeID);
+    // Data table management
+    UFUNCTION(BlueprintCallable, Category = "Quest Dialogue")
+    void LoadDialogueDataTable(UDataTable* DialogueTable);
 
-    UFUNCTION(BlueprintCallable, Category = "Dialogue System")
-    TArray<UQuest_DialogueComponent*> FindNearbyDialogueNPCs(AActor* PlayerActor, float SearchRadius);
+    UFUNCTION(BlueprintCallable, Category = "Quest Dialogue")
+    bool HasDialogueForNPC(const FString& NPCName) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Dialogue System")
-    void CreateSurvivalDialogues();
+    // Events
+    UPROPERTY(BlueprintAssignable, Category = "Quest Dialogue Events")
+    FQuest_OnDialogueStarted OnDialogueStarted;
+
+    UPROPERTY(BlueprintAssignable, Category = "Quest Dialogue Events")
+    FQuest_OnDialogueEnded OnDialogueEnded;
+
+    UPROPERTY(BlueprintAssignable, Category = "Quest Dialogue Events")
+    FQuest_OnDialogueChoice OnDialogueChoice;
 
 protected:
-    void SetupTribalDialogues();
-    void SetupHunterDialogues();
-    void SetupShamanDialogues();
-    void SetupTraderDialogues();
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Quest Dialogue State")
+    EQuest_DialogueState CurrentDialogueState;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Quest Dialogue State")
+    FQuest_DialogueNode CurrentDialogueNode;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Quest Dialogue State")
+    FString CurrentNPCName;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Dialogue Data")
+    UDataTable* DialogueDataTable;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Quest Dialogue State")
+    TMap<FString, TArray<int32>> NPCDialogueMap;
+
+private:
+    void ProcessDialogueNode(int32 DialogueID);
+    void BuildNPCDialogueMap();
+    FQuest_DialogueNode* FindDialogueNode(int32 DialogueID);
+
+    FTimerHandle DialogueTimerHandle;
 };
