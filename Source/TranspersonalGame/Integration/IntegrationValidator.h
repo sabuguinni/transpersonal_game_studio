@@ -1,110 +1,168 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
 #include "Engine/World.h"
+#include "GameFramework/Actor.h"
+#include "Subsystems/GameInstanceSubsystem.h"
 #include "IntegrationValidator.generated.h"
 
+UENUM(BlueprintType)
+enum class EBuild_ValidationResult : uint8
+{
+    Pass        UMETA(DisplayName = "Pass"),
+    Warning     UMETA(DisplayName = "Warning"), 
+    Fail        UMETA(DisplayName = "Fail"),
+    Critical    UMETA(DisplayName = "Critical")
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FBuild_SystemStatus
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadOnly, Category = "Validation")
+    FString SystemName;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Validation")
+    EBuild_ValidationResult Status;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Validation")
+    FString Message;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Validation")
+    float PerformanceScore;
+
+    FBuild_SystemStatus()
+    {
+        SystemName = TEXT("");
+        Status = EBuild_ValidationResult::Pass;
+        Message = TEXT("");
+        PerformanceScore = 1.0f;
+    }
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FBuild_BiomeDistribution
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadOnly, Category = "Distribution")
+    FString BiomeName;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Distribution")
+    int32 ActorCount;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Distribution")
+    FVector BiomeCenter;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Distribution")
+    float DistributionScore;
+
+    FBuild_BiomeDistribution()
+    {
+        BiomeName = TEXT("");
+        ActorCount = 0;
+        BiomeCenter = FVector::ZeroVector;
+        DistributionScore = 0.0f;
+    }
+};
+
 /**
- * Integration Validator - Monitors system health and validates cross-module compatibility
- * Used by Integration & Build Agent #19 to ensure all systems work together correctly
+ * Integration validation system for cross-agent compatibility
+ * Validates that all 18 agent outputs work together correctly
  */
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API AIntegrationValidator : public AActor
+class TRANSPERSONALGAME_API UIntegrationValidator : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
 public:
-    AIntegrationValidator();
+    UIntegrationValidator();
 
-protected:
-    virtual void BeginPlay() override;
+    // Subsystem interface
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
 
-public:
-    virtual void Tick(float DeltaTime) override;
-
-    // === VALIDATION FUNCTIONS ===
-    
-    /** Validate all core systems are loaded and functional */
+    // Core validation functions
     UFUNCTION(BlueprintCallable, Category = "Integration")
-    bool ValidateCoreSystemsLoaded();
-    
-    /** Check actor count limits and memory usage */
+    EBuild_ValidationResult ValidateAllSystems();
+
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    TArray<FBuild_SystemStatus> GetSystemStatusReport();
+
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    TArray<FBuild_BiomeDistribution> GetBiomeDistribution();
+
     UFUNCTION(BlueprintCallable, Category = "Integration")
     bool ValidateActorLimits();
-    
-    /** Verify biome distribution is balanced */
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    bool ValidateBiomeDistribution();
-    
-    /** Test cross-system integration scenarios */
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    bool ValidateCrossSystemIntegration();
-    
-    /** Run full integration test suite */
-    UFUNCTION(BlueprintCallable, Category = "Integration", CallInEditor = true)
-    void RunFullIntegrationTest();
-    
-    /** Generate integration health report */
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    FString GenerateHealthReport();
 
-    // === MONITORING PROPERTIES ===
-    
-    /** Maximum allowed actors in the world */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Limits")
-    int32 MaxActorCount = 8000;
-    
-    /** Maximum allowed dinosaurs */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Limits")
-    int32 MaxDinosaurCount = 150;
-    
-    /** Maximum actors per biome */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Limits")
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    bool ValidateDinosaurLimits();
+
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    float GetOverallIntegrationScore();
+
+    // Cross-system validation
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    bool ValidateCharacterWorldIntegration();
+
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    bool ValidateAIDinosaurIntegration();
+
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    bool ValidateEnvironmentFoliageIntegration();
+
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    bool ValidateQuestNarrativeIntegration();
+
+    // Performance validation
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    bool ValidatePerformanceTargets();
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    float GetMemoryUsageScore();
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    int32 GetTotalActorCount();
+
+protected:
+    // Internal validation helpers
+    bool ValidateCoreClasses();
+    bool ValidateModuleDependencies();
+    bool CheckBiomeDistribution();
+    float CalculatePerformanceScore();
+
+    // System status tracking
+    UPROPERTY()
+    TArray<FBuild_SystemStatus> SystemStatuses;
+
+    UPROPERTY()
+    TArray<FBuild_BiomeDistribution> BiomeDistributions;
+
+    // Validation thresholds
+    UPROPERTY(EditAnywhere, Category = "Limits")
+    int32 MaxTotalActors = 8000;
+
+    UPROPERTY(EditAnywhere, Category = "Limits")
+    int32 MaxDinosaurs = 150;
+
+    UPROPERTY(EditAnywhere, Category = "Limits")
     int32 MaxActorsPerBiome = 4000;
-    
-    /** Enable continuous monitoring */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Monitoring")
-    bool bEnableContinuousMonitoring = true;
-    
-    /** Monitoring interval in seconds */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Monitoring")
-    float MonitoringInterval = 30.0f;
-    
-    /** Last validation results */
-    UPROPERTY(BlueprintReadOnly, Category = "Status")
-    bool bLastValidationPassed = true;
-    
-    /** Current actor count */
-    UPROPERTY(BlueprintReadOnly, Category = "Status")
-    int32 CurrentActorCount = 0;
-    
-    /** Current dinosaur count */
-    UPROPERTY(BlueprintReadOnly, Category = "Status")
-    int32 CurrentDinosaurCount = 0;
+
+    UPROPERTY(EditAnywhere, Category = "Performance")
+    float MinPerformanceScore = 0.7f;
+
+    // Core system classes to validate
+    UPROPERTY()
+    TArray<FString> CoreSystemClasses;
+
+    // Biome centers for distribution validation
+    UPROPERTY()
+    TMap<FString, FVector> BiomeCenters;
 
 private:
-    /** Timer for continuous monitoring */
-    float MonitoringTimer = 0.0f;
-    
-    /** Core system class names to validate */
-    TArray<FString> CoreSystemClasses;
-    
-    /** Biome center coordinates for distribution checking */
-    TArray<FVector2D> BiomeCenters;
-    
-    /** Initialize core system list */
-    void InitializeCoreSystemsList();
-    
-    /** Initialize biome coordinates */
-    void InitializeBiomeCoordinates();
-    
-    /** Count actors in specific biome */
-    int32 CountActorsInBiome(const FVector2D& BiomeCenter, float Radius = 20000.0f);
-    
-    /** Count dinosaur actors */
-    int32 CountDinosaurActors();
-    
-    /** Log validation result */
-    void LogValidationResult(const FString& TestName, bool bPassed, const FString& Details = TEXT(""));
+    void InitializeBiomeCenters();
+    void InitializeCoreSystemClasses();
+    EBuild_ValidationResult ValidateSystemClass(const FString& ClassName);
+    float CalculateBiomeDistributionScore();
 };
