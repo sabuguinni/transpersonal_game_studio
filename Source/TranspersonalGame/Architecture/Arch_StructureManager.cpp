@@ -1,9 +1,8 @@
 #include "Arch_StructureManager.h"
 #include "Engine/Engine.h"
-#include "Engine/StaticMeshActor.h"
-#include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
-#include "UObject/ConstructorHelpers.h"
+#include "Materials/MaterialInterface.h"
+#include "Components/StaticMeshComponent.h"
 #include "Kismet/GameplayStatics.h"
 #include "Math/UnrealMathUtility.h"
 
@@ -11,33 +10,41 @@ AArch_StructureManager::AArch_StructureManager()
 {
     PrimaryActorTick.bCanEverTick = true;
 
-    // Create root component
+    // Create root scene component
     RootSceneComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootSceneComponent"));
     RootComponent = RootSceneComponent;
 
-    // Initialize default values
-    MaxStructuresPerBiome = 50;
-    StructureSpawnRadius = 15000.0f;
-    bAutoGenerateStructures = false;
+    // Create main structure mesh component
+    MainStructureMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("MainStructureMesh"));
+    MainStructureMesh->SetupAttachment(RootComponent);
+    MainStructureMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+    MainStructureMesh->SetCollisionObjectType(ECollisionChannel::ECC_WorldStatic);
 
-    // Initialize managed structures array
-    ManagedStructures.Reserve(250); // 50 per biome * 5 biomes
+    // Initialize structure data
+    StructureData.StructureType = EArch_StructureType::Ruins;
+    StructureData.StructureName = "Ancient Structure";
+    StructureData.Durability = 75.0f;
+    StructureData.WeatheringLevel = 25.0f;
+    StructureData.bIsRuined = false;
+    StructureData.BiomeType = EBiomeType::Savanna;
+
+    // Initialize settings
+    WeatheringRate = 0.1f;
+    bAutoWeathering = true;
+    MaxViewDistance = 10000.0f;
+    WeatheringUpdateInterval = 5.0f;
+    LastWeatheringUpdate = 0.0f;
+    bIsInitialized = false;
 }
 
 void AArch_StructureManager::BeginPlay()
 {
     Super::BeginPlay();
-
-    if (bAutoGenerateStructures)
+    
+    if (!bIsInitialized)
     {
-        // Generate structures for all biomes
-        GenerateStructuresForBiome(EBiomeType::Savanna, 10);
-        GenerateStructuresForBiome(EBiomeType::Swamp, 8);
-        GenerateStructuresForBiome(EBiomeType::Forest, 12);
-        GenerateStructuresForBiome(EBiomeType::Desert, 6);
-        GenerateStructuresForBiome(EBiomeType::Mountain, 15);
-
-        UE_LOG(LogTemp, Warning, TEXT("Architecture Manager: Auto-generated structures for all biomes"));
+        UpdateStructureAppearance();
+        bIsInitialized = true;
     }
 }
 
@@ -45,261 +52,220 @@ void AArch_StructureManager::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
 
-    // Periodic validation of structure health and state
-    static float ValidationTimer = 0.0f;
-    ValidationTimer += DeltaTime;
-
-    if (ValidationTimer >= 30.0f) // Validate every 30 seconds
+    if (bAutoWeathering)
     {
-        ValidationTimer = 0.0f;
-
-        // Check for destroyed structures and update array
-        for (int32 i = ManagedStructures.Num() - 1; i >= 0; i--)
-        {
-            if (ManagedStructures[i].StructureHealth <= 0.0f)
-            {
-                ManagedStructures.RemoveAt(i);
-            }
-        }
+        ProcessWeathering(DeltaTime);
     }
+
+    UpdateLOD();
 }
 
-void AArch_StructureManager::SpawnStructureAtLocation(EArch_StructureType StructureType, FVector Location, FRotator Rotation)
+void AArch_StructureManager::InitializeStructure(EArch_StructureType Type, const FString& Name, EBiomeType Biome)
 {
-    if (!GetWorld())
+    StructureData.StructureType = Type;
+    StructureData.StructureName = Name;
+    StructureData.BiomeType = Biome;
+
+    // Set default properties based on structure type
+    switch (Type)
     {
-        UE_LOG(LogTemp, Error, TEXT("Architecture Manager: No valid world for structure spawning"));
-        return;
-    }
-
-    // Validate location
-    EBiomeType BiomeType = EBiomeType::Savanna; // Default, should be determined by location
-    ValidateStructurePlacement(Location, BiomeType);
-
-    // Spawn static mesh actor
-    AStaticMeshActor* StructureActor = GetWorld()->SpawnActor<AStaticMeshActor>(Location, Rotation);
-    if (!StructureActor)
-    {
-        UE_LOG(LogTemp, Error, TEXT("Architecture Manager: Failed to spawn structure actor"));
-        return;
-    }
-
-    // Set mesh based on structure type
-    UStaticMesh* StructureMesh = GetMeshForStructureType(StructureType);
-    if (StructureMesh && StructureActor->GetStaticMeshComponent())
-    {
-        StructureActor->GetStaticMeshComponent()->SetStaticMesh(StructureMesh);
-    }
-
-    // Set actor label
-    FString StructureName = FString::Printf(TEXT("Arch_%s_%d"), 
-        *UEnum::GetValueAsString(StructureType), ManagedStructures.Num());
-    StructureActor->SetActorLabel(StructureName);
-
-    // Create structure data
-    FArch_StructureData NewStructure;
-    NewStructure.StructureName = StructureName;
-    NewStructure.BiomeType = BiomeType;
-    NewStructure.Location = Location;
-    NewStructure.Rotation = Rotation;
-    NewStructure.StructureHealth = 100.0f;
-    NewStructure.bIsRuin = (StructureType == EArch_StructureType::AncientRuin);
-
-    ManagedStructures.Add(NewStructure);
-
-    UE_LOG(LogTemp, Warning, TEXT("Architecture Manager: Spawned %s at %s"), 
-        *StructureName, *Location.ToString());
-}
-
-void AArch_StructureManager::GenerateStructuresForBiome(EBiomeType BiomeType, int32 Count)
-{
-    if (Count <= 0 || Count > MaxStructuresPerBiome)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Architecture Manager: Invalid structure count %d for biome"), Count);
-        return;
-    }
-
-    FVector BiomeCenter = GetBiomeCenterLocation(BiomeType);
-    
-    for (int32 i = 0; i < Count; i++)
-    {
-        // Random location within biome radius
-        float Angle = FMath::RandRange(0.0f, 360.0f);
-        float Distance = FMath::RandRange(1000.0f, StructureSpawnRadius);
-        
-        FVector SpawnLocation = BiomeCenter + FVector(
-            FMath::Cos(FMath::DegreesToRadians(Angle)) * Distance,
-            FMath::Sin(FMath::DegreesToRadians(Angle)) * Distance,
-            100.0f
-        );
-
-        // Random rotation
-        FRotator SpawnRotation = FRotator(0.0f, FMath::RandRange(0.0f, 360.0f), 0.0f);
-
-        // Choose structure type based on biome
-        EArch_StructureType StructureType = EArch_StructureType::StonePillar;
-        switch (BiomeType)
-        {
-        case EBiomeType::Mountain:
-            StructureType = (i % 3 == 0) ? EArch_StructureType::CaveEntrance : EArch_StructureType::RockFormation;
+        case EArch_StructureType::Temple:
+            StructureData.Durability = 90.0f;
+            StructureData.WeatheringLevel = 10.0f;
+            StructureData.bIsRuined = false;
             break;
-        case EBiomeType::Forest:
-            StructureType = (i % 2 == 0) ? EArch_StructureType::AncientRuin : EArch_StructureType::StoneArch;
+        case EArch_StructureType::Ruins:
+            StructureData.Durability = 30.0f;
+            StructureData.WeatheringLevel = 70.0f;
+            StructureData.bIsRuined = true;
             break;
-        case EBiomeType::Desert:
-            StructureType = EArch_StructureType::StonePillar;
+        case EArch_StructureType::Pillar:
+            StructureData.Durability = 80.0f;
+            StructureData.WeatheringLevel = 20.0f;
+            StructureData.bIsRuined = false;
             break;
-        case EBiomeType::Swamp:
-            StructureType = EArch_StructureType::AncientRuin;
+        case EArch_StructureType::Archway:
+            StructureData.Durability = 70.0f;
+            StructureData.WeatheringLevel = 30.0f;
+            StructureData.bIsRuined = false;
             break;
         default:
-            StructureType = EArch_StructureType::StoneWall;
+            StructureData.Durability = 50.0f;
+            StructureData.WeatheringLevel = 50.0f;
+            StructureData.bIsRuined = false;
             break;
-        }
-
-        SpawnStructureAtLocation(StructureType, SpawnLocation, SpawnRotation);
     }
 
-    UE_LOG(LogTemp, Warning, TEXT("Architecture Manager: Generated %d structures for %s biome"), 
-        Count, *UEnum::GetValueAsString(BiomeType));
+    UpdateStructureAppearance();
+    bIsInitialized = true;
+
+    UE_LOG(LogTemp, Log, TEXT("Architecture: Initialized %s structure '%s' in %s biome"), 
+           *UEnum::GetValueAsString(Type), *Name, *UEnum::GetValueAsString(Biome));
 }
 
-void AArch_StructureManager::ClearStructuresInRadius(FVector Center, float Radius)
+void AArch_StructureManager::SetStructureMesh(UStaticMesh* NewMesh)
 {
-    if (!GetWorld())
+    if (NewMesh && MainStructureMesh)
     {
-        return;
+        MainStructureMesh->SetStaticMesh(NewMesh);
+        UpdateStructureAppearance();
+        UE_LOG(LogTemp, Log, TEXT("Architecture: Set new mesh for structure %s"), *StructureData.StructureName);
     }
-
-    int32 ClearedCount = 0;
-    for (int32 i = ManagedStructures.Num() - 1; i >= 0; i--)
-    {
-        float Distance = FVector::Dist(ManagedStructures[i].Location, Center);
-        if (Distance <= Radius)
-        {
-            // Find and destroy the actual actor
-            TArray<AActor*> FoundActors;
-            UGameplayStatics::GetAllActorsOfClass(GetWorld(), AStaticMeshActor::StaticClass(), FoundActors);
-            
-            for (AActor* Actor : FoundActors)
-            {
-                if (Actor->GetActorLabel().Contains(ManagedStructures[i].StructureName))
-                {
-                    Actor->Destroy();
-                    ClearedCount++;
-                    break;
-                }
-            }
-
-            ManagedStructures.RemoveAt(i);
-        }
-    }
-
-    UE_LOG(LogTemp, Warning, TEXT("Architecture Manager: Cleared %d structures in radius %.1f"), 
-        ClearedCount, Radius);
 }
 
-TArray<FArch_StructureData> AArch_StructureManager::GetStructuresInBiome(EBiomeType BiomeType)
+void AArch_StructureManager::ApplyWeathering(float WeatheringAmount)
 {
-    TArray<FArch_StructureData> BiomeStructures;
+    StructureData.WeatheringLevel = FMath::Clamp(StructureData.WeatheringLevel + WeatheringAmount, 0.0f, 100.0f);
+    StructureData.Durability = FMath::Clamp(StructureData.Durability - WeatheringAmount * 0.5f, 0.0f, 100.0f);
+
+    if (StructureData.Durability <= 20.0f && !StructureData.bIsRuined)
+    {
+        SetRuinedState(true);
+    }
+
+    UpdateStructureAppearance();
+}
+
+void AArch_StructureManager::SetRuinedState(bool bRuined)
+{
+    StructureData.bIsRuined = bRuined;
     
-    for (const FArch_StructureData& Structure : ManagedStructures)
+    if (bRuined)
     {
-        if (Structure.BiomeType == BiomeType)
-        {
-            BiomeStructures.Add(Structure);
-        }
+        StructureData.WeatheringLevel = FMath::Max(StructureData.WeatheringLevel, 60.0f);
+        StructureData.Durability = FMath::Min(StructureData.Durability, 30.0f);
     }
 
-    return BiomeStructures;
+    UpdateStructureAppearance();
+    UE_LOG(LogTemp, Log, TEXT("Architecture: Structure %s ruined state set to %s"), 
+           *StructureData.StructureName, bRuined ? TEXT("true") : TEXT("false"));
 }
 
-void AArch_StructureManager::UpdateStructureHealth(int32 StructureIndex, float NewHealth)
+void AArch_StructureManager::RepairStructure(float RepairAmount)
 {
-    if (ManagedStructures.IsValidIndex(StructureIndex))
+    if (!StructureData.bIsRuined)
     {
-        ManagedStructures[StructureIndex].StructureHealth = FMath::Clamp(NewHealth, 0.0f, 100.0f);
-        
-        if (NewHealth <= 0.0f)
-        {
-            UE_LOG(LogTemp, Warning, TEXT("Architecture Manager: Structure %s destroyed"), 
-                *ManagedStructures[StructureIndex].StructureName);
-        }
+        StructureData.Durability = FMath::Clamp(StructureData.Durability + RepairAmount, 0.0f, 100.0f);
+        StructureData.WeatheringLevel = FMath::Clamp(StructureData.WeatheringLevel - RepairAmount * 0.3f, 0.0f, 100.0f);
+        UpdateStructureAppearance();
+        UE_LOG(LogTemp, Log, TEXT("Architecture: Repaired structure %s by %.1f points"), 
+               *StructureData.StructureName, RepairAmount);
     }
 }
 
-void AArch_StructureManager::RegenerateAllStructures()
+void AArch_StructureManager::RandomizeWeathering()
 {
-    // Clear existing structures
-    ClearStructuresInRadius(FVector::ZeroVector, 100000.0f);
-
-    // Regenerate for all biomes
-    GenerateStructuresForBiome(EBiomeType::Savanna, 10);
-    GenerateStructuresForBiome(EBiomeType::Swamp, 8);
-    GenerateStructuresForBiome(EBiomeType::Forest, 12);
-    GenerateStructuresForBiome(EBiomeType::Desert, 6);
-    GenerateStructuresForBiome(EBiomeType::Mountain, 15);
-
-    UE_LOG(LogTemp, Warning, TEXT("Architecture Manager: Regenerated all structures"));
+    StructureData.WeatheringLevel = FMath::RandRange(0.0f, 100.0f);
+    StructureData.Durability = FMath::RandRange(20.0f, 100.0f);
+    StructureData.bIsRuined = StructureData.Durability < 30.0f;
+    UpdateStructureAppearance();
+    UE_LOG(LogTemp, Log, TEXT("Architecture: Randomized weathering for structure %s"), *StructureData.StructureName);
 }
 
-void AArch_StructureManager::OnStructureDestroyed(AActor* DestroyedActor)
+void AArch_StructureManager::ResetStructure()
 {
-    if (!DestroyedActor)
+    StructureData.Durability = 100.0f;
+    StructureData.WeatheringLevel = 0.0f;
+    StructureData.bIsRuined = false;
+    UpdateStructureAppearance();
+    UE_LOG(LogTemp, Log, TEXT("Architecture: Reset structure %s to pristine condition"), *StructureData.StructureName);
+}
+
+void AArch_StructureManager::UpdateStructureAppearance()
+{
+    if (!MainStructureMesh)
     {
         return;
     }
 
-    // Remove from managed structures array
-    for (int32 i = ManagedStructures.Num() - 1; i >= 0; i--)
+    // Apply weathering effects based on weathering level
+    float WeatheringAlpha = StructureData.WeatheringLevel / 100.0f;
+    
+    // Scale structure slightly based on durability (ruins appear smaller/collapsed)
+    if (StructureData.bIsRuined)
     {
-        if (DestroyedActor->GetActorLabel().Contains(ManagedStructures[i].StructureName))
+        float ScaleFactor = FMath::Lerp(0.7f, 1.0f, StructureData.Durability / 100.0f);
+        SetActorScale3D(FVector(ScaleFactor, ScaleFactor, ScaleFactor * 0.8f));
+    }
+    else
+    {
+        SetActorScale3D(FVector(1.0f, 1.0f, 1.0f));
+    }
+
+    // Apply rotation for ruined structures (slight tilt)
+    if (StructureData.bIsRuined && StructureData.WeatheringLevel > 50.0f)
+    {
+        float TiltAngle = FMath::Lerp(0.0f, 15.0f, WeatheringAlpha);
+        FRotator CurrentRotation = GetActorRotation();
+        CurrentRotation.Roll = FMath::RandRange(-TiltAngle, TiltAngle);
+        SetActorRotation(CurrentRotation);
+    }
+}
+
+void AArch_StructureManager::ProcessWeathering(float DeltaTime)
+{
+    LastWeatheringUpdate += DeltaTime;
+    
+    if (LastWeatheringUpdate >= WeatheringUpdateInterval)
+    {
+        LastWeatheringUpdate = 0.0f;
+        
+        // Apply gradual weathering based on biome
+        float BiomeWeatheringMultiplier = 1.0f;
+        switch (StructureData.BiomeType)
         {
-            ManagedStructures.RemoveAt(i);
-            break;
+            case EBiomeType::Swamp:
+                BiomeWeatheringMultiplier = 2.0f; // High humidity accelerates decay
+                break;
+            case EBiomeType::Desert:
+                BiomeWeatheringMultiplier = 1.5f; // Sand erosion
+                break;
+            case EBiomeType::Mountain:
+                BiomeWeatheringMultiplier = 0.7f; // Cold preserves structures
+                break;
+            case EBiomeType::Forest:
+                BiomeWeatheringMultiplier = 1.3f; // Vegetation overgrowth
+                break;
+            default:
+                BiomeWeatheringMultiplier = 1.0f;
+                break;
         }
+
+        float WeatheringIncrement = WeatheringRate * BiomeWeatheringMultiplier * WeatheringUpdateInterval;
+        ApplyWeathering(WeatheringIncrement);
     }
 }
 
-FVector AArch_StructureManager::GetBiomeCenterLocation(EBiomeType BiomeType)
+void AArch_StructureManager::UpdateLOD()
 {
-    switch (BiomeType)
+    if (!MainStructureMesh)
     {
-    case EBiomeType::Savanna:
-        return FVector(0.0f, 0.0f, 0.0f);
-    case EBiomeType::Swamp:
-        return FVector(-50000.0f, -45000.0f, 0.0f);
-    case EBiomeType::Forest:
-        return FVector(-45000.0f, 40000.0f, 0.0f);
-    case EBiomeType::Desert:
-        return FVector(55000.0f, 0.0f, 0.0f);
-    case EBiomeType::Mountain:
-        return FVector(40000.0f, 50000.0f, 0.0f);
-    default:
-        return FVector::ZeroVector;
+        return;
     }
-}
 
-UStaticMesh* AArch_StructureManager::GetMeshForStructureType(EArch_StructureType StructureType)
-{
-    // Return nullptr for now - meshes should be set via Blueprint or loaded from Content
-    // This allows for easy asset swapping without recompilation
-    return nullptr;
-}
-
-void AArch_StructureManager::ValidateStructurePlacement(FVector& Location, EBiomeType BiomeType)
-{
-    // Ensure minimum height above ground
-    Location.Z = FMath::Max(Location.Z, 50.0f);
-
-    // Clamp to biome boundaries
-    FVector BiomeCenter = GetBiomeCenterLocation(BiomeType);
-    float MaxDistance = StructureSpawnRadius;
-
-    FVector Offset = Location - BiomeCenter;
-    if (Offset.Size() > MaxDistance)
+    // Simple distance-based LOD
+    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
+    if (PlayerPawn)
     {
-        Offset = Offset.GetSafeNormal() * MaxDistance;
-        Location = BiomeCenter + Offset;
+        float Distance = FVector::Dist(GetActorLocation(), PlayerPawn->GetActorLocation());
+        
+        if (Distance > MaxViewDistance)
+        {
+            MainStructureMesh->SetVisibility(false);
+        }
+        else
+        {
+            MainStructureMesh->SetVisibility(true);
+            
+            // Adjust detail level based on distance
+            if (Distance > MaxViewDistance * 0.5f)
+            {
+                MainStructureMesh->SetCastShadow(false);
+            }
+            else
+            {
+                MainStructureMesh->SetCastShadow(true);
+            }
+        }
     }
 }
