@@ -2,11 +2,25 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
-#include "Engine/World.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/SceneComponent.h"
-#include "../SharedTypes.h"
+#include "Engine/World.h"
+#include "SharedTypes.h"
 #include "Arch_StructureManager.generated.h"
+
+UENUM(BlueprintType)
+enum class EArch_StructureType : uint8
+{
+    None = 0,
+    Temple,
+    Ruins,
+    Pillar,
+    Archway,
+    Wall,
+    Platform,
+    Bridge,
+    Tower
+};
 
 USTRUCT(BlueprintType)
 struct FArch_StructureData
@@ -14,43 +28,32 @@ struct FArch_StructureData
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    FString StructureName;
+    EArch_StructureType StructureType = EArch_StructureType::None;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    EBiomeType BiomeType;
+    FString StructureName = "UnnamedStructure";
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    FVector Location;
+    float Durability = 100.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    FRotator Rotation;
+    float WeatheringLevel = 0.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    float StructureHealth;
+    bool bIsRuined = false;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    bool bIsRuin;
+    EBiomeType BiomeType = EBiomeType::Savanna;
 
     FArch_StructureData()
     {
-        StructureName = TEXT("Unknown");
+        StructureType = EArch_StructureType::None;
+        StructureName = "UnnamedStructure";
+        Durability = 100.0f;
+        WeatheringLevel = 0.0f;
+        bIsRuined = false;
         BiomeType = EBiomeType::Savanna;
-        Location = FVector::ZeroVector;
-        Rotation = FRotator::ZeroRotator;
-        StructureHealth = 100.0f;
-        bIsRuin = false;
     }
-};
-
-UENUM(BlueprintType)
-enum class EArch_StructureType : uint8
-{
-    StonePillar     UMETA(DisplayName = "Stone Pillar"),
-    StoneWall       UMETA(DisplayName = "Stone Wall"),
-    StoneArch       UMETA(DisplayName = "Stone Arch"),
-    AncientRuin     UMETA(DisplayName = "Ancient Ruin"),
-    CaveEntrance    UMETA(DisplayName = "Cave Entrance"),
-    RockFormation   UMETA(DisplayName = "Rock Formation")
 };
 
 UCLASS(BlueprintType, Blueprintable)
@@ -67,44 +70,69 @@ protected:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
     USceneComponent* RootSceneComponent;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    TArray<FArch_StructureData> ManagedStructures;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    UStaticMeshComponent* MainStructureMesh;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    int32 MaxStructuresPerBiome;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure Data")
+    FArch_StructureData StructureData;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    float StructureSpawnRadius;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure Settings")
+    TArray<UStaticMesh*> StructureMeshes;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    bool bAutoGenerateStructures;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure Settings")
+    float WeatheringRate = 0.1f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure Settings")
+    bool bAutoWeathering = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure Settings")
+    float MaxViewDistance = 10000.0f;
 
 public:
     virtual void Tick(float DeltaTime) override;
 
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void SpawnStructureAtLocation(EArch_StructureType StructureType, FVector Location, FRotator Rotation);
+    UFUNCTION(BlueprintCallable, Category = "Structure Management")
+    void InitializeStructure(EArch_StructureType Type, const FString& Name, EBiomeType Biome);
 
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void GenerateStructuresForBiome(EBiomeType BiomeType, int32 Count);
+    UFUNCTION(BlueprintCallable, Category = "Structure Management")
+    void SetStructureMesh(UStaticMesh* NewMesh);
 
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void ClearStructuresInRadius(FVector Center, float Radius);
+    UFUNCTION(BlueprintCallable, Category = "Structure Management")
+    void ApplyWeathering(float WeatheringAmount);
 
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    TArray<FArch_StructureData> GetStructuresInBiome(EBiomeType BiomeType);
+    UFUNCTION(BlueprintCallable, Category = "Structure Management")
+    void SetRuinedState(bool bRuined);
 
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void UpdateStructureHealth(int32 StructureIndex, float NewHealth);
+    UFUNCTION(BlueprintPure, Category = "Structure Management")
+    FArch_StructureData GetStructureData() const { return StructureData; }
 
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Architecture")
-    void RegenerateAllStructures();
+    UFUNCTION(BlueprintPure, Category = "Structure Management")
+    bool IsStructureRuined() const { return StructureData.bIsRuined; }
+
+    UFUNCTION(BlueprintPure, Category = "Structure Management")
+    float GetDurabilityPercent() const { return StructureData.Durability / 100.0f; }
+
+    UFUNCTION(BlueprintCallable, Category = "Structure Management")
+    void RepairStructure(float RepairAmount);
+
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Editor Tools")
+    void RandomizeWeathering();
+
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Editor Tools")
+    void ResetStructure();
 
 protected:
     UFUNCTION()
-    void OnStructureDestroyed(AActor* DestroyedActor);
+    void UpdateStructureAppearance();
 
-    FVector GetBiomeCenterLocation(EBiomeType BiomeType);
-    UStaticMesh* GetMeshForStructureType(EArch_StructureType StructureType);
-    void ValidateStructurePlacement(FVector& Location, EBiomeType BiomeType);
+    UFUNCTION()
+    void ProcessWeathering(float DeltaTime);
+
+    UFUNCTION()
+    void UpdateLOD();
+
+private:
+    float LastWeatheringUpdate = 0.0f;
+    float WeatheringUpdateInterval = 5.0f;
+    bool bIsInitialized = false;
 };
