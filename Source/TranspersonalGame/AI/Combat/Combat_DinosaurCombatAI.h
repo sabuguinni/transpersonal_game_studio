@@ -5,35 +5,34 @@
 #include "BehaviorTree/BehaviorTreeComponent.h"
 #include "BehaviorTree/BlackboardComponent.h"
 #include "Perception/AIPerceptionComponent.h"
-#include "Perception/AISightConfig.h"
-#include "Perception/AIHearingConfig.h"
-#include "SharedTypes.h"
+#include "Perception/AISenseConfig_Sight.h"
+#include "Perception/AISenseConfig_Hearing.h"
+#include "Engine/Engine.h"
+#include "TranspersonalGame/SharedTypes.h"
 #include "Combat_DinosaurCombatAI.generated.h"
 
-class APawn;
-class UBehaviorTree;
-
 UENUM(BlueprintType)
-enum class ECombat_AggressionLevel : uint8
+enum class ECombat_DinosaurCombatState : uint8
 {
-    Passive = 0,
-    Defensive = 1,
-    Aggressive = 2,
-    Enraged = 3
+    Idle        UMETA(DisplayName = "Idle"),
+    Hunting     UMETA(DisplayName = "Hunting"),
+    Attacking   UMETA(DisplayName = "Attacking"),
+    Fleeing     UMETA(DisplayName = "Fleeing"),
+    Guarding    UMETA(DisplayName = "Guarding"),
+    Patrolling  UMETA(DisplayName = "Patrolling")
 };
 
 UENUM(BlueprintType)
-enum class ECombat_TacticalState : uint8
+enum class ECombat_DinosaurAggressionLevel : uint8
 {
-    Patrol = 0,
-    Investigate = 1,
-    Engage = 2,
-    Retreat = 3,
-    Ambush = 4
+    Passive     UMETA(DisplayName = "Passive"),
+    Defensive   UMETA(DisplayName = "Defensive"),
+    Aggressive  UMETA(DisplayName = "Aggressive"),
+    Enraged     UMETA(DisplayName = "Enraged")
 };
 
 USTRUCT(BlueprintType)
-struct FCombat_DinosaurStats
+struct FCombat_DinosaurCombatStats
 {
     GENERATED_BODY()
 
@@ -44,7 +43,13 @@ struct FCombat_DinosaurStats
     float AttackRange = 300.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Stats")
-    float DetectionRadius = 1500.0f;
+    float AttackCooldown = 2.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Stats")
+    float SightRange = 1500.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Stats")
+    float HearingRange = 800.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Stats")
     float MovementSpeed = 400.0f;
@@ -53,17 +58,28 @@ struct FCombat_DinosaurStats
     float Health = 100.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Stats")
-    float Stamina = 100.0f;
+    float MaxHealth = 100.0f;
+};
 
-    FCombat_DinosaurStats()
-    {
-        AttackDamage = 50.0f;
-        AttackRange = 300.0f;
-        DetectionRadius = 1500.0f;
-        MovementSpeed = 400.0f;
-        Health = 100.0f;
-        Stamina = 100.0f;
-    }
+USTRUCT(BlueprintType)
+struct FCombat_PackCoordination
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pack Behavior")
+    TArray<class ACombat_DinosaurCombatAI*> PackMembers;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pack Behavior")
+    class ACombat_DinosaurCombatAI* PackLeader;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pack Behavior")
+    float PackCohesionRadius = 1000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pack Behavior")
+    bool bIsPackHunting = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pack Behavior")
+    AActor* SharedTarget = nullptr;
 };
 
 UCLASS(BlueprintType, Blueprintable)
@@ -78,87 +94,76 @@ protected:
     virtual void BeginPlay() override;
     virtual void Tick(float DeltaTime) override;
 
-    // AI Perception
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI Perception")
-    UAIPerceptionComponent* AIPerceptionComponent;
+    // Core AI Components
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI Components")
+    class UBehaviorTreeComponent* BehaviorTreeComponent;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI Perception")
-    UAISightConfig* SightConfig;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI Components")
+    class UBlackboardComponent* BlackboardComponent;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI Perception")
-    UAIHearingConfig* HearingConfig;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI Components")
+    class UAIPerceptionComponent* PerceptionComponent;
 
-    // Behavior Tree
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI Behavior")
-    UBehaviorTree* BehaviorTree;
+    // Combat Configuration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Configuration")
+    FCombat_DinosaurCombatStats CombatStats;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI Behavior")
-    UBehaviorTreeComponent* BehaviorTreeComponent;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Configuration")
+    ECombat_DinosaurCombatState CurrentCombatState;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI Behavior")
-    UBlackboardComponent* BlackboardComponent;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Configuration")
+    ECombat_DinosaurAggressionLevel AggressionLevel;
 
-    // Combat Properties
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
-    FCombat_DinosaurStats CombatStats;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Configuration")
+    EDinosaurSpecies DinosaurSpecies;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
-    ECombat_AggressionLevel AggressionLevel;
+    // Pack Behavior
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pack Behavior")
+    FCombat_PackCoordination PackData;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
-    ECombat_TacticalState TacticalState;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pack Behavior")
+    bool bIsPackAnimal = false;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
-    float CombatCooldown = 2.0f;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Combat")
+    // Targets and Threats
+    UPROPERTY(BlueprintReadOnly, Category = "Combat Targets")
     AActor* CurrentTarget;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Combat")
-    float LastAttackTime;
+    UPROPERTY(BlueprintReadOnly, Category = "Combat Targets")
+    TArray<AActor*> KnownThreats;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Combat")
-    bool bIsInCombat;
-
-    // Pack Behavior (for Velociraptors)
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pack Behavior")
-    bool bIsPackHunter;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Pack Behavior")
-    TArray<ACombat_DinosaurCombatAI*> PackMembers;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Pack Behavior")
-    ACombat_DinosaurCombatAI* PackLeader;
+    UPROPERTY(BlueprintReadOnly, Category = "Combat Targets")
+    TArray<AActor*> NearbyAllies;
 
 public:
-    // Combat Functions
-    UFUNCTION(BlueprintCallable, Category = "Combat")
+    // Combat State Management
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    void SetCombatState(ECombat_DinosaurCombatState NewState);
+
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    void SetAggressionLevel(ECombat_DinosaurAggressionLevel NewLevel);
+
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
     void SetTarget(AActor* NewTarget);
 
-    UFUNCTION(BlueprintCallable, Category = "Combat")
-    void AttackTarget();
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    void ClearTarget();
 
-    UFUNCTION(BlueprintCallable, Category = "Combat")
-    void EnterCombatMode();
+    // Combat Actions
+    UFUNCTION(BlueprintCallable, Category = "Combat Actions")
+    bool CanAttackTarget();
 
-    UFUNCTION(BlueprintCallable, Category = "Combat")
-    void ExitCombatMode();
+    UFUNCTION(BlueprintCallable, Category = "Combat Actions")
+    void ExecuteAttack();
 
-    UFUNCTION(BlueprintCallable, Category = "Combat")
-    bool CanAttack() const;
+    UFUNCTION(BlueprintCallable, Category = "Combat Actions")
+    void StartFleeing();
 
-    UFUNCTION(BlueprintCallable, Category = "Combat")
-    float GetDistanceToTarget() const;
+    UFUNCTION(BlueprintCallable, Category = "Combat Actions")
+    void StartHunting(AActor* Prey);
 
-    UFUNCTION(BlueprintCallable, Category = "Combat")
-    void SetAggressionLevel(ECombat_AggressionLevel NewLevel);
-
-    UFUNCTION(BlueprintCallable, Category = "Combat")
-    void SetTacticalState(ECombat_TacticalState NewState);
-
-    // Pack Functions
+    // Pack Coordination
     UFUNCTION(BlueprintCallable, Category = "Pack Behavior")
-    void JoinPack(ACombat_DinosaurCombatAI* Leader);
+    void JoinPack(ACombat_DinosaurCombatAI* PackLeader);
 
     UFUNCTION(BlueprintCallable, Category = "Pack Behavior")
     void LeavePack();
@@ -166,23 +171,46 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Pack Behavior")
     void CoordinatePackAttack(AActor* Target);
 
-    // AI Perception Callbacks
+    UFUNCTION(BlueprintCallable, Category = "Pack Behavior")
+    TArray<ACombat_DinosaurCombatAI*> GetNearbyPackMembers();
+
+    // Perception Events
     UFUNCTION()
     void OnPerceptionUpdated(const TArray<AActor*>& UpdatedActors);
 
     UFUNCTION()
     void OnTargetPerceptionUpdated(AActor* Actor, FAIStimulus Stimulus);
 
+    // Utility Functions
+    UFUNCTION(BlueprintCallable, Category = "Combat Utility")
+    float GetDistanceToTarget();
+
+    UFUNCTION(BlueprintCallable, Category = "Combat Utility")
+    bool IsTargetInAttackRange();
+
+    UFUNCTION(BlueprintCallable, Category = "Combat Utility")
+    FVector GetOptimalAttackPosition();
+
+    UFUNCTION(BlueprintCallable, Category = "Combat Utility")
+    bool ShouldFlee();
+
+    UFUNCTION(BlueprintCallable, Category = "Combat Utility")
+    void UpdateThreatAssessment();
+
 protected:
     // Internal Combat Logic
-    void UpdateCombatBehavior(float DeltaTime);
-    void UpdatePackBehavior(float DeltaTime);
+    void ProcessCombatBehavior(float DeltaTime);
+    void UpdatePackCoordination();
+    void EvaluateThreats();
     void SelectBestTarget();
-    void ExecuteTacticalManeuver();
-    
-    // Utility Functions
-    bool IsTargetValid() const;
-    bool IsTargetInRange() const;
-    bool HasLineOfSight() const;
-    void UpdateBlackboardValues();
+    void ExecuteCombatState();
+
+    // Timers
+    float LastAttackTime = 0.0f;
+    float ThreatUpdateTimer = 0.0f;
+    float PackCoordinationTimer = 0.0f;
+
+    // Configuration
+    static const float THREAT_UPDATE_INTERVAL;
+    static const float PACK_COORDINATION_INTERVAL;
 };
