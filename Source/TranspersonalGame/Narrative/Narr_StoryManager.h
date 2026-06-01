@@ -5,25 +5,44 @@
 #include "SharedTypes.h"
 #include "Narr_StoryManager.generated.h"
 
-UENUM(BlueprintType)
-enum class ENarr_StoryChapter : uint8
-{
-    Awakening       UMETA(DisplayName = "Awakening"),
-    FirstHunt       UMETA(DisplayName = "First Hunt"),
-    TribalContact   UMETA(DisplayName = "Tribal Contact"),
-    TerritoryWars   UMETA(DisplayName = "Territory Wars"),
-    AlphaChallenge  UMETA(DisplayName = "Alpha Challenge"),
-    Exodus          UMETA(DisplayName = "Exodus")
-};
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnStoryEventTriggered, FString, EventID, FString, EventDescription);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnStoryMilestoneReached, EStoryMilestone, Milestone, FString, Description);
 
-UENUM(BlueprintType)
-enum class ENarr_DialogueState : uint8
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FNarr_StoryEvent
 {
-    Neutral         UMETA(DisplayName = "Neutral"),
-    Friendly        UMETA(DisplayName = "Friendly"),
-    Cautious        UMETA(DisplayName = "Cautious"),
-    Hostile         UMETA(DisplayName = "Hostile"),
-    Respectful      UMETA(DisplayName = "Respectful")
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    FString EventID;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    FString EventName;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    FString EventDescription;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    EStoryMilestone RequiredMilestone;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    TArray<FString> PrerequisiteEvents;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    bool bIsTriggered;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    bool bIsRepeatable;
+
+    FNarr_StoryEvent()
+    {
+        EventID = TEXT("");
+        EventName = TEXT("");
+        EventDescription = TEXT("");
+        RequiredMilestone = EStoryMilestone::None;
+        bIsTriggered = false;
+        bIsRepeatable = false;
+    }
 };
 
 USTRUCT(BlueprintType)
@@ -31,75 +50,38 @@ struct TRANSPERSONALGAME_API FNarr_StoryProgress
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    ENarr_StoryChapter CurrentChapter;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Progress")
+    EStoryMilestone CurrentMilestone;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    int32 ChapterProgress;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Progress")
     TArray<FString> CompletedEvents;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    TMap<FString, int32> CharacterRelationships;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Progress")
+    TArray<FString> ActiveEvents;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    bool bHasMetTribe;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Progress")
+    int32 DinosaurEncounters;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    bool bHasKilledAlpha;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Progress")
+    int32 ResourcesGathered;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    int32 SurvivalDays;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Progress")
+    int32 ToolsCrafted;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Progress")
+    float SurvivalTime;
 
     FNarr_StoryProgress()
     {
-        CurrentChapter = ENarr_StoryChapter::Awakening;
-        ChapterProgress = 0;
-        bHasMetTribe = false;
-        bHasKilledAlpha = false;
-        SurvivalDays = 0;
+        CurrentMilestone = EStoryMilestone::None;
+        DinosaurEncounters = 0;
+        ResourcesGathered = 0;
+        ToolsCrafted = 0;
+        SurvivalTime = 0.0f;
     }
 };
 
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FNarr_DialogueNode
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    FString SpeakerName;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    FString DialogueText;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    ENarr_DialogueState RequiredState;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    TArray<FString> PlayerResponses;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    TArray<FString> NextNodeIDs;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    FString AudioFilePath;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    bool bIsQuestRelated;
-
-    FNarr_DialogueNode()
-    {
-        RequiredState = ENarr_DialogueState::Neutral;
-        bIsQuestRelated = false;
-    }
-};
-
-/**
- * Story Manager - Controls narrative progression and dialogue system
- * Tracks player choices, story events, and character relationships
- */
-UCLASS()
+UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UNarr_StoryManager : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
@@ -113,72 +95,68 @@ public:
 
     // Story progression
     UFUNCTION(BlueprintCallable, Category = "Story")
-    void AdvanceChapter(ENarr_StoryChapter NewChapter);
-
-    UFUNCTION(BlueprintCallable, Category = "Story")
     void TriggerStoryEvent(const FString& EventID);
 
     UFUNCTION(BlueprintCallable, Category = "Story")
-    bool HasCompletedEvent(const FString& EventID) const;
+    void AdvanceStoryMilestone(EStoryMilestone NewMilestone);
 
     UFUNCTION(BlueprintCallable, Category = "Story")
-    ENarr_StoryChapter GetCurrentChapter() const;
-
-    // Character relationships
-    UFUNCTION(BlueprintCallable, Category = "Story")
-    void ModifyRelationship(const FString& CharacterName, int32 Delta);
+    bool CanTriggerEvent(const FString& EventID) const;
 
     UFUNCTION(BlueprintCallable, Category = "Story")
-    int32 GetRelationshipLevel(const FString& CharacterName) const;
+    EStoryMilestone GetCurrentMilestone() const;
 
     UFUNCTION(BlueprintCallable, Category = "Story")
-    ENarr_DialogueState GetDialogueState(const FString& CharacterName) const;
+    FNarr_StoryProgress GetStoryProgress() const;
 
-    // Dialogue system
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    void StartDialogue(const FString& CharacterName, const FString& DialogueTreeID);
-
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    FNarr_DialogueNode GetCurrentDialogueNode() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    void SelectDialogueOption(int32 OptionIndex);
-
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    bool IsInDialogue() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    void EndDialogue();
-
-    // Story state queries
+    // Event registration
     UFUNCTION(BlueprintCallable, Category = "Story")
-    int32 GetSurvivalDays() const;
+    void RegisterStoryEvent(const FNarr_StoryEvent& StoryEvent);
 
     UFUNCTION(BlueprintCallable, Category = "Story")
-    void IncrementSurvivalDay();
+    void RegisterDefaultStoryEvents();
 
-    UFUNCTION(BlueprintCallable, Category = "Story")
-    bool CanAccessChapter(ENarr_StoryChapter Chapter) const;
+    // Progress tracking
+    UFUNCTION(BlueprintCallable, Category = "Progress")
+    void IncrementDinosaurEncounters();
+
+    UFUNCTION(BlueprintCallable, Category = "Progress")
+    void IncrementResourcesGathered();
+
+    UFUNCTION(BlueprintCallable, Category = "Progress")
+    void IncrementToolsCrafted();
+
+    UFUNCTION(BlueprintCallable, Category = "Progress")
+    void UpdateSurvivalTime(float DeltaTime);
+
+    // Events
+    UPROPERTY(BlueprintAssignable, Category = "Events")
+    FOnStoryEventTriggered OnStoryEventTriggered;
+
+    UPROPERTY(BlueprintAssignable, Category = "Events")
+    FOnStoryMilestoneReached OnStoryMilestoneReached;
+
+    // Contextual narration
+    UFUNCTION(BlueprintCallable, Category = "Narration")
+    FString GetContextualNarration(const FString& Context) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Narration")
+    void TriggerEnvironmentalNarration(const FString& BiomeName, const FString& WeatherCondition);
 
 protected:
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Story")
-    FNarr_StoryProgress StoryProgress;
+    UPROPERTY(BlueprintReadOnly, Category = "Data")
+    TMap<FString, FNarr_StoryEvent> StoryEvents;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Dialogue")
-    TMap<FString, FNarr_DialogueNode> DialogueDatabase;
+    UPROPERTY(BlueprintReadOnly, Category = "Progress")
+    FNarr_StoryProgress CurrentProgress;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Dialogue")
-    FString CurrentDialogueTreeID;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Dialogue")
-    FString CurrentNodeID;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Dialogue")
-    bool bInDialogue;
+    UPROPERTY(BlueprintReadOnly, Category = "Data")
+    TMap<FString, FString> ContextualNarrations;
 
 private:
-    void LoadDialogueDatabase();
-    void SaveStoryProgress();
-    void LoadStoryProgress();
-    ENarr_DialogueState CalculateDialogueState(const FString& CharacterName) const;
+    void CheckMilestoneProgression();
+    void RegisterContextualNarrations();
+    bool ArePrerequisitesMet(const FNarr_StoryEvent& Event) const;
 };
+
+#include "Narr_StoryManager.generated.h"
