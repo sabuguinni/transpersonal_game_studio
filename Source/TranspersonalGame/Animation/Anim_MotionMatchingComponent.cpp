@@ -3,293 +3,274 @@
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Animation/AnimInstance.h"
-#include "Animation/AnimSequence.h"
-#include "Engine/Engine.h"
+#include "Animation/BlendSpace.h"
+#include "Animation/AnimMontage.h"
+#include "Engine/World.h"
+#include "DrawDebugHelpers.h"
+#include "Kismet/KismetMathLibrary.h"
 
 UAnim_MotionMatchingComponent::UAnim_MotionMatchingComponent()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickGroup = TG_PrePhysics;
+    PrimaryComponentTick.bStartWithTickEnabled = true;
 
-    // Initialize motion matching parameters
-    PoseSearchRadius = 100.0f;
-    VelocityWeight = 0.4f;
-    DirectionWeight = 0.3f;
-    BoneWeight = 0.3f;
+    // Initialize default values
+    MotionSmoothingSpeed = 10.0f;
+    DirectionSmoothingSpeed = 15.0f;
+    bEnableFootIK = true;
+    FootIKTraceDistance = 50.0f;
+    FootIKInterpSpeed = 15.0f;
 
-    BlendAlpha = 0.0f;
-    BlendTimer = 0.0f;
-    BlendDuration = 0.2f;
-    bIsBlending = false;
+    // Initialize IK offsets
+    LeftFootIKOffset = 0.0f;
+    RightFootIKOffset = 0.0f;
+    PelvisIKOffset = 0.0f;
 
-    LastUpdateTime = 0.0f;
-    UpdateFrequency = 30.0f; // 30 FPS for motion matching
-
+    // Initialize cached references
     OwnerCharacter = nullptr;
+    SkeletalMeshComponent = nullptr;
     AnimInstance = nullptr;
 }
 
 void UAnim_MotionMatchingComponent::BeginPlay()
 {
     Super::BeginPlay();
-    InitializeComponent();
-}
-
-void UAnim_MotionMatchingComponent::InitializeComponent()
-{
-    // Get owner character
-    OwnerCharacter = Cast<ACharacter>(GetOwner());
-    if (!OwnerCharacter)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("MotionMatchingComponent: Owner is not a Character"));
-        return;
-    }
-
-    // Get animation instance
-    if (OwnerCharacter->GetMesh())
-    {
-        AnimInstance = OwnerCharacter->GetMesh()->GetAnimInstance();
-        if (!AnimInstance)
-        {
-            UE_LOG(LogTemp, Warning, TEXT("MotionMatchingComponent: No AnimInstance found"));
-        }
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("MotionMatchingComponent initialized for %s"), *OwnerCharacter->GetName());
+    
+    CacheComponents();
+    SetupBlendSpaces();
 }
 
 void UAnim_MotionMatchingComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
-    if (!OwnerCharacter)
+    if (OwnerCharacter && AnimInstance)
     {
-        return;
-    }
+        // Calculate and update motion data
+        FAnim_MotionData NewMotionData = CalculateMotionData();
+        SmoothMotionData(NewMotionData, DeltaTime);
+        UpdateAnimationState(NewMotionData);
 
-    // Update at specified frequency for performance
-    float CurrentTime = GetWorld()->GetTimeSeconds();
-    if (CurrentTime - LastUpdateTime < (1.0f / UpdateFrequency))
-    {
-        return;
-    }
-    LastUpdateTime = CurrentTime;
+        // Update foot IK if enabled
+        if (bEnableFootIK)
+        {
+            UpdateFootIK();
+            ApplyFootIK(DeltaTime);
+        }
 
-    UpdateMotionMatching(DeltaTime);
+        // Store previous frame data
+        PreviousMotionData = CurrentMotionData;
+        CurrentMotionData = NewMotionData;
+    }
 }
 
-void UAnim_MotionMatchingComponent::UpdateMotionMatching(float DeltaTime)
+FAnim_MotionData UAnim_MotionMatchingComponent::CalculateMotionData()
 {
-    if (!OwnerCharacter || !AnimInstance)
+    FAnim_MotionData MotionData;
+
+    if (!OwnerCharacter)
     {
-        return;
+        return MotionData;
     }
 
-    // Update current pose from character state
-    UpdateCurrentPose();
-
-    // Handle blending if active
-    if (bIsBlending)
+    UCharacterMovementComponent* MovementComp = OwnerCharacter->GetCharacterMovement();
+    if (!MovementComp)
     {
-        BlendTimer += DeltaTime;
-        BlendAlpha = FMath::Clamp(BlendTimer / BlendDuration, 0.0f, 1.0f);
-
-        if (BlendAlpha >= 1.0f)
-        {
-            bIsBlending = false;
-            CurrentPose = TargetPose;
-            BlendAlpha = 0.0f;
-            BlendTimer = 0.0f;
-        }
+        return MotionData;
     }
 
-    // Find best matching pose if we have databases
-    if (MotionDatabases.Num() > 0)
+    // Calculate speed
+    FVector Velocity = MovementComp->Velocity;
+    MotionData.Speed = Velocity.Size2D();
+
+    // Calculate direction relative to character forward
+    if (MotionData.Speed > 1.0f)
     {
-        FAnim_MotionPose BestPose = FindBestMatchingPose(CurrentPose);
+        FVector ForwardVector = OwnerCharacter->GetActorForwardVector();
+        FVector VelocityDirection = Velocity.GetSafeNormal2D();
         
-        // Blend to new pose if it's significantly different
-        float PoseDistance = CalculatePoseDistance(CurrentPose, BestPose);
-        if (PoseDistance > PoseSearchRadius * 0.5f)
-        {
-            BlendToPose(BestPose, 0.15f);
-        }
-    }
-}
-
-void UAnim_MotionMatchingComponent::UpdateCurrentPose()
-{
-    if (!OwnerCharacter)
-    {
-        return;
-    }
-
-    // Update pose data from character
-    CurrentPose.RootMotionVelocity = GetCharacterVelocity();
-    CurrentPose.RootMotionDirection = GetCharacterDirection();
-    CurrentPose.MovementSpeed = CurrentPose.RootMotionVelocity.Size();
-
-    // Determine movement state
-    if (CurrentPose.MovementSpeed < 10.0f)
-    {
-        CurrentPose.MovementState = EAnim_MovementState::Idle;
-    }
-    else if (CurrentPose.MovementSpeed < 300.0f)
-    {
-        CurrentPose.MovementState = EAnim_MovementState::Walking;
+        float DotProduct = FVector::DotProduct(ForwardVector, VelocityDirection);
+        float CrossProduct = FVector::CrossProduct(ForwardVector, VelocityDirection).Z;
+        
+        MotionData.Direction = FMath::Atan2(CrossProduct, DotProduct) * (180.0f / PI);
     }
     else
     {
-        CurrentPose.MovementState = EAnim_MovementState::Running;
+        MotionData.Direction = 0.0f;
     }
 
-    // Check if character is falling
-    if (OwnerCharacter->GetCharacterMovement() && OwnerCharacter->GetCharacterMovement()->IsFalling())
+    // Check if character is in air
+    MotionData.bIsInAir = MovementComp->IsFalling();
+
+    // Check if character is crouching
+    MotionData.bIsCrouching = MovementComp->IsCrouching();
+
+    // Calculate turn rate
+    FRotator CurrentRotation = OwnerCharacter->GetActorRotation();
+    if (PreviousMotionData.Speed > 0.0f) // Only calculate turn rate when moving
     {
-        CurrentPose.MovementState = EAnim_MovementState::Falling;
+        float DeltaYaw = FMath::FindDeltaAngleDegrees(PreviousMotionData.Direction, MotionData.Direction);
+        MotionData.TurnRate = DeltaYaw / GetWorld()->GetDeltaSeconds();
+    }
+    else
+    {
+        MotionData.TurnRate = 0.0f;
     }
 
-    CurrentPose.Timestamp = GetWorld()->GetTimeSeconds();
+    return MotionData;
 }
 
-FAnim_MotionPose UAnim_MotionMatchingComponent::FindBestMatchingPose(const FAnim_MotionPose& QueryPose)
+void UAnim_MotionMatchingComponent::SmoothMotionData(FAnim_MotionData& MotionData, float DeltaTime)
 {
-    FAnim_MotionPose BestPose = QueryPose;
-    float BestDistance = FLT_MAX;
+    // Smooth speed changes
+    MotionData.Speed = FMath::FInterpTo(CurrentMotionData.Speed, MotionData.Speed, DeltaTime, MotionSmoothingSpeed);
 
-    // Search through all motion databases
-    for (const FAnim_MotionDatabase& Database : MotionDatabases)
-    {
-        for (const FAnim_MotionPose& Pose : Database.Poses)
-        {
-            // Only consider poses from the same movement state
-            if (Pose.MovementState != QueryPose.MovementState)
-            {
-                continue;
-            }
+    // Smooth direction changes
+    MotionData.Direction = FMath::FInterpAngle(CurrentMotionData.Direction, MotionData.Direction, DeltaTime, DirectionSmoothingSpeed);
 
-            float Distance = CalculatePoseDistance(QueryPose, Pose);
-            if (Distance < BestDistance)
-            {
-                BestDistance = Distance;
-                BestPose = Pose;
-            }
-        }
-    }
-
-    return BestPose;
+    // Smooth turn rate
+    MotionData.TurnRate = FMath::FInterpTo(CurrentMotionData.TurnRate, MotionData.TurnRate, DeltaTime, DirectionSmoothingSpeed);
 }
 
-float UAnim_MotionMatchingComponent::CalculatePoseDistance(const FAnim_MotionPose& PoseA, const FAnim_MotionPose& PoseB)
+void UAnim_MotionMatchingComponent::UpdateAnimationState(const FAnim_MotionData& MotionData)
 {
-    float Distance = 0.0f;
-
-    // Velocity distance
-    float VelocityDistance = FVector::Dist(PoseA.RootMotionVelocity, PoseB.RootMotionVelocity);
-    Distance += VelocityDistance * VelocityWeight;
-
-    // Direction distance
-    float DirectionDistance = FVector::Dist(PoseA.RootMotionDirection, PoseB.RootMotionDirection);
-    Distance += DirectionDistance * DirectionWeight;
-
-    // Speed distance
-    float SpeedDistance = FMath::Abs(PoseA.MovementSpeed - PoseB.MovementSpeed);
-    Distance += SpeedDistance * 0.01f; // Scale down speed difference
-
-    // Bone transform distance (simplified)
-    if (PoseA.BoneTransforms.Num() > 0 && PoseB.BoneTransforms.Num() > 0)
+    if (!AnimInstance)
     {
-        int32 MinBones = FMath::Min(PoseA.BoneTransforms.Num(), PoseB.BoneTransforms.Num());
-        float BoneDistance = 0.0f;
-        
-        for (int32 i = 0; i < MinBones; ++i)
-        {
-            BoneDistance += FVector::Dist(PoseA.BoneTransforms[i].GetLocation(), PoseB.BoneTransforms[i].GetLocation());
-        }
-        
-        Distance += (BoneDistance / MinBones) * BoneWeight;
-    }
-
-    return Distance;
-}
-
-void UAnim_MotionMatchingComponent::BuildMotionDatabase(UAnimSequence* Animation, const FString& DatabaseName)
-{
-    if (!Animation)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("MotionMatchingComponent: Cannot build database from null animation"));
         return;
     }
 
-    FAnim_MotionDatabase NewDatabase;
-    NewDatabase.SourceAnimation = Animation;
-    NewDatabase.DatabaseName = DatabaseName;
+    // Set animation variables that can be read by Animation Blueprint
+    AnimInstance->SetRootMotionMode(ERootMotionMode::RootMotionFromMontagesOnly);
 
-    // Sample poses from animation at regular intervals
-    float AnimLength = Animation->GetPlayLength();
-    float SampleRate = 30.0f; // 30 samples per second
-    int32 NumSamples = FMath::FloorToInt(AnimLength * SampleRate);
-
-    for (int32 i = 0; i < NumSamples; ++i)
-    {
-        float SampleTime = (float)i / SampleRate;
-        
-        FAnim_MotionPose SamplePose;
-        SamplePose.Timestamp = SampleTime;
-        
-        // Extract pose data at this time
-        // Note: In a full implementation, you would extract bone transforms and root motion here
-        // For now, we'll create a basic pose structure
-        
-        NewDatabase.Poses.Add(SamplePose);
-    }
-
-    MotionDatabases.Add(NewDatabase);
-    UE_LOG(LogTemp, Log, TEXT("MotionMatchingComponent: Built database '%s' with %d poses"), *DatabaseName, NewDatabase.Poses.Num());
+    // These would typically be set via Animation Blueprint variables
+    // For now, we log the motion data for debugging
+    UE_LOG(LogTemp, VeryVerbose, TEXT("Motion Data - Speed: %f, Direction: %f, InAir: %s, Crouching: %s, TurnRate: %f"),
+        MotionData.Speed,
+        MotionData.Direction,
+        MotionData.bIsInAir ? TEXT("true") : TEXT("false"),
+        MotionData.bIsCrouching ? TEXT("true") : TEXT("false"),
+        MotionData.TurnRate
+    );
 }
 
-void UAnim_MotionMatchingComponent::SetMovementState(EAnim_MovementState NewState)
+void UAnim_MotionMatchingComponent::SetupBlendSpaces()
 {
-    if (CurrentPose.MovementState != NewState)
+    // This would typically load blend space assets from content
+    // For now, we initialize the structure
+    BlendSpaceData = FAnim_BlendSpaceData();
+    
+    UE_LOG(LogTemp, Log, TEXT("Motion Matching Component: Blend spaces setup complete"));
+}
+
+void UAnim_MotionMatchingComponent::TriggerJumpAnimation()
+{
+    if (AnimInstance && BlendSpaceData.JumpStartAnimation)
     {
-        CurrentPose.MovementState = NewState;
-        UE_LOG(LogTemp, Log, TEXT("MotionMatchingComponent: Movement state changed to %d"), (int32)NewState);
+        // Play jump start animation
+        AnimInstance->Montage_Play(nullptr, 1.0f); // Would use actual jump montage
+        UE_LOG(LogTemp, Log, TEXT("Motion Matching Component: Jump animation triggered"));
     }
 }
 
-EAnim_MovementState UAnim_MotionMatchingComponent::GetCurrentMovementState() const
+void UAnim_MotionMatchingComponent::EndJumpAnimation()
 {
-    return CurrentPose.MovementState;
-}
-
-void UAnim_MotionMatchingComponent::BlendToPose(const FAnim_MotionPose& NewPose, float BlendTime)
-{
-    TargetPose = NewPose;
-    BlendDuration = BlendTime;
-    BlendTimer = 0.0f;
-    BlendAlpha = 0.0f;
-    bIsBlending = true;
-}
-
-FVector UAnim_MotionMatchingComponent::GetCharacterVelocity() const
-{
-    if (OwnerCharacter && OwnerCharacter->GetCharacterMovement())
+    if (AnimInstance && BlendSpaceData.JumpEndAnimation)
     {
-        return OwnerCharacter->GetCharacterMovement()->Velocity;
+        // Play jump end animation
+        AnimInstance->Montage_Play(nullptr, 1.0f); // Would use actual land montage
+        UE_LOG(LogTemp, Log, TEXT("Motion Matching Component: Jump end animation triggered"));
     }
-    return FVector::ZeroVector;
 }
 
-FVector UAnim_MotionMatchingComponent::GetCharacterDirection() const
+void UAnim_MotionMatchingComponent::UpdateFootIK()
 {
+    if (!SkeletalMeshComponent || !bEnableFootIK)
+    {
+        return;
+    }
+
+    // Calculate foot IK offsets
+    LeftFootIKOffset = CalculateFootIKOffset(TEXT("foot_l"));
+    RightFootIKOffset = CalculateFootIKOffset(TEXT("foot_r"));
+
+    // Calculate pelvis offset to keep character grounded
+    float LeftOffset = FMath::Min(LeftFootIKOffset, 0.0f);
+    float RightOffset = FMath::Min(RightFootIKOffset, 0.0f);
+    PelvisIKOffset = FMath::Min(LeftOffset, RightOffset);
+}
+
+float UAnim_MotionMatchingComponent::CalculateFootIKOffset(const FName& SocketName)
+{
+    if (!SkeletalMeshComponent || !OwnerCharacter)
+    {
+        return 0.0f;
+    }
+
+    // Get foot socket location
+    FVector SocketLocation = SkeletalMeshComponent->GetSocketLocation(SocketName);
+    
+    // Trace down from foot to find ground
+    FVector TraceStart = SocketLocation;
+    FVector TraceEnd = TraceStart - FVector(0.0f, 0.0f, FootIKTraceDistance);
+
+    FHitResult HitResult;
+    FCollisionQueryParams QueryParams;
+    QueryParams.AddIgnoredActor(OwnerCharacter);
+
+    bool bHit = GetWorld()->LineTraceSingleByChannel(
+        HitResult,
+        TraceStart,
+        TraceEnd,
+        ECC_WorldStatic,
+        QueryParams
+    );
+
+    if (bHit)
+    {
+        // Calculate offset needed to place foot on ground
+        float DistanceToGround = (TraceStart - HitResult.Location).Z;
+        return FootIKTraceDistance - DistanceToGround;
+    }
+
+    return 0.0f;
+}
+
+void UAnim_MotionMatchingComponent::ApplyFootIK(float DeltaTime)
+{
+    // Interpolate IK offsets for smooth transitions
+    LeftFootIKOffset = FMath::FInterpTo(LeftFootIKOffset, CalculateFootIKOffset(TEXT("foot_l")), DeltaTime, FootIKInterpSpeed);
+    RightFootIKOffset = FMath::FInterpTo(RightFootIKOffset, CalculateFootIKOffset(TEXT("foot_r")), DeltaTime, FootIKInterpSpeed);
+
+    // These values would typically be passed to the Animation Blueprint
+    // for actual bone manipulation
+    UE_LOG(LogTemp, VeryVerbose, TEXT("Foot IK - Left: %f, Right: %f, Pelvis: %f"),
+        LeftFootIKOffset, RightFootIKOffset, PelvisIKOffset);
+}
+
+void UAnim_MotionMatchingComponent::PlayAnimationMontage(UAnimMontage* Montage, float PlayRate)
+{
+    if (AnimInstance && Montage)
+    {
+        AnimInstance->Montage_Play(Montage, PlayRate);
+        UE_LOG(LogTemp, Log, TEXT("Motion Matching Component: Playing animation montage"));
+    }
+}
+
+void UAnim_MotionMatchingComponent::CacheComponents()
+{
+    OwnerCharacter = Cast<ACharacter>(GetOwner());
     if (OwnerCharacter)
     {
-        FVector Velocity = GetCharacterVelocity();
-        if (Velocity.SizeSquared() > 1.0f)
+        SkeletalMeshComponent = OwnerCharacter->GetMesh();
+        if (SkeletalMeshComponent)
         {
-            return Velocity.GetSafeNormal();
+            AnimInstance = SkeletalMeshComponent->GetAnimInstance();
         }
-        return OwnerCharacter->GetActorForwardVector();
     }
-    return FVector::ForwardVector;
+
+    UE_LOG(LogTemp, Log, TEXT("Motion Matching Component: Components cached - Character: %s, Mesh: %s, AnimInstance: %s"),
+        OwnerCharacter ? TEXT("Valid") : TEXT("Invalid"),
+        SkeletalMeshComponent ? TEXT("Valid") : TEXT("Invalid"),
+        AnimInstance ? TEXT("Valid") : TEXT("Invalid")
+    );
 }
