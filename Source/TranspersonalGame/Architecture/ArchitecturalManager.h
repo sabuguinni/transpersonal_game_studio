@@ -4,21 +4,21 @@
 #include "GameFramework/Actor.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/SceneComponent.h"
-#include "Engine/World.h"
-#include "SharedTypes.h"
+#include "Engine/StaticMesh.h"
+#include "Materials/MaterialInterface.h"
+#include "../SharedTypes.h"
 #include "ArchitecturalManager.generated.h"
 
 UENUM(BlueprintType)
 enum class EArch_StructureType : uint8
 {
     None = 0,
-    Pillar,
-    Wall,
-    Archway,
     Platform,
-    Stairs,
-    Watchtower,
-    Ruins
+    Pillar,
+    Archway,
+    Ruins,
+    CaveDwelling,
+    StoneBridge
 };
 
 USTRUCT(BlueprintType)
@@ -30,28 +30,28 @@ struct FArch_StructureData
     EArch_StructureType StructureType = EArch_StructureType::None;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    FVector Location = FVector::ZeroVector;
+    FVector Dimensions = FVector(400.0f, 400.0f, 100.0f);
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    FRotator Rotation = FRotator::ZeroRotator;
+    float WeatheringLevel = 0.5f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    FVector Scale = FVector::OneVector;
+    bool bHasMossGrowth = true;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    float DegradationLevel = 0.0f;
+    bool bHasCarvings = false;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    bool bHasVegetationOvergrowth = false;
+    EBiomeType BiomeType = EBiomeType::Savanna;
 
     FArch_StructureData()
     {
-        StructureType = EArch_StructureType::None;
-        Location = FVector::ZeroVector;
-        Rotation = FRotator::ZeroRotator;
-        Scale = FVector::OneVector;
-        DegradationLevel = 0.0f;
-        bHasVegetationOvergrowth = false;
+        StructureType = EArch_StructureType::Platform;
+        Dimensions = FVector(400.0f, 400.0f, 100.0f);
+        WeatheringLevel = 0.5f;
+        bHasMossGrowth = true;
+        bHasCarvings = false;
+        BiomeType = EBiomeType::Savanna;
     }
 };
 
@@ -69,55 +69,61 @@ protected:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
     USceneComponent* RootSceneComponent;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    TArray<FArch_StructureData> StructureDatabase;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    UStaticMeshComponent* StructureMesh;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    int32 MaxStructuresPerBiome = 50;
+    FArch_StructureData StructureData;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    float MinDistanceBetweenStructures = 1000.0f;
+    TArray<UStaticMesh*> PlatformMeshes;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    TMap<EBiomeType, int32> StructureCountPerBiome;
+    TArray<UStaticMesh*> PillarMeshes;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
+    TArray<UStaticMesh*> ArchwayMeshes;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
+    TArray<UMaterialInterface*> StoneMaterials;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
+    TArray<UMaterialInterface*> WeatheredMaterials;
 
 public:
     virtual void Tick(float DeltaTime) override;
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void SpawnStructureAtLocation(EArch_StructureType StructureType, FVector Location, FRotator Rotation = FRotator::ZeroRotator);
+    void SetStructureType(EArch_StructureType NewType);
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void SpawnStructuresInBiome(EBiomeType BiomeType, int32 Count);
+    void ApplyWeathering(float WeatheringAmount);
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void ClearAllStructures();
+    void SetBiomeAdaptation(EBiomeType BiomeType);
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    int32 GetStructureCount() const;
+    void GenerateStructure();
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    TArray<FArch_StructureData> GetStructuresInRadius(FVector Center, float Radius) const;
+    void AddMossGrowth(bool bEnable);
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void ApplyWeatheringToStructures(float WeatheringAmount);
-
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void UpdateStructureDegradation(float DeltaTime);
+    void AddCarvings(bool bEnable);
 
     UFUNCTION(BlueprintCallable, CallInEditor, Category = "Architecture")
-    void GenerateArchitecturalLayout();
+    void RegenerateStructure();
 
 protected:
     UFUNCTION()
-    void ValidateStructurePlacement();
+    void UpdateStructureMesh();
 
     UFUNCTION()
-    FVector GetRandomLocationInBiome(EBiomeType BiomeType) const;
+    void ApplyBiomeSpecificMaterials();
 
     UFUNCTION()
-    bool IsLocationValid(FVector Location) const;
+    UStaticMesh* GetMeshForStructureType(EArch_StructureType Type);
 
     UFUNCTION()
-    AActor* SpawnStructureMesh(EArch_StructureType StructureType, FVector Location, FRotator Rotation);
+    UMaterialInterface* GetMaterialForBiome(EBiomeType BiomeType, bool bWeathered);
 };
