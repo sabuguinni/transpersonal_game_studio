@@ -1,135 +1,118 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Components/ActorComponent.h"
+#include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/SkeletalMeshComponent.h"
-#include "Engine/StaticMeshActor.h"
-#include "Engine/SkeletalMeshActor.h"
-#include "Subsystems/WorldSubsystem.h"
-#include "SharedTypes.h"
 #include "Perf_RenderingOptimizer.generated.h"
 
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FPerf_LODSettings
+UENUM(BlueprintType)
+enum class EPerf_RenderQuality : uint8
 {
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
-    float NearDistance = 1000.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
-    float MidDistance = 5000.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
-    float FarDistance = 15000.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
-    float CullDistance = 25000.0f;
-
-    FPerf_LODSettings()
-    {
-        NearDistance = 1000.0f;
-        MidDistance = 5000.0f;
-        FarDistance = 15000.0f;
-        CullDistance = 25000.0f;
-    }
+    Low UMETA(DisplayName = "Low"),
+    Medium UMETA(DisplayName = "Medium"),
+    High UMETA(DisplayName = "High"),
+    Ultra UMETA(DisplayName = "Ultra")
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FPerf_RenderStats
+struct TRANSPERSONALGAME_API FPerf_RenderingSettings
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Stats")
-    int32 TotalMeshes = 0;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering")
+    EPerf_RenderQuality QualityLevel = EPerf_RenderQuality::High;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Stats")
-    int32 VisibleMeshes = 0;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering", meta = (ClampMin = "0.1", ClampMax = "2.0"))
+    float RenderScale = 1.0f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Stats")
-    int32 CulledMeshes = 0;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering")
+    bool bEnableDynamicLOD = true;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Stats")
-    float AverageDrawCalls = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering")
+    bool bEnableOcclusion = true;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Stats")
-    float MemoryUsageMB = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering", meta = (ClampMin = "500", ClampMax = "10000"))
+    float MaxDrawDistance = 5000.0f;
 
-    FPerf_RenderStats()
+    FPerf_RenderingSettings()
     {
-        TotalMeshes = 0;
-        VisibleMeshes = 0;
-        CulledMeshes = 0;
-        AverageDrawCalls = 0.0f;
-        MemoryUsageMB = 0.0f;
+        QualityLevel = EPerf_RenderQuality::High;
+        RenderScale = 1.0f;
+        bEnableDynamicLOD = true;
+        bEnableOcclusion = true;
+        MaxDrawDistance = 5000.0f;
     }
 };
 
-UCLASS(BlueprintType)
-class TRANSPERSONALGAME_API UPerf_RenderingOptimizer : public UWorldSubsystem
+UCLASS(ClassGroup=(Performance), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UPerf_RenderingOptimizer : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
     UPerf_RenderingOptimizer();
 
-    // USubsystem interface
-    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
-    virtual void Deinitialize() override;
+protected:
+    virtual void BeginPlay() override;
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    // World Subsystem interface
-    virtual bool ShouldCreateSubsystem(UObject* Outer) const override;
+public:
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance Settings")
+    FPerf_RenderingSettings RenderingSettings;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance Settings", meta = (ClampMin = "30", ClampMax = "120"))
+    int32 TargetFPS = 60;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance Settings")
+    bool bAutoOptimize = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance Settings", meta = (ClampMin = "1.0", ClampMax = "10.0"))
+    float OptimizationInterval = 2.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Performance Stats")
+    float CurrentFPS = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Performance Stats")
+    float AverageFrameTime = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Performance Stats")
+    int32 VisibleActors = 0;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Performance Stats")
+    int32 CulledActors = 0;
 
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    void OptimizeLODSettings();
+    void OptimizeRendering();
 
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    void ApplyDistanceCulling();
+    void SetRenderQuality(EPerf_RenderQuality NewQuality);
 
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    void OptimizeMaterialInstances();
+    void SetRenderScale(float NewScale);
 
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    void UpdateRenderingStats();
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    FPerf_RenderStats GetCurrentRenderStats() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void SetLODSettings(const FPerf_LODSettings& NewSettings);
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    FPerf_LODSettings GetLODSettings() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void EnableOcclusionCulling(bool bEnable);
+    void EnableLODOptimization(bool bEnable);
 
     UFUNCTION(BlueprintCallable, Category = "Performance")
     void SetMaxDrawDistance(float Distance);
 
-protected:
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
-    FPerf_LODSettings LODSettings;
+    UFUNCTION(BlueprintPure, Category = "Performance")
+    float GetCurrentFPS() const { return CurrentFPS; }
 
-    UPROPERTY(BlueprintReadOnly, Category = "Stats")
-    FPerf_RenderStats CurrentStats;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
-    bool bOcclusionCullingEnabled = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
-    float MaxDrawDistance = 20000.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
-    float UpdateInterval = 1.0f;
+    UFUNCTION(BlueprintPure, Category = "Performance")
+    bool IsPerformanceGood() const { return CurrentFPS >= (TargetFPS * 0.9f); }
 
 private:
-    FTimerHandle UpdateTimerHandle;
+    void UpdatePerformanceStats();
+    void ApplyRenderingOptimizations();
+    void OptimizeMeshComponents();
+    void UpdateLODSettings();
+    void CullDistantObjects();
 
-    void ProcessStaticMeshActors();
-    void ProcessSkeletalMeshActors();
-    void ApplyLODToMesh(UStaticMeshComponent* MeshComp, float Distance);
-    void ApplyLODToSkeletalMesh(USkeletalMeshComponent* SkeletalComp, float Distance);
-    float CalculateDistanceToPlayer(const FVector& ActorLocation) const;
+    float LastOptimizationTime = 0.0f;
+    TArray<float> FrameTimeHistory;
+    int32 MaxFrameHistorySize = 60;
 };
