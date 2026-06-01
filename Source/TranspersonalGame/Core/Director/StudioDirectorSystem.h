@@ -2,182 +2,206 @@
 
 #include "CoreMinimal.h"
 #include "Engine/World.h"
-#include "GameFramework/GameModeBase.h"
-#include "Components/ActorComponent.h"
+#include "GameFramework/Actor.h"
+#include "Components/SceneComponent.h"
 #include "Engine/Engine.h"
 #include "StudioDirectorSystem.generated.h"
 
-UENUM(BlueprintType)
-enum class EDir_AgentStatus : uint8
-{
-    Idle        UMETA(DisplayName = "Idle"),
-    Working     UMETA(DisplayName = "Working"),
-    Completed   UMETA(DisplayName = "Completed"),
-    Failed      UMETA(DisplayName = "Failed"),
-    Blocked     UMETA(DisplayName = "Blocked")
-};
-
 USTRUCT(BlueprintType)
-struct FDir_AgentInfo
+struct TRANSPERSONALGAME_API FDir_AgentTaskData
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent")
-    FString AgentName;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent Task")
+    int32 AgentID = 0;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent")
-    int32 AgentID;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent Task")
+    FString TaskDescription = "";
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent")
-    EDir_AgentStatus Status;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent Task")
+    FString Priority = "Normal";
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent")
-    FString CurrentTask;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent Task")
+    bool bCompleted = false;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent")
-    float CompletionPercentage;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent Task")
+    float EstimatedHours = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent")
-    FDateTime LastUpdate;
-
-    FDir_AgentInfo()
+    FDir_AgentTaskData()
     {
-        AgentName = TEXT("");
         AgentID = 0;
-        Status = EDir_AgentStatus::Idle;
-        CurrentTask = TEXT("");
-        CompletionPercentage = 0.0f;
-        LastUpdate = FDateTime::Now();
+        TaskDescription = "";
+        Priority = "Normal";
+        bCompleted = false;
+        EstimatedHours = 1.0f;
     }
 };
 
 USTRUCT(BlueprintType)
-struct FDir_CycleMetrics
+struct TRANSPERSONALGAME_API FDir_ProductionMetrics
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Metrics")
-    int32 CycleNumber;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production")
+    int32 TotalActorsInMap = 0;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Metrics")
-    int32 FilesCreated;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production")
+    int32 DinosaurCount = 0;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Metrics")
-    int32 UE5CommandsExecuted;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production")
+    int32 EnvironmentPropsCount = 0;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Metrics")
-    int32 ActorsSpawned;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production")
+    float FrameRate = 0.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Metrics")
-    float TotalExecutionTime;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production")
+    float MemoryUsageMB = 0.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Metrics")
-    bool bCycleSuccess;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production")
+    bool bBuildCompiling = false;
 
-    FDir_CycleMetrics()
+    FDir_ProductionMetrics()
     {
-        CycleNumber = 0;
-        FilesCreated = 0;
-        UE5CommandsExecuted = 0;
-        ActorsSpawned = 0;
-        TotalExecutionTime = 0.0f;
-        bCycleSuccess = false;
+        TotalActorsInMap = 0;
+        DinosaurCount = 0;
+        EnvironmentPropsCount = 0;
+        FrameRate = 0.0f;
+        MemoryUsageMB = 0.0f;
+        bBuildCompiling = false;
     }
+};
+
+UENUM(BlueprintType)
+enum class EDir_AgentSpecialization : uint8
+{
+    EngineArchitect = 2,
+    CoreSystems = 3,
+    PerformanceOptimizer = 4,
+    ProceduralWorldGenerator = 5,
+    EnvironmentArtist = 6,
+    ArchitectureInterior = 7,
+    LightingAtmosphere = 8,
+    CharacterArtist = 9,
+    Animation = 10,
+    NPCBehavior = 11,
+    CombatEnemyAI = 12,
+    CrowdTrafficSimulation = 13,
+    QuestMissionDesigner = 14,
+    NarrativeDialogue = 15,
+    Audio = 16,
+    VFX = 17,
+    QATesting = 18,
+    IntegrationBuild = 19
 };
 
 /**
- * Studio Director System - Coordinates all 19 agents in the production pipeline
- * Tracks agent status, manages task distribution, and monitors cycle metrics
+ * Studio Director System - Central coordination hub for all 18 specialized agents
+ * Manages task distribution, production metrics, and agent workflow coordination
  */
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UStudioDirectorSystem : public UActorComponent
+class TRANSPERSONALGAME_API AStudioDirectorSystem : public AActor
 {
     GENERATED_BODY()
 
 public:
-    UStudioDirectorSystem();
+    AStudioDirectorSystem();
 
 protected:
     virtual void BeginPlay() override;
+    virtual void Tick(float DeltaTime) override;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    class USceneComponent* RootSceneComponent;
+
+    // Agent Task Management
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent Management")
+    TArray<FDir_AgentTaskData> ActiveTasks;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent Management")
+    TArray<FDir_AgentTaskData> CompletedTasks;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent Management")
+    int32 CurrentCycleID = 0;
+
+    // Production Metrics
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production Metrics")
+    FDir_ProductionMetrics CurrentMetrics;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production Metrics")
+    float MetricsUpdateInterval = 5.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production Metrics")
+    float LastMetricsUpdate = 0.0f;
+
+    // Agent Coordination
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Coordination")
+    bool bAgentChainActive = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Coordination")
+    int32 CurrentActiveAgent = 1;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Coordination")
+    float AgentTimeoutThreshold = 300.0f; // 5 minutes
 
 public:
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+    // Task Management Functions
+    UFUNCTION(BlueprintCallable, Category = "Agent Management")
+    void AssignTaskToAgent(int32 AgentID, const FString& TaskDescription, const FString& Priority = "Normal", float EstimatedHours = 1.0f);
 
-    // Agent Management
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Director")
-    TArray<FDir_AgentInfo> AgentChain;
+    UFUNCTION(BlueprintCallable, Category = "Agent Management")
+    void CompleteAgentTask(int32 AgentID, const FString& TaskDescription);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Director")
-    int32 CurrentActiveAgent;
+    UFUNCTION(BlueprintCallable, Category = "Agent Management")
+    TArray<FDir_AgentTaskData> GetTasksForAgent(int32 AgentID);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Director")
-    FString CurrentCycleID;
+    UFUNCTION(BlueprintCallable, Category = "Agent Management")
+    int32 GetTotalActiveTasks();
 
-    // Cycle Metrics
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Metrics")
-    TArray<FDir_CycleMetrics> CycleHistory;
+    // Production Metrics Functions
+    UFUNCTION(BlueprintCallable, Category = "Production Metrics")
+    void UpdateProductionMetrics();
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Metrics")
-    FDir_CycleMetrics CurrentCycleMetrics;
+    UFUNCTION(BlueprintCallable, Category = "Production Metrics")
+    FDir_ProductionMetrics GetCurrentMetrics();
 
-    // Production Status
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production")
-    bool bProductionActive;
+    UFUNCTION(BlueprintCallable, Category = "Production Metrics")
+    bool IsProductionOnTrack();
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production")
-    float DailyBudgetUsed;
+    // Agent Coordination Functions
+    UFUNCTION(BlueprintCallable, Category = "Coordination")
+    void StartAgentChain();
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production")
-    float DailyBudgetLimit;
-
-    // Agent Control Functions
-    UFUNCTION(BlueprintCallable, Category = "Director")
-    void InitializeAgentChain();
-
-    UFUNCTION(BlueprintCallable, Category = "Director")
-    void StartProductionCycle(const FString& CycleID);
-
-    UFUNCTION(BlueprintCallable, Category = "Director")
-    void UpdateAgentStatus(int32 AgentID, EDir_AgentStatus NewStatus, const FString& Task, float Completion);
-
-    UFUNCTION(BlueprintCallable, Category = "Director")
+    UFUNCTION(BlueprintCallable, Category = "Coordination")
     void AdvanceToNextAgent();
 
-    UFUNCTION(BlueprintCallable, Category = "Director")
-    void CompleteCycle();
+    UFUNCTION(BlueprintCallable, Category = "Coordination")
+    void ReportAgentCompletion(int32 AgentID, bool bSuccess);
 
-    // Metrics Functions
-    UFUNCTION(BlueprintCallable, Category = "Metrics")
-    void RecordFileCreation();
+    UFUNCTION(BlueprintCallable, Category = "Coordination")
+    bool IsAgentChainComplete();
 
-    UFUNCTION(BlueprintCallable, Category = "Metrics")
-    void RecordUE5Command();
+    // Emergency Controls
+    UFUNCTION(BlueprintCallable, Category = "Emergency")
+    void EmergencyStopAllAgents();
 
-    UFUNCTION(BlueprintCallable, Category = "Metrics")
-    void RecordActorSpawn(int32 Count = 1);
+    UFUNCTION(BlueprintCallable, Category = "Emergency")
+    void RestartAgentChain();
 
-    // Query Functions
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Director")
-    FDir_AgentInfo GetAgentInfo(int32 AgentID) const;
+    UFUNCTION(BlueprintCallable, Category = "Emergency")
+    void ForceAgentTimeout(int32 AgentID);
 
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Director")
-    bool IsAgentActive(int32 AgentID) const;
+    // Debug and Monitoring
+    UFUNCTION(BlueprintCallable, Category = "Debug")
+    void LogCurrentStatus();
 
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Director")
-    float GetCycleProgress() const;
-
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Director")
-    int32 GetTotalActorsInScene() const;
-
-    // Emergency Functions
-    UFUNCTION(BlueprintCallable, Category = "Director")
-    void EmergencyStopCycle(const FString& Reason);
-
-    UFUNCTION(BlueprintCallable, Category = "Director")
-    void ResetAgentChain();
+    UFUNCTION(BlueprintCallable, Category = "Debug")
+    void ValidateAgentChainIntegrity();
 
 private:
-    void LogAgentActivity(const FString& Message);
-    void ValidateAgentChain();
-    void UpdateCycleMetrics();
+    void UpdateAgentTimeouts();
+    void CheckProductionLimits();
+    void ValidateMapState();
+    
+    float LastAgentStartTime = 0.0f;
+    bool bEmergencyMode = false;
 };
