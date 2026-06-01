@@ -7,68 +7,41 @@
 #include "Engine/LevelStreaming.h"
 #include "Perf_StreamingManager.generated.h"
 
-UENUM(BlueprintType)
-enum class EPerf_StreamingState : uint8
-{
-    Unloaded UMETA(DisplayName = "Unloaded"),
-    Loading UMETA(DisplayName = "Loading"),
-    Loaded UMETA(DisplayName = "Loaded"),
-    Unloading UMETA(DisplayName = "Unloading"),
-    Failed UMETA(DisplayName = "Failed")
-};
-
 USTRUCT(BlueprintType)
-struct FPerf_StreamingZone
+struct TRANSPERSONALGAME_API FPerf_StreamingZone
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Streaming")
-    FString ZoneName = "";
+    FString ZoneName;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Streaming")
-    FVector ZoneCenter = FVector::ZeroVector;
+    FVector CenterLocation;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Streaming")
-    float ZoneRadius = 5000.0f;
+    float StreamingRadius;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Streaming")
-    float LoadDistance = 8000.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Streaming")
-    float UnloadDistance = 12000.0f;
+    float UnloadRadius;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Streaming")
     TSoftObjectPtr<UWorld> LevelToStream;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Streaming")
-    EPerf_StreamingState CurrentState = EPerf_StreamingState::Unloaded;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Streaming")
+    bool bIsLoaded;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Streaming")
-    int32 Priority = 1;
+    bool bIsVisible;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Streaming")
-    bool bEssential = false;
-};
-
-USTRUCT(BlueprintType)
-struct FPerf_StreamingSettings
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Streaming")
-    float UpdateInterval = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Streaming")
-    int32 MaxConcurrentLoads = 3;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Streaming")
-    float MemoryBudgetMB = 2048.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Streaming")
-    bool bEnablePreloading = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Streaming")
-    float PreloadDistance = 15000.0f;
+    FPerf_StreamingZone()
+    {
+        ZoneName = TEXT("DefaultZone");
+        CenterLocation = FVector::ZeroVector;
+        StreamingRadius = 5000.0f;
+        UnloadRadius = 8000.0f;
+        bIsLoaded = false;
+        bIsVisible = false;
+    }
 };
 
 UCLASS()
@@ -80,77 +53,62 @@ public:
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
-protected:
-    virtual void Tick(float DeltaTime);
-
-public:
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Streaming Settings")
-    FPerf_StreamingSettings StreamingSettings;
-
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Streaming Settings")
     TArray<FPerf_StreamingZone> StreamingZones;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance Stats")
-    int32 LoadedZones = 0;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Streaming Settings")
+    float UpdateFrequency;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance Stats")
-    int32 LoadingZones = 0;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Streaming Settings")
+    bool bAutoManageStreaming;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance Stats")
-    float CurrentMemoryUsageMB = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Streaming Settings")
+    int32 MaxConcurrentLoads;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance Stats")
-    float LastUpdateTime = 0.0f;
+    UFUNCTION(BlueprintCallable, Category = "Level Streaming")
+    void UpdateStreamingForPlayer(APawn* PlayerPawn);
 
-    UFUNCTION(BlueprintCallable, Category = "Streaming")
-    void UpdateStreaming();
-
-    UFUNCTION(BlueprintCallable, Category = "Streaming")
-    void AddStreamingZone(const FPerf_StreamingZone& NewZone);
-
-    UFUNCTION(BlueprintCallable, Category = "Streaming")
-    void RemoveStreamingZone(const FString& ZoneName);
-
-    UFUNCTION(BlueprintCallable, Category = "Streaming")
+    UFUNCTION(BlueprintCallable, Category = "Level Streaming")
     void LoadZone(const FString& ZoneName);
 
-    UFUNCTION(BlueprintCallable, Category = "Streaming")
+    UFUNCTION(BlueprintCallable, Category = "Level Streaming")
     void UnloadZone(const FString& ZoneName);
 
-    UFUNCTION(BlueprintCallable, Category = "Streaming")
-    void LoadZoneImmediate(const FString& ZoneName);
+    UFUNCTION(BlueprintCallable, Category = "Level Streaming")
+    void SetZoneVisibility(const FString& ZoneName, bool bVisible);
 
-    UFUNCTION(BlueprintCallable, Category = "Streaming")
-    void UnloadZoneImmediate(const FString& ZoneName);
+    UFUNCTION(BlueprintCallable, Category = "Level Streaming")
+    bool IsZoneLoaded(const FString& ZoneName);
 
-    UFUNCTION(BlueprintCallable, Category = "Streaming")
-    EPerf_StreamingState GetZoneState(const FString& ZoneName) const;
+    UFUNCTION(BlueprintCallable, Category = "Level Streaming")
+    void AddStreamingZone(const FPerf_StreamingZone& NewZone);
 
-    UFUNCTION(BlueprintCallable, Category = "Streaming")
-    TArray<FString> GetLoadedZones() const;
+    UFUNCTION(BlueprintCallable, Category = "Level Streaming")
+    void RemoveStreamingZone(const FString& ZoneName);
 
-    UFUNCTION(BlueprintCallable, Category = "Streaming")
-    TArray<FString> GetLoadingZones() const;
+    UFUNCTION(BlueprintCallable, Category = "Level Streaming")
+    void PreloadZonesAroundLocation(FVector Location, float Radius);
 
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    float GetMemoryUsagePercent() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    bool IsWithinMemoryBudget() const;
+    UFUNCTION(BlueprintCallable, Category = "Level Streaming")
+    TArray<FString> GetLoadedZones();
 
 private:
-    FTimerHandle UpdateTimerHandle;
-    TMap<FString, ULevelStreaming*> StreamingLevels;
-    TArray<FString> LoadQueue;
-    TArray<FString> UnloadQueue;
+    UPROPERTY()
+    TMap<FString, ULevelStreaming*> LoadedLevels;
+
+    UPROPERTY()
+    TArray<FString> PendingLoads;
+
+    UPROPERTY()
+    TArray<FString> PendingUnloads;
+
+    FTimerHandle StreamingUpdateTimer;
     
-    FVector GetPlayerLocation() const;
-    float GetDistanceToPlayer(const FVector& Location) const;
-    bool ShouldLoadZone(const FPerf_StreamingZone& Zone) const;
-    bool ShouldUnloadZone(const FPerf_StreamingZone& Zone) const;
-    void ProcessLoadQueue();
-    void ProcessUnloadQueue();
-    void UpdateMemoryUsage();
-    FPerf_StreamingZone* FindZone(const FString& ZoneName);
-    const FPerf_StreamingZone* FindZone(const FString& ZoneName) const;
+    void UpdateStreaming();
+    void ProcessPendingOperations();
+    float CalculateDistanceToZone(const FPerf_StreamingZone& Zone, FVector PlayerLocation);
+    bool ShouldLoadZone(const FPerf_StreamingZone& Zone, FVector PlayerLocation);
+    bool ShouldUnloadZone(const FPerf_StreamingZone& Zone, FVector PlayerLocation);
+    void StartZoneLoad(const FString& ZoneName);
+    void StartZoneUnload(const FString& ZoneName);
 };
