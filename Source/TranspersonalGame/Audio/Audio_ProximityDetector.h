@@ -2,53 +2,50 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
-#include "Engine/Engine.h"
-#include "../SharedTypes.h"
+#include "Components/SphereComponent.h"
+#include "Engine/World.h"
 #include "Audio_ProximityDetector.generated.h"
 
 UENUM(BlueprintType)
-enum class EAudio_ThreatLevel : uint8
+enum class EAudio_ProximityType : uint8
 {
-    None        UMETA(DisplayName = "Sem Ameaça"),
-    Low         UMETA(DisplayName = "Ameaça Baixa"),
-    Medium      UMETA(DisplayName = "Ameaça Média"),
-    High        UMETA(DisplayName = "Ameaça Alta"),
-    Critical    UMETA(DisplayName = "Ameaça Crítica")
+    Player      UMETA(DisplayName = "Player"),
+    Dinosaur    UMETA(DisplayName = "Dinosaur"),
+    Environment UMETA(DisplayName = "Environment"),
+    Danger      UMETA(DisplayName = "Danger")
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FAudio_ProximityData
+struct TRANSPERSONALGAME_API FAudio_ProximitySettings
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Proximity")
-    float Distance;
+    float DetectionRadius = 1000.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Proximity")
-    EAudio_ThreatLevel ThreatLevel;
+    float VolumeMultiplier = 1.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Proximity")
-    FString TargetName;
+    bool bUseDistanceAttenuation = true;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Proximity")
-    FVector TargetLocation;
+    float MinVolume = 0.1f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Proximity")
-    float AudioIntensity;
+    float MaxVolume = 1.0f;
 
-    FAudio_ProximityData()
+    FAudio_ProximitySettings()
     {
-        Distance = 0.0f;
-        ThreatLevel = EAudio_ThreatLevel::None;
-        TargetName = TEXT("Unknown");
-        TargetLocation = FVector::ZeroVector;
-        AudioIntensity = 0.0f;
+        DetectionRadius = 1000.0f;
+        VolumeMultiplier = 1.0f;
+        bUseDistanceAttenuation = true;
+        MinVolume = 0.1f;
+        MaxVolume = 1.0f;
     }
 };
 
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnProximityAlert, const FAudio_ProximityData&, ProximityData);
-
-UCLASS(ClassGroup=(Audio), meta=(BlueprintSpawnableComponent))
+UCLASS(BlueprintType, ClassGroup=(Audio), meta=(BlueprintSpawnableComponent))
 class TRANSPERSONALGAME_API UAudio_ProximityDetector : public UActorComponent
 {
     GENERATED_BODY()
@@ -62,49 +59,66 @@ protected:
 public:
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    UFUNCTION(BlueprintCallable, Category = "Proximity Detector")
+    // Proximity settings
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Proximity Settings")
+    EAudio_ProximityType ProximityType;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Proximity Settings")
+    FAudio_ProximitySettings ProximitySettings;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Proximity Settings")
+    TArray<FString> TargetActorTags;
+
+    // Detection sphere
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    USphereComponent* DetectionSphere;
+
+    // Audio management
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    class UAudioComponent* AudioComponent;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    class USoundCue* ProximitySound;
+
+    // Detection functions
+    UFUNCTION(BlueprintCallable, Category = "Proximity Detection")
+    void UpdateProximityDetection();
+
+    UFUNCTION(BlueprintCallable, Category = "Proximity Detection")
+    float CalculateVolumeByDistance(float Distance);
+
+    UFUNCTION(BlueprintCallable, Category = "Proximity Detection")
+    TArray<AActor*> GetNearbyActors();
+
+    UFUNCTION(BlueprintCallable, Category = "Proximity Detection")
     void SetDetectionRadius(float NewRadius);
 
-    UFUNCTION(BlueprintCallable, Category = "Proximity Detector")
-    void AddTargetTag(const FString& Tag);
+    UFUNCTION(BlueprintCallable, Category = "Proximity Detection")
+    void EnableProximityDetection(bool bEnable);
 
-    UFUNCTION(BlueprintCallable, Category = "Proximity Detector")
-    void RemoveTargetTag(const FString& Tag);
+    // Events
+    UFUNCTION(BlueprintImplementableEvent, Category = "Proximity Events")
+    void OnActorEnterProximity(AActor* Actor, float Distance);
 
-    UFUNCTION(BlueprintPure, Category = "Proximity Detector")
-    TArray<FAudio_ProximityData> GetNearbyThreats() const { return NearbyThreats; }
+    UFUNCTION(BlueprintImplementableEvent, Category = "Proximity Events")
+    void OnActorExitProximity(AActor* Actor);
 
-    UPROPERTY(BlueprintAssignable, Category = "Proximity Events")
-    FOnProximityAlert OnProximityAlert;
-
-protected:
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Detection Settings")
-    float DetectionRadius;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Detection Settings")
-    float UpdateInterval;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Detection Settings")
-    TArray<FString> TargetTags;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Threat Levels")
-    float CriticalDistance;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Threat Levels")
-    float HighDistance;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Threat Levels")
-    float MediumDistance;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Detection State")
-    TArray<FAudio_ProximityData> NearbyThreats;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Detection State")
-    float LastUpdateTime;
+    UFUNCTION(BlueprintImplementableEvent, Category = "Proximity Events")
+    void OnProximityVolumeChanged(float NewVolume);
 
 private:
-    void UpdateProximityDetection();
-    EAudio_ThreatLevel CalculateThreatLevel(float Distance) const;
-    float CalculateAudioIntensity(float Distance, EAudio_ThreatLevel ThreatLevel) const;
-    void ProcessDetectedActor(AActor* Actor);
+    // Internal tracking
+    TArray<AActor*> CurrentNearbyActors;
+    TArray<AActor*> PreviousNearbyActors;
+    
+    float LastDetectionUpdate;
+    float DetectionUpdateInterval;
+    
+    bool bIsDetectionEnabled;
+    
+    // Helper functions
+    void CheckForNewActors();
+    void CheckForRemovedActors();
+    void UpdateAudioVolume();
+    bool IsValidTargetActor(AActor* Actor);
 };
