@@ -1,531 +1,471 @@
 #include "NPC_TRexBehavior.h"
-#include "BehaviorTree/BehaviorTree.h"
-#include "BehaviorTree/BlackboardComponent.h"
-#include "BehaviorTree/BehaviorTreeComponent.h"
-#include "Perception/AIPerceptionComponent.h"
-#include "Perception/AISenseConfig_Sight.h"
-#include "Perception/AISenseConfig_Hearing.h"
+#include "Engine/Engine.h"
+#include "Engine/World.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
-#include "Engine/World.h"
+#include "Kismet/KismetMathLibrary.h"
 #include "Kismet/GameplayStatics.h"
-#include "DrawDebugHelpers.h"
 
-ANPC_TRexBehavior::ANPC_TRexBehavior()
+UNPC_TRexBehavior::UNPC_TRexBehavior()
 {
-	PrimaryActorTick.bCanEverTick = true;
-
-	// Initialize AI Components
-	BehaviorTreeComponent = CreateDefaultSubobject<UBehaviorTreeComponent>(TEXT("BehaviorTreeComponent"));
-	BlackboardComponent = CreateDefaultSubobject<UBlackboardComponent>(TEXT("BlackboardComponent"));
-	AIPerceptionComponent = CreateDefaultSubobject<UAIPerceptionComponent>(TEXT("AIPerceptionComponent"));
+	PrimaryComponentTick.bCanEverTick = true;
+	PrimaryComponentTick.TickInterval = 0.1f; // Update 10 times per second
 
 	// Initialize default values
-	CurrentState = ENPC_TRexState::Patrolling;
+	CurrentState = ENPC_DinosaurState::Idle;
+	PreviousState = ENPC_DinosaurState::Idle;
+	
+	// Territory settings
 	TerritoryCenter = FVector::ZeroVector;
+	TerritoryRadius = 5000.0f;
+	PatrolRadius = 3000.0f;
+	
+	// Detection ranges
+	DetectionRange = 3000.0f;
+	AttackRange = 300.0f;
+	ChaseRange = 5000.0f;
+	
+	// Initialize targeting
 	CurrentTarget = nullptr;
-	CurrentPatrolIndex = 0;
-	StateTimer = 0.0f;
-	LastAttackTime = 0.0f;
-
-	// Setup AI Perception
-	SetupAIPerception();
+	CurrentPatrolPoint = FVector::ZeroVector;
+	NextPatrolPoint = FVector::ZeroVector;
+	
+	// Timing
+	StateChangeTime = 0.0f;
+	PatrolPointReachThreshold = 500.0f;
+	AttackCooldown = 3.0f;
+	LastAttackTime = -10.0f;
+	
+	// Movement speeds
+	PatrolSpeed = 200.0f;
+	ChaseSpeed = 600.0f;
+	AttackSpeed = 400.0f;
 }
 
-void ANPC_TRexBehavior::BeginPlay()
+void UNPC_TRexBehavior::BeginPlay()
 {
 	Super::BeginPlay();
-
-	// Set territory center to current location if not set
+	
+	// Initialize territory center to current location if not set
 	if (TerritoryCenter.IsZero())
 	{
-		TerritoryCenter = GetPawn()->GetActorLocation();
+		TerritoryCenter = GetOwner()->GetActorLocation();
 	}
-
-	// Generate patrol points
-	GeneratePatrolPoints();
-
-	// Setup blackboard
-	SetupBlackboard();
-
-	// Start behavior tree if available
-	if (TRexBehaviorTree)
-	{
-		RunBehaviorTree(TRexBehaviorTree);
-	}
-
-	// Start patrolling
-	StartPatrolling();
-
-	UE_LOG(LogTemp, Warning, TEXT("T-Rex AI Controller initialized at location: %s"), *TerritoryCenter.ToString());
+	
+	// Generate initial patrol point
+	NextPatrolPoint = GenerateRandomPatrolPoint();
+	CurrentPatrolPoint = GetOwner()->GetActorLocation();
+	
+	// Start in patrol state
+	TransitionToState(ENPC_DinosaurState::Patrolling);
+	
+	UE_LOG(LogTemp, Warning, TEXT("T-Rex Behavior initialized at territory center: %s"), *TerritoryCenter.ToString());
 }
 
-void ANPC_TRexBehavior::Tick(float DeltaTime)
+void UNPC_TRexBehavior::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
-	Super::Tick(DeltaTime);
-
-	StateTimer += DeltaTime;
-
-	// Update current state behavior
+	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+	
+	if (!GetOwner())
+	{
+		return;
+	}
+	
+	// Update behavior based on current state
+	UpdateBehaviorState();
+	
+	// Execute state-specific behavior
 	switch (CurrentState)
 	{
-		case ENPC_TRexState::Patrolling:
-			UpdatePatrolling(DeltaTime);
-			break;
-		case ENPC_TRexState::Hunting:
-			UpdateHunting(DeltaTime);
-			break;
-		case ENPC_TRexState::Attacking:
-			UpdateAttacking(DeltaTime);
-			break;
-		case ENPC_TRexState::Feeding:
-			UpdateFeeding(DeltaTime);
-			break;
-		case ENPC_TRexState::Resting:
-			UpdateResting(DeltaTime);
-			break;
+	case ENPC_DinosaurState::Patrolling:
+		HandlePatrolState();
+		break;
+	case ENPC_DinosaurState::Hunting:
+		HandleHuntState();
+		break;
+	case ENPC_DinosaurState::Attacking:
+		HandleAttackState();
+		break;
+	case ENPC_DinosaurState::Returning:
+		HandleReturnState();
+		break;
+	default:
+		break;
 	}
 }
 
-void ANPC_TRexBehavior::OnPossess(APawn* InPawn)
+void UNPC_TRexBehavior::InitializeBehavior(FVector NewTerritoryCenter, float NewTerritoryRadius)
 {
-	Super::OnPossess(InPawn);
+	TerritoryCenter = NewTerritoryCenter;
+	TerritoryRadius = NewTerritoryRadius;
+	PatrolRadius = TerritoryRadius * 0.6f; // Patrol within 60% of territory
+	
+	// Reset patrol points
+	NextPatrolPoint = GenerateRandomPatrolPoint();
+	CurrentPatrolPoint = GetOwner()->GetActorLocation();
+	
+	UE_LOG(LogTemp, Log, TEXT("T-Rex territory initialized: Center=%s, Radius=%.1f"), 
+		*TerritoryCenter.ToString(), TerritoryRadius);
+}
 
-	if (InPawn)
+void UNPC_TRexBehavior::UpdateBehaviorState()
+{
+	// Check for state transitions
+	switch (CurrentState)
 	{
-		// Set territory center to pawn location
-		TerritoryCenter = InPawn->GetActorLocation();
-		
-		// Set movement speed
-		if (ACharacter* Character = Cast<ACharacter>(InPawn))
+	case ENPC_DinosaurState::Patrolling:
+		if (ShouldTransitionToHunt())
 		{
-			if (UCharacterMovementComponent* MovementComp = Character->GetCharacterMovement())
+			TransitionToState(ENPC_DinosaurState::Hunting);
+		}
+		break;
+		
+	case ENPC_DinosaurState::Hunting:
+		if (ShouldTransitionToAttack())
+		{
+			TransitionToState(ENPC_DinosaurState::Attacking);
+		}
+		else if (ShouldTransitionToReturn())
+		{
+			TransitionToState(ENPC_DinosaurState::Returning);
+		}
+		break;
+		
+	case ENPC_DinosaurState::Attacking:
+		if (!CanAttackTarget())
+		{
+			if (CurrentTarget && GetDistanceToTarget() < ChaseRange)
 			{
-				MovementComp->MaxWalkSpeed = TRexStats.MovementSpeed;
+				TransitionToState(ENPC_DinosaurState::Hunting);
+			}
+			else
+			{
+				TransitionToState(ENPC_DinosaurState::Returning);
 			}
 		}
-
-		UE_LOG(LogTemp, Warning, TEXT("T-Rex AI Controller possessed pawn: %s"), *InPawn->GetName());
-	}
-}
-
-void ANPC_TRexBehavior::SetState(ENPC_TRexState NewState)
-{
-	if (CurrentState != NewState)
-	{
-		UE_LOG(LogTemp, Log, TEXT("T-Rex state changed from %d to %d"), (int32)CurrentState, (int32)NewState);
+		break;
 		
-		CurrentState = NewState;
-		StateTimer = 0.0f;
-
-		// Update blackboard
-		if (BlackboardComponent)
+	case ENPC_DinosaurState::Returning:
+		if (IsInTerritory())
 		{
-			BlackboardComponent->SetValueAsEnum(TEXT("CurrentState"), (uint8)CurrentState);
+			TransitionToState(ENPC_DinosaurState::Patrolling);
 		}
+		break;
 	}
 }
 
-void ANPC_TRexBehavior::StartPatrolling()
+void UNPC_TRexBehavior::SetTarget(AActor* NewTarget)
 {
-	SetState(ENPC_TRexState::Patrolling);
-	SetMovementSpeed(TRexStats.MovementSpeed);
-	
-	if (PatrolPoints.Num() > 0)
+	CurrentTarget = NewTarget;
+	if (NewTarget)
 	{
-		MoveToNextPatrolPoint();
+		UE_LOG(LogTemp, Log, TEXT("T-Rex acquired target: %s"), *NewTarget->GetName());
 	}
-
-	UE_LOG(LogTemp, Log, TEXT("T-Rex started patrolling"));
 }
 
-void ANPC_TRexBehavior::StartHunting(AActor* Target)
+void UNPC_TRexBehavior::ClearTarget()
 {
-	if (Target)
+	CurrentTarget = nullptr;
+	UE_LOG(LogTemp, Log, TEXT("T-Rex target cleared"));
+}
+
+float UNPC_TRexBehavior::GetDistanceToTarget() const
+{
+	if (!CurrentTarget || !GetOwner())
 	{
-		SetState(ENPC_TRexState::Hunting);
-		CurrentTarget = Target;
-		SetMovementSpeed(TRexStats.HuntingSpeed);
-
-		// Update blackboard
-		if (BlackboardComponent)
-		{
-			BlackboardComponent->SetValueAsObject(TEXT("TargetActor"), Target);
-		}
-
-		// Move to target
-		MoveToActor(Target, TRexStats.AttackRange);
-
-		UE_LOG(LogTemp, Warning, TEXT("T-Rex started hunting target: %s"), *Target->GetName());
-	}
-}
-
-void ANPC_TRexBehavior::StartAttacking()
-{
-	SetState(ENPC_TRexState::Attacking);
-	
-	// Stop movement during attack
-	StopMovement();
-
-	UE_LOG(LogTemp, Warning, TEXT("T-Rex started attacking"));
-}
-
-void ANPC_TRexBehavior::StartFeeding()
-{
-	SetState(ENPC_TRexState::Feeding);
-	
-	// Stop movement during feeding
-	StopMovement();
-
-	UE_LOG(LogTemp, Log, TEXT("T-Rex started feeding"));
-}
-
-void ANPC_TRexBehavior::StartResting()
-{
-	SetState(ENPC_TRexState::Resting);
-	
-	// Stop movement during rest
-	StopMovement();
-
-	UE_LOG(LogTemp, Log, TEXT("T-Rex started resting"));
-}
-
-void ANPC_TRexBehavior::SetTerritoryCenter(FVector NewCenter)
-{
-	TerritoryCenter = NewCenter;
-	GeneratePatrolPoints();
-
-	UE_LOG(LogTemp, Log, TEXT("T-Rex territory center set to: %s"), *NewCenter.ToString());
-}
-
-void ANPC_TRexBehavior::GeneratePatrolPoints()
-{
-	PatrolPoints.Empty();
-
-	// Generate 6 patrol points in a circle around territory center
-	const int32 NumPoints = 6;
-	const float AngleStep = 360.0f / NumPoints;
-
-	for (int32 i = 0; i < NumPoints; i++)
-	{
-		float Angle = FMath::DegreesToRadians(AngleStep * i);
-		float X = TerritoryCenter.X + TRexStats.PatrolRadius * FMath::Cos(Angle);
-		float Y = TerritoryCenter.Y + TRexStats.PatrolRadius * FMath::Sin(Angle);
-		float Z = TerritoryCenter.Z;
-
-		PatrolPoints.Add(FVector(X, Y, Z));
-	}
-
-	CurrentPatrolIndex = 0;
-
-	UE_LOG(LogTemp, Log, TEXT("Generated %d patrol points for T-Rex"), PatrolPoints.Num());
-}
-
-bool ANPC_TRexBehavior::IsInTerritory(FVector Location) const
-{
-	float Distance = FVector::Dist(Location, TerritoryCenter);
-	return Distance <= TRexStats.PatrolRadius;
-}
-
-AActor* ANPC_TRexBehavior::FindNearestPrey()
-{
-	if (!GetPawn())
-		return nullptr;
-
-	FVector PawnLocation = GetPawn()->GetActorLocation();
-	AActor* NearestPrey = nullptr;
-	float NearestDistance = TRexStats.DetectionRange;
-
-	// Find all characters in the world
-	TArray<AActor*> FoundActors;
-	UGameplayStatics::GetAllActorsOfClass(GetWorld(), ACharacter::StaticClass(), FoundActors);
-
-	for (AActor* Actor : FoundActors)
-	{
-		if (Actor && Actor != GetPawn())
-		{
-			float Distance = FVector::Dist(PawnLocation, Actor->GetActorLocation());
-			
-			if (Distance < NearestDistance && CanSeeTarget(Actor))
-			{
-				NearestDistance = Distance;
-				NearestPrey = Actor;
-			}
-		}
-	}
-
-	return NearestPrey;
-}
-
-float ANPC_TRexBehavior::GetDistanceToTarget(AActor* Target) const
-{
-	if (!Target || !GetPawn())
 		return -1.0f;
-
-	return FVector::Dist(GetPawn()->GetActorLocation(), Target->GetActorLocation());
-}
-
-bool ANPC_TRexBehavior::CanSeeTarget(AActor* Target) const
-{
-	if (!Target || !GetPawn())
-		return false;
-
-	// Simple line trace to check visibility
-	FVector Start = GetPawn()->GetActorLocation();
-	FVector End = Target->GetActorLocation();
-
-	FHitResult HitResult;
-	FCollisionQueryParams QueryParams;
-	QueryParams.AddIgnoredActor(GetPawn());
-
-	bool bHit = GetWorld()->LineTraceSingleByChannel(HitResult, Start, End, ECC_Visibility, QueryParams);
+	}
 	
-	return !bHit || HitResult.GetActor() == Target;
+	return FVector::Dist(GetOwner()->GetActorLocation(), CurrentTarget->GetActorLocation());
 }
 
-void ANPC_TRexBehavior::PerformAttack()
+bool UNPC_TRexBehavior::IsInTerritory() const
+{
+	if (!GetOwner())
+	{
+		return false;
+	}
+	
+	float DistanceFromCenter = FVector::Dist(GetOwner()->GetActorLocation(), TerritoryCenter);
+	return DistanceFromCenter <= TerritoryRadius;
+}
+
+void UNPC_TRexBehavior::HandlePatrolState()
+{
+	if (!GetOwner())
+	{
+		return;
+	}
+	
+	FVector CurrentLocation = GetOwner()->GetActorLocation();
+	float DistanceToPatrolPoint = FVector::Dist(CurrentLocation, NextPatrolPoint);
+	
+	// Check if we've reached the patrol point
+	if (DistanceToPatrolPoint < PatrolPointReachThreshold)
+	{
+		// Generate new patrol point
+		CurrentPatrolPoint = NextPatrolPoint;
+		NextPatrolPoint = GenerateRandomPatrolPoint();
+		
+		UE_LOG(LogTemp, Log, TEXT("T-Rex reached patrol point, new target: %s"), *NextPatrolPoint.ToString());
+	}
+	
+	// Move towards patrol point
+	MoveToLocation(NextPatrolPoint, PatrolSpeed);
+}
+
+void UNPC_TRexBehavior::HandleHuntState()
 {
 	if (!CurrentTarget)
-		return;
-
-	float CurrentTime = GetWorld()->GetTimeSeconds();
-	
-	// Check attack cooldown
-	if (CurrentTime - LastAttackTime < 2.0f)
-		return;
-
-	LastAttackTime = CurrentTime;
-
-	// Deal damage to target
-	UE_LOG(LogTemp, Warning, TEXT("T-Rex attacks %s for %.1f damage"), 
-		*CurrentTarget->GetName(), TRexStats.AttackDamage);
-
-	// After attack, start feeding if target is defeated
-	StartFeeding();
-}
-
-bool ANPC_TRexBehavior::IsInAttackRange(AActor* Target) const
-{
-	if (!Target)
-		return false;
-
-	float Distance = GetDistanceToTarget(Target);
-	return Distance > 0 && Distance <= TRexStats.AttackRange;
-}
-
-void ANPC_TRexBehavior::MoveToNextPatrolPoint()
-{
-	if (PatrolPoints.Num() == 0)
-		return;
-
-	FVector TargetPoint = PatrolPoints[CurrentPatrolIndex];
-	MoveToLocation(TargetPoint, 100.0f);
-
-	// Move to next patrol point
-	CurrentPatrolIndex = (CurrentPatrolIndex + 1) % PatrolPoints.Num();
-
-	UE_LOG(LogTemp, Log, TEXT("T-Rex moving to patrol point: %s"), *TargetPoint.ToString());
-}
-
-void ANPC_TRexBehavior::SetMovementSpeed(float Speed)
-{
-	if (APawn* ControlledPawn = GetPawn())
 	{
-		if (ACharacter* Character = Cast<ACharacter>(ControlledPawn))
+		// Lost target, find new one or return to patrol
+		AActor* NewTarget = FindNearestPlayer();
+		if (NewTarget)
 		{
-			if (UCharacterMovementComponent* MovementComp = Character->GetCharacterMovement())
-			{
-				MovementComp->MaxWalkSpeed = Speed;
-			}
+			SetTarget(NewTarget);
+		}
+		else
+		{
+			TransitionToState(ENPC_DinosaurState::Returning);
+			return;
+		}
+	}
+	
+	// Chase the target
+	MoveToLocation(CurrentTarget->GetActorLocation(), ChaseSpeed);
+	RotateTowardsTarget(CurrentTarget, GetWorld()->GetDeltaSeconds());
+}
+
+void UNPC_TRexBehavior::HandleAttackState()
+{
+	if (!CurrentTarget)
+	{
+		TransitionToState(ENPC_DinosaurState::Returning);
+		return;
+	}
+	
+	// Face the target
+	RotateTowardsTarget(CurrentTarget, GetWorld()->GetDeltaSeconds());
+	
+	// Check if we can attack
+	if (CanAttackTarget())
+	{
+		float CurrentTime = GetWorld()->GetTimeSeconds();
+		if (CurrentTime - LastAttackTime >= AttackCooldown)
+		{
+			// Perform attack
+			LastAttackTime = CurrentTime;
+			UE_LOG(LogTemp, Warning, TEXT("T-Rex ATTACKS %s!"), *CurrentTarget->GetName());
+			
+			// Move slightly towards target during attack
+			MoveToLocation(CurrentTarget->GetActorLocation(), AttackSpeed);
 		}
 	}
 }
 
-void ANPC_TRexBehavior::OnPerceptionUpdated(const TArray<AActor*>& UpdatedActors)
+void UNPC_TRexBehavior::HandleReturnState()
 {
-	// Handle perception updates
-	for (AActor* Actor : UpdatedActors)
+	// Move back to territory center
+	MoveToLocation(TerritoryCenter, ChaseSpeed);
+	
+	// Clear target when returning
+	if (CurrentTarget)
 	{
-		if (Actor && Actor != GetPawn())
+		ClearTarget();
+	}
+}
+
+FVector UNPC_TRexBehavior::GenerateRandomPatrolPoint()
+{
+	// Generate random point within patrol radius of territory center
+	float RandomAngle = FMath::RandRange(0.0f, 360.0f);
+	float RandomDistance = FMath::RandRange(PatrolRadius * 0.3f, PatrolRadius);
+	
+	FVector RandomDirection = FVector(
+		FMath::Cos(FMath::DegreesToRadians(RandomAngle)),
+		FMath::Sin(FMath::DegreesToRadians(RandomAngle)),
+		0.0f
+	);
+	
+	FVector PatrolPoint = TerritoryCenter + (RandomDirection * RandomDistance);
+	PatrolPoint.Z = TerritoryCenter.Z; // Keep same height
+	
+	return PatrolPoint;
+}
+
+AActor* UNPC_TRexBehavior::FindNearestPlayer()
+{
+	if (!GetOwner() || !GetWorld())
+	{
+		return nullptr;
+	}
+	
+	// Find all player controllers
+	TArray<AActor*> PlayerActors;
+	UGameplayStatics::GetAllActorsOfClass(GetWorld(), ACharacter::StaticClass(), PlayerActors);
+	
+	AActor* NearestPlayer = nullptr;
+	float NearestDistance = DetectionRange;
+	FVector OwnerLocation = GetOwner()->GetActorLocation();
+	
+	for (AActor* Player : PlayerActors)
+	{
+		if (!Player)
 		{
-			// If we're patrolling and detect prey, start hunting
-			if (CurrentState == ENPC_TRexState::Patrolling)
-			{
-				if (ACharacter* Character = Cast<ACharacter>(Actor))
-				{
-					float Distance = GetDistanceToTarget(Actor);
-					if (Distance <= TRexStats.DetectionRange)
-					{
-						StartHunting(Actor);
-						break;
-					}
-				}
-			}
+			continue;
+		}
+		
+		// Skip if it's the T-Rex itself
+		if (Player == GetOwner())
+		{
+			continue;
+		}
+		
+		float Distance = FVector::Dist(OwnerLocation, Player->GetActorLocation());
+		if (Distance < NearestDistance)
+		{
+			NearestDistance = Distance;
+			NearestPlayer = Player;
 		}
 	}
-}
-
-void ANPC_TRexBehavior::UpdatePatrolling(float DeltaTime)
-{
-	// Look for prey while patrolling
-	AActor* Prey = FindNearestPrey();
-	if (Prey)
-	{
-		StartHunting(Prey);
-		return;
-	}
-
-	// Check if we need to rest
-	if (ShouldRest())
-	{
-		StartResting();
-		return;
-	}
-
-	// Continue patrolling if we've reached current patrol point
-	if (GetMoveStatus() == EPathFollowingStatus::Idle)
-	{
-		MoveToNextPatrolPoint();
-	}
-}
-
-void ANPC_TRexBehavior::UpdateHunting(float DeltaTime)
-{
-	if (!CurrentTarget)
-	{
-		StartPatrolling();
-		return;
-	}
-
-	float Distance = GetDistanceToTarget(CurrentTarget);
 	
-	// Check if target is in attack range
-	if (IsInAttackRange(CurrentTarget))
-	{
-		StartAttacking();
-		return;
-	}
-
-	// Check if target is too far away or out of territory
-	if (Distance > TRexStats.DetectionRange * 1.5f || !IsInTerritory(CurrentTarget->GetActorLocation()))
-	{
-		CurrentTarget = nullptr;
-		StartPatrolling();
-		return;
-	}
-
-	// Continue chasing target
-	MoveToActor(CurrentTarget, TRexStats.AttackRange);
+	return NearestPlayer;
 }
 
-void ANPC_TRexBehavior::UpdateAttacking(float DeltaTime)
+bool UNPC_TRexBehavior::CanAttackTarget() const
+{
+	if (!CurrentTarget || !GetOwner())
+	{
+		return false;
+	}
+	
+	float Distance = GetDistanceToTarget();
+	return Distance >= 0.0f && Distance <= AttackRange;
+}
+
+void UNPC_TRexBehavior::MoveToLocation(FVector TargetLocation, float Speed)
+{
+	if (!GetOwner())
+	{
+		return;
+	}
+	
+	ACharacter* OwnerCharacter = Cast<ACharacter>(GetOwner());
+	if (!OwnerCharacter)
+	{
+		return;
+	}
+	
+	UCharacterMovementComponent* MovementComp = OwnerCharacter->GetCharacterMovement();
+	if (!MovementComp)
+	{
+		return;
+	}
+	
+	// Set movement speed
+	MovementComp->MaxWalkSpeed = Speed;
+	
+	// Calculate direction to target
+	FVector CurrentLocation = GetOwner()->GetActorLocation();
+	FVector Direction = (TargetLocation - CurrentLocation).GetSafeNormal();
+	
+	// Add movement input
+	OwnerCharacter->AddMovementInput(Direction, 1.0f);
+}
+
+void UNPC_TRexBehavior::RotateTowardsTarget(AActor* Target, float DeltaTime)
+{
+	if (!Target || !GetOwner())
+	{
+		return;
+	}
+	
+	FVector OwnerLocation = GetOwner()->GetActorLocation();
+	FVector TargetLocation = Target->GetActorLocation();
+	FVector Direction = (TargetLocation - OwnerLocation).GetSafeNormal();
+	
+	FRotator TargetRotation = Direction.Rotation();
+	FRotator CurrentRotation = GetOwner()->GetActorRotation();
+	
+	// Smooth rotation
+	float RotationSpeed = 180.0f; // degrees per second
+	FRotator NewRotation = FMath::RInterpTo(CurrentRotation, TargetRotation, DeltaTime, RotationSpeed);
+	
+	GetOwner()->SetActorRotation(NewRotation);
+}
+
+void UNPC_TRexBehavior::TransitionToState(ENPC_DinosaurState NewState)
+{
+	if (NewState == CurrentState)
+	{
+		return;
+	}
+	
+	PreviousState = CurrentState;
+	CurrentState = NewState;
+	StateChangeTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
+	
+	UE_LOG(LogTemp, Log, TEXT("T-Rex state transition: %d -> %d"), 
+		static_cast<int32>(PreviousState), static_cast<int32>(CurrentState));
+}
+
+bool UNPC_TRexBehavior::ShouldTransitionToHunt() const
+{
+	// Look for nearby players
+	AActor* NearestPlayer = const_cast<UNPC_TRexBehavior*>(this)->FindNearestPlayer();
+	if (NearestPlayer)
+	{
+		float Distance = FVector::Dist(GetOwner()->GetActorLocation(), NearestPlayer->GetActorLocation());
+		return Distance <= DetectionRange;
+	}
+	
+	return false;
+}
+
+bool UNPC_TRexBehavior::ShouldTransitionToAttack() const
 {
 	if (!CurrentTarget)
 	{
-		StartPatrolling();
-		return;
+		return false;
 	}
+	
+	float Distance = GetDistanceToTarget();
+	return Distance >= 0.0f && Distance <= AttackRange;
+}
 
-	// Check if still in attack range
-	if (!IsInAttackRange(CurrentTarget))
+bool UNPC_TRexBehavior::ShouldTransitionToReturn() const
+{
+	// Return if no target or target is too far from territory
+	if (!CurrentTarget)
 	{
-		StartHunting(CurrentTarget);
-		return;
+		return !IsInTerritory();
 	}
-
-	// Perform attack
-	PerformAttack();
-}
-
-void ANPC_TRexBehavior::UpdateFeeding(float DeltaTime)
-{
-	// Feed for specified duration
-	if (StateTimer >= TRexStats.FeedingDuration)
+	
+	float DistanceToTarget = GetDistanceToTarget();
+	if (DistanceToTarget > ChaseRange)
 	{
-		CurrentTarget = nullptr;
-		StartResting();
+		return true;
 	}
+	
+	// Return if we're too far from territory
+	return !IsInTerritory();
 }
 
-void ANPC_TRexBehavior::UpdateResting(float DeltaTime)
+bool UNPC_TRexBehavior::ShouldTransitionToPatrol() const
 {
-	// Rest for specified duration
-	if (StateTimer >= TRexStats.RestDuration)
+	// Transition to patrol when back in territory and no immediate threats
+	if (!IsInTerritory())
 	{
-		StartPatrolling();
+		return false;
 	}
-}
-
-FVector ANPC_TRexBehavior::GetRandomPatrolPoint() const
-{
-	if (PatrolPoints.Num() == 0)
-		return TerritoryCenter;
-
-	int32 RandomIndex = FMath::RandRange(0, PatrolPoints.Num() - 1);
-	return PatrolPoints[RandomIndex];
-}
-
-bool ANPC_TRexBehavior::ShouldRest() const
-{
-	// Rest every 5 minutes of patrolling
-	return StateTimer > 300.0f;
-}
-
-bool ANPC_TRexBehavior::ShouldFeed() const
-{
-	// Feed after successful attack
-	return CurrentState == ENPC_TRexState::Attacking;
-}
-
-void ANPC_TRexBehavior::SetupAIPerception()
-{
-	if (!AIPerceptionComponent)
-		return;
-
-	// Setup sight sense
-	UAISenseConfig_Sight* SightConfig = CreateDefaultSubobject<UAISenseConfig_Sight>(TEXT("SightConfig"));
-	if (SightConfig)
+	
+	// Check if there are any nearby players
+	AActor* NearestPlayer = const_cast<UNPC_TRexBehavior*>(this)->FindNearestPlayer();
+	if (NearestPlayer)
 	{
-		SightConfig->SightRadius = TRexStats.DetectionRange;
-		SightConfig->LoseSightRadius = TRexStats.DetectionRange * 1.2f;
-		SightConfig->PeripheralVisionAngleDegrees = 120.0f;
-		SightConfig->DetectionByAffiliation.bDetectNeutrals = true;
-		SightConfig->DetectionByAffiliation.bDetectFriendlies = false;
-		SightConfig->DetectionByAffiliation.bDetectEnemies = true;
-
-		AIPerceptionComponent->ConfigureSense(*SightConfig);
+		float Distance = FVector::Dist(GetOwner()->GetActorLocation(), NearestPlayer->GetActorLocation());
+		return Distance > DetectionRange;
 	}
-
-	// Setup hearing sense
-	UAISenseConfig_Hearing* HearingConfig = CreateDefaultSubobject<UAISenseConfig_Hearing>(TEXT("HearingConfig"));
-	if (HearingConfig)
-	{
-		HearingConfig->HearingRange = TRexStats.DetectionRange * 0.8f;
-		HearingConfig->DetectionByAffiliation.bDetectNeutrals = true;
-		HearingConfig->DetectionByAffiliation.bDetectFriendlies = false;
-		HearingConfig->DetectionByAffiliation.bDetectEnemies = true;
-
-		AIPerceptionComponent->ConfigureSense(*HearingConfig);
-	}
-
-	// Set dominant sense
-	AIPerceptionComponent->SetDominantSense(SightConfig->GetSenseImplementation());
-
-	// Bind perception events
-	AIPerceptionComponent->OnPerceptionUpdated.AddDynamic(this, &ANPC_TRexBehavior::OnPerceptionUpdated);
-}
-
-void ANPC_TRexBehavior::SetupBlackboard()
-{
-	if (!BlackboardComponent)
-		return;
-
-	// Set initial blackboard values
-	BlackboardComponent->SetValueAsEnum(TEXT("CurrentState"), (uint8)CurrentState);
-	BlackboardComponent->SetValueAsVector(TEXT("TerritoryCenter"), TerritoryCenter);
-	BlackboardComponent->SetValueAsFloat(TEXT("PatrolRadius"), TRexStats.PatrolRadius);
-	BlackboardComponent->SetValueAsFloat(TEXT("DetectionRange"), TRexStats.DetectionRange);
-	BlackboardComponent->SetValueAsFloat(TEXT("AttackRange"), TRexStats.AttackRange);
-
-	UE_LOG(LogTemp, Log, TEXT("T-Rex blackboard initialized"));
+	
+	return true;
 }
