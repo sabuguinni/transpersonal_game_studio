@@ -1,229 +1,321 @@
 #include "Narr_DialogueManager.h"
-#include "Engine/World.h"
 #include "Engine/Engine.h"
-#include "Kismet/GameplayStatics.h"
+#include "Engine/World.h"
+#include "TimerManager.h"
 #include "Components/AudioComponent.h"
+#include "Engine/GameInstance.h"
+#include "Kismet/GameplayStatics.h"
 
 UNarr_DialogueManager::UNarr_DialogueManager()
 {
-    CurrentContext = FNarr_DialogueContext();
-    DialogueDatabase.Empty();
-    LastPlayedTimes.Empty();
+    DialogueAudioComponent = nullptr;
+    bIsPlayingDialogue = false;
+    CurrentLineIndex = 0;
+    CurrentSequenceID = TEXT("");
 }
 
 void UNarr_DialogueManager::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
     
-    UE_LOG(LogTemp, Warning, TEXT("Narr_DialogueManager: Initializing narrative dialogue system"));
+    UE_LOG(LogTemp, Log, TEXT("DialogueManager: Initializing narrative dialogue system"));
     
-    InitializeDefaultDialogues();
-    
-    UE_LOG(LogTemp, Warning, TEXT("Narr_DialogueManager: Loaded %d dialogue lines"), DialogueDatabase.Num());
-}
-
-void UNarr_DialogueManager::InitializeDefaultDialogues()
-{
-    // Survival warning dialogues
-    FNarr_DialogueLine LowHealthWarning;
-    LowHealthWarning.DialogueText = TEXT("Your wounds bleed freely. Find shelter and rest, or death will claim you.");
-    LowHealthWarning.Speaker = ENarr_SpeakerType::Narrator;
-    LowHealthWarning.TriggerCondition = ENarr_DialogueTrigger::LowHealth;
-    LowHealthWarning.Priority = 10.0f;
-    LowHealthWarning.bIsRepeatable = true;
-    LowHealthWarning.CooldownTime = 60.0f;
-    RegisterDialogueLine(LowHealthWarning);
-
-    FNarr_DialogueLine HungerWarning;
-    HungerWarning.DialogueText = TEXT("Your stomach gnaws with hunger. Hunt or gather food before weakness takes hold.");
-    HungerWarning.Speaker = ENarr_SpeakerType::Narrator;
-    HungerWarning.TriggerCondition = ENarr_DialogueTrigger::Survival_Hunger;
-    HungerWarning.Priority = 8.0f;
-    HungerWarning.bIsRepeatable = true;
-    HungerWarning.CooldownTime = 45.0f;
-    RegisterDialogueLine(HungerWarning);
-
-    FNarr_DialogueLine ThirstWarning;
-    ThirstWarning.DialogueText = TEXT("Your throat burns with thirst. Seek water or perish under the merciless sun.");
-    ThirstWarning.Speaker = ENarr_SpeakerType::Narrator;
-    ThirstWarning.TriggerCondition = ENarr_DialogueTrigger::Survival_Thirst;
-    ThirstWarning.Priority = 9.0f;
-    ThirstWarning.bIsRepeatable = true;
-    ThirstWarning.CooldownTime = 40.0f;
-    RegisterDialogueLine(ThirstWarning);
-
-    // Dinosaur encounter dialogues
-    FNarr_DialogueLine TRexWarning;
-    TRexWarning.DialogueText = TEXT("The earth trembles. A massive predator approaches. Hide or prepare for the fight of your life.");
-    TRexWarning.Speaker = ENarr_SpeakerType::Warning;
-    TRexWarning.TriggerCondition = ENarr_DialogueTrigger::DinosaurNearby;
-    TRexWarning.Priority = 15.0f;
-    TRexWarning.bIsRepeatable = true;
-    TRexWarning.CooldownTime = 120.0f;
-    RegisterDialogueLine(TRexWarning);
-
-    FNarr_DialogueLine RaptorWarning;
-    RaptorWarning.DialogueText = TEXT("Clever hunters stalk through the undergrowth. They hunt in packs. Watch your back.");
-    RaptorWarning.Speaker = ENarr_SpeakerType::Warning;
-    RaptorWarning.TriggerCondition = ENarr_DialogueTrigger::DinosaurNearby;
-    RaptorWarning.Priority = 12.0f;
-    RaptorWarning.bIsRepeatable = true;
-    RaptorWarning.CooldownTime = 90.0f;
-    RegisterDialogueLine(RaptorWarning);
-
-    // Tribal elder wisdom
-    FNarr_DialogueLine ElderWisdom1;
-    ElderWisdom1.DialogueText = TEXT("Fire keeps the darkness at bay. Sharp stone cuts deep. These truths have kept our people alive.");
-    ElderWisdom1.Speaker = ENarr_SpeakerType::TribalElder;
-    ElderWisdom1.TriggerCondition = ENarr_DialogueTrigger::FirstEncounter;
-    ElderWisdom1.Priority = 5.0f;
-    ElderWisdom1.bIsRepeatable = false;
-    ElderWisdom1.CooldownTime = 0.0f;
-    RegisterDialogueLine(ElderWisdom1);
-
-    FNarr_DialogueLine ElderWisdom2;
-    ElderWisdom2.DialogueText = TEXT("The great beasts have ruled this land since time began. Respect their power or become their prey.");
-    ElderWisdom2.Speaker = ENarr_SpeakerType::TribalElder;
-    ElderWisdom2.TriggerCondition = ENarr_DialogueTrigger::Discovery;
-    ElderWisdom2.Priority = 6.0f;
-    ElderWisdom2.bIsRepeatable = true;
-    ElderWisdom2.CooldownTime = 300.0f;
-    RegisterDialogueLine(ElderWisdom2);
-
-    // Discovery dialogues
-    FNarr_DialogueLine ResourceDiscovery;
-    ResourceDiscovery.DialogueText = TEXT("Useful materials lie scattered here. Gather what you can - survival depends on preparation.");
-    ResourceDiscovery.Speaker = ENarr_SpeakerType::PlayerThought;
-    ResourceDiscovery.TriggerCondition = ENarr_DialogueTrigger::Discovery;
-    ResourceDiscovery.Priority = 4.0f;
-    ResourceDiscovery.bIsRepeatable = true;
-    ResourceDiscovery.CooldownTime = 30.0f;
-    RegisterDialogueLine(ResourceDiscovery);
-}
-
-void UNarr_DialogueManager::TriggerDialogue(ENarr_DialogueTrigger TriggerType, const FNarr_DialogueContext& Context)
-{
-    UpdateContext(Context);
-    
-    FNarr_DialogueLine* BestDialogue = FindBestDialogue(TriggerType, Context);
-    
-    if (BestDialogue && CanPlayDialogue(*BestDialogue))
+    // Create audio component for dialogue playback
+    if (UGameInstance* GameInstance = GetGameInstance())
     {
-        PlayDialogue(*BestDialogue);
-    }
-}
-
-void UNarr_DialogueManager::RegisterDialogueLine(const FNarr_DialogueLine& DialogueLine)
-{
-    DialogueDatabase.Add(DialogueLine);
-    UE_LOG(LogTemp, Log, TEXT("Narr_DialogueManager: Registered dialogue line: %s"), *DialogueLine.DialogueText);
-}
-
-void UNarr_DialogueManager::PlayDialogue(const FNarr_DialogueLine& DialogueLine)
-{
-    FString DialogueKey = FString::Printf(TEXT("%s_%s"), 
-        *UEnum::GetValueAsString(DialogueLine.Speaker),
-        *DialogueLine.DialogueText.Left(20));
-    
-    LastPlayedTimes.Add(DialogueKey, GetWorld()->GetTimeSeconds());
-    
-    UE_LOG(LogTemp, Warning, TEXT("Narr_DialogueManager: Playing dialogue - %s: %s"), 
-        *UEnum::GetValueAsString(DialogueLine.Speaker), 
-        *DialogueLine.DialogueText);
-    
-    OnDialogueTriggered(DialogueLine);
-    
-    // Play audio if available
-    if (DialogueLine.VoiceAudio.IsValid())
-    {
-        UGameplayStatics::PlaySound2D(GetWorld(), DialogueLine.VoiceAudio.LoadSynchronous());
-    }
-}
-
-bool UNarr_DialogueManager::CanPlayDialogue(const FNarr_DialogueLine& DialogueLine) const
-{
-    if (!DialogueLine.bIsRepeatable)
-    {
-        FString DialogueKey = FString::Printf(TEXT("%s_%s"), 
-            *UEnum::GetValueAsString(DialogueLine.Speaker),
-            *DialogueLine.DialogueText.Left(20));
-        
-        if (LastPlayedTimes.Contains(DialogueKey))
+        if (UWorld* World = GameInstance->GetWorld())
         {
-            return false;
-        }
-    }
-    
-    if (DialogueLine.CooldownTime > 0.0f)
-    {
-        FString DialogueKey = FString::Printf(TEXT("%s_%s"), 
-            *UEnum::GetValueAsString(DialogueLine.Speaker),
-            *DialogueLine.DialogueText.Left(20));
-        
-        if (const float* LastPlayTime = LastPlayedTimes.Find(DialogueKey))
-        {
-            float CurrentTime = GetWorld()->GetTimeSeconds();
-            if (CurrentTime - *LastPlayTime < DialogueLine.CooldownTime)
+            AActor* DummyActor = World->SpawnActor<AActor>();
+            if (DummyActor)
             {
-                return false;
+                DialogueAudioComponent = DummyActor->CreateDefaultSubobject<UAudioComponent>(TEXT("DialogueAudio"));
+                if (DialogueAudioComponent)
+                {
+                    DialogueAudioComponent->bAutoActivate = false;
+                    DialogueAudioComponent->SetVolumeMultiplier(0.8f);
+                }
             }
         }
     }
     
-    return EvaluateTriggerCondition(DialogueLine, CurrentContext);
+    // Create predefined dialogue sequences
+    CreateSurvivalWarningSequences();
+    CreateDinosaurEncounterSequences();
+    
+    UE_LOG(LogTemp, Log, TEXT("DialogueManager: Initialized with %d dialogue sequences"), RegisteredSequences.Num());
 }
 
-void UNarr_DialogueManager::UpdateContext(const FNarr_DialogueContext& NewContext)
+void UNarr_DialogueManager::Deinitialize()
 {
-    CurrentContext = NewContext;
-    OnContextChanged(NewContext);
-}
-
-bool UNarr_DialogueManager::EvaluateTriggerCondition(const FNarr_DialogueLine& DialogueLine, const FNarr_DialogueContext& Context) const
-{
-    switch (DialogueLine.TriggerCondition)
+    StopCurrentDialogue();
+    
+    if (DialogueAudioComponent && IsValid(DialogueAudioComponent))
     {
-        case ENarr_DialogueTrigger::LowHealth:
-            return Context.PlayerHealthPercent < 30.0f;
-            
-        case ENarr_DialogueTrigger::Survival_Hunger:
-            return Context.PlayerHungerLevel > 70.0f;
-            
-        case ENarr_DialogueTrigger::Survival_Thirst:
-            return Context.PlayerThirstLevel > 80.0f;
-            
-        case ENarr_DialogueTrigger::DinosaurNearby:
-            return Context.bDinosaurNearby && Context.DinosaurDistance < 2000.0f;
-            
-        case ENarr_DialogueTrigger::Combat_Warning:
-            return Context.bDinosaurNearby && Context.DinosaurDistance < 1000.0f;
-            
-        case ENarr_DialogueTrigger::Discovery:
-        case ENarr_DialogueTrigger::FirstEncounter:
-        case ENarr_DialogueTrigger::QuestComplete:
-        case ENarr_DialogueTrigger::PlayerApproach:
-            return true;
-            
-        default:
-            return false;
+        DialogueAudioComponent->Stop();
+        DialogueAudioComponent = nullptr;
+    }
+    
+    RegisteredSequences.Empty();
+    
+    Super::Deinitialize();
+}
+
+void UNarr_DialogueManager::PlayDialogueSequence(const FString& SequenceID, AActor* Speaker)
+{
+    if (!RegisteredSequences.Contains(SequenceID))
+    {
+        UE_LOG(LogTemp, Warning, TEXT("DialogueManager: Sequence '%s' not found"), *SequenceID);
+        return;
+    }
+    
+    FNarr_DialogueSequence& Sequence = RegisteredSequences[SequenceID];
+    
+    // Check if sequence can be played
+    if (Sequence.bHasBeenPlayed && !Sequence.bIsRepeatable)
+    {
+        UE_LOG(LogTemp, Log, TEXT("DialogueManager: Sequence '%s' already played and not repeatable"), *SequenceID);
+        return;
+    }
+    
+    // Stop current dialogue if playing
+    StopCurrentDialogue();
+    
+    // Start new sequence
+    CurrentSequenceID = SequenceID;
+    CurrentLineIndex = 0;
+    bIsPlayingDialogue = true;
+    Sequence.bHasBeenPlayed = true;
+    
+    UE_LOG(LogTemp, Log, TEXT("DialogueManager: Starting sequence '%s' with %d lines"), *SequenceID, Sequence.DialogueLines.Num());
+    
+    PlayNextDialogueLine();
+}
+
+void UNarr_DialogueManager::PlayNarration(const FText& NarrationText, float Duration)
+{
+    StopCurrentDialogue();
+    
+    // Create temporary narration sequence
+    FNarr_DialogueLine NarrationLine;
+    NarrationLine.SpeakerName = TEXT("Narrator");
+    NarrationLine.DialogueText = NarrationText;
+    NarrationLine.Duration = Duration;
+    NarrationLine.bIsNarration = true;
+    
+    CurrentDialogueLine = NarrationLine;
+    bIsPlayingDialogue = true;
+    
+    UE_LOG(LogTemp, Log, TEXT("DialogueManager: Playing narration: %s"), *NarrationText.ToString());
+    
+    // Set timer for narration duration
+    if (UWorld* World = GetWorld())
+    {
+        World->GetTimerManager().SetTimer(DialogueTimerHandle, this, &UNarr_DialogueManager::OnDialogueLineFinished, Duration, false);
     }
 }
 
-FNarr_DialogueLine* UNarr_DialogueManager::FindBestDialogue(ENarr_DialogueTrigger TriggerType, const FNarr_DialogueContext& Context)
+void UNarr_DialogueManager::StopCurrentDialogue()
 {
-    FNarr_DialogueLine* BestDialogue = nullptr;
-    float HighestPriority = -1.0f;
-    
-    for (FNarr_DialogueLine& DialogueLine : DialogueDatabase)
+    if (bIsPlayingDialogue)
     {
-        if (DialogueLine.TriggerCondition == TriggerType && 
-            EvaluateTriggerCondition(DialogueLine, Context) &&
-            DialogueLine.Priority > HighestPriority)
+        bIsPlayingDialogue = false;
+        CurrentLineIndex = 0;
+        CurrentSequenceID = TEXT("");
+        
+        if (DialogueAudioComponent && DialogueAudioComponent->IsPlaying())
         {
-            BestDialogue = &DialogueLine;
-            HighestPriority = DialogueLine.Priority;
+            DialogueAudioComponent->Stop();
+        }
+        
+        if (UWorld* World = GetWorld())
+        {
+            World->GetTimerManager().ClearTimer(DialogueTimerHandle);
+        }
+        
+        UE_LOG(LogTemp, Log, TEXT("DialogueManager: Stopped current dialogue"));
+    }
+}
+
+bool UNarr_DialogueManager::IsDialoguePlaying() const
+{
+    return bIsPlayingDialogue;
+}
+
+void UNarr_DialogueManager::RegisterDialogueSequence(const FNarr_DialogueSequence& Sequence)
+{
+    RegisteredSequences.Add(Sequence.SequenceID, Sequence);
+    UE_LOG(LogTemp, Log, TEXT("DialogueManager: Registered sequence '%s'"), *Sequence.SequenceID);
+}
+
+void UNarr_DialogueManager::PlaySurvivalWarning(ESurvivalThreatLevel ThreatLevel)
+{
+    FString SequenceID;
+    
+    switch (ThreatLevel)
+    {
+        case ESurvivalThreatLevel::Low:
+            SequenceID = TEXT("SurvivalWarning_Low");
+            break;
+        case ESurvivalThreatLevel::Medium:
+            SequenceID = TEXT("SurvivalWarning_Medium");
+            break;
+        case ESurvivalThreatLevel::High:
+            SequenceID = TEXT("SurvivalWarning_High");
+            break;
+        case ESurvivalThreatLevel::Extreme:
+            SequenceID = TEXT("SurvivalWarning_Extreme");
+            break;
+        default:
+            SequenceID = TEXT("SurvivalWarning_Medium");
+            break;
+    }
+    
+    PlayDialogueSequence(SequenceID);
+}
+
+void UNarr_DialogueManager::PlayDinosaurEncounterDialogue(EDinosaurSpecies Species, bool bIsHostile)
+{
+    FString SequenceID = TEXT("Encounter_");
+    
+    switch (Species)
+    {
+        case EDinosaurSpecies::TRex:
+            SequenceID += bIsHostile ? TEXT("TRex_Hostile") : TEXT("TRex_Neutral");
+            break;
+        case EDinosaurSpecies::Velociraptor:
+            SequenceID += bIsHostile ? TEXT("Raptor_Hostile") : TEXT("Raptor_Neutral");
+            break;
+        case EDinosaurSpecies::Triceratops:
+            SequenceID += bIsHostile ? TEXT("Triceratops_Hostile") : TEXT("Triceratops_Neutral");
+            break;
+        case EDinosaurSpecies::Brachiosaurus:
+            SequenceID += bIsHostile ? TEXT("Brachio_Hostile") : TEXT("Brachio_Neutral");
+            break;
+        default:
+            SequenceID += bIsHostile ? TEXT("Generic_Hostile") : TEXT("Generic_Neutral");
+            break;
+    }
+    
+    PlayDialogueSequence(SequenceID);
+}
+
+void UNarr_DialogueManager::OnDialogueLineFinished()
+{
+    if (!bIsPlayingDialogue)
+        return;
+    
+    if (CurrentSequenceID.IsEmpty())
+    {
+        // Single narration finished
+        StopCurrentDialogue();
+        return;
+    }
+    
+    // Move to next line in sequence
+    PlayNextDialogueLine();
+}
+
+void UNarr_DialogueManager::PlayNextDialogueLine()
+{
+    if (!RegisteredSequences.Contains(CurrentSequenceID))
+    {
+        StopCurrentDialogue();
+        return;
+    }
+    
+    FNarr_DialogueSequence& Sequence = RegisteredSequences[CurrentSequenceID];
+    
+    if (CurrentLineIndex >= Sequence.DialogueLines.Num())
+    {
+        // Sequence finished
+        StopCurrentDialogue();
+        return;
+    }
+    
+    // Get current line
+    CurrentDialogueLine = Sequence.DialogueLines[CurrentLineIndex];
+    CurrentLineIndex++;
+    
+    UE_LOG(LogTemp, Log, TEXT("DialogueManager: Playing line %d: %s"), 
+           CurrentLineIndex, *CurrentDialogueLine.DialogueText.ToString());
+    
+    // Play audio if available
+    if (DialogueAudioComponent && CurrentDialogueLine.VoiceClip.IsValid())
+    {
+        if (USoundCue* SoundCue = CurrentDialogueLine.VoiceClip.LoadSynchronous())
+        {
+            DialogueAudioComponent->SetSound(SoundCue);
+            DialogueAudioComponent->Play();
         }
     }
     
-    return BestDialogue;
+    // Set timer for line duration
+    if (UWorld* World = GetWorld())
+    {
+        World->GetTimerManager().SetTimer(DialogueTimerHandle, this, 
+                                         &UNarr_DialogueManager::OnDialogueLineFinished, 
+                                         CurrentDialogueLine.Duration, false);
+    }
+}
+
+void UNarr_DialogueManager::CreateSurvivalWarningSequences()
+{
+    // Low threat warnings
+    FNarr_DialogueSequence LowThreatSeq;
+    LowThreatSeq.SequenceID = TEXT("SurvivalWarning_Low");
+    LowThreatSeq.bIsRepeatable = true;
+    
+    FNarr_DialogueLine Line1;
+    Line1.SpeakerName = TEXT("Narrator");
+    Line1.DialogueText = FText::FromString(TEXT("Stay alert, survivor. Small predators roam these lands."));
+    Line1.Duration = 3.0f;
+    Line1.bIsNarration = true;
+    LowThreatSeq.DialogueLines.Add(Line1);
+    
+    RegisteredSequences.Add(LowThreatSeq.SequenceID, LowThreatSeq);
+    
+    // High threat warnings
+    FNarr_DialogueSequence HighThreatSeq;
+    HighThreatSeq.SequenceID = TEXT("SurvivalWarning_High");
+    HighThreatSeq.bIsRepeatable = true;
+    
+    FNarr_DialogueLine Line2;
+    Line2.SpeakerName = TEXT("Narrator");
+    Line2.DialogueText = FText::FromString(TEXT("Danger approaches. The apex predator has caught your scent."));
+    Line2.Duration = 4.0f;
+    Line2.bIsNarration = true;
+    HighThreatSeq.DialogueLines.Add(Line2);
+    
+    RegisteredSequences.Add(HighThreatSeq.SequenceID, HighThreatSeq);
+}
+
+void UNarr_DialogueManager::CreateDinosaurEncounterSequences()
+{
+    // T-Rex hostile encounter
+    FNarr_DialogueSequence TRexHostile;
+    TRexHostile.SequenceID = TEXT("Encounter_TRex_Hostile");
+    TRexHostile.bIsRepeatable = true;
+    
+    FNarr_DialogueLine TRexLine;
+    TRexLine.SpeakerName = TEXT("Narrator");
+    TRexLine.DialogueText = FText::FromString(TEXT("The thunder lizard roars. Its massive jaws can crush bone in a single bite."));
+    TRexLine.Duration = 5.0f;
+    TRexLine.bIsNarration = true;
+    TRexHostile.DialogueLines.Add(TRexLine);
+    
+    RegisteredSequences.Add(TRexHostile.SequenceID, TRexHostile);
+    
+    // Raptor pack encounter
+    FNarr_DialogueSequence RaptorHostile;
+    RaptorHostile.SequenceID = TEXT("Encounter_Raptor_Hostile");
+    RaptorHostile.bIsRepeatable = true;
+    
+    FNarr_DialogueLine RaptorLine;
+    RaptorLine.SpeakerName = TEXT("Narrator");
+    RaptorLine.DialogueText = FText::FromString(TEXT("Pack hunters circle their prey. Velociraptors work together."));
+    RaptorLine.Duration = 4.0f;
+    RaptorLine.bIsNarration = true;
+    RaptorHostile.DialogueLines.Add(RaptorLine);
+    
+    RegisteredSequences.Add(RaptorHostile.SequenceID, RaptorHostile);
 }
