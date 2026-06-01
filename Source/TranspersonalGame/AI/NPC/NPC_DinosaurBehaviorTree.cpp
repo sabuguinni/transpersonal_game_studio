@@ -1,268 +1,398 @@
 #include "NPC_DinosaurBehaviorTree.h"
+#include "BehaviorTree/BlackboardComponent.h"
+#include "BehaviorTree/BehaviorTreeComponent.h"
+#include "AIController.h"
 #include "Engine/World.h"
-#include "GameFramework/Actor.h"
+#include "GameFramework/Character.h"
 #include "Kismet/GameplayStatics.h"
-#include "Math/UnrealMathUtility.h"
 #include "Engine/Engine.h"
+
+// Blackboard key constants
+const FString UNPC_DinosaurBehaviorTree::BB_CurrentState = TEXT("CurrentState");
+const FString UNPC_DinosaurBehaviorTree::BB_TargetLocation = TEXT("TargetLocation");
+const FString UNPC_DinosaurBehaviorTree::BB_TargetActor = TEXT("TargetActor");
+const FString UNPC_DinosaurBehaviorTree::BB_ThreatLevel = TEXT("ThreatLevel");
+const FString UNPC_DinosaurBehaviorTree::BB_PackLeader = TEXT("PackLeader");
+const FString UNPC_DinosaurBehaviorTree::BB_IsInPack = TEXT("IsInPack");
 
 UNPC_DinosaurBehaviorTree::UNPC_DinosaurBehaviorTree()
 {
-    // Initialize default behavior data
-    BehaviorData.Species = ENPC_DinosaurSpecies::TRex;
-    BehaviorData.CurrentState = ENPC_DinosaurState::Idle;
-    BehaviorData.PatrolRadius = 5000.0f;
-    BehaviorData.DetectionRange = 3000.0f;
-    BehaviorData.AttackRange = 300.0f;
-    BehaviorData.MovementSpeed = 600.0f;
-    BehaviorData.Aggression = 0.7f;
-    BehaviorData.Hunger = 0.5f;
-    BehaviorData.Stamina = 1.0f;
-    BehaviorData.bIsPackHunter = false;
-    BehaviorData.PatrolCenter = FVector::ZeroVector;
-    BehaviorData.CurrentTarget = nullptr;
-    BehaviorData.LastPlayerSightTime = 0.0f;
-    BehaviorData.TerritorialRadius = 2000.0f;
+    PrimaryComponentTick.bCanEverTick = true;
+    PrimaryComponentTick.TickInterval = 0.1f; // Update 10 times per second
+
+    // Initialize default values
+    CurrentState = ENPCBehaviorState::Idle;
+    PreviousState = ENPCBehaviorState::Idle;
+    StateTimer = 0.0f;
+    StateTransitionDelay = 0.5f;
+
+    // Pack behavior defaults
+    PackLeader = nullptr;
+    bIsPackLeader = false;
+    MaxPackSize = 6; // Typical velociraptor pack size
+
+    // Threat detection defaults
+    ThreatDetectionRadius = 2000.0f; // 20 meters
+    ThreatDecayRate = 10.0f; // Threat reduces by 10 per second
+
+    // Behavior parameters
+    PatrolRadius = 5000.0f; // 50 meters patrol radius
+    HuntRange = 3000.0f; // 30 meters hunt range
+    FleeDistance = 1500.0f; // 15 meters flee distance
+    AggressionLevel = 50.0f; // Medium aggression
+    FearLevel = 30.0f; // Low fear
+
+    // Initialize components
+    BehaviorTreeComponent = nullptr;
+    BlackboardComponent = nullptr;
+    BehaviorTreeAsset = nullptr;
 }
 
-void UNPC_DinosaurBehaviorTree::InitializeBehaviorForSpecies(ENPC_DinosaurSpecies Species, const FVector& SpawnLocation)
+void UNPC_DinosaurBehaviorTree::BeginPlay()
 {
-    BehaviorData.Species = Species;
-    BehaviorData.PatrolCenter = SpawnLocation;
-    
-    switch (Species)
+    Super::BeginPlay();
+
+    // Get AI Controller and initialize behavior tree
+    if (AActor* Owner = GetOwner())
     {
-        case ENPC_DinosaurSpecies::TRex:
-            SetupTRexBehavior();
-            break;
-        case ENPC_DinosaurSpecies::Velociraptor:
-            SetupVelociraptorBehavior();
-            break;
-        case ENPC_DinosaurSpecies::Triceratops:
-        case ENPC_DinosaurSpecies::Brachiosaurus:
-        case ENPC_DinosaurSpecies::Ankylosaurus:
-        case ENPC_DinosaurSpecies::Parasaurolophus:
-            SetupHerbivoreBehavior();
-            break;
+        if (APawn* OwnerPawn = Cast<APawn>(Owner))
+        {
+            if (AAIController* AIController = Cast<AAIController>(OwnerPawn->GetController()))
+            {
+                BehaviorTreeComponent = AIController->GetBehaviorTreeComponent();
+                BlackboardComponent = AIController->GetBlackboardComponent();
+            }
+        }
     }
-    
-    UE_LOG(LogTemp, Warning, TEXT("Dinosaur behavior initialized for species: %d at location: %s"), 
-           (int32)Species, *SpawnLocation.ToString());
+
+    InitializeBehaviorTree();
 }
 
-void UNPC_DinosaurBehaviorTree::SetupTRexBehavior()
+void UNPC_DinosaurBehaviorTree::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
-    BehaviorData.PatrolRadius = 8000.0f;
-    BehaviorData.DetectionRange = 4000.0f;
-    BehaviorData.AttackRange = 500.0f;
-    BehaviorData.MovementSpeed = 800.0f;
-    BehaviorData.Aggression = 0.9f;
-    BehaviorData.bIsPackHunter = false;
-    BehaviorData.TerritorialRadius = 3000.0f;
-    BehaviorData.CurrentState = ENPC_DinosaurState::Patrol;
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+
+    UpdateStateTimer(DeltaTime);
+    UpdateThreatDecay(DeltaTime);
+    UpdatePackBehavior();
+    DetectThreats();
 }
 
-void UNPC_DinosaurBehaviorTree::SetupVelociraptorBehavior()
+void UNPC_DinosaurBehaviorTree::InitializeBehaviorTree()
 {
-    BehaviorData.PatrolRadius = 6000.0f;
-    BehaviorData.DetectionRange = 3500.0f;
-    BehaviorData.AttackRange = 200.0f;
-    BehaviorData.MovementSpeed = 1200.0f;
-    BehaviorData.Aggression = 0.8f;
-    BehaviorData.bIsPackHunter = true;
-    BehaviorData.TerritorialRadius = 2500.0f;
-    BehaviorData.CurrentState = ENPC_DinosaurState::Patrol;
-}
-
-void UNPC_DinosaurBehaviorTree::SetupHerbivoreBehavior()
-{
-    BehaviorData.PatrolRadius = 4000.0f;
-    BehaviorData.DetectionRange = 2000.0f;
-    BehaviorData.AttackRange = 400.0f;
-    BehaviorData.MovementSpeed = 400.0f;
-    BehaviorData.Aggression = 0.3f;
-    BehaviorData.bIsPackHunter = false;
-    BehaviorData.TerritorialRadius = 1500.0f;
-    BehaviorData.CurrentState = ENPC_DinosaurState::Eat;
-}
-
-void UNPC_DinosaurBehaviorTree::UpdateBehaviorState(ENPC_DinosaurState NewState)
-{
-    if (BehaviorData.CurrentState != NewState)
+    if (!BlackboardComponent)
     {
-        ENPC_DinosaurState PreviousState = BehaviorData.CurrentState;
-        BehaviorData.CurrentState = NewState;
+        UE_LOG(LogTemp, Warning, TEXT("DinosaurBehaviorTree: No BlackboardComponent found"));
+        return;
+    }
+
+    // Initialize blackboard values
+    SetBlackboardValue(BB_CurrentState, static_cast<float>(CurrentState));
+    SetBlackboardValue(BB_ThreatLevel, 0.0f);
+    SetBlackboardObject(BB_PackLeader, PackLeader);
+    SetBlackboardValue(BB_IsInPack, IsInPack() ? 1.0f : 0.0f);
+
+    // Set initial target location (home position)
+    if (AActor* Owner = GetOwner())
+    {
+        SetBlackboardVector(BB_TargetLocation, Owner->GetActorLocation());
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("DinosaurBehaviorTree: Initialized for %s"), 
+           GetOwner() ? *GetOwner()->GetName() : TEXT("Unknown"));
+}
+
+void UNPC_DinosaurBehaviorTree::StartBehaviorTree()
+{
+    if (BehaviorTreeComponent && BehaviorTreeAsset)
+    {
+        BehaviorTreeComponent->StartTree(*BehaviorTreeAsset);
+        UE_LOG(LogTemp, Log, TEXT("DinosaurBehaviorTree: Started behavior tree"));
+    }
+    else
+    {
+        UE_LOG(LogTemp, Warning, TEXT("DinosaurBehaviorTree: Cannot start - missing component or asset"));
+    }
+}
+
+void UNPC_DinosaurBehaviorTree::StopBehaviorTree()
+{
+    if (BehaviorTreeComponent)
+    {
+        BehaviorTreeComponent->StopTree();
+        UE_LOG(LogTemp, Log, TEXT("DinosaurBehaviorTree: Stopped behavior tree"));
+    }
+}
+
+void UNPC_DinosaurBehaviorTree::RestartBehaviorTree()
+{
+    StopBehaviorTree();
+    StartBehaviorTree();
+}
+
+void UNPC_DinosaurBehaviorTree::SetCurrentState(ENPCBehaviorState NewState)
+{
+    if (CurrentState != NewState)
+    {
+        PreviousState = CurrentState;
+        CurrentState = NewState;
+        StateTimer = 0.0f;
+
+        // Update blackboard
+        SetBlackboardValue(BB_CurrentState, static_cast<float>(CurrentState));
+
+        UE_LOG(LogTemp, Log, TEXT("DinosaurBehaviorTree: State changed from %d to %d"), 
+               static_cast<int32>(PreviousState), static_cast<int32>(CurrentState));
+    }
+}
+
+void UNPC_DinosaurBehaviorTree::TransitionToState(ENPCBehaviorState NewState, float TransitionDelay)
+{
+    StateTransitionDelay = TransitionDelay;
+    SetCurrentState(NewState);
+}
+
+void UNPC_DinosaurBehaviorTree::SetBlackboardValue(const FString& KeyName, float Value)
+{
+    if (BlackboardComponent)
+    {
+        BlackboardComponent->SetValueAsFloat(*KeyName, Value);
+    }
+}
+
+void UNPC_DinosaurBehaviorTree::SetBlackboardVector(const FString& KeyName, const FVector& Value)
+{
+    if (BlackboardComponent)
+    {
+        BlackboardComponent->SetValueAsVector(*KeyName, Value);
+    }
+}
+
+void UNPC_DinosaurBehaviorTree::SetBlackboardObject(const FString& KeyName, UObject* Value)
+{
+    if (BlackboardComponent)
+    {
+        BlackboardComponent->SetValueAsObject(*KeyName, Value);
+    }
+}
+
+float UNPC_DinosaurBehaviorTree::GetBlackboardValue(const FString& KeyName) const
+{
+    if (BlackboardComponent)
+    {
+        return BlackboardComponent->GetValueAsFloat(*KeyName);
+    }
+    return 0.0f;
+}
+
+bool UNPC_DinosaurBehaviorTree::IsInCombat() const
+{
+    return CurrentState == ENPCBehaviorState::Combat || CurrentState == ENPCBehaviorState::Hunting;
+}
+
+bool UNPC_DinosaurBehaviorTree::IsHunting() const
+{
+    return CurrentState == ENPCBehaviorState::Hunting;
+}
+
+bool UNPC_DinosaurBehaviorTree::IsFleeing() const
+{
+    return CurrentState == ENPCBehaviorState::Fleeing;
+}
+
+bool UNPC_DinosaurBehaviorTree::IsFeeding() const
+{
+    return CurrentState == ENPCBehaviorState::Feeding;
+}
+
+bool UNPC_DinosaurBehaviorTree::IsPatrolling() const
+{
+    return CurrentState == ENPCBehaviorState::Patrolling;
+}
+
+void UNPC_DinosaurBehaviorTree::JoinPack(UNPC_DinosaurBehaviorTree* NewPackLeader)
+{
+    if (!NewPackLeader || NewPackLeader == this)
+        return;
+
+    // Leave current pack first
+    LeavePack();
+
+    // Join new pack
+    PackLeader = NewPackLeader;
+    bIsPackLeader = false;
+
+    // Add to leader's pack members
+    if (PackLeader->PackMembers.Num() < PackLeader->MaxPackSize)
+    {
+        PackLeader->PackMembers.AddUnique(this);
+        SetBlackboardObject(BB_PackLeader, PackLeader);
+        SetBlackboardValue(BB_IsInPack, 1.0f);
+
+        UE_LOG(LogTemp, Log, TEXT("DinosaurBehaviorTree: %s joined pack led by %s"), 
+               GetOwner() ? *GetOwner()->GetName() : TEXT("Unknown"),
+               PackLeader->GetOwner() ? *PackLeader->GetOwner()->GetName() : TEXT("Unknown"));
+    }
+}
+
+void UNPC_DinosaurBehaviorTree::LeavePack()
+{
+    if (PackLeader)
+    {
+        // Remove from leader's pack members
+        PackLeader->PackMembers.Remove(this);
+        PackLeader = nullptr;
+    }
+
+    // If this was a pack leader, disband the pack
+    if (bIsPackLeader)
+    {
+        for (UNPC_DinosaurBehaviorTree* Member : PackMembers)
+        {
+            if (Member)
+            {
+                Member->PackLeader = nullptr;
+                Member->SetBlackboardObject(BB_PackLeader, nullptr);
+                Member->SetBlackboardValue(BB_IsInPack, 0.0f);
+            }
+        }
+        PackMembers.Empty();
+        bIsPackLeader = false;
+    }
+
+    // Update blackboard
+    SetBlackboardObject(BB_PackLeader, nullptr);
+    SetBlackboardValue(BB_IsInPack, 0.0f);
+
+    UE_LOG(LogTemp, Log, TEXT("DinosaurBehaviorTree: %s left pack"), 
+           GetOwner() ? *GetOwner()->GetName() : TEXT("Unknown"));
+}
+
+void UNPC_DinosaurBehaviorTree::DetectThreats()
+{
+    if (!GetOwner())
+        return;
+
+    UWorld* World = GetOwner()->GetWorld();
+    if (!World)
+        return;
+
+    FVector OwnerLocation = GetOwner()->GetActorLocation();
+
+    // Find all pawns within threat detection radius
+    TArray<AActor*> FoundActors;
+    UGameplayStatics::GetAllActorsOfClass(World, APawn::StaticClass(), FoundActors);
+
+    for (AActor* Actor : FoundActors)
+    {
+        if (!Actor || Actor == GetOwner())
+            continue;
+
+        float Distance = FVector::Dist(OwnerLocation, Actor->GetActorLocation());
+        if (Distance <= ThreatDetectionRadius)
+        {
+            // Calculate threat level based on distance and actor type
+            float ThreatLevel = 100.0f - (Distance / ThreatDetectionRadius * 100.0f);
+            
+            // Increase threat for players
+            if (Actor->IsA<ACharacter>())
+            {
+                ThreatLevel *= 1.5f;
+            }
+
+            AddThreat(Actor, ThreatLevel);
+        }
+    }
+}
+
+void UNPC_DinosaurBehaviorTree::AddThreat(AActor* ThreatActor, float ThreatLevel)
+{
+    if (!ThreatActor)
+        return;
+
+    ThreatMap.Add(ThreatActor, ThreatLevel);
+    
+    // Update blackboard with highest threat
+    AActor* HighestThreat = GetHighestThreat();
+    if (HighestThreat)
+    {
+        SetBlackboardObject(BB_TargetActor, HighestThreat);
+        SetBlackboardValue(BB_ThreatLevel, ThreatMap[HighestThreat]);
+    }
+}
+
+void UNPC_DinosaurBehaviorTree::RemoveThreat(AActor* ThreatActor)
+{
+    ThreatMap.Remove(ThreatActor);
+}
+
+AActor* UNPC_DinosaurBehaviorTree::GetHighestThreat() const
+{
+    AActor* HighestThreatActor = nullptr;
+    float HighestThreatLevel = 0.0f;
+
+    for (const auto& ThreatPair : ThreatMap)
+    {
+        if (ThreatPair.Value > HighestThreatLevel)
+        {
+            HighestThreatLevel = ThreatPair.Value;
+            HighestThreatActor = ThreatPair.Key;
+        }
+    }
+
+    return HighestThreatActor;
+}
+
+void UNPC_DinosaurBehaviorTree::UpdateStateTimer(float DeltaTime)
+{
+    StateTimer += DeltaTime;
+}
+
+void UNPC_DinosaurBehaviorTree::ProcessStateTransition()
+{
+    if (StateTimer >= StateTransitionDelay)
+    {
+        // State transition logic based on current conditions
+        // This would be expanded based on specific behavior requirements
+    }
+}
+
+void UNPC_DinosaurBehaviorTree::UpdateThreatDecay(float DeltaTime)
+{
+    TArray<AActor*> ThreatsToRemove;
+
+    for (auto& ThreatPair : ThreatMap)
+    {
+        ThreatPair.Value -= ThreatDecayRate * DeltaTime;
         
-        UE_LOG(LogTemp, Log, TEXT("Dinosaur state changed from %d to %d"), 
-               (int32)PreviousState, (int32)NewState);
+        if (ThreatPair.Value <= 0.0f)
+        {
+            ThreatsToRemove.Add(ThreatPair.Key);
+        }
     }
-}
 
-bool UNPC_DinosaurBehaviorTree::ShouldChasePlayer(AActor* PlayerActor, float Distance)
-{
-    if (!PlayerActor)
+    // Remove expired threats
+    for (AActor* ThreatToRemove : ThreatsToRemove)
     {
-        return false;
+        RemoveThreat(ThreatToRemove);
     }
-    
-    // Check if player is within detection range
-    if (Distance > BehaviorData.DetectionRange)
+}
+
+void UNPC_DinosaurBehaviorTree::UpdatePackBehavior()
+{
+    if (IsInPack() && PackLeader)
     {
-        return false;
+        // Follow pack leader's behavior state
+        if (PackLeader->CurrentState != CurrentState)
+        {
+            // Pack members should generally follow leader's state
+            // but with some individual variation
+            float StateFollowChance = 0.8f; // 80% chance to follow leader
+            
+            if (FMath::RandRange(0.0f, 1.0f) <= StateFollowChance)
+            {
+                SetCurrentState(PackLeader->CurrentState);
+            }
+        }
     }
-    
-    // Update last sight time
-    BehaviorData.LastPlayerSightTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
-    
-    // Aggression and hunger influence chase decision
-    float ChaseThreshold = (1.0f - BehaviorData.Aggression) + (BehaviorData.Hunger * 0.5f);
-    
-    return Distance <= (BehaviorData.DetectionRange * ChaseThreshold);
-}
-
-bool UNPC_DinosaurBehaviorTree::ShouldAttackTarget(AActor* Target, float Distance)
-{
-    if (!Target || Distance > BehaviorData.AttackRange)
-    {
-        return false;
-    }
-    
-    // Check stamina for attack
-    if (BehaviorData.Stamina < 0.3f)
-    {
-        return false;
-    }
-    
-    return true;
-}
-
-FVector UNPC_DinosaurBehaviorTree::GetNextPatrolPoint()
-{
-    // Generate random point within patrol radius
-    float RandomAngle = FMath::RandRange(0.0f, 2.0f * PI);
-    float RandomDistance = FMath::RandRange(BehaviorData.PatrolRadius * 0.3f, BehaviorData.PatrolRadius);
-    
-    FVector RandomOffset = FVector(
-        FMath::Cos(RandomAngle) * RandomDistance,
-        FMath::Sin(RandomAngle) * RandomDistance,
-        0.0f
-    );
-    
-    return BehaviorData.PatrolCenter + RandomOffset;
-}
-
-void UNPC_DinosaurBehaviorTree::SetTerritorialBehavior(const FVector& Center, float Radius)
-{
-    BehaviorData.PatrolCenter = Center;
-    BehaviorData.TerritorialRadius = Radius;
-    BehaviorData.CurrentState = ENPC_DinosaurState::Territorial;
-    
-    UE_LOG(LogTemp, Warning, TEXT("Territorial behavior set at %s with radius %f"), 
-           *Center.ToString(), Radius);
-}
-
-float UNPC_DinosaurBehaviorTree::GetSpeciesAggression(ENPC_DinosaurSpecies Species)
-{
-    switch (Species)
-    {
-        case ENPC_DinosaurSpecies::TRex:
-            return 0.9f;
-        case ENPC_DinosaurSpecies::Velociraptor:
-            return 0.8f;
-        case ENPC_DinosaurSpecies::Ankylosaurus:
-            return 0.4f;
-        case ENPC_DinosaurSpecies::Triceratops:
-            return 0.3f;
-        case ENPC_DinosaurSpecies::Brachiosaurus:
-            return 0.1f;
-        case ENPC_DinosaurSpecies::Parasaurolophus:
-            return 0.2f;
-        default:
-            return 0.5f;
-    }
-}
-
-float UNPC_DinosaurBehaviorTree::GetSpeciesDetectionRange(ENPC_DinosaurSpecies Species)
-{
-    switch (Species)
-    {
-        case ENPC_DinosaurSpecies::TRex:
-            return 4000.0f;
-        case ENPC_DinosaurSpecies::Velociraptor:
-            return 3500.0f;
-        case ENPC_DinosaurSpecies::Triceratops:
-            return 2500.0f;
-        case ENPC_DinosaurSpecies::Ankylosaurus:
-            return 2000.0f;
-        case ENPC_DinosaurSpecies::Brachiosaurus:
-            return 3000.0f;
-        case ENPC_DinosaurSpecies::Parasaurolophus:
-            return 2800.0f;
-        default:
-            return 2500.0f;
-    }
-}
-
-bool UNPC_DinosaurBehaviorTree::IsNocturnal(ENPC_DinosaurSpecies Species)
-{
-    switch (Species)
-    {
-        case ENPC_DinosaurSpecies::TRex:
-            return true; // T-Rex hunts at night
-        case ENPC_DinosaurSpecies::Velociraptor:
-            return true; // Pack hunters active at night
-        default:
-            return false; // Most herbivores are diurnal
-    }
-}
-
-void UNPC_DinosaurBehaviorTree::SetupTRexBehavior()
-{
-    // T-Rex specific behavior setup
-    BehaviorData.PatrolRadius = 8000.0f;
-    BehaviorData.DetectionRange = 4000.0f;
-    BehaviorData.AttackRange = 500.0f;
-    BehaviorData.MovementSpeed = 800.0f;
-    BehaviorData.Aggression = 0.9f;
-    BehaviorData.bIsPackHunter = false;
-    BehaviorData.TerritorialRadius = 3000.0f;
-}
-
-void UNPC_DinosaurBehaviorTree::SetupVelociraptorBehavior()
-{
-    // Velociraptor pack behavior
-    BehaviorData.PatrolRadius = 6000.0f;
-    BehaviorData.DetectionRange = 3500.0f;
-    BehaviorData.AttackRange = 200.0f;
-    BehaviorData.MovementSpeed = 1200.0f;
-    BehaviorData.Aggression = 0.8f;
-    BehaviorData.bIsPackHunter = true;
-    BehaviorData.TerritorialRadius = 2500.0f;
-}
-
-void UNPC_DinosaurBehaviorTree::SetupHerbivoreBehavior()
-{
-    // Herbivore defensive behavior
-    BehaviorData.PatrolRadius = 4000.0f;
-    BehaviorData.DetectionRange = 2000.0f;
-    BehaviorData.AttackRange = 400.0f;
-    BehaviorData.MovementSpeed = 400.0f;
-    BehaviorData.Aggression = 0.3f;
-    BehaviorData.bIsPackHunter = false;
-    BehaviorData.TerritorialRadius = 1500.0f;
-}
-
-float UNPC_DinosaurBehaviorTree::GetRandomPatrolDelay()
-{
-    return FMath::RandRange(3.0f, 8.0f);
-}
-
-bool UNPC_DinosaurBehaviorTree::IsPlayerInTerritory(AActor* PlayerActor)
-{
-    if (!PlayerActor)
-    {
-        return false;
-    }
-    
-    float Distance = FVector::Dist(PlayerActor->GetActorLocation(), BehaviorData.PatrolCenter);
-    return Distance <= BehaviorData.TerritorialRadius;
 }
