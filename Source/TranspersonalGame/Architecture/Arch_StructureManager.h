@@ -4,56 +4,57 @@
 #include "GameFramework/Actor.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/SceneComponent.h"
-#include "Engine/World.h"
-#include "SharedTypes.h"
+#include "Engine/StaticMesh.h"
+#include "Materials/MaterialInterface.h"
+#include "../SharedTypes.h"
 #include "Arch_StructureManager.generated.h"
 
-UENUM(BlueprintType)
-enum class EArch_StructureType : uint8
-{
-    None = 0,
-    Temple,
-    Ruins,
-    Pillar,
-    Archway,
-    Wall,
-    Platform,
-    Bridge,
-    Tower
-};
-
 USTRUCT(BlueprintType)
-struct FArch_StructureData
+struct TRANSPERSONALGAME_API FArch_StructureData
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    EArch_StructureType StructureType = EArch_StructureType::None;
+    FString StructureName;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    FString StructureName = "UnnamedStructure";
+    EBiomeType BiomeType;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    float Durability = 100.0f;
+    FVector Location;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    float WeatheringLevel = 0.0f;
+    FRotator Rotation;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    bool bIsRuined = false;
+    float WeatheringLevel;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    EBiomeType BiomeType = EBiomeType::Savanna;
+    bool bIsRuin;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
+    TArray<FString> InteriorObjects;
 
     FArch_StructureData()
     {
-        StructureType = EArch_StructureType::None;
-        StructureName = "UnnamedStructure";
-        Durability = 100.0f;
-        WeatheringLevel = 0.0f;
-        bIsRuined = false;
+        StructureName = TEXT("Unknown");
         BiomeType = EBiomeType::Savanna;
+        Location = FVector::ZeroVector;
+        Rotation = FRotator::ZeroRotator;
+        WeatheringLevel = 0.5f;
+        bIsRuin = false;
     }
+};
+
+UENUM(BlueprintType)
+enum class EArch_StructureType : uint8
+{
+    Dwelling,
+    Storage,
+    Workshop,
+    Ceremonial,
+    Defensive,
+    Ruin
 };
 
 UCLASS(BlueprintType, Blueprintable)
@@ -73,66 +74,59 @@ protected:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
     UStaticMeshComponent* MainStructureMesh;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure Data")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure Config")
     FArch_StructureData StructureData;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure Settings")
-    TArray<UStaticMesh*> StructureMeshes;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure Config")
+    EArch_StructureType StructureType;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure Settings")
-    float WeatheringRate = 0.1f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Materials")
+    TArray<UMaterialInterface*> WeatheredMaterials;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure Settings")
-    bool bAutoWeathering = true;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interior")
+    TArray<UStaticMesh*> InteriorProps;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure Settings")
-    float MaxViewDistance = 10000.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interior")
+    TArray<AActor*> SpawnedInteriorActors;
 
 public:
     virtual void Tick(float DeltaTime) override;
 
     UFUNCTION(BlueprintCallable, Category = "Structure Management")
-    void InitializeStructure(EArch_StructureType Type, const FString& Name, EBiomeType Biome);
-
-    UFUNCTION(BlueprintCallable, Category = "Structure Management")
-    void SetStructureMesh(UStaticMesh* NewMesh);
+    void InitializeStructure(const FArch_StructureData& InStructureData, EArch_StructureType InType);
 
     UFUNCTION(BlueprintCallable, Category = "Structure Management")
     void ApplyWeathering(float WeatheringAmount);
 
-    UFUNCTION(BlueprintCallable, Category = "Structure Management")
-    void SetRuinedState(bool bRuined);
+    UFUNCTION(BlueprintCallable, Category = "Interior Management")
+    void PopulateInterior();
 
-    UFUNCTION(BlueprintPure, Category = "Structure Management")
+    UFUNCTION(BlueprintCallable, Category = "Interior Management")
+    void ClearInterior();
+
+    UFUNCTION(BlueprintCallable, Category = "Structure Management")
+    void ConvertToRuin(float DestructionLevel);
+
+    UFUNCTION(BlueprintCallable, Category = "Structure Management")
     FArch_StructureData GetStructureData() const { return StructureData; }
 
-    UFUNCTION(BlueprintPure, Category = "Structure Management")
-    bool IsStructureRuined() const { return StructureData.bIsRuined; }
-
-    UFUNCTION(BlueprintPure, Category = "Structure Management")
-    float GetDurabilityPercent() const { return StructureData.Durability / 100.0f; }
-
     UFUNCTION(BlueprintCallable, Category = "Structure Management")
-    void RepairStructure(float RepairAmount);
+    void SetStructureType(EArch_StructureType NewType);
 
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Editor Tools")
-    void RandomizeWeathering();
+    UFUNCTION(BlueprintCallable, Category = "Material Management")
+    void UpdateMaterialsForBiome(EBiomeType BiomeType);
 
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Editor Tools")
-    void ResetStructure();
-
-protected:
-    UFUNCTION()
-    void UpdateStructureAppearance();
-
-    UFUNCTION()
-    void ProcessWeathering(float DeltaTime);
-
-    UFUNCTION()
-    void UpdateLOD();
+    UFUNCTION(BlueprintCallable, Category = "Validation")
+    bool ValidateStructurePlacement() const;
 
 private:
-    float LastWeatheringUpdate = 0.0f;
-    float WeatheringUpdateInterval = 5.0f;
-    bool bIsInitialized = false;
+    void SpawnInteriorProp(UStaticMesh* PropMesh, const FVector& RelativeLocation, const FRotator& RelativeRotation);
+    void ApplyBiomeSpecificWeathering();
+    void UpdateStructureAppearance();
+
+    UPROPERTY()
+    float CurrentWeatheringLevel;
+
+    UPROPERTY()
+    bool bInteriorPopulated;
 };
