@@ -3,79 +3,70 @@
 #include "CoreMinimal.h"
 #include "Engine/World.h"
 #include "Subsystems/WorldSubsystem.h"
-#include "Components/ActorComponent.h"
-#include "../../SharedTypes.h"
-#include "Eng_BiomeManager.h"
+#include "SharedTypes.h"
 #include "Eng_WorldArchitect.generated.h"
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEng_WorldConfiguration
+struct TRANSPERSONALGAME_API FEng_WorldZone
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World")
-    FVector WorldSize = FVector(200000, 200000, 10000);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Zone")
+    FString ZoneName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World")
-    int32 MaxTotalActors = 20000;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Zone")
+    FVector CenterLocation;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World")
-    int32 MaxDinosaurs = 150;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Zone")
+    float Radius;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World")
-    int32 MaxVegetation = 15000;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Zone")
+    EBiomeType BiomeType;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World")
-    int32 MaxProps = 5000;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Zone")
+    int32 MaxActors;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World")
-    bool bEnableWorldPartition = true;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Zone")
+    int32 CurrentActors;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World")
-    bool bEnableLODSystem = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World")
-    float WorldStreamingDistance = 50000.0f;
-
-    FEng_WorldConfiguration()
+    FEng_WorldZone()
     {
-        // Default values already set above
+        ZoneName = TEXT("Unknown");
+        CenterLocation = FVector::ZeroVector;
+        Radius = 15000.0f;
+        BiomeType = EBiomeType::Savanna;
+        MaxActors = 1000;
+        CurrentActors = 0;
     }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEng_PerformanceMetrics
+struct TRANSPERSONALGAME_API FEng_PerformanceLimits
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float CurrentFPS = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    int32 MaxTotalActors;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float MemoryUsageMB = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    int32 MaxDinosaurs;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    int32 DrawCalls = 0;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    int32 MaxPropsPerBiome;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    int32 VisibleActors = 0;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float TargetFrameRate;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float GameThreadTime = 0.0f;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float RenderThreadTime = 0.0f;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    bool bIsPerformanceGood = true;
-
-    FEng_PerformanceMetrics()
+    FEng_PerformanceLimits()
     {
-        // Default values already set above
+        MaxTotalActors = 8000;
+        MaxDinosaurs = 150;
+        MaxPropsPerBiome = 1000;
+        TargetFrameRate = 60.0f;
     }
 };
 
-UCLASS(BlueprintType, Blueprintable)
+UCLASS(BlueprintType)
 class TRANSPERSONALGAME_API UEng_WorldArchitect : public UWorldSubsystem
 {
     GENERATED_BODY()
@@ -86,88 +77,43 @@ public:
     // USubsystem interface
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
-    virtual void Tick(float DeltaTime) override;
-    virtual bool ShouldCreateSubsystem(UObject* Outer) const override;
 
-    UFUNCTION(BlueprintCallable, Category = "World Architecture")
-    void InitializeWorldSystems();
+    UFUNCTION(BlueprintCallable, Category = "World Architect")
+    void InitializeWorldZones();
 
-    UFUNCTION(BlueprintCallable, Category = "World Architecture")
-    void ValidateWorldConfiguration();
+    UFUNCTION(BlueprintCallable, Category = "World Architect")
+    bool CanSpawnActorInZone(const FVector& Location, const FString& ActorType);
 
-    UFUNCTION(BlueprintCallable, Category = "World Architecture")
-    bool CanSpawnActor(const FString& ActorType, const FVector& Location);
+    UFUNCTION(BlueprintCallable, Category = "World Architect")
+    FEng_WorldZone GetZoneAtLocation(const FVector& Location);
 
-    UFUNCTION(BlueprintCallable, Category = "World Architecture")
-    void RegisterSpawnedActor(AActor* Actor, const FString& ActorType);
+    UFUNCTION(BlueprintCallable, Category = "World Architect")
+    void RegisterActorSpawned(const FVector& Location, const FString& ActorType);
 
-    UFUNCTION(BlueprintCallable, Category = "World Architecture")
-    void UnregisterActor(AActor* Actor, const FString& ActorType);
-
-    UFUNCTION(BlueprintCallable, Category = "World Architecture")
-    FEng_PerformanceMetrics GetPerformanceMetrics() const;
-
-    UFUNCTION(BlueprintCallable, Category = "World Architecture")
-    void OptimizeWorldPerformance();
-
-    UFUNCTION(BlueprintCallable, Category = "World Architecture")
+    UFUNCTION(BlueprintCallable, Category = "World Architect")
     void CleanupExcessActors();
 
-    UFUNCTION(BlueprintCallable, Category = "World Architecture")
-    TArray<FVector> GetOptimalSpawnLocations(const FString& ActorType, int32 Count);
+    UFUNCTION(BlueprintCallable, Category = "World Architect")
+    int32 GetTotalActorCount();
 
-    UFUNCTION(BlueprintCallable, Category = "World Architecture")
-    void SetWorldConfiguration(const FEng_WorldConfiguration& NewConfig);
+    UFUNCTION(BlueprintCallable, Category = "World Architect")
+    TArray<FEng_WorldZone> GetAllZones() const { return WorldZones; }
 
-    UFUNCTION(BlueprintCallable, Category = "World Architecture")
-    FEng_WorldConfiguration GetWorldConfiguration() const;
-
-    UFUNCTION(BlueprintCallable, Category = "World Architecture")
-    void EnablePerformanceMonitoring(bool bEnable);
-
-    UFUNCTION(BlueprintCallable, Category = "World Architecture")
-    void LogWorldStatistics();
-
-    UFUNCTION(BlueprintCallable, Category = "World Architecture")
-    bool IsWorldHealthy() const;
-
-    UFUNCTION(BlueprintCallable, Category = "World Architecture")
-    void ForceGarbageCollection();
+    UFUNCTION(BlueprintCallable, Category = "World Architect")
+    FEng_PerformanceLimits GetPerformanceLimits() const { return PerformanceLimits; }
 
 protected:
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
-    FEng_WorldConfiguration WorldConfig;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "World Architect")
+    TArray<FEng_WorldZone> WorldZones;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
-    FEng_PerformanceMetrics CurrentMetrics;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "World Architect")
+    FEng_PerformanceLimits PerformanceLimits;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Monitoring")
-    bool bPerformanceMonitoringEnabled = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Monitoring")
-    float PerformanceCheckInterval = 5.0f;
-
-    UPROPERTY()
-    float LastPerformanceCheck = 0.0f;
-
-    UPROPERTY()
-    int32 CurrentDinosaurCount = 0;
-
-    UPROPERTY()
-    int32 CurrentVegetationCount = 0;
-
-    UPROPERTY()
-    int32 CurrentPropCount = 0;
-
-    UPROPERTY()
-    int32 CurrentTotalActors = 0;
+    UPROPERTY(BlueprintReadOnly, Category = "World Architect")
+    bool bIsInitialized;
 
 private:
-    void UpdatePerformanceMetrics();
-    void CheckPerformanceThresholds();
-    void UpdateActorCounts();
-    bool ShouldOptimizePerformance() const;
-    void PerformLODOptimization();
-    void PerformCullingOptimization();
-    UEng_BiomeManager* GetBiomeManager() const;
+    void CreateDefaultZones();
+    void UpdateZoneActorCounts();
+    FEng_WorldZone* FindZoneByLocation(const FVector& Location);
 };
