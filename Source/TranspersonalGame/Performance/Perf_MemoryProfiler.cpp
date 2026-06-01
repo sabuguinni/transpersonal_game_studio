@@ -1,47 +1,83 @@
 #include "Perf_MemoryProfiler.h"
-#include "Engine/World.h"
 #include "Engine/Engine.h"
-#include "TimerManager.h"
+#include "Engine/World.h"
 #include "HAL/PlatformMemory.h"
+#include "Stats/Stats.h"
+#include "Engine/StaticMesh.h"
+#include "Engine/Texture.h"
+#include "Sound/SoundWave.h"
+#include "TimerManager.h"
 #include "GameFramework/Actor.h"
 #include "Components/ActorComponent.h"
-
-UPerf_MemoryProfiler::UPerf_MemoryProfiler()
-{
-    bIsProfilingActive = false;
-    MemoryThresholdMB = 8192.0f; // 8GB threshold
-    ProfilingInterval = 1.0f; // Update every second
-}
 
 void UPerf_MemoryProfiler::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
     
-    UE_LOG(LogTemp, Log, TEXT("Performance Memory Profiler initialized"));
+    bIsProfilingActive = false;
+    ProfilingInterval = 5.0f;
+    MemoryWarningThresholdMB = 6000.0f;  // 6GB warning
+    MemoryCriticalThresholdMB = 8000.0f; // 8GB critical
+    MemoryHistory.Reserve(1000); // Reserve space for history
     
-    // Start profiling automatically
-    StartMemoryProfiling();
+    UE_LOG(LogTemp, Log, TEXT("Performance Memory Profiler initialized"));
 }
 
 void UPerf_MemoryProfiler::Deinitialize()
 {
     StopMemoryProfiling();
+    MemoryHistory.Empty();
     Super::Deinitialize();
 }
 
-FPerf_MemoryStats UPerf_MemoryProfiler::GetCurrentMemoryStats()
+FPerf_MemorySnapshot UPerf_MemoryProfiler::CaptureMemorySnapshot()
 {
-    UpdateMemoryStats();
-    return CurrentStats;
+    FPerf_MemorySnapshot Snapshot;
+    
+    // Get platform memory stats
+    FPlatformMemoryStats MemStats = FPlatformMemory::GetStats();
+    Snapshot.PhysicalMemoryMB = MemStats.UsedPhysical / (1024.0f * 1024.0f);
+    Snapshot.VirtualMemoryMB = MemStats.UsedVirtual / (1024.0f * 1024.0f);
+    
+    // Calculate texture memory usage
+    Snapshot.TextureMemoryMB = CalculateTextureMemoryUsage();
+    
+    // Calculate mesh memory usage
+    Snapshot.MeshMemoryMB = CalculateMeshMemoryUsage();
+    
+    // Calculate audio memory usage
+    Snapshot.AudioMemoryMB = CalculateAudioMemoryUsage();
+    
+    // Count actors and components
+    if (UWorld* World = GetWorld())
+    {
+        Snapshot.ActorCount = 0;
+        Snapshot.ComponentCount = 0;
+        
+        for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+        {
+            AActor* Actor = *ActorItr;
+            if (IsValid(Actor))
+            {
+                Snapshot.ActorCount++;
+                Snapshot.ComponentCount += Actor->GetRootComponent() ? 
+                    Actor->GetRootComponent()->GetAttachChildren().Num() + 1 : 0;
+            }
+        }
+    }
+    
+    Snapshot.Timestamp = FDateTime::Now();
+    return Snapshot;
 }
 
-void UPerf_MemoryProfiler::StartMemoryProfiling()
+void UPerf_MemoryProfiler::StartMemoryProfiling(float IntervalSeconds)
 {
     if (bIsProfilingActive)
     {
-        return;
+        StopMemoryProfiling();
     }
-
+    
+    ProfilingInterval = FMath::Max(IntervalSeconds, 1.0f);
     bIsProfilingActive = true;
     
     if (UWorld* World = GetWorld())
@@ -49,100 +85,134 @@ void UPerf_MemoryProfiler::StartMemoryProfiling()
         World->GetTimerManager().SetTimer(
             ProfilingTimerHandle,
             this,
-            &UPerf_MemoryProfiler::UpdateMemoryStats,
+            &UPerf_MemoryProfiler::OnProfilingTick,
             ProfilingInterval,
             true
         );
     }
     
-    UE_LOG(LogTemp, Log, TEXT("Memory profiling started"));
+    UE_LOG(LogTemp, Log, TEXT("Memory profiling started with %f second intervals"), ProfilingInterval);
 }
 
 void UPerf_MemoryProfiler::StopMemoryProfiling()
 {
-    if (!bIsProfilingActive)
+    if (bIsProfilingActive)
     {
-        return;
+        bIsProfilingActive = false;
+        
+        if (UWorld* World = GetWorld())
+        {
+            World->GetTimerManager().ClearTimer(ProfilingTimerHandle);
+        }
+        
+        UE_LOG(LogTemp, Log, TEXT("Memory profiling stopped"));
     }
-
-    bIsProfilingActive = false;
-    
-    if (UWorld* World = GetWorld())
-    {
-        World->GetTimerManager().ClearTimer(ProfilingTimerHandle);
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("Memory profiling stopped"));
 }
 
-bool UPerf_MemoryProfiler::IsMemoryUsageAboveThreshold() const
+float UPerf_MemoryProfiler::GetAverageMemoryUsage() const
 {
-    return CurrentStats.UsedPhysicalMB > MemoryThresholdMB;
+    if (MemoryHistory.Num() == 0)
+    {
+        return 0.0f;
+    }
+    
+    float TotalMemory = 0.0f;
+    for (const FPerf_MemorySnapshot& Snapshot : MemoryHistory)
+    {
+        TotalMemory += Snapshot.PhysicalMemoryMB;
+    }
+    
+    return TotalMemory / MemoryHistory.Num();
 }
 
-void UPerf_MemoryProfiler::LogMemoryReport()
+float UPerf_MemoryProfiler::GetPeakMemoryUsage() const
 {
-    UpdateMemoryStats();
-    
-    UE_LOG(LogTemp, Warning, TEXT("=== MEMORY REPORT ==="));
-    UE_LOG(LogTemp, Warning, TEXT("Used Physical: %.2f MB"), CurrentStats.UsedPhysicalMB);
-    UE_LOG(LogTemp, Warning, TEXT("Used Virtual: %.2f MB"), CurrentStats.UsedVirtualMB);
-    UE_LOG(LogTemp, Warning, TEXT("Peak Physical: %.2f MB"), CurrentStats.PeakUsedPhysicalMB);
-    UE_LOG(LogTemp, Warning, TEXT("Total Physical: %.2f MB"), CurrentStats.TotalPhysicalMB);
-    UE_LOG(LogTemp, Warning, TEXT("Available Physical: %.2f MB"), CurrentStats.AvailablePhysicalMB);
-    UE_LOG(LogTemp, Warning, TEXT("Actor Count: %d"), CurrentStats.ActorCount);
-    UE_LOG(LogTemp, Warning, TEXT("Component Count: %d"), CurrentStats.ComponentCount);
-    UE_LOG(LogTemp, Warning, TEXT("Memory Threshold: %.2f MB"), MemoryThresholdMB);
-    UE_LOG(LogTemp, Warning, TEXT("Above Threshold: %s"), IsMemoryUsageAboveThreshold() ? TEXT("YES") : TEXT("NO"));
+    float PeakMemory = 0.0f;
+    for (const FPerf_MemorySnapshot& Snapshot : MemoryHistory)
+    {
+        PeakMemory = FMath::Max(PeakMemory, Snapshot.PhysicalMemoryMB);
+    }
+    return PeakMemory;
+}
+
+bool UPerf_MemoryProfiler::IsMemoryUsageCritical() const
+{
+    FPerf_MemorySnapshot CurrentSnapshot = const_cast<UPerf_MemoryProfiler*>(this)->CaptureMemorySnapshot();
+    return CurrentSnapshot.PhysicalMemoryMB > MemoryCriticalThresholdMB;
 }
 
 void UPerf_MemoryProfiler::ForceGarbageCollection()
 {
-    UE_LOG(LogTemp, Warning, TEXT("Forcing garbage collection..."));
+    UE_LOG(LogTemp, Warning, TEXT("Forcing garbage collection due to high memory usage"));
     GEngine->ForceGarbageCollection(true);
-    UpdateMemoryStats();
-    UE_LOG(LogTemp, Warning, TEXT("Garbage collection completed. Memory usage: %.2f MB"), CurrentStats.UsedPhysicalMB);
 }
 
-void UPerf_MemoryProfiler::UpdateMemoryStats()
+void UPerf_MemoryProfiler::OptimizeMemoryUsage()
 {
-    // Get platform memory stats
-    FPlatformMemoryStats MemStats = FPlatformMemory::GetStats();
+    UE_LOG(LogTemp, Log, TEXT("Starting memory optimization"));
     
-    CurrentStats.UsedPhysicalMB = MemStats.UsedPhysical / 1024.0f / 1024.0f;
-    CurrentStats.UsedVirtualMB = MemStats.UsedVirtual / 1024.0f / 1024.0f;
-    CurrentStats.PeakUsedPhysicalMB = MemStats.PeakUsedPhysical / 1024.0f / 1024.0f;
-    CurrentStats.TotalPhysicalMB = MemStats.TotalPhysical / 1024.0f / 1024.0f;
-    CurrentStats.AvailablePhysicalMB = MemStats.AvailablePhysical / 1024.0f / 1024.0f;
+    // Force garbage collection
+    ForceGarbageCollection();
     
-    // Count actors and components in the world
-    CurrentStats.ActorCount = 0;
-    CurrentStats.ComponentCount = 0;
+    // Trim memory pools
+    FPlatformMemory::Trim();
     
-    if (UWorld* World = GetWorld())
+    // Log optimization results
+    FPerf_MemorySnapshot PostOptimization = CaptureMemorySnapshot();
+    UE_LOG(LogTemp, Log, TEXT("Memory optimization complete. Current usage: %f MB"), 
+           PostOptimization.PhysicalMemoryMB);
+}
+
+void UPerf_MemoryProfiler::OnProfilingTick()
+{
+    FPerf_MemorySnapshot Snapshot = CaptureMemorySnapshot();
+    MemoryHistory.Add(Snapshot);
+    
+    // Check for memory warnings
+    if (Snapshot.PhysicalMemoryMB > MemoryCriticalThresholdMB)
     {
-        for (TActorIterator<AActor> ActorIterator(World); ActorIterator; ++ActorIterator)
-        {
-            AActor* Actor = *ActorIterator;
-            if (IsValid(Actor))
-            {
-                CurrentStats.ActorCount++;
-                CurrentStats.ComponentCount += Actor->GetRootComponent() ? Actor->GetComponents<UActorComponent>().Num() : 0;
-            }
-        }
+        UE_LOG(LogTemp, Error, TEXT("CRITICAL: Memory usage at %f MB (threshold: %f MB)"), 
+               Snapshot.PhysicalMemoryMB, MemoryCriticalThresholdMB);
+        OptimizeMemoryUsage();
+    }
+    else if (Snapshot.PhysicalMemoryMB > MemoryWarningThresholdMB)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("WARNING: High memory usage at %f MB (threshold: %f MB)"), 
+               Snapshot.PhysicalMemoryMB, MemoryWarningThresholdMB);
     }
     
-    CheckMemoryThreshold();
+    // Clean up old snapshots to prevent memory growth
+    CleanupOldSnapshots();
 }
 
-void UPerf_MemoryProfiler::CheckMemoryThreshold()
+float UPerf_MemoryProfiler::CalculateTextureMemoryUsage() const
 {
-    if (IsMemoryUsageAboveThreshold())
+    // Simplified texture memory calculation
+    // In a real implementation, you'd iterate through loaded textures
+    return 0.0f; // Placeholder
+}
+
+float UPerf_MemoryProfiler::CalculateMeshMemoryUsage() const
+{
+    // Simplified mesh memory calculation
+    // In a real implementation, you'd iterate through loaded meshes
+    return 0.0f; // Placeholder
+}
+
+float UPerf_MemoryProfiler::CalculateAudioMemoryUsage() const
+{
+    // Simplified audio memory calculation
+    // In a real implementation, you'd iterate through loaded audio assets
+    return 0.0f; // Placeholder
+}
+
+void UPerf_MemoryProfiler::CleanupOldSnapshots()
+{
+    // Keep only the last 200 snapshots to prevent memory growth
+    const int32 MaxSnapshots = 200;
+    if (MemoryHistory.Num() > MaxSnapshots)
     {
-        UE_LOG(LogTemp, Error, TEXT("MEMORY WARNING: Usage (%.2f MB) exceeds threshold (%.2f MB)!"), 
-               CurrentStats.UsedPhysicalMB, MemoryThresholdMB);
-        
-        // Log detailed report when threshold is exceeded
-        LogMemoryReport();
+        int32 ToRemove = MemoryHistory.Num() - MaxSnapshots;
+        MemoryHistory.RemoveAt(0, ToRemove);
     }
 }
