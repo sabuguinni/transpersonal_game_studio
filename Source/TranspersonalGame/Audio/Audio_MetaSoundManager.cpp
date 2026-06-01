@@ -1,340 +1,346 @@
 #include "Audio_MetaSoundManager.h"
-#include "Engine/Engine.h"
-#include "Engine/World.h"
 #include "Components/AudioComponent.h"
-#include "Sound/SoundWave.h"
 #include "Sound/SoundCue.h"
+#include "Engine/Engine.h"
 #include "Kismet/GameplayStatics.h"
-#include "AudioDevice.h"
 
 UAudio_MetaSoundManager::UAudio_MetaSoundManager()
 {
-    CurrentBiome = EAudio_BiomeType::Savanna;
-    CurrentThreatLevel = EAudio_ThreatLevel::Safe;
-    BiomeAudioComponent = nullptr;
-    DialogueAudioComponent = nullptr;
-    EffectsAudioComponent = nullptr;
-}
-
-void UAudio_MetaSoundManager::Initialize(FSubsystemCollectionBase& Collection)
-{
-    Super::Initialize(Collection);
+    PrimaryComponentTick.bCanEverTick = true;
+    PrimaryComponentTick.TickInterval = 0.1f; // Update 10 times per second
     
-    UE_LOG(LogTemp, Log, TEXT("Audio_MetaSoundManager: Initializing adaptive audio system"));
+    // Initialize default values
+    CurrentBiome = EAudio_BiomeType::Forest;
+    RandomSoundTimer = 0.0f;
+    HeartbeatTimer = 0.0f;
+    bIsInDanger = false;
+    HeartbeatBaseVolume = 0.3f;
+    DangerWarningVolume = 0.8f;
     
-    InitializeBiomeProfiles();
-    InitializeDialogueDatabase();
-    
-    // Create audio components
-    if (UWorld* World = GetWorld())
+    // Initialize sound states for all layers
+    for (int32 i = 0; i < (int32)EAudio_SoundLayer::UI + 1; i++)
     {
-        if (AActor* AudioManagerActor = UGameplayStatics::GetActorOfClass(World, AActor::StaticClass()))
-        {
-            BiomeAudioComponent = AudioManagerActor->FindComponentByClass<UAudioComponent>();
-            if (!BiomeAudioComponent)
-            {
-                BiomeAudioComponent = NewObject<UAudioComponent>(AudioManagerActor);
-                AudioManagerActor->AddInstanceComponent(BiomeAudioComponent);
-            }
-            
-            DialogueAudioComponent = NewObject<UAudioComponent>(AudioManagerActor);
-            AudioManagerActor->AddInstanceComponent(DialogueAudioComponent);
-            
-            EffectsAudioComponent = NewObject<UAudioComponent>(AudioManagerActor);
-            AudioManagerActor->AddInstanceComponent(EffectsAudioComponent);
-        }
+        EAudio_SoundLayer Layer = (EAudio_SoundLayer)i;
+        FAudio_SoundState& State = SoundStates.Add(Layer);
+        State.Layer = Layer;
+        State.Volume = 1.0f;
+        State.Pitch = 1.0f;
+        State.bIsPlaying = false;
     }
     
-    UE_LOG(LogTemp, Log, TEXT("Audio_MetaSoundManager: Initialization complete"));
-}
-
-void UAudio_MetaSoundManager::Deinitialize()
-{
-    if (BiomeAudioComponent && BiomeAudioComponent->IsPlaying())
+    // Initialize biome audio data with default values
+    for (int32 i = 0; i < (int32)EAudio_BiomeType::Mountains + 1; i++)
     {
-        BiomeAudioComponent->Stop();
-    }
-    
-    if (DialogueAudioComponent && DialogueAudioComponent->IsPlaying())
-    {
-        DialogueAudioComponent->Stop();
-    }
-    
-    if (EffectsAudioComponent && EffectsAudioComponent->IsPlaying())
-    {
-        EffectsAudioComponent->Stop();
-    }
-    
-    Super::Deinitialize();
-}
-
-void UAudio_MetaSoundManager::SetCurrentBiome(EAudio_BiomeType NewBiome, const FVector& PlayerLocation)
-{
-    if (CurrentBiome != NewBiome)
-    {
-        UE_LOG(LogTemp, Log, TEXT("Audio_MetaSoundManager: Transitioning from %d to %d biome"), 
-               (int32)CurrentBiome, (int32)NewBiome);
-        
-        CrossfadeBiomes(CurrentBiome, NewBiome);
-        CurrentBiome = NewBiome;
-        UpdateBiomeAudio();
+        EAudio_BiomeType Biome = (EAudio_BiomeType)i;
+        FAudio_BiomeAudioData& Data = BiomeAudioData.Add(Biome);
+        Data.AmbientVolume = 0.7f;
+        Data.RandomSoundChance = 0.1f;
     }
 }
 
-void UAudio_MetaSoundManager::UpdateThreatLevel(EAudio_ThreatLevel ThreatLevel)
+void UAudio_MetaSoundManager::BeginPlay()
 {
-    if (CurrentThreatLevel != ThreatLevel)
-    {
-        CurrentThreatLevel = ThreatLevel;
-        
-        // Adjust audio parameters based on threat level
-        float ThreatMultiplier = 1.0f;
-        switch (ThreatLevel)
-        {
-        case EAudio_ThreatLevel::Safe:
-            ThreatMultiplier = 1.0f;
-            break;
-        case EAudio_ThreatLevel::Caution:
-            ThreatMultiplier = 1.2f;
-            break;
-        case EAudio_ThreatLevel::Danger:
-            ThreatMultiplier = 1.5f;
-            break;
-        case EAudio_ThreatLevel::Extreme:
-            ThreatMultiplier = 2.0f;
-            break;
-        }
-        
-        if (BiomeAudioComponent)
-        {
-            BiomeAudioComponent->SetVolumeMultiplier(AmbientVolume * ThreatMultiplier);
-        }
-        
-        UE_LOG(LogTemp, Log, TEXT("Audio_MetaSoundManager: Threat level updated to %d (multiplier: %.2f)"), 
-               (int32)ThreatLevel, ThreatMultiplier);
-    }
+    Super::BeginPlay();
+    
+    InitializeAudioComponents();
+    SetCurrentBiome(CurrentBiome);
 }
 
-void UAudio_MetaSoundManager::PlayDinosaurSound(const FString& DinosaurType, const FVector& Location, float Intensity)
+void UAudio_MetaSoundManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
-    if (!EffectsAudioComponent)
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+    
+    UpdateBiomeAudio(DeltaTime);
+    UpdateRandomSounds(DeltaTime);
+}
+
+void UAudio_MetaSoundManager::InitializeAudioComponents()
+{
+    if (!GetOwner())
     {
-        UE_LOG(LogTemp, Warning, TEXT("Audio_MetaSoundManager: EffectsAudioComponent not available"));
         return;
     }
     
-    // Find appropriate dinosaur sound based on type
-    FString SoundPath;
-    if (DinosaurType.Contains(TEXT("TRex")) || DinosaurType.Contains(TEXT("Tyrannosaurus")))
+    // Create audio components for each layer
+    for (auto& StatePair : SoundStates)
     {
-        SoundPath = TEXT("/Game/Audio/Dinosaurs/TRex_Roar");
-    }
-    else if (DinosaurType.Contains(TEXT("Raptor")) || DinosaurType.Contains(TEXT("Velociraptor")))
-    {
-        SoundPath = TEXT("/Game/Audio/Dinosaurs/Raptor_Call");
-    }
-    else if (DinosaurType.Contains(TEXT("Brachio")) || DinosaurType.Contains(TEXT("Sauropod")))
-    {
-        SoundPath = TEXT("/Game/Audio/Dinosaurs/Brachio_Bellow");
-    }
-    
-    if (!SoundPath.IsEmpty())
-    {
-        EffectsAudioComponent->SetWorldLocation(Location);
-        EffectsAudioComponent->SetVolumeMultiplier(Intensity);
+        EAudio_SoundLayer Layer = StatePair.Key;
+        UAudioComponent* AudioComp = GetOrCreateAudioComponent(Layer);
         
-        UE_LOG(LogTemp, Log, TEXT("Audio_MetaSoundManager: Playing %s sound at location (%.1f, %.1f, %.1f) with intensity %.2f"), 
-               *DinosaurType, Location.X, Location.Y, Location.Z, Intensity);
+        if (AudioComp)
+        {
+            LayerComponents.Add(Layer, AudioComp);
+            
+            // Set default properties based on layer type
+            switch (Layer)
+            {
+                case EAudio_SoundLayer::Ambient:
+                    AudioComp->bAutoActivate = true;
+                    AudioComp->VolumeMultiplier = 0.7f;
+                    break;
+                case EAudio_SoundLayer::Music:
+                    AudioComp->bAutoActivate = false;
+                    AudioComp->VolumeMultiplier = 0.5f;
+                    break;
+                case EAudio_SoundLayer::SFX:
+                    AudioComp->bAutoActivate = false;
+                    AudioComp->VolumeMultiplier = 0.8f;
+                    break;
+                case EAudio_SoundLayer::Dialogue:
+                    AudioComp->bAutoActivate = false;
+                    AudioComp->VolumeMultiplier = 1.0f;
+                    break;
+                case EAudio_SoundLayer::UI:
+                    AudioComp->bAutoActivate = false;
+                    AudioComp->VolumeMultiplier = 0.6f;
+                    break;
+            }
+        }
     }
 }
 
-void UAudio_MetaSoundManager::PlayDialogueLine(const FString& NPCName, const FString& DialogueID)
+UAudioComponent* UAudio_MetaSoundManager::GetOrCreateAudioComponent(EAudio_SoundLayer Layer)
 {
-    if (!DialogueAudioComponent)
+    if (!GetOwner())
     {
-        UE_LOG(LogTemp, Warning, TEXT("Audio_MetaSoundManager: DialogueAudioComponent not available"));
+        return nullptr;
+    }
+    
+    // Check if component already exists
+    if (UAudioComponent** ExistingComp = LayerComponents.Find(Layer))
+    {
+        if (*ExistingComp && IsValid(*ExistingComp))
+        {
+            return *ExistingComp;
+        }
+    }
+    
+    // Create new audio component
+    FString ComponentName = FString::Printf(TEXT("AudioComp_%s"), 
+        *UEnum::GetValueAsString(Layer));
+    
+    UAudioComponent* NewAudioComp = NewObject<UAudioComponent>(GetOwner(), 
+        UAudioComponent::StaticClass(), *ComponentName);
+    
+    if (NewAudioComp)
+    {
+        NewAudioComp->AttachToComponent(GetOwner()->GetRootComponent(), 
+            FAttachmentTransformRules::KeepRelativeTransform);
+        NewAudioComp->RegisterComponent();
+    }
+    
+    return NewAudioComp;
+}
+
+void UAudio_MetaSoundManager::PlaySound(USoundCue* SoundCue, EAudio_SoundLayer Layer, float Volume, float Pitch)
+{
+    if (!SoundCue)
+    {
         return;
     }
     
-    FString DialogueKey = FString::Printf(TEXT("%s_%s"), *NPCName, *DialogueID);
-    
-    if (FAudio_DialogueAudioData* DialogueData = DialogueDatabase.Find(DialogueKey))
+    UAudioComponent* AudioComp = GetOrCreateAudioComponent(Layer);
+    if (!AudioComp)
     {
-        if (DialogueData->VoiceLine.IsValid())
+        return;
+    }
+    
+    // Update sound state
+    if (FAudio_SoundState* State = SoundStates.Find(Layer))
+    {
+        State->Volume = Volume;
+        State->Pitch = Pitch;
+        State->bIsPlaying = true;
+    }
+    
+    // Configure and play sound
+    AudioComp->SetSound(SoundCue);
+    AudioComp->SetVolumeMultiplier(Volume);
+    AudioComp->SetPitchMultiplier(Pitch);
+    AudioComp->Play();
+}
+
+void UAudio_MetaSoundManager::StopSound(EAudio_SoundLayer Layer)
+{
+    UAudioComponent* AudioComp = GetOrCreateAudioComponent(Layer);
+    if (AudioComp && AudioComp->IsPlaying())
+    {
+        AudioComp->Stop();
+    }
+    
+    // Update sound state
+    if (FAudio_SoundState* State = SoundStates.Find(Layer))
+    {
+        State->bIsPlaying = false;
+    }
+}
+
+void UAudio_MetaSoundManager::SetLayerVolume(EAudio_SoundLayer Layer, float Volume)
+{
+    UAudioComponent* AudioComp = GetOrCreateAudioComponent(Layer);
+    if (AudioComp)
+    {
+        AudioComp->SetVolumeMultiplier(Volume);
+    }
+    
+    // Update sound state
+    if (FAudio_SoundState* State = SoundStates.Find(Layer))
+    {
+        State->Volume = Volume;
+    }
+}
+
+void UAudio_MetaSoundManager::SetCurrentBiome(EAudio_BiomeType BiomeType)
+{
+    if (CurrentBiome == BiomeType)
+    {
+        return;
+    }
+    
+    CurrentBiome = BiomeType;
+    
+    // Stop current ambient audio
+    StopSound(EAudio_SoundLayer::Ambient);
+    
+    // Start new biome ambient audio
+    if (FAudio_BiomeAudioData* BiomeData = BiomeAudioData.Find(CurrentBiome))
+    {
+        if (BiomeData->AmbientLoop.IsValid())
         {
-            DialogueAudioComponent->SetSound(DialogueData->VoiceLine.LoadSynchronous());
-            DialogueAudioComponent->SetVolumeMultiplier(DialogueVolume);
-            DialogueAudioComponent->Play();
-            
-            bDialoguePlaying = true;
-            
-            UE_LOG(LogTemp, Log, TEXT("Audio_MetaSoundManager: Playing dialogue %s for NPC %s"), 
-                   *DialogueID, *NPCName);
-            
-            // Set timer to reset dialogue playing flag
-            if (UWorld* World = GetWorld())
+            USoundCue* AmbientCue = BiomeData->AmbientLoop.LoadSynchronous();
+            if (AmbientCue)
             {
-                World->GetTimerManager().SetTimer(
-                    FTimerHandle(),
-                    [this]() { bDialoguePlaying = false; },
-                    DialogueData->Duration,
-                    false
-                );
+                PlaySound(AmbientCue, EAudio_SoundLayer::Ambient, BiomeData->AmbientVolume);
             }
         }
+    }
+}
+
+void UAudio_MetaSoundManager::UpdateBiomeAudio(float DeltaTime)
+{
+    // Ensure ambient audio is playing for current biome
+    if (FAudio_SoundState* AmbientState = SoundStates.Find(EAudio_SoundLayer::Ambient))
+    {
+        if (!AmbientState->bIsPlaying)
+        {
+            SetCurrentBiome(CurrentBiome); // Restart ambient audio
+        }
+    }
+}
+
+void UAudio_MetaSoundManager::UpdateRandomSounds(float DeltaTime)
+{
+    RandomSoundTimer += DeltaTime;
+    
+    // Check for random sound trigger every 5 seconds
+    if (RandomSoundTimer >= 5.0f)
+    {
+        RandomSoundTimer = 0.0f;
+        
+        if (FAudio_BiomeAudioData* BiomeData = BiomeAudioData.Find(CurrentBiome))
+        {
+            float RandomValue = FMath::RandRange(0.0f, 1.0f);
+            if (RandomValue <= BiomeData->RandomSoundChance && BiomeData->RandomSounds.Num() > 0)
+            {
+                int32 RandomIndex = FMath::RandRange(0, BiomeData->RandomSounds.Num() - 1);
+                if (BiomeData->RandomSounds[RandomIndex].IsValid())
+                {
+                    USoundCue* RandomCue = BiomeData->RandomSounds[RandomIndex].LoadSynchronous();
+                    if (RandomCue)
+                    {
+                        PlaySound(RandomCue, EAudio_SoundLayer::SFX, 0.6f);
+                    }
+                }
+            }
+        }
+    }
+}
+
+void UAudio_MetaSoundManager::PlayDialogue(USoundCue* DialogueCue, float Volume)
+{
+    if (DialogueCue)
+    {
+        // Stop any current dialogue
+        StopSound(EAudio_SoundLayer::Dialogue);
+        
+        // Play new dialogue
+        PlaySound(DialogueCue, EAudio_SoundLayer::Dialogue, Volume);
+    }
+}
+
+void UAudio_MetaSoundManager::PlayNarration(USoundCue* NarrationCue, float Volume)
+{
+    if (NarrationCue)
+    {
+        PlaySound(NarrationCue, EAudio_SoundLayer::Music, Volume);
+    }
+}
+
+void UAudio_MetaSoundManager::PlayDangerWarning(float ThreatLevel)
+{
+    if (DangerWarningSound.IsValid())
+    {
+        USoundCue* WarningSoundCue = DangerWarningSound.LoadSynchronous();
+        if (WarningSoundCue)
+        {
+            float WarningVolume = DangerWarningVolume * FMath::Clamp(ThreatLevel, 0.3f, 1.0f);
+            PlaySound(WarningSoundCue, EAudio_SoundLayer::SFX, WarningVolume);
+        }
+    }
+    
+    bIsInDanger = ThreatLevel > 0.5f;
+}
+
+void UAudio_MetaSoundManager::PlayHeartbeat(float Intensity)
+{
+    if (HeartbeatSound.IsValid())
+    {
+        USoundCue* HeartbeatCue = HeartbeatSound.LoadSynchronous();
+        if (HeartbeatCue)
+        {
+            float HeartbeatVolume = HeartbeatBaseVolume * FMath::Clamp(Intensity, 0.1f, 1.0f);
+            float HeartbeatPitch = 1.0f + (Intensity * 0.5f); // Faster when more intense
+            PlaySound(HeartbeatCue, EAudio_SoundLayer::SFX, HeartbeatVolume, HeartbeatPitch);
+        }
+    }
+}
+
+void UAudio_MetaSoundManager::UpdateSurvivalAudio(float Health, float Hunger, float Thirst, float Fear)
+{
+    // Calculate overall stress level
+    float StressLevel = 0.0f;
+    
+    if (Health < 0.3f) StressLevel += (0.3f - Health) * 2.0f;
+    if (Hunger > 0.8f) StressLevel += (Hunger - 0.8f) * 1.5f;
+    if (Thirst > 0.8f) StressLevel += (Thirst - 0.8f) * 1.5f;
+    if (Fear > 0.5f) StressLevel += (Fear - 0.5f) * 2.0f;
+    
+    StressLevel = FMath::Clamp(StressLevel, 0.0f, 1.0f);
+    
+    // Update heartbeat based on stress
+    UpdateHeartbeatAudio(GetWorld()->GetDeltaSeconds(), StressLevel);
+    
+    // Adjust ambient volume based on fear
+    if (Fear > 0.7f)
+    {
+        SetLayerVolume(EAudio_SoundLayer::Ambient, 0.3f); // Muffled when terrified
     }
     else
     {
-        UE_LOG(LogTemp, Warning, TEXT("Audio_MetaSoundManager: Dialogue %s not found for NPC %s"), 
-               *DialogueID, *NPCName);
+        SetLayerVolume(EAudio_SoundLayer::Ambient, 0.7f); // Normal ambient volume
     }
 }
 
-void UAudio_MetaSoundManager::SetDialogueVolume(float Volume)
+void UAudio_MetaSoundManager::UpdateHeartbeatAudio(float DeltaTime, float FearLevel)
 {
-    DialogueVolume = FMath::Clamp(Volume, 0.0f, 2.0f);
+    HeartbeatTimer += DeltaTime;
     
-    if (DialogueAudioComponent)
+    // Heartbeat frequency based on fear level
+    float HeartbeatInterval = FMath::Lerp(2.0f, 0.8f, FearLevel); // 2s to 0.8s between beats
+    
+    if (HeartbeatTimer >= HeartbeatInterval && FearLevel > 0.2f)
     {
-        DialogueAudioComponent->SetVolumeMultiplier(DialogueVolume);
-    }
-}
-
-bool UAudio_MetaSoundManager::IsDialoguePlaying() const
-{
-    return bDialoguePlaying && DialogueAudioComponent && DialogueAudioComponent->IsPlaying();
-}
-
-void UAudio_MetaSoundManager::PlayEnvironmentalEffect(const FString& EffectName, const FVector& Location)
-{
-    if (!EffectsAudioComponent)
-    {
-        return;
-    }
-    
-    EffectsAudioComponent->SetWorldLocation(Location);
-    
-    UE_LOG(LogTemp, Log, TEXT("Audio_MetaSoundManager: Playing environmental effect %s at location (%.1f, %.1f, %.1f)"), 
-           *EffectName, Location.X, Location.Y, Location.Z);
-}
-
-void UAudio_MetaSoundManager::SetMasterVolume(float Volume)
-{
-    MasterVolume = FMath::Clamp(Volume, 0.0f, 1.0f);
-    UpdateBiomeAudio();
-}
-
-void UAudio_MetaSoundManager::SetAmbientVolume(float Volume)
-{
-    AmbientVolume = FMath::Clamp(Volume, 0.0f, 1.0f);
-    UpdateBiomeAudio();
-}
-
-void UAudio_MetaSoundManager::InitializeBiomeProfiles()
-{
-    BiomeProfiles.Empty();
-    
-    // Savanna biome
-    FAudio_BiomeAudioProfile SavannaProfile;
-    SavannaProfile.BiomeType = EAudio_BiomeType::Savanna;
-    SavannaProfile.BaseVolume = 0.7f;
-    SavannaProfile.FadeDistance = 5000.0f;
-    BiomeProfiles.Add(SavannaProfile);
-    
-    // Forest biome
-    FAudio_BiomeAudioProfile ForestProfile;
-    ForestProfile.BiomeType = EAudio_BiomeType::Forest;
-    ForestProfile.BaseVolume = 0.8f;
-    ForestProfile.FadeDistance = 3000.0f;
-    BiomeProfiles.Add(ForestProfile);
-    
-    // Swamp biome
-    FAudio_BiomeAudioProfile SwampProfile;
-    SwampProfile.BiomeType = EAudio_BiomeType::Swamp;
-    SwampProfile.BaseVolume = 0.6f;
-    SwampProfile.FadeDistance = 4000.0f;
-    BiomeProfiles.Add(SwampProfile);
-    
-    // Desert biome
-    FAudio_BiomeAudioProfile DesertProfile;
-    DesertProfile.BiomeType = EAudio_BiomeType::Desert;
-    DesertProfile.BaseVolume = 0.5f;
-    DesertProfile.FadeDistance = 8000.0f;
-    BiomeProfiles.Add(DesertProfile);
-    
-    // Mountain biome
-    FAudio_BiomeAudioProfile MountainProfile;
-    MountainProfile.BiomeType = EAudio_BiomeType::Mountain;
-    MountainProfile.BaseVolume = 0.6f;
-    MountainProfile.FadeDistance = 6000.0f;
-    BiomeProfiles.Add(MountainProfile);
-    
-    UE_LOG(LogTemp, Log, TEXT("Audio_MetaSoundManager: Initialized %d biome audio profiles"), BiomeProfiles.Num());
-}
-
-void UAudio_MetaSoundManager::InitializeDialogueDatabase()
-{
-    DialogueDatabase.Empty();
-    
-    // Initialize dialogue entries for NPCs created by Narrative Agent
-    FAudio_DialogueAudioData TribalElderData;
-    TribalElderData.NPCName = TEXT("TribalElder");
-    TribalElderData.Duration = 16.0f;
-    TribalElderData.bHasSubtitles = true;
-    DialogueDatabase.Add(TEXT("TribalElder_Greeting"), TribalElderData);
-    
-    FAudio_DialogueAudioData QuestGiverData;
-    QuestGiverData.NPCName = TEXT("QuestGiver");
-    QuestGiverData.Duration = 15.0f;
-    QuestGiverData.bHasSubtitles = true;
-    DialogueDatabase.Add(TEXT("QuestGiver_Mission"), QuestGiverData);
-    
-    FAudio_DialogueAudioData BoneReaderData;
-    BoneReaderData.NPCName = TEXT("BoneReader");
-    BoneReaderData.Duration = 17.0f;
-    BoneReaderData.bHasSubtitles = true;
-    DialogueDatabase.Add(TEXT("BoneReader_Lore"), BoneReaderData);
-    
-    FAudio_DialogueAudioData TrackingMentorData;
-    TrackingMentorData.NPCName = TEXT("TrackingMentor");
-    TrackingMentorData.Duration = 16.0f;
-    TrackingMentorData.bHasSubtitles = true;
-    DialogueDatabase.Add(TEXT("TrackingMentor_Guide"), TrackingMentorData);
-    
-    UE_LOG(LogTemp, Log, TEXT("Audio_MetaSoundManager: Initialized dialogue database with %d entries"), DialogueDatabase.Num());
-}
-
-void UAudio_MetaSoundManager::UpdateBiomeAudio()
-{
-    if (!BiomeAudioComponent)
-    {
-        return;
-    }
-    
-    // Find current biome profile
-    FAudio_BiomeAudioProfile* CurrentProfile = BiomeProfiles.FindByPredicate(
-        [this](const FAudio_BiomeAudioProfile& Profile) 
-        { 
-            return Profile.BiomeType == CurrentBiome; 
-        }
-    );
-    
-    if (CurrentProfile)
-    {
-        float FinalVolume = CurrentProfile->BaseVolume * AmbientVolume * MasterVolume;
-        BiomeAudioComponent->SetVolumeMultiplier(FinalVolume);
-        
-        UE_LOG(LogTemp, Log, TEXT("Audio_MetaSoundManager: Updated biome audio - Volume: %.2f"), FinalVolume);
-    }
-}
-
-void UAudio_MetaSoundManager::CrossfadeBiomes(EAudio_BiomeType FromBiome, EAudio_BiomeType ToBiome)
-{
-    // Implement smooth crossfade between biome audio
-    if (BiomeAudioComponent)
-    {
-        // Fade out current biome over 2 seconds, then fade in new biome
-        UE_LOG(LogTemp, Log, TEXT("Audio_MetaSoundManager: Crossfading from biome %d to biome %d"), 
-               (int32)FromBiome, (int32)ToBiome);
+        HeartbeatTimer = 0.0f;
+        PlayHeartbeat(FearLevel);
     }
 }
