@@ -1,347 +1,445 @@
 #include "Audio_SoundManager.h"
+#include "Engine/Engine.h"
+#include "Engine/World.h"
 #include "Components/AudioComponent.h"
 #include "Sound/SoundCue.h"
-#include "Engine/World.h"
 #include "Kismet/GameplayStatics.h"
-#include "Engine/Engine.h"
+#include "AudioDevice.h"
 
-AAudio_SoundManager::AAudio_SoundManager()
+UAudio_SoundManager::UAudio_SoundManager()
 {
-    PrimaryActorTick.bCanEverTick = true;
-
-    // Create root scene component
-    RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootComponent"));
-
-    // Create audio components
-    MasterAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("MasterAudioComponent"));
-    MasterAudioComponent->SetupAttachment(RootComponent);
-    MasterAudioComponent->bAutoActivate = true;
-
-    AmbienceAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("AmbienceAudioComponent"));
-    AmbienceAudioComponent->SetupAttachment(RootComponent);
-    AmbienceAudioComponent->bAutoActivate = false;
-
-    MusicAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("MusicAudioComponent"));
-    MusicAudioComponent->SetupAttachment(RootComponent);
-    MusicAudioComponent->bAutoActivate = false;
-
-    // Initialize default values
-    CurrentBiome = EAudio_BiomeType::Savana;
-    bIsNightTime = false;
-    bIsWeatherActive = false;
-    bIsTransitioning = false;
-    TransitionTimer = 0.0f;
-    TransitionDuration = 5.0f;
-
-    // Initialize volume settings
-    MasterVolume = 1.0f;
-    AmbienceVolume = 0.7f;
-    MusicVolume = 0.5f;
-    SFXVolume = 0.8f;
-
-    // Initialize default dinosaur sound profiles
-    FAudio_SoundProfile TRexProfile;
-    TRexProfile.VolumeMultiplier = 1.5f;
-    TRexProfile.PitchMultiplier = 0.8f;
-    TRexProfile.AttenuationRadius = 10000.0f;
-    DinosaurSoundProfiles.Add(EAudio_DinosaurType::TRex, TRexProfile);
-
-    FAudio_SoundProfile VelociraptorProfile;
-    VelociraptorProfile.VolumeMultiplier = 1.0f;
-    VelociraptorProfile.PitchMultiplier = 1.2f;
-    VelociraptorProfile.AttenuationRadius = 3000.0f;
-    DinosaurSoundProfiles.Add(EAudio_DinosaurType::Velociraptor, VelociraptorProfile);
-
-    FAudio_SoundProfile TriceratopsProfile;
-    TriceratopsProfile.VolumeMultiplier = 1.3f;
-    TriceratopsProfile.PitchMultiplier = 0.9f;
-    TriceratopsProfile.AttenuationRadius = 7000.0f;
-    DinosaurSoundProfiles.Add(EAudio_DinosaurType::Triceratops, TriceratopsProfile);
-
-    FAudio_SoundProfile BrachiosaurusProfile;
-    BrachiosaurusProfile.VolumeMultiplier = 2.0f;
-    BrachiosaurusProfile.PitchMultiplier = 0.6f;
-    BrachiosaurusProfile.AttenuationRadius = 15000.0f;
-    DinosaurSoundProfiles.Add(EAudio_DinosaurType::Brachiosaurus, BrachiosaurusProfile);
-
-    FAudio_SoundProfile AnkylosaurusProfile;
-    AnkylosaurusProfile.VolumeMultiplier = 1.1f;
-    AnkylosaurusProfile.PitchMultiplier = 0.85f;
-    AnkylosaurusProfile.AttenuationRadius = 5000.0f;
-    DinosaurSoundProfiles.Add(EAudio_DinosaurType::Ankylosaurus, AnkylosaurusProfile);
-
-    // Initialize default biome ambience settings
-    FAudio_BiomeAmbience SavanaAmbience;
-    SavanaAmbience.BiomeType = EAudio_BiomeType::Savana;
-    SavanaAmbience.TransitionDuration = 5.0f;
-    BiomeAmbienceSettings.Add(SavanaAmbience);
-
-    FAudio_BiomeAmbience PantanoAmbience;
-    PantanoAmbience.BiomeType = EAudio_BiomeType::Pantano;
-    PantanoAmbience.TransitionDuration = 6.0f;
-    BiomeAmbienceSettings.Add(PantanoAmbience);
-
-    FAudio_BiomeAmbience FlorestaAmbience;
-    FlorestaAmbience.BiomeType = EAudio_BiomeType::Floresta;
-    FlorestaAmbience.TransitionDuration = 4.0f;
-    BiomeAmbienceSettings.Add(FlorestaAmbience);
-
-    FAudio_BiomeAmbience DesertoAmbience;
-    DesertoAmbience.BiomeType = EAudio_BiomeType::Deserto;
-    DesertoAmbience.TransitionDuration = 7.0f;
-    BiomeAmbienceSettings.Add(DesertoAmbience);
-
-    FAudio_BiomeAmbience MontanhaAmbience;
-    MontanhaAmbience.BiomeType = EAudio_BiomeType::Montanha;
-    MontanhaAmbience.TransitionDuration = 5.5f;
-    BiomeAmbienceSettings.Add(MontanhaAmbience);
+	MasterVolume = 1.0f;
+	SFXVolume = 1.0f;
+	MusicVolume = 1.0f;
+	AmbienceVolume = 1.0f;
+	CurrentBiome = EBiomeType::Savanna;
+	CurrentTimeOfDay = 12.0f;
+	CurrentWeather = EWeatherType::Clear;
 }
 
-void AAudio_SoundManager::BeginPlay()
+void UAudio_SoundManager::Initialize(FSubsystemCollectionBase& Collection)
 {
-    Super::BeginPlay();
-    
-    // Start with default biome ambience
-    PlayAmbienceForBiome(CurrentBiome);
-    
-    UE_LOG(LogTemp, Warning, TEXT("Audio_SoundManager: BeginPlay completed"));
+	Super::Initialize(Collection);
+	
+	UE_LOG(LogTemp, Warning, TEXT("Audio_SoundManager: Initializing audio system"));
+	
+	InitializeSoundRegistry();
+	InitializeAmbienceLayers();
+	
+	// Set default biome ambience
+	SetBiomeAmbience(EBiomeType::Savanna, 0.0f);
 }
 
-void AAudio_SoundManager::Tick(float DeltaTime)
+void UAudio_SoundManager::Deinitialize()
 {
-    Super::Tick(DeltaTime);
-
-    // Handle audio transitions
-    if (bIsTransitioning)
-    {
-        TransitionTimer += DeltaTime;
-        float TransitionProgress = FMath::Clamp(TransitionTimer / TransitionDuration, 0.0f, 1.0f);
-
-        if (AmbienceAudioComponent && MusicAudioComponent)
-        {
-            // Crossfade between previous and target ambience
-            float PreviousVolume = (1.0f - TransitionProgress) * AmbienceVolume;
-            float TargetVolume = TransitionProgress * AmbienceVolume;
-
-            AmbienceAudioComponent->SetVolumeMultiplier(PreviousVolume);
-            MusicAudioComponent->SetVolumeMultiplier(TargetVolume);
-        }
-
-        if (TransitionProgress >= 1.0f)
-        {
-            bIsTransitioning = false;
-            TransitionTimer = 0.0f;
-            
-            // Complete the transition
-            if (AmbienceAudioComponent && TargetAmbience)
-            {
-                AmbienceAudioComponent->SetSound(TargetAmbience);
-                AmbienceAudioComponent->SetVolumeMultiplier(AmbienceVolume);
-                AmbienceAudioComponent->Play();
-            }
-            
-            if (MusicAudioComponent)
-            {
-                MusicAudioComponent->Stop();
-            }
-        }
-    }
+	StopAllAmbience(0.0f);
+	
+	// Clean up all active components
+	for (UAudioComponent* Component : ActiveAudioComponents)
+	{
+		if (IsValid(Component))
+		{
+			Component->Stop();
+			Component->DestroyComponent();
+		}
+	}
+	ActiveAudioComponents.Empty();
+	ActiveAmbienceComponents.Empty();
+	
+	Super::Deinitialize();
 }
 
-void AAudio_SoundManager::SetCurrentBiome(EAudio_BiomeType NewBiome)
+void UAudio_SoundManager::PlaySoundAtLocation(const FString& SoundID, FVector Location, float VolumeMultiplier)
 {
-    if (CurrentBiome != NewBiome)
-    {
-        CurrentBiome = NewBiome;
-        PlayAmbienceForBiome(NewBiome);
-        UE_LOG(LogTemp, Warning, TEXT("Audio_SoundManager: Changed to biome %d"), (int32)NewBiome);
-    }
+	if (!SoundRegistry.Contains(SoundID))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Audio_SoundManager: Sound ID '%s' not found in registry"), *SoundID);
+		return;
+	}
+
+	const FAudio_SoundEntry& SoundEntry = SoundRegistry[SoundID];
+	if (!SoundEntry.Sound.IsValid())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Audio_SoundManager: Sound asset for ID '%s' is not valid"), *SoundID);
+		return;
+	}
+
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+
+	float FinalVolume = CalculateFinalVolume(SoundEntry.Volume, VolumeMultiplier);
+	
+	UGameplayStatics::PlaySoundAtLocation(
+		World,
+		SoundEntry.Sound.Get(),
+		Location,
+		FinalVolume,
+		SoundEntry.Pitch,
+		0.0f,
+		nullptr,
+		nullptr,
+		true
+	);
 }
 
-void AAudio_SoundManager::SetTimeOfDay(bool bNightTime)
+void UAudio_SoundManager::PlaySound2D(const FString& SoundID, float VolumeMultiplier)
 {
-    if (bIsNightTime != bNightTime)
-    {
-        bIsNightTime = bNightTime;
-        UpdateAmbienceAudio();
-        UE_LOG(LogTemp, Warning, TEXT("Audio_SoundManager: Time of day changed to %s"), bNightTime ? TEXT("Night") : TEXT("Day"));
-    }
+	if (!SoundRegistry.Contains(SoundID))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Audio_SoundManager: Sound ID '%s' not found in registry"), *SoundID);
+		return;
+	}
+
+	const FAudio_SoundEntry& SoundEntry = SoundRegistry[SoundID];
+	if (!SoundEntry.Sound.IsValid())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Audio_SoundManager: Sound asset for ID '%s' is not valid"), *SoundID);
+		return;
+	}
+
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+
+	float FinalVolume = CalculateFinalVolume(SoundEntry.Volume, VolumeMultiplier);
+	
+	UGameplayStatics::PlaySound2D(
+		World,
+		SoundEntry.Sound.Get(),
+		FinalVolume,
+		SoundEntry.Pitch,
+		0.0f,
+		nullptr,
+		true
+	);
 }
 
-void AAudio_SoundManager::SetWeatherState(bool bWeatherActive)
+UAudioComponent* UAudio_SoundManager::PlaySoundAttached(const FString& SoundID, USceneComponent* AttachComponent, float VolumeMultiplier)
 {
-    if (bIsWeatherActive != bWeatherActive)
-    {
-        bIsWeatherActive = bWeatherActive;
-        UpdateAmbienceAudio();
-        UE_LOG(LogTemp, Warning, TEXT("Audio_SoundManager: Weather state changed to %s"), bWeatherActive ? TEXT("Active") : TEXT("Inactive"));
-    }
+	if (!SoundRegistry.Contains(SoundID) || !IsValid(AttachComponent))
+	{
+		return nullptr;
+	}
+
+	const FAudio_SoundEntry& SoundEntry = SoundRegistry[SoundID];
+	if (!SoundEntry.Sound.IsValid())
+	{
+		return nullptr;
+	}
+
+	UAudioComponent* AudioComp = CreateAudioComponent();
+	if (!AudioComp)
+	{
+		return nullptr;
+	}
+
+	AudioComp->SetSound(SoundEntry.Sound.Get());
+	AudioComp->SetVolumeMultiplier(CalculateFinalVolume(SoundEntry.Volume, VolumeMultiplier));
+	AudioComp->SetPitchMultiplier(SoundEntry.Pitch);
+	AudioComp->AttachToComponent(AttachComponent, FAttachmentTransformRules::KeepWorldTransform);
+	AudioComp->Play();
+
+	ActiveAudioComponents.Add(AudioComp);
+	return AudioComp;
 }
 
-void AAudio_SoundManager::PlayDinosaurSound(EAudio_DinosaurType DinosaurType, FVector Location, bool bIsFootstep)
+void UAudio_SoundManager::SetBiomeAmbience(EBiomeType BiomeType, float FadeTime)
 {
-    FAudio_SoundProfile SoundProfile = GetDinosaurSoundProfile(DinosaurType);
-    
-    USoundCue* SoundToPlay = nullptr;
-    if (bIsFootstep && SoundProfile.FootstepSound.LoadSynchronous())
-    {
-        SoundToPlay = SoundProfile.FootstepSound.LoadSynchronous();
-    }
-    else if (!bIsFootstep && SoundProfile.VocalizationSound.LoadSynchronous())
-    {
-        SoundToPlay = SoundProfile.VocalizationSound.LoadSynchronous();
-    }
+	if (CurrentBiome == BiomeType)
+	{
+		return;
+	}
 
-    if (SoundToPlay)
-    {
-        float FinalVolume = SFXVolume * SoundProfile.VolumeMultiplier * MasterVolume;
-        float FinalPitch = SoundProfile.PitchMultiplier;
+	// Fade out current ambience
+	if (ActiveAmbienceComponents.Contains(CurrentBiome))
+	{
+		UAudioComponent* CurrentAmbience = ActiveAmbienceComponents[CurrentBiome];
+		if (IsValid(CurrentAmbience))
+		{
+			CurrentAmbience->FadeOut(FadeTime, 0.0f);
+		}
+	}
 
-        UGameplayStatics::PlaySoundAtLocation(
-            GetWorld(),
-            SoundToPlay,
-            Location,
-            FinalVolume,
-            FinalPitch,
-            0.0f,
-            nullptr,
-            nullptr,
-            true
-        );
+	// Fade in new ambience
+	if (AmbienceLayers.Contains(BiomeType))
+	{
+		const FAudio_AmbienceLayer& Layer = AmbienceLayers[BiomeType];
+		if (Layer.AmbienceSound.IsValid())
+		{
+			UAudioComponent* NewAmbience = CreateAudioComponent();
+			if (NewAmbience)
+			{
+				NewAmbience->SetSound(Layer.AmbienceSound.Get());
+				NewAmbience->SetVolumeMultiplier(0.0f);
+				NewAmbience->bAutoActivate = false;
+				NewAmbience->Play();
+				NewAmbience->FadeIn(FadeTime, CalculateFinalVolume(Layer.BaseVolume, 1.0f));
+				
+				ActiveAmbienceComponents.Add(BiomeType, NewAmbience);
+				ActiveAudioComponents.Add(NewAmbience);
+			}
+		}
+	}
 
-        UE_LOG(LogTemp, Warning, TEXT("Audio_SoundManager: Played dinosaur sound for type %d at location %s"), 
-               (int32)DinosaurType, *Location.ToString());
-    }
+	CurrentBiome = BiomeType;
+	UE_LOG(LogTemp, Log, TEXT("Audio_SoundManager: Changed biome ambience to %d"), (int32)BiomeType);
 }
 
-void AAudio_SoundManager::PlayAmbienceForBiome(EAudio_BiomeType BiomeType)
+void UAudio_SoundManager::StopAllAmbience(float FadeTime)
 {
-    FAudio_BiomeAmbience BiomeSettings = GetBiomeAmbienceSettings(BiomeType);
-    
-    USoundCue* AmbienceToPlay = nullptr;
-    if (bIsNightTime && BiomeSettings.NightAmbience.LoadSynchronous())
-    {
-        AmbienceToPlay = BiomeSettings.NightAmbience.LoadSynchronous();
-    }
-    else if (bIsWeatherActive && BiomeSettings.WeatherAmbience.LoadSynchronous())
-    {
-        AmbienceToPlay = BiomeSettings.WeatherAmbience.LoadSynchronous();
-    }
-    else if (BiomeSettings.DayAmbience.LoadSynchronous())
-    {
-        AmbienceToPlay = BiomeSettings.DayAmbience.LoadSynchronous();
-    }
-
-    if (AmbienceToPlay && AmbienceAudioComponent)
-    {
-        CrossfadeToNewAmbience(AmbienceToPlay);
-    }
+	for (auto& Pair : ActiveAmbienceComponents)
+	{
+		UAudioComponent* Component = Pair.Value;
+		if (IsValid(Component))
+		{
+			if (FadeTime > 0.0f)
+			{
+				Component->FadeOut(FadeTime, 0.0f);
+			}
+			else
+			{
+				Component->Stop();
+			}
+		}
+	}
+	
+	if (FadeTime <= 0.0f)
+	{
+		ActiveAmbienceComponents.Empty();
+	}
 }
 
-void AAudio_SoundManager::StopAllAmbience()
+void UAudio_SoundManager::SetTimeOfDayAudioMix(float TimeOfDay)
 {
-    if (AmbienceAudioComponent)
-    {
-        AmbienceAudioComponent->Stop();
-    }
-    if (MusicAudioComponent)
-    {
-        MusicAudioComponent->Stop();
-    }
-    bIsTransitioning = false;
-    UE_LOG(LogTemp, Warning, TEXT("Audio_SoundManager: Stopped all ambience"));
+	CurrentTimeOfDay = FMath::Clamp(TimeOfDay, 0.0f, 24.0f);
+	
+	// Adjust ambience volume based on time of day
+	float NightFactor = 1.0f;
+	if (TimeOfDay >= 20.0f || TimeOfDay <= 6.0f)
+	{
+		// Night time - reduce volume and change mix
+		NightFactor = 0.7f;
+	}
+	else if (TimeOfDay >= 6.0f && TimeOfDay <= 8.0f)
+	{
+		// Dawn
+		NightFactor = FMath::Lerp(0.7f, 1.0f, (TimeOfDay - 6.0f) / 2.0f);
+	}
+	else if (TimeOfDay >= 18.0f && TimeOfDay <= 20.0f)
+	{
+		// Dusk
+		NightFactor = FMath::Lerp(1.0f, 0.7f, (TimeOfDay - 18.0f) / 2.0f);
+	}
+
+	// Apply time-based volume adjustment to active ambience
+	for (auto& Pair : ActiveAmbienceComponents)
+	{
+		UAudioComponent* Component = Pair.Value;
+		if (IsValid(Component) && AmbienceLayers.Contains(Pair.Key))
+		{
+			const FAudio_AmbienceLayer& Layer = AmbienceLayers[Pair.Key];
+			float NewVolume = CalculateFinalVolume(Layer.BaseVolume * NightFactor, 1.0f);
+			Component->SetVolumeMultiplier(NewVolume);
+		}
+	}
 }
 
-void AAudio_SoundManager::SetMasterVolume(float Volume)
+void UAudio_SoundManager::SetWeatherAudioMix(EWeatherType WeatherType, float Intensity)
 {
-    MasterVolume = FMath::Clamp(Volume, 0.0f, 1.0f);
-    UpdateAmbienceAudio();
+	CurrentWeather = WeatherType;
+	
+	// Weather-specific audio adjustments
+	switch (WeatherType)
+	{
+		case EWeatherType::Rain:
+			// Add rain sounds, muffle distant sounds
+			PlaySound2D("Weather_Rain", Intensity);
+			break;
+		case EWeatherType::Storm:
+			// Add thunder, heavy rain, wind
+			PlaySound2D("Weather_Storm", Intensity);
+			break;
+		case EWeatherType::Fog:
+			// Muffle all sounds, add eerie ambience
+			SetAmbienceVolume(AmbienceVolume * 0.6f);
+			break;
+		default:
+			break;
+	}
 }
 
-void AAudio_SoundManager::SetAmbienceVolume(float Volume)
+void UAudio_SoundManager::PlayDinosaurSound(EDinosaurSpecies Species, const FString& SoundType, FVector Location)
 {
-    AmbienceVolume = FMath::Clamp(Volume, 0.0f, 1.0f);
-    if (AmbienceAudioComponent)
-    {
-        AmbienceAudioComponent->SetVolumeMultiplier(AmbienceVolume * MasterVolume);
-    }
+	FString SoundID = FString::Printf(TEXT("Dino_%s_%s"), 
+		*UEnum::GetValueAsString(Species), *SoundType);
+	
+	PlaySoundAtLocation(SoundID, Location, 1.0f);
 }
 
-void AAudio_SoundManager::SetMusicVolume(float Volume)
+void UAudio_SoundManager::SetDinosaurProximityAudio(float Distance, EDinosaurSpecies Species)
 {
-    MusicVolume = FMath::Clamp(Volume, 0.0f, 1.0f);
-    if (MusicAudioComponent)
-    {
-        MusicAudioComponent->SetVolumeMultiplier(MusicVolume * MasterVolume);
-    }
+	// Adjust audio mix based on dangerous dinosaur proximity
+	if (Species == EDinosaurSpecies::TRex && Distance < 2000.0f)
+	{
+		// T-Rex nearby - increase tension
+		float TensionFactor = 1.0f - (Distance / 2000.0f);
+		SetAmbienceVolume(AmbienceVolume * (1.0f - TensionFactor * 0.5f));
+		
+		if (Distance < 500.0f)
+		{
+			// Very close - play heartbeat or tension sound
+			PlaySound2D("Player_Heartbeat", TensionFactor);
+		}
+	}
 }
 
-void AAudio_SoundManager::SetSFXVolume(float Volume)
+void UAudio_SoundManager::SetMasterVolume(float Volume)
 {
-    SFXVolume = FMath::Clamp(Volume, 0.0f, 1.0f);
+	MasterVolume = FMath::Clamp(Volume, 0.0f, 1.0f);
+	
+	// Update all active components
+	for (UAudioComponent* Component : ActiveAudioComponents)
+	{
+		if (IsValid(Component))
+		{
+			// Recalculate volume with new master volume
+			float CurrentVolume = Component->GetVolumeMultiplier();
+			Component->SetVolumeMultiplier(CurrentVolume * MasterVolume);
+		}
+	}
 }
 
-void AAudio_SoundManager::UpdateAmbienceAudio()
+void UAudio_SoundManager::SetSFXVolume(float Volume)
 {
-    PlayAmbienceForBiome(CurrentBiome);
+	SFXVolume = FMath::Clamp(Volume, 0.0f, 1.0f);
 }
 
-void AAudio_SoundManager::CrossfadeToNewAmbience(USoundCue* NewAmbience)
+void UAudio_SoundManager::SetMusicVolume(float Volume)
 {
-    if (!NewAmbience || !AmbienceAudioComponent)
-    {
-        return;
-    }
-
-    TargetAmbience = NewAmbience;
-    
-    if (AmbienceAudioComponent->IsPlaying())
-    {
-        // Start crossfade transition
-        bIsTransitioning = true;
-        TransitionTimer = 0.0f;
-        TransitionDuration = GetBiomeAmbienceSettings(CurrentBiome).TransitionDuration;
-        
-        if (MusicAudioComponent)
-        {
-            MusicAudioComponent->SetSound(NewAmbience);
-            MusicAudioComponent->SetVolumeMultiplier(0.0f);
-            MusicAudioComponent->Play();
-        }
-    }
-    else
-    {
-        // Direct play if nothing is currently playing
-        AmbienceAudioComponent->SetSound(NewAmbience);
-        AmbienceAudioComponent->SetVolumeMultiplier(AmbienceVolume * MasterVolume);
-        AmbienceAudioComponent->Play();
-    }
+	MusicVolume = FMath::Clamp(Volume, 0.0f, 1.0f);
 }
 
-FAudio_SoundProfile AAudio_SoundManager::GetDinosaurSoundProfile(EAudio_DinosaurType DinosaurType)
+void UAudio_SoundManager::SetAmbienceVolume(float Volume)
 {
-    if (DinosaurSoundProfiles.Contains(DinosaurType))
-    {
-        return DinosaurSoundProfiles[DinosaurType];
-    }
-    
-    // Return default profile if not found
-    FAudio_SoundProfile DefaultProfile;
-    return DefaultProfile;
+	AmbienceVolume = FMath::Clamp(Volume, 0.0f, 1.0f);
+	
+	// Update active ambience components
+	for (auto& Pair : ActiveAmbienceComponents)
+	{
+		UAudioComponent* Component = Pair.Value;
+		if (IsValid(Component) && AmbienceLayers.Contains(Pair.Key))
+		{
+			const FAudio_AmbienceLayer& Layer = AmbienceLayers[Pair.Key];
+			float NewVolume = CalculateFinalVolume(Layer.BaseVolume, 1.0f);
+			Component->SetVolumeMultiplier(NewVolume);
+		}
+	}
 }
 
-FAudio_BiomeAmbience AAudio_SoundManager::GetBiomeAmbienceSettings(EAudio_BiomeType BiomeType)
+void UAudio_SoundManager::InitializeSoundRegistry()
 {
-    for (const FAudio_BiomeAmbience& Settings : BiomeAmbienceSettings)
-    {
-        if (Settings.BiomeType == BiomeType)
-        {
-            return Settings;
-        }
-    }
-    
-    // Return default settings if not found
-    FAudio_BiomeAmbience DefaultSettings;
-    DefaultSettings.BiomeType = BiomeType;
-    return DefaultSettings;
+	// Initialize basic sound registry with placeholder entries
+	SoundRegistry.Empty();
+	
+	// Player sounds
+	SoundRegistry.Add("Player_Footstep", FAudio_SoundEntry());
+	SoundRegistry.Add("Player_Heartbeat", FAudio_SoundEntry());
+	SoundRegistry.Add("Player_Breathing", FAudio_SoundEntry());
+	
+	// Dinosaur sounds
+	SoundRegistry.Add("Dino_TRex_Roar", FAudio_SoundEntry());
+	SoundRegistry.Add("Dino_TRex_Footstep", FAudio_SoundEntry());
+	SoundRegistry.Add("Dino_Velociraptor_Screech", FAudio_SoundEntry());
+	SoundRegistry.Add("Dino_Triceratops_Bellow", FAudio_SoundEntry());
+	SoundRegistry.Add("Dino_Brachiosaurus_Call", FAudio_SoundEntry());
+	
+	// Environment sounds
+	SoundRegistry.Add("Environment_Wind", FAudio_SoundEntry());
+	SoundRegistry.Add("Environment_Water", FAudio_SoundEntry());
+	SoundRegistry.Add("Environment_Fire", FAudio_SoundEntry());
+	
+	// Weather sounds
+	SoundRegistry.Add("Weather_Rain", FAudio_SoundEntry());
+	SoundRegistry.Add("Weather_Storm", FAudio_SoundEntry());
+	SoundRegistry.Add("Weather_Thunder", FAudio_SoundEntry());
+	
+	// Crafting sounds
+	SoundRegistry.Add("Craft_StoneHit", FAudio_SoundEntry());
+	SoundRegistry.Add("Craft_WoodChop", FAudio_SoundEntry());
+	SoundRegistry.Add("Craft_FireStart", FAudio_SoundEntry());
+	
+	UE_LOG(LogTemp, Log, TEXT("Audio_SoundManager: Initialized %d sound entries"), SoundRegistry.Num());
+}
+
+void UAudio_SoundManager::InitializeAmbienceLayers()
+{
+	AmbienceLayers.Empty();
+	
+	// Savanna ambience
+	FAudio_AmbienceLayer SavannaLayer;
+	SavannaLayer.BaseVolume = 0.6f;
+	SavannaLayer.BiomeType = EBiomeType::Savanna;
+	AmbienceLayers.Add(EBiomeType::Savanna, SavannaLayer);
+	
+	// Forest ambience
+	FAudio_AmbienceLayer ForestLayer;
+	ForestLayer.BaseVolume = 0.7f;
+	ForestLayer.BiomeType = EBiomeType::Forest;
+	AmbienceLayers.Add(EBiomeType::Forest, ForestLayer);
+	
+	// Swamp ambience
+	FAudio_AmbienceLayer SwampLayer;
+	SwampLayer.BaseVolume = 0.5f;
+	SwampLayer.BiomeType = EBiomeType::Swamp;
+	AmbienceLayers.Add(EBiomeType::Swamp, SwampLayer);
+	
+	// Desert ambience
+	FAudio_AmbienceLayer DesertLayer;
+	DesertLayer.BaseVolume = 0.4f;
+	DesertLayer.BiomeType = EBiomeType::Desert;
+	AmbienceLayers.Add(EBiomeType::Desert, DesertLayer);
+	
+	// Mountain ambience
+	FAudio_AmbienceLayer MountainLayer;
+	MountainLayer.BaseVolume = 0.5f;
+	MountainLayer.BiomeType = EBiomeType::Mountain;
+	AmbienceLayers.Add(EBiomeType::Mountain, MountainLayer);
+	
+	UE_LOG(LogTemp, Log, TEXT("Audio_SoundManager: Initialized %d ambience layers"), AmbienceLayers.Num());
+}
+
+void UAudio_SoundManager::CleanupInactiveComponents()
+{
+	ActiveAudioComponents.RemoveAll([](UAudioComponent* Component)
+	{
+		return !IsValid(Component) || !Component->IsPlaying();
+	});
+}
+
+UAudioComponent* UAudio_SoundManager::CreateAudioComponent()
+{
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return nullptr;
+	}
+
+	UAudioComponent* AudioComp = NewObject<UAudioComponent>(World);
+	if (AudioComp)
+	{
+		AudioComp->bAutoActivate = false;
+		AudioComp->bStopWhenOwnerDestroyed = false;
+	}
+	
+	return AudioComp;
+}
+
+float UAudio_SoundManager::CalculateFinalVolume(float BaseVolume, float Multiplier) const
+{
+	return BaseVolume * Multiplier * MasterVolume * SFXVolume;
 }
