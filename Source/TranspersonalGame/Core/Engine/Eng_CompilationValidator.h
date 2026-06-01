@@ -1,72 +1,75 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/World.h"
-#include "Subsystems/GameInstanceSubsystem.h"
+#include "Engine/Engine.h"
+#include "Subsystems/EngineSubsystem.h"
 #include "SharedTypes.h"
 #include "Eng_CompilationValidator.generated.h"
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEng_CompilationError
+struct TRANSPERSONALGAME_API FEng_ModuleStatus
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Compilation")
-    FString FileName;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Module")
+    FString ModuleName;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Compilation")
-    int32 LineNumber;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Module")
+    bool bIsLoaded;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Compilation")
-    FString ErrorMessage;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Module")
+    bool bHasErrors;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Compilation")
-    FString ErrorType;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Module")
+    int32 ClassCount;
 
-    FEng_CompilationError()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Module")
+    TArray<FString> ErrorMessages;
+
+    FEng_ModuleStatus()
     {
-        FileName = TEXT("");
-        LineNumber = 0;
-        ErrorMessage = TEXT("");
-        ErrorType = TEXT("");
+        ModuleName = TEXT("Unknown");
+        bIsLoaded = false;
+        bHasErrors = false;
+        ClassCount = 0;
     }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEng_ModuleCompilationStatus
+struct TRANSPERSONALGAME_API FEng_CompilationReport
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Compilation")
-    FString ModuleName;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Compilation")
+    bool bOverallSuccess;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Compilation")
-    bool bCompiledSuccessfully;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Compilation")
+    int32 TotalModules;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Compilation")
-    int32 ErrorCount;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Compilation")
+    int32 LoadedModules;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Compilation")
-    int32 WarningCount;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Compilation")
+    int32 TotalClasses;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Compilation")
-    float CompilationTime;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Compilation")
+    TArray<FEng_ModuleStatus> ModuleStatuses;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Compilation")
-    TArray<FEng_CompilationError> Errors;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Compilation")
+    FDateTime ReportTime;
 
-    FEng_ModuleCompilationStatus()
+    FEng_CompilationReport()
     {
-        ModuleName = TEXT("");
-        bCompiledSuccessfully = false;
-        ErrorCount = 0;
-        WarningCount = 0;
-        CompilationTime = 0.0f;
+        bOverallSuccess = false;
+        TotalModules = 0;
+        LoadedModules = 0;
+        TotalClasses = 0;
+        ReportTime = FDateTime::Now();
     }
 };
 
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UEng_CompilationValidator : public UGameInstanceSubsystem
+UCLASS(BlueprintType)
+class TRANSPERSONALGAME_API UEng_CompilationValidator : public UEngineSubsystem
 {
     GENERATED_BODY()
 
@@ -77,69 +80,41 @@ public:
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
-    // Compilation validation
-    UFUNCTION(BlueprintCallable, Category = "Compilation")
-    bool ValidateAllModules();
+    UFUNCTION(BlueprintCallable, Category = "Compilation Validator")
+    FEng_CompilationReport ValidateProjectCompilation();
 
-    UFUNCTION(BlueprintCallable, Category = "Compilation")
-    FEng_ModuleCompilationStatus ValidateModule(const FString& ModuleName);
+    UFUNCTION(BlueprintCallable, Category = "Compilation Validator")
+    bool ValidateModuleIntegrity(const FString& ModuleName);
 
-    UFUNCTION(BlueprintCallable, Category = "Compilation")
-    TArray<FEng_ModuleCompilationStatus> GetCompilationStatus();
+    UFUNCTION(BlueprintCallable, Category = "Compilation Validator")
+    TArray<FString> GetMissingCppFiles();
 
-    UFUNCTION(BlueprintCallable, Category = "Compilation")
-    bool CheckClassAvailability(const FString& ClassName);
+    UFUNCTION(BlueprintCallable, Category = "Compilation Validator")
+    bool FixCommonCompilationIssues();
 
-    UFUNCTION(BlueprintCallable, Category = "Compilation")
-    TArray<FString> GetMissingClasses();
-
-    // Code quality checks
-    UFUNCTION(BlueprintCallable, Category = "Compilation")
-    bool ValidateHeaderIncludes();
-
-    UFUNCTION(BlueprintCallable, Category = "Compilation")
-    bool ValidateUPropertyMacros();
-
-    UFUNCTION(BlueprintCallable, Category = "Compilation")
-    bool ValidateUFunctionMacros();
-
-    // Build system integration
-    UFUNCTION(BlueprintCallable, Category = "Compilation")
-    bool TriggerHotReload();
-
-    UFUNCTION(BlueprintCallable, Category = "Compilation")
-    bool CheckBuildConfiguration();
-
-    UFUNCTION(BlueprintCallable, Category = "Compilation")
+    UFUNCTION(BlueprintCallable, Category = "Compilation Validator")
     void GenerateCompilationReport();
 
-    // Error tracking
-    UFUNCTION(BlueprintCallable, Category = "Compilation")
-    void LogCompilationError(const FString& FileName, int32 LineNumber, const FString& ErrorMessage);
+    UFUNCTION(BlueprintCallable, Category = "Compilation Validator", CallInEditor = true)
+    void ValidateAllSystems();
 
-    UFUNCTION(BlueprintCallable, Category = "Compilation")
-    void ClearCompilationErrors();
-
-    UFUNCTION(BlueprintCallable, Category = "Compilation")
-    TArray<FEng_CompilationError> GetRecentErrors() const { return RecentErrors; }
+    UFUNCTION(BlueprintCallable, Category = "Compilation Validator")
+    FEng_CompilationReport GetLastReport() const { return LastCompilationReport; }
 
 protected:
-    UPROPERTY(BlueprintReadOnly, Category = "Compilation")
-    TArray<FEng_ModuleCompilationStatus> ModuleStatus;
+    UPROPERTY(BlueprintReadOnly, Category = "Compilation Validator")
+    FEng_CompilationReport LastCompilationReport;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Compilation")
-    TArray<FEng_CompilationError> RecentErrors;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Compilation Validator")
+    TArray<FString> RequiredModules;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Compilation")
-    bool bValidationInProgress;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Compilation")
-    float LastValidationTime;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Compilation Validator")
+    TArray<FString> CriticalClasses;
 
 private:
-    void ValidateTranspersonalGameModule();
-    void CheckRequiredClasses();
-    void ValidateSharedTypes();
-    bool TestClassInstantiation(const FString& ClassName);
-    void ScanForCompilationIssues();
+    void InitializeRequiredModules();
+    void InitializeCriticalClasses();
+    bool CheckClassExists(const FString& ClassName);
+    FEng_ModuleStatus ValidateModule(const FString& ModuleName);
+    void LogValidationResults(const FEng_CompilationReport& Report);
 };
