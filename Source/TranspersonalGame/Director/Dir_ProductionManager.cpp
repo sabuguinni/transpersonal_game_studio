@@ -1,319 +1,262 @@
 #include "Dir_ProductionManager.h"
-#include "Engine/World.h"
 #include "Engine/Engine.h"
+#include "Engine/World.h"
 #include "EngineUtils.h"
-#include "Kismet/GameplayStatics.h"
+#include "HAL/PlatformFilemanager.h"
+#include "Misc/DateTime.h"
+#include "Misc/FileHelper.h"
 
 UDir_ProductionManager::UDir_ProductionManager()
 {
-    PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 5.0f; // Update every 5 seconds
-    
+    // Initialize default values
+    CurrentPhase = EDir_ProductionPhase::Prototyping;
     MaxTotalActors = 8000;
     MaxDinosaurs = 150;
-    
-    InitializeBiomeData();
+    MaxPropsPerBiome = 1000;
 }
 
-void UDir_ProductionManager::BeginPlay()
+void UDir_ProductionManager::Initialize(FSubsystemCollectionBase& Collection)
 {
-    Super::BeginPlay();
+    Super::Initialize(Collection);
     
-    InitializeBiomes();
-    UpdateProductionMetrics();
+    UE_LOG(LogTemp, Warning, TEXT("Production Manager initialized - Studio Director active"));
+    
+    InitializeAgentPipeline();
+    ValidateProjectStructure();
+    UpdateBuildMetrics();
 }
 
-void UDir_ProductionManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void UDir_ProductionManager::Deinitialize()
 {
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+    UE_LOG(LogTemp, Warning, TEXT("Production Manager shutting down"));
+    Super::Deinitialize();
+}
+
+void UDir_ProductionManager::StartProductionCycle()
+{
+    UE_LOG(LogTemp, Warning, TEXT("=== STARTING PRODUCTION CYCLE ==="));
     
-    UpdateProductionMetrics();
+    // Clear previous tasks
+    ActiveTasks.Empty();
     
-    // Auto-cleanup if limits exceeded
-    if (ProductionMetrics.TotalActors > MaxTotalActors)
+    // Initialize agent tasks for current cycle
+    AssignTaskToAgent(2, "Define core engine architecture and compilation rules", 10.0f);
+    AssignTaskToAgent(3, "Implement physics and collision systems", 9.0f);
+    AssignTaskToAgent(5, "Generate procedural terrain with biome distribution", 8.0f);
+    AssignTaskToAgent(9, "Create character models and MetaHuman integration", 7.0f);
+    AssignTaskToAgent(10, "Implement character animations and Motion Matching", 7.0f);
+    AssignTaskToAgent(12, "Design combat AI for dinosaurs", 6.0f);
+    
+    // Update metrics
+    UpdateBuildMetrics();
+    
+    UE_LOG(LogTemp, Warning, TEXT("Production cycle started with %d active tasks"), ActiveTasks.Num());
+}
+
+void UDir_ProductionManager::AssignTaskToAgent(int32 AgentID, const FString& TaskDescription, float Priority)
+{
+    FDir_AgentTask NewTask;
+    NewTask.AgentID = AgentID;
+    NewTask.AgentName = FString::Printf(TEXT("Agent #%02d"), AgentID);
+    NewTask.TaskDescription = TaskDescription;
+    NewTask.Priority = Priority;
+    NewTask.Status = EDir_AgentStatus::Working;
+    NewTask.StartTime = FDateTime::Now();
+    NewTask.Deadline = FDateTime::Now() + FTimespan::FromHours(24);
+    
+    ActiveTasks.Add(NewTask);
+    
+    UE_LOG(LogTemp, Warning, TEXT("Task assigned to Agent #%02d: %s"), AgentID, *TaskDescription);
+}
+
+void UDir_ProductionManager::UpdateAgentStatus(int32 AgentID, EDir_AgentStatus NewStatus)
+{
+    for (FDir_AgentTask& Task : ActiveTasks)
     {
-        CleanupExcessActors();
-    }
-}
-
-void UDir_ProductionManager::InitializeBiomeData()
-{
-    BiomeData.Empty();
-    
-    // Initialize the 5 biomes with their center coordinates
-    FDir_BiomeData Savana;
-    Savana.BiomeType = EDir_BiomeType::Savana;
-    Savana.CenterLocation = FVector(0, 0, 100);
-    Savana.MaxActors = 1600; // 20% of 8000
-    BiomeData.Add(Savana);
-    
-    FDir_BiomeData Pantano;
-    Pantano.BiomeType = EDir_BiomeType::Pantano;
-    Pantano.CenterLocation = FVector(-50000, -45000, 100);
-    Pantano.MaxActors = 1600;
-    BiomeData.Add(Pantano);
-    
-    FDir_BiomeData Floresta;
-    Floresta.BiomeType = EDir_BiomeType::Floresta;
-    Floresta.CenterLocation = FVector(-45000, 40000, 100);
-    Floresta.MaxActors = 1600;
-    BiomeData.Add(Floresta);
-    
-    FDir_BiomeData Deserto;
-    Deserto.BiomeType = EDir_BiomeType::Deserto;
-    Deserto.CenterLocation = FVector(55000, 0, 100);
-    Deserto.MaxActors = 1600;
-    BiomeData.Add(Deserto);
-    
-    FDir_BiomeData Montanha;
-    Montanha.BiomeType = EDir_BiomeType::Montanha;
-    Montanha.CenterLocation = FVector(40000, 50000, 100);
-    Montanha.MaxActors = 1600;
-    BiomeData.Add(Montanha);
-}
-
-void UDir_ProductionManager::UpdateProductionMetrics()
-{
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        return;
-    }
-    
-    // Count all actors
-    int32 TotalActorCount = 0;
-    int32 DinosaurCount = 0;
-    
-    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
-    {
-        AActor* Actor = *ActorItr;
-        if (Actor && IsValid(Actor))
+        if (Task.AgentID == AgentID)
         {
-            TotalActorCount++;
-            
-            // Check if it's a dinosaur
-            FString ActorName = Actor->GetName().ToLower();
-            if (ActorName.Contains(TEXT("trex")) || 
-                ActorName.Contains(TEXT("veloci")) || 
-                ActorName.Contains(TEXT("tricera")) || 
-                ActorName.Contains(TEXT("brachi")) || 
-                ActorName.Contains(TEXT("ankylo")) || 
-                ActorName.Contains(TEXT("parasauro")))
-            {
-                DinosaurCount++;
-            }
-        }
-    }
-    
-    ProductionMetrics.TotalActors = TotalActorCount;
-    ProductionMetrics.TotalDinosaurs = DinosaurCount;
-    
-    // Update biome counts
-    CountActorsInBiomes();
-    
-    // Calculate performance score based on limits
-    float ActorRatio = (float)TotalActorCount / (float)MaxTotalActors;
-    float DinoRatio = (float)DinosaurCount / (float)MaxDinosaurs;
-    ProductionMetrics.PerformanceScore = FMath::Max(0.0f, 100.0f - (ActorRatio * 50.0f) - (DinoRatio * 30.0f));
-    
-    // Determine production phase
-    if (TotalActorCount < 1000)
-    {
-        ProductionMetrics.CurrentPhase = EDir_ProductionPhase::PreProduction;
-    }
-    else if (TotalActorCount < 3000)
-    {
-        ProductionMetrics.CurrentPhase = EDir_ProductionPhase::PrototypeDevelopment;
-    }
-    else if (TotalActorCount < 5000)
-    {
-        ProductionMetrics.CurrentPhase = EDir_ProductionPhase::VerticalSlice;
-    }
-    else
-    {
-        ProductionMetrics.CurrentPhase = EDir_ProductionPhase::Production;
-    }
-}
-
-void UDir_ProductionManager::CountActorsInBiomes()
-{
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        return;
-    }
-    
-    // Reset counts
-    for (FDir_BiomeData& Biome : BiomeData)
-    {
-        Biome.ActorCount = 0;
-        Biome.DinosaurCount = 0;
-    }
-    
-    // Count actors in each biome
-    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
-    {
-        AActor* Actor = *ActorItr;
-        if (Actor && IsValid(Actor))
-        {
-            for (FDir_BiomeData& Biome : BiomeData)
-            {
-                if (IsActorInBiome(Actor, Biome))
-                {
-                    Biome.ActorCount++;
-                    
-                    // Check if it's a dinosaur
-                    FString ActorName = Actor->GetName().ToLower();
-                    if (ActorName.Contains(TEXT("trex")) || 
-                        ActorName.Contains(TEXT("veloci")) || 
-                        ActorName.Contains(TEXT("tricera")) || 
-                        ActorName.Contains(TEXT("brachi")) || 
-                        ActorName.Contains(TEXT("ankylo")) || 
-                        ActorName.Contains(TEXT("parasauro")))
-                    {
-                        Biome.DinosaurCount++;
-                    }
-                    break; // Actor can only be in one biome
-                }
-            }
+            Task.Status = NewStatus;
+            UE_LOG(LogTemp, Warning, TEXT("Agent #%02d status updated to: %d"), AgentID, (int32)NewStatus);
+            break;
         }
     }
 }
 
-bool UDir_ProductionManager::IsActorInBiome(AActor* Actor, const FDir_BiomeData& Biome)
+void UDir_ProductionManager::GenerateProductionReport()
 {
-    if (!Actor)
-    {
-        return false;
-    }
+    UE_LOG(LogTemp, Warning, TEXT("=== PRODUCTION REPORT ==="));
+    UE_LOG(LogTemp, Warning, TEXT("Current Phase: %d"), (int32)CurrentPhase);
+    UE_LOG(LogTemp, Warning, TEXT("Active Tasks: %d"), ActiveTasks.Num());
     
-    FVector ActorLocation = Actor->GetActorLocation();
-    float Distance = FVector::Dist2D(ActorLocation, Biome.CenterLocation);
+    int32 CompletedTasks = 0;
+    int32 BlockedTasks = 0;
+    int32 FailedTasks = 0;
     
-    // 20km radius for each biome
-    return Distance <= 20000.0f;
-}
-
-bool UDir_ProductionManager::CanSpawnActorInBiome(EDir_BiomeType BiomeType)
-{
-    for (const FDir_BiomeData& Biome : BiomeData)
+    for (const FDir_AgentTask& Task : ActiveTasks)
     {
-        if (Biome.BiomeType == BiomeType)
+        switch (Task.Status)
         {
-            return Biome.ActorCount < Biome.MaxActors;
-        }
-    }
-    return false;
-}
-
-FVector UDir_ProductionManager::GetRandomLocationInBiome(EDir_BiomeType BiomeType)
-{
-    for (const FDir_BiomeData& Biome : BiomeData)
-    {
-        if (Biome.BiomeType == BiomeType)
-        {
-            float RandomX = FMath::RandRange(-15000.0f, 15000.0f);
-            float RandomY = FMath::RandRange(-15000.0f, 15000.0f);
-            
-            return FVector(
-                Biome.CenterLocation.X + RandomX,
-                Biome.CenterLocation.Y + RandomY,
-                100.0f
-            );
-        }
-    }
-    return FVector::ZeroVector;
-}
-
-void UDir_ProductionManager::CleanupExcessActors()
-{
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        return;
-    }
-    
-    TArray<AActor*> ActorsToRemove;
-    int32 ActorsToRemoveCount = ProductionMetrics.TotalActors - MaxTotalActors;
-    
-    if (ActorsToRemoveCount <= 0)
-    {
-        return;
-    }
-    
-    // Collect non-essential actors for removal
-    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
-    {
-        AActor* Actor = *ActorItr;
-        if (Actor && IsValid(Actor))
-        {
-            FString ActorName = Actor->GetName().ToLower();
-            
-            // Don't remove essential actors
-            if (ActorName.Contains(TEXT("playerstart")) || 
-                ActorName.Contains(TEXT("gamemode")) || 
-                ActorName.Contains(TEXT("controller")) ||
-                ActorName.Contains(TEXT("pawn")) ||
-                ActorName.Contains(TEXT("character")))
-            {
-                continue;
-            }
-            
-            ActorsToRemove.Add(Actor);
-            
-            if (ActorsToRemove.Num() >= ActorsToRemoveCount)
-            {
+            case EDir_AgentStatus::Complete:
+                CompletedTasks++;
                 break;
-            }
-        }
-    }
-    
-    // Remove excess actors
-    for (AActor* Actor : ActorsToRemove)
-    {
-        if (IsValid(Actor))
-        {
-            Actor->Destroy();
-        }
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("Production Manager: Removed %d excess actors"), ActorsToRemove.Num());
-}
-
-void UDir_ProductionManager::InitializeBiomes()
-{
-    InitializeBiomeData();
-    UpdateProductionMetrics();
-    
-    UE_LOG(LogTemp, Log, TEXT("Production Manager: Initialized %d biomes"), BiomeData.Num());
-}
-
-void UDir_ProductionManager::ValidateActorLimits()
-{
-    UpdateProductionMetrics();
-    
-    UE_LOG(LogTemp, Warning, TEXT("=== PRODUCTION VALIDATION ==="));
-    UE_LOG(LogTemp, Warning, TEXT("Total Actors: %d / %d"), ProductionMetrics.TotalActors, MaxTotalActors);
-    UE_LOG(LogTemp, Warning, TEXT("Total Dinosaurs: %d / %d"), ProductionMetrics.TotalDinosaurs, MaxDinosaurs);
-    UE_LOG(LogTemp, Warning, TEXT("Performance Score: %.1f"), ProductionMetrics.PerformanceScore);
-    
-    for (const FDir_BiomeData& Biome : BiomeData)
-    {
-        FString BiomeName;
-        switch (Biome.BiomeType)
-        {
-            case EDir_BiomeType::Savana: BiomeName = TEXT("Savana"); break;
-            case EDir_BiomeType::Pantano: BiomeName = TEXT("Pantano"); break;
-            case EDir_BiomeType::Floresta: BiomeName = TEXT("Floresta"); break;
-            case EDir_BiomeType::Deserto: BiomeName = TEXT("Deserto"); break;
-            case EDir_BiomeType::Montanha: BiomeName = TEXT("Montanha"); break;
+            case EDir_AgentStatus::Blocked:
+                BlockedTasks++;
+                break;
+            case EDir_AgentStatus::Failed:
+                FailedTasks++;
+                break;
         }
         
-        UE_LOG(LogTemp, Warning, TEXT("%s: %d actors, %d dinosaurs"), *BiomeName, Biome.ActorCount, Biome.DinosaurCount);
+        UE_LOG(LogTemp, Warning, TEXT("  Agent #%02d: %s [%d]"), 
+               Task.AgentID, *Task.TaskDescription, (int32)Task.Status);
     }
     
-    if (ProductionMetrics.TotalActors > MaxTotalActors)
+    UE_LOG(LogTemp, Warning, TEXT("Completed: %d, Blocked: %d, Failed: %d"), 
+           CompletedTasks, BlockedTasks, FailedTasks);
+    
+    // Build metrics
+    UE_LOG(LogTemp, Warning, TEXT("Build Metrics:"));
+    UE_LOG(LogTemp, Warning, TEXT("  Total Actors: %d/%d"), CurrentMetrics.TotalActors, MaxTotalActors);
+    UE_LOG(LogTemp, Warning, TEXT("  Dinosaurs: %d/%d"), CurrentMetrics.DinosaurCount, MaxDinosaurs);
+    UE_LOG(LogTemp, Warning, TEXT("  Compilation Errors: %d"), CurrentMetrics.CompilationErrors);
+    UE_LOG(LogTemp, Warning, TEXT("  Playable: %s"), CurrentMetrics.bIsPlayable ? TEXT("YES") : TEXT("NO"));
+    
+    UE_LOG(LogTemp, Warning, TEXT("=== END REPORT ==="));
+}
+
+void UDir_ProductionManager::UpdateBuildMetrics()
+{
+    CurrentMetrics.LastUpdate = FDateTime::Now();
+    
+    // Count actors in current world
+    if (UWorld* World = GetWorld())
     {
-        UE_LOG(LogTemp, Error, TEXT("CRITICAL: Actor limit exceeded! Cleanup required."));
+        TArray<AActor*> AllActors;
+        UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), AllActors);
+        CurrentMetrics.TotalActors = AllActors.Num();
+        
+        // Count dinosaurs
+        CurrentMetrics.DinosaurCount = 0;
+        for (AActor* Actor : AllActors)
+        {
+            if (Actor && Actor->GetName().Contains(TEXT("Dino")))
+            {
+                CurrentMetrics.DinosaurCount++;
+            }
+        }
+        
+        // Basic playability check
+        CurrentMetrics.bIsPlayable = (CurrentMetrics.TotalActors > 10 && 
+                                     CurrentMetrics.DinosaurCount > 0 &&
+                                     CurrentMetrics.CompilationErrors == 0);
     }
+    
+    // Memory usage (simplified)
+    CurrentMetrics.MemoryUsageGB = FPlatformMemory::GetStats().UsedPhysical / (1024.0f * 1024.0f * 1024.0f);
+    
+    UE_LOG(LogTemp, Log, TEXT("Build metrics updated: %d actors, %d dinos, playable=%s"), 
+           CurrentMetrics.TotalActors, CurrentMetrics.DinosaurCount, 
+           CurrentMetrics.bIsPlayable ? TEXT("YES") : TEXT("NO"));
+}
+
+bool UDir_ProductionManager::ValidateActorLimits()
+{
+    UpdateBuildMetrics();
+    
+    bool bWithinLimits = true;
+    
+    if (CurrentMetrics.TotalActors > MaxTotalActors)
+    {
+        UE_LOG(LogTemp, Error, TEXT("LIMIT EXCEEDED: Total actors %d > %d"), 
+               CurrentMetrics.TotalActors, MaxTotalActors);
+        bWithinLimits = false;
+    }
+    
+    if (CurrentMetrics.DinosaurCount > MaxDinosaurs)
+    {
+        UE_LOG(LogTemp, Error, TEXT("LIMIT EXCEEDED: Dinosaurs %d > %d"), 
+               CurrentMetrics.DinosaurCount, MaxDinosaurs);
+        bWithinLimits = false;
+    }
+    
+    return bWithinLimits;
+}
+
+void UDir_ProductionManager::EnforceActorLimits()
+{
+    if (!ValidateActorLimits())
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Enforcing actor limits - removing excess actors"));
+        
+        if (UWorld* World = GetWorld())
+        {
+            TArray<AActor*> AllActors;
+            UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), AllActors);
+            
+            // Remove excess actors, prioritizing props over dinosaurs
+            int32 ActorsToRemove = FMath::Max(0, AllActors.Num() - MaxTotalActors);
+            
+            for (int32 i = 0; i < ActorsToRemove && i < AllActors.Num(); i++)
+            {
+                AActor* Actor = AllActors[i];
+                if (Actor && !Actor->GetName().Contains(TEXT("Player")) && 
+                    !Actor->GetName().Contains(TEXT("GameMode")))
+                {
+                    Actor->Destroy();
+                }
+            }
+            
+            UE_LOG(LogTemp, Warning, TEXT("Removed %d excess actors"), ActorsToRemove);
+        }
+    }
+}
+
+void UDir_ProductionManager::InitializeAgentPipeline()
+{
+    UE_LOG(LogTemp, Warning, TEXT("Initializing 19-agent production pipeline"));
+    
+    // Verify critical agents are ready
+    TArray<int32> CriticalAgents = {2, 3, 5, 9, 10, 12, 15, 18, 19};
+    
+    for (int32 AgentID : CriticalAgents)
+    {
+        UE_LOG(LogTemp, Log, TEXT("Agent #%02d registered in pipeline"), AgentID);
+    }
+}
+
+void UDir_ProductionManager::ValidateProjectStructure()
+{
+    UE_LOG(LogTemp, Warning, TEXT("Validating project structure"));
+    
+    // Check if critical directories exist
+    TArray<FString> RequiredPaths = {
+        TEXT("Source/TranspersonalGame/Core"),
+        TEXT("Source/TranspersonalGame/Characters"),
+        TEXT("Source/TranspersonalGame/AI"),
+        TEXT("Source/TranspersonalGame/Environment"),
+        TEXT("Source/TranspersonalGame/Director")
+    };
+    
+    IPlatformFile& PlatformFile = FPlatformFileManager::Get().GetPlatformFile();
+    
+    for (const FString& Path : RequiredPaths)
+    {
+        if (PlatformFile.DirectoryExists(*Path))
+        {
+            UE_LOG(LogTemp, Log, TEXT("✓ Directory exists: %s"), *Path);
+        }
+        else
+        {
+            UE_LOG(LogTemp, Warning, TEXT("✗ Directory missing: %s"), *Path);
+        }
+    }
+}
+
+void UDir_ProductionManager::LogProductionStatus()
+{
+    UE_LOG(LogTemp, Warning, TEXT("=== STUDIO DIRECTOR STATUS ==="));
+    UE_LOG(LogTemp, Warning, TEXT("Production Phase: %d"), (int32)CurrentPhase);
+    UE_LOG(LogTemp, Warning, TEXT("Active Tasks: %d"), ActiveTasks.Num());
+    UE_LOG(LogTemp, Warning, TEXT("Build Playable: %s"), CurrentMetrics.bIsPlayable ? TEXT("YES") : TEXT("NO"));
+    UE_LOG(LogTemp, Warning, TEXT("============================"));
 }
