@@ -2,189 +2,128 @@
 
 #include "CoreMinimal.h"
 #include "Engine/World.h"
+#include "Components/ActorComponent.h"
 #include "GameFramework/Actor.h"
-#include "Components/StaticMeshComponent.h"
-#include "Components/SkeletalMeshComponent.h"
-#include "Engine/Engine.h"
 #include "PhysicsEngine/PhysicsSettings.h"
-#include "PhysicsEngine/BodySetup.h"
-#include "Subsystems/WorldSubsystem.h"
-#include "SharedTypes.h"
 #include "Core_PhysicsManager.generated.h"
 
-/**
- * Dinosaur-specific physics configuration for realistic prehistoric survival gameplay
- * Manages mass, collision, and physics properties for all dinosaur species
- */
+UENUM(BlueprintType)
+enum class ECore_PhysicsQuality : uint8
+{
+    Low         UMETA(DisplayName = "Low Quality"),
+    Medium      UMETA(DisplayName = "Medium Quality"),
+    High        UMETA(DisplayName = "High Quality"),
+    Ultra       UMETA(DisplayName = "Ultra Quality")
+};
+
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FCore_DinosaurPhysicsConfig
+struct FCore_PhysicsSettings
 {
     GENERATED_BODY()
 
-    // Realistic mass values based on paleontological data
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
-    float MassKg = 1000.0f;
+    float GravityScale = 1.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
-    float LinearDamping = 0.1f;
+    float LinearDamping = 0.01f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
-    float AngularDamping = 0.1f;
+    float AngularDamping = 0.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
-    bool bEnableGravity = true;
+    ECore_PhysicsQuality QualityLevel = ECore_PhysicsQuality::Medium;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
-    ECollisionEnabled::Type CollisionEnabled = ECollisionEnabled::QueryAndPhysics;
+    int32 MaxSubsteps = 6;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
-    ECollisionResponse CollisionResponse = ECollisionResponse::ECR_Block;
+    float MaxSubstepDeltaTime = 0.016667f;
 
-    FCore_DinosaurPhysicsConfig()
+    FCore_PhysicsSettings()
     {
-        MassKg = 1000.0f;
-        LinearDamping = 0.1f;
-        AngularDamping = 0.1f;
-        bEnableGravity = true;
-        CollisionEnabled = ECollisionEnabled::QueryAndPhysics;
-        CollisionResponse = ECollisionResponse::ECR_Block;
+        GravityScale = 1.0f;
+        LinearDamping = 0.01f;
+        AngularDamping = 0.0f;
+        QualityLevel = ECore_PhysicsQuality::Medium;
+        MaxSubsteps = 6;
+        MaxSubstepDeltaTime = 0.016667f;
     }
 };
 
 /**
- * Core Physics Manager - Handles all physics simulation for the prehistoric world
- * Manages dinosaur physics, environmental destruction, and collision systems
- * Integrates with Engine Architect performance budgets (3ms frame time limit)
+ * Core Physics Manager - Manages global physics settings and performance
+ * Handles physics quality scaling, gravity modifications, and performance optimization
  */
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UCore_PhysicsManager : public UWorldSubsystem
+UCLASS(BlueprintType, Blueprintable, meta = (BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UCore_PhysicsManager : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
     UCore_PhysicsManager();
 
-    // USubsystem interface
-    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
-    virtual void Deinitialize() override;
-    virtual bool ShouldCreateSubsystem(UObject* Outer) const override;
+protected:
+    virtual void BeginPlay() override;
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    /**
-     * Configure physics properties for a dinosaur actor
-     * @param DinosaurActor - The dinosaur actor to configure
-     * @param Species - Dinosaur species for mass/physics lookup
-     * @return true if configuration was successful
-     */
-    UFUNCTION(BlueprintCallable, Category = "Physics", CallInEditor)
-    bool ConfigureDinosaurPhysics(AActor* DinosaurActor, ECore_DinosaurSpecies Species);
+public:
+    // Physics Settings
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Settings")
+    FCore_PhysicsSettings PhysicsSettings;
 
-    /**
-     * Apply realistic physics impulse to a dinosaur (for combat, falls, impacts)
-     * @param DinosaurActor - Target dinosaur
-     * @param ImpulseVector - Force vector in Newtons
-     * @param bVelChange - Whether to treat as velocity change
-     */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Settings")
+    bool bEnablePhysicsOptimization = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Settings")
+    float PhysicsUpdateRate = 60.0f;
+
+    // Performance Monitoring
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float CurrentPhysicsTime = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    int32 ActivePhysicsBodies = 0;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float AveragePhysicsTime = 0.0f;
+
+    // Physics Quality Management
     UFUNCTION(BlueprintCallable, Category = "Physics")
-    void ApplyDinosaurImpulse(AActor* DinosaurActor, FVector ImpulseVector, bool bVelChange = false);
+    void SetPhysicsQuality(ECore_PhysicsQuality NewQuality);
 
-    /**
-     * Enable/disable physics simulation for a dinosaur
-     * @param DinosaurActor - Target dinosaur
-     * @param bEnable - Enable or disable physics
-     */
     UFUNCTION(BlueprintCallable, Category = "Physics")
-    void SetDinosaurPhysicsEnabled(AActor* DinosaurActor, bool bEnable);
+    void ApplyPhysicsSettings(const FCore_PhysicsSettings& NewSettings);
 
-    /**
-     * Get physics configuration for a specific dinosaur species
-     * @param Species - Dinosaur species
-     * @return Physics configuration struct
-     */
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Physics")
-    FCore_DinosaurPhysicsConfig GetSpeciesPhysicsConfig(ECore_DinosaurSpecies Species) const;
-
-    /**
-     * Register a physics actor with the manager for performance tracking
-     * @param PhysicsActor - Actor with physics simulation
-     * @param Priority - Update priority (0=highest, 10=lowest)
-     */
     UFUNCTION(BlueprintCallable, Category = "Physics")
-    void RegisterPhysicsActor(AActor* PhysicsActor, int32 Priority = 5);
+    void SetGlobalGravityScale(float NewGravityScale);
 
-    /**
-     * Unregister a physics actor from the manager
-     * @param PhysicsActor - Actor to remove from tracking
-     */
     UFUNCTION(BlueprintCallable, Category = "Physics")
-    void UnregisterPhysicsActor(AActor* PhysicsActor);
+    float GetGlobalGravityScale() const;
 
-    /**
-     * Get current physics performance metrics
-     * @param OutFrameTimeMs - Current frame time in milliseconds
-     * @param OutActiveActors - Number of active physics actors
-     * @param OutBudgetUsage - Percentage of performance budget used
-     */
-    UFUNCTION(BlueprintCallable, Category = "Physics")
-    void GetPhysicsMetrics(float& OutFrameTimeMs, int32& OutActiveActors, float& OutBudgetUsage) const;
-
-    /**
-     * Force physics optimization (reduce quality for performance)
-     * Called automatically when budget exceeds 3ms
-     */
-    UFUNCTION(BlueprintCallable, Category = "Physics")
+    // Performance Optimization
+    UFUNCTION(BlueprintCallable, Category = "Performance")
     void OptimizePhysicsPerformance();
 
-    /**
-     * Restore full physics quality
-     * Called when performance budget allows
-     */
-    UFUNCTION(BlueprintCallable, Category = "Physics")
-    void RestorePhysicsQuality();
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void UpdatePhysicsStatistics();
 
-protected:
-    // Dinosaur species physics configurations
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Physics", meta = (AllowPrivateAccess = "true"))
-    TMap<ECore_DinosaurSpecies, FCore_DinosaurPhysicsConfig> SpeciesConfigs;
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    bool ShouldReducePhysicsQuality() const;
 
-    // Registered physics actors for performance tracking
-    UPROPERTY(BlueprintReadOnly, Category = "Physics", meta = (AllowPrivateAccess = "true"))
-    TArray<TWeakObjectPtr<AActor>> RegisteredPhysicsActors;
+    // Debug Functions
+    UFUNCTION(BlueprintCallable, Category = "Debug", CallInEditor)
+    void DebugPhysicsSettings();
 
-    // Performance tracking
-    UPROPERTY(BlueprintReadOnly, Category = "Physics", meta = (AllowPrivateAccess = "true"))
-    float CurrentFrameTimeMs;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Physics", meta = (AllowPrivateAccess = "true"))
-    float PhysicsBudgetMs;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Physics", meta = (AllowPrivateAccess = "true"))
-    bool bOptimizationActive;
+    UFUNCTION(BlueprintCallable, Category = "Debug")
+    void LogPhysicsStatistics();
 
 private:
-    /**
-     * Initialize default physics configurations for all dinosaur species
-     */
-    void InitializeSpeciesConfigs();
+    // Internal tracking
+    float PhysicsTimeAccumulator = 0.0f;
+    int32 PhysicsFrameCount = 0;
+    TArray<float> PhysicsTimeSamples;
 
-    /**
-     * Configure physics component with species-specific settings
-     * @param Component - Physics component to configure
-     * @param Config - Physics configuration to apply
-     */
-    void ApplyPhysicsConfig(UPrimitiveComponent* Component, const FCore_DinosaurPhysicsConfig& Config);
-
-    /**
-     * Update performance metrics (called per frame)
-     */
-    void UpdatePerformanceMetrics();
-
-    // Performance budget enforcement (3ms from Engine Architect)
-    static constexpr float MAX_PHYSICS_BUDGET_MS = 3.0f;
-    
-    // Species mass data based on paleontological research
-    static constexpr float TREX_MASS_KG = 7000.0f;        // 7 tons
-    static constexpr float VELOCIRAPTOR_MASS_KG = 15.0f;  // 15 kg
-    static constexpr float BRACHIOSAURUS_MASS_KG = 50000.0f; // 50 tons
-    static constexpr float TRICERATOPS_MASS_KG = 12000.0f;   // 12 tons
-    static constexpr float ANKYLOSAURUS_MASS_KG = 6000.0f;   // 6 tons
+    void UpdatePerformanceMetrics(float DeltaTime);
+    void ApplyQualitySettings();
+    void MonitorPhysicsPerformance();
 };
