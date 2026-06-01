@@ -1,30 +1,30 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Subsystems/GameInstanceSubsystem.h"
-#include "Engine/Engine.h"
-#include "HAL/PlatformMemory.h"
+#include "Engine/GameInstanceSubsystem.h"
+#include "Engine/World.h"
+#include "HAL/Platform.h"
 #include "Perf_MemoryProfiler.generated.h"
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FPerf_MemoryStats
+struct TRANSPERSONALGAME_API FPerf_MemorySnapshot
 {
     GENERATED_BODY()
 
     UPROPERTY(BlueprintReadOnly, Category = "Memory")
-    float UsedPhysicalMB;
+    float PhysicalMemoryMB;
 
     UPROPERTY(BlueprintReadOnly, Category = "Memory")
-    float UsedVirtualMB;
+    float VirtualMemoryMB;
 
     UPROPERTY(BlueprintReadOnly, Category = "Memory")
-    float PeakUsedPhysicalMB;
+    float TextureMemoryMB;
 
     UPROPERTY(BlueprintReadOnly, Category = "Memory")
-    float TotalPhysicalMB;
+    float MeshMemoryMB;
 
     UPROPERTY(BlueprintReadOnly, Category = "Memory")
-    float AvailablePhysicalMB;
+    float AudioMemoryMB;
 
     UPROPERTY(BlueprintReadOnly, Category = "Memory")
     int32 ActorCount;
@@ -32,15 +32,19 @@ struct TRANSPERSONALGAME_API FPerf_MemoryStats
     UPROPERTY(BlueprintReadOnly, Category = "Memory")
     int32 ComponentCount;
 
-    FPerf_MemoryStats()
+    UPROPERTY(BlueprintReadOnly, Category = "Memory")
+    FDateTime Timestamp;
+
+    FPerf_MemorySnapshot()
     {
-        UsedPhysicalMB = 0.0f;
-        UsedVirtualMB = 0.0f;
-        PeakUsedPhysicalMB = 0.0f;
-        TotalPhysicalMB = 0.0f;
-        AvailablePhysicalMB = 0.0f;
+        PhysicalMemoryMB = 0.0f;
+        VirtualMemoryMB = 0.0f;
+        TextureMemoryMB = 0.0f;
+        MeshMemoryMB = 0.0f;
+        AudioMemoryMB = 0.0f;
         ActorCount = 0;
         ComponentCount = 0;
+        Timestamp = FDateTime::Now();
     }
 };
 
@@ -50,54 +54,58 @@ class TRANSPERSONALGAME_API UPerf_MemoryProfiler : public UGameInstanceSubsystem
     GENERATED_BODY()
 
 public:
-    UPerf_MemoryProfiler();
-
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
-    UFUNCTION(BlueprintCallable, Category = "Performance|Memory")
-    FPerf_MemoryStats GetCurrentMemoryStats();
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    FPerf_MemorySnapshot CaptureMemorySnapshot();
 
-    UFUNCTION(BlueprintCallable, Category = "Performance|Memory")
-    void StartMemoryProfiling();
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void StartMemoryProfiling(float IntervalSeconds = 5.0f);
 
-    UFUNCTION(BlueprintCallable, Category = "Performance|Memory")
+    UFUNCTION(BlueprintCallable, Category = "Performance")
     void StopMemoryProfiling();
 
-    UFUNCTION(BlueprintCallable, Category = "Performance|Memory")
-    bool IsMemoryProfilingActive() const { return bIsProfilingActive; }
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    TArray<FPerf_MemorySnapshot> GetMemoryHistory() const { return MemoryHistory; }
 
-    UFUNCTION(BlueprintCallable, Category = "Performance|Memory")
-    float GetMemoryUsageThresholdMB() const { return MemoryThresholdMB; }
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    float GetAverageMemoryUsage() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Performance|Memory")
-    void SetMemoryUsageThresholdMB(float ThresholdMB) { MemoryThresholdMB = ThresholdMB; }
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    float GetPeakMemoryUsage() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Performance|Memory")
-    bool IsMemoryUsageAboveThreshold() const;
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    bool IsMemoryUsageCritical() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Performance|Memory")
-    void LogMemoryReport();
-
-    UFUNCTION(BlueprintCallable, Category = "Performance|Memory")
+    UFUNCTION(BlueprintCallable, Category = "Performance")
     void ForceGarbageCollection();
 
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void OptimizeMemoryUsage();
+
 protected:
-    void UpdateMemoryStats();
-    void CheckMemoryThreshold();
+    UPROPERTY(BlueprintReadOnly, Category = "Memory")
+    TArray<FPerf_MemorySnapshot> MemoryHistory;
 
-private:
-    UPROPERTY()
-    FPerf_MemoryStats CurrentStats;
-
-    UPROPERTY()
+    UPROPERTY(BlueprintReadOnly, Category = "Memory")
     bool bIsProfilingActive;
 
-    UPROPERTY()
-    float MemoryThresholdMB;
-
-    UPROPERTY()
+    UPROPERTY(BlueprintReadOnly, Category = "Memory")
     float ProfilingInterval;
 
+    UPROPERTY(BlueprintReadOnly, Category = "Memory")
+    float MemoryWarningThresholdMB;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Memory")
+    float MemoryCriticalThresholdMB;
+
+private:
     FTimerHandle ProfilingTimerHandle;
+
+    void OnProfilingTick();
+    float CalculateTextureMemoryUsage() const;
+    float CalculateMeshMemoryUsage() const;
+    float CalculateAudioMemoryUsage() const;
+    void CleanupOldSnapshots();
 };
