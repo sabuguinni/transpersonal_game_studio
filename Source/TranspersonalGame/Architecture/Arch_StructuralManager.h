@@ -3,8 +3,9 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "Components/StaticMeshComponent.h"
-#include "Components/SceneComponent.h"
-#include "Engine/World.h"
+#include "Components/BoxComponent.h"
+#include "Engine/StaticMesh.h"
+#include "Materials/MaterialInterface.h"
 #include "Arch_StructuralManager.generated.h"
 
 UENUM(BlueprintType)
@@ -12,14 +13,14 @@ enum class EArch_StructureType : uint8
 {
     StonePillar     UMETA(DisplayName = "Stone Pillar"),
     StoneWall       UMETA(DisplayName = "Stone Wall"),
-    StoneArch       UMETA(DisplayName = "Stone Arch"),
-    Ruins           UMETA(DisplayName = "Ancient Ruins"),
-    ShelterEntrance UMETA(DisplayName = "Shelter Entrance"),
-    CaveOpening     UMETA(DisplayName = "Cave Opening")
+    StoneArchway    UMETA(DisplayName = "Stone Archway"),
+    CaveEntrance    UMETA(DisplayName = "Cave Entrance"),
+    RockFormation   UMETA(DisplayName = "Rock Formation"),
+    AncientRuin     UMETA(DisplayName = "Ancient Ruin")
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FArch_StructureConfig
+struct FArch_StructureData
 {
     GENERATED_BODY()
 
@@ -27,24 +28,28 @@ struct TRANSPERSONALGAME_API FArch_StructureConfig
     EArch_StructureType StructureType = EArch_StructureType::StonePillar;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    FVector Scale = FVector(1.0f, 1.0f, 1.0f);
+    FVector Dimensions = FVector(200.0f, 200.0f, 400.0f);
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
     float WeatheringLevel = 0.5f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    bool bHasMossOvergrowth = true;
+    bool bHasMossGrowth = true;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    bool bHasCarvedSymbols = false;
+    bool bHasCarvings = false;
 
-    FArch_StructureConfig()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
+    float StructuralIntegrity = 1.0f;
+
+    FArch_StructureData()
     {
         StructureType = EArch_StructureType::StonePillar;
-        Scale = FVector(1.0f, 1.0f, 1.0f);
+        Dimensions = FVector(200.0f, 200.0f, 400.0f);
         WeatheringLevel = 0.5f;
-        bHasMossOvergrowth = true;
-        bHasCarvedSymbols = false;
+        bHasMossGrowth = true;
+        bHasCarvings = false;
+        StructuralIntegrity = 1.0f;
     }
 };
 
@@ -60,52 +65,56 @@ protected:
     virtual void BeginPlay() override;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    USceneComponent* RootSceneComponent;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
     UStaticMeshComponent* StructureMesh;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    FArch_StructureConfig StructureConfig;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    UBoxComponent* InteractionVolume;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    TArray<UMaterialInterface*> WeatheredMaterials;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure Config")
+    FArch_StructureData StructureConfig;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    TArray<UMaterialInterface*> MossyMaterials;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Materials")
+    UMaterialInterface* StoneMaterial;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Materials")
+    UMaterialInterface* WeatheredStoneMaterial;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Materials")
+    UMaterialInterface* MossyStoneMaterial;
 
 public:
     virtual void Tick(float DeltaTime) override;
 
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void SetStructureType(EArch_StructureType NewType);
+    UFUNCTION(BlueprintCallable, Category = "Structure")
+    void InitializeStructure(EArch_StructureType Type, FVector Location, FRotator Rotation);
 
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    UFUNCTION(BlueprintCallable, Category = "Structure")
     void ApplyWeathering(float WeatheringAmount);
 
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void ToggleMossOvergrowth(bool bEnable);
+    UFUNCTION(BlueprintCallable, Category = "Structure")
+    void SetMossGrowth(bool bEnableMoss);
 
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void AddCarvedSymbols(bool bEnable);
+    UFUNCTION(BlueprintCallable, Category = "Structure")
+    void AddCarvings(bool bEnableCarvings);
 
-    UFUNCTION(BlueprintCallable, Category = "Architecture", CallInEditor = true)
-    void GenerateRandomStructure();
+    UFUNCTION(BlueprintCallable, Category = "Structure")
+    float GetStructuralIntegrity() const { return StructureConfig.StructuralIntegrity; }
 
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    FVector GetStructureBounds() const;
+    UFUNCTION(BlueprintCallable, Category = "Structure")
+    EArch_StructureType GetStructureType() const { return StructureConfig.StructureType; }
 
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    bool IsStructureStable() const;
+    UFUNCTION(BlueprintImplementableEvent, Category = "Structure")
+    void OnStructureInteraction(AActor* InteractingActor);
+
+    UFUNCTION(BlueprintImplementableEvent, Category = "Structure")
+    void OnStructuralDamage(float DamageAmount);
 
 protected:
     UFUNCTION()
-    void UpdateStructureAppearance();
-
-    UFUNCTION()
-    void ApplyMaterialVariations();
+    void OnInteractionVolumeBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult);
 
 private:
-    float LastWeatheringUpdate;
-    bool bIsInitialized;
+    void UpdateStructureMaterial();
+    void SetStructureDimensions();
+    UStaticMesh* GetMeshForStructureType(EArch_StructureType Type);
 };
