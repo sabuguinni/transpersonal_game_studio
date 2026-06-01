@@ -1,130 +1,123 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "GameFramework/Actor.h"
+#include "Components/StaticMeshComponent.h"
+#include "Components/SceneComponent.h"
 #include "Engine/World.h"
-#include "Components/ActorComponent.h"
-#include "Engine/StaticMeshActor.h"
-#include "../SharedTypes.h"
+#include "SharedTypes.h"
 #include "ArchitecturalManager.generated.h"
-
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FArch_StructureData
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    FString StructureName;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    FVector Location;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    FRotator Rotation;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    EBiomeType BiomeType;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    float StructuralIntegrity;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    bool bIsRuin;
-
-    FArch_StructureData()
-    {
-        StructureName = TEXT("Unknown");
-        Location = FVector::ZeroVector;
-        Rotation = FRotator::ZeroRotator;
-        BiomeType = EBiomeType::Savanna;
-        StructuralIntegrity = 100.0f;
-        bIsRuin = false;
-    }
-};
 
 UENUM(BlueprintType)
 enum class EArch_StructureType : uint8
 {
     None = 0,
-    Pillar = 1,
-    Wall = 2,
-    Temple = 3,
-    Dwelling = 4,
-    Monument = 5,
-    Bridge = 6,
-    Cave = 7,
-    Ruin = 8
+    Pillar,
+    Wall,
+    Archway,
+    Platform,
+    Stairs,
+    Watchtower,
+    Ruins
 };
 
-UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UArchitecturalManager : public UActorComponent
+USTRUCT(BlueprintType)
+struct FArch_StructureData
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
+    EArch_StructureType StructureType = EArch_StructureType::None;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
+    FVector Location = FVector::ZeroVector;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
+    FRotator Rotation = FRotator::ZeroRotator;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
+    FVector Scale = FVector::OneVector;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
+    float DegradationLevel = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
+    bool bHasVegetationOvergrowth = false;
+
+    FArch_StructureData()
+    {
+        StructureType = EArch_StructureType::None;
+        Location = FVector::ZeroVector;
+        Rotation = FRotator::ZeroRotator;
+        Scale = FVector::OneVector;
+        DegradationLevel = 0.0f;
+        bHasVegetationOvergrowth = false;
+    }
+};
+
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API AArchitecturalManager : public AActor
 {
     GENERATED_BODY()
 
 public:
-    UArchitecturalManager();
+    AArchitecturalManager();
 
 protected:
     virtual void BeginPlay() override;
 
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    USceneComponent* RootSceneComponent;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
+    TArray<FArch_StructureData> StructureDatabase;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
+    int32 MaxStructuresPerBiome = 50;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
+    float MinDistanceBetweenStructures = 1000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
+    TMap<EBiomeType, int32> StructureCountPerBiome;
+
 public:
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
-
-    // Structure Management
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void SpawnStructureAtLocation(EArch_StructureType StructureType, FVector Location, FRotator Rotation, EBiomeType BiomeType);
+    virtual void Tick(float DeltaTime) override;
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void SpawnStructuresAcrossBiomes(EArch_StructureType StructureType, int32 CountPerBiome);
+    void SpawnStructureAtLocation(EArch_StructureType StructureType, FVector Location, FRotator Rotation = FRotator::ZeroRotator);
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    TArray<AActor*> GetAllStructuresInBiome(EBiomeType BiomeType);
+    void SpawnStructuresInBiome(EBiomeType BiomeType, int32 Count);
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void UpdateStructuralIntegrity(AActor* StructureActor, float NewIntegrity);
-
-    // Ruin System
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void ConvertToRuin(AActor* StructureActor);
+    void ClearAllStructures();
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void SpawnRuinsInBiome(EBiomeType BiomeType, int32 RuinCount);
-
-    // Interior Management
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void SetupInteriorProps(AActor* StructureActor, EArch_StructureType StructureType);
+    int32 GetStructureCount() const;
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void AddPrimitiveArtifacts(AActor* StructureActor);
-
-    // Biome Distribution
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    FVector GetRandomLocationInBiome(EBiomeType BiomeType);
+    TArray<FArch_StructureData> GetStructuresInRadius(FVector Center, float Radius) const;
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void DistributeStructuresEvenly();
+    void ApplyWeatheringToStructures(float WeatheringAmount);
+
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    void UpdateStructureDegradation(float DeltaTime);
+
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Architecture")
+    void GenerateArchitecturalLayout();
 
 protected:
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    TArray<FArch_StructureData> ManagedStructures;
+    UFUNCTION()
+    void ValidateStructurePlacement();
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    TMap<EBiomeType, FVector> BiomeCenters;
+    UFUNCTION()
+    FVector GetRandomLocationInBiome(EBiomeType BiomeType) const;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    float MaxStructuresPerBiome;
+    UFUNCTION()
+    bool IsLocationValid(FVector Location) const;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    float StructureSpawnRadius;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    bool bAutoSpawnStructures;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    float MinDistanceBetweenStructures;
-
-private:
-    void InitializeBiomeCenters();
-    bool IsLocationValid(FVector Location, EBiomeType BiomeType);
-    void RegisterStructure(AActor* StructureActor, EArch_StructureType StructureType, EBiomeType BiomeType);
-    void CleanupExcessStructures();
+    UFUNCTION()
+    AActor* SpawnStructureMesh(EArch_StructureType StructureType, FVector Location, FRotator Rotation);
 };
