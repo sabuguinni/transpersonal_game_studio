@@ -1,294 +1,295 @@
 #include "Perf_CullingManager.h"
-#include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
-#include "Camera/CameraComponent.h"
 #include "GameFramework/Pawn.h"
-#include "Components/PrimitiveComponent.h"
-#include "Engine/LocalPlayer.h"
+#include "Engine/Engine.h"
+#include "Camera/CameraComponent.h"
+#include "Components/StaticMeshComponent.h"
+#include "Components/SkeletalMeshComponent.h"
 
-APerf_CullingManager::APerf_CullingManager()
+UPerf_CullingManager::UPerf_CullingManager()
 {
-    PrimaryActorTick.bCanEverTick = true;
-    PrimaryActorTick.TickInterval = 0.1f; // Update every 0.1 seconds
+    PrimaryComponentTick.bCanEverTick = true;
+    PrimaryComponentTick.TickInterval = 0.1f;
     
-    LastOcclusionCheck = 0.0f;
-    CullingUpdateCounter = 0;
+    CullingSettings.MaxDrawDistance = 10000.0f;
+    CullingSettings.FrustumCullingMargin = 100.0f;
+    CullingSettings.bEnableOcclusionCulling = true;
+    CullingSettings.MaxVisibleActors = 5000;
+    CullingSettings.PerformanceCullingThreshold = 30.0f;
     
-    // Set default culling settings
-    CullingSettings = FPerf_CullingSettings();
+    bEnableCulling = true;
+    CullingUpdateInterval = 0.1f;
 }
 
-void APerf_CullingManager::BeginPlay()
+void UPerf_CullingManager::BeginPlay()
 {
     Super::BeginPlay();
     
-    UE_LOG(LogTemp, Warning, TEXT("Perf_CullingManager: Started culling management"));
+    LastUpdateTime = GetWorld()->GetTimeSeconds();
+    
+    if (GEngine)
+    {
+        GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Green, 
+            TEXT("Performance Culling Manager Initialized"));
+    }
 }
 
-void APerf_CullingManager::Tick(float DeltaTime)
+void UPerf_CullingManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
-    Super::Tick(DeltaTime);
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
     
-    if (RegisteredActors.Num() == 0)
+    if (!bEnableCulling)
     {
         return;
     }
     
-    CullingUpdateCounter++;
-    
-    // Update distance and frustum culling every tick
-    if (CullingSettings.bEnableDistanceCulling)
+    float CurrentTime = GetWorld()->GetTimeSeconds();
+    if (CurrentTime - LastUpdateTime >= CullingUpdateInterval)
     {
-        UpdateDistanceCulling();
-    }
-    
-    if (CullingSettings.bEnableFrustumCulling)
-    {
-        UpdateFrustumCulling();
-    }
-    
-    // Update occlusion culling less frequently
-    if (CullingSettings.bEnableOcclusionCulling)
-    {
-        LastOcclusionCheck += DeltaTime;
-        if (LastOcclusionCheck >= CullingSettings.OcclusionCheckFrequency)
-        {
-            UpdateOcclusionCulling();
-            LastOcclusionCheck = 0.0f;
-        }
+        UpdateCulling();
+        LastUpdateTime = CurrentTime;
     }
 }
 
-void APerf_CullingManager::RegisterActorForCulling(AActor* Actor, float CullingDistance)
+void UPerf_CullingManager::UpdateCulling()
 {
-    if (!Actor || RegisteredActors.Contains(Actor))
+    if (!GetWorld())
     {
         return;
     }
     
-    RegisteredActors.Add(Actor);
-    ActorCullingDistances.Add(Actor, CullingDistance);
+    float StartTime = FPlatformTime::Seconds();
     
-    UE_LOG(LogTemp, Log, TEXT("Perf_CullingManager: Registered actor %s for culling"), *Actor->GetName());
-}
-
-void APerf_CullingManager::UnregisterActorFromCulling(AActor* Actor)
-{
-    if (!Actor)
+    TArray<AActor*> AllActors;
+    UGameplayStatics::GetAllActorsOfClass(GetWorld(), AActor::StaticClass(), AllActors);
+    
+    TotalActors = AllActors.Num();
+    CulledActorsList.Empty();
+    VisibleActorsList.Empty();
+    
+    int32 ProcessedActors = 0;
+    
+    for (AActor* Actor : AllActors)
     {
-        return;
-    }
-    
-    RegisteredActors.Remove(Actor);
-    ActorCullingDistances.Remove(Actor);
-    CulledActors.Remove(Actor);
-    
-    // Ensure actor is visible when unregistered
-    if (IsValid(Actor))
-    {
-        Actor->SetActorHiddenInGame(false);
-    }
-}
-
-void APerf_CullingManager::SetCullingSettings(const FPerf_CullingSettings& NewSettings)
-{
-    CullingSettings = NewSettings;
-    ForceUpdateCulling();
-}
-
-void APerf_CullingManager::ForceUpdateCulling()
-{
-    // Reset all actors to visible
-    for (AActor* Actor : RegisteredActors)
-    {
-        if (IsValid(Actor))
-        {
-            Actor->SetActorHiddenInGame(false);
-        }
-    }
-    
-    CulledActors.Empty();
-    
-    // Reapply culling
-    if (CullingSettings.bEnableDistanceCulling)
-    {
-        UpdateDistanceCulling();
-    }
-    
-    if (CullingSettings.bEnableFrustumCulling)
-    {
-        UpdateFrustumCulling();
-    }
-    
-    if (CullingSettings.bEnableOcclusionCulling)
-    {
-        UpdateOcclusionCulling();
-    }
-}
-
-void APerf_CullingManager::UpdateDistanceCulling()
-{
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        return;
-    }
-    
-    APlayerController* PlayerController = World->GetFirstPlayerController();
-    if (!PlayerController || !PlayerController->GetPawn())
-    {
-        return;
-    }
-    
-    FVector PlayerLocation = PlayerController->GetPawn()->GetActorLocation();
-    
-    for (AActor* Actor : RegisteredActors)
-    {
-        if (!IsValid(Actor))
+        if (!Actor || Actor == GetOwner())
         {
             continue;
         }
         
-        float* CullingDistance = ActorCullingDistances.Find(Actor);
-        float MaxDistance = CullingDistance ? *CullingDistance : CullingSettings.MaxRenderDistance;
+        bool bShouldCull = false;
+        EPerf_CullingType CullingReason = EPerf_CullingType::Distance;
         
-        float Distance = FVector::Dist(PlayerLocation, Actor->GetActorLocation());
-        bool bShouldCull = Distance > MaxDistance;
-        
-        if (bShouldCull && !CulledActors.Contains(Actor))
+        // Distance culling
+        if (ShouldCullByDistance(Actor))
         {
-            Actor->SetActorHiddenInGame(true);
-            CulledActors.Add(Actor);
+            bShouldCull = true;
+            CullingReason = EPerf_CullingType::Distance;
         }
-        else if (!bShouldCull && CulledActors.Contains(Actor))
+        // Frustum culling
+        else if (ShouldCullByFrustum(Actor))
         {
-            Actor->SetActorHiddenInGame(false);
-            CulledActors.Remove(Actor);
+            bShouldCull = true;
+            CullingReason = EPerf_CullingType::Frustum;
+        }
+        // Performance culling
+        else if (ShouldCullByPerformance(Actor))
+        {
+            bShouldCull = true;
+            CullingReason = EPerf_CullingType::Performance;
+        }
+        
+        if (bShouldCull)
+        {
+            CullActor(Actor, CullingReason);
+        }
+        else
+        {
+            UnCullActor(Actor);
+        }
+        
+        ProcessedActors++;
+        
+        // Limit processing time per frame
+        if (ProcessedActors % 100 == 0)
+        {
+            float ElapsedTime = FPlatformTime::Seconds() - StartTime;
+            if (ElapsedTime > 0.005f) // 5ms limit
+            {
+                break;
+            }
+        }
+    }
+    
+    CulledActors = CulledActorsList.Num();
+    VisibleActors = VisibleActorsList.Num();
+    LastCullingTime = FPlatformTime::Seconds() - StartTime;
+}
+
+void UPerf_CullingManager::SetCullingEnabled(bool bEnabled)
+{
+    bEnableCulling = bEnabled;
+    
+    if (!bEnabled)
+    {
+        // Restore all culled actors
+        for (AActor* Actor : CulledActorsList)
+        {
+            UnCullActor(Actor);
         }
     }
 }
 
-void APerf_CullingManager::UpdateFrustumCulling()
+bool UPerf_CullingManager::IsActorCulled(AActor* Actor) const
 {
-    for (AActor* Actor : RegisteredActors)
-    {
-        if (!IsValid(Actor) || CulledActors.Contains(Actor))
-        {
-            continue;
-        }
-        
-        bool bInFrustum = IsActorInCameraFrustum(Actor);
-        
-        if (!bInFrustum && !CulledActors.Contains(Actor))
-        {
-            Actor->SetActorHiddenInGame(true);
-            CulledActors.Add(Actor);
-        }
-        else if (bInFrustum && CulledActors.Contains(Actor))
-        {
-            Actor->SetActorHiddenInGame(false);
-            CulledActors.Remove(Actor);
-        }
-    }
+    return CulledActorsList.Contains(Actor);
 }
 
-void APerf_CullingManager::UpdateOcclusionCulling()
+void UPerf_CullingManager::CullActor(AActor* Actor, EPerf_CullingType CullingType)
 {
-    for (AActor* Actor : RegisteredActors)
+    if (!Actor || IsActorCulled(Actor))
     {
-        if (!IsValid(Actor) || CulledActors.Contains(Actor))
-        {
-            continue;
-        }
-        
-        bool bIsOccluded = IsActorOccluded(Actor);
-        
-        if (bIsOccluded && !CulledActors.Contains(Actor))
-        {
-            Actor->SetActorHiddenInGame(true);
-            CulledActors.Add(Actor);
-        }
-        else if (!bIsOccluded && CulledActors.Contains(Actor))
-        {
-            Actor->SetActorHiddenInGame(false);
-            CulledActors.Remove(Actor);
-        }
+        return;
     }
+    
+    UpdateActorVisibility(Actor, false);
+    CulledActorsList.AddUnique(Actor);
+    VisibleActorsList.Remove(Actor);
 }
 
-bool APerf_CullingManager::IsActorInCameraFrustum(AActor* Actor) const
+void UPerf_CullingManager::UnCullActor(AActor* Actor)
 {
-    if (!Actor)
+    if (!Actor || !IsActorCulled(Actor))
     {
-        return false;
+        return;
     }
     
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        return true; // Default to visible if we can't check
-    }
-    
-    APlayerController* PlayerController = World->GetFirstPlayerController();
-    if (!PlayerController)
-    {
-        return true;
-    }
-    
-    // Simple frustum check - in a real implementation you'd use the camera's frustum
-    FVector CameraLocation;
-    FRotator CameraRotation;
-    PlayerController->GetPlayerViewPoint(CameraLocation, CameraRotation);
-    
-    FVector ToActor = Actor->GetActorLocation() - CameraLocation;
-    ToActor.Normalize();
-    
-    FVector CameraForward = CameraRotation.Vector();
-    float DotProduct = FVector::DotProduct(CameraForward, ToActor);
-    
-    // Actor is in front of camera (roughly)
-    return DotProduct > -0.5f;
+    UpdateActorVisibility(Actor, true);
+    CulledActorsList.Remove(Actor);
+    VisibleActorsList.AddUnique(Actor);
 }
 
-bool APerf_CullingManager::IsActorOccluded(AActor* Actor) const
+TArray<AActor*> UPerf_CullingManager::GetCulledActors() const
 {
-    if (!Actor)
+    return CulledActorsList;
+}
+
+TArray<AActor*> UPerf_CullingManager::GetVisibleActors() const
+{
+    return VisibleActorsList;
+}
+
+float UPerf_CullingManager::GetCullingEfficiency() const
+{
+    if (TotalActors == 0)
     {
-        return false;
+        return 0.0f;
     }
     
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        return false;
-    }
-    
-    APlayerController* PlayerController = World->GetFirstPlayerController();
-    if (!PlayerController)
-    {
-        return false;
-    }
-    
-    FVector CameraLocation;
-    FRotator CameraRotation;
-    PlayerController->GetPlayerViewPoint(CameraLocation, CameraRotation);
-    
+    return (float)CulledActors / (float)TotalActors * 100.0f;
+}
+
+bool UPerf_CullingManager::ShouldCullByDistance(AActor* Actor) const
+{
+    FVector PlayerLocation = GetPlayerLocation();
     FVector ActorLocation = Actor->GetActorLocation();
     
-    // Perform line trace to check occlusion
-    FHitResult HitResult;
-    FCollisionQueryParams QueryParams;
-    QueryParams.AddIgnoredActor(Actor);
-    QueryParams.AddIgnoredActor(PlayerController->GetPawn());
+    float Distance = FVector::Dist(PlayerLocation, ActorLocation);
+    return Distance > CullingSettings.MaxDrawDistance;
+}
+
+bool UPerf_CullingManager::ShouldCullByFrustum(AActor* Actor) const
+{
+    // Simplified frustum culling - would need camera frustum in full implementation
+    FVector PlayerLocation = GetPlayerLocation();
+    FVector ActorLocation = Actor->GetActorLocation();
     
-    bool bHit = World->LineTraceSingleByChannel(
-        HitResult,
-        CameraLocation,
-        ActorLocation,
-        ECollisionChannel::ECC_Visibility,
-        QueryParams
-    );
+    // Basic behind-player check
+    if (GetWorld() && GetWorld()->GetFirstPlayerController())
+    {
+        APawn* PlayerPawn = GetWorld()->GetFirstPlayerController()->GetPawn();
+        if (PlayerPawn)
+        {
+            FVector ForwardVector = PlayerPawn->GetActorForwardVector();
+            FVector ToActor = (ActorLocation - PlayerLocation).GetSafeNormal();
+            
+            float DotProduct = FVector::DotProduct(ForwardVector, ToActor);
+            return DotProduct < -0.5f; // Behind player
+        }
+    }
     
-    return bHit; // If we hit something, the actor is occluded
+    return false;
+}
+
+bool UPerf_CullingManager::ShouldCullByOcclusion(AActor* Actor) const
+{
+    // Simplified occlusion check - would need proper occlusion queries in full implementation
+    return false;
+}
+
+bool UPerf_CullingManager::ShouldCullByPerformance(AActor* Actor) const
+{
+    // Cull based on current FPS
+    if (GEngine)
+    {
+        float CurrentFPS = 1.0f / GEngine->GetDeltaSeconds();
+        if (CurrentFPS < CullingSettings.PerformanceCullingThreshold)
+        {
+            // Cull actors that are far and not essential
+            FVector PlayerLocation = GetPlayerLocation();
+            FVector ActorLocation = Actor->GetActorLocation();
+            float Distance = FVector::Dist(PlayerLocation, ActorLocation);
+            
+            return Distance > CullingSettings.MaxDrawDistance * 0.5f;
+        }
+    }
+    
+    return false;
+}
+
+void UPerf_CullingManager::UpdateActorVisibility(AActor* Actor, bool bVisible)
+{
+    if (!Actor)
+    {
+        return;
+    }
+    
+    // Hide/show static mesh components
+    TArray<UStaticMeshComponent*> StaticMeshComponents;
+    Actor->GetComponents<UStaticMeshComponent>(StaticMeshComponents);
+    for (UStaticMeshComponent* MeshComp : StaticMeshComponents)
+    {
+        if (MeshComp)
+        {
+            MeshComp->SetVisibility(bVisible);
+        }
+    }
+    
+    // Hide/show skeletal mesh components
+    TArray<USkeletalMeshComponent*> SkeletalMeshComponents;
+    Actor->GetComponents<USkeletalMeshComponent>(SkeletalMeshComponents);
+    for (USkeletalMeshComponent* MeshComp : SkeletalMeshComponents)
+    {
+        if (MeshComp)
+        {
+            MeshComp->SetVisibility(bVisible);
+        }
+    }
+    
+    // Disable/enable tick for performance
+    Actor->SetActorTickEnabled(bVisible);
+}
+
+FVector UPerf_CullingManager::GetPlayerLocation() const
+{
+    if (GetWorld() && GetWorld()->GetFirstPlayerController())
+    {
+        APawn* PlayerPawn = GetWorld()->GetFirstPlayerController()->GetPawn();
+        if (PlayerPawn)
+        {
+            return PlayerPawn->GetActorLocation();
+        }
+    }
+    
+    return FVector::ZeroVector;
 }
