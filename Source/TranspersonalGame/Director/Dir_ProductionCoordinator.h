@@ -1,15 +1,14 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
 #include "Engine/World.h"
+#include "GameFramework/Actor.h"
 #include "Components/SceneComponent.h"
 #include "Dir_ProductionCoordinator.generated.h"
 
 /**
- * Studio Director's Production Coordinator
- * Manages critical path execution and agent task distribution
- * Ensures playable prototype milestones are met
+ * Studio Director's Production Coordination System
+ * Manages agent task dispatch and milestone tracking for the playable prototype
  */
 
 USTRUCT(BlueprintType)
@@ -17,69 +16,54 @@ struct FDir_AgentTask
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent Task")
     FString AgentName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent Task")
     FString TaskDescription;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent Task")
     int32 Priority;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent Task")
     bool bIsCompleted;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production")
-    float EstimatedHours;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent Task")
+    FVector TaskLocation;
 
     FDir_AgentTask()
     {
         AgentName = TEXT("");
         TaskDescription = TEXT("");
-        Priority = 0;
+        Priority = 1;
         bIsCompleted = false;
-        EstimatedHours = 0.0f;
+        TaskLocation = FVector::ZeroVector;
     }
 };
 
 USTRUCT(BlueprintType)
-struct FDir_BiomeStatus
+struct FDir_MilestoneStatus
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment")
-    FString BiomeName;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Milestone")
+    FString MilestoneName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment")
-    FVector CenterLocation;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Milestone")
+    float CompletionPercentage;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment")
-    int32 ActorCount;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Milestone")
+    TArray<FDir_AgentTask> RequiredTasks;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment")
-    int32 DinosaurCount;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Milestone")
+    bool bIsCriticalPath;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment")
-    bool bIsOverLimit;
-
-    FDir_BiomeStatus()
+    FDir_MilestoneStatus()
     {
-        BiomeName = TEXT("");
-        CenterLocation = FVector::ZeroVector;
-        ActorCount = 0;
-        DinosaurCount = 0;
-        bIsOverLimit = false;
+        MilestoneName = TEXT("");
+        CompletionPercentage = 0.0f;
+        bIsCriticalPath = false;
     }
-};
-
-UENUM(BlueprintType)
-enum class EDir_ProductionPhase : uint8
-{
-    MinimumViablePrototype,
-    CoreGameplayLoop,
-    ContentExpansion,
-    Polish,
-    Release
 };
 
 UCLASS(BlueprintType, Blueprintable)
@@ -96,88 +80,62 @@ protected:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
     USceneComponent* RootSceneComponent;
 
-    // Production Management
+    // Current milestone being tracked
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production")
-    EDir_ProductionPhase CurrentPhase;
+    FDir_MilestoneStatus CurrentMilestone;
 
+    // All active agent tasks
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production")
     TArray<FDir_AgentTask> ActiveTasks;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production")
-    TArray<FDir_BiomeStatus> BiomeStatuses;
+    // Production metrics
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Metrics")
+    int32 TotalActorsInWorld;
 
-    // Critical Path Tracking
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Critical Path")
-    bool bPlayerCharacterExists;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Metrics")
+    int32 DinosaurCount;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Critical Path")
-    bool bTerrainGenerated;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Critical Path")
-    bool bDinosaursSpawned;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Critical Path")
-    bool bSurvivalHUDActive;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Critical Path")
-    bool bBasicLightingSetup;
-
-    // Actor Limits (from Hugo's directives)
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Limits")
-    int32 MaxTotalActors;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Limits")
-    int32 MaxDinosaurs;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Limits")
-    int32 MaxPropsPerBiome;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Metrics")
+    int32 EnvironmentPropsCount;
 
 public:
-    // Production Functions
-    UFUNCTION(BlueprintCallable, Category = "Production")
-    void UpdateProductionStatus();
+    virtual void Tick(float DeltaTime) override;
 
+    // Task management functions
     UFUNCTION(BlueprintCallable, Category = "Production")
-    void AssignTaskToAgent(const FString& AgentName, const FString& TaskDesc, int32 Priority);
+    void DispatchTaskToAgent(const FString& AgentName, const FString& TaskDescription, int32 Priority, FVector Location);
 
     UFUNCTION(BlueprintCallable, Category = "Production")
     void CompleteAgentTask(const FString& AgentName);
 
     UFUNCTION(BlueprintCallable, Category = "Production")
-    float GetOverallProgress() const;
+    float GetMilestoneProgress() const;
 
-    // Critical Path Functions
-    UFUNCTION(BlueprintCallable, Category = "Critical Path")
-    void ValidateCriticalPath();
+    UFUNCTION(BlueprintCallable, Category = "Production")
+    void UpdateWorldMetrics();
 
-    UFUNCTION(BlueprintCallable, Category = "Critical Path")
-    bool IsMinimumViablePrototypeReady() const;
+    UFUNCTION(BlueprintCallable, Category = "Production")
+    TArray<FDir_AgentTask> GetHighPriorityTasks() const;
 
-    // Biome Management
-    UFUNCTION(BlueprintCallable, Category = "Environment")
-    void UpdateBiomeStatuses();
+    // Milestone tracking
+    UFUNCTION(BlueprintCallable, Category = "Production")
+    void SetCurrentMilestone(const FString& MilestoneName, const TArray<FDir_AgentTask>& RequiredTasks);
 
-    UFUNCTION(BlueprintCallable, Category = "Environment")
-    FVector GetOptimalSpawnLocationForBiome(const FString& BiomeName);
+    UFUNCTION(BlueprintCallable, Category = "Production")
+    bool IsMilestoneComplete() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Environment")
-    bool CanSpawnInBiome(const FString& BiomeName) const;
+    // Production validation
+    UFUNCTION(BlueprintCallable, Category = "Production")
+    bool ValidatePlayablePrototype() const;
 
-    // Actor Limit Enforcement
-    UFUNCTION(BlueprintCallable, Category = "Limits")
-    bool IsWithinActorLimits() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Limits")
-    void EnforceActorLimits();
-
-    UFUNCTION(BlueprintCallable, Category = "Limits")
-    int32 GetCurrentActorCount() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Limits")
-    int32 GetCurrentDinosaurCount() const;
+    UFUNCTION(BlueprintCallable, Category = "Production")
+    FString GetProductionStatusReport() const;
 
 private:
-    void InitializeBiomes();
-    void InitializeProductionTasks();
-    FDir_BiomeStatus* FindBiomeStatus(const FString& BiomeName);
+    // Internal tracking
+    float LastMetricsUpdate;
+    static const float MetricsUpdateInterval;
+
+    void InitializePlayablePrototypeMilestone();
+    void ValidateAgentOutputs();
 };
