@@ -1,65 +1,74 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/World.h"
-#include "GameFramework/GameModeBase.h"
+#include "Engine/GameInstanceSubsystem.h"
 #include "Subsystems/WorldSubsystem.h"
-#include "SharedTypes.h"
+#include "Engine/World.h"
+#include "GameFramework/Actor.h"
+#include "Components/ActorComponent.h"
+#include "../SharedTypes.h"
 #include "Eng_ArchitectureManager.generated.h"
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEng_SystemPerformanceMetrics
+struct TRANSPERSONALGAME_API FEng_SystemModule
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float FrameTime;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
+    FString ModuleName;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    int32 ActorCount;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
+    bool bIsLoaded;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    int32 ComponentCount;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
+    bool bIsActive;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float MemoryUsageMB;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
+    int32 Priority;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float GPUMemoryUsageMB;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
+    TArray<FString> Dependencies;
 
-    FEng_SystemPerformanceMetrics()
+    FEng_SystemModule()
     {
-        FrameTime = 0.0f;
-        ActorCount = 0;
-        ComponentCount = 0;
-        MemoryUsageMB = 0.0f;
-        GPUMemoryUsageMB = 0.0f;
+        ModuleName = TEXT("Unknown");
+        bIsLoaded = false;
+        bIsActive = false;
+        Priority = 0;
     }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEng_ModuleLoadInfo
+struct TRANSPERSONALGAME_API FEng_PerformanceMetrics
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Module")
-    FString ModuleName;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float FrameTime;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Module")
-    bool bIsLoaded;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float RenderTime;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Module")
-    float LoadTime;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float GameThreadTime;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Module")
-    int32 ClassCount;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    int32 DrawCalls;
 
-    FEng_ModuleLoadInfo()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    int32 TriangleCount;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float MemoryUsage;
+
+    FEng_PerformanceMetrics()
     {
-        ModuleName = TEXT("");
-        bIsLoaded = false;
-        LoadTime = 0.0f;
-        ClassCount = 0;
+        FrameTime = 0.0f;
+        RenderTime = 0.0f;
+        GameThreadTime = 0.0f;
+        DrawCalls = 0;
+        TriangleCount = 0;
+        MemoryUsage = 0.0f;
     }
 };
 
@@ -75,69 +84,94 @@ public:
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
-    // Performance monitoring
+    // Core Architecture Management
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    FEng_SystemPerformanceMetrics GetCurrentPerformanceMetrics();
+    void InitializeSystemModules();
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void StartPerformanceMonitoring();
+    void RegisterSystemModule(const FString& ModuleName, int32 Priority, const TArray<FString>& Dependencies);
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void StopPerformanceMonitoring();
+    bool LoadSystemModule(const FString& ModuleName);
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    bool IsPerformanceMonitoringActive() const { return bPerformanceMonitoringActive; }
-
-    // Module management
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    TArray<FEng_ModuleLoadInfo> GetLoadedModuleInfo();
+    bool UnloadSystemModule(const FString& ModuleName);
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
+    bool IsSystemModuleLoaded(const FString& ModuleName) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    TArray<FString> GetLoadedModules() const;
+
+    // Performance Monitoring
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    FEng_PerformanceMetrics GetCurrentPerformanceMetrics() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void UpdatePerformanceMetrics();
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    bool IsPerformanceWithinLimits() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void SetPerformanceTargets(float TargetFrameTime, int32 MaxDrawCalls, float MaxMemoryMB);
+
+    // System Validation
+    UFUNCTION(BlueprintCallable, Category = "Validation")
     bool ValidateSystemIntegrity();
 
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void LogSystemArchitecture();
+    UFUNCTION(BlueprintCallable, Category = "Validation")
+    TArray<FString> GetSystemErrors() const;
 
-    // Actor limit enforcement
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    bool EnforceActorLimits();
+    UFUNCTION(BlueprintCallable, Category = "Validation")
+    void RunDiagnostics();
 
+    // Actor Management
     UFUNCTION(BlueprintCallable, Category = "Architecture")
     int32 GetTotalActorCount() const;
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    int32 GetBiomeActorCount(EBiomeType BiomeType) const;
-
-    // System health checks
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    bool CheckMemoryUsage();
+    bool IsActorCountWithinLimits() const;
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    bool CheckFrameRate();
+    void CleanupExcessActors();
+
+    // Module Dependencies
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    bool CheckModuleDependencies(const FString& ModuleName) const;
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void GenerateArchitectureReport();
+    TArray<FString> GetModuleDependencies(const FString& ModuleName) const;
 
 protected:
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    bool bPerformanceMonitoringActive;
+    UPROPERTY(BlueprintReadOnly, Category = "Architecture")
+    TArray<FEng_SystemModule> SystemModules;
 
     UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    FEng_SystemPerformanceMetrics LastPerformanceMetrics;
+    FEng_PerformanceMetrics CurrentMetrics;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float TargetFrameTime;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    int32 MaxDrawCalls;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float MaxMemoryMB;
 
     UPROPERTY(BlueprintReadOnly, Category = "Architecture")
-    TArray<FEng_ModuleLoadInfo> LoadedModules;
+    int32 MaxActorCount;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Validation")
+    TArray<FString> SystemErrors;
 
     UPROPERTY(BlueprintReadOnly, Category = "Architecture")
-    float LastHealthCheckTime;
-
-    // Actor limit constants
-    static constexpr int32 MAX_TOTAL_ACTORS = 20000;
-    static constexpr int32 MAX_ACTORS_PER_BIOME = 4000;
+    bool bSystemsInitialized;
 
 private:
-    void UpdatePerformanceMetrics();
-    void CheckSystemHealth();
-    void ValidateActorCounts();
-    void CleanupExcessActors();
+    void InitializeCoreModules();
+    void ValidateModuleLoad(const FString& ModuleName);
+    void UpdateSystemMetrics();
+    FEng_SystemModule* FindSystemModule(const FString& ModuleName);
+    bool ResolveDependencies(const FString& ModuleName);
 };
