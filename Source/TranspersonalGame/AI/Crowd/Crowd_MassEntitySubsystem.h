@@ -2,72 +2,73 @@
 
 #include "CoreMinimal.h"
 #include "Subsystems/WorldSubsystem.h"
+#include "MassEntityTypes.h"
+#include "MassEntitySubsystem.h"
 #include "Engine/World.h"
-#include "GameFramework/Actor.h"
-#include "Components/StaticMeshComponent.h"
 #include "SharedTypes.h"
 #include "Crowd_MassEntitySubsystem.generated.h"
 
 USTRUCT(BlueprintType)
-struct FCrowd_EntityData
+struct TRANSPERSONALGAME_API FCrowd_EntityData
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Entity")
+    UPROPERTY(BlueprintReadOnly, Category = "Crowd")
     FVector Position;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Entity")
+    UPROPERTY(BlueprintReadOnly, Category = "Crowd")
     FVector Velocity;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Entity")
+    UPROPERTY(BlueprintReadOnly, Category = "Crowd")
     float Speed;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Entity")
-    int32 BiomeID;
+    UPROPERTY(BlueprintReadOnly, Category = "Crowd")
+    ECrowd_BiomeType BiomeType;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Entity")
-    bool bIsActive;
+    UPROPERTY(BlueprintReadOnly, Category = "Crowd")
+    ECrowd_NPCBehaviorState BehaviorState;
 
     FCrowd_EntityData()
     {
         Position = FVector::ZeroVector;
         Velocity = FVector::ZeroVector;
         Speed = 100.0f;
-        BiomeID = 0;
-        bIsActive = true;
+        BiomeType = ECrowd_BiomeType::Savanna;
+        BehaviorState = ECrowd_NPCBehaviorState::Wandering;
     }
 };
 
 USTRUCT(BlueprintType)
-struct FCrowd_BiomeConfig
+struct TRANSPERSONALGAME_API FCrowd_SpawnConfig
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    FString BiomeName;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
+    int32 MaxEntitiesPerBiome;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    FVector CenterLocation;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
+    float SpawnRadius;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float Radius;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
+    float MinDistanceBetweenEntities;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    int32 MaxEntities;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
+    TArray<ECrowd_BiomeType> AllowedBiomes;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float EntityDensity;
-
-    FCrowd_BiomeConfig()
+    FCrowd_SpawnConfig()
     {
-        BiomeName = TEXT("Default");
-        CenterLocation = FVector::ZeroVector;
-        Radius = 15000.0f;
-        MaxEntities = 1000;
-        EntityDensity = 0.1f;
+        MaxEntitiesPerBiome = 200;
+        SpawnRadius = 15000.0f;
+        MinDistanceBetweenEntities = 500.0f;
+        AllowedBiomes = {ECrowd_BiomeType::Savanna, ECrowd_BiomeType::Forest, ECrowd_BiomeType::Desert, ECrowd_BiomeType::Swamp, ECrowd_BiomeType::Mountain};
     }
 };
 
+/**
+ * Mass Entity subsystem for crowd simulation in prehistoric world
+ * Manages up to 50,000 NPCs using UE5 Mass Entity framework
+ * Distributes entities across 5 biomes with realistic population limits
+ */
 UCLASS(BlueprintType)
 class TRANSPERSONALGAME_API UCrowd_MassEntitySubsystem : public UWorldSubsystem
 {
@@ -76,67 +77,58 @@ class TRANSPERSONALGAME_API UCrowd_MassEntitySubsystem : public UWorldSubsystem
 public:
     UCrowd_MassEntitySubsystem();
 
-    // USubsystem interface
+    // UWorldSubsystem interface
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
+    virtual void Tick(float DeltaTime) override;
 
-    // Mass Entity Management
-    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    void InitializeCrowdSystem();
+    UFUNCTION(BlueprintCallable, Category = "Crowd")
+    void InitializeCrowdSimulation();
 
-    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    void SpawnCrowdEntities(int32 Count, const FVector& Location, float Radius);
+    UFUNCTION(BlueprintCallable, Category = "Crowd")
+    void SpawnEntitiesInBiome(ECrowd_BiomeType BiomeType, int32 Count);
 
-    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    void UpdateCrowdMovement(float DeltaTime);
+    UFUNCTION(BlueprintCallable, Category = "Crowd")
+    void UpdateEntityBehavior(FMassEntityHandle EntityHandle, ECrowd_NPCBehaviorState NewState);
 
-    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    void SetBiomeConfiguration(const TArray<FCrowd_BiomeConfig>& BiomeConfigs);
+    UFUNCTION(BlueprintCallable, Category = "Crowd")
+    int32 GetEntityCountInBiome(ECrowd_BiomeType BiomeType) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    int32 GetActiveCrowdEntityCount() const;
+    UFUNCTION(BlueprintCallable, Category = "Crowd")
+    TArray<FCrowd_EntityData> GetEntitiesInRadius(FVector Center, float Radius) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    void ClearAllCrowdEntities();
+    UFUNCTION(BlueprintCallable, Category = "Crowd")
+    void SetCrowdDensity(ECrowd_BiomeType BiomeType, float DensityMultiplier);
 
-    // LOD Management
-    UFUNCTION(BlueprintCallable, Category = "Crowd LOD")
-    void UpdateCrowdLOD(const FVector& PlayerLocation);
+    UFUNCTION(BlueprintCallable, Category = "Crowd")
+    void PauseSimulation(bool bPause);
 
-    UFUNCTION(BlueprintCallable, Category = "Crowd LOD")
-    void SetLODDistances(float HighLOD, float MediumLOD, float LowLOD);
+    UFUNCTION(BlueprintCallable, Category = "Crowd")
+    void ClearAllEntities();
 
 protected:
-    // Entity Storage
-    UPROPERTY(BlueprintReadOnly, Category = "Crowd Data")
-    TArray<FCrowd_EntityData> CrowdEntities;
+    UPROPERTY(BlueprintReadOnly, Category = "Crowd")
+    TObjectPtr<UMassEntitySubsystem> MassEntitySubsystem;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Crowd Data")
-    TArray<FCrowd_BiomeConfig> BiomeConfigurations;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
+    FCrowd_SpawnConfig SpawnConfig;
 
-    // Performance Settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 MaxCrowdEntities;
+    UPROPERTY(BlueprintReadOnly, Category = "Crowd")
+    TMap<ECrowd_BiomeType, int32> BiomeEntityCounts;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float UpdateFrequency;
+    UPROPERTY(BlueprintReadOnly, Category = "Crowd")
+    TArray<FMassEntityHandle> ActiveEntities;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float HighLODDistance;
+    UPROPERTY(BlueprintReadOnly, Category = "Crowd")
+    bool bIsSimulationActive;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float MediumLODDistance;
+    UPROPERTY(BlueprintReadOnly, Category = "Crowd")
+    float SimulationTime;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float LowLODDistance;
-
-    // Internal Methods
-    void ProcessEntityMovement(FCrowd_EntityData& Entity, float DeltaTime);
-    void ApplyFlockingBehavior(FCrowd_EntityData& Entity, const TArray<FCrowd_EntityData>& NearbyEntities);
-    void ConstrainToBiome(FCrowd_EntityData& Entity);
-    int32 GetBiomeForLocation(const FVector& Location);
-    TArray<FCrowd_EntityData> GetNearbyEntities(const FVector& Location, float Radius);
-
-    // Timer Handle
-    FTimerHandle CrowdUpdateTimer;
+private:
+    void UpdateEntityMovement(float DeltaTime);
+    void ProcessBiomeDistribution();
+    FVector GetBiomeCenter(ECrowd_BiomeType BiomeType) const;
+    bool IsValidSpawnLocation(FVector Location, ECrowd_BiomeType BiomeType) const;
+    void CleanupInvalidEntities();
 };
