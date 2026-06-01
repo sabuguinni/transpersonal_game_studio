@@ -1,309 +1,142 @@
 #include "BuildValidationManager.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "Engine/DirectionalLight.h"
-#include "Components/SkyAtmosphereComponent.h"
-#include "Components/SkyLightComponent.h"
-#include "Components/ExponentialHeightFogComponent.h"
 #include "EditorLevelLibrary.h"
+#include "EditorAssetLibrary.h"
 #include "HAL/PlatformFilemanager.h"
 #include "Misc/Paths.h"
 #include "Misc/DateTime.h"
-
-UBuildValidationManager::UBuildValidationManager()
-{
-    LastValidationTime = 0.0f;
-    bAutoValidationEnabled = true;
-}
 
 void UBuildValidationManager::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
     
-    UE_LOG(LogTemp, Warning, TEXT("BuildValidationManager: Sistema de validação inicializado"));
+    MaxActorCount = 8000;
+    MaxDinosaurCount = 150;
+    MaxPropsPerBiome = 1000;
     
-    // Executar validação inicial
-    if (bAutoValidationEnabled)
-    {
-        FTimerHandle ValidationTimer;
-        GetWorld()->GetTimerManager().SetTimer(ValidationTimer, [this]()
-        {
-            RunFullValidation();
-        }, 5.0f, false);
-    }
+    UE_LOG(LogTemp, Log, TEXT("BuildValidationManager initialized with limits: Actors=%d, Dinos=%d, Props/Biome=%d"), 
+           MaxActorCount, MaxDinosaurCount, MaxPropsPerBiome);
 }
 
 void UBuildValidationManager::Deinitialize()
 {
-    UE_LOG(LogTemp, Warning, TEXT("BuildValidationManager: Sistema de validação desligado"));
+    ValidationReports.Empty();
     Super::Deinitialize();
 }
 
-FBuild_ValidationReport UBuildValidationManager::RunFullValidation()
+void UBuildValidationManager::RunFullValidationSuite()
 {
-    double StartTime = FPlatformTime::Seconds();
-    FBuild_ValidationReport Report;
+    ValidationStartTime = FDateTime::Now();
+    ClearValidationReports();
     
-    UE_LOG(LogTemp, Warning, TEXT("BuildValidationManager: Iniciando validação completa"));
+    UE_LOG(LogTemp, Log, TEXT("Starting full validation suite..."));
     
-    // 1. Validar estrutura de ficheiros
-    ValidateFileStructure(Report);
+    ValidateActorCounts();
+    ValidateModuleDependencies();
+    ValidateQAResults();
+    ValidateCompilationStatus();
     
-    // 2. Validar dependências de módulos
-    ValidateModuleDependencies(Report);
+    FTimespan Duration = FDateTime::Now() - ValidationStartTime;
+    UE_LOG(LogTemp, Log, TEXT("Validation suite completed in %.2f seconds"), Duration.GetTotalSeconds());
     
-    // 3. Validar tipos partilhados
-    ValidateSharedTypes(Report);
-    
-    // 4. Validar actores do mapa
-    ValidateMapActors(Report);
-    
-    // 5. Validar iluminação
-    ValidateLightingSetup(Report);
-    
-    // 6. Validar distribuição por biomas
-    ValidateBiomeActors(Report);
-    
-    // 7. Testar compilação
-    Report.bCompilationSuccess = TestCompilation();
-    
-    Report.ValidationTimeSeconds = FPlatformTime::Seconds() - StartTime;
-    LastValidationReport = Report;
-    LastValidationTime = FPlatformTime::Seconds();
-    
-    UE_LOG(LogTemp, Warning, TEXT("BuildValidationManager: Validação completa em %.2f segundos"), Report.ValidationTimeSeconds);
-    
-    return Report;
+    bool bAllPassed = IsValidationPassing();
+    AddValidationReport(
+        bAllPassed ? EBuild_ValidationResult::Pass : EBuild_ValidationResult::Fail,
+        TEXT("Full Validation Suite"),
+        FString::Printf(TEXT("Completed %d tests in %.2f seconds"), ValidationReports.Num(), Duration.GetTotalSeconds()),
+        Duration.GetTotalSeconds()
+    );
 }
 
-TArray<FString> UBuildValidationManager::DetectOrphanHeaders()
+void UBuildValidationManager::ValidateActorCounts()
 {
-    TArray<FString> OrphanHeaders;
+    FDateTime StartTime = FDateTime::Now();
     
-    FString ProjectDir = FPaths::ProjectDir();
-    FString SourceDir = FPaths::Combine(ProjectDir, TEXT("Source"), TEXT("TranspersonalGame"));
-    
-    // Procurar todos os .h files
-    TArray<FString> HeaderFiles;
-    IFileManager::Get().FindFilesRecursive(HeaderFiles, *SourceDir, TEXT("*.h"), true, false);
-    
-    for (const FString& HeaderFile : HeaderFiles)
+    if (UWorld* World = GEngine->GetCurrentPlayWorld())
     {
-        FString CppFile = HeaderFile;
-        CppFile = CppFile.Replace(TEXT(".h"), TEXT(".cpp"));
+        TArray<AActor*> AllActors;
+        UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), AllActors);
         
-        if (!IFileManager::Get().FileExists(*CppFile))
-        {
-            FString RelativePath = HeaderFile;
-            FPaths::MakePathRelativeTo(RelativePath, *SourceDir);
-            OrphanHeaders.Add(RelativePath);
-        }
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("BuildValidationManager: Detectados %d headers órfãos"), OrphanHeaders.Num());
-    
-    return OrphanHeaders;
-}
-
-int32 UBuildValidationManager::CleanDuplicateActors()
-{
-    int32 RemovedCount = 0;
-    
-    if (!GetWorld())
-    {
-        UE_LOG(LogTemp, Error, TEXT("BuildValidationManager: Mundo não disponível para limpeza"));
-        return 0;
-    }
-    
-    // Obter todos os actores
-    TArray<AActor*> AllActors;
-    UEditorLevelLibrary::GetAllLevelActors(GetWorld(), AllActors);
-    
-    // Limpar DirectionalLights duplicados
-    TArray<ADirectionalLight*> DirectionalLights;
-    for (AActor* Actor : AllActors)
-    {
-        if (ADirectionalLight* Light = Cast<ADirectionalLight>(Actor))
-        {
-            DirectionalLights.Add(Light);
-        }
-    }
-    
-    if (DirectionalLights.Num() > 1)
-    {
-        for (int32 i = 1; i < DirectionalLights.Num(); i++)
-        {
-            DirectionalLights[i]->Destroy();
-            RemovedCount++;
-        }
-        UE_LOG(LogTemp, Warning, TEXT("BuildValidationManager: Removidos %d DirectionalLights duplicados"), DirectionalLights.Num() - 1);
-    }
-    
-    // Limpar outros tipos de actores duplicados seria implementado aqui
-    // (SkyAtmosphere, SkyLight, ExponentialHeightFog)
-    
-    UE_LOG(LogTemp, Warning, TEXT("BuildValidationManager: Total de actores duplicados removidos: %d"), RemovedCount);
-    
-    return RemovedCount;
-}
-
-bool UBuildValidationManager::TestCompilation()
-{
-    // Simulação de teste de compilação
-    // Em produção, isto executaria UnrealBuildTool
-    
-    UE_LOG(LogTemp, Warning, TEXT("BuildValidationManager: Testando compilação..."));
-    
-    // Verificar se módulos críticos estão carregados
-    bool bTranspersonalGameLoaded = FModuleManager::Get().IsModuleLoaded("TranspersonalGame");
-    
-    if (!bTranspersonalGameLoaded)
-    {
-        UE_LOG(LogTemp, Error, TEXT("BuildValidationManager: Módulo TranspersonalGame não carregado"));
-        return false;
-    }
-    
-    // Verificar se classes críticas existem
-    UClass* CharacterClass = FindObject<UClass>(ANY_PACKAGE, TEXT("TranspersonalCharacter"));
-    if (!CharacterClass)
-    {
-        UE_LOG(LogTemp, Error, TEXT("BuildValidationManager: TranspersonalCharacter não encontrado"));
-        return false;
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("BuildValidationManager: Compilação validada com sucesso"));
-    return true;
-}
-
-bool UBuildValidationManager::ValidateBiomeDistribution()
-{
-    if (!GetWorld())
-    {
-        return false;
-    }
-    
-    TArray<AActor*> AllActors;
-    UEditorLevelLibrary::GetAllLevelActors(GetWorld(), AllActors);
-    
-    int32 ValidActors = 0;
-    int32 InvalidActors = 0;
-    
-    for (AActor* Actor : AllActors)
-    {
-        FVector Location = Actor->GetActorLocation();
+        int32 ActorCount = AllActors.Num();
+        int32 DinosaurCount = 0;
         
-        // Verificar se está numa posição válida dos biomas
-        bool bValidPosition = false;
-        
-        // Pantano (sudoeste)
-        if (Location.X >= -77500 && Location.X <= -25000 && Location.Y >= -76500 && Location.Y <= -15000)
+        // Count dinosaurs
+        for (AActor* Actor : AllActors)
         {
-            bValidPosition = true;
-        }
-        // Floresta (noroeste)
-        else if (Location.X >= -77500 && Location.X <= -15000 && Location.Y >= 15000 && Location.Y <= 76500)
-        {
-            bValidPosition = true;
-        }
-        // Savana (centro)
-        else if (Location.X >= -20000 && Location.X <= 20000 && Location.Y >= -20000 && Location.Y <= 20000)
-        {
-            bValidPosition = true;
-        }
-        // Deserto (leste)
-        else if (Location.X >= 25000 && Location.X <= 79500 && Location.Y >= -30000 && Location.Y <= 30000)
-        {
-            bValidPosition = true;
-        }
-        // Montanha Nevada (nordeste)
-        else if (Location.X >= 15000 && Location.X <= 79500 && Location.Y >= 20000 && Location.Y <= 76500)
-        {
-            bValidPosition = true;
+            if (Actor && Actor->GetName().Contains(TEXT("Dino"), ESearchCase::IgnoreCase))
+            {
+                DinosaurCount++;
+            }
         }
         
-        if (bValidPosition)
+        FTimespan Duration = FDateTime::Now() - StartTime;
+        
+        // Validate actor limits
+        if (ActorCount > MaxActorCount)
         {
-            ValidActors++;
+            AddValidationReport(
+                EBuild_ValidationResult::Critical,
+                TEXT("Actor Count Validation"),
+                FString::Printf(TEXT("Actor count %d exceeds limit %d"), ActorCount, MaxActorCount),
+                Duration.GetTotalSeconds()
+            );
+        }
+        else if (ActorCount > MaxActorCount * 0.8f)
+        {
+            AddValidationReport(
+                EBuild_ValidationResult::Warning,
+                TEXT("Actor Count Validation"),
+                FString::Printf(TEXT("Actor count %d approaching limit %d"), ActorCount, MaxActorCount),
+                Duration.GetTotalSeconds()
+            );
         }
         else
         {
-            InvalidActors++;
-        }
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("BuildValidationManager: Actores válidos: %d, Inválidos: %d"), ValidActors, InvalidActors);
-    
-    return InvalidActors == 0;
-}
-
-FString UBuildValidationManager::GenerateValidationReport(const FBuild_ValidationReport& Report)
-{
-    FString ReportText;
-    
-    ReportText += TEXT("=== RELATÓRIO DE VALIDAÇÃO DE BUILD ===\n");
-    ReportText += FString::Printf(TEXT("Data: %s\n"), *FDateTime::Now().ToString());
-    ReportText += FString::Printf(TEXT("Tempo de validação: %.2f segundos\n\n"), Report.ValidationTimeSeconds);
-    
-    ReportText += TEXT("ESTATÍSTICAS:\n");
-    ReportText += FString::Printf(TEXT("- Headers totais: %d\n"), Report.TotalHeaders);
-    ReportText += FString::Printf(TEXT("- Implementações totais: %d\n"), Report.TotalImplementations);
-    ReportText += FString::Printf(TEXT("- Headers órfãos: %d\n"), Report.OrphanHeaders);
-    ReportText += FString::Printf(TEXT("- Actores duplicados: %d\n"), Report.DuplicateActors);
-    ReportText += FString::Printf(TEXT("- Compilação: %s\n\n"), Report.bCompilationSuccess ? TEXT("SUCESSO") : TEXT("FALHOU"));
-    
-    ReportText += TEXT("PROBLEMAS DETECTADOS:\n");
-    for (const FBuild_ValidationIssue& Issue : Report.Issues)
-    {
-        FString SeverityText;
-        switch (Issue.Severity)
-        {
-            case EBuild_ValidationResult::Success: SeverityText = TEXT("OK"); break;
-            case EBuild_ValidationResult::Warning: SeverityText = TEXT("AVISO"); break;
-            case EBuild_ValidationResult::Error: SeverityText = TEXT("ERRO"); break;
-            case EBuild_ValidationResult::Critical: SeverityText = TEXT("CRÍTICO"); break;
+            AddValidationReport(
+                EBuild_ValidationResult::Pass,
+                TEXT("Actor Count Validation"),
+                FString::Printf(TEXT("Actor count %d within limits"), ActorCount),
+                Duration.GetTotalSeconds()
+            );
         }
         
-        ReportText += FString::Printf(TEXT("[%s] %s:%s - %s\n"), 
-                                     *SeverityText, *Issue.ModuleName, *Issue.FileName, *Issue.Description);
-    }
-    
-    return ReportText;
-}
-
-void UBuildValidationManager::ValidateFileStructure(FBuild_ValidationReport& Report)
-{
-    FString ProjectDir = FPaths::ProjectDir();
-    FString SourceDir = FPaths::Combine(ProjectDir, TEXT("Source"), TEXT("TranspersonalGame"));
-    
-    TArray<FString> HeaderFiles;
-    TArray<FString> CppFiles;
-    
-    IFileManager::Get().FindFilesRecursive(HeaderFiles, *SourceDir, TEXT("*.h"), true, false);
-    IFileManager::Get().FindFilesRecursive(CppFiles, *SourceDir, TEXT("*.cpp"), true, false);
-    
-    Report.TotalHeaders = HeaderFiles.Num();
-    Report.TotalImplementations = CppFiles.Num();
-    
-    // Detectar headers órfãos
-    for (const FString& HeaderFile : HeaderFiles)
-    {
-        FString CppFile = HeaderFile;
-        CppFile = CppFile.Replace(TEXT(".h"), TEXT(".cpp"));
-        
-        if (!IFileManager::Get().FileExists(*CppFile))
+        // Validate dinosaur limits
+        if (DinosaurCount > MaxDinosaurCount)
         {
-            Report.OrphanHeaders++;
-            AddValidationIssue(Report, EBuild_ValidationResult::Error, 
-                             GetModuleNameFromPath(HeaderFile), 
-                             FPaths::GetCleanFilename(HeaderFile),
-                             TEXT("Header sem implementação .cpp correspondente"));
+            AddValidationReport(
+                EBuild_ValidationResult::Critical,
+                TEXT("Dinosaur Count Validation"),
+                FString::Printf(TEXT("Dinosaur count %d exceeds limit %d"), DinosaurCount, MaxDinosaurCount),
+                Duration.GetTotalSeconds()
+            );
+        }
+        else
+        {
+            AddValidationReport(
+                EBuild_ValidationResult::Pass,
+                TEXT("Dinosaur Count Validation"),
+                FString::Printf(TEXT("Dinosaur count %d within limits"), DinosaurCount),
+                Duration.GetTotalSeconds()
+            );
         }
     }
+    else
+    {
+        AddValidationReport(
+            EBuild_ValidationResult::Fail,
+            TEXT("Actor Count Validation"),
+            TEXT("No valid world found for actor counting"),
+            0.0f
+        );
+    }
 }
 
-void UBuildValidationManager::ValidateModuleDependencies(FBuild_ValidationReport& Report)
+void UBuildValidationManager::ValidateModuleDependencies()
 {
-    // Verificar se módulos críticos estão disponíveis
+    FDateTime StartTime = FDateTime::Now();
+    
+    // Check if core modules are loaded
     TArray<FString> RequiredModules = {
         TEXT("TranspersonalGame"),
         TEXT("Core"),
@@ -311,144 +144,160 @@ void UBuildValidationManager::ValidateModuleDependencies(FBuild_ValidationReport
         TEXT("Engine")
     };
     
+    int32 LoadedModules = 0;
     for (const FString& ModuleName : RequiredModules)
     {
-        if (!FModuleManager::Get().IsModuleLoaded(*ModuleName))
+        if (FModuleManager::Get().IsModuleLoaded(*ModuleName))
         {
-            AddValidationIssue(Report, EBuild_ValidationResult::Critical,
-                             ModuleName, TEXT("Module"),
-                             FString::Printf(TEXT("Módulo %s não carregado"), *ModuleName));
+            LoadedModules++;
         }
     }
-}
-
-void UBuildValidationManager::ValidateSharedTypes(FBuild_ValidationReport& Report)
-{
-    // Verificar se SharedTypes.h existe e está acessível
-    FString SharedTypesPath = FPaths::Combine(FPaths::ProjectDir(), TEXT("Source"), TEXT("TranspersonalGame"), TEXT("SharedTypes.h"));
     
-    if (!IFileManager::Get().FileExists(*SharedTypesPath))
+    FTimespan Duration = FDateTime::Now() - StartTime;
+    
+    if (LoadedModules == RequiredModules.Num())
     {
-        AddValidationIssue(Report, EBuild_ValidationResult::Critical,
-                         TEXT("Core"), TEXT("SharedTypes.h"),
-                         TEXT("Ficheiro SharedTypes.h não encontrado"));
+        AddValidationReport(
+            EBuild_ValidationResult::Pass,
+            TEXT("Module Dependencies"),
+            FString::Printf(TEXT("All %d required modules loaded"), RequiredModules.Num()),
+            Duration.GetTotalSeconds()
+        );
+    }
+    else
+    {
+        AddValidationReport(
+            EBuild_ValidationResult::Fail,
+            TEXT("Module Dependencies"),
+            FString::Printf(TEXT("Only %d of %d required modules loaded"), LoadedModules, RequiredModules.Num()),
+            Duration.GetTotalSeconds()
+        );
     }
 }
 
-void UBuildValidationManager::ValidateMapActors(FBuild_ValidationReport& Report)
+void UBuildValidationManager::ValidateQAResults()
 {
-    if (!GetWorld())
-    {
-        AddValidationIssue(Report, EBuild_ValidationResult::Error,
-                         TEXT("World"), TEXT("MinPlayableMap"),
-                         TEXT("Mundo não disponível para validação"));
-        return;
-    }
+    FDateTime StartTime = FDateTime::Now();
     
-    TArray<AActor*> AllActors;
-    UEditorLevelLibrary::GetAllLevelActors(GetWorld(), AllActors);
+    FString QAResultsPath = FPaths::ProjectDir() / TEXT("Source/TranspersonalGame/QA/asset_requests.json");
     
-    // Contar actores por tipo
-    TMap<FString, int32> ActorCounts;
-    for (AActor* Actor : AllActors)
+    if (FPlatformFileManager::Get().GetPlatformFile().FileExists(*QAResultsPath))
     {
-        FString ClassName = Actor->GetClass()->GetName();
-        ActorCounts.FindOrAdd(ClassName)++;
-    }
-    
-    // Reportar contagens
-    for (const auto& Pair : ActorCounts)
-    {
-        if (Pair.Value > 1 && (Pair.Key.Contains(TEXT("Light")) || Pair.Key.Contains(TEXT("Sky")) || Pair.Key.Contains(TEXT("Fog"))))
+        FString FileContent;
+        if (FFileHelper::LoadFileToString(FileContent, *QAResultsPath))
         {
-            Report.DuplicateActors += Pair.Value - 1;
-            AddValidationIssue(Report, EBuild_ValidationResult::Warning,
-                             TEXT("Map"), TEXT("MinPlayableMap"),
-                             FString::Printf(TEXT("Actores duplicados: %d x %s"), Pair.Value, *Pair.Key));
+            // Basic validation - check if file is not empty and contains valid JSON structure
+            if (FileContent.Len() > 10 && FileContent.Contains(TEXT("{")))
+            {
+                AddValidationReport(
+                    EBuild_ValidationResult::Pass,
+                    TEXT("QA Results Validation"),
+                    TEXT("QA results file found and appears valid"),
+                    (FDateTime::Now() - StartTime).GetTotalSeconds()
+                );
+            }
+            else
+            {
+                AddValidationReport(
+                    EBuild_ValidationResult::Warning,
+                    TEXT("QA Results Validation"),
+                    TEXT("QA results file found but appears empty or invalid"),
+                    (FDateTime::Now() - StartTime).GetTotalSeconds()
+                );
+            }
+        }
+        else
+        {
+            AddValidationReport(
+                EBuild_ValidationResult::Fail,
+                TEXT("QA Results Validation"),
+                TEXT("QA results file exists but cannot be read"),
+                (FDateTime::Now() - StartTime).GetTotalSeconds()
+            );
         }
     }
+    else
+    {
+        AddValidationReport(
+            EBuild_ValidationResult::Warning,
+            TEXT("QA Results Validation"),
+            TEXT("No QA results file found - may be first run"),
+            (FDateTime::Now() - StartTime).GetTotalSeconds()
+        );
+    }
 }
 
-void UBuildValidationManager::ValidateLightingSetup(FBuild_ValidationReport& Report)
+void UBuildValidationManager::ValidateCompilationStatus()
 {
-    if (!GetWorld())
+    FDateTime StartTime = FDateTime::Now();
+    
+    FString BinariesPath = FPaths::ProjectDir() / TEXT("Binaries");
+    
+    if (FPlatformFileManager::Get().GetPlatformFile().DirectoryExists(*BinariesPath))
     {
-        return;
-    }
-    
-    TArray<AActor*> AllActors;
-    UEditorLevelLibrary::GetAllLevelActors(GetWorld(), AllActors);
-    
-    bool bHasDirectionalLight = false;
-    bool bHasSkyLight = false;
-    
-    for (AActor* Actor : AllActors)
-    {
-        if (Cast<ADirectionalLight>(Actor))
+        TArray<FString> BinaryFiles;
+        FPlatformFileManager::Get().GetPlatformFile().FindFilesRecursively(BinaryFiles, *BinariesPath, TEXT(".so"));
+        
+        if (BinaryFiles.Num() > 0)
         {
-            bHasDirectionalLight = true;
+            AddValidationReport(
+                EBuild_ValidationResult::Pass,
+                TEXT("Compilation Status"),
+                FString::Printf(TEXT("Found %d compiled binary files"), BinaryFiles.Num()),
+                (FDateTime::Now() - StartTime).GetTotalSeconds()
+            );
         }
-        // Verificar outros tipos de iluminação seria implementado aqui
+        else
+        {
+            AddValidationReport(
+                EBuild_ValidationResult::Fail,
+                TEXT("Compilation Status"),
+                TEXT("No compiled binary files found"),
+                (FDateTime::Now() - StartTime).GetTotalSeconds()
+            );
+        }
     }
-    
-    if (!bHasDirectionalLight)
+    else
     {
-        AddValidationIssue(Report, EBuild_ValidationResult::Warning,
-                         TEXT("Lighting"), TEXT("MinPlayableMap"),
-                         TEXT("Nenhum DirectionalLight encontrado"));
+        AddValidationReport(
+            EBuild_ValidationResult::Fail,
+            TEXT("Compilation Status"),
+            TEXT("Binaries directory not found"),
+            (FDateTime::Now() - StartTime).GetTotalSeconds()
+        );
     }
 }
 
-void UBuildValidationManager::ValidateBiomeActors(FBuild_ValidationReport& Report)
+bool UBuildValidationManager::IsValidationPassing() const
 {
-    // Implementação da validação de distribuição por biomas
-    // (já implementada em ValidateBiomeDistribution)
-}
-
-bool UBuildValidationManager::IsValidBiomePosition(const FVector& Position, EBiomeType BiomeType)
-{
-    switch (BiomeType)
+    for (const FBuild_ValidationReport& Report : ValidationReports)
     {
-        case EBiomeType::Swamp:
-            return Position.X >= -77500 && Position.X <= -25000 && Position.Y >= -76500 && Position.Y <= -15000;
-        case EBiomeType::Forest:
-            return Position.X >= -77500 && Position.X <= -15000 && Position.Y >= 15000 && Position.Y <= 76500;
-        case EBiomeType::Savanna:
-            return Position.X >= -20000 && Position.X <= 20000 && Position.Y >= -20000 && Position.Y <= 20000;
-        case EBiomeType::Desert:
-            return Position.X >= 25000 && Position.X <= 79500 && Position.Y >= -30000 && Position.Y <= 30000;
-        case EBiomeType::SnowyMountain:
-            return Position.X >= 15000 && Position.X <= 79500 && Position.Y >= 20000 && Position.Y <= 76500;
-        default:
+        if (Report.Result == EBuild_ValidationResult::Critical || Report.Result == EBuild_ValidationResult::Fail)
+        {
             return false;
-    }
-}
-
-FString UBuildValidationManager::GetModuleNameFromPath(const FString& FilePath)
-{
-    TArray<FString> PathParts;
-    FilePath.ParseIntoArray(PathParts, TEXT("/"));
-    
-    for (int32 i = 0; i < PathParts.Num(); i++)
-    {
-        if (PathParts[i] == TEXT("TranspersonalGame") && i + 1 < PathParts.Num())
-        {
-            return PathParts[i + 1];
         }
     }
-    
-    return TEXT("Unknown");
+    return true;
 }
 
-void UBuildValidationManager::AddValidationIssue(FBuild_ValidationReport& Report, EBuild_ValidationResult Severity, 
-                                                const FString& Module, const FString& File, const FString& Description, int32 Line)
+void UBuildValidationManager::AddValidationReport(EBuild_ValidationResult Result, const FString& TestName, const FString& Details, float ExecutionTime)
 {
-    FBuild_ValidationIssue Issue;
-    Issue.Severity = Severity;
-    Issue.ModuleName = Module;
-    Issue.FileName = File;
-    Issue.Description = Description;
-    Issue.LineNumber = Line;
+    FBuild_ValidationReport Report;
+    Report.Result = Result;
+    Report.TestName = TestName;
+    Report.Details = Details;
+    Report.ExecutionTime = ExecutionTime;
     
-    Report.Issues.Add(Issue);
+    ValidationReports.Add(Report);
+    
+    FString ResultString;
+    switch (Result)
+    {
+        case EBuild_ValidationResult::Pass: ResultString = TEXT("PASS"); break;
+        case EBuild_ValidationResult::Warning: ResultString = TEXT("WARN"); break;
+        case EBuild_ValidationResult::Fail: ResultString = TEXT("FAIL"); break;
+        case EBuild_ValidationResult::Critical: ResultString = TEXT("CRIT"); break;
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("[%s] %s: %s (%.3fs)"), *ResultString, *TestName, *Details, ExecutionTime);
 }
