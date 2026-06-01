@@ -5,110 +5,134 @@
 #include "GameFramework/PlayerController.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/SkeletalMeshComponent.h"
-#include "TimerManager.h"
-#include "Kismet/GameplayStatics.h"
+#include "Engine/StaticMesh.h"
+#include "Engine/SkeletalMesh.h"
+#include "DrawDebugHelpers.h"
 
-void UPerf_LODManager::Initialize(FSubsystemCollectionBase& Collection)
+UPerf_LODManager::UPerf_LODManager()
 {
-    Super::Initialize(Collection);
+    PrimaryComponentTick.bCanEverTick = true;
+    PrimaryComponentTick.TickInterval = 0.1f;
     
-    UE_LOG(LogTemp, Log, TEXT("Performance LOD Manager initialized"));
+    UpdateFrequency = 0.1f;
+    CurrentLODLevel = EPerf_LODLevel::High;
+    DistanceToPlayer = 0.0f;
+    ManagedActorsCount = 0;
+    LastUpdateTime = 0.0f;
+    CachedPlayerPawn = nullptr;
+}
+
+void UPerf_LODManager::BeginPlay()
+{
+    Super::BeginPlay();
     
-    // Initialize default settings
-    LODSettings = FPerf_LODSettings();
-    AverageLODUpdateTime = 0.0f;
-    LODUpdateTimes.Reserve(60); // Store last 60 update times
+    CachePlayerPawn();
+    LastUpdateTime = GetWorld()->GetTimeSeconds();
     
-    // Start periodic LOD updates (every 0.5 seconds)
-    if (UWorld* World = GetWorld())
+    // Register owner actor for LOD management
+    if (AActor* Owner = GetOwner())
     {
-        World->GetTimerManager().SetTimer(LODUpdateTimer, this, &UPerf_LODManager::PeriodicLODUpdate, 0.5f, true);
+        RegisterActorForLOD(Owner);
     }
 }
 
-void UPerf_LODManager::Deinitialize()
+void UPerf_LODManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
-    // Clear timer
-    if (UWorld* World = GetWorld())
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+    
+    float CurrentTime = GetWorld()->GetTimeSeconds();
+    if (CurrentTime - LastUpdateTime >= UpdateFrequency)
     {
-        World->GetTimerManager().ClearTimer(LODUpdateTimer);
-    }
-    
-    // Clear managed actors
-    ManagedActors.Empty();
-    CulledActors.Empty();
-    LODUpdateTimes.Empty();
-    
-    UE_LOG(LogTemp, Log, TEXT("Performance LOD Manager deinitialized"));
-    
-    Super::Deinitialize();
-}
-
-void UPerf_LODManager::UpdateLODForActor(AActor* Actor, const FVector& PlayerLocation)
-{
-    if (!Actor || !LODSettings.bEnableAutomaticLOD)
-    {
-        return;
-    }
-    
-    double StartTime = FPlatformTime::Seconds();
-    
-    // Calculate distance to player
-    float Distance = FVector::Dist(Actor->GetActorLocation(), PlayerLocation);
-    
-    // Determine LOD level
-    EPerf_LODLevel LODLevel = CalculateLODLevel(Distance);
-    
-    // Handle culling
-    if (LODLevel == EPerf_LODLevel::Culled)
-    {
-        CullActor(Actor);
-        return;
-    }
-    else if (IsActorCulled(Actor))
-    {
-        UnCullActor(Actor);
-    }
-    
-    // Apply LOD to mesh components
-    TArray<UStaticMeshComponent*> StaticMeshes;
-    Actor->GetComponents<UStaticMeshComponent>(StaticMeshes);
-    for (UStaticMeshComponent* MeshComp : StaticMeshes)
-    {
-        ApplyLODToStaticMesh(MeshComp, LODLevel);
-    }
-    
-    TArray<USkeletalMeshComponent*> SkeletalMeshes;
-    Actor->GetComponents<USkeletalMeshComponent>(SkeletalMeshes);
-    for (USkeletalMeshComponent* MeshComp : SkeletalMeshes)
-    {
-        ApplyLODToSkeletalMesh(MeshComp, LODLevel);
-    }
-    
-    // Track performance
-    float UpdateTime = (FPlatformTime::Seconds() - StartTime) * 1000.0f; // Convert to ms
-    UpdatePerformanceStats(UpdateTime);
-}
-
-void UPerf_LODManager::UpdateAllActorLODs(const FVector& PlayerLocation)
-{
-    // Clean up invalid weak pointers
-    ManagedActors.RemoveAll([](const TWeakObjectPtr<AActor>& WeakActor) {
-        return !WeakActor.IsValid();
-    });
-    
-    // Update LOD for all managed actors
-    for (const TWeakObjectPtr<AActor>& WeakActor : ManagedActors)
-    {
-        if (AActor* Actor = WeakActor.Get())
+        if (!CachedPlayerPawn)
         {
-            UpdateLODForActor(Actor, PlayerLocation);
+            CachePlayerPawn();
+        }
+        
+        UpdateAllManagedActors();
+        CleanupInvalidActors();
+        LastUpdateTime = CurrentTime;
+    }
+}
+
+void UPerf_LODManager::UpdateLODForActor(AActor* Actor)
+{
+    if (!Actor || !CachedPlayerPawn)
+    {
+        return;
+    }
+    
+    float Distance = GetDistanceToPlayer(Actor);
+    EPerf_LODLevel NewLODLevel = CalculateLODLevel(Distance);
+    
+    // Check frustum culling if enabled
+    if (LODSettings.bEnableFrustumCulling && !IsActorInPlayerView(Actor))
+    {
+        NewLODLevel = EPerf_LODLevel::Culled;
+    }
+    
+    SetLODLevel(Actor, NewLODLevel);
+    
+    if (Actor == GetOwner())
+    {
+        CurrentLODLevel = NewLODLevel;
+        DistanceToPlayer = Distance;
+    }
+}
+
+void UPerf_LODManager::UpdateAllManagedActors()
+{
+    for (int32 i = ManagedActors.Num() - 1; i >= 0; i--)
+    {
+        if (ManagedActors[i].IsValid())
+        {
+            UpdateLODForActor(ManagedActors[i].Get());
+        }
+        else
+        {
+            ManagedActors.RemoveAt(i);
         }
     }
+    
+    ManagedActorsCount = ManagedActors.Num();
+}
+
+void UPerf_LODManager::RegisterActorForLOD(AActor* Actor)
+{
+    if (!Actor)
+    {
+        return;
+    }
+    
+    TWeakObjectPtr<AActor> WeakActor(Actor);
+    if (!ManagedActors.Contains(WeakActor))
+    {
+        ManagedActors.Add(WeakActor);
+        ManagedActorsCount = ManagedActors.Num();
+        
+        // Immediately update LOD for new actor
+        UpdateLODForActor(Actor);
+    }
+}
+
+void UPerf_LODManager::UnregisterActorFromLOD(AActor* Actor)
+{
+    if (!Actor)
+    {
+        return;
+    }
+    
+    TWeakObjectPtr<AActor> WeakActor(Actor);
+    ManagedActors.Remove(WeakActor);
+    ManagedActorsCount = ManagedActors.Num();
 }
 
 EPerf_LODLevel UPerf_LODManager::CalculateLODLevel(float Distance) const
 {
+    if (!LODSettings.bEnableDistanceCulling)
+    {
+        return EPerf_LODLevel::High;
+    }
+    
     if (Distance <= LODSettings.HighDetailDistance)
     {
         return EPerf_LODLevel::High;
@@ -123,7 +147,7 @@ EPerf_LODLevel UPerf_LODManager::CalculateLODLevel(float Distance) const
     }
     else if (Distance <= LODSettings.CullDistance)
     {
-        return EPerf_LODLevel::Low; // Keep visible but lowest detail
+        return EPerf_LODLevel::Low;
     }
     else
     {
@@ -131,182 +155,171 @@ EPerf_LODLevel UPerf_LODManager::CalculateLODLevel(float Distance) const
     }
 }
 
-void UPerf_LODManager::SetLODSettings(const FPerf_LODSettings& NewSettings)
-{
-    LODSettings = NewSettings;
-    UE_LOG(LogTemp, Log, TEXT("LOD Settings updated - High: %.0f, Medium: %.0f, Low: %.0f, Cull: %.0f"), 
-           LODSettings.HighDetailDistance, LODSettings.MediumDetailDistance, 
-           LODSettings.LowDetailDistance, LODSettings.CullDistance);
-}
-
-void UPerf_LODManager::CullActor(AActor* Actor)
-{
-    if (!Actor || IsActorCulled(Actor))
-    {
-        return;
-    }
-    
-    // Hide the actor
-    Actor->SetActorHiddenInGame(true);
-    Actor->SetActorEnableCollision(false);
-    
-    // Add to culled list
-    CulledActors.AddUnique(Actor);
-    
-    UE_LOG(LogTemp, VeryVerbose, TEXT("Culled actor: %s"), *Actor->GetName());
-}
-
-void UPerf_LODManager::UnCullActor(AActor* Actor)
-{
-    if (!Actor || !IsActorCulled(Actor))
-    {
-        return;
-    }
-    
-    // Show the actor
-    Actor->SetActorHiddenInGame(false);
-    Actor->SetActorEnableCollision(true);
-    
-    // Remove from culled list
-    CulledActors.Remove(Actor);
-    
-    UE_LOG(LogTemp, VeryVerbose, TEXT("Un-culled actor: %s"), *Actor->GetName());
-}
-
-bool UPerf_LODManager::IsActorCulled(AActor* Actor) const
+void UPerf_LODManager::SetLODLevel(AActor* Actor, EPerf_LODLevel LODLevel)
 {
     if (!Actor)
+    {
+        return;
+    }
+    
+    // Handle culling
+    if (LODLevel == EPerf_LODLevel::Culled)
+    {
+        Actor->SetActorHiddenInGame(true);
+        Actor->SetActorEnableCollision(false);
+        Actor->SetActorTickEnabled(false);
+        return;
+    }
+    else
+    {
+        Actor->SetActorHiddenInGame(false);
+        Actor->SetActorEnableCollision(true);
+        Actor->SetActorTickEnabled(true);
+    }
+    
+    ApplyLODToComponents(Actor, LODLevel);
+}
+
+void UPerf_LODManager::OptimizeStaticMesh(UStaticMeshComponent* MeshComp, EPerf_LODLevel LODLevel)
+{
+    if (!MeshComp || !MeshComp->GetStaticMesh())
+    {
+        return;
+    }
+    
+    int32 LODIndex = static_cast<int32>(LODLevel);
+    int32 MaxLOD = MeshComp->GetStaticMesh()->GetNumLODs() - 1;
+    
+    // Clamp LOD index to available LODs
+    LODIndex = FMath::Clamp(LODIndex, 0, MaxLOD);
+    
+    MeshComp->SetForcedLodModel(LODIndex + 1); // UE5 LOD is 1-based
+    
+    // Adjust shadow casting based on LOD level
+    switch (LODLevel)
+    {
+        case EPerf_LODLevel::High:
+            MeshComp->SetCastShadow(true);
+            MeshComp->bCastDynamicShadow = true;
+            break;
+        case EPerf_LODLevel::Medium:
+            MeshComp->SetCastShadow(true);
+            MeshComp->bCastDynamicShadow = false;
+            break;
+        case EPerf_LODLevel::Low:
+            MeshComp->SetCastShadow(false);
+            MeshComp->bCastDynamicShadow = false;
+            break;
+        default:
+            break;
+    }
+}
+
+void UPerf_LODManager::OptimizeSkeletalMesh(USkeletalMeshComponent* MeshComp, EPerf_LODLevel LODLevel)
+{
+    if (!MeshComp || !MeshComp->GetSkeletalMeshAsset())
+    {
+        return;
+    }
+    
+    int32 LODIndex = static_cast<int32>(LODLevel);
+    
+    MeshComp->SetForcedLOD(LODIndex + 1); // UE5 LOD is 1-based
+    
+    // Adjust animation and physics based on LOD level
+    switch (LODLevel)
+    {
+        case EPerf_LODLevel::High:
+            MeshComp->SetUpdateAnimationInEditor(true);
+            MeshComp->SetCastShadow(true);
+            break;
+        case EPerf_LODLevel::Medium:
+            MeshComp->SetUpdateAnimationInEditor(true);
+            MeshComp->SetCastShadow(true);
+            break;
+        case EPerf_LODLevel::Low:
+            MeshComp->SetUpdateAnimationInEditor(false);
+            MeshComp->SetCastShadow(false);
+            break;
+        default:
+            break;
+    }
+}
+
+float UPerf_LODManager::GetDistanceToPlayer(AActor* Actor) const
+{
+    if (!Actor || !CachedPlayerPawn)
+    {
+        return 0.0f;
+    }
+    
+    return FVector::Dist(Actor->GetActorLocation(), CachedPlayerPawn->GetActorLocation());
+}
+
+bool UPerf_LODManager::IsActorInPlayerView(AActor* Actor) const
+{
+    if (!Actor || !CachedPlayerPawn)
     {
         return false;
     }
     
-    return CulledActors.Contains(Actor);
+    // Simple frustum check - can be enhanced with proper camera frustum
+    FVector PlayerLocation = CachedPlayerPawn->GetActorLocation();
+    FVector PlayerForward = CachedPlayerPawn->GetActorForwardVector();
+    FVector ToActor = (Actor->GetActorLocation() - PlayerLocation).GetSafeNormal();
+    
+    float DotProduct = FVector::DotProduct(PlayerForward, ToActor);
+    
+    // Actor is in front of player (within 120 degree cone)
+    return DotProduct > -0.5f;
 }
 
-void UPerf_LODManager::ApplyLODToStaticMesh(UStaticMeshComponent* MeshComp, EPerf_LODLevel LODLevel)
+void UPerf_LODManager::CachePlayerPawn()
 {
-    if (!MeshComp)
+    if (UWorld* World = GetWorld())
     {
-        return;
-    }
-    
-    // Set forced LOD level
-    int32 ForcedLODLevel = 0;
-    switch (LODLevel)
-    {
-        case EPerf_LODLevel::High:
-            ForcedLODLevel = 0;
-            break;
-        case EPerf_LODLevel::Medium:
-            ForcedLODLevel = 1;
-            break;
-        case EPerf_LODLevel::Low:
-            ForcedLODLevel = 2;
-            break;
-        default:
-            ForcedLODLevel = 0;
-            break;
-    }
-    
-    MeshComp->SetForcedLodModel(ForcedLODLevel + 1); // +1 because 0 means no forced LOD
-}
-
-void UPerf_LODManager::ApplyLODToSkeletalMesh(USkeletalMeshComponent* MeshComp, EPerf_LODLevel LODLevel)
-{
-    if (!MeshComp)
-    {
-        return;
-    }
-    
-    // Set forced LOD level
-    int32 ForcedLODLevel = 0;
-    switch (LODLevel)
-    {
-        case EPerf_LODLevel::High:
-            ForcedLODLevel = 0;
-            break;
-        case EPerf_LODLevel::Medium:
-            ForcedLODLevel = 1;
-            break;
-        case EPerf_LODLevel::Low:
-            ForcedLODLevel = 2;
-            break;
-        default:
-            ForcedLODLevel = 0;
-            break;
-    }
-    
-    MeshComp->SetForcedLOD(ForcedLODLevel + 1); // +1 because 0 means no forced LOD
-}
-
-void UPerf_LODManager::RegisterActor(AActor* Actor)
-{
-    if (!Actor)
-    {
-        return;
-    }
-    
-    ManagedActors.AddUnique(Actor);
-    UE_LOG(LogTemp, VeryVerbose, TEXT("Registered actor for LOD management: %s"), *Actor->GetName());
-}
-
-void UPerf_LODManager::UnregisterActor(AActor* Actor)
-{
-    if (!Actor)
-    {
-        return;
-    }
-    
-    ManagedActors.Remove(Actor);
-    CulledActors.Remove(Actor);
-    UE_LOG(LogTemp, VeryVerbose, TEXT("Unregistered actor from LOD management: %s"), *Actor->GetName());
-}
-
-void UPerf_LODManager::UpdatePerformanceStats(float UpdateTime)
-{
-    // Add to update times array
-    LODUpdateTimes.Add(UpdateTime);
-    
-    // Keep only last 60 measurements
-    if (LODUpdateTimes.Num() > 60)
-    {
-        LODUpdateTimes.RemoveAt(0);
-    }
-    
-    // Calculate average
-    if (LODUpdateTimes.Num() > 0)
-    {
-        float Total = 0.0f;
-        for (float Time : LODUpdateTimes)
+        if (APlayerController* PC = World->GetFirstPlayerController())
         {
-            Total += Time;
+            CachedPlayerPawn = PC->GetPawn();
         }
-        AverageLODUpdateTime = Total / LODUpdateTimes.Num();
     }
 }
 
-void UPerf_LODManager::PeriodicLODUpdate()
+void UPerf_LODManager::CleanupInvalidActors()
 {
-    if (!LODSettings.bEnableAutomaticLOD)
+    for (int32 i = ManagedActors.Num() - 1; i >= 0; i--)
+    {
+        if (!ManagedActors[i].IsValid())
+        {
+            ManagedActors.RemoveAt(i);
+        }
+    }
+    
+    ManagedActorsCount = ManagedActors.Num();
+}
+
+void UPerf_LODManager::ApplyLODToComponents(AActor* Actor, EPerf_LODLevel LODLevel)
+{
+    if (!Actor)
     {
         return;
     }
     
-    // Get player location
-    UWorld* World = GetWorld();
-    if (!World)
+    // Apply LOD to all static mesh components
+    TArray<UStaticMeshComponent*> StaticMeshComponents;
+    Actor->GetComponents<UStaticMeshComponent>(StaticMeshComponents);
+    
+    for (UStaticMeshComponent* MeshComp : StaticMeshComponents)
     {
-        return;
+        OptimizeStaticMesh(MeshComp, LODLevel);
     }
     
-    APlayerController* PlayerController = World->GetFirstPlayerController();
-    if (!PlayerController || !PlayerController->GetPawn())
+    // Apply LOD to all skeletal mesh components
+    TArray<USkeletalMeshComponent*> SkeletalMeshComponents;
+    Actor->GetComponents<USkeletalMeshComponent>(SkeletalMeshComponents);
+    
+    for (USkeletalMeshComponent* MeshComp : SkeletalMeshComponents)
     {
-        return;
+        OptimizeSkeletalMesh(MeshComp, LODLevel);
     }
-    
-    FVector PlayerLocation = PlayerController->GetPawn()->GetActorLocation();
-    
-    // Update all actor LODs
-    UpdateAllActorLODs(PlayerLocation);
 }
