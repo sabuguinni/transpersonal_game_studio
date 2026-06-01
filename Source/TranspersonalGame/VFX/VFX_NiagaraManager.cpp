@@ -1,285 +1,274 @@
 #include "VFX_NiagaraManager.h"
-#include "NiagaraComponent.h"
-#include "NiagaraFunctionLibrary.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "TimerManager.h"
+#include "GameFramework/PlayerController.h"
 #include "Kismet/GameplayStatics.h"
+#include "Components/SceneComponent.h"
 
 AVFX_NiagaraManager::AVFX_NiagaraManager()
 {
-    PrimaryActorTick.bCanEverTick = true;
-    
-    // Set default values
-    CleanupTimer = 0.0f;
-    CleanupInterval = 5.0f;
+    PrimaryActorTick.bCanEverTick = false;
+
+    // Create root component
+    RootSceneComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootSceneComponent"));
+    RootComponent = RootSceneComponent;
+
+    // Initialize VFX settings
+    bEnableDustEffects = true;
+    bEnableFireEffects = true;
+    bEnableWeatherEffects = true;
+    bEnableBloodEffects = true;
+
+    // Performance defaults
+    VFXQualityScale = 1.0f;
+    MaxVFXDistance = 3000.0f;
+    MaxActiveVFXSystems = 50;
+
+    // Biome intensity defaults
+    SavanaDustIntensity = 1.2f;
+    SwampMistIntensity = 0.8f;
+    ForestParticleIntensity = 1.0f;
+    DesertSandstormIntensity = 1.5f;
+    MountainSnowIntensity = 0.9f;
+
+    LastCleanupTime = 0.0f;
 }
 
 void AVFX_NiagaraManager::BeginPlay()
 {
     Super::BeginPlay();
     
-    // Initialize the effect registry with default values
-    InitializeEffectRegistry();
+    InitializeVFXSystems();
     
-    UE_LOG(LogTemp, Warning, TEXT("VFX_NiagaraManager: BeginPlay - System initialized"));
+    UE_LOG(LogTemp, Log, TEXT("VFX Niagara Manager initialized"));
 }
 
-void AVFX_NiagaraManager::Tick(float DeltaTime)
+void AVFX_NiagaraManager::InitializeVFXSystems()
 {
-    Super::Tick(DeltaTime);
+    // Clear any existing VFX actors
+    ActiveVFXActors.Empty();
     
-    // Update active effects
-    UpdateActiveEffects(DeltaTime);
+    // Set up performance monitoring
+    LastCleanupTime = GetWorld()->GetTimeSeconds();
     
-    // Periodic cleanup
-    CleanupTimer += DeltaTime;
-    if (CleanupTimer >= CleanupInterval)
+    UE_LOG(LogTemp, Log, TEXT("VFX systems initialized with quality scale: %f"), VFXQualityScale);
+}
+
+void AVFX_NiagaraManager::TriggerFootstepDust(FVector Location, float Intensity)
+{
+    if (!bEnableDustEffects || !IsLocationValid(Location))
     {
-        CleanupExpiredEffects();
-        CleanupTimer = 0.0f;
+        return;
+    }
+
+    // Check distance to player
+    float DistanceToPlayer = CalculateDistanceToPlayer(Location);
+    if (DistanceToPlayer > MaxVFXDistance)
+    {
+        return;
+    }
+
+    // Get biome-specific intensity
+    EVFX_BiomeType BiomeType = GetBiomeAtLocation(Location);
+    float BiomeIntensity = GetBiomeVFXIntensity(BiomeType);
+    float FinalIntensity = Intensity * BiomeIntensity * VFXQualityScale;
+
+    // Create dust effect (placeholder implementation)
+    UE_LOG(LogTemp, Log, TEXT("Triggered footstep dust at %s with intensity %f"), 
+           *Location.ToString(), FinalIntensity);
+    
+    // Cleanup if needed
+    if (ActiveVFXActors.Num() > MaxActiveVFXSystems)
+    {
+        CleanupDistantVFX();
     }
 }
 
-void AVFX_NiagaraManager::InitializeEffectRegistry()
+void AVFX_NiagaraManager::TriggerBloodImpact(FVector Location, FVector Direction, float Amount)
 {
-    // Initialize default effect data
-    FVFX_EffectData FootstepData;
-    FootstepData.EffectType = EVFX_EffectType::FootstepDust;
-    FootstepData.Duration = 3.0f;
-    FootstepData.Scale = 1.0f;
-    FootstepData.bAutoDestroy = true;
-    EffectRegistry.Add(EVFX_EffectType::FootstepDust, FootstepData);
+    if (!bEnableBloodEffects || !IsLocationValid(Location))
+    {
+        return;
+    }
 
-    FVFX_EffectData CampfireData;
-    CampfireData.EffectType = EVFX_EffectType::CampfireFire;
-    CampfireData.Duration = -1.0f; // Continuous
-    CampfireData.Scale = 1.0f;
-    CampfireData.bAutoDestroy = false;
-    EffectRegistry.Add(EVFX_EffectType::CampfireFire, CampfireData);
+    float DistanceToPlayer = CalculateDistanceToPlayer(Location);
+    if (DistanceToPlayer > MaxVFXDistance)
+    {
+        return;
+    }
 
-    FVFX_EffectData BloodData;
-    BloodData.EffectType = EVFX_EffectType::BloodImpact;
-    BloodData.Duration = 2.0f;
-    BloodData.Scale = 1.0f;
-    BloodData.bAutoDestroy = true;
-    EffectRegistry.Add(EVFX_EffectType::BloodImpact, BloodData);
-
-    FVFX_EffectData RainData;
-    RainData.EffectType = EVFX_EffectType::WeatherRain;
-    RainData.Duration = -1.0f; // Continuous
-    RainData.Scale = 1.0f;
-    RainData.bAutoDestroy = false;
-    EffectRegistry.Add(EVFX_EffectType::WeatherRain, RainData);
-
-    FVFX_EffectData VaporData;
-    VaporData.EffectType = EVFX_EffectType::BreathVapor;
-    VaporData.Duration = 1.5f;
-    VaporData.Scale = 1.0f;
-    VaporData.bAutoDestroy = true;
-    EffectRegistry.Add(EVFX_EffectType::BreathVapor, VaporData);
-
-    UE_LOG(LogTemp, Warning, TEXT("VFX_NiagaraManager: Effect registry initialized with %d effects"), EffectRegistry.Num());
+    float FinalAmount = Amount * VFXQualityScale;
+    
+    UE_LOG(LogTemp, Log, TEXT("Triggered blood impact at %s with amount %f"), 
+           *Location.ToString(), FinalAmount);
 }
 
-UNiagaraComponent* AVFX_NiagaraManager::SpawnVFXAtLocation(EVFX_EffectType EffectType, FVector Location, FRotator Rotation)
+void AVFX_NiagaraManager::CreateCampfire(FVector Location)
 {
-    if (!EffectRegistry.Contains(EffectType))
+    if (!bEnableFireEffects || !IsLocationValid(Location))
     {
-        UE_LOG(LogTemp, Warning, TEXT("VFX_NiagaraManager: Effect type not found in registry"));
-        return nullptr;
+        return;
     }
 
-    FVFX_EffectData* EffectData = EffectRegistry.Find(EffectType);
-    if (!EffectData || !EffectData->NiagaraSystem.IsValid())
-    {
-        UE_LOG(LogTemp, Warning, TEXT("VFX_NiagaraManager: Invalid Niagara system for effect type"));
-        return nullptr;
-    }
-
-    // Spawn Niagara effect at location
-    UNiagaraComponent* NiagaraComp = UNiagaraFunctionLibrary::SpawnSystemAtLocation(
-        GetWorld(),
-        EffectData->NiagaraSystem.Get(),
-        Location,
-        Rotation,
-        FVector(EffectData->Scale),
-        EffectData->bAutoDestroy
-    );
-
-    if (NiagaraComp)
-    {
-        ActiveEffects.Add(NiagaraComp);
-        UE_LOG(LogTemp, Log, TEXT("VFX_NiagaraManager: Spawned effect at location %s"), *Location.ToString());
-    }
-
-    return NiagaraComp;
+    UE_LOG(LogTemp, Log, TEXT("Created campfire VFX at %s"), *Location.ToString());
 }
 
-UNiagaraComponent* AVFX_NiagaraManager::SpawnVFXAttached(EVFX_EffectType EffectType, USceneComponent* AttachTo, FName SocketName)
+void AVFX_NiagaraManager::TriggerWeatherEffect(EVFX_WeatherType WeatherType, FVector Location, float Intensity)
 {
-    if (!AttachTo || !EffectRegistry.Contains(EffectType))
+    if (!bEnableWeatherEffects || !IsLocationValid(Location))
     {
-        return nullptr;
+        return;
     }
 
-    FVFX_EffectData* EffectData = EffectRegistry.Find(EffectType);
-    if (!EffectData || !EffectData->NiagaraSystem.IsValid())
-    {
-        return nullptr;
-    }
+    EVFX_BiomeType BiomeType = GetBiomeAtLocation(Location);
+    float BiomeIntensity = GetBiomeVFXIntensity(BiomeType);
+    float FinalIntensity = Intensity * BiomeIntensity * VFXQualityScale;
 
-    // Spawn Niagara effect attached to component
-    UNiagaraComponent* NiagaraComp = UNiagaraFunctionLibrary::SpawnSystemAttached(
-        EffectData->NiagaraSystem.Get(),
-        AttachTo,
-        SocketName,
-        FVector::ZeroVector,
-        FRotator::ZeroRotator,
-        FVector(EffectData->Scale),
-        EAttachLocation::KeepWorldPosition,
-        EffectData->bAutoDestroy
-    );
-
-    if (NiagaraComp)
-    {
-        ActiveEffects.Add(NiagaraComp);
-        UE_LOG(LogTemp, Log, TEXT("VFX_NiagaraManager: Spawned attached effect"));
-    }
-
-    return NiagaraComp;
+    UE_LOG(LogTemp, Log, TEXT("Triggered weather effect type %d at %s with intensity %f"), 
+           (int32)WeatherType, *Location.ToString(), FinalIntensity);
 }
 
-void AVFX_NiagaraManager::StopVFXEffect(UNiagaraComponent* Effect)
+void AVFX_NiagaraManager::SetVFXQuality(float NewQuality)
 {
-    if (Effect && IsValid(Effect))
+    VFXQualityScale = FMath::Clamp(NewQuality, 0.1f, 2.0f);
+    
+    UE_LOG(LogTemp, Log, TEXT("VFX quality set to %f"), VFXQualityScale);
+}
+
+void AVFX_NiagaraManager::CleanupDistantVFX()
+{
+    float CurrentTime = GetWorld()->GetTimeSeconds();
+    
+    // Only cleanup every 5 seconds to avoid performance hits
+    if (CurrentTime - LastCleanupTime < 5.0f)
     {
-        Effect->DestroyComponent();
-        ActiveEffects.Remove(Effect);
-        UE_LOG(LogTemp, Log, TEXT("VFX_NiagaraManager: Stopped VFX effect"));
+        return;
     }
-}
 
-void AVFX_NiagaraManager::StopAllVFXEffects()
-{
-    for (UNiagaraComponent* Effect : ActiveEffects)
-    {
-        if (Effect && IsValid(Effect))
-        {
-            Effect->DestroyComponent();
-        }
-    }
-    ActiveEffects.Empty();
-    UE_LOG(LogTemp, Warning, TEXT("VFX_NiagaraManager: Stopped all VFX effects"));
-}
-
-void AVFX_NiagaraManager::PlayFootstepDust(FVector Location, float DinosaurSize)
-{
-    FVFX_EffectData* EffectData = EffectRegistry.Find(EVFX_EffectType::FootstepDust);
-    if (EffectData)
-    {
-        // Scale effect based on dinosaur size
-        float OriginalScale = EffectData->Scale;
-        EffectData->Scale = DinosaurSize;
-        
-        SpawnVFXAtLocation(EVFX_EffectType::FootstepDust, Location, FRotator::ZeroRotator);
-        
-        // Restore original scale
-        EffectData->Scale = OriginalScale;
-        
-        UE_LOG(LogTemp, Log, TEXT("VFX_NiagaraManager: Played footstep dust at %s with size %f"), *Location.ToString(), DinosaurSize);
-    }
-}
-
-void AVFX_NiagaraManager::PlayCampfireEffect(FVector Location)
-{
-    SpawnVFXAtLocation(EVFX_EffectType::CampfireFire, Location, FRotator::ZeroRotator);
-    UE_LOG(LogTemp, Log, TEXT("VFX_NiagaraManager: Played campfire effect at %s"), *Location.ToString());
-}
-
-void AVFX_NiagaraManager::PlayBloodImpact(FVector Location, FVector ImpactNormal)
-{
-    FRotator ImpactRotation = ImpactNormal.Rotation();
-    SpawnVFXAtLocation(EVFX_EffectType::BloodImpact, Location, ImpactRotation);
-    UE_LOG(LogTemp, Log, TEXT("VFX_NiagaraManager: Played blood impact at %s"), *Location.ToString());
-}
-
-void AVFX_NiagaraManager::PlayWeatherRain(bool bEnable)
-{
-    if (bEnable)
-    {
-        FVector SkyLocation = FVector(0.0f, 0.0f, 2000.0f);
-        SpawnVFXAtLocation(EVFX_EffectType::WeatherRain, SkyLocation, FRotator::ZeroRotator);
-        UE_LOG(LogTemp, Warning, TEXT("VFX_NiagaraManager: Enabled weather rain"));
-    }
-    else
-    {
-        // Stop all rain effects
-        for (int32 i = ActiveEffects.Num() - 1; i >= 0; i--)
-        {
-            UNiagaraComponent* Effect = ActiveEffects[i];
-            if (Effect && Effect->GetAsset())
-            {
-                // Check if this is a rain effect (simplified check)
-                StopVFXEffect(Effect);
-            }
-        }
-        UE_LOG(LogTemp, Warning, TEXT("VFX_NiagaraManager: Disabled weather rain"));
-    }
-}
-
-void AVFX_NiagaraManager::PlayBreathVapor(FVector Location, float Temperature)
-{
-    // Only show breath vapor in cold conditions
-    if (Temperature < 10.0f)
-    {
-        SpawnVFXAtLocation(EVFX_EffectType::BreathVapor, Location, FRotator::ZeroRotator);
-        UE_LOG(LogTemp, Log, TEXT("VFX_NiagaraManager: Played breath vapor at %s (temp: %f)"), *Location.ToString(), Temperature);
-    }
-}
-
-void AVFX_NiagaraManager::RegisterEffect(EVFX_EffectType EffectType, UNiagaraSystem* NiagaraSystem, float Duration)
-{
-    if (NiagaraSystem)
-    {
-        FVFX_EffectData NewEffectData;
-        NewEffectData.EffectType = EffectType;
-        NewEffectData.NiagaraSystem = NiagaraSystem;
-        NewEffectData.Duration = Duration;
-        NewEffectData.Scale = 1.0f;
-        NewEffectData.bAutoDestroy = (Duration > 0.0f);
-        
-        EffectRegistry.Add(EffectType, NewEffectData);
-        UE_LOG(LogTemp, Warning, TEXT("VFX_NiagaraManager: Registered new effect type"));
-    }
-}
-
-void AVFX_NiagaraManager::CleanupExpiredEffects()
-{
     int32 RemovedCount = 0;
-    for (int32 i = ActiveEffects.Num() - 1; i >= 0; i--)
+    
+    for (int32 i = ActiveVFXActors.Num() - 1; i >= 0; i--)
     {
-        UNiagaraComponent* Effect = ActiveEffects[i];
-        if (!Effect || !IsValid(Effect))
+        if (!IsValid(ActiveVFXActors[i]))
         {
-            ActiveEffects.RemoveAt(i);
+            ActiveVFXActors.RemoveAt(i);
+            RemovedCount++;
+            continue;
+        }
+
+        float Distance = CalculateDistanceToPlayer(ActiveVFXActors[i]->GetActorLocation());
+        if (Distance > MaxVFXDistance * 1.5f) // Extra margin for cleanup
+        {
+            ActiveVFXActors[i]->Destroy();
+            ActiveVFXActors.RemoveAt(i);
             RemovedCount++;
         }
     }
+
+    LastCleanupTime = CurrentTime;
     
     if (RemovedCount > 0)
     {
-        UE_LOG(LogTemp, Log, TEXT("VFX_NiagaraManager: Cleaned up %d expired effects"), RemovedCount);
+        UE_LOG(LogTemp, Log, TEXT("Cleaned up %d distant VFX actors"), RemovedCount);
     }
 }
 
-int32 AVFX_NiagaraManager::GetActiveEffectCount() const
+int32 AVFX_NiagaraManager::GetActiveVFXCount() const
 {
-    return ActiveEffects.Num();
+    return ActiveVFXActors.Num();
 }
 
-void AVFX_NiagaraManager::UpdateActiveEffects(float DeltaTime)
+EVFX_BiomeType AVFX_NiagaraManager::GetBiomeAtLocation(FVector Location) const
 {
-    // Update logic for active effects if needed
-    // This could include fading, scaling, or other time-based modifications
+    // Biome detection based on coordinates
+    float X = Location.X;
+    float Y = Location.Y;
+
+    // Pantano: around (-50000, -45000)
+    if (X < -30000 && Y < -25000)
+    {
+        return EVFX_BiomeType::Swamp;
+    }
+    // Floresta: around (-45000, 40000)
+    else if (X < -25000 && Y > 20000)
+    {
+        return EVFX_BiomeType::Forest;
+    }
+    // Deserto: around (55000, 0)
+    else if (X > 35000 && FMath::Abs(Y) < 20000)
+    {
+        return EVFX_BiomeType::Desert;
+    }
+    // Montanha: around (40000, 50000)
+    else if (X > 20000 && Y > 30000)
+    {
+        return EVFX_BiomeType::Mountain;
+    }
+    // Default: Savana around (0, 0)
+    else
+    {
+        return EVFX_BiomeType::Savanna;
+    }
+}
+
+float AVFX_NiagaraManager::GetBiomeVFXIntensity(EVFX_BiomeType BiomeType) const
+{
+    switch (BiomeType)
+    {
+        case EVFX_BiomeType::Savanna:
+            return SavanaDustIntensity;
+        case EVFX_BiomeType::Swamp:
+            return SwampMistIntensity;
+        case EVFX_BiomeType::Forest:
+            return ForestParticleIntensity;
+        case EVFX_BiomeType::Desert:
+            return DesertSandstormIntensity;
+        case EVFX_BiomeType::Mountain:
+            return MountainSnowIntensity;
+        default:
+            return 1.0f;
+    }
+}
+
+void AVFX_NiagaraManager::UpdateVFXPerformance()
+{
+    // Performance monitoring and adjustment
+    int32 ActiveCount = GetActiveVFXCount();
+    
+    if (ActiveCount > MaxActiveVFXSystems * 0.8f)
+    {
+        // Reduce quality slightly when approaching limit
+        VFXQualityScale = FMath::Max(0.5f, VFXQualityScale * 0.95f);
+    }
+    else if (ActiveCount < MaxActiveVFXSystems * 0.3f)
+    {
+        // Restore quality when load is low
+        VFXQualityScale = FMath::Min(1.0f, VFXQualityScale * 1.02f);
+    }
+}
+
+bool AVFX_NiagaraManager::IsLocationValid(FVector Location) const
+{
+    // Basic validation - check if location is within reasonable bounds
+    return FMath::Abs(Location.X) < 100000.0f && 
+           FMath::Abs(Location.Y) < 100000.0f && 
+           Location.Z > -1000.0f && 
+           Location.Z < 10000.0f;
+}
+
+float AVFX_NiagaraManager::CalculateDistanceToPlayer(FVector Location) const
+{
+    if (UWorld* World = GetWorld())
+    {
+        if (APlayerController* PC = World->GetFirstPlayerController())
+        {
+            if (APawn* PlayerPawn = PC->GetPawn())
+            {
+                return FVector::Dist(PlayerPawn->GetActorLocation(), Location);
+            }
+        }
+    }
+    
+    // Default fallback distance
+    return 1000.0f;
 }
