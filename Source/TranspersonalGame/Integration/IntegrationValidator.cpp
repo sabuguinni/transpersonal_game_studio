@@ -1,408 +1,311 @@
 #include "IntegrationValidator.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "Engine/Level.h"
-#include "Engine/DirectionalLight.h"
-#include "Engine/SkyLight.h"
-#include "Components/SkyAtmosphereComponent.h"
-#include "Components/ExponentialHeightFogComponent.h"
-#include "GameFramework/Character.h"
+#include "EngineUtils.h"
 #include "GameFramework/PlayerStart.h"
-#include "Modules/ModuleManager.h"
+#include "Components/StaticMeshComponent.h"
 #include "UObject/UObjectGlobals.h"
-#include "HAL/PlatformFilemanager.h"
-#include "Misc/Paths.h"
 
-void UIntegrationValidator::Initialize(FSubsystemCollectionBase& Collection)
+AIntegrationValidator::AIntegrationValidator()
 {
-    Super::Initialize(Collection);
-
-    // Initialize known modules
-    KnownModules = {
-        TEXT("TranspersonalGame"),
-        TEXT("Core"),
-        TEXT("Engine"),
-        TEXT("UnrealEd")
-    };
-
-    // Initialize critical classes to test
-    CriticalClasses = {
-        TEXT("/Script/TranspersonalGame.TranspersonalCharacter"),
-        TEXT("/Script/TranspersonalGame.TranspersonalGameState"),
-        TEXT("/Script/TranspersonalGame.PCGWorldGenerator"),
-        TEXT("/Script/TranspersonalGame.FoliageManager"),
-        TEXT("/Script/TranspersonalGame.CrowdSimulationManager"),
-        TEXT("/Script/TranspersonalGame.ProceduralWorldManager"),
-        TEXT("/Script/TranspersonalGame.BuildIntegrationManager")
-    };
-
-    UE_LOG(LogTemp, Log, TEXT("IntegrationValidator initialized with %d critical classes"), CriticalClasses.Num());
+    PrimaryActorTick.bCanEverTick = true;
+    PrimaryActorTick.bStartWithTickEnabled = true;
+    
+    // Set up root component
+    RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootComponent"));
+    
+    // Initialize default values
+    MaxActorCount = 8000;
+    MaxDinosaurCount = 150;
+    MaxActorsPerBiome = 4000;
+    bEnableContinuousMonitoring = true;
+    MonitoringInterval = 30.0f;
+    MonitoringTimer = 0.0f;
+    
+    // Initialize core systems and biome data
+    InitializeCoreSystemsList();
+    InitializeBiomeCoordinates();
 }
 
-void UIntegrationValidator::Deinitialize()
+void AIntegrationValidator::BeginPlay()
 {
-    Super::Deinitialize();
-    UE_LOG(LogTemp, Log, TEXT("IntegrationValidator deinitialized"));
+    Super::BeginPlay();
+    
+    // Run initial validation
+    UE_LOG(LogTemp, Warning, TEXT("IntegrationValidator: Starting initial validation"));
+    RunFullIntegrationTest();
 }
 
-FInteg_ValidationResult UIntegrationValidator::ValidateFullSystem()
+void AIntegrationValidator::Tick(float DeltaTime)
 {
-    FInteg_ValidationResult Result;
-    Result.bIsValid = true;
-    Result.ErrorCount = 0;
-    Result.WarningCount = 0;
-
-    if (bValidationInProgress)
+    Super::Tick(DeltaTime);
+    
+    if (bEnableContinuousMonitoring)
     {
-        Result.bIsValid = false;
-        Result.ErrorMessage = TEXT("Validation already in progress");
-        return Result;
-    }
-
-    bValidationInProgress = true;
-    LastValidationTime = FPlatformTime::Seconds();
-
-    UE_LOG(LogTemp, Log, TEXT("Starting full system validation..."));
-
-    // Validate modules
-    for (const FString& ModuleName : KnownModules)
-    {
-        FInteg_ModuleStatus ModuleStatus = ValidateModule(ModuleName);
-        if (ModuleStatus.bHasErrors)
+        MonitoringTimer += DeltaTime;
+        if (MonitoringTimer >= MonitoringInterval)
         {
-            Result.ErrorCount++;
-            Result.Details.Add(FString::Printf(TEXT("Module %s has errors"), *ModuleName));
+            MonitoringTimer = 0.0f;
+            
+            // Run quick validation checks
+            ValidateActorLimits();
+            ValidateBiomeDistribution();
         }
     }
+}
 
-    // Validate critical classes
-    for (const FString& ClassName : CriticalClasses)
+void AIntegrationValidator::InitializeCoreSystemsList()
+{
+    CoreSystemClasses.Empty();
+    CoreSystemClasses.Add(TEXT("TranspersonalCharacter"));
+    CoreSystemClasses.Add(TEXT("TranspersonalGameState"));
+    CoreSystemClasses.Add(TEXT("BuildIntegrationManager"));
+    CoreSystemClasses.Add(TEXT("PCGWorldGenerator"));
+    CoreSystemClasses.Add(TEXT("FoliageManager"));
+    CoreSystemClasses.Add(TEXT("CrowdSimulationManager"));
+}
+
+void AIntegrationValidator::InitializeBiomeCoordinates()
+{
+    BiomeCenters.Empty();
+    BiomeCenters.Add(FVector2D(0.0f, 0.0f));           // Savana
+    BiomeCenters.Add(FVector2D(-50000.0f, -45000.0f)); // Pantano
+    BiomeCenters.Add(FVector2D(-45000.0f, 40000.0f));  // Floresta
+    BiomeCenters.Add(FVector2D(55000.0f, 0.0f));       // Deserto
+    BiomeCenters.Add(FVector2D(40000.0f, 50000.0f));   // Montanha
+}
+
+bool AIntegrationValidator::ValidateCoreSystemsLoaded()
+{
+    bool bAllSystemsLoaded = true;
+    
+    for (const FString& ClassName : CoreSystemClasses)
     {
-        if (!TestClassLoading(ClassName))
+        FString ClassPath = FString::Printf(TEXT("/Script/TranspersonalGame.%s"), *ClassName);
+        UClass* LoadedClass = LoadClass<UObject>(nullptr, *ClassPath);
+        
+        if (LoadedClass)
         {
-            Result.ErrorCount++;
-            Result.Details.Add(FString::Printf(TEXT("Failed to load critical class: %s"), *ClassName));
+            LogValidationResult(ClassName, true, TEXT("Class loaded successfully"));
+        }
+        else
+        {
+            LogValidationResult(ClassName, false, TEXT("Class failed to load"));
+            bAllSystemsLoaded = false;
         }
     }
-
-    // Validate MinPlayableMap
-    FInteg_LevelStatus LevelStatus = ValidateLevel(TEXT("/Game/Maps/MinPlayableMap"));
-    if (LevelStatus.DuplicateActors > 0)
-    {
-        Result.WarningCount++;
-        Result.Details.Add(FString::Printf(TEXT("Level has %d duplicate actors"), LevelStatus.DuplicateActors));
-    }
-
-    if (!LevelStatus.bHasPlayerStart)
-    {
-        Result.ErrorCount++;
-        Result.Details.Add(TEXT("Level missing PlayerStart"));
-    }
-
-    if (!LevelStatus.bHasCharacter)
-    {
-        Result.WarningCount++;
-        Result.Details.Add(TEXT("Level missing player character"));
-    }
-
-    // Check performance
-    if (!IsPerformanceAcceptable())
-    {
-        Result.WarningCount++;
-        Result.Details.Add(TEXT("Performance below acceptable threshold"));
-    }
-
-    // Final validation result
-    Result.bIsValid = (Result.ErrorCount == 0);
-    if (!Result.bIsValid)
-    {
-        Result.ErrorMessage = FString::Printf(TEXT("Validation failed with %d errors and %d warnings"), 
-                                            Result.ErrorCount, Result.WarningCount);
-    }
-
-    LogValidationResults(Result);
-    bValidationInProgress = false;
-
-    return Result;
+    
+    return bAllSystemsLoaded;
 }
 
-FInteg_ModuleStatus UIntegrationValidator::ValidateModule(const FString& ModuleName)
+bool AIntegrationValidator::ValidateActorLimits()
 {
-    FInteg_ModuleStatus Status;
-    Status.ModuleName = ModuleName;
-    Status.bIsLoaded = FModuleManager::Get().IsModuleLoaded(*ModuleName);
-    Status.ClassCount = 0;
-    Status.bHasErrors = false;
-
-    if (!Status.bIsLoaded)
-    {
-        Status.bHasErrors = true;
-        UE_LOG(LogTemp, Warning, TEXT("Module %s is not loaded"), *ModuleName);
-        return Status;
-    }
-
-    // Test class loading for this module
-    ValidateModuleClasses(ModuleName, Status);
-
-    UE_LOG(LogTemp, Log, TEXT("Module %s validation: %d classes, %d loaded, %d failed"), 
-           *ModuleName, Status.ClassCount, Status.LoadedClasses.Num(), Status.FailedClasses.Num());
-
-    return Status;
-}
-
-FInteg_LevelStatus UIntegrationValidator::ValidateLevel(const FString& LevelPath)
-{
-    FInteg_LevelStatus Status;
-    Status.LevelName = LevelPath;
-    Status.TotalActors = 0;
-    Status.DuplicateActors = 0;
-    Status.bHasPlayerStart = false;
-    Status.bHasCharacter = false;
-    Status.bHasLighting = false;
-
-    UWorld* World = GEngine->GetWorldFromContextObject(this, EGetWorldErrorMode::LogAndReturnNull);
-    if (!World)
-    {
-        UE_LOG(LogTemp, Error, TEXT("Cannot validate level - no world context"));
-        return Status;
-    }
-
-    ValidateLevelActors(World, Status);
-
-    UE_LOG(LogTemp, Log, TEXT("Level validation: %d actors, %d duplicates"), 
-           Status.TotalActors, Status.DuplicateActors);
-
-    return Status;
-}
-
-bool UIntegrationValidator::CleanupDuplicateActors(const FString& LevelPath)
-{
-    UWorld* World = GEngine->GetWorldFromContextObject(this, EGetWorldErrorMode::LogAndReturnNull);
+    UWorld* World = GetWorld();
     if (!World)
     {
         return false;
     }
-
-    CleanupLightingDuplicates(World);
-    return true;
+    
+    // Count all actors
+    CurrentActorCount = 0;
+    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+    {
+        CurrentActorCount++;
+    }
+    
+    // Count dinosaurs
+    CurrentDinosaurCount = CountDinosaurActors();
+    
+    // Check limits
+    bool bActorLimitOK = CurrentActorCount <= MaxActorCount;
+    bool bDinoLimitOK = CurrentDinosaurCount <= MaxDinosaurCount;
+    
+    LogValidationResult(TEXT("ActorLimit"), bActorLimitOK, 
+        FString::Printf(TEXT("Current: %d, Max: %d"), CurrentActorCount, MaxActorCount));
+    
+    LogValidationResult(TEXT("DinosaurLimit"), bDinoLimitOK,
+        FString::Printf(TEXT("Current: %d, Max: %d"), CurrentDinosaurCount, MaxDinosaurCount));
+    
+    return bActorLimitOK && bDinoLimitOK;
 }
 
-TArray<FString> UIntegrationValidator::GetLoadedModules()
+bool AIntegrationValidator::ValidateBiomeDistribution()
 {
-    TArray<FString> LoadedModules;
+    bool bDistributionOK = true;
     
-    for (const FString& ModuleName : KnownModules)
+    for (int32 i = 0; i < BiomeCenters.Num(); i++)
     {
-        if (FModuleManager::Get().IsModuleLoaded(*ModuleName))
+        int32 ActorsInBiome = CountActorsInBiome(BiomeCenters[i]);
+        bool bBiomeOK = ActorsInBiome <= MaxActorsPerBiome;
+        
+        if (!bBiomeOK)
         {
-            LoadedModules.Add(ModuleName);
+            bDistributionOK = false;
+        }
+        
+        FString BiomeName = FString::Printf(TEXT("Biome_%d"), i);
+        LogValidationResult(BiomeName, bBiomeOK,
+            FString::Printf(TEXT("Actors: %d, Max: %d"), ActorsInBiome, MaxActorsPerBiome));
+    }
+    
+    return bDistributionOK;
+}
+
+bool AIntegrationValidator::ValidateCrossSystemIntegration()
+{
+    // Test basic cross-system compatibility
+    bool bIntegrationOK = true;
+    
+    // Check if PlayerStart exists (basic level setup)
+    UWorld* World = GetWorld();
+    if (World)
+    {
+        bool bPlayerStartFound = false;
+        for (TActorIterator<APlayerStart> PlayerStartItr(World); PlayerStartItr; ++PlayerStartItr)
+        {
+            bPlayerStartFound = true;
+            break;
+        }
+        
+        LogValidationResult(TEXT("PlayerStart"), bPlayerStartFound, TEXT("Required for gameplay"));
+        if (!bPlayerStartFound)
+        {
+            bIntegrationOK = false;
         }
     }
-
-    return LoadedModules;
+    
+    return bIntegrationOK;
 }
 
-bool UIntegrationValidator::TestClassLoading(const FString& ClassName)
+void AIntegrationValidator::RunFullIntegrationTest()
 {
-    UClass* LoadedClass = LoadClass<UObject>(nullptr, *ClassName);
-    bool bSuccess = (LoadedClass != nullptr);
+    UE_LOG(LogTemp, Warning, TEXT("IntegrationValidator: Running full integration test"));
     
-    if (bSuccess)
+    bool bCoreSystemsOK = ValidateCoreSystemsLoaded();
+    bool bActorLimitsOK = ValidateActorLimits();
+    bool bBiomeDistributionOK = ValidateBiomeDistribution();
+    bool bCrossSystemOK = ValidateCrossSystemIntegration();
+    
+    bLastValidationPassed = bCoreSystemsOK && bActorLimitsOK && bBiomeDistributionOK && bCrossSystemOK;
+    
+    FString OverallResult = bLastValidationPassed ? TEXT("PASS") : TEXT("FAIL");
+    UE_LOG(LogTemp, Warning, TEXT("IntegrationValidator: Full test result: %s"), *OverallResult);
+    
+    // Generate and log health report
+    FString HealthReport = GenerateHealthReport();
+    UE_LOG(LogTemp, Warning, TEXT("Health Report:\n%s"), *HealthReport);
+}
+
+FString AIntegrationValidator::GenerateHealthReport()
+{
+    FString Report;
+    Report += TEXT("=== INTEGRATION HEALTH REPORT ===\n");
+    Report += FString::Printf(TEXT("Validation Status: %s\n"), bLastValidationPassed ? TEXT("PASS") : TEXT("FAIL"));
+    Report += FString::Printf(TEXT("Total Actors: %d / %d\n"), CurrentActorCount, MaxActorCount);
+    Report += FString::Printf(TEXT("Dinosaurs: %d / %d\n"), CurrentDinosaurCount, MaxDinosaurCount);
+    Report += TEXT("Core Systems: ");
+    
+    int32 LoadedSystems = 0;
+    for (const FString& ClassName : CoreSystemClasses)
     {
-        UE_LOG(LogTemp, VeryVerbose, TEXT("Successfully loaded class: %s"), *ClassName);
+        FString ClassPath = FString::Printf(TEXT("/Script/TranspersonalGame.%s"), *ClassName);
+        UClass* LoadedClass = LoadClass<UObject>(nullptr, *ClassPath);
+        if (LoadedClass)
+        {
+            LoadedSystems++;
+        }
+    }
+    
+    Report += FString::Printf(TEXT("%d / %d\n"), LoadedSystems, CoreSystemClasses.Num());
+    Report += TEXT("Biome Distribution:\n");
+    
+    for (int32 i = 0; i < BiomeCenters.Num(); i++)
+    {
+        int32 ActorsInBiome = CountActorsInBiome(BiomeCenters[i]);
+        Report += FString::Printf(TEXT("  Biome %d: %d actors\n"), i, ActorsInBiome);
+    }
+    
+    return Report;
+}
+
+int32 AIntegrationValidator::CountActorsInBiome(const FVector2D& BiomeCenter, float Radius)
+{
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        return 0;
+    }
+    
+    int32 Count = 0;
+    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+    {
+        AActor* Actor = *ActorItr;
+        if (Actor)
+        {
+            FVector ActorLocation = Actor->GetActorLocation();
+            FVector2D ActorLocation2D(ActorLocation.X, ActorLocation.Y);
+            
+            float Distance = FVector2D::Distance(ActorLocation2D, BiomeCenter);
+            if (Distance <= Radius)
+            {
+                Count++;
+            }
+        }
+    }
+    
+    return Count;
+}
+
+int32 AIntegrationValidator::CountDinosaurActors()
+{
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        return 0;
+    }
+    
+    int32 Count = 0;
+    TArray<FString> DinosaurKeywords = {
+        TEXT("trex"), TEXT("veloci"), TEXT("tricera"), TEXT("brachi"), 
+        TEXT("ankylo"), TEXT("parasauro"), TEXT("pachy"), TEXT("proto"), TEXT("tsinta")
+    };
+    
+    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+    {
+        AActor* Actor = *ActorItr;
+        if (Actor)
+        {
+            FString ActorName = Actor->GetName().ToLower();
+            for (const FString& Keyword : DinosaurKeywords)
+            {
+                if (ActorName.Contains(Keyword))
+                {
+                    Count++;
+                    break;
+                }
+            }
+        }
+    }
+    
+    return Count;
+}
+
+void AIntegrationValidator::LogValidationResult(const FString& TestName, bool bPassed, const FString& Details)
+{
+    FString Status = bPassed ? TEXT("PASS") : TEXT("FAIL");
+    FString LogMessage = FString::Printf(TEXT("Validation [%s]: %s"), *TestName, *Status);
+    
+    if (!Details.IsEmpty())
+    {
+        LogMessage += FString::Printf(TEXT(" - %s"), *Details);
+    }
+    
+    if (bPassed)
+    {
+        UE_LOG(LogTemp, Log, TEXT("%s"), *LogMessage);
     }
     else
     {
-        UE_LOG(LogTemp, Warning, TEXT("Failed to load class: %s"), *ClassName);
+        UE_LOG(LogTemp, Warning, TEXT("%s"), *LogMessage);
     }
-
-    return bSuccess;
-}
-
-void UIntegrationValidator::GenerateIntegrationReport()
-{
-    FInteg_ValidationResult FullResult = ValidateFullSystem();
-    
-    UE_LOG(LogTemp, Log, TEXT("=== INTEGRATION REPORT ==="));
-    UE_LOG(LogTemp, Log, TEXT("Validation Status: %s"), FullResult.bIsValid ? TEXT("PASS") : TEXT("FAIL"));
-    UE_LOG(LogTemp, Log, TEXT("Errors: %d, Warnings: %d"), FullResult.ErrorCount, FullResult.WarningCount);
-    
-    for (const FString& Detail : FullResult.Details)
-    {
-        UE_LOG(LogTemp, Log, TEXT("  - %s"), *Detail);
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("=== END REPORT ==="));
-}
-
-float UIntegrationValidator::GetCurrentFramerate()
-{
-    if (GEngine && GEngine->GetGameViewport())
-    {
-        return 1.0f / GEngine->GetGameViewport()->GetWorld()->GetDeltaSeconds();
-    }
-    return 0.0f;
-}
-
-bool UIntegrationValidator::IsPerformanceAcceptable()
-{
-    float CurrentFPS = GetCurrentFramerate();
-    return CurrentFPS >= 30.0f; // Minimum acceptable framerate
-}
-
-bool UIntegrationValidator::ValidateModuleClasses(const FString& ModuleName, FInteg_ModuleStatus& OutStatus)
-{
-    // Test critical classes for TranspersonalGame module
-    if (ModuleName == TEXT("TranspersonalGame"))
-    {
-        for (const FString& ClassName : CriticalClasses)
-        {
-            OutStatus.ClassCount++;
-            if (TestClassLoading(ClassName))
-            {
-                OutStatus.LoadedClasses.Add(ClassName);
-            }
-            else
-            {
-                OutStatus.FailedClasses.Add(ClassName);
-                OutStatus.bHasErrors = true;
-            }
-        }
-    }
-
-    return !OutStatus.bHasErrors;
-}
-
-bool UIntegrationValidator::ValidateLevelActors(UWorld* World, FInteg_LevelStatus& OutStatus)
-{
-    if (!World || !World->GetCurrentLevel())
-    {
-        return false;
-    }
-
-    TMap<FString, int32> ActorTypeCounts;
-    
-    for (AActor* Actor : World->GetCurrentLevel()->Actors)
-    {
-        if (!Actor)
-        {
-            continue;
-        }
-
-        OutStatus.TotalActors++;
-        
-        FString ActorClassName = Actor->GetClass()->GetName();
-        int32& Count = ActorTypeCounts.FindOrAdd(ActorClassName);
-        Count++;
-
-        // Check for specific actor types
-        if (Actor->IsA<APlayerStart>())
-        {
-            OutStatus.bHasPlayerStart = true;
-        }
-        else if (Actor->IsA<ACharacter>())
-        {
-            OutStatus.bHasCharacter = true;
-        }
-        else if (Actor->IsA<ADirectionalLight>() || Actor->IsA<ASkyLight>())
-        {
-            OutStatus.bHasLighting = true;
-        }
-    }
-
-    // Count duplicates for lighting actors
-    TArray<FString> LightingTypes = {
-        TEXT("DirectionalLight"),
-        TEXT("SkyLight"),
-        TEXT("SkyAtmosphere"),
-        TEXT("ExponentialHeightFog")
-    };
-
-    for (const FString& LightingType : LightingTypes)
-    {
-        if (int32* Count = ActorTypeCounts.Find(LightingType))
-        {
-            if (*Count > 1)
-            {
-                OutStatus.DuplicateActors += (*Count - 1);
-            }
-        }
-    }
-
-    OutStatus.ActorCounts = ActorTypeCounts;
-    return true;
-}
-
-void UIntegrationValidator::CleanupLightingDuplicates(UWorld* World)
-{
-    if (!World || !World->GetCurrentLevel())
-    {
-        return;
-    }
-
-    TMap<FString, AActor*> FirstOfType;
-    TArray<AActor*> ActorsToDestroy;
-
-    for (AActor* Actor : World->GetCurrentLevel()->Actors)
-    {
-        if (!Actor)
-        {
-            continue;
-        }
-
-        FString ActorClassName = Actor->GetClass()->GetName();
-        
-        // Only clean up lighting actors
-        if (ActorClassName == TEXT("DirectionalLight") || 
-            ActorClassName == TEXT("SkyLight") ||
-            ActorClassName == TEXT("SkyAtmosphere") ||
-            ActorClassName == TEXT("ExponentialHeightFog"))
-        {
-            if (FirstOfType.Contains(ActorClassName))
-            {
-                // This is a duplicate, mark for destruction
-                ActorsToDestroy.Add(Actor);
-                UE_LOG(LogTemp, Log, TEXT("Marking duplicate %s for destruction: %s"), 
-                       *ActorClassName, *Actor->GetName());
-            }
-            else
-            {
-                // This is the first of this type, keep it
-                FirstOfType.Add(ActorClassName, Actor);
-                UE_LOG(LogTemp, Log, TEXT("Keeping first %s: %s"), 
-                       *ActorClassName, *Actor->GetName());
-            }
-        }
-    }
-
-    // Destroy duplicates
-    for (AActor* Actor : ActorsToDestroy)
-    {
-        if (Actor && IsValid(Actor))
-        {
-            Actor->Destroy();
-        }
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("Cleaned up %d duplicate lighting actors"), ActorsToDestroy.Num());
-}
-
-void UIntegrationValidator::LogValidationResults(const FInteg_ValidationResult& Results)
-{
-    UE_LOG(LogTemp, Log, TEXT("=== VALIDATION RESULTS ==="));
-    UE_LOG(LogTemp, Log, TEXT("Status: %s"), Results.bIsValid ? TEXT("VALID") : TEXT("INVALID"));
-    UE_LOG(LogTemp, Log, TEXT("Errors: %d"), Results.ErrorCount);
-    UE_LOG(LogTemp, Log, TEXT("Warnings: %d"), Results.WarningCount);
-    
-    if (!Results.ErrorMessage.IsEmpty())
-    {
-        UE_LOG(LogTemp, Error, TEXT("Error: %s"), *Results.ErrorMessage);
-    }
-
-    for (const FString& Detail : Results.Details)
-    {
-        UE_LOG(LogTemp, Log, TEXT("  %s"), *Detail);
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("=== END VALIDATION ==="));
 }
