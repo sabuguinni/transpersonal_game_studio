@@ -4,69 +4,19 @@
 #include "GameFramework/Actor.h"
 #include "Engine/World.h"
 #include "Components/StaticMeshComponent.h"
-#include "Components/SceneComponent.h"
-#include "SharedTypes.h"
 #include "Crowd_MassEntityManager.generated.h"
 
 UENUM(BlueprintType)
-enum class ECrowd_BehaviorState : uint8
+enum class ECrowd_DensityLevel : uint8
 {
-    IdleStanding        UMETA(DisplayName = "Idle Standing"),
-    WalkingPatrol       UMETA(DisplayName = "Walking Patrol"),
-    GatheringSocial     UMETA(DisplayName = "Gathering Social"),
-    FleeingDanger       UMETA(DisplayName = "Fleeing Danger"),
-    WorkingActivity     UMETA(DisplayName = "Working Activity")
-};
-
-UENUM(BlueprintType)
-enum class ECrowd_LODLevel : uint8
-{
-    High        UMETA(DisplayName = "High Detail"),
-    Medium      UMETA(DisplayName = "Medium Detail"),
-    Low         UMETA(DisplayName = "Low Detail"),
-    Culled      UMETA(DisplayName = "Culled")
+    Low         UMETA(DisplayName = "Low Density"),
+    Medium      UMETA(DisplayName = "Medium Density"),
+    High        UMETA(DisplayName = "High Density"),
+    Critical    UMETA(DisplayName = "Critical Density")
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FCrowd_NPCData
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd NPC")
-    FVector Location;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd NPC")
-    FRotator Rotation;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd NPC")
-    ECrowd_BehaviorState BehaviorState;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd NPC")
-    ECrowd_LODLevel LODLevel;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd NPC")
-    float MovementSpeed;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd NPC")
-    FVector PatrolTarget;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd NPC")
-    bool bIsVisible;
-
-    FCrowd_NPCData()
-    {
-        Location = FVector::ZeroVector;
-        Rotation = FRotator::ZeroRotator;
-        BehaviorState = ECrowd_BehaviorState::IdleStanding;
-        LODLevel = ECrowd_LODLevel::High;
-        MovementSpeed = 100.0f;
-        PatrolTarget = FVector::ZeroVector;
-        bIsVisible = true;
-    }
-};
-
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FCrowd_BiomeDistribution
+struct TRANSPERSONALGAME_API FCrowd_BiomeData
 {
     GENERATED_BODY()
 
@@ -77,17 +27,55 @@ struct TRANSPERSONALGAME_API FCrowd_BiomeDistribution
     FVector CenterLocation;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    int32 MaxNPCs;
+    float Radius;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    int32 CurrentNPCs;
+    ECrowd_DensityLevel DensityLevel;
 
-    FCrowd_BiomeDistribution()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    int32 MaxCrowdEntities;
+
+    FCrowd_BiomeData()
     {
         BiomeName = TEXT("Unknown");
         CenterLocation = FVector::ZeroVector;
-        MaxNPCs = 200;
-        CurrentNPCs = 0;
+        Radius = 10000.0f;
+        DensityLevel = ECrowd_DensityLevel::Medium;
+        MaxCrowdEntities = 50;
+    }
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FCrowd_EntityData
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Entity")
+    FVector Location;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Entity")
+    FVector Velocity;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Entity")
+    FVector TargetLocation;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Entity")
+    float Speed;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Entity")
+    float AvoidanceRadius;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Entity")
+    bool bIsActive;
+
+    FCrowd_EntityData()
+    {
+        Location = FVector::ZeroVector;
+        Velocity = FVector::ZeroVector;
+        TargetLocation = FVector::ZeroVector;
+        Speed = 300.0f;
+        AvoidanceRadius = 150.0f;
+        bIsActive = true;
     }
 };
 
@@ -101,93 +89,99 @@ public:
 
 protected:
     virtual void BeginPlay() override;
-
-public:
     virtual void Tick(float DeltaTime) override;
 
     // Core crowd management
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Management")
-    int32 MaxCrowdSize;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd System")
+    int32 MaxTotalEntities;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Management")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd System")
     float UpdateFrequency;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Management")
-    bool bEnableLODSystem;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd System")
+    float LODDistance1;
 
-    // LOD distances
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD System")
-    float LODCloseDistance;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd System")
+    float LODDistance2;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD System")
-    float LODMediumDistance;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd System")
+    float LODDistance3;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD System")
-    float LODFarDistance;
+    // Biome configuration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biomes")
+    TArray<FCrowd_BiomeData> BiomeConfigurations;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD System")
-    float LODCullDistance;
+    // Entity management
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Entities")
+    TArray<FCrowd_EntityData> ActiveEntities;
 
-    // Biome distribution
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Distribution")
-    TArray<FCrowd_BiomeDistribution> BiomeData;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding")
+    float PathfindingRadius;
 
-    // NPC management
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "NPC Management")
-    TArray<FCrowd_NPCData> ActiveNPCs;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding")
+    float WaypointReachDistance;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Management")
-    float MovementUpdateInterval;
+    // Performance settings
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    int32 EntitiesPerFrame;
 
-    // Performance monitoring
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Performance")
-    int32 VisibleNPCCount;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    bool bUseLODSystem;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Performance")
-    float LastUpdateTime;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    bool bUseOcclusion;
 
-    // Crowd behavior functions
+public:
+    // Core functionality
     UFUNCTION(BlueprintCallable, Category = "Crowd Management")
     void InitializeCrowdSystem();
 
     UFUNCTION(BlueprintCallable, Category = "Crowd Management")
-    void SpawnCrowdNPCs(int32 Count);
+    void SpawnCrowdEntitiesInBiome(const FString& BiomeName, int32 Count);
 
     UFUNCTION(BlueprintCallable, Category = "Crowd Management")
-    void UpdateCrowdLOD();
+    void UpdateCrowdEntities(float DeltaTime);
 
     UFUNCTION(BlueprintCallable, Category = "Crowd Management")
-    void UpdateCrowdBehavior();
+    void ClearAllCrowdEntities();
 
-    UFUNCTION(BlueprintCallable, Category = "LOD System")
-    ECrowd_LODLevel CalculateLODLevel(const FVector& NPCLocation, const FVector& PlayerLocation);
+    // Biome management
+    UFUNCTION(BlueprintCallable, Category = "Biome Management")
+    void RegisterBiome(const FCrowd_BiomeData& BiomeData);
 
-    UFUNCTION(BlueprintCallable, Category = "Biome Distribution")
-    FVector GetRandomLocationInBiome(const FString& BiomeName);
+    UFUNCTION(BlueprintCallable, Category = "Biome Management")
+    FCrowd_BiomeData GetBiomeByName(const FString& BiomeName);
 
-    UFUNCTION(BlueprintCallable, Category = "Biome Distribution")
-    void DistributeNPCsAcrossBiomes();
+    UFUNCTION(BlueprintCallable, Category = "Biome Management")
+    FString GetBiomeAtLocation(const FVector& Location);
+
+    // Entity queries
+    UFUNCTION(BlueprintCallable, Category = "Entity Queries")
+    int32 GetActiveEntityCount();
+
+    UFUNCTION(BlueprintCallable, Category = "Entity Queries")
+    TArray<FCrowd_EntityData> GetEntitiesInRadius(const FVector& Center, float Radius);
+
+    UFUNCTION(BlueprintCallable, Category = "Entity Queries")
+    bool IsLocationCrowded(const FVector& Location, float CheckRadius);
+
+    // Performance optimization
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void UpdateLODLevels(const FVector& ViewerLocation);
 
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    void OptimizeCrowdPerformance();
+    void CullDistantEntities(const FVector& ViewerLocation, float MaxDistance);
 
-    UFUNCTION(BlueprintCallable, Category = "Behavior")
-    void AssignRandomBehavior(int32 NPCIndex);
-
-    UFUNCTION(BlueprintCallable, Category = "Behavior")
-    void ProcessFleeingBehavior(int32 NPCIndex);
-
-    UFUNCTION(BlueprintCallable, Category = "Behavior")
-    void ProcessGatheringBehavior(int32 NPCIndex);
-
-    UFUNCTION(BlueprintCallable, Category = "Behavior")
-    void ProcessPatrolBehavior(int32 NPCIndex);
+protected:
+    // Internal methods
+    void SetupDefaultBiomes();
+    void UpdateEntityMovement(FCrowd_EntityData& Entity, float DeltaTime);
+    FVector CalculateAvoidanceForce(const FCrowd_EntityData& Entity);
+    FVector FindNearestWaypoint(const FVector& Location);
+    bool IsWithinBiomeBounds(const FVector& Location, const FCrowd_BiomeData& Biome);
 
 private:
-    float LastMovementUpdate;
-    float LastLODUpdate;
-    
-    void UpdateNPCMovement(float DeltaTime);
-    void CleanupInvalidNPCs();
-    void EnforceCrowdLimits();
+    float LastUpdateTime;
+    int32 CurrentEntityIndex;
+    bool bSystemInitialized;
 };
