@@ -3,47 +3,74 @@
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
 #include "Engine/Engine.h"
-#include "PhysicsEngine/PhysicsAsset.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "Animation/AnimInstance.h"
+#include "PhysicsEngine/PhysicsConstraintComponent.h"
 #include "Core_RagdollSystem.generated.h"
 
-UENUM(BlueprintType)
-enum class ECore_RagdollState : uint8
-{
-    Inactive,
-    Activating,
-    Active,
-    Deactivating
-};
-
 USTRUCT(BlueprintType)
-struct FCore_RagdollConfig
+struct TRANSPERSONALGAME_API FCore_RagdollBone
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll")
-    float ActivationForce = 1000.0f;
+    FName BoneName;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll")
-    float BlendTime = 0.5f;
+    float Mass;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll")
-    bool bAutoDeactivate = true;
+    float LinearDamping;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll")
-    float AutoDeactivateTime = 5.0f;
+    float AngularDamping;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll")
-    float MinVelocityThreshold = 50.0f;
-
-    FCore_RagdollConfig()
+    FCore_RagdollBone()
     {
-        ActivationForce = 1000.0f;
-        BlendTime = 0.5f;
-        bAutoDeactivate = true;
-        AutoDeactivateTime = 5.0f;
-        MinVelocityThreshold = 50.0f;
+        BoneName = NAME_None;
+        Mass = 1.0f;
+        LinearDamping = 0.1f;
+        AngularDamping = 0.1f;
     }
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FCore_RagdollConstraint
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll")
+    FName ParentBone;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll")
+    FName ChildBone;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll")
+    float LinearLimit;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll")
+    float AngularLimit;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll")
+    float Strength;
+
+    FCore_RagdollConstraint()
+    {
+        ParentBone = NAME_None;
+        ChildBone = NAME_None;
+        LinearLimit = 100.0f;
+        AngularLimit = 45.0f;
+        Strength = 1000.0f;
+    }
+};
+
+UENUM(BlueprintType)
+enum class ECore_RagdollState : uint8
+{
+    Inactive UMETA(DisplayName = "Inactive"),
+    Activating UMETA(DisplayName = "Activating"),
+    Active UMETA(DisplayName = "Active"),
+    Deactivating UMETA(DisplayName = "Deactivating")
 };
 
 UCLASS(ClassGroup=(TranspersonalGame), meta=(BlueprintSpawnableComponent))
@@ -59,51 +86,64 @@ protected:
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 public:
+    // Core ragdoll functionality
     UFUNCTION(BlueprintCallable, Category = "Ragdoll")
-    void ActivateRagdoll(const FVector& ImpactForce = FVector::ZeroVector, const FVector& ImpactLocation = FVector::ZeroVector);
+    void ActivateRagdoll();
 
     UFUNCTION(BlueprintCallable, Category = "Ragdoll")
     void DeactivateRagdoll();
 
     UFUNCTION(BlueprintCallable, Category = "Ragdoll")
-    void SetRagdollConfig(const FCore_RagdollConfig& NewConfig);
-
-    UFUNCTION(BlueprintPure, Category = "Ragdoll")
-    ECore_RagdollState GetRagdollState() const { return CurrentState; }
-
-    UFUNCTION(BlueprintPure, Category = "Ragdoll")
-    bool IsRagdollActive() const { return CurrentState == ECore_RagdollState::Active; }
+    void SetRagdollImpulse(const FVector& Impulse, const FName& BoneName = NAME_None);
 
     UFUNCTION(BlueprintCallable, Category = "Ragdoll")
-    void ApplyImpulseToRagdoll(const FVector& Impulse, const FName& BoneName = NAME_None);
+    bool IsRagdollActive() const;
 
     UFUNCTION(BlueprintCallable, Category = "Ragdoll")
-    void SetBoneLinearVelocity(const FName& BoneName, const FVector& Velocity);
+    void SetupRagdollConstraints();
 
     UFUNCTION(BlueprintCallable, Category = "Ragdoll")
-    FVector GetBoneVelocity(const FName& BoneName) const;
+    void ConfigureBonePhysics(const FName& BoneName, float Mass, float LinearDamping, float AngularDamping);
 
-protected:
+    // Configuration
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll")
-    FCore_RagdollConfig RagdollConfig;
+    TObjectPtr<USkeletalMeshComponent> TargetMesh;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll")
+    TArray<FCore_RagdollBone> RagdollBones;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll")
+    TArray<FCore_RagdollConstraint> RagdollConstraints;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll")
+    float ActivationBlendTime;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll")
+    float DeactivationBlendTime;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll")
+    bool bAutoSetupConstraints;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll")
+    float GlobalMassScale;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll")
+    float GlobalDampingScale;
+
+    // State tracking
     UPROPERTY(BlueprintReadOnly, Category = "Ragdoll")
     ECore_RagdollState CurrentState;
 
-    UPROPERTY()
-    USkeletalMeshComponent* TargetMesh;
+    UPROPERTY(BlueprintReadOnly, Category = "Ragdoll")
+    float StateTransitionTime;
 
-    UPROPERTY()
-    UPhysicsAsset* CachedPhysicsAsset;
-
-    float StateTimer;
-    float BlendWeight;
-    FTransform PreRagdollTransform;
+private:
+    void InitializeRagdollBones();
+    void UpdateStateTransition(float DeltaTime);
+    void BlendToRagdoll(float Alpha);
+    void BlendFromRagdoll(float Alpha);
+    
+    float TransitionTimer;
     TArray<FTransform> PreRagdollBoneTransforms;
-
-    void UpdateRagdollBlending(float DeltaTime);
-    void CachePreRagdollState();
-    void RestorePreRagdollState();
-    bool ShouldAutoDeactivate() const;
-    void FindTargetMesh();
+    bool bRagdollInitialized;
 };
