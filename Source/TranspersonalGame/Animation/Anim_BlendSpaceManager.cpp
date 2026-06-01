@@ -1,313 +1,267 @@
 #include "Anim_BlendSpaceManager.h"
-#include "Animation/BlendSpace.h"
-#include "Animation/BlendSpace1D.h"
-#include "Animation/AnimSequence.h"
 #include "Engine/Engine.h"
-#include "Kismet/KismetMathLibrary.h"
+#include "GameFramework/Character.h"
+#include "GameFramework/CharacterMovementComponent.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Animation/AnimInstance.h"
 
 UAnim_BlendSpaceManager::UAnim_BlendSpaceManager()
 {
+    PrimaryComponentTick.bCanEverTick = true;
+    
     // Initialize default values
-    LocomotionData = FAnim_LocomotionBlendSpace();
+    CurrentLocomotionState = EAnim_LocomotionState::Idle;
+    WalkSpeedThreshold = 150.0f;
+    RunSpeedThreshold = 375.0f;
+    SprintSpeedThreshold = 600.0f;
+    
+    // Initialize blend space data
+    BlendSpaceData = FAnim_BlendSpaceData();
 }
 
-UBlendSpace* UAnim_BlendSpaceManager::CreateLocomotionBlendSpace(const FString& BlendSpaceName, 
-                                                               const TArray<UAnimSequence*>& Animations)
+void UAnim_BlendSpaceManager::BeginPlay()
 {
-    if (Animations.Num() == 0)
+    Super::BeginPlay();
+    
+    // Validate that we have the necessary animation assets
+    if (!ValidateAnimationAssets())
     {
-        UE_LOG(LogTemp, Warning, TEXT("Cannot create blend space: No animations provided"));
-        return nullptr;
+        UE_LOG(LogTemp, Warning, TEXT("Animation assets not fully configured for BlendSpaceManager"));
     }
+    
+    // Create runtime blend space if needed
+    CreateRuntimeBlendSpace();
+}
 
-    // Create new blend space
-    UBlendSpace* NewBlendSpace = NewObject<UBlendSpace>(this, FName(*BlendSpaceName));
-    if (!NewBlendSpace)
+void UAnim_BlendSpaceManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+{
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+    
+    // Get owner character
+    ACharacter* OwnerCharacter = Cast<ACharacter>(GetOwner());
+    if (!OwnerCharacter)
     {
-        UE_LOG(LogTemp, Error, TEXT("Failed to create blend space: %s"), *BlendSpaceName);
-        return nullptr;
+        return;
     }
-
-    // Configure axes
-    ConfigureBlendSpaceAxes(NewBlendSpace, TEXT("Speed"), TEXT("Direction"));
-
-    // Add animations to blend space in standard locomotion positions
-    if (Animations.Num() >= 8)
+    
+    // Get movement component
+    UCharacterMovementComponent* MovementComp = OwnerCharacter->GetCharacterMovement();
+    if (!MovementComp)
     {
-        // Standard 8-directional locomotion setup
-        AddAnimationToBlendSpace(NewBlendSpace, Animations[0], FVector(1.0f, 0.0f, 0.0f));    // Forward
-        AddAnimationToBlendSpace(NewBlendSpace, Animations[1], FVector(-1.0f, 0.0f, 0.0f));   // Backward
-        AddAnimationToBlendSpace(NewBlendSpace, Animations[2], FVector(0.0f, -1.0f, 0.0f));   // Left
-        AddAnimationToBlendSpace(NewBlendSpace, Animations[3], FVector(0.0f, 1.0f, 0.0f));    // Right
-        AddAnimationToBlendSpace(NewBlendSpace, Animations[4], FVector(0.7f, -0.7f, 0.0f));   // Forward-Left
-        AddAnimationToBlendSpace(NewBlendSpace, Animations[5], FVector(0.7f, 0.7f, 0.0f));    // Forward-Right
-        AddAnimationToBlendSpace(NewBlendSpace, Animations[6], FVector(-0.7f, -0.7f, 0.0f));  // Backward-Left
-        AddAnimationToBlendSpace(NewBlendSpace, Animations[7], FVector(-0.7f, 0.7f, 0.0f));   // Backward-Right
+        return;
+    }
+    
+    // Calculate current speed and direction
+    FVector Velocity = MovementComp->Velocity;
+    float CurrentSpeed = Velocity.Size();
+    FVector2D Direction = FVector2D(Velocity.X, Velocity.Y).GetSafeNormal();
+    
+    // Determine locomotion state
+    bool bIsCrouching = MovementComp->IsCrouching();
+    bool bIsInAir = MovementComp->IsFalling();
+    
+    EAnim_LocomotionState NewState = GetLocomotionStateFromSpeed(CurrentSpeed, bIsCrouching, bIsInAir);
+    
+    // Update state if changed
+    if (NewState != CurrentLocomotionState)
+    {
+        if (CanTransitionToState(CurrentLocomotionState, NewState))
+        {
+            SetLocomotionState(NewState);
+        }
+    }
+    
+    // Update blend space input
+    UpdateBlendSpaceInput(CurrentSpeed, Direction);
+}
+
+void UAnim_BlendSpaceManager::UpdateBlendSpaceInput(float Speed, FVector2D Direction)
+{
+    // Normalize speed for blend space (0.0 = idle, 1.0 = sprint)
+    float NormalizedSpeed = 0.0f;
+    
+    if (Speed > WalkSpeedThreshold)
+    {
+        if (Speed <= RunSpeedThreshold)
+        {
+            // Walking range (0.0 to 0.5)
+            NormalizedSpeed = FMath::GetMappedRangeValueClamped(
+                FVector2D(WalkSpeedThreshold, RunSpeedThreshold),
+                FVector2D(0.0f, 0.5f),
+                Speed
+            );
+        }
+        else if (Speed <= SprintSpeedThreshold)
+        {
+            // Running range (0.5 to 1.0)
+            NormalizedSpeed = FMath::GetMappedRangeValueClamped(
+                FVector2D(RunSpeedThreshold, SprintSpeedThreshold),
+                FVector2D(0.5f, 1.0f),
+                Speed
+            );
+        }
+        else
+        {
+            // Sprinting (1.0)
+            NormalizedSpeed = 1.0f;
+        }
+    }
+    
+    // Update blend space data
+    BlendSpaceData.BlendSpaceInput = NormalizedSpeed;
+    BlendSpaceData.DirectionalInput = Direction;
+    
+    // Calculate internal blend space values
+    CalculateBlendSpaceValues(Speed, Direction);
+}
+
+void UAnim_BlendSpaceManager::SetLocomotionState(EAnim_LocomotionState NewState)
+{
+    if (CurrentLocomotionState != NewState)
+    {
+        EAnim_LocomotionState PreviousState = CurrentLocomotionState;
+        CurrentLocomotionState = NewState;
+        
+        // Log state change for debugging
+        UE_LOG(LogTemp, Log, TEXT("Locomotion state changed from %d to %d"), 
+               (int32)PreviousState, (int32)CurrentLocomotionState);
+    }
+}
+
+EAnim_LocomotionState UAnim_BlendSpaceManager::GetLocomotionStateFromSpeed(float Speed, bool bIsCrouching, bool bIsInAir)
+{
+    // Handle airborne states first
+    if (bIsInAir)
+    {
+        // Determine if jumping or falling based on velocity
+        ACharacter* OwnerCharacter = Cast<ACharacter>(GetOwner());
+        if (OwnerCharacter)
+        {
+            FVector Velocity = OwnerCharacter->GetVelocity();
+            if (Velocity.Z > 0.0f)
+            {
+                return EAnim_LocomotionState::Jumping;
+            }
+            else
+            {
+                return EAnim_LocomotionState::Falling;
+            }
+        }
+        return EAnim_LocomotionState::Falling;
+    }
+    
+    // Handle crouching states
+    if (bIsCrouching)
+    {
+        return EAnim_LocomotionState::Crouching;
+    }
+    
+    // Handle ground locomotion based on speed
+    if (Speed < WalkSpeedThreshold)
+    {
+        return EAnim_LocomotionState::Idle;
+    }
+    else if (Speed < RunSpeedThreshold)
+    {
+        return EAnim_LocomotionState::Walking;
+    }
+    else if (Speed < SprintSpeedThreshold)
+    {
+        return EAnim_LocomotionState::Running;
     }
     else
     {
-        // Simplified setup with available animations
-        for (int32 i = 0; i < Animations.Num(); ++i)
-        {
-            float Angle = (i * 360.0f / Animations.Num()) * PI / 180.0f;
-            FVector Position(FMath::Cos(Angle), FMath::Sin(Angle), 0.0f);
-            AddAnimationToBlendSpace(NewBlendSpace, Animations[i], Position);
-        }
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("Created locomotion blend space: %s with %d animations"), 
-           *BlendSpaceName, Animations.Num());
-
-    return NewBlendSpace;
-}
-
-UBlendSpace1D* UAnim_BlendSpaceManager::CreateSpeedBlendSpace(const FString& BlendSpaceName,
-                                                            UAnimSequence* SlowAnim,
-                                                            UAnimSequence* FastAnim)
-{
-    if (!SlowAnim || !FastAnim)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Cannot create speed blend space: Missing animations"));
-        return nullptr;
-    }
-
-    UBlendSpace1D* NewBlendSpace1D = NewObject<UBlendSpace1D>(this, FName(*BlendSpaceName));
-    if (!NewBlendSpace1D)
-    {
-        UE_LOG(LogTemp, Error, TEXT("Failed to create 1D blend space: %s"), *BlendSpaceName);
-        return nullptr;
-    }
-
-    // Add animations at different speed positions
-    AddAnimationToBlendSpace1D(NewBlendSpace1D, SlowAnim, 0.0f);
-    AddAnimationToBlendSpace1D(NewBlendSpace1D, FastAnim, 1.0f);
-
-    UE_LOG(LogTemp, Log, TEXT("Created speed blend space: %s"), *BlendSpaceName);
-
-    return NewBlendSpace1D;
-}
-
-void UAnim_BlendSpaceManager::SetupWalkBlendSpace()
-{
-    if (!LocomotionData.WalkBlendSpace)
-    {
-        TArray<UAnimSequence*> WalkAnimations;
-        WalkAnimations.Add(LocomotionData.WalkForward);
-        WalkAnimations.Add(LocomotionData.WalkBackward);
-        WalkAnimations.Add(LocomotionData.WalkLeft);
-        WalkAnimations.Add(LocomotionData.WalkRight);
-        WalkAnimations.Add(LocomotionData.WalkForwardLeft);
-        WalkAnimations.Add(LocomotionData.WalkForwardRight);
-        WalkAnimations.Add(LocomotionData.WalkBackwardLeft);
-        WalkAnimations.Add(LocomotionData.WalkBackwardRight);
-
-        // Filter out null animations
-        WalkAnimations.RemoveAll([](UAnimSequence* Anim) { return Anim == nullptr; });
-
-        if (WalkAnimations.Num() > 0)
-        {
-            LocomotionData.WalkBlendSpace = CreateLocomotionBlendSpace(TEXT("WalkBlendSpace"), WalkAnimations);
-        }
+        return EAnim_LocomotionState::Sprinting;
     }
 }
 
-void UAnim_BlendSpaceManager::SetupRunBlendSpace()
+void UAnim_BlendSpaceManager::CreateRuntimeBlendSpace()
 {
-    if (!LocomotionData.RunBlendSpace)
-    {
-        TArray<UAnimSequence*> RunAnimations;
-        RunAnimations.Add(LocomotionData.RunForward);
-        RunAnimations.Add(LocomotionData.RunBackward);
-        RunAnimations.Add(LocomotionData.RunLeft);
-        RunAnimations.Add(LocomotionData.RunRight);
-
-        // Filter out null animations
-        RunAnimations.RemoveAll([](UAnimSequence* Anim) { return Anim == nullptr; });
-
-        if (RunAnimations.Num() > 0)
-        {
-            LocomotionData.RunBlendSpace = CreateLocomotionBlendSpace(TEXT("RunBlendSpace"), RunAnimations);
-        }
-    }
-}
-
-void UAnim_BlendSpaceManager::SetupCrouchBlendSpace()
-{
-    // Placeholder for crouch blend space setup
-    // Would use crouch-specific animations when available
-    UE_LOG(LogTemp, Log, TEXT("Crouch blend space setup - placeholder implementation"));
-}
-
-FVector2D UAnim_BlendSpaceManager::CalculateLocomotionInput(float Speed, float Direction) const
-{
-    // Normalize speed (0-1 range)
-    float NormalizedSpeed = FMath::Clamp(Speed / MAX_LOCOMOTION_SPEED, 0.0f, 1.0f);
+    // This function would create blend spaces at runtime if needed
+    // For now, we'll rely on pre-created blend space assets
     
-    // Convert direction from degrees to normalized range (-1 to 1)
-    float NormalizedDirection = FMath::Clamp(Direction / MAX_DIRECTION_ANGLE, -1.0f, 1.0f);
-    
-    return FVector2D(NormalizedSpeed, NormalizedDirection);
-}
-
-float UAnim_BlendSpaceManager::CalculateSpeedInput(float CurrentSpeed, float MaxSpeed) const
-{
-    return FMath::Clamp(CurrentSpeed / MaxSpeed, 0.0f, 1.0f);
-}
-
-FVector2D UAnim_BlendSpaceManager::CalculateDirectionalInput(const FVector& Velocity, const FVector& ForwardVector) const
-{
-    if (Velocity.SizeSquared() < 1.0f)
+    if (!BlendSpaceData.LocomotionBlendSpace)
     {
-        return FVector2D::ZeroVector;
-    }
-
-    // Normalize velocity (ignore Z component)
-    FVector NormalizedVelocity = Velocity;
-    NormalizedVelocity.Z = 0.0f;
-    NormalizedVelocity.Normalize();
-
-    // Calculate forward/backward component
-    float ForwardComponent = FVector::DotProduct(NormalizedVelocity, ForwardVector);
-    
-    // Calculate right component
-    FVector RightVector = FVector::CrossProduct(ForwardVector, FVector::UpVector);
-    float RightComponent = FVector::DotProduct(NormalizedVelocity, RightVector);
-
-    return FVector2D(ForwardComponent, RightComponent);
-}
-
-bool UAnim_BlendSpaceManager::ValidateBlendSpace(UBlendSpace* BlendSpace) const
-{
-    if (!BlendSpace)
-    {
-        return false;
-    }
-
-    // Check if blend space has valid sample data
-    // Note: This is a simplified validation - real implementation would check sample points
-    return true;
-}
-
-bool UAnim_BlendSpaceManager::ValidateBlendSpace1D(UBlendSpace1D* BlendSpace1D) const
-{
-    if (!BlendSpace1D)
-    {
-        return false;
-    }
-
-    // Check if 1D blend space has valid sample data
-    return true;
-}
-
-void UAnim_BlendSpaceManager::RefreshAllBlendSpaces()
-{
-    SetupWalkBlendSpace();
-    SetupRunBlendSpace();
-    SetupCrouchBlendSpace();
-
-    UE_LOG(LogTemp, Log, TEXT("Refreshed all blend spaces"));
-}
-
-TArray<UBlendSpace*> UAnim_BlendSpaceManager::GetAllBlendSpaces() const
-{
-    TArray<UBlendSpace*> BlendSpaces;
-    
-    if (LocomotionData.WalkBlendSpace)
-    {
-        BlendSpaces.Add(LocomotionData.WalkBlendSpace);
+        UE_LOG(LogTemp, Warning, TEXT("No locomotion blend space assigned to BlendSpaceManager"));
     }
     
-    if (LocomotionData.RunBlendSpace)
+    if (!BlendSpaceData.DirectionalBlendSpace)
     {
-        BlendSpaces.Add(LocomotionData.RunBlendSpace);
+        UE_LOG(LogTemp, Warning, TEXT("No directional blend space assigned to BlendSpaceManager"));
     }
-    
-    if (LocomotionData.CrouchBlendSpace)
-    {
-        BlendSpaces.Add(LocomotionData.CrouchBlendSpace);
-    }
-
-    // Add custom blend spaces
-    for (const FAnim_BlendSpaceData& CustomData : CustomBlendSpaces)
-    {
-        if (CustomData.BlendSpace)
-        {
-            BlendSpaces.Add(CustomData.BlendSpace);
-        }
-    }
-
-    return BlendSpaces;
 }
 
-UBlendSpace* UAnim_BlendSpaceManager::GetBlendSpaceByType(EAnim_BlendSpaceType BlendSpaceType) const
+bool UAnim_BlendSpaceManager::ValidateAnimationAssets()
 {
-    switch (BlendSpaceType)
+    bool bAllAssetsValid = true;
+    
+    // Check essential animations
+    if (!AnimationSequences.IdleAnimation)
     {
-        case EAnim_BlendSpaceType::Locomotion:
-            return LocomotionData.WalkBlendSpace;
-        
-        case EAnim_BlendSpaceType::Directional:
-            return LocomotionData.RunBlendSpace;
-        
+        UE_LOG(LogTemp, Warning, TEXT("Missing idle animation"));
+        bAllAssetsValid = false;
+    }
+    
+    if (!AnimationSequences.WalkAnimation)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Missing walk animation"));
+        bAllAssetsValid = false;
+    }
+    
+    if (!AnimationSequences.RunAnimation)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Missing run animation"));
+        bAllAssetsValid = false;
+    }
+    
+    return bAllAssetsValid;
+}
+
+void UAnim_BlendSpaceManager::CalculateBlendSpaceValues(float Speed, FVector2D Direction)
+{
+    // Internal calculation for blend space interpolation
+    // This handles the smooth transitions between animation states
+    
+    // Apply smoothing to direction input to avoid jittery animations
+    static FVector2D SmoothedDirection = FVector2D::ZeroVector;
+    float SmoothingFactor = 0.1f;
+    
+    SmoothedDirection = FMath::Lerp(SmoothedDirection, Direction, SmoothingFactor);
+    BlendSpaceData.DirectionalInput = SmoothedDirection;
+}
+
+bool UAnim_BlendSpaceManager::CanTransitionToState(EAnim_LocomotionState FromState, EAnim_LocomotionState ToState)
+{
+    // Define valid state transitions
+    // This prevents jarring animation changes
+    
+    switch (FromState)
+    {
+        case EAnim_LocomotionState::Idle:
+            return true; // Can transition to any state from idle
+            
+        case EAnim_LocomotionState::Walking:
+            return (ToState != EAnim_LocomotionState::Sprinting); // Can't go directly from walk to sprint
+            
+        case EAnim_LocomotionState::Running:
+            return true; // Running can transition to any state
+            
+        case EAnim_LocomotionState::Sprinting:
+            return (ToState != EAnim_LocomotionState::Walking); // Can't go directly from sprint to walk
+            
+        case EAnim_LocomotionState::Jumping:
+            return (ToState == EAnim_LocomotionState::Falling || ToState == EAnim_LocomotionState::Landing);
+            
+        case EAnim_LocomotionState::Falling:
+            return (ToState == EAnim_LocomotionState::Landing || ToState == EAnim_LocomotionState::Idle);
+            
+        case EAnim_LocomotionState::Landing:
+            return (ToState == EAnim_LocomotionState::Idle || ToState == EAnim_LocomotionState::Walking);
+            
+        case EAnim_LocomotionState::Crouching:
+            return true; // Can transition to any state from crouching
+            
         default:
-            break;
+            return true;
     }
-
-    // Search in custom blend spaces
-    for (const FAnim_BlendSpaceData& CustomData : CustomBlendSpaces)
-    {
-        if (CustomData.BlendSpaceType == BlendSpaceType && CustomData.BlendSpace)
-        {
-            return CustomData.BlendSpace;
-        }
-    }
-
-    return nullptr;
-}
-
-void UAnim_BlendSpaceManager::ConfigureBlendSpaceAxes(UBlendSpace* BlendSpace, 
-                                                     const FString& XAxisName,
-                                                     const FString& YAxisName) const
-{
-    if (!BlendSpace)
-    {
-        return;
-    }
-
-    // Note: In a real implementation, you would configure the blend space axes here
-    // This would involve setting up the axis parameters, ranges, and interpolation settings
-    // For now, this is a placeholder that logs the configuration
-    
-    UE_LOG(LogTemp, Log, TEXT("Configuring blend space axes: X=%s, Y=%s"), *XAxisName, *YAxisName);
-}
-
-void UAnim_BlendSpaceManager::AddAnimationToBlendSpace(UBlendSpace* BlendSpace, 
-                                                      UAnimSequence* Animation,
-                                                      const FVector& Position) const
-{
-    if (!BlendSpace || !Animation)
-    {
-        return;
-    }
-
-    // Note: In a real implementation, you would add the animation sample to the blend space
-    // This would involve creating a blend sample and setting its position and animation
-    
-    UE_LOG(LogTemp, Log, TEXT("Adding animation %s to blend space at position (%f, %f, %f)"), 
-           *Animation->GetName(), Position.X, Position.Y, Position.Z);
-}
-
-void UAnim_BlendSpaceManager::AddAnimationToBlendSpace1D(UBlendSpace1D* BlendSpace1D,
-                                                        UAnimSequence* Animation,
-                                                        float Position) const
-{
-    if (!BlendSpace1D || !Animation)
-    {
-        return;
-    }
-
-    // Note: In a real implementation, you would add the animation sample to the 1D blend space
-    
-    UE_LOG(LogTemp, Log, TEXT("Adding animation %s to 1D blend space at position %f"), 
-           *Animation->GetName(), Position);
 }
