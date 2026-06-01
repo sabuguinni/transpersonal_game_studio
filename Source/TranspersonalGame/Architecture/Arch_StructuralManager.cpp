@@ -1,206 +1,228 @@
 #include "Arch_StructuralManager.h"
 #include "Components/StaticMeshComponent.h"
-#include "Components/SceneComponent.h"
+#include "Components/BoxComponent.h"
 #include "Engine/Engine.h"
 #include "Engine/StaticMesh.h"
 #include "Materials/MaterialInterface.h"
-#include "Math/UnrealMathUtility.h"
+#include "UObject/ConstructorHelpers.h"
 
 AArch_StructuralManager::AArch_StructuralManager()
 {
     PrimaryActorTick.bCanEverTick = true;
 
     // Create root component
-    RootSceneComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootSceneComponent"));
-    RootComponent = RootSceneComponent;
+    RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootComponent"));
 
     // Create structure mesh component
     StructureMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("StructureMesh"));
     StructureMesh->SetupAttachment(RootComponent);
+    StructureMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+    StructureMesh->SetCollisionObjectType(ECollisionChannel::ECC_WorldStatic);
+    StructureMesh->SetCollisionResponseToAllChannels(ECollisionResponse::ECR_Block);
 
-    // Initialize default values
-    StructureConfig = FArch_StructureConfig();
-    LastWeatheringUpdate = 0.0f;
-    bIsInitialized = false;
+    // Create interaction volume
+    InteractionVolume = CreateDefaultSubobject<UBoxComponent>(TEXT("InteractionVolume"));
+    InteractionVolume->SetupAttachment(StructureMesh);
+    InteractionVolume->SetBoxExtent(FVector(300.0f, 300.0f, 500.0f));
+    InteractionVolume->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+    InteractionVolume->SetCollisionObjectType(ECollisionChannel::ECC_WorldDynamic);
+    InteractionVolume->SetCollisionResponseToAllChannels(ECollisionResponse::ECR_Ignore);
+    InteractionVolume->SetCollisionResponseToChannel(ECollisionChannel::ECC_Pawn, ECollisionResponse::ECR_Overlap);
 
-    // Set default scale
-    SetActorScale3D(FVector(1.0f, 1.0f, 1.0f));
+    // Bind overlap events
+    InteractionVolume->OnComponentBeginOverlap.AddDynamic(this, &AArch_StructuralManager::OnInteractionVolumeBeginOverlap);
+
+    // Initialize default structure config
+    StructureConfig.StructureType = EArch_StructureType::StonePillar;
+    StructureConfig.Dimensions = FVector(200.0f, 200.0f, 400.0f);
+    StructureConfig.WeatheringLevel = 0.5f;
+    StructureConfig.bHasMossGrowth = true;
+    StructureConfig.bHasCarvings = false;
+    StructureConfig.StructuralIntegrity = 1.0f;
+
+    // Try to load default materials
+    static ConstructorHelpers::FObjectFinder<UMaterialInterface> StoneMat(TEXT("/Engine/BasicShapes/BasicShapeMaterial"));
+    if (StoneMat.Succeeded())
+    {
+        StoneMaterial = StoneMat.Object;
+        WeatheredStoneMaterial = StoneMat.Object;
+        MossyStoneMaterial = StoneMat.Object;
+    }
+
+    // Set default mesh
+    static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeMesh(TEXT("/Engine/BasicShapes/Cube"));
+    if (CubeMesh.Succeeded() && StructureMesh)
+    {
+        StructureMesh->SetStaticMesh(CubeMesh.Object);
+    }
 }
 
 void AArch_StructuralManager::BeginPlay()
 {
     Super::BeginPlay();
     
-    // Initialize structure appearance
-    UpdateStructureAppearance();
-    ApplyMaterialVariations();
-    bIsInitialized = true;
-
-    UE_LOG(LogTemp, Log, TEXT("Arch_StructuralManager: Initialized structure of type %d"), 
-           static_cast<int32>(StructureConfig.StructureType));
+    // Initialize structure with current config
+    InitializeStructure(StructureConfig.StructureType, GetActorLocation(), GetActorRotation());
+    
+    // Apply initial weathering and moss
+    ApplyWeathering(StructureConfig.WeatheringLevel);
+    SetMossGrowth(StructureConfig.bHasMossGrowth);
+    AddCarvings(StructureConfig.bHasCarvings);
 }
 
 void AArch_StructuralManager::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
 
-    if (!bIsInitialized)
-        return;
-
-    // Update weathering over time (very slow process)
-    LastWeatheringUpdate += DeltaTime;
-    if (LastWeatheringUpdate > 60.0f) // Update every minute
+    // Gradual weathering over time (very slow)
+    if (StructureConfig.WeatheringLevel < 1.0f)
     {
-        if (StructureConfig.WeatheringLevel < 1.0f)
+        float WeatheringRate = 0.001f; // Very slow weathering
+        StructureConfig.WeatheringLevel = FMath::Clamp(StructureConfig.WeatheringLevel + (WeatheringRate * DeltaTime), 0.0f, 1.0f);
+        
+        // Update material every 10 seconds to avoid constant updates
+        static float MaterialUpdateTimer = 0.0f;
+        MaterialUpdateTimer += DeltaTime;
+        if (MaterialUpdateTimer >= 10.0f)
         {
-            StructureConfig.WeatheringLevel += 0.001f; // Very gradual weathering
-            ApplyMaterialVariations();
+            UpdateStructureMaterial();
+            MaterialUpdateTimer = 0.0f;
         }
-        LastWeatheringUpdate = 0.0f;
     }
 }
 
-void AArch_StructuralManager::SetStructureType(EArch_StructureType NewType)
+void AArch_StructuralManager::InitializeStructure(EArch_StructureType Type, FVector Location, FRotator Rotation)
 {
-    StructureConfig.StructureType = NewType;
-    UpdateStructureAppearance();
-
-    UE_LOG(LogTemp, Log, TEXT("Arch_StructuralManager: Changed structure type to %d"), 
-           static_cast<int32>(NewType));
+    StructureConfig.StructureType = Type;
+    
+    // Set location and rotation
+    SetActorLocation(Location);
+    SetActorRotation(Rotation);
+    
+    // Update mesh based on structure type
+    UStaticMesh* NewMesh = GetMeshForStructureType(Type);
+    if (NewMesh && StructureMesh)
+    {
+        StructureMesh->SetStaticMesh(NewMesh);
+    }
+    
+    // Set dimensions based on structure type
+    SetStructureDimensions();
+    
+    // Update material
+    UpdateStructureMaterial();
+    
+    UE_LOG(LogTemp, Log, TEXT("Architecture: Initialized %s structure at location %s"), 
+           *UEnum::GetValueAsString(Type), *Location.ToString());
 }
 
 void AArch_StructuralManager::ApplyWeathering(float WeatheringAmount)
 {
     StructureConfig.WeatheringLevel = FMath::Clamp(WeatheringAmount, 0.0f, 1.0f);
-    ApplyMaterialVariations();
-
-    UE_LOG(LogTemp, Log, TEXT("Arch_StructuralManager: Applied weathering level %.2f"), 
-           StructureConfig.WeatheringLevel);
+    
+    // Reduce structural integrity based on weathering
+    StructureConfig.StructuralIntegrity = FMath::Clamp(1.0f - (StructureConfig.WeatheringLevel * 0.3f), 0.1f, 1.0f);
+    
+    UpdateStructureMaterial();
+    
+    UE_LOG(LogTemp, Log, TEXT("Architecture: Applied weathering level %.2f, integrity now %.2f"), 
+           WeatheringAmount, StructureConfig.StructuralIntegrity);
 }
 
-void AArch_StructuralManager::ToggleMossOvergrowth(bool bEnable)
+void AArch_StructuralManager::SetMossGrowth(bool bEnableMoss)
 {
-    StructureConfig.bHasMossOvergrowth = bEnable;
-    ApplyMaterialVariations();
-
-    UE_LOG(LogTemp, Log, TEXT("Arch_StructuralManager: Moss overgrowth %s"), 
-           bEnable ? TEXT("enabled") : TEXT("disabled"));
+    StructureConfig.bHasMossGrowth = bEnableMoss;
+    UpdateStructureMaterial();
+    
+    UE_LOG(LogTemp, Log, TEXT("Architecture: Moss growth %s"), bEnableMoss ? TEXT("enabled") : TEXT("disabled"));
 }
 
-void AArch_StructuralManager::AddCarvedSymbols(bool bEnable)
+void AArch_StructuralManager::AddCarvings(bool bEnableCarvings)
 {
-    StructureConfig.bHasCarvedSymbols = bEnable;
-    ApplyMaterialVariations();
-
-    UE_LOG(LogTemp, Log, TEXT("Arch_StructuralManager: Carved symbols %s"), 
-           bEnable ? TEXT("enabled") : TEXT("disabled"));
+    StructureConfig.bHasCarvings = bEnableCarvings;
+    UpdateStructureMaterial();
+    
+    UE_LOG(LogTemp, Log, TEXT("Architecture: Carvings %s"), bEnableCarvings ? TEXT("enabled") : TEXT("disabled"));
 }
 
-void AArch_StructuralManager::GenerateRandomStructure()
+void AArch_StructuralManager::OnInteractionVolumeBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
 {
-    // Randomly select structure type
-    int32 RandomType = FMath::RandRange(0, 5);
-    StructureConfig.StructureType = static_cast<EArch_StructureType>(RandomType);
-
-    // Random scale variations
-    float ScaleVariation = FMath::RandRange(0.7f, 1.5f);
-    StructureConfig.Scale = FVector(ScaleVariation, ScaleVariation, ScaleVariation);
-
-    // Random weathering
-    StructureConfig.WeatheringLevel = FMath::RandRange(0.2f, 0.9f);
-
-    // Random features
-    StructureConfig.bHasMossOvergrowth = FMath::RandBool();
-    StructureConfig.bHasCarvedSymbols = FMath::RandRange(0.0f, 1.0f) > 0.7f; // 30% chance
-
-    // Apply changes
-    UpdateStructureAppearance();
-    ApplyMaterialVariations();
-
-    UE_LOG(LogTemp, Log, TEXT("Arch_StructuralManager: Generated random structure"));
-}
-
-FVector AArch_StructuralManager::GetStructureBounds() const
-{
-    if (StructureMesh && StructureMesh->GetStaticMesh())
+    if (OtherActor && OtherActor != this)
     {
-        FBoxSphereBounds Bounds = StructureMesh->GetStaticMesh()->GetBounds();
-        return Bounds.BoxExtent * 2.0f * StructureConfig.Scale;
+        // Check if it's a player character
+        if (OtherActor->IsA<APawn>())
+        {
+            OnStructureInteraction(OtherActor);
+            UE_LOG(LogTemp, Log, TEXT("Architecture: Player interacted with %s structure"), 
+                   *UEnum::GetValueAsString(StructureConfig.StructureType));
+        }
     }
-    return FVector(100.0f, 100.0f, 100.0f); // Default bounds
 }
 
-bool AArch_StructuralManager::IsStructureStable() const
-{
-    // Structure becomes less stable as weathering increases
-    float StabilityThreshold = 0.8f;
-    return StructureConfig.WeatheringLevel < StabilityThreshold;
-}
-
-void AArch_StructuralManager::UpdateStructureAppearance()
+void AArch_StructuralManager::UpdateStructureMaterial()
 {
     if (!StructureMesh)
         return;
 
-    // Apply scale based on structure config
-    SetActorScale3D(StructureConfig.Scale);
+    UMaterialInterface* MaterialToUse = StoneMaterial;
 
-    // Different mesh setups based on structure type
+    // Choose material based on weathering and moss
+    if (StructureConfig.bHasMossGrowth && StructureConfig.WeatheringLevel > 0.3f)
+    {
+        MaterialToUse = MossyStoneMaterial ? MossyStoneMaterial : StoneMaterial;
+    }
+    else if (StructureConfig.WeatheringLevel > 0.6f)
+    {
+        MaterialToUse = WeatheredStoneMaterial ? WeatheredStoneMaterial : StoneMaterial;
+    }
+
+    if (MaterialToUse)
+    {
+        StructureMesh->SetMaterial(0, MaterialToUse);
+    }
+}
+
+void AArch_StructuralManager::SetStructureDimensions()
+{
+    if (!StructureMesh)
+        return;
+
+    FVector Scale = FVector(1.0f);
+
     switch (StructureConfig.StructureType)
     {
         case EArch_StructureType::StonePillar:
-            // Tall and narrow
-            StructureMesh->SetRelativeScale3D(FVector(0.5f, 0.5f, 3.0f));
+            Scale = FVector(0.5f, 0.5f, 2.0f); // Tall and narrow
+            StructureConfig.Dimensions = FVector(100.0f, 100.0f, 400.0f);
             break;
         case EArch_StructureType::StoneWall:
-            // Wide and medium height
-            StructureMesh->SetRelativeScale3D(FVector(3.0f, 0.3f, 1.5f));
+            Scale = FVector(4.0f, 0.5f, 1.5f); // Long and wide
+            StructureConfig.Dimensions = FVector(800.0f, 100.0f, 300.0f);
             break;
-        case EArch_StructureType::StoneArch:
-            // Arch-like proportions
-            StructureMesh->SetRelativeScale3D(FVector(2.0f, 0.5f, 2.5f));
+        case EArch_StructureType::StoneArchway:
+            Scale = FVector(1.5f, 0.5f, 2.5f); // Archway proportions
+            StructureConfig.Dimensions = FVector(300.0f, 100.0f, 500.0f);
             break;
-        case EArch_StructureType::Ruins:
-            // Irregular, partially collapsed
-            StructureMesh->SetRelativeScale3D(FVector(1.5f, 1.2f, 0.8f));
+        case EArch_StructureType::CaveEntrance:
+            Scale = FVector(2.0f, 1.0f, 1.5f); // Cave opening
+            StructureConfig.Dimensions = FVector(400.0f, 200.0f, 300.0f);
             break;
-        case EArch_StructureType::ShelterEntrance:
-            // Low and wide
-            StructureMesh->SetRelativeScale3D(FVector(2.5f, 1.0f, 1.2f));
+        case EArch_StructureType::RockFormation:
+            Scale = FVector(1.5f, 1.5f, 1.0f); // Natural rock cluster
+            StructureConfig.Dimensions = FVector(300.0f, 300.0f, 200.0f);
             break;
-        case EArch_StructureType::CaveOpening:
-            // Natural opening proportions
-            StructureMesh->SetRelativeScale3D(FVector(1.8f, 0.8f, 2.0f));
+        case EArch_StructureType::AncientRuin:
+            Scale = FVector(2.0f, 2.0f, 1.0f); // Ruined structure
+            StructureConfig.Dimensions = FVector(400.0f, 400.0f, 200.0f);
             break;
     }
+
+    StructureMesh->SetWorldScale3D(Scale);
 }
 
-void AArch_StructuralManager::ApplyMaterialVariations()
+UStaticMesh* AArch_StructuralManager::GetMeshForStructureType(EArch_StructureType Type)
 {
-    if (!StructureMesh)
-        return;
-
-    // Apply weathered materials based on weathering level
-    if (WeatheredMaterials.Num() > 0)
-    {
-        int32 MaterialIndex = FMath::FloorToInt(StructureConfig.WeatheringLevel * WeatheredMaterials.Num());
-        MaterialIndex = FMath::Clamp(MaterialIndex, 0, WeatheredMaterials.Num() - 1);
-        
-        if (WeatheredMaterials[MaterialIndex])
-        {
-            StructureMesh->SetMaterial(0, WeatheredMaterials[MaterialIndex]);
-        }
-    }
-
-    // Apply mossy materials if enabled
-    if (StructureConfig.bHasMossOvergrowth && MossyMaterials.Num() > 0)
-    {
-        int32 MossIndex = FMath::RandRange(0, MossyMaterials.Num() - 1);
-        if (MossyMaterials[MossIndex])
-        {
-            StructureMesh->SetMaterial(1, MossyMaterials[MossIndex]);
-        }
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("Arch_StructuralManager: Applied material variations"));
+    // For now, return basic cube mesh - in production this would load specific meshes
+    UStaticMesh* CubeMesh = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube"));
+    return CubeMesh;
 }
