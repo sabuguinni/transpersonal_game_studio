@@ -1,311 +1,340 @@
 #include "StudioDirectorSystem.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "EngineUtils.h"
-#include "HAL/PlatformFilemanager.h"
-#include "Misc/DateTime.h"
+#include "Components/SceneComponent.h"
+#include "Kismet/GameplayStatics.h"
 
-UStudioDirectorSystem::UStudioDirectorSystem()
+AStudioDirectorSystem::AStudioDirectorSystem()
 {
-    PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 1.0f; // Update every second
+    PrimaryActorTick.bCanEverTick = true;
     
+    // Create root component
+    RootSceneComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootSceneComponent"));
+    RootComponent = RootSceneComponent;
+
+    // Initialize default values
+    CurrentCycleID = 0;
+    MetricsUpdateInterval = 5.0f;
+    LastMetricsUpdate = 0.0f;
+    bAgentChainActive = false;
     CurrentActiveAgent = 1;
-    bProductionActive = false;
-    DailyBudgetUsed = 0.0f;
-    DailyBudgetLimit = 100.0f;
-    CurrentCycleID = TEXT("");
-    
-    InitializeAgentChain();
+    AgentTimeoutThreshold = 300.0f;
+    LastAgentStartTime = 0.0f;
+    bEmergencyMode = false;
+
+    // Initialize production metrics
+    CurrentMetrics = FDir_ProductionMetrics();
 }
 
-void UStudioDirectorSystem::BeginPlay()
+void AStudioDirectorSystem::BeginPlay()
 {
     Super::BeginPlay();
     
-    UE_LOG(LogTemp, Warning, TEXT("Studio Director System initialized"));
-    LogAgentActivity(TEXT("Studio Director System online - Ready for production"));
+    UE_LOG(LogTemp, Warning, TEXT("Studio Director System initialized - Ready for agent coordination"));
+    
+    // Start initial metrics update
+    UpdateProductionMetrics();
+    
+    // Log startup status
+    LogCurrentStatus();
 }
 
-void UStudioDirectorSystem::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void AStudioDirectorSystem::Tick(float DeltaTime)
 {
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+    Super::Tick(DeltaTime);
     
-    if (bProductionActive)
+    // Update metrics periodically
+    if (GetWorld()->GetTimeSeconds() - LastMetricsUpdate > MetricsUpdateInterval)
     {
-        UpdateCycleMetrics();
-        ValidateAgentChain();
+        UpdateProductionMetrics();
+        LastMetricsUpdate = GetWorld()->GetTimeSeconds();
+    }
+    
+    // Check agent timeouts if chain is active
+    if (bAgentChainActive)
+    {
+        UpdateAgentTimeouts();
+    }
+    
+    // Validate production limits
+    CheckProductionLimits();
+}
+
+void AStudioDirectorSystem::AssignTaskToAgent(int32 AgentID, const FString& TaskDescription, const FString& Priority, float EstimatedHours)
+{
+    FDir_AgentTaskData NewTask;
+    NewTask.AgentID = AgentID;
+    NewTask.TaskDescription = TaskDescription;
+    NewTask.Priority = Priority;
+    NewTask.EstimatedHours = EstimatedHours;
+    NewTask.bCompleted = false;
+    
+    ActiveTasks.Add(NewTask);
+    
+    UE_LOG(LogTemp, Warning, TEXT("Task assigned to Agent #%d: %s"), AgentID, *TaskDescription);
+}
+
+void AStudioDirectorSystem::CompleteAgentTask(int32 AgentID, const FString& TaskDescription)
+{
+    for (int32 i = ActiveTasks.Num() - 1; i >= 0; i--)
+    {
+        if (ActiveTasks[i].AgentID == AgentID && ActiveTasks[i].TaskDescription == TaskDescription)
+        {
+            ActiveTasks[i].bCompleted = true;
+            CompletedTasks.Add(ActiveTasks[i]);
+            ActiveTasks.RemoveAt(i);
+            
+            UE_LOG(LogTemp, Warning, TEXT("Task completed by Agent #%d: %s"), AgentID, *TaskDescription);
+            break;
+        }
     }
 }
 
-void UStudioDirectorSystem::InitializeAgentChain()
+TArray<FDir_AgentTaskData> AStudioDirectorSystem::GetTasksForAgent(int32 AgentID)
 {
-    AgentChain.Empty();
+    TArray<FDir_AgentTaskData> AgentTasks;
     
-    // Initialize all 19 agents in the production pipeline
-    TArray<FString> AgentNames = {
-        TEXT("Studio Director"),
-        TEXT("Engine Architect"),
-        TEXT("Core Systems Programmer"),
-        TEXT("Performance Optimizer"),
-        TEXT("Procedural World Generator"),
-        TEXT("Environment Artist"),
-        TEXT("Architecture & Interior Agent"),
-        TEXT("Lighting & Atmosphere Agent"),
-        TEXT("Character Artist Agent"),
-        TEXT("Animation Agent"),
-        TEXT("NPC Behavior Agent"),
-        TEXT("Combat & Enemy AI Agent"),
-        TEXT("Crowd & Traffic Simulation"),
-        TEXT("Quest & Mission Designer"),
-        TEXT("Narrative & Dialogue Agent"),
-        TEXT("Audio Agent"),
-        TEXT("VFX Agent"),
-        TEXT("QA & Testing Agent"),
-        TEXT("Integration & Build Agent")
-    };
-    
-    for (int32 i = 0; i < AgentNames.Num(); i++)
+    for (const FDir_AgentTaskData& Task : ActiveTasks)
     {
-        FDir_AgentInfo NewAgent;
-        NewAgent.AgentID = i + 1;
-        NewAgent.AgentName = AgentNames[i];
-        NewAgent.Status = EDir_AgentStatus::Idle;
-        NewAgent.CurrentTask = TEXT("Waiting for cycle start");
-        NewAgent.CompletionPercentage = 0.0f;
-        NewAgent.LastUpdate = FDateTime::Now();
-        
-        AgentChain.Add(NewAgent);
+        if (Task.AgentID == AgentID)
+        {
+            AgentTasks.Add(Task);
+        }
     }
     
-    UE_LOG(LogTemp, Warning, TEXT("Agent chain initialized with %d agents"), AgentChain.Num());
+    return AgentTasks;
 }
 
-void UStudioDirectorSystem::StartProductionCycle(const FString& CycleID)
+int32 AStudioDirectorSystem::GetTotalActiveTasks()
 {
-    CurrentCycleID = CycleID;
-    bProductionActive = true;
-    CurrentActiveAgent = 1;
-    
-    // Initialize cycle metrics
-    CurrentCycleMetrics = FDir_CycleMetrics();
-    CurrentCycleMetrics.CycleNumber = CycleHistory.Num() + 1;
-    
-    // Reset all agents to idle
-    for (FDir_AgentInfo& Agent : AgentChain)
-    {
-        Agent.Status = EDir_AgentStatus::Idle;
-        Agent.CompletionPercentage = 0.0f;
-        Agent.LastUpdate = FDateTime::Now();
-    }
-    
-    // Activate first agent (Studio Director)
-    if (AgentChain.IsValidIndex(0))
-    {
-        AgentChain[0].Status = EDir_AgentStatus::Working;
-        AgentChain[0].CurrentTask = TEXT("Coordinating cycle start");
-    }
-    
-    LogAgentActivity(FString::Printf(TEXT("Production cycle %s started"), *CycleID));
+    return ActiveTasks.Num();
 }
 
-void UStudioDirectorSystem::UpdateAgentStatus(int32 AgentID, EDir_AgentStatus NewStatus, const FString& Task, float Completion)
+void AStudioDirectorSystem::UpdateProductionMetrics()
 {
-    int32 AgentIndex = AgentID - 1;
-    if (!AgentChain.IsValidIndex(AgentIndex))
+    if (!GetWorld())
     {
         return;
     }
     
-    FDir_AgentInfo& Agent = AgentChain[AgentIndex];
-    Agent.Status = NewStatus;
-    Agent.CurrentTask = Task;
-    Agent.CompletionPercentage = FMath::Clamp(Completion, 0.0f, 100.0f);
-    Agent.LastUpdate = FDateTime::Now();
+    // Count all actors in the world
+    TArray<AActor*> AllActors;
+    UGameplayStatics::GetAllActorsOfClass(GetWorld(), AActor::StaticClass(), AllActors);
+    CurrentMetrics.TotalActorsInMap = AllActors.Num();
     
-    LogAgentActivity(FString::Printf(TEXT("Agent %d (%s): %s - %.1f%% complete"), 
-        AgentID, *Agent.AgentName, *Task, Completion));
-    
-    // If agent completed, advance to next
-    if (NewStatus == EDir_AgentStatus::Completed && Completion >= 100.0f)
+    // Count dinosaur actors
+    int32 DinoCount = 0;
+    for (AActor* Actor : AllActors)
     {
-        AdvanceToNextAgent();
+        if (Actor && Actor->GetName().Contains(TEXT("Dinosaur")) || 
+            Actor->GetName().Contains(TEXT("TRex")) ||
+            Actor->GetName().Contains(TEXT("Veloci")) ||
+            Actor->GetName().Contains(TEXT("Tricera")) ||
+            Actor->GetName().Contains(TEXT("Brachi")))
+        {
+            DinoCount++;
+        }
     }
+    CurrentMetrics.DinosaurCount = DinoCount;
+    
+    // Count environment props
+    int32 PropsCount = 0;
+    for (AActor* Actor : AllActors)
+    {
+        if (Actor && (Actor->GetName().Contains(TEXT("Tree")) || 
+                     Actor->GetName().Contains(TEXT("Rock")) ||
+                     Actor->GetName().Contains(TEXT("Bush")) ||
+                     Actor->GetName().Contains(TEXT("Grass"))))
+        {
+            PropsCount++;
+        }
+    }
+    CurrentMetrics.EnvironmentPropsCount = PropsCount;
+    
+    // Get frame rate (simplified)
+    CurrentMetrics.FrameRate = 1.0f / GetWorld()->GetDeltaSeconds();
+    
+    // Memory usage (placeholder - would need platform-specific implementation)
+    CurrentMetrics.MemoryUsageMB = CurrentMetrics.TotalActorsInMap * 0.1f; // Rough estimate
+    
+    UE_LOG(LogTemp, Log, TEXT("Production Metrics Updated - Actors: %d, Dinos: %d, Props: %d, FPS: %.1f"), 
+           CurrentMetrics.TotalActorsInMap, CurrentMetrics.DinosaurCount, 
+           CurrentMetrics.EnvironmentPropsCount, CurrentMetrics.FrameRate);
 }
 
-void UStudioDirectorSystem::AdvanceToNextAgent()
+FDir_ProductionMetrics AStudioDirectorSystem::GetCurrentMetrics()
 {
-    if (CurrentActiveAgent < AgentChain.Num())
+    return CurrentMetrics;
+}
+
+bool AStudioDirectorSystem::IsProductionOnTrack()
+{
+    // Check production limits from brain memories
+    bool bActorLimitOK = CurrentMetrics.TotalActorsInMap <= 8000;
+    bool bDinoLimitOK = CurrentMetrics.DinosaurCount <= 150;
+    bool bFrameRateOK = CurrentMetrics.FrameRate >= 30.0f;
+    
+    return bActorLimitOK && bDinoLimitOK && bFrameRateOK;
+}
+
+void AStudioDirectorSystem::StartAgentChain()
+{
+    bAgentChainActive = true;
+    CurrentActiveAgent = 2; // Start with Engine Architect
+    LastAgentStartTime = GetWorld()->GetTimeSeconds();
+    
+    UE_LOG(LogTemp, Warning, TEXT("Agent Chain Started - Current Agent: #%d"), CurrentActiveAgent);
+    
+    // Assign initial task to Engine Architect
+    AssignTaskToAgent(2, "Define technical architecture and establish coding standards", "Critical", 2.0f);
+}
+
+void AStudioDirectorSystem::AdvanceToNextAgent()
+{
+    if (!bAgentChainActive)
     {
-        CurrentActiveAgent++;
-        
-        if (AgentChain.IsValidIndex(CurrentActiveAgent - 1))
-        {
-            AgentChain[CurrentActiveAgent - 1].Status = EDir_AgentStatus::Working;
-            AgentChain[CurrentActiveAgent - 1].CurrentTask = TEXT("Starting work");
-            
-            LogAgentActivity(FString::Printf(TEXT("Advanced to Agent %d (%s)"), 
-                CurrentActiveAgent, *AgentChain[CurrentActiveAgent - 1].AgentName));
-        }
+        return;
+    }
+    
+    CurrentActiveAgent++;
+    LastAgentStartTime = GetWorld()->GetTimeSeconds();
+    
+    if (CurrentActiveAgent > 19)
+    {
+        // Chain complete
+        bAgentChainActive = false;
+        CurrentActiveAgent = 1;
+        UE_LOG(LogTemp, Warning, TEXT("Agent Chain Complete - All agents have executed"));
     }
     else
     {
-        // All agents completed - finish cycle
-        CompleteCycle();
+        UE_LOG(LogTemp, Warning, TEXT("Advanced to Agent #%d"), CurrentActiveAgent);
     }
 }
 
-void UStudioDirectorSystem::CompleteCycle()
+void AStudioDirectorSystem::ReportAgentCompletion(int32 AgentID, bool bSuccess)
 {
-    bProductionActive = false;
-    CurrentCycleMetrics.bCycleSuccess = true;
-    CurrentCycleMetrics.TotalExecutionTime = FDateTime::Now().GetTicks() - CycleHistory.Num() * 1000000; // Rough estimate
-    
-    CycleHistory.Add(CurrentCycleMetrics);
-    
-    LogAgentActivity(FString::Printf(TEXT("Cycle %s completed successfully"), *CurrentCycleID));
-    
-    // Log cycle summary
-    UE_LOG(LogTemp, Warning, TEXT("=== CYCLE SUMMARY ==="));
-    UE_LOG(LogTemp, Warning, TEXT("Files Created: %d"), CurrentCycleMetrics.FilesCreated);
-    UE_LOG(LogTemp, Warning, TEXT("UE5 Commands: %d"), CurrentCycleMetrics.UE5CommandsExecuted);
-    UE_LOG(LogTemp, Warning, TEXT("Actors Spawned: %d"), CurrentCycleMetrics.ActorsSpawned);
-}
-
-void UStudioDirectorSystem::RecordFileCreation()
-{
-    CurrentCycleMetrics.FilesCreated++;
-    LogAgentActivity(TEXT("File created"));
-}
-
-void UStudioDirectorSystem::RecordUE5Command()
-{
-    CurrentCycleMetrics.UE5CommandsExecuted++;
-    LogAgentActivity(TEXT("UE5 command executed"));
-}
-
-void UStudioDirectorSystem::RecordActorSpawn(int32 Count)
-{
-    CurrentCycleMetrics.ActorsSpawned += Count;
-    LogAgentActivity(FString::Printf(TEXT("%d actors spawned"), Count));
-}
-
-FDir_AgentInfo UStudioDirectorSystem::GetAgentInfo(int32 AgentID) const
-{
-    int32 AgentIndex = AgentID - 1;
-    if (AgentChain.IsValidIndex(AgentIndex))
+    if (AgentID == CurrentActiveAgent)
     {
-        return AgentChain[AgentIndex];
-    }
-    
-    return FDir_AgentInfo();
-}
-
-bool UStudioDirectorSystem::IsAgentActive(int32 AgentID) const
-{
-    int32 AgentIndex = AgentID - 1;
-    if (AgentChain.IsValidIndex(AgentIndex))
-    {
-        return AgentChain[AgentIndex].Status == EDir_AgentStatus::Working;
-    }
-    
-    return false;
-}
-
-float UStudioDirectorSystem::GetCycleProgress() const
-{
-    if (AgentChain.Num() == 0)
-    {
-        return 0.0f;
-    }
-    
-    float TotalProgress = 0.0f;
-    for (const FDir_AgentInfo& Agent : AgentChain)
-    {
-        TotalProgress += Agent.CompletionPercentage;
-    }
-    
-    return TotalProgress / AgentChain.Num();
-}
-
-int32 UStudioDirectorSystem::GetTotalActorsInScene() const
-{
-    if (UWorld* World = GetWorld())
-    {
-        int32 ActorCount = 0;
-        for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+        if (bSuccess)
         {
-            ActorCount++;
+            UE_LOG(LogTemp, Warning, TEXT("Agent #%d completed successfully"), AgentID);
+            AdvanceToNextAgent();
         }
-        return ActorCount;
-    }
-    
-    return 0;
-}
-
-void UStudioDirectorSystem::EmergencyStopCycle(const FString& Reason)
-{
-    bProductionActive = false;
-    CurrentCycleMetrics.bCycleSuccess = false;
-    
-    for (FDir_AgentInfo& Agent : AgentChain)
-    {
-        if (Agent.Status == EDir_AgentStatus::Working)
+        else
         {
-            Agent.Status = EDir_AgentStatus::Failed;
-            Agent.CurrentTask = FString::Printf(TEXT("Emergency stop: %s"), *Reason);
+            UE_LOG(LogTemp, Error, TEXT("Agent #%d failed - Emergency intervention required"), AgentID);
+            bEmergencyMode = true;
         }
     }
-    
-    LogAgentActivity(FString::Printf(TEXT("EMERGENCY STOP: %s"), *Reason));
-    UE_LOG(LogTemp, Error, TEXT("Production cycle emergency stop: %s"), *Reason);
 }
 
-void UStudioDirectorSystem::ResetAgentChain()
+bool AStudioDirectorSystem::IsAgentChainComplete()
 {
-    InitializeAgentChain();
+    return !bAgentChainActive && CurrentActiveAgent == 1;
+}
+
+void AStudioDirectorSystem::EmergencyStopAllAgents()
+{
+    bAgentChainActive = false;
+    bEmergencyMode = true;
     CurrentActiveAgent = 1;
-    bProductionActive = false;
     
-    LogAgentActivity(TEXT("Agent chain reset"));
+    UE_LOG(LogTemp, Error, TEXT("EMERGENCY STOP - All agent operations halted"));
 }
 
-void UStudioDirectorSystem::LogAgentActivity(const FString& Message)
+void AStudioDirectorSystem::RestartAgentChain()
 {
-    FString LogMessage = FString::Printf(TEXT("[DIRECTOR] %s"), *Message);
-    UE_LOG(LogTemp, Warning, TEXT("%s"), *LogMessage);
+    bEmergencyMode = false;
+    ActiveTasks.Empty();
+    StartAgentChain();
     
-    if (GEngine)
-    {
-        GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Yellow, LogMessage);
-    }
+    UE_LOG(LogTemp, Warning, TEXT("Agent Chain Restarted after emergency"));
 }
 
-void UStudioDirectorSystem::ValidateAgentChain()
+void AStudioDirectorSystem::ForceAgentTimeout(int32 AgentID)
+{
+    UE_LOG(LogTemp, Error, TEXT("Agent #%d timed out - Forcing advancement"), AgentID);
+    AdvanceToNextAgent();
+}
+
+void AStudioDirectorSystem::LogCurrentStatus()
+{
+    UE_LOG(LogTemp, Warning, TEXT("=== STUDIO DIRECTOR STATUS ==="));
+    UE_LOG(LogTemp, Warning, TEXT("Cycle ID: %d"), CurrentCycleID);
+    UE_LOG(LogTemp, Warning, TEXT("Active Tasks: %d"), ActiveTasks.Num());
+    UE_LOG(LogTemp, Warning, TEXT("Completed Tasks: %d"), CompletedTasks.Num());
+    UE_LOG(LogTemp, Warning, TEXT("Agent Chain Active: %s"), bAgentChainActive ? TEXT("Yes") : TEXT("No"));
+    UE_LOG(LogTemp, Warning, TEXT("Current Active Agent: #%d"), CurrentActiveAgent);
+    UE_LOG(LogTemp, Warning, TEXT("Emergency Mode: %s"), bEmergencyMode ? TEXT("Yes") : TEXT("No"));
+    UE_LOG(LogTemp, Warning, TEXT("Total Actors: %d"), CurrentMetrics.TotalActorsInMap);
+    UE_LOG(LogTemp, Warning, TEXT("Dinosaur Count: %d"), CurrentMetrics.DinosaurCount);
+    UE_LOG(LogTemp, Warning, TEXT("Production On Track: %s"), IsProductionOnTrack() ? TEXT("Yes") : TEXT("No"));
+}
+
+void AStudioDirectorSystem::ValidateAgentChainIntegrity()
 {
     // Check for stuck agents
-    FDateTime CurrentTime = FDateTime::Now();
-    for (FDir_AgentInfo& Agent : AgentChain)
+    if (bAgentChainActive)
     {
-        if (Agent.Status == EDir_AgentStatus::Working)
+        float TimeSinceLastAgent = GetWorld()->GetTimeSeconds() - LastAgentStartTime;
+        if (TimeSinceLastAgent > AgentTimeoutThreshold)
         {
-            FTimespan TimeSinceUpdate = CurrentTime - Agent.LastUpdate;
-            if (TimeSinceUpdate.GetTotalMinutes() > 5.0) // 5 minute timeout
-            {
-                Agent.Status = EDir_AgentStatus::Failed;
-                Agent.CurrentTask = TEXT("Timeout - Agent stuck");
-                
-                LogAgentActivity(FString::Printf(TEXT("Agent %d timeout detected"), Agent.AgentID));
-            }
+            UE_LOG(LogTemp, Error, TEXT("Agent #%d exceeded timeout threshold"), CurrentActiveAgent);
+            ForceAgentTimeout(CurrentActiveAgent);
         }
+    }
+    
+    // Validate production limits
+    if (!IsProductionOnTrack())
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Production metrics indicate potential issues"));
     }
 }
 
-void UStudioDirectorSystem::UpdateCycleMetrics()
+void AStudioDirectorSystem::UpdateAgentTimeouts()
 {
-    // Update real-time metrics
-    if (UWorld* World = GetWorld())
+    if (!bAgentChainActive)
     {
-        CurrentCycleMetrics.ActorsSpawned = GetTotalActorsInScene();
+        return;
+    }
+    
+    float TimeSinceLastAgent = GetWorld()->GetTimeSeconds() - LastAgentStartTime;
+    
+    if (TimeSinceLastAgent > AgentTimeoutThreshold)
+    {
+        UE_LOG(LogTemp, Error, TEXT("Agent #%d timeout detected - Auto-advancing"), CurrentActiveAgent);
+        ForceAgentTimeout(CurrentActiveAgent);
+    }
+}
+
+void AStudioDirectorSystem::CheckProductionLimits()
+{
+    // Check actor limits from brain memories
+    if (CurrentMetrics.TotalActorsInMap > 8000)
+    {
+        UE_LOG(LogTemp, Error, TEXT("CRITICAL: Actor count (%d) exceeds limit (8000)"), CurrentMetrics.TotalActorsInMap);
+        bEmergencyMode = true;
+    }
+    
+    if (CurrentMetrics.DinosaurCount > 150)
+    {
+        UE_LOG(LogTemp, Error, TEXT("CRITICAL: Dinosaur count (%d) exceeds limit (150)"), CurrentMetrics.DinosaurCount);
+        bEmergencyMode = true;
+    }
+}
+
+void AStudioDirectorSystem::ValidateMapState()
+{
+    if (!GetWorld())
+    {
+        return;
+    }
+    
+    // Verify MinPlayableMap is loaded
+    FString CurrentLevelName = GetWorld()->GetName();
+    if (!CurrentLevelName.Contains(TEXT("MinPlayableMap")))
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Warning: Not in MinPlayableMap - Current level: %s"), *CurrentLevelName);
     }
 }
