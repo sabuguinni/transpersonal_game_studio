@@ -3,69 +3,46 @@
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
 #include "Engine/Engine.h"
+#include "PhysicsEngine/PhysicsAsset.h"
 #include "Components/SkeletalMeshComponent.h"
-#include "PhysicsEngine/PhysicsConstraintComponent.h"
-#include "Animation/AnimInstance.h"
 #include "Core_RagdollSystem.generated.h"
 
 UENUM(BlueprintType)
 enum class ECore_RagdollState : uint8
 {
-    Disabled    UMETA(DisplayName = "Disabled"),
-    Activating  UMETA(DisplayName = "Activating"),
-    Active      UMETA(DisplayName = "Active"),
-    Blending    UMETA(DisplayName = "Blending Back")
+    Inactive,
+    Activating,
+    Active,
+    Deactivating
 };
 
 USTRUCT(BlueprintType)
-struct FCore_RagdollBone
+struct FCore_RagdollConfig
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll")
-    FName BoneName;
+    float ActivationForce = 1000.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll")
-    float Mass = 10.0f;
+    float BlendTime = 0.5f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll")
-    float LinearDamping = 0.1f;
+    bool bAutoDeactivate = true;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll")
-    float AngularDamping = 0.1f;
+    float AutoDeactivateTime = 5.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll")
-    bool bEnableGravity = true;
+    float MinVelocityThreshold = 50.0f;
 
-    FCore_RagdollBone()
+    FCore_RagdollConfig()
     {
-        BoneName = NAME_None;
-    }
-};
-
-USTRUCT(BlueprintType)
-struct FCore_RagdollProfile
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll")
-    FString ProfileName;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll")
-    TArray<FCore_RagdollBone> Bones;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll")
-    float BlendInTime = 0.2f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll")
-    float BlendOutTime = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll")
-    float MaxRagdollTime = 10.0f;
-
-    FCore_RagdollProfile()
-    {
-        ProfileName = TEXT("Default");
+        ActivationForce = 1000.0f;
+        BlendTime = 0.5f;
+        bAutoDeactivate = true;
+        AutoDeactivateTime = 5.0f;
+        MinVelocityThreshold = 50.0f;
     }
 };
 
@@ -82,90 +59,51 @@ protected:
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 public:
-    // Core ragdoll functionality
     UFUNCTION(BlueprintCallable, Category = "Ragdoll")
-    void ActivateRagdoll(const FString& ProfileName = TEXT("Default"));
+    void ActivateRagdoll(const FVector& ImpactForce = FVector::ZeroVector, const FVector& ImpactLocation = FVector::ZeroVector);
 
     UFUNCTION(BlueprintCallable, Category = "Ragdoll")
     void DeactivateRagdoll();
 
     UFUNCTION(BlueprintCallable, Category = "Ragdoll")
-    void BlendToAnimation(float BlendTime = 1.0f);
+    void SetRagdollConfig(const FCore_RagdollConfig& NewConfig);
+
+    UFUNCTION(BlueprintPure, Category = "Ragdoll")
+    ECore_RagdollState GetRagdollState() const { return CurrentState; }
+
+    UFUNCTION(BlueprintPure, Category = "Ragdoll")
+    bool IsRagdollActive() const { return CurrentState == ECore_RagdollState::Active; }
 
     UFUNCTION(BlueprintCallable, Category = "Ragdoll")
-    bool IsRagdollActive() const;
+    void ApplyImpulseToRagdoll(const FVector& Impulse, const FName& BoneName = NAME_None);
 
     UFUNCTION(BlueprintCallable, Category = "Ragdoll")
-    ECore_RagdollState GetRagdollState() const;
-
-    // Configuration
-    UFUNCTION(BlueprintCallable, Category = "Ragdoll")
-    void AddRagdollProfile(const FCore_RagdollProfile& Profile);
+    void SetBoneLinearVelocity(const FName& BoneName, const FVector& Velocity);
 
     UFUNCTION(BlueprintCallable, Category = "Ragdoll")
-    void SetSkeletalMeshComponent(USkeletalMeshComponent* InMeshComponent);
-
-    UFUNCTION(BlueprintCallable, Category = "Ragdoll")
-    void SetBonePhysicsProperties(const FName& BoneName, float Mass, float LinearDamping, float AngularDamping);
-
-    // Impact and force application
-    UFUNCTION(BlueprintCallable, Category = "Ragdoll")
-    void ApplyImpulseAtBone(const FName& BoneName, const FVector& Impulse);
-
-    UFUNCTION(BlueprintCallable, Category = "Ragdoll")
-    void ApplyRadialImpulse(const FVector& Origin, float Radius, float Strength, bool bVelChange = false);
-
-    // Constraint management
-    UFUNCTION(BlueprintCallable, Category = "Ragdoll")
-    void SetConstraintLimits(const FName& BoneName, bool bEnableSwing1, bool bEnableSwing2, bool bEnableTwist);
-
-    UFUNCTION(BlueprintCallable, Category = "Ragdoll")
-    void ModifyConstraintStrength(const FName& BoneName, float Strength);
+    FVector GetBoneVelocity(const FName& BoneName) const;
 
 protected:
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    USkeletalMeshComponent* SkeletalMeshComponent;
-
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll")
-    TArray<FCore_RagdollProfile> RagdollProfiles;
+    FCore_RagdollConfig RagdollConfig;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ragdoll")
+    UPROPERTY(BlueprintReadOnly, Category = "Ragdoll")
     ECore_RagdollState CurrentState;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll")
-    FString ActiveProfileName;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ragdoll")
-    float RagdollActiveTime;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ragdoll")
-    float BlendTimer;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll")
-    bool bAutoBlendBack = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll")
-    float AutoBlendBackDelay = 3.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll")
-    bool bPreserveMomentum = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll")
-    float MomentumScale = 1.0f;
-
-    // Cached animation data for blending back
     UPROPERTY()
-    TArray<FTransform> CachedBoneTransforms;
+    USkeletalMeshComponent* TargetMesh;
 
     UPROPERTY()
-    TArray<FName> RagdollBoneNames;
+    UPhysicsAsset* CachedPhysicsAsset;
 
-private:
-    void InitializeRagdollProfiles();
-    void CacheBoneTransforms();
-    void ApplyRagdollProfile(const FCore_RagdollProfile& Profile);
-    void UpdateBlending(float DeltaTime);
-    void UpdateRagdollState(float DeltaTime);
-    FCore_RagdollProfile* FindProfile(const FString& ProfileName);
-    void SetupDefaultProfile();
+    float StateTimer;
+    float BlendWeight;
+    FTransform PreRagdollTransform;
+    TArray<FTransform> PreRagdollBoneTransforms;
+
+    void UpdateRagdollBlending(float DeltaTime);
+    void CachePreRagdollState();
+    void RestorePreRagdollState();
+    bool ShouldAutoDeactivate() const;
+    void FindTargetMesh();
 };
