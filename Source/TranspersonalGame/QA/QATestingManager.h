@@ -2,17 +2,18 @@
 
 #include "CoreMinimal.h"
 #include "Engine/World.h"
-#include "GameFramework/GameModeBase.h"
+#include "GameFramework/Actor.h"
 #include "Components/ActorComponent.h"
+#include "Engine/Engine.h"
 #include "QATestingManager.generated.h"
 
 UENUM(BlueprintType)
 enum class EQA_TestResult : uint8
 {
+    NotRun      UMETA(DisplayName = "Not Run"),
     Pass        UMETA(DisplayName = "Pass"),
     Fail        UMETA(DisplayName = "Fail"),
-    Warning     UMETA(DisplayName = "Warning"),
-    Skipped     UMETA(DisplayName = "Skipped")
+    Warning     UMETA(DisplayName = "Warning")
 };
 
 USTRUCT(BlueprintType)
@@ -20,173 +21,188 @@ struct FQA_TestCase
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Testing")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Test")
     FString TestName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Testing")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Test")
     FString TestDescription;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Testing")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Test")
     EQA_TestResult Result;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Testing")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Test")
     FString ErrorMessage;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Testing")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Test")
     float ExecutionTime;
 
     FQA_TestCase()
     {
         TestName = TEXT("");
         TestDescription = TEXT("");
-        Result = EQA_TestResult::Skipped;
+        Result = EQA_TestResult::NotRun;
         ErrorMessage = TEXT("");
         ExecutionTime = 0.0f;
     }
 };
 
 USTRUCT(BlueprintType)
-struct FQA_SystemLimits
+struct FQA_PerformanceMetrics
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Limits")
-    int32 MaxTotalActors;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    int32 TotalActors;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Limits")
-    int32 MaxDinosaurs;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    int32 StaticMeshActors;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Limits")
-    int32 MaxEnvironmentProps;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    int32 SkeletalMeshActors;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Limits")
-    int32 MaxActorsPerBiome;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    int32 LightActors;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Limits")
-    float MaxMemoryUsageMB;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    int32 DinosaurActors;
 
-    FQA_SystemLimits()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float FrameRate;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float MemoryUsageMB;
+
+    FQA_PerformanceMetrics()
     {
-        MaxTotalActors = 8000;
-        MaxDinosaurs = 150;
-        MaxEnvironmentProps = 5000;
-        MaxActorsPerBiome = 4000;
-        MaxMemoryUsageMB = 4000.0f;
+        TotalActors = 0;
+        StaticMeshActors = 0;
+        SkeletalMeshActors = 0;
+        LightActors = 0;
+        DinosaurActors = 0;
+        FrameRate = 0.0f;
+        MemoryUsageMB = 0.0f;
     }
 };
 
 /**
- * QA Testing Manager - Validates game systems, performance, and compliance
- * Ensures all systems meet quality standards and performance requirements
+ * QA Testing Manager - Handles automated testing and validation
+ * Ensures game quality and performance standards
  */
-UCLASS(BlueprintType, Blueprintable, meta = (BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UQATestingManager : public UActorComponent
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API AQATestingManager : public AActor
 {
     GENERATED_BODY()
 
 public:
-    UQATestingManager();
+    AQATestingManager();
 
 protected:
     virtual void BeginPlay() override;
 
 public:
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+    virtual void Tick(float DeltaTime) override;
 
-    // System Validation
-    UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    bool ValidateSystemHealth();
-
-    UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    bool ValidateActorLimits();
-
-    UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    bool ValidateBiomeDistribution();
-
-    UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    bool ValidatePerformanceMetrics();
-
-    UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    bool ValidateGameplayReadiness();
-
-    // Test Execution
+    // Test execution functions
     UFUNCTION(BlueprintCallable, Category = "QA Testing")
     void RunAllTests();
 
     UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    void RunTestSuite(const FString& SuiteName);
+    void RunPerformanceTests();
 
     UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    FQA_TestCase RunSingleTest(const FString& TestName);
-
-    // Reporting
-    UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    FString GenerateQAReport();
+    void RunActorValidationTests();
 
     UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    void SaveReportToFile(const FString& ReportContent);
+    void RunBiomeDistributionTests();
 
     UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    TArray<FQA_TestCase> GetTestResults() const { return TestResults; }
-
-    // Monitoring
-    UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    void StartContinuousMonitoring();
+    void RunDinosaurValidationTests();
 
     UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    void StopContinuousMonitoring();
+    void RunVFXValidationTests();
 
-    UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    bool IsMonitoringActive() const { return bContinuousMonitoring; }
+    // Validation functions
+    UFUNCTION(BlueprintCallable, Category = "QA Validation")
+    bool ValidateActorCount();
 
-    // Configuration
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Configuration")
-    FQA_SystemLimits SystemLimits;
+    UFUNCTION(BlueprintCallable, Category = "QA Validation")
+    bool ValidateDinosaurCount();
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Configuration")
-    bool bAutoRunTests;
+    UFUNCTION(BlueprintCallable, Category = "QA Validation")
+    bool ValidateBiomeDistribution();
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Configuration")
-    float TestInterval;
+    UFUNCTION(BlueprintCallable, Category = "QA Validation")
+    bool ValidatePerformanceMetrics();
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Configuration")
-    bool bLogTestResults;
+    // Reporting functions
+    UFUNCTION(BlueprintCallable, Category = "QA Reporting")
+    void GenerateTestReport();
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Configuration")
-    bool bBreakOnFailure;
+    UFUNCTION(BlueprintCallable, Category = "QA Reporting")
+    void LogTestResults();
+
+    UFUNCTION(BlueprintCallable, Category = "QA Reporting")
+    FString GetTestSummary();
+
+    // Performance monitoring
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    FQA_PerformanceMetrics GetCurrentPerformanceMetrics();
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void StartPerformanceMonitoring();
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void StopPerformanceMonitoring();
 
 protected:
-    // Internal test methods
-    FQA_TestCase TestActorCount();
-    FQA_TestCase TestDinosaurPopulation();
-    FQA_TestCase TestEnvironmentProps();
-    FQA_TestCase TestBiomeBalance();
-    FQA_TestCase TestMemoryUsage();
-    FQA_TestCase TestGameplayElements();
-    FQA_TestCase TestVFXSystems();
-    FQA_TestCase TestAudioSystems();
-    FQA_TestCase TestNavigationMesh();
-    FQA_TestCase TestLightingSetup();
+    // Test data
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Testing")
+    TArray<FQA_TestCase> TestCases;
 
-    // Utility methods
-    int32 CountActorsOfType(const FString& ActorType);
-    float EstimateMemoryUsage();
-    bool CheckBiomeDistribution();
-    void LogTestResult(const FQA_TestCase& TestCase);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    FQA_PerformanceMetrics CurrentMetrics;
 
-private:
-    UPROPERTY()
-    TArray<FQA_TestCase> TestResults;
+    // Configuration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Config")
+    int32 MaxActorCount;
 
-    UPROPERTY()
-    bool bContinuousMonitoring;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Config")
+    int32 MaxDinosaurCount;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Config")
+    float MinFrameRate;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Config")
+    float MaxMemoryUsageMB;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Config")
+    bool bAutoRunTests;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Config")
+    float TestInterval;
+
+    // Internal state
     UPROPERTY()
     float LastTestTime;
 
     UPROPERTY()
-    int32 TestRunCount;
+    bool bIsMonitoring;
 
     UPROPERTY()
-    UWorld* CachedWorld;
+    int32 TestsRun;
+
+    UPROPERTY()
+    int32 TestsPassed;
+
+    UPROPERTY()
+    int32 TestsFailed;
+
+private:
+    // Helper functions
+    void InitializeTestCases();
+    void ExecuteTestCase(FQA_TestCase& TestCase);
+    void UpdatePerformanceMetrics();
+    void CheckActorLimits();
+    void ValidateGameSystems();
+    void LogPerformanceWarnings();
 };
