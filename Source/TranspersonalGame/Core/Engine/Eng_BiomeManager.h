@@ -2,14 +2,13 @@
 
 #include "CoreMinimal.h"
 #include "Engine/World.h"
-#include "GameFramework/Actor.h"
+#include "Subsystems/WorldSubsystem.h"
 #include "Components/ActorComponent.h"
-#include "Engine/Engine.h"
-#include "../SharedTypes.h"
+#include "../../SharedTypes.h"
 #include "Eng_BiomeManager.generated.h"
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEng_BiomeConfig
+struct TRANSPERSONALGAME_API FEng_BiomeConfiguration
 {
     GENERATED_BODY()
 
@@ -20,103 +19,98 @@ struct TRANSPERSONALGAME_API FEng_BiomeConfig
     FVector CenterLocation = FVector::ZeroVector;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float Radius = 30000.0f;
+    float Radius = 15000.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
     float Temperature = 25.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float Humidity = 50.0f;
+    float Humidity = 0.5f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    float Density = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    TArray<FString> AllowedVegetation;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    TArray<FString> AllowedDinosaurs;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
     int32 MaxActors = 4000;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    int32 MaxDinosaurs = 30;
+    int32 CurrentActorCount = 0;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    TArray<FString> AllowedDinosaurTypes;
-
-    FEng_BiomeConfig()
+    FEng_BiomeConfiguration()
     {
-        AllowedDinosaurTypes = {"TRex", "Velociraptor", "Triceratops"};
+        AllowedVegetation.Add("Tree");
+        AllowedVegetation.Add("Bush");
+        AllowedDinosaurs.Add("TRex");
+        AllowedDinosaurs.Add("Velociraptor");
     }
 };
 
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEng_BiomeStats
-{
-    GENERATED_BODY()
-
-    UPROPERTY(BlueprintReadOnly, Category = "Stats")
-    int32 CurrentActors = 0;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Stats")
-    int32 CurrentDinosaurs = 0;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Stats")
-    float ActorDensity = 0.0f;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Stats")
-    bool bIsOverloaded = false;
-};
-
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API AEng_BiomeManager : public AActor
+class TRANSPERSONALGAME_API UEng_BiomeManager : public UWorldSubsystem
 {
     GENERATED_BODY()
 
 public:
-    AEng_BiomeManager();
+    UEng_BiomeManager();
 
-protected:
-    virtual void BeginPlay() override;
+    // USubsystem interface
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
 
-public:
-    virtual void Tick(float DeltaTime) override;
+    UFUNCTION(BlueprintCallable, Category = "Biome")
+    void InitializeBiomes();
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome System")
-    TArray<FEng_BiomeConfig> BiomeConfigs;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Biome System")
-    TMap<EBiomeType, FEng_BiomeStats> BiomeStats;
-
-    UFUNCTION(BlueprintCallable, Category = "Biome System")
+    UFUNCTION(BlueprintCallable, Category = "Biome")
     EBiomeType GetBiomeAtLocation(const FVector& Location) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Biome System")
-    bool CanSpawnActorInBiome(EBiomeType BiomeType, bool bIsDinosaur = false) const;
+    UFUNCTION(BlueprintCallable, Category = "Biome")
+    FEng_BiomeConfiguration GetBiomeConfiguration(EBiomeType BiomeType) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Biome System")
-    FVector GetRandomLocationInBiome(EBiomeType BiomeType) const;
+    UFUNCTION(BlueprintCallable, Category = "Biome")
+    bool CanSpawnActorInBiome(EBiomeType BiomeType, const FString& ActorType) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Biome System")
-    void UpdateBiomeStats();
+    UFUNCTION(BlueprintCallable, Category = "Biome")
+    void RegisterActorInBiome(EBiomeType BiomeType);
 
-    UFUNCTION(BlueprintCallable, Category = "Biome System")
-    void CleanupOverloadedBiomes();
+    UFUNCTION(BlueprintCallable, Category = "Biome")
+    void UnregisterActorFromBiome(EBiomeType BiomeType);
 
-    UFUNCTION(BlueprintCallable, Category = "Biome System")
-    TArray<FString> GetAllowedDinosaursForBiome(EBiomeType BiomeType) const;
+    UFUNCTION(BlueprintCallable, Category = "Biome")
+    TArray<FVector> GetSpawnLocationsInBiome(EBiomeType BiomeType, int32 Count) const;
 
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Debug")
-    void InitializeDefaultBiomes();
+    UFUNCTION(BlueprintCallable, Category = "Biome")
+    float GetBiomeTemperature(const FVector& Location) const;
 
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Debug")
-    void LogBiomeStatus();
+    UFUNCTION(BlueprintCallable, Category = "Biome")
+    float GetBiomeHumidity(const FVector& Location) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Biome")
+    void UpdateBiomeActorCounts();
+
+    UFUNCTION(BlueprintCallable, Category = "Biome")
+    bool IsBiomeOvercrowded(EBiomeType BiomeType) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Biome")
+    void CleanupOvercrowdedBiomes();
 
 protected:
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    class USceneComponent* RootSceneComponent;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    TMap<EBiomeType, FEng_BiomeConfiguration> BiomeConfigurations;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
-    float UpdateInterval = 5.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    int32 GlobalMaxActors = 20000;
 
-    UPROPERTY()
-    float LastUpdateTime = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    int32 GlobalCurrentActors = 0;
 
-    void InitializeBiomeConfigs();
-    void ValidateBiomeLimits();
-    FEng_BiomeConfig* GetBiomeConfig(EBiomeType BiomeType);
-    void RemoveOldestActorsFromBiome(EBiomeType BiomeType, int32 NumToRemove);
+private:
+    void SetupDefaultBiomes();
+    float CalculateDistanceFromBiomeCenter(const FVector& Location, const FEng_BiomeConfiguration& Biome) const;
+    EBiomeType FindClosestBiome(const FVector& Location) const;
 };
