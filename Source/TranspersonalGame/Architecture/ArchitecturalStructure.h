@@ -4,18 +4,30 @@
 #include "GameFramework/Actor.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/BoxComponent.h"
-#include "../SharedTypes.h"
+#include "Engine/Engine.h"
 #include "ArchitecturalStructure.generated.h"
 
 UENUM(BlueprintType)
 enum class EArch_StructureType : uint8
 {
-    Shelter         UMETA(DisplayName = "Shelter"),
-    Monument        UMETA(DisplayName = "Monument"),
-    Wall            UMETA(DisplayName = "Wall"),
-    Pillar          UMETA(DisplayName = "Pillar"),
-    Platform        UMETA(DisplayName = "Platform"),
-    Bridge          UMETA(DisplayName = "Bridge")
+    Temple         UMETA(DisplayName = "Temple"),
+    Ruins          UMETA(DisplayName = "Ruins"),
+    Column         UMETA(DisplayName = "Column"),
+    Archway        UMETA(DisplayName = "Archway"),
+    Wall           UMETA(DisplayName = "Wall"),
+    Platform       UMETA(DisplayName = "Platform"),
+    Bridge         UMETA(DisplayName = "Bridge"),
+    Shelter        UMETA(DisplayName = "Shelter")
+};
+
+UENUM(BlueprintType)
+enum class EArch_StructureCondition : uint8
+{
+    Pristine       UMETA(DisplayName = "Pristine"),
+    Weathered      UMETA(DisplayName = "Weathered"),
+    Damaged        UMETA(DisplayName = "Damaged"),
+    Ruined         UMETA(DisplayName = "Ruined"),
+    Overgrown      UMETA(DisplayName = "Overgrown")
 };
 
 USTRUCT(BlueprintType)
@@ -24,31 +36,31 @@ struct FArch_StructureData
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    EArch_StructureType StructureType = EArch_StructureType::Shelter;
+    EArch_StructureType StructureType = EArch_StructureType::Ruins;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    float DurabilityMax = 1000.0f;
+    EArch_StructureCondition Condition = EArch_StructureCondition::Weathered;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    float DurabilityCurrent = 1000.0f;
+    float Age = 1000.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    bool bCanProvideShade = true;
+    bool bIsExplorable = true;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    bool bCanProvideShelter = true;
+    bool bHasInterior = false;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    float ShelterRadius = 500.0f;
+    FString HistoricalDescription = TEXT("Ancient structure from the Cretaceous period");
 
     FArch_StructureData()
     {
-        StructureType = EArch_StructureType::Shelter;
-        DurabilityMax = 1000.0f;
-        DurabilityCurrent = 1000.0f;
-        bCanProvideShade = true;
-        bCanProvideShelter = true;
-        ShelterRadius = 500.0f;
+        StructureType = EArch_StructureType::Ruins;
+        Condition = EArch_StructureCondition::Weathered;
+        Age = 1000.0f;
+        bIsExplorable = true;
+        bHasInterior = false;
+        HistoricalDescription = TEXT("Ancient structure from the Cretaceous period");
     }
 };
 
@@ -64,7 +76,7 @@ protected:
     virtual void BeginPlay() override;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    UStaticMeshComponent* StructureMesh;
+    UStaticMeshComponent* MainStructureMesh;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
     UBoxComponent* InteractionVolume;
@@ -72,35 +84,41 @@ protected:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure Data")
     FArch_StructureData StructureData;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    EBiomeType BiomeType = EBiomeType::Savana;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Visual")
+    TArray<UStaticMeshComponent*> DetailMeshes;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Gameplay")
+    bool bCanProvideShelte = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Gameplay")
+    float ShelterRadius = 500.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Gameplay")
+    bool bHasHiddenAreas = false;
 
 public:
     virtual void Tick(float DeltaTime) override;
 
     UFUNCTION(BlueprintCallable, Category = "Structure")
-    void TakeDamage(float DamageAmount);
-
-    UFUNCTION(BlueprintCallable, Category = "Structure")
-    void RepairStructure(float RepairAmount);
-
-    UFUNCTION(BlueprintPure, Category = "Structure")
-    float GetDurabilityPercentage() const;
-
-    UFUNCTION(BlueprintPure, Category = "Structure")
-    bool IsInShelterRange(FVector TestLocation) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Structure")
     void SetStructureType(EArch_StructureType NewType);
 
-    UFUNCTION(BlueprintImplementableEvent, Category = "Structure")
-    void OnStructureDestroyed();
+    UFUNCTION(BlueprintCallable, Category = "Structure")
+    void SetCondition(EArch_StructureCondition NewCondition);
+
+    UFUNCTION(BlueprintCallable, Category = "Structure")
+    bool IsPlayerInShelter(AActor* Player);
+
+    UFUNCTION(BlueprintCallable, Category = "Structure")
+    void ApplyWeathering(float WeatheringAmount);
 
     UFUNCTION(BlueprintImplementableEvent, Category = "Structure")
-    void OnPlayerEnterShelter();
+    void OnPlayerEnterStructure(AActor* Player);
 
     UFUNCTION(BlueprintImplementableEvent, Category = "Structure")
-    void OnPlayerExitShelter();
+    void OnPlayerExitStructure(AActor* Player);
+
+    UFUNCTION(BlueprintCallable, Category = "Structure")
+    FString GetStructureDescription() const;
 
 protected:
     UFUNCTION()
@@ -109,7 +127,10 @@ protected:
     UFUNCTION()
     void OnInteractionVolumeEndOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex);
 
+    UFUNCTION(BlueprintCallable, Category = "Structure")
+    void UpdateVisualCondition();
+
 private:
-    bool bPlayerInShelter = false;
-    float WeatherDecayRate = 1.0f;
+    bool bPlayerInside = false;
+    float LastWeatheringTime = 0.0f;
 };
