@@ -3,69 +3,105 @@
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
 #include "Engine/HitResult.h"
+#include "PhysicsEngine/BodyInstance.h"
+#include "Particles/ParticleSystem.h"
+#include "Sound/SoundBase.h"
 #include "Core_ImpactSystem.generated.h"
 
-class UPrimitiveComponent;
-class USoundCue;
-class UParticleSystem;
-class UNiagaraSystem;
+UENUM(BlueprintType)
+enum class ECore_ImpactType : uint8
+{
+    Light       UMETA(DisplayName = "Light Impact"),
+    Medium      UMETA(DisplayName = "Medium Impact"),
+    Heavy       UMETA(DisplayName = "Heavy Impact"),
+    Explosive   UMETA(DisplayName = "Explosive Impact")
+};
 
-/**
- * Settings for material-specific impact behavior
- */
+UENUM(BlueprintType)
+enum class ECore_SurfaceType : uint8
+{
+    Default     UMETA(DisplayName = "Default"),
+    Rock        UMETA(DisplayName = "Rock"),
+    Dirt        UMETA(DisplayName = "Dirt"),
+    Wood        UMETA(DisplayName = "Wood"),
+    Metal       UMETA(DisplayName = "Metal"),
+    Water       UMETA(DisplayName = "Water"),
+    Flesh       UMETA(DisplayName = "Flesh"),
+    Bone        UMETA(DisplayName = "Bone")
+};
+
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FCore_ImpactSettings
+struct FCore_ImpactData
 {
     GENERATED_BODY()
 
-    /** Multiplier for damage calculation */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Impact Settings")
-    float DamageMultiplier = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Impact")
+    ECore_ImpactType ImpactType = ECore_ImpactType::Medium;
 
-    /** Volume multiplier for impact sounds */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Impact Settings")
-    float SoundVolume = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Impact")
+    ECore_SurfaceType SurfaceType = ECore_SurfaceType::Default;
 
-    /** Scale multiplier for impact particles */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Impact Settings")
-    float ParticleScale = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Impact")
+    float ImpactForce = 1000.0f;
 
-    /** Whether this material can cause damage on impact */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Impact Settings")
-    bool bCanCauseDamage = true;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Impact")
+    FVector ImpactLocation = FVector::ZeroVector;
 
-    /** Whether to play sound effects on impact */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Impact Settings")
-    bool bPlaySound = true;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Impact")
+    FVector ImpactNormal = FVector::UpVector;
 
-    /** Whether to spawn particle effects on impact */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Impact Settings")
-    bool bSpawnParticles = true;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Impact")
+    AActor* ImpactCauser = nullptr;
 
-    FCore_ImpactSettings()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Impact")
+    UPrimitiveComponent* ImpactComponent = nullptr;
+
+    FCore_ImpactData()
     {
-        DamageMultiplier = 1.0f;
-        SoundVolume = 1.0f;
-        ParticleScale = 1.0f;
-        bCanCauseDamage = true;
-        bPlaySound = true;
-        bSpawnParticles = true;
+        ImpactType = ECore_ImpactType::Medium;
+        SurfaceType = ECore_SurfaceType::Default;
+        ImpactForce = 1000.0f;
+        ImpactLocation = FVector::ZeroVector;
+        ImpactNormal = FVector::UpVector;
+        ImpactCauser = nullptr;
+        ImpactComponent = nullptr;
     }
 };
 
-/**
- * Core Impact System Component
- * 
- * Handles collision impacts, material-based responses, damage calculation,
- * and audio/visual effect spawning for realistic impact feedback.
- * 
- * Features:
- * - Material-based impact processing (Stone, Wood, Flesh, etc.)
- * - Velocity-based damage calculation
- * - Dynamic sound and particle effect spawning
- * - Configurable impact thresholds and material properties
- * - Integration with UE5 physics and collision systems
- */
+USTRUCT(BlueprintType)
+struct FCore_ImpactEffect
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Effects")
+    UParticleSystem* ParticleEffect = nullptr;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Effects")
+    USoundBase* SoundEffect = nullptr;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Effects")
+    float EffectScale = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Effects")
+    float SoundVolume = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Effects")
+    bool bCreateDecal = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Effects")
+    float DecalSize = 10.0f;
+
+    FCore_ImpactEffect()
+    {
+        ParticleEffect = nullptr;
+        SoundEffect = nullptr;
+        EffectScale = 1.0f;
+        SoundVolume = 1.0f;
+        bCreateDecal = false;
+        DecalSize = 10.0f;
+    }
+};
+
 UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
 class TRANSPERSONALGAME_API UCore_ImpactSystem : public UActorComponent
 {
@@ -77,75 +113,60 @@ public:
 protected:
     virtual void BeginPlay() override;
 
-    /** Initialize the impact system */
-    UFUNCTION(BlueprintCallable, Category = "Impact System")
-    void InitializeImpactSystem();
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Impact System")
+    TMap<ECore_SurfaceType, FCore_ImpactEffect> SurfaceEffects;
 
-    /** Setup default material impact mappings */
-    void SetupDefaultMaterialImpacts();
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Impact System")
+    float MinImpactForce = 100.0f;
 
-    /** Register collision event callbacks */
-    void RegisterCollisionCallbacks();
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Impact System")
+    float MaxImpactForce = 10000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Impact System")
+    bool bEnableImpactEffects = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Impact System")
+    float EffectCooldown = 0.1f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Impact System")
+    float LastImpactTime = 0.0f;
 
 public:
-    /** Collision event handler */
-    UFUNCTION()
-    void OnComponentHit(UPrimitiveComponent* HitComp, AActor* OtherActor, UPrimitiveComponent* OtherComp, FVector NormalImpulse, const FHitResult& Hit);
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    /** Process an impact event */
     UFUNCTION(BlueprintCallable, Category = "Impact System")
-    void ProcessImpact(const FHitResult& HitResult, float ImpactVelocity, UPrimitiveComponent* HitComponent, AActor* OtherActor, UPrimitiveComponent* OtherComponent);
+    void ProcessImpact(const FCore_ImpactData& ImpactData);
 
-    /** Determine material type from hit result */
     UFUNCTION(BlueprintCallable, Category = "Impact System")
-    FString DetermineMaterialType(const FHitResult& HitResult, UPrimitiveComponent* Component);
+    void ProcessHitResult(const FHitResult& HitResult, float ImpactForce, AActor* Causer);
 
-    /** Play impact sound based on material and strength */
     UFUNCTION(BlueprintCallable, Category = "Impact System")
-    void PlayImpactSound(const FVector& Location, const FString& MaterialType, float ImpactStrength, float VolumeMultiplier);
+    ECore_SurfaceType GetSurfaceType(UPrimitiveComponent* Component);
 
-    /** Spawn impact particles based on material and strength */
     UFUNCTION(BlueprintCallable, Category = "Impact System")
-    void SpawnImpactParticles(const FVector& Location, const FVector& Normal, const FString& MaterialType, float ImpactStrength, float ScaleMultiplier);
+    ECore_ImpactType GetImpactType(float Force);
 
-    /** Apply damage based on impact velocity and material */
     UFUNCTION(BlueprintCallable, Category = "Impact System")
-    void ApplyImpactDamage(AActor* TargetActor, float ImpactVelocity, float DamageMultiplier);
+    void SpawnImpactEffects(const FCore_ImpactData& ImpactData);
 
-    /** Set impact settings for a specific material type */
     UFUNCTION(BlueprintCallable, Category = "Impact System")
-    void SetMaterialImpactSettings(const FString& MaterialType, const FCore_ImpactSettings& Settings);
+    void SetSurfaceEffect(ECore_SurfaceType SurfaceType, const FCore_ImpactEffect& Effect);
 
-    /** Get impact settings for a specific material type */
     UFUNCTION(BlueprintCallable, Category = "Impact System")
-    FCore_ImpactSettings GetMaterialImpactSettings(const FString& MaterialType) const;
+    FCore_ImpactEffect GetSurfaceEffect(ECore_SurfaceType SurfaceType);
 
-    /** Set the velocity range for impact detection */
     UFUNCTION(BlueprintCallable, Category = "Impact System")
-    void SetImpactVelocityRange(float MinVelocity, float MaxVelocity);
+    void EnableImpactEffects(bool bEnable) { bEnableImpactEffects = bEnable; }
 
-protected:
-    /** Minimum impact velocity to trigger effects */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Impact Settings")
-    float MinImpactVelocity = 300.0f;
+    UFUNCTION(BlueprintCallable, Category = "Impact System")
+    bool CanProcessImpact() const;
 
-    /** Maximum impact velocity for scaling calculations */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Impact Settings")
-    float MaxImpactVelocity = 2000.0f;
+    UFUNCTION(BlueprintImplementableEvent, Category = "Impact System")
+    void OnImpactProcessed(const FCore_ImpactData& ImpactData);
 
-    /** Default impact settings for unknown materials */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Impact Settings")
-    FCore_ImpactSettings DefaultImpactSettings;
-
-    /** Map of material types to their impact settings */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Impact Settings")
-    TMap<FString, FCore_ImpactSettings> MaterialImpactMap;
-
-    /** Impact sound assets for different materials */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Impact Assets")
-    TMap<FString, TSoftObjectPtr<USoundCue>> ImpactSounds;
-
-    /** Impact particle systems for different materials */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Impact Assets")
-    TMap<FString, TSoftObjectPtr<UNiagaraSystem>> ImpactParticles;
+private:
+    void InitializeDefaultEffects();
+    void SpawnParticleEffect(const FCore_ImpactData& ImpactData, UParticleSystem* ParticleSystem, float Scale);
+    void PlaySoundEffect(const FCore_ImpactData& ImpactData, USoundBase* Sound, float Volume);
+    void CreateDecal(const FCore_ImpactData& ImpactData, float Size);
 };
