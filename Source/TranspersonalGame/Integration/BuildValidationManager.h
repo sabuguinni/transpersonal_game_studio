@@ -2,42 +2,39 @@
 
 #include "CoreMinimal.h"
 #include "Engine/GameInstanceSubsystem.h"
-#include "Engine/World.h"
 #include "BuildValidationManager.generated.h"
 
 UENUM(BlueprintType)
-enum class EBuild_ValidationResult : uint8
+enum class EBuildValidationStatus : uint8
 {
-    Pass        UMETA(DisplayName = "Pass"),
-    Warning     UMETA(DisplayName = "Warning"),
-    Fail        UMETA(DisplayName = "Fail"),
-    Critical    UMETA(DisplayName = "Critical")
+    Unknown,
+    Validating,
+    Passed,
+    Failed,
+    Warning
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FBuild_ValidationReport
+struct FBuildValidationResult
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    EBuild_ValidationResult Result;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
+    UPROPERTY(BlueprintReadOnly)
     FString TestName;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    FString Details;
+    UPROPERTY(BlueprintReadOnly)
+    EBuildValidationStatus Status;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
+    UPROPERTY(BlueprintReadOnly)
+    FString Message;
+
+    UPROPERTY(BlueprintReadOnly)
     float ExecutionTime;
 
-    FBuild_ValidationReport()
-    {
-        Result = EBuild_ValidationResult::Pass;
-        TestName = TEXT("");
-        Details = TEXT("");
-        ExecutionTime = 0.0f;
-    }
+    FBuildValidationResult()
+        : Status(EBuildValidationStatus::Unknown)
+        , ExecutionTime(0.0f)
+    {}
 };
 
 UCLASS(BlueprintType)
@@ -53,10 +50,10 @@ public:
     void RunFullValidationSuite();
 
     UFUNCTION(BlueprintCallable, Category = "Build Validation")
-    void ValidateActorCounts();
+    void ValidateModuleDependencies();
 
     UFUNCTION(BlueprintCallable, Category = "Build Validation")
-    void ValidateModuleDependencies();
+    void ValidateAssetIntegrity();
 
     UFUNCTION(BlueprintCallable, Category = "Build Validation")
     void ValidateQAResults();
@@ -65,34 +62,32 @@ public:
     void ValidateCompilationStatus();
 
     UFUNCTION(BlueprintCallable, Category = "Build Validation")
-    TArray<FBuild_ValidationReport> GetValidationReports() const { return ValidationReports; }
+    TArray<FBuildValidationResult> GetValidationResults() const;
 
     UFUNCTION(BlueprintCallable, Category = "Build Validation")
-    bool IsValidationPassing() const;
+    EBuildValidationStatus GetOverallStatus() const;
 
     UFUNCTION(BlueprintCallable, Category = "Build Validation")
-    void ClearValidationReports() { ValidationReports.Empty(); }
+    void ClearValidationResults();
+
+    UFUNCTION(BlueprintCallable, Category = "Build Validation")
+    bool IsValidationInProgress() const;
 
 protected:
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    TArray<FBuild_ValidationReport> ValidationReports;
+    UPROPERTY(BlueprintReadOnly, Category = "Build Validation")
+    TArray<FBuildValidationResult> ValidationResults;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    int32 MaxActorCount;
+    UPROPERTY(BlueprintReadOnly, Category = "Build Validation")
+    bool bValidationInProgress;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    int32 MaxDinosaurCount;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    int32 MaxPropsPerBiome;
+    UPROPERTY(BlueprintReadOnly, Category = "Build Validation")
+    EBuildValidationStatus OverallStatus;
 
 private:
-    void AddValidationReport(EBuild_ValidationResult Result, const FString& TestName, const FString& Details, float ExecutionTime = 0.0f);
-    
-    bool ValidateActorLimits();
-    bool ValidateBiomeDistribution();
-    bool ValidateModuleLoading();
-    bool ValidateAssetIntegrity();
+    void AddValidationResult(const FString& TestName, EBuildValidationStatus Status, const FString& Message, float ExecutionTime = 0.0f);
+    void UpdateOverallStatus();
     
     FDateTime ValidationStartTime;
+    int32 TotalTests;
+    int32 CompletedTests;
 };
