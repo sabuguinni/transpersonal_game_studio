@@ -1,22 +1,11 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
-#include "Components/SphereComponent.h"
-#include "Components/StaticMeshComponent.h"
-#include "Engine/TriggerVolume.h"
-#include "SharedTypes.h"
+#include "Engine/GameInstanceSubsystem.h"
+#include "Components/AudioComponent.h"
+#include "Sound/SoundCue.h"
+#include "../SharedTypes.h"
 #include "Narr_DialogueSystem.generated.h"
-
-UENUM(BlueprintType)
-enum class ENarr_DialogueType : uint8
-{
-    Warning,
-    Lore,
-    Tutorial,
-    Tribal,
-    Survival
-};
 
 USTRUCT(BlueprintType)
 struct TRANSPERSONALGAME_API FNarr_DialogueLine
@@ -30,124 +19,121 @@ struct TRANSPERSONALGAME_API FNarr_DialogueLine
     FString DialogueText;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    ENarr_DialogueType DialogueType;
+    USoundCue* VoiceClip;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
     float Duration;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    bool bRequiresTrigger;
+    ENarr_EmotionalTone EmotionalTone;
 
     FNarr_DialogueLine()
     {
         SpeakerName = TEXT("Unknown");
         DialogueText = TEXT("");
-        DialogueType = ENarr_DialogueType::Lore;
+        VoiceClip = nullptr;
         Duration = 3.0f;
-        bRequiresTrigger = false;
+        EmotionalTone = ENarr_EmotionalTone::Neutral;
     }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FNarr_StoryMarker
+struct TRANSPERSONALGAME_API FNarr_DialogueSequence
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    FString MarkerName;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    FVector Location;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    TArray<FNarr_DialogueLine> AssociatedDialogue;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    bool bDiscovered;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    float DiscoveryRadius;
-
-    FNarr_StoryMarker()
-    {
-        MarkerName = TEXT("Unknown Marker");
-        Location = FVector::ZeroVector;
-        bDiscovered = false;
-        DiscoveryRadius = 500.0f;
-    }
-};
-
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API ANarr_DialogueSystem : public AActor
-{
-    GENERATED_BODY()
-
-public:
-    ANarr_DialogueSystem();
-
-protected:
-    virtual void BeginPlay() override;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    USphereComponent* TriggerSphere;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    UStaticMeshComponent* VisualMesh;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    FString SequenceID;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
     TArray<FNarr_DialogueLine> DialogueLines;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    FString NPCName;
+    bool bIsRepeatable;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    ENarr_DialogueType NPCType;
+    TArray<FString> RequiredFlags;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    bool bCanRepeatDialogue;
+    FNarr_DialogueSequence()
+    {
+        SequenceID = TEXT("Default");
+        bIsRepeatable = false;
+    }
+};
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    float InteractionRange;
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnDialogueStarted, const FString&, SequenceID);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnDialogueLineChanged, const FNarr_DialogueLine&, CurrentLine);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnDialogueEnded);
 
-    UPROPERTY(BlueprintReadOnly, Category = "State")
-    bool bHasBeenTriggered;
-
-    UPROPERTY(BlueprintReadOnly, Category = "State")
-    int32 CurrentDialogueIndex;
+UCLASS()
+class TRANSPERSONALGAME_API UNarr_DialogueSystem : public UGameInstanceSubsystem
+{
+    GENERATED_BODY()
 
 public:
-    virtual void Tick(float DeltaTime) override;
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
 
     UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    void TriggerDialogue();
+    void StartDialogueSequence(const FString& SequenceID);
 
     UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    void NextDialogueLine();
+    void AdvanceDialogue();
 
     UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    FNarr_DialogueLine GetCurrentDialogue() const;
+    void StopDialogue();
 
     UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    bool HasMoreDialogue() const;
+    bool IsDialogueActive() const { return bIsDialogueActive; }
 
     UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    void ResetDialogue();
+    FNarr_DialogueLine GetCurrentDialogueLine() const { return CurrentDialogueLine; }
 
-    UFUNCTION(BlueprintImplementableEvent, Category = "Dialogue")
-    void OnDialogueTriggered(const FNarr_DialogueLine& DialogueLine);
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    void RegisterDialogueSequence(const FNarr_DialogueSequence& NewSequence);
 
-    UFUNCTION(BlueprintImplementableEvent, Category = "Dialogue")
-    void OnDialogueCompleted();
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    void SetDialogueFlag(const FString& FlagName, bool bValue);
+
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    bool GetDialogueFlag(const FString& FlagName) const;
+
+    UPROPERTY(BlueprintAssignable, Category = "Dialogue Events")
+    FOnDialogueStarted OnDialogueStarted;
+
+    UPROPERTY(BlueprintAssignable, Category = "Dialogue Events")
+    FOnDialogueLineChanged OnDialogueLineChanged;
+
+    UPROPERTY(BlueprintAssignable, Category = "Dialogue Events")
+    FOnDialogueEnded OnDialogueEnded;
 
 protected:
-    UFUNCTION()
-    void OnTriggerEnter(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComponent, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult);
+    UPROPERTY()
+    TMap<FString, FNarr_DialogueSequence> DialogueSequences;
 
-    UFUNCTION()
-    void OnTriggerExit(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComponent, int32 OtherBodyIndex);
+    UPROPERTY()
+    TMap<FString, bool> DialogueFlags;
 
-private:
-    void InitializeDialogueLines();
-    void SetupTribalDialogue();
-    void SetupSurvivalWarnings();
+    UPROPERTY()
+    UAudioComponent* DialogueAudioComponent;
+
+    UPROPERTY()
+    bool bIsDialogueActive;
+
+    UPROPERTY()
+    FString CurrentSequenceID;
+
+    UPROPERTY()
+    int32 CurrentLineIndex;
+
+    UPROPERTY()
+    FNarr_DialogueLine CurrentDialogueLine;
+
+    UPROPERTY()
+    FTimerHandle DialogueTimerHandle;
+
+    void PlayCurrentDialogueLine();
+    void OnDialogueLineFinished();
+    bool CheckSequenceRequirements(const FNarr_DialogueSequence& Sequence) const;
+    void LoadDefaultDialogueSequences();
 };
