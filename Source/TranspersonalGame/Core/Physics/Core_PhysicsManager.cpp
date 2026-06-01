@@ -1,369 +1,240 @@
 #include "Core_PhysicsManager.h"
-#include "Engine/World.h"
-#include "GameFramework/Actor.h"
-#include "Components/PrimitiveComponent.h"
-#include "Components/StaticMeshComponent.h"
-#include "Components/SkeletalMeshComponent.h"
-#include "PhysicsEngine/BodyInstance.h"
 #include "Engine/Engine.h"
-#include "TimerManager.h"
+#include "Engine/World.h"
+#include "PhysicsEngine/PhysicsSettings.h"
+#include "Components/PrimitiveComponent.h"
+#include "GameFramework/WorldSettings.h"
 
 UCore_PhysicsManager::UCore_PhysicsManager()
 {
-    CurrentFrameTimeMs = 0.0f;
-    PhysicsBudgetMs = MAX_PHYSICS_BUDGET_MS;
-    bOptimizationActive = false;
+    PrimaryComponentTick.bCanEverTick = true;
+    PrimaryComponentTick.TickGroup = TG_PrePhysics;
+    
+    PhysicsSettings = FCore_PhysicsSettings();
+    bEnablePhysicsOptimization = true;
+    PhysicsUpdateRate = 60.0f;
+    CurrentPhysicsTime = 0.0f;
+    ActivePhysicsBodies = 0;
+    AveragePhysicsTime = 0.0f;
+    
+    PhysicsTimeSamples.Reserve(60); // 1 second of samples at 60fps
 }
 
-void UCore_PhysicsManager::Initialize(FSubsystemCollectionBase& Collection)
+void UCore_PhysicsManager::BeginPlay()
 {
-    Super::Initialize(Collection);
+    Super::BeginPlay();
     
-    UE_LOG(LogTemp, Warning, TEXT("Core_PhysicsManager: Initializing physics subsystem"));
+    ApplyQualitySettings();
     
-    // Initialize species-specific physics configurations
-    InitializeSpeciesConfigs();
-    
-    // Start performance monitoring
-    if (UWorld* World = GetWorld())
-    {
-        FTimerHandle TimerHandle;
-        World->GetTimerManager().SetTimer(TimerHandle, this, &UCore_PhysicsManager::UpdatePerformanceMetrics, 0.1f, true);
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("Core_PhysicsManager: Initialization complete with %d species configs"), SpeciesConfigs.Num());
+    UE_LOG(LogTemp, Log, TEXT("Core_PhysicsManager: Initialized with quality level %d"), 
+           (int32)PhysicsSettings.QualityLevel);
 }
 
-void UCore_PhysicsManager::Deinitialize()
+void UCore_PhysicsManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
-    UE_LOG(LogTemp, Warning, TEXT("Core_PhysicsManager: Deinitializing physics subsystem"));
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
     
-    // Clear all registered actors
-    RegisteredPhysicsActors.Empty();
-    SpeciesConfigs.Empty();
-    
-    Super::Deinitialize();
-}
-
-bool UCore_PhysicsManager::ShouldCreateSubsystem(UObject* Outer) const
-{
-    // Only create in game worlds, not in editor preview worlds
-    if (UWorld* World = Cast<UWorld>(Outer))
+    if (bEnablePhysicsOptimization)
     {
-        return World->IsGameWorld() || World->IsEditorWorld();
-    }
-    return false;
-}
-
-void UCore_PhysicsManager::InitializeSpeciesConfigs()
-{
-    // T-Rex configuration - Massive predator
-    FCore_DinosaurPhysicsConfig TRexConfig;
-    TRexConfig.MassKg = TREX_MASS_KG;
-    TRexConfig.LinearDamping = 0.05f;  // Low damping for momentum
-    TRexConfig.AngularDamping = 0.1f;
-    TRexConfig.bEnableGravity = true;
-    TRexConfig.CollisionEnabled = ECollisionEnabled::QueryAndPhysics;
-    TRexConfig.CollisionResponse = ECollisionResponse::ECR_Block;
-    SpeciesConfigs.Add(ECore_DinosaurSpecies::TRex, TRexConfig);
-    
-    // Velociraptor configuration - Fast and agile
-    FCore_DinosaurPhysicsConfig RaptorConfig;
-    RaptorConfig.MassKg = VELOCIRAPTOR_MASS_KG;
-    RaptorConfig.LinearDamping = 0.2f;  // Higher damping for quick stops
-    RaptorConfig.AngularDamping = 0.3f;
-    RaptorConfig.bEnableGravity = true;
-    RaptorConfig.CollisionEnabled = ECollisionEnabled::QueryAndPhysics;
-    RaptorConfig.CollisionResponse = ECollisionResponse::ECR_Block;
-    SpeciesConfigs.Add(ECore_DinosaurSpecies::Velociraptor, RaptorConfig);
-    
-    // Brachiosaurus configuration - Gentle giant
-    FCore_DinosaurPhysicsConfig BrachioConfig;
-    BrachioConfig.MassKg = BRACHIOSAURUS_MASS_KG;
-    BrachioConfig.LinearDamping = 0.02f;  // Very low damping due to massive size
-    BrachioConfig.AngularDamping = 0.05f;
-    BrachioConfig.bEnableGravity = true;
-    BrachioConfig.CollisionEnabled = ECollisionEnabled::QueryAndPhysics;
-    BrachioConfig.CollisionResponse = ECollisionResponse::ECR_Block;
-    SpeciesConfigs.Add(ECore_DinosaurSpecies::Brachiosaurus, BrachioConfig);
-    
-    // Triceratops configuration - Armored herbivore
-    FCore_DinosaurPhysicsConfig TriceraConfig;
-    TriceraConfig.MassKg = TRICERATOPS_MASS_KG;
-    TriceraConfig.LinearDamping = 0.08f;
-    TriceraConfig.AngularDamping = 0.15f;
-    TriceraConfig.bEnableGravity = true;
-    TriceraConfig.CollisionEnabled = ECollisionEnabled::QueryAndPhysics;
-    TriceraConfig.CollisionResponse = ECollisionResponse::ECR_Block;
-    SpeciesConfigs.Add(ECore_DinosaurSpecies::Triceratops, TriceraConfig);
-    
-    // Ankylosaurus configuration - Tank-like herbivore
-    FCore_DinosaurPhysicsConfig AnkyloConfig;
-    AnkyloConfig.MassKg = ANKYLOSAURUS_MASS_KG;
-    AnkyloConfig.LinearDamping = 0.1f;
-    AnkyloConfig.AngularDamping = 0.2f;
-    AnkyloConfig.bEnableGravity = true;
-    AnkyloConfig.CollisionEnabled = ECollisionEnabled::QueryAndPhysics;
-    AnkyloConfig.CollisionResponse = ECollisionResponse::ECR_Block;
-    SpeciesConfigs.Add(ECore_DinosaurSpecies::Ankylosaurus, AnkyloConfig);
-    
-    UE_LOG(LogTemp, Warning, TEXT("Core_PhysicsManager: Initialized %d species physics configurations"), SpeciesConfigs.Num());
-}
-
-bool UCore_PhysicsManager::ConfigureDinosaurPhysics(AActor* DinosaurActor, ECore_DinosaurSpecies Species)
-{
-    if (!DinosaurActor)
-    {
-        UE_LOG(LogTemp, Error, TEXT("Core_PhysicsManager: Cannot configure physics for null dinosaur actor"));
-        return false;
-    }
-    
-    const FCore_DinosaurPhysicsConfig* Config = SpeciesConfigs.Find(Species);
-    if (!Config)
-    {
-        UE_LOG(LogTemp, Error, TEXT("Core_PhysicsManager: No physics config found for species %d"), (int32)Species);
-        return false;
-    }
-    
-    // Find the main physics component (skeletal mesh for dinosaurs)
-    USkeletalMeshComponent* SkeletalComp = DinosaurActor->FindComponentByClass<USkeletalMeshComponent>();
-    if (SkeletalComp)
-    {
-        ApplyPhysicsConfig(SkeletalComp, *Config);
-        UE_LOG(LogTemp, Warning, TEXT("Core_PhysicsManager: Applied physics config to skeletal mesh for %s (Mass: %.1f kg)"), 
-               *DinosaurActor->GetName(), Config->MassKg);
-        return true;
-    }
-    
-    // Fallback to static mesh component
-    UStaticMeshComponent* StaticComp = DinosaurActor->FindComponentByClass<UStaticMeshComponent>();
-    if (StaticComp)
-    {
-        ApplyPhysicsConfig(StaticComp, *Config);
-        UE_LOG(LogTemp, Warning, TEXT("Core_PhysicsManager: Applied physics config to static mesh for %s (Mass: %.1f kg)"), 
-               *DinosaurActor->GetName(), Config->MassKg);
-        return true;
-    }
-    
-    UE_LOG(LogTemp, Error, TEXT("Core_PhysicsManager: No physics component found on dinosaur actor %s"), *DinosaurActor->GetName());
-    return false;
-}
-
-void UCore_PhysicsManager::ApplyPhysicsConfig(UPrimitiveComponent* Component, const FCore_DinosaurPhysicsConfig& Config)
-{
-    if (!Component)
-    {
-        return;
-    }
-    
-    // Configure collision
-    Component->SetCollisionEnabled(Config.CollisionEnabled);
-    Component->SetCollisionResponseToAllChannels(Config.CollisionResponse);
-    
-    // Configure physics simulation
-    Component->SetSimulatePhysics(true);
-    Component->SetEnableGravity(Config.bEnableGravity);
-    
-    // Configure mass and damping
-    if (FBodyInstance* BodyInstance = Component->GetBodyInstance())
-    {
-        BodyInstance->SetMassOverride(Config.MassKg, true);
-        BodyInstance->LinearDamping = Config.LinearDamping;
-        BodyInstance->AngularDamping = Config.AngularDamping;
-        BodyInstance->UpdateMassProperties();
+        UpdatePerformanceMetrics(DeltaTime);
+        MonitorPhysicsPerformance();
     }
 }
 
-void UCore_PhysicsManager::ApplyDinosaurImpulse(AActor* DinosaurActor, FVector ImpulseVector, bool bVelChange)
+void UCore_PhysicsManager::SetPhysicsQuality(ECore_PhysicsQuality NewQuality)
 {
-    if (!DinosaurActor)
-    {
-        return;
-    }
+    PhysicsSettings.QualityLevel = NewQuality;
+    ApplyQualitySettings();
     
-    UPrimitiveComponent* PhysicsComp = nullptr;
+    UE_LOG(LogTemp, Log, TEXT("Core_PhysicsManager: Physics quality changed to %d"), (int32)NewQuality);
+}
+
+void UCore_PhysicsManager::ApplyPhysicsSettings(const FCore_PhysicsSettings& NewSettings)
+{
+    PhysicsSettings = NewSettings;
+    ApplyQualitySettings();
     
-    // Find physics component
-    USkeletalMeshComponent* SkeletalComp = DinosaurActor->FindComponentByClass<USkeletalMeshComponent>();
-    if (SkeletalComp && SkeletalComp->IsSimulatingPhysics())
+    UWorld* World = GetWorld();
+    if (World && World->GetWorldSettings())
     {
-        PhysicsComp = SkeletalComp;
-    }
-    else
-    {
-        UStaticMeshComponent* StaticComp = DinosaurActor->FindComponentByClass<UStaticMeshComponent>();
-        if (StaticComp && StaticComp->IsSimulatingPhysics())
-        {
-            PhysicsComp = StaticComp;
-        }
-    }
-    
-    if (PhysicsComp)
-    {
-        PhysicsComp->AddImpulse(ImpulseVector, NAME_None, bVelChange);
-        UE_LOG(LogTemp, Warning, TEXT("Core_PhysicsManager: Applied impulse %.1f,%.1f,%.1f to %s"), 
-               ImpulseVector.X, ImpulseVector.Y, ImpulseVector.Z, *DinosaurActor->GetName());
+        AWorldSettings* WorldSettings = World->GetWorldSettings();
+        WorldSettings->GlobalGravityZ = -980.0f * PhysicsSettings.GravityScale;
     }
 }
 
-void UCore_PhysicsManager::SetDinosaurPhysicsEnabled(AActor* DinosaurActor, bool bEnable)
+void UCore_PhysicsManager::SetGlobalGravityScale(float NewGravityScale)
 {
-    if (!DinosaurActor)
+    PhysicsSettings.GravityScale = FMath::Clamp(NewGravityScale, 0.1f, 5.0f);
+    
+    UWorld* World = GetWorld();
+    if (World && World->GetWorldSettings())
     {
-        return;
+        AWorldSettings* WorldSettings = World->GetWorldSettings();
+        WorldSettings->GlobalGravityZ = -980.0f * PhysicsSettings.GravityScale;
     }
     
-    // Enable/disable physics on all primitive components
-    TArray<UPrimitiveComponent*> PrimitiveComps;
-    DinosaurActor->GetComponents<UPrimitiveComponent>(PrimitiveComps);
-    
-    for (UPrimitiveComponent* Comp : PrimitiveComps)
-    {
-        if (Comp)
-        {
-            Comp->SetSimulatePhysics(bEnable);
-        }
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("Core_PhysicsManager: %s physics for %s"), 
-           bEnable ? TEXT("Enabled") : TEXT("Disabled"), *DinosaurActor->GetName());
+    UE_LOG(LogTemp, Log, TEXT("Core_PhysicsManager: Gravity scale set to %f"), PhysicsSettings.GravityScale);
 }
 
-FCore_DinosaurPhysicsConfig UCore_PhysicsManager::GetSpeciesPhysicsConfig(ECore_DinosaurSpecies Species) const
+float UCore_PhysicsManager::GetGlobalGravityScale() const
 {
-    const FCore_DinosaurPhysicsConfig* Config = SpeciesConfigs.Find(Species);
-    if (Config)
-    {
-        return *Config;
-    }
-    
-    // Return default config if species not found
-    return FCore_DinosaurPhysicsConfig();
-}
-
-void UCore_PhysicsManager::RegisterPhysicsActor(AActor* PhysicsActor, int32 Priority)
-{
-    if (PhysicsActor && !RegisteredPhysicsActors.Contains(PhysicsActor))
-    {
-        RegisteredPhysicsActors.Add(PhysicsActor);
-        UE_LOG(LogTemp, Log, TEXT("Core_PhysicsManager: Registered physics actor %s (Priority: %d)"), 
-               *PhysicsActor->GetName(), Priority);
-    }
-}
-
-void UCore_PhysicsManager::UnregisterPhysicsActor(AActor* PhysicsActor)
-{
-    if (PhysicsActor)
-    {
-        RegisteredPhysicsActors.RemoveSingle(PhysicsActor);
-        UE_LOG(LogTemp, Log, TEXT("Core_PhysicsManager: Unregistered physics actor %s"), *PhysicsActor->GetName());
-    }
-}
-
-void UCore_PhysicsManager::GetPhysicsMetrics(float& OutFrameTimeMs, int32& OutActiveActors, float& OutBudgetUsage) const
-{
-    OutFrameTimeMs = CurrentFrameTimeMs;
-    
-    // Count active physics actors
-    OutActiveActors = 0;
-    for (const TWeakObjectPtr<AActor>& ActorPtr : RegisteredPhysicsActors)
-    {
-        if (ActorPtr.IsValid())
-        {
-            OutActiveActors++;
-        }
-    }
-    
-    // Calculate budget usage percentage
-    OutBudgetUsage = (CurrentFrameTimeMs / PhysicsBudgetMs) * 100.0f;
+    return PhysicsSettings.GravityScale;
 }
 
 void UCore_PhysicsManager::OptimizePhysicsPerformance()
 {
-    if (bOptimizationActive)
+    if (ShouldReducePhysicsQuality())
     {
-        return;
-    }
-    
-    bOptimizationActive = true;
-    UE_LOG(LogTemp, Warning, TEXT("Core_PhysicsManager: Activating physics optimization (Budget exceeded: %.2fms > %.2fms)"), 
-           CurrentFrameTimeMs, PhysicsBudgetMs);
-    
-    // Reduce physics quality for performance
-    if (UWorld* World = GetWorld())
-    {
-        // Reduce physics substeps
-        World->GetPhysicsScene()->GetPxScene()->setSubStepSize(1.0f / 30.0f); // 30Hz instead of 60Hz
-        
-        // Disable physics on distant actors
-        for (const TWeakObjectPtr<AActor>& ActorPtr : RegisteredPhysicsActors)
+        // Automatically reduce quality if performance is poor
+        switch (PhysicsSettings.QualityLevel)
         {
-            if (AActor* Actor = ActorPtr.Get())
+            case ECore_PhysicsQuality::Ultra:
+                SetPhysicsQuality(ECore_PhysicsQuality::High);
+                break;
+            case ECore_PhysicsQuality::High:
+                SetPhysicsQuality(ECore_PhysicsQuality::Medium);
+                break;
+            case ECore_PhysicsQuality::Medium:
+                SetPhysicsQuality(ECore_PhysicsQuality::Low);
+                break;
+            default:
+                break;
+        }
+    }
+}
+
+void UCore_PhysicsManager::UpdatePhysicsStatistics()
+{
+    UWorld* World = GetWorld();
+    if (!World) return;
+    
+    ActivePhysicsBodies = 0;
+    
+    // Count active physics bodies
+    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+    {
+        AActor* Actor = *ActorItr;
+        if (Actor)
+        {
+            TArray<UPrimitiveComponent*> PrimitiveComponents;
+            Actor->GetComponents<UPrimitiveComponent>(PrimitiveComponents);
+            
+            for (UPrimitiveComponent* Primitive : PrimitiveComponents)
             {
-                // Simple distance check - disable physics for actors >5000 units away
-                float DistanceToPlayer = 5000.0f; // Simplified - would need player reference
-                if (DistanceToPlayer > 5000.0f)
+                if (Primitive && Primitive->IsSimulatingPhysics())
                 {
-                    SetDinosaurPhysicsEnabled(Actor, false);
+                    ActivePhysicsBodies++;
                 }
             }
         }
     }
 }
 
-void UCore_PhysicsManager::RestorePhysicsQuality()
+bool UCore_PhysicsManager::ShouldReducePhysicsQuality() const
 {
-    if (!bOptimizationActive)
+    // Reduce quality if average physics time exceeds threshold
+    const float PhysicsTimeThreshold = 1.0f / PhysicsUpdateRate * 0.3f; // 30% of frame budget
+    return AveragePhysicsTime > PhysicsTimeThreshold;
+}
+
+void UCore_PhysicsManager::DebugPhysicsSettings()
+{
+    UE_LOG(LogTemp, Warning, TEXT("=== Core Physics Manager Debug ==="));
+    UE_LOG(LogTemp, Warning, TEXT("Quality Level: %d"), (int32)PhysicsSettings.QualityLevel);
+    UE_LOG(LogTemp, Warning, TEXT("Gravity Scale: %f"), PhysicsSettings.GravityScale);
+    UE_LOG(LogTemp, Warning, TEXT("Linear Damping: %f"), PhysicsSettings.LinearDamping);
+    UE_LOG(LogTemp, Warning, TEXT("Angular Damping: %f"), PhysicsSettings.AngularDamping);
+    UE_LOG(LogTemp, Warning, TEXT("Max Substeps: %d"), PhysicsSettings.MaxSubsteps);
+    UE_LOG(LogTemp, Warning, TEXT("Max Substep Delta: %f"), PhysicsSettings.MaxSubstepDeltaTime);
+    UE_LOG(LogTemp, Warning, TEXT("Active Physics Bodies: %d"), ActivePhysicsBodies);
+    UE_LOG(LogTemp, Warning, TEXT("Average Physics Time: %f ms"), AveragePhysicsTime * 1000.0f);
+}
+
+void UCore_PhysicsManager::LogPhysicsStatistics()
+{
+    UpdatePhysicsStatistics();
+    
+    UE_LOG(LogTemp, Log, TEXT("Physics Statistics:"));
+    UE_LOG(LogTemp, Log, TEXT("- Active Bodies: %d"), ActivePhysicsBodies);
+    UE_LOG(LogTemp, Log, TEXT("- Current Physics Time: %f ms"), CurrentPhysicsTime * 1000.0f);
+    UE_LOG(LogTemp, Log, TEXT("- Average Physics Time: %f ms"), AveragePhysicsTime * 1000.0f);
+    UE_LOG(LogTemp, Log, TEXT("- Physics Update Rate: %f Hz"), PhysicsUpdateRate);
+}
+
+void UCore_PhysicsManager::UpdatePerformanceMetrics(float DeltaTime)
+{
+    // Track physics performance
+    PhysicsTimeAccumulator += DeltaTime;
+    PhysicsFrameCount++;
+    
+    // Update samples for rolling average
+    PhysicsTimeSamples.Add(DeltaTime);
+    if (PhysicsTimeSamples.Num() > 60)
     {
-        return;
+        PhysicsTimeSamples.RemoveAt(0);
     }
     
-    bOptimizationActive = false;
-    UE_LOG(LogTemp, Warning, TEXT("Core_PhysicsManager: Restoring full physics quality"));
-    
-    // Restore physics quality
-    if (UWorld* World = GetWorld())
+    // Calculate average every second
+    if (PhysicsTimeAccumulator >= 1.0f)
     {
-        // Restore normal physics substeps
-        World->GetPhysicsScene()->GetPxScene()->setSubStepSize(1.0f / 60.0f); // 60Hz
+        CurrentPhysicsTime = PhysicsTimeAccumulator / PhysicsFrameCount;
         
-        // Re-enable physics on all registered actors
-        for (const TWeakObjectPtr<AActor>& ActorPtr : RegisteredPhysicsActors)
+        // Calculate rolling average
+        float TotalTime = 0.0f;
+        for (float Sample : PhysicsTimeSamples)
         {
-            if (AActor* Actor = ActorPtr.Get())
-            {
-                SetDinosaurPhysicsEnabled(Actor, true);
-            }
+            TotalTime += Sample;
         }
+        AveragePhysicsTime = TotalTime / PhysicsTimeSamples.Num();
+        
+        PhysicsTimeAccumulator = 0.0f;
+        PhysicsFrameCount = 0;
+        
+        UpdatePhysicsStatistics();
     }
 }
 
-void UCore_PhysicsManager::UpdatePerformanceMetrics()
+void UCore_PhysicsManager::ApplyQualitySettings()
 {
-    // Simple frame time tracking
-    static double LastUpdateTime = 0.0;
-    double CurrentTime = FPlatformTime::Seconds();
+    UPhysicsSettings* PhysSettings = UPhysicsSettings::Get();
+    if (!PhysSettings) return;
     
-    if (LastUpdateTime > 0.0)
+    switch (PhysicsSettings.QualityLevel)
     {
-        double DeltaTime = CurrentTime - LastUpdateTime;
-        CurrentFrameTimeMs = static_cast<float>(DeltaTime * 1000.0);
-        
-        // Check if we need to optimize or restore
-        if (CurrentFrameTimeMs > PhysicsBudgetMs && !bOptimizationActive)
+        case ECore_PhysicsQuality::Low:
+            PhysicsSettings.MaxSubsteps = 2;
+            PhysicsSettings.MaxSubstepDeltaTime = 0.033333f; // 30fps
+            break;
+            
+        case ECore_PhysicsQuality::Medium:
+            PhysicsSettings.MaxSubsteps = 4;
+            PhysicsSettings.MaxSubstepDeltaTime = 0.025f; // 40fps
+            break;
+            
+        case ECore_PhysicsQuality::High:
+            PhysicsSettings.MaxSubsteps = 6;
+            PhysicsSettings.MaxSubstepDeltaTime = 0.016667f; // 60fps
+            break;
+            
+        case ECore_PhysicsQuality::Ultra:
+            PhysicsSettings.MaxSubsteps = 8;
+            PhysicsSettings.MaxSubstepDeltaTime = 0.008333f; // 120fps
+            break;
+    }
+}
+
+void UCore_PhysicsManager::MonitorPhysicsPerformance()
+{
+    static float LastOptimizationTime = 0.0f;
+    float CurrentTime = GetWorld()->GetTimeSeconds();
+    
+    // Only optimize every 5 seconds to avoid oscillation
+    if (CurrentTime - LastOptimizationTime > 5.0f)
+    {
+        if (bEnablePhysicsOptimization)
         {
             OptimizePhysicsPerformance();
         }
-        else if (CurrentFrameTimeMs < (PhysicsBudgetMs * 0.7f) && bOptimizationActive)
-        {
-            RestorePhysicsQuality();
-        }
+        LastOptimizationTime = CurrentTime;
     }
-    
-    LastUpdateTime = CurrentTime;
-    
-    // Clean up invalid actor references
-    RegisteredPhysicsActors.RemoveAll([](const TWeakObjectPtr<AActor>& ActorPtr) {
-        return !ActorPtr.IsValid();
-    });
 }
