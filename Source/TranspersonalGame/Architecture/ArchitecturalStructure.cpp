@@ -2,8 +2,7 @@
 #include "Components/StaticMeshComponent.h"
 #include "Components/BoxComponent.h"
 #include "Engine/Engine.h"
-#include "Engine/StaticMesh.h"
-#include "UObject/ConstructorHelpers.h"
+#include "GameFramework/Character.h"
 
 AArchitecturalStructure::AArchitecturalStructure()
 {
@@ -12,182 +11,190 @@ AArchitecturalStructure::AArchitecturalStructure()
     // Create root component
     RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootComponent"));
 
-    // Create structure mesh component
-    StructureMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("StructureMesh"));
-    StructureMesh->SetupAttachment(RootComponent);
-    StructureMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-    StructureMesh->SetCollisionResponseToAllChannels(ECR_Block);
+    // Create main structure mesh
+    MainStructureMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("MainStructureMesh"));
+    MainStructureMesh->SetupAttachment(RootComponent);
+    MainStructureMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+    MainStructureMesh->SetCollisionObjectType(ECollisionChannel::ECC_WorldStatic);
+    MainStructureMesh->SetCollisionResponseToAllChannels(ECollisionResponse::ECR_Block);
 
     // Create interaction volume
     InteractionVolume = CreateDefaultSubobject<UBoxComponent>(TEXT("InteractionVolume"));
     InteractionVolume->SetupAttachment(RootComponent);
-    InteractionVolume->SetBoxExtent(FVector(600.0f, 600.0f, 300.0f));
+    InteractionVolume->SetBoxExtent(FVector(800.0f, 800.0f, 400.0f));
     InteractionVolume->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
-    InteractionVolume->SetCollisionResponseToAllChannels(ECR_Ignore);
-    InteractionVolume->SetCollisionResponseToChannel(ECC_Pawn, ECR_Overlap);
+    InteractionVolume->SetCollisionObjectType(ECollisionChannel::ECC_WorldDynamic);
+    InteractionVolume->SetCollisionResponseToAllChannels(ECollisionResponse::ECR_Ignore);
+    InteractionVolume->SetCollisionResponseToChannel(ECollisionChannel::ECC_Pawn, ECollisionResponse::ECR_Overlap);
+
+    // Bind overlap events
+    InteractionVolume->OnComponentBeginOverlap.AddDynamic(this, &AArchitecturalStructure::OnInteractionVolumeBeginOverlap);
+    InteractionVolume->OnComponentEndOverlap.AddDynamic(this, &AArchitecturalStructure::OnInteractionVolumeEndOverlap);
 
     // Initialize structure data
-    StructureData.StructureType = EArch_StructureType::Shelter;
-    StructureData.DurabilityMax = 1000.0f;
-    StructureData.DurabilityCurrent = 1000.0f;
-    StructureData.bCanProvideShade = true;
-    StructureData.bCanProvideShelter = true;
-    StructureData.ShelterRadius = 500.0f;
+    StructureData.StructureType = EArch_StructureType::Ruins;
+    StructureData.Condition = EArch_StructureCondition::Weathered;
+    StructureData.Age = 1000.0f;
+    StructureData.bIsExplorable = true;
+    StructureData.bHasInterior = false;
+    StructureData.HistoricalDescription = TEXT("Ancient stone structure from the Cretaceous period, weathered by millennia of exposure to the elements.");
 
-    BiomeType = EBiomeType::Savana;
-    bPlayerInShelter = false;
-    WeatherDecayRate = 1.0f;
+    // Initialize gameplay properties
+    bCanProvideShelte = true;
+    ShelterRadius = 500.0f;
+    bHasHiddenAreas = false;
+    bPlayerInside = false;
+    LastWeatheringTime = 0.0f;
 }
 
 void AArchitecturalStructure::BeginPlay()
 {
     Super::BeginPlay();
-
-    // Bind overlap events
-    if (InteractionVolume)
-    {
-        InteractionVolume->OnComponentBeginOverlap.AddDynamic(this, &AArchitecturalStructure::OnInteractionVolumeBeginOverlap);
-        InteractionVolume->OnComponentEndOverlap.AddDynamic(this, &AArchitecturalStructure::OnInteractionVolumeEndOverlap);
-    }
-
-    // Adjust decay rate based on biome
-    switch (BiomeType)
-    {
-        case EBiomeType::Pantano:
-            WeatherDecayRate = 2.0f; // Faster decay in swamp
-            break;
-        case EBiomeType::Deserto:
-            WeatherDecayRate = 1.5f; // Sand erosion
-            break;
-        case EBiomeType::Montanha:
-            WeatherDecayRate = 0.5f; // Slower decay in mountains
-            break;
-        default:
-            WeatherDecayRate = 1.0f;
-            break;
-    }
+    
+    // Apply initial visual condition based on structure data
+    UpdateVisualCondition();
+    
+    // Log structure creation
+    UE_LOG(LogTemp, Warning, TEXT("ArchitecturalStructure spawned: %s, Age: %.1f years"), 
+           *UEnum::GetValueAsString(StructureData.StructureType), StructureData.Age);
 }
 
 void AArchitecturalStructure::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
 
-    // Apply weather decay over time
-    if (StructureData.DurabilityCurrent > 0.0f)
+    // Gradual weathering over time (very slow)
+    LastWeatheringTime += DeltaTime;
+    if (LastWeatheringTime >= 60.0f) // Every minute
     {
-        float DecayAmount = WeatherDecayRate * DeltaTime * 0.1f; // Very slow decay
-        StructureData.DurabilityCurrent = FMath::Max(0.0f, StructureData.DurabilityCurrent - DecayAmount);
-
-        // Destroy structure if durability reaches zero
-        if (StructureData.DurabilityCurrent <= 0.0f)
-        {
-            OnStructureDestroyed();
-        }
+        ApplyWeathering(0.001f); // Very small weathering amount
+        LastWeatheringTime = 0.0f;
     }
-}
-
-void AArchitecturalStructure::TakeDamage(float DamageAmount)
-{
-    if (DamageAmount <= 0.0f) return;
-
-    StructureData.DurabilityCurrent = FMath::Max(0.0f, StructureData.DurabilityCurrent - DamageAmount);
-
-    if (StructureData.DurabilityCurrent <= 0.0f)
-    {
-        OnStructureDestroyed();
-    }
-}
-
-void AArchitecturalStructure::RepairStructure(float RepairAmount)
-{
-    if (RepairAmount <= 0.0f) return;
-
-    StructureData.DurabilityCurrent = FMath::Min(StructureData.DurabilityMax, StructureData.DurabilityCurrent + RepairAmount);
-}
-
-float AArchitecturalStructure::GetDurabilityPercentage() const
-{
-    if (StructureData.DurabilityMax <= 0.0f) return 0.0f;
-    return (StructureData.DurabilityCurrent / StructureData.DurabilityMax) * 100.0f;
-}
-
-bool AArchitecturalStructure::IsInShelterRange(FVector TestLocation) const
-{
-    if (!StructureData.bCanProvideShelter) return false;
-
-    float Distance = FVector::Dist(GetActorLocation(), TestLocation);
-    return Distance <= StructureData.ShelterRadius;
 }
 
 void AArchitecturalStructure::SetStructureType(EArch_StructureType NewType)
 {
     StructureData.StructureType = NewType;
-
-    // Adjust properties based on structure type
+    UpdateVisualCondition();
+    
+    // Update properties based on structure type
     switch (NewType)
     {
+        case EArch_StructureType::Temple:
+            StructureData.bHasInterior = true;
+            bCanProvideShelte = true;
+            ShelterRadius = 800.0f;
+            break;
+        case EArch_StructureType::Ruins:
+            StructureData.bHasInterior = false;
+            bCanProvideShelte = false;
+            ShelterRadius = 300.0f;
+            break;
         case EArch_StructureType::Shelter:
-            StructureData.bCanProvideShelter = true;
-            StructureData.bCanProvideShade = true;
-            StructureData.ShelterRadius = 500.0f;
-            break;
-        case EArch_StructureType::Monument:
-            StructureData.bCanProvideShelter = false;
-            StructureData.bCanProvideShade = true;
-            StructureData.ShelterRadius = 200.0f;
-            StructureData.DurabilityMax = 2000.0f; // Monuments are more durable
-            break;
-        case EArch_StructureType::Wall:
-            StructureData.bCanProvideShelter = false;
-            StructureData.bCanProvideShade = true;
-            StructureData.ShelterRadius = 100.0f;
-            break;
-        case EArch_StructureType::Pillar:
-            StructureData.bCanProvideShelter = false;
-            StructureData.bCanProvideShade = false;
-            StructureData.ShelterRadius = 50.0f;
-            break;
-        case EArch_StructureType::Platform:
-            StructureData.bCanProvideShelter = false;
-            StructureData.bCanProvideShade = false;
-            StructureData.ShelterRadius = 300.0f;
+            StructureData.bHasInterior = true;
+            bCanProvideShelte = true;
+            ShelterRadius = 400.0f;
             break;
         case EArch_StructureType::Bridge:
-            StructureData.bCanProvideShelter = false;
-            StructureData.bCanProvideShade = true;
-            StructureData.ShelterRadius = 200.0f;
+            StructureData.bHasInterior = false;
+            bCanProvideShelte = false;
+            ShelterRadius = 0.0f;
+            break;
+        default:
+            bCanProvideShelte = false;
+            ShelterRadius = 200.0f;
             break;
     }
+}
 
-    StructureData.DurabilityCurrent = StructureData.DurabilityMax;
+void AArchitecturalStructure::SetCondition(EArch_StructureCondition NewCondition)
+{
+    StructureData.Condition = NewCondition;
+    UpdateVisualCondition();
+}
+
+bool AArchitecturalStructure::IsPlayerInShelter(AActor* Player)
+{
+    if (!Player || !bCanProvideShelte)
+    {
+        return false;
+    }
+
+    float Distance = FVector::Dist(GetActorLocation(), Player->GetActorLocation());
+    return Distance <= ShelterRadius;
+}
+
+void AArchitecturalStructure::ApplyWeathering(float WeatheringAmount)
+{
+    StructureData.Age += WeatheringAmount * 10.0f; // Age increases with weathering
+
+    // Gradually worsen condition based on age
+    if (StructureData.Age > 2000.0f && StructureData.Condition == EArch_StructureCondition::Pristine)
+    {
+        SetCondition(EArch_StructureCondition::Weathered);
+    }
+    else if (StructureData.Age > 5000.0f && StructureData.Condition == EArch_StructureCondition::Weathered)
+    {
+        SetCondition(EArch_StructureCondition::Damaged);
+    }
+    else if (StructureData.Age > 10000.0f && StructureData.Condition == EArch_StructureCondition::Damaged)
+    {
+        SetCondition(EArch_StructureCondition::Ruined);
+    }
+}
+
+FString AArchitecturalStructure::GetStructureDescription() const
+{
+    FString TypeString = UEnum::GetValueAsString(StructureData.StructureType);
+    FString ConditionString = UEnum::GetValueAsString(StructureData.Condition);
+    
+    return FString::Printf(TEXT("%s %s (Age: %.0f years) - %s"), 
+                          *ConditionString, 
+                          *TypeString, 
+                          StructureData.Age, 
+                          *StructureData.HistoricalDescription);
 }
 
 void AArchitecturalStructure::OnInteractionVolumeBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
 {
-    if (!OtherActor) return;
-
-    // Check if it's the player character
-    if (OtherActor->IsA<APawn>() && OtherActor->ActorHasTag(TEXT("Player")))
+    if (OtherActor && OtherActor->IsA<ACharacter>())
     {
-        if (StructureData.bCanProvideShelter && !bPlayerInShelter)
-        {
-            bPlayerInShelter = true;
-            OnPlayerEnterShelter();
-        }
+        bPlayerInside = true;
+        OnPlayerEnterStructure(OtherActor);
+        
+        // Log interaction
+        UE_LOG(LogTemp, Log, TEXT("Player entered %s"), *GetStructureDescription());
     }
 }
 
 void AArchitecturalStructure::OnInteractionVolumeEndOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex)
 {
-    if (!OtherActor) return;
-
-    // Check if it's the player character
-    if (OtherActor->IsA<APawn>() && OtherActor->ActorHasTag(TEXT("Player")))
+    if (OtherActor && OtherActor->IsA<ACharacter>())
     {
-        if (bPlayerInShelter)
-        {
-            bPlayerInShelter = false;
-            OnPlayerExitShelter();
-        }
+        bPlayerInside = false;
+        OnPlayerExitStructure(OtherActor);
+        
+        // Log interaction
+        UE_LOG(LogTemp, Log, TEXT("Player exited %s"), *GetStructureDescription());
     }
+}
+
+void AArchitecturalStructure::UpdateVisualCondition()
+{
+    if (!MainStructureMesh)
+    {
+        return;
+    }
+
+    // Apply visual changes based on condition
+    // This would typically involve material parameter changes, mesh swapping, etc.
+    // For now, we'll just log the condition change
+    UE_LOG(LogTemp, Warning, TEXT("Structure visual condition updated: %s"), 
+           *UEnum::GetValueAsString(StructureData.Condition));
+    
+    // In a full implementation, you would:
+    // 1. Change material parameters (rust, moss, damage)
+    // 2. Swap meshes for different damage states
+    // 3. Add/remove particle effects (dust, vegetation)
+    // 4. Adjust collision based on structural integrity
 }
