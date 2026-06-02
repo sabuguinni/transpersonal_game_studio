@@ -1,318 +1,297 @@
 #include "Audio_EnvironmentalSoundManager.h"
-#include "Engine/Engine.h"
-#include "Kismet/GameplayStatics.h"
 #include "Components/AudioComponent.h"
 #include "Sound/SoundCue.h"
+#include "Sound/SoundWave.h"
+#include "Engine/World.h"
+#include "GameFramework/Pawn.h"
+#include "Kismet/GameplayStatics.h"
+#include "Engine/Engine.h"
 
 AAudio_EnvironmentalSoundManager::AAudio_EnvironmentalSoundManager()
 {
     PrimaryActorTick.bCanEverTick = true;
 
     // Create audio components
-    CurrentBiomeAmbient = CreateDefaultSubobject<UAudioComponent>(TEXT("BiomeAmbientAudio"));
-    CurrentBiomeWind = CreateDefaultSubobject<UAudioComponent>(TEXT("BiomeWindAudio"));
-    CurrentBiomeCreatures = CreateDefaultSubobject<UAudioComponent>(TEXT("BiomeCreatureAudio"));
+    PrimaryAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("PrimaryAudioComponent"));
+    RootComponent = PrimaryAudioComponent;
+    PrimaryAudioComponent->bAutoActivate = false;
+    PrimaryAudioComponent->VolumeMultiplier = 0.0f;
 
-    // Set up root component
-    RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootComponent"));
-    CurrentBiomeAmbient->SetupAttachment(RootComponent);
-    CurrentBiomeWind->SetupAttachment(RootComponent);
-    CurrentBiomeCreatures->SetupAttachment(RootComponent);
+    SecondaryAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("SecondaryAudioComponent"));
+    SecondaryAudioComponent->SetupAttachment(RootComponent);
+    SecondaryAudioComponent->bAutoActivate = false;
+    SecondaryAudioComponent->VolumeMultiplier = 0.0f;
 
-    // Configure audio components
-    CurrentBiomeAmbient->bAutoActivate = false;
-    CurrentBiomeWind->bAutoActivate = false;
-    CurrentBiomeCreatures->bAutoActivate = false;
+    // Initialize default values
+    CurrentBiome = EAudio_BiomeType::Forest;
+    TargetBiome = EAudio_BiomeType::Forest;
+    bIsTransitioning = false;
+    TransitionProgress = 0.0f;
+    BiomeDetectionRadius = 1000.0f;
+    MasterVolume = 1.0f;
+    bEnableRandomSounds = true;
+    RandomSoundTimer = 0.0f;
+    bPrimaryActive = true;
+    FadeTimer = 0.0f;
+    FadeDuration = 2.0f;
 
-    CurrentBiomeAmbient->SetVolumeMultiplier(0.8f);
-    CurrentBiomeWind->SetVolumeMultiplier(0.6f);
-    CurrentBiomeCreatures->SetVolumeMultiplier(0.7f);
+    // Initialize default biome settings
+    FAudio_BiomeAudioSettings ForestSettings;
+    ForestSettings.BaseVolume = 0.6f;
+    ForestSettings.FadeInTime = 3.0f;
+    ForestSettings.FadeOutTime = 2.0f;
+    ForestSettings.RandomSoundInterval = 12.0f;
+    BiomeAudioSettings.Add(EAudio_BiomeType::Forest, ForestSettings);
+
+    FAudio_BiomeAudioSettings PlainsSettings;
+    PlainsSettings.BaseVolume = 0.4f;
+    PlainsSettings.FadeInTime = 2.5f;
+    PlainsSettings.FadeOutTime = 2.5f;
+    PlainsSettings.RandomSoundInterval = 18.0f;
+    BiomeAudioSettings.Add(EAudio_BiomeType::Plains, PlainsSettings);
+
+    FAudio_BiomeAudioSettings CaveSettings;
+    CaveSettings.BaseVolume = 0.7f;
+    CaveSettings.FadeInTime = 1.5f;
+    CaveSettings.FadeOutTime = 1.5f;
+    CaveSettings.RandomSoundInterval = 25.0f;
+    BiomeAudioSettings.Add(EAudio_BiomeType::Cave, CaveSettings);
 }
 
 void AAudio_EnvironmentalSoundManager::BeginPlay()
 {
     Super::BeginPlay();
-
-    InitializeBiomeAudioData();
-    InitializeDinosaurAudioData();
-
-    // Start with Savana biome audio
-    UpdateBiomeAudio(EAudio_BiomeType::Savana);
+    
+    // Start with current biome audio
+    SetBiome(CurrentBiome);
 }
 
 void AAudio_EnvironmentalSoundManager::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
 
-    // Handle biome fade transitions
-    if (bIsFading)
+    // Update biome transitions
+    if (bIsTransitioning)
     {
-        FadeTimer += DeltaTime;
-        float FadeAlpha = FadeTimer / FadeDuration;
-
-        if (FadeAlpha >= 1.0f)
-        {
-            // Fade complete
-            bIsFading = false;
-            FadeTimer = 0.0f;
-            UpdateBiomeAudio(FadeToBiome);
-        }
-        else
-        {
-            // Update fade volumes
-            float FromVolume = (1.0f - FadeAlpha) * MasterEnvironmentalVolume;
-            float ToVolume = FadeAlpha * MasterEnvironmentalVolume;
-
-            CurrentBiomeAmbient->SetVolumeMultiplier(FromVolume);
-            CurrentBiomeWind->SetVolumeMultiplier(FromVolume * 0.6f);
-            CurrentBiomeCreatures->SetVolumeMultiplier(FromVolume * 0.7f);
-        }
+        UpdateBiomeTransition(DeltaTime);
     }
 
-    // Update biome based on player location
-    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
-    if (PlayerPawn)
+    // Update random sounds
+    if (bEnableRandomSounds)
     {
-        FVector PlayerLocation = PlayerPawn->GetActorLocation();
-        EAudio_BiomeType DetectedBiome = GetBiomeFromLocation(PlayerLocation);
+        UpdateRandomSounds(DeltaTime);
+    }
 
-        if (DetectedBiome != CurrentBiome && !bIsFading)
-        {
-            FadeBetweenBiomes(CurrentBiome, DetectedBiome, 3.0f);
-        }
+    // Auto-detect biome changes
+    EAudio_BiomeType DetectedBiome = DetectCurrentBiome();
+    if (DetectedBiome != CurrentBiome && !bIsTransitioning)
+    {
+        SetBiome(DetectedBiome);
     }
 }
 
-void AAudio_EnvironmentalSoundManager::InitializeBiomeAudioData()
+void AAudio_EnvironmentalSoundManager::SetBiome(EAudio_BiomeType NewBiome)
 {
-    // Initialize biome audio data with placeholder paths
-    // These will be replaced with actual sound cues when available
+    if (NewBiome == CurrentBiome && !bIsTransitioning)
+    {
+        return;
+    }
 
-    FAudio_BiomeAudioData SavanaData;
-    SavanaData.BaseVolume = 0.7f;
-    SavanaData.FadeDistance = 8000.0f;
-    BiomeAudioMap.Add(EAudio_BiomeType::Savana, SavanaData);
-
-    FAudio_BiomeAudioData PantanoData;
-    PantanoData.BaseVolume = 0.8f;
-    PantanoData.FadeDistance = 6000.0f;
-    BiomeAudioMap.Add(EAudio_BiomeType::Pantano, PantanoData);
-
-    FAudio_BiomeAudioData FlorestaData;
-    FlorestaData.BaseVolume = 0.9f;
-    FlorestaData.FadeDistance = 7000.0f;
-    BiomeAudioMap.Add(EAudio_BiomeType::Floresta, FlorestaData);
-
-    FAudio_BiomeAudioData DesertoData;
-    DesertoData.BaseVolume = 0.6f;
-    DesertoData.FadeDistance = 10000.0f;
-    BiomeAudioMap.Add(EAudio_BiomeType::Deserto, DesertoData);
-
-    FAudio_BiomeAudioData MontanhaData;
-    MontanhaData.BaseVolume = 0.8f;
-    MontanhaData.FadeDistance = 9000.0f;
-    BiomeAudioMap.Add(EAudio_BiomeType::Montanha, MontanhaData);
+    StartBiomeTransition(NewBiome);
 }
 
-void AAudio_EnvironmentalSoundManager::InitializeDinosaurAudioData()
+void AAudio_EnvironmentalSoundManager::SetMasterVolume(float Volume)
 {
-    // T-Rex audio data
-    FAudio_DinosaurAudioData TRexData;
-    TRexData.AudioRange = 5000.0f;
-    TRexData.VolumeMultiplier = 1.2f;
-    DinosaurAudioMap.Add(TEXT("TRex"), TRexData);
-
-    // Velociraptor audio data
-    FAudio_DinosaurAudioData VelociraptorData;
-    VelociraptorData.AudioRange = 2500.0f;
-    VelociraptorData.VolumeMultiplier = 0.8f;
-    DinosaurAudioMap.Add(TEXT("Velociraptor"), VelociraptorData);
-
-    // Brachiosaurus audio data
-    FAudio_DinosaurAudioData BrachiosaurusData;
-    BrachiosaurusData.AudioRange = 8000.0f;
-    BrachiosaurusData.VolumeMultiplier = 1.5f;
-    DinosaurAudioMap.Add(TEXT("Brachiosaurus"), BrachiosaurusData);
-
-    // Triceratops audio data
-    FAudio_DinosaurAudioData TriceratopsData;
-    TriceratopsData.AudioRange = 4000.0f;
-    TriceratopsData.VolumeMultiplier = 1.0f;
-    DinosaurAudioMap.Add(TEXT("Triceratops"), TriceratopsData);
-
-    // Ankylosaurus audio data
-    FAudio_DinosaurAudioData AnkylosaurusData;
-    AnkylosaurusData.AudioRange = 3500.0f;
-    AnkylosaurusData.VolumeMultiplier = 0.9f;
-    DinosaurAudioMap.Add(TEXT("Ankylosaurus"), AnkylosaurusData);
-}
-
-void AAudio_EnvironmentalSoundManager::UpdateBiomeAudio(EAudio_BiomeType NewBiome)
-{
-    CurrentBiome = NewBiome;
-
-    if (FAudio_BiomeAudioData* BiomeData = BiomeAudioMap.Find(NewBiome))
-    {
-        // Stop current audio
-        CurrentBiomeAmbient->Stop();
-        CurrentBiomeWind->Stop();
-        CurrentBiomeCreatures->Stop();
-
-        // Set volumes based on biome data and master volume
-        float AmbientVolume = BiomeData->BaseVolume * MasterEnvironmentalVolume;
-        float WindVolume = BiomeData->BaseVolume * 0.6f * MasterEnvironmentalVolume;
-        float CreatureVolume = BiomeData->BaseVolume * 0.7f * MasterEnvironmentalVolume;
-
-        CurrentBiomeAmbient->SetVolumeMultiplier(AmbientVolume);
-        CurrentBiomeWind->SetVolumeMultiplier(WindVolume);
-        CurrentBiomeCreatures->SetVolumeMultiplier(CreatureVolume);
-
-        // Load and play new sounds if available
-        if (BiomeData->AmbientSound.IsValid())
-        {
-            CurrentBiomeAmbient->SetSound(BiomeData->AmbientSound.Get());
-            CurrentBiomeAmbient->Play();
-        }
-
-        if (BiomeData->WindSound.IsValid())
-        {
-            CurrentBiomeWind->SetSound(BiomeData->WindSound.Get());
-            CurrentBiomeWind->Play();
-        }
-
-        if (BiomeData->CreatureSound.IsValid())
-        {
-            CurrentBiomeCreatures->SetSound(BiomeData->CreatureSound.Get());
-            CurrentBiomeCreatures->Play();
-        }
-
-        UE_LOG(LogTemp, Log, TEXT("Environmental Audio: Switched to biome %d"), (int32)NewBiome);
-    }
-}
-
-EAudio_BiomeType AAudio_EnvironmentalSoundManager::GetBiomeFromLocation(FVector Location)
-{
-    // Biome detection based on coordinates from memory
-    // Savana (0,0), Pantano (-50000,-45000), Floresta (-45000,40000), 
-    // Deserto (55000,0), Montanha (40000,50000)
-
-    float X = Location.X;
-    float Y = Location.Y;
-
-    // Calculate distances to biome centers
-    float DistToSavana = FVector::Dist2D(Location, FVector(0, 0, 0));
-    float DistToPantano = FVector::Dist2D(Location, FVector(-50000, -45000, 0));
-    float DistToFloresta = FVector::Dist2D(Location, FVector(-45000, 40000, 0));
-    float DistToDeserto = FVector::Dist2D(Location, FVector(55000, 0, 0));
-    float DistToMontanha = FVector::Dist2D(Location, FVector(40000, 50000, 0));
-
-    // Find closest biome
-    float MinDistance = DistToSavana;
-    EAudio_BiomeType ClosestBiome = EAudio_BiomeType::Savana;
-
-    if (DistToPantano < MinDistance)
-    {
-        MinDistance = DistToPantano;
-        ClosestBiome = EAudio_BiomeType::Pantano;
-    }
-
-    if (DistToFloresta < MinDistance)
-    {
-        MinDistance = DistToFloresta;
-        ClosestBiome = EAudio_BiomeType::Floresta;
-    }
-
-    if (DistToDeserto < MinDistance)
-    {
-        MinDistance = DistToDeserto;
-        ClosestBiome = EAudio_BiomeType::Deserto;
-    }
-
-    if (DistToMontanha < MinDistance)
-    {
-        MinDistance = DistToMontanha;
-        ClosestBiome = EAudio_BiomeType::Montanha;
-    }
-
-    return ClosestBiome;
-}
-
-void AAudio_EnvironmentalSoundManager::PlayDinosaurSound(const FString& DinosaurType, const FString& SoundType, FVector Location, float VolumeOverride)
-{
-    if (FAudio_DinosaurAudioData* DinoData = DinosaurAudioMap.Find(DinosaurType))
-    {
-        // Calculate distance to player for volume adjustment
-        APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
-        if (!PlayerPawn) return;
-
-        float Distance = FVector::Dist(PlayerPawn->GetActorLocation(), Location);
-        if (Distance > DinoData->AudioRange) return; // Too far to hear
-
-        // Calculate volume based on distance
-        float VolumeMultiplier = VolumeOverride >= 0.0f ? VolumeOverride : DinoData->VolumeMultiplier;
-        float DistanceVolume = 1.0f - (Distance / DinoData->AudioRange);
-        float FinalVolume = VolumeMultiplier * DistanceVolume * MasterDinosaurVolume;
-
-        // Determine which sound to play
-        USoundCue* SoundToPlay = nullptr;
-        if (SoundType == TEXT("Idle") && DinoData->IdleSound.IsValid())
-        {
-            SoundToPlay = DinoData->IdleSound.Get();
-        }
-        else if (SoundType == TEXT("Movement") && DinoData->MovementSound.IsValid())
-        {
-            SoundToPlay = DinoData->MovementSound.Get();
-        }
-        else if (SoundType == TEXT("Aggressive") && DinoData->AggressiveSound.IsValid())
-        {
-            SoundToPlay = DinoData->AggressiveSound.Get();
-        }
-
-        if (SoundToPlay)
-        {
-            UGameplayStatics::PlaySoundAtLocation(GetWorld(), SoundToPlay, Location, FinalVolume);
-            UE_LOG(LogTemp, Log, TEXT("Played %s %s sound at distance %.2f with volume %.2f"), 
-                   *DinosaurType, *SoundType, Distance, FinalVolume);
-        }
-    }
-}
-
-void AAudio_EnvironmentalSoundManager::SetMasterEnvironmentalVolume(float NewVolume)
-{
-    MasterEnvironmentalVolume = FMath::Clamp(NewVolume, 0.0f, 1.0f);
+    MasterVolume = FMath::Clamp(Volume, 0.0f, 1.0f);
     
-    // Update current playing audio volumes
-    if (FAudio_BiomeAudioData* BiomeData = BiomeAudioMap.Find(CurrentBiome))
+    if (PrimaryAudioComponent)
     {
-        CurrentBiomeAmbient->SetVolumeMultiplier(BiomeData->BaseVolume * MasterEnvironmentalVolume);
-        CurrentBiomeWind->SetVolumeMultiplier(BiomeData->BaseVolume * 0.6f * MasterEnvironmentalVolume);
-        CurrentBiomeCreatures->SetVolumeMultiplier(BiomeData->BaseVolume * 0.7f * MasterEnvironmentalVolume);
+        PrimaryAudioComponent->SetVolumeMultiplier(GetCurrentVolume());
+    }
+    
+    if (SecondaryAudioComponent)
+    {
+        SecondaryAudioComponent->SetVolumeMultiplier(GetCurrentVolume());
     }
 }
 
-void AAudio_EnvironmentalSoundManager::SetMasterDinosaurVolume(float NewVolume)
+void AAudio_EnvironmentalSoundManager::PlayRandomBiomeSound()
 {
-    MasterDinosaurVolume = FMath::Clamp(NewVolume, 0.0f, 1.0f);
+    if (!BiomeAudioSettings.Contains(CurrentBiome))
+    {
+        return;
+    }
+
+    const FAudio_BiomeAudioSettings& Settings = BiomeAudioSettings[CurrentBiome];
+    if (Settings.RandomSounds.Num() == 0)
+    {
+        return;
+    }
+
+    int32 RandomIndex = FMath::RandRange(0, Settings.RandomSounds.Num() - 1);
+    USoundWave* RandomSound = Settings.RandomSounds[RandomIndex];
+    
+    if (RandomSound)
+    {
+        UGameplayStatics::PlaySoundAtLocation(
+            this,
+            RandomSound,
+            GetActorLocation(),
+            MasterVolume * 0.8f
+        );
+    }
 }
 
-void AAudio_EnvironmentalSoundManager::FadeBetweenBiomes(EAudio_BiomeType FromBiome, EAudio_BiomeType ToBiome, float FadeTime)
+EAudio_BiomeType AAudio_EnvironmentalSoundManager::DetectCurrentBiome()
 {
-    if (bIsFading) return; // Already fading
+    // Simple biome detection based on player location
+    // In a real implementation, this would query the world generation system
+    
+    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(this, 0);
+    if (!PlayerPawn)
+    {
+        return CurrentBiome;
+    }
 
-    bIsFading = true;
+    FVector PlayerLocation = PlayerPawn->GetActorLocation();
+    float DistanceFromOrigin = FVector::Dist(PlayerLocation, FVector::ZeroVector);
+
+    // Simple distance-based biome detection
+    if (PlayerLocation.Z < -200.0f)
+    {
+        return EAudio_BiomeType::Cave;
+    }
+    else if (DistanceFromOrigin > 5000.0f)
+    {
+        return EAudio_BiomeType::Desert;
+    }
+    else if (PlayerLocation.Z > 1000.0f)
+    {
+        return EAudio_BiomeType::Mountains;
+    }
+    else if (DistanceFromOrigin > 3000.0f)
+    {
+        return EAudio_BiomeType::Plains;
+    }
+    else
+    {
+        return EAudio_BiomeType::Forest;
+    }
+}
+
+float AAudio_EnvironmentalSoundManager::GetCurrentVolume() const
+{
+    if (!BiomeAudioSettings.Contains(CurrentBiome))
+    {
+        return MasterVolume * 0.5f;
+    }
+
+    const FAudio_BiomeAudioSettings& Settings = BiomeAudioSettings[CurrentBiome];
+    return MasterVolume * Settings.BaseVolume;
+}
+
+void AAudio_EnvironmentalSoundManager::UpdateBiomeTransition(float DeltaTime)
+{
+    if (!bIsTransitioning)
+    {
+        return;
+    }
+
+    FadeTimer += DeltaTime;
+    TransitionProgress = FadeTimer / FadeDuration;
+
+    if (TransitionProgress >= 1.0f)
+    {
+        CompleteBiomeTransition();
+        return;
+    }
+
+    // Update volumes during transition
+    UAudioComponent* FadingOut = bPrimaryActive ? PrimaryAudioComponent : SecondaryAudioComponent;
+    UAudioComponent* FadingIn = bPrimaryActive ? SecondaryAudioComponent : PrimaryAudioComponent;
+
+    if (FadingOut)
+    {
+        float FadeOutVolume = (1.0f - TransitionProgress) * GetCurrentVolume();
+        FadingOut->SetVolumeMultiplier(FadeOutVolume);
+    }
+
+    if (FadingIn)
+    {
+        float FadeInVolume = TransitionProgress * GetCurrentVolume();
+        FadingIn->SetVolumeMultiplier(FadeInVolume);
+    }
+}
+
+void AAudio_EnvironmentalSoundManager::StartBiomeTransition(EAudio_BiomeType NewBiome)
+{
+    if (!BiomeAudioSettings.Contains(NewBiome))
+    {
+        return;
+    }
+
+    TargetBiome = NewBiome;
+    bIsTransitioning = true;
     FadeTimer = 0.0f;
-    FadeDuration = FadeTime;
-    FadeFromBiome = FromBiome;
-    FadeToBiome = ToBiome;
 
-    UE_LOG(LogTemp, Log, TEXT("Environmental Audio: Starting fade from biome %d to %d over %.2f seconds"), 
-           (int32)FromBiome, (int32)ToBiome, FadeTime);
+    const FAudio_BiomeAudioSettings& NewSettings = BiomeAudioSettings[NewBiome];
+    FadeDuration = NewSettings.FadeInTime;
+
+    // Start playing new biome sound on inactive component
+    UAudioComponent* NewComponent = bPrimaryActive ? SecondaryAudioComponent : PrimaryAudioComponent;
+    
+    if (NewComponent && NewSettings.AmbientSoundCue)
+    {
+        NewComponent->SetSound(NewSettings.AmbientSoundCue);
+        NewComponent->SetVolumeMultiplier(0.0f);
+        NewComponent->Play();
+    }
 }
 
-void AAudio_EnvironmentalSoundManager::UpdateVolumeBasedOnDistance(UAudioComponent* AudioComp, float Distance, float MaxDistance)
+void AAudio_EnvironmentalSoundManager::CompleteBiomeTransition()
 {
-    if (!AudioComp) return;
+    bIsTransitioning = false;
+    TransitionProgress = 1.0f;
+    CurrentBiome = TargetBiome;
 
-    float VolumeMultiplier = 1.0f - FMath::Clamp(Distance / MaxDistance, 0.0f, 1.0f);
-    AudioComp->SetVolumeMultiplier(VolumeMultiplier * MasterEnvironmentalVolume);
+    // Stop old component and activate new one
+    UAudioComponent* OldComponent = bPrimaryActive ? PrimaryAudioComponent : SecondaryAudioComponent;
+    UAudioComponent* NewComponent = bPrimaryActive ? SecondaryAudioComponent : PrimaryAudioComponent;
+
+    if (OldComponent)
+    {
+        OldComponent->Stop();
+        OldComponent->SetVolumeMultiplier(0.0f);
+    }
+
+    if (NewComponent)
+    {
+        NewComponent->SetVolumeMultiplier(GetCurrentVolume());
+    }
+
+    // Swap active component
+    bPrimaryActive = !bPrimaryActive;
+
+    // Reset random sound timer
+    RandomSoundTimer = 0.0f;
+}
+
+void AAudio_EnvironmentalSoundManager::UpdateRandomSounds(float DeltaTime)
+{
+    if (!BiomeAudioSettings.Contains(CurrentBiome))
+    {
+        return;
+    }
+
+    const FAudio_BiomeAudioSettings& Settings = BiomeAudioSettings[CurrentBiome];
+    RandomSoundTimer += DeltaTime;
+
+    if (RandomSoundTimer >= Settings.RandomSoundInterval)
+    {
+        PlayRandomBiomeSound();
+        RandomSoundTimer = 0.0f;
+        
+        // Add some randomness to the interval
+        RandomSoundTimer -= FMath::RandRange(0.0f, Settings.RandomSoundInterval * 0.3f);
+    }
 }
