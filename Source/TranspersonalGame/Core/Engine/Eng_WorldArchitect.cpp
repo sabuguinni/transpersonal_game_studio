@@ -1,234 +1,236 @@
 #include "Eng_WorldArchitect.h"
 #include "Engine/World.h"
-#include "EngineUtils.h"
 #include "Engine/Engine.h"
+#include "Components/StaticMeshComponent.h"
+#include "Engine/StaticMesh.h"
+#include "UObject/ConstructorHelpers.h"
 
 UEng_WorldArchitect::UEng_WorldArchitect()
 {
-    bIsInitialized = false;
+    // Initialize default world bounds
+    WorldBounds.MinBounds = FVector(-10000, -10000, -1000);
+    WorldBounds.MaxBounds = FVector(10000, 10000, 2000);
+    WorldBounds.BiomeTransitionZone = 500.0f;
+
+    // Initialize default terrain settings
+    TerrainSettings.HeightScale = 100.0f;
+    TerrainSettings.NoiseScale = 0.001f;
+    TerrainSettings.TerrainResolution = 1024;
+    TerrainSettings.bEnableWorldPartition = true;
 }
 
 void UEng_WorldArchitect::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
     
-    UE_LOG(LogTemp, Warning, TEXT("UEng_WorldArchitect: Initializing World Architect subsystem"));
+    UE_LOG(LogTemp, Warning, TEXT("WorldArchitect: Initializing world architecture subsystem"));
     
-    CreateDefaultZones();
-    bIsInitialized = true;
+    // Calculate initial biome zones
+    CalculateBiomeZones();
     
-    UE_LOG(LogTemp, Warning, TEXT("UEng_WorldArchitect: Initialized with %d zones"), WorldZones.Num());
+    bWorldInitialized = true;
 }
 
 void UEng_WorldArchitect::Deinitialize()
 {
-    WorldZones.Empty();
-    bIsInitialized = false;
+    BiomeManagerRef = nullptr;
+    bWorldInitialized = false;
     
     Super::Deinitialize();
 }
 
-void UEng_WorldArchitect::InitializeWorldZones()
+void UEng_WorldArchitect::InitializeWorldBounds(const FEng_WorldBounds& Bounds)
 {
-    if (!bIsInitialized)
-    {
-        CreateDefaultZones();
-        bIsInitialized = true;
-    }
+    WorldBounds = Bounds;
+    CalculateBiomeZones();
     
-    UpdateZoneActorCounts();
+    UE_LOG(LogTemp, Warning, TEXT("WorldArchitect: World bounds initialized - Min: %s, Max: %s"), 
+           *WorldBounds.MinBounds.ToString(), *WorldBounds.MaxBounds.ToString());
 }
 
-void UEng_WorldArchitect::CreateDefaultZones()
+void UEng_WorldArchitect::SetupBiomeZones()
 {
-    WorldZones.Empty();
+    if (!bWorldInitialized)
+    {
+        UE_LOG(LogTemp, Error, TEXT("WorldArchitect: Cannot setup biome zones - world not initialized"));
+        return;
+    }
+
+    CalculateBiomeZones();
     
-    // Create 5 biome zones based on memory coordinates
-    FEng_WorldZone SavannaZone;
-    SavannaZone.ZoneName = TEXT("Savanna");
-    SavannaZone.CenterLocation = FVector(0.0f, 0.0f, 100.0f);
-    SavannaZone.BiomeType = EBiomeType::Savanna;
-    SavannaZone.MaxActors = 1600; // 20% of 8000 total
-    WorldZones.Add(SavannaZone);
-    
-    FEng_WorldZone SwampZone;
-    SwampZone.ZoneName = TEXT("Swamp");
-    SwampZone.CenterLocation = FVector(-50000.0f, -45000.0f, 100.0f);
-    SwampZone.BiomeType = EBiomeType::Swamp;
-    SwampZone.MaxActors = 1600;
-    WorldZones.Add(SwampZone);
-    
-    FEng_WorldZone ForestZone;
-    ForestZone.ZoneName = TEXT("Forest");
-    ForestZone.CenterLocation = FVector(-45000.0f, 40000.0f, 100.0f);
-    ForestZone.BiomeType = EBiomeType::Forest;
-    ForestZone.MaxActors = 1600;
-    WorldZones.Add(ForestZone);
-    
-    FEng_WorldZone DesertZone;
-    DesertZone.ZoneName = TEXT("Desert");
-    DesertZone.CenterLocation = FVector(55000.0f, 0.0f, 100.0f);
-    DesertZone.BiomeType = EBiomeType::Desert;
-    DesertZone.MaxActors = 1600;
-    WorldZones.Add(DesertZone);
-    
-    FEng_WorldZone MountainZone;
-    MountainZone.ZoneName = TEXT("Mountain");
-    MountainZone.CenterLocation = FVector(40000.0f, 50000.0f, 100.0f);
-    MountainZone.BiomeType = EBiomeType::Mountain;
-    MountainZone.MaxActors = 1600;
-    WorldZones.Add(MountainZone);
-    
-    UE_LOG(LogTemp, Warning, TEXT("UEng_WorldArchitect: Created %d default zones"), WorldZones.Num());
+    UE_LOG(LogTemp, Warning, TEXT("WorldArchitect: Biome zones setup complete - %d zones created"), 
+           BiomeZoneCenters.Num());
 }
 
-bool UEng_WorldArchitect::CanSpawnActorInZone(const FVector& Location, const FString& ActorType)
+void UEng_WorldArchitect::ValidateWorldPartition()
 {
-    FEng_WorldZone* Zone = FindZoneByLocation(Location);
-    if (!Zone)
+    UWorld* World = GetWorld();
+    if (!World)
     {
-        return false;
+        UE_LOG(LogTemp, Error, TEXT("WorldArchitect: Cannot validate world partition - no world"));
+        return;
     }
-    
-    // Check zone limits
-    if (Zone->CurrentActors >= Zone->MaxActors)
+
+    // Check if world partition is enabled
+    if (TerrainSettings.bEnableWorldPartition)
     {
-        UE_LOG(LogTemp, Warning, TEXT("UEng_WorldArchitect: Zone %s at capacity (%d/%d)"), 
-               *Zone->ZoneName, Zone->CurrentActors, Zone->MaxActors);
-        return false;
+        UE_LOG(LogTemp, Warning, TEXT("WorldArchitect: World Partition validation - Enabled"));
     }
-    
-    // Check global limits
-    int32 TotalActors = GetTotalActorCount();
-    if (TotalActors >= PerformanceLimits.MaxTotalActors)
+    else
     {
-        UE_LOG(LogTemp, Warning, TEXT("UEng_WorldArchitect: Global actor limit reached (%d/%d)"), 
-               TotalActors, PerformanceLimits.MaxTotalActors);
-        return false;
+        UE_LOG(LogTemp, Warning, TEXT("WorldArchitect: World Partition validation - Disabled"));
     }
-    
-    return true;
+
+    ValidateActorCounts();
 }
 
-FEng_WorldZone UEng_WorldArchitect::GetZoneAtLocation(const FVector& Location)
+FVector UEng_WorldArchitect::GetWorldCenter() const
 {
-    FEng_WorldZone* Zone = FindZoneByLocation(Location);
-    if (Zone)
-    {
-        return *Zone;
-    }
-    
-    // Return default zone if not found
-    FEng_WorldZone DefaultZone;
-    return DefaultZone;
+    return (WorldBounds.MinBounds + WorldBounds.MaxBounds) * 0.5f;
 }
 
-void UEng_WorldArchitect::RegisterActorSpawned(const FVector& Location, const FString& ActorType)
+bool UEng_WorldArchitect::IsLocationInBounds(const FVector& Location) const
 {
-    FEng_WorldZone* Zone = FindZoneByLocation(Location);
-    if (Zone)
+    return Location.X >= WorldBounds.MinBounds.X && Location.X <= WorldBounds.MaxBounds.X &&
+           Location.Y >= WorldBounds.MinBounds.Y && Location.Y <= WorldBounds.MaxBounds.Y &&
+           Location.Z >= WorldBounds.MinBounds.Z && Location.Z <= WorldBounds.MaxBounds.Z;
+}
+
+EBiomeType UEng_WorldArchitect::GetBiomeAtLocation(const FVector& Location) const
+{
+    if (!IsLocationInBounds(Location))
     {
-        Zone->CurrentActors++;
-        UE_LOG(LogTemp, Log, TEXT("UEng_WorldArchitect: Registered %s in %s (%d/%d)"), 
-               *ActorType, *Zone->ZoneName, Zone->CurrentActors, Zone->MaxActors);
+        return EBiomeType::Forest; // Default fallback
+    }
+
+    // Simple biome determination based on location
+    FVector WorldCenter = GetWorldCenter();
+    FVector Offset = Location - WorldCenter;
+    
+    // Determine biome based on distance from center and direction
+    float DistanceFromCenter = Offset.Size2D();
+    
+    if (DistanceFromCenter < 2000.0f)
+    {
+        return EBiomeType::Forest; // Central forest
+    }
+    else if (Offset.X > 0 && Offset.Y > 0)
+    {
+        return EBiomeType::Desert; // Northeast quadrant
+    }
+    else if (Offset.X < 0 && Offset.Y > 0)
+    {
+        return EBiomeType::Tundra; // Northwest quadrant
+    }
+    else if (Offset.X < 0 && Offset.Y < 0)
+    {
+        return EBiomeType::Swamp; // Southwest quadrant
+    }
+    else
+    {
+        return EBiomeType::Grassland; // Southeast quadrant
     }
 }
 
-void UEng_WorldArchitect::CleanupExcessActors()
+void UEng_WorldArchitect::RegisterBiomeManager(UBiomeManager* Manager)
+{
+    BiomeManagerRef = Manager;
+    UE_LOG(LogTemp, Warning, TEXT("WorldArchitect: Biome manager registered"));
+}
+
+void UEng_WorldArchitect::SetTerrainSettings(const FEng_TerrainSettings& Settings)
+{
+    TerrainSettings = Settings;
+    UE_LOG(LogTemp, Warning, TEXT("WorldArchitect: Terrain settings updated - Resolution: %d, Height Scale: %f"), 
+           TerrainSettings.TerrainResolution, TerrainSettings.HeightScale);
+}
+
+void UEng_WorldArchitect::ValidateWorldConfiguration()
+{
+    UE_LOG(LogTemp, Warning, TEXT("WorldArchitect: === WORLD CONFIGURATION VALIDATION ==="));
+    UE_LOG(LogTemp, Warning, TEXT("World Bounds: %s to %s"), 
+           *WorldBounds.MinBounds.ToString(), *WorldBounds.MaxBounds.ToString());
+    UE_LOG(LogTemp, Warning, TEXT("Biome Zones: %d"), BiomeZoneCenters.Num());
+    UE_LOG(LogTemp, Warning, TEXT("World Partition: %s"), 
+           TerrainSettings.bEnableWorldPartition ? TEXT("Enabled") : TEXT("Disabled"));
+    UE_LOG(LogTemp, Warning, TEXT("Terrain Resolution: %d"), TerrainSettings.TerrainResolution);
+    
+    ValidateActorCounts();
+}
+
+void UEng_WorldArchitect::CalculateBiomeZones()
+{
+    BiomeZoneCenters.Empty();
+    
+    FVector WorldCenter = GetWorldCenter();
+    float ZoneRadius = (WorldBounds.MaxBounds.X - WorldBounds.MinBounds.X) * 0.3f;
+    
+    // Create 5 biome zone centers
+    BiomeZoneCenters.Add(WorldCenter); // Central forest
+    BiomeZoneCenters.Add(WorldCenter + FVector(ZoneRadius, ZoneRadius, 0)); // NE Desert
+    BiomeZoneCenters.Add(WorldCenter + FVector(-ZoneRadius, ZoneRadius, 0)); // NW Tundra
+    BiomeZoneCenters.Add(WorldCenter + FVector(-ZoneRadius, -ZoneRadius, 0)); // SW Swamp
+    BiomeZoneCenters.Add(WorldCenter + FVector(ZoneRadius, -ZoneRadius, 0)); // SE Grassland
+}
+
+void UEng_WorldArchitect::ValidateActorCounts()
 {
     UWorld* World = GetWorld();
     if (!World)
     {
         return;
     }
-    
-    int32 TotalActors = GetTotalActorCount();
-    if (TotalActors <= PerformanceLimits.MaxTotalActors)
-    {
-        return;
-    }
-    
-    int32 ActorsToRemove = TotalActors - PerformanceLimits.MaxTotalActors;
-    int32 RemovedCount = 0;
-    
-    UE_LOG(LogTemp, Warning, TEXT("UEng_WorldArchitect: Cleaning up %d excess actors"), ActorsToRemove);
-    
-    // Remove oldest non-essential actors first
-    for (TActorIterator<AActor> ActorItr(World); ActorItr && RemovedCount < ActorsToRemove; ++ActorItr)
-    {
-        AActor* Actor = *ActorItr;
-        if (!Actor || Actor->IsA<APawn>() || Actor->GetName().Contains(TEXT("PlayerStart")))
-        {
-            continue; // Skip important actors
-        }
-        
-        Actor->Destroy();
-        RemovedCount++;
-    }
-    
-    UpdateZoneActorCounts();
-    UE_LOG(LogTemp, Warning, TEXT("UEng_WorldArchitect: Removed %d actors"), RemovedCount);
+
+    // Count actors in the world (this would be implemented with proper actor counting)
+    UE_LOG(LogTemp, Warning, TEXT("WorldArchitect: Actor count validation - Implementation needed"));
 }
 
-int32 UEng_WorldArchitect::GetTotalActorCount()
+// AEng_WorldAnchor Implementation
+AEng_WorldAnchor::AEng_WorldAnchor()
 {
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        return 0;
-    }
-    
-    int32 Count = 0;
-    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
-    {
-        Count++;
-    }
-    
-    return Count;
-}
+    PrimaryActorTick.bCanEverTick = false;
 
-void UEng_WorldArchitect::UpdateZoneActorCounts()
-{
-    UWorld* World = GetWorld();
-    if (!World)
+    // Create anchor mesh component
+    AnchorMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("AnchorMesh"));
+    RootComponent = AnchorMesh;
+
+    // Set default properties
+    AnchorBiome = EBiomeType::Forest;
+    InfluenceRadius = 1000.0f;
+
+    // Try to load a default mesh
+    static ConstructorHelpers::FObjectFinder<UStaticMesh> SphereMesh(TEXT("/Engine/BasicShapes/Sphere"));
+    if (SphereMesh.Succeeded())
     {
-        return;
-    }
-    
-    // Reset all zone counts
-    for (FEng_WorldZone& Zone : WorldZones)
-    {
-        Zone.CurrentActors = 0;
-    }
-    
-    // Count actors in each zone
-    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
-    {
-        AActor* Actor = *ActorItr;
-        if (!Actor)
-        {
-            continue;
-        }
-        
-        FVector ActorLocation = Actor->GetActorLocation();
-        FEng_WorldZone* Zone = FindZoneByLocation(ActorLocation);
-        if (Zone)
-        {
-            Zone->CurrentActors++;
-        }
+        AnchorMesh->SetStaticMesh(SphereMesh.Object);
+        AnchorMesh->SetWorldScale3D(FVector(2.0f, 2.0f, 2.0f));
     }
 }
 
-FEng_WorldZone* UEng_WorldArchitect::FindZoneByLocation(const FVector& Location)
+void AEng_WorldAnchor::SetAnchorType(EBiomeType BiomeType)
 {
-    for (FEng_WorldZone& Zone : WorldZones)
+    AnchorBiome = BiomeType;
+    
+    // Update visual representation based on biome type
+    if (AnchorMesh)
     {
-        float Distance = FVector::Dist2D(Location, Zone.CenterLocation);
-        if (Distance <= Zone.Radius)
+        switch (AnchorBiome)
         {
-            return &Zone;
+        case EBiomeType::Forest:
+            AnchorMesh->SetWorldScale3D(FVector(2.0f, 2.0f, 3.0f));
+            break;
+        case EBiomeType::Desert:
+            AnchorMesh->SetWorldScale3D(FVector(3.0f, 3.0f, 1.0f));
+            break;
+        case EBiomeType::Tundra:
+            AnchorMesh->SetWorldScale3D(FVector(1.5f, 1.5f, 4.0f));
+            break;
+        case EBiomeType::Swamp:
+            AnchorMesh->SetWorldScale3D(FVector(4.0f, 4.0f, 1.5f));
+            break;
+        case EBiomeType::Grassland:
+            AnchorMesh->SetWorldScale3D(FVector(2.5f, 2.5f, 2.0f));
+            break;
         }
     }
-    
-    return nullptr;
 }
