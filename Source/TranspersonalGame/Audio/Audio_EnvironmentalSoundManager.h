@@ -7,68 +7,49 @@
 #include "Engine/World.h"
 #include "Audio_EnvironmentalSoundManager.generated.h"
 
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FAudio_BiomeAudioSettings
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Audio")
+    class USoundCue* AmbientSoundCue;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Audio")
+    float BaseVolume = 0.5f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Audio")
+    float FadeInTime = 2.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Audio")
+    float FadeOutTime = 2.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Audio")
+    TArray<class USoundWave*> RandomSounds;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Audio")
+    float RandomSoundInterval = 15.0f;
+
+    FAudio_BiomeAudioSettings()
+    {
+        AmbientSoundCue = nullptr;
+        BaseVolume = 0.5f;
+        FadeInTime = 2.0f;
+        FadeOutTime = 2.0f;
+        RandomSoundInterval = 15.0f;
+    }
+};
+
 UENUM(BlueprintType)
 enum class EAudio_BiomeType : uint8
 {
-    Savana = 0,
-    Pantano = 1,
-    Floresta = 2,
-    Deserto = 3,
-    Montanha = 4
-};
-
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FAudio_BiomeAudioData
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Audio")
-    TSoftObjectPtr<USoundCue> AmbientSound;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Audio")
-    TSoftObjectPtr<USoundCue> WindSound;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Audio")
-    TSoftObjectPtr<USoundCue> CreatureSound;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Audio")
-    float BaseVolume = 0.8f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Audio")
-    float FadeDistance = 5000.0f;
-
-    FAudio_BiomeAudioData()
-    {
-        BaseVolume = 0.8f;
-        FadeDistance = 5000.0f;
-    }
-};
-
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FAudio_DinosaurAudioData
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur Audio")
-    TSoftObjectPtr<USoundCue> IdleSound;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur Audio")
-    TSoftObjectPtr<USoundCue> MovementSound;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur Audio")
-    TSoftObjectPtr<USoundCue> AggressiveSound;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur Audio")
-    float AudioRange = 3000.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur Audio")
-    float VolumeMultiplier = 1.0f;
-
-    FAudio_DinosaurAudioData()
-    {
-        AudioRange = 3000.0f;
-        VolumeMultiplier = 1.0f;
-    }
+    Forest      UMETA(DisplayName = "Forest"),
+    Plains      UMETA(DisplayName = "Plains"),
+    Mountains   UMETA(DisplayName = "Mountains"),
+    Swamp       UMETA(DisplayName = "Swamp"),
+    Desert      UMETA(DisplayName = "Desert"),
+    Cave        UMETA(DisplayName = "Cave"),
+    River       UMETA(DisplayName = "River")
 };
 
 UCLASS(BlueprintType, Blueprintable)
@@ -81,68 +62,71 @@ public:
 
 protected:
     virtual void BeginPlay() override;
-
-public:
     virtual void Tick(float DeltaTime) override;
 
-    // Biome audio management
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Audio")
-    TMap<EAudio_BiomeType, FAudio_BiomeAudioData> BiomeAudioMap;
-
-    // Dinosaur audio management
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur Audio")
-    TMap<FString, FAudio_DinosaurAudioData> DinosaurAudioMap;
-
-    // Audio components for biome sounds
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio Components")
-    UAudioComponent* CurrentBiomeAmbient;
+    class UAudioComponent* PrimaryAudioComponent;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio Components")
-    UAudioComponent* CurrentBiomeWind;
+    class UAudioComponent* SecondaryAudioComponent;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio Components")
-    UAudioComponent* CurrentBiomeCreatures;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Settings")
+    TMap<EAudio_BiomeType, FAudio_BiomeAudioSettings> BiomeAudioSettings;
 
-    // Master volume controls
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Volume Control", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float MasterEnvironmentalVolume = 0.7f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Volume Control", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float MasterDinosaurVolume = 0.8f;
-
-    // Current biome tracking
     UPROPERTY(BlueprintReadOnly, Category = "Current State")
-    EAudio_BiomeType CurrentBiome = EAudio_BiomeType::Savana;
+    EAudio_BiomeType CurrentBiome;
 
-    // Functions
-    UFUNCTION(BlueprintCallable, Category = "Environmental Audio")
-    void UpdateBiomeAudio(EAudio_BiomeType NewBiome);
+    UPROPERTY(BlueprintReadOnly, Category = "Current State")
+    bool bIsTransitioning;
 
-    UFUNCTION(BlueprintCallable, Category = "Environmental Audio")
-    EAudio_BiomeType GetBiomeFromLocation(FVector Location);
+    UPROPERTY(BlueprintReadOnly, Category = "Current State")
+    float TransitionProgress;
 
-    UFUNCTION(BlueprintCallable, Category = "Dinosaur Audio")
-    void PlayDinosaurSound(const FString& DinosaurType, const FString& SoundType, FVector Location, float VolumeOverride = -1.0f);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Settings")
+    float BiomeDetectionRadius = 1000.0f;
 
-    UFUNCTION(BlueprintCallable, Category = "Volume Control")
-    void SetMasterEnvironmentalVolume(float NewVolume);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Settings")
+    float MasterVolume = 1.0f;
 
-    UFUNCTION(BlueprintCallable, Category = "Volume Control")
-    void SetMasterDinosaurVolume(float NewVolume);
-
-    UFUNCTION(BlueprintCallable, Category = "Environmental Audio")
-    void FadeBetweenBiomes(EAudio_BiomeType FromBiome, EAudio_BiomeType ToBiome, float FadeTime = 2.0f);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Settings")
+    bool bEnableRandomSounds = true;
 
 private:
-    // Internal functions
-    void InitializeBiomeAudioData();
-    void InitializeDinosaurAudioData();
-    void UpdateVolumeBasedOnDistance(UAudioComponent* AudioComp, float Distance, float MaxDistance);
+    float RandomSoundTimer;
+    bool bPrimaryActive;
+    float FadeTimer;
+    float FadeDuration;
+    EAudio_BiomeType TargetBiome;
 
-    // Fade state
-    bool bIsFading = false;
-    float FadeTimer = 0.0f;
-    float FadeDuration = 2.0f;
-    EAudio_BiomeType FadeFromBiome;
-    EAudio_BiomeType FadeToBiome;
+public:
+    UFUNCTION(BlueprintCallable, Category = "Environmental Audio")
+    void SetBiome(EAudio_BiomeType NewBiome);
+
+    UFUNCTION(BlueprintCallable, Category = "Environmental Audio")
+    void SetMasterVolume(float Volume);
+
+    UFUNCTION(BlueprintCallable, Category = "Environmental Audio")
+    void PlayRandomBiomeSound();
+
+    UFUNCTION(BlueprintCallable, Category = "Environmental Audio")
+    EAudio_BiomeType DetectCurrentBiome();
+
+    UFUNCTION(BlueprintPure, Category = "Environmental Audio")
+    float GetCurrentVolume() const;
+
+    UFUNCTION(BlueprintPure, Category = "Environmental Audio")
+    bool IsTransitioning() const { return bIsTransitioning; }
+
+protected:
+    UFUNCTION()
+    void UpdateBiomeTransition(float DeltaTime);
+
+    UFUNCTION()
+    void StartBiomeTransition(EAudio_BiomeType NewBiome);
+
+    UFUNCTION()
+    void CompleteBiomeTransition();
+
+    UFUNCTION()
+    void UpdateRandomSounds(float DeltaTime);
 };
