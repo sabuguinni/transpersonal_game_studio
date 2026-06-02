@@ -3,71 +3,16 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "Components/StaticMeshComponent.h"
+#include "Engine/StaticMeshActor.h"
 #include "Materials/MaterialInterface.h"
-#include "Engine/World.h"
 #include "SharedTypes.h"
 #include "World_WaterSystemManager.generated.h"
 
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FWorld_RiverSegment
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "River")
-    FVector StartPoint;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "River")
-    FVector EndPoint;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "River")
-    float Width;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "River")
-    float FlowSpeed;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "River")
-    FString BiomeType;
-
-    FWorld_RiverSegment()
-    {
-        StartPoint = FVector::ZeroVector;
-        EndPoint = FVector::ZeroVector;
-        Width = 200.0f;
-        FlowSpeed = 1.0f;
-        BiomeType = TEXT("Forest");
-    }
-};
-
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FWorld_LakeData
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lake")
-    FVector Position;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lake")
-    float Radius;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lake")
-    float Depth;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lake")
-    FString LakeType;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lake")
-    bool bHasFish;
-
-    FWorld_LakeData()
-    {
-        Position = FVector::ZeroVector;
-        Radius = 500.0f;
-        Depth = 100.0f;
-        LakeType = TEXT("Freshwater");
-        bHasFish = true;
-    }
-};
-
+/**
+ * Water System Manager - Handles dynamic water bodies, rivers, and water flow
+ * Creates and manages lakes, rivers, waterfalls, and water-based ecosystems
+ * Supports seasonal water level changes and dynamic flow systems
+ */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API AWorld_WaterSystemManager : public AActor
 {
@@ -78,84 +23,112 @@ public:
 
 protected:
     virtual void BeginPlay() override;
+    virtual void Tick(float DeltaTime) override;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    // Water body components
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Water System")
     class USceneComponent* RootSceneComponent;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water System")
-    TArray<FWorld_RiverSegment> RiverSegments;
+    // Water configuration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water Config")
+    float BaseWaterLevel;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water System")
-    TArray<FWorld_LakeData> Lakes;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water Config")
+    float SeasonalVariation;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water Config")
+    float FlowSpeed;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water Config")
+    bool bDynamicWaterLevels;
+
+    // Water materials
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Materials")
+    class UMaterialInterface* LakeWaterMaterial;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Materials")
-    class UMaterialInterface* WaterMaterial;
+    class UMaterialInterface* RiverWaterMaterial;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Materials")
-    class UMaterialInterface* RiverMaterial;
+    class UMaterialInterface* WaterfallMaterial;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Meshes")
-    class UStaticMesh* WaterPlaneMesh;
+    // Water body arrays
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Water Bodies")
+    TArray<class AStaticMeshActor*> Lakes;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Generation")
-    int32 MaxRiverSegments;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Water Bodies")
+    TArray<class AStaticMeshActor*> Rivers;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Generation")
-    int32 MaxLakes;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Water Bodies")
+    TArray<class AStaticMeshActor*> Waterfalls;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Generation")
-    float MinDistanceBetweenLakes;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Water Bodies")
+    TArray<class AStaticMeshActor*> Ponds;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    bool bUseInstancedMeshes;
+    // Flow system
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Flow System")
+    TArray<FVector> FlowPoints;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float WaterLODDistance;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flow System")
+    float FlowParticleIntensity;
 
 public:
-    UFUNCTION(BlueprintCallable, Category = "Water System")
-    void GenerateRiverSystem();
+    // Water creation functions
+    UFUNCTION(BlueprintCallable, Category = "Water Creation")
+    void CreateMainLake(FVector Location, float Scale = 20.0f);
 
-    UFUNCTION(BlueprintCallable, Category = "Water System")
-    void GenerateLakes();
+    UFUNCTION(BlueprintCallable, Category = "Water Creation")
+    void CreateRiverSystem(const TArray<FVector>& RiverPoints);
 
-    UFUNCTION(BlueprintCallable, Category = "Water System")
-    void CreateRiverSegment(const FWorld_RiverSegment& SegmentData);
+    UFUNCTION(BlueprintCallable, Category = "Water Creation")
+    void CreateWaterfall(FVector Location, FRotator Rotation, float Height = 5.0f);
 
-    UFUNCTION(BlueprintCallable, Category = "Water System")
-    void CreateLake(const FWorld_LakeData& LakeData);
+    UFUNCTION(BlueprintCallable, Category = "Water Creation")
+    void CreatePond(FVector Location, float Scale = 5.0f, const FString& BiomeType = TEXT("Generic"));
 
-    UFUNCTION(BlueprintCallable, Category = "Water System")
-    void ClearWaterBodies();
+    // Water management functions
+    UFUNCTION(BlueprintCallable, Category = "Water Management")
+    void UpdateWaterLevels(float SeasonalFactor);
 
-    UFUNCTION(BlueprintCallable, Category = "Water System")
-    bool IsPositionNearWater(const FVector& Position, float Threshold = 500.0f) const;
+    UFUNCTION(BlueprintCallable, Category = "Water Management")
+    void UpdateFlowEffects();
 
-    UFUNCTION(BlueprintCallable, Category = "Water System")
-    FVector GetNearestWaterPosition(const FVector& FromPosition) const;
+    UFUNCTION(BlueprintCallable, Category = "Water Management")
+    void SetWaterMaterials();
 
-    UFUNCTION(BlueprintCallable, Category = "Water System")
-    void UpdateWaterFlow(float DeltaTime);
+    // Utility functions
+    UFUNCTION(BlueprintCallable, Category = "Water Utility")
+    bool IsLocationNearWater(FVector Location, float Radius = 500.0f) const;
 
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Editor")
-    void GenerateWaterSystemInEditor();
+    UFUNCTION(BlueprintCallable, Category = "Water Utility")
+    FVector GetNearestWaterSource(FVector Location) const;
 
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Editor")
-    void ValidateWaterSystem();
+    UFUNCTION(BlueprintCallable, Category = "Water Utility")
+    float GetWaterDepthAtLocation(FVector Location) const;
 
-protected:
-    UFUNCTION()
-    void OnRiverSegmentCreated(class AActor* NewActor);
+    // Ecosystem functions
+    UFUNCTION(BlueprintCallable, Category = "Water Ecosystem")
+    void SpawnWaterVegetation();
 
-    UFUNCTION()
-    void OnLakeCreated(class AActor* NewActor);
+    UFUNCTION(BlueprintCallable, Category = "Water Ecosystem")
+    void CreateFishingSpots();
 
-    void SetupWaterMaterial(class UStaticMeshComponent* MeshComponent, bool bIsRiver = false);
-    void OptimizeWaterRendering();
-    FVector CalculateRiverFlowDirection(int32 SegmentIndex) const;
+    UFUNCTION(BlueprintCallable, Category = "Water Ecosystem")
+    void UpdateWaterQuality(float PollutionLevel);
 
 private:
-    TArray<class AActor*> SpawnedWaterActors;
-    float WaterSystemBounds;
-    bool bWaterSystemInitialized;
+    // Internal water creation helpers
+    AStaticMeshActor* CreateWaterBody(FVector Location, FVector Scale, FRotator Rotation, const FString& Label);
+    void SetupWaterMesh(AStaticMeshActor* WaterActor, class UStaticMesh* Mesh);
+    void ApplyWaterMaterial(AStaticMeshActor* WaterActor, class UMaterialInterface* Material);
+
+    // Flow system helpers
+    void CreateFlowMarkers();
+    void UpdateFlowDirection();
+    void CalculateWaterFlow();
+
+    // Current water state
+    float CurrentWaterLevel;
+    float CurrentFlowRate;
+    bool bWaterSystemActive;
 };
