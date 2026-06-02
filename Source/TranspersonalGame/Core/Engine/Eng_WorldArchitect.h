@@ -1,72 +1,47 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/World.h"
+#include "Engine/GameInstanceSubsystem.h"
 #include "Subsystems/WorldSubsystem.h"
-#include "SharedTypes.h"
+#include "Components/ActorComponent.h"
+#include "GameFramework/Actor.h"
+#include "../SharedTypes.h"
 #include "Eng_WorldArchitect.generated.h"
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEng_WorldZone
+struct TRANSPERSONALGAME_API FEng_WorldBounds
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Zone")
-    FString ZoneName;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World Bounds")
+    FVector MinBounds = FVector(-10000, -10000, -1000);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Zone")
-    FVector CenterLocation;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World Bounds")
+    FVector MaxBounds = FVector(10000, 10000, 2000);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Zone")
-    float Radius;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Zone")
-    EBiomeType BiomeType;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Zone")
-    int32 MaxActors;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Zone")
-    int32 CurrentActors;
-
-    FEng_WorldZone()
-    {
-        ZoneName = TEXT("Unknown");
-        CenterLocation = FVector::ZeroVector;
-        Radius = 15000.0f;
-        BiomeType = EBiomeType::Savanna;
-        MaxActors = 1000;
-        CurrentActors = 0;
-    }
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World Bounds")
+    float BiomeTransitionZone = 500.0f;
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEng_PerformanceLimits
+struct TRANSPERSONALGAME_API FEng_TerrainSettings
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 MaxTotalActors;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
+    float HeightScale = 100.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 MaxDinosaurs;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
+    float NoiseScale = 0.001f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 MaxPropsPerBiome;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
+    int32 TerrainResolution = 1024;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float TargetFrameRate;
-
-    FEng_PerformanceLimits()
-    {
-        MaxTotalActors = 8000;
-        MaxDinosaurs = 150;
-        MaxPropsPerBiome = 1000;
-        TargetFrameRate = 60.0f;
-    }
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
+    bool bEnableWorldPartition = true;
 };
 
-UCLASS(BlueprintType)
+UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UEng_WorldArchitect : public UWorldSubsystem
 {
     GENERATED_BODY()
@@ -74,46 +49,77 @@ class TRANSPERSONALGAME_API UEng_WorldArchitect : public UWorldSubsystem
 public:
     UEng_WorldArchitect();
 
-    // USubsystem interface
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
-    UFUNCTION(BlueprintCallable, Category = "World Architect")
-    void InitializeWorldZones();
+    UFUNCTION(BlueprintCallable, Category = "World Architecture")
+    void InitializeWorldBounds(const FEng_WorldBounds& Bounds);
 
-    UFUNCTION(BlueprintCallable, Category = "World Architect")
-    bool CanSpawnActorInZone(const FVector& Location, const FString& ActorType);
+    UFUNCTION(BlueprintCallable, Category = "World Architecture")
+    void SetupBiomeZones();
 
-    UFUNCTION(BlueprintCallable, Category = "World Architect")
-    FEng_WorldZone GetZoneAtLocation(const FVector& Location);
+    UFUNCTION(BlueprintCallable, Category = "World Architecture")
+    void ValidateWorldPartition();
 
-    UFUNCTION(BlueprintCallable, Category = "World Architect")
-    void RegisterActorSpawned(const FVector& Location, const FString& ActorType);
+    UFUNCTION(BlueprintCallable, Category = "World Architecture")
+    FVector GetWorldCenter() const;
 
-    UFUNCTION(BlueprintCallable, Category = "World Architect")
-    void CleanupExcessActors();
+    UFUNCTION(BlueprintCallable, Category = "World Architecture")
+    bool IsLocationInBounds(const FVector& Location) const;
 
-    UFUNCTION(BlueprintCallable, Category = "World Architect")
-    int32 GetTotalActorCount();
+    UFUNCTION(BlueprintCallable, Category = "World Architecture")
+    EBiomeType GetBiomeAtLocation(const FVector& Location) const;
 
-    UFUNCTION(BlueprintCallable, Category = "World Architect")
-    TArray<FEng_WorldZone> GetAllZones() const { return WorldZones; }
+    UFUNCTION(BlueprintCallable, Category = "World Architecture")
+    void RegisterBiomeManager(class UBiomeManager* Manager);
 
-    UFUNCTION(BlueprintCallable, Category = "World Architect")
-    FEng_PerformanceLimits GetPerformanceLimits() const { return PerformanceLimits; }
+    UFUNCTION(BlueprintCallable, Category = "World Architecture")
+    void SetTerrainSettings(const FEng_TerrainSettings& Settings);
+
+    UFUNCTION(BlueprintCallable, Category = "World Architecture", CallInEditor = true)
+    void ValidateWorldConfiguration();
 
 protected:
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "World Architect")
-    TArray<FEng_WorldZone> WorldZones;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
+    FEng_WorldBounds WorldBounds;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "World Architect")
-    FEng_PerformanceLimits PerformanceLimits;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
+    FEng_TerrainSettings TerrainSettings;
 
-    UPROPERTY(BlueprintReadOnly, Category = "World Architect")
-    bool bIsInitialized;
+    UPROPERTY(BlueprintReadOnly, Category = "Runtime")
+    TArray<FVector> BiomeZoneCenters;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Runtime")
+    bool bWorldInitialized = false;
 
 private:
-    void CreateDefaultZones();
-    void UpdateZoneActorCounts();
-    FEng_WorldZone* FindZoneByLocation(const FVector& Location);
+    class UBiomeManager* BiomeManagerRef = nullptr;
+    
+    void CalculateBiomeZones();
+    void ValidateActorCounts();
+};
+
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API AEng_WorldAnchor : public AActor
+{
+    GENERATED_BODY()
+
+public:
+    AEng_WorldAnchor();
+
+    UFUNCTION(BlueprintCallable, Category = "World Anchor")
+    void SetAnchorType(EBiomeType BiomeType);
+
+    UFUNCTION(BlueprintCallable, Category = "World Anchor")
+    EBiomeType GetAnchorType() const { return AnchorBiome; }
+
+protected:
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
+    EBiomeType AnchorBiome = EBiomeType::Forest;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
+    float InfluenceRadius = 1000.0f;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    class UStaticMeshComponent* AnchorMesh;
 };
