@@ -3,32 +3,32 @@
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
 #include "Engine/Engine.h"
-#include "GameFramework/Actor.h"
-#include "Components/SphereComponent.h"
+#include "GameFramework/Character.h"
 #include "Quest_NPCInteractionSystem.generated.h"
 
 UENUM(BlueprintType)
 enum class EQuest_NPCRole : uint8
 {
-    None UMETA(DisplayName = "None"),
-    QuestGiver UMETA(DisplayName = "Quest Giver"),
-    Vendor UMETA(DisplayName = "Vendor"),
-    Guide UMETA(DisplayName = "Guide"),
-    Survivor UMETA(DisplayName = "Survivor"),
-    Hunter UMETA(DisplayName = "Hunter"),
-    Crafter UMETA(DisplayName = "Crafter")
+    VillageElder    UMETA(DisplayName = "Village Elder"),
+    HunterGuide     UMETA(DisplayName = "Hunter Guide"),
+    Tracker         UMETA(DisplayName = "Tracker"),
+    Gatherer        UMETA(DisplayName = "Gatherer"),
+    Warrior         UMETA(DisplayName = "Warrior"),
+    Shaman          UMETA(DisplayName = "Shaman"),
+    Crafter         UMETA(DisplayName = "Crafter"),
+    Scout           UMETA(DisplayName = "Scout")
 };
 
 UENUM(BlueprintType)
-enum class EQuest_NPCState : uint8
+enum class EQuest_NPCMood : uint8
 {
-    Idle UMETA(DisplayName = "Idle"),
-    Talking UMETA(DisplayName = "Talking"),
-    Working UMETA(DisplayName = "Working"),
-    Sleeping UMETA(DisplayName = "Sleeping"),
-    Hunting UMETA(DisplayName = "Hunting"),
-    Crafting UMETA(DisplayName = "Crafting"),
-    Gathering UMETA(DisplayName = "Gathering")
+    Friendly        UMETA(DisplayName = "Friendly"),
+    Neutral         UMETA(DisplayName = "Neutral"),
+    Worried         UMETA(DisplayName = "Worried"),
+    Angry           UMETA(DisplayName = "Angry"),
+    Fearful         UMETA(DisplayName = "Fearful"),
+    Excited         UMETA(DisplayName = "Excited"),
+    Desperate       UMETA(DisplayName = "Desperate")
 };
 
 USTRUCT(BlueprintType)
@@ -43,50 +43,58 @@ struct FQuest_NPCDialogue
     FString SpeakerName;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    float DialogueDuration;
+    EQuest_NPCMood RequiredMood;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
     bool bIsQuestRelated;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    FString QuestID;
+
     FQuest_NPCDialogue()
     {
-        DialogueText = TEXT("Hello, survivor.");
+        DialogueText = TEXT("Hello, traveler.");
         SpeakerName = TEXT("Unknown");
-        DialogueDuration = 3.0f;
+        RequiredMood = EQuest_NPCMood::Neutral;
         bIsQuestRelated = false;
+        QuestID = TEXT("");
     }
 };
 
 USTRUCT(BlueprintType)
-struct FQuest_NPCProfile
+struct FQuest_NPCQuestData
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Profile")
-    FString NPCName;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    FString QuestID;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Profile")
-    EQuest_NPCRole Role;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    FString QuestTitle;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Profile")
-    FString Description;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    FString QuestDescription;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Profile")
-    TArray<FQuest_NPCDialogue> AvailableDialogues;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    bool bIsAvailable;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Profile")
-    float InteractionRange;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    bool bIsCompleted;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Profile")
-    bool bCanGiveQuests;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    TArray<FString> Prerequisites;
 
-    FQuest_NPCProfile()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    int32 RewardExperience;
+
+    FQuest_NPCQuestData()
     {
-        NPCName = TEXT("Survivor");
-        Role = EQuest_NPCRole::Survivor;
-        Description = TEXT("A fellow survivor in this prehistoric world.");
-        InteractionRange = 300.0f;
-        bCanGiveQuests = true;
+        QuestID = TEXT("");
+        QuestTitle = TEXT("");
+        QuestDescription = TEXT("");
+        bIsAvailable = false;
+        bIsCompleted = false;
+        RewardExperience = 100;
     }
 };
 
@@ -104,70 +112,78 @@ protected:
 public:
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    // NPC Profile
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Profile")
-    FQuest_NPCProfile NPCProfile;
+    // NPC Properties
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC")
+    EQuest_NPCRole NPCRole;
 
-    // Current State
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC State")
-    EQuest_NPCState CurrentState;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC")
+    EQuest_NPCMood CurrentMood;
 
-    // Interaction Settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interaction")
-    bool bIsInteractable;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC")
+    FString NPCName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interaction")
-    float InteractionCooldown;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC")
+    float InteractionRange;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interaction")
-    FString InteractionPrompt;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC")
+    bool bCanInteract;
 
-    // Quest Related
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quests")
-    TArray<FString> AvailableQuestIDs;
+    // Dialogue System
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    TArray<FQuest_NPCDialogue> AvailableDialogues;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quests")
-    TArray<FString> CompletedQuestIDs;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    FQuest_NPCDialogue CurrentDialogue;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quests")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    bool bInConversation;
+
+    // Quest System
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    TArray<FQuest_NPCQuestData> AvailableQuests;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    TArray<FString> CompletedQuests;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
     bool bHasActiveQuest;
 
-    // Functions
-    UFUNCTION(BlueprintCallable, Category = "NPC Interaction")
-    bool CanInteract() const;
+    // Interaction Functions
+    UFUNCTION(BlueprintCallable, Category = "Interaction")
+    bool CanPlayerInteract(AActor* Player);
 
-    UFUNCTION(BlueprintCallable, Category = "NPC Interaction")
-    void StartInteraction(AActor* InteractingActor);
+    UFUNCTION(BlueprintCallable, Category = "Interaction")
+    void StartInteraction(AActor* Player);
 
-    UFUNCTION(BlueprintCallable, Category = "NPC Interaction")
+    UFUNCTION(BlueprintCallable, Category = "Interaction")
     void EndInteraction();
 
-    UFUNCTION(BlueprintCallable, Category = "NPC Interaction")
-    FQuest_NPCDialogue GetRandomDialogue() const;
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    FQuest_NPCDialogue GetCurrentDialogue();
 
-    UFUNCTION(BlueprintCallable, Category = "NPC Interaction")
-    void SetNPCState(EQuest_NPCState NewState);
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    void SetDialogue(const FString& DialogueText, EQuest_NPCMood Mood);
 
-    UFUNCTION(BlueprintCallable, Category = "Quest Management")
-    bool HasAvailableQuests() const;
+    UFUNCTION(BlueprintCallable, Category = "Quest")
+    TArray<FQuest_NPCQuestData> GetAvailableQuests();
 
-    UFUNCTION(BlueprintCallable, Category = "Quest Management")
-    void AddAvailableQuest(const FString& QuestID);
+    UFUNCTION(BlueprintCallable, Category = "Quest")
+    bool GiveQuestToPlayer(const FString& QuestID, AActor* Player);
 
-    UFUNCTION(BlueprintCallable, Category = "Quest Management")
-    void CompleteQuest(const FString& QuestID);
+    UFUNCTION(BlueprintCallable, Category = "Quest")
+    bool CompleteQuest(const FString& QuestID);
 
-    UFUNCTION(BlueprintCallable, Category = "Quest Management")
-    bool IsQuestCompleted(const FString& QuestID) const;
+    UFUNCTION(BlueprintCallable, Category = "NPC")
+    void SetNPCMood(EQuest_NPCMood NewMood);
+
+    UFUNCTION(BlueprintCallable, Category = "NPC")
+    FString GetNPCRoleString();
 
 private:
-    // Internal state
+    AActor* InteractingPlayer;
     float LastInteractionTime;
-    AActor* CurrentInteractingActor;
-    bool bIsCurrentlyInteracting;
 
-    // Helper functions
-    void UpdateNPCBehavior(float DeltaTime);
-    void CheckForNearbyPlayers();
-    FString GetStateBasedDialogue() const;
+    void UpdateDialogueBasedOnMood();
+    void InitializeQuestData();
+    void InitializeDialogues();
 };
