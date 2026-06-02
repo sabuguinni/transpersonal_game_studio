@@ -1,297 +1,489 @@
 #include "World_WeatherSystem.h"
-#include "Components/ExponentialHeightFogComponent.h"
-#include "Components/PointLightComponent.h"
-#include "Engine/PointLight.h"
 #include "Engine/World.h"
-#include "GameFramework/Pawn.h"
+#include "Engine/Engine.h"
 #include "Kismet/GameplayStatics.h"
-#include "UObject/ConstructorHelpers.h"
+#include "Kismet/KismetMathLibrary.h"
+#include "Components/AudioComponent.h"
+#include "Particles/ParticleSystemComponent.h"
+#include "Engine/ExponentialHeightFog.h"
+#include "Engine/DirectionalLight.h"
+#include "Components/LightComponent.h"
 
 AWorld_WeatherSystem::AWorld_WeatherSystem()
 {
     PrimaryActorTick.bCanEverTick = true;
 
-    // Create root scene component
-    RootSceneComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootScene"));
+    // Create root component
+    RootSceneComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootSceneComponent"));
     RootComponent = RootSceneComponent;
 
-    // Create fog component
-    FogComponent = CreateDefaultSubobject<UExponentialHeightFogComponent>(TEXT("FogComponent"));
-    if (FogComponent)
-    {
-        FogComponent->SetupAttachment(RootComponent);
-        FogComponent->SetFogDensity(0.02f);
-        FogComponent->SetFogInscatteringColor(FLinearColor::White);
-        FogComponent->SetFogHeightFalloff(0.2f);
-        FogComponent->SetFogMaxOpacity(1.0f);
-    }
+    // Create particle components
+    RainParticles = CreateDefaultSubobject<UParticleSystemComponent>(TEXT("RainParticles"));
+    RainParticles->SetupAttachment(RootComponent);
+    RainParticles->bAutoActivate = false;
 
-    // Initialize default weather settings
-    WeatherSettings.WeatherType = EWorld_WeatherType::Clear_Hot;
-    WeatherSettings.FogDensity = 0.02f;
-    WeatherSettings.FogColor = FLinearColor::White;
-    WeatherSettings.WindIntensity = 1.0f;
-    WeatherSettings.WindDirection = FVector(1, 0, 0);
-    WeatherSettings.Temperature = 25.0f;
-    WeatherSettings.Humidity = 0.5f;
+    SnowParticles = CreateDefaultSubobject<UParticleSystemComponent>(TEXT("SnowParticles"));
+    SnowParticles->SetupAttachment(RootComponent);
+    SnowParticles->bAutoActivate = false;
 
-    BiomeType = EBiomeType::Savanna;
-    EffectRadius = 15000.0f;
-    bDynamicWeather = true;
-    WeatherTransitionSpeed = 1.0f;
+    SandstormParticles = CreateDefaultSubobject<UParticleSystemComponent>(TEXT("SandstormParticles"));
+    SandstormParticles->SetupAttachment(RootComponent);
+    SandstormParticles->bAutoActivate = false;
+
+    // Create audio component
+    WeatherAudio = CreateDefaultSubobject<UAudioComponent>(TEXT("WeatherAudio"));
+    WeatherAudio->SetupAttachment(RootComponent);
+    WeatherAudio->bAutoActivate = false;
+
+    // Initialize weather data
+    CurrentWeather = FWorld_WeatherData();
+    ClimateZone = EWorld_ClimateZone::Temperate;
+    WeatherCycleDuration = 300.0f;
+    WeatherTransitionSpeed = 0.1f;
+    bEnableRandomWeather = true;
+    bEnableSeasonalChanges = true;
+
+    // Initialize timers
+    WeatherTimer = 0.0f;
+    TransitionTimer = 0.0f;
+    bIsTransitioning = false;
+
+    // Initialize references
+    FogActor = nullptr;
+    SunLight = nullptr;
+    RainSound = nullptr;
+    StormSound = nullptr;
+    WindSound = nullptr;
 }
 
 void AWorld_WeatherSystem::BeginPlay()
 {
     Super::BeginPlay();
+
+    // Find fog and lighting actors in the world
+    TArray<AActor*> FoundActors;
+    UGameplayStatics::GetAllActorsOfClass(GetWorld(), AExponentialHeightFog::StaticClass(), FoundActors);
+    if (FoundActors.Num() > 0)
+    {
+        FogActor = Cast<AExponentialHeightFog>(FoundActors[0]);
+    }
+
+    FoundActors.Empty();
+    UGameplayStatics::GetAllActorsOfClass(GetWorld(), ADirectionalLight::StaticClass(), FoundActors);
+    if (FoundActors.Num() > 0)
+    {
+        SunLight = Cast<ADirectionalLight>(FoundActors[0]);
+    }
+
+    // Initialize weather system
+    if (bEnableRandomWeather)
+    {
+        GenerateRandomWeather();
+    }
     
-    InitializeWeatherForBiome();
-    ApplyWeatherSettings();
-    CreateWindEffects();
+    ApplyWeatherEffects();
 }
 
 void AWorld_WeatherSystem::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
 
-    if (bDynamicWeather)
+    if (bEnableRandomWeather)
     {
-        UpdateDynamicWeather(DeltaTime);
+        UpdateWeatherCycle(DeltaTime);
     }
 
     if (bIsTransitioning)
     {
-        CurrentTransitionTime += DeltaTime;
-        float Alpha = FMath::Clamp(CurrentTransitionTime / TargetTransitionTime, 0.0f, 1.0f);
-
-        // Interpolate weather settings
-        WeatherSettings.FogDensity = FMath::Lerp(StartWeatherSettings.FogDensity, TargetWeatherSettings.FogDensity, Alpha);
-        WeatherSettings.FogColor = FLinearColor::LerpUsingHSV(StartWeatherSettings.FogColor, TargetWeatherSettings.FogColor, Alpha);
-        WeatherSettings.WindIntensity = FMath::Lerp(StartWeatherSettings.WindIntensity, TargetWeatherSettings.WindIntensity, Alpha);
-        WeatherSettings.Temperature = FMath::Lerp(StartWeatherSettings.Temperature, TargetWeatherSettings.Temperature, Alpha);
-        WeatherSettings.Humidity = FMath::Lerp(StartWeatherSettings.Humidity, TargetWeatherSettings.Humidity, Alpha);
-
-        ApplyWeatherSettings();
-
-        if (Alpha >= 1.0f)
-        {
-            bIsTransitioning = false;
-            WeatherSettings = TargetWeatherSettings;
-        }
+        ProcessWeatherTransition(DeltaTime);
     }
 }
 
-void AWorld_WeatherSystem::SetWeatherType(EWorld_WeatherType NewWeatherType)
+void AWorld_WeatherSystem::SetWeather(EWorld_WeatherType NewWeatherType, float NewIntensity)
 {
-    WeatherSettings.WeatherType = NewWeatherType;
-    
+    FWorld_WeatherData NewWeather;
+    NewWeather.WeatherType = NewWeatherType;
+    NewWeather.Intensity = FMath::Clamp(NewIntensity, 0.0f, 1.0f);
+
+    // Set appropriate values based on weather type
     switch (NewWeatherType)
     {
-        case EWorld_WeatherType::Clear_Hot:
-            WeatherSettings.FogDensity = 0.01f;
-            WeatherSettings.FogColor = FLinearColor(1.0f, 0.95f, 0.8f, 1.0f);
-            WeatherSettings.Temperature = 35.0f;
-            WeatherSettings.Humidity = 0.2f;
+        case EWorld_WeatherType::Clear:
+            NewWeather.WindSpeed = 5.0f;
+            NewWeather.Humidity = 30.0f;
+            NewWeather.Visibility = 1.0f;
             break;
-            
-        case EWorld_WeatherType::Foggy_Humid:
-            WeatherSettings.FogDensity = 0.08f;
-            WeatherSettings.FogColor = FLinearColor(0.7f, 0.8f, 0.6f, 1.0f);
-            WeatherSettings.Temperature = 22.0f;
-            WeatherSettings.Humidity = 0.9f;
+        case EWorld_WeatherType::Cloudy:
+            NewWeather.WindSpeed = 10.0f;
+            NewWeather.Humidity = 60.0f;
+            NewWeather.Visibility = 0.8f;
             break;
-            
-        case EWorld_WeatherType::Rainy_Dense:
-            WeatherSettings.FogDensity = 0.05f;
-            WeatherSettings.FogColor = FLinearColor(0.6f, 0.7f, 0.8f, 1.0f);
-            WeatherSettings.Temperature = 18.0f;
-            WeatherSettings.Humidity = 0.95f;
+        case EWorld_WeatherType::Rain:
+            NewWeather.WindSpeed = 15.0f;
+            NewWeather.Humidity = 90.0f;
+            NewWeather.Visibility = 0.6f;
             break;
-            
-        case EWorld_WeatherType::Sandstorm_Dry:
-            WeatherSettings.FogDensity = 0.12f;
-            WeatherSettings.FogColor = FLinearColor(0.9f, 0.7f, 0.4f, 1.0f);
-            WeatherSettings.Temperature = 42.0f;
-            WeatherSettings.Humidity = 0.1f;
-            WeatherSettings.WindIntensity = 3.0f;
+        case EWorld_WeatherType::Storm:
+            NewWeather.WindSpeed = 30.0f;
+            NewWeather.Humidity = 95.0f;
+            NewWeather.Visibility = 0.3f;
             break;
-            
-        case EWorld_WeatherType::Snowy_Windy:
-            WeatherSettings.FogDensity = 0.06f;
-            WeatherSettings.FogColor = FLinearColor(0.9f, 0.9f, 1.0f, 1.0f);
-            WeatherSettings.Temperature = -5.0f;
-            WeatherSettings.Humidity = 0.8f;
-            WeatherSettings.WindIntensity = 2.5f;
+        case EWorld_WeatherType::Fog:
+            NewWeather.WindSpeed = 2.0f;
+            NewWeather.Humidity = 95.0f;
+            NewWeather.Visibility = 0.2f;
+            break;
+        case EWorld_WeatherType::Sandstorm:
+            NewWeather.WindSpeed = 40.0f;
+            NewWeather.Humidity = 10.0f;
+            NewWeather.Visibility = 0.1f;
+            break;
+        case EWorld_WeatherType::Snow:
+            NewWeather.WindSpeed = 12.0f;
+            NewWeather.Humidity = 80.0f;
+            NewWeather.Visibility = 0.5f;
+            NewWeather.Temperature = -5.0f;
             break;
     }
-    
-    ApplyWeatherSettings();
+
+    StartWeatherTransition(NewWeather);
 }
 
-void AWorld_WeatherSystem::ApplyWeatherSettings()
+void AWorld_WeatherSystem::StartWeatherTransition(const FWorld_WeatherData& NewWeather)
 {
-    if (FogComponent)
-    {
-        FogComponent->SetFogDensity(WeatherSettings.FogDensity);
-        FogComponent->SetFogInscatteringColor(WeatherSettings.FogColor);
-    }
+    TargetWeather = NewWeather;
+    bIsTransitioning = true;
+    TransitionTimer = 0.0f;
+}
+
+void AWorld_WeatherSystem::SetClimateZone(EWorld_ClimateZone NewClimateZone)
+{
+    ClimateZone = NewClimateZone;
     
-    UpdateFogSettings();
+    if (bEnableRandomWeather)
+    {
+        GenerateRandomWeather();
+    }
 }
 
 void AWorld_WeatherSystem::UpdateFogSettings()
 {
-    if (!FogComponent)
+    if (!FogActor || !FogActor->GetComponent())
+    {
         return;
-
-    // Adjust fog settings based on weather type
-    switch (WeatherSettings.WeatherType)
-    {
-        case EWorld_WeatherType::Foggy_Humid:
-            FogComponent->SetFogHeightFalloff(0.1f);
-            FogComponent->SetStartDistance(100.0f);
-            break;
-            
-        case EWorld_WeatherType::Sandstorm_Dry:
-            FogComponent->SetFogHeightFalloff(0.3f);
-            FogComponent->SetStartDistance(500.0f);
-            break;
-            
-        case EWorld_WeatherType::Snowy_Windy:
-            FogComponent->SetFogHeightFalloff(0.15f);
-            FogComponent->SetStartDistance(200.0f);
-            break;
-            
-        default:
-            FogComponent->SetFogHeightFalloff(0.2f);
-            FogComponent->SetStartDistance(1000.0f);
-            break;
     }
-}
 
-void AWorld_WeatherSystem::CreateWindEffects()
-{
-    UWorld* World = GetWorld();
-    if (!World)
-        return;
+    float FogDensity = 0.02f;
+    float FogHeight = 1000.0f;
+    FLinearColor FogColor = FLinearColor::Gray;
 
-    // Clear existing wind markers
-    for (APointLight* Marker : WindMarkers)
+    switch (CurrentWeather.WeatherType)
     {
-        if (IsValid(Marker))
-        {
-            Marker->Destroy();
-        }
-    }
-    WindMarkers.Empty();
-
-    // Create new wind markers based on wind intensity
-    int32 NumMarkers = FMath::RoundToInt(WeatherSettings.WindIntensity * 3.0f);
-    for (int32 i = 0; i < NumMarkers; ++i)
-    {
-        FVector SpawnLocation = GetActorLocation() + FMath::VRand() * EffectRadius * 0.5f;
-        SpawnLocation.Z = GetActorLocation().Z + FMath::RandRange(500.0f, 1500.0f);
-
-        APointLight* WindMarker = World->SpawnActor<APointLight>(SpawnLocation, FRotator::ZeroRotator);
-        if (WindMarker)
-        {
-            UPointLightComponent* LightComp = WindMarker->GetPointLightComponent();
-            if (LightComp)
-            {
-                LightComp->SetIntensity(0.5f * WeatherSettings.WindIntensity);
-                LightComp->SetLightColor(FLinearColor(0.3f, 0.8f, 1.0f, 1.0f));
-                LightComp->SetAttenuationRadius(2000.0f);
-                LightComp->SetCastShadows(false);
-            }
-            
-            WindMarkers.Add(WindMarker);
-        }
-    }
-}
-
-FWorld_WeatherSettings AWorld_WeatherSystem::GetCurrentWeatherSettings() const
-{
-    return WeatherSettings;
-}
-
-bool AWorld_WeatherSystem::IsPlayerInWeatherZone(APawn* Player) const
-{
-    if (!Player)
-        return false;
-
-    float Distance = FVector::Dist(GetActorLocation(), Player->GetActorLocation());
-    return Distance <= EffectRadius;
-}
-
-void AWorld_WeatherSystem::TransitionToWeather(EWorld_WeatherType TargetWeather, float TransitionTime)
-{
-    if (bIsTransitioning)
-        return;
-
-    StartWeatherSettings = WeatherSettings;
-    TargetWeatherSettings = WeatherSettings;
-    TargetWeatherSettings.WeatherType = TargetWeather;
-    
-    // Set target weather properties
-    SetWeatherType(TargetWeather);
-    TargetWeatherSettings = WeatherSettings;
-    
-    // Restore current settings for interpolation
-    WeatherSettings = StartWeatherSettings;
-    
-    bIsTransitioning = true;
-    CurrentTransitionTime = 0.0f;
-    TargetTransitionTime = TransitionTime;
-}
-
-void AWorld_WeatherSystem::InitializeWeatherForBiome()
-{
-    WeatherSettings = GetDefaultSettingsForBiome(BiomeType);
-    SetWeatherType(WeatherSettings.WeatherType);
-}
-
-void AWorld_WeatherSystem::UpdateDynamicWeather(float DeltaTime)
-{
-    // Simple dynamic weather variation
-    static float WeatherTimer = 0.0f;
-    WeatherTimer += DeltaTime * WeatherTransitionSpeed;
-    
-    float Variation = FMath::Sin(WeatherTimer * 0.1f) * 0.2f;
-    
-    // Apply subtle variations to current weather
-    if (FogComponent)
-    {
-        float BaseDensity = WeatherSettings.FogDensity;
-        float VariedDensity = BaseDensity + (BaseDensity * Variation);
-        FogComponent->SetFogDensity(FMath::Max(0.001f, VariedDensity));
-    }
-}
-
-FWorld_WeatherSettings AWorld_WeatherSystem::GetDefaultSettingsForBiome(EBiomeType Biome) const
-{
-    FWorld_WeatherSettings DefaultSettings;
-    
-    switch (Biome)
-    {
-        case EBiomeType::Savanna:
-            DefaultSettings.WeatherType = EWorld_WeatherType::Clear_Hot;
+        case EWorld_WeatherType::Clear:
+            FogDensity = 0.005f;
+            FogColor = FLinearColor(0.8f, 0.9f, 1.0f, 1.0f);
             break;
-        case EBiomeType::Swamp:
-            DefaultSettings.WeatherType = EWorld_WeatherType::Foggy_Humid;
+        case EWorld_WeatherType::Fog:
+            FogDensity = 0.1f * CurrentWeather.Intensity;
+            FogHeight = 500.0f;
+            FogColor = FLinearColor(0.7f, 0.7f, 0.8f, 1.0f);
             break;
-        case EBiomeType::Forest:
-            DefaultSettings.WeatherType = EWorld_WeatherType::Rainy_Dense;
+        case EWorld_WeatherType::Storm:
+            FogDensity = 0.05f;
+            FogColor = FLinearColor(0.3f, 0.3f, 0.4f, 1.0f);
             break;
-        case EBiomeType::Desert:
-            DefaultSettings.WeatherType = EWorld_WeatherType::Sandstorm_Dry;
-            break;
-        case EBiomeType::Mountain:
-            DefaultSettings.WeatherType = EWorld_WeatherType::Snowy_Windy;
+        case EWorld_WeatherType::Sandstorm:
+            FogDensity = 0.08f * CurrentWeather.Intensity;
+            FogColor = FLinearColor(0.8f, 0.6f, 0.4f, 1.0f);
             break;
         default:
-            DefaultSettings.WeatherType = EWorld_WeatherType::Clear_Hot;
+            FogDensity = 0.02f;
+            break;
+    }
+
+    FogActor->GetComponent()->SetFogDensity(FogDensity);
+    FogActor->GetComponent()->SetFogHeightFalloff(FogHeight);
+    FogActor->GetComponent()->SetFogInscatteringColor(FogColor);
+}
+
+void AWorld_WeatherSystem::UpdateLightingSettings()
+{
+    if (!SunLight || !SunLight->GetLightComponent())
+    {
+        return;
+    }
+
+    float LightIntensity = 3.0f;
+    FLinearColor LightColor = FLinearColor::White;
+
+    switch (CurrentWeather.WeatherType)
+    {
+        case EWorld_WeatherType::Clear:
+            LightIntensity = 3.0f;
+            LightColor = FLinearColor(1.0f, 1.0f, 0.9f, 1.0f);
+            break;
+        case EWorld_WeatherType::Cloudy:
+            LightIntensity = 2.0f;
+            LightColor = FLinearColor(0.8f, 0.8f, 0.9f, 1.0f);
+            break;
+        case EWorld_WeatherType::Storm:
+            LightIntensity = 1.0f;
+            LightColor = FLinearColor(0.5f, 0.5f, 0.6f, 1.0f);
+            break;
+        case EWorld_WeatherType::Rain:
+            LightIntensity = 1.5f;
+            LightColor = FLinearColor(0.7f, 0.7f, 0.8f, 1.0f);
+            break;
+        case EWorld_WeatherType::Fog:
+            LightIntensity = 1.2f;
+            LightColor = FLinearColor(0.8f, 0.8f, 0.9f, 1.0f);
+            break;
+        case EWorld_WeatherType::Sandstorm:
+            LightIntensity = 0.8f;
+            LightColor = FLinearColor(1.0f, 0.8f, 0.6f, 1.0f);
+            break;
+        default:
+            break;
+    }
+
+    SunLight->GetLightComponent()->SetIntensity(LightIntensity);
+    SunLight->GetLightComponent()->SetLightColor(LightColor);
+}
+
+void AWorld_WeatherSystem::UpdateParticleEffects()
+{
+    // Deactivate all particles first
+    RainParticles->Deactivate();
+    SnowParticles->Deactivate();
+    SandstormParticles->Deactivate();
+
+    // Activate appropriate particle system
+    switch (CurrentWeather.WeatherType)
+    {
+        case EWorld_WeatherType::Rain:
+        case EWorld_WeatherType::Storm:
+            RainParticles->Activate();
+            break;
+        case EWorld_WeatherType::Snow:
+            SnowParticles->Activate();
+            break;
+        case EWorld_WeatherType::Sandstorm:
+            SandstormParticles->Activate();
+            break;
+        default:
+            break;
+    }
+}
+
+void AWorld_WeatherSystem::UpdateAudioEffects()
+{
+    if (!WeatherAudio)
+    {
+        return;
+    }
+
+    WeatherAudio->Stop();
+
+    USoundCue* SoundToPlay = nullptr;
+    float Volume = CurrentWeather.Intensity;
+
+    switch (CurrentWeather.WeatherType)
+    {
+        case EWorld_WeatherType::Rain:
+            SoundToPlay = RainSound;
+            break;
+        case EWorld_WeatherType::Storm:
+            SoundToPlay = StormSound;
+            Volume *= 1.5f;
+            break;
+        case EWorld_WeatherType::Sandstorm:
+        case EWorld_WeatherType::Snow:
+            SoundToPlay = WindSound;
+            break;
+        default:
+            break;
+    }
+
+    if (SoundToPlay)
+    {
+        WeatherAudio->SetSound(SoundToPlay);
+        WeatherAudio->SetVolumeMultiplier(Volume);
+        WeatherAudio->Play();
+    }
+}
+
+void AWorld_WeatherSystem::GenerateRandomWeather()
+{
+    FWorld_WeatherData NewWeather = GenerateWeatherForClimate();
+    StartWeatherTransition(NewWeather);
+}
+
+bool AWorld_WeatherSystem::IsStormActive() const
+{
+    return CurrentWeather.WeatherType == EWorld_WeatherType::Storm ||
+           CurrentWeather.WeatherType == EWorld_WeatherType::Sandstorm;
+}
+
+float AWorld_WeatherSystem::GetVisibilityMultiplier() const
+{
+    return CurrentWeather.Visibility;
+}
+
+FVector AWorld_WeatherSystem::GetWindDirection() const
+{
+    // Generate wind direction based on weather type
+    FVector WindDir = FVector::ForwardVector;
+    
+    switch (CurrentWeather.WeatherType)
+    {
+        case EWorld_WeatherType::Storm:
+        case EWorld_WeatherType::Sandstorm:
+            // Variable wind direction for storms
+            WindDir = FVector(
+                FMath::Sin(GetWorld()->GetTimeSeconds() * 0.5f),
+                FMath::Cos(GetWorld()->GetTimeSeconds() * 0.3f),
+                0.0f
+            ).GetSafeNormal();
+            break;
+        default:
+            WindDir = FVector(1.0f, 0.2f, 0.0f).GetSafeNormal();
+            break;
+    }
+
+    return WindDir;
+}
+
+float AWorld_WeatherSystem::GetWindStrength() const
+{
+    return CurrentWeather.WindSpeed * CurrentWeather.Intensity;
+}
+
+void AWorld_WeatherSystem::UpdateWeatherCycle(float DeltaTime)
+{
+    WeatherTimer += DeltaTime;
+    
+    if (WeatherTimer >= WeatherCycleDuration)
+    {
+        WeatherTimer = 0.0f;
+        GenerateRandomWeather();
+    }
+}
+
+void AWorld_WeatherSystem::ProcessWeatherTransition(float DeltaTime)
+{
+    TransitionTimer += DeltaTime * WeatherTransitionSpeed;
+    
+    if (TransitionTimer >= 1.0f)
+    {
+        // Transition complete
+        CurrentWeather = TargetWeather;
+        bIsTransitioning = false;
+        TransitionTimer = 0.0f;
+        
+        ApplyWeatherEffects();
+    }
+    else
+    {
+        // Interpolate weather values
+        float Alpha = TransitionTimer;
+        
+        CurrentWeather.Intensity = FMath::Lerp(CurrentWeather.Intensity, TargetWeather.Intensity, Alpha);
+        CurrentWeather.WindSpeed = FMath::Lerp(CurrentWeather.WindSpeed, TargetWeather.WindSpeed, Alpha);
+        CurrentWeather.Humidity = FMath::Lerp(CurrentWeather.Humidity, TargetWeather.Humidity, Alpha);
+        CurrentWeather.Temperature = FMath::Lerp(CurrentWeather.Temperature, TargetWeather.Temperature, Alpha);
+        CurrentWeather.Visibility = FMath::Lerp(CurrentWeather.Visibility, TargetWeather.Visibility, Alpha);
+        
+        // Update weather type when halfway through transition
+        if (Alpha >= 0.5f && CurrentWeather.WeatherType != TargetWeather.WeatherType)
+        {
+            CurrentWeather.WeatherType = TargetWeather.WeatherType;
+            UpdateParticleEffects();
+            UpdateAudioEffects();
+        }
+        
+        // Update visual effects during transition
+        UpdateFogSettings();
+        UpdateLightingSettings();
+    }
+}
+
+FWorld_WeatherData AWorld_WeatherSystem::GenerateWeatherForClimate() const
+{
+    FWorld_WeatherData NewWeather;
+    
+    // Generate weather based on climate zone
+    TArray<EWorld_WeatherType> PossibleWeather;
+    
+    switch (ClimateZone)
+    {
+        case EWorld_ClimateZone::Tropical:
+            PossibleWeather.Add(EWorld_WeatherType::Clear);
+            PossibleWeather.Add(EWorld_WeatherType::Cloudy);
+            PossibleWeather.Add(EWorld_WeatherType::Rain);
+            PossibleWeather.Add(EWorld_WeatherType::Storm);
+            break;
+        case EWorld_ClimateZone::Temperate:
+            PossibleWeather.Add(EWorld_WeatherType::Clear);
+            PossibleWeather.Add(EWorld_WeatherType::Cloudy);
+            PossibleWeather.Add(EWorld_WeatherType::Rain);
+            PossibleWeather.Add(EWorld_WeatherType::Fog);
+            break;
+        case EWorld_ClimateZone::Arid:
+            PossibleWeather.Add(EWorld_WeatherType::Clear);
+            PossibleWeather.Add(EWorld_WeatherType::Sandstorm);
+            break;
+        case EWorld_ClimateZone::Polar:
+            PossibleWeather.Add(EWorld_WeatherType::Cloudy);
+            PossibleWeather.Add(EWorld_WeatherType::Snow);
+            PossibleWeather.Add(EWorld_WeatherType::Fog);
+            break;
+        case EWorld_ClimateZone::Mountain:
+            PossibleWeather.Add(EWorld_WeatherType::Clear);
+            PossibleWeather.Add(EWorld_WeatherType::Cloudy);
+            PossibleWeather.Add(EWorld_WeatherType::Fog);
+            PossibleWeather.Add(EWorld_WeatherType::Snow);
             break;
     }
     
-    return DefaultSettings;
+    if (PossibleWeather.Num() > 0)
+    {
+        int32 RandomIndex = FMath::RandRange(0, PossibleWeather.Num() - 1);
+        NewWeather.WeatherType = PossibleWeather[RandomIndex];
+    }
+    
+    // Generate random intensity and other parameters
+    NewWeather.Intensity = FMath::RandRange(0.3f, 1.0f);
+    
+    return NewWeather;
+}
+
+void AWorld_WeatherSystem::ApplyWeatherEffects()
+{
+    UpdateFogSettings();
+    UpdateLightingSettings();
+    UpdateParticleEffects();
+    UpdateAudioEffects();
+}
+
+void AWorld_WeatherSystem::CleanupWeatherEffects()
+{
+    if (RainParticles)
+    {
+        RainParticles->Deactivate();
+    }
+    
+    if (SnowParticles)
+    {
+        SnowParticles->Deactivate();
+    }
+    
+    if (SandstormParticles)
+    {
+        SandstormParticles->Deactivate();
+    }
+    
+    if (WeatherAudio)
+    {
+        WeatherAudio->Stop();
+    }
 }
