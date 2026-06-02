@@ -2,59 +2,87 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
-#include "Engine/World.h"
+#include "Engine/Engine.h"
 #include "Components/AudioComponent.h"
 #include "Sound/SoundCue.h"
-#include "Sound/SoundWave.h"
-#include "Engine/TriggerVolume.h"
-#include "GameFramework/Actor.h"
+#include "../Narrative/Narr_SurvivalNarrativeCore.h"
+#include "AudioTypes.h"
 #include "Audio_NarrativeIntegration.generated.h"
 
 UENUM(BlueprintType)
-enum class EAudio_NarrativeContext : uint8
+enum class EAudio_NarrativeIntensity : uint8
 {
-    Atmospheric     UMETA(DisplayName = "Atmospheric"),
-    Survival        UMETA(DisplayName = "Survival"),
-    Danger          UMETA(DisplayName = "Danger"),
-    Discovery       UMETA(DisplayName = "Discovery"),
-    Crafting        UMETA(DisplayName = "Crafting")
+    Calm = 0        UMETA(DisplayName = "Calm"),
+    Tension = 1     UMETA(DisplayName = "Tension"),
+    Danger = 2      UMETA(DisplayName = "Danger"),
+    Combat = 3      UMETA(DisplayName = "Combat"),
+    Discovery = 4   UMETA(DisplayName = "Discovery")
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FAudio_NarrativeClip
+struct TRANSPERSONALGAME_API FAudio_NarrativeAudioState
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative Audio")
-    FString ClipName;
+    EAudio_NarrativeIntensity CurrentIntensity;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative Audio")
-    FString AudioURL;
+    float IntensityLevel;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative Audio")
-    EAudio_NarrativeContext Context;
+    FString CurrentPhase;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative Audio")
-    float Duration;
+    bool bIsInStoryLocation;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative Audio")
-    bool bIsLooping;
+    float ThreatLevel;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative Audio")
-    float Volume;
-
-    FAudio_NarrativeClip()
+    FAudio_NarrativeAudioState()
     {
-        ClipName = TEXT("");
-        AudioURL = TEXT("");
-        Context = EAudio_NarrativeContext::Atmospheric;
-        Duration = 0.0f;
-        bIsLooping = false;
-        Volume = 1.0f;
+        CurrentIntensity = EAudio_NarrativeIntensity::Calm;
+        IntensityLevel = 0.0f;
+        CurrentPhase = TEXT("Awakening");
+        bIsInStoryLocation = false;
+        ThreatLevel = 0.0f;
     }
 };
 
-UCLASS(ClassGroup=(Audio), meta=(BlueprintSpawnableComponent))
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FAudio_NarrativeAudioConfig
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Config")
+    TSoftObjectPtr<USoundCue> CalmMusic;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Config")
+    TSoftObjectPtr<USoundCue> TensionMusic;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Config")
+    TSoftObjectPtr<USoundCue> DangerMusic;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Config")
+    TSoftObjectPtr<USoundCue> CombatMusic;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Config")
+    TSoftObjectPtr<USoundCue> DiscoveryMusic;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Config")
+    float TransitionDuration;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Config")
+    float IntensityThreshold;
+
+    FAudio_NarrativeAudioConfig()
+    {
+        TransitionDuration = 2.0f;
+        IntensityThreshold = 0.3f;
+    }
+};
+
+UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
 class TRANSPERSONALGAME_API UAudio_NarrativeIntegration : public UActorComponent
 {
     GENERATED_BODY()
@@ -65,81 +93,59 @@ public:
 protected:
     virtual void BeginPlay() override;
 
-    // Narrative audio clips database
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative Audio")
-    TArray<FAudio_NarrativeClip> NarrativeClips;
+    FAudio_NarrativeAudioState CurrentAudioState;
 
-    // Audio components for playback
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio Components")
-    TObjectPtr<UAudioComponent> PrimaryAudioComponent;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative Audio")
+    FAudio_NarrativeAudioConfig AudioConfig;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio Components")
-    TObjectPtr<UAudioComponent> SecondaryAudioComponent;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    UAudioComponent* MusicAudioComponent;
 
-    // Current playback state
-    UPROPERTY(BlueprintReadOnly, Category = "Audio State")
-    bool bIsPlayingNarrative;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    UAudioComponent* AmbienceAudioComponent;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Audio State")
-    EAudio_NarrativeContext CurrentContext;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative Audio")
+    float UpdateInterval;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Settings")
-    float FadeInDuration;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Settings")
-    float FadeOutDuration;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Settings")
-    float SpatialRange;
+    FTimerHandle AudioUpdateTimer;
 
 public:
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    // Core narrative audio functions
     UFUNCTION(BlueprintCallable, Category = "Narrative Audio")
-    void PlayNarrativeClip(const FString& ClipName, bool bInterruptCurrent = false);
-
-    UFUNCTION(BlueprintCallable, Category = "Narrative Audio")
-    void PlayContextualNarrative(EAudio_NarrativeContext Context, bool bRandomSelection = true);
+    void OnNarrativePhaseChanged(const FString& NewPhase, float IntensityLevel);
 
     UFUNCTION(BlueprintCallable, Category = "Narrative Audio")
-    void StopNarrativeAudio(bool bFadeOut = true);
+    void OnThreatLevelChanged(float NewThreatLevel);
 
     UFUNCTION(BlueprintCallable, Category = "Narrative Audio")
-    void RegisterNarrativeClip(const FAudio_NarrativeClip& NewClip);
+    void OnStoryLocationEntered(const FString& LocationName);
 
-    // Integration with narrative triggers
-    UFUNCTION(BlueprintCallable, Category = "Narrative Integration")
-    void OnNarrativeTriggerEntered(const FString& TriggerID, EAudio_NarrativeContext Context);
+    UFUNCTION(BlueprintCallable, Category = "Narrative Audio")
+    void OnStoryLocationExited();
 
-    UFUNCTION(BlueprintCallable, Category = "Narrative Integration")
-    void OnNarrativeTriggerExited(const FString& TriggerID);
+    UFUNCTION(BlueprintCallable, Category = "Narrative Audio")
+    void UpdateAudioIntensity();
 
-    // Audio state queries
-    UFUNCTION(BlueprintPure, Category = "Audio State")
-    bool IsPlayingNarrative() const { return bIsPlayingNarrative; }
+    UFUNCTION(BlueprintCallable, Category = "Narrative Audio")
+    void TransitionToIntensity(EAudio_NarrativeIntensity NewIntensity);
 
-    UFUNCTION(BlueprintPure, Category = "Audio State")
-    EAudio_NarrativeContext GetCurrentContext() const { return CurrentContext; }
+    UFUNCTION(BlueprintPure, Category = "Narrative Audio")
+    EAudio_NarrativeIntensity GetCurrentIntensity() const { return CurrentAudioState.CurrentIntensity; }
 
-    UFUNCTION(BlueprintPure, Category = "Audio State")
-    TArray<FAudio_NarrativeClip> GetClipsByContext(EAudio_NarrativeContext Context) const;
+    UFUNCTION(BlueprintPure, Category = "Narrative Audio")
+    float GetIntensityLevel() const { return CurrentAudioState.IntensityLevel; }
+
+    UFUNCTION(BlueprintCallable, Category = "Narrative Audio")
+    void SetMusicVolume(float Volume);
+
+    UFUNCTION(BlueprintCallable, Category = "Narrative Audio")
+    void SetAmbienceVolume(float Volume);
 
 private:
-    // Internal audio management
-    void InitializeAudioComponents();
-    void LoadPredefinedNarrativeClips();
-    FAudio_NarrativeClip* FindClipByName(const FString& ClipName);
-    void HandleAudioFinished();
-
-    // Fade management
-    void StartFadeIn(UAudioComponent* AudioComp, float Duration);
-    void StartFadeOut(UAudioComponent* AudioComp, float Duration);
-
-    // Current fade state
-    bool bIsFading;
-    float FadeTimer;
-    float FadeTargetDuration;
-    UAudioComponent* FadingComponent;
-    bool bFadeIn;
+    void UpdateAudioState();
+    void PlayMusicForIntensity(EAudio_NarrativeIntensity Intensity);
+    USoundCue* GetSoundCueForIntensity(EAudio_NarrativeIntensity Intensity);
+    void CrossfadeMusic(USoundCue* NewMusic);
 };
