@@ -1,9 +1,22 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/GameInstanceSubsystem.h"
-#include "SharedTypes.h"
+#include "Subsystems/GameInstanceSubsystem.h"
+#include "Engine/Engine.h"
+#include "../SharedTypes.h"
 #include "Narr_StoryManager.generated.h"
+
+UENUM(BlueprintType)
+enum class ENarr_StoryPhase : uint8
+{
+    Awakening       UMETA(DisplayName = "Awakening"),
+    FirstHunt       UMETA(DisplayName = "First Hunt"),
+    TribalContact   UMETA(DisplayName = "Tribal Contact"),
+    TerritoryWars   UMETA(DisplayName = "Territory Wars"),
+    ApexChallenge   UMETA(DisplayName = "Apex Challenge"),
+    TribalLeader    UMETA(DisplayName = "Tribal Leader"),
+    LegendaryHunter UMETA(DisplayName = "Legendary Hunter")
+};
 
 USTRUCT(BlueprintType)
 struct TRANSPERSONALGAME_API FNarr_StoryEvent
@@ -20,44 +33,59 @@ struct TRANSPERSONALGAME_API FNarr_StoryEvent
     FString EventDescription;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    ENarr_StoryPhase RequiredPhase;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
     bool bIsCompleted;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    int32 Priority;
+    bool bIsRepeatable;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    int32 CompletionCount;
 
     FNarr_StoryEvent()
     {
         EventID = TEXT("");
         EventTitle = TEXT("");
         EventDescription = TEXT("");
+        RequiredPhase = ENarr_StoryPhase::Awakening;
         bIsCompleted = false;
-        Priority = 0;
+        bIsRepeatable = false;
+        CompletionCount = 0;
     }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FNarr_DialogueLine
+struct TRANSPERSONALGAME_API FNarr_CharacterArc
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    FString SpeakerName;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
+    FString CharacterName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    FString DialogueText;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
+    ENPCRole CharacterRole;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    FString AudioPath;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
+    int32 RelationshipLevel;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    float Duration;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
+    bool bIsTrusted;
 
-    FNarr_DialogueLine()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
+    bool bIsRival;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
+    TArray<FString> CompletedInteractions;
+
+    FNarr_CharacterArc()
     {
-        SpeakerName = TEXT("");
-        DialogueText = TEXT("");
-        AudioPath = TEXT("");
-        Duration = 3.0f;
+        CharacterName = TEXT("");
+        CharacterRole = ENPCRole::Gatherer;
+        RelationshipLevel = 0;
+        bIsTrusted = false;
+        bIsRival = false;
     }
 };
 
@@ -67,39 +95,85 @@ class TRANSPERSONALGAME_API UNarr_StoryManager : public UGameInstanceSubsystem
     GENERATED_BODY()
 
 public:
-    UNarr_StoryManager();
-
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
 
+    // Story Progression
+    UFUNCTION(BlueprintCallable, Category = "Story")
+    void AdvanceStoryPhase();
+
+    UFUNCTION(BlueprintCallable, Category = "Story")
+    ENarr_StoryPhase GetCurrentStoryPhase() const { return CurrentStoryPhase; }
+
+    UFUNCTION(BlueprintCallable, Category = "Story")
+    void SetStoryPhase(ENarr_StoryPhase NewPhase);
+
+    // Story Events
     UFUNCTION(BlueprintCallable, Category = "Story")
     void TriggerStoryEvent(const FString& EventID);
 
     UFUNCTION(BlueprintCallable, Category = "Story")
-    bool IsStoryEventCompleted(const FString& EventID);
+    bool IsStoryEventCompleted(const FString& EventID) const;
 
     UFUNCTION(BlueprintCallable, Category = "Story")
-    void PlayDialogue(const FString& DialogueID);
+    void CompleteStoryEvent(const FString& EventID);
 
     UFUNCTION(BlueprintCallable, Category = "Story")
-    void RegisterStoryEvent(const FNarr_StoryEvent& NewEvent);
+    TArray<FNarr_StoryEvent> GetAvailableStoryEvents() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Story")
-    TArray<FNarr_StoryEvent> GetActiveStoryEvents();
+    // Character Relationships
+    UFUNCTION(BlueprintCallable, Category = "Character")
+    void UpdateCharacterRelationship(const FString& CharacterName, int32 RelationshipChange);
+
+    UFUNCTION(BlueprintCallable, Category = "Character")
+    int32 GetCharacterRelationshipLevel(const FString& CharacterName) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Character")
+    void SetCharacterTrusted(const FString& CharacterName, bool bTrusted);
+
+    UFUNCTION(BlueprintCallable, Category = "Character")
+    bool IsCharacterTrusted(const FString& CharacterName) const;
+
+    // Player Progress Tracking
+    UFUNCTION(BlueprintCallable, Category = "Progress")
+    void RecordPlayerAction(const FString& ActionType, const FString& ActionDetails);
+
+    UFUNCTION(BlueprintCallable, Category = "Progress")
+    int32 GetPlayerActionCount(const FString& ActionType) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Progress")
+    void UpdateSurvivalMilestone(const FString& MilestoneType, int32 Value);
+
+    // Narrative Context
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    FString GetContextualNarration(const FString& Situation) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    void TriggerEnvironmentalNarration(const FString& LocationTag);
 
 protected:
-    UPROPERTY(BlueprintReadOnly, Category = "Story")
-    TArray<FNarr_StoryEvent> StoryEvents;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    ENarr_StoryPhase CurrentStoryPhase;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Story")
-    TMap<FString, FNarr_DialogueLine> DialogueDatabase;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    TMap<FString, FNarr_StoryEvent> StoryEvents;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Story")
-    FString CurrentDialogueID;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
+    TMap<FString, FNarr_CharacterArc> CharacterArcs;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Story")
-    bool bIsDialoguePlaying;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Progress")
+    TMap<FString, int32> PlayerActionCounts;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Progress")
+    TMap<FString, int32> SurvivalMilestones;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    TMap<FString, FString> ContextualNarrations;
 
 private:
     void InitializeStoryEvents();
-    void LoadDialogueDatabase();
+    void InitializeCharacterArcs();
+    void InitializeNarrations();
+    void CheckStoryPhaseProgression();
+    bool ValidateStoryPhaseAdvancement(ENarr_StoryPhase TargetPhase) const;
 };
