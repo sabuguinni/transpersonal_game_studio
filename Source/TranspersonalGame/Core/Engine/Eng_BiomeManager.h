@@ -3,23 +3,17 @@
 #include "CoreMinimal.h"
 #include "Engine/World.h"
 #include "Subsystems/WorldSubsystem.h"
-#include "Components/ActorComponent.h"
-#include "../../SharedTypes.h"
+#include "Components/StaticMeshComponent.h"
+#include "../SharedTypes.h"
 #include "Eng_BiomeManager.generated.h"
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEng_BiomeConfiguration
+struct TRANSPERSONALGAME_API FEng_BiomeData
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    EBiomeType BiomeType = EBiomeType::Savanna;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    FVector CenterLocation = FVector::ZeroVector;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float Radius = 15000.0f;
+    EBiomeType BiomeType = EBiomeType::Grassland;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
     float Temperature = 25.0f;
@@ -28,29 +22,55 @@ struct TRANSPERSONALGAME_API FEng_BiomeConfiguration
     float Humidity = 0.5f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float Density = 1.0f;
+    float Elevation = 0.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    TArray<FString> AllowedVegetation;
+    TArray<TSubclassOf<class AActor>> FoliageTypes;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    TArray<FString> AllowedDinosaurs;
+    TArray<TSubclassOf<class APawn>> DinosaurTypes;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    int32 MaxActors = 4000;
+    int32 MaxActorsPerBiome = 4000;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    int32 CurrentActorCount = 0;
-
-    FEng_BiomeConfiguration()
+    FEng_BiomeData()
     {
-        AllowedVegetation.Add("Tree");
-        AllowedVegetation.Add("Bush");
-        AllowedDinosaurs.Add("TRex");
-        AllowedDinosaurs.Add("Velociraptor");
+        Temperature = 25.0f;
+        Humidity = 0.5f;
+        Elevation = 0.0f;
+        MaxActorsPerBiome = 4000;
     }
 };
 
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FEng_BiomeRegion
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Region")
+    FVector Center = FVector::ZeroVector;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Region")
+    float Radius = 10000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Region")
+    FEng_BiomeData BiomeData;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Region")
+    TArray<AActor*> SpawnedActors;
+
+    FEng_BiomeRegion()
+    {
+        Center = FVector::ZeroVector;
+        Radius = 10000.0f;
+    }
+};
+
+/**
+ * Engine Architect's Biome Management System
+ * Manages biome distribution, environmental parameters, and actor spawning limits
+ * Critical for maintaining performance with max 20,000 total actors across 5 biomes
+ */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UEng_BiomeManager : public UWorldSubsystem
 {
@@ -59,58 +79,86 @@ class TRANSPERSONALGAME_API UEng_BiomeManager : public UWorldSubsystem
 public:
     UEng_BiomeManager();
 
-    // USubsystem interface
+    // UWorldSubsystem interface
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
-    UFUNCTION(BlueprintCallable, Category = "Biome")
+    // Biome Management
+    UFUNCTION(BlueprintCallable, Category = "Biome Management")
     void InitializeBiomes();
 
-    UFUNCTION(BlueprintCallable, Category = "Biome")
+    UFUNCTION(BlueprintCallable, Category = "Biome Management")
     EBiomeType GetBiomeAtLocation(const FVector& Location) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Biome")
-    FEng_BiomeConfiguration GetBiomeConfiguration(EBiomeType BiomeType) const;
+    UFUNCTION(BlueprintCallable, Category = "Biome Management")
+    FEng_BiomeData GetBiomeData(EBiomeType BiomeType) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Biome")
-    bool CanSpawnActorInBiome(EBiomeType BiomeType, const FString& ActorType) const;
+    UFUNCTION(BlueprintCallable, Category = "Biome Management")
+    bool CanSpawnActorInBiome(EBiomeType BiomeType) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Biome")
-    void RegisterActorInBiome(EBiomeType BiomeType);
+    UFUNCTION(BlueprintCallable, Category = "Biome Management")
+    void RegisterActorToBiome(AActor* Actor, EBiomeType BiomeType);
 
-    UFUNCTION(BlueprintCallable, Category = "Biome")
-    void UnregisterActorFromBiome(EBiomeType BiomeType);
+    UFUNCTION(BlueprintCallable, Category = "Biome Management")
+    void UnregisterActorFromBiome(AActor* Actor, EBiomeType BiomeType);
 
-    UFUNCTION(BlueprintCallable, Category = "Biome")
-    TArray<FVector> GetSpawnLocationsInBiome(EBiomeType BiomeType, int32 Count) const;
+    // Performance Management
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    int32 GetTotalActorCount() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Biome")
-    float GetBiomeTemperature(const FVector& Location) const;
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    int32 GetBiomeActorCount(EBiomeType BiomeType) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Biome")
-    float GetBiomeHumidity(const FVector& Location) const;
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void CleanupExcessActors();
 
-    UFUNCTION(BlueprintCallable, Category = "Biome")
-    void UpdateBiomeActorCounts();
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    bool IsWithinActorLimits() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Biome")
-    bool IsBiomeOvercrowded(EBiomeType BiomeType) const;
+    // Environmental Parameters
+    UFUNCTION(BlueprintCallable, Category = "Environment")
+    float GetTemperatureAtLocation(const FVector& Location) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Biome")
-    void CleanupOvercrowdedBiomes();
+    UFUNCTION(BlueprintCallable, Category = "Environment")
+    float GetHumidityAtLocation(const FVector& Location) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Environment")
+    float GetElevationAtLocation(const FVector& Location) const;
+
+    // Biome Transitions
+    UFUNCTION(BlueprintCallable, Category = "Transitions")
+    float GetBiomeTransitionWeight(const FVector& Location, EBiomeType BiomeType) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Transitions")
+    TArray<EBiomeType> GetNearbyBiomes(const FVector& Location, float Radius) const;
 
 protected:
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    TMap<EBiomeType, FEng_BiomeConfiguration> BiomeConfigurations;
+    // Biome Regions
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biomes")
+    TMap<EBiomeType, FEng_BiomeRegion> BiomeRegions;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    int32 GlobalMaxActors = 20000;
+    // Performance Limits
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    int32 MaxTotalActors = 20000;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    int32 GlobalCurrentActors = 0;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    int32 MaxActorsPerBiome = 4000;
+
+    // Biome Configuration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
+    TMap<EBiomeType, FEng_BiomeData> BiomeConfigurations;
+
+    // Internal Methods
+    void SetupDefaultBiomes();
+    void CreateBiomeRegion(EBiomeType BiomeType, const FVector& Center, float Radius);
+    void ValidateActorLimits();
+    void RemoveOldestActorsFromBiome(EBiomeType BiomeType, int32 CountToRemove);
 
 private:
-    void SetupDefaultBiomes();
-    float CalculateDistanceFromBiomeCenter(const FVector& Location, const FEng_BiomeConfiguration& Biome) const;
-    EBiomeType FindClosestBiome(const FVector& Location) const;
+    // Actor tracking per biome
+    TMap<EBiomeType, TArray<TWeakObjectPtr<AActor>>> BiomeActorRegistry;
+    
+    // Performance monitoring
+    float LastCleanupTime = 0.0f;
+    const float CleanupInterval = 30.0f; // seconds
 };
