@@ -1,304 +1,254 @@
 #include "Combat_DamageSystem.h"
 #include "Engine/World.h"
 #include "TimerManager.h"
-#include "GameFramework/PlayerController.h"
-#include "Camera/CameraShakeBase.h"
 #include "Kismet/GameplayStatics.h"
+#include "Components/StaticMeshComponent.h"
+#include "Materials/MaterialInstanceDynamic.h"
+#include "GameFramework/Character.h"
+#include "Components/SkeletalMeshComponent.h"
 
 UCombat_DamageSystem::UCombat_DamageSystem()
 {
     PrimaryComponentTick.bCanEverTick = true;
     PrimaryComponentTick.TickInterval = 0.1f;
 
-    // Initialize health stats
+    // Initialize default health stats
     HealthStats.MaxHealth = 100.0f;
     HealthStats.CurrentHealth = 100.0f;
-    HealthStats.HealthRegenRate = 2.0f;
-    HealthStats.DamageReduction = 0.0f;
+    HealthStats.HealthRegenRate = 1.0f;
+    HealthStats.DamageResistance = 0.0f;
     HealthStats.bIsInvulnerable = false;
     HealthStats.LastDamageTime = 0.0f;
 
-    InvulnerabilityDuration = 0.5f;
-    bAutoRegen = true;
-    RegenDelay = 3.0f;
+    // Initialize damage type resistances
+    DamageTypeResistances.Add(EDamageType::Physical, 0.0f);
+    DamageTypeResistances.Add(EDamageType::Fire, 0.0f);
+    DamageTypeResistances.Add(EDamageType::Ice, 0.0f);
+    DamageTypeResistances.Add(EDamageType::Poison, 0.0f);
+    DamageTypeResistances.Add(EDamageType::Bleed, 0.0f);
+
+    // Initialize visual settings
     bShowDamageNumbers = true;
-    bScreenShakeOnDamage = true;
-    ScreenShakeIntensity = 1.0f;
+    DamageNumberDisplayTime = 2.0f;
+    CriticalHitColor = FLinearColor::Red;
+    NormalHitColor = FLinearColor::White;
+
+    bIsDead = false;
+    LastRegenTime = 0.0f;
 }
 
 void UCombat_DamageSystem::BeginPlay()
 {
     Super::BeginPlay();
-    
-    // Ensure health is properly initialized
-    if (HealthStats.CurrentHealth <= 0.0f)
-    {
-        HealthStats.CurrentHealth = HealthStats.MaxHealth;
-    }
 
-    // Broadcast initial health
-    OnHealthChanged.Broadcast(GetHealthPercent());
+    // Ensure current health doesn't exceed max health
+    HealthStats.CurrentHealth = FMath::Min(HealthStats.CurrentHealth, HealthStats.MaxHealth);
+    
+    // Initialize last damage time
+    HealthStats.LastDamageTime = GetWorld()->GetTimeSeconds();
+    LastRegenTime = GetWorld()->GetTimeSeconds();
 }
 
 void UCombat_DamageSystem::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
-    if (bAutoRegen && IsAlive() && !IsAtFullHealth())
+    if (!bIsDead && HealthStats.HealthRegenRate > 0.0f)
     {
-        ProcessHealthRegen(DeltaTime);
+        ProcessHealthRegeneration(DeltaTime);
+    }
+
+    // Clean up expired damage number actors
+    for (int32 i = DamageNumberActors.Num() - 1; i >= 0; i--)
+    {
+        if (!IsValid(DamageNumberActors[i]))
+        {
+            DamageNumberActors.RemoveAt(i);
+        }
     }
 }
 
-void UCombat_DamageSystem::TakeDamage(const FCombat_DamageInfo& DamageInfo)
+bool UCombat_DamageSystem::ApplyDamage(const FCombat_DamageInfo& DamageInfo)
 {
-    if (!ShouldTakeDamage(DamageInfo))
+    if (bIsDead || HealthStats.bIsInvulnerable || DamageInfo.DamageAmount <= 0.0f)
     {
-        return;
+        return false;
     }
 
-    float FinalDamage = CalculateFinalDamage(DamageInfo);
+    // Calculate actual damage after resistances
+    float ActualDamage = CalculateActualDamage(DamageInfo);
     
-    if (FinalDamage <= 0.0f)
+    if (ActualDamage <= 0.0f)
     {
-        return;
+        return false;
     }
 
-    // Apply damage
-    HealthStats.CurrentHealth = FMath::Max(0.0f, HealthStats.CurrentHealth - FinalDamage);
+    // Apply damage to health
+    HealthStats.CurrentHealth = FMath::Max(0.0f, HealthStats.CurrentHealth - ActualDamage);
     HealthStats.LastDamageTime = GetWorld()->GetTimeSeconds();
 
-    // Trigger effects
-    ShowDamageEffect(DamageInfo);
-    
-    if (bScreenShakeOnDamage)
+    // Show damage numbers if enabled
+    if (bShowDamageNumbers)
     {
-        TriggerScreenShake(FinalDamage);
+        ShowDamageNumber(DamageInfo, ActualDamage);
     }
 
-    // Broadcast events
-    OnDamageTaken.Broadcast(FinalDamage, DamageInfo);
-    OnHealthChanged.Broadcast(GetHealthPercent());
+    // Broadcast damage taken event
+    OnDamageTaken.Broadcast(ActualDamage, DamageInfo);
+    OnHealthChanged.Broadcast(GetHealthPercentage());
 
     // Check for death
-    if (HealthStats.CurrentHealth <= 0.0f)
+    if (HealthStats.CurrentHealth <= 0.0f && !bIsDead)
     {
-        HandleDeath();
+        TriggerDeathSequence();
     }
 
-    UE_LOG(LogTemp, Warning, TEXT("Actor %s took %.1f damage, health: %.1f/%.1f"), 
-           *GetOwner()->GetName(), FinalDamage, HealthStats.CurrentHealth, HealthStats.MaxHealth);
+    return true;
 }
 
-void UCombat_DamageSystem::Heal(float HealAmount)
+void UCombat_DamageSystem::HealDamage(float HealAmount)
 {
-    if (!IsAlive() || HealAmount <= 0.0f)
+    if (bIsDead || HealAmount <= 0.0f)
     {
         return;
     }
 
     float OldHealth = HealthStats.CurrentHealth;
     HealthStats.CurrentHealth = FMath::Min(HealthStats.MaxHealth, HealthStats.CurrentHealth + HealAmount);
-    
-    float ActualHeal = HealthStats.CurrentHealth - OldHealth;
-    
-    if (ActualHeal > 0.0f)
-    {
-        OnHealthChanged.Broadcast(GetHealthPercent());
-        UE_LOG(LogTemp, Log, TEXT("Actor %s healed %.1f health, new health: %.1f/%.1f"), 
-               *GetOwner()->GetName(), ActualHeal, HealthStats.CurrentHealth, HealthStats.MaxHealth);
-    }
-}
 
-void UCombat_DamageSystem::SetHealth(float NewHealth)
-{
-    float ClampedHealth = FMath::Clamp(NewHealth, 0.0f, HealthStats.MaxHealth);
-    
-    if (ClampedHealth != HealthStats.CurrentHealth)
+    if (HealthStats.CurrentHealth != OldHealth)
     {
-        HealthStats.CurrentHealth = ClampedHealth;
-        OnHealthChanged.Broadcast(GetHealthPercent());
-        
-        if (HealthStats.CurrentHealth <= 0.0f)
-        {
-            HandleDeath();
-        }
+        OnHealthChanged.Broadcast(GetHealthPercentage());
     }
 }
 
 void UCombat_DamageSystem::SetMaxHealth(float NewMaxHealth)
 {
-    if (NewMaxHealth > 0.0f)
+    if (NewMaxHealth <= 0.0f)
     {
-        float HealthPercent = GetHealthPercent();
-        HealthStats.MaxHealth = NewMaxHealth;
-        HealthStats.CurrentHealth = HealthStats.MaxHealth * HealthPercent;
-        OnHealthChanged.Broadcast(GetHealthPercent());
+        return;
     }
+
+    float HealthPercentage = GetHealthPercentage();
+    HealthStats.MaxHealth = NewMaxHealth;
+    HealthStats.CurrentHealth = HealthStats.MaxHealth * HealthPercentage;
+
+    OnHealthChanged.Broadcast(GetHealthPercentage());
 }
 
-void UCombat_DamageSystem::SetInvulnerable(bool bInvulnerable)
+void UCombat_DamageSystem::SetInvulnerable(bool bNewInvulnerable)
 {
-    HealthStats.bIsInvulnerable = bInvulnerable;
-    
-    if (bInvulnerable)
-    {
-        UE_LOG(LogTemp, Log, TEXT("Actor %s is now invulnerable"), *GetOwner()->GetName());
-    }
-    else
-    {
-        UE_LOG(LogTemp, Log, TEXT("Actor %s is no longer invulnerable"), *GetOwner()->GetName());
-    }
+    HealthStats.bIsInvulnerable = bNewInvulnerable;
 }
 
-void UCombat_DamageSystem::ResetHealth()
-{
-    HealthStats.CurrentHealth = HealthStats.MaxHealth;
-    HealthStats.LastDamageTime = 0.0f;
-    OnHealthChanged.Broadcast(1.0f);
-    
-    UE_LOG(LogTemp, Log, TEXT("Actor %s health reset to full"), *GetOwner()->GetName());
-}
-
-void UCombat_DamageSystem::Kill()
-{
-    if (IsAlive())
-    {
-        HealthStats.CurrentHealth = 0.0f;
-        OnHealthChanged.Broadcast(0.0f);
-        HandleDeath();
-        
-        UE_LOG(LogTemp, Warning, TEXT("Actor %s was killed"), *GetOwner()->GetName());
-    }
-}
-
-float UCombat_DamageSystem::GetHealthPercent() const
+float UCombat_DamageSystem::GetHealthPercentage() const
 {
     if (HealthStats.MaxHealth <= 0.0f)
     {
         return 0.0f;
     }
-    
     return HealthStats.CurrentHealth / HealthStats.MaxHealth;
+}
+
+bool UCombat_DamageSystem::IsAlive() const
+{
+    return !bIsDead && HealthStats.CurrentHealth > 0.0f;
 }
 
 bool UCombat_DamageSystem::IsAtFullHealth() const
 {
-    return FMath::IsNearlyEqual(HealthStats.CurrentHealth, HealthStats.MaxHealth, 0.1f);
+    return HealthStats.CurrentHealth >= HealthStats.MaxHealth;
 }
 
-float UCombat_DamageSystem::CalculateFinalDamage(const FCombat_DamageInfo& DamageInfo) const
+float UCombat_DamageSystem::CalculateActualDamage(const FCombat_DamageInfo& DamageInfo) const
 {
     float BaseDamage = DamageInfo.DamageAmount;
-    
-    // Apply damage reduction
-    float DamageAfterReduction = BaseDamage * (1.0f - FMath::Clamp(HealthStats.DamageReduction, 0.0f, 0.95f));
     
     // Apply critical hit multiplier
     if (DamageInfo.bIsCriticalHit)
     {
-        DamageAfterReduction *= 2.0f;
+        BaseDamage *= 2.0f;
     }
-    
-    // Minimum damage threshold
-    return FMath::Max(0.0f, DamageAfterReduction);
+
+    // Apply general damage resistance
+    BaseDamage *= (1.0f - HealthStats.DamageResistance);
+
+    // Apply damage type specific resistance
+    float TypeResistance = GetDamageTypeResistance(DamageInfo.DamageType);
+    BaseDamage *= (1.0f - TypeResistance);
+
+    return FMath::Max(0.0f, BaseDamage);
 }
 
-bool UCombat_DamageSystem::ShouldTakeDamage(const FCombat_DamageInfo& DamageInfo) const
+void UCombat_DamageSystem::ProcessHealthRegeneration(float DeltaTime)
 {
-    // Dead actors don't take damage
-    if (!IsAlive())
-    {
-        return false;
-    }
+    float CurrentTime = GetWorld()->GetTimeSeconds();
+    float TimeSinceLastDamage = CurrentTime - HealthStats.LastDamageTime;
     
-    // Invulnerable actors don't take damage
-    if (HealthStats.bIsInvulnerable)
+    // Only regenerate if enough time has passed since last damage (3 seconds)
+    if (TimeSinceLastDamage >= 3.0f && HealthStats.CurrentHealth < HealthStats.MaxHealth)
     {
-        return false;
+        float RegenAmount = HealthStats.HealthRegenRate * DeltaTime;
+        HealDamage(RegenAmount);
     }
-    
-    // Check for invulnerability frames after recent damage
-    if (IsRecentlyDamaged())
-    {
-        return false;
-    }
-    
-    // No self-damage
-    if (DamageInfo.DamageSource == GetOwner())
-    {
-        return false;
-    }
-    
-    return true;
 }
 
-void UCombat_DamageSystem::HandleDeath()
+void UCombat_DamageSystem::TriggerDeathSequence()
 {
-    if (!IsAlive())
+    bIsDead = true;
+    HealthStats.CurrentHealth = 0.0f;
+    
+    // Broadcast death event
+    OnDeath.Broadcast();
+
+    // Disable collision and movement for the owner
+    AActor* Owner = GetOwner();
+    if (Owner)
     {
-        OnDeath.Broadcast();
-        UE_LOG(LogTemp, Warning, TEXT("Actor %s has died"), *GetOwner()->GetName());
+        // Disable collision
+        Owner->SetActorEnableCollision(false);
+        
+        // If it's a character, disable movement
+        if (ACharacter* Character = Cast<ACharacter>(Owner))
+        {
+            Character->DisableInput(nullptr);
+        }
     }
 }
 
-void UCombat_DamageSystem::ProcessHealthRegen(float DeltaTime)
-{
-    if (IsRecentlyDamaged())
-    {
-        return;
-    }
-    
-    float RegenAmount = HealthStats.HealthRegenRate * DeltaTime;
-    Heal(RegenAmount);
-}
-
-void UCombat_DamageSystem::ShowDamageEffect(const FCombat_DamageInfo& DamageInfo)
-{
-    if (!bShowDamageNumbers)
-    {
-        return;
-    }
-    
-    // Log damage for now - in a full game this would spawn floating damage text
-    FString DamageText = FString::Printf(TEXT("%.0f"), DamageInfo.DamageAmount);
-    if (DamageInfo.bIsCriticalHit)
-    {
-        DamageText += TEXT(" CRIT!");
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("Damage Effect: %s at location %s"), 
-           *DamageText, *DamageInfo.HitLocation.ToString());
-}
-
-void UCombat_DamageSystem::TriggerScreenShake(float DamageAmount)
+void UCombat_DamageSystem::ShowDamageNumber(const FCombat_DamageInfo& DamageInfo, float ActualDamage)
 {
     if (!GetWorld())
     {
         return;
     }
-    
-    // Get player controller for screen shake
-    APlayerController* PC = GetWorld()->GetFirstPlayerController();
-    if (!PC)
+
+    // Create a simple static mesh actor to display damage number
+    FVector SpawnLocation = DamageInfo.ImpactLocation;
+    if (SpawnLocation.IsZero() && GetOwner())
     {
-        return;
+        SpawnLocation = GetOwner()->GetActorLocation() + FVector(0, 0, 100);
     }
-    
-    // Scale shake intensity based on damage
-    float ShakeScale = FMath::Clamp(DamageAmount / 50.0f, 0.1f, 2.0f) * ScreenShakeIntensity;
-    
-    // For now just log - in full game would use actual camera shake class
-    UE_LOG(LogTemp, Log, TEXT("Screen shake triggered with intensity %.2f"), ShakeScale);
+
+    AActor* DamageNumberActor = GetWorld()->SpawnActor<AActor>(AActor::StaticClass(), SpawnLocation, FRotator::ZeroRotator);
+    if (DamageNumberActor)
+    {
+        DamageNumberActor->SetLifeSpan(DamageNumberDisplayTime);
+        DamageNumberActors.Add(DamageNumberActor);
+
+        // Set color based on critical hit
+        FLinearColor DisplayColor = DamageInfo.bIsCriticalHit ? CriticalHitColor : NormalHitColor;
+        
+        // Log damage for debugging
+        UE_LOG(LogTemp, Log, TEXT("Damage: %.1f %s"), ActualDamage, DamageInfo.bIsCriticalHit ? TEXT("CRITICAL!") : TEXT(""));
+    }
 }
 
-bool UCombat_DamageSystem::IsRecentlyDamaged() const
+float UCombat_DamageSystem::GetDamageTypeResistance(EDamageType DamageType) const
 {
-    if (!GetWorld())
+    if (const float* Resistance = DamageTypeResistances.Find(DamageType))
     {
-        return false;
+        return *Resistance;
     }
-    
-    float TimeSinceLastDamage = GetWorld()->GetTimeSeconds() - HealthStats.LastDamageTime;
-    return TimeSinceLastDamage < InvulnerabilityDuration;
+    return 0.0f;
 }
