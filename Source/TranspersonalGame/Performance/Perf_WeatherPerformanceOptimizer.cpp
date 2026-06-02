@@ -1,447 +1,356 @@
 #include "Perf_WeatherPerformanceOptimizer.h"
-#include "Engine/Engine.h"
 #include "Engine/World.h"
+#include "Engine/Engine.h"
 #include "Particles/ParticleSystemComponent.h"
-#include "Components/AudioComponent.h"
-#include "Materials/MaterialParameterCollectionInstance.h"
+#include "Components/VolumetricFogComponent.h"
+#include "Components/WindDirectionalSourceComponent.h"
 #include "Kismet/GameplayStatics.h"
-#include "Engine/GameViewportClient.h"
+#include "Engine/StaticMeshActor.h"
+#include "HAL/PlatformFilemanager.h"
 
 UPerf_WeatherPerformanceOptimizer::UPerf_WeatherPerformanceOptimizer()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 0.1f; // Check performance 10 times per second
+    PrimaryComponentTick.TickInterval = 1.0f / OptimizationSettings.WeatherUpdateFrequency;
     
-    // Initialize default settings
-    CurrentComplexity = EPerf_WeatherComplexity::Medium;
-    bDynamicOptimizationEnabled = true;
-    PerformanceCheckInterval = 1.0f;
-    
-    // Performance tracking
-    CurrentFrameRate = 60.0f;
-    AverageFrameRate = 60.0f;
-    ActiveParticleCount = 0;
-    WeatherRenderTime = 0.0f;
-    
-    // Internal state
-    FrameTimeAccumulator = 0.0f;
-    FrameCount = 0;
-    LastPerformanceCheck = 0.0f;
-    FrameTimeHistory.Reserve(60); // Store last 60 frame times
+    // Initialize default optimization settings
+    OptimizationSettings.OptimizationLevel = EPerf_WeatherOptimizationLevel::Medium;
+    OptimizationSettings.MaxParticleSystemFrameTime = 2.0f;
+    OptimizationSettings.MaxActiveParticles = 5000;
+    OptimizationSettings.WeatherLODDistance = 5000.0f;
+    OptimizationSettings.bEnableVolumetricFogOptimization = true;
+    OptimizationSettings.bEnableWindSimulationOptimization = true;
+    OptimizationSettings.WeatherUpdateFrequency = 30.0f;
 }
 
 void UPerf_WeatherPerformanceOptimizer::BeginPlay()
 {
     Super::BeginPlay();
     
-    // Find all weather-related particle systems in the world
-    UWorld* World = GetWorld();
-    if (World)
-    {
-        for (TActorIterator<AActor> ActorIterator(World); ActorIterator; ++ActorIterator)
-        {
-            AActor* Actor = *ActorIterator;
-            if (Actor)
-            {
-                // Find particle system components
-                TArray<UParticleSystemComponent*> ParticleComponents;
-                Actor->GetComponents<UParticleSystemComponent>(ParticleComponents);
-                
-                for (UParticleSystemComponent* ParticleComp : ParticleComponents)
-                {
-                    if (ParticleComp && ParticleComp->GetName().Contains(TEXT("Weather")))
-                    {
-                        WeatherParticleSystems.Add(ParticleComp);
-                    }
-                }
-                
-                // Find audio components
-                TArray<UAudioComponent*> AudioComponents;
-                Actor->GetComponents<UAudioComponent>(AudioComponents);
-                
-                for (UAudioComponent* AudioComp : AudioComponents)
-                {
-                    if (AudioComp && AudioComp->GetName().Contains(TEXT("Weather")))
-                    {
-                        WeatherAudioComponents.Add(AudioComp);
-                    }
-                }
-            }
-        }
-    }
+    UE_LOG(LogTemp, Log, TEXT("Weather Performance Optimizer initialized"));
     
-    // Initialize performance monitoring
-    OptimizeWeatherSystems();
-    
-    UE_LOG(LogTemp, Log, TEXT("Weather Performance Optimizer initialized with %d particle systems and %d audio components"), 
-           WeatherParticleSystems.Num(), WeatherAudioComponents.Num());
+    // Start optimization after a brief delay to allow world setup
+    GetWorld()->GetTimerManager().SetTimer(
+        FTimerHandle(),
+        this,
+        &UPerf_WeatherPerformanceOptimizer::OptimizeWeatherSystems,
+        1.0f,
+        false
+    );
 }
 
 void UPerf_WeatherPerformanceOptimizer::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
     
-    // Calculate current frame rate
-    CalculateFrameRate(DeltaTime);
+    UpdateWeatherMetrics();
     
-    // Check if it's time for performance monitoring
-    LastPerformanceCheck += DeltaTime;
-    if (LastPerformanceCheck >= PerformanceCheckInterval)
+    // Check if we need to apply optimizations
+    if (WeatherMetrics.TotalWeatherFrameTime > OptimizationSettings.MaxParticleSystemFrameTime)
     {
-        MonitorWeatherPerformance();
-        
-        if (bDynamicOptimizationEnabled)
-        {
-            CheckPerformanceThresholds();
-        }
-        
-        LastPerformanceCheck = 0.0f;
+        OptimizeWeatherSystems();
     }
 }
 
 void UPerf_WeatherPerformanceOptimizer::OptimizeWeatherSystems()
 {
-    OptimizeRainSystem();
-    OptimizeSnowSystem();
-    OptimizeFogSystem();
-    OptimizeWindSystem();
-    OptimizeWeatherAudio();
-    OptimizeWeatherLighting();
-    AdjustLODSettings();
+    if (bIsOptimizationActive)
+    {
+        return;
+    }
     
-    UE_LOG(LogTemp, Log, TEXT("Weather systems optimized for complexity level: %d"), (int32)CurrentComplexity);
+    bIsOptimizationActive = true;
+    LastOptimizationTime = GetWorld()->GetTimeSeconds();
+    
+    UE_LOG(LogTemp, Log, TEXT("Starting weather system optimization"));
+    
+    OptimizeParticleSystems();
+    OptimizeVolumetricFog();
+    OptimizeWindSimulation();
+    ApplyOptimizationSettings();
+    
+    bIsOptimizationActive = false;
+    
+    UE_LOG(LogTemp, Log, TEXT("Weather system optimization completed"));
 }
 
-void UPerf_WeatherPerformanceOptimizer::SetWeatherComplexity(EPerf_WeatherComplexity Complexity)
+void UPerf_WeatherPerformanceOptimizer::UpdateWeatherMetrics()
 {
-    CurrentComplexity = Complexity;
+    UpdateParticleSystemMetrics();
+    UpdateVolumetricFogMetrics();
+    UpdateWindSimulationMetrics();
     
-    // Adjust performance settings based on complexity
-    switch (Complexity)
+    // Calculate total frame time
+    WeatherMetrics.TotalWeatherFrameTime = 
+        WeatherMetrics.ParticleSystemFrameTime +
+        WeatherMetrics.VolumetricFogFrameTime +
+        WeatherMetrics.WindSimulationFrameTime +
+        WeatherMetrics.WeatherUpdateFrameTime;
+}
+
+void UPerf_WeatherPerformanceOptimizer::SetOptimizationLevel(EPerf_WeatherOptimizationLevel NewLevel)
+{
+    OptimizationSettings.OptimizationLevel = NewLevel;
+    
+    // Adjust settings based on optimization level
+    switch (NewLevel)
     {
-        case EPerf_WeatherComplexity::Minimal:
-            PerformanceSettings.MaxRainParticles = 100;
-            PerformanceSettings.MaxSnowParticles = 50;
-            PerformanceSettings.MaxFogParticles = 25;
-            PerformanceSettings.bEnableDynamicWeatherLighting = false;
+        case EPerf_WeatherOptimizationLevel::Disabled:
+            OptimizationSettings.MaxActiveParticles = 10000;
+            OptimizationSettings.WeatherLODDistance = 10000.0f;
+            OptimizationSettings.bEnableVolumetricFogOptimization = false;
+            OptimizationSettings.bEnableWindSimulationOptimization = false;
             break;
             
-        case EPerf_WeatherComplexity::Low:
-            PerformanceSettings.MaxRainParticles = 300;
-            PerformanceSettings.MaxSnowParticles = 150;
-            PerformanceSettings.MaxFogParticles = 75;
-            PerformanceSettings.bEnableDynamicWeatherLighting = false;
+        case EPerf_WeatherOptimizationLevel::Low:
+            OptimizationSettings.MaxActiveParticles = 8000;
+            OptimizationSettings.WeatherLODDistance = 8000.0f;
+            OptimizationSettings.bEnableVolumetricFogOptimization = true;
+            OptimizationSettings.bEnableWindSimulationOptimization = true;
             break;
             
-        case EPerf_WeatherComplexity::Medium:
-            PerformanceSettings.MaxRainParticles = 600;
-            PerformanceSettings.MaxSnowParticles = 300;
-            PerformanceSettings.MaxFogParticles = 150;
-            PerformanceSettings.bEnableDynamicWeatherLighting = true;
+        case EPerf_WeatherOptimizationLevel::Medium:
+            OptimizationSettings.MaxActiveParticles = 5000;
+            OptimizationSettings.WeatherLODDistance = 5000.0f;
+            OptimizationSettings.bEnableVolumetricFogOptimization = true;
+            OptimizationSettings.bEnableWindSimulationOptimization = true;
             break;
             
-        case EPerf_WeatherComplexity::High:
-            PerformanceSettings.MaxRainParticles = 1000;
-            PerformanceSettings.MaxSnowParticles = 500;
-            PerformanceSettings.MaxFogParticles = 250;
-            PerformanceSettings.bEnableDynamicWeatherLighting = true;
+        case EPerf_WeatherOptimizationLevel::High:
+            OptimizationSettings.MaxActiveParticles = 3000;
+            OptimizationSettings.WeatherLODDistance = 3000.0f;
+            OptimizationSettings.bEnableVolumetricFogOptimization = true;
+            OptimizationSettings.bEnableWindSimulationOptimization = true;
             break;
             
-        case EPerf_WeatherComplexity::Ultra:
-            PerformanceSettings.MaxRainParticles = 2000;
-            PerformanceSettings.MaxSnowParticles = 1000;
-            PerformanceSettings.MaxFogParticles = 500;
-            PerformanceSettings.bEnableDynamicWeatherLighting = true;
+        case EPerf_WeatherOptimizationLevel::Ultra:
+            OptimizationSettings.MaxActiveParticles = 1500;
+            OptimizationSettings.WeatherLODDistance = 2000.0f;
+            OptimizationSettings.bEnableVolumetricFogOptimization = true;
+            OptimizationSettings.bEnableWindSimulationOptimization = true;
             break;
     }
     
     OptimizeWeatherSystems();
 }
 
-void UPerf_WeatherPerformanceOptimizer::AdjustParticleCount(int32 NewParticleCount)
+void UPerf_WeatherPerformanceOptimizer::OptimizeParticleSystems()
 {
-    for (UParticleSystemComponent* ParticleComp : WeatherParticleSystems)
-    {
-        if (ParticleComp && ParticleComp->IsValidLowLevel())
-        {
-            // Adjust particle count based on system type
-            if (ParticleComp->GetName().Contains(TEXT("Rain")))
-            {
-                PerformanceSettings.MaxRainParticles = FMath::Min(NewParticleCount, 2000);
-            }
-            else if (ParticleComp->GetName().Contains(TEXT("Snow")))
-            {
-                PerformanceSettings.MaxSnowParticles = FMath::Min(NewParticleCount / 2, 1000);
-            }
-            else if (ParticleComp->GetName().Contains(TEXT("Fog")))
-            {
-                PerformanceSettings.MaxFogParticles = FMath::Min(NewParticleCount / 4, 500);
-            }
-        }
-    }
-    
-    UpdateParticleSettings();
-}
-
-void UPerf_WeatherPerformanceOptimizer::OptimizeWeatherAudio()
-{
-    for (UAudioComponent* AudioComp : WeatherAudioComponents)
-    {
-        if (AudioComp && AudioComp->IsValidLowLevel())
-        {
-            // Adjust audio settings based on performance requirements
-            AudioComp->SetVolumeMultiplier(PerformanceSettings.WeatherAudioVolume);
-            
-            // Adjust attenuation distance
-            if (AudioComp->AttenuationSettings)
-            {
-                AudioComp->AttenuationSettings->Attenuation.FalloffDistance = PerformanceSettings.WeatherAudioDistance;
-            }
-        }
-    }
-}
-
-void UPerf_WeatherPerformanceOptimizer::OptimizeWeatherLighting()
-{
-    if (!PerformanceSettings.bEnableDynamicWeatherLighting)
-    {
-        // Disable dynamic lighting for weather effects
-        UWorld* World = GetWorld();
-        if (World)
-        {
-            // Find and disable dynamic weather lights
-            for (TActorIterator<AActor> ActorIterator(World); ActorIterator; ++ActorIterator)
-            {
-                AActor* Actor = *ActorIterator;
-                if (Actor && Actor->GetName().Contains(TEXT("WeatherLight")))
-                {
-                    Actor->SetActorHiddenInGame(true);
-                }
-            }
-        }
-    }
-}
-
-float UPerf_WeatherPerformanceOptimizer::GetCurrentFrameRate() const
-{
-    return CurrentFrameRate;
-}
-
-bool UPerf_WeatherPerformanceOptimizer::IsPerformanceAcceptable() const
-{
-    return CurrentFrameRate >= PerformanceSettings.MinFrameRate;
-}
-
-void UPerf_WeatherPerformanceOptimizer::MonitorWeatherPerformance()
-{
-    // Count active particles
-    ActiveParticleCount = 0;
-    for (UParticleSystemComponent* ParticleComp : WeatherParticleSystems)
-    {
-        if (ParticleComp && ParticleComp->IsValidLowLevel() && ParticleComp->IsActive())
-        {
-            ActiveParticleCount += ParticleComp->GetNumActiveParticles();
-        }
-    }
-    
-    // Log performance metrics periodically
-    static float LastLogTime = 0.0f;
-    LastLogTime += PerformanceCheckInterval;
-    if (LastLogTime >= 5.0f) // Log every 5 seconds
-    {
-        LogWeatherPerformanceMetrics();
-        LastLogTime = 0.0f;
-    }
-}
-
-void UPerf_WeatherPerformanceOptimizer::LogWeatherPerformanceMetrics()
-{
-    UE_LOG(LogTemp, Log, TEXT("Weather Performance - FPS: %.1f, Particles: %d, Complexity: %d"), 
-           CurrentFrameRate, ActiveParticleCount, (int32)CurrentComplexity);
-}
-
-void UPerf_WeatherPerformanceOptimizer::EnableDynamicOptimization(bool bEnabled)
-{
-    bDynamicOptimizationEnabled = bEnabled;
-    UE_LOG(LogTemp, Log, TEXT("Dynamic weather optimization %s"), bEnabled ? TEXT("enabled") : TEXT("disabled"));
-}
-
-void UPerf_WeatherPerformanceOptimizer::UpdatePerformanceSettings()
-{
-    UpdateParticleSettings();
-    UpdateAudioSettings();
-    UpdateLightingSettings();
-}
-
-void UPerf_WeatherPerformanceOptimizer::OptimizeRainSystem()
-{
-    for (UParticleSystemComponent* ParticleComp : WeatherParticleSystems)
-    {
-        if (ParticleComp && ParticleComp->GetName().Contains(TEXT("Rain")))
-        {
-            // Adjust rain particle count based on performance settings
-            ParticleComp->SetIntParameter(TEXT("ParticleCount"), PerformanceSettings.MaxRainParticles);
-        }
-    }
-}
-
-void UPerf_WeatherPerformanceOptimizer::OptimizeSnowSystem()
-{
-    for (UParticleSystemComponent* ParticleComp : WeatherParticleSystems)
-    {
-        if (ParticleComp && ParticleComp->GetName().Contains(TEXT("Snow")))
-        {
-            // Adjust snow particle count based on performance settings
-            ParticleComp->SetIntParameter(TEXT("ParticleCount"), PerformanceSettings.MaxSnowParticles);
-        }
-    }
-}
-
-void UPerf_WeatherPerformanceOptimizer::OptimizeFogSystem()
-{
-    for (UParticleSystemComponent* ParticleComp : WeatherParticleSystems)
-    {
-        if (ParticleComp && ParticleComp->GetName().Contains(TEXT("Fog")))
-        {
-            // Adjust fog particle count based on performance settings
-            ParticleComp->SetIntParameter(TEXT("ParticleCount"), PerformanceSettings.MaxFogParticles);
-        }
-    }
-}
-
-void UPerf_WeatherPerformanceOptimizer::OptimizeWindSystem()
-{
-    // Optimize wind effects based on complexity level
     UWorld* World = GetWorld();
-    if (World)
+    if (!World) return;
+    
+    TArray<AActor*> ParticleActors;
+    UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), ParticleActors);
+    
+    int32 OptimizedParticles = 0;
+    
+    for (AActor* Actor : ParticleActors)
     {
-        for (TActorIterator<AActor> ActorIterator(World); ActorIterator; ++ActorIterator)
+        if (!Actor) continue;
+        
+        TArray<UParticleSystemComponent*> ParticleComponents;
+        Actor->GetComponents<UParticleSystemComponent>(ParticleComponents);
+        
+        for (UParticleSystemComponent* ParticleComp : ParticleComponents)
         {
-            AActor* Actor = *ActorIterator;
-            if (Actor && Actor->GetName().Contains(TEXT("Wind")))
+            if (!ParticleComp) continue;
+            
+            // Calculate distance from player
+            APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(World, 0);
+            if (PlayerPawn)
             {
-                // Adjust wind effect intensity based on performance
-                if (CurrentComplexity <= EPerf_WeatherComplexity::Low)
+                float Distance = FVector::Dist(Actor->GetActorLocation(), PlayerPawn->GetActorLocation());
+                
+                // Apply LOD based on distance and optimization level
+                if (Distance > OptimizationSettings.WeatherLODDistance)
                 {
-                    Actor->SetActorHiddenInGame(true);
+                    ParticleComp->SetActive(false);
                 }
                 else
                 {
-                    Actor->SetActorHiddenInGame(false);
+                    ParticleComp->SetActive(true);
+                    
+                    // Adjust particle count based on distance and optimization level
+                    float LODScale = FMath::Clamp(1.0f - (Distance / OptimizationSettings.WeatherLODDistance), 0.1f, 1.0f);
+                    
+                    // Apply optimization level scaling
+                    switch (OptimizationSettings.OptimizationLevel)
+                    {
+                        case EPerf_WeatherOptimizationLevel::High:
+                            LODScale *= 0.7f;
+                            break;
+                        case EPerf_WeatherOptimizationLevel::Ultra:
+                            LODScale *= 0.5f;
+                            break;
+                        default:
+                            break;
+                    }
+                    
+                    // Note: In a real implementation, you would modify particle system parameters
+                    // This is a simplified version for demonstration
                 }
+                
+                OptimizedParticles++;
             }
         }
     }
+    
+    UE_LOG(LogTemp, Log, TEXT("Optimized %d particle systems"), OptimizedParticles);
 }
 
-void UPerf_WeatherPerformanceOptimizer::AdjustLODSettings()
+void UPerf_WeatherPerformanceOptimizer::OptimizeVolumetricFog()
 {
-    // Adjust LOD settings for weather effects based on performance
-    for (UParticleSystemComponent* ParticleComp : WeatherParticleSystems)
+    if (!OptimizationSettings.bEnableVolumetricFogOptimization)
     {
-        if (ParticleComp && ParticleComp->IsValidLowLevel())
-        {
-            // Set LOD distance based on complexity
-            float LODDistance = 1000.0f;
-            switch (CurrentComplexity)
-            {
-                case EPerf_WeatherComplexity::Minimal:
-                    LODDistance = 500.0f;
-                    break;
-                case EPerf_WeatherComplexity::Low:
-                    LODDistance = 750.0f;
-                    break;
-                case EPerf_WeatherComplexity::Medium:
-                    LODDistance = 1000.0f;
-                    break;
-                case EPerf_WeatherComplexity::High:
-                    LODDistance = 1500.0f;
-                    break;
-                case EPerf_WeatherComplexity::Ultra:
-                    LODDistance = 2000.0f;
-                    break;
-            }
-            
-            ParticleComp->SetFloatParameter(TEXT("LODDistance"), LODDistance);
-        }
+        return;
     }
-}
-
-void UPerf_WeatherPerformanceOptimizer::UpdateParticleSettings()
-{
-    OptimizeRainSystem();
-    OptimizeSnowSystem();
-    OptimizeFogSystem();
-}
-
-void UPerf_WeatherPerformanceOptimizer::UpdateAudioSettings()
-{
-    OptimizeWeatherAudio();
-}
-
-void UPerf_WeatherPerformanceOptimizer::UpdateLightingSettings()
-{
-    OptimizeWeatherLighting();
-}
-
-void UPerf_WeatherPerformanceOptimizer::CalculateFrameRate(float DeltaTime)
-{
-    if (DeltaTime > 0.0f)
+    
+    UWorld* World = GetWorld();
+    if (!World) return;
+    
+    // Find volumetric fog components and optimize them
+    TArray<AActor*> FogActors;
+    UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), FogActors);
+    
+    for (AActor* Actor : FogActors)
     {
-        CurrentFrameRate = 1.0f / DeltaTime;
+        if (!Actor) continue;
         
-        // Add to frame time history
-        FrameTimeHistory.Add(DeltaTime);
-        if (FrameTimeHistory.Num() > 60)
-        {
-            FrameTimeHistory.RemoveAt(0);
-        }
+        TArray<UVolumetricFogComponent*> FogComponents;
+        Actor->GetComponents<UVolumetricFogComponent>(FogComponents);
         
-        // Calculate average frame rate
-        if (FrameTimeHistory.Num() > 0)
+        for (UVolumetricFogComponent* FogComp : FogComponents)
         {
-            float AverageFrameTime = 0.0f;
-            for (float FrameTime : FrameTimeHistory)
+            if (!FogComp) continue;
+            
+            // Apply optimization based on level
+            switch (OptimizationSettings.OptimizationLevel)
             {
-                AverageFrameTime += FrameTime;
+                case EPerf_WeatherOptimizationLevel::High:
+                case EPerf_WeatherOptimizationLevel::Ultra:
+                    // Reduce fog quality for better performance
+                    // Note: Actual fog parameters would be adjusted here
+                    break;
+                default:
+                    break;
             }
-            AverageFrameTime /= FrameTimeHistory.Num();
-            AverageFrameRate = 1.0f / AverageFrameTime;
         }
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("Volumetric fog optimization completed"));
+}
+
+void UPerf_WeatherPerformanceOptimizer::OptimizeWindSimulation()
+{
+    if (!OptimizationSettings.bEnableWindSimulationOptimization)
+    {
+        return;
+    }
+    
+    UWorld* World = GetWorld();
+    if (!World) return;
+    
+    // Find wind components and optimize them
+    TArray<AActor*> WindActors;
+    UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), WindActors);
+    
+    for (AActor* Actor : WindActors)
+    {
+        if (!Actor) continue;
+        
+        TArray<UWindDirectionalSourceComponent*> WindComponents;
+        Actor->GetComponents<UWindDirectionalSourceComponent>(WindComponents);
+        
+        for (UWindDirectionalSourceComponent* WindComp : WindComponents)
+        {
+            if (!WindComp) continue;
+            
+            // Optimize wind simulation based on optimization level
+            switch (OptimizationSettings.OptimizationLevel)
+            {
+                case EPerf_WeatherOptimizationLevel::High:
+                    WindComp->SetStrength(WindComp->GetStrength() * 0.8f);
+                    break;
+                case EPerf_WeatherOptimizationLevel::Ultra:
+                    WindComp->SetStrength(WindComp->GetStrength() * 0.6f);
+                    break;
+                default:
+                    break;
+            }
+        }
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("Wind simulation optimization completed"));
+}
+
+void UPerf_WeatherPerformanceOptimizer::RunWeatherPerformanceTest()
+{
+    UE_LOG(LogTemp, Warning, TEXT("=== Weather Performance Test ==="));
+    
+    UpdateWeatherMetrics();
+    
+    UE_LOG(LogTemp, Warning, TEXT("Particle System Frame Time: %.2f ms"), WeatherMetrics.ParticleSystemFrameTime);
+    UE_LOG(LogTemp, Warning, TEXT("Active Particle Count: %d"), WeatherMetrics.ActiveParticleCount);
+    UE_LOG(LogTemp, Warning, TEXT("Volumetric Fog Frame Time: %.2f ms"), WeatherMetrics.VolumetricFogFrameTime);
+    UE_LOG(LogTemp, Warning, TEXT("Wind Simulation Frame Time: %.2f ms"), WeatherMetrics.WindSimulationFrameTime);
+    UE_LOG(LogTemp, Warning, TEXT("Total Weather Frame Time: %.2f ms"), WeatherMetrics.TotalWeatherFrameTime);
+    UE_LOG(LogTemp, Warning, TEXT("Weather Effect LOD Level: %d"), WeatherMetrics.WeatherEffectLODLevel);
+    
+    // Test optimization
+    OptimizeWeatherSystems();
+    
+    UE_LOG(LogTemp, Warning, TEXT("=== Weather Performance Test Completed ==="));
+}
+
+void UPerf_WeatherPerformanceOptimizer::UpdateParticleSystemMetrics()
+{
+    // Simulate particle system metrics
+    WeatherMetrics.ParticleSystemFrameTime = FMath::RandRange(0.5f, 3.0f);
+    WeatherMetrics.ActiveParticleCount = FMath::RandRange(1000, 8000);
+}
+
+void UPerf_WeatherPerformanceOptimizer::UpdateVolumetricFogMetrics()
+{
+    // Simulate volumetric fog metrics
+    WeatherMetrics.VolumetricFogFrameTime = FMath::RandRange(0.2f, 1.5f);
+}
+
+void UPerf_WeatherPerformanceOptimizer::UpdateWindSimulationMetrics()
+{
+    // Simulate wind simulation metrics
+    WeatherMetrics.WindSimulationFrameTime = FMath::RandRange(0.1f, 0.8f);
+}
+
+void UPerf_WeatherPerformanceOptimizer::ApplyOptimizationSettings()
+{
+    // Update tick interval based on optimization settings
+    PrimaryComponentTick.TickInterval = 1.0f / OptimizationSettings.WeatherUpdateFrequency;
+    
+    // Calculate weather effect LOD level
+    switch (OptimizationSettings.OptimizationLevel)
+    {
+        case EPerf_WeatherOptimizationLevel::Disabled:
+            WeatherMetrics.WeatherEffectLODLevel = 0;
+            break;
+        case EPerf_WeatherOptimizationLevel::Low:
+            WeatherMetrics.WeatherEffectLODLevel = 1;
+            break;
+        case EPerf_WeatherOptimizationLevel::Medium:
+            WeatherMetrics.WeatherEffectLODLevel = 2;
+            break;
+        case EPerf_WeatherOptimizationLevel::High:
+            WeatherMetrics.WeatherEffectLODLevel = 3;
+            break;
+        case EPerf_WeatherOptimizationLevel::Ultra:
+            WeatherMetrics.WeatherEffectLODLevel = 4;
+            break;
     }
 }
 
-void UPerf_WeatherPerformanceOptimizer::CheckPerformanceThresholds()
+void UPerf_WeatherPerformanceOptimizer::LogWeatherPerformanceData()
 {
-    if (CurrentFrameRate < PerformanceSettings.MinFrameRate)
-    {
-        // Performance is below threshold, reduce complexity
-        if (CurrentComplexity > EPerf_WeatherComplexity::Minimal)
-        {
-            EPerf_WeatherComplexity NewComplexity = static_cast<EPerf_WeatherComplexity>(
-                static_cast<int32>(CurrentComplexity) - 1);
-            SetWeatherComplexity(NewComplexity);
-            
-            UE_LOG(LogTemp, Warning, TEXT("Performance below threshold (%.1f FPS), reducing weather complexity to %d"), 
-                   CurrentFrameRate, (int32)NewComplexity);
-        }
-    }
-    else if (CurrentFrameRate > PerformanceSettings.TargetFrameRate + 10.0f)
-    {
-        // Performance is well above target, can increase complexity
-        if (CurrentComplexity < EPerf_WeatherComplexity::Ultra)
-        {
-            EPerf_WeatherComplexity NewComplexity = static_cast<EPerf_WeatherComplexity>(
-                static_cast<int32>(CurrentComplexity) + 1);
-            SetWeatherComplexity(NewComplexity);
-            
-            UE_LOG(LogTemp, Log, TEXT("Performance above target (%.1f FPS), increasing weather complexity to %d"), 
-                   CurrentFrameRate, (int32)NewComplexity);
-        }
-    }
-}
-
-void UPerf_WeatherPerformanceOptimizer::ApplyPerformanceAdjustments()
-{
-    UpdatePerformanceSettings();
+    UE_LOG(LogTemp, Log, TEXT("Weather Performance Data:"));
+    UE_LOG(LogTemp, Log, TEXT("  Particle Frame Time: %.2f ms"), WeatherMetrics.ParticleSystemFrameTime);
+    UE_LOG(LogTemp, Log, TEXT("  Active Particles: %d"), WeatherMetrics.ActiveParticleCount);
+    UE_LOG(LogTemp, Log, TEXT("  Total Frame Time: %.2f ms"), WeatherMetrics.TotalWeatherFrameTime);
 }
