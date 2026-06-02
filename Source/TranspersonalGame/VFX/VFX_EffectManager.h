@@ -2,11 +2,10 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
-#include "Components/StaticMeshComponent.h"
-#include "Particles/ParticleSystemComponent.h"
-#include "NiagaraComponent.h"
 #include "NiagaraSystem.h"
-#include "Engine/World.h"
+#include "NiagaraComponent.h"
+#include "Components/StaticMeshComponent.h"
+#include "Engine/StaticMesh.h"
 #include "SharedTypes.h"
 #include "VFX_EffectManager.generated.h"
 
@@ -16,44 +15,37 @@ struct TRANSPERSONALGAME_API FVFX_EffectData
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
-    FString EffectName;
+    TSoftObjectPtr<UNiagaraSystem> NiagaraEffect;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
-    FVector Location;
+    FVector EffectScale = FVector(1.0f);
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
-    float Duration;
+    float EffectDuration = 2.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
-    float Intensity;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
-    bool bIsActive;
+    bool bAutoDestroy = true;
 
     FVFX_EffectData()
     {
-        EffectName = TEXT("Default");
-        Location = FVector::ZeroVector;
-        Duration = 5.0f;
-        Intensity = 1.0f;
-        bIsActive = false;
+        NiagaraEffect = nullptr;
+        EffectScale = FVector(1.0f);
+        EffectDuration = 2.0f;
+        bAutoDestroy = true;
     }
 };
 
 UENUM(BlueprintType)
 enum class EVFX_EffectType : uint8
 {
-    None = 0,
-    DinosaurFootstep,
-    CampfireFire,
-    WeatherRain,
-    WeatherFog,
-    VolcanicAsh,
-    BloodSplatter,
-    DustCloud,
-    WaterSplash,
-    RockImpact,
-    VegetationRustle
+    Fire_Campfire       UMETA(DisplayName = "Campfire"),
+    Dust_Footstep       UMETA(DisplayName = "Footstep Dust"),
+    Blood_Impact        UMETA(DisplayName = "Blood Impact"),
+    Water_Splash        UMETA(DisplayName = "Water Splash"),
+    Smoke_Cooking       UMETA(DisplayName = "Cooking Smoke"),
+    Rain_Weather        UMETA(DisplayName = "Rain"),
+    Wind_Particles      UMETA(DisplayName = "Wind Particles"),
+    Sparks_Crafting     UMETA(DisplayName = "Crafting Sparks")
 };
 
 UCLASS(BlueprintType, Blueprintable)
@@ -67,72 +59,41 @@ public:
 protected:
     virtual void BeginPlay() override;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "VFX")
-    class USceneComponent* RootSceneComponent;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    USceneComponent* RootSceneComponent;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Effects")
-    TArray<FVFX_EffectData> ActiveEffects;
+    TMap<EVFX_EffectType, FVFX_EffectData> EffectDatabase;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Settings")
-    float GlobalVFXIntensity;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Settings")
-    bool bEnableEnvironmentalVFX;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Settings")
-    bool bEnableDinosaurVFX;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Settings")
-    bool bEnableWeatherVFX;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Performance")
-    int32 MaxActiveEffects;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Performance")
-    float EffectCullingDistance;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "VFX Runtime")
+    TArray<UNiagaraComponent*> ActiveEffects;
 
 public:
-    virtual void Tick(float DeltaTime) override;
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    UNiagaraComponent* SpawnEffect(EVFX_EffectType EffectType, FVector Location, FRotator Rotation = FRotator::ZeroRotator);
 
     UFUNCTION(BlueprintCallable, Category = "VFX")
-    void CreateDinosaurFootstepEffect(FVector Location, float DinosaurSize);
+    void SpawnFootstepDust(FVector FootLocation, float DinosaurSize = 1.0f);
 
     UFUNCTION(BlueprintCallable, Category = "VFX")
-    void CreateCampfireEffect(FVector Location, float FireIntensity);
+    void SpawnCampfire(FVector FireLocation);
 
     UFUNCTION(BlueprintCallable, Category = "VFX")
-    void CreateWeatherEffect(EVFX_EffectType WeatherType, FVector Location, float Coverage);
+    void SpawnBloodImpact(FVector ImpactLocation, FVector ImpactNormal);
 
     UFUNCTION(BlueprintCallable, Category = "VFX")
-    void CreateBloodEffect(FVector Location, FVector ImpactDirection, float Amount);
-
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    void CreateRockImpactEffect(FVector Location, float ImpactForce);
-
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    void StopEffect(const FString& EffectName);
-
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    void StopAllEffects();
-
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    void SetGlobalVFXIntensity(float NewIntensity);
-
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    int32 GetActiveEffectCount() const;
+    void SpawnWaterSplash(FVector WaterLocation, float SplashIntensity = 1.0f);
 
     UFUNCTION(BlueprintCallable, Category = "VFX")
     void CleanupExpiredEffects();
 
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    bool IsEffectActive(const FString& EffectName) const;
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "VFX Debug")
+    void TestAllEffects();
 
-protected:
-    void UpdateEffects(float DeltaTime);
-    void CullDistantEffects();
-    void ManagePerformance();
-    
-    FVFX_EffectData* FindEffect(const FString& EffectName);
-    void RemoveEffect(const FString& EffectName);
-    void AddEffect(const FVFX_EffectData& NewEffect);
+private:
+    void InitializeEffectDatabase();
+    void CleanupEffect(UNiagaraComponent* EffectComponent);
+
+    UPROPERTY()
+    float EffectCleanupTimer = 0.0f;
 };
