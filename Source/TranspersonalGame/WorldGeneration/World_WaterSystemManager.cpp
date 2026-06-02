@@ -1,214 +1,242 @@
 #include "World_WaterSystemManager.h"
-#include "Components/SceneComponent.h"
-#include "Components/StaticMeshComponent.h"
-#include "Engine/StaticMesh.h"
-#include "Materials/Material.h"
-#include "Engine/World.h"
 #include "Engine/Engine.h"
+#include "Engine/World.h"
+#include "Engine/StaticMeshActor.h"
+#include "Components/StaticMeshComponent.h"
+#include "Materials/MaterialInterface.h"
+#include "Engine/StaticMesh.h"
+#include "UObject/ConstructorHelpers.h"
 #include "Kismet/GameplayStatics.h"
-#include "Math/UnrealMathUtility.h"
 
 AWorld_WaterSystemManager::AWorld_WaterSystemManager()
 {
     PrimaryActorTick.bCanEverTick = true;
 
+    // Create root component
     RootSceneComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootSceneComponent"));
     RootComponent = RootSceneComponent;
 
-    // Initialize default values
-    MaxRiverSegments = 20;
-    MaxLakes = 8;
-    MinDistanceBetweenLakes = 2000.0f;
-    bUseInstancedMeshes = true;
-    WaterLODDistance = 5000.0f;
-    WaterSystemBounds = 10000.0f;
-    bWaterSystemInitialized = false;
+    // Initialize water configuration
+    BaseWaterLevel = 50.0f;
+    SeasonalVariation = 20.0f;
+    FlowSpeed = 100.0f;
+    bDynamicWaterLevels = true;
+    FlowParticleIntensity = 1.0f;
 
-    // Set up default river segments
-    RiverSegments.Empty();
-    FWorld_RiverSegment MainRiver;
-    MainRiver.StartPoint = FVector(-5000, -3000, 50);
-    MainRiver.EndPoint = FVector(5000, 3000, 30);
-    MainRiver.Width = 400.0f;
-    MainRiver.FlowSpeed = 2.0f;
-    MainRiver.BiomeType = TEXT("Mixed");
-    RiverSegments.Add(MainRiver);
+    // Initialize water state
+    CurrentWaterLevel = BaseWaterLevel;
+    CurrentFlowRate = FlowSpeed;
+    bWaterSystemActive = true;
 
-    // Set up default lakes
-    Lakes.Empty();
-    FWorld_LakeData ForestLake;
-    ForestLake.Position = FVector(-3000, 2000, 40);
-    ForestLake.Radius = 800.0f;
-    ForestLake.LakeType = TEXT("Forest");
-    ForestLake.bHasFish = true;
-    Lakes.Add(ForestLake);
-
-    FWorld_LakeData PlainsLake;
-    PlainsLake.Position = FVector(3000, -2000, 45);
-    PlainsLake.Radius = 600.0f;
-    PlainsLake.LakeType = TEXT("Plains");
-    PlainsLake.bHasFish = false;
-    Lakes.Add(PlainsLake);
+    // Load default materials if available
+    static ConstructorHelpers::FObjectFinder<UMaterialInterface> LakeMaterial(TEXT("/Engine/EngineMaterials/DefaultMaterial"));
+    if (LakeMaterial.Succeeded())
+    {
+        LakeWaterMaterial = LakeMaterial.Object;
+        RiverWaterMaterial = LakeMaterial.Object;
+        WaterfallMaterial = LakeMaterial.Object;
+    }
 }
 
 void AWorld_WaterSystemManager::BeginPlay()
 {
     Super::BeginPlay();
-    
-    if (!bWaterSystemInitialized)
+
+    UE_LOG(LogTemp, Warning, TEXT("WaterSystemManager: Initializing water system"));
+
+    // Set up initial water materials
+    SetWaterMaterials();
+
+    // Create flow markers for existing water bodies
+    CreateFlowMarkers();
+
+    // Initialize water ecosystem
+    SpawnWaterVegetation();
+}
+
+void AWorld_WaterSystemManager::Tick(float DeltaTime)
+{
+    Super::Tick(DeltaTime);
+
+    if (bWaterSystemActive && bDynamicWaterLevels)
     {
-        GenerateWaterSystemInEditor();
-        bWaterSystemInitialized = true;
+        // Update water flow effects
+        UpdateFlowEffects();
+
+        // Calculate seasonal water level changes
+        float SeasonalFactor = FMath::Sin(GetWorld()->GetTimeSeconds() * 0.1f) * 0.5f + 0.5f;
+        UpdateWaterLevels(SeasonalFactor);
     }
 }
 
-void AWorld_WaterSystemManager::GenerateRiverSystem()
+void AWorld_WaterSystemManager::CreateMainLake(FVector Location, float Scale)
 {
-    if (!GetWorld())
+    AStaticMeshActor* Lake = CreateWaterBody(
+        Location,
+        FVector(Scale, Scale, 1.0f),
+        FRotator(0, 0, 0),
+        TEXT("MainLake_Central")
+    );
+
+    if (Lake)
     {
-        UE_LOG(LogTemp, Warning, TEXT("WaterSystemManager: No valid world"));
-        return;
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("WaterSystemManager: Generating river system with %d segments"), RiverSegments.Num());
-
-    for (int32 i = 0; i < RiverSegments.Num(); i++)
-    {
-        CreateRiverSegment(RiverSegments[i]);
-    }
-
-    OptimizeWaterRendering();
-}
-
-void AWorld_WaterSystemManager::GenerateLakes()
-{
-    if (!GetWorld())
-    {
-        UE_LOG(LogTemp, Warning, TEXT("WaterSystemManager: No valid world"));
-        return;
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("WaterSystemManager: Generating %d lakes"), Lakes.Num());
-
-    for (int32 i = 0; i < Lakes.Num(); i++)
-    {
-        CreateLake(Lakes[i]);
+        Lakes.Add(Lake);
+        UE_LOG(LogTemp, Warning, TEXT("WaterSystemManager: Created main lake at %s"), *Location.ToString());
     }
 }
 
-void AWorld_WaterSystemManager::CreateRiverSegment(const FWorld_RiverSegment& SegmentData)
+void AWorld_WaterSystemManager::CreateRiverSystem(const TArray<FVector>& RiverPoints)
 {
-    if (!GetWorld())
+    for (int32 i = 0; i < RiverPoints.Num() - 1; i++)
     {
-        return;
-    }
+        FVector Location = RiverPoints[i];
+        FString Label = FString::Printf(TEXT("River_Segment_%d"), i + 1);
 
-    // Calculate midpoint for river segment placement
-    FVector MidPoint = (SegmentData.StartPoint + SegmentData.EndPoint) * 0.5f;
-    
-    // Calculate rotation to align with flow direction
-    FVector Direction = (SegmentData.EndPoint - SegmentData.StartPoint).GetSafeNormal();
-    FRotator Rotation = Direction.Rotation();
+        AStaticMeshActor* RiverSegment = CreateWaterBody(
+            Location,
+            FVector(3.0f, 1.0f, 0.1f),
+            FRotator(0, 0, 0),
+            Label
+        );
 
-    // Spawn river segment actor
-    AActor* RiverActor = GetWorld()->SpawnActor<AActor>(AActor::StaticClass(), MidPoint, Rotation);
-    if (!RiverActor)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("WaterSystemManager: Failed to spawn river actor"));
-        return;
-    }
-
-    // Add static mesh component
-    UStaticMeshComponent* MeshComponent = NewObject<UStaticMeshComponent>(RiverActor);
-    if (MeshComponent)
-    {
-        RiverActor->SetRootComponent(MeshComponent);
-        
-        // Set scale based on river width and length
-        float Length = FVector::Dist(SegmentData.StartPoint, SegmentData.EndPoint);
-        FVector Scale = FVector(Length / 100.0f, SegmentData.Width / 100.0f, 0.1f);
-        RiverActor->SetActorScale3D(Scale);
-
-        SetupWaterMaterial(MeshComponent, true);
-        
-        FString RiverName = FString::Printf(TEXT("RiverSegment_%s_%d"), 
-            *SegmentData.BiomeType, SpawnedWaterActors.Num());
-        RiverActor->SetActorLabel(RiverName);
-        
-        SpawnedWaterActors.Add(RiverActor);
-        OnRiverSegmentCreated(RiverActor);
-        
-        UE_LOG(LogTemp, Log, TEXT("WaterSystemManager: Created river segment %s"), *RiverName);
-    }
-}
-
-void AWorld_WaterSystemManager::CreateLake(const FWorld_LakeData& LakeData)
-{
-    if (!GetWorld())
-    {
-        return;
-    }
-
-    // Spawn lake actor
-    AActor* LakeActor = GetWorld()->SpawnActor<AActor>(AActor::StaticClass(), LakeData.Position, FRotator::ZeroRotator);
-    if (!LakeActor)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("WaterSystemManager: Failed to spawn lake actor"));
-        return;
-    }
-
-    // Add static mesh component
-    UStaticMeshComponent* MeshComponent = NewObject<UStaticMeshComponent>(LakeActor);
-    if (MeshComponent)
-    {
-        LakeActor->SetRootComponent(MeshComponent);
-        
-        // Set scale based on lake radius
-        FVector Scale = FVector(LakeData.Radius / 50.0f, LakeData.Radius / 50.0f, 0.1f);
-        LakeActor->SetActorScale3D(Scale);
-
-        SetupWaterMaterial(MeshComponent, false);
-        
-        FString LakeName = FString::Printf(TEXT("Lake_%s_%d"), 
-            *LakeData.LakeType, SpawnedWaterActors.Num());
-        LakeActor->SetActorLabel(LakeName);
-        
-        SpawnedWaterActors.Add(LakeActor);
-        OnLakeCreated(LakeActor);
-        
-        UE_LOG(LogTemp, Log, TEXT("WaterSystemManager: Created lake %s"), *LakeName);
-    }
-}
-
-void AWorld_WaterSystemManager::ClearWaterBodies()
-{
-    for (AActor* WaterActor : SpawnedWaterActors)
-    {
-        if (IsValid(WaterActor))
+        if (RiverSegment)
         {
-            WaterActor->Destroy();
+            Rivers.Add(RiverSegment);
+            FlowPoints.Add(Location);
         }
     }
-    SpawnedWaterActors.Empty();
-    UE_LOG(LogTemp, Log, TEXT("WaterSystemManager: Cleared all water bodies"));
+
+    UE_LOG(LogTemp, Warning, TEXT("WaterSystemManager: Created river system with %d segments"), RiverPoints.Num() - 1);
 }
 
-bool AWorld_WaterSystemManager::IsPositionNearWater(const FVector& Position, float Threshold) const
+void AWorld_WaterSystemManager::CreateWaterfall(FVector Location, FRotator Rotation, float Height)
 {
-    // Check distance to rivers
-    for (const FWorld_RiverSegment& River : RiverSegments)
+    AStaticMeshActor* Waterfall = CreateWaterBody(
+        Location,
+        FVector(1.0f, Height, 0.1f),
+        Rotation,
+        TEXT("Waterfall_Mountain")
+    );
+
+    if (Waterfall)
     {
-        FVector MidPoint = (River.StartPoint + River.EndPoint) * 0.5f;
-        if (FVector::Dist(Position, MidPoint) < Threshold)
+        Waterfalls.Add(Waterfall);
+        FlowPoints.Add(Location);
+        UE_LOG(LogTemp, Warning, TEXT("WaterSystemManager: Created waterfall at %s"), *Location.ToString());
+    }
+}
+
+void AWorld_WaterSystemManager::CreatePond(FVector Location, float Scale, const FString& BiomeType)
+{
+    FString Label = FString::Printf(TEXT("%s_Pond"), *BiomeType);
+
+    AStaticMeshActor* Pond = CreateWaterBody(
+        Location,
+        FVector(Scale, Scale, 1.0f),
+        FRotator(0, 0, 0),
+        Label
+    );
+
+    if (Pond)
+    {
+        Ponds.Add(Pond);
+        UE_LOG(LogTemp, Warning, TEXT("WaterSystemManager: Created %s pond at %s"), *BiomeType, *Location.ToString());
+    }
+}
+
+void AWorld_WaterSystemManager::UpdateWaterLevels(float SeasonalFactor)
+{
+    float TargetLevel = BaseWaterLevel + (SeasonalVariation * SeasonalFactor);
+    CurrentWaterLevel = FMath::FInterpTo(CurrentWaterLevel, TargetLevel, GetWorld()->GetDeltaSeconds(), 0.1f);
+
+    // Update all water bodies to new level
+    for (AStaticMeshActor* Lake : Lakes)
+    {
+        if (Lake)
+        {
+            FVector NewLocation = Lake->GetActorLocation();
+            NewLocation.Z = CurrentWaterLevel;
+            Lake->SetActorLocation(NewLocation);
+        }
+    }
+
+    for (AStaticMeshActor* Pond : Ponds)
+    {
+        if (Pond)
+        {
+            FVector NewLocation = Pond->GetActorLocation();
+            NewLocation.Z = CurrentWaterLevel - 20.0f; // Ponds slightly lower
+            Pond->SetActorLocation(NewLocation);
+        }
+    }
+}
+
+void AWorld_WaterSystemManager::UpdateFlowEffects()
+{
+    CurrentFlowRate = FlowSpeed * (1.0f + FMath::Sin(GetWorld()->GetTimeSeconds() * 2.0f) * 0.2f);
+
+    // Update flow direction and particle effects
+    UpdateFlowDirection();
+}
+
+void AWorld_WaterSystemManager::SetWaterMaterials()
+{
+    // Apply materials to all water bodies
+    for (AStaticMeshActor* Lake : Lakes)
+    {
+        if (Lake && LakeWaterMaterial)
+        {
+            ApplyWaterMaterial(Lake, LakeWaterMaterial);
+        }
+    }
+
+    for (AStaticMeshActor* River : Rivers)
+    {
+        if (River && RiverWaterMaterial)
+        {
+            ApplyWaterMaterial(River, RiverWaterMaterial);
+        }
+    }
+
+    for (AStaticMeshActor* Waterfall : Waterfalls)
+    {
+        if (Waterfall && WaterfallMaterial)
+        {
+            ApplyWaterMaterial(Waterfall, WaterfallMaterial);
+        }
+    }
+
+    for (AStaticMeshActor* Pond : Ponds)
+    {
+        if (Pond && LakeWaterMaterial)
+        {
+            ApplyWaterMaterial(Pond, LakeWaterMaterial);
+        }
+    }
+}
+
+bool AWorld_WaterSystemManager::IsLocationNearWater(FVector Location, float Radius) const
+{
+    // Check distance to all water bodies
+    for (const AStaticMeshActor* Lake : Lakes)
+    {
+        if (Lake && FVector::Dist(Lake->GetActorLocation(), Location) <= Radius)
         {
             return true;
         }
     }
 
-    // Check distance to lakes
-    for (const FWorld_LakeData& Lake : Lakes)
+    for (const AStaticMeshActor* River : Rivers)
     {
-        if (FVector::Dist(Position, Lake.Position) < (Lake.Radius + Threshold))
+        if (River && FVector::Dist(River->GetActorLocation(), Location) <= Radius)
+        {
+            return true;
+        }
+    }
+
+    for (const AStaticMeshActor* Pond : Ponds)
+    {
+        if (Pond && FVector::Dist(Pond->GetActorLocation(), Location) <= Radius)
         {
             return true;
         }
@@ -217,134 +245,155 @@ bool AWorld_WaterSystemManager::IsPositionNearWater(const FVector& Position, flo
     return false;
 }
 
-FVector AWorld_WaterSystemManager::GetNearestWaterPosition(const FVector& FromPosition) const
+FVector AWorld_WaterSystemManager::GetNearestWaterSource(FVector Location) const
 {
-    FVector NearestPosition = FVector::ZeroVector;
-    float MinDistance = FLT_MAX;
+    FVector NearestWater = Location;
+    float MinDistance = MAX_FLT;
 
-    // Check rivers
-    for (const FWorld_RiverSegment& River : RiverSegments)
+    // Check all water bodies for nearest
+    TArray<const AStaticMeshActor*> AllWaterBodies;
+    for (const AStaticMeshActor* Lake : Lakes) AllWaterBodies.Add(Lake);
+    for (const AStaticMeshActor* River : Rivers) AllWaterBodies.Add(River);
+    for (const AStaticMeshActor* Pond : Ponds) AllWaterBodies.Add(Pond);
+
+    for (const AStaticMeshActor* WaterBody : AllWaterBodies)
     {
-        FVector MidPoint = (River.StartPoint + River.EndPoint) * 0.5f;
-        float Distance = FVector::Dist(FromPosition, MidPoint);
-        if (Distance < MinDistance)
+        if (WaterBody)
         {
-            MinDistance = Distance;
-            NearestPosition = MidPoint;
-        }
-    }
-
-    // Check lakes
-    for (const FWorld_LakeData& Lake : Lakes)
-    {
-        float Distance = FVector::Dist(FromPosition, Lake.Position);
-        if (Distance < MinDistance)
-        {
-            MinDistance = Distance;
-            NearestPosition = Lake.Position;
-        }
-    }
-
-    return NearestPosition;
-}
-
-void AWorld_WaterSystemManager::UpdateWaterFlow(float DeltaTime)
-{
-    // Update water material parameters for flow animation
-    if (WaterMaterial)
-    {
-        // This would update material parameters for flow animation
-        // Implementation depends on material setup
-    }
-}
-
-void AWorld_WaterSystemManager::GenerateWaterSystemInEditor()
-{
-    ClearWaterBodies();
-    GenerateRiverSystem();
-    GenerateLakes();
-    ValidateWaterSystem();
-}
-
-void AWorld_WaterSystemManager::ValidateWaterSystem()
-{
-    int32 ValidRivers = 0;
-    int32 ValidLakes = 0;
-
-    for (const AActor* WaterActor : SpawnedWaterActors)
-    {
-        if (IsValid(WaterActor))
-        {
-            if (WaterActor->GetActorLabel().Contains(TEXT("River")))
+            float Distance = FVector::Dist(WaterBody->GetActorLocation(), Location);
+            if (Distance < MinDistance)
             {
-                ValidRivers++;
-            }
-            else if (WaterActor->GetActorLabel().Contains(TEXT("Lake")))
-            {
-                ValidLakes++;
+                MinDistance = Distance;
+                NearestWater = WaterBody->GetActorLocation();
             }
         }
     }
 
-    UE_LOG(LogTemp, Log, TEXT("WaterSystemManager: Validation complete - %d rivers, %d lakes"), 
-        ValidRivers, ValidLakes);
+    return NearestWater;
 }
 
-void AWorld_WaterSystemManager::OnRiverSegmentCreated(AActor* NewActor)
+float AWorld_WaterSystemManager::GetWaterDepthAtLocation(FVector Location) const
 {
-    if (IsValid(NewActor))
+    // Simple depth calculation based on proximity to water bodies
+    if (IsLocationNearWater(Location, 100.0f))
     {
-        // Additional setup for river segments
-        UE_LOG(LogTemp, Log, TEXT("WaterSystemManager: River segment created: %s"), *NewActor->GetActorLabel());
+        return FMath::RandRange(1.0f, 5.0f); // Shallow to medium depth
     }
+    
+    return 0.0f; // No water
 }
 
-void AWorld_WaterSystemManager::OnLakeCreated(AActor* NewActor)
+void AWorld_WaterSystemManager::SpawnWaterVegetation()
 {
-    if (IsValid(NewActor))
+    // Spawn vegetation near water bodies
+    for (const AStaticMeshActor* Lake : Lakes)
     {
-        // Additional setup for lakes
-        UE_LOG(LogTemp, Log, TEXT("WaterSystemManager: Lake created: %s"), *NewActor->GetActorLabel());
-    }
-}
-
-void AWorld_WaterSystemManager::SetupWaterMaterial(UStaticMeshComponent* MeshComponent, bool bIsRiver)
-{
-    if (!MeshComponent)
-    {
-        return;
-    }
-
-    UMaterialInterface* MaterialToUse = bIsRiver ? RiverMaterial : WaterMaterial;
-    if (MaterialToUse)
-    {
-        MeshComponent->SetMaterial(0, MaterialToUse);
-    }
-}
-
-void AWorld_WaterSystemManager::OptimizeWaterRendering()
-{
-    // Implement LOD and culling optimizations
-    for (AActor* WaterActor : SpawnedWaterActors)
-    {
-        if (IsValid(WaterActor))
+        if (Lake)
         {
-            UStaticMeshComponent* MeshComp = WaterActor->FindComponentByClass<UStaticMeshComponent>();
-            if (MeshComp)
+            FVector LakeLocation = Lake->GetActorLocation();
+            // Spawn reeds and water plants around lake perimeter
+            for (int32 i = 0; i < 8; i++)
             {
-                // Set up LOD distances
-                MeshComp->SetCullDistance(WaterLODDistance);
+                float Angle = (i / 8.0f) * 2.0f * PI;
+                FVector VegLocation = LakeLocation + FVector(
+                    FMath::Cos(Angle) * 1200.0f,
+                    FMath::Sin(Angle) * 1200.0f,
+                    0.0f
+                );
+                
+                // Note: Actual vegetation spawning would be handled by Environment Artist
+                UE_LOG(LogTemp, Log, TEXT("WaterSystemManager: Vegetation spawn point at %s"), *VegLocation.ToString());
             }
         }
     }
 }
 
-FVector AWorld_WaterSystemManager::CalculateRiverFlowDirection(int32 SegmentIndex) const
+void AWorld_WaterSystemManager::CreateFishingSpots()
 {
-    if (RiverSegments.IsValidIndex(SegmentIndex))
+    // Create designated fishing locations
+    for (const AStaticMeshActor* Lake : Lakes)
     {
-        const FWorld_RiverSegment& Segment = RiverSegments[SegmentIndex];
-        return (Segment.EndPoint - Segment.StartPoint).GetSafeNormal();
+        if (Lake)
+        {
+            FVector FishingSpot = Lake->GetActorLocation() + FVector(500.0f, 0.0f, 0.0f);
+            UE_LOG(LogTemp, Warning, TEXT("WaterSystemManager: Fishing spot created at %s"), *FishingSpot.ToString());
+        }
     }
-    return FVector::ForwardVector;
+}
+
+void AWorld_WaterSystemManager::UpdateWaterQuality(float PollutionLevel)
+{
+    // Adjust water appearance and ecosystem health based on pollution
+    float WaterClarityFactor = FMath::Clamp(1.0f - PollutionLevel, 0.1f, 1.0f);
+    UE_LOG(LogTemp, Log, TEXT("WaterSystemManager: Water quality updated - Clarity: %f"), WaterClarityFactor);
+}
+
+AStaticMeshActor* AWorld_WaterSystemManager::CreateWaterBody(FVector Location, FVector Scale, FRotator Rotation, const FString& Label)
+{
+    if (!GetWorld())
+    {
+        return nullptr;
+    }
+
+    AStaticMeshActor* WaterActor = GetWorld()->SpawnActor<AStaticMeshActor>(Location, Rotation);
+    if (WaterActor)
+    {
+        WaterActor->SetActorLabel(Label);
+        WaterActor->SetActorScale3D(Scale);
+
+        // Set up water mesh
+        UStaticMesh* PlaneMesh = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Plane"));
+        SetupWaterMesh(WaterActor, PlaneMesh);
+    }
+
+    return WaterActor;
+}
+
+void AWorld_WaterSystemManager::SetupWaterMesh(AStaticMeshActor* WaterActor, UStaticMesh* Mesh)
+{
+    if (WaterActor && Mesh)
+    {
+        UStaticMeshComponent* MeshComp = WaterActor->GetStaticMeshComponent();
+        if (MeshComp)
+        {
+            MeshComp->SetStaticMesh(Mesh);
+        }
+    }
+}
+
+void AWorld_WaterSystemManager::ApplyWaterMaterial(AStaticMeshActor* WaterActor, UMaterialInterface* Material)
+{
+    if (WaterActor && Material)
+    {
+        UStaticMeshComponent* MeshComp = WaterActor->GetStaticMeshComponent();
+        if (MeshComp)
+        {
+            MeshComp->SetMaterial(0, Material);
+        }
+    }
+}
+
+void AWorld_WaterSystemManager::CreateFlowMarkers()
+{
+    for (const FVector& FlowPoint : FlowPoints)
+    {
+        UE_LOG(LogTemp, Log, TEXT("WaterSystemManager: Flow marker at %s"), *FlowPoint.ToString());
+    }
+}
+
+void AWorld_WaterSystemManager::UpdateFlowDirection()
+{
+    // Update flow particle systems and water surface animation
+    for (const FVector& FlowPoint : FlowPoints)
+    {
+        // Flow direction calculation would be implemented here
+        // This is a placeholder for actual particle system updates
+    }
+}
+
+void AWorld_WaterSystemManager::CalculateWaterFlow()
+{
+    // Physics-based water flow calculation
+    // Would integrate with UE5 fluid simulation systems
+    CurrentFlowRate = FlowSpeed * (CurrentWaterLevel / BaseWaterLevel);
 }
