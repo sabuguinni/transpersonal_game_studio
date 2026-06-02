@@ -2,56 +2,71 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "Engine/StaticMeshActor.h"
 #include "Components/StaticMeshComponent.h"
-#include "Engine/World.h"
+#include "Components/SceneComponent.h"
+#include "../SharedTypes.h"
 #include "World_BiomeManager.generated.h"
 
-UENUM(BlueprintType)
-enum class EWorld_BiomeType : uint8
-{
-    Grasslands      UMETA(DisplayName = "Grasslands"),
-    Forest          UMETA(DisplayName = "Forest"),
-    Mountains       UMETA(DisplayName = "Mountains"),
-    Rivers          UMETA(DisplayName = "Rivers"),
-    Wetlands        UMETA(DisplayName = "Wetlands"),
-    Volcanic        UMETA(DisplayName = "Volcanic"),
-    Desert          UMETA(DisplayName = "Desert")
-};
-
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FWorld_BiomeData
+struct TRANSPERSONALGAME_API FWorld_BiomeZone
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    EWorld_BiomeType BiomeType = EWorld_BiomeType::Grasslands;
+    EWorld_BiomeType BiomeType = EWorld_BiomeType::Forest;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    FVector Location = FVector::ZeroVector;
+    FVector CenterLocation = FVector::ZeroVector;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    FVector Size = FVector(10000.0f, 10000.0f, 1000.0f);
+    float Radius = 2000.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float Temperature = 25.0f;
+    int32 MaxProps = 1000;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float Humidity = 0.5f;
+    int32 CurrentProps = 0;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float Elevation = 0.0f;
+    float TerrainRoughness = 0.5f;
 
-    FWorld_BiomeData()
-    {
-        BiomeType = EWorld_BiomeType::Grasslands;
-        Location = FVector::ZeroVector;
-        Size = FVector(10000.0f, 10000.0f, 1000.0f);
-        Temperature = 25.0f;
-        Humidity = 0.5f;
-        Elevation = 0.0f;
-    }
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    float VegetationDensity = 0.7f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    float WaterPresence = 0.2f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    bool bIsActive = true;
 };
 
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FWorld_BiomePerformanceMetrics
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    int32 TotalActors = 0;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    int32 VisibleActors = 0;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float FrameTime = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float MemoryUsageMB = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    EWorld_PerformanceLevel CurrentPerformanceLevel = EWorld_PerformanceLevel::High;
+};
+
+/**
+ * Advanced Biome Manager for procedural world generation
+ * Manages distinct biome zones with performance optimization
+ * Integrates with Physics Integration Optimizer for adaptive quality
+ */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API AWorld_BiomeManager : public AActor
 {
@@ -62,47 +77,118 @@ public:
 
 protected:
     virtual void BeginPlay() override;
+    virtual void Tick(float DeltaTime) override;
 
+    // Core Components
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
     USceneComponent* RootSceneComponent;
 
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    UStaticMeshComponent* VisualizationMesh;
+
+    // Biome Configuration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biomes", meta = (AllowPrivateAccess = "true"))
+    TArray<FWorld_BiomeZone> BiomeZones;
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biomes")
-    TArray<FWorld_BiomeData> BiomeRegions;
+    float BiomeTransitionDistance = 500.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World Generation")
-    int32 WorldSizeX = 100000;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biomes")
+    bool bEnableAutomaticGeneration = true;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World Generation")
-    int32 WorldSizeY = 100000;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biomes")
+    int32 MaxTotalActors = 20000;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World Generation")
-    float BiomeBlendDistance = 5000.0f;
+    // Performance Management
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    FWorld_BiomePerformanceMetrics PerformanceMetrics;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float PerformanceUpdateInterval = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float CullingDistance = 5000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    bool bEnableDistanceCulling = true;
+
+    // Runtime Data
+    UPROPERTY()
+    float LastPerformanceUpdate = 0.0f;
+
+    UPROPERTY()
+    TArray<AActor*> SpawnedActors;
 
 public:
-    virtual void Tick(float DeltaTime) override;
-
-    UFUNCTION(BlueprintCallable, Category = "Biome Management")
+    // Biome Management
+    UFUNCTION(BlueprintCallable, Category = "Biomes")
     void InitializeBiomes();
 
-    UFUNCTION(BlueprintCallable, Category = "Biome Management")
+    UFUNCTION(BlueprintCallable, Category = "Biomes")
+    void GenerateBiomeContent();
+
+    UFUNCTION(BlueprintCallable, Category = "Biomes")
     EWorld_BiomeType GetBiomeAtLocation(const FVector& Location) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Biome Management")
-    FWorld_BiomeData GetBiomeData(EWorld_BiomeType BiomeType) const;
+    UFUNCTION(BlueprintCallable, Category = "Biomes")
+    FWorld_BiomeZone* GetBiomeZoneAtLocation(const FVector& Location);
 
-    UFUNCTION(BlueprintCallable, Category = "Biome Management")
-    void AddBiomeRegion(const FWorld_BiomeData& BiomeData);
+    UFUNCTION(BlueprintCallable, Category = "Biomes")
+    void AddBiomeZone(const FWorld_BiomeZone& NewBiome);
 
-    UFUNCTION(BlueprintCallable, Category = "Biome Management")
-    TArray<FWorld_BiomeData> GetNearbyBiomes(const FVector& Location, float Radius) const;
+    UFUNCTION(BlueprintCallable, Category = "Biomes")
+    void RemoveBiomeZone(int32 BiomeIndex);
 
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "World Generation")
-    void GenerateDefaultBiomes();
+    // Content Generation
+    UFUNCTION(BlueprintCallable, Category = "Generation")
+    void SpawnBiomeProps(int32 BiomeIndex, int32 PropCount);
 
-    UFUNCTION(BlueprintCallable, Category = "Biome Management")
-    float GetBiomeInfluenceAtLocation(const FVector& Location, EWorld_BiomeType BiomeType) const;
+    UFUNCTION(BlueprintCallable, Category = "Generation")
+    void SpawnTerrainFeatures(const FWorld_BiomeZone& Biome);
+
+    UFUNCTION(BlueprintCallable, Category = "Generation")
+    void SpawnVegetation(const FWorld_BiomeZone& Biome);
+
+    UFUNCTION(BlueprintCallable, Category = "Generation")
+    void SpawnWaterFeatures(const FWorld_BiomeZone& Biome);
+
+    // Performance Optimization
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void UpdatePerformanceMetrics();
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void OptimizeBiomePerformance();
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void CullDistantActors(const FVector& ViewerLocation);
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void AdjustBiomeQuality(EWorld_PerformanceLevel TargetLevel);
+
+    // Utility Functions
+    UFUNCTION(BlueprintCallable, Category = "Utility")
+    float GetDistanceToBiome(const FVector& Location, int32 BiomeIndex) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Utility")
+    bool IsLocationInBiome(const FVector& Location, int32 BiomeIndex) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Utility")
+    void CleanupExcessActors();
+
+    // Debug and Visualization
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Debug")
+    void VisualizeAllBiomes();
+
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Debug")
+    void ClearAllSpawnedActors();
+
+    UFUNCTION(BlueprintCallable, Category = "Debug")
+    void LogBiomeStatistics() const;
 
 private:
-    void CreateDefaultBiomeLayout();
-    float CalculateDistanceToBiome(const FVector& Location, const FWorld_BiomeData& BiomeData) const;
+    // Internal helper functions
+    void CreateDefaultBiomes();
+    AActor* SpawnPropForBiome(const FWorld_BiomeZone& Biome, const FVector& Location);
+    void UpdateBiomeActorCounts();
+    bool CanSpawnMoreActors() const;
 };
