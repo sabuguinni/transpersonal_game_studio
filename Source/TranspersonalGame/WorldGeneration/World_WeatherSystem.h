@@ -2,47 +2,69 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
-#include "Components/ExponentialHeightFogComponent.h"
-#include "Components/PointLightComponent.h"
-#include "Engine/World.h"
-#include "SharedTypes.h"
+#include "Components/StaticMeshComponent.h"
+#include "Components/SceneComponent.h"
+#include "Engine/ExponentialHeightFog.h"
+#include "Engine/DirectionalLight.h"
+#include "Sound/SoundCue.h"
+#include "Components/AudioComponent.h"
+#include "Particles/ParticleSystemComponent.h"
 #include "World_WeatherSystem.generated.h"
 
 UENUM(BlueprintType)
 enum class EWorld_WeatherType : uint8
 {
-    Clear_Hot       UMETA(DisplayName = "Clear Hot"),
-    Foggy_Humid     UMETA(DisplayName = "Foggy Humid"),
-    Rainy_Dense     UMETA(DisplayName = "Rainy Dense"),
-    Sandstorm_Dry   UMETA(DisplayName = "Sandstorm Dry"),
-    Snowy_Windy     UMETA(DisplayName = "Snowy Windy")
+    Clear       UMETA(DisplayName = "Clear"),
+    Cloudy      UMETA(DisplayName = "Cloudy"),
+    Rain        UMETA(DisplayName = "Rain"),
+    Storm       UMETA(DisplayName = "Storm"),
+    Fog         UMETA(DisplayName = "Fog"),
+    Sandstorm   UMETA(DisplayName = "Sandstorm"),
+    Snow        UMETA(DisplayName = "Snow")
+};
+
+UENUM(BlueprintType)
+enum class EWorld_ClimateZone : uint8
+{
+    Tropical    UMETA(DisplayName = "Tropical"),
+    Temperate   UMETA(DisplayName = "Temperate"),
+    Arid        UMETA(DisplayName = "Arid"),
+    Polar       UMETA(DisplayName = "Polar"),
+    Mountain    UMETA(DisplayName = "Mountain")
 };
 
 USTRUCT(BlueprintType)
-struct FWorld_WeatherSettings
+struct FWorld_WeatherData
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather")
-    EWorld_WeatherType WeatherType = EWorld_WeatherType::Clear_Hot;
+    EWorld_WeatherType WeatherType = EWorld_WeatherType::Clear;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather")
-    float FogDensity = 0.02f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float Intensity = 0.5f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather")
-    FLinearColor FogColor = FLinearColor::White;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather", meta = (ClampMin = "0.0", ClampMax = "100.0"))
+    float WindSpeed = 10.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather")
-    float WindIntensity = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather", meta = (ClampMin = "0.0", ClampMax = "100.0"))
+    float Humidity = 50.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather")
-    FVector WindDirection = FVector(1, 0, 0);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather", meta = (ClampMin = "-50.0", ClampMax = "50.0"))
+    float Temperature = 20.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather")
-    float Temperature = 25.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float Visibility = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather")
-    float Humidity = 0.5f;
+    FWorld_WeatherData()
+    {
+        WeatherType = EWorld_WeatherType::Clear;
+        Intensity = 0.5f;
+        WindSpeed = 10.0f;
+        Humidity = 50.0f;
+        Temperature = 20.0f;
+        Visibility = 1.0f;
+    }
 };
 
 UCLASS(BlueprintType, Blueprintable)
@@ -55,63 +77,108 @@ public:
 
 protected:
     virtual void BeginPlay() override;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    class UExponentialHeightFogComponent* FogComponent;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    class USceneComponent* RootSceneComponent;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather Settings")
-    FWorld_WeatherSettings WeatherSettings;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather Settings")
-    EBiomeType BiomeType = EBiomeType::Savanna;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather Settings")
-    float EffectRadius = 15000.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather Settings")
-    bool bDynamicWeather = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather Settings")
-    float WeatherTransitionSpeed = 1.0f;
-
-public:
     virtual void Tick(float DeltaTime) override;
 
-    UFUNCTION(BlueprintCallable, Category = "Weather")
-    void SetWeatherType(EWorld_WeatherType NewWeatherType);
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    USceneComponent* RootSceneComponent;
 
-    UFUNCTION(BlueprintCallable, Category = "Weather")
-    void ApplyWeatherSettings();
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    UParticleSystemComponent* RainParticles;
 
-    UFUNCTION(BlueprintCallable, Category = "Weather")
-    void UpdateFogSettings();
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    UParticleSystemComponent* SnowParticles;
 
-    UFUNCTION(BlueprintCallable, Category = "Weather")
-    void CreateWindEffects();
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    UParticleSystemComponent* SandstormParticles;
 
-    UFUNCTION(BlueprintCallable, Category = "Weather")
-    FWorld_WeatherSettings GetCurrentWeatherSettings() const;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    UAudioComponent* WeatherAudio;
 
-    UFUNCTION(BlueprintCallable, Category = "Weather")
-    bool IsPlayerInWeatherZone(class APawn* Player) const;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather System")
+    FWorld_WeatherData CurrentWeather;
 
-    UFUNCTION(BlueprintCallable, Category = "Weather")
-    void TransitionToWeather(EWorld_WeatherType TargetWeather, float TransitionTime);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather System")
+    EWorld_ClimateZone ClimateZone = EWorld_ClimateZone::Temperate;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather System", meta = (ClampMin = "1.0", ClampMax = "3600.0"))
+    float WeatherCycleDuration = 300.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather System", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float WeatherTransitionSpeed = 0.1f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather System")
+    bool bEnableRandomWeather = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather System")
+    bool bEnableSeasonalChanges = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "References")
+    AExponentialHeightFog* FogActor;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "References")
+    ADirectionalLight* SunLight;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    USoundCue* RainSound;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    USoundCue* StormSound;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    USoundCue* WindSound;
 
 private:
-    void InitializeWeatherForBiome();
-    void UpdateDynamicWeather(float DeltaTime);
-    FWorld_WeatherSettings GetDefaultSettingsForBiome(EBiomeType Biome) const;
+    float WeatherTimer;
+    float TransitionTimer;
+    FWorld_WeatherData TargetWeather;
+    bool bIsTransitioning;
 
-    UPROPERTY()
-    TArray<class APointLight*> WindMarkers;
+public:
+    UFUNCTION(BlueprintCallable, Category = "Weather System")
+    void SetWeather(EWorld_WeatherType NewWeatherType, float NewIntensity = 0.5f);
 
-    float CurrentTransitionTime = 0.0f;
-    float TargetTransitionTime = 0.0f;
-    bool bIsTransitioning = false;
-    FWorld_WeatherSettings TargetWeatherSettings;
-    FWorld_WeatherSettings StartWeatherSettings;
+    UFUNCTION(BlueprintCallable, Category = "Weather System")
+    void StartWeatherTransition(const FWorld_WeatherData& NewWeather);
+
+    UFUNCTION(BlueprintCallable, Category = "Weather System")
+    FWorld_WeatherData GetCurrentWeather() const { return CurrentWeather; }
+
+    UFUNCTION(BlueprintCallable, Category = "Weather System")
+    void SetClimateZone(EWorld_ClimateZone NewClimateZone);
+
+    UFUNCTION(BlueprintCallable, Category = "Weather System")
+    void UpdateFogSettings();
+
+    UFUNCTION(BlueprintCallable, Category = "Weather System")
+    void UpdateLightingSettings();
+
+    UFUNCTION(BlueprintCallable, Category = "Weather System")
+    void UpdateParticleEffects();
+
+    UFUNCTION(BlueprintCallable, Category = "Weather System")
+    void UpdateAudioEffects();
+
+    UFUNCTION(BlueprintCallable, Category = "Weather System")
+    void GenerateRandomWeather();
+
+    UFUNCTION(BlueprintCallable, Category = "Weather System")
+    bool IsStormActive() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Weather System")
+    float GetVisibilityMultiplier() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Weather System")
+    FVector GetWindDirection() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Weather System")
+    float GetWindStrength() const;
+
+protected:
+    void UpdateWeatherCycle(float DeltaTime);
+    void ProcessWeatherTransition(float DeltaTime);
+    FWorld_WeatherData GenerateWeatherForClimate() const;
+    void ApplyWeatherEffects();
+    void CleanupWeatherEffects();
 };
+
+#include "World_WeatherSystem.generated.h"
