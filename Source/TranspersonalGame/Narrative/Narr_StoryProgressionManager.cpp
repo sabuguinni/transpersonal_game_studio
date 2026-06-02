@@ -1,337 +1,268 @@
 #include "Narr_StoryProgressionManager.h"
-#include "Engine/World.h"
 #include "Engine/Engine.h"
-#include "Kismet/GameplayStatics.h"
-#include "TranspersonalGame/TranspersonalGameState.h"
-#include "TranspersonalGame/TranspersonalCharacter.h"
-#include "TranspersonalGame/SharedTypes.h"
+#include "Engine/World.h"
 
 UNarr_StoryProgressionManager::UNarr_StoryProgressionManager()
 {
-    PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 1.0f;
-    
-    // Initialize story progression data
-    CurrentChapter = ENarr_StoryChapter::Arrival;
-    CurrentObjective = ENarr_ObjectiveType::Explore;
-    StoryProgress = 0.0f;
-    
-    // Initialize survival thresholds for story progression
-    HealthThresholdForDanger = 30.0f;
-    HungerThresholdForUrgency = 70.0f;
-    FearThresholdForPanic = 80.0f;
-    
-    // Initialize discovery counters
-    DinosaurSpeciesDiscovered = 0;
-    BiomesExplored = 0;
-    Dayssurvived = 0;
-    
-    bIsStoryActive = true;
-    bCanProgressStory = true;
-    LastStoryEventTime = 0.0f;
-    StoryEventCooldown = 30.0f; // 30 seconds between story events
+    CurrentProgress = FNarr_ChapterProgress();
 }
 
-void UNarr_StoryProgressionManager::BeginPlay()
+void UNarr_StoryProgressionManager::Initialize(FSubsystemCollectionBase& Collection)
 {
-    Super::BeginPlay();
+    Super::Initialize(Collection);
     
-    // Get reference to game state for survival stats
-    if (UWorld* World = GetWorld())
+    InitializeChapterNarratives();
+    InitializeDefaultEvents();
+    UpdateAvailableEvents();
+    
+    UE_LOG(LogTemp, Warning, TEXT("Story Progression Manager initialized - Chapter: %d"), 
+           static_cast<int32>(CurrentProgress.CurrentChapter));
+}
+
+void UNarr_StoryProgressionManager::TriggerStoryEvent(const FString& EventID)
+{
+    if (!CanTriggerEvent(EventID))
     {
-        GameStateRef = Cast<ATranspersonalGameState>(World->GetGameState());
-        if (GameStateRef)
+        UE_LOG(LogTemp, Warning, TEXT("Cannot trigger story event: %s"), *EventID);
+        return;
+    }
+
+    const FNarr_StoryEvent* Event = RegisteredEvents.Find(EventID);
+    if (!Event)
+    {
+        UE_LOG(LogTemp, Error, TEXT("Story event not found: %s"), *EventID);
+        return;
+    }
+
+    // Mark event as completed
+    MarkEventCompleted(EventID);
+    
+    // Update chapter progress
+    CurrentProgress.ChapterProgress += 12.5f; // Each event advances chapter by 12.5%
+    if (CurrentProgress.ChapterProgress >= 100.0f)
+    {
+        // Auto-advance to next chapter
+        ENarr_StoryChapter NextChapter = static_cast<ENarr_StoryChapter>(
+            static_cast<int32>(CurrentProgress.CurrentChapter) + 1);
+        
+        if (NextChapter <= ENarr_StoryChapter::Legacy)
         {
-            UE_LOG(LogTemp, Warning, TEXT("StoryProgressionManager: Connected to GameState"));
+            AdvanceChapter(NextChapter);
         }
     }
-    
-    // Initialize story with arrival chapter
-    StartStoryChapter(ENarr_StoryChapter::Arrival);
+
+    // Log narrative text
+    UE_LOG(LogTemp, Log, TEXT("Story Event Triggered: %s - %s"), 
+           *EventID, *Event->NarrativeText);
+
+    // Update available events
+    UpdateAvailableEvents();
 }
 
-void UNarr_StoryProgressionManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void UNarr_StoryProgressionManager::AdvanceChapter(ENarr_StoryChapter NewChapter)
 {
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-    
-    if (!bIsStoryActive || !bCanProgressStory)
+    if (NewChapter == CurrentProgress.CurrentChapter)
     {
         return;
     }
+
+    ENarr_StoryChapter OldChapter = CurrentProgress.CurrentChapter;
+    CurrentProgress.CurrentChapter = NewChapter;
+    CurrentProgress.ChapterProgress = 0.0f;
+    CurrentProgress.ChapterStartTime = FDateTime::Now();
     
-    // Check for story progression conditions
-    CheckStoryProgressionConditions();
-    
-    // Update story event timing
-    LastStoryEventTime += DeltaTime;
-    
-    // Check for automatic story events based on survival state
-    CheckSurvivalBasedStoryEvents();
+    UE_LOG(LogTemp, Warning, TEXT("Chapter Advanced: %d -> %d"), 
+           static_cast<int32>(OldChapter), static_cast<int32>(NewChapter));
+
+    // Clear completed events for new chapter
+    CurrentProgress.CompletedEvents.Empty();
+    UpdateAvailableEvents();
 }
 
-void UNarr_StoryProgressionManager::CheckStoryProgressionConditions()
+bool UNarr_StoryProgressionManager::CanTriggerEvent(const FString& EventID) const
 {
-    if (!GameStateRef)
+    const FNarr_StoryEvent* Event = RegisteredEvents.Find(EventID);
+    if (!Event)
     {
-        return;
+        return false;
     }
-    
-    // Check chapter progression based on current chapter
-    switch (CurrentChapter)
+
+    // Check if already completed and not repeatable
+    if (!Event->bIsRepeatable && IsEventCompleted(EventID))
     {
-        case ENarr_StoryChapter::Arrival:
-            CheckArrivalProgression();
-            break;
-            
-        case ENarr_StoryChapter::FirstContact:
-            CheckFirstContactProgression();
-            break;
-            
-        case ENarr_StoryChapter::Survival:
-            CheckSurvivalProgression();
-            break;
-            
-        case ENarr_StoryChapter::Discovery:
-            CheckDiscoveryProgression();
-            break;
-            
-        case ENarr_StoryChapter::Adaptation:
-            CheckAdaptationProgression();
-            break;
-            
-        case ENarr_StoryChapter::Mastery:
-            CheckMasteryProgression();
-            break;
-            
-        default:
-            break;
+        return false;
+    }
+
+    // Check chapter requirement
+    if (Event->RequiredChapter != CurrentProgress.CurrentChapter)
+    {
+        return false;
+    }
+
+    // Check trigger condition
+    return CheckTriggerCondition(*Event);
+}
+
+ENarr_StoryChapter UNarr_StoryProgressionManager::GetCurrentChapter() const
+{
+    return CurrentProgress.CurrentChapter;
+}
+
+float UNarr_StoryProgressionManager::GetChapterProgress() const
+{
+    return CurrentProgress.ChapterProgress;
+}
+
+TArray<FString> UNarr_StoryProgressionManager::GetAvailableEvents() const
+{
+    return CurrentProgress.AvailableEvents;
+}
+
+void UNarr_StoryProgressionManager::RegisterStoryEvent(const FNarr_StoryEvent& NewEvent)
+{
+    RegisteredEvents.Add(NewEvent.EventID, NewEvent);
+    UpdateAvailableEvents();
+    
+    UE_LOG(LogTemp, Log, TEXT("Story event registered: %s"), *NewEvent.EventID);
+}
+
+void UNarr_StoryProgressionManager::UnregisterStoryEvent(const FString& EventID)
+{
+    RegisteredEvents.Remove(EventID);
+    CurrentProgress.AvailableEvents.Remove(EventID);
+    CurrentProgress.CompletedEvents.Remove(EventID);
+    
+    UE_LOG(LogTemp, Log, TEXT("Story event unregistered: %s"), *EventID);
+}
+
+void UNarr_StoryProgressionManager::SetChapterProgress(float Progress)
+{
+    CurrentProgress.ChapterProgress = FMath::Clamp(Progress, 0.0f, 100.0f);
+}
+
+bool UNarr_StoryProgressionManager::IsEventCompleted(const FString& EventID) const
+{
+    return CurrentProgress.CompletedEvents.Contains(EventID);
+}
+
+void UNarr_StoryProgressionManager::MarkEventCompleted(const FString& EventID)
+{
+    if (!IsEventCompleted(EventID))
+    {
+        CurrentProgress.CompletedEvents.Add(EventID);
     }
 }
 
-void UNarr_StoryProgressionManager::CheckArrivalProgression()
+FString UNarr_StoryProgressionManager::GetChapterNarrative(ENarr_StoryChapter Chapter) const
 {
-    // Progress from Arrival to FirstContact when player moves significantly
-    if (GameStateRef)
+    const FString* Narrative = ChapterNarratives.Find(Chapter);
+    return Narrative ? *Narrative : TEXT("Unknown chapter narrative");
+}
+
+FString UNarr_StoryProgressionManager::GetEventNarrative(const FString& EventID) const
+{
+    const FNarr_StoryEvent* Event = RegisteredEvents.Find(EventID);
+    return Event ? Event->NarrativeText : TEXT("Unknown event narrative");
+}
+
+void UNarr_StoryProgressionManager::InitializeChapterNarratives()
+{
+    ChapterNarratives.Empty();
+    
+    ChapterNarratives.Add(ENarr_StoryChapter::Awakening, 
+        TEXT("You awaken in a world ruled by giants. Every sound could mean death, every shadow could hide a predator. Learn quickly, or become prey."));
+    
+    ChapterNarratives.Add(ENarr_StoryChapter::FirstHunt, 
+        TEXT("The taste of victory is sweet, but the hunt has only begun. Larger beasts roam these lands, and they have noticed your presence."));
+    
+    ChapterNarratives.Add(ENarr_StoryChapter::TribalContact, 
+        TEXT("You are not alone. Others have survived the endless hunt, but trust is a luxury few can afford in this savage world."));
+    
+    ChapterNarratives.Add(ENarr_StoryChapter::PackLeader, 
+        TEXT("Leadership is earned through blood and cunning. Your pack looks to you for guidance, but every decision could be their last."));
+    
+    ChapterNarratives.Add(ENarr_StoryChapter::TerritoryWars, 
+        TEXT("The land grows scarce, and other tribes eye your territory with hungry eyes. War is coming, and only the strongest will claim these hunting grounds."));
+    
+    ChapterNarratives.Add(ENarr_StoryChapter::Exodus, 
+        TEXT("The old lands burn behind you. Ahead lies the unknown, but staying means certain death. Lead your people to safety, if such a place exists."));
+    
+    ChapterNarratives.Add(ENarr_StoryChapter::NewLands, 
+        TEXT("Fresh territories stretch before you, untamed and full of promise. But new lands bring new dangers, and the cycle begins anew."));
+    
+    ChapterNarratives.Add(ENarr_StoryChapter::Legacy, 
+        TEXT("Your name will be remembered in the songs of future generations. The settlement you built stands as proof that humanity can endure, even in the age of giants."));
+}
+
+void UNarr_StoryProgressionManager::InitializeDefaultEvents()
+{
+    RegisteredEvents.Empty();
+
+    // Awakening Chapter Events
+    FNarr_StoryEvent FirstSteps;
+    FirstSteps.EventID = TEXT("awakening_first_steps");
+    FirstSteps.RequiredChapter = ENarr_StoryChapter::Awakening;
+    FirstSteps.TriggerType = ENarr_StoryTrigger::PlayerAction;
+    FirstSteps.TriggerCondition = TEXT("move_distance_100");
+    FirstSteps.NarrativeText = TEXT("Your legs shake with each step. The ground beneath feels alien, dangerous. Every instinct screams to find shelter.");
+    FirstSteps.AudioCueID = TEXT("narr_first_steps");
+    FirstSteps.bIsRepeatable = false;
+    RegisteredEvents.Add(FirstSteps.EventID, FirstSteps);
+
+    FNarr_StoryEvent FirstShelter;
+    FirstShelter.EventID = TEXT("awakening_first_shelter");
+    FirstShelter.RequiredChapter = ENarr_StoryChapter::Awakening;
+    FirstShelter.TriggerType = ENarr_StoryTrigger::PlayerAction;
+    FirstShelter.TriggerCondition = TEXT("build_shelter");
+    FirstShelter.NarrativeText = TEXT("The crude shelter offers little comfort, but it is yours. For the first time since awakening, you feel a moment of safety.");
+    FirstShelter.AudioCueID = TEXT("narr_first_shelter");
+    FirstShelter.bIsRepeatable = false;
+    RegisteredEvents.Add(FirstShelter.EventID, FirstShelter);
+
+    // FirstHunt Chapter Events
+    FNarr_StoryEvent FirstKill;
+    FirstKill.EventID = TEXT("firsthunt_first_kill");
+    FirstKill.RequiredChapter = ENarr_StoryChapter::FirstHunt;
+    FirstKill.TriggerType = ENarr_StoryTrigger::CombatVictory;
+    FirstKill.TriggerCondition = TEXT("kill_dinosaur");
+    FirstKill.NarrativeText = TEXT("The beast lies still, its blood warm on your hands. You are no longer just prey - you are a hunter.");
+    FirstKill.AudioCueID = TEXT("narr_first_kill");
+    FirstKill.bIsRepeatable = false;
+    RegisteredEvents.Add(FirstKill.EventID, FirstKill);
+
+    // TribalContact Chapter Events
+    FNarr_StoryEvent FirstContact;
+    FirstContact.EventID = TEXT("tribal_first_contact");
+    FirstContact.RequiredChapter = ENarr_StoryChapter::TribalContact;
+    FirstContact.TriggerType = ENarr_StoryTrigger::NPCInteraction;
+    FirstContact.TriggerCondition = TEXT("meet_tribal_npc");
+    FirstContact.NarrativeText = TEXT("The stranger's eyes hold the same wariness as your own. In this world of giants, finding another human is both blessing and curse.");
+    FirstContact.AudioCueID = TEXT("narr_first_contact");
+    FirstContact.bIsRepeatable = false;
+    RegisteredEvents.Add(FirstContact.EventID, FirstContact);
+}
+
+void UNarr_StoryProgressionManager::UpdateAvailableEvents()
+{
+    CurrentProgress.AvailableEvents.Empty();
+    
+    for (const auto& EventPair : RegisteredEvents)
     {
-        // Check if player has moved from spawn point
-        if (ATranspersonalCharacter* Player = Cast<ATranspersonalCharacter>(UGameplayStatics::GetPlayerCharacter(GetWorld(), 0)))
+        const FNarr_StoryEvent& Event = EventPair.Value;
+        
+        if (Event.RequiredChapter == CurrentProgress.CurrentChapter)
         {
-            FVector CurrentLocation = Player->GetActorLocation();
-            float DistanceFromSpawn = FVector::Dist(CurrentLocation, FVector::ZeroVector);
-            
-            if (DistanceFromSpawn > 1000.0f) // Player moved 10 meters from spawn
+            if (Event.bIsRepeatable || !IsEventCompleted(Event.EventID))
             {
-                StartStoryChapter(ENarr_StoryChapter::FirstContact);
+                CurrentProgress.AvailableEvents.Add(Event.EventID);
             }
         }
     }
 }
 
-void UNarr_StoryProgressionManager::CheckFirstContactProgression()
+bool UNarr_StoryProgressionManager::CheckTriggerCondition(const FNarr_StoryEvent& Event) const
 {
-    // Progress when player first encounters a dinosaur
-    if (DinosaurSpeciesDiscovered >= 1)
-    {
-        StartStoryChapter(ENarr_StoryChapter::Survival);
-    }
-}
-
-void UNarr_StoryProgressionManager::CheckSurvivalProgression()
-{
-    // Progress when player has survived for a while and explored
-    if (DaysEnabled >= 2 && BiomesExplored >= 2)
-    {
-        StartStoryChapter(ENarr_StoryChapter::Discovery);
-    }
-}
-
-void UNarr_StoryProgressionManager::CheckDiscoveryProgression()
-{
-    // Progress when player has discovered multiple species and biomes
-    if (DinosaurSpeciesDiscovered >= 5 && BiomesExplored >= 4)
-    {
-        StartStoryChapter(ENarr_StoryChapter::Adaptation);
-    }
-}
-
-void UNarr_StoryProgressionManager::CheckAdaptationProgression()
-{
-    // Progress when player has mastered survival mechanics
-    if (DaysEnabled >= 7 && GameStateRef && GameStateRef->Health > 80.0f && GameStateRef->Hunger < 30.0f)
-    {
-        StartStoryChapter(ENarr_StoryChapter::Mastery);
-    }
-}
-
-void UNarr_StoryProgressionManager::CheckMasteryProgression()
-{
-    // Final chapter - story complete
-    StoryProgress = 100.0f;
-}
-
-void UNarr_StoryProgressionManager::StartStoryChapter(ENarr_StoryChapter NewChapter)
-{
-    if (NewChapter == CurrentChapter)
-    {
-        return;
-    }
-    
-    ENarr_StoryChapter PreviousChapter = CurrentChapter;
-    CurrentChapter = NewChapter;
-    
-    // Calculate story progress percentage
-    int32 ChapterIndex = static_cast<int32>(CurrentChapter);
-    int32 TotalChapters = static_cast<int32>(ENarr_StoryChapter::Mastery) + 1;
-    StoryProgress = (static_cast<float>(ChapterIndex) / static_cast<float>(TotalChapters)) * 100.0f;
-    
-    // Trigger chapter start event
-    OnChapterStarted.Broadcast(CurrentChapter, PreviousChapter);
-    
-    // Set appropriate objective for new chapter
-    SetObjectiveForChapter(NewChapter);
-    
-    UE_LOG(LogTemp, Warning, TEXT("Story Chapter Started: %d, Progress: %.1f%%"), 
-           static_cast<int32>(NewChapter), StoryProgress);
-}
-
-void UNarr_StoryProgressionManager::SetObjectiveForChapter(ENarr_StoryChapter Chapter)
-{
-    switch (Chapter)
-    {
-        case ENarr_StoryChapter::Arrival:
-            CurrentObjective = ENarr_ObjectiveType::Explore;
-            break;
-            
-        case ENarr_StoryChapter::FirstContact:
-            CurrentObjective = ENarr_ObjectiveType::Observe;
-            break;
-            
-        case ENarr_StoryChapter::Survival:
-            CurrentObjective = ENarr_ObjectiveType::Survive;
-            break;
-            
-        case ENarr_StoryChapter::Discovery:
-            CurrentObjective = ENarr_ObjectiveType::Document;
-            break;
-            
-        case ENarr_StoryChapter::Adaptation:
-            CurrentObjective = ENarr_ObjectiveType::Adapt;
-            break;
-            
-        case ENarr_StoryChapter::Mastery:
-            CurrentObjective = ENarr_ObjectiveType::Master;
-            break;
-    }
-    
-    OnObjectiveChanged.Broadcast(CurrentObjective);
-}
-
-void UNarr_StoryProgressionManager::CheckSurvivalBasedStoryEvents()
-{
-    if (!GameStateRef || LastStoryEventTime < StoryEventCooldown)
-    {
-        return;
-    }
-    
-    // Check for critical health story event
-    if (GameStateRef->Health <= HealthThresholdForDanger)
-    {
-        TriggerStoryEvent(ENarr_StoryEventType::HealthCritical);
-    }
-    // Check for high hunger story event
-    else if (GameStateRef->Hunger >= HungerThresholdForUrgency)
-    {
-        TriggerStoryEvent(ENarr_StoryEventType::HungerUrgent);
-    }
-    // Check for high fear story event
-    else if (GameStateRef->Fear >= FearThresholdForPanic)
-    {
-        TriggerStoryEvent(ENarr_StoryEventType::FearPanic);
-    }
-}
-
-void UNarr_StoryProgressionManager::TriggerStoryEvent(ENarr_StoryEventType EventType)
-{
-    LastStoryEventTime = 0.0f; // Reset cooldown
-    
-    OnStoryEventTriggered.Broadcast(EventType, CurrentChapter);
-    
-    UE_LOG(LogTemp, Warning, TEXT("Story Event Triggered: %d in Chapter: %d"), 
-           static_cast<int32>(EventType), static_cast<int32>(CurrentChapter));
-}
-
-void UNarr_StoryProgressionManager::OnDinosaurDiscovered(const FString& SpeciesName)
-{
-    if (!DiscoveredSpecies.Contains(SpeciesName))
-    {
-        DiscoveredSpecies.Add(SpeciesName);
-        DinosaurSpeciesDiscovered = DiscoveredSpecies.Num();
-        
-        TriggerStoryEvent(ENarr_StoryEventType::DinosaurDiscovered);
-        
-        UE_LOG(LogTemp, Warning, TEXT("New dinosaur species discovered: %s (Total: %d)"), 
-               *SpeciesName, DinosaurSpeciesDiscovered);
-    }
-}
-
-void UNarr_StoryProgressionManager::OnBiomeEntered(ENarr_BiomeType BiomeType)
-{
-    if (!ExploredBiomes.Contains(BiomeType))
-    {
-        ExploredBiomes.Add(BiomeType);
-        BiomesExplored = ExploredBiomes.Num();
-        
-        TriggerStoryEvent(ENarr_StoryEventType::BiomeDiscovered);
-        
-        UE_LOG(LogTemp, Warning, TEXT("New biome explored: %d (Total: %d)"), 
-               static_cast<int32>(BiomeType), BiomesExplored);
-    }
-}
-
-void UNarr_StoryProgressionManager::OnDayPassed()
-{
-    DaysEnabled++;
-    
-    if (DaysEnabled % 3 == 0) // Every 3 days
-    {
-        TriggerStoryEvent(ENarr_StoryEventType::TimeProgression);
-    }
-}
-
-bool UNarr_StoryProgressionManager::CanProgressToChapter(ENarr_StoryChapter TargetChapter) const
-{
-    // Check if we can progress to the target chapter based on current progress
-    int32 CurrentChapterIndex = static_cast<int32>(CurrentChapter);
-    int32 TargetChapterIndex = static_cast<int32>(TargetChapter);
-    
-    // Can only progress to next chapter or stay in current
-    return TargetChapterIndex <= CurrentChapterIndex + 1;
-}
-
-FString UNarr_StoryProgressionManager::GetCurrentChapterName() const
-{
-    switch (CurrentChapter)
-    {
-        case ENarr_StoryChapter::Arrival: return TEXT("Arrival");
-        case ENarr_StoryChapter::FirstContact: return TEXT("First Contact");
-        case ENarr_StoryChapter::Survival: return TEXT("Survival");
-        case ENarr_StoryChapter::Discovery: return TEXT("Discovery");
-        case ENarr_StoryChapter::Adaptation: return TEXT("Adaptation");
-        case ENarr_StoryChapter::Mastery: return TEXT("Mastery");
-        default: return TEXT("Unknown");
-    }
-}
-
-FString UNarr_StoryProgressionManager::GetCurrentObjectiveName() const
-{
-    switch (CurrentObjective)
-    {
-        case ENarr_ObjectiveType::Explore: return TEXT("Explore the Environment");
-        case ENarr_ObjectiveType::Survive: return TEXT("Maintain Survival");
-        case ENarr_ObjectiveType::Observe: return TEXT("Observe Wildlife");
-        case ENarr_ObjectiveType::Document: return TEXT("Document Discoveries");
-        case ENarr_ObjectiveType::Adapt: return TEXT("Adapt to Environment");
-        case ENarr_ObjectiveType::Master: return TEXT("Master the Prehistoric World");
-        default: return TEXT("Unknown Objective");
-    }
+    // Basic condition checking - in a full implementation, this would check game state
+    // For now, return true to allow manual triggering
+    return true;
 }
