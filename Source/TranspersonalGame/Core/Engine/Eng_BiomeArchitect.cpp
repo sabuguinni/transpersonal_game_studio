@@ -1,289 +1,337 @@
 #include "Eng_BiomeArchitect.h"
-#include "Engine/World.h"
 #include "Engine/Engine.h"
-
-// Static biome center definitions from memory
-const FVector UEng_BiomeArchitect::SavannaCenter = FVector(0.0f, 0.0f, 100.0f);
-const FVector UEng_BiomeArchitect::SwampCenter = FVector(-50000.0f, -45000.0f, 100.0f);
-const FVector UEng_BiomeArchitect::ForestCenter = FVector(-45000.0f, 40000.0f, 100.0f);
-const FVector UEng_BiomeArchitect::DesertCenter = FVector(55000.0f, 0.0f, 100.0f);
-const FVector UEng_BiomeArchitect::MountainCenter = FVector(40000.0f, 50000.0f, 100.0f);
-const float UEng_BiomeArchitect::BiomeRadius = 15000.0f;
+#include "Engine/World.h"
 
 UEng_BiomeArchitect::UEng_BiomeArchitect()
 {
-    PrimaryComponentTick.bCanEverTick = false;
-    bWantsInitializeComponent = true;
+    GlobalMaxActors = 20000;
+    MaxDinosaursTotal = 150;
+    DefaultBiomeRadius = 5000.0f;
 }
 
-void UEng_BiomeArchitect::BeginPlay()
+void UEng_BiomeArchitect::Initialize(FSubsystemCollectionBase& Collection)
 {
-    Super::BeginPlay();
+    Super::Initialize(Collection);
     
-    InitializeDefaultBiomes();
-    SetupEnvironmentalConstraints();
-    ConfigureSpeciesDistribution();
+    UE_LOG(LogTemp, Warning, TEXT("Engine Architect: Biome Architecture System Initializing"));
     
-    UE_LOG(LogTemp, Warning, TEXT("BiomeArchitect: Initialized with %d biome definitions"), BiomeDefinitions.Num());
+    InitializeBiomeDefinitions();
+    SetupDefaultBiomes();
+    SetupDefaultTransitions();
+    
+    UE_LOG(LogTemp, Warning, TEXT("Engine Architect: Biome Architecture System Ready - %d biomes defined"), BiomeDefinitions.Num());
 }
 
-void UEng_BiomeArchitect::InitializeDefaultBiomes()
+void UEng_BiomeArchitect::Deinitialize()
 {
     BiomeDefinitions.Empty();
+    BiomeTransitions.Empty();
     
-    // Savanna biome
-    FBiomeDefinition Savanna;
-    Savanna.BiomeType = EBiomeType::Savanna;
-    Savanna.BiomeName = TEXT("African Savanna");
-    Savanna.CenterLocation = SavannaCenter;
-    Savanna.Radius = BiomeRadius;
-    Savanna.TemperatureRange = FVector2D(25.0f, 35.0f);
-    Savanna.HumidityRange = FVector2D(0.3f, 0.6f);
-    Savanna.VegetationDensity = 0.4f;
-    BiomeDefinitions.Add(Savanna);
+    UE_LOG(LogTemp, Warning, TEXT("Engine Architect: Biome Architecture System Shutdown"));
     
-    // Swamp biome
-    FBiomeDefinition Swamp;
-    Swamp.BiomeType = EBiomeType::Swamp;
-    Swamp.BiomeName = TEXT("Prehistoric Wetlands");
-    Swamp.CenterLocation = SwampCenter;
-    Swamp.Radius = BiomeRadius;
-    Swamp.TemperatureRange = FVector2D(20.0f, 30.0f);
-    Swamp.HumidityRange = FVector2D(0.8f, 1.0f);
-    Swamp.VegetationDensity = 0.8f;
-    BiomeDefinitions.Add(Swamp);
-    
-    // Forest biome
-    FBiomeDefinition Forest;
-    Forest.BiomeType = EBiomeType::Forest;
-    Forest.BiomeName = TEXT("Dense Prehistoric Forest");
-    Forest.CenterLocation = ForestCenter;
-    Forest.Radius = BiomeRadius;
-    Forest.TemperatureRange = FVector2D(15.0f, 25.0f);
-    Forest.HumidityRange = FVector2D(0.6f, 0.9f);
-    Forest.VegetationDensity = 0.9f;
-    BiomeDefinitions.Add(Forest);
-    
-    // Desert biome
-    FBiomeDefinition Desert;
-    Desert.BiomeType = EBiomeType::Desert;
-    Desert.BiomeName = TEXT("Arid Badlands");
-    Desert.CenterLocation = DesertCenter;
-    Desert.Radius = BiomeRadius;
-    Desert.TemperatureRange = FVector2D(30.0f, 45.0f);
-    Desert.HumidityRange = FVector2D(0.1f, 0.3f);
-    Desert.VegetationDensity = 0.1f;
-    BiomeDefinitions.Add(Desert);
-    
-    // Mountain biome
-    FBiomeDefinition Mountain;
-    Mountain.BiomeType = EBiomeType::Mountain;
-    Mountain.BiomeName = TEXT("Rocky Highlands");
-    Mountain.CenterLocation = MountainCenter;
-    Mountain.Radius = BiomeRadius;
-    Mountain.TemperatureRange = FVector2D(5.0f, 20.0f);
-    Mountain.HumidityRange = FVector2D(0.4f, 0.7f);
-    Mountain.VegetationDensity = 0.3f;
-    BiomeDefinitions.Add(Mountain);
+    Super::Deinitialize();
 }
 
-void UEng_BiomeArchitect::SetupEnvironmentalConstraints()
+void UEng_BiomeArchitect::InitializeBiomeDefinitions()
 {
-    BiomeConstraints.Empty();
+    BiomeDefinitions.Empty();
+    BiomeTransitions.Empty();
     
-    // Savanna constraints
-    FEnvironmentalConstraints SavannaConstraints;
-    SavannaConstraints.MaxWindSpeed = 15.0f;
-    SavannaConstraints.RainProbability = 0.2f;
-    SavannaConstraints.MaxVisibility = 10000.0f;
-    SavannaConstraints.AllowedTimeOfDay = ETimeOfDay::All;
-    BiomeConstraints.Add(EBiomeType::Savanna, SavannaConstraints);
-    
-    // Swamp constraints
-    FEnvironmentalConstraints SwampConstraints;
-    SwampConstraints.MaxWindSpeed = 8.0f;
-    SwampConstraints.RainProbability = 0.6f;
-    SwampConstraints.MaxVisibility = 3000.0f;
-    SwampConstraints.AllowedTimeOfDay = ETimeOfDay::All;
-    BiomeConstraints.Add(EBiomeType::Swamp, SwampConstraints);
-    
-    // Forest constraints
-    FEnvironmentalConstraints ForestConstraints;
-    ForestConstraints.MaxWindSpeed = 12.0f;
-    ForestConstraints.RainProbability = 0.4f;
-    ForestConstraints.MaxVisibility = 2000.0f;
-    ForestConstraints.AllowedTimeOfDay = ETimeOfDay::All;
-    BiomeConstraints.Add(EBiomeType::Forest, ForestConstraints);
-    
-    // Desert constraints
-    FEnvironmentalConstraints DesertConstraints;
-    DesertConstraints.MaxWindSpeed = 25.0f;
-    DesertConstraints.RainProbability = 0.05f;
-    DesertConstraints.MaxVisibility = 15000.0f;
-    DesertConstraints.AllowedTimeOfDay = ETimeOfDay::All;
-    BiomeConstraints.Add(EBiomeType::Desert, DesertConstraints);
-    
-    // Mountain constraints
-    FEnvironmentalConstraints MountainConstraints;
-    MountainConstraints.MaxWindSpeed = 30.0f;
-    MountainConstraints.RainProbability = 0.3f;
-    MountainConstraints.MaxVisibility = 12000.0f;
-    MountainConstraints.AllowedTimeOfDay = ETimeOfDay::All;
-    BiomeConstraints.Add(EBiomeType::Mountain, MountainConstraints);
+    UE_LOG(LogTemp, Log, TEXT("Engine Architect: Initializing biome definitions"));
 }
 
-void UEng_BiomeArchitect::ConfigureSpeciesDistribution()
+FEng_BiomeDefinition UEng_BiomeArchitect::GetBiomeDefinition(EBiomeType BiomeType) const
 {
-    AllowedSpeciesPerBiome.Empty();
-    
-    // Savanna species
-    TArray<EDinosaurSpecies> SavannaSpecies;
-    SavannaSpecies.Add(EDinosaurSpecies::TRex);
-    SavannaSpecies.Add(EDinosaurSpecies::Velociraptor);
-    SavannaSpecies.Add(EDinosaurSpecies::Triceratops);
-    SavannaSpecies.Add(EDinosaurSpecies::Parasaurolophus);
-    AllowedSpeciesPerBiome.Add(EBiomeType::Savanna, SavannaSpecies);
-    
-    // Swamp species
-    TArray<EDinosaurSpecies> SwampSpecies;
-    SwampSpecies.Add(EDinosaurSpecies::TRex);
-    SwampSpecies.Add(EDinosaurSpecies::Triceratops);
-    SwampSpecies.Add(EDinosaurSpecies::Parasaurolophus);
-    SwampSpecies.Add(EDinosaurSpecies::Ankylosaurus);
-    AllowedSpeciesPerBiome.Add(EBiomeType::Swamp, SwampSpecies);
-    
-    // Forest species
-    TArray<EDinosaurSpecies> ForestSpecies;
-    ForestSpecies.Add(EDinosaurSpecies::Velociraptor);
-    ForestSpecies.Add(EDinosaurSpecies::Brachiosaurus);
-    ForestSpecies.Add(EDinosaurSpecies::Parasaurolophus);
-    ForestSpecies.Add(EDinosaurSpecies::Compsognathus);
-    AllowedSpeciesPerBiome.Add(EBiomeType::Forest, ForestSpecies);
-    
-    // Desert species
-    TArray<EDinosaurSpecies> DesertSpecies;
-    DesertSpecies.Add(EDinosaurSpecies::TRex);
-    DesertSpecies.Add(EDinosaurSpecies::Velociraptor);
-    DesertSpecies.Add(EDinosaurSpecies::Ankylosaurus);
-    DesertSpecies.Add(EDinosaurSpecies::Compsognathus);
-    AllowedSpeciesPerBiome.Add(EBiomeType::Desert, DesertSpecies);
-    
-    // Mountain species
-    TArray<EDinosaurSpecies> MountainSpecies;
-    MountainSpecies.Add(EDinosaurSpecies::TRex);
-    MountainSpecies.Add(EDinosaurSpecies::Velociraptor);
-    MountainSpecies.Add(EDinosaurSpecies::Ankylosaurus);
-    MountainSpecies.Add(EDinosaurSpecies::Triceratops);
-    AllowedSpeciesPerBiome.Add(EBiomeType::Mountain, MountainSpecies);
-}
-
-bool UEng_BiomeArchitect::ValidateBiomeConfiguration()
-{
-    if (BiomeDefinitions.Num() != 5)
+    if (const FEng_BiomeDefinition* Found = BiomeDefinitions.Find(BiomeType))
     {
-        UE_LOG(LogTemp, Error, TEXT("BiomeArchitect: Invalid biome count. Expected 5, got %d"), BiomeDefinitions.Num());
-        return false;
+        return *Found;
     }
     
-    for (const FBiomeDefinition& Biome : BiomeDefinitions)
+    UE_LOG(LogTemp, Warning, TEXT("Engine Architect: Biome definition not found for type %d"), (int32)BiomeType);
+    return FEng_BiomeDefinition();
+}
+
+void UEng_BiomeArchitect::RegisterBiomeDefinition(const FEng_BiomeDefinition& BiomeDefinition)
+{
+    if (ValidateBiomeDefinition(BiomeDefinition))
     {
-        if (Biome.Radius <= 0.0f)
+        BiomeDefinitions.Add(BiomeDefinition.BiomeType, BiomeDefinition);
+        UE_LOG(LogTemp, Log, TEXT("Engine Architect: Registered biome %s"), *BiomeDefinition.BiomeName);
+    }
+    else
+    {
+        UE_LOG(LogTemp, Error, TEXT("Engine Architect: Invalid biome definition for %s"), *BiomeDefinition.BiomeName);
+    }
+}
+
+TArray<FEng_BiomeDefinition> UEng_BiomeArchitect::GetAllBiomeDefinitions() const
+{
+    TArray<FEng_BiomeDefinition> Definitions;
+    BiomeDefinitions.GenerateValueArray(Definitions);
+    return Definitions;
+}
+
+void UEng_BiomeArchitect::RegisterBiomeTransition(const FEng_BiomeTransition& Transition)
+{
+    // Check if transition already exists
+    for (const FEng_BiomeTransition& ExistingTransition : BiomeTransitions)
+    {
+        if (ExistingTransition.FromBiome == Transition.FromBiome && 
+            ExistingTransition.ToBiome == Transition.ToBiome)
         {
-            UE_LOG(LogTemp, Error, TEXT("BiomeArchitect: Invalid radius for biome %s"), *Biome.BiomeName);
-            return false;
-        }
-        
-        if (Biome.VegetationDensity < 0.0f || Biome.VegetationDensity > 1.0f)
-        {
-            UE_LOG(LogTemp, Error, TEXT("BiomeArchitect: Invalid vegetation density for biome %s"), *Biome.BiomeName);
-            return false;
+            UE_LOG(LogTemp, Warning, TEXT("Engine Architect: Transition already exists from %d to %d"), 
+                   (int32)Transition.FromBiome, (int32)Transition.ToBiome);
+            return;
         }
     }
     
-    UE_LOG(LogTemp, Warning, TEXT("BiomeArchitect: Configuration validation passed"));
-    return true;
+    BiomeTransitions.Add(Transition);
+    UE_LOG(LogTemp, Log, TEXT("Engine Architect: Registered biome transition from %d to %d"), 
+           (int32)Transition.FromBiome, (int32)Transition.ToBiome);
 }
 
-FBiomeDefinition UEng_BiomeArchitect::GetBiomeDefinition(EBiomeType BiomeType)
+FEng_BiomeTransition UEng_BiomeArchitect::GetBiomeTransition(EBiomeType FromBiome, EBiomeType ToBiome) const
 {
-    for (const FBiomeDefinition& Biome : BiomeDefinitions)
+    for (const FEng_BiomeTransition& Transition : BiomeTransitions)
     {
-        if (Biome.BiomeType == BiomeType)
+        if (Transition.FromBiome == FromBiome && Transition.ToBiome == ToBiome)
         {
-            return Biome;
+            return Transition;
         }
     }
     
-    UE_LOG(LogTemp, Warning, TEXT("BiomeArchitect: Biome definition not found for type %d"), (int32)BiomeType);
-    return FBiomeDefinition();
+    UE_LOG(LogTemp, Warning, TEXT("Engine Architect: No transition found from %d to %d"), (int32)FromBiome, (int32)ToBiome);
+    return FEng_BiomeTransition();
 }
 
-bool UEng_BiomeArchitect::CanSpawnSpeciesInBiome(EDinosaurSpecies Species, EBiomeType BiomeType)
+bool UEng_BiomeArchitect::HasBiomeTransition(EBiomeType FromBiome, EBiomeType ToBiome) const
 {
-    if (AllowedSpeciesPerBiome.Contains(BiomeType))
+    for (const FEng_BiomeTransition& Transition : BiomeTransitions)
     {
-        const TArray<EDinosaurSpecies>& AllowedSpecies = AllowedSpeciesPerBiome[BiomeType];
-        return AllowedSpecies.Contains(Species);
+        if (Transition.FromBiome == FromBiome && Transition.ToBiome == ToBiome)
+        {
+            return true;
+        }
     }
-    
     return false;
 }
 
-FVector UEng_BiomeArchitect::GetBiomeCenter(EBiomeType BiomeType)
+bool UEng_BiomeArchitect::ValidateBiomeLayout(const TArray<EBiomeType>& BiomeLayout) const
 {
-    switch (BiomeType)
+    if (BiomeLayout.Num() == 0)
     {
-        case EBiomeType::Savanna: return SavannaCenter;
-        case EBiomeType::Swamp: return SwampCenter;
-        case EBiomeType::Forest: return ForestCenter;
-        case EBiomeType::Desert: return DesertCenter;
-        case EBiomeType::Mountain: return MountainCenter;
-        default: return FVector::ZeroVector;
+        UE_LOG(LogTemp, Error, TEXT("Engine Architect: Empty biome layout"));
+        return false;
     }
-}
-
-EBiomeType UEng_BiomeArchitect::GetBiomeAtLocation(FVector WorldLocation)
-{
-    float ClosestDistance = FLT_MAX;
-    EBiomeType ClosestBiome = EBiomeType::Savanna;
     
-    for (const FBiomeDefinition& Biome : BiomeDefinitions)
+    // Check if all biomes are defined
+    for (EBiomeType BiomeType : BiomeLayout)
     {
-        float Distance = FVector::Dist2D(WorldLocation, Biome.CenterLocation);
-        if (Distance < ClosestDistance)
+        if (!BiomeDefinitions.Contains(BiomeType))
         {
-            ClosestDistance = Distance;
-            ClosestBiome = Biome.BiomeType;
+            UE_LOG(LogTemp, Error, TEXT("Engine Architect: Undefined biome type %d in layout"), (int32)BiomeType);
+            return false;
         }
     }
     
-    return ClosestBiome;
+    UE_LOG(LogTemp, Log, TEXT("Engine Architect: Biome layout validated - %d biomes"), BiomeLayout.Num());
+    return true;
 }
 
-int32 UEng_BiomeArchitect::GetActorCountInBiome(EBiomeType BiomeType)
+int32 UEng_BiomeArchitect::GetMaxActorsForBiome(EBiomeType BiomeType) const
 {
-    if (!GetWorld())
+    if (const FEng_BiomeDefinition* Found = BiomeDefinitions.Find(BiomeType))
     {
-        return 0;
+        return Found->MaxActorsPerBiome;
     }
-    
-    FVector BiomeCenter = GetBiomeCenter(BiomeType);
-    int32 ActorCount = 0;
-    
-    for (TActorIterator<AActor> ActorItr(GetWorld()); ActorItr; ++ActorItr)
-    {
-        AActor* Actor = *ActorItr;
-        if (Actor && FVector::Dist2D(Actor->GetActorLocation(), BiomeCenter) <= BiomeRadius)
-        {
-            ActorCount++;
-        }
-    }
-    
-    return ActorCount;
+    return 4000; // Default limit
 }
 
-bool UEng_BiomeArchitect::IsWithinPerformanceLimits(EBiomeType BiomeType)
+float UEng_BiomeArchitect::GetBiomeRadius(EBiomeType BiomeType) const
 {
-    int32 ActorCount = GetActorCountInBiome(BiomeType);
-    return ActorCount <= MaxActorsPerBiome;
+    if (const FEng_BiomeDefinition* Found = BiomeDefinitions.Find(BiomeType))
+    {
+        return Found->BiomeRadius;
+    }
+    return DefaultBiomeRadius;
+}
+
+bool UEng_BiomeArchitect::CanDinosaurSpawnInBiome(EDinosaurSpecies Species, EBiomeType BiomeType) const
+{
+    if (const FEng_BiomeDefinition* Found = BiomeDefinitions.Find(BiomeType))
+    {
+        return Found->NativeDinosaurs.Contains(Species);
+    }
+    return false;
+}
+
+bool UEng_BiomeArchitect::CanVegetationSpawnInBiome(EVegetationType VegetationType, EBiomeType BiomeType) const
+{
+    if (const FEng_BiomeDefinition* Found = BiomeDefinitions.Find(BiomeType))
+    {
+        return Found->NativeVegetation.Contains(VegetationType);
+    }
+    return false;
+}
+
+TArray<EDinosaurSpecies> UEng_BiomeArchitect::GetNativeDinosaursForBiome(EBiomeType BiomeType) const
+{
+    if (const FEng_BiomeDefinition* Found = BiomeDefinitions.Find(BiomeType))
+    {
+        return Found->NativeDinosaurs;
+    }
+    return TArray<EDinosaurSpecies>();
+}
+
+TArray<EVegetationType> UEng_BiomeArchitect::GetNativeVegetationForBiome(EBiomeType BiomeType) const
+{
+    if (const FEng_BiomeDefinition* Found = BiomeDefinitions.Find(BiomeType))
+    {
+        return Found->NativeVegetation;
+    }
+    return TArray<EVegetationType>();
+}
+
+bool UEng_BiomeArchitect::IsActorLimitReached(EBiomeType BiomeType, int32 CurrentActorCount) const
+{
+    int32 MaxActors = GetMaxActorsForBiome(BiomeType);
+    return CurrentActorCount >= MaxActors;
+}
+
+int32 UEng_BiomeArchitect::GetRemainingActorBudget(EBiomeType BiomeType, int32 CurrentActorCount) const
+{
+    int32 MaxActors = GetMaxActorsForBiome(BiomeType);
+    return FMath::Max(0, MaxActors - CurrentActorCount);
+}
+
+void UEng_BiomeArchitect::SetupDefaultBiomes()
+{
+    // Forest Biome
+    FEng_BiomeDefinition ForestBiome;
+    ForestBiome.BiomeType = EBiomeType::Forest;
+    ForestBiome.BiomeName = TEXT("Dense Forest");
+    ForestBiome.Temperature = 22.0f;
+    ForestBiome.Humidity = 0.8f;
+    ForestBiome.Elevation = 150.0f;
+    ForestBiome.NativeDinosaurs = {EDinosaurSpecies::Parasaurolophus, EDinosaurSpecies::Triceratops, EDinosaurSpecies::Velociraptor};
+    ForestBiome.NativeVegetation = {EVegetationType::Tree, EVegetationType::Fern, EVegetationType::Moss};
+    ForestBiome.MaxActorsPerBiome = 4000;
+    ForestBiome.BiomeRadius = 6000.0f;
+    RegisterBiomeDefinition(ForestBiome);
+
+    // Desert Biome
+    FEng_BiomeDefinition DesertBiome;
+    DesertBiome.BiomeType = EBiomeType::Desert;
+    DesertBiome.BiomeName = TEXT("Arid Desert");
+    DesertBiome.Temperature = 35.0f;
+    DesertBiome.Humidity = 0.2f;
+    DesertBiome.Elevation = 50.0f;
+    DesertBiome.NativeDinosaurs = {EDinosaurSpecies::TRex, EDinosaurSpecies::Ankylosaurus};
+    DesertBiome.NativeVegetation = {EVegetationType::Cactus, EVegetationType::DeadTree};
+    DesertBiome.MaxActorsPerBiome = 3000;
+    DesertBiome.BiomeRadius = 7000.0f;
+    RegisterBiomeDefinition(DesertBiome);
+
+    // Plains Biome
+    FEng_BiomeDefinition PlainsBiome;
+    PlainsBiome.BiomeType = EBiomeType::Plains;
+    PlainsBiome.BiomeName = TEXT("Open Plains");
+    PlainsBiome.Temperature = 25.0f;
+    PlainsBiome.Humidity = 0.5f;
+    PlainsBiome.Elevation = 100.0f;
+    PlainsBiome.NativeDinosaurs = {EDinosaurSpecies::Brachiosaurus, EDinosaurSpecies::Parasaurolophus, EDinosaurSpecies::TRex};
+    PlainsBiome.NativeVegetation = {EVegetationType::Grass, EVegetationType::Bush};
+    PlainsBiome.MaxActorsPerBiome = 5000;
+    PlainsBiome.BiomeRadius = 8000.0f;
+    RegisterBiomeDefinition(PlainsBiome);
+
+    // Swamp Biome
+    FEng_BiomeDefinition SwampBiome;
+    SwampBiome.BiomeType = EBiomeType::Swamp;
+    SwampBiome.BiomeName = TEXT("Murky Swamp");
+    SwampBiome.Temperature = 28.0f;
+    SwampBiome.Humidity = 0.9f;
+    SwampBiome.Elevation = 20.0f;
+    SwampBiome.NativeDinosaurs = {EDinosaurSpecies::Brachiosaurus, EDinosaurSpecies::Parasaurolophus};
+    SwampBiome.NativeVegetation = {EVegetationType::Tree, EVegetationType::Fern, EVegetationType::Moss, EVegetationType::Vine};
+    SwampBiome.MaxActorsPerBiome = 3500;
+    SwampBiome.BiomeRadius = 5500.0f;
+    RegisterBiomeDefinition(SwampBiome);
+
+    // Mountain Biome
+    FEng_BiomeDefinition MountainBiome;
+    MountainBiome.BiomeType = EBiomeType::Mountain;
+    MountainBiome.BiomeName = TEXT("Rocky Mountains");
+    MountainBiome.Temperature = 15.0f;
+    MountainBiome.Humidity = 0.4f;
+    MountainBiome.Elevation = 500.0f;
+    MountainBiome.NativeDinosaurs = {EDinosaurSpecies::Ankylosaurus, EDinosaurSpecies::TRex};
+    MountainBiome.NativeVegetation = {EVegetationType::Bush, EVegetationType::DeadTree};
+    MountainBiome.MaxActorsPerBiome = 2500;
+    MountainBiome.BiomeRadius = 4500.0f;
+    RegisterBiomeDefinition(MountainBiome);
+
+    UE_LOG(LogTemp, Warning, TEXT("Engine Architect: Setup %d default biomes"), BiomeDefinitions.Num());
+}
+
+void UEng_BiomeArchitect::SetupDefaultTransitions()
+{
+    // Forest to Plains
+    FEng_BiomeTransition ForestToPlains;
+    ForestToPlains.FromBiome = EBiomeType::Forest;
+    ForestToPlains.ToBiome = EBiomeType::Plains;
+    ForestToPlains.TransitionWidth = 1500.0f;
+    ForestToPlains.BlendFactor = 0.6f;
+    RegisterBiomeTransition(ForestToPlains);
+
+    // Plains to Desert
+    FEng_BiomeTransition PlainsToDesert;
+    PlainsToDesert.FromBiome = EBiomeType::Plains;
+    PlainsToDesert.ToBiome = EBiomeType::Desert;
+    PlainsToDesert.TransitionWidth = 2000.0f;
+    PlainsToDesert.BlendFactor = 0.7f;
+    RegisterBiomeTransition(PlainsToDesert);
+
+    // Forest to Swamp
+    FEng_BiomeTransition ForestToSwamp;
+    ForestToSwamp.FromBiome = EBiomeType::Forest;
+    ForestToSwamp.ToBiome = EBiomeType::Swamp;
+    ForestToSwamp.TransitionWidth = 1200.0f;
+    ForestToSwamp.BlendFactor = 0.8f;
+    RegisterBiomeTransition(ForestToSwamp);
+
+    // Plains to Mountain
+    FEng_BiomeTransition PlainsToMountain;
+    PlainsToMountain.FromBiome = EBiomeType::Plains;
+    PlainsToMountain.ToBiome = EBiomeType::Mountain;
+    PlainsToMountain.TransitionWidth = 1800.0f;
+    PlainsToMountain.BlendFactor = 0.5f;
+    RegisterBiomeTransition(PlainsToMountain);
+
+    UE_LOG(LogTemp, Warning, TEXT("Engine Architect: Setup %d biome transitions"), BiomeTransitions.Num());
+}
+
+bool UEng_BiomeArchitect::ValidateBiomeDefinition(const FEng_BiomeDefinition& BiomeDefinition) const
+{
+    if (BiomeDefinition.BiomeName.IsEmpty())
+    {
+        UE_LOG(LogTemp, Error, TEXT("Engine Architect: Biome definition has empty name"));
+        return false;
+    }
+    
+    if (BiomeDefinition.MaxActorsPerBiome <= 0 || BiomeDefinition.MaxActorsPerBiome > 10000)
+    {
+        UE_LOG(LogTemp, Error, TEXT("Engine Architect: Invalid actor limit %d for biome %s"), 
+               BiomeDefinition.MaxActorsPerBiome, *BiomeDefinition.BiomeName);
+        return false;
+    }
+    
+    if (BiomeDefinition.BiomeRadius <= 0.0f || BiomeDefinition.BiomeRadius > 20000.0f)
+    {
+        UE_LOG(LogTemp, Error, TEXT("Engine Architect: Invalid radius %f for biome %s"), 
+               BiomeDefinition.BiomeRadius, *BiomeDefinition.BiomeName);
+        return false;
+    }
+    
+    return true;
 }
