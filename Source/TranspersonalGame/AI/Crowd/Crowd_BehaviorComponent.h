@@ -2,69 +2,80 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
-#include "Engine/Engine.h"
+#include "Engine/World.h"
+#include "../../SharedTypes.h"
 #include "Crowd_BehaviorComponent.generated.h"
 
-UENUM(BlueprintType)
-enum class ECrowd_ActivityState : uint8
-{
-    Idle        UMETA(DisplayName = "Idle"),
-    Moving      UMETA(DisplayName = "Moving"),
-    Working     UMETA(DisplayName = "Working"),
-    Resting     UMETA(DisplayName = "Resting"),
-    Fleeing     UMETA(DisplayName = "Fleeing"),
-    Following   UMETA(DisplayName = "Following")
-};
-
 USTRUCT(BlueprintType)
-struct FCrowd_BehaviorSettings
+struct TRANSPERSONALGAME_API FCrowd_BehaviorParams
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
-    float MovementSpeed = 300.0f;
+    float SeparationRadius;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
-    float RotationSpeed = 180.0f;
+    float AlignmentRadius;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
-    float PersonalSpace = 100.0f;
+    float CohesionRadius;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
-    float ViewDistance = 800.0f;
+    float SeparationWeight;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
-    float ReactionTime = 0.5f;
+    float AlignmentWeight;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
-    bool bAvoidObstacles = true;
+    float CohesionWeight;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
-    bool bFollowLeader = false;
+    float MaxSpeed;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
-    float LeaderFollowDistance = 200.0f;
+    float MaxForce;
+
+    FCrowd_BehaviorParams()
+    {
+        SeparationRadius = 100.0f;
+        AlignmentRadius = 200.0f;
+        CohesionRadius = 150.0f;
+        SeparationWeight = 2.0f;
+        AlignmentWeight = 1.0f;
+        CohesionWeight = 1.0f;
+        MaxSpeed = 200.0f;
+        MaxForce = 50.0f;
+    }
 };
 
 USTRUCT(BlueprintType)
-struct FCrowd_EmotionalState
+struct TRANSPERSONALGAME_API FCrowd_FlockingData
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Emotion", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float Fear = 0.0f;
+    UPROPERTY(BlueprintReadWrite, Category = "Flocking")
+    FVector SeparationForce;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Emotion", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float Curiosity = 0.5f;
+    UPROPERTY(BlueprintReadWrite, Category = "Flocking")
+    FVector AlignmentForce;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Emotion", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float Aggression = 0.1f;
+    UPROPERTY(BlueprintReadWrite, Category = "Flocking")
+    FVector CohesionForce;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Emotion", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float Sociability = 0.7f;
+    UPROPERTY(BlueprintReadWrite, Category = "Flocking")
+    FVector AvoidanceForce;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Emotion", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float Energy = 1.0f;
+    UPROPERTY(BlueprintReadWrite, Category = "Flocking")
+    int32 NeighborCount;
+
+    FCrowd_FlockingData()
+    {
+        SeparationForce = FVector::ZeroVector;
+        AlignmentForce = FVector::ZeroVector;
+        CohesionForce = FVector::ZeroVector;
+        AvoidanceForce = FVector::ZeroVector;
+        NeighborCount = 0;
+    }
 };
 
 UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
@@ -77,82 +88,67 @@ public:
 
 protected:
     virtual void BeginPlay() override;
-
-public:
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
-    FCrowd_BehaviorSettings BehaviorSettings;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Behavior")
+    FCrowd_BehaviorParams BehaviorParams;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "State")
-    ECrowd_ActivityState CurrentActivity = ECrowd_ActivityState::Idle;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Behavior")
+    ECrowd_BehaviorState CurrentState;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Emotion")
-    FCrowd_EmotionalState EmotionalState;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Behavior")
+    float StateChangeTimer;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Navigation")
-    FVector CurrentDestination;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Behavior")
+    float MinStateTime;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Navigation")
-    FVector LastKnownPlayerLocation;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Behavior")
+    float MaxStateTime;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
-    AActor* LeaderActor;
+    UPROPERTY(BlueprintReadOnly, Category = "Crowd Behavior")
+    FCrowd_FlockingData FlockingData;
 
-    UPROPERTY(BlueprintReadOnly, Category = "State")
-    float TimeSinceLastActivity = 0.0f;
+    UPROPERTY(BlueprintReadOnly, Category = "Crowd Behavior")
+    FVector CurrentVelocity;
 
-    UPROPERTY(BlueprintReadOnly, Category = "State")
-    bool bCanSeePlayer = false;
-
-    UPROPERTY(BlueprintReadOnly, Category = "State")
-    float DistanceToPlayer = 0.0f;
-
-    UFUNCTION(BlueprintCallable, Category = "Behavior")
-    void SetActivityState(ECrowd_ActivityState NewState);
-
-    UFUNCTION(BlueprintCallable, Category = "Navigation")
-    void SetDestination(const FVector& NewDestination);
-
-    UFUNCTION(BlueprintCallable, Category = "Behavior")
-    void ReactToPlayer(AActor* PlayerActor);
-
-    UFUNCTION(BlueprintCallable, Category = "Behavior")
-    void ReactToThreat(AActor* ThreatActor);
-
-    UFUNCTION(BlueprintCallable, Category = "Emotion")
-    void ModifyEmotionalState(float FearDelta, float CuriosityDelta, float AggressionDelta, float SociabilityDelta);
-
-    UFUNCTION(BlueprintCallable, Category = "Group")
-    TArray<AActor*> FindNearbyGroupMembers(float SearchRadius);
-
-    UFUNCTION(BlueprintCallable, Category = "Navigation")
-    FVector CalculateFlockingMovement();
-
-    UFUNCTION(BlueprintCallable, Category = "Navigation")
-    FVector CalculateObstacleAvoidance();
-
-    UFUNCTION(BlueprintCallable, Category = "Behavior")
-    bool ShouldFleeFromPlayer();
-
-    UFUNCTION(BlueprintCallable, Category = "Behavior")
-    bool ShouldApproachPlayer();
-
-    UFUNCTION(BlueprintCallable, Category = "Behavior")
-    void UpdatePlayerAwareness(float DeltaTime);
-
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    void TriggerEmotionalAnimation();
+    UPROPERTY(BlueprintReadOnly, Category = "Crowd Behavior")
+    FVector TargetLocation;
 
 private:
-    void UpdateActivityBehavior(float DeltaTime);
-    void UpdateEmotionalDecay(float DeltaTime);
-    void ProcessPlayerInteraction(float DeltaTime);
-    void UpdateLeaderFollowing(float DeltaTime);
-    
-    float ActivityTimer = 0.0f;
-    float EmotionDecayRate = 0.1f;
-    float PlayerDetectionRadius = 1000.0f;
-    float LastPlayerCheckTime = 0.0f;
-    float PlayerCheckInterval = 0.2f;
+    TArray<AActor*> NearbyAgents;
+    float LastNeighborUpdate;
+
+public:
+    UFUNCTION(BlueprintCallable, Category = "Crowd Behavior")
+    FVector CalculateFlockingForce();
+
+    UFUNCTION(BlueprintCallable, Category = "Crowd Behavior")
+    FVector CalculateSeparation();
+
+    UFUNCTION(BlueprintCallable, Category = "Crowd Behavior")
+    FVector CalculateAlignment();
+
+    UFUNCTION(BlueprintCallable, Category = "Crowd Behavior")
+    FVector CalculateCohesion();
+
+    UFUNCTION(BlueprintCallable, Category = "Crowd Behavior")
+    FVector CalculateAvoidance();
+
+    UFUNCTION(BlueprintCallable, Category = "Crowd Behavior")
+    void UpdateNearbyAgents();
+
+    UFUNCTION(BlueprintCallable, Category = "Crowd Behavior")
+    void SetBehaviorState(ECrowd_BehaviorState NewState);
+
+    UFUNCTION(BlueprintCallable, Category = "Crowd Behavior")
+    void SetTargetLocation(FVector NewTarget);
+
+    UFUNCTION(BlueprintCallable, Category = "Crowd Behavior")
+    FVector GetSteeringForce(FVector TargetVelocity);
+
+    UFUNCTION(BlueprintPure, Category = "Crowd Behavior")
+    ECrowd_BehaviorState GetCurrentState() const { return CurrentState; }
+
+    UFUNCTION(BlueprintPure, Category = "Crowd Behavior")
+    FVector GetCurrentVelocity() const { return CurrentVelocity; }
 };
