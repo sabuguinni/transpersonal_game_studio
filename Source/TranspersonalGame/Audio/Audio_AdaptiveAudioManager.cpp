@@ -1,347 +1,356 @@
 #include "Audio_AdaptiveAudioManager.h"
-#include "Engine/Engine.h"
-#include "Engine/World.h"
+#include "Components/AudioComponent.h"
+#include "Sound/SoundCue.h"
 #include "Kismet/GameplayStatics.h"
-#include "GameFramework/Character.h"
-#include "../Core/TranspersonalGameState.h"
-#include "../Core/TranspersonalCharacter.h"
+#include "Engine/World.h"
+#include "GameFramework/PlayerController.h"
+#include "GameFramework/Pawn.h"
 
 AAudio_AdaptiveAudioManager::AAudio_AdaptiveAudioManager()
 {
     PrimaryActorTick.bCanEverTick = true;
 
+    // Create audio components
+    AmbientAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("AmbientAudio"));
+    RootComponent = AmbientAudioComponent;
+    AmbientAudioComponent->bAutoActivate = true;
+
+    MusicAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("MusicAudio"));
+    MusicAudioComponent->SetupAttachment(RootComponent);
+    MusicAudioComponent->bAutoActivate = true;
+
+    EffectsAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("EffectsAudio"));
+    EffectsAudioComponent->SetupAttachment(RootComponent);
+    EffectsAudioComponent->bAutoActivate = false;
+
     // Initialize default values
-    TransitionDuration = 2.0f;
-    BiomeDetectionRadius = 1000.0f;
-    DinosaurProximityRadius = 2000.0f;
-    MasterVolume = 1.0f;
-    AmbienceVolume = 0.7f;
-    ProximityAlertVolume = 0.9f;
-    CurrentBiome = EBiomeType::Savana;
+    TransitionSpeed = 1.0f;
+    MaxAudioDistance = 5000.0f;
+    CurrentVolumeMultiplier = 1.0f;
+    TargetMusicVolume = 0.7f;
+    CurrentMusicVolume = 0.7f;
     bIsTransitioning = false;
-    TransitionTimer = 0.0f;
+    TargetMusicLayer = EAudio_MusicLayer::Ambient;
 
-    // Create root component
-    RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootComponent"));
-
-    // Initialize audio components
-    InitializeAudioComponents();
-    SetupProximityDetection();
+    // Initialize music state
+    CurrentMusicState.CurrentLayer = EAudio_MusicLayer::Ambient;
+    CurrentMusicState.IntensityLevel = 0.5f;
+    CurrentMusicState.EnvironmentType = EAudio_EnvironmentType::Forest;
+    CurrentMusicState.bInDanger = false;
+    CurrentMusicState.EmotionalIntensity = 0.0f;
 }
 
 void AAudio_AdaptiveAudioManager::BeginPlay()
 {
     Super::BeginPlay();
 
-    // Cache references
-    PlayerCharacter = Cast<ATranspersonalCharacter>(UGameplayStatics::GetPlayerCharacter(this, 0));
-    GameStateRef = Cast<ATranspersonalGameState>(UGameplayStatics::GetGameState(this));
-
-    // Start with savana audio (default spawn biome)
-    SwitchToBiomeAudio(EBiomeType::Savana);
-
-    UE_LOG(LogTemp, Warning, TEXT("AdaptiveAudioManager: System initialized"));
+    // Set initial ambient audio
+    UpdateAmbientAudio();
+    
+    // Start with ambient music layer
+    SetMusicLayer(EAudio_MusicLayer::Ambient, 0.0f);
 }
 
 void AAudio_AdaptiveAudioManager::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
 
-    // Handle audio transitions
+    // Update audio based on current game state
+    UpdateAudioBasedOnGameState();
+    
+    // Handle music transitions
+    HandleMusicTransition(DeltaTime);
+}
+
+void AAudio_AdaptiveAudioManager::SetMusicLayer(EAudio_MusicLayer NewLayer, float FadeTime)
+{
+    if (NewLayer != CurrentMusicState.CurrentLayer)
+    {
+        TargetMusicLayer = NewLayer;
+        bIsTransitioning = true;
+        
+        // Find the sound cue for this layer
+        if (MusicLayers.Contains(NewLayer))
+        {
+            USoundCue* NewMusic = MusicLayers[NewLayer];
+            if (NewMusic && MusicAudioComponent)
+            {
+                if (FadeTime > 0.0f)
+                {
+                    // Implement crossfade logic here
+                    MusicAudioComponent->FadeOut(FadeTime, 0.0f);
+                    
+                    // Use a timer to start new music after fade out
+                    FTimerHandle FadeTimer;
+                    GetWorld()->GetTimerManager().SetTimer(FadeTimer, [this, NewMusic, FadeTime]()
+                    {
+                        MusicAudioComponent->SetSound(NewMusic);
+                        MusicAudioComponent->Play();
+                        MusicAudioComponent->FadeIn(FadeTime, CurrentMusicVolume);
+                        bIsTransitioning = false;
+                    }, FadeTime, false);
+                }
+                else
+                {
+                    MusicAudioComponent->SetSound(NewMusic);
+                    MusicAudioComponent->Play();
+                    bIsTransitioning = false;
+                }
+            }
+        }
+        
+        CurrentMusicState.CurrentLayer = NewLayer;
+    }
+}
+
+void AAudio_AdaptiveAudioManager::SetEnvironmentType(EAudio_EnvironmentType NewEnvironment)
+{
+    if (NewEnvironment != CurrentMusicState.EnvironmentType)
+    {
+        CurrentMusicState.EnvironmentType = NewEnvironment;
+        UpdateAmbientAudio();
+    }
+}
+
+void AAudio_AdaptiveAudioManager::SetDangerState(bool bDangerous, float IntensityLevel)
+{
+    CurrentMusicState.bInDanger = bDangerous;
+    CurrentMusicState.IntensityLevel = FMath::Clamp(IntensityLevel, 0.0f, 1.0f);
+    
+    if (bDangerous)
+    {
+        if (IntensityLevel > 0.8f)
+        {
+            SetMusicLayer(EAudio_MusicLayer::Combat, 1.5f);
+        }
+        else
+        {
+            SetMusicLayer(EAudio_MusicLayer::Tension, 2.0f);
+        }
+        
+        // Play danger stinger
+        PlayDangerStinger();
+    }
+    else
+    {
+        // Return to exploration or calm music
+        if (CurrentMusicState.EmotionalIntensity > 0.3f)
+        {
+            SetMusicLayer(EAudio_MusicLayer::Exploration, 3.0f);
+        }
+        else
+        {
+            SetMusicLayer(EAudio_MusicLayer::Calm, 4.0f);
+        }
+    }
+}
+
+void AAudio_AdaptiveAudioManager::UpdateEmotionalState(ENarr_EmotionalState EmotionalState, float Intensity)
+{
+    CurrentMusicState.EmotionalIntensity = FMath::Clamp(Intensity, 0.0f, 1.0f);
+    
+    // Adjust music based on emotional state
+    switch (EmotionalState)
+    {
+        case ENarr_EmotionalState::Fear:
+            if (!CurrentMusicState.bInDanger)
+            {
+                SetMusicLayer(EAudio_MusicLayer::Tension, 2.0f);
+            }
+            break;
+            
+        case ENarr_EmotionalState::Calm:
+        case ENarr_EmotionalState::Relief:
+            if (!CurrentMusicState.bInDanger)
+            {
+                SetMusicLayer(EAudio_MusicLayer::Calm, 3.0f);
+            }
+            break;
+            
+        case ENarr_EmotionalState::Excitement:
+        case ENarr_EmotionalState::Curiosity:
+            if (!CurrentMusicState.bInDanger)
+            {
+                SetMusicLayer(EAudio_MusicLayer::Exploration, 2.5f);
+            }
+            break;
+            
+        case ENarr_EmotionalState::Anger:
+            SetMusicLayer(EAudio_MusicLayer::Combat, 1.0f);
+            break;
+            
+        default:
+            // Default to ambient if no specific emotional response
+            if (!CurrentMusicState.bInDanger)
+            {
+                SetMusicLayer(EAudio_MusicLayer::Ambient, 2.0f);
+            }
+            break;
+    }
+}
+
+void AAudio_AdaptiveAudioManager::PlayDangerStinger()
+{
+    if (DangerStingers.Num() > 0 && EffectsAudioComponent)
+    {
+        int32 RandomIndex = FMath::RandRange(0, DangerStingers.Num() - 1);
+        USoundCue* StingerSound = DangerStingers[RandomIndex];
+        
+        if (StingerSound)
+        {
+            EffectsAudioComponent->SetSound(StingerSound);
+            EffectsAudioComponent->Play();
+        }
+    }
+}
+
+void AAudio_AdaptiveAudioManager::UpdateMusicIntensity(float NewIntensity)
+{
+    CurrentMusicState.IntensityLevel = FMath::Clamp(NewIntensity, 0.0f, 1.0f);
+    
+    // Adjust volume based on intensity
+    TargetMusicVolume = 0.5f + (CurrentMusicState.IntensityLevel * 0.3f);
+    
+    if (MusicAudioComponent)
+    {
+        MusicAudioComponent->SetVolumeMultiplier(TargetMusicVolume * CurrentVolumeMultiplier);
+    }
+}
+
+void AAudio_AdaptiveAudioManager::TriggerEnvironmentalAudio(FVector Location, float Radius, USoundCue* SoundToPlay)
+{
+    if (SoundToPlay)
+    {
+        float DistanceToPlayer = CalculateDistanceToPlayer();
+        
+        if (DistanceToPlayer <= Radius)
+        {
+            // Calculate volume based on distance
+            float VolumeMultiplier = 1.0f - (DistanceToPlayer / Radius);
+            
+            UGameplayStatics::PlaySoundAtLocation(
+                GetWorld(),
+                SoundToPlay,
+                Location,
+                VolumeMultiplier,
+                1.0f,
+                0.0f,
+                nullptr,
+                nullptr,
+                true
+            );
+        }
+    }
+}
+
+void AAudio_AdaptiveAudioManager::SetGlobalAudioVolume(float VolumeMultiplier)
+{
+    CurrentVolumeMultiplier = FMath::Clamp(VolumeMultiplier, 0.0f, 1.0f);
+    
+    if (AmbientAudioComponent)
+    {
+        AmbientAudioComponent->SetVolumeMultiplier(CurrentVolumeMultiplier);
+    }
+    
+    if (MusicAudioComponent)
+    {
+        MusicAudioComponent->SetVolumeMultiplier(TargetMusicVolume * CurrentVolumeMultiplier);
+    }
+}
+
+void AAudio_AdaptiveAudioManager::UpdateAudioBasedOnGameState()
+{
+    // Check if player is in danger
+    bool bPlayerInDanger = IsPlayerInDanger();
+    
+    if (bPlayerInDanger != CurrentMusicState.bInDanger)
+    {
+        SetDangerState(bPlayerInDanger, CurrentMusicState.IntensityLevel);
+    }
+    
+    // Update intensity based on distance to threats
+    float DistanceToPlayer = CalculateDistanceToPlayer();
+    float NewIntensity = FMath::Clamp(1.0f - (DistanceToPlayer / MaxAudioDistance), 0.0f, 1.0f);
+    
+    if (FMath::Abs(NewIntensity - CurrentMusicState.IntensityLevel) > 0.1f)
+    {
+        UpdateMusicIntensity(NewIntensity);
+    }
+}
+
+void AAudio_AdaptiveAudioManager::HandleMusicTransition(float DeltaTime)
+{
     if (bIsTransitioning)
     {
-        TransitionTimer += DeltaTime;
-        float TransitionProgress = FMath::Clamp(TransitionTimer / TransitionDuration, 0.0f, 1.0f);
-
-        if (TransitionFromComponent && TransitionToComponent)
+        // Smooth volume transitions during music layer changes
+        if (MusicAudioComponent)
         {
-            float FromVolume = FMath::Lerp(AmbienceVolume, 0.0f, TransitionProgress);
-            float ToVolume = FMath::Lerp(0.0f, AmbienceVolume, TransitionProgress);
-
-            TransitionFromComponent->SetVolumeMultiplier(FromVolume * MasterVolume);
-            TransitionToComponent->SetVolumeMultiplier(ToVolume * MasterVolume);
-        }
-
-        if (TransitionProgress >= 1.0f)
-        {
-            bIsTransitioning = false;
-            if (TransitionFromComponent)
+            float CurrentVolume = MusicAudioComponent->GetVolumeMultiplier();
+            float NewVolume = FMath::FInterpTo(CurrentVolume, TargetMusicVolume * CurrentVolumeMultiplier, DeltaTime, TransitionSpeed);
+            MusicAudioComponent->SetVolumeMultiplier(NewVolume);
+            
+            if (FMath::Abs(NewVolume - TargetMusicVolume * CurrentVolumeMultiplier) < 0.01f)
             {
-                TransitionFromComponent->Stop();
+                bIsTransitioning = false;
             }
         }
     }
+}
 
-    // Detect biome changes every 2 seconds
-    static float BiomeCheckTimer = 0.0f;
-    BiomeCheckTimer += DeltaTime;
-    if (BiomeCheckTimer >= 2.0f)
+void AAudio_AdaptiveAudioManager::UpdateAmbientAudio()
+{
+    if (AmbientSounds.Contains(CurrentMusicState.EnvironmentType) && AmbientAudioComponent)
     {
-        DetectCurrentBiome();
-        CheckDinosaurProximity();
-        BiomeCheckTimer = 0.0f;
-    }
-
-    // Update audio based on environmental factors
-    UpdateAudioBasedOnTimeOfDay();
-    UpdateAudioBasedOnWeather();
-}
-
-void AAudio_AdaptiveAudioManager::InitializeAudioComponents()
-{
-    // Create audio components for each biome
-    SavanaAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("SavanaAudio"));
-    SavanaAudioComponent->SetupAttachment(RootComponent);
-    SavanaAudioComponent->bAutoActivate = false;
-
-    FlorestaAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("FlorestaAudio"));
-    FlorestaAudioComponent->SetupAttachment(RootComponent);
-    FlorestaAudioComponent->bAutoActivate = false;
-
-    PantanoAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("PantanoAudio"));
-    PantanoAudioComponent->SetupAttachment(RootComponent);
-    PantanoAudioComponent->bAutoActivate = false;
-
-    DesertoAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("DesertoAudio"));
-    DesertoAudioComponent->SetupAttachment(RootComponent);
-    DesertoAudioComponent->bAutoActivate = false;
-
-    MontanhaAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("MontanhaAudio"));
-    MontanhaAudioComponent->SetupAttachment(RootComponent);
-    MontanhaAudioComponent->bAutoActivate = false;
-}
-
-void AAudio_AdaptiveAudioManager::SetupProximityDetection()
-{
-    ProximityDetectionSphere = CreateDefaultSubobject<USphereComponent>(TEXT("ProximityDetection"));
-    ProximityDetectionSphere->SetupAttachment(RootComponent);
-    ProximityDetectionSphere->SetSphereRadius(DinosaurProximityRadius);
-    ProximityDetectionSphere->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
-    ProximityDetectionSphere->SetCollisionResponseToAllChannels(ECR_Ignore);
-    ProximityDetectionSphere->SetCollisionResponseToChannel(ECC_Pawn, ECR_Overlap);
-}
-
-void AAudio_AdaptiveAudioManager::DetectCurrentBiome()
-{
-    if (!PlayerCharacter)
-        return;
-
-    FVector PlayerLocation = PlayerCharacter->GetActorLocation();
-    EBiomeType DetectedBiome = GetBiomeAtLocation(PlayerLocation);
-
-    if (DetectedBiome != CurrentBiome)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("AdaptiveAudioManager: Biome changed from %d to %d"), 
-               (int32)CurrentBiome, (int32)DetectedBiome);
-        SwitchToBiomeAudio(DetectedBiome);
-    }
-}
-
-EBiomeType AAudio_AdaptiveAudioManager::GetBiomeAtLocation(const FVector& Location)
-{
-    // Biome detection based on coordinates from brain memories
-    float X = Location.X;
-    float Y = Location.Y;
-
-    // Pantano (sudoeste): X(-77500 a -25000), Y(-76500 a -15000)
-    if (X >= -77500.0f && X <= -25000.0f && Y >= -76500.0f && Y <= -15000.0f)
-        return EBiomeType::Pantano;
-
-    // Floresta (noroeste): X(-77500 a -15000), Y(15000 a 76500)
-    if (X >= -77500.0f && X <= -15000.0f && Y >= 15000.0f && Y <= 76500.0f)
-        return EBiomeType::Floresta;
-
-    // Deserto (leste): X(25000 a 79500), Y(-30000 a 30000)
-    if (X >= 25000.0f && X <= 79500.0f && Y >= -30000.0f && Y <= 30000.0f)
-        return EBiomeType::Deserto;
-
-    // Montanha Nevada (nordeste): X(15000 a 79500), Y(20000 a 76500)
-    if (X >= 15000.0f && X <= 79500.0f && Y >= 20000.0f && Y <= 76500.0f)
-        return EBiomeType::MontanhaNevada;
-
-    // Savana (centro) - default
-    return EBiomeType::Savana;
-}
-
-void AAudio_AdaptiveAudioManager::SwitchToBiomeAudio(EBiomeType NewBiome)
-{
-    if (NewBiome == CurrentBiome && !bIsTransitioning)
-        return;
-
-    UAudioComponent* NewAudioComponent = nullptr;
-
-    switch (NewBiome)
-    {
-        case EBiomeType::Savana:
-            NewAudioComponent = SavanaAudioComponent;
-            break;
-        case EBiomeType::Floresta:
-            NewAudioComponent = FlorestaAudioComponent;
-            break;
-        case EBiomeType::Pantano:
-            NewAudioComponent = PantanoAudioComponent;
-            break;
-        case EBiomeType::Deserto:
-            NewAudioComponent = DesertoAudioComponent;
-            break;
-        case EBiomeType::MontanhaNevada:
-            NewAudioComponent = MontanhaAudioComponent;
-            break;
-    }
-
-    if (NewAudioComponent)
-    {
-        CrossfadeAudio(GetCurrentBiomeAudioComponent(), NewAudioComponent);
-        CurrentBiome = NewBiome;
-    }
-}
-
-UAudioComponent* AAudio_AdaptiveAudioManager::GetCurrentBiomeAudioComponent()
-{
-    switch (CurrentBiome)
-    {
-        case EBiomeType::Savana: return SavanaAudioComponent;
-        case EBiomeType::Floresta: return FlorestaAudioComponent;
-        case EBiomeType::Pantano: return PantanoAudioComponent;
-        case EBiomeType::Deserto: return DesertoAudioComponent;
-        case EBiomeType::MontanhaNevada: return MontanhaAudioComponent;
-        default: return SavanaAudioComponent;
-    }
-}
-
-void AAudio_AdaptiveAudioManager::CrossfadeAudio(UAudioComponent* FromComponent, UAudioComponent* ToComponent)
-{
-    if (!ToComponent)
-        return;
-
-    TransitionFromComponent = FromComponent;
-    TransitionToComponent = ToComponent;
-    bIsTransitioning = true;
-    TransitionTimer = 0.0f;
-
-    // Start new audio component
-    ToComponent->SetVolumeMultiplier(0.0f);
-    ToComponent->Play();
-}
-
-void AAudio_AdaptiveAudioManager::CheckDinosaurProximity()
-{
-    if (!PlayerCharacter)
-        return;
-
-    // Get all overlapping actors in proximity sphere
-    TArray<AActor*> OverlappingActors;
-    ProximityDetectionSphere->GetOverlappingActors(OverlappingActors);
-
-    for (AActor* Actor : OverlappingActors)
-    {
-        // Check if actor is a dinosaur (simplified check by name)
-        FString ActorName = Actor->GetName();
-        if (ActorName.Contains(TEXT("TRex")) || ActorName.Contains(TEXT("Raptor")) || 
-            ActorName.Contains(TEXT("Triceratops")) || ActorName.Contains(TEXT("Brachiosaurus")))
+        USoundCue* AmbientSound = AmbientSounds[CurrentMusicState.EnvironmentType];
+        if (AmbientSound)
         {
-            float Distance = FVector::Dist(PlayerCharacter->GetActorLocation(), Actor->GetActorLocation());
-            
-            // Determine species based on name
-            EDinosaurSpecies Species = EDinosaurSpecies::TRex;
-            if (ActorName.Contains(TEXT("Raptor"))) Species = EDinosaurSpecies::Raptor;
-            else if (ActorName.Contains(TEXT("Triceratops"))) Species = EDinosaurSpecies::Triceratops;
-            else if (ActorName.Contains(TEXT("Brachiosaurus"))) Species = EDinosaurSpecies::Brachiosaurus;
-
-            TriggerProximityAlert(Distance, Species);
-            break; // Only alert for closest dinosaur
+            AmbientAudioComponent->SetSound(AmbientSound);
+            if (!AmbientAudioComponent->IsPlaying())
+            {
+                AmbientAudioComponent->Play();
+            }
         }
     }
 }
 
-void AAudio_AdaptiveAudioManager::TriggerProximityAlert(float Distance, EDinosaurSpecies Species)
+float AAudio_AdaptiveAudioManager::CalculateDistanceToPlayer()
 {
-    // Calculate alert intensity based on distance
-    float AlertIntensity = FMath::Clamp(1.0f - (Distance / DinosaurProximityRadius), 0.0f, 1.0f);
+    APlayerController* PlayerController = GetWorld()->GetFirstPlayerController();
+    if (PlayerController && PlayerController->GetPawn())
+    {
+        FVector PlayerLocation = PlayerController->GetPawn()->GetActorLocation();
+        return FVector::Dist(GetActorLocation(), PlayerLocation);
+    }
     
-    if (AlertIntensity > 0.3f) // Only alert if dinosaur is relatively close
+    return MaxAudioDistance; // Return max distance if no player found
+}
+
+bool AAudio_AdaptiveAudioManager::IsPlayerInDanger()
+{
+    // Simple danger detection - check for nearby dinosaurs or threats
+    APlayerController* PlayerController = GetWorld()->GetFirstPlayerController();
+    if (PlayerController && PlayerController->GetPawn())
     {
-        UE_LOG(LogTemp, Warning, TEXT("AdaptiveAudioManager: Dinosaur proximity alert! Species: %d, Distance: %.1f, Intensity: %.2f"), 
-               (int32)Species, Distance, AlertIntensity);
+        FVector PlayerLocation = PlayerController->GetPawn()->GetActorLocation();
         
-        // Play proximity alert sound with intensity-based volume
-        // This would trigger MetaSound or audio cue for proximity alerts
+        // Check for actors with "TRex", "Raptor" etc in their name within danger radius
+        TArray<AActor*> AllActors;
+        UGameplayStatics::GetAllActorsOfClass(GetWorld(), AActor::StaticClass(), AllActors);
+        
+        for (AActor* Actor : AllActors)
+        {
+            if (Actor && Actor->GetName().Contains(TEXT("TRex")) || 
+                Actor->GetName().Contains(TEXT("Raptor")) ||
+                Actor->GetName().Contains(TEXT("Danger")))
+            {
+                float Distance = FVector::Dist(PlayerLocation, Actor->GetActorLocation());
+                if (Distance < 1500.0f) // Danger radius
+                {
+                    return true;
+                }
+            }
+        }
     }
-}
-
-void AAudio_AdaptiveAudioManager::UpdateAudioBasedOnTimeOfDay()
-{
-    if (!GameStateRef)
-        return;
-
-    // Adjust audio based on time of day
-    float TimeOfDay = GameStateRef->GetTimeOfDay();
-    float NightVolume = 1.0f;
-
-    // Reduce volume during night (22:00 - 06:00)
-    if (TimeOfDay > 22.0f || TimeOfDay < 6.0f)
-    {
-        NightVolume = 0.6f;
-    }
-
-    // Apply night volume modifier to all biome audio components
-    if (SavanaAudioComponent) SavanaAudioComponent->SetVolumeMultiplier(AmbienceVolume * NightVolume * MasterVolume);
-    if (FlorestaAudioComponent) FlorestaAudioComponent->SetVolumeMultiplier(AmbienceVolume * NightVolume * MasterVolume);
-    if (PantanoAudioComponent) PantanoAudioComponent->SetVolumeMultiplier(AmbienceVolume * NightVolume * MasterVolume);
-    if (DesertoAudioComponent) DesertoAudioComponent->SetVolumeMultiplier(AmbienceVolume * NightVolume * MasterVolume);
-    if (MontanhaAudioComponent) MontanhaAudioComponent->SetVolumeMultiplier(AmbienceVolume * NightVolume * MasterVolume);
-}
-
-void AAudio_AdaptiveAudioManager::UpdateAudioBasedOnWeather()
-{
-    if (!GameStateRef)
-        return;
-
-    // Adjust audio based on weather conditions
-    EWeatherType CurrentWeather = GameStateRef->GetCurrentWeather();
-    float WeatherVolumeModifier = 1.0f;
-
-    switch (CurrentWeather)
-    {
-        case EWeatherType::Storm:
-            WeatherVolumeModifier = 1.5f; // Louder during storms
-            break;
-        case EWeatherType::Rain:
-            WeatherVolumeModifier = 1.2f; // Slightly louder during rain
-            break;
-        case EWeatherType::Fog:
-            WeatherVolumeModifier = 0.8f; // Muffled during fog
-            break;
-        default:
-            WeatherVolumeModifier = 1.0f;
-            break;
-    }
-
-    // Apply weather modifier (this would be more sophisticated in practice)
-    MasterVolume = FMath::Clamp(MasterVolume * WeatherVolumeModifier, 0.1f, 2.0f);
-}
-
-void AAudio_AdaptiveAudioManager::UpdateAudioZones()
-{
-    // Update audio zones based on player position and biome
-    DetectCurrentBiome();
-}
-
-void AAudio_AdaptiveAudioManager::SetBiomeAudioVolume(EBiomeType Biome, float Volume)
-{
-    UAudioComponent* TargetComponent = nullptr;
-
-    switch (Biome)
-    {
-        case EBiomeType::Savana: TargetComponent = SavanaAudioComponent; break;
-        case EBiomeType::Floresta: TargetComponent = FlorestaAudioComponent; break;
-        case EBiomeType::Pantano: TargetComponent = PantanoAudioComponent; break;
-        case EBiomeType::Deserto: TargetComponent = DesertoAudioComponent; break;
-        case EBiomeType::MontanhaNevada: TargetComponent = MontanhaAudioComponent; break;
-    }
-
-    if (TargetComponent)
-    {
-        TargetComponent->SetVolumeMultiplier(Volume * MasterVolume);
-    }
+    
+    return false;
 }
