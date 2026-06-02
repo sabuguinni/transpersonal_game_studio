@@ -1,316 +1,418 @@
 #include "Eng_GameplayFoundation.h"
-#include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "GameFramework/Character.h"
+#include "Engine/GameInstance.h"
+#include "GameFramework/GameModeBase.h"
 #include "GameFramework/PlayerController.h"
-#include "Components/ActorComponent.h"
-#include "UObject/ConstructorHelpers.h"
+#include "GameFramework/Character.h"
+#include "Kismet/GameplayStatics.h"
+#include "Engine/Engine.h"
 
-UEng_GameplayFoundation::UEng_GameplayFoundation()
-{
-	// Set default survival stats
-	DefaultSurvivalStats.Health = 100.0f;
-	DefaultSurvivalStats.Hunger = 100.0f;
-	DefaultSurvivalStats.Thirst = 100.0f;
-	DefaultSurvivalStats.Stamina = 100.0f;
-	DefaultSurvivalStats.Fear = 0.0f;
-	DefaultSurvivalStats.Temperature = 98.6f;
-
-	// Set performance limits
-	MaxWorldActors = 8000;
-	MaxDinosaurs = 150;
-}
+// UEng_GameplayFoundation Implementation
 
 void UEng_GameplayFoundation::Initialize(FSubsystemCollectionBase& Collection)
 {
-	Super::Initialize(Collection);
-
-	UE_LOG(LogTemp, Warning, TEXT("UEng_GameplayFoundation: Initializing Gameplay Foundation Architecture"));
-
-	// Initialize core systems
-	RegisteredCharacterClasses.Empty();
-	RegisteredWorldSystems.Empty();
-	RegisteredSurvivalComponents.Empty();
-	RegisteredDinosaurSpecies.Empty();
-	SystemCompilationStatus.Empty();
-
-	// Register default character class (will be overridden by Character Artist)
-	// For now, use base ACharacter class
-	PrimaryCharacterClass = ACharacter::StaticClass();
-	RegisterCharacterClass(PrimaryCharacterClass);
-
-	// Update compilation status
-	UpdateCompilationStatus();
-
-	UE_LOG(LogTemp, Warning, TEXT("UEng_GameplayFoundation: Gameplay Foundation initialized successfully"));
+    Super::Initialize(Collection);
+    
+    UE_LOG(LogTemp, Warning, TEXT("Engine Architect: Initializing Gameplay Foundation System"));
+    
+    // Initialize default configurations
+    PlayerMovementConfig.WalkSpeed = 300.0f;
+    PlayerMovementConfig.RunSpeed = 600.0f;
+    PlayerMovementConfig.JumpHeight = 420.0f;
+    PlayerMovementConfig.StaminaDrainRate = 10.0f;
+    PlayerMovementConfig.StaminaRegenRate = 15.0f;
+    
+    WorldInteractionConfig.InteractionRange = 200.0f;
+    WorldInteractionConfig.GatheringTime = 2.0f;
+    WorldInteractionConfig.CraftingSpeedMultiplier = 1.0f;
+    WorldInteractionConfig.MaxInventorySlots = 30;
+    
+    // Reset metrics
+    CurrentMetrics.ActivePlayers = 0;
+    CurrentMetrics.ActiveDinosaurs = 0;
+    CurrentMetrics.AverageFrameTime = 0.0f;
+    CurrentMetrics.WorldLoadProgress = 0.0f;
+    CurrentMetrics.bIsGameplayReady = false;
+    
+    bIsInitialized = true;
+    InitializationTime = GetWorld()->GetTimeSeconds();
+    
+    UE_LOG(LogTemp, Warning, TEXT("Engine Architect: Gameplay Foundation System initialized successfully"));
 }
 
-bool UEng_GameplayFoundation::ValidateGameplayArchitecture()
+void UEng_GameplayFoundation::Deinitialize()
 {
-	UE_LOG(LogTemp, Warning, TEXT("UEng_GameplayFoundation: Validating Gameplay Architecture"));
-
-	bool bAllValid = true;
-
-	// Validate character architecture
-	if (!ValidateCharacterArchitecture())
-	{
-		UE_LOG(LogTemp, Error, TEXT("UEng_GameplayFoundation: Character architecture validation FAILED"));
-		bAllValid = false;
-	}
-
-	// Validate world architecture
-	if (!ValidateWorldArchitecture())
-	{
-		UE_LOG(LogTemp, Error, TEXT("UEng_GameplayFoundation: World architecture validation FAILED"));
-		bAllValid = false;
-	}
-
-	// Validate survival architecture
-	if (!ValidateSurvivalArchitecture())
-	{
-		UE_LOG(LogTemp, Error, TEXT("UEng_GameplayFoundation: Survival architecture validation FAILED"));
-		bAllValid = false;
-	}
-
-	// Validate dinosaur architecture
-	if (!ValidateDinosaurArchitecture())
-	{
-		UE_LOG(LogTemp, Error, TEXT("UEng_GameplayFoundation: Dinosaur architecture validation FAILED"));
-		bAllValid = false;
-	}
-
-	if (bAllValid)
-	{
-		UE_LOG(LogTemp, Warning, TEXT("UEng_GameplayFoundation: ALL architecture validations PASSED"));
-	}
-
-	return bAllValid;
+    UE_LOG(LogTemp, Warning, TEXT("Engine Architect: Deinitializing Gameplay Foundation System"));
+    
+    bIsInitialized = false;
+    CurrentMetrics.bIsGameplayReady = false;
+    
+    Super::Deinitialize();
 }
 
-void UEng_GameplayFoundation::RegisterCharacterClass(TSubclassOf<ACharacter> CharacterClass)
+bool UEng_GameplayFoundation::ShouldCreateSubsystem(UObject* Outer) const
 {
-	if (CharacterClass)
-	{
-		RegisteredCharacterClasses.AddUnique(CharacterClass);
-		UE_LOG(LogTemp, Warning, TEXT("UEng_GameplayFoundation: Registered character class: %s"), 
-			*CharacterClass->GetName());
-	}
+    // Only create in game worlds, not in editor preview worlds
+    if (UWorld* World = Cast<UWorld>(Outer))
+    {
+        return World->IsGameWorld();
+    }
+    return false;
 }
 
-void UEng_GameplayFoundation::RegisterWorldSystem(const FString& SystemName, UObject* SystemInstance)
+void UEng_GameplayFoundation::InitializeGameplaySystems()
 {
-	if (SystemInstance && !SystemName.IsEmpty())
-	{
-		RegisteredWorldSystems.Add(SystemName, SystemInstance);
-		UE_LOG(LogTemp, Warning, TEXT("UEng_GameplayFoundation: Registered world system: %s"), 
-			*SystemName);
-	}
+    if (!bIsInitialized)
+    {
+        UE_LOG(LogTemp, Error, TEXT("Engine Architect: Cannot initialize gameplay systems - foundation not initialized"));
+        return;
+    }
+    
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        UE_LOG(LogTemp, Error, TEXT("Engine Architect: Cannot initialize gameplay systems - no world"));
+        return;
+    }
+    
+    UE_LOG(LogTemp, Warning, TEXT("Engine Architect: Initializing core gameplay systems"));
+    
+    // Update initial metrics
+    UpdateGameplayMetrics();
+    
+    // Mark systems as ready
+    CurrentMetrics.bIsGameplayReady = true;
+    CurrentMetrics.WorldLoadProgress = 1.0f;
+    
+    UE_LOG(LogTemp, Warning, TEXT("Engine Architect: Core gameplay systems initialized"));
 }
 
-UObject* UEng_GameplayFoundation::GetWorldSystem(const FString& SystemName) const
+void UEng_GameplayFoundation::UpdateGameplayMetrics()
 {
-	if (RegisteredWorldSystems.Contains(SystemName))
-	{
-		return RegisteredWorldSystems[SystemName];
-	}
-	return nullptr;
+    if (!bIsInitialized)
+    {
+        return;
+    }
+    
+    UpdatePlayerMetrics();
+    UpdateWorldMetrics();
+    UpdatePerformanceMetrics();
 }
 
-void UEng_GameplayFoundation::RegisterSurvivalComponent(TSubclassOf<UActorComponent> ComponentClass)
+bool UEng_GameplayFoundation::IsGameplaySystemReady() const
 {
-	if (ComponentClass)
-	{
-		RegisteredSurvivalComponents.AddUnique(ComponentClass);
-		UE_LOG(LogTemp, Warning, TEXT("UEng_GameplayFoundation: Registered survival component: %s"), 
-			*ComponentClass->GetName());
-	}
+    return bIsInitialized && CurrentMetrics.bIsGameplayReady;
 }
 
-void UEng_GameplayFoundation::RegisterDinosaurSpecies(const FString& SpeciesName, TSubclassOf<APawn> DinosaurClass)
+void UEng_GameplayFoundation::SetPlayerMovementConfig(const FEng_PlayerMovementConfig& Config)
 {
-	if (DinosaurClass && !SpeciesName.IsEmpty())
-	{
-		RegisteredDinosaurSpecies.Add(SpeciesName, DinosaurClass);
-		UE_LOG(LogTemp, Warning, TEXT("UEng_GameplayFoundation: Registered dinosaur species: %s"), 
-			*SpeciesName);
-	}
+    PlayerMovementConfig = Config;
+    UE_LOG(LogTemp, Log, TEXT("Engine Architect: Player movement config updated - Walk: %f, Run: %f"), 
+           Config.WalkSpeed, Config.RunSpeed);
 }
 
-TArray<FString> UEng_GameplayFoundation::GetRegisteredDinosaurSpecies() const
+FEng_PlayerMovementConfig UEng_GameplayFoundation::GetPlayerMovementConfig() const
 {
-	TArray<FString> SpeciesNames;
-	RegisteredDinosaurSpecies.GetKeys(SpeciesNames);
-	return SpeciesNames;
+    return PlayerMovementConfig;
 }
 
-bool UEng_GameplayFoundation::CanSpawnMoreActors() const
+void UEng_GameplayFoundation::SetWorldInteractionConfig(const FEng_WorldInteractionConfig& Config)
 {
-	if (UWorld* World = GetWorld())
-	{
-		int32 CurrentActorCount = World->GetActorCount();
-		return CurrentActorCount < MaxWorldActors;
-	}
-	return false;
+    WorldInteractionConfig = Config;
+    UE_LOG(LogTemp, Log, TEXT("Engine Architect: World interaction config updated - Range: %f, Slots: %d"), 
+           Config.InteractionRange, Config.MaxInventorySlots);
 }
 
-bool UEng_GameplayFoundation::CanSpawnMoreDinosaurs() const
+FEng_WorldInteractionConfig UEng_GameplayFoundation::GetWorldInteractionConfig() const
 {
-	if (UWorld* World = GetWorld())
-	{
-		// Count dinosaurs in the world
-		int32 DinosaurCount = 0;
-		for (const auto& SpeciesPair : RegisteredDinosaurSpecies)
-		{
-			TSubclassOf<APawn> DinosaurClass = SpeciesPair.Value;
-			if (DinosaurClass)
-			{
-				for (TActorIterator<APawn> ActorItr(World, DinosaurClass); ActorItr; ++ActorItr)
-				{
-					DinosaurCount++;
-				}
-			}
-		}
-		return DinosaurCount < MaxDinosaurs;
-	}
-	return false;
+    return WorldInteractionConfig;
 }
 
-bool UEng_GameplayFoundation::ValidateSystemCompilation()
+FEng_GameplayMetrics UEng_GameplayFoundation::GetCurrentMetrics() const
 {
-	UE_LOG(LogTemp, Warning, TEXT("UEng_GameplayFoundation: Validating system compilation"));
-
-	UpdateCompilationStatus();
-
-	bool bAllCompiled = true;
-	for (const auto& StatusPair : SystemCompilationStatus)
-	{
-		if (!StatusPair.Value)
-		{
-			UE_LOG(LogTemp, Error, TEXT("UEng_GameplayFoundation: System compilation FAILED: %s"), 
-				*StatusPair.Key);
-			bAllCompiled = false;
-		}
-	}
-
-	return bAllCompiled;
+    return CurrentMetrics;
 }
 
-TArray<FString> UEng_GameplayFoundation::GetSystemCompilationStatus() const
+void UEng_GameplayFoundation::LogGameplayStatus() const
 {
-	TArray<FString> StatusStrings;
-	for (const auto& StatusPair : SystemCompilationStatus)
-	{
-		FString Status = FString::Printf(TEXT("%s: %s"), 
-			*StatusPair.Key, 
-			StatusPair.Value ? TEXT("COMPILED") : TEXT("FAILED"));
-		StatusStrings.Add(Status);
-	}
-	return StatusStrings;
+    UE_LOG(LogTemp, Warning, TEXT("=== Engine Architect: Gameplay Foundation Status ==="));
+    UE_LOG(LogTemp, Warning, TEXT("Initialized: %s"), bIsInitialized ? TEXT("YES") : TEXT("NO"));
+    UE_LOG(LogTemp, Warning, TEXT("Gameplay Ready: %s"), CurrentMetrics.bIsGameplayReady ? TEXT("YES") : TEXT("NO"));
+    UE_LOG(LogTemp, Warning, TEXT("Active Players: %d"), CurrentMetrics.ActivePlayers);
+    UE_LOG(LogTemp, Warning, TEXT("Active Dinosaurs: %d"), CurrentMetrics.ActiveDinosaurs);
+    UE_LOG(LogTemp, Warning, TEXT("Average Frame Time: %f ms"), CurrentMetrics.AverageFrameTime);
+    UE_LOG(LogTemp, Warning, TEXT("World Load Progress: %f%%"), CurrentMetrics.WorldLoadProgress * 100.0f);
+    UE_LOG(LogTemp, Warning, TEXT("=== End Status ==="));
 }
 
-bool UEng_GameplayFoundation::ValidateCharacterArchitecture()
+void UEng_GameplayFoundation::ValidateGameplayFoundation()
 {
-	// Check that we have at least one registered character class
-	if (RegisteredCharacterClasses.Num() == 0)
-	{
-		UE_LOG(LogTemp, Error, TEXT("UEng_GameplayFoundation: No character classes registered"));
-		return false;
-	}
-
-	// Check that primary character class is valid
-	if (!PrimaryCharacterClass)
-	{
-		UE_LOG(LogTemp, Error, TEXT("UEng_GameplayFoundation: Primary character class is null"));
-		return false;
-	}
-
-	// Validate that primary character class is in registered list
-	if (!RegisteredCharacterClasses.Contains(PrimaryCharacterClass))
-	{
-		UE_LOG(LogTemp, Error, TEXT("UEng_GameplayFoundation: Primary character class not in registered list"));
-		return false;
-	}
-
-	UE_LOG(LogTemp, Warning, TEXT("UEng_GameplayFoundation: Character architecture validation PASSED"));
-	return true;
+    UE_LOG(LogTemp, Warning, TEXT("Engine Architect: Validating Gameplay Foundation"));
+    
+    bool bValidationPassed = true;
+    
+    // Check initialization
+    if (!bIsInitialized)
+    {
+        UE_LOG(LogTemp, Error, TEXT("Validation FAILED: Foundation not initialized"));
+        bValidationPassed = false;
+    }
+    
+    // Check world reference
+    if (!GetWorld())
+    {
+        UE_LOG(LogTemp, Error, TEXT("Validation FAILED: No world reference"));
+        bValidationPassed = false;
+    }
+    
+    // Check configuration validity
+    if (PlayerMovementConfig.WalkSpeed <= 0.0f || PlayerMovementConfig.RunSpeed <= PlayerMovementConfig.WalkSpeed)
+    {
+        UE_LOG(LogTemp, Error, TEXT("Validation FAILED: Invalid movement configuration"));
+        bValidationPassed = false;
+    }
+    
+    // Check system integrity
+    if (!ValidateSystemIntegrity())
+    {
+        UE_LOG(LogTemp, Error, TEXT("Validation FAILED: System integrity check failed"));
+        bValidationPassed = false;
+    }
+    
+    if (bValidationPassed)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Engine Architect: Gameplay Foundation validation PASSED"));
+    }
+    else
+    {
+        UE_LOG(LogTemp, Error, TEXT("Engine Architect: Gameplay Foundation validation FAILED"));
+    }
 }
 
-bool UEng_GameplayFoundation::ValidateWorldArchitecture()
+void UEng_GameplayFoundation::UpdatePlayerMetrics()
 {
-	// For now, just check that we have a valid world
-	if (!GetWorld())
-	{
-		UE_LOG(LogTemp, Error, TEXT("UEng_GameplayFoundation: No valid world found"));
-		return false;
-	}
-
-	UE_LOG(LogTemp, Warning, TEXT("UEng_GameplayFoundation: World architecture validation PASSED"));
-	return true;
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        return;
+    }
+    
+    // Count active players
+    TArray<AActor*> PlayerControllers;
+    UGameplayStatics::GetAllActorsOfClass(World, APlayerController::StaticClass(), PlayerControllers);
+    CurrentMetrics.ActivePlayers = PlayerControllers.Num();
 }
 
-bool UEng_GameplayFoundation::ValidateSurvivalArchitecture()
+void UEng_GameplayFoundation::UpdateWorldMetrics()
 {
-	// Check that default survival stats are valid
-	if (DefaultSurvivalStats.Health < 0.0f || DefaultSurvivalStats.Health > 100.0f)
-	{
-		UE_LOG(LogTemp, Error, TEXT("UEng_GameplayFoundation: Invalid default health value"));
-		return false;
-	}
-
-	if (DefaultSurvivalStats.Hunger < 0.0f || DefaultSurvivalStats.Hunger > 100.0f)
-	{
-		UE_LOG(LogTemp, Error, TEXT("UEng_GameplayFoundation: Invalid default hunger value"));
-		return false;
-	}
-
-	if (DefaultSurvivalStats.Thirst < 0.0f || DefaultSurvivalStats.Thirst > 100.0f)
-	{
-		UE_LOG(LogTemp, Error, TEXT("UEng_GameplayFoundation: Invalid default thirst value"));
-		return false;
-	}
-
-	UE_LOG(LogTemp, Warning, TEXT("UEng_GameplayFoundation: Survival architecture validation PASSED"));
-	return true;
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        return;
+    }
+    
+    // Count dinosaurs (actors with "Dinosaur" in their name)
+    TArray<AActor*> AllActors;
+    UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), AllActors);
+    
+    int32 DinosaurCount = 0;
+    for (AActor* Actor : AllActors)
+    {
+        if (Actor && Actor->GetName().Contains(TEXT("Dinosaur")))
+        {
+            DinosaurCount++;
+        }
+    }
+    CurrentMetrics.ActiveDinosaurs = DinosaurCount;
 }
 
-bool UEng_GameplayFoundation::ValidateDinosaurArchitecture()
+void UEng_GameplayFoundation::UpdatePerformanceMetrics()
 {
-	// Check performance limits
-	if (MaxDinosaurs <= 0 || MaxDinosaurs > 1000)
-	{
-		UE_LOG(LogTemp, Error, TEXT("UEng_GameplayFoundation: Invalid dinosaur limit: %d"), MaxDinosaurs);
-		return false;
-	}
-
-	if (MaxWorldActors <= 0 || MaxWorldActors > 50000)
-	{
-		UE_LOG(LogTemp, Error, TEXT("UEng_GameplayFoundation: Invalid world actor limit: %d"), MaxWorldActors);
-		return false;
-	}
-
-	UE_LOG(LogTemp, Warning, TEXT("UEng_GameplayFoundation: Dinosaur architecture validation PASSED"));
-	return true;
+    if (GEngine && GEngine->GetGameViewport())
+    {
+        // Get frame time from engine
+        CurrentMetrics.AverageFrameTime = FApp::GetDeltaTime() * 1000.0f; // Convert to milliseconds
+    }
 }
 
-void UEng_GameplayFoundation::UpdateCompilationStatus()
+bool UEng_GameplayFoundation::ValidateSystemIntegrity() const
 {
-	SystemCompilationStatus.Empty();
+    // Basic integrity checks
+    if (PlayerMovementConfig.WalkSpeed <= 0.0f)
+    {
+        return false;
+    }
+    
+    if (WorldInteractionConfig.InteractionRange <= 0.0f)
+    {
+        return false;
+    }
+    
+    if (WorldInteractionConfig.MaxInventorySlots <= 0)
+    {
+        return false;
+    }
+    
+    return true;
+}
 
-	// Check character system compilation
-	SystemCompilationStatus.Add(TEXT("CharacterSystem"), RegisteredCharacterClasses.Num() > 0);
+// UEng_GameplayFoundationComponent Implementation
 
-	// Check world system compilation
-	SystemCompilationStatus.Add(TEXT("WorldSystem"), GetWorld() != nullptr);
+UEng_GameplayFoundationComponent::UEng_GameplayFoundationComponent()
+{
+    PrimaryComponentTick.bCanEverTick = true;
+    PrimaryComponentTick.TickInterval = 1.0f; // Tick every second
+    
+    bAutoInitialize = true;
+    bEnableMetricsLogging = true;
+    MetricsUpdateInterval = 1.0f;
+}
 
-	// Check survival system compilation
-	SystemCompilationStatus.Add(TEXT("SurvivalSystem"), RegisteredSurvivalComponents.Num() >= 0);
+void UEng_GameplayFoundationComponent::BeginPlay()
+{
+    Super::BeginPlay();
+    
+    UE_LOG(LogTemp, Warning, TEXT("Engine Architect: Gameplay Foundation Component starting"));
+    
+    FoundationStartupTime = GetWorld()->GetTimeSeconds();
+    
+    if (bAutoInitialize)
+    {
+        InitializeFoundationSystems();
+    }
+}
 
-	// Check dinosaur system compilation
-	SystemCompilationStatus.Add(TEXT("DinosaurSystem"), MaxDinosaurs > 0 && MaxDinosaurs <= 150);
+void UEng_GameplayFoundationComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+    ShutdownFoundationSystems();
+    Super::EndPlay(EndPlayReason);
+}
 
-	// Check foundation compilation
-	SystemCompilationStatus.Add(TEXT("GameplayFoundation"), true);
+void UEng_GameplayFoundationComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+{
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+    
+    if (bFoundationInitialized && bEnableMetricsLogging)
+    {
+        LastMetricsUpdate += DeltaTime;
+        if (LastMetricsUpdate >= MetricsUpdateInterval)
+        {
+            UpdateFoundationMetrics();
+            LastMetricsUpdate = 0.0f;
+        }
+    }
+}
 
-	UE_LOG(LogTemp, Warning, TEXT("UEng_GameplayFoundation: Updated compilation status for %d systems"), 
-		SystemCompilationStatus.Num());
+void UEng_GameplayFoundationComponent::InitializeFoundationSystems()
+{
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        UE_LOG(LogTemp, Error, TEXT("Engine Architect: Cannot initialize foundation - no world"));
+        return;
+    }
+    
+    UEng_GameplayFoundation* FoundationSubsystem = World->GetSubsystem<UEng_GameplayFoundation>();
+    if (FoundationSubsystem)
+    {
+        FoundationSubsystem->InitializeGameplaySystems();
+        bFoundationInitialized = true;
+        UE_LOG(LogTemp, Warning, TEXT("Engine Architect: Foundation systems initialized via component"));
+    }
+    else
+    {
+        UE_LOG(LogTemp, Error, TEXT("Engine Architect: Could not find Gameplay Foundation subsystem"));
+    }
+}
+
+void UEng_GameplayFoundationComponent::ShutdownFoundationSystems()
+{
+    if (bFoundationInitialized)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Engine Architect: Shutting down foundation systems"));
+        bFoundationInitialized = false;
+    }
+}
+
+bool UEng_GameplayFoundationComponent::AreFoundationSystemsReady() const
+{
+    if (!bFoundationInitialized)
+    {
+        return false;
+    }
+    
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        return false;
+    }
+    
+    UEng_GameplayFoundation* FoundationSubsystem = World->GetSubsystem<UEng_GameplayFoundation>();
+    return FoundationSubsystem && FoundationSubsystem->IsGameplaySystemReady();
+}
+
+void UEng_GameplayFoundationComponent::ApplyDefaultConfiguration()
+{
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        return;
+    }
+    
+    UEng_GameplayFoundation* FoundationSubsystem = World->GetSubsystem<UEng_GameplayFoundation>();
+    if (FoundationSubsystem)
+    {
+        // Apply default movement config
+        FEng_PlayerMovementConfig DefaultMovement;
+        DefaultMovement.WalkSpeed = 300.0f;
+        DefaultMovement.RunSpeed = 600.0f;
+        DefaultMovement.JumpHeight = 420.0f;
+        DefaultMovement.StaminaDrainRate = 10.0f;
+        DefaultMovement.StaminaRegenRate = 15.0f;
+        FoundationSubsystem->SetPlayerMovementConfig(DefaultMovement);
+        
+        // Apply default interaction config
+        FEng_WorldInteractionConfig DefaultInteraction;
+        DefaultInteraction.InteractionRange = 200.0f;
+        DefaultInteraction.GatheringTime = 2.0f;
+        DefaultInteraction.CraftingSpeedMultiplier = 1.0f;
+        DefaultInteraction.MaxInventorySlots = 30;
+        FoundationSubsystem->SetWorldInteractionConfig(DefaultInteraction);
+        
+        UE_LOG(LogTemp, Warning, TEXT("Engine Architect: Default configuration applied"));
+    }
+}
+
+void UEng_GameplayFoundationComponent::SaveConfiguration()
+{
+    UE_LOG(LogTemp, Warning, TEXT("Engine Architect: Configuration save requested (placeholder)"));
+    // TODO: Implement configuration saving to file/registry
+}
+
+void UEng_GameplayFoundationComponent::LoadConfiguration()
+{
+    UE_LOG(LogTemp, Warning, TEXT("Engine Architect: Configuration load requested (placeholder)"));
+    // TODO: Implement configuration loading from file/registry
+}
+
+void UEng_GameplayFoundationComponent::UpdateFoundationMetrics()
+{
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        return;
+    }
+    
+    UEng_GameplayFoundation* FoundationSubsystem = World->GetSubsystem<UEng_GameplayFoundation>();
+    if (FoundationSubsystem)
+    {
+        FoundationSubsystem->UpdateGameplayMetrics();
+        
+        if (bEnableMetricsLogging)
+        {
+            FEng_GameplayMetrics Metrics = FoundationSubsystem->GetCurrentMetrics();
+            UE_LOG(LogTemp, Log, TEXT("Engine Architect Metrics - Players: %d, Dinosaurs: %d, Frame: %f ms"), 
+                   Metrics.ActivePlayers, Metrics.ActiveDinosaurs, Metrics.AverageFrameTime);
+        }
+    }
 }
