@@ -1,6 +1,6 @@
 #include "Audio_NarrativeIntegration.h"
 #include "Components/AudioComponent.h"
-#include "Engine/Engine.h"
+#include "Sound/SoundCue.h"
 #include "Engine/World.h"
 #include "TimerManager.h"
 #include "Kismet/GameplayStatics.h"
@@ -8,359 +8,254 @@
 UAudio_NarrativeIntegration::UAudio_NarrativeIntegration()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickGroup = TG_PostUpdateWork;
+    UpdateInterval = 1.0f;
 
-    // Initialize default values
-    bIsPlayingNarrative = false;
-    CurrentContext = EAudio_NarrativeContext::Atmospheric;
-    FadeInDuration = 1.0f;
-    FadeOutDuration = 1.5f;
-    SpatialRange = 2000.0f;
+    // Create audio components
+    MusicAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("MusicAudioComponent"));
+    AmbienceAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("AmbienceAudioComponent"));
 
-    // Fade state
-    bIsFading = false;
-    FadeTimer = 0.0f;
-    FadeTargetDuration = 0.0f;
-    FadingComponent = nullptr;
-    bFadeIn = false;
+    if (MusicAudioComponent)
+    {
+        MusicAudioComponent->bAutoActivate = false;
+        MusicAudioComponent->SetVolumeMultiplier(0.7f);
+    }
 
-    // Initialize audio components
-    PrimaryAudioComponent = nullptr;
-    SecondaryAudioComponent = nullptr;
+    if (AmbienceAudioComponent)
+    {
+        AmbienceAudioComponent->bAutoActivate = false;
+        AmbienceAudioComponent->SetVolumeMultiplier(0.5f);
+    }
+
+    // Initialize default state
+    CurrentAudioState.CurrentIntensity = EAudio_NarrativeIntensity::Calm;
+    CurrentAudioState.IntensityLevel = 0.0f;
+    CurrentAudioState.CurrentPhase = TEXT("Awakening");
+    CurrentAudioState.bIsInStoryLocation = false;
+    CurrentAudioState.ThreatLevel = 0.0f;
 }
 
 void UAudio_NarrativeIntegration::BeginPlay()
 {
     Super::BeginPlay();
 
-    InitializeAudioComponents();
-    LoadPredefinedNarrativeClips();
-
-    UE_LOG(LogTemp, Log, TEXT("Audio_NarrativeIntegration: Component initialized with %d narrative clips"), NarrativeClips.Num());
-}
-
-void UAudio_NarrativeIntegration::InitializeAudioComponents()
-{
-    if (!GetOwner())
+    // Start periodic audio updates
+    if (UWorld* World = GetWorld())
     {
-        UE_LOG(LogTemp, Error, TEXT("Audio_NarrativeIntegration: No owner actor found"));
-        return;
+        World->GetTimerManager().SetTimer(
+            AudioUpdateTimer,
+            this,
+            &UAudio_NarrativeIntegration::UpdateAudioIntensity,
+            UpdateInterval,
+            true
+        );
     }
 
-    // Create primary audio component
-    PrimaryAudioComponent = NewObject<UAudioComponent>(GetOwner());
-    if (PrimaryAudioComponent)
-    {
-        PrimaryAudioComponent->SetupAttachment(GetOwner()->GetRootComponent());
-        PrimaryAudioComponent->bAutoActivate = false;
-        PrimaryAudioComponent->SetVolumeMultiplier(1.0f);
-        PrimaryAudioComponent->SetPitchMultiplier(1.0f);
-        PrimaryAudioComponent->bAllowSpatialization = true;
-        PrimaryAudioComponent->AttenuationSettings = nullptr; // Use default 3D settings
-        GetOwner()->AddInstanceComponent(PrimaryAudioComponent);
-        PrimaryAudioComponent->RegisterComponent();
-    }
-
-    // Create secondary audio component for crossfading
-    SecondaryAudioComponent = NewObject<UAudioComponent>(GetOwner());
-    if (SecondaryAudioComponent)
-    {
-        SecondaryAudioComponent->SetupAttachment(GetOwner()->GetRootComponent());
-        SecondaryAudioComponent->bAutoActivate = false;
-        SecondaryAudioComponent->SetVolumeMultiplier(1.0f);
-        SecondaryAudioComponent->SetPitchMultiplier(1.0f);
-        SecondaryAudioComponent->bAllowSpatialization = true;
-        SecondaryAudioComponent->AttenuationSettings = nullptr;
-        GetOwner()->AddInstanceComponent(SecondaryAudioComponent);
-        SecondaryAudioComponent->RegisterComponent();
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("Audio_NarrativeIntegration: Audio components initialized"));
-}
-
-void UAudio_NarrativeIntegration::LoadPredefinedNarrativeClips()
-{
-    // Load the voice lines generated in this cycle
-    FAudio_NarrativeClip AtmosphericClip;
-    AtmosphericClip.ClipName = TEXT("AtmosphericNarrator");
-    AtmosphericClip.AudioURL = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1777667789154_AtmosphericNarrator.mp3");
-    AtmosphericClip.Context = EAudio_NarrativeContext::Atmospheric;
-    AtmosphericClip.Duration = 15.0f;
-    AtmosphericClip.Volume = 0.8f;
-    AtmosphericClip.bIsLooping = false;
-    NarrativeClips.Add(AtmosphericClip);
-
-    FAudio_NarrativeClip SurvivalClip;
-    SurvivalClip.ClipName = TEXT("SurvivalExpert");
-    SurvivalClip.AudioURL = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1777667791541_SurvivalExpert.mp3");
-    SurvivalClip.Context = EAudio_NarrativeContext::Survival;
-    SurvivalClip.Duration = 12.0f;
-    SurvivalClip.Volume = 0.9f;
-    SurvivalClip.bIsLooping = false;
-    NarrativeClips.Add(SurvivalClip);
-
-    // Load previous cycle clips
-    FAudio_NarrativeClip TribalElder;
-    TribalElder.ClipName = TEXT("TribalElder");
-    TribalElder.AudioURL = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1777667781397_TribalElder.mp3");
-    TribalElder.Context = EAudio_NarrativeContext::Discovery;
-    TribalElder.Duration = 18.0f;
-    TribalElder.Volume = 0.7f;
-    TribalElder.bIsLooping = false;
-    NarrativeClips.Add(TribalElder);
-
-    FAudio_NarrativeClip PlayerCrafting;
-    PlayerCrafting.ClipName = TEXT("PlayerCharacter_Crafting");
-    PlayerCrafting.AudioURL = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1777667782886_PlayerCharacter.mp3");
-    PlayerCrafting.Context = EAudio_NarrativeContext::Crafting;
-    PlayerCrafting.Duration = 15.0f;
-    PlayerCrafting.Volume = 0.8f;
-    PlayerCrafting.bIsLooping = false;
-    NarrativeClips.Add(PlayerCrafting);
-
-    UE_LOG(LogTemp, Log, TEXT("Audio_NarrativeIntegration: Loaded %d predefined narrative clips"), NarrativeClips.Num());
+    // Initialize with calm music
+    TransitionToIntensity(EAudio_NarrativeIntensity::Calm);
 }
 
 void UAudio_NarrativeIntegration::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+    UpdateAudioState();
+}
 
-    // Handle fade in/out
-    if (bIsFading && FadingComponent)
+void UAudio_NarrativeIntegration::OnNarrativePhaseChanged(const FString& NewPhase, float IntensityLevel)
+{
+    CurrentAudioState.CurrentPhase = NewPhase;
+    CurrentAudioState.IntensityLevel = IntensityLevel;
+
+    // Determine intensity based on phase and level
+    EAudio_NarrativeIntensity NewIntensity = EAudio_NarrativeIntensity::Calm;
+
+    if (NewPhase == TEXT("Discovery") || NewPhase == TEXT("Adaptation"))
     {
-        FadeTimer += DeltaTime;
-        float FadeProgress = FMath::Clamp(FadeTimer / FadeTargetDuration, 0.0f, 1.0f);
-
-        if (bFadeIn)
+        NewIntensity = EAudio_NarrativeIntensity::Discovery;
+    }
+    else if (NewPhase == TEXT("Mastery") || NewPhase == TEXT("Leadership"))
+    {
+        if (IntensityLevel > 0.7f)
         {
-            float Volume = FMath::Lerp(0.0f, 1.0f, FadeProgress);
-            FadingComponent->SetVolumeMultiplier(Volume);
+            NewIntensity = EAudio_NarrativeIntensity::Tension;
         }
         else
         {
-            float Volume = FMath::Lerp(1.0f, 0.0f, FadeProgress);
-            FadingComponent->SetVolumeMultiplier(Volume);
-        }
-
-        if (FadeProgress >= 1.0f)
-        {
-            bIsFading = false;
-            if (!bFadeIn)
-            {
-                FadingComponent->Stop();
-                bIsPlayingNarrative = false;
-            }
+            NewIntensity = EAudio_NarrativeIntensity::Calm;
         }
     }
-
-    // Check if audio finished playing
-    if (bIsPlayingNarrative && PrimaryAudioComponent && !PrimaryAudioComponent->IsPlaying())
+    else if (NewPhase == TEXT("Legacy"))
     {
-        if (!bIsFading) // Only stop if not currently fading
-        {
-            HandleAudioFinished();
-        }
+        NewIntensity = EAudio_NarrativeIntensity::Discovery;
     }
+
+    TransitionToIntensity(NewIntensity);
+
+    UE_LOG(LogTemp, Log, TEXT("Audio_NarrativeIntegration: Phase changed to %s with intensity %f"), *NewPhase, IntensityLevel);
 }
 
-void UAudio_NarrativeIntegration::PlayNarrativeClip(const FString& ClipName, bool bInterruptCurrent)
+void UAudio_NarrativeIntegration::OnThreatLevelChanged(float NewThreatLevel)
 {
-    if (bIsPlayingNarrative && !bInterruptCurrent)
+    CurrentAudioState.ThreatLevel = NewThreatLevel;
+
+    // Override intensity based on threat level
+    EAudio_NarrativeIntensity ThreatIntensity = CurrentAudioState.CurrentIntensity;
+
+    if (NewThreatLevel > 0.8f)
     {
-        UE_LOG(LogTemp, Warning, TEXT("Audio_NarrativeIntegration: Already playing narrative, skipping %s"), *ClipName);
-        return;
+        ThreatIntensity = EAudio_NarrativeIntensity::Combat;
     }
-
-    FAudio_NarrativeClip* FoundClip = FindClipByName(ClipName);
-    if (!FoundClip)
+    else if (NewThreatLevel > 0.5f)
     {
-        UE_LOG(LogTemp, Error, TEXT("Audio_NarrativeIntegration: Clip not found: %s"), *ClipName);
-        return;
+        ThreatIntensity = EAudio_NarrativeIntensity::Danger;
     }
-
-    if (bInterruptCurrent && bIsPlayingNarrative)
+    else if (NewThreatLevel > 0.2f)
     {
-        StopNarrativeAudio(true);
-    }
-
-    // For now, log the clip info (actual audio loading would require additional implementation)
-    UE_LOG(LogTemp, Log, TEXT("Audio_NarrativeIntegration: Playing narrative clip '%s' (Context: %d, Duration: %.1fs)"), 
-           *FoundClip->ClipName, 
-           (int32)FoundClip->Context, 
-           FoundClip->Duration);
-
-    bIsPlayingNarrative = true;
-    CurrentContext = FoundClip->Context;
-
-    // Start fade in
-    if (PrimaryAudioComponent)
-    {
-        StartFadeIn(PrimaryAudioComponent, FadeInDuration);
-    }
-}
-
-void UAudio_NarrativeIntegration::PlayContextualNarrative(EAudio_NarrativeContext Context, bool bRandomSelection)
-{
-    TArray<FAudio_NarrativeClip> ContextClips = GetClipsByContext(Context);
-    
-    if (ContextClips.Num() == 0)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Audio_NarrativeIntegration: No clips found for context %d"), (int32)Context);
-        return;
-    }
-
-    FAudio_NarrativeClip* SelectedClip = nullptr;
-    if (bRandomSelection)
-    {
-        int32 RandomIndex = FMath::RandRange(0, ContextClips.Num() - 1);
-        SelectedClip = &ContextClips[RandomIndex];
+        ThreatIntensity = EAudio_NarrativeIntensity::Tension;
     }
     else
     {
-        SelectedClip = &ContextClips[0];
+        // Return to phase-based intensity
+        OnNarrativePhaseChanged(CurrentAudioState.CurrentPhase, CurrentAudioState.IntensityLevel);
+        return;
     }
 
-    if (SelectedClip)
-    {
-        PlayNarrativeClip(SelectedClip->ClipName, false);
-    }
+    TransitionToIntensity(ThreatIntensity);
+
+    UE_LOG(LogTemp, Log, TEXT("Audio_NarrativeIntegration: Threat level changed to %f"), NewThreatLevel);
 }
 
-void UAudio_NarrativeIntegration::StopNarrativeAudio(bool bFadeOut)
+void UAudio_NarrativeIntegration::OnStoryLocationEntered(const FString& LocationName)
 {
-    if (!bIsPlayingNarrative)
+    CurrentAudioState.bIsInStoryLocation = true;
+
+    // Play discovery music for story locations
+    TransitionToIntensity(EAudio_NarrativeIntensity::Discovery);
+
+    UE_LOG(LogTemp, Log, TEXT("Audio_NarrativeIntegration: Entered story location: %s"), *LocationName);
+}
+
+void UAudio_NarrativeIntegration::OnStoryLocationExited()
+{
+    CurrentAudioState.bIsInStoryLocation = false;
+
+    // Return to normal intensity based on current state
+    OnNarrativePhaseChanged(CurrentAudioState.CurrentPhase, CurrentAudioState.IntensityLevel);
+
+    UE_LOG(LogTemp, Log, TEXT("Audio_NarrativeIntegration: Exited story location"));
+}
+
+void UAudio_NarrativeIntegration::UpdateAudioIntensity()
+{
+    // This is called periodically to update audio based on current game state
+    UpdateAudioState();
+}
+
+void UAudio_NarrativeIntegration::TransitionToIntensity(EAudio_NarrativeIntensity NewIntensity)
+{
+    if (CurrentAudioState.CurrentIntensity == NewIntensity)
     {
         return;
     }
 
-    if (bFadeOut && PrimaryAudioComponent)
+    CurrentAudioState.CurrentIntensity = NewIntensity;
+    PlayMusicForIntensity(NewIntensity);
+
+    UE_LOG(LogTemp, Log, TEXT("Audio_NarrativeIntegration: Transitioned to intensity: %d"), (int32)NewIntensity);
+}
+
+void UAudio_NarrativeIntegration::SetMusicVolume(float Volume)
+{
+    if (MusicAudioComponent)
     {
-        StartFadeOut(PrimaryAudioComponent, FadeOutDuration);
+        MusicAudioComponent->SetVolumeMultiplier(FMath::Clamp(Volume, 0.0f, 1.0f));
+    }
+}
+
+void UAudio_NarrativeIntegration::SetAmbienceVolume(float Volume)
+{
+    if (AmbienceAudioComponent)
+    {
+        AmbienceAudioComponent->SetVolumeMultiplier(FMath::Clamp(Volume, 0.0f, 1.0f));
+    }
+}
+
+void UAudio_NarrativeIntegration::UpdateAudioState()
+{
+    // Update audio state based on current conditions
+    // This could check for nearby threats, player health, etc.
+    
+    // Example: Reduce music volume if player is low on health
+    if (AActor* Owner = GetOwner())
+    {
+        // Check if owner has health component and adjust audio accordingly
+        // This would integrate with the survival system
+    }
+}
+
+void UAudio_NarrativeIntegration::PlayMusicForIntensity(EAudio_NarrativeIntensity Intensity)
+{
+    USoundCue* NewMusic = GetSoundCueForIntensity(Intensity);
+    
+    if (NewMusic && MusicAudioComponent)
+    {
+        CrossfadeMusic(NewMusic);
+    }
+}
+
+USoundCue* UAudio_NarrativeIntegration::GetSoundCueForIntensity(EAudio_NarrativeIntensity Intensity)
+{
+    switch (Intensity)
+    {
+        case EAudio_NarrativeIntensity::Calm:
+            return AudioConfig.CalmMusic.LoadSynchronous();
+        case EAudio_NarrativeIntensity::Tension:
+            return AudioConfig.TensionMusic.LoadSynchronous();
+        case EAudio_NarrativeIntensity::Danger:
+            return AudioConfig.DangerMusic.LoadSynchronous();
+        case EAudio_NarrativeIntensity::Combat:
+            return AudioConfig.CombatMusic.LoadSynchronous();
+        case EAudio_NarrativeIntensity::Discovery:
+            return AudioConfig.DiscoveryMusic.LoadSynchronous();
+        default:
+            return AudioConfig.CalmMusic.LoadSynchronous();
+    }
+}
+
+void UAudio_NarrativeIntegration::CrossfadeMusic(USoundCue* NewMusic)
+{
+    if (!MusicAudioComponent || !NewMusic)
+    {
+        return;
+    }
+
+    // Simple crossfade implementation
+    if (MusicAudioComponent->IsPlaying())
+    {
+        MusicAudioComponent->FadeOut(AudioConfig.TransitionDuration, 0.0f);
+        
+        // Start new music after fade out
+        if (UWorld* World = GetWorld())
+        {
+            FTimerHandle FadeInTimer;
+            World->GetTimerManager().SetTimer(
+                FadeInTimer,
+                [this, NewMusic]()
+                {
+                    if (MusicAudioComponent)
+                    {
+                        MusicAudioComponent->SetSound(NewMusic);
+                        MusicAudioComponent->FadeIn(AudioConfig.TransitionDuration, 0.7f);
+                    }
+                },
+                AudioConfig.TransitionDuration,
+                false
+            );
+        }
     }
     else
     {
-        if (PrimaryAudioComponent)
-        {
-            PrimaryAudioComponent->Stop();
-        }
-        bIsPlayingNarrative = false;
+        // No current music, just start the new one
+        MusicAudioComponent->SetSound(NewMusic);
+        MusicAudioComponent->FadeIn(AudioConfig.TransitionDuration, 0.7f);
     }
-
-    UE_LOG(LogTemp, Log, TEXT("Audio_NarrativeIntegration: Stopping narrative audio (fade: %s)"), bFadeOut ? TEXT("true") : TEXT("false"));
-}
-
-void UAudio_NarrativeIntegration::RegisterNarrativeClip(const FAudio_NarrativeClip& NewClip)
-{
-    // Check if clip already exists
-    for (const FAudio_NarrativeClip& ExistingClip : NarrativeClips)
-    {
-        if (ExistingClip.ClipName == NewClip.ClipName)
-        {
-            UE_LOG(LogTemp, Warning, TEXT("Audio_NarrativeIntegration: Clip '%s' already exists, skipping registration"), *NewClip.ClipName);
-            return;
-        }
-    }
-
-    NarrativeClips.Add(NewClip);
-    UE_LOG(LogTemp, Log, TEXT("Audio_NarrativeIntegration: Registered new narrative clip '%s'"), *NewClip.ClipName);
-}
-
-void UAudio_NarrativeIntegration::OnNarrativeTriggerEntered(const FString& TriggerID, EAudio_NarrativeContext Context)
-{
-    UE_LOG(LogTemp, Log, TEXT("Audio_NarrativeIntegration: Narrative trigger entered - %s (Context: %d)"), *TriggerID, (int32)Context);
-
-    // Map trigger IDs to specific clips or play contextual audio
-    if (TriggerID.Contains(TEXT("DangerZone")))
-    {
-        PlayContextualNarrative(EAudio_NarrativeContext::Danger, true);
-    }
-    else if (TriggerID.Contains(TEXT("WaterSource")))
-    {
-        PlayContextualNarrative(EAudio_NarrativeContext::Survival, true);
-    }
-    else if (TriggerID.Contains(TEXT("SafeSpot")))
-    {
-        PlayContextualNarrative(EAudio_NarrativeContext::Atmospheric, true);
-    }
-    else
-    {
-        PlayContextualNarrative(Context, true);
-    }
-}
-
-void UAudio_NarrativeIntegration::OnNarrativeTriggerExited(const FString& TriggerID)
-{
-    UE_LOG(LogTemp, Log, TEXT("Audio_NarrativeIntegration: Narrative trigger exited - %s"), *TriggerID);
-    
-    // Optionally fade out current narrative when leaving trigger
-    if (bIsPlayingNarrative)
-    {
-        StopNarrativeAudio(true);
-    }
-}
-
-TArray<FAudio_NarrativeClip> UAudio_NarrativeIntegration::GetClipsByContext(EAudio_NarrativeContext Context) const
-{
-    TArray<FAudio_NarrativeClip> ContextClips;
-    
-    for (const FAudio_NarrativeClip& Clip : NarrativeClips)
-    {
-        if (Clip.Context == Context)
-        {
-            ContextClips.Add(Clip);
-        }
-    }
-    
-    return ContextClips;
-}
-
-FAudio_NarrativeClip* UAudio_NarrativeIntegration::FindClipByName(const FString& ClipName)
-{
-    for (FAudio_NarrativeClip& Clip : NarrativeClips)
-    {
-        if (Clip.ClipName == ClipName)
-        {
-            return &Clip;
-        }
-    }
-    return nullptr;
-}
-
-void UAudio_NarrativeIntegration::HandleAudioFinished()
-{
-    bIsPlayingNarrative = false;
-    CurrentContext = EAudio_NarrativeContext::Atmospheric;
-    
-    UE_LOG(LogTemp, Log, TEXT("Audio_NarrativeIntegration: Narrative audio finished"));
-}
-
-void UAudio_NarrativeIntegration::StartFadeIn(UAudioComponent* AudioComp, float Duration)
-{
-    if (!AudioComp)
-    {
-        return;
-    }
-
-    bIsFading = true;
-    bFadeIn = true;
-    FadeTimer = 0.0f;
-    FadeTargetDuration = Duration;
-    FadingComponent = AudioComp;
-
-    AudioComp->SetVolumeMultiplier(0.0f);
-    // AudioComp->Play(); // Would be called when actual audio loading is implemented
-}
-
-void UAudio_NarrativeIntegration::StartFadeOut(UAudioComponent* AudioComp, float Duration)
-{
-    if (!AudioComp)
-    {
-        return;
-    }
-
-    bIsFading = true;
-    bFadeIn = false;
-    FadeTimer = 0.0f;
-    FadeTargetDuration = Duration;
-    FadingComponent = AudioComp;
 }
