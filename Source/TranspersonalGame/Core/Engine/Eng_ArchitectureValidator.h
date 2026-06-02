@@ -1,48 +1,88 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/World.h"
-#include "GameFramework/GameModeBase.h"
-#include "Subsystems/WorldSubsystem.h"
+#include "Engine/GameInstanceSubsystem.h"
 #include "Eng_ArchitectureValidator.generated.h"
 
 UENUM(BlueprintType)
-enum class EEng_ValidationResult : uint8
+enum class EEng_ValidationLevel : uint8
 {
-    Pass        UMETA(DisplayName = "Pass"),
-    Warning     UMETA(DisplayName = "Warning"), 
-    Error       UMETA(DisplayName = "Error"),
-    Critical    UMETA(DisplayName = "Critical")
+    Critical    UMETA(DisplayName = "Critical"),
+    High        UMETA(DisplayName = "High"),
+    Medium      UMETA(DisplayName = "Medium"),
+    Low         UMETA(DisplayName = "Low")
+};
+
+UENUM(BlueprintType)
+enum class EEng_ModuleType : uint8
+{
+    Core        UMETA(DisplayName = "Core"),
+    Gameplay    UMETA(DisplayName = "Gameplay"),
+    World       UMETA(DisplayName = "World"),
+    Character   UMETA(DisplayName = "Character"),
+    AI          UMETA(DisplayName = "AI"),
+    Audio       UMETA(DisplayName = "Audio"),
+    VFX         UMETA(DisplayName = "VFX"),
+    UI          UMETA(DisplayName = "UI")
 };
 
 USTRUCT(BlueprintType)
-struct FEng_ValidationReport
+struct TRANSPERSONALGAME_API FEng_ValidationRule
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    FString ModuleName;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Validation")
+    FString RuleName;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    EEng_ValidationResult Result;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Validation")
+    FString Description;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    FString Message;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Validation")
+    EEng_ValidationLevel Level;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    float Timestamp;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Validation")
+    bool bIsActive;
 
-    FEng_ValidationReport()
+    FEng_ValidationRule()
     {
-        ModuleName = TEXT("");
-        Result = EEng_ValidationResult::Pass;
-        Message = TEXT("");
-        Timestamp = 0.0f;
+        RuleName = TEXT("");
+        Description = TEXT("");
+        Level = EEng_ValidationLevel::Medium;
+        bIsActive = true;
     }
 };
 
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UEng_ArchitectureValidator : public UWorldSubsystem
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FEng_ModuleInfo
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Module")
+    FString ModuleName;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Module")
+    EEng_ModuleType ModuleType;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Module")
+    TArray<FString> Dependencies;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Module")
+    int32 Priority;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Module")
+    bool bIsCompiled;
+
+    FEng_ModuleInfo()
+    {
+        ModuleName = TEXT("");
+        ModuleType = EEng_ModuleType::Core;
+        Priority = 0;
+        bIsCompiled = false;
+    }
+};
+
+UCLASS(BlueprintType)
+class TRANSPERSONALGAME_API UEng_ArchitectureValidator : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
@@ -51,43 +91,78 @@ public:
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    bool ValidateSystemArchitecture();
+    // Architecture Validation
+    UFUNCTION(BlueprintCallable, Category = "Architecture", CallInEditor = true)
+    bool ValidateProjectArchitecture();
 
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    bool ValidateModuleIntegrity(const FString& ModuleName);
+    UFUNCTION(BlueprintCallable, Category = "Architecture", CallInEditor = true)
+    bool ValidateModuleDependencies();
 
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    TArray<FEng_ValidationReport> GetValidationReports() const;
+    UFUNCTION(BlueprintCallable, Category = "Architecture", CallInEditor = true)
+    bool ValidateHeaderIncludes();
 
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void ClearValidationReports();
+    UFUNCTION(BlueprintCallable, Category = "Architecture", CallInEditor = true)
+    bool ValidateUE5Compatibility();
 
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    bool ValidateActorCounts();
+    // Module Management
+    UFUNCTION(BlueprintCallable, Category = "Module", CallInEditor = true)
+    void RegisterModule(const FEng_ModuleInfo& ModuleInfo);
 
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    bool ValidateBiomeDistribution();
+    UFUNCTION(BlueprintCallable, Category = "Module", CallInEditor = true)
+    bool IsModuleValid(const FString& ModuleName);
 
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    bool ValidateDinosaurLimits();
+    UFUNCTION(BlueprintCallable, Category = "Module", CallInEditor = true)
+    TArray<FString> GetInvalidModules();
+
+    // Validation Rules
+    UFUNCTION(BlueprintCallable, Category = "Validation", CallInEditor = true)
+    void AddValidationRule(const FEng_ValidationRule& Rule);
+
+    UFUNCTION(BlueprintCallable, Category = "Validation", CallInEditor = true)
+    TArray<FEng_ValidationRule> GetActiveValidationRules();
+
+    // Compilation Checks
+    UFUNCTION(BlueprintCallable, Category = "Compilation", CallInEditor = true)
+    bool CheckCompilationErrors();
+
+    UFUNCTION(BlueprintCallable, Category = "Compilation", CallInEditor = true)
+    TArray<FString> GetCompilationErrors();
+
+    // Performance Validation
+    UFUNCTION(BlueprintCallable, Category = "Performance", CallInEditor = true)
+    bool ValidatePerformanceConstraints();
+
+    UFUNCTION(BlueprintCallable, Category = "Performance", CallInEditor = true)
+    float GetCurrentFrameRate();
+
+    UFUNCTION(BlueprintCallable, Category = "Performance", CallInEditor = true)
+    int32 GetActorCount();
 
 protected:
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    TArray<FEng_ValidationReport> ValidationReports;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
+    TArray<FEng_ModuleInfo> RegisteredModules;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    int32 MaxActorsPerBiome;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
+    TArray<FEng_ValidationRule> ValidationRules;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    int32 MaxTotalActors;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
+    TArray<FString> CompilationErrors;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    int32 MaxDinosaurs;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
+    bool bArchitectureValid;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float TargetFrameRate;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    int32 MaxActorCount;
 
 private:
-    void AddValidationReport(const FString& ModuleName, EEng_ValidationResult Result, const FString& Message);
-    bool ValidateClassExists(const FString& ClassName, const FString& ModuleName);
-    bool ValidateComponentRegistration();
-    bool ValidateSubsystemInitialization();
+    void InitializeValidationRules();
+    void InitializeModuleRegistry();
+    bool ValidateModuleStructure(const FEng_ModuleInfo& Module);
+    bool CheckHeaderCompliance(const FString& HeaderPath);
+    void LogValidationResult(const FString& TestName, bool bPassed);
 };
+
+#include "Eng_ArchitectureValidator.generated.h"
