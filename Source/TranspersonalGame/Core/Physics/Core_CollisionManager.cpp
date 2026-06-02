@@ -1,363 +1,212 @@
 #include "Core_CollisionManager.h"
 #include "Engine/World.h"
-#include "DrawDebugHelpers.h"
-#include "PhysicalMaterials/PhysicalMaterial.h"
-#include "Components/StaticMeshComponent.h"
-#include "Components/SkeletalMeshComponent.h"
+#include "Engine/Engine.h"
+#include "Components/PrimitiveComponent.h"
 #include "Kismet/GameplayStatics.h"
 
 UCore_CollisionManager::UCore_CollisionManager()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.bStartWithTickEnabled = true;
+    PrimaryComponentTick.TickGroup = TG_PostPhysics;
     
-    MaxCollisionHistorySize = 1000;
-    bDebugVisualization = false;
-    CollisionHistoryRetentionTime = 30.0f;
+    MyCollisionType = ECore_CollisionType::Character;
+    bEnableCollisionLogging = true;
+    MinImpactForceThreshold = 100.0f;
+    CollisionCooldown = 0.1f;
+    MaxCollisionHistory = 50;
+    TotalCollisions = 0;
+    LastCollisionTime = 0.0f;
 }
 
 void UCore_CollisionManager::BeginPlay()
 {
     Super::BeginPlay();
     
-    InitializeDefaultProfiles();
+    // Initialize collision history
+    CollisionHistory.Reserve(MaxCollisionHistory);
     
-    // Bind collision events for owner actor's components
-    if (AActor* Owner = GetOwner())
-    {
-        TArray<UPrimitiveComponent*> PrimitiveComponents;
-        Owner->GetComponents<UPrimitiveComponent>(PrimitiveComponents);
-        
-        for (UPrimitiveComponent* PrimComp : PrimitiveComponents)
-        {
-            if (PrimComp)
-            {
-                PrimComp->OnComponentHit.AddDynamic(this, &UCore_CollisionManager::OnComponentHit);
-                PrimComp->OnComponentBeginOverlap.AddDynamic(this, &UCore_CollisionManager::OnComponentBeginOverlap);
-                PrimComp->OnComponentEndOverlap.AddDynamic(this, &UCore_CollisionManager::OnComponentEndOverlap);
-            }
-        }
-    }
+    UE_LOG(LogTemp, Log, TEXT("Core_CollisionManager: Initialized for collision type %d"), (int32)MyCollisionType);
 }
 
 void UCore_CollisionManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
     
-    CleanupOldCollisions();
-    
-    if (bDebugVisualization)
+    // Clean up old collision data if needed
+    if (CollisionHistory.Num() > MaxCollisionHistory)
     {
-        DebugDrawCollisionShapes();
+        int32 ExcessCount = CollisionHistory.Num() - MaxCollisionHistory;
+        CollisionHistory.RemoveAt(0, ExcessCount);
     }
 }
 
-void UCore_CollisionManager::SetCollisionProfile(UPrimitiveComponent* Component, const FCore_CollisionProfile& Profile)
+void UCore_CollisionManager::RegisterCollision(const FHitResult& HitResult, float ImpactForce)
 {
-    if (!Component)
+    if (IsWithinCooldown() || ImpactForce < MinImpactForceThreshold)
     {
-        UE_LOG(LogTemp, Warning, TEXT("Core_CollisionManager: Null component passed to SetCollisionProfile"));
         return;
     }
     
-    Component->SetCollisionEnabled(Profile.CollisionEnabled);
-    Component->SetCollisionObjectType(Profile.ObjectType);
-    Component->SetGenerateOverlapEvents(Profile.bGenerateOverlapEvents);
-    Component->SetCanCharacterStepUpOn(Profile.bCanCharacterStepUpOn ? ECB_Yes : ECB_No);
-}
-
-FCore_CollisionProfile UCore_CollisionManager::GetCollisionProfile(UPrimitiveComponent* Component)
-{
-    FCore_CollisionProfile Profile;
-    
-    if (Component)
+    if (ShouldIgnoreCollision(HitResult.GetActor()))
     {
-        Profile.CollisionEnabled = Component->GetCollisionEnabled();
-        Profile.ObjectType = Component->GetCollisionObjectType();
-        Profile.bGenerateOverlapEvents = Component->GetGenerateOverlapEvents();
-        Profile.bCanCharacterStepUpOn = (Component->GetCanCharacterStepUpOn() == ECB_Yes);
+        return;
     }
     
-    return Profile;
-}
-
-void UCore_CollisionManager::RegisterCollisionProfile(const FName& ProfileName, const FCore_CollisionProfile& Profile)
-{
-    RegisteredProfiles.Add(ProfileName, Profile);
-    UE_LOG(LogTemp, Log, TEXT("Core_CollisionManager: Registered collision profile '%s'"), *ProfileName.ToString());
-}
-
-bool UCore_CollisionManager::LineTrace(const FVector& Start, const FVector& End, FHitResult& HitResult, bool bTraceComplex)
-{
-    if (UWorld* World = GetWorld())
-    {
-        FCollisionQueryParams QueryParams;
-        QueryParams.bTraceComplex = bTraceComplex;
-        QueryParams.AddIgnoredActor(GetOwner());
-        
-        return World->LineTraceSingleByChannel(HitResult, Start, End, ECC_Visibility, QueryParams);
-    }
-    
-    return false;
-}
-
-bool UCore_CollisionManager::SphereTrace(const FVector& Start, const FVector& End, float Radius, FHitResult& HitResult)
-{
-    if (UWorld* World = GetWorld())
-    {
-        FCollisionQueryParams QueryParams;
-        QueryParams.AddIgnoredActor(GetOwner());
-        
-        return World->SweepSingleByChannel(HitResult, Start, End, FQuat::Identity, ECC_Visibility, FCollisionShape::MakeSphere(Radius), QueryParams);
-    }
-    
-    return false;
-}
-
-bool UCore_CollisionManager::BoxTrace(const FVector& Start, const FVector& End, const FVector& HalfSize, const FRotator& Orientation, FHitResult& HitResult)
-{
-    if (UWorld* World = GetWorld())
-    {
-        FCollisionQueryParams QueryParams;
-        QueryParams.AddIgnoredActor(GetOwner());
-        
-        return World->SweepSingleByChannel(HitResult, Start, End, Orientation.Quaternion(), ECC_Visibility, FCollisionShape::MakeBox(HalfSize), QueryParams);
-    }
-    
-    return false;
-}
-
-bool UCore_CollisionManager::SphereOverlap(const FVector& Location, float Radius, TArray<AActor*>& OverlappingActors)
-{
-    if (UWorld* World = GetWorld())
-    {
-        TArray<FOverlapResult> OverlapResults;
-        FCollisionQueryParams QueryParams;
-        QueryParams.AddIgnoredActor(GetOwner());
-        
-        bool bHasOverlap = World->OverlapMultiByChannel(OverlapResults, Location, FQuat::Identity, ECC_Visibility, FCollisionShape::MakeSphere(Radius), QueryParams);
-        
-        OverlappingActors.Empty();
-        for (const FOverlapResult& Result : OverlapResults)
-        {
-            if (Result.GetActor())
-            {
-                OverlappingActors.AddUnique(Result.GetActor());
-            }
-        }
-        
-        return bHasOverlap;
-    }
-    
-    return false;
-}
-
-bool UCore_CollisionManager::BoxOverlap(const FVector& Location, const FVector& HalfSize, const FRotator& Orientation, TArray<AActor*>& OverlappingActors)
-{
-    if (UWorld* World = GetWorld())
-    {
-        TArray<FOverlapResult> OverlapResults;
-        FCollisionQueryParams QueryParams;
-        QueryParams.AddIgnoredActor(GetOwner());
-        
-        bool bHasOverlap = World->OverlapMultiByChannel(OverlapResults, Location, Orientation.Quaternion(), ECC_Visibility, FCollisionShape::MakeBox(HalfSize), QueryParams);
-        
-        OverlappingActors.Empty();
-        for (const FOverlapResult& Result : OverlapResults)
-        {
-            if (Result.GetActor())
-            {
-                OverlappingActors.AddUnique(Result.GetActor());
-            }
-        }
-        
-        return bHasOverlap;
-    }
-    
-    return false;
-}
-
-void UCore_CollisionManager::SetCollisionResponseToChannel(UPrimitiveComponent* Component, ECollisionChannel Channel, ECollisionResponse Response)
-{
-    if (Component)
-    {
-        Component->SetCollisionResponseToChannel(Channel, Response);
-    }
-}
-
-void UCore_CollisionManager::SetCollisionResponseToAllChannels(UPrimitiveComponent* Component, ECollisionResponse Response)
-{
-    if (Component)
-    {
-        Component->SetCollisionResponseToAllChannels(Response);
-    }
-}
-
-void UCore_CollisionManager::SetPhysicsMaterial(UPrimitiveComponent* Component, UPhysicalMaterial* PhysMaterial)
-{
-    if (Component && PhysMaterial)
-    {
-        Component->SetPhysMaterialOverride(PhysMaterial);
-    }
-}
-
-void UCore_CollisionManager::OnComponentHit(UPrimitiveComponent* HitComp, AActor* OtherActor, UPrimitiveComponent* OtherComp, FVector NormalImpulse, const FHitResult& Hit)
-{
+    // Create collision data
     FCore_CollisionData CollisionData;
-    CollisionData.HitActor = OtherActor;
-    CollisionData.HitComponent = OtherComp;
-    CollisionData.ImpactPoint = Hit.ImpactPoint;
-    CollisionData.ImpactNormal = Hit.ImpactNormal;
-    CollisionData.ImpactForce = NormalImpulse.Size();
+    CollisionData.CollisionType = MyCollisionType;
+    CollisionData.ImpactForce = ImpactForce;
+    CollisionData.ImpactLocation = HitResult.ImpactPoint;
+    CollisionData.ImpactNormal = HitResult.ImpactNormal;
+    CollisionData.HitActor = HitResult.GetActor();
     CollisionData.Timestamp = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
     
-    RecordCollision(CollisionData);
+    ProcessCollisionData(CollisionData);
     
-    UE_LOG(LogTemp, Log, TEXT("Core_CollisionManager: Hit detected with %s at force %.2f"), 
-           OtherActor ? *OtherActor->GetName() : TEXT("Unknown"), CollisionData.ImpactForce);
-}
-
-void UCore_CollisionManager::OnComponentBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
-{
-    UE_LOG(LogTemp, Log, TEXT("Core_CollisionManager: Begin overlap with %s"), 
-           OtherActor ? *OtherActor->GetName() : TEXT("Unknown"));
-}
-
-void UCore_CollisionManager::OnComponentEndOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex)
-{
-    UE_LOG(LogTemp, Log, TEXT("Core_CollisionManager: End overlap with %s"), 
-           OtherActor ? *OtherActor->GetName() : TEXT("Unknown"));
-}
-
-void UCore_CollisionManager::RecordCollision(const FCore_CollisionData& CollisionData)
-{
-    CollisionHistory.Add(CollisionData);
+    // Update cooldown
+    LastCollisionTime = CollisionData.Timestamp;
+    TotalCollisions++;
     
-    if (CollisionHistory.Num() > MaxCollisionHistorySize)
+    // Broadcast event
+    OnCollisionDetected.Broadcast(CollisionData, HitResult.GetActor());
+    
+    if (bEnableCollisionLogging)
     {
-        CollisionHistory.RemoveAt(0, CollisionHistory.Num() - MaxCollisionHistorySize);
+        UE_LOG(LogTemp, Log, TEXT("Core_CollisionManager: Collision registered - Force: %f, Actor: %s"), 
+               ImpactForce, 
+               HitResult.GetActor() ? *HitResult.GetActor()->GetName() : TEXT("None"));
     }
 }
 
-TArray<FCore_CollisionData> UCore_CollisionManager::GetRecentCollisions(float TimeWindow)
+void UCore_CollisionManager::SetCollisionType(ECore_CollisionType NewType)
 {
-    TArray<FCore_CollisionData> RecentCollisions;
-    
-    if (UWorld* World = GetWorld())
+    MyCollisionType = NewType;
+    UE_LOG(LogTemp, Log, TEXT("Core_CollisionManager: Collision type changed to %d"), (int32)NewType);
+}
+
+bool UCore_CollisionManager::IsCollisionTypeCompatible(ECore_CollisionType OtherType) const
+{
+    // Define collision compatibility rules
+    switch (MyCollisionType)
     {
-        float CurrentTime = World->GetTimeSeconds();
-        float CutoffTime = CurrentTime - TimeWindow;
-        
-        for (const FCore_CollisionData& Collision : CollisionHistory)
-        {
-            if (Collision.Timestamp >= CutoffTime)
-            {
-                RecentCollisions.Add(Collision);
-            }
-        }
+        case ECore_CollisionType::Character:
+            return OtherType != ECore_CollisionType::Character; // Characters don't collide with each other
+            
+        case ECore_CollisionType::Dinosaur:
+            return OtherType == ECore_CollisionType::Character || 
+                   OtherType == ECore_CollisionType::Environment ||
+                   OtherType == ECore_CollisionType::Projectile;
+            
+        case ECore_CollisionType::Projectile:
+            return OtherType != ECore_CollisionType::Projectile; // Projectiles don't collide with each other
+            
+        case ECore_CollisionType::Trigger:
+            return true; // Triggers can collide with everything
+            
+        default:
+            return true;
     }
+}
+
+void UCore_CollisionManager::EnableCollisionTracking(bool bEnable)
+{
+    bEnableCollisionLogging = bEnable;
     
-    return RecentCollisions;
+    if (!bEnable)
+    {
+        ClearCollisionHistory();
+    }
+}
+
+void UCore_CollisionManager::GetRecentCollisions(TArray<FCore_CollisionData>& OutCollisions, int32 Count)
+{
+    OutCollisions.Empty();
+    
+    int32 StartIndex = FMath::Max(0, CollisionHistory.Num() - Count);
+    for (int32 i = StartIndex; i < CollisionHistory.Num(); i++)
+    {
+        OutCollisions.Add(CollisionHistory[i]);
+    }
 }
 
 void UCore_CollisionManager::ClearCollisionHistory()
 {
     CollisionHistory.Empty();
+    TotalCollisions = 0;
     UE_LOG(LogTemp, Log, TEXT("Core_CollisionManager: Collision history cleared"));
 }
 
-void UCore_CollisionManager::DebugDrawCollisionShapes()
+float UCore_CollisionManager::CalculateImpactForce(const FVector& Velocity, float Mass) const
 {
-    if (UWorld* World = GetWorld())
+    // F = ma, where a is derived from velocity change
+    float Speed = Velocity.Size();
+    return Speed * Mass * 0.1f; // Simplified calculation
+}
+
+bool UCore_CollisionManager::ShouldIgnoreCollision(AActor* OtherActor) const
+{
+    if (!OtherActor)
     {
-        if (AActor* Owner = GetOwner())
-        {
-            TArray<UPrimitiveComponent*> PrimitiveComponents;
-            Owner->GetComponents<UPrimitiveComponent>(PrimitiveComponents);
+        return true;
+    }
+    
+    // Check if actor is in ignore list
+    if (IgnoredActors.Contains(OtherActor))
+    {
+        return true;
+    }
+    
+    // Ignore self-collision
+    if (OtherActor == GetOwner())
+    {
+        return true;
+    }
+    
+    return false;
+}
+
+void UCore_CollisionManager::ProcessCollisionData(const FCore_CollisionData& CollisionData)
+{
+    UpdateCollisionHistory(CollisionData);
+    
+    // Apply collision-specific logic based on type
+    switch (CollisionData.CollisionType)
+    {
+        case ECore_CollisionType::Character:
+            // Handle character collision effects
+            break;
             
-            for (UPrimitiveComponent* PrimComp : PrimitiveComponents)
-            {
-                DrawDebugCollisionShape(PrimComp);
-            }
-        }
+        case ECore_CollisionType::Dinosaur:
+            // Handle dinosaur collision effects
+            break;
+            
+        case ECore_CollisionType::Projectile:
+            // Handle projectile collision effects
+            break;
+            
+        default:
+            break;
     }
 }
 
-void UCore_CollisionManager::SetDebugVisualization(bool bEnabled)
+void UCore_CollisionManager::UpdateCollisionHistory(const FCore_CollisionData& NewCollision)
 {
-    bDebugVisualization = bEnabled;
-    UE_LOG(LogTemp, Log, TEXT("Core_CollisionManager: Debug visualization %s"), 
-           bEnabled ? TEXT("enabled") : TEXT("disabled"));
-}
-
-void UCore_CollisionManager::InitializeDefaultProfiles()
-{
-    // Character Profile
-    FCore_CollisionProfile CharacterProfile;
-    CharacterProfile.ProfileName = TEXT("Character");
-    CharacterProfile.CollisionEnabled = ECollisionEnabled::QueryAndPhysics;
-    CharacterProfile.ObjectType = ECR_Pawn;
-    CharacterProfile.bGenerateOverlapEvents = true;
-    CharacterProfile.bCanCharacterStepUpOn = false;
-    RegisterCollisionProfile(CharacterProfile.ProfileName, CharacterProfile);
+    CollisionHistory.Add(NewCollision);
     
-    // Environment Profile
-    FCore_CollisionProfile EnvironmentProfile;
-    EnvironmentProfile.ProfileName = TEXT("Environment");
-    EnvironmentProfile.CollisionEnabled = ECollisionEnabled::QueryAndPhysics;
-    EnvironmentProfile.ObjectType = ECR_WorldStatic;
-    EnvironmentProfile.bGenerateOverlapEvents = false;
-    EnvironmentProfile.bCanCharacterStepUpOn = true;
-    RegisterCollisionProfile(EnvironmentProfile.ProfileName, EnvironmentProfile);
-    
-    // Projectile Profile
-    FCore_CollisionProfile ProjectileProfile;
-    ProjectileProfile.ProfileName = TEXT("Projectile");
-    ProjectileProfile.CollisionEnabled = ECollisionEnabled::QueryAndPhysics;
-    ProjectileProfile.ObjectType = ECR_WorldDynamic;
-    ProjectileProfile.bGenerateOverlapEvents = true;
-    ProjectileProfile.bCanCharacterStepUpOn = false;
-    RegisterCollisionProfile(ProjectileProfile.ProfileName, ProjectileProfile);
-}
-
-void UCore_CollisionManager::CleanupOldCollisions()
-{
-    if (UWorld* World = GetWorld())
+    // Maintain size limit
+    while (CollisionHistory.Num() > MaxCollisionHistory)
     {
-        float CurrentTime = World->GetTimeSeconds();
-        float CutoffTime = CurrentTime - CollisionHistoryRetentionTime;
-        
-        CollisionHistory.RemoveAll([CutoffTime](const FCore_CollisionData& Collision)
-        {
-            return Collision.Timestamp < CutoffTime;
-        });
+        CollisionHistory.RemoveAt(0);
     }
 }
 
-void UCore_CollisionManager::DrawDebugCollisionShape(UPrimitiveComponent* Component)
+bool UCore_CollisionManager::IsWithinCooldown() const
 {
-    if (!Component || !GetWorld())
+    if (!GetWorld())
     {
-        return;
+        return false;
     }
     
-    FVector Location = Component->GetComponentLocation();
-    FRotator Rotation = Component->GetComponentRotation();
-    
-    // Draw different shapes based on component type
-    if (UStaticMeshComponent* StaticMeshComp = Cast<UStaticMeshComponent>(Component))
-    {
-        FBoxSphereBounds Bounds = StaticMeshComp->GetLocalBounds();
-        DrawDebugBox(GetWorld(), Location, Bounds.BoxExtent, Rotation.Quaternion(), FColor::Green, false, 0.1f);
-    }
-    else if (USkeletalMeshComponent* SkeletalMeshComp = Cast<USkeletalMeshComponent>(Component))
-    {
-        FBoxSphereBounds Bounds = SkeletalMeshComp->GetLocalBounds();
-        DrawDebugBox(GetWorld(), Location, Bounds.BoxExtent, Rotation.Quaternion(), FColor::Blue, false, 0.1f);
-    }
-    else
-    {
-        // Generic sphere for other components
-        DrawDebugSphere(GetWorld(), Location, 50.0f, 12, FColor::Red, false, 0.1f);
-    }
+    float CurrentTime = GetWorld()->GetTimeSeconds();
+    return (CurrentTime - LastCollisionTime) < CollisionCooldown;
 }
