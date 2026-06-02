@@ -1,277 +1,266 @@
 #include "Narr_DialogueSystem.h"
-#include "Engine/World.h"
-#include "Engine/GameInstance.h"
+#include "Narr_TribalNPC.h"
 #include "Components/AudioComponent.h"
-#include "Sound/SoundCue.h"
-#include "TimerManager.h"
-#include "Kismet/GameplayStatics.h"
+#include "Sound/SoundWave.h"
+#include "Engine/Engine.h"
 
-void UNarr_DialogueSystem::Initialize(FSubsystemCollectionBase& Collection)
+UNarr_DialogueSystem::UNarr_DialogueSystem()
 {
-    Super::Initialize(Collection);
-    
+    PrimaryComponentTick.bCanEverTick = true;
+    PrimaryComponentTick.TickInterval = 0.1f;
+
     bIsDialogueActive = false;
-    CurrentSequenceID = TEXT("");
     CurrentLineIndex = 0;
+    DialogueTimer = 0.0f;
+    CurrentNPC = nullptr;
+    DialogueAudioComponent = nullptr;
+}
+
+void UNarr_DialogueSystem::BeginPlay()
+{
+    Super::BeginPlay();
     
+    InitializeDialogueDatabase();
+    LoadDialogueDatabase();
+
     // Create audio component for dialogue playback
-    if (UGameInstance* GameInstance = GetGameInstance())
+    DialogueAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("DialogueAudioComponent"));
+    if (DialogueAudioComponent)
     {
-        if (UWorld* World = GameInstance->GetWorld())
-        {
-            DialogueAudioComponent = NewObject<UAudioComponent>(this);
-            if (DialogueAudioComponent)
-            {
-                DialogueAudioComponent->SetAutoDestroy(false);
-                DialogueAudioComponent->bAutoActivate = false;
-            }
-        }
+        DialogueAudioComponent->bAutoActivate = false;
+        DialogueAudioComponent->SetVolumeMultiplier(0.8f);
     }
-    
-    LoadDefaultDialogueSequences();
-    
-    UE_LOG(LogTemp, Log, TEXT("Narrative Dialogue System initialized"));
 }
 
-void UNarr_DialogueSystem::Deinitialize()
+void UNarr_DialogueSystem::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
-    StopDialogue();
-    
-    if (DialogueAudioComponent && IsValid(DialogueAudioComponent))
-    {
-        DialogueAudioComponent->Stop();
-        DialogueAudioComponent->DestroyComponent();
-        DialogueAudioComponent = nullptr;
-    }
-    
-    Super::Deinitialize();
-}
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
-void UNarr_DialogueSystem::StartDialogueSequence(const FString& SequenceID)
-{
     if (bIsDialogueActive)
     {
-        StopDialogue();
+        DialogueTimer += DeltaTime;
+        ProcessCurrentDialogueLine();
     }
-    
-    if (!DialogueSequences.Contains(SequenceID))
+}
+
+bool UNarr_DialogueSystem::StartDialogue(const FString& DialogueID, ANarr_TribalNPC* NPC)
+{
+    if (!NPC || bIsDialogueActive)
     {
-        UE_LOG(LogTemp, Warning, TEXT("Dialogue sequence not found: %s"), *SequenceID);
-        return;
+        return false;
     }
-    
-    const FNarr_DialogueSequence& Sequence = DialogueSequences[SequenceID];
-    
-    if (!CheckSequenceRequirements(Sequence))
+
+    FNarr_DialogueNode DialogueNode = GetDialogueNode(DialogueID);
+    if (DialogueNode.DialogueID.IsEmpty())
     {
-        UE_LOG(LogTemp, Log, TEXT("Dialogue sequence requirements not met: %s"), *SequenceID);
-        return;
+        UE_LOG(LogTemp, Warning, TEXT("Dialogue node not found: %s"), *DialogueID);
+        return false;
     }
-    
-    if (Sequence.DialogueLines.Num() == 0)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Dialogue sequence has no lines: %s"), *SequenceID);
-        return;
-    }
-    
-    CurrentSequenceID = SequenceID;
-    CurrentLineIndex = 0;
+
+    CurrentDialogueNode = DialogueNode;
+    CurrentNPC = NPC;
     bIsDialogueActive = true;
-    
-    OnDialogueStarted.Broadcast(SequenceID);
-    PlayCurrentDialogueLine();
-    
-    UE_LOG(LogTemp, Log, TEXT("Started dialogue sequence: %s"), *SequenceID);
-}
-
-void UNarr_DialogueSystem::AdvanceDialogue()
-{
-    if (!bIsDialogueActive || !DialogueSequences.Contains(CurrentSequenceID))
-    {
-        return;
-    }
-    
-    const FNarr_DialogueSequence& CurrentSequence = DialogueSequences[CurrentSequenceID];
-    CurrentLineIndex++;
-    
-    if (CurrentLineIndex >= CurrentSequence.DialogueLines.Num())
-    {
-        // End of sequence
-        StopDialogue();
-        return;
-    }
-    
-    PlayCurrentDialogueLine();
-}
-
-void UNarr_DialogueSystem::StopDialogue()
-{
-    if (!bIsDialogueActive)
-    {
-        return;
-    }
-    
-    bIsDialogueActive = false;
-    CurrentSequenceID = TEXT("");
     CurrentLineIndex = 0;
+    DialogueTimer = 0.0f;
+
+    UE_LOG(LogTemp, Log, TEXT("Started dialogue: %s with NPC: %s"), *DialogueID, *NPC->GetName());
+    return true;
+}
+
+void UNarr_DialogueSystem::SelectPlayerChoice(int32 ChoiceIndex)
+{
+    if (!bIsDialogueActive || ChoiceIndex < 0 || ChoiceIndex >= CurrentDialogueNode.PlayerChoices.Num())
+    {
+        return;
+    }
+
+    FNarr_DialogueChoice SelectedChoice = CurrentDialogueNode.PlayerChoices[ChoiceIndex];
     
+    if (!ValidateDialogueChoice(SelectedChoice))
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Player choice validation failed"));
+        return;
+    }
+
+    if (SelectedChoice.bEndsConversation || SelectedChoice.NextDialogueID.IsEmpty())
+    {
+        EndDialogue();
+    }
+    else
+    {
+        // Transition to next dialogue node
+        StartDialogue(SelectedChoice.NextDialogueID, CurrentNPC);
+    }
+}
+
+void UNarr_DialogueSystem::EndDialogue()
+{
+    bIsDialogueActive = false;
+    CurrentLineIndex = 0;
+    DialogueTimer = 0.0f;
+    CurrentNPC = nullptr;
+    StopDialogueAudio();
+
+    UE_LOG(LogTemp, Log, TEXT("Dialogue ended"));
+}
+
+void UNarr_DialogueSystem::LoadDialogueDatabase()
+{
+    // This would typically load from a data table or JSON file
+    // For now, we'll populate with hardcoded dialogue for testing
+    InitializeDialogueDatabase();
+}
+
+FNarr_DialogueNode UNarr_DialogueSystem::GetDialogueNode(const FString& DialogueID) const
+{
+    if (DialogueDatabase.Contains(DialogueID))
+    {
+        return DialogueDatabase[DialogueID];
+    }
+    
+    return FNarr_DialogueNode();
+}
+
+void UNarr_DialogueSystem::PlayDialogueAudio(const FString& AudioPath)
+{
+    if (!DialogueAudioComponent || AudioPath.IsEmpty())
+    {
+        return;
+    }
+
+    // Load and play audio file
+    // In a real implementation, this would load the audio asset from the path
+    UE_LOG(LogTemp, Log, TEXT("Playing dialogue audio: %s"), *AudioPath);
+    
+    // For now, just log that we would play the audio
+    // DialogueAudioComponent->SetSound(LoadedSoundWave);
+    // DialogueAudioComponent->Play();
+}
+
+void UNarr_DialogueSystem::StopDialogueAudio()
+{
     if (DialogueAudioComponent && DialogueAudioComponent->IsPlaying())
     {
         DialogueAudioComponent->Stop();
     }
-    
-    if (UWorld* World = GetWorld())
-    {
-        World->GetTimerManager().ClearTimer(DialogueTimerHandle);
-    }
-    
-    OnDialogueEnded.Broadcast();
-    
-    UE_LOG(LogTemp, Log, TEXT("Dialogue stopped"));
 }
 
-void UNarr_DialogueSystem::RegisterDialogueSequence(const FNarr_DialogueSequence& NewSequence)
+void UNarr_DialogueSystem::InitializeDialogueDatabase()
 {
-    DialogueSequences.Add(NewSequence.SequenceID, NewSequence);
-    UE_LOG(LogTemp, Log, TEXT("Registered dialogue sequence: %s with %d lines"), 
-           *NewSequence.SequenceID, NewSequence.DialogueLines.Num());
+    // Elder Greeting Dialogue
+    FNarr_DialogueNode ElderGreeting;
+    ElderGreeting.DialogueID = TEXT("elder_greeting");
+    ElderGreeting.NPCRole = ENPCRole::Elder;
+    ElderGreeting.bIsQuestDialogue = false;
+
+    FNarr_DialogueLine ElderLine1;
+    ElderLine1.SpeakerName = TEXT("Village Elder");
+    ElderLine1.DialogueText = TEXT("Welcome, young hunter. I sense great potential in you.");
+    ElderLine1.Duration = 4.0f;
+    ElderLine1.RequiredMood = ENPCMoodState::Friendly;
+    ElderGreeting.DialogueLines.Add(ElderLine1);
+
+    FNarr_DialogueChoice ElderChoice1;
+    ElderChoice1.ChoiceText = TEXT("I seek wisdom about surviving in these lands.");
+    ElderChoice1.NextDialogueID = TEXT("elder_wisdom");
+    ElderGreeting.PlayerChoices.Add(ElderChoice1);
+
+    FNarr_DialogueChoice ElderChoice2;
+    ElderChoice2.ChoiceText = TEXT("Do you have any tasks for me?");
+    ElderChoice2.NextDialogueID = TEXT("elder_quest");
+    ElderGreeting.PlayerChoices.Add(ElderChoice2);
+
+    DialogueDatabase.Add(ElderGreeting.DialogueID, ElderGreeting);
+
+    // Hunter Guide Dialogue
+    FNarr_DialogueNode HunterDialogue;
+    HunterDialogue.DialogueID = TEXT("hunter_training");
+    HunterDialogue.NPCRole = ENPCRole::Hunter;
+    HunterDialogue.bIsQuestDialogue = true;
+
+    FNarr_DialogueLine HunterLine1;
+    HunterLine1.SpeakerName = TEXT("Hunter Guide");
+    HunterLine1.DialogueText = TEXT("The great beasts require respect and strategy. Are you ready to learn?");
+    HunterLine1.Duration = 5.0f;
+    HunterLine1.RequiredMood = ENPCMoodState::Confident;
+    HunterDialogue.DialogueLines.Add(HunterLine1);
+
+    FNarr_DialogueChoice HunterChoice1;
+    HunterChoice1.ChoiceText = TEXT("Teach me to hunt the thunder lizards.");
+    HunterChoice1.NextDialogueID = TEXT("hunting_lesson");
+    HunterDialogue.PlayerChoices.Add(HunterChoice1);
+
+    DialogueDatabase.Add(HunterDialogue.DialogueID, HunterDialogue);
+
+    // Scout Warning Dialogue
+    FNarr_DialogueNode ScoutWarning;
+    ScoutWarning.DialogueID = TEXT("scout_warning");
+    ScoutWarning.NPCRole = ENPCRole::Scout;
+    ScoutWarning.bIsQuestDialogue = false;
+
+    FNarr_DialogueLine ScoutLine1;
+    ScoutLine1.SpeakerName = TEXT("Tribal Scout");
+    ScoutLine1.DialogueText = TEXT("Danger approaches from the northern canyon. Massive footprints in the mud.");
+    ScoutLine1.Duration = 4.5f;
+    ScoutLine1.RequiredMood = ENPCMoodState::Anxious;
+    ScoutWarning.DialogueLines.Add(ScoutLine1);
+
+    FNarr_DialogueChoice ScoutChoice1;
+    ScoutChoice1.ChoiceText = TEXT("I'll investigate the threat.");
+    ScoutChoice1.NextDialogueID = TEXT("scout_mission");
+    ScoutWarning.PlayerChoices.Add(ScoutChoice1);
+
+    DialogueDatabase.Add(ScoutWarning.DialogueID, ScoutWarning);
+
+    UE_LOG(LogTemp, Log, TEXT("Dialogue database initialized with %d entries"), DialogueDatabase.Num());
 }
 
-void UNarr_DialogueSystem::SetDialogueFlag(const FString& FlagName, bool bValue)
+void UNarr_DialogueSystem::ProcessCurrentDialogueLine()
 {
-    DialogueFlags.Add(FlagName, bValue);
-    UE_LOG(LogTemp, Log, TEXT("Set dialogue flag %s to %s"), *FlagName, bValue ? TEXT("true") : TEXT("false"));
-}
-
-bool UNarr_DialogueSystem::GetDialogueFlag(const FString& FlagName) const
-{
-    if (const bool* FlagValue = DialogueFlags.Find(FlagName))
-    {
-        return *FlagValue;
-    }
-    return false;
-}
-
-void UNarr_DialogueSystem::PlayCurrentDialogueLine()
-{
-    if (!bIsDialogueActive || !DialogueSequences.Contains(CurrentSequenceID))
+    if (CurrentLineIndex >= CurrentDialogueNode.DialogueLines.Num())
     {
         return;
     }
+
+    FNarr_DialogueLine CurrentLine = CurrentDialogueNode.DialogueLines[CurrentLineIndex];
     
-    const FNarr_DialogueSequence& CurrentSequence = DialogueSequences[CurrentSequenceID];
-    
-    if (CurrentLineIndex < 0 || CurrentLineIndex >= CurrentSequence.DialogueLines.Num())
+    // Check if enough time has passed for this line
+    if (DialogueTimer >= CurrentLine.Duration)
     {
-        return;
+        AdvanceToNextLine();
     }
-    
-    CurrentDialogueLine = CurrentSequence.DialogueLines[CurrentLineIndex];
-    
-    // Play audio if available
-    if (CurrentDialogueLine.VoiceClip && DialogueAudioComponent)
-    {
-        DialogueAudioComponent->SetSound(CurrentDialogueLine.VoiceClip);
-        DialogueAudioComponent->Play();
-    }
-    
-    // Set timer for line duration
-    if (UWorld* World = GetWorld())
-    {
-        World->GetTimerManager().SetTimer(DialogueTimerHandle, 
-                                         this, 
-                                         &UNarr_DialogueSystem::OnDialogueLineFinished, 
-                                         CurrentDialogueLine.Duration, 
-                                         false);
-    }
-    
-    OnDialogueLineChanged.Broadcast(CurrentDialogueLine);
-    
-    UE_LOG(LogTemp, Log, TEXT("Playing dialogue line: %s - %s"), 
-           *CurrentDialogueLine.SpeakerName, *CurrentDialogueLine.DialogueText);
 }
 
-void UNarr_DialogueSystem::OnDialogueLineFinished()
+void UNarr_DialogueSystem::AdvanceToNextLine()
 {
-    AdvanceDialogue();
-}
+    CurrentLineIndex++;
+    DialogueTimer = 0.0f;
 
-bool UNarr_DialogueSystem::CheckSequenceRequirements(const FNarr_DialogueSequence& Sequence) const
-{
-    for (const FString& RequiredFlag : Sequence.RequiredFlags)
+    if (CurrentLineIndex >= CurrentDialogueNode.DialogueLines.Num())
     {
-        if (!GetDialogueFlag(RequiredFlag))
+        // All lines have been played, show player choices or end dialogue
+        if (CurrentDialogueNode.PlayerChoices.Num() == 0)
         {
-            return false;
+            EndDialogue();
         }
+        // Player choices would be handled by UI system
     }
-    return true;
+    else
+    {
+        // Play next line
+        FNarr_DialogueLine NextLine = CurrentDialogueNode.DialogueLines[CurrentLineIndex];
+        PlayDialogueAudio(NextLine.AudioPath);
+    }
 }
 
-void UNarr_DialogueSystem::LoadDefaultDialogueSequences()
+bool UNarr_DialogueSystem::ValidateDialogueChoice(const FNarr_DialogueChoice& Choice) const
 {
-    // T-Rex encounter dialogue
-    FNarr_DialogueSequence TRexEncounter;
-    TRexEncounter.SequenceID = TEXT("trex_encounter");
-    TRexEncounter.bIsRepeatable = true;
-    
-    FNarr_DialogueLine TRexLine1;
-    TRexLine1.SpeakerName = TEXT("Narrator");
-    TRexLine1.DialogueText = TEXT("The ground trembles beneath massive footsteps. A Tyrannosaurus Rex emerges from the forest.");
-    TRexLine1.Duration = 4.0f;
-    TRexLine1.EmotionalTone = ENarr_EmotionalTone::Tense;
-    
-    FNarr_DialogueLine TRexLine2;
-    TRexLine2.SpeakerName = TEXT("Narrator");
-    TRexLine2.DialogueText = TEXT("Its massive jaws can crush bone. Move slowly and avoid sudden movements.");
-    TRexLine2.Duration = 3.5f;
-    TRexLine2.EmotionalTone = ENarr_EmotionalTone::Fearful;
-    
-    TRexEncounter.DialogueLines.Add(TRexLine1);
-    TRexEncounter.DialogueLines.Add(TRexLine2);
-    RegisterDialogueSequence(TRexEncounter);
-    
-    // Raptor pack dialogue
-    FNarr_DialogueSequence RaptorPack;
-    RaptorPack.SequenceID = TEXT("raptor_pack");
-    RaptorPack.bIsRepeatable = true;
-    
-    FNarr_DialogueLine RaptorLine1;
-    RaptorLine1.SpeakerName = TEXT("Narrator");
-    RaptorLine1.DialogueText = TEXT("Sharp clicks echo through the undergrowth. Velociraptors hunt in coordinated packs.");
-    RaptorLine1.Duration = 4.0f;
-    RaptorLine1.EmotionalTone = ENarr_EmotionalTone::Tense;
-    
-    FNarr_DialogueLine RaptorLine2;
-    RaptorLine2.SpeakerName = TEXT("Narrator");
-    RaptorLine2.DialogueText = TEXT("They communicate through calls. One distracts while others flank their prey.");
-    RaptorLine2.Duration = 3.5f;
-    RaptorLine2.EmotionalTone = ENarr_EmotionalTone::Urgent;
-    
-    RaptorPack.DialogueLines.Add(RaptorLine1);
-    RaptorPack.DialogueLines.Add(RaptorLine2);
-    RegisterDialogueSequence(RaptorPack);
-    
-    // Survival tutorial dialogue
-    FNarr_DialogueSequence SurvivalTutorial;
-    SurvivalTutorial.SequenceID = TEXT("survival_tutorial");
-    SurvivalTutorial.bIsRepeatable = false;
-    
-    FNarr_DialogueLine TutorialLine1;
-    TutorialLine1.SpeakerName = TEXT("Narrator");
-    TutorialLine1.DialogueText = TEXT("Welcome to the Cretaceous period. Survival depends on your ability to adapt.");
-    TutorialLine1.Duration = 4.0f;
-    TutorialLine1.EmotionalTone = ENarr_EmotionalTone::Informative;
-    
-    FNarr_DialogueLine TutorialLine2;
-    TutorialLine2.SpeakerName = TEXT("Narrator");
-    TutorialLine2.DialogueText = TEXT("Gather resources, craft tools, and avoid the apex predators that rule this world.");
-    TutorialLine2.Duration = 4.5f;
-    TutorialLine2.EmotionalTone = ENarr_EmotionalTone::Instructional;
-    
-    SurvivalTutorial.DialogueLines.Add(TutorialLine1);
-    SurvivalTutorial.DialogueLines.Add(TutorialLine2);
-    RegisterDialogueSequence(SurvivalTutorial);
-    
-    UE_LOG(LogTemp, Log, TEXT("Loaded %d default dialogue sequences"), DialogueSequences.Num());
+    // Check if player meets requirements for this choice
+    if (Choice.RequiredSurvivalLevel > 0)
+    {
+        // In a real implementation, check player's survival level
+        // For now, always return true
+    }
+
+    return true;
 }
