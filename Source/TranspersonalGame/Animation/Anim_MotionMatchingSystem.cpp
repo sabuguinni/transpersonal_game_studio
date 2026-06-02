@@ -3,285 +3,415 @@
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Animation/AnimInstance.h"
-#include "Engine/World.h"
+#include "Animation/AnimMontage.h"
+#include "Animation/AnimSequence.h"
+#include "Animation/BlendSpace.h"
 #include "Kismet/KismetMathLibrary.h"
+#include "Engine/World.h"
 
 UAnim_MotionMatchingSystem::UAnim_MotionMatchingSystem()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 0.016f; // 60 FPS sampling
-
-    // Initialize configuration
-    MotionSampleRate = 60.0f;
-    PoseMatchThreshold = 0.8f;
-    BlendSpeed = 5.0f;
-    MaxDatabaseEntries = 1000;
-
-    // Initialize state
-    bMotionMatchingEnabled = true;
-    LastSampleTime = 0.0f;
-
-    // Initialize current motion data
-    CurrentMotion = FAnim_MotionData();
-    CurrentBestMatch = FAnim_PoseMatchData();
+    PrimaryComponentTick.TickInterval = 0.016f; // 60 FPS update rate
+    
+    // Initialize motion matching parameters
+    MotionMatchingThreshold = 0.8f;
+    StateTransitionTime = 0.3f;
+    bEnableMotionMatching = true;
+    
+    // Initialize internal state
+    PreviousState = EAnim_MotionState::Idle;
+    StateTransitionTimer = 0.0f;
+    bIsTransitioning = false;
+    LastUpdateTime = 0.0f;
+    UpdateFrequency = 0.016f;
+    bNeedsUpdate = true;
+    
+    // Initialize motion data
+    CurrentMotionData = FAnim_MotionData();
+    
+    // Initialize blend space config
+    BlendSpaceConfig = FAnim_BlendSpaceConfig();
 }
 
 void UAnim_MotionMatchingSystem::BeginPlay()
 {
     Super::BeginPlay();
-
-    // Initialize motion database with basic entries
-    MotionDatabase.Reserve(MaxDatabaseEntries);
-    PoseDatabase.Reserve(MaxDatabaseEntries);
-
-    // Sample initial motion state
-    SampleCurrentMotion();
+    
+    // Cache character references
+    CacheCharacterReferences();
+    
+    // Initialize animation assets
+    InitializeAnimationAssets();
+    
+    UE_LOG(LogTemp, Warning, TEXT("Motion Matching System initialized for %s"), 
+           OwnerCharacter ? *OwnerCharacter->GetName() : TEXT("Unknown"));
 }
 
 void UAnim_MotionMatchingSystem::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-
-    if (!bMotionMatchingEnabled)
+    
+    if (!bEnableMotionMatching || !OwnerCharacter)
     {
         return;
     }
-
-    // Sample motion at configured rate
-    float CurrentTime = GetWorld()->GetTimeSeconds();
-    if (CurrentTime - LastSampleTime >= (1.0f / MotionSampleRate))
+    
+    // Update at specified frequency
+    LastUpdateTime += DeltaTime;
+    if (LastUpdateTime >= UpdateFrequency)
     {
-        SampleCurrentMotion();
-        LastSampleTime = CurrentTime;
-
-        // Find best matching pose
-        CurrentBestMatch = FindBestPoseMatch(CurrentMotion);
-
-        // Clean up old entries periodically
-        if (MotionDatabase.Num() > MaxDatabaseEntries)
+        UpdateMotionData(DeltaTime);
+        CalculateMotionState();
+        UpdateBlendSpaces();
+        HandleStateTransitions();
+        
+        LastUpdateTime = 0.0f;
+    }
+    
+    // Update transition timer
+    if (bIsTransitioning)
+    {
+        StateTransitionTimer += DeltaTime;
+        if (StateTransitionTimer >= StateTransitionTime)
         {
-            CleanupOldEntries();
+            bIsTransitioning = false;
+            StateTransitionTimer = 0.0f;
         }
     }
 }
 
-FAnim_MotionData UAnim_MotionMatchingSystem::AnalyzeCurrentMotion()
+void UAnim_MotionMatchingSystem::UpdateMotionData(float DeltaTime)
 {
-    FAnim_MotionData MotionData;
-
-    // Get owner velocity and movement data
-    MotionData.Velocity = GetOwnerVelocity();
-    MotionData.Speed = MotionData.Velocity.Size();
-    MotionData.bIsMoving = MotionData.Speed > 1.0f;
-    MotionData.bIsInAir = IsOwnerInAir();
-    MotionData.bIsCrouching = IsOwnerCrouching();
-
-    // Calculate movement direction relative to forward vector
-    if (AActor* Owner = GetOwner())
+    if (!OwnerCharacter)
     {
-        FVector ForwardVector = Owner->GetActorForwardVector();
-        FVector VelocityNormalized = MotionData.Velocity.GetSafeNormal();
-        MotionData.Direction = FMath::RadiansToDegrees(FMath::Acos(FVector::DotProduct(ForwardVector, VelocityNormalized)));
+        return;
     }
-
-    // Determine movement state
-    if (MotionData.bIsInAir)
+    
+    UCharacterMovementComponent* MovementComp = OwnerCharacter->GetCharacterMovement();
+    if (!MovementComp)
     {
-        MotionData.MovementState = EAnim_MovementState::Jumping;
+        return;
     }
-    else if (MotionData.bIsCrouching)
+    
+    // Update velocity and speed
+    CurrentMotionData.Velocity = MovementComp->Velocity;
+    CurrentMotionData.Speed = CurrentMotionData.Velocity.Size();
+    
+    // Calculate movement direction relative to character forward
+    if (CurrentMotionData.Speed > 0.1f)
     {
-        MotionData.MovementState = EAnim_MovementState::Crouching;
-    }
-    else if (MotionData.Speed > 300.0f)
-    {
-        MotionData.MovementState = EAnim_MovementState::Running;
-    }
-    else if (MotionData.Speed > 50.0f)
-    {
-        MotionData.MovementState = EAnim_MovementState::Walking;
+        FVector ForwardVector = OwnerCharacter->GetActorForwardVector();
+        FVector VelocityNormalized = CurrentMotionData.Velocity.GetSafeNormal();
+        CurrentMotionData.Direction = FMath::RadiansToDegrees(FMath::Acos(FVector::DotProduct(ForwardVector, VelocityNormalized)));
+        
+        // Determine if moving left or right
+        FVector RightVector = OwnerCharacter->GetActorRightVector();
+        float RightDot = FVector::DotProduct(RightVector, VelocityNormalized);
+        if (RightDot < 0.0f)
+        {
+            CurrentMotionData.Direction *= -1.0f;
+        }
     }
     else
     {
-        MotionData.MovementState = EAnim_MovementState::Idle;
+        CurrentMotionData.Direction = 0.0f;
     }
-
-    return MotionData;
+    
+    // Update air state
+    CurrentMotionData.bIsInAir = MovementComp->IsFalling();
+    
+    // Update crouching state
+    CurrentMotionData.bIsCrouching = MovementComp->IsCrouching();
 }
 
-FAnim_PoseMatchData UAnim_MotionMatchingSystem::FindBestPoseMatch(const FAnim_MotionData& TargetMotion)
+void UAnim_MotionMatchingSystem::CalculateMotionState()
 {
-    FAnim_PoseMatchData BestMatch;
-    float BestScore = 0.0f;
-
-    for (const FAnim_PoseMatchData& PoseData : PoseDatabase)
+    EAnim_MotionState NewState = CurrentMotionData.CurrentState;
+    
+    // Determine state based on motion data
+    if (CurrentMotionData.bIsInAir)
     {
-        // Find corresponding motion data for this pose
-        for (const FAnim_MotionData& MotionData : MotionDatabase)
-        {
-            if (FMath::Abs(MotionData.Speed - TargetMotion.Speed) < 50.0f &&
-                MotionData.MovementState == TargetMotion.MovementState)
-            {
-                float Similarity = CalculateMotionSimilarity(MotionData, TargetMotion);
-                if (Similarity > BestScore && Similarity >= PoseMatchThreshold)
-                {
-                    BestScore = Similarity;
-                    BestMatch = PoseData;
-                    BestMatch.MatchScore = Similarity;
-                }
-            }
-        }
+        NewState = EAnim_MotionState::Jumping;
     }
-
-    return BestMatch;
-}
-
-void UAnim_MotionMatchingSystem::UpdateMotionDatabase(const FAnim_MotionData& NewMotionData)
-{
-    // Add new motion data to database
-    MotionDatabase.Add(NewMotionData);
-
-    // Create corresponding pose data (simplified for now)
-    FAnim_PoseMatchData NewPoseData;
-    NewPoseData.PoseName = FName(*FString::Printf(TEXT("Pose_%d"), MotionDatabase.Num()));
-    NewPoseData.TimeStamp = GetWorld()->GetTimeSeconds();
-    NewPoseData.MatchScore = 1.0f;
-
-    PoseDatabase.Add(NewPoseData);
-}
-
-float UAnim_MotionMatchingSystem::CalculateMotionSimilarity(const FAnim_MotionData& MotionA, const FAnim_MotionData& MotionB)
-{
-    float Similarity = 1.0f;
-
-    // Speed similarity (weighted 40%)
-    float SpeedDiff = FMath::Abs(MotionA.Speed - MotionB.Speed);
-    float SpeedSimilarity = FMath::Clamp(1.0f - (SpeedDiff / 500.0f), 0.0f, 1.0f);
-    Similarity *= (SpeedSimilarity * 0.4f + 0.6f);
-
-    // Direction similarity (weighted 30%)
-    float DirectionDiff = FMath::Abs(MotionA.Direction - MotionB.Direction);
-    float DirectionSimilarity = FMath::Clamp(1.0f - (DirectionDiff / 180.0f), 0.0f, 1.0f);
-    Similarity *= (DirectionSimilarity * 0.3f + 0.7f);
-
-    // State matching (weighted 30%)
-    if (MotionA.MovementState == MotionB.MovementState)
+    else if (CurrentMotionData.bIsCrouching)
     {
-        Similarity *= 1.0f;
+        NewState = EAnim_MotionState::Crouching;
+    }
+    else if (CurrentMotionData.Speed > 400.0f) // Running threshold
+    {
+        NewState = EAnim_MotionState::Running;
+    }
+    else if (CurrentMotionData.Speed > 50.0f) // Walking threshold
+    {
+        NewState = EAnim_MotionState::Walking;
     }
     else
     {
-        Similarity *= 0.5f; // Penalty for different states
+        NewState = EAnim_MotionState::Idle;
     }
-
-    // Boolean state matching
-    if (MotionA.bIsInAir == MotionB.bIsInAir)
-    {
-        Similarity *= 1.0f;
-    }
-    else
-    {
-        Similarity *= 0.3f; // Heavy penalty for air/ground mismatch
-    }
-
-    return FMath::Clamp(Similarity, 0.0f, 1.0f);
-}
-
-void UAnim_MotionMatchingSystem::BlendToTargetPose(const FAnim_PoseMatchData& TargetPose, float BlendTime)
-{
-    // This would integrate with the animation system to blend to the target pose
-    // For now, we'll just log the blend request
-    if (AActor* Owner = GetOwner())
-    {
-        UE_LOG(LogTemp, Log, TEXT("Motion Matching: Blending to pose %s with score %f over %f seconds"),
-            *TargetPose.PoseName.ToString(), TargetPose.MatchScore, BlendTime);
-    }
-}
-
-void UAnim_MotionMatchingSystem::SetMotionMatchingEnabled(bool bEnabled)
-{
-    bMotionMatchingEnabled = bEnabled;
     
-    if (bEnabled)
+    // Check if state should transition
+    if (NewState != CurrentMotionData.CurrentState && ShouldTransitionToState(NewState))
     {
-        UE_LOG(LogTemp, Log, TEXT("Motion Matching System: ENABLED"));
-    }
-    else
-    {
-        UE_LOG(LogTemp, Log, TEXT("Motion Matching System: DISABLED"));
+        SetMotionState(NewState);
     }
 }
 
-void UAnim_MotionMatchingSystem::SampleCurrentMotion()
+void UAnim_MotionMatchingSystem::SetMotionState(EAnim_MotionState NewState)
 {
-    CurrentMotion = AnalyzeCurrentMotion();
-    
-    // Add to database if motion is significantly different from recent entries
-    bool bShouldAddToDatabase = true;
-    if (MotionDatabase.Num() > 0)
+    if (NewState == CurrentMotionData.CurrentState)
     {
-        const FAnim_MotionData& LastMotion = MotionDatabase.Last();
-        float Similarity = CalculateMotionSimilarity(CurrentMotion, LastMotion);
-        if (Similarity > 0.95f) // Very similar to last sample
+        return;
+    }
+    
+    PreviousState = CurrentMotionData.CurrentState;
+    CurrentMotionData.CurrentState = NewState;
+    
+    // Start transition
+    bIsTransitioning = true;
+    StateTransitionTimer = 0.0f;
+    
+    // Play appropriate montage if available
+    if (StateMontages.Contains(NewState))
+    {
+        PlayMontage(NewState);
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("Motion state changed from %d to %d"), 
+           (int32)PreviousState, (int32)NewState);
+}
+
+void UAnim_MotionMatchingSystem::UpdateBlendSpaces()
+{
+    if (!AnimInstance)
+    {
+        return;
+    }
+    
+    // Set blend space values based on current motion
+    SetBlendSpaceValues(CurrentMotionData.Speed, CurrentMotionData.Direction);
+}
+
+void UAnim_MotionMatchingSystem::SetBlendSpaceValues(float Speed, float Direction)
+{
+    if (!AnimInstance)
+    {
+        return;
+    }
+    
+    // Normalize speed for blend space (0-600 units/sec -> 0-1)
+    float NormalizedSpeed = FMath::Clamp(Speed / 600.0f, 0.0f, 1.0f);
+    
+    // Normalize direction (-180 to 180 degrees -> -1 to 1)
+    float NormalizedDirection = FMath::Clamp(Direction / 180.0f, -1.0f, 1.0f);
+    
+    // Set animation blueprint variables (these would be exposed in the AnimBP)
+    // AnimInstance->SetVariableValue(TEXT("Speed"), NormalizedSpeed);
+    // AnimInstance->SetVariableValue(TEXT("Direction"), NormalizedDirection);
+}
+
+void UAnim_MotionMatchingSystem::PlayMontage(EAnim_MotionState State, float PlayRate)
+{
+    UAnimMontage* Montage = GetMontageForState(State);
+    if (Montage && AnimInstance)
+    {
+        AnimInstance->Montage_Play(Montage, PlayRate);
+    }
+}
+
+void UAnim_MotionMatchingSystem::StopMontage(float BlendOutTime)
+{
+    if (AnimInstance)
+    {
+        AnimInstance->Montage_Stop(BlendOutTime);
+    }
+}
+
+void UAnim_MotionMatchingSystem::SetTribalRole(EAnim_TribalRole NewRole)
+{
+    CurrentMotionData.TribalRole = NewRole;
+    
+    // Update idle animation based on role
+    UAnimSequence* RoleIdleAnim = GetIdleAnimationForRole(NewRole);
+    if (RoleIdleAnim && AnimInstance)
+    {
+        // Set role-specific idle animation
+        // This would typically be handled in the Animation Blueprint
+    }
+}
+
+void UAnim_MotionMatchingSystem::PlayTribalGesture(EAnim_TribalRole Role)
+{
+    // Play role-specific gesture animation
+    switch (Role)
+    {
+        case EAnim_TribalRole::Hunter:
+            // Play hunting gesture (bow draw, spear throw, etc.)
+            break;
+        case EAnim_TribalRole::Gatherer:
+            // Play gathering gesture (picking, collecting, etc.)
+            break;
+        case EAnim_TribalRole::Crafter:
+            // Play crafting gesture (hammering, carving, etc.)
+            break;
+        case EAnim_TribalRole::Elder:
+            // Play wisdom gesture (pointing, teaching, etc.)
+            break;
+        default:
+            break;
+    }
+}
+
+void UAnim_MotionMatchingSystem::PlayWorkAnimation(EAnim_TribalRole Role)
+{
+    // Play extended work animation based on role
+    EAnim_MotionState WorkState = EAnim_MotionState::Crafting;
+    
+    switch (Role)
+    {
+        case EAnim_TribalRole::Hunter:
+            WorkState = EAnim_MotionState::Combat;
+            break;
+        case EAnim_TribalRole::Gatherer:
+            WorkState = EAnim_MotionState::Gathering;
+            break;
+        case EAnim_TribalRole::Crafter:
+            WorkState = EAnim_MotionState::Crafting;
+            break;
+        default:
+            WorkState = EAnim_MotionState::Idle;
+            break;
+    }
+    
+    SetMotionState(WorkState);
+}
+
+void UAnim_MotionMatchingSystem::PlayCommunicationGesture()
+{
+    // Play generic communication gesture
+    // This could be waving, pointing, or tribal sign language
+    PlayMontage(EAnim_MotionState::Idle, 1.0f);
+}
+
+void UAnim_MotionMatchingSystem::EnableMotionMatching(bool bEnable)
+{
+    bEnableMotionMatching = bEnable;
+    
+    if (!bEnable)
+    {
+        // Reset to idle state when disabled
+        SetMotionState(EAnim_MotionState::Idle);
+    }
+}
+
+EAnim_MotionState UAnim_MotionMatchingSystem::GetCurrentMotionState() const
+{
+    return CurrentMotionData.CurrentState;
+}
+
+FAnim_MotionData UAnim_MotionMatchingSystem::GetMotionData() const
+{
+    return CurrentMotionData;
+}
+
+void UAnim_MotionMatchingSystem::HandleStateTransitions()
+{
+    // Handle smooth transitions between states
+    if (bIsTransitioning)
+    {
+        float TransitionAlpha = StateTransitionTimer / StateTransitionTime;
+        TransitionAlpha = FMath::Clamp(TransitionAlpha, 0.0f, 1.0f);
+        
+        // Apply transition logic here
+        // This would typically involve blending between animations
+    }
+}
+
+bool UAnim_MotionMatchingSystem::ShouldTransitionToState(EAnim_MotionState NewState)
+{
+    // Prevent rapid state changes
+    if (bIsTransitioning)
+    {
+        return false;
+    }
+    
+    // State-specific transition rules
+    switch (CurrentMotionData.CurrentState)
+    {
+        case EAnim_MotionState::Jumping:
+            // Only allow transition out of jumping when landing
+            return !CurrentMotionData.bIsInAir;
+            
+        case EAnim_MotionState::Combat:
+            // Combat state has priority, harder to interrupt
+            return NewState == EAnim_MotionState::Idle || NewState == EAnim_MotionState::Running;
+            
+        default:
+            return true;
+    }
+}
+
+float UAnim_MotionMatchingSystem::CalculateMotionScore(const FAnim_MotionData& TargetMotion)
+{
+    float Score = 0.0f;
+    
+    // Calculate similarity score between current and target motion
+    float SpeedDiff = FMath::Abs(CurrentMotionData.Speed - TargetMotion.Speed);
+    float DirectionDiff = FMath::Abs(CurrentMotionData.Direction - TargetMotion.Direction);
+    
+    // Normalize differences and calculate score
+    Score = 1.0f - ((SpeedDiff / 600.0f) + (DirectionDiff / 180.0f)) * 0.5f;
+    
+    return FMath::Clamp(Score, 0.0f, 1.0f);
+}
+
+void UAnim_MotionMatchingSystem::CacheCharacterReferences()
+{
+    OwnerCharacter = Cast<ACharacter>(GetOwner());
+    
+    if (OwnerCharacter)
+    {
+        SkeletalMeshComponent = OwnerCharacter->GetMesh();
+        
+        if (SkeletalMeshComponent)
         {
-            bShouldAddToDatabase = false;
+            AnimInstance = SkeletalMeshComponent->GetAnimInstance();
         }
     }
-
-    if (bShouldAddToDatabase)
-    {
-        UpdateMotionDatabase(CurrentMotion);
-    }
 }
 
-void UAnim_MotionMatchingSystem::CleanupOldEntries()
+void UAnim_MotionMatchingSystem::InitializeAnimationAssets()
 {
-    // Remove oldest 10% of entries when database is full
-    int32 EntriesToRemove = FMath::Max(1, MaxDatabaseEntries / 10);
+    // Initialize default animation assets
+    // In a real implementation, these would be loaded from content browser
     
-    if (MotionDatabase.Num() > EntriesToRemove)
+    // Clear existing mappings
+    StateMontages.Empty();
+    RoleIdleAnimations.Empty();
+    
+    // Note: Asset loading would typically happen here
+    // For now, we'll leave these empty and they can be set in Blueprint
+    
+    UE_LOG(LogTemp, Warning, TEXT("Animation assets initialized (assets should be set in Blueprint)"));
+}
+
+UAnimMontage* UAnim_MotionMatchingSystem::GetMontageForState(EAnim_MotionState State)
+{
+    if (StateMontages.Contains(State))
     {
-        MotionDatabase.RemoveAt(0, EntriesToRemove);
+        return StateMontages[State];
     }
     
-    if (PoseDatabase.Num() > EntriesToRemove)
-    {
-        PoseDatabase.RemoveAt(0, EntriesToRemove);
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("Motion Matching: Cleaned up %d old entries. Database size: %d"), 
-        EntriesToRemove, MotionDatabase.Num());
+    return nullptr;
 }
 
-FVector UAnim_MotionMatchingSystem::GetOwnerVelocity() const
+UAnimSequence* UAnim_MotionMatchingSystem::GetIdleAnimationForRole(EAnim_TribalRole Role)
 {
-    if (ACharacter* Character = Cast<ACharacter>(GetOwner()))
+    if (RoleIdleAnimations.Contains(Role))
     {
-        if (UCharacterMovementComponent* MovementComp = Character->GetCharacterMovement())
-        {
-            return MovementComp->Velocity;
-        }
+        return RoleIdleAnimations[Role];
     }
-    return FVector::ZeroVector;
-}
-
-bool UAnim_MotionMatchingSystem::IsOwnerInAir() const
-{
-    if (ACharacter* Character = Cast<ACharacter>(GetOwner()))
-    {
-        if (UCharacterMovementComponent* MovementComp = Character->GetCharacterMovement())
-        {
-            return MovementComp->IsFalling();
-        }
-    }
-    return false;
-}
-
-bool UAnim_MotionMatchingSystem::IsOwnerCrouching() const
-{
-    if (ACharacter* Character = Cast<ACharacter>(GetOwner()))
-    {
-        return Character->bIsCrouched;
-    }
-    return false;
+    
+    return nullptr;
 }
