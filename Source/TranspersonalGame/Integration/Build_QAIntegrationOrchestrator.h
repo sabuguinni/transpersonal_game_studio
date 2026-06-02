@@ -1,11 +1,10 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/World.h"
 #include "GameFramework/Actor.h"
-#include "Components/ActorComponent.h"
-#include "Subsystems/GameInstanceSubsystem.h"
-#include "../SharedTypes.h"
+#include "Engine/Engine.h"
+#include "Engine/World.h"
+#include "SharedTypes.h"
 #include "Build_QAIntegrationOrchestrator.generated.h"
 
 USTRUCT(BlueprintType)
@@ -20,21 +19,17 @@ struct TRANSPERSONALGAME_API FBuild_QATestResult
     bool bPassed;
 
     UPROPERTY(BlueprintReadOnly, Category = "QA Test")
-    FString ErrorMessage;
-
-    UPROPERTY(BlueprintReadOnly, Category = "QA Test")
     float ExecutionTime;
 
     UPROPERTY(BlueprintReadOnly, Category = "QA Test")
-    int32 ActorsAffected;
+    FString ErrorMessage;
 
     FBuild_QATestResult()
     {
         TestName = TEXT("");
         bPassed = false;
-        ErrorMessage = TEXT("");
         ExecutionTime = 0.0f;
-        ActorsAffected = 0;
+        ErrorMessage = TEXT("");
     }
 };
 
@@ -53,89 +48,76 @@ struct TRANSPERSONALGAME_API FBuild_IntegrationReport
     int32 DinosaurCount;
 
     UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    int32 VFXActors;
+    int32 VFXActorCount;
 
     UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    int32 AudioActors;
+    bool bWithinActorLimits;
 
     UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    bool bBuildValid;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    FString BuildStatus;
+    float OverallScore;
 
     FBuild_IntegrationReport()
     {
         TotalActors = 0;
         DinosaurCount = 0;
-        VFXActors = 0;
-        AudioActors = 0;
-        bBuildValid = false;
-        BuildStatus = TEXT("Unknown");
+        VFXActorCount = 0;
+        bWithinActorLimits = true;
+        OverallScore = 0.0f;
     }
 };
 
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UBuild_QAIntegrationOrchestrator : public UGameInstanceSubsystem
+class TRANSPERSONALGAME_API ABuild_QAIntegrationOrchestrator : public AActor
 {
     GENERATED_BODY()
 
 public:
-    UBuild_QAIntegrationOrchestrator();
-
-    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
-    virtual void Deinitialize() override;
-
-    UFUNCTION(BlueprintCallable, Category = "QA Integration")
-    FBuild_IntegrationReport GenerateIntegrationReport();
-
-    UFUNCTION(BlueprintCallable, Category = "QA Integration")
-    bool ValidateQATestResults();
-
-    UFUNCTION(BlueprintCallable, Category = "QA Integration")
-    bool ValidateActorLimits();
-
-    UFUNCTION(BlueprintCallable, Category = "QA Integration")
-    bool ValidateDinosaurLimits();
-
-    UFUNCTION(BlueprintCallable, Category = "QA Integration")
-    bool ValidateVFXSystems();
-
-    UFUNCTION(BlueprintCallable, Category = "QA Integration")
-    bool ValidateAudioSystems();
-
-    UFUNCTION(BlueprintCallable, Category = "QA Integration")
-    bool ValidateBuildIntegrity();
-
-    UFUNCTION(BlueprintCallable, Category = "QA Integration")
-    void CleanupExcessActors();
-
-    UFUNCTION(BlueprintCallable, Category = "QA Integration")
-    TArray<FBuild_QATestResult> ParseQATestResults();
-
-    UFUNCTION(BlueprintCallable, Category = "QA Integration")
-    bool ExecuteIntegrationValidation();
-
-    UFUNCTION(BlueprintCallable, Category = "QA Integration")
-    void LogIntegrationStatus(const FString& Status);
+    ABuild_QAIntegrationOrchestrator();
 
 protected:
-    UPROPERTY(BlueprintReadOnly, Category = "QA Integration")
-    FBuild_IntegrationReport LastReport;
+    virtual void BeginPlay() override;
 
     UPROPERTY(BlueprintReadOnly, Category = "QA Integration")
-    TArray<FBuild_QATestResult> CachedTestResults;
+    FBuild_IntegrationReport CurrentReport;
 
     UPROPERTY(BlueprintReadOnly, Category = "QA Integration")
-    bool bIntegrationValid;
+    bool bIntegrationComplete;
 
     UPROPERTY(BlueprintReadOnly, Category = "QA Integration")
     float LastValidationTime;
 
+public:
+    virtual void Tick(float DeltaTime) override;
+
+    UFUNCTION(BlueprintCallable, Category = "QA Integration")
+    void ExecuteFullIntegrationTest();
+
+    UFUNCTION(BlueprintCallable, Category = "QA Integration")
+    void ValidateVFXIntegration();
+
+    UFUNCTION(BlueprintCallable, Category = "QA Integration")
+    void ValidateActorLimits();
+
+    UFUNCTION(BlueprintCallable, Category = "QA Integration")
+    void ValidateClassLoading();
+
+    UFUNCTION(BlueprintCallable, Category = "QA Integration")
+    FBuild_IntegrationReport GetIntegrationReport() const;
+
+    UFUNCTION(BlueprintCallable, Category = "QA Integration")
+    bool IsIntegrationHealthy() const;
+
+    UFUNCTION(CallInEditor, Category = "QA Integration")
+    void RunEditorIntegrationTest();
+
 private:
-    void ValidateSystemIntegration();
-    void CheckCrossSystemCompatibility();
-    void ValidatePerformanceMetrics();
-    bool CheckModuleCompilation();
-    void GenerateIntegrationMetrics();
+    void ParseQATestResults();
+    void ValidateCrossSystemCompatibility();
+    void GenerateIntegrationScore();
+    
+    UPROPERTY()
+    TArray<AActor*> CachedActors;
+    
+    UPROPERTY()
+    float ValidationInterval;
 };
