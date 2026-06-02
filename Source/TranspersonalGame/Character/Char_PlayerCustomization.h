@@ -1,189 +1,154 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "UObject/NoExportTypes.h"
 #include "Engine/Engine.h"
+#include "Components/ActorComponent.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Materials/MaterialInterface.h"
+#include "Materials/MaterialInstanceDynamic.h"
+#include "../SharedTypes.h"
 #include "Char_PlayerCustomization.generated.h"
 
-UENUM(BlueprintType)
-enum class EChar_PlayerGender : uint8
-{
-    Male        UMETA(DisplayName = "Male"),
-    Female      UMETA(DisplayName = "Female")
-};
-
-UENUM(BlueprintType)
-enum class EChar_PlayerBuild : uint8
-{
-    Lean        UMETA(DisplayName = "Lean"),
-    Average     UMETA(DisplayName = "Average"),
-    Muscular    UMETA(DisplayName = "Muscular"),
-    Heavy       UMETA(DisplayName = "Heavy")
-};
-
 USTRUCT(BlueprintType)
-struct FChar_PlayerFace
+struct TRANSPERSONALGAME_API FChar_TribalAppearance
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Face")
-    float FaceWidth;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
+    EChar_TribalRole TribalRole;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Face")
-    float JawSize;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
+    FLinearColor SkinTone;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Face")
-    float CheekboneHeight;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Face")
-    float NoseSize;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Face")
-    float EyeSize;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Face")
-    float BrowRidge;
-
-    FChar_PlayerFace()
-    {
-        FaceWidth = 0.5f;
-        JawSize = 0.5f;
-        CheekboneHeight = 0.5f;
-        NoseSize = 0.5f;
-        EyeSize = 0.5f;
-        BrowRidge = 0.5f;
-    }
-};
-
-USTRUCT(BlueprintType)
-struct FChar_PlayerHair
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hair")
-    int32 HairStyle;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hair")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
     FLinearColor HairColor;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hair")
-    float HairLength;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
+    FLinearColor WarPaintColor;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hair")
-    bool bHasBeard;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
+    float BodyBuild; // 0.0 = lean, 1.0 = muscular
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hair")
-    int32 BeardStyle;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
+    float WeatheringLevel; // 0.0 = clean, 1.0 = heavily weathered
 
-    FChar_PlayerHair()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
+    TArray<FString> EquippedAccessories;
+
+    FChar_TribalAppearance()
     {
-        HairStyle = 0;
+        TribalRole = EChar_TribalRole::Hunter;
+        SkinTone = FLinearColor(0.8f, 0.6f, 0.4f, 1.0f);
         HairColor = FLinearColor(0.2f, 0.1f, 0.05f, 1.0f);
-        HairLength = 0.5f;
-        bHasBeard = false;
-        BeardStyle = 0;
+        WarPaintColor = FLinearColor(0.8f, 0.1f, 0.1f, 1.0f);
+        BodyBuild = 0.5f;
+        WeatheringLevel = 0.3f;
     }
 };
 
 USTRUCT(BlueprintType)
-struct FChar_PlayerAppearance
+struct TRANSPERSONALGAME_API FChar_ClothingSet
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Basic")
-    EChar_PlayerGender Gender;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Clothing")
+    TSoftObjectPtr<USkeletalMesh> TorsoMesh;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Basic")
-    EChar_PlayerBuild BodyBuild;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Clothing")
+    TSoftObjectPtr<USkeletalMesh> LegsMesh;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Basic")
-    float Height;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Clothing")
+    TSoftObjectPtr<USkeletalMesh> FeetMesh;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Skin")
-    float SkinTone;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Clothing")
+    TSoftObjectPtr<UMaterialInterface> ClothingMaterial;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Skin")
-    float SkinRoughness;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Clothing")
+    EChar_TribalRole RequiredRole;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Skin")
-    float TanLevel;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Clothing")
+    float DurabilityLevel; // 0.0 = tattered, 1.0 = pristine
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Eyes")
-    FLinearColor EyeColor;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Face")
-    FChar_PlayerFace FaceFeatures;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hair")
-    FChar_PlayerHair HairSettings;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Scars")
-    TArray<int32> ScarsAndMarks;
-
-    FChar_PlayerAppearance()
+    FChar_ClothingSet()
     {
-        Gender = EChar_PlayerGender::Male;
-        BodyBuild = EChar_PlayerBuild::Average;
-        Height = 1.0f;
-        SkinTone = 0.5f;
-        SkinRoughness = 0.3f;
-        TanLevel = 0.4f;
-        EyeColor = FLinearColor(0.3f, 0.2f, 0.1f, 1.0f);
+        RequiredRole = EChar_TribalRole::Hunter;
+        DurabilityLevel = 0.7f;
     }
 };
 
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UChar_PlayerCustomization : public UObject
+/**
+ * Player Character Customization System
+ * Handles visual appearance, clothing, and tribal identity for the player character
+ */
+UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UChar_PlayerCustomization : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
     UChar_PlayerCustomization();
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Player Appearance")
-    FChar_PlayerAppearance CurrentAppearance;
+protected:
+    virtual void BeginPlay() override;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Presets")
-    TArray<FChar_PlayerAppearance> AppearancePresets;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Appearance")
+    FChar_TribalAppearance CurrentAppearance;
 
-    UFUNCTION(BlueprintCallable, Category = "Customization")
-    void ApplyAppearanceToCharacter(class ACharacter* TargetCharacter);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Appearance")
+    FChar_ClothingSet CurrentClothing;
 
-    UFUNCTION(BlueprintCallable, Category = "Customization")
-    void SaveAppearancePreset(const FString& PresetName, const FChar_PlayerAppearance& Appearance);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Appearance")
+    TArray<FChar_ClothingSet> AvailableClothingSets;
 
-    UFUNCTION(BlueprintCallable, Category = "Customization")
-    bool LoadAppearancePreset(const FString& PresetName, FChar_PlayerAppearance& OutAppearance);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Appearance")
+    USkeletalMeshComponent* TargetMeshComponent;
 
-    UFUNCTION(BlueprintCallable, Category = "Customization")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Appearance")
+    UMaterialInstanceDynamic* DynamicSkinMaterial;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Appearance")
+    UMaterialInstanceDynamic* DynamicHairMaterial;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Appearance")
+    TArray<TSoftObjectPtr<USkeletalMesh>> TribalMeshVariants;
+
+public:
+    UFUNCTION(BlueprintCallable, Category = "Character Customization")
+    void ApplyTribalAppearance(const FChar_TribalAppearance& NewAppearance);
+
+    UFUNCTION(BlueprintCallable, Category = "Character Customization")
+    void ChangeClothingSet(const FChar_ClothingSet& NewClothing);
+
+    UFUNCTION(BlueprintCallable, Category = "Character Customization")
+    void SetTribalRole(EChar_TribalRole NewRole);
+
+    UFUNCTION(BlueprintCallable, Category = "Character Customization")
+    void ApplyWeathering(float WeatheringAmount);
+
+    UFUNCTION(BlueprintCallable, Category = "Character Customization")
+    void AddTribalMarkings(const FLinearColor& MarkingColor, const FString& MarkingPattern);
+
+    UFUNCTION(BlueprintCallable, Category = "Character Customization")
     void RandomizeAppearance();
 
-    UFUNCTION(BlueprintCallable, Category = "Customization")
-    void ApplyTribalPreset(int32 PresetIndex);
+    UFUNCTION(BlueprintCallable, Category = "Character Customization")
+    FChar_TribalAppearance GetCurrentAppearance() const { return CurrentAppearance; }
 
-    UFUNCTION(BlueprintCallable, Category = "Customization")
-    TArray<FString> GetAvailablePresetNames() const;
+    UFUNCTION(BlueprintCallable, Category = "Character Customization")
+    void SetTargetMeshComponent(USkeletalMeshComponent* MeshComp);
 
-    UFUNCTION(BlueprintCallable, Category = "Validation")
-    bool ValidateAppearance(const FChar_PlayerAppearance& Appearance) const;
+    UFUNCTION(BlueprintCallable, Category = "Character Customization")
+    void LoadClothingPresets();
 
-protected:
-    UFUNCTION()
-    void InitializeTribalPresets();
-
-    UFUNCTION()
-    void ApplyFaceFeatures(class USkeletalMeshComponent* MeshComponent, const FChar_PlayerFace& FaceData);
-
-    UFUNCTION()
-    void ApplyHairSettings(class USkeletalMeshComponent* MeshComponent, const FChar_PlayerHair& HairData);
-
-    UFUNCTION()
-    void ApplyBodyBuild(class USkeletalMeshComponent* MeshComponent, EChar_PlayerBuild BuildType);
-
-    UFUNCTION()
-    FChar_PlayerAppearance GenerateRandomTribalAppearance();
+    UFUNCTION(BlueprintCallable, Category = "Character Customization")
+    bool ValidateClothingForRole(const FChar_ClothingSet& Clothing, EChar_TribalRole Role);
 
 private:
-    UPROPERTY()
-    TMap<FString, FChar_PlayerAppearance> SavedPresets;
+    void UpdateMaterialParameters();
+    void ApplyBodyBuildModifications();
+    void LoadTribalMeshVariants();
+    void CreateDynamicMaterials();
+    FLinearColor GenerateRandomSkinTone();
+    FLinearColor GenerateRandomHairColor();
+    void ApplyRoleBasedModifications(EChar_TribalRole Role);
 };
