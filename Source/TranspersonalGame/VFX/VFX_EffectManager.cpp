@@ -1,303 +1,226 @@
 #include "VFX_EffectManager.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "Components/SceneComponent.h"
-#include "Kismet/GameplayStatics.h"
 #include "TimerManager.h"
+#include "NiagaraFunctionLibrary.h"
 
 AVFX_EffectManager::AVFX_EffectManager()
 {
     PrimaryActorTick.bCanEverTick = true;
-    
-    RootSceneComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootScene"));
+    PrimaryActorTick.TickInterval = 1.0f; // Check for cleanup every second
+
+    RootSceneComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootSceneComponent"));
     RootComponent = RootSceneComponent;
-    
-    // Initialize VFX settings
-    GlobalVFXIntensity = 1.0f;
-    bEnableEnvironmentalVFX = true;
-    bEnableDinosaurVFX = true;
-    bEnableWeatherVFX = true;
-    MaxActiveEffects = 50;
-    EffectCullingDistance = 10000.0f;
-    
-    ActiveEffects.Reserve(MaxActiveEffects);
+
+    InitializeEffectDatabase();
 }
 
 void AVFX_EffectManager::BeginPlay()
 {
     Super::BeginPlay();
     
-    UE_LOG(LogTemp, Warning, TEXT("VFX Effect Manager initialized with %d max effects"), MaxActiveEffects);
+    UE_LOG(LogTemp, Warning, TEXT("VFX_EffectManager: System initialized with %d effect types"), EffectDatabase.Num());
+}
+
+void AVFX_EffectManager::InitializeEffectDatabase()
+{
+    // Initialize campfire effect
+    FVFX_EffectData CampfireData;
+    CampfireData.EffectScale = FVector(1.0f, 1.0f, 1.5f);
+    CampfireData.EffectDuration = 0.0f; // Persistent fire
+    CampfireData.bAutoDestroy = false;
+    EffectDatabase.Add(EVFX_EffectType::Fire_Campfire, CampfireData);
+
+    // Initialize footstep dust effect
+    FVFX_EffectData FootstepData;
+    FootstepData.EffectScale = FVector(1.0f);
+    FootstepData.EffectDuration = 3.0f;
+    FootstepData.bAutoDestroy = true;
+    EffectDatabase.Add(EVFX_EffectType::Dust_Footstep, FootstepData);
+
+    // Initialize blood impact effect
+    FVFX_EffectData BloodData;
+    BloodData.EffectScale = FVector(0.8f);
+    BloodData.EffectDuration = 5.0f;
+    BloodData.bAutoDestroy = true;
+    EffectDatabase.Add(EVFX_EffectType::Blood_Impact, BloodData);
+
+    // Initialize water splash effect
+    FVFX_EffectData WaterData;
+    WaterData.EffectScale = FVector(1.2f);
+    WaterData.EffectDuration = 2.5f;
+    WaterData.bAutoDestroy = true;
+    EffectDatabase.Add(EVFX_EffectType::Water_Splash, WaterData);
+
+    // Initialize cooking smoke effect
+    FVFX_EffectData SmokeData;
+    SmokeData.EffectScale = FVector(0.7f, 0.7f, 1.0f);
+    SmokeData.EffectDuration = 0.0f; // Persistent while cooking
+    SmokeData.bAutoDestroy = false;
+    EffectDatabase.Add(EVFX_EffectType::Smoke_Cooking, SmokeData);
+
+    // Initialize rain effect
+    FVFX_EffectData RainData;
+    RainData.EffectScale = FVector(10.0f, 10.0f, 5.0f);
+    RainData.EffectDuration = 0.0f; // Weather-controlled
+    RainData.bAutoDestroy = false;
+    EffectDatabase.Add(EVFX_EffectType::Rain_Weather, RainData);
+
+    // Initialize wind particles effect
+    FVFX_EffectData WindData;
+    WindData.EffectScale = FVector(5.0f, 5.0f, 2.0f);
+    WindData.EffectDuration = 0.0f; // Environmental
+    WindData.bAutoDestroy = false;
+    EffectDatabase.Add(EVFX_EffectType::Wind_Particles, WindData);
+
+    // Initialize crafting sparks effect
+    FVFX_EffectData SparksData;
+    SparksData.EffectScale = FVector(0.5f);
+    SparksData.EffectDuration = 1.5f;
+    SparksData.bAutoDestroy = true;
+    EffectDatabase.Add(EVFX_EffectType::Sparks_Crafting, SparksData);
+}
+
+UNiagaraComponent* AVFX_EffectManager::SpawnEffect(EVFX_EffectType EffectType, FVector Location, FRotator Rotation)
+{
+    if (!EffectDatabase.Contains(EffectType))
+    {
+        UE_LOG(LogTemp, Warning, TEXT("VFX_EffectManager: Effect type not found in database"));
+        return nullptr;
+    }
+
+    const FVFX_EffectData& EffectData = EffectDatabase[EffectType];
     
-    // Set up performance management timer
-    GetWorldTimerManager().SetTimer(
-        FTimerHandle(),
-        this,
-        &AVFX_EffectManager::ManagePerformance,
-        2.0f,
+    if (!EffectData.NiagaraEffect.IsValid())
+    {
+        UE_LOG(LogTemp, Warning, TEXT("VFX_EffectManager: Niagara system not assigned for effect type"));
+        return nullptr;
+    }
+
+    UNiagaraComponent* NewEffect = UNiagaraFunctionLibrary::SpawnSystemAtLocation(
+        GetWorld(),
+        EffectData.NiagaraEffect.Get(),
+        Location,
+        Rotation,
+        EffectData.EffectScale,
+        true,
+        true,
+        ENCPoolMethod::None,
         true
     );
-}
 
-void AVFX_EffectManager::Tick(float DeltaTime)
-{
-    Super::Tick(DeltaTime);
-    UpdateEffects(DeltaTime);
-}
-
-void AVFX_EffectManager::CreateDinosaurFootstepEffect(FVector Location, float DinosaurSize)
-{
-    if (!bEnableDinosaurVFX) return;
-    
-    FVFX_EffectData FootstepEffect;
-    FootstepEffect.EffectName = FString::Printf(TEXT("DinoFootstep_%d"), FMath::RandRange(1000, 9999));
-    FootstepEffect.Location = Location;
-    FootstepEffect.Duration = 3.0f + (DinosaurSize * 0.5f);
-    FootstepEffect.Intensity = FMath::Clamp(DinosaurSize, 0.5f, 3.0f) * GlobalVFXIntensity;
-    FootstepEffect.bIsActive = true;
-    
-    AddEffect(FootstepEffect);
-    
-    UE_LOG(LogTemp, Log, TEXT("Created dinosaur footstep effect at %s, size: %.2f"), 
-           *Location.ToString(), DinosaurSize);
-}
-
-void AVFX_EffectManager::CreateCampfireEffect(FVector Location, float FireIntensity)
-{
-    if (!bEnableEnvironmentalVFX) return;
-    
-    FVFX_EffectData CampfireEffect;
-    CampfireEffect.EffectName = FString::Printf(TEXT("Campfire_%d"), FMath::RandRange(1000, 9999));
-    CampfireEffect.Location = Location;
-    CampfireEffect.Duration = 300.0f; // Long-lasting fire
-    CampfireEffect.Intensity = FireIntensity * GlobalVFXIntensity;
-    CampfireEffect.bIsActive = true;
-    
-    AddEffect(CampfireEffect);
-    
-    UE_LOG(LogTemp, Log, TEXT("Created campfire effect at %s, intensity: %.2f"), 
-           *Location.ToString(), FireIntensity);
-}
-
-void AVFX_EffectManager::CreateWeatherEffect(EVFX_EffectType WeatherType, FVector Location, float Coverage)
-{
-    if (!bEnableWeatherVFX) return;
-    
-    FVFX_EffectData WeatherEffect;
-    
-    switch (WeatherType)
+    if (NewEffect)
     {
-        case EVFX_EffectType::WeatherRain:
-            WeatherEffect.EffectName = FString::Printf(TEXT("Rain_%d"), FMath::RandRange(1000, 9999));
-            WeatherEffect.Duration = 120.0f;
-            break;
-        case EVFX_EffectType::WeatherFog:
-            WeatherEffect.EffectName = FString::Printf(TEXT("Fog_%d"), FMath::RandRange(1000, 9999));
-            WeatherEffect.Duration = 180.0f;
-            break;
-        case EVFX_EffectType::VolcanicAsh:
-            WeatherEffect.EffectName = FString::Printf(TEXT("VolcanicAsh_%d"), FMath::RandRange(1000, 9999));
-            WeatherEffect.Duration = 240.0f;
-            break;
-        default:
-            WeatherEffect.EffectName = TEXT("UnknownWeather");
-            WeatherEffect.Duration = 60.0f;
-            break;
-    }
-    
-    WeatherEffect.Location = Location;
-    WeatherEffect.Intensity = Coverage * GlobalVFXIntensity;
-    WeatherEffect.bIsActive = true;
-    
-    AddEffect(WeatherEffect);
-    
-    UE_LOG(LogTemp, Log, TEXT("Created weather effect %s at %s, coverage: %.2f"), 
-           *WeatherEffect.EffectName, *Location.ToString(), Coverage);
-}
-
-void AVFX_EffectManager::CreateBloodEffect(FVector Location, FVector ImpactDirection, float Amount)
-{
-    if (!bEnableDinosaurVFX) return;
-    
-    FVFX_EffectData BloodEffect;
-    BloodEffect.EffectName = FString::Printf(TEXT("Blood_%d"), FMath::RandRange(1000, 9999));
-    BloodEffect.Location = Location;
-    BloodEffect.Duration = 5.0f;
-    BloodEffect.Intensity = Amount * GlobalVFXIntensity;
-    BloodEffect.bIsActive = true;
-    
-    AddEffect(BloodEffect);
-    
-    UE_LOG(LogTemp, Log, TEXT("Created blood effect at %s, amount: %.2f"), 
-           *Location.ToString(), Amount);
-}
-
-void AVFX_EffectManager::CreateRockImpactEffect(FVector Location, float ImpactForce)
-{
-    if (!bEnableEnvironmentalVFX) return;
-    
-    FVFX_EffectData RockImpact;
-    RockImpact.EffectName = FString::Printf(TEXT("RockImpact_%d"), FMath::RandRange(1000, 9999));
-    RockImpact.Location = Location;
-    RockImpact.Duration = 2.0f;
-    RockImpact.Intensity = FMath::Clamp(ImpactForce / 1000.0f, 0.1f, 2.0f) * GlobalVFXIntensity;
-    RockImpact.bIsActive = true;
-    
-    AddEffect(RockImpact);
-    
-    UE_LOG(LogTemp, Log, TEXT("Created rock impact effect at %s, force: %.2f"), 
-           *Location.ToString(), ImpactForce);
-}
-
-void AVFX_EffectManager::StopEffect(const FString& EffectName)
-{
-    FVFX_EffectData* Effect = FindEffect(EffectName);
-    if (Effect)
-    {
-        Effect->bIsActive = false;
-        UE_LOG(LogTemp, Log, TEXT("Stopped VFX effect: %s"), *EffectName);
-    }
-}
-
-void AVFX_EffectManager::StopAllEffects()
-{
-    for (FVFX_EffectData& Effect : ActiveEffects)
-    {
-        Effect.bIsActive = false;
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("Stopped all VFX effects (%d total)"), ActiveEffects.Num());
-}
-
-void AVFX_EffectManager::SetGlobalVFXIntensity(float NewIntensity)
-{
-    GlobalVFXIntensity = FMath::Clamp(NewIntensity, 0.0f, 2.0f);
-    UE_LOG(LogTemp, Log, TEXT("Set global VFX intensity to %.2f"), GlobalVFXIntensity);
-}
-
-int32 AVFX_EffectManager::GetActiveEffectCount() const
-{
-    int32 ActiveCount = 0;
-    for (const FVFX_EffectData& Effect : ActiveEffects)
-    {
-        if (Effect.bIsActive)
+        ActiveEffects.Add(NewEffect);
+        
+        // Set auto-destroy timer if needed
+        if (EffectData.bAutoDestroy && EffectData.EffectDuration > 0.0f)
         {
-            ActiveCount++;
+            FTimerHandle CleanupTimer;
+            GetWorld()->GetTimerManager().SetTimer(
+                CleanupTimer,
+                [this, NewEffect]()
+                {
+                    CleanupEffect(NewEffect);
+                },
+                EffectData.EffectDuration,
+                false
+            );
         }
+
+        UE_LOG(LogTemp, Log, TEXT("VFX_EffectManager: Spawned effect at location %s"), *Location.ToString());
     }
-    return ActiveCount;
+
+    return NewEffect;
+}
+
+void AVFX_EffectManager::SpawnFootstepDust(FVector FootLocation, float DinosaurSize)
+{
+    FVector AdjustedLocation = FootLocation + FVector(0, 0, -10); // Slightly below ground
+    UNiagaraComponent* DustEffect = SpawnEffect(EVFX_EffectType::Dust_Footstep, AdjustedLocation);
+    
+    if (DustEffect)
+    {
+        // Scale effect based on dinosaur size
+        FVector ScaleMultiplier = FVector(DinosaurSize);
+        DustEffect->SetWorldScale3D(ScaleMultiplier);
+        
+        // Set dust intensity parameter
+        DustEffect->SetFloatParameter(TEXT("DustIntensity"), FMath::Clamp(DinosaurSize, 0.5f, 3.0f));
+    }
+}
+
+void AVFX_EffectManager::SpawnCampfire(FVector FireLocation)
+{
+    UNiagaraComponent* FireEffect = SpawnEffect(EVFX_EffectType::Fire_Campfire, FireLocation);
+    
+    if (FireEffect)
+    {
+        // Set fire parameters
+        FireEffect->SetFloatParameter(TEXT("FireIntensity"), 1.0f);
+        FireEffect->SetVectorParameter(TEXT("WindDirection"), FVector(1, 0, 0));
+    }
+}
+
+void AVFX_EffectManager::SpawnBloodImpact(FVector ImpactLocation, FVector ImpactNormal)
+{
+    FRotator ImpactRotation = FRotationMatrix::MakeFromZ(ImpactNormal).Rotator();
+    UNiagaraComponent* BloodEffect = SpawnEffect(EVFX_EffectType::Blood_Impact, ImpactLocation, ImpactRotation);
+    
+    if (BloodEffect)
+    {
+        BloodEffect->SetVectorParameter(TEXT("ImpactNormal"), ImpactNormal);
+        BloodEffect->SetFloatParameter(TEXT("BloodAmount"), 1.0f);
+    }
+}
+
+void AVFX_EffectManager::SpawnWaterSplash(FVector WaterLocation, float SplashIntensity)
+{
+    UNiagaraComponent* SplashEffect = SpawnEffect(EVFX_EffectType::Water_Splash, WaterLocation);
+    
+    if (SplashEffect)
+    {
+        SplashEffect->SetFloatParameter(TEXT("SplashIntensity"), SplashIntensity);
+        FVector SplashScale = FVector(SplashIntensity);
+        SplashEffect->SetWorldScale3D(SplashScale);
+    }
 }
 
 void AVFX_EffectManager::CleanupExpiredEffects()
 {
-    ActiveEffects.RemoveAll([](const FVFX_EffectData& Effect)
+    ActiveEffects.RemoveAll([this](UNiagaraComponent* Effect)
     {
-        return !Effect.bIsActive || Effect.Duration <= 0.0f;
-    });
-}
-
-bool AVFX_EffectManager::IsEffectActive(const FString& EffectName) const
-{
-    for (const FVFX_EffectData& Effect : ActiveEffects)
-    {
-        if (Effect.EffectName == EffectName && Effect.bIsActive)
+        if (!IsValid(Effect) || !Effect->IsActive())
         {
+            if (IsValid(Effect))
+            {
+                Effect->DestroyComponent();
+            }
             return true;
         }
-    }
-    return false;
-}
-
-void AVFX_EffectManager::UpdateEffects(float DeltaTime)
-{
-    for (FVFX_EffectData& Effect : ActiveEffects)
-    {
-        if (Effect.bIsActive)
-        {
-            Effect.Duration -= DeltaTime;
-            if (Effect.Duration <= 0.0f)
-            {
-                Effect.bIsActive = false;
-            }
-        }
-    }
-}
-
-void AVFX_EffectManager::CullDistantEffects()
-{
-    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
-    if (!PlayerPawn) return;
-    
-    FVector PlayerLocation = PlayerPawn->GetActorLocation();
-    
-    for (FVFX_EffectData& Effect : ActiveEffects)
-    {
-        float Distance = FVector::Dist(PlayerLocation, Effect.Location);
-        if (Distance > EffectCullingDistance)
-        {
-            Effect.bIsActive = false;
-        }
-    }
-}
-
-void AVFX_EffectManager::ManagePerformance()
-{
-    CullDistantEffects();
-    CleanupExpiredEffects();
-    
-    int32 ActiveCount = GetActiveEffectCount();
-    if (ActiveCount > MaxActiveEffects)
-    {
-        // Disable oldest effects
-        int32 ToRemove = ActiveCount - MaxActiveEffects;
-        for (int32 i = 0; i < ActiveEffects.Num() && ToRemove > 0; i++)
-        {
-            if (ActiveEffects[i].bIsActive)
-            {
-                ActiveEffects[i].bIsActive = false;
-                ToRemove--;
-            }
-        }
-        
-        UE_LOG(LogTemp, Warning, TEXT("VFX performance management: disabled %d effects"), 
-               ActiveCount - MaxActiveEffects);
-    }
-}
-
-FVFX_EffectData* AVFX_EffectManager::FindEffect(const FString& EffectName)
-{
-    for (FVFX_EffectData& Effect : ActiveEffects)
-    {
-        if (Effect.EffectName == EffectName)
-        {
-            return &Effect;
-        }
-    }
-    return nullptr;
-}
-
-void AVFX_EffectManager::RemoveEffect(const FString& EffectName)
-{
-    ActiveEffects.RemoveAll([&EffectName](const FVFX_EffectData& Effect)
-    {
-        return Effect.EffectName == EffectName;
+        return false;
     });
 }
 
-void AVFX_EffectManager::AddEffect(const FVFX_EffectData& NewEffect)
+void AVFX_EffectManager::CleanupEffect(UNiagaraComponent* EffectComponent)
 {
-    if (ActiveEffects.Num() >= MaxActiveEffects)
+    if (IsValid(EffectComponent))
     {
-        CleanupExpiredEffects();
+        EffectComponent->Deactivate();
+        ActiveEffects.Remove(EffectComponent);
+        EffectComponent->DestroyComponent();
     }
+}
+
+void AVFX_EffectManager::TestAllEffects()
+{
+    FVector TestLocation = GetActorLocation();
     
-    if (ActiveEffects.Num() < MaxActiveEffects)
-    {
-        ActiveEffects.Add(NewEffect);
-    }
-    else
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Cannot add VFX effect %s - at maximum capacity"), 
-               *NewEffect.EffectName);
-    }
+    // Test each effect type
+    SpawnFootstepDust(TestLocation + FVector(100, 0, 0), 2.0f);
+    SpawnCampfire(TestLocation + FVector(0, 100, 0));
+    SpawnBloodImpact(TestLocation + FVector(-100, 0, 0), FVector::UpVector);
+    SpawnWaterSplash(TestLocation + FVector(0, -100, 0), 1.5f);
+    
+    UE_LOG(LogTemp, Warning, TEXT("VFX_EffectManager: Test effects spawned"));
 }
