@@ -2,231 +2,205 @@
 
 #include "CoreMinimal.h"
 #include "Engine/GameInstanceSubsystem.h"
-#include "Engine/World.h"
-#include "GameFramework/Character.h"
-#include "GameFramework/PlayerController.h"
-#include "GameFramework/GameModeBase.h"
-#include "Components/ActorComponent.h"
+#include "Subsystems/WorldSubsystem.h"
 #include "SharedTypes.h"
 #include "Eng_GameplayFoundation.generated.h"
 
 /**
- * CRITICAL GAMEPLAY FOUNDATION ARCHITECTURE
- * 
- * This system defines the core gameplay architecture that ALL other agents must follow.
- * No agent may create gameplay systems that violate these foundations.
- * 
- * MANDATE: Every gameplay system MUST inherit from or integrate with these base classes.
+ * Engine Architect #02 - Gameplay Foundation System
+ * Core gameplay architecture for the prehistoric survival game
+ * Defines the fundamental systems that enable player interaction with the world
  */
 
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UEng_GameplayFoundation : public UGameInstanceSubsystem
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FEng_GameplayMetrics
 {
-	GENERATED_BODY()
+    GENERATED_BODY()
 
-public:
-	UEng_GameplayFoundation();
+    UPROPERTY(BlueprintReadOnly, Category = "Gameplay Metrics")
+    int32 ActivePlayers = 0;
 
-	// === CORE GAMEPLAY ARCHITECTURE ===
+    UPROPERTY(BlueprintReadOnly, Category = "Gameplay Metrics")
+    int32 ActiveDinosaurs = 0;
 
-	/** Initialize the gameplay foundation - called once at game start */
-	UFUNCTION(BlueprintCallable, Category = "Gameplay Foundation")
-	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    UPROPERTY(BlueprintReadOnly, Category = "Gameplay Metrics")
+    float AverageFrameTime = 0.0f;
 
-	/** Validate that all core gameplay systems are properly configured */
-	UFUNCTION(BlueprintCallable, CallInEditor, Category = "Gameplay Foundation")
-	bool ValidateGameplayArchitecture();
+    UPROPERTY(BlueprintReadOnly, Category = "Gameplay Metrics")
+    float WorldLoadProgress = 0.0f;
 
-	// === CHARACTER SYSTEM FOUNDATION ===
+    UPROPERTY(BlueprintReadOnly, Category = "Gameplay Metrics")
+    bool bIsGameplayReady = false;
+};
 
-	/** Register a character class as valid for the game */
-	UFUNCTION(BlueprintCallable, Category = "Character Foundation")
-	void RegisterCharacterClass(TSubclassOf<ACharacter> CharacterClass);
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FEng_PlayerMovementConfig
+{
+    GENERATED_BODY()
 
-	/** Get the primary player character class */
-	UFUNCTION(BlueprintPure, Category = "Character Foundation")
-	TSubclassOf<ACharacter> GetPrimaryCharacterClass() const { return PrimaryCharacterClass; }
+    UPROPERTY(BlueprintReadWrite, Category = "Movement")
+    float WalkSpeed = 300.0f;
 
-	// === WORLD SYSTEM FOUNDATION ===
+    UPROPERTY(BlueprintReadWrite, Category = "Movement")
+    float RunSpeed = 600.0f;
 
-	/** Register a world system as active */
-	UFUNCTION(BlueprintCallable, Category = "World Foundation")
-	void RegisterWorldSystem(const FString& SystemName, UObject* SystemInstance);
+    UPROPERTY(BlueprintReadWrite, Category = "Movement")
+    float JumpHeight = 420.0f;
 
-	/** Get a registered world system by name */
-	UFUNCTION(BlueprintCallable, Category = "World Foundation")
-	UObject* GetWorldSystem(const FString& SystemName) const;
+    UPROPERTY(BlueprintReadWrite, Category = "Movement")
+    float StaminaDrainRate = 10.0f;
 
-	// === SURVIVAL SYSTEM FOUNDATION ===
+    UPROPERTY(BlueprintReadWrite, Category = "Movement")
+    float StaminaRegenRate = 15.0f;
+};
 
-	/** Core survival stats that ALL characters must have */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival Foundation")
-	FEng_SurvivalStats DefaultSurvivalStats;
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FEng_WorldInteractionConfig
+{
+    GENERATED_BODY()
 
-	/** Register a survival component as valid */
-	UFUNCTION(BlueprintCallable, Category = "Survival Foundation")
-	void RegisterSurvivalComponent(TSubclassOf<UActorComponent> ComponentClass);
+    UPROPERTY(BlueprintReadWrite, Category = "Interaction")
+    float InteractionRange = 200.0f;
 
-	// === DINOSAUR SYSTEM FOUNDATION ===
+    UPROPERTY(BlueprintReadWrite, Category = "Interaction")
+    float GatheringTime = 2.0f;
 
-	/** Register a dinosaur species as valid for spawning */
-	UFUNCTION(BlueprintCallable, Category = "Dinosaur Foundation")
-	void RegisterDinosaurSpecies(const FString& SpeciesName, TSubclassOf<APawn> DinosaurClass);
+    UPROPERTY(BlueprintReadWrite, Category = "Interaction")
+    float CraftingSpeedMultiplier = 1.0f;
 
-	/** Get all registered dinosaur species */
-	UFUNCTION(BlueprintPure, Category = "Dinosaur Foundation")
-	TArray<FString> GetRegisteredDinosaurSpecies() const;
-
-	// === PERFORMANCE FOUNDATION ===
-
-	/** Maximum actors allowed in the world at once */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance Foundation")
-	int32 MaxWorldActors = 8000;
-
-	/** Maximum dinosaurs allowed in the world at once */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance Foundation")
-	int32 MaxDinosaurs = 150;
-
-	/** Check if we can spawn more actors */
-	UFUNCTION(BlueprintPure, Category = "Performance Foundation")
-	bool CanSpawnMoreActors() const;
-
-	/** Check if we can spawn more dinosaurs */
-	UFUNCTION(BlueprintPure, Category = "Performance Foundation")
-	bool CanSpawnMoreDinosaurs() const;
-
-	// === COMPILATION FOUNDATION ===
-
-	/** Validate that all registered systems compile correctly */
-	UFUNCTION(BlueprintCallable, CallInEditor, Category = "Compilation Foundation")
-	bool ValidateSystemCompilation();
-
-	/** Get compilation status of all systems */
-	UFUNCTION(BlueprintPure, Category = "Compilation Foundation")
-	TArray<FString> GetSystemCompilationStatus() const;
-
-protected:
-	// === INTERNAL ARCHITECTURE STATE ===
-
-	/** Primary character class for the game */
-	UPROPERTY()
-	TSubclassOf<ACharacter> PrimaryCharacterClass;
-
-	/** Registered character classes */
-	UPROPERTY()
-	TArray<TSubclassOf<ACharacter>> RegisteredCharacterClasses;
-
-	/** Registered world systems */
-	UPROPERTY()
-	TMap<FString, UObject*> RegisteredWorldSystems;
-
-	/** Registered survival components */
-	UPROPERTY()
-	TArray<TSubclassOf<UActorComponent>> RegisteredSurvivalComponents;
-
-	/** Registered dinosaur species */
-	UPROPERTY()
-	TMap<FString, TSubclassOf<APawn>> RegisteredDinosaurSpecies;
-
-	/** System compilation status cache */
-	UPROPERTY()
-	TMap<FString, bool> SystemCompilationStatus;
-
-	// === VALIDATION METHODS ===
-
-	/** Validate character system architecture */
-	bool ValidateCharacterArchitecture();
-
-	/** Validate world system architecture */
-	bool ValidateWorldArchitecture();
-
-	/** Validate survival system architecture */
-	bool ValidateSurvivalArchitecture();
-
-	/** Validate dinosaur system architecture */
-	bool ValidateDinosaurArchitecture();
-
-	/** Update system compilation status */
-	void UpdateCompilationStatus();
+    UPROPERTY(BlueprintReadWrite, Category = "Interaction")
+    int32 MaxInventorySlots = 30;
 };
 
 /**
- * GAMEPLAY FOUNDATION STRUCTS
- * These are the core data structures that define gameplay architecture
+ * Core gameplay foundation subsystem
+ * Manages fundamental gameplay systems and player interaction
  */
-
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEng_SurvivalStats
+UCLASS(BlueprintType)
+class TRANSPERSONALGAME_API UEng_GameplayFoundation : public UWorldSubsystem
 {
-	GENERATED_BODY()
+    GENERATED_BODY()
 
-	/** Player health (0-100) */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival")
-	float Health = 100.0f;
+public:
+    // USubsystem interface
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
+    virtual bool ShouldCreateSubsystem(UObject* Outer) const override;
 
-	/** Player hunger (0-100, 0 = starving) */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival")
-	float Hunger = 100.0f;
+    // Core gameplay management
+    UFUNCTION(BlueprintCallable, Category = "Gameplay Foundation")
+    void InitializeGameplaySystems();
 
-	/** Player thirst (0-100, 0 = dehydrated) */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival")
-	float Thirst = 100.0f;
+    UFUNCTION(BlueprintCallable, Category = "Gameplay Foundation")
+    void UpdateGameplayMetrics();
 
-	/** Player stamina (0-100) */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival")
-	float Stamina = 100.0f;
+    UFUNCTION(BlueprintCallable, Category = "Gameplay Foundation")
+    bool IsGameplaySystemReady() const;
 
-	/** Player fear level (0-100, affects decision making) */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival")
-	float Fear = 0.0f;
+    // Player configuration
+    UFUNCTION(BlueprintCallable, Category = "Player Config")
+    void SetPlayerMovementConfig(const FEng_PlayerMovementConfig& Config);
 
-	/** Body temperature (affects survival) */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival")
-	float Temperature = 98.6f;
+    UFUNCTION(BlueprintCallable, Category = "Player Config")
+    FEng_PlayerMovementConfig GetPlayerMovementConfig() const;
 
-	FEng_SurvivalStats()
-	{
-		Health = 100.0f;
-		Hunger = 100.0f;
-		Thirst = 100.0f;
-		Stamina = 100.0f;
-		Fear = 0.0f;
-		Temperature = 98.6f;
-	}
+    // World interaction
+    UFUNCTION(BlueprintCallable, Category = "World Interaction")
+    void SetWorldInteractionConfig(const FEng_WorldInteractionConfig& Config);
+
+    UFUNCTION(BlueprintCallable, Category = "World Interaction")
+    FEng_WorldInteractionConfig GetWorldInteractionConfig() const;
+
+    // Metrics and monitoring
+    UFUNCTION(BlueprintCallable, Category = "Metrics")
+    FEng_GameplayMetrics GetCurrentMetrics() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Metrics")
+    void LogGameplayStatus() const;
+
+    // System validation
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Validation")
+    void ValidateGameplayFoundation();
+
+protected:
+    UPROPERTY(BlueprintReadOnly, Category = "Config")
+    FEng_PlayerMovementConfig PlayerMovementConfig;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Config")
+    FEng_WorldInteractionConfig WorldInteractionConfig;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
+    FEng_GameplayMetrics CurrentMetrics;
+
+    UPROPERTY(BlueprintReadOnly, Category = "State")
+    bool bIsInitialized = false;
+
+    UPROPERTY(BlueprintReadOnly, Category = "State")
+    float InitializationTime = 0.0f;
+
+private:
+    void UpdatePlayerMetrics();
+    void UpdateWorldMetrics();
+    void UpdatePerformanceMetrics();
+    bool ValidateSystemIntegrity() const;
 };
 
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEng_GameplaySystemInfo
+/**
+ * Gameplay foundation manager component
+ * Attaches to GameMode to manage core gameplay systems
+ */
+UCLASS(BlueprintType, Blueprintable, ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UEng_GameplayFoundationComponent : public UActorComponent
 {
-	GENERATED_BODY()
+    GENERATED_BODY()
 
-	/** Name of the gameplay system */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System Info")
-	FString SystemName;
+public:
+    UEng_GameplayFoundationComponent();
 
-	/** Whether the system is currently active */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System Info")
-	bool bIsActive = false;
+protected:
+    virtual void BeginPlay() override;
+    virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
-	/** Whether the system compiled successfully */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System Info")
-	bool bCompiledSuccessfully = false;
+public:
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-	/** System priority (higher = more important) */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System Info")
-	int32 Priority = 0;
+    // Foundation management
+    UFUNCTION(BlueprintCallable, Category = "Foundation")
+    void InitializeFoundationSystems();
 
-	/** System dependencies */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System Info")
-	TArray<FString> Dependencies;
+    UFUNCTION(BlueprintCallable, Category = "Foundation")
+    void ShutdownFoundationSystems();
 
-	FEng_GameplaySystemInfo()
-	{
-		SystemName = TEXT("Unknown");
-		bIsActive = false;
-		bCompiledSuccessfully = false;
-		Priority = 0;
-	}
+    UFUNCTION(BlueprintCallable, Category = "Foundation")
+    bool AreFoundationSystemsReady() const;
+
+    // Configuration
+    UFUNCTION(BlueprintCallable, Category = "Configuration")
+    void ApplyDefaultConfiguration();
+
+    UFUNCTION(BlueprintCallable, Category = "Configuration")
+    void SaveConfiguration();
+
+    UFUNCTION(BlueprintCallable, Category = "Configuration")
+    void LoadConfiguration();
+
+protected:
+    UPROPERTY(BlueprintReadOnly, Category = "Foundation")
+    bool bFoundationInitialized = false;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Foundation")
+    float FoundationStartupTime = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
+    bool bAutoInitialize = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
+    bool bEnableMetricsLogging = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
+    float MetricsUpdateInterval = 1.0f;
+
+private:
+    float LastMetricsUpdate = 0.0f;
+    void UpdateFoundationMetrics();
 };
-
-#include "Eng_GameplayFoundation.generated.h"
