@@ -3,9 +3,9 @@
 #include "CoreMinimal.h"
 #include "Animation/AnimInstance.h"
 #include "Engine/Engine.h"
-#include "Components/SkeletalMeshComponent.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
+#include "Kismet/KismetMathLibrary.h"
 #include "Anim_TribalCharacterAnimInstance.generated.h"
 
 UENUM(BlueprintType)
@@ -18,21 +18,18 @@ enum class EAnim_TribalMovementState : uint8
     Falling     UMETA(DisplayName = "Falling"),
     Crouching   UMETA(DisplayName = "Crouching"),
     Crafting    UMETA(DisplayName = "Crafting"),
-    SpearReady  UMETA(DisplayName = "Spear Ready"),
-    Throwing    UMETA(DisplayName = "Throwing")
+    Hunting     UMETA(DisplayName = "Hunting")
 };
 
 UENUM(BlueprintType)
-enum class EAnim_TribalActionState : uint8
+enum class EAnim_TribalEmotionalState : uint8
 {
-    None            UMETA(DisplayName = "None"),
-    Gathering       UMETA(DisplayName = "Gathering"),
-    Hunting         UMETA(DisplayName = "Hunting"),
-    Crafting        UMETA(DisplayName = "Crafting"),
-    Resting         UMETA(DisplayName = "Resting"),
-    Socializing     UMETA(DisplayName = "Socializing"),
-    Patrolling      UMETA(DisplayName = "Patrolling"),
-    Fleeing         UMETA(DisplayName = "Fleeing")
+    Calm        UMETA(DisplayName = "Calm"),
+    Alert       UMETA(DisplayName = "Alert"),
+    Fearful     UMETA(DisplayName = "Fearful"),
+    Aggressive  UMETA(DisplayName = "Aggressive"),
+    Tired       UMETA(DisplayName = "Tired"),
+    Injured     UMETA(DisplayName = "Injured")
 };
 
 USTRUCT(BlueprintType)
@@ -40,35 +37,44 @@ struct TRANSPERSONALGAME_API FAnim_TribalAnimationData
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
+    UPROPERTY(BlueprintReadOnly, Category = "Movement")
     float Speed = 0.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
+    UPROPERTY(BlueprintReadOnly, Category = "Movement")
     float Direction = 0.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
+    UPROPERTY(BlueprintReadOnly, Category = "Movement")
     bool bIsInAir = false;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
+    UPROPERTY(BlueprintReadOnly, Category = "Movement")
     bool bIsCrouching = false;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "States")
+    UPROPERTY(BlueprintReadOnly, Category = "Movement")
     EAnim_TribalMovementState MovementState = EAnim_TribalMovementState::Idle;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "States")
-    EAnim_TribalActionState ActionState = EAnim_TribalActionState::None;
+    UPROPERTY(BlueprintReadOnly, Category = "Emotional")
+    EAnim_TribalEmotionalState EmotionalState = EAnim_TribalEmotionalState::Calm;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival")
+    UPROPERTY(BlueprintReadOnly, Category = "Survival")
+    float HealthPercentage = 1.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Survival")
+    float StaminaPercentage = 1.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Survival")
     float FearLevel = 0.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival")
-    float EnergyLevel = 1.0f;
+    UPROPERTY(BlueprintReadOnly, Category = "IK")
+    FVector LeftFootIKLocation = FVector::ZeroVector;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tools")
-    bool bHasSpear = false;
+    UPROPERTY(BlueprintReadOnly, Category = "IK")
+    FVector RightFootIKLocation = FVector::ZeroVector;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tools")
-    bool bHasTool = false;
+    UPROPERTY(BlueprintReadOnly, Category = "IK")
+    FRotator LeftFootIKRotation = FRotator::ZeroRotator;
+
+    UPROPERTY(BlueprintReadOnly, Category = "IK")
+    FRotator RightFootIKRotation = FRotator::ZeroRotator;
 
     FAnim_TribalAnimationData()
     {
@@ -77,20 +83,23 @@ struct TRANSPERSONALGAME_API FAnim_TribalAnimationData
         bIsInAir = false;
         bIsCrouching = false;
         MovementState = EAnim_TribalMovementState::Idle;
-        ActionState = EAnim_TribalActionState::None;
+        EmotionalState = EAnim_TribalEmotionalState::Calm;
+        HealthPercentage = 1.0f;
+        StaminaPercentage = 1.0f;
         FearLevel = 0.0f;
-        EnergyLevel = 1.0f;
-        bHasSpear = false;
-        bHasTool = false;
+        LeftFootIKLocation = FVector::ZeroVector;
+        RightFootIKLocation = FVector::ZeroVector;
+        LeftFootIKRotation = FRotator::ZeroRotator;
+        RightFootIKRotation = FRotator::ZeroRotator;
     }
 };
 
 /**
- * Animation Instance for tribal characters in the prehistoric survival game.
- * Handles movement states, survival actions, and tool usage animations.
- * Integrates with Motion Matching for fluid character movement.
+ * Animation Instance for tribal prehistoric characters
+ * Handles movement states, emotional expressions, and survival animations
+ * Designed for realistic prehistoric human behavior and survival scenarios
  */
-UCLASS(Blueprintable, BlueprintType)
+UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UAnim_TribalCharacterAnimInstance : public UAnimInstance
 {
     GENERATED_BODY()
@@ -102,128 +111,92 @@ protected:
     virtual void NativeInitializeAnimation() override;
     virtual void NativeUpdateAnimation(float DeltaTimeX) override;
 
-    // Animation Data
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Data")
+public:
+    // Animation data structure
+    UPROPERTY(BlueprintReadOnly, Category = "Animation Data")
     FAnim_TribalAnimationData AnimData;
 
-    // Character Reference
+    // Character reference
     UPROPERTY(BlueprintReadOnly, Category = "Character")
-    class ACharacter* OwnerCharacter;
+    ACharacter* OwningCharacter;
 
-    // Movement Component Reference
-    UPROPERTY(BlueprintReadOnly, Category = "Movement")
-    class UCharacterMovementComponent* MovementComponent;
+    // Movement component reference
+    UPROPERTY(BlueprintReadOnly, Category = "Character")
+    UCharacterMovementComponent* MovementComponent;
 
-    // Animation Assets
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animations|Idle")
-    class UAnimSequence* IdleAnimation;
+    // Animation update functions
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    void UpdateMovementData();
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animations|Movement")
-    class UBlendSpace* WalkRunBlendSpace;
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    void UpdateEmotionalState();
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animations|Movement")
-    class UAnimSequence* JumpStartAnimation;
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    void UpdateSurvivalData();
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animations|Movement")
-    class UAnimSequence* JumpLoopAnimation;
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    void UpdateFootIK();
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animations|Movement")
-    class UAnimSequence* JumpEndAnimation;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animations|Actions")
-    class UAnimMontage* SpearThrowMontage;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animations|Actions")
-    class UAnimMontage* CraftingMontage;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animations|Actions")
-    class UAnimMontage* GatheringMontage;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animations|Reactions")
-    class UAnimMontage* FearReactionMontage;
-
-    // Animation Control
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Control")
-    float MovementSpeedThreshold = 10.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Control")
-    float RunSpeedThreshold = 300.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Control")
-    float AnimationBlendSpeed = 5.0f;
-
-    // IK Settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK")
-    bool bEnableFootIK = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK")
-    float FootIKInterpSpeed = 15.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK")
-    float FootIKTraceDistance = 50.0f;
-
-public:
-    // Animation State Control
+    // State transition functions
     UFUNCTION(BlueprintCallable, Category = "Animation")
     void SetMovementState(EAnim_TribalMovementState NewState);
 
     UFUNCTION(BlueprintCallable, Category = "Animation")
-    void SetActionState(EAnim_TribalActionState NewState);
+    void SetEmotionalState(EAnim_TribalEmotionalState NewState);
+
+    // Animation event handlers
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    void OnStartCrafting();
 
     UFUNCTION(BlueprintCallable, Category = "Animation")
-    void PlayActionMontage(EAnim_TribalActionState ActionType);
+    void OnStopCrafting();
 
     UFUNCTION(BlueprintCallable, Category = "Animation")
-    void StopActionMontage();
+    void OnStartHunting();
 
-    // Survival Animation Triggers
-    UFUNCTION(BlueprintCallable, Category = "Survival")
-    void TriggerFearReaction(float FearIntensity);
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    void OnStopHunting();
 
-    UFUNCTION(BlueprintCallable, Category = "Survival")
-    void UpdateEnergyLevel(float NewEnergyLevel);
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    void OnTakeDamage(float DamageAmount);
 
-    // Tool Animation Control
-    UFUNCTION(BlueprintCallable, Category = "Tools")
-    void SetHasSpear(bool bNewHasSpear);
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    void OnStaminaChanged(float NewStamina, float MaxStamina);
 
-    UFUNCTION(BlueprintCallable, Category = "Tools")
-    void SetHasTool(bool bNewHasTool);
-
-    UFUNCTION(BlueprintCallable, Category = "Tools")
-    void PlaySpearThrowAnimation();
-
-    UFUNCTION(BlueprintCallable, Category = "Tools")
-    void PlayCraftingAnimation();
-
-    // Getters
-    UFUNCTION(BlueprintPure, Category = "Animation Data")
-    FAnim_TribalAnimationData GetAnimationData() const { return AnimData; }
-
-    UFUNCTION(BlueprintPure, Category = "Animation Data")
-    EAnim_TribalMovementState GetMovementState() const { return AnimData.MovementState; }
-
-    UFUNCTION(BlueprintPure, Category = "Animation Data")
-    EAnim_TribalActionState GetActionState() const { return AnimData.ActionState; }
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    void OnFearLevelChanged(float NewFearLevel);
 
 protected:
-    // Internal Update Functions
-    void UpdateMovementData();
-    void UpdateMovementState();
-    void UpdateActionState();
-    void UpdateSurvivalData();
-    void UpdateToolData();
+    // Internal state tracking
+    UPROPERTY()
+    float LastUpdateTime;
 
-    // Helper Functions
-    bool IsMoving() const;
-    bool IsRunning() const;
-    bool IsInAir() const;
-    float CalculateDirection() const;
+    UPROPERTY()
+    FVector LastVelocity;
 
-private:
-    // Internal State
-    float LastUpdateTime = 0.0f;
-    bool bWasInAir = false;
-    EAnim_TribalMovementState PreviousMovementState = EAnim_TribalMovementState::Idle;
-    EAnim_TribalActionState PreviousActionState = EAnim_TribalActionState::None;
+    UPROPERTY()
+    bool bWasInAir;
+
+    // IK settings
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK Settings")
+    float FootIKTraceDistance = 50.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK Settings")
+    float FootIKInterpSpeed = 15.0f;
+
+    // Animation thresholds
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Settings")
+    float WalkSpeedThreshold = 100.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Settings")
+    float RunSpeedThreshold = 300.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Settings")
+    float FearThreshold = 0.5f;
+
+    // Helper functions
+    FVector PerformFootTrace(FVector FootLocation, FName SocketName);
+    EAnim_TribalMovementState CalculateMovementState();
+    EAnim_TribalEmotionalState CalculateEmotionalState();
+    float CalculateDirection(FVector Velocity, FRotator Rotation);
 };
