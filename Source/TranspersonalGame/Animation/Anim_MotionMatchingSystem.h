@@ -5,17 +5,40 @@
 #include "Animation/AnimInstance.h"
 #include "Animation/BlendSpace.h"
 #include "Animation/AnimMontage.h"
-#include "Engine/DataTable.h"
+#include "Engine/Engine.h"
 #include "../SharedTypes.h"
 #include "Anim_MotionMatchingSystem.generated.h"
+
+UENUM(BlueprintType)
+enum class EAnim_MotionState : uint8
+{
+    Idle        UMETA(DisplayName = "Idle"),
+    Walking     UMETA(DisplayName = "Walking"),
+    Running     UMETA(DisplayName = "Running"),
+    Crouching   UMETA(DisplayName = "Crouching"),
+    Jumping     UMETA(DisplayName = "Jumping"),
+    Climbing    UMETA(DisplayName = "Climbing"),
+    Swimming    UMETA(DisplayName = "Swimming"),
+    Combat      UMETA(DisplayName = "Combat"),
+    Gathering   UMETA(DisplayName = "Gathering"),
+    Crafting    UMETA(DisplayName = "Crafting")
+};
+
+UENUM(BlueprintType)
+enum class EAnim_TribalRole : uint8
+{
+    Hunter      UMETA(DisplayName = "Hunter"),
+    Gatherer    UMETA(DisplayName = "Gatherer"),
+    Crafter     UMETA(DisplayName = "Crafter"),
+    Elder       UMETA(DisplayName = "Elder"),
+    Child       UMETA(DisplayName = "Child"),
+    Warrior     UMETA(DisplayName = "Warrior")
+};
 
 USTRUCT(BlueprintType)
 struct TRANSPERSONALGAME_API FAnim_MotionData
 {
     GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion")
-    FVector Velocity;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion")
     float Speed;
@@ -24,7 +47,7 @@ struct TRANSPERSONALGAME_API FAnim_MotionData
     float Direction;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion")
-    bool bIsMoving;
+    FVector Velocity;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion")
     bool bIsInAir;
@@ -33,43 +56,50 @@ struct TRANSPERSONALGAME_API FAnim_MotionData
     bool bIsCrouching;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion")
-    EAnim_MovementState MovementState;
+    EAnim_MotionState CurrentState;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion")
+    EAnim_TribalRole TribalRole;
 
     FAnim_MotionData()
     {
-        Velocity = FVector::ZeroVector;
         Speed = 0.0f;
         Direction = 0.0f;
-        bIsMoving = false;
+        Velocity = FVector::ZeroVector;
         bIsInAir = false;
         bIsCrouching = false;
-        MovementState = EAnim_MovementState::Idle;
+        CurrentState = EAnim_MotionState::Idle;
+        TribalRole = EAnim_TribalRole::Hunter;
     }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FAnim_PoseMatchData
+struct TRANSPERSONALGAME_API FAnim_BlendSpaceConfig
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pose")
-    FName PoseName;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
+    class UBlendSpace* LocomotionBlendSpace;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pose")
-    float MatchScore;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
+    class UBlendSpace* CombatBlendSpace;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pose")
-    float TimeStamp;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
+    class UBlendSpace* WorkBlendSpace;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pose")
-    TArray<FTransform> BoneTransforms;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
+    float BlendSpacePlayRate;
 
-    FAnim_PoseMatchData()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
+    float TransitionSpeed;
+
+    FAnim_BlendSpaceConfig()
     {
-        PoseName = NAME_None;
-        MatchScore = 0.0f;
-        TimeStamp = 0.0f;
-        BoneTransforms.Empty();
+        LocomotionBlendSpace = nullptr;
+        CombatBlendSpace = nullptr;
+        WorkBlendSpace = nullptr;
+        BlendSpacePlayRate = 1.0f;
+        TransitionSpeed = 5.0f;
     }
 };
 
@@ -85,69 +115,102 @@ protected:
     virtual void BeginPlay() override;
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
+    // Core motion matching data
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Motion Matching")
+    FAnim_MotionData CurrentMotionData;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
+    FAnim_BlendSpaceConfig BlendSpaceConfig;
+
+    // Animation assets
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Assets")
+    TMap<EAnim_MotionState, class UAnimMontage*> StateMontages;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Assets")
+    TMap<EAnim_TribalRole, class UAnimSequence*> RoleIdleAnimations;
+
+    // Motion matching parameters
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float MotionMatchingThreshold;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
+    float StateTransitionTime;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
+    bool bEnableMotionMatching;
+
+    // Character references
+    UPROPERTY()
+    class ACharacter* OwnerCharacter;
+
+    UPROPERTY()
+    class USkeletalMeshComponent* SkeletalMeshComponent;
+
+    UPROPERTY()
+    class UAnimInstance* AnimInstance;
+
 public:
-    // Motion analysis functions
+    // Motion matching functions
     UFUNCTION(BlueprintCallable, Category = "Motion Matching")
-    FAnim_MotionData AnalyzeCurrentMotion();
+    void UpdateMotionData(float DeltaTime);
 
     UFUNCTION(BlueprintCallable, Category = "Motion Matching")
-    FAnim_PoseMatchData FindBestPoseMatch(const FAnim_MotionData& TargetMotion);
+    void SetMotionState(EAnim_MotionState NewState);
 
     UFUNCTION(BlueprintCallable, Category = "Motion Matching")
-    void UpdateMotionDatabase(const FAnim_MotionData& NewMotionData);
+    void SetTribalRole(EAnim_TribalRole NewRole);
 
     UFUNCTION(BlueprintCallable, Category = "Motion Matching")
-    float CalculateMotionSimilarity(const FAnim_MotionData& MotionA, const FAnim_MotionData& MotionB);
-
-    // Animation blending functions
-    UFUNCTION(BlueprintCallable, Category = "Motion Matching")
-    void BlendToTargetPose(const FAnim_PoseMatchData& TargetPose, float BlendTime);
+    EAnim_MotionState GetCurrentMotionState() const;
 
     UFUNCTION(BlueprintCallable, Category = "Motion Matching")
-    void SetMotionMatchingEnabled(bool bEnabled);
+    FAnim_MotionData GetMotionData() const;
 
-    UFUNCTION(BlueprintPure, Category = "Motion Matching")
-    bool IsMotionMatchingActive() const { return bMotionMatchingEnabled; }
+    // Animation control functions
+    UFUNCTION(BlueprintCallable, Category = "Animation Control")
+    void PlayMontage(EAnim_MotionState State, float PlayRate = 1.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "Animation Control")
+    void StopMontage(float BlendOutTime = 0.25f);
+
+    UFUNCTION(BlueprintCallable, Category = "Animation Control")
+    void SetBlendSpaceValues(float Speed, float Direction);
+
+    UFUNCTION(BlueprintCallable, Category = "Animation Control")
+    void EnableMotionMatching(bool bEnable);
+
+    // Tribal-specific animation functions
+    UFUNCTION(BlueprintCallable, Category = "Tribal Animation")
+    void PlayTribalGesture(EAnim_TribalRole Role);
+
+    UFUNCTION(BlueprintCallable, Category = "Tribal Animation")
+    void PlayWorkAnimation(EAnim_TribalRole Role);
+
+    UFUNCTION(BlueprintCallable, Category = "Tribal Animation")
+    void PlayCommunicationGesture();
 
 protected:
-    // Motion database
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Database")
-    TArray<FAnim_MotionData> MotionDatabase;
+    // Internal motion matching logic
+    void CalculateMotionState();
+    void UpdateBlendSpaces();
+    void HandleStateTransitions();
+    bool ShouldTransitionToState(EAnim_MotionState NewState);
+    float CalculateMotionScore(const FAnim_MotionData& TargetMotion);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Database")
-    TArray<FAnim_PoseMatchData> PoseDatabase;
-
-    // Configuration
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
-    float MotionSampleRate;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
-    float PoseMatchThreshold;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
-    float BlendSpeed;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
-    int32 MaxDatabaseEntries;
-
-    // State tracking
-    UPROPERTY(BlueprintReadOnly, Category = "State")
-    FAnim_MotionData CurrentMotion;
-
-    UPROPERTY(BlueprintReadOnly, Category = "State")
-    FAnim_PoseMatchData CurrentBestMatch;
-
-    UPROPERTY(BlueprintReadOnly, Category = "State")
-    bool bMotionMatchingEnabled;
-
-    UPROPERTY(BlueprintReadOnly, Category = "State")
-    float LastSampleTime;
+    // Animation utility functions
+    void InitializeAnimationAssets();
+    void CacheCharacterReferences();
+    UAnimMontage* GetMontageForState(EAnim_MotionState State);
+    UAnimSequence* GetIdleAnimationForRole(EAnim_TribalRole Role);
 
 private:
-    // Internal functions
-    void SampleCurrentMotion();
-    void CleanupOldEntries();
-    FVector GetOwnerVelocity() const;
-    bool IsOwnerInAir() const;
-    bool IsOwnerCrouching() const;
+    // Internal state tracking
+    EAnim_MotionState PreviousState;
+    float StateTransitionTimer;
+    bool bIsTransitioning;
+    
+    // Performance optimization
+    float LastUpdateTime;
+    float UpdateFrequency;
+    bool bNeedsUpdate;
 };
