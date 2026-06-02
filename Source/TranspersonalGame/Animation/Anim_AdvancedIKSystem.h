@@ -4,59 +4,49 @@
 #include "Components/ActorComponent.h"
 #include "Engine/Engine.h"
 #include "Animation/AnimInstance.h"
+#include "Animation/AnimMontage.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Engine/World.h"
 #include "DrawDebugHelpers.h"
 #include "Anim_AdvancedIKSystem.generated.h"
 
-UENUM(BlueprintType)
-enum class EAnim_IKTargetType : uint8
-{
-    LeftFoot     UMETA(DisplayName = "Left Foot"),
-    RightFoot    UMETA(DisplayName = "Right Foot"),
-    LeftHand     UMETA(DisplayName = "Left Hand"),
-    RightHand    UMETA(DisplayName = "Right Hand"),
-    Pelvis       UMETA(DisplayName = "Pelvis"),
-    Spine        UMETA(DisplayName = "Spine")
-};
-
 USTRUCT(BlueprintType)
-struct FAnim_IKTarget
+struct TRANSPERSONALGAME_API FAnim_IKBoneTarget
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK Target")
-    EAnim_IKTargetType TargetType;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK")
+    FName BoneName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK Target")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK")
     FVector TargetLocation;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK Target")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK")
     FRotator TargetRotation;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK Target")
-    float IKAlpha;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK")
+    float BlendWeight;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK Target")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK")
     bool bIsActive;
 
-    FAnim_IKTarget()
+    FAnim_IKBoneTarget()
     {
-        TargetType = EAnim_IKTargetType::LeftFoot;
+        BoneName = NAME_None;
         TargetLocation = FVector::ZeroVector;
         TargetRotation = FRotator::ZeroRotator;
-        IKAlpha = 1.0f;
-        bIsActive = true;
+        BlendWeight = 1.0f;
+        bIsActive = false;
     }
 };
 
 USTRUCT(BlueprintType)
-struct FAnim_FootIKData
+struct TRANSPERSONALGAME_API FAnim_FootIKData
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Foot IK")
-    float FootOffset;
+    FVector FootLocation;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Foot IK")
     FRotator FootRotation;
@@ -65,22 +55,21 @@ struct FAnim_FootIKData
     float IKAlpha;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Foot IK")
-    bool bIsGrounded;
+    float GroundDistance;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Foot IK")
+    bool bHasValidGround;
 
     FAnim_FootIKData()
     {
-        FootOffset = 0.0f;
+        FootLocation = FVector::ZeroVector;
         FootRotation = FRotator::ZeroRotator;
-        IKAlpha = 1.0f;
-        bIsGrounded = true;
+        IKAlpha = 0.0f;
+        GroundDistance = 0.0f;
+        bHasValidGround = false;
     }
 };
 
-/**
- * Advanced IK System for character animation
- * Handles foot placement, hand IK, and full-body IK adjustments
- * Integrates with terrain adaptation and environmental interaction
- */
 UCLASS(ClassGroup=(Animation), meta=(BlueprintSpawnableComponent))
 class TRANSPERSONALGAME_API UAnim_AdvancedIKSystem : public UActorComponent
 {
@@ -91,115 +80,109 @@ public:
 
 protected:
     virtual void BeginPlay() override;
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 public:
-    // Core IK functionality
-    UFUNCTION(BlueprintCallable, Category = "Advanced IK")
-    void UpdateIKTargets(float DeltaTime);
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    UFUNCTION(BlueprintCallable, Category = "Advanced IK")
-    void SetIKTarget(EAnim_IKTargetType TargetType, FVector Location, FRotator Rotation, float Alpha = 1.0f);
+    // Foot IK System
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Foot IK")
+    bool bEnableFootIK;
 
-    UFUNCTION(BlueprintCallable, Category = "Advanced IK")
-    FAnim_IKTarget GetIKTarget(EAnim_IKTargetType TargetType) const;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Foot IK")
+    float FootIKTraceDistance;
 
-    // Foot IK system
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Foot IK")
+    float FootIKInterpSpeed;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Foot IK")
+    FName LeftFootBoneName;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Foot IK")
+    FName RightFootBoneName;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Foot IK")
+    FName PelvisBoneName;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Foot IK")
+    FAnim_FootIKData LeftFootIKData;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Foot IK")
+    FAnim_FootIKData RightFootIKData;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Foot IK")
+    float PelvisOffset;
+
+    // Look At IK System
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Look At IK")
+    bool bEnableLookAtIK;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Look At IK")
+    FName HeadBoneName;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Look At IK")
+    FVector LookAtTarget;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Look At IK")
+    float LookAtBlendSpeed;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Look At IK")
+    float MaxLookAtAngle;
+
+    // Spine IK System
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spine IK")
+    bool bEnableSpineIK;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spine IK")
+    TArray<FName> SpineBoneNames;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spine IK")
+    float SpineFlexibility;
+
+    // General IK Targets
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK Targets")
+    TArray<FAnim_IKBoneTarget> IKBoneTargets;
+
+    // Functions
     UFUNCTION(BlueprintCallable, Category = "Foot IK")
     void UpdateFootIK(float DeltaTime);
 
-    UFUNCTION(BlueprintCallable, Category = "Foot IK")
-    FAnim_FootIKData CalculateFootPlacement(const FVector& FootLocation, const FName& SocketName);
+    UFUNCTION(BlueprintCallable, Category = "Look At IK")
+    void UpdateLookAtIK(float DeltaTime);
 
-    UFUNCTION(BlueprintCallable, Category = "Foot IK")
-    float GetTerrainHeightAtLocation(const FVector& Location, float TraceDistance = 200.0f);
+    UFUNCTION(BlueprintCallable, Category = "Spine IK")
+    void UpdateSpineIK(float DeltaTime);
 
-    // Hand IK system
-    UFUNCTION(BlueprintCallable, Category = "Hand IK")
-    void UpdateHandIK(float DeltaTime);
+    UFUNCTION(BlueprintCallable, Category = "IK System")
+    void SetLookAtTarget(const FVector& NewTarget);
 
-    UFUNCTION(BlueprintCallable, Category = "Hand IK")
-    void SetHandIKTarget(bool bIsLeftHand, AActor* TargetActor, FVector Offset = FVector::ZeroVector);
+    UFUNCTION(BlueprintCallable, Category = "IK System")
+    void AddIKBoneTarget(const FName& BoneName, const FVector& TargetLocation, const FRotator& TargetRotation, float BlendWeight = 1.0f);
 
-    // Pelvis adjustment
-    UFUNCTION(BlueprintCallable, Category = "Pelvis IK")
-    void UpdatePelvisOffset(float DeltaTime);
+    UFUNCTION(BlueprintCallable, Category = "IK System")
+    void RemoveIKBoneTarget(const FName& BoneName);
 
-    UFUNCTION(BlueprintCallable, Category = "Pelvis IK")
-    float CalculatePelvisOffset() const;
+    UFUNCTION(BlueprintCallable, Category = "IK System")
+    void EnableFootIK(bool bEnable);
 
-    // Debug and visualization
-    UFUNCTION(BlueprintCallable, Category = "IK Debug", CallInEditor)
-    void ToggleIKDebugVisualization();
+    UFUNCTION(BlueprintCallable, Category = "IK System")
+    void EnableLookAtIK(bool bEnable);
 
-    UFUNCTION(BlueprintCallable, Category = "IK Debug")
-    void DrawIKDebugInfo();
-
-    // Configuration
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK Settings")
-    bool bEnableFootIK;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK Settings")
-    bool bEnableHandIK;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK Settings")
-    bool bEnablePelvisAdjustment;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK Settings")
-    float IKUpdateRate;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK Settings")
-    float FootTraceDistance;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK Settings")
-    float IKInterpSpeed;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK Settings")
-    float MaxFootOffset;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK Settings")
-    float MaxPelvisOffset;
-
-    // IK targets storage
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "IK State")
-    TMap<EAnim_IKTargetType, FAnim_IKTarget> IKTargets;
-
-    // Foot IK data
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Foot IK State")
-    FAnim_FootIKData LeftFootIK;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Foot IK State")
-    FAnim_FootIKData RightFootIK;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Pelvis IK State")
-    float PelvisOffset;
-
-    // Debug settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Debug")
-    bool bShowIKDebug;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Debug")
-    bool bShowFootTraces;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Debug")
-    bool bShowIKTargets;
+    UFUNCTION(BlueprintCallable, Category = "IK System")
+    void EnableSpineIK(bool bEnable);
 
 private:
-    // Internal state
-    float LastIKUpdateTime;
+    UPROPERTY()
     USkeletalMeshComponent* OwnerMeshComponent;
-    
-    // Cached socket names
-    FName LeftFootSocketName;
-    FName RightFootSocketName;
-    FName LeftHandSocketName;
-    FName RightHandSocketName;
 
-    // Helper functions
-    void InitializeIKTargets();
-    void CacheSocketNames();
-    FVector GetSocketWorldLocation(const FName& SocketName) const;
-    FRotator GetSocketWorldRotation(const FName& SocketName) const;
-    bool PerformFootTrace(const FVector& StartLocation, FVector& OutHitLocation, FVector& OutHitNormal) const;
-    FRotator CalculateFootRotationFromNormal(const FVector& SurfaceNormal) const;
+    // Internal foot IK functions
+    bool PerformFootTrace(const FVector& FootLocation, FAnim_FootIKData& FootData);
+    FRotator CalculateFootRotationFromNormal(const FVector& Normal);
+    void UpdatePelvisOffset(float DeltaTime);
+
+    // Internal look at IK functions
+    FRotator CalculateLookAtRotation(const FVector& CurrentLocation, const FVector& TargetLocation);
+    bool IsLookAtTargetValid();
+
+    // Internal spine IK functions
+    void CalculateSpineBendRotations(const FVector& TargetDirection, TArray<FRotator>& OutRotations);
 };
