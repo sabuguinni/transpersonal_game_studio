@@ -2,17 +2,15 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
-#include "Engine/World.h"
 #include "Engine/Engine.h"
-#include "Particles/ParticleSystemComponent.h"
-#include "Components/AudioComponent.h"
-#include "Materials/MaterialParameterCollection.h"
+#include "Engine/World.h"
+#include "Kismet/GameplayStatics.h"
 #include "Perf_WeatherPerformanceOptimizer.generated.h"
 
 UENUM(BlueprintType)
-enum class EPerf_WeatherComplexity : uint8
+enum class EPerf_WeatherOptimizationLevel : uint8
 {
-    Minimal     UMETA(DisplayName = "Minimal"),
+    Disabled    UMETA(DisplayName = "Disabled"),
     Low         UMETA(DisplayName = "Low"),
     Medium      UMETA(DisplayName = "Medium"),
     High        UMETA(DisplayName = "High"),
@@ -20,53 +18,57 @@ enum class EPerf_WeatherComplexity : uint8
 };
 
 USTRUCT(BlueprintType)
-struct FPerf_WeatherPerformanceSettings
+struct FPerf_WeatherMetrics
 {
     GENERATED_BODY()
 
-    // Particle system settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Particles")
-    int32 MaxRainParticles = 1000;
+    UPROPERTY(BlueprintReadOnly, Category = "Weather Performance")
+    float ParticleSystemFrameTime = 0.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Particles")
-    int32 MaxSnowParticles = 500;
+    UPROPERTY(BlueprintReadOnly, Category = "Weather Performance")
+    int32 ActiveParticleCount = 0;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Particles")
-    int32 MaxFogParticles = 200;
+    UPROPERTY(BlueprintReadOnly, Category = "Weather Performance")
+    float WeatherUpdateFrameTime = 0.0f;
 
-    // Audio settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    float WeatherAudioDistance = 2000.0f;
+    UPROPERTY(BlueprintReadOnly, Category = "Weather Performance")
+    float VolumetricFogFrameTime = 0.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    float WeatherAudioVolume = 1.0f;
+    UPROPERTY(BlueprintReadOnly, Category = "Weather Performance")
+    float WindSimulationFrameTime = 0.0f;
 
-    // Lighting settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
-    bool bEnableDynamicWeatherLighting = true;
+    UPROPERTY(BlueprintReadOnly, Category = "Weather Performance")
+    int32 WeatherEffectLODLevel = 0;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
-    float LightingUpdateRate = 0.1f;
+    UPROPERTY(BlueprintReadOnly, Category = "Weather Performance")
+    float TotalWeatherFrameTime = 0.0f;
+};
 
-    // Performance thresholds
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float MinFrameRate = 30.0f;
+USTRUCT(BlueprintType)
+struct FPerf_WeatherOptimizationSettings
+{
+    GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float TargetFrameRate = 60.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather Optimization")
+    EPerf_WeatherOptimizationLevel OptimizationLevel = EPerf_WeatherOptimizationLevel::Medium;
 
-    FPerf_WeatherPerformanceSettings()
-    {
-        MaxRainParticles = 1000;
-        MaxSnowParticles = 500;
-        MaxFogParticles = 200;
-        WeatherAudioDistance = 2000.0f;
-        WeatherAudioVolume = 1.0f;
-        bEnableDynamicWeatherLighting = true;
-        LightingUpdateRate = 0.1f;
-        MinFrameRate = 30.0f;
-        TargetFrameRate = 60.0f;
-    }
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather Optimization")
+    float MaxParticleSystemFrameTime = 2.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather Optimization")
+    int32 MaxActiveParticles = 5000;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather Optimization")
+    float WeatherLODDistance = 5000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather Optimization")
+    bool bEnableVolumetricFogOptimization = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather Optimization")
+    bool bEnableWindSimulationOptimization = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather Optimization")
+    float WeatherUpdateFrequency = 30.0f;
 };
 
 UCLASS(ClassGroup=(Performance), meta=(BlueprintSpawnableComponent))
@@ -82,99 +84,47 @@ protected:
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 public:
-    // Performance optimization functions
     UFUNCTION(BlueprintCallable, Category = "Weather Performance")
     void OptimizeWeatherSystems();
 
     UFUNCTION(BlueprintCallable, Category = "Weather Performance")
-    void SetWeatherComplexity(EPerf_WeatherComplexity Complexity);
+    void UpdateWeatherMetrics();
 
     UFUNCTION(BlueprintCallable, Category = "Weather Performance")
-    void AdjustParticleCount(int32 NewParticleCount);
+    FPerf_WeatherMetrics GetWeatherMetrics() const { return WeatherMetrics; }
 
     UFUNCTION(BlueprintCallable, Category = "Weather Performance")
-    void OptimizeWeatherAudio();
+    void SetOptimizationLevel(EPerf_WeatherOptimizationLevel NewLevel);
 
     UFUNCTION(BlueprintCallable, Category = "Weather Performance")
-    void OptimizeWeatherLighting();
+    void OptimizeParticleSystems();
 
     UFUNCTION(BlueprintCallable, Category = "Weather Performance")
-    float GetCurrentFrameRate() const;
+    void OptimizeVolumetricFog();
 
     UFUNCTION(BlueprintCallable, Category = "Weather Performance")
-    bool IsPerformanceAcceptable() const;
+    void OptimizeWindSimulation();
 
-    // Weather system monitoring
-    UFUNCTION(BlueprintCallable, Category = "Weather Performance")
-    void MonitorWeatherPerformance();
-
-    UFUNCTION(BlueprintCallable, Category = "Weather Performance")
-    void LogWeatherPerformanceMetrics();
-
-    // Dynamic optimization
-    UFUNCTION(BlueprintCallable, Category = "Weather Performance")
-    void EnableDynamicOptimization(bool bEnabled);
-
-    UFUNCTION(BlueprintCallable, Category = "Weather Performance")
-    void UpdatePerformanceSettings();
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Weather Performance")
+    void RunWeatherPerformanceTest();
 
 protected:
-    // Performance settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance Settings")
-    FPerf_WeatherPerformanceSettings PerformanceSettings;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather Performance")
+    FPerf_WeatherOptimizationSettings OptimizationSettings;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance Settings")
-    EPerf_WeatherComplexity CurrentComplexity;
+    UPROPERTY(BlueprintReadOnly, Category = "Weather Performance")
+    FPerf_WeatherMetrics WeatherMetrics;
 
-    // Dynamic optimization
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dynamic Optimization")
-    bool bDynamicOptimizationEnabled;
+    UPROPERTY(BlueprintReadOnly, Category = "Weather Performance")
+    float LastOptimizationTime = 0.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dynamic Optimization")
-    float PerformanceCheckInterval;
-
-    // Performance tracking
-    UPROPERTY(BlueprintReadOnly, Category = "Performance Tracking")
-    float CurrentFrameRate;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Performance Tracking")
-    float AverageFrameRate;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Performance Tracking")
-    int32 ActiveParticleCount;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Performance Tracking")
-    float WeatherRenderTime;
+    UPROPERTY(BlueprintReadOnly, Category = "Weather Performance")
+    bool bIsOptimizationActive = false;
 
 private:
-    // Internal optimization functions
-    void OptimizeRainSystem();
-    void OptimizeSnowSystem();
-    void OptimizeFogSystem();
-    void OptimizeWindSystem();
-    void AdjustLODSettings();
-    void UpdateParticleSettings();
-    void UpdateAudioSettings();
-    void UpdateLightingSettings();
-
-    // Performance monitoring
-    void CalculateFrameRate(float DeltaTime);
-    void CheckPerformanceThresholds();
-    void ApplyPerformanceAdjustments();
-
-    // Internal state
-    float FrameTimeAccumulator;
-    int32 FrameCount;
-    float LastPerformanceCheck;
-    TArray<float> FrameTimeHistory;
-    
-    // Weather system references
-    UPROPERTY()
-    TArray<UParticleSystemComponent*> WeatherParticleSystems;
-    
-    UPROPERTY()
-    TArray<UAudioComponent*> WeatherAudioComponents;
-    
-    UPROPERTY()
-    UMaterialParameterCollection* WeatherMaterialCollection;
+    void UpdateParticleSystemMetrics();
+    void UpdateVolumetricFogMetrics();
+    void UpdateWindSimulationMetrics();
+    void ApplyOptimizationSettings();
+    void LogWeatherPerformanceData();
 };
