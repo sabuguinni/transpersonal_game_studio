@@ -1,293 +1,406 @@
 #include "Eng_BiomeManager.h"
 #include "Engine/World.h"
+#include "Engine/Engine.h"
 #include "Kismet/GameplayStatics.h"
-#include "Math/UnrealMathUtility.h"
+#include "Components/StaticMeshComponent.h"
 
 UEng_BiomeManager::UEng_BiomeManager()
 {
-    // Constructor
+    MaxTotalActors = 20000;
+    MaxActorsPerBiome = 4000;
+    LastCleanupTime = 0.0f;
 }
 
 void UEng_BiomeManager::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
     
-    UE_LOG(LogTemp, Warning, TEXT("BiomeManager: Initializing biome subsystem"));
+    UE_LOG(LogTemp, Warning, TEXT("Engine Architect: BiomeManager Initialize"));
+    
     SetupDefaultBiomes();
     InitializeBiomes();
 }
 
 void UEng_BiomeManager::Deinitialize()
 {
-    UE_LOG(LogTemp, Warning, TEXT("BiomeManager: Deinitializing biome subsystem"));
+    // Clean up biome actor registry
+    BiomeActorRegistry.Empty();
+    BiomeRegions.Empty();
     BiomeConfigurations.Empty();
     
     Super::Deinitialize();
 }
 
-void UEng_BiomeManager::SetupDefaultBiomes()
-{
-    // Savanna biome (center of map)
-    FEng_BiomeConfiguration Savanna;
-    Savanna.BiomeType = EBiomeType::Savanna;
-    Savanna.CenterLocation = FVector(0, 0, 100);
-    Savanna.Radius = 15000.0f;
-    Savanna.Temperature = 28.0f;
-    Savanna.Humidity = 0.3f;
-    Savanna.Density = 0.7f;
-    Savanna.AllowedVegetation = {"AcaciaTree", "SavannaGrass", "BaobabTree"};
-    Savanna.AllowedDinosaurs = {"TRex", "Triceratops", "Parasaurolophus"};
-    BiomeConfigurations.Add(EBiomeType::Savanna, Savanna);
-
-    // Swamp biome (southwest)
-    FEng_BiomeConfiguration Swamp;
-    Swamp.BiomeType = EBiomeType::Swamp;
-    Swamp.CenterLocation = FVector(-50000, -45000, 50);
-    Swamp.Radius = 15000.0f;
-    Swamp.Temperature = 24.0f;
-    Swamp.Humidity = 0.9f;
-    Swamp.Density = 1.2f;
-    Swamp.AllowedVegetation = {"CypressTree", "SwampGrass", "Ferns"};
-    Swamp.AllowedDinosaurs = {"Velociraptor", "Ankylosaurus", "Parasaurolophus"};
-    BiomeConfigurations.Add(EBiomeType::Swamp, Swamp);
-
-    // Forest biome (northwest)
-    FEng_BiomeConfiguration Forest;
-    Forest.BiomeType = EBiomeType::Forest;
-    Forest.CenterLocation = FVector(-45000, 40000, 200);
-    Forest.Radius = 15000.0f;
-    Forest.Temperature = 20.0f;
-    Forest.Humidity = 0.8f;
-    Forest.Density = 1.5f;
-    Forest.AllowedVegetation = {"PineTree", "OakTree", "Ferns", "Bushes"};
-    Forest.AllowedDinosaurs = {"Brachiosaurus", "Velociraptor", "Triceratops"};
-    BiomeConfigurations.Add(EBiomeType::Forest, Forest);
-
-    // Desert biome (east)
-    FEng_BiomeConfiguration Desert;
-    Desert.BiomeType = EBiomeType::Desert;
-    Desert.CenterLocation = FVector(55000, 0, 150);
-    Desert.Radius = 15000.0f;
-    Desert.Temperature = 35.0f;
-    Desert.Humidity = 0.1f;
-    Desert.Density = 0.3f;
-    Desert.AllowedVegetation = {"Cactus", "DesertShrub"};
-    Desert.AllowedDinosaurs = {"TRex", "Ankylosaurus"};
-    BiomeConfigurations.Add(EBiomeType::Desert, Desert);
-
-    // Mountain biome (northeast)
-    FEng_BiomeConfiguration Mountain;
-    Mountain.BiomeType = EBiomeType::Mountain;
-    Mountain.CenterLocation = FVector(40000, 50000, 500);
-    Mountain.Radius = 15000.0f;
-    Mountain.Temperature = 15.0f;
-    Mountain.Humidity = 0.6f;
-    Mountain.Density = 0.8f;
-    Mountain.AllowedVegetation = {"PineTree", "MountainGrass", "Rocks"};
-    Mountain.AllowedDinosaurs = {"Velociraptor", "Triceratops"};
-    BiomeConfigurations.Add(EBiomeType::Mountain, Mountain);
-}
-
 void UEng_BiomeManager::InitializeBiomes()
 {
-    UE_LOG(LogTemp, Warning, TEXT("BiomeManager: Initialized %d biomes"), BiomeConfigurations.Num());
+    UE_LOG(LogTemp, Warning, TEXT("Engine Architect: Initializing Biomes"));
     
-    for (auto& BiomePair : BiomeConfigurations)
+    // Create 5 biome regions across the map
+    CreateBiomeRegion(EBiomeType::Grassland, FVector(0, 0, 0), 15000.0f);
+    CreateBiomeRegion(EBiomeType::Forest, FVector(20000, 0, 0), 12000.0f);
+    CreateBiomeRegion(EBiomeType::Desert, FVector(-20000, 0, 0), 10000.0f);
+    CreateBiomeRegion(EBiomeType::Mountain, FVector(0, 20000, 0), 8000.0f);
+    CreateBiomeRegion(EBiomeType::Swamp, FVector(0, -20000, 0), 9000.0f);
+    
+    // Initialize actor registry for each biome
+    for (const auto& BiomePair : BiomeConfigurations)
     {
-        FEng_BiomeConfiguration& Config = BiomePair.Value;
-        Config.CurrentActorCount = 0;
-        
-        UE_LOG(LogTemp, Log, TEXT("BiomeManager: Setup biome %s at location (%f, %f, %f)"), 
-            *UEnum::GetValueAsString(Config.BiomeType),
-            Config.CenterLocation.X, Config.CenterLocation.Y, Config.CenterLocation.Z);
+        BiomeActorRegistry.Add(BiomePair.Key, TArray<TWeakObjectPtr<AActor>>());
     }
+}
+
+void UEng_BiomeManager::SetupDefaultBiomes()
+{
+    // Grassland Configuration
+    FEng_BiomeData GrasslandData;
+    GrasslandData.BiomeType = EBiomeType::Grassland;
+    GrasslandData.Temperature = 22.0f;
+    GrasslandData.Humidity = 0.6f;
+    GrasslandData.Elevation = 100.0f;
+    GrasslandData.MaxActorsPerBiome = 4000;
+    BiomeConfigurations.Add(EBiomeType::Grassland, GrasslandData);
+    
+    // Forest Configuration
+    FEng_BiomeData ForestData;
+    ForestData.BiomeType = EBiomeType::Forest;
+    ForestData.Temperature = 18.0f;
+    ForestData.Humidity = 0.8f;
+    ForestData.Elevation = 200.0f;
+    ForestData.MaxActorsPerBiome = 4000;
+    BiomeConfigurations.Add(EBiomeType::Forest, ForestData);
+    
+    // Desert Configuration
+    FEng_BiomeData DesertData;
+    DesertData.BiomeType = EBiomeType::Desert;
+    DesertData.Temperature = 35.0f;
+    DesertData.Humidity = 0.2f;
+    DesertData.Elevation = 50.0f;
+    DesertData.MaxActorsPerBiome = 4000;
+    BiomeConfigurations.Add(EBiomeType::Desert, DesertData);
+    
+    // Mountain Configuration
+    FEng_BiomeData MountainData;
+    MountainData.BiomeType = EBiomeType::Mountain;
+    MountainData.Temperature = 8.0f;
+    MountainData.Humidity = 0.4f;
+    MountainData.Elevation = 1500.0f;
+    MountainData.MaxActorsPerBiome = 4000;
+    BiomeConfigurations.Add(EBiomeType::Mountain, MountainData);
+    
+    // Swamp Configuration
+    FEng_BiomeData SwampData;
+    SwampData.BiomeType = EBiomeType::Swamp;
+    SwampData.Temperature = 26.0f;
+    SwampData.Humidity = 0.9f;
+    SwampData.Elevation = 20.0f;
+    SwampData.MaxActorsPerBiome = 4000;
+    BiomeConfigurations.Add(EBiomeType::Swamp, SwampData);
+}
+
+void UEng_BiomeManager::CreateBiomeRegion(EBiomeType BiomeType, const FVector& Center, float Radius)
+{
+    FEng_BiomeRegion NewRegion;
+    NewRegion.Center = Center;
+    NewRegion.Radius = Radius;
+    
+    if (BiomeConfigurations.Contains(BiomeType))
+    {
+        NewRegion.BiomeData = BiomeConfigurations[BiomeType];
+    }
+    
+    BiomeRegions.Add(BiomeType, NewRegion);
+    
+    UE_LOG(LogTemp, Warning, TEXT("Engine Architect: Created biome region %d at %s with radius %f"), 
+           (int32)BiomeType, *Center.ToString(), Radius);
 }
 
 EBiomeType UEng_BiomeManager::GetBiomeAtLocation(const FVector& Location) const
 {
-    return FindClosestBiome(Location);
-}
-
-FEng_BiomeConfiguration UEng_BiomeManager::GetBiomeConfiguration(EBiomeType BiomeType) const
-{
-    if (const FEng_BiomeConfiguration* Config = BiomeConfigurations.Find(BiomeType))
-    {
-        return *Config;
-    }
+    float ClosestDistance = FLT_MAX;
+    EBiomeType ClosestBiome = EBiomeType::Grassland;
     
-    // Return default savanna if not found
-    return BiomeConfigurations[EBiomeType::Savanna];
-}
-
-bool UEng_BiomeManager::CanSpawnActorInBiome(EBiomeType BiomeType, const FString& ActorType) const
-{
-    const FEng_BiomeConfiguration* Config = BiomeConfigurations.Find(BiomeType);
-    if (!Config)
+    for (const auto& RegionPair : BiomeRegions)
     {
-        return false;
-    }
-
-    // Check if biome is overcrowded
-    if (Config->CurrentActorCount >= Config->MaxActors)
-    {
-        return false;
-    }
-
-    // Check if global limit is reached
-    if (GlobalCurrentActors >= GlobalMaxActors)
-    {
-        return false;
-    }
-
-    // Check if actor type is allowed in this biome
-    return Config->AllowedVegetation.Contains(ActorType) || Config->AllowedDinosaurs.Contains(ActorType);
-}
-
-void UEng_BiomeManager::RegisterActorInBiome(EBiomeType BiomeType)
-{
-    if (FEng_BiomeConfiguration* Config = BiomeConfigurations.Find(BiomeType))
-    {
-        Config->CurrentActorCount++;
-        GlobalCurrentActors++;
-    }
-}
-
-void UEng_BiomeManager::UnregisterActorFromBiome(EBiomeType BiomeType)
-{
-    if (FEng_BiomeConfiguration* Config = BiomeConfigurations.Find(BiomeType))
-    {
-        Config->CurrentActorCount = FMath::Max(0, Config->CurrentActorCount - 1);
-        GlobalCurrentActors = FMath::Max(0, GlobalCurrentActors - 1);
-    }
-}
-
-TArray<FVector> UEng_BiomeManager::GetSpawnLocationsInBiome(EBiomeType BiomeType, int32 Count) const
-{
-    TArray<FVector> Locations;
-    
-    const FEng_BiomeConfiguration* Config = BiomeConfigurations.Find(BiomeType);
-    if (!Config)
-    {
-        return Locations;
-    }
-
-    for (int32 i = 0; i < Count; i++)
-    {
-        // Generate random location within biome radius
-        float Angle = FMath::RandRange(0.0f, 2.0f * PI);
-        float Distance = FMath::RandRange(0.0f, Config->Radius * 0.8f); // Stay within 80% of radius
+        const FEng_BiomeRegion& Region = RegionPair.Value;
+        float Distance = FVector::Dist(Location, Region.Center);
         
-        FVector RandomOffset;
-        RandomOffset.X = FMath::Cos(Angle) * Distance;
-        RandomOffset.Y = FMath::Sin(Angle) * Distance;
-        RandomOffset.Z = FMath::RandRange(-100.0f, 100.0f); // Some height variation
-        
-        FVector SpawnLocation = Config->CenterLocation + RandomOffset;
-        Locations.Add(SpawnLocation);
-    }
-
-    return Locations;
-}
-
-float UEng_BiomeManager::GetBiomeTemperature(const FVector& Location) const
-{
-    EBiomeType BiomeType = GetBiomeAtLocation(Location);
-    const FEng_BiomeConfiguration* Config = BiomeConfigurations.Find(BiomeType);
-    return Config ? Config->Temperature : 25.0f;
-}
-
-float UEng_BiomeManager::GetBiomeHumidity(const FVector& Location) const
-{
-    EBiomeType BiomeType = GetBiomeAtLocation(Location);
-    const FEng_BiomeConfiguration* Config = BiomeConfigurations.Find(BiomeType);
-    return Config ? Config->Humidity : 0.5f;
-}
-
-void UEng_BiomeManager::UpdateBiomeActorCounts()
-{
-    // Reset all counts
-    GlobalCurrentActors = 0;
-    for (auto& BiomePair : BiomeConfigurations)
-    {
-        BiomePair.Value.CurrentActorCount = 0;
-    }
-
-    // Count all actors in the world
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        return;
-    }
-
-    TArray<AActor*> AllActors;
-    UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), AllActors);
-
-    for (AActor* Actor : AllActors)
-    {
-        if (!Actor)
-        {
-            continue;
-        }
-
-        EBiomeType BiomeType = GetBiomeAtLocation(Actor->GetActorLocation());
-        RegisterActorInBiome(BiomeType);
-    }
-
-    UE_LOG(LogTemp, Warning, TEXT("BiomeManager: Updated actor counts - Global: %d"), GlobalCurrentActors);
-}
-
-bool UEng_BiomeManager::IsBiomeOvercrowded(EBiomeType BiomeType) const
-{
-    const FEng_BiomeConfiguration* Config = BiomeConfigurations.Find(BiomeType);
-    return Config ? (Config->CurrentActorCount >= Config->MaxActors) : false;
-}
-
-void UEng_BiomeManager::CleanupOvercrowdedBiomes()
-{
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        return;
-    }
-
-    for (auto& BiomePair : BiomeConfigurations)
-    {
-        EBiomeType BiomeType = BiomePair.Key;
-        FEng_BiomeConfiguration& Config = BiomePair.Value;
-        
-        if (Config.CurrentActorCount > Config.MaxActors)
-        {
-            int32 ExcessActors = Config.CurrentActorCount - Config.MaxActors;
-            UE_LOG(LogTemp, Warning, TEXT("BiomeManager: Cleaning up %d excess actors in biome %s"), 
-                ExcessActors, *UEnum::GetValueAsString(BiomeType));
-            
-            // This would need to be implemented with specific cleanup logic
-            // For now, just log the need for cleanup
-        }
-    }
-}
-
-float UEng_BiomeManager::CalculateDistanceFromBiomeCenter(const FVector& Location, const FEng_BiomeConfiguration& Biome) const
-{
-    return FVector::Dist2D(Location, Biome.CenterLocation);
-}
-
-EBiomeType UEng_BiomeManager::FindClosestBiome(const FVector& Location) const
-{
-    EBiomeType ClosestBiome = EBiomeType::Savanna;
-    float ClosestDistance = MAX_FLT;
-
-    for (const auto& BiomePair : BiomeConfigurations)
-    {
-        const FEng_BiomeConfiguration& Config = BiomePair.Value;
-        float Distance = CalculateDistanceFromBiomeCenter(Location, Config);
-        
-        if (Distance < ClosestDistance)
+        if (Distance < Region.Radius && Distance < ClosestDistance)
         {
             ClosestDistance = Distance;
-            ClosestBiome = Config.BiomeType;
+            ClosestBiome = RegionPair.Key;
         }
     }
-
+    
     return ClosestBiome;
+}
+
+FEng_BiomeData UEng_BiomeManager::GetBiomeData(EBiomeType BiomeType) const
+{
+    if (BiomeConfigurations.Contains(BiomeType))
+    {
+        return BiomeConfigurations[BiomeType];
+    }
+    
+    return FEng_BiomeData(); // Return default
+}
+
+bool UEng_BiomeManager::CanSpawnActorInBiome(EBiomeType BiomeType) const
+{
+    int32 CurrentCount = GetBiomeActorCount(BiomeType);
+    int32 MaxCount = MaxActorsPerBiome;
+    
+    if (BiomeConfigurations.Contains(BiomeType))
+    {
+        MaxCount = BiomeConfigurations[BiomeType].MaxActorsPerBiome;
+    }
+    
+    return CurrentCount < MaxCount && GetTotalActorCount() < MaxTotalActors;
+}
+
+void UEng_BiomeManager::RegisterActorToBiome(AActor* Actor, EBiomeType BiomeType)
+{
+    if (!Actor)
+    {
+        return;
+    }
+    
+    if (!BiomeActorRegistry.Contains(BiomeType))
+    {
+        BiomeActorRegistry.Add(BiomeType, TArray<TWeakObjectPtr<AActor>>());
+    }
+    
+    BiomeActorRegistry[BiomeType].Add(Actor);
+    
+    // Check if we need cleanup
+    if (!IsWithinActorLimits())
+    {
+        CleanupExcessActors();
+    }
+}
+
+void UEng_BiomeManager::UnregisterActorFromBiome(AActor* Actor, EBiomeType BiomeType)
+{
+    if (!Actor || !BiomeActorRegistry.Contains(BiomeType))
+    {
+        return;
+    }
+    
+    BiomeActorRegistry[BiomeType].RemoveAll([Actor](const TWeakObjectPtr<AActor>& WeakActor)
+    {
+        return !WeakActor.IsValid() || WeakActor.Get() == Actor;
+    });
+}
+
+int32 UEng_BiomeManager::GetTotalActorCount() const
+{
+    int32 TotalCount = 0;
+    
+    for (const auto& RegistryPair : BiomeActorRegistry)
+    {
+        // Count only valid actors
+        for (const TWeakObjectPtr<AActor>& WeakActor : RegistryPair.Value)
+        {
+            if (WeakActor.IsValid())
+            {
+                TotalCount++;
+            }
+        }
+    }
+    
+    return TotalCount;
+}
+
+int32 UEng_BiomeManager::GetBiomeActorCount(EBiomeType BiomeType) const
+{
+    if (!BiomeActorRegistry.Contains(BiomeType))
+    {
+        return 0;
+    }
+    
+    int32 ValidCount = 0;
+    for (const TWeakObjectPtr<AActor>& WeakActor : BiomeActorRegistry[BiomeType])
+    {
+        if (WeakActor.IsValid())
+        {
+            ValidCount++;
+        }
+    }
+    
+    return ValidCount;
+}
+
+void UEng_BiomeManager::CleanupExcessActors()
+{
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        return;
+    }
+    
+    float CurrentTime = World->GetTimeSeconds();
+    if (CurrentTime - LastCleanupTime < CleanupInterval)
+    {
+        return; // Don't cleanup too frequently
+    }
+    
+    LastCleanupTime = CurrentTime;
+    
+    UE_LOG(LogTemp, Warning, TEXT("Engine Architect: Cleaning up excess actors"));
+    
+    // Clean up invalid references first
+    for (auto& RegistryPair : BiomeActorRegistry)
+    {
+        RegistryPair.Value.RemoveAll([](const TWeakObjectPtr<AActor>& WeakActor)
+        {
+            return !WeakActor.IsValid();
+        });
+    }
+    
+    // Remove excess actors from biomes that exceed limits
+    for (const auto& BiomePair : BiomeConfigurations)
+    {
+        EBiomeType BiomeType = BiomePair.Key;
+        int32 MaxActors = BiomePair.Value.MaxActorsPerBiome;
+        int32 CurrentActors = GetBiomeActorCount(BiomeType);
+        
+        if (CurrentActors > MaxActors)
+        {
+            int32 ExcessCount = CurrentActors - MaxActors;
+            RemoveOldestActorsFromBiome(BiomeType, ExcessCount);
+        }
+    }
+}
+
+void UEng_BiomeManager::RemoveOldestActorsFromBiome(EBiomeType BiomeType, int32 CountToRemove)
+{
+    if (!BiomeActorRegistry.Contains(BiomeType) || CountToRemove <= 0)
+    {
+        return;
+    }
+    
+    TArray<TWeakObjectPtr<AActor>>& ActorArray = BiomeActorRegistry[BiomeType];
+    int32 ActorsRemoved = 0;
+    
+    // Remove from the beginning (oldest actors)
+    for (int32 i = 0; i < ActorArray.Num() && ActorsRemoved < CountToRemove; ++i)
+    {
+        if (ActorArray[i].IsValid())
+        {
+            AActor* ActorToDestroy = ActorArray[i].Get();
+            if (ActorToDestroy)
+            {
+                // Don't destroy critical actors like PlayerStart, GameMode, etc.
+                if (!ActorToDestroy->IsA<APlayerStart>() && 
+                    !ActorToDestroy->IsA<AGameModeBase>() &&
+                    !ActorToDestroy->GetName().Contains(TEXT("PlayerStart")))
+                {
+                    ActorToDestroy->Destroy();
+                    ActorsRemoved++;
+                }
+            }
+        }
+    }
+    
+    // Clean up the array
+    ActorArray.RemoveAll([](const TWeakObjectPtr<AActor>& WeakActor)
+    {
+        return !WeakActor.IsValid();
+    });
+    
+    UE_LOG(LogTemp, Warning, TEXT("Engine Architect: Removed %d excess actors from biome %d"), 
+           ActorsRemoved, (int32)BiomeType);
+}
+
+bool UEng_BiomeManager::IsWithinActorLimits() const
+{
+    return GetTotalActorCount() <= MaxTotalActors;
+}
+
+float UEng_BiomeManager::GetTemperatureAtLocation(const FVector& Location) const
+{
+    EBiomeType BiomeType = GetBiomeAtLocation(Location);
+    FEng_BiomeData BiomeData = GetBiomeData(BiomeType);
+    
+    // Add some variation based on elevation
+    float ElevationModifier = (Location.Z - BiomeData.Elevation) * -0.01f; // Cooler at higher elevation
+    
+    return BiomeData.Temperature + ElevationModifier;
+}
+
+float UEng_BiomeManager::GetHumidityAtLocation(const FVector& Location) const
+{
+    EBiomeType BiomeType = GetBiomeAtLocation(Location);
+    FEng_BiomeData BiomeData = GetBiomeData(BiomeType);
+    
+    return BiomeData.Humidity;
+}
+
+float UEng_BiomeManager::GetElevationAtLocation(const FVector& Location) const
+{
+    EBiomeType BiomeType = GetBiomeAtLocation(Location);
+    FEng_BiomeData BiomeData = GetBiomeData(BiomeType);
+    
+    return BiomeData.Elevation;
+}
+
+float UEng_BiomeManager::GetBiomeTransitionWeight(const FVector& Location, EBiomeType BiomeType) const
+{
+    if (!BiomeRegions.Contains(BiomeType))
+    {
+        return 0.0f;
+    }
+    
+    const FEng_BiomeRegion& Region = BiomeRegions[BiomeType];
+    float Distance = FVector::Dist(Location, Region.Center);
+    
+    if (Distance >= Region.Radius)
+    {
+        return 0.0f;
+    }
+    
+    // Linear falloff from center to edge
+    return 1.0f - (Distance / Region.Radius);
+}
+
+TArray<EBiomeType> UEng_BiomeManager::GetNearbyBiomes(const FVector& Location, float Radius) const
+{
+    TArray<EBiomeType> NearbyBiomes;
+    
+    for (const auto& RegionPair : BiomeRegions)
+    {
+        const FEng_BiomeRegion& Region = RegionPair.Value;
+        float Distance = FVector::Dist(Location, Region.Center);
+        
+        if (Distance <= (Region.Radius + Radius))
+        {
+            NearbyBiomes.Add(RegionPair.Key);
+        }
+    }
+    
+    return NearbyBiomes;
+}
+
+void UEng_BiomeManager::ValidateActorLimits()
+{
+    int32 TotalActors = GetTotalActorCount();
+    
+    if (TotalActors > MaxTotalActors)
+    {
+        UE_LOG(LogTemp, Error, TEXT("Engine Architect: CRITICAL - Total actors (%d) exceeds limit (%d)"), 
+               TotalActors, MaxTotalActors);
+        CleanupExcessActors();
+    }
+    
+    for (const auto& BiomePair : BiomeConfigurations)
+    {
+        EBiomeType BiomeType = BiomePair.Key;
+        int32 BiomeActors = GetBiomeActorCount(BiomeType);
+        int32 BiomeLimit = BiomePair.Value.MaxActorsPerBiome;
+        
+        if (BiomeActors > BiomeLimit)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("Engine Architect: Biome %d has %d actors (limit: %d)"), 
+                   (int32)BiomeType, BiomeActors, BiomeLimit);
+        }
+    }
 }
