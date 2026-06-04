@@ -1,259 +1,192 @@
 #include "Anim_MovementController.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
-#include "Components/SkeletalMeshComponent.h"
-#include "Engine/World.h"
-#include "DrawDebugHelpers.h"
 #include "Kismet/KismetMathLibrary.h"
+#include "Engine/Engine.h"
 
 UAnim_MovementController::UAnim_MovementController()
 {
-    PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickGroup = TG_PrePhysics;
+    OwnerCharacter = nullptr;
+    CharacterMovement = nullptr;
     
-    // Initialize default values
+    // Set default animation thresholds
     WalkSpeedThreshold = 150.0f;
     RunSpeedThreshold = 400.0f;
-    MovingThreshold = 10.0f;
-    GroundTraceDistance = 200.0f;
+    IdleThreshold = 10.0f;
     
-    OwnerCharacter = nullptr;
-    MovementComponent = nullptr;
-    MeshComponent = nullptr;
+    // Initialize blend parameters
+    IdleToWalkBlend = 0.0f;
+    WalkToRunBlend = 0.0f;
+    DirectionalBlend = 0.0f;
 }
 
-void UAnim_MovementController::BeginPlay()
+void UAnim_MovementController::NativeInitializeAnimation()
 {
-    Super::BeginPlay();
+    Super::NativeInitializeAnimation();
     
-    CacheComponents();
-}
-
-void UAnim_MovementController::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
-{
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-    
-    if (OwnerCharacter && MovementComponent)
-    {
-        UpdateMovementValues();
-        UpdateMovementState();
-        UpdateLocomotionMode();
-    }
-}
-
-void UAnim_MovementController::CacheComponents()
-{
-    OwnerCharacter = Cast<ACharacter>(GetOwner());
+    // Get character reference
+    OwnerCharacter = Cast<ATranspersonalCharacter>(TryGetPawnOwner());
     if (OwnerCharacter)
     {
-        MovementComponent = OwnerCharacter->GetCharacterMovement();
-        MeshComponent = OwnerCharacter->GetMesh();
+        CharacterMovement = OwnerCharacter->GetCharacterMovement();
+        UE_LOG(LogTemp, Log, TEXT("Animation Controller initialized for character: %s"), *OwnerCharacter->GetName());
+    }
+    else
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Animation Controller failed to get character reference"));
     }
 }
 
-void UAnim_MovementController::UpdateMovementValues()
+void UAnim_MovementController::NativeUpdateAnimation(float DeltaTime)
 {
-    if (!MovementComponent)
+    Super::NativeUpdateAnimation(DeltaTime);
+    
+    if (!OwnerCharacter || !CharacterMovement)
+    {
         return;
+    }
+    
+    UpdateMovementData(DeltaTime);
+    UpdateMovementState();
+    UpdateBlendParameters(DeltaTime);
+}
+
+void UAnim_MovementController::UpdateMovementData(float DeltaTime)
+{
+    if (!OwnerCharacter || !CharacterMovement)
+    {
+        return;
+    }
+    
+    // Get velocity and speed
+    MovementData.Velocity = CharacterMovement->Velocity;
+    MovementData.Speed = MovementData.Velocity.Size();
+    MovementData.GroundSpeed = MovementData.Velocity.Size2D();
+    
+    // Calculate movement direction relative to character forward
+    if (MovementData.GroundSpeed > 1.0f)
+    {
+        FVector ForwardVector = OwnerCharacter->GetActorForwardVector();
+        FVector VelocityDirection = MovementData.Velocity.GetSafeNormal2D();
+        MovementData.Direction = FMath::RadiansToDegrees(FMath::Acos(FVector::DotProduct(ForwardVector, VelocityDirection)));
         
-    // Get current velocity
-    MovementData.Velocity = MovementComponent->Velocity;
+        // Determine if moving left or right
+        FVector RightVector = OwnerCharacter->GetActorRightVector();
+        float RightDot = FVector::DotProduct(RightVector, VelocityDirection);
+        if (RightDot < 0.0f)
+        {
+            MovementData.Direction *= -1.0f;
+        }
+    }
+    else
+    {
+        MovementData.Direction = 0.0f;
+    }
     
-    // Calculate 2D speed (horizontal movement)
-    FVector HorizontalVelocity = FVector(MovementData.Velocity.X, MovementData.Velocity.Y, 0.0f);
-    MovementData.Speed = HorizontalVelocity.Size();
+    // Update movement flags
+    MovementData.bIsInAir = CharacterMovement->IsFalling();
+    MovementData.bIsCrouching = CharacterMovement->IsCrouching();
+    MovementData.bIsAccelerating = CharacterMovement->GetCurrentAcceleration().SizeSquared() > 0.0f;
     
-    // Check if moving
-    MovementData.bIsMoving = MovementData.Speed > MovingThreshold;
-    
-    // Calculate direction
-    MovementData.Direction = CalculateDirection();
-    
-    // Check air state
-    MovementData.bIsInAir = IsCharacterInAir();
-    
-    // Check crouch state
-    MovementData.bIsCrouching = MovementComponent->IsCrouching();
-    
-    // Calculate ground distance
-    MovementData.GroundDistance = GetGroundDistance();
+    // Calculate jump height if in air
+    if (MovementData.bIsInAir)
+    {
+        MovementData.JumpHeight = MovementData.Velocity.Z;
+    }
+    else
+    {
+        MovementData.JumpHeight = 0.0f;
+    }
 }
 
 void UAnim_MovementController::UpdateMovementState()
 {
-    MovementData.CurrentState = DetermineMovementState();
+    MovementData.MovementState = DetermineMovementState();
 }
 
-void UAnim_MovementController::UpdateLocomotionMode()
+EAnim_MovementState UAnim_MovementController::DetermineMovementState() const
 {
-    if (MovementData.bIsInAir)
+    if (!OwnerCharacter || !CharacterMovement)
     {
-        MovementData.LocomotionMode = EAnim_LocomotionMode::Air;
-    }
-    else if (MovementComponent && MovementComponent->IsSwimming())
-    {
-        MovementData.LocomotionMode = EAnim_LocomotionMode::Water;
-    }
-    else
-    {
-        MovementData.LocomotionMode = EAnim_LocomotionMode::Ground;
-    }
-}
-
-FAnim_MovementData UAnim_MovementController::CalculateMovementData()
-{
-    if (MovementComponent)
-    {
-        UpdateMovementValues();
-        UpdateMovementState();
-        UpdateLocomotionMode();
-    }
-    
-    return MovementData;
-}
-
-EAnim_MovementState UAnim_MovementController::DetermineMovementState()
-{
-    if (!MovementComponent)
         return EAnim_MovementState::Idle;
+    }
     
-    // Check air states first
+    // Check if in air first
     if (MovementData.bIsInAir)
     {
         if (MovementData.Velocity.Z > 0.0f)
+        {
             return EAnim_MovementState::Jumping;
+        }
         else
+        {
             return EAnim_MovementState::Falling;
+        }
     }
     
-    // Check water state
-    if (MovementComponent->IsSwimming())
-    {
-        return EAnim_MovementState::Swimming;
-    }
-    
-    // Check crouch state
+    // Check if crouching
     if (MovementData.bIsCrouching)
     {
         return EAnim_MovementState::Crouching;
     }
     
-    // Ground movement states
-    if (!MovementData.bIsMoving)
+    // Check if swimming
+    if (CharacterMovement->IsSwimming())
+    {
+        return EAnim_MovementState::Swimming;
+    }
+    
+    // Check ground movement
+    if (MovementData.GroundSpeed <= IdleThreshold)
     {
         return EAnim_MovementState::Idle;
     }
-    
-    if (MovementData.Speed <= WalkSpeedThreshold)
+    else if (MovementData.GroundSpeed <= RunSpeedThreshold)
     {
         return EAnim_MovementState::Walking;
-    }
-    else if (MovementData.Speed > RunSpeedThreshold)
-    {
-        return EAnim_MovementState::Running;
     }
     else
     {
-        return EAnim_MovementState::Walking;
+        return EAnim_MovementState::Running;
     }
 }
 
-float UAnim_MovementController::CalculateDirection()
+void UAnim_MovementController::UpdateBlendParameters(float DeltaTime)
 {
-    if (!OwnerCharacter || !MovementData.bIsMoving)
-        return 0.0f;
+    // Smooth interpolation speed
+    const float InterpSpeed = 5.0f;
     
-    // Get character forward vector
-    FVector ForwardVector = OwnerCharacter->GetActorForwardVector();
-    
-    // Get movement direction (normalized velocity)
-    FVector MovementDirection = MovementData.Velocity.GetSafeNormal2D();
-    
-    // Calculate angle between forward and movement direction
-    float DotProduct = FVector::DotProduct(ForwardVector, MovementDirection);
-    float CrossProduct = FVector::CrossProduct(ForwardVector, MovementDirection).Z;
-    
-    // Convert to angle in degrees
-    float Angle = FMath::RadiansToDegrees(FMath::Atan2(CrossProduct, DotProduct));
-    
-    return Angle;
-}
-
-bool UAnim_MovementController::IsCharacterInAir()
-{
-    if (!MovementComponent)
-        return false;
-    
-    return MovementComponent->IsFalling();
-}
-
-float UAnim_MovementController::GetGroundDistance()
-{
-    if (!OwnerCharacter)
-        return 0.0f;
-    
-    FVector StartLocation = OwnerCharacter->GetActorLocation();
-    FVector EndLocation = StartLocation - FVector(0.0f, 0.0f, GroundTraceDistance);
-    
-    FHitResult HitResult;
-    FCollisionQueryParams QueryParams;
-    QueryParams.AddIgnoredActor(OwnerCharacter);
-    
-    bool bHit = GetWorld()->LineTraceSingleByChannel(
-        HitResult,
-        StartLocation,
-        EndLocation,
-        ECollisionChannel::ECC_WorldStatic,
-        QueryParams
-    );
-    
-    if (bHit)
+    // Calculate idle to walk blend
+    float TargetIdleToWalk = 0.0f;
+    if (MovementData.GroundSpeed > IdleThreshold)
     {
-        return FVector::Dist(StartLocation, HitResult.Location);
+        TargetIdleToWalk = FMath::Clamp((MovementData.GroundSpeed - IdleThreshold) / (WalkSpeedThreshold - IdleThreshold), 0.0f, 1.0f);
     }
+    IdleToWalkBlend = FMath::FInterpTo(IdleToWalkBlend, TargetIdleToWalk, DeltaTime, InterpSpeed);
     
-    return GroundTraceDistance;
-}
-
-void UAnim_MovementController::TriggerJumpAnimation()
-{
-    // This can be used to trigger specific jump montages or notify the animation blueprint
-    if (OwnerCharacter)
+    // Calculate walk to run blend
+    float TargetWalkToRun = 0.0f;
+    if (MovementData.GroundSpeed > WalkSpeedThreshold)
     {
-        UE_LOG(LogTemp, Log, TEXT("Jump animation triggered for %s"), *OwnerCharacter->GetName());
+        TargetWalkToRun = FMath::Clamp((MovementData.GroundSpeed - WalkSpeedThreshold) / (RunSpeedThreshold - WalkSpeedThreshold), 0.0f, 1.0f);
     }
-}
-
-void UAnim_MovementController::TriggerLandAnimation()
-{
-    // This can be used to trigger specific landing montages or notify the animation blueprint
-    if (OwnerCharacter)
-    {
-        UE_LOG(LogTemp, Log, TEXT("Land animation triggered for %s"), *OwnerCharacter->GetName());
-    }
-}
-
-void UAnim_MovementController::TriggerCrouchAnimation(bool bCrouch)
-{
-    // This can be used to trigger specific crouch transitions
-    if (OwnerCharacter)
-    {
-        UE_LOG(LogTemp, Log, TEXT("Crouch animation triggered for %s: %s"), 
-               *OwnerCharacter->GetName(), 
-               bCrouch ? TEXT("Enter") : TEXT("Exit"));
-    }
-}
-
-float UAnim_MovementController::CalculateSpeedRatio()
-{
-    if (!MovementComponent)
-        return 0.0f;
+    WalkToRunBlend = FMath::FInterpTo(WalkToRunBlend, TargetWalkToRun, DeltaTime, InterpSpeed);
     
-    float MaxSpeed = MovementComponent->GetMaxSpeed();
-    if (MaxSpeed > 0.0f)
+    // Calculate directional blend (-1 to 1, where -1 is left, 1 is right)
+    float TargetDirectional = MovementData.Direction / 180.0f; // Normalize to -1 to 1 range
+    TargetDirectional = FMath::Clamp(TargetDirectional, -1.0f, 1.0f);
+    DirectionalBlend = FMath::FInterpTo(DirectionalBlend, TargetDirectional, DeltaTime, InterpSpeed * 2.0f);
+}
+
+void UAnim_MovementController::ForceUpdateAnimation()
+{
+    if (OwnerCharacter && CharacterMovement)
     {
-        return MovementData.Speed / MaxSpeed;
+        UpdateMovementData(0.016f); // Assume 60fps for immediate update
+        UpdateMovementState();
+        UpdateBlendParameters(0.016f);
+        
+        UE_LOG(LogTemp, Log, TEXT("Animation forced update - State: %d, Speed: %f"), 
+               (int32)MovementData.MovementState, MovementData.Speed);
     }
-    
-    return 0.0f;
 }
