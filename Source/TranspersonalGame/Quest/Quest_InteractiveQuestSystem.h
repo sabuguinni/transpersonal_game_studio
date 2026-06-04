@@ -2,195 +2,242 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
-#include "Components/BoxComponent.h"
-#include "Components/StaticMeshComponent.h"
-#include "Components/PointLightComponent.h"
-#include "Engine/TriggerBox.h"
+#include "Components/ActorComponent.h"
+#include "Engine/World.h"
 #include "SharedTypes.h"
 #include "Quest_InteractiveQuestSystem.generated.h"
 
 UENUM(BlueprintType)
-enum class EQuest_SurvivalObjectiveType : uint8
+enum class EQuest_InteractionType : uint8
 {
-    WaterCollection     UMETA(DisplayName = "Water Collection"),
-    Hunting            UMETA(DisplayName = "Hunting"),
-    Crafting           UMETA(DisplayName = "Crafting"),
-    Building           UMETA(DisplayName = "Building"),
-    Exploration        UMETA(DisplayName = "Exploration"),
-    ResourceGathering  UMETA(DisplayName = "Resource Gathering")
+    Dialogue        UMETA(DisplayName = "Dialogue"),
+    QuestGiver      UMETA(DisplayName = "Quest Giver"),
+    QuestReceiver   UMETA(DisplayName = "Quest Receiver"),
+    Vendor          UMETA(DisplayName = "Vendor"),
+    Informant       UMETA(DisplayName = "Informant"),
+    Companion       UMETA(DisplayName = "Companion")
 };
 
 UENUM(BlueprintType)
-enum class EQuest_ProgressState : uint8
+enum class EQuest_NPCMood : uint8
 {
-    NotStarted         UMETA(DisplayName = "Not Started"),
-    InProgress         UMETA(DisplayName = "In Progress"),
-    Completed          UMETA(DisplayName = "Completed"),
-    Failed             UMETA(DisplayName = "Failed")
+    Friendly        UMETA(DisplayName = "Friendly"),
+    Neutral         UMETA(DisplayName = "Neutral"),
+    Suspicious      UMETA(DisplayName = "Suspicious"),
+    Hostile         UMETA(DisplayName = "Hostile"),
+    Fearful         UMETA(DisplayName = "Fearful"),
+    Excited         UMETA(DisplayName = "Excited")
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FQuest_SurvivalObjective
+struct TRANSPERSONALGAME_API FQuest_DialogueOption
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    FString ObjectiveName;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    FString OptionText;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    FString Description;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    FString ResponseText;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    EQuest_SurvivalObjectiveType ObjectiveType;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    bool bLeadsToQuest;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    FVector TargetLocation;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    FString QuestID;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    EQuest_ProgressState CurrentState;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    int32 RelationshipChange;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    float CompletionProgress;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    int32 RequiredAmount;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    int32 CurrentAmount;
-
-    FQuest_SurvivalObjective()
+    FQuest_DialogueOption()
     {
-        ObjectiveName = TEXT("");
-        Description = TEXT("");
-        ObjectiveType = EQuest_SurvivalObjectiveType::WaterCollection;
-        TargetLocation = FVector::ZeroVector;
-        CurrentState = EQuest_ProgressState::NotStarted;
-        CompletionProgress = 0.0f;
-        RequiredAmount = 1;
-        CurrentAmount = 0;
+        OptionText = TEXT("");
+        ResponseText = TEXT("");
+        bLeadsToQuest = false;
+        QuestID = TEXT("");
+        RelationshipChange = 0;
+    }
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FQuest_NPCPersonality
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Personality")
+    float Friendliness;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Personality")
+    float Helpfulness;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Personality")
+    float Suspicion;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Personality")
+    float Courage;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Personality")
+    float Knowledge;
+
+    FQuest_NPCPersonality()
+    {
+        Friendliness = 0.5f;
+        Helpfulness = 0.5f;
+        Suspicion = 0.3f;
+        Courage = 0.5f;
+        Knowledge = 0.4f;
     }
 };
 
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API AQuest_InteractiveQuestMarker : public AActor
+class TRANSPERSONALGAME_API AQuest_InteractiveNPC : public AActor
 {
     GENERATED_BODY()
 
 public:
-    AQuest_InteractiveQuestMarker();
+    AQuest_InteractiveNPC();
 
 protected:
     virtual void BeginPlay() override;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    UStaticMeshComponent* MarkerMesh;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    UPointLightComponent* MarkerLight;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    FQuest_SurvivalObjective AssociatedObjective;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    bool bIsActive;
-
 public:
-    UFUNCTION(BlueprintCallable, Category = "Quest")
-    void ActivateMarker();
+    virtual void Tick(float DeltaTime) override;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Info")
+    FString NPCName;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Info")
+    FString NPCRole;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Info")
+    EQuest_InteractionType InteractionType;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Info")
+    EQuest_NPCMood CurrentMood;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Info")
+    FQuest_NPCPersonality Personality;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    TArray<FQuest_DialogueOption> DialogueOptions;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quests")
+    TArray<FString> AvailableQuests;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Relationship")
+    float PlayerRelationship;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Relationship")
+    int32 InteractionCount;
+
+    UFUNCTION(BlueprintCallable, Category = "Interaction")
+    void StartInteraction(AActor* PlayerActor);
+
+    UFUNCTION(BlueprintCallable, Category = "Interaction")
+    void ProcessDialogueChoice(int32 ChoiceIndex);
+
+    UFUNCTION(BlueprintCallable, Category = "Interaction")
+    TArray<FString> GetAvailableDialogueOptions();
 
     UFUNCTION(BlueprintCallable, Category = "Quest")
-    void DeactivateMarker();
+    bool CanGiveQuest(const FString& QuestID);
 
     UFUNCTION(BlueprintCallable, Category = "Quest")
-    void UpdateObjectiveProgress(int32 NewAmount);
+    void GiveQuestToPlayer(const FString& QuestID);
 
-    UFUNCTION(BlueprintPure, Category = "Quest")
-    FQuest_SurvivalObjective GetObjective() const { return AssociatedObjective; }
+    UFUNCTION(BlueprintCallable, Category = "Relationship")
+    void ModifyRelationship(float Amount);
+
+    UFUNCTION(BlueprintCallable, Category = "Mood")
+    void UpdateMoodBasedOnRelationship();
+
+private:
+    void GenerateContextualDialogue();
+    void UpdatePersonalityBasedResponses();
 };
 
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API AQuest_SurvivalTrigger : public ATriggerBox
+class TRANSPERSONALGAME_API UQuest_InteractionComponent : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    AQuest_SurvivalTrigger();
+    UQuest_InteractionComponent();
 
 protected:
     virtual void BeginPlay() override;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    EQuest_SurvivalObjectiveType TriggerType;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    FString QuestDescription;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    bool bIsOneTimeUse;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    bool bHasBeenTriggered;
-
 public:
-    UFUNCTION()
-    void OnActorBeginOverlap(AActor* OverlappedActor, AActor* OtherActor);
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    UFUNCTION(BlueprintCallable, Category = "Quest")
-    void TriggerQuest(AActor* TriggeringActor);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interaction")
+    float InteractionRange;
 
-    UFUNCTION(BlueprintPure, Category = "Quest")
-    bool CanTrigger() const;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interaction")
+    bool bCanInteract;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interaction")
+    FString InteractionPrompt;
+
+    UFUNCTION(BlueprintCallable, Category = "Interaction")
+    bool IsPlayerInRange();
+
+    UFUNCTION(BlueprintCallable, Category = "Interaction")
+    void EnableInteraction();
+
+    UFUNCTION(BlueprintCallable, Category = "Interaction")
+    void DisableInteraction();
+
+    UFUNCTION(BlueprintImplementableEvent, Category = "Interaction")
+    void OnInteractionAvailable();
+
+    UFUNCTION(BlueprintImplementableEvent, Category = "Interaction")
+    void OnInteractionUnavailable();
+
+private:
+    UPROPERTY()
+    AActor* CachedPlayerActor;
+
+    void CheckPlayerProximity();
 };
 
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UQuest_InteractiveQuestSystem : public UObject
+class TRANSPERSONALGAME_API AQuest_InteractiveQuestBoard : public AActor
 {
     GENERATED_BODY()
 
 public:
-    UQuest_InteractiveQuestSystem();
+    AQuest_InteractiveQuestBoard();
 
 protected:
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest System")
-    TArray<FQuest_SurvivalObjective> ActiveObjectives;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest System")
-    TArray<FQuest_SurvivalObjective> CompletedObjectives;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest System")
-    TArray<AQuest_InteractiveQuestMarker*> QuestMarkers;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest System")
-    TArray<AQuest_SurvivalTrigger*> QuestTriggers;
+    virtual void BeginPlay() override;
 
 public:
-    UFUNCTION(BlueprintCallable, Category = "Quest System")
-    void InitializeQuestSystem();
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Board")
+    TArray<FString> PostedQuests;
 
-    UFUNCTION(BlueprintCallable, Category = "Quest System")
-    void AddObjective(const FQuest_SurvivalObjective& NewObjective);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Board")
+    int32 MaxQuestCount;
 
-    UFUNCTION(BlueprintCallable, Category = "Quest System")
-    void CompleteObjective(const FString& ObjectiveName);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Board")
+    float QuestRefreshTime;
 
-    UFUNCTION(BlueprintCallable, Category = "Quest System")
-    void UpdateObjectiveProgress(const FString& ObjectiveName, int32 NewAmount);
+    UFUNCTION(BlueprintCallable, Category = "Quest Board")
+    void RefreshQuestBoard();
 
-    UFUNCTION(BlueprintCallable, Category = "Quest System")
-    void CreateQuestMarker(const FVector& Location, const FQuest_SurvivalObjective& Objective);
+    UFUNCTION(BlueprintCallable, Category = "Quest Board")
+    TArray<FString> GetAvailableQuests();
 
-    UFUNCTION(BlueprintCallable, Category = "Quest System")
-    void CreateQuestTrigger(const FVector& Location, EQuest_SurvivalObjectiveType TriggerType);
+    UFUNCTION(BlueprintCallable, Category = "Quest Board")
+    void AddQuest(const FString& QuestID);
 
-    UFUNCTION(BlueprintPure, Category = "Quest System")
-    TArray<FQuest_SurvivalObjective> GetActiveObjectives() const { return ActiveObjectives; }
+    UFUNCTION(BlueprintCallable, Category = "Quest Board")
+    void RemoveQuest(const FString& QuestID);
 
-    UFUNCTION(BlueprintPure, Category = "Quest System")
-    TArray<FQuest_SurvivalObjective> GetCompletedObjectives() const { return CompletedObjectives; }
+    UFUNCTION(BlueprintCallable, Category = "Quest Board")
+    void PostCommunityQuest(const FString& QuestID, int32 Priority);
 
-    UFUNCTION(BlueprintPure, Category = "Quest System")
-    int32 GetTotalObjectivesCount() const;
-
-    UFUNCTION(BlueprintPure, Category = "Quest System")
-    float GetOverallProgress() const;
+private:
+    FTimerHandle QuestRefreshTimer;
+    void AutoRefreshQuests();
 };
