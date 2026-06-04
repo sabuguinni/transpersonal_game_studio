@@ -1,421 +1,282 @@
 #include "Build_QAIntegrationManager.h"
-#include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "EngineUtils.h"
-#include "Components/StaticMeshComponent.h"
-#include "Engine/StaticMesh.h"
+#include "TimerManager.h"
+#include "Engine/Engine.h"
+#include "Kismet/GameplayStatics.h"
 
 ABuild_QAIntegrationManager::ABuild_QAIntegrationManager()
 {
-    PrimaryActorTick.bCanEverTick = false;
-
-    // Create QA validator mesh component
-    QAValidatorMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("QAValidatorMesh"));
-    RootComponent = QAValidatorMesh;
-
-    // Set default limits
-    MaxActorLimit = 20000;
-    MaxDinosaurLimit = 150;
-
-    InitializeQAValidator();
+    PrimaryActorTick.bCanEverTick = true;
+    
+    bAutoRunTests = false;
+    TestInterval = 30.0f;
+    LastTestTime = 0.0f;
+    bTestsRunning = false;
+    
+    // Initialize report
+    CurrentReport = FBuild_IntegrationReport();
+    CurrentReport.BuildTimestamp = FDateTime::Now().ToString();
 }
 
 void ABuild_QAIntegrationManager::BeginPlay()
 {
     Super::BeginPlay();
     
-    // Auto-generate QA integration report on begin play
-    GenerateQAIntegrationReport();
-}
-
-void ABuild_QAIntegrationManager::InitializeQAValidator()
-{
-    if (QAValidatorMesh)
+    UE_LOG(LogTemp, Warning, TEXT("QA Integration Manager initialized"));
+    
+    if (bAutoRunTests)
     {
-        // Set a basic cube mesh for visualization
-        static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeMeshAsset(TEXT("/Engine/BasicShapes/Cube"));
-        if (CubeMeshAsset.Succeeded())
-        {
-            QAValidatorMesh->SetStaticMesh(CubeMeshAsset.Object);
-            QAValidatorMesh->SetWorldScale3D(FVector(2.0f, 2.0f, 0.5f));
-        }
+        // Run initial tests after a short delay
+        GetWorld()->GetTimerManager().SetTimer(
+            FTimerHandle(),
+            this,
+            &ABuild_QAIntegrationManager::RunQAIntegrationTests,
+            2.0f,
+            false
+        );
     }
 }
 
-FBuild_QAIntegrationReport ABuild_QAIntegrationManager::ValidateQAResults()
+void ABuild_QAIntegrationManager::Tick(float DeltaTime)
 {
-    FBuild_QAIntegrationReport Report;
+    Super::Tick(DeltaTime);
     
-    // Get all actors in the world
-    UWorld* World = GetWorld();
-    if (!World)
+    if (bAutoRunTests && !bTestsRunning)
     {
-        UE_LOG(LogTemp, Error, TEXT("QAIntegrationManager: No valid world found"));
-        return Report;
-    }
-
-    // Count total actors
-    TArray<AActor*> AllActors;
-    UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), AllActors);
-    Report.TotalActorCount = AllActors.Num();
-
-    // Count dinosaurs
-    int32 DinoCount = 0;
-    for (AActor* Actor : AllActors)
-    {
-        if (Actor && Actor->GetActorLabel().Contains(TEXT("Dino"), ESearchCase::IgnoreCase) ||
-            Actor->GetActorLabel().Contains(TEXT("TRex"), ESearchCase::IgnoreCase) ||
-            Actor->GetActorLabel().Contains(TEXT("Veloci"), ESearchCase::IgnoreCase) ||
-            Actor->GetActorLabel().Contains(TEXT("Tricera"), ESearchCase::IgnoreCase) ||
-            Actor->GetActorLabel().Contains(TEXT("Brachi"), ESearchCase::IgnoreCase))
+        LastTestTime += DeltaTime;
+        if (LastTestTime >= TestInterval)
         {
-            DinoCount++;
+            RunQAIntegrationTests();
+            LastTestTime = 0.0f;
         }
-    }
-    Report.DinosaurCount = DinoCount;
-
-    // Check limits
-    Report.bWithinActorLimits = (Report.TotalActorCount <= MaxActorLimit) && (Report.DinosaurCount <= MaxDinosaurLimit);
-
-    // Parse test results
-    Report.VFXTests = ParseVFXTestResults();
-    Report.PerformanceTests = ParsePerformanceTestResults();
-    Report.IntegrationTests = ParseIntegrationTestResults();
-
-    // Determine overall pass status
-    bool bAllVFXPassed = true;
-    for (const FBuild_QATestResult& Test : Report.VFXTests)
-    {
-        if (!Test.bPassed)
-        {
-            bAllVFXPassed = false;
-            break;
-        }
-    }
-
-    bool bAllPerfPassed = true;
-    for (const FBuild_QATestResult& Test : Report.PerformanceTests)
-    {
-        if (!Test.bPassed)
-        {
-            bAllPerfPassed = false;
-            break;
-        }
-    }
-
-    bool bAllIntegrationPassed = true;
-    for (const FBuild_QATestResult& Test : Report.IntegrationTests)
-    {
-        if (!Test.bPassed)
-        {
-            bAllIntegrationPassed = false;
-            break;
-        }
-    }
-
-    Report.bAllTestsPassed = bAllVFXPassed && bAllPerfPassed && bAllIntegrationPassed && Report.bWithinActorLimits;
-
-    CurrentReport = Report;
-    return Report;
-}
-
-bool ABuild_QAIntegrationManager::CheckActorLimits()
-{
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        return false;
-    }
-
-    TArray<AActor*> AllActors;
-    UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), AllActors);
-    
-    int32 TotalActors = AllActors.Num();
-    int32 DinoCount = 0;
-
-    for (AActor* Actor : AllActors)
-    {
-        if (Actor && (Actor->GetActorLabel().Contains(TEXT("Dino"), ESearchCase::IgnoreCase) ||
-                     Actor->GetActorLabel().Contains(TEXT("TRex"), ESearchCase::IgnoreCase) ||
-                     Actor->GetActorLabel().Contains(TEXT("Veloci"), ESearchCase::IgnoreCase)))
-        {
-            DinoCount++;
-        }
-    }
-
-    bool bWithinLimits = (TotalActors <= MaxActorLimit) && (DinoCount <= MaxDinosaurLimit);
-    
-    UE_LOG(LogTemp, Warning, TEXT("QA Integration - Actor Count: %d/%d, Dino Count: %d/%d, Within Limits: %s"),
-           TotalActors, MaxActorLimit, DinoCount, MaxDinosaurLimit, bWithinLimits ? TEXT("YES") : TEXT("NO"));
-
-    return bWithinLimits;
-}
-
-TArray<FBuild_QATestResult> ABuild_QAIntegrationManager::ParseVFXTestResults()
-{
-    TArray<FBuild_QATestResult> VFXResults;
-    UWorld* World = GetWorld();
-    
-    if (!World)
-    {
-        VFXResults.Add(CreateTestResult(TEXT("VFX_WorldValidation"), false, TEXT("No valid world found")));
-        return VFXResults;
-    }
-
-    // Look for VFX test actors created by QA Agent
-    TArray<AActor*> AllActors;
-    UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), AllActors);
-    
-    int32 VFXTestActors = 0;
-    int32 NiagaraActors = 0;
-    
-    for (AActor* Actor : AllActors)
-    {
-        if (Actor)
-        {
-            FString Label = Actor->GetActorLabel();
-            if (Label.Contains(TEXT("VFX_Test"), ESearchCase::IgnoreCase) ||
-                Label.Contains(TEXT("VFXTest"), ESearchCase::IgnoreCase))
-            {
-                VFXTestActors++;
-            }
-            if (Label.Contains(TEXT("Niagara"), ESearchCase::IgnoreCase) ||
-                Label.Contains(TEXT("Particle"), ESearchCase::IgnoreCase))
-            {
-                NiagaraActors++;
-            }
-        }
-    }
-
-    // Create test results based on findings
-    VFXResults.Add(CreateTestResult(TEXT("VFX_TestActorsPresent"), VFXTestActors > 0, 
-                                   VFXTestActors > 0 ? TEXT("") : TEXT("No VFX test actors found"), 0.1f));
-    
-    VFXResults.Add(CreateTestResult(TEXT("Niagara_SystemsPresent"), NiagaraActors > 0,
-                                   NiagaraActors > 0 ? TEXT("") : TEXT("No Niagara systems found"), 0.1f));
-
-    VFXResults.Add(CreateTestResult(TEXT("VFX_Integration"), (VFXTestActors + NiagaraActors) >= 2,
-                                   (VFXTestActors + NiagaraActors) >= 2 ? TEXT("") : TEXT("Insufficient VFX integration"), 0.2f));
-
-    return VFXResults;
-}
-
-TArray<FBuild_QATestResult> ABuild_QAIntegrationManager::ParsePerformanceTestResults()
-{
-    TArray<FBuild_QATestResult> PerfResults;
-    UWorld* World = GetWorld();
-    
-    if (!World)
-    {
-        PerfResults.Add(CreateTestResult(TEXT("Performance_WorldValidation"), false, TEXT("No valid world found")));
-        return PerfResults;
-    }
-
-    // Check actor count performance
-    TArray<AActor*> AllActors;
-    UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), AllActors);
-    int32 ActorCount = AllActors.Num();
-    
-    bool bActorCountOK = ActorCount <= MaxActorLimit;
-    PerfResults.Add(CreateTestResult(TEXT("Performance_ActorCount"), bActorCountOK,
-                                    bActorCountOK ? TEXT("") : FString::Printf(TEXT("Actor count %d exceeds limit %d"), ActorCount, MaxActorLimit), 0.1f));
-
-    // Check for performance test actors
-    int32 PerfTestActors = 0;
-    for (AActor* Actor : AllActors)
-    {
-        if (Actor && (Actor->GetActorLabel().Contains(TEXT("Performance"), ESearchCase::IgnoreCase) ||
-                     Actor->GetActorLabel().Contains(TEXT("Optimization"), ESearchCase::IgnoreCase)))
-        {
-            PerfTestActors++;
-        }
-    }
-
-    PerfResults.Add(CreateTestResult(TEXT("Performance_TestActorsPresent"), PerfTestActors > 0,
-                                    PerfTestActors > 0 ? TEXT("") : TEXT("No performance test actors found"), 0.1f));
-
-    // Memory usage estimation (basic)
-    float EstimatedMemoryMB = ActorCount * 0.1f; // Rough estimate: 0.1MB per actor
-    bool bMemoryOK = EstimatedMemoryMB < 2000.0f; // Under 2GB
-    PerfResults.Add(CreateTestResult(TEXT("Performance_MemoryEstimate"), bMemoryOK,
-                                    bMemoryOK ? TEXT("") : FString::Printf(TEXT("Estimated memory %.1fMB too high"), EstimatedMemoryMB), 0.2f));
-
-    return PerfResults;
-}
-
-TArray<FBuild_QATestResult> ABuild_QAIntegrationManager::ParseIntegrationTestResults()
-{
-    TArray<FBuild_QATestResult> IntegrationResults;
-    UWorld* World = GetWorld();
-    
-    if (!World)
-    {
-        IntegrationResults.Add(CreateTestResult(TEXT("Integration_WorldValidation"), false, TEXT("No valid world found")));
-        return IntegrationResults;
-    }
-
-    // Check for integration test actors
-    TArray<AActor*> AllActors;
-    UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), AllActors);
-    
-    int32 IntegrationTestActors = 0;
-    bool bHasLandscape = false;
-    bool bHasLighting = false;
-    bool bHasCharacter = false;
-    
-    for (AActor* Actor : AllActors)
-    {
-        if (Actor)
-        {
-            FString Label = Actor->GetActorLabel();
-            if (Label.Contains(TEXT("Integration"), ESearchCase::IgnoreCase) ||
-                Label.Contains(TEXT("Test"), ESearchCase::IgnoreCase))
-            {
-                IntegrationTestActors++;
-            }
-            if (Label.Contains(TEXT("Landscape"), ESearchCase::IgnoreCase) ||
-                Label.Contains(TEXT("Terrain"), ESearchCase::IgnoreCase))
-            {
-                bHasLandscape = true;
-            }
-            if (Label.Contains(TEXT("Light"), ESearchCase::IgnoreCase) ||
-                Label.Contains(TEXT("Sun"), ESearchCase::IgnoreCase))
-            {
-                bHasLighting = true;
-            }
-            if (Label.Contains(TEXT("Character"), ESearchCase::IgnoreCase) ||
-                Label.Contains(TEXT("Player"), ESearchCase::IgnoreCase))
-            {
-                bHasCharacter = true;
-            }
-        }
-    }
-
-    // Create integration test results
-    IntegrationResults.Add(CreateTestResult(TEXT("Integration_TestActorsPresent"), IntegrationTestActors > 0,
-                                           IntegrationTestActors > 0 ? TEXT("") : TEXT("No integration test actors found"), 0.1f));
-
-    IntegrationResults.Add(CreateTestResult(TEXT("Integration_WorldTerrain"), bHasLandscape,
-                                           bHasLandscape ? TEXT("") : TEXT("No landscape/terrain found"), 0.1f));
-
-    IntegrationResults.Add(CreateTestResult(TEXT("Integration_Lighting"), bHasLighting,
-                                           bHasLighting ? TEXT("") : TEXT("No lighting setup found"), 0.1f));
-
-    IntegrationResults.Add(CreateTestResult(TEXT("Integration_Character"), bHasCharacter,
-                                           bHasCharacter ? TEXT("") : TEXT("No character setup found"), 0.1f));
-
-    bool bCrossSystemOK = ValidateCrossSystemCompatibility();
-    IntegrationResults.Add(CreateTestResult(TEXT("Integration_CrossSystem"), bCrossSystemOK,
-                                           bCrossSystemOK ? TEXT("") : TEXT("Cross-system compatibility issues"), 0.2f));
-
-    return IntegrationResults;
-}
-
-void ABuild_QAIntegrationManager::GenerateQAIntegrationReport()
-{
-    FBuild_QAIntegrationReport Report = ValidateQAResults();
-    
-    UE_LOG(LogTemp, Warning, TEXT("=== QA INTEGRATION REPORT ==="));
-    UE_LOG(LogTemp, Warning, TEXT("Total Actors: %d"), Report.TotalActorCount);
-    UE_LOG(LogTemp, Warning, TEXT("Dinosaur Count: %d"), Report.DinosaurCount);
-    UE_LOG(LogTemp, Warning, TEXT("Within Limits: %s"), Report.bWithinActorLimits ? TEXT("YES") : TEXT("NO"));
-    UE_LOG(LogTemp, Warning, TEXT("All Tests Passed: %s"), Report.bAllTestsPassed ? TEXT("YES") : TEXT("NO"));
-    
-    UE_LOG(LogTemp, Warning, TEXT("VFX Tests: %d"), Report.VFXTests.Num());
-    for (const FBuild_QATestResult& Test : Report.VFXTests)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("  %s: %s"), *Test.TestName, Test.bPassed ? TEXT("PASS") : TEXT("FAIL"));
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("Performance Tests: %d"), Report.PerformanceTests.Num());
-    for (const FBuild_QATestResult& Test : Report.PerformanceTests)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("  %s: %s"), *Test.TestName, Test.bPassed ? TEXT("PASS") : TEXT("FAIL"));
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("Integration Tests: %d"), Report.IntegrationTests.Num());
-    for (const FBuild_QATestResult& Test : Report.IntegrationTests)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("  %s: %s"), *Test.TestName, Test.bPassed ? TEXT("PASS") : TEXT("FAIL"));
     }
 }
 
-bool ABuild_QAIntegrationManager::ValidateCrossSystemCompatibility()
+void ABuild_QAIntegrationManager::RunQAIntegrationTests()
 {
-    UWorld* World = GetWorld();
-    if (!World)
+    if (bTestsRunning)
     {
-        return false;
+        UE_LOG(LogTemp, Warning, TEXT("QA Integration tests already running"));
+        return;
     }
+    
+    bTestsRunning = true;
+    UE_LOG(LogTemp, Warning, TEXT("Starting QA Integration test suite"));
+    
+    // Clear previous results
+    CurrentReport.TestResults.Empty();
+    CurrentReport.TotalTests = 0;
+    CurrentReport.PassedTests = 0;
+    CurrentReport.FailedTests = 0;
+    CurrentReport.BuildTimestamp = FDateTime::Now().ToString();
+    
+    // Run validation tests
+    ValidateVFXSystems();
+    ValidatePerformanceMetrics();
+    ValidateBuildIntegrity();
+    
+    // Generate final report
+    GenerateReport();
+    LogIntegrationStatus();
+    
+    bTestsRunning = false;
+    UE_LOG(LogTemp, Warning, TEXT("QA Integration test suite completed"));
+}
 
-    // Basic cross-system validation
-    // Check if we have the minimum required systems for a functional game
-    TArray<AActor*> AllActors;
-    UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), AllActors);
+void ABuild_QAIntegrationManager::ValidateVFXSystems()
+{
+    float StartTime = FPlatformTime::Seconds();
     
-    bool bHasWorldGen = false;
-    bool bHasCharacterSystem = false;
-    bool bHasLightingSystem = false;
-    bool bHasGameMode = false;
+    // Test VFX system availability
+    bool bVFXSystemsValid = true;
+    FString ErrorMsg = TEXT("");
     
-    for (AActor* Actor : AllActors)
+    try
     {
-        if (Actor)
+        // Check for Niagara system availability
+        UWorld* World = GetWorld();
+        if (!World)
         {
-            FString ClassName = Actor->GetClass()->GetName();
-            FString Label = Actor->GetActorLabel();
+            bVFXSystemsValid = false;
+            ErrorMsg = TEXT("World not available for VFX testing");
+        }
+        else
+        {
+            // Count VFX actors in the world
+            TArray<AActor*> AllActors;
+            UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), AllActors);
             
-            if (ClassName.Contains(TEXT("WorldGen")) || Label.Contains(TEXT("WorldGen")))
+            int32 VFXActorCount = 0;
+            for (AActor* Actor : AllActors)
             {
-                bHasWorldGen = true;
+                if (Actor && Actor->GetName().Contains(TEXT("VFX")))
+                {
+                    VFXActorCount++;
+                }
             }
-            if (ClassName.Contains(TEXT("Character")) || Label.Contains(TEXT("Character")))
-            {
-                bHasCharacterSystem = true;
-            }
-            if (ClassName.Contains(TEXT("Light")) || Label.Contains(TEXT("Light")))
-            {
-                bHasLightingSystem = true;
-            }
+            
+            UE_LOG(LogTemp, Log, TEXT("Found %d VFX-related actors"), VFXActorCount);
         }
     }
-
-    // Check for game mode
-    AGameModeBase* GameMode = World->GetAuthGameMode();
-    bHasGameMode = (GameMode != nullptr);
-
-    bool bCompatible = bHasWorldGen && bHasCharacterSystem && bHasLightingSystem && bHasGameMode;
-    
-    UE_LOG(LogTemp, Warning, TEXT("Cross-System Compatibility Check:"));
-    UE_LOG(LogTemp, Warning, TEXT("  WorldGen: %s"), bHasWorldGen ? TEXT("OK") : TEXT("MISSING"));
-    UE_LOG(LogTemp, Warning, TEXT("  Character: %s"), bHasCharacterSystem ? TEXT("OK") : TEXT("MISSING"));
-    UE_LOG(LogTemp, Warning, TEXT("  Lighting: %s"), bHasLightingSystem ? TEXT("OK") : TEXT("MISSING"));
-    UE_LOG(LogTemp, Warning, TEXT("  GameMode: %s"), bHasGameMode ? TEXT("OK") : TEXT("MISSING"));
-    UE_LOG(LogTemp, Warning, TEXT("  Overall: %s"), bCompatible ? TEXT("COMPATIBLE") : TEXT("INCOMPATIBLE"));
-
-    return bCompatible;
-}
-
-bool ABuild_QAIntegrationManager::ValidateTestActor(AActor* TestActor)
-{
-    if (!TestActor)
+    catch (...)
     {
-        return false;
+        bVFXSystemsValid = false;
+        ErrorMsg = TEXT("Exception during VFX validation");
     }
-
-    // Basic validation - check if actor is valid and has components
-    bool bHasComponents = TestActor->GetRootComponent() != nullptr;
-    bool bHasValidTransform = !TestActor->GetActorLocation().IsZero() || !TestActor->GetActorRotation().IsZero();
     
-    return bHasComponents;
+    float ExecutionTime = FPlatformTime::Seconds() - StartTime;
+    AddTestResult(TEXT("VFX Systems Validation"), bVFXSystemsValid, ErrorMsg, ExecutionTime);
 }
 
-FBuild_QATestResult ABuild_QAIntegrationManager::CreateTestResult(const FString& TestName, bool bPassed, const FString& ErrorMsg, float ExecTime)
+void ABuild_QAIntegrationManager::ValidatePerformanceMetrics()
+{
+    float StartTime = FPlatformTime::Seconds();
+    
+    bool bPerformanceValid = true;
+    FString ErrorMsg = TEXT("");
+    
+    try
+    {
+        // Check frame rate
+        float CurrentFPS = 1.0f / GetWorld()->GetDeltaSeconds();
+        if (CurrentFPS < 30.0f)
+        {
+            bPerformanceValid = false;
+            ErrorMsg = FString::Printf(TEXT("Low FPS detected: %.2f"), CurrentFPS);
+        }
+        
+        // Check memory usage (basic check)
+        FPlatformMemoryStats MemStats = FPlatformMemory::GetStats();
+        float MemoryUsageGB = MemStats.UsedPhysical / (1024.0f * 1024.0f * 1024.0f);
+        
+        if (MemoryUsageGB > 8.0f) // Arbitrary threshold
+        {
+            bPerformanceValid = false;
+            ErrorMsg += FString::Printf(TEXT(" High memory usage: %.2f GB"), MemoryUsageGB);
+        }
+        
+        UE_LOG(LogTemp, Log, TEXT("Performance check - FPS: %.2f, Memory: %.2f GB"), CurrentFPS, MemoryUsageGB);
+    }
+    catch (...)
+    {
+        bPerformanceValid = false;
+        ErrorMsg = TEXT("Exception during performance validation");
+    }
+    
+    float ExecutionTime = FPlatformTime::Seconds() - StartTime;
+    AddTestResult(TEXT("Performance Metrics Validation"), bPerformanceValid, ErrorMsg, ExecutionTime);
+}
+
+void ABuild_QAIntegrationManager::ValidateBuildIntegrity()
+{
+    float StartTime = FPlatformTime::Seconds();
+    
+    bool bBuildValid = true;
+    FString ErrorMsg = TEXT("");
+    
+    try
+    {
+        // Check for critical game classes
+        TArray<FString> CriticalClasses = {
+            TEXT("/Script/TranspersonalGame.TranspersonalCharacter"),
+            TEXT("/Script/TranspersonalGame.TranspersonalGameState"),
+            TEXT("/Script/TranspersonalGame.PCGWorldGenerator"),
+            TEXT("/Script/TranspersonalGame.FoliageManager")
+        };
+        
+        int32 LoadedClasses = 0;
+        for (const FString& ClassName : CriticalClasses)
+        {
+            UClass* LoadedClass = LoadClass<UObject>(nullptr, *ClassName);
+            if (LoadedClass)
+            {
+                LoadedClasses++;
+                UE_LOG(LogTemp, Log, TEXT("Successfully loaded class: %s"), *ClassName);
+            }
+            else
+            {
+                UE_LOG(LogTemp, Warning, TEXT("Failed to load class: %s"), *ClassName);
+                ErrorMsg += FString::Printf(TEXT("Missing class: %s "), *ClassName);
+            }
+        }
+        
+        if (LoadedClasses < CriticalClasses.Num())
+        {
+            bBuildValid = false;
+            ErrorMsg = FString::Printf(TEXT("Only %d/%d critical classes loaded. %s"), 
+                LoadedClasses, CriticalClasses.Num(), *ErrorMsg);
+        }
+    }
+    catch (...)
+    {
+        bBuildValid = false;
+        ErrorMsg = TEXT("Exception during build integrity validation");
+    }
+    
+    float ExecutionTime = FPlatformTime::Seconds() - StartTime;
+    AddTestResult(TEXT("Build Integrity Validation"), bBuildValid, ErrorMsg, ExecutionTime);
+}
+
+FBuild_IntegrationReport ABuild_QAIntegrationManager::GetIntegrationReport() const
+{
+    return CurrentReport;
+}
+
+bool ABuild_QAIntegrationManager::IsSystemHealthy() const
+{
+    return CurrentReport.bBuildSuccessful && (CurrentReport.FailedTests == 0);
+}
+
+void ABuild_QAIntegrationManager::EditorRunIntegrationTests()
+{
+    UE_LOG(LogTemp, Warning, TEXT("Running QA Integration tests from editor"));
+    RunQAIntegrationTests();
+}
+
+void ABuild_QAIntegrationManager::AddTestResult(const FString& TestName, bool bPassed, const FString& ErrorMessage, float ExecutionTime)
 {
     FBuild_QATestResult Result;
     Result.TestName = TestName;
     Result.bPassed = bPassed;
-    Result.ErrorMessage = ErrorMsg;
-    Result.ExecutionTime = ExecTime;
-    return Result;
+    Result.ErrorMessage = ErrorMessage;
+    Result.ExecutionTime = ExecutionTime;
+    
+    CurrentReport.TestResults.Add(Result);
+    CurrentReport.TotalTests++;
+    
+    if (bPassed)
+    {
+        CurrentReport.PassedTests++;
+    }
+    else
+    {
+        CurrentReport.FailedTests++;
+    }
+}
+
+void ABuild_QAIntegrationManager::GenerateReport()
+{
+    CurrentReport.bBuildSuccessful = (CurrentReport.FailedTests == 0);
+    
+    UE_LOG(LogTemp, Warning, TEXT("=== QA Integration Report ==="));
+    UE_LOG(LogTemp, Warning, TEXT("Total Tests: %d"), CurrentReport.TotalTests);
+    UE_LOG(LogTemp, Warning, TEXT("Passed: %d"), CurrentReport.PassedTests);
+    UE_LOG(LogTemp, Warning, TEXT("Failed: %d"), CurrentReport.FailedTests);
+    UE_LOG(LogTemp, Warning, TEXT("Build Successful: %s"), CurrentReport.bBuildSuccessful ? TEXT("YES") : TEXT("NO"));
+    UE_LOG(LogTemp, Warning, TEXT("Timestamp: %s"), *CurrentReport.BuildTimestamp);
+}
+
+void ABuild_QAIntegrationManager::LogIntegrationStatus()
+{
+    for (const FBuild_QATestResult& Result : CurrentReport.TestResults)
+    {
+        if (Result.bPassed)
+        {
+            UE_LOG(LogTemp, Log, TEXT("[PASS] %s (%.3fs)"), *Result.TestName, Result.ExecutionTime);
+        }
+        else
+        {
+            UE_LOG(LogTemp, Error, TEXT("[FAIL] %s (%.3fs): %s"), *Result.TestName, Result.ExecutionTime, *Result.ErrorMessage);
+        }
+    }
 }
