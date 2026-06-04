@@ -4,15 +4,17 @@
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
 #include "Components/ActorComponent.h"
+#include "NiagaraSystem.h"
+#include "NiagaraComponent.h"
 #include "QA_VFXTestFramework.generated.h"
 
 UENUM(BlueprintType)
 enum class EQA_VFXTestResult : uint8
 {
-    NotTested,
-    Pass,
-    Fail,
-    Warning
+    NotTested = 0,
+    Pass = 1,
+    Fail = 2,
+    Warning = 3
 };
 
 USTRUCT(BlueprintType)
@@ -22,9 +24,6 @@ struct FQA_VFXTestCase
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Testing")
     FString TestName;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Testing")
-    FString TestDescription;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Testing")
     EQA_VFXTestResult Result;
@@ -37,8 +36,7 @@ struct FQA_VFXTestCase
 
     FQA_VFXTestCase()
     {
-        TestName = TEXT("");
-        TestDescription = TEXT("");
+        TestName = TEXT("Unnamed Test");
         Result = EQA_VFXTestResult::NotTested;
         ErrorMessage = TEXT("");
         ExecutionTime = 0.0f;
@@ -53,51 +51,60 @@ class TRANSPERSONALGAME_API UQA_VFXTestFramework : public UActorComponent
 public:
     UQA_VFXTestFramework();
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Testing")
-    TArray<FQA_VFXTestCase> TestCases;
+protected:
+    virtual void BeginPlay() override;
+
+public:
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+
+    // === VFX TESTING METHODS ===
+    UFUNCTION(BlueprintCallable, Category = "QA Testing")
+    void RunAllVFXTests();
+
+    UFUNCTION(BlueprintCallable, Category = "QA Testing")
+    void TestNiagaraSystemSpawning();
+
+    UFUNCTION(BlueprintCallable, Category = "QA Testing")
+    void TestCombatParticleEffects();
+
+    UFUNCTION(BlueprintCallable, Category = "QA Testing")
+    void TestEnvironmentalVFX();
+
+    UFUNCTION(BlueprintCallable, Category = "QA Testing")
+    void TestVFXPerformance();
+
+    UFUNCTION(BlueprintCallable, Category = "QA Testing")
+    void ValidateVFXIntegration();
+
+    // === RESULTS AND REPORTING ===
+    UFUNCTION(BlueprintCallable, Category = "QA Testing")
+    TArray<FQA_VFXTestCase> GetTestResults() const { return TestResults; }
+
+    UFUNCTION(BlueprintCallable, Category = "QA Testing")
+    void GenerateVFXTestReport();
+
+    UFUNCTION(BlueprintCallable, Category = "QA Testing")
+    bool AreAllTestsPassing() const;
+
+protected:
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "QA Testing")
+    TArray<FQA_VFXTestCase> TestResults;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Testing")
     bool bAutoRunTests;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Testing")
-    float TestTimeout;
+    float TestInterval;
 
-    UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    void RunAllVFXTests();
+    // === VFX REFERENCES FOR TESTING ===
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Testing")
+    TArray<TSoftObjectPtr<UNiagaraSystem>> TestNiagaraSystems;
 
-    UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    void RunSpecificTest(const FString& TestName);
-
-    UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    bool TestScreenShakeSystem();
-
-    UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    bool TestNiagaraParticleSystem();
-
-    UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    bool TestVFXAudioIntegration();
-
-    UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    bool TestDamageFlashEffect();
-
-    UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    bool TestEnvironmentalVFX();
-
-    UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    FQA_VFXTestCase GetTestResult(const FString& TestName);
-
-    UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    void ClearAllTestResults();
-
-    UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    void GenerateTestReport();
-
-protected:
-    virtual void BeginPlay() override;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Testing")
+    TArray<AActor*> TestActors;
 
 private:
-    void InitializeTestCases();
-    void LogTestResult(const FString& TestName, EQA_VFXTestResult Result, const FString& Message = TEXT(""));
-    bool ValidateVFXClass(const FString& ClassName);
-    bool ValidateNiagaraSystem(const FString& SystemPath);
+    void AddTestResult(const FString& TestName, EQA_VFXTestResult Result, const FString& ErrorMessage = TEXT(""), float ExecutionTime = 0.0f);
+    void LogTestResult(const FQA_VFXTestCase& TestCase);
+    float TestStartTime;
 };
