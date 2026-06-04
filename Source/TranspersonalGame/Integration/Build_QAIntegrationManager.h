@@ -1,10 +1,8 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/World.h"
 #include "GameFramework/Actor.h"
-#include "Components/StaticMeshComponent.h"
-#include "Engine/StaticMeshActor.h"
+#include "Engine/Engine.h"
 #include "SharedTypes.h"
 #include "Build_QAIntegrationManager.generated.h"
 
@@ -13,16 +11,16 @@ struct TRANSPERSONALGAME_API FBuild_QATestResult
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "QA Test")
+    UPROPERTY(BlueprintReadOnly, Category = "QA")
     FString TestName;
 
-    UPROPERTY(BlueprintReadOnly, Category = "QA Test")
+    UPROPERTY(BlueprintReadOnly, Category = "QA")
     bool bPassed;
 
-    UPROPERTY(BlueprintReadOnly, Category = "QA Test")
+    UPROPERTY(BlueprintReadOnly, Category = "QA")
     FString ErrorMessage;
 
-    UPROPERTY(BlueprintReadOnly, Category = "QA Test")
+    UPROPERTY(BlueprintReadOnly, Category = "QA")
     float ExecutionTime;
 
     FBuild_QATestResult()
@@ -35,37 +33,35 @@ struct TRANSPERSONALGAME_API FBuild_QATestResult
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FBuild_QAIntegrationReport
+struct TRANSPERSONALGAME_API FBuild_IntegrationReport
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "QA Integration")
-    TArray<FBuild_QATestResult> VFXTests;
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    TArray<FBuild_QATestResult> TestResults;
 
-    UPROPERTY(BlueprintReadOnly, Category = "QA Integration")
-    TArray<FBuild_QATestResult> PerformanceTests;
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    int32 TotalTests;
 
-    UPROPERTY(BlueprintReadOnly, Category = "QA Integration")
-    TArray<FBuild_QATestResult> IntegrationTests;
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    int32 PassedTests;
 
-    UPROPERTY(BlueprintReadOnly, Category = "QA Integration")
-    int32 TotalActorCount;
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    int32 FailedTests;
 
-    UPROPERTY(BlueprintReadOnly, Category = "QA Integration")
-    int32 DinosaurCount;
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    bool bBuildSuccessful;
 
-    UPROPERTY(BlueprintReadOnly, Category = "QA Integration")
-    bool bWithinActorLimits;
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    FString BuildTimestamp;
 
-    UPROPERTY(BlueprintReadOnly, Category = "QA Integration")
-    bool bAllTestsPassed;
-
-    FBuild_QAIntegrationReport()
+    FBuild_IntegrationReport()
     {
-        TotalActorCount = 0;
-        DinosaurCount = 0;
-        bWithinActorLimits = false;
-        bAllTestsPassed = false;
+        TotalTests = 0;
+        PassedTests = 0;
+        FailedTests = 0;
+        bBuildSuccessful = false;
+        BuildTimestamp = TEXT("");
     }
 };
 
@@ -80,43 +76,44 @@ public:
 protected:
     virtual void BeginPlay() override;
 
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "QA Integration")
+    FBuild_IntegrationReport CurrentReport;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Integration")
+    bool bAutoRunTests;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Integration")
+    float TestInterval;
+
 public:
-    UFUNCTION(BlueprintCallable, Category = "QA Integration")
-    FBuild_QAIntegrationReport ValidateQAResults();
+    virtual void Tick(float DeltaTime) override;
 
     UFUNCTION(BlueprintCallable, Category = "QA Integration")
-    bool CheckActorLimits();
+    void RunQAIntegrationTests();
 
     UFUNCTION(BlueprintCallable, Category = "QA Integration")
-    TArray<FBuild_QATestResult> ParseVFXTestResults();
+    void ValidateVFXSystems();
 
     UFUNCTION(BlueprintCallable, Category = "QA Integration")
-    TArray<FBuild_QATestResult> ParsePerformanceTestResults();
+    void ValidatePerformanceMetrics();
 
     UFUNCTION(BlueprintCallable, Category = "QA Integration")
-    TArray<FBuild_QATestResult> ParseIntegrationTestResults();
+    void ValidateBuildIntegrity();
 
     UFUNCTION(BlueprintCallable, Category = "QA Integration")
-    void GenerateQAIntegrationReport();
+    FBuild_IntegrationReport GetIntegrationReport() const;
 
     UFUNCTION(BlueprintCallable, Category = "QA Integration")
-    bool ValidateCrossSystemCompatibility();
+    bool IsSystemHealthy() const;
 
-protected:
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    UStaticMeshComponent* QAValidatorMesh;
-
-    UPROPERTY(BlueprintReadOnly, Category = "QA Integration")
-    FBuild_QAIntegrationReport CurrentReport;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Integration")
-    int32 MaxActorLimit;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Integration")
-    int32 MaxDinosaurLimit;
+    UFUNCTION(CallInEditor, Category = "QA Integration")
+    void EditorRunIntegrationTests();
 
 private:
-    void InitializeQAValidator();
-    bool ValidateTestActor(AActor* TestActor);
-    FBuild_QATestResult CreateTestResult(const FString& TestName, bool bPassed, const FString& ErrorMsg = TEXT(""), float ExecTime = 0.0f);
+    void AddTestResult(const FString& TestName, bool bPassed, const FString& ErrorMessage = TEXT(""), float ExecutionTime = 0.0f);
+    void GenerateReport();
+    void LogIntegrationStatus();
+
+    float LastTestTime;
+    bool bTestsRunning;
 };
