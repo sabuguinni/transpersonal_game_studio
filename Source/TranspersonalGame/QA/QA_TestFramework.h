@@ -9,10 +9,10 @@
 UENUM(BlueprintType)
 enum class EQA_TestResult : uint8
 {
-    NotRun      UMETA(DisplayName = "Not Run"),
     Pass        UMETA(DisplayName = "Pass"),
     Fail        UMETA(DisplayName = "Fail"),
-    Warning     UMETA(DisplayName = "Warning")
+    Warning     UMETA(DisplayName = "Warning"),
+    Skipped     UMETA(DisplayName = "Skipped")
 };
 
 USTRUCT(BlueprintType)
@@ -39,82 +39,73 @@ struct FQA_TestCase
     {
         TestName = TEXT("");
         TestDescription = TEXT("");
-        Result = EQA_TestResult::NotRun;
+        Result = EQA_TestResult::Skipped;
         ErrorMessage = TEXT("");
         ExecutionTime = 0.0f;
     }
 };
 
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UQA_TestFramework : public UObject
+class TRANSPERSONALGAME_API UQA_TestFramework : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
     UQA_TestFramework();
 
-    // Core testing functions
     UFUNCTION(BlueprintCallable, Category = "QA Testing")
     void RunAllTests();
 
     UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    void RunTestByName(const FString& TestName);
+    void RunVFXTests();
 
     UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    void AddTestCase(const FQA_TestCase& TestCase);
+    void RunPerformanceTests();
 
     UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    TArray<FQA_TestCase> GetTestResults() const;
+    void RunIntegrationTests();
 
     UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    void ClearTestResults();
-
-    // Specific test categories
-    UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    void TestVFXSystems();
+    void RunCompilationTests();
 
     UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    void TestCharacterMovement();
+    FQA_TestCase ValidateActorSpawning();
 
     UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    void TestDinosaurAI();
+    FQA_TestCase ValidateVFXSystems();
 
     UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    void TestWorldGeneration();
+    FQA_TestCase ValidateAudioSystems();
 
     UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    void TestAudioSystems();
+    FQA_TestCase ValidateCharacterMovement();
 
     UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    void TestPerformanceMetrics();
-
-    // Validation helpers
-    UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    bool ValidateActorCount(int32 ExpectedCount, const FString& ActorType);
-
-    UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    bool ValidateClassLoading(const FString& ClassName);
-
-    UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    bool ValidateAssetLoading(const FString& AssetPath);
+    FQA_TestCase ValidateDinosaurAI();
 
     UFUNCTION(BlueprintCallable, Category = "QA Testing")
     void GenerateTestReport();
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Results")
+    TArray<FQA_TestCase> TestResults;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Config")
+    bool bAutoRunOnBeginPlay;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Config")
+    bool bGenerateDetailedLogs;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Config")
+    int32 MaxTestActors;
+
 protected:
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "QA Testing")
-    TArray<FQA_TestCase> TestCases;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "QA Testing")
-    int32 PassedTests;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "QA Testing")
-    int32 FailedTests;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "QA Testing")
-    int32 WarningTests;
+    virtual void BeginPlay() override;
 
 private:
     void LogTestResult(const FQA_TestCase& TestCase);
     FQA_TestCase CreateTestCase(const FString& Name, const FString& Description);
+    void CleanupTestActors();
+
+    UPROPERTY()
+    TArray<AActor*> SpawnedTestActors;
 };
