@@ -1,95 +1,103 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/Engine.h"
+#include "Engine/BlueprintGeneratedClass.h"
 #include "NiagaraSystem.h"
 #include "NiagaraComponent.h"
-#include "Components/ActorComponent.h"
+#include "Components/StaticMeshComponent.h"
+#include "Engine/World.h"
 #include "SharedTypes.h"
 #include "VFX_NiagaraLibrary.generated.h"
 
-UENUM(BlueprintType)
-enum class EVFX_EffectType : uint8
-{
-    Fire_Campfire       UMETA(DisplayName = "Campfire"),
-    Impact_Footstep     UMETA(DisplayName = "Dinosaur Footstep"),
-    Weather_Rain        UMETA(DisplayName = "Rain"),
-    Weather_Snow        UMETA(DisplayName = "Snow"),
-    Combat_BloodSplash  UMETA(DisplayName = "Blood Splash"),
-    Craft_Sparks        UMETA(DisplayName = "Crafting Sparks"),
-    Environment_Dust    UMETA(DisplayName = "Dust Cloud"),
-    Water_Splash        UMETA(DisplayName = "Water Splash")
-};
+TRANSPERSONALGAME_API DECLARE_LOG_CATEGORY_EXTERN(LogVFXNiagara, Log, All);
 
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FVFX_EffectData
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
-    EVFX_EffectType EffectType;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
-    TSoftObjectPtr<UNiagaraSystem> NiagaraSystem;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
-    FVector Scale;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
-    float Duration;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
-    bool bAutoDestroy;
-
-    FVFX_EffectData()
-    {
-        EffectType = EVFX_EffectType::Fire_Campfire;
-        Scale = FVector::OneVector;
-        Duration = 5.0f;
-        bAutoDestroy = true;
-    }
-};
-
-UCLASS(ClassGroup=(VFX), meta=(BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UVFX_NiagaraLibrary : public UActorComponent
+/**
+ * VFX Library for prehistoric survival game effects
+ * Manages Niagara particle systems for realistic environmental effects
+ */
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API UVFX_NiagaraLibrary : public UObject
 {
     GENERATED_BODY()
 
 public:
     UVFX_NiagaraLibrary();
 
+    // Environment VFX
+    UFUNCTION(BlueprintCallable, Category = "VFX|Environment")
+    static class UNiagaraSystem* GetCampfireVFX();
+
+    UFUNCTION(BlueprintCallable, Category = "VFX|Environment")
+    static class UNiagaraSystem* GetRainVFX();
+
+    UFUNCTION(BlueprintCallable, Category = "VFX|Environment")
+    static class UNiagaraSystem* GetFogVFX();
+
+    UFUNCTION(BlueprintCallable, Category = "VFX|Environment")
+    static class UNiagaraSystem* GetWindVFX();
+
+    // Dinosaur VFX
+    UFUNCTION(BlueprintCallable, Category = "VFX|Dinosaur")
+    static class UNiagaraSystem* GetFootstepDustVFX();
+
+    UFUNCTION(BlueprintCallable, Category = "VFX|Dinosaur")
+    static class UNiagaraSystem* GetBreathVaporVFX();
+
+    UFUNCTION(BlueprintCallable, Category = "VFX|Dinosaur")
+    static class UNiagaraSystem* GetBloodImpactVFX();
+
+    UFUNCTION(BlueprintCallable, Category = "VFX|Dinosaur")
+    static class UNiagaraSystem* GetRoarDistortionVFX();
+
+    // Combat VFX
+    UFUNCTION(BlueprintCallable, Category = "VFX|Combat")
+    static class UNiagaraSystem* GetSpearImpactVFX();
+
+    UFUNCTION(BlueprintCallable, Category = "VFX|Combat")
+    static class UNiagaraSystem* GetStoneImpactVFX();
+
+    UFUNCTION(BlueprintCallable, Category = "VFX|Combat")
+    static class UNiagaraSystem* GetWoundBleedingVFX();
+
+    // Crafting VFX
+    UFUNCTION(BlueprintCallable, Category = "VFX|Crafting")
+    static class UNiagaraSystem* GetSparksVFX();
+
+    UFUNCTION(BlueprintCallable, Category = "VFX|Crafting")
+    static class UNiagaraSystem* GetCookingSmokeVFX();
+
+    // Utility functions
+    UFUNCTION(BlueprintCallable, Category = "VFX|Utility")
+    static class UNiagaraComponent* SpawnVFXAtLocation(
+        UWorld* World,
+        class UNiagaraSystem* VFXSystem,
+        const FVector& Location,
+        const FRotator& Rotation = FRotator::ZeroRotator,
+        const FVector& Scale = FVector::OneVector
+    );
+
+    UFUNCTION(BlueprintCallable, Category = "VFX|Utility")
+    static void AttachVFXToActor(
+        AActor* TargetActor,
+        class UNiagaraSystem* VFXSystem,
+        const FName& SocketName = NAME_None,
+        const FVector& LocationOffset = FVector::ZeroVector
+    );
+
 protected:
-    virtual void BeginPlay() override;
+    // VFX asset references
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "VFX Assets")
+    static TSoftObjectPtr<class UNiagaraSystem> CampfireVFX;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Library")
-    TArray<FVFX_EffectData> EffectLibrary;
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "VFX Assets")
+    static TSoftObjectPtr<class UNiagaraSystem> RainVFX;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "VFX Library")
-    TArray<UNiagaraComponent*> ActiveEffects;
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "VFX Assets")
+    static TSoftObjectPtr<class UNiagaraSystem> FootstepDustVFX;
 
-public:
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    UNiagaraComponent* SpawnEffect(EVFX_EffectType EffectType, FVector Location, FRotator Rotation = FRotator::ZeroRotator);
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "VFX Assets")
+    static TSoftObjectPtr<class UNiagaraSystem> BloodImpactVFX;
 
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    void SpawnEffectAtActor(EVFX_EffectType EffectType, AActor* TargetActor, FVector Offset = FVector::ZeroVector);
-
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    void StopAllEffects();
-
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    void StopEffectsByType(EVFX_EffectType EffectType);
-
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    int32 GetActiveEffectCount() const;
-
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    void InitializeEffectLibrary();
-
-protected:
-    FVFX_EffectData* GetEffectData(EVFX_EffectType EffectType);
-    void CleanupDestroyedEffects();
-
-private:
-    void SetupDefaultEffects();
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "VFX Assets")
+    static TSoftObjectPtr<class UNiagaraSystem> SparksVFX;
 };
