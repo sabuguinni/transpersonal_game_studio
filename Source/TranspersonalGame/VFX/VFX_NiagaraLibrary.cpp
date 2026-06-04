@@ -1,211 +1,211 @@
 #include "VFX_NiagaraLibrary.h"
+#include "NiagaraSystem.h"
+#include "NiagaraComponent.h"
 #include "NiagaraFunctionLibrary.h"
 #include "Engine/World.h"
+#include "Engine/Engine.h"
 #include "Components/SceneComponent.h"
+
+DEFINE_LOG_CATEGORY(LogVFXNiagara);
+
+// Static asset references
+TSoftObjectPtr<UNiagaraSystem> UVFX_NiagaraLibrary::CampfireVFX = nullptr;
+TSoftObjectPtr<UNiagaraSystem> UVFX_NiagaraLibrary::RainVFX = nullptr;
+TSoftObjectPtr<UNiagaraSystem> UVFX_NiagaraLibrary::FootstepDustVFX = nullptr;
+TSoftObjectPtr<UNiagaraSystem> UVFX_NiagaraLibrary::BloodImpactVFX = nullptr;
+TSoftObjectPtr<UNiagaraSystem> UVFX_NiagaraLibrary::SparksVFX = nullptr;
 
 UVFX_NiagaraLibrary::UVFX_NiagaraLibrary()
 {
-    PrimaryComponentTick.bCanEverTick = false;
-    PrimaryComponentTick.bStartWithTickEnabled = false;
+    // Initialize asset references
+    CampfireVFX = TSoftObjectPtr<UNiagaraSystem>(FSoftObjectPath(TEXT("/Game/VFX/Environment/NS_Fire_Campfire")));
+    RainVFX = TSoftObjectPtr<UNiagaraSystem>(FSoftObjectPath(TEXT("/Game/VFX/Weather/NS_Weather_Rain")));
+    FootstepDustVFX = TSoftObjectPtr<UNiagaraSystem>(FSoftObjectPath(TEXT("/Game/VFX/Dinosaur/NS_Dino_FootstepDust")));
+    BloodImpactVFX = TSoftObjectPtr<UNiagaraSystem>(FSoftObjectPath(TEXT("/Game/VFX/Combat/NS_Combat_BloodImpact")));
+    SparksVFX = TSoftObjectPtr<UNiagaraSystem>(FSoftObjectPath(TEXT("/Game/VFX/Crafting/NS_Craft_Sparks")));
+}
+
+UNiagaraSystem* UVFX_NiagaraLibrary::GetCampfireVFX()
+{
+    if (CampfireVFX.IsValid())
+    {
+        return CampfireVFX.LoadSynchronous();
+    }
     
-    SetupDefaultEffects();
-}
-
-void UVFX_NiagaraLibrary::BeginPlay()
-{
-    Super::BeginPlay();
-    InitializeEffectLibrary();
-}
-
-void UVFX_NiagaraLibrary::SetupDefaultEffects()
-{
-    EffectLibrary.Empty();
-
-    // Campfire effect
-    FVFX_EffectData CampfireData;
-    CampfireData.EffectType = EVFX_EffectType::Fire_Campfire;
-    CampfireData.Scale = FVector(1.0f, 1.0f, 1.5f);
-    CampfireData.Duration = -1.0f; // Infinite
-    CampfireData.bAutoDestroy = false;
-    EffectLibrary.Add(CampfireData);
-
-    // Dinosaur footstep impact
-    FVFX_EffectData FootstepData;
-    FootstepData.EffectType = EVFX_EffectType::Impact_Footstep;
-    FootstepData.Scale = FVector(2.0f, 2.0f, 1.0f);
-    FootstepData.Duration = 3.0f;
-    FootstepData.bAutoDestroy = true;
-    EffectLibrary.Add(FootstepData);
-
-    // Rain weather
-    FVFX_EffectData RainData;
-    RainData.EffectType = EVFX_EffectType::Weather_Rain;
-    RainData.Scale = FVector(10.0f, 10.0f, 5.0f);
-    RainData.Duration = -1.0f; // Infinite
-    RainData.bAutoDestroy = false;
-    EffectLibrary.Add(RainData);
-
-    // Blood splash combat
-    FVFX_EffectData BloodData;
-    BloodData.EffectType = EVFX_EffectType::Combat_BloodSplash;
-    BloodData.Scale = FVector(0.8f, 0.8f, 0.8f);
-    BloodData.Duration = 2.5f;
-    BloodData.bAutoDestroy = true;
-    EffectLibrary.Add(BloodData);
-
-    // Crafting sparks
-    FVFX_EffectData SparksData;
-    SparksData.EffectType = EVFX_EffectType::Craft_Sparks;
-    SparksData.Scale = FVector(0.5f, 0.5f, 0.5f);
-    SparksData.Duration = 1.5f;
-    SparksData.bAutoDestroy = true;
-    EffectLibrary.Add(SparksData);
-
-    // Environment dust
-    FVFX_EffectData DustData;
-    DustData.EffectType = EVFX_EffectType::Environment_Dust;
-    DustData.Scale = FVector(1.5f, 1.5f, 1.0f);
-    DustData.Duration = 4.0f;
-    DustData.bAutoDestroy = true;
-    EffectLibrary.Add(DustData);
-
-    // Water splash
-    FVFX_EffectData WaterData;
-    WaterData.EffectType = EVFX_EffectType::Water_Splash;
-    WaterData.Scale = FVector(1.2f, 1.2f, 1.2f);
-    WaterData.Duration = 2.0f;
-    WaterData.bAutoDestroy = true;
-    EffectLibrary.Add(WaterData);
-
-    // Snow weather
-    FVFX_EffectData SnowData;
-    SnowData.EffectType = EVFX_EffectType::Weather_Snow;
-    SnowData.Scale = FVector(8.0f, 8.0f, 3.0f);
-    SnowData.Duration = -1.0f; // Infinite
-    SnowData.bAutoDestroy = false;
-    EffectLibrary.Add(SnowData);
-}
-
-void UVFX_NiagaraLibrary::InitializeEffectLibrary()
-{
-    // Initialize Niagara system references
-    // In a real implementation, these would load actual Niagara assets
-    for (FVFX_EffectData& EffectData : EffectLibrary)
-    {
-        // Placeholder - would load actual Niagara systems from content browser
-        // EffectData.NiagaraSystem = LoadObject<UNiagaraSystem>(nullptr, TEXT("/Game/VFX/NS_Fire_Campfire"));
-    }
-}
-
-UNiagaraComponent* UVFX_NiagaraLibrary::SpawnEffect(EVFX_EffectType EffectType, FVector Location, FRotator Rotation)
-{
-    FVFX_EffectData* EffectData = GetEffectData(EffectType);
-    if (!EffectData)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("VFX_NiagaraLibrary: Effect type not found"));
-        return nullptr;
-    }
-
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        return nullptr;
-    }
-
-    // Create Niagara component
-    UNiagaraComponent* NiagaraComp = UNiagaraFunctionLibrary::SpawnSystemAtLocation(
-        World,
-        EffectData->NiagaraSystem.LoadSynchronous(),
-        Location,
-        Rotation,
-        EffectData->Scale,
-        EffectData->bAutoDestroy
-    );
-
-    if (NiagaraComp)
-    {
-        ActiveEffects.Add(NiagaraComp);
-        
-        // Set duration for auto-destroy effects
-        if (EffectData->bAutoDestroy && EffectData->Duration > 0.0f)
-        {
-            FTimerHandle TimerHandle;
-            World->GetTimerManager().SetTimer(TimerHandle, [this, NiagaraComp]()
-            {
-                if (IsValid(NiagaraComp))
-                {
-                    NiagaraComp->DestroyComponent();
-                    ActiveEffects.Remove(NiagaraComp);
-                }
-            }, EffectData->Duration, false);
-        }
-    }
-
-    CleanupDestroyedEffects();
-    return NiagaraComp;
-}
-
-void UVFX_NiagaraLibrary::SpawnEffectAtActor(EVFX_EffectType EffectType, AActor* TargetActor, FVector Offset)
-{
-    if (!TargetActor)
-    {
-        return;
-    }
-
-    FVector SpawnLocation = TargetActor->GetActorLocation() + Offset;
-    FRotator SpawnRotation = TargetActor->GetActorRotation();
-    
-    SpawnEffect(EffectType, SpawnLocation, SpawnRotation);
-}
-
-void UVFX_NiagaraLibrary::StopAllEffects()
-{
-    for (UNiagaraComponent* Effect : ActiveEffects)
-    {
-        if (IsValid(Effect))
-        {
-            Effect->DestroyComponent();
-        }
-    }
-    ActiveEffects.Empty();
-}
-
-void UVFX_NiagaraLibrary::StopEffectsByType(EVFX_EffectType EffectType)
-{
-    // Note: This is a simplified implementation
-    // In practice, you'd track effect types per component
-    CleanupDestroyedEffects();
-}
-
-int32 UVFX_NiagaraLibrary::GetActiveEffectCount() const
-{
-    int32 ValidCount = 0;
-    for (UNiagaraComponent* Effect : ActiveEffects)
-    {
-        if (IsValid(Effect))
-        {
-            ValidCount++;
-        }
-    }
-    return ValidCount;
-}
-
-FVFX_EffectData* UVFX_NiagaraLibrary::GetEffectData(EVFX_EffectType EffectType)
-{
-    for (FVFX_EffectData& EffectData : EffectLibrary)
-    {
-        if (EffectData.EffectType == EffectType)
-        {
-            return &EffectData;
-        }
-    }
+    UE_LOG(LogVFXNiagara, Warning, TEXT("Campfire VFX asset not found, using fallback"));
     return nullptr;
 }
 
-void UVFX_NiagaraLibrary::CleanupDestroyedEffects()
+UNiagaraSystem* UVFX_NiagaraLibrary::GetRainVFX()
 {
-    ActiveEffects.RemoveAll([](UNiagaraComponent* Effect)
+    if (RainVFX.IsValid())
     {
-        return !IsValid(Effect);
-    });
+        return RainVFX.LoadSynchronous();
+    }
+    
+    UE_LOG(LogVFXNiagara, Warning, TEXT("Rain VFX asset not found"));
+    return nullptr;
+}
+
+UNiagaraSystem* UVFX_NiagaraLibrary::GetFogVFX()
+{
+    // Placeholder implementation - would load from /Game/VFX/Weather/NS_Weather_Fog
+    UE_LOG(LogVFXNiagara, Log, TEXT("Fog VFX requested - placeholder implementation"));
+    return nullptr;
+}
+
+UNiagaraSystem* UVFX_NiagaraLibrary::GetWindVFX()
+{
+    // Placeholder implementation - would load from /Game/VFX/Weather/NS_Weather_Wind
+    UE_LOG(LogVFXNiagara, Log, TEXT("Wind VFX requested - placeholder implementation"));
+    return nullptr;
+}
+
+UNiagaraSystem* UVFX_NiagaraLibrary::GetFootstepDustVFX()
+{
+    if (FootstepDustVFX.IsValid())
+    {
+        return FootstepDustVFX.LoadSynchronous();
+    }
+    
+    UE_LOG(LogVFXNiagara, Warning, TEXT("Footstep dust VFX asset not found"));
+    return nullptr;
+}
+
+UNiagaraSystem* UVFX_NiagaraLibrary::GetBreathVaporVFX()
+{
+    // Placeholder implementation - would load from /Game/VFX/Dinosaur/NS_Dino_BreathVapor
+    UE_LOG(LogVFXNiagara, Log, TEXT("Breath vapor VFX requested - placeholder implementation"));
+    return nullptr;
+}
+
+UNiagaraSystem* UVFX_NiagaraLibrary::GetBloodImpactVFX()
+{
+    if (BloodImpactVFX.IsValid())
+    {
+        return BloodImpactVFX.LoadSynchronous();
+    }
+    
+    UE_LOG(LogVFXNiagara, Warning, TEXT("Blood impact VFX asset not found"));
+    return nullptr;
+}
+
+UNiagaraSystem* UVFX_NiagaraLibrary::GetRoarDistortionVFX()
+{
+    // Placeholder implementation - would load from /Game/VFX/Dinosaur/NS_Dino_RoarDistortion
+    UE_LOG(LogVFXNiagara, Log, TEXT("Roar distortion VFX requested - placeholder implementation"));
+    return nullptr;
+}
+
+UNiagaraSystem* UVFX_NiagaraLibrary::GetSpearImpactVFX()
+{
+    // Placeholder implementation - would load from /Game/VFX/Combat/NS_Combat_SpearImpact
+    UE_LOG(LogVFXNiagara, Log, TEXT("Spear impact VFX requested - placeholder implementation"));
+    return nullptr;
+}
+
+UNiagaraSystem* UVFX_NiagaraLibrary::GetStoneImpactVFX()
+{
+    // Placeholder implementation - would load from /Game/VFX/Combat/NS_Combat_StoneImpact
+    UE_LOG(LogVFXNiagara, Log, TEXT("Stone impact VFX requested - placeholder implementation"));
+    return nullptr;
+}
+
+UNiagaraSystem* UVFX_NiagaraLibrary::GetWoundBleedingVFX()
+{
+    // Placeholder implementation - would load from /Game/VFX/Combat/NS_Combat_WoundBleeding
+    UE_LOG(LogVFXNiagara, Log, TEXT("Wound bleeding VFX requested - placeholder implementation"));
+    return nullptr;
+}
+
+UNiagaraSystem* UVFX_NiagaraLibrary::GetSparksVFX()
+{
+    if (SparksVFX.IsValid())
+    {
+        return SparksVFX.LoadSynchronous();
+    }
+    
+    UE_LOG(LogVFXNiagara, Warning, TEXT("Sparks VFX asset not found"));
+    return nullptr;
+}
+
+UNiagaraSystem* UVFX_NiagaraLibrary::GetCookingSmokeVFX()
+{
+    // Placeholder implementation - would load from /Game/VFX/Crafting/NS_Craft_CookingSmoke
+    UE_LOG(LogVFXNiagara, Log, TEXT("Cooking smoke VFX requested - placeholder implementation"));
+    return nullptr;
+}
+
+UNiagaraComponent* UVFX_NiagaraLibrary::SpawnVFXAtLocation(
+    UWorld* World,
+    UNiagaraSystem* VFXSystem,
+    const FVector& Location,
+    const FRotator& Rotation,
+    const FVector& Scale)
+{
+    if (!World || !VFXSystem)
+    {
+        UE_LOG(LogVFXNiagara, Error, TEXT("SpawnVFXAtLocation: Invalid World or VFXSystem"));
+        return nullptr;
+    }
+
+    UNiagaraComponent* VFXComponent = UNiagaraFunctionLibrary::SpawnSystemAtLocation(
+        World,
+        VFXSystem,
+        Location,
+        Rotation,
+        Scale,
+        true,  // Auto destroy
+        true,  // Auto activate
+        ENCPoolMethod::None
+    );
+
+    if (VFXComponent)
+    {
+        UE_LOG(LogVFXNiagara, Log, TEXT("Spawned VFX %s at location %s"), 
+               *VFXSystem->GetName(), *Location.ToString());
+    }
+    else
+    {
+        UE_LOG(LogVFXNiagara, Error, TEXT("Failed to spawn VFX %s"), *VFXSystem->GetName());
+    }
+
+    return VFXComponent;
+}
+
+void UVFX_NiagaraLibrary::AttachVFXToActor(
+    AActor* TargetActor,
+    UNiagaraSystem* VFXSystem,
+    const FName& SocketName,
+    const FVector& LocationOffset)
+{
+    if (!TargetActor || !VFXSystem)
+    {
+        UE_LOG(LogVFXNiagara, Error, TEXT("AttachVFXToActor: Invalid TargetActor or VFXSystem"));
+        return;
+    }
+
+    UNiagaraComponent* VFXComponent = UNiagaraFunctionLibrary::SpawnSystemAttached(
+        VFXSystem,
+        TargetActor->GetRootComponent(),
+        SocketName,
+        LocationOffset,
+        FRotator::ZeroRotator,
+        FVector::OneVector,
+        EAttachLocation::KeepRelativeOffset,
+        true,  // Auto destroy
+        true,  // Auto activate
+        ENCPoolMethod::None
+    );
+
+    if (VFXComponent)
+    {
+        UE_LOG(LogVFXNiagara, Log, TEXT("Attached VFX %s to actor %s"), 
+               *VFXSystem->GetName(), *TargetActor->GetName());
+    }
+    else
+    {
+        UE_LOG(LogVFXNiagara, Error, TEXT("Failed to attach VFX %s to actor %s"), 
+               *VFXSystem->GetName(), *TargetActor->GetName());
+    }
 }
