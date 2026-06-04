@@ -1,156 +1,118 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/World.h"
 #include "GameFramework/Actor.h"
-#include "Components/ActorComponent.h"
-#include "Subsystems/GameInstanceSubsystem.h"
-#include "SharedTypes.h"
+#include "Engine/World.h"
+#include "Components/StaticMeshComponent.h"
 #include "Build_QAIntegrationValidator.generated.h"
 
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FBuild_QAValidationResult
+UENUM(BlueprintType)
+enum class EBuild_QAValidationStatus : uint8
 {
-    GENERATED_BODY()
-
-    UPROPERTY(BlueprintReadOnly, Category = "QA Validation")
-    bool bValidationPassed = false;
-
-    UPROPERTY(BlueprintReadOnly, Category = "QA Validation")
-    FString ValidationMessage;
-
-    UPROPERTY(BlueprintReadOnly, Category = "QA Validation")
-    int32 ErrorCount = 0;
-
-    UPROPERTY(BlueprintReadOnly, Category = "QA Validation")
-    int32 WarningCount = 0;
-
-    UPROPERTY(BlueprintReadOnly, Category = "QA Validation")
-    TArray<FString> CriticalErrors;
-
-    UPROPERTY(BlueprintReadOnly, Category = "QA Validation")
-    TArray<FString> Warnings;
-
-    UPROPERTY(BlueprintReadOnly, Category = "QA Validation")
-    float ValidationTimestamp = 0.0f;
-
-    FBuild_QAValidationResult()
-    {
-        bValidationPassed = false;
-        ValidationMessage = TEXT("Not validated");
-        ErrorCount = 0;
-        WarningCount = 0;
-        ValidationTimestamp = 0.0f;
-    }
+    Pending UMETA(DisplayName = "Pending"),
+    InProgress UMETA(DisplayName = "In Progress"),
+    Passed UMETA(DisplayName = "Passed"),
+    Failed UMETA(DisplayName = "Failed"),
+    Critical UMETA(DisplayName = "Critical Error")
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FBuild_QAIntegrationMetrics
+struct TRANSPERSONALGAME_API FBuild_QAIntegrationResult
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "QA Metrics")
-    int32 TotalActorsInMap = 0;
+    UPROPERTY(BlueprintReadOnly, Category = "QA Integration")
+    EBuild_QAValidationStatus ValidationStatus = EBuild_QAValidationStatus::Pending;
 
-    UPROPERTY(BlueprintReadOnly, Category = "QA Metrics")
-    int32 DinosaurCount = 0;
+    UPROPERTY(BlueprintReadOnly, Category = "QA Integration")
+    int32 TotalActorsValidated = 0;
 
-    UPROPERTY(BlueprintReadOnly, Category = "QA Metrics")
-    int32 VFXActorCount = 0;
+    UPROPERTY(BlueprintReadOnly, Category = "QA Integration")
+    int32 QAActorsFound = 0;
 
-    UPROPERTY(BlueprintReadOnly, Category = "QA Metrics")
-    int32 AudioActorCount = 0;
+    UPROPERTY(BlueprintReadOnly, Category = "QA Integration")
+    int32 VFXActorsFound = 0;
 
-    UPROPERTY(BlueprintReadOnly, Category = "QA Metrics")
-    float MemoryUsageMB = 0.0f;
+    UPROPERTY(BlueprintReadOnly, Category = "QA Integration")
+    bool bPerformanceLimitsOK = true;
 
-    UPROPERTY(BlueprintReadOnly, Category = "QA Metrics")
-    float FrameRate = 0.0f;
+    UPROPERTY(BlueprintReadOnly, Category = "QA Integration")
+    bool bModuleIntegrationOK = true;
 
-    UPROPERTY(BlueprintReadOnly, Category = "QA Metrics")
-    bool bPerformanceWithinLimits = true;
+    UPROPERTY(BlueprintReadOnly, Category = "QA Integration")
+    bool bVFXIntegrationOK = true;
 
-    UPROPERTY(BlueprintReadOnly, Category = "QA Metrics")
-    TArray<FString> PerformanceWarnings;
+    UPROPERTY(BlueprintReadOnly, Category = "QA Integration")
+    FString ValidationReport = TEXT("No validation performed yet");
 
-    FBuild_QAIntegrationMetrics()
+    FBuild_QAIntegrationResult()
     {
-        TotalActorsInMap = 0;
-        DinosaurCount = 0;
-        VFXActorCount = 0;
-        AudioActorCount = 0;
-        MemoryUsageMB = 0.0f;
-        FrameRate = 0.0f;
-        bPerformanceWithinLimits = true;
+        ValidationStatus = EBuild_QAValidationStatus::Pending;
+        TotalActorsValidated = 0;
+        QAActorsFound = 0;
+        VFXActorsFound = 0;
+        bPerformanceLimitsOK = true;
+        bModuleIntegrationOK = true;
+        bVFXIntegrationOK = true;
+        ValidationReport = TEXT("Initialized");
     }
 };
 
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UBuild_QAIntegrationValidator : public UGameInstanceSubsystem
+class TRANSPERSONALGAME_API ABuild_QAIntegrationValidator : public AActor
 {
     GENERATED_BODY()
 
 public:
-    UBuild_QAIntegrationValidator();
+    ABuild_QAIntegrationValidator();
 
-    // Subsystem interface
-    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
-    virtual void Deinitialize() override;
+protected:
+    virtual void BeginPlay() override;
 
-    // QA Integration validation functions
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    UStaticMeshComponent* ValidatorMesh;
+
+    UPROPERTY(BlueprintReadOnly, Category = "QA Integration")
+    FBuild_QAIntegrationResult CurrentValidationResult;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Integration")
+    int32 MaxActorLimit = 200;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Integration")
+    bool bAutoValidateOnBeginPlay = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Integration")
+    float ValidationInterval = 30.0f;
+
+public:
     UFUNCTION(BlueprintCallable, Category = "QA Integration")
-    FBuild_QAValidationResult ValidateQAResults();
+    FBuild_QAIntegrationResult ValidateQAIntegration();
 
     UFUNCTION(BlueprintCallable, Category = "QA Integration")
-    FBuild_QAIntegrationMetrics CollectIntegrationMetrics();
-
-    UFUNCTION(BlueprintCallable, Category = "QA Integration")
-    bool ValidateActorLimits();
-
-    UFUNCTION(BlueprintCallable, Category = "QA Integration")
-    bool ValidateDinosaurLimits();
-
-    UFUNCTION(BlueprintCallable, Category = "QA Integration")
-    bool ValidatePerformanceMetrics();
+    bool ValidatePerformanceLimits();
 
     UFUNCTION(BlueprintCallable, Category = "QA Integration")
     bool ValidateModuleIntegration();
 
     UFUNCTION(BlueprintCallable, Category = "QA Integration")
-    FString GenerateIntegrationReport();
+    bool ValidateVFXIntegration();
 
     UFUNCTION(BlueprintCallable, Category = "QA Integration")
-    void LogValidationResults(const FBuild_QAValidationResult& Results);
+    void GenerateValidationReport();
 
-    // Critical validation checks
-    UFUNCTION(BlueprintCallable, Category = "QA Integration")
-    bool CheckCriticalSystemsOnline();
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "QA Integration")
+    void RunFullValidation();
 
-    UFUNCTION(BlueprintCallable, Category = "QA Integration")
-    bool ValidateMapIntegrity();
+    UFUNCTION(BlueprintPure, Category = "QA Integration")
+    FBuild_QAIntegrationResult GetValidationResult() const { return CurrentValidationResult; }
 
-    UFUNCTION(BlueprintCallable, Category = "QA Integration")
-    bool ValidateAssetReferences();
-
-protected:
-    UPROPERTY(BlueprintReadOnly, Category = "QA Integration")
-    FBuild_QAValidationResult LastValidationResult;
-
-    UPROPERTY(BlueprintReadOnly, Category = "QA Integration")
-    FBuild_QAIntegrationMetrics LastMetrics;
-
-    UPROPERTY(BlueprintReadOnly, Category = "QA Integration")
-    bool bValidationInProgress = false;
-
-    UPROPERTY(BlueprintReadOnly, Category = "QA Integration")
-    float LastValidationTime = 0.0f;
+    UFUNCTION(BlueprintPure, Category = "QA Integration")
+    bool IsValidationPassing() const;
 
 private:
-    // Internal validation helpers
-    bool ValidateActorCounts();
-    bool ValidateSystemReferences();
-    bool ValidatePerformanceLimits();
-    void CollectPerformanceData();
-    void LogCriticalError(const FString& ErrorMessage);
-    void LogWarning(const FString& WarningMessage);
+    FTimerHandle ValidationTimerHandle;
+    
+    void PerformPeriodicValidation();
+    void UpdateValidationStatus();
+    int32 CountActorsByType(const FString& TypeFilter);
 };
