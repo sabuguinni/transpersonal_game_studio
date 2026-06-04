@@ -1,31 +1,31 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Subsystems/GameInstanceSubsystem.h"
-#include "Engine/Engine.h"
+#include "Engine/GameInstanceSubsystem.h"
+#include "Engine/World.h"
 #include "Components/AudioComponent.h"
 #include "Sound/SoundCue.h"
-#include "../Narrative/NarrativeStoryManager.h"
+#include "SharedTypes.h"
 #include "Audio_AdaptiveMusicManager.generated.h"
 
 UENUM(BlueprintType)
 enum class EAudio_MusicLayer : uint8
 {
-    Ambient         UMETA(DisplayName = "Ambient"),
-    Tension         UMETA(DisplayName = "Tension"),
-    Combat          UMETA(DisplayName = "Combat"),
-    Exploration     UMETA(DisplayName = "Exploration"),
-    Discovery       UMETA(DisplayName = "Discovery")
+    Ambient     UMETA(DisplayName = "Ambient"),
+    Tension     UMETA(DisplayName = "Tension"),
+    Combat      UMETA(DisplayName = "Combat"),
+    Exploration UMETA(DisplayName = "Exploration"),
+    Danger      UMETA(DisplayName = "Danger")
 };
 
 UENUM(BlueprintType)
-enum class EAudio_BiomeTheme : uint8
+enum class EAudio_BiomeType : uint8
 {
-    Savana          UMETA(DisplayName = "Savana"),
-    Forest          UMETA(DisplayName = "Forest"),
-    Desert          UMETA(DisplayName = "Desert"),
-    Swamp           UMETA(DisplayName = "Swamp"),
-    Mountain        UMETA(DisplayName = "Mountain")
+    Forest      UMETA(DisplayName = "Forest"),
+    Plains      UMETA(DisplayName = "Plains"),
+    River       UMETA(DisplayName = "River"),
+    Mountains   UMETA(DisplayName = "Mountains"),
+    Caves       UMETA(DisplayName = "Caves")
 };
 
 USTRUCT(BlueprintType)
@@ -33,37 +33,23 @@ struct TRANSPERSONALGAME_API FAudio_MusicState
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Music State")
-    EStoryPhase CurrentStoryPhase = EStoryPhase::Awakening;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    EAudio_MusicLayer CurrentLayer = EAudio_MusicLayer::Ambient;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Music State")
-    EAudio_BiomeTheme CurrentBiome = EAudio_BiomeTheme::Savana;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    EAudio_BiomeType CurrentBiome = EAudio_BiomeType::Forest;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Music State")
-    EAudio_MusicLayer ActiveLayer = EAudio_MusicLayer::Ambient;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Music State")
-    float FearLevel = 0.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Music State")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
     float IntensityLevel = 0.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Music State")
-    bool bInCombat = false;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float CrossfadeTime = 2.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Music State")
-    bool bNearPredator = false;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bIsInCombat = false;
 
-    FAudio_MusicState()
-    {
-        CurrentStoryPhase = EStoryPhase::Awakening;
-        CurrentBiome = EAudio_BiomeTheme::Savana;
-        ActiveLayer = EAudio_MusicLayer::Ambient;
-        FearLevel = 0.0f;
-        IntensityLevel = 0.0f;
-        bInCombat = false;
-        bNearPredator = false;
-    }
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bDangerNearby = false;
 };
 
 UCLASS(BlueprintType, Blueprintable)
@@ -78,80 +64,65 @@ public:
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
-    // Music control functions
-    UFUNCTION(BlueprintCallable, Category = "Adaptive Music")
-    void UpdateMusicState(const FAudio_MusicState& NewState);
+    // Music control
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    void SetMusicLayer(EAudio_MusicLayer NewLayer, float CrossfadeTime = 2.0f);
 
-    UFUNCTION(BlueprintCallable, Category = "Adaptive Music")
-    void SetStoryPhase(EStoryPhase NewPhase);
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    void SetBiome(EAudio_BiomeType NewBiome);
 
-    UFUNCTION(BlueprintCallable, Category = "Adaptive Music")
-    void SetBiome(EAudio_BiomeTheme NewBiome);
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    void SetIntensity(float NewIntensity);
 
-    UFUNCTION(BlueprintCallable, Category = "Adaptive Music")
-    void SetFearLevel(float NewFearLevel);
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    void OnCombatStart();
 
-    UFUNCTION(BlueprintCallable, Category = "Adaptive Music")
-    void SetCombatState(bool bInCombat);
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    void OnCombatEnd();
 
-    UFUNCTION(BlueprintCallable, Category = "Adaptive Music")
-    void SetPredatorProximity(bool bNearPredator);
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    void OnDangerDetected(bool bDangerous);
 
-    // Layer management
-    UFUNCTION(BlueprintCallable, Category = "Adaptive Music")
-    void FadeInLayer(EAudio_MusicLayer Layer, float FadeTime = 2.0f);
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    void UpdateMusicState(float DeltaTime);
 
-    UFUNCTION(BlueprintCallable, Category = "Adaptive Music")
-    void FadeOutLayer(EAudio_MusicLayer Layer, float FadeTime = 2.0f);
+    // Getters
+    UFUNCTION(BlueprintPure, Category = "Audio")
+    FAudio_MusicState GetCurrentMusicState() const { return CurrentMusicState; }
 
-    UFUNCTION(BlueprintCallable, Category = "Adaptive Music")
-    void CrossfadeToLayer(EAudio_MusicLayer NewLayer, float FadeTime = 3.0f);
-
-    // Music intensity control
-    UFUNCTION(BlueprintCallable, Category = "Adaptive Music")
-    void UpdateIntensity(float DeltaTime);
-
-    UFUNCTION(BlueprintCallable, Category = "Adaptive Music")
-    void PlayStinger(const FString& StingerName);
-
-    // Audio component management
-    UFUNCTION(BlueprintCallable, Category = "Adaptive Music")
-    void InitializeAudioComponents();
-
-    UFUNCTION(BlueprintCallable, Category = "Adaptive Music")
-    void CleanupAudioComponents();
+    UFUNCTION(BlueprintPure, Category = "Audio")
+    bool IsInCombat() const { return CurrentMusicState.bIsInCombat; }
 
 protected:
-    // Current music state
-    UPROPERTY(BlueprintReadOnly, Category = "Music State")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
     FAudio_MusicState CurrentMusicState;
 
-    // Audio components for layered music
-    UPROPERTY(BlueprintReadOnly, Category = "Audio Components")
-    TMap<EAudio_MusicLayer, UAudioComponent*> MusicLayers;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    TMap<EAudio_MusicLayer, TSoftObjectPtr<USoundCue>> MusicLayers;
 
-    // Music assets organized by biome and layer
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Music Assets")
-    TMap<EAudio_BiomeTheme, TMap<EAudio_MusicLayer, USoundCue*>> BiomeMusicAssets;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    TMap<EAudio_BiomeType, TSoftObjectPtr<USoundCue>> BiomeAmbience;
 
-    // Stinger sounds for dramatic moments
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Music Assets")
-    TMap<FString, USoundCue*> StingerSounds;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    UAudioComponent* MusicAudioComponent;
 
-    // Crossfade parameters
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crossfade")
-    float DefaultFadeTime = 2.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    UAudioComponent* AmbienceAudioComponent;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crossfade")
-    float IntensityUpdateRate = 0.1f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    float MasterVolume = 1.0f;
 
-    // Internal update functions
-    void UpdateLayerBasedOnState();
-    void UpdateVolumeBasedOnIntensity();
-    void HandleStoryPhaseTransition(EStoryPhase OldPhase, EStoryPhase NewPhase);
-    void HandleBiomeTransition(EAudio_BiomeTheme OldBiome, EAudio_BiomeTheme NewBiome);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    float MusicVolume = 0.7f;
 
-    // Timer handles for smooth transitions
-    FTimerHandle IntensityUpdateTimer;
-    FTimerHandle CrossfadeTimer;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    float AmbienceVolume = 0.5f;
+
+private:
+    void CrossfadeToLayer(EAudio_MusicLayer NewLayer, float CrossfadeTime);
+    void UpdateBiomeAmbience();
+    void CalculateAdaptiveIntensity();
+
+    float LastIntensityUpdate = 0.0f;
+    float IntensityUpdateInterval = 1.0f;
 };
