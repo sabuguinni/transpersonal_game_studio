@@ -2,433 +2,290 @@
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
-#include "GameFramework/Actor.h"
+#include "TimerManager.h"
 #include "Components/StaticMeshComponent.h"
-#include "Components/SkeletalMeshComponent.h"
-#include "Particles/ParticleSystemComponent.h"
-#include "Components/AudioComponent.h"
-#include "HAL/PlatformFilemanager.h"
-#include "Misc/DateTime.h"
-#include "Misc/Paths.h"
+#include "Engine/StaticMesh.h"
+#include "UObject/ConstructorHelpers.h"
 
-UBuild_QAIntegrationValidator::UBuild_QAIntegrationValidator()
+ABuild_QAIntegrationValidator::ABuild_QAIntegrationValidator()
 {
-    bValidationInProgress = false;
-    LastValidationTime = 0.0f;
+    PrimaryActorTick.bCanEverTick = false;
+
+    // Create validator mesh component
+    ValidatorMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("ValidatorMesh"));
+    RootComponent = ValidatorMesh;
+
+    // Set default mesh (cube)
+    static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeMeshAsset(TEXT("/Engine/BasicShapes/Cube"));
+    if (CubeMeshAsset.Succeeded())
+    {
+        ValidatorMesh->SetStaticMesh(CubeMeshAsset.Object);
+        ValidatorMesh->SetWorldScale3D(FVector(0.5f, 0.5f, 0.5f));
+    }
+
+    // Initialize validation settings
+    MaxActorLimit = 200;
+    bAutoValidateOnBeginPlay = true;
+    ValidationInterval = 30.0f;
+
+    // Initialize validation result
+    CurrentValidationResult = FBuild_QAIntegrationResult();
 }
 
-void UBuild_QAIntegrationValidator::Initialize(FSubsystemCollectionBase& Collection)
+void ABuild_QAIntegrationValidator::BeginPlay()
 {
-    Super::Initialize(Collection);
-    
-    UE_LOG(LogTemp, Warning, TEXT("Build_QAIntegrationValidator: Subsystem initialized"));
-    
-    // Initialize validation state
-    LastValidationResult = FBuild_QAValidationResult();
-    LastMetrics = FBuild_QAIntegrationMetrics();
-    bValidationInProgress = false;
-    LastValidationTime = 0.0f;
+    Super::BeginPlay();
+
+    if (bAutoValidateOnBeginPlay)
+    {
+        // Run initial validation
+        ValidateQAIntegration();
+
+        // Set up periodic validation
+        if (ValidationInterval > 0.0f)
+        {
+            GetWorldTimerManager().SetTimer(
+                ValidationTimerHandle,
+                this,
+                &ABuild_QAIntegrationValidator::PerformPeriodicValidation,
+                ValidationInterval,
+                true
+            );
+        }
+    }
 }
 
-void UBuild_QAIntegrationValidator::Deinitialize()
+FBuild_QAIntegrationResult ABuild_QAIntegrationValidator::ValidateQAIntegration()
 {
-    UE_LOG(LogTemp, Warning, TEXT("Build_QAIntegrationValidator: Subsystem deinitialized"));
-    Super::Deinitialize();
-}
+    UE_LOG(LogTemp, Warning, TEXT("QA Integration Validator: Starting validation"));
 
-FBuild_QAValidationResult UBuild_QAIntegrationValidator::ValidateQAResults()
-{
-    if (bValidationInProgress)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("QA validation already in progress"));
-        return LastValidationResult;
-    }
+    // Reset validation result
+    CurrentValidationResult = FBuild_QAIntegrationResult();
+    CurrentValidationResult.ValidationStatus = EBuild_QAValidationStatus::InProgress;
 
-    bValidationInProgress = true;
-    FBuild_QAValidationResult Result;
-    Result.ValidationTimestamp = FPlatformTime::Seconds();
-
-    UE_LOG(LogTemp, Warning, TEXT("Starting QA Integration validation"));
-
-    // Validate actor limits
-    bool bActorLimitsValid = ValidateActorLimits();
-    if (!bActorLimitsValid)
-    {
-        Result.CriticalErrors.Add(TEXT("Actor count exceeds safe limits"));
-        Result.ErrorCount++;
-    }
-
-    // Validate dinosaur limits
-    bool bDinosaurLimitsValid = ValidateDinosaurLimits();
-    if (!bDinosaurLimitsValid)
-    {
-        Result.CriticalErrors.Add(TEXT("Dinosaur count exceeds realistic limits"));
-        Result.ErrorCount++;
-    }
-
-    // Validate performance metrics
-    bool bPerformanceValid = ValidatePerformanceMetrics();
-    if (!bPerformanceValid)
-    {
-        Result.Warnings.Add(TEXT("Performance metrics indicate potential issues"));
-        Result.WarningCount++;
-    }
+    // Validate performance limits
+    CurrentValidationResult.bPerformanceLimitsOK = ValidatePerformanceLimits();
 
     // Validate module integration
-    bool bModuleIntegrationValid = ValidateModuleIntegration();
-    if (!bModuleIntegrationValid)
-    {
-        Result.CriticalErrors.Add(TEXT("Module integration validation failed"));
-        Result.ErrorCount++;
-    }
+    CurrentValidationResult.bModuleIntegrationOK = ValidateModuleIntegration();
 
-    // Check critical systems
-    bool bCriticalSystemsOnline = CheckCriticalSystemsOnline();
-    if (!bCriticalSystemsOnline)
-    {
-        Result.CriticalErrors.Add(TEXT("Critical systems offline or not responding"));
-        Result.ErrorCount++;
-    }
+    // Validate VFX integration
+    CurrentValidationResult.bVFXIntegrationOK = ValidateVFXIntegration();
 
-    // Validate map integrity
-    bool bMapIntegrityValid = ValidateMapIntegrity();
-    if (!bMapIntegrityValid)
-    {
-        Result.CriticalErrors.Add(TEXT("Map integrity validation failed"));
-        Result.ErrorCount++;
-    }
+    // Count actors by type
+    CurrentValidationResult.QAActorsFound = CountActorsByType(TEXT("QA"));
+    CurrentValidationResult.VFXActorsFound = CountActorsByType(TEXT("VFX"));
 
-    // Determine overall validation result
-    Result.bValidationPassed = (Result.ErrorCount == 0);
-    
-    if (Result.bValidationPassed)
-    {
-        Result.ValidationMessage = FString::Printf(TEXT("QA Integration validation PASSED with %d warnings"), Result.WarningCount);
-    }
-    else
-    {
-        Result.ValidationMessage = FString::Printf(TEXT("QA Integration validation FAILED with %d errors and %d warnings"), Result.ErrorCount, Result.WarningCount);
-    }
+    // Update overall status
+    UpdateValidationStatus();
 
-    LastValidationResult = Result;
-    LastValidationTime = FPlatformTime::Seconds();
-    bValidationInProgress = false;
+    // Generate report
+    GenerateValidationReport();
 
-    LogValidationResults(Result);
-    return Result;
+    UE_LOG(LogTemp, Warning, TEXT("QA Integration Validator: Validation complete - Status: %d"), 
+           (int32)CurrentValidationResult.ValidationStatus);
+
+    return CurrentValidationResult;
 }
 
-FBuild_QAIntegrationMetrics UBuild_QAIntegrationValidator::CollectIntegrationMetrics()
-{
-    FBuild_QAIntegrationMetrics Metrics;
-
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        UE_LOG(LogTemp, Error, TEXT("Cannot collect metrics - World is null"));
-        return Metrics;
-    }
-
-    // Count all actors
-    int32 TotalActors = 0;
-    int32 DinosaurActors = 0;
-    int32 VFXActors = 0;
-    int32 AudioActors = 0;
-
-    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
-    {
-        AActor* Actor = *ActorItr;
-        if (!Actor) continue;
-
-        TotalActors++;
-
-        FString ActorName = Actor->GetName().ToLower();
-        FString ActorLabel = Actor->GetActorLabel().ToLower();
-
-        // Count dinosaurs
-        TArray<FString> DinoKeywords = {TEXT("trex"), TEXT("veloci"), TEXT("tricera"), TEXT("brachi"), TEXT("ankylo"), TEXT("parasauro"), TEXT("pachy"), TEXT("proto"), TEXT("tsinta")};
-        for (const FString& Keyword : DinoKeywords)
-        {
-            if (ActorName.Contains(Keyword) || ActorLabel.Contains(Keyword))
-            {
-                DinosaurActors++;
-                break;
-            }
-        }
-
-        // Count VFX actors
-        if (Actor->FindComponentByClass<UParticleSystemComponent>())
-        {
-            VFXActors++;
-        }
-
-        // Count audio actors
-        if (Actor->FindComponentByClass<UAudioComponent>())
-        {
-            AudioActors++;
-        }
-    }
-
-    Metrics.TotalActorsInMap = TotalActors;
-    Metrics.DinosaurCount = DinosaurActors;
-    Metrics.VFXActorCount = VFXActors;
-    Metrics.AudioActorCount = AudioActors;
-
-    // Performance metrics (simplified)
-    Metrics.FrameRate = 1.0f / FApp::GetDeltaTime();
-    Metrics.MemoryUsageMB = FPlatformMemory::GetStats().UsedPhysical / (1024.0f * 1024.0f);
-
-    // Check performance limits
-    Metrics.bPerformanceWithinLimits = true;
-    if (Metrics.TotalActorsInMap > 20000)
-    {
-        Metrics.PerformanceWarnings.Add(FString::Printf(TEXT("Total actors (%d) exceeds limit of 20,000"), Metrics.TotalActorsInMap));
-        Metrics.bPerformanceWithinLimits = false;
-    }
-
-    if (Metrics.DinosaurCount > 150)
-    {
-        Metrics.PerformanceWarnings.Add(FString::Printf(TEXT("Dinosaur count (%d) exceeds limit of 150"), Metrics.DinosaurCount));
-        Metrics.bPerformanceWithinLimits = false;
-    }
-
-    if (Metrics.FrameRate < 30.0f)
-    {
-        Metrics.PerformanceWarnings.Add(FString::Printf(TEXT("Frame rate (%.1f) below minimum of 30 FPS"), Metrics.FrameRate));
-        Metrics.bPerformanceWithinLimits = false;
-    }
-
-    LastMetrics = Metrics;
-    return Metrics;
-}
-
-bool UBuild_QAIntegrationValidator::ValidateActorLimits()
-{
-    FBuild_QAIntegrationMetrics Metrics = CollectIntegrationMetrics();
-    
-    bool bWithinLimits = true;
-    
-    if (Metrics.TotalActorsInMap > 20000)
-    {
-        LogCriticalError(FString::Printf(TEXT("Actor count %d exceeds maximum limit of 20,000"), Metrics.TotalActorsInMap));
-        bWithinLimits = false;
-    }
-    else if (Metrics.TotalActorsInMap > 15000)
-    {
-        LogWarning(FString::Printf(TEXT("Actor count %d approaching limit of 20,000"), Metrics.TotalActorsInMap));
-    }
-
-    return bWithinLimits;
-}
-
-bool UBuild_QAIntegrationValidator::ValidateDinosaurLimits()
-{
-    FBuild_QAIntegrationMetrics Metrics = CollectIntegrationMetrics();
-    
-    bool bWithinLimits = true;
-    
-    if (Metrics.DinosaurCount > 150)
-    {
-        LogCriticalError(FString::Printf(TEXT("Dinosaur count %d exceeds maximum limit of 150"), Metrics.DinosaurCount));
-        bWithinLimits = false;
-    }
-    else if (Metrics.DinosaurCount > 120)
-    {
-        LogWarning(FString::Printf(TEXT("Dinosaur count %d approaching limit of 150"), Metrics.DinosaurCount));
-    }
-
-    return bWithinLimits;
-}
-
-bool UBuild_QAIntegrationValidator::ValidatePerformanceMetrics()
-{
-    FBuild_QAIntegrationMetrics Metrics = CollectIntegrationMetrics();
-    return Metrics.bPerformanceWithinLimits;
-}
-
-bool UBuild_QAIntegrationValidator::ValidateModuleIntegration()
-{
-    // Check if core TranspersonalGame classes are available
-    bool bModulesValid = true;
-
-    // This is a simplified check - in a real implementation we would
-    // verify that all expected modules are loaded and functional
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        LogCriticalError(TEXT("World reference is null - core module integration failed"));
-        return false;
-    }
-
-    UE_LOG(LogTemp, Warning, TEXT("Module integration validation passed"));
-    return bModulesValid;
-}
-
-bool UBuild_QAIntegrationValidator::CheckCriticalSystemsOnline()
+bool ABuild_QAIntegrationValidator::ValidatePerformanceLimits()
 {
     UWorld* World = GetWorld();
     if (!World)
     {
-        LogCriticalError(TEXT("World system is offline"));
+        UE_LOG(LogTemp, Error, TEXT("QA Integration Validator: No world found"));
         return false;
     }
 
-    // Check for essential actors
-    bool bPlayerStartFound = false;
-    bool bLightingFound = false;
-
-    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
-    {
-        AActor* Actor = *ActorItr;
-        if (!Actor) continue;
-
-        FString ActorName = Actor->GetClass()->GetName();
-        
-        if (ActorName.Contains(TEXT("PlayerStart")))
-        {
-            bPlayerStartFound = true;
-        }
-        
-        if (ActorName.Contains(TEXT("Light")))
-        {
-            bLightingFound = true;
-        }
-    }
-
-    if (!bPlayerStartFound)
-    {
-        LogCriticalError(TEXT("No PlayerStart found in map"));
-        return false;
-    }
-
-    if (!bLightingFound)
-    {
-        LogWarning(TEXT("No lighting actors found in map"));
-    }
-
-    return true;
-}
-
-bool UBuild_QAIntegrationValidator::ValidateMapIntegrity()
-{
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        return false;
-    }
-
-    // Basic map integrity checks
+    // Count total actors
     int32 ActorCount = 0;
     for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
     {
         ActorCount++;
     }
 
-    if (ActorCount == 0)
-    {
-        LogCriticalError(TEXT("Map appears to be empty - no actors found"));
-        return false;
-    }
+    CurrentValidationResult.TotalActorsValidated = ActorCount;
 
-    UE_LOG(LogTemp, Warning, TEXT("Map integrity validation passed with %d actors"), ActorCount);
-    return true;
-}
-
-bool UBuild_QAIntegrationValidator::ValidateAssetReferences()
-{
-    // Simplified asset reference validation
-    // In a full implementation, this would check for broken asset references
-    return true;
-}
-
-FString UBuild_QAIntegrationValidator::GenerateIntegrationReport()
-{
-    FString Report;
-    Report += TEXT("=== QA INTEGRATION VALIDATION REPORT ===\n");
-    Report += FString::Printf(TEXT("Generated: %s\n"), *FDateTime::Now().ToString());
-    Report += TEXT("\n");
-
-    FBuild_QAIntegrationMetrics Metrics = CollectIntegrationMetrics();
+    bool bWithinLimits = ActorCount <= MaxActorLimit;
     
-    Report += TEXT("METRICS:\n");
-    Report += FString::Printf(TEXT("- Total Actors: %d\n"), Metrics.TotalActorsInMap);
-    Report += FString::Printf(TEXT("- Dinosaurs: %d\n"), Metrics.DinosaurCount);
-    Report += FString::Printf(TEXT("- VFX Actors: %d\n"), Metrics.VFXActorCount);
-    Report += FString::Printf(TEXT("- Audio Actors: %d\n"), Metrics.AudioActorCount);
-    Report += FString::Printf(TEXT("- Frame Rate: %.1f FPS\n"), Metrics.FrameRate);
-    Report += FString::Printf(TEXT("- Memory Usage: %.1f MB\n"), Metrics.MemoryUsageMB);
-    Report += TEXT("\n");
-
-    Report += TEXT("VALIDATION RESULTS:\n");
-    Report += FString::Printf(TEXT("- Actor Limits: %s\n"), ValidateActorLimits() ? TEXT("PASS") : TEXT("FAIL"));
-    Report += FString::Printf(TEXT("- Dinosaur Limits: %s\n"), ValidateDinosaurLimits() ? TEXT("PASS") : TEXT("FAIL"));
-    Report += FString::Printf(TEXT("- Performance: %s\n"), ValidatePerformanceMetrics() ? TEXT("PASS") : TEXT("FAIL"));
-    Report += FString::Printf(TEXT("- Module Integration: %s\n"), ValidateModuleIntegration() ? TEXT("PASS") : TEXT("FAIL"));
-    Report += FString::Printf(TEXT("- Critical Systems: %s\n"), CheckCriticalSystemsOnline() ? TEXT("PASS") : TEXT("FAIL"));
-    Report += FString::Printf(TEXT("- Map Integrity: %s\n"), ValidateMapIntegrity() ? TEXT("PASS") : TEXT("FAIL"));
-
-    if (Metrics.PerformanceWarnings.Num() > 0)
+    if (bWithinLimits)
     {
-        Report += TEXT("\nWARNINGS:\n");
-        for (const FString& Warning : Metrics.PerformanceWarnings)
-        {
-            Report += FString::Printf(TEXT("- %s\n"), *Warning);
-        }
-    }
-
-    Report += TEXT("\n=== END REPORT ===");
-    
-    return Report;
-}
-
-void UBuild_QAIntegrationValidator::LogValidationResults(const FBuild_QAValidationResult& Results)
-{
-    if (Results.bValidationPassed)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("QA Integration Validation: %s"), *Results.ValidationMessage);
+        UE_LOG(LogTemp, Log, TEXT("QA Integration Validator: Performance OK - %d/%d actors"), 
+               ActorCount, MaxActorLimit);
     }
     else
     {
-        UE_LOG(LogTemp, Error, TEXT("QA Integration Validation: %s"), *Results.ValidationMessage);
+        UE_LOG(LogTemp, Warning, TEXT("QA Integration Validator: Performance WARNING - %d/%d actors"), 
+               ActorCount, MaxActorLimit);
+    }
+
+    return bWithinLimits;
+}
+
+bool ABuild_QAIntegrationValidator::ValidateModuleIntegration()
+{
+    // Check if core TranspersonalGame classes are available
+    bool bCoreClassesOK = true;
+
+    // Test character class
+    UClass* CharacterClass = FindObject<UClass>(ANY_PACKAGE, TEXT("TranspersonalCharacter"));
+    if (!CharacterClass)
+    {
+        UE_LOG(LogTemp, Error, TEXT("QA Integration Validator: TranspersonalCharacter class not found"));
+        bCoreClassesOK = false;
+    }
+
+    // Test game state class
+    UClass* GameStateClass = FindObject<UClass>(ANY_PACKAGE, TEXT("TranspersonalGameState"));
+    if (!GameStateClass)
+    {
+        UE_LOG(LogTemp, Error, TEXT("QA Integration Validator: TranspersonalGameState class not found"));
+        bCoreClassesOK = false;
+    }
+
+    // Test QA framework class
+    UClass* QAFrameworkClass = FindObject<UClass>(ANY_PACKAGE, TEXT("QA_TestFramework"));
+    if (!QAFrameworkClass)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("QA Integration Validator: QA_TestFramework class not found"));
+        // Not critical for core module integration
+    }
+
+    if (bCoreClassesOK)
+    {
+        UE_LOG(LogTemp, Log, TEXT("QA Integration Validator: Module integration OK"));
+    }
+
+    return bCoreClassesOK;
+}
+
+bool ABuild_QAIntegrationValidator::ValidateVFXIntegration()
+{
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        return false;
+    }
+
+    // Count VFX-related actors
+    int32 VFXActorCount = 0;
+    int32 NiagaraActorCount = 0;
+
+    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+    {
+        AActor* Actor = *ActorItr;
+        FString ActorName = Actor->GetClass()->GetName();
         
-        for (const FString& Error : Results.CriticalErrors)
+        if (ActorName.Contains(TEXT("VFX")))
         {
-            UE_LOG(LogTemp, Error, TEXT("Critical Error: %s"), *Error);
+            VFXActorCount++;
+        }
+        
+        if (ActorName.Contains(TEXT("Niagara")))
+        {
+            NiagaraActorCount++;
         }
     }
 
-    for (const FString& Warning : Results.Warnings)
+    bool bVFXIntegrationOK = (VFXActorCount > 0 || NiagaraActorCount > 0);
+
+    UE_LOG(LogTemp, Log, TEXT("QA Integration Validator: VFX Integration - %d VFX actors, %d Niagara actors"), 
+           VFXActorCount, NiagaraActorCount);
+
+    return bVFXIntegrationOK;
+}
+
+void ABuild_QAIntegrationValidator::GenerateValidationReport()
+{
+    FString Report = TEXT("=== QA Integration Validation Report ===\n");
+    
+    Report += FString::Printf(TEXT("Total Actors: %d\n"), CurrentValidationResult.TotalActorsValidated);
+    Report += FString::Printf(TEXT("QA Actors: %d\n"), CurrentValidationResult.QAActorsFound);
+    Report += FString::Printf(TEXT("VFX Actors: %d\n"), CurrentValidationResult.VFXActorsFound);
+    Report += FString::Printf(TEXT("Performance Limits: %s\n"), 
+                             CurrentValidationResult.bPerformanceLimitsOK ? TEXT("PASS") : TEXT("FAIL"));
+    Report += FString::Printf(TEXT("Module Integration: %s\n"), 
+                             CurrentValidationResult.bModuleIntegrationOK ? TEXT("PASS") : TEXT("FAIL"));
+    Report += FString::Printf(TEXT("VFX Integration: %s\n"), 
+                             CurrentValidationResult.bVFXIntegrationOK ? TEXT("PASS") : TEXT("FAIL"));
+    
+    FString StatusText;
+    switch (CurrentValidationResult.ValidationStatus)
     {
-        UE_LOG(LogTemp, Warning, TEXT("Warning: %s"), *Warning);
+        case EBuild_QAValidationStatus::Passed:
+            StatusText = TEXT("PASSED");
+            break;
+        case EBuild_QAValidationStatus::Failed:
+            StatusText = TEXT("FAILED");
+            break;
+        case EBuild_QAValidationStatus::Critical:
+            StatusText = TEXT("CRITICAL");
+            break;
+        default:
+            StatusText = TEXT("PENDING");
+            break;
+    }
+    
+    Report += FString::Printf(TEXT("Overall Status: %s\n"), *StatusText);
+    
+    CurrentValidationResult.ValidationReport = Report;
+    
+    UE_LOG(LogTemp, Warning, TEXT("QA Integration Validation Report:\n%s"), *Report);
+}
+
+void ABuild_QAIntegrationValidator::RunFullValidation()
+{
+    UE_LOG(LogTemp, Warning, TEXT("QA Integration Validator: Running full validation (Editor)"));
+    ValidateQAIntegration();
+}
+
+bool ABuild_QAIntegrationValidator::IsValidationPassing() const
+{
+    return CurrentValidationResult.ValidationStatus == EBuild_QAValidationStatus::Passed;
+}
+
+void ABuild_QAIntegrationValidator::PerformPeriodicValidation()
+{
+    UE_LOG(LogTemp, Log, TEXT("QA Integration Validator: Performing periodic validation"));
+    ValidateQAIntegration();
+}
+
+void ABuild_QAIntegrationValidator::UpdateValidationStatus()
+{
+    // Determine overall validation status
+    if (!CurrentValidationResult.bModuleIntegrationOK)
+    {
+        CurrentValidationResult.ValidationStatus = EBuild_QAValidationStatus::Critical;
+    }
+    else if (!CurrentValidationResult.bPerformanceLimitsOK || !CurrentValidationResult.bVFXIntegrationOK)
+    {
+        CurrentValidationResult.ValidationStatus = EBuild_QAValidationStatus::Failed;
+    }
+    else
+    {
+        CurrentValidationResult.ValidationStatus = EBuild_QAValidationStatus::Passed;
     }
 }
 
-bool UBuild_QAIntegrationValidator::ValidateActorCounts()
+int32 ABuild_QAIntegrationValidator::CountActorsByType(const FString& TypeFilter)
 {
-    return ValidateActorLimits();
-}
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        return 0;
+    }
 
-bool UBuild_QAIntegrationValidator::ValidateSystemReferences()
-{
-    return ValidateModuleIntegration();
-}
+    int32 Count = 0;
+    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+    {
+        AActor* Actor = *ActorItr;
+        FString ActorName = Actor->GetClass()->GetName();
+        
+        if (ActorName.Contains(TypeFilter))
+        {
+            Count++;
+        }
+    }
 
-bool UBuild_QAIntegrationValidator::ValidatePerformanceLimits()
-{
-    return ValidatePerformanceMetrics();
-}
-
-void UBuild_QAIntegrationValidator::CollectPerformanceData()
-{
-    CollectIntegrationMetrics();
-}
-
-void UBuild_QAIntegrationValidator::LogCriticalError(const FString& ErrorMessage)
-{
-    UE_LOG(LogTemp, Error, TEXT("QA Integration Critical Error: %s"), *ErrorMessage);
-}
-
-void UBuild_QAIntegrationValidator::LogWarning(const FString& WarningMessage)
-{
-    UE_LOG(LogTemp, Warning, TEXT("QA Integration Warning: %s"), *WarningMessage);
+    return Count;
 }
