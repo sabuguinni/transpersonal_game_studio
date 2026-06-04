@@ -5,9 +5,6 @@
 #include "Engine/Engine.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
-#include "Components/CapsuleComponent.h"
-#include "Kismet/KismetMathLibrary.h"
-#include "TranspersonalGame/TranspersonalGame.h"
 #include "Anim_CharacterAnimInstance.generated.h"
 
 UENUM(BlueprintType)
@@ -22,20 +19,21 @@ enum class EAnim_MovementState : uint8
     Swimming    UMETA(DisplayName = "Swimming")
 };
 
-UENUM(BlueprintType)
-enum class EAnim_CombatState : uint8
-{
-    Peaceful    UMETA(DisplayName = "Peaceful"),
-    Alert       UMETA(DisplayName = "Alert"),
-    Combat      UMETA(DisplayName = "Combat"),
-    Injured     UMETA(DisplayName = "Injured"),
-    Dead        UMETA(DisplayName = "Dead")
-};
-
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FAnim_MovementData
+UCLASS(Blueprintable, BlueprintType)
+class TRANSPERSONALGAME_API UAnim_CharacterAnimInstance : public UAnimInstance
 {
     GENERATED_BODY()
+
+public:
+    UAnim_CharacterAnimInstance();
+
+    virtual void NativeInitializeAnimation() override;
+    virtual void NativeUpdateAnimation(float DeltaSeconds) override;
+
+protected:
+    // Movement state tracking
+    UPROPERTY(BlueprintReadOnly, Category = "Movement")
+    EAnim_MovementState CurrentMovementState;
 
     UPROPERTY(BlueprintReadOnly, Category = "Movement")
     float Speed;
@@ -50,28 +48,21 @@ struct TRANSPERSONALGAME_API FAnim_MovementData
     bool bIsCrouching;
 
     UPROPERTY(BlueprintReadOnly, Category = "Movement")
-    EAnim_MovementState MovementState;
+    bool bIsSwimming;
 
-    FAnim_MovementData()
-    {
-        Speed = 0.0f;
-        Direction = 0.0f;
-        bIsInAir = false;
-        bIsCrouching = false;
-        MovementState = EAnim_MovementState::Idle;
-    }
-};
+    // Animation blending
+    UPROPERTY(BlueprintReadOnly, Category = "Animation")
+    float IdleToWalkBlend;
 
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FAnim_IKData
-{
-    GENERATED_BODY()
+    UPROPERTY(BlueprintReadOnly, Category = "Animation")
+    float WalkToRunBlend;
+
+    // IK system variables
+    UPROPERTY(BlueprintReadOnly, Category = "IK")
+    float LeftFootIKOffset;
 
     UPROPERTY(BlueprintReadOnly, Category = "IK")
-    FVector LeftFootIKLocation;
-
-    UPROPERTY(BlueprintReadOnly, Category = "IK")
-    FVector RightFootIKLocation;
+    float RightFootIKOffset;
 
     UPROPERTY(BlueprintReadOnly, Category = "IK")
     FRotator LeftFootIKRotation;
@@ -79,124 +70,22 @@ struct TRANSPERSONALGAME_API FAnim_IKData
     UPROPERTY(BlueprintReadOnly, Category = "IK")
     FRotator RightFootIKRotation;
 
-    UPROPERTY(BlueprintReadOnly, Category = "IK")
-    float LeftFootIKAlpha;
+    // Character reference
+    UPROPERTY(BlueprintReadOnly, Category = "Character")
+    ACharacter* OwningCharacter;
 
-    UPROPERTY(BlueprintReadOnly, Category = "IK")
-    float RightFootIKAlpha;
-
-    FAnim_IKData()
-    {
-        LeftFootIKLocation = FVector::ZeroVector;
-        RightFootIKLocation = FVector::ZeroVector;
-        LeftFootIKRotation = FRotator::ZeroRotator;
-        RightFootIKRotation = FRotator::ZeroRotator;
-        LeftFootIKAlpha = 0.0f;
-        RightFootIKAlpha = 0.0f;
-    }
-};
-
-/**
- * Character Animation Instance for realistic movement and IK foot placement
- * Handles state transitions, blend spaces, and foot IK adaptation to terrain
- */
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UAnim_CharacterAnimInstance : public UAnimInstance
-{
-    GENERATED_BODY()
-
-public:
-    UAnim_CharacterAnimInstance();
-
-    virtual void NativeInitializeAnimation() override;
-    virtual void NativeUpdateAnimation(float DeltaTimeX) override;
-
-protected:
-    // Character Reference
-    UPROPERTY(BlueprintReadOnly, Category = "Character", meta = (AllowPrivateAccess = "true"))
-    class ACharacter* OwnerCharacter;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Character", meta = (AllowPrivateAccess = "true"))
-    class UCharacterMovementComponent* CharacterMovement;
-
-    // Movement Data
-    UPROPERTY(BlueprintReadOnly, Category = "Movement", meta = (AllowPrivateAccess = "true"))
-    FAnim_MovementData MovementData;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Movement", meta = (AllowPrivateAccess = "true"))
-    float GroundSpeed;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Movement", meta = (AllowPrivateAccess = "true"))
-    float MovementDirection;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Movement", meta = (AllowPrivateAccess = "true"))
-    bool bShouldMove;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Movement", meta = (AllowPrivateAccess = "true"))
-    bool bIsFalling;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Movement", meta = (AllowPrivateAccess = "true"))
-    bool bIsJumping;
-
-    // Combat State
-    UPROPERTY(BlueprintReadOnly, Category = "Combat", meta = (AllowPrivateAccess = "true"))
-    EAnim_CombatState CombatState;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Combat", meta = (AllowPrivateAccess = "true"))
-    bool bIsAiming;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Combat", meta = (AllowPrivateAccess = "true"))
-    bool bIsAttacking;
-
-    // IK System
-    UPROPERTY(BlueprintReadOnly, Category = "IK", meta = (AllowPrivateAccess = "true"))
-    FAnim_IKData IKData;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK", meta = (AllowPrivateAccess = "true"))
-    float IKTraceDistance;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK", meta = (AllowPrivateAccess = "true"))
-    float IKInterpSpeed;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK", meta = (AllowPrivateAccess = "true"))
-    FName LeftFootSocketName;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK", meta = (AllowPrivateAccess = "true"))
-    FName RightFootSocketName;
-
-    // Animation Thresholds
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Thresholds", meta = (AllowPrivateAccess = "true"))
-    float WalkSpeedThreshold;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Thresholds", meta = (AllowPrivateAccess = "true"))
-    float RunSpeedThreshold;
+    UPROPERTY(BlueprintReadOnly, Category = "Character")
+    UCharacterMovementComponent* MovementComponent;
 
 private:
-    // Internal Methods
-    void UpdateMovementValues();
-    void UpdateCombatState();
-    void UpdateFootIK();
+    void UpdateMovementState();
+    void UpdateIKValues();
+    void PerformFootIKTrace(FVector FootLocation, float& IKOffset, FRotator& IKRotation, bool bIsLeftFoot);
     
-    FVector PerformFootTrace(const FName& SocketName, float TraceDistance);
-    void CalculateFootIK(const FName& SocketName, FVector& OutLocation, FRotator& OutRotation, float& OutAlpha);
+    // IK trace parameters
+    UPROPERTY(EditAnywhere, Category = "IK Settings")
+    float IKTraceDistance = 50.0f;
 
-public:
-    // Blueprint Callable Functions
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    void SetCombatState(EAnim_CombatState NewState);
-
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    void TriggerAttackAnimation();
-
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    void TriggerJumpAnimation();
-
-    UFUNCTION(BlueprintPure, Category = "Animation")
-    bool IsMoving() const { return bShouldMove; }
-
-    UFUNCTION(BlueprintPure, Category = "Animation")
-    float GetMovementSpeed() const { return GroundSpeed; }
-
-    UFUNCTION(BlueprintPure, Category = "Animation")
-    EAnim_MovementState GetMovementState() const { return MovementData.MovementState; }
+    UPROPERTY(EditAnywhere, Category = "IK Settings")
+    float IKInterpSpeed = 15.0f;
 };
