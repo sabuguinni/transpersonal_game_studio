@@ -1,101 +1,78 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/World.h"
-#include "Components/ActorComponent.h"
-#include "Components/StaticMeshComponent.h"
-#include "Engine/StaticMeshActor.h"
 #include "GameFramework/Actor.h"
-#include "SharedTypes.h"
+#include "Components/StaticMeshComponent.h"
+#include "Components/SceneComponent.h"
+#include "Engine/StaticMesh.h"
+#include "../SharedTypes.h"
 #include "Arch_CretaceousStructureSystem.generated.h"
 
 UENUM(BlueprintType)
 enum class EArch_StructureType : uint8
 {
-    StoneArch       UMETA(DisplayName = "Stone Archway"),
-    CaveDwelling    UMETA(DisplayName = "Cave Dwelling"),
-    RockShelter     UMETA(DisplayName = "Rock Shelter"),
-    StoneCircle     UMETA(DisplayName = "Stone Circle"),
-    Cairn           UMETA(DisplayName = "Stone Cairn"),
-    NaturalBridge   UMETA(DisplayName = "Natural Bridge")
+    ShelterBasic     UMETA(DisplayName = "Basic Shelter"),
+    ShelterAdvanced  UMETA(DisplayName = "Advanced Shelter"),
+    StoragePit       UMETA(DisplayName = "Storage Pit"),
+    FirePit          UMETA(DisplayName = "Fire Pit"),
+    WaterCatchment   UMETA(DisplayName = "Water Catchment"),
+    DefensiveWall    UMETA(DisplayName = "Defensive Wall"),
+    WatchTower       UMETA(DisplayName = "Watch Tower"),
+    BridgeSimple     UMETA(DisplayName = "Simple Bridge"),
+    CaveEntrance     UMETA(DisplayName = "Cave Entrance")
 };
 
 UENUM(BlueprintType)
-enum class EArch_ConstructionMaterial : uint8
+enum class EArch_BuildMaterial : uint8
 {
-    Limestone       UMETA(DisplayName = "Limestone"),
-    Sandstone       UMETA(DisplayName = "Sandstone"),
-    Basalt          UMETA(DisplayName = "Basalt"),
-    Granite         UMETA(DisplayName = "Granite"),
-    Shale           UMETA(DisplayName = "Shale"),
-    Clay            UMETA(DisplayName = "Clay")
+    Wood            UMETA(DisplayName = "Wood"),
+    Stone           UMETA(DisplayName = "Stone"),
+    Mud             UMETA(DisplayName = "Mud/Clay"),
+    Bone            UMETA(DisplayName = "Bone"),
+    Hide            UMETA(DisplayName = "Animal Hide"),
+    Thatch          UMETA(DisplayName = "Thatch/Grass"),
+    Mixed           UMETA(DisplayName = "Mixed Materials")
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FArch_StructureData
+struct TRANSPERSONALGAME_API FArch_StructureConfig
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    EArch_StructureType StructureType = EArch_StructureType::StoneArch;
+    EArch_StructureType StructureType = EArch_StructureType::ShelterBasic;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    EArch_ConstructionMaterial PrimaryMaterial = EArch_ConstructionMaterial::Limestone;
+    EArch_BuildMaterial PrimaryMaterial = EArch_BuildMaterial::Wood;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    FVector Dimensions = FVector(400.0f, 200.0f, 300.0f);
+    float StructuralIntegrity = 100.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    float WeatheringLevel = 0.7f;
+    float WeatherResistance = 50.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    float MossGrowth = 0.5f;
+    int32 MaxOccupants = 2;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    bool bHasPrimitiveToolMarks = true;
+    bool bProvidesShelter = true;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    int32 EstimatedAge = 65000000;
+    bool bProvidesStorage = false;
 
-    FArch_StructureData()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
+    bool bProvidesWarmth = false;
+
+    FArch_StructureConfig()
     {
-        StructureType = EArch_StructureType::StoneArch;
-        PrimaryMaterial = EArch_ConstructionMaterial::Limestone;
-        Dimensions = FVector(400.0f, 200.0f, 300.0f);
-        WeatheringLevel = 0.7f;
-        MossGrowth = 0.5f;
-        bHasPrimitiveToolMarks = true;
-        EstimatedAge = 65000000;
-    }
-};
-
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FArch_InteriorLayout
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interior")
-    TArray<FVector> FirePitLocations;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interior")
-    TArray<FVector> SleepingAreas;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interior")
-    TArray<FVector> ToolStorageAreas;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interior")
-    TArray<FVector> FoodStorageAreas;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interior")
-    float FloorArea = 2500.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interior")
-    float CeilingHeight = 250.0f;
-
-    FArch_InteriorLayout()
-    {
-        FloorArea = 2500.0f;
-        CeilingHeight = 250.0f;
+        StructureType = EArch_StructureType::ShelterBasic;
+        PrimaryMaterial = EArch_BuildMaterial::Wood;
+        StructuralIntegrity = 100.0f;
+        WeatherResistance = 50.0f;
+        MaxOccupants = 2;
+        bProvidesShelter = true;
+        bProvidesStorage = false;
+        bProvidesWarmth = false;
     }
 };
 
@@ -111,84 +88,63 @@ protected:
     virtual void BeginPlay() override;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    UStaticMeshComponent* StructureMesh;
+    USceneComponent* RootSceneComponent;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    UStaticMeshComponent* InteriorMesh;
+    UStaticMeshComponent* MainStructureMesh;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure Data")
-    FArch_StructureData StructureData;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    UStaticMeshComponent* SupportBeamsMesh;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interior")
-    FArch_InteriorLayout InteriorLayout;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    UStaticMeshComponent* RoofMesh;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    EBiomeType AssociatedBiome = EBiomeType::Temperate;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure Config")
+    FArch_StructureConfig StructureConfig;
 
-public:
-    UFUNCTION(BlueprintCallable, Category = "Structure")
-    void InitializeStructure(const FArch_StructureData& InStructureData);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure State")
+    float CurrentIntegrity = 100.0f;
 
-    UFUNCTION(BlueprintCallable, Category = "Structure")
-    void ApplyWeathering(float WeatheringAmount);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure State")
+    float DamageAccumulated = 0.0f;
 
-    UFUNCTION(BlueprintCallable, Category = "Interior")
-    void SetupInteriorLayout(const FArch_InteriorLayout& Layout);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure State")
+    bool bIsOccupied = false;
 
-    UFUNCTION(BlueprintCallable, Category = "Structure")
-    FArch_StructureData GetStructureData() const { return StructureData; }
-
-    UFUNCTION(BlueprintCallable, Category = "Structure")
-    bool IsHabitable() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Structure")
-    float GetStructuralIntegrity() const;
-};
-
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UArch_CretaceousStructureSystem : public UActorComponent
-{
-    GENERATED_BODY()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure State")
+    int32 CurrentOccupants = 0;
 
 public:
-    UArch_CretaceousStructureSystem();
+    virtual void Tick(float DeltaTime) override;
+
+    UFUNCTION(BlueprintCallable, Category = "Structure")
+    void ApplyWeatherDamage(float DamageAmount);
+
+    UFUNCTION(BlueprintCallable, Category = "Structure")
+    void RepairStructure(float RepairAmount);
+
+    UFUNCTION(BlueprintCallable, Category = "Structure")
+    bool CanAccommodateOccupants(int32 NumOccupants) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Structure")
+    void SetOccupancy(int32 NumOccupants);
+
+    UFUNCTION(BlueprintCallable, Category = "Structure")
+    float GetShelterEffectiveness() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Structure")
+    void UpdateStructureMeshes();
+
+    UFUNCTION(BlueprintImplementableEvent, Category = "Structure")
+    void OnStructureDestroyed();
+
+    UFUNCTION(BlueprintImplementableEvent, Category = "Structure")
+    void OnOccupancyChanged(int32 NewOccupants);
 
 protected:
-    virtual void BeginPlay() override;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Generation")
-    int32 MaxStructuresPerBiome = 5;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Generation")
-    float MinDistanceBetweenStructures = 5000.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Generation")
-    TArray<EArch_StructureType> AllowedStructureTypes;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Runtime")
-    TArray<AArch_CretaceousStructure*> SpawnedStructures;
-
-public:
-    UFUNCTION(BlueprintCallable, Category = "Structure Generation")
-    void GenerateStructuresForBiome(EBiomeType BiomeType, const FVector& BiomeCenter, float BiomeRadius);
-
-    UFUNCTION(BlueprintCallable, Category = "Structure Generation")
-    AArch_CretaceousStructure* SpawnStructureAtLocation(const FVector& Location, EArch_StructureType StructureType);
-
-    UFUNCTION(BlueprintCallable, Category = "Structure Management")
-    void ValidateStructurePlacement(const FVector& Location, bool& bIsValidLocation, FString& ValidationMessage);
-
-    UFUNCTION(BlueprintCallable, Category = "Structure Management")
-    void CleanupExcessStructures();
-
-    UFUNCTION(BlueprintCallable, Category = "Structure Management")
-    int32 GetStructureCount() const { return SpawnedStructures.Num(); }
-
-    UFUNCTION(BlueprintCallable, Category = "Structure Management")
-    TArray<AArch_CretaceousStructure*> GetStructuresInRadius(const FVector& Center, float Radius) const;
-
-private:
-    bool IsLocationSuitableForStructure(const FVector& Location, EArch_StructureType StructureType) const;
-    FArch_StructureData GenerateStructureDataForBiome(EBiomeType BiomeType, EArch_StructureType StructureType) const;
-    void ApplyBiomeSpecificMaterials(AArch_CretaceousStructure* Structure, EBiomeType BiomeType) const;
+    void InitializeStructureComponents();
+    void ApplyMaterialBasedProperties();
+    void CalculateWeatherResistance();
+    UStaticMesh* GetMeshForStructureType() const;
+    UStaticMesh* GetMeshForMaterial(EArch_BuildMaterial Material) const;
 };
