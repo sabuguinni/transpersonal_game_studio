@@ -11,15 +11,14 @@
 UENUM(BlueprintType)
 enum class EVFX_EffectType : uint8
 {
-    None = 0,
-    Fire_Campfire = 1,
-    Dust_Footstep = 2,
-    Blood_Impact = 3,
-    Water_Splash = 4,
-    Smoke_Cooking = 5,
-    Weather_Rain = 6,
-    Wind_Particles = 7,
-    Craft_Sparks = 8
+    Fire_Campfire       UMETA(DisplayName = "Campfire"),
+    Impact_Footstep     UMETA(DisplayName = "Dinosaur Footstep"),
+    Weather_Rain        UMETA(DisplayName = "Rain"),
+    Weather_Snow        UMETA(DisplayName = "Snow"),
+    Combat_BloodSplash  UMETA(DisplayName = "Blood Splash"),
+    Craft_Sparks        UMETA(DisplayName = "Crafting Sparks"),
+    Environment_Dust    UMETA(DisplayName = "Dust Cloud"),
+    Water_Splash        UMETA(DisplayName = "Water Splash")
 };
 
 USTRUCT(BlueprintType)
@@ -28,30 +27,30 @@ struct TRANSPERSONALGAME_API FVFX_EffectData
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
-    EVFX_EffectType EffectType = EVFX_EffectType::None;
+    EVFX_EffectType EffectType;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
     TSoftObjectPtr<UNiagaraSystem> NiagaraSystem;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
-    FVector Scale = FVector(1.0f);
+    FVector Scale;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
-    float Duration = 5.0f;
+    float Duration;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
-    bool bAutoDestroy = true;
+    bool bAutoDestroy;
 
     FVFX_EffectData()
     {
-        EffectType = EVFX_EffectType::None;
-        Scale = FVector(1.0f);
+        EffectType = EVFX_EffectType::Fire_Campfire;
+        Scale = FVector::OneVector;
         Duration = 5.0f;
         bAutoDestroy = true;
     }
 };
 
-UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
+UCLASS(ClassGroup=(VFX), meta=(BlueprintSpawnableComponent))
 class TRANSPERSONALGAME_API UVFX_NiagaraLibrary : public UActorComponent
 {
     GENERATED_BODY()
@@ -63,7 +62,7 @@ protected:
     virtual void BeginPlay() override;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Library")
-    TMap<EVFX_EffectType, FVFX_EffectData> EffectDatabase;
+    TArray<FVFX_EffectData> EffectLibrary;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "VFX Library")
     TArray<UNiagaraComponent*> ActiveEffects;
@@ -73,26 +72,24 @@ public:
     UNiagaraComponent* SpawnEffect(EVFX_EffectType EffectType, FVector Location, FRotator Rotation = FRotator::ZeroRotator);
 
     UFUNCTION(BlueprintCallable, Category = "VFX")
-    void StopEffect(UNiagaraComponent* EffectComponent);
+    void SpawnEffectAtActor(EVFX_EffectType EffectType, AActor* TargetActor, FVector Offset = FVector::ZeroVector);
 
     UFUNCTION(BlueprintCallable, Category = "VFX")
     void StopAllEffects();
 
     UFUNCTION(BlueprintCallable, Category = "VFX")
-    void InitializeEffectDatabase();
-
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    bool IsEffectActive(EVFX_EffectType EffectType) const;
+    void StopEffectsByType(EVFX_EffectType EffectType);
 
     UFUNCTION(BlueprintCallable, Category = "VFX")
     int32 GetActiveEffectCount() const;
 
     UFUNCTION(BlueprintCallable, Category = "VFX")
-    void SetEffectScale(EVFX_EffectType EffectType, FVector NewScale);
+    void InitializeEffectLibrary();
+
+protected:
+    FVFX_EffectData* GetEffectData(EVFX_EffectType EffectType);
+    void CleanupDestroyedEffects();
 
 private:
-    void CleanupInactiveEffects();
-    
-    UFUNCTION()
-    void OnEffectFinished(UNiagaraComponent* FinishedEffect);
+    void SetupDefaultEffects();
 };
