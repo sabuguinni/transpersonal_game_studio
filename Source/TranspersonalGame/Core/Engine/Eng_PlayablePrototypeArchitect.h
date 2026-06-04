@@ -1,136 +1,187 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Components/ActorComponent.h"
 #include "Engine/World.h"
+#include "GameFramework/Character.h"
+#include "GameFramework/PlayerController.h"
+#include "Components/StaticMeshComponent.h"
+#include "Engine/StaticMeshActor.h"
+#include "Landscape/Landscape.h"
+#include "Engine/DirectionalLight.h"
+#include "Components/SkyAtmosphereComponent.h"
+#include "Components/ExponentialHeightFogComponent.h"
 #include "SharedTypes.h"
 #include "Eng_PlayablePrototypeArchitect.generated.h"
+
+UENUM(BlueprintType)
+enum class EEng_PrototypeComponent : uint8
+{
+    None = 0,
+    ThirdPersonCharacter = 1,
+    CameraBoom = 2,
+    FollowCamera = 3,
+    Landscape = 4,
+    PlayerMovement = 5,
+    DinosaurMeshes = 6,
+    DirectionalLight = 7,
+    SkyAtmosphere = 8,
+    ExponentialHeightFog = 9,
+    PlayerStart = 10,
+    NavMeshBounds = 11
+};
 
 USTRUCT(BlueprintType)
 struct TRANSPERSONALGAME_API FEng_PrototypeRequirement
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly)
-    FString RequirementName;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Prototype")
+    EEng_PrototypeComponent Component;
 
-    UPROPERTY(BlueprintReadOnly)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Prototype")
+    bool bIsRequired;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Prototype")
+    bool bIsImplemented;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Prototype")
     FString Description;
 
-    UPROPERTY(BlueprintReadOnly)
-    bool bIsCompleted;
-
-    UPROPERTY(BlueprintReadOnly)
-    float CompletionPercentage;
-
-    UPROPERTY(BlueprintReadOnly)
-    FString ResponsibleAgent;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Prototype")
+    float Priority;
 
     FEng_PrototypeRequirement()
     {
-        RequirementName = TEXT("");
+        Component = EEng_PrototypeComponent::None;
+        bIsRequired = false;
+        bIsImplemented = false;
         Description = TEXT("");
-        bIsCompleted = false;
-        CompletionPercentage = 0.0f;
-        ResponsibleAgent = TEXT("");
+        Priority = 0.0f;
     }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEng_MilestoneData
+struct TRANSPERSONALGAME_API FEng_WalkAroundMilestone
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly)
-    FString MilestoneName;
-
-    UPROPERTY(BlueprintReadOnly)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Milestone")
     TArray<FEng_PrototypeRequirement> Requirements;
 
-    UPROPERTY(BlueprintReadOnly)
-    float OverallProgress;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Milestone")
+    float CompletionPercentage;
 
-    UPROPERTY(BlueprintReadOnly)
-    bool bIsMilestoneComplete;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Milestone")
+    int32 CompletedComponents;
 
-    FEng_MilestoneData()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Milestone")
+    int32 TotalComponents;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Milestone")
+    bool bMilestoneComplete;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Milestone")
+    FString StatusMessage;
+
+    FEng_WalkAroundMilestone()
     {
-        MilestoneName = TEXT("");
-        OverallProgress = 0.0f;
-        bIsMilestoneComplete = false;
+        CompletionPercentage = 0.0f;
+        CompletedComponents = 0;
+        TotalComponents = 0;
+        bMilestoneComplete = false;
+        StatusMessage = TEXT("Milestone not started");
     }
 };
 
-UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UEng_PlayablePrototypeArchitect : public UActorComponent
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API UEng_PlayablePrototypeArchitect : public UObject
 {
     GENERATED_BODY()
 
 public:
     UEng_PlayablePrototypeArchitect();
 
-protected:
-    virtual void BeginPlay() override;
-
-public:
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
-
-    // Core milestone tracking
-    UPROPERTY(BlueprintReadOnly, Category = "Prototype Architecture")
-    FEng_MilestoneData WalkAroundMilestone;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Prototype Architecture")
-    TArray<FString> CriticalCompilationErrors;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Prototype Architecture")
-    TArray<FString> ArchitectureViolations;
-
-    // Validation functions
+    // Core validation methods
     UFUNCTION(BlueprintCallable, Category = "Prototype Architecture")
-    void ValidateWalkAroundMilestone();
+    bool ValidatePlayablePrototype();
 
     UFUNCTION(BlueprintCallable, Category = "Prototype Architecture")
-    bool ValidateCharacterMovement();
+    FEng_WalkAroundMilestone GetWalkAroundMilestoneStatus();
 
     UFUNCTION(BlueprintCallable, Category = "Prototype Architecture")
-    bool ValidateTerrainSystem();
+    bool ValidateCharacterController();
 
     UFUNCTION(BlueprintCallable, Category = "Prototype Architecture")
-    bool ValidateLightingSystem();
+    bool ValidateWorldEnvironment();
 
     UFUNCTION(BlueprintCallable, Category = "Prototype Architecture")
-    bool ValidateDinosaurPlacements();
+    bool ValidateDinosaurPresence();
 
     UFUNCTION(BlueprintCallable, Category = "Prototype Architecture")
-    bool ValidateCameraSystem();
+    bool ValidateLightingSetup();
+
+    // Component-specific validation
+    UFUNCTION(BlueprintCallable, Category = "Prototype Architecture")
+    bool CheckThirdPersonCharacter();
+
+    UFUNCTION(BlueprintCallable, Category = "Prototype Architecture")
+    bool CheckCameraSetup();
+
+    UFUNCTION(BlueprintCallable, Category = "Prototype Architecture")
+    bool CheckLandscapeTerrain();
+
+    UFUNCTION(BlueprintCallable, Category = "Prototype Architecture")
+    bool CheckPlayerMovement();
+
+    UFUNCTION(BlueprintCallable, Category = "Prototype Architecture")
+    bool CheckDinosaurMeshes();
+
+    UFUNCTION(BlueprintCallable, Category = "Prototype Architecture")
+    bool CheckLightingComponents();
+
+    // Milestone management
+    UFUNCTION(BlueprintCallable, Category = "Prototype Architecture")
+    void UpdateMilestoneProgress();
+
+    UFUNCTION(BlueprintCallable, Category = "Prototype Architecture")
+    void GeneratePrototypeReport();
+
+    UFUNCTION(BlueprintCallable, Category = "Prototype Architecture")
+    TArray<FString> GetMissingComponents();
+
+    UFUNCTION(BlueprintCallable, Category = "Prototype Architecture")
+    float CalculateCompletionPercentage();
 
     // Architecture enforcement
     UFUNCTION(BlueprintCallable, Category = "Prototype Architecture")
-    void EnforceArchitecturalStandards();
+    bool EnforceMinimumViablePrototype();
 
     UFUNCTION(BlueprintCallable, Category = "Prototype Architecture")
-    void ValidateCompilationStatus();
+    bool ValidateGameplayReadiness();
 
-    UFUNCTION(BlueprintCallable, Category = "Prototype Architecture")
-    float CalculateOverallProgress();
+    UFUNCTION(BlueprintCallable, Category = "Prototype Architecture", CallInEditor = true)
+    void RunFullPrototypeValidation();
 
-    // Reporting
-    UFUNCTION(BlueprintCallable, Category = "Prototype Architecture")
-    FString GenerateProgressReport();
+protected:
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Prototype State")
+    FEng_WalkAroundMilestone CurrentMilestone;
 
-    UFUNCTION(BlueprintCallable, Category = "Prototype Architecture")
-    void LogArchitectureStatus();
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Prototype State")
+    TArray<FEng_PrototypeRequirement> PrototypeRequirements;
 
-private:
-    void InitializeWalkAroundRequirements();
-    void UpdateRequirementProgress(const FString& RequirementName, float Progress, bool bCompleted);
-    bool CheckActorExistence(const FString& ActorClass);
-    int32 CountActorsOfClass(const FString& ActorClass);
-    void ValidateSystemIntegration();
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Prototype State")
+    bool bPrototypeValidated;
 
-    UPROPERTY()
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Prototype State")
+    FString LastValidationResult;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Prototype State")
     float LastValidationTime;
 
-    UPROPERTY()
-    bool bValidationInProgress;
+private:
+    void InitializePrototypeRequirements();
+    bool ValidateWorldActors();
+    bool ValidatePlayerController();
+    bool ValidateGameMode();
+    void LogValidationResult(const FString& Component, bool bResult);
 };
