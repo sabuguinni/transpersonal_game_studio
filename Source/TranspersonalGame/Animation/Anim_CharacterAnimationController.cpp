@@ -1,333 +1,330 @@
 #include "Anim_CharacterAnimationController.h"
-#include "Components/SkeletalMeshComponent.h"
 #include "GameFramework/Character.h"
+#include "GameFramework/CharacterMovementComponent.h"
+#include "Components/SkeletalMeshComponent.h"
 #include "Animation/AnimInstance.h"
-#include "Engine/Engine.h"
+#include "Animation/AnimMontage.h"
+#include "Engine/World.h"
+#include "TimerManager.h"
 
 UAnim_CharacterAnimationController::UAnim_CharacterAnimationController()
 {
     PrimaryComponentTick.bCanEverTick = true;
     PrimaryComponentTick.TickGroup = TG_PrePhysics;
-
-    // Initialize animation state
-    CurrentMovementState = EAnim_MovementState::Idle;
-    CurrentCombatState = EAnim_CombatState::None;
-    CurrentSpeed = 0.0f;
-    CurrentDirection = 0.0f;
-    bIsInAir = false;
-    bIsClimbing = false;
-
-    // Initialize internal state
-    LastMontagePlayTime = 0.0f;
-    CurrentlyPlayingMontage = nullptr;
-    OwnerMesh = nullptr;
-    AnimInstance = nullptr;
-
-    // Initialize animation assets to nullptr (will be set in Blueprint or code)
+    
+    // Initialize default values
+    WalkSpeedThreshold = 100.0f;
+    RunSpeedThreshold = 300.0f;
+    AnimationSmoothingSpeed = 10.0f;
+    LastUpdateTime = 0.0f;
+    LastVelocity = FVector::ZeroVector;
+    bWasMovingLastFrame = false;
+    
+    // Initialize component pointers
+    MeshComponent = nullptr;
+    MovementComponent = nullptr;
+    AnimationBlueprint = nullptr;
     MovementBlendSpace = nullptr;
-    JumpMontage = nullptr;
-    LandMontage = nullptr;
-    AttackLightMontage = nullptr;
-    AttackHeavyMontage = nullptr;
-    BlockMontage = nullptr;
-    DodgeLeftMontage = nullptr;
-    DodgeRightMontage = nullptr;
-    CraftingMontage = nullptr;
-    GatheringMontage = nullptr;
-    ClimbingMontage = nullptr;
 }
 
 void UAnim_CharacterAnimationController::BeginPlay()
 {
     Super::BeginPlay();
     
-    CacheComponentReferences();
+    InitializeComponents();
     
-    if (OwnerMesh && AnimInstance)
-    {
-        LogAnimationEvent(TEXT("Animation Controller initialized successfully"));
-    }
-    else
-    {
-        LogAnimationEvent(TEXT("Warning: Failed to cache component references"));
-    }
+    // Set initial animation state
+    MovementData.MovementState = EAnim_MovementState::Idle;
+    ActionData.CurrentAction = EAnim_ActionState::None;
+    
+    LastUpdateTime = GetWorld()->GetTimeSeconds();
 }
 
 void UAnim_CharacterAnimationController::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-
-    // Update animation state based on character movement
-    if (ACharacter* OwnerCharacter = Cast<ACharacter>(GetOwner()))
+    
+    if (MeshComponent && MovementComponent)
     {
-        // Update speed and direction
-        FVector Velocity = OwnerCharacter->GetVelocity();
-        CurrentSpeed = Velocity.Size2D();
-        
-        if (CurrentSpeed > 1.0f)
-        {
-            FVector Forward = OwnerCharacter->GetActorForwardVector();
-            FVector VelNormalized = Velocity.GetSafeNormal2D();
-            CurrentDirection = FVector::DotProduct(Forward, VelNormalized);
-        }
-        else
-        {
-            CurrentDirection = 0.0f;
-        }
-
-        // Update movement state based on speed
-        if (CurrentSpeed < 1.0f)
-        {
-            SetMovementState(EAnim_MovementState::Idle);
-        }
-        else if (CurrentSpeed < 300.0f)
-        {
-            SetMovementState(EAnim_MovementState::Walking);
-        }
-        else
-        {
-            SetMovementState(EAnim_MovementState::Running);
-        }
-
-        // Update air state
-        bIsInAir = OwnerCharacter->GetMovementComponent()->IsFalling();
+        UpdateMovementAnimation(DeltaTime);
     }
+}
+
+void UAnim_CharacterAnimationController::InitializeComponents()
+{
+    AActor* Owner = GetOwner();
+    if (!Owner)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("UAnim_CharacterAnimationController: No owner found"));
+        return;
+    }
+    
+    // Get mesh component
+    MeshComponent = Owner->FindComponentByClass<USkeletalMeshComponent>();
+    if (!MeshComponent)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("UAnim_CharacterAnimationController: No SkeletalMeshComponent found on owner"));
+    }
+    
+    // Get movement component
+    MovementComponent = Owner->FindComponentByClass<UCharacterMovementComponent>();
+    if (!MovementComponent)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("UAnim_CharacterAnimationController: No CharacterMovementComponent found on owner"));
+    }
+    
+    // Apply animation blueprint if set
+    if (MeshComponent && AnimationBlueprint)
+    {
+        MeshComponent->SetAnimInstanceClass(AnimationBlueprint);
+        UE_LOG(LogTemp, Log, TEXT("UAnim_CharacterAnimationController: Applied animation blueprint"));
+    }
+}
+
+void UAnim_CharacterAnimationController::UpdateMovementAnimation(float DeltaTime)
+{
+    if (!MovementComponent || !MeshComponent)
+    {
+        return;
+    }
+    
+    UpdateMovementData(DeltaTime);
+    UpdateActionData(DeltaTime);
+    
+    // Update animation instance variables if available
+    UAnimInstance* AnimInstance = MeshComponent->GetAnimInstance();
+    if (AnimInstance)
+    {
+        // Set animation variables (these would be read by the Animation Blueprint)
+        // Note: In a real implementation, you'd create custom AnimInstance class
+        // with these variables exposed for the Animation Blueprint to read
+    }
+    
+    LastUpdateTime = GetWorld()->GetTimeSeconds();
+}
+
+void UAnim_CharacterAnimationController::UpdateMovementData(float DeltaTime)
+{
+    if (!MovementComponent)
+    {
+        return;
+    }
+    
+    // Get current velocity
+    FVector CurrentVelocity = MovementComponent->Velocity;
+    float CurrentSpeed = CurrentVelocity.Size();
+    
+    // Smooth speed changes
+    float TargetSpeed = CurrentSpeed;
+    MovementData.Speed = FMath::FInterpTo(MovementData.Speed, TargetSpeed, DeltaTime, AnimationSmoothingSpeed);
+    
+    // Calculate movement direction
+    MovementData.Direction = CalculateMovementDirection();
+    
+    // Update movement state
+    EAnim_MovementState NewState = CalculateMovementState();
+    if (NewState != MovementData.MovementState)
+    {
+        SetMovementState(NewState);
+    }
+    
+    // Update movement flags
+    MovementData.bIsMoving = CurrentSpeed > 10.0f;
+    MovementData.bIsInAir = MovementComponent->IsFalling();
+    MovementData.bIsCrouching = MovementComponent->IsCrouching();
+    
+    // Store for next frame
+    LastVelocity = CurrentVelocity;
+    bWasMovingLastFrame = MovementData.bIsMoving;
+}
+
+void UAnim_CharacterAnimationController::UpdateActionData(float DeltaTime)
+{
+    // Update action progress if performing an action
+    if (ActionData.bIsPerformingAction)
+    {
+        // Check if montage is still playing
+        if (!IsPlayingActionMontage())
+        {
+            // Action completed
+            ActionData.bIsPerformingAction = false;
+            ActionData.CurrentAction = EAnim_ActionState::None;
+            ActionData.ActionProgress = 0.0f;
+            ActionData.ActionTarget = TEXT("");
+        }
+        else
+        {
+            // Update progress based on montage position
+            if (MeshComponent && MeshComponent->GetAnimInstance())
+            {
+                UAnimInstance* AnimInstance = MeshComponent->GetAnimInstance();
+                if (UAnimMontage* CurrentMontage = AnimInstance->GetCurrentActiveMontage())
+                {
+                    float MontagePosition = AnimInstance->Montage_GetPosition(CurrentMontage);
+                    float MontageLength = CurrentMontage->GetPlayLength();
+                    ActionData.ActionProgress = (MontageLength > 0.0f) ? (MontagePosition / MontageLength) : 0.0f;
+                }
+            }
+        }
+    }
+}
+
+EAnim_MovementState UAnim_CharacterAnimationController::CalculateMovementState() const
+{
+    if (!MovementComponent)
+    {
+        return EAnim_MovementState::Idle;
+    }
+    
+    // Check for special movement states first
+    if (MovementComponent->IsFalling())
+    {
+        return EAnim_MovementState::Falling;
+    }
+    
+    if (MovementComponent->IsCrouching())
+    {
+        return EAnim_MovementState::Crouching;
+    }
+    
+    if (MovementComponent->IsSwimming())
+    {
+        return EAnim_MovementState::Swimming;
+    }
+    
+    // Check speed-based states
+    float CurrentSpeed = MovementComponent->Velocity.Size();
+    
+    if (CurrentSpeed < WalkSpeedThreshold)
+    {
+        return EAnim_MovementState::Idle;
+    }
+    else if (CurrentSpeed < RunSpeedThreshold)
+    {
+        return EAnim_MovementState::Walking;
+    }
+    else
+    {
+        return EAnim_MovementState::Running;
+    }
+}
+
+float UAnim_CharacterAnimationController::CalculateMovementDirection() const
+{
+    if (!MovementComponent || !GetOwner())
+    {
+        return 0.0f;
+    }
+    
+    FVector Velocity = MovementComponent->Velocity;
+    if (Velocity.SizeSquared() < 1.0f)
+    {
+        return 0.0f;
+    }
+    
+    FVector Forward = GetOwner()->GetActorForwardVector();
+    FVector Right = GetOwner()->GetActorRightVector();
+    
+    // Normalize velocity to get direction
+    Velocity.Normalize();
+    
+    // Calculate angle relative to forward direction
+    float ForwardDot = FVector::DotProduct(Forward, Velocity);
+    float RightDot = FVector::DotProduct(Right, Velocity);
+    
+    return FMath::Atan2(RightDot, ForwardDot) * (180.0f / PI);
 }
 
 void UAnim_CharacterAnimationController::SetMovementState(EAnim_MovementState NewState)
 {
-    if (CurrentMovementState != NewState)
+    if (MovementData.MovementState != NewState)
     {
-        CurrentMovementState = NewState;
-        LogAnimationEvent(FString::Printf(TEXT("Movement state changed to: %d"), (int32)NewState));
+        EAnim_MovementState PreviousState = MovementData.MovementState;
+        MovementData.MovementState = NewState;
+        
+        UE_LOG(LogTemp, Log, TEXT("UAnim_CharacterAnimationController: Movement state changed from %d to %d"), 
+               (int32)PreviousState, (int32)NewState);
     }
 }
 
-void UAnim_CharacterAnimationController::SetCombatState(EAnim_CombatState NewState)
+void UAnim_CharacterAnimationController::PlayActionMontage(EAnim_ActionState ActionType, float PlayRate)
 {
-    if (CurrentCombatState != NewState)
+    if (!MeshComponent || !MeshComponent->GetAnimInstance())
     {
-        CurrentCombatState = NewState;
-        LogAnimationEvent(FString::Printf(TEXT("Combat state changed to: %d"), (int32)NewState));
-    }
-}
-
-void UAnim_CharacterAnimationController::PlayMontage(UAnimMontage* Montage, float PlayRate)
-{
-    if (!IsValidAnimationAsset(Montage) || !AnimInstance)
-    {
-        LogAnimationEvent(TEXT("Cannot play montage: Invalid asset or AnimInstance"));
+        UE_LOG(LogTemp, Warning, TEXT("UAnim_CharacterAnimationController: Cannot play montage - no mesh or anim instance"));
         return;
     }
-
-    // Stop current montage if playing
-    if (CurrentlyPlayingMontage && AnimInstance->Montage_IsPlaying(CurrentlyPlayingMontage))
+    
+    UAnimMontage** FoundMontage = ActionMontages.Find(ActionType);
+    if (!FoundMontage || !*FoundMontage)
     {
-        AnimInstance->Montage_Stop(0.2f, CurrentlyPlayingMontage);
-    }
-
-    // Play new montage
-    float Duration = AnimInstance->Montage_Play(Montage, PlayRate);
-    if (Duration > 0.0f)
-    {
-        CurrentlyPlayingMontage = Montage;
-        LastMontagePlayTime = GetWorld()->GetTimeSeconds();
-        LogAnimationEvent(FString::Printf(TEXT("Playing montage: %s"), *Montage->GetName()));
-    }
-    else
-    {
-        LogAnimationEvent(FString::Printf(TEXT("Failed to play montage: %s"), *Montage->GetName()));
-    }
-}
-
-void UAnim_CharacterAnimationController::StopMontage(UAnimMontage* Montage)
-{
-    if (!AnimInstance || !Montage)
-    {
+        UE_LOG(LogTemp, Warning, TEXT("UAnim_CharacterAnimationController: No montage registered for action type %d"), (int32)ActionType);
         return;
     }
-
-    if (AnimInstance->Montage_IsPlaying(Montage))
+    
+    UAnimInstance* AnimInstance = MeshComponent->GetAnimInstance();
+    float MontageLength = AnimInstance->Montage_Play(*FoundMontage, PlayRate);
+    
+    if (MontageLength > 0.0f)
     {
-        AnimInstance->Montage_Stop(0.2f, Montage);
-        LogAnimationEvent(FString::Printf(TEXT("Stopped montage: %s"), *Montage->GetName()));
+        ActionData.CurrentAction = ActionType;
+        ActionData.bIsPerformingAction = true;
+        ActionData.ActionProgress = 0.0f;
         
-        if (CurrentlyPlayingMontage == Montage)
-        {
-            CurrentlyPlayingMontage = nullptr;
-        }
-    }
-}
-
-void UAnim_CharacterAnimationController::UpdateMovementBlendSpace(float Speed, float Direction)
-{
-    CurrentSpeed = Speed;
-    CurrentDirection = Direction;
-    
-    // The blend space will be updated through the AnimInstance
-    // This function serves as a manual override if needed
-}
-
-void UAnim_CharacterAnimationController::TriggerJumpAnimation()
-{
-    if (JumpMontage)
-    {
-        PlayMontage(JumpMontage, 1.0f);
+        UE_LOG(LogTemp, Log, TEXT("UAnim_CharacterAnimationController: Started action montage for type %d"), (int32)ActionType);
     }
     else
     {
-        LogAnimationEvent(TEXT("Jump animation triggered but no JumpMontage assigned"));
+        UE_LOG(LogTemp, Warning, TEXT("UAnim_CharacterAnimationController: Failed to play montage for action type %d"), (int32)ActionType);
     }
 }
 
-void UAnim_CharacterAnimationController::TriggerLandAnimation()
+void UAnim_CharacterAnimationController::StopActionMontage()
 {
-    if (LandMontage)
+    if (MeshComponent && MeshComponent->GetAnimInstance())
     {
-        PlayMontage(LandMontage, 1.0f);
-    }
-    else
-    {
-        LogAnimationEvent(TEXT("Land animation triggered but no LandMontage assigned"));
-    }
-}
-
-void UAnim_CharacterAnimationController::TriggerAttackAnimation(EAnim_AttackType AttackType)
-{
-    UAnimMontage* AttackMontage = nullptr;
-    
-    switch (AttackType)
-    {
-        case EAnim_AttackType::Light:
-            AttackMontage = AttackLightMontage;
-            break;
-        case EAnim_AttackType::Heavy:
-            AttackMontage = AttackHeavyMontage;
-            break;
-        default:
-            LogAnimationEvent(TEXT("Unknown attack type"));
-            return;
-    }
-
-    if (AttackMontage)
-    {
-        SetCombatState(EAnim_CombatState::Attacking);
-        PlayMontage(AttackMontage, 1.0f);
-    }
-    else
-    {
-        LogAnimationEvent(TEXT("Attack animation triggered but no montage assigned"));
-    }
-}
-
-void UAnim_CharacterAnimationController::TriggerBlockAnimation()
-{
-    if (BlockMontage)
-    {
-        SetCombatState(EAnim_CombatState::Blocking);
-        PlayMontage(BlockMontage, 1.0f);
-    }
-    else
-    {
-        LogAnimationEvent(TEXT("Block animation triggered but no BlockMontage assigned"));
-    }
-}
-
-void UAnim_CharacterAnimationController::TriggerDodgeAnimation(EAnim_DodgeDirection Direction)
-{
-    UAnimMontage* DodgeMontage = nullptr;
-    
-    switch (Direction)
-    {
-        case EAnim_DodgeDirection::Left:
-            DodgeMontage = DodgeLeftMontage;
-            break;
-        case EAnim_DodgeDirection::Right:
-            DodgeMontage = DodgeRightMontage;
-            break;
-        default:
-            LogAnimationEvent(TEXT("Unknown dodge direction"));
-            return;
-    }
-
-    if (DodgeMontage)
-    {
-        SetCombatState(EAnim_CombatState::Dodging);
-        PlayMontage(DodgeMontage, 1.0f);
-    }
-    else
-    {
-        LogAnimationEvent(TEXT("Dodge animation triggered but no montage assigned"));
-    }
-}
-
-void UAnim_CharacterAnimationController::TriggerCraftingAnimation()
-{
-    if (CraftingMontage)
-    {
-        PlayMontage(CraftingMontage, 1.0f);
-    }
-    else
-    {
-        LogAnimationEvent(TEXT("Crafting animation triggered but no CraftingMontage assigned"));
-    }
-}
-
-void UAnim_CharacterAnimationController::TriggerGatheringAnimation()
-{
-    if (GatheringMontage)
-    {
-        PlayMontage(GatheringMontage, 1.0f);
-    }
-    else
-    {
-        LogAnimationEvent(TEXT("Gathering animation triggered but no GatheringMontage assigned"));
-    }
-}
-
-void UAnim_CharacterAnimationController::TriggerClimbingAnimation(bool bIsClimbingNow)
-{
-    bIsClimbing = bIsClimbingNow;
-    
-    if (bIsClimbingNow && ClimbingMontage)
-    {
-        PlayMontage(ClimbingMontage, 1.0f);
-    }
-    else if (!bIsClimbingNow && CurrentlyPlayingMontage == ClimbingMontage)
-    {
-        StopMontage(ClimbingMontage);
-    }
-}
-
-void UAnim_CharacterAnimationController::CacheComponentReferences()
-{
-    if (AActor* Owner = GetOwner())
-    {
-        OwnerMesh = Owner->FindComponentByClass<USkeletalMeshComponent>();
+        UAnimInstance* AnimInstance = MeshComponent->GetAnimInstance();
+        AnimInstance->Montage_Stop(0.2f); // 0.2 second blend out
         
-        if (OwnerMesh)
-        {
-            AnimInstance = OwnerMesh->GetAnimInstance();
-        }
+        ActionData.bIsPerformingAction = false;
+        ActionData.CurrentAction = EAnim_ActionState::None;
+        ActionData.ActionProgress = 0.0f;
+        
+        UE_LOG(LogTemp, Log, TEXT("UAnim_CharacterAnimationController: Stopped action montage"));
     }
 }
 
-bool UAnim_CharacterAnimationController::IsValidAnimationAsset(UAnimationAsset* Asset) const
+bool UAnim_CharacterAnimationController::IsPlayingActionMontage() const
 {
-    return Asset != nullptr && IsValid(Asset);
-}
-
-void UAnim_CharacterAnimationController::LogAnimationEvent(const FString& Event) const
-{
-    if (GEngine)
+    if (MeshComponent && MeshComponent->GetAnimInstance())
     {
-        GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Cyan, 
-            FString::Printf(TEXT("AnimController [%s]: %s"), 
-                GetOwner() ? *GetOwner()->GetName() : TEXT("Unknown"), 
-                *Event));
+        UAnimInstance* AnimInstance = MeshComponent->GetAnimInstance();
+        return AnimInstance->IsAnyMontagePlaying();
     }
     
-    UE_LOG(LogTemp, Log, TEXT("AnimController [%s]: %s"), 
-        GetOwner() ? *GetOwner()->GetName() : TEXT("Unknown"), 
-        *Event);
+    return false;
+}
+
+void UAnim_CharacterAnimationController::SetAnimationBlueprint(TSubclassOf<UAnimInstance> NewAnimBP)
+{
+    AnimationBlueprint = NewAnimBP;
+    
+    if (MeshComponent && AnimationBlueprint)
+    {
+        MeshComponent->SetAnimInstanceClass(AnimationBlueprint);
+        UE_LOG(LogTemp, Log, TEXT("UAnim_CharacterAnimationController: Set new animation blueprint"));
+    }
+}
+
+void UAnim_CharacterAnimationController::RegisterAnimationMontage(EAnim_ActionState ActionType, UAnimMontage* Montage)
+{
+    if (Montage)
+    {
+        ActionMontages.Add(ActionType, Montage);
+        UE_LOG(LogTemp, Log, TEXT("UAnim_CharacterAnimationController: Registered montage for action type %d"), (int32)ActionType);
+    }
+    else
+    {
+        UE_LOG(LogTemp, Warning, TEXT("UAnim_CharacterAnimationController: Attempted to register null montage for action type %d"), (int32)ActionType);
+    }
 }
