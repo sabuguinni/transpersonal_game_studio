@@ -1,269 +1,330 @@
 #include "Dir_ProductionCoordinator.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "GameFramework/Character.h"
-#include "Landscape/Landscape.h"
-#include "Engine/DirectionalLight.h"
-#include "Components/StaticMeshComponent.h"
-#include "UObject/ConstructorHelpers.h"
+#include "TimerManager.h"
 
-ADir_ProductionCoordinator::ADir_ProductionCoordinator()
+UDir_ProductionCoordinator::UDir_ProductionCoordinator()
 {
-    PrimaryActorTick.bCanEverTick = true;
-
-    RootSceneComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootSceneComponent"));
-    RootComponent = RootSceneComponent;
-
-    CurrentCycleID = TEXT("PROD_CYCLE_AUTO_20260604_005");
-    TotalCycles = 5;
-
-    InitializeDefaultAgents();
+    PrimaryComponentTick.bCanEverTick = true;
+    ProductionUpdateInterval = 5.0f;
+    LastProductionUpdate = FDateTime::Now();
 }
 
-void ADir_ProductionCoordinator::BeginPlay()
+void UDir_ProductionCoordinator::BeginPlay()
 {
     Super::BeginPlay();
     
-    UE_LOG(LogTemp, Warning, TEXT("ProductionCoordinator: Starting Cycle 005 coordination"));
-    InitializeAgentTracking();
-    CheckMilestoneProgress();
+    InitializeDefaultAgents();
+    
+    // Create initial milestone for playable prototype
+    TArray<FString> PrototypeAgents;
+    PrototypeAgents.Add(TEXT("Engine Architect"));
+    PrototypeAgents.Add(TEXT("Core Systems"));
+    PrototypeAgents.Add(TEXT("World Generator"));
+    PrototypeAgents.Add(TEXT("Character Artist"));
+    PrototypeAgents.Add(TEXT("Animation"));
+    
+    CreateMilestone(TEXT("Playable Prototype"), PrototypeAgents, FDateTime::Now() + FTimespan::FromDays(2));
+    
+    UE_LOG(LogTemp, Warning, TEXT("Production Coordinator initialized with %d agents"), AgentTasks.Num());
 }
 
-void ADir_ProductionCoordinator::Tick(float DeltaTime)
+void UDir_ProductionCoordinator::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
-    Super::Tick(DeltaTime);
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
     
-    // Update milestone progress every 5 seconds
-    static float TimeAccumulator = 0.0f;
-    TimeAccumulator += DeltaTime;
-    
-    if (TimeAccumulator >= 5.0f)
+    FDateTime CurrentTime = FDateTime::Now();
+    if ((CurrentTime - LastProductionUpdate).GetTotalSeconds() >= ProductionUpdateInterval)
     {
-        CheckMilestoneProgress();
-        TimeAccumulator = 0.0f;
+        UpdateProductionMetrics();
+        LastProductionUpdate = CurrentTime;
     }
 }
 
-void ADir_ProductionCoordinator::InitializeDefaultAgents()
+void UDir_ProductionCoordinator::RegisterAgent(const FString& AgentName, const FString& InitialTask)
 {
-    AgentStatuses.Empty();
-
-    // Initialize all 19 agents
-    TArray<FString> AgentNames = {
-        TEXT("Studio Director"),
-        TEXT("Engine Architect"),
-        TEXT("Core Systems Programmer"),
-        TEXT("Performance Optimizer"),
-        TEXT("Procedural World Generator"),
-        TEXT("Environment Artist"),
-        TEXT("Architecture & Interior Agent"),
-        TEXT("Lighting & Atmosphere Agent"),
-        TEXT("Character Artist Agent"),
-        TEXT("Animation Agent"),
-        TEXT("NPC Behavior Agent"),
-        TEXT("Combat & Enemy AI Agent"),
-        TEXT("Crowd & Traffic Simulation"),
-        TEXT("Quest & Mission Designer"),
-        TEXT("Narrative & Dialogue Agent"),
-        TEXT("Audio Agent"),
-        TEXT("VFX Agent"),
-        TEXT("QA & Testing Agent"),
-        TEXT("Integration & Build Agent")
-    };
-
-    for (int32 i = 0; i < AgentNames.Num(); i++)
-    {
-        FDir_AgentStatus NewAgent;
-        NewAgent.AgentNumber = i + 1;
-        NewAgent.AgentName = AgentNames[i];
-        NewAgent.bIsActive = (i < 5); // First 5 agents active for Milestone 1
-        NewAgent.CurrentTask = TEXT("Milestone 1: Walk Around Prototype");
-        NewAgent.CompletionPercentage = 0.0f;
-        NewAgent.LastUpdateTime = FDateTime::Now();
-        
-        AgentStatuses.Add(NewAgent);
-    }
-}
-
-void ADir_ProductionCoordinator::InitializeAgentTracking()
-{
-    UE_LOG(LogTemp, Warning, TEXT("ProductionCoordinator: Initializing agent tracking for %d agents"), AgentStatuses.Num());
+    FDir_AgentTask NewTask;
+    NewTask.AgentName = AgentName;
+    NewTask.TaskDescription = InitialTask;
+    NewTask.Status = EDir_AgentStatus::Idle;
+    NewTask.ProgressPercentage = 0.0f;
     
-    for (FDir_AgentStatus& Agent : AgentStatuses)
-    {
-        Agent.LastUpdateTime = FDateTime::Now();
-        UE_LOG(LogTemp, Log, TEXT("Agent #%d (%s): %s"), 
-               Agent.AgentNumber, 
-               *Agent.AgentName, 
-               Agent.bIsActive ? TEXT("ACTIVE") : TEXT("STANDBY"));
-    }
+    AgentTasks.Add(NewTask);
+    
+    LogProductionEvent(FString::Printf(TEXT("Agent %s registered with task: %s"), *AgentName, *InitialTask));
 }
 
-void ADir_ProductionCoordinator::UpdateAgentStatus(int32 AgentNumber, const FString& TaskDescription, float Progress)
+void UDir_ProductionCoordinator::UpdateAgentStatus(const FString& AgentName, EDir_AgentStatus NewStatus, float Progress)
 {
-    for (FDir_AgentStatus& Agent : AgentStatuses)
+    for (FDir_AgentTask& Task : AgentTasks)
     {
-        if (Agent.AgentNumber == AgentNumber)
+        if (Task.AgentName == AgentName)
         {
-            Agent.CurrentTask = TaskDescription;
-            Agent.CompletionPercentage = FMath::Clamp(Progress, 0.0f, 100.0f);
-            Agent.LastUpdateTime = FDateTime::Now();
+            Task.Status = NewStatus;
+            Task.ProgressPercentage = FMath::Clamp(Progress, 0.0f, 100.0f);
             
-            UE_LOG(LogTemp, Warning, TEXT("Agent #%d updated: %s (%.1f%%)"), 
-                   AgentNumber, *TaskDescription, Progress);
+            FString StatusText;
+            switch (NewStatus)
+            {
+                case EDir_AgentStatus::Idle: StatusText = TEXT("Idle"); break;
+                case EDir_AgentStatus::Working: StatusText = TEXT("Working"); break;
+                case EDir_AgentStatus::Completed: StatusText = TEXT("Completed"); break;
+                case EDir_AgentStatus::Blocked: StatusText = TEXT("Blocked"); break;
+                case EDir_AgentStatus::Failed: StatusText = TEXT("Failed"); break;
+            }
+            
+            LogProductionEvent(FString::Printf(TEXT("Agent %s status: %s (%.1f%%)"), *AgentName, *StatusText, Progress));
             break;
         }
     }
 }
 
-void ADir_ProductionCoordinator::CheckMilestoneProgress()
+void UDir_ProductionCoordinator::AssignTaskToAgent(const FString& AgentName, const FString& TaskDescription)
 {
-    ScanWorldForMilestoneComponents();
-    CurrentMilestone.OverallProgress = CalculateOverallProgress();
-    
-    UE_LOG(LogTemp, Warning, TEXT("Milestone Progress: %.1f%% - Character:%s Landscape:%s Movement:%s Dinosaurs:%s Lighting:%s"),
-           CurrentMilestone.OverallProgress,
-           CurrentMilestone.bHasThirdPersonCharacter ? TEXT("YES") : TEXT("NO"),
-           CurrentMilestone.bHasLandscape ? TEXT("YES") : TEXT("NO"),
-           CurrentMilestone.bHasMovement ? TEXT("YES") : TEXT("NO"),
-           CurrentMilestone.bHasDinosaurs ? TEXT("YES") : TEXT("NO"),
-           CurrentMilestone.bHasLighting ? TEXT("YES") : TEXT("NO"));
-}
-
-void ADir_ProductionCoordinator::ScanWorldForMilestoneComponents()
-{
-    UWorld* World = GetWorld();
-    if (!World)
+    for (FDir_AgentTask& Task : AgentTasks)
     {
-        return;
-    }
-
-    // Reset milestone flags
-    CurrentMilestone.bHasThirdPersonCharacter = false;
-    CurrentMilestone.bHasLandscape = false;
-    CurrentMilestone.bHasMovement = false;
-    CurrentMilestone.bHasDinosaurs = false;
-    CurrentMilestone.bHasLighting = false;
-
-    // Scan for characters
-    for (TActorIterator<ACharacter> ActorItr(World); ActorItr; ++ActorItr)
-    {
-        ACharacter* Character = *ActorItr;
-        if (Character && Character->GetName().Contains(TEXT("TranspersonalCharacter")))
+        if (Task.AgentName == AgentName)
         {
-            CurrentMilestone.bHasThirdPersonCharacter = true;
-            CurrentMilestone.bHasMovement = true; // Assume character has movement
+            Task.TaskDescription = TaskDescription;
+            Task.Status = EDir_AgentStatus::Working;
+            Task.ProgressPercentage = 0.0f;
+            
+            LogProductionEvent(FString::Printf(TEXT("Task assigned to %s: %s"), *AgentName, *TaskDescription));
             break;
         }
     }
+}
 
-    // Scan for landscape
-    for (TActorIterator<ALandscape> ActorItr(World); ActorItr; ++ActorItr)
+TArray<FDir_AgentTask> UDir_ProductionCoordinator::GetAllAgentTasks() const
+{
+    return AgentTasks;
+}
+
+void UDir_ProductionCoordinator::CreateMilestone(const FString& MilestoneName, const TArray<FString>& RequiredAgents, const FDateTime& Deadline)
+{
+    FDir_ProductionMilestone NewMilestone;
+    NewMilestone.MilestoneName = MilestoneName;
+    NewMilestone.RequiredAgents = RequiredAgents;
+    NewMilestone.bIsCompleted = false;
+    NewMilestone.Deadline = Deadline;
+    
+    ProductionMilestones.Add(NewMilestone);
+    
+    LogProductionEvent(FString::Printf(TEXT("Milestone created: %s (requires %d agents)"), *MilestoneName, RequiredAgents.Num()));
+}
+
+void UDir_ProductionCoordinator::CheckMilestoneCompletion(const FString& MilestoneName)
+{
+    for (FDir_ProductionMilestone& Milestone : ProductionMilestones)
     {
-        ALandscape* Landscape = *ActorItr;
-        if (Landscape)
+        if (Milestone.MilestoneName == MilestoneName && !Milestone.bIsCompleted)
         {
-            CurrentMilestone.bHasLandscape = true;
+            bool bAllAgentsCompleted = true;
+            
+            for (const FString& RequiredAgent : Milestone.RequiredAgents)
+            {
+                bool bAgentCompleted = false;
+                for (const FDir_AgentTask& Task : AgentTasks)
+                {
+                    if (Task.AgentName == RequiredAgent && Task.Status == EDir_AgentStatus::Completed)
+                    {
+                        bAgentCompleted = true;
+                        break;
+                    }
+                }
+                
+                if (!bAgentCompleted)
+                {
+                    bAllAgentsCompleted = false;
+                    break;
+                }
+            }
+            
+            if (bAllAgentsCompleted)
+            {
+                Milestone.bIsCompleted = true;
+                LogProductionEvent(FString::Printf(TEXT("MILESTONE COMPLETED: %s"), *MilestoneName));
+            }
             break;
         }
     }
+}
 
-    // Scan for lighting
-    for (TActorIterator<ADirectionalLight> ActorItr(World); ActorItr; ++ActorItr)
+TArray<FDir_ProductionMilestone> UDir_ProductionCoordinator::GetActiveMilestones() const
+{
+    TArray<FDir_ProductionMilestone> ActiveMilestones;
+    
+    for (const FDir_ProductionMilestone& Milestone : ProductionMilestones)
     {
-        ADirectionalLight* Light = *ActorItr;
-        if (Light)
+        if (!Milestone.bIsCompleted)
         {
-            CurrentMilestone.bHasLighting = true;
-            break;
+            ActiveMilestones.Add(Milestone);
         }
     }
+    
+    return ActiveMilestones;
+}
 
-    // Scan for dinosaur placeholders
-    int32 DinosaurCount = 0;
-    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+float UDir_ProductionCoordinator::GetOverallProgress() const
+{
+    if (AgentTasks.Num() == 0)
+        return 0.0f;
+    
+    float TotalProgress = 0.0f;
+    for (const FDir_AgentTask& Task : AgentTasks)
     {
-        AActor* Actor = *ActorItr;
-        if (Actor && (Actor->GetName().Contains(TEXT("Dinosaur")) || 
-                     Actor->GetName().Contains(TEXT("TRex")) ||
-                     Actor->GetName().Contains(TEXT("Raptor")) ||
-                     Actor->GetName().Contains(TEXT("Brachio"))))
+        TotalProgress += Task.ProgressPercentage;
+    }
+    
+    return TotalProgress / AgentTasks.Num();
+}
+
+int32 UDir_ProductionCoordinator::GetActiveAgentCount() const
+{
+    int32 ActiveCount = 0;
+    
+    for (const FDir_AgentTask& Task : AgentTasks)
+    {
+        if (Task.Status == EDir_AgentStatus::Working)
         {
-            DinosaurCount++;
+            ActiveCount++;
         }
     }
-    CurrentMilestone.bHasDinosaurs = (DinosaurCount >= 3);
+    
+    return ActiveCount;
 }
 
-float ADir_ProductionCoordinator::CalculateOverallProgress() const
+FString UDir_ProductionCoordinator::GenerateProductionReport() const
 {
-    float Progress = 0.0f;
-    int32 TotalComponents = 5;
+    FString Report = TEXT("=== PRODUCTION REPORT ===\n");
+    Report += FString::Printf(TEXT("Overall Progress: %.1f%%\n"), GetOverallProgress());
+    Report += FString::Printf(TEXT("Active Agents: %d/%d\n"), GetActiveAgentCount(), AgentTasks.Num());
     
-    if (CurrentMilestone.bHasThirdPersonCharacter) Progress += 20.0f;
-    if (CurrentMilestone.bHasLandscape) Progress += 20.0f;
-    if (CurrentMilestone.bHasMovement) Progress += 20.0f;
-    if (CurrentMilestone.bHasDinosaurs) Progress += 20.0f;
-    if (CurrentMilestone.bHasLighting) Progress += 20.0f;
-    
-    return Progress;
-}
-
-FDir_MilestoneProgress ADir_ProductionCoordinator::GetCurrentMilestoneStatus() const
-{
-    return CurrentMilestone;
-}
-
-TArray<FDir_AgentStatus> ADir_ProductionCoordinator::GetAllAgentStatuses() const
-{
-    return AgentStatuses;
-}
-
-void ADir_ProductionCoordinator::ValidateMinPlayableMap()
-{
-    UE_LOG(LogTemp, Warning, TEXT("=== MIN PLAYABLE MAP VALIDATION ==="));
-    
-    CheckMilestoneProgress();
-    
-    if (CurrentMilestone.OverallProgress >= 80.0f)
+    Report += TEXT("\nAgent Status:\n");
+    for (const FDir_AgentTask& Task : AgentTasks)
     {
-        UE_LOG(LogTemp, Warning, TEXT("VALIDATION PASSED: Minimum playable prototype ready (%.1f%%)"), 
-               CurrentMilestone.OverallProgress);
-    }
-    else
-    {
-        UE_LOG(LogTemp, Error, TEXT("VALIDATION FAILED: Prototype incomplete (%.1f%%)"), 
-               CurrentMilestone.OverallProgress);
+        FString StatusText;
+        switch (Task.Status)
+        {
+            case EDir_AgentStatus::Idle: StatusText = TEXT("IDLE"); break;
+            case EDir_AgentStatus::Working: StatusText = TEXT("WORKING"); break;
+            case EDir_AgentStatus::Completed: StatusText = TEXT("COMPLETED"); break;
+            case EDir_AgentStatus::Blocked: StatusText = TEXT("BLOCKED"); break;
+            case EDir_AgentStatus::Failed: StatusText = TEXT("FAILED"); break;
+        }
         
-        if (!CurrentMilestone.bHasThirdPersonCharacter)
-            UE_LOG(LogTemp, Error, TEXT("MISSING: Third Person Character"));
-        if (!CurrentMilestone.bHasLandscape)
-            UE_LOG(LogTemp, Error, TEXT("MISSING: Landscape terrain"));
-        if (!CurrentMilestone.bHasMovement)
-            UE_LOG(LogTemp, Error, TEXT("MISSING: Player movement"));
-        if (!CurrentMilestone.bHasDinosaurs)
-            UE_LOG(LogTemp, Error, TEXT("MISSING: Dinosaur placeholders"));
-        if (!CurrentMilestone.bHasLighting)
-            UE_LOG(LogTemp, Error, TEXT("MISSING: Directional lighting"));
+        Report += FString::Printf(TEXT("- %s: %s (%.1f%%) - %s\n"), 
+            *Task.AgentName, *StatusText, Task.ProgressPercentage, *Task.TaskDescription);
+    }
+    
+    TArray<FDir_ProductionMilestone> ActiveMilestones = GetActiveMilestones();
+    if (ActiveMilestones.Num() > 0)
+    {
+        Report += TEXT("\nActive Milestones:\n");
+        for (const FDir_ProductionMilestone& Milestone : ActiveMilestones)
+        {
+            FTimespan TimeRemaining = Milestone.Deadline - FDateTime::Now();
+            Report += FString::Printf(TEXT("- %s (%.1f days remaining)\n"), 
+                *Milestone.MilestoneName, TimeRemaining.GetTotalDays());
+        }
+    }
+    
+    return Report;
+}
+
+TArray<FString> UDir_ProductionCoordinator::GetBlockedAgents() const
+{
+    TArray<FString> BlockedAgents;
+    
+    for (const FDir_AgentTask& Task : AgentTasks)
+    {
+        if (Task.Status == EDir_AgentStatus::Blocked)
+        {
+            BlockedAgents.Add(Task.AgentName);
+        }
+    }
+    
+    return BlockedAgents;
+}
+
+void UDir_ProductionCoordinator::ResolveAgentBlockage(const FString& AgentName, const FString& Resolution)
+{
+    for (FDir_AgentTask& Task : AgentTasks)
+    {
+        if (Task.AgentName == AgentName && Task.Status == EDir_AgentStatus::Blocked)
+        {
+            Task.Status = EDir_AgentStatus::Working;
+            Task.LastOutput = Resolution;
+            
+            LogProductionEvent(FString::Printf(TEXT("Blockage resolved for %s: %s"), *AgentName, *Resolution));
+            break;
+        }
     }
 }
 
-void ADir_ProductionCoordinator::LogProductionMetrics()
+void UDir_ProductionCoordinator::InitializeDefaultAgents()
 {
-    UE_LOG(LogTemp, Warning, TEXT("=== PRODUCTION METRICS CYCLE %s ==="), *CurrentCycleID);
-    UE_LOG(LogTemp, Warning, TEXT("Total Cycles: %d"), TotalCycles);
-    UE_LOG(LogTemp, Warning, TEXT("Active Agents: %d"), CurrentMilestone.TotalAgentsActive);
-    UE_LOG(LogTemp, Warning, TEXT("Milestone Progress: %.1f%%"), CurrentMilestone.OverallProgress);
-    
-    for (const FDir_AgentStatus& Agent : AgentStatuses)
+    // Register all 19 agents in the production pipeline
+    RegisterAgent(TEXT("Engine Architect"), TEXT("Define UE5 architecture and core systems"));
+    RegisterAgent(TEXT("Core Systems"), TEXT("Implement physics, collision, and destruction"));
+    RegisterAgent(TEXT("Performance Optimizer"), TEXT("Ensure 60fps PC / 30fps console performance"));
+    RegisterAgent(TEXT("World Generator"), TEXT("Create procedural terrain and biomes"));
+    RegisterAgent(TEXT("Environment Artist"), TEXT("Populate world with vegetation and props"));
+    RegisterAgent(TEXT("Architecture Designer"), TEXT("Build prehistoric structures and shelters"));
+    RegisterAgent(TEXT("Lighting Artist"), TEXT("Implement day/night cycle and atmosphere"));
+    RegisterAgent(TEXT("Character Artist"), TEXT("Create player character and NPCs"));
+    RegisterAgent(TEXT("Animation Specialist"), TEXT("Add motion matching and IK systems"));
+    RegisterAgent(TEXT("NPC Behavior"), TEXT("Implement AI behavior trees and routines"));
+    RegisterAgent(TEXT("Combat AI"), TEXT("Create tactical dinosaur combat AI"));
+    RegisterAgent(TEXT("Crowd Simulation"), TEXT("Implement mass AI for large groups"));
+    RegisterAgent(TEXT("Quest Designer"), TEXT("Convert narrative into playable missions"));
+    RegisterAgent(TEXT("Narrative Designer"), TEXT("Write game bible and story content"));
+    RegisterAgent(TEXT("Audio Specialist"), TEXT("Create adaptive music and sound effects"));
+    RegisterAgent(TEXT("VFX Artist"), TEXT("Implement Niagara particle effects"));
+    RegisterAgent(TEXT("QA Tester"), TEXT("Test all systems and validate builds"));
+    RegisterAgent(TEXT("Integration Specialist"), TEXT("Integrate all agent outputs"));
+    RegisterAgent(TEXT("Build Engineer"), TEXT("Maintain builds and deployment"));
+}
+
+void UDir_ProductionCoordinator::UpdateProductionMetrics()
+{
+    // Check milestone progress
+    for (const FDir_ProductionMilestone& Milestone : ProductionMilestones)
     {
-        if (Agent.bIsActive)
+        if (!Milestone.bIsCompleted)
         {
-            UE_LOG(LogTemp, Log, TEXT("Agent #%d (%s): %s - %.1f%%"),
-                   Agent.AgentNumber,
-                   *Agent.AgentName,
-                   *Agent.CurrentTask,
-                   Agent.CompletionPercentage);
+            CheckMilestoneCompletion(Milestone.MilestoneName);
         }
     }
+    
+    // Update agent dependencies
+    for (const FDir_AgentTask& Task : AgentTasks)
+    {
+        ValidateAgentDependencies(Task.AgentName);
+    }
+    
+    // Log production status
+    if (GetActiveAgentCount() > 0)
+    {
+        UE_LOG(LogTemp, Log, TEXT("Production Update: %.1f%% complete, %d agents active"), 
+            GetOverallProgress(), GetActiveAgentCount());
+    }
+}
+
+bool UDir_ProductionCoordinator::ValidateAgentDependencies(const FString& AgentName)
+{
+    // Implement dependency validation logic
+    // For now, return true - can be expanded with specific dependency rules
+    return true;
+}
+
+void UDir_ProductionCoordinator::LogProductionEvent(const FString& EventDescription)
+{
+    FDateTime CurrentTime = FDateTime::Now();
+    FString LogMessage = FString::Printf(TEXT("[%s] %s"), 
+        *CurrentTime.ToString(TEXT("%H:%M:%S")), *EventDescription);
+    
+    UE_LOG(LogTemp, Warning, TEXT("PRODUCTION: %s"), *LogMessage);
+    
+    // Could also write to file or send to external logging system
 }
