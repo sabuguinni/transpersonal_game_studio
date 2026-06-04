@@ -1,200 +1,187 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/World.h"
-#include "GameFramework/GameModeBase.h"
-#include "Subsystems/WorldSubsystem.h"
-#include "Components/ActorComponent.h"
-#include "Engine/Engine.h"
+#include "Engine/GameInstanceSubsystem.h"
+#include "SharedTypes.h"
 #include "Eng_GameplayArchitect.generated.h"
 
-UENUM(BlueprintType)
-enum class EEng_GameplayLayer : uint8
-{
-    Core        UMETA(DisplayName = "Core Gameplay"),
-    Movement    UMETA(DisplayName = "Character Movement"),
-    Combat      UMETA(DisplayName = "Combat System"),
-    Survival    UMETA(DisplayName = "Survival Mechanics"),
-    World       UMETA(DisplayName = "World Interaction"),
-    AI          UMETA(DisplayName = "AI Behavior"),
-    Narrative   UMETA(DisplayName = "Quest & Narrative")
-};
-
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEng_GameplayMetrics
+struct TRANSPERSONALGAME_API FEng_GameplayRequirement
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float FrameTime;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Gameplay")
+    FString RequirementName;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    int32 ActiveActors;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Gameplay")
+    EGameplaySystemType SystemType;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    int32 ActiveComponents;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Gameplay")
+    bool bIsImplemented;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float MemoryUsageMB;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Gameplay")
+    bool bIsTested;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Gameplay")
-    int32 ActivePlayers;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Gameplay")
+    float ImplementationProgress;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Gameplay")
-    int32 ActiveDinosaurs;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Gameplay")
+    FString DependentSystems;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Gameplay")
-    float WorldLoadProgress;
-
-    FEng_GameplayMetrics()
+    FEng_GameplayRequirement()
     {
-        FrameTime = 0.0f;
-        ActiveActors = 0;
-        ActiveComponents = 0;
-        MemoryUsageMB = 0.0f;
-        ActivePlayers = 0;
-        ActiveDinosaurs = 0;
-        WorldLoadProgress = 0.0f;
+        RequirementName = TEXT("");
+        SystemType = EGameplaySystemType::Movement;
+        bIsImplemented = false;
+        bIsTested = false;
+        ImplementationProgress = 0.0f;
+        DependentSystems = TEXT("");
     }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEng_GameplayConfig
+struct TRANSPERSONALGAME_API FEng_CharacterArchitecture
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
-    float MaxWalkSpeed;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
+    bool bHasMovementComponent;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
-    float MaxRunSpeed;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
+    bool bHasCameraComponent;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
+    bool bHasInputBinding;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
+    bool bHasSurvivalStats;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
+    float MovementSpeed;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
     float JumpHeight;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival")
-    float HungerDecayRate;
+    FEng_CharacterArchitecture()
+    {
+        bHasMovementComponent = false;
+        bHasCameraComponent = false;
+        bHasInputBinding = false;
+        bHasSurvivalStats = false;
+        MovementSpeed = 600.0f;
+        JumpHeight = 420.0f;
+    }
+};
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival")
-    float ThirstDecayRate;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival")
-    float StaminaRegenRate;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
-    float BaseDamageMultiplier;
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FEng_WorldArchitecture
+{
+    GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World")
-    int32 MaxSimultaneousDinosaurs;
+    bool bHasLandscape;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 MaxDrawCalls;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World")
+    bool bHasLighting;
 
-    FEng_GameplayConfig()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World")
+    bool bHasDinosaurs;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World")
+    bool bHasNavMesh;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World")
+    int32 DinosaurCount;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World")
+    float WorldSize;
+
+    FEng_WorldArchitecture()
     {
-        MaxWalkSpeed = 600.0f;
-        MaxRunSpeed = 1200.0f;
-        JumpHeight = 420.0f;
-        HungerDecayRate = 1.0f;
-        ThirstDecayRate = 1.5f;
-        StaminaRegenRate = 10.0f;
-        BaseDamageMultiplier = 1.0f;
-        MaxSimultaneousDinosaurs = 150;
-        MaxDrawCalls = 2000;
+        bHasLandscape = false;
+        bHasLighting = false;
+        bHasDinosaurs = false;
+        bHasNavMesh = false;
+        DinosaurCount = 0;
+        WorldSize = 4000.0f;
     }
 };
 
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UEng_GameplayArchitectSubsystem : public UWorldSubsystem
+class TRANSPERSONALGAME_API UEng_GameplayArchitect : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
 public:
+    UEng_GameplayArchitect();
+
+    // Subsystem interface
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
-    virtual void Tick(float DeltaTime) override;
-    virtual bool ShouldCreateSubsystem(UObject* Outer) const override;
+
+    // Gameplay architecture validation
+    UFUNCTION(BlueprintCallable, Category = "Gameplay Architecture")
+    bool ValidateWalkAroundMilestone();
 
     UFUNCTION(BlueprintCallable, Category = "Gameplay Architecture")
-    void InitializeGameplayLayers();
+    bool ValidateCharacterImplementation();
 
     UFUNCTION(BlueprintCallable, Category = "Gameplay Architecture")
-    void ValidateGameplayIntegrity();
+    bool ValidateWorldImplementation();
 
     UFUNCTION(BlueprintCallable, Category = "Gameplay Architecture")
-    FEng_GameplayMetrics GetCurrentMetrics() const;
+    float GetMilestoneProgress();
+
+    // Architecture requirements management
+    UFUNCTION(BlueprintCallable, Category = "Gameplay Architecture")
+    void AddGameplayRequirement(const FEng_GameplayRequirement& Requirement);
 
     UFUNCTION(BlueprintCallable, Category = "Gameplay Architecture")
-    void UpdateGameplayConfig(const FEng_GameplayConfig& NewConfig);
+    void UpdateRequirementProgress(const FString& RequirementName, float Progress);
 
     UFUNCTION(BlueprintCallable, Category = "Gameplay Architecture")
-    bool IsGameplayLayerActive(EEng_GameplayLayer Layer) const;
+    TArray<FEng_GameplayRequirement> GetPendingRequirements();
+
+    // System integration validation
+    UFUNCTION(BlueprintCallable, Category = "Gameplay Architecture")
+    bool ValidateSystemIntegration(EGameplaySystemType SystemA, EGameplaySystemType SystemB);
 
     UFUNCTION(BlueprintCallable, Category = "Gameplay Architecture")
-    void SetGameplayLayerActive(EEng_GameplayLayer Layer, bool bActive);
+    void RegisterSystemDependency(EGameplaySystemType System, EGameplaySystemType Dependency);
 
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void OptimizeGameplayPerformance();
+    // Real-time monitoring
+    UFUNCTION(BlueprintCallable, Category = "Gameplay Architecture")
+    void StartArchitectureMonitoring();
 
-    UFUNCTION(BlueprintCallable, Category = "Debug")
-    void LogGameplayStatus();
+    UFUNCTION(BlueprintCallable, Category = "Gameplay Architecture")
+    void StopArchitectureMonitoring();
+
+    UFUNCTION(BlueprintCallable, Category = "Gameplay Architecture")
+    FString GetArchitectureReport();
 
 protected:
-    UPROPERTY(BlueprintReadOnly, Category = "Configuration")
-    FEng_GameplayConfig GameplayConfig;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
+    TArray<FEng_GameplayRequirement> GameplayRequirements;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
-    FEng_GameplayMetrics CurrentMetrics;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
+    FEng_CharacterArchitecture CharacterArch;
 
-    UPROPERTY(BlueprintReadOnly, Category = "State")
-    TMap<EEng_GameplayLayer, bool> LayerActiveStates;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
+    FEng_WorldArchitecture WorldArch;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float LastOptimizationTime;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
+    bool bMonitoringActive;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
+    float LastValidationTime;
 
 private:
-    void UpdateMetrics();
-    void CheckPerformanceThresholds();
-    void ValidateSystemIntegrity();
-    bool IsPerformanceOptimal() const;
-};
+    void InitializeDefaultRequirements();
+    void ValidateCurrentImplementation();
+    bool CheckCharacterMovement();
+    bool CheckWorldState();
+    bool CheckDinosaurPresence();
+    void LogArchitectureStatus(const FString& Message);
 
-UCLASS(BlueprintType, Blueprintable, ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UEng_GameplayArchitectComponent : public UActorComponent
-{
-    GENERATED_BODY()
-
-public:
-    UEng_GameplayArchitectComponent();
-
-protected:
-    virtual void BeginPlay() override;
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
-
-public:
-    UFUNCTION(BlueprintCallable, Category = "Gameplay Architecture")
-    void RegisterWithArchitect();
-
-    UFUNCTION(BlueprintCallable, Category = "Gameplay Architecture")
-    void UnregisterFromArchitect();
-
-    UFUNCTION(BlueprintCallable, Category = "Gameplay Architecture")
-    bool IsArchitectureValid() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    float GetComponentPerformanceScore() const;
-
-protected:
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
-    EEng_GameplayLayer AssignedLayer;
-
-    UPROPERTY(BlueprintReadOnly, Category = "State")
-    bool bIsRegistered;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float PerformanceScore;
-
-private:
-    void CalculatePerformanceScore();
-    void ValidateComponentState();
+    FTimerHandle MonitoringTimerHandle;
 };
