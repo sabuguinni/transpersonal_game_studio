@@ -3,66 +3,93 @@
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
 #include "Engine/PointLight.h"
-#include "Engine/SpotLight.h"
-#include "Engine/RectLight.h"
-#include "Components/PointLightComponent.h"
-#include "Components/SpotLightComponent.h"
-#include "Components/RectLightComponent.h"
 #include "Engine/ExponentialHeightFog.h"
+#include "Components/PointLightComponent.h"
 #include "Components/ExponentialHeightFogComponent.h"
 #include "Light_CaveLightingSystem.generated.h"
 
 UENUM(BlueprintType)
-enum class ELight_CaveType : uint8
+enum class ELight_CaveLightType : uint8
 {
-    ShallowCave     UMETA(DisplayName = "Shallow Cave"),
-    DeepCavern      UMETA(DisplayName = "Deep Cavern"),
-    TunnelSystem    UMETA(DisplayName = "Tunnel System"),
-    UndergroundLake UMETA(DisplayName = "Underground Lake")
+    FireLight       UMETA(DisplayName = "Fire Light"),
+    EntranceLight   UMETA(DisplayName = "Entrance Light"),
+    AmbientLight    UMETA(DisplayName = "Ambient Light"),
+    TorchLight      UMETA(DisplayName = "Torch Light")
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FLight_CaveLightingConfig
+struct TRANSPERSONALGAME_API FLight_CaveLightConfig
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cave Lighting")
-    float EntranceLightIntensity = 800.0f;
+    ELight_CaveLightType LightType = ELight_CaveLightType::FireLight;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cave Lighting")
-    float FirePitIntensity = 1200.0f;
+    float Intensity = 800.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cave Lighting")
-    float AmbientIntensity = 200.0f;
+    FLinearColor LightColor = FLinearColor(1.0f, 0.7f, 0.47f, 1.0f);
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cave Lighting")
-    FLinearColor EntranceColor = FLinearColor(1.0f, 0.78f, 0.59f, 1.0f);
+    float AttenuationRadius = 500.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cave Lighting")
-    FLinearColor FirePitColor = FLinearColor(1.0f, 0.47f, 0.24f, 1.0f);
+    bool bUseFlickering = true;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cave Lighting")
-    FLinearColor AmbientColor = FLinearColor(0.71f, 0.71f, 0.86f, 1.0f);
+    float FlickerIntensity = 0.2f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cave Lighting")
-    float FogDensity = 0.02f;
+    float FlickerSpeed = 2.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cave Lighting")
-    float FogHeightFalloff = 0.2f;
-
-    FLight_CaveLightingConfig()
+    FLight_CaveLightConfig()
     {
-        EntranceLightIntensity = 800.0f;
-        FirePitIntensity = 1200.0f;
-        AmbientIntensity = 200.0f;
-        EntranceColor = FLinearColor(1.0f, 0.78f, 0.59f, 1.0f);
-        FirePitColor = FLinearColor(1.0f, 0.47f, 0.24f, 1.0f);
-        AmbientColor = FLinearColor(0.71f, 0.71f, 0.86f, 1.0f);
-        FogDensity = 0.02f;
-        FogHeightFalloff = 0.2f;
+        LightType = ELight_CaveLightType::FireLight;
+        Intensity = 800.0f;
+        LightColor = FLinearColor(1.0f, 0.7f, 0.47f, 1.0f);
+        AttenuationRadius = 500.0f;
+        bUseFlickering = true;
+        FlickerIntensity = 0.2f;
+        FlickerSpeed = 2.0f;
     }
 };
 
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FLight_CaveAtmosphereConfig
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cave Atmosphere")
+    float FogDensity = 0.02f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cave Atmosphere")
+    float FogHeightFalloff = 0.2f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cave Atmosphere")
+    FLinearColor FogColor = FLinearColor(0.47f, 0.39f, 0.31f, 1.0f);
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cave Atmosphere")
+    bool bEnableVolumetricFog = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cave Atmosphere")
+    float VolumetricFogScatteringDistribution = 0.2f;
+
+    FLight_CaveAtmosphereConfig()
+    {
+        FogDensity = 0.02f;
+        FogHeightFalloff = 0.2f;
+        FogColor = FLinearColor(0.47f, 0.39f, 0.31f, 1.0f);
+        bEnableVolumetricFog = true;
+        VolumetricFogScatteringDistribution = 0.2f;
+    }
+};
+
+/**
+ * Cave Lighting System Component
+ * Manages dynamic lighting for cave interiors including firelight, entrance lighting,
+ * atmospheric effects, and lighting transitions for prehistoric cave environments.
+ */
 UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
 class TRANSPERSONALGAME_API ULight_CaveLightingSystem : public UActorComponent
 {
@@ -73,83 +100,86 @@ public:
 
 protected:
     virtual void BeginPlay() override;
-
-public:
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    // Cave lighting configuration
+public:
+    // === CAVE LIGHTING CONFIGURATION ===
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cave Lighting")
-    ELight_CaveType CaveType = ELight_CaveType::ShallowCave;
+    FLight_CaveLightConfig FireLightConfig;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cave Lighting")
-    FLight_CaveLightingConfig LightingConfig;
+    FLight_CaveLightConfig EntranceLightConfig;
 
-    // Light actor references
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Cave Lighting")
-    APointLight* EntranceLight;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cave Lighting")
+    FLight_CaveAtmosphereConfig AtmosphereConfig;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Cave Lighting")
-    ASpotLight* FirePitLight;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cave Lighting")
+    bool bAutoSetupLighting = true;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cave Lighting")
+    float LightingTransitionRadius = 1000.0f;
+
+    // === LIGHTING ACTORS ===
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Cave Lighting")
-    ARectLight* AmbientLight;
+    TArray<APointLight*> CaveLights;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Cave Lighting")
     AExponentialHeightFog* CaveFog;
 
-    // Cave lighting setup functions
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Cave Lighting")
+    APointLight* MainFireLight;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Cave Lighting")
+    APointLight* EntranceLight;
+
+    // === LIGHTING METHODS ===
     UFUNCTION(BlueprintCallable, Category = "Cave Lighting")
     void SetupCaveLighting();
 
     UFUNCTION(BlueprintCallable, Category = "Cave Lighting")
-    void CreateEntranceLighting(const FVector& Location);
+    void CreateFireLight(const FVector& Location, const FLight_CaveLightConfig& Config);
 
     UFUNCTION(BlueprintCallable, Category = "Cave Lighting")
-    void CreateFirePitLighting(const FVector& Location, const FRotator& Rotation);
+    void CreateEntranceLight(const FVector& Location);
 
     UFUNCTION(BlueprintCallable, Category = "Cave Lighting")
-    void CreateAmbientLighting(const FVector& Location);
+    void CreateCaveAtmosphere(const FVector& Location);
 
     UFUNCTION(BlueprintCallable, Category = "Cave Lighting")
-    void SetupAtmosphericFog(const FVector& Location);
-
-    // Dynamic lighting control
-    UFUNCTION(BlueprintCallable, Category = "Cave Lighting")
-    void SetFirePitActive(bool bActive);
+    void UpdateFlickeringLights(float DeltaTime);
 
     UFUNCTION(BlueprintCallable, Category = "Cave Lighting")
-    void UpdateLightingForTimeOfDay(float TimeOfDay);
+    void SetLightingIntensity(float IntensityMultiplier);
 
     UFUNCTION(BlueprintCallable, Category = "Cave Lighting")
-    void SetCaveType(ELight_CaveType NewCaveType);
-
-    // Lighting intensity modulation
-    UFUNCTION(BlueprintCallable, Category = "Cave Lighting")
-    void ModulateFirePitIntensity(float IntensityMultiplier);
+    void EnableCaveLighting(bool bEnable);
 
     UFUNCTION(BlueprintCallable, Category = "Cave Lighting")
-    void SetAmbientLightingIntensity(float NewIntensity);
-
-    // Cave atmosphere effects
-    UFUNCTION(BlueprintCallable, Category = "Cave Lighting")
-    void UpdateFogDensity(float NewDensity);
+    void TransitionToInteriorLighting(float TransitionAlpha);
 
     UFUNCTION(BlueprintCallable, Category = "Cave Lighting")
-    void SetCaveMoodLighting(const FLinearColor& MoodColor, float Intensity);
+    void TransitionToExteriorLighting(float TransitionAlpha);
 
-protected:
-    // Internal lighting management
-    void ConfigureLightForCaveType();
-    void UpdateLightPositions();
-    void ValidateLightActors();
+    // === ATMOSPHERIC EFFECTS ===
+    UFUNCTION(BlueprintCallable, Category = "Cave Atmosphere")
+    void UpdateCaveAtmosphere();
+
+    UFUNCTION(BlueprintCallable, Category = "Cave Atmosphere")
+    void SetFogDensity(float Density);
+
+    UFUNCTION(BlueprintCallable, Category = "Cave Atmosphere")
+    void SetFogColor(const FLinearColor& Color);
 
 private:
-    // Fire flicker simulation
-    float FireFlickerTimer = 0.0f;
-    float BaseFireIntensity = 1200.0f;
-    bool bFireFlickerEnabled = true;
+    // === INTERNAL STATE ===
+    float FlickerTime;
+    float BaseIntensityMultiplier;
+    bool bIsPlayerInCave;
+    float CurrentTransitionAlpha;
 
-    // Cave depth calculation
-    float CalculateCaveDepthFactor() const;
-    void ApplyDepthBasedLighting(float DepthFactor);
+    // === INTERNAL METHODS ===
+    void InitializeLightingSystem();
+    void CleanupLightingActors();
+    float CalculateFlickerValue(float Time, float Speed, float Intensity) const;
+    void UpdateLightTransition(float DeltaTime);
 };
