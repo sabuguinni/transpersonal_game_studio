@@ -46,18 +46,22 @@ struct FQA_TestCase
 };
 
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UQA_TestFramework : public UActorComponent
+class TRANSPERSONALGAME_API UQA_TestFramework : public UObject
 {
     GENERATED_BODY()
 
 public:
     UQA_TestFramework();
 
+    // Core Testing Functions
     UFUNCTION(BlueprintCallable, Category = "QA Testing")
     void RunAllTests();
 
     UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    void RunVFXTests();
+    void RunVFXSystemTests();
+
+    UFUNCTION(BlueprintCallable, Category = "QA Testing")
+    void RunCoreSystemTests();
 
     UFUNCTION(BlueprintCallable, Category = "QA Testing")
     void RunPerformanceTests();
@@ -65,47 +69,48 @@ public:
     UFUNCTION(BlueprintCallable, Category = "QA Testing")
     void RunIntegrationTests();
 
+    // Test Result Management
     UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    void RunCompilationTests();
+    void AddTestResult(const FQA_TestCase& TestCase);
 
     UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    FQA_TestCase ValidateActorSpawning();
+    TArray<FQA_TestCase> GetTestResults() const;
 
     UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    FQA_TestCase ValidateVFXSystems();
-
-    UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    FQA_TestCase ValidateAudioSystems();
-
-    UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    FQA_TestCase ValidateCharacterMovement();
-
-    UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    FQA_TestCase ValidateDinosaurAI();
+    void ClearTestResults();
 
     UFUNCTION(BlueprintCallable, Category = "QA Testing")
     void GenerateTestReport();
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Results")
-    TArray<FQA_TestCase> TestResults;
+    // Validation Functions
+    UFUNCTION(BlueprintCallable, Category = "QA Validation")
+    bool ValidateActorCount(int32 ExpectedMinimum);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Config")
-    bool bAutoRunOnBeginPlay;
+    UFUNCTION(BlueprintCallable, Category = "QA Validation")
+    bool ValidateClassLoading(const FString& ClassName);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Config")
-    bool bGenerateDetailedLogs;
+    UFUNCTION(BlueprintCallable, Category = "QA Validation")
+    bool ValidateNiagaraSystem(const FString& SystemPath);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Config")
-    int32 MaxTestActors;
+    UFUNCTION(BlueprintCallable, Category = "QA Validation")
+    bool ValidateMapIntegrity();
 
 protected:
-    virtual void BeginPlay() override;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "QA Testing")
+    TArray<FQA_TestCase> TestResults;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Settings")
+    bool bAutoRunOnBeginPlay;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Settings")
+    bool bLogDetailedResults;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Settings")
+    float TestTimeout;
 
 private:
+    // Internal test execution
+    FQA_TestCase ExecuteTest(const FString& TestName, TFunction<bool()> TestFunction);
     void LogTestResult(const FQA_TestCase& TestCase);
-    FQA_TestCase CreateTestCase(const FString& Name, const FString& Description);
-    void CleanupTestActors();
-
-    UPROPERTY()
-    TArray<AActor*> SpawnedTestActors;
+    double GetCurrentTime() const;
 };
