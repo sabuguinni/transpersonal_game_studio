@@ -1,120 +1,128 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Components/ActorComponent.h"
+#include "Engine/World.h"
+#include "GameFramework/Actor.h"
 #include "NavigationSystem.h"
 #include "NavMesh/RecastNavMesh.h"
-#include "AI/NavigationSystemBase.h"
+#include "MassEntityTypes.h"
+#include "MassCommonTypes.h"
 #include "SharedTypes.h"
 #include "Crowd_PathfindingManager.generated.h"
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FCrowd_PathNode
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding")
+    FVector Position;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding")
+    float Weight;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding")
+    int32 NodeID;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding")
+    TArray<int32> ConnectedNodes;
+
+    FCrowd_PathNode()
+    {
+        Position = FVector::ZeroVector;
+        Weight = 1.0f;
+        NodeID = -1;
+    }
+};
 
 USTRUCT(BlueprintType)
 struct TRANSPERSONALGAME_API FCrowd_PathRequest
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FVector StartLocation = FVector::ZeroVector;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding")
+    FVector StartLocation;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FVector EndLocation = FVector::ZeroVector;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding")
+    FVector TargetLocation;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    int32 EntityID = -1;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding")
+    FMassEntityHandle EntityHandle;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float Priority = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding")
+    float Priority;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    bool bIsComplete = false;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding")
+    bool bIsValid;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    TArray<FVector> PathPoints;
+    FCrowd_PathRequest()
+    {
+        StartLocation = FVector::ZeroVector;
+        TargetLocation = FVector::ZeroVector;
+        Priority = 1.0f;
+        bIsValid = false;
+    }
 };
 
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FCrowd_FlowField
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FVector2D GridOrigin = FVector2D::ZeroVector;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float CellSize = 100.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    int32 GridWidth = 100;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    int32 GridHeight = 100;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    TArray<FVector2D> FlowDirections;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FVector TargetLocation = FVector::ZeroVector;
-};
-
-UCLASS(BlueprintType, ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UCrowd_PathfindingManager : public UActorComponent
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API ACrowd_PathfindingManager : public AActor
 {
     GENERATED_BODY()
 
 public:
-    UCrowd_PathfindingManager();
+    ACrowd_PathfindingManager();
 
 protected:
     virtual void BeginPlay() override;
+    virtual void Tick(float DeltaTime) override;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding Network")
+    TArray<FCrowd_PathNode> PathNodes;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding Network")
+    float MaxPathDistance;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding Network")
+    int32 MaxSimultaneousRequests;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float PathfindingBudgetPerFrame;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    int32 MaxPathNodesPerRequest;
+
+private:
+    UPROPERTY()
+    TArray<FCrowd_PathRequest> PendingRequests;
+
+    UPROPERTY()
+    UNavigationSystemV1* NavSystem;
+
+    UPROPERTY()
+    ARecastNavMesh* NavMesh;
 
 public:
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+    UFUNCTION(BlueprintCallable, Category = "Pathfinding")
+    bool RequestPath(const FVector& Start, const FVector& Target, FMassEntityHandle EntityHandle, float Priority = 1.0f);
 
-    UFUNCTION(BlueprintCallable, Category = "Crowd Pathfinding")
-    void RequestPath(const FCrowd_PathRequest& PathRequest);
+    UFUNCTION(BlueprintCallable, Category = "Pathfinding")
+    TArray<FVector> GetPath(const FVector& Start, const FVector& Target);
 
-    UFUNCTION(BlueprintCallable, Category = "Crowd Pathfinding")
-    void GenerateFlowField(FVector TargetLocation, float Radius);
+    UFUNCTION(BlueprintCallable, Category = "Pathfinding Network")
+    void BuildPathNetwork();
 
-    UFUNCTION(BlueprintCallable, Category = "Crowd Pathfinding")
-    FVector2D GetFlowDirection(FVector WorldLocation) const;
+    UFUNCTION(BlueprintCallable, Category = "Pathfinding Network")
+    void AddPathNode(const FVector& Position, float Weight = 1.0f);
 
-    UFUNCTION(BlueprintCallable, Category = "Crowd Pathfinding")
-    void ProcessPathRequests(int32 MaxRequestsPerFrame = 10);
+    UFUNCTION(BlueprintCallable, Category = "Pathfinding Network")
+    void ConnectNodes(int32 NodeA, int32 NodeB);
 
-    UFUNCTION(BlueprintCallable, Category = "Crowd Pathfinding")
-    bool IsLocationNavigable(FVector Location) const;
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void ProcessPathRequests(float DeltaTime);
 
-    UFUNCTION(BlueprintCallable, Category = "Crowd Pathfinding")
-    void ClearAllPaths();
+    UFUNCTION(BlueprintCallable, Category = "Debug")
+    void DrawPathNetwork();
 
-    UFUNCTION(BlueprintCallable, Category = "Crowd Pathfinding")
-    int32 GetPendingRequestCount() const;
-
-protected:
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding Config")
-    int32 MaxPathRequestsPerFrame = 10;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding Config")
-    float PathfindingTimeout = 5.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flow Field")
-    FCrowd_FlowField CurrentFlowField;
-
-    UPROPERTY()
-    TArray<FCrowd_PathRequest> PendingPathRequests;
-
-    UPROPERTY()
-    TArray<FCrowd_PathRequest> CompletedPathRequests;
-
-    UPROPERTY()
-    TObjectPtr<UNavigationSystemV1> NavigationSystem;
-
-    void InitializeNavigationSystem();
-    void UpdateFlowField();
-    bool FindPathToLocation(const FVector& Start, const FVector& End, TArray<FVector>& OutPath);
-    void CalculateFlowFieldDirections();
-    FVector2D WorldToGrid(FVector WorldLocation) const;
-    FVector GridToWorld(FVector2D GridCoord) const;
-    bool IsValidGridCoordinate(int32 X, int32 Y) const;
+    UFUNCTION(BlueprintCallable, Category = "Debug")
+    void DebugDrawPath(const TArray<FVector>& Path);
 };
