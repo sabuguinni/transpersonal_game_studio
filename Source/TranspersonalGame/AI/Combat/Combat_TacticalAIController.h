@@ -2,137 +2,193 @@
 
 #include "CoreMinimal.h"
 #include "AIController.h"
-#include "BehaviorTree/BehaviorTreeComponent.h"
-#include "BehaviorTree/BlackboardComponent.h"
-#include "Perception/AIPerceptionComponent.h"
-#include "Perception/AISightConfig.h"
-#include "Perception/AIHearingConfig.h"
+#include "Engine/World.h"
+#include "Engine/Engine.h"
+#include "Components/ActorComponent.h"
+#include "GameFramework/Actor.h"
+#include "SharedTypes.h"
 #include "Combat_TacticalAIController.generated.h"
 
 UENUM(BlueprintType)
 enum class ECombat_TacticalState : uint8
 {
-	Patrol		UMETA(DisplayName = "Patrol"),
-	Hunt		UMETA(DisplayName = "Hunt"),
-	Attack		UMETA(DisplayName = "Attack"),
-	Retreat		UMETA(DisplayName = "Retreat"),
-	Flank		UMETA(DisplayName = "Flank"),
-	Ambush		UMETA(DisplayName = "Ambush")
+    Patrol      UMETA(DisplayName = "Patrol"),
+    Alert       UMETA(DisplayName = "Alert"),
+    Hunt        UMETA(DisplayName = "Hunt"),
+    Attack      UMETA(DisplayName = "Attack"),
+    Retreat     UMETA(DisplayName = "Retreat"),
+    Regroup     UMETA(DisplayName = "Regroup"),
+    Flank       UMETA(DisplayName = "Flank"),
+    Ambush      UMETA(DisplayName = "Ambush")
+};
+
+UENUM(BlueprintType)
+enum class ECombat_FormationType : uint8
+{
+    Single      UMETA(DisplayName = "Single"),
+    Pack        UMETA(DisplayName = "Pack"),
+    Swarm       UMETA(DisplayName = "Swarm"),
+    Pincer      UMETA(DisplayName = "Pincer"),
+    Surround    UMETA(DisplayName = "Surround")
 };
 
 USTRUCT(BlueprintType)
-struct FCombat_TacticalFormation
+struct TRANSPERSONALGAME_API FCombat_TacticalData
 {
-	GENERATED_BODY()
+    GENERATED_BODY()
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Formation")
-	FVector LeaderPosition;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+    ECombat_TacticalState CurrentState = ECombat_TacticalState::Patrol;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Formation")
-	TArray<FVector> MemberPositions;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+    ECombat_FormationType FormationType = ECombat_FormationType::Single;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Formation")
-	float FormationRadius;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+    float ThreatLevel = 0.0f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Formation")
-	bool bMaintainFormation;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+    float AttackRange = 200.0f;
 
-	FCombat_TacticalFormation()
-	{
-		LeaderPosition = FVector::ZeroVector;
-		FormationRadius = 500.0f;
-		bMaintainFormation = true;
-	}
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+    float FlankingDistance = 300.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+    int32 PackSize = 1;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+    bool bIsPackLeader = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+    bool bCanCallReinforcements = true;
+
+    FCombat_TacticalData()
+    {
+        CurrentState = ECombat_TacticalState::Patrol;
+        FormationType = ECombat_FormationType::Single;
+        ThreatLevel = 0.0f;
+        AttackRange = 200.0f;
+        FlankingDistance = 300.0f;
+        PackSize = 1;
+        bIsPackLeader = false;
+        bCanCallReinforcements = true;
+    }
 };
 
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API ACombat_TacticalAIController : public AAIController
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FCombat_DamageZone
 {
-	GENERATED_BODY()
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Damage")
+    FVector Center = FVector::ZeroVector;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Damage")
+    float Radius = 100.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Damage")
+    float BaseDamage = 20.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Damage")
+    FString DamageType = TEXT("Physical");
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Damage")
+    bool bIsActive = true;
+
+    FCombat_DamageZone()
+    {
+        Center = FVector::ZeroVector;
+        Radius = 100.0f;
+        BaseDamage = 20.0f;
+        DamageType = TEXT("Physical");
+        bIsActive = true;
+    }
+};
+
+UCLASS(Blueprintable, BlueprintType)
+class TRANSPERSONALGAME_API UCombat_TacticalAIController : public UAIController
+{
+    GENERATED_BODY()
 
 public:
-	ACombat_TacticalAIController();
+    UCombat_TacticalAIController();
 
 protected:
-	virtual void BeginPlay() override;
-	virtual void Tick(float DeltaTime) override;
-
-	// AI Perception
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI")
-	class UAIPerceptionComponent* AIPerceptionComponent;
-
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI")
-	class UAISightConfig* SightConfig;
-
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI")
-	class UAIHearingConfig* HearingConfig;
-
-	// Tactical State
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
-	ECombat_TacticalState CurrentTacticalState;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
-	FCombat_TacticalFormation CurrentFormation;
-
-	// Combat Parameters
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat", meta = (ClampMin = "0.0", ClampMax = "2000.0"))
-	float AttackRange;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat", meta = (ClampMin = "0.0", ClampMax = "3000.0"))
-	float DetectionRange;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat", meta = (ClampMin = "0.0", ClampMax = "100.0"))
-	float Aggression;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat", meta = (ClampMin = "0.0", ClampMax = "100.0"))
-	float Intelligence;
-
-	// Pack Behavior
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pack")
-	TArray<ACombat_TacticalAIController*> PackMembers;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pack")
-	ACombat_TacticalAIController* PackLeader;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pack")
-	bool bIsPackLeader;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pack")
-	float PackCohesion;
+    virtual void BeginPlay() override;
+    virtual void Tick(float DeltaTime) override;
 
 public:
-	// Tactical Functions
-	UFUNCTION(BlueprintCallable, Category = "Combat")
-	void SetTacticalState(ECombat_TacticalState NewState);
+    // Tactical AI Properties
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
+    FCombat_TacticalData TacticalData;
 
-	UFUNCTION(BlueprintCallable, Category = "Combat")
-	void InitiateAttack(AActor* Target);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
+    TArray<FCombat_DamageZone> DamageZones;
 
-	UFUNCTION(BlueprintCallable, Category = "Combat")
-	void ExecuteFlankingManeuver(AActor* Target);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
+    TArray<AActor*> PackMembers;
 
-	UFUNCTION(BlueprintCallable, Category = "Combat")
-	void SetupAmbush(FVector AmbushLocation);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
+    AActor* CurrentTarget;
 
-	// Pack Functions
-	UFUNCTION(BlueprintCallable, Category = "Pack")
-	void JoinPack(ACombat_TacticalAIController* Leader);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
+    TArray<FVector> TacticalWaypoints;
 
-	UFUNCTION(BlueprintCallable, Category = "Pack")
-	void FormPack(const TArray<ACombat_TacticalAIController*>& Members);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
+    float StateTransitionCooldown = 2.0f;
 
-	UFUNCTION(BlueprintCallable, Category = "Pack")
-	void UpdateFormation(const FCombat_TacticalFormation& NewFormation);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
+    float LastStateChange = 0.0f;
 
-	// Perception Callbacks
-	UFUNCTION()
-	void OnPerceptionUpdated(const TArray<AActor*>& UpdatedActors);
+    // Combat Decision Making
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    void EvaluateThreatLevel();
 
-protected:
-	// Internal Functions
-	void UpdateTacticalBehavior(float DeltaTime);
-	void ProcessPackCommunication();
-	FVector CalculateFlankingPosition(AActor* Target);
-	bool IsInAttackRange(AActor* Target) const;
-	void BroadcastTacticalState();
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    void UpdateTacticalState();
+
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    void ExecuteFormationMovement();
+
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    void ProcessCombatDecision();
+
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    bool CanTransitionToState(ECombat_TacticalState NewState);
+
+    // Pack Coordination
+    UFUNCTION(BlueprintCallable, Category = "Pack AI")
+    void CoordinatePackAttack();
+
+    UFUNCTION(BlueprintCallable, Category = "Pack AI")
+    void AssignPackRoles();
+
+    UFUNCTION(BlueprintCallable, Category = "Pack AI")
+    void CallReinforcements();
+
+    // Damage System
+    UFUNCTION(BlueprintCallable, Category = "Damage")
+    void ConfigureDamageZones();
+
+    UFUNCTION(BlueprintCallable, Category = "Damage")
+    bool IsTargetInDamageZone(AActor* Target, FCombat_DamageZone& Zone);
+
+    UFUNCTION(BlueprintCallable, Category = "Damage")
+    float CalculateDamageToTarget(AActor* Target);
+
+    // Tactical Movement
+    UFUNCTION(BlueprintCallable, Category = "Movement")
+    FVector GetFlankingPosition(AActor* Target);
+
+    UFUNCTION(BlueprintCallable, Category = "Movement")
+    FVector GetAmbushPosition(AActor* Target);
+
+    UFUNCTION(BlueprintCallable, Category = "Movement")
+    void MoveToTacticalPosition(FVector Position);
+
+private:
+    float LastThreatEvaluation = 0.0f;
+    float ThreatEvaluationInterval = 1.0f;
+    
+    bool bIsExecutingManeuver = false;
+    FVector CurrentTacticalTarget = FVector::ZeroVector;
 };
