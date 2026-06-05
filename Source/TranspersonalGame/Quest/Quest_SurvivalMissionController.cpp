@@ -1,295 +1,393 @@
 #include "Quest_SurvivalMissionController.h"
+#include "Components/StaticMeshComponent.h"
+#include "Components/SphereComponent.h"
+#include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "TimerManager.h"
 #include "Kismet/GameplayStatics.h"
-#include "Engine/Engine.h"
 
-UQuest_SurvivalMissionController::UQuest_SurvivalMissionController()
+AQuest_SurvivalMissionController::AQuest_SurvivalMissionController()
 {
-    PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 1.0f;
-    
-    MissionCheckInterval = 5.0f;
-    MaxActiveMissions = 3;
-    bAutoGenerateMissions = true;
-    PlayerHealthThreshold = 30.0f;
-    PlayerHungerThreshold = 20.0f;
-    PlayerThirstThreshold = 15.0f;
+    PrimaryActorTick.bCanEverTick = true;
+
+    // Create root component
+    RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootComponent"));
+
+    // Create mission marker mesh
+    MissionMarkerMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("MissionMarkerMesh"));
+    MissionMarkerMesh->SetupAttachment(RootComponent);
+    MissionMarkerMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+
+    // Create interaction sphere
+    InteractionSphere = CreateDefaultSubobject<USphereComponent>(TEXT("InteractionSphere"));
+    InteractionSphere->SetupAttachment(RootComponent);
+    InteractionSphere->SetSphereRadius(200.0f);
+    InteractionSphere->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+    InteractionSphere->SetCollisionResponseToAllChannels(ECR_Ignore);
+    InteractionSphere->SetCollisionResponseToChannel(ECC_Pawn, ECR_Overlap);
+
+    // Initialize default mission
+    CurrentMission.MissionType = EQuest_SurvivalMissionType::Hunt_Raptor;
+    CurrentMission.Difficulty = EQuest_MissionDifficulty::Beginner;
+    CurrentMission.MissionTitle = TEXT("First Hunt");
+    CurrentMission.MissionDescription = TEXT("Hunt a raptor to prove your survival skills");
+    CurrentMission.RequiredQuantity = 1;
+    CurrentMission.TimeLimit = 600.0f; // 10 minutes
+    CurrentMission.ExperienceReward = 150;
 }
 
-void UQuest_SurvivalMissionController::BeginPlay()
+void AQuest_SurvivalMissionController::BeginPlay()
 {
     Super::BeginPlay();
-    
-    if (bAutoGenerateMissions)
+
+    InitializeMissionDatabase();
+    SetupMissionMarker();
+
+    // Bind overlap events
+    if (InteractionSphere)
     {
-        GetWorld()->GetTimerManager().SetTimer(
-            MissionCheckTimer,
-            this,
-            &UQuest_SurvivalMissionController::CheckPlayerSurvivalStatus,
-            MissionCheckInterval,
-            true
-        );
+        InteractionSphere->OnComponentBeginOverlap.AddDynamic(this, &AQuest_SurvivalMissionController::OnInteractionSphereBeginOverlap);
+    }
+
+    UE_LOG(LogTemp, Warning, TEXT("SurvivalMissionController initialized with %d available missions"), AvailableMissions.Num());
+}
+
+void AQuest_SurvivalMissionController::Tick(float DeltaTime)
+{
+    Super::Tick(DeltaTime);
+
+    if (bMissionActive)
+    {
+        float ElapsedTime = GetWorld()->GetTimeSeconds() - MissionStartTime;
+        
+        // Check for mission timeout
+        if (ElapsedTime >= CurrentMission.TimeLimit)
+        {
+            FailMission();
+        }
+
+        // Update visual indicators
+        UpdateMissionMarkerVisual();
     }
 }
 
-void UQuest_SurvivalMissionController::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void AQuest_SurvivalMissionController::StartMission(EQuest_SurvivalMissionType MissionType, EQuest_MissionDifficulty Difficulty)
 {
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-    
-    CleanupExpiredMissions();
+    if (bMissionActive)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Cannot start new mission - mission already active"));
+        return;
+    }
+
+    CurrentMission = CreateMissionData(MissionType, Difficulty);
+    bMissionActive = true;
+    MissionStartTime = GetWorld()->GetTimeSeconds();
+    CurrentProgress = 0;
+
+    UE_LOG(LogTemp, Warning, TEXT("Mission Started: %s"), *CurrentMission.MissionTitle);
+
+    // Notify game systems
+    if (GEngine)
+    {
+        GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Green, 
+            FString::Printf(TEXT("Mission Started: %s"), *CurrentMission.MissionTitle));
+    }
+
+    UpdateMissionMarkerVisual();
 }
 
-void UQuest_SurvivalMissionController::CreateSurvivalMission(EQuest_SurvivalMissionType MissionType, EQuest_SurvivalUrgency Urgency, FVector Location)
+void AQuest_SurvivalMissionController::CompleteMission()
 {
-    if (ActiveMissions.Num() >= MaxActiveMissions)
+    if (!bMissionActive)
     {
         return;
     }
+
+    bMissionActive = false;
     
-    FQuest_SurvivalMissionData NewMission;
-    NewMission.MissionType = MissionType;
-    NewMission.UrgencyLevel = Urgency;
-    NewMission.TargetLocation = Location;
-    NewMission.MissionDescription = GetMissionDescription(MissionType);
-    
-    switch (Urgency)
+    UE_LOG(LogTemp, Warning, TEXT("Mission Completed: %s - Reward: %d XP"), 
+        *CurrentMission.MissionTitle, CurrentMission.ExperienceReward);
+
+    if (GEngine)
     {
-        case EQuest_SurvivalUrgency::Low:
-            NewMission.TimeLimit = 600.0f;
-            NewMission.CompletionReward = 5.0f;
-            break;
-        case EQuest_SurvivalUrgency::Medium:
-            NewMission.TimeLimit = 300.0f;
-            NewMission.CompletionReward = 10.0f;
-            break;
-        case EQuest_SurvivalUrgency::High:
-            NewMission.TimeLimit = 180.0f;
-            NewMission.CompletionReward = 20.0f;
-            break;
-        case EQuest_SurvivalUrgency::Critical:
-            NewMission.TimeLimit = 120.0f;
-            NewMission.CompletionReward = 35.0f;
-            break;
-        case EQuest_SurvivalUrgency::LifeThreatening:
-            NewMission.TimeLimit = 60.0f;
-            NewMission.CompletionReward = 50.0f;
-            break;
+        GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Yellow, 
+            FString::Printf(TEXT("Mission Complete! +%d XP"), CurrentMission.ExperienceReward));
     }
-    
-    switch (MissionType)
+
+    // Auto-generate next mission after completion
+    FTimerHandle TimerHandle;
+    GetWorld()->GetTimerManager().SetTimer(TimerHandle, [this]()
     {
-        case EQuest_SurvivalMissionType::GatherWater:
-            NewMission.RequiredQuantity = 3;
-            break;
-        case EQuest_SurvivalMissionType::HuntPrey:
-            NewMission.RequiredQuantity = 1;
-            break;
-        case EQuest_SurvivalMissionType::FindFood:
-            NewMission.RequiredQuantity = 5;
-            break;
-        case EQuest_SurvivalMissionType::CraftTool:
-            NewMission.RequiredQuantity = 1;
-            break;
-        default:
-            NewMission.RequiredQuantity = 1;
-            break;
-    }
-    
-    ActiveMissions.Add(NewMission);
-    
-    UE_LOG(LogTemp, Warning, TEXT("Survival Mission Created: %s (Urgency: %d)"), 
-           *NewMission.MissionDescription, (int32)NewMission.UrgencyLevel);
+        GenerateRandomMission();
+    }, 3.0f, false);
+
+    UpdateMissionMarkerVisual();
 }
 
-void UQuest_SurvivalMissionController::CompleteMission(int32 MissionIndex)
+void AQuest_SurvivalMissionController::FailMission()
 {
-    if (ActiveMissions.IsValidIndex(MissionIndex))
-    {
-        FQuest_SurvivalMissionData CompletedMission = ActiveMissions[MissionIndex];
-        CompletedMission.bIsCompleted = true;
-        
-        CompletedMissions.Add(CompletedMission);
-        ActiveMissions.RemoveAt(MissionIndex);
-        
-        UE_LOG(LogTemp, Warning, TEXT("Survival Mission Completed: %s (Reward: %.1f)"), 
-               *CompletedMission.MissionDescription, CompletedMission.CompletionReward);
-    }
-}
-
-bool UQuest_SurvivalMissionController::CheckMissionCompletion(const FQuest_SurvivalMissionData& Mission)
-{
-    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
-    if (!PlayerPawn)
-    {
-        return false;
-    }
-    
-    float DistanceToTarget = FVector::Dist(PlayerPawn->GetActorLocation(), Mission.TargetLocation);
-    
-    switch (Mission.MissionType)
-    {
-        case EQuest_SurvivalMissionType::GatherWater:
-        case EQuest_SurvivalMissionType::FindFood:
-            return DistanceToTarget < 200.0f;
-            
-        case EQuest_SurvivalMissionType::BuildShelter:
-        case EQuest_SurvivalMissionType::DefendCamp:
-            return DistanceToTarget < 500.0f;
-            
-        case EQuest_SurvivalMissionType::ExploreTerritory:
-            return DistanceToTarget < 100.0f;
-            
-        case EQuest_SurvivalMissionType::EscapePredator:
-            return DistanceToTarget > 1000.0f;
-            
-        default:
-            return DistanceToTarget < 300.0f;
-    }
-}
-
-void UQuest_SurvivalMissionController::GenerateUrgentMissions()
-{
-    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
-    if (!PlayerPawn)
+    if (!bMissionActive)
     {
         return;
     }
+
+    bMissionActive = false;
     
-    FVector PlayerLocation = PlayerPawn->GetActorLocation();
-    
-    // Generate water mission if player is thirsty
-    CreateSurvivalMission(
-        EQuest_SurvivalMissionType::GatherWater,
-        EQuest_SurvivalUrgency::Critical,
-        FindNearestResourceLocation(EQuest_SurvivalMissionType::GatherWater)
-    );
-    
-    // Generate food mission if player is hungry
-    CreateSurvivalMission(
-        EQuest_SurvivalMissionType::FindFood,
-        EQuest_SurvivalUrgency::High,
-        FindNearestResourceLocation(EQuest_SurvivalMissionType::FindFood)
-    );
-    
-    // Generate shelter mission for night survival
-    CreateSurvivalMission(
-        EQuest_SurvivalMissionType::BuildShelter,
-        EQuest_SurvivalUrgency::Medium,
-        PlayerLocation + FVector(FMath::RandRange(-500, 500), FMath::RandRange(-500, 500), 0)
-    );
+    UE_LOG(LogTemp, Warning, TEXT("Mission Failed: %s"), *CurrentMission.MissionTitle);
+
+    if (GEngine)
+    {
+        GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red, 
+            FString::Printf(TEXT("Mission Failed: %s"), *CurrentMission.MissionTitle));
+    }
+
+    // Generate easier mission after failure
+    EQuest_MissionDifficulty NewDifficulty = CurrentMission.Difficulty;
+    if (NewDifficulty > EQuest_MissionDifficulty::Beginner)
+    {
+        NewDifficulty = static_cast<EQuest_MissionDifficulty>(static_cast<uint8>(NewDifficulty) - 1);
+    }
+
+    FTimerHandle TimerHandle;
+    GetWorld()->GetTimerManager().SetTimer(TimerHandle, [this, NewDifficulty]()
+    {
+        GenerateDifficultyBasedMission(NewDifficulty);
+    }, 5.0f, false);
+
+    UpdateMissionMarkerVisual();
 }
 
-FString UQuest_SurvivalMissionController::GetMissionDescription(EQuest_SurvivalMissionType MissionType)
+void AQuest_SurvivalMissionController::UpdateProgress(int32 ProgressAmount)
 {
-    switch (MissionType)
+    if (!bMissionActive)
     {
-        case EQuest_SurvivalMissionType::GatherWater:
-            return TEXT("Find clean water source to refill containers");
-        case EQuest_SurvivalMissionType::HuntPrey:
-            return TEXT("Hunt small game for meat and materials");
-        case EQuest_SurvivalMissionType::BuildShelter:
-            return TEXT("Construct shelter for protection from elements");
-        case EQuest_SurvivalMissionType::EscapePredator:
-            return TEXT("Escape from dangerous predator territory");
-        case EQuest_SurvivalMissionType::FindFood:
-            return TEXT("Gather edible plants and fruits");
-        case EQuest_SurvivalMissionType::CraftTool:
-            return TEXT("Craft essential survival tool");
-        case EQuest_SurvivalMissionType::ExploreTerritory:
-            return TEXT("Scout new area for resources and dangers");
-        case EQuest_SurvivalMissionType::DefendCamp:
-            return TEXT("Protect camp from hostile creatures");
-        default:
-            return TEXT("Unknown survival mission");
+        return;
+    }
+
+    CurrentProgress += ProgressAmount;
+    
+    UE_LOG(LogTemp, Warning, TEXT("Mission Progress: %d/%d"), CurrentProgress, CurrentMission.RequiredQuantity);
+
+    if (IsMissionComplete())
+    {
+        CompleteMission();
     }
 }
 
-EQuest_SurvivalUrgency UQuest_SurvivalMissionController::CalculateUrgencyLevel(float PlayerHealth, float PlayerHunger, float PlayerThirst)
+bool AQuest_SurvivalMissionController::IsMissionComplete() const
 {
-    if (PlayerHealth < 20.0f || PlayerThirst < 10.0f)
+    return bMissionActive && (CurrentProgress >= CurrentMission.RequiredQuantity);
+}
+
+float AQuest_SurvivalMissionController::GetRemainingTime() const
+{
+    if (!bMissionActive)
     {
-        return EQuest_SurvivalUrgency::LifeThreatening;
+        return 0.0f;
     }
-    else if (PlayerHealth < 40.0f || PlayerThirst < 20.0f || PlayerHunger < 15.0f)
+
+    float ElapsedTime = GetWorld()->GetTimeSeconds() - MissionStartTime;
+    return FMath::Max(0.0f, CurrentMission.TimeLimit - ElapsedTime);
+}
+
+FString AQuest_SurvivalMissionController::GetMissionStatusText() const
+{
+    if (!bMissionActive)
     {
-        return EQuest_SurvivalUrgency::Critical;
+        return TEXT("No Active Mission");
     }
-    else if (PlayerHealth < 60.0f || PlayerThirst < 40.0f || PlayerHunger < 30.0f)
+
+    float RemainingTime = GetRemainingTime();
+    int32 Minutes = FMath::FloorToInt(RemainingTime / 60.0f);
+    int32 Seconds = FMath::FloorToInt(RemainingTime) % 60;
+
+    return FString::Printf(TEXT("%s - Progress: %d/%d - Time: %02d:%02d"), 
+        *CurrentMission.MissionTitle, CurrentProgress, CurrentMission.RequiredQuantity, Minutes, Seconds);
+}
+
+void AQuest_SurvivalMissionController::GenerateRandomMission()
+{
+    if (AvailableMissions.Num() == 0)
     {
-        return EQuest_SurvivalUrgency::High;
+        return;
     }
-    else if (PlayerHealth < 80.0f || PlayerThirst < 60.0f || PlayerHunger < 50.0f)
+
+    int32 RandomIndex = FMath::RandRange(0, AvailableMissions.Num() - 1);
+    FQuest_SurvivalMissionData SelectedMission = AvailableMissions[RandomIndex];
+
+    StartMission(SelectedMission.MissionType, SelectedMission.Difficulty);
+}
+
+void AQuest_SurvivalMissionController::GenerateDifficultyBasedMission(EQuest_MissionDifficulty TargetDifficulty)
+{
+    TArray<FQuest_SurvivalMissionData> FilteredMissions;
+    
+    for (const FQuest_SurvivalMissionData& Mission : AvailableMissions)
     {
-        return EQuest_SurvivalUrgency::Medium;
+        if (Mission.Difficulty == TargetDifficulty)
+        {
+            FilteredMissions.Add(Mission);
+        }
+    }
+
+    if (FilteredMissions.Num() > 0)
+    {
+        int32 RandomIndex = FMath::RandRange(0, FilteredMissions.Num() - 1);
+        FQuest_SurvivalMissionData SelectedMission = FilteredMissions[RandomIndex];
+        StartMission(SelectedMission.MissionType, SelectedMission.Difficulty);
     }
     else
     {
-        return EQuest_SurvivalUrgency::Low;
+        GenerateRandomMission();
     }
 }
 
-void UQuest_SurvivalMissionController::CheckPlayerSurvivalStatus()
+void AQuest_SurvivalMissionController::OnInteractionSphereBeginOverlap(UPrimitiveComponent* OverlappedComponent, 
+    AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, 
+    bool bFromSweep, const FHitResult& SweepResult)
 {
-    if (ActiveMissions.Num() >= MaxActiveMissions)
+    if (!OtherActor || OtherActor == this)
     {
         return;
     }
-    
-    // Simulate player stats check (would integrate with actual player stats system)
-    float SimulatedHealth = FMath::RandRange(20.0f, 100.0f);
-    float SimulatedHunger = FMath::RandRange(10.0f, 100.0f);
-    float SimulatedThirst = FMath::RandRange(5.0f, 100.0f);
-    
-    EQuest_SurvivalUrgency CurrentUrgency = CalculateUrgencyLevel(SimulatedHealth, SimulatedHunger, SimulatedThirst);
-    
-    if (CurrentUrgency >= EQuest_SurvivalUrgency::High)
-    {
-        GenerateUrgentMissions();
-    }
-}
 
-void UQuest_SurvivalMissionController::CleanupExpiredMissions()
-{
-    for (int32 i = ActiveMissions.Num() - 1; i >= 0; i--)
+    // Check if it's the player character
+    if (OtherActor->IsA<APawn>())
     {
-        if (ActiveMissions[i].TimeLimit <= 0.0f)
+        if (!bMissionActive)
         {
-            UE_LOG(LogTemp, Warning, TEXT("Survival Mission Expired: %s"), *ActiveMissions[i].MissionDescription);
-            ActiveMissions.RemoveAt(i);
+            GenerateRandomMission();
         }
         else
         {
-            ActiveMissions[i].TimeLimit -= GetWorld()->GetDeltaSeconds();
+            if (GEngine)
+            {
+                GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Cyan, GetMissionStatusText());
+            }
         }
     }
 }
 
-FVector UQuest_SurvivalMissionController::FindNearestResourceLocation(EQuest_SurvivalMissionType ResourceType)
+void AQuest_SurvivalMissionController::InitializeMissionDatabase()
 {
-    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
-    if (!PlayerPawn)
-    {
-        return FVector::ZeroVector;
-    }
+    AvailableMissions.Empty();
+
+    // Hunt missions
+    AvailableMissions.Add(CreateMissionData(EQuest_SurvivalMissionType::Hunt_Raptor, EQuest_MissionDifficulty::Beginner));
+    AvailableMissions.Add(CreateMissionData(EQuest_SurvivalMissionType::Hunt_Raptor, EQuest_MissionDifficulty::Intermediate));
     
-    FVector PlayerLocation = PlayerPawn->GetActorLocation();
+    // Gather missions
+    AvailableMissions.Add(CreateMissionData(EQuest_SurvivalMissionType::Gather_Resources, EQuest_MissionDifficulty::Beginner));
+    AvailableMissions.Add(CreateMissionData(EQuest_SurvivalMissionType::Gather_Resources, EQuest_MissionDifficulty::Novice));
     
-    switch (ResourceType)
+    // Build missions
+    AvailableMissions.Add(CreateMissionData(EQuest_SurvivalMissionType::Build_Shelter, EQuest_MissionDifficulty::Novice));
+    AvailableMissions.Add(CreateMissionData(EQuest_SurvivalMissionType::Build_Shelter, EQuest_MissionDifficulty::Advanced));
+    
+    // Exploration missions
+    AvailableMissions.Add(CreateMissionData(EQuest_SurvivalMissionType::Explore_Cave, EQuest_MissionDifficulty::Intermediate));
+    AvailableMissions.Add(CreateMissionData(EQuest_SurvivalMissionType::Find_Water, EQuest_MissionDifficulty::Beginner));
+
+    UE_LOG(LogTemp, Warning, TEXT("Initialized %d survival missions"), AvailableMissions.Num());
+}
+
+void AQuest_SurvivalMissionController::SetupMissionMarker()
+{
+    if (MissionMarkerMesh)
     {
-        case EQuest_SurvivalMissionType::GatherWater:
-            // Find nearest water source (simulate)
-            return PlayerLocation + FVector(FMath::RandRange(-1000, 1000), FMath::RandRange(-1000, 1000), -50);
-            
-        case EQuest_SurvivalMissionType::FindFood:
-            // Find nearest food source (simulate)
-            return PlayerLocation + FVector(FMath::RandRange(-800, 800), FMath::RandRange(-800, 800), 0);
-            
-        case EQuest_SurvivalMissionType::HuntPrey:
-            // Find nearest hunting ground (simulate)
-            return PlayerLocation + FVector(FMath::RandRange(-1500, 1500), FMath::RandRange(-1500, 1500), 0);
-            
-        default:
-            return PlayerLocation + FVector(FMath::RandRange(-500, 500), FMath::RandRange(-500, 500), 0);
+        // Set default scale and visibility
+        MissionMarkerMesh->SetWorldScale3D(FVector(2.0f, 2.0f, 3.0f));
+        MissionMarkerMesh->SetVisibility(true);
     }
+}
+
+void AQuest_SurvivalMissionController::UpdateMissionMarkerVisual()
+{
+    if (!MissionMarkerMesh)
+    {
+        return;
+    }
+
+    if (bMissionActive)
+    {
+        // Pulsing effect for active missions
+        float PulseValue = FMath::Sin(GetWorld()->GetTimeSeconds() * 3.0f) * 0.3f + 1.0f;
+        MissionMarkerMesh->SetWorldScale3D(FVector(2.0f * PulseValue, 2.0f * PulseValue, 3.0f));
+    }
+    else
+    {
+        // Static scale for inactive missions
+        MissionMarkerMesh->SetWorldScale3D(FVector(2.0f, 2.0f, 3.0f));
+    }
+}
+
+FQuest_SurvivalMissionData AQuest_SurvivalMissionController::CreateMissionData(EQuest_SurvivalMissionType Type, EQuest_MissionDifficulty Difficulty)
+{
+    FQuest_SurvivalMissionData MissionData;
+    MissionData.MissionType = Type;
+    MissionData.Difficulty = Difficulty;
+
+    // Configure mission based on type and difficulty
+    switch (Type)
+    {
+        case EQuest_SurvivalMissionType::Hunt_Raptor:
+            MissionData.MissionTitle = TEXT("Raptor Hunt");
+            MissionData.MissionDescription = TEXT("Hunt and kill raptors to secure the area");
+            MissionData.RequiredQuantity = (Difficulty == EQuest_MissionDifficulty::Beginner) ? 1 : 3;
+            MissionData.TimeLimit = 600.0f + (static_cast<int32>(Difficulty) * 300.0f);
+            MissionData.ExperienceReward = 100 + (static_cast<int32>(Difficulty) * 50);
+            break;
+
+        case EQuest_SurvivalMissionType::Gather_Resources:
+            MissionData.MissionTitle = TEXT("Resource Gathering");
+            MissionData.MissionDescription = TEXT("Collect essential survival resources");
+            MissionData.RequiredQuantity = 5 + (static_cast<int32>(Difficulty) * 3);
+            MissionData.TimeLimit = 300.0f + (static_cast<int32>(Difficulty) * 120.0f);
+            MissionData.ExperienceReward = 75 + (static_cast<int32>(Difficulty) * 25);
+            MissionData.RequiredItems.Add(TEXT("Stone"));
+            MissionData.RequiredItems.Add(TEXT("Wood"));
+            break;
+
+        case EQuest_SurvivalMissionType::Build_Shelter:
+            MissionData.MissionTitle = TEXT("Shelter Construction");
+            MissionData.MissionDescription = TEXT("Build a shelter to protect from the elements");
+            MissionData.RequiredQuantity = 1;
+            MissionData.TimeLimit = 900.0f + (static_cast<int32>(Difficulty) * 300.0f);
+            MissionData.ExperienceReward = 200 + (static_cast<int32>(Difficulty) * 100);
+            break;
+
+        case EQuest_SurvivalMissionType::Find_Water:
+            MissionData.MissionTitle = TEXT("Water Source");
+            MissionData.MissionDescription = TEXT("Locate a clean water source for survival");
+            MissionData.RequiredQuantity = 1;
+            MissionData.TimeLimit = 450.0f;
+            MissionData.ExperienceReward = 125;
+            break;
+
+        case EQuest_SurvivalMissionType::Craft_Tools:
+            MissionData.MissionTitle = TEXT("Tool Crafting");
+            MissionData.MissionDescription = TEXT("Craft essential tools for survival");
+            MissionData.RequiredQuantity = 2 + static_cast<int32>(Difficulty);
+            MissionData.TimeLimit = 600.0f + (static_cast<int32>(Difficulty) * 180.0f);
+            MissionData.ExperienceReward = 150 + (static_cast<int32>(Difficulty) * 50);
+            break;
+
+        case EQuest_SurvivalMissionType::Escape_Predator:
+            MissionData.MissionTitle = TEXT("Predator Escape");
+            MissionData.MissionDescription = TEXT("Survive and escape from dangerous predators");
+            MissionData.RequiredQuantity = 1;
+            MissionData.TimeLimit = 180.0f;
+            MissionData.ExperienceReward = 300;
+            break;
+
+        case EQuest_SurvivalMissionType::Explore_Cave:
+            MissionData.MissionTitle = TEXT("Cave Exploration");
+            MissionData.MissionDescription = TEXT("Explore dangerous caves for valuable resources");
+            MissionData.RequiredQuantity = 1;
+            MissionData.TimeLimit = 720.0f + (static_cast<int32>(Difficulty) * 240.0f);
+            MissionData.ExperienceReward = 250 + (static_cast<int32>(Difficulty) * 75);
+            break;
+    }
+
+    return MissionData;
 }
