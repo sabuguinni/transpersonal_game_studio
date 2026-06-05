@@ -1,377 +1,406 @@
 #include "Build_FinalIntegrationOrchestrator.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "Engine/GameInstance.h"
-#include "EngineUtils.h"
-#include "GameFramework/PlayerStart.h"
-#include "GameFramework/GameModeBase.h"
-#include "Components/StaticMeshComponent.h"
-#include "Kismet/GameplayStatics.h"
+#include "GameFramework/Actor.h"
+#include "Components/ActorComponent.h"
+#include "UObject/UObjectIterator.h"
+#include "Engine/Blueprint.h"
+#include "AssetRegistry/AssetRegistryModule.h"
+#include "Misc/DateTime.h"
 
-// Static member definitions
-const TMap<FString, FVector> UBuild_FinalIntegrationOrchestrator::BiomeCoordinates = {
-    {TEXT("Savana"), FVector(0.0f, 0.0f, 0.0f)},
-    {TEXT("Floresta"), FVector(-45000.0f, 40000.0f, 0.0f)},
-    {TEXT("Pantano"), FVector(-50000.0f, -45000.0f, 0.0f)},
-    {TEXT("Deserto"), FVector(55000.0f, 0.0f, 0.0f)},
-    {TEXT("Montanha"), FVector(40000.0f, 50000.0f, 0.0f)}
-};
-
-const TArray<FString> UBuild_FinalIntegrationOrchestrator::CriticalModules = {
-    TEXT("TranspersonalCharacter"),
-    TEXT("TranspersonalGameState"),
-    TEXT("PCGWorldGenerator"),
-    TEXT("FoliageManager"),
-    TEXT("CrowdSimulationManager"),
-    TEXT("ProceduralWorldManager"),
-    TEXT("BuildIntegrationManager")
-};
+DEFINE_LOG_CATEGORY_STATIC(LogBuildFinalIntegration, Log, All);
 
 UBuild_FinalIntegrationOrchestrator::UBuild_FinalIntegrationOrchestrator()
 {
-    bLastValidationPassed = false;
-    LastValidationTime = FDateTime::Now();
+    PrimaryComponentTick.bCanEverTick = true;
+    PrimaryComponentTick.TickInterval = 5.0f;
+    
+    // Initialize integration state
+    IntegrationState = EBuild_IntegrationState::Initializing;
+    TotalSystemsToValidate = 0;
+    ValidatedSystems = 0;
+    CriticalErrorCount = 0;
+    WarningCount = 0;
+    
+    // Set default validation thresholds
+    MaxCriticalErrors = 5;
+    MaxWarnings = 20;
+    ValidationTimeoutSeconds = 300.0f;
+    
+    bIsIntegrationComplete = false;
+    bHasCriticalFailures = false;
+    
+    LastValidationTime = FDateTime::MinValue();
+    IntegrationStartTime = FDateTime::MinValue();
 }
 
-void UBuild_FinalIntegrationOrchestrator::Initialize(FSubsystemCollectionBase& Collection)
+void UBuild_FinalIntegrationOrchestrator::BeginPlay()
 {
-    Super::Initialize(Collection);
+    Super::BeginPlay();
     
-    UE_LOG(LogTemp, Warning, TEXT("Build_FinalIntegrationOrchestrator initialized"));
+    UE_LOG(LogBuildFinalIntegration, Log, TEXT("Build_FinalIntegrationOrchestrator: Starting final integration validation"));
     
-    // Perform initial health check
-    LastHealthReport = PerformSystemHealthCheck();
+    // Initialize integration process
+    IntegrationStartTime = FDateTime::Now();
+    IntegrationState = EBuild_IntegrationState::ValidatingCore;
+    
+    // Start validation process
+    StartFinalIntegrationValidation();
 }
 
-void UBuild_FinalIntegrationOrchestrator::Deinitialize()
+void UBuild_FinalIntegrationOrchestrator::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
-    UE_LOG(LogTemp, Warning, TEXT("Build_FinalIntegrationOrchestrator shutting down"));
-    Super::Deinitialize();
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+    
+    // Update integration process
+    UpdateIntegrationProcess();
+    
+    // Check for timeout
+    CheckValidationTimeout();
 }
 
-FBuild_SystemHealthReport UBuild_FinalIntegrationOrchestrator::PerformSystemHealthCheck()
+void UBuild_FinalIntegrationOrchestrator::StartFinalIntegrationValidation()
 {
-    FBuild_SystemHealthReport Report;
+    UE_LOG(LogBuildFinalIntegration, Log, TEXT("Starting final integration validation process"));
     
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        UE_LOG(LogTemp, Error, TEXT("No valid world for health check"));
-        return Report;
-    }
-
-    // Count total actors
-    int32 ActorCount = 0;
-    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
-    {
-        ActorCount++;
-    }
-    Report.TotalActors = ActorCount;
-
-    // Check biome population
-    BiomeStatus = CheckBiomePopulation();
-    Report.PopulatedBiomes = 0;
-    for (const FBuild_BiomePopulation& Biome : BiomeStatus)
-    {
-        if (Biome.bIsPopulated)
-        {
-            Report.PopulatedBiomes++;
-        }
-    }
-
-    // Test module compilation
-    Report.bCompilationSuccess = TestModuleCompilation(Report.WorkingModules, Report.FailedModules);
-
-    // Calculate integration score
-    Report.IntegrationScore = CalculateIntegrationScore();
+    // Clear previous results
+    ValidationResults.Empty();
+    SystemValidationStatus.Empty();
+    CriticalErrorCount = 0;
+    WarningCount = 0;
+    ValidatedSystems = 0;
     
-    // Update timestamp
-    Report.LastValidationTime = FDateTime::Now().ToString();
-    LastValidationTime = FDateTime::Now();
-
-    // Store report
-    LastHealthReport = Report;
+    // Identify all systems to validate
+    IdentifySystemsToValidate();
     
-    UE_LOG(LogTemp, Warning, TEXT("System Health Check: %d actors, %d biomes, score %d/100"), 
-           Report.TotalActors, Report.PopulatedBiomes, Report.IntegrationScore);
-
-    return Report;
+    // Begin core system validation
+    ValidateCoreGameSystems();
 }
 
-bool UBuild_FinalIntegrationOrchestrator::ValidateCrossSystemIntegrations()
+void UBuild_FinalIntegrationOrchestrator::IdentifySystemsToValidate()
 {
-    bool bAllValid = true;
-
-    // Validate player systems
-    if (!ValidatePlayerSystems())
-    {
-        UE_LOG(LogTemp, Error, TEXT("Player system validation failed"));
-        bAllValid = false;
-    }
-
-    // Validate dinosaur systems
-    if (!ValidateDinosaurSystems())
-    {
-        UE_LOG(LogTemp, Error, TEXT("Dinosaur system validation failed"));
-        bAllValid = false;
-    }
-
-    // Validate environment systems
-    if (!ValidateEnvironmentSystems())
-    {
-        UE_LOG(LogTemp, Error, TEXT("Environment system validation failed"));
-        bAllValid = false;
-    }
-
-    // Validate physics systems
-    if (!ValidatePhysicsSystems())
-    {
-        UE_LOG(LogTemp, Error, TEXT("Physics system validation failed"));
-        bAllValid = false;
-    }
-
-    bLastValidationPassed = bAllValid;
-    return bAllValid;
+    SystemsToValidate.Empty();
+    
+    // Core game systems
+    SystemsToValidate.Add(TEXT("TranspersonalGameState"));
+    SystemsToValidate.Add(TEXT("TranspersonalCharacter"));
+    SystemsToValidate.Add(TEXT("TranspersonalGameMode"));
+    
+    // World generation systems
+    SystemsToValidate.Add(TEXT("PCGWorldGenerator"));
+    SystemsToValidate.Add(TEXT("FoliageManager"));
+    SystemsToValidate.Add(TEXT("ProceduralWorldManager"));
+    
+    // Character and animation systems
+    SystemsToValidate.Add(TEXT("PrimitiveAnimationController"));
+    SystemsToValidate.Add(TEXT("CharacterMovementEnhancer"));
+    
+    // AI and behavior systems
+    SystemsToValidate.Add(TEXT("NPCBehaviorManager"));
+    SystemsToValidate.Add(TEXT("CombatAIController"));
+    SystemsToValidate.Add(TEXT("CrowdSimulationManager"));
+    
+    // Quest and narrative systems
+    SystemsToValidate.Add(TEXT("QuestManager"));
+    SystemsToValidate.Add(TEXT("NarrativeManager"));
+    SystemsToValidate.Add(TEXT("DialogueSystem"));
+    
+    // Audio and VFX systems
+    SystemsToValidate.Add(TEXT("AudioManager"));
+    SystemsToValidate.Add(TEXT("VFXManager"));
+    SystemsToValidate.Add(TEXT("NiagaraVFXLibrary"));
+    
+    // QA and testing systems
+    SystemsToValidate.Add(TEXT("QA_VFXIntegrationValidator"));
+    SystemsToValidate.Add(TEXT("QA_CriticalSystemMonitor"));
+    SystemsToValidate.Add(TEXT("QA_TestFramework"));
+    
+    // Build and integration systems
+    SystemsToValidate.Add(TEXT("BuildIntegrationManager"));
+    SystemsToValidate.Add(TEXT("BuildValidationActor"));
+    
+    TotalSystemsToValidate = SystemsToValidate.Num();
+    
+    UE_LOG(LogBuildFinalIntegration, Log, TEXT("Identified %d systems to validate"), TotalSystemsToValidate);
 }
 
-TArray<FBuild_BiomePopulation> UBuild_FinalIntegrationOrchestrator::CheckBiomePopulation()
+void UBuild_FinalIntegrationOrchestrator::ValidateCoreGameSystems()
 {
-    TArray<FBuild_BiomePopulation> BiomeData;
+    UE_LOG(LogBuildFinalIntegration, Log, TEXT("Validating core game systems"));
     
-    UWorld* World = GetWorld();
-    if (!World)
+    // Validate each core system
+    for (const FString& SystemName : SystemsToValidate)
     {
-        return BiomeData;
+        ValidateIndividualSystem(SystemName);
     }
+    
+    // Update integration state
+    IntegrationState = EBuild_IntegrationState::ValidatingIntegration;
+}
 
-    // Initialize biome data
-    for (const auto& BiomePair : BiomeCoordinates)
+void UBuild_FinalIntegrationOrchestrator::ValidateIndividualSystem(const FString& SystemName)
+{
+    FBuild_SystemValidationResult Result;
+    Result.SystemName = SystemName;
+    Result.ValidationTime = FDateTime::Now();
+    Result.bIsValid = false;
+    Result.ErrorCount = 0;
+    Result.WarningCount = 0;
+    
+    // Try to load the class
+    FString ClassPath = FString::Printf(TEXT("/Script/TranspersonalGame.%s"), *SystemName);
+    UClass* SystemClass = LoadClass<UObject>(nullptr, *ClassPath);
+    
+    if (SystemClass)
     {
-        FBuild_BiomePopulation BiomeInfo;
-        BiomeInfo.BiomeName = BiomePair.Key;
-        BiomeInfo.CenterLocation = BiomePair.Value;
-        BiomeInfo.ActorCount = 0;
-        BiomeInfo.bIsPopulated = false;
-        BiomeData.Add(BiomeInfo);
-    }
-
-    // Count actors in each biome
-    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
-    {
-        AActor* Actor = *ActorItr;
-        if (!Actor)
-        {
-            continue;
-        }
-
-        FVector ActorLocation = Actor->GetActorLocation();
+        Result.bIsValid = true;
+        Result.ValidationMessage = FString::Printf(TEXT("System %s loaded successfully"), *SystemName);
         
-        // Check which biome this actor belongs to
-        for (int32 i = 0; i < BiomeData.Num(); i++)
+        // Additional validation for specific system types
+        if (SystemClass->IsChildOf<AActor>())
         {
-            FVector BiomeCenter = BiomeData[i].CenterLocation;
-            float Distance = FVector::Dist2D(ActorLocation, BiomeCenter);
+            // Validate actor-based systems
+            ValidateActorSystem(SystemClass, Result);
+        }
+        else if (SystemClass->IsChildOf<UActorComponent>())
+        {
+            // Validate component-based systems
+            ValidateComponentSystem(SystemClass, Result);
+        }
+        else if (SystemClass->IsChildOf<UGameInstanceSubsystem>() || SystemClass->IsChildOf<UWorldSubsystem>())
+        {
+            // Validate subsystem-based systems
+            ValidateSubsystemSystem(SystemClass, Result);
+        }
+        
+        ValidatedSystems++;
+    }
+    else
+    {
+        Result.bIsValid = false;
+        Result.ErrorCount = 1;
+        Result.ValidationMessage = FString::Printf(TEXT("Failed to load system %s"), *SystemName);
+        CriticalErrorCount++;
+    }
+    
+    // Store result
+    ValidationResults.Add(Result);
+    SystemValidationStatus.Add(SystemName, Result.bIsValid);
+    
+    UE_LOG(LogBuildFinalIntegration, Log, TEXT("System %s validation: %s"), 
+           *SystemName, Result.bIsValid ? TEXT("PASS") : TEXT("FAIL"));
+}
+
+void UBuild_FinalIntegrationOrchestrator::ValidateActorSystem(UClass* ActorClass, FBuild_SystemValidationResult& Result)
+{
+    // Check if actor can be spawned
+    if (UWorld* World = GetWorld())
+    {
+        // Try to get default object
+        AActor* DefaultActor = Cast<AActor>(ActorClass->GetDefaultObject());
+        if (DefaultActor)
+        {
+            Result.ValidationMessage += TEXT(" - Actor CDO valid");
             
-            // Consider actors within 10km of biome center
-            if (Distance <= 10000.0f)
+            // Check for required components
+            TArray<UActorComponent*> Components = DefaultActor->GetRootComponent() ? 
+                DefaultActor->GetRootComponent()->GetAttachChildren() : TArray<UActorComponent*>();
+            
+            if (Components.Num() > 0)
             {
-                BiomeData[i].ActorCount++;
-                break;
+                Result.ValidationMessage += FString::Printf(TEXT(" - %d components found"), Components.Num());
             }
-        }
-    }
-
-    // Mark biomes as populated if they have enough actors
-    for (int32 i = 0; i < BiomeData.Num(); i++)
-    {
-        BiomeData[i].bIsPopulated = (BiomeData[i].ActorCount >= 10);
-    }
-
-    return BiomeData;
-}
-
-bool UBuild_FinalIntegrationOrchestrator::TestModuleCompilation(TArray<FString>& OutWorkingModules, TArray<FString>& OutFailedModules)
-{
-    OutWorkingModules.Empty();
-    OutFailedModules.Empty();
-
-    bool bAllModulesWorking = true;
-
-    for (const FString& ModuleName : CriticalModules)
-    {
-        // Try to find the class
-        FString ClassPath = FString::Printf(TEXT("/Script/TranspersonalGame.%s"), *ModuleName);
-        UClass* TestClass = FindObject<UClass>(ANY_PACKAGE, *ClassPath);
-        
-        if (TestClass)
-        {
-            OutWorkingModules.Add(ModuleName);
-            UE_LOG(LogTemp, Log, TEXT("Module %s: WORKING"), *ModuleName);
         }
         else
         {
-            OutFailedModules.Add(ModuleName);
-            UE_LOG(LogTemp, Error, TEXT("Module %s: FAILED"), *ModuleName);
-            bAllModulesWorking = false;
+            Result.WarningCount++;
+            Result.ValidationMessage += TEXT(" - Warning: Actor CDO invalid");
         }
     }
-
-    return bAllModulesWorking;
 }
 
-int32 UBuild_FinalIntegrationOrchestrator::CalculateIntegrationScore()
+void UBuild_FinalIntegrationOrchestrator::ValidateComponentSystem(UClass* ComponentClass, FBuild_SystemValidationResult& Result)
 {
-    int32 Score = 0;
-
-    // Base score from actor count (max 30 points)
-    Score += FMath::Min(30, LastHealthReport.TotalActors / 10);
-
-    // Biome population score (max 30 points)
-    Score += LastHealthReport.PopulatedBiomes * 6;
-
-    // Module compilation score (max 35 points)
-    if (LastHealthReport.bCompilationSuccess)
+    // Check component default object
+    UActorComponent* DefaultComponent = Cast<UActorComponent>(ComponentClass->GetDefaultObject());
+    if (DefaultComponent)
     {
-        Score += 35;
-    }
-    else
-    {
-        Score += (LastHealthReport.WorkingModules.Num() * 35) / CriticalModules.Num();
-    }
-
-    // Cross-system integration bonus (max 5 points)
-    if (bLastValidationPassed)
-    {
-        Score += 5;
-    }
-
-    return FMath::Clamp(Score, 0, 100);
-}
-
-bool UBuild_FinalIntegrationOrchestrator::SaveMapState()
-{
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        UE_LOG(LogTemp, Error, TEXT("Cannot save map: No valid world"));
-        return false;
-    }
-
-    // Use the safe map saving method
-    FString MapPath = TEXT("/Game/Maps/MinPlayableMap");
-    
-    // TODO: Implement safe map saving
-    // For now, just log the attempt
-    UE_LOG(LogTemp, Warning, TEXT("Map save requested for: %s"), *MapPath);
-    
-    return true;
-}
-
-bool UBuild_FinalIntegrationOrchestrator::PerformCompilationGate()
-{
-    UE_LOG(LogTemp, Warning, TEXT("=== COMPILATION GATE ==="));
-    
-    // Perform final health check
-    FBuild_SystemHealthReport FinalReport = PerformSystemHealthCheck();
-    
-    // Validate cross-system integrations
-    bool bIntegrationsValid = ValidateCrossSystemIntegrations();
-    
-    // Check minimum requirements
-    bool bPassesGate = true;
-    
-    if (FinalReport.TotalActors < 50)
-    {
-        UE_LOG(LogTemp, Error, TEXT("GATE FAIL: Insufficient actors (%d < 50)"), FinalReport.TotalActors);
-        bPassesGate = false;
-    }
-    
-    if (FinalReport.PopulatedBiomes < 2)
-    {
-        UE_LOG(LogTemp, Error, TEXT("GATE FAIL: Insufficient biomes (%d < 2)"), FinalReport.PopulatedBiomes);
-        bPassesGate = false;
-    }
-    
-    if (FinalReport.FailedModules.Num() > 2)
-    {
-        UE_LOG(LogTemp, Error, TEXT("GATE FAIL: Too many failed modules (%d > 2)"), FinalReport.FailedModules.Num());
-        bPassesGate = false;
-    }
-    
-    if (!bIntegrationsValid)
-    {
-        UE_LOG(LogTemp, Error, TEXT("GATE FAIL: Cross-system integration failures"));
-        bPassesGate = false;
-    }
-
-    if (bPassesGate)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("COMPILATION GATE: PASSED (Score: %d/100)"), FinalReport.IntegrationScore);
-    }
-    else
-    {
-        UE_LOG(LogTemp, Error, TEXT("COMPILATION GATE: FAILED (Score: %d/100)"), FinalReport.IntegrationScore);
-    }
-
-    return bPassesGate;
-}
-
-// Private validation helpers
-bool UBuild_FinalIntegrationOrchestrator::ValidatePlayerSystems()
-{
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        return false;
-    }
-
-    // Check for PlayerStart
-    bool bHasPlayerStart = false;
-    for (TActorIterator<APlayerStart> PlayerStartItr(World); PlayerStartItr; ++PlayerStartItr)
-    {
-        bHasPlayerStart = true;
-        break;
-    }
-
-    // Check for GameMode
-    AGameModeBase* GameMode = UGameplayStatics::GetGameMode(World);
-    bool bHasGameMode = (GameMode != nullptr);
-
-    return bHasPlayerStart && bHasGameMode;
-}
-
-bool UBuild_FinalIntegrationOrchestrator::ValidateDinosaurSystems()
-{
-    // TODO: Implement dinosaur system validation
-    // Check for dinosaur actors, AI components, etc.
-    return true;
-}
-
-bool UBuild_FinalIntegrationOrchestrator::ValidateEnvironmentSystems()
-{
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        return false;
-    }
-
-    // Check for environment actors (static meshes, foliage, etc.)
-    int32 EnvironmentActorCount = 0;
-    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
-    {
-        AActor* Actor = *ActorItr;
-        if (Actor && Actor->FindComponentByClass<UStaticMeshComponent>())
+        Result.ValidationMessage += TEXT(" - Component CDO valid");
+        
+        // Check if component can tick
+        if (DefaultComponent->PrimaryComponentTick.bCanEverTick)
         {
-            EnvironmentActorCount++;
+            Result.ValidationMessage += TEXT(" - Tick enabled");
         }
     }
-
-    return EnvironmentActorCount > 10;
+    else
+    {
+        Result.WarningCount++;
+        Result.ValidationMessage += TEXT(" - Warning: Component CDO invalid");
+    }
 }
 
-bool UBuild_FinalIntegrationOrchestrator::ValidatePhysicsSystems()
+void UBuild_FinalIntegrationOrchestrator::ValidateSubsystemSystem(UClass* SubsystemClass, FBuild_SystemValidationResult& Result)
 {
-    // TODO: Implement physics system validation
-    // Check for collision components, physics bodies, etc.
-    return true;
+    // Check subsystem default object
+    USubsystem* DefaultSubsystem = Cast<USubsystem>(SubsystemClass->GetDefaultObject());
+    if (DefaultSubsystem)
+    {
+        Result.ValidationMessage += TEXT(" - Subsystem CDO valid");
+        
+        // Try to get subsystem instance if world exists
+        if (UWorld* World = GetWorld())
+        {
+            if (SubsystemClass->IsChildOf<UWorldSubsystem>())
+            {
+                UWorldSubsystem* WorldSubsystem = World->GetSubsystem(SubsystemClass->StaticClass());
+                if (WorldSubsystem)
+                {
+                    Result.ValidationMessage += TEXT(" - World subsystem instance found");
+                }
+            }
+        }
+    }
+    else
+    {
+        Result.WarningCount++;
+        Result.ValidationMessage += TEXT(" - Warning: Subsystem CDO invalid");
+    }
+}
+
+void UBuild_FinalIntegrationOrchestrator::UpdateIntegrationProcess()
+{
+    // Update validation progress
+    float ValidationProgress = TotalSystemsToValidate > 0 ? 
+        (float)ValidatedSystems / (float)TotalSystemsToValidate : 0.0f;
+    
+    // Check if validation is complete
+    if (ValidationProgress >= 1.0f && IntegrationState == EBuild_IntegrationState::ValidatingIntegration)
+    {
+        CompleteIntegrationValidation();
+    }
+    
+    // Update warning count
+    WarningCount = 0;
+    for (const FBuild_SystemValidationResult& Result : ValidationResults)
+    {
+        WarningCount += Result.WarningCount;
+    }
+    
+    // Check for critical failures
+    bHasCriticalFailures = (CriticalErrorCount > MaxCriticalErrors) || (WarningCount > MaxWarnings);
+}
+
+void UBuild_FinalIntegrationOrchestrator::CompleteIntegrationValidation()
+{
+    UE_LOG(LogBuildFinalIntegration, Log, TEXT("Completing final integration validation"));
+    
+    IntegrationState = EBuild_IntegrationState::Complete;
+    bIsIntegrationComplete = true;
+    LastValidationTime = FDateTime::Now();
+    
+    // Generate final report
+    GenerateFinalIntegrationReport();
+    
+    // Broadcast completion
+    OnIntegrationComplete.Broadcast(bHasCriticalFailures);
+}
+
+void UBuild_FinalIntegrationOrchestrator::GenerateFinalIntegrationReport()
+{
+    FString Report = TEXT("=== FINAL INTEGRATION VALIDATION REPORT ===\n");
+    Report += FString::Printf(TEXT("Validation Time: %s\n"), *FDateTime::Now().ToString());
+    Report += FString::Printf(TEXT("Total Systems: %d\n"), TotalSystemsToValidate);
+    Report += FString::Printf(TEXT("Validated Systems: %d\n"), ValidatedSystems);
+    Report += FString::Printf(TEXT("Critical Errors: %d\n"), CriticalErrorCount);
+    Report += FString::Printf(TEXT("Warnings: %d\n"), WarningCount);
+    Report += FString::Printf(TEXT("Success Rate: %.1f%%\n"), 
+                             TotalSystemsToValidate > 0 ? (float)ValidatedSystems / TotalSystemsToValidate * 100.0f : 0.0f);
+    
+    Report += TEXT("\n=== SYSTEM VALIDATION DETAILS ===\n");
+    for (const FBuild_SystemValidationResult& Result : ValidationResults)
+    {
+        Report += FString::Printf(TEXT("%s: %s - %s\n"), 
+                                 *Result.SystemName,
+                                 Result.bIsValid ? TEXT("PASS") : TEXT("FAIL"),
+                                 *Result.ValidationMessage);
+    }
+    
+    Report += TEXT("\n=== INTEGRATION STATUS ===\n");
+    if (bHasCriticalFailures)
+    {
+        Report += TEXT("STATUS: CRITICAL FAILURES DETECTED\n");
+        Report += TEXT("ACTION REQUIRED: Fix critical errors before deployment\n");
+    }
+    else
+    {
+        Report += TEXT("STATUS: INTEGRATION SUCCESSFUL\n");
+        Report += TEXT("READY FOR: Next development cycle\n");
+    }
+    
+    FinalIntegrationReport = Report;
+    
+    UE_LOG(LogBuildFinalIntegration, Log, TEXT("Final Integration Report:\n%s"), *Report);
+}
+
+void UBuild_FinalIntegrationOrchestrator::CheckValidationTimeout()
+{
+    if (IntegrationStartTime != FDateTime::MinValue())
+    {
+        FTimespan ElapsedTime = FDateTime::Now() - IntegrationStartTime;
+        if (ElapsedTime.GetTotalSeconds() > ValidationTimeoutSeconds)
+        {
+            UE_LOG(LogBuildFinalIntegration, Warning, TEXT("Integration validation timeout reached"));
+            
+            IntegrationState = EBuild_IntegrationState::Failed;
+            bHasCriticalFailures = true;
+            
+            CompleteIntegrationValidation();
+        }
+    }
+}
+
+FString UBuild_FinalIntegrationOrchestrator::GetIntegrationStatusString() const
+{
+    switch (IntegrationState)
+    {
+        case EBuild_IntegrationState::Initializing:
+            return TEXT("Initializing");
+        case EBuild_IntegrationState::ValidatingCore:
+            return TEXT("Validating Core Systems");
+        case EBuild_IntegrationState::ValidatingIntegration:
+            return TEXT("Validating Integration");
+        case EBuild_IntegrationState::Complete:
+            return TEXT("Complete");
+        case EBuild_IntegrationState::Failed:
+            return TEXT("Failed");
+        default:
+            return TEXT("Unknown");
+    }
+}
+
+float UBuild_FinalIntegrationOrchestrator::GetValidationProgress() const
+{
+    return TotalSystemsToValidate > 0 ? (float)ValidatedSystems / (float)TotalSystemsToValidate : 0.0f;
+}
+
+bool UBuild_FinalIntegrationOrchestrator::IsSystemValidated(const FString& SystemName) const
+{
+    const bool* ValidationStatus = SystemValidationStatus.Find(SystemName);
+    return ValidationStatus ? *ValidationStatus : false;
+}
+
+TArray<FString> UBuild_FinalIntegrationOrchestrator::GetFailedSystems() const
+{
+    TArray<FString> FailedSystems;
+    
+    for (const auto& StatusPair : SystemValidationStatus)
+    {
+        if (!StatusPair.Value)
+        {
+            FailedSystems.Add(StatusPair.Key);
+        }
+    }
+    
+    return FailedSystems;
 }
