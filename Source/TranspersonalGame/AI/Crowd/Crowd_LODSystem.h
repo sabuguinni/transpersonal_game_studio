@@ -1,107 +1,161 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "UObject/NoExportTypes.h"
-#include "MassLODTypes.h"
+#include "Subsystems/WorldSubsystem.h"
 #include "MassEntityTypes.h"
+#include "MassCommonTypes.h"
+#include "Engine/World.h"
+#include "GameFramework/PlayerController.h"
 #include "SharedTypes.h"
 #include "Crowd_LODSystem.generated.h"
 
-/**
- * LOD (Level of Detail) system for crowd simulation
- * Manages performance by reducing detail for distant crowd entities
- */
+UENUM(BlueprintType)
+enum class ECrowd_LODLevel : uint8
+{
+    High        UMETA(DisplayName = "High Detail"),
+    Medium      UMETA(DisplayName = "Medium Detail"),
+    Low         UMETA(DisplayName = "Low Detail"),
+    Culled      UMETA(DisplayName = "Culled")
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FCrowd_LODSettings
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD Distances")
+    float HighDetailDistance;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD Distances")
+    float MediumDetailDistance;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD Distances")
+    float LowDetailDistance;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD Distances")
+    float CullDistance;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    int32 MaxHighDetailAgents;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    int32 MaxMediumDetailAgents;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float LODUpdateFrequency;
+
+    FCrowd_LODSettings()
+    {
+        HighDetailDistance = 500.0f;
+        MediumDetailDistance = 1500.0f;
+        LowDetailDistance = 3000.0f;
+        CullDistance = 5000.0f;
+        MaxHighDetailAgents = 100;
+        MaxMediumDetailAgents = 500;
+        LODUpdateFrequency = 0.1f; // 10 times per second
+    }
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FCrowd_EntityLOD
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Entity LOD")
+    FMassEntityHandle EntityHandle;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Entity LOD")
+    ECrowd_LODLevel CurrentLOD;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Entity LOD")
+    float DistanceToPlayer;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Entity LOD")
+    float LastUpdateTime;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Entity LOD")
+    bool bIsVisible;
+
+    FCrowd_EntityLOD()
+    {
+        CurrentLOD = ECrowd_LODLevel::Culled;
+        DistanceToPlayer = 0.0f;
+        LastUpdateTime = 0.0f;
+        bIsVisible = false;
+    }
+};
+
 UCLASS(BlueprintType)
-class TRANSPERSONALGAME_API UCrowd_LODSystem : public UObject
+class TRANSPERSONALGAME_API UCrowd_LODSystem : public UWorldSubsystem
 {
     GENERATED_BODY()
 
 public:
     UCrowd_LODSystem();
 
-    // Initialize the LOD system
-    UFUNCTION(BlueprintCallable, Category = "Crowd LOD")
-    void Initialize();
-
-    // Update LOD for all crowd entities based on distance from viewer
-    UFUNCTION(BlueprintCallable, Category = "Crowd LOD")
-    void UpdateLOD(const FVector& ViewerLocation);
-
-    // Get current LOD level for an entity
-    UFUNCTION(BlueprintCallable, Category = "Crowd LOD")
-    ECrowd_LODLevel GetEntityLOD(FMassEntityHandle Entity) const;
-
-    // Set LOD level for an entity
-    UFUNCTION(BlueprintCallable, Category = "Crowd LOD")
-    void SetEntityLOD(FMassEntityHandle Entity, ECrowd_LODLevel NewLOD);
-
-    // Get total number of entities per LOD level
-    UFUNCTION(BlueprintCallable, Category = "Crowd LOD")
-    void GetLODCounts(int32& LOD0Count, int32& LOD1Count, int32& LOD2Count, int32& LOD3Count) const;
+    // USubsystem interface
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
+    virtual void Tick(float DeltaTime) override;
+    virtual bool ShouldCreateSubsystem(UObject* Outer) const override;
 
 protected:
-    // Calculate LOD level based on distance
-    ECrowd_LODLevel CalculateLODFromDistance(float Distance) const;
-
-    // Apply LOD settings to entity
-    void ApplyLODToEntity(FMassEntityHandle Entity, ECrowd_LODLevel LODLevel);
-
-    // Update entity visibility based on LOD
-    void UpdateEntityVisibility(FMassEntityHandle Entity, ECrowd_LODLevel LODLevel);
-
-    // Update entity update frequency based on LOD
-    void UpdateEntityUpdateFrequency(FMassEntityHandle Entity, ECrowd_LODLevel LODLevel);
-
-public:
-    // LOD distance thresholds
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD Settings")
-    float LOD0Distance = 500.0f; // High detail - full simulation
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD Settings")
-    float LOD1Distance = 1500.0f; // Medium detail - reduced update rate
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD Settings")
-    float LOD2Distance = 3000.0f; // Low detail - basic movement only
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD Settings")
-    float LOD3Distance = 5000.0f; // Culled - no simulation
-
-    // Performance settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 MaxHighDetailEntities = 50; // Maximum entities at LOD0
+    FCrowd_LODSettings LODSettings;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 MaxMediumDetailEntities = 200; // Maximum entities at LOD1
+    float LODUpdateTimer;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 MaxLowDetailEntities = 1000; // Maximum entities at LOD2
-
-    // Update frequencies per LOD level (in seconds)
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Update Frequency")
-    float LOD0UpdateFrequency = 0.016f; // 60 FPS
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Update Frequency")
-    float LOD1UpdateFrequency = 0.1f; // 10 FPS
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Update Frequency")
-    float LOD2UpdateFrequency = 0.5f; // 2 FPS
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Update Frequency")
-    float LOD3UpdateFrequency = 2.0f; // 0.5 FPS
+    int32 MaxEntitiesPerFrameUpdate;
 
 private:
-    // Track entities by LOD level
-    TMap<FMassEntityHandle, ECrowd_LODLevel> EntityLODMap;
-    
-    // Count entities per LOD level
-    TArray<int32> LODCounts;
-    
-    // Last update time
-    float LastUpdateTime = 0.0f;
-    
-    // Update interval for LOD calculations
-    float LODUpdateInterval = 0.2f; // Update LOD 5 times per second
+    UPROPERTY()
+    TArray<FCrowd_EntityLOD> ManagedEntities;
 
-    // Helper to get current world time
-    float GetWorldTime() const;
+    UPROPERTY()
+    APlayerController* CachedPlayerController;
+
+    UPROPERTY()
+    APawn* CachedPlayerPawn;
+
+    int32 CurrentUpdateIndex;
+    float LastLODUpdateTime;
+
+public:
+    UFUNCTION(BlueprintCallable, Category = "Crowd LOD")
+    void RegisterEntity(FMassEntityHandle EntityHandle);
+
+    UFUNCTION(BlueprintCallable, Category = "Crowd LOD")
+    void UnregisterEntity(FMassEntityHandle EntityHandle);
+
+    UFUNCTION(BlueprintCallable, Category = "Crowd LOD")
+    ECrowd_LODLevel GetEntityLOD(FMassEntityHandle EntityHandle) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Crowd LOD")
+    void UpdateEntityLOD(FCrowd_EntityLOD& EntityLOD);
+
+    UFUNCTION(BlueprintCallable, Category = "Crowd LOD")
+    void UpdateAllEntityLODs();
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void OptimizeLODDistribution();
+
+    UFUNCTION(BlueprintCallable, Category = "Settings")
+    void SetLODSettings(const FCrowd_LODSettings& NewSettings);
+
+    UFUNCTION(BlueprintCallable, Category = "Settings")
+    FCrowd_LODSettings GetLODSettings() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Debug")
+    void DrawLODDebugInfo();
+
+    UFUNCTION(BlueprintCallable, Category = "Statistics")
+    void GetLODStatistics(int32& HighDetail, int32& MediumDetail, int32& LowDetail, int32& Culled) const;
+
+private:
+    void UpdatePlayerReferences();
+    FVector GetPlayerLocation() const;
+    ECrowd_LODLevel CalculateLODLevel(float Distance) const;
+    void EnforceLODLimits();
 };
