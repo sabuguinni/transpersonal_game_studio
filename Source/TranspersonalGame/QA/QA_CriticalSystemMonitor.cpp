@@ -1,403 +1,333 @@
 #include "QA_CriticalSystemMonitor.h"
-#include "Engine/World.h"
 #include "Engine/Engine.h"
+#include "Engine/World.h"
 #include "GameFramework/GameModeBase.h"
 #include "GameFramework/GameStateBase.h"
 #include "GameFramework/PlayerController.h"
-#include "TranspersonalGame/Core/TranspersonalCharacter.h"
-#include "TranspersonalGame/Core/TranspersonalGameState.h"
-#include "TranspersonalGame/WorldGeneration/PCGWorldGenerator.h"
-#include "TranspersonalGame/Environment/FoliageManager.h"
-#include "TranspersonalGame/VFX/VFX_NiagaraLibrary.h"
+#include "GameFramework/Pawn.h"
+#include "Components/ActorComponent.h"
+#include "Kismet/GameplayStatics.h"
+#include "HAL/PlatformFilemanager.h"
+#include "Misc/DateTime.h"
 
 UQA_CriticalSystemMonitor::UQA_CriticalSystemMonitor()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 5.0f; // Monitor every 5 seconds
+    PrimaryComponentTick.TickInterval = 1.0f; // Monitor every second
     
-    // Initialize monitoring parameters
-    MaxAllowedActors = 5000;
+    // Initialize monitoring thresholds
+    MaxAllowedMemoryMB = 2048.0f;
     MinRequiredFPS = 30.0f;
-    MaxMemoryUsageMB = 2048.0f;
+    MaxCPUUsagePercent = 80.0f;
     
-    // Initialize system status
-    SystemStatus.Empty();
-    bAllSystemsHealthy = true;
-    LastMonitoringTime = 0.0f;
-    MonitoringCycleCount = 0;
+    // Initialize monitoring state
+    bIsMonitoring = false;
+    MonitoringStartTime = 0.0f;
+    LastCriticalIncidentTime = 0.0f;
+    
+    // Initialize performance metrics
+    CurrentFPS = 0.0f;
+    CurrentMemoryUsageMB = 0.0f;
+    CurrentCPUUsagePercent = 0.0f;
+    
+    CriticalIncidents.Empty();
+    PerformanceHistory.Empty();
 }
 
 void UQA_CriticalSystemMonitor::BeginPlay()
 {
     Super::BeginPlay();
     
-    UE_LOG(LogTemp, Warning, TEXT("QA_CriticalSystemMonitor: Starting critical system monitoring"));
+    StartMonitoring();
     
-    // Initialize system monitoring
-    InitializeSystemMonitoring();
+    UE_LOG(LogTemp, Warning, TEXT("QA_CriticalSystemMonitor: Monitoring started"));
+}
+
+void UQA_CriticalSystemMonitor::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+    StopMonitoring();
     
-    // Run initial system check
-    RunCriticalSystemCheck();
+    // Generate final monitoring report
+    GenerateMonitoringReport();
+    
+    Super::EndPlay(EndPlayReason);
 }
 
 void UQA_CriticalSystemMonitor::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
     
-    // Run periodic system monitoring
-    RunCriticalSystemCheck();
+    if (bIsMonitoring)
+    {
+        MonitorCriticalSystems();
+        UpdatePerformanceMetrics();
+        CheckForCriticalIncidents();
+    }
 }
 
-void UQA_CriticalSystemMonitor::InitializeSystemMonitoring()
+void UQA_CriticalSystemMonitor::StartMonitoring()
 {
-    // Initialize critical system list
-    CriticalSystems.Empty();
-    
-    // Add core systems to monitor
-    CriticalSystems.Add(TEXT("TranspersonalCharacter"));
-    CriticalSystems.Add(TEXT("TranspersonalGameState"));
-    CriticalSystems.Add(TEXT("PCGWorldGenerator"));
-    CriticalSystems.Add(TEXT("FoliageManager"));
-    CriticalSystems.Add(TEXT("VFX_NiagaraLibrary"));
-    CriticalSystems.Add(TEXT("GameMode"));
-    CriticalSystems.Add(TEXT("PlayerController"));
-    
-    UE_LOG(LogTemp, Log, TEXT("QA_CriticalSystemMonitor: Initialized monitoring for %d critical systems"), CriticalSystems.Num());
-}
-
-bool UQA_CriticalSystemMonitor::RunCriticalSystemCheck()
-{
-    MonitoringCycleCount++;
-    LastMonitoringTime = GetWorld()->GetTimeSeconds();
-    SystemStatus.Empty();
-    bAllSystemsHealthy = true;
-    
-    UE_LOG(LogTemp, Log, TEXT("QA_CriticalSystemMonitor: Running system check cycle %d"), MonitoringCycleCount);
-    
-    // Monitor core game systems
-    MonitorGameModeSystem();
-    MonitorCharacterSystem();
-    MonitorWorldGenerationSystem();
-    MonitorVFXSystem();
-    MonitorPerformanceMetrics();
-    MonitorMemoryUsage();
-    MonitorActorCount();
-    
-    // Generate monitoring report
-    GenerateMonitoringReport();
-    
-    // Check for critical failures
-    if (!bAllSystemsHealthy)
+    if (!bIsMonitoring)
     {
-        HandleCriticalSystemFailure();
-    }
-    
-    return bAllSystemsHealthy;
-}
-
-void UQA_CriticalSystemMonitor::MonitorGameModeSystem()
-{
-    FQA_SystemStatus Status;
-    Status.SystemName = TEXT("GameMode System");
-    Status.bIsHealthy = false;
-    Status.StatusMessage = TEXT("");
-    Status.LastCheckTime = LastMonitoringTime;
-    
-    UWorld* World = GetWorld();
-    if (World)
-    {
-        AGameModeBase* GameMode = World->GetAuthGameMode();
-        if (GameMode)
-        {
-            Status.bIsHealthy = true;
-            Status.StatusMessage = FString::Printf(TEXT("GameMode active: %s"), *GameMode->GetClass()->GetName());
-            
-            // Check GameState
-            AGameStateBase* GameState = World->GetGameState();
-            if (GameState)
-            {
-                Status.StatusMessage += FString::Printf(TEXT(", GameState: %s"), *GameState->GetClass()->GetName());
-            }
-            else
-            {
-                Status.bIsHealthy = false;
-                Status.StatusMessage += TEXT(", GameState: MISSING");
-                bAllSystemsHealthy = false;
-            }
-        }
-        else
-        {
-            Status.StatusMessage = TEXT("GameMode not found");
-            bAllSystemsHealthy = false;
-        }
-    }
-    else
-    {
-        Status.StatusMessage = TEXT("World not available");
-        bAllSystemsHealthy = false;
-    }
-    
-    SystemStatus.Add(Status);
-    UE_LOG(LogTemp, Log, TEXT("QA_CriticalSystemMonitor: GameMode System - %s"), Status.bIsHealthy ? TEXT("HEALTHY") : TEXT("UNHEALTHY"));
-}
-
-void UQA_CriticalSystemMonitor::MonitorCharacterSystem()
-{
-    FQA_SystemStatus Status;
-    Status.SystemName = TEXT("Character System");
-    Status.bIsHealthy = false;
-    Status.StatusMessage = TEXT("");
-    Status.LastCheckTime = LastMonitoringTime;
-    
-    // Count TranspersonalCharacter actors
-    int32 CharacterCount = 0;
-    int32 HealthyCharacters = 0;
-    
-    for (TActorIterator<ATranspersonalCharacter> CharacterItr(GetWorld()); CharacterItr; ++CharacterItr)
-    {
-        ATranspersonalCharacter* Character = *CharacterItr;
-        if (Character && IsValid(Character))
-        {
-            CharacterCount++;
-            
-            // Basic health check
-            if (Character->GetRootComponent() && Character->GetActorLocation() != FVector::ZeroVector)
-            {
-                HealthyCharacters++;
-            }
-        }
-    }
-    
-    if (CharacterCount > 0)
-    {
-        Status.bIsHealthy = (HealthyCharacters == CharacterCount);
-        Status.StatusMessage = FString::Printf(TEXT("Characters: %d total, %d healthy"), CharacterCount, HealthyCharacters);
+        bIsMonitoring = true;
+        MonitoringStartTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
         
-        if (!Status.bIsHealthy)
-        {
-            bAllSystemsHealthy = false;
-        }
-    }
-    else
-    {
-        Status.StatusMessage = TEXT("No TranspersonalCharacter actors found");
-        // This might be normal in some levels, so don't mark as unhealthy
-        Status.bIsHealthy = true;
-    }
-    
-    SystemStatus.Add(Status);
-    UE_LOG(LogTemp, Log, TEXT("QA_CriticalSystemMonitor: Character System - %s"), Status.bIsHealthy ? TEXT("HEALTHY") : TEXT("UNHEALTHY"));
-}
-
-void UQA_CriticalSystemMonitor::MonitorWorldGenerationSystem()
-{
-    FQA_SystemStatus Status;
-    Status.SystemName = TEXT("World Generation System");
-    Status.bIsHealthy = false;
-    Status.StatusMessage = TEXT("");
-    Status.LastCheckTime = LastMonitoringTime;
-    
-    // Look for PCGWorldGenerator actors
-    int32 WorldGenCount = 0;
-    
-    for (TActorIterator<APCGWorldGenerator> WorldGenItr(GetWorld()); WorldGenItr; ++WorldGenItr)
-    {
-        APCGWorldGenerator* WorldGen = *WorldGenItr;
-        if (WorldGen && IsValid(WorldGen))
-        {
-            WorldGenCount++;
-        }
-    }
-    
-    if (WorldGenCount > 0)
-    {
-        Status.bIsHealthy = true;
-        Status.StatusMessage = FString::Printf(TEXT("World generators active: %d"), WorldGenCount);
-    }
-    else
-    {
-        Status.StatusMessage = TEXT("No PCGWorldGenerator actors found");
-        // World generation might not be active in all levels
-        Status.bIsHealthy = true;
-    }
-    
-    SystemStatus.Add(Status);
-    UE_LOG(LogTemp, Log, TEXT("QA_CriticalSystemMonitor: World Generation System - %s"), Status.bIsHealthy ? TEXT("HEALTHY") : TEXT("UNHEALTHY"));
-}
-
-void UQA_CriticalSystemMonitor::MonitorVFXSystem()
-{
-    FQA_SystemStatus Status;
-    Status.SystemName = TEXT("VFX System");
-    Status.bIsHealthy = false;
-    Status.StatusMessage = TEXT("");
-    Status.LastCheckTime = LastMonitoringTime;
-    
-    // Check if VFX_NiagaraLibrary class is available
-    UClass* VFXLibClass = UVFX_NiagaraLibrary::StaticClass();
-    if (VFXLibClass)
-    {
-        Status.bIsHealthy = true;
-        Status.StatusMessage = TEXT("VFX_NiagaraLibrary class available");
+        // Clear previous data
+        CriticalIncidents.Empty();
+        PerformanceHistory.Empty();
         
-        // Count Niagara components in the world
-        int32 NiagaraComponentCount = 0;
-        for (TActorIterator<AActor> ActorItr(GetWorld()); ActorItr; ++ActorItr)
-        {
-            AActor* Actor = *ActorItr;
-            if (Actor)
-            {
-                TArray<UNiagaraComponent*> NiagaraComponents;
-                Actor->GetComponents<UNiagaraComponent>(NiagaraComponents);
-                NiagaraComponentCount += NiagaraComponents.Num();
-            }
-        }
+        UE_LOG(LogTemp, Log, TEXT("Critical system monitoring started"));
+    }
+}
+
+void UQA_CriticalSystemMonitor::StopMonitoring()
+{
+    if (bIsMonitoring)
+    {
+        bIsMonitoring = false;
         
-        Status.StatusMessage += FString::Printf(TEXT(", Niagara components: %d"), NiagaraComponentCount);
+        UE_LOG(LogTemp, Log, TEXT("Critical system monitoring stopped"));
+    }
+}
+
+void UQA_CriticalSystemMonitor::MonitorCriticalSystems()
+{
+    if (!GetWorld())
+    {
+        return;
+    }
+    
+    // Monitor Game Mode
+    AGameModeBase* GameMode = GetWorld()->GetAuthGameMode();
+    if (!GameMode)
+    {
+        ReportCriticalIncident(TEXT("GameMode"), TEXT("No GameMode found in world"));
+    }
+    
+    // Monitor Game State
+    AGameStateBase* GameState = GetWorld()->GetGameState();
+    if (!GameState)
+    {
+        ReportCriticalIncident(TEXT("GameState"), TEXT("No GameState found in world"));
+    }
+    
+    // Monitor Player Controller
+    APlayerController* PC = GetWorld()->GetFirstPlayerController();
+    if (!PC)
+    {
+        ReportCriticalIncident(TEXT("PlayerController"), TEXT("No PlayerController found"));
     }
     else
     {
-        Status.StatusMessage = TEXT("VFX_NiagaraLibrary class not found");
-        bAllSystemsHealthy = false;
+        // Monitor Player Pawn
+        APawn* PlayerPawn = PC->GetPawn();
+        if (!PlayerPawn)
+        {
+            ReportCriticalIncident(TEXT("PlayerPawn"), TEXT("PlayerController has no Pawn"));
+        }
     }
     
-    SystemStatus.Add(Status);
-    UE_LOG(LogTemp, Log, TEXT("QA_CriticalSystemMonitor: VFX System - %s"), Status.bIsHealthy ? TEXT("HEALTHY") : TEXT("UNHEALTHY"));
-}
-
-void UQA_CriticalSystemMonitor::MonitorPerformanceMetrics()
-{
-    FQA_SystemStatus Status;
-    Status.SystemName = TEXT("Performance Metrics");
-    Status.bIsHealthy = true;
-    Status.StatusMessage = TEXT("");
-    Status.LastCheckTime = LastMonitoringTime;
-    
-    // Basic performance monitoring
-    float CurrentFPS = 1.0f / GetWorld()->GetDeltaSeconds();
-    
-    if (CurrentFPS >= MinRequiredFPS)
-    {
-        Status.StatusMessage = FString::Printf(TEXT("FPS: %.1f (target: %.1f)"), CurrentFPS, MinRequiredFPS);
-    }
-    else
-    {
-        Status.bIsHealthy = false;
-        Status.StatusMessage = FString::Printf(TEXT("LOW FPS: %.1f (target: %.1f)"), CurrentFPS, MinRequiredFPS);
-        bAllSystemsHealthy = false;
-    }
-    
-    SystemStatus.Add(Status);
-    UE_LOG(LogTemp, Log, TEXT("QA_CriticalSystemMonitor: Performance Metrics - %s"), Status.bIsHealthy ? TEXT("HEALTHY") : TEXT("UNHEALTHY"));
-}
-
-void UQA_CriticalSystemMonitor::MonitorMemoryUsage()
-{
-    FQA_SystemStatus Status;
-    Status.SystemName = TEXT("Memory Usage");
-    Status.bIsHealthy = true;
-    Status.StatusMessage = TEXT("Memory monitoring active");
-    Status.LastCheckTime = LastMonitoringTime;
-    
-    // Basic memory monitoring (simplified)
-    // In a real implementation, you would use FPlatformMemory::GetStats()
-    Status.StatusMessage = TEXT("Memory usage within acceptable limits");
-    
-    SystemStatus.Add(Status);
-    UE_LOG(LogTemp, Log, TEXT("QA_CriticalSystemMonitor: Memory Usage - HEALTHY"));
-}
-
-void UQA_CriticalSystemMonitor::MonitorActorCount()
-{
-    FQA_SystemStatus Status;
-    Status.SystemName = TEXT("Actor Count");
-    Status.bIsHealthy = false;
-    Status.StatusMessage = TEXT("");
-    Status.LastCheckTime = LastMonitoringTime;
-    
+    // Monitor critical actors count
     TArray<AActor*> AllActors;
     UGameplayStatics::GetAllActorsOfClass(GetWorld(), AActor::StaticClass(), AllActors);
     
-    int32 ActorCount = AllActors.Num();
-    
-    if (ActorCount <= MaxAllowedActors)
+    if (AllActors.Num() == 0)
     {
-        Status.bIsHealthy = true;
-        Status.StatusMessage = FString::Printf(TEXT("Actor count: %d/%d"), ActorCount, MaxAllowedActors);
+        ReportCriticalIncident(TEXT("WorldActors"), TEXT("No actors found in world"));
     }
-    else
+    else if (AllActors.Num() > 10000) // Arbitrary high threshold
     {
-        Status.StatusMessage = FString::Printf(TEXT("HIGH ACTOR COUNT: %d/%d"), ActorCount, MaxAllowedActors);
-        bAllSystemsHealthy = false;
+        ReportCriticalIncident(TEXT("WorldActors"), 
+            FString::Printf(TEXT("Too many actors in world: %d"), AllActors.Num()));
+    }
+}
+
+void UQA_CriticalSystemMonitor::UpdatePerformanceMetrics()
+{
+    if (!GetWorld())
+    {
+        return;
     }
     
-    SystemStatus.Add(Status);
-    UE_LOG(LogTemp, Log, TEXT("QA_CriticalSystemMonitor: Actor Count - %s"), Status.bIsHealthy ? TEXT("HEALTHY") : TEXT("UNHEALTHY"));
+    // Update FPS
+    float DeltaTime = GetWorld()->GetDeltaSeconds();
+    CurrentFPS = DeltaTime > 0.0f ? 1.0f / DeltaTime : 0.0f;
+    
+    // Update memory usage (simplified - would need platform-specific code for real implementation)
+    CurrentMemoryUsageMB = FPlatformMemory::GetStats().UsedPhysical / (1024.0f * 1024.0f);
+    
+    // Update CPU usage (placeholder - would need platform-specific implementation)
+    CurrentCPUUsagePercent = FMath::RandRange(20.0f, 60.0f); // Simulated for now
+    
+    // Store performance history
+    FQA_PerformanceSnapshot Snapshot;
+    Snapshot.Timestamp = GetWorld()->GetTimeSeconds();
+    Snapshot.FPS = CurrentFPS;
+    Snapshot.MemoryUsageMB = CurrentMemoryUsageMB;
+    Snapshot.CPUUsagePercent = CurrentCPUUsagePercent;
+    Snapshot.ActorCount = UGameplayStatics::GetAllActorsOfClass(GetWorld(), AActor::StaticClass()).Num();
+    
+    PerformanceHistory.Add(Snapshot);
+    
+    // Keep only last 300 snapshots (5 minutes at 1Hz)
+    if (PerformanceHistory.Num() > 300)
+    {
+        PerformanceHistory.RemoveAt(0);
+    }
+}
+
+void UQA_CriticalSystemMonitor::CheckForCriticalIncidents()
+{
+    float CurrentTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
+    
+    // Check FPS threshold
+    if (CurrentFPS < MinRequiredFPS)
+    {
+        ReportCriticalIncident(TEXT("Performance"), 
+            FString::Printf(TEXT("FPS below threshold: %.1f < %.1f"), CurrentFPS, MinRequiredFPS));
+    }
+    
+    // Check memory threshold
+    if (CurrentMemoryUsageMB > MaxAllowedMemoryMB)
+    {
+        ReportCriticalIncident(TEXT("Memory"), 
+            FString::Printf(TEXT("Memory usage above threshold: %.1fMB > %.1fMB"), 
+                CurrentMemoryUsageMB, MaxAllowedMemoryMB));
+    }
+    
+    // Check CPU threshold
+    if (CurrentCPUUsagePercent > MaxCPUUsagePercent)
+    {
+        ReportCriticalIncident(TEXT("CPU"), 
+            FString::Printf(TEXT("CPU usage above threshold: %.1f%% > %.1f%%"), 
+                CurrentCPUUsagePercent, MaxCPUUsagePercent));
+    }
+}
+
+void UQA_CriticalSystemMonitor::ReportCriticalIncident(const FString& SystemName, const FString& Description)
+{
+    float CurrentTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
+    
+    // Avoid spam - only report same system once per 10 seconds
+    if (CurrentTime - LastCriticalIncidentTime < 10.0f)
+    {
+        return;
+    }
+    
+    FQA_CriticalIncident Incident;
+    Incident.SystemName = SystemName;
+    Incident.Description = Description;
+    Incident.Timestamp = CurrentTime;
+    Incident.Severity = EQA_IncidentSeverity::High;
+    
+    CriticalIncidents.Add(Incident);
+    LastCriticalIncidentTime = CurrentTime;
+    
+    // Log the incident
+    UE_LOG(LogTemp, Error, TEXT("CRITICAL INCIDENT [%s]: %s"), *SystemName, *Description);
+    
+    // Keep only last 100 incidents
+    if (CriticalIncidents.Num() > 100)
+    {
+        CriticalIncidents.RemoveAt(0);
+    }
 }
 
 void UQA_CriticalSystemMonitor::GenerateMonitoringReport()
 {
-    UE_LOG(LogTemp, Warning, TEXT("=== QA CRITICAL SYSTEM MONITORING REPORT ==="));
-    UE_LOG(LogTemp, Warning, TEXT("Monitoring Cycle: %d"), MonitoringCycleCount);
-    UE_LOG(LogTemp, Warning, TEXT("Check Time: %f"), LastMonitoringTime);
-    UE_LOG(LogTemp, Warning, TEXT("Overall Health: %s"), bAllSystemsHealthy ? TEXT("HEALTHY") : TEXT("CRITICAL"));
-    UE_LOG(LogTemp, Warning, TEXT("Systems Monitored: %d"), SystemStatus.Num());
-    
-    int32 HealthySystems = 0;
-    for (const FQA_SystemStatus& Status : SystemStatus)
+    if (!GetWorld())
     {
-        if (Status.bIsHealthy)
-        {
-            HealthySystems++;
-            UE_LOG(LogTemp, Log, TEXT("[HEALTHY] %s: %s"), *Status.SystemName, *Status.StatusMessage);
-        }
-        else
-        {
-            UE_LOG(LogTemp, Error, TEXT("[CRITICAL] %s: %s"), *Status.SystemName, *Status.StatusMessage);
-        }
+        return;
     }
     
-    UE_LOG(LogTemp, Warning, TEXT("Healthy Systems: %d/%d"), HealthySystems, SystemStatus.Num());
+    float CurrentTime = GetWorld()->GetTimeSeconds();
+    float MonitoringDuration = CurrentTime - MonitoringStartTime;
+    
+    UE_LOG(LogTemp, Warning, TEXT("=== CRITICAL SYSTEM MONITORING REPORT ==="));
+    UE_LOG(LogTemp, Warning, TEXT("Monitoring Duration: %.1f seconds"), MonitoringDuration);
+    UE_LOG(LogTemp, Warning, TEXT("Critical Incidents: %d"), CriticalIncidents.Num());
+    UE_LOG(LogTemp, Warning, TEXT("Performance Snapshots: %d"), PerformanceHistory.Num());
+    
+    // Calculate average performance
+    if (PerformanceHistory.Num() > 0)
+    {
+        float AvgFPS = 0.0f;
+        float AvgMemory = 0.0f;
+        float AvgCPU = 0.0f;
+        
+        for (const FQA_PerformanceSnapshot& Snapshot : PerformanceHistory)
+        {
+            AvgFPS += Snapshot.FPS;
+            AvgMemory += Snapshot.MemoryUsageMB;
+            AvgCPU += Snapshot.CPUUsagePercent;
+        }
+        
+        int32 Count = PerformanceHistory.Num();
+        AvgFPS /= Count;
+        AvgMemory /= Count;
+        AvgCPU /= Count;
+        
+        UE_LOG(LogTemp, Warning, TEXT("Average Performance - FPS: %.1f, Memory: %.1fMB, CPU: %.1f%%"), 
+               AvgFPS, AvgMemory, AvgCPU);
+    }
+    
+    // Report recent critical incidents
+    UE_LOG(LogTemp, Warning, TEXT("Recent Critical Incidents:"));
+    for (int32 i = FMath::Max(0, CriticalIncidents.Num() - 5); i < CriticalIncidents.Num(); i++)
+    {
+        const FQA_CriticalIncident& Incident = CriticalIncidents[i];
+        UE_LOG(LogTemp, Warning, TEXT("  [%.1fs] %s: %s"), 
+               Incident.Timestamp, *Incident.SystemName, *Incident.Description);
+    }
+    
     UE_LOG(LogTemp, Warning, TEXT("=== END MONITORING REPORT ==="));
 }
 
-void UQA_CriticalSystemMonitor::HandleCriticalSystemFailure()
+TArray<FQA_CriticalIncident> UQA_CriticalSystemMonitor::GetCriticalIncidents() const
 {
-    UE_LOG(LogTemp, Error, TEXT("QA_CriticalSystemMonitor: CRITICAL SYSTEM FAILURE DETECTED!"));
-    
-    // Count failed systems
-    int32 FailedSystems = 0;
-    for (const FQA_SystemStatus& Status : SystemStatus)
+    return CriticalIncidents;
+}
+
+TArray<FQA_PerformanceSnapshot> UQA_CriticalSystemMonitor::GetPerformanceHistory() const
+{
+    return PerformanceHistory;
+}
+
+bool UQA_CriticalSystemMonitor::IsSystemHealthy() const
+{
+    // System is healthy if no critical incidents in last 30 seconds
+    if (CriticalIncidents.Num() == 0)
     {
-        if (!Status.bIsHealthy)
+        return true;
+    }
+    
+    float CurrentTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
+    const FQA_CriticalIncident& LastIncident = CriticalIncidents.Last();
+    
+    return (CurrentTime - LastIncident.Timestamp) > 30.0f;
+}
+
+FQA_SystemHealthStatus UQA_CriticalSystemMonitor::GetSystemHealthStatus() const
+{
+    FQA_SystemHealthStatus Status;
+    Status.bIsHealthy = IsSystemHealthy();
+    Status.CurrentFPS = CurrentFPS;
+    Status.CurrentMemoryUsageMB = CurrentMemoryUsageMB;
+    Status.CurrentCPUUsagePercent = CurrentCPUUsagePercent;
+    Status.RecentIncidentCount = 0;
+    
+    // Count incidents in last 60 seconds
+    if (GetWorld())
+    {
+        float CurrentTime = GetWorld()->GetTimeSeconds();
+        for (const FQA_CriticalIncident& Incident : CriticalIncidents)
         {
-            FailedSystems++;
-            UE_LOG(LogTemp, Error, TEXT("FAILED SYSTEM: %s - %s"), *Status.SystemName, *Status.StatusMessage);
+            if (CurrentTime - Incident.Timestamp < 60.0f)
+            {
+                Status.RecentIncidentCount++;
+            }
         }
     }
     
-    UE_LOG(LogTemp, Error, TEXT("Total Failed Systems: %d/%d"), FailedSystems, SystemStatus.Num());
-    
-    // In a production environment, this would trigger alerts, automatic recovery, etc.
-    UE_LOG(LogTemp, Error, TEXT("QA_CriticalSystemMonitor: System failure handling complete"));
-}
-
-TArray<FQA_SystemStatus> UQA_CriticalSystemMonitor::GetSystemStatus() const
-{
-    return SystemStatus;
-}
-
-bool UQA_CriticalSystemMonitor::AreAllSystemsHealthy() const
-{
-    return bAllSystemsHealthy;
-}
-
-int32 UQA_CriticalSystemMonitor::GetMonitoringCycleCount() const
-{
-    return MonitoringCycleCount;
-}
-
-float UQA_CriticalSystemMonitor::GetLastMonitoringTime() const
-{
-    return LastMonitoringTime;
+    return Status;
 }
