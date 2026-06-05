@@ -1,93 +1,84 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Components/ActorComponent.h"
+#include "GameFramework/Actor.h"
 #include "Engine/World.h"
 #include "Camera/CameraShakeBase.h"
+#include "Kismet/GameplayStatics.h"
 #include "Audio_ScreenShakeController.generated.h"
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FAudio_ShakeParameters
+struct TRANSPERSONALGAME_API FAudio_ShakeSettings
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shake Parameters")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shake")
     float Intensity = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shake Parameters")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shake")
     float Duration = 0.5f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shake Parameters")
-    float Frequency = 10.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shake")
+    float Falloff = 1000.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shake Parameters")
-    float FalloffRadius = 1000.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shake")
+    bool bOrientShakeTowardsEpicenter = true;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shake Parameters")
-    bool bUseDistanceAttenuation = true;
-
-    FAudio_ShakeParameters()
+    FAudio_ShakeSettings()
     {
         Intensity = 1.0f;
         Duration = 0.5f;
-        Frequency = 10.0f;
-        FalloffRadius = 1000.0f;
-        bUseDistanceAttenuation = true;
+        Falloff = 1000.0f;
+        bOrientShakeTowardsEpicenter = true;
     }
 };
 
-UCLASS(ClassGroup=(Audio), meta=(BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UAudio_ScreenShakeController : public UActorComponent
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API AAudio_ScreenShakeController : public AActor
 {
     GENERATED_BODY()
 
 public:
-    UAudio_ScreenShakeController();
+    AAudio_ScreenShakeController();
 
 protected:
     virtual void BeginPlay() override;
 
 public:
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+    virtual void Tick(float DeltaTime) override;
 
-    // Screen shake functions
-    UFUNCTION(BlueprintCallable, Category = "Audio Screen Shake")
-    void TriggerDinosaurFootstepShake(const FVector& FootstepLocation, float DinosaurSize = 1.0f);
+    // Trigger screen shake based on distance and intensity
+    UFUNCTION(BlueprintCallable, Category = "Audio Effects")
+    void TriggerProximityShake(FVector SourceLocation, float MaxDistance, float BaseIntensity);
 
-    UFUNCTION(BlueprintCallable, Category = "Audio Screen Shake")
-    void TriggerTRexApproachShake(const FVector& TRexLocation);
+    // Trigger T-Rex footstep shake
+    UFUNCTION(BlueprintCallable, Category = "Audio Effects")
+    void TriggerTRexFootstep(FVector FootstepLocation);
 
-    UFUNCTION(BlueprintCallable, Category = "Audio Screen Shake")
-    void TriggerCustomShake(const FAudio_ShakeParameters& ShakeParams, const FVector& SourceLocation);
+    // Trigger damage impact shake
+    UFUNCTION(BlueprintCallable, Category = "Audio Effects")
+    void TriggerDamageShake(float DamageAmount);
 
-    UFUNCTION(BlueprintCallable, Category = "Audio Screen Shake")
-    void StopAllShakes();
+protected:
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shake Settings")
+    FAudio_ShakeSettings TRexShakeSettings;
 
-    // Configuration
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Screen Shake")
-    FAudio_ShakeParameters DefaultFootstepShake;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shake Settings")
+    FAudio_ShakeSettings DamageShakeSettings;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Screen Shake")
-    FAudio_ShakeParameters TRexApproachShake;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shake Settings")
+    FAudio_ShakeSettings GenericShakeSettings;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Screen Shake")
-    float MaxShakeDistance = 2000.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    class USoundBase* TRexFootstepSound;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Screen Shake")
-    bool bEnableScreenShake = true;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    class USoundBase* DamageImpactSound;
 
 private:
-    // Internal shake management
-    void ApplyScreenShake(const FAudio_ShakeParameters& ShakeParams, const FVector& SourceLocation);
-    float CalculateShakeIntensity(const FVector& SourceLocation, float BaseIntensity, float FalloffRadius);
+    // Calculate shake intensity based on distance
+    float CalculateShakeIntensity(FVector SourceLocation, FVector PlayerLocation, float MaxDistance, float BaseIntensity);
 
-    UPROPERTY()
-    class APlayerController* CachedPlayerController;
-
-    // Shake tracking
-    TArray<float> ActiveShakeDurations;
-    float ShakeCooldownTimer = 0.0f;
-    static constexpr float SHAKE_COOLDOWN = 0.1f;
+    // Apply camera shake to player
+    void ApplyCameraShake(const FAudio_ShakeSettings& ShakeSettings, FVector EpicenterLocation);
 };
-
-#include "Audio_ScreenShakeController.generated.h"
