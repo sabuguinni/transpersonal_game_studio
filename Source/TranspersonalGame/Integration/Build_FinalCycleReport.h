@@ -1,173 +1,272 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/World.h"
-#include "GameFramework/Actor.h"
-#include "Components/ActorComponent.h"
+#include "UObject/NoExportTypes.h"
+#include "Engine/DataTable.h"
 #include "Build_FinalCycleReport.generated.h"
 
 UENUM(BlueprintType)
-enum class EBuild_CycleStatus : uint8
+enum class EBuild_CycleCompletionStatus : uint8
 {
-    Unknown         UMETA(DisplayName = "Unknown"),
-    InProgress      UMETA(DisplayName = "In Progress"),
-    Completed       UMETA(DisplayName = "Completed"),
-    Failed          UMETA(DisplayName = "Failed"),
-    Validated       UMETA(DisplayName = "Validated")
+    InProgress,
+    Completed,
+    Failed,
+    Critical,
+    Delivered
 };
 
 UENUM(BlueprintType)
-enum class EBuild_SystemHealth : uint8
+enum class EBuild_AgentStatus : uint8
 {
-    Critical        UMETA(DisplayName = "Critical"),
-    Warning         UMETA(DisplayName = "Warning"),
-    Healthy         UMETA(DisplayName = "Healthy"),
-    Optimal         UMETA(DisplayName = "Optimal")
+    NotStarted,
+    InProgress,
+    Completed,
+    Failed,
+    Timeout
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FBuild_SystemValidationResult
+struct TRANSPERSONALGAME_API FBuild_AgentExecutionResult
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    FString SystemName;
+    UPROPERTY(BlueprintReadOnly, Category = "Agent Execution")
+    int32 AgentNumber;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    EBuild_SystemHealth HealthStatus;
+    UPROPERTY(BlueprintReadOnly, Category = "Agent Execution")
+    FString AgentName;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    bool bCompilationSuccess;
+    UPROPERTY(BlueprintReadOnly, Category = "Agent Execution")
+    EBuild_AgentStatus Status;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    bool bRuntimeFunctional;
+    UPROPERTY(BlueprintReadOnly, Category = "Agent Execution")
+    int32 ToolCallsExecuted;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    int32 ActorCount;
+    UPROPERTY(BlueprintReadOnly, Category = "Agent Execution")
+    int32 FilesWritten;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    FString ValidationNotes;
+    UPROPERTY(BlueprintReadOnly, Category = "Agent Execution")
+    int32 UE5CommandsExecuted;
 
-    FBuild_SystemValidationResult()
+    UPROPERTY(BlueprintReadOnly, Category = "Agent Execution")
+    float ExecutionTimeSeconds;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Agent Execution")
+    FString LastError;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Agent Execution")
+    TArray<FString> DeliverablesCreated;
+
+    FBuild_AgentExecutionResult()
     {
-        SystemName = TEXT("Unknown");
-        HealthStatus = EBuild_SystemHealth::Critical;
-        bCompilationSuccess = false;
-        bRuntimeFunctional = false;
-        ActorCount = 0;
-        ValidationNotes = TEXT("");
+        AgentNumber = 0;
+        AgentName = TEXT("");
+        Status = EBuild_AgentStatus::NotStarted;
+        ToolCallsExecuted = 0;
+        FilesWritten = 0;
+        UE5CommandsExecuted = 0;
+        ExecutionTimeSeconds = 0.0f;
+        LastError = TEXT("");
     }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FBuild_CycleCompletionData
+struct TRANSPERSONALGAME_API FBuild_SystemIntegrationStatus
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Cycle")
-    FString CycleID;
+    UPROPERTY(BlueprintReadOnly, Category = "System Integration")
+    FString SystemName;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Cycle")
-    EBuild_CycleStatus Status;
+    UPROPERTY(BlueprintReadOnly, Category = "System Integration")
+    bool bIsLoaded;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Cycle")
-    float ExecutionTimeSeconds;
+    UPROPERTY(BlueprintReadOnly, Category = "System Integration")
+    bool bIsFunctional;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Cycle")
-    int32 TotalAgentsExecuted;
+    UPROPERTY(BlueprintReadOnly, Category = "System Integration")
+    bool bHasValidDependencies;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Cycle")
-    int32 SuccessfulAgents;
+    UPROPERTY(BlueprintReadOnly, Category = "System Integration")
+    int32 ComponentCount;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Cycle")
-    int32 FailedAgents;
+    UPROPERTY(BlueprintReadOnly, Category = "System Integration")
+    FString IntegrationNotes;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Cycle")
-    TArray<FBuild_SystemValidationResult> SystemResults;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Cycle")
-    FString FinalReport;
-
-    FBuild_CycleCompletionData()
+    FBuild_SystemIntegrationStatus()
     {
-        CycleID = TEXT("UNKNOWN");
-        Status = EBuild_CycleStatus::Unknown;
-        ExecutionTimeSeconds = 0.0f;
-        TotalAgentsExecuted = 0;
-        SuccessfulAgents = 0;
-        FailedAgents = 0;
-        FinalReport = TEXT("");
+        SystemName = TEXT("");
+        bIsLoaded = false;
+        bIsFunctional = false;
+        bHasValidDependencies = false;
+        ComponentCount = 0;
+        IntegrationNotes = TEXT("");
+    }
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FBuild_QualityMetrics
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadOnly, Category = "Quality Metrics")
+    int32 TotalClassesLoaded;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Quality Metrics")
+    int32 FunctionalTestsPassed;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Quality Metrics")
+    int32 IntegrationTestsPassed;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Quality Metrics")
+    float CompilationSuccessRate;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Quality Metrics")
+    float SystemIntegrationRate;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Quality Metrics")
+    int32 CriticalErrorsFound;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Quality Metrics")
+    int32 WarningsFound;
+
+    FBuild_QualityMetrics()
+    {
+        TotalClassesLoaded = 0;
+        FunctionalTestsPassed = 0;
+        IntegrationTestsPassed = 0;
+        CompilationSuccessRate = 0.0f;
+        SystemIntegrationRate = 0.0f;
+        CriticalErrorsFound = 0;
+        WarningsFound = 0;
     }
 };
 
 /**
- * Final Cycle Report Generator - Integration Agent #19
- * Generates comprehensive reports for completed production cycles
- * Validates all systems and provides final delivery status
+ * Final Cycle Report - Comprehensive summary of production cycle completion
+ * Generated by Integration Agent #19 at the end of each cycle
  */
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UBuild_FinalCycleReport : public UActorComponent
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FBuild_FinalCycleReport
 {
     GENERATED_BODY()
 
-public:
-    UBuild_FinalCycleReport();
+    // Cycle identification
+    UPROPERTY(BlueprintReadOnly, Category = "Cycle Info")
+    FString CycleID;
 
-protected:
-    virtual void BeginPlay() override;
+    UPROPERTY(BlueprintReadOnly, Category = "Cycle Info")
+    FDateTime CycleStartTime;
 
-public:
-    UPROPERTY(BlueprintReadOnly, Category = "Report")
-    FBuild_CycleCompletionData CurrentCycleData;
+    UPROPERTY(BlueprintReadOnly, Category = "Cycle Info")
+    FDateTime CycleEndTime;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Report")
-    TArray<FBuild_SystemValidationResult> CriticalSystemResults;
+    UPROPERTY(BlueprintReadOnly, Category = "Cycle Info")
+    float TotalCycleDurationMinutes;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Report")
-    bool bBridgeOperational;
+    // Overall status
+    UPROPERTY(BlueprintReadOnly, Category = "Status")
+    EBuild_CycleCompletionStatus OverallStatus;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Report")
-    bool bAllSystemsValidated;
+    UPROPERTY(BlueprintReadOnly, Category = "Status")
+    float CycleCompletionPercentage;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Report")
-    int32 TotalActorsInLevel;
+    UPROPERTY(BlueprintReadOnly, Category = "Status")
+    bool bReadyForNextCycle;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Report")
-    FString BuildHealthSummary;
+    // Agent execution results
+    UPROPERTY(BlueprintReadOnly, Category = "Agent Results")
+    TArray<FBuild_AgentExecutionResult> AgentResults;
 
-    // Core validation functions
-    UFUNCTION(BlueprintCallable, Category = "Validation")
-    void GenerateFinalCycleReport(const FString& CycleID);
+    UPROPERTY(BlueprintReadOnly, Category = "Agent Results")
+    int32 AgentsCompleted;
 
-    UFUNCTION(BlueprintCallable, Category = "Validation")
-    bool ValidateAllCriticalSystems();
+    UPROPERTY(BlueprintReadOnly, Category = "Agent Results")
+    int32 AgentsFailed;
 
-    UFUNCTION(BlueprintCallable, Category = "Validation")
-    FBuild_SystemValidationResult ValidateSystem(const FString& SystemName, const FString& ClassPath);
+    UPROPERTY(BlueprintReadOnly, Category = "Agent Results")
+    int32 AgentsTimedOut;
 
-    UFUNCTION(BlueprintCallable, Category = "Validation")
-    void ValidateBridgeConnection();
+    // System integration status
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    TArray<FBuild_SystemIntegrationStatus> SystemStatuses;
 
-    UFUNCTION(BlueprintCallable, Category = "Validation")
-    void CountLevelActors();
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    int32 SystemsIntegrated;
 
-    UFUNCTION(BlueprintCallable, Category = "Report")
-    FString GenerateBuildHealthSummary();
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    int32 SystemsTotal;
 
-    UFUNCTION(BlueprintCallable, Category = "Report")
-    void ExportReportToFile(const FString& FilePath);
+    // Quality metrics
+    UPROPERTY(BlueprintReadOnly, Category = "Quality")
+    FBuild_QualityMetrics QualityMetrics;
 
-    // Blueprint events
-    UFUNCTION(BlueprintImplementableEvent, Category = "Events")
-    void OnCycleReportGenerated(const FBuild_CycleCompletionData& CycleData);
+    // Production metrics
+    UPROPERTY(BlueprintReadOnly, Category = "Production")
+    int32 TotalFilesCreated;
 
-    UFUNCTION(BlueprintImplementableEvent, Category = "Events")
-    void OnSystemValidationComplete(bool bAllSystemsHealthy);
+    UPROPERTY(BlueprintReadOnly, Category = "Production")
+    int32 TotalUE5CommandsExecuted;
 
-private:
-    void InitializeSystemValidation();
-    void ValidateVFXSystems();
-    void ValidateCoreSystems();
-    void ValidateWorldSystems();
-    void GenerateHealthMetrics();
+    UPROPERTY(BlueprintReadOnly, Category = "Production")
+    int32 TotalToolCallsExecuted;
+
+    // Critical issues
+    UPROPERTY(BlueprintReadOnly, Category = "Issues")
+    TArray<FString> CriticalIssues;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Issues")
+    TArray<FString> RecommendationsForNextCycle;
+
+    // Summary
+    UPROPERTY(BlueprintReadOnly, Category = "Summary")
+    FString ExecutiveSummary;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Summary")
+    FString NextCyclePriorities;
+
+    FBuild_FinalCycleReport()
+    {
+        CycleID = TEXT("");
+        CycleStartTime = FDateTime::Now();
+        CycleEndTime = FDateTime::Now();
+        TotalCycleDurationMinutes = 0.0f;
+        OverallStatus = EBuild_CycleCompletionStatus::InProgress;
+        CycleCompletionPercentage = 0.0f;
+        bReadyForNextCycle = false;
+        AgentsCompleted = 0;
+        AgentsFailed = 0;
+        AgentsTimedOut = 0;
+        SystemsIntegrated = 0;
+        SystemsTotal = 0;
+        TotalFilesCreated = 0;
+        TotalUE5CommandsExecuted = 0;
+        TotalToolCallsExecuted = 0;
+        ExecutiveSummary = TEXT("");
+        NextCyclePriorities = TEXT("");
+    }
+};
+
+/**
+ * Data table row for cycle history tracking
+ */
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FBuild_CycleHistoryEntry : public FTableRowBase
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Cycle History")
+    FBuild_FinalCycleReport CycleReport;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Cycle History")
+    bool bWasSuccessful;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Cycle History")
+    FString CycleNotes;
+
+    FBuild_CycleHistoryEntry()
+    {
+        bWasSuccessful = false;
+        CycleNotes = TEXT("");
+    }
 };
