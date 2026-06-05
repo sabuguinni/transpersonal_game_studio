@@ -4,27 +4,37 @@
 #include "MassProcessor.h"
 #include "MassEntityTypes.h"
 #include "MassCommonFragments.h"
-#include "SharedTypes.h"
+#include "MassMovementFragments.h"
+#include "Engine/World.h"
+#include "Components/StaticMeshComponent.h"
 #include "Crowd_MassEntityProcessor.generated.h"
 
-class UMassSignalSubsystem;
+// Forward declarations
+class UMassEntitySubsystem;
+struct FMassEntityHandle;
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FCrowd_MovementFragment : public FMassFragment
+struct TRANSPERSONALGAME_API FCrowd_TribalFragment : public FMassFragment
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
-    FVector Velocity = FVector::ZeroVector;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal")
+    int32 TribeID = 0;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
-    float MaxSpeed = 300.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal")
+    float Hunger = 100.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
-    float Acceleration = 600.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal")
+    float Energy = 100.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
-    bool bIsMoving = false;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal")
+    float SocialStatus = 50.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal")
+    FVector HomeLocation = FVector::ZeroVector;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal")
+    FVector WorkLocation = FVector::ZeroVector;
 };
 
 USTRUCT(BlueprintType)
@@ -33,115 +43,65 @@ struct TRANSPERSONALGAME_API FCrowd_BehaviorFragment : public FMassFragment
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
-    ECrowd_BehaviorState CurrentState = ECrowd_BehaviorState::Idle;
+    int32 CurrentBehavior = 0; // 0=Idle, 1=Work, 2=Hunt, 3=Gather, 4=Social, 5=Rest
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
+    float BehaviorTimer = 0.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
     FVector TargetLocation = FVector::ZeroVector;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
-    float StateTimer = 0.0f;
+    float MovementSpeed = 200.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
-    float MaxStateTime = 10.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
-    int32 GroupID = -1;
+    bool bIsGroupLeader = false;
 };
 
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FCrowd_LODFragment : public FMassFragment
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
-    ECrowd_LODLevel CurrentLOD = ECrowd_LODLevel::High;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
-    float DistanceToPlayer = 0.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
-    bool bIsVisible = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
-    float LastUpdateTime = 0.0f;
-};
-
-UCLASS()
-class TRANSPERSONALGAME_API UCrowd_MovementProcessor : public UMassProcessor
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API UCrowd_MassEntityProcessor : public UMassProcessor
 {
     GENERATED_BODY()
 
 public:
-    UCrowd_MovementProcessor();
+    UCrowd_MassEntityProcessor();
 
-protected:
+    // UMassProcessor interface
     virtual void ConfigureQueries() override;
     virtual void Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context) override;
 
-private:
-    FMassEntityQuery EntityQuery;
-
-    UPROPERTY(EditAnywhere, Category = "Movement")
-    float MaxMovementSpeed = 400.0f;
-
-    UPROPERTY(EditAnywhere, Category = "Movement")
-    float SteeringForce = 800.0f;
-};
-
-UCLASS()
-class TRANSPERSONALGAME_API UCrowd_BehaviorProcessor : public UMassProcessor
-{
-    GENERATED_BODY()
-
-public:
-    UCrowd_BehaviorProcessor();
-
 protected:
-    virtual void ConfigureQueries() override;
-    virtual void Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context) override;
+    // Mass Entity queries
+    FMassEntityQuery TribalBehaviorQuery;
+    FMassEntityQuery MovementQuery;
+    FMassEntityQuery SocialInteractionQuery;
 
-private:
-    FMassEntityQuery EntityQuery;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Settings")
+    int32 MaxEntitiesPerFrame = 1000;
 
-    UPROPERTY(EditAnywhere, Category = "Behavior")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Settings")
     float BehaviorUpdateInterval = 2.0f;
 
-    UPROPERTY(EditAnywhere, Category = "Behavior")
-    float WanderRadius = 1000.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Settings")
+    float SocialInteractionRadius = 300.0f;
 
-    void UpdateBehaviorState(FCrowd_BehaviorFragment& BehaviorFragment, const FTransformFragment& Transform, float DeltaTime);
-    FVector GetWanderTarget(const FVector& CurrentLocation);
-};
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Settings")
+    float WorkLocationRadius = 500.0f;
 
-UCLASS()
-class TRANSPERSONALGAME_API UCrowd_LODProcessor : public UMassProcessor
-{
-    GENERATED_BODY()
+    // Behavior processing methods
+    UFUNCTION(BlueprintCallable, Category = "Crowd Processing")
+    void ProcessTribalBehaviors(FMassEntityManager& EntityManager, FMassExecutionContext& Context);
 
-public:
-    UCrowd_LODProcessor();
+    UFUNCTION(BlueprintCallable, Category = "Crowd Processing")
+    void ProcessMovement(FMassEntityManager& EntityManager, FMassExecutionContext& Context);
 
-protected:
-    virtual void ConfigureQueries() override;
-    virtual void Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context) override;
+    UFUNCTION(BlueprintCallable, Category = "Crowd Processing")
+    void ProcessSocialInteractions(FMassEntityManager& EntityManager, FMassExecutionContext& Context);
+
+    UFUNCTION(BlueprintCallable, Category = "Crowd Processing")
+    void UpdateBehaviorState(FCrowd_TribalFragment& TribalData, FCrowd_BehaviorFragment& BehaviorData, float DeltaTime);
 
 private:
-    FMassEntityQuery EntityQuery;
-
-    UPROPERTY(EditAnywhere, Category = "LOD")
-    float HighLODDistance = 1000.0f;
-
-    UPROPERTY(EditAnywhere, Category = "LOD")
-    float MediumLODDistance = 2500.0f;
-
-    UPROPERTY(EditAnywhere, Category = "LOD")
-    float LowLODDistance = 5000.0f;
-
-    UPROPERTY(EditAnywhere, Category = "LOD")
-    float LODUpdateInterval = 1.0f;
-
-    ECrowd_LODLevel CalculateLODLevel(float Distance) const;
-    FVector GetPlayerLocation() const;
+    float LastUpdateTime = 0.0f;
+    int32 ProcessedEntitiesThisFrame = 0;
 };
-
-#include "Crowd_MassEntityProcessor.generated.h"
