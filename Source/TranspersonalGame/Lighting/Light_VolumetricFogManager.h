@@ -1,11 +1,14 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Components/ActorComponent.h"
-#include "Engine/ExponentialHeightFog.h"
+#include "GameFramework/Actor.h"
 #include "Components/ExponentialHeightFogComponent.h"
-#include "Engine/VolumetricFog.h"
-#include "SharedTypes.h"
+#include "Components/DirectionalLightComponent.h"
+#include "Components/SkyLightComponent.h"
+#include "Engine/DirectionalLight.h"
+#include "Engine/SkyLight.h"
+#include "Engine/ExponentialHeightFog.h"
+#include "TranspersonalGame.h"
 #include "Light_VolumetricFogManager.generated.h"
 
 USTRUCT(BlueprintType)
@@ -20,146 +23,88 @@ struct TRANSPERSONALGAME_API FLight_VolumetricFogSettings
     float FogHeightFalloff = 0.2f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Volumetric Fog")
-    float FogMaxOpacity = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Volumetric Fog")
-    float StartDistance = 0.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Volumetric Fog")
-    float FogCutoffDistance = 0.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Volumetric Fog")
-    FLinearColor FogInscatteringColor = FLinearColor(0.447f, 0.639f, 1.0f);
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Volumetric Fog")
-    FLinearColor FogAlbedo = FLinearColor(1.0f, 1.0f, 1.0f);
+    FColor FogInscatteringColor = FColor(180, 200, 255, 255);
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Volumetric Fog")
     float VolumetricFogScatteringDistribution = 0.2f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Volumetric Fog")
+    FColor VolumetricFogAlbedo = FColor(240, 240, 255, 255);
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Volumetric Fog")
     float VolumetricFogExtinctionScale = 1.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Volumetric Fog")
-    float VolumetricFogDistance = 6000.0f;
+    float SunVolumetricScatteringIntensity = 2.5f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Volumetric Fog")
-    float VolumetricFogStaticLightingScatteringIntensity = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Volumetric Fog")
-    bool bOverrideLightColorsWithFogInscatteringColors = false;
+    float SkyLightVolumetricIntensity = 1.5f;
 };
 
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FLight_BiomeFogProfile
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Fog")
-    EBiomeType BiomeType = EBiomeType::Savana;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Fog")
-    FLight_VolumetricFogSettings DaySettings;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Fog")
-    FLight_VolumetricFogSettings NightSettings;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Fog")
-    FLight_VolumetricFogSettings DawnSettings;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Fog")
-    FLight_VolumetricFogSettings DuskSettings;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Fog")
-    float TransitionSpeed = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Fog")
-    bool bEnableVolumetricFog = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Fog")
-    bool bEnableHeightFog = true;
-};
-
-UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API ULight_VolumetricFogManager : public UActorComponent
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API ALight_VolumetricFogManager : public AActor
 {
     GENERATED_BODY()
 
 public:
-    ULight_VolumetricFogManager();
+    ALight_VolumetricFogManager();
 
 protected:
     virtual void BeginPlay() override;
 
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    class USceneComponent* RootSceneComponent;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Volumetric Settings")
+    FLight_VolumetricFogSettings VolumetricSettings;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Fog References")
+    class AExponentialHeightFog* FogActor;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Light References")
+    class ADirectionalLight* SunLight;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Light References")
+    class ASkyLight* SkyLight;
+
 public:
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+    UFUNCTION(BlueprintCallable, Category = "Volumetric Fog")
+    void InitializeVolumetricFog();
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fog Management")
-    TArray<FLight_BiomeFogProfile> BiomeFogProfiles;
+    UFUNCTION(BlueprintCallable, Category = "Volumetric Fog")
+    void UpdateVolumetricSettings(const FLight_VolumetricFogSettings& NewSettings);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fog Management")
-    float CurrentTimeOfDay = 12.0f;
+    UFUNCTION(BlueprintCallable, Category = "Volumetric Fog")
+    void SetFogDensity(float NewDensity);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fog Management")
-    EBiomeType CurrentBiome = EBiomeType::Savana;
+    UFUNCTION(BlueprintCallable, Category = "Volumetric Fog")
+    void SetFogHeightFalloff(float NewFalloff);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fog Management")
-    bool bAutoDetectBiome = true;
+    UFUNCTION(BlueprintCallable, Category = "Volumetric Fog")
+    void SetVolumetricScatteringIntensity(float NewIntensity);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fog Management")
-    float BiomeDetectionRadius = 5000.0f;
+    UFUNCTION(BlueprintCallable, Category = "Volumetric Fog")
+    void ApplyCretaceousAtmosphere();
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Fog Management")
-    AExponentialHeightFog* HeightFogActor;
+    UFUNCTION(BlueprintCallable, Category = "Volumetric Fog")
+    void SaveAtmosphericSettings();
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Fog Management")
-    UExponentialHeightFogComponent* HeightFogComponent;
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Editor Tools")
+    void EditorApplyVolumetricFog();
 
-    UFUNCTION(BlueprintCallable, Category = "Fog Management")
-    void SetTimeOfDay(float NewTimeOfDay);
+protected:
+    UFUNCTION()
+    void FindExistingLightingActors();
 
-    UFUNCTION(BlueprintCallable, Category = "Fog Management")
-    void SetCurrentBiome(EBiomeType NewBiome);
+    UFUNCTION()
+    void CreateVolumetricFogActor();
 
-    UFUNCTION(BlueprintCallable, Category = "Fog Management")
-    void UpdateFogSettings();
+    UFUNCTION()
+    void ConfigureSunLight();
 
-    UFUNCTION(BlueprintCallable, Category = "Fog Management")
-    FLight_VolumetricFogSettings GetCurrentFogSettings() const;
+    UFUNCTION()
+    void ConfigureSkyLight();
 
-    UFUNCTION(BlueprintCallable, Category = "Fog Management")
-    void InitializeBiomeFogProfiles();
-
-    UFUNCTION(BlueprintCallable, Category = "Fog Management")
-    void DetectCurrentBiome();
-
-    UFUNCTION(BlueprintCallable, Category = "Fog Management")
-    FLight_VolumetricFogSettings InterpolateFogSettings(const FLight_VolumetricFogSettings& SettingsA, const FLight_VolumetricFogSettings& SettingsB, float Alpha) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Fog Management")
-    void ApplyFogSettingsToComponent(const FLight_VolumetricFogSettings& Settings);
-
-    UFUNCTION(BlueprintCallable, Category = "Fog Management")
-    void CreateHeightFogActor();
-
-    UFUNCTION(BlueprintCallable, Category = "Fog Management")
-    void EnableVolumetricFog(bool bEnable);
-
-    UFUNCTION(BlueprintCallable, Category = "Fog Management")
-    void SetFogDensityMultiplier(float Multiplier);
-
-private:
-    UPROPERTY()
-    float LastTimeOfDay = -1.0f;
-
-    UPROPERTY()
-    EBiomeType LastBiome = EBiomeType::Savana;
-
-    UPROPERTY()
-    bool bFogSystemInitialized = false;
-
-    void InitializeFogSystem();
-    FLight_BiomeFogProfile* GetBiomeFogProfile(EBiomeType BiomeType);
-    float GetTimeOfDayAlpha() const;
-    EDayNightPhase GetCurrentDayNightPhase() const;
+    UFUNCTION()
+    void ApplyFogSettings();
 };
