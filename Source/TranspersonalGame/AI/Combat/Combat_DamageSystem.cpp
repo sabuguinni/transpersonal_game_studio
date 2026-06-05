@@ -1,254 +1,208 @@
 #include "Combat_DamageSystem.h"
-#include "Engine/World.h"
+#include "Engine/Engine.h"
 #include "TimerManager.h"
-#include "Kismet/GameplayStatics.h"
-#include "Components/StaticMeshComponent.h"
-#include "Materials/MaterialInstanceDynamic.h"
-#include "GameFramework/Character.h"
-#include "Components/SkeletalMeshComponent.h"
+#include "Engine/World.h"
+#include "Math/UnrealMathUtility.h"
 
 UCombat_DamageSystem::UCombat_DamageSystem()
 {
-    PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 0.1f;
-
-    // Initialize default health stats
-    HealthStats.MaxHealth = 100.0f;
-    HealthStats.CurrentHealth = 100.0f;
-    HealthStats.HealthRegenRate = 1.0f;
-    HealthStats.DamageResistance = 0.0f;
-    HealthStats.bIsInvulnerable = false;
-    HealthStats.LastDamageTime = 0.0f;
-
-    // Initialize damage type resistances
-    DamageTypeResistances.Add(EDamageType::Physical, 0.0f);
-    DamageTypeResistances.Add(EDamageType::Fire, 0.0f);
-    DamageTypeResistances.Add(EDamageType::Ice, 0.0f);
-    DamageTypeResistances.Add(EDamageType::Poison, 0.0f);
-    DamageTypeResistances.Add(EDamageType::Bleed, 0.0f);
-
-    // Initialize visual settings
-    bShowDamageNumbers = true;
-    DamageNumberDisplayTime = 2.0f;
-    CriticalHitColor = FLinearColor::Red;
-    NormalHitColor = FLinearColor::White;
-
-    bIsDead = false;
-    LastRegenTime = 0.0f;
+    PrimaryComponentTick.bCanEverTick = false;
+    
+    BaseArmor = 10.0f;
+    BlockChance = 0.15f;
+    CriticalResistance = 0.1f;
+    MaxHealth = 100.0f;
+    CurrentHealth = 100.0f;
+    HealthRegenRate = 2.0f;
+    bIsAlive = true;
+    bIsInvulnerable = false;
+    InvulnerabilityDuration = 1.0f;
 }
 
 void UCombat_DamageSystem::BeginPlay()
 {
     Super::BeginPlay();
-
-    // Ensure current health doesn't exceed max health
-    HealthStats.CurrentHealth = FMath::Min(HealthStats.CurrentHealth, HealthStats.MaxHealth);
     
-    // Initialize last damage time
-    HealthStats.LastDamageTime = GetWorld()->GetTimeSeconds();
-    LastRegenTime = GetWorld()->GetTimeSeconds();
+    CurrentHealth = MaxHealth;
+    bIsAlive = true;
+    bIsInvulnerable = false;
+    
+    StartHealthRegen();
 }
 
-void UCombat_DamageSystem::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+FCombat_HitResult UCombat_DamageSystem::ApplyDamage(const FCombat_DamageData& DamageData, AActor* DamageSource)
 {
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-
-    if (!bIsDead && HealthStats.HealthRegenRate > 0.0f)
-    {
-        ProcessHealthRegeneration(DeltaTime);
-    }
-
-    // Clean up expired damage number actors
-    for (int32 i = DamageNumberActors.Num() - 1; i >= 0; i--)
-    {
-        if (!IsValid(DamageNumberActors[i]))
-        {
-            DamageNumberActors.RemoveAt(i);
-        }
-    }
-}
-
-bool UCombat_DamageSystem::ApplyDamage(const FCombat_DamageInfo& DamageInfo)
-{
-    if (bIsDead || HealthStats.bIsInvulnerable || DamageInfo.DamageAmount <= 0.0f)
-    {
-        return false;
-    }
-
-    // Calculate actual damage after resistances
-    float ActualDamage = CalculateActualDamage(DamageInfo);
+    FCombat_HitResult HitResult;
     
-    if (ActualDamage <= 0.0f)
+    if (!CanTakeDamage())
     {
-        return false;
+        return HitResult;
     }
-
-    // Apply damage to health
-    HealthStats.CurrentHealth = FMath::Max(0.0f, HealthStats.CurrentHealth - ActualDamage);
-    HealthStats.LastDamageTime = GetWorld()->GetTimeSeconds();
-
-    // Show damage numbers if enabled
-    if (bShowDamageNumbers)
+    
+    float FinalDamage = DamageData.BaseDamage;
+    bool bWasCritical = false;
+    bool bWasBlocked = false;
+    
+    // Roll for block
+    if (RollBlock())
     {
-        ShowDamageNumber(DamageInfo, ActualDamage);
+        bWasBlocked = true;
+        FinalDamage *= 0.5f; // Blocked attacks do half damage
     }
-
-    // Broadcast damage taken event
-    OnDamageTaken.Broadcast(ActualDamage, DamageInfo);
-    OnHealthChanged.Broadcast(GetHealthPercentage());
-
+    
+    // Roll for critical hit (reduced by critical resistance)
+    float EffectiveCritChance = FMath::Max(0.0f, 0.1f - CriticalResistance);
+    if (RollCritical(EffectiveCritChance))
+    {
+        bWasCritical = true;
+        FinalDamage *= DamageData.CriticalMultiplier;
+    }
+    
+    // Apply armor reduction
+    FinalDamage = CalculateDamageReduction(FinalDamage, DamageData.ArmorPenetration);
+    
+    // Apply damage
+    CurrentHealth = FMath::Max(0.0f, CurrentHealth - FinalDamage);
+    
+    // Set up hit result
+    HitResult.FinalDamage = FinalDamage;
+    HitResult.bWasCritical = bWasCritical;
+    HitResult.bWasBlocked = bWasBlocked;
+    HitResult.HitLocation = GetOwner()->GetActorLocation();
+    
+    // Broadcast damage event
+    OnDamageTaken.Broadcast(FinalDamage, bWasCritical, DamageSource);
+    OnHealthChanged.Broadcast(CurrentHealth, MaxHealth);
+    
     // Check for death
-    if (HealthStats.CurrentHealth <= 0.0f && !bIsDead)
+    if (CurrentHealth <= 0.0f && bIsAlive)
     {
-        TriggerDeathSequence();
+        Kill();
     }
-
-    return true;
+    
+    // Set temporary invulnerability
+    if (FinalDamage > 0.0f)
+    {
+        SetInvulnerable(true);
+        GetWorld()->GetTimerManager().SetTimer(InvulnerabilityTimer, this, &UCombat_DamageSystem::EndInvulnerability, InvulnerabilityDuration, false);
+    }
+    
+    return HitResult;
 }
 
-void UCombat_DamageSystem::HealDamage(float HealAmount)
+void UCombat_DamageSystem::Heal(float HealAmount)
 {
-    if (bIsDead || HealAmount <= 0.0f)
+    if (!bIsAlive || HealAmount <= 0.0f)
     {
         return;
     }
-
-    float OldHealth = HealthStats.CurrentHealth;
-    HealthStats.CurrentHealth = FMath::Min(HealthStats.MaxHealth, HealthStats.CurrentHealth + HealAmount);
-
-    if (HealthStats.CurrentHealth != OldHealth)
+    
+    float OldHealth = CurrentHealth;
+    CurrentHealth = FMath::Min(MaxHealth, CurrentHealth + HealAmount);
+    
+    if (CurrentHealth != OldHealth)
     {
-        OnHealthChanged.Broadcast(GetHealthPercentage());
+        OnHealthChanged.Broadcast(CurrentHealth, MaxHealth);
     }
-}
-
-void UCombat_DamageSystem::SetMaxHealth(float NewMaxHealth)
-{
-    if (NewMaxHealth <= 0.0f)
-    {
-        return;
-    }
-
-    float HealthPercentage = GetHealthPercentage();
-    HealthStats.MaxHealth = NewMaxHealth;
-    HealthStats.CurrentHealth = HealthStats.MaxHealth * HealthPercentage;
-
-    OnHealthChanged.Broadcast(GetHealthPercentage());
 }
 
 void UCombat_DamageSystem::SetInvulnerable(bool bNewInvulnerable)
 {
-    HealthStats.bIsInvulnerable = bNewInvulnerable;
+    bIsInvulnerable = bNewInvulnerable;
+    
+    if (!bNewInvulnerable && GetWorld())
+    {
+        GetWorld()->GetTimerManager().ClearTimer(InvulnerabilityTimer);
+    }
+}
+
+void UCombat_DamageSystem::Kill()
+{
+    if (!bIsAlive)
+    {
+        return;
+    }
+    
+    bIsAlive = false;
+    CurrentHealth = 0.0f;
+    StopHealthRegen();
+    
+    OnDeath.Broadcast(GetOwner());
+    OnHealthChanged.Broadcast(CurrentHealth, MaxHealth);
+}
+
+void UCombat_DamageSystem::Revive(float ReviveHealth)
+{
+    if (bIsAlive)
+    {
+        return;
+    }
+    
+    bIsAlive = true;
+    CurrentHealth = FMath::Clamp(ReviveHealth, 1.0f, MaxHealth);
+    StartHealthRegen();
+    
+    OnRevive.Broadcast(GetOwner());
+    OnHealthChanged.Broadcast(CurrentHealth, MaxHealth);
 }
 
 float UCombat_DamageSystem::GetHealthPercentage() const
 {
-    if (HealthStats.MaxHealth <= 0.0f)
+    return MaxHealth > 0.0f ? (CurrentHealth / MaxHealth) : 0.0f;
+}
+
+bool UCombat_DamageSystem::IsLowHealth() const
+{
+    return GetHealthPercentage() < 0.25f;
+}
+
+bool UCombat_DamageSystem::CanTakeDamage() const
+{
+    return bIsAlive && !bIsInvulnerable;
+}
+
+void UCombat_DamageSystem::StartHealthRegen()
+{
+    if (GetWorld() && HealthRegenRate > 0.0f)
     {
-        return 0.0f;
-    }
-    return HealthStats.CurrentHealth / HealthStats.MaxHealth;
-}
-
-bool UCombat_DamageSystem::IsAlive() const
-{
-    return !bIsDead && HealthStats.CurrentHealth > 0.0f;
-}
-
-bool UCombat_DamageSystem::IsAtFullHealth() const
-{
-    return HealthStats.CurrentHealth >= HealthStats.MaxHealth;
-}
-
-float UCombat_DamageSystem::CalculateActualDamage(const FCombat_DamageInfo& DamageInfo) const
-{
-    float BaseDamage = DamageInfo.DamageAmount;
-    
-    // Apply critical hit multiplier
-    if (DamageInfo.bIsCriticalHit)
-    {
-        BaseDamage *= 2.0f;
-    }
-
-    // Apply general damage resistance
-    BaseDamage *= (1.0f - HealthStats.DamageResistance);
-
-    // Apply damage type specific resistance
-    float TypeResistance = GetDamageTypeResistance(DamageInfo.DamageType);
-    BaseDamage *= (1.0f - TypeResistance);
-
-    return FMath::Max(0.0f, BaseDamage);
-}
-
-void UCombat_DamageSystem::ProcessHealthRegeneration(float DeltaTime)
-{
-    float CurrentTime = GetWorld()->GetTimeSeconds();
-    float TimeSinceLastDamage = CurrentTime - HealthStats.LastDamageTime;
-    
-    // Only regenerate if enough time has passed since last damage (3 seconds)
-    if (TimeSinceLastDamage >= 3.0f && HealthStats.CurrentHealth < HealthStats.MaxHealth)
-    {
-        float RegenAmount = HealthStats.HealthRegenRate * DeltaTime;
-        HealDamage(RegenAmount);
+        GetWorld()->GetTimerManager().SetTimer(HealthRegenTimer, this, &UCombat_DamageSystem::RegenHealth, 1.0f, true);
     }
 }
 
-void UCombat_DamageSystem::TriggerDeathSequence()
+void UCombat_DamageSystem::StopHealthRegen()
 {
-    bIsDead = true;
-    HealthStats.CurrentHealth = 0.0f;
-    
-    // Broadcast death event
-    OnDeath.Broadcast();
-
-    // Disable collision and movement for the owner
-    AActor* Owner = GetOwner();
-    if (Owner)
+    if (GetWorld())
     {
-        // Disable collision
-        Owner->SetActorEnableCollision(false);
-        
-        // If it's a character, disable movement
-        if (ACharacter* Character = Cast<ACharacter>(Owner))
-        {
-            Character->DisableInput(nullptr);
-        }
+        GetWorld()->GetTimerManager().ClearTimer(HealthRegenTimer);
     }
 }
 
-void UCombat_DamageSystem::ShowDamageNumber(const FCombat_DamageInfo& DamageInfo, float ActualDamage)
+void UCombat_DamageSystem::RegenHealth()
 {
-    if (!GetWorld())
+    if (bIsAlive && CurrentHealth < MaxHealth && CurrentHealth > 0.0f)
     {
-        return;
-    }
-
-    // Create a simple static mesh actor to display damage number
-    FVector SpawnLocation = DamageInfo.ImpactLocation;
-    if (SpawnLocation.IsZero() && GetOwner())
-    {
-        SpawnLocation = GetOwner()->GetActorLocation() + FVector(0, 0, 100);
-    }
-
-    AActor* DamageNumberActor = GetWorld()->SpawnActor<AActor>(AActor::StaticClass(), SpawnLocation, FRotator::ZeroRotator);
-    if (DamageNumberActor)
-    {
-        DamageNumberActor->SetLifeSpan(DamageNumberDisplayTime);
-        DamageNumberActors.Add(DamageNumberActor);
-
-        // Set color based on critical hit
-        FLinearColor DisplayColor = DamageInfo.bIsCriticalHit ? CriticalHitColor : NormalHitColor;
-        
-        // Log damage for debugging
-        UE_LOG(LogTemp, Log, TEXT("Damage: %.1f %s"), ActualDamage, DamageInfo.bIsCriticalHit ? TEXT("CRITICAL!") : TEXT(""));
+        Heal(HealthRegenRate);
     }
 }
 
-float UCombat_DamageSystem::GetDamageTypeResistance(EDamageType DamageType) const
+void UCombat_DamageSystem::EndInvulnerability()
 {
-    if (const float* Resistance = DamageTypeResistances.Find(DamageType))
-    {
-        return *Resistance;
-    }
-    return 0.0f;
+    SetInvulnerable(false);
+}
+
+float UCombat_DamageSystem::CalculateDamageReduction(float IncomingDamage, float ArmorPenetration) const
+{
+    float EffectiveArmor = FMath::Max(0.0f, BaseArmor - ArmorPenetration);
+    float DamageReduction = EffectiveArmor / (EffectiveArmor + 100.0f);
+    return IncomingDamage * (1.0f - DamageReduction);
+}
+
+bool UCombat_DamageSystem::RollCritical(float CritChance) const
+{
+    return FMath::RandRange(0.0f, 1.0f) < CritChance;
+}
+
+bool UCombat_DamageSystem::RollBlock() const
+{
+    return FMath::RandRange(0.0f, 1.0f) < BlockChance;
 }
