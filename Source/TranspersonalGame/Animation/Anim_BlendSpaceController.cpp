@@ -2,231 +2,207 @@
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Components/SkeletalMeshComponent.h"
-#include "Kismet/KismetMathLibrary.h"
-#include "Engine/Engine.h"
+#include "Animation/AnimInstance.h"
+#include "Animation/BlendSpace.h"
+#include "Animation/BlendSpace1D.h"
+#include "Engine/World.h"
+#include "TimerManager.h"
 
 UAnim_BlendSpaceController::UAnim_BlendSpaceController()
 {
+    PrimaryComponentTick.bCanEverTick = true;
+    PrimaryComponentTick.TickGroup = TG_PrePhysics;
+    
     // Initialize default values
-    OwnerCharacter = nullptr;
-    MovementComponent = nullptr;
-    GroundSpeed = 0.0f;
-    bShouldMove = false;
+    SmoothedDirection = FVector2D::ZeroVector;
     SmoothedSpeed = 0.0f;
-    SmoothedDirection = 0.0f;
-    SmoothedLeanAngle = 0.0f;
+    LastUpdateTime = 0.0f;
     
-    // Initialize blend space data
-    BlendSpaceData = FAnim_BlendSpaceData();
-    BlendSpaceSettings = FAnim_BlendSpaceSettings();
+    // Set default configuration
+    Config = FAnim_BlendSpaceConfig();
 }
 
-void UAnim_BlendSpaceController::NativeInitializeAnimation()
+void UAnim_BlendSpaceController::BeginPlay()
 {
-    Super::NativeInitializeAnimation();
+    Super::BeginPlay();
     
-    UpdateCharacterReferences();
+    // Initialize blend spaces
+    InitializeBlendSpaces();
     
-    if (OwnerCharacter)
+    // Validate owner is a character
+    if (ACharacter* Character = Cast<ACharacter>(GetOwner()))
     {
-        UE_LOG(LogTemp, Log, TEXT("Anim_BlendSpaceController: Initialized for character %s"), 
-               *OwnerCharacter->GetName());
-    }
-}
-
-void UAnim_BlendSpaceController::NativeUpdateAnimation(float DeltaTimeX)
-{
-    Super::NativeUpdateAnimation(DeltaTimeX);
-    
-    if (!OwnerCharacter || !MovementComponent)
-    {
-        UpdateCharacterReferences();
-        return;
-    }
-    
-    UpdateMovementData();
-    UpdateBlendSpaceValues(DeltaTimeX);
-    SmoothValues(DeltaTimeX);
-}
-
-void UAnim_BlendSpaceController::UpdateCharacterReferences()
-{
-    OwnerCharacter = Cast<ACharacter>(TryGetPawnOwner());
-    
-    if (OwnerCharacter)
-    {
-        MovementComponent = OwnerCharacter->GetCharacterMovement();
-    }
-}
-
-void UAnim_BlendSpaceController::UpdateMovementData()
-{
-    if (!OwnerCharacter || !MovementComponent)
-    {
-        return;
-    }
-    
-    // Get current movement data
-    Velocity = OwnerCharacter->GetVelocity();
-    Acceleration = MovementComponent->GetCurrentAcceleration();
-    GroundSpeed = Velocity.Size2D();
-    bShouldMove = ShouldCharacterMove();
-    
-    // Update movement state flags
-    BlendSpaceData.bIsMoving = bShouldMove && GroundSpeed > BlendSpaceSettings.MinMovementSpeed;
-    BlendSpaceData.bIsFalling = MovementComponent->IsFalling();
-    BlendSpaceData.bIsJumping = MovementComponent->IsMovingOnGround() == false && Velocity.Z > 0.0f;
-}
-
-void UAnim_BlendSpaceController::UpdateBlendSpaceValues(float DeltaTime)
-{
-    if (!OwnerCharacter)
-    {
-        return;
-    }
-    
-    CalculateSpeedAndDirection();
-    CalculateLeanAngle();
-}
-
-void UAnim_BlendSpaceController::CalculateSpeedAndDirection()
-{
-    if (!OwnerCharacter)
-    {
-        BlendSpaceData.Speed = 0.0f;
-        BlendSpaceData.Direction = 0.0f;
-        return;
-    }
-    
-    // Calculate speed (normalized to character's max walk speed)
-    float MaxWalkSpeed = MovementComponent ? MovementComponent->MaxWalkSpeed : 600.0f;
-    BlendSpaceData.Speed = FMath::Clamp(GroundSpeed / MaxWalkSpeed, 0.0f, 1.0f);
-    
-    // Calculate direction relative to character's forward vector
-    if (BlendSpaceData.bIsMoving && GroundSpeed > BlendSpaceSettings.MinMovementSpeed)
-    {
-        BlendSpaceData.Direction = CalculateDirectionFromVelocity();
+        UE_LOG(LogTemp, Log, TEXT("BlendSpaceController initialized for character: %s"), *Character->GetName());
     }
     else
     {
-        BlendSpaceData.Direction = 0.0f;
+        UE_LOG(LogTemp, Warning, TEXT("BlendSpaceController attached to non-character actor"));
     }
 }
 
-void UAnim_BlendSpaceController::CalculateLeanAngle()
+void UAnim_BlendSpaceController::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
-    if (!OwnerCharacter || !BlendSpaceData.bIsMoving)
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+    
+    if (ACharacter* Character = Cast<ACharacter>(GetOwner()))
     {
-        BlendSpaceData.LeanAngle = 0.0f;
-        return;
+        if (UCharacterMovementComponent* MovementComp = Character->GetCharacterMovement())
+        {
+            // Get current movement data
+            FVector Velocity = MovementComp->Velocity;
+            float CurrentSpeed = Velocity.Size2D();
+            FVector2D MovementDir = FVector2D::ZeroVector;
+            
+            if (CurrentSpeed > 0.1f)
+            {
+                FVector ForwardVector = Character->GetActorForwardVector();
+                FVector RightVector = Character->GetActorRightVector();
+                
+                // Calculate movement direction relative to character
+                float ForwardDot = FVector::DotProduct(Velocity.GetSafeNormal(), ForwardVector);
+                float RightDot = FVector::DotProduct(Velocity.GetSafeNormal(), RightVector);
+                
+                MovementDir = FVector2D(ForwardDot, RightDot);
+            }
+            
+            // Update blend space values
+            UpdateBlendSpaceValues(CurrentSpeed, MovementDir);
+            
+            // Update smoothed values
+            UpdateSmoothedValues(DeltaTime, CurrentSpeed, MovementDir);
+            
+            // Update air state
+            BlendSpaceData.bIsInAir = MovementComp->IsFalling();
+        }
     }
-    
-    BlendSpaceData.LeanAngle = CalculateLeanFromAcceleration();
 }
 
-float UAnim_BlendSpaceController::CalculateDirectionFromVelocity() const
+void UAnim_BlendSpaceController::InitializeBlendSpaces()
 {
-    if (!OwnerCharacter || GroundSpeed < BlendSpaceSettings.MinMovementSpeed)
+    // Create default blend spaces if none are assigned
+    if (!BlendSpaceData.MovementBlendSpace)
     {
-        return 0.0f;
+        CreateDefaultBlendSpaces();
     }
     
-    // Get character's forward and right vectors
-    FVector ForwardVector = OwnerCharacter->GetActorForwardVector();
-    FVector RightVector = OwnerCharacter->GetActorRightVector();
-    
-    // Normalize velocity to 2D
-    FVector NormalizedVelocity = Velocity.GetSafeNormal2D();
-    
-    // Calculate dot products to determine direction
-    float ForwardDot = FVector::DotProduct(NormalizedVelocity, ForwardVector);
-    float RightDot = FVector::DotProduct(NormalizedVelocity, RightVector);
-    
-    // Convert to angle in degrees (-180 to 180)
-    float Direction = FMath::RadiansToDegrees(FMath::Atan2(RightDot, ForwardDot));
-    
-    return Direction;
+    ValidateBlendSpaces();
 }
 
-float UAnim_BlendSpaceController::CalculateLeanFromAcceleration() const
+void UAnim_BlendSpaceController::UpdateBlendSpaceValues(float Speed, const FVector2D& Direction)
 {
-    if (!OwnerCharacter || !BlendSpaceSettings.bUseAcceleration)
+    BlendSpaceData.CurrentSpeed = Speed;
+    BlendSpaceData.MovementDirection = Direction;
+    
+    // Normalize speed for blend space sampling
+    float NormalizedSpeed = GetNormalizedSpeed();
+    
+    // Update last update time
+    LastUpdateTime = GetWorld()->GetTimeSeconds();
+}
+
+void UAnim_BlendSpaceController::SetMovementBlendSpace(UBlendSpace* NewBlendSpace)
+{
+    BlendSpaceData.MovementBlendSpace = NewBlendSpace;
+    
+    if (NewBlendSpace)
     {
-        return 0.0f;
+        UE_LOG(LogTemp, Log, TEXT("Movement BlendSpace set: %s"), *NewBlendSpace->GetName());
     }
-    
-    // Get character's right vector
-    FVector RightVector = OwnerCharacter->GetActorRightVector();
-    
-    // Calculate lean based on acceleration in right direction
-    float RightAcceleration = FVector::DotProduct(Acceleration, RightVector);
-    
-    // Normalize and clamp to max lean angle
-    float LeanAngle = (RightAcceleration / 1000.0f) * BlendSpaceSettings.MaxLeanAngle;
-    LeanAngle = FMath::Clamp(LeanAngle, -BlendSpaceSettings.MaxLeanAngle, BlendSpaceSettings.MaxLeanAngle);
-    
-    return LeanAngle;
 }
 
-void UAnim_BlendSpaceController::SmoothValues(float DeltaTime)
+void UAnim_BlendSpaceController::SetSpeedBlendSpace(UBlendSpace1D* NewBlendSpace)
 {
-    // Smooth speed
-    SmoothedSpeed = FMath::FInterpTo(SmoothedSpeed, BlendSpaceData.Speed, 
-                                   DeltaTime, BlendSpaceSettings.SpeedSmoothingRate);
+    BlendSpaceData.SpeedBlendSpace = NewBlendSpace;
     
-    // Smooth direction
-    SmoothedDirection = FMath::FInterpTo(SmoothedDirection, BlendSpaceData.Direction, 
-                                       DeltaTime, BlendSpaceSettings.DirectionSmoothingRate);
-    
-    // Smooth lean angle
-    SmoothedLeanAngle = FMath::FInterpTo(SmoothedLeanAngle, BlendSpaceData.LeanAngle, 
-                                       DeltaTime, BlendSpaceSettings.LeanSmoothingRate);
-    
-    // Update blend space data with smoothed values
-    BlendSpaceData.Speed = SmoothedSpeed;
-    BlendSpaceData.Direction = SmoothedDirection;
-    BlendSpaceData.LeanAngle = SmoothedLeanAngle;
-}
-
-bool UAnim_BlendSpaceController::ShouldCharacterMove() const
-{
-    if (!MovementComponent)
+    if (NewBlendSpace)
     {
-        return false;
+        UE_LOG(LogTemp, Log, TEXT("Speed BlendSpace set: %s"), *NewBlendSpace->GetName());
     }
-    
-    // Character should move if:
-    // 1. Has input acceleration
-    // 2. Is not falling (unless has horizontal velocity)
-    // 3. Has sufficient ground speed
-    
-    bool bHasAcceleration = !Acceleration.IsNearlyZero();
-    bool bHasVelocity = GroundSpeed > BlendSpaceSettings.MinMovementSpeed;
-    bool bIsGrounded = MovementComponent->IsMovingOnGround();
-    
-    return (bHasAcceleration || bHasVelocity) && (bIsGrounded || bHasVelocity);
 }
 
-void UAnim_BlendSpaceController::SetBlendSpaceSettings(const FAnim_BlendSpaceSettings& NewSettings)
+float UAnim_BlendSpaceController::GetNormalizedSpeed() const
 {
-    BlendSpaceSettings = NewSettings;
-    
-    UE_LOG(LogTemp, Log, TEXT("Anim_BlendSpaceController: Updated blend space settings"));
-}
-
-void UAnim_BlendSpaceController::LogBlendSpaceData() const
-{
-    if (GEngine)
+    if (Config.MaxRunSpeed > 0.0f)
     {
-        FString DebugString = FString::Printf(
-            TEXT("BlendSpace - Speed: %.2f, Direction: %.2f, Lean: %.2f, Moving: %s, Falling: %s"),
-            BlendSpaceData.Speed,
-            BlendSpaceData.Direction,
-            BlendSpaceData.LeanAngle,
-            BlendSpaceData.bIsMoving ? TEXT("True") : TEXT("False"),
-            BlendSpaceData.bIsFalling ? TEXT("True") : TEXT("False")
-        );
-        
-        GEngine->AddOnScreenDebugMessage(-1, 0.0f, FColor::Green, DebugString);
+        return FMath::Clamp(BlendSpaceData.CurrentSpeed / Config.MaxRunSpeed, 0.0f, 1.0f);
     }
+    
+    return 0.0f;
+}
+
+void UAnim_BlendSpaceController::SetBlendSpaceConfig(const FAnim_BlendSpaceConfig& NewConfig)
+{
+    Config = NewConfig;
+    
+    UE_LOG(LogTemp, Log, TEXT("BlendSpace configuration updated - MaxWalk: %f, MaxRun: %f"), 
+           Config.MaxWalkSpeed, Config.MaxRunSpeed);
+}
+
+UAnimSequence* UAnim_BlendSpaceController::SampleBlendSpaceAnimation(float Speed, const FVector2D& Direction)
+{
+    if (!BlendSpaceData.MovementBlendSpace)
+    {
+        return nullptr;
+    }
+    
+    // Sample the blend space at the given parameters
+    FBlendSampleData SampleData;
+    TArray<FBlendSampleData> BlendSamples;
+    
+    // This would typically be done through the animation blueprint
+    // For now, return nullptr as this requires more complex blend space sampling
+    return nullptr;
+}
+
+void UAnim_BlendSpaceController::CreateDefaultBlendSpaces()
+{
+    // Create default movement blend space
+    BlendSpaceData.MovementBlendSpace = CreateMovementBlendSpace();
+    BlendSpaceData.SpeedBlendSpace = CreateSpeedBlendSpace();
+    
+    UE_LOG(LogTemp, Log, TEXT("Default blend spaces created"));
+}
+
+void UAnim_BlendSpaceController::UpdateSmoothedValues(float DeltaTime, float TargetSpeed, const FVector2D& TargetDirection)
+{
+    // Smooth speed changes
+    SmoothedSpeed = FMath::FInterpTo(SmoothedSpeed, TargetSpeed, DeltaTime, Config.BlendSpaceSmoothing);
+    
+    // Smooth direction changes
+    SmoothedDirection = FMath::Vector2DInterpTo(SmoothedDirection, TargetDirection, DeltaTime, Config.BlendSpaceSmoothing);
+    
+    // Apply direction change threshold
+    if (FVector2D::Distance(SmoothedDirection, TargetDirection) < Config.DirectionChangeThreshold)
+    {
+        SmoothedDirection = TargetDirection;
+    }
+}
+
+void UAnim_BlendSpaceController::ValidateBlendSpaces()
+{
+    if (!BlendSpaceData.MovementBlendSpace)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Movement BlendSpace is null"));
+    }
+    
+    if (!BlendSpaceData.SpeedBlendSpace)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Speed BlendSpace is null"));
+    }
+}
+
+UBlendSpace* UAnim_BlendSpaceController::CreateMovementBlendSpace()
+{
+    // In a real implementation, this would create a blend space asset
+    // For now, return nullptr as asset creation requires editor-only code
+    UE_LOG(LogTemp, Log, TEXT("Movement BlendSpace creation requested - requires asset creation"));
+    return nullptr;
+}
+
+UBlendSpace1D* UAnim_BlendSpaceController::CreateSpeedBlendSpace()
+{
+    // In a real implementation, this would create a 1D blend space asset
+    // For now, return nullptr as asset creation requires editor-only code
+    UE_LOG(LogTemp, Log, TEXT("Speed BlendSpace creation requested - requires asset creation"));
+    return nullptr;
 }
