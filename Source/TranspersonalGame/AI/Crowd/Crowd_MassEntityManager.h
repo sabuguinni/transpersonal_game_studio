@@ -4,52 +4,53 @@
 #include "GameFramework/Actor.h"
 #include "MassEntitySubsystem.h"
 #include "MassSpawnerSubsystem.h"
-#include "MassGameplayProcessor.h"
+#include "MassSimulationSubsystem.h"
 #include "Engine/World.h"
 #include "Components/StaticMeshComponent.h"
+#include "Components/SphereComponent.h"
 #include "SharedTypes.h"
 #include "Crowd_MassEntityManager.generated.h"
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FCrowd_HerdData
+struct TRANSPERSONALGAME_API FCrowd_AgentConfig
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Herd")
-    int32 EntityCount = 100;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Herd")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Agent")
     float MovementSpeed = 150.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Herd")
-    float FlockingRadius = 500.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Agent")
+    float PersonalSpace = 100.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Herd")
-    FVector CenterLocation = FVector::ZeroVector;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Agent")
+    float ViewRange = 500.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Herd")
-    ECrowd_BehaviorType BehaviorType = ECrowd_BehaviorType::Grazing;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Agent")
+    ECrowd_BehaviorType BehaviorType = ECrowd_BehaviorType::Wandering;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Agent")
+    int32 LODLevel = 0;
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FCrowd_LODSettings
+struct TRANSPERSONALGAME_API FCrowd_SpawnZone
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
-    float HighDetailDistance = 1000.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn Zone")
+    FVector Center = FVector::ZeroVector;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
-    float MediumDetailDistance = 2500.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn Zone")
+    float Radius = 1000.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
-    float LowDetailDistance = 5000.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn Zone")
+    int32 MaxAgents = 1000;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
-    int32 MaxHighDetailEntities = 200;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn Zone")
+    ECrowd_DensityLevel DensityLevel = ECrowd_DensityLevel::Medium;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
-    int32 MaxMediumDetailEntities = 1000;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn Zone")
+    TArray<FCrowd_AgentConfig> AgentConfigs;
 };
 
 UCLASS(BlueprintType, Blueprintable)
@@ -62,65 +63,102 @@ public:
 
 protected:
     virtual void BeginPlay() override;
-    virtual void Tick(float DeltaTime) override;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    UStaticMeshComponent* VisualizationMesh;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd System")
-    TArray<FCrowd_HerdData> HerdConfigurations;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd System")
-    FCrowd_LODSettings LODSettings;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd System")
-    int32 MaxSimultaneousEntities = 50000;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd System")
-    float UpdateFrequency = 0.1f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd System")
-    bool bEnableFlocking = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd System")
-    bool bEnableAvoidance = true;
-
-private:
-    UPROPERTY()
-    class UMassEntitySubsystem* MassEntitySubsystem;
-
-    UPROPERTY()
-    class UMassSpawnerSubsystem* MassSpawnerSubsystem;
-
-    TArray<FMassEntityHandle> ActiveEntities;
-    float LastUpdateTime = 0.0f;
-    int32 CurrentEntityCount = 0;
+    virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 public:
-    UFUNCTION(BlueprintCallable, Category = "Crowd System")
+    virtual void Tick(float DeltaTime) override;
+
+    // Core Mass Entity System
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Mass Entity")
+    class UMassEntitySubsystem* MassEntitySubsystem;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Mass Entity")
+    class UMassSpawnerSubsystem* MassSpawnerSubsystem;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Mass Entity")
+    class UMassSimulationSubsystem* MassSimulationSubsystem;
+
+    // Crowd Configuration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Config")
+    TArray<FCrowd_SpawnZone> SpawnZones;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Config")
+    int32 MaxTotalAgents = 50000;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Config")
+    float TickInterval = 0.016f; // 60 FPS
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Config")
+    float LODUpdateInterval = 0.5f;
+
+    // Performance Settings
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float CullingDistance = 5000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    int32 MaxVisibleAgents = 2000;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    bool bEnableOcclusion = true;
+
+    // Runtime State
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Runtime")
+    int32 ActiveAgentCount = 0;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Runtime")
+    int32 VisibleAgentCount = 0;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Runtime")
+    float CurrentFrameTime = 0.0f;
+
+    // Core Functions
+    UFUNCTION(BlueprintCallable, Category = "Crowd Management")
     void InitializeMassEntitySystem();
 
-    UFUNCTION(BlueprintCallable, Category = "Crowd System")
-    void SpawnHerd(const FCrowd_HerdData& HerdData);
+    UFUNCTION(BlueprintCallable, Category = "Crowd Management")
+    void SpawnCrowdInZone(const FCrowd_SpawnZone& Zone);
 
-    UFUNCTION(BlueprintCallable, Category = "Crowd System")
-    void UpdateCrowdBehavior(float DeltaTime);
+    UFUNCTION(BlueprintCallable, Category = "Crowd Management")
+    void DespawnAllAgents();
 
-    UFUNCTION(BlueprintCallable, Category = "Crowd System")
-    void SetHerdDestination(int32 HerdIndex, FVector NewDestination);
-
-    UFUNCTION(BlueprintCallable, Category = "Crowd System")
+    UFUNCTION(BlueprintCallable, Category = "Crowd Management")
     void UpdateLODSystem();
 
-    UFUNCTION(BlueprintCallable, Category = "Crowd System")
-    int32 GetActiveEntityCount() const { return CurrentEntityCount; }
+    UFUNCTION(BlueprintCallable, Category = "Crowd Management")
+    void SetDensityLevel(ECrowd_DensityLevel NewDensity);
 
-    UFUNCTION(BlueprintCallable, Category = "Crowd System")
-    void ClearAllHerds();
+    // Pathfinding Integration
+    UFUNCTION(BlueprintCallable, Category = "Pathfinding")
+    void RegisterWaypoint(const FVector& Location, const FString& WaypointName);
 
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Debug")
-    void DebugSpawnTestHerd();
+    UFUNCTION(BlueprintCallable, Category = "Pathfinding")
+    void CreatePathNetwork();
 
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Debug")
-    void DebugShowHerdStats();
+    UFUNCTION(BlueprintCallable, Category = "Pathfinding")
+    TArray<FVector> GetOptimalPath(const FVector& Start, const FVector& End);
+
+    // Performance Monitoring
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    float GetCurrentPerformanceMetric() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void OptimizePerformance();
+
+private:
+    // Internal Systems
+    void UpdateAgentBehaviors(float DeltaTime);
+    void ProcessCulling();
+    void HandleCollisionAvoidance();
+    void UpdatePathfinding();
+    
+    // Performance Optimization
+    void AdaptiveLOD();
+    void DynamicCulling();
+    void BatchProcessing();
+
+    // Internal State
+    TArray<FVector> WaypointNetwork;
+    TMap<FString, FVector> NamedWaypoints;
+    float LastLODUpdate = 0.0f;
+    float LastPerformanceCheck = 0.0f;
 };
