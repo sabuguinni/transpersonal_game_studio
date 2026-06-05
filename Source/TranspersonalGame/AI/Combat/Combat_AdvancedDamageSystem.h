@@ -4,77 +4,79 @@
 #include "Components/ActorComponent.h"
 #include "Engine/Engine.h"
 #include "GameFramework/Actor.h"
-#include "SharedTypes.h"
+#include "GameFramework/Pawn.h"
+#include "../../SharedTypes.h"
 #include "Combat_AdvancedDamageSystem.generated.h"
 
-UENUM(BlueprintType)
-enum class ECombat_DamageType : uint8
-{
-    Physical     UMETA(DisplayName = "Physical"),
-    Environmental UMETA(DisplayName = "Environmental"),
-    Fall         UMETA(DisplayName = "Fall"),
-    Bite         UMETA(DisplayName = "Bite"),
-    Claw         UMETA(DisplayName = "Claw"),
-    Crush        UMETA(DisplayName = "Crush")
-};
-
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FCombat_DamageData
+struct TRANSPERSONALGAME_API FCombat_DamageInfo
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Damage")
-    float BaseDamage = 25.0f;
+    float BaseDamage = 10.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Damage")
-    float DamageVariance = 10.0f;
+    EDamageType DamageType = EDamageType::Physical;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Damage")
-    ECombat_DamageType DamageType = ECombat_DamageType::Physical;
+    FVector HitLocation = FVector::ZeroVector;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Damage")
-    bool bCanCauseBleeding = false;
+    FVector HitDirection = FVector::ForwardVector;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Damage")
-    float CriticalHitChance = 0.1f;
+    AActor* DamageSource = nullptr;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Damage")
-    float CriticalMultiplier = 2.0f;
+    float ArmorPenetration = 0.0f;
 
-    FCombat_DamageData()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Damage")
+    bool bIsCriticalHit = false;
+
+    FCombat_DamageInfo()
     {
-        BaseDamage = 25.0f;
-        DamageVariance = 10.0f;
-        DamageType = ECombat_DamageType::Physical;
-        bCanCauseBleeding = false;
-        CriticalHitChance = 0.1f;
-        CriticalMultiplier = 2.0f;
+        BaseDamage = 10.0f;
+        DamageType = EDamageType::Physical;
+        HitLocation = FVector::ZeroVector;
+        HitDirection = FVector::ForwardVector;
+        DamageSource = nullptr;
+        ArmorPenetration = 0.0f;
+        bIsCriticalHit = false;
     }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FCombat_DamageResult
+struct TRANSPERSONALGAME_API FCombat_BodyPartDamage
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Damage")
-    float FinalDamage = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Body Part")
+    FString BodyPartName = "Torso";
 
-    UPROPERTY(BlueprintReadOnly, Category = "Damage")
-    bool bWasCritical = false;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Body Part")
+    float DamageMultiplier = 1.0f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Damage")
-    bool bCausedBleeding = false;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Body Part")
+    float CurrentHealth = 100.0f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Damage")
-    ECombat_DamageType DamageType = ECombat_DamageType::Physical;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Body Part")
+    float MaxHealth = 100.0f;
 
-    FCombat_DamageResult()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Body Part")
+    bool bIsVitalPart = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Body Part")
+    bool bIsDisabled = false;
+
+    FCombat_BodyPartDamage()
     {
-        FinalDamage = 0.0f;
-        bWasCritical = false;
-        bCausedBleeding = false;
-        DamageType = ECombat_DamageType::Physical;
+        BodyPartName = "Torso";
+        DamageMultiplier = 1.0f;
+        CurrentHealth = 100.0f;
+        MaxHealth = 100.0f;
+        bIsVitalPart = false;
+        bIsDisabled = false;
     }
 };
 
@@ -89,68 +91,96 @@ public:
 protected:
     virtual void BeginPlay() override;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Damage System")
-    TMap<ECombat_DamageType, FCombat_DamageData> DamageTypeData;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Damage System")
-    float DamageReductionPercentage = 0.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Damage System")
-    bool bIsInvulnerable = false;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Damage System")
-    float BleedingDamagePerSecond = 5.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Damage System")
-    float BleedingDuration = 10.0f;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Damage System")
-    bool bIsBleeding = false;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Damage System")
-    float BleedingTimeRemaining = 0.0f;
-
-    FTimerHandle BleedingTimerHandle;
-
 public:
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    UFUNCTION(BlueprintCallable, Category = "Damage System")
-    FCombat_DamageResult ApplyDamage(const FCombat_DamageData& DamageData, AActor* DamageSource = nullptr);
+    // === DAMAGE APPLICATION ===
+    UFUNCTION(BlueprintCallable, Category = "Combat Damage")
+    float ApplyDamage(const FCombat_DamageInfo& DamageInfo);
 
-    UFUNCTION(BlueprintCallable, Category = "Damage System")
-    void SetDamageReduction(float ReductionPercentage);
+    UFUNCTION(BlueprintCallable, Category = "Combat Damage")
+    float ApplyDamageToBodyPart(const FString& BodyPartName, const FCombat_DamageInfo& DamageInfo);
 
-    UFUNCTION(BlueprintCallable, Category = "Damage System")
-    void SetInvulnerability(bool bInvulnerable);
+    UFUNCTION(BlueprintCallable, Category = "Combat Damage")
+    void ApplyStatusEffect(EStatusEffect Effect, float Duration, float Intensity);
 
-    UFUNCTION(BlueprintCallable, Category = "Damage System")
-    void StartBleeding(float Duration = 10.0f);
+    // === DAMAGE CALCULATION ===
+    UFUNCTION(BlueprintCallable, Category = "Combat Damage")
+    float CalculateFinalDamage(float BaseDamage, EDamageType DamageType, const FString& BodyPartName);
 
-    UFUNCTION(BlueprintCallable, Category = "Damage System")
-    void StopBleeding();
+    UFUNCTION(BlueprintCallable, Category = "Combat Damage")
+    bool CheckCriticalHit(const FVector& HitLocation, const FVector& HitDirection);
 
-    UFUNCTION(BlueprintCallable, Category = "Damage System")
-    float CalculateFallDamage(float FallHeight);
+    UFUNCTION(BlueprintCallable, Category = "Combat Damage")
+    float GetDamageResistance(EDamageType DamageType);
 
-    UFUNCTION(BlueprintCallable, Category = "Damage System")
-    FCombat_DamageData GetDamageDataForType(ECombat_DamageType DamageType);
+    // === BODY PART SYSTEM ===
+    UFUNCTION(BlueprintCallable, Category = "Combat Damage")
+    void InitializeBodyParts();
 
-    UFUNCTION(BlueprintImplementableEvent, Category = "Damage System")
-    void OnDamageApplied(const FCombat_DamageResult& DamageResult, AActor* DamageSource);
+    UFUNCTION(BlueprintCallable, Category = "Combat Damage")
+    FCombat_BodyPartDamage GetBodyPartInfo(const FString& BodyPartName);
 
-    UFUNCTION(BlueprintImplementableEvent, Category = "Damage System")
-    void OnCriticalHit(const FCombat_DamageResult& DamageResult);
+    UFUNCTION(BlueprintCallable, Category = "Combat Damage")
+    void HealBodyPart(const FString& BodyPartName, float HealAmount);
 
-    UFUNCTION(BlueprintImplementableEvent, Category = "Damage System")
-    void OnBleedingStarted();
+    // === STATUS EFFECTS ===
+    UFUNCTION(BlueprintCallable, Category = "Combat Damage")
+    void ProcessStatusEffects(float DeltaTime);
 
-    UFUNCTION(BlueprintImplementableEvent, Category = "Damage System")
-    void OnBleedingStopped();
+    UFUNCTION(BlueprintCallable, Category = "Combat Damage")
+    bool HasStatusEffect(EStatusEffect Effect);
 
-private:
-    void InitializeDamageTypes();
-    void ProcessBleeding();
-    float CalculateRandomDamage(const FCombat_DamageData& DamageData);
-    bool RollForCritical(float CriticalChance);
+    UFUNCTION(BlueprintCallable, Category = "Combat Damage")
+    void RemoveStatusEffect(EStatusEffect Effect);
+
+    // === DEATH AND REVIVAL ===
+    UFUNCTION(BlueprintCallable, Category = "Combat Damage")
+    void HandleDeath();
+
+    UFUNCTION(BlueprintCallable, Category = "Combat Damage")
+    bool CanRevive();
+
+    UFUNCTION(BlueprintCallable, Category = "Combat Damage")
+    void ReviveActor(float HealthPercentage = 0.25f);
+
+protected:
+    // === DAMAGE PROPERTIES ===
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Damage", meta = (AllowPrivateAccess = "true"))
+    float MaxHealth = 100.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Damage", meta = (AllowPrivateAccess = "true"))
+    float CurrentHealth = 100.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Damage", meta = (AllowPrivateAccess = "true"))
+    TMap<EDamageType, float> DamageResistances;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Damage", meta = (AllowPrivateAccess = "true"))
+    TArray<FCombat_BodyPartDamage> BodyParts;
+
+    // === STATUS EFFECTS ===
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Damage", meta = (AllowPrivateAccess = "true"))
+    TMap<EStatusEffect, float> ActiveStatusEffects;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Damage", meta = (AllowPrivateAccess = "true"))
+    TMap<EStatusEffect, float> StatusEffectDurations;
+
+    // === COMBAT SETTINGS ===
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Damage", meta = (AllowPrivateAccess = "true"))
+    float CriticalHitChance = 0.1f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Damage", meta = (AllowPrivateAccess = "true"))
+    float CriticalHitMultiplier = 2.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Damage", meta = (AllowPrivateAccess = "true"))
+    bool bIsDead = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Damage", meta = (AllowPrivateAccess = "true"))
+    bool bCanRevive = true;
+
+    // === INTERNAL METHODS ===
+    void UpdateHealthStatus();
+    void BroadcastDamageEvent(const FCombat_DamageInfo& DamageInfo, float FinalDamage);
+    void BroadcastDeathEvent();
+    FString DetermineHitBodyPart(const FVector& HitLocation);
 };
