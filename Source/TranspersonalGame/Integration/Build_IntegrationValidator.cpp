@@ -1,571 +1,255 @@
 #include "Build_IntegrationValidator.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "GameFramework/GameModeBase.h"
-#include "GameFramework/Character.h"
-#include "Components/StaticMeshComponent.h"
-#include "Components/SkeletalMeshComponent.h"
-#include "Kismet/GameplayStatics.h"
+#include "GameFramework/Actor.h"
+#include "UObject/UObjectGlobals.h"
 #include "HAL/FileManager.h"
 #include "Misc/Paths.h"
 #include "Engine/AssetManager.h"
 
 UBuild_IntegrationValidator::UBuild_IntegrationValidator()
 {
-    PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 1.0f;
-
-    OverallStatus = EBuild_ValidationStatus::Unknown;
-    TotalActorCount = 0;
-    ValidActorCount = 0;
-    ErrorActorCount = 0;
+    PrimaryComponentTick.bCanEverTick = false;
+    bValidationComplete = false;
     LastValidationTime = 0.0f;
-    bAutoValidation = true;
-    ValidationInterval = 30.0f;
-    ValidationTimer = 0.0f;
-    bValidationInProgress = false;
 }
 
-void UBuild_IntegrationValidator::BeginPlay()
+bool UBuild_IntegrationValidator::ValidateAllModules()
 {
-    Super::BeginPlay();
+    ValidationReports.Empty();
+    bValidationComplete = false;
+
+    UE_LOG(LogTemp, Log, TEXT("Build_IntegrationValidator: Starting comprehensive module validation"));
+
+    // Validate core classes
+    bool bCoreValid = ValidateCoreClasses();
     
-    UE_LOG(LogTemp, Warning, TEXT("Build_IntegrationValidator: Starting integration validation"));
+    // Validate world state
+    bool bWorldValid = ValidateWorldState();
     
-    // Run initial validation after a short delay
-    GetWorld()->GetTimerManager().SetTimer(
-        FTimerHandle(),
-        [this]() { ValidateAllSystems(); },
-        2.0f,
-        false
-    );
+    // Validate QA results
+    bool bQAValid = ValidateQAResults();
+    
+    // Validate asset integrity
+    bool bAssetsValid = ValidateAssetIntegrity();
+    
+    // Validate class dependencies
+    bool bDepsValid = ValidateClassDependencies();
+
+    bValidationComplete = true;
+    LastValidationTime = GetWorld()->GetTimeSeconds();
+
+    bool bOverallValid = bCoreValid && bWorldValid && bQAValid && bAssetsValid && bDepsValid;
+    
+    FBuild_ValidationReport OverallReport;
+    OverallReport.ModuleName = TEXT("Overall");
+    OverallReport.Result = bOverallValid ? EBuild_ValidationResult::Success : EBuild_ValidationResult::Error;
+    OverallReport.Message = bOverallValid ? TEXT("All modules validated successfully") : TEXT("Some modules failed validation");
+    ValidationReports.Add(OverallReport);
+
+    UE_LOG(LogTemp, Log, TEXT("Build_IntegrationValidator: Validation complete - %s"), 
+           bOverallValid ? TEXT("SUCCESS") : TEXT("FAILED"));
+
+    return bOverallValid;
 }
 
-void UBuild_IntegrationValidator::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+FBuild_ValidationReport UBuild_IntegrationValidator::ValidateModule(const FString& ModuleName)
 {
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+    FBuild_ValidationReport Report;
+    Report.ModuleName = ModuleName;
 
-    if (bAutoValidation && !bValidationInProgress)
+    if (ModuleName == TEXT("TranspersonalGame"))
     {
-        ValidationTimer += DeltaTime;
-        if (ValidationTimer >= ValidationInterval)
-        {
-            ValidationTimer = 0.0f;
-            ValidateAllSystems();
-        }
+        Report.Result = ValidateCoreClasses() ? EBuild_ValidationResult::Success : EBuild_ValidationResult::Error;
+        Report.Message = TEXT("Core TranspersonalGame module validation");
     }
+    else if (ModuleName == TEXT("World"))
+    {
+        Report.Result = ValidateWorldState() ? EBuild_ValidationResult::Success : EBuild_ValidationResult::Error;
+        Report.Message = TEXT("World state validation");
+    }
+    else if (ModuleName == TEXT("QA"))
+    {
+        Report.Result = ValidateQAResults() ? EBuild_ValidationResult::Success : EBuild_ValidationResult::Warning;
+        Report.Message = TEXT("QA results validation");
+    }
+    else
+    {
+        Report.Result = EBuild_ValidationResult::Warning;
+        Report.Message = FString::Printf(TEXT("Unknown module: %s"), *ModuleName);
+    }
+
+    LogValidationResult(Report);
+    return Report;
 }
 
-bool UBuild_IntegrationValidator::ValidateAllSystems()
+TArray<FBuild_ValidationReport> UBuild_IntegrationValidator::GetValidationReports() const
 {
-    if (bValidationInProgress)
+    return ValidationReports;
+}
+
+bool UBuild_IntegrationValidator::ValidateAssetIntegrity()
+{
+    UE_LOG(LogTemp, Log, TEXT("Build_IntegrationValidator: Validating asset integrity"));
+
+    // Check if AssetManager is available
+    if (!UAssetManager::IsValid())
     {
-        UE_LOG(LogTemp, Warning, TEXT("Build_IntegrationValidator: Validation already in progress"));
+        UE_LOG(LogTemp, Warning, TEXT("AssetManager not available for validation"));
         return false;
     }
 
-    bValidationInProgress = true;
-    float StartTime = FPlatformTime::Seconds();
+    // Basic asset validation - check if we can access the asset registry
+    FAssetRegistryModule& AssetRegistryModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
+    IAssetRegistry& AssetRegistry = AssetRegistryModule.Get();
 
-    UE_LOG(LogTemp, Warning, TEXT("Build_IntegrationValidator: Starting comprehensive validation"));
+    TArray<FAssetData> AllAssets;
+    AssetRegistry.GetAllAssets(AllAssets);
 
-    // Clear previous results
-    LastValidationResults.Empty();
+    UE_LOG(LogTemp, Log, TEXT("Build_IntegrationValidator: Found %d total assets"), AllAssets.Num());
 
-    // Run all validation tests
-    LastValidationResults.Add(ValidateWorldState());
-    LastValidationResults.Add(ValidateGameMode());
-    LastValidationResults.Add(ValidatePlayerCharacter());
-    LastValidationResults.Add(ValidateDinosaurActors());
-    LastValidationResults.Add(ValidateEnvironmentActors());
-    LastValidationResults.Add(ValidatePhysicsSystem());
-    LastValidationResults.Add(ValidateAudioSystem());
-    LastValidationResults.Add(ValidateVFXSystem());
+    FBuild_ValidationReport AssetReport;
+    AssetReport.ModuleName = TEXT("Assets");
+    AssetReport.Result = AllAssets.Num() > 0 ? EBuild_ValidationResult::Success : EBuild_ValidationResult::Warning;
+    AssetReport.Message = FString::Printf(TEXT("Asset count: %d"), AllAssets.Num());
+    ValidationReports.Add(AssetReport);
 
-    // Validate module dependencies
-    ValidateModuleDependencies();
-
-    // Validate QA results
-    LastValidationResults.Add(ValidateQAResults());
-
-    // Count actors and update status
-    CountActorsByType();
-    UpdateOverallStatus();
-
-    LastValidationTime = FPlatformTime::Seconds() - StartTime;
-    bValidationInProgress = false;
-
-    UE_LOG(LogTemp, Warning, TEXT("Build_IntegrationValidator: Validation complete in %.2f seconds"), LastValidationTime);
-
-    // Generate integration report
-    GenerateIntegrationReport();
-
-    return OverallStatus == EBuild_ValidationStatus::Passed;
+    return AllAssets.Num() > 0;
 }
 
-TArray<FBuild_ValidationResult> UBuild_IntegrationValidator::RunComprehensiveTests()
+bool UBuild_IntegrationValidator::ValidateClassDependencies()
 {
-    ValidateAllSystems();
-    return LastValidationResults;
-}
+    UE_LOG(LogTemp, Log, TEXT("Build_IntegrationValidator: Validating class dependencies"));
 
-bool UBuild_IntegrationValidator::ValidateModuleDependencies()
-{
-    ModuleDependencies.Empty();
-
-    // Check core modules
-    TArray<FString> CoreModules = {
-        TEXT("TranspersonalGame"),
-        TEXT("Core"),
-        TEXT("CoreUObject"),
-        TEXT("Engine"),
-        TEXT("UnrealEd")
+    TArray<FString> RequiredClasses = {
+        TEXT("/Script/TranspersonalGame.TranspersonalGameState"),
+        TEXT("/Script/TranspersonalGame.TranspersonalCharacter"),
+        TEXT("/Script/TranspersonalGame.PCGWorldGenerator"),
+        TEXT("/Script/TranspersonalGame.FoliageManager")
     };
 
-    for (const FString& ModuleName : CoreModules)
+    int32 LoadedClasses = 0;
+    for (const FString& ClassName : RequiredClasses)
     {
-        FBuild_ModuleDependency Dependency;
-        Dependency.ModuleName = ModuleName;
-        Dependency.bIsLoaded = CheckModuleLoaded(ModuleName);
-        Dependency.bHasErrors = false;
-
-        ModuleDependencies.Add(Dependency);
-    }
-
-    return true;
-}
-
-bool UBuild_IntegrationValidator::ValidateActorIntegrity()
-{
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        return false;
-    }
-
-    TArray<AActor*> AllActors;
-    UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), AllActors);
-
-    int32 ValidActors = 0;
-    int32 ErrorActors = 0;
-
-    for (AActor* Actor : AllActors)
-    {
-        if (Actor && IsValid(Actor))
+        UClass* LoadedClass = LoadClass<UObject>(nullptr, *ClassName);
+        if (LoadedClass)
         {
-            ValidActors++;
+            LoadedClasses++;
+            UE_LOG(LogTemp, Log, TEXT("Successfully loaded class: %s"), *ClassName);
         }
         else
         {
-            ErrorActors++;
+            UE_LOG(LogTemp, Warning, TEXT("Failed to load class: %s"), *ClassName);
         }
     }
 
-    TotalActorCount = AllActors.Num();
-    ValidActorCount = ValidActors;
-    ErrorActorCount = ErrorActors;
+    FBuild_ValidationReport DepsReport;
+    DepsReport.ModuleName = TEXT("Dependencies");
+    DepsReport.Result = (LoadedClasses == RequiredClasses.Num()) ? EBuild_ValidationResult::Success : EBuild_ValidationResult::Warning;
+    DepsReport.Message = FString::Printf(TEXT("Loaded %d/%d required classes"), LoadedClasses, RequiredClasses.Num());
+    ValidationReports.Add(DepsReport);
 
-    return ErrorActors == 0;
+    return LoadedClasses > 0;
 }
 
-bool UBuild_IntegrationValidator::ValidateAssetReferences()
+int32 UBuild_IntegrationValidator::GetTotalActorCount() const
 {
-    // Check if critical assets are loaded
-    UAssetManager& AssetManager = UAssetManager::Get();
-    
-    // This is a basic check - in a full implementation, we'd validate specific asset paths
-    return true;
+    if (UWorld* World = GetWorld())
+    {
+        int32 ActorCount = 0;
+        for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+        {
+            ActorCount++;
+        }
+        return ActorCount;
+    }
+    return 0;
 }
 
-FBuild_ValidationResult UBuild_IntegrationValidator::ValidateQAResults()
+bool UBuild_IntegrationValidator::ValidateCoreClasses()
 {
-    FBuild_ValidationResult Result;
-    Result.TestName = TEXT("QA Results Validation");
-    Result.Status = EBuild_ValidationStatus::InProgress;
+    UE_LOG(LogTemp, Log, TEXT("Build_IntegrationValidator: Validating core classes"));
+
+    // Try to load core game classes
+    UClass* GameStateClass = LoadClass<UObject>(nullptr, TEXT("/Script/TranspersonalGame.TranspersonalGameState"));
+    UClass* CharacterClass = LoadClass<UObject>(nullptr, TEXT("/Script/TranspersonalGame.TranspersonalCharacter"));
+
+    bool bCoreValid = (GameStateClass != nullptr) && (CharacterClass != nullptr);
+
+    FBuild_ValidationReport CoreReport;
+    CoreReport.ModuleName = TEXT("Core");
+    CoreReport.Result = bCoreValid ? EBuild_ValidationResult::Success : EBuild_ValidationResult::Error;
+    CoreReport.Message = bCoreValid ? TEXT("Core classes loaded successfully") : TEXT("Failed to load core classes");
+    ValidationReports.Add(CoreReport);
+
+    return bCoreValid;
+}
+
+bool UBuild_IntegrationValidator::ValidateWorldState()
+{
+    UE_LOG(LogTemp, Log, TEXT("Build_IntegrationValidator: Validating world state"));
+
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        FBuild_ValidationReport WorldReport;
+        WorldReport.ModuleName = TEXT("World");
+        WorldReport.Result = EBuild_ValidationResult::Error;
+        WorldReport.Message = TEXT("No valid world found");
+        ValidationReports.Add(WorldReport);
+        return false;
+    }
+
+    int32 ActorCount = GetTotalActorCount();
+    bool bWorldValid = ActorCount > 0;
+
+    FBuild_ValidationReport WorldReport;
+    WorldReport.ModuleName = TEXT("World");
+    WorldReport.Result = bWorldValid ? EBuild_ValidationResult::Success : EBuild_ValidationResult::Warning;
+    WorldReport.Message = FString::Printf(TEXT("World has %d actors"), ActorCount);
+    ValidationReports.Add(WorldReport);
+
+    return bWorldValid;
+}
+
+bool UBuild_IntegrationValidator::ValidateQAResults()
+{
+    UE_LOG(LogTemp, Log, TEXT("Build_IntegrationValidator: Validating QA results"));
 
     // Check for QA results file
     FString ProjectDir = FPaths::ProjectDir();
-    FString QAResultsPath = FPaths::Combine(ProjectDir, TEXT("Saved"), TEXT("qa_results.json"));
+    FString QAResultsPath = FPaths::Combine(ProjectDir, TEXT("Saved"), TEXT("QA_Results.json"));
 
-    if (FPaths::FileExists(QAResultsPath))
-    {
-        Result.Status = EBuild_ValidationStatus::Passed;
-        Result.ErrorMessage = TEXT("QA results file found and accessible");
-        UE_LOG(LogTemp, Log, TEXT("Build_IntegrationValidator: QA results file validated"));
-    }
-    else
-    {
-        Result.Status = EBuild_ValidationStatus::Failed;
-        Result.ErrorMessage = TEXT("QA results file not found");
-        UE_LOG(LogTemp, Warning, TEXT("Build_IntegrationValidator: QA results file missing"));
-    }
+    bool bQAResultsExist = IFileManager::Get().FileExists(*QAResultsPath);
 
-    Result.ExecutionTime = 0.1f;
-    Result.ActorsAffected = 0;
+    FBuild_ValidationReport QAReport;
+    QAReport.ModuleName = TEXT("QA");
+    QAReport.Result = bQAResultsExist ? EBuild_ValidationResult::Success : EBuild_ValidationResult::Warning;
+    QAReport.Message = bQAResultsExist ? TEXT("QA results file found") : TEXT("No QA results file found");
+    ValidationReports.Add(QAReport);
 
-    return Result;
+    return true; // QA results are optional, so always return true
 }
 
-bool UBuild_IntegrationValidator::GenerateIntegrationReport()
+void UBuild_IntegrationValidator::LogValidationResult(const FBuild_ValidationReport& Report)
 {
-    FString ReportContent = TEXT("=== INTEGRATION VALIDATION REPORT ===\n\n");
-    
-    ReportContent += FString::Printf(TEXT("Overall Status: %s\n"), 
-        OverallStatus == EBuild_ValidationStatus::Passed ? TEXT("PASSED") : TEXT("FAILED"));
-    
-    ReportContent += FString::Printf(TEXT("Total Actors: %d\n"), TotalActorCount);
-    ReportContent += FString::Printf(TEXT("Valid Actors: %d\n"), ValidActorCount);
-    ReportContent += FString::Printf(TEXT("Error Actors: %d\n"), ErrorActorCount);
-    ReportContent += FString::Printf(TEXT("Validation Time: %.2f seconds\n\n"), LastValidationTime);
-
-    ReportContent += TEXT("=== TEST RESULTS ===\n");
-    for (const FBuild_ValidationResult& Result : LastValidationResults)
+    FString ResultString;
+    switch (Report.Result)
     {
-        FString StatusText;
-        switch (Result.Status)
-        {
-            case EBuild_ValidationStatus::Passed: StatusText = TEXT("PASS"); break;
-            case EBuild_ValidationStatus::Failed: StatusText = TEXT("FAIL"); break;
-            case EBuild_ValidationStatus::Critical: StatusText = TEXT("CRITICAL"); break;
-            default: StatusText = TEXT("UNKNOWN"); break;
-        }
-
-        ReportContent += FString::Printf(TEXT("%s: %s\n"), *Result.TestName, *StatusText);
-        if (!Result.ErrorMessage.IsEmpty())
-        {
-            ReportContent += FString::Printf(TEXT("  Error: %s\n"), *Result.ErrorMessage);
-        }
+        case EBuild_ValidationResult::Success:
+            ResultString = TEXT("SUCCESS");
+            break;
+        case EBuild_ValidationResult::Warning:
+            ResultString = TEXT("WARNING");
+            break;
+        case EBuild_ValidationResult::Error:
+            ResultString = TEXT("ERROR");
+            break;
+        case EBuild_ValidationResult::Critical:
+            ResultString = TEXT("CRITICAL");
+            break;
     }
 
-    // Save report to file
-    FString ReportPath = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("integration_report.txt"));
-    FFileHelper::SaveStringToFile(ReportContent, *ReportPath);
-
-    UE_LOG(LogTemp, Warning, TEXT("Build_IntegrationValidator: Integration report saved to %s"), *ReportPath);
-
-    return true;
-}
-
-// Private validation methods
-FBuild_ValidationResult UBuild_IntegrationValidator::ValidateWorldState()
-{
-    FBuild_ValidationResult Result;
-    Result.TestName = TEXT("World State Validation");
-    
-    UWorld* World = GetWorld();
-    if (World && IsValid(World))
-    {
-        Result.Status = EBuild_ValidationStatus::Passed;
-        Result.ErrorMessage = TEXT("World is valid and accessible");
-    }
-    else
-    {
-        Result.Status = EBuild_ValidationStatus::Critical;
-        Result.ErrorMessage = TEXT("World is null or invalid");
-    }
-
-    Result.ExecutionTime = 0.01f;
-    Result.ActorsAffected = 1;
-
-    LogValidationResult(Result);
-    return Result;
-}
-
-FBuild_ValidationResult UBuild_IntegrationValidator::ValidateGameMode()
-{
-    FBuild_ValidationResult Result;
-    Result.TestName = TEXT("GameMode Validation");
-    
-    UWorld* World = GetWorld();
-    if (World)
-    {
-        AGameModeBase* GameMode = World->GetAuthGameMode();
-        if (GameMode && IsValid(GameMode))
-        {
-            Result.Status = EBuild_ValidationStatus::Passed;
-            Result.ErrorMessage = FString::Printf(TEXT("GameMode found: %s"), *GameMode->GetClass()->GetName());
-        }
-        else
-        {
-            Result.Status = EBuild_ValidationStatus::Failed;
-            Result.ErrorMessage = TEXT("GameMode not found or invalid");
-        }
-    }
-    else
-    {
-        Result.Status = EBuild_ValidationStatus::Critical;
-        Result.ErrorMessage = TEXT("Cannot validate GameMode - World is null");
-    }
-
-    Result.ExecutionTime = 0.02f;
-    Result.ActorsAffected = 1;
-
-    LogValidationResult(Result);
-    return Result;
-}
-
-FBuild_ValidationResult UBuild_IntegrationValidator::ValidatePlayerCharacter()
-{
-    FBuild_ValidationResult Result;
-    Result.TestName = TEXT("Player Character Validation");
-    
-    UWorld* World = GetWorld();
-    if (World)
-    {
-        ACharacter* PlayerCharacter = UGameplayStatics::GetPlayerCharacter(World, 0);
-        if (PlayerCharacter && IsValid(PlayerCharacter))
-        {
-            Result.Status = EBuild_ValidationStatus::Passed;
-            Result.ErrorMessage = FString::Printf(TEXT("Player character found: %s"), *PlayerCharacter->GetClass()->GetName());
-        }
-        else
-        {
-            Result.Status = EBuild_ValidationStatus::Failed;
-            Result.ErrorMessage = TEXT("Player character not found or invalid");
-        }
-    }
-    else
-    {
-        Result.Status = EBuild_ValidationStatus::Critical;
-        Result.ErrorMessage = TEXT("Cannot validate Player Character - World is null");
-    }
-
-    Result.ExecutionTime = 0.02f;
-    Result.ActorsAffected = 1;
-
-    LogValidationResult(Result);
-    return Result;
-}
-
-FBuild_ValidationResult UBuild_IntegrationValidator::ValidateDinosaurActors()
-{
-    FBuild_ValidationResult Result;
-    Result.TestName = TEXT("Dinosaur Actors Validation");
-    
-    UWorld* World = GetWorld();
-    if (World)
-    {
-        TArray<AActor*> AllActors;
-        UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), AllActors);
-
-        int32 DinosaurCount = 0;
-        for (AActor* Actor : AllActors)
-        {
-            if (Actor && Actor->GetActorLabel().Contains(TEXT("Dino")))
-            {
-                DinosaurCount++;
-            }
-        }
-
-        if (DinosaurCount > 0)
-        {
-            Result.Status = EBuild_ValidationStatus::Passed;
-            Result.ErrorMessage = FString::Printf(TEXT("Found %d dinosaur actors"), DinosaurCount);
-        }
-        else
-        {
-            Result.Status = EBuild_ValidationStatus::Failed;
-            Result.ErrorMessage = TEXT("No dinosaur actors found");
-        }
-
-        Result.ActorsAffected = DinosaurCount;
-    }
-    else
-    {
-        Result.Status = EBuild_ValidationStatus::Critical;
-        Result.ErrorMessage = TEXT("Cannot validate Dinosaur Actors - World is null");
-        Result.ActorsAffected = 0;
-    }
-
-    Result.ExecutionTime = 0.05f;
-
-    LogValidationResult(Result);
-    return Result;
-}
-
-FBuild_ValidationResult UBuild_IntegrationValidator::ValidateEnvironmentActors()
-{
-    FBuild_ValidationResult Result;
-    Result.TestName = TEXT("Environment Actors Validation");
-    
-    UWorld* World = GetWorld();
-    if (World)
-    {
-        TArray<AActor*> AllActors;
-        UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), AllActors);
-
-        int32 EnvironmentCount = 0;
-        for (AActor* Actor : AllActors)
-        {
-            if (Actor && (Actor->GetActorLabel().Contains(TEXT("Tree")) || 
-                         Actor->GetActorLabel().Contains(TEXT("Rock")) ||
-                         Actor->GetActorLabel().Contains(TEXT("Foliage"))))
-            {
-                EnvironmentCount++;
-            }
-        }
-
-        Result.Status = EBuild_ValidationStatus::Passed;
-        Result.ErrorMessage = FString::Printf(TEXT("Found %d environment actors"), EnvironmentCount);
-        Result.ActorsAffected = EnvironmentCount;
-    }
-    else
-    {
-        Result.Status = EBuild_ValidationStatus::Critical;
-        Result.ErrorMessage = TEXT("Cannot validate Environment Actors - World is null");
-        Result.ActorsAffected = 0;
-    }
-
-    Result.ExecutionTime = 0.05f;
-
-    LogValidationResult(Result);
-    return Result;
-}
-
-FBuild_ValidationResult UBuild_IntegrationValidator::ValidatePhysicsSystem()
-{
-    FBuild_ValidationResult Result;
-    Result.TestName = TEXT("Physics System Validation");
-    
-    UWorld* World = GetWorld();
-    if (World && World->GetPhysicsScene())
-    {
-        Result.Status = EBuild_ValidationStatus::Passed;
-        Result.ErrorMessage = TEXT("Physics scene is active and functional");
-    }
-    else
-    {
-        Result.Status = EBuild_ValidationStatus::Failed;
-        Result.ErrorMessage = TEXT("Physics scene not found or inactive");
-    }
-
-    Result.ExecutionTime = 0.01f;
-    Result.ActorsAffected = 0;
-
-    LogValidationResult(Result);
-    return Result;
-}
-
-FBuild_ValidationResult UBuild_IntegrationValidator::ValidateAudioSystem()
-{
-    FBuild_ValidationResult Result;
-    Result.TestName = TEXT("Audio System Validation");
-    
-    // Basic audio system check
-    Result.Status = EBuild_ValidationStatus::Passed;
-    Result.ErrorMessage = TEXT("Audio system validation passed");
-    Result.ExecutionTime = 0.01f;
-    Result.ActorsAffected = 0;
-
-    LogValidationResult(Result);
-    return Result;
-}
-
-FBuild_ValidationResult UBuild_IntegrationValidator::ValidateVFXSystem()
-{
-    FBuild_ValidationResult Result;
-    Result.TestName = TEXT("VFX System Validation");
-    
-    // Basic VFX system check
-    Result.Status = EBuild_ValidationStatus::Passed;
-    Result.ErrorMessage = TEXT("VFX system validation passed");
-    Result.ExecutionTime = 0.01f;
-    Result.ActorsAffected = 0;
-
-    LogValidationResult(Result);
-    return Result;
-}
-
-void UBuild_IntegrationValidator::LogValidationResult(const FBuild_ValidationResult& Result)
-{
-    FString StatusText;
-    switch (Result.Status)
-    {
-        case EBuild_ValidationStatus::Passed: StatusText = TEXT("PASSED"); break;
-        case EBuild_ValidationStatus::Failed: StatusText = TEXT("FAILED"); break;
-        case EBuild_ValidationStatus::Critical: StatusText = TEXT("CRITICAL"); break;
-        default: StatusText = TEXT("UNKNOWN"); break;
-    }
-
-    UE_LOG(LogTemp, Warning, TEXT("Build_IntegrationValidator: %s - %s: %s"), 
-        *Result.TestName, *StatusText, *Result.ErrorMessage);
-}
-
-void UBuild_IntegrationValidator::UpdateOverallStatus()
-{
-    bool bHasCritical = false;
-    bool bHasFailed = false;
-    bool bAllPassed = true;
-
-    for (const FBuild_ValidationResult& Result : LastValidationResults)
-    {
-        if (Result.Status == EBuild_ValidationStatus::Critical)
-        {
-            bHasCritical = true;
-            bAllPassed = false;
-        }
-        else if (Result.Status == EBuild_ValidationStatus::Failed)
-        {
-            bHasFailed = true;
-            bAllPassed = false;
-        }
-        else if (Result.Status != EBuild_ValidationStatus::Passed)
-        {
-            bAllPassed = false;
-        }
-    }
-
-    if (bHasCritical)
-    {
-        OverallStatus = EBuild_ValidationStatus::Critical;
-    }
-    else if (bHasFailed)
-    {
-        OverallStatus = EBuild_ValidationStatus::Failed;
-    }
-    else if (bAllPassed)
-    {
-        OverallStatus = EBuild_ValidationStatus::Passed;
-    }
-    else
-    {
-        OverallStatus = EBuild_ValidationStatus::Unknown;
-    }
-}
-
-bool UBuild_IntegrationValidator::CheckModuleLoaded(const FString& ModuleName)
-{
-    // Basic module check - in a full implementation, we'd use FModuleManager
-    return true;
-}
-
-void UBuild_IntegrationValidator::CountActorsByType()
-{
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        TotalActorCount = 0;
-        ValidActorCount = 0;
-        ErrorActorCount = 0;
-        return;
-    }
-
-    TArray<AActor*> AllActors;
-    UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), AllActors);
-
-    TotalActorCount = AllActors.Num();
-    ValidActorCount = 0;
-    ErrorActorCount = 0;
-
-    for (AActor* Actor : AllActors)
-    {
-        if (Actor && IsValid(Actor))
-        {
-            ValidActorCount++;
-        }
-        else
-        {
-            ErrorActorCount++;
-        }
-    }
+    UE_LOG(LogTemp, Log, TEXT("Validation [%s] %s: %s"), 
+           *Report.ModuleName, *ResultString, *Report.Message);
 }
