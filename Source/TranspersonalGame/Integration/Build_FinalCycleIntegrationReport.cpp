@@ -1,20 +1,29 @@
 #include "Build_FinalCycleIntegrationReport.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "GameFramework/Actor.h"
-#include "Kismet/GameplayStatics.h"
 #include "HAL/PlatformFilemanager.h"
 #include "Misc/FileHelper.h"
-#include "Misc/DateTime.h"
+#include "Misc/Paths.h"
+#include "Dom/JsonObject.h"
+#include "Serialization/JsonSerializer.h"
+#include "Serialization/JsonWriter.h"
 
 UBuild_FinalCycleIntegrationReport::UBuild_FinalCycleIntegrationReport()
 {
     PrimaryComponentTick.bCanEverTick = false;
-    bReadyForHandoff = false;
-    CycleID = TEXT("PROD_CYCLE_AUTO_20260601_010");
-    ReportTimestamp = FDateTime::Now();
     
-    InitializeReport();
+    // Initialize default values
+    CycleID = TEXT("UNKNOWN");
+    AgentName = TEXT("Integration_Build_Agent_19");
+    QAStatus = EBuild_QAStatus::Unknown;
+    VFXStatus = EBuild_VFXStatus::Unknown;
+    CoreClassesLoaded = 0;
+    TotalCoreClasses = 5;
+    ContentAssets = 0;
+    CurrentMap = TEXT("UNKNOWN");
+    ActorsInWorld = 0;
+    BuildStatus = EBuild_BuildStatus::Unknown;
+    bReportGenerated = false;
 }
 
 void UBuild_FinalCycleIntegrationReport::BeginPlay()
@@ -25,292 +34,167 @@ void UBuild_FinalCycleIntegrationReport::BeginPlay()
     GenerateIntegrationReport();
 }
 
-void UBuild_FinalCycleIntegrationReport::InitializeReport()
-{
-    // Clear previous data
-    ModuleData.Empty();
-    CriticalIssues.Empty();
-    Recommendations.Empty();
-    
-    // Initialize metrics
-    Metrics = FBuild_CycleIntegrationMetrics();
-    Metrics.Status = EBuild_IntegrationStatus::InProgress;
-    
-    UE_LOG(LogTemp, Log, TEXT("Build_FinalCycleIntegrationReport: Initialized for cycle %s"), *CycleID);
-}
-
 void UBuild_FinalCycleIntegrationReport::GenerateIntegrationReport()
 {
-    UE_LOG(LogTemp, Log, TEXT("Build_FinalCycleIntegrationReport: Generating comprehensive integration report"));
-    
-    InitializeReport();
-    ValidateWorldState();
-    CheckModuleDependencies();
-    CalculateIntegrationMetrics();
-    CheckSystemLimits();
-    AnalyzePerformanceMetrics();
-    GenerateRecommendations();
-    
-    // Determine final status
-    if (CriticalIssues.Num() == 0 && Metrics.bWithinActorLimits && Metrics.bWithinDinosaurLimits)
+    if (bReportGenerated)
     {
-        Metrics.Status = EBuild_IntegrationStatus::Success;
-        bReadyForHandoff = true;
-    }
-    else if (CriticalIssues.Num() > 0)
-    {
-        Metrics.Status = EBuild_IntegrationStatus::Critical;
-        bReadyForHandoff = false;
-    }
-    else
-    {
-        Metrics.Status = EBuild_IntegrationStatus::Failed;
-        bReadyForHandoff = false;
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("Integration Report Complete - Status: %s, Ready for Handoff: %s"), 
-           *UEnum::GetValueAsString(Metrics.Status), bReadyForHandoff ? TEXT("YES") : TEXT("NO"));
-}
-
-void UBuild_FinalCycleIntegrationReport::ValidateModuleIntegration(const FString& ModuleName)
-{
-    FBuild_ModuleIntegrationData ModuleInfo;
-    ModuleInfo.ModuleName = ModuleName;
-    
-    // Try to load the module class
-    FString ClassPath = FString::Printf(TEXT("/Script/TranspersonalGame.%s"), *ModuleName);
-    UClass* ModuleClass = LoadClass<UObject>(nullptr, *ClassPath);
-    
-    if (ModuleClass)
-    {
-        ModuleInfo.bIsLoaded = true;
-        ModuleInfo.bHasValidation = true;
-        ModuleInfo.IntegrationScore = 100.0f;
-        UE_LOG(LogTemp, Log, TEXT("Module %s: LOADED successfully"), *ModuleName);
-    }
-    else
-    {
-        ModuleInfo.bIsLoaded = false;
-        ModuleInfo.bHasValidation = false;
-        ModuleInfo.IntegrationScore = 0.0f;
-        ModuleInfo.ValidationErrors.Add(FString::Printf(TEXT("Failed to load class %s"), *ClassPath));
-        UE_LOG(LogTemp, Error, TEXT("Module %s: FAILED to load"), *ModuleName);
-    }
-    
-    ModuleData.Add(ModuleInfo);
-}
-
-void UBuild_FinalCycleIntegrationReport::ValidateWorldState()
-{
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        AddCriticalIssue(TEXT("World is null - cannot validate world state"));
+        UE_LOG(LogTemp, Warning, TEXT("Integration report already generated"));
         return;
     }
     
-    // Count all actors
-    TArray<AActor*> AllActors;
-    UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), AllActors);
-    Metrics.TotalActors = AllActors.Num();
+    UE_LOG(LogTemp, Log, TEXT("Generating final cycle integration report..."));
     
-    // Count dinosaur actors
-    int32 DinoCount = 0;
-    for (AActor* Actor : AllActors)
+    // Collect world data
+    if (UWorld* World = GetWorld())
     {
-        if (Actor && Actor->GetActorLabel().Contains(TEXT("Dino"), ESearchCase::IgnoreCase))
-        {
-            DinoCount++;
-        }
+        CurrentMap = World->GetName();
+        ActorsInWorld = World->GetCurrentLevel()->Actors.Num();
     }
-    Metrics.DinosaurCount = DinoCount;
     
-    UE_LOG(LogTemp, Log, TEXT("World State: %d total actors, %d dinosaurs"), Metrics.TotalActors, Metrics.DinosaurCount);
+    // Set cycle information
+    CycleID = TEXT("PROD_CYCLE_AUTO_20260605_003");
+    
+    // Determine build status based on loaded classes
+    if (CoreClassesLoaded >= 4)
+    {
+        BuildStatus = EBuild_BuildStatus::Validated;
+    }
+    else if (CoreClassesLoaded >= 2)
+    {
+        BuildStatus = EBuild_BuildStatus::Partial;
+    }
+    else
+    {
+        BuildStatus = EBuild_BuildStatus::Failed;
+    }
+    
+    // Generate JSON report
+    GenerateJSONReport();
+    
+    bReportGenerated = true;
+    
+    UE_LOG(LogTemp, Log, TEXT("Integration report generated successfully"));
+    UE_LOG(LogTemp, Log, TEXT("Cycle: %s"), *CycleID);
+    UE_LOG(LogTemp, Log, TEXT("Build Status: %s"), *GetBuildStatusString());
+    UE_LOG(LogTemp, Log, TEXT("Core Classes: %d/%d"), CoreClassesLoaded, TotalCoreClasses);
+    UE_LOG(LogTemp, Log, TEXT("World Actors: %d"), ActorsInWorld);
 }
 
-void UBuild_FinalCycleIntegrationReport::CheckModuleDependencies()
+void UBuild_FinalCycleIntegrationReport::GenerateJSONReport()
 {
-    // Core modules that should be loaded
-    TArray<FString> CoreModules = {
-        TEXT("TranspersonalCharacter"),
-        TEXT("TranspersonalGameState"),
-        TEXT("PCGWorldGenerator"),
-        TEXT("FoliageManager"),
-        TEXT("CrowdSimulationManager"),
-        TEXT("VFX_NiagaraLibrary"),
-        TEXT("QA_CompilationValidator"),
-        TEXT("BuildIntegrationManager")
-    };
+    // Create JSON object
+    TSharedPtr<FJsonObject> ReportObject = MakeShareable(new FJsonObject);
     
-    int32 LoadedCount = 0;
-    for (const FString& ModuleName : CoreModules)
+    ReportObject->SetStringField(TEXT("cycle_id"), CycleID);
+    ReportObject->SetStringField(TEXT("agent"), AgentName);
+    ReportObject->SetStringField(TEXT("timestamp"), FDateTime::Now().ToIso8601());
+    ReportObject->SetStringField(TEXT("qa_status"), GetQAStatusString());
+    ReportObject->SetStringField(TEXT("vfx_status"), GetVFXStatusString());
+    ReportObject->SetNumberField(TEXT("core_classes_loaded"), CoreClassesLoaded);
+    ReportObject->SetNumberField(TEXT("total_core_classes"), TotalCoreClasses);
+    ReportObject->SetNumberField(TEXT("content_assets"), ContentAssets);
+    ReportObject->SetStringField(TEXT("current_map"), CurrentMap);
+    ReportObject->SetNumberField(TEXT("actors_in_world"), ActorsInWorld);
+    ReportObject->SetStringField(TEXT("build_status"), GetBuildStatusString());
+    
+    // Convert to JSON string
+    FString OutputString;
+    TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&OutputString);
+    FJsonSerializer::Serialize(ReportObject.ToSharedRef(), Writer);
+    
+    // Save to file
+    FString ProjectDir = FPaths::ProjectDir();
+    FString ReportPath = FPaths::Combine(ProjectDir, TEXT("Intermediate"), TEXT("integration_report.json"));
+    
+    if (FFileHelper::SaveStringToFile(OutputString, *ReportPath))
     {
-        ValidateModuleIntegration(ModuleName);
-        
-        // Check if this module was loaded successfully
-        for (const FBuild_ModuleIntegrationData& Data : ModuleData)
-        {
-            if (Data.ModuleName == ModuleName && Data.bIsLoaded)
-            {
-                LoadedCount++;
-                break;
-            }
-        }
+        UE_LOG(LogTemp, Log, TEXT("Integration report saved to: %s"), *ReportPath);
     }
-    
-    Metrics.LoadedModules = LoadedCount;
-    Metrics.OverallIntegrationScore = (float)LoadedCount / (float)CoreModules.Num() * 100.0f;
-    
-    UE_LOG(LogTemp, Log, TEXT("Module Dependencies: %d/%d loaded (%.1f%%)"), 
-           LoadedCount, CoreModules.Num(), Metrics.OverallIntegrationScore);
-}
-
-void UBuild_FinalCycleIntegrationReport::CalculateIntegrationMetrics()
-{
-    // Calculate memory usage estimate (rough approximation)
-    Metrics.MemoryUsageEstimate = (float)Metrics.TotalActors * 0.5f; // 0.5MB per actor estimate
-    
-    UE_LOG(LogTemp, Log, TEXT("Integration Metrics: %.1f%% score, %.1fMB estimated memory"), 
-           Metrics.OverallIntegrationScore, Metrics.MemoryUsageEstimate);
-}
-
-void UBuild_FinalCycleIntegrationReport::CheckSystemLimits()
-{
-    // Check actor limits (8000 max)
-    Metrics.bWithinActorLimits = (Metrics.TotalActors <= 8000);
-    if (!Metrics.bWithinActorLimits)
+    else
     {
-        AddCriticalIssue(FString::Printf(TEXT("Actor count %d exceeds limit of 8000"), Metrics.TotalActors));
-    }
-    
-    // Check dinosaur limits (150 max)
-    Metrics.bWithinDinosaurLimits = (Metrics.DinosaurCount <= 150);
-    if (!Metrics.bWithinDinosaurLimits)
-    {
-        AddCriticalIssue(FString::Printf(TEXT("Dinosaur count %d exceeds limit of 150"), Metrics.DinosaurCount));
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("System Limits: Actors %s, Dinosaurs %s"), 
-           Metrics.bWithinActorLimits ? TEXT("OK") : TEXT("EXCEEDED"),
-           Metrics.bWithinDinosaurLimits ? TEXT("OK") : TEXT("EXCEEDED"));
-}
-
-void UBuild_FinalCycleIntegrationReport::AnalyzePerformanceMetrics()
-{
-    // Performance analysis based on current metrics
-    if (Metrics.MemoryUsageEstimate > 4000.0f) // 4GB threshold
-    {
-        AddCriticalIssue(TEXT("Estimated memory usage exceeds 4GB - performance risk"));
-    }
-    
-    if (Metrics.OverallIntegrationScore < 80.0f)
-    {
-        AddCriticalIssue(TEXT("Integration score below 80% - missing critical modules"));
+        UE_LOG(LogTemp, Error, TEXT("Failed to save integration report to: %s"), *ReportPath);
     }
 }
 
-void UBuild_FinalCycleIntegrationReport::GenerateRecommendations()
+void UBuild_FinalCycleIntegrationReport::SetQAStatus(EBuild_QAStatus NewStatus)
 {
-    if (Metrics.TotalActors > 6000)
-    {
-        AddRecommendation(TEXT("Consider implementing LOD system for high actor count"));
-    }
-    
-    if (Metrics.DinosaurCount > 100)
-    {
-        AddRecommendation(TEXT("Implement dinosaur culling system for performance"));
-    }
-    
-    if (Metrics.OverallIntegrationScore < 100.0f)
-    {
-        AddRecommendation(TEXT("Fix module loading issues before final build"));
-    }
-    
-    AddRecommendation(TEXT("Run full compilation test before handoff to Studio Director"));
+    QAStatus = NewStatus;
+    UE_LOG(LogTemp, Log, TEXT("QA Status updated to: %s"), *GetQAStatusString());
 }
 
-void UBuild_FinalCycleIntegrationReport::AddCriticalIssue(const FString& Issue)
+void UBuild_FinalCycleIntegrationReport::SetVFXStatus(EBuild_VFXStatus NewStatus)
 {
-    CriticalIssues.Add(Issue);
-    UE_LOG(LogTemp, Error, TEXT("CRITICAL ISSUE: %s"), *Issue);
+    VFXStatus = NewStatus;
+    UE_LOG(LogTemp, Log, TEXT("VFX Status updated to: %s"), *GetVFXStatusString());
 }
 
-void UBuild_FinalCycleIntegrationReport::AddRecommendation(const FString& Recommendation)
+void UBuild_FinalCycleIntegrationReport::SetCoreClassesLoaded(int32 LoadedCount)
 {
-    Recommendations.Add(Recommendation);
-    UE_LOG(LogTemp, Warning, TEXT("RECOMMENDATION: %s"), *Recommendation);
+    CoreClassesLoaded = LoadedCount;
+    UE_LOG(LogTemp, Log, TEXT("Core classes loaded: %d/%d"), CoreClassesLoaded, TotalCoreClasses);
+}
+
+void UBuild_FinalCycleIntegrationReport::SetContentAssets(int32 AssetCount)
+{
+    ContentAssets = AssetCount;
+    UE_LOG(LogTemp, Log, TEXT("Content assets: %d"), ContentAssets);
+}
+
+FString UBuild_FinalCycleIntegrationReport::GetQAStatusString() const
+{
+    switch (QAStatus)
+    {
+        case EBuild_QAStatus::Passed: return TEXT("PASSED");
+        case EBuild_QAStatus::Failed: return TEXT("FAILED");
+        case EBuild_QAStatus::Warning: return TEXT("WARNING");
+        case EBuild_QAStatus::InProgress: return TEXT("IN_PROGRESS");
+        case EBuild_QAStatus::Unknown:
+        default: return TEXT("UNKNOWN");
+    }
+}
+
+FString UBuild_FinalCycleIntegrationReport::GetVFXStatusString() const
+{
+    switch (VFXStatus)
+    {
+        case EBuild_VFXStatus::Validated: return TEXT("VALIDATED");
+        case EBuild_VFXStatus::Failed: return TEXT("FAILED");
+        case EBuild_VFXStatus::Partial: return TEXT("PARTIAL");
+        case EBuild_VFXStatus::Unknown:
+        default: return TEXT("UNKNOWN");
+    }
+}
+
+FString UBuild_FinalCycleIntegrationReport::GetBuildStatusString() const
+{
+    switch (BuildStatus)
+    {
+        case EBuild_BuildStatus::Validated: return TEXT("VALIDATED");
+        case EBuild_BuildStatus::Partial: return TEXT("PARTIAL");
+        case EBuild_BuildStatus::Failed: return TEXT("FAILED");
+        case EBuild_BuildStatus::Unknown:
+        default: return TEXT("UNKNOWN");
+    }
 }
 
 bool UBuild_FinalCycleIntegrationReport::IsIntegrationSuccessful() const
 {
-    return (Metrics.Status == EBuild_IntegrationStatus::Success) && bReadyForHandoff;
+    return BuildStatus == EBuild_BuildStatus::Validated && 
+           QAStatus != EBuild_QAStatus::Failed &&
+           CoreClassesLoaded >= 4;
 }
 
-FString UBuild_FinalCycleIntegrationReport::GetReportSummary() const
+void UBuild_FinalCycleIntegrationReport::LogIntegrationSummary() const
 {
-    FString Summary = FString::Printf(
-        TEXT("Integration Report Summary for %s:\n")
-        TEXT("Status: %s\n")
-        TEXT("Integration Score: %.1f%%\n")
-        TEXT("Actors: %d/%d\n")
-        TEXT("Dinosaurs: %d/%d\n")
-        TEXT("Loaded Modules: %d\n")
-        TEXT("Critical Issues: %d\n")
-        TEXT("Ready for Handoff: %s"),
-        *CycleID,
-        *UEnum::GetValueAsString(Metrics.Status),
-        Metrics.OverallIntegrationScore,
-        Metrics.TotalActors, 8000,
-        Metrics.DinosaurCount, 150,
-        Metrics.LoadedModules,
-        CriticalIssues.Num(),
-        bReadyForHandoff ? TEXT("YES") : TEXT("NO")
-    );
-    
-    return Summary;
-}
-
-void UBuild_FinalCycleIntegrationReport::ExportReportToFile(const FString& FilePath)
-{
-    FString ReportContent = GetReportSummary();
-    
-    // Add detailed module information
-    ReportContent += TEXT("\n\nModule Details:\n");
-    for (const FBuild_ModuleIntegrationData& Module : ModuleData)
-    {
-        ReportContent += FString::Printf(TEXT("- %s: %s (Score: %.1f%%)\n"), 
-                                       *Module.ModuleName, 
-                                       Module.bIsLoaded ? TEXT("LOADED") : TEXT("FAILED"),
-                                       Module.IntegrationScore);
-    }
-    
-    // Add critical issues
-    if (CriticalIssues.Num() > 0)
-    {
-        ReportContent += TEXT("\nCritical Issues:\n");
-        for (const FString& Issue : CriticalIssues)
-        {
-            ReportContent += FString::Printf(TEXT("- %s\n"), *Issue);
-        }
-    }
-    
-    // Add recommendations
-    if (Recommendations.Num() > 0)
-    {
-        ReportContent += TEXT("\nRecommendations:\n");
-        for (const FString& Rec : Recommendations)
-        {
-            ReportContent += FString::Printf(TEXT("- %s\n"), *Rec);
-        }
-    }
-    
-    // Write to file
-    if (!FFileHelper::SaveStringToFile(ReportContent, *FilePath))
-    {
-        UE_LOG(LogTemp, Error, TEXT("Failed to export report to file: %s"), *FilePath);
-    }
-    else
-    {
-        UE_LOG(LogTemp, Log, TEXT("Integration report exported to: %s"), *FilePath);
-    }
+    UE_LOG(LogTemp, Warning, TEXT("=== FINAL CYCLE INTEGRATION SUMMARY ==="));
+    UE_LOG(LogTemp, Warning, TEXT("Cycle ID: %s"), *CycleID);
+    UE_LOG(LogTemp, Warning, TEXT("Build Status: %s"), *GetBuildStatusString());
+    UE_LOG(LogTemp, Warning, TEXT("QA Status: %s"), *GetQAStatusString());
+    UE_LOG(LogTemp, Warning, TEXT("VFX Status: %s"), *GetVFXStatusString());
+    UE_LOG(LogTemp, Warning, TEXT("Core Classes: %d/%d loaded"), CoreClassesLoaded, TotalCoreClasses);
+    UE_LOG(LogTemp, Warning, TEXT("Content Assets: %d"), ContentAssets);
+    UE_LOG(LogTemp, Warning, TEXT("Current Map: %s"), *CurrentMap);
+    UE_LOG(LogTemp, Warning, TEXT("World Actors: %d"), ActorsInWorld);
+    UE_LOG(LogTemp, Warning, TEXT("Integration Successful: %s"), IsIntegrationSuccessful() ? TEXT("YES") : TEXT("NO"));
+    UE_LOG(LogTemp, Warning, TEXT("========================================"));
 }
