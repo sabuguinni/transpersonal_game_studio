@@ -1,460 +1,396 @@
 #include "Combat_TacticalAI.h"
+#include "BehaviorTree/BehaviorTree.h"
+#include "BehaviorTree/BehaviorTreeComponent.h"
+#include "BehaviorTree/BlackboardComponent.h"
+#include "Perception/AIPerceptionComponent.h"
+#include "Perception/AISightConfig.h"
+#include "Perception/AIHearingConfig.h"
 #include "Engine/World.h"
-#include "GameFramework/Actor.h"
 #include "GameFramework/Pawn.h"
-#include "Components/PrimitiveComponent.h"
-#include "Engine/Engine.h"
-#include "DrawDebugHelpers.h"
+#include "Kismet/GameplayStatics.h"
+#include "Components/StaticMeshComponent.h"
 
-UCombat_TacticalAI::UCombat_TacticalAI()
+ACombat_TacticalAI::ACombat_TacticalAI()
 {
-    PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 0.1f;
+    PrimaryActorTick.bCanEverTick = true;
 
-    // Initialize tactical parameters
-    TacticalAnalysisRadius = 2000.0f;
-    ThreatAssessmentInterval = 0.5f;
-    PackCoordinationRadius = 1500.0f;
-    FlankingDistance = 800.0f;
-    RetreatThreshold = 0.3f;
+    // Initialize AI components
+    BehaviorTreeComponent = CreateDefaultSubobject<UBehaviorTreeComponent>(TEXT("BehaviorTreeComponent"));
+    BlackboardComponent = CreateDefaultSubobject<UBlackboardComponent>(TEXT("BlackboardComponent"));
+    AIPerceptionComponent = CreateDefaultSubobject<UAIPerceptionComponent>(TEXT("AIPerceptionComponent"));
 
-    // Initialize state
-    CurrentStance = ECombat_TacticalStance::Defensive;
-    bIsPackLeader = false;
-    LastThreatUpdate = 0.0f;
-    LastTacticalAnalysis = 0.0f;
-    CachedPrimaryThreat = nullptr;
-    PackRallyPoint = FVector::ZeroVector;
+    // Configure sight perception
+    UAISightConfig* SightConfig = CreateDefaultSubobject<UAISightConfig>(TEXT("SightConfig"));
+    if (SightConfig)
+    {
+        SightConfig->SightRadius = SightRadius;
+        SightConfig->LoseSightRadius = SightRadius * 1.2f;
+        SightConfig->PeripheralVisionAngleDegrees = SightAngle;
+        SightConfig->SetMaxAge(5.0f);
+        SightConfig->DetectionByAffiliation.bDetectNeutrals = true;
+        SightConfig->DetectionByAffiliation.bDetectEnemies = true;
+        SightConfig->DetectionByAffiliation.bDetectFriendlies = true;
+        
+        AIPerceptionComponent->ConfigureSense(*SightConfig);
+    }
+
+    // Configure hearing perception
+    UAIHearingConfig* HearingConfig = CreateDefaultSubobject<UAIHearingConfig>(TEXT("HearingConfig"));
+    if (HearingConfig)
+    {
+        HearingConfig->HearingRange = HearingRadius;
+        HearingConfig->SetMaxAge(3.0f);
+        HearingConfig->DetectionByAffiliation.bDetectNeutrals = true;
+        HearingConfig->DetectionByAffiliation.bDetectEnemies = true;
+        HearingConfig->DetectionByAffiliation.bDetectFriendlies = true;
+        
+        AIPerceptionComponent->ConfigureSense(*HearingConfig);
+    }
+
+    // Set dominant sense
+    AIPerceptionComponent->SetDominantSense(SightConfig->GetSenseImplementation());
+
+    // Initialize tactical state
+    CurrentTacticalState = ECombat_TacticalState::Idle;
+    TerritorialCenter = FVector::ZeroVector;
 }
 
-void UCombat_TacticalAI::BeginPlay()
+void ACombat_TacticalAI::BeginPlay()
 {
     Super::BeginPlay();
-    
-    // Initialize pack coordination
-    UpdatePackMembers();
-    
-    // Set initial tactical position
-    if (AActor* Owner = GetOwner())
+
+    // Bind perception events
+    if (AIPerceptionComponent)
     {
-        CurrentPosition.Position = Owner->GetActorLocation();
-        CurrentPosition.AdvantageScore = 0.5f;
+        AIPerceptionComponent->OnPerceptionUpdated.AddDynamic(this, &ACombat_TacticalAI::OnPerceptionUpdated);
+    }
+
+    // Set territorial center to spawn location
+    if (GetPawn())
+    {
+        TerritorialCenter = GetPawn()->GetActorLocation();
+    }
+
+    // Start behavior tree if available
+    if (CombatBehaviorTree && BlackboardComponent)
+    {
+        RunBehaviorTree(CombatBehaviorTree);
     }
 }
 
-void UCombat_TacticalAI::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void ACombat_TacticalAI::Tick(float DeltaTime)
 {
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+    Super::Tick(DeltaTime);
 
-    if (!GetOwner())
-        return;
-
-    float CurrentTime = GetWorld()->GetTimeSeconds();
-
-    // Update threat assessment periodically
-    if (CurrentTime - LastThreatUpdate >= ThreatAssessmentInterval)
-    {
-        UpdateThreatAssessment();
-        LastThreatUpdate = CurrentTime;
-    }
-
-    // Perform tactical analysis
-    if (CurrentTime - LastTacticalAnalysis >= 1.0f)
-    {
-        AnalyzeTacticalSituation();
-        LastTacticalAnalysis = CurrentTime;
-    }
-
-    // Coordinate with pack
-    if (PackMembers.Num() > 0)
-    {
-        CoordinateWithPack();
-    }
+    UpdateTacticalBehavior(DeltaTime);
 }
 
-void UCombat_TacticalAI::AnalyzeTacticalSituation()
+void ACombat_TacticalAI::SetTacticalState(ECombat_TacticalState NewState)
 {
-    if (!GetOwner())
-        return;
-
-    AActor* PrimaryThreat = GetPrimaryThreat();
-    if (!PrimaryThreat)
+    if (CurrentTacticalState != NewState)
     {
-        SetTacticalStance(ECombat_TacticalStance::Defensive);
-        return;
-    }
-
-    float ThreatDistance = FVector::Dist(GetOwner()->GetActorLocation(), PrimaryThreat->GetActorLocation());
-    float ThreatLevel = CalculateThreatLevel(PrimaryThreat);
-
-    // Determine tactical stance based on situation
-    if (ThreatLevel > 0.8f && ThreatDistance < 500.0f)
-    {
-        // High threat, close distance - consider retreat or aggressive response
-        if (PackMembers.Num() >= 2)
-        {
-            SetTacticalStance(ECombat_TacticalStance::Aggressive);
-        }
-        else if (ThreatLevel > RetreatThreshold)
-        {
-            SetTacticalStance(ECombat_TacticalStance::Retreating);
-        }
-    }
-    else if (ThreatDistance > 1000.0f && PackMembers.Num() > 0)
-    {
-        // Distant threat with pack support - flanking opportunity
-        SetTacticalStance(ECombat_TacticalStance::Flanking);
-    }
-    else if (ThreatDistance < 300.0f)
-    {
-        // Close threat - defensive stance
-        SetTacticalStance(ECombat_TacticalStance::Defensive);
-    }
-
-    // Update current position advantage
-    CurrentPosition.AdvantageScore = CalculatePositionAdvantage(GetOwner()->GetActorLocation(), PrimaryThreat);
-}
-
-FCombat_TacticalPosition UCombat_TacticalAI::FindOptimalPosition(const FVector& TargetLocation)
-{
-    FCombat_TacticalPosition BestPosition;
-    float BestScore = -1.0f;
-
-    if (!GetOwner())
-        return BestPosition;
-
-    FVector OwnerLocation = GetOwner()->GetActorLocation();
-    
-    // Generate candidate positions in a circle around current location
-    int32 NumCandidates = 8;
-    float SearchRadius = 600.0f;
-
-    for (int32 i = 0; i < NumCandidates; i++)
-    {
-        float Angle = (2.0f * PI * i) / NumCandidates;
-        FVector CandidatePos = OwnerLocation + FVector(
-            FMath::Cos(Angle) * SearchRadius,
-            FMath::Sin(Angle) * SearchRadius,
-            0.0f
-        );
-
-        // Calculate advantage score for this position
-        float Score = CalculatePositionAdvantage(CandidatePos, nullptr);
+        CurrentTacticalState = NewState;
         
-        // Bonus for flanking positions
-        FVector ToTarget = (TargetLocation - CandidatePos).GetSafeNormal();
-        FVector TargetForward = FVector::ForwardVector; // Assume target faces forward
-        float FlankingAngle = FVector::DotProduct(ToTarget, TargetForward);
-        if (FMath::Abs(FlankingAngle) < 0.5f) // Side approach
+        // Update blackboard
+        if (BlackboardComponent)
         {
-            Score += 0.3f;
-        }
-
-        // Check for line of sight
-        if (HasLineOfSight(CandidatePos, TargetLocation))
-        {
-            Score += 0.2f;
-        }
-
-        if (Score > BestScore)
-        {
-            BestScore = Score;
-            BestPosition.Position = CandidatePos;
-            BestPosition.AdvantageScore = Score;
-            BestPosition.bIsFlankingPosition = FMath::Abs(FlankingAngle) < 0.5f;
-            BestPosition.bHasCover = false; // TODO: Implement cover detection
+            BlackboardComponent->SetValueAsEnum(TEXT("TacticalState"), static_cast<uint8>(NewState));
         }
     }
-
-    return BestPosition;
 }
 
-void UCombat_TacticalAI::SetTacticalStance(ECombat_TacticalStance NewStance)
+void ACombat_TacticalAI::InitializePackBehavior(const TArray<AActor*>& PackMembers, bool bAsLeader)
 {
-    if (CurrentStance != NewStance)
+    TacticalData.PackMembers = PackMembers;
+    TacticalData.bIsPackLeader = bAsLeader;
+    
+    if (BlackboardComponent)
     {
-        CurrentStance = NewStance;
-        
-        // Broadcast stance change to pack members
-        BroadcastTacticalInfo();
-        
-        // Debug output
-        if (GEngine && GetOwner())
-        {
-            FString StanceName = UEnum::GetValueAsString(NewStance);
-            GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Yellow, 
-                FString::Printf(TEXT("%s: Tactical Stance -> %s"), 
-                *GetOwner()->GetName(), *StanceName));
-        }
+        BlackboardComponent->SetValueAsBool(TEXT("IsPackLeader"), bAsLeader);
+        BlackboardComponent->SetValueAsInt(TEXT("PackSize"), PackMembers.Num());
     }
 }
 
-void UCombat_TacticalAI::UpdateThreatAssessment()
+void ACombat_TacticalAI::CoordinatePackAttack(AActor* Target)
 {
-    if (!GetOwner() || !GetWorld())
+    if (!Target || !TacticalData.bIsPackLeader)
         return;
 
-    KnownThreats.Empty();
-    
-    // Find all potential threats in range
-    TArray<AActor*> NearbyActors;
-    FVector OwnerLocation = GetOwner()->GetActorLocation();
-    
-    for (TActorIterator<APawn> ActorItr(GetWorld()); ActorItr; ++ActorItr)
+    // Coordinate pack members for attack
+    for (AActor* PackMember : TacticalData.PackMembers)
     {
-        APawn* Pawn = *ActorItr;
-        if (!Pawn || Pawn == GetOwner())
+        if (!PackMember || PackMember == GetPawn())
             continue;
 
-        float Distance = FVector::Dist(OwnerLocation, Pawn->GetActorLocation());
-        if (Distance <= TacticalAnalysisRadius)
+        // Try to get the AI controller of pack member
+        if (APawn* PackPawn = Cast<APawn>(PackMember))
         {
-            FCombat_ThreatAssessment Threat;
-            Threat.ThreatTarget = Pawn;
-            Threat.Distance = Distance;
-            Threat.ThreatLevel = CalculateThreatLevel(Pawn);
-            Threat.bIsDirectThreat = Threat.ThreatLevel > 0.3f;
-            Threat.LastSeenTime = GetWorld()->GetTimeSeconds();
-            
-            KnownThreats.Add(Threat);
+            if (ACombat_TacticalAI* PackAI = Cast<ACombat_TacticalAI>(PackPawn->GetController()))
+            {
+                PackAI->SetTacticalState(ECombat_TacticalState::Attack);
+                if (PackAI->BlackboardComponent)
+                {
+                    PackAI->BlackboardComponent->SetValueAsObject(TEXT("AttackTarget"), Target);
+                }
+            }
         }
     }
-
-    // Sort threats by level (highest first)
-    KnownThreats.Sort([](const FCombat_ThreatAssessment& A, const FCombat_ThreatAssessment& B) {
-        return A.ThreatLevel > B.ThreatLevel;
-    });
-
-    // Update cached primary threat
-    CachedPrimaryThreat = KnownThreats.Num() > 0 ? KnownThreats[0].ThreatTarget : nullptr;
 }
 
-AActor* UCombat_TacticalAI::GetPrimaryThreat() const
+void ACombat_TacticalAI::CallForPackHelp(AActor* Threat)
 {
-    return CachedPrimaryThreat;
+    if (!Threat || !TacticalData.bCanCallForHelp)
+        return;
+
+    // Alert nearby pack members
+    for (AActor* PackMember : TacticalData.PackMembers)
+    {
+        if (!PackMember || PackMember == GetPawn())
+            continue;
+
+        float Distance = FVector::Dist(GetPawn()->GetActorLocation(), PackMember->GetActorLocation());
+        if (Distance <= TacticalData.PackCoordinationRange)
+        {
+            if (APawn* PackPawn = Cast<APawn>(PackMember))
+            {
+                if (ACombat_TacticalAI* PackAI = Cast<ACombat_TacticalAI>(PackPawn->GetController()))
+                {
+                    PackAI->SetTacticalState(ECombat_TacticalState::Defend);
+                    if (PackAI->BlackboardComponent)
+                    {
+                        PackAI->BlackboardComponent->SetValueAsObject(TEXT("ThreatTarget"), Threat);
+                    }
+                }
+            }
+        }
+    }
 }
 
-float UCombat_TacticalAI::CalculateThreatLevel(AActor* Target) const
+bool ACombat_TacticalAI::IsInTerritorialRange(const FVector& Location) const
 {
-    if (!Target || !GetOwner())
+    float Distance = FVector::Dist(TerritorialCenter, Location);
+    return Distance <= TacticalData.TerritorialRadius;
+}
+
+void ACombat_TacticalAI::DefendTerritory(AActor* Intruder)
+{
+    if (!Intruder)
+        return;
+
+    SetTacticalState(ECombat_TacticalState::Territorial);
+    
+    if (BlackboardComponent)
+    {
+        BlackboardComponent->SetValueAsObject(TEXT("TerritorialIntruder"), Intruder);
+        BlackboardComponent->SetValueAsVector(TEXT("TerritorialCenter"), TerritorialCenter);
+    }
+}
+
+float ACombat_TacticalAI::CalculateThreatLevel(AActor* Target) const
+{
+    if (!Target)
         return 0.0f;
 
-    float ThreatLevel = 0.0f;
-    float Distance = FVector::Dist(GetOwner()->GetActorLocation(), Target->GetActorLocation());
-
-    // Base threat based on distance (closer = more threatening)
-    ThreatLevel += FMath::Clamp(1.0f - (Distance / TacticalAnalysisRadius), 0.0f, 0.5f);
-
-    // Check if target is player character
-    if (Target->IsA<APawn>() && Cast<APawn>(Target)->IsPlayerControlled())
-    {
-        ThreatLevel += 0.7f; // Players are high priority threats
-    }
-
-    // Check if target is facing us (indicates awareness)
-    FVector ToOwner = (GetOwner()->GetActorLocation() - Target->GetActorLocation()).GetSafeNormal();
-    FVector TargetForward = Target->GetActorForwardVector();
-    float DotProduct = FVector::DotProduct(TargetForward, ToOwner);
-    if (DotProduct > 0.7f)
-    {
-        ThreatLevel += 0.2f; // Target is aware and facing us
-    }
-
+    float ThreatLevel = 0.5f; // Base threat level
+    
+    // Distance factor - closer = more threatening
+    float Distance = FVector::Dist(GetPawn()->GetActorLocation(), Target->GetActorLocation());
+    float DistanceFactor = FMath::Clamp(1.0f - (Distance / 2000.0f), 0.1f, 1.0f);
+    ThreatLevel += DistanceFactor * 0.3f;
+    
+    // Size factor (rough estimation based on actor bounds)
+    FVector ActorBounds = Target->GetActorBounds(false).BoxExtent;
+    float SizeFactor = FMath::Clamp(ActorBounds.Size() / 1000.0f, 0.1f, 1.0f);
+    ThreatLevel += SizeFactor * 0.2f;
+    
     return FMath::Clamp(ThreatLevel, 0.0f, 1.0f);
 }
 
-void UCombat_TacticalAI::CoordinateWithPack()
+FVector ACombat_TacticalAI::GetOptimalAttackPosition(AActor* Target) const
 {
-    UpdatePackMembers();
-    
-    if (bIsPackLeader && PackMembers.Num() > 0)
-    {
-        // As pack leader, coordinate group tactics
-        AActor* PrimaryThreat = GetPrimaryThreat();
-        if (PrimaryThreat)
-        {
-            // Assign roles to pack members
-            for (int32 i = 0; i < PackMembers.Num(); i++)
-            {
-                if (UCombat_TacticalAI* Member = PackMembers[i])
-                {
-                    if (i % 2 == 0)
-                    {
-                        Member->SetTacticalStance(ECombat_TacticalStance::Flanking);
-                    }
-                    else
-                    {
-                        Member->SetTacticalStance(ECombat_TacticalStance::Aggressive);
-                    }
-                }
-            }
-        }
-    }
-}
-
-void UCombat_TacticalAI::RequestPackSupport(const FVector& Location)
-{
-    PackRallyPoint = Location;
-    
-    // Notify pack members
-    for (UCombat_TacticalAI* Member : PackMembers)
-    {
-        if (Member && Member != this)
-        {
-            Member->RespondToPackCall(Location);
-        }
-    }
-}
-
-void UCombat_TacticalAI::RespondToPackCall(const FVector& RallyPoint)
-{
-    PackRallyPoint = RallyPoint;
-    SetTacticalStance(ECombat_TacticalStance::Aggressive);
-}
-
-bool UCombat_TacticalAI::ShouldEngageTarget(AActor* Target) const
-{
-    if (!Target || !GetOwner())
-        return false;
-
-    float ThreatLevel = CalculateThreatLevel(Target);
-    float Distance = FVector::Dist(GetOwner()->GetActorLocation(), Target->GetActorLocation());
-
-    // Engage if threat is high and we have pack support, or if cornered
-    bool bHasPackSupport = PackMembers.Num() >= 2;
-    bool bIsCornered = Distance < 300.0f;
-    
-    return (ThreatLevel > 0.6f && bHasPackSupport) || (ThreatLevel > 0.4f && bIsCornered);
-}
-
-bool UCombat_TacticalAI::ShouldRetreat() const
-{
-    AActor* PrimaryThreat = GetPrimaryThreat();
-    if (!PrimaryThreat)
-        return false;
-
-    float ThreatLevel = CalculateThreatLevel(PrimaryThreat);
-    bool bOutnumbered = PackMembers.Num() == 0 && KnownThreats.Num() > 1;
-    
-    return ThreatLevel > RetreatThreshold && bOutnumbered;
-}
-
-FVector UCombat_TacticalAI::CalculateFlankingPosition(AActor* Target) const
-{
-    if (!Target || !GetOwner())
-        return GetOwner()->GetActorLocation();
+    if (!Target || !GetPawn())
+        return GetPawn()->GetActorLocation();
 
     FVector TargetLocation = Target->GetActorLocation();
+    FVector MyLocation = GetPawn()->GetActorLocation();
+    
+    // Calculate position behind target for ambush
     FVector TargetForward = Target->GetActorForwardVector();
-    FVector TargetRight = Target->GetActorRightVector();
+    FVector OptimalPosition = TargetLocation - (TargetForward * 300.0f);
     
-    // Position to the side of the target
-    FVector FlankingPos = TargetLocation + (TargetRight * FlankingDistance);
+    // Add some randomization for pack coordination
+    FVector RandomOffset = FVector(
+        FMath::RandRange(-200.0f, 200.0f),
+        FMath::RandRange(-200.0f, 200.0f),
+        0.0f
+    );
     
-    return FlankingPos;
+    return OptimalPosition + RandomOffset;
 }
 
-void UCombat_TacticalAI::UpdatePackMembers()
+bool ACombat_TacticalAI::ShouldFlee() const
 {
-    if (!GetWorld())
+    // Check health threshold
+    if (GetPawn())
+    {
+        // Simplified health check - in real implementation would check actual health component
+        float HealthRatio = 1.0f; // Placeholder
+        if (HealthRatio <= TacticalData.FleeHealthThreshold)
+            return true;
+    }
+    
+    // Check if overwhelmed by threats
+    if (PerceivedThreats.Num() > 3 && !TacticalData.bIsPackLeader)
+        return true;
+    
+    return false;
+}
+
+void ACombat_TacticalAI::UpdateTacticalBehavior(float DeltaTime)
+{
+    LastTacticalUpdate += DeltaTime;
+    
+    if (LastTacticalUpdate >= TacticalUpdateInterval)
+    {
+        LastTacticalUpdate = 0.0f;
+        
+        ProcessPerceptionUpdates();
+        HandlePackCoordination();
+        EvaluateThreatResponse();
+    }
+}
+
+void ACombat_TacticalAI::ProcessPerceptionUpdates()
+{
+    if (!AIPerceptionComponent)
         return;
 
-    PackMembers.Empty();
-    FVector OwnerLocation = GetOwner()->GetActorLocation();
+    PerceivedThreats.Empty();
+    PerceivedAllies.Empty();
     
-    // Find other tactical AI components in range
-    for (TActorIterator<AActor> ActorItr(GetWorld()); ActorItr; ++ActorItr)
+    TArray<AActor*> PerceivedActors;
+    AIPerceptionComponent->GetCurrentlyPerceivedActors(nullptr, PerceivedActors);
+    
+    for (AActor* Actor : PerceivedActors)
     {
-        AActor* Actor = *ActorItr;
-        if (!Actor || Actor == GetOwner())
+        if (!Actor || Actor == GetPawn())
             continue;
-
-        if (UCombat_TacticalAI* OtherAI = Actor->FindComponentByClass<UCombat_TacticalAI>())
+            
+        // Simple threat classification - in real implementation would use proper faction system
+        if (Actor->GetName().Contains("Player") || Actor->GetName().Contains("Enemy"))
         {
-            float Distance = FVector::Dist(OwnerLocation, Actor->GetActorLocation());
-            if (Distance <= PackCoordinationRadius)
+            PerceivedThreats.Add(Actor);
+        }
+        else if (Actor->GetName().Contains("Pack") || Actor->GetName().Contains("Ally"))
+        {
+            PerceivedAllies.Add(Actor);
+        }
+    }
+}
+
+void ACombat_TacticalAI::HandlePackCoordination()
+{
+    if (!TacticalData.bIsPackLeader || TacticalData.PackMembers.Num() == 0)
+        return;
+
+    // Update pack member positions and states
+    for (AActor* PackMember : TacticalData.PackMembers)
+    {
+        if (!PackMember)
+            continue;
+            
+        float Distance = FVector::Dist(GetPawn()->GetActorLocation(), PackMember->GetActorLocation());
+        
+        // If pack member is too far, call them back
+        if (Distance > TacticalData.PackCoordinationRange * 1.5f)
+        {
+            if (APawn* PackPawn = Cast<APawn>(PackMember))
             {
-                PackMembers.Add(OtherAI);
+                if (ACombat_TacticalAI* PackAI = Cast<ACombat_TacticalAI>(PackPawn->GetController()))
+                {
+                    if (PackAI->BlackboardComponent)
+                    {
+                        PackAI->BlackboardComponent->SetValueAsVector(TEXT("PackRallyPoint"), GetPawn()->GetActorLocation());
+                    }
+                }
             }
         }
     }
+}
 
-    // Determine pack leadership (first found becomes leader)
-    bIsPackLeader = PackMembers.Num() > 0;
-    for (UCombat_TacticalAI* Member : PackMembers)
+void ACombat_TacticalAI::EvaluateThreatResponse()
+{
+    if (PerceivedThreats.Num() == 0)
     {
-        if (Member && Member->bIsPackLeader && Member != this)
+        if (CurrentTacticalState == ECombat_TacticalState::Attack || 
+            CurrentTacticalState == ECombat_TacticalState::Defend)
         {
-            bIsPackLeader = false;
-            break;
+            SetTacticalState(ECombat_TacticalState::Patrol);
+        }
+        return;
+    }
+
+    // Find highest threat
+    AActor* HighestThreat = nullptr;
+    float HighestThreatLevel = 0.0f;
+    
+    for (AActor* Threat : PerceivedThreats)
+    {
+        float ThreatLevel = CalculateThreatLevel(Threat);
+        if (ThreatLevel > HighestThreatLevel)
+        {
+            HighestThreatLevel = ThreatLevel;
+            HighestThreat = Threat;
+        }
+    }
+    
+    if (HighestThreat)
+    {
+        CurrentTarget = HighestThreat;
+        
+        if (BlackboardComponent)
+        {
+            BlackboardComponent->SetValueAsObject(TEXT("TargetActor"), HighestThreat);
+            BlackboardComponent->SetValueAsFloat(TEXT("ThreatLevel"), HighestThreatLevel);
+        }
+        
+        // Decide on tactical response
+        if (ShouldFlee())
+        {
+            SetTacticalState(ECombat_TacticalState::Flee);
+        }
+        else if (IsInTerritorialRange(HighestThreat->GetActorLocation()))
+        {
+            DefendTerritory(HighestThreat);
+        }
+        else if (TacticalData.bIsPackLeader && TacticalData.PackMembers.Num() > 1)
+        {
+            CoordinatePackAttack(HighestThreat);
+            SetTacticalState(ECombat_TacticalState::PackCoordinate);
+        }
+        else
+        {
+            SetTacticalState(ECombat_TacticalState::Attack);
         }
     }
 }
 
-float UCombat_TacticalAI::CalculatePositionAdvantage(const FVector& Position, AActor* Target) const
+void ACombat_TacticalAI::OnPerceptionUpdated(const TArray<AActor*>& UpdatedActors)
 {
-    float Advantage = 0.5f; // Base advantage
-    
-    if (!GetWorld())
-        return Advantage;
-
-    // Higher ground bonus
-    if (GetOwner())
+    // Perception update handled in ProcessPerceptionUpdates during tick
+    // This callback can be used for immediate responses to new threats
+    for (AActor* Actor : UpdatedActors)
     {
-        float HeightDiff = Position.Z - GetOwner()->GetActorLocation().Z;
-        Advantage += FMath::Clamp(HeightDiff / 500.0f, -0.2f, 0.3f);
-    }
-
-    // Cover bonus (simplified - check for nearby obstacles)
-    FVector TraceStart = Position + FVector(0, 0, 100);
-    FVector TraceEnd = TraceStart + FVector(500, 0, 0);
-    
-    FHitResult HitResult;
-    if (GetWorld()->LineTraceSingleByChannel(HitResult, TraceStart, TraceEnd, ECC_WorldStatic))
-    {
-        Advantage += 0.1f; // Some cover available
-    }
-
-    return FMath::Clamp(Advantage, 0.0f, 1.0f);
-}
-
-bool UCombat_TacticalAI::HasLineOfSight(const FVector& FromLocation, const FVector& ToLocation) const
-{
-    if (!GetWorld())
-        return false;
-
-    FHitResult HitResult;
-    FVector Start = FromLocation + FVector(0, 0, 100); // Eye level
-    FVector End = ToLocation + FVector(0, 0, 100);
-    
-    return !GetWorld()->LineTraceSingleByChannel(HitResult, Start, End, ECC_Visibility);
-}
-
-void UCombat_TacticalAI::BroadcastTacticalInfo()
-{
-    // Broadcast tactical information to pack members
-    for (UCombat_TacticalAI* Member : PackMembers)
-    {
-        if (Member && Member != this)
+        if (!Actor)
+            continue;
+            
+        // Immediate threat response for high-priority targets
+        if (Actor->GetName().Contains("Player"))
         {
-            // Share threat information
-            for (const FCombat_ThreatAssessment& Threat : KnownThreats)
+            float ThreatLevel = CalculateThreatLevel(Actor);
+            if (ThreatLevel > 0.8f && TacticalData.bCanCallForHelp)
             {
-                // Pack members can share threat data
-                bool bAlreadyKnown = false;
-                for (const FCombat_ThreatAssessment& MemberThreat : Member->KnownThreats)
-                {
-                    if (MemberThreat.ThreatTarget == Threat.ThreatTarget)
-                    {
-                        bAlreadyKnown = true;
-                        break;
-                    }
-                }
-                
-                if (!bAlreadyKnown)
-                {
-                    Member->KnownThreats.Add(Threat);
-                }
+                CallForPackHelp(Actor);
             }
         }
     }
