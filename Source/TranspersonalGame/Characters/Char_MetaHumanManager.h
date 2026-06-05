@@ -2,161 +2,179 @@
 
 #include "CoreMinimal.h"
 #include "Engine/World.h"
-#include "Components/ActorComponent.h"
-#include "Engine/DataTable.h"
+#include "GameFramework/Actor.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Components/StaticMeshComponent.h"
+#include "Materials/MaterialInterface.h"
+#include "Materials/MaterialInstanceDynamic.h"
+#include "Engine/SkeletalMesh.h"
 #include "SharedTypes.h"
 #include "Char_MetaHumanManager.generated.h"
 
-class ATranspersonalCharacter;
-class USkeletalMesh;
-class UMaterialInterface;
+UENUM(BlueprintType)
+enum class EChar_SkinTone : uint8
+{
+    Light       UMETA(DisplayName = "Light"),
+    Medium      UMETA(DisplayName = "Medium"),
+    Dark        UMETA(DisplayName = "Dark"),
+    Weathered   UMETA(DisplayName = "Weathered")
+};
+
+UENUM(BlueprintType)
+enum class EChar_BodyBuild : uint8
+{
+    Lean        UMETA(DisplayName = "Lean"),
+    Athletic    UMETA(DisplayName = "Athletic"),
+    Sturdy      UMETA(DisplayName = "Sturdy"),
+    Muscular    UMETA(DisplayName = "Muscular"),
+    Slim        UMETA(DisplayName = "Slim")
+};
+
+UENUM(BlueprintType)
+enum class EChar_CharacterType : uint8
+{
+    Hunter      UMETA(DisplayName = "Tribal Hunter"),
+    Gatherer    UMETA(DisplayName = "Tribal Gatherer"),
+    Elder       UMETA(DisplayName = "Tribal Elder"),
+    Youth       UMETA(DisplayName = "Tribal Youth"),
+    Warrior     UMETA(DisplayName = "Tribal Warrior")
+};
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FChar_CharacterPreset
+struct TRANSPERSONALGAME_API FChar_CharacterCustomization
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
+    EChar_SkinTone SkinTone = EChar_SkinTone::Medium;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
+    EChar_BodyBuild BodyBuild = EChar_BodyBuild::Athletic;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
+    EChar_CharacterType CharacterType = EChar_CharacterType::Hunter;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
+    FString CharacterName = TEXT("Survivor");
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
+    float SkinRoughness = 0.7f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
+    float WeatheringLevel = 0.5f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
+    bool bHasFacialHair = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
+    bool bHasScars = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Equipment")
+    bool bHasTribalPaint = false;
+
+    FChar_CharacterCustomization()
+    {
+        SkinTone = EChar_SkinTone::Medium;
+        BodyBuild = EChar_BodyBuild::Athletic;
+        CharacterType = EChar_CharacterType::Hunter;
+        CharacterName = TEXT("Survivor");
+        SkinRoughness = 0.7f;
+        WeatheringLevel = 0.5f;
+        bHasFacialHair = false;
+        bHasScars = true;
+        bHasTribalPaint = false;
+    }
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FChar_MetaHumanPreset
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Preset")
     FString PresetName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
-    EChar_CharacterRole Role;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Preset")
+    FChar_CharacterCustomization Customization;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
-    EChar_Gender Gender;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Assets")
+    TSoftObjectPtr<USkeletalMesh> SkeletalMeshAsset;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
-    EChar_AgeGroup AgeGroup;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Assets")
+    TSoftObjectPtr<UMaterialInterface> BaseMaterial;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
-    FString MeshPath;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Assets")
+    TArray<TSoftObjectPtr<UStaticMesh>> ClothingMeshes;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
-    FString MaterialPath;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Assets")
+    TArray<TSoftObjectPtr<UStaticMesh>> AccessoryMeshes;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
-    TArray<FString> AccessoryPaths;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
-    FLinearColor SkinTone;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
-    FLinearColor HairColor;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
-    float SurvivalWear;
-
-    FChar_CharacterPreset()
+    FChar_MetaHumanPreset()
     {
         PresetName = TEXT("Default");
-        Role = EChar_CharacterRole::Survivor;
-        Gender = EChar_Gender::Male;
-        AgeGroup = EChar_AgeGroup::Adult;
-        MeshPath = TEXT("");
-        MaterialPath = TEXT("");
-        SkinTone = FLinearColor(0.8f, 0.6f, 0.4f, 1.0f);
-        HairColor = FLinearColor(0.3f, 0.2f, 0.1f, 1.0f);
-        SurvivalWear = 0.5f;
     }
 };
 
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FChar_DiversitySettings
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Diversity")
-    bool bEnableEthnicDiversity;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Diversity")
-    bool bEnableAgeDiversity;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Diversity")
-    bool bEnableGenderBalance;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Diversity")
-    bool bEnableRoleSpecialization;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Diversity")
-    float SkinToneVariation;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Diversity")
-    float BodyTypeVariation;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Diversity")
-    float FacialFeatureVariation;
-
-    FChar_DiversitySettings()
-    {
-        bEnableEthnicDiversity = true;
-        bEnableAgeDiversity = true;
-        bEnableGenderBalance = true;
-        bEnableRoleSpecialization = true;
-        SkinToneVariation = 0.8f;
-        BodyTypeVariation = 0.6f;
-        FacialFeatureVariation = 0.7f;
-    }
-};
-
-UCLASS(BlueprintType, Blueprintable, ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UChar_MetaHumanManager : public UActorComponent
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API AChar_MetaHumanManager : public AActor
 {
     GENERATED_BODY()
 
 public:
-    UChar_MetaHumanManager();
+    AChar_MetaHumanManager();
 
 protected:
     virtual void BeginPlay() override;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaHuman System")
-    TArray<FChar_CharacterPreset> CharacterPresets;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    USceneComponent* RootSceneComponent;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaHuman System")
-    FChar_DiversitySettings DiversitySettings;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Presets")
+    TArray<FChar_MetaHumanPreset> CharacterPresets;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaHuman System")
-    TArray<TSoftObjectPtr<USkeletalMesh>> AvailableMeshes;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Materials")
+    TSoftObjectPtr<UMaterialInterface> PrimitiveSkinMaterial;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaHuman System")
-    TArray<TSoftObjectPtr<UMaterialInterface>> AvailableMaterials;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Materials")
+    TSoftObjectPtr<UMaterialInterface> TribalClothingMaterial;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaHuman System")
-    int32 MaxNPCsPerRole;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Volumetric Lighting")
+    float SubsurfaceScatteringIntensity = 1.2f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaHuman System")
-    float CharacterSpawnRadius;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Volumetric Lighting")
+    float SkinTranslucency = 0.3f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Volumetric Lighting")
+    FLinearColor SkinSubsurfaceColor = FLinearColor(1.0f, 0.4f, 0.3f, 1.0f);
 
 public:
-    UFUNCTION(BlueprintCallable, Category = "MetaHuman System")
-    ATranspersonalCharacter* SpawnCharacterFromPreset(const FChar_CharacterPreset& Preset, const FVector& Location, const FRotator& Rotation = FRotator::ZeroRotator);
+    UFUNCTION(BlueprintCallable, Category = "Character Creation")
+    AActor* CreateCharacterFromCustomization(const FChar_CharacterCustomization& Customization, const FVector& SpawnLocation);
 
-    UFUNCTION(BlueprintCallable, Category = "MetaHuman System")
-    FChar_CharacterPreset GenerateRandomPreset(EChar_CharacterRole DesiredRole = EChar_CharacterRole::Survivor);
+    UFUNCTION(BlueprintCallable, Category = "Character Creation")
+    void ApplyCharacterCustomization(AActor* CharacterActor, const FChar_CharacterCustomization& Customization);
 
-    UFUNCTION(BlueprintCallable, Category = "MetaHuman System")
-    void ApplyPresetToCharacter(ATranspersonalCharacter* Character, const FChar_CharacterPreset& Preset);
+    UFUNCTION(BlueprintCallable, Category = "Character Creation")
+    FChar_CharacterCustomization GetRandomCharacterCustomization();
 
-    UFUNCTION(BlueprintCallable, Category = "MetaHuman System")
-    TArray<ATranspersonalCharacter*> SpawnDiverseNPCGroup(const FVector& CenterLocation, int32 GroupSize = 5);
+    UFUNCTION(BlueprintCallable, Category = "Character Creation")
+    TArray<FChar_MetaHumanPreset> GetAvailablePresets() const;
 
-    UFUNCTION(BlueprintCallable, Category = "MetaHuman System")
-    void InitializePresetDatabase();
+    UFUNCTION(BlueprintCallable, Category = "Material Setup")
+    UMaterialInstanceDynamic* CreateVolumetricSkinMaterial(EChar_SkinTone SkinTone, float WeatheringLevel);
 
-    UFUNCTION(BlueprintCallable, Category = "MetaHuman System")
-    FChar_CharacterPreset GetPresetByName(const FString& PresetName) const;
+    UFUNCTION(BlueprintCallable, Category = "Material Setup")
+    void ApplyVolumetricLightingToCharacter(AActor* CharacterActor);
 
-    UFUNCTION(BlueprintCallable, Category = "MetaHuman System")
-    TArray<FChar_CharacterPreset> GetPresetsByRole(EChar_CharacterRole Role) const;
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Editor Tools")
+    void InitializeCharacterPresets();
 
-    UFUNCTION(BlueprintCallable, Category = "MetaHuman System", CallInEditor = true)
-    void PreviewCharacterPreset(const FChar_CharacterPreset& Preset);
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Editor Tools")
+    void TestCharacterVisibilityInFog();
 
-private:
-    void CreateDefaultPresets();
-    FLinearColor GenerateRandomSkinTone() const;
-    FLinearColor GenerateRandomHairColor() const;
-    FString SelectRandomMeshPath() const;
-    FString SelectRandomMaterialPath() const;
-    TArray<FString> SelectRandomAccessories(EChar_CharacterRole Role) const;
+protected:
+    void LoadCharacterAssets();
+    void SetupVolumetricMaterials();
+    FLinearColor GetSkinToneColor(EChar_SkinTone SkinTone);
+    float GetBodyBuildScale(EChar_BodyBuild BodyBuild);
 };
