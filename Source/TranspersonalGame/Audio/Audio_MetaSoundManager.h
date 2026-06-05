@@ -1,10 +1,11 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/World.h"
-#include "Components/ActorComponent.h"
+#include "Subsystems/GameInstanceSubsystem.h"
+#include "Engine/Engine.h"
 #include "Sound/SoundCue.h"
 #include "MetasoundSource.h"
+#include "Components/AudioComponent.h"
 #include "Audio_MetaSoundManager.generated.h"
 
 UENUM(BlueprintType)
@@ -12,19 +13,25 @@ enum class EAudio_SoundCategory : uint8
 {
     Ambient,
     Dinosaur,
-    Player,
-    Weather,
+    Environment,
     Combat,
-    UI
+    UI,
+    Narration
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FAudio_SoundLayer
+struct TRANSPERSONALGAME_API FAudio_SoundEntry
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    TSoftObjectPtr<UMetaSoundSource> MetaSoundAsset;
+    FString SoundID;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    TSoftObjectPtr<USoundBase> SoundAsset;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    EAudio_SoundCategory Category;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     float Volume = 1.0f;
@@ -33,71 +40,68 @@ struct TRANSPERSONALGAME_API FAudio_SoundLayer
     float Pitch = 1.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    bool bLooping = false;
+    bool bIs3D = true;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    EAudio_SoundCategory Category = EAudio_SoundCategory::Ambient;
-
-    FAudio_SoundLayer()
+    FAudio_SoundEntry()
     {
+        SoundID = TEXT("");
+        Category = EAudio_SoundCategory::Ambient;
         Volume = 1.0f;
         Pitch = 1.0f;
-        bLooping = false;
-        Category = EAudio_SoundCategory::Ambient;
+        bIs3D = true;
     }
 };
 
-UCLASS(ClassGroup=(Audio), meta=(BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UAudio_MetaSoundManager : public UActorComponent
+UCLASS(BlueprintType)
+class TRANSPERSONALGAME_API UAudio_MetaSoundManager : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
 public:
-    UAudio_MetaSoundManager();
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
+
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    void PlaySound2D(const FString& SoundID, float VolumeMultiplier = 1.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    void PlaySound3D(const FString& SoundID, const FVector& Location, float VolumeMultiplier = 1.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    void PlaySoundAttached(const FString& SoundID, USceneComponent* AttachComponent, float VolumeMultiplier = 1.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    void StopSound(const FString& SoundID);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    void StopAllSounds();
+
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    void SetMasterVolume(float Volume);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    void SetCategoryVolume(EAudio_SoundCategory Category, float Volume);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    void RegisterSound(const FString& SoundID, USoundBase* SoundAsset, EAudio_SoundCategory Category);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    bool IsSoundPlaying(const FString& SoundID) const;
 
 protected:
-    virtual void BeginPlay() override;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Audio")
+    TMap<FString, FAudio_SoundEntry> SoundRegistry;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Layers")
-    TArray<FAudio_SoundLayer> AmbientLayers;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Audio")
+    TMap<FString, UAudioComponent*> ActiveSounds;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Layers")
-    TArray<FAudio_SoundLayer> DinosaurLayers;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Audio")
+    TMap<EAudio_SoundCategory, float> CategoryVolumes;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Settings")
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Audio")
     float MasterVolume = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Settings")
-    float AmbientVolume = 0.7f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Settings")
-    float DinosaurVolume = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Settings")
-    float WeatherVolume = 0.8f;
-
-public:
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
-
-    UFUNCTION(BlueprintCallable, Category = "Audio Control")
-    void PlayMetaSoundLayer(const FAudio_SoundLayer& SoundLayer, FVector Location = FVector::ZeroVector);
-
-    UFUNCTION(BlueprintCallable, Category = "Audio Control")
-    void StopSoundCategory(EAudio_SoundCategory Category);
-
-    UFUNCTION(BlueprintCallable, Category = "Audio Control")
-    void SetCategoryVolume(EAudio_SoundCategory Category, float NewVolume);
-
-    UFUNCTION(BlueprintCallable, Category = "Audio Control")
-    void UpdateAmbientLayers();
-
-    UFUNCTION(BlueprintCallable, Category = "Audio Control")
-    void TriggerDinosaurProximityAudio(float Distance, float DinosaurSize);
-
 private:
-    UPROPERTY()
-    TMap<EAudio_SoundCategory, TArray<class UAudioComponent*>> ActiveAudioComponents;
-
-    void CleanupFinishedComponents();
-    UAudioComponent* CreateAudioComponentForMetaSound(UMetaSoundSource* MetaSound, FVector Location);
+    void LoadDefaultSounds();
+    float GetEffectiveVolume(const FAudio_SoundEntry& SoundEntry, float VolumeMultiplier) const;
 };
