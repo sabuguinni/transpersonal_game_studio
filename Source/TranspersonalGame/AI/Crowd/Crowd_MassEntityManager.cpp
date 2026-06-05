@@ -1,65 +1,85 @@
 #include "Crowd_MassEntityManager.h"
-#include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "Components/StaticMeshComponent.h"
-#include "MassEntitySubsystem.h"
-#include "MassSpawnerSubsystem.h"
+#include "Engine/Engine.h"
+#include "Kismet/GameplayStatics.h"
 #include "NavigationSystem.h"
 #include "AI/NavigationSystemBase.h"
+#include "DrawDebugHelpers.h"
 
 ACrowd_MassEntityManager::ACrowd_MassEntityManager()
 {
     PrimaryActorTick.bCanEverTick = true;
+    PrimaryActorTick.TickInterval = TickInterval;
     
-    VisualizationMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("VisualizationMesh"));
-    RootComponent = VisualizationMesh;
+    // Initialize default spawn zone
+    FCrowd_SpawnZone DefaultZone;
+    DefaultZone.Center = FVector::ZeroVector;
+    DefaultZone.Radius = 2000.0f;
+    DefaultZone.MaxAgents = 5000;
+    DefaultZone.DensityLevel = ECrowd_DensityLevel::Medium;
     
-    // Default herd configurations
-    FCrowd_HerdData DefaultHerbivoreHerd;
-    DefaultHerbivoreHerd.EntityCount = 500;
-    DefaultHerbivoreHerd.MovementSpeed = 120.0f;
-    DefaultHerbivoreHerd.FlockingRadius = 800.0f;
-    DefaultHerbivoreHerd.BehaviorType = ECrowd_BehaviorType::Grazing;
-    HerdConfigurations.Add(DefaultHerbivoreHerd);
+    FCrowd_AgentConfig DefaultConfig;
+    DefaultConfig.MovementSpeed = 150.0f;
+    DefaultConfig.PersonalSpace = 100.0f;
+    DefaultConfig.ViewRange = 500.0f;
+    DefaultConfig.BehaviorType = ECrowd_BehaviorType::Wandering;
+    DefaultZone.AgentConfigs.Add(DefaultConfig);
     
-    FCrowd_HerdData DefaultPredatorPack;
-    DefaultPredatorPack.EntityCount = 50;
-    DefaultPredatorPack.MovementSpeed = 250.0f;
-    DefaultPredatorPack.FlockingRadius = 300.0f;
-    DefaultPredatorPack.BehaviorType = ECrowd_BehaviorType::Hunting;
-    HerdConfigurations.Add(DefaultPredatorPack);
-    
-    // LOD settings for performance
-    LODSettings.HighDetailDistance = 1000.0f;
-    LODSettings.MediumDetailDistance = 2500.0f;
-    LODSettings.LowDetailDistance = 5000.0f;
-    LODSettings.MaxHighDetailEntities = 200;
-    LODSettings.MaxMediumDetailEntities = 1000;
+    SpawnZones.Add(DefaultZone);
 }
 
 void ACrowd_MassEntityManager::BeginPlay()
 {
     Super::BeginPlay();
     
+    UE_LOG(LogTemp, Warning, TEXT("Crowd Mass Entity Manager: Initializing..."));
+    
     InitializeMassEntitySystem();
     
-    // Spawn default herds
-    for (const FCrowd_HerdData& HerdData : HerdConfigurations)
+    // Create initial path network
+    CreatePathNetwork();
+    
+    // Spawn initial crowds
+    for (const FCrowd_SpawnZone& Zone : SpawnZones)
     {
-        SpawnHerd(HerdData);
+        SpawnCrowdInZone(Zone);
     }
+    
+    UE_LOG(LogTemp, Warning, TEXT("Crowd Mass Entity Manager: Initialization complete. Active agents: %d"), ActiveAgentCount);
+}
+
+void ACrowd_MassEntityManager::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+    DespawnAllAgents();
+    Super::EndPlay(EndPlayReason);
 }
 
 void ACrowd_MassEntityManager::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
     
-    LastUpdateTime += DeltaTime;
-    if (LastUpdateTime >= UpdateFrequency)
+    CurrentFrameTime = DeltaTime;
+    
+    // Update agent behaviors
+    UpdateAgentBehaviors(DeltaTime);
+    
+    // Process culling for performance
+    ProcessCulling();
+    
+    // Update LOD system periodically
+    LastLODUpdate += DeltaTime;
+    if (LastLODUpdate >= LODUpdateInterval)
     {
-        UpdateCrowdBehavior(DeltaTime);
         UpdateLODSystem();
-        LastUpdateTime = 0.0f;
+        LastLODUpdate = 0.0f;
+    }
+    
+    // Performance monitoring
+    LastPerformanceCheck += DeltaTime;
+    if (LastPerformanceCheck >= 1.0f)
+    {
+        OptimizePerformance();
+        LastPerformanceCheck = 0.0f;
     }
 }
 
@@ -68,193 +88,335 @@ void ACrowd_MassEntityManager::InitializeMassEntitySystem()
     UWorld* World = GetWorld();
     if (!World)
     {
-        UE_LOG(LogTemp, Error, TEXT("ACrowd_MassEntityManager: No valid world"));
+        UE_LOG(LogTemp, Error, TEXT("Crowd Manager: No world found"));
         return;
     }
     
+    // Get Mass Entity subsystems
     MassEntitySubsystem = World->GetSubsystem<UMassEntitySubsystem>();
+    if (MassEntitySubsystem)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Mass Entity Subsystem initialized"));
+    }
+    else
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Mass Entity Subsystem not available - using fallback crowd system"));
+    }
+    
+    // Initialize spawner subsystem
     MassSpawnerSubsystem = World->GetSubsystem<UMassSpawnerSubsystem>();
-    
-    if (!MassEntitySubsystem)
+    if (MassSpawnerSubsystem)
     {
-        UE_LOG(LogTemp, Error, TEXT("ACrowd_MassEntityManager: Failed to get MassEntitySubsystem"));
-        return;
+        UE_LOG(LogTemp, Warning, TEXT("Mass Spawner Subsystem initialized"));
     }
     
-    if (!MassSpawnerSubsystem)
+    // Initialize simulation subsystem
+    MassSimulationSubsystem = World->GetSubsystem<UMassSimulationSubsystem>();
+    if (MassSimulationSubsystem)
     {
-        UE_LOG(LogTemp, Error, TEXT("ACrowd_MassEntityManager: Failed to get MassSpawnerSubsystem"));
-        return;
+        UE_LOG(LogTemp, Warning, TEXT("Mass Simulation Subsystem initialized"));
     }
-    
-    UE_LOG(LogTemp, Warning, TEXT("ACrowd_MassEntityManager: Mass Entity system initialized"));
 }
 
-void ACrowd_MassEntityManager::SpawnHerd(const FCrowd_HerdData& HerdData)
+void ACrowd_MassEntityManager::SpawnCrowdInZone(const FCrowd_SpawnZone& Zone)
 {
-    if (!MassEntitySubsystem || !MassSpawnerSubsystem)
+    if (ActiveAgentCount >= MaxTotalAgents)
     {
-        UE_LOG(LogTemp, Error, TEXT("ACrowd_MassEntityManager: Mass systems not initialized"));
+        UE_LOG(LogTemp, Warning, TEXT("Cannot spawn more agents - max limit reached: %d"), MaxTotalAgents);
         return;
     }
     
-    if (CurrentEntityCount + HerdData.EntityCount > MaxSimultaneousEntities)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("ACrowd_MassEntityManager: Entity limit reached, cannot spawn herd"));
-        return;
-    }
+    int32 AgentsToSpawn = FMath::Min(Zone.MaxAgents, MaxTotalAgents - ActiveAgentCount);
     
-    // Create entities in a circular formation around center location
-    for (int32 i = 0; i < HerdData.EntityCount; i++)
+    UE_LOG(LogTemp, Warning, TEXT("Spawning %d agents in zone at %s (radius: %.1f)"), 
+           AgentsToSpawn, *Zone.Center.ToString(), Zone.Radius);
+    
+    // Spawn agents in circular pattern
+    for (int32 i = 0; i < AgentsToSpawn; i++)
     {
-        float Angle = (2.0f * PI * i) / HerdData.EntityCount;
-        float Distance = FMath::RandRange(50.0f, HerdData.FlockingRadius);
+        // Random position within zone radius
+        float Angle = FMath::RandRange(0.0f, 2.0f * PI);
+        float Distance = FMath::RandRange(0.0f, Zone.Radius);
         
-        FVector SpawnLocation = HerdData.CenterLocation + FVector(
+        FVector SpawnLocation = Zone.Center + FVector(
             FMath::Cos(Angle) * Distance,
             FMath::Sin(Angle) * Distance,
             0.0f
         );
         
-        // Create entity through Mass Entity system
-        FMassEntityHandle EntityHandle = MassEntitySubsystem->CreateEntity();
-        if (EntityHandle.IsValid())
+        // Adjust Z to ground level
+        FHitResult HitResult;
+        FVector TraceStart = SpawnLocation + FVector(0, 0, 1000);
+        FVector TraceEnd = SpawnLocation - FVector(0, 0, 1000);
+        
+        if (GetWorld()->LineTraceSingleByChannel(HitResult, TraceStart, TraceEnd, ECC_WorldStatic))
         {
-            ActiveEntities.Add(EntityHandle);
-            CurrentEntityCount++;
+            SpawnLocation.Z = HitResult.Location.Z + 50.0f; // Offset above ground
         }
+        
+        // For now, create debug visualization (will be replaced with Mass Entity spawning)
+        if (i % 100 == 0) // Only visualize every 100th agent for performance
+        {
+            DrawDebugSphere(GetWorld(), SpawnLocation, 25.0f, 8, FColor::Blue, false, 5.0f);
+        }
+        
+        ActiveAgentCount++;
     }
     
-    UE_LOG(LogTemp, Warning, TEXT("ACrowd_MassEntityManager: Spawned herd with %d entities. Total: %d"), 
-           HerdData.EntityCount, CurrentEntityCount);
+    UE_LOG(LogTemp, Warning, TEXT("Spawned %d agents. Total active: %d"), AgentsToSpawn, ActiveAgentCount);
 }
 
-void ACrowd_MassEntityManager::UpdateCrowdBehavior(float DeltaTime)
+void ACrowd_MassEntityManager::DespawnAllAgents()
 {
-    if (!MassEntitySubsystem)
+    UE_LOG(LogTemp, Warning, TEXT("Despawning all %d agents"), ActiveAgentCount);
+    
+    if (MassEntitySubsystem)
     {
-        return;
+        // Mass Entity despawn logic would go here
     }
     
-    // Update flocking behavior for all active entities
-    if (bEnableFlocking)
-    {
-        // Implement basic flocking rules: separation, alignment, cohesion
-        for (int32 i = 0; i < ActiveEntities.Num(); i++)
-        {
-            if (!ActiveEntities[i].IsValid())
-            {
-                ActiveEntities.RemoveAt(i);
-                i--;
-                CurrentEntityCount--;
-                continue;
-            }
-            
-            // Basic flocking behavior would be implemented here
-            // For now, we just validate entity existence
-        }
-    }
-    
-    // Update avoidance behavior
-    if (bEnableAvoidance)
-    {
-        // Implement obstacle avoidance and inter-entity collision avoidance
-    }
-}
-
-void ACrowd_MassEntityManager::SetHerdDestination(int32 HerdIndex, FVector NewDestination)
-{
-    if (HerdIndex >= 0 && HerdIndex < HerdConfigurations.Num())
-    {
-        HerdConfigurations[HerdIndex].CenterLocation = NewDestination;
-        UE_LOG(LogTemp, Warning, TEXT("ACrowd_MassEntityManager: Set herd %d destination to %s"), 
-               HerdIndex, *NewDestination.ToString());
-    }
+    ActiveAgentCount = 0;
+    VisibleAgentCount = 0;
 }
 
 void ACrowd_MassEntityManager::UpdateLODSystem()
 {
-    // Implement LOD system based on distance from player
-    APawn* PlayerPawn = GetWorld()->GetFirstPlayerController()->GetPawn();
-    if (!PlayerPawn)
-    {
-        return;
-    }
+    if (!GetWorld()) return;
+    
+    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
+    if (!PlayerPawn) return;
     
     FVector PlayerLocation = PlayerPawn->GetActorLocation();
-    int32 HighDetailCount = 0;
-    int32 MediumDetailCount = 0;
     
-    for (const FMassEntityHandle& EntityHandle : ActiveEntities)
+    // Update LOD based on distance to player
+    for (const FCrowd_SpawnZone& Zone : SpawnZones)
     {
-        if (!EntityHandle.IsValid())
+        float DistanceToPlayer = FVector::Dist(PlayerLocation, Zone.Center);
+        
+        // Determine LOD level based on distance
+        int32 NewLODLevel = 0;
+        if (DistanceToPlayer > 2000.0f) NewLODLevel = 2;      // Low detail
+        else if (DistanceToPlayer > 1000.0f) NewLODLevel = 1; // Medium detail
+        else NewLODLevel = 0;                                  // High detail
+        
+        // Apply LOD optimizations
+        AdaptiveLOD();
+    }
+}
+
+void ACrowd_MassEntityManager::SetDensityLevel(ECrowd_DensityLevel NewDensity)
+{
+    UE_LOG(LogTemp, Warning, TEXT("Setting crowd density to level: %d"), (int32)NewDensity);
+    
+    // Adjust spawn zones based on density
+    for (FCrowd_SpawnZone& Zone : SpawnZones)
+    {
+        Zone.DensityLevel = NewDensity;
+        
+        switch (NewDensity)
         {
-            continue;
+            case ECrowd_DensityLevel::Low:
+                Zone.MaxAgents = FMath::Min(Zone.MaxAgents, 1000);
+                break;
+            case ECrowd_DensityLevel::Medium:
+                Zone.MaxAgents = FMath::Min(Zone.MaxAgents, 5000);
+                break;
+            case ECrowd_DensityLevel::High:
+                Zone.MaxAgents = FMath::Min(Zone.MaxAgents, 15000);
+                break;
+            case ECrowd_DensityLevel::Ultra:
+                Zone.MaxAgents = FMath::Min(Zone.MaxAgents, 50000);
+                break;
+        }
+    }
+}
+
+void ACrowd_MassEntityManager::RegisterWaypoint(const FVector& Location, const FString& WaypointName)
+{
+    WaypointNetwork.Add(Location);
+    NamedWaypoints.Add(WaypointName, Location);
+    
+    UE_LOG(LogTemp, Warning, TEXT("Registered waypoint '%s' at %s"), *WaypointName, *Location.ToString());
+}
+
+void ACrowd_MassEntityManager::CreatePathNetwork()
+{
+    // Create default waypoint network in a grid pattern
+    const float GridSize = 1000.0f;
+    const int32 GridDimension = 5;
+    
+    WaypointNetwork.Empty();
+    NamedWaypoints.Empty();
+    
+    for (int32 X = 0; X < GridDimension; X++)
+    {
+        for (int32 Y = 0; Y < GridDimension; Y++)
+        {
+            FVector WaypointLocation = FVector(
+                (X - GridDimension/2) * GridSize,
+                (Y - GridDimension/2) * GridSize,
+                100.0f
+            );
+            
+            FString WaypointName = FString::Printf(TEXT("Waypoint_%d_%d"), X, Y);
+            RegisterWaypoint(WaypointLocation, WaypointName);
+        }
+    }
+    
+    UE_LOG(LogTemp, Warning, TEXT("Created path network with %d waypoints"), WaypointNetwork.Num());
+}
+
+TArray<FVector> ACrowd_MassEntityManager::GetOptimalPath(const FVector& Start, const FVector& End)
+{
+    TArray<FVector> Path;
+    
+    // Simple pathfinding - find nearest waypoints and create path
+    FVector NearestStart = Start;
+    FVector NearestEnd = End;
+    
+    float MinStartDist = MAX_FLT;
+    float MinEndDist = MAX_FLT;
+    
+    for (const FVector& Waypoint : WaypointNetwork)
+    {
+        float StartDist = FVector::Dist(Start, Waypoint);
+        if (StartDist < MinStartDist)
+        {
+            MinStartDist = StartDist;
+            NearestStart = Waypoint;
         }
         
-        // Calculate distance to player (simplified - would need actual entity positions)
-        float Distance = FVector::Dist(PlayerLocation, GetActorLocation());
+        float EndDist = FVector::Dist(End, Waypoint);
+        if (EndDist < MinEndDist)
+        {
+            MinEndDist = EndDist;
+            NearestEnd = Waypoint;
+        }
+    }
+    
+    Path.Add(Start);
+    Path.Add(NearestStart);
+    Path.Add(NearestEnd);
+    Path.Add(End);
+    
+    return Path;
+}
+
+float ACrowd_MassEntityManager::GetCurrentPerformanceMetric() const
+{
+    // Simple performance metric based on frame time and agent count
+    float BaselineFrameTime = 0.016f; // 60 FPS target
+    float PerformanceRatio = BaselineFrameTime / FMath::Max(CurrentFrameTime, 0.001f);
+    
+    // Factor in agent count
+    float AgentLoadFactor = (float)ActiveAgentCount / (float)MaxTotalAgents;
+    
+    return PerformanceRatio * (1.0f - AgentLoadFactor * 0.5f);
+}
+
+void ACrowd_MassEntityManager::OptimizePerformance()
+{
+    float PerformanceMetric = GetCurrentPerformanceMetric();
+    
+    if (PerformanceMetric < 0.8f) // Performance below 80%
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Performance low (%.2f) - optimizing crowd system"), PerformanceMetric);
         
-        if (Distance <= LODSettings.HighDetailDistance && HighDetailCount < LODSettings.MaxHighDetailEntities)
-        {
-            // Set high detail LOD
-            HighDetailCount++;
-        }
-        else if (Distance <= LODSettings.MediumDetailDistance && MediumDetailCount < LODSettings.MaxMediumDetailEntities)
-        {
-            // Set medium detail LOD
-            MediumDetailCount++;
-        }
-        else
-        {
-            // Set low detail LOD or cull
-        }
+        // Reduce visible agents
+        MaxVisibleAgents = FMath::Max(MaxVisibleAgents - 100, 500);
+        
+        // Increase culling distance
+        CullingDistance = FMath::Min(CullingDistance * 1.1f, 10000.0f);
+        
+        // Force LOD update
+        UpdateLODSystem();
     }
-}
-
-void ACrowd_MassEntityManager::ClearAllHerds()
-{
-    if (MassEntitySubsystem)
+    else if (PerformanceMetric > 1.2f) // Performance above 120%
     {
-        for (const FMassEntityHandle& EntityHandle : ActiveEntities)
-        {
-            if (EntityHandle.IsValid())
-            {
-                MassEntitySubsystem->DestroyEntity(EntityHandle);
-            }
-        }
+        // Increase visible agents
+        MaxVisibleAgents = FMath::Min(MaxVisibleAgents + 50, 5000);
+        
+        // Decrease culling distance
+        CullingDistance = FMath::Max(CullingDistance * 0.95f, 2000.0f);
     }
-    
-    ActiveEntities.Empty();
-    CurrentEntityCount = 0;
-    
-    UE_LOG(LogTemp, Warning, TEXT("ACrowd_MassEntityManager: Cleared all herds"));
 }
 
-void ACrowd_MassEntityManager::DebugSpawnTestHerd()
+void ACrowd_MassEntityManager::UpdateAgentBehaviors(float DeltaTime)
 {
-    FCrowd_HerdData TestHerd;
-    TestHerd.EntityCount = 100;
-    TestHerd.MovementSpeed = 200.0f;
-    TestHerd.FlockingRadius = 400.0f;
-    TestHerd.CenterLocation = GetActorLocation() + FVector(500.0f, 0.0f, 0.0f);
-    TestHerd.BehaviorType = ECrowd_BehaviorType::Migrating;
+    // Update agent AI behaviors (simplified for now)
+    // In full implementation, this would update Mass Entity components
     
-    SpawnHerd(TestHerd);
-}
-
-void ACrowd_MassEntityManager::DebugShowHerdStats()
-{
-    UE_LOG(LogTemp, Warning, TEXT("=== CROWD SYSTEM STATS ==="));
-    UE_LOG(LogTemp, Warning, TEXT("Active Entities: %d / %d"), CurrentEntityCount, MaxSimultaneousEntities);
-    UE_LOG(LogTemp, Warning, TEXT("Configured Herds: %d"), HerdConfigurations.Num());
-    UE_LOG(LogTemp, Warning, TEXT("Update Frequency: %.2f"), UpdateFrequency);
-    UE_LOG(LogTemp, Warning, TEXT("Flocking Enabled: %s"), bEnableFlocking ? TEXT("Yes") : TEXT("No"));
-    UE_LOG(LogTemp, Warning, TEXT("Avoidance Enabled: %s"), bEnableAvoidance ? TEXT("Yes") : TEXT("No"));
-    
-    if (GEngine)
+    if (ActiveAgentCount > 0)
     {
-        GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Green, 
-            FString::Printf(TEXT("Crowd System: %d/%d entities active"), CurrentEntityCount, MaxSimultaneousEntities));
+        // Simulate behavior processing time
+        float BehaviorProcessingTime = ActiveAgentCount * 0.00001f; // Very small per-agent cost
+        
+        // Update pathfinding
+        UpdatePathfinding();
+        
+        // Handle collision avoidance
+        HandleCollisionAvoidance();
     }
+}
+
+void ACrowd_MassEntityManager::ProcessCulling()
+{
+    if (!GetWorld()) return;
+    
+    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
+    if (!PlayerPawn) return;
+    
+    FVector PlayerLocation = PlayerPawn->GetActorLocation();
+    
+    // Dynamic culling based on distance and occlusion
+    DynamicCulling();
+    
+    // Update visible agent count (simplified)
+    VisibleAgentCount = FMath::Min(ActiveAgentCount, MaxVisibleAgents);
+}
+
+void ACrowd_MassEntityManager::HandleCollisionAvoidance()
+{
+    // Simplified collision avoidance system
+    // In full implementation, this would use Mass Entity spatial partitioning
+}
+
+void ACrowd_MassEntityManager::UpdatePathfinding()
+{
+    // Update pathfinding for active agents
+    // In full implementation, this would update Mass Entity movement components
+}
+
+void ACrowd_MassEntityManager::AdaptiveLOD()
+{
+    // Adaptive LOD system based on performance and distance
+    float PerformanceMetric = GetCurrentPerformanceMetric();
+    
+    if (PerformanceMetric < 0.7f)
+    {
+        // Aggressive LOD reduction
+        MaxVisibleAgents = FMath::Max(MaxVisibleAgents - 200, 300);
+    }
+    else if (PerformanceMetric > 1.1f)
+    {
+        // Increase LOD quality
+        MaxVisibleAgents = FMath::Min(MaxVisibleAgents + 100, 3000);
+    }
+}
+
+void ACrowd_MassEntityManager::DynamicCulling()
+{
+    // Dynamic culling based on view frustum and occlusion
+    if (bEnableOcclusion)
+    {
+        // Occlusion culling logic would go here
+        // For now, simple distance-based culling
+        VisibleAgentCount = FMath::Min(ActiveAgentCount, MaxVisibleAgents);
+    }
+}
+
+void ACrowd_MassEntityManager::BatchProcessing()
+{
+    // Batch processing for performance optimization
+    // Process agents in batches to spread load across frames
 }
