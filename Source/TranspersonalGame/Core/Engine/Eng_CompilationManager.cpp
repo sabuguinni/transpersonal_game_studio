@@ -1,214 +1,373 @@
 #include "Eng_CompilationManager.h"
 #include "Engine/Engine.h"
-#include "HAL/FileManager.h"
+#include "Engine/World.h"
+#include "Kismet/GameplayStatics.h"
+#include "HAL/PlatformFilemanager.h"
+#include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
-#include "UObject/UObjectGlobals.h"
 
-void UEng_CompilationManager::Initialize(FSubsystemCollectionBase& Collection)
+DEFINE_LOG_CATEGORY_STATIC(LogEngCompilationManager, Log, All);
+
+UEng_CompilationManager::UEng_CompilationManager()
 {
-    Super::Initialize(Collection);
+    PrimaryComponentTick.bCanEverTick = false;
     
-    // Define critical modules that must always be enabled
-    CriticalModules = {
-        TEXT("TranspersonalGame"),
-        TEXT("TranspersonalCharacter"),
-        TEXT("TranspersonalGameMode"),
-        TEXT("TranspersonalGameState"),
-        TEXT("DinosaurTRex"),
-        TEXT("DinosaurCombatAIController")
+    // Initialize compilation tracking
+    TotalFilesTracked = 0;
+    FilesWithErrors = 0;
+    FilesWithWarnings = 0;
+    LastCompilationTime = 0.0f;
+    CompilationInProgress = false;
+}
+
+void UEng_CompilationManager::BeginPlay()
+{
+    Super::BeginPlay();
+    
+    // Initialize compilation management system
+    InitializeCompilationTracking();
+    
+    // Perform initial compilation scan
+    ScanProjectFiles();
+    
+    UE_LOG(LogEngCompilationManager, Log, TEXT("Engine Compilation Manager initialized - tracking %d files"), TotalFilesTracked);
+}
+
+void UEng_CompilationManager::InitializeCompilationTracking()
+{
+    // Clear existing tracking data
+    TrackedFiles.Empty();
+    CompilationIssues.Empty();
+    
+    // Set up file patterns to track
+    FilePatterns = {
+        TEXT("*.h"),
+        TEXT("*.cpp"),
+        TEXT("*.build.cs"),
+        TEXT("*.target.cs")
     };
     
-    TotalSourceFiles = 0;
-    EnabledSourceFiles = 0;
-    DisabledSourceFiles = 0;
+    // Set up critical paths
+    CriticalPaths = {
+        TEXT("Source/TranspersonalGame/"),
+        TEXT("Source/TranspersonalGame/Core/"),
+        TEXT("Source/TranspersonalGame/Characters/"),
+        TEXT("Source/TranspersonalGame/World/"),
+        TEXT("Source/TranspersonalGame/AI/")
+    };
     
-    InitializeModuleTracking();
-    ScanSourceDirectory();
-    
-    UE_LOG(LogTemp, Log, TEXT("Engine Compilation Manager initialized - %d enabled, %d disabled files"), 
-           EnabledSourceFiles, DisabledSourceFiles);
+    UE_LOG(LogEngCompilationManager, Log, TEXT("Compilation tracking initialized"));
 }
 
-void UEng_CompilationManager::Deinitialize()
+bool UEng_CompilationManager::ScanProjectFiles()
 {
-    ModuleInfos.Empty();
-    CriticalModules.Empty();
-    Super::Deinitialize();
-}
-
-bool UEng_CompilationManager::CheckModuleCompilationStatus(const FString& ModuleName)
-{
-    // Try to load the module class to check if it compiled successfully
-    FString ClassPath = FString::Printf(TEXT("/Script/TranspersonalGame.%s"), *ModuleName);
-    UClass* ModuleClass = LoadClass<UObject>(nullptr, *ClassPath);
+    UE_LOG(LogEngCompilationManager, Log, TEXT("Starting project file scan..."));
     
-    EEng_CompilationStatus Status = ModuleClass ? EEng_CompilationStatus::Success : EEng_CompilationStatus::Failed;
-    UpdateModuleStatus(ModuleName, Status);
+    TotalFilesTracked = 0;
+    FilesWithErrors = 0;
+    FilesWithWarnings = 0;
     
-    return ModuleClass != nullptr;
-}
-
-TArray<FEng_ModuleCompilationInfo> UEng_CompilationManager::GetAllModuleStatus()
-{
-    // Update status for all tracked modules
-    for (FEng_ModuleCompilationInfo& ModuleInfo : ModuleInfos)
+    // Scan each critical path
+    for (const FString& Path : CriticalPaths)
     {
-        CheckModuleCompilationStatus(ModuleInfo.ModuleName);
+        ScanDirectory(Path);
     }
     
-    return ModuleInfos;
-}
-
-bool UEng_CompilationManager::EnableModule(const FString& ModuleName)
-{
-    // This would require file system operations to rename .cpp.disabled to .cpp
-    // For now, just track the request
-    UpdateModuleStatus(ModuleName, EEng_CompilationStatus::Unknown);
+    UE_LOG(LogEngCompilationManager, Log, TEXT("Project scan complete - %d files tracked, %d with errors, %d with warnings"), 
+           TotalFilesTracked, FilesWithErrors, FilesWithWarnings);
     
-    UE_LOG(LogTemp, Warning, TEXT("Module enable requested for %s - requires file system operations"), *ModuleName);
-    return false; // Not implemented in this version
+    return FilesWithErrors == 0;
 }
 
-bool UEng_CompilationManager::DisableModule(const FString& ModuleName)
+void UEng_CompilationManager::ScanDirectory(const FString& DirectoryPath)
 {
-    // Check if module is critical
-    if (CriticalModules.Contains(ModuleName))
+    FString FullPath = FPaths::ProjectDir() + DirectoryPath;
+    
+    if (!FPlatformFileManager::Get().GetPlatformFile().DirectoryExists(*FullPath))
     {
-        UE_LOG(LogTemp, Error, TEXT("Cannot disable critical module: %s"), *ModuleName);
-        return false;
+        UE_LOG(LogEngCompilationManager, Warning, TEXT("Directory does not exist: %s"), *FullPath);
+        return;
     }
     
-    // This would require file system operations to rename .cpp to .cpp.disabled
-    // For now, just track the request
-    UpdateModuleStatus(ModuleName, EEng_CompilationStatus::Disabled);
+    // Get all files in directory
+    TArray<FString> FoundFiles;
+    IFileManager& FileManager = IFileManager::Get();
     
-    UE_LOG(LogTemp, Warning, TEXT("Module disable requested for %s - requires file system operations"), *ModuleName);
-    return false; // Not implemented in this version
-}
-
-int32 UEng_CompilationManager::GetTotalEnabledModules() const
-{
-    return EnabledSourceFiles;
-}
-
-int32 UEng_CompilationManager::GetTotalDisabledModules() const
-{
-    return DisabledSourceFiles;
-}
-
-bool UEng_CompilationManager::ValidateMinimalBuild()
-{
-    bool bAllCriticalModulesValid = true;
-    
-    for (const FString& CriticalModule : CriticalModules)
+    for (const FString& Pattern : FilePatterns)
     {
-        if (!CheckModuleCompilationStatus(CriticalModule))
+        FString SearchPattern = FullPath + Pattern;
+        FileManager.FindFiles(FoundFiles, *SearchPattern, true, false);
+        
+        for (const FString& FileName : FoundFiles)
         {
-            UE_LOG(LogTemp, Error, TEXT("Critical module %s failed validation"), *CriticalModule);
-            bAllCriticalModulesValid = false;
+            FString FilePath = DirectoryPath + FileName;
+            AnalyzeFile(FilePath);
+            TotalFilesTracked++;
         }
+        
+        FoundFiles.Empty();
     }
+}
+
+void UEng_CompilationManager::AnalyzeFile(const FString& FilePath)
+{
+    FEng_FileCompilationInfo FileInfo;
+    FileInfo.FilePath = FilePath;
+    FileInfo.LastModified = FDateTime::Now(); // Simplified - would use actual file time
+    FileInfo.HasErrors = false;
+    FileInfo.HasWarnings = false;
+    FileInfo.Issues.Empty();
     
-    if (bAllCriticalModulesValid)
+    // Read file content for analysis
+    FString FileContent;
+    FString FullFilePath = FPaths::ProjectDir() + FilePath;
+    
+    if (FFileHelper::LoadFileToString(FileContent, *FullFilePath))
     {
-        UE_LOG(LogTemp, Log, TEXT("Minimal build validation PASSED - all critical modules compiled"));
+        // Analyze file content for common issues
+        AnalyzeFileContent(FileContent, FileInfo);
     }
     else
     {
-        UE_LOG(LogTemp, Error, TEXT("Minimal build validation FAILED - critical modules missing"));
+        // File read error
+        FEng_CompilationIssue Issue;
+        Issue.IssueType = EEng_CompilationIssueType::FileAccess;
+        Issue.Severity = EEng_CompilationSeverity::Error;
+        Issue.Description = TEXT("Could not read file");
+        Issue.LineNumber = 0;
+        
+        FileInfo.Issues.Add(Issue);
+        FileInfo.HasErrors = true;
+        FilesWithErrors++;
     }
     
-    return bAllCriticalModulesValid;
-}
-
-TArray<FString> UEng_CompilationManager::GetCriticalModules() const
-{
-    return CriticalModules;
-}
-
-void UEng_CompilationManager::InitializeModuleTracking()
-{
-    ModuleInfos.Empty();
+    // Store file info
+    TrackedFiles.Add(FileInfo);
     
-    // Initialize tracking for critical modules
-    for (const FString& ModuleName : CriticalModules)
+    if (FileInfo.HasErrors)
     {
-        FEng_ModuleCompilationInfo ModuleInfo;
-        ModuleInfo.ModuleName = ModuleName;
-        ModuleInfo.Status = EEng_CompilationStatus::Unknown;
-        ModuleInfo.bIsEnabled = true;
-        ModuleInfos.Add(ModuleInfo);
+        FilesWithErrors++;
     }
-    
-    // Add other known modules
-    TArray<FString> AdditionalModules = {
-        TEXT("PCGWorldGenerator"),
-        TEXT("FoliageManager"),
-        TEXT("CrowdSimulationManager"),
-        TEXT("ProceduralWorldManager"),
-        TEXT("BuildIntegrationManager")
-    };
-    
-    for (const FString& ModuleName : AdditionalModules)
+    else if (FileInfo.HasWarnings)
     {
-        FEng_ModuleCompilationInfo ModuleInfo;
-        ModuleInfo.ModuleName = ModuleName;
-        ModuleInfo.Status = EEng_CompilationStatus::Unknown;
-        ModuleInfo.bIsEnabled = true;
-        ModuleInfos.Add(ModuleInfo);
+        FilesWithWarnings++;
     }
 }
 
-void UEng_CompilationManager::UpdateModuleStatus(const FString& ModuleName, EEng_CompilationStatus Status)
+void UEng_CompilationManager::AnalyzeFileContent(const FString& Content, FEng_FileCompilationInfo& FileInfo)
 {
-    for (FEng_ModuleCompilationInfo& ModuleInfo : ModuleInfos)
+    TArray<FString> Lines;
+    Content.ParseIntoArray(Lines, TEXT("\n"), true);
+    
+    for (int32 LineIndex = 0; LineIndex < Lines.Num(); LineIndex++)
     {
-        if (ModuleInfo.ModuleName == ModuleName)
+        const FString& Line = Lines[LineIndex];
+        
+        // Check for common compilation issues
+        CheckIncludeIssues(Line, LineIndex + 1, FileInfo);
+        CheckMacroIssues(Line, LineIndex + 1, FileInfo);
+        CheckTypeIssues(Line, LineIndex + 1, FileInfo);
+        CheckSyntaxIssues(Line, LineIndex + 1, FileInfo);
+    }
+    
+    // File-level checks
+    CheckFileStructure(Lines, FileInfo);
+}
+
+void UEng_CompilationManager::CheckIncludeIssues(const FString& Line, int32 LineNumber, FEng_FileCompilationInfo& FileInfo)
+{
+    if (Line.Contains(TEXT("#include")))
+    {
+        // Check for missing quotes or brackets
+        if (!Line.Contains(TEXT("\"")) && !Line.Contains(TEXT("<")))
         {
-            ModuleInfo.Status = Status;
-            ModuleInfo.LastCompileTime = FPlatformTime::Seconds();
-            return;
+            AddIssue(FileInfo, EEng_CompilationIssueType::IncludeStructure, EEng_CompilationSeverity::Error,
+                     TEXT("Include statement missing quotes or brackets"), LineNumber);
+        }
+        
+        // Check for .generated.h not being last
+        if (Line.Contains(TEXT(".generated.h")) && LineNumber < 10)
+        {
+            // This is a simplified check - would need more sophisticated analysis
+            AddIssue(FileInfo, EEng_CompilationIssueType::IncludeStructure, EEng_CompilationSeverity::Warning,
+                     TEXT("Generated header should be last include"), LineNumber);
+        }
+    }
+}
+
+void UEng_CompilationManager::CheckMacroIssues(const FString& Line, int32 LineNumber, FEng_FileCompilationInfo& FileInfo)
+{
+    // Check UPROPERTY issues
+    if (Line.Contains(TEXT("UPROPERTY")))
+    {
+        if (Line.Contains(TEXT("\\\"")) || Line.Contains(TEXT("\\\'")))
+        {
+            AddIssue(FileInfo, EEng_CompilationIssueType::MacroUsage, EEng_CompilationSeverity::Error,
+                     TEXT("Escaped quotes in UPROPERTY - use normal quotes"), LineNumber);
+        }
+        
+        if (Line.Contains(TEXT("CallInEditor = true")))
+        {
+            AddIssue(FileInfo, EEng_CompilationIssueType::MacroUsage, EEng_CompilationSeverity::Error,
+                     TEXT("CallInEditor should be a bare flag, not CallInEditor = true"), LineNumber);
         }
     }
     
-    // If module not found, add it
-    FEng_ModuleCompilationInfo NewModuleInfo;
-    NewModuleInfo.ModuleName = ModuleName;
-    NewModuleInfo.Status = Status;
-    NewModuleInfo.LastCompileTime = FPlatformTime::Seconds();
-    NewModuleInfo.bIsEnabled = true;
-    ModuleInfos.Add(NewModuleInfo);
-}
-
-bool UEng_CompilationManager::IsModuleFileEnabled(const FString& FilePath)
-{
-    return !FilePath.EndsWith(TEXT(".disabled"));
-}
-
-void UEng_CompilationManager::ScanSourceDirectory()
-{
-    FString SourcePath = FPaths::ProjectDir() / TEXT("Source/TranspersonalGame");
-    
-    TArray<FString> FoundFiles;
-    IFileManager::Get().FindFilesRecursive(FoundFiles, *SourcePath, TEXT("*.cpp"), true, false);
-    
-    EnabledSourceFiles = 0;
-    DisabledSourceFiles = 0;
-    
-    for (const FString& FilePath : FoundFiles)
+    // Check UFUNCTION issues
+    if (Line.Contains(TEXT("UFUNCTION")))
     {
-        if (IsModuleFileEnabled(FilePath))
+        if (Line.Contains(TEXT("CallInEditor = true")))
         {
-            EnabledSourceFiles++;
+            AddIssue(FileInfo, EEng_CompilationIssueType::MacroUsage, EEng_CompilationSeverity::Error,
+                     TEXT("CallInEditor should be a bare flag"), LineNumber);
         }
-        else
+    }
+}
+
+void UEng_CompilationManager::CheckTypeIssues(const FString& Line, int32 LineNumber, FEng_FileCompilationInfo& FileInfo)
+{
+    // Check for potential type redefinition issues
+    if (Line.Contains(TEXT("USTRUCT")) || Line.Contains(TEXT("UENUM")) || Line.Contains(TEXT("UCLASS")))
+    {
+        // Check if it's at global scope (simplified check)
+        FString TrimmedLine = Line.TrimStartAndEnd();
+        if (TrimmedLine.StartsWith(TEXT("    ")) || TrimmedLine.StartsWith(TEXT("\t")))
         {
-            DisabledSourceFiles++;
+            AddIssue(FileInfo, EEng_CompilationIssueType::TypeDefinition, EEng_CompilationSeverity::Error,
+                     TEXT("USTRUCT/UENUM/UCLASS must be at global scope"), LineNumber);
+        }
+    }
+}
+
+void UEng_CompilationManager::CheckSyntaxIssues(const FString& Line, int32 LineNumber, FEng_FileCompilationInfo& FileInfo)
+{
+    // Check for common syntax issues
+    if (Line.Contains(TEXT("bool bIs")) && Line.Contains(TEXT(" ")))
+    {
+        // Check for spaces in variable names
+        FString AfterBool = Line.RightChop(Line.Find(TEXT("bool bIs")) + 8);
+        if (AfterBool.Contains(TEXT(" ")) && !AfterBool.Contains(TEXT(";")))
+        {
+            AddIssue(FileInfo, EEng_CompilationIssueType::Syntax, EEng_CompilationSeverity::Error,
+                     TEXT("Variable name contains spaces"), LineNumber);
+        }
+    }
+}
+
+void UEng_CompilationManager::CheckFileStructure(const TArray<FString>& Lines, FEng_FileCompilationInfo& FileInfo)
+{
+    bool bHasPragmaOnce = false;
+    bool bHasGeneratedInclude = false;
+    int32 GeneratedIncludeLine = -1;
+    
+    for (int32 i = 0; i < Lines.Num(); i++)
+    {
+        const FString& Line = Lines[i];
+        
+        if (Line.Contains(TEXT("#pragma once")))
+        {
+            bHasPragmaOnce = true;
+        }
+        
+        if (Line.Contains(TEXT(".generated.h")))
+        {
+            bHasGeneratedInclude = true;
+            GeneratedIncludeLine = i;
         }
     }
     
-    TotalSourceFiles = EnabledSourceFiles + DisabledSourceFiles;
+    // Check header structure
+    if (FileInfo.FilePath.EndsWith(TEXT(".h")))
+    {
+        if (!bHasPragmaOnce)
+        {
+            AddIssue(FileInfo, EEng_CompilationIssueType::FileStructure, EEng_CompilationSeverity::Warning,
+                     TEXT("Header file missing #pragma once"), 1);
+        }
+        
+        if (bHasGeneratedInclude)
+        {
+            // Check if .generated.h is near the end
+            if (GeneratedIncludeLine < Lines.Num() - 20)
+            {
+                AddIssue(FileInfo, EEng_CompilationIssueType::IncludeStructure, EEng_CompilationSeverity::Warning,
+                         TEXT(".generated.h should be the last include"), GeneratedIncludeLine + 1);
+            }
+        }
+    }
+}
+
+void UEng_CompilationManager::AddIssue(FEng_FileCompilationInfo& FileInfo, EEng_CompilationIssueType Type, 
+                                       EEng_CompilationSeverity Severity, const FString& Description, int32 LineNumber)
+{
+    FEng_CompilationIssue Issue;
+    Issue.IssueType = Type;
+    Issue.Severity = Severity;
+    Issue.Description = Description;
+    Issue.LineNumber = LineNumber;
     
-    UE_LOG(LogTemp, Log, TEXT("Source scan complete: %d total files (%d enabled, %d disabled)"), 
-           TotalSourceFiles, EnabledSourceFiles, DisabledSourceFiles);
+    FileInfo.Issues.Add(Issue);
+    
+    if (Severity == EEng_CompilationSeverity::Error)
+    {
+        FileInfo.HasErrors = true;
+    }
+    else if (Severity == EEng_CompilationSeverity::Warning)
+    {
+        FileInfo.HasWarnings = true;
+    }
+    
+    // Add to global issues list
+    CompilationIssues.Add(Issue);
+}
+
+bool UEng_CompilationManager::ValidateProjectCompilation()
+{
+    UE_LOG(LogEngCompilationManager, Log, TEXT("Starting project compilation validation..."));
+    
+    CompilationInProgress = true;
+    
+    // Rescan all files
+    bool bScanSuccess = ScanProjectFiles();
+    
+    // Generate detailed report
+    GenerateCompilationReport();
+    
+    CompilationInProgress = false;
+    LastCompilationTime = GetWorld()->GetTimeSeconds();
+    
+    UE_LOG(LogEngCompilationManager, Log, TEXT("Compilation validation complete - Success: %s"), 
+           bScanSuccess ? TEXT("true") : TEXT("false"));
+    
+    return bScanSuccess;
+}
+
+void UEng_CompilationManager::GenerateCompilationReport()
+{
+    UE_LOG(LogEngCompilationManager, Log, TEXT("=== COMPILATION MANAGER REPORT ==="));
+    UE_LOG(LogEngCompilationManager, Log, TEXT("Total files tracked: %d"), TotalFilesTracked);
+    UE_LOG(LogEngCompilationManager, Log, TEXT("Files with errors: %d"), FilesWithErrors);
+    UE_LOG(LogEngCompilationManager, Log, TEXT("Files with warnings: %d"), FilesWithWarnings);
+    UE_LOG(LogEngCompilationManager, Log, TEXT("Total issues found: %d"), CompilationIssues.Num());
+    
+    if (FilesWithErrors > 0)
+    {
+        UE_LOG(LogEngCompilationManager, Log, TEXT("=== FILES WITH ERRORS ==="));
+        for (const FEng_FileCompilationInfo& FileInfo : TrackedFiles)
+        {
+            if (FileInfo.HasErrors)
+            {
+                UE_LOG(LogEngCompilationManager, Error, TEXT("ERROR FILE: %s"), *FileInfo.FilePath);
+                for (const FEng_CompilationIssue& Issue : FileInfo.Issues)
+                {
+                    if (Issue.Severity == EEng_CompilationSeverity::Error)
+                    {
+                        UE_LOG(LogEngCompilationManager, Error, TEXT("  Line %d: %s"), Issue.LineNumber, *Issue.Description);
+                    }
+                }
+            }
+        }
+    }
+    
+    UE_LOG(LogEngCompilationManager, Log, TEXT("=== END COMPILATION REPORT ==="));
 }
