@@ -5,27 +5,31 @@
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/Engine.h"
-#include "UObject/ConstructorHelpers.h"
-#include "../SharedTypes.h"
+#include "SharedTypes.h"
 #include "Char_TribalCharacterSystem.generated.h"
 
 UENUM(BlueprintType)
 enum class EChar_TribalRole : uint8
 {
+    Warrior     UMETA(DisplayName = "Warrior"),
+    Shaman      UMETA(DisplayName = "Shaman"),
+    Elder       UMETA(DisplayName = "Elder"),
+    Child       UMETA(DisplayName = "Child"),
     Hunter      UMETA(DisplayName = "Hunter"),
     Gatherer    UMETA(DisplayName = "Gatherer"),
-    Crafter     UMETA(DisplayName = "Crafter"),
-    Elder       UMETA(DisplayName = "Elder"),
-    Scout       UMETA(DisplayName = "Scout")
+    Crafter     UMETA(DisplayName = "Crafter")
 };
 
 UENUM(BlueprintType)
-enum class EChar_AgeGroup : uint8
+enum class EChar_EmotionalState : uint8
 {
-    YoungAdult  UMETA(DisplayName = "Young Adult"),
-    Adult       UMETA(DisplayName = "Adult"),
-    MiddleAged  UMETA(DisplayName = "Middle Aged"),
-    Elder       UMETA(DisplayName = "Elder")
+    Calm        UMETA(DisplayName = "Calm"),
+    Fear        UMETA(DisplayName = "Fear"),
+    Aggressive  UMETA(DisplayName = "Aggressive"),
+    Curious     UMETA(DisplayName = "Curious"),
+    Exhausted   UMETA(DisplayName = "Exhausted"),
+    Alert       UMETA(DisplayName = "Alert"),
+    Joyful      UMETA(DisplayName = "Joyful")
 };
 
 USTRUCT(BlueprintType)
@@ -34,25 +38,32 @@ struct TRANSPERSONALGAME_API FChar_TribalAppearance
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
-    EChar_AgeGroup AgeGroup = EChar_AgeGroup::Adult;
+    FLinearColor SkinTone;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
-    float SkinTone = 0.5f; // 0.0 = light, 1.0 = dark
+    FLinearColor HairColor;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
-    int32 HairStyle = 0; // 0-5 different styles
+    float BodyScale;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
-    int32 FacialFeatures = 0; // 0-10 different face variations
+    int32 TribalMarkings;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
-    float BodyBuild = 0.5f; // 0.0 = lean, 1.0 = muscular
+    bool bHasFeathers;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
-    bool bHasScars = false;
+    bool bHasBoneJewelry;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
-    int32 ClothingVariation = 0; // Different animal hide patterns
+    FChar_TribalAppearance()
+    {
+        SkinTone = FLinearColor(0.8f, 0.6f, 0.4f, 1.0f);
+        HairColor = FLinearColor(0.2f, 0.1f, 0.05f, 1.0f);
+        BodyScale = 1.0f;
+        TribalMarkings = 0;
+        bHasFeathers = false;
+        bHasBoneJewelry = false;
+    }
 };
 
 USTRUCT(BlueprintType)
@@ -61,19 +72,28 @@ struct TRANSPERSONALGAME_API FChar_TribalStats
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
-    float Strength = 50.0f;
+    float Strength;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
-    float Agility = 50.0f;
+    float Agility;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
-    float Intelligence = 50.0f;
+    float Wisdom;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
-    float Survival = 50.0f;
+    float Endurance;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
-    float SocialSkill = 50.0f;
+    float SocialStanding;
+
+    FChar_TribalStats()
+    {
+        Strength = 50.0f;
+        Agility = 50.0f;
+        Wisdom = 50.0f;
+        Endurance = 50.0f;
+        SocialStanding = 50.0f;
+    }
 };
 
 UCLASS(BlueprintType, Blueprintable)
@@ -90,85 +110,94 @@ protected:
 public:
     virtual void Tick(float DeltaTime) override;
 
-    // Character Properties
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal Character")
-    EChar_TribalRole TribalRole = EChar_TribalRole::Hunter;
+    // Character Identity
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal Identity")
+    FString CharacterName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal Character")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal Identity")
+    EChar_TribalRole TribalRole;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal Identity")
+    int32 Age;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal Identity")
     FChar_TribalAppearance Appearance;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal Character")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal Identity")
     FChar_TribalStats Stats;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal Character")
-    FString CharacterName = TEXT("Tribal Survivor");
+    // Emotional System
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Emotions")
+    EChar_EmotionalState CurrentEmotion;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal Character")
-    int32 Age = 25;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Emotions")
+    float EmotionIntensity;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal Character")
-    bool bIsFemale = false;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Emotions")
+    float EmotionDuration;
 
-    // Equipment Components
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Equipment")
-    class UStaticMeshComponent* WeaponMesh;
+    // Equipment and Tools
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Equipment")
+    TArray<UStaticMeshComponent*> EquippedTools;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Equipment")
-    class UStaticMeshComponent* ToolMesh;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Equipment")
+    UStaticMeshComponent* PrimaryWeapon;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Equipment")
-    class UStaticMeshComponent* AccessoryMesh;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Equipment")
+    UStaticMeshComponent* SecondaryTool;
 
-    // Behavior Properties
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
-    float WalkSpeed = 150.0f;
+    // Social Behavior
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Social")
+    TArray<AChar_TribalCharacter*> KnownCharacters;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
-    float RunSpeed = 400.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Social")
+    float TrustLevel;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
-    float AlertRadius = 1000.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Social")
+    bool bIsTribalLeader;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
-    bool bIsHostile = false;
-
-    // Functions
-    UFUNCTION(BlueprintCallable, Category = "Tribal Character")
-    void RandomizeAppearance();
-
-    UFUNCTION(BlueprintCallable, Category = "Tribal Character")
+    // Character Functions
+    UFUNCTION(BlueprintCallable, Category = "Character")
     void SetTribalRole(EChar_TribalRole NewRole);
 
-    UFUNCTION(BlueprintCallable, Category = "Tribal Character")
-    void EquipWeapon(class UStaticMesh* WeaponStaticMesh);
+    UFUNCTION(BlueprintCallable, Category = "Character")
+    void UpdateEmotionalState(EChar_EmotionalState NewEmotion, float Intensity);
 
-    UFUNCTION(BlueprintCallable, Category = "Tribal Character")
-    void SetAgeGroup(EChar_AgeGroup NewAgeGroup);
+    UFUNCTION(BlueprintCallable, Category = "Character")
+    void ApplyAppearanceSettings();
 
-    UFUNCTION(BlueprintCallable, Category = "Tribal Character")
+    UFUNCTION(BlueprintCallable, Category = "Character")
+    void EquipTool(UStaticMesh* ToolMesh, bool bIsPrimaryWeapon);
+
+    UFUNCTION(BlueprintCallable, Category = "Character")
+    void InteractWithCharacter(AChar_TribalCharacter* OtherCharacter);
+
+    UFUNCTION(BlueprintCallable, Category = "Character")
     FString GetCharacterDescription() const;
 
+    UFUNCTION(BlueprintCallable, Category = "Character")
+    bool CanPerformAction(const FString& ActionName) const;
+
+protected:
+    // Internal character management
+    void UpdateCharacterMesh();
+    void UpdateEquipment();
+    void ProcessEmotionalDecay(float DeltaTime);
+    void UpdateSocialRelationships();
+
 private:
-    void InitializeComponents();
-    void SetupDefaultMeshes();
-    void ApplyAppearanceToMesh();
-};
+    // Character customization components
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components", meta = (AllowPrivateAccess = "true"))
+    UStaticMeshComponent* TribalMarkingsComponent;
 
-UCLASS(BlueprintType)
-class TRANSPERSONALGAME_API UChar_TribalCharacterManager : public UObject
-{
-    GENERATED_BODY()
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components", meta = (AllowPrivateAccess = "true"))
+    UStaticMeshComponent* FeatherComponent;
 
-public:
-    UFUNCTION(BlueprintCallable, Category = "Character Manager")
-    static AChar_TribalCharacter* SpawnTribalCharacter(UWorld* World, FVector Location, EChar_TribalRole Role = EChar_TribalRole::Hunter);
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components", meta = (AllowPrivateAccess = "true"))
+    UStaticMeshComponent* JewelryComponent;
 
-    UFUNCTION(BlueprintCallable, Category = "Character Manager")
-    static void SpawnTribalGroup(UWorld* World, FVector CenterLocation, int32 GroupSize = 5);
-
-    UFUNCTION(BlueprintCallable, Category = "Character Manager")
-    static TArray<AChar_TribalCharacter*> GetAllTribalCharacters(UWorld* World);
-
-    UFUNCTION(BlueprintCallable, Category = "Character Manager")
-    static void RandomizeAllTribalCharacters(UWorld* World);
+    // Timers and state tracking
+    float EmotionTimer;
+    float LastInteractionTime;
+    bool bAppearanceNeedsUpdate;
 };
