@@ -1,231 +1,414 @@
 #include "QA_VFXIntegrationValidator.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "NiagaraActor.h"
+#include "Components/StaticMeshComponent.h"
 #include "NiagaraComponent.h"
 #include "NiagaraSystem.h"
-#include "GameFramework/Actor.h"
-#include "Components/StaticMeshComponent.h"
-#include "Materials/MaterialInterface.h"
-#include "Kismet/GameplayStatics.h"
+#include "Particles/ParticleSystemComponent.h"
+#include "Engine/StaticMesh.h"
+#include "Materials/Material.h"
+#include "UObject/ConstructorHelpers.h"
 
 UQA_VFXIntegrationValidator::UQA_VFXIntegrationValidator()
 {
-    PrimaryComponentTick.bCanEverTick = false;
+    PrimaryComponentTick.bCanEverTick = true;
+    PrimaryComponentTick.TickInterval = 1.0f;
     
-    // Initialize validation thresholds
-    MaxAllowedParticleCount = 50000;
-    MinRequiredFPS = 30.0f;
-    MaxMemoryUsageMB = 512.0f;
+    // Initialize validation parameters
+    MaxParticleCount = 10000;
+    MaxEffectDuration = 30.0f;
+    MinFrameRate = 30.0f;
     
-    // Initialize validation results
-    ValidationResults.Empty();
-    bValidationPassed = false;
-    LastValidationTime = 0.0f;
+    // Initialize validation state
+    bValidationActive = false;
+    ValidationStartTime = 0.0f;
+    LastFrameRate = 60.0f;
+    ActiveEffectCount = 0;
+    TotalParticleCount = 0;
 }
 
 void UQA_VFXIntegrationValidator::BeginPlay()
 {
     Super::BeginPlay();
     
-    // Start validation timer
-    GetWorld()->GetTimerManager().SetTimer(
-        ValidationTimerHandle,
-        this,
-        &UQA_VFXIntegrationValidator::RunPeriodicValidation,
-        5.0f,  // Run every 5 seconds
-        true   // Loop
-    );
+    UE_LOG(LogTemp, Warning, TEXT("QA_VFXIntegrationValidator: BeginPlay - Starting VFX validation"));
+    
+    // Start validation process
+    StartValidation();
 }
 
-void UQA_VFXIntegrationValidator::EndPlay(const EEndPlayReason::Type EndPlayReason)
+void UQA_VFXIntegrationValidator::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
-    // Clear validation timer
-    if (GetWorld())
-    {
-        GetWorld()->GetTimerManager().ClearTimer(ValidationTimerHandle);
-    }
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
     
-    Super::EndPlay(EndPlayReason);
+    if (bValidationActive)
+    {
+        UpdateValidationMetrics(DeltaTime);
+        CheckPerformanceThresholds();
+        ValidateActiveEffects();
+    }
 }
 
-bool UQA_VFXIntegrationValidator::ValidateVFXSystems()
+void UQA_VFXIntegrationValidator::StartValidation()
 {
-    if (!GetWorld())
+    if (bValidationActive)
     {
-        UE_LOG(LogTemp, Error, TEXT("QA_VFXIntegrationValidator: No valid world found"));
-        return false;
+        UE_LOG(LogTemp, Warning, TEXT("QA_VFXIntegrationValidator: Validation already active"));
+        return;
     }
     
+    bValidationActive = true;
+    ValidationStartTime = GetWorld()->GetTimeSeconds();
+    
+    // Clear previous results
     ValidationResults.Empty();
-    bValidationPassed = true;
+    EffectValidationData.Empty();
     
-    // Validate Niagara systems
-    bool bNiagaraValid = ValidateNiagaraSystems();
+    UE_LOG(LogTemp, Warning, TEXT("QA_VFXIntegrationValidator: Validation started"));
     
-    // Validate VFX performance
-    bool bPerformanceValid = ValidateVFXPerformance();
-    
-    // Validate VFX integration with gameplay
-    bool bIntegrationValid = ValidateGameplayIntegration();
-    
-    // Overall validation result
-    bValidationPassed = bNiagaraValid && bPerformanceValid && bIntegrationValid;
-    LastValidationTime = GetWorld()->GetTimeSeconds();
-    
-    // Log validation summary
-    UE_LOG(LogTemp, Warning, TEXT("VFX Integration Validation Complete - Passed: %s"), 
-           bValidationPassed ? TEXT("YES") : TEXT("NO"));
-    
-    return bValidationPassed;
-}
-
-bool UQA_VFXIntegrationValidator::ValidateNiagaraSystems()
-{
-    TArray<AActor*> NiagaraActors;
-    UGameplayStatics::GetAllActorsOfClass(GetWorld(), ANiagaraActor::StaticClass(), NiagaraActors);
-    
-    FQA_ValidationResult NiagaraResult;
-    NiagaraResult.TestName = TEXT("Niagara Systems Validation");
-    NiagaraResult.bPassed = true;
-    
-    int32 ValidSystems = 0;
-    int32 TotalSystems = NiagaraActors.Num();
-    
-    for (AActor* Actor : NiagaraActors)
-    {
-        if (ANiagaraActor* NiagaraActor = Cast<ANiagaraActor>(Actor))
-        {
-            UNiagaraComponent* NiagaraComp = NiagaraActor->GetNiagaraComponent();
-            if (NiagaraComp && NiagaraComp->GetAsset())
-            {
-                ValidSystems++;
-                
-                // Check if system is active
-                if (!NiagaraComp->IsActive())
-                {
-                    UE_LOG(LogTemp, Warning, TEXT("Inactive Niagara system: %s"), 
-                           *NiagaraActor->GetName());
-                }
-            }
-            else
-            {
-                NiagaraResult.bPassed = false;
-                NiagaraResult.ErrorMessage += FString::Printf(
-                    TEXT("Invalid Niagara system: %s; "), *NiagaraActor->GetName());
-            }
-        }
-    }
-    
-    NiagaraResult.Details = FString::Printf(
-        TEXT("Valid systems: %d/%d"), ValidSystems, TotalSystems);
-    
-    ValidationResults.Add(NiagaraResult);
-    
-    UE_LOG(LogTemp, Log, TEXT("Niagara validation: %d/%d systems valid"), 
-           ValidSystems, TotalSystems);
-    
-    return NiagaraResult.bPassed;
-}
-
-bool UQA_VFXIntegrationValidator::ValidateVFXPerformance()
-{
-    FQA_ValidationResult PerformanceResult;
-    PerformanceResult.TestName = TEXT("VFX Performance Validation");
-    PerformanceResult.bPassed = true;
-    
-    // Get current FPS
-    float CurrentFPS = 1.0f / GetWorld()->GetDeltaSeconds();
-    
-    // Check FPS threshold
-    if (CurrentFPS < MinRequiredFPS)
-    {
-        PerformanceResult.bPassed = false;
-        PerformanceResult.ErrorMessage += FString::Printf(
-            TEXT("FPS below threshold: %.1f < %.1f; "), CurrentFPS, MinRequiredFPS);
-    }
-    
-    // Count total particles (simplified estimation)
-    TArray<AActor*> NiagaraActors;
-    UGameplayStatics::GetAllActorsOfClass(GetWorld(), ANiagaraActor::StaticClass(), NiagaraActors);
-    
-    int32 EstimatedParticleCount = NiagaraActors.Num() * 1000; // Rough estimate
-    
-    if (EstimatedParticleCount > MaxAllowedParticleCount)
-    {
-        PerformanceResult.bPassed = false;
-        PerformanceResult.ErrorMessage += FString::Printf(
-            TEXT("Particle count too high: %d > %d; "), 
-            EstimatedParticleCount, MaxAllowedParticleCount);
-    }
-    
-    PerformanceResult.Details = FString::Printf(
-        TEXT("FPS: %.1f, Estimated particles: %d"), CurrentFPS, EstimatedParticleCount);
-    
-    ValidationResults.Add(PerformanceResult);
-    
-    UE_LOG(LogTemp, Log, TEXT("VFX Performance: FPS=%.1f, Particles=%d"), 
-           CurrentFPS, EstimatedParticleCount);
-    
-    return PerformanceResult.bPassed;
-}
-
-bool UQA_VFXIntegrationValidator::ValidateGameplayIntegration()
-{
-    FQA_ValidationResult IntegrationResult;
-    IntegrationResult.TestName = TEXT("VFX Gameplay Integration");
-    IntegrationResult.bPassed = true;
-    
-    // Check if VFX systems respond to gameplay events
-    TArray<AActor*> AllActors;
-    UGameplayStatics::GetAllActorsOfClass(GetWorld(), AActor::StaticClass(), AllActors);
-    
-    int32 VFXEnabledActors = 0;
-    int32 TotalGameplayActors = 0;
-    
-    for (AActor* Actor : AllActors)
-    {
-        // Skip non-gameplay actors
-        if (Actor->IsA<ANiagaraActor>() || 
-            Actor->GetName().Contains(TEXT("Light")) ||
-            Actor->GetName().Contains(TEXT("Sky")))
-        {
-            continue;
-        }
-        
-        TotalGameplayActors++;
-        
-        // Check if actor has VFX components or references
-        TArray<UActorComponent*> Components = Actor->GetRootComponent()->GetAttachChildren();
-        for (UActorComponent* Component : Components)
-        {
-            if (Component->IsA<UNiagaraComponent>())
-            {
-                VFXEnabledActors++;
-                break;
-            }
-        }
-    }
-    
-    // Calculate integration percentage
-    float IntegrationPercentage = TotalGameplayActors > 0 ? 
-        (float)VFXEnabledActors / TotalGameplayActors * 100.0f : 0.0f;
-    
-    IntegrationResult.Details = FString::Printf(
-        TEXT("VFX integration: %.1f%% (%d/%d actors)"), 
-        IntegrationPercentage, VFXEnabledActors, TotalGameplayActors);
-    
-    ValidationResults.Add(IntegrationResult);
-    
-    UE_LOG(LogTemp, Log, TEXT("VFX Integration: %.1f%% of gameplay actors have VFX"), 
-           IntegrationPercentage);
-    
-    return IntegrationResult.bPassed;
-}
-
-void UQA_VFXIntegrationValidator::RunPeriodicValidation()
-{
+    // Validate existing VFX systems
     ValidateVFXSystems();
+    ValidateNiagaraSystems();
+    ValidateParticleSystems();
+}
+
+void UQA_VFXIntegrationValidator::StopValidation()
+{
+    if (!bValidationActive)
+    {
+        return;
+    }
+    
+    bValidationActive = false;
+    float ValidationDuration = GetWorld()->GetTimeSeconds() - ValidationStartTime;
+    
+    // Generate final validation report
+    GenerateValidationReport(ValidationDuration);
+    
+    UE_LOG(LogTemp, Warning, TEXT("QA_VFXIntegrationValidator: Validation stopped after %.2f seconds"), ValidationDuration);
+}
+
+void UQA_VFXIntegrationValidator::ValidateVFXSystems()
+{
+    UE_LOG(LogTemp, Warning, TEXT("QA_VFXIntegrationValidator: Validating VFX systems"));
+    
+    // Find all VFX_EffectManager actors in the world
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        AddValidationResult(TEXT("VFX_Systems"), false, TEXT("World not available"));
+        return;
+    }
+    
+    int32 VFXManagerCount = 0;
+    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+    {
+        AActor* Actor = *ActorItr;
+        if (Actor && Actor->GetClass()->GetName().Contains(TEXT("VFX_EffectManager")))
+        {
+            VFXManagerCount++;
+            ValidateVFXManager(Actor);
+        }
+    }
+    
+    if (VFXManagerCount > 0)
+    {
+        AddValidationResult(TEXT("VFX_EffectManager"), true, FString::Printf(TEXT("Found %d VFX managers"), VFXManagerCount));
+    }
+    else
+    {
+        AddValidationResult(TEXT("VFX_EffectManager"), false, TEXT("No VFX managers found"));
+    }
+}
+
+void UQA_VFXIntegrationValidator::ValidateVFXManager(AActor* VFXManager)
+{
+    if (!VFXManager)
+    {
+        return;
+    }
+    
+    FString ActorName = VFXManager->GetName();
+    UE_LOG(LogTemp, Warning, TEXT("QA_VFXIntegrationValidator: Validating VFX Manager: %s"), *ActorName);
+    
+    // Check if actor has required components
+    TArray<UActorComponent*> Components = VFXManager->GetRootComponent()->GetAttachChildren();
+    
+    bool bHasNiagaraComponent = false;
+    bool bHasParticleComponent = false;
+    
+    for (UActorComponent* Component : Components)
+    {
+        if (Cast<UNiagaraComponent>(Component))
+        {
+            bHasNiagaraComponent = true;
+        }
+        else if (Cast<UParticleSystemComponent>(Component))
+        {
+            bHasParticleComponent = true;
+        }
+    }
+    
+    // Validate component setup
+    if (bHasNiagaraComponent || bHasParticleComponent)
+    {
+        AddValidationResult(ActorName, true, TEXT("VFX components found"));
+    }
+    else
+    {
+        AddValidationResult(ActorName, false, TEXT("No VFX components found"));
+    }
+}
+
+void UQA_VFXIntegrationValidator::ValidateNiagaraSystems()
+{
+    UE_LOG(LogTemp, Warning, TEXT("QA_VFXIntegrationValidator: Validating Niagara systems"));
+    
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        return;
+    }
+    
+    int32 NiagaraComponentCount = 0;
+    int32 ActiveNiagaraCount = 0;
+    
+    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+    {
+        AActor* Actor = *ActorItr;
+        if (!Actor) continue;
+        
+        TArray<UNiagaraComponent*> NiagaraComponents;
+        Actor->GetComponents<UNiagaraComponent>(NiagaraComponents);
+        
+        for (UNiagaraComponent* NiagaraComp : NiagaraComponents)
+        {
+            NiagaraComponentCount++;
+            
+            if (NiagaraComp && NiagaraComp->IsActive())
+            {
+                ActiveNiagaraCount++;
+                ValidateNiagaraComponent(NiagaraComp);
+            }
+        }
+    }
+    
+    AddValidationResult(TEXT("Niagara_Systems"), true, 
+        FString::Printf(TEXT("Found %d Niagara components (%d active)"), NiagaraComponentCount, ActiveNiagaraCount));
+}
+
+void UQA_VFXIntegrationValidator::ValidateNiagaraComponent(UNiagaraComponent* NiagaraComp)
+{
+    if (!NiagaraComp)
+    {
+        return;
+    }
+    
+    FString ComponentName = NiagaraComp->GetName();
+    
+    // Check if system asset is valid
+    UNiagaraSystem* NiagaraSystem = NiagaraComp->GetAsset();
+    if (NiagaraSystem)
+    {
+        // Estimate particle count (simplified)
+        int32 EstimatedParticles = 100; // Default estimate
+        TotalParticleCount += EstimatedParticles;
+        
+        FQA_EffectValidationData ValidationData;
+        ValidationData.EffectName = ComponentName;
+        ValidationData.EffectType = TEXT("Niagara");
+        ValidationData.bIsActive = NiagaraComp->IsActive();
+        ValidationData.ParticleCount = EstimatedParticles;
+        ValidationData.Duration = 0.0f; // Will be updated during tick
+        
+        EffectValidationData.Add(ValidationData);
+    }
+    else
+    {
+        AddValidationResult(ComponentName, false, TEXT("Niagara system asset is null"));
+    }
+}
+
+void UQA_VFXIntegrationValidator::ValidateParticleSystems()
+{
+    UE_LOG(LogTemp, Warning, TEXT("QA_VFXIntegrationValidator: Validating particle systems"));
+    
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        return;
+    }
+    
+    int32 ParticleComponentCount = 0;
+    int32 ActiveParticleCount = 0;
+    
+    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+    {
+        AActor* Actor = *ActorItr;
+        if (!Actor) continue;
+        
+        TArray<UParticleSystemComponent*> ParticleComponents;
+        Actor->GetComponents<UParticleSystemComponent>(ParticleComponents);
+        
+        for (UParticleSystemComponent* ParticleComp : ParticleComponents)
+        {
+            ParticleComponentCount++;
+            
+            if (ParticleComp && ParticleComp->IsActive())
+            {
+                ActiveParticleCount++;
+                ValidateParticleComponent(ParticleComp);
+            }
+        }
+    }
+    
+    AddValidationResult(TEXT("Particle_Systems"), true, 
+        FString::Printf(TEXT("Found %d particle components (%d active)"), ParticleComponentCount, ActiveParticleCount));
+}
+
+void UQA_VFXIntegrationValidator::ValidateParticleComponent(UParticleSystemComponent* ParticleComp)
+{
+    if (!ParticleComp)
+    {
+        return;
+    }
+    
+    FString ComponentName = ParticleComp->GetName();
+    
+    // Check if template is valid
+    if (ParticleComp->Template)
+    {
+        // Estimate particle count (simplified)
+        int32 EstimatedParticles = 50; // Default estimate
+        TotalParticleCount += EstimatedParticles;
+        
+        FQA_EffectValidationData ValidationData;
+        ValidationData.EffectName = ComponentName;
+        ValidationData.EffectType = TEXT("Cascade");
+        ValidationData.bIsActive = ParticleComp->IsActive();
+        ValidationData.ParticleCount = EstimatedParticles;
+        ValidationData.Duration = 0.0f;
+        
+        EffectValidationData.Add(ValidationData);
+    }
+    else
+    {
+        AddValidationResult(ComponentName, false, TEXT("Particle system template is null"));
+    }
+}
+
+void UQA_VFXIntegrationValidator::UpdateValidationMetrics(float DeltaTime)
+{
+    // Update frame rate
+    if (DeltaTime > 0.0f)
+    {
+        LastFrameRate = 1.0f / DeltaTime;
+    }
+    
+    // Update active effect count
+    ActiveEffectCount = 0;
+    for (FQA_EffectValidationData& EffectData : EffectValidationData)
+    {
+        if (EffectData.bIsActive)
+        {
+            ActiveEffectCount++;
+            EffectData.Duration += DeltaTime;
+        }
+    }
+}
+
+void UQA_VFXIntegrationValidator::CheckPerformanceThresholds()
+{
+    // Check frame rate threshold
+    if (LastFrameRate < MinFrameRate)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("QA_VFXIntegrationValidator: Frame rate below threshold: %.1f FPS"), LastFrameRate);
+    }
+    
+    // Check particle count threshold
+    if (TotalParticleCount > MaxParticleCount)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("QA_VFXIntegrationValidator: Particle count above threshold: %d"), TotalParticleCount);
+    }
+    
+    // Check for long-running effects
+    for (const FQA_EffectValidationData& EffectData : EffectValidationData)
+    {
+        if (EffectData.bIsActive && EffectData.Duration > MaxEffectDuration)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("QA_VFXIntegrationValidator: Long-running effect: %s (%.1fs)"), 
+                *EffectData.EffectName, EffectData.Duration);
+        }
+    }
+}
+
+void UQA_VFXIntegrationValidator::ValidateActiveEffects()
+{
+    // Validate that active effects are still functioning
+    for (FQA_EffectValidationData& EffectData : EffectValidationData)
+    {
+        if (EffectData.bIsActive)
+        {
+            // Additional validation logic can be added here
+            // For now, just log active effects periodically
+            static float LastLogTime = 0.0f;
+            float CurrentTime = GetWorld()->GetTimeSeconds();
+            
+            if (CurrentTime - LastLogTime > 5.0f) // Log every 5 seconds
+            {
+                UE_LOG(LogTemp, Log, TEXT("QA_VFXIntegrationValidator: Active effect: %s (%s, %d particles)"), 
+                    *EffectData.EffectName, *EffectData.EffectType, EffectData.ParticleCount);
+                LastLogTime = CurrentTime;
+            }
+        }
+    }
+}
+
+void UQA_VFXIntegrationValidator::AddValidationResult(const FString& TestName, bool bPassed, const FString& Details)
+{
+    FQA_ValidationResult Result;
+    Result.TestName = TestName;
+    Result.bPassed = bPassed;
+    Result.Details = Details;
+    Result.Timestamp = GetWorld()->GetTimeSeconds();
+    
+    ValidationResults.Add(Result);
+    
+    FString Status = bPassed ? TEXT("PASS") : TEXT("FAIL");
+    UE_LOG(LogTemp, Warning, TEXT("QA_VFXIntegrationValidator: [%s] %s - %s"), *Status, *TestName, *Details);
+}
+
+void UQA_VFXIntegrationValidator::GenerateValidationReport(float ValidationDuration)
+{
+    UE_LOG(LogTemp, Warning, TEXT("=== QA VFX INTEGRATION VALIDATION REPORT ==="));
+    UE_LOG(LogTemp, Warning, TEXT("Validation Duration: %.2f seconds"), ValidationDuration);
+    UE_LOG(LogTemp, Warning, TEXT("Total Tests: %d"), ValidationResults.Num());
+    
+    int32 PassedTests = 0;
+    int32 FailedTests = 0;
+    
+    for (const FQA_ValidationResult& Result : ValidationResults)
+    {
+        if (Result.bPassed)
+        {
+            PassedTests++;
+        }
+        else
+        {
+            FailedTests++;
+        }
+    }
+    
+    UE_LOG(LogTemp, Warning, TEXT("Passed Tests: %d"), PassedTests);
+    UE_LOG(LogTemp, Warning, TEXT("Failed Tests: %d"), FailedTests);
+    UE_LOG(LogTemp, Warning, TEXT("Success Rate: %.1f%%"), (float)PassedTests / ValidationResults.Num() * 100.0f);
+    
+    UE_LOG(LogTemp, Warning, TEXT("Performance Metrics:"));
+    UE_LOG(LogTemp, Warning, TEXT("- Last Frame Rate: %.1f FPS"), LastFrameRate);
+    UE_LOG(LogTemp, Warning, TEXT("- Active Effects: %d"), ActiveEffectCount);
+    UE_LOG(LogTemp, Warning, TEXT("- Total Particles: %d"), TotalParticleCount);
+    
+    UE_LOG(LogTemp, Warning, TEXT("=== END VALIDATION REPORT ==="));
 }
 
 TArray<FQA_ValidationResult> UQA_VFXIntegrationValidator::GetValidationResults() const
@@ -233,22 +416,27 @@ TArray<FQA_ValidationResult> UQA_VFXIntegrationValidator::GetValidationResults()
     return ValidationResults;
 }
 
-bool UQA_VFXIntegrationValidator::IsValidationPassing() const
+TArray<FQA_EffectValidationData> UQA_VFXIntegrationValidator::GetEffectValidationData() const
 {
-    return bValidationPassed;
+    return EffectValidationData;
 }
 
-float UQA_VFXIntegrationValidator::GetLastValidationTime() const
+bool UQA_VFXIntegrationValidator::IsValidationActive() const
 {
-    return LastValidationTime;
+    return bValidationActive;
 }
 
-void UQA_VFXIntegrationValidator::SetValidationThresholds(int32 MaxParticles, float MinFPS, float MaxMemoryMB)
+float UQA_VFXIntegrationValidator::GetLastFrameRate() const
 {
-    MaxAllowedParticleCount = MaxParticles;
-    MinRequiredFPS = MinFPS;
-    MaxMemoryUsageMB = MaxMemoryMB;
-    
-    UE_LOG(LogTemp, Log, TEXT("VFX validation thresholds updated: Particles=%d, FPS=%.1f, Memory=%.1fMB"), 
-           MaxParticles, MinFPS, MaxMemoryMB);
+    return LastFrameRate;
+}
+
+int32 UQA_VFXIntegrationValidator::GetActiveEffectCount() const
+{
+    return ActiveEffectCount;
+}
+
+int32 UQA_VFXIntegrationValidator::GetTotalParticleCount() const
+{
+    return TotalParticleCount;
 }
