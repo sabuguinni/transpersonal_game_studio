@@ -1,13 +1,18 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/Engine.h"
-#include "Components/ActorComponent.h"
+#include "GameFramework/Actor.h"
 #include "Engine/World.h"
+#include "Components/StaticMeshComponent.h"
+#include "Components/BoxComponent.h"
+#include "PhysicsEngine/BodySetup.h"
+#include "PhysicsEngine/BodyInstance.h"
 #include "Landscape/Landscape.h"
-#include "PhysicsEngine/PhysicsSettings.h"
+#include "Landscape/LandscapeComponent.h"
+#include "Engine/StaticMesh.h"
+#include "Materials/MaterialInterface.h"
 #include "Chaos/ChaosEngineInterface.h"
-#include "Core/Engine/Eng_SystemArchitect.h"
+#include "Chaos/ChaosSolverActor.h"
 #include "Core_TerrainPhysics.generated.h"
 
 UENUM(BlueprintType)
@@ -28,207 +33,172 @@ struct TRANSPERSONALGAME_API FCore_TerrainPhysicsProperties
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Physics")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
     float Friction = 0.7f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Physics")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
     float Restitution = 0.3f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Physics")
-    float Density = 2.5f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
+    float Density = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Physics")
-    float MovementSpeedMultiplier = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
+    float Hardness = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Physics")
-    float StabilityFactor = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
+    float Temperature = 20.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Physics")
-    bool bCanSink = false;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
+    bool bCanDeform = false;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Physics")
-    float SinkRate = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
+    bool bIsSlippery = false;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Physics")
-    float TemperatureEffect = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
+    bool bCausesFootprints = false;
+
+    FCore_TerrainPhysicsProperties()
+    {
+        Friction = 0.7f;
+        Restitution = 0.3f;
+        Density = 1.0f;
+        Hardness = 1.0f;
+        Temperature = 20.0f;
+        bCanDeform = false;
+        bIsSlippery = false;
+        bCausesFootprints = false;
+    }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FCore_TerrainInteraction
+struct TRANSPERSONALGAME_API FCore_TerrainImpactData
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Interaction")
-    AActor* InteractingActor = nullptr;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Impact")
+    FVector ImpactLocation = FVector::ZeroVector;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Interaction")
-    FVector ContactPoint = FVector::ZeroVector;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Impact")
+    FVector ImpactNormal = FVector::UpVector;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Interaction")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Impact")
+    float ImpactForce = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Impact")
     ECore_TerrainType TerrainType = ECore_TerrainType::Grass;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Interaction")
-    float InteractionStrength = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Impact")
+    AActor* ImpactingActor = nullptr;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Interaction")
-    float Duration = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Impact")
+    float Timestamp = 0.0f;
 };
 
-/**
- * Core Terrain Physics System
- * Manages realistic terrain physics interactions for the prehistoric survival game
- * Handles terrain material properties, character movement on different surfaces,
- * environmental effects, and realistic physics simulation
- */
-UCLASS(BlueprintType, Blueprintable, ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UCore_TerrainPhysics : public UActorComponent
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API ACore_TerrainPhysics : public AActor
 {
     GENERATED_BODY()
 
 public:
-    UCore_TerrainPhysics();
+    ACore_TerrainPhysics();
 
 protected:
     virtual void BeginPlay() override;
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 public:
-    // === TERRAIN PHYSICS PROPERTIES ===
-    
+    virtual void Tick(float DeltaTime) override;
+
+    // Core terrain physics properties
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Physics")
     TMap<ECore_TerrainType, FCore_TerrainPhysicsProperties> TerrainProperties;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Physics")
-    float TerrainDetectionRadius = 100.0f;
+    float TerrainUpdateRate = 0.1f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Physics")
-    float PhysicsUpdateRate = 60.0f;
+    float MaxImpactForce = 10000.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Physics")
-    bool bEnableRealtimePhysics = true;
+    bool bEnableTerrainDeformation = true;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Physics")
-    float GravityMultiplier = 1.0f;
+    bool bEnableFootprints = true;
 
-    // === TERRAIN INTERACTION SYSTEM ===
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Physics")
+    bool bEnableTemperatureEffects = true;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Terrain Interaction")
-    TArray<FCore_TerrainInteraction> ActiveInteractions;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Interaction")
-    int32 MaxSimultaneousInteractions = 50;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Interaction")
-    float InteractionCleanupInterval = 5.0f;
-
-    // === PERFORMANCE OPTIMIZATION ===
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float LODDistance1 = 500.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float LODDistance2 = 1000.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float LODDistance3 = 2000.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    bool bEnableLODOptimization = true;
-
-    // === SYSTEM REGISTRATION ===
-
-    UPROPERTY(BlueprintReadOnly, Category = "System Registration")
-    class UEng_SystemArchitect* SystemArchitect = nullptr;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System Registration")
-    bool bRegisteredWithArchitect = false;
-
-public:
-    // === TERRAIN PHYSICS FUNCTIONS ===
+    // Terrain analysis functions
+    UFUNCTION(BlueprintCallable, Category = "Terrain Physics")
+    ECore_TerrainType GetTerrainTypeAtLocation(const FVector& Location);
 
     UFUNCTION(BlueprintCallable, Category = "Terrain Physics")
-    ECore_TerrainType DetectTerrainType(const FVector& Location);
+    FCore_TerrainPhysicsProperties GetTerrainPropertiesAtLocation(const FVector& Location);
 
     UFUNCTION(BlueprintCallable, Category = "Terrain Physics")
-    FCore_TerrainPhysicsProperties GetTerrainProperties(ECore_TerrainType TerrainType);
+    float GetTerrainSlopeAtLocation(const FVector& Location);
 
     UFUNCTION(BlueprintCallable, Category = "Terrain Physics")
-    void ApplyTerrainPhysics(AActor* Actor, const FVector& Location);
+    FVector GetTerrainNormalAtLocation(const FVector& Location);
+
+    // Terrain interaction functions
+    UFUNCTION(BlueprintCallable, Category = "Terrain Physics")
+    void ApplyTerrainImpact(const FCore_TerrainImpactData& ImpactData);
 
     UFUNCTION(BlueprintCallable, Category = "Terrain Physics")
-    float CalculateMovementModifier(ECore_TerrainType TerrainType, float BaseSpeed);
+    void CreateFootprint(const FVector& Location, float Size, float Depth);
 
     UFUNCTION(BlueprintCallable, Category = "Terrain Physics")
-    void UpdateTerrainInteraction(AActor* Actor, const FVector& ContactPoint);
+    void DeformTerrain(const FVector& Location, float Radius, float Strength);
 
-    // === TERRAIN MATERIAL FUNCTIONS ===
+    UFUNCTION(BlueprintCallable, Category = "Terrain Physics")
+    bool IsLocationWalkable(const FVector& Location);
 
-    UFUNCTION(BlueprintCallable, Category = "Terrain Materials")
-    void SetTerrainMaterialProperties(ECore_TerrainType TerrainType, float Friction, float Restitution);
+    // Physics material functions
+    UFUNCTION(BlueprintCallable, Category = "Terrain Physics")
+    void UpdatePhysicsMaterialForTerrain(ECore_TerrainType TerrainType);
 
-    UFUNCTION(BlueprintCallable, Category = "Terrain Materials")
-    void ApplyEnvironmentalEffects(const FVector& Location, float DeltaTime);
+    UFUNCTION(BlueprintCallable, Category = "Terrain Physics")
+    void ApplyTerrainEffectsToActor(AActor* Actor, const FVector& Location);
 
-    UFUNCTION(BlueprintCallable, Category = "Terrain Materials")
-    bool IsTerrainStable(const FVector& Location, float ActorMass = 100.0f);
+    // Temperature and environmental effects
+    UFUNCTION(BlueprintCallable, Category = "Terrain Physics")
+    float GetTemperatureAtLocation(const FVector& Location);
 
-    // === PHYSICS SIMULATION FUNCTIONS ===
+    UFUNCTION(BlueprintCallable, Category = "Terrain Physics")
+    void UpdateTerrainTemperature(float DeltaTime);
 
-    UFUNCTION(BlueprintCallable, Category = "Physics Simulation")
-    void SimulateTerrainDeformation(const FVector& ImpactPoint, float Force, float Radius);
+    UFUNCTION(BlueprintCallable, Category = "Terrain Physics")
+    void ProcessEnvironmentalEffects(float DeltaTime);
 
-    UFUNCTION(BlueprintCallable, Category = "Physics Simulation")
-    void UpdateGravityEffects(AActor* Actor, ECore_TerrainType TerrainType);
+    // Validation and testing
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Terrain Physics")
+    void ValidateTerrainPhysics();
 
-    UFUNCTION(BlueprintCallable, Category = "Physics Simulation")
-    void ProcessTerrainCollisions(float DeltaTime);
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Terrain Physics")
+    void TestTerrainInteraction();
 
-    // === PERFORMANCE FUNCTIONS ===
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Terrain Physics")
+    void DebugDrawTerrainInfo();
 
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void OptimizePhysicsLOD(const FVector& ViewerLocation);
+protected:
+    // Internal terrain tracking
+    UPROPERTY()
+    TArray<FCore_TerrainImpactData> RecentImpacts;
 
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void CleanupInactiveInteractions();
+    UPROPERTY()
+    float LastUpdateTime = 0.0f;
 
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    int32 GetActiveInteractionCount() const;
+    UPROPERTY()
+    TMap<FVector, float> TemperatureMap;
 
-    // === SYSTEM INTEGRATION FUNCTIONS ===
+    UPROPERTY()
+    TArray<ALandscape*> TrackedLandscapes;
 
-    UFUNCTION(BlueprintCallable, Category = "System Integration")
-    void RegisterWithSystemArchitect();
-
-    UFUNCTION(BlueprintCallable, Category = "System Integration")
-    void ValidateSystemIntegrity();
-
-    UFUNCTION(BlueprintCallable, Category = "System Integration", CallInEditor = true)
-    void RunTerrainPhysicsTests();
-
-    // === BLUEPRINT EVENTS ===
-
-    UFUNCTION(BlueprintImplementableEvent, Category = "Terrain Events")
-    void OnTerrainTypeChanged(ECore_TerrainType NewTerrainType, const FVector& Location);
-
-    UFUNCTION(BlueprintImplementableEvent, Category = "Terrain Events")
-    void OnTerrainDeformation(const FVector& Location, float DeformationAmount);
-
-    UFUNCTION(BlueprintImplementableEvent, Category = "Terrain Events")
-    void OnUnstableTerrainDetected(const FVector& Location, AActor* AffectedActor);
-
-private:
-    // Internal tracking
-    float LastCleanupTime = 0.0f;
-    int32 CurrentLODLevel = 0;
-    TArray<AActor*> TrackedActors;
-    
-    // Performance monitoring
-    float AverageFrameTime = 0.0f;
-    int32 FrameCounter = 0;
-    
-    // Helper functions
+    // Internal helper functions
     void InitializeTerrainProperties();
-    void UpdatePerformanceMetrics(float DeltaTime);
-    ECore_TerrainType SampleTerrainAtLocation(const FVector& Location);
-    void ApplyTerrainSpecificPhysics(AActor* Actor, ECore_TerrainType TerrainType);
+    void UpdateTrackedLandscapes();
+    void ProcessTerrainImpacts(float DeltaTime);
+    void CleanupOldImpacts();
+    ECore_TerrainType SampleTerrainTypeFromLandscape(const FVector& Location);
+    float CalculateTerrainHardness(ECore_TerrainType TerrainType, float Temperature);
 };
