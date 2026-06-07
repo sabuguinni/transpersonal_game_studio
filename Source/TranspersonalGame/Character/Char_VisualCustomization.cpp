@@ -1,291 +1,274 @@
 #include "Char_VisualCustomization.h"
 #include "Components/SkeletalMeshComponent.h"
-#include "GameFramework/Character.h"
+#include "Materials/MaterialInterface.h"
 #include "Materials/MaterialInstanceDynamic.h"
+#include "Materials/MaterialParameterCollection.h"
 #include "Engine/Engine.h"
+#include "GameFramework/Character.h"
+#include "Kismet/KismetMathLibrary.h"
 
 UChar_VisualCustomization::UChar_VisualCustomization()
 {
-    PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 1.0f; // Update every second
+    PrimaryComponentTick.bCanEverTick = false;
     
     // Initialize default appearance
-    AppearanceData = FChar_AppearanceData();
-    bAppearanceApplied = false;
-    LastUpdateTime = 0.0f;
+    CurrentAppearance = FChar_AppearanceData();
+    
+    // Initialize component references
+    OwnerMeshComponent = nullptr;
+    BaseSkinMaterial = nullptr;
+    BaseHairMaterial = nullptr;
+    BaseClothingMaterial = nullptr;
+    MetaHumanMesh = nullptr;
+    AppearanceParameters = nullptr;
 }
 
 void UChar_VisualCustomization::BeginPlay()
 {
     Super::BeginPlay();
     
-    // Apply initial appearance after a short delay to ensure mesh is loaded
-    FTimerHandle TimerHandle;
-    GetWorld()->GetTimerManager().SetTimer(TimerHandle, this, &UChar_VisualCustomization::ApplyAppearance, 0.5f, false);
+    // Get owner's skeletal mesh component
+    if (AActor* Owner = GetOwner())
+    {
+        OwnerMeshComponent = Owner->FindComponentByClass<USkeletalMeshComponent>();
+        
+        if (!OwnerMeshComponent)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("UChar_VisualCustomization: No SkeletalMeshComponent found on owner"));
+        }
+    }
+    
+    // Apply initial appearance
+    ApplyAppearance(CurrentAppearance);
 }
 
 void UChar_VisualCustomization::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-    
-    // Periodic check to ensure appearance is maintained
-    LastUpdateTime += DeltaTime;
-    if (LastUpdateTime >= 5.0f && !bAppearanceApplied)
-    {
-        ApplyAppearance();
-        LastUpdateTime = 0.0f;
-    }
 }
 
-void UChar_VisualCustomization::ApplyAppearance()
+void UChar_VisualCustomization::ApplyAppearance(const FChar_AppearanceData& NewAppearance)
 {
-    USkeletalMeshComponent* MeshComp = GetCharacterMesh();
-    if (!MeshComp)
+    CurrentAppearance = NewAppearance;
+    
+    if (!OwnerMeshComponent)
     {
-        UE_LOG(LogTemp, Warning, TEXT("UChar_VisualCustomization: No mesh component found"));
+        UE_LOG(LogTemp, Warning, TEXT("UChar_VisualCustomization::ApplyAppearance: No mesh component available"));
         return;
     }
-
-    // Update mesh based on body type
-    UpdateMeshBasedOnBodyType();
     
-    // Update materials based on appearance data
-    UpdateMaterialsBasedOnAppearance();
+    // Apply all appearance settings
+    ApplySkinToneMaterial();
+    ApplyBodyBuildScale();
+    ApplyTribalMarkingsTexture();
+    ApplyHairStyleMesh();
+    ApplyClothingMesh();
+    UpdateMaterialParameters();
     
-    // Apply material parameters
-    ApplyMaterialParameters();
-    
-    bAppearanceApplied = true;
-    
-    UE_LOG(LogTemp, Log, TEXT("UChar_VisualCustomization: Appearance applied successfully"));
+    UE_LOG(LogTemp, Log, TEXT("Applied character appearance: SkinTone=%d, BodyBuild=%d"), 
+           (int32)CurrentAppearance.SkinTone, (int32)CurrentAppearance.BodyBuild);
 }
 
 void UChar_VisualCustomization::RandomizeAppearance()
 {
-    // Randomize body type
-    int32 BodyTypeIndex = FMath::RandRange(0, 4);
-    AppearanceData.BodyType = static_cast<EChar_BodyType>(BodyTypeIndex);
+    FChar_AppearanceData RandomAppearance;
     
-    // Randomize skin tone
-    int32 SkinToneIndex = FMath::RandRange(0, 4);
-    AppearanceData.SkinTone = static_cast<EChar_SkinTone>(SkinToneIndex);
+    // Randomize all appearance properties
+    RandomAppearance.SkinTone = static_cast<EChar_SkinTone>(FMath::RandRange(0, 5));
+    RandomAppearance.BodyBuild = static_cast<EChar_BodyBuild>(FMath::RandRange(0, 4));
+    RandomAppearance.TribalMarkings = static_cast<EChar_TribalMarkings>(FMath::RandRange(0, 5));
+    RandomAppearance.HairStyle = static_cast<EChar_HairStyle>(FMath::RandRange(0, 5));
+    RandomAppearance.ClothingStyle = static_cast<EChar_ClothingStyle>(FMath::RandRange(0, 5));
     
-    // Randomize clothing style
-    int32 ClothingIndex = FMath::RandRange(0, 4);
-    AppearanceData.ClothingStyle = static_cast<EChar_ClothingStyle>(ClothingIndex);
+    // Random colors
+    TArray<FLinearColor> HairColors = {
+        FLinearColor::Black,
+        FLinearColor(0.3f, 0.2f, 0.1f, 1.0f), // Brown
+        FLinearColor(0.6f, 0.4f, 0.2f, 1.0f), // Light Brown
+        FLinearColor(0.8f, 0.6f, 0.3f, 1.0f), // Blonde
+        FLinearColor(0.4f, 0.4f, 0.4f, 1.0f)  // Gray
+    };
     
-    // Randomize colors
-    AppearanceData.SkinColor = FLinearColor(
-        FMath::RandRange(0.3f, 0.9f),
-        FMath::RandRange(0.2f, 0.7f),
-        FMath::RandRange(0.1f, 0.5f),
-        1.0f
-    );
+    TArray<FLinearColor> EyeColors = {
+        FLinearColor(0.3f, 0.2f, 0.1f, 1.0f), // Brown
+        FLinearColor(0.2f, 0.4f, 0.6f, 1.0f), // Blue
+        FLinearColor(0.3f, 0.5f, 0.2f, 1.0f), // Green
+        FLinearColor(0.4f, 0.3f, 0.2f, 1.0f), // Hazel
+        FLinearColor(0.2f, 0.2f, 0.2f, 1.0f)  // Dark
+    };
     
-    AppearanceData.ClothingColor = FLinearColor(
-        FMath::RandRange(0.2f, 0.6f),
-        FMath::RandRange(0.1f, 0.5f),
-        FMath::RandRange(0.05f, 0.3f),
-        1.0f
-    );
+    RandomAppearance.HairColor = HairColors[FMath::RandRange(0, HairColors.Num() - 1)];
+    RandomAppearance.EyeColor = EyeColors[FMath::RandRange(0, EyeColors.Num() - 1)];
     
-    // Randomize features
-    AppearanceData.bHasWarPaint = FMath::RandBool();
-    AppearanceData.bHasScars = FMath::RandBool();
-    AppearanceData.MuscleDefinition = FMath::RandRange(0.2f, 1.0f);
+    // Random weathering and scars (survival game appropriate)
+    RandomAppearance.WeatheringLevel = FMath::RandRange(0.3f, 0.8f);
+    RandomAppearance.ScarLevel = FMath::RandRange(0.1f, 0.6f);
+    RandomAppearance.BodyScale = FMath::RandRange(0.9f, 1.1f);
     
-    // Apply the randomized appearance
-    ApplyAppearance();
+    ApplyAppearance(RandomAppearance);
     
-    UE_LOG(LogTemp, Log, TEXT("UChar_VisualCustomization: Appearance randomized"));
-}
-
-void UChar_VisualCustomization::SetBodyType(EChar_BodyType NewBodyType)
-{
-    AppearanceData.BodyType = NewBodyType;
-    UpdateMeshBasedOnBodyType();
-    ApplyMaterialParameters();
+    UE_LOG(LogTemp, Log, TEXT("Randomized character appearance"));
 }
 
 void UChar_VisualCustomization::SetSkinTone(EChar_SkinTone NewSkinTone)
 {
-    AppearanceData.SkinTone = NewSkinTone;
-    
-    // Update skin color based on tone
-    switch (NewSkinTone)
-    {
-        case EChar_SkinTone::Light:
-            AppearanceData.SkinColor = FLinearColor(0.9f, 0.8f, 0.7f, 1.0f);
-            break;
-        case EChar_SkinTone::Medium:
-            AppearanceData.SkinColor = FLinearColor(0.7f, 0.6f, 0.4f, 1.0f);
-            break;
-        case EChar_SkinTone::Dark:
-            AppearanceData.SkinColor = FLinearColor(0.4f, 0.3f, 0.2f, 1.0f);
-            break;
-        case EChar_SkinTone::Tanned:
-            AppearanceData.SkinColor = FLinearColor(0.8f, 0.5f, 0.3f, 1.0f);
-            break;
-        case EChar_SkinTone::Weathered:
-            AppearanceData.SkinColor = FLinearColor(0.6f, 0.4f, 0.3f, 1.0f);
-            break;
-    }
-    
-    ApplyMaterialParameters();
+    CurrentAppearance.SkinTone = NewSkinTone;
+    ApplySkinToneMaterial();
+    UpdateMaterialParameters();
 }
 
-void UChar_VisualCustomization::SetClothingStyle(EChar_ClothingStyle NewStyle)
+void UChar_VisualCustomization::SetBodyBuild(EChar_BodyBuild NewBodyBuild)
 {
-    AppearanceData.ClothingStyle = NewStyle;
-    
-    // Update clothing color based on style
-    switch (NewStyle)
-    {
-        case EChar_ClothingStyle::AnimalHide:
-            AppearanceData.ClothingColor = FLinearColor(0.4f, 0.3f, 0.2f, 1.0f);
-            break;
-        case EChar_ClothingStyle::PlantFiber:
-            AppearanceData.ClothingColor = FLinearColor(0.3f, 0.4f, 0.2f, 1.0f);
-            break;
-        case EChar_ClothingStyle::BoneOrnaments:
-            AppearanceData.ClothingColor = FLinearColor(0.8f, 0.8f, 0.7f, 1.0f);
-            break;
-        case EChar_ClothingStyle::FeatheredGarb:
-            AppearanceData.ClothingColor = FLinearColor(0.6f, 0.4f, 0.2f, 1.0f);
-            break;
-        case EChar_ClothingStyle::MinimalWrap:
-            AppearanceData.ClothingColor = FLinearColor(0.5f, 0.3f, 0.2f, 1.0f);
-            break;
-    }
-    
-    UpdateMaterialsBasedOnAppearance();
-    ApplyMaterialParameters();
+    CurrentAppearance.BodyBuild = NewBodyBuild;
+    ApplyBodyBuildScale();
 }
 
-void UChar_VisualCustomization::SetWarPaint(bool bEnabled)
+void UChar_VisualCustomization::SetTribalMarkings(EChar_TribalMarkings NewMarkings)
 {
-    AppearanceData.bHasWarPaint = bEnabled;
-    ApplyMaterialParameters();
+    CurrentAppearance.TribalMarkings = NewMarkings;
+    ApplyTribalMarkingsTexture();
+    UpdateMaterialParameters();
 }
 
-void UChar_VisualCustomization::SetScars(bool bEnabled)
+void UChar_VisualCustomization::SetHairStyle(EChar_HairStyle NewHairStyle)
 {
-    AppearanceData.bHasScars = bEnabled;
-    ApplyMaterialParameters();
+    CurrentAppearance.HairStyle = NewHairStyle;
+    ApplyHairStyleMesh();
 }
 
-void UChar_VisualCustomization::UpdateMeshBasedOnBodyType()
+void UChar_VisualCustomization::SetClothingStyle(EChar_ClothingStyle NewClothingStyle)
 {
-    USkeletalMeshComponent* MeshComp = GetCharacterMesh();
-    if (!MeshComp)
+    CurrentAppearance.ClothingStyle = NewClothingStyle;
+    ApplyClothingMesh();
+}
+
+void UChar_VisualCustomization::SetWeatheringLevel(float NewLevel)
+{
+    CurrentAppearance.WeatheringLevel = FMath::Clamp(NewLevel, 0.0f, 1.0f);
+    UpdateMaterialParameters();
+}
+
+void UChar_VisualCustomization::SetScarLevel(float NewLevel)
+{
+    CurrentAppearance.ScarLevel = FMath::Clamp(NewLevel, 0.0f, 1.0f);
+    UpdateMaterialParameters();
+}
+
+void UChar_VisualCustomization::SaveAppearanceToFile(const FString& FileName)
+{
+    // Implementation for saving appearance data to file
+    // This would serialize the CurrentAppearance struct to JSON or binary format
+    UE_LOG(LogTemp, Log, TEXT("Saving appearance to file: %s"), *FileName);
+}
+
+bool UChar_VisualCustomization::LoadAppearanceFromFile(const FString& FileName)
+{
+    // Implementation for loading appearance data from file
+    // This would deserialize the appearance data and apply it
+    UE_LOG(LogTemp, Log, TEXT("Loading appearance from file: %s"), *FileName);
+    return true;
+}
+
+void UChar_VisualCustomization::ApplySkinToneMaterial()
+{
+    if (!OwnerMeshComponent || SkinToneMaterials.Num() == 0)
     {
         return;
     }
-
-    // Try to load body type specific mesh if available
-    if (BodyTypeMeshes.IsValidIndex(static_cast<int32>(AppearanceData.BodyType)))
-    {
-        TSoftObjectPtr<USkeletalMesh> MeshPtr = BodyTypeMeshes[static_cast<int32>(AppearanceData.BodyType)];
-        if (USkeletalMesh* Mesh = MeshPtr.LoadSynchronous())
-        {
-            MeshComp->SetSkeletalMesh(Mesh);
-            UE_LOG(LogTemp, Log, TEXT("UChar_VisualCustomization: Updated mesh for body type"));
-        }
-    }
     
-    // Adjust scale based on body type
-    FVector Scale = FVector(1.0f);
-    switch (AppearanceData.BodyType)
+    int32 SkinToneIndex = static_cast<int32>(CurrentAppearance.SkinTone);
+    if (SkinToneMaterials.IsValidIndex(SkinToneIndex))
     {
-        case EChar_BodyType::Lean:
-            Scale = FVector(0.95f, 0.95f, 1.02f);
-            break;
-        case EChar_BodyType::Muscular:
-            Scale = FVector(1.05f, 1.05f, 1.0f);
-            break;
-        case EChar_BodyType::Stocky:
-            Scale = FVector(1.1f, 1.1f, 0.98f);
-            break;
-        case EChar_BodyType::Tall:
-            Scale = FVector(0.98f, 0.98f, 1.08f);
-            break;
-        case EChar_BodyType::Elder:
-            Scale = FVector(0.96f, 0.96f, 0.95f);
-            break;
-    }
-    
-    MeshComp->SetWorldScale3D(Scale);
-}
-
-void UChar_VisualCustomization::UpdateMaterialsBasedOnAppearance()
-{
-    USkeletalMeshComponent* MeshComp = GetCharacterMesh();
-    if (!MeshComp)
-    {
-        return;
-    }
-
-    // Apply skin material if available
-    if (SkinMaterials.IsValidIndex(static_cast<int32>(AppearanceData.SkinTone)))
-    {
-        TSoftObjectPtr<UMaterialInterface> MaterialPtr = SkinMaterials[static_cast<int32>(AppearanceData.SkinTone)];
-        if (UMaterialInterface* Material = MaterialPtr.LoadSynchronous())
+        UMaterialInterface* SkinMaterial = SkinToneMaterials[SkinToneIndex];
+        if (SkinMaterial)
         {
-            MeshComp->SetMaterial(0, Material); // Assuming skin is material slot 0
-        }
-    }
-    
-    // Apply clothing material if available
-    if (ClothingMaterials.IsValidIndex(static_cast<int32>(AppearanceData.ClothingStyle)))
-    {
-        TSoftObjectPtr<UMaterialInterface> MaterialPtr = ClothingMaterials[static_cast<int32>(AppearanceData.ClothingStyle)];
-        if (UMaterialInterface* Material = MaterialPtr.LoadSynchronous())
-        {
-            MeshComp->SetMaterial(1, Material); // Assuming clothing is material slot 1
+            OwnerMeshComponent->SetMaterial(0, SkinMaterial);
+            UE_LOG(LogTemp, Log, TEXT("Applied skin tone material: %d"), SkinToneIndex);
         }
     }
 }
 
-USkeletalMeshComponent* UChar_VisualCustomization::GetCharacterMesh() const
+void UChar_VisualCustomization::ApplyBodyBuildScale()
 {
-    if (ACharacter* Character = Cast<ACharacter>(GetOwner()))
-    {
-        return Character->GetMesh();
-    }
-    
-    return GetOwner()->FindComponentByClass<USkeletalMeshComponent>();
-}
-
-void UChar_VisualCustomization::ApplyMaterialParameters()
-{
-    USkeletalMeshComponent* MeshComp = GetCharacterMesh();
-    if (!MeshComp)
+    if (!OwnerMeshComponent)
     {
         return;
     }
-
-    // Create dynamic material instances and set parameters
-    for (int32 MaterialIndex = 0; MaterialIndex < MeshComp->GetNumMaterials(); ++MaterialIndex)
+    
+    FVector BaseScale = FVector(1.0f, 1.0f, 1.0f);
+    
+    // Adjust scale based on body build
+    switch (CurrentAppearance.BodyBuild)
     {
-        UMaterialInterface* BaseMaterial = MeshComp->GetMaterial(MaterialIndex);
-        if (BaseMaterial)
+        case EChar_BodyBuild::Lean:
+            BaseScale = FVector(0.95f, 0.95f, 1.0f);
+            break;
+        case EChar_BodyBuild::Athletic:
+            BaseScale = FVector(1.0f, 1.0f, 1.0f);
+            break;
+        case EChar_BodyBuild::Muscular:
+            BaseScale = FVector(1.05f, 1.05f, 1.0f);
+            break;
+        case EChar_BodyBuild::Stocky:
+            BaseScale = FVector(1.1f, 1.1f, 0.98f);
+            break;
+        case EChar_BodyBuild::Weathered:
+            BaseScale = FVector(0.98f, 0.98f, 0.96f);
+            break;
+    }
+    
+    // Apply body scale modifier
+    BaseScale *= CurrentAppearance.BodyScale;
+    
+    OwnerMeshComponent->SetWorldScale3D(BaseScale);
+    UE_LOG(LogTemp, Log, TEXT("Applied body build scale: %s"), *BaseScale.ToString());
+}
+
+void UChar_VisualCustomization::ApplyTribalMarkingsTexture()
+{
+    // Implementation for applying tribal markings as texture overlays
+    // This would use material parameters to blend marking textures
+    UE_LOG(LogTemp, Log, TEXT("Applied tribal markings: %d"), (int32)CurrentAppearance.TribalMarkings);
+}
+
+void UChar_VisualCustomization::ApplyHairStyleMesh()
+{
+    // Implementation for changing hair mesh based on style
+    // This would swap hair mesh components or modify hair material parameters
+    UE_LOG(LogTemp, Log, TEXT("Applied hair style: %d"), (int32)CurrentAppearance.HairStyle);
+}
+
+void UChar_VisualCustomization::ApplyClothingMesh()
+{
+    // Implementation for changing clothing meshes based on style
+    // This would swap clothing mesh components or modify clothing materials
+    UE_LOG(LogTemp, Log, TEXT("Applied clothing style: %d"), (int32)CurrentAppearance.ClothingStyle);
+}
+
+void UChar_VisualCustomization::UpdateMaterialParameters()
+{
+    if (!OwnerMeshComponent)
+    {
+        return;
+    }
+    
+    // Create or get dynamic material instances
+    for (int32 i = 0; i < OwnerMeshComponent->GetNumMaterials(); ++i)
+    {
+        UMaterialInterface* Material = OwnerMeshComponent->GetMaterial(i);
+        if (Material)
         {
-            UMaterialInstanceDynamic* DynamicMaterial = UMaterialInstanceDynamic::Create(BaseMaterial, this);
+            UMaterialInstanceDynamic* DynamicMaterial = OwnerMeshComponent->CreateAndSetMaterialInstanceDynamic(i);
             if (DynamicMaterial)
             {
-                // Set color parameters
-                DynamicMaterial->SetVectorParameterValue(TEXT("SkinColor"), AppearanceData.SkinColor);
-                DynamicMaterial->SetVectorParameterValue(TEXT("ClothingColor"), AppearanceData.ClothingColor);
-                
-                // Set scalar parameters
-                DynamicMaterial->SetScalarParameterValue(TEXT("MuscleDefinition"), AppearanceData.MuscleDefinition);
-                DynamicMaterial->SetScalarParameterValue(TEXT("HasWarPaint"), AppearanceData.bHasWarPaint ? 1.0f : 0.0f);
-                DynamicMaterial->SetScalarParameterValue(TEXT("HasScars"), AppearanceData.bHasScars ? 1.0f : 0.0f);
-                
-                MeshComp->SetMaterial(MaterialIndex, DynamicMaterial);
+                // Set material parameters based on appearance
+                DynamicMaterial->SetVectorParameterValue(TEXT("HairColor"), CurrentAppearance.HairColor);
+                DynamicMaterial->SetVectorParameterValue(TEXT("EyeColor"), CurrentAppearance.EyeColor);
+                DynamicMaterial->SetScalarParameterValue(TEXT("WeatheringLevel"), CurrentAppearance.WeatheringLevel);
+                DynamicMaterial->SetScalarParameterValue(TEXT("ScarLevel"), CurrentAppearance.ScarLevel);
             }
         }
     }
     
-    UE_LOG(LogTemp, Log, TEXT("UChar_VisualCustomization: Material parameters applied"));
+    UE_LOG(LogTemp, Log, TEXT("Updated material parameters"));
 }
