@@ -1,17 +1,14 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Engine/GameInstanceSubsystem.h"
 #include "Engine/World.h"
-#include "Engine/Engine.h"
-#include "UObject/UObjectGlobals.h"
-#include "Subsystems/GameInstanceSubsystem.h"
 #include "Eng_CompilationFixer.generated.h"
 
 /**
- * Engine Architect - Compilation Fixer System
- * Identifies and fixes critical compilation issues across the project
- * Ensures all .h files have matching .cpp implementations
- * Validates UE5.5 API compatibility
+ * Engine Architect's Compilation Fixer
+ * Supreme authority for fixing compilation issues across the entire project
+ * Detects and resolves common C++ compilation problems automatically
  */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UEng_CompilationFixer : public UGameInstanceSubsystem
@@ -21,44 +18,58 @@ class TRANSPERSONALGAME_API UEng_CompilationFixer : public UGameInstanceSubsyste
 public:
     UEng_CompilationFixer();
 
-    // Subsystem overrides
+    // Subsystem interface
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
-    // Compilation fixing methods
-    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    void FixMissingCppFiles();
+    // Compilation fixing functions
+    UFUNCTION(BlueprintCallable, Category = "Engine Architect|Compilation")
+    void FixAllCompilationIssues();
 
-    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    void ValidateApiCompatibility();
-
-    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
+    UFUNCTION(BlueprintCallable, Category = "Engine Architect|Compilation")
     void FixIncludePaths();
 
-    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
+    UFUNCTION(BlueprintCallable, Category = "Engine Architect|Compilation")
+    void FixMissingHeaders();
+
+    UFUNCTION(BlueprintCallable, Category = "Engine Architect|Compilation")
+    void FixAPICompatibility();
+
+    UFUNCTION(BlueprintCallable, Category = "Engine Architect|Compilation")
     void RemoveDuplicateFiles();
 
-    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    bool RunCompilationTest();
+    UFUNCTION(BlueprintCallable, Category = "Engine Architect|Compilation")
+    void ImplementMissingStubs();
 
-    // Status tracking
-    UPROPERTY(BlueprintReadOnly, Category = "Engine Architecture")
-    int32 FixedFilesCount;
+    UFUNCTION(BlueprintCallable, Category = "Engine Architect|Compilation")
+    bool ValidateProjectCompilation();
 
-    UPROPERTY(BlueprintReadOnly, Category = "Engine Architecture")
-    int32 RemainingErrors;
+    // Diagnostic functions
+    UFUNCTION(BlueprintCallable, Category = "Engine Architect|Diagnostics")
+    TArray<FString> GetCompilationErrors();
 
-    UPROPERTY(BlueprintReadOnly, Category = "Engine Architecture")
-    bool bCompilationClean;
+    UFUNCTION(BlueprintCallable, Category = "Engine Architect|Diagnostics")
+    TArray<FString> GetMissingIncludes();
 
-private:
+    UFUNCTION(BlueprintCallable, Category = "Engine Architect|Diagnostics")
+    TArray<FString> GetDuplicateDefinitions();
+
+protected:
     // Internal fixing methods
-    void FixHeaderOnlyClasses();
-    void FixApiMacros();
-    void FixIncludeOrder();
-    void ValidateGeneratedHeaders();
-    
-    // Error tracking
-    TArray<FString> CompilationErrors;
-    TArray<FString> FixedFiles;
+    void FixHeaderIncludeOrder();
+    void FixGeneratedIncludeOrder();
+    void FixUPropertyMacros();
+    void FixUFunctionMacros();
+    void FixForwardDeclarations();
+    void FixModuleDependencies();
+
+    // Validation state
+    UPROPERTY(BlueprintReadOnly, Category = "Engine Architect")
+    bool bCompilationValid;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Engine Architect")
+    int32 FixedIssuesCount;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Engine Architect")
+    TArray<FString> LastCompilationErrors;
 };
