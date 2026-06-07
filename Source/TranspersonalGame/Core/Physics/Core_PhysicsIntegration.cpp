@@ -1,413 +1,418 @@
 #include "Core_PhysicsIntegration.h"
-#include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "Components/PrimitiveComponent.h"
-#include "GameFramework/Character.h"
-#include "GameFramework/CharacterMovementComponent.h"
+#include "PhysicalMaterials/PhysicalMaterial.h"
+#include "Engine/Engine.h"
 #include "DrawDebugHelpers.h"
 #include "CollisionQueryParams.h"
-
-DEFINE_LOG_CATEGORY(LogCore_PhysicsIntegration);
 
 UCore_PhysicsIntegration::UCore_PhysicsIntegration()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickGroup = TG_PostPhysics;
+    PrimaryComponentTick.bStartWithTickEnabled = true;
     
-    // Initialize default values
-    TerrainAdaptationStrength = 1.0f;
-    CollisionResponseMultiplier = 1.0f;
-    MaxTerrainSlope = 45.0f;
-    bEnableAdvancedPhysics = true;
-    bEnableTerrainIK = true;
+    // Initialize default physics properties
+    Friction = 0.7f;
+    Restitution = 0.3f;
+    Density = 1.0f;
     
-    // Initialize state
-    CurrentGroundNormal = FVector::UpVector;
-    CurrentTerrainSlope = 0.0f;
-    bIsOnValidTerrain = true;
-    bIsOnUnevenTerrain = false;
+    // Initialize collision settings
+    CollisionObjectType = ECC_WorldDynamic;
+    CollisionResponseToWorld = ECR_Block;
+    CollisionResponseToPawn = ECR_Block;
+    CollisionResponseToVehicle = ECR_Block;
     
-    // Internal state
-    LastValidationTime = 0.0f;
-    LastKnownGoodPosition = FVector::ZeroVector;
-    bPhysicsValidated = false;
+    // Initialize performance settings
+    bOptimizePerformance = true;
+    PhysicsLODLevel = 1;
+    MaxSimulationDistance = 5000.0f;
+    CullingDistance = 10000.0f;
+    
+    // Initialize physics state
+    bPhysicsEnabled = true;
+    bGravityEnabled = true;
+    CustomGravity = FVector(0.0f, 0.0f, -980.0f);
+    
+    // Initialize force multipliers
+    MaxForceMultiplier = 1.0f;
+    MaxImpulseMultiplier = 1.0f;
+    MaxTorqueMultiplier = 1.0f;
+    
+    // Initialize internal variables
+    LastPerformanceCheck = 0.0f;
+    PhysicsObjectCount = 0;
+    AverageFrameTime = 0.016f; // 60 FPS baseline
 }
 
 void UCore_PhysicsIntegration::BeginPlay()
 {
     Super::BeginPlay();
     
-    UE_LOG(LogCore_PhysicsIntegration, Log, TEXT("Core_PhysicsIntegration component initialized"));
+    InitializePhysicsSettings();
     
-    // Validate initial setup
-    ValidatePhysicsSetup();
-    
-    // Store initial position
-    if (AActor* Owner = GetOwner())
-    {
-        LastKnownGoodPosition = Owner->GetActorLocation();
-    }
+    UE_LOG(LogTemp, Log, TEXT("Core_PhysicsIntegration: Component initialized for %s"), 
+           GetOwner() ? *GetOwner()->GetName() : TEXT("Unknown"));
 }
 
 void UCore_PhysicsIntegration::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
     
-    if (!bEnableAdvancedPhysics)
+    if (bOptimizePerformance)
     {
-        return;
-    }
-    
-    // Update physics state
-    UpdatePhysicsState();
-    
-    // Update terrain adaptation
-    if (bEnableTerrainIK)
-    {
-        UpdateTerrainAdaptation();
-    }
-    
-    // Validate physics periodically
-    LastValidationTime += DeltaTime;
-    if (LastValidationTime > 1.0f) // Validate every second
-    {
-        ValidateTerrainInteraction();
-        LastValidationTime = 0.0f;
-    }
-}
-
-void UCore_PhysicsIntegration::UpdateTerrainAdaptation()
-{
-    AActor* Owner = GetOwner();
-    if (!Owner)
-    {
-        return;
-    }
-    
-    FVector ActorLocation = Owner->GetActorLocation();
-    FVector TraceStart = ActorLocation + FVector(0, 0, 50);
-    FVector TraceEnd = ActorLocation - FVector(0, 0, 200);
-    
-    FHitResult HitResult;
-    if (PerformTerrainTrace(HitResult, TraceStart, TraceEnd))
-    {
-        CurrentGroundNormal = HitResult.Normal;
+        UpdatePhysicsLOD();
         
-        // Calculate terrain slope
-        float DotProduct = FVector::DotProduct(CurrentGroundNormal, FVector::UpVector);
-        CurrentTerrainSlope = FMath::RadiansToDegrees(FMath::Acos(DotProduct));
-        
-        // Check if terrain is valid
-        bIsOnValidTerrain = CurrentTerrainSlope <= MaxTerrainSlope;
-        bIsOnUnevenTerrain = CurrentTerrainSlope > 5.0f;
-        
-        // Apply terrain adaptation if character
-        if (ACharacter* Character = Cast<ACharacter>(Owner))
+        // Performance monitoring every second
+        LastPerformanceCheck += DeltaTime;
+        if (LastPerformanceCheck >= 1.0f)
         {
-            if (UCharacterMovementComponent* MovementComp = Character->GetCharacterMovement())
-            {
-                // Adjust movement based on terrain slope
-                float SlopeMultiplier = FMath::Clamp(1.0f - (CurrentTerrainSlope / MaxTerrainSlope), 0.1f, 1.0f);
-                MovementComp->MaxWalkSpeed = MovementComp->MaxWalkSpeed * SlopeMultiplier * TerrainAdaptationStrength;
-            }
+            ValidatePhysicsState();
+            LastPerformanceCheck = 0.0f;
         }
     }
+    
+    // Update average frame time for performance tracking
+    AverageFrameTime = (AverageFrameTime * 0.9f) + (DeltaTime * 0.1f);
 }
 
-void UCore_PhysicsIntegration::ApplyPhysicsCorrection(const FVector& CorrectionVector)
+void UCore_PhysicsIntegration::SetPhysicsMaterial(UPhysicalMaterial* Material)
 {
-    AActor* Owner = GetOwner();
-    if (!Owner)
+    if (!Material)
     {
+        UE_LOG(LogTemp, Warning, TEXT("Core_PhysicsIntegration: Attempted to set null physics material"));
         return;
     }
     
-    FVector CurrentLocation = Owner->GetActorLocation();
-    FVector NewLocation = CurrentLocation + (CorrectionVector * CollisionResponseMultiplier);
+    CurrentPhysicsMaterial = Material;
     
-    // Validate new position
-    FHitResult HitResult;
-    if (!PerformTerrainTrace(HitResult, NewLocation + FVector(0, 0, 50), NewLocation - FVector(0, 0, 200)))
+    // Apply material properties to owner's primitive component
+    if (AActor* Owner = GetOwner())
     {
-        // If new position is invalid, use last known good position
-        NewLocation = LastKnownGoodPosition;
-    }
-    else
-    {
-        LastKnownGoodPosition = NewLocation;
+        if (UPrimitiveComponent* PrimComp = Owner->FindComponentByClass<UPrimitiveComponent>())
+        {
+            PrimComp->SetPhysMaterialOverride(Material);
+            
+            // Update local properties from material
+            Friction = Material->Friction;
+            Restitution = Material->Restitution;
+            Density = Material->Density;
+        }
     }
     
-    Owner->SetActorLocation(NewLocation);
-    
-    UE_LOG(LogCore_PhysicsIntegration, VeryVerbose, TEXT("Applied physics correction: %s"), *CorrectionVector.ToString());
+    UE_LOG(LogTemp, Log, TEXT("Core_PhysicsIntegration: Physics material set to %s"), *Material->GetName());
 }
 
-bool UCore_PhysicsIntegration::PerformTerrainTrace(FHitResult& OutHit, const FVector& StartLocation, const FVector& EndLocation)
+UPhysicalMaterial* UCore_PhysicsIntegration::GetCurrentPhysicsMaterial() const
 {
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        return false;
-    }
-    
-    FCollisionQueryParams QueryParams;
-    QueryParams.AddIgnoredActor(GetOwner());
-    QueryParams.bTraceComplex = true;
-    
-    return World->LineTraceSingleByChannel(
-        OutHit,
-        StartLocation,
-        EndLocation,
-        ECC_WorldStatic,
-        QueryParams
-    );
+    return CurrentPhysicsMaterial;
 }
 
-FVector UCore_PhysicsIntegration::CalculateTerrainNormal(const FVector& Location)
+void UCore_PhysicsIntegration::ConfigureCollisionResponse(ECollisionResponse ResponseType)
 {
-    FHitResult HitResult;
-    FVector TraceStart = Location + FVector(0, 0, 100);
-    FVector TraceEnd = Location - FVector(0, 0, 200);
+    CollisionResponseToWorld = ResponseType;
+    CollisionResponseToPawn = ResponseType;
+    CollisionResponseToVehicle = ResponseType;
     
-    if (PerformTerrainTrace(HitResult, TraceStart, TraceEnd))
+    // Apply to owner's primitive component
+    if (AActor* Owner = GetOwner())
     {
-        return HitResult.Normal;
+        if (UPrimitiveComponent* PrimComp = Owner->FindComponentByClass<UPrimitiveComponent>())
+        {
+            PrimComp->SetCollisionResponseToAllChannels(ResponseType);
+        }
     }
     
-    return FVector::UpVector;
+    UE_LOG(LogTemp, Log, TEXT("Core_PhysicsIntegration: Collision response configured"));
 }
 
-void UCore_PhysicsIntegration::HandleCollisionResponse(const FHitResult& HitResult)
+void UCore_PhysicsIntegration::SetCollisionObjectType(ECollisionChannel ObjectType)
 {
-    if (!HitResult.bBlockingHit)
+    CollisionObjectType = ObjectType;
+    
+    // Apply to owner's primitive component
+    if (AActor* Owner = GetOwner())
     {
-        return;
+        if (UPrimitiveComponent* PrimComp = Owner->FindComponentByClass<UPrimitiveComponent>())
+        {
+            PrimComp->SetCollisionObjectType(ObjectType);
+        }
     }
     
-    // Calculate response vector
-    FVector ResponseVector = HitResult.Normal * CollisionResponseMultiplier;
+    UE_LOG(LogTemp, Log, TEXT("Core_PhysicsIntegration: Collision object type set"));
+}
+
+void UCore_PhysicsIntegration::OptimizePhysicsPerformance(bool bEnable)
+{
+    bOptimizePerformance = bEnable;
     
-    // Apply response
-    ApplyPhysicsCorrection(ResponseVector);
+    if (bEnable)
+    {
+        UpdatePhysicsLOD();
+    }
     
-    UE_LOG(LogCore_PhysicsIntegration, Log, TEXT("Handled collision response with %s"), 
-           HitResult.GetActor() ? *HitResult.GetActor()->GetName() : TEXT("Unknown"));
+    UE_LOG(LogTemp, Log, TEXT("Core_PhysicsIntegration: Physics optimization %s"), 
+           bEnable ? TEXT("enabled") : TEXT("disabled"));
+}
+
+void UCore_PhysicsIntegration::SetPhysicsLOD(int32 LODLevel)
+{
+    PhysicsLODLevel = FMath::Clamp(LODLevel, 0, 3);
+    
+    if (bOptimizePerformance)
+    {
+        UpdatePhysicsLOD();
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("Core_PhysicsIntegration: Physics LOD set to %d"), PhysicsLODLevel);
 }
 
 void UCore_PhysicsIntegration::EnablePhysicsSimulation(bool bEnable)
 {
-    AActor* Owner = GetOwner();
-    if (!Owner)
+    bPhysicsEnabled = bEnable;
+    
+    // Apply to owner's primitive component
+    if (AActor* Owner = GetOwner())
     {
-        return;
+        if (UPrimitiveComponent* PrimComp = Owner->FindComponentByClass<UPrimitiveComponent>())
+        {
+            PrimComp->SetSimulatePhysics(bEnable);
+        }
     }
     
-    if (UPrimitiveComponent* PrimComp = Owner->FindComponentByClass<UPrimitiveComponent>())
-    {
-        PrimComp->SetSimulatePhysics(bEnable);
-        UE_LOG(LogCore_PhysicsIntegration, Log, TEXT("Physics simulation %s for %s"), 
-               bEnable ? TEXT("enabled") : TEXT("disabled"), *Owner->GetName());
-    }
+    UE_LOG(LogTemp, Log, TEXT("Core_PhysicsIntegration: Physics simulation %s"), 
+           bEnable ? TEXT("enabled") : TEXT("disabled"));
 }
 
-void UCore_PhysicsIntegration::SetPhysicsProperties(float Mass, float LinearDamping, float AngularDamping)
+bool UCore_PhysicsIntegration::IsPhysicsSimulationEnabled() const
 {
-    AActor* Owner = GetOwner();
-    if (!Owner)
+    return bPhysicsEnabled;
+}
+
+void UCore_PhysicsIntegration::ApplyForce(const FVector& Force, const FVector& Location)
+{
+    if (!bPhysicsEnabled)
     {
         return;
     }
     
-    if (UPrimitiveComponent* PrimComp = Owner->FindComponentByClass<UPrimitiveComponent>())
+    if (AActor* Owner = GetOwner())
     {
-        FBodyInstance* BodyInstance = PrimComp->GetBodyInstance();
-        if (BodyInstance)
+        if (UPrimitiveComponent* PrimComp = Owner->FindComponentByClass<UPrimitiveComponent>())
         {
-            BodyInstance->SetMassOverride(Mass);
-            BodyInstance->LinearDamping = LinearDamping;
-            BodyInstance->AngularDamping = AngularDamping;
+            FVector ScaledForce = Force * MaxForceMultiplier;
+            PrimComp->AddForceAtLocation(ScaledForce, Location);
             
-            UE_LOG(LogCore_PhysicsIntegration, Log, TEXT("Set physics properties - Mass: %f, LinearDamping: %f, AngularDamping: %f"), 
-                   Mass, LinearDamping, AngularDamping);
+            UE_LOG(LogTemp, VeryVerbose, TEXT("Core_PhysicsIntegration: Applied force %s at location %s"), 
+                   *ScaledForce.ToString(), *Location.ToString());
         }
     }
 }
 
-void UCore_PhysicsIntegration::ApplyImpulseAtLocation(const FVector& Impulse, const FVector& Location)
+void UCore_PhysicsIntegration::ApplyImpulse(const FVector& Impulse, const FVector& Location)
 {
-    AActor* Owner = GetOwner();
-    if (!Owner)
+    if (!bPhysicsEnabled)
     {
         return;
     }
     
-    if (UPrimitiveComponent* PrimComp = Owner->FindComponentByClass<UPrimitiveComponent>())
+    if (AActor* Owner = GetOwner())
     {
-        PrimComp->AddImpulseAtLocation(Impulse, Location);
-        UE_LOG(LogCore_PhysicsIntegration, Log, TEXT("Applied impulse %s at location %s"), 
-               *Impulse.ToString(), *Location.ToString());
-    }
-}
-
-void UCore_PhysicsIntegration::SetCollisionResponseToChannel(ECollisionChannel Channel, ECollisionResponse Response)
-{
-    AActor* Owner = GetOwner();
-    if (!Owner)
-    {
-        return;
-    }
-    
-    if (UPrimitiveComponent* PrimComp = Owner->FindComponentByClass<UPrimitiveComponent>())
-    {
-        PrimComp->SetCollisionResponseToChannel(Channel, Response);
-        UE_LOG(LogCore_PhysicsIntegration, Log, TEXT("Set collision response for channel %d to %d"), 
-               (int32)Channel, (int32)Response);
-    }
-}
-
-bool UCore_PhysicsIntegration::CheckPhysicsStability()
-{
-    AActor* Owner = GetOwner();
-    if (!Owner)
-    {
-        return false;
-    }
-    
-    // Check if actor is in a stable position
-    FVector CurrentLocation = Owner->GetActorLocation();
-    FVector Velocity = Owner->GetVelocity();
-    
-    bool bIsStable = Velocity.Size() < 10.0f && bIsOnValidTerrain;
-    
-    if (bIsStable)
-    {
-        LastKnownGoodPosition = CurrentLocation;
-    }
-    
-    return bIsStable;
-}
-
-void UCore_PhysicsIntegration::OptimizePhysicsPerformance()
-{
-    AActor* Owner = GetOwner();
-    if (!Owner)
-    {
-        return;
-    }
-    
-    // Reduce physics update frequency for distant objects
-    if (UPrimitiveComponent* PrimComp = Owner->FindComponentByClass<UPrimitiveComponent>())
-    {
-        // Get distance to player
-        if (APawn* PlayerPawn = GetWorld()->GetFirstPlayerController()->GetPawn())
+        if (UPrimitiveComponent* PrimComp = Owner->FindComponentByClass<UPrimitiveComponent>())
         {
-            float Distance = FVector::Dist(Owner->GetActorLocation(), PlayerPawn->GetActorLocation());
+            FVector ScaledImpulse = Impulse * MaxImpulseMultiplier;
+            PrimComp->AddImpulseAtLocation(ScaledImpulse, Location);
             
-            if (Distance > 5000.0f) // 50 meters
-            {
-                // Reduce physics complexity for distant objects
-                PrimComp->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
-            }
-            else
-            {
-                PrimComp->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-            }
+            UE_LOG(LogTemp, VeryVerbose, TEXT("Core_PhysicsIntegration: Applied impulse %s at location %s"), 
+                   *ScaledImpulse.ToString(), *Location.ToString());
         }
     }
 }
 
-void UCore_PhysicsIntegration::ValidatePhysicsSetup()
+void UCore_PhysicsIntegration::ApplyTorque(const FVector& Torque)
 {
-    AActor* Owner = GetOwner();
-    if (!Owner)
+    if (!bPhysicsEnabled)
     {
-        UE_LOG(LogCore_PhysicsIntegration, Error, TEXT("No owner actor found for physics integration"));
         return;
     }
     
-    // Check for required components
-    UPrimitiveComponent* PrimComp = Owner->FindComponentByClass<UPrimitiveComponent>();
-    if (!PrimComp)
+    if (AActor* Owner = GetOwner())
     {
-        UE_LOG(LogCore_PhysicsIntegration, Warning, TEXT("No primitive component found on %s"), *Owner->GetName());
-    }
-    
-    // Validate physics settings
-    if (TerrainAdaptationStrength <= 0.0f)
-    {
-        UE_LOG(LogCore_PhysicsIntegration, Warning, TEXT("Invalid terrain adaptation strength: %f"), TerrainAdaptationStrength);
-        TerrainAdaptationStrength = 1.0f;
-    }
-    
-    if (MaxTerrainSlope <= 0.0f || MaxTerrainSlope > 90.0f)
-    {
-        UE_LOG(LogCore_PhysicsIntegration, Warning, TEXT("Invalid max terrain slope: %f"), MaxTerrainSlope);
-        MaxTerrainSlope = 45.0f;
-    }
-    
-    bPhysicsValidated = true;
-    UE_LOG(LogCore_PhysicsIntegration, Log, TEXT("Physics setup validated for %s"), *Owner->GetName());
-}
-
-void UCore_PhysicsIntegration::TestPhysicsIntegration()
-{
-    UE_LOG(LogCore_PhysicsIntegration, Log, TEXT("Testing physics integration..."));
-    
-    // Test terrain trace
-    FHitResult HitResult;
-    AActor* Owner = GetOwner();
-    if (Owner)
-    {
-        FVector ActorLocation = Owner->GetActorLocation();
-        bool bHit = PerformTerrainTrace(HitResult, ActorLocation + FVector(0, 0, 50), ActorLocation - FVector(0, 0, 200));
-        
-        UE_LOG(LogCore_PhysicsIntegration, Log, TEXT("Terrain trace test: %s"), bHit ? TEXT("SUCCESS") : TEXT("FAILED"));
-        
-        if (bHit)
+        if (UPrimitiveComponent* PrimComp = Owner->FindComponentByClass<UPrimitiveComponent>())
         {
-            UE_LOG(LogCore_PhysicsIntegration, Log, TEXT("Ground normal: %s, Slope: %f degrees"), 
-                   *HitResult.Normal.ToString(), CurrentTerrainSlope);
-        }
-    }
-    
-    // Test physics stability
-    bool bStable = CheckPhysicsStability();
-    UE_LOG(LogCore_PhysicsIntegration, Log, TEXT("Physics stability test: %s"), bStable ? TEXT("STABLE") : TEXT("UNSTABLE"));
-}
-
-void UCore_PhysicsIntegration::UpdatePhysicsState()
-{
-    // Update internal physics state
-    if (IsPhysicsComponentValid())
-    {
-        LogPhysicsState();
-    }
-}
-
-void UCore_PhysicsIntegration::ValidateTerrainInteraction()
-{
-    if (!bIsOnValidTerrain)
-    {
-        UE_LOG(LogCore_PhysicsIntegration, Warning, TEXT("Actor on invalid terrain (slope: %f degrees)"), CurrentTerrainSlope);
-        
-        // Apply correction if needed
-        if (CurrentTerrainSlope > MaxTerrainSlope)
-        {
-            FVector CorrectionVector = CurrentGroundNormal * 100.0f;
-            ApplyPhysicsCorrection(CorrectionVector);
+            FVector ScaledTorque = Torque * MaxTorqueMultiplier;
+            PrimComp->AddTorqueInRadians(ScaledTorque);
+            
+            UE_LOG(LogTemp, VeryVerbose, TEXT("Core_PhysicsIntegration: Applied torque %s"), 
+                   *ScaledTorque.ToString());
         }
     }
 }
 
-bool UCore_PhysicsIntegration::IsPhysicsComponentValid() const
+bool UCore_PhysicsIntegration::LineTrace(const FVector& Start, const FVector& End, FHitResult& HitResult)
 {
-    return bPhysicsValidated && GetOwner() != nullptr;
+    if (UWorld* World = GetWorld())
+    {
+        FCollisionQueryParams QueryParams;
+        QueryParams.AddIgnoredActor(GetOwner());
+        QueryParams.bTraceComplex = false;
+        QueryParams.bReturnPhysicalMaterial = true;
+        
+        bool bHit = World->LineTraceSingleByChannel(
+            HitResult,
+            Start,
+            End,
+            ECC_WorldStatic,
+            QueryParams
+        );
+        
+        return bHit;
+    }
+    
+    return false;
 }
 
-void UCore_PhysicsIntegration::LogPhysicsState() const
+bool UCore_PhysicsIntegration::SphereTrace(const FVector& Start, const FVector& End, float Radius, FHitResult& HitResult)
 {
-    UE_LOG(LogCore_PhysicsIntegration, VeryVerbose, TEXT("Physics State - Terrain Valid: %s, Slope: %f, Uneven: %s"), 
-           bIsOnValidTerrain ? TEXT("true") : TEXT("false"),
-           CurrentTerrainSlope,
-           bIsOnUnevenTerrain ? TEXT("true") : TEXT("false"));
+    if (UWorld* World = GetWorld())
+    {
+        FCollisionQueryParams QueryParams;
+        QueryParams.AddIgnoredActor(GetOwner());
+        QueryParams.bTraceComplex = false;
+        QueryParams.bReturnPhysicalMaterial = true;
+        
+        bool bHit = World->SweepSingleByChannel(
+            HitResult,
+            Start,
+            End,
+            FQuat::Identity,
+            ECC_WorldStatic,
+            FCollisionShape::MakeSphere(Radius),
+            QueryParams
+        );
+        
+        return bHit;
+    }
+    
+    return false;
+}
+
+bool UCore_PhysicsIntegration::BoxTrace(const FVector& Start, const FVector& End, const FVector& HalfSize, FHitResult& HitResult)
+{
+    if (UWorld* World = GetWorld())
+    {
+        FCollisionQueryParams QueryParams;
+        QueryParams.AddIgnoredActor(GetOwner());
+        QueryParams.bTraceComplex = false;
+        QueryParams.bReturnPhysicalMaterial = true;
+        
+        bool bHit = World->SweepSingleByChannel(
+            HitResult,
+            Start,
+            End,
+            FQuat::Identity,
+            ECC_WorldStatic,
+            FCollisionShape::MakeBox(HalfSize),
+            QueryParams
+        );
+        
+        return bHit;
+    }
+    
+    return false;
+}
+
+void UCore_PhysicsIntegration::InitializePhysicsSettings()
+{
+    if (AActor* Owner = GetOwner())
+    {
+        if (UPrimitiveComponent* PrimComp = Owner->FindComponentByClass<UPrimitiveComponent>())
+        {
+            // Apply initial physics settings
+            PrimComp->SetSimulatePhysics(bPhysicsEnabled);
+            PrimComp->SetEnableGravity(bGravityEnabled);
+            PrimComp->SetCollisionObjectType(CollisionObjectType);
+            PrimComp->SetCollisionResponseToAllChannels(CollisionResponseToWorld);
+            
+            // Apply custom gravity if set
+            if (!CustomGravity.Equals(FVector(0.0f, 0.0f, -980.0f)))
+            {
+                // Note: Custom gravity requires world-level changes in UE5
+                UE_LOG(LogTemp, Log, TEXT("Core_PhysicsIntegration: Custom gravity detected but requires world-level implementation"));
+            }
+        }
+    }
+}
+
+void UCore_PhysicsIntegration::UpdatePhysicsLOD()
+{
+    if (!GetOwner())
+    {
+        return;
+    }
+    
+    // Calculate distance to player
+    float DistanceToPlayer = 0.0f;
+    if (UWorld* World = GetWorld())
+    {
+        if (APawn* PlayerPawn = World->GetFirstPlayerController()->GetPawn())
+        {
+            DistanceToPlayer = FVector::Dist(GetOwner()->GetActorLocation(), PlayerPawn->GetActorLocation());
+        }
+    }
+    
+    // Apply LOD based on distance and performance settings
+    if (UPrimitiveComponent* PrimComp = GetOwner()->FindComponentByClass<UPrimitiveComponent>())
+    {
+        if (DistanceToPlayer > CullingDistance)
+        {
+            // Disable physics simulation at extreme distances
+            PrimComp->SetSimulatePhysics(false);
+        }
+        else if (DistanceToPlayer > MaxSimulationDistance)
+        {
+            // Reduce physics complexity
+            PrimComp->SetSimulatePhysics(false);
+        }
+        else
+        {
+            // Full physics simulation within range
+            PrimComp->SetSimulatePhysics(bPhysicsEnabled);
+        }
+    }
+}
+
+void UCore_PhysicsIntegration::ValidatePhysicsState()
+{
+    // Count physics objects in the world for performance monitoring
+    PhysicsObjectCount = 0;
+    if (UWorld* World = GetWorld())
+    {
+        for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+        {
+            if (AActor* Actor = *ActorItr)
+            {
+                if (UPrimitiveComponent* PrimComp = Actor->FindComponentByClass<UPrimitiveComponent>())
+                {
+                    if (PrimComp->IsSimulatingPhysics())
+                    {
+                        PhysicsObjectCount++;
+                    }
+                }
+            }
+        }
+    }
+    
+    // Log performance warnings if needed
+    if (AverageFrameTime > 0.033f) // Below 30 FPS
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Core_PhysicsIntegration: Performance warning - Average frame time: %f, Physics objects: %d"), 
+               AverageFrameTime, PhysicsObjectCount);
+    }
+    
+    // Auto-optimize if performance is poor
+    if (AverageFrameTime > 0.05f && PhysicsObjectCount > 100) // Below 20 FPS with many objects
+    {
+        PhysicsLODLevel = FMath::Min(PhysicsLODLevel + 1, 3);
+        UE_LOG(LogTemp, Log, TEXT("Core_PhysicsIntegration: Auto-increasing LOD level to %d due to performance"), PhysicsLODLevel);
+    }
 }
