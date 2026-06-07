@@ -4,91 +4,85 @@
 #include "Engine/Engine.h"
 #include "NiagaraSystem.h"
 #include "NiagaraComponent.h"
-#include "Components/StaticMeshComponent.h"
-#include "Engine/World.h"
-#include "Kismet/GameplayStatics.h"
+#include "Components/ActorComponent.h"
 #include "VFX_NiagaraLibrary.generated.h"
 
-/**
- * VFX Niagara Library for prehistoric particle effects
- * Manages campfire, footsteps, impacts, weather, and atmospheric effects
- */
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UVFX_NiagaraLibrary : public UObject
+UENUM(BlueprintType)
+enum class EVFX_EffectType : uint8
+{
+    Fire_Campfire       UMETA(DisplayName = "Campfire"),
+    Fire_Torch          UMETA(DisplayName = "Torch"),
+    Dust_Footstep       UMETA(DisplayName = "Footstep Dust"),
+    Dust_DinoStomp      UMETA(DisplayName = "Dinosaur Stomp"),
+    Blood_Impact        UMETA(DisplayName = "Blood Impact"),
+    Water_Splash        UMETA(DisplayName = "Water Splash"),
+    Smoke_Cooking       UMETA(DisplayName = "Cooking Smoke"),
+    Rain_Heavy          UMETA(DisplayName = "Heavy Rain"),
+    Fog_Morning         UMETA(DisplayName = "Morning Fog")
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FVFX_EffectData
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+    TSoftObjectPtr<UNiagaraSystem> NiagaraSystem;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+    FVector Scale;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+    float Duration;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+    bool bAutoDestroy;
+
+    FVFX_EffectData()
+    {
+        Scale = FVector(1.0f);
+        Duration = 5.0f;
+        bAutoDestroy = true;
+    }
+};
+
+UCLASS(BlueprintType, Blueprintable, ClassGroup=(VFX))
+class TRANSPERSONALGAME_API UVFX_NiagaraLibrary : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
     UVFX_NiagaraLibrary();
 
-    // === CAMPFIRE EFFECTS ===
-    UFUNCTION(BlueprintCallable, Category = "VFX|Fire")
-    static class UNiagaraComponent* SpawnCampfireEffect(UWorld* World, FVector Location, FRotator Rotation = FRotator::ZeroRotator);
-
-    UFUNCTION(BlueprintCallable, Category = "VFX|Fire")
-    static void StopCampfireEffect(class UNiagaraComponent* FireComponent);
-
-    // === FOOTSTEP EFFECTS ===
-    UFUNCTION(BlueprintCallable, Category = "VFX|Footsteps")
-    static void SpawnFootstepDust(UWorld* World, FVector Location, float DinosaurSize = 1.0f);
-
-    UFUNCTION(BlueprintCallable, Category = "VFX|Footsteps")
-    static void SpawnHeavyFootstep(UWorld* World, FVector Location, FVector Velocity);
-
-    // === IMPACT EFFECTS ===
-    UFUNCTION(BlueprintCallable, Category = "VFX|Combat")
-    static void SpawnBloodImpact(UWorld* World, FVector Location, FVector Normal);
-
-    UFUNCTION(BlueprintCallable, Category = "VFX|Combat")
-    static void SpawnRockImpact(UWorld* World, FVector Location, FVector Normal);
-
-    UFUNCTION(BlueprintCallable, Category = "VFX|Combat")
-    static void SpawnWoodImpact(UWorld* World, FVector Location, FVector Normal);
-
-    // === WEATHER EFFECTS ===
-    UFUNCTION(BlueprintCallable, Category = "VFX|Weather")
-    static class UNiagaraComponent* SpawnRainEffect(UWorld* World, FVector Location, float Intensity = 1.0f);
-
-    UFUNCTION(BlueprintCallable, Category = "VFX|Weather")
-    static class UNiagaraComponent* SpawnFogEffect(UWorld* World, FVector Location, float Density = 1.0f);
-
-    // === DINOSAUR EFFECTS ===
-    UFUNCTION(BlueprintCallable, Category = "VFX|Dinosaurs")
-    static void SpawnBreathVapor(UWorld* World, FVector Location, FRotator Direction);
-
-    UFUNCTION(BlueprintCallable, Category = "VFX|Dinosaurs")
-    static void SpawnRoarDistortion(UWorld* World, FVector Location, float Intensity);
-
-    // === ENVIRONMENTAL EFFECTS ===
-    UFUNCTION(BlueprintCallable, Category = "VFX|Environment")
-    static void SpawnDustCloud(UWorld* World, FVector Location, FVector Size);
-
-    UFUNCTION(BlueprintCallable, Category = "VFX|Environment")
-    static void SpawnInsectSwarm(UWorld* World, FVector Location, float Radius);
-
 protected:
-    // === NIAGARA SYSTEM REFERENCES ===
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "VFX Assets")
-    static class UNiagaraSystem* CampfireSystem;
+    virtual void BeginPlay() override;
 
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "VFX Assets")
-    static class UNiagaraSystem* FootstepDustSystem;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Library")
+    TMap<EVFX_EffectType, FVFX_EffectData> EffectLibrary;
 
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "VFX Assets")
-    static class UNiagaraSystem* BloodImpactSystem;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "VFX Library")
+    TArray<UNiagaraComponent*> ActiveEffects;
 
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "VFX Assets")
-    static class UNiagaraSystem* RainSystem;
+public:
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    UNiagaraComponent* SpawnEffect(EVFX_EffectType EffectType, FVector Location, FRotator Rotation = FRotator::ZeroRotator);
 
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "VFX Assets")
-    static class UNiagaraSystem* FogSystem;
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    void StopEffect(UNiagaraComponent* EffectComponent);
 
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "VFX Assets")
-    static class UNiagaraSystem* BreathVaporSystem;
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    void StopAllEffects();
+
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    void RegisterEffect(EVFX_EffectType EffectType, UNiagaraSystem* NiagaraSystem, FVector Scale = FVector(1.0f), float Duration = 5.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    bool HasEffect(EVFX_EffectType EffectType) const;
+
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    int32 GetActiveEffectCount() const;
 
 private:
-    // === HELPER FUNCTIONS ===
-    static FVector CalculateParticleVelocity(FVector ImpactNormal, float Speed);
-    static float GetEnvironmentalWindStrength(UWorld* World, FVector Location);
-    static bool IsLocationUnderwater(UWorld* World, FVector Location);
+    void CleanupFinishedEffects();
+    void InitializeDefaultEffects();
 };
