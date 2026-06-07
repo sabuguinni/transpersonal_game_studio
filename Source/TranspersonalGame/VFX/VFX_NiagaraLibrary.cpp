@@ -1,365 +1,164 @@
 #include "VFX_NiagaraLibrary.h"
 #include "NiagaraFunctionLibrary.h"
 #include "Engine/World.h"
-#include "Components/SceneComponent.h"
-#include "Math/UnrealMathUtility.h"
-
-// Initialize static Niagara system references
-UNiagaraSystem* UVFX_NiagaraLibrary::CampfireSystem = nullptr;
-UNiagaraSystem* UVFX_NiagaraLibrary::FootstepDustSystem = nullptr;
-UNiagaraSystem* UVFX_NiagaraLibrary::BloodImpactSystem = nullptr;
-UNiagaraSystem* UVFX_NiagaraLibrary::RainSystem = nullptr;
-UNiagaraSystem* UVFX_NiagaraLibrary::FogSystem = nullptr;
-UNiagaraSystem* UVFX_NiagaraLibrary::BreathVaporSystem = nullptr;
+#include "TimerManager.h"
 
 UVFX_NiagaraLibrary::UVFX_NiagaraLibrary()
 {
-    // Constructor implementation
+    PrimaryComponentTick.bCanEverTick = false;
+    bWantsInitializeComponent = true;
 }
 
-// === CAMPFIRE EFFECTS ===
-UNiagaraComponent* UVFX_NiagaraLibrary::SpawnCampfireEffect(UWorld* World, FVector Location, FRotator Rotation)
+void UVFX_NiagaraLibrary::BeginPlay()
 {
-    if (!World)
+    Super::BeginPlay();
+    InitializeDefaultEffects();
+    
+    // Setup cleanup timer for finished effects
+    if (GetWorld())
     {
-        UE_LOG(LogTemp, Warning, TEXT("VFX_NiagaraLibrary: Invalid World for campfire effect"));
+        GetWorld()->GetTimerManager().SetTimer(
+            FTimerHandle(),
+            this,
+            &UVFX_NiagaraLibrary::CleanupFinishedEffects,
+            2.0f,
+            true
+        );
+    }
+}
+
+UNiagaraComponent* UVFX_NiagaraLibrary::SpawnEffect(EVFX_EffectType EffectType, FVector Location, FRotator Rotation)
+{
+    if (!EffectLibrary.Contains(EffectType))
+    {
+        UE_LOG(LogTemp, Warning, TEXT("VFX_NiagaraLibrary: Effect type not found in library"));
         return nullptr;
     }
 
-    // Spawn Niagara component for campfire
-    UNiagaraComponent* FireComponent = UNiagaraFunctionLibrary::SpawnSystemAtLocation(
-        World,
-        CampfireSystem,
+    const FVFX_EffectData& EffectData = EffectLibrary[EffectType];
+    
+    if (!EffectData.NiagaraSystem.IsValid())
+    {
+        UE_LOG(LogTemp, Warning, TEXT("VFX_NiagaraLibrary: Niagara system is null for effect type"));
+        return nullptr;
+    }
+
+    UNiagaraComponent* EffectComponent = UNiagaraFunctionLibrary::SpawnSystemAtLocation(
+        GetWorld(),
+        EffectData.NiagaraSystem.Get(),
         Location,
         Rotation,
-        FVector(1.0f, 1.0f, 1.0f),
-        true,
-        true,
-        ENCPoolMethod::None,
-        true
+        EffectData.Scale,
+        EffectData.bAutoDestroy
     );
 
-    if (FireComponent)
+    if (EffectComponent)
     {
-        // Set campfire-specific parameters
-        FireComponent->SetFloatParameter(FName("FireIntensity"), 1.0f);
-        FireComponent->SetFloatParameter(FName("SmokeAmount"), 0.8f);
-        FireComponent->SetVectorParameter(FName("WindDirection"), FVector(0.1f, 0.0f, 1.0f));
+        ActiveEffects.Add(EffectComponent);
         
-        UE_LOG(LogTemp, Log, TEXT("VFX_NiagaraLibrary: Campfire effect spawned at %s"), *Location.ToString());
-    }
-
-    return FireComponent;
-}
-
-void UVFX_NiagaraLibrary::StopCampfireEffect(UNiagaraComponent* FireComponent)
-{
-    if (FireComponent && IsValid(FireComponent))
-    {
-        FireComponent->Deactivate();
-        UE_LOG(LogTemp, Log, TEXT("VFX_NiagaraLibrary: Campfire effect stopped"));
-    }
-}
-
-// === FOOTSTEP EFFECTS ===
-void UVFX_NiagaraLibrary::SpawnFootstepDust(UWorld* World, FVector Location, float DinosaurSize)
-{
-    if (!World)
-    {
-        return;
-    }
-
-    // Calculate dust intensity based on dinosaur size
-    float DustIntensity = FMath::Clamp(DinosaurSize, 0.5f, 3.0f);
-    FVector DustScale = FVector(DustIntensity, DustIntensity, 1.0f);
-
-    UNiagaraComponent* DustComponent = UNiagaraFunctionLibrary::SpawnSystemAtLocation(
-        World,
-        FootstepDustSystem,
-        Location,
-        FRotator::ZeroRotator,
-        DustScale,
-        true,
-        true,
-        ENCPoolMethod::AutoRelease,
-        true
-    );
-
-    if (DustComponent)
-    {
-        DustComponent->SetFloatParameter(FName("ParticleCount"), 50.0f * DustIntensity);
-        DustComponent->SetFloatParameter(FName("LifeTime"), 2.0f);
-        DustComponent->SetVectorParameter(FName("InitialVelocity"), FVector(0.0f, 0.0f, 100.0f * DustIntensity));
+        // Set duration if specified
+        if (EffectData.Duration > 0.0f && EffectData.bAutoDestroy)
+        {
+            EffectComponent->SetFloatParameter(TEXT("LifeTime"), EffectData.Duration);
+        }
         
-        UE_LOG(LogTemp, Log, TEXT("VFX_NiagaraLibrary: Footstep dust spawned with intensity %.2f"), DustIntensity);
+        UE_LOG(LogTemp, Log, TEXT("VFX_NiagaraLibrary: Spawned effect at location %s"), *Location.ToString());
+    }
+
+    return EffectComponent;
+}
+
+void UVFX_NiagaraLibrary::StopEffect(UNiagaraComponent* EffectComponent)
+{
+    if (EffectComponent && IsValid(EffectComponent))
+    {
+        EffectComponent->Deactivate();
+        ActiveEffects.Remove(EffectComponent);
     }
 }
 
-void UVFX_NiagaraLibrary::SpawnHeavyFootstep(UWorld* World, FVector Location, FVector Velocity)
+void UVFX_NiagaraLibrary::StopAllEffects()
 {
-    if (!World)
+    for (UNiagaraComponent* Effect : ActiveEffects)
     {
+        if (Effect && IsValid(Effect))
+        {
+            Effect->Deactivate();
+        }
+    }
+    ActiveEffects.Empty();
+}
+
+void UVFX_NiagaraLibrary::RegisterEffect(EVFX_EffectType EffectType, UNiagaraSystem* NiagaraSystem, FVector Scale, float Duration)
+{
+    if (!NiagaraSystem)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("VFX_NiagaraLibrary: Cannot register null Niagara system"));
         return;
     }
 
-    // Heavy footstep with ground shake effect
-    float VelocityMagnitude = Velocity.Size();
-    float ShakeIntensity = FMath::Clamp(VelocityMagnitude / 1000.0f, 0.1f, 2.0f);
+    FVFX_EffectData EffectData;
+    EffectData.NiagaraSystem = NiagaraSystem;
+    EffectData.Scale = Scale;
+    EffectData.Duration = Duration;
+    EffectData.bAutoDestroy = Duration > 0.0f;
 
-    SpawnFootstepDust(World, Location, ShakeIntensity);
+    EffectLibrary.Add(EffectType, EffectData);
     
-    // Additional rock debris for heavy impacts
-    SpawnDustCloud(World, Location + FVector(0, 0, 10), FVector(ShakeIntensity * 100.0f));
+    UE_LOG(LogTemp, Log, TEXT("VFX_NiagaraLibrary: Registered effect type %d"), (int32)EffectType);
 }
 
-// === IMPACT EFFECTS ===
-void UVFX_NiagaraLibrary::SpawnBloodImpact(UWorld* World, FVector Location, FVector Normal)
+bool UVFX_NiagaraLibrary::HasEffect(EVFX_EffectType EffectType) const
 {
-    if (!World)
-    {
-        return;
-    }
+    return EffectLibrary.Contains(EffectType);
+}
 
-    FRotator ImpactRotation = FRotationMatrix::MakeFromZ(Normal).Rotator();
+int32 UVFX_NiagaraLibrary::GetActiveEffectCount() const
+{
+    return ActiveEffects.Num();
+}
+
+void UVFX_NiagaraLibrary::CleanupFinishedEffects()
+{
+    ActiveEffects.RemoveAll([](UNiagaraComponent* Effect) {
+        return !Effect || !IsValid(Effect) || !Effect->IsActive();
+    });
+}
+
+void UVFX_NiagaraLibrary::InitializeDefaultEffects()
+{
+    // Initialize default effect data structures
+    // Note: Actual Niagara systems will be assigned via Blueprint or C++ setup
     
-    UNiagaraComponent* BloodComponent = UNiagaraFunctionLibrary::SpawnSystemAtLocation(
-        World,
-        BloodImpactSystem,
-        Location,
-        ImpactRotation,
-        FVector(1.0f),
-        true,
-        true,
-        ENCPoolMethod::AutoRelease,
-        true
-    );
+    FVFX_EffectData CampfireData;
+    CampfireData.Scale = FVector(1.0f, 1.0f, 1.5f);
+    CampfireData.Duration = -1.0f; // Persistent
+    CampfireData.bAutoDestroy = false;
+    EffectLibrary.Add(EVFX_EffectType::Fire_Campfire, CampfireData);
 
-    if (BloodComponent)
-    {
-        BloodComponent->SetVectorParameter(FName("ImpactNormal"), Normal);
-        BloodComponent->SetFloatParameter(FName("BloodAmount"), 1.0f);
-        BloodComponent->SetVectorParameter(FName("BloodColor"), FVector(0.8f, 0.1f, 0.1f));
-        
-        UE_LOG(LogTemp, Log, TEXT("VFX_NiagaraLibrary: Blood impact effect spawned"));
-    }
-}
+    FVFX_EffectData FootstepData;
+    FootstepData.Scale = FVector(0.5f);
+    FootstepData.Duration = 2.0f;
+    FootstepData.bAutoDestroy = true;
+    EffectLibrary.Add(EVFX_EffectType::Dust_Footstep, FootstepData);
 
-void UVFX_NiagaraLibrary::SpawnRockImpact(UWorld* World, FVector Location, FVector Normal)
-{
-    if (!World)
-    {
-        return;
-    }
+    FVFX_EffectData DinoStompData;
+    DinoStompData.Scale = FVector(2.0f);
+    DinoStompData.Duration = 3.0f;
+    DinoStompData.bAutoDestroy = true;
+    EffectLibrary.Add(EVFX_EffectType::Dust_DinoStomp, DinoStompData);
 
-    // Rock impact creates dust and small debris
-    SpawnDustCloud(World, Location, FVector(80.0f, 80.0f, 120.0f));
-    
-    // Spawn small rock particles
-    FVector ParticleVelocity = CalculateParticleVelocity(Normal, 300.0f);
-    
-    UE_LOG(LogTemp, Log, TEXT("VFX_NiagaraLibrary: Rock impact effect spawned"));
-}
+    FVFX_EffectData BloodData;
+    BloodData.Scale = FVector(1.0f);
+    BloodData.Duration = 5.0f;
+    BloodData.bAutoDestroy = true;
+    EffectLibrary.Add(EVFX_EffectType::Blood_Impact, BloodData);
 
-void UVFX_NiagaraLibrary::SpawnWoodImpact(UWorld* World, FVector Location, FVector Normal)
-{
-    if (!World)
-    {
-        return;
-    }
+    FVFX_EffectData RainData;
+    RainData.Scale = FVector(10.0f, 10.0f, 1.0f);
+    RainData.Duration = -1.0f; // Persistent weather
+    RainData.bAutoDestroy = false;
+    EffectLibrary.Add(EVFX_EffectType::Rain_Heavy, RainData);
 
-    // Wood impact creates splinters and small dust
-    SpawnDustCloud(World, Location, FVector(40.0f, 40.0f, 60.0f));
-    
-    UE_LOG(LogTemp, Log, TEXT("VFX_NiagaraLibrary: Wood impact effect spawned"));
-}
-
-// === WEATHER EFFECTS ===
-UNiagaraComponent* UVFX_NiagaraLibrary::SpawnRainEffect(UWorld* World, FVector Location, float Intensity)
-{
-    if (!World)
-    {
-        return nullptr;
-    }
-
-    float ClampedIntensity = FMath::Clamp(Intensity, 0.1f, 2.0f);
-    
-    UNiagaraComponent* RainComponent = UNiagaraFunctionLibrary::SpawnSystemAtLocation(
-        World,
-        RainSystem,
-        Location,
-        FRotator::ZeroRotator,
-        FVector(ClampedIntensity),
-        true,
-        true,
-        ENCPoolMethod::None,
-        true
-    );
-
-    if (RainComponent)
-    {
-        RainComponent->SetFloatParameter(FName("RainIntensity"), ClampedIntensity);
-        RainComponent->SetFloatParameter(FName("DropSize"), 1.0f);
-        RainComponent->SetVectorParameter(FName("WindDirection"), FVector(0.2f, 0.1f, -1.0f));
-        
-        UE_LOG(LogTemp, Log, TEXT("VFX_NiagaraLibrary: Rain effect spawned with intensity %.2f"), ClampedIntensity);
-    }
-
-    return RainComponent;
-}
-
-UNiagaraComponent* UVFX_NiagaraLibrary::SpawnFogEffect(UWorld* World, FVector Location, float Density)
-{
-    if (!World)
-    {
-        return nullptr;
-    }
-
-    float ClampedDensity = FMath::Clamp(Density, 0.1f, 1.5f);
-    
-    UNiagaraComponent* FogComponent = UNiagaraFunctionLibrary::SpawnSystemAtLocation(
-        World,
-        FogSystem,
-        Location,
-        FRotator::ZeroRotator,
-        FVector(ClampedDensity),
-        true,
-        true,
-        ENCPoolMethod::None,
-        true
-    );
-
-    if (FogComponent)
-    {
-        FogComponent->SetFloatParameter(FName("FogDensity"), ClampedDensity);
-        FogComponent->SetFloatParameter(FName("FogHeight"), 200.0f);
-        FogComponent->SetVectorParameter(FName("FogColor"), FVector(0.7f, 0.8f, 0.9f));
-        
-        UE_LOG(LogTemp, Log, TEXT("VFX_NiagaraLibrary: Fog effect spawned with density %.2f"), ClampedDensity);
-    }
-
-    return FogComponent;
-}
-
-// === DINOSAUR EFFECTS ===
-void UVFX_NiagaraLibrary::SpawnBreathVapor(UWorld* World, FVector Location, FRotator Direction)
-{
-    if (!World)
-    {
-        return;
-    }
-
-    UNiagaraComponent* BreathComponent = UNiagaraFunctionLibrary::SpawnSystemAtLocation(
-        World,
-        BreathVaporSystem,
-        Location,
-        Direction,
-        FVector(1.0f),
-        true,
-        true,
-        ENCPoolMethod::AutoRelease,
-        true
-    );
-
-    if (BreathComponent)
-    {
-        BreathComponent->SetFloatParameter(FName("VaporIntensity"), 0.8f);
-        BreathComponent->SetFloatParameter(FName("Temperature"), -10.0f); // Cold breath
-        BreathComponent->SetVectorParameter(FName("BreathDirection"), Direction.Vector());
-        
-        UE_LOG(LogTemp, Log, TEXT("VFX_NiagaraLibrary: Breath vapor effect spawned"));
-    }
-}
-
-void UVFX_NiagaraLibrary::SpawnRoarDistortion(UWorld* World, FVector Location, float Intensity)
-{
-    if (!World)
-    {
-        return;
-    }
-
-    // Visual distortion effect for powerful roars
-    float ClampedIntensity = FMath::Clamp(Intensity, 0.5f, 3.0f);
-    
-    // Create air distortion particles
-    SpawnDustCloud(World, Location, FVector(ClampedIntensity * 150.0f));
-    
-    UE_LOG(LogTemp, Log, TEXT("VFX_NiagaraLibrary: Roar distortion effect spawned with intensity %.2f"), ClampedIntensity);
-}
-
-// === ENVIRONMENTAL EFFECTS ===
-void UVFX_NiagaraLibrary::SpawnDustCloud(UWorld* World, FVector Location, FVector Size)
-{
-    if (!World)
-    {
-        return;
-    }
-
-    // Generic dust cloud for various impacts
-    UNiagaraComponent* DustComponent = UNiagaraFunctionLibrary::SpawnSystemAtLocation(
-        World,
-        FootstepDustSystem, // Reuse footstep system for dust clouds
-        Location,
-        FRotator::ZeroRotator,
-        Size / 100.0f, // Scale down size vector
-        true,
-        true,
-        ENCPoolMethod::AutoRelease,
-        true
-    );
-
-    if (DustComponent)
-    {
-        DustComponent->SetFloatParameter(FName("ParticleCount"), Size.X);
-        DustComponent->SetFloatParameter(FName("LifeTime"), 3.0f);
-        DustComponent->SetVectorParameter(FName("CloudSize"), Size);
-        
-        UE_LOG(LogTemp, Log, TEXT("VFX_NiagaraLibrary: Dust cloud spawned with size %s"), *Size.ToString());
-    }
-}
-
-void UVFX_NiagaraLibrary::SpawnInsectSwarm(UWorld* World, FVector Location, float Radius)
-{
-    if (!World)
-    {
-        return;
-    }
-
-    // Insect swarm for environmental ambience
-    float ClampedRadius = FMath::Clamp(Radius, 50.0f, 500.0f);
-    
-    UE_LOG(LogTemp, Log, TEXT("VFX_NiagaraLibrary: Insect swarm spawned with radius %.2f"), ClampedRadius);
-}
-
-// === HELPER FUNCTIONS ===
-FVector UVFX_NiagaraLibrary::CalculateParticleVelocity(FVector ImpactNormal, float Speed)
-{
-    // Calculate realistic particle velocity based on impact normal
-    FVector ReflectedDirection = FMath::VRand() + ImpactNormal;
-    ReflectedDirection.Normalize();
-    
-    return ReflectedDirection * Speed;
-}
-
-float UVFX_NiagaraLibrary::GetEnvironmentalWindStrength(UWorld* World, FVector Location)
-{
-    if (!World)
-    {
-        return 0.0f;
-    }
-
-    // Simple wind calculation based on location
-    // In a real implementation, this would query weather systems
-    return FMath::Sin(World->GetTimeSeconds() * 0.1f) * 0.5f + 0.5f;
-}
-
-bool UVFX_NiagaraLibrary::IsLocationUnderwater(UWorld* World, FVector Location)
-{
-    if (!World)
-    {
-        return false;
-    }
-
-    // Simple water level check
-    // In a real implementation, this would query water bodies
-    return Location.Z < 0.0f;
+    UE_LOG(LogTemp, Log, TEXT("VFX_NiagaraLibrary: Initialized %d default effects"), EffectLibrary.Num());
 }
