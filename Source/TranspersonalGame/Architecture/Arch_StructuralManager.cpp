@@ -1,395 +1,373 @@
 #include "Arch_StructuralManager.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "Components/StaticMeshComponent.h"
-#include "Engine/StaticMeshActor.h"
-#include "Materials/MaterialInterface.h"
+#include "Components/SceneComponent.h"
+#include "Engine/StaticMesh.h"
+#include "UObject/ConstructorHelpers.h"
 #include "Kismet/GameplayStatics.h"
-#include "Math/UnrealMathUtility.h"
+#include "Engine/ExponentialHeightFog.h"
+#include "Components/ExponentialHeightFogComponent.h"
 
-UArch_StructuralManager::UArch_StructuralManager()
+AArch_StructuralManager::AArch_StructuralManager()
 {
-    PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 5.0f;
-    
-    MaxStructuresPerBiome = 25;
-    StructureSpawnRadius = 15000.0f;
-    MinDistanceBetweenStructures = 2000.0f;
-    bAutoGenerateStructures = true;
-    WeatheringRate = 0.1f;
+    PrimaryActorTick.bCanEverTick = true;
+
+    // Create root scene component
+    RootSceneComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootSceneComponent"));
+    RootComponent = RootSceneComponent;
+
+    // Initialize default values
+    BiomeInfluenceRadius = 5000.0f;
+    bEnableAtmosphericEffects = true;
+    AtmosphericDensity = 0.02f;
+    AtmosphericColor = FLinearColor(0.8f, 0.9f, 1.0f, 1.0f);
+
+    // Initialize lighting configuration with Cretaceous-appropriate values
+    LightingConfig = FArch_LightingConfiguration();
 }
 
-void UArch_StructuralManager::BeginPlay()
+void AArch_StructuralManager::BeginPlay()
 {
     Super::BeginPlay();
-    InitializeStructureSystem();
     
-    if (bAutoGenerateStructures)
+    InitializeArchitecturalSystems();
+    ConfigureArchitecturalLighting();
+    
+    if (bEnableAtmosphericEffects)
     {
-        // Generate structures for each biome
-        GenerateStructuresForBiome(EBiomeType::Savanna, 20);
-        GenerateStructuresForBiome(EBiomeType::Forest, 25);
-        GenerateStructuresForBiome(EBiomeType::Desert, 15);
-        GenerateStructuresForBiome(EBiomeType::Swamp, 18);
-        GenerateStructuresForBiome(EBiomeType::Mountain, 22);
+        UpdateAtmosphericEffects();
     }
 }
 
-void UArch_StructuralManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void AArch_StructuralManager::Tick(float DeltaTime)
 {
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+    Super::Tick(DeltaTime);
     
-    // Periodic weathering updates
-    for (const FArch_StructureData& StructureData : ActiveStructures)
-    {
-        // Find structure actor and apply weathering
-        TArray<AActor*> FoundActors;
-        UGameplayStatics::GetAllActorsOfClass(GetWorld(), AStaticMeshActor::StaticClass(), FoundActors);
-        
-        for (AActor* Actor : FoundActors)
-        {
-            if (FVector::Dist(Actor->GetActorLocation(), StructureData.Location) < 100.0f)
-            {
-                UpdateStructureWeathering(Actor, WeatheringRate * DeltaTime);
-                break;
-            }
-        }
-    }
+    // Update structural weathering over time
+    UpdateStructuralWeathering();
 }
 
-void UArch_StructuralManager::SpawnStructureAtLocation(EArch_StructureType StructureType, FVector Location, EBiomeType BiomeType)
+void AArch_StructuralManager::SpawnStructuralElement(const FArch_StructuralElement& Element)
 {
-    if (!IsValidStructureLocation(Location, BiomeType))
+    if (!ValidateElementPlacement(Element))
     {
-        UE_LOG(LogTemp, Warning, TEXT("Invalid structure location"));
+        UE_LOG(LogTemp, Warning, TEXT("Invalid structural element placement: %s"), *Element.ElementName);
         return;
     }
-    
+
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        UE_LOG(LogTemp, Error, TEXT("No valid world context for spawning structural element"));
+        return;
+    }
+
+    // Spawn static mesh actor for the structural element
+    FActorSpawnParameters SpawnParams;
+    SpawnParams.Owner = this;
+    SpawnParams.Instigator = GetInstigator();
+
+    AStaticMeshActor* StructureActor = World->SpawnActor<AStaticMeshActor>(
+        AStaticMeshActor::StaticClass(),
+        Element.Location,
+        Element.Rotation,
+        SpawnParams
+    );
+
+    if (StructureActor)
+    {
+        StructureActor->SetActorScale3D(Element.Scale);
+        StructureActor->SetActorLabel(Element.ElementName);
+        
+        // Configure mesh component if available
+        UStaticMeshComponent* MeshComponent = StructureActor->GetStaticMeshComponent();
+        if (MeshComponent)
+        {
+            // Apply biome-specific materials and properties
+            ConfigureBiomeSpecificArchitecture(Element.AssociatedBiome);
+        }
+
+        SpawnedStructures.Add(StructureActor);
+        UE_LOG(LogTemp, Log, TEXT("Successfully spawned structural element: %s"), *Element.ElementName);
+    }
+    else
+    {
+        UE_LOG(LogTemp, Error, TEXT("Failed to spawn structural element: %s"), *Element.ElementName);
+    }
+}
+
+void AArch_StructuralManager::ConfigureArchitecturalLighting()
+{
     UWorld* World = GetWorld();
     if (!World)
     {
         return;
     }
-    
-    // Create structure actor
-    AStaticMeshActor* StructureActor = World->SpawnActor<AStaticMeshActor>(Location, FRotator::ZeroRotator);
-    if (!StructureActor)
-    {
-        return;
-    }
-    
-    // Set up mesh component
-    UStaticMeshComponent* MeshComp = CreateStructureMesh(StructureType);
-    if (MeshComp)
-    {
-        StructureActor->SetRootComponent(MeshComp);
-        ApplyBiomeSpecificMaterials(MeshComp, BiomeType);
-    }
-    
-    // Create structure data
-    FArch_StructureData NewStructure;
-    NewStructure.StructureType = StructureType;
-    NewStructure.Location = Location;
-    NewStructure.BiomeType = BiomeType;
-    NewStructure.bIsPlayerAccessible = true;
-    
-    // Register structure
-    RegisterStructure(StructureActor, NewStructure);
-    
-    UE_LOG(LogTemp, Log, TEXT("Spawned structure at location: %s"), *Location.ToString());
-}
 
-void UArch_StructuralManager::GenerateStructuresForBiome(EBiomeType BiomeType, int32 StructureCount)
-{
-    FVector BiomeCenter = GetBiomeCenter(BiomeType);
-    
-    for (int32 i = 0; i < StructureCount; ++i)
+    // Spawn directional light for main architectural illumination
+    FActorSpawnParameters SpawnParams;
+    SpawnParams.Owner = this;
+
+    ADirectionalLight* MainLight = World->SpawnActor<ADirectionalLight>(
+        ADirectionalLight::StaticClass(),
+        GetActorLocation() + FVector(0, 0, 500),
+        LightingConfig.DirectionalRotation,
+        SpawnParams
+    );
+
+    if (MainLight)
     {
-        // Random location within biome
-        FVector RandomOffset = FVector(
-            FMath::RandRange(-StructureSpawnRadius, StructureSpawnRadius),
-            FMath::RandRange(-StructureSpawnRadius, StructureSpawnRadius),
-            0.0f
+        UDirectionalLightComponent* LightComponent = MainLight->GetLightComponent();
+        if (LightComponent)
+        {
+            LightComponent->SetIntensity(LightingConfig.DirectionalIntensity);
+            LightComponent->SetLightColor(LightingConfig.DirectionalColor);
+            LightComponent->SetCastShadows(true);
+        }
+        
+        MainLight->SetActorLabel(TEXT("Arch_MainDirectionalLight"));
+        DirectionalLights.Add(MainLight);
+    }
+
+    // Spawn point lights for interior/accent lighting
+    for (int32 i = 0; i < LightingConfig.PointLightLocations.Num(); i++)
+    {
+        APointLight* PointLight = World->SpawnActor<APointLight>(
+            APointLight::StaticClass(),
+            GetActorLocation() + LightingConfig.PointLightLocations[i],
+            FRotator::ZeroRotator,
+            SpawnParams
         );
-        
-        FVector SpawnLocation = BiomeCenter + RandomOffset;
-        SpawnLocation.Z = 100.0f; // Ground level
-        
-        // Random structure type appropriate for biome
-        EArch_StructureType StructureType;
-        switch (BiomeType)
-        {
-            case EBiomeType::Mountain:
-                StructureType = (FMath::RandBool()) ? EArch_StructureType::CaveEntrance : EArch_StructureType::CliffOverhang;
-                break;
-            case EBiomeType::Desert:
-                StructureType = (FMath::RandBool()) ? EArch_StructureType::RockShelter : EArch_StructureType::NaturalArch;
-                break;
-            case EBiomeType::Forest:
-                StructureType = EArch_StructureType::BoulderFormation;
-                break;
-            case EBiomeType::Swamp:
-                StructureType = EArch_StructureType::StonePlatform;
-                break;
-            default:
-                StructureType = EArch_StructureType::RockShelter;
-                break;
-        }
-        
-        SpawnStructureAtLocation(StructureType, SpawnLocation, BiomeType);
-    }
-}
 
-TArray<AActor*> UArch_StructuralManager::GetStructuresInRadius(FVector Center, float Radius)
-{
-    TArray<AActor*> NearbyStructures;
-    TArray<AActor*> AllActors;
-    UGameplayStatics::GetAllActorsOfClass(GetWorld(), AStaticMeshActor::StaticClass(), AllActors);
-    
-    for (AActor* Actor : AllActors)
-    {
-        if (FVector::Dist(Actor->GetActorLocation(), Center) <= Radius)
+        if (PointLight)
         {
-            // Check if this is a structure we manage
-            for (const FArch_StructureData& StructureData : ActiveStructures)
+            UPointLightComponent* PointComponent = PointLight->GetLightComponent();
+            if (PointComponent)
             {
-                if (FVector::Dist(Actor->GetActorLocation(), StructureData.Location) < 100.0f)
-                {
-                    NearbyStructures.Add(Actor);
-                    break;
-                }
+                PointComponent->SetIntensity(LightingConfig.PointLightIntensity);
+                PointComponent->SetAttenuationRadius(LightingConfig.PointLightRadius);
+                PointComponent->SetLightColor(LightingConfig.DirectionalColor);
             }
+            
+            PointLight->SetActorLabel(FString::Printf(TEXT("Arch_PointLight_%d"), i));
+            PointLights.Add(PointLight);
         }
     }
-    
-    return NearbyStructures;
+
+    UE_LOG(LogTemp, Log, TEXT("Architectural lighting configured with %d directional and %d point lights"), 
+           DirectionalLights.Num(), PointLights.Num());
 }
 
-void UArch_StructuralManager::RemoveStructuresInArea(FVector Center, float Radius)
+void AArch_StructuralManager::UpdateAtmosphericEffects()
 {
-    TArray<AActor*> StructuresToRemove = GetStructuresInRadius(Center, Radius);
-    
-    for (AActor* Structure : StructuresToRemove)
-    {
-        // Remove from active structures list
-        ActiveStructures.RemoveAll([Structure](const FArch_StructureData& Data) {
-            return FVector::Dist(Structure->GetActorLocation(), Data.Location) < 100.0f;
-        });
-        
-        // Destroy actor
-        Structure->Destroy();
-    }
-}
-
-bool UArch_StructuralManager::IsLocationSheltered(FVector Location)
-{
-    TArray<AActor*> NearbyStructures = GetStructuresInRadius(Location, 1000.0f);
-    
-    for (AActor* Structure : NearbyStructures)
-    {
-        // Simple shelter check - if structure is above the location
-        if (Structure->GetActorLocation().Z > Location.Z + 200.0f)
-        {
-            float Distance = FVector::Dist2D(Structure->GetActorLocation(), Location);
-            if (Distance < 500.0f)
-            {
-                return true;
-            }
-        }
-    }
-    
-    return false;
-}
-
-AActor* UArch_StructuralManager::FindNearestShelter(FVector PlayerLocation, float SearchRadius)
-{
-    TArray<AActor*> NearbyStructures = GetStructuresInRadius(PlayerLocation, SearchRadius);
-    AActor* NearestShelter = nullptr;
-    float NearestDistance = SearchRadius;
-    
-    for (AActor* Structure : NearbyStructures)
-    {
-        float Distance = FVector::Dist(Structure->GetActorLocation(), PlayerLocation);
-        if (Distance < NearestDistance)
-        {
-            NearestDistance = Distance;
-            NearestShelter = Structure;
-        }
-    }
-    
-    return NearestShelter;
-}
-
-void UArch_StructuralManager::CreateEmergencyShelter(FVector Location, EBiomeType BiomeType)
-{
-    // Create a simple rock shelter for emergency situations
-    SpawnStructureAtLocation(EArch_StructureType::RockShelter, Location, BiomeType);
-    UE_LOG(LogTemp, Log, TEXT("Created emergency shelter at: %s"), *Location.ToString());
-}
-
-float UArch_StructuralManager::CalculateStructuralStability(AActor* Structure)
-{
-    if (!Structure)
-    {
-        return 0.0f;
-    }
-    
-    // Simple stability calculation based on age and weather exposure
-    float BaseStability = 100.0f;
-    
-    // Find structure data
-    for (const FArch_StructureData& StructureData : ActiveStructures)
-    {
-        if (FVector::Dist(Structure->GetActorLocation(), StructureData.Location) < 100.0f)
-        {
-            // Reduce stability based on biome conditions
-            switch (StructureData.BiomeType)
-            {
-                case EBiomeType::Swamp:
-                    BaseStability *= 0.7f; // High moisture degrades structures
-                    break;
-                case EBiomeType::Desert:
-                    BaseStability *= 0.8f; // Sand erosion
-                    break;
-                case EBiomeType::Mountain:
-                    BaseStability *= 0.9f; // Cold and wind
-                    break;
-                default:
-                    BaseStability *= 0.85f;
-                    break;
-            }
-            break;
-        }
-    }
-    
-    return FMath::Clamp(BaseStability, 0.0f, 100.0f);
-}
-
-void UArch_StructuralManager::UpdateStructureWeathering(AActor* Structure, float WeatherIntensity)
-{
-    if (!Structure)
+    UWorld* World = GetWorld();
+    if (!World)
     {
         return;
     }
-    
-    // Apply visual weathering effects
-    UStaticMeshComponent* MeshComp = Structure->FindComponentByClass<UStaticMeshComponent>();
-    if (MeshComp)
+
+    // Find or create exponential height fog
+    AExponentialHeightFog* HeightFog = nullptr;
+    TArray<AActor*> FoundFogs;
+    UGameplayStatics::GetAllActorsOfClass(World, AExponentialHeightFog::StaticClass(), FoundFogs);
+
+    if (FoundFogs.Num() > 0)
     {
-        // Gradually darken and add wear to materials
-        // This would be expanded with actual material parameter updates
-        UE_LOG(LogTemp, VeryVerbose, TEXT("Applying weathering to structure"));
+        HeightFog = Cast<AExponentialHeightFog>(FoundFogs[0]);
+    }
+    else
+    {
+        // Spawn new height fog
+        FActorSpawnParameters SpawnParams;
+        SpawnParams.Owner = this;
+        
+        HeightFog = World->SpawnActor<AExponentialHeightFog>(
+            AExponentialHeightFog::StaticClass(),
+            GetActorLocation(),
+            FRotator::ZeroRotator,
+            SpawnParams
+        );
+    }
+
+    if (HeightFog)
+    {
+        UExponentialHeightFogComponent* FogComponent = HeightFog->GetComponent();
+        if (FogComponent)
+        {
+            FogComponent->SetFogDensity(AtmosphericDensity);
+            FogComponent->SetFogHeightFalloff(0.2f);
+            FogComponent->SetFogInscatteringColor(AtmosphericColor);
+            FogComponent->SetStartDistance(1000.0f);
+        }
+        
+        HeightFog->SetActorLabel(TEXT("Arch_AtmosphericFog"));
+        UE_LOG(LogTemp, Log, TEXT("Atmospheric effects updated for architectural ambiance"));
     }
 }
 
-bool UArch_StructuralManager::CanStructureSupportWeight(AActor* Structure, float Weight)
+void AArch_StructuralManager::SetBiomeArchitecture(EBiomeType BiomeType)
 {
-    float Stability = CalculateStructuralStability(Structure);
-    float MaxSupportWeight = Stability * 10.0f; // 1000kg at 100% stability
+    ConfigureBiomeSpecificArchitecture(BiomeType);
     
-    return Weight <= MaxSupportWeight;
+    // Update existing structures to match new biome
+    for (AActor* Structure : SpawnedStructures)
+    {
+        if (Structure)
+        {
+            // Apply biome-specific modifications
+            UE_LOG(LogTemp, Log, TEXT("Updated structure %s for biome type"), *Structure->GetName());
+        }
+    }
 }
 
-void UArch_StructuralManager::InitializeStructureSystem()
+TArray<FArch_StructuralElement> AArch_StructuralManager::GetStructuresInRadius(FVector Center, float Radius)
 {
-    ActiveStructures.Empty();
-    UE_LOG(LogTemp, Log, TEXT("Architecture Structural Manager initialized"));
+    TArray<FArch_StructuralElement> StructuresInRange;
+    
+    for (const FArch_StructuralElement& Element : StructuralElements)
+    {
+        float Distance = FVector::Dist(Element.Location, Center);
+        if (Distance <= Radius)
+        {
+            StructuresInRange.Add(Element);
+        }
+    }
+    
+    return StructuresInRange;
 }
 
-FVector UArch_StructuralManager::GetBiomeCenter(EBiomeType BiomeType)
+void AArch_StructuralManager::ApplyWeatheringEffects(float WeatheringIntensity)
+{
+    for (FArch_StructuralElement& Element : StructuralElements)
+    {
+        // Reduce structural integrity based on weathering
+        Element.StructuralIntegrity = FMath::Max(0.0f, 
+            Element.StructuralIntegrity - (WeatheringIntensity * 0.1f));
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("Applied weathering effects with intensity: %f"), WeatheringIntensity);
+}
+
+void AArch_StructuralManager::GenerateArchitecturalLayout()
+{
+    // Clear existing elements
+    StructuralElements.Empty();
+    
+    // Generate basic Cretaceous architectural layout
+    FVector BaseLocation = GetActorLocation();
+    
+    // Create main structure
+    FArch_StructuralElement MainStructure;
+    MainStructure.ElementName = TEXT("CretaceousMainHall");
+    MainStructure.Location = BaseLocation;
+    MainStructure.Scale = FVector(2.0f, 2.0f, 1.5f);
+    MainStructure.AssociatedBiome = EBiomeType::Temperate;
+    MainStructure.StructuralIntegrity = 85.0f;
+    StructuralElements.Add(MainStructure);
+    
+    // Create supporting pillars
+    for (int32 i = 0; i < 4; i++)
+    {
+        FArch_StructuralElement Pillar;
+        Pillar.ElementName = FString::Printf(TEXT("CretaceousPillar_%d"), i);
+        
+        float Angle = (i * 90.0f) * PI / 180.0f;
+        FVector PillarOffset = FVector(FMath::Cos(Angle), FMath::Sin(Angle), 0) * 1000.0f;
+        Pillar.Location = BaseLocation + PillarOffset;
+        Pillar.Scale = FVector(0.5f, 0.5f, 2.0f);
+        Pillar.AssociatedBiome = EBiomeType::Temperate;
+        Pillar.StructuralIntegrity = 70.0f;
+        StructuralElements.Add(Pillar);
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("Generated architectural layout with %d elements"), StructuralElements.Num());
+}
+
+void AArch_StructuralManager::ValidateStructuralIntegrity()
+{
+    int32 ValidStructures = 0;
+    int32 DamagedStructures = 0;
+    
+    for (const FArch_StructuralElement& Element : StructuralElements)
+    {
+        if (Element.StructuralIntegrity > 50.0f)
+        {
+            ValidStructures++;
+        }
+        else
+        {
+            DamagedStructures++;
+        }
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("Structural integrity validation: %d valid, %d damaged structures"), 
+           ValidStructures, DamagedStructures);
+}
+
+void AArch_StructuralManager::InitializeArchitecturalSystems()
+{
+    // Initialize point light locations for interior lighting
+    LightingConfig.PointLightLocations.Empty();
+    LightingConfig.PointLightLocations.Add(FVector(500, 0, 150));
+    LightingConfig.PointLightLocations.Add(FVector(-500, 0, 150));
+    LightingConfig.PointLightLocations.Add(FVector(0, 500, 150));
+    LightingConfig.PointLightLocations.Add(FVector(0, -500, 150));
+    
+    UE_LOG(LogTemp, Log, TEXT("Architectural systems initialized"));
+}
+
+void AArch_StructuralManager::ConfigureBiomeSpecificArchitecture(EBiomeType BiomeType)
 {
     switch (BiomeType)
     {
-        case EBiomeType::Savanna:
-            return FVector(0.0f, 0.0f, 100.0f);
-        case EBiomeType::Swamp:
-            return FVector(-50000.0f, -45000.0f, 100.0f);
-        case EBiomeType::Forest:
-            return FVector(-45000.0f, 40000.0f, 100.0f);
-        case EBiomeType::Desert:
-            return FVector(55000.0f, 0.0f, 100.0f);
-        case EBiomeType::Mountain:
-            return FVector(40000.0f, 50000.0f, 100.0f);
-        default:
-            return FVector::ZeroVector;
-    }
-}
-
-UStaticMeshComponent* UArch_StructuralManager::CreateStructureMesh(EArch_StructureType StructureType)
-{
-    UStaticMeshComponent* MeshComp = NewObject<UStaticMeshComponent>();
-    
-    // In a real implementation, this would load appropriate static meshes
-    // For now, we'll use basic shapes as placeholders
-    switch (StructureType)
-    {
-        case EArch_StructureType::CaveEntrance:
-            // Load cave entrance mesh
+        case EBiomeType::Temperate:
+            AtmosphericColor = FLinearColor(0.8f, 0.9f, 1.0f, 1.0f);
+            AtmosphericDensity = 0.02f;
             break;
-        case EArch_StructureType::RockShelter:
-            // Load rock shelter mesh
+        case EBiomeType::Arid:
+            AtmosphericColor = FLinearColor(1.0f, 0.9f, 0.7f, 1.0f);
+            AtmosphericDensity = 0.015f;
             break;
-        case EArch_StructureType::StonePlatform:
-            // Load stone platform mesh
+        case EBiomeType::Tropical:
+            AtmosphericColor = FLinearColor(0.7f, 1.0f, 0.8f, 1.0f);
+            AtmosphericDensity = 0.025f;
             break;
         default:
-            break;
-    }
-    
-    return MeshComp;
-}
-
-void UArch_StructuralManager::ApplyBiomeSpecificMaterials(UStaticMeshComponent* MeshComp, EBiomeType BiomeType)
-{
-    if (!MeshComp)
-    {
-        return;
-    }
-    
-    // Apply materials based on biome
-    // This would load actual material assets in a full implementation
-    switch (BiomeType)
-    {
-        case EBiomeType::Swamp:
-            // Apply mossy, wet materials
-            break;
-        case EBiomeType::Desert:
-            // Apply sandy, weathered materials
-            break;
-        case EBiomeType::Mountain:
-            // Apply cold, rocky materials
-            break;
-        default:
-            // Apply default stone materials
+            // Keep default values
             break;
     }
 }
 
-bool UArch_StructuralManager::IsValidStructureLocation(FVector Location, EBiomeType BiomeType)
+void AArch_StructuralManager::UpdateStructuralWeathering()
 {
-    // Check minimum distance from other structures
-    for (const FArch_StructureData& ExistingStructure : ActiveStructures)
+    // Gradual weathering simulation
+    static float WeatheringTimer = 0.0f;
+    WeatheringTimer += GetWorld()->GetDeltaSeconds();
+    
+    if (WeatheringTimer >= 10.0f) // Update every 10 seconds
     {
-        if (FVector::Dist(Location, ExistingStructure.Location) < MinDistanceBetweenStructures)
+        ApplyWeatheringEffects(0.1f);
+        WeatheringTimer = 0.0f;
+    }
+}
+
+bool AArch_StructuralManager::ValidateElementPlacement(const FArch_StructuralElement& Element)
+{
+    // Check for overlapping structures
+    for (const FArch_StructuralElement& ExistingElement : StructuralElements)
+    {
+        float Distance = FVector::Dist(Element.Location, ExistingElement.Location);
+        if (Distance < 500.0f) // Minimum distance between structures
         {
             return false;
         }
     }
     
-    // Check if location is within biome bounds
-    FVector BiomeCenter = GetBiomeCenter(BiomeType);
-    float DistanceFromCenter = FVector::Dist2D(Location, BiomeCenter);
-    
-    return DistanceFromCenter <= StructureSpawnRadius;
-}
-
-void UArch_StructuralManager::RegisterStructure(AActor* Structure, const FArch_StructureData& StructureData)
-{
-    if (Structure)
+    // Validate structural integrity
+    if (Element.StructuralIntegrity <= 0.0f)
     {
-        ActiveStructures.Add(StructureData);
-        Structure->SetActorLabel(FString::Printf(TEXT("Structure_%s_%d"), 
-            *UEnum::GetValueAsString(StructureData.StructureType), 
-            ActiveStructures.Num()));
+        return false;
     }
+    
+    return true;
 }
