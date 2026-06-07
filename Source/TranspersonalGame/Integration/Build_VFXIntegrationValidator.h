@@ -1,97 +1,98 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
 #include "Engine/World.h"
-#include "Components/StaticMeshComponent.h"
-#include "NiagaraComponent.h"
-#include "NiagaraSystem.h"
+#include "Components/ActorComponent.h"
+#include "Engine/Engine.h"
+#include "SharedTypes.h"
 #include "Build_VFXIntegrationValidator.generated.h"
 
-UENUM(BlueprintType)
-enum class EBuild_VFXValidationResult : uint8
-{
-    Passed      UMETA(DisplayName = "Validation Passed"),
-    Failed      UMETA(DisplayName = "Validation Failed"),
-    Warning     UMETA(DisplayName = "Validation Warning"),
-    NotTested   UMETA(DisplayName = "Not Tested")
-};
-
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FBuild_VFXValidationReport
+struct TRANSPERSONALGAME_API FBuild_VFXValidationResult
 {
     GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadOnly, Category = "VFX Validation")
+    bool bNiagaraSystemsValid = false;
+
+    UPROPERTY(BlueprintReadOnly, Category = "VFX Validation")
+    bool bParticleSystemsValid = false;
+
+    UPROPERTY(BlueprintReadOnly, Category = "VFX Validation")
+    bool bCampfireEffectsValid = false;
+
+    UPROPERTY(BlueprintReadOnly, Category = "VFX Validation")
+    bool bPerformanceWithinBudget = false;
 
     UPROPERTY(BlueprintReadOnly, Category = "VFX Validation")
     int32 TotalVFXActors = 0;
 
     UPROPERTY(BlueprintReadOnly, Category = "VFX Validation")
-    int32 ValidVFXActors = 0;
+    float FrameTimeImpact = 0.0f;
 
     UPROPERTY(BlueprintReadOnly, Category = "VFX Validation")
-    int32 InvalidVFXActors = 0;
+    FString ValidationReport;
 
-    UPROPERTY(BlueprintReadOnly, Category = "VFX Validation")
-    TArray<FString> ValidationErrors;
-
-    UPROPERTY(BlueprintReadOnly, Category = "VFX Validation")
-    EBuild_VFXValidationResult OverallResult = EBuild_VFXValidationResult::NotTested;
-
-    UPROPERTY(BlueprintReadOnly, Category = "VFX Validation")
-    float ValidationTimestamp = 0.0f;
+    FBuild_VFXValidationResult()
+    {
+        bNiagaraSystemsValid = false;
+        bParticleSystemsValid = false;
+        bCampfireEffectsValid = false;
+        bPerformanceWithinBudget = false;
+        TotalVFXActors = 0;
+        FrameTimeImpact = 0.0f;
+        ValidationReport = TEXT("No validation performed");
+    }
 };
 
-/**
- * Build VFX Integration Validator
- * Validates VFX systems integration with build pipeline
- * Ensures Niagara effects work correctly across all modules
- */
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API ABuild_VFXIntegrationValidator : public AActor
+class TRANSPERSONALGAME_API UBuild_VFXIntegrationValidator : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    ABuild_VFXIntegrationValidator();
+    UBuild_VFXIntegrationValidator();
+
+    // Core VFX validation functions
+    UFUNCTION(BlueprintCallable, Category = "VFX Integration")
+    FBuild_VFXValidationResult ValidateVFXSystems();
+
+    UFUNCTION(BlueprintCallable, Category = "VFX Integration")
+    bool ValidateNiagaraSystems();
+
+    UFUNCTION(BlueprintCallable, Category = "VFX Integration")
+    bool ValidateParticleSystems();
+
+    UFUNCTION(BlueprintCallable, Category = "VFX Integration")
+    bool ValidateCampfireEffects();
+
+    UFUNCTION(BlueprintCallable, Category = "VFX Integration")
+    float MeasureVFXPerformanceImpact();
+
+    UFUNCTION(BlueprintCallable, Category = "VFX Integration")
+    void GenerateVFXIntegrationReport();
+
+    // QA integration functions
+    UFUNCTION(BlueprintCallable, Category = "VFX Integration")
+    bool ValidateQATestActors();
+
+    UFUNCTION(BlueprintCallable, Category = "VFX Integration")
+    void ProcessQAValidationResults();
 
 protected:
     virtual void BeginPlay() override;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    UStaticMeshComponent* ValidatorMesh;
+    UPROPERTY(BlueprintReadOnly, Category = "VFX Integration")
+    FBuild_VFXValidationResult LastValidationResult;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    UNiagaraComponent* TestVFXComponent;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Integration")
+    float MaxAllowedFrameTimeImpact = 2.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Validation")
-    bool bAutoValidateOnBeginPlay = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Validation")
-    float ValidationInterval = 5.0f;
-
-    UPROPERTY(BlueprintReadOnly, Category = "VFX Validation")
-    FBuild_VFXValidationReport LastValidationReport;
-
-public:
-    UFUNCTION(BlueprintCallable, Category = "VFX Validation")
-    FBuild_VFXValidationReport ValidateVFXIntegration();
-
-    UFUNCTION(BlueprintCallable, Category = "VFX Validation")
-    bool ValidateNiagaraSystem(UNiagaraSystem* NiagaraSystem);
-
-    UFUNCTION(BlueprintCallable, Category = "VFX Validation")
-    TArray<AActor*> FindAllVFXActors();
-
-    UFUNCTION(BlueprintCallable, Category = "VFX Validation")
-    bool TestVFXPerformance();
-
-    UFUNCTION(BlueprintCallable, Category = "VFX Validation", CallInEditor = true)
-    void RunVFXValidationTest();
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Integration")
+    bool bEnableDetailedLogging = true;
 
 private:
-    FTimerHandle ValidationTimerHandle;
-    
-    void PerformPeriodicValidation();
-    bool ValidateVFXActor(AActor* Actor);
-    void LogValidationResult(const FBuild_VFXValidationReport& Report);
+    void LogValidationStep(const FString& StepName, bool bSuccess);
+    TArray<AActor*> FindVFXActors();
+    TArray<AActor*> FindQATestActors();
 };
