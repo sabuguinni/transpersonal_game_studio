@@ -1,277 +1,327 @@
 #include "Narr_NarrativeManager.h"
 #include "Engine/Engine.h"
-#include "Engine/World.h"
-#include "Kismet/GameplayStatics.h"
-#include "Sound/SoundCue.h"
-#include "Components/AudioComponent.h"
+#include "Engine/DataTable.h"
 
 UNarr_NarrativeManager::UNarr_NarrativeManager()
 {
-    EventCooldownTime = 5.0f;
+    QuestDataTable = nullptr;
+    DialogueDataTable = nullptr;
+    bInDialogue = false;
 }
 
 void UNarr_NarrativeManager::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
     
-    InitializeDefaultEvents();
+    UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Initializing prehistoric survival narrative system"));
     
-    UE_LOG(LogTemp, Warning, TEXT("Narrative Manager initialized with %d events"), NarrativeEvents.Num());
+    LoadQuestData();
+    LoadDialogueData();
+    InitializeDefaultQuests();
+    InitializeDefaultDialogues();
+    
+    // Initialize story flags for prehistoric survival
+    StoryFlags.Add(TEXT("FirstHunt"), false);
+    StoryFlags.Add(TEXT("MetElder"), false);
+    StoryFlags.Add(TEXT("LearnedCrafting"), false);
+    StoryFlags.Add(TEXT("SurvivedFirstNight"), false);
+    StoryFlags.Add(TEXT("EncounteredPredator"), false);
+    StoryFlags.Add(TEXT("FoundWaterSource"), false);
+    StoryFlags.Add(TEXT("BuiltShelter"), false);
+    StoryFlags.Add(TEXT("JoinedTribe"), false);
+    
+    UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Initialization complete"));
 }
 
 void UNarr_NarrativeManager::Deinitialize()
 {
-    NarrativeEvents.Empty();
-    CompletedEvents.Empty();
-    EventLastTriggered.Empty();
+    ActiveQuests.Empty();
+    CompletedQuests.Empty();
+    StoryFlags.Empty();
+    bInDialogue = false;
     
     Super::Deinitialize();
 }
 
-void UNarr_NarrativeManager::TriggerNarrativeEvent(const FString& EventID, AActor* SourceActor)
+void UNarr_NarrativeManager::StartQuest(const FString& QuestID)
 {
-    if (!NarrativeEvents.Contains(EventID))
+    FNarr_Quest* Quest = FindQuest(QuestID);
+    if (Quest && Quest->State == ENarr_QuestState::Inactive)
     {
-        UE_LOG(LogTemp, Warning, TEXT("Narrative event not found: %s"), *EventID);
-        return;
-    }
-
-    const FNarr_NarrativeEvent& Event = NarrativeEvents[EventID];
-    
-    // Check cooldown
-    if (EventLastTriggered.Contains(EventID))
-    {
-        float TimeSinceLastTrigger = GetWorld()->GetTimeSeconds() - EventLastTriggered[EventID];
-        if (TimeSinceLastTrigger < EventCooldownTime)
-        {
-            return;
-        }
-    }
-
-    // Check if event is repeatable
-    if (!Event.bIsRepeatable && CompletedEvents.Contains(EventID))
-    {
-        return;
-    }
-
-    // Check event conditions
-    if (!CheckEventConditions(Event))
-    {
-        return;
-    }
-
-    ProcessEventTrigger(Event, SourceActor);
-    EventLastTriggered.Add(EventID, GetWorld()->GetTimeSeconds());
-}
-
-bool UNarr_NarrativeManager::IsEventAvailable(const FString& EventID) const
-{
-    if (!NarrativeEvents.Contains(EventID))
-    {
-        return false;
-    }
-
-    const FNarr_NarrativeEvent& Event = NarrativeEvents[EventID];
-    
-    if (!Event.bIsRepeatable && CompletedEvents.Contains(EventID))
-    {
-        return false;
-    }
-
-    return CheckEventConditions(Event);
-}
-
-void UNarr_NarrativeManager::AdvanceStoryProgress(const FString& ObjectiveID)
-{
-    CurrentStoryProgress.CurrentObjective++;
-    
-    UE_LOG(LogTemp, Log, TEXT("Story progress advanced: %s (Objective %d)"), 
-           *ObjectiveID, CurrentStoryProgress.CurrentObjective);
-
-    // Trigger story advancement event
-    TriggerNarrativeEvent(TEXT("StoryAdvancement"));
-}
-
-FNarr_StoryProgress UNarr_NarrativeManager::GetCurrentStoryProgress() const
-{
-    return CurrentStoryProgress;
-}
-
-void UNarr_NarrativeManager::RegisterEventCompletion(const FString& EventID)
-{
-    if (!CompletedEvents.Contains(EventID))
-    {
-        CompletedEvents.Add(EventID);
-        CurrentStoryProgress.CompletedEvents.Add(EventID);
-    }
-}
-
-TArray<FNarr_NarrativeEvent> UNarr_NarrativeManager::GetAvailableEvents() const
-{
-    TArray<FNarr_NarrativeEvent> AvailableEvents;
-    
-    for (const auto& EventPair : NarrativeEvents)
-    {
-        if (IsEventAvailable(EventPair.Key))
-        {
-            AvailableEvents.Add(EventPair.Value);
-        }
-    }
-
-    // Sort by priority
-    AvailableEvents.Sort([](const FNarr_NarrativeEvent& A, const FNarr_NarrativeEvent& B) {
-        return A.EventPriority > B.EventPriority;
-    });
-
-    return AvailableEvents;
-}
-
-void UNarr_NarrativeManager::LoadNarrativeData(UDataTable* NarrativeDataTable)
-{
-    if (!NarrativeDataTable)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Narrative data table is null"));
-        return;
-    }
-
-    TArray<FNarr_NarrativeEvent*> AllRows;
-    NarrativeDataTable->GetAllRows<FNarr_NarrativeEvent>(TEXT("LoadNarrativeData"), AllRows);
-
-    for (FNarr_NarrativeEvent* Row : AllRows)
-    {
-        if (Row)
-        {
-            NarrativeEvents.Add(Row->EventID, *Row);
-        }
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("Loaded %d narrative events from data table"), AllRows.Num());
-}
-
-void UNarr_NarrativeManager::PlayNarrativeAudio(const FString& AudioClipID)
-{
-    // Find audio clip and play it
-    FString AudioPath = FString::Printf(TEXT("/Game/Audio/Narrative/%s"), *AudioClipID);
-    
-    USoundCue* AudioClip = LoadObject<USoundCue>(nullptr, *AudioPath);
-    if (AudioClip && GetWorld())
-    {
-        UGameplayStatics::PlaySound2D(GetWorld(), AudioClip);
-        UE_LOG(LogTemp, Log, TEXT("Playing narrative audio: %s"), *AudioClipID);
-    }
-    else
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Audio clip not found: %s"), *AudioClipID);
-    }
-}
-
-void UNarr_NarrativeManager::SetStoryChapter(const FString& ChapterID)
-{
-    CurrentStoryProgress.ChapterID = ChapterID;
-    CurrentStoryProgress.CurrentObjective = 0;
-    
-    UE_LOG(LogTemp, Log, TEXT("Story chapter set to: %s"), *ChapterID);
-}
-
-void UNarr_NarrativeManager::InitializeDefaultEvents()
-{
-    // Danger Warning Event
-    FNarr_NarrativeEvent DangerEvent;
-    DangerEvent.EventID = TEXT("DangerWarning");
-    DangerEvent.EventTitle = TEXT("Predator Detected");
-    DangerEvent.EventDescription = TEXT("A large predator has been detected nearby");
-    DangerEvent.EventType = ENarr_NarrativeEventType::Combat_Warning;
-    DangerEvent.EventPriority = 10.0f;
-    DangerEvent.bIsRepeatable = true;
-    DangerEvent.AudioClips.Add(TEXT("DangerWarning_01"));
-    NarrativeEvents.Add(DangerEvent.EventID, DangerEvent);
-
-    // Discovery Event
-    FNarr_NarrativeEvent DiscoveryEvent;
-    DiscoveryEvent.EventID = TEXT("FireDiscovery");
-    DiscoveryEvent.EventTitle = TEXT("Fire Discovered");
-    DiscoveryEvent.EventDescription = TEXT("Ancient knowledge of fire has been discovered");
-    DiscoveryEvent.EventType = ENarr_NarrativeEventType::Discovery;
-    DiscoveryEvent.EventPriority = 8.0f;
-    DiscoveryEvent.bIsRepeatable = false;
-    DiscoveryEvent.AudioClips.Add(TEXT("FireDiscovery_01"));
-    NarrativeEvents.Add(DiscoveryEvent.EventID, DiscoveryEvent);
-
-    // Low Health Warning
-    FNarr_NarrativeEvent HealthEvent;
-    HealthEvent.EventID = TEXT("LowHealth");
-    HealthEvent.EventTitle = TEXT("Wounded");
-    HealthEvent.EventDescription = TEXT("Health is critically low");
-    HealthEvent.EventType = ENarr_NarrativeEventType::LowHealth;
-    HealthEvent.EventPriority = 9.0f;
-    HealthEvent.bIsRepeatable = true;
-    HealthEvent.RequiredConditions.Add(TEXT("Health<25"));
-    NarrativeEvents.Add(HealthEvent.EventID, HealthEvent);
-
-    // Hunger Warning
-    FNarr_NarrativeEvent HungerEvent;
-    HungerEvent.EventID = TEXT("Hunger");
-    HungerEvent.EventTitle = TEXT("Starving");
-    HungerEvent.EventDescription = TEXT("Food is urgently needed");
-    HungerEvent.EventType = ENarr_NarrativeEventType::Hunger;
-    HungerEvent.EventPriority = 7.0f;
-    HungerEvent.bIsRepeatable = true;
-    HungerEvent.RequiredConditions.Add(TEXT("Hunger<20"));
-    NarrativeEvents.Add(HungerEvent.EventID, HungerEvent);
-
-    // Area Discovery
-    FNarr_NarrativeEvent AreaEvent;
-    AreaEvent.EventID = TEXT("NewAreaDiscovered");
-    AreaEvent.EventTitle = TEXT("New Territory");
-    AreaEvent.EventDescription = TEXT("A new area has been discovered");
-    AreaEvent.EventType = ENarr_NarrativeEventType::Discovery;
-    AreaEvent.EventPriority = 6.0f;
-    AreaEvent.bIsRepeatable = true;
-    NarrativeEvents.Add(AreaEvent.EventID, AreaEvent);
-}
-
-bool UNarr_NarrativeManager::CheckEventConditions(const FNarr_NarrativeEvent& Event) const
-{
-    // Basic condition checking - can be expanded with game state
-    for (const FString& Condition : Event.RequiredConditions)
-    {
-        if (Condition.Contains(TEXT("Health<")))
-        {
-            // Would check actual player health here
-            // For now, return true for demonstration
-            return true;
-        }
+        Quest->State = ENarr_QuestState::Active;
+        ActiveQuests.Add(*Quest);
         
-        if (Condition.Contains(TEXT("Hunger<")))
+        UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Started quest '%s'"), *QuestID);
+        
+        // Trigger story event for quest start
+        TriggerStoryEvent(FString::Printf(TEXT("QuestStarted_%s"), *QuestID));
+    }
+}
+
+void UNarr_NarrativeManager::CompleteQuest(const FString& QuestID)
+{
+    for (int32 i = 0; i < ActiveQuests.Num(); i++)
+    {
+        if (ActiveQuests[i].QuestID == QuestID)
         {
-            // Would check actual player hunger here
+            ActiveQuests[i].State = ENarr_QuestState::Completed;
+            CompletedQuests.Add(ActiveQuests[i]);
+            ActiveQuests.RemoveAt(i);
+            
+            UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Completed quest '%s'"), *QuestID);
+            
+            // Trigger story event for quest completion
+            TriggerStoryEvent(FString::Printf(TEXT("QuestCompleted_%s"), *QuestID));
+            break;
+        }
+    }
+}
+
+void UNarr_NarrativeManager::FailQuest(const FString& QuestID)
+{
+    for (int32 i = 0; i < ActiveQuests.Num(); i++)
+    {
+        if (ActiveQuests[i].QuestID == QuestID)
+        {
+            ActiveQuests[i].State = ENarr_QuestState::Failed;
+            ActiveQuests.RemoveAt(i);
+            
+            UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Failed quest '%s'"), *QuestID);
+            break;
+        }
+    }
+}
+
+void UNarr_NarrativeManager::UpdateQuestObjective(const FString& QuestID, const FString& ObjectiveID, int32 Progress)
+{
+    FNarr_Quest* Quest = FindQuest(QuestID);
+    if (Quest && Quest->State == ENarr_QuestState::Active)
+    {
+        for (FNarr_QuestObjective& Objective : Quest->Objectives)
+        {
+            if (Objective.ObjectiveID == ObjectiveID)
+            {
+                Objective.CurrentProgress = FMath::Min(Progress, Objective.TargetProgress);
+                
+                if (Objective.CurrentProgress >= Objective.TargetProgress)
+                {
+                    Objective.State = ENarr_QuestState::Completed;
+                    UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Completed objective '%s' for quest '%s'"), *ObjectiveID, *QuestID);
+                }
+                
+                // Check if all objectives are complete
+                bool bAllComplete = true;
+                for (const FNarr_QuestObjective& CheckObjective : Quest->Objectives)
+                {
+                    if (CheckObjective.State != ENarr_QuestState::Completed)
+                    {
+                        bAllComplete = false;
+                        break;
+                    }
+                }
+                
+                if (bAllComplete)
+                {
+                    CompleteQuest(QuestID);
+                }
+                break;
+            }
+        }
+    }
+}
+
+bool UNarr_NarrativeManager::IsQuestActive(const FString& QuestID) const
+{
+    for (const FNarr_Quest& Quest : ActiveQuests)
+    {
+        if (Quest.QuestID == QuestID)
+        {
             return true;
         }
     }
-    
-    return true;
+    return false;
 }
 
-void UNarr_NarrativeManager::ProcessEventTrigger(const FNarr_NarrativeEvent& Event, AActor* SourceActor)
+bool UNarr_NarrativeManager::IsQuestCompleted(const FString& QuestID) const
 {
-    UE_LOG(LogTemp, Log, TEXT("Narrative Event Triggered: %s - %s"), 
-           *Event.EventTitle, *Event.EventDescription);
-
-    // Play audio clips
-    for (const FString& AudioClip : Event.AudioClips)
+    for (const FNarr_Quest& Quest : CompletedQuests)
     {
-        PlayNarrativeAudio(AudioClip);
+        if (Quest.QuestID == QuestID)
+        {
+            return true;
+        }
     }
+    return false;
+}
 
-    // Mark as completed if not repeatable
-    if (!Event.bIsRepeatable)
-    {
-        RegisterEventCompletion(Event.EventID);
-    }
+TArray<FNarr_Quest> UNarr_NarrativeManager::GetActiveQuests() const
+{
+    return ActiveQuests;
+}
 
-    // Broadcast event to other systems
-    if (GetWorld())
+void UNarr_NarrativeManager::StartDialogue(const FString& DialogueID)
+{
+    FNarr_DialogueEntry* Dialogue = FindDialogue(DialogueID);
+    if (Dialogue)
     {
-        // Could broadcast to UI, quest system, etc.
+        CurrentDialogue = *Dialogue;
+        bInDialogue = true;
+        
+        UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Started dialogue '%s' with '%s'"), *DialogueID, *Dialogue->SpeakerName);
     }
+}
+
+void UNarr_NarrativeManager::SelectDialogueChoice(int32 ChoiceIndex)
+{
+    if (bInDialogue && CurrentDialogue.Choices.IsValidIndex(ChoiceIndex))
+    {
+        const FNarr_DialogueChoice& Choice = CurrentDialogue.Choices[ChoiceIndex];
+        
+        UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Selected choice '%s'"), *Choice.ChoiceText);
+        
+        if (!Choice.NextDialogueID.IsEmpty())
+        {
+            StartDialogue(Choice.NextDialogueID);
+        }
+        else
+        {
+            EndDialogue();
+        }
+    }
+}
+
+FNarr_DialogueEntry UNarr_NarrativeManager::GetCurrentDialogue() const
+{
+    return CurrentDialogue;
+}
+
+bool UNarr_NarrativeManager::IsInDialogue() const
+{
+    return bInDialogue;
+}
+
+void UNarr_NarrativeManager::EndDialogue()
+{
+    bInDialogue = false;
+    CurrentDialogue = FNarr_DialogueEntry();
+    
+    UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Ended dialogue"));
+}
+
+void UNarr_NarrativeManager::SetStoryFlag(const FString& FlagName, bool bValue)
+{
+    StoryFlags.Add(FlagName, bValue);
+    
+    UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Set story flag '%s' to %s"), *FlagName, bValue ? TEXT("true") : TEXT("false"));
+    
+    // Trigger story event for flag change
+    TriggerStoryEvent(FString::Printf(TEXT("FlagChanged_%s_%s"), *FlagName, bValue ? TEXT("True") : TEXT("False")));
+}
+
+bool UNarr_NarrativeManager::GetStoryFlag(const FString& FlagName) const
+{
+    const bool* Flag = StoryFlags.Find(FlagName);
+    return Flag ? *Flag : false;
+}
+
+void UNarr_NarrativeManager::TriggerStoryEvent(const FString& EventID)
+{
+    UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Triggered story event '%s'"), *EventID);
+    
+    // Handle specific prehistoric survival story events
+    if (EventID == TEXT("QuestStarted_FirstHunt"))
+    {
+        SetStoryFlag(TEXT("FirstHunt"), true);
+    }
+    else if (EventID == TEXT("QuestCompleted_FirstHunt"))
+    {
+        SetStoryFlag(TEXT("LearnedCrafting"), true);
+    }
+    else if (EventID == TEXT("FlagChanged_SurvivedFirstNight_True"))
+    {
+        // Unlock advanced survival quests
+        StartQuest(TEXT("BuildShelter"));
+    }
+}
+
+void UNarr_NarrativeManager::LoadQuestData()
+{
+    // In a full implementation, this would load from data tables
+    UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Loading quest data"));
+}
+
+void UNarr_NarrativeManager::LoadDialogueData()
+{
+    // In a full implementation, this would load from data tables
+    UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Loading dialogue data"));
+}
+
+void UNarr_NarrativeManager::InitializeDefaultQuests()
+{
+    // Create default prehistoric survival quests
+    FNarr_Quest FirstHunt;
+    FirstHunt.QuestID = TEXT("FirstHunt");
+    FirstHunt.QuestName = TEXT("First Hunt");
+    FirstHunt.Description = TEXT("Learn to hunt small prey to survive in the prehistoric wilderness.");
+    FirstHunt.State = ENarr_QuestState::Inactive;
+    FirstHunt.ExperienceReward = 100;
+    
+    FNarr_QuestObjective HuntObjective;
+    HuntObjective.ObjectiveID = TEXT("KillSmallPrey");
+    HuntObjective.Description = TEXT("Hunt 3 small animals");
+    HuntObjective.State = ENarr_QuestState::Inactive;
+    HuntObjective.TargetProgress = 3;
+    FirstHunt.Objectives.Add(HuntObjective);
+    
+    FNarr_Quest BuildShelter;
+    BuildShelter.QuestID = TEXT("BuildShelter");
+    BuildShelter.QuestName = TEXT("Build Shelter");
+    BuildShelter.Description = TEXT("Construct a basic shelter to protect yourself from predators and weather.");
+    BuildShelter.State = ENarr_QuestState::Inactive;
+    BuildShelter.ExperienceReward = 200;
+    
+    FNarr_QuestObjective GatherMaterials;
+    GatherMaterials.ObjectiveID = TEXT("GatherWood");
+    GatherMaterials.Description = TEXT("Gather 10 pieces of wood");
+    GatherMaterials.State = ENarr_QuestState::Inactive;
+    GatherMaterials.TargetProgress = 10;
+    BuildShelter.Objectives.Add(GatherMaterials);
+    
+    UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Initialized default quests"));
+}
+
+void UNarr_NarrativeManager::InitializeDefaultDialogues()
+{
+    // Create default prehistoric survival dialogues
+    UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Initialized default dialogues"));
+}
+
+FNarr_Quest* UNarr_NarrativeManager::FindQuest(const FString& QuestID)
+{
+    for (FNarr_Quest& Quest : ActiveQuests)
+    {
+        if (Quest.QuestID == QuestID)
+        {
+            return &Quest;
+        }
+    }
+    return nullptr;
+}
+
+const FNarr_Quest* UNarr_NarrativeManager::FindQuest(const FString& QuestID) const
+{
+    for (const FNarr_Quest& Quest : ActiveQuests)
+    {
+        if (Quest.QuestID == QuestID)
+        {
+            return &Quest;
+        }
+    }
+    return nullptr;
+}
+
+FNarr_DialogueEntry* UNarr_NarrativeManager::FindDialogue(const FString& DialogueID)
+{
+    // In a full implementation, this would search dialogue data
+    return nullptr;
 }
