@@ -3,74 +3,154 @@
 #include "CoreMinimal.h"
 #include "Engine/GameInstanceSubsystem.h"
 #include "Engine/DataTable.h"
-#include "SharedTypes.h"
 #include "Narr_NarrativeManager.generated.h"
 
+UENUM(BlueprintType)
+enum class ENarr_QuestState : uint8
+{
+    Inactive,
+    Active,
+    Completed,
+    Failed
+};
+
+UENUM(BlueprintType)
+enum class ENarr_DialogueType : uint8
+{
+    Info,
+    Warning,
+    Quest,
+    Trade,
+    Combat
+};
+
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FNarr_NarrativeEvent
+struct FNarr_DialogueChoice
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Narrative")
-    FString EventID;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    FString ChoiceText;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Narrative")
-    FString EventTitle;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    FString NextDialogueID;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Narrative")
-    FString EventDescription;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    bool bRequiresItem;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Narrative")
-    ENarr_NarrativeEventType EventType;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    FString RequiredItemID;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Narrative")
-    float EventPriority;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Narrative")
-    bool bIsRepeatable;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Narrative")
-    TArray<FString> RequiredConditions;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Narrative")
-    TArray<FString> AudioClips;
-
-    FNarr_NarrativeEvent()
+    FNarr_DialogueChoice()
     {
-        EventID = TEXT("");
-        EventTitle = TEXT("");
-        EventDescription = TEXT("");
-        EventType = ENarr_NarrativeEventType::Discovery;
-        EventPriority = 1.0f;
-        bIsRepeatable = false;
+        ChoiceText = TEXT("");
+        NextDialogueID = TEXT("");
+        bRequiresItem = false;
+        RequiredItemID = TEXT("");
     }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FNarr_StoryProgress
+struct FNarr_DialogueEntry
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Story")
-    FString ChapterID;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    FString DialogueID;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Story")
-    int32 CurrentObjective;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    FString SpeakerName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Story")
-    TArray<FString> CompletedEvents;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    FString DialogueText;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Story")
-    TArray<FString> UnlockedAreas;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    ENarr_DialogueType DialogueType;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Story")
-    float SurvivalDays;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    TArray<FNarr_DialogueChoice> Choices;
 
-    FNarr_StoryProgress()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    FString AudioAssetPath;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    float DisplayDuration;
+
+    FNarr_DialogueEntry()
     {
-        ChapterID = TEXT("Chapter01_Awakening");
-        CurrentObjective = 0;
-        SurvivalDays = 0.0f;
+        DialogueID = TEXT("");
+        SpeakerName = TEXT("");
+        DialogueText = TEXT("");
+        DialogueType = ENarr_DialogueType::Info;
+        AudioAssetPath = TEXT("");
+        DisplayDuration = 5.0f;
+    }
+};
+
+USTRUCT(BlueprintType)
+struct FNarr_QuestObjective
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    FString ObjectiveID;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    FString Description;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    ENarr_QuestState State;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    int32 CurrentProgress;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    int32 TargetProgress;
+
+    FNarr_QuestObjective()
+    {
+        ObjectiveID = TEXT("");
+        Description = TEXT("");
+        State = ENarr_QuestState::Inactive;
+        CurrentProgress = 0;
+        TargetProgress = 1;
+    }
+};
+
+USTRUCT(BlueprintType)
+struct FNarr_Quest
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    FString QuestID;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    FString QuestName;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    FString Description;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    ENarr_QuestState State;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    TArray<FNarr_QuestObjective> Objectives;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    FString RewardItemID;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    int32 ExperienceReward;
+
+    FNarr_Quest()
+    {
+        QuestID = TEXT("");
+        QuestName = TEXT("");
+        Description = TEXT("");
+        State = ENarr_QuestState::Inactive;
+        RewardItemID = TEXT("");
+        ExperienceReward = 0;
     }
 };
 
@@ -82,54 +162,87 @@ class TRANSPERSONALGAME_API UNarr_NarrativeManager : public UGameInstanceSubsyst
 public:
     UNarr_NarrativeManager();
 
+    // Subsystem interface
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
+    // Quest management
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void TriggerNarrativeEvent(const FString& EventID, AActor* SourceActor = nullptr);
+    void StartQuest(const FString& QuestID);
 
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    bool IsEventAvailable(const FString& EventID) const;
+    void CompleteQuest(const FString& QuestID);
 
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void AdvanceStoryProgress(const FString& ObjectiveID);
+    void FailQuest(const FString& QuestID);
 
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    FNarr_StoryProgress GetCurrentStoryProgress() const;
+    void UpdateQuestObjective(const FString& QuestID, const FString& ObjectiveID, int32 Progress);
 
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void RegisterEventCompletion(const FString& EventID);
+    bool IsQuestActive(const FString& QuestID) const;
 
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    TArray<FNarr_NarrativeEvent> GetAvailableEvents() const;
+    bool IsQuestCompleted(const FString& QuestID) const;
 
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void LoadNarrativeData(UDataTable* NarrativeDataTable);
+    TArray<FNarr_Quest> GetActiveQuests() const;
+
+    // Dialogue management
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    void StartDialogue(const FString& DialogueID);
 
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void PlayNarrativeAudio(const FString& AudioClipID);
+    void SelectDialogueChoice(int32 ChoiceIndex);
 
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void SetStoryChapter(const FString& ChapterID);
+    FNarr_DialogueEntry GetCurrentDialogue() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    bool IsInDialogue() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    void EndDialogue();
+
+    // Story progression
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    void SetStoryFlag(const FString& FlagName, bool bValue);
+
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    bool GetStoryFlag(const FString& FlagName) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    void TriggerStoryEvent(const FString& EventID);
 
 protected:
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Narrative", meta = (AllowPrivateAccess = "true"))
-    TMap<FString, FNarr_NarrativeEvent> NarrativeEvents;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Narrative")
+    UDataTable* QuestDataTable;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Narrative", meta = (AllowPrivateAccess = "true"))
-    FNarr_StoryProgress CurrentStoryProgress;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Narrative")
+    UDataTable* DialogueDataTable;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Narrative", meta = (AllowPrivateAccess = "true"))
-    TArray<FString> CompletedEvents;
+    UPROPERTY(BlueprintReadOnly, Category = "Narrative")
+    TArray<FNarr_Quest> ActiveQuests;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Narrative", meta = (AllowPrivateAccess = "true"))
-    float EventCooldownTime;
+    UPROPERTY(BlueprintReadOnly, Category = "Narrative")
+    TArray<FNarr_Quest> CompletedQuests;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Narrative", meta = (AllowPrivateAccess = "true"))
-    TMap<FString, float> EventLastTriggered;
+    UPROPERTY(BlueprintReadOnly, Category = "Narrative")
+    FNarr_DialogueEntry CurrentDialogue;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Narrative")
+    bool bInDialogue;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Narrative")
+    TMap<FString, bool> StoryFlags;
 
 private:
-    void InitializeDefaultEvents();
-    bool CheckEventConditions(const FNarr_NarrativeEvent& Event) const;
-    void ProcessEventTrigger(const FNarr_NarrativeEvent& Event, AActor* SourceActor);
+    void LoadQuestData();
+    void LoadDialogueData();
+    void InitializeDefaultQuests();
+    void InitializeDefaultDialogues();
+
+    FNarr_Quest* FindQuest(const FString& QuestID);
+    const FNarr_Quest* FindQuest(const FString& QuestID) const;
+    FNarr_DialogueEntry* FindDialogue(const FString& DialogueID);
 };
