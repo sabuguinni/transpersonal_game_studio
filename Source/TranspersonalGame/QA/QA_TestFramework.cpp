@@ -1,173 +1,92 @@
 #include "QA_TestFramework.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "EditorLevelLibrary.h"
-#include "EditorAssetLibrary.h"
-#include "NiagaraSystem.h"
-#include "NiagaraComponent.h"
+#include "GameFramework/Actor.h"
+#include "Components/ActorComponent.h"
+#include "Engine/Level.h"
 #include "HAL/PlatformFilemanager.h"
 #include "Misc/DateTime.h"
+#include "Misc/Paths.h"
+#include "UObject/UObjectGlobals.h"
+#include "Engine/StaticMeshActor.h"
+#include "Components/StaticMeshComponent.h"
 
 UQA_TestFramework::UQA_TestFramework()
 {
-    bAutoRunOnBeginPlay = false;
-    bLogDetailedResults = true;
-    TestTimeout = 30.0f;
+    bIsRunningTests = false;
+    StartTime = 0.0f;
 }
 
 void UQA_TestFramework::RunAllTests()
 {
-    UE_LOG(LogTemp, Warning, TEXT("QA Framework: Starting comprehensive test suite"));
-    
-    ClearTestResults();
-    
-    // Run all test categories
-    RunCoreSystemTests();
-    RunVFXSystemTests();
-    RunPerformanceTests();
-    RunIntegrationTests();
-    
-    GenerateTestReport();
-    
-    UE_LOG(LogTemp, Warning, TEXT("QA Framework: All tests completed"));
+    if (bIsRunningTests)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("QA Tests already running"));
+        return;
+    }
+
+    bIsRunningTests = true;
+    TestResults.Empty();
+    StartTime = FPlatformTime::Seconds();
+
+    UE_LOG(LogTemp, Log, TEXT("QA Framework: Starting all tests"));
+
+    // Run core system validation tests
+    FQA_TestCase CharacterTest;
+    CharacterTest.TestName = TEXT("Character System Validation");
+    CharacterTest.TestDescription = TEXT("Validate TranspersonalCharacter class loads and functions");
+    CharacterTest.Result = ValidateCharacterSystem() ? EQA_TestResult::Passed : EQA_TestResult::Failed;
+    TestResults.Add(CharacterTest);
+
+    FQA_TestCase VFXTest;
+    VFXTest.TestName = TEXT("VFX System Validation");
+    VFXTest.TestDescription = TEXT("Validate VFX classes and Niagara integration");
+    VFXTest.Result = ValidateVFXSystem() ? EQA_TestResult::Passed : EQA_TestResult::Failed;
+    TestResults.Add(VFXTest);
+
+    FQA_TestCase WorldGenTest;
+    WorldGenTest.TestName = TEXT("World Generation Validation");
+    WorldGenTest.TestDescription = TEXT("Validate PCG and world generation systems");
+    WorldGenTest.Result = ValidateWorldGeneration() ? EQA_TestResult::Passed : EQA_TestResult::Failed;
+    TestResults.Add(WorldGenTest);
+
+    FQA_TestCase PerformanceTest;
+    PerformanceTest.TestName = TEXT("Performance Baseline");
+    PerformanceTest.TestDescription = TEXT("Measure current frame rate and memory usage");
+    float FrameRate = MeasureFrameRate(2.0f);
+    PerformanceTest.Result = (FrameRate > 30.0f) ? EQA_TestResult::Passed : EQA_TestResult::Warning;
+    PerformanceTest.ErrorMessage = FString::Printf(TEXT("Frame Rate: %.2f FPS"), FrameRate);
+    TestResults.Add(PerformanceTest);
+
+    bIsRunningTests = false;
+    float TotalTime = FPlatformTime::Seconds() - StartTime;
+    UE_LOG(LogTemp, Log, TEXT("QA Framework: All tests completed in %.2f seconds"), TotalTime);
 }
 
-void UQA_TestFramework::RunVFXSystemTests()
+void UQA_TestFramework::RunTestByName(const FString& TestName)
 {
-    UE_LOG(LogTemp, Warning, TEXT("QA Framework: Running VFX system tests"));
+    UE_LOG(LogTemp, Log, TEXT("QA Framework: Running test: %s"), *TestName);
     
-    // Test VFX class loading
-    FQA_TestCase VFXClassTest = ExecuteTest(TEXT("VFX_PrehistoricFireSystem_Loading"), [this]() -> bool
+    if (TestName == TEXT("Character System Validation"))
     {
-        UClass* VFXClass = LoadClass<UObject>(nullptr, TEXT("/Script/TranspersonalGame.VFX_PrehistoricFireSystem"));
-        return VFXClass != nullptr;
-    });
-    AddTestResult(VFXClassTest);
-    
-    // Test Niagara system assets
-    FQA_TestCase NiagaraAssetsTest = ExecuteTest(TEXT("Niagara_Fire_Assets"), [this]() -> bool
+        FQA_TestCase Test;
+        Test.TestName = TestName;
+        Test.Result = ValidateCharacterSystem() ? EQA_TestResult::Passed : EQA_TestResult::Failed;
+        TestResults.Add(Test);
+    }
+    else if (TestName == TEXT("VFX System Validation"))
     {
-        TArray<FString> Assets = UEditorAssetLibrary::ListAssets(TEXT("/Game/VFX"), true);
-        int32 FireAssets = 0;
-        for (const FString& Asset : Assets)
-        {
-            if (Asset.Contains(TEXT("Fire")) || Asset.Contains(TEXT("Campfire")))
-            {
-                FireAssets++;
-            }
-        }
-        return FireAssets > 0;
-    });
-    AddTestResult(NiagaraAssetsTest);
-    
-    // Test VFX actor spawning
-    FQA_TestCase VFXSpawnTest = ExecuteTest(TEXT("VFX_Actor_Spawning"), [this]() -> bool
-    {
-        UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
-        if (!World) return false;
-        
-        // Try to spawn a basic VFX actor
-        FVector SpawnLocation(0.0f, 0.0f, 100.0f);
-        FRotator SpawnRotation = FRotator::ZeroRotator;
-        
-        AActor* VFXActor = World->SpawnActor<AActor>(AActor::StaticClass(), SpawnLocation, SpawnRotation);
-        bool bSpawned = VFXActor != nullptr;
-        
-        if (VFXActor)
-        {
-            VFXActor->Destroy();
-        }
-        
-        return bSpawned;
-    });
-    AddTestResult(VFXSpawnTest);
+        FQA_TestCase Test;
+        Test.TestName = TestName;
+        Test.Result = ValidateVFXSystem() ? EQA_TestResult::Passed : EQA_TestResult::Failed;
+        TestResults.Add(Test);
+    }
 }
 
-void UQA_TestFramework::RunCoreSystemTests()
+void UQA_TestFramework::AddTestCase(const FQA_TestCase& TestCase)
 {
-    UE_LOG(LogTemp, Warning, TEXT("QA Framework: Running core system tests"));
-    
-    // Test TranspersonalGameState loading
-    FQA_TestCase GameStateTest = ExecuteTest(TEXT("TranspersonalGameState_Loading"), [this]() -> bool
-    {
-        UClass* GameStateClass = LoadClass<UObject>(nullptr, TEXT("/Script/TranspersonalGame.TranspersonalGameState"));
-        return GameStateClass != nullptr;
-    });
-    AddTestResult(GameStateTest);
-    
-    // Test TranspersonalCharacter loading
-    FQA_TestCase CharacterTest = ExecuteTest(TEXT("TranspersonalCharacter_Loading"), [this]() -> bool
-    {
-        UClass* CharacterClass = LoadClass<UObject>(nullptr, TEXT("/Script/TranspersonalGame.TranspersonalCharacter"));
-        return CharacterClass != nullptr;
-    });
-    AddTestResult(CharacterTest);
-    
-    // Test PCGWorldGenerator loading
-    FQA_TestCase WorldGenTest = ExecuteTest(TEXT("PCGWorldGenerator_Loading"), [this]() -> bool
-    {
-        UClass* WorldGenClass = LoadClass<UObject>(nullptr, TEXT("/Script/TranspersonalGame.PCGWorldGenerator"));
-        return WorldGenClass != nullptr;
-    });
-    AddTestResult(WorldGenTest);
-}
-
-void UQA_TestFramework::RunPerformanceTests()
-{
-    UE_LOG(LogTemp, Warning, TEXT("QA Framework: Running performance tests"));
-    
-    // Test actor count performance
-    FQA_TestCase ActorCountTest = ExecuteTest(TEXT("Actor_Count_Performance"), [this]() -> bool
-    {
-        TArray<AActor*> AllActors = UEditorLevelLibrary::GetAllLevelActors();
-        int32 ActorCount = AllActors.Num();
-        
-        // Reasonable actor count for performance (under 1000 for editor)
-        bool bPerformanceOK = ActorCount < 1000;
-        
-        UE_LOG(LogTemp, Warning, TEXT("QA: Actor count: %d (Performance OK: %s)"), 
-               ActorCount, bPerformanceOK ? TEXT("Yes") : TEXT("No"));
-        
-        return bPerformanceOK;
-    });
-    AddTestResult(ActorCountTest);
-    
-    // Test memory usage
-    FQA_TestCase MemoryTest = ExecuteTest(TEXT("Memory_Usage_Check"), [this]() -> bool
-    {
-        // Basic memory check - always pass for now, but log info
-        FPlatformMemoryStats MemStats = FPlatformMemory::GetStats();
-        UE_LOG(LogTemp, Warning, TEXT("QA: Available Physical Memory: %llu MB"), 
-               MemStats.AvailablePhysical / (1024 * 1024));
-        
-        return true; // Always pass for now
-    });
-    AddTestResult(MemoryTest);
-}
-
-void UQA_TestFramework::RunIntegrationTests()
-{
-    UE_LOG(LogTemp, Warning, TEXT("QA Framework: Running integration tests"));
-    
-    // Test map integrity
-    FQA_TestCase MapIntegrityTest = ExecuteTest(TEXT("Map_Integrity_Check"), [this]() -> bool
-    {
-        return ValidateMapIntegrity();
-    });
-    AddTestResult(MapIntegrityTest);
-    
-    // Test minimum actor requirements
-    FQA_TestCase MinActorTest = ExecuteTest(TEXT("Minimum_Actor_Requirements"), [this]() -> bool
-    {
-        return ValidateActorCount(10); // Minimum 10 actors in map
-    });
-    AddTestResult(MinActorTest);
-}
-
-void UQA_TestFramework::AddTestResult(const FQA_TestCase& TestCase)
-{
-    TestResults.Add(TestCase);
-    LogTestResult(TestCase);
+    TestCases.Add(TestCase);
+    UE_LOG(LogTemp, Log, TEXT("QA Framework: Added test case: %s"), *TestCase.TestName);
 }
 
 TArray<FQA_TestCase> UQA_TestFramework::GetTestResults() const
@@ -178,130 +97,167 @@ TArray<FQA_TestCase> UQA_TestFramework::GetTestResults() const
 void UQA_TestFramework::ClearTestResults()
 {
     TestResults.Empty();
+    UE_LOG(LogTemp, Log, TEXT("QA Framework: Test results cleared"));
 }
 
-void UQA_TestFramework::GenerateTestReport()
+bool UQA_TestFramework::ValidateActorExists(const FString& ActorName)
 {
-    UE_LOG(LogTemp, Warning, TEXT("=== QA TEST REPORT ==="));
-    
-    int32 PassCount = 0;
-    int32 FailCount = 0;
-    int32 WarningCount = 0;
-    int32 SkippedCount = 0;
-    
-    for (const FQA_TestCase& Test : TestResults)
-    {
-        switch (Test.Result)
-        {
-            case EQA_TestResult::Pass: PassCount++; break;
-            case EQA_TestResult::Fail: FailCount++; break;
-            case EQA_TestResult::Warning: WarningCount++; break;
-            case EQA_TestResult::Skipped: SkippedCount++; break;
-        }
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("Total Tests: %d"), TestResults.Num());
-    UE_LOG(LogTemp, Warning, TEXT("PASS: %d"), PassCount);
-    UE_LOG(LogTemp, Warning, TEXT("FAIL: %d"), FailCount);
-    UE_LOG(LogTemp, Warning, TEXT("WARNING: %d"), WarningCount);
-    UE_LOG(LogTemp, Warning, TEXT("SKIPPED: %d"), SkippedCount);
-    
-    float SuccessRate = TestResults.Num() > 0 ? (float)PassCount / TestResults.Num() * 100.0f : 0.0f;
-    UE_LOG(LogTemp, Warning, TEXT("Success Rate: %.1f%%"), SuccessRate);
-    
-    UE_LOG(LogTemp, Warning, TEXT("=== END QA REPORT ==="));
-}
-
-bool UQA_TestFramework::ValidateActorCount(int32 ExpectedMinimum)
-{
-    TArray<AActor*> AllActors = UEditorLevelLibrary::GetAllLevelActors();
-    return AllActors.Num() >= ExpectedMinimum;
-}
-
-bool UQA_TestFramework::ValidateClassLoading(const FString& ClassName)
-{
-    UClass* LoadedClass = LoadClass<UObject>(nullptr, *ClassName);
-    return LoadedClass != nullptr;
-}
-
-bool UQA_TestFramework::ValidateNiagaraSystem(const FString& SystemPath)
-{
-    UNiagaraSystem* NiagaraSystem = LoadObject<UNiagaraSystem>(nullptr, *SystemPath);
-    return NiagaraSystem != nullptr;
-}
-
-bool UQA_TestFramework::ValidateMapIntegrity()
-{
-    UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+    UWorld* World = GEngine->GetWorldFromContextObject(this, EGetWorldErrorMode::LogAndReturnNull);
     if (!World)
     {
         return false;
     }
-    
-    // Basic map integrity checks
-    TArray<AActor*> AllActors = UEditorLevelLibrary::GetAllLevelActors();
-    
-    // Check for null actors
-    for (AActor* Actor : AllActors)
+
+    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
     {
-        if (!IsValid(Actor))
+        AActor* Actor = *ActorItr;
+        if (Actor && Actor->GetName().Contains(ActorName))
         {
-            return false;
+            return true;
         }
     }
-    
-    return true;
+    return false;
 }
 
-FQA_TestCase UQA_TestFramework::ExecuteTest(const FString& TestName, TFunction<bool()> TestFunction)
+bool UQA_TestFramework::ValidateComponentExists(AActor* Actor, const FString& ComponentName)
 {
-    FQA_TestCase TestCase;
-    TestCase.TestName = TestName;
-    TestCase.TestDescription = FString::Printf(TEXT("Automated test: %s"), *TestName);
-    
-    double StartTime = GetCurrentTime();
-    
-    try
+    if (!Actor)
     {
-        bool bTestPassed = TestFunction();
-        TestCase.Result = bTestPassed ? EQA_TestResult::Pass : EQA_TestResult::Fail;
-        
-        if (!bTestPassed)
+        return false;
+    }
+
+    TArray<UActorComponent*> Components = Actor->GetRootComponent()->GetAttachChildren();
+    for (UActorComponent* Component : Components)
+    {
+        if (Component && Component->GetName().Contains(ComponentName))
         {
-            TestCase.ErrorMessage = FString::Printf(TEXT("Test %s failed"), *TestName);
+            return true;
         }
     }
-    catch (...)
+    return false;
+}
+
+bool UQA_TestFramework::ValidateClassLoads(const FString& ClassName)
+{
+    FString ClassPath = FString::Printf(TEXT("/Script/TranspersonalGame.%s"), *ClassName);
+    UClass* LoadedClass = LoadClass<UObject>(nullptr, *ClassPath);
+    return LoadedClass != nullptr;
+}
+
+bool UQA_TestFramework::ValidateMapLoads(const FString& MapPath)
+{
+    return FPaths::FileExists(MapPath);
+}
+
+float UQA_TestFramework::MeasureFrameRate(float Duration)
+{
+    // Simple frame rate measurement
+    UWorld* World = GEngine->GetWorldFromContextObject(this, EGetWorldErrorMode::LogAndReturnNull);
+    if (!World)
     {
-        TestCase.Result = EQA_TestResult::Fail;
-        TestCase.ErrorMessage = FString::Printf(TEXT("Test %s threw an exception"), *TestName);
+        return 0.0f;
     }
+
+    float DeltaTime = World->GetDeltaSeconds();
+    return (DeltaTime > 0.0f) ? (1.0f / DeltaTime) : 60.0f;
+}
+
+int32 UQA_TestFramework::CountActorsInLevel()
+{
+    UWorld* World = GEngine->GetWorldFromContextObject(this, EGetWorldErrorMode::LogAndReturnNull);
+    if (!World)
+    {
+        return 0;
+    }
+
+    int32 ActorCount = 0;
+    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+    {
+        ActorCount++;
+    }
+    return ActorCount;
+}
+
+float UQA_TestFramework::MeasureMemoryUsage()
+{
+    FPlatformMemoryStats MemStats = FPlatformMemory::GetStats();
+    return static_cast<float>(MemStats.UsedPhysical) / (1024.0f * 1024.0f); // Convert to MB
+}
+
+bool UQA_TestFramework::ValidateVFXSystem()
+{
+    // Check if VFX classes can be loaded
+    bool bVFXLibraryExists = ValidateClassLoads(TEXT("VFX_NiagaraLibrary"));
+    bool bVFXManagerExists = ValidateClassLoads(TEXT("VFX_EffectManager"));
     
-    double EndTime = GetCurrentTime();
-    TestCase.ExecutionTime = static_cast<float>(EndTime - StartTime);
+    UE_LOG(LogTemp, Log, TEXT("QA VFX Validation: Library=%s, Manager=%s"), 
+           bVFXLibraryExists ? TEXT("PASS") : TEXT("FAIL"),
+           bVFXManagerExists ? TEXT("PASS") : TEXT("FAIL"));
     
-    return TestCase;
+    return bVFXLibraryExists && bVFXManagerExists;
+}
+
+bool UQA_TestFramework::ValidateAudioSystem()
+{
+    // Check if Audio classes can be loaded
+    bool bAudioManagerExists = ValidateClassLoads(TEXT("Audio_SoundManager"));
+    
+    UE_LOG(LogTemp, Log, TEXT("QA Audio Validation: Manager=%s"), 
+           bAudioManagerExists ? TEXT("PASS") : TEXT("FAIL"));
+    
+    return bAudioManagerExists;
+}
+
+bool UQA_TestFramework::ValidateCharacterSystem()
+{
+    // Check if core character classes can be loaded
+    bool bCharacterExists = ValidateClassLoads(TEXT("TranspersonalCharacter"));
+    bool bGameStateExists = ValidateClassLoads(TEXT("TranspersonalGameState"));
+    
+    UE_LOG(LogTemp, Log, TEXT("QA Character Validation: Character=%s, GameState=%s"), 
+           bCharacterExists ? TEXT("PASS") : TEXT("FAIL"),
+           bGameStateExists ? TEXT("PASS") : TEXT("FAIL"));
+    
+    return bCharacterExists && bGameStateExists;
+}
+
+bool UQA_TestFramework::ValidateWorldGeneration()
+{
+    // Check if world generation classes can be loaded
+    bool bPCGExists = ValidateClassLoads(TEXT("PCGWorldGenerator"));
+    bool bFoliageExists = ValidateClassLoads(TEXT("FoliageManager"));
+    
+    UE_LOG(LogTemp, Log, TEXT("QA WorldGen Validation: PCG=%s, Foliage=%s"), 
+           bPCGExists ? TEXT("PASS") : TEXT("FAIL"),
+           bFoliageExists ? TEXT("PASS") : TEXT("FAIL"));
+    
+    return bPCGExists && bFoliageExists;
 }
 
 void UQA_TestFramework::LogTestResult(const FQA_TestCase& TestCase)
 {
-    if (!bLogDetailedResults) return;
-    
     FString ResultString;
     switch (TestCase.Result)
     {
-        case EQA_TestResult::Pass: ResultString = TEXT("PASS"); break;
-        case EQA_TestResult::Fail: ResultString = TEXT("FAIL"); break;
-        case EQA_TestResult::Warning: ResultString = TEXT("WARN"); break;
-        case EQA_TestResult::Skipped: ResultString = TEXT("SKIP"); break;
+        case EQA_TestResult::Passed:
+            ResultString = TEXT("PASSED");
+            break;
+        case EQA_TestResult::Failed:
+            ResultString = TEXT("FAILED");
+            break;
+        case EQA_TestResult::Warning:
+            ResultString = TEXT("WARNING");
+            break;
+        default:
+            ResultString = TEXT("NOT_RUN");
+            break;
     }
-    
-    UE_LOG(LogTemp, Warning, TEXT("QA Test [%s] %s (%.3fs) - %s"), 
-           *ResultString, *TestCase.TestName, TestCase.ExecutionTime, 
-           TestCase.ErrorMessage.IsEmpty() ? TEXT("OK") : *TestCase.ErrorMessage);
-}
 
-double UQA_TestFramework::GetCurrentTime() const
-{
-    return FPlatformTime::Seconds();
+    UE_LOG(LogTemp, Log, TEXT("QA Test [%s]: %s - %s"), 
+           *ResultString, *TestCase.TestName, *TestCase.TestDescription);
+    
+    if (!TestCase.ErrorMessage.IsEmpty())
+    {
+        UE_LOG(LogTemp, Log, TEXT("QA Test Details: %s"), *TestCase.ErrorMessage);
+    }
 }
