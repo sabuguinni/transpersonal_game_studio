@@ -3,193 +3,181 @@
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/Pawn.h"
+#include "Components/StaticMeshComponent.h"
 #include "Components/PrimitiveComponent.h"
 #include "PhysicsEngine/BodyInstance.h"
-#include "HAL/PlatformMemory.h"
-#include "../Core_PhysicsWorldManager.h"
+#include "Engine/StaticMeshActor.h"
+#include "Kismet/GameplayStatics.h"
+#include "HAL/PlatformFilemanager.h"
+#include "Misc/DateTime.h"
+#include "Stats/Stats.h"
 
-APerf_PhysicsPerformanceIntegrator::APerf_PhysicsPerformanceIntegrator()
+UPerf_PhysicsPerformanceIntegrator::UPerf_PhysicsPerformanceIntegrator()
 {
-    PrimaryActorTick.bCanEverTick = true;
-    PrimaryActorTick.TickInterval = 0.1f; // Update every 100ms
-    
-    PerformanceUpdateInterval = 1.0f;
-    bEnablePerformanceOptimization = true;
-    bLogPerformanceMetrics = false;
-    LastPerformanceUpdate = 0.0f;
-    PhysicsWorldManager = nullptr;
-    
-    // Initialize optimization settings
-    OptimizationSettings = FPerf_PhysicsOptimizationSettings();
+    PrimaryComponentTick.bCanEverTick = true;
+    PrimaryComponentTick.TickInterval = 0.1f; // Update every 100ms
+
+    // Default performance settings
+    TargetFPS = 60.0f;
+    MinimumFPS = 30.0f;
+    OptimizationLevel = EPerf_PhysicsOptimizationLevel::Balanced;
+    QualityMode = EPerf_PhysicsQualityMode::High;
+
+    // Performance budgets
+    MaxPhysicsBodies = 1000;
+    MaxSimulatingBodies = 200;
+    MaxPhysicsStepTime = 5.0f; // 5ms
+    MaxCollisionPairs = 500;
+
+    // Optimization controls
+    bEnableAutomaticOptimization = true;
+    bEnableLODOptimization = true;
+    bEnableCollisionOptimization = true;
+    bEnableMemoryOptimization = true;
+
+    // Distance thresholds
+    NearDistance = 1000.0f;   // 10 meters
+    MediumDistance = 5000.0f; // 50 meters
+    FarDistance = 10000.0f;   // 100 meters
+
+    // Performance thresholds
+    CriticalFPSThreshold = 20.0f;
+    WarningFPSThreshold = 40.0f;
+    OptimalFPSThreshold = 55.0f;
+
+    // Monitoring settings
+    MetricsUpdateInterval = 0.5f;
+    OptimizationCheckInterval = 1.0f;
+    bEnableDetailedLogging = false;
+
+    // Internal state
+    LastMetricsUpdate = 0.0f;
+    LastOptimizationCheck = 0.0f;
+    bIsMonitoring = false;
+    MaxHistorySize = 60; // 60 samples for history
+
+    // Initialize metrics
     CurrentMetrics = FPerf_PhysicsPerformanceMetrics();
 }
 
-void APerf_PhysicsPerformanceIntegrator::BeginPlay()
+void UPerf_PhysicsPerformanceIntegrator::BeginPlay()
 {
     Super::BeginPlay();
     
-    // Find the Core_PhysicsWorldManager in the world
-    UWorld* World = GetWorld();
-    if (World)
-    {
-        for (TActorIterator<ACore_PhysicsWorldManager> ActorItr(World); ActorItr; ++ActorItr)
-        {
-            PhysicsWorldManager = *ActorItr;
-            break;
-        }
-    }
+    UE_LOG(LogTemp, Log, TEXT("Physics Performance Integrator: Starting performance monitoring"));
     
-    if (PhysicsWorldManager)
-    {
-        UE_LOG(LogTemp, Log, TEXT("PhysicsPerformanceIntegrator: Connected to PhysicsWorldManager"));
-    }
-    else
-    {
-        UE_LOG(LogTemp, Warning, TEXT("PhysicsPerformanceIntegrator: No PhysicsWorldManager found"));
-    }
+    // Start monitoring automatically
+    StartPerformanceMonitoring();
     
-    // Initialize performance tracking
-    PhysicsFrameTimeHistory.Reserve(60); // Store 1 second of history at 60fps
+    // Apply initial optimization settings
+    ApplyOptimizationSettings();
+    
+    // Initialize history arrays
+    FPSHistory.Reserve(MaxHistorySize);
+    FrameTimeHistory.Reserve(MaxHistorySize);
 }
 
-void APerf_PhysicsPerformanceIntegrator::Tick(float DeltaTime)
+void UPerf_PhysicsPerformanceIntegrator::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
-    Super::Tick(DeltaTime);
-    
-    if (!bEnablePerformanceOptimization)
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+
+    if (!bIsMonitoring)
     {
         return;
     }
-    
-    LastPerformanceUpdate += DeltaTime;
-    
-    if (LastPerformanceUpdate >= PerformanceUpdateInterval)
+
+    float CurrentTime = GetWorld()->GetTimeSeconds();
+
+    // Update performance metrics
+    if (CurrentTime - LastMetricsUpdate >= MetricsUpdateInterval)
     {
-        UpdatePhysicsPerformanceMetrics();
-        OptimizePhysicsPerformance();
-        LastPerformanceUpdate = 0.0f;
+        UpdatePerformanceMetrics();
+        LastMetricsUpdate = CurrentTime;
+    }
+
+    // Check for optimization needs
+    if (bEnableAutomaticOptimization && CurrentTime - LastOptimizationCheck >= OptimizationCheckInterval)
+    {
+        CheckPerformanceThresholds();
+        LastOptimizationCheck = CurrentTime;
     }
 }
 
-void APerf_PhysicsPerformanceIntegrator::UpdatePhysicsPerformanceMetrics()
+void UPerf_PhysicsPerformanceIntegrator::StartPerformanceMonitoring()
 {
-    CalculatePhysicsFrameTime();
-    CountActivePhysicsBodies();
-    AnalyzePhysicsMemoryUsage();
+    bIsMonitoring = true;
+    LastMetricsUpdate = GetWorld()->GetTimeSeconds();
+    LastOptimizationCheck = GetWorld()->GetTimeSeconds();
     
-    if (bLogPerformanceMetrics)
+    UE_LOG(LogTemp, Log, TEXT("Physics Performance Integrator: Performance monitoring started"));
+    
+    if (bEnableDetailedLogging)
     {
-        UE_LOG(LogTemp, Log, TEXT("Physics Performance - Frame Time: %.2fms, Active Bodies: %d, Memory: %.2fMB"),
-            CurrentMetrics.PhysicsFrameTime,
-            CurrentMetrics.ActivePhysicsBodies,
-            CurrentMetrics.PhysicsMemoryUsage);
+        LogPerformanceMetrics();
     }
 }
 
-void APerf_PhysicsPerformanceIntegrator::OptimizePhysicsPerformance()
+void UPerf_PhysicsPerformanceIntegrator::StopPerformanceMonitoring()
 {
-    if (!IsPhysicsPerformanceAcceptable())
-    {
-        ApplyPhysicsOptimizations();
-    }
-    
-    if (OptimizationSettings.bEnablePhysicsLOD)
-    {
-        UpdatePhysicsLODSystem();
-    }
-    
-    if (OptimizationSettings.bEnablePhysicsCulling)
-    {
-        CullDistantPhysicsActors();
-    }
+    bIsMonitoring = false;
+    UE_LOG(LogTemp, Log, TEXT("Physics Performance Integrator: Performance monitoring stopped"));
 }
 
-void APerf_PhysicsPerformanceIntegrator::SetPhysicsLODLevel(AActor* Actor, int32 LODLevel)
-{
-    if (!Actor)
-    {
-        return;
-    }
-    
-    UStaticMeshComponent* MeshComp = Actor->FindComponentByClass<UStaticMeshComponent>();
-    if (!MeshComp)
-    {
-        return;
-    }
-    
-    switch (LODLevel)
-    {
-        case 0: // High quality - full physics
-            MeshComp->SetSimulatePhysics(true);
-            MeshComp->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-            break;
-            
-        case 1: // Medium quality - simplified physics
-            MeshComp->SetSimulatePhysics(true);
-            MeshComp->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
-            break;
-            
-        case 2: // Low quality - no physics
-            MeshComp->SetSimulatePhysics(false);
-            MeshComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-            break;
-            
-        default:
-            break;
-    }
-}
-
-void APerf_PhysicsPerformanceIntegrator::RegisterPhysicsActor(AActor* Actor)
-{
-    if (Actor && !TrackedPhysicsActors.Contains(Actor))
-    {
-        TrackedPhysicsActors.Add(Actor);
-    }
-}
-
-void APerf_PhysicsPerformanceIntegrator::UnregisterPhysicsActor(AActor* Actor)
-{
-    TrackedPhysicsActors.Remove(Actor);
-}
-
-FPerf_PhysicsPerformanceMetrics APerf_PhysicsPerformanceIntegrator::GetCurrentPhysicsMetrics() const
+FPerf_PhysicsPerformanceMetrics UPerf_PhysicsPerformanceIntegrator::GetCurrentMetrics() const
 {
     return CurrentMetrics;
 }
 
-void APerf_PhysicsPerformanceIntegrator::SetOptimizationSettings(const FPerf_PhysicsOptimizationSettings& NewSettings)
+void UPerf_PhysicsPerformanceIntegrator::SetOptimizationLevel(EPerf_PhysicsOptimizationLevel NewLevel)
 {
-    OptimizationSettings = NewSettings;
+    OptimizationLevel = NewLevel;
+    ApplyOptimizationSettings();
+    
+    UE_LOG(LogTemp, Log, TEXT("Physics Performance Integrator: Optimization level changed to %d"), (int32)NewLevel);
 }
 
-bool APerf_PhysicsPerformanceIntegrator::IsPhysicsPerformanceAcceptable() const
+void UPerf_PhysicsPerformanceIntegrator::SetQualityMode(EPerf_PhysicsQualityMode NewMode)
 {
-    return CurrentMetrics.PhysicsFrameTime <= OptimizationSettings.MaxPhysicsFrameTime &&
-           CurrentMetrics.ActivePhysicsBodies <= OptimizationSettings.MaxActivePhysicsBodies;
+    QualityMode = NewMode;
+    UpdatePhysicsQuality();
+    
+    UE_LOG(LogTemp, Log, TEXT("Physics Performance Integrator: Quality mode changed to %d"), (int32)NewMode);
 }
 
-void APerf_PhysicsPerformanceIntegrator::EnablePhysicsOptimization(bool bEnable)
+void UPerf_PhysicsPerformanceIntegrator::OptimizePhysicsPerformance()
 {
-    bEnablePerformanceOptimization = bEnable;
+    UE_LOG(LogTemp, Log, TEXT("Physics Performance Integrator: Starting physics performance optimization"));
+    
+    // Collect current statistics
+    CollectPhysicsStatistics();
+    
+    // Optimize physics bodies
+    OptimizePhysicsBodies();
+    
+    // Optimize collision settings
+    OptimizeCollisionSettings();
+    
+    // Update physics quality based on performance
+    UpdatePhysicsQuality();
+    
+    LogOptimizationAction(TEXT("Full Optimization"), FString::Printf(TEXT("FPS: %.1f, Bodies: %d"), CurrentMetrics.CurrentFPS, CurrentMetrics.ActivePhysicsBodies));
 }
 
-void APerf_PhysicsPerformanceIntegrator::CullDistantPhysicsActors()
+void UPerf_PhysicsPerformanceIntegrator::OptimizeNearbyActors(float Radius)
 {
-    UWorld* World = GetWorld();
-    if (!World)
+    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
+    if (!PlayerPawn)
     {
         return;
     }
+
+    FVector PlayerLocation = PlayerPawn->GetActorLocation();
+    TArray<AActor*> FoundActors;
     
-    APlayerController* PC = World->GetFirstPlayerController();
-    if (!PC || !PC->GetPawn())
-    {
-        return;
-    }
+    UGameplayStatics::GetAllActorsOfClass(GetWorld(), AStaticMeshActor::StaticClass(), FoundActors);
     
-    FVector PlayerLocation = PC->GetPawn()->GetActorLocation();
-    
-    for (AActor* Actor : TrackedPhysicsActors)
+    int32 OptimizedCount = 0;
+    for (AActor* Actor : FoundActors)
     {
         if (!Actor)
         {
@@ -197,121 +185,191 @@ void APerf_PhysicsPerformanceIntegrator::CullDistantPhysicsActors()
         }
         
         float Distance = FVector::Dist(PlayerLocation, Actor->GetActorLocation());
-        
-        if (Distance > OptimizationSettings.PhysicsLODDistance3)
+        if (Distance <= Radius)
         {
-            SetPhysicsSimulationEnabled(Actor, false);
-        }
-        else
-        {
-            SetPhysicsSimulationEnabled(Actor, true);
-            AdjustPhysicsComplexity(Actor, Distance);
+            OptimizeActorPhysics(Actor, Distance);
+            OptimizedCount++;
         }
     }
+    
+    UE_LOG(LogTemp, Log, TEXT("Physics Performance Integrator: Optimized %d actors within %.1f units"), OptimizedCount, Radius);
 }
 
-void APerf_PhysicsPerformanceIntegrator::UpdatePhysicsLODSystem()
+void UPerf_PhysicsPerformanceIntegrator::OptimizeActorPhysics(AActor* Actor, float Distance)
 {
-    UWorld* World = GetWorld();
-    if (!World)
+    if (!Actor)
     {
         return;
     }
+
+    // Apply distance-based optimization
+    ApplyDistanceBasedOptimization(Actor, Distance);
     
-    APlayerController* PC = World->GetFirstPlayerController();
-    if (!PC || !PC->GetPawn())
+    // Get static mesh component for optimization
+    UStaticMeshComponent* MeshComp = Actor->FindComponentByClass<UStaticMeshComponent>();
+    if (!MeshComp)
     {
         return;
     }
-    
-    FVector PlayerLocation = PC->GetPawn()->GetActorLocation();
-    
-    for (AActor* Actor : TrackedPhysicsActors)
+
+    // Optimize based on current performance
+    if (CurrentMetrics.CurrentFPS < CriticalFPSThreshold)
     {
-        if (!Actor)
+        // Critical performance - aggressive optimization
+        if (Distance > MediumDistance)
         {
-            continue;
+            MeshComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+            MeshComp->SetSimulatePhysics(false);
         }
-        
-        float Distance = GetDistanceToPlayer(Actor);
-        int32 LODLevel = 0;
-        
-        if (Distance > OptimizationSettings.PhysicsLODDistance3)
+        else if (Distance > NearDistance)
         {
-            LODLevel = 2; // No physics
+            MeshComp->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+            MeshComp->SetSimulatePhysics(false);
         }
-        else if (Distance > OptimizationSettings.PhysicsLODDistance2)
+    }
+    else if (CurrentMetrics.CurrentFPS < WarningFPSThreshold)
+    {
+        // Warning performance - moderate optimization
+        if (Distance > FarDistance)
         {
-            LODLevel = 2; // No physics
+            MeshComp->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
         }
-        else if (Distance > OptimizationSettings.PhysicsLODDistance1)
-        {
-            LODLevel = 1; // Simplified physics
-        }
-        else
-        {
-            LODLevel = 0; // Full physics
-        }
-        
-        SetPhysicsLODLevel(Actor, LODLevel);
     }
 }
 
-int32 APerf_PhysicsPerformanceIntegrator::GetOptimalPhysicsBodyCount() const
+void UPerf_PhysicsPerformanceIntegrator::AnalyzePhysicsPerformance()
 {
-    float FrameTimeRatio = CurrentMetrics.PhysicsFrameTime / OptimizationSettings.MaxPhysicsFrameTime;
+    CollectPhysicsStatistics();
     
-    if (FrameTimeRatio > 1.0f)
-    {
-        // Reduce physics bodies if frame time is too high
-        return FMath::Max(100, CurrentMetrics.ActivePhysicsBodies - 50);
-    }
-    else if (FrameTimeRatio < 0.5f)
-    {
-        // Can increase physics bodies if frame time is low
-        return FMath::Min(OptimizationSettings.MaxActivePhysicsBodies, CurrentMetrics.ActivePhysicsBodies + 25);
-    }
+    float PerformanceScore = GetPerformanceScore();
+    bool bIsCritical = IsPerformanceCritical();
     
-    return CurrentMetrics.ActivePhysicsBodies;
+    UE_LOG(LogTemp, Warning, TEXT("=== Physics Performance Analysis ==="));
+    UE_LOG(LogTemp, Warning, TEXT("Current FPS: %.2f (Target: %.2f)"), CurrentMetrics.CurrentFPS, TargetFPS);
+    UE_LOG(LogTemp, Warning, TEXT("Frame Time: %.2f ms"), CurrentMetrics.AverageFrameTime);
+    UE_LOG(LogTemp, Warning, TEXT("Physics Bodies: %d/%d"), CurrentMetrics.ActivePhysicsBodies, MaxPhysicsBodies);
+    UE_LOG(LogTemp, Warning, TEXT("Simulating Bodies: %d/%d"), CurrentMetrics.SimulatingBodies, MaxSimulatingBodies);
+    UE_LOG(LogTemp, Warning, TEXT("Physics Step Time: %.2f ms"), CurrentMetrics.PhysicsStepTime);
+    UE_LOG(LogTemp, Warning, TEXT("Collision Pairs: %d/%d"), CurrentMetrics.CollisionPairs, MaxCollisionPairs);
+    UE_LOG(LogTemp, Warning, TEXT("Memory Usage: %.2f MB"), CurrentMetrics.MemoryUsageMB);
+    UE_LOG(LogTemp, Warning, TEXT("Performance Score: %.2f"), PerformanceScore);
+    UE_LOG(LogTemp, Warning, TEXT("Critical Performance: %s"), bIsCritical ? TEXT("YES") : TEXT("NO"));
+    UE_LOG(LogTemp, Warning, TEXT("==================================="));
 }
 
-void APerf_PhysicsPerformanceIntegrator::CalculatePhysicsFrameTime()
+bool UPerf_PhysicsPerformanceIntegrator::IsPerformanceCritical() const
 {
-    // Estimate physics frame time based on current frame time
-    float CurrentFrameTime = FApp::GetDeltaTime() * 1000.0f; // Convert to milliseconds
-    
-    PhysicsFrameTimeHistory.Add(CurrentFrameTime);
-    
-    if (PhysicsFrameTimeHistory.Num() > 60)
-    {
-        PhysicsFrameTimeHistory.RemoveAt(0);
-    }
-    
-    // Calculate average physics frame time
-    float TotalTime = 0.0f;
-    for (float FrameTime : PhysicsFrameTimeHistory)
-    {
-        TotalTime += FrameTime;
-    }
-    
-    CurrentMetrics.PhysicsFrameTime = PhysicsFrameTimeHistory.Num() > 0 ? TotalTime / PhysicsFrameTimeHistory.Num() : 0.0f;
-    CurrentMetrics.AveragePhysicsStepTime = CurrentMetrics.PhysicsFrameTime * 0.3f; // Estimate physics portion
+    return CurrentMetrics.CurrentFPS < CriticalFPSThreshold ||
+           CurrentMetrics.ActivePhysicsBodies > MaxPhysicsBodies ||
+           CurrentMetrics.PhysicsStepTime > MaxPhysicsStepTime;
 }
 
-void APerf_PhysicsPerformanceIntegrator::CountActivePhysicsBodies()
+float UPerf_PhysicsPerformanceIntegrator::GetPerformanceScore() const
 {
-    UWorld* World = GetWorld();
-    if (!World)
+    float FPSScore = FMath::Clamp(CurrentMetrics.CurrentFPS / TargetFPS, 0.0f, 1.0f);
+    float BodiesScore = 1.0f - FMath::Clamp((float)CurrentMetrics.ActivePhysicsBodies / MaxPhysicsBodies, 0.0f, 1.0f);
+    float StepTimeScore = 1.0f - FMath::Clamp(CurrentMetrics.PhysicsStepTime / MaxPhysicsStepTime, 0.0f, 1.0f);
+    
+    return (FPSScore + BodiesScore + StepTimeScore) / 3.0f * 100.0f;
+}
+
+void UPerf_PhysicsPerformanceIntegrator::LogPerformanceMetrics()
+{
+    UE_LOG(LogTemp, Log, TEXT("Physics Performance Metrics:"));
+    UE_LOG(LogTemp, Log, TEXT("  FPS: %.2f"), CurrentMetrics.CurrentFPS);
+    UE_LOG(LogTemp, Log, TEXT("  Frame Time: %.2f ms"), CurrentMetrics.AverageFrameTime);
+    UE_LOG(LogTemp, Log, TEXT("  Physics Bodies: %d"), CurrentMetrics.ActivePhysicsBodies);
+    UE_LOG(LogTemp, Log, TEXT("  Simulating Bodies: %d"), CurrentMetrics.SimulatingBodies);
+    UE_LOG(LogTemp, Log, TEXT("  Physics Step Time: %.2f ms"), CurrentMetrics.PhysicsStepTime);
+    UE_LOG(LogTemp, Log, TEXT("  Memory Usage: %.2f MB"), CurrentMetrics.MemoryUsageMB);
+}
+
+void UPerf_PhysicsPerformanceIntegrator::ResetPerformanceCounters()
+{
+    CurrentMetrics = FPerf_PhysicsPerformanceMetrics();
+    FPSHistory.Empty();
+    FrameTimeHistory.Empty();
+    
+    UE_LOG(LogTemp, Log, TEXT("Physics Performance Integrator: Performance counters reset"));
+}
+
+void UPerf_PhysicsPerformanceIntegrator::UpdatePerformanceMetrics()
+{
+    // Calculate current FPS
+    float DeltaTime = GetWorld()->GetDeltaSeconds();
+    CurrentMetrics.CurrentFPS = DeltaTime > 0.0f ? 1.0f / DeltaTime : 0.0f;
+    CurrentMetrics.AverageFrameTime = DeltaTime * 1000.0f; // Convert to milliseconds
+    
+    // Update FPS history
+    UpdateFPSHistory(CurrentMetrics.CurrentFPS);
+    
+    // Collect physics statistics
+    CollectPhysicsStatistics();
+    
+    // Update average FPS from history
+    if (FPSHistory.Num() > 0)
     {
-        return;
+        CurrentMetrics.CurrentFPS = GetAverageFPS();
     }
-    
-    int32 ActiveBodies = 0;
-    int32 CollisionChecks = 0;
-    
-    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+}
+
+void UPerf_PhysicsPerformanceIntegrator::CheckPerformanceThresholds()
+{
+    if (CurrentMetrics.CurrentFPS < CriticalFPSThreshold)
     {
-        AActor* Actor = *ActorItr;
+        UE_LOG(LogTemp, Warning, TEXT("Physics Performance Integrator: CRITICAL FPS detected (%.2f)"), CurrentMetrics.CurrentFPS);
+        
+        if (bEnableAutomaticOptimization)
+        {
+            OptimizePhysicsPerformance();
+        }
+    }
+    else if (CurrentMetrics.CurrentFPS < WarningFPSThreshold)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Physics Performance Integrator: Low FPS warning (%.2f)"), CurrentMetrics.CurrentFPS);
+        
+        if (bEnableAutomaticOptimization)
+        {
+            // Apply lighter optimization
+            OptimizeNearbyActors(FarDistance);
+        }
+    }
+}
+
+void UPerf_PhysicsPerformanceIntegrator::ApplyOptimizationSettings()
+{
+    switch (OptimizationLevel)
+    {
+        case EPerf_PhysicsOptimizationLevel::Disabled:
+            bEnableAutomaticOptimization = false;
+            break;
+        case EPerf_PhysicsOptimizationLevel::Conservative:
+            MaxPhysicsBodies = 1500;
+            MaxSimulatingBodies = 300;
+            break;
+        case EPerf_PhysicsOptimizationLevel::Balanced:
+            MaxPhysicsBodies = 1000;
+            MaxSimulatingBodies = 200;
+            break;
+        case EPerf_PhysicsOptimizationLevel::Aggressive:
+            MaxPhysicsBodies = 500;
+            MaxSimulatingBodies = 100;
+            break;
+        case EPerf_PhysicsOptimizationLevel::Maximum:
+            MaxPhysicsBodies = 250;
+            MaxSimulatingBodies = 50;
+            break;
+    }
+}
+
+void UPerf_PhysicsPerformanceIntegrator::OptimizePhysicsBodies()
+{
+    TArray<AActor*> AllActors;
+    UGameplayStatics::GetAllActorsOfClass(GetWorld(), AActor::StaticClass(), AllActors);
+    
+    int32 OptimizedBodies = 0;
+    for (AActor* Actor : AllActors)
+    {
         if (!Actor)
         {
             continue;
@@ -320,69 +378,82 @@ void APerf_PhysicsPerformanceIntegrator::CountActivePhysicsBodies()
         UPrimitiveComponent* PrimComp = Actor->FindComponentByClass<UPrimitiveComponent>();
         if (PrimComp && PrimComp->IsSimulatingPhysics())
         {
-            ActiveBodies++;
-            
-            if (PrimComp->GetCollisionEnabled() != ECollisionEnabled::NoCollision)
+            float Distance = CalculateDistance(Actor);
+            if (Distance > FarDistance && CurrentMetrics.SimulatingBodies > MaxSimulatingBodies)
             {
-                CollisionChecks++;
+                PrimComp->SetSimulatePhysics(false);
+                OptimizedBodies++;
             }
         }
     }
     
-    CurrentMetrics.ActivePhysicsBodies = ActiveBodies;
-    CurrentMetrics.CollisionChecksPerFrame = CollisionChecks;
-}
-
-void APerf_PhysicsPerformanceIntegrator::AnalyzePhysicsMemoryUsage()
-{
-    // Estimate physics memory usage
-    FPlatformMemoryStats MemStats = FPlatformMemory::GetStats();
-    CurrentMetrics.PhysicsMemoryUsage = MemStats.UsedPhysical / (1024.0f * 1024.0f); // Convert to MB
-}
-
-void APerf_PhysicsPerformanceIntegrator::ApplyPhysicsOptimizations()
-{
-    if (CurrentMetrics.PhysicsFrameTime > OptimizationSettings.MaxPhysicsFrameTime)
+    if (OptimizedBodies > 0)
     {
-        // Reduce physics quality for distant objects
-        for (AActor* Actor : TrackedPhysicsActors)
+        LogOptimizationAction(TEXT("Physics Bodies"), FString::Printf(TEXT("Disabled %d bodies"), OptimizedBodies));
+    }
+}
+
+void UPerf_PhysicsPerformanceIntegrator::OptimizeCollisionSettings()
+{
+    if (!bEnableCollisionOptimization)
+    {
+        return;
+    }
+    
+    TArray<AActor*> AllActors;
+    UGameplayStatics::GetAllActorsOfClass(GetWorld(), AStaticMeshActor::StaticClass(), AllActors);
+    
+    int32 OptimizedCollisions = 0;
+    for (AActor* Actor : AllActors)
+    {
+        if (!Actor)
         {
-            if (Actor)
+            continue;
+        }
+        
+        float Distance = CalculateDistance(Actor);
+        UStaticMeshComponent* MeshComp = Actor->FindComponentByClass<UStaticMeshComponent>();
+        
+        if (MeshComp && Distance > FarDistance)
+        {
+            if (MeshComp->GetCollisionEnabled() == ECollisionEnabled::QueryAndPhysics)
             {
-                float Distance = GetDistanceToPlayer(Actor);
-                if (Distance > OptimizationSettings.PhysicsLODDistance1)
-                {
-                    SetPhysicsLODLevel(Actor, 1); // Simplified physics
-                }
+                MeshComp->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+                OptimizedCollisions++;
             }
         }
     }
     
-    if (CurrentMetrics.ActivePhysicsBodies > OptimizationSettings.MaxActivePhysicsBodies)
+    if (OptimizedCollisions > 0)
     {
-        // Disable physics for the most distant objects
-        CullDistantPhysicsActors();
+        LogOptimizationAction(TEXT("Collision Settings"), FString::Printf(TEXT("Optimized %d collisions"), OptimizedCollisions));
     }
 }
 
-float APerf_PhysicsPerformanceIntegrator::GetDistanceToPlayer(AActor* Actor) const
+void UPerf_PhysicsPerformanceIntegrator::UpdatePhysicsQuality()
 {
-    UWorld* World = GetWorld();
-    if (!World || !Actor)
-    {
-        return 0.0f;
-    }
-    
-    APlayerController* PC = World->GetFirstPlayerController();
-    if (!PC || !PC->GetPawn())
-    {
-        return 0.0f;
-    }
-    
-    return FVector::Dist(PC->GetPawn()->GetActorLocation(), Actor->GetActorLocation());
+    // This would integrate with UE5's physics settings
+    // For now, we'll just log the quality change
+    UE_LOG(LogTemp, Log, TEXT("Physics Performance Integrator: Physics quality updated to %d"), (int32)QualityMode);
 }
 
-void APerf_PhysicsPerformanceIntegrator::SetPhysicsSimulationEnabled(AActor* Actor, bool bEnabled)
+float UPerf_PhysicsPerformanceIntegrator::CalculateDistance(const AActor* Actor) const
+{
+    if (!Actor)
+    {
+        return 0.0f;
+    }
+    
+    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
+    if (!PlayerPawn)
+    {
+        return 0.0f;
+    }
+    
+    return FVector::Dist(PlayerPawn->GetActorLocation(), Actor->GetActorLocation());
+}
+
+void UPerf_PhysicsPerformanceIntegrator::ApplyDistanceBasedOptimization(AActor* Actor, float Distance)
 {
     if (!Actor)
     {
@@ -390,33 +461,111 @@ void APerf_PhysicsPerformanceIntegrator::SetPhysicsSimulationEnabled(AActor* Act
     }
     
     UPrimitiveComponent* PrimComp = Actor->FindComponentByClass<UPrimitiveComponent>();
-    if (PrimComp)
-    {
-        PrimComp->SetSimulatePhysics(bEnabled);
-    }
-}
-
-void APerf_PhysicsPerformanceIntegrator::AdjustPhysicsComplexity(AActor* Actor, float Distance)
-{
-    if (!Actor)
+    if (!PrimComp)
     {
         return;
     }
     
-    int32 LODLevel = 0;
+    // Apply optimization based on distance
+    if (Distance > FarDistance)
+    {
+        // Far distance - minimal physics
+        PrimComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+        PrimComp->SetSimulatePhysics(false);
+    }
+    else if (Distance > MediumDistance)
+    {
+        // Medium distance - query only collision
+        PrimComp->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+        PrimComp->SetSimulatePhysics(false);
+    }
+    else if (Distance > NearDistance)
+    {
+        // Near distance - full collision, no physics simulation
+        PrimComp->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+        PrimComp->SetSimulatePhysics(false);
+    }
+    // Close distance - full physics (no changes needed)
+}
+
+void UPerf_PhysicsPerformanceIntegrator::CollectPhysicsStatistics()
+{
+    // Count physics bodies
+    TArray<AActor*> AllActors;
+    UGameplayStatics::GetAllActorsOfClass(GetWorld(), AActor::StaticClass(), AllActors);
     
-    if (Distance > OptimizationSettings.PhysicsLODDistance2)
+    CurrentMetrics.ActivePhysicsBodies = 0;
+    CurrentMetrics.SimulatingBodies = 0;
+    
+    for (AActor* Actor : AllActors)
     {
-        LODLevel = 2; // No physics
-    }
-    else if (Distance > OptimizationSettings.PhysicsLODDistance1)
-    {
-        LODLevel = 1; // Simplified physics
-    }
-    else
-    {
-        LODLevel = 0; // Full physics
+        if (!Actor)
+        {
+            continue;
+        }
+        
+        UPrimitiveComponent* PrimComp = Actor->FindComponentByClass<UPrimitiveComponent>();
+        if (PrimComp)
+        {
+            if (PrimComp->GetCollisionEnabled() != ECollisionEnabled::NoCollision)
+            {
+                CurrentMetrics.ActivePhysicsBodies++;
+            }
+            
+            if (PrimComp->IsSimulatingPhysics())
+            {
+                CurrentMetrics.SimulatingBodies++;
+            }
+        }
     }
     
-    SetPhysicsLODLevel(Actor, LODLevel);
+    // Estimate physics step time (simplified)
+    CurrentMetrics.PhysicsStepTime = CurrentMetrics.SimulatingBodies * 0.01f; // Rough estimate
+    
+    // Estimate collision pairs
+    CurrentMetrics.CollisionPairs = CurrentMetrics.ActivePhysicsBodies * 2; // Simplified estimate
+    
+    // Estimate memory usage
+    CurrentMetrics.MemoryUsageMB = (CurrentMetrics.ActivePhysicsBodies * 0.1f) + (CurrentMetrics.SimulatingBodies * 0.5f);
+}
+
+void UPerf_PhysicsPerformanceIntegrator::UpdateFPSHistory(float CurrentFPS)
+{
+    FPSHistory.Add(CurrentFPS);
+    FrameTimeHistory.Add(1000.0f / FMath::Max(CurrentFPS, 1.0f));
+    
+    // Maintain history size
+    if (FPSHistory.Num() > MaxHistorySize)
+    {
+        FPSHistory.RemoveAt(0);
+    }
+    
+    if (FrameTimeHistory.Num() > MaxHistorySize)
+    {
+        FrameTimeHistory.RemoveAt(0);
+    }
+}
+
+float UPerf_PhysicsPerformanceIntegrator::GetAverageFPS() const
+{
+    if (FPSHistory.Num() == 0)
+    {
+        return 60.0f;
+    }
+    
+    float Sum = 0.0f;
+    for (float FPS : FPSHistory)
+    {
+        Sum += FPS;
+    }
+    
+    return Sum / FPSHistory.Num();
+}
+
+void UPerf_PhysicsPerformanceIntegrator::LogOptimizationAction(const FString& Action, const FString& Details)
+{
+    if (bEnableDetailedLogging)
+    {
+        UE_LOG(LogTemp, Log, TEXT("Physics Performance Integrator: %s - %s"), *Action, *Details);
+    }
 }
