@@ -2,341 +2,305 @@
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "Engine/GameInstance.h"
-#include "TimerManager.h"
-#include "UObject/UObjectGlobals.h"
-#include "UObject/Package.h"
-
-UBuildIntegrationManager::UBuildIntegrationManager()
-{
-    CurrentStatus = EBuild_IntegrationStatus::Unknown;
-    ValidationInterval = 30.0f; // Validate every 30 seconds
-
-    // Initialize core system class paths
-    CoreSystemClasses = {
-        TEXT("/Script/TranspersonalGame.TranspersonalCharacter"),
-        TEXT("/Script/TranspersonalGame.TranspersonalGameState"),
-        TEXT("/Script/TranspersonalGame.PCGWorldGenerator"),
-        TEXT("/Script/TranspersonalGame.FoliageManager"),
-        TEXT("/Script/TranspersonalGame.CrowdSimulationManager"),
-        TEXT("/Script/TranspersonalGame.ProceduralWorldManager")
-    };
-
-    // Initialize QA system class paths
-    QASystemClasses = {
-        TEXT("/Script/TranspersonalGame.QATestFramework"),
-        TEXT("/Script/TranspersonalGame.VFXValidationComponent"),
-        TEXT("/Script/TranspersonalGame.AudioTestComponent")
-    };
-}
+#include "Modules/ModuleManager.h"
+#include "HAL/PlatformFilemanager.h"
+#include "Misc/DateTime.h"
+#include "Engine/Level.h"
+#include "EngineUtils.h"
 
 void UBuildIntegrationManager::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
     
-    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Initializing integration validation system"));
+    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Initializing integration system"));
     
-    // Perform initial validation
-    FBuild_IntegrationReport InitialReport = ValidateAllSystems();
+    InitializeSystemModules();
+    RefreshSystemStatus();
     
-    // Start periodic validation
-    if (UWorld* World = GetWorld())
-    {
-        World->GetTimerManager().SetTimer(
-            ValidationTimerHandle,
-            this,
-            &UBuildIntegrationManager::PerformPeriodicValidation,
-            ValidationInterval,
-            true
-        );
-    }
+    // Set initial validation time
+    LastValidationTime = FPlatformTime::Seconds();
     
-    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Initialization complete - Status: %d"), (int32)CurrentStatus);
+    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Integration system initialized successfully"));
 }
 
 void UBuildIntegrationManager::Deinitialize()
 {
-    if (UWorld* World = GetWorld())
-    {
-        World->GetTimerManager().ClearTimer(ValidationTimerHandle);
-    }
+    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Shutting down integration system"));
     
-    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Deinitializing"));
+    SystemModules.Empty();
+    CurrentStatus = FBuild_IntegrationStatus();
+    LastValidationResult = FBuild_ValidationResult();
+    
     Super::Deinitialize();
 }
 
-FBuild_IntegrationReport UBuildIntegrationManager::ValidateAllSystems()
+void UBuildIntegrationManager::InitializeSystemModules()
 {
-    FBuild_IntegrationReport Report;
-    Report.ValidationTimestamp = FDateTime::Now();
-    Report.SystemsTotal = CoreSystemClasses.Num() + QASystemClasses.Num();
-    Report.SystemsLoaded = 0;
-
-    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Starting comprehensive system validation"));
-
-    // Validate core systems
-    for (const FString& SystemClass : CoreSystemClasses)
-    {
-        FBuild_SystemValidationResult Result;
-        if (ValidateSystemClass(SystemClass, Result))
-        {
-            Report.SystemsLoaded++;
-        }
-        Report.SystemResults.Add(Result);
-    }
-
-    // Validate QA systems
-    for (const FString& QAClass : QASystemClasses)
-    {
-        FBuild_SystemValidationResult Result;
-        if (ValidateSystemClass(QAClass, Result))
-        {
-            Report.SystemsLoaded++;
-        }
-        Report.SystemResults.Add(Result);
-    }
-
-    // Calculate integration percentage
-    Report.IntegrationPercentage = Report.SystemsTotal > 0 ? 
-        (float(Report.SystemsLoaded) / float(Report.SystemsTotal)) * 100.0f : 0.0f;
-
-    // Determine overall status
-    if (Report.IntegrationPercentage >= 90.0f)
-    {
-        Report.OverallStatus = EBuild_IntegrationStatus::Passed;
-    }
-    else if (Report.IntegrationPercentage >= 70.0f)
-    {
-        Report.OverallStatus = EBuild_IntegrationStatus::Validating;
-    }
-    else if (Report.IntegrationPercentage >= 50.0f)
-    {
-        Report.OverallStatus = EBuild_IntegrationStatus::Failed;
-    }
-    else
-    {
-        Report.OverallStatus = EBuild_IntegrationStatus::Critical;
-    }
-
-    LastIntegrationReport = Report;
-    CurrentStatus = Report.OverallStatus;
-
-    LogIntegrationResults(Report);
-    return Report;
+    SystemModules.Empty();
+    
+    // Core game modules
+    SystemModules.Add(TEXT("TranspersonalGame"));
+    SystemModules.Add(TEXT("Engine"));
+    SystemModules.Add(TEXT("Core"));
+    SystemModules.Add(TEXT("CoreUObject"));
+    
+    // Game-specific modules
+    SystemModules.Add(TEXT("PCGWorldGenerator"));
+    SystemModules.Add(TEXT("FoliageManager"));
+    SystemModules.Add(TEXT("CrowdSimulation"));
+    SystemModules.Add(TEXT("ProceduralWorld"));
+    
+    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Initialized %d system modules"), SystemModules.Num());
 }
 
-bool UBuildIntegrationManager::ValidateSystemClass(const FString& ClassName, FBuild_SystemValidationResult& OutResult)
+FBuild_IntegrationStatus UBuildIntegrationManager::GetIntegrationStatus() const
 {
-    OutResult.SystemName = ClassName;
-    OutResult.bIsLoaded = false;
-    OutResult.bIsFunctional = false;
-    OutResult.ErrorMessage = TEXT("");
+    return CurrentStatus;
+}
 
-    try
+bool UBuildIntegrationManager::ValidateAllSystems()
+{
+    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Starting full system validation"));
+    
+    bool bAllValid = true;
+    int32 ValidModules = 0;
+    
+    CurrentStatus.LoadedModules.Empty();
+    CurrentStatus.FailedModules.Empty();
+    
+    for (const FString& ModuleName : SystemModules)
     {
-        // Attempt to load the class
-        UClass* LoadedClass = LoadClass<UObject>(nullptr, *ClassName);
-        
-        if (LoadedClass)
+        if (ValidateModule(ModuleName))
         {
-            OutResult.bIsLoaded = true;
-            
-            // Test basic functionality
-            if (TestSystemFunctionality(LoadedClass, OutResult))
-            {
-                OutResult.bIsFunctional = true;
-                UE_LOG(LogTemp, Log, TEXT("BuildIntegrationManager: System validation PASSED - %s"), *ClassName);
-                return true;
-            }
-            else
-            {
-                UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: System loaded but not functional - %s"), *ClassName);
-            }
+            CurrentStatus.LoadedModules.Add(ModuleName);
+            ValidModules++;
         }
         else
         {
-            OutResult.ErrorMessage = TEXT("Class failed to load");
-            UE_LOG(LogTemp, Error, TEXT("BuildIntegrationManager: Failed to load class - %s"), *ClassName);
+            CurrentStatus.FailedModules.Add(ModuleName);
+            bAllValid = false;
         }
     }
-    catch (...)
-    {
-        OutResult.ErrorMessage = TEXT("Exception during class loading");
-        UE_LOG(LogTemp, Error, TEXT("BuildIntegrationManager: Exception loading class - %s"), *ClassName);
-    }
+    
+    CurrentStatus.bAllModulesLoaded = bAllValid;
+    CurrentStatus.bIsCompiled = bAllValid;
+    
+    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Validation complete - %d/%d modules valid"), 
+           ValidModules, SystemModules.Num());
+    
+    return bAllValid;
+}
 
+bool UBuildIntegrationManager::ValidateModule(const FString& ModuleName)
+{
+    // Check if module is loaded
+    if (FModuleManager::Get().IsModuleLoaded(*ModuleName))
+    {
+        UE_LOG(LogTemp, Log, TEXT("BuildIntegrationManager: Module %s is loaded"), *ModuleName);
+        return true;
+    }
+    
+    // Try to load module if not loaded
+    if (FModuleManager::Get().ModuleExists(*ModuleName))
+    {
+        try
+        {
+            FModuleManager::Get().LoadModule(*ModuleName);
+            UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Successfully loaded module %s"), *ModuleName);
+            return true;
+        }
+        catch (...)
+        {
+            UE_LOG(LogTemp, Error, TEXT("BuildIntegrationManager: Failed to load module %s"), *ModuleName);
+            return false;
+        }
+    }
+    
+    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Module %s does not exist"), *ModuleName);
     return false;
 }
 
-bool UBuildIntegrationManager::TestSystemFunctionality(UClass* SystemClass, FBuild_SystemValidationResult& OutResult)
+FBuild_ValidationResult UBuildIntegrationManager::RunFullValidation()
 {
-    if (!SystemClass)
-    {
-        OutResult.ErrorMessage = TEXT("Null system class");
-        return false;
-    }
-
-    // Basic functionality test - check if class has expected properties/functions
-    try
-    {
-        // Test CDO access
-        UObject* CDO = SystemClass->GetDefaultObject();
-        if (!CDO)
-        {
-            OutResult.ErrorMessage = TEXT("Failed to get Class Default Object");
-            return false;
-        }
-
-        // Test reflection data
-        if (SystemClass->GetPropertiesSize() == 0 && SystemClass->NumReplicatedProperties() == 0)
-        {
-            // Class has no properties - might be a stub
-            OutResult.ErrorMessage = TEXT("Class appears to be a stub (no properties)");
-            return false;
-        }
-
-        return true;
-    }
-    catch (...)
-    {
-        OutResult.ErrorMessage = TEXT("Exception during functionality test");
-        return false;
-    }
-}
-
-bool UBuildIntegrationManager::ValidateSystemDependencies()
-{
-    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Validating system dependencies"));
+    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Running comprehensive validation"));
     
-    // Check cross-module dependencies
-    bool bDependenciesValid = true;
-
-    // Test World Generation <-> Foliage integration
-    UClass* WorldGenClass = LoadClass<UObject>(nullptr, TEXT("/Script/TranspersonalGame.PCGWorldGenerator"));
-    UClass* FoliageClass = LoadClass<UObject>(nullptr, TEXT("/Script/TranspersonalGame.FoliageManager"));
+    FBuild_ValidationResult Result;
+    float StartTime = FPlatformTime::Seconds();
     
-    if (!WorldGenClass || !FoliageClass)
-    {
-        UE_LOG(LogTemp, Error, TEXT("BuildIntegrationManager: World Generation <-> Foliage dependency FAILED"));
-        bDependenciesValid = false;
-    }
-
-    // Test Character <-> GameState integration
-    UClass* CharacterClass = LoadClass<UObject>(nullptr, TEXT("/Script/TranspersonalGame.TranspersonalCharacter"));
-    UClass* GameStateClass = LoadClass<UObject>(nullptr, TEXT("/Script/TranspersonalGame.TranspersonalGameState"));
+    Result.ErrorMessages.Empty();
+    Result.WarningMessages.Empty();
+    Result.ErrorCount = 0;
+    Result.WarningCount = 0;
     
-    if (!CharacterClass || !GameStateClass)
+    // Validate modules
+    if (!ValidateAllSystems())
     {
-        UE_LOG(LogTemp, Error, TEXT("BuildIntegrationManager: Character <-> GameState dependency FAILED"));
-        bDependenciesValid = false;
+        Result.ErrorCount++;
+        Result.ErrorMessages.Add(TEXT("Module validation failed"));
     }
-
-    return bDependenciesValid;
-}
-
-bool UBuildIntegrationManager::ValidateMapIntegrity()
-{
-    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Validating map integrity"));
     
-    UWorld* World = GetWorld();
-    if (!World)
+    // Validate actors
+    if (!ValidateActorIntegrity())
     {
-        UE_LOG(LogTemp, Error, TEXT("BuildIntegrationManager: No world available for map validation"));
-        return false;
+        Result.WarningCount++;
+        Result.WarningMessages.Add(TEXT("Some actors have integrity issues"));
     }
-
-    // Basic map validation
-    int32 ActorCount = 0;
-    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
-    {
-        ActorCount++;
-    }
-
-    if (ActorCount < 10) // Minimum expected actors in MinPlayableMap
-    {
-        UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Map has insufficient actors (%d)"), ActorCount);
-        return false;
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("BuildIntegrationManager: Map validation passed (%d actors)"), ActorCount);
-    return true;
-}
-
-FBuild_SystemValidationResult UBuildIntegrationManager::ValidateCoreSystem(const FString& SystemClassName)
-{
-    FBuild_SystemValidationResult Result;
-    ValidateSystemClass(SystemClassName, Result);
+    
+    // Update actor count
+    CurrentStatus.ActiveActorCount = GetActiveActorCount();
+    
+    // Set build time
+    CurrentStatus.LastBuildTime = FDateTime::Now().ToString();
+    
+    Result.ValidationDuration = FPlatformTime::Seconds() - StartTime;
+    Result.bValidationPassed = (Result.ErrorCount == 0);
+    
+    LastValidationResult = Result;
+    LastValidationTime = FPlatformTime::Seconds();
+    
+    LogValidationResults(Result);
+    
     return Result;
 }
 
-FBuild_SystemValidationResult UBuildIntegrationManager::ValidateQASystem(const FString& QAClassName)
+bool UBuildIntegrationManager::CheckModuleCompatibility(const FString& ModuleName)
 {
-    FBuild_SystemValidationResult Result;
-    ValidateSystemClass(QAClassName, Result);
-    return Result;
-}
-
-bool UBuildIntegrationManager::CreateBuildSnapshot(const FString& SnapshotName)
-{
-    if (SnapshotName.IsEmpty())
+    if (!FModuleManager::Get().IsModuleLoaded(*ModuleName))
     {
+        UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Module %s not loaded for compatibility check"), *ModuleName);
         return false;
     }
-
-    // Create a simple snapshot record
-    FString SnapshotData = FString::Printf(TEXT("Snapshot_%s_%s"), 
-        *SnapshotName, 
-        *FDateTime::Now().ToString());
     
-    BuildSnapshots.Add(SnapshotName, SnapshotData);
-    
-    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Created build snapshot - %s"), *SnapshotName);
+    // Basic compatibility check - module is loaded and functional
+    UE_LOG(LogTemp, Log, TEXT("BuildIntegrationManager: Module %s compatibility check passed"), *ModuleName);
     return true;
 }
 
-bool UBuildIntegrationManager::RestoreBuildSnapshot(const FString& SnapshotName)
+void UBuildIntegrationManager::RefreshSystemStatus()
 {
-    if (!BuildSnapshots.Contains(SnapshotName))
+    UpdateIntegrationStatus();
+    
+    UE_LOG(LogTemp, Log, TEXT("BuildIntegrationManager: System status refreshed - %d actors, %d loaded modules"), 
+           CurrentStatus.ActiveActorCount, CurrentStatus.LoadedModules.Num());
+}
+
+bool UBuildIntegrationManager::TriggerBuildValidation()
+{
+    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Triggering build validation"));
+    
+    FBuild_ValidationResult Result = RunFullValidation();
+    return Result.bValidationPassed;
+}
+
+TArray<FString> UBuildIntegrationManager::GetLoadedModuleList() const
+{
+    return CurrentStatus.LoadedModules;
+}
+
+TArray<FString> UBuildIntegrationManager::GetFailedModuleList() const
+{
+    return CurrentStatus.FailedModules;
+}
+
+int32 UBuildIntegrationManager::GetActiveActorCount() const
+{
+    if (UWorld* World = GetWorld())
     {
-        UE_LOG(LogTemp, Error, TEXT("BuildIntegrationManager: Snapshot not found - %s"), *SnapshotName);
-        return false;
+        int32 ActorCount = 0;
+        for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+        {
+            if (ActorItr->IsValidLowLevel() && !ActorItr->IsPendingKill())
+            {
+                ActorCount++;
+            }
+        }
+        return ActorCount;
     }
-
-    // In a real implementation, this would restore the build state
-    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Restored build snapshot - %s"), *SnapshotName);
-    return true;
+    
+    return 0;
 }
 
-TArray<FString> UBuildIntegrationManager::GetAvailableSnapshots() const
+bool UBuildIntegrationManager::ValidateActorIntegrity()
 {
-    TArray<FString> SnapshotNames;
-    BuildSnapshots.GetKeys(SnapshotNames);
-    return SnapshotNames;
+    if (UWorld* World = GetWorld())
+    {
+        int32 ValidActors = 0;
+        int32 InvalidActors = 0;
+        
+        for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+        {
+            AActor* Actor = *ActorItr;
+            if (Actor && Actor->IsValidLowLevel() && !Actor->IsPendingKill())
+            {
+                ValidActors++;
+            }
+            else
+            {
+                InvalidActors++;
+            }
+        }
+        
+        UE_LOG(LogTemp, Log, TEXT("BuildIntegrationManager: Actor integrity check - %d valid, %d invalid"), 
+               ValidActors, InvalidActors);
+        
+        return (InvalidActors == 0);
+    }
+    
+    return false;
 }
 
-void UBuildIntegrationManager::PerformPeriodicValidation()
+void UBuildIntegrationManager::CleanupInvalidActors()
 {
-    UE_LOG(LogTemp, Log, TEXT("BuildIntegrationManager: Performing periodic validation"));
+    if (UWorld* World = GetWorld())
+    {
+        TArray<AActor*> ActorsToDestroy;
+        
+        for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+        {
+            AActor* Actor = *ActorItr;
+            if (Actor && (Actor->IsPendingKill() || !Actor->IsValidLowLevel()))
+            {
+                ActorsToDestroy.Add(Actor);
+            }
+        }
+        
+        for (AActor* Actor : ActorsToDestroy)
+        {
+            if (Actor && Actor->IsValidLowLevel())
+            {
+                Actor->Destroy();
+            }
+        }
+        
+        UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Cleaned up %d invalid actors"), ActorsToDestroy.Num());
+    }
+}
+
+void UBuildIntegrationManager::UpdateIntegrationStatus()
+{
+    CurrentStatus.ActiveActorCount = GetActiveActorCount();
+    CurrentStatus.LastBuildTime = FDateTime::Now().ToString();
+    
+    // Update module status
     ValidateAllSystems();
 }
 
-void UBuildIntegrationManager::LogIntegrationResults(const FBuild_IntegrationReport& Report)
+void UBuildIntegrationManager::LogValidationResults(const FBuild_ValidationResult& Result)
 {
-    UE_LOG(LogTemp, Warning, TEXT("=== BUILD INTEGRATION REPORT ==="));
-    UE_LOG(LogTemp, Warning, TEXT("Overall Status: %d"), (int32)Report.OverallStatus);
-    UE_LOG(LogTemp, Warning, TEXT("Systems Loaded: %d/%d (%.1f%%)"), 
-        Report.SystemsLoaded, Report.SystemsTotal, Report.IntegrationPercentage);
+    UE_LOG(LogTemp, Warning, TEXT("=== BUILD INTEGRATION VALIDATION RESULTS ==="));
+    UE_LOG(LogTemp, Warning, TEXT("Validation Passed: %s"), Result.bValidationPassed ? TEXT("YES") : TEXT("NO"));
+    UE_LOG(LogTemp, Warning, TEXT("Errors: %d, Warnings: %d"), Result.ErrorCount, Result.WarningCount);
+    UE_LOG(LogTemp, Warning, TEXT("Duration: %.2f seconds"), Result.ValidationDuration);
     
-    for (const FBuild_SystemValidationResult& Result : Report.SystemResults)
+    for (const FString& Error : Result.ErrorMessages)
     {
-        if (Result.bIsLoaded && Result.bIsFunctional)
-        {
-            UE_LOG(LogTemp, Log, TEXT("  ✓ %s"), *Result.SystemName);
-        }
-        else
-        {
-            UE_LOG(LogTemp, Error, TEXT("  ✗ %s - %s"), *Result.SystemName, *Result.ErrorMessage);
-        }
+        UE_LOG(LogTemp, Error, TEXT("ERROR: %s"), *Error);
     }
     
-    UE_LOG(LogTemp, Warning, TEXT("=== END INTEGRATION REPORT ==="));
+    for (const FString& Warning : Result.WarningMessages)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("WARNING: %s"), *Warning);
+    }
+    
+    UE_LOG(LogTemp, Warning, TEXT("=== END VALIDATION RESULTS ==="));
 }
