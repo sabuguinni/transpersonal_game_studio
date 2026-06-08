@@ -1,164 +1,208 @@
 #include "VFX_NiagaraLibrary.h"
-#include "NiagaraFunctionLibrary.h"
 #include "Engine/World.h"
-#include "TimerManager.h"
+#include "NiagaraFunctionLibrary.h"
+#include "Engine/Engine.h"
 
-UVFX_NiagaraLibrary::UVFX_NiagaraLibrary()
-{
-    PrimaryComponentTick.bCanEverTick = false;
-    bWantsInitializeComponent = true;
-}
+TMap<EVFX_EffectType, TSoftObjectPtr<UNiagaraSystem>> UVFX_NiagaraLibrary::EffectRegistry;
 
-void UVFX_NiagaraLibrary::BeginPlay()
+UNiagaraComponent* UVFX_NiagaraLibrary::SpawnVFXAtLocation(
+    UObject* WorldContext,
+    EVFX_EffectType EffectType,
+    FVector Location,
+    FRotator Rotation,
+    FVector Scale)
 {
-    Super::BeginPlay();
-    InitializeDefaultEffects();
-    
-    // Setup cleanup timer for finished effects
-    if (GetWorld())
+    if (!WorldContext)
     {
-        GetWorld()->GetTimerManager().SetTimer(
-            FTimerHandle(),
-            this,
-            &UVFX_NiagaraLibrary::CleanupFinishedEffects,
-            2.0f,
-            true
-        );
-    }
-}
-
-UNiagaraComponent* UVFX_NiagaraLibrary::SpawnEffect(EVFX_EffectType EffectType, FVector Location, FRotator Rotation)
-{
-    if (!EffectLibrary.Contains(EffectType))
-    {
-        UE_LOG(LogTemp, Warning, TEXT("VFX_NiagaraLibrary: Effect type not found in library"));
+        UE_LOG(LogTemp, Warning, TEXT("VFX_NiagaraLibrary: WorldContext is null"));
         return nullptr;
     }
 
-    const FVFX_EffectData& EffectData = EffectLibrary[EffectType];
-    
-    if (!EffectData.NiagaraSystem.IsValid())
+    UWorld* World = GEngine->GetWorldFromContextObject(WorldContext, EGetWorldErrorMode::LogAndReturnNull);
+    if (!World)
     {
-        UE_LOG(LogTemp, Warning, TEXT("VFX_NiagaraLibrary: Niagara system is null for effect type"));
+        UE_LOG(LogTemp, Warning, TEXT("VFX_NiagaraLibrary: Could not get world from context"));
         return nullptr;
     }
 
-    UNiagaraComponent* EffectComponent = UNiagaraFunctionLibrary::SpawnSystemAtLocation(
-        GetWorld(),
-        EffectData.NiagaraSystem.Get(),
-        Location,
-        Rotation,
-        EffectData.Scale,
-        EffectData.bAutoDestroy
-    );
+    InitializeEffectRegistry();
 
-    if (EffectComponent)
-    {
-        ActiveEffects.Add(EffectComponent);
-        
-        // Set duration if specified
-        if (EffectData.Duration > 0.0f && EffectData.bAutoDestroy)
-        {
-            EffectComponent->SetFloatParameter(TEXT("LifeTime"), EffectData.Duration);
-        }
-        
-        UE_LOG(LogTemp, Log, TEXT("VFX_NiagaraLibrary: Spawned effect at location %s"), *Location.ToString());
-    }
-
-    return EffectComponent;
-}
-
-void UVFX_NiagaraLibrary::StopEffect(UNiagaraComponent* EffectComponent)
-{
-    if (EffectComponent && IsValid(EffectComponent))
-    {
-        EffectComponent->Deactivate();
-        ActiveEffects.Remove(EffectComponent);
-    }
-}
-
-void UVFX_NiagaraLibrary::StopAllEffects()
-{
-    for (UNiagaraComponent* Effect : ActiveEffects)
-    {
-        if (Effect && IsValid(Effect))
-        {
-            Effect->Deactivate();
-        }
-    }
-    ActiveEffects.Empty();
-}
-
-void UVFX_NiagaraLibrary::RegisterEffect(EVFX_EffectType EffectType, UNiagaraSystem* NiagaraSystem, FVector Scale, float Duration)
-{
+    UNiagaraSystem* NiagaraSystem = GetNiagaraSystemForEffect(EffectType);
     if (!NiagaraSystem)
     {
-        UE_LOG(LogTemp, Warning, TEXT("VFX_NiagaraLibrary: Cannot register null Niagara system"));
+        UE_LOG(LogTemp, Warning, TEXT("VFX_NiagaraLibrary: No Niagara system found for effect type %d"), (int32)EffectType);
+        return nullptr;
+    }
+
+    UNiagaraComponent* VFXComponent = UNiagaraFunctionLibrary::SpawnSystemAtLocation(
+        World,
+        NiagaraSystem,
+        Location,
+        Rotation,
+        Scale,
+        true,
+        true,
+        ENCPoolMethod::None,
+        true
+    );
+
+    if (VFXComponent)
+    {
+        UE_LOG(LogTemp, Log, TEXT("VFX_NiagaraLibrary: Successfully spawned VFX effect at location %s"), *Location.ToString());
+    }
+
+    return VFXComponent;
+}
+
+UNiagaraComponent* UVFX_NiagaraLibrary::AttachVFXToActor(
+    AActor* TargetActor,
+    EVFX_EffectType EffectType,
+    FName SocketName,
+    FVector RelativeLocation,
+    FRotator RelativeRotation,
+    FVector Scale)
+{
+    if (!TargetActor)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("VFX_NiagaraLibrary: TargetActor is null"));
+        return nullptr;
+    }
+
+    InitializeEffectRegistry();
+
+    UNiagaraSystem* NiagaraSystem = GetNiagaraSystemForEffect(EffectType);
+    if (!NiagaraSystem)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("VFX_NiagaraLibrary: No Niagara system found for effect type %d"), (int32)EffectType);
+        return nullptr;
+    }
+
+    UNiagaraComponent* VFXComponent = UNiagaraFunctionLibrary::SpawnSystemAttached(
+        NiagaraSystem,
+        TargetActor->GetRootComponent(),
+        SocketName,
+        RelativeLocation,
+        RelativeRotation,
+        Scale,
+        EAttachLocation::KeepRelativeOffset,
+        true,
+        ENCPoolMethod::None,
+        true
+    );
+
+    if (VFXComponent)
+    {
+        UE_LOG(LogTemp, Log, TEXT("VFX_NiagaraLibrary: Successfully attached VFX effect to actor %s"), *TargetActor->GetName());
+    }
+
+    return VFXComponent;
+}
+
+void UVFX_NiagaraLibrary::StopVFXEffect(UNiagaraComponent* VFXComponent)
+{
+    if (!VFXComponent)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("VFX_NiagaraLibrary: VFXComponent is null"));
         return;
     }
 
-    FVFX_EffectData EffectData;
-    EffectData.NiagaraSystem = NiagaraSystem;
-    EffectData.Scale = Scale;
-    EffectData.Duration = Duration;
-    EffectData.bAutoDestroy = Duration > 0.0f;
+    VFXComponent->Deactivate();
+    UE_LOG(LogTemp, Log, TEXT("VFX_NiagaraLibrary: VFX effect stopped"));
+}
 
-    EffectLibrary.Add(EffectType, EffectData);
+TArray<FVFX_EffectData> UVFX_NiagaraLibrary::GetAvailableEffects()
+{
+    TArray<FVFX_EffectData> AvailableEffects;
     
-    UE_LOG(LogTemp, Log, TEXT("VFX_NiagaraLibrary: Registered effect type %d"), (int32)EffectType);
+    InitializeEffectRegistry();
+
+    for (const auto& EffectPair : EffectRegistry)
+    {
+        FVFX_EffectData EffectData;
+        EffectData.EffectType = EffectPair.Key;
+        EffectData.NiagaraSystem = EffectPair.Value;
+        
+        switch (EffectPair.Key)
+        {
+            case EVFX_EffectType::Fire_Campfire:
+                EffectData.Duration = 0.0f; // Looping
+                EffectData.Scale = FVector(1.0f);
+                break;
+            case EVFX_EffectType::Dust_Impact:
+                EffectData.Duration = 2.0f;
+                EffectData.Scale = FVector(1.5f);
+                break;
+            case EVFX_EffectType::Water_Splash:
+                EffectData.Duration = 1.5f;
+                EffectData.Scale = FVector(1.0f);
+                break;
+            case EVFX_EffectType::Blood_Hit:
+                EffectData.Duration = 3.0f;
+                EffectData.Scale = FVector(0.8f);
+                break;
+            case EVFX_EffectType::Steam_Breath:
+                EffectData.Duration = 4.0f;
+                EffectData.Scale = FVector(1.2f);
+                break;
+            case EVFX_EffectType::Volcanic_Smoke:
+                EffectData.Duration = 0.0f; // Looping
+                EffectData.Scale = FVector(2.0f);
+                break;
+        }
+        
+        AvailableEffects.Add(EffectData);
+    }
+
+    return AvailableEffects;
 }
 
-bool UVFX_NiagaraLibrary::HasEffect(EVFX_EffectType EffectType) const
+UNiagaraSystem* UVFX_NiagaraLibrary::GetNiagaraSystemForEffect(EVFX_EffectType EffectType)
 {
-    return EffectLibrary.Contains(EffectType);
+    InitializeEffectRegistry();
+
+    if (EffectRegistry.Contains(EffectType))
+    {
+        TSoftObjectPtr<UNiagaraSystem> SystemPtr = EffectRegistry[EffectType];
+        if (SystemPtr.IsValid())
+        {
+            return SystemPtr.Get();
+        }
+        else if (!SystemPtr.IsNull())
+        {
+            // Try to load the asset
+            return SystemPtr.LoadSynchronous();
+        }
+    }
+
+    UE_LOG(LogTemp, Warning, TEXT("VFX_NiagaraLibrary: No Niagara system registered for effect type %d"), (int32)EffectType);
+    return nullptr;
 }
 
-int32 UVFX_NiagaraLibrary::GetActiveEffectCount() const
+void UVFX_NiagaraLibrary::InitializeEffectRegistry()
 {
-    return ActiveEffects.Num();
-}
+    if (EffectRegistry.Num() > 0)
+    {
+        return; // Already initialized
+    }
 
-void UVFX_NiagaraLibrary::CleanupFinishedEffects()
-{
-    ActiveEffects.RemoveAll([](UNiagaraComponent* Effect) {
-        return !Effect || !IsValid(Effect) || !Effect->IsActive();
-    });
-}
-
-void UVFX_NiagaraLibrary::InitializeDefaultEffects()
-{
-    // Initialize default effect data structures
-    // Note: Actual Niagara systems will be assigned via Blueprint or C++ setup
+    // Initialize with placeholder paths - these will be replaced with actual Niagara systems
+    EffectRegistry.Add(EVFX_EffectType::Fire_Campfire, 
+        TSoftObjectPtr<UNiagaraSystem>(FSoftObjectPath(TEXT("/Engine/VFX/Niagara/DefaultAssets/FX_Smoke"))));
     
-    FVFX_EffectData CampfireData;
-    CampfireData.Scale = FVector(1.0f, 1.0f, 1.5f);
-    CampfireData.Duration = -1.0f; // Persistent
-    CampfireData.bAutoDestroy = false;
-    EffectLibrary.Add(EVFX_EffectType::Fire_Campfire, CampfireData);
+    EffectRegistry.Add(EVFX_EffectType::Dust_Impact, 
+        TSoftObjectPtr<UNiagaraSystem>(FSoftObjectPath(TEXT("/Engine/VFX/Niagara/DefaultAssets/FX_Dust"))));
+    
+    EffectRegistry.Add(EVFX_EffectType::Water_Splash, 
+        TSoftObjectPtr<UNiagaraSystem>(FSoftObjectPath(TEXT("/Engine/VFX/Niagara/DefaultAssets/FX_Water"))));
+    
+    EffectRegistry.Add(EVFX_EffectType::Blood_Hit, 
+        TSoftObjectPtr<UNiagaraSystem>(FSoftObjectPath(TEXT("/Engine/VFX/Niagara/DefaultAssets/FX_Blood"))));
+    
+    EffectRegistry.Add(EVFX_EffectType::Steam_Breath, 
+        TSoftObjectPtr<UNiagaraSystem>(FSoftObjectPath(TEXT("/Engine/VFX/Niagara/DefaultAssets/FX_Steam"))));
+    
+    EffectRegistry.Add(EVFX_EffectType::Volcanic_Smoke, 
+        TSoftObjectPtr<UNiagaraSystem>(FSoftObjectPath(TEXT("/Engine/VFX/Niagara/DefaultAssets/FX_Volcano"))));
 
-    FVFX_EffectData FootstepData;
-    FootstepData.Scale = FVector(0.5f);
-    FootstepData.Duration = 2.0f;
-    FootstepData.bAutoDestroy = true;
-    EffectLibrary.Add(EVFX_EffectType::Dust_Footstep, FootstepData);
-
-    FVFX_EffectData DinoStompData;
-    DinoStompData.Scale = FVector(2.0f);
-    DinoStompData.Duration = 3.0f;
-    DinoStompData.bAutoDestroy = true;
-    EffectLibrary.Add(EVFX_EffectType::Dust_DinoStomp, DinoStompData);
-
-    FVFX_EffectData BloodData;
-    BloodData.Scale = FVector(1.0f);
-    BloodData.Duration = 5.0f;
-    BloodData.bAutoDestroy = true;
-    EffectLibrary.Add(EVFX_EffectType::Blood_Impact, BloodData);
-
-    FVFX_EffectData RainData;
-    RainData.Scale = FVector(10.0f, 10.0f, 1.0f);
-    RainData.Duration = -1.0f; // Persistent weather
-    RainData.bAutoDestroy = false;
-    EffectLibrary.Add(EVFX_EffectType::Rain_Heavy, RainData);
-
-    UE_LOG(LogTemp, Log, TEXT("VFX_NiagaraLibrary: Initialized %d default effects"), EffectLibrary.Num());
+    UE_LOG(LogTemp, Log, TEXT("VFX_NiagaraLibrary: Effect registry initialized with %d effects"), EffectRegistry.Num());
 }
