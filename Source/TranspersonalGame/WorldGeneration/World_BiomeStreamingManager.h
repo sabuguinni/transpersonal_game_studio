@@ -1,11 +1,32 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
-#include "Components/SphereComponent.h"
 #include "Engine/World.h"
-#include "SharedTypes.h"
+#include "Subsystems/WorldSubsystem.h"
+#include "Components/StaticMeshComponent.h"
+#include "Engine/StaticMeshActor.h"
+#include "../SharedTypes.h"
 #include "World_BiomeStreamingManager.generated.h"
+
+UENUM(BlueprintType)
+enum class EWorld_BiomeType : uint8
+{
+    Forest      UMETA(DisplayName = "Forest"),
+    Desert      UMETA(DisplayName = "Desert"),
+    Volcanic    UMETA(DisplayName = "Volcanic"),
+    Swamp       UMETA(DisplayName = "Swamp"),
+    Mountain    UMETA(DisplayName = "Mountain"),
+    Tundra      UMETA(DisplayName = "Tundra")
+};
+
+UENUM(BlueprintType)
+enum class EWorld_StreamingState : uint8
+{
+    Unloaded    UMETA(DisplayName = "Unloaded"),
+    Loading     UMETA(DisplayName = "Loading"),
+    Loaded      UMETA(DisplayName = "Loaded"),
+    Unloading   UMETA(DisplayName = "Unloading")
+};
 
 USTRUCT(BlueprintType)
 struct TRANSPERSONALGAME_API FWorld_BiomeZone
@@ -16,168 +37,145 @@ struct TRANSPERSONALGAME_API FWorld_BiomeZone
     FString BiomeName;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    FVector Center;
+    EWorld_BiomeType BiomeType;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float StreamingRadius;
+    FVector CenterLocation;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float VegetationDensity;
+    float Radius;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    EBiomeType BiomeType;
+    EWorld_StreamingState StreamingState;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    bool bIsActive;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    int32 DetailLevel;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float LastUpdateTime;
 
     FWorld_BiomeZone()
     {
         BiomeName = TEXT("DefaultBiome");
-        Center = FVector::ZeroVector;
-        StreamingRadius = 1000.0f;
-        VegetationDensity = 0.5f;
-        BiomeType = EBiomeType::Temperate;
-        bIsActive = false;
+        BiomeType = EWorld_BiomeType::Forest;
+        CenterLocation = FVector::ZeroVector;
+        Radius = 1000.0f;
+        StreamingState = EWorld_StreamingState::Unloaded;
+        DetailLevel = 2;
+        LastUpdateTime = 0.0f;
     }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FWorld_StreamingPerformanceData
+struct TRANSPERSONALGAME_API FWorld_PerformanceZone
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 ActiveActorCount;
+    FString ZoneName;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float FrameTime;
+    FVector CenterLocation;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float StreamingDistance;
+    float Radius;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    bool bPerformanceOptimized;
+    int32 MaxDetailLevel;
 
-    FWorld_StreamingPerformanceData()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float StreamingPriority;
+
+    FWorld_PerformanceZone()
     {
-        ActiveActorCount = 0;
-        FrameTime = 0.0f;
-        StreamingDistance = 2000.0f;
-        bPerformanceOptimized = true;
+        ZoneName = TEXT("DefaultZone");
+        CenterLocation = FVector::ZeroVector;
+        Radius = 1000.0f;
+        MaxDetailLevel = 3;
+        StreamingPriority = 1.0f;
     }
 };
 
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API AWorld_BiomeStreamingManager : public AActor
+class TRANSPERSONALGAME_API UWorld_BiomeStreamingManager : public UWorldSubsystem
 {
     GENERATED_BODY()
 
 public:
-    AWorld_BiomeStreamingManager();
+    UWorld_BiomeStreamingManager();
 
-protected:
-    virtual void BeginPlay() override;
-    virtual void Tick(float DeltaTime) override;
+    // Subsystem overrides
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
+    virtual bool ShouldCreateSubsystem(UObject* Outer) const override;
 
-    // Core biome streaming data
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Streaming")
-    TArray<FWorld_BiomeZone> BiomeZones;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    FWorld_StreamingPerformanceData PerformanceData;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    class USphereComponent* StreamingTrigger;
-
-    // Streaming configuration
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Streaming Config")
-    float MaxStreamingDistance;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Streaming Config")
-    int32 MaxActiveActors;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Streaming Config")
-    float PerformanceThreshold;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Streaming Config")
-    bool bEnablePerformanceMonitoring;
-
-public:
-    // Biome streaming interface
+    // Biome management
     UFUNCTION(BlueprintCallable, Category = "Biome Streaming")
-    void InitializeBiomeStreaming();
+    void RegisterBiomeZone(const FWorld_BiomeZone& BiomeZone);
+
+    UFUNCTION(BlueprintCallable, Category = "Biome Streaming")
+    void UnregisterBiomeZone(const FString& BiomeName);
 
     UFUNCTION(BlueprintCallable, Category = "Biome Streaming")
     void UpdateBiomeStreaming(const FVector& PlayerLocation);
 
     UFUNCTION(BlueprintCallable, Category = "Biome Streaming")
-    void ActivateBiome(const FString& BiomeName);
+    EWorld_BiomeType GetBiomeAtLocation(const FVector& Location) const;
 
     UFUNCTION(BlueprintCallable, Category = "Biome Streaming")
-    void DeactivateBiome(const FString& BiomeName);
+    TArray<FWorld_BiomeZone> GetActiveBiomes() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Biome Streaming")
-    FWorld_BiomeZone GetBiomeAtLocation(const FVector& Location);
-
-    // Performance monitoring
+    // Performance integration
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    void UpdatePerformanceMetrics();
+    void RegisterPerformanceZone(const FWorld_PerformanceZone& PerformanceZone);
 
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    bool ShouldOptimizeStreaming() const;
+    void UpdatePerformanceBasedStreaming(float CurrentFPS, float TargetFPS);
 
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    void OptimizeStreamingDistance();
+    int32 GetRecommendedDetailLevel(const FVector& Location, float CurrentFPS) const;
 
-    // Vegetation streaming integration
-    UFUNCTION(BlueprintCallable, Category = "Vegetation")
-    void StreamVegetationForBiome(const FString& BiomeName);
+    // Vegetation and terrain
+    UFUNCTION(BlueprintCallable, Category = "World Generation")
+    void GenerateVegetationForBiome(const FString& BiomeName, int32 VegetationCount);
 
-    UFUNCTION(BlueprintCallable, Category = "Vegetation")
-    void UnstreamVegetationForBiome(const FString& BiomeName);
+    UFUNCTION(BlueprintCallable, Category = "World Generation")
+    void CreateLandmarkAtLocation(const FVector& Location, const FString& LandmarkName);
 
-    // Water body streaming
-    UFUNCTION(BlueprintCallable, Category = "Water")
-    void StreamWaterBodies(const FVector& PlayerLocation);
+    UFUNCTION(BlueprintCallable, Category = "World Generation")
+    void CreateWaterSystem(const TArray<FVector>& WaterPoints);
 
-    UFUNCTION(BlueprintCallable, Category = "Water")
-    void UpdateWaterBodyLOD(float Distance);
-
-    // Physics integration
-    UFUNCTION(BlueprintCallable, Category = "Physics")
-    void UpdatePhysicsIntegration();
-
-    UFUNCTION(BlueprintCallable, Category = "Physics")
-    void EnablePhysicsForStreamedActors(bool bEnable);
-
-    // Debug and validation
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Debug")
-    void ValidateStreamingSystem();
-
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Debug")
+    // Debug and utilities
+    UFUNCTION(BlueprintCallable, Category = "Debug", CallInEditor)
     void DebugDrawBiomeZones();
 
     UFUNCTION(BlueprintCallable, Category = "Debug")
-    FString GetStreamingSystemStatus() const;
+    void LogBiomeStatus() const;
+
+protected:
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Streaming")
+    TArray<FWorld_BiomeZone> RegisteredBiomes;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    TArray<FWorld_PerformanceZone> PerformanceZones;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Streaming")
+    float StreamingUpdateInterval;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Streaming")
+    float MaxStreamingDistance;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float PerformanceUpdateInterval;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float LastPerformanceUpdate;
 
 private:
-    // Internal streaming logic
-    void ProcessBiomeActivation();
-    void ProcessBiomeDeactivation();
-    void UpdateStreamingLOD();
-    void MonitorPerformanceMetrics();
-    
-    // Performance optimization
-    void OptimizeActorCount();
-    void AdjustStreamingDistances();
-    void ManageMemoryUsage();
-
-    // Internal state
-    TArray<FString> ActiveBiomes;
-    TArray<FString> PendingActivation;
-    TArray<FString> PendingDeactivation;
-    float LastPerformanceCheck;
-    bool bStreamingSystemInitialized;
+    void StreamInBiome(FWorld_BiomeZone& BiomeZone);
+    void StreamOutBiome(FWorld_BiomeZone& BiomeZone);
+    float CalculateStreamingPriority(const FWorld_BiomeZone& BiomeZone, const FVector& PlayerLocation) const;
+    void AdjustDetailLevelForPerformance(FWorld_BiomeZone& BiomeZone, float CurrentFPS, float TargetFPS);
+    AActor* SpawnVegetationActor(const FVector& Location, EWorld_BiomeType BiomeType);
+    UStaticMesh* GetMeshForBiomeType(EWorld_BiomeType BiomeType) const;
 };
-
-#include "World_BiomeStreamingManager.generated.h"
