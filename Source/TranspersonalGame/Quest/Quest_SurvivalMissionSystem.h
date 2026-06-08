@@ -1,50 +1,57 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
+#include "Engine/GameInstanceSubsystem.h"
 #include "Components/ActorComponent.h"
-#include "Engine/World.h"
+#include "../SharedTypes.h"
 #include "Quest_SurvivalMissionSystem.generated.h"
 
-UENUM(BlueprintType)
-enum class EQuest_SurvivalMissionType : uint8
-{
-    None UMETA(DisplayName = "None"),
-    GatherFood UMETA(DisplayName = "Gather Food"),
-    FindWater UMETA(DisplayName = "Find Water"),
-    BuildShelter UMETA(DisplayName = "Build Shelter"),
-    CraftTool UMETA(DisplayName = "Craft Tool"),
-    HuntPrey UMETA(DisplayName = "Hunt Prey"),
-    EscapePredator UMETA(DisplayName = "Escape Predator"),
-    ExploreArea UMETA(DisplayName = "Explore Area"),
-    DefendTerritory UMETA(DisplayName = "Defend Territory")
-};
-
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FQuest_SurvivalMissionData
+struct TRANSPERSONALGAME_API FQuest_MissionObjective
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mission")
-    FString MissionName;
+    FString ObjectiveText;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mission")
-    FString Description;
+    bool bIsCompleted;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mission")
-    EQuest_SurvivalMissionType MissionType;
+    int32 CurrentProgress;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mission")
-    int32 TargetQuantity;
+    int32 RequiredProgress;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mission")
-    float TimeLimit;
+    FString TargetActorTag;
+
+    FQuest_MissionObjective()
+    {
+        ObjectiveText = TEXT("Unknown Objective");
+        bIsCompleted = false;
+        CurrentProgress = 0;
+        RequiredProgress = 1;
+        TargetActorTag = TEXT("");
+    }
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FQuest_SurvivalMission
+{
+    GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mission")
-    float DifficultyLevel;
+    FString MissionID;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mission")
-    FVector TargetLocation;
+    FString MissionTitle;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mission")
+    FString MissionDescription;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mission")
+    TArray<FQuest_MissionObjective> Objectives;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mission")
     bool bIsActive;
@@ -52,99 +59,93 @@ struct TRANSPERSONALGAME_API FQuest_SurvivalMissionData
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mission")
     bool bIsCompleted;
 
-    FQuest_SurvivalMissionData()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mission")
+    float TimeLimit;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mission")
+    float ElapsedTime;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mission")
+    int32 ExperienceReward;
+
+    FQuest_SurvivalMission()
     {
-        MissionName = TEXT("Unknown Mission");
-        Description = TEXT("No description available");
-        MissionType = EQuest_SurvivalMissionType::None;
-        TargetQuantity = 1;
-        TimeLimit = 300.0f; // 5 minutes default
-        DifficultyLevel = 1.0f;
-        TargetLocation = FVector::ZeroVector;
+        MissionID = TEXT("MISSION_001");
+        MissionTitle = TEXT("Survive the Day");
+        MissionDescription = TEXT("Basic survival mission");
         bIsActive = false;
         bIsCompleted = false;
+        TimeLimit = 600.0f; // 10 minutes
+        ElapsedTime = 0.0f;
+        ExperienceReward = 100;
     }
 };
 
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API AQuest_SurvivalMissionSystem : public AActor
+class TRANSPERSONALGAME_API UQuest_SurvivalMissionSystem : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
 public:
-    AQuest_SurvivalMissionSystem();
+    UQuest_SurvivalMissionSystem();
 
-protected:
-    virtual void BeginPlay() override;
-
-public:
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Tick(float DeltaTime) override;
+    virtual bool ShouldCreateSubsystem(UObject* Outer) const override { return true; }
 
-    // Mission Management
-    UFUNCTION(BlueprintCallable, Category = "Survival Mission")
-    void StartMission(EQuest_SurvivalMissionType MissionType, const FVector& Location = FVector::ZeroVector);
+    UFUNCTION(BlueprintCallable, Category = "Quest System")
+    void StartMission(const FString& MissionID);
 
-    UFUNCTION(BlueprintCallable, Category = "Survival Mission")
-    void CompleteMission();
+    UFUNCTION(BlueprintCallable, Category = "Quest System")
+    void CompleteMission(const FString& MissionID);
 
-    UFUNCTION(BlueprintCallable, Category = "Survival Mission")
-    void FailMission();
+    UFUNCTION(BlueprintCallable, Category = "Quest System")
+    void UpdateObjectiveProgress(const FString& MissionID, int32 ObjectiveIndex, int32 ProgressAmount);
 
-    UFUNCTION(BlueprintCallable, Category = "Survival Mission")
-    bool IsMissionActive() const;
+    UFUNCTION(BlueprintCallable, Category = "Quest System")
+    bool IsMissionActive(const FString& MissionID) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Survival Mission")
-    FQuest_SurvivalMissionData GetCurrentMission() const;
+    UFUNCTION(BlueprintCallable, Category = "Quest System")
+    TArray<FQuest_SurvivalMission> GetActiveMissions() const;
 
-    // Mission Generation
-    UFUNCTION(BlueprintCallable, Category = "Survival Mission")
-    void GenerateRandomMission();
+    UFUNCTION(BlueprintCallable, Category = "Quest System")
+    void CreateHuntingMission(const FString& DinosaurType, int32 RequiredKills);
 
-    UFUNCTION(BlueprintCallable, Category = "Survival Mission")
-    void GenerateMissionBasedOnPlayerState();
+    UFUNCTION(BlueprintCallable, Category = "Quest System")
+    void CreateGatheringMission(const FString& ResourceType, int32 RequiredAmount);
 
-    // Progress Tracking
-    UFUNCTION(BlueprintCallable, Category = "Survival Mission")
-    void UpdateMissionProgress(int32 Progress);
+    UFUNCTION(BlueprintCallable, Category = "Quest System")
+    void CreateExplorationMission(const FString& LocationName, float DiscoveryRadius);
 
-    UFUNCTION(BlueprintCallable, Category = "Survival Mission")
-    float GetMissionProgress() const;
+    UFUNCTION(BlueprintCallable, Category = "Quest System")
+    void RegisterKill(const FString& DinosaurType);
 
-    // Event Handlers
-    UFUNCTION(BlueprintImplementableEvent, Category = "Survival Mission")
-    void OnMissionStarted(const FQuest_SurvivalMissionData& MissionData);
+    UFUNCTION(BlueprintCallable, Category = "Quest System")
+    void RegisterResourceGathered(const FString& ResourceType, int32 Amount);
 
-    UFUNCTION(BlueprintImplementableEvent, Category = "Survival Mission")
-    void OnMissionCompleted(const FQuest_SurvivalMissionData& MissionData);
-
-    UFUNCTION(BlueprintImplementableEvent, Category = "Survival Mission")
-    void OnMissionFailed(const FQuest_SurvivalMissionData& MissionData);
-
-    UFUNCTION(BlueprintImplementableEvent, Category = "Survival Mission")
-    void OnMissionProgressUpdated(float ProgressPercentage);
+    UFUNCTION(BlueprintCallable, Category = "Quest System")
+    void RegisterLocationDiscovered(const FString& LocationName);
 
 protected:
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mission Data")
-    FQuest_SurvivalMissionData CurrentMission;
+    UPROPERTY(BlueprintReadOnly, Category = "Quest System")
+    TArray<FQuest_SurvivalMission> ActiveMissions;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mission Data")
-    TArray<FQuest_SurvivalMissionData> AvailableMissions;
+    UPROPERTY(BlueprintReadOnly, Category = "Quest System")
+    TArray<FQuest_SurvivalMission> CompletedMissions;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mission Settings")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest System")
+    int32 MaxActiveMissions;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest System")
     float MissionCheckInterval;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mission Settings")
-    int32 MaxSimultaneousMissions;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mission Progress")
-    int32 CurrentProgress;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mission Progress")
-    float MissionTimer;
+    UPROPERTY(BlueprintReadOnly, Category = "Quest System")
+    float LastMissionCheck;
 
 private:
-    void InitializeMissionTemplates();
-    void CheckMissionTimeout();
-    FQuest_SurvivalMissionData CreateMissionFromType(EQuest_SurvivalMissionType Type, const FVector& Location);
-    void LogMissionEvent(const FString& Event, const FString& Details);
+    void CheckMissionTimeouts(float DeltaTime);
+    void CheckObjectiveCompletion();
+    FQuest_SurvivalMission* FindMissionByID(const FString& MissionID);
+    void InitializeDefaultMissions();
+    FString GenerateUniqueMissionID();
 };
