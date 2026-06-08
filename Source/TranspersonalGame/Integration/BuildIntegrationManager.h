@@ -2,7 +2,6 @@
 
 #include "CoreMinimal.h"
 #include "Engine/GameInstanceSubsystem.h"
-#include "Engine/World.h"
 #include "SharedTypes.h"
 #include "BuildIntegrationManager.generated.h"
 
@@ -11,52 +10,49 @@ struct TRANSPERSONALGAME_API FBuild_IntegrationStatus
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
     bool bIsCompiled = false;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
     bool bAllModulesLoaded = false;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
     int32 ActiveActorCount = 0;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    FString LastBuildTime;
+    UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
+    float LastValidationTime = 0.0f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
     TArray<FString> LoadedModules;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    TArray<FString> FailedModules;
+    UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
+    TArray<FString> CompilationErrors;
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FBuild_ValidationResult
+struct TRANSPERSONALGAME_API FBuild_SystemHealth
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    bool bValidationPassed = false;
+    UPROPERTY(BlueprintReadOnly, Category = "System Health")
+    bool bWorldGeneratorActive = false;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    int32 ErrorCount = 0;
+    UPROPERTY(BlueprintReadOnly, Category = "System Health")
+    bool bFoliageManagerActive = false;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    int32 WarningCount = 0;
+    UPROPERTY(BlueprintReadOnly, Category = "System Health")
+    bool bCrowdSimulationActive = false;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    TArray<FString> ErrorMessages;
+    UPROPERTY(BlueprintReadOnly, Category = "System Health")
+    bool bQAFrameworkActive = false;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    TArray<FString> WarningMessages;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    float ValidationDuration = 0.0f;
+    UPROPERTY(BlueprintReadOnly, Category = "System Health")
+    float OverallHealthScore = 0.0f;
 };
 
 /**
- * Build Integration Manager - Handles integration of all game systems
- * Validates compilation, module loading, and cross-system compatibility
+ * Build Integration Manager - Orchestrates all systems and validates build integrity
+ * Ensures all 18 agent outputs integrate into a cohesive, playable game
  */
 UCLASS(BlueprintType)
 class TRANSPERSONALGAME_API UBuildIntegrationManager : public UGameInstanceSubsystem
@@ -64,62 +60,55 @@ class TRANSPERSONALGAME_API UBuildIntegrationManager : public UGameInstanceSubsy
     GENERATED_BODY()
 
 public:
-    // USubsystem interface
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
-    // Integration Management
-    UFUNCTION(BlueprintCallable, Category = "Integration")
+    UFUNCTION(BlueprintCallable, Category = "Build Integration")
+    void ValidateAllSystems();
+
+    UFUNCTION(BlueprintCallable, Category = "Build Integration")
     FBuild_IntegrationStatus GetIntegrationStatus() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    bool ValidateAllSystems();
+    UFUNCTION(BlueprintCallable, Category = "Build Integration")
+    FBuild_SystemHealth GetSystemHealth() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    FBuild_ValidationResult RunFullValidation();
+    UFUNCTION(BlueprintCallable, Category = "Build Integration")
+    void RunCompilationTest();
 
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    bool CheckModuleCompatibility(const FString& ModuleName);
+    UFUNCTION(BlueprintCallable, Category = "Build Integration")
+    void ValidateMinPlayableMap();
 
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    void RefreshSystemStatus();
+    UFUNCTION(BlueprintCallable, Category = "Build Integration")
+    bool CheckAllModulesLoaded();
 
-    // Build Management
-    UFUNCTION(BlueprintCallable, Category = "Build")
-    bool TriggerBuildValidation();
+    UFUNCTION(BlueprintCallable, Category = "Build Integration")
+    void GenerateBuildReport();
 
-    UFUNCTION(BlueprintCallable, Category = "Build")
-    TArray<FString> GetLoadedModuleList() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Build")
-    TArray<FString> GetFailedModuleList() const;
-
-    // Actor Management
-    UFUNCTION(BlueprintCallable, Category = "Actors")
-    int32 GetActiveActorCount() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Actors")
-    bool ValidateActorIntegrity();
-
-    UFUNCTION(BlueprintCallable, Category = "Actors")
-    void CleanupInvalidActors();
+    UFUNCTION(BlueprintCallable, Category = "Build Integration")
+    void FixCommonIntegrationIssues();
 
 protected:
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
     FBuild_IntegrationStatus CurrentStatus;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    FBuild_ValidationResult LastValidationResult;
+    UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
+    FBuild_SystemHealth SystemHealth;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    TArray<FString> SystemModules;
+    UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
+    TArray<FString> CriticalErrors;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    float LastValidationTime = 0.0f;
+    UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
+    float LastFullValidation = 0.0f;
 
 private:
-    void InitializeSystemModules();
-    bool ValidateModule(const FString& ModuleName);
-    void UpdateIntegrationStatus();
-    void LogValidationResults(const FBuild_ValidationResult& Result);
+    void ValidateWorldGeneration();
+    void ValidateFoliageSystem();
+    void ValidateCrowdSimulation();
+    void ValidateQAFramework();
+    void ValidateCharacterSystems();
+    void ValidateGameplayIntegration();
+    void CheckForDuplicateTypes();
+    void ValidateSharedTypes();
+    void CheckCompilationErrors();
+    void UpdateSystemHealth();
 };
