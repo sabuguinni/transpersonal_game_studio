@@ -1,15 +1,10 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/GameInstanceSubsystem.h"
+#include "Components/ActorComponent.h"
 #include "Engine/DataTable.h"
-#include "Sound/SoundBase.h"
-#include "../SharedTypes.h"
+#include "SharedTypes.h"
 #include "Narr_DialogueSystem.generated.h"
-
-// Forward declarations
-class UNarr_DialogueComponent;
-class ANarr_DialogueTrigger;
 
 USTRUCT(BlueprintType)
 struct TRANSPERSONALGAME_API FNarr_DialogueLine
@@ -17,23 +12,27 @@ struct TRANSPERSONALGAME_API FNarr_DialogueLine
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    FText SpeakerName;
+    FString SpeakerName;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
     FText DialogueText;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    TSoftObjectPtr<USoundBase> VoiceAudio;
+    FString AudioAssetPath;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    float DisplayDuration;
+    float Duration;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    TArray<FText> PlayerResponses;
+    bool bIsPlayerChoice;
 
     FNarr_DialogueLine()
     {
-        DisplayDuration = 5.0f;
+        SpeakerName = TEXT("");
+        DialogueText = FText::GetEmpty();
+        AudioAssetPath = TEXT("");
+        Duration = 3.0f;
+        bIsPlayerChoice = false;
     }
 };
 
@@ -43,87 +42,74 @@ struct TRANSPERSONALGAME_API FNarr_DialogueSequence
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    FName SequenceID;
+    FString SequenceID;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
     TArray<FNarr_DialogueLine> DialogueLines;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    ESurvivalContext TriggerContext;
+    bool bCanRepeat;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    bool bIsRepeatable;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    int32 Priority;
+    bool bIsCompleted;
 
     FNarr_DialogueSequence()
     {
-        TriggerContext = ESurvivalContext::Exploration;
-        bIsRepeatable = false;
-        Priority = 1;
+        SequenceID = TEXT("");
+        bCanRepeat = true;
+        bIsCompleted = false;
     }
 };
 
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UNarr_DialogueSystem : public UGameInstanceSubsystem
+UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UNarr_DialogueSystem : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
     UNarr_DialogueSystem();
 
-    // Subsystem interface
-    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
-    virtual void Deinitialize() override;
-
-    // Dialogue management
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void TriggerDialogue(FName SequenceID, AActor* Speaker = nullptr);
-
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void StopCurrentDialogue();
-
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    bool IsDialogueActive() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void RegisterDialogueSequence(const FNarr_DialogueSequence& Sequence);
-
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void PlayContextualDialogue(ESurvivalContext Context, const FVector& Location);
-
-    // Audio management
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void PlayVoiceLine(USoundBase* VoiceAudio, const FVector& Location);
-
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void SetDialogueVolume(float Volume);
-
 protected:
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dialogue")
-    TMap<FName, FNarr_DialogueSequence> DialogueDatabase;
+    virtual void BeginPlay() override;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dialogue")
-    TArray<FNarr_DialogueSequence> ContextualDialogues;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue System")
+    TArray<FNarr_DialogueSequence> AvailableSequences;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Dialogue")
-    FNarr_DialogueSequence* CurrentSequence;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue System")
+    FNarr_DialogueSequence CurrentSequence;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Dialogue")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue System")
     int32 CurrentLineIndex;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Audio")
-    float DialogueVolume;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue System")
+    bool bIsDialogueActive;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Audio")
-    class UAudioComponent* VoiceAudioComponent;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue System")
+    float DefaultLineDuration;
+
+public:
+    UFUNCTION(BlueprintCallable, Category = "Dialogue System")
+    bool StartDialogueSequence(const FString& SequenceID);
+
+    UFUNCTION(BlueprintCallable, Category = "Dialogue System")
+    void AdvanceDialogue();
+
+    UFUNCTION(BlueprintCallable, Category = "Dialogue System")
+    void EndDialogue();
+
+    UFUNCTION(BlueprintCallable, Category = "Dialogue System")
+    FNarr_DialogueLine GetCurrentLine() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Dialogue System")
+    bool IsDialogueActive() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Dialogue System")
+    void AddDialogueSequence(const FNarr_DialogueSequence& NewSequence);
+
+    UFUNCTION(BlueprintCallable, Category = "Dialogue System")
+    TArray<FString> GetAvailableSequenceIDs() const;
 
 private:
-    void InitializeDefaultDialogues();
-    void AdvanceDialogue();
-    FNarr_DialogueSequence* FindBestContextualDialogue(ESurvivalContext Context);
-
-    FTimerHandle DialogueTimerHandle;
-    bool bDialogueActive;
+    void InitializeDefaultSequences();
+    FNarr_DialogueSequence* FindSequenceByID(const FString& SequenceID);
 };
