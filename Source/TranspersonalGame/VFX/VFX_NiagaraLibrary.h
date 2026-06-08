@@ -4,21 +4,22 @@
 #include "Engine/Engine.h"
 #include "NiagaraSystem.h"
 #include "NiagaraComponent.h"
+#include "NiagaraFunctionLibrary.h"
 #include "Components/ActorComponent.h"
+#include "Engine/World.h"
+#include "GameFramework/Actor.h"
+#include "UObject/NoExportTypes.h"
 #include "VFX_NiagaraLibrary.generated.h"
 
 UENUM(BlueprintType)
 enum class EVFX_EffectType : uint8
 {
-    Fire_Campfire       UMETA(DisplayName = "Campfire"),
-    Fire_Torch          UMETA(DisplayName = "Torch"),
-    Dust_Footstep       UMETA(DisplayName = "Footstep Dust"),
-    Dust_DinoStomp      UMETA(DisplayName = "Dinosaur Stomp"),
-    Blood_Impact        UMETA(DisplayName = "Blood Impact"),
-    Water_Splash        UMETA(DisplayName = "Water Splash"),
-    Smoke_Cooking       UMETA(DisplayName = "Cooking Smoke"),
-    Rain_Heavy          UMETA(DisplayName = "Heavy Rain"),
-    Fog_Morning         UMETA(DisplayName = "Morning Fog")
+    Fire_Campfire UMETA(DisplayName = "Campfire"),
+    Dust_Impact UMETA(DisplayName = "Dust Impact"),
+    Water_Splash UMETA(DisplayName = "Water Splash"),
+    Blood_Hit UMETA(DisplayName = "Blood Hit"),
+    Steam_Breath UMETA(DisplayName = "Steam Breath"),
+    Volcanic_Smoke UMETA(DisplayName = "Volcanic Smoke")
 };
 
 USTRUCT(BlueprintType)
@@ -27,62 +28,60 @@ struct TRANSPERSONALGAME_API FVFX_EffectData
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
-    TSoftObjectPtr<UNiagaraSystem> NiagaraSystem;
+    EVFX_EffectType EffectType;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
-    FVector Scale;
+    TSoftObjectPtr<UNiagaraSystem> NiagaraSystem;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
     float Duration;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
-    bool bAutoDestroy;
+    FVector Scale;
 
     FVFX_EffectData()
     {
-        Scale = FVector(1.0f);
+        EffectType = EVFX_EffectType::Fire_Campfire;
         Duration = 5.0f;
-        bAutoDestroy = true;
+        Scale = FVector(1.0f);
     }
 };
 
-UCLASS(BlueprintType, Blueprintable, ClassGroup=(VFX))
-class TRANSPERSONALGAME_API UVFX_NiagaraLibrary : public UActorComponent
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API UVFX_NiagaraLibrary : public UBlueprintFunctionLibrary
 {
     GENERATED_BODY()
 
 public:
-    UVFX_NiagaraLibrary();
-
-protected:
-    virtual void BeginPlay() override;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Library")
-    TMap<EVFX_EffectType, FVFX_EffectData> EffectLibrary;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "VFX Library")
-    TArray<UNiagaraComponent*> ActiveEffects;
-
-public:
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    UNiagaraComponent* SpawnEffect(EVFX_EffectType EffectType, FVector Location, FRotator Rotation = FRotator::ZeroRotator);
+    UFUNCTION(BlueprintCallable, Category = "VFX", CallInEditor = true)
+    static UNiagaraComponent* SpawnVFXAtLocation(
+        UObject* WorldContext,
+        EVFX_EffectType EffectType,
+        FVector Location,
+        FRotator Rotation = FRotator::ZeroRotator,
+        FVector Scale = FVector(1.0f)
+    );
 
     UFUNCTION(BlueprintCallable, Category = "VFX")
-    void StopEffect(UNiagaraComponent* EffectComponent);
+    static UNiagaraComponent* AttachVFXToActor(
+        AActor* TargetActor,
+        EVFX_EffectType EffectType,
+        FName SocketName = NAME_None,
+        FVector RelativeLocation = FVector::ZeroVector,
+        FRotator RelativeRotation = FRotator::ZeroRotator,
+        FVector Scale = FVector(1.0f)
+    );
 
     UFUNCTION(BlueprintCallable, Category = "VFX")
-    void StopAllEffects();
+    static void StopVFXEffect(UNiagaraComponent* VFXComponent);
 
     UFUNCTION(BlueprintCallable, Category = "VFX")
-    void RegisterEffect(EVFX_EffectType EffectType, UNiagaraSystem* NiagaraSystem, FVector Scale = FVector(1.0f), float Duration = 5.0f);
+    static TArray<FVFX_EffectData> GetAvailableEffects();
 
     UFUNCTION(BlueprintCallable, Category = "VFX")
-    bool HasEffect(EVFX_EffectType EffectType) const;
-
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    int32 GetActiveEffectCount() const;
+    static UNiagaraSystem* GetNiagaraSystemForEffect(EVFX_EffectType EffectType);
 
 private:
-    void CleanupFinishedEffects();
-    void InitializeDefaultEffects();
+    static TMap<EVFX_EffectType, TSoftObjectPtr<UNiagaraSystem>> EffectRegistry;
+    static void InitializeEffectRegistry();
 };
