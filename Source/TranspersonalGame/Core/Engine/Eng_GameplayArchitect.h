@@ -1,245 +1,215 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/GameInstanceSubsystem.h"
-#include "Components/ActorComponent.h"
+#include "GameFramework/Actor.h"
 #include "Engine/World.h"
-#include "GameFramework/GameModeBase.h"
-#include "GameFramework/Character.h"
-#include "GameFramework/PlayerController.h"
-#include "Kismet/GameplayStatics.h"
+#include "Components/StaticMeshComponent.h"
+#include "Components/SceneComponent.h"
+#include "SharedTypes.h"
 #include "Eng_GameplayArchitect.generated.h"
 
 // Forward declarations
-class UEng_BiomeSystem;
-class UEng_SurvivalSystem;
-class UEng_DinosaurSystem;
-
-UENUM(BlueprintType)
-enum class EEng_GameplaySystemType : uint8
-{
-    None            UMETA(DisplayName = "None"),
-    Biome           UMETA(DisplayName = "Biome System"),
-    Survival        UMETA(DisplayName = "Survival System"),
-    Dinosaur        UMETA(DisplayName = "Dinosaur System"),
-    Combat          UMETA(DisplayName = "Combat System"),
-    Quest           UMETA(DisplayName = "Quest System"),
-    NPC             UMETA(DisplayName = "NPC System"),
-    World           UMETA(DisplayName = "World System"),
-    Audio           UMETA(DisplayName = "Audio System"),
-    VFX             UMETA(DisplayName = "VFX System"),
-    Performance     UMETA(DisplayName = "Performance System")
-};
-
-UENUM(BlueprintType)
-enum class EEng_GameplayPriority : uint8
-{
-    Critical        UMETA(DisplayName = "Critical"),
-    High            UMETA(DisplayName = "High"),
-    Medium          UMETA(DisplayName = "Medium"),
-    Low             UMETA(DisplayName = "Low"),
-    Background      UMETA(DisplayName = "Background")
-};
-
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEng_GameplaySystemInfo
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System Info")
-    EEng_GameplaySystemType SystemType = EEng_GameplaySystemType::None;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System Info")
-    FString SystemName;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System Info")
-    EEng_GameplayPriority Priority = EEng_GameplayPriority::Medium;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System Info")
-    bool bIsActive = false;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System Info")
-    bool bIsInitialized = false;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System Info")
-    float InitializationTime = 0.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System Info")
-    float LastUpdateTime = 0.0f;
-
-    FEng_GameplaySystemInfo()
-    {
-        SystemType = EEng_GameplaySystemType::None;
-        SystemName = TEXT("Unknown System");
-        Priority = EEng_GameplayPriority::Medium;
-        bIsActive = false;
-        bIsInitialized = false;
-        InitializationTime = 0.0f;
-        LastUpdateTime = 0.0f;
-    }
-};
-
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEng_GameplayArchitectureConfig
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    bool bEnableBiomeSystem = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    bool bEnableSurvivalSystem = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    bool bEnableDinosaurSystem = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    bool bEnablePerformanceMonitoring = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    float SystemUpdateInterval = 0.1f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    int32 MaxConcurrentSystems = 10;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    bool bAutoInitializeSystems = true;
-
-    FEng_GameplayArchitectureConfig()
-    {
-        bEnableBiomeSystem = true;
-        bEnableSurvivalSystem = true;
-        bEnableDinosaurSystem = true;
-        bEnablePerformanceMonitoring = true;
-        SystemUpdateInterval = 0.1f;
-        MaxConcurrentSystems = 10;
-        bAutoInitializeSystems = true;
-    }
-};
+class UEng_BiomeSystemManager;
+class UEng_ArchitecturalCore;
+class UEng_CompilationManager;
 
 /**
- * Engine Architect Gameplay Architecture System
- * Defines and manages the core gameplay architecture for the prehistoric survival game
- * Coordinates between biome, survival, dinosaur, and other gameplay systems
+ * Eng_GameplayArchitect - Supreme gameplay architecture authority
+ * Defines and enforces all gameplay system architectural patterns, integration rules,
+ * and cross-system communication protocols for the prehistoric survival game.
+ * This is the master architect that ensures all gameplay systems work cohesively.
  */
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UEng_GameplayArchitect : public UGameInstanceSubsystem
+class TRANSPERSONALGAME_API AEng_GameplayArchitect : public AActor
 {
     GENERATED_BODY()
 
 public:
-    UEng_GameplayArchitect();
-
-    // USubsystem interface
-    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
-    virtual void Deinitialize() override;
-
-    // Core Architecture Methods
-    UFUNCTION(BlueprintCallable, Category = "Gameplay Architecture")
-    void InitializeGameplayArchitecture();
-
-    UFUNCTION(BlueprintCallable, Category = "Gameplay Architecture")
-    void ShutdownGameplayArchitecture();
-
-    UFUNCTION(BlueprintCallable, Category = "Gameplay Architecture")
-    bool RegisterGameplaySystem(EEng_GameplaySystemType SystemType, const FString& SystemName);
-
-    UFUNCTION(BlueprintCallable, Category = "Gameplay Architecture")
-    bool UnregisterGameplaySystem(EEng_GameplaySystemType SystemType);
-
-    UFUNCTION(BlueprintCallable, Category = "Gameplay Architecture")
-    bool IsSystemRegistered(EEng_GameplaySystemType SystemType) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Gameplay Architecture")
-    bool IsSystemActive(EEng_GameplaySystemType SystemType) const;
-
-    // System Management
-    UFUNCTION(BlueprintCallable, Category = "System Management")
-    void ActivateSystem(EEng_GameplaySystemType SystemType);
-
-    UFUNCTION(BlueprintCallable, Category = "System Management")
-    void DeactivateSystem(EEng_GameplaySystemType SystemType);
-
-    UFUNCTION(BlueprintCallable, Category = "System Management")
-    void UpdateAllSystems(float DeltaTime);
-
-    UFUNCTION(BlueprintCallable, Category = "System Management")
-    void UpdateSystem(EEng_GameplaySystemType SystemType, float DeltaTime);
-
-    // Configuration
-    UFUNCTION(BlueprintCallable, Category = "Configuration")
-    void SetArchitectureConfig(const FEng_GameplayArchitectureConfig& NewConfig);
-
-    UFUNCTION(BlueprintCallable, Category = "Configuration")
-    FEng_GameplayArchitectureConfig GetArchitectureConfig() const;
-
-    // System Information
-    UFUNCTION(BlueprintCallable, Category = "System Info")
-    TArray<FEng_GameplaySystemInfo> GetAllSystemInfo() const;
-
-    UFUNCTION(BlueprintCallable, Category = "System Info")
-    FEng_GameplaySystemInfo GetSystemInfo(EEng_GameplaySystemType SystemType) const;
-
-    UFUNCTION(BlueprintCallable, Category = "System Info")
-    int32 GetActiveSystemCount() const;
-
-    UFUNCTION(BlueprintCallable, Category = "System Info")
-    float GetTotalSystemUpdateTime() const;
-
-    // Performance Monitoring
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void EnablePerformanceMonitoring(bool bEnable);
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    bool IsPerformanceMonitoringEnabled() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    float GetSystemPerformanceMetric(EEng_GameplaySystemType SystemType) const;
-
-    // Debug and Validation
-    UFUNCTION(BlueprintCallable, Category = "Debug", CallInEditor = true)
-    void ValidateArchitecture();
-
-    UFUNCTION(BlueprintCallable, Category = "Debug", CallInEditor = true)
-    void PrintSystemStatus();
-
-    UFUNCTION(BlueprintCallable, Category = "Debug")
-    bool RunArchitectureDiagnostics();
+    AEng_GameplayArchitect();
 
 protected:
-    // Core system registry
+    virtual void BeginPlay() override;
+    virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+
+public:
+    virtual void Tick(float DeltaTime) override;
+
+    // ===== CORE ARCHITECTURAL COMPONENTS =====
+    
+    /** Root scene component for architectural organization */
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Architecture")
-    TMap<EEng_GameplaySystemType, FEng_GameplaySystemInfo> RegisteredSystems;
+    USceneComponent* ArchitecturalRoot;
 
-    // Configuration
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
-    FEng_GameplayArchitectureConfig ArchitectureConfig;
+    /** Visual representation mesh for debugging */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Architecture")
+    UStaticMeshComponent* ArchitecturalMesh;
 
-    // Performance tracking
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Performance")
-    TMap<EEng_GameplaySystemType, float> SystemPerformanceMetrics;
+    // ===== GAMEPLAY SYSTEM ARCHITECTURE =====
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Performance")
-    bool bPerformanceMonitoringEnabled;
+    /** Current gameplay architecture state */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Gameplay Architecture")
+    EEng_ArchitecturalState GameplayArchitectureState;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Performance")
-    float TotalUpdateTime;
+    /** Gameplay system integration level */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Gameplay Architecture")
+    EEng_SystemIntegrationLevel SystemIntegrationLevel;
 
-    // Internal methods
-    void InitializeDefaultSystems();
-    void CleanupSystems();
-    void UpdatePerformanceMetrics(EEng_GameplaySystemType SystemType, float UpdateTime);
-    bool ValidateSystemDependencies(EEng_GameplaySystemType SystemType) const;
-    void LogSystemEvent(EEng_GameplaySystemType SystemType, const FString& Event) const;
+    /** Active gameplay patterns count */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Gameplay Architecture")
+    int32 ActiveGameplayPatterns;
+
+    /** Cross-system communication channels */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Gameplay Architecture")
+    int32 CrossSystemChannels;
+
+    // ===== SURVIVAL SYSTEM ARCHITECTURE =====
+
+    /** Survival mechanics integration state */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival Architecture")
+    bool bSurvivalSystemsIntegrated;
+
+    /** Hunger/thirst/stamina architecture validation */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival Architecture")
+    bool bSurvivalStatsArchitectureValid;
+
+    /** Crafting system architectural compliance */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival Architecture")
+    bool bCraftingArchitectureCompliant;
+
+    /** Shelter building system integration */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival Architecture")
+    bool bShelterSystemIntegrated;
+
+    // ===== DINOSAUR SYSTEM ARCHITECTURE =====
+
+    /** Dinosaur AI architecture validation */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur Architecture")
+    bool bDinosaurAIArchitectureValid;
+
+    /** Dinosaur behavior tree integration */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur Architecture")
+    bool bDinosaurBehaviorTreesIntegrated;
+
+    /** Dinosaur ecology system compliance */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur Architecture")
+    bool bDinosaurEcologyCompliant;
+
+    /** Predator-prey relationship architecture */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur Architecture")
+    bool bPredatorPreyArchitectureValid;
+
+    // ===== WORLD SYSTEM ARCHITECTURE =====
+
+    /** Biome system architectural integration */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World Architecture")
+    bool bBiomeSystemArchitectureIntegrated;
+
+    /** Terrain generation architecture compliance */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World Architecture")
+    bool bTerrainArchitectureCompliant;
+
+    /** Weather system integration state */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World Architecture")
+    bool bWeatherSystemIntegrated;
+
+    /** Day/night cycle architecture validation */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World Architecture")
+    bool bDayNightCycleArchitectureValid;
+
+    // ===== COMBAT SYSTEM ARCHITECTURE =====
+
+    /** Combat mechanics architectural validation */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Architecture")
+    bool bCombatMechanicsArchitectureValid;
+
+    /** Weapon system integration state */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Architecture")
+    bool bWeaponSystemIntegrated;
+
+    /** Damage calculation architecture compliance */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Architecture")
+    bool bDamageArchitectureCompliant;
+
+    /** Tactical combat AI integration */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Architecture")
+    bool bTacticalCombatAIIntegrated;
+
+    // ===== ARCHITECTURAL VALIDATION METHODS =====
+
+    /** Initialize all gameplay architectural systems */
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    void InitializeGameplayArchitecture();
+
+    /** Validate survival system architectural compliance */
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    bool ValidateSurvivalArchitecture();
+
+    /** Validate dinosaur system architectural integration */
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    bool ValidateDinosaurArchitecture();
+
+    /** Validate world system architectural compliance */
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    bool ValidateWorldArchitecture();
+
+    /** Validate combat system architectural integration */
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    bool ValidateCombatArchitecture();
+
+    /** Perform comprehensive architectural validation */
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    bool PerformComprehensiveArchitecturalValidation();
+
+    /** Get current architectural health score (0-100) */
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    float GetArchitecturalHealthScore() const;
+
+    /** Get detailed architectural status report */
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    FString GetArchitecturalStatusReport() const;
+
+    // ===== SYSTEM INTEGRATION METHODS =====
+
+    /** Integrate survival systems with world systems */
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    void IntegrateSurvivalWithWorldSystems();
+
+    /** Integrate dinosaur AI with biome systems */
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    void IntegrateDinosaurAIWithBiomeSystems();
+
+    /** Integrate combat systems with survival mechanics */
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    void IntegrateCombatWithSurvivalSystems();
+
+    /** Establish cross-system communication channels */
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    void EstablishCrossSystemCommunication();
+
+    // ===== ARCHITECTURAL GOVERNANCE =====
+
+    /** Enforce architectural compliance across all systems */
+    UFUNCTION(BlueprintCallable, Category = "Governance")
+    void EnforceArchitecturalCompliance();
+
+    /** Audit system architectural patterns */
+    UFUNCTION(BlueprintCallable, Category = "Governance")
+    void AuditSystemArchitecturalPatterns();
+
+    /** Generate architectural improvement recommendations */
+    UFUNCTION(BlueprintCallable, Category = "Governance")
+    TArray<FString> GenerateArchitecturalImprovements();
 
 private:
-    // Timer handle for system updates
-    FTimerHandle SystemUpdateTimerHandle;
-
-    // Initialization state
-    bool bIsArchitectureInitialized;
+    /** Internal architectural state tracking */
+    float ArchitecturalHealthScore;
     
-    // System update tracking
-    double LastSystemUpdateTime;
-    int32 SystemUpdateCounter;
+    /** Last validation timestamp */
+    float LastValidationTime;
+    
+    /** Architectural compliance flags */
+    TMap<FString, bool> SystemComplianceFlags;
+    
+    /** Cross-system integration status */
+    TMap<FString, EEng_SystemIntegrationLevel> SystemIntegrationStatus;
 };
