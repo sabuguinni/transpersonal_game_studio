@@ -1,13 +1,12 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Components/ActorComponent.h"
-#include "Engine/DataTable.h"
+#include "Engine/GameInstanceSubsystem.h"
 #include "SharedTypes.h"
 #include "Narr_DialogueSystem.generated.h"
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FNarr_DialogueLine
+struct TRANSPERSONALGAME_API FNarr_DialogueNode
 {
     GENERATED_BODY()
 
@@ -15,101 +14,102 @@ struct TRANSPERSONALGAME_API FNarr_DialogueLine
     FString SpeakerName;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    FText DialogueText;
+    FString DialogueText;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    FString AudioAssetPath;
+    TArray<FString> PlayerResponses;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    float Duration;
+    TArray<int32> NextNodeIndices;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    bool bIsPlayerChoice;
+    bool bIsQuestNode;
 
-    FNarr_DialogueLine()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    FString QuestID;
+
+    FNarr_DialogueNode()
+        : SpeakerName(TEXT(""))
+        , DialogueText(TEXT(""))
+        , bIsQuestNode(false)
+        , QuestID(TEXT(""))
     {
-        SpeakerName = TEXT("");
-        DialogueText = FText::GetEmpty();
-        AudioAssetPath = TEXT("");
-        Duration = 3.0f;
-        bIsPlayerChoice = false;
     }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FNarr_DialogueSequence
+struct TRANSPERSONALGAME_API FNarr_DialogueTree
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    FString SequenceID;
+    FString TreeID;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    TArray<FNarr_DialogueLine> DialogueLines;
+    TArray<FNarr_DialogueNode> DialogueNodes;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    bool bCanRepeat;
+    int32 CurrentNodeIndex;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    bool bIsCompleted;
-
-    FNarr_DialogueSequence()
+    FNarr_DialogueTree()
+        : TreeID(TEXT(""))
+        , CurrentNodeIndex(0)
     {
-        SequenceID = TEXT("");
-        bCanRepeat = true;
-        bIsCompleted = false;
     }
 };
 
-UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UNarr_DialogueSystem : public UActorComponent
+UCLASS()
+class TRANSPERSONALGAME_API UNarr_DialogueSystem : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
 public:
-    UNarr_DialogueSystem();
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
 
-protected:
-    virtual void BeginPlay() override;
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    void StartDialogue(const FString& TreeID, class AActor* Speaker, class AActor* Listener);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue System")
-    TArray<FNarr_DialogueSequence> AvailableSequences;
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    void SelectPlayerResponse(int32 ResponseIndex);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue System")
-    FNarr_DialogueSequence CurrentSequence;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue System")
-    int32 CurrentLineIndex;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue System")
-    bool bIsDialogueActive;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue System")
-    float DefaultLineDuration;
-
-public:
-    UFUNCTION(BlueprintCallable, Category = "Dialogue System")
-    bool StartDialogueSequence(const FString& SequenceID);
-
-    UFUNCTION(BlueprintCallable, Category = "Dialogue System")
-    void AdvanceDialogue();
-
-    UFUNCTION(BlueprintCallable, Category = "Dialogue System")
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
     void EndDialogue();
 
-    UFUNCTION(BlueprintCallable, Category = "Dialogue System")
-    FNarr_DialogueLine GetCurrentLine() const;
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    FNarr_DialogueNode GetCurrentDialogueNode() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Dialogue System")
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
     bool IsDialogueActive() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Dialogue System")
-    void AddDialogueSequence(const FNarr_DialogueSequence& NewSequence);
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    void RegisterDialogueTree(const FNarr_DialogueTree& DialogueTree);
 
-    UFUNCTION(BlueprintCallable, Category = "Dialogue System")
-    TArray<FString> GetAvailableSequenceIDs() const;
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    void CreateHunterDialogue();
+
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    void CreateElderDialogue();
+
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    void CreateScoutDialogue();
+
+protected:
+    UPROPERTY(BlueprintReadOnly, Category = "Dialogue")
+    TMap<FString, FNarr_DialogueTree> DialogueTrees;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Dialogue")
+    FString CurrentTreeID;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Dialogue")
+    bool bDialogueActive;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Dialogue")
+    class AActor* CurrentSpeaker;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Dialogue")
+    class AActor* CurrentListener;
 
 private:
-    void InitializeDefaultSequences();
-    FNarr_DialogueSequence* FindSequenceByID(const FString& SequenceID);
+    void ProcessCurrentNode();
+    void AdvanceToNextNode(int32 NextIndex);
 };
