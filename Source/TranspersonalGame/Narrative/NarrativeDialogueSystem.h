@@ -3,12 +3,11 @@
 #include "CoreMinimal.h"
 #include "Engine/GameInstanceSubsystem.h"
 #include "Engine/DataTable.h"
-#include "Sound/SoundCue.h"
-#include "../SharedTypes.h"
+#include "SharedTypes.h"
 #include "NarrativeDialogueSystem.generated.h"
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FNarr_DialogueLine
+struct TRANSPERSONALGAME_API FNarr_DialogueEntry
 {
     GENERATED_BODY()
 
@@ -19,89 +18,106 @@ struct TRANSPERSONALGAME_API FNarr_DialogueLine
     FText DialogueText;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    TSoftObjectPtr<USoundCue> VoiceAudio;
+    float Duration;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    float DisplayDuration;
+    FString AudioPath;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    bool bIsNarration;
+    bool bIsPlayerChoice;
 
-    FNarr_DialogueLine()
+    FNarr_DialogueEntry()
     {
-        SpeakerName = TEXT("");
-        DialogueText = FText::GetEmpty();
-        DisplayDuration = 3.0f;
-        bIsNarration = false;
+        SpeakerName = TEXT("Unknown");
+        DialogueText = FText::FromString(TEXT("..."));
+        Duration = 3.0f;
+        AudioPath = TEXT("");
+        bIsPlayerChoice = false;
     }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FNarr_SurvivalTip
+struct TRANSPERSONALGAME_API FNarr_DialogueTree : public FTableRowBase
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival")
-    FText TipText;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    FString DialogueID;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival")
-    ENarr_DinosaurSpecies TriggerSpecies;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    TArray<FNarr_DialogueEntry> DialogueEntries;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival")
-    float TriggerDistance;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    TArray<FString> NextDialogueIDs;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival")
-    TSoftObjectPtr<USoundCue> WarningAudio;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    bool bIsQuestDialogue;
 
-    FNarr_SurvivalTip()
+    FNarr_DialogueTree()
     {
-        TipText = FText::GetEmpty();
-        TriggerSpecies = ENarr_DinosaurSpecies::TRex;
-        TriggerDistance = 1000.0f;
+        DialogueID = TEXT("default_dialogue");
+        bIsQuestDialogue = false;
     }
 };
 
-UCLASS()
+UCLASS(BlueprintType)
 class TRANSPERSONALGAME_API UNarrativeDialogueSystem : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
 public:
+    UNarrativeDialogueSystem();
+
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
-    virtual void Deinitialize() override;
 
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void PlayDialogueLine(const FNarr_DialogueLine& DialogueLine);
+    bool StartDialogue(const FString& DialogueID, AActor* Speaker, AActor* Listener);
 
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void TriggerSurvivalTip(ENarr_DinosaurSpecies Species, float Distance);
+    void EndDialogue();
 
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void PlayNarration(const FText& NarrationText, float Duration = 5.0f);
+    bool AdvanceDialogue();
 
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void StopCurrentDialogue();
+    FNarr_DialogueEntry GetCurrentDialogueEntry() const;
 
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    bool IsDialoguePlaying() const;
+    bool IsDialogueActive() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    void RegisterDialogueTable(UDataTable* DialogueTable);
+
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    TArray<FString> GetAvailableChoices() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    void SelectChoice(int32 ChoiceIndex);
 
 protected:
-    UPROPERTY(EditDefaultsOnly, Category = "Dialogue")
-    TArray<FNarr_DialogueLine> IntroDialogues;
+    UPROPERTY(BlueprintReadOnly, Category = "Narrative")
+    bool bDialogueActive;
 
-    UPROPERTY(EditDefaultsOnly, Category = "Survival")
-    TArray<FNarr_SurvivalTip> SurvivalTips;
+    UPROPERTY(BlueprintReadOnly, Category = "Narrative")
+    FString CurrentDialogueID;
 
-    UPROPERTY(BlueprintReadOnly, Category = "State")
-    bool bIsPlayingDialogue;
+    UPROPERTY(BlueprintReadOnly, Category = "Narrative")
+    int32 CurrentEntryIndex;
 
-    UPROPERTY(BlueprintReadOnly, Category = "State")
-    FNarr_DialogueLine CurrentDialogue;
+    UPROPERTY(BlueprintReadOnly, Category = "Narrative")
+    FNarr_DialogueTree CurrentDialogueTree;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Narrative")
+    TWeakObjectPtr<AActor> CurrentSpeaker;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Narrative")
+    TWeakObjectPtr<AActor> CurrentListener;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Narrative")
+    UDataTable* DialogueDataTable;
 
 private:
-    FTimerHandle DialogueTimerHandle;
-    
-    void OnDialogueFinished();
-    void InitializeDialogueData();
-    void InitializeSurvivalTips();
+    bool LoadDialogueTree(const FString& DialogueID);
+    void PlayDialogueAudio(const FString& AudioPath);
+    void TriggerDialogueEvent(const FString& EventName);
 };
