@@ -19,59 +19,54 @@ protected:
 public:    
     virtual void Tick(float DeltaTime) override;
 
-    // QA Testing Interface
-    UFUNCTION(BlueprintCallable, Category = "QA Validation", CallInEditor)
-    void RunFullValidationSuite();
-
-    UFUNCTION(BlueprintCallable, Category = "QA Validation", CallInEditor)
-    void ValidateVFXSystems();
-
-    UFUNCTION(BlueprintCallable, Category = "QA Validation", CallInEditor)
-    void ValidateCharacterSystems();
-
-    UFUNCTION(BlueprintCallable, Category = "QA Validation", CallInEditor)
-    void ValidateWorldGeneration();
-
-    UFUNCTION(BlueprintCallable, Category = "QA Validation", CallInEditor)
-    void ValidatePerformance();
+    UFUNCTION(BlueprintCallable, Category = "QA Validation")
+    void StartValidationSuite();
 
     UFUNCTION(BlueprintCallable, Category = "QA Validation")
-    void GenerateQAReport();
+    void ValidateCurrentLevel();
 
-    // Automated testing
-    UFUNCTION(BlueprintCallable, Category = "QA Automation")
-    void StartAutomatedTesting();
+    UFUNCTION(BlueprintCallable, Category = "QA Validation")
+    void ValidatePlayerCharacter();
 
-    UFUNCTION(BlueprintCallable, Category = "QA Automation")
-    void StopAutomatedTesting();
+    UFUNCTION(BlueprintCallable, Category = "QA Validation")
+    void ValidateDinosaurActors();
 
-    // Results access
-    UFUNCTION(BlueprintCallable, Category = "QA Results")
-    TArray<FQA_TestCase> GetLastTestResults() const;
+    UFUNCTION(BlueprintCallable, Category = "QA Validation")
+    void ValidateWorldAssets();
 
-    UFUNCTION(BlueprintCallable, Category = "QA Results")
-    FString GetValidationSummary() const;
+    UFUNCTION(BlueprintCallable, Category = "QA Validation")
+    void ValidatePerformanceMetrics();
+
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "QA Validation")
+    void RunEditorValidation();
 
 protected:
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "QA Components")
+    class USceneComponent* RootSceneComponent;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "QA Components")
+    class UStaticMeshComponent* ValidationMesh;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Settings")
+    bool bAutoValidateOnBeginPlay;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Settings")
+    float ValidationInterval;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Settings")
+    bool bShowValidationResults;
+
+    UPROPERTY(BlueprintReadOnly, Category = "QA Results")
+    TArray<FQA_TestCase> LastValidationResults;
+
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "QA Framework")
     UQA_TestFramework* TestFramework;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Settings")
-    bool bAutoRunOnBeginPlay;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Settings")
-    float AutoTestInterval;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Settings")
-    bool bLogDetailedResults;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Settings")
-    bool bGenerateReports;
-
 private:
-    FTimerHandle AutoTestTimer;
-    bool bIsRunningAutomatedTests;
-    
-    void RunAutomatedTestCycle();
-    void LogValidationResults(const TArray<FQA_TestCase>& Results);
+    float LastValidationTime;
+    bool bValidationInProgress;
+
+    void InitializeTestFramework();
+    void DisplayValidationResults();
+    FString GetValidationSummary() const;
 };
