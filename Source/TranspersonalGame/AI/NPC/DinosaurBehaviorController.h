@@ -7,17 +7,14 @@
 #include "Perception/AIPerceptionComponent.h"
 #include "Perception/AISenseConfig_Sight.h"
 #include "Perception/AISenseConfig_Hearing.h"
-#include "../../SharedTypes.h"
+#include "Engine/Engine.h"
+#include "TranspersonalGame/SharedTypes.h"
 #include "DinosaurBehaviorController.generated.h"
 
-class UBehaviorTree;
-class UBlackboardData;
-class APawn;
+class UBehaviorTreeComponent;
+class UBlackboardComponent;
+class UAIPerceptionComponent;
 
-/**
- * Advanced AI Controller for dinosaur NPCs with sophisticated behavior patterns
- * Handles pack dynamics, territorial behavior, hunting, and social interactions
- */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API ADinosaurBehaviorController : public AAIController
 {
@@ -28,105 +25,107 @@ public:
 
 protected:
     virtual void BeginPlay() override;
-    virtual void Tick(float DeltaTime) override;
     virtual void OnPossess(APawn* InPawn) override;
+    virtual void OnUnPossess() override;
 
     // Core AI Components
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI")
-    class UBehaviorTreeComponent* BehaviorTreeComponent;
+    UBehaviorTreeComponent* BehaviorTreeComponent;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI")
-    class UBlackboardComponent* BlackboardComponent;
+    UBlackboardComponent* BlackboardComponent;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI")
-    class UAIPerceptionComponent* AIPerceptionComponent;
+    UAIPerceptionComponent* AIPerceptionComponent;
 
-    // Behavior Trees for different dinosaur types
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
-    UBehaviorTree* PredatorBehaviorTree;
+    // Behavior Tree Assets
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI")
+    class UBehaviorTree* DefaultBehaviorTree;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
-    UBehaviorTree* HerbivoreeBehaviorTree;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
-    UBehaviorTree* PackHunterBehaviorTree;
-
-    // Blackboard Assets
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
-    UBlackboardData* DinosaurBlackboard;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI")
+    class UBlackboardData* DefaultBlackboard;
 
     // Perception Configuration
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Perception")
-    class UAISenseConfig_Sight* SightConfig;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Perception")
+    float SightRadius = 3000.0f;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Perception")
-    class UAISenseConfig_Hearing* HearingConfig;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Perception")
+    float LoseSightRadius = 3500.0f;
 
-    // Behavior State
-    UPROPERTY(BlueprintReadOnly, Category = "State")
-    ENPC_DinosaurBehaviorState CurrentBehaviorState;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Perception")
+    float PeripheralVisionAngleDegrees = 90.0f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "State")
-    ENPC_DinosaurSpecies DinosaurSpecies;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Perception")
+    float HearingRange = 2000.0f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Pack")
-    TArray<ADinosaurBehaviorController*> PackMembers;
+    // Behavior States
+    UPROPERTY(BlueprintReadWrite, Category = "Behavior")
+    ENPCBehaviorState CurrentBehaviorState = ENPCBehaviorState::Idle;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Pack")
-    ADinosaurBehaviorController* PackLeader;
+    UPROPERTY(BlueprintReadWrite, Category = "Behavior")
+    float AggressionLevel = 0.5f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Pack")
-    bool bIsPackLeader;
+    UPROPERTY(BlueprintReadWrite, Category = "Behavior")
+    float FearLevel = 0.0f;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Behavior")
+    float HungerLevel = 0.3f;
 
     // Territory and Patrol
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Territory")
-    float TerritoryRadius;
+    FVector TerritoryCenter = FVector::ZeroVector;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Territory")
-    FVector TerritoryCenter;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Territory")
+    float TerritoryRadius = 5000.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Patrol")
-    float PatrolRadius;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Patrol")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Territory")
     TArray<FVector> PatrolPoints;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Patrol")
-    int32 CurrentPatrolIndex;
+    UPROPERTY(BlueprintReadWrite, Category = "Territory")
+    int32 CurrentPatrolIndex = 0;
 
-    // Combat and Hunting
-    UPROPERTY(BlueprintReadOnly, Category = "Combat")
-    AActor* CurrentTarget;
+    // Pack Behavior
+    UPROPERTY(BlueprintReadWrite, Category = "Pack")
+    TArray<ADinosaurBehaviorController*> PackMembers;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Combat")
-    float LastAttackTime;
+    UPROPERTY(BlueprintReadWrite, Category = "Pack")
+    bool bIsPackLeader = false;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
-    float AttackCooldown;
+    UPROPERTY(BlueprintReadWrite, Category = "Pack")
+    ADinosaurBehaviorController* PackLeader = nullptr;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
-    float AttackRange;
+    // Combat and Threat Response
+    UPROPERTY(BlueprintReadWrite, Category = "Combat")
+    AActor* CurrentTarget = nullptr;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
-    float ChaseRange;
+    UPROPERTY(BlueprintReadWrite, Category = "Combat")
+    float AttackRange = 300.0f;
 
-    // Social Behavior
-    UPROPERTY(BlueprintReadOnly, Category = "Social")
-    float LastSocialInteraction;
+    UPROPERTY(BlueprintReadWrite, Category = "Combat")
+    float ChaseRange = 3000.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Social")
-    float SocialInteractionCooldown;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Social")
-    TMap<ADinosaurBehaviorController*, float> SocialRelationships;
+    UPROPERTY(BlueprintReadWrite, Category = "Combat")
+    float FleeThreshold = 0.8f;
 
 public:
-    // Behavior State Management
+    // Behavior Control Functions
     UFUNCTION(BlueprintCallable, Category = "Behavior")
-    void SetBehaviorState(ENPC_DinosaurBehaviorState NewState);
+    void SetBehaviorState(ENPCBehaviorState NewState);
 
-    UFUNCTION(BlueprintPure, Category = "Behavior")
-    ENPC_DinosaurBehaviorState GetBehaviorState() const { return CurrentBehaviorState; }
+    UFUNCTION(BlueprintCallable, Category = "Behavior")
+    void UpdateEmotionalState(float DeltaAggression, float DeltaFear, float DeltaHunger);
+
+    UFUNCTION(BlueprintCallable, Category = "Territory")
+    void SetTerritoryCenter(FVector NewCenter);
+
+    UFUNCTION(BlueprintCallable, Category = "Territory")
+    void AddPatrolPoint(FVector PatrolPoint);
+
+    UFUNCTION(BlueprintCallable, Category = "Territory")
+    FVector GetNextPatrolPoint();
+
+    UFUNCTION(BlueprintCallable, Category = "Territory")
+    bool IsInTerritory(FVector Location) const;
 
     // Pack Management
     UFUNCTION(BlueprintCallable, Category = "Pack")
@@ -136,34 +135,34 @@ public:
     void LeavePack();
 
     UFUNCTION(BlueprintCallable, Category = "Pack")
-    void AddPackMember(ADinosaurBehaviorController* Member);
+    void AddPackMember(ADinosaurBehaviorController* NewMember);
 
     UFUNCTION(BlueprintCallable, Category = "Pack")
     void RemovePackMember(ADinosaurBehaviorController* Member);
 
-    UFUNCTION(BlueprintPure, Category = "Pack")
-    bool IsInPack() const { return PackLeader != nullptr || bIsPackLeader; }
-
-    // Territory Management
-    UFUNCTION(BlueprintCallable, Category = "Territory")
-    void SetTerritory(FVector Center, float Radius);
-
-    UFUNCTION(BlueprintPure, Category = "Territory")
-    bool IsInTerritory(FVector Location) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Territory")
-    void GeneratePatrolPoints();
+    UFUNCTION(BlueprintCallable, Category = "Pack")
+    void BroadcastToPackMembers(ENPCBehaviorState NewState);
 
     // Combat Functions
     UFUNCTION(BlueprintCallable, Category = "Combat")
     void SetTarget(AActor* NewTarget);
 
-    UFUNCTION(BlueprintPure, Category = "Combat")
-    bool CanAttack() const;
+    UFUNCTION(BlueprintCallable, Category = "Combat")
+    void ClearTarget();
 
     UFUNCTION(BlueprintCallable, Category = "Combat")
-    void PerformAttack();
+    bool IsTargetInAttackRange() const;
 
+    UFUNCTION(BlueprintCallable, Category = "Combat")
+    bool IsTargetInChaseRange() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Combat")
+    void InitiateCombat(AActor* Target);
+
+    UFUNCTION(BlueprintCallable, Category = "Combat")
+    void FleeFromThreat(AActor* Threat);
+
+protected:
     // Perception Callbacks
     UFUNCTION()
     void OnPerceptionUpdated(const TArray<AActor*>& UpdatedActors);
@@ -171,24 +170,21 @@ public:
     UFUNCTION()
     void OnTargetPerceptionUpdated(AActor* Actor, FAIStimulus Stimulus);
 
-protected:
-    // Internal behavior functions
-    void UpdateBehaviorState();
-    void UpdatePackBehavior();
-    void UpdateTerritorialBehavior();
-    void UpdateHuntingBehavior();
-    void UpdateSocialBehavior();
+    // Internal Behavior Logic
+    void InitializePerception();
+    void SetupBlackboardKeys();
+    void UpdateBehaviorTree();
+    void ProcessThreatAssessment();
+    void UpdatePackCommunication();
 
-    // Utility functions
-    FVector GetRandomPatrolPoint() const;
-    ADinosaurBehaviorController* FindNearestPackMember() const;
-    AActor* FindBestTarget() const;
-    bool ShouldFleeFromThreat(AActor* Threat) const;
-
-private:
-    // Timers and intervals
-    float BehaviorUpdateInterval;
-    float LastBehaviorUpdate;
-    float PackUpdateInterval;
-    float LastPackUpdate;
+    // Blackboard Keys
+    FName TargetActorKey = TEXT("TargetActor");
+    FName BehaviorStateKey = TEXT("BehaviorState");
+    FName PatrolPointKey = TEXT("PatrolPoint");
+    FName TerritoryLocationKey = TEXT("TerritoryLocation");
+    FName AggressionLevelKey = TEXT("AggressionLevel");
+    FName FearLevelKey = TEXT("FearLevel");
+    FName HungerLevelKey = TEXT("HungerLevel");
+    FName PackLeaderKey = TEXT("PackLeader");
+    FName IsInCombatKey = TEXT("IsInCombat");
 };
