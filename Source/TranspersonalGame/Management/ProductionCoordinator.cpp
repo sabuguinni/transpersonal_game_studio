@@ -1,13 +1,13 @@
 #include "ProductionCoordinator.h"
 #include "Engine/Engine.h"
-#include "Engine/World.h"
-#include "TimerManager.h"
+#include "Kismet/KismetSystemLibrary.h"
 
 AProductionCoordinator::AProductionCoordinator()
 {
     PrimaryActorTick.bCanEverTick = true;
-    CurrentCycle = 1;
-    CurrentPhase = TEXT("Initialization");
+    
+    CurrentCycle = 20; // Starting from Cycle 020
+    ProductionPhase = TEXT("Milestone 1 - Walk Around");
     OverallProgress = 0.0f;
 }
 
@@ -15,267 +15,340 @@ void AProductionCoordinator::BeginPlay()
 {
     Super::BeginPlay();
     
-    // Initialize the production pipeline
-    InitializeProductionPipeline();
-    
-    UE_LOG(LogTemp, Warning, TEXT("ProductionCoordinator: Production pipeline initialized"));
+    InitializeMilestones();
+    LogProductionStatus();
 }
 
 void AProductionCoordinator::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
     
-    // Update production metrics every frame
-    UpdateProductionMetrics();
+    // Update overall progress every frame
+    OverallProgress = CalculateOverallProgress();
 }
 
-void AProductionCoordinator::InitializeProductionPipeline()
+void AProductionCoordinator::InitializeMilestones()
 {
-    // Clear existing data
-    AgentTasks.Empty();
-    ProductionMilestones.Empty();
+    Milestones.Empty();
     
-    // Setup initial milestones
-    SetupInitialMilestones();
+    // Milestone 1: Walk Around
+    FDir_MilestoneData Milestone1;
+    Milestone1.MilestoneName = TEXT("Milestone 1 - Walk Around");
+    Milestone1.RequiredFeatures.Add(TEXT("ThirdPersonCharacter with WASD movement"));
+    Milestone1.RequiredFeatures.Add(TEXT("Camera boom + follow camera"));
+    Milestone1.RequiredFeatures.Add(TEXT("Landscape with basic terrain"));
+    Milestone1.RequiredFeatures.Add(TEXT("Player can walk, run, jump"));
+    Milestone1.RequiredFeatures.Add(TEXT("3-5 static dinosaur meshes placed"));
+    Milestone1.RequiredFeatures.Add(TEXT("Directional light + sky + fog"));
+    Milestones.Add(Milestone1);
     
-    // Assign initial tasks to agents
-    AssignInitialTasks();
-    
-    UE_LOG(LogTemp, Warning, TEXT("ProductionCoordinator: Pipeline initialized with %d milestones and %d tasks"), 
-           ProductionMilestones.Num(), AgentTasks.Num());
-}
-
-void AProductionCoordinator::SetupInitialMilestones()
-{
-    // Milestone 1: Walk Around Prototype
-    FDir_ProductionMilestone WalkAroundMilestone;
-    WalkAroundMilestone.Type = EDir_MilestoneType::WalkAround;
-    WalkAroundMilestone.Description = TEXT("Player can walk around with WASD, camera follows, basic terrain exists");
-    WalkAroundMilestone.RequiredAgents.Add(TEXT("Agent_02_EngineArchitect"));
-    WalkAroundMilestone.RequiredAgents.Add(TEXT("Agent_03_CoreSystems"));
-    WalkAroundMilestone.RequiredAgents.Add(TEXT("Agent_05_WorldGenerator"));
-    WalkAroundMilestone.RequiredAgents.Add(TEXT("Agent_09_CharacterArtist"));
-    WalkAroundMilestone.TargetDate = FDateTime::Now() + FTimespan::FromDays(2);
-    ProductionMilestones.Add(WalkAroundMilestone);
-    
-    // Milestone 2: Dinosaur AI Systems
-    FDir_ProductionMilestone DinosaurAIMilestone;
-    DinosaurAIMilestone.Type = EDir_MilestoneType::DinosaurAI;
-    DinosaurAIMilestone.Description = TEXT("5+ dinosaurs with basic AI, collision, and visual feedback");
-    DinosaurAIMilestone.RequiredAgents.Add(TEXT("Agent_10_Animation"));
-    DinosaurAIMilestone.RequiredAgents.Add(TEXT("Agent_11_NPCBehavior"));
-    DinosaurAIMilestone.RequiredAgents.Add(TEXT("Agent_12_CombatAI"));
-    DinosaurAIMilestone.TargetDate = FDateTime::Now() + FTimespan::FromDays(4);
-    ProductionMilestones.Add(DinosaurAIMilestone);
+    // Milestone 2: Basic Interaction
+    FDir_MilestoneData Milestone2;
+    Milestone2.MilestoneName = TEXT("Milestone 2 - Basic Interaction");
+    Milestone2.RequiredFeatures.Add(TEXT("Pick up objects"));
+    Milestone2.RequiredFeatures.Add(TEXT("Basic UI elements"));
+    Milestone2.RequiredFeatures.Add(TEXT("Simple inventory system"));
+    Milestones.Add(Milestone2);
     
     // Milestone 3: Survival Systems
-    FDir_ProductionMilestone SurvivalMilestone;
-    SurvivalMilestone.Type = EDir_MilestoneType::SurvivalSystems;
-    SurvivalMilestone.Description = TEXT("Health, hunger, thirst, stamina systems with HUD");
-    SurvivalMilestone.RequiredAgents.Add(TEXT("Agent_14_QuestDesigner"));
-    SurvivalMilestone.RequiredAgents.Add(TEXT("Agent_16_Audio"));
-    SurvivalMilestone.TargetDate = FDateTime::Now() + FTimespan::FromDays(6);
-    ProductionMilestones.Add(SurvivalMilestone);
+    FDir_MilestoneData Milestone3;
+    Milestone3.MilestoneName = TEXT("Milestone 3 - Survival Systems");
+    Milestone3.RequiredFeatures.Add(TEXT("Health/Hunger/Thirst bars"));
+    Milestone3.RequiredFeatures.Add(TEXT("Resource gathering"));
+    Milestone3.RequiredFeatures.Add(TEXT("Basic crafting"));
+    Milestones.Add(Milestone3);
     
-    // Milestone 4: Full Prototype
-    FDir_ProductionMilestone FullPrototypeMilestone;
-    FullPrototypeMilestone.Type = EDir_MilestoneType::FullPrototype;
-    FullPrototypeMilestone.Description = TEXT("Complete playable prototype with all systems integrated");
-    FullPrototypeMilestone.RequiredAgents.Add(TEXT("Agent_17_VFX"));
-    FullPrototypeMilestone.RequiredAgents.Add(TEXT("Agent_18_QA"));
-    FullPrototypeMilestone.RequiredAgents.Add(TEXT("Agent_19_Integration"));
-    FullPrototypeMilestone.TargetDate = FDateTime::Now() + FTimespan::FromDays(10);
-    ProductionMilestones.Add(FullPrototypeMilestone);
+    // Initialize agent tasks
+    AgentTasks.Empty();
+    
+    // Agent #2 - Engine Architect
+    FDir_AgentTask Task2;
+    Task2.AgentNumber = 2;
+    Task2.AgentName = TEXT("Engine Architect");
+    Task2.TaskDescription = TEXT("Validate core architecture and establish technical standards");
+    Task2.CurrentPhase = EDir_ProductionPhase::Production;
+    Task2.Priority = 10.0f;
+    AgentTasks.Add(Task2);
+    
+    // Agent #3 - Core Systems
+    FDir_AgentTask Task3;
+    Task3.AgentNumber = 3;
+    Task3.AgentName = TEXT("Core Systems Programmer");
+    Task3.TaskDescription = TEXT("Implement physics, collision, and movement systems");
+    Task3.CurrentPhase = EDir_ProductionPhase::Production;
+    Task3.Priority = 9.0f;
+    AgentTasks.Add(Task3);
+    
+    // Agent #5 - World Generator
+    FDir_AgentTask Task5;
+    Task5.AgentNumber = 5;
+    Task5.AgentName = TEXT("Procedural World Generator");
+    Task5.TaskDescription = TEXT("Enhance terrain with height variation and biomes");
+    Task5.CurrentPhase = EDir_ProductionPhase::Production;
+    Task5.Priority = 8.0f;
+    AgentTasks.Add(Task5);
+    
+    // Agent #9 - Character Artist
+    FDir_AgentTask Task9;
+    Task9.AgentNumber = 9;
+    Task9.AgentName = TEXT("Character Artist");
+    Task9.TaskDescription = TEXT("Improve character model and create dinosaur actors");
+    Task9.CurrentPhase = EDir_ProductionPhase::Production;
+    Task9.Priority = 8.0f;
+    AgentTasks.Add(Task9);
+    
+    // Agent #10 - Animation
+    FDir_AgentTask Task10;
+    Task10.AgentNumber = 10;
+    Task10.AgentName = TEXT("Animation Agent");
+    Task10.TaskDescription = TEXT("Implement character and dinosaur animation systems");
+    Task10.CurrentPhase = EDir_ProductionPhase::Production;
+    Task10.Priority = 7.0f;
+    AgentTasks.Add(Task10);
+    
+    // Agent #12 - Combat & Enemy AI
+    FDir_AgentTask Task12;
+    Task12.AgentNumber = 12;
+    Task12.AgentName = TEXT("Combat & Enemy AI");
+    Task12.TaskDescription = TEXT("Create survival HUD and basic dinosaur AI");
+    Task12.CurrentPhase = EDir_ProductionPhase::Production;
+    Task12.Priority = 7.0f;
+    AgentTasks.Add(Task12);
+    
+    UE_LOG(LogTemp, Warning, TEXT("ProductionCoordinator: Initialized %d milestones and %d agent tasks"), 
+           Milestones.Num(), AgentTasks.Num());
 }
 
-void AProductionCoordinator::AssignInitialTasks()
+void AProductionCoordinator::UpdateMilestoneProgress(const FString& MilestoneName, float NewProgress)
 {
-    // High priority tasks for immediate execution
-    AssignTaskToAgent(TEXT("Agent_02_EngineArchitect"), TEXT("Validate core engine architecture and compilation"), 10.0f);
-    AssignTaskToAgent(TEXT("Agent_03_CoreSystems"), TEXT("Implement physics and collision systems"), 9.0f);
-    AssignTaskToAgent(TEXT("Agent_05_WorldGenerator"), TEXT("Create terrain with hills and basic landscape"), 8.0f);
-    AssignTaskToAgent(TEXT("Agent_09_CharacterArtist"), TEXT("Refine TranspersonalCharacter with proper movement"), 8.0f);
-    AssignTaskToAgent(TEXT("Agent_10_Animation"), TEXT("Add walking, running, jumping animations"), 7.0f);
-    
-    // Medium priority tasks
-    AssignTaskToAgent(TEXT("Agent_12_CombatAI"), TEXT("Implement basic dinosaur AI and behavior trees"), 6.0f);
-    AssignTaskToAgent(TEXT("Agent_11_NPCBehavior"), TEXT("Create dinosaur patrol and idle behaviors"), 5.0f);
-    AssignTaskToAgent(TEXT("Agent_06_EnvironmentArtist"), TEXT("Add vegetation and environmental props"), 4.0f);
-    AssignTaskToAgent(TEXT("Agent_08_LightingAtmosphere"), TEXT("Setup day/night cycle and atmospheric lighting"), 4.0f);
-    
-    // Lower priority tasks
-    AssignTaskToAgent(TEXT("Agent_14_QuestDesigner"), TEXT("Design survival mechanics and objectives"), 3.0f);
-    AssignTaskToAgent(TEXT("Agent_16_Audio"), TEXT("Add ambient sounds and character audio"), 3.0f);
-    AssignTaskToAgent(TEXT("Agent_17_VFX"), TEXT("Create particle effects for environment"), 2.0f);
-    AssignTaskToAgent(TEXT("Agent_18_QA"), TEXT("Setup testing framework and validation"), 2.0f);
-    AssignTaskToAgent(TEXT("Agent_19_Integration"), TEXT("Prepare build integration pipeline"), 1.0f);
-}
-
-void AProductionCoordinator::AssignTaskToAgent(const FString& AgentName, const FString& TaskDescription, float Priority)
-{
-    FDir_AgentTask NewTask;
-    NewTask.AgentName = AgentName;
-    NewTask.TaskDescription = TaskDescription;
-    NewTask.Status = EDir_AgentStatus::Working;
-    NewTask.Priority = Priority;
-    NewTask.AssignedTime = FDateTime::Now();
-    
-    AgentTasks.Add(NewTask);
-    
-    UE_LOG(LogTemp, Warning, TEXT("ProductionCoordinator: Assigned task to %s: %s (Priority: %.1f)"), 
-           *AgentName, *TaskDescription, Priority);
-}
-
-void AProductionCoordinator::UpdateAgentStatus(const FString& AgentName, EDir_AgentStatus NewStatus)
-{
-    for (FDir_AgentTask& Task : AgentTasks)
+    for (FDir_MilestoneData& Milestone : Milestones)
     {
-        if (Task.AgentName == AgentName)
+        if (Milestone.MilestoneName == MilestoneName)
         {
-            Task.Status = NewStatus;
-            if (NewStatus == EDir_AgentStatus::Complete)
-            {
-                Task.CompletionTime = FDateTime::Now();
-            }
+            Milestone.CompletionPercentage = FMath::Clamp(NewProgress, 0.0f, 100.0f);
+            Milestone.bIsComplete = (Milestone.CompletionPercentage >= 100.0f);
+            
+            UE_LOG(LogTemp, Warning, TEXT("ProductionCoordinator: Updated %s to %.1f%% complete"), 
+                   *MilestoneName, Milestone.CompletionPercentage);
             break;
         }
     }
 }
 
-void AProductionCoordinator::CompleteAgentTask(const FString& AgentName)
+bool AProductionCoordinator::IsMilestoneComplete(const FString& MilestoneName) const
 {
-    UpdateAgentStatus(AgentName, EDir_AgentStatus::Complete);
-    UE_LOG(LogTemp, Warning, TEXT("ProductionCoordinator: Task completed by %s"), *AgentName);
-}
-
-bool AProductionCoordinator::ValidateMilestone(EDir_MilestoneType MilestoneType)
-{
-    for (FDir_ProductionMilestone& Milestone : ProductionMilestones)
+    for (const FDir_MilestoneData& Milestone : Milestones)
     {
-        if (Milestone.Type == MilestoneType)
+        if (Milestone.MilestoneName == MilestoneName)
         {
-            // Check if all required agents have completed their tasks
-            int32 CompletedAgents = 0;
-            for (const FString& RequiredAgent : Milestone.RequiredAgents)
-            {
-                for (const FDir_AgentTask& Task : AgentTasks)
-                {
-                    if (Task.AgentName == RequiredAgent && Task.Status == EDir_AgentStatus::Complete)
-                    {
-                        CompletedAgents++;
-                        break;
-                    }
-                }
-            }
-            
-            Milestone.CompletionPercentage = (float)CompletedAgents / (float)Milestone.RequiredAgents.Num() * 100.0f;
-            Milestone.bIsComplete = (CompletedAgents == Milestone.RequiredAgents.Num());
-            
             return Milestone.bIsComplete;
         }
     }
     return false;
 }
 
-FString AProductionCoordinator::GetProductionReport()
+float AProductionCoordinator::GetMilestoneProgress(const FString& MilestoneName) const
 {
-    FString Report = FString::Printf(TEXT("=== PRODUCTION REPORT - CYCLE %d ===\n"), CurrentCycle);
-    Report += FString::Printf(TEXT("Current Phase: %s\n"), *CurrentPhase);
-    Report += FString::Printf(TEXT("Overall Progress: %.1f%%\n\n"), OverallProgress);
-    
-    Report += TEXT("=== MILESTONE STATUS ===\n");
-    for (const FDir_ProductionMilestone& Milestone : ProductionMilestones)
+    for (const FDir_MilestoneData& Milestone : Milestones)
     {
-        FString MilestoneStatus = Milestone.bIsComplete ? TEXT("COMPLETE") : TEXT("IN PROGRESS");
-        Report += FString::Printf(TEXT("%s: %s (%.1f%%)\n"), 
-                                 *Milestone.Description, *MilestoneStatus, Milestone.CompletionPercentage);
-    }
-    
-    Report += TEXT("\n=== AGENT STATUS ===\n");
-    for (const FDir_AgentTask& Task : AgentTasks)
-    {
-        FString StatusString;
-        switch (Task.Status)
+        if (Milestone.MilestoneName == MilestoneName)
         {
-            case EDir_AgentStatus::Idle: StatusString = TEXT("IDLE"); break;
-            case EDir_AgentStatus::Working: StatusString = TEXT("WORKING"); break;
-            case EDir_AgentStatus::Blocked: StatusString = TEXT("BLOCKED"); break;
-            case EDir_AgentStatus::Complete: StatusString = TEXT("COMPLETE"); break;
-            case EDir_AgentStatus::Failed: StatusString = TEXT("FAILED"); break;
+            return Milestone.CompletionPercentage;
         }
-        Report += FString::Printf(TEXT("%s: %s [%s]\n"), 
-                                 *Task.AgentName, *StatusString, *Task.TaskDescription);
     }
-    
-    return Report;
+    return 0.0f;
 }
 
-TArray<FString> AProductionCoordinator::GetBlockedAgents()
+void AProductionCoordinator::AssignTaskToAgent(int32 AgentNumber, const FString& TaskDescription, float Priority)
 {
-    TArray<FString> BlockedAgents;
-    for (const FDir_AgentTask& Task : AgentTasks)
+    for (FDir_AgentTask& Task : AgentTasks)
     {
-        if (Task.Status == EDir_AgentStatus::Blocked || Task.Status == EDir_AgentStatus::Failed)
+        if (Task.AgentNumber == AgentNumber)
         {
-            BlockedAgents.Add(Task.AgentName);
+            Task.TaskDescription = TaskDescription;
+            Task.Priority = Priority;
+            Task.bIsBlocked = false;
+            Task.BlockingReason = TEXT("");
+            
+            UE_LOG(LogTemp, Warning, TEXT("ProductionCoordinator: Assigned task to Agent #%d: %s"), 
+                   AgentNumber, *TaskDescription);
+            return;
         }
     }
+    
+    // Create new task if agent not found
+    FDir_AgentTask NewTask;
+    NewTask.AgentNumber = AgentNumber;
+    NewTask.AgentName = FString::Printf(TEXT("Agent #%d"), AgentNumber);
+    NewTask.TaskDescription = TaskDescription;
+    NewTask.Priority = Priority;
+    AgentTasks.Add(NewTask);
+    
+    UE_LOG(LogTemp, Warning, TEXT("ProductionCoordinator: Created new task for Agent #%d: %s"), 
+           AgentNumber, *TaskDescription);
+}
+
+void AProductionCoordinator::CompleteAgentTask(int32 AgentNumber)
+{
+    for (FDir_AgentTask& Task : AgentTasks)
+    {
+        if (Task.AgentNumber == AgentNumber)
+        {
+            Task.CurrentPhase = EDir_ProductionPhase::Complete;
+            Task.bIsBlocked = false;
+            
+            UE_LOG(LogTemp, Warning, TEXT("ProductionCoordinator: Agent #%d completed task: %s"), 
+                   AgentNumber, *Task.TaskDescription);
+            break;
+        }
+    }
+}
+
+void AProductionCoordinator::BlockAgent(int32 AgentNumber, const FString& Reason)
+{
+    for (FDir_AgentTask& Task : AgentTasks)
+    {
+        if (Task.AgentNumber == AgentNumber)
+        {
+            Task.bIsBlocked = true;
+            Task.BlockingReason = Reason;
+            
+            UE_LOG(LogTemp, Error, TEXT("ProductionCoordinator: Agent #%d blocked - %s"), 
+                   AgentNumber, *Reason);
+            break;
+        }
+    }
+}
+
+void AProductionCoordinator::UnblockAgent(int32 AgentNumber)
+{
+    for (FDir_AgentTask& Task : AgentTasks)
+    {
+        if (Task.AgentNumber == AgentNumber)
+        {
+            Task.bIsBlocked = false;
+            Task.BlockingReason = TEXT("");
+            
+            UE_LOG(LogTemp, Warning, TEXT("ProductionCoordinator: Agent #%d unblocked"), AgentNumber);
+            break;
+        }
+    }
+}
+
+TArray<FDir_AgentTask> AProductionCoordinator::GetBlockedAgents() const
+{
+    TArray<FDir_AgentTask> BlockedAgents;
+    
+    for (const FDir_AgentTask& Task : AgentTasks)
+    {
+        if (Task.bIsBlocked)
+        {
+            BlockedAgents.Add(Task);
+        }
+    }
+    
     return BlockedAgents;
 }
 
-void AProductionCoordinator::AdvanceToNextCycle()
+void AProductionCoordinator::IncrementCycle()
 {
     CurrentCycle++;
-    
-    // Update phase based on milestone completion
-    if (ValidateMilestone(EDir_MilestoneType::FullPrototype))
-    {
-        CurrentPhase = TEXT("Production Complete");
-    }
-    else if (ValidateMilestone(EDir_MilestoneType::SurvivalSystems))
-    {
-        CurrentPhase = TEXT("Final Integration");
-    }
-    else if (ValidateMilestone(EDir_MilestoneType::DinosaurAI))
-    {
-        CurrentPhase = TEXT("Survival Systems");
-    }
-    else if (ValidateMilestone(EDir_MilestoneType::WalkAround))
-    {
-        CurrentPhase = TEXT("Dinosaur AI");
-    }
-    else
-    {
-        CurrentPhase = TEXT("Core Prototype");
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("ProductionCoordinator: Advanced to Cycle %d - Phase: %s"), 
-           CurrentCycle, *CurrentPhase);
+    UE_LOG(LogTemp, Warning, TEXT("ProductionCoordinator: Advanced to Cycle %d"), CurrentCycle);
 }
 
-void AProductionCoordinator::UpdateProductionMetrics()
+float AProductionCoordinator::CalculateOverallProgress()
 {
-    // Calculate overall progress based on completed milestones
+    if (Milestones.Num() == 0)
+    {
+        return 0.0f;
+    }
+    
     float TotalProgress = 0.0f;
-    for (const FDir_ProductionMilestone& Milestone : ProductionMilestones)
+    for (const FDir_MilestoneData& Milestone : Milestones)
     {
         TotalProgress += Milestone.CompletionPercentage;
     }
     
-    if (ProductionMilestones.Num() > 0)
+    return TotalProgress / Milestones.Num();
+}
+
+void AProductionCoordinator::LogProductionStatus()
+{
+    UE_LOG(LogTemp, Warning, TEXT("=== PRODUCTION STATUS - CYCLE %d ==="), CurrentCycle);
+    UE_LOG(LogTemp, Warning, TEXT("Phase: %s"), *ProductionPhase);
+    UE_LOG(LogTemp, Warning, TEXT("Overall Progress: %.1f%%"), OverallProgress);
+    
+    UE_LOG(LogTemp, Warning, TEXT("Milestones:"));
+    for (const FDir_MilestoneData& Milestone : Milestones)
     {
-        OverallProgress = TotalProgress / (float)ProductionMilestones.Num();
+        UE_LOG(LogTemp, Warning, TEXT("  %s: %.1f%% %s"), 
+               *Milestone.MilestoneName, 
+               Milestone.CompletionPercentage,
+               Milestone.bIsComplete ? TEXT("[COMPLETE]") : TEXT("[IN PROGRESS]"));
     }
+    
+    UE_LOG(LogTemp, Warning, TEXT("Agent Tasks:"));
+    for (const FDir_AgentTask& Task : AgentTasks)
+    {
+        FString Status = Task.bIsBlocked ? FString::Printf(TEXT("[BLOCKED: %s]"), *Task.BlockingReason) : TEXT("[ACTIVE]");
+        UE_LOG(LogTemp, Warning, TEXT("  Agent #%d (%s): %s %s"), 
+               Task.AgentNumber, *Task.AgentName, *Task.TaskDescription, *Status);
+    }
+}
+
+void AProductionCoordinator::RefreshProductionData()
+{
+    OverallProgress = CalculateOverallProgress();
+    LogProductionStatus();
+}
+
+void AProductionCoordinator::ResetAllTasks()
+{
+    for (FDir_AgentTask& Task : AgentTasks)
+    {
+        Task.CurrentPhase = EDir_ProductionPhase::Planning;
+        Task.bIsBlocked = false;
+        Task.BlockingReason = TEXT("");
+    }
+    
+    UE_LOG(LogTemp, Warning, TEXT("ProductionCoordinator: All agent tasks reset"));
 }
 
 void AProductionCoordinator::GenerateProductionReport()
 {
-    FString Report = GetProductionReport();
-    UE_LOG(LogTemp, Warning, TEXT("%s"), *Report);
+    UE_LOG(LogTemp, Warning, TEXT("=== PRODUCTION REPORT - CYCLE %d ==="), CurrentCycle);
     
-    if (GEngine)
+    // Count completed vs incomplete milestones
+    int32 CompletedMilestones = 0;
+    for (const FDir_MilestoneData& Milestone : Milestones)
     {
-        GEngine->AddOnScreenDebugMessage(-1, 10.0f, FColor::Green, 
-                                        FString::Printf(TEXT("Production Report Generated - Cycle %d"), CurrentCycle));
+        if (Milestone.bIsComplete)
+        {
+            CompletedMilestones++;
+        }
+    }
+    
+    // Count blocked agents
+    int32 BlockedAgents = GetBlockedAgents().Num();
+    
+    UE_LOG(LogTemp, Warning, TEXT("Summary:"));
+    UE_LOG(LogTemp, Warning, TEXT("  Milestones Complete: %d/%d"), CompletedMilestones, Milestones.Num());
+    UE_LOG(LogTemp, Warning, TEXT("  Overall Progress: %.1f%%"), OverallProgress);
+    UE_LOG(LogTemp, Warning, TEXT("  Blocked Agents: %d"), BlockedAgents);
+    UE_LOG(LogTemp, Warning, TEXT("  Current Phase: %s"), *ProductionPhase);
+    
+    // Recommendations
+    if (BlockedAgents > 0)
+    {
+        UE_LOG(LogTemp, Error, TEXT("CRITICAL: %d agents are blocked and need attention"), BlockedAgents);
+    }
+    
+    if (OverallProgress < 25.0f)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("RECOMMENDATION: Focus on Milestone 1 completion"));
+    }
+    else if (OverallProgress < 50.0f)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("RECOMMENDATION: Begin Milestone 2 preparation"));
     }
 }
