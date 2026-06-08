@@ -4,133 +4,124 @@
 #include "Components/ActorComponent.h"
 #include "Engine/World.h"
 #include "Landscape/Landscape.h"
-#include "PhysicsEngine/BodyInstance.h"
-#include "Chaos/ChaosEngineInterface.h"
-#include "SharedTypes.h"
+#include "PhysicsEngine/PhysicsSettings.h"
+#include "Materials/MaterialInterface.h"
+#include "Materials/PhysicalMaterial.h"
+#include "Core/SharedTypes.h"
 #include "Core_TerrainPhysics.generated.h"
 
 /**
- * Terrain Physics System for Prehistoric Survival Game
- * Manages dynamic terrain physics including:
- * - Surface material detection and response
- * - Slope stability and landslide simulation
- * - Erosion and weathering effects
- * - Footprint and track generation
- * - Ground deformation from heavy impacts
- * - Terrain-based movement modifiers
+ * Core_TerrainPhysics - Advanced terrain physics system for prehistoric survival gameplay
+ * 
+ * Manages dynamic terrain physics properties including:
+ * - Surface material detection and physics response
+ * - Terrain deformation and erosion simulation
+ * - Environmental physics effects (mud, sand, rock stability)
+ * - Biome-specific physics parameters
+ * - Performance optimization for large-scale terrain
+ * 
+ * Integrates with PCGWorldGenerator for procedural terrain physics setup
+ * Provides realistic ground interaction for dinosaurs and player character
  */
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FCore_TerrainSurface
+struct TRANSPERSONALGAME_API FCore_TerrainSurfaceData
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
-    ECore_SurfaceType SurfaceType = ECore_SurfaceType::Dirt;
+    /** Surface material type affecting physics behavior */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Physics")
+    ESurfaceMaterial SurfaceType = ESurfaceMaterial::Rock;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
-    float Friction = 0.7f;
+    /** Friction coefficient for this surface (0.0 = ice, 1.0 = rubber) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Physics", meta = (ClampMin = "0.0", ClampMax = "2.0"))
+    float FrictionCoefficient = 0.7f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
-    float Hardness = 0.5f;
+    /** Restitution (bounciness) of the surface (0.0 = no bounce, 1.0 = perfect bounce) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Physics", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float Restitution = 0.1f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
-    float Moisture = 0.3f;
+    /** Density of the surface material (kg/m³) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Physics", meta = (ClampMin = "100.0", ClampMax = "10000.0"))
+    float Density = 2000.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
+    /** How much this surface can deform under pressure (0.0 = rigid, 1.0 = soft) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Physics", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float DeformationResistance = 0.8f;
+
+    /** Sound effect to play when objects impact this surface */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Physics")
+    TSoftObjectPtr<class USoundBase> ImpactSound;
+
+    /** Particle effect to spawn on impact */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Physics")
+    TSoftObjectPtr<class UNiagaraSystem> ImpactParticles;
+
+    FCore_TerrainSurfaceData()
+    {
+        SurfaceType = ESurfaceMaterial::Rock;
+        FrictionCoefficient = 0.7f;
+        Restitution = 0.1f;
+        Density = 2000.0f;
+        DeformationResistance = 0.8f;
+    }
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FCore_TerrainPhysicsZone
+{
+    GENERATED_BODY()
+
+    /** Zone identifier for this physics region */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Zone")
+    FString ZoneID;
+
+    /** Biome type affecting physics parameters */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Zone")
+    EBiomeType BiomeType = EBiomeType::Grassland;
+
+    /** Center location of this physics zone */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Zone")
+    FVector ZoneCenter = FVector::ZeroVector;
+
+    /** Radius of influence for this zone */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Zone", meta = (ClampMin = "100.0"))
+    float ZoneRadius = 5000.0f;
+
+    /** Gravity modifier for this zone (1.0 = normal gravity) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Zone", meta = (ClampMin = "0.1", ClampMax = "5.0"))
+    float GravityMultiplier = 1.0f;
+
+    /** Wind force affecting objects in this zone */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Zone")
+    FVector WindForce = FVector::ZeroVector;
+
+    /** Temperature affecting material properties */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Zone")
     float Temperature = 20.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
-    bool bCanDeform = true;
+    /** Humidity level affecting friction and deformation */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Zone", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float Humidity = 0.5f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
-    bool bCanErode = true;
+    /** Surface materials present in this zone */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Zone")
+    TArray<FCore_TerrainSurfaceData> SurfaceMaterials;
 
-    FCore_TerrainSurface()
+    FCore_TerrainPhysicsZone()
     {
-        SurfaceType = ECore_SurfaceType::Dirt;
-        Friction = 0.7f;
-        Hardness = 0.5f;
-        Moisture = 0.3f;
+        ZoneID = TEXT("DefaultZone");
+        BiomeType = EBiomeType::Grassland;
+        ZoneCenter = FVector::ZeroVector;
+        ZoneRadius = 5000.0f;
+        GravityMultiplier = 1.0f;
+        WindForce = FVector::ZeroVector;
         Temperature = 20.0f;
-        bCanDeform = true;
-        bCanErode = true;
+        Humidity = 0.5f;
     }
 };
 
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FCore_FootprintData
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Footprint")
-    FVector Location = FVector::ZeroVector;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Footprint")
-    FRotator Rotation = FRotator::ZeroRotator;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Footprint")
-    float Depth = 2.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Footprint")
-    float Width = 25.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Footprint")
-    float Length = 30.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Footprint")
-    float CreationTime = 0.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Footprint")
-    ECore_CreatureType CreatureType = ECore_CreatureType::Human;
-
-    FCore_FootprintData()
-    {
-        Location = FVector::ZeroVector;
-        Rotation = FRotator::ZeroRotator;
-        Depth = 2.0f;
-        Width = 25.0f;
-        Length = 30.0f;
-        CreationTime = 0.0f;
-        CreatureType = ECore_CreatureType::Human;
-    }
-};
-
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FCore_TerrainDeformation
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Deformation")
-    FVector ImpactLocation = FVector::ZeroVector;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Deformation")
-    float ImpactForce = 1000.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Deformation")
-    float DeformationRadius = 100.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Deformation")
-    float MaxDepth = 50.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Deformation")
-    float RecoveryTime = 30.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Deformation")
-    bool bPermanent = false;
-
-    FCore_TerrainDeformation()
-    {
-        ImpactLocation = FVector::ZeroVector;
-        ImpactForce = 1000.0f;
-        DeformationRadius = 100.0f;
-        MaxDepth = 50.0f;
-        RecoveryTime = 30.0f;
-        bPermanent = false;
-    }
-};
-
-UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
+UCLASS(ClassGroup=(TranspersonalGame), meta=(BlueprintSpawnableComponent))
 class TRANSPERSONALGAME_API UCore_TerrainPhysics : public UActorComponent
 {
     GENERATED_BODY()
@@ -143,137 +134,123 @@ protected:
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 public:
-    // === TERRAIN SURFACE ANALYSIS ===
-    
-    UFUNCTION(BlueprintCallable, Category = "Terrain Physics")
-    FCore_TerrainSurface AnalyzeSurfaceAtLocation(const FVector& Location);
+    // === TERRAIN PHYSICS MANAGEMENT ===
 
+    /** Initialize terrain physics system for the current world */
     UFUNCTION(BlueprintCallable, Category = "Terrain Physics")
-    float GetSlopeAngleAtLocation(const FVector& Location);
+    void InitializeTerrainPhysics();
 
+    /** Register a physics zone with specific parameters */
     UFUNCTION(BlueprintCallable, Category = "Terrain Physics")
-    FVector GetSurfaceNormalAtLocation(const FVector& Location);
+    void RegisterPhysicsZone(const FCore_TerrainPhysicsZone& PhysicsZone);
 
+    /** Get surface data at a specific world location */
     UFUNCTION(BlueprintCallable, Category = "Terrain Physics")
-    bool IsLocationStable(const FVector& Location, float ObjectMass = 100.0f);
+    FCore_TerrainSurfaceData GetSurfaceDataAtLocation(const FVector& WorldLocation);
 
-    // === FOOTPRINT SYSTEM ===
-    
+    /** Apply environmental forces to an actor based on terrain */
     UFUNCTION(BlueprintCallable, Category = "Terrain Physics")
-    void CreateFootprint(const FVector& Location, const FRotator& Rotation, ECore_CreatureType CreatureType, float Force = 500.0f);
+    void ApplyEnvironmentalForces(AActor* TargetActor, float DeltaTime);
 
+    /** Check if location is suitable for building/placing objects */
     UFUNCTION(BlueprintCallable, Category = "Terrain Physics")
-    TArray<FCore_FootprintData> GetFootprintsInRadius(const FVector& Center, float Radius);
-
-    UFUNCTION(BlueprintCallable, Category = "Terrain Physics")
-    void ClearOldFootprints(float MaxAge = 300.0f);
+    bool IsLocationStable(const FVector& WorldLocation, float RequiredStability = 0.7f);
 
     // === TERRAIN DEFORMATION ===
-    
-    UFUNCTION(BlueprintCallable, Category = "Terrain Physics")
-    void ApplyTerrainDeformation(const FCore_TerrainDeformation& DeformationData);
 
+    /** Deform terrain at location with specified parameters */
     UFUNCTION(BlueprintCallable, Category = "Terrain Physics")
-    void CreateImpactCrater(const FVector& ImpactLocation, float Force, float Radius);
+    void DeformTerrainAtLocation(const FVector& WorldLocation, float DeformationRadius, float DeformationStrength, bool bIsAdditive = false);
 
+    /** Create crater from explosion or impact */
     UFUNCTION(BlueprintCallable, Category = "Terrain Physics")
-    void ProcessTerrainErosion(float DeltaTime);
+    void CreateImpactCrater(const FVector& ImpactLocation, float CraterRadius, float CraterDepth);
 
-    // === MOVEMENT MODIFIERS ===
-    
+    /** Simulate erosion effects over time */
     UFUNCTION(BlueprintCallable, Category = "Terrain Physics")
-    float GetMovementSpeedModifier(const FVector& Location, ECore_MovementType MovementType);
+    void SimulateErosion(float DeltaTime);
 
-    UFUNCTION(BlueprintCallable, Category = "Terrain Physics")
-    float GetStaminaCostModifier(const FVector& Location, ECore_MovementType MovementType);
+    // === PHYSICS OPTIMIZATION ===
 
+    /** Update physics LOD based on distance from players */
     UFUNCTION(BlueprintCallable, Category = "Terrain Physics")
-    bool CanPlaceStructureAtLocation(const FVector& Location, float StructureWeight = 1000.0f);
+    void UpdatePhysicsLOD();
 
-    // === PHYSICS INTEGRATION ===
-    
+    /** Enable/disable physics simulation for distant terrain */
     UFUNCTION(BlueprintCallable, Category = "Terrain Physics")
-    void UpdatePhysicsMaterialAtLocation(const FVector& Location, float Radius);
+    void SetPhysicsSimulationEnabled(bool bEnabled, float DistanceThreshold = 10000.0f);
 
+    /** Get current physics performance metrics */
     UFUNCTION(BlueprintCallable, Category = "Terrain Physics")
-    void ApplyEnvironmentalForces(AActor* Actor, const FVector& Location);
-
-    UFUNCTION(BlueprintCallable, Category = "Terrain Physics")
-    void ValidateTerrainPhysicsIntegrity();
+    FString GetPhysicsPerformanceStats();
 
 protected:
-    // === TERRAIN DATA ===
-    
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Physics", meta = (AllowPrivateAccess = "true"))
-    TArray<FCore_TerrainSurface> TerrainSurfaces;
+    // === CORE PROPERTIES ===
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Physics", meta = (AllowPrivateAccess = "true"))
-    TArray<FCore_FootprintData> ActiveFootprints;
+    /** All registered physics zones in the world */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Terrain Physics")
+    TArray<FCore_TerrainPhysicsZone> PhysicsZones;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Physics", meta = (AllowPrivateAccess = "true"))
-    TArray<FCore_TerrainDeformation> ActiveDeformations;
+    /** Default surface data for unknown terrain types */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Physics")
+    FCore_TerrainSurfaceData DefaultSurfaceData;
 
-    // === PHYSICS SETTINGS ===
-    
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Settings", meta = (AllowPrivateAccess = "true"))
-    float MaxFootprintDistance = 5000.0f;
+    /** Maximum distance for physics simulation */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Physics", meta = (ClampMin = "1000.0"))
+    float MaxPhysicsDistance = 15000.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Settings", meta = (AllowPrivateAccess = "true"))
-    float FootprintLifetime = 300.0f;
+    /** Update frequency for physics zones (seconds) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Physics", meta = (ClampMin = "0.1"))
+    float PhysicsUpdateInterval = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Settings", meta = (AllowPrivateAccess = "true"))
-    float DeformationThreshold = 1000.0f;
+    /** Enable terrain deformation */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Physics")
+    bool bEnableTerrainDeformation = true;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Settings", meta = (AllowPrivateAccess = "true"))
-    float ErosionRate = 0.01f;
+    /** Enable erosion simulation */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Physics")
+    bool bEnableErosionSimulation = false;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Settings", meta = (AllowPrivateAccess = "true"))
-    bool bEnableFootprints = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Settings", meta = (AllowPrivateAccess = "true"))
-    bool bEnableDeformation = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Settings", meta = (AllowPrivateAccess = "true"))
-    bool bEnableErosion = false;
-
-    // === PERFORMANCE OPTIMIZATION ===
-    
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance", meta = (AllowPrivateAccess = "true"))
-    int32 MaxFootprints = 1000;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance", meta = (AllowPrivateAccess = "true"))
-    int32 MaxDeformations = 100;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance", meta = (AllowPrivateAccess = "true"))
-    float UpdateFrequency = 0.1f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance", meta = (AllowPrivateAccess = "true"))
-    float PhysicsLODDistance = 2000.0f;
+    /** Performance optimization level (0=disabled, 3=maximum) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Physics", meta = (ClampMin = "0", ClampMax = "3"))
+    int32 OptimizationLevel = 1;
 
 private:
     // === INTERNAL SYSTEMS ===
-    
-    float LastUpdateTime;
-    
-    ALandscape* CachedLandscape;
-    
-    TMap<FVector, float> SurfaceHardnessCache;
-    
-    TMap<FVector, ECore_SurfaceType> SurfaceTypeCache;
+
+    /** Timer for physics zone updates */
+    float PhysicsUpdateTimer = 0.0f;
+
+    /** Cached landscape reference */
+    UPROPERTY()
+    TWeakObjectPtr<ALandscape> CachedLandscape;
+
+    /** Cached player references for distance calculations */
+    UPROPERTY()
+    TArray<TWeakObjectPtr<APawn>> CachedPlayers;
+
+    /** Performance tracking */
+    int32 ActivePhysicsZones = 0;
+    int32 DeformationOperationsThisFrame = 0;
+    float LastPerformanceCheck = 0.0f;
 
     // === HELPER FUNCTIONS ===
-    
-    void InitializeTerrainPhysics();
-    
-    void UpdateFootprintSystem(float DeltaTime);
-    
-    void UpdateDeformationSystem(float DeltaTime);
-    
-    void CacheTerrainData();
-    
-    float CalculateImpactForce(const FVector& Velocity, float Mass);
-    
-    ECore_SurfaceType DetermineSurfaceType(const FVector& Location);
-    
-    void ApplyPhysicsMaterialToLocation(const FVector& Location, float Radius, ECore_SurfaceType SurfaceType);
+
+    /** Find the landscape actor in the current world */
+    ALandscape* FindLandscapeActor();
+
+    /** Get height and normal at world location */
+    bool GetTerrainHeightAndNormal(const FVector& WorldLocation, float& OutHeight, FVector& OutNormal);
+
+    /** Calculate surface material based on slope and biome */
+    ESurfaceMaterial CalculateSurfaceMaterial(const FVector& WorldLocation, const FVector& SurfaceNormal);
+
+    /** Apply biome-specific physics modifications */
+    void ApplyBiomePhysicsModifications(FCore_TerrainSurfaceData& SurfaceData, EBiomeType BiomeType);
+
+    /** Update cached player references */
+    void UpdateCachedPlayers();
+
+    /** Calculate distance-based LOD level */
+    int32 CalculatePhysicsLOD(const FVector& Location);
 };
