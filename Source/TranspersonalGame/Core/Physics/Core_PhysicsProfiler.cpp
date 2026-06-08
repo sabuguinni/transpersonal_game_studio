@@ -4,54 +4,42 @@
 #include "PhysicsEngine/PhysicsSettings.h"
 #include "HAL/PlatformFilemanager.h"
 #include "Misc/DateTime.h"
-#include "Misc/FileHelper.h"
-
-DEFINE_LOG_CATEGORY(LogPhysicsProfiler);
+#include "DrawDebugHelpers.h"
 
 UCore_PhysicsProfiler::UCore_PhysicsProfiler()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 0.1f; // 10 FPS profiling
+    PrimaryComponentTick.TickInterval = 0.1f; // Update 10 times per second
     
-    // Initialize profiling data
-    bIsProfilingActive = false;
-    ProfileFrameCount = 0;
-    TotalPhysicsTime = 0.0f;
-    MaxPhysicsTime = 0.0f;
-    MinPhysicsTime = FLT_MAX;
+    // Initialize default values
+    CurrentFrameTime = 0.0f;
+    PhysicsStepTime = 0.0f;
+    ActiveRigidBodies = 0;
+    SleepingRigidBodies = 0;
+    CollisionPairs = 0;
+    MemoryUsageMB = 0.0f;
+    
+    // Configuration defaults
+    bEnableProfiling = true;
+    ProfilingInterval = 0.1f;
+    bLogToConsole = false;
+    bDisplayOnScreen = true;
     
     // Performance thresholds
-    PerformanceThresholds.PhysicsTimeWarning = 8.33f; // 8.33ms = 120fps limit
-    PerformanceThresholds.PhysicsTimeCritical = 16.67f; // 16.67ms = 60fps limit
-    PerformanceThresholds.RigidBodyCountWarning = 500;
-    PerformanceThresholds.RigidBodyCountCritical = 1000;
-    PerformanceThresholds.CollisionCountWarning = 100;
-    PerformanceThresholds.CollisionCountCritical = 200;
+    WarningFrameTime = 16.67f; // 60 FPS threshold
+    CriticalFrameTime = 33.33f; // 30 FPS threshold
+    MaxActiveRigidBodies = 1000;
     
-    // Initialize metrics
-    CurrentMetrics.PhysicsTime = 0.0f;
-    CurrentMetrics.RigidBodyCount = 0;
-    CurrentMetrics.CollisionCount = 0;
-    CurrentMetrics.ConstraintCount = 0;
-    CurrentMetrics.MemoryUsage = 0;
-    CurrentMetrics.CPUUsage = 0.0f;
-    
-    // Profiling configuration
-    ProfilingConfig.bEnableDetailedProfiling = true;
-    ProfilingConfig.bLogToFile = true;
-    ProfilingConfig.bDisplayOnScreen = false;
-    ProfilingConfig.ProfilingDuration = 60.0f; // 60 seconds
-    ProfilingConfig.SampleRate = 0.1f; // 10 samples per second
+    LastProfilingTime = 0.0f;
+    FrameTimeHistory.Reserve(100);
+    RigidBodyCountHistory.Reserve(100);
 }
 
 void UCore_PhysicsProfiler::BeginPlay()
 {
     Super::BeginPlay();
     
-    UE_LOG(LogPhysicsProfiler, Log, TEXT("Physics Profiler initialized"));
-    
-    // Start profiling if auto-start is enabled
-    if (ProfilingConfig.bAutoStartProfiling)
+    if (bEnableProfiling)
     {
         StartProfiling();
     }
@@ -61,248 +49,284 @@ void UCore_PhysicsProfiler::TickComponent(float DeltaTime, ELevelTick TickType, 
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
     
-    if (bIsProfilingActive)
+    if (!bEnableProfiling)
     {
-        UpdatePhysicsMetrics();
+        return;
+    }
+    
+    float CurrentTime = GetWorld()->GetTimeSeconds();
+    if (CurrentTime - LastProfilingTime >= ProfilingInterval)
+    {
+        UpdateMetrics();
+        AnalyzePerformance();
         
-        ProfileFrameCount++;
-        ProfilingElapsedTime += DeltaTime;
-        
-        // Check if profiling duration exceeded
-        if (ProfilingElapsedTime >= ProfilingConfig.ProfilingDuration)
-        {
-            StopProfiling();
-        }
-        
-        // Display on-screen if enabled
-        if (ProfilingConfig.bDisplayOnScreen)
+        if (bDisplayOnScreen)
         {
             DisplayMetricsOnScreen();
         }
+        
+        if (bLogToConsole)
+        {
+            LogCurrentMetrics();
+        }
+        
+        LastProfilingTime = CurrentTime;
     }
 }
 
 void UCore_PhysicsProfiler::StartProfiling()
 {
-    if (bIsProfilingActive)
-    {
-        UE_LOG(LogPhysicsProfiler, Warning, TEXT("Profiling already active"));
-        return;
-    }
+    bEnableProfiling = true;
+    ResetMetrics();
     
-    bIsProfilingActive = true;
-    ProfileFrameCount = 0;
-    ProfilingElapsedTime = 0.0f;
-    TotalPhysicsTime = 0.0f;
-    MaxPhysicsTime = 0.0f;
-    MinPhysicsTime = FLT_MAX;
-    
-    // Clear previous data
-    PhysicsTimeHistory.Empty();
-    RigidBodyCountHistory.Empty();
-    CollisionCountHistory.Empty();
-    
-    ProfilingStartTime = FDateTime::Now();
-    
-    UE_LOG(LogPhysicsProfiler, Log, TEXT("Physics profiling started"));
-    
-    // Broadcast start event
-    OnProfilingStarted.Broadcast();
+    UE_LOG(LogTemp, Log, TEXT("Physics Profiler: Started profiling"));
 }
 
 void UCore_PhysicsProfiler::StopProfiling()
 {
-    if (!bIsProfilingActive)
-    {
-        UE_LOG(LogPhysicsProfiler, Warning, TEXT("Profiling not active"));
-        return;
-    }
+    bEnableProfiling = false;
     
-    bIsProfilingActive = false;
-    
-    // Calculate final statistics
-    if (ProfileFrameCount > 0)
-    {
-        float AveragePhysicsTime = TotalPhysicsTime / ProfileFrameCount;
-        
-        UE_LOG(LogPhysicsProfiler, Log, TEXT("Physics Profiling Results:"));
-        UE_LOG(LogPhysicsProfiler, Log, TEXT("  Duration: %.2f seconds"), ProfilingElapsedTime);
-        UE_LOG(LogPhysicsProfiler, Log, TEXT("  Frames: %d"), ProfileFrameCount);
-        UE_LOG(LogPhysicsProfiler, Log, TEXT("  Average Physics Time: %.2f ms"), AveragePhysicsTime);
-        UE_LOG(LogPhysicsProfiler, Log, TEXT("  Max Physics Time: %.2f ms"), MaxPhysicsTime);
-        UE_LOG(LogPhysicsProfiler, Log, TEXT("  Min Physics Time: %.2f ms"), MinPhysicsTime);
-    }
-    
-    // Save profiling data if enabled
-    if (ProfilingConfig.bLogToFile)
-    {
-        SaveProfilingDataToFile();
-    }
-    
-    // Broadcast stop event
-    OnProfilingStopped.Broadcast();
+    UE_LOG(LogTemp, Log, TEXT("Physics Profiler: Stopped profiling"));
 }
 
-void UCore_PhysicsProfiler::UpdatePhysicsMetrics()
+void UCore_PhysicsProfiler::ResetMetrics()
 {
+    CurrentFrameTime = 0.0f;
+    PhysicsStepTime = 0.0f;
+    ActiveRigidBodies = 0;
+    SleepingRigidBodies = 0;
+    CollisionPairs = 0;
+    MemoryUsageMB = 0.0f;
+    
+    FrameTimeHistory.Empty();
+    RigidBodyCountHistory.Empty();
+    
+    UE_LOG(LogTemp, Log, TEXT("Physics Profiler: Metrics reset"));
+}
+
+FString UCore_PhysicsProfiler::GetPerformanceReport()
+{
+    FString Report;
+    Report += FString::Printf(TEXT("=== PHYSICS PERFORMANCE REPORT ===\n"));
+    Report += FString::Printf(TEXT("Frame Time: %.2f ms\n"), CurrentFrameTime);
+    Report += FString::Printf(TEXT("Physics Step Time: %.2f ms\n"), PhysicsStepTime);
+    Report += FString::Printf(TEXT("Active Rigid Bodies: %d\n"), ActiveRigidBodies);
+    Report += FString::Printf(TEXT("Sleeping Rigid Bodies: %d\n"), SleepingRigidBodies);
+    Report += FString::Printf(TEXT("Collision Pairs: %d\n"), CollisionPairs);
+    Report += FString::Printf(TEXT("Memory Usage: %.2f MB\n"), MemoryUsageMB);
+    
+    // Performance status
+    if (CurrentFrameTime > CriticalFrameTime)
+    {
+        Report += TEXT("Status: CRITICAL - Performance below 30 FPS\n");
+    }
+    else if (CurrentFrameTime > WarningFrameTime)
+    {
+        Report += TEXT("Status: WARNING - Performance below 60 FPS\n");
+    }
+    else
+    {
+        Report += TEXT("Status: GOOD - Performance within limits\n");
+    }
+    
+    return Report;
+}
+
+bool UCore_PhysicsProfiler::IsPerformanceWithinLimits()
+{
+    return (CurrentFrameTime <= WarningFrameTime && ActiveRigidBodies <= MaxActiveRigidBodies);
+}
+
+void UCore_PhysicsProfiler::LogCurrentMetrics()
+{
+    UE_LOG(LogTemp, Log, TEXT("Physics Profiler - Frame: %.2fms, Bodies: %d/%d, Collisions: %d"), 
+           CurrentFrameTime, ActiveRigidBodies, SleepingRigidBodies, CollisionPairs);
+}
+
+void UCore_PhysicsProfiler::ProfilePhysicsStep()
+{
+    // Profile the physics simulation step
+    double StartTime = FPlatformTime::Seconds();
+    
+    // Physics step happens automatically in UE5, we measure the delta
+    float DeltaTime = GetWorld()->GetDeltaSeconds();
+    PhysicsStepTime = DeltaTime * 1000.0f; // Convert to milliseconds
+    
+    double EndTime = FPlatformTime::Seconds();
+    float ProfileTime = (EndTime - StartTime) * 1000.0f;
+    
+    UE_LOG(LogTemp, VeryVerbose, TEXT("Physics Step Profile: %.3f ms"), ProfileTime);
+}
+
+void UCore_PhysicsProfiler::ProfileCollisionDetection()
+{
+    // Profile collision detection by counting collision events
     UWorld* World = GetWorld();
     if (!World)
     {
         return;
     }
     
-    // Get physics scene
-    FPhysScene* PhysScene = World->GetPhysicsScene();
-    if (!PhysScene)
-    {
-        return;
-    }
+    // Count active collision pairs (approximation)
+    CollisionPairs = 0;
     
-    // Update physics timing
-    float CurrentPhysicsTime = GetPhysicsTime();
-    CurrentMetrics.PhysicsTime = CurrentPhysicsTime;
-    
-    // Update statistics
-    TotalPhysicsTime += CurrentPhysicsTime;
-    MaxPhysicsTime = FMath::Max(MaxPhysicsTime, CurrentPhysicsTime);
-    MinPhysicsTime = FMath::Min(MinPhysicsTime, CurrentPhysicsTime);
-    
-    // Store history
-    PhysicsTimeHistory.Add(CurrentPhysicsTime);
-    if (PhysicsTimeHistory.Num() > 1000) // Keep last 1000 samples
-    {
-        PhysicsTimeHistory.RemoveAt(0);
-    }
-    
-    // Update rigid body count
-    CurrentMetrics.RigidBodyCount = GetRigidBodyCount();
-    RigidBodyCountHistory.Add(CurrentMetrics.RigidBodyCount);
-    if (RigidBodyCountHistory.Num() > 1000)
-    {
-        RigidBodyCountHistory.RemoveAt(0);
-    }
-    
-    // Update collision count
-    CurrentMetrics.CollisionCount = GetCollisionCount();
-    CollisionCountHistory.Add(CurrentMetrics.CollisionCount);
-    if (CollisionCountHistory.Num() > 1000)
-    {
-        CollisionCountHistory.RemoveAt(0);
-    }
-    
-    // Update other metrics
-    CurrentMetrics.ConstraintCount = GetConstraintCount();
-    CurrentMetrics.MemoryUsage = GetPhysicsMemoryUsage();
-    CurrentMetrics.CPUUsage = GetPhysicsCPUUsage();
-    
-    // Check performance thresholds
-    CheckPerformanceThresholds();
-}
-
-float UCore_PhysicsProfiler::GetPhysicsTime()
-{
-    // Get physics timing from stats system
-    // This is a simplified implementation - in real scenario would use proper stats
-    return FMath::RandRange(2.0f, 12.0f); // Simulated physics time in milliseconds
-}
-
-int32 UCore_PhysicsProfiler::GetRigidBodyCount()
-{
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        return 0;
-    }
-    
-    int32 Count = 0;
-    
-    // Count all actors with physics bodies
     for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
     {
         AActor* Actor = *ActorItr;
         if (Actor && Actor->GetRootComponent())
         {
             UPrimitiveComponent* PrimComp = Cast<UPrimitiveComponent>(Actor->GetRootComponent());
-            if (PrimComp && PrimComp->IsSimulatingPhysics())
+            if (PrimComp && PrimComp->IsCollisionEnabled())
             {
-                Count++;
+                CollisionPairs++;
+            }
+        }
+    }
+}
+
+void UCore_PhysicsProfiler::ProfileConstraintSolving()
+{
+    // Profile physics constraint solving
+    // This is handled internally by Chaos Physics
+    // We can monitor the overall physics performance impact
+    
+    UPhysicsSettings* PhysicsSettings = UPhysicsSettings::Get();
+    if (PhysicsSettings)
+    {
+        float MaxSubstepDelta = PhysicsSettings->MaxSubstepDeltaTime;
+        int32 MaxSubsteps = PhysicsSettings->MaxSubsteps;
+        
+        UE_LOG(LogTemp, VeryVerbose, TEXT("Constraint Solver Settings - MaxSubstepDelta: %.4f, MaxSubsteps: %d"), 
+               MaxSubstepDelta, MaxSubsteps);
+    }
+}
+
+TArray<FString> UCore_PhysicsProfiler::GetOptimizationSuggestions()
+{
+    TArray<FString> Suggestions;
+    
+    if (CurrentFrameTime > CriticalFrameTime)
+    {
+        Suggestions.Add(TEXT("CRITICAL: Reduce active rigid bodies count"));
+        Suggestions.Add(TEXT("CRITICAL: Implement physics LOD system"));
+        Suggestions.Add(TEXT("CRITICAL: Increase physics culling distance"));
+    }
+    else if (CurrentFrameTime > WarningFrameTime)
+    {
+        Suggestions.Add(TEXT("WARNING: Consider physics optimization"));
+        Suggestions.Add(TEXT("WARNING: Monitor rigid body count"));
+    }
+    
+    if (ActiveRigidBodies > MaxActiveRigidBodies)
+    {
+        Suggestions.Add(TEXT("Too many active rigid bodies - implement culling"));
+    }
+    
+    if (CollisionPairs > 500)
+    {
+        Suggestions.Add(TEXT("High collision pair count - optimize collision channels"));
+    }
+    
+    if (MemoryUsageMB > 100.0f)
+    {
+        Suggestions.Add(TEXT("High physics memory usage - consider mesh simplification"));
+    }
+    
+    return Suggestions;
+}
+
+void UCore_PhysicsProfiler::ApplyAutoOptimizations()
+{
+    // Apply automatic optimizations based on current performance
+    if (CurrentFrameTime > CriticalFrameTime)
+    {
+        // Emergency optimizations
+        UPhysicsSettings* PhysicsSettings = UPhysicsSettings::Get();
+        if (PhysicsSettings)
+        {
+            // Reduce physics accuracy for better performance
+            PhysicsSettings->MaxSubsteps = FMath::Max(1, PhysicsSettings->MaxSubsteps - 1);
+            UE_LOG(LogTemp, Warning, TEXT("Auto-optimization: Reduced MaxSubsteps to %d"), PhysicsSettings->MaxSubsteps);
+        }
+    }
+}
+
+void UCore_PhysicsProfiler::UpdateMetrics()
+{
+    // Update frame time
+    CurrentFrameTime = GetWorld()->GetDeltaSeconds() * 1000.0f;
+    FrameTimeHistory.Add(CurrentFrameTime);
+    if (FrameTimeHistory.Num() > 100)
+    {
+        FrameTimeHistory.RemoveAt(0);
+    }
+    
+    // Count rigid bodies
+    ActiveRigidBodies = 0;
+    SleepingRigidBodies = 0;
+    
+    UWorld* World = GetWorld();
+    if (World)
+    {
+        for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+        {
+            AActor* Actor = *ActorItr;
+            if (Actor && Actor->GetRootComponent())
+            {
+                UPrimitiveComponent* PrimComp = Cast<UPrimitiveComponent>(Actor->GetRootComponent());
+                if (PrimComp && PrimComp->IsSimulatingPhysics())
+                {
+                    if (PrimComp->IsSimulatingPhysics())
+                    {
+                        ActiveRigidBodies++;
+                    }
+                    else
+                    {
+                        SleepingRigidBodies++;
+                    }
+                }
             }
         }
     }
     
-    return Count;
-}
-
-int32 UCore_PhysicsProfiler::GetCollisionCount()
-{
-    // This would typically track collision events
-    // For now, return a simulated value
-    return FMath::RandRange(10, 50);
-}
-
-int32 UCore_PhysicsProfiler::GetConstraintCount()
-{
-    // Count physics constraints in the world
-    // Simplified implementation
-    return FMath::RandRange(0, 20);
-}
-
-int32 UCore_PhysicsProfiler::GetPhysicsMemoryUsage()
-{
-    // Get physics memory usage in KB
-    // This would use proper memory tracking in real implementation
-    return FMath::RandRange(1024, 8192); // 1-8 MB
-}
-
-float UCore_PhysicsProfiler::GetPhysicsCPUUsage()
-{
-    // Get physics CPU usage percentage
-    // Simplified implementation
-    return FMath::RandRange(5.0f, 25.0f);
-}
-
-void UCore_PhysicsProfiler::CheckPerformanceThresholds()
-{
-    // Check physics time thresholds
-    if (CurrentMetrics.PhysicsTime > PerformanceThresholds.PhysicsTimeCritical)
+    RigidBodyCountHistory.Add(ActiveRigidBodies);
+    if (RigidBodyCountHistory.Num() > 100)
     {
-        UE_LOG(LogPhysicsProfiler, Error, TEXT("CRITICAL: Physics time %.2f ms exceeds critical threshold %.2f ms"), 
-               CurrentMetrics.PhysicsTime, PerformanceThresholds.PhysicsTimeCritical);
-        OnPerformanceThresholdExceeded.Broadcast(ECore_PerformanceLevel::Critical, TEXT("Physics Time"));
-    }
-    else if (CurrentMetrics.PhysicsTime > PerformanceThresholds.PhysicsTimeWarning)
-    {
-        UE_LOG(LogPhysicsProfiler, Warning, TEXT("WARNING: Physics time %.2f ms exceeds warning threshold %.2f ms"), 
-               CurrentMetrics.PhysicsTime, PerformanceThresholds.PhysicsTimeWarning);
-        OnPerformanceThresholdExceeded.Broadcast(ECore_PerformanceLevel::Warning, TEXT("Physics Time"));
+        RigidBodyCountHistory.RemoveAt(0);
     }
     
-    // Check rigid body count thresholds
-    if (CurrentMetrics.RigidBodyCount > PerformanceThresholds.RigidBodyCountCritical)
-    {
-        UE_LOG(LogPhysicsProfiler, Error, TEXT("CRITICAL: Rigid body count %d exceeds critical threshold %d"), 
-               CurrentMetrics.RigidBodyCount, PerformanceThresholds.RigidBodyCountCritical);
-        OnPerformanceThresholdExceeded.Broadcast(ECore_PerformanceLevel::Critical, TEXT("Rigid Body Count"));
-    }
-    else if (CurrentMetrics.RigidBodyCount > PerformanceThresholds.RigidBodyCountWarning)
-    {
-        UE_LOG(LogPhysicsProfiler, Warning, TEXT("WARNING: Rigid body count %d exceeds warning threshold %d"), 
-               CurrentMetrics.RigidBodyCount, PerformanceThresholds.RigidBodyCountWarning);
-        OnPerformanceThresholdExceeded.Broadcast(ECore_PerformanceLevel::Warning, TEXT("Rigid Body Count"));
-    }
+    // Profile collision detection
+    ProfileCollisionDetection();
     
-    // Check collision count thresholds
-    if (CurrentMetrics.CollisionCount > PerformanceThresholds.CollisionCountCritical)
+    // Estimate memory usage (simplified)
+    MemoryUsageMB = (ActiveRigidBodies * 0.1f) + (CollisionPairs * 0.05f);
+}
+
+void UCore_PhysicsProfiler::AnalyzePerformance()
+{
+    // Analyze performance trends
+    if (FrameTimeHistory.Num() > 10)
     {
-        UE_LOG(LogPhysicsProfiler, Error, TEXT("CRITICAL: Collision count %d exceeds critical threshold %d"), 
-               CurrentMetrics.CollisionCount, PerformanceThresholds.CollisionCountCritical);
-        OnPerformanceThresholdExceeded.Broadcast(ECore_PerformanceLevel::Critical, TEXT("Collision Count"));
-    }
-    else if (CurrentMetrics.CollisionCount > PerformanceThresholds.CollisionCountWarning)
-    {
-        UE_LOG(LogPhysicsProfiler, Warning, TEXT("WARNING: Collision count %d exceeds warning threshold %d"), 
-               CurrentMetrics.CollisionCount, PerformanceThresholds.CollisionCountWarning);
-        OnPerformanceThresholdExceeded.Broadcast(ECore_PerformanceLevel::Warning, TEXT("Collision Count"));
+        float AverageFrameTime = 0.0f;
+        for (float FrameTime : FrameTimeHistory)
+        {
+            AverageFrameTime += FrameTime;
+        }
+        AverageFrameTime /= FrameTimeHistory.Num();
+        
+        // Check for performance degradation
+        float RecentAverage = 0.0f;
+        int32 RecentSamples = FMath::Min(10, FrameTimeHistory.Num());
+        for (int32 i = FrameTimeHistory.Num() - RecentSamples; i < FrameTimeHistory.Num(); i++)
+        {
+            RecentAverage += FrameTimeHistory[i];
+        }
+        RecentAverage /= RecentSamples;
+        
+        if (RecentAverage > AverageFrameTime * 1.2f)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("Physics Profiler: Performance degradation detected"));
+        }
     }
 }
 
@@ -311,127 +335,20 @@ void UCore_PhysicsProfiler::DisplayMetricsOnScreen()
     if (GEngine)
     {
         FString DisplayText = FString::Printf(
-            TEXT("Physics Profiler\n")
-            TEXT("Physics Time: %.2f ms\n")
-            TEXT("Rigid Bodies: %d\n")
-            TEXT("Collisions: %d\n")
-            TEXT("Constraints: %d\n")
-            TEXT("Memory: %d KB\n")
-            TEXT("CPU: %.1f%%"),
-            CurrentMetrics.PhysicsTime,
-            CurrentMetrics.RigidBodyCount,
-            CurrentMetrics.CollisionCount,
-            CurrentMetrics.ConstraintCount,
-            CurrentMetrics.MemoryUsage,
-            CurrentMetrics.CPUUsage
+            TEXT("Physics Profiler:\nFrame: %.1fms | Bodies: %d | Collisions: %d | Memory: %.1fMB"),
+            CurrentFrameTime, ActiveRigidBodies, CollisionPairs, MemoryUsageMB
         );
         
-        GEngine->AddOnScreenDebugMessage(-1, 0.1f, FColor::Green, DisplayText);
+        FColor DisplayColor = FColor::Green;
+        if (CurrentFrameTime > CriticalFrameTime)
+        {
+            DisplayColor = FColor::Red;
+        }
+        else if (CurrentFrameTime > WarningFrameTime)
+        {
+            DisplayColor = FColor::Yellow;
+        }
+        
+        GEngine->AddOnScreenDebugMessage(-1, ProfilingInterval + 0.1f, DisplayColor, DisplayText);
     }
-}
-
-void UCore_PhysicsProfiler::SaveProfilingDataToFile()
-{
-    FString FileName = FString::Printf(TEXT("PhysicsProfile_%s.csv"), 
-                                      *ProfilingStartTime.ToString(TEXT("%Y%m%d_%H%M%S")));
-    
-    FString FilePath = FPaths::ProjectLogDir() / FileName;
-    
-    FString CSVContent = TEXT("Frame,PhysicsTime,RigidBodies,Collisions\n");
-    
-    int32 MaxSamples = FMath::Min({PhysicsTimeHistory.Num(), RigidBodyCountHistory.Num(), CollisionCountHistory.Num()});
-    
-    for (int32 i = 0; i < MaxSamples; i++)
-    {
-        CSVContent += FString::Printf(TEXT("%d,%.2f,%d,%d\n"),
-                                     i,
-                                     PhysicsTimeHistory[i],
-                                     RigidBodyCountHistory[i],
-                                     CollisionCountHistory[i]);
-    }
-    
-    if (FFileHelper::SaveStringToFile(CSVContent, *FilePath))
-    {
-        UE_LOG(LogPhysicsProfiler, Log, TEXT("Profiling data saved to: %s"), *FilePath);
-    }
-    else
-    {
-        UE_LOG(LogPhysicsProfiler, Error, TEXT("Failed to save profiling data to: %s"), *FilePath);
-    }
-}
-
-FCore_PhysicsMetrics UCore_PhysicsProfiler::GetCurrentMetrics() const
-{
-    return CurrentMetrics;
-}
-
-FCore_PerformanceThresholds UCore_PhysicsProfiler::GetPerformanceThresholds() const
-{
-    return PerformanceThresholds;
-}
-
-void UCore_PhysicsProfiler::SetPerformanceThresholds(const FCore_PerformanceThresholds& NewThresholds)
-{
-    PerformanceThresholds = NewThresholds;
-    UE_LOG(LogPhysicsProfiler, Log, TEXT("Performance thresholds updated"));
-}
-
-bool UCore_PhysicsProfiler::IsProfilingActive() const
-{
-    return bIsProfilingActive;
-}
-
-float UCore_PhysicsProfiler::GetAveragePhysicsTime() const
-{
-    if (ProfileFrameCount > 0)
-    {
-        return TotalPhysicsTime / ProfileFrameCount;
-    }
-    return 0.0f;
-}
-
-float UCore_PhysicsProfiler::GetMaxPhysicsTime() const
-{
-    return MaxPhysicsTime;
-}
-
-float UCore_PhysicsProfiler::GetMinPhysicsTime() const
-{
-    return MinPhysicsTime == FLT_MAX ? 0.0f : MinPhysicsTime;
-}
-
-TArray<float> UCore_PhysicsProfiler::GetPhysicsTimeHistory() const
-{
-    return PhysicsTimeHistory;
-}
-
-void UCore_PhysicsProfiler::SetProfilingConfig(const FCore_ProfilingConfig& NewConfig)
-{
-    ProfilingConfig = NewConfig;
-    UE_LOG(LogPhysicsProfiler, Log, TEXT("Profiling configuration updated"));
-}
-
-FCore_ProfilingConfig UCore_PhysicsProfiler::GetProfilingConfig() const
-{
-    return ProfilingConfig;
-}
-
-void UCore_PhysicsProfiler::ResetProfiling()
-{
-    if (bIsProfilingActive)
-    {
-        StopProfiling();
-    }
-    
-    ProfileFrameCount = 0;
-    TotalPhysicsTime = 0.0f;
-    MaxPhysicsTime = 0.0f;
-    MinPhysicsTime = FLT_MAX;
-    ProfilingElapsedTime = 0.0f;
-    
-    PhysicsTimeHistory.Empty();
-    RigidBodyCountHistory.Empty();
-    CollisionCountHistory.Empty();
-    
-    UE_LOG(LogPhysicsProfiler, Log, TEXT("Physics profiler reset"));
 }
