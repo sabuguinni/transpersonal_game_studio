@@ -2,24 +2,36 @@
 
 #include "CoreMinimal.h"
 #include "Animation/AnimInstance.h"
-#include "Engine/Engine.h"
-#include "GameFramework/Character.h"
-#include "GameFramework/CharacterMovementComponent.h"
+#include "Anim_MotionMatchingSystem.h"
 #include "Anim_CharacterAnimInstance.generated.h"
 
-UENUM(BlueprintType)
-enum class EAnim_MovementState : uint8
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FAnim_IKFootData
 {
-    Idle        UMETA(DisplayName = "Idle"),
-    Walking     UMETA(DisplayName = "Walking"),
-    Running     UMETA(DisplayName = "Running"),
-    Jumping     UMETA(DisplayName = "Jumping"),
-    Falling     UMETA(DisplayName = "Falling"),
-    Crouching   UMETA(DisplayName = "Crouching"),
-    Swimming    UMETA(DisplayName = "Swimming")
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK")
+    FVector FootLocation;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK")
+    FRotator FootRotation;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK")
+    float IKAlpha;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK")
+    float KneeTargetZ;
+
+    FAnim_IKFootData()
+    {
+        FootLocation = FVector::ZeroVector;
+        FootRotation = FRotator::ZeroRotator;
+        IKAlpha = 0.0f;
+        KneeTargetZ = 0.0f;
+    }
 };
 
-UCLASS(Blueprintable, BlueprintType)
+UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UAnim_CharacterAnimInstance : public UAnimInstance
 {
     GENERATED_BODY()
@@ -27,65 +39,81 @@ class TRANSPERSONALGAME_API UAnim_CharacterAnimInstance : public UAnimInstance
 public:
     UAnim_CharacterAnimInstance();
 
+protected:
     virtual void NativeInitializeAnimation() override;
     virtual void NativeUpdateAnimation(float DeltaSeconds) override;
 
-protected:
-    // Movement state tracking
-    UPROPERTY(BlueprintReadOnly, Category = "Movement")
-    EAnim_MovementState CurrentMovementState;
+public:
+    // Motion Matching Variables
+    UPROPERTY(BlueprintReadOnly, Category = "Motion")
+    FAnim_MotionData MotionData;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Movement")
+    UPROPERTY(BlueprintReadOnly, Category = "Motion")
+    FName CurrentState;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Motion")
+    class UAnim_MotionMatchingSystem* MotionMatchingSystem;
+
+    // IK Variables
+    UPROPERTY(BlueprintReadOnly, Category = "IK")
+    FAnim_IKFootData LeftFootIK;
+
+    UPROPERTY(BlueprintReadOnly, Category = "IK")
+    FAnim_IKFootData RightFootIK;
+
+    UPROPERTY(BlueprintReadOnly, Category = "IK")
+    float HipOffset;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK Settings")
+    float IKTraceDistance;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK Settings")
+    float IKInterpSpeed;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK Settings")
+    bool bEnableFootIK;
+
+    // Blend Space Variables
+    UPROPERTY(BlueprintReadOnly, Category = "Locomotion")
     float Speed;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Movement")
+    UPROPERTY(BlueprintReadOnly, Category = "Locomotion")
     float Direction;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Movement")
+    UPROPERTY(BlueprintReadOnly, Category = "Locomotion")
     bool bIsInAir;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Movement")
+    UPROPERTY(BlueprintReadOnly, Category = "Locomotion")
     bool bIsCrouching;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Movement")
-    bool bIsSwimming;
+    UPROPERTY(BlueprintReadOnly, Category = "Locomotion")
+    bool bIsMoving;
 
-    // Animation blending
-    UPROPERTY(BlueprintReadOnly, Category = "Animation")
-    float IdleToWalkBlend;
+    // Animation State Functions
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    void PlayActionMontage(FName ActionName, float PlayRate = 1.0f);
 
-    UPROPERTY(BlueprintReadOnly, Category = "Animation")
-    float WalkToRunBlend;
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    void StopActionMontage(float BlendOutTime = 0.25f);
 
-    // IK system variables
-    UPROPERTY(BlueprintReadOnly, Category = "IK")
-    float LeftFootIKOffset;
+    UFUNCTION(BlueprintCallable, Category = "IK")
+    void UpdateFootIK(float DeltaSeconds);
 
-    UPROPERTY(BlueprintReadOnly, Category = "IK")
-    float RightFootIKOffset;
+    UFUNCTION(BlueprintCallable, Category = "IK")
+    FAnim_IKFootData CalculateFootIK(FName SocketName, float DeltaSeconds);
 
-    UPROPERTY(BlueprintReadOnly, Category = "IK")
-    FRotator LeftFootIKRotation;
+protected:
+    UPROPERTY()
+    class ACharacter* OwnerCharacter;
 
-    UPROPERTY(BlueprintReadOnly, Category = "IK")
-    FRotator RightFootIKRotation;
+    UPROPERTY()
+    class UCharacterMovementComponent* MovementComponent;
 
-    // Character reference
-    UPROPERTY(BlueprintReadOnly, Category = "Character")
-    ACharacter* OwningCharacter;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Character")
-    UCharacterMovementComponent* MovementComponent;
+    UPROPERTY()
+    class UAnimMontage* CurrentActionMontage;
 
 private:
-    void UpdateMovementState();
-    void UpdateIKValues();
-    void PerformFootIKTrace(FVector FootLocation, float& IKOffset, FRotator& IKRotation, bool bIsLeftFoot);
-    
-    // IK trace parameters
-    UPROPERTY(EditAnywhere, Category = "IK Settings")
-    float IKTraceDistance = 50.0f;
-
-    UPROPERTY(EditAnywhere, Category = "IK Settings")
-    float IKInterpSpeed = 15.0f;
+    void UpdateLocomotionVariables();
+    void UpdateMotionMatchingData();
+    FVector PerformFootTrace(const FVector& FootLocation, float& OutImpactZ) const;
 };
