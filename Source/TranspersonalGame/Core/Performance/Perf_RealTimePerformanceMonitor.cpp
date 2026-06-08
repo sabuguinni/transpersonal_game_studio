@@ -1,33 +1,37 @@
 #include "Perf_RealTimePerformanceMonitor.h"
-#include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "HAL/PlatformMemory.h"
+#include "Engine/GameViewportClient.h"
+#include "HAL/PlatformFilemanager.h"
+#include "Misc/DateTime.h"
 #include "Stats/Stats.h"
 #include "RenderCore.h"
+#include "RHI.h"
+#include "Engine/Engine.h"
 #include "TimerManager.h"
-#include "Engine/GameViewportClient.h"
-#include "Misc/App.h"
 
 UPerf_RealTimePerformanceMonitor::UPerf_RealTimePerformanceMonitor()
+    : bIsMonitoring(false)
+    , CurrentPerformanceLevel(EPerf_PerformanceLevel::Good)
+    , TargetFPS(60.0f)
+    , bAutoQualityAdjustment(true)
+    , MonitoringInterval(0.5f)
+    , PerformanceHistorySize(120)
+    , QualityAdjustmentCooldown(0)
+    , ConsecutivePoorFrames(0)
+    , ConsecutiveGoodFrames(0)
 {
-    bIsMonitoring = false;
-    TargetFPS = 60.0f;
-    MonitoringInterval = 0.1f;
-    LastPerformanceLevel = EPerf_PerformanceLevel::Excellent;
 }
 
 void UPerf_RealTimePerformanceMonitor::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
     
-    UE_LOG(LogTemp, Log, TEXT("Performance Monitor initialized"));
+    UE_LOG(LogTemp, Log, TEXT("Performance Monitor: Initialized"));
     
-    // Reserve space for historical data
-    FPSHistory.Reserve(300); // 30 seconds at 0.1s intervals
-    FrameTimeHistory.Reserve(300);
-    MemoryHistory.Reserve(300);
+    // Reserve space for performance history
+    PerformanceHistory.Reserve(PerformanceHistorySize);
     
-    // Start monitoring automatically
+    // Start monitoring by default
     StartMonitoring();
 }
 
@@ -37,32 +41,29 @@ void UPerf_RealTimePerformanceMonitor::Deinitialize()
     Super::Deinitialize();
 }
 
-bool UPerf_RealTimePerformanceMonitor::ShouldCreateSubsystem(UObject* Outer) const
-{
-    return true;
-}
-
 void UPerf_RealTimePerformanceMonitor::StartMonitoring()
 {
     if (bIsMonitoring)
     {
         return;
     }
-
+    
     bIsMonitoring = true;
     
+    // Get world for timer manager
     UWorld* World = GetWorld();
-    if (World && World->GetTimerManager().IsValidHandle(MonitoringTimerHandle) == false)
+    if (World)
     {
+        // Start the monitoring timer
         World->GetTimerManager().SetTimer(
             MonitoringTimerHandle,
             this,
-            &UPerf_RealTimePerformanceMonitor::UpdateMetrics,
+            &UPerf_RealTimePerformanceMonitor::UpdatePerformanceMetrics,
             MonitoringInterval,
             true
         );
         
-        UE_LOG(LogTemp, Log, TEXT("Performance monitoring started"));
+        UE_LOG(LogTemp, Log, TEXT("Performance Monitor: Started monitoring"));
     }
 }
 
@@ -72,313 +73,298 @@ void UPerf_RealTimePerformanceMonitor::StopMonitoring()
     {
         return;
     }
-
+    
     bIsMonitoring = false;
     
+    // Get world for timer manager
     UWorld* World = GetWorld();
-    if (World && World->GetTimerManager().IsValidHandle(MonitoringTimerHandle))
+    if (World)
     {
         World->GetTimerManager().ClearTimer(MonitoringTimerHandle);
-        UE_LOG(LogTemp, Log, TEXT("Performance monitoring stopped"));
+        UE_LOG(LogTemp, Log, TEXT("Performance Monitor: Stopped monitoring"));
     }
 }
 
-void UPerf_RealTimePerformanceMonitor::UpdateMetrics()
+FPerf_PerformanceSnapshot UPerf_RealTimePerformanceMonitor::GetCurrentSnapshot() const
 {
-    if (!bIsMonitoring)
-    {
-        return;
-    }
-
-    UpdateFrameMetrics();
-    UpdateMemoryMetrics();
-    UpdateSystemMetrics();
-    CheckPerformanceLevel();
-    TriggerOptimizationIfNeeded();
+    FPerf_PerformanceSnapshot Snapshot;
+    
+    Snapshot.CurrentFPS = CalculateCurrentFPS();
+    Snapshot.FrameTimeMS = CalculateFrameTime();
+    Snapshot.GPUTimeMS = CalculateGPUTime();
+    Snapshot.MemoryUsageMB = CalculateMemoryUsage();
+    Snapshot.DrawCalls = CalculateDrawCalls();
+    Snapshot.TriangleCount = CalculateTriangleCount();
+    Snapshot.TimeStamp = FPlatformTime::Seconds();
+    
+    return Snapshot;
 }
 
-void UPerf_RealTimePerformanceMonitor::UpdateFrameMetrics()
+float UPerf_RealTimePerformanceMonitor::GetAverageFPS() const
 {
-    // Get current FPS
-    CurrentFrameMetrics.CurrentFPS = 1.0f / FApp::GetDeltaTime();
-    CurrentFrameMetrics.FrameTime = FApp::GetDeltaTime() * 1000.0f; // Convert to milliseconds
-    
-    // Get thread times (approximations)
-    CurrentFrameMetrics.GameThreadTime = FApp::GetDeltaTime() * 1000.0f * 0.6f; // Estimate
-    CurrentFrameMetrics.RenderThreadTime = FApp::GetDeltaTime() * 1000.0f * 0.3f; // Estimate
-    CurrentFrameMetrics.GPUTime = FApp::GetDeltaTime() * 1000.0f * 0.4f; // Estimate
-    
-    // Add to history
-    FPSHistory.Add(CurrentFrameMetrics.CurrentFPS);
-    FrameTimeHistory.Add(CurrentFrameMetrics.FrameTime);
-    
-    // Keep history size manageable
-    if (FPSHistory.Num() > 300)
-    {
-        FPSHistory.RemoveAt(0);
-        FrameTimeHistory.RemoveAt(0);
-    }
-}
-
-void UPerf_RealTimePerformanceMonitor::UpdateMemoryMetrics()
-{
-    FPlatformMemoryStats MemStats = FPlatformMemory::GetStats();
-    
-    CurrentMemoryMetrics.UsedPhysicalMemoryMB = MemStats.UsedPhysical / (1024.0f * 1024.0f);
-    CurrentMemoryMetrics.UsedVirtualMemoryMB = MemStats.UsedVirtual / (1024.0f * 1024.0f);
-    CurrentMemoryMetrics.PeakUsedPhysicalMemoryMB = MemStats.PeakUsedPhysical / (1024.0f * 1024.0f);
-    CurrentMemoryMetrics.PeakUsedVirtualMemoryMB = MemStats.PeakUsedVirtual / (1024.0f * 1024.0f);
-    
-    // Add to history
-    MemoryHistory.Add(CurrentMemoryMetrics.UsedPhysicalMemoryMB);
-    
-    if (MemoryHistory.Num() > 300)
-    {
-        MemoryHistory.RemoveAt(0);
-    }
-}
-
-void UPerf_RealTimePerformanceMonitor::UpdateSystemMetrics()
-{
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        return;
-    }
-    
-    // Count actors
-    CurrentSystemMetrics.ActiveActors = 0;
-    CurrentSystemMetrics.VisibleActors = 0;
-    
-    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
-    {
-        AActor* Actor = *ActorItr;
-        if (Actor && !Actor->IsPendingKill())
-        {
-            CurrentSystemMetrics.ActiveActors++;
-            
-            if (!Actor->IsHidden())
-            {
-                CurrentSystemMetrics.VisibleActors++;
-            }
-        }
-    }
-    
-    // Estimate draw calls and triangles (simplified)
-    CurrentSystemMetrics.DrawCalls = CurrentSystemMetrics.VisibleActors * 2; // Rough estimate
-    CurrentSystemMetrics.Triangles = CurrentSystemMetrics.VisibleActors * 1000; // Rough estimate
-    
-    // CPU usage approximation
-    CurrentSystemMetrics.CPUUsagePercent = FMath::Clamp(
-        (CurrentFrameMetrics.FrameTime / 16.67f) * 100.0f, // 16.67ms = 60 FPS
-        0.0f,
-        100.0f
-    );
-}
-
-EPerf_PerformanceLevel UPerf_RealTimePerformanceMonitor::GetCurrentPerformanceLevel() const
-{
-    float CurrentFPS = CurrentFrameMetrics.CurrentFPS;
-    
-    if (CurrentFPS >= 60.0f)
-    {
-        return EPerf_PerformanceLevel::Excellent;
-    }
-    else if (CurrentFPS >= 45.0f)
-    {
-        return EPerf_PerformanceLevel::Good;
-    }
-    else if (CurrentFPS >= 30.0f)
-    {
-        return EPerf_PerformanceLevel::Average;
-    }
-    else if (CurrentFPS >= 15.0f)
-    {
-        return EPerf_PerformanceLevel::Poor;
-    }
-    else
-    {
-        return EPerf_PerformanceLevel::Critical;
-    }
-}
-
-void UPerf_RealTimePerformanceMonitor::CheckPerformanceLevel()
-{
-    EPerf_PerformanceLevel NewLevel = GetCurrentPerformanceLevel();
-    
-    if (NewLevel != LastPerformanceLevel)
-    {
-        LastPerformanceLevel = NewLevel;
-        OnPerformanceChanged.Broadcast(NewLevel);
-        
-        UE_LOG(LogTemp, Warning, TEXT("Performance level changed to: %d"), (int32)NewLevel);
-    }
-    
-    // Trigger critical performance event
-    if (NewLevel == EPerf_PerformanceLevel::Critical)
-    {
-        OnPerformanceCritical.Broadcast(CurrentFrameMetrics.CurrentFPS);
-        UE_LOG(LogTemp, Error, TEXT("CRITICAL PERFORMANCE: FPS = %.2f"), CurrentFrameMetrics.CurrentFPS);
-    }
-}
-
-void UPerf_RealTimePerformanceMonitor::TriggerOptimizationIfNeeded()
-{
-    // Auto-optimize if performance is poor for sustained period
-    if (GetCurrentPerformanceLevel() <= EPerf_PerformanceLevel::Poor)
-    {
-        float AverageFPS = CalculateAverageFPS(10); // Last 1 second
-        if (AverageFPS < TargetFPS * 0.75f) // 75% of target
-        {
-            UE_LOG(LogTemp, Warning, TEXT("Triggering automatic optimizations due to poor performance"));
-            ApplyAutomaticOptimizations();
-        }
-    }
-}
-
-void UPerf_RealTimePerformanceMonitor::LogPerformanceReport()
-{
-    float AvgFPS = CalculateAverageFPS();
-    float FrameVariance = CalculateFrameTimeVariance();
-    
-    UE_LOG(LogTemp, Log, TEXT("=== PERFORMANCE REPORT ==="));
-    UE_LOG(LogTemp, Log, TEXT("Current FPS: %.2f"), CurrentFrameMetrics.CurrentFPS);
-    UE_LOG(LogTemp, Log, TEXT("Average FPS: %.2f"), AvgFPS);
-    UE_LOG(LogTemp, Log, TEXT("Frame Time: %.2f ms"), CurrentFrameMetrics.FrameTime);
-    UE_LOG(LogTemp, Log, TEXT("Frame Variance: %.2f"), FrameVariance);
-    UE_LOG(LogTemp, Log, TEXT("Memory Usage: %.2f MB"), CurrentMemoryMetrics.UsedPhysicalMemoryMB);
-    UE_LOG(LogTemp, Log, TEXT("Active Actors: %d"), CurrentSystemMetrics.ActiveActors);
-    UE_LOG(LogTemp, Log, TEXT("Visible Actors: %d"), CurrentSystemMetrics.VisibleActors);
-    UE_LOG(LogTemp, Log, TEXT("Performance Level: %d"), (int32)GetCurrentPerformanceLevel());
-}
-
-TArray<FString> UPerf_RealTimePerformanceMonitor::GetOptimizationSuggestions() const
-{
-    TArray<FString> Suggestions;
-    
-    EPerf_PerformanceLevel CurrentLevel = GetCurrentPerformanceLevel();
-    
-    if (CurrentLevel <= EPerf_PerformanceLevel::Average)
-    {
-        if (CurrentSystemMetrics.VisibleActors > 1000)
-        {
-            Suggestions.Add(TEXT("Reduce visible actor count through culling"));
-        }
-        
-        if (CurrentMemoryMetrics.UsedPhysicalMemoryMB > 4000.0f)
-        {
-            Suggestions.Add(TEXT("Optimize memory usage - consider texture streaming"));
-        }
-        
-        if (CurrentFrameMetrics.FrameTime > 20.0f)
-        {
-            Suggestions.Add(TEXT("Frame time too high - check for expensive operations"));
-        }
-        
-        if (CurrentSystemMetrics.DrawCalls > 5000)
-        {
-            Suggestions.Add(TEXT("Too many draw calls - consider mesh batching"));
-        }
-        
-        Suggestions.Add(TEXT("Enable automatic LOD system"));
-        Suggestions.Add(TEXT("Reduce shadow quality"));
-        Suggestions.Add(TEXT("Enable occlusion culling"));
-    }
-    
-    return Suggestions;
-}
-
-void UPerf_RealTimePerformanceMonitor::ApplyAutomaticOptimizations()
-{
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        return;
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("Applying automatic performance optimizations..."));
-    
-    OptimizeLODSettings();
-    OptimizeCullingSettings();
-    OptimizeMemorySettings();
-    OptimizeRenderingSettings();
-}
-
-void UPerf_RealTimePerformanceMonitor::OptimizeLODSettings()
-{
-    // Apply more aggressive LOD settings
-    if (GEngine && GEngine->GetGameUserSettings())
-    {
-        // This would require access to console variables
-        UE_LOG(LogTemp, Log, TEXT("Optimizing LOD settings"));
-    }
-}
-
-void UPerf_RealTimePerformanceMonitor::OptimizeCullingSettings()
-{
-    // Enable more aggressive culling
-    UE_LOG(LogTemp, Log, TEXT("Optimizing culling settings"));
-}
-
-void UPerf_RealTimePerformanceMonitor::OptimizeMemorySettings()
-{
-    // Trigger garbage collection
-    GEngine->ForceGarbageCollection(true);
-    UE_LOG(LogTemp, Log, TEXT("Forced garbage collection for memory optimization"));
-}
-
-void UPerf_RealTimePerformanceMonitor::OptimizeRenderingSettings()
-{
-    // Reduce rendering quality temporarily
-    UE_LOG(LogTemp, Log, TEXT("Optimizing rendering settings"));
-}
-
-float UPerf_RealTimePerformanceMonitor::CalculateAverageFPS(int32 SampleCount) const
-{
-    if (FPSHistory.Num() == 0)
-    {
-        return CurrentFrameMetrics.CurrentFPS;
-    }
-    
-    int32 StartIndex = FMath::Max(0, FPSHistory.Num() - SampleCount);
-    float Sum = 0.0f;
-    int32 Count = 0;
-    
-    for (int32 i = StartIndex; i < FPSHistory.Num(); ++i)
-    {
-        Sum += FPSHistory[i];
-        Count++;
-    }
-    
-    return Count > 0 ? Sum / Count : CurrentFrameMetrics.CurrentFPS;
-}
-
-float UPerf_RealTimePerformanceMonitor::CalculateFrameTimeVariance() const
-{
-    if (FrameTimeHistory.Num() < 2)
+    if (PerformanceHistory.Num() == 0)
     {
         return 0.0f;
     }
     
-    float Mean = 0.0f;
-    for (float FrameTime : FrameTimeHistory)
+    float TotalFPS = 0.0f;
+    for (const FPerf_PerformanceSnapshot& Snapshot : PerformanceHistory)
     {
-        Mean += FrameTime;
-    }
-    Mean /= FrameTimeHistory.Num();
-    
-    float Variance = 0.0f;
-    for (float FrameTime : FrameTimeHistory)
-    {
-        float Diff = FrameTime - Mean;
-        Variance += Diff * Diff;
+        TotalFPS += Snapshot.CurrentFPS;
     }
     
-    return Variance / FrameTimeHistory.Num();
+    return TotalFPS / PerformanceHistory.Num();
 }
 
-bool UPerf_RealTimePerformanceMonitor::IsPerformanceStable() const
+float UPerf_RealTimePerformanceMonitor::GetAverageFrameTime() const
 {
-    float Variance = CalculateFrameTimeVariance();
-    return Variance < 5.0f; // Less than 5ms variance considered stable
+    if (PerformanceHistory.Num() == 0)
+    {
+        return 0.0f;
+    }
+    
+    float TotalFrameTime = 0.0f;
+    for (const FPerf_PerformanceSnapshot& Snapshot : PerformanceHistory)
+    {
+        TotalFrameTime += Snapshot.FrameTimeMS;
+    }
+    
+    return TotalFrameTime / PerformanceHistory.Num();
+}
+
+void UPerf_RealTimePerformanceMonitor::SetTargetFPS(float NewTargetFPS)
+{
+    TargetFPS = FMath::Clamp(NewTargetFPS, 15.0f, 120.0f);
+    UE_LOG(LogTemp, Log, TEXT("Performance Monitor: Target FPS set to %.1f"), TargetFPS);
+}
+
+void UPerf_RealTimePerformanceMonitor::EnableAutoQualityAdjustment(bool bEnable)
+{
+    bAutoQualityAdjustment = bEnable;
+    UE_LOG(LogTemp, Log, TEXT("Performance Monitor: Auto quality adjustment %s"), 
+           bEnable ? TEXT("enabled") : TEXT("disabled"));
+}
+
+void UPerf_RealTimePerformanceMonitor::LogCurrentPerformance()
+{
+    FPerf_PerformanceSnapshot Snapshot = GetCurrentSnapshot();
+    
+    UE_LOG(LogTemp, Warning, TEXT("=== PERFORMANCE SNAPSHOT ==="));
+    UE_LOG(LogTemp, Warning, TEXT("FPS: %.1f"), Snapshot.CurrentFPS);
+    UE_LOG(LogTemp, Warning, TEXT("Frame Time: %.2f ms"), Snapshot.FrameTimeMS);
+    UE_LOG(LogTemp, Warning, TEXT("GPU Time: %.2f ms"), Snapshot.GPUTimeMS);
+    UE_LOG(LogTemp, Warning, TEXT("Memory: %.1f MB"), Snapshot.MemoryUsageMB);
+    UE_LOG(LogTemp, Warning, TEXT("Draw Calls: %d"), Snapshot.DrawCalls);
+    UE_LOG(LogTemp, Warning, TEXT("Triangles: %d"), Snapshot.TriangleCount);
+    UE_LOG(LogTemp, Warning, TEXT("Performance Level: %s"), 
+           *UEnum::GetValueAsString(CurrentPerformanceLevel));
+}
+
+void UPerf_RealTimePerformanceMonitor::ResetPerformanceHistory()
+{
+    PerformanceHistory.Empty();
+    ConsecutivePoorFrames = 0;
+    ConsecutiveGoodFrames = 0;
+    QualityAdjustmentCooldown = 0;
+    UE_LOG(LogTemp, Log, TEXT("Performance Monitor: History reset"));
+}
+
+void UPerf_RealTimePerformanceMonitor::UpdatePerformanceMetrics()
+{
+    // Get current performance snapshot
+    FPerf_PerformanceSnapshot CurrentSnapshot = GetCurrentSnapshot();
+    
+    // Add to history
+    PerformanceHistory.Add(CurrentSnapshot);
+    
+    // Maintain history size limit
+    if (PerformanceHistory.Num() > PerformanceHistorySize)
+    {
+        PerformanceHistory.RemoveAt(0);
+    }
+    
+    // Analyze performance level
+    AnalyzePerformanceLevel();
+    
+    // Adjust quality if auto-adjustment is enabled
+    if (bAutoQualityAdjustment)
+    {
+        AdjustQualitySettings();
+    }
+    
+    // Broadcast snapshot event
+    OnPerformanceSnapshot.Broadcast(CurrentSnapshot);
+}
+
+void UPerf_RealTimePerformanceMonitor::AnalyzePerformanceLevel()
+{
+    float CurrentFPS = CalculateCurrentFPS();
+    EPerf_PerformanceLevel NewLevel = CurrentPerformanceLevel;
+    
+    // Determine performance level based on FPS
+    if (CurrentFPS >= EXCELLENT_FPS_THRESHOLD)
+    {
+        NewLevel = EPerf_PerformanceLevel::Excellent;
+        ConsecutiveGoodFrames++;
+        ConsecutivePoorFrames = 0;
+    }
+    else if (CurrentFPS >= GOOD_FPS_THRESHOLD)
+    {
+        NewLevel = EPerf_PerformanceLevel::Good;
+        ConsecutiveGoodFrames++;
+        ConsecutivePoorFrames = 0;
+    }
+    else if (CurrentFPS >= ACCEPTABLE_FPS_THRESHOLD)
+    {
+        NewLevel = EPerf_PerformanceLevel::Acceptable;
+        ConsecutiveGoodFrames = 0;
+        ConsecutivePoorFrames++;
+    }
+    else if (CurrentFPS >= POOR_FPS_THRESHOLD)
+    {
+        NewLevel = EPerf_PerformanceLevel::Poor;
+        ConsecutiveGoodFrames = 0;
+        ConsecutivePoorFrames++;
+    }
+    else
+    {
+        NewLevel = EPerf_PerformanceLevel::Critical;
+        ConsecutiveGoodFrames = 0;
+        ConsecutivePoorFrames++;
+    }
+    
+    // Update performance level if changed
+    if (NewLevel != CurrentPerformanceLevel)
+    {
+        CurrentPerformanceLevel = NewLevel;
+        OnPerformanceLevelChanged.Broadcast(CurrentPerformanceLevel);
+        
+        UE_LOG(LogTemp, Warning, TEXT("Performance Monitor: Level changed to %s (%.1f FPS)"),
+               *UEnum::GetValueAsString(CurrentPerformanceLevel), CurrentFPS);
+    }
+}
+
+void UPerf_RealTimePerformanceMonitor::AdjustQualitySettings()
+{
+    // Update cooldown counter
+    if (QualityAdjustmentCooldown > 0)
+    {
+        QualityAdjustmentCooldown--;
+        return;
+    }
+    
+    // Check if we need to reduce quality
+    if (ConsecutivePoorFrames >= POOR_FRAME_THRESHOLD && CanReduceQuality())
+    {
+        ReduceQualitySettings();
+        QualityAdjustmentCooldown = QUALITY_ADJUSTMENT_COOLDOWN_FRAMES;
+        ConsecutivePoorFrames = 0;
+        return;
+    }
+    
+    // Check if we can increase quality
+    if (ConsecutiveGoodFrames >= GOOD_FRAME_THRESHOLD && CanIncreaseQuality())
+    {
+        IncreaseQualitySettings();
+        QualityAdjustmentCooldown = QUALITY_ADJUSTMENT_COOLDOWN_FRAMES;
+        ConsecutiveGoodFrames = 0;
+        return;
+    }
+}
+
+float UPerf_RealTimePerformanceMonitor::CalculateCurrentFPS() const
+{
+    if (GEngine && GEngine->GetGameViewport())
+    {
+        return 1.0f / FApp::GetDeltaTime();
+    }
+    return 0.0f;
+}
+
+float UPerf_RealTimePerformanceMonitor::CalculateFrameTime() const
+{
+    return FApp::GetDeltaTime() * 1000.0f; // Convert to milliseconds
+}
+
+float UPerf_RealTimePerformanceMonitor::CalculateGPUTime() const
+{
+    // This would require access to GPU timing stats
+    // For now, return a placeholder value
+    return CalculateFrameTime() * 0.7f; // Estimate GPU time as 70% of frame time
+}
+
+float UPerf_RealTimePerformanceMonitor::CalculateMemoryUsage() const
+{
+    FPlatformMemoryStats MemStats = FPlatformMemory::GetStats();
+    return MemStats.UsedPhysical / (1024.0f * 1024.0f); // Convert to MB
+}
+
+int32 UPerf_RealTimePerformanceMonitor::CalculateDrawCalls() const
+{
+    // This would require access to render stats
+    // For now, return a placeholder value
+    return 1000; // Placeholder
+}
+
+int32 UPerf_RealTimePerformanceMonitor::CalculateTriangleCount() const
+{
+    // This would require access to render stats
+    // For now, return a placeholder value
+    return 100000; // Placeholder
+}
+
+void UPerf_RealTimePerformanceMonitor::ReduceQualitySettings()
+{
+    UE_LOG(LogTemp, Warning, TEXT("Performance Monitor: Reducing quality settings"));
+    
+    // Execute console commands to reduce quality
+    if (GEngine)
+    {
+        // Reduce shadow quality
+        GEngine->Exec(GetWorld(), TEXT("r.ShadowQuality 2"));
+        
+        // Reduce post-processing quality
+        GEngine->Exec(GetWorld(), TEXT("r.PostProcessAAQuality 1"));
+        
+        // Reduce texture quality
+        GEngine->Exec(GetWorld(), TEXT("r.Streaming.PoolSize 1000"));
+        
+        // Reduce view distance
+        GEngine->Exec(GetWorld(), TEXT("r.ViewDistanceScale 0.8"));
+    }
+}
+
+void UPerf_RealTimePerformanceMonitor::IncreaseQualitySettings()
+{
+    UE_LOG(LogTemp, Log, TEXT("Performance Monitor: Increasing quality settings"));
+    
+    // Execute console commands to increase quality
+    if (GEngine)
+    {
+        // Increase shadow quality
+        GEngine->Exec(GetWorld(), TEXT("r.ShadowQuality 3"));
+        
+        // Increase post-processing quality
+        GEngine->Exec(GetWorld(), TEXT("r.PostProcessAAQuality 2"));
+        
+        // Increase texture quality
+        GEngine->Exec(GetWorld(), TEXT("r.Streaming.PoolSize 2000"));
+        
+        // Increase view distance
+        GEngine->Exec(GetWorld(), TEXT("r.ViewDistanceScale 1.0"));
+    }
+}
+
+bool UPerf_RealTimePerformanceMonitor::CanReduceQuality() const
+{
+    // Check if we can reduce quality further
+    // This would check current quality settings
+    return true; // Placeholder - always allow reduction for now
+}
+
+bool UPerf_RealTimePerformanceMonitor::CanIncreaseQuality() const
+{
+    // Check if we can increase quality
+    // This would check current quality settings and performance headroom
+    return CurrentPerformanceLevel == EPerf_PerformanceLevel::Excellent;
 }
