@@ -3,204 +3,260 @@
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Engine/World.h"
-#include "Kismet/KismetMathLibrary.h"
 #include "DrawDebugHelpers.h"
+#include "Kismet/KismetMathLibrary.h"
 
 UAnim_CharacterAnimInstance::UAnim_CharacterAnimInstance()
 {
-    CurrentMovementState = EAnim_MovementState::Idle;
+    IKTraceDistance = 50.0f;
+    IKInterpSpeed = 15.0f;
+    bEnableFootIK = true;
+    HipOffset = 0.0f;
+    
     Speed = 0.0f;
     Direction = 0.0f;
     bIsInAir = false;
     bIsCrouching = false;
-    bIsSwimming = false;
-    IdleToWalkBlend = 0.0f;
-    WalkToRunBlend = 0.0f;
-    LeftFootIKOffset = 0.0f;
-    RightFootIKOffset = 0.0f;
-    LeftFootIKRotation = FRotator::ZeroRotator;
-    RightFootIKRotation = FRotator::ZeroRotator;
-    OwningCharacter = nullptr;
+    bIsMoving = false;
+    
+    CurrentState = TEXT("Idle");
+    OwnerCharacter = nullptr;
     MovementComponent = nullptr;
+    MotionMatchingSystem = nullptr;
+    CurrentActionMontage = nullptr;
 }
 
 void UAnim_CharacterAnimInstance::NativeInitializeAnimation()
 {
     Super::NativeInitializeAnimation();
-
-    // Cache character and movement component references
-    OwningCharacter = Cast<ACharacter>(GetOwningActor());
-    if (OwningCharacter)
+    
+    OwnerCharacter = Cast<ACharacter>(TryGetPawnOwner());
+    if (OwnerCharacter)
     {
-        MovementComponent = OwningCharacter->GetCharacterMovement();
+        MovementComponent = OwnerCharacter->GetCharacterMovement();
+        MotionMatchingSystem = OwnerCharacter->FindComponentByClass<UAnim_MotionMatchingSystem>();
     }
 }
 
 void UAnim_CharacterAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 {
     Super::NativeUpdateAnimation(DeltaSeconds);
-
-    if (!OwningCharacter || !MovementComponent)
+    
+    if (!OwnerCharacter || !MovementComponent)
     {
         return;
     }
-
-    // Update basic movement variables
-    FVector Velocity = OwningCharacter->GetVelocity();
-    Speed = Velocity.Size2D();
-    Direction = UKismetMathLibrary::CalculateDirection(Velocity, OwningCharacter->GetActorRotation()).Yaw;
-
-    // Update movement state flags
-    bIsInAir = MovementComponent->IsFalling();
-    bIsCrouching = MovementComponent->IsCrouching();
-    bIsSwimming = MovementComponent->IsSwimming();
-
-    // Update movement state
-    UpdateMovementState();
-
-    // Update animation blending values
-    IdleToWalkBlend = FMath::Clamp(Speed / 150.0f, 0.0f, 1.0f); // Walk threshold at 150 units/s
-    WalkToRunBlend = FMath::Clamp((Speed - 150.0f) / 300.0f, 0.0f, 1.0f); // Run threshold at 450 units/s
-
-    // Update IK system
-    UpdateIKValues();
+    
+    UpdateLocomotionVariables();
+    UpdateMotionMatchingData();
+    
+    if (bEnableFootIK)
+    {
+        UpdateFootIK(DeltaSeconds);
+    }
 }
 
-void UAnim_CharacterAnimInstance::UpdateMovementState()
+void UAnim_CharacterAnimInstance::UpdateLocomotionVariables()
 {
-    if (bIsSwimming)
+    if (!MovementComponent)
     {
-        CurrentMovementState = EAnim_MovementState::Swimming;
+        return;
     }
-    else if (bIsInAir)
+    
+    FVector Velocity = MovementComponent->Velocity;
+    Speed = Velocity.Size();
+    bIsMoving = Speed > 3.0f;
+    bIsInAir = MovementComponent->IsFalling();
+    bIsCrouching = MovementComponent->IsCrouching();
+    
+    // Calculate movement direction
+    if (Speed > 0.0f && OwnerCharacter)
     {
-        if (MovementComponent->Velocity.Z > 0.0f)
+        FVector ForwardVector = OwnerCharacter->GetActorForwardVector();
+        FVector VelocityDirection = Velocity.GetSafeNormal();
+        
+        float DotProduct = FVector::DotProduct(ForwardVector, VelocityDirection);
+        Direction = FMath::RadiansToDegrees(FMath::Acos(FMath::Clamp(DotProduct, -1.0f, 1.0f)));
+        
+        // Determine if moving left or right
+        FVector CrossProduct = FVector::CrossProduct(ForwardVector, VelocityDirection);
+        if (CrossProduct.Z < 0)
         {
-            CurrentMovementState = EAnim_MovementState::Jumping;
+            Direction *= -1.0f;
         }
-        else
-        {
-            CurrentMovementState = EAnim_MovementState::Falling;
-        }
-    }
-    else if (bIsCrouching)
-    {
-        CurrentMovementState = EAnim_MovementState::Crouching;
-    }
-    else if (Speed > 450.0f)
-    {
-        CurrentMovementState = EAnim_MovementState::Running;
-    }
-    else if (Speed > 10.0f)
-    {
-        CurrentMovementState = EAnim_MovementState::Walking;
     }
     else
     {
-        CurrentMovementState = EAnim_MovementState::Idle;
+        Direction = 0.0f;
     }
 }
 
-void UAnim_CharacterAnimInstance::UpdateIKValues()
+void UAnim_CharacterAnimInstance::UpdateMotionMatchingData()
 {
-    if (!OwningCharacter || bIsInAir || bIsSwimming)
+    if (MotionMatchingSystem)
     {
-        // Reset IK when not grounded
-        LeftFootIKOffset = FMath::FInterpTo(LeftFootIKOffset, 0.0f, GetWorld()->GetDeltaSeconds(), IKInterpSpeed);
-        RightFootIKOffset = FMath::FInterpTo(RightFootIKOffset, 0.0f, GetWorld()->GetDeltaSeconds(), IKInterpSpeed);
-        LeftFootIKRotation = FMath::RInterpTo(LeftFootIKRotation, FRotator::ZeroRotator, GetWorld()->GetDeltaSeconds(), IKInterpSpeed);
-        RightFootIKRotation = FMath::RInterpTo(RightFootIKRotation, FRotator::ZeroRotator, GetWorld()->GetDeltaSeconds(), IKInterpSpeed);
-        return;
+        MotionData = MotionMatchingSystem->CurrentMotionData;
+        CurrentState = MotionMatchingSystem->CurrentAnimationState;
     }
-
-    USkeletalMeshComponent* MeshComp = OwningCharacter->GetMesh();
-    if (!MeshComp)
-    {
-        return;
-    }
-
-    // Get foot bone locations
-    FVector LeftFootLocation = MeshComp->GetSocketLocation(FName("foot_l"));
-    FVector RightFootLocation = MeshComp->GetSocketLocation(FName("foot_r"));
-
-    // Perform IK traces for both feet
-    float LeftIKOffset, RightIKOffset;
-    FRotator LeftIKRot, RightIKRot;
-
-    PerformFootIKTrace(LeftFootLocation, LeftIKOffset, LeftIKRot, true);
-    PerformFootIKTrace(RightFootLocation, RightIKOffset, RightIKRot, false);
-
-    // Interpolate IK values for smooth transitions
-    float DeltaTime = GetWorld()->GetDeltaSeconds();
-    LeftFootIKOffset = FMath::FInterpTo(LeftFootIKOffset, LeftIKOffset, DeltaTime, IKInterpSpeed);
-    RightFootIKOffset = FMath::FInterpTo(RightFootIKOffset, RightIKOffset, DeltaTime, IKInterpSpeed);
-    LeftFootIKRotation = FMath::RInterpTo(LeftFootIKRotation, LeftIKRot, DeltaTime, IKInterpSpeed);
-    RightFootIKRotation = FMath::RInterpTo(RightFootIKRotation, RightIKRot, DeltaTime, IKInterpSpeed);
 }
 
-void UAnim_CharacterAnimInstance::PerformFootIKTrace(FVector FootLocation, float& IKOffset, FRotator& IKRotation, bool bIsLeftFoot)
+void UAnim_CharacterAnimInstance::UpdateFootIK(float DeltaSeconds)
 {
-    if (!OwningCharacter)
+    if (!OwnerCharacter || bIsInAir)
     {
-        IKOffset = 0.0f;
-        IKRotation = FRotator::ZeroRotator;
+        // Reset IK when in air
+        LeftFootIK.IKAlpha = FMath::FInterpTo(LeftFootIK.IKAlpha, 0.0f, DeltaSeconds, IKInterpSpeed);
+        RightFootIK.IKAlpha = FMath::FInterpTo(RightFootIK.IKAlpha, 0.0f, DeltaSeconds, IKInterpSpeed);
+        HipOffset = FMath::FInterpTo(HipOffset, 0.0f, DeltaSeconds, IKInterpSpeed);
         return;
     }
-
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        IKOffset = 0.0f;
-        IKRotation = FRotator::ZeroRotator;
-        return;
-    }
-
-    // Convert foot location to world space
-    FVector WorldFootLocation = OwningCharacter->GetMesh()->GetComponentTransform().TransformPosition(FootLocation);
     
-    // Trace parameters
-    FVector TraceStart = WorldFootLocation + FVector(0.0f, 0.0f, IKTraceDistance);
-    FVector TraceEnd = WorldFootLocation - FVector(0.0f, 0.0f, IKTraceDistance);
+    // Calculate foot IK for both feet
+    LeftFootIK = CalculateFootIK(TEXT("foot_l"), DeltaSeconds);
+    RightFootIK = CalculateFootIK(TEXT("foot_r"), DeltaSeconds);
+    
+    // Calculate hip offset to keep character grounded
+    float LeftFootOffset = LeftFootIK.FootLocation.Z;
+    float RightFootOffset = RightFootIK.FootLocation.Z;
+    float TargetHipOffset = FMath::Min(LeftFootOffset, RightFootOffset);
+    
+    if (TargetHipOffset < 0.0f)
+    {
+        HipOffset = FMath::FInterpTo(HipOffset, TargetHipOffset, DeltaSeconds, IKInterpSpeed);
+        
+        // Adjust foot locations relative to hip
+        LeftFootIK.FootLocation.Z -= HipOffset;
+        RightFootIK.FootLocation.Z -= HipOffset;
+    }
+    else
+    {
+        HipOffset = FMath::FInterpTo(HipOffset, 0.0f, DeltaSeconds, IKInterpSpeed);
+    }
+}
 
+FAnim_IKFootData UAnim_CharacterAnimInstance::CalculateFootIK(FName SocketName, float DeltaSeconds)
+{
+    FAnim_IKFootData FootData;
+    
+    if (!OwnerCharacter)
+    {
+        return FootData;
+    }
+    
+    USkeletalMeshComponent* Mesh = OwnerCharacter->GetMesh();
+    if (!Mesh)
+    {
+        return FootData;
+    }
+    
+    // Get foot socket location
+    FVector SocketLocation = Mesh->GetSocketLocation(SocketName);
+    
+    // Perform trace downward from foot
+    float ImpactZ = 0.0f;
+    FVector TraceStart = SocketLocation;
+    FVector TraceEnd = TraceStart - FVector(0, 0, IKTraceDistance);
+    
     FHitResult HitResult;
     FCollisionQueryParams QueryParams;
-    QueryParams.AddIgnoredActor(OwningCharacter);
-
-    // Perform line trace
-    bool bHit = World->LineTraceSingleByChannel(
+    QueryParams.AddIgnoredActor(OwnerCharacter);
+    
+    bool bHit = GetWorld()->LineTraceSingleByChannel(
         HitResult,
         TraceStart,
         TraceEnd,
         ECC_Visibility,
         QueryParams
     );
-
+    
     if (bHit)
     {
-        // Calculate IK offset
-        float DistanceFromGround = (WorldFootLocation - HitResult.Location).Z;
-        IKOffset = -DistanceFromGround;
-
+        ImpactZ = HitResult.Location.Z;
+        
+        // Calculate foot offset
+        float FootOffset = ImpactZ - SocketLocation.Z;
+        FootData.FootLocation = FVector(0, 0, FootOffset);
+        
         // Calculate foot rotation based on surface normal
         FVector SurfaceNormal = HitResult.Normal;
-        FVector ForwardVector = OwningCharacter->GetActorForwardVector();
-        FVector RightVector = OwningCharacter->GetActorRightVector();
-
-        // Calculate pitch and roll for foot alignment
-        float Pitch = FMath::Atan2(FVector::DotProduct(SurfaceNormal, ForwardVector), SurfaceNormal.Z);
-        float Roll = FMath::Atan2(FVector::DotProduct(SurfaceNormal, RightVector), SurfaceNormal.Z);
-
-        // Apply foot-specific adjustments
-        if (bIsLeftFoot)
-        {
-            Roll = -Roll; // Invert roll for left foot
-        }
-
-        IKRotation = FRotator(FMath::RadiansToDegrees(Pitch), 0.0f, FMath::RadiansToDegrees(Roll));
+        FVector ForwardVector = OwnerCharacter->GetActorForwardVector();
+        FVector RightVector = OwnerCharacter->GetActorRightVector();
+        
+        float PitchAngle = FMath::RadiansToDegrees(FMath::Asin(FVector::DotProduct(SurfaceNormal, ForwardVector)));
+        float RollAngle = FMath::RadiansToDegrees(FMath::Asin(FVector::DotProduct(SurfaceNormal, RightVector)));
+        
+        FootData.FootRotation = FRotator(-PitchAngle, 0, RollAngle);
+        FootData.IKAlpha = FMath::FInterpTo(FootData.IKAlpha, 1.0f, DeltaSeconds, IKInterpSpeed);
+        
+        // Calculate knee target for pole vector
+        FootData.KneeTargetZ = FMath::Abs(FootOffset) * 0.5f;
     }
     else
     {
-        IKOffset = 0.0f;
-        IKRotation = FRotator::ZeroRotator;
+        FootData.IKAlpha = FMath::FInterpTo(FootData.IKAlpha, 0.0f, DeltaSeconds, IKInterpSpeed);
     }
+    
+    return FootData;
+}
+
+void UAnim_CharacterAnimInstance::PlayActionMontage(FName ActionName, float PlayRate)
+{
+    if (!MotionMatchingSystem)
+    {
+        return;
+    }
+    
+    UAnimMontage* MontageToPlay = MotionMatchingSystem->GetActionMontage(ActionName);
+    if (MontageToPlay)
+    {
+        CurrentActionMontage = MontageToPlay;
+        Montage_Play(MontageToPlay, PlayRate);
+        
+        UE_LOG(LogTemp, Log, TEXT("Playing Action Montage: %s"), *ActionName.ToString());
+    }
+}
+
+void UAnim_CharacterAnimInstance::StopActionMontage(float BlendOutTime)
+{
+    if (CurrentActionMontage && Montage_IsPlaying(CurrentActionMontage))
+    {
+        Montage_Stop(BlendOutTime, CurrentActionMontage);
+        CurrentActionMontage = nullptr;
+    }
+}
+
+FVector UAnim_CharacterAnimInstance::PerformFootTrace(const FVector& FootLocation, float& OutImpactZ) const
+{
+    if (!GetWorld())
+    {
+        OutImpactZ = FootLocation.Z;
+        return FVector::ZeroVector;
+    }
+    
+    FVector TraceStart = FootLocation + FVector(0, 0, 20);
+    FVector TraceEnd = FootLocation - FVector(0, 0, IKTraceDistance);
+    
+    FHitResult HitResult;
+    FCollisionQueryParams QueryParams;
+    if (OwnerCharacter)
+    {
+        QueryParams.AddIgnoredActor(OwnerCharacter);
+    }
+    
+    bool bHit = GetWorld()->LineTraceSingleByChannel(
+        HitResult,
+        TraceStart,
+        TraceEnd,
+        ECC_Visibility,
+        QueryParams
+    );
+    
+    if (bHit)
+    {
+        OutImpactZ = HitResult.Location.Z;
+        return HitResult.Normal;
+    }
+    
+    OutImpactZ = FootLocation.Z;
+    return FVector::UpVector;
 }
