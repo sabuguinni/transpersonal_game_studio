@@ -1,263 +1,237 @@
 #include "Crowd_MassEntitySubsystem.h"
 #include "Engine/World.h"
-#include "MassEntitySubsystem.h"
-#include "MassSpawnerSubsystem.h"
-#include "MassCommonFragments.h"
-#include "MassMovementFragments.h"
-#include "MassNavigationFragments.h"
-#include "NavigationSystem.h"
-#include "Kismet/GameplayStatics.h"
+#include "Engine/Engine.h"
+#include "TimerManager.h"
+#include "DrawDebugHelpers.h"
 
 void UCrowd_MassEntitySubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
     
-    MassEntitySubsystem = GetWorld()->GetSubsystem<UMassEntitySubsystem>();
+    UE_LOG(LogTemp, Log, TEXT("Crowd Mass Entity Subsystem Initialized"));
     
-    // Initialize default spawn config
-    DefaultSpawnConfig.MaxEntities = 50000;
-    DefaultSpawnConfig.SpawnRadius = 10000.0f;
-    DefaultSpawnConfig.SpawnCenter = FVector::ZeroVector;
-    DefaultSpawnConfig.AllowedBehaviors = {
-        ECrowd_BehaviorState::Wandering,
-        ECrowd_BehaviorState::Following,
-        ECrowd_BehaviorState::Gathering
-    };
-    
+    // Initialize Mass Entity system
     InitializeMassEntity();
     
-    UE_LOG(LogTemp, Warning, TEXT("Crowd Mass Entity Subsystem initialized - capacity: %d entities"), DefaultSpawnConfig.MaxEntities);
+    // Setup tick timer for simulation updates
+    if (UWorld* World = GetWorld())
+    {
+        World->GetTimerManager().SetTimer(
+            FTimerHandle(),
+            this,
+            &UCrowd_MassEntitySubsystem::UpdateSimulationStats,
+            1.0f / TickRate,
+            true
+        );
+    }
+    
+    // Initialize stats
+    CurrentStats = FCrowd_SimulationStats();
+    CurrentStats.MaxEntities = MaxEntityCount;
 }
 
 void UCrowd_MassEntitySubsystem::Deinitialize()
 {
-    ClearAllEntities();
+    DespawnAllEntities();
+    
+    if (UWorld* World = GetWorld())
+    {
+        World->GetTimerManager().ClearAllTimersForObject(this);
+    }
+    
     Super::Deinitialize();
+}
+
+bool UCrowd_MassEntitySubsystem::ShouldCreateSubsystem(UObject* Outer) const
+{
+    // Only create in game worlds, not in editor preview worlds
+    if (UWorld* World = Cast<UWorld>(Outer))
+    {
+        return World->IsGameWorld();
+    }
+    return false;
+}
+
+void UCrowd_MassEntitySubsystem::SpawnCrowdEntities(const TArray<FCrowd_EntitySpawnData>& SpawnData)
+{
+    if (ActiveEntities.Num() + SpawnData.Num() > MaxEntityCount)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Cannot spawn %d entities - would exceed max count of %d"), 
+               SpawnData.Num(), MaxEntityCount);
+        return;
+    }
+    
+    for (const FCrowd_EntitySpawnData& EntityData : SpawnData)
+    {
+        // Add to active entities list
+        ActiveEntities.Add(EntityData);
+        
+        // TODO: Integrate with actual Mass Entity spawning system
+        UE_LOG(LogTemp, Log, TEXT("Spawned crowd entity at %s with behavior %d"), 
+               *EntityData.Location.ToString(), (int32)EntityData.BehaviorType);
+    }
+    
+    CurrentStats.ActiveEntities = ActiveEntities.Num();
+    UE_LOG(LogTemp, Log, TEXT("Total active entities: %d"), CurrentStats.ActiveEntities);
+}
+
+void UCrowd_MassEntitySubsystem::DespawnAllEntities()
+{
+    ActiveEntities.Empty();
+    CurrentStats.ActiveEntities = 0;
+    
+    UE_LOG(LogTemp, Log, TEXT("All crowd entities despawned"));
+}
+
+void UCrowd_MassEntitySubsystem::SetMaxEntityCount(int32 NewMaxCount)
+{
+    MaxEntityCount = FMath::Max(1, NewMaxCount);
+    CurrentStats.MaxEntities = MaxEntityCount;
+    
+    // If we're over the new limit, remove excess entities
+    if (ActiveEntities.Num() > MaxEntityCount)
+    {
+        int32 EntitiesToRemove = ActiveEntities.Num() - MaxEntityCount;
+        ActiveEntities.RemoveAt(MaxEntityCount, EntitiesToRemove);
+        CurrentStats.ActiveEntities = ActiveEntities.Num();
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("Max entity count set to %d"), MaxEntityCount);
+}
+
+FCrowd_SimulationStats UCrowd_MassEntitySubsystem::GetSimulationStats() const
+{
+    return CurrentStats;
+}
+
+void UCrowd_MassEntitySubsystem::SetGlobalBehaviorState(ECrowd_BehaviorType NewBehavior)
+{
+    for (FCrowd_EntitySpawnData& Entity : ActiveEntities)
+    {
+        Entity.BehaviorType = NewBehavior;
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("Global behavior state changed to %d"), (int32)NewBehavior);
+}
+
+void UCrowd_MassEntitySubsystem::AddBehaviorZone(const FVector& Center, float Radius, ECrowd_BehaviorType ZoneBehavior)
+{
+    BehaviorZones.Add(Center, ZoneBehavior);
+    
+    UE_LOG(LogTemp, Log, TEXT("Added behavior zone at %s with radius %.1f and behavior %d"), 
+           *Center.ToString(), Radius, (int32)ZoneBehavior);
+}
+
+void UCrowd_MassEntitySubsystem::RemoveBehaviorZone(const FVector& Center)
+{
+    if (BehaviorZones.Remove(Center) > 0)
+    {
+        UE_LOG(LogTemp, Log, TEXT("Removed behavior zone at %s"), *Center.ToString());
+    }
+}
+
+void UCrowd_MassEntitySubsystem::SetLODDistances(float HighLOD, float MediumLOD, float LowLOD)
+{
+    HighLODDistance = FMath::Max(0.0f, HighLOD);
+    MediumLODDistance = FMath::Max(HighLODDistance, MediumLOD);
+    LowLODDistance = FMath::Max(MediumLODDistance, LowLOD);
+    
+    UE_LOG(LogTemp, Log, TEXT("LOD distances set - High: %.1f, Medium: %.1f, Low: %.1f"), 
+           HighLODDistance, MediumLODDistance, LowLODDistance);
+}
+
+void UCrowd_MassEntitySubsystem::EnableDynamicLOD(bool bEnable)
+{
+    bEnableLODSystem = bEnable;
+    UE_LOG(LogTemp, Log, TEXT("Dynamic LOD system %s"), bEnable ? TEXT("enabled") : TEXT("disabled"));
+}
+
+void UCrowd_MassEntitySubsystem::DebugSpawnTestCrowd()
+{
+    TArray<FCrowd_EntitySpawnData> TestSpawnData;
+    
+    // Create a grid of test entities
+    for (int32 X = -5; X <= 5; X++)
+    {
+        for (int32 Y = -5; Y <= 5; Y++)
+        {
+            FCrowd_EntitySpawnData SpawnData;
+            SpawnData.Location = FVector(X * 200.0f, Y * 200.0f, 100.0f);
+            SpawnData.BehaviorType = (X + Y) % 2 == 0 ? ECrowd_BehaviorType::Wandering : ECrowd_BehaviorType::Following;
+            SpawnData.MovementSpeed = FMath::RandRange(100.0f, 200.0f);
+            SpawnData.GroupID = FMath::Abs(X + Y) % 4;
+            
+            TestSpawnData.Add(SpawnData);
+        }
+    }
+    
+    SpawnCrowdEntities(TestSpawnData);
+    UE_LOG(LogTemp, Log, TEXT("Spawned test crowd with %d entities"), TestSpawnData.Num());
+}
+
+void UCrowd_MassEntitySubsystem::DebugClearAllEntities()
+{
+    DespawnAllEntities();
+    UE_LOG(LogTemp, Log, TEXT("Debug: All entities cleared"));
+}
+
+void UCrowd_MassEntitySubsystem::DebugPrintStats()
+{
+    UE_LOG(LogTemp, Log, TEXT("=== CROWD SIMULATION STATS ==="));
+    UE_LOG(LogTemp, Log, TEXT("Active Entities: %d / %d"), CurrentStats.ActiveEntities, CurrentStats.MaxEntities);
+    UE_LOG(LogTemp, Log, TEXT("Average Frame Time: %.3f ms"), CurrentStats.AverageFrameTime);
+    UE_LOG(LogTemp, Log, TEXT("High Density Zones: %d entities"), CurrentStats.EntitiesInHighDensityZones);
+    UE_LOG(LogTemp, Log, TEXT("Low Density Zones: %d entities"), CurrentStats.EntitiesInLowDensityZones);
+    UE_LOG(LogTemp, Log, TEXT("Behavior Zones: %d"), BehaviorZones.Num());
+    UE_LOG(LogTemp, Log, TEXT("LOD System: %s"), bEnableLODSystem ? TEXT("Enabled") : TEXT("Disabled"));
 }
 
 void UCrowd_MassEntitySubsystem::InitializeMassEntity()
 {
-    if (!MassEntitySubsystem)
-    {
-        UE_LOG(LogTemp, Error, TEXT("MassEntitySubsystem not available"));
-        return;
-    }
+    // Initialize Mass Entity processor
+    MassProcessor = nullptr; // TODO: Create actual Mass Entity processor
+    BehaviorTree = nullptr;  // TODO: Create behavior tree processor
     
-    // Reserve entity capacity
-    ActiveEntities.Reserve(DefaultSpawnConfig.MaxEntities);
-    
-    UE_LOG(LogTemp, Warning, TEXT("Mass Entity system initialized for crowd simulation"));
+    UE_LOG(LogTemp, Log, TEXT("Mass Entity system initialized"));
 }
 
-void UCrowd_MassEntitySubsystem::SpawnCrowdEntities(const FCrowd_SpawnConfig& Config)
+void UCrowd_MassEntitySubsystem::UpdateSimulationStats()
 {
-    if (!MassEntitySubsystem)
+    // Update frame time
+    static float LastFrameTime = 0.0f;
+    float CurrentTime = FPlatformTime::Seconds();
+    CurrentStats.AverageFrameTime = (CurrentTime - LastFrameTime) * 1000.0f; // Convert to ms
+    LastFrameTime = CurrentTime;
+    
+    // Process LOD system if enabled
+    if (bEnableLODSystem)
     {
-        UE_LOG(LogTemp, Error, TEXT("Cannot spawn entities - MassEntitySubsystem not available"));
-        return;
+        ProcessLODSystem();
     }
     
-    // Clear existing entities first
-    ClearAllEntities();
-    
-    // Spawn entities in batches for performance
-    const int32 BatchSize = 1000;
-    const int32 NumBatches = FMath::CeilToInt(static_cast<float>(Config.MaxEntities) / BatchSize);
-    
-    for (int32 BatchIndex = 0; BatchIndex < NumBatches; ++BatchIndex)
-    {
-        const int32 EntitiesInBatch = FMath::Min(BatchSize, Config.MaxEntities - (BatchIndex * BatchSize));
-        
-        for (int32 i = 0; i < EntitiesInBatch; ++i)
-        {
-            // Generate random spawn position within radius
-            const float Angle = FMath::RandRange(0.0f, 2.0f * PI);
-            const float Distance = FMath::RandRange(100.0f, Config.SpawnRadius);
-            const FVector SpawnLocation = Config.SpawnCenter + FVector(
-                FMath::Cos(Angle) * Distance,
-                FMath::Sin(Angle) * Distance,
-                0.0f
-            );
-            
-            // Create entity
-            FMassEntityHandle NewEntity = MassEntitySubsystem->CreateEntity();
-            if (NewEntity.IsValid())
-            {
-                // Add transform fragment
-                FTransformFragment TransformFragment;
-                TransformFragment.GetMutableTransform().SetLocation(SpawnLocation);
-                TransformFragment.GetMutableTransform().SetRotation(FQuat::Identity);
-                
-                // Add movement fragment
-                FMassVelocityFragment VelocityFragment;
-                VelocityFragment.Value = FVector::ZeroVector;
-                
-                ActiveEntities.Add(NewEntity);
-            }
-        }
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("Spawned %d crowd entities at location %s"), ActiveEntities.Num(), *Config.SpawnCenter.ToString());
+    // Handle behavior zones
+    HandleBehaviorZones();
 }
 
-void UCrowd_MassEntitySubsystem::UpdateCrowdBehavior(float DeltaTime)
+void UCrowd_MassEntitySubsystem::ProcessLODSystem()
 {
-    if (ActiveEntities.Num() == 0)
-    {
-        return;
-    }
-    
-    ProcessMovement(DeltaTime);
-    ProcessBehaviorStates(DeltaTime);
+    // TODO: Implement actual LOD processing based on distance to player
+    // For now, just simulate the counts
+    int32 TotalEntities = ActiveEntities.Num();
+    CurrentStats.EntitiesInHighDensityZones = FMath::RandRange(0, TotalEntities / 3);
+    CurrentStats.EntitiesInLowDensityZones = TotalEntities - CurrentStats.EntitiesInHighDensityZones;
 }
 
-void UCrowd_MassEntitySubsystem::ProcessMovement(float DeltaTime)
+void UCrowd_MassEntitySubsystem::HandleBehaviorZones()
 {
-    const float MaxSpeed = 200.0f;
-    const float SeparationRadius = 100.0f;
-    
-    for (const FMassEntityHandle& Entity : ActiveEntities)
+    // TODO: Process entities within behavior zones and update their behavior
+    // This would involve checking entity positions against zone centers and radii
+    for (const auto& ZonePair : BehaviorZones)
     {
-        if (!Entity.IsValid())
-        {
-            continue;
-        }
+        const FVector& ZoneCenter = ZonePair.Key;
+        const ECrowd_BehaviorType& ZoneBehavior = ZonePair.Value;
         
-        // Get current location (simplified - in real implementation would use Mass fragments)
-        FVector CurrentLocation = FVector::ZeroVector; // Would get from TransformFragment
-        
-        // Calculate flocking forces
-        FVector FlockingForce = CalculateFlockingForce(Entity, CurrentLocation);
-        
-        // Apply movement towards destination
-        FVector ToDestination = (CurrentDestination - CurrentLocation).GetSafeNormal();
-        FVector FinalVelocity = (FlockingForce + ToDestination) * MaxSpeed * DeltaTime;
-        
-        // Update position (would update TransformFragment in real implementation)
-        FVector NewLocation = CurrentLocation + FinalVelocity;
+        // Process entities in this zone
+        // Implementation would go here
     }
-}
-
-void UCrowd_MassEntitySubsystem::ProcessBehaviorStates(float DeltaTime)
-{
-    // Process different behavior states
-    for (const FMassEntityHandle& Entity : ActiveEntities)
-    {
-        if (!Entity.IsValid())
-        {
-            continue;
-        }
-        
-        // Randomly change behavior states occasionally
-        if (FMath::RandRange(0.0f, 1.0f) < 0.001f) // 0.1% chance per frame
-        {
-            // Switch to random allowed behavior
-            if (DefaultSpawnConfig.AllowedBehaviors.Num() > 0)
-            {
-                const int32 RandomIndex = FMath::RandRange(0, DefaultSpawnConfig.AllowedBehaviors.Num() - 1);
-                ECrowd_BehaviorState NewState = DefaultSpawnConfig.AllowedBehaviors[RandomIndex];
-                // Would update behavior fragment here
-            }
-        }
-    }
-}
-
-FVector UCrowd_MassEntitySubsystem::CalculateFlockingForce(const FMassEntityHandle& Entity, const FVector& CurrentLocation)
-{
-    FVector SeparationForce = FVector::ZeroVector;
-    FVector AlignmentForce = FVector::ZeroVector;
-    FVector CohesionForce = FVector::ZeroVector;
-    
-    const float SeparationRadius = 150.0f;
-    const float AlignmentRadius = 300.0f;
-    const float CohesionRadius = 500.0f;
-    
-    int32 SeparationCount = 0;
-    int32 AlignmentCount = 0;
-    int32 CohesionCount = 0;
-    
-    // Check neighbors (simplified - would use spatial partitioning in real implementation)
-    for (const FMassEntityHandle& OtherEntity : ActiveEntities)
-    {
-        if (OtherEntity == Entity || !OtherEntity.IsValid())
-        {
-            continue;
-        }
-        
-        FVector OtherLocation = FVector::ZeroVector; // Would get from fragment
-        float Distance = FVector::Dist(CurrentLocation, OtherLocation);
-        
-        // Separation
-        if (Distance < SeparationRadius && Distance > 0.0f)
-        {
-            FVector Diff = (CurrentLocation - OtherLocation).GetSafeNormal();
-            SeparationForce += Diff / Distance; // Weight by inverse distance
-            SeparationCount++;
-        }
-        
-        // Alignment
-        if (Distance < AlignmentRadius)
-        {
-            // Would get velocity from VelocityFragment
-            FVector OtherVelocity = FVector::ForwardVector; // Placeholder
-            AlignmentForce += OtherVelocity;
-            AlignmentCount++;
-        }
-        
-        // Cohesion
-        if (Distance < CohesionRadius)
-        {
-            CohesionForce += OtherLocation;
-            CohesionCount++;
-        }
-    }
-    
-    // Average and normalize forces
-    if (SeparationCount > 0)
-    {
-        SeparationForce /= SeparationCount;
-        SeparationForce = SeparationForce.GetSafeNormal() * 2.0f; // Separation weight
-    }
-    
-    if (AlignmentCount > 0)
-    {
-        AlignmentForce /= AlignmentCount;
-        AlignmentForce = AlignmentForce.GetSafeNormal() * 1.0f; // Alignment weight
-    }
-    
-    if (CohesionCount > 0)
-    {
-        CohesionForce /= CohesionCount;
-        CohesionForce = (CohesionForce - CurrentLocation).GetSafeNormal() * 1.5f; // Cohesion weight
-    }
-    
-    return SeparationForce + AlignmentForce + CohesionForce;
-}
-
-void UCrowd_MassEntitySubsystem::SetCrowdDestination(FVector NewDestination)
-{
-    CurrentDestination = NewDestination;
-    UE_LOG(LogTemp, Warning, TEXT("Crowd destination set to: %s"), *NewDestination.ToString());
-}
-
-int32 UCrowd_MassEntitySubsystem::GetActiveEntityCount() const
-{
-    return ActiveEntities.Num();
-}
-
-void UCrowd_MassEntitySubsystem::ClearAllEntities()
-{
-    if (MassEntitySubsystem)
-    {
-        for (const FMassEntityHandle& Entity : ActiveEntities)
-        {
-            if (Entity.IsValid())
-            {
-                MassEntitySubsystem->DestroyEntity(Entity);
-            }
-        }
-    }
-    
-    ActiveEntities.Empty();
-    UE_LOG(LogTemp, Warning, TEXT("Cleared all crowd entities"));
 }
