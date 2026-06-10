@@ -1,14 +1,11 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
-#include "Components/StaticMeshComponent.h"
-#include "Components/PointLightComponent.h"
-#include "Components/DirectionalLightComponent.h"
-#include "Engine/DirectionalLight.h"
-#include "Engine/PointLight.h"
+#include "Engine/World.h"
+#include "Components/ActorComponent.h"
 #include "Engine/StaticMeshActor.h"
-#include "../SharedTypes.h"
+#include "Components/StaticMeshComponent.h"
+#include "SharedTypes.h"
 #include "Arch_StructuralManager.generated.h"
 
 USTRUCT(BlueprintType)
@@ -29,138 +26,110 @@ struct TRANSPERSONALGAME_API FArch_StructuralElement
     FVector Scale;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
+    float IntegrityLevel;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
     EBiomeType AssociatedBiome;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    float StructuralIntegrity;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    bool bIsInterior;
 
     FArch_StructuralElement()
     {
-        ElementName = TEXT("DefaultStructure");
+        ElementName = TEXT("Unknown");
         Location = FVector::ZeroVector;
         Rotation = FRotator::ZeroRotator;
         Scale = FVector::OneVector;
+        IntegrityLevel = 1.0f;
         AssociatedBiome = EBiomeType::Temperate;
-        StructuralIntegrity = 100.0f;
-        bIsInterior = false;
     }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FArch_LightingConfiguration
+struct TRANSPERSONALGAME_API FArch_InteriorSpace
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
-    FLinearColor AmbientColor;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interior")
+    FString SpaceName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
-    float AmbientIntensity;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interior")
+    FVector Dimensions;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
-    FLinearColor DirectionalColor;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interior")
+    TArray<FString> ContainedObjects;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
-    float DirectionalIntensity;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interior")
+    float AmbientLightLevel;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
-    FRotator DirectionalRotation;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interior")
+    bool bHasRoof;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
-    TArray<FVector> PointLightLocations;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interior")
+    float StructuralSoundness;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
-    float PointLightIntensity;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
-    float PointLightRadius;
-
-    FArch_LightingConfiguration()
+    FArch_InteriorSpace()
     {
-        AmbientColor = FLinearColor(1.0f, 0.95f, 0.8f, 1.0f);
-        AmbientIntensity = 2.5f;
-        DirectionalColor = FLinearColor(1.0f, 0.9f, 0.7f, 1.0f);
-        DirectionalIntensity = 3.0f;
-        DirectionalRotation = FRotator(-45.0f, 135.0f, 0.0f);
-        PointLightIntensity = 1000.0f;
-        PointLightRadius = 2000.0f;
+        SpaceName = TEXT("Unnamed Space");
+        Dimensions = FVector(500.0f, 500.0f, 300.0f);
+        AmbientLightLevel = 0.3f;
+        bHasRoof = true;
+        StructuralSoundness = 1.0f;
     }
 };
 
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API AArch_StructuralManager : public AActor
+UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UArch_StructuralManager : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    AArch_StructuralManager();
+    UArch_StructuralManager();
 
 protected:
     virtual void BeginPlay() override;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    USceneComponent* RootSceneComponent;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
     TArray<FArch_StructuralElement> StructuralElements;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    FArch_LightingConfiguration LightingConfig;
+    TArray<FArch_InteriorSpace> InteriorSpaces;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    float BiomeInfluenceRadius;
+    float WeatheringRate;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    bool bEnableAtmosphericEffects;
+    float BaseIntegrity;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    float AtmosphericDensity;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    FLinearColor AtmosphericColor;
+    bool bEnableWeathering;
 
 public:
-    virtual void Tick(float DeltaTime) override;
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
     void SpawnStructuralElement(const FArch_StructuralElement& Element);
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void ConfigureArchitecturalLighting();
+    void CreateInteriorSpace(const FArch_InteriorSpace& Space);
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void UpdateAtmosphericEffects();
+    void ApplyWeathering(float DeltaTime);
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void SetBiomeArchitecture(EBiomeType BiomeType);
+    float GetStructuralIntegrity() const;
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    TArray<FArch_StructuralElement> GetStructuresInRadius(FVector Center, float Radius);
+    TArray<FArch_StructuralElement> GetElementsByBiome(EBiomeType BiomeType) const;
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void ApplyWeatheringEffects(float WeatheringIntensity);
+    void RepairStructure(float RepairAmount);
 
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Architecture")
-    void GenerateArchitecturalLayout();
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    bool IsStructureSafe() const;
 
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Architecture")
-    void ValidateStructuralIntegrity();
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    void SetWeatheringEnabled(bool bEnabled);
 
 private:
-    UPROPERTY()
-    TArray<AActor*> SpawnedStructures;
-
-    UPROPERTY()
-    TArray<ADirectionalLight*> DirectionalLights;
-
-    UPROPERTY()
-    TArray<APointLight*> PointLights;
-
-    void InitializeArchitecturalSystems();
-    void ConfigureBiomeSpecificArchitecture(EBiomeType BiomeType);
-    void UpdateStructuralWeathering();
-    bool ValidateElementPlacement(const FArch_StructuralElement& Element);
+    void UpdateElementIntegrity(FArch_StructuralElement& Element, float DeltaTime);
+    void CheckStructuralStability();
+    float CalculateEnvironmentalDamage(const FArch_StructuralElement& Element) const;
 };
