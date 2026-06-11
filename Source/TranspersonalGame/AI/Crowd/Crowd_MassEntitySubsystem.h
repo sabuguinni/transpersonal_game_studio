@@ -3,94 +3,70 @@
 #include "CoreMinimal.h"
 #include "Subsystems/WorldSubsystem.h"
 #include "Engine/World.h"
-#include "Components/StaticMeshComponent.h"
-#include "Engine/StaticMeshActor.h"
+#include "Components/ActorComponent.h"
 #include "SharedTypes.h"
 #include "Crowd_MassEntitySubsystem.generated.h"
 
-// Forward declarations
-class ACrowdSpawnPoint;
-class ACrowdWaypoint;
-
-/**
- * Crowd spawn point data structure
- */
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FCrowd_SpawnPointData
+struct TRANSPERSONALGAME_API FCrowd_AgentData
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Agent")
+    FVector Position;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Agent")
+    FVector Velocity;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Agent")
+    float MovementSpeed;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Agent")
+    int32 AgentID;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Agent")
+    ECrowd_BehaviorState BehaviorState;
+
+    FCrowd_AgentData()
+    {
+        Position = FVector::ZeroVector;
+        Velocity = FVector::ZeroVector;
+        MovementSpeed = 150.0f;
+        AgentID = -1;
+        BehaviorState = ECrowd_BehaviorState::Wandering;
+    }
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FCrowd_SpawnParameters
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Spawn")
-    FVector Location = FVector::ZeroVector;
+    int32 MaxAgents;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Spawn")
-    FString SpawnPointName = TEXT("DefaultSpawnPoint");
+    float SpawnRadius;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Spawn")
-    int32 MaxCrowdSize = 50;
+    float SeparationDistance;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Spawn")
-    float SpawnRadius = 500.0f;
+    float FollowDistance;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Spawn")
-    bool bIsActive = true;
+    FVector SpawnCenter;
 
-    FCrowd_SpawnPointData()
+    FCrowd_SpawnParameters()
     {
-        Location = FVector::ZeroVector;
-        SpawnPointName = TEXT("DefaultSpawnPoint");
-        MaxCrowdSize = 50;
-        SpawnRadius = 500.0f;
-        bIsActive = true;
+        MaxAgents = 50;
+        SpawnRadius = 200.0f;
+        SeparationDistance = 100.0f;
+        FollowDistance = 300.0f;
+        SpawnCenter = FVector::ZeroVector;
     }
 };
 
-/**
- * Crowd LOD level enumeration
- */
-UENUM(BlueprintType)
-enum class ECrowd_LODLevel : uint8
-{
-    High        UMETA(DisplayName = "High LOD"),
-    Medium      UMETA(DisplayName = "Medium LOD"),
-    Low         UMETA(DisplayName = "Low LOD"),
-    Culled      UMETA(DisplayName = "Culled")
-};
-
-/**
- * Crowd pathfinding connection data
- */
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FCrowd_PathConnection
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Pathfinding")
-    FVector StartLocation = FVector::ZeroVector;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Pathfinding")
-    FVector EndLocation = FVector::ZeroVector;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Pathfinding")
-    float PathWeight = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Pathfinding")
-    bool bIsBidirectional = true;
-
-    FCrowd_PathConnection()
-    {
-        StartLocation = FVector::ZeroVector;
-        EndLocation = FVector::ZeroVector;
-        PathWeight = 1.0f;
-        bIsBidirectional = true;
-    }
-};
-
-/**
- * Mass Entity Crowd Simulation Subsystem
- * Manages large-scale crowd simulation using UE5's Mass Entity framework
- * Handles up to 50,000 simultaneous crowd agents with LOD optimization
- */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UCrowd_MassEntitySubsystem : public UWorldSubsystem
 {
@@ -102,97 +78,49 @@ public:
     // USubsystem interface
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
-    virtual bool ShouldCreateSubsystem(UObject* Outer) const override;
 
-    // Crowd spawn point management
+    // Crowd management functions
     UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    void RegisterSpawnPoint(const FCrowd_SpawnPointData& SpawnPointData);
-
-    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    void UnregisterSpawnPoint(const FString& SpawnPointName);
+    void InitializeCrowdSystem();
 
     UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    TArray<FCrowd_SpawnPointData> GetActiveSpawnPoints() const;
-
-    // Crowd pathfinding network
-    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    void AddPathConnection(const FCrowd_PathConnection& PathConnection);
+    void SpawnCrowdAgents(const FCrowd_SpawnParameters& SpawnParams);
 
     UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    void RemovePathConnection(const FVector& StartLocation, const FVector& EndLocation);
+    void UpdateCrowdSimulation(float DeltaTime);
 
     UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    TArray<FVector> FindPath(const FVector& StartLocation, const FVector& EndLocation) const;
-
-    // LOD management
-    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    ECrowd_LODLevel CalculateLODLevel(const FVector& CrowdAgentLocation, const FVector& ViewerLocation) const;
+    void ClearAllAgents();
 
     UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    void SetLODDistances(float HighLODDistance, float MediumLODDistance, float LowLODDistance);
-
-    // Mass Entity integration
-    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    void SpawnCrowdAtLocation(const FVector& Location, int32 CrowdSize = 20);
+    int32 GetActiveAgentCount() const;
 
     UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    void DespawnAllCrowd();
+    TArray<FCrowd_AgentData> GetAllAgentData() const;
 
+    // Configuration
     UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    int32 GetActiveCrowdCount() const;
-
-    // Performance monitoring
-    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    float GetCrowdSimulationFrameTime() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    void SetMaxCrowdAgents(int32 MaxAgents);
+    void SetCrowdParameters(const FCrowd_SpawnParameters& NewParams);
 
 protected:
-    // Crowd spawn points registry
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Crowd Data")
-    TArray<FCrowd_SpawnPointData> SpawnPoints;
+    UPROPERTY(BlueprintReadOnly, Category = "Crowd State")
+    TArray<FCrowd_AgentData> ActiveAgents;
 
-    // Pathfinding network
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Crowd Data")
-    TArray<FCrowd_PathConnection> PathConnections;
+    UPROPERTY(BlueprintReadOnly, Category = "Crowd State")
+    FCrowd_SpawnParameters CurrentParameters;
 
-    // LOD configuration
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd LOD")
-    float HighLODDistance = 500.0f;
+    UPROPERTY(BlueprintReadOnly, Category = "Crowd State")
+    bool bIsInitialized;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd LOD")
-    float MediumLODDistance = 1500.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd LOD")
-    float LowLODDistance = 3000.0f;
-
-    // Performance settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Performance")
-    int32 MaxCrowdAgents = 50000;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Performance")
-    float UpdateFrequency = 60.0f;
-
-    // Runtime data
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Crowd Runtime")
-    int32 ActiveCrowdCount = 0;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Crowd Runtime")
-    float LastFrameTime = 0.0f;
+    UPROPERTY(BlueprintReadOnly, Category = "Crowd State")
+    float LastUpdateTime;
 
 private:
-    // Internal pathfinding helpers
-    TArray<FVector> BuildPathGraph() const;
-    float CalculatePathDistance(const FVector& Start, const FVector& End) const;
-    bool IsValidPathConnection(const FCrowd_PathConnection& Connection) const;
-
-    // LOD optimization helpers
-    void UpdateCrowdLOD();
-    void CullDistantCrowd(const FVector& ViewerLocation);
-
-    // Mass Entity integration
-    void InitializeMassEntitySystem();
-    void ShutdownMassEntitySystem();
-    bool bMassEntityInitialized = false;
+    void UpdateAgentBehavior(FCrowd_AgentData& Agent, float DeltaTime);
+    void ApplyFlockingBehavior(FCrowd_AgentData& Agent);
+    void ApplyAvoidanceBehavior(FCrowd_AgentData& Agent);
+    FVector CalculateSeparation(const FCrowd_AgentData& Agent);
+    FVector CalculateAlignment(const FCrowd_AgentData& Agent);
+    FVector CalculateCohesion(const FCrowd_AgentData& Agent);
+    bool IsValidSpawnLocation(const FVector& Location);
 };
