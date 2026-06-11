@@ -1,175 +1,209 @@
 #include "Audio_SoundManager.h"
 #include "Engine/Engine.h"
-#include "Engine/World.h"
-#include "GameFramework/Actor.h"
 #include "Kismet/GameplayStatics.h"
 #include "Components/AudioComponent.h"
+#include "Sound/SoundCue.h"
 
-UAudio_SoundManager::UAudio_SoundManager()
+AAudio_SoundManager::AAudio_SoundManager()
 {
-    InitializeCategoryVolumes();
+    PrimaryActorTick.bCanEverTick = true;
+
+    // Create master audio component
+    MasterAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("MasterAudioComponent"));
+    RootComponent = MasterAudioComponent;
+
+    // Initialize default values
+    MasterVolume = 1.0f;
+    CurrentBiome = EBiomeType::Forest;
+    LastPlayerPosition = FVector::ZeroVector;
+
+    // Setup default sound zones
+    FAudio_SoundZone ForestZone;
+    ForestZone.ZoneName = TEXT("Forest");
+    ForestZone.VolumeMultiplier = 0.7f;
+    ForestZone.FadeDistance = 1500.0f;
+    SoundZones.Add(ForestZone);
+
+    FAudio_SoundZone CaveZone;
+    CaveZone.ZoneName = TEXT("Cave");
+    CaveZone.VolumeMultiplier = 0.4f;
+    CaveZone.FadeDistance = 800.0f;
+    SoundZones.Add(CaveZone);
+
+    FAudio_SoundZone RiverZone;
+    RiverZone.ZoneName = TEXT("River");
+    RiverZone.VolumeMultiplier = 0.8f;
+    RiverZone.FadeDistance = 1200.0f;
+    SoundZones.Add(RiverZone);
 }
 
-void UAudio_SoundManager::Initialize(FSubsystemCollectionBase& Collection)
+void AAudio_SoundManager::BeginPlay()
 {
-    Super::Initialize(Collection);
-    InitializeCategoryVolumes();
-    UE_LOG(LogTemp, Log, TEXT("Audio_SoundManager initialized"));
-}
-
-void UAudio_SoundManager::Deinitialize()
-{
-    // Stop all active audio components
-    for (UAudioComponent* AudioComp : ActiveAudioComponents)
-    {
-        if (IsValid(AudioComp))
-        {
-            AudioComp->Stop();
-        }
-    }
-    ActiveAudioComponents.Empty();
+    Super::BeginPlay();
     
-    Super::Deinitialize();
-    UE_LOG(LogTemp, Log, TEXT("Audio_SoundManager deinitialized"));
-}
-
-void UAudio_SoundManager::InitializeCategoryVolumes()
-{
-    CategoryVolumes.Add(EAudio_SoundCategory::Ambient, 0.8f);
-    CategoryVolumes.Add(EAudio_SoundCategory::Footsteps, 1.0f);
-    CategoryVolumes.Add(EAudio_SoundCategory::Combat, 1.0f);
-    CategoryVolumes.Add(EAudio_SoundCategory::Crafting, 0.9f);
-    CategoryVolumes.Add(EAudio_SoundCategory::UI, 0.7f);
-    CategoryVolumes.Add(EAudio_SoundCategory::Voice, 1.0f);
-    CategoryVolumes.Add(EAudio_SoundCategory::Music, 0.6f);
-}
-
-void UAudio_SoundManager::PlaySound2D(USoundBase* Sound, float Volume, float Pitch)
-{
-    if (!Sound)
+    // Initialize audio system
+    if (MasterAudioComponent)
     {
-        UE_LOG(LogTemp, Warning, TEXT("PlaySound2D: Sound is null"));
+        MasterAudioComponent->SetVolumeMultiplier(MasterVolume);
+        MasterAudioComponent->SetAutoActivate(true);
+    }
+
+    // Set initial biome ambient
+    SetBiomeAmbient(CurrentBiome);
+    
+    UE_LOG(LogTemp, Log, TEXT("Audio_SoundManager initialized with %d sound zones"), SoundZones.Num());
+}
+
+void AAudio_SoundManager::Tick(float DeltaTime)
+{
+    Super::Tick(DeltaTime);
+    
+    // Update ambient audio based on player position
+    UpdateAmbientAudio();
+}
+
+void AAudio_SoundManager::PlayDinosaurSound(EDinosaurSpecies Species, const FString& SoundType, const FVector& Location)
+{
+    if (!DinosaurSounds.Contains(Species))
+    {
+        UE_LOG(LogTemp, Warning, TEXT("No sound set found for dinosaur species"));
         return;
     }
 
-    UWorld* World = GetWorld();
-    if (!World)
+    const FAudio_DinosaurSoundSet& SoundSet = DinosaurSounds[Species];
+    USoundCue* SoundToPlay = nullptr;
+
+    if (SoundType == TEXT("Idle"))
     {
-        UE_LOG(LogTemp, Warning, TEXT("PlaySound2D: World is null"));
-        return;
+        SoundToPlay = SoundSet.IdleSound;
+    }
+    else if (SoundType == TEXT("Alert"))
+    {
+        SoundToPlay = SoundSet.AlertSound;
+    }
+    else if (SoundType == TEXT("Attack"))
+    {
+        SoundToPlay = SoundSet.AttackSound;
+    }
+    else if (SoundType == TEXT("Footstep"))
+    {
+        SoundToPlay = SoundSet.FootstepSound;
     }
 
-    UAudioComponent* AudioComp = UGameplayStatics::SpawnSound2D(World, Sound, Volume, Pitch);
-    if (AudioComp)
+    if (SoundToPlay)
     {
-        ActiveAudioComponents.Add(AudioComp);
-        CleanupFinishedComponents();
-    }
-}
-
-void UAudio_SoundManager::PlaySound3D(USoundBase* Sound, FVector Location, float Volume, float Pitch)
-{
-    if (!Sound)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("PlaySound3D: Sound is null"));
-        return;
-    }
-
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("PlaySound3D: World is null"));
-        return;
-    }
-
-    UAudioComponent* AudioComp = UGameplayStatics::SpawnSoundAtLocation(World, Sound, Location, FRotator::ZeroRotator, Volume, Pitch);
-    if (AudioComp)
-    {
-        ActiveAudioComponents.Add(AudioComp);
-        CleanupFinishedComponents();
-    }
-}
-
-void UAudio_SoundManager::PlaySoundAtActor(USoundBase* Sound, AActor* Actor, float Volume, float Pitch)
-{
-    if (!Sound || !Actor)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("PlaySoundAtActor: Sound or Actor is null"));
-        return;
-    }
-
-    PlaySound3D(Sound, Actor->GetActorLocation(), Volume, Pitch);
-}
-
-void UAudio_SoundManager::StopAllSoundsOfCategory(EAudio_SoundCategory Category)
-{
-    for (int32 i = ActiveAudioComponents.Num() - 1; i >= 0; i--)
-    {
-        UAudioComponent* AudioComp = ActiveAudioComponents[i];
-        if (IsValid(AudioComp))
+        // Calculate attenuation based on distance
+        float Attenuation = CalculateDistanceAttenuation(Location, LastPlayerPosition, SoundSet.MaxHearingDistance);
+        
+        if (Attenuation > 0.1f)
         {
-            // Note: In a full implementation, we'd store category info with each component
-            // For now, this is a basic implementation
-            AudioComp->Stop();
-            ActiveAudioComponents.RemoveAt(i);
+            UGameplayStatics::PlaySoundAtLocation(
+                GetWorld(),
+                SoundToPlay,
+                Location,
+                Attenuation * MasterVolume
+            );
+            
+            UE_LOG(LogTemp, Log, TEXT("Played %s sound for dinosaur at distance %.2f"), *SoundType, FVector::Dist(Location, LastPlayerPosition));
         }
     }
 }
 
-void UAudio_SoundManager::SetCategoryVolume(EAudio_SoundCategory Category, float Volume)
+void AAudio_SoundManager::PlayFootstepSound(const FVector& Location, bool bIsPlayer)
 {
-    CategoryVolumes.Add(Category, FMath::Clamp(Volume, 0.0f, 1.0f));
-}
-
-float UAudio_SoundManager::GetCategoryVolume(EAudio_SoundCategory Category) const
-{
-    const float* VolumePtr = CategoryVolumes.Find(Category);
-    return VolumePtr ? *VolumePtr : 1.0f;
-}
-
-void UAudio_SoundManager::RegisterSound(const FString& SoundName, const FAudio_SoundEntry& SoundEntry)
-{
-    RegisteredSounds.Add(SoundName, SoundEntry);
-    UE_LOG(LogTemp, Log, TEXT("Registered sound: %s"), *SoundName);
-}
-
-void UAudio_SoundManager::PlayRegisteredSound(const FString& SoundName, FVector Location)
-{
-    const FAudio_SoundEntry* SoundEntry = RegisteredSounds.Find(SoundName);
-    if (!SoundEntry)
+    if (PlayerFootstepSound)
     {
-        UE_LOG(LogTemp, Warning, TEXT("PlayRegisteredSound: Sound '%s' not found"), *SoundName);
-        return;
-    }
-
-    USoundBase* Sound = SoundEntry->Sound.LoadSynchronous();
-    if (!Sound)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("PlayRegisteredSound: Failed to load sound '%s'"), *SoundName);
-        return;
-    }
-
-    float CategoryVolume = GetCategoryVolume(SoundEntry->Category);
-    float FinalVolume = SoundEntry->Volume * CategoryVolume;
-
-    if (SoundEntry->bIs3D && Location != FVector::ZeroVector)
-    {
-        PlaySound3D(Sound, Location, FinalVolume, SoundEntry->Pitch);
-    }
-    else
-    {
-        PlaySound2D(Sound, FinalVolume, SoundEntry->Pitch);
+        float Volume = bIsPlayer ? 0.5f : 0.3f;
+        UGameplayStatics::PlaySoundAtLocation(
+            GetWorld(),
+            PlayerFootstepSound,
+            Location,
+            Volume * MasterVolume
+        );
     }
 }
 
-void UAudio_SoundManager::CleanupFinishedComponents()
+void AAudio_SoundManager::PlayCraftingSound(const FVector& Location)
 {
-    for (int32 i = ActiveAudioComponents.Num() - 1; i >= 0; i--)
+    if (CraftingSound)
     {
-        UAudioComponent* AudioComp = ActiveAudioComponents[i];
-        if (!IsValid(AudioComp) || !AudioComp->IsPlaying())
+        UGameplayStatics::PlaySoundAtLocation(
+            GetWorld(),
+            CraftingSound,
+            Location,
+            0.7f * MasterVolume
+        );
+    }
+}
+
+void AAudio_SoundManager::PlayDangerStinger()
+{
+    if (DangerStinger)
+    {
+        UGameplayStatics::PlaySound2D(GetWorld(), DangerStinger, MasterVolume);
+        UE_LOG(LogTemp, Log, TEXT("Played danger stinger"));
+    }
+}
+
+void AAudio_SoundManager::SetBiomeAmbient(EBiomeType BiomeType)
+{
+    CurrentBiome = BiomeType;
+    
+    if (BiomeAmbientSounds.Contains(BiomeType))
+    {
+        USoundCue* AmbientSound = BiomeAmbientSounds[BiomeType];
+        if (AmbientSound && MasterAudioComponent)
         {
-            ActiveAudioComponents.RemoveAt(i);
+            MasterAudioComponent->SetSound(AmbientSound);
+            MasterAudioComponent->Play();
+            UE_LOG(LogTemp, Log, TEXT("Set biome ambient for type %d"), (int32)BiomeType);
         }
     }
+}
+
+void AAudio_SoundManager::UpdatePlayerPosition(const FVector& PlayerLocation)
+{
+    LastPlayerPosition = PlayerLocation;
+    CheckSoundZones(PlayerLocation);
+}
+
+void AAudio_SoundManager::UpdateAmbientAudio()
+{
+    // This would typically check for biome transitions and update ambient accordingly
+    // For now, we maintain the current biome ambient
+}
+
+void AAudio_SoundManager::CheckSoundZones(const FVector& PlayerLocation)
+{
+    // Check if player has entered any specific sound zones
+    for (const FAudio_SoundZone& Zone : SoundZones)
+    {
+        // In a full implementation, this would check against actual zone geometry
+        // For now, we use distance-based approximation
+        float DistanceToZoneCenter = FVector::Dist(PlayerLocation, GetActorLocation());
+        
+        if (DistanceToZoneCenter < Zone.FadeDistance)
+        {
+            float VolumeModifier = FMath::Clamp(1.0f - (DistanceToZoneCenter / Zone.FadeDistance), 0.0f, 1.0f);
+            VolumeModifier *= Zone.VolumeMultiplier;
+            
+            if (MasterAudioComponent)
+            {
+                MasterAudioComponent->SetVolumeMultiplier(VolumeModifier * MasterVolume);
+            }
+        }
+    }
+}
+
+float AAudio_SoundManager::CalculateDistanceAttenuation(const FVector& SoundLocation, const FVector& ListenerLocation, float MaxDistance)
+{
+    float Distance = FVector::Dist(SoundLocation, ListenerLocation);
+    
+    if (Distance >= MaxDistance)
+    {
+        return 0.0f;
+    }
+    
+    // Linear attenuation for simplicity
+    return 1.0f - (Distance / MaxDistance);
 }
