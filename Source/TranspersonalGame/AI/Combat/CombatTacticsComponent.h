@@ -1,108 +1,92 @@
-// Copyright Transpersonal Game Studio. All Rights Reserved.
-
 #pragma once
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
-#include "GameplayTags.h"
-#include "Engine/World.h"
+#include "Engine/Engine.h"
+#include "CombatBehaviorTree.h"
 #include "CombatTacticsComponent.generated.h"
 
 UENUM(BlueprintType)
-enum class ETacticType : uint8
+enum class ECombat_TacticType : uint8
 {
-    None,
-    DirectAssault,
-    Flanking,
-    Ambush,
-    Stalking,
-    PackHunt,
-    Retreat,
-    Distraction
-};
-
-UENUM(BlueprintType)
-enum class EFormation : uint8
-{
-    None,
-    Line,
-    Circle,
-    Wedge,
-    Scatter,
-    Pincer
+    None            UMETA(DisplayName = "None"),
+    Ambush          UMETA(DisplayName = "Ambush"),
+    Flanking        UMETA(DisplayName = "Flanking"),
+    PackHunt        UMETA(DisplayName = "Pack Hunt"),
+    Intimidation    UMETA(DisplayName = "Intimidation"),
+    Retreat         UMETA(DisplayName = "Retreat"),
+    Territorial     UMETA(DisplayName = "Territorial"),
+    Defensive       UMETA(DisplayName = "Defensive")
 };
 
 USTRUCT(BlueprintType)
-struct FTacticalPosition
+struct TRANSPERSONALGAME_API FCombat_TacticData
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadWrite)
-    FVector Position = FVector::ZeroVector;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tactics")
+    ECombat_TacticType TacticType = ECombat_TacticType::None;
 
-    UPROPERTY(BlueprintReadWrite)
-    FRotator Rotation = FRotator::ZeroRotator;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tactics")
+    float ExecutionChance = 0.5f;
 
-    UPROPERTY(BlueprintReadWrite)
-    ETacticType AssignedTactic = ETacticType::None;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tactics")
+    float CooldownTime = 10.0f;
 
-    UPROPERTY(BlueprintReadWrite)
-    float Priority = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tactics")
+    float EffectiveRange = 1000.0f;
 
-    UPROPERTY(BlueprintReadWrite)
-    bool bIsOccupied = false;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tactics")
+    int32 RequiredAllies = 0;
 
-    UPROPERTY(BlueprintReadWrite)
-    AActor* OccupyingActor = nullptr;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tactics")
+    bool bRequiresLineOfSight = true;
 
-    FTacticalPosition()
+    FCombat_TacticData()
     {
-        Position = FVector::ZeroVector;
-        Rotation = FRotator::ZeroRotator;
-        AssignedTactic = ETacticType::None;
-        Priority = 0.0f;
-        bIsOccupied = false;
-        OccupyingActor = nullptr;
+        TacticType = ECombat_TacticType::None;
+        ExecutionChance = 0.5f;
+        CooldownTime = 10.0f;
+        EffectiveRange = 1000.0f;
+        RequiredAllies = 0;
+        bRequiresLineOfSight = true;
     }
 };
 
 USTRUCT(BlueprintType)
-struct FTacticalPlan
+struct TRANSPERSONALGAME_API FCombat_EnvironmentFactor
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadWrite)
-    ETacticType PrimaryTactic = ETacticType::None;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment")
+    bool bInCover = false;
 
-    UPROPERTY(BlueprintReadWrite)
-    EFormation Formation = EFormation::None;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment")
+    bool bHighGround = false;
 
-    UPROPERTY(BlueprintReadWrite)
-    TArray<FTacticalPosition> Positions;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment")
+    bool bNearWater = false;
 
-    UPROPERTY(BlueprintReadWrite)
-    AActor* TargetActor = nullptr;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment")
+    bool bInForest = false;
 
-    UPROPERTY(BlueprintReadWrite)
-    float ExecutionTime = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment")
+    float VisibilityLevel = 1.0f;
 
-    UPROPERTY(BlueprintReadWrite)
-    float SuccessChance = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment")
+    float NoiseLevel = 0.5f;
 
-    FTacticalPlan()
+    FCombat_EnvironmentFactor()
     {
-        PrimaryTactic = ETacticType::None;
-        Formation = EFormation::None;
-        TargetActor = nullptr;
-        ExecutionTime = 0.0f;
-        SuccessChance = 0.0f;
+        bInCover = false;
+        bHighGround = false;
+        bNearWater = false;
+        bInForest = false;
+        VisibilityLevel = 1.0f;
+        NoiseLevel = 0.5f;
     }
 };
 
-/**
- * Component that handles tactical combat decisions and positioning
- * Implements advanced AI tactics like flanking, ambushing, and pack coordination
- */
 UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
 class TRANSPERSONALGAME_API UCombatTacticsComponent : public UActorComponent
 {
@@ -115,135 +99,70 @@ protected:
     virtual void BeginPlay() override;
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    // Tactical Parameters
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tactics")
-    float TacticalRange = 1500.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tactics")
-    float FlankingAngle = 45.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tactics")
-    float AmbushDistance = 800.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tactics")
-    float PackCoordinationRadius = 2000.0f;
-
-    // Current Tactical State
-    UPROPERTY(BlueprintReadOnly, Category = "Tactics")
-    FTacticalPlan CurrentPlan;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Tactics")
-    ETacticType ActiveTactic = ETacticType::None;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Tactics")
-    FVector TacticalTargetLocation = FVector::ZeroVector;
-
-    // Tactical Intelligence
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tactics")
-    float TacticalIntelligence = 0.7f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tactics")
-    float AdaptationSpeed = 0.5f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tactics")
-    bool bCanUseAdvancedTactics = true;
-
 public:
-    // Tactical Planning
-    UFUNCTION(BlueprintCallable, Category = "Combat Tactics")
-    void UpdateTactics(AActor* Target);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Tactics")
+    TArray<FCombat_TacticData> AvailableTactics;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Tactics")
+    FCombat_TacticData CurrentTactic;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Tactics")
+    FCombat_EnvironmentFactor EnvironmentFactors;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Tactics")
+    float TacticalUpdateInterval = 2.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Tactics")
+    float TacticalAwareness = 0.7f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Tactics")
+    bool bCanUseTactics = true;
 
     UFUNCTION(BlueprintCallable, Category = "Combat Tactics")
-    FTacticalPlan GenerateTacticalPlan(AActor* Target, ETacticType PreferredTactic = ETacticType::None);
+    void InitializeTactics();
 
     UFUNCTION(BlueprintCallable, Category = "Combat Tactics")
-    bool ExecuteTacticalPlan(const FTacticalPlan& Plan);
-
-    // Tactical Positioning
-    UFUNCTION(BlueprintCallable, Category = "Combat Tactics")
-    FVector GetFlankingPosition(AActor* Target, bool bLeftFlank = true);
+    bool SelectBestTactic(AActor* Target);
 
     UFUNCTION(BlueprintCallable, Category = "Combat Tactics")
-    FVector GetAmbushPosition(AActor* Target);
+    void ExecuteCurrentTactic(AActor* Target);
 
     UFUNCTION(BlueprintCallable, Category = "Combat Tactics")
-    FVector GetStalkingPosition(AActor* Target);
+    bool CanExecuteTactic(const FCombat_TacticData& Tactic, AActor* Target) const;
 
     UFUNCTION(BlueprintCallable, Category = "Combat Tactics")
-    TArray<FVector> GetPackFormationPositions(AActor* Target, EFormation Formation, int32 PackSize);
-
-    // Tactical Analysis
-    UFUNCTION(BlueprintPure, Category = "Combat Tactics")
-    ETacticType GetBestTacticForTarget(AActor* Target) const;
-
-    UFUNCTION(BlueprintPure, Category = "Combat Tactics")
-    float EvaluateTacticEffectiveness(ETacticType Tactic, AActor* Target) const;
-
-    UFUNCTION(BlueprintPure, Category = "Combat Tactics")
-    bool CanExecuteTactic(ETacticType Tactic, AActor* Target) const;
-
-    // Environmental Analysis
-    UFUNCTION(BlueprintCallable, Category = "Combat Tactics")
-    TArray<FVector> FindCoverPositions(FVector CenterLocation, float SearchRadius);
+    void UpdateEnvironmentFactors();
 
     UFUNCTION(BlueprintCallable, Category = "Combat Tactics")
-    TArray<FVector> FindHighGroundPositions(FVector CenterLocation, float SearchRadius);
-
-    UFUNCTION(BlueprintPure, Category = "Combat Tactics")
-    bool HasLineOfSight(FVector FromLocation, FVector ToLocation) const;
-
-    UFUNCTION(BlueprintPure, Category = "Combat Tactics")
-    float GetTerrainAdvantage(FVector Position, AActor* Target) const;
-
-    // Pack Coordination
-    UFUNCTION(BlueprintCallable, Category = "Combat Tactics")
-    void CoordinateWithPack(const TArray<AActor*>& PackMembers, AActor* Target);
+    float CalculateTacticEffectiveness(const FCombat_TacticData& Tactic, AActor* Target) const;
 
     UFUNCTION(BlueprintCallable, Category = "Combat Tactics")
-    void AssignPackRoles(const TArray<AActor*>& PackMembers, AActor* Target);
+    TArray<AActor*> FindNearbyAllies(float SearchRadius = 2000.0f) const;
 
-    // Getters
-    UFUNCTION(BlueprintPure, Category = "Combat Tactics")
-    ETacticType GetActiveTactic() const { return ActiveTactic; }
+    UFUNCTION(BlueprintCallable, Category = "Combat Tactics")
+    bool HasLineOfSight(AActor* Target) const;
 
-    UFUNCTION(BlueprintPure, Category = "Combat Tactics")
-    FVector GetTacticalTargetLocation() const { return TacticalTargetLocation; }
-
-    UFUNCTION(BlueprintPure, Category = "Combat Tactics")
-    FTacticalPlan GetCurrentPlan() const { return CurrentPlan; }
+    UFUNCTION(BlueprintCallable, Category = "Combat Tactics")
+    void SetTacticalCooldown(ECombat_TacticType TacticType, float CooldownDuration);
 
 protected:
-    // Internal Functions
-    void AnalyzeEnvironment(AActor* Target);
-    void UpdateTacticalIntelligence(bool bTacticSuccessful);
-    FVector FindOptimalPosition(AActor* Target, ETacticType Tactic);
-    bool IsPositionValid(FVector Position, AActor* Target, ETacticType Tactic);
-    float CalculatePositionScore(FVector Position, AActor* Target, ETacticType Tactic);
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat Tactics")
+    TMap<ECombat_TacticType, float> TacticalCooldowns;
 
-    // Tactical Timers
-    FTimerHandle TacticalUpdateTimer;
-    FTimerHandle EnvironmentAnalysisTimer;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat Tactics")
+    float LastTacticalUpdate = 0.0f;
 
-    void OnTacticalUpdate();
-    void OnEnvironmentAnalysis();
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat Tactics")
+    AActor* CurrentTarget = nullptr;
 
-    // Cached Environmental Data
-    UPROPERTY()
-    TArray<FVector> CachedCoverPositions;
-
-    UPROPERTY()
-    TArray<FVector> CachedHighGroundPositions;
-
-    UPROPERTY()
-    float LastEnvironmentUpdateTime = 0.0f;
-
-    // Tactical History
-    UPROPERTY()
-    TArray<ETacticType> RecentTactics;
-
-    UPROPERTY()
-    TArray<bool> TacticSuccessHistory;
-
-    void RecordTacticResult(ETacticType Tactic, bool bSuccess);
-    float GetTacticSuccessRate(ETacticType Tactic) const;
+    void InitializeDefaultTactics();
+    void UpdateTacticalCooldowns(float DeltaTime);
+    bool IsTacticOnCooldown(ECombat_TacticType TacticType) const;
+    void ExecuteAmbushTactic(AActor* Target);
+    void ExecuteFlankingTactic(AActor* Target);
+    void ExecutePackHuntTactic(AActor* Target);
+    void ExecuteIntimidationTactic(AActor* Target);
+    void ExecuteRetreatTactic(AActor* Target);
+    void ExecuteTerritorialTactic(AActor* Target);
+    void ExecuteDefensiveTactic(AActor* Target);
 };
