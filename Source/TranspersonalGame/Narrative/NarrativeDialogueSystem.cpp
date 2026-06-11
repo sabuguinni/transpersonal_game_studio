@@ -1,259 +1,209 @@
 #include "NarrativeDialogueSystem.h"
 #include "Engine/Engine.h"
-#include "Engine/World.h"
 #include "Kismet/GameplayStatics.h"
-#include "Engine/DataTable.h"
-
-UNarrativeDialogueSystem::UNarrativeDialogueSystem()
-{
-    DialogueDataTable = nullptr;
-}
 
 void UNarrativeDialogueSystem::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
     
-    UE_LOG(LogTemp, Log, TEXT("NarrativeDialogueSystem: Initializing dialogue system"));
+    bDialogueActive = false;
+    CurrentSpeaker = nullptr;
     
     LoadDialogueData();
+    LoadQuestData();
     
-    // Initialize default quest dialogues
-    TArray<FNarr_DialogueEntry> FirstHuntDialogues;
-    
-    FNarr_DialogueEntry Entry1;
-    Entry1.DialogueID = TEXT("FirstHunt_Start");
-    Entry1.SpeakerName = TEXT("Tribal Elder");
-    Entry1.DialogueText = TEXT("The ancient hunting grounds hold many secrets. Follow the river downstream to find the sacred cave.");
-    Entry1.DisplayDuration = 5.0f;
-    Entry1.QuestID = TEXT("FirstHunt");
-    Entry1.Priority = 1;
-    FirstHuntDialogues.Add(Entry1);
-    
-    FNarr_DialogueEntry Entry2;
-    Entry2.DialogueID = TEXT("FirstHunt_Warning");
-    Entry2.SpeakerName = TEXT("Scout");
-    Entry2.DialogueText = TEXT("Danger! Massive footprints in the mud ahead. Take cover and wait for the beast to pass.");
-    Entry2.DisplayDuration = 4.0f;
-    Entry2.QuestID = TEXT("FirstHunt");
-    Entry2.Priority = 2;
-    FirstHuntDialogues.Add(Entry2);
-    
-    RegisterQuestDialogue(TEXT("FirstHunt"), FirstHuntDialogues);
-    
-    UE_LOG(LogTemp, Log, TEXT("NarrativeDialogueSystem: Initialization complete"));
+    UE_LOG(LogTemp, Log, TEXT("NarrativeDialogueSystem initialized"));
 }
 
-void UNarrativeDialogueSystem::Deinitialize()
+void UNarrativeDialogueSystem::StartDialogue(const FString& DialogueID, AActor* Speaker)
 {
-    QuestDialogues.Empty();
-    ActiveDialogues.Empty();
-    
-    Super::Deinitialize();
-}
-
-void UNarrativeDialogueSystem::RegisterQuestDialogue(const FString& QuestID, const TArray<FNarr_DialogueEntry>& DialogueEntries)
-{
-    if (QuestID.IsEmpty())
+    if (!Speaker)
     {
-        UE_LOG(LogTemp, Warning, TEXT("NarrativeDialogueSystem: Cannot register dialogue with empty QuestID"));
+        UE_LOG(LogTemp, Warning, TEXT("Cannot start dialogue: Speaker is null"));
         return;
     }
-    
-    FNarr_QuestDialogue NewQuestDialogue;
-    NewQuestDialogue.QuestID = QuestID;
-    NewQuestDialogue.DialogueEntries = DialogueEntries;
-    NewQuestDialogue.bIsActive = false;
-    
-    QuestDialogues.Add(QuestID, NewQuestDialogue);
-    
-    UE_LOG(LogTemp, Log, TEXT("NarrativeDialogueSystem: Registered %d dialogue entries for quest %s"), 
-           DialogueEntries.Num(), *QuestID);
+
+    if (FNarr_DialogueEntry* FoundDialogue = DialogueDatabase.Find(DialogueID))
+    {
+        CurrentDialogue = *FoundDialogue;
+        CurrentSpeaker = Speaker;
+        bDialogueActive = true;
+        
+        BroadcastDialogueUpdate();
+        
+        UE_LOG(LogTemp, Log, TEXT("Started dialogue: %s with speaker: %s"), 
+               *DialogueID, *Speaker->GetName());
+    }
+    else
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Dialogue ID not found: %s"), *DialogueID);
+    }
 }
 
-void UNarrativeDialogueSystem::TriggerDialogue(const FString& DialogueID, AActor* TriggerActor)
+void UNarrativeDialogueSystem::EndDialogue()
 {
-    if (DialogueID.IsEmpty())
+    if (bDialogueActive)
     {
+        bDialogueActive = false;
+        CurrentSpeaker = nullptr;
+        CurrentDialogue = FNarr_DialogueEntry();
+        
+        UE_LOG(LogTemp, Log, TEXT("Dialogue ended"));
+    }
+}
+
+void UNarrativeDialogueSystem::SelectDialogueOption(int32 OptionIndex)
+{
+    if (!bDialogueActive)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("No active dialogue to select option"));
         return;
     }
-    
-    // Find dialogue entry by ID
-    for (auto& QuestPair : QuestDialogues)
+
+    if (CurrentDialogue.ResponseOptions.IsValidIndex(OptionIndex))
     {
-        if (QuestPair.Value.bIsActive)
+        FString SelectedOption = CurrentDialogue.ResponseOptions[OptionIndex];
+        UE_LOG(LogTemp, Log, TEXT("Player selected dialogue option: %s"), *SelectedOption);
+        
+        // Process the selected option (could trigger quest updates, new dialogue, etc.)
+        EndDialogue();
+    }
+    else
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Invalid dialogue option index: %d"), OptionIndex);
+    }
+}
+
+bool UNarrativeDialogueSystem::IsDialogueActive() const
+{
+    return bDialogueActive;
+}
+
+FNarr_DialogueEntry UNarrativeDialogueSystem::GetCurrentDialogue() const
+{
+    return CurrentDialogue;
+}
+
+void UNarrativeDialogueSystem::UpdateQuestObjective(const FString& QuestID, const FString& ObjectiveID, int32 Progress)
+{
+    if (TArray<FNarr_QuestObjective>* QuestObjectives = QuestDatabase.Find(QuestID))
+    {
+        for (FNarr_QuestObjective& Objective : *QuestObjectives)
         {
-            for (const FNarr_DialogueEntry& Entry : QuestPair.Value.DialogueEntries)
+            if (Objective.ObjectiveID == ObjectiveID)
             {
-                if (Entry.DialogueID == DialogueID)
+                Objective.CurrentCount = FMath::Min(Objective.CurrentCount + Progress, Objective.RequiredCount);
+                
+                if (Objective.CurrentCount >= Objective.RequiredCount)
                 {
-                    // Add to active dialogues if not already present
-                    bool bAlreadyActive = false;
-                    for (const FNarr_DialogueEntry& ActiveEntry : ActiveDialogues)
-                    {
-                        if (ActiveEntry.DialogueID == DialogueID)
-                        {
-                            bAlreadyActive = true;
-                            break;
-                        }
-                    }
-                    
-                    if (!bAlreadyActive)
-                    {
-                        ActiveDialogues.Add(Entry);
-                        SortDialoguesByPriority();
-                        
-                        UE_LOG(LogTemp, Log, TEXT("NarrativeDialogueSystem: Triggered dialogue %s"), *DialogueID);
-                        
-                        // Broadcast dialogue event (can be extended for UI integration)
-                        if (GEngine)
-                        {
-                            GEngine->AddOnScreenDebugMessage(-1, Entry.DisplayDuration, FColor::Yellow,
-                                FString::Printf(TEXT("%s: %s"), *Entry.SpeakerName, *Entry.DialogueText));
-                        }
-                    }
-                    return;
+                    Objective.bIsCompleted = true;
+                    UE_LOG(LogTemp, Log, TEXT("Quest objective completed: %s - %s"), 
+                           *QuestID, *ObjectiveID);
                 }
+                
+                return;
             }
         }
+        
+        UE_LOG(LogTemp, Warning, TEXT("Objective ID not found: %s in quest: %s"), 
+               *ObjectiveID, *QuestID);
+    }
+    else
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Quest ID not found: %s"), *QuestID);
+    }
+}
+
+bool UNarrativeDialogueSystem::IsQuestCompleted(const FString& QuestID) const
+{
+    if (const TArray<FNarr_QuestObjective>* QuestObjectives = QuestDatabase.Find(QuestID))
+    {
+        for (const FNarr_QuestObjective& Objective : *QuestObjectives)
+        {
+            if (!Objective.bIsCompleted)
+            {
+                return false;
+            }
+        }
+        return true;
     }
     
-    UE_LOG(LogTemp, Warning, TEXT("NarrativeDialogueSystem: Dialogue %s not found or quest not active"), *DialogueID);
-}
-
-void UNarrativeDialogueSystem::ActivateQuestDialogues(const FString& QuestID)
-{
-    if (FNarr_QuestDialogue* QuestDialogue = QuestDialogues.Find(QuestID))
-    {
-        QuestDialogue->bIsActive = true;
-        UE_LOG(LogTemp, Log, TEXT("NarrativeDialogueSystem: Activated dialogues for quest %s"), *QuestID);
-    }
-}
-
-void UNarrativeDialogueSystem::DeactivateQuestDialogues(const FString& QuestID)
-{
-    if (FNarr_QuestDialogue* QuestDialogue = QuestDialogues.Find(QuestID))
-    {
-        QuestDialogue->bIsActive = false;
-        
-        // Remove active dialogues for this quest
-        ActiveDialogues.RemoveAll([QuestID](const FNarr_DialogueEntry& Entry)
-        {
-            return Entry.QuestID == QuestID;
-        });
-        
-        UE_LOG(LogTemp, Log, TEXT("NarrativeDialogueSystem: Deactivated dialogues for quest %s"), *QuestID);
-    }
-}
-
-TArray<FNarr_DialogueEntry> UNarrativeDialogueSystem::GetActiveDialogues() const
-{
-    return ActiveDialogues;
-}
-
-void UNarrativeDialogueSystem::OnQuestStarted(const FString& QuestID)
-{
-    ActivateQuestDialogues(QuestID);
-}
-
-void UNarrativeDialogueSystem::OnQuestCompleted(const FString& QuestID)
-{
-    DeactivateQuestDialogues(QuestID);
-}
-
-void UNarrativeDialogueSystem::OnQuestFailed(const FString& QuestID)
-{
-    DeactivateQuestDialogues(QuestID);
+    return false;
 }
 
 void UNarrativeDialogueSystem::LoadDialogueData()
 {
-    // Load dialogue data table if available
-    if (DialogueDataTable)
-    {
-        UE_LOG(LogTemp, Log, TEXT("NarrativeDialogueSystem: Loading dialogue data from data table"));
-        // Implementation for loading from data table can be added here
-    }
-    else
-    {
-        UE_LOG(LogTemp, Log, TEXT("NarrativeDialogueSystem: No dialogue data table specified, using default dialogues"));
-    }
+    // Sample survival-focused dialogue entries
+    FNarr_DialogueEntry HunterGreeting;
+    HunterGreeting.SpeakerName = TEXT("Tribal Hunter");
+    HunterGreeting.DialogueText = TEXT("The hunting grounds are dangerous today. Large predator tracks near the river.");
+    HunterGreeting.AudioDuration = 4.5f;
+    HunterGreeting.ResponseOptions.Add(TEXT("Tell me about the tracks"));
+    HunterGreeting.ResponseOptions.Add(TEXT("I can handle myself"));
+    HunterGreeting.ResponseOptions.Add(TEXT("Where should I hunt instead?"));
+    DialogueDatabase.Add(TEXT("hunter_greeting"), HunterGreeting);
+
+    FNarr_DialogueEntry CrafterAdvice;
+    CrafterAdvice.SpeakerName = TEXT("Tool Maker");
+    CrafterAdvice.DialogueText = TEXT("Sharp stones make better spear tips. Look for flint near the rocky cliffs.");
+    CrafterAdvice.AudioDuration = 3.8f;
+    CrafterAdvice.ResponseOptions.Add(TEXT("Show me how to knap flint"));
+    CrafterAdvice.ResponseOptions.Add(TEXT("Where are these cliffs?"));
+    DialogueDatabase.Add(TEXT("crafter_advice"), CrafterAdvice);
+
+    FNarr_DialogueEntry ScoutWarning;
+    ScoutWarning.SpeakerName = TEXT("Territory Scout");
+    ScoutWarning.DialogueText = TEXT("Raptor pack claimed the eastern valley. Three adults, possibly more. Avoid that area.");
+    ScoutWarning.AudioDuration = 5.2f;
+    ScoutWarning.ResponseOptions.Add(TEXT("How do you know their numbers?"));
+    ScoutWarning.ResponseOptions.Add(TEXT("Any safe routes east?"));
+    DialogueDatabase.Add(TEXT("scout_warning"), ScoutWarning);
+
+    UE_LOG(LogTemp, Log, TEXT("Loaded %d dialogue entries"), DialogueDatabase.Num());
 }
 
-void UNarrativeDialogueSystem::SortDialoguesByPriority()
+void UNarrativeDialogueSystem::LoadQuestData()
 {
-    ActiveDialogues.Sort([](const FNarr_DialogueEntry& A, const FNarr_DialogueEntry& B)
-    {
-        return A.Priority < B.Priority;
-    });
+    // Sample survival quest: First Hunt
+    TArray<FNarr_QuestObjective> FirstHuntObjectives;
+    
+    FNarr_QuestObjective CraftSpear;
+    CraftSpear.ObjectiveID = TEXT("craft_spear");
+    CraftSpear.Description = TEXT("Craft a wooden spear for hunting");
+    CraftSpear.RequiredCount = 1;
+    FirstHuntObjectives.Add(CraftSpear);
+    
+    FNarr_QuestObjective HuntSmallGame;
+    HuntSmallGame.ObjectiveID = TEXT("hunt_small_game");
+    HuntSmallGame.Description = TEXT("Hunt 3 small creatures for food");
+    HuntSmallGame.RequiredCount = 3;
+    FirstHuntObjectives.Add(HuntSmallGame);
+    
+    QuestDatabase.Add(TEXT("first_hunt"), FirstHuntObjectives);
+
+    // Sample survival quest: Territory Mapping
+    TArray<FNarr_QuestObjective> TerritoryObjectives;
+    
+    FNarr_QuestObjective ExploreRiver;
+    ExploreRiver.ObjectiveID = TEXT("explore_river");
+    ExploreRiver.Description = TEXT("Follow the river to find water sources");
+    ExploreRiver.RequiredCount = 1;
+    TerritoryObjectives.Add(ExploreRiver);
+    
+    FNarr_QuestObjective MarkDangerZones;
+    MarkDangerZones.ObjectiveID = TEXT("mark_danger_zones");
+    MarkDangerZones.Description = TEXT("Identify 5 predator territories");
+    MarkDangerZones.RequiredCount = 5;
+    TerritoryObjectives.Add(MarkDangerZones);
+    
+    QuestDatabase.Add(TEXT("territory_mapping"), TerritoryObjectives);
+
+    UE_LOG(LogTemp, Log, TEXT("Loaded %d quest entries"), QuestDatabase.Num());
 }
 
-// UNarrativeDialogueTrigger Implementation
-
-UNarrativeDialogueTrigger::UNarrativeDialogueTrigger()
+void UNarrativeDialogueSystem::BroadcastDialogueUpdate()
 {
-    PrimaryComponentTick.bCanEverTick = false;
-    
-    DialogueID = TEXT("");
-    RequiredQuestID = TEXT("");
-    bTriggerOnce = true;
-    TriggerRadius = 200.0f;
-    bHasTriggered = false;
-    DialogueSystem = nullptr;
-}
-
-void UNarrativeDialogueTrigger::BeginPlay()
-{
-    Super::BeginPlay();
-    
-    if (UGameInstance* GameInstance = GetWorld()->GetGameInstance())
-    {
-        DialogueSystem = GameInstance->GetSubsystem<UNarrativeDialogueSystem>();
-    }
-}
-
-void UNarrativeDialogueTrigger::TriggerDialogue(AActor* TriggeringActor)
-{
-    if (!CanTrigger(TriggeringActor))
-    {
-        return;
-    }
-    
-    if (DialogueSystem)
-    {
-        DialogueSystem->TriggerDialogue(DialogueID, TriggeringActor);
-        
-        if (bTriggerOnce)
-        {
-            bHasTriggered = true;
-        }
-        
-        UE_LOG(LogTemp, Log, TEXT("NarrativeDialogueTrigger: Triggered dialogue %s"), *DialogueID);
-    }
-}
-
-bool UNarrativeDialogueTrigger::CanTrigger(AActor* TriggeringActor) const
-{
-    if (!TriggeringActor)
-    {
-        return false;
-    }
-    
-    if (bTriggerOnce && bHasTriggered)
-    {
-        return false;
-    }
-    
-    if (DialogueID.IsEmpty())
-    {
-        return false;
-    }
-    
-    // Check if required quest is active (if specified)
-    if (!RequiredQuestID.IsEmpty() && DialogueSystem)
-    {
-        // Quest validation logic can be added here
-        // For now, assume quest is active if RequiredQuestID is not empty
-    }
-    
-    return true;
+    // This would broadcast to UI systems in a full implementation
+    UE_LOG(LogTemp, Log, TEXT("Broadcasting dialogue update: %s"), 
+           *CurrentDialogue.DialogueText);
 }
