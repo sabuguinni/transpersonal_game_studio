@@ -2,233 +2,161 @@
 
 #include "CoreMinimal.h"
 #include "Engine/World.h"
-#include "Components/PrimitiveComponent.h"
-#include "Components/SkeletalMeshComponent.h"
-#include "Components/CapsuleComponent.h"
-#include "Engine/HitResult.h"
+#include "Components/ActorComponent.h"
+#include "Engine/Engine.h"
 #include "PhysicsEngine/PhysicsSettings.h"
-#include "PhysicalMaterials/PhysicalMaterial.h"
-#include "GameFramework/WorldSettings.h"
-#include "Subsystems/WorldSubsystem.h"
 #include "Core_PhysicsManager.generated.h"
 
-/**
- * Physics simulation quality levels for performance scaling
- */
 UENUM(BlueprintType)
-enum class ECore_PhysicsQuality : uint8
+enum class ECore_PhysicsPreset : uint8
 {
-    Low         UMETA(DisplayName = "Low Quality"),
-    Medium      UMETA(DisplayName = "Medium Quality"), 
-    High        UMETA(DisplayName = "High Quality"),
-    Ultra       UMETA(DisplayName = "Ultra Quality")
+    Default         UMETA(DisplayName = "Default"),
+    HighPrecision   UMETA(DisplayName = "High Precision"),
+    Performance     UMETA(DisplayName = "Performance Optimized"),
+    Destruction     UMETA(DisplayName = "Destruction Heavy"),
+    Ragdoll         UMETA(DisplayName = "Ragdoll Optimized")
 };
 
-/**
- * Ragdoll activation modes for character physics
- */
-UENUM(BlueprintType)
-enum class ECore_RagdollMode : uint8
-{
-    Disabled    UMETA(DisplayName = "Disabled"),
-    Partial     UMETA(DisplayName = "Partial Ragdoll"),
-    Full        UMETA(DisplayName = "Full Ragdoll"),
-    Blended     UMETA(DisplayName = "Animation Blended")
-};
-
-/**
- * Physics material surface types for different terrain
- */
-UENUM(BlueprintType)
-enum class ECore_SurfaceType : uint8
-{
-    Rock        UMETA(DisplayName = "Rock Surface"),
-    Dirt        UMETA(DisplayName = "Dirt Surface"),
-    Grass       UMETA(DisplayName = "Grass Surface"),
-    Wood        UMETA(DisplayName = "Wood Surface"),
-    Water       UMETA(DisplayName = "Water Surface"),
-    Ice         UMETA(DisplayName = "Ice Surface"),
-    Sand        UMETA(DisplayName = "Sand Surface"),
-    Mud         UMETA(DisplayName = "Mud Surface")
-};
-
-/**
- * Physics simulation parameters for world-wide settings
- */
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FCore_PhysicsSettings
+struct TRANSPERSONALGAME_API FCore_PhysicsProfile
 {
     GENERATED_BODY()
 
-    /** Global gravity multiplier */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics", meta = (ClampMin = "0.1", ClampMax = "2.0"))
-    float GravityMultiplier = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Profile")
+    float GravityScale = 1.0f;
 
-    /** Physics simulation quality level */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
-    ECore_PhysicsQuality QualityLevel = ECore_PhysicsQuality::High;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Profile")
+    float LinearDamping = 0.01f;
 
-    /** Maximum physics simulation distance from player */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance", meta = (ClampMin = "500.0", ClampMax = "10000.0"))
-    float MaxSimulationDistance = 3000.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Profile")
+    float AngularDamping = 0.0f;
 
-    /** Enable advanced collision detection */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
-    bool bEnableAdvancedCollision = true;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Profile")
+    float MaxAngularVelocity = 3600.0f;
 
-    /** Enable physics material effects */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
-    bool bEnablePhysicsMaterials = true;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Profile")
+    bool bEnableCCD = false;
 
-    FCore_PhysicsSettings()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Profile")
+    float SleepThreshold = 0.005f;
+
+    FCore_PhysicsProfile()
     {
-        GravityMultiplier = 1.0f;
-        QualityLevel = ECore_PhysicsQuality::High;
-        MaxSimulationDistance = 3000.0f;
-        bEnableAdvancedCollision = true;
-        bEnablePhysicsMaterials = true;
+        GravityScale = 1.0f;
+        LinearDamping = 0.01f;
+        AngularDamping = 0.0f;
+        MaxAngularVelocity = 3600.0f;
+        bEnableCCD = false;
+        SleepThreshold = 0.005f;
     }
 };
 
 /**
- * Ragdoll configuration for character physics simulation
+ * Core Physics Manager - Handles advanced physics systems for dinosaur survival gameplay
+ * Manages ragdoll physics, destruction, collision optimization, and physics materials
  */
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FCore_RagdollConfig
-{
-    GENERATED_BODY()
-
-    /** Ragdoll activation mode */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll")
-    ECore_RagdollMode RagdollMode = ECore_RagdollMode::Disabled;
-
-    /** Time to blend from animation to ragdoll */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll", meta = (ClampMin = "0.0", ClampMax = "2.0"))
-    float BlendInTime = 0.2f;
-
-    /** Time to blend from ragdoll back to animation */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll", meta = (ClampMin = "0.0", ClampMax = "2.0"))
-    float BlendOutTime = 0.5f;
-
-    /** Minimum impact velocity to trigger ragdoll */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll", meta = (ClampMin = "100.0", ClampMax = "2000.0"))
-    float MinImpactVelocity = 500.0f;
-
-    /** Maximum ragdoll duration before recovery */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll", meta = (ClampMin = "1.0", ClampMax = "30.0"))
-    float MaxRagdollDuration = 5.0f;
-
-    FCore_RagdollConfig()
-    {
-        RagdollMode = ECore_RagdollMode::Disabled;
-        BlendInTime = 0.2f;
-        BlendOutTime = 0.5f;
-        MinImpactVelocity = 500.0f;
-        MaxRagdollDuration = 5.0f;
-    }
-};
-
-/**
- * Core Physics Manager - World Subsystem for managing physics simulation
- * Handles physics quality scaling, ragdoll systems, and collision optimization
- */
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UCore_PhysicsManager : public UWorldSubsystem
+UCLASS(ClassGroup=(TranspersonalGame), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UCore_PhysicsManager : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
     UCore_PhysicsManager();
 
-    // USubsystem interface
-    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
-    virtual void Deinitialize() override;
-    virtual bool ShouldCreateSubsystem(UObject* Outer) const override;
-
-    // Physics Settings Management
-    UFUNCTION(BlueprintCallable, Category = "Physics")
-    void SetPhysicsQuality(ECore_PhysicsQuality NewQuality);
-
-    UFUNCTION(BlueprintPure, Category = "Physics")
-    ECore_PhysicsQuality GetPhysicsQuality() const { return PhysicsSettings.QualityLevel; }
-
-    UFUNCTION(BlueprintCallable, Category = "Physics")
-    void SetGravityMultiplier(float Multiplier);
-
-    UFUNCTION(BlueprintPure, Category = "Physics")
-    float GetGravityMultiplier() const { return PhysicsSettings.GravityMultiplier; }
-
-    // Ragdoll System
-    UFUNCTION(BlueprintCallable, Category = "Ragdoll")
-    bool ActivateRagdoll(USkeletalMeshComponent* MeshComponent, const FCore_RagdollConfig& Config);
-
-    UFUNCTION(BlueprintCallable, Category = "Ragdoll")
-    bool DeactivateRagdoll(USkeletalMeshComponent* MeshComponent, float BlendTime = 0.5f);
-
-    UFUNCTION(BlueprintPure, Category = "Ragdoll")
-    bool IsRagdollActive(USkeletalMeshComponent* MeshComponent) const;
-
-    // Collision Detection
-    UFUNCTION(BlueprintCallable, Category = "Physics")
-    bool PerformAdvancedLineTrace(const FVector& Start, const FVector& End, FHitResult& OutHit, 
-        const TArray<AActor*>& IgnoreActors = TArray<AActor*>()) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Physics")
-    TArray<FHitResult> PerformMultiLineTrace(const FVector& Start, const FVector& End, 
-        const TArray<AActor*>& IgnoreActors = TArray<AActor*>()) const;
-
-    // Physics Materials
-    UFUNCTION(BlueprintCallable, Category = "Physics")
-    void ApplyPhysicsMaterial(UPrimitiveComponent* Component, ECore_SurfaceType SurfaceType);
-
-    UFUNCTION(BlueprintPure, Category = "Physics")
-    UPhysicalMaterial* GetPhysicsMaterialForSurface(ECore_SurfaceType SurfaceType) const;
-
-    // Performance Optimization
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void OptimizePhysicsForDistance(const FVector& PlayerLocation);
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void SetMaxSimulationDistance(float Distance);
-
-    // Debug and Validation
-    UFUNCTION(BlueprintCallable, Category = "Debug", CallInEditor = true)
-    void ValidatePhysicsSetup();
-
-    UFUNCTION(BlueprintCallable, Category = "Debug")
-    void TogglePhysicsDebugVisualization(bool bEnabled);
-
 protected:
-    /** Current physics settings */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Physics")
-    FCore_PhysicsSettings PhysicsSettings;
+    virtual void BeginPlay() override;
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    /** Physics materials for different surface types */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Physics")
-    TMap<ECore_SurfaceType, TSoftObjectPtr<UPhysicalMaterial>> PhysicsMaterials;
+public:
+    // === PHYSICS PROFILES ===
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Manager")
+    ECore_PhysicsPreset CurrentPreset = ECore_PhysicsPreset::Default;
 
-    /** Active ragdoll components */
-    UPROPERTY()
-    TMap<USkeletalMeshComponent*, FCore_RagdollConfig> ActiveRagdolls;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Manager")
+    FCore_PhysicsProfile DefaultProfile;
 
-    /** Timer handle for physics optimization updates */
-    FTimerHandle OptimizationTimerHandle;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Manager")
+    FCore_PhysicsProfile HighPrecisionProfile;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Manager")
+    FCore_PhysicsProfile PerformanceProfile;
+
+    // === PHYSICS OPTIMIZATION ===
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Optimization")
+    float PhysicsUpdateRate = 60.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Optimization")
+    int32 MaxSimulatingBodies = 500;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Optimization")
+    float CullingDistance = 5000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Optimization")
+    bool bEnablePhysicsLOD = true;
+
+    // === RAGDOLL SYSTEM ===
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll")
+    float RagdollBlendTime = 0.2f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll")
+    float RagdollLifetime = 30.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll")
+    bool bAutoCleanupRagdolls = true;
+
+    // === DESTRUCTION SYSTEM ===
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Destruction")
+    float DestructionForceThreshold = 1000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Destruction")
+    int32 MaxDestructionChunks = 50;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Destruction")
+    float DestructionCleanupTime = 60.0f;
+
+    // === PHYSICS FUNCTIONS ===
+    UFUNCTION(BlueprintCallable, Category = "Physics Manager")
+    void SetPhysicsPreset(ECore_PhysicsPreset NewPreset);
+
+    UFUNCTION(BlueprintCallable, Category = "Physics Manager")
+    void ApplyPhysicsProfile(const FCore_PhysicsProfile& Profile, AActor* TargetActor = nullptr);
+
+    UFUNCTION(BlueprintCallable, Category = "Physics Manager")
+    void OptimizePhysicsForPerformance();
+
+    UFUNCTION(BlueprintCallable, Category = "Physics Manager")
+    void EnableRagdollOnActor(AActor* TargetActor, float BlendTime = 0.2f);
+
+    UFUNCTION(BlueprintCallable, Category = "Physics Manager")
+    void DisableRagdollOnActor(AActor* TargetActor, float BlendTime = 0.2f);
+
+    UFUNCTION(BlueprintCallable, Category = "Physics Manager")
+    void TriggerDestruction(AActor* TargetActor, FVector ImpactPoint, float Force);
+
+    UFUNCTION(BlueprintCallable, Category = "Physics Manager")
+    int32 GetActivePhysicsBodies() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Physics Manager")
+    void CleanupInactivePhysicsBodies();
+
+    // === COLLISION OPTIMIZATION ===
+    UFUNCTION(BlueprintCallable, Category = "Collision")
+    void OptimizeCollisionForActor(AActor* TargetActor);
+
+    UFUNCTION(BlueprintCallable, Category = "Collision")
+    void SetCollisionLOD(AActor* TargetActor, int32 LODLevel);
 
 private:
-    // Internal helper functions
-    void ApplyPhysicsQualitySettings();
-    void UpdatePhysicsSimulation();
-    void CleanupInactiveRagdolls();
+    // Internal tracking
+    TArray<TWeakObjectPtr<AActor>> ActiveRagdolls;
+    TArray<TWeakObjectPtr<AActor>> DestructionActors;
     
-    // Physics material initialization
-    void InitializePhysicsMaterials();
-    
-    // Performance monitoring
-    void MonitorPhysicsPerformance();
-    
-    /** Last player location for distance-based optimization */
-    FVector LastPlayerLocation;
-    
-    /** Physics debug visualization enabled */
-    bool bDebugVisualizationEnabled = false;
+    float LastOptimizationTime = 0.0f;
+    float OptimizationInterval = 5.0f;
+
+    // Helper functions
+    void UpdatePhysicsOptimization();
+    void CleanupExpiredRagdolls();
+    void CleanupDestructionActors();
+    FCore_PhysicsProfile GetProfileForPreset(ECore_PhysicsPreset Preset) const;
 };
