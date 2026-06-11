@@ -1,487 +1,435 @@
 #include "Core_PhysicsOptimizer.h"
 #include "Engine/World.h"
+#include "Engine/Engine.h"
+#include "GameFramework/Actor.h"
+#include "Components/PrimitiveComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/SkeletalMeshComponent.h"
-#include "Engine/StaticMeshActor.h"
-#include "GameFramework/Pawn.h"
-#include "PhysicsEngine/BodyInstance.h"
-#include "Components/PrimitiveComponent.h"
-
-DEFINE_LOG_CATEGORY_STATIC(LogPhysicsOptimizer, Log, All);
+#include "PhysicsEngine/PhysicsSettings.h"
+#include "Kismet/GameplayStatics.h"
 
 UCore_PhysicsOptimizer::UCore_PhysicsOptimizer()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 0.1f; // Optimize every 100ms
+    PrimaryComponentTick.TickInterval = 0.1f; // Update 10 times per second
     
-    // Default optimization settings
-    OptimizationSettings.MaxSimulationDistance = 5000.0f;
-    OptimizationSettings.CullingDistance = 10000.0f;
-    OptimizationSettings.MaxActiveRigidBodies = 500;
-    OptimizationSettings.MaxActiveConstraints = 200;
-    OptimizationSettings.bEnableLODOptimization = true;
-    OptimizationSettings.bEnableDistanceCulling = true;
-    OptimizationSettings.bEnableComplexityReduction = true;
-    
-    // Performance thresholds
-    PerformanceThresholds.TargetFrameTime = 16.67f; // 60 FPS
-    PerformanceThresholds.MaxPhysicsTime = 5.0f;
-    PerformanceThresholds.CriticalFrameTime = 33.33f; // 30 FPS
-    
-    // Initialize counters
-    ActiveRigidBodies = 0;
-    ActiveConstraints = 0;
-    OptimizedObjects = 0;
-    LastOptimizationTime = 0.0f;
+    // Initialize performance history
+    PerformanceHistory.Reserve(60); // Store 60 samples (6 seconds at 10Hz)
 }
 
 void UCore_PhysicsOptimizer::BeginPlay()
 {
     Super::BeginPlay();
     
-    UE_LOG(LogPhysicsOptimizer, Log, TEXT("Physics Optimizer initialized"));
+    // Cache physics settings reference
+    PhysicsSettings = GetMutableDefault<UPhysicsSettings>();
     
-    // Cache world reference
-    CachedWorld = GetWorld();
-    if (!CachedWorld)
-    {
-        UE_LOG(LogPhysicsOptimizer, Error, TEXT("Failed to get world reference"));
-        return;
-    }
+    // Initialize physics object tracking
+    RefreshPhysicsObjectList();
     
-    // Initialize optimization system
-    InitializeOptimization();
+    // Set initial optimization time
+    LastOptimizationTime = GetWorld()->GetTimeSeconds();
+    
+    UE_LOG(LogTemp, Log, TEXT("Core_PhysicsOptimizer: Initialized with %d physics objects"), TrackedPhysicsObjects.Num());
 }
 
 void UCore_PhysicsOptimizer::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
     
-    if (!CachedWorld)
+    // Update performance metrics every tick
+    UpdatePerformanceMetrics();
+    
+    // Run optimization at specified intervals
+    float CurrentTime = GetWorld()->GetTimeSeconds();
+    if (CurrentTime - LastOptimizationTime >= OptimizationInterval)
     {
-        return;
-    }
-    
-    // Update performance metrics
-    UpdatePerformanceMetrics(DeltaTime);
-    
-    // Run optimization pass
-    RunOptimizationPass();
-    
-    // Update statistics
-    UpdateOptimizationStats();
-}
-
-void UCore_PhysicsOptimizer::InitializeOptimization()
-{
-    if (!CachedWorld)
-    {
-        return;
-    }
-    
-    UE_LOG(LogPhysicsOptimizer, Log, TEXT("Initializing physics optimization system"));
-    
-    // Scan for physics objects
-    ScanPhysicsObjects();
-    
-    // Setup optimization groups
-    SetupOptimizationGroups();
-    
-    UE_LOG(LogPhysicsOptimizer, Log, TEXT("Physics optimization initialized with %d objects"), PhysicsObjects.Num());
-}
-
-void UCore_PhysicsOptimizer::ScanPhysicsObjects()
-{
-    PhysicsObjects.Empty();
-    
-    if (!CachedWorld)
-    {
-        return;
-    }
-    
-    // Iterate through all actors with physics
-    for (TActorIterator<AActor> ActorItr(CachedWorld); ActorItr; ++ActorItr)
-    {
-        AActor* Actor = *ActorItr;
-        if (!Actor || Actor->IsPendingKill())
+        if (bEnablePhysicsLOD)
         {
-            continue;
+            UpdatePhysicsLOD();
         }
         
-        // Check for physics components
-        TArray<UPrimitiveComponent*> PrimitiveComponents;
-        Actor->GetComponents<UPrimitiveComponent>(PrimitiveComponents);
-        
-        for (UPrimitiveComponent* Component : PrimitiveComponents)
+        if (bEnableAdaptiveTimestep)
         {
-            if (Component && Component->IsSimulatingPhysics())
-            {
-                FCore_PhysicsObjectInfo ObjectInfo;
-                ObjectInfo.Actor = Actor;
-                ObjectInfo.Component = Component;
-                ObjectInfo.OriginalComplexity = GetPhysicsComplexity(Component);
-                ObjectInfo.CurrentComplexity = ObjectInfo.OriginalComplexity;
-                ObjectInfo.LastOptimizationTime = 0.0f;
-                ObjectInfo.bIsOptimized = false;
-                
-                PhysicsObjects.Add(ObjectInfo);
-                break; // One entry per actor
-            }
+            AdjustPhysicsTimestep();
         }
+        
+        if (bEnablePhysicsCulling)
+        {
+            CullDistantPhysicsObjects();
+        }
+        
+        OptimizePhysicsSettings();
+        LastOptimizationTime = CurrentTime;
     }
-    
-    UE_LOG(LogPhysicsOptimizer, Log, TEXT("Scanned %d physics objects"), PhysicsObjects.Num());
 }
 
-void UCore_PhysicsOptimizer::SetupOptimizationGroups()
+void UCore_PhysicsOptimizer::UpdatePhysicsLOD()
 {
-    OptimizationGroups.Empty();
-    
-    // Group objects by type and complexity
-    for (const FCore_PhysicsObjectInfo& ObjectInfo : PhysicsObjects)
-    {
-        if (!ObjectInfo.Actor.IsValid())
-        {
-            continue;
-        }
-        
-        FString GroupName = GetOptimizationGroupName(ObjectInfo.Actor.Get());
-        
-        FCore_OptimizationGroup* Group = OptimizationGroups.Find(GroupName);
-        if (!Group)
-        {
-            FCore_OptimizationGroup NewGroup;
-            NewGroup.GroupName = GroupName;
-            NewGroup.MaxObjects = GetMaxObjectsForGroup(GroupName);
-            NewGroup.OptimizationPriority = GetGroupPriority(GroupName);
-            OptimizationGroups.Add(GroupName, NewGroup);
-            Group = &OptimizationGroups[GroupName];
-        }
-        
-        Group->Objects.Add(ObjectInfo.Actor.Get());
-    }
-    
-    UE_LOG(LogPhysicsOptimizer, Log, TEXT("Created %d optimization groups"), OptimizationGroups.Num());
-}
-
-void UCore_PhysicsOptimizer::RunOptimizationPass()
-{
-    if (!CachedWorld)
+    if (!GetWorld() || !GetOwner())
     {
         return;
     }
-    
-    float CurrentTime = CachedWorld->GetTimeSeconds();
-    
-    // Skip if optimization ran recently
-    if (CurrentTime - LastOptimizationTime < 0.1f)
-    {
-        return;
-    }
-    
-    LastOptimizationTime = CurrentTime;
     
     // Get player location for distance calculations
-    FVector PlayerLocation = GetPlayerLocation();
-    
-    // Optimize based on distance and performance
-    OptimizeByDistance(PlayerLocation);
-    OptimizeByPerformance();
-    OptimizeByComplexity();
-    
-    // Update active counts
-    UpdateActiveCounts();
-}
-
-void UCore_PhysicsOptimizer::OptimizeByDistance(const FVector& PlayerLocation)
-{
-    if (!OptimizationSettings.bEnableDistanceCulling)
+    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
+    if (!PlayerPawn)
     {
         return;
     }
     
-    for (FCore_PhysicsObjectInfo& ObjectInfo : PhysicsObjects)
+    FVector PlayerLocation = PlayerPawn->GetActorLocation();
+    
+    // Clean up invalid object references
+    TrackedPhysicsObjects.RemoveAll([](const TWeakObjectPtr<AActor>& WeakPtr)
     {
-        if (!ObjectInfo.Actor.IsValid() || !ObjectInfo.Component.IsValid())
+        return !WeakPtr.IsValid();
+    });
+    
+    // Sort objects by distance and importance
+    TArray<TPair<float, TWeakObjectPtr<AActor>>> ObjectDistances;
+    
+    for (const TWeakObjectPtr<AActor>& WeakActor : TrackedPhysicsObjects)
+    {
+        if (AActor* Actor = WeakActor.Get())
+        {
+            float Distance = FVector::Dist(PlayerLocation, Actor->GetActorLocation());
+            ObjectDistances.Add(TPair<float, TWeakObjectPtr<AActor>>(Distance, WeakActor));
+        }
+    }
+    
+    // Sort by distance (closest first)
+    ObjectDistances.Sort([](const TPair<float, TWeakObjectPtr<AActor>>& A, const TPair<float, TWeakObjectPtr<AActor>>& B)
+    {
+        return A.Key < B.Key;
+    });
+    
+    // Apply LOD levels based on distance and budget
+    int32 HighDetailCount = 0;
+    int32 MediumDetailCount = 0;
+    
+    for (const auto& ObjectDistance : ObjectDistances)
+    {
+        AActor* Actor = ObjectDistance.Value.Get();
+        if (!Actor)
         {
             continue;
         }
         
-        float Distance = FVector::Dist(PlayerLocation, ObjectInfo.Actor->GetActorLocation());
+        float Distance = ObjectDistance.Key;
+        int32 LODLevel = 0; // Default to high detail
         
-        // Disable physics for distant objects
-        if (Distance > OptimizationSettings.CullingDistance)
+        // Determine LOD level based on distance and budget
+        if (Distance <= HighDetailDistance && HighDetailCount < MaxHighDetailObjects)
         {
-            if (ObjectInfo.Component->IsSimulatingPhysics())
-            {
-                ObjectInfo.Component->SetSimulatePhysics(false);
-                ObjectInfo.bIsOptimized = true;
-                OptimizedObjects++;
-            }
+            LODLevel = 0; // High detail
+            HighDetailCount++;
         }
-        // Re-enable physics for nearby objects
-        else if (Distance < OptimizationSettings.MaxSimulationDistance)
+        else if (Distance <= MediumDetailDistance && MediumDetailCount < MaxMediumDetailObjects)
         {
-            if (!ObjectInfo.Component->IsSimulatingPhysics() && ObjectInfo.bIsOptimized)
-            {
-                ObjectInfo.Component->SetSimulatePhysics(true);
-                ObjectInfo.bIsOptimized = false;
-            }
+            LODLevel = 1; // Medium detail
+            MediumDetailCount++;
         }
-    }
-}
-
-void UCore_PhysicsOptimizer::OptimizeByPerformance()
-{
-    // Check if we're hitting performance targets
-    if (CurrentFrameTime > PerformanceThresholds.CriticalFrameTime)
-    {
-        // Aggressive optimization needed
-        ReducePhysicsComplexity(0.5f);
-    }
-    else if (CurrentFrameTime > PerformanceThresholds.TargetFrameTime)
-    {
-        // Moderate optimization
-        ReducePhysicsComplexity(0.8f);
-    }
-    else
-    {
-        // Performance is good, restore complexity if possible
-        RestorePhysicsComplexity();
-    }
-}
-
-void UCore_PhysicsOptimizer::OptimizeByComplexity()
-{
-    if (!OptimizationSettings.bEnableComplexityReduction)
-    {
-        return;
-    }
-    
-    // Limit active rigid bodies
-    if (ActiveRigidBodies > OptimizationSettings.MaxActiveRigidBodies)
-    {
-        DisableExcessRigidBodies();
-    }
-    
-    // Limit active constraints
-    if (ActiveConstraints > OptimizationSettings.MaxActiveConstraints)
-    {
-        DisableExcessConstraints();
-    }
-}
-
-void UCore_PhysicsOptimizer::ReducePhysicsComplexity(float ReductionFactor)
-{
-    FVector PlayerLocation = GetPlayerLocation();
-    
-    // Sort objects by distance from player
-    PhysicsObjects.Sort([PlayerLocation](const FCore_PhysicsObjectInfo& A, const FCore_PhysicsObjectInfo& B)
-    {
-        if (!A.Actor.IsValid() || !B.Actor.IsValid())
+        else if (Distance <= LowDetailDistance)
         {
-            return false;
+            LODLevel = 2; // Low detail
+        }
+        else
+        {
+            LODLevel = 3; // Disabled/culled
         }
         
-        float DistA = FVector::Dist(PlayerLocation, A.Actor->GetActorLocation());
-        float DistB = FVector::Dist(PlayerLocation, B.Actor->GetActorLocation());
-        return DistA > DistB; // Furthest first
-    });
-    
-    // Reduce complexity for distant objects
-    int32 ObjectsToOptimize = FMath::FloorToInt(PhysicsObjects.Num() * (1.0f - ReductionFactor));
-    
-    for (int32 i = 0; i < ObjectsToOptimize && i < PhysicsObjects.Num(); i++)
-    {
-        FCore_PhysicsObjectInfo& ObjectInfo = PhysicsObjects[i];
-        
-        if (ObjectInfo.Component.IsValid() && !ObjectInfo.bIsOptimized)
-        {
-            // Reduce collision complexity
-            ReduceCollisionComplexity(ObjectInfo.Component.Get());
-            ObjectInfo.bIsOptimized = true;
-            OptimizedObjects++;
-        }
+        ApplyPhysicsLOD(Actor, LODLevel);
     }
+    
+    ActivePhysicsObjects = HighDetailCount + MediumDetailCount;
 }
 
-void UCore_PhysicsOptimizer::RestorePhysicsComplexity()
-{
-    for (FCore_PhysicsObjectInfo& ObjectInfo : PhysicsObjects)
-    {
-        if (ObjectInfo.Component.IsValid() && ObjectInfo.bIsOptimized)
-        {
-            // Restore original complexity
-            RestoreCollisionComplexity(ObjectInfo.Component.Get(), ObjectInfo.OriginalComplexity);
-            ObjectInfo.bIsOptimized = false;
-        }
-    }
-}
-
-void UCore_PhysicsOptimizer::UpdatePerformanceMetrics(float DeltaTime)
-{
-    CurrentFrameTime = DeltaTime * 1000.0f; // Convert to milliseconds
-    
-    // Track physics time (simplified)
-    CurrentPhysicsTime = FMath::Min(CurrentFrameTime * 0.3f, PerformanceThresholds.MaxPhysicsTime);
-    
-    // Update averages
-    static float FrameTimeAccumulator = 0.0f;
-    static int32 FrameCount = 0;
-    
-    FrameTimeAccumulator += CurrentFrameTime;
-    FrameCount++;
-    
-    if (FrameCount >= 60) // Update average every 60 frames
-    {
-        AverageFrameTime = FrameTimeAccumulator / FrameCount;
-        FrameTimeAccumulator = 0.0f;
-        FrameCount = 0;
-    }
-}
-
-void UCore_PhysicsOptimizer::UpdateActiveCounts()
-{
-    ActiveRigidBodies = 0;
-    ActiveConstraints = 0;
-    
-    for (const FCore_PhysicsObjectInfo& ObjectInfo : PhysicsObjects)
-    {
-        if (ObjectInfo.Component.IsValid() && ObjectInfo.Component->IsSimulatingPhysics())
-        {
-            ActiveRigidBodies++;
-        }
-    }
-    
-    // Count constraints (simplified)
-    ActiveConstraints = ActiveRigidBodies / 4; // Rough estimate
-}
-
-void UCore_PhysicsOptimizer::UpdateOptimizationStats()
-{
-    // Reset counters periodically
-    static float LastStatsReset = 0.0f;
-    float CurrentTime = CachedWorld ? CachedWorld->GetTimeSeconds() : 0.0f;
-    
-    if (CurrentTime - LastStatsReset > 5.0f) // Reset every 5 seconds
-    {
-        OptimizedObjects = 0;
-        LastStatsReset = CurrentTime;
-    }
-}
-
-FVector UCore_PhysicsOptimizer::GetPlayerLocation() const
-{
-    if (!CachedWorld)
-    {
-        return FVector::ZeroVector;
-    }
-    
-    APawn* PlayerPawn = CachedWorld->GetFirstPlayerController() ? 
-        CachedWorld->GetFirstPlayerController()->GetPawn() : nullptr;
-    
-    return PlayerPawn ? PlayerPawn->GetActorLocation() : FVector::ZeroVector;
-}
-
-ECore_PhysicsComplexity UCore_PhysicsOptimizer::GetPhysicsComplexity(UPrimitiveComponent* Component) const
-{
-    if (!Component)
-    {
-        return ECore_PhysicsComplexity::Simple;
-    }
-    
-    // Determine complexity based on collision settings
-    if (Component->GetCollisionResponseToChannel(ECC_Pawn) == ECR_Block)
-    {
-        return ECore_PhysicsComplexity::Complex;
-    }
-    else if (Component->GetCollisionEnabled() == ECollisionEnabled::QueryAndPhysics)
-    {
-        return ECore_PhysicsComplexity::Medium;
-    }
-    
-    return ECore_PhysicsComplexity::Simple;
-}
-
-FString UCore_PhysicsOptimizer::GetOptimizationGroupName(AActor* Actor) const
+void UCore_PhysicsOptimizer::ApplyPhysicsLOD(AActor* Actor, int32 LODLevel)
 {
     if (!Actor)
     {
-        return TEXT("Unknown");
+        return;
     }
     
-    // Classify by actor type
-    if (Actor->IsA<APawn>())
-    {
-        return TEXT("Characters");
-    }
-    else if (Actor->IsA<AStaticMeshActor>())
-    {
-        return TEXT("StaticMeshes");
-    }
+    // Get all primitive components
+    TArray<UPrimitiveComponent*> PrimitiveComponents;
+    Actor->GetComponents<UPrimitiveComponent>(PrimitiveComponents);
     
-    return TEXT("Other");
-}
-
-int32 UCore_PhysicsOptimizer::GetMaxObjectsForGroup(const FString& GroupName) const
-{
-    if (GroupName == TEXT("Characters"))
+    for (UPrimitiveComponent* PrimComp : PrimitiveComponents)
     {
-        return 50;
+        if (!PrimComp)
+        {
+            continue;
+        }
+        
+        switch (LODLevel)
+        {
+            case 0: // High detail
+                PrimComp->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+                if (PrimComp->IsSimulatingPhysics())
+                {
+                    // Full physics simulation
+                    PrimComp->SetSimulatePhysics(true);
+                }
+                break;
+                
+            case 1: // Medium detail
+                PrimComp->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+                if (PrimComp->IsSimulatingPhysics())
+                {
+                    // Reduced physics update rate
+                    PrimComp->SetSimulatePhysics(true);
+                }
+                break;
+                
+            case 2: // Low detail
+                PrimComp->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+                // Disable physics simulation but keep collision
+                if (PrimComp->IsSimulatingPhysics())
+                {
+                    PrimComp->SetSimulatePhysics(false);
+                }
+                break;
+                
+            case 3: // Disabled/culled
+                PrimComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+                if (PrimComp->IsSimulatingPhysics())
+                {
+                    PrimComp->SetSimulatePhysics(false);
+                }
+                break;
+        }
     }
-    else if (GroupName == TEXT("StaticMeshes"))
-    {
-        return 200;
-    }
-    
-    return 100;
 }
 
-float UCore_PhysicsOptimizer::GetGroupPriority(const FString& GroupName) const
+void UCore_PhysicsOptimizer::OptimizePhysicsSettings()
 {
-    if (GroupName == TEXT("Characters"))
-    {
-        return 1.0f; // Highest priority
-    }
-    else if (GroupName == TEXT("StaticMeshes"))
-    {
-        return 0.5f;
-    }
-    
-    return 0.3f;
-}
-
-void UCore_PhysicsOptimizer::DisableExcessRigidBodies()
-{
-    // Implementation for disabling excess rigid bodies
-    // This would involve more complex logic to selectively disable physics
-    UE_LOG(LogPhysicsOptimizer, Warning, TEXT("Too many active rigid bodies (%d), optimization needed"), ActiveRigidBodies);
-}
-
-void UCore_PhysicsOptimizer::DisableExcessConstraints()
-{
-    // Implementation for disabling excess constraints
-    UE_LOG(LogPhysicsOptimizer, Warning, TEXT("Too many active constraints (%d), optimization needed"), ActiveConstraints);
-}
-
-void UCore_PhysicsOptimizer::ReduceCollisionComplexity(UPrimitiveComponent* Component)
-{
-    if (!Component)
+    if (!PhysicsSettings)
     {
         return;
     }
     
-    // Simplify collision by reducing precision
-    Component->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+    // Calculate performance budget
+    PhysicsPerformanceBudget = CalculatePerformanceBudget();
+    
+    // Adjust physics settings based on performance
+    if (PhysicsPerformanceBudget < 0.5f) // Performance is poor
+    {
+        // Reduce physics quality
+        SetPhysicsQualityLevel(0); // Low quality
+    }
+    else if (PhysicsPerformanceBudget < 0.8f) // Performance is moderate
+    {
+        // Medium physics quality
+        SetPhysicsQualityLevel(1); // Medium quality
+    }
+    else // Performance is good
+    {
+        // High physics quality
+        SetPhysicsQualityLevel(2); // High quality
+    }
 }
 
-void UCore_PhysicsOptimizer::RestoreCollisionComplexity(UPrimitiveComponent* Component, ECore_PhysicsComplexity OriginalComplexity)
+void UCore_PhysicsOptimizer::UpdatePerformanceMetrics()
 {
-    if (!Component)
+    // Get current frame time (simplified - in real implementation would use more sophisticated timing)
+    float DeltaTime = GetWorld()->GetDeltaSeconds();
+    CurrentPhysicsFrameTime = DeltaTime * 1000.0f; // Convert to milliseconds
+    
+    // Add to performance history
+    PerformanceHistory.Add(CurrentPhysicsFrameTime);
+    if (PerformanceHistory.Num() > 60)
+    {
+        PerformanceHistory.RemoveAt(0); // Keep only last 60 samples
+    }
+}
+
+float UCore_PhysicsOptimizer::CalculatePerformanceBudget()
+{
+    if (PerformanceHistory.Num() == 0)
+    {
+        return 1.0f;
+    }
+    
+    // Calculate average frame time
+    float AverageFrameTime = 0.0f;
+    for (float FrameTime : PerformanceHistory)
+    {
+        AverageFrameTime += FrameTime;
+    }
+    AverageFrameTime /= PerformanceHistory.Num();
+    
+    // Calculate budget based on target vs actual performance
+    float Budget = TargetPhysicsFrameTime / FMath::Max(AverageFrameTime, 0.1f);
+    return FMath::Clamp(Budget, 0.0f, 1.0f);
+}
+
+void UCore_PhysicsOptimizer::AdjustPhysicsTimestep()
+{
+    if (!PhysicsSettings)
     {
         return;
     }
     
-    // Restore original collision settings
-    Component->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+    // Adjust timestep based on performance budget
+    float TargetTimestep = FMath::Lerp(MaxPhysicsTimestep, MinPhysicsTimestep, PhysicsPerformanceBudget);
+    
+    // Apply the new timestep (this would require engine modifications in a real implementation)
+    // For now, we'll just log the recommended timestep
+    UE_LOG(LogTemp, VeryVerbose, TEXT("Recommended Physics Timestep: %f"), TargetTimestep);
+}
+
+void UCore_PhysicsOptimizer::CullDistantPhysicsObjects()
+{
+    if (!GetWorld())
+    {
+        return;
+    }
+    
+    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
+    if (!PlayerPawn)
+    {
+        return;
+    }
+    
+    FVector PlayerLocation = PlayerPawn->GetActorLocation();
+    
+    // Disable physics for very distant objects
+    for (const TWeakObjectPtr<AActor>& WeakActor : TrackedPhysicsObjects)
+    {
+        if (AActor* Actor = WeakActor.Get())
+        {
+            float Distance = FVector::Dist(PlayerLocation, Actor->GetActorLocation());
+            if (Distance > LowDetailDistance * 2.0f) // Double the low detail distance for culling
+            {
+                SetObjectPhysicsEnabled(Actor, false);
+            }
+        }
+    }
+}
+
+void UCore_PhysicsOptimizer::RefreshPhysicsObjectList()
+{
+    TrackedPhysicsObjects.Empty();
+    
+    if (!GetWorld())
+    {
+        return;
+    }
+    
+    // Find all actors with physics components
+    for (TActorIterator<AActor> ActorIterator(GetWorld()); ActorIterator; ++ActorIterator)
+    {
+        AActor* Actor = *ActorIterator;
+        if (!Actor)
+        {
+            continue;
+        }
+        
+        // Check if actor has physics components
+        TArray<UPrimitiveComponent*> PrimitiveComponents;
+        Actor->GetComponents<UPrimitiveComponent>(PrimitiveComponents);
+        
+        bool bHasPhysics = false;
+        for (UPrimitiveComponent* PrimComp : PrimitiveComponents)
+        {
+            if (PrimComp && (PrimComp->IsSimulatingPhysics() || PrimComp->IsCollisionEnabled()))
+            {
+                bHasPhysics = true;
+                break;
+            }
+        }
+        
+        if (bHasPhysics)
+        {
+            TrackedPhysicsObjects.Add(Actor);
+        }
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("Core_PhysicsOptimizer: Tracking %d physics objects"), TrackedPhysicsObjects.Num());
+}
+
+// === PUBLIC BLUEPRINT FUNCTIONS ===
+
+void UCore_PhysicsOptimizer::GetPhysicsPerformanceMetrics(float& FrameTime, int32& ObjectCount, float& Budget)
+{
+    FrameTime = CurrentPhysicsFrameTime;
+    ObjectCount = ActivePhysicsObjects;
+    Budget = PhysicsPerformanceBudget;
+}
+
+void UCore_PhysicsOptimizer::SetPhysicsQualityLevel(int32 QualityLevel)
+{
+    switch (QualityLevel)
+    {
+        case 0: // Low quality
+            MaxHighDetailObjects = 25;
+            MaxMediumDetailObjects = 50;
+            TargetPhysicsFrameTime = 16.67f; // 60Hz
+            break;
+            
+        case 1: // Medium quality
+            MaxHighDetailObjects = 50;
+            MaxMediumDetailObjects = 100;
+            TargetPhysicsFrameTime = 11.11f; // 90Hz
+            break;
+            
+        case 2: // High quality
+            MaxHighDetailObjects = 100;
+            MaxMediumDetailObjects = 200;
+            TargetPhysicsFrameTime = 8.33f; // 120Hz
+            break;
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("Physics Quality Level set to: %d"), QualityLevel);
+}
+
+void UCore_PhysicsOptimizer::SetObjectPhysicsEnabled(AActor* Actor, bool bEnabled)
+{
+    if (!Actor)
+    {
+        return;
+    }
+    
+    TArray<UPrimitiveComponent*> PrimitiveComponents;
+    Actor->GetComponents<UPrimitiveComponent>(PrimitiveComponents);
+    
+    for (UPrimitiveComponent* PrimComp : PrimitiveComponents)
+    {
+        if (PrimComp)
+        {
+            if (bEnabled)
+            {
+                PrimComp->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+                if (PrimComp->GetBodyInstance()->bSimulatePhysics)
+                {
+                    PrimComp->SetSimulatePhysics(true);
+                }
+            }
+            else
+            {
+                PrimComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+                PrimComp->SetSimulatePhysics(false);
+            }
+        }
+    }
+}
+
+void UCore_PhysicsOptimizer::GetRecommendedPhysicsSettings(float& Gravity, float& Timestep, int32& MaxObjects)
+{
+    if (PhysicsSettings)
+    {
+        Gravity = PhysicsSettings->DefaultGravityZ;
+    }
+    else
+    {
+        Gravity = -980.0f; // Default gravity
+    }
+    
+    // Recommend timestep based on current performance
+    Timestep = FMath::Lerp(MaxPhysicsTimestep, MinPhysicsTimestep, PhysicsPerformanceBudget);
+    
+    // Recommend max objects based on performance
+    MaxObjects = FMath::RoundToInt(FMath::Lerp(50.0f, 200.0f, PhysicsPerformanceBudget));
 }
