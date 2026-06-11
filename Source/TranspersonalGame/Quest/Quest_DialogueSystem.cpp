@@ -1,238 +1,199 @@
 #include "Quest_DialogueSystem.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "TimerManager.h"
-#include "Engine/DataTable.h"
+#include "Kismet/GameplayStatics.h"
 
 UQuest_DialogueSystem::UQuest_DialogueSystem()
 {
-    CurrentDialogueState = EQuest_DialogueState::None;
+    bIsDialogueActive = false;
     CurrentNPCName = TEXT("");
-    DialogueDataTable = nullptr;
+    CurrentLineIndex = 0;
 }
 
 void UQuest_DialogueSystem::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
     
-    UE_LOG(LogTemp, Warning, TEXT("Quest_DialogueSystem initialized"));
+    InitializeDefaultDialogues();
     
-    // Initialize dialogue state
-    CurrentDialogueState = EQuest_DialogueState::None;
-    CurrentNPCName = TEXT("");
-    NPCDialogueMap.Empty();
+    UE_LOG(LogTemp, Warning, TEXT("Quest Dialogue System initialized"));
 }
 
-void UQuest_DialogueSystem::Deinitialize()
+void UQuest_DialogueSystem::RegisterDialogueTree(const FQuest_DialogueTree& DialogueTree)
 {
-    // Clean up any active dialogue
-    if (CurrentDialogueState != EQuest_DialogueState::None)
+    if (!DialogueTree.NPCName.IsEmpty())
     {
-        EndDialogue();
+        DialogueTrees.Add(DialogueTree.NPCName, DialogueTree);
+        UE_LOG(LogTemp, Warning, TEXT("Registered dialogue tree for NPC: %s"), *DialogueTree.NPCName);
+    }
+}
+
+FQuest_DialogueTree UQuest_DialogueSystem::GetDialogueTreeForNPC(const FString& NPCName)
+{
+    if (DialogueTrees.Contains(NPCName))
+    {
+        return DialogueTrees[NPCName];
     }
     
-    NPCDialogueMap.Empty();
-    DialogueDataTable = nullptr;
-    
-    Super::Deinitialize();
+    return FQuest_DialogueTree();
 }
 
-bool UQuest_DialogueSystem::StartDialogue(const FString& NPCName, int32 StartingDialogueID)
+bool UQuest_DialogueSystem::StartDialogue(const FString& NPCName, AActor* PlayerActor)
 {
-    if (CurrentDialogueState != EQuest_DialogueState::None)
+    if (bIsDialogueActive)
     {
         UE_LOG(LogTemp, Warning, TEXT("Cannot start dialogue - dialogue already active"));
         return false;
     }
-
-    if (!DialogueDataTable)
+    
+    if (!DialogueTrees.Contains(NPCName))
     {
-        UE_LOG(LogTemp, Error, TEXT("Cannot start dialogue - no dialogue data table loaded"));
+        UE_LOG(LogTemp, Warning, TEXT("No dialogue tree found for NPC: %s"), *NPCName);
         return false;
     }
-
-    FQuest_DialogueNode* DialogueNode = FindDialogueNode(StartingDialogueID);
-    if (!DialogueNode)
+    
+    FQuest_DialogueTree DialogueTree = DialogueTrees[NPCName];
+    
+    if (!CanAccessDialogue(DialogueTree))
     {
-        UE_LOG(LogTemp, Error, TEXT("Cannot find dialogue node with ID: %d"), StartingDialogueID);
+        UE_LOG(LogTemp, Warning, TEXT("Player cannot access dialogue for NPC: %s"), *NPCName);
         return false;
     }
-
-    // Start dialogue
-    CurrentDialogueState = EQuest_DialogueState::Active;
+    
+    bIsDialogueActive = true;
     CurrentNPCName = NPCName;
-    CurrentDialogueNode = *DialogueNode;
-
-    // Broadcast dialogue started event
-    OnDialogueStarted.Broadcast(NPCName, CurrentDialogueNode.DialogueEntry.DialogueText);
-
-    UE_LOG(LogTemp, Log, TEXT("Started dialogue with %s: %s"), 
-           *NPCName, 
-           *CurrentDialogueNode.DialogueEntry.DialogueText.ToString());
-
+    CurrentLineIndex = 0;
+    
+    // Play first dialogue line if available
+    if (DialogueTree.DialogueLines.Num() > 0)
+    {
+        PlayDialogueLine(DialogueTree.DialogueLines[0]);
+    }
+    
+    UE_LOG(LogTemp, Warning, TEXT("Started dialogue with NPC: %s"), *NPCName);
     return true;
+}
+
+void UQuest_DialogueSystem::PlayDialogueLine(const FQuest_DialogueLine& DialogueLine)
+{
+    // Log the dialogue line for now
+    UE_LOG(LogTemp, Warning, TEXT("%s: %s"), *DialogueLine.SpeakerName, *DialogueLine.DialogueText);
+    
+    // In a full implementation, this would:
+    // 1. Display UI with dialogue text
+    // 2. Play audio if AudioURL is provided
+    // 3. Handle timing based on Duration
+    // 4. Trigger quest events if bIsQuestRelated is true
 }
 
 void UQuest_DialogueSystem::EndDialogue()
 {
-    if (CurrentDialogueState == EQuest_DialogueState::None)
-    {
-        return;
-    }
-
-    // Clear dialogue timer if active
-    if (UWorld* World = GetWorld())
-    {
-        World->GetTimerManager().ClearTimer(DialogueTimerHandle);
-    }
-
-    // Reset dialogue state
-    CurrentDialogueState = EQuest_DialogueState::None;
+    bIsDialogueActive = false;
     CurrentNPCName = TEXT("");
-    CurrentDialogueNode = FQuest_DialogueNode();
-
-    // Broadcast dialogue ended event
-    OnDialogueEnded.Broadcast();
-
-    UE_LOG(LogTemp, Log, TEXT("Dialogue ended"));
-}
-
-void UQuest_DialogueSystem::SelectDialogueChoice(int32 ChoiceIndex)
-{
-    if (CurrentDialogueState != EQuest_DialogueState::Active)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Cannot select choice - no active dialogue"));
-        return;
-    }
-
-    if (!CurrentDialogueNode.Choices.IsValidIndex(ChoiceIndex))
-    {
-        UE_LOG(LogTemp, Error, TEXT("Invalid choice index: %d"), ChoiceIndex);
-        return;
-    }
-
-    FQuest_DialogueChoice& SelectedChoice = CurrentDialogueNode.Choices[ChoiceIndex];
+    CurrentLineIndex = 0;
     
-    // Broadcast choice selection event
-    OnDialogueChoice.Broadcast(ChoiceIndex, SelectedChoice.ChoiceText);
-
-    UE_LOG(LogTemp, Log, TEXT("Player selected choice: %s"), *SelectedChoice.ChoiceText.ToString());
-
-    // Handle choice result
-    if (SelectedChoice.bEndsDialogue)
-    {
-        EndDialogue();
-    }
-    else if (SelectedChoice.NextDialogueID >= 0)
-    {
-        ProcessDialogueNode(SelectedChoice.NextDialogueID);
-    }
-    else
-    {
-        // No next dialogue specified, end dialogue
-        EndDialogue();
-    }
+    UE_LOG(LogTemp, Warning, TEXT("Dialogue ended"));
 }
 
-void UQuest_DialogueSystem::LoadDialogueDataTable(UDataTable* DialogueTable)
+bool UQuest_DialogueSystem::IsDialogueActive() const
 {
-    DialogueDataTable = DialogueTable;
+    return bIsDialogueActive;
+}
+
+void UQuest_DialogueSystem::InitializeDefaultDialogues()
+{
+    // Hunt Master Dialogue
+    FQuest_DialogueTree HuntMasterTree;
+    HuntMasterTree.TreeID = TEXT("hunt_master_01");
+    HuntMasterTree.NPCName = TEXT("HuntMaster_NPC");
+    HuntMasterTree.bIsRepeatable = true;
     
-    if (DialogueDataTable)
-    {
-        BuildNPCDialogueMap();
-        UE_LOG(LogTemp, Log, TEXT("Loaded dialogue data table with %d entries"), 
-               DialogueDataTable->GetRowNames().Num());
-    }
-}
-
-bool UQuest_DialogueSystem::HasDialogueForNPC(const FString& NPCName) const
-{
-    return NPCDialogueMap.Contains(NPCName);
-}
-
-void UQuest_DialogueSystem::ProcessDialogueNode(int32 DialogueID)
-{
-    FQuest_DialogueNode* DialogueNode = FindDialogueNode(DialogueID);
-    if (!DialogueNode)
-    {
-        UE_LOG(LogTemp, Error, TEXT("Cannot find dialogue node with ID: %d"), DialogueID);
-        EndDialogue();
-        return;
-    }
-
-    CurrentDialogueNode = *DialogueNode;
+    FQuest_DialogueLine HuntLine1;
+    HuntLine1.SpeakerName = TEXT("Hunt Master");
+    HuntLine1.DialogueText = TEXT("Greetings, survivor. I am the Hunt Master. The great beasts of this land hold the key to our tribe's survival.");
+    HuntLine1.Duration = 5.0f;
+    HuntLine1.bIsQuestRelated = true;
     
-    UE_LOG(LogTemp, Log, TEXT("Processing dialogue: %s"), 
-           *CurrentDialogueNode.DialogueEntry.DialogueText.ToString());
-
-    // If this dialogue doesn't require player response and has no choices, auto-advance
-    if (!CurrentDialogueNode.DialogueEntry.bRequiresPlayerResponse && 
-        CurrentDialogueNode.Choices.Num() == 0)
-    {
-        // Set timer to auto-advance dialogue
-        if (UWorld* World = GetWorld())
-        {
-            World->GetTimerManager().SetTimer(
-                DialogueTimerHandle,
-                [this]() { EndDialogue(); },
-                CurrentDialogueNode.DialogueEntry.Duration,
-                false
-            );
-        }
-    }
-}
-
-void UQuest_DialogueSystem::BuildNPCDialogueMap()
-{
-    NPCDialogueMap.Empty();
+    FQuest_DialogueLine HuntLine2;
+    HuntLine2.SpeakerName = TEXT("Hunt Master");
+    HuntLine2.DialogueText = TEXT("Bring me proof of your hunting prowess - the hide of a mighty Triceratops, the claw of a swift Raptor, or if you dare... the tooth of the apex predator, the Tyrannosaurus Rex.");
+    HuntLine2.Duration = 8.0f;
+    HuntLine2.bIsQuestRelated = true;
     
-    if (!DialogueDataTable)
-    {
-        return;
-    }
-
-    // Get all dialogue rows
-    TArray<FQuest_DialogueNode*> AllDialogueRows;
-    DialogueDataTable->GetAllRows<FQuest_DialogueNode>(TEXT("BuildNPCDialogueMap"), AllDialogueRows);
-
-    // Build map of NPC names to dialogue IDs
-    for (FQuest_DialogueNode* DialogueRow : AllDialogueRows)
-    {
-        if (DialogueRow && !DialogueRow->DialogueEntry.SpeakerName.IsEmpty())
-        {
-            FString NPCName = DialogueRow->DialogueEntry.SpeakerName;
-            
-            if (!NPCDialogueMap.Contains(NPCName))
-            {
-                NPCDialogueMap.Add(NPCName, TArray<int32>());
-            }
-            
-            NPCDialogueMap[NPCName].Add(DialogueRow->DialogueID);
-        }
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("Built NPC dialogue map for %d NPCs"), NPCDialogueMap.Num());
+    FQuest_DialogueLine HuntLine3;
+    HuntLine3.SpeakerName = TEXT("Hunt Master");
+    HuntLine3.DialogueText = TEXT("Each hunt will test your courage and skill. Are you ready to prove yourself as a true hunter of the ancient world?");
+    HuntLine3.Duration = 6.0f;
+    HuntLine3.bIsQuestRelated = true;
+    
+    HuntMasterTree.DialogueLines.Add(HuntLine1);
+    HuntMasterTree.DialogueLines.Add(HuntLine2);
+    HuntMasterTree.DialogueLines.Add(HuntLine3);
+    
+    RegisterDialogueTree(HuntMasterTree);
+    
+    // Gatherer Elder Dialogue
+    FQuest_DialogueTree GathererTree;
+    GathererTree.TreeID = TEXT("gatherer_elder_01");
+    GathererTree.NPCName = TEXT("GathererElder_NPC");
+    GathererTree.bIsRepeatable = true;
+    
+    FQuest_DialogueLine GatherLine1;
+    GatherLine1.SpeakerName = TEXT("Gatherer Elder");
+    GatherLine1.DialogueText = TEXT("Young one, the earth provides all we need, but only to those who know where to look and how to gather with respect.");
+    GatherLine1.Duration = 6.0f;
+    GatherLine1.bIsQuestRelated = true;
+    
+    FQuest_DialogueLine GatherLine2;
+    GatherLine2.SpeakerName = TEXT("Gatherer Elder");
+    GatherLine2.DialogueText = TEXT("The sacred stones near the canyon hold power for our tools. The ancient trees whisper secrets of strong wood for our shelters.");
+    GatherLine2.Duration = 7.0f;
+    GatherLine2.bIsQuestRelated = true;
+    
+    FQuest_DialogueLine GatherLine3;
+    GatherLine3.SpeakerName = TEXT("Gatherer Elder");
+    GatherLine3.DialogueText = TEXT("Learn the ways of gathering, and you will never go hungry. But remember - take only what you need, for the land must provide for generations to come.");
+    GatherLine3.Duration = 8.0f;
+    GatherLine3.bIsQuestRelated = true;
+    
+    GathererTree.DialogueLines.Add(GatherLine1);
+    GathererTree.DialogueLines.Add(GatherLine2);
+    GathererTree.DialogueLines.Add(GatherLine3);
+    
+    RegisterDialogueTree(GathererTree);
+    
+    // Scout Dialogue
+    FQuest_DialogueTree ScoutTree;
+    ScoutTree.TreeID = TEXT("scout_01");
+    ScoutTree.NPCName = TEXT("Scout_NPC");
+    ScoutTree.bIsRepeatable = true;
+    
+    FQuest_DialogueLine ScoutLine1;
+    ScoutLine1.SpeakerName = TEXT("Scout");
+    ScoutLine1.DialogueText = TEXT("I've seen movement beyond the ridge. Large shapes moving through the mist. We must know what dangers lurk in the unknown territories.");
+    ScoutLine1.Duration = 7.0f;
+    ScoutLine1.bIsQuestRelated = true;
+    
+    FQuest_DialogueLine ScoutLine2;
+    ScoutLine2.SpeakerName = TEXT("Scout");
+    ScoutLine2.DialogueText = TEXT("Will you venture into the unexplored lands? Map the territories, mark the dangers, and return with knowledge that could save our people?");
+    ScoutLine2.Duration = 6.0f;
+    ScoutLine2.bIsQuestRelated = true;
+    
+    ScoutTree.DialogueLines.Add(ScoutLine1);
+    ScoutTree.DialogueLines.Add(ScoutLine2);
+    
+    RegisterDialogueTree(ScoutTree);
 }
 
-FQuest_DialogueNode* UQuest_DialogueSystem::FindDialogueNode(int32 DialogueID)
+bool UQuest_DialogueSystem::CanAccessDialogue(const FQuest_DialogueTree& DialogueTree)
 {
-    if (!DialogueDataTable)
-    {
-        return nullptr;
-    }
-
-    // Search through all rows for matching dialogue ID
-    TArray<FQuest_DialogueNode*> AllDialogueRows;
-    DialogueDataTable->GetAllRows<FQuest_DialogueNode>(TEXT("FindDialogueNode"), AllDialogueRows);
-
-    for (FQuest_DialogueNode* DialogueRow : AllDialogueRows)
-    {
-        if (DialogueRow && DialogueRow->DialogueID == DialogueID)
-        {
-            return DialogueRow;
-        }
-    }
-
-    return nullptr;
+    // For now, all dialogues are accessible
+    // In a full implementation, this would check:
+    // 1. Required quest completion status
+    // 2. Player level/stats
+    // 3. Previous dialogue history
+    // 4. Time-based restrictions
+    
+    return true;
 }
