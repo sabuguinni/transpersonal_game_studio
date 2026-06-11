@@ -1,370 +1,253 @@
 #include "Build_IntegrationValidator.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "EngineUtils.h"
-#include "UObject/UObjectGlobals.h"
-#include "UObject/Package.h"
-#include "Misc/PackageName.h"
+#include "Engine/Level.h"
+#include "GameFramework/Actor.h"
+#include "UObject/UObjectIterator.h"
+#include "Misc/DateTime.h"
 #include "HAL/PlatformFilemanager.h"
-#include "Misc/Paths.h"
 
 UBuild_IntegrationValidator::UBuild_IntegrationValidator()
 {
-    PrimaryComponentTick.bCanEverTick = true;
-    ValidationInterval = 30.0f; // Validate every 30 seconds
-    bAutoValidateOnTick = false;
-    TimeSinceLastValidation = 0.0f;
-
-    // Initialize required modules
-    RequiredModules = {
+    // Initialize core module names for validation
+    CoreModuleNames = {
+        TEXT("TranspersonalGame"),
         TEXT("Core"),
-        TEXT("Character"), 
+        TEXT("Physics"), 
         TEXT("World"),
-        TEXT("AI"),
+        TEXT("Environment"),
+        TEXT("Character"),
+        TEXT("Animation"),
+        TEXT("NPC"),
         TEXT("Combat"),
+        TEXT("Crowd"),
         TEXT("Quest"),
+        TEXT("Narrative"),
         TEXT("Audio"),
         TEXT("VFX"),
-        TEXT("QA"),
-        TEXT("Integration")
+        TEXT("QA")
     };
 
-    // Initialize required classes
-    RequiredClasses = {
-        TEXT("/Script/TranspersonalGame.TranspersonalCharacter"),
-        TEXT("/Script/TranspersonalGame.TranspersonalGameState"),
-        TEXT("/Script/TranspersonalGame.PCGWorldGenerator"),
-        TEXT("/Script/TranspersonalGame.FoliageManager"),
-        TEXT("/Script/TranspersonalGame.CrowdSimulationManager")
-    };
+    // Set validation thresholds
+    HealthyThreshold = 80.0f;
+    WarningThreshold = 60.0f;
+    bAutoValidateOnStartup = true;
+
+    // Initialize report
+    LastIntegrationReport = FBuild_IntegrationReport();
 }
 
-void UBuild_IntegrationValidator::BeginPlay()
+void UBuild_IntegrationValidator::Initialize(FSubsystemCollectionBase& Collection)
 {
-    Super::BeginPlay();
+    Super::Initialize(Collection);
     
-    UE_LOG(LogTemp, Log, TEXT("Build Integration Validator initialized"));
+    UE_LOG(LogTemp, Log, TEXT("Build_IntegrationValidator: Subsystem initialized"));
     
-    // Perform initial validation
-    if (bAutoValidateOnTick)
+    if (bAutoValidateOnStartup)
     {
-        LastReport = ValidateFullIntegration();
-        LogIntegrationReport(LastReport);
+        // Delay initial validation to allow other systems to initialize
+        FTimerHandle TimerHandle;
+        GetWorld()->GetTimerManager().SetTimer(TimerHandle, [this]()
+        {
+            ValidateIntegration();
+        }, 2.0f, false);
     }
 }
 
-void UBuild_IntegrationValidator::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void UBuild_IntegrationValidator::Deinitialize()
 {
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+    UE_LOG(LogTemp, Log, TEXT("Build_IntegrationValidator: Subsystem deinitialized"));
+    Super::Deinitialize();
+}
 
-    if (bAutoValidateOnTick)
+FBuild_IntegrationReport UBuild_IntegrationValidator::ValidateIntegration()
+{
+    UE_LOG(LogTemp, Log, TEXT("Build_IntegrationValidator: Starting comprehensive integration validation"));
+
+    // Reset report
+    LastIntegrationReport = FBuild_IntegrationReport();
+    LastIntegrationReport.ValidationTimestamp = FDateTime::Now();
+    LastIntegrationReport.TotalModules = CoreModuleNames.Num();
+
+    // Validate core modules
+    ValidateCoreModules();
+
+    // Validate actor integration
+    ValidateActorIntegration();
+
+    // Validate shared types
+    ValidateSharedTypes();
+
+    // Calculate overall status
+    CalculateOverallStatus();
+
+    UE_LOG(LogTemp, Log, TEXT("Build_IntegrationValidator: Integration validation complete - Status: %s, Success Rate: %.1f%%"), 
+        *UEnum::GetValueAsString(LastIntegrationReport.OverallStatus), 
+        LastIntegrationReport.SuccessRate);
+
+    return LastIntegrationReport;
+}
+
+FBuild_ModuleValidation UBuild_IntegrationValidator::ValidateModule(const FString& ModuleName)
+{
+    FBuild_ModuleValidation Validation;
+    Validation.ModuleName = ModuleName;
+
+    try
     {
-        TimeSinceLastValidation += DeltaTime;
-        
-        if (TimeSinceLastValidation >= ValidationInterval)
+        // Try to find classes from this module
+        TArray<FString> TestClassPaths = {
+            FString::Printf(TEXT("/Script/TranspersonalGame.%s_TestClass"), *ModuleName),
+            FString::Printf(TEXT("/Script/TranspersonalGame.%sManager"), *ModuleName),
+            FString::Printf(TEXT("/Script/TranspersonalGame.%sComponent"), *ModuleName),
+            FString::Printf(TEXT("/Script/TranspersonalGame.%sSystem"), *ModuleName)
+        };
+
+        int32 FoundClasses = 0;
+        for (const FString& ClassPath : TestClassPaths)
         {
-            LastReport = ValidateFullIntegration();
-            TimeSinceLastValidation = 0.0f;
+            UClass* TestClass = LoadClass<UObject>(nullptr, *ClassPath);
+            if (TestClass)
+            {
+                FoundClasses++;
+                Validation.bIsLoaded = true;
+            }
+        }
+
+        Validation.ClassCount = FoundClasses;
+        Validation.bHasValidClasses = FoundClasses > 0;
+
+        if (!Validation.bHasValidClasses)
+        {
+            Validation.ErrorMessage = TEXT("No loadable classes found for module");
+        }
+    }
+    catch (...)
+    {
+        Validation.bIsLoaded = false;
+        Validation.bHasValidClasses = false;
+        Validation.ErrorMessage = TEXT("Exception during module validation");
+    }
+
+    return Validation;
+}
+
+EBuild_IntegrationStatus UBuild_IntegrationValidator::GetIntegrationStatus() const
+{
+    return LastIntegrationReport.OverallStatus;
+}
+
+void UBuild_IntegrationValidator::ForceRevalidation()
+{
+    UE_LOG(LogTemp, Log, TEXT("Build_IntegrationValidator: Force revalidation requested"));
+    ValidateIntegration();
+}
+
+bool UBuild_IntegrationValidator::IsBuildHealthy() const
+{
+    return LastIntegrationReport.OverallStatus == EBuild_IntegrationStatus::Healthy ||
+           LastIntegrationReport.SuccessRate >= HealthyThreshold;
+}
+
+void UBuild_IntegrationValidator::ValidateCoreModules()
+{
+    UE_LOG(LogTemp, Log, TEXT("Build_IntegrationValidator: Validating core modules"));
+
+    LastIntegrationReport.ModuleValidations.Empty();
+    int32 LoadedCount = 0;
+
+    for (const FString& ModuleName : CoreModuleNames)
+    {
+        FBuild_ModuleValidation ModuleValidation = ValidateModule(ModuleName);
+        LastIntegrationReport.ModuleValidations.Add(ModuleValidation);
+
+        if (ModuleValidation.bIsLoaded)
+        {
+            LoadedCount++;
+        }
+
+        UE_LOG(LogTemp, Log, TEXT("Module %s: Loaded=%s, Classes=%d"), 
+            *ModuleName, 
+            ModuleValidation.bIsLoaded ? TEXT("Yes") : TEXT("No"),
+            ModuleValidation.ClassCount);
+    }
+
+    LastIntegrationReport.LoadedModules = LoadedCount;
+    LastIntegrationReport.SuccessRate = (float)LoadedCount / (float)LastIntegrationReport.TotalModules * 100.0f;
+}
+
+void UBuild_IntegrationValidator::ValidateActorIntegration()
+{
+    UE_LOG(LogTemp, Log, TEXT("Build_IntegrationValidator: Validating actor integration"));
+
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Build_IntegrationValidator: No world available for actor validation"));
+        return;
+    }
+
+    int32 TotalActors = 0;
+    int32 CustomActors = 0;
+
+    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+    {
+        AActor* Actor = *ActorItr;
+        if (Actor)
+        {
+            TotalActors++;
             
-            // Log critical issues immediately
-            if (LastReport.OverallStatus == EBuild_IntegrationStatus::Critical || 
-                LastReport.OverallStatus == EBuild_IntegrationStatus::Failed)
+            FString ClassName = Actor->GetClass()->GetName();
+            if (ClassName.Contains(TEXT("Transpersonal")))
             {
-                UE_LOG(LogTemp, Error, TEXT("Integration validation failed! Health: %.1f%%"), LastReport.OverallHealthPercentage);
+                CustomActors++;
             }
         }
     }
+
+    LastIntegrationReport.TotalActorsInLevel = TotalActors;
+    LastIntegrationReport.ActiveCustomActors = CustomActors;
+
+    UE_LOG(LogTemp, Log, TEXT("Actor Integration: Total=%d, Custom=%d"), TotalActors, CustomActors);
 }
 
-FBuild_IntegrationReport UBuild_IntegrationValidator::ValidateFullIntegration()
+void UBuild_IntegrationValidator::ValidateSharedTypes()
 {
-    FBuild_IntegrationReport Report;
-    Report.LastValidationTime = FDateTime::Now();
-    
-    UE_LOG(LogTemp, Log, TEXT("Starting full integration validation..."));
-    
-    // Validate each required module
-    for (const FString& ModuleName : RequiredModules)
-    {
-        FBuild_ModuleStatus ModuleStatus = ValidateModule(ModuleName);
-        Report.ModuleStatuses.Add(ModuleStatus);
-    }
-    
-    // Count total actors in level
-    Report.TotalActorsInLevel = CountActorsInLevel();
-    
-    // Count loaded classes
-    Report.LoadedClassCount = 0;
-    for (const FString& ClassName : RequiredClasses)
-    {
-        if (ValidateClassLoading(ClassName))
-        {
-            Report.LoadedClassCount++;
-        }
-    }
-    
-    // Calculate overall health
-    Report.OverallHealthPercentage = CalculateIntegrationHealth();
-    Report.OverallStatus = DetermineOverallStatus(Report.OverallHealthPercentage);
-    
-    UE_LOG(LogTemp, Log, TEXT("Integration validation complete. Health: %.1f%%"), Report.OverallHealthPercentage);
-    
-    return Report;
-}
+    UE_LOG(LogTemp, Log, TEXT("Build_IntegrationValidator: Validating shared types integration"));
 
-FBuild_ModuleStatus UBuild_IntegrationValidator::ValidateModule(const FString& ModuleName)
-{
-    FBuild_ModuleStatus Status;
-    Status.ModuleName = ModuleName;
-    
-    // Check if module is loaded
-    if (IsModuleLoaded(ModuleName))
+    // Try to validate SharedTypes integration
+    UClass* SharedTypesClass = LoadClass<UObject>(nullptr, TEXT("/Script/TranspersonalGame.SharedTypes"));
+    if (SharedTypesClass)
     {
-        Status.Status = EBuild_IntegrationStatus::Healthy;
-        Status.ClassCount = CountClassesInModule(ModuleName);
-        
-        // Count actors of this module type in level
-        Status.ActorCount = 0;
-        if (UWorld* World = GetWorld())
-        {
-            for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
-            {
-                AActor* Actor = *ActorItr;
-                if (Actor && Actor->GetClass()->GetName().Contains(ModuleName))
-                {
-                    Status.ActorCount++;
-                }
-            }
-        }
-        
-        // Check for warnings
-        if (Status.ClassCount == 0)
-        {
-            Status.Status = EBuild_IntegrationStatus::Warning;
-            Status.ErrorMessages.Add(FString::Printf(TEXT("Module %s has no classes"), *ModuleName));
-        }
+        UE_LOG(LogTemp, Log, TEXT("SharedTypes: Successfully validated"));
     }
     else
     {
-        Status.Status = EBuild_IntegrationStatus::Failed;
-        Status.ErrorMessages.Add(FString::Printf(TEXT("Module %s is not loaded"), *ModuleName));
+        UE_LOG(LogTemp, Warning, TEXT("SharedTypes: Validation failed - may need compilation"));
     }
-    
-    return Status;
 }
 
-bool UBuild_IntegrationValidator::ValidateClassLoading(const FString& ClassName)
+void UBuild_IntegrationValidator::CalculateOverallStatus()
 {
-    UClass* LoadedClass = LoadClass<UObject>(nullptr, *ClassName);
-    return LoadedClass != nullptr;
-}
+    float SuccessRate = LastIntegrationReport.SuccessRate;
 
-int32 UBuild_IntegrationValidator::CountActorsInLevel()
-{
-    int32 ActorCount = 0;
-    
-    if (UWorld* World = GetWorld())
+    if (SuccessRate >= HealthyThreshold)
     {
-        for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
-        {
-            ActorCount++;
-        }
+        LastIntegrationReport.OverallStatus = EBuild_IntegrationStatus::Healthy;
     }
-    
-    return ActorCount;
-}
-
-TArray<FString> UBuild_IntegrationValidator::GetLoadedModuleNames()
-{
-    TArray<FString> LoadedModules;
-    
-    // This is a simplified implementation
-    // In a real scenario, you'd query the module manager
-    for (const FString& ModuleName : RequiredModules)
+    else if (SuccessRate >= WarningThreshold)
     {
-        if (IsModuleLoaded(ModuleName))
-        {
-            LoadedModules.Add(ModuleName);
-        }
+        LastIntegrationReport.OverallStatus = EBuild_IntegrationStatus::Warning;
     }
-    
-    return LoadedModules;
-}
-
-float UBuild_IntegrationValidator::CalculateIntegrationHealth()
-{
-    float TotalScore = 0.0f;
-    float MaxScore = 0.0f;
-    
-    // Module health (40% of total score)
-    float ModuleScore = 0.0f;
-    for (const FBuild_ModuleStatus& ModuleStatus : LastReport.ModuleStatuses)
+    else if (SuccessRate > 0.0f)
     {
-        switch (ModuleStatus.Status)
-        {
-            case EBuild_IntegrationStatus::Healthy:
-                ModuleScore += 1.0f;
-                break;
-            case EBuild_IntegrationStatus::Warning:
-                ModuleScore += 0.7f;
-                break;
-            case EBuild_IntegrationStatus::Critical:
-                ModuleScore += 0.3f;
-                break;
-            default:
-                ModuleScore += 0.0f;
-                break;
-        }
-    }
-    TotalScore += (ModuleScore / RequiredModules.Num()) * 40.0f;
-    MaxScore += 40.0f;
-    
-    // Class loading health (30% of total score)
-    float ClassScore = (float)LastReport.LoadedClassCount / RequiredClasses.Num();
-    TotalScore += ClassScore * 30.0f;
-    MaxScore += 30.0f;
-    
-    // Level content health (30% of total score)
-    float LevelScore = FMath::Min(LastReport.TotalActorsInLevel / 20.0f, 1.0f); // Expect at least 20 actors
-    TotalScore += LevelScore * 30.0f;
-    MaxScore += 30.0f;
-    
-    return (TotalScore / MaxScore) * 100.0f;
-}
-
-EBuild_IntegrationStatus UBuild_IntegrationValidator::DetermineOverallStatus(float HealthPercentage)
-{
-    if (HealthPercentage >= 90.0f)
-    {
-        return EBuild_IntegrationStatus::Healthy;
-    }
-    else if (HealthPercentage >= 70.0f)
-    {
-        return EBuild_IntegrationStatus::Warning;
-    }
-    else if (HealthPercentage >= 40.0f)
-    {
-        return EBuild_IntegrationStatus::Critical;
+        LastIntegrationReport.OverallStatus = EBuild_IntegrationStatus::Critical;
     }
     else
     {
-        return EBuild_IntegrationStatus::Failed;
+        LastIntegrationReport.OverallStatus = EBuild_IntegrationStatus::Failed;
     }
-}
 
-void UBuild_IntegrationValidator::LogIntegrationReport(const FBuild_IntegrationReport& Report)
-{
-    UE_LOG(LogTemp, Log, TEXT("=== INTEGRATION REPORT ==="));
-    UE_LOG(LogTemp, Log, TEXT("Overall Health: %.1f%%"), Report.OverallHealthPercentage);
-    UE_LOG(LogTemp, Log, TEXT("Overall Status: %s"), 
-        Report.OverallStatus == EBuild_IntegrationStatus::Healthy ? TEXT("Healthy") :
-        Report.OverallStatus == EBuild_IntegrationStatus::Warning ? TEXT("Warning") :
-        Report.OverallStatus == EBuild_IntegrationStatus::Critical ? TEXT("Critical") : TEXT("Failed"));
-    UE_LOG(LogTemp, Log, TEXT("Total Actors: %d"), Report.TotalActorsInLevel);
-    UE_LOG(LogTemp, Log, TEXT("Loaded Classes: %d/%d"), Report.LoadedClassCount, RequiredClasses.Num());
-    
-    for (const FBuild_ModuleStatus& ModuleStatus : Report.ModuleStatuses)
-    {
-        UE_LOG(LogTemp, Log, TEXT("Module %s: %s (Classes: %d, Actors: %d)"), 
-            *ModuleStatus.ModuleName,
-            ModuleStatus.Status == EBuild_IntegrationStatus::Healthy ? TEXT("OK") : TEXT("FAIL"),
-            ModuleStatus.ClassCount,
-            ModuleStatus.ActorCount);
-            
-        for (const FString& Error : ModuleStatus.ErrorMessages)
-        {
-            UE_LOG(LogTemp, Warning, TEXT("  - %s"), *Error);
-        }
-    }
-    UE_LOG(LogTemp, Log, TEXT("=== END REPORT ==="));
-}
-
-void UBuild_IntegrationValidator::CreateIntegrationTestActors()
-{
-    if (UWorld* World = GetWorld())
-    {
-        // Create test marker
-        FVector TestLocation(2000.0f, 2000.0f, 200.0f);
-        FRotator TestRotation(0.0f, 0.0f, 0.0f);
-        
-        AActor* TestActor = World->SpawnActor<AActor>(AActor::StaticClass(), TestLocation, TestRotation);
-        if (TestActor)
-        {
-            TestActor->SetActorLabel(TEXT("Integration_Test_Marker"));
-            UE_LOG(LogTemp, Log, TEXT("Created integration test marker"));
-        }
-    }
-}
-
-bool UBuild_IntegrationValidator::ValidateMinPlayableMap()
-{
-    if (UWorld* World = GetWorld())
-    {
-        int32 ActorCount = CountActorsInLevel();
-        
-        // Check for minimum required actors
-        bool bHasPlayerStart = false;
-        bool bHasLighting = false;
-        bool bHasTerrain = false;
-        
-        for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
-        {
-            AActor* Actor = *ActorItr;
-            if (Actor)
-            {
-                FString ActorName = Actor->GetClass()->GetName();
-                if (ActorName.Contains(TEXT("PlayerStart")))
-                {
-                    bHasPlayerStart = true;
-                }
-                else if (ActorName.Contains(TEXT("Light")))
-                {
-                    bHasLighting = true;
-                }
-                else if (ActorName.Contains(TEXT("Landscape")) || ActorName.Contains(TEXT("Terrain")))
-                {
-                    bHasTerrain = true;
-                }
-            }
-        }
-        
-        bool bIsValid = (ActorCount >= 10) && bHasPlayerStart && bHasLighting;
-        
-        UE_LOG(LogTemp, Log, TEXT("MinPlayableMap validation: %s (Actors: %d, PlayerStart: %s, Lighting: %s, Terrain: %s)"),
-            bIsValid ? TEXT("PASS") : TEXT("FAIL"),
-            ActorCount,
-            bHasPlayerStart ? TEXT("YES") : TEXT("NO"),
-            bHasLighting ? TEXT("YES") : TEXT("NO"),
-            bHasTerrain ? TEXT("YES") : TEXT("NO"));
-            
-        return bIsValid;
-    }
-    
-    return false;
-}
-
-bool UBuild_IntegrationValidator::IsModuleLoaded(const FString& ModuleName)
-{
-    // Simplified check - in reality you'd use FModuleManager
-    // For now, assume core modules are always loaded
-    return RequiredModules.Contains(ModuleName);
-}
-
-int32 UBuild_IntegrationValidator::CountClassesInModule(const FString& ModuleName)
-{
-    // Simplified implementation
-    // In reality, you'd enumerate classes in the module
-    return 1; // Assume each module has at least one class
-}
-
-TArray<FString> UBuild_IntegrationValidator::GetModuleErrors(const FString& ModuleName)
-{
-    TArray<FString> Errors;
-    
-    if (!IsModuleLoaded(ModuleName))
-    {
-        Errors.Add(FString::Printf(TEXT("Module %s is not loaded"), *ModuleName));
-    }
-    
-    return Errors;
+    UE_LOG(LogTemp, Log, TEXT("Build_IntegrationValidator: Overall status calculated as %s"), 
+        *UEnum::GetValueAsString(LastIntegrationReport.OverallStatus));
 }
