@@ -1,238 +1,158 @@
 #include "NarrativeManager.h"
-#include "NarrativeDialogueSystem.h"
-#include "Components/AudioComponent.h"
-#include "Engine/World.h"
-#include "GameFramework/PlayerController.h"
-#include "Kismet/GameplayStatics.h"
-#include "TranspersonalCharacter.h"
 #include "Engine/Engine.h"
 
-ANarrativeManager::ANarrativeManager()
+void UNarrativeManager::Initialize(FSubsystemCollectionBase& Collection)
 {
-    PrimaryActorTick.bCanEverTick = true;
-
-    // Create dialogue system component
-    DialogueSystem = CreateDefaultSubobject<UNarrativeDialogueSystem>(TEXT("DialogueSystem"));
-
-    // Create narrator audio component
-    NarratorAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("NarratorAudio"));
-    RootComponent = NarratorAudioComponent;
-
-    // Initialize default values
-    PlayerDetectionRadius = 1000.0f;
-    bNarrativeSystemActive = true;
-    PlayerCharacter = nullptr;
-    CurrentDialogueTimer = 0.0f;
-    CurrentDialogueIndex = -1;
+    Super::Initialize(Collection);
+    
+    bIsDialogueActive = false;
+    CurrentNarrationText = TEXT("");
+    
+    LoadDialogueData();
+    
+    UE_LOG(LogTemp, Log, TEXT("NarrativeManager initialized"));
 }
 
-void ANarrativeManager::BeginPlay()
+void UNarrativeManager::StartDialogue(const FString& DialogueID)
 {
-    Super::BeginPlay();
-
-    // Find player character
-    FindPlayerCharacter();
-
-    // Initialize narrative events
-    InitializeNarrativeEvents();
-}
-
-void ANarrativeManager::Tick(float DeltaTime)
-{
-    Super::Tick(DeltaTime);
-
-    if (bNarrativeSystemActive)
+    if (bIsDialogueActive)
     {
-        CheckPlayerProximity();
-        UpdateDialoguePlayback(DeltaTime);
+        UE_LOG(LogTemp, Warning, TEXT("Dialogue already active, cannot start new dialogue: %s"), *DialogueID);
+        return;
+    }
+
+    // Sample survival dialogue data
+    CurrentDialogue.Empty();
+    
+    if (DialogueID == TEXT("HunterEncounter"))
+    {
+        FNarr_DialogueLine Line1;
+        Line1.SpeakerName = TEXT("Experienced Hunter");
+        Line1.DialogueText = TEXT("Stay low, newcomer. The great beasts hunt these grounds.");
+        Line1.DisplayDuration = 4.0f;
+        CurrentDialogue.Add(Line1);
+
+        FNarr_DialogueLine Line2;
+        Line2.SpeakerName = TEXT("Experienced Hunter");
+        Line2.DialogueText = TEXT("See those tracks? Thunderfoot passed here at dawn. Avoid the river bend.");
+        Line2.DisplayDuration = 5.0f;
+        CurrentDialogue.Add(Line2);
+    }
+    else if (DialogueID == TEXT("TribalElder"))
+    {
+        FNarr_DialogueLine Line1;
+        Line1.SpeakerName = TEXT("Tribal Elder");
+        Line1.DialogueText = TEXT("The old ways kept us alive when the earth shook and fire rained from sky.");
+        Line1.DisplayDuration = 5.0f;
+        CurrentDialogue.Add(Line1);
+
+        FNarr_DialogueLine Line2;
+        Line2.SpeakerName = TEXT("Tribal Elder");
+        Line2.DialogueText = TEXT("Learn to read the wind, child. It carries warnings of approaching danger.");
+        Line2.DisplayDuration = 4.5f;
+        CurrentDialogue.Add(Line2);
+    }
+
+    bIsDialogueActive = true;
+    
+    if (CurrentDialogue.Num() > 0)
+    {
+        DisplayDialogueLine(CurrentDialogue[0]);
     }
 }
 
-void ANarrativeManager::TriggerNarrativeEvent(const FString& EventID)
+void UNarrativeManager::DisplayDialogueLine(const FNarr_DialogueLine& DialogueLine)
 {
-    for (FNarr_NarrativeEvent& Event : NarrativeEvents)
+    UE_LOG(LogTemp, Log, TEXT("Displaying dialogue - %s: %s"), *DialogueLine.SpeakerName, *DialogueLine.DialogueText);
+    
+    // In a full implementation, this would trigger UI display
+    if (GEngine)
     {
-        if (Event.EventID == EventID)
+        FString DisplayText = FString::Printf(TEXT("%s: %s"), *DialogueLine.SpeakerName, *DialogueLine.DialogueText);
+        GEngine->AddOnScreenDebugMessage(-1, DialogueLine.DisplayDuration, FColor::Yellow, DisplayText);
+    }
+}
+
+void UNarrativeManager::CompleteQuestObjective(const FString& ObjectiveID)
+{
+    for (FNarr_QuestObjective& Objective : ActiveObjectives)
+    {
+        if (Objective.ObjectiveID == ObjectiveID)
         {
-            if (Event.bIsOneShot && Event.bHasBeenTriggered)
+            Objective.CurrentCount++;
+            if (Objective.CurrentCount >= Objective.RequiredCount)
             {
-                return; // Already triggered
+                Objective.bIsCompleted = true;
+                UE_LOG(LogTemp, Log, TEXT("Quest objective completed: %s"), *ObjectiveID);
+                
+                if (GEngine)
+                {
+                    FString CompletionText = FString::Printf(TEXT("Objective Complete: %s"), *Objective.Description);
+                    GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Green, CompletionText);
+                }
             }
-
-            Event.bHasBeenTriggered = true;
-
-            // Create dialogue entry for this event
-            FNarr_DialogueEntry DialogueEntry;
-            DialogueEntry.Speaker = Event.CharacterName;
-            DialogueEntry.Text = Event.DialogueText;
-            DialogueEntry.DisplayDuration = 4.0f;
-
-            TArray<FNarr_DialogueEntry> SingleDialogue;
-            SingleDialogue.Add(DialogueEntry);
-
-            StartDialogueSequence(SingleDialogue);
-
-            // Trigger blueprint event
-            OnNarrativeEventTriggered(EventID, Event.DialogueText);
-
             break;
         }
     }
 }
 
-void ANarrativeManager::StartDialogueSequence(const TArray<FNarr_DialogueEntry>& DialogueEntries)
+bool UNarrativeManager::IsQuestObjectiveComplete(const FString& ObjectiveID)
 {
-    if (DialogueEntries.Num() > 0)
+    for (const FNarr_QuestObjective& Objective : ActiveObjectives)
     {
-        ActiveDialogue = DialogueEntries;
-        CurrentDialogueIndex = 0;
-        CurrentDialogueTimer = 0.0f;
-
-        // Start first dialogue
-        const FNarr_DialogueEntry& FirstEntry = ActiveDialogue[0];
-        OnDialogueStarted(FirstEntry.Speaker, FirstEntry.Text);
-
-        // Play audio if available
-        if (FirstEntry.VoiceClip.IsValid())
+        if (Objective.ObjectiveID == ObjectiveID)
         {
-            USoundCue* SoundCue = FirstEntry.VoiceClip.LoadSynchronous();
-            if (SoundCue && NarratorAudioComponent)
-            {
-                NarratorAudioComponent->SetSound(SoundCue);
-                NarratorAudioComponent->Play();
-            }
+            return Objective.bIsCompleted;
         }
     }
+    return false;
 }
 
-void ANarrativeManager::StopCurrentDialogue()
+void UNarrativeManager::TriggerNarration(const FString& NarrationText, float Duration)
 {
-    CurrentDialogueIndex = -1;
-    CurrentDialogueTimer = 0.0f;
-    ActiveDialogue.Empty();
-
-    if (NarratorAudioComponent)
-    {
-        NarratorAudioComponent->Stop();
-    }
-
-    OnDialogueEnded();
-}
-
-bool ANarrativeManager::IsDialoguePlaying() const
-{
-    return CurrentDialogueIndex >= 0 && CurrentDialogueIndex < ActiveDialogue.Num();
-}
-
-void ANarrativeManager::CheckPlayerProximity()
-{
-    if (!PlayerCharacter)
-    {
-        FindPlayerCharacter();
-        return;
-    }
-
-    FVector PlayerLocation = PlayerCharacter->GetActorLocation();
-    FVector ManagerLocation = GetActorLocation();
-    float Distance = FVector::Dist(PlayerLocation, ManagerLocation);
-
-    // Check for narrative events within range
-    for (FNarr_NarrativeEvent& Event : NarrativeEvents)
-    {
-        if (Distance <= Event.TriggerRadius)
-        {
-            if (!Event.bHasBeenTriggered || !Event.bIsOneShot)
-            {
-                TriggerNarrativeEvent(Event.EventID);
-            }
-        }
-    }
-}
-
-void ANarrativeManager::UpdateDialoguePlayback(float DeltaTime)
-{
-    if (!IsDialoguePlaying())
-    {
-        return;
-    }
-
-    CurrentDialogueTimer += DeltaTime;
-
-    const FNarr_DialogueEntry& CurrentEntry = ActiveDialogue[CurrentDialogueIndex];
+    CurrentNarrationText = NarrationText;
+    UE_LOG(LogTemp, Log, TEXT("Narration triggered: %s"), *NarrationText);
     
-    if (CurrentDialogueTimer >= CurrentEntry.DisplayDuration)
+    if (GEngine)
     {
-        CurrentDialogueIndex++;
-        CurrentDialogueTimer = 0.0f;
-
-        if (CurrentDialogueIndex < ActiveDialogue.Num())
-        {
-            // Start next dialogue
-            const FNarr_DialogueEntry& NextEntry = ActiveDialogue[CurrentDialogueIndex];
-            OnDialogueStarted(NextEntry.Speaker, NextEntry.Text);
-
-            // Play audio if available
-            if (NextEntry.VoiceClip.IsValid())
-            {
-                USoundCue* SoundCue = NextEntry.VoiceClip.LoadSynchronous();
-                if (SoundCue && NarratorAudioComponent)
-                {
-                    NarratorAudioComponent->SetSound(SoundCue);
-                    NarratorAudioComponent->Play();
-                }
-            }
-        }
-        else
-        {
-            // End dialogue sequence
-            StopCurrentDialogue();
-        }
+        GEngine->AddOnScreenDebugMessage(-1, Duration, FColor::Cyan, NarrationText);
     }
 }
 
-void ANarrativeManager::InitializeNarrativeEvents()
+void UNarrativeManager::LoadDialogueData()
 {
-    // Clear existing events
-    NarrativeEvents.Empty();
-
-    // River danger warning
-    FNarr_NarrativeEvent RiverEvent;
-    RiverEvent.EventID = TEXT("river_danger");
-    RiverEvent.DialogueText = TEXT("The ancient hunting grounds stretch before you, survivor. The river runs red with danger - massive predator tracks mark the muddy banks. Stay low, move silent.");
-    RiverEvent.CharacterName = TEXT("Narrator");
-    RiverEvent.TriggerRadius = 800.0f;
-    RiverEvent.bIsOneShot = true;
-    NarrativeEvents.Add(RiverEvent);
-
-    // Thunderfoot warning
-    FNarr_NarrativeEvent ThunderfootEvent;
-    ThunderfootEvent.EventID = TEXT("thunderfoot_warning");
-    ThunderfootEvent.DialogueText = TEXT("Warning! Thunderfoot approaches from the eastern ridge. Seek shelter in the caves or climb the tall rocks. Do not attempt to outrun a creature that size.");
-    ThunderfootEvent.CharacterName = TEXT("Tribal Scout");
-    ThunderfootEvent.TriggerRadius = 1200.0f;
-    ThunderfootEvent.bIsOneShot = false;
-    NarrativeEvents.Add(ThunderfootEvent);
-
-    // First survival tip
-    FNarr_NarrativeEvent SurvivalEvent;
-    SurvivalEvent.EventID = TEXT("survival_basics");
-    SurvivalEvent.DialogueText = TEXT("Remember the old ways, young hunter. Water flows downhill, predators hunt at dawn and dusk, and the safest path is not always the shortest.");
-    SurvivalEvent.CharacterName = TEXT("Elder Voice");
-    SurvivalEvent.TriggerRadius = 600.0f;
-    SurvivalEvent.bIsOneShot = true;
-    NarrativeEvents.Add(SurvivalEvent);
+    // Initialize sample quest objectives for survival gameplay
+    ActiveObjectives.Empty();
+    
+    FNarr_QuestObjective Obj1;
+    Obj1.ObjectiveID = TEXT("GatherSticks");
+    Obj1.Description = TEXT("Gather 10 sticks for shelter construction");
+    Obj1.RequiredCount = 10;
+    Obj1.CurrentCount = 0;
+    ActiveObjectives.Add(Obj1);
+    
+    FNarr_QuestObjective Obj2;
+    Obj2.ObjectiveID = TEXT("FindWater");
+    Obj2.Description = TEXT("Locate a safe water source");
+    Obj2.RequiredCount = 1;
+    Obj2.CurrentCount = 0;
+    ActiveObjectives.Add(Obj2);
+    
+    FNarr_QuestObjective Obj3;
+    Obj3.ObjectiveID = TEXT("AvoidPredators");
+    Obj3.Description = TEXT("Survive 3 predator encounters");
+    Obj3.RequiredCount = 3;
+    Obj3.CurrentCount = 0;
+    ActiveObjectives.Add(Obj3);
+    
+    UE_LOG(LogTemp, Log, TEXT("Loaded %d quest objectives"), ActiveObjectives.Num());
 }
 
-void ANarrativeManager::FindPlayerCharacter()
+void UNarrativeManager::ProcessDialogueChoice(int32 ChoiceIndex)
 {
-    if (UWorld* World = GetWorld())
-    {
-        if (APlayerController* PC = World->GetFirstPlayerController())
-        {
-            if (APawn* PlayerPawn = PC->GetPawn())
-            {
-                PlayerCharacter = Cast<ATranspersonalCharacter>(PlayerPawn);
-            }
-        }
-    }
+    // Handle player dialogue choices
+    UE_LOG(LogTemp, Log, TEXT("Player selected dialogue choice: %d"), ChoiceIndex);
+    
+    // This would advance the dialogue tree based on player choice
+    bIsDialogueActive = false;
 }
