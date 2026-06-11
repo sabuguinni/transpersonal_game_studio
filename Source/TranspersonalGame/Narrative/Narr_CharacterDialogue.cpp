@@ -1,88 +1,92 @@
 #include "Narr_CharacterDialogue.h"
+#include "Engine/Engine.h"
 
 UNarr_CharacterDialogue::UNarr_CharacterDialogue()
 {
-    CharacterName = TEXT("Unnamed NPC");
-    NPCType = ENarr_NPCType::Villager;
-    
-    // Setup default greeting
-    DefaultGreeting.SequenceID = TEXT("greeting");
-    DefaultGreeting.bIsRepeatable = true;
-    
-    FNarr_DialogueLine greetingLine;
-    greetingLine.SpeakerName = CharacterName;
-    greetingLine.DialogueText = FText::FromString(TEXT("Greetings, hunter. The wilds are dangerous today."));
-    greetingLine.Duration = 3.5f;
-    
-    DefaultGreeting.DialogueLines.Add(greetingLine);
-    
-    // Setup emergency warning
-    EmergencyWarning.SequenceID = TEXT("emergency");
-    EmergencyWarning.bIsRepeatable = true;
-    
-    FNarr_DialogueLine warningLine;
-    warningLine.SpeakerName = CharacterName;
-    warningLine.DialogueText = FText::FromString(TEXT("Danger approaches! Seek shelter immediately!"));
-    warningLine.Duration = 2.5f;
-    
-    EmergencyWarning.DialogueLines.Add(warningLine);
+    CharacterName = TEXT("Unknown Character");
+    CharacterType = ECharacterArchetype::Survivor;
+    CurrentDialogueIndex = 0;
+    bDialogueCompleted = false;
 }
 
-FNarr_DialogueSequence UNarr_CharacterDialogue::GetDialogueByID(const FString& SequenceID)
+FNarr_DialogueLine UNarr_CharacterDialogue::GetCurrentDialogue() const
 {
-    if (SequenceID == TEXT("greeting"))
+    if (DialogueLines.IsValidIndex(CurrentDialogueIndex))
     {
-        return DefaultGreeting;
+        return DialogueLines[CurrentDialogueIndex];
     }
     
-    if (SequenceID == TEXT("emergency"))
-    {
-        return EmergencyWarning;
-    }
+    // Return default dialogue if index is invalid
+    FNarr_DialogueLine DefaultLine;
+    DefaultLine.SpeakerName = CharacterName;
+    DefaultLine.DialogueText = FText::FromString(TEXT("I have nothing more to say."));
+    return DefaultLine;
+}
+
+TArray<FNarr_DialogueChoice> UNarr_CharacterDialogue::GetAvailableChoices() const
+{
+    TArray<FNarr_DialogueChoice> AvailableChoices;
     
-    for (const FNarr_DialogueSequence& Sequence : DialogueSequences)
+    // Filter choices based on current dialogue state
+    for (const FNarr_DialogueChoice& Choice : DialogueChoices)
     {
-        if (Sequence.SequenceID == SequenceID)
+        // For now, include all choices - can add item/condition checks later
+        if (!Choice.bRequiresItem)
         {
-            return Sequence;
+            AvailableChoices.Add(Choice);
         }
     }
     
-    // Return default if not found
-    return DefaultGreeting;
+    // If no specific choices, add default continue option
+    if (AvailableChoices.Num() == 0 && HasMoreDialogue())
+    {
+        FNarr_DialogueChoice ContinueChoice;
+        ContinueChoice.ChoiceText = FText::FromString(TEXT("Continue..."));
+        ContinueChoice.NextDialogueID = CurrentDialogueIndex + 1;
+        AvailableChoices.Add(ContinueChoice);
+    }
+    
+    return AvailableChoices;
 }
 
-TArray<FString> UNarr_CharacterDialogue::GetAvailableSequences()
+bool UNarr_CharacterDialogue::AdvanceDialogue(int32 ChoiceIndex)
 {
-    TArray<FString> AvailableIDs;
+    TArray<FNarr_DialogueChoice> AvailableChoices = GetAvailableChoices();
     
-    AvailableIDs.Add(DefaultGreeting.SequenceID);
-    AvailableIDs.Add(EmergencyWarning.SequenceID);
-    
-    for (const FNarr_DialogueSequence& Sequence : DialogueSequences)
+    if (!AvailableChoices.IsValidIndex(ChoiceIndex))
     {
-        AvailableIDs.Add(Sequence.SequenceID);
+        return false;
     }
     
-    return AvailableIDs;
+    const FNarr_DialogueChoice& SelectedChoice = AvailableChoices[ChoiceIndex];
+    
+    if (SelectedChoice.NextDialogueID >= 0)
+    {
+        CurrentDialogueIndex = SelectedChoice.NextDialogueID;
+    }
+    else
+    {
+        // Auto-advance to next dialogue
+        CurrentDialogueIndex++;
+    }
+    
+    // Check if dialogue is completed
+    if (CurrentDialogueIndex >= DialogueLines.Num())
+    {
+        bDialogueCompleted = true;
+        return false;
+    }
+    
+    return true;
 }
 
-bool UNarr_CharacterDialogue::HasPrerequisites(const FString& SequenceID, const TArray<FString>& PlayerProgress)
+void UNarr_CharacterDialogue::ResetDialogue()
 {
-    FNarr_DialogueSequence FoundSequence = GetDialogueByID(SequenceID);
-    
-    if (FoundSequence.Prerequisites.Num() == 0)
-    {
-        return true; // No prerequisites needed
-    }
-    
-    for (const FString& Prerequisite : FoundSequence.Prerequisites)
-    {
-        if (!PlayerProgress.Contains(Prerequisite))
-        {
-            return false; // Missing prerequisite
-        }
-    }
-    
-    return true; // All prerequisites met
+    CurrentDialogueIndex = 0;
+    bDialogueCompleted = false;
+}
+
+bool UNarr_CharacterDialogue::HasMoreDialogue() const
+{
+    return !bDialogueCompleted && CurrentDialogueIndex < DialogueLines.Num();
 }
