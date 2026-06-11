@@ -1,238 +1,149 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
-#include "Engine/Engine.h"
-#include "Components/SceneComponent.h"
-#include "../SharedTypes.h"
+#include "Subsystems/GameInstanceSubsystem.h"
+#include "Engine/DataTable.h"
+#include "SharedTypes.h"
 #include "Narr_StoryManager.generated.h"
 
-// Story progression states for prehistoric survival narrative
-UENUM(BlueprintType)
-enum class ENarr_StoryPhase : uint8
-{
-    Awakening,          // Player awakens in prehistoric world
-    FirstSurvival,      // Learning basic survival mechanics
-    TribalContact,      // First contact with other survivors
-    TerritoryExploration, // Exploring dangerous territories
-    DinosaurEncounters, // Major dinosaur confrontations
-    TribalIntegration,  // Joining or forming tribal groups
-    EnvironmentalCrisis, // Major environmental disasters
-    TribalWarfare,      // Conflicts between groups
-    Evolution,          // Technological/social advancement
-    Legacy              // Establishing lasting civilization
-};
-
-// Story event types that can trigger narrative responses
-UENUM(BlueprintType)
-enum class ENarr_StoryEventType : uint8
-{
-    PlayerDeath,        // Player character dies
-    DinosaurKill,       // Player kills major dinosaur
-    TribalMeeting,      // First contact with NPC tribe
-    ResourceDiscovery,  // Finding major resource cache
-    EnvironmentalHazard, // Natural disaster occurs
-    TerritoryConquest,  // Claiming new territory
-    CraftingBreakthrough, // Major technological advance
-    AllianceFormed,     // Political alliance created
-    ConflictResolution, // Major conflict resolved
-    SeasonalChange      // Environmental season shift
-};
-
-// Character archetype for narrative purposes
-UENUM(BlueprintType)
-enum class ENarr_CharacterArchetype : uint8
-{
-    Survivor,           // Basic survival-focused character
-    Hunter,             // Predator/combat specialist
-    Gatherer,           // Resource collection specialist
-    Crafter,            // Tool/weapon creation expert
-    Explorer,           // Territory expansion focused
-    Leader,             // Tribal leadership role
-    Healer,             // Medical/support specialist
-    Scout,              // Reconnaissance specialist
-    Warrior,            // Combat-focused tribal member
-    Elder               // Wisdom/knowledge keeper
-};
-
-// Story progression data structure
 USTRUCT(BlueprintType)
-struct FNarr_StoryProgressionData
+struct TRANSPERSONALGAME_API FNarr_StoryEvent
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story Progression")
-    ENarr_StoryPhase CurrentPhase;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    FString EventID;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story Progression")
-    TArray<ENarr_StoryEventType> CompletedEvents;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    FText EventTitle;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story Progression")
-    int32 DaysInWorld;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    FText EventDescription;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story Progression")
-    int32 DinosaurKillCount;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    bool bIsCompleted;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story Progression")
-    int32 TribesEncountered;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    int32 StoryChapter;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story Progression")
-    float SurvivalRating;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    TArray<FString> Prerequisites;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story Progression")
-    ENarr_CharacterArchetype PlayerArchetype;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    TArray<FString> UnlockedEvents;
 
-    FNarr_StoryProgressionData()
+    FNarr_StoryEvent()
     {
-        CurrentPhase = ENarr_StoryPhase::Awakening;
-        CompletedEvents.Empty();
-        DaysInWorld = 0;
-        DinosaurKillCount = 0;
-        TribesEncountered = 0;
-        SurvivalRating = 0.0f;
-        PlayerArchetype = ENarr_CharacterArchetype::Survivor;
+        EventID = TEXT("DefaultEvent");
+        EventTitle = FText::FromString(TEXT("Unknown Event"));
+        EventDescription = FText::FromString(TEXT("No description available"));
+        bIsCompleted = false;
+        StoryChapter = 1;
     }
 };
 
-// Narrative event data for story triggers
 USTRUCT(BlueprintType)
-struct FNarr_NarrativeEvent
+struct TRANSPERSONALGAME_API FNarr_StoryProgress
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative Event")
-    FString EventTitle;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story Progress")
+    int32 CurrentChapter;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative Event")
-    FString EventDescription;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story Progress")
+    TArray<FString> CompletedEvents;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative Event")
-    ENarr_StoryEventType EventType;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story Progress")
+    TArray<FString> ActiveEvents;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative Event")
-    ENarr_StoryPhase RequiredPhase;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story Progress")
+    float SurvivalDays;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative Event")
-    float EventPriority;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story Progress")
+    int32 DinosaurEncounters;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative Event")
-    bool bIsRepeatable;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story Progress")
+    bool bFirstHuntCompleted;
 
-    FNarr_NarrativeEvent()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story Progress")
+    bool bSafeHavenFound;
+
+    FNarr_StoryProgress()
     {
-        EventTitle = TEXT("Unknown Event");
-        EventDescription = TEXT("A mysterious event occurs in the prehistoric world.");
-        EventType = ENarr_StoryEventType::SeasonalChange;
-        RequiredPhase = ENarr_StoryPhase::Awakening;
-        EventPriority = 1.0f;
-        bIsRepeatable = false;
+        CurrentChapter = 1;
+        SurvivalDays = 0.0f;
+        DinosaurEncounters = 0;
+        bFirstHuntCompleted = false;
+        bSafeHavenFound = false;
     }
 };
 
-/**
- * Story Manager for prehistoric survival narrative
- * Manages story progression, character development, and narrative events
- * Integrates with quest system and environmental storytelling
- */
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API ANarr_StoryManager : public AActor
+UCLASS()
+class TRANSPERSONALGAME_API UNarr_StoryManager : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
 public:
-    ANarr_StoryManager();
+    UNarr_StoryManager();
+
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
 
 protected:
-    virtual void BeginPlay() override;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story System")
+    TArray<FNarr_StoryEvent> StoryEvents;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story System")
+    FNarr_StoryProgress CurrentProgress;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story System")
+    bool bStorySystemActive;
 
 public:
-    virtual void Tick(float DeltaTime) override;
+    UFUNCTION(BlueprintCallable, Category = "Story")
+    bool TriggerStoryEvent(const FString& EventID);
 
-    // Core story progression system
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story System")
-    FNarr_StoryProgressionData StoryProgression;
+    UFUNCTION(BlueprintCallable, Category = "Story")
+    bool CompleteStoryEvent(const FString& EventID);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story System")
-    TArray<FNarr_NarrativeEvent> ActiveEvents;
+    UFUNCTION(BlueprintCallable, Category = "Story")
+    bool IsEventCompleted(const FString& EventID) const;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story System")
-    TArray<FNarr_NarrativeEvent> CompletedEvents;
+    UFUNCTION(BlueprintCallable, Category = "Story")
+    bool IsEventActive(const FString& EventID) const;
 
-    // Story progression methods
-    UFUNCTION(BlueprintCallable, Category = "Story Progression")
-    void AdvanceStoryPhase(ENarr_StoryPhase NewPhase);
+    UFUNCTION(BlueprintCallable, Category = "Story")
+    TArray<FString> GetActiveEvents() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Story Progression")
-    void TriggerStoryEvent(ENarr_StoryEventType EventType, const FString& EventContext);
+    UFUNCTION(BlueprintCallable, Category = "Story")
+    TArray<FString> GetAvailableEvents() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Story Progression")
-    bool IsStoryEventCompleted(ENarr_StoryEventType EventType) const;
+    UFUNCTION(BlueprintCallable, Category = "Story")
+    FNarr_StoryProgress GetStoryProgress() const { return CurrentProgress; }
 
-    UFUNCTION(BlueprintCallable, Category = "Story Progression")
-    void UpdatePlayerArchetype(ENarr_CharacterArchetype NewArchetype);
+    UFUNCTION(BlueprintCallable, Category = "Story")
+    void AdvanceChapter();
 
-    // Character development tracking
-    UFUNCTION(BlueprintCallable, Category = "Character Development")
-    void RecordDinosaurKill(const FString& DinosaurType);
+    UFUNCTION(BlueprintCallable, Category = "Story")
+    void UpdateSurvivalStats(float DaysElapsed, int32 NewEncounters);
 
-    UFUNCTION(BlueprintCallable, Category = "Character Development")
-    void RecordTribalEncounter(const FString& TribeName);
+    UFUNCTION(BlueprintCallable, Category = "Story")
+    void SetMilestone(const FString& MilestoneName, bool bCompleted);
 
-    UFUNCTION(BlueprintCallable, Category = "Character Development")
-    void UpdateSurvivalRating(float RatingChange);
+    UFUNCTION(BlueprintCallable, Category = "Story")
+    bool GetMilestone(const FString& MilestoneName) const;
 
-    // Narrative event management
-    UFUNCTION(BlueprintCallable, Category = "Narrative Events")
-    void RegisterNarrativeEvent(const FNarr_NarrativeEvent& NewEvent);
+    UFUNCTION(BlueprintCallable, Category = "Story")
+    void AddStoryEvent(const FNarr_StoryEvent& NewEvent);
 
-    UFUNCTION(BlueprintCallable, Category = "Narrative Events")
-    TArray<FNarr_NarrativeEvent> GetAvailableEvents() const;
+    UFUNCTION(BlueprintCallable, Category = "Story")
+    FText GetChapterTitle() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Narrative Events")
-    void CompleteNarrativeEvent(const FString& EventTitle);
-
-    // Story query methods
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Story Query")
-    ENarr_StoryPhase GetCurrentStoryPhase() const { return StoryProgression.CurrentPhase; }
-
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Story Query")
-    int32 GetDaysInWorld() const { return StoryProgression.DaysInWorld; }
-
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Story Query")
-    ENarr_CharacterArchetype GetPlayerArchetype() const { return StoryProgression.PlayerArchetype; }
-
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Story Query")
-    float GetSurvivalRating() const { return StoryProgression.SurvivalRating; }
-
-protected:
-    // Internal story management
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    USceneComponent* RootSceneComponent;
-
-    // Story progression timers
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story Timing")
-    float DayProgressionTimer;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story Timing")
-    float EventCheckInterval;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story Timing")
-    float LastEventCheckTime;
-
-    // Story configuration
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story Config")
-    float SecondsPerGameDay;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story Config")
-    bool bAutoProgressStory;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story Config")
-    float StoryProgressionThreshold;
+    UFUNCTION(BlueprintCallable, Category = "Story")
+    FText GetChapterDescription() const;
 
 private:
-    void ProcessDayProgression(float DeltaTime);
-    void CheckForStoryEvents();
-    void EvaluateStoryPhaseProgression();
-    FString GetStoryPhaseDescription(ENarr_StoryPhase Phase) const;
-    FString GetEventTypeDescription(ENarr_StoryEventType EventType) const;
+    FNarr_StoryEvent* FindStoryEvent(const FString& EventID);
+    bool CheckEventPrerequisites(const FNarr_StoryEvent& Event) const;
+    void UnlockFollowupEvents(const FNarr_StoryEvent& CompletedEvent);
+    void InitializeDefaultStoryEvents();
 };
