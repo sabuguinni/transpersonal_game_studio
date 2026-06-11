@@ -1,348 +1,280 @@
 #include "Audio_MetaSoundManager.h"
-#include "Engine/World.h"
-#include "Kismet/GameplayStatics.h"
 #include "Components/AudioComponent.h"
-#include "Sound/SoundBase.h"
-#include "MetasoundSource.h"
 #include "Engine/Engine.h"
+#include "TimerManager.h"
+#include "Sound/SoundBase.h"
+#include "Kismet/GameplayStatics.h"
 
-UAudio_MetaSoundManager::UAudio_MetaSoundManager()
+AAudio_MetaSoundManager::AAudio_MetaSoundManager()
 {
-    CurrentAmbienceType = EAudio_AmbienceType::Forest;
-    CurrentThreatLevel = EAudio_ThreatLevel::Safe;
+    PrimaryActorTick.bCanEverTick = true;
+    
+    // Initialize audio components
+    InitializeAudioComponents();
+    
+    // Set default states
+    CurrentMusicState = EAudio_MusicState::Calm;
+    CurrentAmbientZone = EAudio_AmbientZone::Forest;
+    
+    // Set default volumes
     MasterVolume = 1.0f;
-    AmbienceVolume = 0.8f;
+    MusicVolume = 0.7f;
+    AmbientVolume = 0.5f;
     SFXVolume = 1.0f;
-    VoiceVolume = 1.0f;
-    NarrationComponent = nullptr;
 }
 
-void UAudio_MetaSoundManager::Initialize(FSubsystemCollectionBase& Collection)
+void AAudio_MetaSoundManager::BeginPlay()
 {
-    Super::Initialize(Collection);
+    Super::BeginPlay();
     
-    UE_LOG(LogTemp, Warning, TEXT("Audio_MetaSoundManager: Initializing adaptive audio system"));
+    LoadDefaultSoundLayers();
+    UpdateVolumeSettings();
     
-    InitializeAmbienceConfigs();
-    InitializeDinosaurSounds();
-    InitializeNarrationSounds();
+    // Start with default music and ambient
+    SetMusicState(CurrentMusicState);
+    SetAmbientZone(CurrentAmbientZone);
+}
+
+void AAudio_MetaSoundManager::Tick(float DeltaTime)
+{
+    Super::Tick(DeltaTime);
     
-    // Create narration component
-    NarrationComponent = CreateAudioComponent();
-    if (NarrationComponent)
+    if (bIsFadingMusic)
     {
-        NarrationComponent->SetVolumeMultiplier(VoiceVolume * MasterVolume);
+        ProcessMusicFade();
+    }
+    
+    if (bIsFadingAmbient)
+    {
+        ProcessAmbientFade();
     }
 }
 
-void UAudio_MetaSoundManager::Deinitialize()
+void AAudio_MetaSoundManager::InitializeAudioComponents()
 {
-    // Clean up audio components
-    for (UAudioComponent* Component : AmbienceComponents)
+    // Create music audio component
+    MusicAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("MusicAudioComponent"));
+    if (MusicAudioComponent)
     {
-        if (Component && IsValid(Component))
+        MusicAudioComponent->bAutoActivate = false;
+        MusicAudioComponent->SetVolumeMultiplier(MusicVolume);
+    }
+    
+    // Create ambient audio component
+    AmbientAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("AmbientAudioComponent"));
+    if (AmbientAudioComponent)
+    {
+        AmbientAudioComponent->bAutoActivate = false;
+        AmbientAudioComponent->SetVolumeMultiplier(AmbientVolume);
+    }
+    
+    // Create SFX audio component
+    SFXAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("SFXAudioComponent"));
+    if (SFXAudioComponent)
+    {
+        SFXAudioComponent->bAutoActivate = false;
+        SFXAudioComponent->SetVolumeMultiplier(SFXVolume);
+    }
+}
+
+void AAudio_MetaSoundManager::LoadDefaultSoundLayers()
+{
+    // Initialize empty sound layers - to be populated via Blueprint or data assets
+    for (int32 i = 0; i < (int32)EAudio_MusicState::Danger + 1; i++)
+    {
+        EAudio_MusicState State = (EAudio_MusicState)i;
+        MusicLayers.Add(State, FAudio_SoundLayer());
+    }
+    
+    for (int32 i = 0; i < (int32)EAudio_AmbientZone::Mountain + 1; i++)
+    {
+        EAudio_AmbientZone Zone = (EAudio_AmbientZone)i;
+        AmbientLayers.Add(Zone, FAudio_SoundLayer());
+    }
+}
+
+void AAudio_MetaSoundManager::UpdateVolumeSettings()
+{
+    if (MusicAudioComponent)
+    {
+        MusicAudioComponent->SetVolumeMultiplier(MasterVolume * MusicVolume);
+    }
+    
+    if (AmbientAudioComponent)
+    {
+        AmbientAudioComponent->SetVolumeMultiplier(MasterVolume * AmbientVolume);
+    }
+    
+    if (SFXAudioComponent)
+    {
+        SFXAudioComponent->SetVolumeMultiplier(MasterVolume * SFXVolume);
+    }
+}
+
+void AAudio_MetaSoundManager::SetMusicState(EAudio_MusicState NewState)
+{
+    if (CurrentMusicState == NewState) return;
+    
+    CurrentMusicState = NewState;
+    
+    if (MusicLayers.Contains(NewState))
+    {
+        const FAudio_SoundLayer& Layer = MusicLayers[NewState];
+        if (Layer.SoundAsset && MusicAudioComponent)
         {
-            Component->Stop();
-            Component->DestroyComponent();
+            MusicAudioComponent->Stop();
+            MusicAudioComponent->SetSound(Layer.SoundAsset);
+            MusicAudioComponent->SetVolumeMultiplier(MasterVolume * MusicVolume * Layer.Volume);
+            MusicAudioComponent->Play();
         }
     }
-    AmbienceComponents.Empty();
-    
-    if (NarrationComponent && IsValid(NarrationComponent))
-    {
-        NarrationComponent->Stop();
-        NarrationComponent->DestroyComponent();
-        NarrationComponent = nullptr;
-    }
-    
-    Super::Deinitialize();
 }
 
-void UAudio_MetaSoundManager::SetAmbienceType(EAudio_AmbienceType NewAmbienceType, float FadeTime)
+void AAudio_MetaSoundManager::SetAmbientZone(EAudio_AmbientZone NewZone)
 {
-    if (CurrentAmbienceType == NewAmbienceType)
+    if (CurrentAmbientZone == NewZone) return;
+    
+    CurrentAmbientZone = NewZone;
+    
+    if (AmbientLayers.Contains(NewZone))
     {
-        return;
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("Audio_MetaSoundManager: Changing ambience from %d to %d"), 
-           (int32)CurrentAmbienceType, (int32)NewAmbienceType);
-    
-    CrossfadeToNewAmbience(NewAmbienceType, FadeTime);
-    CurrentAmbienceType = NewAmbienceType;
-}
-
-void UAudio_MetaSoundManager::SetThreatLevel(EAudio_ThreatLevel ThreatLevel, float FadeTime)
-{
-    if (CurrentThreatLevel == ThreatLevel)
-    {
-        return;
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("Audio_MetaSoundManager: Threat level changed to %d"), (int32)ThreatLevel);
-    
-    UpdateThreatLevelMix(ThreatLevel, FadeTime);
-    CurrentThreatLevel = ThreatLevel;
-}
-
-void UAudio_MetaSoundManager::PlayDinosaurSound(const FString& DinosaurType, const FVector& Location, float Volume)
-{
-    if (DinosaurSounds.Contains(DinosaurType))
-    {
-        TSoftObjectPtr<UMetaSoundSource>* SoundPtr = DinosaurSounds.Find(DinosaurType);
-        if (SoundPtr && SoundPtr->IsValid())
+        const FAudio_SoundLayer& Layer = AmbientLayers[NewZone];
+        if (Layer.SoundAsset && AmbientAudioComponent)
         {
-            UMetaSoundSource* MetaSound = SoundPtr->LoadSynchronous();
-            if (MetaSound)
-            {
-                UGameplayStatics::PlaySoundAtLocation(
-                    GetWorld(),
-                    MetaSound,
-                    Location,
-                    Volume * SFXVolume * MasterVolume
-                );
-                
-                UE_LOG(LogTemp, Warning, TEXT("Audio_MetaSoundManager: Playing %s sound at location"), *DinosaurType);
-            }
+            AmbientAudioComponent->Stop();
+            AmbientAudioComponent->SetSound(Layer.SoundAsset);
+            AmbientAudioComponent->SetVolumeMultiplier(MasterVolume * AmbientVolume * Layer.Volume);
+            AmbientAudioComponent->Play();
         }
     }
-    else
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Audio_MetaSoundManager: Dinosaur sound %s not found"), *DinosaurType);
-    }
 }
 
-void UAudio_MetaSoundManager::PlayNarrationLine(const FString& NarrationKey, float Volume)
+void AAudio_MetaSoundManager::PlaySFX(USoundBase* SoundEffect, float Volume)
 {
-    if (!NarrationComponent)
+    if (SoundEffect && SFXAudioComponent)
     {
-        UE_LOG(LogTemp, Error, TEXT("Audio_MetaSoundManager: Narration component not initialized"));
-        return;
-    }
-    
-    if (NarrationSounds.Contains(NarrationKey))
-    {
-        TSoftObjectPtr<USoundBase>* SoundPtr = NarrationSounds.Find(NarrationKey);
-        if (SoundPtr && SoundPtr->IsValid())
-        {
-            USoundBase* Sound = SoundPtr->LoadSynchronous();
-            if (Sound)
-            {
-                NarrationComponent->SetSound(Sound);
-                NarrationComponent->SetVolumeMultiplier(Volume * VoiceVolume * MasterVolume);
-                NarrationComponent->Play();
-                
-                UE_LOG(LogTemp, Warning, TEXT("Audio_MetaSoundManager: Playing narration: %s"), *NarrationKey);
-            }
-        }
-    }
-    else
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Audio_MetaSoundManager: Narration %s not found"), *NarrationKey);
+        SFXAudioComponent->SetSound(SoundEffect);
+        SFXAudioComponent->SetVolumeMultiplier(MasterVolume * SFXVolume * Volume);
+        SFXAudioComponent->Play();
     }
 }
 
-void UAudio_MetaSoundManager::SetMasterVolume(float Volume)
+void AAudio_MetaSoundManager::SetMasterVolume(float Volume)
 {
     MasterVolume = FMath::Clamp(Volume, 0.0f, 1.0f);
-    
-    // Update all active components
-    for (UAudioComponent* Component : AmbienceComponents)
-    {
-        if (Component && IsValid(Component))
-        {
-            Component->SetVolumeMultiplier(AmbienceVolume * MasterVolume);
-        }
-    }
-    
-    if (NarrationComponent && IsValid(NarrationComponent))
-    {
-        NarrationComponent->SetVolumeMultiplier(VoiceVolume * MasterVolume);
-    }
+    UpdateVolumeSettings();
 }
 
-void UAudio_MetaSoundManager::SetAmbienceVolume(float Volume)
+void AAudio_MetaSoundManager::SetMusicVolume(float Volume)
 {
-    AmbienceVolume = FMath::Clamp(Volume, 0.0f, 1.0f);
-    
-    for (UAudioComponent* Component : AmbienceComponents)
-    {
-        if (Component && IsValid(Component))
-        {
-            Component->SetVolumeMultiplier(AmbienceVolume * MasterVolume);
-        }
-    }
+    MusicVolume = FMath::Clamp(Volume, 0.0f, 1.0f);
+    UpdateVolumeSettings();
 }
 
-void UAudio_MetaSoundManager::SetSFXVolume(float Volume)
+void AAudio_MetaSoundManager::SetAmbientVolume(float Volume)
+{
+    AmbientVolume = FMath::Clamp(Volume, 0.0f, 1.0f);
+    UpdateVolumeSettings();
+}
+
+void AAudio_MetaSoundManager::SetSFXVolume(float Volume)
 {
     SFXVolume = FMath::Clamp(Volume, 0.0f, 1.0f);
+    UpdateVolumeSettings();
 }
 
-void UAudio_MetaSoundManager::SetVoiceVolume(float Volume)
+void AAudio_MetaSoundManager::FadeToMusicState(EAudio_MusicState NewState, float FadeTime)
 {
-    VoiceVolume = FMath::Clamp(Volume, 0.0f, 1.0f);
+    if (CurrentMusicState == NewState || !MusicAudioComponent) return;
     
-    if (NarrationComponent && IsValid(NarrationComponent))
+    // Setup fade parameters
+    MusicFadeStartVolume = MusicAudioComponent->VolumeMultiplier;
+    MusicFadeTargetVolume = 0.0f;
+    MusicFadeCurrentTime = 0.0f;
+    MusicFadeDuration = FadeTime * 0.5f; // Half time to fade out
+    bIsFadingMusic = true;
+    
+    // Store the target state for after fade
+    EAudio_MusicState TargetState = NewState;
+    
+    // Set timer to switch music at halfway point
+    GetWorldTimerManager().SetTimer(MusicFadeTimer, [this, TargetState]()
     {
-        NarrationComponent->SetVolumeMultiplier(VoiceVolume * MasterVolume);
-    }
-}
-
-void UAudio_MetaSoundManager::InitializeAmbienceConfigs()
-{
-    // Forest ambience configuration
-    FAudio_AmbienceConfig ForestConfig;
-    ForestConfig.AmbienceType = EAudio_AmbienceType::Forest;
-    ForestConfig.CrossfadeTime = 3.0f;
-    ForestConfig.MaxDistance = 5000.0f;
-    
-    FAudio_SoundLayer ForestLayer1;
-    ForestLayer1.Volume = 0.6f;
-    ForestLayer1.FadeTime = 2.0f;
-    ForestLayer1.bIsLooping = true;
-    ForestConfig.SoundLayers.Add(ForestLayer1);
-    
-    AmbienceConfigs.Add(EAudio_AmbienceType::Forest, ForestConfig);
-    
-    // Danger zone configuration
-    FAudio_AmbienceConfig DangerConfig;
-    DangerConfig.AmbienceType = EAudio_AmbienceType::Danger;
-    DangerConfig.CrossfadeTime = 1.5f;
-    DangerConfig.MaxDistance = 3000.0f;
-    
-    FAudio_SoundLayer DangerLayer1;
-    DangerLayer1.Volume = 0.8f;
-    DangerLayer1.FadeTime = 1.0f;
-    DangerLayer1.bIsLooping = true;
-    DangerConfig.SoundLayers.Add(DangerLayer1);
-    
-    AmbienceConfigs.Add(EAudio_AmbienceType::Danger, DangerConfig);
-    
-    // Peaceful area configuration
-    FAudio_AmbienceConfig PeacefulConfig;
-    PeacefulConfig.AmbienceType = EAudio_AmbienceType::Peaceful;
-    PeacefulConfig.CrossfadeTime = 4.0f;
-    PeacefulConfig.MaxDistance = 8000.0f;
-    
-    FAudio_SoundLayer PeacefulLayer1;
-    PeacefulLayer1.Volume = 0.4f;
-    PeacefulLayer1.FadeTime = 3.0f;
-    PeacefulLayer1.bIsLooping = true;
-    PeacefulConfig.SoundLayers.Add(PeacefulLayer1);
-    
-    AmbienceConfigs.Add(EAudio_AmbienceType::Peaceful, PeacefulConfig);
-    
-    UE_LOG(LogTemp, Warning, TEXT("Audio_MetaSoundManager: Initialized %d ambience configurations"), AmbienceConfigs.Num());
-}
-
-void UAudio_MetaSoundManager::InitializeDinosaurSounds()
-{
-    // Initialize dinosaur sound mappings
-    // These would be populated with actual MetaSound assets in a real project
-    
-    UE_LOG(LogTemp, Warning, TEXT("Audio_MetaSoundManager: Dinosaur sounds initialized (placeholder)"));
-}
-
-void UAudio_MetaSoundManager::InitializeNarrationSounds()
-{
-    // Initialize narration sound mappings
-    // These would be populated with actual sound assets
-    
-    UE_LOG(LogTemp, Warning, TEXT("Audio_MetaSoundManager: Narration sounds initialized (placeholder)"));
-}
-
-void UAudio_MetaSoundManager::CrossfadeToNewAmbience(EAudio_AmbienceType NewType, float FadeTime)
-{
-    // Fade out current ambience components
-    for (UAudioComponent* Component : AmbienceComponents)
-    {
-        if (Component && IsValid(Component) && Component->IsPlaying())
+        SetMusicState(TargetState);
+        // Start fade in
+        MusicFadeStartVolume = 0.0f;
+        if (MusicLayers.Contains(TargetState))
         {
-            Component->FadeOut(FadeTime, 0.0f);
+            MusicFadeTargetVolume = MasterVolume * MusicVolume * MusicLayers[TargetState].Volume;
         }
+        MusicFadeCurrentTime = 0.0f;
+    }, MusicFadeDuration, false);
+}
+
+void AAudio_MetaSoundManager::FadeToAmbientZone(EAudio_AmbientZone NewZone, float FadeTime)
+{
+    if (CurrentAmbientZone == NewZone || !AmbientAudioComponent) return;
+    
+    // Setup fade parameters
+    AmbientFadeStartVolume = AmbientAudioComponent->VolumeMultiplier;
+    AmbientFadeTargetVolume = 0.0f;
+    AmbientFadeCurrentTime = 0.0f;
+    AmbientFadeDuration = FadeTime * 0.5f; // Half time to fade out
+    bIsFadingAmbient = true;
+    
+    // Store the target zone for after fade
+    EAudio_AmbientZone TargetZone = NewZone;
+    
+    // Set timer to switch ambient at halfway point
+    GetWorldTimerManager().SetTimer(AmbientFadeTimer, [this, TargetZone]()
+    {
+        SetAmbientZone(TargetZone);
+        // Start fade in
+        AmbientFadeStartVolume = 0.0f;
+        if (AmbientLayers.Contains(TargetZone))
+        {
+            AmbientFadeTargetVolume = MasterVolume * AmbientVolume * AmbientLayers[TargetZone].Volume;
+        }
+        AmbientFadeCurrentTime = 0.0f;
+    }, AmbientFadeDuration, false);
+}
+
+void AAudio_MetaSoundManager::ProcessMusicFade()
+{
+    if (!MusicAudioComponent || MusicFadeDuration <= 0.0f)
+    {
+        bIsFadingMusic = false;
+        return;
     }
     
-    // Clear old components after fade
-    AmbienceComponents.Empty();
+    MusicFadeCurrentTime += GetWorld()->GetDeltaSeconds();
+    float Alpha = FMath::Clamp(MusicFadeCurrentTime / MusicFadeDuration, 0.0f, 1.0f);
     
-    // Get new ambience config
-    if (AmbienceConfigs.Contains(NewType))
+    float CurrentVolume = FMath::Lerp(MusicFadeStartVolume, MusicFadeTargetVolume, Alpha);
+    MusicAudioComponent->SetVolumeMultiplier(CurrentVolume);
+    
+    if (Alpha >= 1.0f)
     {
-        const FAudio_AmbienceConfig& Config = AmbienceConfigs[NewType];
-        
-        // Create new audio components for each layer
-        for (const FAudio_SoundLayer& Layer : Config.SoundLayers)
-        {
-            UAudioComponent* NewComponent = CreateAudioComponent();
-            if (NewComponent)
-            {
-                NewComponent->SetVolumeMultiplier(0.0f); // Start at 0 for fade in
-                
-                // Fade in the new component
-                NewComponent->FadeIn(FadeTime, Layer.Volume * AmbienceVolume * MasterVolume);
-                
-                AmbienceComponents.Add(NewComponent);
-            }
-        }
-        
-        UE_LOG(LogTemp, Warning, TEXT("Audio_MetaSoundManager: Crossfaded to %d with %d layers"), 
-               (int32)NewType, Config.SoundLayers.Num());
+        bIsFadingMusic = false;
     }
 }
 
-void UAudio_MetaSoundManager::UpdateThreatLevelMix(EAudio_ThreatLevel ThreatLevel, float FadeTime)
+void AAudio_MetaSoundManager::ProcessAmbientFade()
 {
-    float ThreatIntensity = 0.0f;
-    
-    switch (ThreatLevel)
+    if (!AmbientAudioComponent || AmbientFadeDuration <= 0.0f)
     {
-        case EAudio_ThreatLevel::Safe:
-            ThreatIntensity = 0.0f;
-            break;
-        case EAudio_ThreatLevel::Caution:
-            ThreatIntensity = 0.3f;
-            break;
-        case EAudio_ThreatLevel::Danger:
-            ThreatIntensity = 0.7f;
-            break;
-        case EAudio_ThreatLevel::Extreme:
-            ThreatIntensity = 1.0f;
-            break;
+        bIsFadingAmbient = false;
+        return;
     }
     
-    // Adjust ambience volume based on threat level
-    float AdjustedVolume = AmbienceVolume * (1.0f - ThreatIntensity * 0.3f);
+    AmbientFadeCurrentTime += GetWorld()->GetDeltaSeconds();
+    float Alpha = FMath::Clamp(AmbientFadeCurrentTime / AmbientFadeDuration, 0.0f, 1.0f);
     
-    for (UAudioComponent* Component : AmbienceComponents)
+    float CurrentVolume = FMath::Lerp(AmbientFadeStartVolume, AmbientFadeTargetVolume, Alpha);
+    AmbientAudioComponent->SetVolumeMultiplier(CurrentVolume);
+    
+    if (Alpha >= 1.0f)
     {
-        if (Component && IsValid(Component))
-        {
-            Component->SetVolumeMultiplier(AdjustedVolume * MasterVolume);
-        }
+        bIsFadingAmbient = false;
     }
-    
-    UE_LOG(LogTemp, Warning, TEXT("Audio_MetaSoundManager: Updated threat level mix - intensity: %f"), ThreatIntensity);
-}
-
-UAudioComponent* UAudio_MetaSoundManager::CreateAudioComponent()
-{
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        UE_LOG(LogTemp, Error, TEXT("Audio_MetaSoundManager: Cannot create audio component - no world"));
-        return nullptr;
-    }
-    
-    UAudioComponent* NewComponent = NewObject<UAudioComponent>(this);
-    if (NewComponent)
-    {
-        NewComponent->bAutoActivate = false;
-        NewComponent->bStopWhenOwnerDestroyed = true;
-        NewComponent->SetWorldLocation(FVector::ZeroVector);
-        
-        UE_LOG(LogTemp, Log, TEXT("Audio_MetaSoundManager: Created new audio component"));
-    }
-    
-    return NewComponent;
 }
