@@ -1,445 +1,243 @@
 #include "Build_IntegrationValidator.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "GameFramework/GameModeBase.h"
-#include "GameFramework/PlayerController.h"
-#include "Components/StaticMeshComponent.h"
 #include "HAL/PlatformFilemanager.h"
-#include "Misc/DateTime.h"
 #include "Misc/Paths.h"
+#include "Misc/DateTime.h"
+#include "UObject/UObjectGlobals.h"
+#include "Engine/Level.h"
+#include "EngineUtils.h"
 
 UBuild_IntegrationValidator::UBuild_IntegrationValidator()
 {
-    PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 1.0f;
-
-    // Configuration defaults
-    bAutoValidateOnBeginPlay = true;
-    ValidationInterval = 30.0f;
-    bLogValidationResults = true;
-    bValidationInProgress = false;
-    LastValidationTime = 0.0f;
-    ValidationTimer = 0.0f;
-
-    // Critical systems that must be operational
-    CriticalSystems.Add(TEXT("TranspersonalGameState"));
-    CriticalSystems.Add(TEXT("TranspersonalCharacter"));
-    CriticalSystems.Add(TEXT("PCGWorldGenerator"));
-    CriticalSystems.Add(TEXT("FoliageManager"));
-    CriticalSystems.Add(TEXT("CrowdSimulationManager"));
+    PrimaryComponentTick.bCanEverTick = false;
+    InitializeCoreSystemClasses();
 }
 
-void UBuild_IntegrationValidator::BeginPlay()
+void UBuild_IntegrationValidator::InitializeCoreSystemClasses()
 {
-    Super::BeginPlay();
-
-    if (bAutoValidateOnBeginPlay)
-    {
-        // Delay initial validation to allow systems to initialize
-        GetWorld()->GetTimerManager().SetTimer(
-            FTimerHandle(),
-            [this]() { RunFullValidation(); },
-            2.0f,
-            false
-        );
-    }
+    CoreSystemClasses.Empty();
+    CoreSystemClasses.Add(TEXT("TranspersonalGameState"));
+    CoreSystemClasses.Add(TEXT("TranspersonalCharacter"));
+    CoreSystemClasses.Add(TEXT("PCGWorldGenerator"));
+    CoreSystemClasses.Add(TEXT("FoliageManager"));
+    CoreSystemClasses.Add(TEXT("CrowdSimulationManager"));
+    CoreSystemClasses.Add(TEXT("ProceduralWorldManager"));
+    CoreSystemClasses.Add(TEXT("BuildIntegrationManager"));
+    CoreSystemClasses.Add(TEXT("QA_TestFramework"));
 }
 
-void UBuild_IntegrationValidator::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
-{
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-
-    ValidationTimer += DeltaTime;
-
-    // Periodic validation
-    if (ValidationTimer >= ValidationInterval && !bValidationInProgress)
-    {
-        ValidationTimer = 0.0f;
-        RunFullValidation();
-    }
-}
-
-TArray<FBuild_ValidationResult> UBuild_IntegrationValidator::RunFullValidation()
-{
-    if (bValidationInProgress)
-    {
-        return LastValidationResults;
-    }
-
-    bValidationInProgress = true;
-    LastValidationStartTime = FPlatformTime::Seconds();
-    LastValidationResults.Empty();
-
-    UE_LOG(LogTemp, Log, TEXT("Integration Validator: Starting full validation"));
-
-    // Run all validation tests
-    LastValidationResults.Add(ValidateClassLoading());
-    LastValidationResults.Add(ValidateLevelIntegrity());
-    LastValidationResults.Add(ValidateSystemDependencies());
-    LastValidationResults.Add(ValidateAssetReferences());
-
-    // Update system statuses
-    SystemStatuses.Empty();
-    for (const FString& SystemName : CriticalSystems)
-    {
-        UpdateSystemStatus(SystemName);
-    }
-
-    LastValidationTime = FPlatformTime::Seconds() - LastValidationStartTime;
-    bValidationInProgress = false;
-
-    UE_LOG(LogTemp, Log, TEXT("Integration Validator: Validation completed in %.3f seconds"), LastValidationTime);
-
-    return LastValidationResults;
-}
-
-FBuild_ValidationResult UBuild_IntegrationValidator::ValidateClassLoading()
+FBuild_ValidationResult UBuild_IntegrationValidator::ValidateProjectIntegration()
 {
     FBuild_ValidationResult Result;
-    Result.TestName = TEXT("Class Loading Validation");
-    
-    double StartTime = FPlatformTime::Seconds();
-    
-    int32 LoadedCount = 0;
-    int32 TotalCount = CriticalSystems.Num();
-    TArray<FString> FailedClasses;
+    Result.ReportTimestamp = FDateTime::Now().ToString();
 
-    for (const FString& SystemName : CriticalSystems)
+    // Validate class loading
+    TArray<FString> FailedClasses;
+    bool ClassValidation = ValidateClassLoading(CoreSystemClasses, FailedClasses);
+    Result.LoadedClasses = CoreSystemClasses.Num() - FailedClasses.Num();
+    Result.TotalClasses = CoreSystemClasses.Num();
+    Result.FailedClasses = FailedClasses;
+
+    // Count compiled binaries
+    Result.BinaryFiles = CountCompiledBinaries();
+
+    // Count level actors
+    Result.LevelActors = CountLevelActors();
+
+    // Calculate health percentage
+    int32 PassedChecks = 0;
+    int32 TotalChecks = 4;
+
+    // Check 1: Class loading (80% threshold)
+    if (Result.LoadedClasses >= Result.TotalClasses * 0.8f)
     {
-        FString ClassPath = FString::Printf(TEXT("/Script/TranspersonalGame.%s"), *SystemName);
+        PassedChecks++;
+    }
+
+    // Check 2: Binary compilation
+    if (Result.BinaryFiles > 0)
+    {
+        PassedChecks++;
+    }
+
+    // Check 3: Level population (20+ actors)
+    if (Result.LevelActors >= 20)
+    {
+        PassedChecks++;
+    }
+
+    // Check 4: Core systems presence
+    TArray<FString> CoreSystems = {TEXT("TranspersonalCharacter"), TEXT("TranspersonalGameState"), TEXT("PCGWorldGenerator")};
+    int32 CoreLoaded = 0;
+    for (const FString& CoreClass : CoreSystems)
+    {
+        if (!FailedClasses.Contains(CoreClass))
+        {
+            CoreLoaded++;
+        }
+    }
+    if (CoreLoaded == CoreSystems.Num())
+    {
+        PassedChecks++;
+    }
+
+    Result.HealthPercentage = (float(PassedChecks) / float(TotalChecks)) * 100.0f;
+    Result.Status = CalculateIntegrationStatus(Result.HealthPercentage);
+
+    LastValidationResult = Result;
+    LogValidationResults(Result);
+    GenerateIntegrationReport(Result);
+
+    return Result;
+}
+
+bool UBuild_IntegrationValidator::ValidateClassLoading(const TArray<FString>& ClassNames, TArray<FString>& FailedClasses)
+{
+    FailedClasses.Empty();
+    int32 LoadedCount = 0;
+
+    for (const FString& ClassName : ClassNames)
+    {
+        FString ClassPath = FString::Printf(TEXT("/Script/TranspersonalGame.%s"), *ClassName);
         UClass* LoadedClass = LoadClass<UObject>(nullptr, *ClassPath);
         
         if (LoadedClass)
         {
             LoadedCount++;
+            UE_LOG(LogTemp, Log, TEXT("✓ Class loaded: %s"), *ClassName);
         }
         else
         {
-            FailedClasses.Add(SystemName);
+            FailedClasses.Add(ClassName);
+            UE_LOG(LogTemp, Warning, TEXT("✗ Class failed to load: %s"), *ClassName);
         }
     }
 
-    Result.ExecutionTime = FPlatformTime::Seconds() - StartTime;
-
-    if (LoadedCount == TotalCount)
-    {
-        Result.Status = EBuild_ValidationStatus::Passed;
-        Result.Message = FString::Printf(TEXT("All %d critical classes loaded successfully"), TotalCount);
-    }
-    else if (LoadedCount >= TotalCount * 0.8f) // 80% threshold
-    {
-        Result.Status = EBuild_ValidationStatus::Warning;
-        Result.Message = FString::Printf(TEXT("%d/%d classes loaded. Failed: %s"), 
-            LoadedCount, TotalCount, *FString::Join(FailedClasses, TEXT(", ")));
-    }
-    else
-    {
-        Result.Status = EBuild_ValidationStatus::Failed;
-        Result.Message = FString::Printf(TEXT("Critical failure: Only %d/%d classes loaded"), LoadedCount, TotalCount);
-    }
-
-    if (bLogValidationResults)
-    {
-        LogValidationResult(Result);
-    }
-
-    return Result;
+    return FailedClasses.Num() == 0;
 }
 
-FBuild_ValidationResult UBuild_IntegrationValidator::ValidateLevelIntegrity()
+int32 UBuild_IntegrationValidator::CountCompiledBinaries()
 {
-    FBuild_ValidationResult Result;
-    Result.TestName = TEXT("Level Integrity Validation");
+    FString ProjectDir = FPaths::ProjectDir();
+    FString BinariesDir = FPaths::Combine(ProjectDir, TEXT("Binaries"));
     
-    double StartTime = FPlatformTime::Seconds();
-
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        Result.Status = EBuild_ValidationStatus::Critical;
-        Result.Message = TEXT("No valid world context");
-        Result.ExecutionTime = FPlatformTime::Seconds() - StartTime;
-        return Result;
-    }
-
-    // Count actors and validate basic level structure
-    TArray<AActor*> AllActors;
-    UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), AllActors);
-
-    int32 PlayerStarts = 0;
-    int32 LightSources = 0;
-    int32 StaticMeshes = 0;
-    int32 CustomActors = 0;
-
-    for (AActor* Actor : AllActors)
-    {
-        if (Actor->IsA<APlayerStart>())
-        {
-            PlayerStarts++;
-        }
-        else if (Actor->IsA<ALight>())
-        {
-            LightSources++;
-        }
-        else if (Actor->FindComponentByClass<UStaticMeshComponent>())
-        {
-            StaticMeshes++;
-        }
-        else if (Actor->GetClass()->GetName().Contains(TEXT("Transpersonal")))
-        {
-            CustomActors++;
-        }
-    }
-
-    Result.ExecutionTime = FPlatformTime::Seconds() - StartTime;
-
-    // Validate minimum level requirements
-    bool bHasPlayerStart = PlayerStarts > 0;
-    bool bHasLighting = LightSources > 0;
-    bool bHasGeometry = StaticMeshes > 0;
-
-    if (bHasPlayerStart && bHasLighting && bHasGeometry)
-    {
-        Result.Status = EBuild_ValidationStatus::Passed;
-        Result.Message = FString::Printf(TEXT("Level valid: %d actors, %d custom"), AllActors.Num(), CustomActors);
-    }
-    else
-    {
-        Result.Status = EBuild_ValidationStatus::Failed;
-        Result.Message = FString::Printf(TEXT("Level incomplete: PlayerStart=%d, Lights=%d, Meshes=%d"), 
-            PlayerStarts, LightSources, StaticMeshes);
-    }
-
-    if (bLogValidationResults)
-    {
-        LogValidationResult(Result);
-    }
-
-    return Result;
-}
-
-FBuild_ValidationResult UBuild_IntegrationValidator::ValidateSystemDependencies()
-{
-    FBuild_ValidationResult Result;
-    Result.TestName = TEXT("System Dependencies Validation");
+    int32 BinaryCount = 0;
+    IPlatformFile& PlatformFile = FPlatformFileManager::Get().GetPlatformFile();
     
-    double StartTime = FPlatformTime::Seconds();
-
-    // Check if critical systems can communicate
-    bool bCommunicationTest = TestCrossSystemCommunication();
-    
-    Result.ExecutionTime = FPlatformTime::Seconds() - StartTime;
-
-    if (bCommunicationTest)
+    if (PlatformFile.DirectoryExists(*BinariesDir))
     {
-        Result.Status = EBuild_ValidationStatus::Passed;
-        Result.Message = TEXT("System dependencies validated successfully");
-    }
-    else
-    {
-        Result.Status = EBuild_ValidationStatus::Warning;
-        Result.Message = TEXT("Some system dependencies may have issues");
-    }
-
-    if (bLogValidationResults)
-    {
-        LogValidationResult(Result);
-    }
-
-    return Result;
-}
-
-FBuild_ValidationResult UBuild_IntegrationValidator::ValidateAssetReferences()
-{
-    FBuild_ValidationResult Result;
-    Result.TestName = TEXT("Asset References Validation");
-    
-    double StartTime = FPlatformTime::Seconds();
-
-    // Basic asset validation - check if critical paths exist
-    TArray<FString> CriticalPaths = {
-        TEXT("/Game/Maps/MinPlayableMap"),
-        TEXT("/Game/TranspersonalGame/"),
-        TEXT("/Game/Characters/"),
-        TEXT("/Game/Environment/")
-    };
-
-    int32 ValidPaths = 0;
-    for (const FString& Path : CriticalPaths)
-    {
-        if (FPaths::DirectoryExists(FPaths::ProjectContentDir() + Path.Replace(TEXT("/Game/"), TEXT(""))))
-        {
-            ValidPaths++;
-        }
-    }
-
-    Result.ExecutionTime = FPlatformTime::Seconds() - StartTime;
-
-    if (ValidPaths >= CriticalPaths.Num() * 0.75f) // 75% threshold
-    {
-        Result.Status = EBuild_ValidationStatus::Passed;
-        Result.Message = FString::Printf(TEXT("%d/%d critical asset paths found"), ValidPaths, CriticalPaths.Num());
-    }
-    else
-    {
-        Result.Status = EBuild_ValidationStatus::Warning;
-        Result.Message = FString::Printf(TEXT("Missing asset paths: %d/%d found"), ValidPaths, CriticalPaths.Num());
-    }
-
-    if (bLogValidationResults)
-    {
-        LogValidationResult(Result);
-    }
-
-    return Result;
-}
-
-TArray<FBuild_SystemStatus> UBuild_IntegrationValidator::GetSystemStatusReport()
-{
-    return SystemStatuses;
-}
-
-bool UBuild_IntegrationValidator::TestCrossSystemCommunication()
-{
-    // Test basic system communication
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        return false;
-    }
-
-    // Test GameMode access
-    AGameModeBase* GameMode = World->GetAuthGameMode();
-    if (!GameMode)
-    {
-        return false;
-    }
-
-    // Test PlayerController access
-    APlayerController* PC = World->GetFirstPlayerController();
-    if (!PC)
-    {
-        return false;
-    }
-
-    return true;
-}
-
-bool UBuild_IntegrationValidator::TestPerformanceBaseline()
-{
-    // Basic performance test - measure frame time
-    double StartTime = FPlatformTime::Seconds();
-    
-    // Simulate some work
-    for (int32 i = 0; i < 1000; ++i)
-    {
-        FVector TestVector = FVector(i, i * 2, i * 3);
-        TestVector.Normalize();
-    }
-    
-    double ElapsedTime = FPlatformTime::Seconds() - StartTime;
-    
-    // Should complete in reasonable time (< 1ms for this simple test)
-    return ElapsedTime < 0.001;
-}
-
-bool UBuild_IntegrationValidator::TestMemoryUsage()
-{
-    // Basic memory test - check if we can allocate reasonable amounts
-    try
-    {
-        TArray<int32> TestArray;
-        TestArray.Reserve(10000);
-        for (int32 i = 0; i < 10000; ++i)
-        {
-            TestArray.Add(i);
-        }
-        return true;
-    }
-    catch (...)
-    {
-        return false;
-    }
-}
-
-bool UBuild_IntegrationValidator::ValidateBuildConfiguration()
-{
-    // Check if we're in a valid build configuration
-    UWorld* World = GetWorld();
-    return World && World->IsGameWorld();
-}
-
-TArray<FString> UBuild_IntegrationValidator::GetMissingDependencies()
-{
-    TArray<FString> MissingDeps;
-    
-    for (const FString& SystemName : CriticalSystems)
-    {
-        FString ClassPath = FString::Printf(TEXT("/Script/TranspersonalGame.%s"), *SystemName);
-        UClass* LoadedClass = LoadClass<UObject>(nullptr, *ClassPath);
+        TArray<FString> FoundFiles;
+        PlatformFile.FindFilesRecursively(FoundFiles, *BinariesDir, TEXT(".so"));
+        PlatformFile.FindFilesRecursively(FoundFiles, *BinariesDir, TEXT(".dll"));
+        PlatformFile.FindFilesRecursively(FoundFiles, *BinariesDir, TEXT(".dylib"));
         
-        if (!LoadedClass)
+        BinaryCount = FoundFiles.Num();
+        UE_LOG(LogTemp, Log, TEXT("Found %d compiled binary files"), BinaryCount);
+    }
+    
+    return BinaryCount;
+}
+
+int32 UBuild_IntegrationValidator::CountLevelActors()
+{
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        return 0;
+    }
+
+    int32 ActorCount = 0;
+    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+    {
+        AActor* Actor = *ActorItr;
+        if (Actor && !Actor->IsPendingKill())
         {
-            MissingDeps.Add(SystemName);
+            ActorCount++;
         }
     }
-    
-    return MissingDeps;
+
+    UE_LOG(LogTemp, Log, TEXT("Total actors in level: %d"), ActorCount);
+    return ActorCount;
 }
 
-TArray<FString> UBuild_IntegrationValidator::GetCompilationErrors()
+EBuild_IntegrationStatus UBuild_IntegrationValidator::CalculateIntegrationStatus(float HealthPercentage)
 {
-    TArray<FString> Errors;
-    
-    // This would typically read from build logs
-    // For now, return basic validation errors
-    TArray<FString> MissingDeps = GetMissingDependencies();
-    for (const FString& Dep : MissingDeps)
+    if (HealthPercentage >= HealthyThreshold)
     {
-        Errors.Add(FString::Printf(TEXT("Missing class: %s"), *Dep));
+        return EBuild_IntegrationStatus::Healthy;
     }
-    
-    return Errors;
-}
-
-void UBuild_IntegrationValidator::UpdateSystemStatus(const FString& SystemName)
-{
-    FBuild_SystemStatus Status;
-    Status.SystemName = SystemName;
-    
-    FString ClassPath = FString::Printf(TEXT("/Script/TranspersonalGame.%s"), *SystemName);
-    UClass* LoadedClass = LoadClass<UObject>(nullptr, *ClassPath);
-    
-    Status.bIsLoaded = (LoadedClass != nullptr);
-    Status.bIsInitialized = Status.bIsLoaded; // Simplified check
-    Status.ComponentCount = 1; // Simplified
-    
-    SystemStatuses.Add(Status);
-}
-
-void UBuild_IntegrationValidator::LogValidationResult(const FBuild_ValidationResult& Result)
-{
-    FString StatusString;
-    switch (Result.Status)
+    else if (HealthPercentage >= StableThreshold)
     {
-        case EBuild_ValidationStatus::Passed:
-            StatusString = TEXT("PASSED");
-            UE_LOG(LogTemp, Log, TEXT("[VALIDATION] %s: %s - %s (%.3fs)"), 
-                *StatusString, *Result.TestName, *Result.Message, Result.ExecutionTime);
-            break;
-        case EBuild_ValidationStatus::Warning:
-            StatusString = TEXT("WARNING");
-            UE_LOG(LogTemp, Warning, TEXT("[VALIDATION] %s: %s - %s (%.3fs)"), 
-                *StatusString, *Result.TestName, *Result.Message, Result.ExecutionTime);
-            break;
-        case EBuild_ValidationStatus::Failed:
-        case EBuild_ValidationStatus::Critical:
-            StatusString = TEXT("FAILED");
-            UE_LOG(LogTemp, Error, TEXT("[VALIDATION] %s: %s - %s (%.3fs)"), 
-                *StatusString, *Result.TestName, *Result.Message, Result.ExecutionTime);
-            break;
-        default:
-            StatusString = TEXT("UNKNOWN");
-            break;
+        return EBuild_IntegrationStatus::Stable;
     }
+    else if (HealthPercentage > 0.0f)
+    {
+        return EBuild_IntegrationStatus::Critical;
+    }
+    else
+    {
+        return EBuild_IntegrationStatus::Failed;
+    }
+}
+
+void UBuild_IntegrationValidator::GenerateIntegrationReport(const FBuild_ValidationResult& Result)
+{
+    FString ReportContent = FString::Printf(
+        TEXT("INTEGRATION VALIDATION REPORT\n")
+        TEXT("Timestamp: %s\n")
+        TEXT("Integration Health: %.0f%%\n")
+        TEXT("Status: %s\n")
+        TEXT("Loaded Classes: %d/%d\n")
+        TEXT("Binary Files: %d\n")
+        TEXT("Level Actors: %d\n"),
+        *Result.ReportTimestamp,
+        Result.HealthPercentage,
+        *UEnum::GetValueAsString(Result.Status),
+        Result.LoadedClasses,
+        Result.TotalClasses,
+        Result.BinaryFiles,
+        Result.LevelActors
+    );
+
+    if (Result.FailedClasses.Num() > 0)
+    {
+        ReportContent += TEXT("Failed Classes:\n");
+        for (const FString& FailedClass : Result.FailedClasses)
+        {
+            ReportContent += FString::Printf(TEXT("  - %s\n"), *FailedClass);
+        }
+    }
+
+    FString ReportPath = FPaths::Combine(FPaths::ProjectLogDir(), TEXT("IntegrationReport.txt"));
+    FFileHelper::SaveStringToFile(ReportContent, *ReportPath);
+    
+    UE_LOG(LogTemp, Log, TEXT("Integration report saved to: %s"), *ReportPath);
+}
+
+void UBuild_IntegrationValidator::LogValidationResults(const FBuild_ValidationResult& Result)
+{
+    UE_LOG(LogTemp, Log, TEXT("=== INTEGRATION VALIDATION RESULTS ==="));
+    UE_LOG(LogTemp, Log, TEXT("Health: %.0f%% (%s)"), Result.HealthPercentage, *UEnum::GetValueAsString(Result.Status));
+    UE_LOG(LogTemp, Log, TEXT("Classes: %d/%d loaded"), Result.LoadedClasses, Result.TotalClasses);
+    UE_LOG(LogTemp, Log, TEXT("Binaries: %d files"), Result.BinaryFiles);
+    UE_LOG(LogTemp, Log, TEXT("Actors: %d in level"), Result.LevelActors);
+
+    if (Result.Status == EBuild_IntegrationStatus::Healthy)
+    {
+        UE_LOG(LogTemp, Log, TEXT("🟢 BUILD STATUS: HEALTHY - Ready for next development cycle"));
+    }
+    else if (Result.Status == EBuild_IntegrationStatus::Stable)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("🟡 BUILD STATUS: STABLE - Minor issues need attention"));
+    }
+    else
+    {
+        UE_LOG(LogTemp, Error, TEXT("🔴 BUILD STATUS: CRITICAL - Major integration problems"));
+    }
+}
+
+bool UBuild_IntegrationValidator::CheckBinaryCompilation()
+{
+    return CountCompiledBinaries() > 0;
 }
