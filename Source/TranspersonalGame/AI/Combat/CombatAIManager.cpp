@@ -1,396 +1,338 @@
 #include "CombatAIManager.h"
-#include "Engine/Engine.h"
 #include "Engine/World.h"
+#include "TimerManager.h"
 #include "Kismet/GameplayStatics.h"
-#include "Components/SceneComponent.h"
-#include "CombatBehaviorComponent.h"
-#include "Combat_DinosaurPawn.h"
+#include "Engine/Engine.h"
+#include "DrawDebugHelpers.h"
 
 ACombatAIManager::ACombatAIManager()
 {
     PrimaryActorTick.bCanEverTick = true;
-    PrimaryActorTick.TickInterval = 0.1f; // 10 FPS for combat AI
+    PrimaryActorTick.TickInterval = 0.1f;
 
-    RootSceneComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootSceneComponent"));
-    RootComponent = RootSceneComponent;
-
-    // Combat AI Configuration
-    CombatDetectionRange = 2000.0f;
-    TacticalUpdateInterval = 0.5f;
-    MaxSimultaneousCombats = 5;
-    bEnablePackCoordination = true;
-    bEnableTacticalPositioning = true;
-
-    CurrentActiveCombats = 0;
-    TacticalUpdateTimer = 0.0f;
-    EncounterCheckTimer = 0.0f;
+    // Initialize default values
+    ThreatUpdateInterval = 1.0f;
+    MaxCombatRange = 5000.0f;
+    FlankingAngle = 45.0f;
+    RetreatHealthThreshold = 0.3f;
 }
 
 void ACombatAIManager::BeginPlay()
 {
     Super::BeginPlay();
-    InitializeCombatSystem();
+
+    // Start threat assessment timer
+    if (GetWorld())
+    {
+        GetWorld()->GetTimerManager().SetTimer(
+            ThreatAssessmentTimer,
+            this,
+            &ACombatAIManager::UpdateThreatAssessments,
+            ThreatUpdateInterval,
+            true
+        );
+    }
+
+    UE_LOG(LogTemp, Warning, TEXT("CombatAIManager initialized and active"));
 }
 
 void ACombatAIManager::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
-    UpdateCombatSystem(DeltaTime);
+    ProcessCombatLogic();
 }
 
-void ACombatAIManager::InitializeCombatSystem()
+FCombat_ThreatAssessment ACombatAIManager::AssessThreat(AActor* PotentialThreat, AActor* Assessor)
 {
-    UE_LOG(LogTemp, Log, TEXT("CombatAIManager: Initializing combat system"));
+    FCombat_ThreatAssessment Assessment;
 
-    // Create default combat encounters
-    CreateCombatEncounter(FVector(2000, 0, 100), ECombat_ThreatLevel::Medium, 3);
-    CreateCombatEncounter(FVector(-2000, 1500, 150), ECombat_ThreatLevel::High, 5);
-    CreateCombatEncounter(FVector(1000, -2000, 120), ECombat_ThreatLevel::Low, 2);
-    CreateCombatEncounter(FVector(-1500, -1000, 180), ECombat_ThreatLevel::Critical, 7);
-
-    UE_LOG(LogTemp, Log, TEXT("CombatAIManager: Created %d combat encounters"), CombatEncounters.Num());
-}
-
-void ACombatAIManager::RegisterCombatant(ACombat_DinosaurPawn* Dinosaur)
-{
-    if (Dinosaur && !ActiveCombatants.Contains(Dinosaur))
+    if (!PotentialThreat || !Assessor)
     {
-        ActiveCombatants.Add(Dinosaur);
-        UE_LOG(LogTemp, Log, TEXT("CombatAIManager: Registered combatant %s"), *Dinosaur->GetName());
+        return Assessment;
+    }
+
+    // Calculate distance
+    float Distance = FVector::Dist(PotentialThreat->GetActorLocation(), Assessor->GetActorLocation());
+    Assessment.ThreatDistance = Distance;
+    Assessment.ThreatSource = PotentialThreat;
+
+    // Calculate threat score
+    float ThreatScore = CalculateThreatScore(PotentialThreat, Assessor);
+
+    // Determine threat level based on distance and score
+    if (Distance > MaxCombatRange)
+    {
+        Assessment.ThreatLevel = ECombat_ThreatLevel::None;
+    }
+    else if (ThreatScore > 0.8f)
+    {
+        Assessment.ThreatLevel = ECombat_ThreatLevel::Critical;
+    }
+    else if (ThreatScore > 0.6f)
+    {
+        Assessment.ThreatLevel = ECombat_ThreatLevel::High;
+    }
+    else if (ThreatScore > 0.4f)
+    {
+        Assessment.ThreatLevel = ECombat_ThreatLevel::Medium;
+    }
+    else if (ThreatScore > 0.2f)
+    {
+        Assessment.ThreatLevel = ECombat_ThreatLevel::Low;
+    }
+
+    Assessment.AggressionModifier = ThreatScore;
+
+    return Assessment;
+}
+
+void ACombatAIManager::RegisterCombatant(AActor* Combatant)
+{
+    if (Combatant && IsValidCombatant(Combatant))
+    {
+        ActiveCombatants.AddUnique(Combatant);
+        UE_LOG(LogTemp, Log, TEXT("Registered combatant: %s"), *Combatant->GetName());
     }
 }
 
-void ACombatAIManager::UnregisterCombatant(ACombat_DinosaurPawn* Dinosaur)
+void ACombatAIManager::UnregisterCombatant(AActor* Combatant)
 {
-    if (Dinosaur)
+    if (Combatant)
     {
-        ActiveCombatants.Remove(Dinosaur);
-        UE_LOG(LogTemp, Log, TEXT("CombatAIManager: Unregistered combatant %s"), *Dinosaur->GetName());
+        ActiveCombatants.Remove(Combatant);
+        ThreatAssessments.Remove(Combatant);
+        UE_LOG(LogTemp, Log, TEXT("Unregistered combatant: %s"), *Combatant->GetName());
     }
 }
 
-bool ACombatAIManager::StartCombatEncounter(const FVector& Location, ECombat_ThreatLevel ThreatLevel)
+TArray<AActor*> ACombatAIManager::GetNearbyThreats(AActor* Assessor, float SearchRadius)
 {
-    if (!CanStartNewCombat())
+    TArray<AActor*> NearbyThreats;
+
+    if (!Assessor)
     {
-        return false;
+        return NearbyThreats;
     }
 
-    // Find nearby dinosaurs to participate in combat
-    TArray<AActor*> FoundActors;
-    UGameplayStatics::GetAllActorsOfClass(GetWorld(), ACombat_DinosaurPawn::StaticClass(), FoundActors);
+    FVector AssessorLocation = Assessor->GetActorLocation();
 
-    TArray<ACombat_DinosaurPawn*> NearbyDinosaurs;
-    for (AActor* Actor : FoundActors)
+    for (AActor* Combatant : ActiveCombatants)
     {
-        if (ACombat_DinosaurPawn* Dinosaur = Cast<ACombat_DinosaurPawn>(Actor))
+        if (Combatant && Combatant != Assessor)
         {
-            float Distance = FVector::Dist(Actor->GetActorLocation(), Location);
-            if (Distance <= CombatDetectionRange)
+            float Distance = FVector::Dist(Combatant->GetActorLocation(), AssessorLocation);
+            if (Distance <= SearchRadius)
             {
-                NearbyDinosaurs.Add(Dinosaur);
+                NearbyThreats.Add(Combatant);
             }
         }
     }
 
-    if (NearbyDinosaurs.Num() > 0)
-    {
-        CurrentActiveCombats++;
-        
-        // Coordinate pack attack if multiple dinosaurs
-        if (NearbyDinosaurs.Num() > 1 && bEnablePackCoordination)
-        {
-            CoordinatePackAttack(NearbyDinosaurs, nullptr); // Target will be determined by individual AI
-        }
+    return NearbyThreats;
+}
 
-        UE_LOG(LogTemp, Log, TEXT("CombatAIManager: Started combat encounter at %s with %d dinosaurs"), 
-               *Location.ToString(), NearbyDinosaurs.Num());
+void ACombatAIManager::InitiateCombatEncounter(AActor* Aggressor, AActor* Target)
+{
+    if (!Aggressor || !Target)
+    {
+        return;
+    }
+
+    UE_LOG(LogTemp, Warning, TEXT("Combat initiated: %s vs %s"), 
+           *Aggressor->GetName(), *Target->GetName());
+
+    // Register both as combatants if not already registered
+    RegisterCombatant(Aggressor);
+    RegisterCombatant(Target);
+
+    // Assess mutual threats
+    FCombat_ThreatAssessment AggressorThreat = AssessThreat(Target, Aggressor);
+    FCombat_ThreatAssessment TargetThreat = AssessThreat(Aggressor, Target);
+
+    ThreatAssessments.Add(Aggressor, AggressorThreat);
+    ThreatAssessments.Add(Target, TargetThreat);
+}
+
+void ACombatAIManager::EndCombatEncounter(AActor* Combatant)
+{
+    if (Combatant)
+    {
+        ThreatAssessments.Remove(Combatant);
+        UE_LOG(LogTemp, Log, TEXT("Combat ended for: %s"), *Combatant->GetName());
+    }
+}
+
+FVector ACombatAIManager::CalculateFlankingPosition(AActor* Attacker, AActor* Target)
+{
+    if (!Attacker || !Target)
+    {
+        return FVector::ZeroVector;
+    }
+
+    FVector TargetLocation = Target->GetActorLocation();
+    FVector AttackerLocation = Attacker->GetActorLocation();
+    FVector DirectionToTarget = (TargetLocation - AttackerLocation).GetSafeNormal();
+
+    // Calculate flanking position at 45-degree angle
+    FVector FlankDirection = DirectionToTarget.RotateAngleAxis(FlankingAngle, FVector::UpVector);
+    FVector FlankingPosition = TargetLocation + (FlankDirection * 800.0f);
+
+    return FlankingPosition;
+}
+
+bool ACombatAIManager::ShouldRetreat(AActor* Combatant)
+{
+    if (!Combatant)
+    {
+        return false;
+    }
+
+    // Check if combatant has health component and is below threshold
+    // This is a simplified check - in practice would use actual health component
+    FCombat_ThreatAssessment* Assessment = ThreatAssessments.Find(Combatant);
+    if (Assessment && Assessment->ThreatLevel == ECombat_ThreatLevel::Critical)
+    {
         return true;
     }
 
     return false;
 }
 
-void ACombatAIManager::EndCombatEncounter(const FVector& Location)
+void ACombatAIManager::CoordinatePackAttack(TArray<AActor*> PackMembers, AActor* Target)
 {
-    if (CurrentActiveCombats > 0)
-    {
-        CurrentActiveCombats--;
-        UE_LOG(LogTemp, Log, TEXT("CombatAIManager: Ended combat encounter at %s"), *Location.ToString());
-    }
-}
-
-void ACombatAIManager::UpdateTacticalPositions()
-{
-    if (!bEnableTacticalPositioning)
+    if (!Target || PackMembers.Num() == 0)
     {
         return;
     }
 
-    for (ACombat_DinosaurPawn* Combatant : ActiveCombatants)
+    UE_LOG(LogTemp, Warning, TEXT("Coordinating pack attack with %d members against %s"), 
+           PackMembers.Num(), *Target->GetName());
+
+    // Assign roles to pack members
+    for (int32 i = 0; i < PackMembers.Num(); i++)
     {
-        if (IsValid(Combatant))
-        {
-            // Get combat behavior component
-            UCombat_BehaviorComponent* BehaviorComp = Combatant->FindComponentByClass<UCombat_BehaviorComponent>();
-            if (BehaviorComp)
-            {
-                // Update tactical position based on behavior type
-                FVector OptimalPosition = GetOptimalAttackPosition(Combatant, nullptr);
-                // Position will be used by the behavior component
-            }
-        }
-    }
-}
-
-FVector ACombatAIManager::GetOptimalAttackPosition(ACombat_DinosaurPawn* Attacker, AActor* Target)
-{
-    if (!Attacker)
-    {
-        return FVector::ZeroVector;
-    }
-
-    FVector AttackerLocation = Attacker->GetActorLocation();
-    
-    if (!Target)
-    {
-        // Return a position slightly forward from current location
-        FVector Forward = Attacker->GetActorForwardVector();
-        return AttackerLocation + (Forward * 500.0f);
-    }
-
-    FVector TargetLocation = Target->GetActorLocation();
-    FVector Direction = (TargetLocation - AttackerLocation).GetSafeNormal();
-    
-    // Calculate flanking position
-    FVector RightVector = FVector::CrossProduct(Direction, FVector::UpVector);
-    float FlankOffset = FMath::RandRange(-800.0f, 800.0f);
-    
-    return TargetLocation + (RightVector * FlankOffset) + (Direction * -300.0f);
-}
-
-ECombat_Formation ACombatAIManager::GetRecommendedFormation(const TArray<ACombat_DinosaurPawn*>& Pack)
-{
-    int32 PackSize = Pack.Num();
-    
-    if (PackSize <= 1)
-    {
-        return ECombat_Formation::None;
-    }
-    else if (PackSize <= 3)
-    {
-        return ECombat_Formation::Line;
-    }
-    else if (PackSize <= 5)
-    {
-        return ECombat_Formation::Wedge;
-    }
-    else
-    {
-        return ECombat_Formation::Circle;
-    }
-}
-
-void ACombatAIManager::CoordinatePackAttack(const TArray<ACombat_DinosaurPawn*>& Pack, AActor* Target)
-{
-    if (Pack.Num() <= 1)
-    {
-        return;
-    }
-
-    ECombat_Formation Formation = GetRecommendedFormation(Pack);
-    
-    // Assign roles based on formation
-    for (int32 i = 0; i < Pack.Num(); i++)
-    {
-        if (IsValid(Pack[i]))
-        {
-            UCombat_BehaviorComponent* BehaviorComp = Pack[i]->FindComponentByClass<UCombat_BehaviorComponent>();
-            if (BehaviorComp)
-            {
-                // Set formation role and position
-                // This would be implemented in the behavior component
-            }
-        }
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("CombatAIManager: Coordinating pack attack with %d dinosaurs using %s formation"), 
-           Pack.Num(), *UEnum::GetValueAsString(Formation));
-}
-
-void ACombatAIManager::ExecuteFlankingManeuver(ACombat_DinosaurPawn* Leader, const TArray<ACombat_DinosaurPawn*>& Flankers)
-{
-    if (!Leader || Flankers.Num() == 0)
-    {
-        return;
-    }
-
-    FVector LeaderLocation = Leader->GetActorLocation();
-    
-    for (int32 i = 0; i < Flankers.Num(); i++)
-    {
-        if (IsValid(Flankers[i]))
-        {
-            // Calculate flanking positions
-            float Angle = (360.0f / Flankers.Num()) * i;
-            FVector FlankPosition = LeaderLocation + FVector(
-                FMath::Cos(FMath::DegreesToRadians(Angle)) * 1000.0f,
-                FMath::Sin(FMath::DegreesToRadians(Angle)) * 1000.0f,
-                0.0f
-            );
-
-            // Move flanker to position (would be handled by behavior component)
-            UE_LOG(LogTemp, Log, TEXT("CombatAIManager: Flanker %d moving to position %s"), 
-                   i, *FlankPosition.ToString());
-        }
-    }
-}
-
-void ACombatAIManager::CreateCombatEncounter(const FVector& Location, ECombat_ThreatLevel ThreatLevel, int32 DinosaurCount)
-{
-    FCombat_EncounterData NewEncounter;
-    NewEncounter.Location = Location;
-    NewEncounter.ThreatLevel = ThreatLevel;
-    NewEncounter.DinosaurCount = DinosaurCount;
-    NewEncounter.EncounterRadius = 1500.0f;
-    NewEncounter.bIsActive = true;
-
-    CombatEncounters.Add(NewEncounter);
-}
-
-void ACombatAIManager::CheckEncounterTriggers()
-{
-    // Find player character
-    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
-    if (!PlayerPawn)
-    {
-        return;
-    }
-
-    FVector PlayerLocation = PlayerPawn->GetActorLocation();
-
-    for (FCombat_EncounterData& Encounter : CombatEncounters)
-    {
-        if (!Encounter.bIsActive)
+        AActor* PackMember = PackMembers[i];
+        if (!PackMember)
         {
             continue;
         }
 
-        float Distance = FVector::Dist(PlayerLocation, Encounter.Location);
-        if (Distance <= Encounter.EncounterRadius)
+        FVector FlankingPos = CalculateFlankingPosition(PackMember, Target);
+        
+        // In a real implementation, this would send commands to AI controllers
+        // For now, we log the tactical positioning
+        UE_LOG(LogTemp, Log, TEXT("Pack member %s assigned flanking position"), 
+               *PackMember->GetName());
+    }
+}
+
+void ACombatAIManager::UpdateThreatAssessments()
+{
+    // Update threat assessments for all active combatants
+    for (AActor* Combatant : ActiveCombatants)
+    {
+        if (!IsValid(Combatant))
         {
-            if (StartCombatEncounter(Encounter.Location, Encounter.ThreatLevel))
+            continue;
+        }
+
+        TArray<AActor*> NearbyThreats = GetNearbyThreats(Combatant, MaxCombatRange);
+        
+        // Find the highest threat
+        FCombat_ThreatAssessment HighestThreat;
+        for (AActor* Threat : NearbyThreats)
+        {
+            FCombat_ThreatAssessment CurrentThreat = AssessThreat(Threat, Combatant);
+            if (CurrentThreat.ThreatLevel > HighestThreat.ThreatLevel)
             {
-                Encounter.bIsActive = false; // Deactivate until cooldown
+                HighestThreat = CurrentThreat;
             }
         }
+
+        ThreatAssessments.Add(Combatant, HighestThreat);
     }
 }
 
-FCombat_EncounterData* ACombatAIManager::GetNearestEncounter(const FVector& Location)
+void ACombatAIManager::ProcessCombatLogic()
 {
-    FCombat_EncounterData* NearestEncounter = nullptr;
-    float NearestDistance = FLT_MAX;
-
-    for (FCombat_EncounterData& Encounter : CombatEncounters)
+    // Process combat logic for all active combatants
+    for (AActor* Combatant : ActiveCombatants)
     {
-        float Distance = FVector::Dist(Location, Encounter.Location);
-        if (Distance < NearestDistance)
+        if (!IsValid(Combatant))
         {
-            NearestDistance = Distance;
-            NearestEncounter = &Encounter;
+            continue;
         }
-    }
 
-    return NearestEncounter;
-}
-
-bool ACombatAIManager::IsLocationInCombat(const FVector& Location) const
-{
-    for (const FCombat_EncounterData& Encounter : CombatEncounters)
-    {
-        if (Encounter.bIsActive)
+        FCombat_ThreatAssessment* Assessment = ThreatAssessments.Find(Combatant);
+        if (!Assessment)
         {
-            float Distance = FVector::Dist(Location, Encounter.Location);
-            if (Distance <= Encounter.EncounterRadius)
-            {
-                return true;
-            }
+            continue;
         }
-    }
-    return false;
-}
 
-int32 ACombatAIManager::GetCombatantsInRange(const FVector& Location, float Range) const
-{
-    int32 Count = 0;
-    for (ACombat_DinosaurPawn* Combatant : ActiveCombatants)
-    {
-        if (IsValid(Combatant))
+        // Check if should retreat
+        if (ShouldRetreat(Combatant))
         {
-            float Distance = FVector::Dist(Location, Combatant->GetActorLocation());
-            if (Distance <= Range)
-            {
-                Count++;
-            }
+            UE_LOG(LogTemp, Log, TEXT("%s should retreat"), *Combatant->GetName());
         }
-    }
-    return Count;
-}
 
-void ACombatAIManager::UpdateCombatSystem(float DeltaTime)
-{
-    TacticalUpdateTimer += DeltaTime;
-    EncounterCheckTimer += DeltaTime;
-
-    // Update tactical positions
-    if (TacticalUpdateTimer >= TacticalUpdateInterval)
-    {
-        UpdateTacticalPositions();
-        TacticalUpdateTimer = 0.0f;
-    }
-
-    // Check encounter triggers
-    if (EncounterCheckTimer >= 1.0f) // Check every second
-    {
-        CheckEncounterTriggers();
-        EncounterCheckTimer = 0.0f;
-    }
-
-    // Process active combats
-    ProcessActiveCombats();
-    
-    // Cleanup inactive combatants
-    CleanupInactiveCombatants();
-}
-
-void ACombatAIManager::ProcessActiveCombats()
-{
-    // Process ongoing combat encounters
-    for (FCombat_EncounterData& Encounter : CombatEncounters)
-    {
-        if (Encounter.bIsActive)
+        // Process threat response based on level
+        switch (Assessment->ThreatLevel)
         {
-            // Check if encounter should end (no combatants in range, etc.)
-            int32 CombatantsInRange = GetCombatantsInRange(Encounter.Location, Encounter.EncounterRadius);
-            if (CombatantsInRange == 0)
-            {
-                EndCombatEncounter(Encounter.Location);
-                Encounter.bIsActive = false;
-            }
+            case ECombat_ThreatLevel::Critical:
+                // Engage in combat or flee
+                break;
+            case ECombat_ThreatLevel::High:
+                // Prepare for combat
+                break;
+            case ECombat_ThreatLevel::Medium:
+                // Stay alert
+                break;
+            case ECombat_ThreatLevel::Low:
+                // Monitor situation
+                break;
+            case ECombat_ThreatLevel::None:
+                // Return to normal behavior
+                break;
         }
     }
 }
 
-void ACombatAIManager::CleanupInactiveCombatants()
+float ACombatAIManager::CalculateThreatScore(AActor* Threat, AActor* Assessor)
 {
-    ActiveCombatants.RemoveAll([](ACombat_DinosaurPawn* Combatant)
+    if (!Threat || !Assessor)
     {
-        return !IsValid(Combatant);
-    });
+        return 0.0f;
+    }
+
+    float ThreatScore = 0.0f;
+    float Distance = FVector::Dist(Threat->GetActorLocation(), Assessor->GetActorLocation());
+
+    // Distance factor (closer = more threatening)
+    float DistanceFactor = FMath::Clamp(1.0f - (Distance / MaxCombatRange), 0.0f, 1.0f);
+    ThreatScore += DistanceFactor * 0.4f;
+
+    // Size factor (larger = more threatening)
+    FVector ThreatScale = Threat->GetActorScale3D();
+    float SizeFactor = FMath::Clamp(ThreatScale.Size() / 3.0f, 0.0f, 1.0f);
+    ThreatScore += SizeFactor * 0.3f;
+
+    // Movement factor (moving towards = more threatening)
+    FVector ThreatVelocity = Threat->GetVelocity();
+    FVector DirectionToAssessor = (Assessor->GetActorLocation() - Threat->GetActorLocation()).GetSafeNormal();
+    float MovementFactor = FMath::Max(0.0f, FVector::DotProduct(ThreatVelocity.GetSafeNormal(), DirectionToAssessor));
+    ThreatScore += MovementFactor * 0.3f;
+
+    return FMath::Clamp(ThreatScore, 0.0f, 1.0f);
 }
 
-bool ACombatAIManager::CanStartNewCombat() const
+bool ACombatAIManager::IsValidCombatant(AActor* Actor)
 {
-    return CurrentActiveCombats < MaxSimultaneousCombats;
+    if (!Actor)
+    {
+        return false;
+    }
+
+    // Check if actor is a pawn or has combat-relevant components
+    return Actor->IsA<APawn>() || Actor->GetName().Contains(TEXT("Dino")) || 
+           Actor->GetName().Contains(TEXT("Character"));
 }
