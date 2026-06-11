@@ -6,66 +6,70 @@
 #include "Narr_StoryProgressionManager.generated.h"
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FNarr_StoryChapter
+struct TRANSPERSONALGAME_API FNarr_StoryMilestone
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    FString ChapterName;
+    FString MilestoneID;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    FString ChapterDescription;
+    FText MilestoneName;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    TArray<FString> RequiredQuestIDs;
+    FText Description;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    TArray<FString> UnlockedQuestIDs;
+    bool bCompleted;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    bool bIsCompleted;
+    TArray<FString> RequiredConditions;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    int32 ChapterOrder;
+    TArray<FString> UnlockedContent;
 
-    FNarr_StoryChapter()
+    FNarr_StoryMilestone()
     {
-        ChapterName = TEXT("");
-        ChapterDescription = TEXT("");
-        bIsCompleted = false;
-        ChapterOrder = 0;
+        MilestoneID = TEXT("DefaultMilestone");
+        MilestoneName = FText::FromString(TEXT("Unknown Milestone"));
+        Description = FText::FromString(TEXT(""));
+        bCompleted = false;
     }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FNarr_CharacterArc
+struct TRANSPERSONALGAME_API FNarr_PlayerProgress
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
-    FString CharacterID;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Progress")
+    int32 DaysAlive;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
-    FString CharacterName;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Progress")
+    int32 DinosaursSeen;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
-    TArray<FString> CompletedEvents;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Progress")
+    int32 DinosaursSurvived;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
-    TArray<FString> AvailableEvents;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Progress")
+    int32 ToolsCrafted;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
-    float RelationshipLevel;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Progress")
+    int32 SheltersBuilt;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
-    bool bIsAlive;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Progress")
+    TArray<FString> BiomesExplored;
 
-    FNarr_CharacterArc()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Progress")
+    TArray<FString> CompletedMilestones;
+
+    FNarr_PlayerProgress()
     {
-        CharacterID = TEXT("");
-        CharacterName = TEXT("");
-        RelationshipLevel = 0.0f;
-        bIsAlive = true;
+        DaysAlive = 0;
+        DinosaursSeen = 0;
+        DinosaursSurvived = 0;
+        ToolsCrafted = 0;
+        SheltersBuilt = 0;
     }
 };
 
@@ -75,56 +79,39 @@ class TRANSPERSONALGAME_API UNarr_StoryProgressionManager : public UGameInstance
     GENERATED_BODY()
 
 public:
-    UNarr_StoryProgressionManager();
-
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
 
     UFUNCTION(BlueprintCallable, Category = "Story")
-    void InitializeStorySystem();
+    void UpdatePlayerProgress(const FString& ProgressType, int32 Value);
 
     UFUNCTION(BlueprintCallable, Category = "Story")
-    void CompleteChapter(const FString& ChapterID);
+    bool CheckMilestoneConditions(const FString& MilestoneID);
 
     UFUNCTION(BlueprintCallable, Category = "Story")
-    bool IsChapterUnlocked(const FString& ChapterID) const;
+    void CompleteMilestone(const FString& MilestoneID);
 
     UFUNCTION(BlueprintCallable, Category = "Story")
-    FNarr_StoryChapter GetCurrentChapter() const;
+    FNarr_PlayerProgress GetPlayerProgress() const;
 
     UFUNCTION(BlueprintCallable, Category = "Story")
-    TArray<FNarr_StoryChapter> GetAvailableChapters() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Character")
-    void UpdateCharacterRelationship(const FString& CharacterID, float DeltaRelationship);
-
-    UFUNCTION(BlueprintCallable, Category = "Character")
-    void TriggerCharacterEvent(const FString& CharacterID, const FString& EventID);
-
-    UFUNCTION(BlueprintCallable, Category = "Character")
-    FNarr_CharacterArc GetCharacterArc(const FString& CharacterID) const;
+    TArray<FNarr_StoryMilestone> GetAvailableMilestones() const;
 
     UFUNCTION(BlueprintCallable, Category = "Story")
-    void SaveStoryProgress();
-
-    UFUNCTION(BlueprintCallable, Category = "Story")
-    void LoadStoryProgress();
+    void TriggerStoryEvent(const FString& EventID, const FVector& Location);
 
 protected:
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    TArray<FNarr_StoryChapter> StoryChapters;
+    UPROPERTY(BlueprintReadOnly, Category = "Story")
+    FNarr_PlayerProgress CurrentProgress;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
-    TArray<FNarr_CharacterArc> CharacterArcs;
+    UPROPERTY(BlueprintReadOnly, Category = "Story")
+    TMap<FString, FNarr_StoryMilestone> StoryMilestones;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    FString CurrentChapterID;
+    UFUNCTION()
+    void InitializeStoryMilestones();
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    int32 CurrentChapterIndex;
+    UFUNCTION()
+    void CheckAllMilestones();
 
-private:
-    void SetupDefaultStoryChapters();
-    void SetupDefaultCharacterArcs();
-    bool CheckChapterRequirements(const FNarr_StoryChapter& Chapter) const;
-    void UnlockNewQuests(const FNarr_StoryChapter& Chapter);
+    UFUNCTION()
+    void UnlockContent(const TArray<FString>& ContentIDs);
 };
