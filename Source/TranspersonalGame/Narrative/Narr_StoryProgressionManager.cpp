@@ -2,235 +2,225 @@
 #include "Engine/Engine.h"
 #include "Kismet/GameplayStatics.h"
 
-UNarr_StoryProgressionManager::UNarr_StoryProgressionManager()
-{
-    CurrentChapterID = TEXT("Chapter_01_Awakening");
-    CurrentChapterIndex = 0;
-}
-
 void UNarr_StoryProgressionManager::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
-    InitializeStorySystem();
-}
-
-void UNarr_StoryProgressionManager::InitializeStorySystem()
-{
-    SetupDefaultStoryChapters();
-    SetupDefaultCharacterArcs();
     
-    UE_LOG(LogTemp, Warning, TEXT("Story Progression Manager initialized with %d chapters"), StoryChapters.Num());
+    // Initialize player progress
+    CurrentProgress = FNarr_PlayerProgress();
+    
+    // Initialize story milestones
+    InitializeStoryMilestones();
+    
+    UE_LOG(LogTemp, Log, TEXT("Narr_StoryProgressionManager initialized with %d milestones"), StoryMilestones.Num());
 }
 
-void UNarr_StoryProgressionManager::SetupDefaultStoryChapters()
+void UNarr_StoryProgressionManager::UpdatePlayerProgress(const FString& ProgressType, int32 Value)
 {
-    StoryChapters.Empty();
-
-    // Chapter 1: Awakening
-    FNarr_StoryChapter Chapter1;
-    Chapter1.ChapterName = TEXT("The Awakening");
-    Chapter1.ChapterDescription = TEXT("You awaken in a primordial world, alone and vulnerable. Learn to survive the basics of this dangerous land.");
-    Chapter1.RequiredQuestIDs = {};
-    Chapter1.UnlockedQuestIDs = {TEXT("Quest_FirstTools"), TEXT("Quest_FindShelter"), TEXT("Quest_FirstHunt")};
-    Chapter1.bIsCompleted = false;
-    Chapter1.ChapterOrder = 1;
-    StoryChapters.Add(Chapter1);
-
-    // Chapter 2: First Contact
-    FNarr_StoryChapter Chapter2;
-    Chapter2.ChapterName = TEXT("First Contact");
-    Chapter2.ChapterDescription = TEXT("You encounter other survivors. Will they be allies or enemies in this harsh world?");
-    Chapter2.RequiredQuestIDs = {TEXT("Quest_FirstTools"), TEXT("Quest_FindShelter")};
-    Chapter2.UnlockedQuestIDs = {TEXT("Quest_MeetTribal"), TEXT("Quest_ProveWorth"), TEXT("Quest_LearnLanguage")};
-    Chapter2.bIsCompleted = false;
-    Chapter2.ChapterOrder = 2;
-    StoryChapters.Add(Chapter2);
-
-    // Chapter 3: The Hunt
-    FNarr_StoryChapter Chapter3;
-    Chapter3.ChapterName = TEXT("The Great Hunt");
-    Chapter3.ChapterDescription = TEXT("A massive predator threatens the tribal lands. Join the hunt or face extinction.");
-    Chapter3.RequiredQuestIDs = {TEXT("Quest_MeetTribal"), TEXT("Quest_ProveWorth")};
-    Chapter3.UnlockedQuestIDs = {TEXT("Quest_TrackBeast"), TEXT("Quest_GatherHunters"), TEXT("Quest_FinalConfrontation")};
-    Chapter3.bIsCompleted = false;
-    Chapter3.ChapterOrder = 3;
-    StoryChapters.Add(Chapter3);
-
-    // Chapter 4: New Territories
-    FNarr_StoryChapter Chapter4;
-    Chapter4.ChapterName = TEXT("New Territories");
-    Chapter4.ChapterDescription = TEXT("With the great threat defeated, explore new lands and establish your place in this world.");
-    Chapter4.RequiredQuestIDs = {TEXT("Quest_FinalConfrontation")};
-    Chapter4.UnlockedQuestIDs = {TEXT("Quest_ExploreNorth"), TEXT("Quest_BuildSettlement"), TEXT("Quest_TameBeasts")};
-    Chapter4.bIsCompleted = false;
-    Chapter4.ChapterOrder = 4;
-    StoryChapters.Add(Chapter4);
-}
-
-void UNarr_StoryProgressionManager::SetupDefaultCharacterArcs()
-{
-    CharacterArcs.Empty();
-
-    // Grimjaw - Tribal Chief
-    FNarr_CharacterArc GrimjawArc;
-    GrimjawArc.CharacterID = TEXT("Chief_Grimjaw");
-    GrimjawArc.CharacterName = TEXT("Chief Grimjaw Beastslayer");
-    GrimjawArc.CompletedEvents = {};
-    GrimjawArc.AvailableEvents = {TEXT("Event_FirstMeeting"), TEXT("Event_ProveWorth"), TEXT("Event_GainTrust")};
-    GrimjawArc.RelationshipLevel = 0.0f;
-    GrimjawArc.bIsAlive = true;
-    CharacterArcs.Add(GrimjawArc);
-
-    // Stoneheart - Elder
-    FNarr_CharacterArc StoneheartArc;
-    StoneheartArc.CharacterID = TEXT("Elder_Stoneheart");
-    StoneheartArc.CharacterName = TEXT("Elder Stoneheart Lorekeeper");
-    StoneheartArc.CompletedEvents = {};
-    StoneheartArc.AvailableEvents = {TEXT("Event_LearnLore"), TEXT("Event_AncientWisdom"), TEXT("Event_SacredRites")};
-    StoneheartArc.RelationshipLevel = 0.0f;
-    StoneheartArc.bIsAlive = true;
-    CharacterArcs.Add(StoneheartArc);
-
-    // Vex - Scout
-    FNarr_CharacterArc VexArc;
-    VexArc.CharacterID = TEXT("Scout_Vex");
-    VexArc.CharacterName = TEXT("Vex Pathfinder");
-    VexArc.CompletedEvents = {};
-    VexArc.AvailableEvents = {TEXT("Event_LearnPaths"), TEXT("Event_DangerWarning"), TEXT("Event_SecretRoute")};
-    VexArc.RelationshipLevel = 0.0f;
-    VexArc.bIsAlive = true;
-    CharacterArcs.Add(VexArc);
-}
-
-void UNarr_StoryProgressionManager::CompleteChapter(const FString& ChapterID)
-{
-    for (FNarr_StoryChapter& Chapter : StoryChapters)
+    if (ProgressType == TEXT("DaysAlive"))
     {
-        if (Chapter.ChapterName.Contains(ChapterID) || Chapter.ChapterOrder == CurrentChapterIndex + 1)
+        CurrentProgress.DaysAlive = FMath::Max(CurrentProgress.DaysAlive, Value);
+    }
+    else if (ProgressType == TEXT("DinosaursSeen"))
+    {
+        CurrentProgress.DinosaursSeen += Value;
+    }
+    else if (ProgressType == TEXT("DinosaursSurvived"))
+    {
+        CurrentProgress.DinosaursSurvived += Value;
+    }
+    else if (ProgressType == TEXT("ToolsCrafted"))
+    {
+        CurrentProgress.ToolsCrafted += Value;
+    }
+    else if (ProgressType == TEXT("SheltersBuilt"))
+    {
+        CurrentProgress.SheltersBuilt += Value;
+    }
+    
+    // Check if any milestones are now completed
+    CheckAllMilestones();
+    
+    UE_LOG(LogTemp, Log, TEXT("Updated progress: %s = %d"), *ProgressType, Value);
+}
+
+bool UNarr_StoryProgressionManager::CheckMilestoneConditions(const FString& MilestoneID)
+{
+    if (FNarr_StoryMilestone* Milestone = StoryMilestones.Find(MilestoneID))
+    {
+        if (Milestone->bCompleted)
         {
-            Chapter.bIsCompleted = true;
-            UnlockNewQuests(Chapter);
-            CurrentChapterIndex++;
-            
-            if (CurrentChapterIndex < StoryChapters.Num())
+            return true;
+        }
+        
+        // Check all required conditions
+        for (const FString& Condition : Milestone->RequiredConditions)
+        {
+            if (Condition == TEXT("FirstDay") && CurrentProgress.DaysAlive >= 1)
             {
-                CurrentChapterID = StoryChapters[CurrentChapterIndex].ChapterName;
+                continue;
             }
-            
-            UE_LOG(LogTemp, Warning, TEXT("Chapter completed: %s"), *Chapter.ChapterName);
-            SaveStoryProgress();
-            break;
+            else if (Condition == TEXT("FirstDinosaur") && CurrentProgress.DinosaursSeen >= 1)
+            {
+                continue;
+            }
+            else if (Condition == TEXT("FirstTool") && CurrentProgress.ToolsCrafted >= 1)
+            {
+                continue;
+            }
+            else if (Condition == TEXT("FirstShelter") && CurrentProgress.SheltersBuilt >= 1)
+            {
+                continue;
+            }
+            else if (Condition == TEXT("SurviveWeek") && CurrentProgress.DaysAlive >= 7)
+            {
+                continue;
+            }
+            else
+            {
+                return false; // Condition not met
+            }
         }
+        
+        return true; // All conditions met
     }
-}
-
-bool UNarr_StoryProgressionManager::IsChapterUnlocked(const FString& ChapterID) const
-{
-    for (const FNarr_StoryChapter& Chapter : StoryChapters)
-    {
-        if (Chapter.ChapterName.Contains(ChapterID))
-        {
-            return CheckChapterRequirements(Chapter);
-        }
-    }
+    
     return false;
 }
 
-FNarr_StoryChapter UNarr_StoryProgressionManager::GetCurrentChapter() const
+void UNarr_StoryProgressionManager::CompleteMilestone(const FString& MilestoneID)
 {
-    if (CurrentChapterIndex >= 0 && CurrentChapterIndex < StoryChapters.Num())
+    if (FNarr_StoryMilestone* Milestone = StoryMilestones.Find(MilestoneID))
     {
-        return StoryChapters[CurrentChapterIndex];
-    }
-    return FNarr_StoryChapter();
-}
-
-TArray<FNarr_StoryChapter> UNarr_StoryProgressionManager::GetAvailableChapters() const
-{
-    TArray<FNarr_StoryChapter> AvailableChapters;
-    
-    for (const FNarr_StoryChapter& Chapter : StoryChapters)
-    {
-        if (CheckChapterRequirements(Chapter) && !Chapter.bIsCompleted)
+        if (!Milestone->bCompleted)
         {
-            AvailableChapters.Add(Chapter);
-        }
-    }
-    
-    return AvailableChapters;
-}
-
-void UNarr_StoryProgressionManager::UpdateCharacterRelationship(const FString& CharacterID, float DeltaRelationship)
-{
-    for (FNarr_CharacterArc& Arc : CharacterArcs)
-    {
-        if (Arc.CharacterID == CharacterID)
-        {
-            Arc.RelationshipLevel = FMath::Clamp(Arc.RelationshipLevel + DeltaRelationship, -100.0f, 100.0f);
-            UE_LOG(LogTemp, Warning, TEXT("Character %s relationship updated to %f"), *Arc.CharacterName, Arc.RelationshipLevel);
-            break;
-        }
-    }
-}
-
-void UNarr_StoryProgressionManager::TriggerCharacterEvent(const FString& CharacterID, const FString& EventID)
-{
-    for (FNarr_CharacterArc& Arc : CharacterArcs)
-    {
-        if (Arc.CharacterID == CharacterID)
-        {
-            if (Arc.AvailableEvents.Contains(EventID))
+            Milestone->bCompleted = true;
+            CurrentProgress.CompletedMilestones.Add(MilestoneID);
+            
+            // Unlock associated content
+            UnlockContent(Milestone->UnlockedContent);
+            
+            // Display milestone completion
+            if (GEngine)
             {
-                Arc.AvailableEvents.Remove(EventID);
-                Arc.CompletedEvents.Add(EventID);
-                UE_LOG(LogTemp, Warning, TEXT("Character event triggered: %s - %s"), *Arc.CharacterName, *EventID);
+                FString CompletionText = FString::Printf(TEXT("MILESTONE COMPLETED: %s"), 
+                                                       *Milestone->MilestoneName.ToString());
+                GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Green, CompletionText);
             }
-            break;
+            
+            UE_LOG(LogTemp, Log, TEXT("Completed milestone: %s"), *MilestoneID);
         }
     }
 }
 
-FNarr_CharacterArc UNarr_StoryProgressionManager::GetCharacterArc(const FString& CharacterID) const
+FNarr_PlayerProgress UNarr_StoryProgressionManager::GetPlayerProgress() const
 {
-    for (const FNarr_CharacterArc& Arc : CharacterArcs)
+    return CurrentProgress;
+}
+
+TArray<FNarr_StoryMilestone> UNarr_StoryProgressionManager::GetAvailableMilestones() const
+{
+    TArray<FNarr_StoryMilestone> AvailableMilestones;
+    
+    for (const auto& MilestonePair : StoryMilestones)
     {
-        if (Arc.CharacterID == CharacterID)
+        if (!MilestonePair.Value.bCompleted)
         {
-            return Arc;
+            AvailableMilestones.Add(MilestonePair.Value);
         }
-    }
-    return FNarr_CharacterArc();
-}
-
-bool UNarr_StoryProgressionManager::CheckChapterRequirements(const FNarr_StoryChapter& Chapter) const
-{
-    if (Chapter.RequiredQuestIDs.Num() == 0)
-    {
-        return true; // No requirements
     }
     
-    // For now, assume all required quests are completed
-    // In a full implementation, this would check against a quest manager
-    return true;
+    return AvailableMilestones;
 }
 
-void UNarr_StoryProgressionManager::UnlockNewQuests(const FNarr_StoryChapter& Chapter)
+void UNarr_StoryProgressionManager::TriggerStoryEvent(const FString& EventID, const FVector& Location)
 {
-    for (const FString& QuestID : Chapter.UnlockedQuestIDs)
+    if (EventID == TEXT("DinosaurEncounter"))
     {
-        UE_LOG(LogTemp, Warning, TEXT("Quest unlocked: %s"), *QuestID);
-        // In a full implementation, this would notify the quest manager
+        UpdatePlayerProgress(TEXT("DinosaursSeen"), 1);
+    }
+    else if (EventID == TEXT("DinosaurSurvival"))
+    {
+        UpdatePlayerProgress(TEXT("DinosaursSurvived"), 1);
+    }
+    else if (EventID == TEXT("ToolCrafted"))
+    {
+        UpdatePlayerProgress(TEXT("ToolsCrafted"), 1);
+    }
+    else if (EventID == TEXT("ShelterBuilt"))
+    {
+        UpdatePlayerProgress(TEXT("SheltersBuilt"), 1);
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("Triggered story event: %s at location %s"), *EventID, *Location.ToString());
+}
+
+void UNarr_StoryProgressionManager::InitializeStoryMilestones()
+{
+    // First Day milestone
+    FNarr_StoryMilestone FirstDay;
+    FirstDay.MilestoneID = TEXT("FirstDay");
+    FirstDay.MilestoneName = FText::FromString(TEXT("First Dawn"));
+    FirstDay.Description = FText::FromString(TEXT("Survive your first day in the prehistoric world"));
+    FirstDay.RequiredConditions.Add(TEXT("FirstDay"));
+    FirstDay.UnlockedContent.Add(TEXT("BasicCrafting"));
+    StoryMilestones.Add(FirstDay.MilestoneID, FirstDay);
+    
+    // First Dinosaur milestone
+    FNarr_StoryMilestone FirstDinosaur;
+    FirstDinosaur.MilestoneID = TEXT("FirstEncounter");
+    FirstDinosaur.MilestoneName = FText::FromString(TEXT("Ancient Giants"));
+    FirstDinosaur.Description = FText::FromString(TEXT("Witness your first dinosaur in the wild"));
+    FirstDinosaur.RequiredConditions.Add(TEXT("FirstDinosaur"));
+    FirstDinosaur.UnlockedContent.Add(TEXT("DinosaurLore"));
+    StoryMilestones.Add(FirstDinosaur.MilestoneID, FirstDinosaur);
+    
+    // First Tool milestone
+    FNarr_StoryMilestone FirstTool;
+    FirstTool.MilestoneID = TEXT("FirstTool");
+    FirstTool.MilestoneName = FText::FromString(TEXT("Stone Age Begins"));
+    FirstTool.Description = FText::FromString(TEXT("Craft your first primitive tool"));
+    FirstTool.RequiredConditions.Add(TEXT("FirstTool"));
+    FirstTool.UnlockedContent.Add(TEXT("AdvancedCrafting"));
+    StoryMilestones.Add(FirstTool.MilestoneID, FirstTool);
+    
+    // First Shelter milestone
+    FNarr_StoryMilestone FirstShelter;
+    FirstShelter.MilestoneID = TEXT("FirstShelter");
+    FirstShelter.MilestoneName = FText::FromString(TEXT("Safe Haven"));
+    FirstShelter.Description = FText::FromString(TEXT("Build your first shelter from the elements"));
+    FirstShelter.RequiredConditions.Add(TEXT("FirstShelter"));
+    FirstShelter.UnlockedContent.Add(TEXT("Construction"));
+    StoryMilestones.Add(FirstShelter.MilestoneID, FirstShelter);
+    
+    // Survive Week milestone
+    FNarr_StoryMilestone SurviveWeek;
+    SurviveWeek.MilestoneID = TEXT("SurviveWeek");
+    SurviveWeek.MilestoneName = FText::FromString(TEXT("Seasoned Survivor"));
+    SurviveWeek.Description = FText::FromString(TEXT("Survive for seven days in the prehistoric world"));
+    SurviveWeek.RequiredConditions.Add(TEXT("SurviveWeek"));
+    SurviveWeek.UnlockedContent.Add(TEXT("ExpertSurvival"));
+    StoryMilestones.Add(SurviveWeek.MilestoneID, SurviveWeek);
+}
+
+void UNarr_StoryProgressionManager::CheckAllMilestones()
+{
+    for (auto& MilestonePair : StoryMilestones)
+    {
+        if (!MilestonePair.Value.bCompleted && CheckMilestoneConditions(MilestonePair.Key))
+        {
+            CompleteMilestone(MilestonePair.Key);
+        }
     }
 }
 
-void UNarr_StoryProgressionManager::SaveStoryProgress()
+void UNarr_StoryProgressionManager::UnlockContent(const TArray<FString>& ContentIDs)
 {
-    UE_LOG(LogTemp, Warning, TEXT("Story progress saved - Current Chapter: %s"), *CurrentChapterID);
-    // Implementation would save to persistent storage
-}
-
-void UNarr_StoryProgressionManager::LoadStoryProgress()
-{
-    UE_LOG(LogTemp, Warning, TEXT("Story progress loaded"));
-    // Implementation would load from persistent storage
+    for (const FString& ContentID : ContentIDs)
+    {
+        UE_LOG(LogTemp, Log, TEXT("Unlocked content: %s"), *ContentID);
+        
+        // Here you would implement actual content unlocking
+        // e.g., enable new crafting recipes, unlock new areas, etc.
+    }
 }
