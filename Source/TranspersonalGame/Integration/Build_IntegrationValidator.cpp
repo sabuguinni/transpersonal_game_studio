@@ -3,475 +3,396 @@
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
 #include "Components/StaticMeshComponent.h"
-#include "Engine/StaticMeshActor.h"
-#include "Kismet/GameplayStatics.h"
-#include "HAL/PlatformFilemanager.h"
-#include "Misc/Paths.h"
-#include "Misc/DateTime.h"
-#include "Engine/Blueprint.h"
+#include "Engine/StaticMesh.h"
 #include "UObject/ConstructorHelpers.h"
+#include "Kismet/GameplayStatics.h"
+#include "Engine/GameInstance.h"
+#include "Modules/ModuleManager.h"
 
 UBuild_IntegrationValidator::UBuild_IntegrationValidator()
 {
     PrimaryComponentTick.bCanEverTick = false;
-    bAutoValidateOnBeginPlay = false;
-    bLogDetailedResults = true;
-    ValidationTimeout = 30.0f;
+    
+    // Initialize validation state
+    OverallStatus = EBuild_ValidationStatus::Unknown;
+    ValidationProgress = 0.0f;
+    TotalTests = 0;
+    PassedTests = 0;
+    FailedTests = 0;
+    
+    // Configuration defaults
+    bAutoRunOnBeginPlay = false;
+    bVerboseLogging = true;
+    
+    // Required modules for validation
+    RequiredModules.Add(TEXT("TranspersonalGame"));
+    RequiredModules.Add(TEXT("Engine"));
+    RequiredModules.Add(TEXT("CoreUObject"));
+    
+    // Required classes for validation
+    RequiredClasses.Add(TEXT("TranspersonalGameState"));
+    RequiredClasses.Add(TEXT("TranspersonalCharacter"));
+    RequiredClasses.Add(TEXT("PCGWorldGenerator"));
+    RequiredClasses.Add(TEXT("FoliageManager"));
+    RequiredClasses.Add(TEXT("CrowdSimulationManager"));
+    RequiredClasses.Add(TEXT("ProceduralWorldManager"));
+    RequiredClasses.Add(TEXT("BuildIntegrationManager"));
 }
 
 void UBuild_IntegrationValidator::BeginPlay()
 {
     Super::BeginPlay();
     
-    if (bAutoValidateOnBeginPlay)
+    if (bAutoRunOnBeginPlay)
     {
-        RunFullValidationSuite();
+        RunFullValidation();
     }
 }
 
-bool UBuild_IntegrationValidator::ValidateProjectStructure()
+void UBuild_IntegrationValidator::RunFullValidation()
 {
-    float StartTime = FPlatformTime::Seconds();
-    bool bSuccess = true;
-    
-    // Check project file exists
-    FString ProjectPath = FPaths::GetProjectFilePath();
-    if (!FPaths::FileExists(ProjectPath))
+    if (bVerboseLogging)
     {
-        AddValidationReport(TEXT("Project Structure"), EBuild_ValidationResult::Critical, 
-            TEXT("Project file not found"), FPlatformTime::Seconds() - StartTime);
-        return false;
+        UE_LOG(LogTemp, Warning, TEXT("=== BUILD INTEGRATION VALIDATION STARTED ==="));
     }
     
-    // Check source directory
-    FString SourceDir = FPaths::ProjectDir() / TEXT("Source");
-    if (!FPaths::DirectoryExists(SourceDir))
+    ResetValidationState();
+    OverallStatus = EBuild_ValidationStatus::Running;
+    
+    // Run all validation tests
+    TArray<TPair<FString, TFunction<bool()>>> ValidationTests;
+    
+    ValidationTests.Add(MakeTuple(TEXT("Module Loading"), [this]() { return ValidateModuleLoading(); }));
+    ValidationTests.Add(MakeTuple(TEXT("Class Registration"), [this]() { return ValidateClassRegistration(); }));
+    ValidationTests.Add(MakeTuple(TEXT("Level Integrity"), [this]() { return ValidateLevelIntegrity(); }));
+    ValidationTests.Add(MakeTuple(TEXT("Actor Spawning"), [this]() { return ValidateActorSpawning(); }));
+    
+    TotalTests = ValidationTests.Num();
+    
+    // Execute all tests
+    for (const auto& Test : ValidationTests)
     {
-        AddValidationReport(TEXT("Project Structure"), EBuild_ValidationResult::Error, 
-            TEXT("Source directory not found"), FPlatformTime::Seconds() - StartTime);
-        bSuccess = false;
+        FBuild_ValidationResult Result = RunSingleTest(Test.Key, Test.Value);
+        ValidationResults.Add(Result);
+        
+        if (Result.Status == EBuild_ValidationStatus::Pass)
+        {
+            PassedTests++;
+        }
+        else
+        {
+            FailedTests++;
+        }
+        
+        UpdateValidationProgress();
+        LogValidationResult(Result);
     }
     
-    // Check content directory
-    FString ContentDir = FPaths::ProjectContentDir();
-    if (!FPaths::DirectoryExists(ContentDir))
+    // Determine overall status
+    if (FailedTests == 0)
     {
-        AddValidationReport(TEXT("Project Structure"), EBuild_ValidationResult::Error, 
-            TEXT("Content directory not found"), FPlatformTime::Seconds() - StartTime);
-        bSuccess = false;
+        OverallStatus = EBuild_ValidationStatus::Pass;
+    }
+    else if (PassedTests > FailedTests)
+    {
+        OverallStatus = EBuild_ValidationStatus::Fail;
+    }
+    else
+    {
+        OverallStatus = EBuild_ValidationStatus::Critical;
     }
     
-    if (bSuccess)
-    {
-        AddValidationReport(TEXT("Project Structure"), EBuild_ValidationResult::Success, 
-            TEXT("Project structure validation passed"), FPlatformTime::Seconds() - StartTime);
-    }
+    GenerateIntegrationReport();
     
-    return bSuccess;
+    if (bVerboseLogging)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("=== BUILD INTEGRATION VALIDATION COMPLETED ==="));
+    }
 }
 
 bool UBuild_IntegrationValidator::ValidateModuleLoading()
 {
-    float StartTime = FPlatformTime::Seconds();
-    bool bSuccess = true;
-    
-    // Clear previous module statuses
+    bool bAllModulesLoaded = true;
     ModuleStatuses.Empty();
     
-    // Test core TranspersonalGame module
-    FBuild_ModuleStatus TranspersonalGameStatus;
-    TranspersonalGameStatus.ModuleName = TEXT("TranspersonalGame");
-    TranspersonalGameStatus.bIsLoaded = true; // We're running, so it's loaded
-    
-    // Test loading core classes
-    TArray<FString> CoreClasses = {
-        TEXT("/Script/TranspersonalGame.TranspersonalCharacter"),
-        TEXT("/Script/TranspersonalGame.TranspersonalGameState"),
-        TEXT("/Script/TranspersonalGame.PCGWorldGenerator"),
-        TEXT("/Script/TranspersonalGame.FoliageManager"),
-        TEXT("/Script/TranspersonalGame.CrowdSimulationManager")
-    };
-    
-    for (const FString& ClassName : CoreClasses)
+    for (const FString& ModuleName : RequiredModules)
     {
-        UClass* LoadedClass = LoadClass<UObject>(nullptr, *ClassName);
-        if (LoadedClass)
+        FBuild_ModuleStatus ModuleStatus;
+        ModuleStatus.ModuleName = ModuleName;
+        
+        // Check if module is loaded
+        if (FModuleManager::Get().IsModuleLoaded(*ModuleName))
         {
-            TranspersonalGameStatus.LoadedClasses.Add(ClassName);
-            TranspersonalGameStatus.ClassCount++;
+            ModuleStatus.bIsLoaded = true;
+            
+            if (bVerboseLogging)
+            {
+                UE_LOG(LogTemp, Log, TEXT("✓ Module loaded: %s"), *ModuleName);
+            }
         }
         else
         {
-            TranspersonalGameStatus.FailedClasses.Add(ClassName);
-            TranspersonalGameStatus.bHasErrors = true;
-            bSuccess = false;
+            ModuleStatus.bIsLoaded = false;
+            bAllModulesLoaded = false;
+            
+            if (bVerboseLogging)
+            {
+                UE_LOG(LogTemp, Warning, TEXT("✗ Module not loaded: %s"), *ModuleName);
+            }
         }
+        
+        ModuleStatuses.Add(ModuleStatus);
     }
     
-    ModuleStatuses.Add(TranspersonalGameStatus);
-    
-    FString ResultMessage = FString::Printf(TEXT("Module validation: %d/%d classes loaded"), 
-        TranspersonalGameStatus.LoadedClasses.Num(), CoreClasses.Num());
-    
-    EBuild_ValidationResult Result = bSuccess ? EBuild_ValidationResult::Success : EBuild_ValidationResult::Warning;
-    AddValidationReport(TEXT("Module Loading"), Result, ResultMessage, FPlatformTime::Seconds() - StartTime);
-    
-    return bSuccess;
+    return bAllModulesLoaded;
 }
 
 bool UBuild_IntegrationValidator::ValidateClassRegistration()
 {
-    float StartTime = FPlatformTime::Seconds();
-    bool bSuccess = true;
-    int32 RegisteredClasses = 0;
+    bool bAllClassesRegistered = true;
     
-    // Check if our custom classes are properly registered with UE5's reflection system
-    for (TObjectIterator<UClass> ClassIterator; ClassIterator; ++ClassIterator)
+    for (const FString& ClassName : RequiredClasses)
     {
-        UClass* Class = *ClassIterator;
-        if (Class && Class->GetPackage())
+        FString ClassPath = FString::Printf(TEXT("/Script/TranspersonalGame.%s"), *ClassName);
+        UClass* LoadedClass = LoadClass<UObject>(nullptr, *ClassPath);
+        
+        if (LoadedClass)
         {
-            FString PackageName = Class->GetPackage()->GetName();
-            if (PackageName.Contains(TEXT("TranspersonalGame")))
+            if (bVerboseLogging)
             {
-                RegisteredClasses++;
-                if (bLogDetailedResults)
+                UE_LOG(LogTemp, Log, TEXT("✓ Class registered: %s"), *ClassName);
+            }
+            
+            // Update module status with loaded class
+            for (FBuild_ModuleStatus& ModuleStatus : ModuleStatuses)
+            {
+                if (ModuleStatus.ModuleName == TEXT("TranspersonalGame"))
                 {
-                    UE_LOG(LogTemp, Log, TEXT("Registered class: %s"), *Class->GetName());
+                    ModuleStatus.LoadedClasses.Add(ClassName);
+                    ModuleStatus.ClassCount++;
+                    break;
+                }
+            }
+        }
+        else
+        {
+            bAllClassesRegistered = false;
+            
+            if (bVerboseLogging)
+            {
+                UE_LOG(LogTemp, Warning, TEXT("✗ Class not registered: %s"), *ClassName);
+            }
+            
+            // Update module status with failed class
+            for (FBuild_ModuleStatus& ModuleStatus : ModuleStatuses)
+            {
+                if (ModuleStatus.ModuleName == TEXT("TranspersonalGame"))
+                {
+                    ModuleStatus.FailedClasses.Add(ClassName);
+                    break;
                 }
             }
         }
     }
     
-    FString ResultMessage = FString::Printf(TEXT("Found %d registered TranspersonalGame classes"), RegisteredClasses);
-    
-    if (RegisteredClasses > 0)
+    return bAllClassesRegistered;
+}
+
+bool UBuild_IntegrationValidator::ValidateLevelIntegrity()
+{
+    UWorld* World = GetWorld();
+    if (!World)
     {
-        AddValidationReport(TEXT("Class Registration"), EBuild_ValidationResult::Success, 
-            ResultMessage, FPlatformTime::Seconds() - StartTime);
+        if (bVerboseLogging)
+        {
+            UE_LOG(LogTemp, Error, TEXT("✗ No valid world found"));
+        }
+        return false;
+    }
+    
+    // Count actors in the level
+    int32 ActorCount = 0;
+    for (TActorIterator<AActor> ActorIterator(World); ActorIterator; ++ActorIterator)
+    {
+        ActorCount++;
+    }
+    
+    if (bVerboseLogging)
+    {
+        UE_LOG(LogTemp, Log, TEXT("✓ Level integrity check: %d actors found"), ActorCount);
+    }
+    
+    // Basic integrity check - level should have at least some actors
+    return ActorCount > 0;
+}
+
+bool UBuild_IntegrationValidator::ValidateActorSpawning()
+{
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        return false;
+    }
+    
+    // Try to spawn a test actor
+    FVector SpawnLocation(1000.0f, 1000.0f, 200.0f);
+    FRotator SpawnRotation = FRotator::ZeroRotator;
+    
+    AActor* TestActor = World->SpawnActor<AActor>(AActor::StaticClass(), SpawnLocation, SpawnRotation);
+    
+    if (TestActor)
+    {
+        TestActor->SetActorLabel(TEXT("ValidationTestActor"));
+        
+        if (bVerboseLogging)
+        {
+            UE_LOG(LogTemp, Log, TEXT("✓ Actor spawning test successful"));
+        }
+        
+        // Clean up test actor
+        TestActor->Destroy();
+        return true;
     }
     else
     {
-        AddValidationReport(TEXT("Class Registration"), EBuild_ValidationResult::Warning, 
-            TEXT("No TranspersonalGame classes found in reflection system"), FPlatformTime::Seconds() - StartTime);
-        bSuccess = false;
+        if (bVerboseLogging)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("✗ Actor spawning test failed"));
+        }
+        return false;
     }
-    
-    return bSuccess;
 }
 
-bool UBuild_IntegrationValidator::ValidateCrossSystemIntegration()
+void UBuild_IntegrationValidator::GenerateIntegrationReport()
 {
-    float StartTime = FPlatformTime::Seconds();
-    bool bSuccess = true;
-    
-    // Test world generation integration
-    if (!ValidateWorldGeneration())
+    if (bVerboseLogging)
     {
-        bSuccess = false;
+        UE_LOG(LogTemp, Warning, TEXT("=== INTEGRATION VALIDATION REPORT ==="));
+        UE_LOG(LogTemp, Warning, TEXT("Overall Status: %s"), 
+            OverallStatus == EBuild_ValidationStatus::Pass ? TEXT("PASS") :
+            OverallStatus == EBuild_ValidationStatus::Fail ? TEXT("FAIL") :
+            OverallStatus == EBuild_ValidationStatus::Critical ? TEXT("CRITICAL") : TEXT("UNKNOWN"));
+        
+        UE_LOG(LogTemp, Warning, TEXT("Tests Passed: %d/%d"), PassedTests, TotalTests);
+        UE_LOG(LogTemp, Warning, TEXT("Tests Failed: %d/%d"), FailedTests, TotalTests);
+        UE_LOG(LogTemp, Warning, TEXT("Validation Progress: %.1f%%"), ValidationProgress);
+        
+        UE_LOG(LogTemp, Warning, TEXT("Module Status:"));
+        for (const FBuild_ModuleStatus& ModuleStatus : ModuleStatuses)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("  %s: %s (%d classes)"), 
+                *ModuleStatus.ModuleName,
+                ModuleStatus.bIsLoaded ? TEXT("LOADED") : TEXT("NOT LOADED"),
+                ModuleStatus.ClassCount);
+        }
+        
+        UE_LOG(LogTemp, Warning, TEXT("=== END INTEGRATION REPORT ==="));
     }
-    
-    // Test character systems integration
-    if (!ValidateCharacterSystems())
-    {
-        bSuccess = false;
-    }
-    
-    // Test AI systems integration
-    if (!ValidateAISystems())
-    {
-        bSuccess = false;
-    }
-    
-    // Test environment systems integration
-    if (!ValidateEnvironmentSystems())
-    {
-        bSuccess = false;
-    }
-    
-    // Test quest systems integration
-    if (!ValidateQuestSystems())
-    {
-        bSuccess = false;
-    }
-    
-    EBuild_ValidationResult Result = bSuccess ? EBuild_ValidationResult::Success : EBuild_ValidationResult::Warning;
-    AddValidationReport(TEXT("Cross-System Integration"), Result, 
-        TEXT("Cross-system integration validation completed"), FPlatformTime::Seconds() - StartTime);
-    
-    return bSuccess;
 }
 
-bool UBuild_IntegrationValidator::RunFullValidationSuite()
+FBuild_ValidationResult UBuild_IntegrationValidator::RunSingleTest(const FString& TestName, TFunction<bool()> TestFunction)
 {
-    ClearValidationReports();
+    FBuild_ValidationResult Result;
+    Result.TestName = TestName;
     
-    UE_LOG(LogTemp, Warning, TEXT("=== INTEGRATION VALIDATOR - FULL SUITE ==="));
-    
-    bool bAllPassed = true;
-    
-    // Run all validation tests
-    if (!ValidateProjectStructure()) bAllPassed = false;
-    if (!ValidateModuleLoading()) bAllPassed = false;
-    if (!ValidateClassRegistration()) bAllPassed = false;
-    if (!CheckCompilationStatus()) bAllPassed = false;
-    if (!ValidateBinaryFiles()) bAllPassed = false;
-    if (!TestActorSpawning()) bAllPassed = false;
-    if (!ValidateCrossSystemIntegration()) bAllPassed = false;
-    
-    // Generate summary report
-    FString SummaryReport = GenerateIntegrationReport();
-    UE_LOG(LogTemp, Warning, TEXT("%s"), *SummaryReport);
-    
-    return bAllPassed;
-}
-
-bool UBuild_IntegrationValidator::CheckCompilationStatus()
-{
-    float StartTime = FPlatformTime::Seconds();
-    
-    // Check if we can create basic UE5 objects (indicates successful compilation)
-    bool bCanCreateObjects = true;
+    double StartTime = FPlatformTime::Seconds();
     
     try
     {
-        // Test creating a basic actor
-        UWorld* World = GetWorld();
-        if (World)
+        bool bTestPassed = TestFunction();
+        Result.Status = bTestPassed ? EBuild_ValidationStatus::Pass : EBuild_ValidationStatus::Fail;
+        
+        if (!bTestPassed)
         {
-            FActorSpawnParameters SpawnParams;
-            SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-            
-            AActor* TestActor = World->SpawnActor<AActor>(AActor::StaticClass(), FVector::ZeroVector, FRotator::ZeroRotator, SpawnParams);
-            if (TestActor)
-            {
-                TestActor->Destroy();
-            }
-            else
-            {
-                bCanCreateObjects = false;
-            }
+            Result.ErrorMessage = FString::Printf(TEXT("Test '%s' failed validation"), *TestName);
         }
     }
     catch (...)
     {
-        bCanCreateObjects = false;
+        Result.Status = EBuild_ValidationStatus::Critical;
+        Result.ErrorMessage = FString::Printf(TEXT("Test '%s' threw an exception"), *TestName);
     }
     
-    EBuild_ValidationResult Result = bCanCreateObjects ? EBuild_ValidationResult::Success : EBuild_ValidationResult::Error;
-    FString Message = bCanCreateObjects ? TEXT("Compilation status: OK") : TEXT("Compilation issues detected");
+    double EndTime = FPlatformTime::Seconds();
+    Result.ExecutionTime = static_cast<float>(EndTime - StartTime);
     
-    AddValidationReport(TEXT("Compilation Status"), Result, Message, FPlatformTime::Seconds() - StartTime);
-    
-    return bCanCreateObjects;
+    return Result;
 }
 
-bool UBuild_IntegrationValidator::ValidateBinaryFiles()
+void UBuild_IntegrationValidator::LogValidationResult(const FBuild_ValidationResult& Result)
 {
-    float StartTime = FPlatformTime::Seconds();
-    
-    // Check for compiled binaries in expected locations
-    FString BinariesDir = FPaths::ProjectDir() / TEXT("Binaries");
-    bool bBinariesExist = FPaths::DirectoryExists(BinariesDir);
-    
-    EBuild_ValidationResult Result = bBinariesExist ? EBuild_ValidationResult::Success : EBuild_ValidationResult::Warning;
-    FString Message = bBinariesExist ? TEXT("Binary files found") : TEXT("Binary directory not found - may be development build");
-    
-    AddValidationReport(TEXT("Binary Validation"), Result, Message, FPlatformTime::Seconds() - StartTime);
-    
-    return bBinariesExist;
-}
-
-bool UBuild_IntegrationValidator::TestActorSpawning()
-{
-    float StartTime = FPlatformTime::Seconds();
-    bool bSuccess = false;
-    
-    UWorld* World = GetWorld();
-    if (World)
+    if (bVerboseLogging)
     {
-        try
+        FString StatusText = 
+            Result.Status == EBuild_ValidationStatus::Pass ? TEXT("PASS") :
+            Result.Status == EBuild_ValidationStatus::Fail ? TEXT("FAIL") :
+            Result.Status == EBuild_ValidationStatus::Critical ? TEXT("CRITICAL") : TEXT("UNKNOWN");
+        
+        UE_LOG(LogTemp, Log, TEXT("Test '%s': %s (%.3fs)"), 
+            *Result.TestName, *StatusText, Result.ExecutionTime);
+        
+        if (!Result.ErrorMessage.IsEmpty())
         {
-            FActorSpawnParameters SpawnParams;
-            SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-            
-            // Test spawning a static mesh actor
-            AStaticMeshActor* TestActor = World->SpawnActor<AStaticMeshActor>(
-                AStaticMeshActor::StaticClass(), 
-                FVector(2000, 2000, 200), 
-                FRotator::ZeroRotator, 
-                SpawnParams
-            );
-            
-            if (TestActor)
-            {
-                TestActor->SetActorLabel(TEXT("IntegrationTest_Validator"));
-                bSuccess = true;
-                
-                // Clean up test actor after a short delay
-                FTimerHandle TimerHandle;
-                World->GetTimerManager().SetTimer(TimerHandle, [TestActor]()
-                {
-                    if (IsValid(TestActor))
-                    {
-                        TestActor->Destroy();
-                    }
-                }, 1.0f, false);
-            }
-        }
-        catch (...)
-        {
-            bSuccess = false;
+            UE_LOG(LogTemp, Warning, TEXT("  Error: %s"), *Result.ErrorMessage);
         }
     }
-    
-    EBuild_ValidationResult Result = bSuccess ? EBuild_ValidationResult::Success : EBuild_ValidationResult::Error;
-    FString Message = bSuccess ? TEXT("Actor spawning test passed") : TEXT("Actor spawning test failed");
-    
-    AddValidationReport(TEXT("Actor Spawning"), Result, Message, FPlatformTime::Seconds() - StartTime);
-    
-    return bSuccess;
 }
 
-// Cross-system validation helpers
-bool UBuild_IntegrationValidator::ValidateWorldGeneration()
+void UBuild_IntegrationValidator::UpdateValidationProgress()
 {
-    // Test if PCGWorldGenerator class exists and can be instantiated
-    UClass* WorldGenClass = LoadClass<UObject>(nullptr, TEXT("/Script/TranspersonalGame.PCGWorldGenerator"));
-    return (WorldGenClass != nullptr);
-}
-
-bool UBuild_IntegrationValidator::ValidateCharacterSystems()
-{
-    // Test if TranspersonalCharacter class exists
-    UClass* CharacterClass = LoadClass<UObject>(nullptr, TEXT("/Script/TranspersonalGame.TranspersonalCharacter"));
-    return (CharacterClass != nullptr);
-}
-
-bool UBuild_IntegrationValidator::ValidateAISystems()
-{
-    // Test if CrowdSimulationManager class exists
-    UClass* CrowdClass = LoadClass<UObject>(nullptr, TEXT("/Script/TranspersonalGame.CrowdSimulationManager"));
-    return (CrowdClass != nullptr);
-}
-
-bool UBuild_IntegrationValidator::ValidateEnvironmentSystems()
-{
-    // Test if FoliageManager class exists
-    UClass* FoliageClass = LoadClass<UObject>(nullptr, TEXT("/Script/TranspersonalGame.FoliageManager"));
-    return (FoliageClass != nullptr);
-}
-
-bool UBuild_IntegrationValidator::ValidateQuestSystems()
-{
-    // Test if quest-related classes exist (placeholder for now)
-    return true; // Will be implemented when quest system is added
-}
-
-TArray<FBuild_ValidationReport> UBuild_IntegrationValidator::GetValidationReports() const
-{
-    return ValidationReports;
-}
-
-TArray<FBuild_ModuleStatus> UBuild_IntegrationValidator::GetModuleStatuses() const
-{
-    return ModuleStatuses;
-}
-
-FString UBuild_IntegrationValidator::GenerateIntegrationReport() const
-{
-    FString Report = TEXT("=== INTEGRATION VALIDATION REPORT ===\n");
-    Report += FString::Printf(TEXT("Generated: %s\n"), *FDateTime::Now().ToString());
-    Report += FString::Printf(TEXT("Total Tests: %d\n\n"), ValidationReports.Num());
-    
-    int32 SuccessCount = 0;
-    int32 WarningCount = 0;
-    int32 ErrorCount = 0;
-    int32 CriticalCount = 0;
-    
-    for (const FBuild_ValidationReport& ValidationReport : ValidationReports)
+    if (TotalTests > 0)
     {
-        switch (ValidationReport.Result)
-        {
-            case EBuild_ValidationResult::Success: SuccessCount++; break;
-            case EBuild_ValidationResult::Warning: WarningCount++; break;
-            case EBuild_ValidationResult::Error: ErrorCount++; break;
-            case EBuild_ValidationResult::Critical: CriticalCount++; break;
-        }
-        
-        FString ResultStr;
-        switch (ValidationReport.Result)
-        {
-            case EBuild_ValidationResult::Success: ResultStr = TEXT("PASS"); break;
-            case EBuild_ValidationResult::Warning: ResultStr = TEXT("WARN"); break;
-            case EBuild_ValidationResult::Error: ResultStr = TEXT("FAIL"); break;
-            case EBuild_ValidationResult::Critical: ResultStr = TEXT("CRIT"); break;
-        }
-        
-        Report += FString::Printf(TEXT("[%s] %s: %s (%.3fs)\n"), 
-            *ResultStr, *ValidationReport.TestName, *ValidationReport.Message, ValidationReport.ExecutionTime);
-    }
-    
-    Report += FString::Printf(TEXT("\nSUMMARY: %d PASS, %d WARN, %d FAIL, %d CRIT\n"), 
-        SuccessCount, WarningCount, ErrorCount, CriticalCount);
-    
-    return Report;
-}
-
-void UBuild_IntegrationValidator::AddValidationReport(const FString& TestName, EBuild_ValidationResult Result, const FString& Message, float ExecutionTime)
-{
-    FBuild_ValidationReport Report;
-    Report.TestName = TestName;
-    Report.Result = Result;
-    Report.Message = Message;
-    Report.ExecutionTime = ExecutionTime;
-    
-    ValidationReports.Add(Report);
-    
-    if (bLogDetailedResults)
-    {
-        FString ResultStr;
-        switch (Result)
-        {
-            case EBuild_ValidationResult::Success: ResultStr = TEXT("PASS"); break;
-            case EBuild_ValidationResult::Warning: ResultStr = TEXT("WARN"); break;
-            case EBuild_ValidationResult::Error: ResultStr = TEXT("FAIL"); break;
-            case EBuild_ValidationResult::Critical: ResultStr = TEXT("CRIT"); break;
-        }
-        
-        UE_LOG(LogTemp, Warning, TEXT("[%s] %s: %s"), *ResultStr, *TestName, *Message);
+        ValidationProgress = (static_cast<float>(PassedTests + FailedTests) / static_cast<float>(TotalTests)) * 100.0f;
     }
 }
 
-void UBuild_IntegrationValidator::ClearValidationReports()
+void UBuild_IntegrationValidator::ResetValidationState()
 {
-    ValidationReports.Empty();
+    ValidationResults.Empty();
     ModuleStatuses.Empty();
+    OverallStatus = EBuild_ValidationStatus::Unknown;
+    ValidationProgress = 0.0f;
+    TotalTests = 0;
+    PassedTests = 0;
+    FailedTests = 0;
 }
 
-// ABuild_IntegrationValidatorActor implementation
-ABuild_IntegrationValidatorActor::ABuild_IntegrationValidatorActor()
+// === INTEGRATION TEST ACTOR IMPLEMENTATION ===
+
+ABuild_IntegrationTestActor::ABuild_IntegrationTestActor()
 {
     PrimaryActorTick.bCanEverTick = false;
     
-    ValidatorComponent = CreateDefaultSubobject<UBuild_IntegrationValidator>(TEXT("ValidatorComponent"));
+    // Create integration validator component
+    IntegrationValidator = CreateDefaultSubobject<UBuild_IntegrationValidator>(TEXT("IntegrationValidator"));
+    
+    // Create test mesh component
+    TestMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("TestMesh"));
+    RootComponent = TestMesh;
+    
+    // Try to load a basic cube mesh for testing
+    static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeMeshAsset(TEXT("/Engine/BasicShapes/Cube"));
+    if (CubeMeshAsset.Succeeded())
+    {
+        TestMesh->SetStaticMesh(CubeMeshAsset.Object);
+    }
 }
 
-void ABuild_IntegrationValidatorActor::BeginPlay()
+void ABuild_IntegrationTestActor::BeginPlay()
 {
     Super::BeginPlay();
+    
+    // Set actor label for identification
+    SetActorLabel(TEXT("IntegrationTestActor"));
 }
 
-UBuild_IntegrationValidator* ABuild_IntegrationValidatorActor::GetValidatorComponent() const
+void ABuild_IntegrationTestActor::RunIntegrationTests()
 {
-    return ValidatorComponent;
-}
-
-bool ABuild_IntegrationValidatorActor::RunValidation()
-{
-    if (ValidatorComponent)
+    if (IntegrationValidator)
     {
-        return ValidatorComponent->RunFullValidationSuite();
+        IntegrationValidator->RunFullValidation();
+        
+        // Fire blueprint event with validation status
+        OnValidationComplete(IntegrationValidator->GetOverallStatus());
     }
-    return false;
 }
