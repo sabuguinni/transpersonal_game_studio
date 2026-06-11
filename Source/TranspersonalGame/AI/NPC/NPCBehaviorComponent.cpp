@@ -1,315 +1,321 @@
 #include "NPCBehaviorComponent.h"
-#include "GameFramework/Character.h"
-#include "GameFramework/CharacterMovementComponent.h"
-#include "Kismet/GameplayStatics.h"
 #include "Engine/World.h"
-#include "DrawDebugHelpers.h"
+#include "GameFramework/Pawn.h"
+#include "GameFramework/PlayerController.h"
+#include "Kismet/GameplayStatics.h"
+#include "Components/PrimitiveComponent.h"
+#include "Engine/Engine.h"
 
-UNPC_BehaviorComponent::UNPC_BehaviorComponent()
+UNPCBehaviorComponent::UNPCBehaviorComponent()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 0.1f;
-
-    CurrentState = ENPC_BehaviorState::Idle;
-    DetectionRadius = 1500.0f;
-    FleeRadius = 800.0f;
-    MovementSpeed = 300.0f;
-    PatrolRadius = 2000.0f;
-    
-    Courage = 0.5f;
-    Curiosity = 0.7f;
-    Sociability = 0.6f;
+    PrimaryComponentTick.TickInterval = 0.1f; // Update 10 times per second
 }
 
-void UNPC_BehaviorComponent::BeginPlay()
+void UNPCBehaviorComponent::BeginPlay()
 {
     Super::BeginPlay();
     
-    // Initialize patrol points around spawn location
-    if (AActor* Owner = GetOwner())
+    // Initialize behavior system
+    SetBehaviorState(ENPC_BehaviorState::Idle);
+    
+    // Start behavior update timer
+    if (UWorld* World = GetWorld())
     {
-        FVector SpawnLocation = Owner->GetActorLocation();
-        BehaviorMemory.PatrolPoints.Empty();
+        World->GetTimerManager().SetTimer(BehaviorTimer, this, &UNPCBehaviorComponent::UpdateBehavior, 0.5f, true);
+    }
+    
+    // Setup default patrol if no points specified
+    if (PatrolPoints.Num() == 0)
+    {
+        FNPC_PatrolPoint Point1;
+        Point1.Location = GetOwner()->GetActorLocation() + FVector(500, 0, 0);
+        Point1.WaitTime = 2.0f;
         
-        // Create 4 patrol points in a square pattern
-        float PatrolDistance = PatrolRadius * 0.7f;
-        BehaviorMemory.PatrolPoints.Add(SpawnLocation + FVector(PatrolDistance, PatrolDistance, 0));
-        BehaviorMemory.PatrolPoints.Add(SpawnLocation + FVector(-PatrolDistance, PatrolDistance, 0));
-        BehaviorMemory.PatrolPoints.Add(SpawnLocation + FVector(-PatrolDistance, -PatrolDistance, 0));
-        BehaviorMemory.PatrolPoints.Add(SpawnLocation + FVector(PatrolDistance, -PatrolDistance, 0));
+        FNPC_PatrolPoint Point2;
+        Point2.Location = GetOwner()->GetActorLocation() + FVector(-500, 0, 0);
+        Point2.WaitTime = 2.0f;
         
-        BehaviorMemory.CurrentPatrolIndex = 0;
+        PatrolPoints.Add(Point1);
+        PatrolPoints.Add(Point2);
     }
 }
 
-void UNPC_BehaviorComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void UNPCBehaviorComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-
-    // Update memory timers
-    BehaviorMemory.TimeSincePlayerSeen += DeltaTime;
-
-    // State machine
-    switch (CurrentState)
-    {
-        case ENPC_BehaviorState::Idle:
-            HandleIdleState(DeltaTime);
-            break;
-        case ENPC_BehaviorState::Patrolling:
-            HandlePatrollingState(DeltaTime);
-            break;
-        case ENPC_BehaviorState::Investigating:
-            HandleInvestigatingState(DeltaTime);
-            break;
-        case ENPC_BehaviorState::Fleeing:
-            HandleFleeingState(DeltaTime);
-            break;
-        default:
-            break;
-    }
-
-    // Check for player detection
-    if (CanSeePlayer())
-    {
-        ReactToPlayer();
-    }
+    
+    StateTimer += DeltaTime;
 }
 
-void UNPC_BehaviorComponent::SetBehaviorState(ENPC_BehaviorState NewState)
+void UNPCBehaviorComponent::SetBehaviorState(ENPC_BehaviorState NewState)
 {
     if (CurrentState != NewState)
     {
         CurrentState = NewState;
-        UE_LOG(LogTemp, Log, TEXT("NPC %s changed state to %d"), 
-               GetOwner() ? *GetOwner()->GetName() : TEXT("Unknown"), 
-               (int32)NewState);
+        StateTimer = 0.0f;
+        
+        // Log state change for debugging
+        if (GEngine)
+        {
+            FString StateName = UEnum::GetValueAsString(CurrentState);
+            GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Yellow, 
+                FString::Printf(TEXT("NPC %s: State changed to %s"), 
+                *GetOwner()->GetName(), *StateName));
+        }
     }
 }
 
-bool UNPC_BehaviorComponent::CanSeePlayer()
+void UNPCBehaviorComponent::StartPatrolling()
 {
-    AActor* Player = GetPlayerActor();
-    if (!Player || !GetOwner())
+    if (PatrolPoints.Num() > 0)
+    {
+        SetBehaviorState(ENPC_BehaviorState::Patrolling);
+        CurrentPatrolIndex = 0;
+        MoveToNextPatrolPoint();
+    }
+}
+
+void UNPCBehaviorComponent::InvestigateLocation(FVector Location)
+{
+    TargetLocation = Location;
+    bHasValidTarget = true;
+    SetBehaviorState(ENPC_BehaviorState::Investigating);
+}
+
+void UNPCBehaviorComponent::FleeFromThreat(FVector ThreatLocation)
+{
+    // Calculate flee direction (opposite from threat)
+    FVector FleeDirection = (GetOwner()->GetActorLocation() - ThreatLocation).GetSafeNormal();
+    TargetLocation = GetOwner()->GetActorLocation() + (FleeDirection * FleeRadius * 2.0f);
+    bHasValidTarget = true;
+    SetBehaviorState(ENPC_BehaviorState::Fleeing);
+    
+    // Clear memory after fleeing
+    if (UWorld* World = GetWorld())
+    {
+        World->GetTimerManager().SetTimer(MemoryTimer, this, &UNPCBehaviorComponent::ClearPlayerMemory, MemoryDuration, false);
+    }
+}
+
+bool UNPCBehaviorComponent::CanSeePlayer()
+{
+    APawn* Player = GetNearestPlayer();
+    if (!Player)
     {
         return false;
     }
-
-    float Distance = GetDistanceToPlayer();
+    
+    FVector OwnerLocation = GetOwner()->GetActorLocation();
+    FVector PlayerLocation = Player->GetActorLocation();
+    float Distance = FVector::Dist(OwnerLocation, PlayerLocation);
+    
     if (Distance > DetectionRadius)
     {
         return false;
     }
-
-    // Simple line trace for line of sight
-    FVector StartLocation = GetOwner()->GetActorLocation();
-    FVector EndLocation = Player->GetActorLocation();
     
+    // Simple line of sight check
     FHitResult HitResult;
     FCollisionQueryParams QueryParams;
     QueryParams.AddIgnoredActor(GetOwner());
     QueryParams.AddIgnoredActor(Player);
-
+    
     bool bHit = GetWorld()->LineTraceSingleByChannel(
         HitResult,
-        StartLocation,
-        EndLocation,
+        OwnerLocation,
+        PlayerLocation,
         ECollisionChannel::ECC_Visibility,
         QueryParams
     );
-
+    
     return !bHit; // Can see if no obstruction
 }
 
-void UNPC_BehaviorComponent::UpdatePatrol()
+APawn* UNPCBehaviorComponent::GetNearestPlayer()
 {
-    if (BehaviorMemory.PatrolPoints.Num() == 0)
+    if (UWorld* World = GetWorld())
     {
-        return;
+        if (APlayerController* PC = World->GetFirstPlayerController())
+        {
+            return PC->GetPawn();
+        }
     }
+    return nullptr;
+}
 
-    AActor* Owner = GetOwner();
-    if (!Owner)
+void UNPCBehaviorComponent::UpdateBehavior()
+{
+    switch (CurrentState)
     {
-        return;
-    }
-
-    FVector CurrentLocation = Owner->GetActorLocation();
-    FVector TargetPoint = BehaviorMemory.PatrolPoints[BehaviorMemory.CurrentPatrolIndex];
-    
-    float DistanceToTarget = FVector::Dist(CurrentLocation, TargetPoint);
-    
-    if (DistanceToTarget < 200.0f) // Close enough to patrol point
-    {
-        // Move to next patrol point
-        BehaviorMemory.CurrentPatrolIndex = (BehaviorMemory.CurrentPatrolIndex + 1) % BehaviorMemory.PatrolPoints.Num();
-    }
-    else
-    {
-        // Move towards current patrol point
-        FVector Direction = (TargetPoint - CurrentLocation).GetSafeNormal();
-        FVector NewLocation = CurrentLocation + Direction * MovementSpeed * GetWorld()->GetDeltaSeconds();
-        Owner->SetActorLocation(NewLocation);
+        case ENPC_BehaviorState::Idle:
+            ProcessIdleState();
+            break;
+        case ENPC_BehaviorState::Patrolling:
+            ProcessPatrollingState();
+            break;
+        case ENPC_BehaviorState::Investigating:
+            ProcessInvestigatingState();
+            break;
+        case ENPC_BehaviorState::Fleeing:
+            ProcessFleeingState();
+            break;
+        default:
+            break;
     }
 }
 
-void UNPC_BehaviorComponent::ReactToPlayer()
+void UNPCBehaviorComponent::ProcessIdleState()
 {
-    AActor* Player = GetPlayerActor();
-    if (!Player)
+    // Check for player
+    if (CanSeePlayer())
     {
-        return;
+        APawn* Player = GetNearestPlayer();
+        if (Player)
+        {
+            LastKnownPlayerLocation = Player->GetActorLocation();
+            float Distance = FVector::Dist(GetOwner()->GetActorLocation(), LastKnownPlayerLocation);
+            
+            if (Distance < FleeRadius)
+            {
+                FleeFromThreat(LastKnownPlayerLocation);
+            }
+            else
+            {
+                InvestigateLocation(LastKnownPlayerLocation);
+            }
+        }
     }
-
-    UpdatePlayerMemory(Player->GetActorLocation());
-    
-    float Distance = GetDistanceToPlayer();
-    
-    // Decide reaction based on distance and personality
-    if (Distance < FleeRadius && Courage < 0.3f)
+    else if (StateTimer > 3.0f) // Idle for 3 seconds, start patrolling
     {
-        StartFleeing();
-    }
-    else if (Distance < DetectionRadius && Curiosity > 0.5f)
-    {
-        StartInvestigating(Player->GetActorLocation());
+        StartPatrolling();
     }
 }
 
-void UNPC_BehaviorComponent::UpdatePlayerMemory(const FVector& PlayerLocation)
+void UNPCBehaviorComponent::ProcessPatrollingState()
 {
-    BehaviorMemory.LastKnownPlayerLocation = PlayerLocation;
-    BehaviorMemory.TimeSincePlayerSeen = 0.0f;
-}
-
-void UNPC_BehaviorComponent::StartFleeing()
-{
-    SetBehaviorState(ENPC_BehaviorState::Fleeing);
-    
-    // TODO: Implement flee behavior - move away from player
-    AActor* Player = GetPlayerActor();
-    AActor* Owner = GetOwner();
-    
-    if (Player && Owner)
+    // Check for player first
+    if (CanSeePlayer())
     {
-        FVector FleeDirection = (Owner->GetActorLocation() - Player->GetActorLocation()).GetSafeNormal();
-        FVector FleeTarget = Owner->GetActorLocation() + FleeDirection * FleeRadius;
+        APawn* Player = GetNearestPlayer();
+        if (Player)
+        {
+            LastKnownPlayerLocation = Player->GetActorLocation();
+            float Distance = FVector::Dist(GetOwner()->GetActorLocation(), LastKnownPlayerLocation);
+            
+            if (Distance < FleeRadius)
+            {
+                FleeFromThreat(LastKnownPlayerLocation);
+                return;
+            }
+        }
+    }
+    
+    // Continue patrol
+    if (PatrolPoints.Num() > 0)
+    {
+        FVector CurrentLocation = GetOwner()->GetActorLocation();
+        FVector PatrolTarget = PatrolPoints[CurrentPatrolIndex].Location;
+        float Distance = FVector::Dist(CurrentLocation, PatrolTarget);
         
-        // Simple flee movement
-        Owner->SetActorLocation(FMath::VInterpTo(
-            Owner->GetActorLocation(), 
-            FleeTarget, 
-            GetWorld()->GetDeltaSeconds(), 
-            2.0f
-        ));
+        if (Distance < 100.0f) // Reached patrol point
+        {
+            if (StateTimer > PatrolPoints[CurrentPatrolIndex].WaitTime)
+            {
+                MoveToNextPatrolPoint();
+            }
+        }
+        else
+        {
+            // Move towards patrol point (simplified movement)
+            FVector Direction = (PatrolTarget - CurrentLocation).GetSafeNormal();
+            FVector NewLocation = CurrentLocation + (Direction * MovementSpeed * 0.5f * GetWorld()->GetDeltaSeconds());
+            GetOwner()->SetActorLocation(NewLocation);
+        }
     }
 }
 
-void UNPC_BehaviorComponent::StartInvestigating(const FVector& Location)
+void UNPCBehaviorComponent::ProcessInvestigatingState()
 {
-    SetBehaviorState(ENPC_BehaviorState::Investigating);
-    BehaviorMemory.LastKnownPlayerLocation = Location;
-}
-
-void UNPC_BehaviorComponent::HandleIdleState(float DeltaTime)
-{
-    // Randomly decide to start patrolling
-    static float IdleTimer = 0.0f;
-    IdleTimer += DeltaTime;
-    
-    if (IdleTimer > 3.0f)
-    {
-        SetBehaviorState(ENPC_BehaviorState::Patrolling);
-        IdleTimer = 0.0f;
-    }
-}
-
-void UNPC_BehaviorComponent::HandlePatrollingState(float DeltaTime)
-{
-    UpdatePatrol();
-    
-    // Occasionally return to idle
-    static float PatrolTimer = 0.0f;
-    PatrolTimer += DeltaTime;
-    
-    if (PatrolTimer > 15.0f && FMath::RandRange(0.0f, 1.0f) < 0.1f)
+    if (!bHasValidTarget)
     {
         SetBehaviorState(ENPC_BehaviorState::Idle);
-        PatrolTimer = 0.0f;
-    }
-}
-
-void UNPC_BehaviorComponent::HandleInvestigatingState(float DeltaTime)
-{
-    AActor* Owner = GetOwner();
-    if (!Owner)
-    {
         return;
     }
-
-    // Move towards last known player location
-    FVector CurrentLocation = Owner->GetActorLocation();
-    FVector TargetLocation = BehaviorMemory.LastKnownPlayerLocation;
     
+    FVector CurrentLocation = GetOwner()->GetActorLocation();
     float Distance = FVector::Dist(CurrentLocation, TargetLocation);
     
-    if (Distance < 300.0f || BehaviorMemory.TimeSincePlayerSeen > 10.0f)
+    if (Distance < 150.0f || StateTimer > 8.0f) // Reached target or timeout
     {
-        // Finished investigating or lost interest
-        SetBehaviorState(ENPC_BehaviorState::Patrolling);
+        bHasValidTarget = false;
+        SetBehaviorState(ENPC_BehaviorState::Idle);
     }
     else
     {
-        // Move towards investigation point
+        // Move towards investigation target
         FVector Direction = (TargetLocation - CurrentLocation).GetSafeNormal();
-        FVector NewLocation = CurrentLocation + Direction * MovementSpeed * 0.5f * DeltaTime;
-        Owner->SetActorLocation(NewLocation);
+        FVector NewLocation = CurrentLocation + (Direction * MovementSpeed * 0.8f * GetWorld()->GetDeltaSeconds());
+        GetOwner()->SetActorLocation(NewLocation);
     }
 }
 
-void UNPC_BehaviorComponent::HandleFleeingState(float DeltaTime)
+void UNPCBehaviorComponent::ProcessFleeingState()
 {
-    // Return to patrol after fleeing for a while
-    if (BehaviorMemory.TimeSincePlayerSeen > 8.0f)
+    if (!bHasValidTarget)
     {
-        SetBehaviorState(ENPC_BehaviorState::Patrolling);
-    }
-}
-
-AActor* UNPC_BehaviorComponent::GetPlayerActor()
-{
-    return UGameplayStatics::GetPlayerCharacter(GetWorld(), 0);
-}
-
-float UNPC_BehaviorComponent::GetDistanceToPlayer()
-{
-    AActor* Player = GetPlayerActor();
-    if (!Player || !GetOwner())
-    {
-        return FLT_MAX;
+        SetBehaviorState(ENPC_BehaviorState::Idle);
+        return;
     }
     
-    return FVector::Dist(GetOwner()->GetActorLocation(), Player->GetActorLocation());
-}
-
-bool UNPC_BehaviorComponent::IsPlayerInRange(float Range)
-{
-    return GetDistanceToPlayer() <= Range;
-}
-
-FVector UNPC_BehaviorComponent::GetRandomPatrolPoint()
-{
-    if (!GetOwner())
+    FVector CurrentLocation = GetOwner()->GetActorLocation();
+    float Distance = FVector::Dist(CurrentLocation, TargetLocation);
+    
+    if (Distance < 200.0f || StateTimer > 5.0f) // Reached safe distance or timeout
     {
-        return FVector::ZeroVector;
+        bHasValidTarget = false;
+        SetBehaviorState(ENPC_BehaviorState::Idle);
+    }
+    else
+    {
+        // Move away from threat
+        FVector Direction = (TargetLocation - CurrentLocation).GetSafeNormal();
+        FVector NewLocation = CurrentLocation + (Direction * MovementSpeed * 1.5f * GetWorld()->GetDeltaSeconds());
+        GetOwner()->SetActorLocation(NewLocation);
+    }
+}
+
+void UNPCBehaviorComponent::MoveToNextPatrolPoint()
+{
+    if (PatrolPoints.Num() == 0)
+    {
+        return;
     }
     
-    FVector BaseLocation = GetOwner()->GetActorLocation();
-    float Angle = FMath::RandRange(0.0f, 2.0f * PI);
-    float Distance = FMath::RandRange(PatrolRadius * 0.3f, PatrolRadius);
+    CurrentPatrolIndex++;
+    if (CurrentPatrolIndex >= PatrolPoints.Num())
+    {
+        if (bLoopPatrol)
+        {
+            CurrentPatrolIndex = 0;
+        }
+        else
+        {
+            CurrentPatrolIndex = PatrolPoints.Num() - 1;
+            SetBehaviorState(ENPC_BehaviorState::Idle);
+            return;
+        }
+    }
     
-    return BaseLocation + FVector(
-        FMath::Cos(Angle) * Distance,
-        FMath::Sin(Angle) * Distance,
-        0.0f
-    );
+    StateTimer = 0.0f;
+}
+
+void UNPCBehaviorComponent::ClearPlayerMemory()
+{
+    LastKnownPlayerLocation = FVector::ZeroVector;
+    if (GEngine)
+    {
+        GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Green, 
+            FString::Printf(TEXT("NPC %s: Memory cleared"), *GetOwner()->GetName()));
+    }
 }
