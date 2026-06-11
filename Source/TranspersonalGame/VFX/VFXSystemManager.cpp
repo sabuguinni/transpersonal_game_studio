@@ -1,272 +1,174 @@
 #include "VFXSystemManager.h"
 #include "Engine/World.h"
-#include "Engine/Engine.h"
-#include "Particles/ParticleSystemComponent.h"
-#include "Particles/ParticleSystem.h"
-#include "Engine/StaticMeshActor.h"
-#include "Components/StaticMeshComponent.h"
+#include "NiagaraFunctionLibrary.h"
 #include "Kismet/GameplayStatics.h"
-#include "Engine/Player.h"
-#include "Engine/LocalPlayer.h"
+#include "Engine/Engine.h"
 
-UVFX_SystemManager::UVFX_SystemManager()
+void UVFX_SystemManager::Initialize(FSubsystemCollectionBase& Collection)
 {
-    PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 0.1f; // Update VFX every 100ms for performance
-    
-    MaxActiveVFX = 50;
-    bEnableVFXLOD = true;
-    VFXCullingDistance = 10000.0f;
+    Super::Initialize(Collection);
+    InitializeEffectLibrary();
+    UE_LOG(LogTemp, Warning, TEXT("VFX System Manager Initialized"));
 }
 
-void UVFX_SystemManager::BeginPlay()
+void UVFX_SystemManager::Deinitialize()
 {
-    Super::BeginPlay();
-    
-    UE_LOG(LogTemp, Warning, TEXT("VFX System Manager initialized - Max VFX: %d"), MaxActiveVFX);
+    EffectLibrary.Empty();
+    Super::Deinitialize();
 }
 
-void UVFX_SystemManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void UVFX_SystemManager::InitializeEffectLibrary()
 {
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-    
-    // Clean up expired VFX components
-    CleanupExpiredVFX();
-    
-    // Apply LOD to active VFX based on distance to player
-    if (bEnableVFXLOD)
+    // Initialize fire effect
+    FVFX_EffectData FireData;
+    FireData.Duration = 5.0f;
+    FireData.Scale = 1.0f;
+    EffectLibrary.Add(EVFX_EffectType::Fire, FireData);
+
+    // Initialize dust effect
+    FVFX_EffectData DustData;
+    DustData.Duration = 2.0f;
+    DustData.Scale = 1.0f;
+    EffectLibrary.Add(EVFX_EffectType::Dust, DustData);
+
+    // Initialize blood effect
+    FVFX_EffectData BloodData;
+    BloodData.Duration = 3.0f;
+    BloodData.Scale = 1.0f;
+    EffectLibrary.Add(EVFX_EffectType::Blood, BloodData);
+
+    // Initialize water effect
+    FVFX_EffectData WaterData;
+    WaterData.Duration = 4.0f;
+    WaterData.Scale = 1.0f;
+    EffectLibrary.Add(EVFX_EffectType::Water, WaterData);
+
+    // Initialize impact effect
+    FVFX_EffectData ImpactData;
+    ImpactData.Duration = 1.5f;
+    ImpactData.Scale = 1.0f;
+    EffectLibrary.Add(EVFX_EffectType::Impact, ImpactData);
+
+    // Initialize footstep effect
+    FVFX_EffectData FootstepData;
+    FootstepData.Duration = 1.0f;
+    FootstepData.Scale = 1.0f;
+    EffectLibrary.Add(EVFX_EffectType::Footstep, FootstepData);
+
+    // Initialize breath effect
+    FVFX_EffectData BreathData;
+    BreathData.Duration = 2.0f;
+    BreathData.Scale = 1.0f;
+    EffectLibrary.Add(EVFX_EffectType::Breath, BreathData);
+}
+
+void UVFX_SystemManager::SpawnEffect(EVFX_EffectType EffectType, FVector Location, FRotator Rotation, float Scale)
+{
+    if (!EffectLibrary.Contains(EffectType))
     {
-        APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
-        if (PlayerPawn)
-        {
-            for (UParticleSystemComponent* VFXComp : ActiveVFXComponents)
-            {
-                if (IsValid(VFXComp))
-                {
-                    float Distance = FVector::Dist(PlayerPawn->GetActorLocation(), VFXComp->GetComponentLocation());
-                    ApplyVFXLOD(VFXComp, Distance);
-                }
-            }
-        }
-    }
-}
-
-void UVFX_SystemManager::SpawnVFXEffect(EVFX_EffectType EffectType, FVector Location, FRotator Rotation, FVector Scale)
-{
-    if (ActiveVFXComponents.Num() >= MaxActiveVFX)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("VFX limit reached (%d), skipping new effect"), MaxActiveVFX);
+        UE_LOG(LogTemp, Warning, TEXT("VFX Effect type not found in library"));
         return;
     }
 
-    FVFX_EffectData EffectData;
-    EffectData.EffectType = EffectType;
-    EffectData.Location = Location;
-    EffectData.Rotation = Rotation;
-    EffectData.Scale = Scale;
+    const FVFX_EffectData& EffectData = EffectLibrary[EffectType];
     
-    // Set duration based on effect type
-    switch (EffectType)
+    if (EffectData.ParticleSystem)
     {
-        case EVFX_EffectType::FootstepDust:
-            EffectData.Duration = 2.0f;
-            break;
-        case EVFX_EffectType::CampfireFire:
-            EffectData.Duration = 0.0f; // Persistent
-            EffectData.bAutoDestroy = false;
-            break;
-        case EVFX_EffectType::WeatherRain:
-        case EVFX_EffectType::WeatherDustStorm:
-        case EVFX_EffectType::WeatherMist:
-            EffectData.Duration = 0.0f; // Persistent weather
-            EffectData.bAutoDestroy = false;
-            break;
-        case EVFX_EffectType::BloodSplatter:
-            EffectData.Duration = 3.0f;
-            break;
-        case EVFX_EffectType::ImpactSpark:
-            EffectData.Duration = 1.5f;
-            break;
-        default:
-            EffectData.Duration = 5.0f;
-            break;
+        SpawnNiagaraEffect(EffectData.ParticleSystem, Location, Rotation, Scale);
     }
 
-    UParticleSystemComponent* NewVFX = CreateVFXComponent(EffectType, EffectData);
-    if (NewVFX)
+    if (EffectData.Sound)
     {
-        ActiveVFXComponents.Add(NewVFX);
-        UE_LOG(LogTemp, Log, TEXT("Spawned VFX effect type %d at location %s"), (int32)EffectType, *Location.ToString());
+        PlayEffectSound(EffectData.Sound, Location);
     }
 }
 
-void UVFX_SystemManager::SpawnFootstepDust(FVector Location, float Intensity)
+void UVFX_SystemManager::SpawnFootstepEffect(FVector Location, bool bIsLarge)
 {
-    FVector Scale = FVector(Intensity, Intensity, Intensity);
-    SpawnVFXEffect(EVFX_EffectType::FootstepDust, Location, FRotator::ZeroRotator, Scale);
-}
-
-void UVFX_SystemManager::SpawnCampfire(FVector Location)
-{
-    SpawnVFXEffect(EVFX_EffectType::CampfireFire, Location, FRotator::ZeroRotator, FVector::OneVector);
-}
-
-void UVFX_SystemManager::SpawnWeatherEffect(EVFX_EffectType WeatherType, FVector Location, FVector Scale)
-{
-    if (WeatherType == EVFX_EffectType::WeatherRain || 
-        WeatherType == EVFX_EffectType::WeatherDustStorm || 
-        WeatherType == EVFX_EffectType::WeatherMist)
-    {
-        SpawnVFXEffect(WeatherType, Location, FRotator::ZeroRotator, Scale);
-    }
-}
-
-void UVFX_SystemManager::SpawnImpactEffect(FVector Location, EVFX_EffectType ImpactType)
-{
-    SpawnVFXEffect(ImpactType, Location, FRotator::ZeroRotator, FVector::OneVector);
-}
-
-void UVFX_SystemManager::ClearAllVFX()
-{
-    for (UParticleSystemComponent* VFXComp : ActiveVFXComponents)
-    {
-        if (IsValid(VFXComp))
-        {
-            VFXComp->DestroyComponent();
-        }
-    }
-    ActiveVFXComponents.Empty();
-    UE_LOG(LogTemp, Warning, TEXT("Cleared all VFX effects"));
-}
-
-int32 UVFX_SystemManager::GetActiveVFXCount() const
-{
-    return ActiveVFXComponents.Num();
-}
-
-void UVFX_SystemManager::SetupBiomeVFX(EBiomeType BiomeType, FVector BiomeCenter)
-{
-    switch (BiomeType)
-    {
-        case EBiomeType::Savanna:
-            // Dust and heat shimmer effects
-            SpawnWeatherEffect(EVFX_EffectType::WeatherDustStorm, BiomeCenter + FVector(0, 0, 500), FVector(3.0f, 3.0f, 2.0f));
-            break;
-        case EBiomeType::Swamp:
-            // Mist and fog effects
-            SpawnWeatherEffect(EVFX_EffectType::WeatherMist, BiomeCenter + FVector(0, 0, 200), FVector(4.0f, 4.0f, 1.5f));
-            break;
-        case EBiomeType::Forest:
-            // Light rain and particle effects
-            SpawnWeatherEffect(EVFX_EffectType::WeatherRain, BiomeCenter + FVector(0, 0, 800), FVector(5.0f, 5.0f, 3.0f));
-            break;
-        case EBiomeType::Desert:
-            // Heavy dust storms
-            SpawnWeatherEffect(EVFX_EffectType::WeatherDustStorm, BiomeCenter + FVector(0, 0, 600), FVector(6.0f, 6.0f, 4.0f));
-            break;
-        case EBiomeType::Mountain:
-            // Mountain mist and wind effects
-            SpawnWeatherEffect(EVFX_EffectType::WeatherMist, BiomeCenter + FVector(0, 0, 1000), FVector(4.0f, 4.0f, 2.0f));
-            break;
-        default:
-            break;
-    }
+    float Scale = bIsLarge ? 2.0f : 1.0f;
+    SpawnEffect(EVFX_EffectType::Footstep, Location, FRotator::ZeroRotator, Scale);
     
-    UE_LOG(LogTemp, Warning, TEXT("Setup VFX for biome %d at center %s"), (int32)BiomeType, *BiomeCenter.ToString());
-}
-
-void UVFX_SystemManager::CleanupExpiredVFX()
-{
-    for (int32 i = ActiveVFXComponents.Num() - 1; i >= 0; i--)
+    // Add dust for large footsteps
+    if (bIsLarge)
     {
-        UParticleSystemComponent* VFXComp = ActiveVFXComponents[i];
-        if (!IsValid(VFXComp) || !VFXComp->IsActive())
-        {
-            if (IsValid(VFXComp))
-            {
-                VFXComp->DestroyComponent();
-            }
-            ActiveVFXComponents.RemoveAt(i);
-        }
+        FVector DustLocation = Location + FVector(0, 0, 10);
+        SpawnEffect(EVFX_EffectType::Dust, DustLocation, FRotator::ZeroRotator, Scale * 1.5f);
     }
 }
 
-UParticleSystemComponent* UVFX_SystemManager::CreateVFXComponent(EVFX_EffectType EffectType, const FVFX_EffectData& EffectData)
+void UVFX_SystemManager::SpawnImpactEffect(FVector Location, FVector Normal)
 {
-    if (!GetWorld())
+    FRotator ImpactRotation = Normal.Rotation();
+    SpawnEffect(EVFX_EffectType::Impact, Location, ImpactRotation, 1.0f);
+}
+
+void UVFX_SystemManager::SpawnFireEffect(FVector Location, float Intensity)
+{
+    float Scale = FMath::Clamp(Intensity, 0.5f, 3.0f);
+    SpawnEffect(EVFX_EffectType::Fire, Location, FRotator::ZeroRotator, Scale);
+}
+
+void UVFX_SystemManager::SpawnBloodEffect(FVector Location, FVector Direction)
+{
+    FRotator BloodRotation = Direction.Rotation();
+    SpawnEffect(EVFX_EffectType::Blood, Location, BloodRotation, 1.0f);
+}
+
+void UVFX_SystemManager::SpawnWeatherEffect(EVFX_EffectType WeatherType, FVector Location, float Radius)
+{
+    if (WeatherType != EVFX_EffectType::Weather)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Invalid weather effect type"));
+        return;
+    }
+
+    float Scale = Radius / 1000.0f;
+    SpawnEffect(WeatherType, Location, FRotator::ZeroRotator, Scale);
+}
+
+UNiagaraComponent* UVFX_SystemManager::SpawnNiagaraEffect(UNiagaraSystem* System, FVector Location, FRotator Rotation, float Scale)
+{
+    if (!System)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Niagara System is null"));
+        return nullptr;
+    }
+
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        UE_LOG(LogTemp, Error, TEXT("World is null in VFX System Manager"));
+        return nullptr;
+    }
+
+    UNiagaraComponent* NiagaraComp = UNiagaraFunctionLibrary::SpawnSystemAtLocation(
+        World, System, Location, Rotation, FVector(Scale), true, true
+    );
+
+    if (NiagaraComp)
+    {
+        UE_LOG(LogTemp, Log, TEXT("Spawned Niagara effect at location: %s"), *Location.ToString());
+    }
+
+    return NiagaraComp;
+}
+
+UAudioComponent* UVFX_SystemManager::PlayEffectSound(USoundCue* Sound, FVector Location)
+{
+    if (!Sound)
     {
         return nullptr;
     }
 
-    // Create a new actor to hold the particle system
-    AActor* VFXActor = GetWorld()->SpawnActor<AActor>();
-    if (!VFXActor)
+    UWorld* World = GetWorld();
+    if (!World)
     {
         return nullptr;
     }
 
-    // Set actor transform
-    VFXActor->SetActorLocation(EffectData.Location);
-    VFXActor->SetActorRotation(EffectData.Rotation);
-    VFXActor->SetActorScale3D(EffectData.Scale);
+    UAudioComponent* AudioComp = UGameplayStatics::SpawnSoundAtLocation(
+        World, Sound, Location, FRotator::ZeroRotator, 1.0f, 1.0f, 0.0f
+    );
 
-    // Create particle system component
-    UParticleSystemComponent* ParticleComp = NewObject<UParticleSystemComponent>(VFXActor);
-    if (!ParticleComp)
-    {
-        VFXActor->Destroy();
-        return nullptr;
-    }
-
-    VFXActor->SetRootComponent(ParticleComp);
-    ParticleComp->RegisterComponent();
-
-    // Auto-destroy if specified
-    if (EffectData.bAutoDestroy && EffectData.Duration > 0.0f)
-    {
-        FTimerHandle TimerHandle;
-        GetWorld()->GetTimerManager().SetTimer(TimerHandle, [VFXActor]()
-        {
-            if (IsValid(VFXActor))
-            {
-                VFXActor->Destroy();
-            }
-        }, EffectData.Duration, false);
-    }
-
-    return ParticleComp;
-}
-
-void UVFX_SystemManager::ApplyVFXLOD(UParticleSystemComponent* VFXComponent, float DistanceToPlayer)
-{
-    if (!IsValid(VFXComponent))
-    {
-        return;
-    }
-
-    // Cull VFX beyond maximum distance
-    if (DistanceToPlayer > VFXCullingDistance)
-    {
-        VFXComponent->SetVisibility(false);
-        return;
-    }
-
-    VFXComponent->SetVisibility(true);
-
-    // Apply LOD based on distance
-    if (DistanceToPlayer > VFXCullingDistance * 0.7f)
-    {
-        // Far LOD - reduce particle count
-        VFXComponent->SetFloatParameter(FName("ParticleMultiplier"), 0.3f);
-    }
-    else if (DistanceToPlayer > VFXCullingDistance * 0.4f)
-    {
-        // Medium LOD
-        VFXComponent->SetFloatParameter(FName("ParticleMultiplier"), 0.6f);
-    }
-    else
-    {
-        // Near LOD - full quality
-        VFXComponent->SetFloatParameter(FName("ParticleMultiplier"), 1.0f);
-    }
+    return AudioComp;
 }
