@@ -1,279 +1,257 @@
 #include "Quest_ObjectiveTracker.h"
-#include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "Kismet/GameplayStatics.h"
+#include "GameFramework/PlayerController.h"
+#include "GameFramework/Pawn.h"
 
 UQuest_ObjectiveTracker::UQuest_ObjectiveTracker()
 {
+    PrimaryComponentTick.bCanEverTick = true;
+    LocationCheckInterval = 2.0f;
+    bAutoCompleteLocationObjectives = true;
+    LastLocationCheckTime = 0.0f;
 }
 
-void UQuest_ObjectiveTracker::Initialize(FSubsystemCollectionBase& Collection)
+void UQuest_ObjectiveTracker::BeginPlay()
 {
-    Super::Initialize(Collection);
+    Super::BeginPlay();
     
-    InitializeDefaultObjectives();
-    
-    UE_LOG(LogTemp, Warning, TEXT("Quest Objective Tracker initialized"));
+    UE_LOG(LogTemp, Log, TEXT("Quest_ObjectiveTracker: Component initialized"));
 }
 
-void UQuest_ObjectiveTracker::AddObjective(const FQuest_Objective& Objective)
+void UQuest_ObjectiveTracker::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
-    if (!Objective.ObjectiveID.IsEmpty())
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+
+    // Check location-based objectives periodically
+    if (bAutoCompleteLocationObjectives)
     {
-        Objectives.Add(Objective.ObjectiveID, Objective);
-        UE_LOG(LogTemp, Warning, TEXT("Added objective: %s - %s"), *Objective.ObjectiveID, *Objective.Title);
+        LastLocationCheckTime += DeltaTime;
+        if (LastLocationCheckTime >= LocationCheckInterval)
+        {
+            LastLocationCheckTime = 0.0f;
+            
+            // Get player location
+            if (UWorld* World = GetWorld())
+            {
+                if (APlayerController* PC = World->GetFirstPlayerController())
+                {
+                    if (APawn* PlayerPawn = PC->GetPawn())
+                    {
+                        CheckLocationObjectives(PlayerPawn->GetActorLocation());
+                    }
+                }
+            }
+        }
     }
+}
+
+void UQuest_ObjectiveTracker::AddObjective(const FQuest_ObjectiveData& NewObjective)
+{
+    // Check if objective already exists
+    for (const FQuest_ObjectiveData& Existing : ActiveObjectives)
+    {
+        if (Existing.ObjectiveID == NewObjective.ObjectiveID)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("Quest_ObjectiveTracker: Objective %s already exists"), *NewObjective.ObjectiveID);
+            return;
+        }
+    }
+
+    ActiveObjectives.Add(NewObjective);
+    UE_LOG(LogTemp, Log, TEXT("Quest_ObjectiveTracker: Added objective %s"), *NewObjective.ObjectiveID);
+    
+    OnObjectiveUpdated.Broadcast(NewObjective.ObjectiveID);
 }
 
 void UQuest_ObjectiveTracker::RemoveObjective(const FString& ObjectiveID)
 {
-    if (Objectives.Contains(ObjectiveID))
+    for (int32 i = ActiveObjectives.Num() - 1; i >= 0; i--)
     {
-        Objectives.Remove(ObjectiveID);
-        UE_LOG(LogTemp, Warning, TEXT("Removed objective: %s"), *ObjectiveID);
-    }
-}
-
-void UQuest_ObjectiveTracker::ActivateObjective(const FString& ObjectiveID)
-{
-    if (Objectives.Contains(ObjectiveID))
-    {
-        FQuest_Objective& Objective = Objectives[ObjectiveID];
-        Objective.Status = EQuest_ObjectiveStatus::Active;
-        
-        OnObjectiveUpdated.Broadcast(Objective);
-        UE_LOG(LogTemp, Warning, TEXT("Activated objective: %s"), *ObjectiveID);
-    }
-}
-
-void UQuest_ObjectiveTracker::CompleteObjective(const FString& ObjectiveID)
-{
-    if (Objectives.Contains(ObjectiveID))
-    {
-        FQuest_Objective& Objective = Objectives[ObjectiveID];
-        Objective.Status = EQuest_ObjectiveStatus::Completed;
-        Objective.CurrentCount = Objective.RequiredCount;
-        
-        OnObjectiveCompleted.Broadcast(Objective);
-        UE_LOG(LogTemp, Warning, TEXT("Completed objective: %s"), *ObjectiveID);
-    }
-}
-
-void UQuest_ObjectiveTracker::FailObjective(const FString& ObjectiveID)
-{
-    if (Objectives.Contains(ObjectiveID))
-    {
-        FQuest_Objective& Objective = Objectives[ObjectiveID];
-        Objective.Status = EQuest_ObjectiveStatus::Failed;
-        
-        OnObjectiveUpdated.Broadcast(Objective);
-        UE_LOG(LogTemp, Warning, TEXT("Failed objective: %s"), *ObjectiveID);
-    }
-}
-
-void UQuest_ObjectiveTracker::UpdateObjectiveProgress(const FQuest_ProgressEvent& ProgressEvent)
-{
-    if (Objectives.Contains(ProgressEvent.ObjectiveID))
-    {
-        FQuest_Objective& Objective = Objectives[ProgressEvent.ObjectiveID];
-        
-        if (Objective.Status == EQuest_ObjectiveStatus::Active && MatchesProgressEvent(Objective, ProgressEvent))
+        if (ActiveObjectives[i].ObjectiveID == ObjectiveID)
         {
-            Objective.CurrentCount = FMath::Min(Objective.CurrentCount + ProgressEvent.ProgressAmount, Objective.RequiredCount);
-            
-            OnObjectiveUpdated.Broadcast(Objective);
-            
-            // Check if objective is now complete
-            if (Objective.CurrentCount >= Objective.RequiredCount)
-            {
-                CompleteObjective(ProgressEvent.ObjectiveID);
-            }
-            
-            UE_LOG(LogTemp, Warning, TEXT("Updated objective progress: %s (%d/%d)"), 
-                   *ProgressEvent.ObjectiveID, Objective.CurrentCount, Objective.RequiredCount);
-        }
-    }
-}
-
-FQuest_Objective UQuest_ObjectiveTracker::GetObjective(const FString& ObjectiveID)
-{
-    if (Objectives.Contains(ObjectiveID))
-    {
-        return Objectives[ObjectiveID];
-    }
-    
-    return FQuest_Objective();
-}
-
-TArray<FQuest_Objective> UQuest_ObjectiveTracker::GetActiveObjectives()
-{
-    TArray<FQuest_Objective> ActiveObjectives;
-    
-    for (const auto& ObjectivePair : Objectives)
-    {
-        if (ObjectivePair.Value.Status == EQuest_ObjectiveStatus::Active && !ObjectivePair.Value.bIsHidden)
-        {
-            ActiveObjectives.Add(ObjectivePair.Value);
+            ActiveObjectives.RemoveAt(i);
+            UE_LOG(LogTemp, Log, TEXT("Quest_ObjectiveTracker: Removed objective %s"), *ObjectiveID);
+            return;
         }
     }
     
-    return ActiveObjectives;
+    UE_LOG(LogTemp, Warning, TEXT("Quest_ObjectiveTracker: Objective %s not found for removal"), *ObjectiveID);
 }
 
-TArray<FQuest_Objective> UQuest_ObjectiveTracker::GetCompletedObjectives()
+void UQuest_ObjectiveTracker::UpdateObjectiveProgress(const FString& ObjectiveID, int32 ProgressAmount)
 {
-    TArray<FQuest_Objective> CompletedObjectives;
-    
-    for (const auto& ObjectivePair : Objectives)
+    for (FQuest_ObjectiveData& Objective : ActiveObjectives)
     {
-        if (ObjectivePair.Value.Status == EQuest_ObjectiveStatus::Completed)
+        if (Objective.ObjectiveID == ObjectiveID)
         {
-            CompletedObjectives.Add(ObjectivePair.Value);
+            Objective.CurrentCount += ProgressAmount;
+            Objective.CurrentCount = FMath::Clamp(Objective.CurrentCount, 0, Objective.TargetCount);
+            
+            UE_LOG(LogTemp, Log, TEXT("Quest_ObjectiveTracker: Updated %s progress to %d/%d"), 
+                   *ObjectiveID, Objective.CurrentCount, Objective.TargetCount);
+            
+            CheckObjectiveCompletion(Objective);
+            OnObjectiveUpdated.Broadcast(ObjectiveID);
+            return;
         }
     }
     
-    return CompletedObjectives;
+    UE_LOG(LogTemp, Warning, TEXT("Quest_ObjectiveTracker: Objective %s not found for progress update"), *ObjectiveID);
 }
 
-bool UQuest_ObjectiveTracker::IsObjectiveComplete(const FString& ObjectiveID)
+bool UQuest_ObjectiveTracker::IsObjectiveCompleted(const FString& ObjectiveID) const
 {
-    if (Objectives.Contains(ObjectiveID))
+    for (const FQuest_ObjectiveData& Objective : ActiveObjectives)
     {
-        return Objectives[ObjectiveID].Status == EQuest_ObjectiveStatus::Completed;
+        if (Objective.ObjectiveID == ObjectiveID)
+        {
+            return Objective.bIsCompleted;
+        }
+    }
+    
+    // Check completed objectives
+    for (const FQuest_ObjectiveData& Objective : CompletedObjectives)
+    {
+        if (Objective.ObjectiveID == ObjectiveID)
+        {
+            return true;
+        }
     }
     
     return false;
 }
 
-int32 UQuest_ObjectiveTracker::GetObjectiveProgress(const FString& ObjectiveID)
+FQuest_ObjectiveData UQuest_ObjectiveTracker::GetObjectiveData(const FString& ObjectiveID) const
 {
-    if (Objectives.Contains(ObjectiveID))
+    for (const FQuest_ObjectiveData& Objective : ActiveObjectives)
     {
-        return Objectives[ObjectiveID].CurrentCount;
+        if (Objective.ObjectiveID == ObjectiveID)
+        {
+            return Objective;
+        }
     }
     
-    return 0;
+    for (const FQuest_ObjectiveData& Objective : CompletedObjectives)
+    {
+        if (Objective.ObjectiveID == ObjectiveID)
+        {
+            return Objective;
+        }
+    }
+    
+    return FQuest_ObjectiveData();
 }
 
-void UQuest_ObjectiveTracker::InitializeDefaultObjectives()
+TArray<FQuest_ObjectiveData> UQuest_ObjectiveTracker::GetAllObjectives() const
 {
-    // Hunt Objectives
-    FQuest_Objective HuntTRex;
-    HuntTRex.ObjectiveID = TEXT("hunt_trex_01");
-    HuntTRex.Title = TEXT("Hunt the Apex Predator");
-    HuntTRex.Description = TEXT("Defeat a Tyrannosaurus Rex and bring back its tooth as proof");
-    HuntTRex.ObjectiveType = EQuest_ObjectiveType::Kill_Dinosaur;
-    HuntTRex.Status = EQuest_ObjectiveStatus::Inactive;
-    HuntTRex.RequiredCount = 1;
-    HuntTRex.TargetName = TEXT("TRex");
-    AddObjective(HuntTRex);
-    
-    FQuest_Objective HuntRaptors;
-    HuntRaptors.ObjectiveID = TEXT("hunt_raptors_01");
-    HuntRaptors.Title = TEXT("Pack Hunter Challenge");
-    HuntRaptors.Description = TEXT("Defeat 3 Velociraptors and collect their claws");
-    HuntRaptors.ObjectiveType = EQuest_ObjectiveType::Kill_Dinosaur;
-    HuntRaptors.Status = EQuest_ObjectiveStatus::Inactive;
-    HuntRaptors.RequiredCount = 3;
-    HuntRaptors.TargetName = TEXT("Raptor");
-    AddObjective(HuntRaptors);
-    
-    FQuest_Objective HuntTriceratops;
-    HuntTriceratops.ObjectiveID = TEXT("hunt_triceratops_01");
-    HuntTriceratops.Title = TEXT("Armored Giant Hunt");
-    HuntTriceratops.Description = TEXT("Take down a Triceratops and harvest its hide");
-    HuntTriceratops.ObjectiveType = EQuest_ObjectiveType::Kill_Dinosaur;
-    HuntTriceratops.Status = EQuest_ObjectiveStatus::Inactive;
-    HuntTriceratops.RequiredCount = 1;
-    HuntTriceratops.TargetName = TEXT("Triceratops");
-    AddObjective(HuntTriceratops);
-    
-    // Gathering Objectives
-    FQuest_Objective GatherWood;
-    GatherWood.ObjectiveID = TEXT("gather_wood_01");
-    GatherWood.Title = TEXT("Collect Ancient Wood");
-    GatherWood.Description = TEXT("Gather 10 pieces of strong wood from ancient trees");
-    GatherWood.ObjectiveType = EQuest_ObjectiveType::Gather_Resource;
-    GatherWood.Status = EQuest_ObjectiveStatus::Inactive;
-    GatherWood.RequiredCount = 10;
-    GatherWood.TargetName = TEXT("Wood");
-    AddObjective(GatherWood);
-    
-    FQuest_Objective GatherStone;
-    GatherStone.ObjectiveID = TEXT("gather_stone_01");
-    GatherStone.Title = TEXT("Sacred Stone Collection");
-    GatherStone.Description = TEXT("Collect 15 sacred stones for tool crafting");
-    GatherStone.ObjectiveType = EQuest_ObjectiveType::Gather_Resource;
-    GatherStone.Status = EQuest_ObjectiveStatus::Inactive;
-    GatherStone.RequiredCount = 15;
-    GatherStone.TargetName = TEXT("Stone");
-    AddObjective(GatherStone);
-    
-    FQuest_Objective GatherFood;
-    GatherFood.ObjectiveID = TEXT("gather_food_01");
-    GatherFood.Title = TEXT("Sustenance Gathering");
-    GatherFood.Description = TEXT("Gather 20 berries and edible plants for the tribe");
-    GatherFood.ObjectiveType = EQuest_ObjectiveType::Gather_Resource;
-    GatherFood.Status = EQuest_ObjectiveStatus::Inactive;
-    GatherFood.RequiredCount = 20;
-    GatherFood.TargetName = TEXT("Food");
-    AddObjective(GatherFood);
-    
-    // Exploration Objectives
-    FQuest_Objective ExploreCanyon;
-    ExploreCanyon.ObjectiveID = TEXT("explore_canyon_01");
-    ExploreCanyon.Title = TEXT("Canyon Reconnaissance");
-    ExploreCanyon.Description = TEXT("Explore the mysterious canyon and report back");
-    ExploreCanyon.ObjectiveType = EQuest_ObjectiveType::Explore_Area;
-    ExploreCanyon.Status = EQuest_ObjectiveStatus::Inactive;
-    ExploreCanyon.RequiredCount = 1;
-    ExploreCanyon.TargetName = TEXT("Canyon");
-    ExploreCanyon.TargetLocation = FVector(1000, 1000, 0);
-    AddObjective(ExploreCanyon);
-    
-    FQuest_Objective ExploreForest;
-    ExploreForest.ObjectiveID = TEXT("explore_forest_01");
-    ExploreForest.Title = TEXT("Deep Forest Survey");
-    ExploreForest.Description = TEXT("Map the dangerous deep forest territories");
-    ExploreForest.ObjectiveType = EQuest_ObjectiveType::Explore_Area;
-    ExploreForest.Status = EQuest_ObjectiveStatus::Inactive;
-    ExploreForest.RequiredCount = 1;
-    ExploreForest.TargetName = TEXT("Forest");
-    ExploreForest.TargetLocation = FVector(-1000, 1000, 0);
-    AddObjective(ExploreForest);
-    
-    // Survival Objectives
-    FQuest_Objective SurviveNight;
-    SurviveNight.ObjectiveID = TEXT("survive_night_01");
-    SurviveNight.Title = TEXT("Night Survival Test");
-    SurviveNight.Description = TEXT("Survive through the dangerous night without shelter");
-    SurviveNight.ObjectiveType = EQuest_ObjectiveType::Survive_Duration;
-    SurviveNight.Status = EQuest_ObjectiveStatus::Inactive;
-    SurviveNight.RequiredCount = 480; // 8 minutes (representing night duration)
-    AddObjective(SurviveNight);
+    TArray<FQuest_ObjectiveData> AllObjectives = ActiveObjectives;
+    AllObjectives.Append(CompletedObjectives);
+    return AllObjectives;
 }
 
-bool UQuest_ObjectiveTracker::MatchesProgressEvent(const FQuest_Objective& Objective, const FQuest_ProgressEvent& Event)
+TArray<FQuest_ObjectiveData> UQuest_ObjectiveTracker::GetActiveObjectives() const
 {
-    // Check if the event type matches the objective type
-    if (Objective.ObjectiveType != Event.EventType)
+    TArray<FQuest_ObjectiveData> Active;
+    for (const FQuest_ObjectiveData& Objective : ActiveObjectives)
     {
-        return false;
+        if (!Objective.bIsCompleted)
+        {
+            Active.Add(Objective);
+        }
     }
-    
-    // For specific target objectives, check if the target name matches
-    if (!Objective.TargetName.IsEmpty() && !Event.TargetName.IsEmpty())
+    return Active;
+}
+
+void UQuest_ObjectiveTracker::CompleteObjective(const FString& ObjectiveID)
+{
+    for (int32 i = 0; i < ActiveObjectives.Num(); i++)
     {
-        return Objective.TargetName.Equals(Event.TargetName, ESearchCase::IgnoreCase);
+        if (ActiveObjectives[i].ObjectiveID == ObjectiveID)
+        {
+            ActiveObjectives[i].bIsCompleted = true;
+            ActiveObjectives[i].CurrentCount = ActiveObjectives[i].TargetCount;
+            
+            CompletedObjectives.Add(ActiveObjectives[i]);
+            BroadcastObjectiveEvents(ActiveObjectives[i]);
+            
+            ActiveObjectives.RemoveAt(i);
+            
+            UE_LOG(LogTemp, Log, TEXT("Quest_ObjectiveTracker: Completed objective %s"), *ObjectiveID);
+            return;
+        }
     }
-    
-    // For location-based objectives, check distance
-    if (Objective.ObjectiveType == EQuest_ObjectiveType::Explore_Area || 
-        Objective.ObjectiveType == EQuest_ObjectiveType::Reach_Location)
+}
+
+void UQuest_ObjectiveTracker::CheckLocationObjectives(const FVector& PlayerLocation)
+{
+    for (FQuest_ObjectiveData& Objective : ActiveObjectives)
     {
-        float Distance = FVector::Dist(Objective.TargetLocation, Event.EventLocation);
-        return Distance <= 500.0f; // Within 500 units
+        if (Objective.ObjectiveType == EQuest_ObjectiveType::Reach && !Objective.bIsCompleted)
+        {
+            float Distance = FVector::Dist(PlayerLocation, Objective.TargetLocation);
+            if (Distance <= Objective.CompletionRadius)
+            {
+                CompleteObjective(Objective.ObjectiveID);
+            }
+        }
     }
-    
-    return true;
+}
+
+void UQuest_ObjectiveTracker::OnDinosaurKilled(const FString& DinosaurType)
+{
+    for (FQuest_ObjectiveData& Objective : ActiveObjectives)
+    {
+        if (Objective.ObjectiveType == EQuest_ObjectiveType::Hunt && !Objective.bIsCompleted)
+        {
+            // Check if this dinosaur type matches the objective
+            if (Objective.ObjectiveDescription.Contains(DinosaurType))
+            {
+                UpdateObjectiveProgress(Objective.ObjectiveID, 1);
+            }
+        }
+    }
+}
+
+void UQuest_ObjectiveTracker::OnResourceGathered(const FString& ResourceType, int32 Amount)
+{
+    for (FQuest_ObjectiveData& Objective : ActiveObjectives)
+    {
+        if (Objective.ObjectiveType == EQuest_ObjectiveType::Gather && !Objective.bIsCompleted)
+        {
+            // Check if this resource type matches the objective
+            if (Objective.ObjectiveDescription.Contains(ResourceType))
+            {
+                UpdateObjectiveProgress(Objective.ObjectiveID, Amount);
+            }
+        }
+    }
+}
+
+void UQuest_ObjectiveTracker::OnStructureBuilt(const FString& StructureType)
+{
+    for (FQuest_ObjectiveData& Objective : ActiveObjectives)
+    {
+        if (Objective.ObjectiveType == EQuest_ObjectiveType::Build && !Objective.bIsCompleted)
+        {
+            // Check if this structure type matches the objective
+            if (Objective.ObjectiveDescription.Contains(StructureType))
+            {
+                UpdateObjectiveProgress(Objective.ObjectiveID, 1);
+            }
+        }
+    }
+}
+
+void UQuest_ObjectiveTracker::CheckObjectiveCompletion(FQuest_ObjectiveData& Objective)
+{
+    if (!Objective.bIsCompleted && Objective.CurrentCount >= Objective.TargetCount)
+    {
+        CompleteObjective(Objective.ObjectiveID);
+    }
+}
+
+void UQuest_ObjectiveTracker::BroadcastObjectiveEvents(const FQuest_ObjectiveData& Objective)
+{
+    OnObjectiveCompleted.Broadcast(Objective.ObjectiveID);
+    OnObjectiveUpdated.Broadcast(Objective.ObjectiveID);
 }
