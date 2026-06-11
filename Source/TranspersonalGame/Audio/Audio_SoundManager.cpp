@@ -1,244 +1,149 @@
 #include "Audio_SoundManager.h"
 #include "Engine/World.h"
+#include "Kismet/GameplayStatics.h"
 #include "Components/AudioComponent.h"
 #include "Sound/SoundCue.h"
-#include "Kismet/GameplayStatics.h"
+#include "Engine/Engine.h"
 
 UAudio_SoundManager::UAudio_SoundManager()
 {
-    PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 0.1f;
+    MasterVolume = 1.0f;
+    
+    // Initialize default volume levels for each sound type
+    SoundTypeVolumes.Add(EAudio_SoundType::Ambient, 0.7f);
+    SoundTypeVolumes.Add(EAudio_SoundType::DinosaurFootsteps, 0.9f);
+    SoundTypeVolumes.Add(EAudio_SoundType::DinosaurRoar, 1.0f);
+    SoundTypeVolumes.Add(EAudio_SoundType::PlayerFootsteps, 0.5f);
+    SoundTypeVolumes.Add(EAudio_SoundType::Fire, 0.6f);
+    SoundTypeVolumes.Add(EAudio_SoundType::Weather, 0.8f);
+    SoundTypeVolumes.Add(EAudio_SoundType::Combat, 0.9f);
+    SoundTypeVolumes.Add(EAudio_SoundType::UI, 0.7f);
 }
 
-void UAudio_SoundManager::BeginPlay()
+void UAudio_SoundManager::Initialize(FSubsystemCollectionBase& Collection)
 {
-    Super::BeginPlay();
+    Super::Initialize(Collection);
     InitializeDefaultSounds();
+    UE_LOG(LogTemp, Warning, TEXT("Audio_SoundManager initialized"));
 }
 
-void UAudio_SoundManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void UAudio_SoundManager::Deinitialize()
 {
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-    
-    // Clean up finished audio components
-    TArray<FString> ToRemove;
-    for (auto& Pair : ActiveAudioComponents)
-    {
-        if (!IsValid(Pair.Value) || !Pair.Value->IsPlaying())
-        {
-            ToRemove.Add(Pair.Key);
-        }
-    }
-    
-    for (const FString& Key : ToRemove)
-    {
-        if (UAudioComponent* AudioComp = ActiveAudioComponents.FindRef(Key))
-        {
-            AudioComp->DestroyComponent();
-        }
-        ActiveAudioComponents.Remove(Key);
-    }
+    StopAllSounds();
+    Super::Deinitialize();
 }
 
-void UAudio_SoundManager::PlaySound(const FString& SoundName, FVector Location, AActor* AttachToActor)
+void UAudio_SoundManager::PlaySound(EAudio_SoundType SoundType, FVector Location, float VolumeMultiplier)
 {
-    FAudio_SoundEntry* SoundEntry = FindSoundEntry(SoundName);
+    FAudio_SoundEntry* SoundEntry = FindSoundEntry(SoundType);
     if (!SoundEntry || !SoundEntry->SoundCue.IsValid())
     {
-        UE_LOG(LogTemp, Warning, TEXT("Audio_SoundManager: Sound '%s' not found or invalid"), *SoundName);
+        UE_LOG(LogTemp, Warning, TEXT("Sound entry not found or invalid for type: %d"), (int32)SoundType);
         return;
     }
 
-    USoundCue* SoundCue = SoundEntry->SoundCue.LoadSynchronous();
-    if (!SoundCue)
+    UWorld* World = GetWorld();
+    if (!World)
     {
-        UE_LOG(LogTemp, Warning, TEXT("Audio_SoundManager: Failed to load sound cue for '%s'"), *SoundName);
         return;
     }
 
-    // Stop existing instance if playing
-    if (ActiveAudioComponents.Contains(SoundName))
+    // Stop existing sound of this type if not looping
+    if (!SoundEntry->bLooping && ActiveSounds.Contains(SoundType))
     {
-        StopSound(SoundName);
+        StopSound(SoundType);
     }
 
-    UAudioComponent* AudioComponent = nullptr;
-    
-    if (SoundEntry->bIs3D)
+    float FinalVolume = SoundEntry->Volume * VolumeMultiplier * MasterVolume;
+    if (SoundTypeVolumes.Contains(SoundType))
     {
-        if (AttachToActor)
-        {
-            AudioComponent = UGameplayStatics::SpawnSoundAttached(
-                SoundCue, 
-                AttachToActor->GetRootComponent(),
-                NAME_None,
-                FVector::ZeroVector,
-                EAttachLocation::KeepRelativeOffset,
-                false
-            );
-        }
-        else
-        {
-            AudioComponent = UGameplayStatics::SpawnSoundAtLocation(
-                GetWorld(),
-                SoundCue,
-                Location
-            );
-        }
-    }
-    else
-    {
-        AudioComponent = UGameplayStatics::SpawnSound2D(GetWorld(), SoundCue);
+        FinalVolume *= SoundTypeVolumes[SoundType];
     }
 
-    if (AudioComponent)
+    UAudioComponent* AudioComponent = UGameplayStatics::SpawnSoundAtLocation(
+        World,
+        SoundEntry->SoundCue.Get(),
+        Location,
+        FRotator::ZeroRotator,
+        FinalVolume,
+        SoundEntry->Pitch
+    );
+
+    if (AudioComponent && SoundEntry->bLooping)
     {
-        float FinalVolume = SoundEntry->Volume * GetCategoryVolume(SoundEntry->Category) * MasterVolume;
-        AudioComponent->SetVolumeMultiplier(FinalVolume);
-        AudioComponent->SetPitchMultiplier(SoundEntry->Pitch);
-        
-        ActiveAudioComponents.Add(SoundName, AudioComponent);
-        
-        UE_LOG(LogTemp, Log, TEXT("Audio_SoundManager: Playing sound '%s' at volume %.2f"), *SoundName, FinalVolume);
+        ActiveSounds.Add(SoundType, AudioComponent);
     }
 }
 
-void UAudio_SoundManager::StopSound(const FString& SoundName)
+void UAudio_SoundManager::PlaySoundAtLocation(EAudio_SoundType SoundType, FVector Location, float VolumeMultiplier)
 {
-    if (UAudioComponent* AudioComp = ActiveAudioComponents.FindRef(SoundName))
+    PlaySound(SoundType, Location, VolumeMultiplier);
+}
+
+void UAudio_SoundManager::StopSound(EAudio_SoundType SoundType)
+{
+    if (ActiveSounds.Contains(SoundType))
     {
-        AudioComp->Stop();
-        AudioComp->DestroyComponent();
-        ActiveAudioComponents.Remove(SoundName);
-        
-        UE_LOG(LogTemp, Log, TEXT("Audio_SoundManager: Stopped sound '%s'"), *SoundName);
+        UAudioComponent* AudioComponent = ActiveSounds[SoundType];
+        if (AudioComponent && IsValid(AudioComponent))
+        {
+            AudioComponent->Stop();
+        }
+        ActiveSounds.Remove(SoundType);
     }
 }
 
 void UAudio_SoundManager::StopAllSounds()
 {
-    for (auto& Pair : ActiveAudioComponents)
+    for (auto& SoundPair : ActiveSounds)
     {
-        if (IsValid(Pair.Value))
+        if (SoundPair.Value && IsValid(SoundPair.Value))
         {
-            Pair.Value->Stop();
-            Pair.Value->DestroyComponent();
+            SoundPair.Value->Stop();
         }
     }
-    ActiveAudioComponents.Empty();
-    
-    UE_LOG(LogTemp, Log, TEXT("Audio_SoundManager: Stopped all sounds"));
+    ActiveSounds.Empty();
 }
 
-void UAudio_SoundManager::SetCategoryVolume(EAudio_SoundCategory Category, float Volume)
+void UAudio_SoundManager::SetMasterVolume(float Volume)
 {
-    Volume = FMath::Clamp(Volume, 0.0f, 1.0f);
-    
-    switch (Category)
-    {
-        case EAudio_SoundCategory::Ambient:
-            AmbientVolume = Volume;
-            break;
-        case EAudio_SoundCategory::Dinosaur:
-            DinosaurVolume = Volume;
-            break;
-        case EAudio_SoundCategory::Player:
-            PlayerVolume = Volume;
-            break;
-        default:
-            break;
-    }
-    
-    // Update volume for currently playing sounds of this category
-    for (auto& Pair : ActiveAudioComponents)
-    {
-        FAudio_SoundEntry* Entry = FindSoundEntry(Pair.Key);
-        if (Entry && Entry->Category == Category && IsValid(Pair.Value))
-        {
-            float FinalVolume = Entry->Volume * GetCategoryVolume(Category) * MasterVolume;
-            Pair.Value->SetVolumeMultiplier(FinalVolume);
-        }
-    }
+    MasterVolume = FMath::Clamp(Volume, 0.0f, 1.0f);
 }
 
-void UAudio_SoundManager::RegisterSound(const FString& SoundName, USoundCue* SoundCue, EAudio_SoundCategory Category)
+void UAudio_SoundManager::SetSoundTypeVolume(EAudio_SoundType SoundType, float Volume)
 {
-    if (!SoundCue)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Audio_SoundManager: Cannot register null sound cue for '%s'"), *SoundName);
-        return;
-    }
+    SoundTypeVolumes.Add(SoundType, FMath::Clamp(Volume, 0.0f, 1.0f));
+}
 
-    FAudio_SoundEntry NewEntry;
-    NewEntry.SoundName = SoundName;
-    NewEntry.SoundCue = SoundCue;
-    NewEntry.Category = Category;
-    
-    // Remove existing entry if it exists
-    SoundLibrary.RemoveAll([&SoundName](const FAudio_SoundEntry& Entry) {
-        return Entry.SoundName == SoundName;
+void UAudio_SoundManager::RegisterSoundEntry(const FAudio_SoundEntry& SoundEntry)
+{
+    // Remove existing entry of the same type
+    SoundEntries.RemoveAll([SoundEntry](const FAudio_SoundEntry& Entry)
+    {
+        return Entry.SoundType == SoundEntry.SoundType;
     });
     
-    SoundLibrary.Add(NewEntry);
-    
-    UE_LOG(LogTemp, Log, TEXT("Audio_SoundManager: Registered sound '%s'"), *SoundName);
+    // Add new entry
+    SoundEntries.Add(SoundEntry);
 }
 
-bool UAudio_SoundManager::IsSoundPlaying(const FString& SoundName)
+void UAudio_SoundManager::PlayDinosaurFootstep(FVector Location, float DinosaurSize)
 {
-    if (UAudioComponent* AudioComp = ActiveAudioComponents.FindRef(SoundName))
+    float VolumeMultiplier = FMath::Clamp(DinosaurSize, 0.1f, 3.0f);
+    PlaySoundAtLocation(EAudio_SoundType::DinosaurFootsteps, Location, VolumeMultiplier);
+}
+
+void UAudio_SoundManager::PlayDinosaurRoar(FVector Location, float IntensityLevel)
+{
+    float VolumeMultiplier = FMath::Clamp(IntensityLevel, 0.5f, 2.0f);
+    PlaySoundAtLocation(EAudio_SoundType::DinosaurRoar, Location, VolumeMultiplier);
+}
+
+FAudio_SoundEntry* UAudio_SoundManager::FindSoundEntry(EAudio_SoundType SoundType)
+{
+    for (FAudio_SoundEntry& Entry : SoundEntries)
     {
-        return IsValid(AudioComp) && AudioComp->IsPlaying();
-    }
-    return false;
-}
-
-void UAudio_SoundManager::InitializeDefaultSounds()
-{
-    // Initialize default prehistoric sound entries
-    FAudio_SoundEntry TRexRoar;
-    TRexRoar.SoundName = TEXT("TRexRoar");
-    TRexRoar.Category = EAudio_SoundCategory::Dinosaur;
-    TRexRoar.Volume = 1.0f;
-    TRexRoar.bIs3D = true;
-    SoundLibrary.Add(TRexRoar);
-
-    FAudio_SoundEntry RaptorCall;
-    RaptorCall.SoundName = TEXT("RaptorCall");
-    RaptorCall.Category = EAudio_SoundCategory::Dinosaur;
-    RaptorCall.Volume = 0.8f;
-    RaptorCall.bIs3D = true;
-    SoundLibrary.Add(RaptorCall);
-
-    FAudio_SoundEntry ForestAmbient;
-    ForestAmbient.SoundName = TEXT("ForestAmbient");
-    ForestAmbient.Category = EAudio_SoundCategory::Ambient;
-    ForestAmbient.Volume = 0.6f;
-    ForestAmbient.bIs3D = false;
-    SoundLibrary.Add(ForestAmbient);
-
-    FAudio_SoundEntry PlayerFootsteps;
-    PlayerFootsteps.SoundName = TEXT("PlayerFootsteps");
-    PlayerFootsteps.Category = EAudio_SoundCategory::Player;
-    PlayerFootsteps.Volume = 0.5f;
-    PlayerFootsteps.bIs3D = true;
-    SoundLibrary.Add(PlayerFootsteps);
-
-    FAudio_SoundEntry StoneCrafting;
-    StoneCrafting.SoundName = TEXT("StoneCrafting");
-    StoneCrafting.Category = EAudio_SoundCategory::Player;
-    StoneCrafting.Volume = 0.7f;
-    StoneCrafting.bIs3D = true;
-    SoundLibrary.Add(StoneCrafting);
-
-    UE_LOG(LogTemp, Log, TEXT("Audio_SoundManager: Initialized %d default sounds"), SoundLibrary.Num());
-}
-
-FAudio_SoundEntry* UAudio_SoundManager::FindSoundEntry(const FString& SoundName)
-{
-    for (FAudio_SoundEntry& Entry : SoundLibrary)
-    {
-        if (Entry.SoundName == SoundName)
+        if (Entry.SoundType == SoundType)
         {
             return &Entry;
         }
@@ -246,17 +151,32 @@ FAudio_SoundEntry* UAudio_SoundManager::FindSoundEntry(const FString& SoundName)
     return nullptr;
 }
 
-float UAudio_SoundManager::GetCategoryVolume(EAudio_SoundCategory Category)
+void UAudio_SoundManager::InitializeDefaultSounds()
 {
-    switch (Category)
-    {
-        case EAudio_SoundCategory::Ambient:
-            return AmbientVolume;
-        case EAudio_SoundCategory::Dinosaur:
-            return DinosaurVolume;
-        case EAudio_SoundCategory::Player:
-            return PlayerVolume;
-        default:
-            return 1.0f;
-    }
+    // Initialize with placeholder sound entries
+    // These would be replaced with actual sound assets in production
+    
+    FAudio_SoundEntry AmbientEntry;
+    AmbientEntry.SoundType = EAudio_SoundType::Ambient;
+    AmbientEntry.Volume = 0.7f;
+    AmbientEntry.bLooping = true;
+    SoundEntries.Add(AmbientEntry);
+
+    FAudio_SoundEntry FootstepEntry;
+    FootstepEntry.SoundType = EAudio_SoundType::DinosaurFootsteps;
+    FootstepEntry.Volume = 0.9f;
+    FootstepEntry.bLooping = false;
+    SoundEntries.Add(FootstepEntry);
+
+    FAudio_SoundEntry RoarEntry;
+    RoarEntry.SoundType = EAudio_SoundType::DinosaurRoar;
+    RoarEntry.Volume = 1.0f;
+    RoarEntry.bLooping = false;
+    SoundEntries.Add(RoarEntry);
+
+    FAudio_SoundEntry FireEntry;
+    FireEntry.SoundType = EAudio_SoundType::Fire;
+    FireEntry.Volume = 0.6f;
+    FireEntry.bLooping = true;
+    SoundEntries.Add(FireEntry);
 }
