@@ -3,59 +3,16 @@
 #include "CoreMinimal.h"
 #include "Engine/World.h"
 #include "Components/ActorComponent.h"
-#include "Engine/Engine.h"
+#include "Engine/HitResult.h"
 #include "PhysicsEngine/PhysicsSettings.h"
+#include "SharedTypes.h"
 #include "Core_PhysicsManager.generated.h"
 
-UENUM(BlueprintType)
-enum class ECore_PhysicsPreset : uint8
-{
-    Default         UMETA(DisplayName = "Default"),
-    HighPrecision   UMETA(DisplayName = "High Precision"),
-    Performance     UMETA(DisplayName = "Performance Optimized"),
-    Destruction     UMETA(DisplayName = "Destruction Heavy"),
-    Ragdoll         UMETA(DisplayName = "Ragdoll Optimized")
-};
-
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FCore_PhysicsProfile
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Profile")
-    float GravityScale = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Profile")
-    float LinearDamping = 0.01f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Profile")
-    float AngularDamping = 0.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Profile")
-    float MaxAngularVelocity = 3600.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Profile")
-    bool bEnableCCD = false;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Profile")
-    float SleepThreshold = 0.005f;
-
-    FCore_PhysicsProfile()
-    {
-        GravityScale = 1.0f;
-        LinearDamping = 0.01f;
-        AngularDamping = 0.0f;
-        MaxAngularVelocity = 3600.0f;
-        bEnableCCD = false;
-        SleepThreshold = 0.005f;
-    }
-};
-
 /**
- * Core Physics Manager - Handles advanced physics systems for dinosaur survival gameplay
- * Manages ragdoll physics, destruction, collision optimization, and physics materials
+ * Core Physics Manager - Handles physics simulation, collision detection, and ragdoll systems
+ * Integrates with UE5 Chaos Physics for realistic prehistoric world simulation
  */
-UCLASS(ClassGroup=(TranspersonalGame), meta=(BlueprintSpawnableComponent))
+UCLASS(BlueprintType, Blueprintable, meta = (BlueprintSpawnableComponent))
 class TRANSPERSONALGAME_API UCore_PhysicsManager : public UActorComponent
 {
     GENERATED_BODY()
@@ -68,95 +25,88 @@ protected:
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 public:
-    // === PHYSICS PROFILES ===
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Manager")
-    ECore_PhysicsPreset CurrentPreset = ECore_PhysicsPreset::Default;
+    // Physics Configuration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Settings")
+    float GlobalGravityScale = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Manager")
-    FCore_PhysicsProfile DefaultProfile;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Settings")
+    float DefaultLinearDamping = 0.01f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Manager")
-    FCore_PhysicsProfile HighPrecisionProfile;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Settings")
+    float DefaultAngularDamping = 0.01f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Manager")
-    FCore_PhysicsProfile PerformanceProfile;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Settings")
+    bool bEnableAdvancedPhysics = true;
 
-    // === PHYSICS OPTIMIZATION ===
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Optimization")
-    float PhysicsUpdateRate = 60.0f;
+    // Collision Detection
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision")
+    TEnumAsByte<ECollisionChannel> DefaultCollisionChannel = ECC_WorldStatic;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Optimization")
-    int32 MaxSimulatingBodies = 500;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision")
+    float CollisionTolerance = 0.1f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Optimization")
-    float CullingDistance = 5000.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Optimization")
-    bool bEnablePhysicsLOD = true;
-
-    // === RAGDOLL SYSTEM ===
+    // Ragdoll System
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll")
-    float RagdollBlendTime = 0.2f;
+    bool bEnableRagdollSystem = true;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll")
-    float RagdollLifetime = 30.0f;
+    float RagdollImpulseThreshold = 500.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll")
-    bool bAutoCleanupRagdolls = true;
+    float RagdollRecoveryTime = 3.0f;
 
-    // === DESTRUCTION SYSTEM ===
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Destruction")
-    float DestructionForceThreshold = 1000.0f;
+    // Physics Simulation Functions
+    UFUNCTION(BlueprintCallable, Category = "Physics")
+    void SetGlobalPhysicsSettings(float NewGravityScale, float NewLinearDamping, float NewAngularDamping);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Destruction")
-    int32 MaxDestructionChunks = 50;
+    UFUNCTION(BlueprintCallable, Category = "Physics")
+    bool PerformLineTrace(FVector Start, FVector End, FHitResult& OutHit, bool bTraceComplex = false);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Destruction")
-    float DestructionCleanupTime = 60.0f;
+    UFUNCTION(BlueprintCallable, Category = "Physics")
+    bool PerformSphereTrace(FVector Start, FVector End, float Radius, FHitResult& OutHit);
 
-    // === PHYSICS FUNCTIONS ===
-    UFUNCTION(BlueprintCallable, Category = "Physics Manager")
-    void SetPhysicsPreset(ECore_PhysicsPreset NewPreset);
+    UFUNCTION(BlueprintCallable, Category = "Physics")
+    TArray<FHitResult> PerformMultiLineTrace(FVector Start, FVector End, bool bTraceComplex = false);
 
-    UFUNCTION(BlueprintCallable, Category = "Physics Manager")
-    void ApplyPhysicsProfile(const FCore_PhysicsProfile& Profile, AActor* TargetActor = nullptr);
+    // Ragdoll Functions
+    UFUNCTION(BlueprintCallable, Category = "Ragdoll")
+    void EnableRagdoll(AActor* TargetActor, FVector ImpulseDirection = FVector::ZeroVector, float ImpulseStrength = 1000.0f);
 
-    UFUNCTION(BlueprintCallable, Category = "Physics Manager")
-    void OptimizePhysicsForPerformance();
+    UFUNCTION(BlueprintCallable, Category = "Ragdoll")
+    void DisableRagdoll(AActor* TargetActor);
 
-    UFUNCTION(BlueprintCallable, Category = "Physics Manager")
-    void EnableRagdollOnActor(AActor* TargetActor, float BlendTime = 0.2f);
+    UFUNCTION(BlueprintCallable, Category = "Ragdoll")
+    bool IsActorInRagdoll(AActor* TargetActor);
 
-    UFUNCTION(BlueprintCallable, Category = "Physics Manager")
-    void DisableRagdollOnActor(AActor* TargetActor, float BlendTime = 0.2f);
+    // Physics Validation
+    UFUNCTION(BlueprintCallable, Category = "Physics Validation")
+    bool ValidatePhysicsSetup(AActor* TargetActor);
 
-    UFUNCTION(BlueprintCallable, Category = "Physics Manager")
-    void TriggerDestruction(AActor* TargetActor, FVector ImpactPoint, float Force);
+    UFUNCTION(BlueprintCallable, Category = "Physics Validation")
+    void RunPhysicsPerformanceTest();
 
-    UFUNCTION(BlueprintCallable, Category = "Physics Manager")
-    int32 GetActivePhysicsBodies() const;
+    // Destruction System
+    UFUNCTION(BlueprintCallable, Category = "Destruction")
+    void ApplyDestructiveForce(AActor* TargetActor, FVector ForceLocation, float ForceRadius, float ForceStrength);
 
-    UFUNCTION(BlueprintCallable, Category = "Physics Manager")
-    void CleanupInactivePhysicsBodies();
-
-    // === COLLISION OPTIMIZATION ===
-    UFUNCTION(BlueprintCallable, Category = "Collision")
-    void OptimizeCollisionForActor(AActor* TargetActor);
-
-    UFUNCTION(BlueprintCallable, Category = "Collision")
-    void SetCollisionLOD(AActor* TargetActor, int32 LODLevel);
+    UFUNCTION(BlueprintCallable, Category = "Destruction")
+    void CreatePhysicsExplosion(FVector ExplosionLocation, float ExplosionRadius, float ExplosionStrength);
 
 private:
     // Internal tracking
-    TArray<TWeakObjectPtr<AActor>> ActiveRagdolls;
-    TArray<TWeakObjectPtr<AActor>> DestructionActors;
-    
-    float LastOptimizationTime = 0.0f;
-    float OptimizationInterval = 5.0f;
+    UPROPERTY()
+    TArray<AActor*> RagdollActors;
+
+    UPROPERTY()
+    TMap<AActor*, float> RagdollTimers;
+
+    // Physics validation cache
+    UPROPERTY()
+    TMap<AActor*, bool> PhysicsValidationCache;
 
     // Helper functions
-    void UpdatePhysicsOptimization();
-    void CleanupExpiredRagdolls();
-    void CleanupDestructionActors();
-    FCore_PhysicsProfile GetProfileForPreset(ECore_PhysicsPreset Preset) const;
+    void UpdateRagdollTimers(float DeltaTime);
+    void CleanupInvalidActors();
+    USkeletalMeshComponent* GetSkeletalMeshFromActor(AActor* Actor);
+    void LogPhysicsState(const FString& Message);
 };
