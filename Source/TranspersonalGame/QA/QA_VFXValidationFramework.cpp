@@ -1,444 +1,381 @@
 #include "QA_VFXValidationFramework.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "GameFramework/Actor.h"
-#include "Components/ActorComponent.h"
-#include "NiagaraComponent.h"
-#include "NiagaraSystem.h"
-#include "Engine/StaticMeshActor.h"
 #include "Kismet/GameplayStatics.h"
+#include "NiagaraSystem.h"
+#include "NiagaraActor.h"
+#include "NiagaraComponent.h"
+#include "Materials/Material.h"
+#include "Engine/StaticMeshActor.h"
+#include "Components/StaticMeshComponent.h"
 #include "HAL/PlatformFilemanager.h"
 #include "Misc/DateTime.h"
 
-UQA_VFXValidationFramework::UQA_VFXValidationFramework()
+AQA_VFXValidationFramework::AQA_VFXValidationFramework()
 {
-    PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 1.0f; // Update metrics every second
+    PrimaryActorTick.bCanEverTick = false;
     
-    // Set default performance thresholds
-    MaxAcceptableFrameTime = 33.33f; // 30 FPS threshold
-    MaxAcceptableActorCount = 1000;
-    MaxAcceptableMemoryUsage = 2048.0f; // 2GB
-    bAutoRunValidationOnBeginPlay = false;
-    
-    bValidationInProgress = false;
-    TestStartTime = 0.0f;
+    // Set default values
+    bAutoRunOnBeginPlay = false;
+    bCleanupAfterTest = true;
+    MaxAllowedParticleSystems = 50.0f;
+    PerformanceThresholdMS = 16.67f;
+    bTestInProgress = false;
 }
 
-void UQA_VFXValidationFramework::BeginPlay()
+void AQA_VFXValidationFramework::BeginPlay()
 {
     Super::BeginPlay();
     
-    UE_LOG(LogTemp, Log, TEXT("QA VFX Validation Framework initialized"));
-    
-    if (bAutoRunValidationOnBeginPlay)
+    if (bAutoRunOnBeginPlay)
     {
-        // Delay validation to allow other systems to initialize
+        // Delay the test to ensure all systems are initialized
         FTimerHandle TimerHandle;
-        GetWorld()->GetTimerManager().SetTimer(TimerHandle, this, &UQA_VFXValidationFramework::RunFullVFXValidationSuite, 2.0f, false);
-    }
-}
-
-void UQA_VFXValidationFramework::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
-{
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-    
-    // Update performance metrics continuously
-    UpdatePerformanceMetrics();
-}
-
-bool UQA_VFXValidationFramework::ValidateVFXSystemIntegrity()
-{
-    TestStartTime = FPlatformTime::Seconds();
-    bool bAllTestsPassed = true;
-    
-    UE_LOG(LogTemp, Log, TEXT("QA: Starting VFX System Integrity Validation"));
-    
-    // Test 1: Validate VFX Manager Classes
-    if (!ValidateVFXManagerClasses())
-    {
-        AddTestResult(TEXT("VFX Manager Classes"), EQA_VFXTestResult::Fail, TEXT("Failed to load VFX manager classes"));
-        bAllTestsPassed = false;
-    }
-    else
-    {
-        AddTestResult(TEXT("VFX Manager Classes"), EQA_VFXTestResult::Pass);
-    }
-    
-    // Test 2: Validate Niagara Availability
-    if (!ValidateNiagaraAvailability())
-    {
-        AddTestResult(TEXT("Niagara Availability"), EQA_VFXTestResult::Fail, TEXT("Niagara system not available"));
-        bAllTestsPassed = false;
-    }
-    else
-    {
-        AddTestResult(TEXT("Niagara Availability"), EQA_VFXTestResult::Pass);
-    }
-    
-    // Test 3: Test VFX Actor Spawning
-    if (!TestVFXActorSpawning())
-    {
-        AddTestResult(TEXT("VFX Actor Spawning"), EQA_VFXTestResult::Warning, TEXT("VFX actor spawning had issues"));
-    }
-    else
-    {
-        AddTestResult(TEXT("VFX Actor Spawning"), EQA_VFXTestResult::Pass);
-    }
-    
-    float ExecutionTime = FPlatformTime::Seconds() - TestStartTime;
-    UE_LOG(LogTemp, Log, TEXT("QA: VFX System Integrity Validation completed in %.2f seconds"), ExecutionTime);
-    
-    return bAllTestsPassed;
-}
-
-bool UQA_VFXValidationFramework::TestNiagaraSystemLoading()
-{
-    TestStartTime = FPlatformTime::Seconds();
-    
-    try
-    {
-        // Test loading Niagara component class
-        UClass* NiagaraComponentClass = UNiagaraComponent::StaticClass();
-        if (!NiagaraComponentClass)
+        GetWorld()->GetTimerManager().SetTimer(TimerHandle, [this]()
         {
-            AddTestResult(TEXT("Niagara Component Loading"), EQA_VFXTestResult::Fail, TEXT("Failed to load NiagaraComponent class"));
-            return false;
-        }
-        
-        // Test loading Niagara system class
-        UClass* NiagaraSystemClass = UNiagaraSystem::StaticClass();
-        if (!NiagaraSystemClass)
-        {
-            AddTestResult(TEXT("Niagara System Loading"), EQA_VFXTestResult::Fail, TEXT("Failed to load NiagaraSystem class"));
-            return false;
-        }
-        
-        float ExecutionTime = FPlatformTime::Seconds() - TestStartTime;
-        AddTestResult(TEXT("Niagara System Loading"), EQA_VFXTestResult::Pass, TEXT(""), ExecutionTime);
-        
-        UE_LOG(LogTemp, Log, TEXT("QA: Niagara system loading test passed"));
-        return true;
+            RunFullVFXValidation();
+        }, 2.0f, false);
     }
-    catch (...)
+}
+
+FQA_VFXTestResult AQA_VFXValidationFramework::RunFullVFXValidation()
+{
+    if (bTestInProgress)
     {
-        AddTestResult(TEXT("Niagara System Loading"), EQA_VFXTestResult::Fail, TEXT("Exception during Niagara loading test"));
+        UE_LOG(LogTemp, Warning, TEXT("VFX validation already in progress"));
+        return LastTestResult;
+    }
+
+    bTestInProgress = true;
+    TestStartTime = FPlatformTime::Seconds();
+    CurrentErrors.Empty();
+    CurrentWarnings.Empty();
+
+    UE_LOG(LogTemp, Log, TEXT("=== Starting Full VFX Validation ==="));
+
+    FQA_VFXTestResult Result;
+    
+    // Run all validation tests
+    Result.bVFXManagerLoaded = ValidateVFXManager();
+    Result.bCampfireSystemExists = ValidateParticleSystems();
+    Result.bFireMaterialExists = ValidateVFXMaterials();
+    Result.bCharacterIntegration = ValidateCharacterIntegration();
+    Result.ParticleSystemCount = CountActiveParticleSystems();
+    Result.bDustSystemExists = ValidateNiagaraSystem("/Game/VFX/Particles/NS_DinosaurFootstepDust");
+    Result.bDustMaterialExists = ValidateMaterial("/Game/VFX/Materials/M_DustParticle");
+
+    // Performance check
+    bool bPerformanceOK = CheckVFXPerformance();
+    if (!bPerformanceOK)
+    {
+        AddWarning("VFX Performance below threshold");
+    }
+
+    // Test spawning
+    AActor* TestCampfire = SpawnTestCampfire(FVector(500, 0, 50));
+    AActor* TestDust = SpawnTestDustImpact(FVector(1000, 0, 50));
+    
+    Result.TestActorsSpawned = 0;
+    if (TestCampfire) Result.TestActorsSpawned++;
+    if (TestDust) Result.TestActorsSpawned++;
+
+    // Calculate validation time
+    Result.ValidationTime = FPlatformTime::Seconds() - TestStartTime;
+    
+    // Copy error and warning messages
+    Result.ErrorMessages = CurrentErrors;
+    Result.WarningMessages = CurrentWarnings;
+
+    // Store result
+    LastTestResult = Result;
+
+    // Log results
+    LogTestResults(Result);
+
+    // Generate report
+    GenerateVFXReport();
+
+    // Cleanup if requested
+    if (bCleanupAfterTest)
+    {
+        FTimerHandle CleanupTimer;
+        GetWorld()->GetTimerManager().SetTimer(CleanupTimer, [this]()
+        {
+            CleanupTestActors();
+        }, 5.0f, false);
+    }
+
+    bTestInProgress = false;
+    UE_LOG(LogTemp, Log, TEXT("=== VFX Validation Complete ==="));
+
+    return Result;
+}
+
+bool AQA_VFXValidationFramework::ValidateVFXManager()
+{
+    UClass* VFXManagerClass = LoadClass<AActor>(nullptr, TEXT("/Script/TranspersonalGame.VFX_EffectManager"));
+    if (!VFXManagerClass)
+    {
+        AddError("VFX_EffectManager class not found");
         return false;
     }
+
+    UE_LOG(LogTemp, Log, TEXT("✓ VFX_EffectManager class loaded successfully"));
+    return true;
 }
 
-bool UQA_VFXValidationFramework::ValidateVFXComponentAttachment()
+bool AQA_VFXValidationFramework::ValidateParticleSystems()
 {
-    TestStartTime = FPlatformTime::Seconds();
+    bool bCampfireValid = ValidateNiagaraSystem("/Game/VFX/Particles/NS_CampfireFlames");
+    bool bDustValid = ValidateNiagaraSystem("/Game/VFX/Particles/NS_DinosaurFootstepDust");
     
+    return bCampfireValid && bDustValid;
+}
+
+bool AQA_VFXValidationFramework::ValidateVFXMaterials()
+{
+    bool bFireMaterialValid = ValidateMaterial("/Game/VFX/Materials/M_FireParticle");
+    bool bDustMaterialValid = ValidateMaterial("/Game/VFX/Materials/M_DustParticle");
+    
+    return bFireMaterialValid && bDustMaterialValid;
+}
+
+bool AQA_VFXValidationFramework::ValidateCharacterIntegration()
+{
+    UClass* CharacterClass = LoadClass<APawn>(nullptr, TEXT("/Script/TranspersonalGame.TranspersonalCharacter"));
+    if (!CharacterClass)
+    {
+        AddError("TranspersonalCharacter class not found for VFX integration");
+        return false;
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("✓ Character class found for VFX integration"));
+    return true;
+}
+
+int32 AQA_VFXValidationFramework::CountActiveParticleSystems()
+{
     UWorld* World = GetWorld();
     if (!World)
     {
-        AddTestResult(TEXT("VFX Component Attachment"), EQA_VFXTestResult::Fail, TEXT("No valid world context"));
-        return false;
+        AddError("World not available for particle system count");
+        return 0;
     }
+
+    TArray<AActor*> NiagaraActors;
+    UGameplayStatics::GetAllActorsOfClass(World, ANiagaraActor::StaticClass(), NiagaraActors);
     
-    // Find actors in the level that can have VFX components attached
-    TArray<AActor*> AllActors;
-    UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), AllActors);
-    
-    int32 ActorsWithComponents = 0;
-    int32 TestableActors = 0;
-    
-    for (AActor* Actor : AllActors)
+    int32 ActiveCount = 0;
+    for (AActor* Actor : NiagaraActors)
     {
-        if (Actor && !Actor->IsPendingKill())
+        if (ANiagaraActor* NiagaraActor = Cast<ANiagaraActor>(Actor))
         {
-            TestableActors++;
-            
-            // Check if actor has any components
-            TArray<UActorComponent*> Components = Actor->GetComponents<UActorComponent>().Array();
-            if (Components.Num() > 0)
+            if (UNiagaraComponent* Component = NiagaraActor->GetNiagaraComponent())
             {
-                ActorsWithComponents++;
+                if (Component->IsActive())
+                {
+                    ActiveCount++;
+                }
             }
         }
     }
+
+    UE_LOG(LogTemp, Log, TEXT("Active particle systems: %d"), ActiveCount);
     
-    float ComponentRatio = TestableActors > 0 ? (float)ActorsWithComponents / (float)TestableActors : 0.0f;
-    
-    float ExecutionTime = FPlatformTime::Seconds() - TestStartTime;
-    
-    if (ComponentRatio > 0.5f) // At least 50% of actors should have components
+    if (ActiveCount > MaxAllowedParticleSystems)
     {
-        AddTestResult(TEXT("VFX Component Attachment"), EQA_VFXTestResult::Pass, 
-                     FString::Printf(TEXT("%.1f%% actors have components"), ComponentRatio * 100.0f), ExecutionTime);
-        return true;
+        AddWarning(FString::Printf(TEXT("High particle system count: %d (max recommended: %.0f)"), 
+                                   ActiveCount, MaxAllowedParticleSystems));
     }
-    else
+
+    return ActiveCount;
+}
+
+bool AQA_VFXValidationFramework::CheckVFXPerformance()
+{
+    // Simple performance check - in a real implementation, this would measure frame time impact
+    float CurrentFrameTime = GetWorld()->GetDeltaSeconds() * 1000.0f; // Convert to milliseconds
+    
+    if (CurrentFrameTime > PerformanceThresholdMS)
     {
-        AddTestResult(TEXT("VFX Component Attachment"), EQA_VFXTestResult::Warning, 
-                     FString::Printf(TEXT("Only %.1f%% actors have components"), ComponentRatio * 100.0f), ExecutionTime);
+        AddWarning(FString::Printf(TEXT("Frame time %.2fms exceeds threshold %.2fms"), 
+                                   CurrentFrameTime, PerformanceThresholdMS));
         return false;
     }
+
+    return true;
 }
 
-bool UQA_VFXValidationFramework::TestVFXPerformanceMetrics()
+AActor* AQA_VFXValidationFramework::SpawnTestCampfire(FVector Location)
 {
-    TestStartTime = FPlatformTime::Seconds();
-    
-    UpdatePerformanceMetrics();
-    
-    bool bPerformanceAcceptable = true;
-    FString PerformanceIssues;
-    
-    // Check frame time
-    if (!CheckFrameTimeThreshold())
-    {
-        bPerformanceAcceptable = false;
-        PerformanceIssues += FString::Printf(TEXT("Frame time: %.2fms (max: %.2fms); "), 
-                                           CurrentMetrics.FrameTime, MaxAcceptableFrameTime);
-    }
-    
-    // Check actor count
-    if (!CheckActorCountThreshold())
-    {
-        bPerformanceAcceptable = false;
-        PerformanceIssues += FString::Printf(TEXT("Actor count: %d (max: %d); "), 
-                                           CurrentMetrics.TotalActorsInLevel, MaxAcceptableActorCount);
-    }
-    
-    // Check memory usage
-    if (!CheckMemoryUsageThreshold())
-    {
-        bPerformanceAcceptable = false;
-        PerformanceIssues += FString::Printf(TEXT("Memory: %.1fMB (max: %.1fMB); "), 
-                                           CurrentMetrics.MemoryUsageMB, MaxAcceptableMemoryUsage);
-    }
-    
-    float ExecutionTime = FPlatformTime::Seconds() - TestStartTime;
-    
-    if (bPerformanceAcceptable)
-    {
-        AddTestResult(TEXT("VFX Performance Metrics"), EQA_VFXTestResult::Pass, TEXT("All metrics within acceptable range"), ExecutionTime);
-    }
-    else
-    {
-        AddTestResult(TEXT("VFX Performance Metrics"), EQA_VFXTestResult::Warning, PerformanceIssues, ExecutionTime);
-    }
-    
-    return bPerformanceAcceptable;
-}
-
-bool UQA_VFXValidationFramework::ValidateVFXAudioIntegration()
-{
-    TestStartTime = FPlatformTime::Seconds();
-    
-    // Basic audio system availability check
     UWorld* World = GetWorld();
     if (!World)
     {
-        AddTestResult(TEXT("VFX Audio Integration"), EQA_VFXTestResult::Fail, TEXT("No world context for audio testing"));
-        return false;
+        AddError("World not available for campfire spawn test");
+        return nullptr;
     }
-    
-    // Check if audio device is available
-    if (GEngine && GEngine->GetAudioDeviceManager())
-    {
-        float ExecutionTime = FPlatformTime::Seconds() - TestStartTime;
-        AddTestResult(TEXT("VFX Audio Integration"), EQA_VFXTestResult::Pass, TEXT("Audio system available"), ExecutionTime);
-        return true;
-    }
-    else
-    {
-        float ExecutionTime = FPlatformTime::Seconds() - TestStartTime;
-        AddTestResult(TEXT("VFX Audio Integration"), EQA_VFXTestResult::Warning, TEXT("Audio system not fully available"), ExecutionTime);
-        return false;
-    }
-}
 
-void UQA_VFXValidationFramework::RunFullVFXValidationSuite()
-{
-    if (bValidationInProgress)
+    UClass* NiagaraActorClass = ANiagaraActor::StaticClass();
+    if (!NiagaraActorClass)
     {
-        UE_LOG(LogTemp, Warning, TEXT("QA: VFX validation already in progress"));
-        return;
+        AddError("NiagaraActor class not found");
+        return nullptr;
     }
-    
-    bValidationInProgress = true;
-    ClearTestResults();
-    
-    UE_LOG(LogTemp, Log, TEXT("QA: Starting Full VFX Validation Suite"));
-    
-    // Run all validation tests
-    ValidateVFXSystemIntegrity();
-    TestNiagaraSystemLoading();
-    ValidateVFXComponentAttachment();
-    TestVFXPerformanceMetrics();
-    ValidateVFXAudioIntegration();
-    
-    bValidationInProgress = false;
-    
-    // Generate report
-    GenerateVFXValidationReport();
-    
-    UE_LOG(LogTemp, Log, TEXT("QA: Full VFX Validation Suite completed"));
-}
 
-void UQA_VFXValidationFramework::GenerateVFXValidationReport()
-{
-    UE_LOG(LogTemp, Log, TEXT("=== QA VFX VALIDATION REPORT ==="));
-    UE_LOG(LogTemp, Log, TEXT("Generated: %s"), *FDateTime::Now().ToString());
-    UE_LOG(LogTemp, Log, TEXT("Total Tests: %d"), TestResults.Num());
-    
-    int32 PassCount = 0;
-    int32 WarningCount = 0;
-    int32 FailCount = 0;
-    
-    for (const FQA_VFXTestCase& TestCase : TestResults)
+    AActor* CampfireActor = World->SpawnActor<AActor>(NiagaraActorClass, Location, FRotator::ZeroRotator);
+    if (CampfireActor)
     {
-        FString ResultString;
-        switch (TestCase.Result)
-        {
-            case EQA_VFXTestResult::Pass:
-                ResultString = TEXT("PASS");
-                PassCount++;
-                break;
-            case EQA_VFXTestResult::Warning:
-                ResultString = TEXT("WARNING");
-                WarningCount++;
-                break;
-            case EQA_VFXTestResult::Fail:
-                ResultString = TEXT("FAIL");
-                FailCount++;
-                break;
-            default:
-                ResultString = TEXT("NOT_TESTED");
-                break;
-        }
+        CampfireActor->SetActorLabel(TEXT("QA_TestCampfire"));
+        SpawnedTestActors.Add(CampfireActor);
         
-        UE_LOG(LogTemp, Log, TEXT("[%s] %s (%.2fs) - %s"), 
-               *ResultString, *TestCase.TestName, TestCase.ExecutionTime, *TestCase.ErrorMessage);
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("Summary: %d PASS, %d WARNING, %d FAIL"), PassCount, WarningCount, FailCount);
-    UE_LOG(LogTemp, Log, TEXT("=== END VFX VALIDATION REPORT ==="));
-}
-
-FQA_VFXPerformanceMetrics UQA_VFXValidationFramework::GetCurrentPerformanceMetrics()
-{
-    UpdatePerformanceMetrics();
-    return CurrentMetrics;
-}
-
-bool UQA_VFXValidationFramework::IsVFXPerformanceAcceptable()
-{
-    UpdatePerformanceMetrics();
-    return CurrentMetrics.bPerformanceAcceptable;
-}
-
-bool UQA_VFXValidationFramework::ValidateVFXManagerClasses()
-{
-    // This would normally test loading of custom VFX manager classes
-    // For now, we'll do a basic validation
-    return true;
-}
-
-bool UQA_VFXValidationFramework::ValidateNiagaraAvailability()
-{
-    UClass* NiagaraComponentClass = UNiagaraComponent::StaticClass();
-    UClass* NiagaraSystemClass = UNiagaraSystem::StaticClass();
-    
-    return (NiagaraComponentClass != nullptr && NiagaraSystemClass != nullptr);
-}
-
-bool UQA_VFXValidationFramework::TestVFXActorSpawning()
-{
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        return false;
-    }
-    
-    // Test spawning a basic actor for VFX attachment
-    FVector TestLocation(0.0f, 0.0f, 200.0f);
-    FRotator TestRotation(0.0f, 0.0f, 0.0f);
-    
-    AActor* TestActor = World->SpawnActor<AActor>(AActor::StaticClass(), TestLocation, TestRotation);
-    if (TestActor)
-    {
-        TestActor->SetActorLabel(TEXT("QA_VFX_TestActor"));
-        return true;
-    }
-    
-    return false;
-}
-
-bool UQA_VFXValidationFramework::ValidateVFXIntegrationPoints()
-{
-    // Test integration with other game systems
-    return true;
-}
-
-void UQA_VFXValidationFramework::UpdatePerformanceMetrics()
-{
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        return;
-    }
-    
-    // Update actor count
-    TArray<AActor*> AllActors;
-    UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), AllActors);
-    CurrentMetrics.TotalActorsInLevel = AllActors.Num();
-    
-    // Update frame time (simplified)
-    CurrentMetrics.FrameTime = FApp::GetDeltaTime() * 1000.0f; // Convert to milliseconds
-    
-    // Update memory usage (simplified)
-    CurrentMetrics.MemoryUsageMB = FPlatformMemory::GetStats().UsedPhysical / (1024.0f * 1024.0f);
-    
-    // Count active particle systems
-    CurrentMetrics.ActiveParticleSystems = 0;
-    for (AActor* Actor : AllActors)
-    {
-        if (Actor)
+        // Try to set the Niagara system
+        if (ANiagaraActor* NiagaraActor = Cast<ANiagaraActor>(CampfireActor))
         {
-            TArray<UNiagaraComponent*> NiagaraComponents;
-            Actor->GetComponents<UNiagaraComponent>(NiagaraComponents);
-            CurrentMetrics.ActiveParticleSystems += NiagaraComponents.Num();
+            UNiagaraSystem* CampfireSystem = LoadObject<UNiagaraSystem>(nullptr, TEXT("/Game/VFX/Particles/NS_CampfireFlames"));
+            if (CampfireSystem && NiagaraActor->GetNiagaraComponent())
+            {
+                NiagaraActor->GetNiagaraComponent()->SetAsset(CampfireSystem);
+                UE_LOG(LogTemp, Log, TEXT("✓ Test campfire spawned and configured"));
+            }
+        }
+    }
+    else
+    {
+        AddError("Failed to spawn test campfire actor");
+    }
+
+    return CampfireActor;
+}
+
+AActor* AQA_VFXValidationFramework::SpawnTestDustImpact(FVector Location)
+{
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        AddError("World not available for dust impact spawn test");
+        return nullptr;
+    }
+
+    AActor* DustActor = World->SpawnActor<AActor>(ANiagaraActor::StaticClass(), Location, FRotator::ZeroRotator);
+    if (DustActor)
+    {
+        DustActor->SetActorLabel(TEXT("QA_TestDustImpact"));
+        SpawnedTestActors.Add(DustActor);
+        
+        if (ANiagaraActor* NiagaraActor = Cast<ANiagaraActor>(DustActor))
+        {
+            UNiagaraSystem* DustSystem = LoadObject<UNiagaraSystem>(nullptr, TEXT("/Game/VFX/Particles/NS_DinosaurFootstepDust"));
+            if (DustSystem && NiagaraActor->GetNiagaraComponent())
+            {
+                NiagaraActor->GetNiagaraComponent()->SetAsset(DustSystem);
+                UE_LOG(LogTemp, Log, TEXT("✓ Test dust impact spawned and configured"));
+            }
+        }
+    }
+    else
+    {
+        AddError("Failed to spawn test dust impact actor");
+    }
+
+    return DustActor;
+}
+
+void AQA_VFXValidationFramework::CleanupTestActors()
+{
+    for (AActor* Actor : SpawnedTestActors)
+    {
+        if (IsValid(Actor))
+        {
+            Actor->Destroy();
         }
     }
     
-    // Determine if performance is acceptable
-    CurrentMetrics.bPerformanceAcceptable = CheckFrameTimeThreshold() && 
-                                          CheckActorCountThreshold() && 
-                                          CheckMemoryUsageThreshold();
+    SpawnedTestActors.Empty();
+    UE_LOG(LogTemp, Log, TEXT("Test actors cleaned up"));
 }
 
-bool UQA_VFXValidationFramework::CheckFrameTimeThreshold()
+void AQA_VFXValidationFramework::GenerateVFXReport()
 {
-    return CurrentMetrics.FrameTime <= MaxAcceptableFrameTime;
-}
-
-bool UQA_VFXValidationFramework::CheckMemoryUsageThreshold()
-{
-    return CurrentMetrics.MemoryUsageMB <= MaxAcceptableMemoryUsage;
-}
-
-bool UQA_VFXValidationFramework::CheckActorCountThreshold()
-{
-    return CurrentMetrics.TotalActorsInLevel <= MaxAcceptableActorCount;
-}
-
-void UQA_VFXValidationFramework::AddTestResult(const FString& TestName, EQA_VFXTestResult Result, const FString& ErrorMessage, float ExecutionTime)
-{
-    FQA_VFXTestCase NewTestCase;
-    NewTestCase.TestName = TestName;
-    NewTestCase.Result = Result;
-    NewTestCase.ErrorMessage = ErrorMessage;
-    NewTestCase.ExecutionTime = ExecutionTime;
+    FString ReportContent = TEXT("=== VFX VALIDATION REPORT ===\n");
+    ReportContent += FString::Printf(TEXT("Validation Time: %.3f seconds\n"), LastTestResult.ValidationTime);
+    ReportContent += FString::Printf(TEXT("VFX Manager Loaded: %s\n"), LastTestResult.bVFXManagerLoaded ? TEXT("PASS") : TEXT("FAIL"));
+    ReportContent += FString::Printf(TEXT("Campfire System: %s\n"), LastTestResult.bCampfireSystemExists ? TEXT("PASS") : TEXT("FAIL"));
+    ReportContent += FString::Printf(TEXT("Dust System: %s\n"), LastTestResult.bDustSystemExists ? TEXT("PASS") : TEXT("FAIL"));
+    ReportContent += FString::Printf(TEXT("Fire Material: %s\n"), LastTestResult.bFireMaterialExists ? TEXT("PASS") : TEXT("FAIL"));
+    ReportContent += FString::Printf(TEXT("Dust Material: %s\n"), LastTestResult.bDustMaterialExists ? TEXT("PASS") : TEXT("FAIL"));
+    ReportContent += FString::Printf(TEXT("Character Integration: %s\n"), LastTestResult.bCharacterIntegration ? TEXT("PASS") : TEXT("FAIL"));
+    ReportContent += FString::Printf(TEXT("Active Particle Systems: %d\n"), LastTestResult.ParticleSystemCount);
+    ReportContent += FString::Printf(TEXT("Test Actors Spawned: %d\n"), LastTestResult.TestActorsSpawned);
     
-    TestResults.Add(NewTestCase);
+    if (LastTestResult.ErrorMessages.Num() > 0)
+    {
+        ReportContent += TEXT("\nERRORS:\n");
+        for (const FString& Error : LastTestResult.ErrorMessages)
+        {
+            ReportContent += FString::Printf(TEXT("- %s\n"), *Error);
+        }
+    }
+    
+    if (LastTestResult.WarningMessages.Num() > 0)
+    {
+        ReportContent += TEXT("\nWARNINGS:\n");
+        for (const FString& Warning : LastTestResult.WarningMessages)
+        {
+            ReportContent += FString::Printf(TEXT("- %s\n"), *Warning);
+        }
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("%s"), *ReportContent);
 }
 
-void UQA_VFXValidationFramework::ClearTestResults()
+void AQA_VFXValidationFramework::LogTestResults(const FQA_VFXTestResult& Results)
 {
-    TestResults.Empty();
+    UE_LOG(LogTemp, Log, TEXT("=== VFX TEST RESULTS ==="));
+    UE_LOG(LogTemp, Log, TEXT("VFX Manager: %s"), Results.bVFXManagerLoaded ? TEXT("✓") : TEXT("✗"));
+    UE_LOG(LogTemp, Log, TEXT("Campfire System: %s"), Results.bCampfireSystemExists ? TEXT("✓") : TEXT("✗"));
+    UE_LOG(LogTemp, Log, TEXT("Dust System: %s"), Results.bDustSystemExists ? TEXT("✓") : TEXT("✗"));
+    UE_LOG(LogTemp, Log, TEXT("Fire Material: %s"), Results.bFireMaterialExists ? TEXT("✓") : TEXT("✗"));
+    UE_LOG(LogTemp, Log, TEXT("Dust Material: %s"), Results.bDustMaterialExists ? TEXT("✓") : TEXT("✗"));
+    UE_LOG(LogTemp, Log, TEXT("Character Integration: %s"), Results.bCharacterIntegration ? TEXT("✓") : TEXT("✗"));
+    UE_LOG(LogTemp, Log, TEXT("Particle Count: %d"), Results.ParticleSystemCount);
+    UE_LOG(LogTemp, Log, TEXT("Test Actors: %d"), Results.TestActorsSpawned);
+    UE_LOG(LogTemp, Log, TEXT("Validation Time: %.3fs"), Results.ValidationTime);
+}
+
+bool AQA_VFXValidationFramework::ValidateNiagaraSystem(const FString& SystemPath)
+{
+    UNiagaraSystem* System = LoadObject<UNiagaraSystem>(nullptr, *SystemPath);
+    if (!System)
+    {
+        AddError(FString::Printf(TEXT("Niagara system not found: %s"), *SystemPath));
+        return false;
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("✓ Niagara system found: %s"), *SystemPath);
+    return true;
+}
+
+bool AQA_VFXValidationFramework::ValidateMaterial(const FString& MaterialPath)
+{
+    UMaterial* Material = LoadObject<UMaterial>(nullptr, *MaterialPath);
+    if (!Material)
+    {
+        AddError(FString::Printf(TEXT("Material not found: %s"), *MaterialPath));
+        return false;
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("✓ Material found: %s"), *MaterialPath);
+    return true;
+}
+
+void AQA_VFXValidationFramework::AddError(const FString& ErrorMessage)
+{
+    CurrentErrors.Add(ErrorMessage);
+    UE_LOG(LogTemp, Error, TEXT("VFX Validation Error: %s"), *ErrorMessage);
+}
+
+void AQA_VFXValidationFramework::AddWarning(const FString& WarningMessage)
+{
+    CurrentWarnings.Add(WarningMessage);
+    UE_LOG(LogTemp, Warning, TEXT("VFX Validation Warning: %s"), *WarningMessage);
 }
