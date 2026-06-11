@@ -2,116 +2,86 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
-#include "Components/AudioComponent.h"
+#include "Engine/World.h"
 #include "Components/StaticMeshComponent.h"
-#include "Engine/TriggerVolume.h"
+#include "Components/SphereComponent.h"
+#include "Subsystems/WorldSubsystem.h"
 #include "SharedTypes.h"
 #include "World_BiomeStreamingManager.generated.h"
 
-// Forward declarations
-class UWorld_BiomeStreamingComponent;
-class UWorld_AudioProfileComponent;
-
-UENUM(BlueprintType)
-enum class EWorld_BiomeType : uint8
-{
-    Forest      UMETA(DisplayName = "Forest"),
-    Desert      UMETA(DisplayName = "Desert"), 
-    Swamp       UMETA(DisplayName = "Swamp"),
-    Mountain    UMETA(DisplayName = "Mountain"),
-    Plains      UMETA(DisplayName = "Plains"),
-    Tundra      UMETA(DisplayName = "Tundra"),
-    Volcanic    UMETA(DisplayName = "Volcanic"),
-    Coastal     UMETA(DisplayName = "Coastal")
-};
-
-UENUM(BlueprintType)
-enum class EWorld_StreamingState : uint8
-{
-    Unloaded    UMETA(DisplayName = "Unloaded"),
-    Loading     UMETA(DisplayName = "Loading"),
-    Loaded      UMETA(DisplayName = "Loaded"),
-    Unloading   UMETA(DisplayName = "Unloading")
-};
-
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FWorld_BiomeStreamingZone
+struct TRANSPERSONALGAME_API FWorld_BiomeConfig
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Streaming")
-    FString ZoneName;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    FString BiomeName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Streaming")
-    EWorld_BiomeType BiomeType;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    FVector Location;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Streaming")
-    FVector ZoneCenter;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    float StreamingRadius;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Streaming")
-    FVector ZoneExtents;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    EBiomeType BiomeType;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Streaming")
-    float StreamingDistance;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather")
+    EWeatherType WeatherPattern;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Streaming")
-    float UnloadingDistance;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather")
+    float FogDensity;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Streaming")
-    FString AudioProfile;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Vegetation")
+    float VegetationDensity;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Streaming")
-    EWorld_StreamingState CurrentState;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Visual")
+    FLinearColor BiomeColor;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Streaming")
-    TArray<TSoftObjectPtr<UStaticMesh>> VegetationMeshes;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    int32 LODLevel;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Streaming")
-    TArray<TSoftObjectPtr<USoundBase>> AmbientSounds;
-
-    FWorld_BiomeStreamingZone()
+    FWorld_BiomeConfig()
     {
-        ZoneName = TEXT("DefaultZone");
-        BiomeType = EWorld_BiomeType::Forest;
-        ZoneCenter = FVector::ZeroVector;
-        ZoneExtents = FVector(1000.0f, 1000.0f, 500.0f);
-        StreamingDistance = 2000.0f;
-        UnloadingDistance = 3000.0f;
-        AudioProfile = TEXT("Default");
-        CurrentState = EWorld_StreamingState::Unloaded;
+        BiomeName = TEXT("DefaultBiome");
+        Location = FVector::ZeroVector;
+        StreamingRadius = 1000.0f;
+        BiomeType = EBiomeType::Temperate;
+        WeatherPattern = EWeatherType::Clear;
+        FogDensity = 0.5f;
+        VegetationDensity = 0.5f;
+        BiomeColor = FLinearColor::White;
+        LODLevel = 0;
     }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FWorld_AudioProfile
+struct TRANSPERSONALGAME_API FWorld_WeatherTransition
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Profile")
-    FString ProfileName;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Transition")
+    FString FromBiome;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Profile")
-    TSoftObjectPtr<USoundBase> AmbientSound;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Transition")
+    FString ToBiome;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Profile")
-    float Volume;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Transition")
+    FVector TransitionLocation;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Profile")
-    float AttenuationRadius;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Transition")
+    float TransitionRadius;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Profile")
-    bool bLooping;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Transition")
+    float BlendFactor;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Profile")
-    bool bAutoActivate;
-
-    FWorld_AudioProfile()
+    FWorld_WeatherTransition()
     {
-        ProfileName = TEXT("Default");
-        Volume = 0.5f;
-        AttenuationRadius = 1500.0f;
-        bLooping = true;
-        bAutoActivate = true;
+        FromBiome = TEXT("None");
+        ToBiome = TEXT("None");
+        TransitionLocation = FVector::ZeroVector;
+        TransitionRadius = 500.0f;
+        BlendFactor = 0.5f;
     }
 };
 
@@ -125,103 +95,117 @@ public:
 
 protected:
     virtual void BeginPlay() override;
-    virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
-
-public:
     virtual void Tick(float DeltaTime) override;
 
-    // Core streaming functionality
-    UFUNCTION(BlueprintCallable, Category = "Biome Streaming")
-    void InitializeBiomeStreaming();
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    class USceneComponent* RootSceneComponent;
 
-    UFUNCTION(BlueprintCallable, Category = "Biome Streaming")
-    void UpdateStreamingBasedOnPlayerLocation(const FVector& PlayerLocation);
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    class USphereComponent* StreamingDetectionSphere;
 
-    UFUNCTION(BlueprintCallable, Category = "Biome Streaming")
-    void LoadBiomeZone(const FString& ZoneName);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biomes")
+    TArray<FWorld_BiomeConfig> BiomeConfigurations;
 
-    UFUNCTION(BlueprintCallable, Category = "Biome Streaming")
-    void UnloadBiomeZone(const FString& ZoneName);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather")
+    TArray<FWorld_WeatherTransition> WeatherTransitions;
 
-    UFUNCTION(BlueprintCallable, Category = "Biome Streaming")
-    bool IsBiomeZoneLoaded(const FString& ZoneName) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Biome Streaming")
-    EWorld_BiomeType GetBiomeTypeAtLocation(const FVector& Location) const;
-
-    // Zone management
-    UFUNCTION(BlueprintCallable, Category = "Biome Streaming")
-    void AddBiomeZone(const FWorld_BiomeStreamingZone& NewZone);
-
-    UFUNCTION(BlueprintCallable, Category = "Biome Streaming")
-    void RemoveBiomeZone(const FString& ZoneName);
-
-    UFUNCTION(BlueprintCallable, Category = "Biome Streaming")
-    FWorld_BiomeStreamingZone* GetBiomeZone(const FString& ZoneName);
-
-    // Audio profile management
-    UFUNCTION(BlueprintCallable, Category = "Audio Profiles")
-    void RegisterAudioProfile(const FString& ProfileName, const FWorld_AudioProfile& Profile);
-
-    UFUNCTION(BlueprintCallable, Category = "Audio Profiles")
-    void ActivateAudioProfile(const FString& ProfileName, const FVector& Location);
-
-    UFUNCTION(BlueprintCallable, Category = "Audio Profiles")
-    void DeactivateAudioProfile(const FString& ProfileName);
-
-    // Vegetation management
-    UFUNCTION(BlueprintCallable, Category = "Vegetation")
-    void SpawnVegetationInZone(const FString& ZoneName);
-
-    UFUNCTION(BlueprintCallable, Category = "Vegetation")
-    void ClearVegetationInZone(const FString& ZoneName);
-
-    // Utility functions
-    UFUNCTION(BlueprintCallable, Category = "Biome Streaming")
-    float GetDistanceToNearestBiomeZone(const FVector& Location) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Biome Streaming")
-    TArray<FString> GetActiveZoneNames() const;
-
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Debug")
-    void DebugPrintBiomeZones();
-
-protected:
-    // Internal streaming logic
-    void ProcessStreamingQueue();
-    void UpdateAudioBasedOnLocation(const FVector& PlayerLocation);
-    void CleanupUnusedResources();
-
-    // Vegetation spawning helpers
-    void SpawnTreesInZone(const FWorld_BiomeStreamingZone& Zone);
-    void SpawnBushesInZone(const FWorld_BiomeStreamingZone& Zone);
-    FVector GetRandomLocationInZone(const FWorld_BiomeStreamingZone& Zone) const;
-
-private:
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Streaming", meta = (AllowPrivateAccess = "true"))
-    TArray<FWorld_BiomeStreamingZone> BiomeZones;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Profiles", meta = (AllowPrivateAccess = "true"))
-    TMap<FString, FWorld_AudioProfile> AudioProfiles;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components", meta = (AllowPrivateAccess = "true"))
-    TArray<UWorld_BiomeStreamingComponent*> StreamingComponents;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components", meta = (AllowPrivateAccess = "true"))
-    TArray<UWorld_AudioProfileComponent*> AudioComponents;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings", meta = (AllowPrivateAccess = "true"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Streaming")
     float StreamingUpdateInterval;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings", meta = (AllowPrivateAccess = "true"))
-    float MaxVegetationDensity;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Streaming")
+    float MaxStreamingDistance;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings", meta = (AllowPrivateAccess = "true"))
-    bool bEnableDebugVisualization;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    bool bEnableLODOptimization;
 
-    // Runtime state
-    FVector LastPlayerLocation;
-    float StreamingUpdateTimer;
-    TMap<FString, TArray<AActor*>> SpawnedVegetationActors;
-    TMap<FString, UAudioComponent*> ActiveAudioComponents;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    int32 MaxActiveStreamingZones;
+
+private:
+    UPROPERTY()
+    TArray<AActor*> ActiveBiomeActors;
+
+    UPROPERTY()
+    TArray<AActor*> StreamingVolumeActors;
+
+    UPROPERTY()
+    AActor* WeatherControllerActor;
+
+    float LastStreamingUpdate;
+    FString CurrentActiveBiome;
+
+public:
+    UFUNCTION(BlueprintCallable, Category = "Biome Streaming")
+    void InitializeBiomeSystem();
+
+    UFUNCTION(BlueprintCallable, Category = "Biome Streaming")
+    void CreateBiomeZone(const FWorld_BiomeConfig& BiomeConfig);
+
+    UFUNCTION(BlueprintCallable, Category = "Biome Streaming")
+    void UpdateStreamingZones(const FVector& PlayerLocation);
+
+    UFUNCTION(BlueprintCallable, Category = "Biome Streaming")
+    FString GetCurrentBiome(const FVector& Location) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Weather")
+    void UpdateWeatherSystem(const FString& BiomeName, float DeltaTime);
+
+    UFUNCTION(BlueprintCallable, Category = "Weather")
+    void CreateWeatherTransition(const FWorld_WeatherTransition& Transition);
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void OptimizeBiomePerformance(const FVector& PlayerLocation);
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void SetBiomeLOD(const FString& BiomeName, int32 LODLevel);
+
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Editor")
+    void GenerateDefaultBiomes();
+
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Editor")
+    void ValidateBiomeConfiguration();
+
+protected:
+    UFUNCTION()
+    void OnStreamingVolumeEntered(class UPrimitiveComponent* OverlappedComponent, class AActor* OtherActor, class UPrimitiveComponent* OtherComponent, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult);
+
+    UFUNCTION()
+    void OnStreamingVolumeExited(class UPrimitiveComponent* OverlappedComponent, class AActor* OtherActor, class UPrimitiveComponent* OtherComponent, int32 OtherBodyIndex);
+
+private:
+    void CreateVegetationCluster(const FVector& Location, float Density, const FString& BiomeName);
+    void UpdateBiomeLighting(const FString& BiomeName, const FLinearColor& BiomeColor);
+    void CleanupInactiveBiomes();
+    float CalculateStreamingPriority(const FVector& BiomeLocation, const FVector& PlayerLocation) const;
+};
+
+UCLASS(BlueprintType)
+class TRANSPERSONALGAME_API UWorld_BiomeStreamingSubsystem : public UWorldSubsystem
+{
+    GENERATED_BODY()
+
+public:
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
+
+    UFUNCTION(BlueprintCallable, Category = "Biome Streaming")
+    AWorld_BiomeStreamingManager* GetBiomeStreamingManager() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Biome Streaming")
+    void RegisterBiomeManager(AWorld_BiomeStreamingManager* Manager);
+
+    UFUNCTION(BlueprintCallable, Category = "Biome Streaming")
+    FString GetPlayerCurrentBiome() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void UpdateGlobalStreamingSettings(float MaxDistance, int32 MaxZones);
+
+private:
+    UPROPERTY()
+    AWorld_BiomeStreamingManager* BiomeManager;
+
+    UPROPERTY()
+    FString CachedPlayerBiome;
+
+    float LastBiomeCheck;
 };
