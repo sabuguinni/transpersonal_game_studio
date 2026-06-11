@@ -1,174 +1,134 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/GameInstance.h"
-#include "Subsystems/GameInstanceSubsystem.h"
+#include "Components/ActorComponent.h"
+#include "Engine/Engine.h"
+#include "SharedTypes.h"
 #include "Quest_ObjectiveTracker.generated.h"
 
-UENUM(BlueprintType)
-enum class EQuest_ObjectiveType : uint8
-{
-    Kill_Dinosaur      UMETA(DisplayName = "Kill Dinosaur"),
-    Gather_Resource    UMETA(DisplayName = "Gather Resource"),
-    Explore_Area       UMETA(DisplayName = "Explore Area"),
-    Craft_Item         UMETA(DisplayName = "Craft Item"),
-    Survive_Duration   UMETA(DisplayName = "Survive Duration"),
-    Reach_Location     UMETA(DisplayName = "Reach Location"),
-    Interact_NPC       UMETA(DisplayName = "Interact with NPC"),
-    Build_Structure    UMETA(DisplayName = "Build Structure")
-};
-
-UENUM(BlueprintType)
-enum class EQuest_ObjectiveStatus : uint8
-{
-    Inactive          UMETA(DisplayName = "Inactive"),
-    Active            UMETA(DisplayName = "Active"),
-    Completed         UMETA(DisplayName = "Completed"),
-    Failed            UMETA(DisplayName = "Failed"),
-    Optional          UMETA(DisplayName = "Optional")
-};
-
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FQuest_Objective
+struct TRANSPERSONALGAME_API FQuest_ObjectiveData
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Objective")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Objective")
     FString ObjectiveID;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Objective")
-    FString Title;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Objective")
+    FString ObjectiveDescription;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Objective")
-    FString Description;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Objective")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Objective")
     EQuest_ObjectiveType ObjectiveType;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Objective")
-    EQuest_ObjectiveStatus Status;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Objective")
+    int32 TargetCount;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Objective")
-    int32 RequiredCount;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Objective")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Objective")
     int32 CurrentCount;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Objective")
-    FString TargetName;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Objective")
+    bool bIsCompleted;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Objective")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Objective")
     FVector TargetLocation;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Objective")
-    bool bIsOptional;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Objective")
+    float CompletionRadius;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Objective")
-    bool bIsHidden;
-
-    FQuest_Objective()
+    FQuest_ObjectiveData()
     {
         ObjectiveID = TEXT("");
-        Title = TEXT("");
-        Description = TEXT("");
-        ObjectiveType = EQuest_ObjectiveType::Kill_Dinosaur;
-        Status = EQuest_ObjectiveStatus::Inactive;
-        RequiredCount = 1;
+        ObjectiveDescription = TEXT("");
+        ObjectiveType = EQuest_ObjectiveType::Hunt;
+        TargetCount = 1;
         CurrentCount = 0;
-        TargetName = TEXT("");
+        bIsCompleted = false;
         TargetLocation = FVector::ZeroVector;
-        bIsOptional = false;
-        bIsHidden = false;
+        CompletionRadius = 500.0f;
     }
 };
 
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FQuest_ProgressEvent
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Progress")
-    FString ObjectiveID;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Progress")
-    EQuest_ObjectiveType EventType;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Progress")
-    FString TargetName;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Progress")
-    int32 ProgressAmount;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Progress")
-    FVector EventLocation;
-
-    FQuest_ProgressEvent()
-    {
-        ObjectiveID = TEXT("");
-        EventType = EQuest_ObjectiveType::Kill_Dinosaur;
-        TargetName = TEXT("");
-        ProgressAmount = 1;
-        EventLocation = FVector::ZeroVector;
-    }
-};
-
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FQuest_ObjectiveUpdated, const FQuest_Objective&, UpdatedObjective);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FQuest_ObjectiveCompleted, const FQuest_Objective&, CompletedObjective);
-
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UQuest_ObjectiveTracker : public UGameInstanceSubsystem
+UCLASS(ClassGroup=(Quest), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UQuest_ObjectiveTracker : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
     UQuest_ObjectiveTracker();
 
-    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+protected:
+    virtual void BeginPlay() override;
 
-    UFUNCTION(BlueprintCallable, Category = "Quest Objectives")
-    void AddObjective(const FQuest_Objective& Objective);
+public:
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    UFUNCTION(BlueprintCallable, Category = "Quest Objectives")
+    // Objective Management
+    UFUNCTION(BlueprintCallable, Category = "Quest Objective")
+    void AddObjective(const FQuest_ObjectiveData& NewObjective);
+
+    UFUNCTION(BlueprintCallable, Category = "Quest Objective")
     void RemoveObjective(const FString& ObjectiveID);
 
-    UFUNCTION(BlueprintCallable, Category = "Quest Objectives")
-    void ActivateObjective(const FString& ObjectiveID);
+    UFUNCTION(BlueprintCallable, Category = "Quest Objective")
+    void UpdateObjectiveProgress(const FString& ObjectiveID, int32 ProgressAmount);
 
-    UFUNCTION(BlueprintCallable, Category = "Quest Objectives")
+    UFUNCTION(BlueprintCallable, Category = "Quest Objective")
+    bool IsObjectiveCompleted(const FString& ObjectiveID) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Quest Objective")
+    FQuest_ObjectiveData GetObjectiveData(const FString& ObjectiveID) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Quest Objective")
+    TArray<FQuest_ObjectiveData> GetAllObjectives() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Quest Objective")
+    TArray<FQuest_ObjectiveData> GetActiveObjectives() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Quest Objective")
     void CompleteObjective(const FString& ObjectiveID);
 
-    UFUNCTION(BlueprintCallable, Category = "Quest Objectives")
-    void FailObjective(const FString& ObjectiveID);
+    // Location-based objectives
+    UFUNCTION(BlueprintCallable, Category = "Quest Objective")
+    void CheckLocationObjectives(const FVector& PlayerLocation);
 
-    UFUNCTION(BlueprintCallable, Category = "Quest Objectives")
-    void UpdateObjectiveProgress(const FQuest_ProgressEvent& ProgressEvent);
+    // Hunt objectives
+    UFUNCTION(BlueprintCallable, Category = "Quest Objective")
+    void OnDinosaurKilled(const FString& DinosaurType);
 
-    UFUNCTION(BlueprintCallable, Category = "Quest Objectives")
-    FQuest_Objective GetObjective(const FString& ObjectiveID);
+    // Gather objectives
+    UFUNCTION(BlueprintCallable, Category = "Quest Objective")
+    void OnResourceGathered(const FString& ResourceType, int32 Amount);
 
-    UFUNCTION(BlueprintCallable, Category = "Quest Objectives")
-    TArray<FQuest_Objective> GetActiveObjectives();
+    // Build objectives
+    UFUNCTION(BlueprintCallable, Category = "Quest Objective")
+    void OnStructureBuilt(const FString& StructureType);
 
-    UFUNCTION(BlueprintCallable, Category = "Quest Objectives")
-    TArray<FQuest_Objective> GetCompletedObjectives();
-
-    UFUNCTION(BlueprintCallable, Category = "Quest Objectives")
-    bool IsObjectiveComplete(const FString& ObjectiveID);
-
-    UFUNCTION(BlueprintCallable, Category = "Quest Objectives")
-    int32 GetObjectiveProgress(const FString& ObjectiveID);
-
+    // Events
+    DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnObjectiveCompleted, const FString&, ObjectiveID);
     UPROPERTY(BlueprintAssignable, Category = "Quest Events")
-    FQuest_ObjectiveUpdated OnObjectiveUpdated;
+    FOnObjectiveCompleted OnObjectiveCompleted;
 
+    DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnObjectiveUpdated, const FString&, ObjectiveID);
     UPROPERTY(BlueprintAssignable, Category = "Quest Events")
-    FQuest_ObjectiveCompleted OnObjectiveCompleted;
+    FOnObjectiveUpdated OnObjectiveUpdated;
 
 protected:
-    UPROPERTY(BlueprintReadOnly, Category = "Quest Objectives")
-    TMap<FString, FQuest_Objective> Objectives;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Objectives")
+    TArray<FQuest_ObjectiveData> ActiveObjectives;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Objectives")
+    TArray<FQuest_ObjectiveData> CompletedObjectives;
+
+    // Objective tracking settings
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Settings")
+    float LocationCheckInterval;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Settings")
+    bool bAutoCompleteLocationObjectives;
 
 private:
-    void InitializeDefaultObjectives();
-    bool MatchesProgressEvent(const FQuest_Objective& Objective, const FQuest_ProgressEvent& Event);
+    float LastLocationCheckTime;
+    
+    void CheckObjectiveCompletion(FQuest_ObjectiveData& Objective);
+    void BroadcastObjectiveEvents(const FQuest_ObjectiveData& Objective);
 };
