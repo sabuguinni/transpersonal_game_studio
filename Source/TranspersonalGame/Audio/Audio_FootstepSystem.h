@@ -2,54 +2,41 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
-#include "Sound/SoundBase.h"
-#include "Engine/DataTable.h"
-#include "Components/AudioComponent.h"
+#include "Sound/SoundCue.h"
+#include "SharedTypes.h"
 #include "Audio_FootstepSystem.generated.h"
 
-UENUM(BlueprintType)
-enum class EAudio_SurfaceType : uint8
-{
-    Grass,
-    Dirt,
-    Stone,
-    Sand,
-    Water,
-    Wood,
-    Metal,
-    Snow
-};
-
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FAudio_FootstepData : public FTableRowBase
+struct TRANSPERSONALGAME_API FAudio_SurfaceSound
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    EAudio_SurfaceType SurfaceType;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Audio")
+    ESurfaceType SurfaceType;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    TArray<TSoftObjectPtr<USoundBase>> FootstepSounds;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Audio")
+    USoundCue* FootstepSound;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float VolumeMultiplier = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Audio")
+    USoundCue* LandingSound;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float PitchVariation = 0.1f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Audio")
+    float VolumeMultiplier;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float MinTimeBetweenSteps = 0.3f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Audio")
+    float PitchVariation;
 
-    FAudio_FootstepData()
+    FAudio_SurfaceSound()
     {
-        SurfaceType = EAudio_SurfaceType::Grass;
+        SurfaceType = ESurfaceType::Grass;
+        FootstepSound = nullptr;
+        LandingSound = nullptr;
         VolumeMultiplier = 1.0f;
-        PitchVariation = 0.1f;
-        MinTimeBetweenSteps = 0.3f;
+        PitchVariation = 0.2f;
     }
 };
 
-UCLASS(ClassGroup=(Audio), meta=(BlueprintSpawnableComponent))
+UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
 class TRANSPERSONALGAME_API UAudio_FootstepSystem : public UActorComponent
 {
     GENERATED_BODY()
@@ -60,46 +47,34 @@ public:
 protected:
     virtual void BeginPlay() override;
 
-public:
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Footstep Settings")
+    TArray<FAudio_SurfaceSound> SurfaceSounds;
 
-    UFUNCTION(BlueprintCallable, Category = "Footstep System")
-    void PlayFootstepSound(EAudio_SurfaceType SurfaceType, FVector Location);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Footstep Settings")
+    float FootstepVolumeScale;
 
-    UFUNCTION(BlueprintCallable, Category = "Footstep System")
-    void SetFootstepVolume(float Volume);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Footstep Settings")
+    float MinTimeBetweenSteps;
 
-    UFUNCTION(BlueprintCallable, Category = "Footstep System")
-    EAudio_SurfaceType DetectSurfaceType(FVector Location);
-
-    UFUNCTION(BlueprintCallable, Category = "Footstep System")
-    void EnableAutoFootsteps(bool bEnable);
-
-protected:
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Footstep System")
-    UDataTable* FootstepDataTable;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Footstep System")
-    float FootstepVolume = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Footstep System")
-    float FootstepRange = 1000.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Footstep System")
-    bool bAutoDetectFootsteps = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Footstep System")
-    float MovementThreshold = 50.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Footstep Settings")
+    bool bEnableFootstepParticles;
 
 private:
-    UPROPERTY()
-    UAudioComponent* FootstepAudioComponent;
-
-    FVector LastLocation;
     float LastFootstepTime;
-    float AccumulatedDistance;
+    ESurfaceType LastSurfaceType;
 
-    void InitializeFootstepAudio();
-    FAudio_FootstepData* GetFootstepData(EAudio_SurfaceType SurfaceType);
-    bool ShouldPlayFootstep(float DeltaTime, float DistanceMoved);
+public:
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    void PlayFootstep(const FVector& Location, ESurfaceType Surface, float MovementSpeed = 1.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    void PlayLanding(const FVector& Location, ESurfaceType Surface, float ImpactForce = 1.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    ESurfaceType DetectSurfaceType(const FVector& Location);
+
+private:
+    FAudio_SurfaceSound* GetSurfaceSound(ESurfaceType SurfaceType);
+    float CalculateVolumeFromSpeed(float MovementSpeed);
+    float CalculatePitchVariation();
 };
