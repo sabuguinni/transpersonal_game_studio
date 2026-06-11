@@ -5,6 +5,8 @@
 #include "Components/ActorComponent.h"
 #include "NiagaraComponent.h"
 #include "NiagaraSystem.h"
+#include "Materials/Material.h"
+#include "Components/AudioComponent.h"
 #include "QA_VFXValidator.generated.h"
 
 UENUM(BlueprintType)
@@ -13,7 +15,7 @@ enum class EQA_VFXValidationResult : uint8
     Pass        UMETA(DisplayName = "Pass"),
     Warning     UMETA(DisplayName = "Warning"),
     Fail        UMETA(DisplayName = "Fail"),
-    NotTested   UMETA(DisplayName = "Not Tested")
+    Critical    UMETA(DisplayName = "Critical")
 };
 
 USTRUCT(BlueprintType)
@@ -36,13 +38,13 @@ struct FQA_VFXTestResult
     FQA_VFXTestResult()
     {
         TestName = TEXT("");
-        Result = EQA_VFXValidationResult::NotTested;
+        Result = EQA_VFXValidationResult::Pass;
         Details = TEXT("");
         ExecutionTime = 0.0f;
     }
 };
 
-UCLASS(BlueprintType, Blueprintable, meta = (BlueprintSpawnableComponent))
+UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UQA_VFXValidator : public UActorComponent
 {
     GENERATED_BODY()
@@ -50,116 +52,65 @@ class TRANSPERSONALGAME_API UQA_VFXValidator : public UActorComponent
 public:
     UQA_VFXValidator();
 
-protected:
-    virtual void BeginPlay() override;
-
-public:
-    // === VFX VALIDATION METHODS ===
-    
+    // Core validation functions
     UFUNCTION(BlueprintCallable, Category = "QA|VFX")
-    FQA_VFXTestResult ValidateNiagaraSystem(UNiagaraSystem* NiagaraSystem);
+    TArray<FQA_VFXTestResult> ValidateAllVFXSystems();
 
     UFUNCTION(BlueprintCallable, Category = "QA|VFX")
-    FQA_VFXTestResult ValidateNiagaraComponent(UNiagaraComponent* NiagaraComponent);
+    FQA_VFXTestResult ValidateNiagaraSystem(class UNiagaraSystem* System);
 
     UFUNCTION(BlueprintCallable, Category = "QA|VFX")
-    TArray<FQA_VFXTestResult> ValidateAllVFXInLevel();
+    FQA_VFXTestResult ValidateVFXMaterials();
 
     UFUNCTION(BlueprintCallable, Category = "QA|VFX")
-    FQA_VFXTestResult ValidateVFXPerformance();
+    FQA_VFXTestResult ValidateParticlePerformance();
 
     UFUNCTION(BlueprintCallable, Category = "QA|VFX")
-    FQA_VFXTestResult ValidateVFXAudioSync();
+    FQA_VFXTestResult ValidateAudioVFXIntegration();
 
     UFUNCTION(BlueprintCallable, Category = "QA|VFX")
-    FQA_VFXTestResult ValidateVFXLightingIntegration();
+    FQA_VFXTestResult ValidateVFXActorComponents();
 
-    // === CAMPFIRE VFX SPECIFIC VALIDATION ===
-    
-    UFUNCTION(BlueprintCallable, Category = "QA|VFX|Campfire")
-    FQA_VFXTestResult ValidateCampfireVFX(AActor* CampfireActor);
-
-    UFUNCTION(BlueprintCallable, Category = "QA|VFX|Campfire")
-    FQA_VFXTestResult ValidateCampfireParticleCount();
-
-    UFUNCTION(BlueprintCallable, Category = "QA|VFX|Campfire")
-    FQA_VFXTestResult ValidateCampfireLightInteraction();
-
-    // === FOOTSTEP VFX SPECIFIC VALIDATION ===
-    
-    UFUNCTION(BlueprintCallable, Category = "QA|VFX|Footsteps")
-    FQA_VFXTestResult ValidateFootstepVFX(AActor* CharacterActor);
-
-    UFUNCTION(BlueprintCallable, Category = "QA|VFX|Footsteps")
-    FQA_VFXTestResult ValidateFootstepDustSpawn();
-
-    UFUNCTION(BlueprintCallable, Category = "QA|VFX|Footsteps")
-    FQA_VFXTestResult ValidateFootstepTerrainInteraction();
-
-    // === PERFORMANCE VALIDATION ===
-    
+    // Performance testing
     UFUNCTION(BlueprintCallable, Category = "QA|Performance")
-    FQA_VFXTestResult ValidateVFXFrameRate();
+    float GetParticleSystemFrameTime();
 
     UFUNCTION(BlueprintCallable, Category = "QA|Performance")
-    FQA_VFXTestResult ValidateVFXMemoryUsage();
+    int32 GetActiveParticleCount();
 
     UFUNCTION(BlueprintCallable, Category = "QA|Performance")
-    FQA_VFXTestResult ValidateVFXLODSystem();
+    bool IsVFXPerformanceAcceptable();
 
-    // === INTEGRATION VALIDATION ===
-    
+    // Integration testing
     UFUNCTION(BlueprintCallable, Category = "QA|Integration")
-    FQA_VFXTestResult ValidateVFXCharacterIntegration();
-
-    UFUNCTION(BlueprintCallable, Category = "QA|Integration")
-    FQA_VFXTestResult ValidateVFXEnvironmentIntegration();
+    TArray<AActor*> FindActorsWithVFXComponents();
 
     UFUNCTION(BlueprintCallable, Category = "QA|Integration")
-    FQA_VFXTestResult ValidateVFXWeatherIntegration();
+    bool ValidateVFXAudioSync(AActor* Actor);
 
-    // === AUTOMATED TESTING ===
-    
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "QA|Automation")
-    void RunFullVFXValidationSuite();
-
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "QA|Automation")
+    // Reporting
+    UFUNCTION(BlueprintCallable, Category = "QA|Reporting")
     void GenerateVFXValidationReport();
 
+    UFUNCTION(BlueprintCallable, Category = "QA|Reporting")
+    FString GetLastValidationSummary();
+
 protected:
-    // === VALIDATION DATA ===
-    
     UPROPERTY(BlueprintReadOnly, Category = "QA")
-    TArray<FQA_VFXTestResult> ValidationResults;
+    TArray<FQA_VFXTestResult> LastTestResults;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA|Settings")
-    float PerformanceThresholdFPS;
+    UPROPERTY(BlueprintReadOnly, Category = "QA")
+    float MaxAcceptableFrameTime;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA|Settings")
-    int32 MaxParticleCountThreshold;
+    UPROPERTY(BlueprintReadOnly, Category = "QA")
+    int32 MaxAcceptableParticleCount;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA|Settings")
-    float MemoryUsageThresholdMB;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA|Settings")
-    bool bEnableDetailedLogging;
+    UPROPERTY(BlueprintReadOnly, Category = "QA")
+    bool bVerboseLogging;
 
 private:
-    // === HELPER METHODS ===
-    
-    FQA_VFXTestResult CreateTestResult(const FString& TestName, EQA_VFXValidationResult Result, const FString& Details, float ExecutionTime = 0.0f);
-    
-    void LogTestResult(const FQA_VFXTestResult& TestResult);
-    
-    float MeasureExecutionTime(TFunction<void()> TestFunction);
-    
-    bool IsVFXSystemValid(UNiagaraSystem* System);
-    
-    bool IsVFXComponentValid(UNiagaraComponent* Component);
-    
-    int32 CountActiveParticles();
-    
-    float GetCurrentFrameRate();
-    
-    float GetVFXMemoryUsage();
+    FQA_VFXTestResult CreateTestResult(const FString& TestName, EQA_VFXValidationResult Result, const FString& Details, float ExecutionTime);
+    void LogTestResult(const FQA_VFXTestResult& Result);
+    bool IsSystemValid(class UNiagaraSystem* System);
+    bool IsMaterialValid(class UMaterial* Material);
 };
