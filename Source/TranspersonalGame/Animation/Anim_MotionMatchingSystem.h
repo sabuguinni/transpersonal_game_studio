@@ -1,11 +1,10 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Components/ActorComponent.h"
-#include "Animation/AnimInstance.h"
-#include "Animation/AnimMontage.h"
+#include "UObject/NoExportTypes.h"
+#include "Animation/AnimSequence.h"
 #include "Animation/BlendSpace.h"
-#include "Engine/DataTable.h"
+#include "../SharedTypes.h"
 #include "Anim_MotionMatchingSystem.generated.h"
 
 USTRUCT(BlueprintType)
@@ -13,112 +12,158 @@ struct TRANSPERSONALGAME_API FAnim_MotionData
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Data")
+    UAnimSequence* AnimSequence;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Data")
+    float StartTime;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Data")
+    float EndTime;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Data")
     FVector Velocity;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Data")
     float Speed;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Data")
     float Direction;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion")
-    bool bIsInAir;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Data")
+    ESurvivalState SurvivalState;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion")
-    bool bIsCrouching;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Data")
+    EMovementType MovementType;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Data")
+    float MatchingScore;
 
     FAnim_MotionData()
     {
+        AnimSequence = nullptr;
+        StartTime = 0.0f;
+        EndTime = 0.0f;
         Velocity = FVector::ZeroVector;
         Speed = 0.0f;
         Direction = 0.0f;
-        bIsInAir = false;
-        bIsCrouching = false;
+        SurvivalState = ESurvivalState::Normal;
+        MovementType = EMovementType::Walking;
+        MatchingScore = 0.0f;
     }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FAnim_StateTransition
+struct TRANSPERSONALGAME_API FAnim_MotionQuery
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Transition")
-    FName FromState;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Query")
+    FVector DesiredVelocity;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Transition")
-    FName ToState;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Query")
+    float DesiredSpeed;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Transition")
-    float BlendTime;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Query")
+    float DesiredDirection;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Transition")
-    class UAnimMontage* TransitionMontage;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Query")
+    ESurvivalState CurrentSurvivalState;
 
-    FAnim_StateTransition()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Query")
+    EMovementType PreferredMovementType;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Query")
+    float TerrainSteepness;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Query")
+    bool bIsInCombat;
+
+    FAnim_MotionQuery()
     {
-        FromState = NAME_None;
-        ToState = NAME_None;
-        BlendTime = 0.2f;
-        TransitionMontage = nullptr;
+        DesiredVelocity = FVector::ZeroVector;
+        DesiredSpeed = 0.0f;
+        DesiredDirection = 0.0f;
+        CurrentSurvivalState = ESurvivalState::Normal;
+        PreferredMovementType = EMovementType::Walking;
+        TerrainSteepness = 0.0f;
+        bIsInCombat = false;
     }
 };
 
-UCLASS(ClassGroup=(Animation), meta=(BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UAnim_MotionMatchingSystem : public UActorComponent
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API UAnim_MotionMatchingSystem : public UObject
 {
     GENERATED_BODY()
 
 public:
     UAnim_MotionMatchingSystem();
 
+    // Core motion matching functions
+    UFUNCTION(BlueprintCallable, Category = "Motion Matching")
+    FAnim_MotionData FindBestMotionMatch(const FAnim_MotionQuery& Query);
+
+    UFUNCTION(BlueprintCallable, Category = "Motion Matching")
+    void BuildMotionDatabase(const TArray<UAnimSequence*>& AnimSequences);
+
+    UFUNCTION(BlueprintCallable, Category = "Motion Matching")
+    void AddMotionData(UAnimSequence* AnimSequence, float SampleRate = 30.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "Motion Matching")
+    float CalculateMotionScore(const FAnim_MotionData& MotionData, const FAnim_MotionQuery& Query);
+
+    UFUNCTION(BlueprintCallable, Category = "Motion Matching")
+    void ClearMotionDatabase();
+
+    // Animation blending functions
+    UFUNCTION(BlueprintCallable, Category = "Motion Matching")
+    float CalculateBlendWeight(const FAnim_MotionData& MotionA, const FAnim_MotionData& MotionB, float BlendTime);
+
+    UFUNCTION(BlueprintCallable, Category = "Motion Matching")
+    TArray<FAnim_MotionData> GetTopMotionMatches(const FAnim_MotionQuery& Query, int32 MaxResults = 3);
+
 protected:
-    virtual void BeginPlay() override;
+    // Motion database
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Motion Database")
+    TArray<FAnim_MotionData> MotionDatabase;
 
-public:
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+    // Matching weights
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Matching Weights")
+    float VelocityWeight;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
-    TMap<FName, class UBlendSpace*> MovementBlendSpaces;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Matching Weights")
+    float SpeedWeight;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
-    TMap<FName, class UAnimMontage*> ActionMontages;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Matching Weights")
+    float DirectionWeight;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
-    TArray<FAnim_StateTransition> StateTransitions;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Matching Weights")
+    float SurvivalStateWeight;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Motion State")
-    FAnim_MotionData CurrentMotionData;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Matching Weights")
+    float MovementTypeWeight;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Motion State")
-    FName CurrentAnimationState;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Matching Weights")
+    float TerrainWeight;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
-    float MotionMatchingThreshold;
+    // Performance settings
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    int32 MaxDatabaseSize;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
-    float StateTransitionCooldown;
-
-    UFUNCTION(BlueprintCallable, Category = "Motion Matching")
-    void UpdateMotionData(const FVector& InVelocity, bool bInIsInAir, bool bInIsCrouching);
-
-    UFUNCTION(BlueprintCallable, Category = "Motion Matching")
-    void RequestStateTransition(FName NewState);
-
-    UFUNCTION(BlueprintCallable, Category = "Motion Matching")
-    UBlendSpace* GetCurrentBlendSpace() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Motion Matching")
-    UAnimMontage* GetActionMontage(FName ActionName) const;
-
-    UFUNCTION(BlueprintImplementableEvent, Category = "Motion Matching")
-    void OnStateChanged(FName OldState, FName NewState);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float MinMatchingThreshold;
 
 private:
-    UPROPERTY()
-    float LastTransitionTime;
-
-    void ProcessMotionMatching();
-    FName DetermineOptimalState() const;
-    bool CanTransitionToState(FName TargetState) const;
+    // Helper functions
+    void ExtractMotionFeatures(UAnimSequence* AnimSequence, float Time, FAnim_MotionData& OutMotionData);
+    float CalculateVelocityScore(const FVector& MotionVelocity, const FVector& QueryVelocity);
+    float CalculateDirectionScore(float MotionDirection, float QueryDirection);
+    float CalculateStateScore(ESurvivalState MotionState, ESurvivalState QueryState);
+    float CalculateMovementTypeScore(EMovementType MotionType, EMovementType QueryType);
+    
+    // Animation analysis
+    FVector ExtractRootMotionVelocity(UAnimSequence* AnimSequence, float Time);
+    float ExtractMovementDirection(UAnimSequence* AnimSequence, float Time);
+    ESurvivalState DetermineAnimationSurvivalState(UAnimSequence* AnimSequence);
+    EMovementType DetermineAnimationMovementType(UAnimSequence* AnimSequence);
 };
