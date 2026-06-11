@@ -3,43 +3,68 @@
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
 #include "Engine/World.h"
-#include "TimerManager.h"
+#include "GameFramework/Pawn.h"
+#include "SharedTypes.h"
 #include "NPCBehaviorComponent.generated.h"
 
-UENUM(BlueprintType)
-enum class ENPC_BehaviorState : uint8
-{
-    Idle        UMETA(DisplayName = "Idle"),
-    Patrolling  UMETA(DisplayName = "Patrolling"),
-    Investigating UMETA(DisplayName = "Investigating"),
-    Fleeing     UMETA(DisplayName = "Fleeing"),
-    Attacking   UMETA(DisplayName = "Attacking"),
-    Feeding     UMETA(DisplayName = "Feeding"),
-    Resting     UMETA(DisplayName = "Resting")
-};
-
 USTRUCT(BlueprintType)
-struct FNPC_PatrolPoint
+struct TRANSPERSONALGAME_API FNPC_BehaviorState
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FVector Location = FVector::ZeroVector;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Behavior")
+    ENPC_BehaviorMode CurrentMode;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float WaitTime = 3.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Behavior")
+    float StateTimer;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    bool bIsResting = false;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Behavior")
+    FVector TargetLocation;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Behavior")
+    AActor* TargetActor;
+
+    FNPC_BehaviorState()
+    {
+        CurrentMode = ENPC_BehaviorMode::Idle;
+        StateTimer = 0.0f;
+        TargetLocation = FVector::ZeroVector;
+        TargetActor = nullptr;
+    }
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FNPC_Memory
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Memory")
+    FVector LastSeenPlayerLocation;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Memory")
+    float TimeSincePlayerSeen;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Memory")
+    TArray<FVector> PatrolPoints;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Memory")
+    int32 CurrentPatrolIndex;
+
+    FNPC_Memory()
+    {
+        LastSeenPlayerLocation = FVector::ZeroVector;
+        TimeSincePlayerSeen = 999.0f;
+        CurrentPatrolIndex = 0;
+    }
 };
 
 UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UNPCBehaviorComponent : public UActorComponent
+class TRANSPERSONALGAME_API UNPC_BehaviorComponent : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    UNPCBehaviorComponent();
+    UNPC_BehaviorComponent();
 
 protected:
     virtual void BeginPlay() override;
@@ -47,68 +72,56 @@ protected:
 public:
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    // Core Behavior Properties
+    // Core behavior properties
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Behavior")
-    ENPC_BehaviorState CurrentState = ENPC_BehaviorState::Idle;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Behavior")
-    float DetectionRadius = 1500.0f;
+    FNPC_BehaviorState BehaviorState;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Behavior")
-    float FleeRadius = 800.0f;
+    FNPC_Memory NPCMemory;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Behavior")
-    float MovementSpeed = 300.0f;
+    float SightRange;
 
-    // Patrol System
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Patrol")
-    TArray<FNPC_PatrolPoint> PatrolPoints;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Behavior")
+    float HearingRange;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Patrol")
-    int32 CurrentPatrolIndex = 0;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Behavior")
+    float MovementSpeed;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Patrol")
-    bool bLoopPatrol = true;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Behavior")
+    float AggressionLevel;
 
-    // Memory System
-    UPROPERTY(BlueprintReadOnly, Category = "Memory")
-    FVector LastKnownPlayerLocation = FVector::ZeroVector;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory")
-    float MemoryDuration = 10.0f;
-
-    // Behavior Functions
+    // Behavior functions
     UFUNCTION(BlueprintCallable, Category = "NPC Behavior")
-    void SetBehaviorState(ENPC_BehaviorState NewState);
+    void SetBehaviorMode(ENPC_BehaviorMode NewMode);
 
     UFUNCTION(BlueprintCallable, Category = "NPC Behavior")
-    void StartPatrolling();
+    void UpdatePatrolBehavior(float DeltaTime);
 
     UFUNCTION(BlueprintCallable, Category = "NPC Behavior")
-    void InvestigateLocation(FVector Location);
+    void UpdateChaseBehavior(float DeltaTime);
 
     UFUNCTION(BlueprintCallable, Category = "NPC Behavior")
-    void FleeFromThreat(FVector ThreatLocation);
+    void UpdateFlockingBehavior(float DeltaTime);
 
     UFUNCTION(BlueprintCallable, Category = "NPC Behavior")
     bool CanSeePlayer();
 
     UFUNCTION(BlueprintCallable, Category = "NPC Behavior")
-    APawn* GetNearestPlayer();
+    void AddPatrolPoint(FVector NewPoint);
+
+    UFUNCTION(BlueprintCallable, Category = "NPC Behavior")
+    void ClearPatrolPoints();
 
 private:
-    FTimerHandle BehaviorTimer;
-    FTimerHandle MemoryTimer;
+    void ProcessSensoryInput(float DeltaTime);
+    void UpdateMemory(float DeltaTime);
+    void ExecuteBehavior(float DeltaTime);
     
-    void UpdateBehavior();
-    void ProcessIdleState();
-    void ProcessPatrollingState();
-    void ProcessInvestigatingState();
-    void ProcessFleeingState();
-    void MoveToNextPatrolPoint();
-    void ClearPlayerMemory();
-    
-    float StateTimer = 0.0f;
-    FVector TargetLocation = FVector::ZeroVector;
-    bool bHasValidTarget = false;
+    APawn* GetPlayerPawn();
+    float GetDistanceToPlayer();
+    bool IsPlayerInSightRange();
+    bool IsPlayerInHearingRange();
 };
+
+#include "NPCBehaviorComponent.generated.h"
