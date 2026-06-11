@@ -5,62 +5,82 @@
 #include "SharedTypes.h"
 #include "Build_IntegrationManager.generated.h"
 
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FBuild_CompilationResult
+UENUM(BlueprintType)
+enum class EBuild_IntegrationStatus : uint8
 {
-    GENERATED_BODY()
-
-    UPROPERTY(BlueprintReadOnly, Category = "Compilation")
-    bool bCompilationSuccessful = false;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Compilation")
-    int32 ErrorCount = 0;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Compilation")
-    int32 WarningCount = 0;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Compilation")
-    float CompilationTimeSeconds = 0.0f;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Compilation")
-    TArray<FString> ErrorMessages;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Compilation")
-    FString CompilationOutput;
+    Unknown         UMETA(DisplayName = "Unknown"),
+    Validating      UMETA(DisplayName = "Validating"),
+    Valid           UMETA(DisplayName = "Valid"),
+    Invalid         UMETA(DisplayName = "Invalid"),
+    CompileError    UMETA(DisplayName = "Compile Error"),
+    RuntimeError    UMETA(DisplayName = "Runtime Error")
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FBuild_IntegrationStatus
+struct TRANSPERSONALGAME_API FBuild_ModuleStatus
 {
     GENERATED_BODY()
 
     UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    int32 TotalActorsInMap = 0;
+    FString ModuleName;
 
     UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    int32 FunctionalCppClasses = 0;
+    EBuild_IntegrationStatus Status;
 
     UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    int32 OrphanHeaders = 0;
+    int32 ClassCount;
 
     UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    bool bMapPlayable = false;
+    int32 ActorCount;
 
     UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    int32 IntegrationScore = 0;
+    FString LastError;
+
+    FBuild_ModuleStatus()
+    {
+        ModuleName = TEXT("");
+        Status = EBuild_IntegrationStatus::Unknown;
+        ClassCount = 0;
+        ActorCount = 0;
+        LastError = TEXT("");
+    }
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FBuild_SystemHealth
+{
+    GENERATED_BODY()
 
     UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    TArray<FString> CriticalIssues;
+    float FrameRate;
 
     UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    TArray<FString> NextPriorities;
+    float MemoryUsageMB;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    int32 TotalActors;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    int32 ActiveComponents;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    bool bIsStable;
+
+    FBuild_SystemHealth()
+    {
+        FrameRate = 0.0f;
+        MemoryUsageMB = 0.0f;
+        TotalActors = 0;
+        ActiveComponents = 0;
+        bIsStable = false;
+    }
 };
 
 /**
- * Integration Manager - Coordena a integração de todos os sistemas do jogo
- * Responsável por validar compilação, limpar duplicados, e garantir que o jogo é jogável
+ * Integration Manager - Orchestrates build validation and system health monitoring
+ * Ensures all modules work together correctly and maintains build stability
  */
-UCLASS(BlueprintType, Blueprintable)
+UCLASS(BlueprintType)
 class TRANSPERSONALGAME_API UBuild_IntegrationManager : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
@@ -72,70 +92,56 @@ public:
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
-    // Compilation Management
-    UFUNCTION(BlueprintCallable, Category = "Integration|Compilation")
-    FBuild_CompilationResult TestCompilation();
+    // Integration validation
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    void ValidateAllModules();
 
-    UFUNCTION(BlueprintCallable, Category = "Integration|Compilation")
-    bool ValidateModuleDependencies();
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    void ValidateModule(const FString& ModuleName);
 
-    UFUNCTION(BlueprintCallable, Category = "Integration|Compilation")
-    TArray<FString> FindOrphanHeaders();
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    EBuild_IntegrationStatus GetModuleStatus(const FString& ModuleName);
 
-    // Map Validation
-    UFUNCTION(BlueprintCallable, Category = "Integration|Map")
-    FBuild_IntegrationStatus ValidateMinPlayableMap();
+    // System health monitoring
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    FBuild_SystemHealth GetSystemHealth();
 
-    UFUNCTION(BlueprintCallable, Category = "Integration|Map")
-    int32 CleanDuplicateActors();
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    void RunIntegrationTests();
 
-    UFUNCTION(BlueprintCallable, Category = "Integration|Map")
-    bool IsMapPlayable();
+    // Build management
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    void CreateBuildSnapshot();
 
-    // Class Validation
-    UFUNCTION(BlueprintCallable, Category = "Integration|Classes")
-    TArray<FString> GetFunctionalCppClasses();
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    bool RestoreBuildSnapshot(const FString& SnapshotName);
 
-    UFUNCTION(BlueprintCallable, Category = "Integration|Classes")
-    bool ValidateClassIntegrity(const FString& ClassName);
+    // Error reporting
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    TArray<FString> GetIntegrationErrors();
 
-    // Integration Reporting
-    UFUNCTION(BlueprintCallable, Category = "Integration|Reporting")
-    FBuild_IntegrationStatus GenerateIntegrationReport();
-
-    UFUNCTION(BlueprintCallable, Category = "Integration|Reporting")
-    void LogIntegrationStatus();
-
-    // Critical System Checks
-    UFUNCTION(BlueprintCallable, Category = "Integration|Critical")
-    bool ValidateCriticalSystems();
-
-    UFUNCTION(BlueprintCallable, Category = "Integration|Critical")
-    TArray<FString> GetCriticalIssues();
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    void ClearIntegrationErrors();
 
 protected:
-    // Internal validation methods
-    bool ValidatePlayerStart();
-    bool ValidateLighting();
-    bool ValidateTerrain();
-    bool ValidateGameMode();
-    
-    int32 CountActorsByType(UClass* ActorClass);
-    void CleanActorDuplicates(UClass* ActorClass, int32 MaxCount = 1);
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    TMap<FString, FBuild_ModuleStatus> ModuleStatuses;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    FBuild_SystemHealth CurrentSystemHealth;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    TArray<FString> IntegrationErrors;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    bool bValidationInProgress;
 
 private:
-    UPROPERTY()
-    FBuild_IntegrationStatus CurrentStatus;
+    void ValidateModuleClasses(const FString& ModuleName);
+    void ValidateModuleActors(const FString& ModuleName);
+    void UpdateSystemHealth();
+    void LogIntegrationError(const FString& Error);
 
-    UPROPERTY()
-    TArray<FString> KnownCppClasses;
-
-    UPROPERTY()
-    bool bInitialized = false;
-
-    // Critical actor counts
-    int32 PlayerStartCount = 0;
-    int32 DirectionalLightCount = 0;
-    int32 LandscapeCount = 0;
-    int32 SkyAtmosphereCount = 0;
+    FTimerHandle ValidationTimerHandle;
+    FTimerHandle HealthMonitorHandle;
 };
