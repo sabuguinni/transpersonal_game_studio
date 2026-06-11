@@ -1,307 +1,227 @@
 #include "Narr_StoryManager.h"
 #include "Engine/Engine.h"
 
-UNarr_StoryManager::UNarr_StoryManager()
-{
-    bStorySystemActive = true;
-}
-
 void UNarr_StoryManager::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
     
-    InitializeDefaultStoryEvents();
-    UE_LOG(LogTemp, Log, TEXT("Story Manager initialized with %d story events"), StoryEvents.Num());
+    CurrentPhase = ENarr_StoryPhase::Awakening;
+    CompletedEventsCount = 0;
+    
+    InitializeStoryEvents();
+    
+    UE_LOG(LogTemp, Warning, TEXT("Narrative Story Manager initialized - Phase: Awakening"));
 }
 
-bool UNarr_StoryManager::TriggerStoryEvent(const FString& EventID)
+void UNarr_StoryManager::AdvanceStoryPhase()
 {
-    if (!bStorySystemActive)
+    if (!CanAdvancePhase())
     {
-        return false;
+        UE_LOG(LogTemp, Warning, TEXT("Cannot advance story phase - prerequisites not met"));
+        return;
     }
     
-    FNarr_StoryEvent* Event = FindStoryEvent(EventID);
-    if (!Event)
+    switch (CurrentPhase)
+    {
+        case ENarr_StoryPhase::Awakening:
+            CurrentPhase = ENarr_StoryPhase::FirstHunt;
+            break;
+        case ENarr_StoryPhase::FirstHunt:
+            CurrentPhase = ENarr_StoryPhase::TribeContact;
+            break;
+        case ENarr_StoryPhase::TribeContact:
+            CurrentPhase = ENarr_StoryPhase::Survival;
+            break;
+        case ENarr_StoryPhase::Survival:
+            CurrentPhase = ENarr_StoryPhase::Mastery;
+            break;
+        case ENarr_StoryPhase::Mastery:
+            UE_LOG(LogTemp, Warning, TEXT("Story complete - player has mastered survival"));
+            return;
+    }
+    
+    FString PhaseDescription = GetCurrentPhaseDescription();
+    UE_LOG(LogTemp, Warning, TEXT("Story phase advanced to: %s"), *PhaseDescription);
+    
+    if (GEngine)
+    {
+        GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Green, 
+            FString::Printf(TEXT("Story Phase: %s"), *PhaseDescription));
+    }
+}
+
+void UNarr_StoryManager::CompleteStoryEvent(const FString& EventID)
+{
+    if (!StoryEvents.Contains(EventID))
     {
         UE_LOG(LogTemp, Warning, TEXT("Story event not found: %s"), *EventID);
-        return false;
+        return;
     }
     
-    if (Event->bIsCompleted)
+    FNarr_StoryEvent& Event = StoryEvents[EventID];
+    
+    if (Event.bIsCompleted)
     {
-        UE_LOG(LogTemp, Log, TEXT("Story event already completed: %s"), *EventID);
-        return false;
+        return;
     }
     
-    if (!CheckEventPrerequisites(*Event))
+    // Check prerequisites
+    for (const FString& Prerequisite : Event.Prerequisites)
     {
-        UE_LOG(LogTemp, Warning, TEXT("Prerequisites not met for story event: %s"), *EventID);
-        return false;
-    }
-    
-    if (!CurrentProgress.ActiveEvents.Contains(EventID))
-    {
-        CurrentProgress.ActiveEvents.Add(EventID);
-        UE_LOG(LogTemp, Log, TEXT("Triggered story event: %s"), *EventID);
-    }
-    
-    return true;
-}
-
-bool UNarr_StoryManager::CompleteStoryEvent(const FString& EventID)
-{
-    FNarr_StoryEvent* Event = FindStoryEvent(EventID);
-    if (!Event)
-    {
-        return false;
-    }
-    
-    if (Event->bIsCompleted)
-    {
-        return true;
-    }
-    
-    Event->bIsCompleted = true;
-    CurrentProgress.CompletedEvents.Add(EventID);
-    CurrentProgress.ActiveEvents.Remove(EventID);
-    
-    UnlockFollowupEvents(*Event);
-    
-    UE_LOG(LogTemp, Log, TEXT("Completed story event: %s"), *EventID);
-    return true;
-}
-
-bool UNarr_StoryManager::IsEventCompleted(const FString& EventID) const
-{
-    return CurrentProgress.CompletedEvents.Contains(EventID);
-}
-
-bool UNarr_StoryManager::IsEventActive(const FString& EventID) const
-{
-    return CurrentProgress.ActiveEvents.Contains(EventID);
-}
-
-TArray<FString> UNarr_StoryManager::GetActiveEvents() const
-{
-    return CurrentProgress.ActiveEvents;
-}
-
-TArray<FString> UNarr_StoryManager::GetAvailableEvents() const
-{
-    TArray<FString> Available;
-    
-    for (const FNarr_StoryEvent& Event : StoryEvents)
-    {
-        if (!Event.bIsCompleted && CheckEventPrerequisites(Event))
+        if (!IsStoryEventCompleted(Prerequisite))
         {
-            Available.Add(Event.EventID);
-        }
-    }
-    
-    return Available;
-}
-
-void UNarr_StoryManager::AdvanceChapter()
-{
-    CurrentProgress.CurrentChapter++;
-    UE_LOG(LogTemp, Log, TEXT("Advanced to story chapter: %d"), CurrentProgress.CurrentChapter);
-}
-
-void UNarr_StoryManager::UpdateSurvivalStats(float DaysElapsed, int32 NewEncounters)
-{
-    CurrentProgress.SurvivalDays += DaysElapsed;
-    CurrentProgress.DinosaurEncounters += NewEncounters;
-    
-    // Check for milestone triggers
-    if (CurrentProgress.SurvivalDays >= 1.0f && !IsEventCompleted("FirstDayComplete"))
-    {
-        TriggerStoryEvent("FirstDayComplete");
-    }
-    
-    if (CurrentProgress.DinosaurEncounters >= 5 && !IsEventCompleted("ExperiencedSurvivor"))
-    {
-        TriggerStoryEvent("ExperiencedSurvivor");
-    }
-}
-
-void UNarr_StoryManager::SetMilestone(const FString& MilestoneName, bool bCompleted)
-{
-    if (MilestoneName == TEXT("FirstHunt"))
-    {
-        CurrentProgress.bFirstHuntCompleted = bCompleted;
-        if (bCompleted)
-        {
-            TriggerStoryEvent("FirstHuntComplete");
-        }
-    }
-    else if (MilestoneName == TEXT("SafeHaven"))
-    {
-        CurrentProgress.bSafeHavenFound = bCompleted;
-        if (bCompleted)
-        {
-            TriggerStoryEvent("SafeHavenFound");
-        }
-    }
-}
-
-bool UNarr_StoryManager::GetMilestone(const FString& MilestoneName) const
-{
-    if (MilestoneName == TEXT("FirstHunt"))
-    {
-        return CurrentProgress.bFirstHuntCompleted;
-    }
-    else if (MilestoneName == TEXT("SafeHaven"))
-    {
-        return CurrentProgress.bSafeHavenFound;
-    }
-    
-    return false;
-}
-
-void UNarr_StoryManager::AddStoryEvent(const FNarr_StoryEvent& NewEvent)
-{
-    // Check if event already exists
-    for (int32 i = 0; i < StoryEvents.Num(); i++)
-    {
-        if (StoryEvents[i].EventID == NewEvent.EventID)
-        {
-            StoryEvents[i] = NewEvent;
+            UE_LOG(LogTemp, Warning, TEXT("Cannot complete event %s - prerequisite %s not met"), 
+                *EventID, *Prerequisite);
             return;
         }
     }
     
-    StoryEvents.Add(NewEvent);
-}
-
-FText UNarr_StoryManager::GetChapterTitle() const
-{
-    switch (CurrentProgress.CurrentChapter)
+    Event.bIsCompleted = true;
+    CompletedEventsCount++;
+    
+    UE_LOG(LogTemp, Warning, TEXT("Story event completed: %s - %s"), *EventID, *Event.EventDescription);
+    
+    if (GEngine)
     {
-        case 1:
-            return FText::FromString(TEXT("Chapter 1: First Steps"));
-        case 2:
-            return FText::FromString(TEXT("Chapter 2: The Hunt Begins"));
-        case 3:
-            return FText::FromString(TEXT("Chapter 3: Ancient Grounds"));
-        default:
-            return FText::FromString(TEXT("Chapter: Unknown"));
+        GEngine->AddOnScreenDebugMessage(-1, 4.0f, FColor::Yellow, 
+            FString::Printf(TEXT("Achievement: %s"), *Event.EventDescription));
     }
 }
 
-FText UNarr_StoryManager::GetChapterDescription() const
+bool UNarr_StoryManager::IsStoryEventCompleted(const FString& EventID) const
 {
-    switch (CurrentProgress.CurrentChapter)
+    if (const FNarr_StoryEvent* Event = StoryEvents.Find(EventID))
     {
-        case 1:
-            return FText::FromString(TEXT("Learn to survive in the prehistoric world. Find food, water, and shelter."));
-        case 2:
-            return FText::FromString(TEXT("Master the art of hunting. Face your first dinosaur encounters."));
-        case 3:
-            return FText::FromString(TEXT("Explore the ancient hunting grounds. Uncover the secrets of the past."));
+        return Event->bIsCompleted;
+    }
+    return false;
+}
+
+ENarr_StoryPhase UNarr_StoryManager::GetCurrentStoryPhase() const
+{
+    return CurrentPhase;
+}
+
+FString UNarr_StoryManager::GetCurrentPhaseDescription() const
+{
+    switch (CurrentPhase)
+    {
+        case ENarr_StoryPhase::Awakening:
+            return TEXT("Awakening - Learn to survive in the prehistoric world");
+        case ENarr_StoryPhase::FirstHunt:
+            return TEXT("First Hunt - Prove yourself as a hunter");
+        case ENarr_StoryPhase::TribeContact:
+            return TEXT("Tribe Contact - Find and join other survivors");
+        case ENarr_StoryPhase::Survival:
+            return TEXT("Survival - Master the art of staying alive");
+        case ENarr_StoryPhase::Mastery:
+            return TEXT("Mastery - Become the apex survivor");
         default:
-            return FText::FromString(TEXT("Continue your journey of survival."));
+            return TEXT("Unknown Phase");
     }
 }
 
-FNarr_StoryEvent* UNarr_StoryManager::FindStoryEvent(const FString& EventID)
+TArray<FString> UNarr_StoryManager::GetAvailableEvents() const
 {
-    for (FNarr_StoryEvent& Event : StoryEvents)
+    TArray<FString> AvailableEvents;
+    
+    for (const auto& EventPair : StoryEvents)
     {
-        if (Event.EventID == EventID)
+        const FNarr_StoryEvent& Event = EventPair.Value;
+        
+        if (Event.bIsCompleted || Event.RequiredPhase != CurrentPhase)
         {
-            return &Event;
+            continue;
+        }
+        
+        // Check prerequisites
+        bool bCanComplete = true;
+        for (const FString& Prerequisite : Event.Prerequisites)
+        {
+            if (!IsStoryEventCompleted(Prerequisite))
+            {
+                bCanComplete = false;
+                break;
+            }
+        }
+        
+        if (bCanComplete)
+        {
+            AvailableEvents.Add(Event.EventID);
         }
     }
-    return nullptr;
+    
+    return AvailableEvents;
 }
 
-bool UNarr_StoryManager::CheckEventPrerequisites(const FNarr_StoryEvent& Event) const
+void UNarr_StoryManager::InitializeStoryEvents()
 {
-    for (const FString& Prerequisite : Event.Prerequisites)
-    {
-        if (!IsEventCompleted(Prerequisite))
-        {
-            return false;
-        }
-    }
-    return true;
-}
-
-void UNarr_StoryManager::UnlockFollowupEvents(const FNarr_StoryEvent& CompletedEvent)
-{
-    for (const FString& UnlockedEventID : CompletedEvent.UnlockedEvents)
-    {
-        TriggerStoryEvent(UnlockedEventID);
-    }
-}
-
-void UNarr_StoryManager::InitializeDefaultStoryEvents()
-{
-    // Chapter 1 Events
-    FNarr_StoryEvent FirstSteps;
-    FirstSteps.EventID = TEXT("FirstSteps");
-    FirstSteps.EventTitle = FText::FromString(TEXT("First Steps"));
-    FirstSteps.EventDescription = FText::FromString(TEXT("Take your first steps into the prehistoric world."));
-    FirstSteps.StoryChapter = 1;
-    FirstSteps.UnlockedEvents.Add(TEXT("FindWater"));
-    StoryEvents.Add(FirstSteps);
+    // Awakening Phase Events
+    FNarr_StoryEvent WakeUp;
+    WakeUp.EventID = TEXT("WakeUp");
+    WakeUp.EventDescription = TEXT("Awaken in the prehistoric world");
+    WakeUp.RequiredPhase = ENarr_StoryPhase::Awakening;
+    StoryEvents.Add(WakeUp.EventID, WakeUp);
     
-    FNarr_StoryEvent FindWater;
-    FindWater.EventID = TEXT("FindWater");
-    FindWater.EventTitle = FText::FromString(TEXT("Find Water"));
-    FindWater.EventDescription = FText::FromString(TEXT("Locate a clean water source to survive."));
-    FindWater.StoryChapter = 1;
-    FindWater.Prerequisites.Add(TEXT("FirstSteps"));
-    FindWater.UnlockedEvents.Add(TEXT("FirstDayComplete"));
-    StoryEvents.Add(FindWater);
+    FNarr_StoryEvent FirstTool;
+    FirstTool.EventID = TEXT("FirstTool");
+    FirstTool.EventDescription = TEXT("Craft your first stone tool");
+    FirstTool.RequiredPhase = ENarr_StoryPhase::Awakening;
+    FirstTool.Prerequisites.Add(TEXT("WakeUp"));
+    StoryEvents.Add(FirstTool.EventID, FirstTool);
     
-    FNarr_StoryEvent FirstDayComplete;
-    FirstDayComplete.EventID = TEXT("FirstDayComplete");
-    FirstDayComplete.EventTitle = FText::FromString(TEXT("First Day Survived"));
-    FirstDayComplete.EventDescription = FText::FromString(TEXT("You have survived your first day in the prehistoric world."));
-    FirstDayComplete.StoryChapter = 1;
-    FirstDayComplete.Prerequisites.Add(TEXT("FindWater"));
-    FirstDayComplete.UnlockedEvents.Add(TEXT("FirstHuntComplete"));
-    StoryEvents.Add(FirstDayComplete);
+    FNarr_StoryEvent FirstShelter;
+    FirstShelter.EventID = TEXT("FirstShelter");
+    FirstShelter.EventDescription = TEXT("Build basic shelter");
+    FirstShelter.RequiredPhase = ENarr_StoryPhase::Awakening;
+    FirstShelter.Prerequisites.Add(TEXT("FirstTool"));
+    StoryEvents.Add(FirstShelter.EventID, FirstShelter);
     
-    // Chapter 2 Events
-    FNarr_StoryEvent FirstHuntComplete;
-    FirstHuntComplete.EventID = TEXT("FirstHuntComplete");
-    FirstHuntComplete.EventTitle = FText::FromString(TEXT("First Hunt"));
-    FirstHuntComplete.EventDescription = FText::FromString(TEXT("Successfully complete your first hunt for food."));
-    FirstHuntComplete.StoryChapter = 2;
-    FirstHuntComplete.Prerequisites.Add(TEXT("FirstDayComplete"));
-    FirstHuntComplete.UnlockedEvents.Add(TEXT("DinosaurEncounter"));
-    StoryEvents.Add(FirstHuntComplete);
+    // First Hunt Phase Events
+    FNarr_StoryEvent FirstKill;
+    FirstKill.EventID = TEXT("FirstKill");
+    FirstKill.EventDescription = TEXT("Successfully hunt your first prey");
+    FirstKill.RequiredPhase = ENarr_StoryPhase::FirstHunt;
+    FirstKill.Prerequisites.Add(TEXT("FirstShelter"));
+    StoryEvents.Add(FirstKill.EventID, FirstKill);
     
     FNarr_StoryEvent DinosaurEncounter;
     DinosaurEncounter.EventID = TEXT("DinosaurEncounter");
-    DinosaurEncounter.EventTitle = FText::FromString(TEXT("Dinosaur Encounter"));
-    DinosaurEncounter.EventDescription = FText::FromString(TEXT("Face your first dinosaur encounter and survive."));
-    DinosaurEncounter.StoryChapter = 2;
-    DinosaurEncounter.Prerequisites.Add(TEXT("FirstHuntComplete"));
-    DinosaurEncounter.UnlockedEvents.Add(TEXT("SafeHavenFound"));
-    StoryEvents.Add(DinosaurEncounter);
+    DinosaurEncounter.EventDescription = TEXT("Survive your first dinosaur encounter");
+    DinosaurEncounter.RequiredPhase = ENarr_StoryPhase::FirstHunt;
+    DinosaurEncounter.Prerequisites.Add(TEXT("FirstKill"));
+    StoryEvents.Add(DinosaurEncounter.EventID, DinosaurEncounter);
     
-    // Chapter 3 Events
-    FNarr_StoryEvent SafeHavenFound;
-    SafeHavenFound.EventID = TEXT("SafeHavenFound");
-    SafeHavenFound.EventTitle = FText::FromString(TEXT("Safe Haven"));
-    SafeHavenFound.EventDescription = FText::FromString(TEXT("Discover a safe place to establish your base."));
-    SafeHavenFound.StoryChapter = 3;
-    SafeHavenFound.Prerequisites.Add(TEXT("DinosaurEncounter"));
-    SafeHavenFound.UnlockedEvents.Add(TEXT("ExperiencedSurvivor"));
-    StoryEvents.Add(SafeHavenFound);
+    // Tribe Contact Phase Events
+    FNarr_StoryEvent MeetTribe;
+    MeetTribe.EventID = TEXT("MeetTribe");
+    MeetTribe.EventDescription = TEXT("Make contact with other survivors");
+    MeetTribe.RequiredPhase = ENarr_StoryPhase::TribeContact;
+    MeetTribe.Prerequisites.Add(TEXT("DinosaurEncounter"));
+    StoryEvents.Add(MeetTribe.EventID, MeetTribe);
     
-    FNarr_StoryEvent ExperiencedSurvivor;
-    ExperiencedSurvivor.EventID = TEXT("ExperiencedSurvivor");
-    ExperiencedSurvivor.EventTitle = FText::FromString(TEXT("Experienced Survivor"));
-    ExperiencedSurvivor.EventDescription = FText::FromString(TEXT("Become an experienced survivor of the prehistoric world."));
-    ExperiencedSurvivor.StoryChapter = 3;
-    ExperiencedSurvivor.Prerequisites.Add(TEXT("SafeHavenFound"));
-    StoryEvents.Add(ExperiencedSurvivor);
+    UE_LOG(LogTemp, Warning, TEXT("Initialized %d story events"), StoryEvents.Num());
+}
+
+bool UNarr_StoryManager::CanAdvancePhase() const
+{
+    int32 RequiredEvents = 0;
+    int32 CompletedRequiredEvents = 0;
     
-    // Trigger initial event
-    TriggerStoryEvent("FirstSteps");
+    for (const auto& EventPair : StoryEvents)
+    {
+        const FNarr_StoryEvent& Event = EventPair.Value;
+        
+        if (Event.RequiredPhase == CurrentPhase)
+        {
+            RequiredEvents++;
+            if (Event.bIsCompleted)
+            {
+                CompletedRequiredEvents++;
+            }
+        }
+    }
+    
+    // Require at least 70% of phase events to be completed
+    return RequiredEvents > 0 && (float)CompletedRequiredEvents / RequiredEvents >= 0.7f;
 }
