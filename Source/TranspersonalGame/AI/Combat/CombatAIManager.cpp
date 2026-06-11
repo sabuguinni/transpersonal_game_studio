@@ -1,388 +1,396 @@
 #include "CombatAIManager.h"
+#include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "GameFramework/Character.h"
-#include "GameFramework/Pawn.h"
 #include "Kismet/GameplayStatics.h"
-#include "Engine/TriggerBox.h"
-#include "Components/PrimitiveComponent.h"
-#include "DrawDebugHelpers.h"
+#include "Components/SceneComponent.h"
+#include "CombatBehaviorComponent.h"
+#include "Combat_DinosaurPawn.h"
 
-UCombatAIManager::UCombatAIManager()
+ACombatAIManager::ACombatAIManager()
 {
-    PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 0.1f;
-    
-    CombatUpdateInterval = 0.5f;
-    MaxEngagementDistance = 3000.0f;
-    LastCombatUpdate = 0.0f;
-    PlayerCharacter = nullptr;
+    PrimaryActorTick.bCanEverTick = true;
+    PrimaryActorTick.TickInterval = 0.1f; // 10 FPS for combat AI
+
+    RootSceneComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootSceneComponent"));
+    RootComponent = RootSceneComponent;
+
+    // Combat AI Configuration
+    CombatDetectionRange = 2000.0f;
+    TacticalUpdateInterval = 0.5f;
+    MaxSimultaneousCombats = 5;
+    bEnablePackCoordination = true;
+    bEnableTacticalPositioning = true;
+
+    CurrentActiveCombats = 0;
+    TacticalUpdateTimer = 0.0f;
+    EncounterCheckTimer = 0.0f;
 }
 
-void UCombatAIManager::BeginPlay()
+void ACombatAIManager::BeginPlay()
 {
     Super::BeginPlay();
-    
-    InitializeSpeciesTactics();
-    
-    // Find player character
-    PlayerCharacter = UGameplayStatics::GetPlayerCharacter(GetWorld(), 0);
-    
-    UE_LOG(LogTemp, Warning, TEXT("CombatAIManager initialized"));
+    InitializeCombatSystem();
 }
 
-void UCombatAIManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void ACombatAIManager::Tick(float DeltaTime)
 {
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-    
-    LastCombatUpdate += DeltaTime;
-    if (LastCombatUpdate >= CombatUpdateInterval)
+    Super::Tick(DeltaTime);
+    UpdateCombatSystem(DeltaTime);
+}
+
+void ACombatAIManager::InitializeCombatSystem()
+{
+    UE_LOG(LogTemp, Log, TEXT("CombatAIManager: Initializing combat system"));
+
+    // Create default combat encounters
+    CreateCombatEncounter(FVector(2000, 0, 100), ECombat_ThreatLevel::Medium, 3);
+    CreateCombatEncounter(FVector(-2000, 1500, 150), ECombat_ThreatLevel::High, 5);
+    CreateCombatEncounter(FVector(1000, -2000, 120), ECombat_ThreatLevel::Low, 2);
+    CreateCombatEncounter(FVector(-1500, -1000, 180), ECombat_ThreatLevel::Critical, 7);
+
+    UE_LOG(LogTemp, Log, TEXT("CombatAIManager: Created %d combat encounters"), CombatEncounters.Num());
+}
+
+void ACombatAIManager::RegisterCombatant(ACombat_DinosaurPawn* Dinosaur)
+{
+    if (Dinosaur && !ActiveCombatants.Contains(Dinosaur))
     {
-        UpdateCombatStates(DeltaTime);
-        ProcessTacticalDecisions();
-        LastCombatUpdate = 0.0f;
+        ActiveCombatants.Add(Dinosaur);
+        UE_LOG(LogTemp, Log, TEXT("CombatAIManager: Registered combatant %s"), *Dinosaur->GetName());
     }
 }
 
-void UCombatAIManager::RegisterCombatZone(ATriggerBox* Zone, ECombat_ThreatLevel ThreatLevel)
+void ACombatAIManager::UnregisterCombatant(ACombat_DinosaurPawn* Dinosaur)
 {
-    if (!Zone)
+    if (Dinosaur)
+    {
+        ActiveCombatants.Remove(Dinosaur);
+        UE_LOG(LogTemp, Log, TEXT("CombatAIManager: Unregistered combatant %s"), *Dinosaur->GetName());
+    }
+}
+
+bool ACombatAIManager::StartCombatEncounter(const FVector& Location, ECombat_ThreatLevel ThreatLevel)
+{
+    if (!CanStartNewCombat())
+    {
+        return false;
+    }
+
+    // Find nearby dinosaurs to participate in combat
+    TArray<AActor*> FoundActors;
+    UGameplayStatics::GetAllActorsOfClass(GetWorld(), ACombat_DinosaurPawn::StaticClass(), FoundActors);
+
+    TArray<ACombat_DinosaurPawn*> NearbyDinosaurs;
+    for (AActor* Actor : FoundActors)
+    {
+        if (ACombat_DinosaurPawn* Dinosaur = Cast<ACombat_DinosaurPawn>(Actor))
+        {
+            float Distance = FVector::Dist(Actor->GetActorLocation(), Location);
+            if (Distance <= CombatDetectionRange)
+            {
+                NearbyDinosaurs.Add(Dinosaur);
+            }
+        }
+    }
+
+    if (NearbyDinosaurs.Num() > 0)
+    {
+        CurrentActiveCombats++;
+        
+        // Coordinate pack attack if multiple dinosaurs
+        if (NearbyDinosaurs.Num() > 1 && bEnablePackCoordination)
+        {
+            CoordinatePackAttack(NearbyDinosaurs, nullptr); // Target will be determined by individual AI
+        }
+
+        UE_LOG(LogTemp, Log, TEXT("CombatAIManager: Started combat encounter at %s with %d dinosaurs"), 
+               *Location.ToString(), NearbyDinosaurs.Num());
+        return true;
+    }
+
+    return false;
+}
+
+void ACombatAIManager::EndCombatEncounter(const FVector& Location)
+{
+    if (CurrentActiveCombats > 0)
+    {
+        CurrentActiveCombats--;
+        UE_LOG(LogTemp, Log, TEXT("CombatAIManager: Ended combat encounter at %s"), *Location.ToString());
+    }
+}
+
+void ACombatAIManager::UpdateTacticalPositions()
+{
+    if (!bEnableTacticalPositioning)
     {
         return;
     }
-    
-    FCombat_EncounterData NewEncounter;
-    NewEncounter.Location = Zone->GetActorLocation();
-    NewEncounter.ThreatLevel = ThreatLevel;
-    NewEncounter.EngagementRadius = 1500.0f;
-    NewEncounter.bIsActive = true;
-    
-    ActiveEncounters.Add(NewEncounter);
-    
-    UE_LOG(LogTemp, Warning, TEXT("Combat zone registered at %s with threat level %d"), 
-           *NewEncounter.Location.ToString(), (int32)ThreatLevel);
+
+    for (ACombat_DinosaurPawn* Combatant : ActiveCombatants)
+    {
+        if (IsValid(Combatant))
+        {
+            // Get combat behavior component
+            UCombat_BehaviorComponent* BehaviorComp = Combatant->FindComponentByClass<UCombat_BehaviorComponent>();
+            if (BehaviorComp)
+            {
+                // Update tactical position based on behavior type
+                FVector OptimalPosition = GetOptimalAttackPosition(Combatant, nullptr);
+                // Position will be used by the behavior component
+            }
+        }
+    }
 }
 
-void UCombatAIManager::CreateTacticalEncounter(FVector Location, const TArray<FString>& DinosaurTypes, ECombat_ThreatLevel ThreatLevel)
+FVector ACombatAIManager::GetOptimalAttackPosition(ACombat_DinosaurPawn* Attacker, AActor* Target)
+{
+    if (!Attacker)
+    {
+        return FVector::ZeroVector;
+    }
+
+    FVector AttackerLocation = Attacker->GetActorLocation();
+    
+    if (!Target)
+    {
+        // Return a position slightly forward from current location
+        FVector Forward = Attacker->GetActorForwardVector();
+        return AttackerLocation + (Forward * 500.0f);
+    }
+
+    FVector TargetLocation = Target->GetActorLocation();
+    FVector Direction = (TargetLocation - AttackerLocation).GetSafeNormal();
+    
+    // Calculate flanking position
+    FVector RightVector = FVector::CrossProduct(Direction, FVector::UpVector);
+    float FlankOffset = FMath::RandRange(-800.0f, 800.0f);
+    
+    return TargetLocation + (RightVector * FlankOffset) + (Direction * -300.0f);
+}
+
+ECombat_Formation ACombatAIManager::GetRecommendedFormation(const TArray<ACombat_DinosaurPawn*>& Pack)
+{
+    int32 PackSize = Pack.Num();
+    
+    if (PackSize <= 1)
+    {
+        return ECombat_Formation::None;
+    }
+    else if (PackSize <= 3)
+    {
+        return ECombat_Formation::Line;
+    }
+    else if (PackSize <= 5)
+    {
+        return ECombat_Formation::Wedge;
+    }
+    else
+    {
+        return ECombat_Formation::Circle;
+    }
+}
+
+void ACombatAIManager::CoordinatePackAttack(const TArray<ACombat_DinosaurPawn*>& Pack, AActor* Target)
+{
+    if (Pack.Num() <= 1)
+    {
+        return;
+    }
+
+    ECombat_Formation Formation = GetRecommendedFormation(Pack);
+    
+    // Assign roles based on formation
+    for (int32 i = 0; i < Pack.Num(); i++)
+    {
+        if (IsValid(Pack[i]))
+        {
+            UCombat_BehaviorComponent* BehaviorComp = Pack[i]->FindComponentByClass<UCombat_BehaviorComponent>();
+            if (BehaviorComp)
+            {
+                // Set formation role and position
+                // This would be implemented in the behavior component
+            }
+        }
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("CombatAIManager: Coordinating pack attack with %d dinosaurs using %s formation"), 
+           Pack.Num(), *UEnum::GetValueAsString(Formation));
+}
+
+void ACombatAIManager::ExecuteFlankingManeuver(ACombat_DinosaurPawn* Leader, const TArray<ACombat_DinosaurPawn*>& Flankers)
+{
+    if (!Leader || Flankers.Num() == 0)
+    {
+        return;
+    }
+
+    FVector LeaderLocation = Leader->GetActorLocation();
+    
+    for (int32 i = 0; i < Flankers.Num(); i++)
+    {
+        if (IsValid(Flankers[i]))
+        {
+            // Calculate flanking positions
+            float Angle = (360.0f / Flankers.Num()) * i;
+            FVector FlankPosition = LeaderLocation + FVector(
+                FMath::Cos(FMath::DegreesToRadians(Angle)) * 1000.0f,
+                FMath::Sin(FMath::DegreesToRadians(Angle)) * 1000.0f,
+                0.0f
+            );
+
+            // Move flanker to position (would be handled by behavior component)
+            UE_LOG(LogTemp, Log, TEXT("CombatAIManager: Flanker %d moving to position %s"), 
+                   i, *FlankPosition.ToString());
+        }
+    }
+}
+
+void ACombatAIManager::CreateCombatEncounter(const FVector& Location, ECombat_ThreatLevel ThreatLevel, int32 DinosaurCount)
 {
     FCombat_EncounterData NewEncounter;
     NewEncounter.Location = Location;
     NewEncounter.ThreatLevel = ThreatLevel;
-    NewEncounter.DinosaurTypes = DinosaurTypes;
-    NewEncounter.EngagementRadius = 2000.0f;
+    NewEncounter.DinosaurCount = DinosaurCount;
+    NewEncounter.EncounterRadius = 1500.0f;
     NewEncounter.bIsActive = true;
-    
-    ActiveEncounters.Add(NewEncounter);
-    
-    UE_LOG(LogTemp, Warning, TEXT("Tactical encounter created at %s with %d dinosaur types"), 
-           *Location.ToString(), DinosaurTypes.Num());
+
+    CombatEncounters.Add(NewEncounter);
 }
 
-ECombat_ThreatLevel UCombatAIManager::CalculateThreatLevel(APawn* Target, const TArray<APawn*>& Enemies)
+void ACombatAIManager::CheckEncounterTriggers()
 {
-    if (!Target || Enemies.Num() == 0)
-    {
-        return ECombat_ThreatLevel::None;
-    }
-    
-    int32 EnemyCount = Enemies.Num();
-    float ClosestDistance = MAX_FLT;
-    
-    for (APawn* Enemy : Enemies)
-    {
-        if (Enemy)
-        {
-            float Distance = FVector::Dist(Target->GetActorLocation(), Enemy->GetActorLocation());
-            if (Distance < ClosestDistance)
-            {
-                ClosestDistance = Distance;
-            }
-        }
-    }
-    
-    // Calculate threat based on enemy count and proximity
-    if (EnemyCount >= 5 || ClosestDistance < 500.0f)
-    {
-        return ECombat_ThreatLevel::Extreme;
-    }
-    else if (EnemyCount >= 3 || ClosestDistance < 1000.0f)
-    {
-        return ECombat_ThreatLevel::High;
-    }
-    else if (EnemyCount >= 2 || ClosestDistance < 1500.0f)
-    {
-        return ECombat_ThreatLevel::Medium;
-    }
-    else if (EnemyCount >= 1 || ClosestDistance < 2500.0f)
-    {
-        return ECombat_ThreatLevel::Low;
-    }
-    
-    return ECombat_ThreatLevel::None;
-}
-
-void UCombatAIManager::SetDinosaurAIState(APawn* Dinosaur, ECombat_AIState NewState)
-{
-    if (!Dinosaur)
+    // Find player character
+    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
+    if (!PlayerPawn)
     {
         return;
     }
-    
-    DinosaurStates.Add(Dinosaur, NewState);
-    
-    UE_LOG(LogTemp, Log, TEXT("Dinosaur %s state changed to %d"), 
-           *Dinosaur->GetName(), (int32)NewState);
-}
 
-ECombat_AIState UCombatAIManager::GetDinosaurAIState(APawn* Dinosaur) const
-{
-    if (!Dinosaur)
-    {
-        return ECombat_AIState::Passive;
-    }
-    
-    const ECombat_AIState* StatePtr = DinosaurStates.Find(Dinosaur);
-    return StatePtr ? *StatePtr : ECombat_AIState::Passive;
-}
+    FVector PlayerLocation = PlayerPawn->GetActorLocation();
 
-void UCombatAIManager::CoordinatePackAttack(const TArray<APawn*>& PackMembers, APawn* Target)
-{
-    if (!Target || PackMembers.Num() < 2)
+    for (FCombat_EncounterData& Encounter : CombatEncounters)
     {
-        return;
-    }
-    
-    FVector TargetLocation = Target->GetActorLocation();
-    
-    // Assign roles to pack members
-    for (int32 i = 0; i < PackMembers.Num(); i++)
-    {
-        APawn* Member = PackMembers[i];
-        if (!Member)
+        if (!Encounter.bIsActive)
         {
             continue;
         }
-        
-        if (i == 0)
-        {
-            // Alpha leads direct attack
-            SetDinosaurAIState(Member, ECombat_AIState::Aggressive);
-        }
-        else
-        {
-            // Others flank
-            FVector FlankPosition = CalculateFlankingPosition(Member, Target);
-            SetDinosaurAIState(Member, ECombat_AIState::Hunting);
-            
-            // Move to flank position (this would be handled by behavior tree in full implementation)
-            UE_LOG(LogTemp, Log, TEXT("Pack member %s flanking to %s"), 
-                   *Member->GetName(), *FlankPosition.ToString());
-        }
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("Pack attack coordinated with %d members"), PackMembers.Num());
-}
 
-FVector UCombatAIManager::CalculateFlankingPosition(APawn* Attacker, APawn* Target)
-{
-    if (!Attacker || !Target)
-    {
-        return FVector::ZeroVector;
-    }
-    
-    FVector TargetLocation = Target->GetActorLocation();
-    FVector AttackerLocation = Attacker->GetActorLocation();
-    
-    // Calculate perpendicular flanking position
-    FVector DirectionToTarget = (TargetLocation - AttackerLocation).GetSafeNormal();
-    FVector RightVector = FVector::CrossProduct(DirectionToTarget, FVector::UpVector);
-    
-    // Choose random side for flanking
-    float FlankSide = FMath::RandBool() ? 1.0f : -1.0f;
-    FVector FlankPosition = TargetLocation + (RightVector * FlankSide * 800.0f);
-    
-    return FlankPosition;
-}
-
-bool UCombatAIManager::ShouldEngageTarget(APawn* Dinosaur, APawn* Target)
-{
-    if (!Dinosaur || !Target)
-    {
-        return false;
-    }
-    
-    float Distance = FVector::Dist(Dinosaur->GetActorLocation(), Target->GetActorLocation());
-    
-    // Get species tactics
-    FString DinosaurName = Dinosaur->GetName();
-    FCombat_TacticalData* TacticsPtr = nullptr;
-    
-    for (auto& SpeciesPair : SpeciesTactics)
-    {
-        if (DinosaurName.Contains(SpeciesPair.Key))
+        float Distance = FVector::Dist(PlayerLocation, Encounter.Location);
+        if (Distance <= Encounter.EncounterRadius)
         {
-            TacticsPtr = &SpeciesPair.Value;
-            break;
-        }
-    }
-    
-    if (!TacticsPtr)
-    {
-        return Distance < 1000.0f; // Default engagement range
-    }
-    
-    return Distance < TacticsPtr->AttackRange;
-}
-
-void UCombatAIManager::OnPlayerEnterCombatZone(ACharacter* Player, ATriggerBox* Zone)
-{
-    if (!Player || !Zone)
-    {
-        return;
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("Player entered combat zone: %s"), *Zone->GetName());
-    
-    // Find encounter data for this zone
-    FVector ZoneLocation = Zone->GetActorLocation();
-    for (FCombat_EncounterData& Encounter : ActiveEncounters)
-    {
-        if (FVector::Dist(Encounter.Location, ZoneLocation) < 500.0f)
-        {
-            // Activate encounter
-            Encounter.bIsActive = true;
-            UE_LOG(LogTemp, Warning, TEXT("Combat encounter activated - Threat Level: %d"), 
-                   (int32)Encounter.ThreatLevel);
-            break;
-        }
-    }
-}
-
-void UCombatAIManager::OnDinosaurSpotPlayer(APawn* Dinosaur, ACharacter* Player)
-{
-    if (!Dinosaur || !Player)
-    {
-        return;
-    }
-    
-    SetDinosaurAIState(Dinosaur, ECombat_AIState::Alert);
-    
-    UE_LOG(LogTemp, Warning, TEXT("Dinosaur %s spotted player"), *Dinosaur->GetName());
-}
-
-void UCombatAIManager::OnCombatInitiated(APawn* Aggressor, APawn* Target)
-{
-    if (!Aggressor || !Target)
-    {
-        return;
-    }
-    
-    SetDinosaurAIState(Aggressor, ECombat_AIState::Aggressive);
-    
-    UE_LOG(LogTemp, Warning, TEXT("Combat initiated: %s vs %s"), 
-           *Aggressor->GetName(), *Target->GetName());
-}
-
-void UCombatAIManager::UpdateCombatStates(float DeltaTime)
-{
-    if (!PlayerCharacter)
-    {
-        return;
-    }
-    
-    FVector PlayerLocation = PlayerCharacter->GetActorLocation();
-    
-    // Update all dinosaur states based on player proximity
-    for (auto& StatePair : DinosaurStates)
-    {
-        APawn* Dinosaur = StatePair.Key;
-        ECombat_AIState CurrentState = StatePair.Value;
-        
-        if (!Dinosaur)
-        {
-            continue;
-        }
-        
-        float DistanceToPlayer = FVector::Dist(Dinosaur->GetActorLocation(), PlayerLocation);
-        
-        // State transitions based on distance
-        if (DistanceToPlayer < 500.0f && CurrentState == ECombat_AIState::Passive)
-        {
-            SetDinosaurAIState(Dinosaur, ECombat_AIState::Alert);
-        }
-        else if (DistanceToPlayer < 300.0f && CurrentState == ECombat_AIState::Alert)
-        {
-            SetDinosaurAIState(Dinosaur, ECombat_AIState::Aggressive);
-        }
-        else if (DistanceToPlayer > 2000.0f && CurrentState != ECombat_AIState::Passive)
-        {
-            SetDinosaurAIState(Dinosaur, ECombat_AIState::Passive);
-        }
-    }
-}
-
-void UCombatAIManager::ProcessTacticalDecisions()
-{
-    // Find nearby dinosaurs for pack coordination
-    TArray<APawn*> NearbyDinosaurs;
-    
-    for (auto& StatePair : DinosaurStates)
-    {
-        APawn* Dinosaur = StatePair.Key;
-        if (Dinosaur && StatePair.Value != ECombat_AIState::Passive)
-        {
-            NearbyDinosaurs.Add(Dinosaur);
-        }
-    }
-    
-    // Group dinosaurs by proximity for pack tactics
-    if (NearbyDinosaurs.Num() >= 2 && PlayerCharacter)
-    {
-        TArray<APawn*> PackMembers;
-        
-        for (APawn* Dino : NearbyDinosaurs)
-        {
-            float DistanceToPlayer = FVector::Dist(Dino->GetActorLocation(), PlayerCharacter->GetActorLocation());
-            if (DistanceToPlayer < 1500.0f)
+            if (StartCombatEncounter(Encounter.Location, Encounter.ThreatLevel))
             {
-                PackMembers.Add(Dino);
+                Encounter.bIsActive = false; // Deactivate until cooldown
             }
         }
-        
-        if (PackMembers.Num() >= 2)
+    }
+}
+
+FCombat_EncounterData* ACombatAIManager::GetNearestEncounter(const FVector& Location)
+{
+    FCombat_EncounterData* NearestEncounter = nullptr;
+    float NearestDistance = FLT_MAX;
+
+    for (FCombat_EncounterData& Encounter : CombatEncounters)
+    {
+        float Distance = FVector::Dist(Location, Encounter.Location);
+        if (Distance < NearestDistance)
         {
-            CoordinatePackAttack(PackMembers, PlayerCharacter);
+            NearestDistance = Distance;
+            NearestEncounter = &Encounter;
+        }
+    }
+
+    return NearestEncounter;
+}
+
+bool ACombatAIManager::IsLocationInCombat(const FVector& Location) const
+{
+    for (const FCombat_EncounterData& Encounter : CombatEncounters)
+    {
+        if (Encounter.bIsActive)
+        {
+            float Distance = FVector::Dist(Location, Encounter.Location);
+            if (Distance <= Encounter.EncounterRadius)
+            {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+int32 ACombatAIManager::GetCombatantsInRange(const FVector& Location, float Range) const
+{
+    int32 Count = 0;
+    for (ACombat_DinosaurPawn* Combatant : ActiveCombatants)
+    {
+        if (IsValid(Combatant))
+        {
+            float Distance = FVector::Dist(Location, Combatant->GetActorLocation());
+            if (Distance <= Range)
+            {
+                Count++;
+            }
+        }
+    }
+    return Count;
+}
+
+void ACombatAIManager::UpdateCombatSystem(float DeltaTime)
+{
+    TacticalUpdateTimer += DeltaTime;
+    EncounterCheckTimer += DeltaTime;
+
+    // Update tactical positions
+    if (TacticalUpdateTimer >= TacticalUpdateInterval)
+    {
+        UpdateTacticalPositions();
+        TacticalUpdateTimer = 0.0f;
+    }
+
+    // Check encounter triggers
+    if (EncounterCheckTimer >= 1.0f) // Check every second
+    {
+        CheckEncounterTriggers();
+        EncounterCheckTimer = 0.0f;
+    }
+
+    // Process active combats
+    ProcessActiveCombats();
+    
+    // Cleanup inactive combatants
+    CleanupInactiveCombatants();
+}
+
+void ACombatAIManager::ProcessActiveCombats()
+{
+    // Process ongoing combat encounters
+    for (FCombat_EncounterData& Encounter : CombatEncounters)
+    {
+        if (Encounter.bIsActive)
+        {
+            // Check if encounter should end (no combatants in range, etc.)
+            int32 CombatantsInRange = GetCombatantsInRange(Encounter.Location, Encounter.EncounterRadius);
+            if (CombatantsInRange == 0)
+            {
+                EndCombatEncounter(Encounter.Location);
+                Encounter.bIsActive = false;
+            }
         }
     }
 }
 
-void UCombatAIManager::InitializeSpeciesTactics()
+void ACombatAIManager::CleanupInactiveCombatants()
 {
-    // T-Rex tactics
-    FCombat_TacticalData TRexTactics;
-    TRexTactics.AttackRange = 800.0f;
-    TRexTactics.FleeDistance = 0.0f; // Never flees
-    TRexTactics.GroupCoordination = 0.2f; // Solitary
-    TRexTactics.bCanAmbush = false;
-    TRexTactics.bPackHunter = false;
-    SpeciesTactics.Add("TRex", TRexTactics);
-    
-    // Velociraptor tactics
-    FCombat_TacticalData VelociTactics;
-    VelociTactics.AttackRange = 400.0f;
-    VelociTactics.FleeDistance = 1200.0f;
-    VelociTactics.GroupCoordination = 0.9f; // Highly coordinated
-    VelociTactics.bCanAmbush = true;
-    VelociTactics.bPackHunter = true;
-    SpeciesTactics.Add("Veloci", VelociTactics);
-    
-    // Triceratops tactics
-    FCombat_TacticalData TriceratoTactics;
-    TriceratoTactics.AttackRange = 600.0f;
-    TriceratoTactics.FleeDistance = 800.0f;
-    TriceratoTactics.GroupCoordination = 0.6f; // Herd behavior
-    TriceratoTactics.bCanAmbush = false;
-    TriceratoTactics.bPackHunter = false;
-    SpeciesTactics.Add("Tricera", TriceratoTactics);
-    
-    UE_LOG(LogTemp, Warning, TEXT("Species tactics initialized for %d species"), SpeciesTactics.Num());
+    ActiveCombatants.RemoveAll([](ACombat_DinosaurPawn* Combatant)
+    {
+        return !IsValid(Combatant);
+    });
+}
+
+bool ACombatAIManager::CanStartNewCombat() const
+{
+    return CurrentActiveCombats < MaxSimultaneousCombats;
 }
