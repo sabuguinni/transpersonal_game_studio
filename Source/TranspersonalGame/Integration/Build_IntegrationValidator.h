@@ -11,7 +11,7 @@ enum class EBuild_IntegrationStatus : uint8
 {
     Unknown     UMETA(DisplayName = "Unknown"),
     Healthy     UMETA(DisplayName = "Healthy"),
-    Stable      UMETA(DisplayName = "Stable"),
+    Moderate    UMETA(DisplayName = "Moderate"), 
     Critical    UMETA(DisplayName = "Critical"),
     Failed      UMETA(DisplayName = "Failed")
 };
@@ -28,32 +28,31 @@ struct TRANSPERSONALGAME_API FBuild_ValidationResult
     float HealthPercentage = 0.0f;
 
     UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    int32 LoadedClasses = 0;
+    int32 PassedChecks = 0;
 
     UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    int32 TotalClasses = 0;
+    int32 TotalChecks = 0;
 
     UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    int32 BinaryFiles = 0;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    int32 LevelActors = 0;
+    TArray<FString> LoadedClasses;
 
     UPROPERTY(BlueprintReadOnly, Category = "Integration")
     TArray<FString> FailedClasses;
 
     UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    FString ReportTimestamp;
+    int32 ActorCount = 0;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    int32 BinaryCount = 0;
 
     FBuild_ValidationResult()
     {
         Status = EBuild_IntegrationStatus::Unknown;
         HealthPercentage = 0.0f;
-        LoadedClasses = 0;
-        TotalClasses = 0;
-        BinaryFiles = 0;
-        LevelActors = 0;
-        ReportTimestamp = TEXT("");
+        PassedChecks = 0;
+        TotalChecks = 0;
+        ActorCount = 0;
+        BinaryCount = 0;
     }
 };
 
@@ -65,39 +64,48 @@ class TRANSPERSONALGAME_API UBuild_IntegrationValidator : public UActorComponent
 public:
     UBuild_IntegrationValidator();
 
-    UFUNCTION(BlueprintCallable, Category = "Integration", CallInEditor = true)
-    FBuild_ValidationResult ValidateProjectIntegration();
+    UFUNCTION(BlueprintCallable, Category = "Integration", CallInEditor)
+    FBuild_ValidationResult ValidateIntegration();
+
+    UFUNCTION(BlueprintCallable, Category = "Integration", CallInEditor)
+    bool ValidateCriticalClasses();
+
+    UFUNCTION(BlueprintCallable, Category = "Integration", CallInEditor)
+    bool ValidateBinaryCompilation();
+
+    UFUNCTION(BlueprintCallable, Category = "Integration", CallInEditor)
+    bool ValidateLevelContent();
+
+    UFUNCTION(BlueprintCallable, Category = "Integration", CallInEditor)
+    bool ValidateQAIntegration();
 
     UFUNCTION(BlueprintCallable, Category = "Integration")
-    bool ValidateClassLoading(const TArray<FString>& ClassNames, TArray<FString>& FailedClasses);
+    EBuild_IntegrationStatus GetCurrentIntegrationStatus() const;
 
     UFUNCTION(BlueprintCallable, Category = "Integration")
-    int32 CountCompiledBinaries();
-
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    int32 CountLevelActors();
-
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    EBuild_IntegrationStatus CalculateIntegrationStatus(float HealthPercentage);
-
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    void GenerateIntegrationReport(const FBuild_ValidationResult& Result);
+    float GetIntegrationHealthPercentage() const;
 
 protected:
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    FBuild_ValidationResult LastValidationResult;
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration")
-    TArray<FString> CoreSystemClasses;
+    TArray<FString> CriticalClassNames;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration")
+    TArray<FString> QAClassNames;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration")
+    int32 MinimumActorCount = 10;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration")
     float HealthyThreshold = 75.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration")
-    float StableThreshold = 50.0f;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    FBuild_ValidationResult LastValidationResult;
+    float ModerateThreshold = 50.0f;
 
 private:
-    void InitializeCoreSystemClasses();
-    bool CheckBinaryCompilation();
-    void LogValidationResults(const FBuild_ValidationResult& Result);
+    void InitializeCriticalClasses();
+    void InitializeQAClasses();
+    EBuild_IntegrationStatus CalculateStatus(float HealthPercentage) const;
 };
