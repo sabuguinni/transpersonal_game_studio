@@ -1,417 +1,453 @@
 #include "BiomeManager.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "Kismet/GameplayStatics.h"
 #include "Math/UnrealMathUtility.h"
+#include "Kismet/GameplayStatics.h"
 
 UBiomeManager::UBiomeManager()
 {
-    PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 1.0f; // Tick every second for weather updates
-    
-    // Initialize default values
-    BiomeTransitionSmoothness = 2.0f;
-    WeatherUpdateFrequency = 30.0f;
-    MaxBiomeInfluenceRadius = 10000.0f;
-    TimeSinceWeatherUpdate = 0.0f;
-    bIsBiomeSystemInitialized = false;
-    ActiveTransitionCount = 0;
+    BiomeTransitionSmoothness = 0.3f;
+    BiomeResolution = 100;
+    TemperatureVariation = 15.0f;
+    HumidityVariation = 0.4f;
 }
 
-void UBiomeManager::BeginPlay()
+void UBiomeManager::Initialize(FSubsystemCollectionBase& Collection)
 {
-    Super::BeginPlay();
+    Super::Initialize(Collection);
     
-    // Initialize biome system on begin play
-    InitializeBiomeSystem();
+    UE_LOG(LogTemp, Warning, TEXT("BiomeManager: Initializing biome system"));
     
-    UE_LOG(LogTemp, Warning, TEXT("BiomeManager: System initialized with %d biome types"), BiomeDataMap.Num());
+    // Initialize default biome configurations
+    InitializeDefaultBiomes();
+    
+    // Set up global environmental parameters
+    GlobalEnvironmentalParams.BaseTemperature = 25.0f; // 25°C base
+    GlobalEnvironmentalParams.BaseHumidity = 0.6f; // 60% base humidity
+    GlobalEnvironmentalParams.SeasonalVariation = 0.2f;
+    GlobalEnvironmentalParams.DayNightTemperatureDelta = 8.0f;
+    
+    UE_LOG(LogTemp, Warning, TEXT("BiomeManager: Initialized with %d biome types"), BiomeDefinitions.Num());
 }
 
-void UBiomeManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void UBiomeManager::Deinitialize()
 {
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+    BiomeDefinitions.Empty();
+    ActiveBiomeZones.Empty();
+    BiomeCache.Empty();
+    EnvironmentCache.Empty();
     
-    if (!bIsBiomeSystemInitialized)
-    {
-        return;
-    }
-    
-    // Update weather progression
-    UpdateWeatherProgression(DeltaTime);
-}
-
-void UBiomeManager::InitializeBiomeSystem()
-{
-    if (bIsBiomeSystemInitialized)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("BiomeManager: System already initialized"));
-        return;
-    }
-    
-    // Clear existing data
-    BiomeDataMap.Empty();
-    ActiveBiomes.Empty();
-    BiomeWeatherStates.Empty();
-    
-    // Initialize default biome data
-    InitializeDefaultBiomeData();
-    
-    // Set system as initialized
-    bIsBiomeSystemInitialized = true;
-    TimeSinceWeatherUpdate = 0.0f;
-    
-    UE_LOG(LogTemp, Warning, TEXT("BiomeManager: Biome system initialized successfully"));
+    UE_LOG(LogTemp, Warning, TEXT("BiomeManager: Deinitialized"));
+    Super::Deinitialize();
 }
 
 EEng_BiomeType UBiomeManager::GetBiomeAtLocation(const FVector& WorldLocation) const
 {
-    if (!bIsBiomeSystemInitialized || BiomeDataMap.Num() == 0)
+    // Convert world location to biome grid coordinates
+    FIntVector GridCoord = FIntVector(
+        FMath::FloorToInt(WorldLocation.X / BiomeResolution),
+        FMath::FloorToInt(WorldLocation.Y / BiomeResolution),
+        0
+    );
+    
+    // Check cache first
+    if (BiomeCache.Contains(GridCoord))
     {
-        return EEng_BiomeType::Grassland; // Default fallback
+        return BiomeCache[GridCoord];
     }
     
-    // Simple biome determination based on location
-    // This is a basic implementation - can be expanded with noise functions, height maps, etc.
+    // Calculate biome based on environmental parameters
+    float Temperature = GetTemperatureAtLocation(WorldLocation);
+    float Humidity = GetHumidityAtLocation(WorldLocation);
+    float Elevation = WorldLocation.Z;
     
-    float X = WorldLocation.X;
-    float Y = WorldLocation.Y;
-    float Z = WorldLocation.Z;
+    EEng_BiomeType BiomeType = CalculateBiomeFromParameters(Temperature, Humidity, Elevation);
     
-    // Determine biome based on location patterns
-    if (Z > 2000.0f)
-    {
-        return EEng_BiomeType::Mountain;
-    }
-    else if (FMath::Abs(X) < 5000.0f && FMath::Abs(Y) < 5000.0f)
-    {
-        return EEng_BiomeType::Grassland; // Central area
-    }
-    else if (X > 10000.0f || X < -10000.0f)
-    {
-        return EEng_BiomeType::Desert; // Far east/west
-    }
-    else if (Y > 8000.0f)
-    {
-        return EEng_BiomeType::Forest; // North
-    }
-    else if (Y < -8000.0f)
-    {
-        return EEng_BiomeType::Swamp; // South
-    }
-    else
-    {
-        return EEng_BiomeType::Savanna; // Default
-    }
+    // Cache result
+    BiomeCache.Add(GridCoord, BiomeType);
+    
+    return BiomeType;
 }
 
 FEng_BiomeData UBiomeManager::GetBiomeData(EEng_BiomeType BiomeType) const
 {
-    if (const FEng_BiomeData* FoundData = BiomeDataMap.Find(BiomeType))
+    if (BiomeDefinitions.Contains(BiomeType))
     {
-        return *FoundData;
+        return BiomeDefinitions[BiomeType];
     }
     
     // Return default biome data if not found
-    FEng_BiomeData DefaultData;
-    DefaultData.BiomeType = BiomeType;
-    DefaultData.Temperature = 20.0f;
-    DefaultData.Humidity = 0.5f;
-    DefaultData.DangerLevel = 0.3f;
-    DefaultData.BiomeName = TEXT("Unknown Biome");
+    FEng_BiomeData DefaultBiome;
+    DefaultBiome.BiomeType = EEng_BiomeType::Temperate_Forest;
+    DefaultBiome.Temperature = 20.0f;
+    DefaultBiome.Humidity = 0.7f;
+    DefaultBiome.VegetationDensity = 0.6f;
+    DefaultBiome.WaterAvailability = 0.5f;
     
-    return DefaultData;
+    UE_LOG(LogTemp, Warning, TEXT("BiomeManager: Biome type %d not found, returning default"), (int32)BiomeType);
+    return DefaultBiome;
 }
 
-void UBiomeManager::UpdateBiomeTransition(const FVector& Location, float TransitionRadius)
+void UBiomeManager::RegisterBiomeZone(const FEng_BiomeZone& BiomeZone)
 {
-    if (!bIsBiomeSystemInitialized)
-    {
-        return;
-    }
+    ActiveBiomeZones.Add(BiomeZone);
+    UpdateBiomeZoneCache();
     
-    // Get current biome at location
-    EEng_BiomeType CurrentBiome = GetBiomeAtLocation(Location);
-    
-    // Add to active biomes if not already present
-    ActiveBiomes.AddUnique(CurrentBiome);
-    
-    // Update transition count
-    ActiveTransitionCount = FMath::Max(1, ActiveBiomes.Num() - 1);
-    
-    UE_LOG(LogTemp, Log, TEXT("BiomeManager: Updated transition at location (%f, %f, %f) - Biome: %d"), 
-           Location.X, Location.Y, Location.Z, (int32)CurrentBiome);
+    UE_LOG(LogTemp, Log, TEXT("BiomeManager: Registered biome zone at (%f, %f) with radius %f"), 
+           BiomeZone.Center.X, BiomeZone.Center.Y, BiomeZone.Radius);
 }
 
-FEng_WeatherState UBiomeManager::GetCurrentWeather() const
+TArray<FEng_BiomeZone> UBiomeManager::GetBiomeZonesInRadius(const FVector& Center, float Radius) const
 {
-    FEng_WeatherState DefaultWeather;
-    DefaultWeather.WeatherType = EEng_WeatherType::Clear;
-    DefaultWeather.Intensity = 0.0f;
-    DefaultWeather.WindSpeed = 5.0f;
-    DefaultWeather.Temperature = 20.0f;
-    DefaultWeather.Humidity = 0.5f;
+    TArray<FEng_BiomeZone> NearbyZones;
     
-    // Return weather for the first active biome, or default
-    if (ActiveBiomes.Num() > 0)
+    for (const FEng_BiomeZone& Zone : ActiveBiomeZones)
     {
-        if (const FEng_WeatherState* FoundWeather = BiomeWeatherStates.Find(ActiveBiomes[0]))
+        float Distance = FVector::Dist2D(Center, Zone.Center);
+        if (Distance <= (Radius + Zone.Radius))
         {
-            return *FoundWeather;
+            NearbyZones.Add(Zone);
         }
     }
     
-    return DefaultWeather;
+    return NearbyZones;
 }
 
-void UBiomeManager::SetWeatherState(EEng_BiomeType BiomeType, const FEng_WeatherState& NewWeather)
+float UBiomeManager::GetTemperatureAtLocation(const FVector& WorldLocation) const
 {
-    BiomeWeatherStates.Add(BiomeType, NewWeather);
+    float BaseTemp = GlobalEnvironmentalParams.BaseTemperature;
     
-    UE_LOG(LogTemp, Log, TEXT("BiomeManager: Set weather for biome %d - Type: %d, Intensity: %f"), 
-           (int32)BiomeType, (int32)NewWeather.WeatherType, NewWeather.Intensity);
+    // Add elevation-based cooling (6.5°C per 1000m)
+    float ElevationCooling = (WorldLocation.Z / 1000.0f) * 6.5f;
+    
+    // Add noise variation
+    float NoiseVariation = GenerateTemperatureNoise(WorldLocation) * TemperatureVariation;
+    
+    return BaseTemp - ElevationCooling + NoiseVariation;
 }
 
-void UBiomeManager::UpdateWeatherProgression(float DeltaTime)
+float UBiomeManager::GetHumidityAtLocation(const FVector& WorldLocation) const
 {
-    TimeSinceWeatherUpdate += DeltaTime;
+    float BaseHumidity = GlobalEnvironmentalParams.BaseHumidity;
     
-    if (TimeSinceWeatherUpdate >= WeatherUpdateFrequency)
+    // Add noise variation
+    float NoiseVariation = GenerateHumidityNoise(WorldLocation) * HumidityVariation;
+    
+    return FMath::Clamp(BaseHumidity + NoiseVariation, 0.0f, 1.0f);
+}
+
+EEng_WeatherType UBiomeManager::GetWeatherAtLocation(const FVector& WorldLocation) const
+{
+    float Humidity = GetHumidityAtLocation(WorldLocation);
+    float Temperature = GetTemperatureAtLocation(WorldLocation);
+    
+    // Simple weather determination based on environmental conditions
+    if (Humidity > 0.8f && Temperature > 15.0f)
     {
-        // Update weather for each active biome
-        for (EEng_BiomeType BiomeType : ActiveBiomes)
-        {
-            UpdateBiomeWeatherInternal(BiomeType, TimeSinceWeatherUpdate);
-        }
-        
-        TimeSinceWeatherUpdate = 0.0f;
+        return EEng_WeatherType::Rainy;
     }
-}
-
-float UBiomeManager::GetTemperatureAtLocation(const FVector& Location) const
-{
-    EEng_BiomeType BiomeType = GetBiomeAtLocation(Location);
-    FEng_BiomeData BiomeData = GetBiomeData(BiomeType);
-    
-    // Add some variation based on height
-    float HeightModifier = Location.Z * -0.01f; // Temperature decreases with altitude
-    
-    return BiomeData.Temperature + HeightModifier;
-}
-
-float UBiomeManager::GetHumidityAtLocation(const FVector& Location) const
-{
-    EEng_BiomeType BiomeType = GetBiomeAtLocation(Location);
-    FEng_BiomeData BiomeData = GetBiomeData(BiomeType);
-    
-    return BiomeData.Humidity;
-}
-
-float UBiomeManager::GetBiomeDangerLevel(EEng_BiomeType BiomeType) const
-{
-    FEng_BiomeData BiomeData = GetBiomeData(BiomeType);
-    return BiomeData.DangerLevel;
-}
-
-bool UBiomeManager::ValidateBiomeConfiguration()
-{
-    bool bIsValid = true;
-    
-    // Check if we have biome data
-    if (BiomeDataMap.Num() == 0)
+    else if (Temperature < 5.0f)
     {
-        UE_LOG(LogTemp, Error, TEXT("BiomeManager: No biome data configured"));
-        bIsValid = false;
+        return EEng_WeatherType::Cold;
+    }
+    else if (Humidity < 0.3f)
+    {
+        return EEng_WeatherType::Dry;
     }
     
-    // Validate each biome data entry
-    for (const auto& BiomeEntry : BiomeDataMap)
+    return EEng_WeatherType::Clear;
+}
+
+bool UBiomeManager::IsInBiomeTransitionZone(const FVector& WorldLocation, float TransitionRadius) const
+{
+    EEng_BiomeType CenterBiome = GetBiomeAtLocation(WorldLocation);
+    
+    // Check surrounding points
+    TArray<FVector> TestPoints = {
+        WorldLocation + FVector(TransitionRadius, 0, 0),
+        WorldLocation + FVector(-TransitionRadius, 0, 0),
+        WorldLocation + FVector(0, TransitionRadius, 0),
+        WorldLocation + FVector(0, -TransitionRadius, 0)
+    };
+    
+    for (const FVector& TestPoint : TestPoints)
     {
-        if (!ValidateSingleBiomeData(BiomeEntry.Value))
+        if (GetBiomeAtLocation(TestPoint) != CenterBiome)
         {
-            UE_LOG(LogTemp, Error, TEXT("BiomeManager: Invalid biome data for type %d"), (int32)BiomeEntry.Key);
-            bIsValid = false;
+            return true;
         }
     }
     
-    // Check system parameters
-    if (BiomeTransitionSmoothness <= 0.0f || WeatherUpdateFrequency <= 0.0f || MaxBiomeInfluenceRadius <= 0.0f)
-    {
-        UE_LOG(LogTemp, Error, TEXT("BiomeManager: Invalid system parameters"));
-        bIsValid = false;
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("BiomeManager: Configuration validation %s"), bIsValid ? TEXT("PASSED") : TEXT("FAILED"));
-    return bIsValid;
+    return false;
 }
 
-FString UBiomeManager::GetBiomeSystemStatus() const
+FEng_BiomeTransition UBiomeManager::CalculateBiomeTransition(const FVector& WorldLocation) const
 {
-    FString Status = FString::Printf(TEXT("BiomeManager Status:\n"));
-    Status += FString::Printf(TEXT("- Initialized: %s\n"), bIsBiomeSystemInitialized ? TEXT("Yes") : TEXT("No"));
-    Status += FString::Printf(TEXT("- Biome Types: %d\n"), BiomeDataMap.Num());
-    Status += FString::Printf(TEXT("- Active Biomes: %d\n"), ActiveBiomes.Num());
-    Status += FString::Printf(TEXT("- Active Transitions: %d\n"), ActiveTransitionCount);
-    Status += FString::Printf(TEXT("- Weather States: %d\n"), BiomeWeatherStates.Num());
-    Status += FString::Printf(TEXT("- Time Since Weather Update: %.1fs\n"), TimeSinceWeatherUpdate);
+    FEng_BiomeTransition Transition;
+    Transition.PrimaryBiome = GetBiomeAtLocation(WorldLocation);
+    Transition.SecondaryBiome = EEng_BiomeType::Temperate_Forest; // Default
+    Transition.BlendFactor = 0.0f;
     
-    return Status;
-}
-
-void UBiomeManager::InitializeDefaultBiomeData()
-{
-    // Grassland biome
-    FEng_BiomeData GrasslandData;
-    GrasslandData.BiomeType = EEng_BiomeType::Grassland;
-    GrasslandData.Temperature = 22.0f;
-    GrasslandData.Humidity = 0.6f;
-    GrasslandData.DangerLevel = 0.2f;
-    GrasslandData.BiomeName = TEXT("Grassland");
-    BiomeDataMap.Add(EEng_BiomeType::Grassland, GrasslandData);
-    
-    // Forest biome
-    FEng_BiomeData ForestData;
-    ForestData.BiomeType = EEng_BiomeType::Forest;
-    ForestData.Temperature = 18.0f;
-    ForestData.Humidity = 0.8f;
-    ForestData.DangerLevel = 0.4f;
-    ForestData.BiomeName = TEXT("Forest");
-    BiomeDataMap.Add(EEng_BiomeType::Forest, ForestData);
-    
-    // Desert biome
-    FEng_BiomeData DesertData;
-    DesertData.BiomeType = EEng_BiomeType::Desert;
-    DesertData.Temperature = 35.0f;
-    DesertData.Humidity = 0.1f;
-    DesertData.DangerLevel = 0.6f;
-    DesertData.BiomeName = TEXT("Desert");
-    BiomeDataMap.Add(EEng_BiomeType::Desert, DesertData);
-    
-    // Mountain biome
-    FEng_BiomeData MountainData;
-    MountainData.BiomeType = EEng_BiomeType::Mountain;
-    MountainData.Temperature = 5.0f;
-    MountainData.Humidity = 0.3f;
-    MountainData.DangerLevel = 0.7f;
-    MountainData.BiomeName = TEXT("Mountain");
-    BiomeDataMap.Add(EEng_BiomeType::Mountain, MountainData);
-    
-    // Swamp biome
-    FEng_BiomeData SwampData;
-    SwampData.BiomeType = EEng_BiomeType::Swamp;
-    SwampData.Temperature = 25.0f;
-    SwampData.Humidity = 0.9f;
-    SwampData.DangerLevel = 0.8f;
-    SwampData.BiomeName = TEXT("Swamp");
-    BiomeDataMap.Add(EEng_BiomeType::Swamp, SwampData);
-    
-    // Savanna biome
-    FEng_BiomeData SavannaData;
-    SavannaData.BiomeType = EEng_BiomeType::Savanna;
-    SavannaData.Temperature = 28.0f;
-    SavannaData.Humidity = 0.4f;
-    SavannaData.DangerLevel = 0.5f;
-    SavannaData.BiomeName = TEXT("Savanna");
-    BiomeDataMap.Add(EEng_BiomeType::Savanna, SavannaData);
-    
-    // Initialize default weather states
-    for (const auto& BiomeEntry : BiomeDataMap)
+    if (IsInBiomeTransitionZone(WorldLocation))
     {
-        FEng_WeatherState DefaultWeather;
-        DefaultWeather.WeatherType = EEng_WeatherType::Clear;
-        DefaultWeather.Intensity = 0.0f;
-        DefaultWeather.WindSpeed = 5.0f;
-        DefaultWeather.Temperature = BiomeEntry.Value.Temperature;
-        DefaultWeather.Humidity = BiomeEntry.Value.Humidity;
+        // Find the secondary biome and calculate blend factor
+        float MinDistance = MAX_FLT;
+        EEng_BiomeType ClosestDifferentBiome = Transition.PrimaryBiome;
         
-        BiomeWeatherStates.Add(BiomeEntry.Key, DefaultWeather);
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("BiomeManager: Initialized %d default biome configurations"), BiomeDataMap.Num());
-}
-
-float UBiomeManager::CalculateBiomeInfluence(const FVector& Location, EEng_BiomeType BiomeType) const
-{
-    // Simple distance-based influence calculation
-    // In a full implementation, this would use noise functions, heightmaps, etc.
-    
-    float Distance = FVector::Dist(Location, FVector::ZeroVector);
-    float NormalizedDistance = FMath::Clamp(Distance / MaxBiomeInfluenceRadius, 0.0f, 1.0f);
-    
-    // Apply smoothing
-    float Influence = FMath::Pow(1.0f - NormalizedDistance, BiomeTransitionSmoothness);
-    
-    return FMath::Clamp(Influence, 0.0f, 1.0f);
-}
-
-void UBiomeManager::UpdateBiomeWeatherInternal(EEng_BiomeType BiomeType, float DeltaTime)
-{
-    FEng_WeatherState* CurrentWeather = BiomeWeatherStates.Find(BiomeType);
-    if (!CurrentWeather)
-    {
-        return;
-    }
-    
-    // Simple weather progression - randomly change weather occasionally
-    float RandomChance = FMath::RandRange(0.0f, 1.0f);
-    
-    if (RandomChance < 0.1f) // 10% chance to change weather
-    {
-        // Randomly select new weather type
-        int32 WeatherTypeCount = (int32)EEng_WeatherType::Count;
-        int32 NewWeatherIndex = FMath::RandRange(0, WeatherTypeCount - 1);
-        CurrentWeather->WeatherType = (EEng_WeatherType)NewWeatherIndex;
-        
-        // Set appropriate intensity
-        switch (CurrentWeather->WeatherType)
+        // Sample surrounding area
+        for (int32 i = 0; i < 8; ++i)
         {
-        case EEng_WeatherType::Clear:
-            CurrentWeather->Intensity = 0.0f;
-            break;
-        case EEng_WeatherType::Rain:
-            CurrentWeather->Intensity = FMath::RandRange(0.3f, 0.8f);
-            break;
-        case EEng_WeatherType::Storm:
-            CurrentWeather->Intensity = FMath::RandRange(0.6f, 1.0f);
-            break;
-        case EEng_WeatherType::Fog:
-            CurrentWeather->Intensity = FMath::RandRange(0.2f, 0.6f);
-            break;
-        case EEng_WeatherType::Snow:
-            CurrentWeather->Intensity = FMath::RandRange(0.2f, 0.7f);
-            break;
+            float Angle = (i / 8.0f) * 2.0f * PI;
+            FVector SamplePoint = WorldLocation + FVector(
+                FMath::Cos(Angle) * 1000.0f,
+                FMath::Sin(Angle) * 1000.0f,
+                0
+            );
+            
+            EEng_BiomeType SampleBiome = GetBiomeAtLocation(SamplePoint);
+            if (SampleBiome != Transition.PrimaryBiome)
+            {
+                float Distance = FVector::Dist2D(WorldLocation, SamplePoint);
+                if (Distance < MinDistance)
+                {
+                    MinDistance = Distance;
+                    ClosestDifferentBiome = SampleBiome;
+                }
+            }
         }
         
-        UE_LOG(LogTemp, Log, TEXT("BiomeManager: Weather changed for biome %d to %d (intensity: %f)"), 
-               (int32)BiomeType, (int32)CurrentWeather->WeatherType, CurrentWeather->Intensity);
+        Transition.SecondaryBiome = ClosestDifferentBiome;
+        Transition.BlendFactor = FMath::Clamp(1.0f - (MinDistance / 1000.0f), 0.0f, 1.0f);
+    }
+    
+    return Transition;
+}
+
+void UBiomeManager::ValidateBiomeConfiguration()
+{
+    UE_LOG(LogTemp, Warning, TEXT("BiomeManager: Validating biome configuration..."));
+    
+    int32 ValidBiomes = 0;
+    int32 InvalidBiomes = 0;
+    
+    for (const auto& BiomePair : BiomeDefinitions)
+    {
+        if (ValidateBiomeData(BiomePair.Value))
+        {
+            ValidBiomes++;
+        }
+        else
+        {
+            InvalidBiomes++;
+            UE_LOG(LogTemp, Error, TEXT("BiomeManager: Invalid biome data for type %d"), (int32)BiomePair.Key);
+        }
+    }
+    
+    UE_LOG(LogTemp, Warning, TEXT("BiomeManager: Validation complete - %d valid, %d invalid biomes"), 
+           ValidBiomes, InvalidBiomes);
+}
+
+void UBiomeManager::GenerateDebugBiomeMap()
+{
+    UE_LOG(LogTemp, Warning, TEXT("BiomeManager: Generating debug biome map..."));
+    
+    // Generate a simple biome map for debugging
+    const int32 MapSize = 20;
+    const float SampleDistance = 1000.0f;
+    
+    for (int32 X = -MapSize; X <= MapSize; ++X)
+    {
+        FString RowString = TEXT("");
+        for (int32 Y = -MapSize; Y <= MapSize; ++Y)
+        {
+            FVector SampleLocation = FVector(X * SampleDistance, Y * SampleDistance, 0);
+            EEng_BiomeType BiomeType = GetBiomeAtLocation(SampleLocation);
+            
+            // Convert biome type to character for display
+            TCHAR BiomeChar = TEXT('?');
+            switch (BiomeType)
+            {
+                case EEng_BiomeType::Tropical_Rainforest: BiomeChar = TEXT('R'); break;
+                case EEng_BiomeType::Temperate_Forest: BiomeChar = TEXT('F'); break;
+                case EEng_BiomeType::Grassland: BiomeChar = TEXT('G'); break;
+                case EEng_BiomeType::Desert: BiomeChar = TEXT('D'); break;
+                case EEng_BiomeType::Tundra: BiomeChar = TEXT('T'); break;
+                case EEng_BiomeType::Swamp: BiomeChar = TEXT('S'); break;
+                case EEng_BiomeType::Mountain: BiomeChar = TEXT('M'); break;
+                case EEng_BiomeType::Coastal: BiomeChar = TEXT('C'); break;
+                default: BiomeChar = TEXT('?'); break;
+            }
+            
+            RowString += BiomeChar;
+        }
+        UE_LOG(LogTemp, Warning, TEXT("BiomeMap[%2d]: %s"), X, *RowString);
     }
 }
 
-bool UBiomeManager::ValidateSingleBiomeData(const FEng_BiomeData& BiomeData) const
+EEng_BiomeType UBiomeManager::CalculateBiomeFromParameters(float Temperature, float Humidity, float Elevation) const
 {
-    // Check temperature range
+    // Biome determination logic based on temperature, humidity, and elevation
+    if (Elevation > 2000.0f)
+    {
+        return EEng_BiomeType::Mountain;
+    }
+    else if (Temperature > 25.0f && Humidity > 0.8f)
+    {
+        return EEng_BiomeType::Tropical_Rainforest;
+    }
+    else if (Temperature > 20.0f && Humidity > 0.6f)
+    {
+        return EEng_BiomeType::Temperate_Forest;
+    }
+    else if (Temperature > 15.0f && Humidity < 0.3f)
+    {
+        return EEng_BiomeType::Desert;
+    }
+    else if (Temperature < 5.0f)
+    {
+        return EEng_BiomeType::Tundra;
+    }
+    else if (Humidity > 0.9f)
+    {
+        return EEng_BiomeType::Swamp;
+    }
+    else if (Elevation < 50.0f)
+    {
+        return EEng_BiomeType::Coastal;
+    }
+    else
+    {
+        return EEng_BiomeType::Grassland;
+    }
+}
+
+float UBiomeManager::GenerateTemperatureNoise(const FVector& Location) const
+{
+    // Simple noise generation for temperature variation
+    float NoiseScale = 0.001f;
+    float Noise = FMath::PerlinNoise2D(FVector2D(Location.X * NoiseScale, Location.Y * NoiseScale));
+    return Noise; // Returns value between -1 and 1
+}
+
+float UBiomeManager::GenerateHumidityNoise(const FVector& Location) const
+{
+    // Simple noise generation for humidity variation
+    float NoiseScale = 0.0015f;
+    float Noise = FMath::PerlinNoise2D(FVector2D(Location.X * NoiseScale + 1000.0f, Location.Y * NoiseScale + 1000.0f));
+    return Noise * 0.5f; // Returns value between -0.5 and 0.5
+}
+
+void UBiomeManager::InitializeDefaultBiomes()
+{
+    // Initialize default biome configurations
+    FEng_BiomeData TropicalRainforest;
+    TropicalRainforest.BiomeType = EEng_BiomeType::Tropical_Rainforest;
+    TropicalRainforest.Temperature = 27.0f;
+    TropicalRainforest.Humidity = 0.9f;
+    TropicalRainforest.VegetationDensity = 0.95f;
+    TropicalRainforest.WaterAvailability = 0.9f;
+    BiomeDefinitions.Add(EEng_BiomeType::Tropical_Rainforest, TropicalRainforest);
+    
+    FEng_BiomeData TemperateForest;
+    TemperateForest.BiomeType = EEng_BiomeType::Temperate_Forest;
+    TemperateForest.Temperature = 15.0f;
+    TemperateForest.Humidity = 0.7f;
+    TemperateForest.VegetationDensity = 0.8f;
+    TemperateForest.WaterAvailability = 0.6f;
+    BiomeDefinitions.Add(EEng_BiomeType::Temperate_Forest, TemperateForest);
+    
+    FEng_BiomeData Grassland;
+    Grassland.BiomeType = EEng_BiomeType::Grassland;
+    Grassland.Temperature = 20.0f;
+    Grassland.Humidity = 0.5f;
+    Grassland.VegetationDensity = 0.4f;
+    Grassland.WaterAvailability = 0.4f;
+    BiomeDefinitions.Add(EEng_BiomeType::Grassland, Grassland);
+    
+    FEng_BiomeData Desert;
+    Desert.BiomeType = EEng_BiomeType::Desert;
+    Desert.Temperature = 35.0f;
+    Desert.Humidity = 0.1f;
+    Desert.VegetationDensity = 0.05f;
+    Desert.WaterAvailability = 0.1f;
+    BiomeDefinitions.Add(EEng_BiomeType::Desert, Desert);
+    
+    FEng_BiomeData Tundra;
+    Tundra.BiomeType = EEng_BiomeType::Tundra;
+    Tundra.Temperature = -5.0f;
+    Tundra.Humidity = 0.3f;
+    Tundra.VegetationDensity = 0.1f;
+    Tundra.WaterAvailability = 0.2f;
+    BiomeDefinitions.Add(EEng_BiomeType::Tundra, Tundra);
+    
+    FEng_BiomeData Swamp;
+    Swamp.BiomeType = EEng_BiomeType::Swamp;
+    Swamp.Temperature = 22.0f;
+    Swamp.Humidity = 0.95f;
+    Swamp.VegetationDensity = 0.7f;
+    Swamp.WaterAvailability = 1.0f;
+    BiomeDefinitions.Add(EEng_BiomeType::Swamp, Swamp);
+    
+    FEng_BiomeData Mountain;
+    Mountain.BiomeType = EEng_BiomeType::Mountain;
+    Mountain.Temperature = 5.0f;
+    Mountain.Humidity = 0.4f;
+    Mountain.VegetationDensity = 0.2f;
+    Mountain.WaterAvailability = 0.3f;
+    BiomeDefinitions.Add(EEng_BiomeType::Mountain, Mountain);
+    
+    FEng_BiomeData Coastal;
+    Coastal.BiomeType = EEng_BiomeType::Coastal;
+    Coastal.Temperature = 18.0f;
+    Coastal.Humidity = 0.8f;
+    Coastal.VegetationDensity = 0.6f;
+    Coastal.WaterAvailability = 0.8f;
+    BiomeDefinitions.Add(EEng_BiomeType::Coastal, Coastal);
+    
+    UE_LOG(LogTemp, Warning, TEXT("BiomeManager: Initialized %d default biomes"), BiomeDefinitions.Num());
+}
+
+void UBiomeManager::UpdateBiomeZoneCache()
+{
+    // Clear existing cache when biome zones change
+    BiomeCache.Empty();
+    EnvironmentCache.Empty();
+    
+    UE_LOG(LogTemp, Log, TEXT("BiomeManager: Updated biome zone cache - %d active zones"), ActiveBiomeZones.Num());
+}
+
+bool UBiomeManager::ValidateBiomeData(const FEng_BiomeData& BiomeData) const
+{
+    // Validate biome data ranges
     if (BiomeData.Temperature < -50.0f || BiomeData.Temperature > 60.0f)
     {
         return false;
     }
     
-    // Check humidity range
     if (BiomeData.Humidity < 0.0f || BiomeData.Humidity > 1.0f)
     {
         return false;
     }
     
-    // Check danger level range
-    if (BiomeData.DangerLevel < 0.0f || BiomeData.DangerLevel > 1.0f)
+    if (BiomeData.VegetationDensity < 0.0f || BiomeData.VegetationDensity > 1.0f)
     {
         return false;
     }
     
-    // Check name is not empty
-    if (BiomeData.BiomeName.IsEmpty())
+    if (BiomeData.WaterAvailability < 0.0f || BiomeData.WaterAvailability > 1.0f)
     {
         return false;
     }
     
     return true;
+}
+
+void UBiomeManager::LogBiomeSystemStatus() const
+{
+    UE_LOG(LogTemp, Warning, TEXT("=== BIOME SYSTEM STATUS ==="));
+    UE_LOG(LogTemp, Warning, TEXT("Registered biomes: %d"), BiomeDefinitions.Num());
+    UE_LOG(LogTemp, Warning, TEXT("Active biome zones: %d"), ActiveBiomeZones.Num());
+    UE_LOG(LogTemp, Warning, TEXT("Cached biome samples: %d"), BiomeCache.Num());
+    UE_LOG(LogTemp, Warning, TEXT("Biome resolution: %d units"), BiomeResolution);
+    UE_LOG(LogTemp, Warning, TEXT("Transition smoothness: %f"), BiomeTransitionSmoothness);
 }
