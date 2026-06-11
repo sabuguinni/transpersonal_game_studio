@@ -8,9 +8,9 @@
 #include "Core_PhysicsOptimizer.generated.h"
 
 /**
- * Core Physics Optimizer - Manages physics performance and LOD systems
- * Optimizes physics simulation based on distance, importance, and performance budget
- * Part of the Core Systems module for prehistoric survival game
+ * Core Physics Optimization System
+ * Manages physics performance, LOD systems, and collision optimization
+ * for the Transpersonal Game Studio prehistoric survival game.
  */
 UCLASS(ClassGroup=(TranspersonalGame), meta=(BlueprintSpawnableComponent))
 class TRANSPERSONALGAME_API UCore_PhysicsOptimizer : public UActorComponent
@@ -25,129 +25,117 @@ protected:
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 public:
-    // === PHYSICS LOD SYSTEM ===
+    // === PHYSICS PERFORMANCE SETTINGS ===
     
-    /** Distance thresholds for physics LOD levels */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics LOD")
-    float HighDetailDistance = 1000.0f;
+    /** Maximum number of physics objects to simulate simultaneously */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Performance")
+    int32 MaxPhysicsObjects = 500;
     
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics LOD")
-    float MediumDetailDistance = 2500.0f;
+    /** Distance threshold for physics LOD switching */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Performance")
+    float PhysicsLODDistance = 2000.0f;
     
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics LOD")
-    float LowDetailDistance = 5000.0f;
+    /** Enable physics object pooling for performance */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Performance")
+    bool bEnablePhysicsPooling = true;
     
-    /** Maximum number of high-detail physics objects */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics LOD")
-    int32 MaxHighDetailObjects = 50;
+    /** Physics simulation substeps for accuracy vs performance balance */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Performance")
+    int32 PhysicsSubsteps = 2;
     
-    /** Maximum number of medium-detail physics objects */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics LOD")
-    int32 MaxMediumDetailObjects = 100;
+    // === COLLISION OPTIMIZATION ===
+    
+    /** Enable collision complexity optimization */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision Optimization")
+    bool bOptimizeCollisionComplexity = true;
+    
+    /** Distance for collision detail reduction */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision Optimization")
+    float CollisionLODDistance = 1500.0f;
+    
+    /** Enable collision shape simplification */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision Optimization")
+    bool bSimplifyCollisionShapes = true;
     
     // === PERFORMANCE MONITORING ===
     
-    /** Target physics frame time in milliseconds */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float TargetPhysicsFrameTime = 8.33f; // 120Hz physics
-    
-    /** Current physics frame time */
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float CurrentPhysicsFrameTime = 0.0f;
+    /** Current physics frame time in milliseconds */
+    UPROPERTY(BlueprintReadOnly, Category = "Performance Monitoring")
+    float PhysicsFrameTime = 0.0f;
     
     /** Number of active physics objects */
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    UPROPERTY(BlueprintReadOnly, Category = "Performance Monitoring")
     int32 ActivePhysicsObjects = 0;
     
-    /** Physics performance budget (0.0 to 1.0) */
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float PhysicsPerformanceBudget = 1.0f;
+    /** Physics memory usage in MB */
+    UPROPERTY(BlueprintReadOnly, Category = "Performance Monitoring")
+    float PhysicsMemoryUsage = 0.0f;
     
-    // === OPTIMIZATION SETTINGS ===
+    // === OPTIMIZATION FUNCTIONS ===
     
-    /** Enable automatic physics LOD */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Optimization")
-    bool bEnablePhysicsLOD = true;
-    
-    /** Enable physics object culling */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Optimization")
-    bool bEnablePhysicsCulling = true;
-    
-    /** Enable adaptive physics timestep */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Optimization")
-    bool bEnableAdaptiveTimestep = true;
-    
-    /** Minimum physics timestep */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Optimization")
-    float MinPhysicsTimestep = 0.008333f; // 120Hz
-    
-    /** Maximum physics timestep */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Optimization")
-    float MaxPhysicsTimestep = 0.033333f; // 30Hz
-    
-    // === PHYSICS OPTIMIZATION FUNCTIONS ===
-    
-    /** Update physics LOD for all objects */
-    UFUNCTION(BlueprintCallable, Category = "Physics Optimization")
-    void UpdatePhysicsLOD();
-    
-    /** Optimize physics settings based on performance */
+    /** Optimize physics settings based on current performance */
     UFUNCTION(BlueprintCallable, Category = "Physics Optimization")
     void OptimizePhysicsSettings();
     
+    /** Update physics LOD based on distance */
+    UFUNCTION(BlueprintCallable, Category = "Physics Optimization")
+    void UpdatePhysicsLOD();
+    
+    /** Enable/disable physics for distant objects */
+    UFUNCTION(BlueprintCallable, Category = "Physics Optimization")
+    void ManageDistantPhysics();
+    
+    /** Optimize collision complexity for performance */
+    UFUNCTION(BlueprintCallable, Category = "Physics Optimization")
+    void OptimizeCollisionComplexity();
+    
     /** Get current physics performance metrics */
-    UFUNCTION(BlueprintCallable, Category = "Physics Optimization")
-    void GetPhysicsPerformanceMetrics(float& FrameTime, int32& ObjectCount, float& Budget);
+    UFUNCTION(BlueprintCallable, Category = "Performance Monitoring")
+    void UpdatePerformanceMetrics();
     
-    /** Set physics quality level (0=Low, 1=Medium, 2=High) */
+    /** Force physics cleanup and optimization */
     UFUNCTION(BlueprintCallable, Category = "Physics Optimization")
+    void ForcePhysicsCleanup();
+    
+    // === ADAPTIVE PERFORMANCE ===
+    
+    /** Automatically adjust physics quality based on performance */
+    UFUNCTION(BlueprintCallable, Category = "Adaptive Performance")
+    void AdaptPhysicsQuality();
+    
+    /** Set physics quality level (0=Low, 1=Medium, 2=High, 3=Ultra) */
+    UFUNCTION(BlueprintCallable, Category = "Adaptive Performance")
     void SetPhysicsQualityLevel(int32 QualityLevel);
-    
-    /** Enable/disable physics for specific object */
-    UFUNCTION(BlueprintCallable, Category = "Physics Optimization")
-    void SetObjectPhysicsEnabled(AActor* Actor, bool bEnabled);
-    
-    /** Get recommended physics settings for current performance */
-    UFUNCTION(BlueprintCallable, Category = "Physics Optimization")
-    void GetRecommendedPhysicsSettings(float& Gravity, float& Timestep, int32& MaxObjects);
 
 private:
     // === INTERNAL OPTIMIZATION DATA ===
     
-    /** Cached reference to physics settings */
-    UPROPERTY()
-    UPhysicsSettings* PhysicsSettings;
+    /** Timer for performance monitoring updates */
+    float PerformanceUpdateTimer = 0.0f;
     
-    /** List of physics objects being tracked */
-    UPROPERTY()
-    TArray<TWeakObjectPtr<AActor>> TrackedPhysicsObjects;
+    /** Target frame time for physics (16.67ms for 60fps) */
+    float TargetPhysicsFrameTime = 16.67f;
     
-    /** Performance history for adaptive optimization */
-    TArray<float> PerformanceHistory;
+    /** Current physics quality level */
+    int32 CurrentQualityLevel = 2;
     
-    /** Last optimization update time */
-    float LastOptimizationTime = 0.0f;
+    /** Physics objects currently being tracked */
+    TArray<TWeakObjectPtr<AActor>> TrackedPhysicsActors;
     
-    /** Optimization update interval */
-    float OptimizationInterval = 1.0f;
+    /** Last performance measurement time */
+    float LastPerformanceMeasurement = 0.0f;
     
-    // === INTERNAL OPTIMIZATION FUNCTIONS ===
+    // === INTERNAL HELPER FUNCTIONS ===
     
-    /** Update performance metrics */
-    void UpdatePerformanceMetrics();
+    /** Scan for physics objects in the world */
+    void ScanPhysicsObjects();
     
-    /** Apply physics LOD to specific object */
-    void ApplyPhysicsLOD(AActor* Actor, int32 LODLevel);
+    /** Apply LOD settings to a specific actor */
+    void ApplyPhysicsLOD(AActor* Actor, float Distance);
     
-    /** Calculate physics performance budget */
-    float CalculatePerformanceBudget();
+    /** Calculate distance-based physics quality */
+    int32 CalculatePhysicsQuality(float Distance);
     
-    /** Adjust physics timestep based on performance */
-    void AdjustPhysicsTimestep();
-    
-    /** Cull distant physics objects */
-    void CullDistantPhysicsObjects();
-    
-    /** Find all physics objects in world */
-    void RefreshPhysicsObjectList();
+    /** Update physics world settings */
+    void UpdatePhysicsWorldSettings();
 };
