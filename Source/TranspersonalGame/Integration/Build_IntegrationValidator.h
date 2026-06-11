@@ -7,16 +7,18 @@
 #include "Build_IntegrationValidator.generated.h"
 
 UENUM(BlueprintType)
-enum class EBuild_ValidationResult : uint8
+enum class EBuild_ValidationStatus : uint8
 {
-    Success     UMETA(DisplayName = "Success"),
-    Warning     UMETA(DisplayName = "Warning"),
-    Error       UMETA(DisplayName = "Error"),
+    Unknown     UMETA(DisplayName = "Unknown"),
+    Pending     UMETA(DisplayName = "Pending"),
+    Running     UMETA(DisplayName = "Running"),
+    Pass        UMETA(DisplayName = "Pass"),
+    Fail        UMETA(DisplayName = "Fail"),
     Critical    UMETA(DisplayName = "Critical")
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FBuild_ValidationReport
+struct FBuild_ValidationResult
 {
     GENERATED_BODY()
 
@@ -24,25 +26,25 @@ struct TRANSPERSONALGAME_API FBuild_ValidationReport
     FString TestName;
 
     UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    EBuild_ValidationResult Result;
+    EBuild_ValidationStatus Status;
 
     UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    FString Message;
+    FString ErrorMessage;
 
     UPROPERTY(BlueprintReadOnly, Category = "Validation")
     float ExecutionTime;
 
-    FBuild_ValidationReport()
+    FBuild_ValidationResult()
     {
         TestName = TEXT("");
-        Result = EBuild_ValidationResult::Success;
-        Message = TEXT("");
+        Status = EBuild_ValidationStatus::Unknown;
+        ErrorMessage = TEXT("");
         ExecutionTime = 0.0f;
     }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FBuild_ModuleStatus
+struct FBuild_ModuleStatus
 {
     GENERATED_BODY()
 
@@ -51,9 +53,6 @@ struct TRANSPERSONALGAME_API FBuild_ModuleStatus
 
     UPROPERTY(BlueprintReadOnly, Category = "Module")
     bool bIsLoaded;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Module")
-    bool bHasErrors;
 
     UPROPERTY(BlueprintReadOnly, Category = "Module")
     int32 ClassCount;
@@ -68,16 +67,15 @@ struct TRANSPERSONALGAME_API FBuild_ModuleStatus
     {
         ModuleName = TEXT("");
         bIsLoaded = false;
-        bHasErrors = false;
         ClassCount = 0;
     }
 };
 
 /**
- * Integration and Build Validation System
- * Validates compilation, module loading, and cross-system integration
+ * Integration Validator Component - Validates build integrity and module loading
+ * Used by Integration Agent #19 to ensure all systems integrate correctly
  */
-UCLASS(BlueprintType, Blueprintable)
+UCLASS(BlueprintType, Blueprintable, ClassGroup=(TranspersonalGame), meta=(BlueprintSpawnableComponent))
 class TRANSPERSONALGAME_API UBuild_IntegrationValidator : public UActorComponent
 {
     GENERATED_BODY()
@@ -89,100 +87,111 @@ protected:
     virtual void BeginPlay() override;
 
 public:
-    // Core validation functions
+    // === VALIDATION FUNCTIONS ===
+    
     UFUNCTION(BlueprintCallable, Category = "Integration", CallInEditor = true)
-    bool ValidateProjectStructure();
+    void RunFullValidation();
 
-    UFUNCTION(BlueprintCallable, Category = "Integration", CallInEditor = true)
+    UFUNCTION(BlueprintCallable, Category = "Integration")
     bool ValidateModuleLoading();
 
-    UFUNCTION(BlueprintCallable, Category = "Integration", CallInEditor = true)
+    UFUNCTION(BlueprintCallable, Category = "Integration")
     bool ValidateClassRegistration();
 
-    UFUNCTION(BlueprintCallable, Category = "Integration", CallInEditor = true)
-    bool ValidateCrossSystemIntegration();
-
-    UFUNCTION(BlueprintCallable, Category = "Integration", CallInEditor = true)
-    bool RunFullValidationSuite();
-
-    // Reporting functions
     UFUNCTION(BlueprintCallable, Category = "Integration")
-    TArray<FBuild_ValidationReport> GetValidationReports() const;
+    bool ValidateLevelIntegrity();
 
     UFUNCTION(BlueprintCallable, Category = "Integration")
-    TArray<FBuild_ModuleStatus> GetModuleStatuses() const;
+    bool ValidateActorSpawning();
 
     UFUNCTION(BlueprintCallable, Category = "Integration")
-    FString GenerateIntegrationReport() const;
+    void GenerateIntegrationReport();
 
-    // Build status functions
-    UFUNCTION(BlueprintCallable, Category = "Build", CallInEditor = true)
-    bool CheckCompilationStatus();
+    // === GETTERS ===
+    
+    UFUNCTION(BlueprintPure, Category = "Integration")
+    TArray<FBuild_ValidationResult> GetValidationResults() const { return ValidationResults; }
 
-    UFUNCTION(BlueprintCallable, Category = "Build", CallInEditor = true)
-    bool ValidateBinaryFiles();
+    UFUNCTION(BlueprintPure, Category = "Integration")
+    TArray<FBuild_ModuleStatus> GetModuleStatuses() const { return ModuleStatuses; }
 
-    UFUNCTION(BlueprintCallable, Category = "Build", CallInEditor = true)
-    bool TestActorSpawning();
+    UFUNCTION(BlueprintPure, Category = "Integration")
+    EBuild_ValidationStatus GetOverallStatus() const { return OverallStatus; }
+
+    UFUNCTION(BlueprintPure, Category = "Integration")
+    float GetValidationProgress() const { return ValidationProgress; }
 
 protected:
-    // Internal validation helpers
-    bool ValidateWorldGeneration();
-    bool ValidateCharacterSystems();
-    bool ValidateAISystems();
-    bool ValidateEnvironmentSystems();
-    bool ValidateQuestSystems();
+    // === VALIDATION DATA ===
+    
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    TArray<FBuild_ValidationResult> ValidationResults;
 
-    // Error tracking
-    void AddValidationReport(const FString& TestName, EBuild_ValidationResult Result, const FString& Message, float ExecutionTime = 0.0f);
-    void ClearValidationReports();
-
-private:
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Validation", meta = (AllowPrivateAccess = "true"))
-    TArray<FBuild_ValidationReport> ValidationReports;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Validation", meta = (AllowPrivateAccess = "true"))
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
     TArray<FBuild_ModuleStatus> ModuleStatuses;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings", meta = (AllowPrivateAccess = "true"))
-    bool bAutoValidateOnBeginPlay;
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    EBuild_ValidationStatus OverallStatus;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings", meta = (AllowPrivateAccess = "true"))
-    bool bLogDetailedResults;
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    float ValidationProgress;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings", meta = (AllowPrivateAccess = "true"))
-    float ValidationTimeout;
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    int32 TotalTests;
 
-public:
-    // Getters for private members
-    FORCEINLINE bool GetAutoValidateOnBeginPlay() const { return bAutoValidateOnBeginPlay; }
-    FORCEINLINE bool GetLogDetailedResults() const { return bLogDetailedResults; }
-    FORCEINLINE float GetValidationTimeout() const { return ValidationTimeout; }
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    int32 PassedTests;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    int32 FailedTests;
+
+    // === CONFIGURATION ===
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
+    TArray<FString> RequiredModules;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
+    TArray<FString> RequiredClasses;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
+    bool bAutoRunOnBeginPlay;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
+    bool bVerboseLogging;
+
+private:
+    // === INTERNAL VALIDATION METHODS ===
+    
+    FBuild_ValidationResult RunSingleTest(const FString& TestName, TFunction<bool()> TestFunction);
+    void LogValidationResult(const FBuild_ValidationResult& Result);
+    void UpdateValidationProgress();
+    void ResetValidationState();
 };
 
 /**
- * Actor that contains the Integration Validator component
- * Can be placed in levels for automated validation
+ * Integration Test Actor - Spawnable actor for integration testing
  */
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API ABuild_IntegrationValidatorActor : public AActor
+class TRANSPERSONALGAME_API ABuild_IntegrationTestActor : public AActor
 {
     GENERATED_BODY()
 
 public:
-    ABuild_IntegrationValidatorActor();
+    ABuild_IntegrationTestActor();
 
 protected:
     virtual void BeginPlay() override;
 
 public:
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Integration")
+    class UBuild_IntegrationValidator* IntegrationValidator;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Integration")
+    class UStaticMeshComponent* TestMesh;
+
     UFUNCTION(BlueprintCallable, Category = "Integration")
-    UBuild_IntegrationValidator* GetValidatorComponent() const;
+    void RunIntegrationTests();
 
-    UFUNCTION(BlueprintCallable, Category = "Integration", CallInEditor = true)
-    bool RunValidation();
-
-private:
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components", meta = (AllowPrivateAccess = "true"))
-    UBuild_IntegrationValidator* ValidatorComponent;
+    UFUNCTION(BlueprintImplementableEvent, Category = "Integration")
+    void OnValidationComplete(EBuild_ValidationStatus Status);
 };
