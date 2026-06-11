@@ -5,43 +5,38 @@
 #include "SharedTypes.h"
 #include "Narr_StoryManager.generated.h"
 
-UENUM(BlueprintType)
-enum class ENarr_StoryPhase : uint8
-{
-    Awakening       UMETA(DisplayName = "Awakening"),
-    FirstHunt       UMETA(DisplayName = "First Hunt"),
-    TribeContact    UMETA(DisplayName = "Tribe Contact"),
-    TerritoryWars   UMETA(DisplayName = "Territory Wars"),
-    AlphaChallenge  UMETA(DisplayName = "Alpha Challenge"),
-    Mastery         UMETA(DisplayName = "Mastery")
-};
+class UNarr_CharacterDialogue;
 
 USTRUCT(BlueprintType)
 struct TRANSPERSONALGAME_API FNarr_StoryEvent
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Story")
     FString EventID;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    FString EventDescription;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Story")
+    FText EventTitle;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    ENarr_StoryPhase RequiredPhase;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Story")
+    FText EventDescription;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Story")
     bool bIsCompleted;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    TArray<FString> Prerequisites;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Story")
+    TArray<FString> PrerequisiteEvents;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Story")
+    ESurvivalContext TriggerContext;
 
     FNarr_StoryEvent()
     {
         EventID = TEXT("");
-        EventDescription = TEXT("");
-        RequiredPhase = ENarr_StoryPhase::Awakening;
+        EventTitle = FText::FromString(TEXT("Unknown Event"));
+        EventDescription = FText::FromString(TEXT(""));
         bIsCompleted = false;
+        TriggerContext = ESurvivalContext::Normal;
     }
 };
 
@@ -51,46 +46,52 @@ class TRANSPERSONALGAME_API UNarr_StoryManager : public UGameInstanceSubsystem
     GENERATED_BODY()
 
 public:
+    UNarr_StoryManager();
+
+    // Subsystem interface
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Story")
+    TArray<FNarr_StoryEvent> StoryEvents;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Story")
+    TMap<FString, UNarr_CharacterDialogue*> CharacterDialogues;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Story")
+    int32 CurrentStoryPhase;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Story")
+    float SurvivalDaysElapsed;
 
     UFUNCTION(BlueprintCallable, Category = "Story")
-    void AdvanceStoryPhase();
+    void TriggerStoryEvent(const FString& EventID);
 
     UFUNCTION(BlueprintCallable, Category = "Story")
-    ENarr_StoryPhase GetCurrentStoryPhase() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Story")
-    void CompleteStoryEvent(const FString& EventID);
-
-    UFUNCTION(BlueprintCallable, Category = "Story")
-    bool IsStoryEventCompleted(const FString& EventID) const;
+    bool IsEventCompleted(const FString& EventID) const;
 
     UFUNCTION(BlueprintCallable, Category = "Story")
     TArray<FNarr_StoryEvent> GetAvailableEvents() const;
 
     UFUNCTION(BlueprintCallable, Category = "Story")
-    FString GetCurrentPhaseDescription() const;
+    UNarr_CharacterDialogue* GetCharacterDialogue(const FString& CharacterName) const;
 
     UFUNCTION(BlueprintCallable, Category = "Story")
-    void RegisterStoryEvent(const FNarr_StoryEvent& Event);
+    void RegisterCharacterDialogue(const FString& CharacterName, UNarr_CharacterDialogue* Dialogue);
 
     UFUNCTION(BlueprintCallable, Category = "Story")
-    float GetStoryProgress() const;
+    void AdvanceStoryPhase();
 
-protected:
-    UPROPERTY(BlueprintReadOnly, Category = "Story")
-    ENarr_StoryPhase CurrentPhase;
+    UFUNCTION(BlueprintCallable, Category = "Story")
+    void UpdateSurvivalTime(float DeltaTime);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    TMap<FString, FNarr_StoryEvent> StoryEvents;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Story")
-    int32 CompletedEventsCount;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Story")
-    int32 TotalEventsCount;
+    UFUNCTION(BlueprintCallable, Category = "Story")
+    FText GetCurrentStoryContext() const;
 
 private:
     void InitializeStoryEvents();
-    bool ArePrerequisitesMet(const FNarr_StoryEvent& Event) const;
+    void CheckEventTriggers();
+    
+    UPROPERTY()
+    TArray<FString> CompletedEvents;
 };
