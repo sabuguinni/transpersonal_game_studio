@@ -1,338 +1,147 @@
 #include "Narr_DialogueSystem.h"
 #include "Engine/Engine.h"
-#include "Engine/World.h"
-#include "GameFramework/Character.h"
-#include "Components/PrimitiveComponent.h"
-#include "Engine/TriggerVolume.h"
 #include "Kismet/GameplayStatics.h"
 
-// UNarr_DialogueComponent Implementation
-UNarr_DialogueComponent::UNarr_DialogueComponent()
+UNarr_DialogueSystem::UNarr_DialogueSystem()
 {
-    PrimaryComponentTick.bCanEverTick = false;
-    
-    CurrentState = ENarr_DialogueState::Inactive;
-    ActiveSequenceIndex = -1;
+    CurrentSequenceID = TEXT("");
     CurrentLineIndex = 0;
+    bDialogueActive = false;
+    DefaultDisplayDuration = 3.0f;
+    
+    InitializeDefaultDialogues();
 }
 
-void UNarr_DialogueComponent::BeginPlay()
+void UNarr_DialogueSystem::StartDialogueSequence(const FString& SequenceID)
 {
-    Super::BeginPlay();
-    
-    // Register with dialogue manager
-    if (UNarr_DialogueManager* DialogueManager = GetWorld()->GetGameInstance()->GetSubsystem<UNarr_DialogueManager>())
+    if (DialogueSequences.Contains(SequenceID))
     {
-        DialogueManager->RegisterDialogueComponent(this);
+        CurrentSequenceID = SequenceID;
+        CurrentLineIndex = 0;
+        bDialogueActive = true;
+        
+        UE_LOG(LogTemp, Warning, TEXT("Started dialogue sequence: %s"), *SequenceID);
     }
-    
-    // Initialize default dialogue sequences if empty
-    if (DialogueSequences.Num() == 0)
+    else
     {
-        // Create default tutorial dialogue
-        FNarr_DialogueSequence TutorialSequence;
-        TutorialSequence.SequenceID = TEXT("tutorial_basic");
-        TutorialSequence.TriggerType = ENarr_DialogueTriggerType::Tutorial;
-        TutorialSequence.bCanRepeat = true;
-        
-        FNarr_DialogueLine TutorialLine1;
-        TutorialLine1.SpeakerName = TEXT("Narrator");
-        TutorialLine1.DialogueText = FText::FromString(TEXT("Welcome to the ancient hunting grounds, survivor."));
-        TutorialLine1.DisplayDuration = 4.0f;
-        
-        FNarr_DialogueLine TutorialLine2;
-        TutorialLine2.SpeakerName = TEXT("Narrator");
-        TutorialLine2.DialogueText = FText::FromString(TEXT("Use WASD to move and Space to jump. Stay alert for predators."));
-        TutorialLine2.DisplayDuration = 5.0f;
-        
-        TutorialSequence.DialogueLines.Add(TutorialLine1);
-        TutorialSequence.DialogueLines.Add(TutorialLine2);
-        DialogueSequences.Add(TutorialSequence);
-        
-        // Create warning dialogue
-        FNarr_DialogueSequence WarningSequence;
-        WarningSequence.SequenceID = TEXT("warning_predator");
-        WarningSequence.TriggerType = ENarr_DialogueTriggerType::Warning;
-        WarningSequence.bCanRepeat = true;
-        
-        FNarr_DialogueLine WarningLine;
-        WarningLine.SpeakerName = TEXT("Tribal Guide");
-        WarningLine.DialogueText = FText::FromString(TEXT("Danger ahead! Massive predator tracks in the mud. Seek high ground or shelter."));
-        WarningLine.DisplayDuration = 6.0f;
-        
-        WarningSequence.DialogueLines.Add(WarningLine);
-        DialogueSequences.Add(WarningSequence);
+        UE_LOG(LogTemp, Error, TEXT("Dialogue sequence not found: %s"), *SequenceID);
     }
 }
 
-bool UNarr_DialogueComponent::StartDialogueSequence(const FString& SequenceID)
+void UNarr_DialogueSystem::StopCurrentDialogue()
 {
-    if (CurrentState == ENarr_DialogueState::InProgress)
-    {
-        return false; // Already in dialogue
-    }
-    
-    int32 SequenceIndex = FindSequenceIndex(SequenceID);
-    if (SequenceIndex == -1)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Dialogue sequence not found: %s"), *SequenceID);
-        return false;
-    }
-    
-    const FNarr_DialogueSequence& Sequence = DialogueSequences[SequenceIndex];
-    if (!ValidateSequenceRequirements(Sequence))
-    {
-        return false;
-    }
-    
-    ActiveSequenceIndex = SequenceIndex;
+    CurrentSequenceID = TEXT("");
     CurrentLineIndex = 0;
-    CurrentState = ENarr_DialogueState::InProgress;
+    bDialogueActive = false;
     
-    UE_LOG(LogTemp, Log, TEXT("Started dialogue sequence: %s"), *SequenceID);
-    return true;
+    UE_LOG(LogTemp, Warning, TEXT("Stopped current dialogue"));
 }
 
-bool UNarr_DialogueComponent::AdvanceDialogue()
+bool UNarr_DialogueSystem::IsDialogueActive() const
 {
-    if (CurrentState != ENarr_DialogueState::InProgress || ActiveSequenceIndex == -1)
-    {
-        return false;
-    }
-    
-    const FNarr_DialogueSequence& ActiveSequence = DialogueSequences[ActiveSequenceIndex];
-    
-    CurrentLineIndex++;
-    if (CurrentLineIndex >= ActiveSequence.DialogueLines.Num())
-    {
-        // End of sequence
-        EndDialogue();
-        return false;
-    }
-    
-    return true;
+    return bDialogueActive;
 }
 
-void UNarr_DialogueComponent::EndDialogue()
+void UNarr_DialogueSystem::RegisterDialogueSequence(const FNarr_DialogueSequence& Sequence)
 {
-    CurrentState = ENarr_DialogueState::Completed;
-    ActiveSequenceIndex = -1;
-    CurrentLineIndex = 0;
-    
-    UE_LOG(LogTemp, Log, TEXT("Dialogue sequence ended"));
+    DialogueSequences.Add(Sequence.SequenceID, Sequence);
+    UE_LOG(LogTemp, Warning, TEXT("Registered dialogue sequence: %s"), *Sequence.SequenceID);
 }
 
-bool UNarr_DialogueComponent::IsDialogueAvailable(const FString& SequenceID) const
+FNarr_DialogueLine UNarr_DialogueSystem::GetCurrentDialogueLine() const
 {
-    int32 SequenceIndex = FindSequenceIndex(SequenceID);
-    if (SequenceIndex == -1)
+    if (bDialogueActive && DialogueSequences.Contains(CurrentSequenceID))
     {
-        return false;
-    }
-    
-    return ValidateSequenceRequirements(DialogueSequences[SequenceIndex]);
-}
-
-FNarr_DialogueLine UNarr_DialogueComponent::GetCurrentDialogueLine() const
-{
-    if (CurrentState != ENarr_DialogueState::InProgress || ActiveSequenceIndex == -1)
-    {
-        return FNarr_DialogueLine(); // Return default empty line
-    }
-    
-    const FNarr_DialogueSequence& ActiveSequence = DialogueSequences[ActiveSequenceIndex];
-    if (CurrentLineIndex < ActiveSequence.DialogueLines.Num())
-    {
-        return ActiveSequence.DialogueLines[CurrentLineIndex];
+        const FNarr_DialogueSequence& CurrentSequence = DialogueSequences[CurrentSequenceID];
+        if (CurrentSequence.DialogueLines.IsValidIndex(CurrentLineIndex))
+        {
+            return CurrentSequence.DialogueLines[CurrentLineIndex];
+        }
     }
     
     return FNarr_DialogueLine();
 }
 
-void UNarr_DialogueComponent::AddDialogueSequence(const FNarr_DialogueSequence& NewSequence)
+void UNarr_DialogueSystem::AdvanceDialogue()
 {
-    DialogueSequences.Add(NewSequence);
-    UE_LOG(LogTemp, Log, TEXT("Added dialogue sequence: %s"), *NewSequence.SequenceID);
-}
-
-int32 UNarr_DialogueComponent::FindSequenceIndex(const FString& SequenceID) const
-{
-    for (int32 i = 0; i < DialogueSequences.Num(); i++)
-    {
-        if (DialogueSequences[i].SequenceID == SequenceID)
-        {
-            return i;
-        }
-    }
-    return -1;
-}
-
-bool UNarr_DialogueComponent::ValidateSequenceRequirements(const FNarr_DialogueSequence& Sequence) const
-{
-    // Check if required quest is completed (if specified)
-    if (!Sequence.RequiredQuestID.IsEmpty())
-    {
-        // TODO: Integrate with quest system to check quest status
-        // For now, assume requirements are met
-        UE_LOG(LogTemp, Log, TEXT("Quest requirement check for: %s"), *Sequence.RequiredQuestID);
-    }
-    
-    return true;
-}
-
-// ANarr_DialogueTrigger Implementation
-ANarr_DialogueTrigger::ANarr_DialogueTrigger()
-{
-    PrimaryActorTick.bCanEverTick = false;
-    
-    DialogueSequenceID = TEXT("tutorial_basic");
-    TriggerType = ENarr_DialogueTriggerType::Tutorial;
-    bCanRetrigger = false;
-    bHasTriggered = false;
-    
-    // Set up collision
-    if (GetCollisionComponent())
-    {
-        GetCollisionComponent()->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
-        GetCollisionComponent()->SetCollisionResponseToAllChannels(ECR_Ignore);
-        GetCollisionComponent()->SetCollisionResponseToChannel(ECC_Pawn, ECR_Overlap);
-    }
-}
-
-void ANarr_DialogueTrigger::BeginPlay()
-{
-    Super::BeginPlay();
-    
-    // Get reference to dialogue manager
-    DialogueManager = GetWorld()->GetGameInstance()->GetSubsystem<UNarr_DialogueManager>();
-    
-    // Bind overlap events
-    if (GetCollisionComponent())
-    {
-        GetCollisionComponent()->OnComponentBeginOverlap.AddDynamic(this, &ANarr_DialogueTrigger::OnOverlapBegin);
-    }
-}
-
-void ANarr_DialogueTrigger::OnOverlapBegin(UPrimitiveComponent* OverlappedComp, AActor* OtherActor, 
-                                          UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, 
-                                          bool bFromSweep, const FHitResult& SweepResult)
-{
-    // Check if it's the player character
-    if (!OtherActor || !OtherActor->IsA<ACharacter>())
+    if (!bDialogueActive || !DialogueSequences.Contains(CurrentSequenceID))
     {
         return;
     }
     
-    // Check if already triggered and can't retrigger
-    if (bHasTriggered && !bCanRetrigger)
-    {
-        return;
-    }
+    const FNarr_DialogueSequence& CurrentSequence = DialogueSequences[CurrentSequenceID];
+    CurrentLineIndex++;
     
-    // Check if dialogue manager is available
-    if (!DialogueManager)
+    if (CurrentLineIndex >= CurrentSequence.DialogueLines.Num())
     {
-        UE_LOG(LogTemp, Warning, TEXT("Dialogue manager not available"));
-        return;
-    }
-    
-    // Find dialogue component on this actor or create one
-    UNarr_DialogueComponent* DialogueComponent = GetComponentByClass<UNarr_DialogueComponent>();
-    if (!DialogueComponent)
-    {
-        // Create dialogue component if it doesn't exist
-        DialogueComponent = NewObject<UNarr_DialogueComponent>(this);
-        if (DialogueComponent)
+        // End of sequence
+        if (CurrentSequence.bIsRepeatable)
         {
-            DialogueComponent->RegisterComponent();
+            CurrentLineIndex = 0;
         }
-    }
-    
-    if (DialogueComponent)
-    {
-        bool bStarted = DialogueManager->StartDialogue(DialogueComponent, DialogueSequenceID);
-        if (bStarted)
+        else
         {
-            bHasTriggered = true;
-            UE_LOG(LogTemp, Log, TEXT("Dialogue triggered: %s"), *DialogueSequenceID);
+            StopCurrentDialogue();
         }
     }
 }
 
-// UNarr_DialogueManager Implementation
-void UNarr_DialogueManager::Initialize(FSubsystemCollectionBase& Collection)
+void UNarr_DialogueSystem::InitializeDefaultDialogues()
 {
-    Super::Initialize(Collection);
+    // Survival Tutorial Dialogue
+    FNarr_DialogueSequence TutorialSequence;
+    TutorialSequence.SequenceID = TEXT("SurvivalTutorial");
+    TutorialSequence.bIsRepeatable = false;
     
-    ActiveDialogueComponent = nullptr;
+    FNarr_DialogueLine Line1;
+    Line1.SpeakerName = TEXT("Elder Hunter");
+    Line1.DialogueText = TEXT("Stay low, newcomer. The great beasts hunt these grounds.");
+    Line1.DisplayDuration = 4.0f;
+    TutorialSequence.DialogueLines.Add(Line1);
     
-    UE_LOG(LogTemp, Log, TEXT("Dialogue Manager initialized"));
-}
-
-void UNarr_DialogueManager::RegisterDialogueComponent(UNarr_DialogueComponent* Component)
-{
-    if (Component && !RegisteredComponents.Contains(Component))
-    {
-        RegisteredComponents.Add(Component);
-        UE_LOG(LogTemp, Log, TEXT("Registered dialogue component"));
-    }
-}
-
-void UNarr_DialogueManager::UnregisterDialogueComponent(UNarr_DialogueComponent* Component)
-{
-    if (Component)
-    {
-        RegisteredComponents.Remove(Component);
-        if (ActiveDialogueComponent == Component)
-        {
-            ActiveDialogueComponent = nullptr;
-        }
-        UE_LOG(LogTemp, Log, TEXT("Unregistered dialogue component"));
-    }
-}
-
-bool UNarr_DialogueManager::StartDialogue(UNarr_DialogueComponent* Component, const FString& SequenceID)
-{
-    if (!Component)
-    {
-        return false;
-    }
+    FNarr_DialogueLine Line2;
+    Line2.SpeakerName = TEXT("Elder Hunter");
+    Line2.DialogueText = TEXT("Follow the river stones to shelter before the sun sets.");
+    Line2.DisplayDuration = 4.0f;
+    TutorialSequence.DialogueLines.Add(Line2);
     
-    // End current dialogue if active
-    if (ActiveDialogueComponent && ActiveDialogueComponent != Component)
-    {
-        ActiveDialogueComponent->EndDialogue();
-    }
+    RegisterDialogueSequence(TutorialSequence);
     
-    // Start new dialogue
-    bool bStarted = Component->StartDialogueSequence(SequenceID);
-    if (bStarted)
-    {
-        ActiveDialogueComponent = Component;
-    }
+    // Danger Warning Dialogue
+    FNarr_DialogueSequence DangerSequence;
+    DangerSequence.SequenceID = TEXT("DangerWarning");
+    DangerSequence.bIsRepeatable = true;
     
-    return bStarted;
-}
-
-UNarr_DialogueComponent* UNarr_DialogueManager::GetActiveDialogueComponent() const
-{
-    return ActiveDialogueComponent;
-}
-
-bool UNarr_DialogueManager::IsDialogueActive() const
-{
-    return ActiveDialogueComponent != nullptr && 
-           ActiveDialogueComponent->CurrentState == ENarr_DialogueState::InProgress;
-}
-
-void UNarr_DialogueManager::LoadDialogueSequences(UDataTable* DialogueTable)
-{
-    if (!DialogueTable)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Invalid dialogue data table"));
-        return;
-    }
+    FNarr_DialogueLine Warning1;
+    Warning1.SpeakerName = TEXT("Scout");
+    Warning1.DialogueText = TEXT("Warning! Thunderfoot approaches from the eastern ridge.");
+    Warning1.DisplayDuration = 3.5f;
+    DangerSequence.DialogueLines.Add(Warning1);
     
-    // TODO: Implement data table loading for dialogue sequences
-    UE_LOG(LogTemp, Log, TEXT("Loading dialogue sequences from data table"));
+    FNarr_DialogueLine Warning2;
+    Warning2.SpeakerName = TEXT("Scout");
+    Warning2.DialogueText = TEXT("Seek shelter in the caves until it passes.");
+    Warning2.DisplayDuration = 3.0f;
+    DangerSequence.DialogueLines.Add(Warning2);
+    
+    RegisterDialogueSequence(DangerSequence);
+    
+    // Discovery Dialogue
+    FNarr_DialogueSequence DiscoverySequence;
+    DiscoverySequence.SequenceID = TEXT("FirstDiscovery");
+    DiscoverySequence.bIsRepeatable = false;
+    
+    FNarr_DialogueLine Discovery1;
+    Discovery1.SpeakerName = TEXT("Explorer");
+    Discovery1.DialogueText = TEXT("These ancient hunting grounds stretch beyond the horizon.");
+    Discovery1.DisplayDuration = 4.0f;
+    DiscoverySequence.DialogueLines.Add(Discovery1);
+    
+    FNarr_DialogueLine Discovery2;
+    Discovery2.SpeakerName = TEXT("Explorer");
+    Discovery2.DialogueText = TEXT("The river runs red with danger - massive predator tracks everywhere.");
+    Discovery2.DisplayDuration = 4.5f;
+    DiscoverySequence.DialogueLines.Add(Discovery2);
+    
+    RegisterDialogueSequence(DiscoverySequence);
 }
