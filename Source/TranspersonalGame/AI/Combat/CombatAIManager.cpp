@@ -1,338 +1,444 @@
 #include "CombatAIManager.h"
 #include "Engine/World.h"
-#include "TimerManager.h"
+#include "GameFramework/Pawn.h"
+#include "AIController.h"
+#include "BehaviorTree/BlackboardComponent.h"
+#include "BehaviorTree/BehaviorTreeComponent.h"
+#include "Perception/AIPerceptionComponent.h"
 #include "Kismet/GameplayStatics.h"
 #include "Engine/Engine.h"
 #include "DrawDebugHelpers.h"
 
-ACombatAIManager::ACombatAIManager()
+UCombatAIManager::UCombatAIManager()
 {
-    PrimaryActorTick.bCanEverTick = true;
-    PrimaryActorTick.TickInterval = 0.1f;
+    PrimaryComponentTick.bCanEverTick = true;
+    PrimaryComponentTick.TickInterval = 0.1f;
 
-    // Initialize default values
-    ThreatUpdateInterval = 1.0f;
-    MaxCombatRange = 5000.0f;
-    FlankingAngle = 45.0f;
-    RetreatHealthThreshold = 0.3f;
+    CurrentThreatLevel = ECombat_ThreatLevel::None;
+    CurrentAIState = ECombat_AIState::Idle;
+    CurrentTarget = nullptr;
+    OwnerAIController = nullptr;
+    BehaviorTreeComponent = nullptr;
+    BlackboardComponent = nullptr;
+    
+    ThreatScanInterval = 0.5f;
+    LastThreatScanTime = 0.0f;
+    TacticalUpdateInterval = 1.0f;
+    LastTacticalUpdateTime = 0.0f;
 }
 
-void ACombatAIManager::BeginPlay()
+void UCombatAIManager::BeginPlay()
 {
     Super::BeginPlay();
 
-    // Start threat assessment timer
-    if (GetWorld())
+    // Initialize AI components
+    if (APawn* OwnerPawn = Cast<APawn>(GetOwner()))
     {
-        GetWorld()->GetTimerManager().SetTimer(
-            ThreatAssessmentTimer,
-            this,
-            &ACombatAIManager::UpdateThreatAssessments,
-            ThreatUpdateInterval,
-            true
-        );
-    }
-
-    UE_LOG(LogTemp, Warning, TEXT("CombatAIManager initialized and active"));
-}
-
-void ACombatAIManager::Tick(float DeltaTime)
-{
-    Super::Tick(DeltaTime);
-    ProcessCombatLogic();
-}
-
-FCombat_ThreatAssessment ACombatAIManager::AssessThreat(AActor* PotentialThreat, AActor* Assessor)
-{
-    FCombat_ThreatAssessment Assessment;
-
-    if (!PotentialThreat || !Assessor)
-    {
-        return Assessment;
-    }
-
-    // Calculate distance
-    float Distance = FVector::Dist(PotentialThreat->GetActorLocation(), Assessor->GetActorLocation());
-    Assessment.ThreatDistance = Distance;
-    Assessment.ThreatSource = PotentialThreat;
-
-    // Calculate threat score
-    float ThreatScore = CalculateThreatScore(PotentialThreat, Assessor);
-
-    // Determine threat level based on distance and score
-    if (Distance > MaxCombatRange)
-    {
-        Assessment.ThreatLevel = ECombat_ThreatLevel::None;
-    }
-    else if (ThreatScore > 0.8f)
-    {
-        Assessment.ThreatLevel = ECombat_ThreatLevel::Critical;
-    }
-    else if (ThreatScore > 0.6f)
-    {
-        Assessment.ThreatLevel = ECombat_ThreatLevel::High;
-    }
-    else if (ThreatScore > 0.4f)
-    {
-        Assessment.ThreatLevel = ECombat_ThreatLevel::Medium;
-    }
-    else if (ThreatScore > 0.2f)
-    {
-        Assessment.ThreatLevel = ECombat_ThreatLevel::Low;
-    }
-
-    Assessment.AggressionModifier = ThreatScore;
-
-    return Assessment;
-}
-
-void ACombatAIManager::RegisterCombatant(AActor* Combatant)
-{
-    if (Combatant && IsValidCombatant(Combatant))
-    {
-        ActiveCombatants.AddUnique(Combatant);
-        UE_LOG(LogTemp, Log, TEXT("Registered combatant: %s"), *Combatant->GetName());
-    }
-}
-
-void ACombatAIManager::UnregisterCombatant(AActor* Combatant)
-{
-    if (Combatant)
-    {
-        ActiveCombatants.Remove(Combatant);
-        ThreatAssessments.Remove(Combatant);
-        UE_LOG(LogTemp, Log, TEXT("Unregistered combatant: %s"), *Combatant->GetName());
-    }
-}
-
-TArray<AActor*> ACombatAIManager::GetNearbyThreats(AActor* Assessor, float SearchRadius)
-{
-    TArray<AActor*> NearbyThreats;
-
-    if (!Assessor)
-    {
-        return NearbyThreats;
-    }
-
-    FVector AssessorLocation = Assessor->GetActorLocation();
-
-    for (AActor* Combatant : ActiveCombatants)
-    {
-        if (Combatant && Combatant != Assessor)
+        OwnerAIController = Cast<AAIController>(OwnerPawn->GetController());
+        if (OwnerAIController)
         {
-            float Distance = FVector::Dist(Combatant->GetActorLocation(), AssessorLocation);
-            if (Distance <= SearchRadius)
-            {
-                NearbyThreats.Add(Combatant);
-            }
+            BehaviorTreeComponent = OwnerAIController->GetBehaviorTreeComponent();
+            BlackboardComponent = OwnerAIController->GetBlackboardComponent();
         }
     }
 
-    return NearbyThreats;
+    // Set initial state
+    SetAIState(ECombat_AIState::Patrol);
 }
 
-void ACombatAIManager::InitiateCombatEncounter(AActor* Aggressor, AActor* Target)
+void UCombatAIManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
-    if (!Aggressor || !Target)
-    {
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+
+    if (!GetWorld())
         return;
+
+    float CurrentTime = GetWorld()->GetTimeSeconds();
+
+    // Periodic threat scanning
+    if (CurrentTime - LastThreatScanTime >= ThreatScanInterval)
+    {
+        ScanForThreats();
+        LastThreatScanTime = CurrentTime;
     }
 
-    UE_LOG(LogTemp, Warning, TEXT("Combat initiated: %s vs %s"), 
-           *Aggressor->GetName(), *Target->GetName());
+    // Periodic tactical updates
+    if (CurrentTime - LastTacticalUpdateTime >= TacticalUpdateInterval)
+    {
+        UpdateTacticalSituation();
+        LastTacticalUpdateTime = CurrentTime;
+    }
 
-    // Register both as combatants if not already registered
-    RegisterCombatant(Aggressor);
-    RegisterCombatant(Target);
-
-    // Assess mutual threats
-    FCombat_ThreatAssessment AggressorThreat = AssessThreat(Target, Aggressor);
-    FCombat_ThreatAssessment TargetThreat = AssessThreat(Aggressor, Target);
-
-    ThreatAssessments.Add(Aggressor, AggressorThreat);
-    ThreatAssessments.Add(Target, TargetThreat);
+    // Clean up invalid threats
+    CleanupInvalidThreats();
 }
 
-void ACombatAIManager::EndCombatEncounter(AActor* Combatant)
+void UCombatAIManager::InitializeCombatAI(AAIController* AIController)
 {
-    if (Combatant)
+    OwnerAIController = AIController;
+    if (OwnerAIController)
     {
-        ThreatAssessments.Remove(Combatant);
-        UE_LOG(LogTemp, Log, TEXT("Combat ended for: %s"), *Combatant->GetName());
-    }
-}
-
-FVector ACombatAIManager::CalculateFlankingPosition(AActor* Attacker, AActor* Target)
-{
-    if (!Attacker || !Target)
-    {
-        return FVector::ZeroVector;
-    }
-
-    FVector TargetLocation = Target->GetActorLocation();
-    FVector AttackerLocation = Attacker->GetActorLocation();
-    FVector DirectionToTarget = (TargetLocation - AttackerLocation).GetSafeNormal();
-
-    // Calculate flanking position at 45-degree angle
-    FVector FlankDirection = DirectionToTarget.RotateAngleAxis(FlankingAngle, FVector::UpVector);
-    FVector FlankingPosition = TargetLocation + (FlankDirection * 800.0f);
-
-    return FlankingPosition;
-}
-
-bool ACombatAIManager::ShouldRetreat(AActor* Combatant)
-{
-    if (!Combatant)
-    {
-        return false;
-    }
-
-    // Check if combatant has health component and is below threshold
-    // This is a simplified check - in practice would use actual health component
-    FCombat_ThreatAssessment* Assessment = ThreatAssessments.Find(Combatant);
-    if (Assessment && Assessment->ThreatLevel == ECombat_ThreatLevel::Critical)
-    {
-        return true;
-    }
-
-    return false;
-}
-
-void ACombatAIManager::CoordinatePackAttack(TArray<AActor*> PackMembers, AActor* Target)
-{
-    if (!Target || PackMembers.Num() == 0)
-    {
-        return;
-    }
-
-    UE_LOG(LogTemp, Warning, TEXT("Coordinating pack attack with %d members against %s"), 
-           PackMembers.Num(), *Target->GetName());
-
-    // Assign roles to pack members
-    for (int32 i = 0; i < PackMembers.Num(); i++)
-    {
-        AActor* PackMember = PackMembers[i];
-        if (!PackMember)
-        {
-            continue;
-        }
-
-        FVector FlankingPos = CalculateFlankingPosition(PackMember, Target);
+        BehaviorTreeComponent = OwnerAIController->GetBehaviorTreeComponent();
+        BlackboardComponent = OwnerAIController->GetBlackboardComponent();
         
-        // In a real implementation, this would send commands to AI controllers
-        // For now, we log the tactical positioning
-        UE_LOG(LogTemp, Log, TEXT("Pack member %s assigned flanking position"), 
-               *PackMember->GetName());
+        UE_LOG(LogTemp, Warning, TEXT("CombatAIManager: Initialized for %s"), 
+               *GetOwner()->GetName());
     }
 }
 
-void ACombatAIManager::UpdateThreatAssessments()
+void UCombatAIManager::SetThreatLevel(ECombat_ThreatLevel NewThreatLevel)
 {
-    // Update threat assessments for all active combatants
-    for (AActor* Combatant : ActiveCombatants)
+    if (CurrentThreatLevel != NewThreatLevel)
     {
-        if (!IsValid(Combatant))
-        {
-            continue;
-        }
-
-        TArray<AActor*> NearbyThreats = GetNearbyThreats(Combatant, MaxCombatRange);
+        CurrentThreatLevel = NewThreatLevel;
+        UpdateBlackboardValues();
         
-        // Find the highest threat
-        FCombat_ThreatAssessment HighestThreat;
-        for (AActor* Threat : NearbyThreats)
+        // React to threat level changes
+        switch (NewThreatLevel)
         {
-            FCombat_ThreatAssessment CurrentThreat = AssessThreat(Threat, Combatant);
-            if (CurrentThreat.ThreatLevel > HighestThreat.ThreatLevel)
-            {
-                HighestThreat = CurrentThreat;
-            }
-        }
-
-        ThreatAssessments.Add(Combatant, HighestThreat);
-    }
-}
-
-void ACombatAIManager::ProcessCombatLogic()
-{
-    // Process combat logic for all active combatants
-    for (AActor* Combatant : ActiveCombatants)
-    {
-        if (!IsValid(Combatant))
-        {
-            continue;
-        }
-
-        FCombat_ThreatAssessment* Assessment = ThreatAssessments.Find(Combatant);
-        if (!Assessment)
-        {
-            continue;
-        }
-
-        // Check if should retreat
-        if (ShouldRetreat(Combatant))
-        {
-            UE_LOG(LogTemp, Log, TEXT("%s should retreat"), *Combatant->GetName());
-        }
-
-        // Process threat response based on level
-        switch (Assessment->ThreatLevel)
-        {
-            case ECombat_ThreatLevel::Critical:
-                // Engage in combat or flee
-                break;
-            case ECombat_ThreatLevel::High:
-                // Prepare for combat
-                break;
-            case ECombat_ThreatLevel::Medium:
-                // Stay alert
+            case ECombat_ThreatLevel::None:
+                SetAIState(ECombat_AIState::Patrol);
                 break;
             case ECombat_ThreatLevel::Low:
-                // Monitor situation
+                SetAIState(ECombat_AIState::Alert);
                 break;
-            case ECombat_ThreatLevel::None:
-                // Return to normal behavior
+            case ECombat_ThreatLevel::Medium:
+            case ECombat_ThreatLevel::High:
+                SetAIState(ECombat_AIState::Combat);
+                break;
+            case ECombat_ThreatLevel::Critical:
+                if (TacticalData.FleeThreshold > 0.7f)
+                {
+                    SetAIState(ECombat_AIState::Flee);
+                }
+                else
+                {
+                    SetAIState(ECombat_AIState::Combat);
+                    if (TacticalData.bCanCallForHelp)
+                    {
+                        CallForHelp(GetOwner()->GetActorLocation(), NewThreatLevel);
+                    }
+                }
                 break;
         }
     }
 }
 
-float ACombatAIManager::CalculateThreatScore(AActor* Threat, AActor* Assessor)
+void UCombatAIManager::SetAIState(ECombat_AIState NewState)
 {
-    if (!Threat || !Assessor)
+    if (CurrentAIState != NewState)
     {
-        return 0.0f;
+        CurrentAIState = NewState;
+        UpdateBlackboardValues();
+        
+        UE_LOG(LogTemp, Log, TEXT("CombatAIManager: %s changed state to %d"), 
+               *GetOwner()->GetName(), (int32)NewState);
     }
-
-    float ThreatScore = 0.0f;
-    float Distance = FVector::Dist(Threat->GetActorLocation(), Assessor->GetActorLocation());
-
-    // Distance factor (closer = more threatening)
-    float DistanceFactor = FMath::Clamp(1.0f - (Distance / MaxCombatRange), 0.0f, 1.0f);
-    ThreatScore += DistanceFactor * 0.4f;
-
-    // Size factor (larger = more threatening)
-    FVector ThreatScale = Threat->GetActorScale3D();
-    float SizeFactor = FMath::Clamp(ThreatScale.Size() / 3.0f, 0.0f, 1.0f);
-    ThreatScore += SizeFactor * 0.3f;
-
-    // Movement factor (moving towards = more threatening)
-    FVector ThreatVelocity = Threat->GetVelocity();
-    FVector DirectionToAssessor = (Assessor->GetActorLocation() - Threat->GetActorLocation()).GetSafeNormal();
-    float MovementFactor = FMath::Max(0.0f, FVector::DotProduct(ThreatVelocity.GetSafeNormal(), DirectionToAssessor));
-    ThreatScore += MovementFactor * 0.3f;
-
-    return FMath::Clamp(ThreatScore, 0.0f, 1.0f);
 }
 
-bool ACombatAIManager::IsValidCombatant(AActor* Actor)
+void UCombatAIManager::UpdateTacticalSituation()
 {
-    if (!Actor)
+    if (!GetWorld() || !GetOwner())
+        return;
+
+    // Assess current threats
+    ECombat_ThreatLevel HighestThreat = ECombat_ThreatLevel::None;
+    AActor* PrimaryThreat = nullptr;
+
+    for (AActor* Threat : KnownThreats)
     {
-        return false;
+        if (!IsValid(Threat))
+            continue;
+
+        ECombat_ThreatLevel ThreatLevel = AssessThreat(Threat);
+        if (ThreatLevel > HighestThreat)
+        {
+            HighestThreat = ThreatLevel;
+            PrimaryThreat = Threat;
+        }
     }
 
-    // Check if actor is a pawn or has combat-relevant components
-    return Actor->IsA<APawn>() || Actor->GetName().Contains(TEXT("Dino")) || 
-           Actor->GetName().Contains(TEXT("Character"));
+    // Update current target and threat level
+    CurrentTarget = PrimaryThreat;
+    SetThreatLevel(HighestThreat);
+
+    // Execute tactical decision based on current situation
+    ExecuteTacticalDecision();
+}
+
+void UCombatAIManager::ExecuteTacticalDecision()
+{
+    if (!CurrentTarget || CurrentAIState == ECombat_AIState::Idle)
+        return;
+
+    float DistanceToTarget = FVector::Dist(GetOwner()->GetActorLocation(), CurrentTarget->GetActorLocation());
+
+    switch (CurrentAIState)
+    {
+        case ECombat_AIState::Combat:
+            if (DistanceToTarget <= TacticalData.AttackRange)
+            {
+                ExecuteAttack(CurrentTarget);
+            }
+            else if (TacticalData.PackCoordination > 0.5f && PackMembers.Num() > 0)
+            {
+                ExecuteFlank(CurrentTarget);
+            }
+            break;
+
+        case ECombat_AIState::Flee:
+            ExecuteFlee(CurrentTarget->GetActorLocation());
+            break;
+
+        case ECombat_AIState::Hunt:
+            if (DistanceToTarget > TacticalData.AttackRange * 2.0f)
+            {
+                // Move closer to target
+                if (OwnerAIController && OwnerAIController->GetPawn())
+                {
+                    OwnerAIController->MoveToLocation(CurrentTarget->GetActorLocation());
+                }
+            }
+            break;
+    }
+}
+
+ECombat_ThreatLevel UCombatAIManager::AssessThreat(AActor* Target)
+{
+    if (!IsValid(Target) || !GetOwner())
+        return ECombat_ThreatLevel::None;
+
+    float Distance = FVector::Dist(GetOwner()->GetActorLocation(), Target->GetActorLocation());
+    
+    // Distance-based threat assessment
+    if (Distance > 2000.0f)
+        return ECombat_ThreatLevel::None;
+    else if (Distance > 1000.0f)
+        return ECombat_ThreatLevel::Low;
+    else if (Distance > 500.0f)
+        return ECombat_ThreatLevel::Medium;
+    else if (Distance > 200.0f)
+        return ECombat_ThreatLevel::High;
+    else
+        return ECombat_ThreatLevel::Critical;
+}
+
+void UCombatAIManager::ScanForThreats()
+{
+    if (!GetWorld() || !GetOwner())
+        return;
+
+    // Find all pawns within scan radius
+    TArray<AActor*> FoundActors;
+    UGameplayStatics::GetAllActorsOfClass(GetWorld(), APawn::StaticClass(), FoundActors);
+
+    for (AActor* Actor : FoundActors)
+    {
+        if (!IsValidThreat(Actor))
+            continue;
+
+        float Distance = FVector::Dist(GetOwner()->GetActorLocation(), Actor->GetActorLocation());
+        if (Distance <= 1500.0f) // Scan radius
+        {
+            RegisterThreat(Actor, AssessThreat(Actor));
+        }
+    }
+}
+
+void UCombatAIManager::RegisterThreat(AActor* ThreatActor, ECombat_ThreatLevel ThreatLevel)
+{
+    if (!IsValid(ThreatActor) || ThreatLevel == ECombat_ThreatLevel::None)
+        return;
+
+    KnownThreats.AddUnique(ThreatActor);
+    
+    UE_LOG(LogTemp, Log, TEXT("CombatAIManager: %s registered threat %s with level %d"), 
+           *GetOwner()->GetName(), *ThreatActor->GetName(), (int32)ThreatLevel);
+}
+
+void UCombatAIManager::CallForHelp(const FVector& Location, ECombat_ThreatLevel ThreatLevel)
+{
+    if (!TacticalData.bCanCallForHelp)
+        return;
+
+    TArray<AActor*> NearbyAllies = FindNearbyAllies(TacticalData.HelpRadius);
+    
+    for (AActor* Ally : NearbyAllies)
+    {
+        if (UCombatAIManager* AllyCombatAI = Ally->FindComponentByClass<UCombatAIManager>())
+        {
+            AllyCombatAI->RespondToHelpCall(Location, GetOwner());
+        }
+    }
+
+    UE_LOG(LogTemp, Warning, TEXT("CombatAIManager: %s called for help, %d allies responded"), 
+           *GetOwner()->GetName(), NearbyAllies.Num());
+}
+
+void UCombatAIManager::RespondToHelpCall(const FVector& Location, AActor* Caller)
+{
+    if (CurrentAIState == ECombat_AIState::Combat || CurrentAIState == ECombat_AIState::Flee)
+        return; // Already engaged
+
+    // Move towards the help location
+    if (OwnerAIController && OwnerAIController->GetPawn())
+    {
+        OwnerAIController->MoveToLocation(Location);
+        SetAIState(ECombat_AIState::Alert);
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("CombatAIManager: %s responding to help call from %s"), 
+           *GetOwner()->GetName(), Caller ? *Caller->GetName() : TEXT("Unknown"));
+}
+
+TArray<AActor*> UCombatAIManager::FindNearbyAllies(float SearchRadius)
+{
+    TArray<AActor*> Allies;
+    
+    if (!GetWorld() || !GetOwner())
+        return Allies;
+
+    TArray<AActor*> FoundActors;
+    UGameplayStatics::GetAllActorsOfClass(GetWorld(), GetOwner()->GetClass(), FoundActors);
+
+    for (AActor* Actor : FoundActors)
+    {
+        if (Actor == GetOwner() || !IsValid(Actor))
+            continue;
+
+        float Distance = FVector::Dist(GetOwner()->GetActorLocation(), Actor->GetActorLocation());
+        if (Distance <= SearchRadius)
+        {
+            Allies.Add(Actor);
+        }
+    }
+
+    return Allies;
+}
+
+void UCombatAIManager::ExecuteAttack(AActor* Target)
+{
+    if (!IsValid(Target) || !OwnerAIController)
+        return;
+
+    // Basic attack implementation - move to target
+    OwnerAIController->MoveToLocation(Target->GetActorLocation());
+    
+    UE_LOG(LogTemp, Warning, TEXT("CombatAIManager: %s attacking %s"), 
+           *GetOwner()->GetName(), *Target->GetName());
+}
+
+void UCombatAIManager::ExecuteFlee(const FVector& DangerLocation)
+{
+    if (!OwnerAIController || !GetOwner())
+        return;
+
+    FVector FleeDirection = CalculateFleeDirection(DangerLocation);
+    FVector FleeLocation = GetOwner()->GetActorLocation() + (FleeDirection * 1000.0f);
+    
+    OwnerAIController->MoveToLocation(FleeLocation);
+    
+    UE_LOG(LogTemp, Warning, TEXT("CombatAIManager: %s fleeing from danger"), 
+           *GetOwner()->GetName());
+}
+
+void UCombatAIManager::ExecuteFlank(AActor* Target)
+{
+    if (!IsValid(Target) || !OwnerAIController)
+        return;
+
+    FVector FlankPosition = CalculateFlankPosition(Target);
+    OwnerAIController->MoveToLocation(FlankPosition);
+    
+    UE_LOG(LogTemp, Log, TEXT("CombatAIManager: %s flanking %s"), 
+           *GetOwner()->GetName(), *Target->GetName());
+}
+
+void UCombatAIManager::ExecuteAmbush(const FVector& AmbushLocation)
+{
+    if (!OwnerAIController)
+        return;
+
+    OwnerAIController->MoveToLocation(AmbushLocation);
+    SetAIState(ECombat_AIState::Hunt);
+    
+    UE_LOG(LogTemp, Log, TEXT("CombatAIManager: %s setting up ambush"), 
+           *GetOwner()->GetName());
+}
+
+void UCombatAIManager::UpdateBlackboardValues()
+{
+    if (!BlackboardComponent)
+        return;
+
+    BlackboardComponent->SetValueAsEnum(TEXT("ThreatLevel"), (uint8)CurrentThreatLevel);
+    BlackboardComponent->SetValueAsEnum(TEXT("AIState"), (uint8)CurrentAIState);
+    
+    if (CurrentTarget)
+    {
+        BlackboardComponent->SetValueAsObject(TEXT("CurrentTarget"), CurrentTarget);
+        BlackboardComponent->SetValueAsVector(TEXT("TargetLocation"), CurrentTarget->GetActorLocation());
+    }
+    else
+    {
+        BlackboardComponent->ClearValue(TEXT("CurrentTarget"));
+        BlackboardComponent->ClearValue(TEXT("TargetLocation"));
+    }
+}
+
+bool UCombatAIManager::IsValidThreat(AActor* PotentialThreat) const
+{
+    if (!IsValid(PotentialThreat) || PotentialThreat == GetOwner())
+        return false;
+
+    // Check if it's a player character or different species
+    APawn* ThreatPawn = Cast<APawn>(PotentialThreat);
+    if (!ThreatPawn)
+        return false;
+
+    // Simple threat validation - different class or player controlled
+    return (ThreatPawn->GetClass() != GetOwner()->GetClass()) || ThreatPawn->IsPlayerControlled();
+}
+
+FVector UCombatAIManager::CalculateFlankPosition(AActor* Target)
+{
+    if (!IsValid(Target) || !GetOwner())
+        return GetOwner()->GetActorLocation();
+
+    FVector ToTarget = (Target->GetActorLocation() - GetOwner()->GetActorLocation()).GetSafeNormal();
+    FVector RightVector = FVector::CrossProduct(ToTarget, FVector::UpVector).GetSafeNormal();
+    
+    // Choose random side for flanking
+    float FlankSide = FMath::RandBool() ? 1.0f : -1.0f;
+    FVector FlankDirection = RightVector * FlankSide;
+    
+    return Target->GetActorLocation() + (FlankDirection * TacticalData.AttackRange * 1.5f);
+}
+
+FVector UCombatAIManager::CalculateFleeDirection(const FVector& DangerLocation)
+{
+    if (!GetOwner())
+        return FVector::ZeroVector;
+
+    FVector FleeDirection = (GetOwner()->GetActorLocation() - DangerLocation).GetSafeNormal();
+    
+    // Add some randomness to avoid predictable fleeing
+    FVector RandomOffset = FVector(
+        FMath::RandRange(-0.3f, 0.3f),
+        FMath::RandRange(-0.3f, 0.3f),
+        0.0f
+    );
+    
+    return (FleeDirection + RandomOffset).GetSafeNormal();
+}
+
+void UCombatAIManager::CleanupInvalidThreats()
+{
+    KnownThreats.RemoveAll([](AActor* Threat) {
+        return !IsValid(Threat);
+    });
+
+    PackMembers.RemoveAll([](AActor* Member) {
+        return !IsValid(Member);
+    });
 }
