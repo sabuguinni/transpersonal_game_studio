@@ -9,50 +9,72 @@
 UENUM(BlueprintType)
 enum class EBuild_IntegrationStatus : uint8
 {
-    Unknown     UMETA(DisplayName = "Unknown"),
-    Healthy     UMETA(DisplayName = "Healthy"),
-    Moderate    UMETA(DisplayName = "Moderate"), 
-    Critical    UMETA(DisplayName = "Critical"),
-    Failed      UMETA(DisplayName = "Failed")
+    Unknown         UMETA(DisplayName = "Unknown"),
+    Healthy         UMETA(DisplayName = "Healthy"),
+    Warning         UMETA(DisplayName = "Warning"),
+    Critical        UMETA(DisplayName = "Critical"),
+    Failed          UMETA(DisplayName = "Failed")
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FBuild_ValidationResult
+struct TRANSPERSONALGAME_API FBuild_ModuleStatus
 {
     GENERATED_BODY()
 
     UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    EBuild_IntegrationStatus Status = EBuild_IntegrationStatus::Unknown;
+    FString ModuleName;
 
     UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    float HealthPercentage = 0.0f;
+    EBuild_IntegrationStatus Status;
 
     UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    int32 PassedChecks = 0;
+    int32 ClassCount;
 
     UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    int32 TotalChecks = 0;
+    int32 ActorCount;
 
     UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    TArray<FString> LoadedClasses;
+    TArray<FString> ErrorMessages;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    TArray<FString> FailedClasses;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    int32 ActorCount = 0;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    int32 BinaryCount = 0;
-
-    FBuild_ValidationResult()
+    FBuild_ModuleStatus()
     {
+        ModuleName = TEXT("");
         Status = EBuild_IntegrationStatus::Unknown;
-        HealthPercentage = 0.0f;
-        PassedChecks = 0;
-        TotalChecks = 0;
+        ClassCount = 0;
         ActorCount = 0;
-        BinaryCount = 0;
+    }
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FBuild_IntegrationReport
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    float OverallHealthPercentage;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    EBuild_IntegrationStatus OverallStatus;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    TArray<FBuild_ModuleStatus> ModuleStatuses;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    int32 TotalActorsInLevel;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    int32 LoadedClassCount;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    FDateTime LastValidationTime;
+
+    FBuild_IntegrationReport()
+    {
+        OverallHealthPercentage = 0.0f;
+        OverallStatus = EBuild_IntegrationStatus::Unknown;
+        TotalActorsInLevel = 0;
+        LoadedClassCount = 0;
+        LastValidationTime = FDateTime::Now();
     }
 };
 
@@ -64,48 +86,66 @@ class TRANSPERSONALGAME_API UBuild_IntegrationValidator : public UActorComponent
 public:
     UBuild_IntegrationValidator();
 
-    UFUNCTION(BlueprintCallable, Category = "Integration", CallInEditor)
-    FBuild_ValidationResult ValidateIntegration();
+protected:
+    virtual void BeginPlay() override;
 
-    UFUNCTION(BlueprintCallable, Category = "Integration", CallInEditor)
-    bool ValidateCriticalClasses();
+public:
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    UFUNCTION(BlueprintCallable, Category = "Integration", CallInEditor)
-    bool ValidateBinaryCompilation();
+    // Core validation functions
+    UFUNCTION(BlueprintCallable, Category = "Integration", CallInEditor = true)
+    FBuild_IntegrationReport ValidateFullIntegration();
 
-    UFUNCTION(BlueprintCallable, Category = "Integration", CallInEditor)
-    bool ValidateLevelContent();
+    UFUNCTION(BlueprintCallable, Category = "Integration", CallInEditor = true)
+    FBuild_ModuleStatus ValidateModule(const FString& ModuleName);
 
-    UFUNCTION(BlueprintCallable, Category = "Integration", CallInEditor)
-    bool ValidateQAIntegration();
+    UFUNCTION(BlueprintCallable, Category = "Integration", CallInEditor = true)
+    bool ValidateClassLoading(const FString& ClassName);
+
+    UFUNCTION(BlueprintCallable, Category = "Integration", CallInEditor = true)
+    int32 CountActorsInLevel();
+
+    UFUNCTION(BlueprintCallable, Category = "Integration", CallInEditor = true)
+    TArray<FString> GetLoadedModuleNames();
+
+    // Health monitoring
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    float CalculateIntegrationHealth();
 
     UFUNCTION(BlueprintCallable, Category = "Integration")
-    EBuild_IntegrationStatus GetCurrentIntegrationStatus() const;
+    EBuild_IntegrationStatus DetermineOverallStatus(float HealthPercentage);
 
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    float GetIntegrationHealthPercentage() const;
+    // Diagnostic functions
+    UFUNCTION(BlueprintCallable, Category = "Integration", CallInEditor = true)
+    void LogIntegrationReport(const FBuild_IntegrationReport& Report);
+
+    UFUNCTION(BlueprintCallable, Category = "Integration", CallInEditor = true)
+    void CreateIntegrationTestActors();
+
+    UFUNCTION(BlueprintCallable, Category = "Integration", CallInEditor = true)
+    bool ValidateMinPlayableMap();
 
 protected:
     UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    FBuild_ValidationResult LastValidationResult;
+    FBuild_IntegrationReport LastReport;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration")
-    TArray<FString> CriticalClassNames;
+    float ValidationInterval;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration")
-    TArray<FString> QAClassNames;
+    bool bAutoValidateOnTick;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration")
-    int32 MinimumActorCount = 10;
+    TArray<FString> RequiredModules;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration")
-    float HealthyThreshold = 75.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration")
-    float ModerateThreshold = 50.0f;
+    TArray<FString> RequiredClasses;
 
 private:
-    void InitializeCriticalClasses();
-    void InitializeQAClasses();
-    EBuild_IntegrationStatus CalculateStatus(float HealthPercentage) const;
+    float TimeSinceLastValidation;
+    
+    // Helper functions
+    bool IsModuleLoaded(const FString& ModuleName);
+    int32 CountClassesInModule(const FString& ModuleName);
+    TArray<FString> GetModuleErrors(const FString& ModuleName);
 };
