@@ -2,146 +2,143 @@
 
 #include "CoreMinimal.h"
 #include "Engine/World.h"
-#include "Components/ActorComponent.h"
+#include "Components/SceneComponent.h"
 #include "NiagaraSystem.h"
 #include "NiagaraComponent.h"
 #include "NiagaraFunctionLibrary.h"
-#include "SharedTypes.h"
+#include "Kismet/BlueprintFunctionLibrary.h"
 #include "VFX_NiagaraLibrary.generated.h"
-
-/**
- * VFX Niagara Library - Centralized VFX management system for prehistoric survival game
- * Handles particle effects for fire, weather, impacts, and environmental effects
- */
-
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FVFX_ParticleConfig
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Config")
-    TSoftObjectPtr<UNiagaraSystem> ParticleSystem;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Config")
-    FVector Scale;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Config")
-    float Intensity;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Config")
-    float Duration;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Config")
-    bool bAutoDestroy;
-
-    FVFX_ParticleConfig()
-    {
-        Scale = FVector(1.0f, 1.0f, 1.0f);
-        Intensity = 1.0f;
-        Duration = 5.0f;
-        bAutoDestroy = true;
-    }
-};
 
 UENUM(BlueprintType)
 enum class EVFX_EffectType : uint8
 {
     Fire_Campfire       UMETA(DisplayName = "Campfire"),
     Fire_Torch          UMETA(DisplayName = "Torch"),
-    Impact_Footstep     UMETA(DisplayName = "Footstep Dust"),
-    Impact_Blood        UMETA(DisplayName = "Blood Splatter"),
+    Impact_Dust         UMETA(DisplayName = "Dust Impact"),
+    Impact_Blood        UMETA(DisplayName = "Blood Impact"),
     Impact_Rock         UMETA(DisplayName = "Rock Impact"),
     Weather_Rain        UMETA(DisplayName = "Rain"),
     Weather_Snow        UMETA(DisplayName = "Snow"),
     Weather_Fog         UMETA(DisplayName = "Fog"),
-    Environment_Waterfall UMETA(DisplayName = "Waterfall Spray"),
-    Environment_Volcano   UMETA(DisplayName = "Volcanic Smoke"),
+    Dino_Footstep       UMETA(DisplayName = "Dinosaur Footstep"),
     Dino_Breath         UMETA(DisplayName = "Dinosaur Breath"),
-    Dino_Roar           UMETA(DisplayName = "Roar Distortion")
+    Water_Splash        UMETA(DisplayName = "Water Splash"),
+    Water_Ripple        UMETA(DisplayName = "Water Ripple")
 };
 
-UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UVFX_NiagaraLibrary : public UActorComponent
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FVFX_EffectData
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+    EVFX_EffectType EffectType = EVFX_EffectType::Fire_Campfire;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+    TSoftObjectPtr<UNiagaraSystem> NiagaraSystem;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+    FVector Scale = FVector(1.0f, 1.0f, 1.0f);
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+    float Duration = 5.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+    bool bAutoDestroy = true;
+
+    FVFX_EffectData()
+    {
+        EffectType = EVFX_EffectType::Fire_Campfire;
+        Scale = FVector(1.0f, 1.0f, 1.0f);
+        Duration = 5.0f;
+        bAutoDestroy = true;
+    }
+};
+
+/**
+ * VFX Niagara Library - Blueprint function library for spawning and managing Niagara particle effects
+ * Provides easy access to prehistoric-themed VFX systems for the survival game
+ */
+UCLASS()
+class TRANSPERSONALGAME_API UVFX_NiagaraLibrary : public UBlueprintFunctionLibrary
 {
     GENERATED_BODY()
 
 public:
-    UVFX_NiagaraLibrary();
+    // Spawn a Niagara effect at a specific location
+    UFUNCTION(BlueprintCallable, Category = "VFX|Niagara", CallInEditor = true)
+    static class UNiagaraComponent* SpawnNiagaraEffectAtLocation(
+        const UObject* WorldContext,
+        EVFX_EffectType EffectType,
+        FVector Location,
+        FRotator Rotation = FRotator::ZeroRotator,
+        FVector Scale = FVector(1.0f, 1.0f, 1.0f),
+        bool bAutoDestroy = true
+    );
 
-protected:
-    virtual void BeginPlay() override;
+    // Spawn a Niagara effect attached to a component
+    UFUNCTION(BlueprintCallable, Category = "VFX|Niagara", CallInEditor = true)
+    static class UNiagaraComponent* SpawnNiagaraEffectAttached(
+        EVFX_EffectType EffectType,
+        class USceneComponent* AttachToComponent,
+        FName AttachPointName = NAME_None,
+        FVector Location = FVector::ZeroVector,
+        FRotator Rotation = FRotator::ZeroRotator,
+        FVector Scale = FVector(1.0f, 1.0f, 1.0f),
+        bool bAutoDestroy = true
+    );
 
-public:
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+    // Get Niagara system asset for a specific effect type
+    UFUNCTION(BlueprintCallable, Category = "VFX|Niagara", CallInEditor = true)
+    static class UNiagaraSystem* GetNiagaraSystemForEffect(EVFX_EffectType EffectType);
 
-    // Core VFX spawning functions
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    UNiagaraComponent* SpawnVFXAtLocation(EVFX_EffectType EffectType, FVector Location, FRotator Rotation = FRotator::ZeroRotator);
+    // Create campfire effect with customizable parameters
+    UFUNCTION(BlueprintCallable, Category = "VFX|Fire", CallInEditor = true)
+    static class UNiagaraComponent* CreateCampfireEffect(
+        const UObject* WorldContext,
+        FVector Location,
+        float FireIntensity = 1.0f,
+        float SmokeAmount = 1.0f
+    );
 
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    UNiagaraComponent* SpawnVFXAttached(EVFX_EffectType EffectType, USceneComponent* AttachToComponent, FName AttachPointName = NAME_None);
+    // Create dinosaur footstep dust effect
+    UFUNCTION(BlueprintCallable, Category = "VFX|Dinosaur", CallInEditor = true)
+    static class UNiagaraComponent* CreateFootstepDustEffect(
+        const UObject* WorldContext,
+        FVector Location,
+        float DinosaurSize = 1.0f,
+        FVector GroundNormal = FVector(0.0f, 0.0f, 1.0f)
+    );
 
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    void StopVFX(UNiagaraComponent* VFXComponent);
+    // Create weather rain effect
+    UFUNCTION(BlueprintCallable, Category = "VFX|Weather", CallInEditor = true)
+    static class UNiagaraComponent* CreateRainEffect(
+        const UObject* WorldContext,
+        FVector Location,
+        float RainIntensity = 1.0f,
+        FVector RainDirection = FVector(0.0f, 0.0f, -1.0f)
+    );
 
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    void StopAllVFX();
+    // Create blood impact effect for combat
+    UFUNCTION(BlueprintCallable, Category = "VFX|Combat", CallInEditor = true)
+    static class UNiagaraComponent* CreateBloodImpactEffect(
+        const UObject* WorldContext,
+        FVector Location,
+        FVector ImpactNormal = FVector(0.0f, 0.0f, 1.0f),
+        float BloodAmount = 1.0f
+    );
 
-    // Specialized VFX functions for game mechanics
-    UFUNCTION(BlueprintCallable, Category = "VFX|Fire")
-    UNiagaraComponent* CreateCampfire(FVector Location, float Intensity = 1.0f);
-
-    UFUNCTION(BlueprintCallable, Category = "VFX|Impact")
-    void PlayFootstepDust(FVector Location, ESurfaceType SurfaceType);
-
-    UFUNCTION(BlueprintCallable, Category = "VFX|Impact")
-    void PlayBloodImpact(FVector Location, FVector ImpactNormal, float Intensity = 1.0f);
-
-    UFUNCTION(BlueprintCallable, Category = "VFX|Weather")
-    UNiagaraComponent* StartWeatherEffect(EVFX_EffectType WeatherType, FVector Location, float Radius = 1000.0f);
-
-    UFUNCTION(BlueprintCallable, Category = "VFX|Dinosaur")
-    UNiagaraComponent* PlayDinosaurBreath(FVector Location, FVector Direction, EDinosaurSpecies Species);
-
-    UFUNCTION(BlueprintCallable, Category = "VFX|Environment")
-    UNiagaraComponent* CreateEnvironmentalVFX(EVFX_EffectType EnvironmentType, FVector Location, FVector Scale = FVector(1.0f));
-
-    // VFX configuration and management
-    UFUNCTION(BlueprintCallable, Category = "VFX|Config")
-    void SetVFXIntensity(UNiagaraComponent* VFXComponent, float NewIntensity);
-
-    UFUNCTION(BlueprintCallable, Category = "VFX|Config")
-    void SetVFXScale(UNiagaraComponent* VFXComponent, FVector NewScale);
-
-    UFUNCTION(BlueprintCallable, Category = "VFX|Validation")
-    int32 GetActiveVFXCount() const;
-
-    UFUNCTION(BlueprintCallable, Category = "VFX|Validation")
-    TArray<UNiagaraComponent*> GetActiveVFXComponents() const;
-
-protected:
-    // VFX configuration maps
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Config")
-    TMap<EVFX_EffectType, FVFX_ParticleConfig> VFXConfigurations;
-
-    // Active VFX tracking
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "VFX State")
-    TArray<UNiagaraComponent*> ActiveVFXComponents;
-
-    // Performance settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Performance")
-    int32 MaxActiveVFX;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Performance")
-    float VFXCullingDistance;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Performance")
-    bool bEnableVFXLOD;
+    // Validate and initialize VFX library
+    UFUNCTION(BlueprintCallable, Category = "VFX|System", CallInEditor = true)
+    static bool InitializeVFXLibrary();
 
 private:
-    // Internal helper functions
-    UNiagaraSystem* GetVFXSystemForType(EVFX_EffectType EffectType);
-    void CleanupInactiveVFX();
-    void InitializeVFXConfigurations();
-    bool ShouldCullVFX(const FVector& VFXLocation) const;
+    // Static map of effect types to Niagara system paths
+    static TMap<EVFX_EffectType, FString> EffectSystemPaths;
+
+    // Initialize the effect system paths
+    static void InitializeEffectPaths();
+
+    // Helper function to load Niagara system from path
+    static class UNiagaraSystem* LoadNiagaraSystemFromPath(const FString& SystemPath);
 };
