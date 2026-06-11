@@ -1,163 +1,145 @@
 #include "Narr_DialogueManager.h"
 #include "Engine/Engine.h"
-#include "TimerManager.h"
+#include "Kismet/GameplayStatics.h"
+#include "Components/AudioComponent.h"
 
 void UNarr_DialogueManager::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
     
-    bIsPlaying = false;
+    CurrentSequence = nullptr;
     CurrentLineIndex = 0;
-    CurrentSequenceID = TEXT("");
+    bDialogueActive = false;
     
-    InitializeDefaultDialogues();
+    // Initialize survival dialogue sequences
+    FNarr_DialogueSequence IntroSequence;
+    IntroSequence.SequenceID = TEXT("GameIntro");
+    IntroSequence.TriggerCondition = ENarr_DialogueTrigger::GameStart;
     
-    UE_LOG(LogTemp, Warning, TEXT("Narrative Dialogue Manager initialized"));
+    FNarr_DialogueLine IntroLine1;
+    IntroLine1.SpeakerName = TEXT("Narrator");
+    IntroLine1.DialogueText = FText::FromString(TEXT("You awaken in a world lost to time. The air is thick with danger, and survival is your only goal."));
+    IntroLine1.Duration = 5.0f;
+    IntroSequence.DialogueLines.Add(IntroLine1);
+    
+    FNarr_DialogueLine IntroLine2;
+    IntroLine2.SpeakerName = TEXT("Narrator");
+    IntroLine2.DialogueText = FText::FromString(TEXT("Find shelter, gather resources, and beware the ancient predators that rule this land."));
+    IntroLine2.Duration = 4.0f;
+    IntroSequence.DialogueLines.Add(IntroLine2);
+    
+    RegisterDialogueSequence(IntroSequence);
+    
+    // Dinosaur encounter dialogue
+    FNarr_DialogueSequence DinosaurEncounter;
+    DinosaurEncounter.SequenceID = TEXT("DinosaurSighting");
+    DinosaurEncounter.TriggerCondition = ENarr_DialogueTrigger::DinosaurNear;
+    
+    FNarr_DialogueLine EncounterLine;
+    EncounterLine.SpeakerName = TEXT("Player");
+    EncounterLine.DialogueText = FText::FromString(TEXT("By the spirits... that creature is massive. I must move carefully or become its next meal."));
+    EncounterLine.Duration = 4.0f;
+    DinosaurEncounter.DialogueLines.Add(EncounterLine);
+    
+    RegisterDialogueSequence(DinosaurEncounter);
+    
+    UE_LOG(LogTemp, Log, TEXT("Narr_DialogueManager initialized with %d sequences"), DialogueSequences.Num());
 }
 
-void UNarr_DialogueManager::PlayDialogueSequence(const FString& SequenceID)
+void UNarr_DialogueManager::StartDialogue(const FString& SequenceID)
 {
-    if (bIsPlaying)
+    if (FNarr_DialogueSequence* Sequence = DialogueSequences.Find(SequenceID))
     {
-        StopCurrentDialogue();
+        CurrentSequence = Sequence;
+        CurrentLineIndex = 0;
+        bDialogueActive = true;
+        
+        if (Sequence->DialogueLines.Num() > 0)
+        {
+            ProcessDialogueLine(Sequence->DialogueLines[0]);
+        }
+        
+        UE_LOG(LogTemp, Log, TEXT("Started dialogue sequence: %s"), *SequenceID);
     }
-    
-    if (!DialogueSequences.Contains(SequenceID))
+    else
     {
         UE_LOG(LogTemp, Warning, TEXT("Dialogue sequence not found: %s"), *SequenceID);
-        return;
     }
-    
-    CurrentSequenceID = SequenceID;
-    CurrentLineIndex = 0;
-    bIsPlaying = true;
-    
-    AdvanceDialogue();
 }
 
 void UNarr_DialogueManager::StopCurrentDialogue()
 {
-    bIsPlaying = false;
-    CurrentSequenceID = TEXT("");
-    CurrentLineIndex = 0;
-    
-    if (UWorld* World = GetWorld())
+    if (bDialogueActive)
     {
-        World->GetTimerManager().ClearAllTimersForObject(this);
+        bDialogueActive = false;
+        CurrentSequence = nullptr;
+        CurrentLineIndex = 0;
+        
+        UE_LOG(LogTemp, Log, TEXT("Stopped current dialogue"));
     }
+}
+
+bool UNarr_DialogueManager::IsDialogueActive() const
+{
+    return bDialogueActive;
 }
 
 void UNarr_DialogueManager::RegisterDialogueSequence(const FNarr_DialogueSequence& Sequence)
 {
     DialogueSequences.Add(Sequence.SequenceID, Sequence);
-    UE_LOG(LogTemp, Warning, TEXT("Registered dialogue sequence: %s"), *Sequence.SequenceID);
+    UE_LOG(LogTemp, Log, TEXT("Registered dialogue sequence: %s with %d lines"), 
+           *Sequence.SequenceID, Sequence.DialogueLines.Num());
 }
 
-bool UNarr_DialogueManager::IsDialoguePlaying() const
+void UNarr_DialogueManager::TriggerContextualDialogue(ENarr_DialogueTrigger TriggerType, const FVector& Location)
 {
-    return bIsPlaying;
+    for (const auto& SequencePair : DialogueSequences)
+    {
+        if (SequencePair.Value.TriggerCondition == TriggerType)
+        {
+            StartDialogue(SequencePair.Key);
+            break;
+        }
+    }
 }
 
 void UNarr_DialogueManager::AdvanceDialogue()
 {
-    if (!bIsPlaying || !DialogueSequences.Contains(CurrentSequenceID))
+    if (!bDialogueActive || !CurrentSequence)
     {
         return;
     }
     
-    const FNarr_DialogueSequence& CurrentSequence = DialogueSequences[CurrentSequenceID];
+    CurrentLineIndex++;
     
-    if (CurrentLineIndex >= CurrentSequence.DialogueLines.Num())
+    if (CurrentLineIndex >= CurrentSequence->DialogueLines.Num())
     {
         StopCurrentDialogue();
         return;
     }
     
-    const FNarr_DialogueLine& CurrentLine = CurrentSequence.DialogueLines[CurrentLineIndex];
-    
-    // Display dialogue to player
+    ProcessDialogueLine(CurrentSequence->DialogueLines[CurrentLineIndex]);
+}
+
+void UNarr_DialogueManager::ProcessDialogueLine(const FNarr_DialogueLine& Line)
+{
+    // Display dialogue text to screen
     if (GEngine)
     {
-        FString DisplayText = FString::Printf(TEXT("%s: %s"), *CurrentLine.SpeakerName, *CurrentLine.DialogueText);
-        GEngine->AddOnScreenDebugMessage(-1, CurrentLine.Duration, 
-            CurrentLine.bIsUrgent ? FColor::Red : FColor::White, DisplayText);
+        FString DisplayText = FString::Printf(TEXT("%s: %s"), 
+                                            *Line.SpeakerName, 
+                                            *Line.DialogueText.ToString());
+        
+        GEngine->AddOnScreenDebugMessage(-1, Line.Duration, FColor::White, DisplayText);
     }
     
-    UE_LOG(LogTemp, Warning, TEXT("Dialogue: %s - %s"), *CurrentLine.SpeakerName, *CurrentLine.DialogueText);
-    
-    CurrentLineIndex++;
-    
-    // Schedule next line
+    // Set timer to advance to next line
     if (UWorld* World = GetWorld())
     {
         FTimerHandle TimerHandle;
-        World->GetTimerManager().SetTimer(TimerHandle, this, &UNarr_DialogueManager::AdvanceDialogue, 
-            CurrentLine.Duration, false);
+        World->GetTimerManager().SetTimer(TimerHandle, this, &UNarr_DialogueManager::AdvanceDialogue, Line.Duration, false);
     }
-}
-
-void UNarr_DialogueManager::InitializeDefaultDialogues()
-{
-    // Tribal Elder Introduction
-    FNarr_DialogueSequence ElderIntro;
-    ElderIntro.SequenceID = TEXT("ElderIntro");
-    ElderIntro.bIsRepeatable = false;
     
-    FNarr_DialogueLine Line1;
-    Line1.SpeakerName = TEXT("Tribal Elder");
-    Line1.DialogueText = TEXT("Stay low, newcomer. The great beasts hunt these grounds.");
-    Line1.Duration = 4.0f;
-    Line1.bIsUrgent = false;
-    
-    FNarr_DialogueLine Line2;
-    Line2.SpeakerName = TEXT("Tribal Elder");
-    Line2.DialogueText = TEXT("Follow the river stones to shelter before the sun sets.");
-    Line2.Duration = 3.5f;
-    Line2.bIsUrgent = false;
-    
-    ElderIntro.DialogueLines.Add(Line1);
-    ElderIntro.DialogueLines.Add(Line2);
-    RegisterDialogueSequence(ElderIntro);
-    
-    // Scout Warning
-    FNarr_DialogueSequence ScoutWarning;
-    ScoutWarning.SequenceID = TEXT("ScoutWarning");
-    ScoutWarning.bIsRepeatable = true;
-    
-    FNarr_DialogueLine Warning1;
-    Warning1.SpeakerName = TEXT("Scout");
-    Warning1.DialogueText = TEXT("Warning! Thunderfoot approaches from the eastern ridge.");
-    Warning1.Duration = 3.0f;
-    Warning1.bIsUrgent = true;
-    
-    FNarr_DialogueLine Warning2;
-    Warning2.SpeakerName = TEXT("Scout");
-    Warning2.DialogueText = TEXT("Seek shelter immediately or become prey.");
-    Warning2.Duration = 2.5f;
-    Warning2.bIsUrgent = true;
-    
-    ScoutWarning.DialogueLines.Add(Warning1);
-    ScoutWarning.DialogueLines.Add(Warning2);
-    RegisterDialogueSequence(ScoutWarning);
-    
-    // Hunter Instructions
-    FNarr_DialogueSequence HunterTips;
-    HunterTips.SequenceID = TEXT("HunterTips");
-    HunterTips.bIsRepeatable = true;
-    
-    FNarr_DialogueLine Tip1;
-    Tip1.SpeakerName = TEXT("Hunter");
-    Tip1.DialogueText = TEXT("Sharp stones make better spears than dull ones.");
-    Tip1.Duration = 3.0f;
-    Tip1.bIsUrgent = false;
-    
-    FNarr_DialogueLine Tip2;
-    Tip2.SpeakerName = TEXT("Hunter");
-    Tip2.DialogueText = TEXT("Aim for the soft belly, not the armored hide.");
-    Tip2.Duration = 3.0f;
-    Tip2.bIsUrgent = false;
-    
-    HunterTips.DialogueLines.Add(Tip1);
-    HunterTips.DialogueLines.Add(Tip2);
-    RegisterDialogueSequence(HunterTips);
+    UE_LOG(LogTemp, Log, TEXT("Processing dialogue line: %s - %s"), 
+           *Line.SpeakerName, *Line.DialogueText.ToString());
 }
