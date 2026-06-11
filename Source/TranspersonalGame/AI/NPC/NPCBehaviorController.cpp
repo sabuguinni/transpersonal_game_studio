@@ -1,13 +1,17 @@
 #include "NPCBehaviorController.h"
 #include "BehaviorTree/BehaviorTree.h"
 #include "BehaviorTree/BlackboardData.h"
-#include "Perception/AISense_Sight.h"
-#include "Perception/AISense_Hearing.h"
+#include "BehaviorTree/BehaviorTreeComponent.h"
+#include "BehaviorTree/BlackboardComponent.h"
+#include "Perception/AIPerceptionComponent.h"
+#include "Perception/AISenseConfig_Sight.h"
+#include "Perception/AISenseConfig_Hearing.h"
+#include "GameFramework/Character.h"
+#include "GameFramework/CharacterMovementComponent.h"
 #include "Engine/World.h"
-#include "GameFramework/Pawn.h"
 #include "Kismet/GameplayStatics.h"
 
-UNPC_BehaviorController::UNPC_BehaviorController()
+ANPCBehaviorController::ANPCBehaviorController()
 {
     PrimaryActorTick.bCanEverTick = true;
 
@@ -16,390 +20,342 @@ UNPC_BehaviorController::UNPC_BehaviorController()
     BlackboardComponent = CreateDefaultSubobject<UBlackboardComponent>(TEXT("BlackboardComponent"));
     AIPerceptionComponent = CreateDefaultSubobject<UAIPerceptionComponent>(TEXT("AIPerceptionComponent"));
 
-    // Memory System Defaults
-    MaxShortTermMemories = 20;
-    MaxLongTermMemories = 50;
+    // Set default values
+    CurrentBehaviorState = ENPC_BehaviorState::Idle;
+    PatrolRadius = 1000.0f;
+    AlertRadius = 1500.0f;
+    FleeRadius = 500.0f;
+    WalkSpeed = 150.0f;
+    RunSpeed = 400.0f;
+    
+    MaxShortTermMemories = 10;
     MemoryDecayRate = 0.1f;
-
-    // Perception Defaults
-    SightRadius = 2000.0f;
-    HearingRadius = 1500.0f;
-    PeripheralVisionAngle = 90.0f;
-
-    // Routine Defaults
-    RoutineStartTime = 6.0f; // 6 AM
-    RoutineEndTime = 22.0f;  // 10 PM
+    
+    TimeSinceLastPlayerSighting = 0.0f;
+    bPlayerInSight = false;
     CurrentPatrolIndex = 0;
-
-    // Internal State
-    LastMemoryUpdate = 0.0f;
-    bInEmergencyMode = false;
-    CurrentThreat = nullptr;
 }
 
-void UNPC_BehaviorController::BeginPlay()
+void ANPCBehaviorController::BeginPlay()
 {
     Super::BeginPlay();
-
-    InitializePerception();
-
-    if (DefaultBlackboard)
+    
+    InitializeAIPerception();
+    
+    // Set home location
+    if (GetPawn())
     {
-        UseBlackboard(DefaultBlackboard);
+        HomeLocation = GetPawn()->GetActorLocation();
+        GeneratePatrolPoints();
     }
-
-    if (DefaultBehaviorTree)
+    
+    // Start behavior tree if available
+    if (DefaultBehaviorTree && BlackboardData)
     {
+        UseBlackboard(BlackboardData);
         RunBehaviorTree(DefaultBehaviorTree);
-    }
-
-    // Initialize basic patrol route if none set
-    if (PatrolPoints.Num() == 0 && GetPawn())
-    {
-        FVector PawnLocation = GetPawn()->GetActorLocation();
-        PatrolPoints.Add(PawnLocation + FVector(500, 0, 0));
-        PatrolPoints.Add(PawnLocation + FVector(0, 500, 0));
-        PatrolPoints.Add(PawnLocation + FVector(-500, 0, 0));
-        PatrolPoints.Add(PawnLocation + FVector(0, -500, 0));
+        
+        // Initialize blackboard values
+        if (GetBlackboardComponent())
+        {
+            GetBlackboardComponent()->SetValueAsEnum(TEXT("BehaviorState"), static_cast<uint8>(CurrentBehaviorState));
+            GetBlackboardComponent()->SetValueAsVector(TEXT("HomeLocation"), HomeLocation);
+            GetBlackboardComponent()->SetValueAsFloat(TEXT("PatrolRadius"), PatrolRadius);
+        }
     }
 }
 
-void UNPC_BehaviorController::Tick(float DeltaTime)
+void ANPCBehaviorController::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
-
-    UpdateMemoryDecay(DeltaTime);
-    UpdateRoutineBehavior();
-
-    // Process memory consolidation every 5 seconds
-    if (GetWorld()->GetTimeSeconds() - LastMemoryUpdate > 5.0f)
+    
+    UpdateMemorySystem(DeltaTime);
+    
+    // Update time since last player sighting
+    if (!bPlayerInSight)
     {
-        ProcessMemoryConsolidation();
-        LastMemoryUpdate = GetWorld()->GetTimeSeconds();
+        TimeSinceLastPlayerSighting += DeltaTime;
     }
 }
 
-void UNPC_BehaviorController::InitializePerception()
+void ANPCBehaviorController::InitializeAIPerception()
 {
     if (!AIPerceptionComponent)
         return;
-
-    // Configure Sight
+    
+    // Configure sight sense
     UAISenseConfig_Sight* SightConfig = CreateDefaultSubobject<UAISenseConfig_Sight>(TEXT("SightConfig"));
-    SightConfig->SightRadius = SightRadius;
-    SightConfig->LoseSightRadius = SightRadius + 200.0f;
-    SightConfig->PeripheralVisionAngleDegrees = PeripheralVisionAngle;
-    SightConfig->SetMaxAge(5.0f);
-    SightConfig->DetectionByAffiliation.bDetectNeutrals = true;
-    SightConfig->DetectionByAffiliation.bDetectFriendlies = true;
-    SightConfig->DetectionByAffiliation.bDetectEnemies = true;
-
-    // Configure Hearing
+    if (SightConfig)
+    {
+        SightConfig->SightRadius = AlertRadius;
+        SightConfig->LoseSightRadius = AlertRadius + 200.0f;
+        SightConfig->PeripheralVisionAngleDegrees = 90.0f;
+        SightConfig->SetMaxAge(5.0f);
+        SightConfig->AutoSuccessRangeFromLastSeenLocation = 500.0f;
+        SightConfig->DetectionByAffiliation.bDetectNeutrals = true;
+        SightConfig->DetectionByAffiliation.bDetectFriendlies = true;
+        SightConfig->DetectionByAffiliation.bDetectEnemies = true;
+        
+        AIPerceptionComponent->ConfigureSense(*SightConfig);
+    }
+    
+    // Configure hearing sense
     UAISenseConfig_Hearing* HearingConfig = CreateDefaultSubobject<UAISenseConfig_Hearing>(TEXT("HearingConfig"));
-    HearingConfig->HearingRange = HearingRadius;
-    HearingConfig->SetMaxAge(3.0f);
-    HearingConfig->DetectionByAffiliation.bDetectNeutrals = true;
-    HearingConfig->DetectionByAffiliation.bDetectFriendlies = true;
-    HearingConfig->DetectionByAffiliation.bDetectEnemies = true;
-
-    AIPerceptionComponent->ConfigureSense(*SightConfig);
-    AIPerceptionComponent->ConfigureSense(*HearingConfig);
+    if (HearingConfig)
+    {
+        HearingConfig->HearingRange = AlertRadius * 0.8f;
+        HearingConfig->SetMaxAge(3.0f);
+        HearingConfig->DetectionByAffiliation.bDetectNeutrals = true;
+        HearingConfig->DetectionByAffiliation.bDetectFriendlies = true;
+        HearingConfig->DetectionByAffiliation.bDetectEnemies = true;
+        
+        AIPerceptionComponent->ConfigureSense(*HearingConfig);
+    }
+    
+    // Set sight as dominant sense
     AIPerceptionComponent->SetDominantSense(SightConfig->GetSenseImplementation());
-
+    
     // Bind perception events
-    AIPerceptionComponent->OnPerceptionUpdated.AddDynamic(this, &UNPC_BehaviorController::OnPerceptionUpdated);
-    AIPerceptionComponent->OnTargetPerceptionUpdated.AddDynamic(this, &UNPC_BehaviorController::OnTargetPerceptionUpdated);
+    AIPerceptionComponent->OnPerceptionUpdated.AddDynamic(this, &ANPCBehaviorController::OnPerceptionUpdated);
 }
 
-void UNPC_BehaviorController::AddMemory(FVector Location, ENPC_MemoryType Type, float Importance)
-{
-    FNPC_MemoryEntry NewMemory;
-    NewMemory.Location = Location;
-    NewMemory.MemoryType = Type;
-    NewMemory.Importance = Importance;
-    NewMemory.Timestamp = GetWorld()->GetTimeSeconds();
-
-    // Add to short-term memory
-    ShortTermMemory.Add(NewMemory);
-
-    // Manage memory limits
-    if (ShortTermMemory.Num() > MaxShortTermMemories)
-    {
-        // Move oldest important memories to long-term
-        for (int32 i = ShortTermMemory.Num() - 1; i >= 0; i--)
-        {
-            if (ShortTermMemory[i].Importance > 0.7f && LongTermMemory.Num() < MaxLongTermMemories)
-            {
-                LongTermMemory.Add(ShortTermMemory[i]);
-                ShortTermMemory.RemoveAt(i);
-                break;
-            }
-        }
-
-        // Remove oldest if still over limit
-        if (ShortTermMemory.Num() > MaxShortTermMemories)
-        {
-            ShortTermMemory.RemoveAt(0);
-        }
-    }
-}
-
-void UNPC_BehaviorController::UpdateMemoryDecay(float DeltaTime)
-{
-    float CurrentTime = GetWorld()->GetTimeSeconds();
-
-    // Decay short-term memories
-    for (int32 i = ShortTermMemory.Num() - 1; i >= 0; i--)
-    {
-        float Age = CurrentTime - ShortTermMemory[i].Timestamp;
-        ShortTermMemory[i].Importance -= MemoryDecayRate * DeltaTime * Age;
-
-        if (ShortTermMemory[i].Importance <= 0.0f)
-        {
-            ShortTermMemory.RemoveAt(i);
-        }
-    }
-
-    // Decay long-term memories more slowly
-    for (int32 i = LongTermMemory.Num() - 1; i >= 0; i--)
-    {
-        float Age = CurrentTime - LongTermMemory[i].Timestamp;
-        LongTermMemory[i].Importance -= (MemoryDecayRate * 0.1f) * DeltaTime * Age;
-
-        if (LongTermMemory[i].Importance <= 0.0f)
-        {
-            LongTermMemory.RemoveAt(i);
-        }
-    }
-}
-
-TArray<FNPC_MemoryEntry> UNPC_BehaviorController::GetMemoriesOfType(ENPC_MemoryType Type)
-{
-    TArray<FNPC_MemoryEntry> FilteredMemories;
-
-    for (const FNPC_MemoryEntry& Memory : ShortTermMemory)
-    {
-        if (Memory.MemoryType == Type)
-        {
-            FilteredMemories.Add(Memory);
-        }
-    }
-
-    for (const FNPC_MemoryEntry& Memory : LongTermMemory)
-    {
-        if (Memory.MemoryType == Type)
-        {
-            FilteredMemories.Add(Memory);
-        }
-    }
-
-    return FilteredMemories;
-}
-
-FNPC_MemoryEntry UNPC_BehaviorController::GetNearestMemory(FVector Location, ENPC_MemoryType Type)
-{
-    FNPC_MemoryEntry NearestMemory;
-    float NearestDistance = FLT_MAX;
-
-    TArray<FNPC_MemoryEntry> TypeMemories = GetMemoriesOfType(Type);
-
-    for (const FNPC_MemoryEntry& Memory : TypeMemories)
-    {
-        float Distance = FVector::Dist(Location, Memory.Location);
-        if (Distance < NearestDistance)
-        {
-            NearestDistance = Distance;
-            NearestMemory = Memory;
-        }
-    }
-
-    return NearestMemory;
-}
-
-void UNPC_BehaviorController::UpdateSocialRelation(AActor* Target, float TrustDelta, float FearDelta)
-{
-    if (!Target)
-        return;
-
-    // Find existing relation
-    FNPC_SocialRelation* ExistingRelation = nullptr;
-    for (FNPC_SocialRelation& Relation : SocialRelations)
-    {
-        if (Relation.TargetActor == Target)
-        {
-            ExistingRelation = &Relation;
-            break;
-        }
-    }
-
-    // Create new relation if none exists
-    if (!ExistingRelation)
-    {
-        FNPC_SocialRelation NewRelation;
-        NewRelation.TargetActor = Target;
-        NewRelation.TrustLevel = 0.0f;
-        NewRelation.FearLevel = 0.0f;
-        NewRelation.LastInteractionTime = GetWorld()->GetTimeSeconds();
-        SocialRelations.Add(NewRelation);
-        ExistingRelation = &SocialRelations.Last();
-    }
-
-    // Update relation
-    ExistingRelation->TrustLevel = FMath::Clamp(ExistingRelation->TrustLevel + TrustDelta, -1.0f, 1.0f);
-    ExistingRelation->FearLevel = FMath::Clamp(ExistingRelation->FearLevel + FearDelta, 0.0f, 1.0f);
-    ExistingRelation->LastInteractionTime = GetWorld()->GetTimeSeconds();
-}
-
-FNPC_SocialRelation UNPC_BehaviorController::GetSocialRelation(AActor* Target)
-{
-    for (const FNPC_SocialRelation& Relation : SocialRelations)
-    {
-        if (Relation.TargetActor == Target)
-        {
-            return Relation;
-        }
-    }
-
-    // Return neutral relation if none found
-    FNPC_SocialRelation NeutralRelation;
-    NeutralRelation.TargetActor = Target;
-    return NeutralRelation;
-}
-
-bool UNPC_BehaviorController::IsFriendly(AActor* Target)
-{
-    FNPC_SocialRelation Relation = GetSocialRelation(Target);
-    return Relation.TrustLevel > 0.3f && Relation.FearLevel < 0.2f;
-}
-
-bool UNPC_BehaviorController::IsHostile(AActor* Target)
-{
-    FNPC_SocialRelation Relation = GetSocialRelation(Target);
-    return Relation.TrustLevel < -0.3f || Relation.FearLevel > 0.7f;
-}
-
-void UNPC_BehaviorController::SetPatrolRoute(const TArray<FVector>& NewPatrolPoints)
-{
-    PatrolPoints = NewPatrolPoints;
-    CurrentPatrolIndex = 0;
-}
-
-FVector UNPC_BehaviorController::GetNextPatrolPoint()
-{
-    if (PatrolPoints.Num() == 0)
-    {
-        return GetPawn() ? GetPawn()->GetActorLocation() : FVector::ZeroVector;
-    }
-
-    FVector NextPoint = PatrolPoints[CurrentPatrolIndex];
-    CurrentPatrolIndex = (CurrentPatrolIndex + 1) % PatrolPoints.Num();
-    return NextPoint;
-}
-
-bool UNPC_BehaviorController::IsWithinRoutineHours()
-{
-    UWorld* World = GetWorld();
-    if (!World)
-        return true;
-
-    // Simple time calculation based on world time
-    float WorldTime = World->GetTimeSeconds();
-    float HourOfDay = FMath::Fmod(WorldTime / 3600.0f, 24.0f); // Convert to hours of day
-
-    return HourOfDay >= RoutineStartTime && HourOfDay <= RoutineEndTime;
-}
-
-void UNPC_BehaviorController::OnPerceptionUpdated(const TArray<AActor*>& UpdatedActors)
+void ANPCBehaviorController::OnPerceptionUpdated(const TArray<AActor*>& UpdatedActors)
 {
     for (AActor* Actor : UpdatedActors)
     {
-        if (Actor && Actor != GetPawn())
+        if (!Actor)
+            continue;
+            
+        // Check if this is the player
+        if (Actor->IsA<ACharacter>() && Cast<ACharacter>(Actor)->IsPlayerControlled())
         {
-            // Add memory of seeing this actor
-            AddMemory(Actor->GetActorLocation(), ENPC_MemoryType::ActorSighting, 0.5f);
-
-            // Update social relations based on actor type
-            if (Actor->IsA<APawn>())
+            FActorPerceptionBlueprintInfo PerceptionInfo;
+            AIPerceptionComponent->GetActorsPerception(Actor, PerceptionInfo);
+            
+            if (PerceptionInfo.LastSensedStimuli.Num() > 0)
             {
-                UpdateSocialRelation(Actor, 0.0f, 0.1f); // Slight increase in awareness
+                FAIStimulus LastStimulus = PerceptionInfo.LastSensedStimuli[0];
+                
+                if (LastStimulus.WasSuccessfullySensed())
+                {
+                    // Player spotted
+                    bPlayerInSight = true;
+                    TimeSinceLastPlayerSighting = 0.0f;
+                    LastKnownPlayerLocation = Actor->GetActorLocation();
+                    
+                    // Add to memory
+                    FNPC_MemoryEntry NewMemory;
+                    NewMemory.ActorReference = Actor;
+                    NewMemory.Location = Actor->GetActorLocation();
+                    NewMemory.MemoryType = ENPC_MemoryType::PlayerSighting;
+                    NewMemory.Timestamp = GetWorld()->GetTimeSeconds();
+                    NewMemory.Importance = 1.0f;
+                    NewMemory.EmotionalWeight = 0.8f;
+                    
+                    AddMemory(NewMemory);
+                    
+                    // Update behavior based on distance
+                    float DistanceToPlayer = FVector::Dist(GetPawn()->GetActorLocation(), Actor->GetActorLocation());
+                    
+                    if (DistanceToPlayer <= FleeRadius)
+                    {
+                        SetBehaviorState(ENPC_BehaviorState::Fleeing);
+                    }
+                    else if (DistanceToPlayer <= AlertRadius)
+                    {
+                        SetBehaviorState(ENPC_BehaviorState::Alert);
+                    }
+                }
+                else
+                {
+                    // Lost sight of player
+                    bPlayerInSight = false;
+                }
             }
         }
     }
 }
 
-void UNPC_BehaviorController::OnTargetPerceptionUpdated(AActor* Actor, FAIStimulus Stimulus)
+void ANPCBehaviorController::SetBehaviorState(ENPC_BehaviorState NewState)
 {
-    if (!Actor)
+    if (CurrentBehaviorState == NewState)
         return;
-
-    if (Stimulus.WasSuccessfullySensed())
+        
+    CurrentBehaviorState = NewState;
+    
+    // Update blackboard
+    if (GetBlackboardComponent())
     {
-        // Actor was detected
-        AddMemory(Stimulus.StimulusLocation, ENPC_MemoryType::ActorSighting, 0.7f);
-
-        // Check if this is a threat
-        if (Actor->IsA<APawn>() && !IsFriendly(Actor))
-        {
-            CurrentThreat = Actor;
-            bInEmergencyMode = true;
-            AddMemory(Stimulus.StimulusLocation, ENPC_MemoryType::Danger, 1.0f);
-        }
+        GetBlackboardComponent()->SetValueAsEnum(TEXT("BehaviorState"), static_cast<uint8>(NewState));
     }
-    else
+    
+    // Update movement speed based on state
+    if (ACharacter* Character = Cast<ACharacter>(GetPawn()))
     {
-        // Actor was lost
-        if (CurrentThreat == Actor)
+        UCharacterMovementComponent* MovementComponent = Character->GetCharacterMovement();
+        if (MovementComponent)
         {
-            CurrentThreat = nullptr;
-            bInEmergencyMode = false;
+            switch (NewState)
+            {
+                case ENPC_BehaviorState::Patrolling:
+                case ENPC_BehaviorState::Idle:
+                    MovementComponent->MaxWalkSpeed = WalkSpeed;
+                    break;
+                case ENPC_BehaviorState::Alert:
+                case ENPC_BehaviorState::Fleeing:
+                    MovementComponent->MaxWalkSpeed = RunSpeed;
+                    break;
+                default:
+                    MovementComponent->MaxWalkSpeed = WalkSpeed;
+                    break;
+            }
         }
     }
 }
 
-void UNPC_BehaviorController::ProcessMemoryConsolidation()
+void ANPCBehaviorController::StartPatrolBehavior()
 {
-    // Move important short-term memories to long-term storage
+    SetBehaviorState(ENPC_BehaviorState::Patrolling);
+    
+    if (GetBlackboardComponent() && PatrolPoints.Num() > 0)
+    {
+        GetBlackboardComponent()->SetValueAsVector(TEXT("PatrolTarget"), GetNextPatrolPoint());
+    }
+}
+
+void ANPCBehaviorController::StartFleeBehavior(AActor* ThreatActor)
+{
+    SetBehaviorState(ENPC_BehaviorState::Fleeing);
+    
+    if (GetBlackboardComponent() && ThreatActor)
+    {
+        // Calculate flee direction (opposite to threat)
+        FVector FleeDirection = GetPawn()->GetActorLocation() - ThreatActor->GetActorLocation();
+        FleeDirection.Normalize();
+        FVector FleeTarget = GetPawn()->GetActorLocation() + (FleeDirection * FleeRadius * 2.0f);
+        
+        GetBlackboardComponent()->SetValueAsVector(TEXT("FleeTarget"), FleeTarget);
+        GetBlackboardComponent()->SetValueAsObject(TEXT("ThreatActor"), ThreatActor);
+    }
+}
+
+void ANPCBehaviorController::StartIdleBehavior()
+{
+    SetBehaviorState(ENPC_BehaviorState::Idle);
+}
+
+void ANPCBehaviorController::AddMemory(const FNPC_MemoryEntry& NewMemory)
+{
+    // Add to short-term memory
+    ShortTermMemory.Add(NewMemory);
+    
+    // Maintain memory limit
+    if (ShortTermMemory.Num() > MaxShortTermMemories)
+    {
+        ShortTermMemory.RemoveAt(0);
+    }
+}
+
+bool ANPCBehaviorController::HasMemoryOfActor(AActor* Actor) const
+{
+    if (!Actor)
+        return false;
+        
+    // Check short-term memory
+    for (const FNPC_MemoryEntry& Memory : ShortTermMemory)
+    {
+        if (Memory.ActorReference == Actor)
+            return true;
+    }
+    
+    // Check long-term memory
+    for (const FNPC_MemoryEntry& Memory : LongTermMemory)
+    {
+        if (Memory.ActorReference == Actor)
+            return true;
+    }
+    
+    return false;
+}
+
+void ANPCBehaviorController::ClearMemories()
+{
+    ShortTermMemory.Empty();
+    LongTermMemory.Empty();
+}
+
+void ANPCBehaviorController::UpdateMemorySystem(float DeltaTime)
+{
+    ProcessShortTermMemory();
+    ConsolidateToLongTermMemory();
+}
+
+void ANPCBehaviorController::ProcessShortTermMemory()
+{
+    float CurrentTime = GetWorld()->GetTimeSeconds();
+    
+    // Decay memory importance over time
+    for (FNPC_MemoryEntry& Memory : ShortTermMemory)
+    {
+        float TimeSinceMemory = CurrentTime - Memory.Timestamp;
+        Memory.Importance = FMath::Max(0.0f, Memory.Importance - (MemoryDecayRate * TimeSinceMemory));
+    }
+    
+    // Remove memories with very low importance
+    ShortTermMemory.RemoveAll([](const FNPC_MemoryEntry& Memory) {
+        return Memory.Importance <= 0.1f;
+    });
+}
+
+void ANPCBehaviorController::ConsolidateToLongTermMemory()
+{
+    // Move important memories to long-term storage
     for (int32 i = ShortTermMemory.Num() - 1; i >= 0; i--)
     {
-        if (ShortTermMemory[i].Importance > 0.8f && LongTermMemory.Num() < MaxLongTermMemories)
+        const FNPC_MemoryEntry& Memory = ShortTermMemory[i];
+        
+        // High importance or high emotional weight memories get consolidated
+        if (Memory.Importance > 0.8f || Memory.EmotionalWeight > 0.7f)
         {
-            LongTermMemory.Add(ShortTermMemory[i]);
+            LongTermMemory.Add(Memory);
             ShortTermMemory.RemoveAt(i);
         }
     }
-}
-
-void UNPC_BehaviorController::UpdateRoutineBehavior()
-{
-    if (!BlackboardComponent)
-        return;
-
-    // Update blackboard with current routine state
-    BlackboardComponent->SetValueAsBool(TEXT("IsWithinRoutineHours"), IsWithinRoutineHours());
-    BlackboardComponent->SetValueAsBool(TEXT("InEmergencyMode"), bInEmergencyMode);
-    BlackboardComponent->SetValueAsObject(TEXT("CurrentThreat"), CurrentThreat);
-
-    if (PatrolPoints.Num() > 0)
+    
+    // Limit long-term memory size
+    if (LongTermMemory.Num() > 50)
     {
-        BlackboardComponent->SetValueAsVector(TEXT("NextPatrolPoint"), PatrolPoints[CurrentPatrolIndex]);
+        LongTermMemory.RemoveAt(0);
     }
 }
 
-void UNPC_BehaviorController::HandleEmergencyBehavior()
+void ANPCBehaviorController::GeneratePatrolPoints()
 {
-    if (bInEmergencyMode && CurrentThreat)
+    PatrolPoints.Empty();
+    
+    // Generate 4-6 patrol points around home location
+    int32 NumPoints = FMath::RandRange(4, 6);
+    
+    for (int32 i = 0; i < NumPoints; i++)
     {
-        // Emergency behavior - flee or hide
-        FVector ThreatLocation = CurrentThreat->GetActorLocation();
-        FVector MyLocation = GetPawn() ? GetPawn()->GetActorLocation() : FVector::ZeroVector;
-        FVector FleeDirection = (MyLocation - ThreatLocation).GetSafeNormal();
-        FVector FleeTarget = MyLocation + FleeDirection * 2000.0f;
-
-        if (BlackboardComponent)
-        {
-            BlackboardComponent->SetValueAsVector(TEXT("FleeTarget"), FleeTarget);
-        }
-
-        AddMemory(ThreatLocation, ENPC_MemoryType::Danger, 1.0f);
+        float Angle = (2.0f * PI * i) / NumPoints;
+        float Distance = FMath::RandRange(PatrolRadius * 0.5f, PatrolRadius);
+        
+        FVector PatrolPoint = HomeLocation + FVector(
+            FMath::Cos(Angle) * Distance,
+            FMath::Sin(Angle) * Distance,
+            0.0f
+        );
+        
+        PatrolPoints.Add(PatrolPoint);
     }
+}
+
+FVector ANPCBehaviorController::GetNextPatrolPoint()
+{
+    if (PatrolPoints.Num() == 0)
+        return HomeLocation;
+        
+    CurrentPatrolIndex = (CurrentPatrolIndex + 1) % PatrolPoints.Num();
+    return PatrolPoints[CurrentPatrolIndex];
 }
