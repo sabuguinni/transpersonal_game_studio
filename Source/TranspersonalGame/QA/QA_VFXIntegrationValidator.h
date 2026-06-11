@@ -1,47 +1,46 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
+#include "Engine/Engine.h"
 #include "Components/ActorComponent.h"
-#include "Engine/World.h"
+#include "NiagaraComponent.h"
+#include "NiagaraSystem.h"
+#include "Components/AudioComponent.h"
+#include "Materials/Material.h"
 #include "QA_VFXIntegrationValidator.generated.h"
 
 UENUM(BlueprintType)
-enum class EQA_VFXTestResult : uint8
+enum class EQA_VFXValidationResult : uint8
 {
     Pass        UMETA(DisplayName = "Pass"),
-    Fail        UMETA(DisplayName = "Fail"),
     Warning     UMETA(DisplayName = "Warning"),
-    NotTested   UMETA(DisplayName = "Not Tested")
+    Fail        UMETA(DisplayName = "Fail"),
+    Critical    UMETA(DisplayName = "Critical")
 };
 
 USTRUCT(BlueprintType)
-struct FQA_VFXTestCase
+struct FQA_VFXValidationReport
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Test")
+    UPROPERTY(BlueprintReadOnly, Category = "QA Validation")
     FString TestName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Test")
-    FString TestDescription;
+    UPROPERTY(BlueprintReadOnly, Category = "QA Validation")
+    EQA_VFXValidationResult Result;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Test")
-    EQA_VFXTestResult Result;
+    UPROPERTY(BlueprintReadOnly, Category = "QA Validation")
+    FString Details;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Test")
+    UPROPERTY(BlueprintReadOnly, Category = "QA Validation")
     float ExecutionTime;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Test")
-    FString ErrorMessage;
-
-    FQA_VFXTestCase()
+    FQA_VFXValidationReport()
     {
-        TestName = TEXT("Unnamed Test");
-        TestDescription = TEXT("No description");
-        Result = EQA_VFXTestResult::NotTested;
+        TestName = TEXT("");
+        Result = EQA_VFXValidationResult::Pass;
+        Details = TEXT("");
         ExecutionTime = 0.0f;
-        ErrorMessage = TEXT("");
     }
 };
 
@@ -50,131 +49,127 @@ struct FQA_VFXPerformanceMetrics
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Performance")
-    int32 TotalActorCount;
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    int32 ActiveNiagaraComponents;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Performance")
-    int32 VFXActorCount;
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    int32 TotalParticleCount;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Performance")
-    float FrameRate;
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float VFXMemoryUsageMB;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Performance")
-    float MemoryUsageMB;
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float AverageFrameTime;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Performance")
-    bool bPerformanceAcceptable;
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    bool bPerformanceWithinLimits;
 
     FQA_VFXPerformanceMetrics()
     {
-        TotalActorCount = 0;
-        VFXActorCount = 0;
-        FrameRate = 0.0f;
-        MemoryUsageMB = 0.0f;
-        bPerformanceAcceptable = false;
+        ActiveNiagaraComponents = 0;
+        TotalParticleCount = 0;
+        VFXMemoryUsageMB = 0.0f;
+        AverageFrameTime = 0.0f;
+        bPerformanceWithinLimits = true;
     }
 };
 
 /**
- * QA VFX Integration Validator
- * Comprehensive testing system for VFX integration with game systems
- * Validates performance, functionality, and integration quality
+ * QA VFX Integration Validator - Comprehensive testing framework for VFX systems
+ * Validates Niagara effects, performance metrics, audio-VFX sync, and material integration
  */
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API AQA_VFXIntegrationValidator : public AActor
+UCLASS(BlueprintType, Blueprintable, meta = (BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UQA_VFXIntegrationValidator : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    AQA_VFXIntegrationValidator();
+    UQA_VFXIntegrationValidator();
 
 protected:
     virtual void BeginPlay() override;
 
 public:
-    virtual void Tick(float DeltaTime) override;
+    // Core Validation Functions
+    UFUNCTION(BlueprintCallable, Category = "QA Validation", CallInEditor = true)
+    TArray<FQA_VFXValidationReport> RunFullVFXValidation();
 
-    // Core validation functions
-    UFUNCTION(BlueprintCallable, Category = "QA Validation")
-    void RunFullVFXValidationSuite();
+    UFUNCTION(BlueprintCallable, Category = "QA Validation", CallInEditor = true)
+    FQA_VFXValidationReport ValidateNiagaraLibrary();
 
-    UFUNCTION(BlueprintCallable, Category = "QA Validation")
-    bool ValidateVFXSystemCompilation();
+    UFUNCTION(BlueprintCallable, Category = "QA Validation", CallInEditor = true)
+    FQA_VFXValidationReport ValidateVFXAssets();
 
-    UFUNCTION(BlueprintCallable, Category = "QA Validation")
-    bool ValidateVFXActorSpawning();
+    UFUNCTION(BlueprintCallable, Category = "QA Validation", CallInEditor = true)
+    FQA_VFXValidationReport ValidateCharacterVFXIntegration();
 
-    UFUNCTION(BlueprintCallable, Category = "QA Validation")
-    bool ValidateVFXPerformance();
+    UFUNCTION(BlueprintCallable, Category = "QA Validation", CallInEditor = true)
+    FQA_VFXValidationReport ValidateAudioVFXSynchronization();
 
-    UFUNCTION(BlueprintCallable, Category = "QA Validation")
-    bool ValidateVFXIntegrationWithCharacter();
+    UFUNCTION(BlueprintCallable, Category = "QA Validation", CallInEditor = true)
+    FQA_VFXValidationReport ValidateVFXMaterials();
 
-    UFUNCTION(BlueprintCallable, Category = "QA Validation")
-    bool ValidateVFXIntegrationWithAudio();
+    UFUNCTION(BlueprintCallable, Category = "QA Validation", CallInEditor = true)
+    FQA_VFXValidationReport ValidateVFXLODSystem();
 
-    // Performance testing
-    UFUNCTION(BlueprintCallable, Category = "QA Performance")
-    FQA_VFXPerformanceMetrics GetCurrentPerformanceMetrics();
+    // Performance Validation
+    UFUNCTION(BlueprintCallable, Category = "QA Performance", CallInEditor = true)
+    FQA_VFXPerformanceMetrics GatherVFXPerformanceMetrics();
 
-    UFUNCTION(BlueprintCallable, Category = "QA Performance")
-    bool IsPerformanceWithinLimits();
+    UFUNCTION(BlueprintCallable, Category = "QA Performance", CallInEditor = true)
+    bool ValidateVFXPerformanceLimits(const FQA_VFXPerformanceMetrics& Metrics);
 
-    // Test case management
-    UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    void AddTestCase(const FQA_VFXTestCase& TestCase);
+    // Integration Testing
+    UFUNCTION(BlueprintCallable, Category = "QA Integration", CallInEditor = true)
+    AActor* CreateVFXTestActor(FVector Location = FVector::ZeroVector);
 
-    UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    TArray<FQA_VFXTestCase> GetAllTestResults();
+    UFUNCTION(BlueprintCallable, Category = "QA Integration", CallInEditor = true)
+    bool TestVFXEffectSpawning(const FString& EffectName, FVector Location);
 
-    UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    void ClearTestResults();
+    UFUNCTION(BlueprintCallable, Category = "QA Integration", CallInEditor = true)
+    bool TestVFXEffectLifecycle(UNiagaraComponent* NiagaraComp);
 
-    // Reporting
-    UFUNCTION(BlueprintCallable, Category = "QA Reporting")
-    FString GenerateValidationReport();
+    // Reporting Functions
+    UFUNCTION(BlueprintCallable, Category = "QA Reporting", CallInEditor = true)
+    void GenerateVFXValidationReport(const TArray<FQA_VFXValidationReport>& Reports);
 
-    UFUNCTION(BlueprintCallable, Category = "QA Reporting")
-    void SaveValidationReport(const FString& FilePath);
+    UFUNCTION(BlueprintCallable, Category = "QA Reporting", CallInEditor = true)
+    void LogVFXValidationSummary(const TArray<FQA_VFXValidationReport>& Reports);
 
 protected:
-    // Test case storage
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "QA Data")
-    TArray<FQA_VFXTestCase> TestCases;
+    // Validation Configuration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Config")
+    int32 MaxAllowedNiagaraComponents;
 
-    // Performance metrics
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "QA Performance")
-    FQA_VFXPerformanceMetrics CurrentMetrics;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Config")
+    float MaxVFXMemoryUsageMB;
 
-    // Validation settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Settings")
-    float MaxAcceptableFrameTime;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Config")
+    float MaxFrameTimeThresholdMS;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Settings")
-    int32 MaxAcceptableActorCount;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Config")
+    bool bEnablePerformanceValidation;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Settings")
-    float MaxAcceptableMemoryMB;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Config")
+    bool bEnableIntegrationTesting;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Settings")
-    bool bAutoRunValidationOnBeginPlay;
+    // Test Results Storage
+    UPROPERTY(BlueprintReadOnly, Category = "QA Results")
+    TArray<FQA_VFXValidationReport> LastValidationResults;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Settings")
-    float ValidationInterval;
+    UPROPERTY(BlueprintReadOnly, Category = "QA Results")
+    FQA_VFXPerformanceMetrics LastPerformanceMetrics;
 
-    // Internal state
-    UPROPERTY()
-    float LastValidationTime;
-
-    UPROPERTY()
-    bool bValidationInProgress;
-
-private:
-    // Helper functions
-    void RunTestCase(const FString& TestName, const FString& Description, TFunction<bool()> TestFunction);
-    bool CheckVFXClassExists(const FString& ClassName);
-    int32 CountVFXActorsInLevel();
-    float GetCurrentFrameRate();
-    float GetCurrentMemoryUsage();
-    void LogTestResult(const FQA_VFXTestCase& TestCase);
+    // Helper Functions
+    FQA_VFXValidationReport CreateValidationReport(const FString& TestName, EQA_VFXValidationResult Result, const FString& Details, float ExecutionTime = 0.0f);
+    
+    bool IsVFXClassAvailable(const FString& ClassName);
+    
+    int32 CountActiveNiagaraComponents();
+    
+    float CalculateVFXMemoryUsage();
+    
+    TArray<UNiagaraSystem*> GetAllNiagaraSystems();
+    
+    TArray<UMaterial*> GetVFXMaterials();
 };
