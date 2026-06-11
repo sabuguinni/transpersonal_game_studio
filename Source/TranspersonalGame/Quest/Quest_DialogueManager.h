@@ -1,150 +1,126 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Subsystems/GameInstanceSubsystem.h"
-#include "Engine/DataTable.h"
+#include "Engine/GameInstance.h"
+#include "Components/ActorComponent.h"
 #include "SharedTypes.h"
 #include "Quest_DialogueManager.generated.h"
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FQuest_DialogueEntry
+struct TRANSPERSONALGAME_API FQuest_DialogueNode
 {
     GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    FString DialogueID;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    FString SpeakerName;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
     FString DialogueText;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    FString AudioFilePath;
+    FString SpeakerName;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    TArray<FString> ResponseOptions;
+    TArray<FString> PlayerResponses;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    TArray<FString> RequiredQuests;
+    TArray<int32> NextNodeIndices;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    bool bIsQuestGiver;
+    bool bIsQuestDialogue;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    FString QuestToGive;
+    FString QuestID;
 
-    FQuest_DialogueEntry()
+    FQuest_DialogueNode()
     {
-        DialogueID = TEXT("");
-        SpeakerName = TEXT("");
         DialogueText = TEXT("");
-        AudioFilePath = TEXT("");
-        bIsQuestGiver = false;
-        QuestToGive = TEXT("");
+        SpeakerName = TEXT("Unknown");
+        bIsQuestDialogue = false;
+        QuestID = TEXT("");
     }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FQuest_NPCDialogueSet
+struct TRANSPERSONALGAME_API FQuest_DialogueTree
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC")
-    FString NPCName;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    FString TreeID;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC")
-    TArray<FQuest_DialogueEntry> DialogueEntries;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    TArray<FQuest_DialogueNode> DialogueNodes;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC")
-    FString DefaultGreeting;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    int32 CurrentNodeIndex;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC")
-    FString QuestCompleteResponse;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    bool bIsActive;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC")
-    FString QuestInProgressResponse;
-
-    FQuest_NPCDialogueSet()
+    FQuest_DialogueTree()
     {
-        NPCName = TEXT("");
-        DefaultGreeting = TEXT("");
-        QuestCompleteResponse = TEXT("");
-        QuestInProgressResponse = TEXT("");
+        TreeID = TEXT("");
+        CurrentNodeIndex = 0;
+        bIsActive = false;
     }
 };
 
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UQuest_DialogueManager : public UGameInstanceSubsystem
+UCLASS(ClassGroup=(Quest), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UQuest_DialogueManager : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
     UQuest_DialogueManager();
 
-    // USubsystem interface
-    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
-    virtual void Deinitialize() override;
+protected:
+    virtual void BeginPlay() override;
 
-    // Dialogue Management
-    UFUNCTION(BlueprintCallable, Category = "Quest Dialogue")
-    FQuest_DialogueEntry GetDialogueEntry(const FString& DialogueID);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue System")
+    TArray<FQuest_DialogueTree> DialogueTrees;
 
-    UFUNCTION(BlueprintCallable, Category = "Quest Dialogue")
-    TArray<FQuest_DialogueEntry> GetNPCDialogues(const FString& NPCName);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue System")
+    FQuest_DialogueTree* CurrentDialogueTree;
 
-    UFUNCTION(BlueprintCallable, Category = "Quest Dialogue")
-    FString GetNPCGreeting(const FString& NPCName);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue System")
+    bool bDialogueActive;
 
-    UFUNCTION(BlueprintCallable, Category = "Quest Dialogue")
-    bool StartDialogue(const FString& NPCName, const FString& PlayerID);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    float DialogueAudioVolume;
 
-    UFUNCTION(BlueprintCallable, Category = "Quest Dialogue")
-    void EndDialogue(const FString& PlayerID);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    float DialogueSpeed;
 
-    UFUNCTION(BlueprintCallable, Category = "Quest Dialogue")
-    bool IsInDialogue(const FString& PlayerID) const;
+public:
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    bool StartDialogue(const FString& TreeID);
 
-    // Quest Integration
-    UFUNCTION(BlueprintCallable, Category = "Quest Dialogue")
-    FString GetQuestDialogue(const FString& QuestID, const FString& DialogueType);
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    void EndDialogue();
 
-    UFUNCTION(BlueprintCallable, Category = "Quest Dialogue")
-    void RegisterQuestGiver(const FString& NPCName, const FString& QuestID);
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    bool SelectPlayerResponse(int32 ResponseIndex);
 
-    UFUNCTION(BlueprintCallable, Category = "Quest Dialogue")
-    bool IsQuestGiver(const FString& NPCName) const;
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    FQuest_DialogueNode GetCurrentDialogueNode() const;
 
-    // Audio Integration
-    UFUNCTION(BlueprintCallable, Category = "Quest Dialogue")
-    FString GetDialogueAudioPath(const FString& DialogueID);
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    TArray<FString> GetCurrentPlayerResponses() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Quest Dialogue")
-    void PlayDialogueAudio(const FString& DialogueID);
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    bool IsDialogueActive() const { return bDialogueActive; }
+
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    void CreateSurvivalDialogues();
+
+    UFUNCTION(BlueprintCallable, Category = "Quest Integration")
+    void TriggerQuestFromDialogue(const FString& QuestID);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    void PlayDialogueAudio(const FString& DialogueText, const FString& SpeakerName);
 
 protected:
-    // Dialogue Data
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dialogue Data")
-    TMap<FString, FQuest_NPCDialogueSet> NPCDialogues;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dialogue Data")
-    TMap<FString, FQuest_DialogueEntry> DialogueDatabase;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dialogue Data")
-    TMap<FString, FString> QuestGivers;
-
-    // Active Dialogues
-    UPROPERTY(BlueprintReadOnly, Category = "Active Dialogues")
-    TMap<FString, FString> ActiveDialogues; // PlayerID -> NPCName
-
-    // Initialization
-    void InitializeDialogueDatabase();
-    void LoadNPCDialogues();
-    void SetupQuestGivers();
-
-    // Helper Functions
-    FQuest_DialogueEntry CreateDialogueEntry(const FString& ID, const FString& Speaker, 
-                                           const FString& Text, const FString& AudioPath = TEXT(""));
-    void AddNPCDialogue(const FString& NPCName, const FQuest_DialogueEntry& Entry);
+    void InitializeDefaultDialogues();
+    void CreateHunterDialogue();
+    void CreateCrafterDialogue();
+    void CreateSurvivalGuideDialogue();
+    bool AdvanceToNextNode(int32 NextNodeIndex);
 };
