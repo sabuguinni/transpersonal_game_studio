@@ -1,21 +1,23 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Components/ActorComponent.h"
-#include "Engine/Engine.h"
-#include "Sound/SoundCue.h"
+#include "Engine/GameInstanceSubsystem.h"
 #include "Components/AudioComponent.h"
+#include "Sound/SoundCue.h"
+#include "Engine/World.h"
 #include "Audio_SoundManager.generated.h"
 
 UENUM(BlueprintType)
-enum class EAudio_SoundCategory : uint8
+enum class EAudio_SoundType : uint8
 {
     Ambient,
-    Dinosaur,
-    Player,
-    Environment,
-    UI,
-    Music
+    DinosaurFootsteps,
+    DinosaurRoar,
+    PlayerFootsteps,
+    Fire,
+    Weather,
+    Combat,
+    UI
 };
 
 USTRUCT(BlueprintType)
@@ -24,13 +26,10 @@ struct FAudio_SoundEntry
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FString SoundName;
+    EAudio_SoundType SoundType;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     TSoftObjectPtr<USoundCue> SoundCue;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    EAudio_SoundCategory Category;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     float Volume = 1.0f;
@@ -39,71 +38,69 @@ struct FAudio_SoundEntry
     float Pitch = 1.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    bool bIs3D = true;
+    bool bLooping = false;
 
     FAudio_SoundEntry()
     {
-        SoundName = TEXT("");
-        Category = EAudio_SoundCategory::Ambient;
+        SoundType = EAudio_SoundType::Ambient;
         Volume = 1.0f;
         Pitch = 1.0f;
-        bIs3D = true;
+        bLooping = false;
     }
 };
 
-UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UAudio_SoundManager : public UActorComponent
+UCLASS(BlueprintType)
+class TRANSPERSONALGAME_API UAudio_SoundManager : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
 public:
     UAudio_SoundManager();
 
-protected:
-    virtual void BeginPlay() override;
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio System")
-    TArray<FAudio_SoundEntry> SoundLibrary;
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    void PlaySound(EAudio_SoundType SoundType, FVector Location = FVector::ZeroVector, float VolumeMultiplier = 1.0f);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio System")
-    float MasterVolume = 1.0f;
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    void PlaySoundAtLocation(EAudio_SoundType SoundType, FVector Location, float VolumeMultiplier = 1.0f);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio System")
-    float AmbientVolume = 0.7f;
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    void StopSound(EAudio_SoundType SoundType);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio System")
-    float DinosaurVolume = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio System")
-    float PlayerVolume = 0.8f;
-
-    TMap<FString, UAudioComponent*> ActiveAudioComponents;
-
-public:
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
-
-    UFUNCTION(BlueprintCallable, Category = "Audio System")
-    void PlaySound(const FString& SoundName, FVector Location = FVector::ZeroVector, AActor* AttachToActor = nullptr);
-
-    UFUNCTION(BlueprintCallable, Category = "Audio System")
-    void StopSound(const FString& SoundName);
-
-    UFUNCTION(BlueprintCallable, Category = "Audio System")
+    UFUNCTION(BlueprintCallable, Category = "Audio")
     void StopAllSounds();
 
-    UFUNCTION(BlueprintCallable, Category = "Audio System")
-    void SetCategoryVolume(EAudio_SoundCategory Category, float Volume);
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    void SetMasterVolume(float Volume);
 
-    UFUNCTION(BlueprintCallable, Category = "Audio System")
-    void RegisterSound(const FString& SoundName, USoundCue* SoundCue, EAudio_SoundCategory Category);
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    void SetSoundTypeVolume(EAudio_SoundType SoundType, float Volume);
 
-    UFUNCTION(BlueprintCallable, Category = "Audio System")
-    bool IsSoundPlaying(const FString& SoundName);
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    void RegisterSoundEntry(const FAudio_SoundEntry& SoundEntry);
 
-    UFUNCTION(BlueprintCallable, Category = "Audio System")
-    void InitializeDefaultSounds();
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    void PlayDinosaurFootstep(FVector Location, float DinosaurSize = 1.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    void PlayDinosaurRoar(FVector Location, float IntensityLevel = 1.0f);
+
+protected:
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    TArray<FAudio_SoundEntry> SoundEntries;
+
+    UPROPERTY()
+    TMap<EAudio_SoundType, UAudioComponent*> ActiveSounds;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    float MasterVolume = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    TMap<EAudio_SoundType, float> SoundTypeVolumes;
 
 private:
-    FAudio_SoundEntry* FindSoundEntry(const FString& SoundName);
-    float GetCategoryVolume(EAudio_SoundCategory Category);
+    FAudio_SoundEntry* FindSoundEntry(EAudio_SoundType SoundType);
+    void InitializeDefaultSounds();
 };
