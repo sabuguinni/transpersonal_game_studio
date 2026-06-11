@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "Engine/GameInstanceSubsystem.h"
 #include "Engine/DataTable.h"
+#include "Components/ActorComponent.h"
 #include "SharedTypes.h"
 #include "NarrativeDialogueSystem.generated.h"
 
@@ -12,55 +13,56 @@ struct TRANSPERSONALGAME_API FNarr_DialogueEntry
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    FString DialogueID;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
     FString SpeakerName;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    FText DialogueText;
+    FString DialogueText;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    float Duration;
+    float DisplayDuration;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    FString AudioPath;
+    FString QuestID;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    bool bIsPlayerChoice;
+    int32 Priority;
 
     FNarr_DialogueEntry()
     {
-        SpeakerName = TEXT("Unknown");
-        DialogueText = FText::FromString(TEXT("..."));
-        Duration = 3.0f;
-        AudioPath = TEXT("");
-        bIsPlayerChoice = false;
+        DialogueID = TEXT("");
+        SpeakerName = TEXT("");
+        DialogueText = TEXT("");
+        DisplayDuration = 3.0f;
+        QuestID = TEXT("");
+        Priority = 0;
     }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FNarr_DialogueTree : public FTableRowBase
+struct TRANSPERSONALGAME_API FNarr_QuestDialogue
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    FString DialogueID;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    FString QuestID;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
     TArray<FNarr_DialogueEntry> DialogueEntries;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    TArray<FString> NextDialogueIDs;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    bool bIsActive;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    bool bIsQuestDialogue;
-
-    FNarr_DialogueTree()
+    FNarr_QuestDialogue()
     {
-        DialogueID = TEXT("default_dialogue");
-        bIsQuestDialogue = false;
+        QuestID = TEXT("");
+        bIsActive = false;
     }
 };
 
-UCLASS(BlueprintType)
+UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UNarrativeDialogueSystem : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
@@ -68,56 +70,83 @@ class TRANSPERSONALGAME_API UNarrativeDialogueSystem : public UGameInstanceSubsy
 public:
     UNarrativeDialogueSystem();
 
+    // Subsystem interface
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
+
+    // Dialogue management
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    void RegisterQuestDialogue(const FString& QuestID, const TArray<FNarr_DialogueEntry>& DialogueEntries);
 
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    bool StartDialogue(const FString& DialogueID, AActor* Speaker, AActor* Listener);
+    void TriggerDialogue(const FString& DialogueID, AActor* TriggerActor = nullptr);
 
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void EndDialogue();
+    void ActivateQuestDialogues(const FString& QuestID);
 
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    bool AdvanceDialogue();
+    void DeactivateQuestDialogues(const FString& QuestID);
 
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    FNarr_DialogueEntry GetCurrentDialogueEntry() const;
+    TArray<FNarr_DialogueEntry> GetActiveDialogues() const;
+
+    // Quest integration
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    void OnQuestStarted(const FString& QuestID);
 
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    bool IsDialogueActive() const;
+    void OnQuestCompleted(const FString& QuestID);
 
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void RegisterDialogueTable(UDataTable* DialogueTable);
-
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    TArray<FString> GetAvailableChoices() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void SelectChoice(int32 ChoiceIndex);
+    void OnQuestFailed(const FString& QuestID);
 
 protected:
-    UPROPERTY(BlueprintReadOnly, Category = "Narrative")
-    bool bDialogueActive;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    TMap<FString, FNarr_QuestDialogue> QuestDialogues;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Narrative")
-    FString CurrentDialogueID;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    TArray<FNarr_DialogueEntry> ActiveDialogues;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Narrative")
-    int32 CurrentEntryIndex;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Narrative")
-    FNarr_DialogueTree CurrentDialogueTree;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Narrative")
-    TWeakObjectPtr<AActor> CurrentSpeaker;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Narrative")
-    TWeakObjectPtr<AActor> CurrentListener;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Narrative")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
     UDataTable* DialogueDataTable;
 
 private:
-    bool LoadDialogueTree(const FString& DialogueID);
-    void PlayDialogueAudio(const FString& AudioPath);
-    void TriggerDialogueEvent(const FString& EventName);
+    void LoadDialogueData();
+    void SortDialoguesByPriority();
 };
+
+UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UNarrativeDialogueTrigger : public UActorComponent
+{
+    GENERATED_BODY()
+
+public:
+    UNarrativeDialogueTrigger();
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue Trigger")
+    FString DialogueID;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue Trigger")
+    FString RequiredQuestID;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue Trigger")
+    bool bTriggerOnce;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue Trigger")
+    float TriggerRadius;
+
+    UFUNCTION(BlueprintCallable, Category = "Dialogue Trigger")
+    void TriggerDialogue(AActor* TriggeringActor);
+
+    UFUNCTION(BlueprintCallable, Category = "Dialogue Trigger")
+    bool CanTrigger(AActor* TriggeringActor) const;
+
+protected:
+    virtual void BeginPlay() override;
+
+private:
+    bool bHasTriggered;
+    UNarrativeDialogueSystem* DialogueSystem;
+};
+
+#include "NarrativeDialogueSystem.generated.h"
