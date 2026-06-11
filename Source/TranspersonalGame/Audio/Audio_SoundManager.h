@@ -4,32 +4,32 @@
 #include "Engine/GameInstanceSubsystem.h"
 #include "Components/AudioComponent.h"
 #include "Sound/SoundCue.h"
+#include "Sound/SoundBase.h"
 #include "Engine/World.h"
 #include "Audio_SoundManager.generated.h"
 
 UENUM(BlueprintType)
-enum class EAudio_SoundType : uint8
+enum class EAudio_SoundCategory : uint8
 {
     Ambient,
-    DinosaurFootsteps,
-    DinosaurRoar,
-    PlayerFootsteps,
-    Fire,
-    Weather,
+    Footsteps,
     Combat,
-    UI
+    Crafting,
+    UI,
+    Voice,
+    Music
 };
 
 USTRUCT(BlueprintType)
-struct FAudio_SoundEntry
+struct TRANSPERSONALGAME_API FAudio_SoundEntry
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    EAudio_SoundType SoundType;
+    TSoftObjectPtr<USoundBase> Sound;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    TSoftObjectPtr<USoundCue> SoundCue;
+    EAudio_SoundCategory Category;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     float Volume = 1.0f;
@@ -38,18 +38,18 @@ struct FAudio_SoundEntry
     float Pitch = 1.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    bool bLooping = false;
+    bool bIs3D = true;
 
     FAudio_SoundEntry()
     {
-        SoundType = EAudio_SoundType::Ambient;
+        Category = EAudio_SoundCategory::Ambient;
         Volume = 1.0f;
         Pitch = 1.0f;
-        bLooping = false;
+        bIs3D = true;
     }
 };
 
-UCLASS(BlueprintType)
+UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UAudio_SoundManager : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
@@ -61,46 +61,40 @@ public:
     virtual void Deinitialize() override;
 
     UFUNCTION(BlueprintCallable, Category = "Audio")
-    void PlaySound(EAudio_SoundType SoundType, FVector Location = FVector::ZeroVector, float VolumeMultiplier = 1.0f);
+    void PlaySound2D(USoundBase* Sound, float Volume = 1.0f, float Pitch = 1.0f);
 
     UFUNCTION(BlueprintCallable, Category = "Audio")
-    void PlaySoundAtLocation(EAudio_SoundType SoundType, FVector Location, float VolumeMultiplier = 1.0f);
+    void PlaySound3D(USoundBase* Sound, FVector Location, float Volume = 1.0f, float Pitch = 1.0f);
 
     UFUNCTION(BlueprintCallable, Category = "Audio")
-    void StopSound(EAudio_SoundType SoundType);
+    void PlaySoundAtActor(USoundBase* Sound, AActor* Actor, float Volume = 1.0f, float Pitch = 1.0f);
 
     UFUNCTION(BlueprintCallable, Category = "Audio")
-    void StopAllSounds();
+    void StopAllSoundsOfCategory(EAudio_SoundCategory Category);
 
     UFUNCTION(BlueprintCallable, Category = "Audio")
-    void SetMasterVolume(float Volume);
+    void SetCategoryVolume(EAudio_SoundCategory Category, float Volume);
 
     UFUNCTION(BlueprintCallable, Category = "Audio")
-    void SetSoundTypeVolume(EAudio_SoundType SoundType, float Volume);
+    float GetCategoryVolume(EAudio_SoundCategory Category) const;
 
     UFUNCTION(BlueprintCallable, Category = "Audio")
-    void RegisterSoundEntry(const FAudio_SoundEntry& SoundEntry);
+    void RegisterSound(const FString& SoundName, const FAudio_SoundEntry& SoundEntry);
 
     UFUNCTION(BlueprintCallable, Category = "Audio")
-    void PlayDinosaurFootstep(FVector Location, float DinosaurSize = 1.0f);
-
-    UFUNCTION(BlueprintCallable, Category = "Audio")
-    void PlayDinosaurRoar(FVector Location, float IntensityLevel = 1.0f);
+    void PlayRegisteredSound(const FString& SoundName, FVector Location = FVector::ZeroVector);
 
 protected:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    TArray<FAudio_SoundEntry> SoundEntries;
+    TMap<EAudio_SoundCategory, float> CategoryVolumes;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    TMap<FString, FAudio_SoundEntry> RegisteredSounds;
 
     UPROPERTY()
-    TMap<EAudio_SoundType, UAudioComponent*> ActiveSounds;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    float MasterVolume = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    TMap<EAudio_SoundType, float> SoundTypeVolumes;
+    TArray<UAudioComponent*> ActiveAudioComponents;
 
 private:
-    FAudio_SoundEntry* FindSoundEntry(EAudio_SoundType SoundType);
-    void InitializeDefaultSounds();
+    void InitializeCategoryVolumes();
+    void CleanupFinishedComponents();
 };
