@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Engine/GameInstanceSubsystem.h"
+#include "Engine/DataTable.h"
 #include "SharedTypes.h"
 #include "Narr_DialogueManager.generated.h"
 
@@ -14,20 +15,20 @@ struct TRANSPERSONALGAME_API FNarr_DialogueLine
     FString SpeakerName;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    FString DialogueText;
+    FText DialogueText;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
     float Duration;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    bool bIsUrgent;
+    bool bIsPlayerChoice;
 
     FNarr_DialogueLine()
     {
         SpeakerName = TEXT("Unknown");
-        DialogueText = TEXT("");
+        DialogueText = FText::FromString(TEXT(""));
         Duration = 3.0f;
-        bIsUrgent = false;
+        bIsPlayerChoice = false;
     }
 };
 
@@ -43,12 +44,12 @@ struct TRANSPERSONALGAME_API FNarr_DialogueSequence
     TArray<FNarr_DialogueLine> DialogueLines;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    bool bIsRepeatable;
+    ENarr_DialogueTrigger TriggerCondition;
 
     FNarr_DialogueSequence()
     {
-        SequenceID = TEXT("Default");
-        bIsRepeatable = false;
+        SequenceID = TEXT("DefaultSequence");
+        TriggerCondition = ENarr_DialogueTrigger::Manual;
     }
 };
 
@@ -61,34 +62,36 @@ public:
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
 
     UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    void PlayDialogueSequence(const FString& SequenceID);
+    void StartDialogue(const FString& SequenceID);
 
     UFUNCTION(BlueprintCallable, Category = "Dialogue")
     void StopCurrentDialogue();
 
     UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    bool IsDialogueActive() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
     void RegisterDialogueSequence(const FNarr_DialogueSequence& Sequence);
 
     UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    bool IsDialoguePlaying() const;
+    void TriggerContextualDialogue(ENarr_DialogueTrigger TriggerType, const FVector& Location);
 
 protected:
-    UPROPERTY()
+    UPROPERTY(BlueprintReadOnly, Category = "Dialogue")
     TMap<FString, FNarr_DialogueSequence> DialogueSequences;
 
-    UPROPERTY()
-    FString CurrentSequenceID;
+    UPROPERTY(BlueprintReadOnly, Category = "Dialogue")
+    FNarr_DialogueSequence* CurrentSequence;
 
-    UPROPERTY()
+    UPROPERTY(BlueprintReadOnly, Category = "Dialogue")
     int32 CurrentLineIndex;
 
-    UPROPERTY()
-    bool bIsPlaying;
+    UPROPERTY(BlueprintReadOnly, Category = "Dialogue")
+    bool bDialogueActive;
 
     UFUNCTION()
     void AdvanceDialogue();
 
-    void InitializeDefaultDialogues();
+    UFUNCTION()
+    void ProcessDialogueLine(const FNarr_DialogueLine& Line);
 };
-
-#include "Narr_DialogueManager.generated.h"
