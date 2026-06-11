@@ -7,56 +7,18 @@
 #include "SharedTypes.h"
 #include "Char_VisualCustomization.generated.h"
 
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FChar_SkinTone
+UENUM(BlueprintType)
+enum class EChar_SkinTone : uint8
 {
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
-    FLinearColor BaseColor = FLinearColor(0.8f, 0.6f, 0.4f, 1.0f);
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
-    float Roughness = 0.7f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
-    float Subsurface = 0.3f;
-
-    FChar_SkinTone()
-    {
-        BaseColor = FLinearColor(0.8f, 0.6f, 0.4f, 1.0f);
-        Roughness = 0.7f;
-        Subsurface = 0.3f;
-    }
-};
-
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FChar_ClothingSet
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Clothing")
-    TSoftObjectPtr<USkeletalMesh> TorsoMesh;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Clothing")
-    TSoftObjectPtr<USkeletalMesh> LegsMesh;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Clothing")
-    TSoftObjectPtr<USkeletalMesh> FeetMesh;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Clothing")
-    TSoftObjectPtr<UMaterialInterface> ClothingMaterial;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Clothing")
-    FString ClothingName = TEXT("Basic Hide");
-
-    FChar_ClothingSet()
-    {
-        ClothingName = TEXT("Basic Hide");
-    }
+    Fair        UMETA(DisplayName = "Fair"),
+    Medium      UMETA(DisplayName = "Medium"), 
+    Olive       UMETA(DisplayName = "Olive"),
+    Dark        UMETA(DisplayName = "Dark"),
+    Weathered   UMETA(DisplayName = "Weathered")
 };
 
 UENUM(BlueprintType)
-enum class EChar_BodyType : uint8
+enum class EChar_BodyBuild : uint8
 {
     Lean        UMETA(DisplayName = "Lean"),
     Athletic    UMETA(DisplayName = "Athletic"),
@@ -65,16 +27,59 @@ enum class EChar_BodyType : uint8
 };
 
 UENUM(BlueprintType)
-enum class EChar_Gender : uint8
+enum class EChar_TribalMarkings : uint8
 {
-    Male        UMETA(DisplayName = "Male"),
-    Female      UMETA(DisplayName = "Female")
+    None        UMETA(DisplayName = "None"),
+    Hunter      UMETA(DisplayName = "Hunter"),
+    Warrior     UMETA(DisplayName = "Warrior"),
+    Shaman      UMETA(DisplayName = "Shaman"),
+    Scout       UMETA(DisplayName = "Scout")
 };
 
-/**
- * Component responsible for character visual customization and appearance management
- * Handles skin tones, clothing, body types, and visual variations for NPCs and player
- */
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FChar_VisualPreset
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Visual")
+    FString PresetName;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Visual")
+    EChar_SkinTone SkinTone;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Visual")
+    EChar_BodyBuild BodyBuild;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Visual")
+    EChar_TribalMarkings TribalMarkings;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Visual")
+    float ScarIntensity;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Visual")
+    float MuscleDefinition;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Visual")
+    bool bHasFacialHair;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Visual")
+    TSoftObjectPtr<USkeletalMesh> CharacterMesh;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Visual")
+    TSoftObjectPtr<UMaterialInterface> SkinMaterial;
+
+    FChar_VisualPreset()
+    {
+        PresetName = TEXT("Default");
+        SkinTone = EChar_SkinTone::Medium;
+        BodyBuild = EChar_BodyBuild::Athletic;
+        TribalMarkings = EChar_TribalMarkings::None;
+        ScarIntensity = 0.3f;
+        MuscleDefinition = 0.5f;
+        bHasFacialHair = false;
+    }
+};
+
 UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
 class TRANSPERSONALGAME_API UChar_VisualCustomization : public UActorComponent
 {
@@ -86,78 +91,99 @@ public:
 protected:
     virtual void BeginPlay() override;
 
-    // Character appearance properties
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
-    EChar_Gender CharacterGender = EChar_Gender::Male;
+    // Current visual configuration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Visual", meta = (AllowPrivateAccess = "true"))
+    FChar_VisualPreset CurrentPreset;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
-    EChar_BodyType BodyType = EChar_BodyType::Athletic;
+    // Available presets
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Visual")
+    TArray<FChar_VisualPreset> AvailablePresets;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
-    FChar_SkinTone SkinTone;
+    // MetaHuman integration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaHuman")
+    bool bUseMetaHuman;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
-    FChar_ClothingSet CurrentClothing;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaHuman")
+    TSoftObjectPtr<USkeletalMesh> MetaHumanMesh;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
-    float HeightScale = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaHuman")
+    TArray<TSoftObjectPtr<UMaterialInterface>> MetaHumanMaterials;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
-    float MuscleMass = 0.5f;
-
-    // Available customization options
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Customization")
-    TArray<FChar_SkinTone> AvailableSkinTones;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Customization")
-    TArray<FChar_ClothingSet> AvailableClothing;
-
-    // Character mesh references
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    TObjectPtr<USkeletalMeshComponent> CharacterMesh;
+    // Character mesh reference
+    UPROPERTY(BlueprintReadOnly, Category = "Character Visual")
+    class USkeletalMeshComponent* CharacterMeshComponent;
 
 public:
-    // Customization functions
-    UFUNCTION(BlueprintCallable, Category = "Character Customization")
-    void ApplySkinTone(const FChar_SkinTone& NewSkinTone);
+    // Visual customization methods
+    UFUNCTION(BlueprintCallable, Category = "Character Visual")
+    void ApplyVisualPreset(const FChar_VisualPreset& Preset);
 
-    UFUNCTION(BlueprintCallable, Category = "Character Customization")
-    void ApplyClothingSet(const FChar_ClothingSet& NewClothing);
+    UFUNCTION(BlueprintCallable, Category = "Character Visual")
+    void SetSkinTone(EChar_SkinTone NewSkinTone);
 
-    UFUNCTION(BlueprintCallable, Category = "Character Customization")
-    void SetBodyType(EChar_BodyType NewBodyType);
+    UFUNCTION(BlueprintCallable, Category = "Character Visual")
+    void SetBodyBuild(EChar_BodyBuild NewBodyBuild);
 
-    UFUNCTION(BlueprintCallable, Category = "Character Customization")
-    void SetGender(EChar_Gender NewGender);
+    UFUNCTION(BlueprintCallable, Category = "Character Visual")
+    void SetTribalMarkings(EChar_TribalMarkings NewMarkings);
 
-    UFUNCTION(BlueprintCallable, Category = "Character Customization")
-    void RandomizeAppearance();
+    UFUNCTION(BlueprintCallable, Category = "Character Visual")
+    void SetScarIntensity(float Intensity);
 
-    UFUNCTION(BlueprintCallable, Category = "Character Customization")
-    void ApplyTribalVariation(int32 TribeIndex);
+    UFUNCTION(BlueprintCallable, Category = "Character Visual")
+    void SetMuscleDefinition(float Definition);
+
+    UFUNCTION(BlueprintCallable, Category = "Character Visual")
+    void SetFacialHair(bool bHasFacialHair);
+
+    // MetaHuman methods
+    UFUNCTION(BlueprintCallable, Category = "MetaHuman")
+    void EnableMetaHuman(USkeletalMesh* MetaHumanMesh);
+
+    UFUNCTION(BlueprintCallable, Category = "MetaHuman")
+    void DisableMetaHuman();
+
+    UFUNCTION(BlueprintCallable, Category = "MetaHuman")
+    bool IsUsingMetaHuman() const { return bUseMetaHuman; }
+
+    // Preset management
+    UFUNCTION(BlueprintCallable, Category = "Character Visual")
+    void LoadPreset(const FString& PresetName);
+
+    UFUNCTION(BlueprintCallable, Category = "Character Visual")
+    void SaveCurrentAsPreset(const FString& PresetName);
+
+    UFUNCTION(BlueprintCallable, Category = "Character Visual")
+    TArray<FString> GetAvailablePresetNames() const;
 
     // Getters
-    UFUNCTION(BlueprintPure, Category = "Character Customization")
-    EChar_Gender GetGender() const { return CharacterGender; }
+    UFUNCTION(BlueprintPure, Category = "Character Visual")
+    FChar_VisualPreset GetCurrentPreset() const { return CurrentPreset; }
 
-    UFUNCTION(BlueprintPure, Category = "Character Customization")
-    EChar_BodyType GetBodyType() const { return BodyType; }
+    UFUNCTION(BlueprintPure, Category = "Character Visual")
+    EChar_SkinTone GetSkinTone() const { return CurrentPreset.SkinTone; }
 
-    UFUNCTION(BlueprintPure, Category = "Character Customization")
-    FChar_SkinTone GetSkinTone() const { return SkinTone; }
+    UFUNCTION(BlueprintPure, Category = "Character Visual")
+    EChar_BodyBuild GetBodyBuild() const { return CurrentPreset.BodyBuild; }
 
-    UFUNCTION(BlueprintPure, Category = "Character Customization")
-    FChar_ClothingSet GetClothingSet() const { return CurrentClothing; }
+    UFUNCTION(BlueprintPure, Category = "Character Visual")
+    EChar_TribalMarkings GetTribalMarkings() const { return CurrentPreset.TribalMarkings; }
 
 private:
-    void InitializeDefaultAppearance();
+    // Internal methods
+    void InitializePresets();
     void UpdateCharacterMesh();
-    void ApplyMaterialParameters();
-    void LoadAvailableAssets();
+    void UpdateMaterials();
+    void ApplyTribalMarkings();
+    void ApplyBodyModifications();
 
-    // Material parameter names
-    static const FName SkinColorParam;
-    static const FName RoughnessParam;
-    static const FName SubsurfaceParam;
-    static const FName MuscleMassParam;
+    // Editor-only methods
+#if WITH_EDITOR
+public:
+    UFUNCTION(CallInEditor)
+    void RefreshCharacterVisuals();
+
+    UFUNCTION(CallInEditor)
+    void ResetToDefaultPreset();
+#endif
 };
