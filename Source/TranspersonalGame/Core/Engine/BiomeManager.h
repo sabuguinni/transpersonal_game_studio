@@ -1,117 +1,251 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
 #include "Engine/World.h"
-#include "Components/StaticMeshComponent.h"
-#include "Components/BoxComponent.h"
+#include "Components/ActorComponent.h"
+#include "Engine/DataTable.h"
 #include "../../SharedTypes.h"
 #include "BiomeManager.generated.h"
 
+// Forward declarations
+class UMaterialInterface;
+class UStaticMesh;
+class UTexture2D;
+
 /**
- * BiomeManager - Core biome system architecture for prehistoric world
- * Manages biome transitions, environmental parameters, and ecosystem rules
- * Engine Architect responsibility - defines biome structure for all systems
+ * Biome configuration data structure
+ * Defines all properties for a specific biome type
  */
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API ABiomeManager : public AActor
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FEng_BiomeData : public FTableRowBase
+{
+    GENERATED_BODY()
+
+    FEng_BiomeData()
+    {
+        BiomeType = EBiomeType::Grassland;
+        Temperature = 20.0f;
+        Humidity = 0.5f;
+        Elevation = 0.0f;
+        FoliageDensity = 0.7f;
+        WaterPresence = 0.3f;
+        RockDensity = 0.2f;
+        BiomeName = TEXT("Default Grassland");
+        BiomeDescription = TEXT("A temperate grassland biome");
+    }
+
+    /** Type of biome from SharedTypes enum */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Biome")
+    EBiomeType BiomeType;
+
+    /** Average temperature in Celsius */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Climate", meta = (ClampMin = "-50.0", ClampMax = "60.0"))
+    float Temperature;
+
+    /** Humidity level (0.0 = arid, 1.0 = very humid) */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Climate", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float Humidity;
+
+    /** Preferred elevation range in meters */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Terrain")
+    float Elevation;
+
+    /** Density of vegetation (0.0 = barren, 1.0 = dense forest) */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Vegetation", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float FoliageDensity;
+
+    /** Water presence (0.0 = desert, 1.0 = swamp/wetland) */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Water", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float WaterPresence;
+
+    /** Rock and stone density */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Terrain", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float RockDensity;
+
+    /** Display name for this biome */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Display")
+    FString BiomeName;
+
+    /** Description of this biome */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Display")
+    FString BiomeDescription;
+
+    /** Ground material for this biome */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Materials")
+    TSoftObjectPtr<UMaterialInterface> GroundMaterial;
+
+    /** Primary vegetation meshes */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Meshes")
+    TArray<TSoftObjectPtr<UStaticMesh>> VegetationMeshes;
+
+    /** Rock and stone meshes */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Meshes")
+    TArray<TSoftObjectPtr<UStaticMesh>> RockMeshes;
+};
+
+/**
+ * Biome transition data for smooth blending between biomes
+ */
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FEng_BiomeTransition
+{
+    GENERATED_BODY()
+
+    FEng_BiomeTransition()
+    {
+        FromBiome = EBiomeType::Grassland;
+        ToBiome = EBiomeType::Forest;
+        TransitionDistance = 500.0f;
+        BlendStrength = 0.5f;
+    }
+
+    /** Source biome */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Transition")
+    EBiomeType FromBiome;
+
+    /** Target biome */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Transition")
+    EBiomeType ToBiome;
+
+    /** Distance over which transition occurs */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Transition", meta = (ClampMin = "100.0", ClampMax = "2000.0"))
+    float TransitionDistance;
+
+    /** Strength of blending effect */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Transition", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float BlendStrength;
+};
+
+/**
+ * BiomeManager - Core system for managing world biomes
+ * Handles biome data, transitions, and integration with world generation
+ * This is the architectural foundation for all biome-related systems
+ */
+UCLASS(BlueprintType, Blueprintable, ClassGroup=(TranspersonalGame), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UBiomeManager : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    ABiomeManager();
+    UBiomeManager();
 
 protected:
     virtual void BeginPlay() override;
-    virtual void Tick(float DeltaTime) override;
-
-    // CORE BIOME COMPONENTS
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Biome Core")
-    UStaticMeshComponent* BiomeVisualizationMesh;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Biome Core")
-    UBoxComponent* BiomeBounds;
-
-    // BIOME CONFIGURATION
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Config")
-    EEng_BiomeType CurrentBiomeType;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Config")
-    float BiomeRadius;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Config")
-    float TemperatureBase;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Config")
-    float HumidityLevel;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Config")
-    float FoodAvailability;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Config")
-    float WaterAvailability;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Config")
-    float DangerLevel;
-
-    // ECOSYSTEM PARAMETERS
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ecosystem")
-    TArray<EEng_DinosaurSpecies> NativeDinosaurSpecies;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ecosystem")
-    TArray<EEng_VegetationType> NativeVegetation;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ecosystem")
-    int32 MaxDinosaurPopulation;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ecosystem")
-    float VegetationDensity;
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 public:
-    // BIOME QUERY INTERFACE
-    UFUNCTION(BlueprintCallable, Category = "Biome Query")
-    EEng_BiomeType GetBiomeTypeAtLocation(FVector WorldLocation);
+    // === CORE BIOME SYSTEM ===
 
-    UFUNCTION(BlueprintCallable, Category = "Biome Query")
-    float GetTemperatureAtLocation(FVector WorldLocation);
+    /** Initialize the biome system with data table */
+    UFUNCTION(BlueprintCallable, Category = "Biome System")
+    void InitializeBiomeSystem(UDataTable* BiomeDataTable);
 
-    UFUNCTION(BlueprintCallable, Category = "Biome Query")
-    float GetHumidityAtLocation(FVector WorldLocation);
+    /** Get biome data for a specific biome type */
+    UFUNCTION(BlueprintCallable, Category = "Biome System")
+    bool GetBiomeData(EBiomeType BiomeType, FEng_BiomeData& OutBiomeData) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Biome Query")
-    bool IsLocationInBiome(FVector WorldLocation);
+    /** Determine biome type at world location */
+    UFUNCTION(BlueprintCallable, Category = "Biome System")
+    EBiomeType GetBiomeAtLocation(const FVector& WorldLocation) const;
 
-    // BIOME MANAGEMENT
-    UFUNCTION(BlueprintCallable, Category = "Biome Management")
-    void InitializeBiome(EEng_BiomeType BiomeType, FVector CenterLocation, float Radius);
+    /** Get blended biome influence at location (for transitions) */
+    UFUNCTION(BlueprintCallable, Category = "Biome System")
+    TMap<EBiomeType, float> GetBiomeInfluenceAtLocation(const FVector& WorldLocation) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Biome Management")
-    void UpdateBiomeParameters(float Temperature, float Humidity, float Food, float Water);
+    // === BIOME QUERIES ===
 
-    UFUNCTION(BlueprintCallable, Category = "Biome Management")
-    void RegisterDinosaurInBiome(class ADinosaurBase* Dinosaur);
+    /** Check if location is within a specific biome */
+    UFUNCTION(BlueprintCallable, Category = "Biome Queries")
+    bool IsLocationInBiome(const FVector& WorldLocation, EBiomeType BiomeType) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Biome Management")
-    void UnregisterDinosaurFromBiome(class ADinosaurBase* Dinosaur);
+    /** Get temperature at location based on biome */
+    UFUNCTION(BlueprintCallable, Category = "Biome Queries")
+    float GetTemperatureAtLocation(const FVector& WorldLocation) const;
 
-    // ECOSYSTEM VALIDATION
-    UFUNCTION(BlueprintCallable, Category = "Ecosystem")
-    bool CanSupportDinosaurSpecies(EEng_DinosaurSpecies Species);
+    /** Get humidity at location based on biome */
+    UFUNCTION(BlueprintCallable, Category = "Biome Queries")
+    float GetHumidityAtLocation(const FVector& WorldLocation) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Ecosystem")
-    int32 GetCurrentDinosaurCount();
+    /** Get foliage density at location */
+    UFUNCTION(BlueprintCallable, Category = "Biome Queries")
+    float GetFoliageDensityAtLocation(const FVector& WorldLocation) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Ecosystem")
-    float GetEcosystemHealthScore();
+    // === INTEGRATION POINTS ===
+
+    /** Get suitable vegetation meshes for location */
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    TArray<UStaticMesh*> GetVegetationMeshesForLocation(const FVector& WorldLocation) const;
+
+    /** Get ground material for location */
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    UMaterialInterface* GetGroundMaterialForLocation(const FVector& WorldLocation) const;
+
+    /** Validate biome placement rules */
+    UFUNCTION(BlueprintCallable, Category = "Validation")
+    bool ValidateBiomePlacement(EBiomeType BiomeType, const FVector& WorldLocation) const;
+
+    // === EDITOR TOOLS ===
+
+    /** Debug draw biome boundaries in editor */
+    UFUNCTION(CallInEditor, Category = "Debug")
+    void DebugDrawBiomeBoundaries();
+
+    /** Generate biome preview map */
+    UFUNCTION(CallInEditor, Category = "Debug")
+    void GenerateBiomePreviewMap();
+
+    /** Validate all biome data consistency */
+    UFUNCTION(CallInEditor, Category = "Validation")
+    void ValidateAllBiomeData();
+
+protected:
+    // === CORE DATA ===
+
+    /** Data table containing all biome configurations */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Configuration", meta = (AllowPrivateAccess = "true"))
+    UDataTable* BiomeDataTable;
+
+    /** Cached biome data for fast lookups */
+    UPROPERTY()
+    TMap<EBiomeType, FEng_BiomeData> CachedBiomeData;
+
+    /** Biome transition configurations */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Configuration", meta = (AllowPrivateAccess = "true"))
+    TArray<FEng_BiomeTransition> BiomeTransitions;
+
+    // === SYSTEM PARAMETERS ===
+
+    /** World scale factor for biome calculations */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "System", meta = (AllowPrivateAccess = "true", ClampMin = "0.1", ClampMax = "10.0"))
+    float WorldScale;
+
+    /** Noise scale for biome distribution */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "System", meta = (AllowPrivateAccess = "true", ClampMin = "0.001", ClampMax = "1.0"))
+    float NoiseScale;
+
+    /** Random seed for biome generation */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "System", meta = (AllowPrivateAccess = "true"))
+    int32 BiomeSeed;
+
+    /** Enable debug visualization */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Debug", meta = (AllowPrivateAccess = "true"))
+    bool bShowDebugInfo;
 
 private:
-    // INTERNAL STATE
-    TArray<class ADinosaurBase*> RegisteredDinosaurs;
-    float LastUpdateTime;
-    bool bBiomeInitialized;
+    // === INTERNAL METHODS ===
 
-    // INTERNAL METHODS
-    void UpdateEcosystemBalance();
-    void ValidateBiomeIntegrity();
-    FVector GetBiomeCenterLocation();
+    /** Calculate noise value for biome distribution */
+    float CalculateBiomeNoise(const FVector& WorldLocation) const;
+
+    /** Find transition data between two biomes */
+    const FEng_BiomeTransition* FindBiomeTransition(EBiomeType FromBiome, EBiomeType ToBiome) const;
+
+    /** Calculate biome influence with distance falloff */
+    float CalculateBiomeInfluence(const FVector& Location, const FVector& BiomeCenter, float Radius) const;
+
+    /** Load and cache biome data from data table */
+    void CacheBiomeData();
+
+    /** Validate biome data integrity */
+    bool ValidateBiomeDataIntegrity() const;
 };
