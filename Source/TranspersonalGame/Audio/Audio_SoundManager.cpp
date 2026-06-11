@@ -1,182 +1,175 @@
 #include "Audio_SoundManager.h"
+#include "Engine/Engine.h"
 #include "Engine/World.h"
+#include "GameFramework/Actor.h"
 #include "Kismet/GameplayStatics.h"
 #include "Components/AudioComponent.h"
-#include "Sound/SoundCue.h"
-#include "Engine/Engine.h"
 
 UAudio_SoundManager::UAudio_SoundManager()
 {
-    MasterVolume = 1.0f;
-    
-    // Initialize default volume levels for each sound type
-    SoundTypeVolumes.Add(EAudio_SoundType::Ambient, 0.7f);
-    SoundTypeVolumes.Add(EAudio_SoundType::DinosaurFootsteps, 0.9f);
-    SoundTypeVolumes.Add(EAudio_SoundType::DinosaurRoar, 1.0f);
-    SoundTypeVolumes.Add(EAudio_SoundType::PlayerFootsteps, 0.5f);
-    SoundTypeVolumes.Add(EAudio_SoundType::Fire, 0.6f);
-    SoundTypeVolumes.Add(EAudio_SoundType::Weather, 0.8f);
-    SoundTypeVolumes.Add(EAudio_SoundType::Combat, 0.9f);
-    SoundTypeVolumes.Add(EAudio_SoundType::UI, 0.7f);
+    InitializeCategoryVolumes();
 }
 
 void UAudio_SoundManager::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
-    InitializeDefaultSounds();
-    UE_LOG(LogTemp, Warning, TEXT("Audio_SoundManager initialized"));
+    InitializeCategoryVolumes();
+    UE_LOG(LogTemp, Log, TEXT("Audio_SoundManager initialized"));
 }
 
 void UAudio_SoundManager::Deinitialize()
 {
-    StopAllSounds();
+    // Stop all active audio components
+    for (UAudioComponent* AudioComp : ActiveAudioComponents)
+    {
+        if (IsValid(AudioComp))
+        {
+            AudioComp->Stop();
+        }
+    }
+    ActiveAudioComponents.Empty();
+    
     Super::Deinitialize();
+    UE_LOG(LogTemp, Log, TEXT("Audio_SoundManager deinitialized"));
 }
 
-void UAudio_SoundManager::PlaySound(EAudio_SoundType SoundType, FVector Location, float VolumeMultiplier)
+void UAudio_SoundManager::InitializeCategoryVolumes()
 {
-    FAudio_SoundEntry* SoundEntry = FindSoundEntry(SoundType);
-    if (!SoundEntry || !SoundEntry->SoundCue.IsValid())
+    CategoryVolumes.Add(EAudio_SoundCategory::Ambient, 0.8f);
+    CategoryVolumes.Add(EAudio_SoundCategory::Footsteps, 1.0f);
+    CategoryVolumes.Add(EAudio_SoundCategory::Combat, 1.0f);
+    CategoryVolumes.Add(EAudio_SoundCategory::Crafting, 0.9f);
+    CategoryVolumes.Add(EAudio_SoundCategory::UI, 0.7f);
+    CategoryVolumes.Add(EAudio_SoundCategory::Voice, 1.0f);
+    CategoryVolumes.Add(EAudio_SoundCategory::Music, 0.6f);
+}
+
+void UAudio_SoundManager::PlaySound2D(USoundBase* Sound, float Volume, float Pitch)
+{
+    if (!Sound)
     {
-        UE_LOG(LogTemp, Warning, TEXT("Sound entry not found or invalid for type: %d"), (int32)SoundType);
+        UE_LOG(LogTemp, Warning, TEXT("PlaySound2D: Sound is null"));
         return;
     }
 
     UWorld* World = GetWorld();
     if (!World)
     {
+        UE_LOG(LogTemp, Warning, TEXT("PlaySound2D: World is null"));
         return;
     }
 
-    // Stop existing sound of this type if not looping
-    if (!SoundEntry->bLooping && ActiveSounds.Contains(SoundType))
+    UAudioComponent* AudioComp = UGameplayStatics::SpawnSound2D(World, Sound, Volume, Pitch);
+    if (AudioComp)
     {
-        StopSound(SoundType);
-    }
-
-    float FinalVolume = SoundEntry->Volume * VolumeMultiplier * MasterVolume;
-    if (SoundTypeVolumes.Contains(SoundType))
-    {
-        FinalVolume *= SoundTypeVolumes[SoundType];
-    }
-
-    UAudioComponent* AudioComponent = UGameplayStatics::SpawnSoundAtLocation(
-        World,
-        SoundEntry->SoundCue.Get(),
-        Location,
-        FRotator::ZeroRotator,
-        FinalVolume,
-        SoundEntry->Pitch
-    );
-
-    if (AudioComponent && SoundEntry->bLooping)
-    {
-        ActiveSounds.Add(SoundType, AudioComponent);
+        ActiveAudioComponents.Add(AudioComp);
+        CleanupFinishedComponents();
     }
 }
 
-void UAudio_SoundManager::PlaySoundAtLocation(EAudio_SoundType SoundType, FVector Location, float VolumeMultiplier)
+void UAudio_SoundManager::PlaySound3D(USoundBase* Sound, FVector Location, float Volume, float Pitch)
 {
-    PlaySound(SoundType, Location, VolumeMultiplier);
+    if (!Sound)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("PlaySound3D: Sound is null"));
+        return;
+    }
+
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("PlaySound3D: World is null"));
+        return;
+    }
+
+    UAudioComponent* AudioComp = UGameplayStatics::SpawnSoundAtLocation(World, Sound, Location, FRotator::ZeroRotator, Volume, Pitch);
+    if (AudioComp)
+    {
+        ActiveAudioComponents.Add(AudioComp);
+        CleanupFinishedComponents();
+    }
 }
 
-void UAudio_SoundManager::StopSound(EAudio_SoundType SoundType)
+void UAudio_SoundManager::PlaySoundAtActor(USoundBase* Sound, AActor* Actor, float Volume, float Pitch)
 {
-    if (ActiveSounds.Contains(SoundType))
+    if (!Sound || !Actor)
     {
-        UAudioComponent* AudioComponent = ActiveSounds[SoundType];
-        if (AudioComponent && IsValid(AudioComponent))
+        UE_LOG(LogTemp, Warning, TEXT("PlaySoundAtActor: Sound or Actor is null"));
+        return;
+    }
+
+    PlaySound3D(Sound, Actor->GetActorLocation(), Volume, Pitch);
+}
+
+void UAudio_SoundManager::StopAllSoundsOfCategory(EAudio_SoundCategory Category)
+{
+    for (int32 i = ActiveAudioComponents.Num() - 1; i >= 0; i--)
+    {
+        UAudioComponent* AudioComp = ActiveAudioComponents[i];
+        if (IsValid(AudioComp))
         {
-            AudioComponent->Stop();
-        }
-        ActiveSounds.Remove(SoundType);
-    }
-}
-
-void UAudio_SoundManager::StopAllSounds()
-{
-    for (auto& SoundPair : ActiveSounds)
-    {
-        if (SoundPair.Value && IsValid(SoundPair.Value))
-        {
-            SoundPair.Value->Stop();
-        }
-    }
-    ActiveSounds.Empty();
-}
-
-void UAudio_SoundManager::SetMasterVolume(float Volume)
-{
-    MasterVolume = FMath::Clamp(Volume, 0.0f, 1.0f);
-}
-
-void UAudio_SoundManager::SetSoundTypeVolume(EAudio_SoundType SoundType, float Volume)
-{
-    SoundTypeVolumes.Add(SoundType, FMath::Clamp(Volume, 0.0f, 1.0f));
-}
-
-void UAudio_SoundManager::RegisterSoundEntry(const FAudio_SoundEntry& SoundEntry)
-{
-    // Remove existing entry of the same type
-    SoundEntries.RemoveAll([SoundEntry](const FAudio_SoundEntry& Entry)
-    {
-        return Entry.SoundType == SoundEntry.SoundType;
-    });
-    
-    // Add new entry
-    SoundEntries.Add(SoundEntry);
-}
-
-void UAudio_SoundManager::PlayDinosaurFootstep(FVector Location, float DinosaurSize)
-{
-    float VolumeMultiplier = FMath::Clamp(DinosaurSize, 0.1f, 3.0f);
-    PlaySoundAtLocation(EAudio_SoundType::DinosaurFootsteps, Location, VolumeMultiplier);
-}
-
-void UAudio_SoundManager::PlayDinosaurRoar(FVector Location, float IntensityLevel)
-{
-    float VolumeMultiplier = FMath::Clamp(IntensityLevel, 0.5f, 2.0f);
-    PlaySoundAtLocation(EAudio_SoundType::DinosaurRoar, Location, VolumeMultiplier);
-}
-
-FAudio_SoundEntry* UAudio_SoundManager::FindSoundEntry(EAudio_SoundType SoundType)
-{
-    for (FAudio_SoundEntry& Entry : SoundEntries)
-    {
-        if (Entry.SoundType == SoundType)
-        {
-            return &Entry;
+            // Note: In a full implementation, we'd store category info with each component
+            // For now, this is a basic implementation
+            AudioComp->Stop();
+            ActiveAudioComponents.RemoveAt(i);
         }
     }
-    return nullptr;
 }
 
-void UAudio_SoundManager::InitializeDefaultSounds()
+void UAudio_SoundManager::SetCategoryVolume(EAudio_SoundCategory Category, float Volume)
 {
-    // Initialize with placeholder sound entries
-    // These would be replaced with actual sound assets in production
-    
-    FAudio_SoundEntry AmbientEntry;
-    AmbientEntry.SoundType = EAudio_SoundType::Ambient;
-    AmbientEntry.Volume = 0.7f;
-    AmbientEntry.bLooping = true;
-    SoundEntries.Add(AmbientEntry);
+    CategoryVolumes.Add(Category, FMath::Clamp(Volume, 0.0f, 1.0f));
+}
 
-    FAudio_SoundEntry FootstepEntry;
-    FootstepEntry.SoundType = EAudio_SoundType::DinosaurFootsteps;
-    FootstepEntry.Volume = 0.9f;
-    FootstepEntry.bLooping = false;
-    SoundEntries.Add(FootstepEntry);
+float UAudio_SoundManager::GetCategoryVolume(EAudio_SoundCategory Category) const
+{
+    const float* VolumePtr = CategoryVolumes.Find(Category);
+    return VolumePtr ? *VolumePtr : 1.0f;
+}
 
-    FAudio_SoundEntry RoarEntry;
-    RoarEntry.SoundType = EAudio_SoundType::DinosaurRoar;
-    RoarEntry.Volume = 1.0f;
-    RoarEntry.bLooping = false;
-    SoundEntries.Add(RoarEntry);
+void UAudio_SoundManager::RegisterSound(const FString& SoundName, const FAudio_SoundEntry& SoundEntry)
+{
+    RegisteredSounds.Add(SoundName, SoundEntry);
+    UE_LOG(LogTemp, Log, TEXT("Registered sound: %s"), *SoundName);
+}
 
-    FAudio_SoundEntry FireEntry;
-    FireEntry.SoundType = EAudio_SoundType::Fire;
-    FireEntry.Volume = 0.6f;
-    FireEntry.bLooping = true;
-    SoundEntries.Add(FireEntry);
+void UAudio_SoundManager::PlayRegisteredSound(const FString& SoundName, FVector Location)
+{
+    const FAudio_SoundEntry* SoundEntry = RegisteredSounds.Find(SoundName);
+    if (!SoundEntry)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("PlayRegisteredSound: Sound '%s' not found"), *SoundName);
+        return;
+    }
+
+    USoundBase* Sound = SoundEntry->Sound.LoadSynchronous();
+    if (!Sound)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("PlayRegisteredSound: Failed to load sound '%s'"), *SoundName);
+        return;
+    }
+
+    float CategoryVolume = GetCategoryVolume(SoundEntry->Category);
+    float FinalVolume = SoundEntry->Volume * CategoryVolume;
+
+    if (SoundEntry->bIs3D && Location != FVector::ZeroVector)
+    {
+        PlaySound3D(Sound, Location, FinalVolume, SoundEntry->Pitch);
+    }
+    else
+    {
+        PlaySound2D(Sound, FinalVolume, SoundEntry->Pitch);
+    }
+}
+
+void UAudio_SoundManager::CleanupFinishedComponents()
+{
+    for (int32 i = ActiveAudioComponents.Num() - 1; i >= 0; i--)
+    {
+        UAudioComponent* AudioComp = ActiveAudioComponents[i];
+        if (!IsValid(AudioComp) || !AudioComp->IsPlaying())
+        {
+            ActiveAudioComponents.RemoveAt(i);
+        }
+    }
 }
