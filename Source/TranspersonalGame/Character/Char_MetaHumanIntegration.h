@@ -2,46 +2,64 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
-#include "Engine/SkeletalMesh.h"
-#include "Materials/MaterialInterface.h"
+#include "Engine/DataTable.h"
 #include "Char_MetaHumanIntegration.generated.h"
 
 UENUM(BlueprintType)
 enum class EChar_MetaHumanPreset : uint8
 {
-    TribalElder     UMETA(DisplayName = "Tribal Elder"),
+    TribalWarrior   UMETA(DisplayName = "Tribal Warrior"),
     Hunter          UMETA(DisplayName = "Hunter"),
     Gatherer        UMETA(DisplayName = "Gatherer"),
-    Crafter         UMETA(DisplayName = "Crafter"),
-    Scout           UMETA(DisplayName = "Scout"),
-    Custom          UMETA(DisplayName = "Custom")
+    Elder           UMETA(DisplayName = "Elder"),
+    Child           UMETA(DisplayName = "Child"),
+    Shaman          UMETA(DisplayName = "Shaman")
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FChar_MetaHumanConfig
+struct TRANSPERSONALGAME_API FChar_MetaHumanData : public FTableRowBase
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaHuman")
-    EChar_MetaHumanPreset PresetType = EChar_MetaHumanPreset::Custom;
+    FString MetaHumanID;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaHuman")
-    TSoftObjectPtr<USkeletalMesh> BaseMesh;
+    FString DisplayName;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaHuman")
-    TArray<TSoftObjectPtr<UMaterialInterface>> FaceMaterials;
+    EChar_MetaHumanPreset PresetType;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaHuman")
-    TArray<TSoftObjectPtr<UMaterialInterface>> BodyMaterials;
+    TSoftObjectPtr<class USkeletalMesh> BodyMesh;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaHuman")
-    float AgeModifier = 0.5f;
+    TSoftObjectPtr<class USkeletalMesh> FaceMesh;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaHuman")
-    float WeatheringIntensity = 0.3f;
+    TSoftObjectPtr<class UAnimBlueprint> AnimBlueprint;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaHuman")
-    FLinearColor SkinTone = FLinearColor(0.8f, 0.6f, 0.4f, 1.0f);
+    TArray<TSoftObjectPtr<class UMaterialInterface>> Materials;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaHuman")
+    float Height;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaHuman")
+    float Weight;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaHuman")
+    bool bIsMale;
+
+    FChar_MetaHumanData()
+    {
+        MetaHumanID = TEXT("");
+        DisplayName = TEXT("Unknown");
+        PresetType = EChar_MetaHumanPreset::TribalWarrior;
+        Height = 175.0f;
+        Weight = 70.0f;
+        bIsMale = true;
+    }
 };
 
 UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
@@ -55,38 +73,44 @@ public:
 protected:
     virtual void BeginPlay() override;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaHuman")
+    TSoftObjectPtr<class UDataTable> MetaHumanDataTable;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaHuman")
+    FChar_MetaHumanData CurrentMetaHumanData;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MetaHuman")
+    class USkeletalMeshComponent* BodyMeshComponent;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MetaHuman")
+    class USkeletalMeshComponent* FaceMeshComponent;
+
 public:
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaHuman Config")
-    FChar_MetaHumanConfig MetaHumanConfig;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Diversity")
-    bool bEnableDiversitySystem = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Diversity")
-    TArray<FChar_MetaHumanConfig> DiversityPresets;
+    UFUNCTION(BlueprintCallable, Category = "MetaHuman")
+    bool LoadMetaHumanPreset(EChar_MetaHumanPreset PresetType);
 
     UFUNCTION(BlueprintCallable, Category = "MetaHuman")
-    void ApplyMetaHumanPreset(EChar_MetaHumanPreset PresetType);
+    bool LoadMetaHumanByID(const FString& MetaHumanID);
 
     UFUNCTION(BlueprintCallable, Category = "MetaHuman")
-    void ApplyCustomConfiguration(const FChar_MetaHumanConfig& Config);
+    void ApplyMetaHumanData(const FChar_MetaHumanData& MetaHumanData);
+
+    UFUNCTION(BlueprintPure, Category = "MetaHuman")
+    FChar_MetaHumanData GetCurrentMetaHumanData() const { return CurrentMetaHumanData; }
 
     UFUNCTION(BlueprintCallable, Category = "MetaHuman")
-    void GenerateRandomizedAppearance();
+    TArray<FChar_MetaHumanData> GetAvailableMetaHumans() const;
 
     UFUNCTION(BlueprintCallable, Category = "MetaHuman")
-    void SetAgeAndWeathering(float Age, float Weathering);
+    void SetBodyScale(float ScaleFactor);
 
     UFUNCTION(BlueprintCallable, Category = "MetaHuman")
-    void UpdateMaterialParameters();
+    void SetAnimationBlueprint(TSoftObjectPtr<class UAnimBlueprint> AnimBP);
 
 private:
-    UPROPERTY()
-    class USkeletalMeshComponent* TargetMeshComponent;
-
-    void InitializeDiversityPresets();
-    void ApplyMaterialParameters(UMaterialInterface* Material, const FChar_MetaHumanConfig& Config);
-    FChar_MetaHumanConfig GetPresetConfiguration(EChar_MetaHumanPreset PresetType);
+    void InitializeMeshComponents();
+    void LoadMeshAssets();
+    void ApplyMaterials();
+    FChar_MetaHumanData* FindMetaHumanData(EChar_MetaHumanPreset PresetType) const;
+    FChar_MetaHumanData* FindMetaHumanDataByID(const FString& MetaHumanID) const;
 };
