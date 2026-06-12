@@ -2,49 +2,52 @@
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Animation/AnimMontage.h"
-#include "Animation/BlendSpace.h"
 #include "Kismet/KismetMathLibrary.h"
-#include "Engine/Engine.h"
 
 UAnim_PrimitiveCharacterController::UAnim_PrimitiveCharacterController()
 {
     OwningCharacter = nullptr;
     CharacterMovement = nullptr;
     
-    // Initialize animation assets to nullptr
-    LocomotionBlendSpace = nullptr;
-    CraftingMontage = nullptr;
+    // Set default movement thresholds
+    WalkSpeedThreshold = 150.0f;
+    RunSpeedThreshold = 400.0f;
+    
+    // Initialize animation montages to nullptr
     GatheringMontage = nullptr;
+    CraftingMontage = nullptr;
     HuntingMontage = nullptr;
-    AttackMontage = nullptr;
-    DefendMontage = nullptr;
-    InjuredMontage = nullptr;
-    FearMontage = nullptr;
+    BuildingMontage = nullptr;
+    EatingMontage = nullptr;
+    DrinkingMontage = nullptr;
 }
 
 void UAnim_PrimitiveCharacterController::NativeInitializeAnimation()
 {
     Super::NativeInitializeAnimation();
     
+    // Get the owning character
     OwningCharacter = Cast<ACharacter>(GetOwningActor());
+    
     if (OwningCharacter)
     {
+        // Get the character movement component
         CharacterMovement = OwningCharacter->GetCharacterMovement();
     }
 }
 
-void UAnim_PrimitiveCharacterController::NativeUpdateAnimation(float DeltaTimeX)
+void UAnim_PrimitiveCharacterController::NativeUpdateAnimation(float DeltaTime)
 {
-    Super::NativeUpdateAnimation(DeltaTimeX);
+    Super::NativeUpdateAnimation(DeltaTime);
     
     if (!OwningCharacter || !CharacterMovement)
     {
         return;
     }
     
+    // Update animation data
     UpdateMovementData();
-    UpdateActionData();
-    UpdateSurvivalData();
+    UpdateActionState();
 }
 
 void UAnim_PrimitiveCharacterController::UpdateMovementData()
@@ -56,10 +59,10 @@ void UAnim_PrimitiveCharacterController::UpdateMovementData()
     
     // Get velocity and calculate speed
     FVector Velocity = CharacterMovement->Velocity;
-    AnimData.Speed = Velocity.Size();
+    AnimationData.Speed = Velocity.Size();
     
     // Calculate direction relative to character forward
-    if (AnimData.Speed > 0.1f)
+    if (AnimationData.Speed > 0.0f)
     {
         FVector ForwardVector = OwningCharacter->GetActorForwardVector();
         FVector RightVector = OwningCharacter->GetActorRightVector();
@@ -69,44 +72,41 @@ void UAnim_PrimitiveCharacterController::UpdateMovementData()
         float ForwardDot = FVector::DotProduct(ForwardVector, NormalizedVelocity);
         float RightDot = FVector::DotProduct(RightVector, NormalizedVelocity);
         
-        AnimData.Direction = UKismetMathLibrary::DegAtan2(RightDot, ForwardDot);
+        AnimationData.Direction = UKismetMathLibrary::DegAtan2(RightDot, ForwardDot);
     }
     else
     {
-        AnimData.Direction = 0.0f;
+        AnimationData.Direction = 0.0f;
     }
     
-    // Update movement state flags
-    AnimData.bIsInAir = CharacterMovement->IsFalling();
-    AnimData.bIsCrouching = CharacterMovement->IsCrouching();
+    // Update air state
+    AnimationData.bIsInAir = CharacterMovement->IsFalling();
+    
+    // Update crouching state
+    AnimationData.bIsCrouching = CharacterMovement->IsCrouching();
     
     // Calculate movement state
-    AnimData.MovementState = CalculateMovementState();
+    AnimationData.MovementState = CalculateMovementState();
 }
 
-void UAnim_PrimitiveCharacterController::UpdateActionData()
+void UAnim_PrimitiveCharacterController::UpdateActionState()
 {
-    // Action state is set externally via SetActionState
-    // This function can be extended to handle automatic action detection
-}
-
-void UAnim_PrimitiveCharacterController::UpdateSurvivalData()
-{
-    // Get survival stats from character
-    // This would integrate with the survival system
-    // For now, use placeholder values
-    AnimData.HealthPercent = 1.0f;
-    AnimData.StaminaPercent = 1.0f;
-    AnimData.FearLevel = 0.0f;
-    
-    // TODO: Integrate with actual survival stats from TranspersonalCharacter
+    // This would be updated based on player input or game state
+    // For now, we maintain the current action state
+    // In a full implementation, this would check for active survival actions
 }
 
 EAnim_MovementState UAnim_PrimitiveCharacterController::CalculateMovementState()
 {
-    if (AnimData.bIsInAir)
+    if (!CharacterMovement)
     {
-        if (CharacterMovement->Velocity.Z > 0)
+        return EAnim_MovementState::Idle;
+    }
+    
+    // Check if in air first
+    if (AnimationData.bIsInAir)
+    {
+        if (CharacterMovement->Velocity.Z > 0.0f)
         {
             return EAnim_MovementState::Jumping;
         }
@@ -116,86 +116,74 @@ EAnim_MovementState UAnim_PrimitiveCharacterController::CalculateMovementState()
         }
     }
     
-    if (AnimData.bIsCrouching)
+    // Check if crouching
+    if (AnimationData.bIsCrouching)
     {
         return EAnim_MovementState::Crouching;
     }
     
-    if (AnimData.ActionState == EAnim_ActionState::Hunting)
+    // Check if in combat (would be set by combat system)
+    if (AnimationData.bIsInCombat)
     {
         return EAnim_MovementState::Combat;
     }
     
-    if (AnimData.HealthPercent < 0.3f)
-    {
-        return EAnim_MovementState::Injured;
-    }
-    
-    // Speed-based movement states
-    if (AnimData.Speed < 5.0f)
+    // Determine movement state based on speed
+    if (AnimationData.Speed < 10.0f)
     {
         return EAnim_MovementState::Idle;
     }
-    else if (AnimData.Speed < 200.0f)
+    else if (AnimationData.Speed < RunSpeedThreshold)
     {
         return EAnim_MovementState::Walking;
     }
-    else if (AnimData.Speed < 400.0f)
+    else
     {
         return EAnim_MovementState::Running;
     }
-    else
-    {
-        return EAnim_MovementState::Sprinting;
-    }
 }
 
-void UAnim_PrimitiveCharacterController::PlayActionMontage(EAnim_ActionState ActionType)
+void UAnim_PrimitiveCharacterController::PlaySurvivalAction(EAnim_ActionState ActionType)
 {
     UAnimMontage* MontageToPlay = nullptr;
     
     switch (ActionType)
     {
-        case EAnim_ActionState::Crafting:
-            MontageToPlay = CraftingMontage;
-            break;
         case EAnim_ActionState::Gathering:
             MontageToPlay = GatheringMontage;
+            break;
+        case EAnim_ActionState::Crafting:
+            MontageToPlay = CraftingMontage;
             break;
         case EAnim_ActionState::Hunting:
             MontageToPlay = HuntingMontage;
             break;
-        default:
+        case EAnim_ActionState::Building:
+            MontageToPlay = BuildingMontage;
             break;
+        case EAnim_ActionState::Eating:
+            MontageToPlay = EatingMontage;
+            break;
+        case EAnim_ActionState::Drinking:
+            MontageToPlay = DrinkingMontage;
+            break;
+        default:
+            return;
     }
     
-    if (MontageToPlay && !IsPlayingActionMontage())
+    if (MontageToPlay)
     {
         Montage_Play(MontageToPlay);
-        SetActionState(ActionType);
+        AnimationData.ActionState = ActionType;
     }
 }
 
-void UAnim_PrimitiveCharacterController::StopActionMontage()
+void UAnim_PrimitiveCharacterController::StopCurrentAction()
 {
-    if (IsPlayingActionMontage())
+    if (IsAnyMontagePlaying())
     {
         Montage_Stop(0.2f);
-        SetActionState(EAnim_ActionState::None);
     }
-}
-
-void UAnim_PrimitiveCharacterController::SetMovementState(EAnim_MovementState NewState)
-{
-    AnimData.MovementState = NewState;
-}
-
-void UAnim_PrimitiveCharacterController::SetActionState(EAnim_ActionState NewState)
-{
-    AnimData.ActionState = NewState;
-}
-
-bool UAnim_PrimitiveCharacterController::IsPlayingActionMontage() const
-{
-    return IsAnyMontagePlaying();
+    
+    AnimationData.ActionState = EAnim_ActionState::None;
 }
