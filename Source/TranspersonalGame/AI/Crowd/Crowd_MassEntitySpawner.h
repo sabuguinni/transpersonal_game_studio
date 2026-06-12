@@ -4,45 +4,19 @@
 #include "GameFramework/Actor.h"
 #include "MassEntityTypes.h"
 #include "MassSpawnerTypes.h"
-#include "MassEntityConfigAsset.h"
-#include "MassEntitySubsystem.h"
+#include "SharedTypes.h"
 #include "Crowd_MassEntitySpawner.generated.h"
 
-UENUM(BlueprintType)
-enum class ECrowd_SpawnerType : uint8
-{
-    Villagers,
-    Hunters,
-    Traders,
-    Guards,
-    Animals
-};
+class UMassEntitySubsystem;
+class UCrowd_MassEntityConfig;
+struct FCrowd_MovementFragment;
+struct FCrowd_BehaviorFragment;
 
-USTRUCT(BlueprintType)
-struct FCrowd_SpawnConfiguration
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn Config")
-    ECrowd_SpawnerType SpawnerType = ECrowd_SpawnerType::Villagers;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn Config")
-    int32 MaxEntities = 50;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn Config")
-    float SpawnRadius = 1000.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn Config")
-    FVector SpawnCenter = FVector::ZeroVector;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn Config")
-    bool bUseNavMesh = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn Config")
-    float MinDistanceBetweenEntities = 100.0f;
-};
-
-UCLASS(BlueprintType, Blueprintable)
+/**
+ * Spawner for Mass Entity crowd simulation
+ * Creates and manages up to 50,000 crowd entities
+ */
+UCLASS(BlueprintType, meta = (DisplayName = "Crowd Mass Entity Spawner"))
 class TRANSPERSONALGAME_API ACrowd_MassEntitySpawner : public AActor
 {
     GENERATED_BODY()
@@ -52,48 +26,100 @@ public:
 
 protected:
     virtual void BeginPlay() override;
+    virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 public:
-    virtual void Tick(float DeltaTime) override;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Spawning")
-    FCrowd_SpawnConfiguration SpawnConfig;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Spawning")
-    TObjectPtr<UMassEntityConfigAsset> EntityConfigAsset;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Spawning")
-    bool bAutoSpawnOnBeginPlay = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Spawning")
-    bool bRespawnDeadEntities = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Spawning")
-    float RespawnDelay = 5.0f;
-
+    // Spawning interface
     UFUNCTION(BlueprintCallable, Category = "Crowd Spawning")
-    void SpawnEntities();
-
+    void SpawnCrowdEntities(int32 NumEntities);
+    
     UFUNCTION(BlueprintCallable, Category = "Crowd Spawning")
-    void DestroyAllEntities();
-
+    void DespawnAllEntities();
+    
     UFUNCTION(BlueprintCallable, Category = "Crowd Spawning")
-    int32 GetActiveEntityCount() const;
+    void SetCrowdDensity(float DensityPercentage);
 
-    UFUNCTION(BlueprintCallable, Category = "Crowd Spawning")
-    void SetSpawnConfiguration(const FCrowd_SpawnConfiguration& NewConfig);
+    // Configuration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Config")
+    TObjectPtr<UCrowd_MassEntityConfig> CrowdConfig;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Spawning")
+    int32 MaxCrowdEntities = 50000;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Spawning")
+    float SpawnRadius = 5000.0f;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Spawning")
+    float MinSpawnDistance = 200.0f;
+
+    // Spawn areas
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Spawning")
+    TArray<FVector> SpawnPoints;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Spawning")
+    TArray<FVector> WaypointLocations;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Spawning")
+    bool bAutoGenerateWaypoints = true;
+
+    // Performance settings
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    int32 EntitiesPerBatch = 1000;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float BatchSpawnDelay = 0.1f;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    bool bEnablePerformanceScaling = true;
+
+    // Status
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Status")
+    int32 CurrentEntityCount = 0;
+    
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Status")
+    float CurrentDensityPercentage = 0.0f;
+    
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Status")
+    bool bIsSpawning = false;
+
+protected:
+    // Internal spawning functions
+    void SpawnEntityBatch(int32 BatchSize, int32 BatchIndex);
+    void GenerateSpawnPoints();
+    void GenerateWaypoints();
+    FVector GetRandomSpawnLocation() const;
+    FTransform GetSpawnTransform(const FVector& Location) const;
+    
+    // Entity configuration
+    void ConfigureEntityFragments(FMassEntityHandle Entity, const FTransform& SpawnTransform);
+    void SetupMovementFragment(FMassEntityHandle Entity, const FTransform& SpawnTransform);
+    void SetupBehaviorFragment(FMassEntityHandle Entity);
+    
+    // Performance monitoring
+    void UpdatePerformanceMetrics();
+    bool CanSpawnMoreEntities() const;
 
 private:
-    UPROPERTY()
-    TArray<FMassEntityHandle> SpawnedEntities;
-
+    // Mass Entity system references
     UPROPERTY()
     TObjectPtr<UMassEntitySubsystem> MassEntitySubsystem;
-
-    float LastRespawnTime = 0.0f;
-
-    void InitializeMassSystem();
-    bool IsValidSpawnLocation(const FVector& Location) const;
-    FVector GetRandomSpawnLocation() const;
-    void CleanupDeadEntities();
+    
+    // Entity archetype for crowd entities
+    FMassArchetypeHandle CrowdArchetype;
+    
+    // Spawned entities tracking
+    TArray<FMassEntityHandle> SpawnedEntities;
+    
+    // Batch spawning state
+    FTimerHandle BatchSpawnTimer;
+    int32 CurrentBatchIndex = 0;
+    int32 TargetEntityCount = 0;
+    
+    // Performance tracking
+    float LastPerformanceUpdate = 0.0f;
+    float AverageFrameTime = 0.0f;
+    
+    // Constants
+    static constexpr float PerformanceUpdateInterval = 1.0f;
+    static constexpr float MaxFrameTimeThreshold = 0.033f; // 30 FPS
 };
