@@ -1,291 +1,337 @@
 #include "Build_IntegrationManager.h"
-#include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "Engine/GameInstance.h"
-#include "TimerManager.h"
-#include "HAL/PlatformFilemanager.h"
-#include "Misc/DateTime.h"
-#include "Misc/Paths.h"
+#include "Engine/Engine.h"
+#include "Kismet/GameplayStatics.h"
+#include "TranspersonalGameState.h"
+#include "TranspersonalCharacter.h"
+#include "PCGWorldGenerator.h"
+#include "FoliageManager.h"
+#include "QA/QA_TestFramework.h"
 
 UBuild_IntegrationManager::UBuild_IntegrationManager()
 {
-    bValidationInProgress = false;
+    LastValidationTime = 0.0f;
+    bIntegrationValid = false;
 }
 
 void UBuild_IntegrationManager::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
     
-    UE_LOG(LogTemp, Log, TEXT("Build_IntegrationManager: Initializing integration system"));
+    UE_LOG(LogTemp, Log, TEXT("Build_IntegrationManager: Initialized"));
     
-    // Initialize module statuses
-    ModuleStatuses.Empty();
+    // Initialize system status tracking
+    CachedSystemStatuses.Empty();
     
-    // Add core modules to track
-    TArray<FString> CoreModules = {
-        TEXT("TranspersonalGame"),
-        TEXT("Core"),
-        TEXT("World"),
-        TEXT("Character"),
-        TEXT("AI"),
-        TEXT("QA"),
-        TEXT("Integration")
-    };
-    
-    for (const FString& ModuleName : CoreModules)
-    {
-        FBuild_ModuleStatus NewStatus;
-        NewStatus.ModuleName = ModuleName;
-        NewStatus.Status = EBuild_IntegrationStatus::Unknown;
-        ModuleStatuses.Add(ModuleName, NewStatus);
-    }
-    
-    // Start periodic validation
-    if (UWorld* World = GetWorld())
-    {
-        World->GetTimerManager().SetTimer(
-            ValidationTimerHandle,
-            this,
-            &UBuild_IntegrationManager::ValidateAllModules,
-            30.0f, // Every 30 seconds
-            true
-        );
-        
-        World->GetTimerManager().SetTimer(
-            HealthMonitorHandle,
-            this,
-            &UBuild_IntegrationManager::UpdateSystemHealth,
-            5.0f, // Every 5 seconds
-            true
-        );
-    }
-    
-    // Run initial validation
-    ValidateAllModules();
+    // Add core systems to track
+    UpdateSystemStatus(TEXT("WorldGeneration"), EBuild_ValidationStatus::Unknown);
+    UpdateSystemStatus(TEXT("CharacterSystem"), EBuild_ValidationStatus::Unknown);
+    UpdateSystemStatus(TEXT("AISystem"), EBuild_ValidationStatus::Unknown);
+    UpdateSystemStatus(TEXT("QAFramework"), EBuild_ValidationStatus::Unknown);
+    UpdateSystemStatus(TEXT("FoliageSystem"), EBuild_ValidationStatus::Unknown);
 }
 
 void UBuild_IntegrationManager::Deinitialize()
 {
-    if (UWorld* World = GetWorld())
-    {
-        World->GetTimerManager().ClearTimer(ValidationTimerHandle);
-        World->GetTimerManager().ClearTimer(HealthMonitorHandle);
-    }
-    
+    CachedSystemStatuses.Empty();
     Super::Deinitialize();
 }
 
-void UBuild_IntegrationManager::ValidateAllModules()
+FBuild_IntegrationReport UBuild_IntegrationManager::GenerateIntegrationReport()
 {
-    if (bValidationInProgress)
+    FBuild_IntegrationReport Report;
+    
+    // Get current world
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        return Report;
+    }
+    
+    // Count total actors
+    TArray<AActor*> AllActors;
+    UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), AllActors);
+    Report.TotalActorCount = AllActors.Num();
+    
+    // Validate systems and update statuses
+    ValidateSystemIntegrity();
+    Report.SystemStatuses = CachedSystemStatuses;
+    
+    // Count active systems
+    Report.ActiveSystemCount = 0;
+    for (const FBuild_SystemStatus& Status : CachedSystemStatuses)
+    {
+        if (Status.Status == EBuild_ValidationStatus::Valid)
+        {
+            Report.ActiveSystemCount++;
+        }
+    }
+    
+    // Calculate build time (mock for now)
+    Report.BuildTime = FPlatformTime::Seconds() - LastValidationTime;
+    
+    // Determine if game is playable
+    Report.bIsPlayable = IsGamePlayable();
+    
+    return Report;
+}
+
+bool UBuild_IntegrationManager::ValidateSystemIntegrity()
+{
+    LastValidationTime = FPlatformTime::Seconds();
+    
+    ValidateWorldGeneration();
+    ValidateCharacterSystems();
+    ValidateAISystems();
+    ValidateQASystems();
+    
+    // Check if all critical systems are valid
+    int32 ValidSystems = 0;
+    int32 TotalSystems = CachedSystemStatuses.Num();
+    
+    for (const FBuild_SystemStatus& Status : CachedSystemStatuses)
+    {
+        if (Status.Status == EBuild_ValidationStatus::Valid)
+        {
+            ValidSystems++;
+        }
+    }
+    
+    bIntegrationValid = (ValidSystems >= TotalSystems * 0.8f); // 80% systems must be valid
+    
+    return bIntegrationValid;
+}
+
+void UBuild_IntegrationManager::EnforceActorCap(int32 MaxActors)
+{
+    UWorld* World = GetWorld();
+    if (!World)
     {
         return;
     }
     
-    bValidationInProgress = true;
-    UE_LOG(LogTemp, Log, TEXT("Build_IntegrationManager: Starting module validation"));
+    TArray<AActor*> AllActors;
+    UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), AllActors);
     
-    for (auto& ModulePair : ModuleStatuses)
+    if (AllActors.Num() <= MaxActors)
     {
-        ValidateModule(ModulePair.Key);
+        return;
     }
     
-    bValidationInProgress = false;
-    UE_LOG(LogTemp, Log, TEXT("Build_IntegrationManager: Module validation complete"));
-}
-
-void UBuild_IntegrationManager::ValidateModule(const FString& ModuleName)
-{
-    if (!ModuleStatuses.Contains(ModuleName))
-    {
-        FBuild_ModuleStatus NewStatus;
-        NewStatus.ModuleName = ModuleName;
-        ModuleStatuses.Add(ModuleName, NewStatus);
-    }
+    UE_LOG(LogTemp, Warning, TEXT("Actor cap exceeded: %d/%d - Enforcing cleanup"), AllActors.Num(), MaxActors);
     
-    FBuild_ModuleStatus& Status = ModuleStatuses[ModuleName];
-    Status.Status = EBuild_IntegrationStatus::Validating;
+    // Keep essential actors
+    TArray<AActor*> EssentialActors;
+    TArray<AActor*> NonEssentialActors;
     
-    try
+    for (AActor* Actor : AllActors)
     {
-        // Validate module classes
-        ValidateModuleClasses(ModuleName);
-        
-        // Validate module actors
-        ValidateModuleActors(ModuleName);
-        
-        // If we get here, validation passed
-        Status.Status = EBuild_IntegrationStatus::Valid;
-        Status.LastError = TEXT("");
-        
-        UE_LOG(LogTemp, Log, TEXT("Build_IntegrationManager: Module %s validation passed"), *ModuleName);
-    }
-    catch (...)
-    {
-        Status.Status = EBuild_IntegrationStatus::Invalid;
-        Status.LastError = TEXT("Validation exception occurred");
-        LogIntegrationError(FString::Printf(TEXT("Module %s validation failed"), *ModuleName));
-    }
-}
-
-EBuild_IntegrationStatus UBuild_IntegrationManager::GetModuleStatus(const FString& ModuleName)
-{
-    if (ModuleStatuses.Contains(ModuleName))
-    {
-        return ModuleStatuses[ModuleName].Status;
-    }
-    return EBuild_IntegrationStatus::Unknown;
-}
-
-FBuild_SystemHealth UBuild_IntegrationManager::GetSystemHealth()
-{
-    UpdateSystemHealth();
-    return CurrentSystemHealth;
-}
-
-void UBuild_IntegrationManager::RunIntegrationTests()
-{
-    UE_LOG(LogTemp, Log, TEXT("Build_IntegrationManager: Running integration tests"));
-    
-    // Test 1: Module loading
-    int32 ValidModules = 0;
-    for (const auto& ModulePair : ModuleStatuses)
-    {
-        if (ModulePair.Value.Status == EBuild_IntegrationStatus::Valid)
+        if (!Actor)
         {
-            ValidModules++;
+            continue;
+        }
+        
+        FString ActorName = Actor->GetName().ToLower();
+        
+        // Keep player starts, lights, and dinosaurs
+        if (ActorName.Contains(TEXT("playerstart")) ||
+            ActorName.Contains(TEXT("light")) ||
+            ActorName.Contains(TEXT("trex")) ||
+            ActorName.Contains(TEXT("veloci")) ||
+            ActorName.Contains(TEXT("brachi")) ||
+            ActorName.Contains(TEXT("sky")))
+        {
+            EssentialActors.Add(Actor);
+        }
+        else
+        {
+            NonEssentialActors.Add(Actor);
         }
     }
     
-    UE_LOG(LogTemp, Log, TEXT("Build_IntegrationManager: %d/%d modules valid"), ValidModules, ModuleStatuses.Num());
-    
-    // Test 2: Actor spawning
-    if (UWorld* World = GetWorld())
+    // Remove excess non-essential actors
+    int32 ActorsToRemove = AllActors.Num() - MaxActors;
+    for (int32 i = 0; i < FMath::Min(ActorsToRemove, NonEssentialActors.Num()); i++)
     {
-        int32 ActorCount = World->GetCurrentLevel()->Actors.Num();
-        UE_LOG(LogTemp, Log, TEXT("Build_IntegrationManager: %d actors in current level"), ActorCount);
-    }
-    
-    // Test 3: Memory usage
-    FPlatformMemoryStats MemStats = FPlatformMemory::GetStats();
-    float MemoryMB = MemStats.UsedPhysical / (1024.0f * 1024.0f);
-    UE_LOG(LogTemp, Log, TEXT("Build_IntegrationManager: %.2f MB memory used"), MemoryMB);
-}
-
-void UBuild_IntegrationManager::CreateBuildSnapshot()
-{
-    FString SnapshotName = FString::Printf(TEXT("BuildSnapshot_%s"), *FDateTime::Now().ToString());
-    UE_LOG(LogTemp, Log, TEXT("Build_IntegrationManager: Creating build snapshot: %s"), *SnapshotName);
-    
-    // In a real implementation, this would save the current state
-    // For now, just log the action
-}
-
-bool UBuild_IntegrationManager::RestoreBuildSnapshot(const FString& SnapshotName)
-{
-    UE_LOG(LogTemp, Log, TEXT("Build_IntegrationManager: Restoring build snapshot: %s"), *SnapshotName);
-    
-    // In a real implementation, this would restore a saved state
-    // For now, just return success
-    return true;
-}
-
-TArray<FString> UBuild_IntegrationManager::GetIntegrationErrors()
-{
-    return IntegrationErrors;
-}
-
-void UBuild_IntegrationManager::ClearIntegrationErrors()
-{
-    IntegrationErrors.Empty();
-    UE_LOG(LogTemp, Log, TEXT("Build_IntegrationManager: Integration errors cleared"));
-}
-
-void UBuild_IntegrationManager::ValidateModuleClasses(const FString& ModuleName)
-{
-    // Count classes for this module
-    int32 ClassCount = 0;
-    
-    // This is a simplified validation - in a real system we'd enumerate actual classes
-    if (ModuleName == TEXT("TranspersonalGame"))
-    {
-        ClassCount = 10; // Estimated core classes
-    }
-    else if (ModuleName == TEXT("Character"))
-    {
-        ClassCount = 5;
-    }
-    else if (ModuleName == TEXT("AI"))
-    {
-        ClassCount = 8;
-    }
-    else
-    {
-        ClassCount = 3; // Default estimate
-    }
-    
-    if (ModuleStatuses.Contains(ModuleName))
-    {
-        ModuleStatuses[ModuleName].ClassCount = ClassCount;
-    }
-}
-
-void UBuild_IntegrationManager::ValidateModuleActors(const FString& ModuleName)
-{
-    int32 ActorCount = 0;
-    
-    if (UWorld* World = GetWorld())
-    {
-        // Count actors related to this module
-        for (AActor* Actor : World->GetCurrentLevel()->Actors)
+        if (NonEssentialActors[i])
         {
-            if (Actor && Actor->GetClass()->GetName().Contains(ModuleName))
+            NonEssentialActors[i]->Destroy();
+        }
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("Actor cap enforced: Removed %d actors"), ActorsToRemove);
+}
+
+TArray<FBuild_SystemStatus> UBuild_IntegrationManager::GetSystemStatuses()
+{
+    return CachedSystemStatuses;
+}
+
+bool UBuild_IntegrationManager::IsGamePlayable()
+{
+    // Game is playable if:
+    // 1. Character system is valid
+    // 2. World generation is valid
+    // 3. At least 80% of systems are functional
+    
+    bool bCharacterValid = false;
+    bool bWorldValid = false;
+    int32 ValidSystems = 0;
+    
+    for (const FBuild_SystemStatus& Status : CachedSystemStatuses)
+    {
+        if (Status.Status == EBuild_ValidationStatus::Valid)
+        {
+            ValidSystems++;
+            
+            if (Status.SystemName == TEXT("CharacterSystem"))
             {
-                ActorCount++;
+                bCharacterValid = true;
+            }
+            else if (Status.SystemName == TEXT("WorldGeneration"))
+            {
+                bWorldValid = true;
             }
         }
     }
     
-    if (ModuleStatuses.Contains(ModuleName))
+    float ValidPercentage = CachedSystemStatuses.Num() > 0 ? 
+        (float)ValidSystems / (float)CachedSystemStatuses.Num() : 0.0f;
+    
+    return bCharacterValid && bWorldValid && (ValidPercentage >= 0.8f);
+}
+
+void UBuild_IntegrationManager::RunFullIntegrationTest()
+{
+    UE_LOG(LogTemp, Log, TEXT("Running full integration test..."));
+    
+    ValidateSystemIntegrity();
+    EnforceActorCap();
+    
+    FBuild_IntegrationReport Report = GenerateIntegrationReport();
+    
+    UE_LOG(LogTemp, Log, TEXT("Integration Test Complete:"));
+    UE_LOG(LogTemp, Log, TEXT("- Total Actors: %d"), Report.TotalActorCount);
+    UE_LOG(LogTemp, Log, TEXT("- Active Systems: %d/%d"), Report.ActiveSystemCount, Report.SystemStatuses.Num());
+    UE_LOG(LogTemp, Log, TEXT("- Game Playable: %s"), Report.bIsPlayable ? TEXT("Yes") : TEXT("No"));
+}
+
+void UBuild_IntegrationManager::ValidateWorldGeneration()
+{
+    UWorld* World = GetWorld();
+    if (!World)
     {
-        ModuleStatuses[ModuleName].ActorCount = ActorCount;
+        UpdateSystemStatus(TEXT("WorldGeneration"), EBuild_ValidationStatus::Invalid, TEXT("No world context"));
+        return;
+    }
+    
+    // Check for PCG World Generator
+    TArray<AActor*> PCGActors;
+    UGameplayStatics::GetAllActorsOfClass(World, APCGWorldGenerator::StaticClass(), PCGActors);
+    
+    if (PCGActors.Num() > 0)
+    {
+        UpdateSystemStatus(TEXT("WorldGeneration"), EBuild_ValidationStatus::Valid);
+    }
+    else
+    {
+        UpdateSystemStatus(TEXT("WorldGeneration"), EBuild_ValidationStatus::Invalid, TEXT("No PCG World Generator found"));
     }
 }
 
-void UBuild_IntegrationManager::UpdateSystemHealth()
+void UBuild_IntegrationManager::ValidateCharacterSystems()
 {
-    // Update frame rate
-    if (UWorld* World = GetWorld())
+    UWorld* World = GetWorld();
+    if (!World)
     {
-        CurrentSystemHealth.FrameRate = 1.0f / World->GetDeltaSeconds();
+        UpdateSystemStatus(TEXT("CharacterSystem"), EBuild_ValidationStatus::Invalid, TEXT("No world context"));
+        return;
     }
     
-    // Update memory usage
-    FPlatformMemoryStats MemStats = FPlatformMemory::GetStats();
-    CurrentSystemHealth.MemoryUsageMB = MemStats.UsedPhysical / (1024.0f * 1024.0f);
+    // Check for TranspersonalCharacter
+    TArray<AActor*> Characters;
+    UGameplayStatics::GetAllActorsOfClass(World, ATranspersonalCharacter::StaticClass(), Characters);
     
-    // Update actor count
-    if (UWorld* World = GetWorld())
+    if (Characters.Num() > 0)
     {
-        CurrentSystemHealth.TotalActors = World->GetCurrentLevel()->Actors.Num();
+        UpdateSystemStatus(TEXT("CharacterSystem"), EBuild_ValidationStatus::Valid);
     }
-    
-    // Update component count (simplified)
-    CurrentSystemHealth.ActiveComponents = CurrentSystemHealth.TotalActors * 3; // Estimate
-    
-    // Determine stability
-    CurrentSystemHealth.bIsStable = (CurrentSystemHealth.FrameRate > 20.0f) && 
-                                   (CurrentSystemHealth.MemoryUsageMB < 2048.0f);
+    else
+    {
+        UpdateSystemStatus(TEXT("CharacterSystem"), EBuild_ValidationStatus::Invalid, TEXT("No TranspersonalCharacter found"));
+    }
 }
 
-void UBuild_IntegrationManager::LogIntegrationError(const FString& Error)
+void UBuild_IntegrationManager::ValidateAISystems()
 {
-    IntegrationErrors.Add(Error);
-    UE_LOG(LogTemp, Error, TEXT("Build_IntegrationManager: %s"), *Error);
-    
-    // Keep only last 50 errors
-    if (IntegrationErrors.Num() > 50)
+    UWorld* World = GetWorld();
+    if (!World)
     {
-        IntegrationErrors.RemoveAt(0);
+        UpdateSystemStatus(TEXT("AISystem"), EBuild_ValidationStatus::Invalid, TEXT("No world context"));
+        return;
+    }
+    
+    // Check for AI-related actors (placeholder validation)
+    TArray<AActor*> AllActors;
+    UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), AllActors);
+    
+    bool bHasAI = false;
+    for (AActor* Actor : AllActors)
+    {
+        if (Actor && Actor->GetName().ToLower().Contains(TEXT("ai")))
+        {
+            bHasAI = true;
+            break;
+        }
+    }
+    
+    if (bHasAI)
+    {
+        UpdateSystemStatus(TEXT("AISystem"), EBuild_ValidationStatus::Valid);
+    }
+    else
+    {
+        UpdateSystemStatus(TEXT("AISystem"), EBuild_ValidationStatus::Warning, TEXT("No AI actors detected"));
+    }
+}
+
+void UBuild_IntegrationManager::ValidateQASystems()
+{
+    // Check if QA framework classes are available
+    UClass* QAClass = UQA_TestFramework::StaticClass();
+    
+    if (QAClass)
+    {
+        UpdateSystemStatus(TEXT("QAFramework"), EBuild_ValidationStatus::Valid);
+    }
+    else
+    {
+        UpdateSystemStatus(TEXT("QAFramework"), EBuild_ValidationStatus::Invalid, TEXT("QA Framework not found"));
+    }
+}
+
+void UBuild_IntegrationManager::UpdateSystemStatus(const FString& SystemName, EBuild_ValidationStatus Status, const FString& ErrorMessage)
+{
+    // Find existing status or create new one
+    FBuild_SystemStatus* ExistingStatus = CachedSystemStatuses.FindByPredicate(
+        [&SystemName](const FBuild_SystemStatus& Status)
+        {
+            return Status.SystemName == SystemName;
+        });
+    
+    if (ExistingStatus)
+    {
+        ExistingStatus->Status = Status;
+        ExistingStatus->ErrorMessage = ErrorMessage;
+        ExistingStatus->LastCheckTime = FPlatformTime::Seconds();
+    }
+    else
+    {
+        FBuild_SystemStatus NewStatus;
+        NewStatus.SystemName = SystemName;
+        NewStatus.Status = Status;
+        NewStatus.ErrorMessage = ErrorMessage;
+        NewStatus.LastCheckTime = FPlatformTime::Seconds();
+        CachedSystemStatuses.Add(NewStatus);
     }
 }
