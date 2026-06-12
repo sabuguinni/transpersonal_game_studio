@@ -2,120 +2,107 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
-#include "Components/ActorComponent.h"
 #include "Engine/World.h"
-#include "GameFramework/Character.h"
+#include "Components/SphereComponent.h"
 #include "SharedTypes.h"
 #include "Combat_CombatManager.generated.h"
 
+class UCombat_TacticalAI;
+class UCombat_DinosaurAI;
+
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FCombat_CombatData
+struct TRANSPERSONALGAME_API FCombat_CombatZone
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
-    float AttackDamage = 25.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Zone")
+    FVector Center;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
-    float AttackRange = 200.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Zone")
+    float Radius;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
-    float AttackCooldown = 2.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Zone")
+    ECombat_ThreatLevel ThreatLevel;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
-    bool bIsInCombat = false;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Zone")
+    TArray<AActor*> ActiveCombatants;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
-    AActor* CurrentTarget = nullptr;
-
-    FCombat_CombatData()
+    FCombat_CombatZone()
     {
-        AttackDamage = 25.0f;
-        AttackRange = 200.0f;
-        AttackCooldown = 2.0f;
-        bIsInCombat = false;
-        CurrentTarget = nullptr;
+        Center = FVector::ZeroVector;
+        Radius = 1000.0f;
+        ThreatLevel = ECombat_ThreatLevel::Low;
     }
 };
 
-UENUM(BlueprintType)
-enum class ECombat_CombatState : uint8
-{
-    Idle        UMETA(DisplayName = "Idle"),
-    Searching   UMETA(DisplayName = "Searching"),
-    Engaging    UMETA(DisplayName = "Engaging"),
-    Attacking   UMETA(DisplayName = "Attacking"),
-    Retreating  UMETA(DisplayName = "Retreating"),
-    Dead        UMETA(DisplayName = "Dead")
-};
-
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UCombat_CombatManager : public UActorComponent
+class TRANSPERSONALGAME_API ACombat_CombatManager : public AActor
 {
     GENERATED_BODY()
 
 public:
-    UCombat_CombatManager();
+    ACombat_CombatManager();
 
 protected:
     virtual void BeginPlay() override;
+    virtual void Tick(float DeltaTime) override;
 
-public:
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    USphereComponent* DetectionSphere;
 
-    // Combat Data
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
-    FCombat_CombatData CombatData;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Zones")
+    TArray<FCombat_CombatZone> CombatZones;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
-    ECombat_CombatState CurrentCombatState;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Settings")
+    float CombatUpdateInterval;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
-    float DetectionRadius = 1500.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Settings")
+    int32 MaxSimultaneousCombats;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
-    float EngagementRadius = 800.0f;
+    UPROPERTY(BlueprintReadOnly, Category = "Combat State")
+    TArray<AActor*> ActiveCombatants;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
-    float RetreatRadius = 2000.0f;
-
-    // Combat Functions
-    UFUNCTION(BlueprintCallable, Category = "Combat")
-    void StartCombat(AActor* Target);
-
-    UFUNCTION(BlueprintCallable, Category = "Combat")
-    void EndCombat();
-
-    UFUNCTION(BlueprintCallable, Category = "Combat")
-    void PerformAttack();
-
-    UFUNCTION(BlueprintCallable, Category = "Combat")
-    bool CanAttack() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Combat")
-    AActor* FindNearestEnemy();
-
-    UFUNCTION(BlueprintCallable, Category = "Combat")
-    void UpdateCombatState();
-
-    UFUNCTION(BlueprintCallable, Category = "Combat")
-    float GetDistanceToTarget() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Combat")
-    bool IsTargetInRange() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Combat")
-    void SetCombatState(ECombat_CombatState NewState);
+    UPROPERTY(BlueprintReadOnly, Category = "Combat State")
+    int32 CurrentCombatCount;
 
 private:
-    float LastAttackTime;
-    FTimerHandle CombatUpdateTimer;
+    float LastCombatUpdate;
+    TArray<AActor*> PendingCombatants;
 
-    void UpdateCombatLogic();
-    bool IsValidTarget(AActor* Target) const;
-    void HandleIdleState();
-    void HandleSearchingState();
-    void HandleEngagingState();
-    void HandleAttackingState();
-    void HandleRetreatingState();
+public:
+    UFUNCTION(BlueprintCallable, Category = "Combat Management")
+    void RegisterCombatant(AActor* Combatant);
+
+    UFUNCTION(BlueprintCallable, Category = "Combat Management")
+    void UnregisterCombatant(AActor* Combatant);
+
+    UFUNCTION(BlueprintCallable, Category = "Combat Management")
+    void StartCombat(AActor* Attacker, AActor* Target);
+
+    UFUNCTION(BlueprintCallable, Category = "Combat Management")
+    void EndCombat(AActor* Combatant);
+
+    UFUNCTION(BlueprintCallable, Category = "Combat Management")
+    bool IsInCombatZone(const FVector& Location) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Combat Management")
+    ECombat_ThreatLevel GetThreatLevelAtLocation(const FVector& Location) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Combat Management")
+    TArray<AActor*> GetNearbyCombatants(const FVector& Location, float Radius) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Combat Management")
+    void UpdateCombatZones();
+
+    UFUNCTION(BlueprintCallable, Category = "Combat Management")
+    void ProcessCombatQueue();
+
+    UFUNCTION(BlueprintCallable, Category = "Combat Management")
+    bool CanStartNewCombat() const;
+
+    UFUNCTION(BlueprintPure, Category = "Combat Management")
+    int32 GetActiveCombatCount() const { return CurrentCombatCount; }
+
+    UFUNCTION(BlueprintPure, Category = "Combat Management")
+    bool IsActorInCombat(AActor* Actor) const;
 };
