@@ -2,36 +2,66 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
-#include "Engine/World.h"
-#include "Components/SphereComponent.h"
+#include "Engine/TriggerBox.h"
+#include "Components/StaticMeshComponent.h"
 #include "SharedTypes.h"
 #include "Combat_CombatManager.generated.h"
 
-class UCombat_TacticalAI;
-class UCombat_DinosaurAI;
-
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FCombat_CombatZone
+struct TRANSPERSONALGAME_API FCombat_CombatEncounter
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Zone")
-    FVector Center;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+    FVector Location;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Zone")
-    float Radius;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+    float ThreatLevel;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Zone")
-    ECombat_ThreatLevel ThreatLevel;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+    TArray<AActor*> Enemies;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Zone")
-    TArray<AActor*> ActiveCombatants;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+    float EncounterRadius;
 
-    FCombat_CombatZone()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+    bool bIsActive;
+
+    FCombat_CombatEncounter()
     {
-        Center = FVector::ZeroVector;
-        Radius = 1000.0f;
-        ThreatLevel = ECombat_ThreatLevel::Low;
+        Location = FVector::ZeroVector;
+        ThreatLevel = 0.5f;
+        EncounterRadius = 1000.0f;
+        bIsActive = false;
+    }
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FCombat_TacticalData
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+    float PlayerThreatLevel;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+    FVector LastKnownPlayerPosition;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+    float TimeSinceLastSighting;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+    TArray<FVector> FlankingPositions;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+    bool bPlayerInCombat;
+
+    FCombat_TacticalData()
+    {
+        PlayerThreatLevel = 0.0f;
+        LastKnownPlayerPosition = FVector::ZeroVector;
+        TimeSinceLastSighting = 0.0f;
+        bPlayerInCombat = false;
     }
 };
 
@@ -48,61 +78,68 @@ protected:
     virtual void Tick(float DeltaTime) override;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    USphereComponent* DetectionSphere;
+    UStaticMeshComponent* VisualizationMesh;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Zones")
-    TArray<FCombat_CombatZone> CombatZones;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat System")
+    TArray<FCombat_CombatEncounter> ActiveEncounters;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Settings")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat System")
+    FCombat_TacticalData CurrentTacticalSituation;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat System")
+    float GlobalThreatLevel;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat System")
     float CombatUpdateInterval;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Settings")
-    int32 MaxSimultaneousCombats;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat System")
+    float MaxCombatRange;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Combat State")
-    TArray<AActor*> ActiveCombatants;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Combat State")
-    int32 CurrentCombatCount;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat System")
+    int32 MaxSimultaneousEncounters;
 
 private:
-    float LastCombatUpdate;
-    TArray<AActor*> PendingCombatants;
+    float LastUpdateTime;
+    TArray<AActor*> TrackedEnemies;
+    AActor* PlayerCharacter;
 
 public:
-    UFUNCTION(BlueprintCallable, Category = "Combat Management")
-    void RegisterCombatant(AActor* Combatant);
+    UFUNCTION(BlueprintCallable, Category = "Combat System")
+    void InitializeCombatSystem();
 
-    UFUNCTION(BlueprintCallable, Category = "Combat Management")
-    void UnregisterCombatant(AActor* Combatant);
+    UFUNCTION(BlueprintCallable, Category = "Combat System")
+    void RegisterEnemy(AActor* Enemy, float ThreatLevel);
 
-    UFUNCTION(BlueprintCallable, Category = "Combat Management")
-    void StartCombat(AActor* Attacker, AActor* Target);
+    UFUNCTION(BlueprintCallable, Category = "Combat System")
+    void UnregisterEnemy(AActor* Enemy);
 
-    UFUNCTION(BlueprintCallable, Category = "Combat Management")
-    void EndCombat(AActor* Combatant);
+    UFUNCTION(BlueprintCallable, Category = "Combat System")
+    void StartCombatEncounter(const FVector& Location, const TArray<AActor*>& Enemies);
 
-    UFUNCTION(BlueprintCallable, Category = "Combat Management")
-    bool IsInCombatZone(const FVector& Location) const;
+    UFUNCTION(BlueprintCallable, Category = "Combat System")
+    void EndCombatEncounter(int32 EncounterIndex);
 
-    UFUNCTION(BlueprintCallable, Category = "Combat Management")
-    ECombat_ThreatLevel GetThreatLevelAtLocation(const FVector& Location) const;
+    UFUNCTION(BlueprintCallable, Category = "Combat System")
+    void UpdateTacticalSituation();
 
-    UFUNCTION(BlueprintCallable, Category = "Combat Management")
-    TArray<AActor*> GetNearbyCombatants(const FVector& Location, float Radius) const;
+    UFUNCTION(BlueprintCallable, Category = "Combat System")
+    float CalculatePlayerThreatLevel() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Combat Management")
-    void UpdateCombatZones();
+    UFUNCTION(BlueprintCallable, Category = "Combat System")
+    TArray<FVector> GenerateFlankingPositions(const FVector& PlayerPos, int32 NumPositions) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Combat Management")
-    void ProcessCombatQueue();
+    UFUNCTION(BlueprintCallable, Category = "Combat System")
+    bool IsPlayerInCombat() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Combat Management")
-    bool CanStartNewCombat() const;
+    UFUNCTION(BlueprintCallable, Category = "Combat System")
+    AActor* GetNearestEnemy(const FVector& Position) const;
 
-    UFUNCTION(BlueprintPure, Category = "Combat Management")
-    int32 GetActiveCombatCount() const { return CurrentCombatCount; }
+    UFUNCTION(BlueprintCallable, Category = "Combat System")
+    void SetGlobalThreatLevel(float NewThreatLevel);
 
-    UFUNCTION(BlueprintPure, Category = "Combat Management")
-    bool IsActorInCombat(AActor* Actor) const;
+    UFUNCTION(BlueprintCallable, Category = "Combat System")
+    float GetGlobalThreatLevel() const { return GlobalThreatLevel; }
+
+    UFUNCTION(BlueprintCallable, Category = "Combat System")
+    void ProcessCombatAI(float DeltaTime);
 };
