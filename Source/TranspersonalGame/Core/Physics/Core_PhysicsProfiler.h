@@ -2,283 +2,119 @@
 
 #include "CoreMinimal.h"
 #include "Engine/World.h"
-#include "Subsystems/WorldSubsystem.h"
-#include "Engine/Engine.h"
-#include "HAL/PlatformFilemanager.h"
-#include "Misc/DateTime.h"
+#include "Components/ActorComponent.h"
 #include "Core_PhysicsProfiler.generated.h"
 
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FCore_PhysicsProfileData
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadOnly, Category = "Physics Profiling")
+    float FrameTime;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Physics Profiling")
+    int32 ActiveRigidBodies;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Physics Profiling")
+    int32 PhysicsConstraints;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Physics Profiling")
+    float PhysicsStepTime;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Physics Profiling")
+    int32 CollisionQueries;
+
+    FCore_PhysicsProfileData()
+        : FrameTime(0.0f)
+        , ActiveRigidBodies(0)
+        , PhysicsConstraints(0)
+        , PhysicsStepTime(0.0f)
+        , CollisionQueries(0)
+    {
+    }
+};
+
 /**
- * Physics Profiler - Comprehensive performance monitoring and analysis system
- * Tracks physics performance metrics, generates reports, and provides optimization insights
- * Part of the Core Systems module for prehistoric survival game
+ * Physics profiler component for monitoring physics performance
+ * Tracks physics simulation metrics and provides optimization data
  */
-
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FCore_PhysicsMetrics
-{
-    GENERATED_BODY()
-
-    /** Frame time for physics simulation (milliseconds) */
-    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
-    float PhysicsFrameTime = 0.0f;
-
-    /** Number of active rigid bodies */
-    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
-    int32 ActiveRigidBodies = 0;
-
-    /** Number of active constraints */
-    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
-    int32 ActiveConstraints = 0;
-
-    /** Number of collision pairs processed */
-    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
-    int32 CollisionPairs = 0;
-
-    /** Memory usage by physics simulation (MB) */
-    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
-    float PhysicsMemoryUsage = 0.0f;
-
-    /** CPU usage percentage for physics */
-    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
-    float PhysicsCPUUsage = 0.0f;
-
-    /** Timestamp when metrics were captured */
-    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
-    float Timestamp = 0.0f;
-
-    FCore_PhysicsMetrics()
-    {
-        PhysicsFrameTime = 0.0f;
-        ActiveRigidBodies = 0;
-        ActiveConstraints = 0;
-        CollisionPairs = 0;
-        PhysicsMemoryUsage = 0.0f;
-        PhysicsCPUUsage = 0.0f;
-        Timestamp = 0.0f;
-    }
-};
-
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FCore_PerformanceReport
-{
-    GENERATED_BODY()
-
-    /** Average frame time over reporting period */
-    UPROPERTY(BlueprintReadOnly, Category = "Report")
-    float AverageFrameTime = 0.0f;
-
-    /** Peak frame time during reporting period */
-    UPROPERTY(BlueprintReadOnly, Category = "Report")
-    float PeakFrameTime = 0.0f;
-
-    /** Minimum frame time during reporting period */
-    UPROPERTY(BlueprintReadOnly, Category = "Report")
-    float MinFrameTime = 0.0f;
-
-    /** Frame time variance (stability metric) */
-    UPROPERTY(BlueprintReadOnly, Category = "Report")
-    float FrameTimeVariance = 0.0f;
-
-    /** Performance score (0-100) */
-    UPROPERTY(BlueprintReadOnly, Category = "Report")
-    float PerformanceScore = 0.0f;
-
-    /** Number of performance warnings */
-    UPROPERTY(BlueprintReadOnly, Category = "Report")
-    int32 WarningCount = 0;
-
-    /** Report generation timestamp */
-    UPROPERTY(BlueprintReadOnly, Category = "Report")
-    FString ReportTimestamp;
-
-    FCore_PerformanceReport()
-    {
-        AverageFrameTime = 0.0f;
-        PeakFrameTime = 0.0f;
-        MinFrameTime = 0.0f;
-        FrameTimeVariance = 0.0f;
-        PerformanceScore = 0.0f;
-        WarningCount = 0;
-        ReportTimestamp = TEXT("");
-    }
-};
-
-UCLASS(BlueprintType)
-class TRANSPERSONALGAME_API UCore_PhysicsProfiler : public UWorldSubsystem
+UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UCore_PhysicsProfiler : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
     UCore_PhysicsProfiler();
 
-    // === SUBSYSTEM INTERFACE ===
-    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
-    virtual void Deinitialize() override;
-    virtual bool ShouldCreateSubsystem(UObject* Outer) const override;
-
 protected:
-    virtual void Tick(float DeltaTime) override;
+    virtual void BeginPlay() override;
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 public:
-    // === PROFILING CONTROL ===
-
-    /** Start physics profiling */
+    /** Start profiling physics performance */
     UFUNCTION(BlueprintCallable, Category = "Physics Profiling")
     void StartProfiling();
 
-    /** Stop physics profiling */
+    /** Stop profiling physics performance */
     UFUNCTION(BlueprintCallable, Category = "Physics Profiling")
     void StopProfiling();
 
-    /** Reset all profiling data */
+    /** Get current physics profile data */
+    UFUNCTION(BlueprintCallable, Category = "Physics Profiling")
+    FCore_PhysicsProfileData GetCurrentProfileData() const;
+
+    /** Get average physics profile data over time */
+    UFUNCTION(BlueprintCallable, Category = "Physics Profiling")
+    FCore_PhysicsProfileData GetAverageProfileData() const;
+
+    /** Reset profiling data */
     UFUNCTION(BlueprintCallable, Category = "Physics Profiling")
     void ResetProfilingData();
 
-    /** Check if profiling is currently active */
+    /** Check if physics performance is within acceptable limits */
     UFUNCTION(BlueprintCallable, Category = "Physics Profiling")
-    bool IsProfilingActive() const { return bIsProfilingActive; }
-
-    // === METRICS COLLECTION ===
-
-    /** Get current physics metrics */
-    UFUNCTION(BlueprintCallable, Category = "Physics Profiling")
-    FCore_PhysicsMetrics GetCurrentMetrics();
-
-    /** Get metrics history for specified duration (seconds) */
-    UFUNCTION(BlueprintCallable, Category = "Physics Profiling")
-    TArray<FCore_PhysicsMetrics> GetMetricsHistory(float DurationSeconds = 60.0f);
-
-    /** Get average metrics over specified period */
-    UFUNCTION(BlueprintCallable, Category = "Physics Profiling")
-    FCore_PhysicsMetrics GetAverageMetrics(float PeriodSeconds = 10.0f);
-
-    // === PERFORMANCE ANALYSIS ===
-
-    /** Generate comprehensive performance report */
-    UFUNCTION(BlueprintCallable, Category = "Physics Profiling")
-    FCore_PerformanceReport GeneratePerformanceReport(float AnalysisPeriod = 60.0f);
-
-    /** Get performance score (0-100) */
-    UFUNCTION(BlueprintCallable, Category = "Physics Profiling")
-    float GetPerformanceScore();
-
-    /** Check if performance is within acceptable limits */
-    UFUNCTION(BlueprintCallable, Category = "Physics Profiling")
-    bool IsPerformanceAcceptable();
-
-    /** Get performance bottlenecks */
-    UFUNCTION(BlueprintCallable, Category = "Physics Profiling")
-    TArray<FString> GetPerformanceBottlenecks();
-
-    // === REPORTING AND LOGGING ===
-
-    /** Export metrics to CSV file */
-    UFUNCTION(BlueprintCallable, Category = "Physics Profiling")
-    bool ExportMetricsToCSV(const FString& FilePath);
-
-    /** Export performance report to text file */
-    UFUNCTION(BlueprintCallable, Category = "Physics Profiling")
-    bool ExportReportToFile(const FString& FilePath);
-
-    /** Log current performance status */
-    UFUNCTION(BlueprintCallable, Category = "Physics Profiling")
-    void LogPerformanceStatus();
-
-    // === CONFIGURATION ===
-
-    /** Set profiling update frequency (Hz) */
-    UFUNCTION(BlueprintCallable, Category = "Physics Profiling")
-    void SetProfilingFrequency(float Frequency);
-
-    /** Set maximum history size (number of samples) */
-    UFUNCTION(BlueprintCallable, Category = "Physics Profiling")
-    void SetMaxHistorySize(int32 MaxSize);
-
-    /** Enable/disable automatic report generation */
-    UFUNCTION(BlueprintCallable, Category = "Physics Profiling")
-    void SetAutoReportGeneration(bool bEnabled, float IntervalSeconds = 300.0f);
+    bool IsPhysicsPerformanceAcceptable() const;
 
 protected:
-    // === PROFILING STATE ===
+    /** Current profiling state */
+    UPROPERTY(BlueprintReadOnly, Category = "Physics Profiling")
+    bool bIsProfiling;
 
-    /** Whether profiling is currently active */
-    UPROPERTY(BlueprintReadOnly, Category = "Profiling")
-    bool bIsProfilingActive = false;
+    /** Current frame profile data */
+    UPROPERTY(BlueprintReadOnly, Category = "Physics Profiling")
+    FCore_PhysicsProfileData CurrentFrameData;
 
-    /** Profiling update frequency */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Profiling")
-    float ProfilingFrequency = 10.0f; // 10 Hz
+    /** Accumulated profile data for averaging */
+    UPROPERTY()
+    TArray<FCore_PhysicsProfileData> ProfileDataHistory;
 
-    /** Maximum number of metrics samples to store */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Profiling")
-    int32 MaxHistorySize = 3600; // 1 hour at 1Hz
+    /** Maximum number of frames to keep in history */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Physics Profiling", meta = (ClampMin = "10", ClampMax = "1000"))
+    int32 MaxHistoryFrames;
 
-    /** Enable automatic report generation */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Profiling")
-    bool bAutoReportGeneration = false;
+    /** Target frame time threshold (ms) */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Physics Profiling", meta = (ClampMin = "1.0", ClampMax = "100.0"))
+    float TargetFrameTime;
 
-    /** Auto report generation interval */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Profiling")
-    float AutoReportInterval = 300.0f; // 5 minutes
-
-    // === PERFORMANCE THRESHOLDS ===
-
-    /** Target physics frame time (milliseconds) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance Thresholds")
-    float TargetFrameTime = 8.33f; // 120 Hz
-
-    /** Warning threshold for frame time */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance Thresholds")
-    float WarningFrameTime = 16.67f; // 60 Hz
-
-    /** Critical threshold for frame time */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance Thresholds")
-    float CriticalFrameTime = 33.33f; // 30 Hz
-
-    /** Maximum acceptable rigid bodies */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance Thresholds")
-    int32 MaxRigidBodies = 1000;
-
-    /** Maximum acceptable memory usage (MB) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance Thresholds")
-    float MaxMemoryUsage = 512.0f;
+    /** Maximum acceptable physics step time (ms) */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Physics Profiling", meta = (ClampMin = "1.0", ClampMax = "50.0"))
+    float MaxPhysicsStepTime;
 
 private:
-    // === INTERNAL DATA ===
+    /** Update current frame physics data */
+    void UpdateCurrentFrameData();
 
-    /** Metrics history storage */
-    TArray<FCore_PhysicsMetrics> MetricsHistory;
+    /** Add current frame data to history */
+    void AddFrameDataToHistory();
 
-    /** Last profiling update time */
-    float LastProfilingTime = 0.0f;
+    /** Calculate physics metrics */
+    void CalculatePhysicsMetrics();
 
-    /** Last auto report generation time */
-    float LastAutoReportTime = 0.0f;
+    /** Last frame time for delta calculations */
+    float LastFrameTime;
 
-    /** Current performance warnings */
-    TArray<FString> CurrentWarnings;
-
-    // === INTERNAL FUNCTIONS ===
-
-    /** Collect current physics metrics */
-    FCore_PhysicsMetrics CollectCurrentMetrics();
-
-    /** Update metrics history */
-    void UpdateMetricsHistory(const FCore_PhysicsMetrics& NewMetrics);
-
-    /** Calculate performance score based on metrics */
-    float CalculatePerformanceScore(const FCore_PhysicsMetrics& Metrics);
-
-    /** Analyze performance and generate warnings */
-    void AnalyzePerformance(const FCore_PhysicsMetrics& Metrics);
-
-    /** Generate automatic report if needed */
-    void CheckAutoReportGeneration();
-
-    /** Clean old metrics from history */
-    void CleanOldMetrics();
-
-    /** Format timestamp for reports */
-    FString FormatTimestamp() const;
+    /** Physics world reference */
+    UPROPERTY()
+    UWorld* PhysicsWorld;
 };
