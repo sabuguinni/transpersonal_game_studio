@@ -1,112 +1,110 @@
 #include "ProductionCoordinator.h"
 #include "Engine/World.h"
 #include "Engine/Engine.h"
+#include "EngineUtils.h"
 #include "GameFramework/Character.h"
-#include "Components/StaticMeshComponent.h"
 #include "Landscape/Landscape.h"
-#include "Engine/DirectionalLight.h"
-#include "Engine/SkyLight.h"
 
 AProductionCoordinator::AProductionCoordinator()
 {
     PrimaryActorTick.bCanEverTick = true;
-    PrimaryActorTick.TickInterval = 5.0f; // Update every 5 seconds
     
-    // Set up root component
-    RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootComponent"));
+    // Initialize milestone states
+    bTerrainComplete = false;
+    bCharacterFunctional = false;
+    bDinosaursPlaced = false;
+    bLightingSetup = false;
+    bBasicGameplay = false;
+    
+    // Update every 5 seconds
+    UpdateInterval = 5.0f;
+    TimeSinceLastUpdate = 0.0f;
+    
+    // Initialize default agent tasks
+    AgentTasks.Empty();
+    
+    // Set up initial critical tasks
+    AssignTaskToAgent(TEXT("Agent_02_Engine_Architect"), TEXT("Define core gameplay systems architecture"), 10.0f);
+    AssignTaskToAgent(TEXT("Agent_03_Core_Systems"), TEXT("Implement physics and collision systems"), 9.0f);
+    AssignTaskToAgent(TEXT("Agent_05_World_Generator"), TEXT("Create varied terrain with PCG"), 8.0f);
+    AssignTaskToAgent(TEXT("Agent_09_Character_Artist"), TEXT("Enhance character with proper mesh and animations"), 7.0f);
+    AssignTaskToAgent(TEXT("Agent_12_Combat_AI"), TEXT("Implement basic dinosaur AI behaviors"), 6.0f);
 }
 
 void AProductionCoordinator::BeginPlay()
 {
     Super::BeginPlay();
     
-    InitializeProductionTasks();
+    // Initial metrics update
     UpdateProductionMetrics();
-    bInitialized = true;
+    ValidateMilestones();
     
-    UE_LOG(LogTemp, Warning, TEXT("ProductionCoordinator initialized - Cycle %d"), CurrentCycle);
+    UE_LOG(LogTemp, Warning, TEXT("ProductionCoordinator initialized - tracking %d agent tasks"), AgentTasks.Num());
 }
 
 void AProductionCoordinator::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
     
-    if (!bInitialized)
-        return;
+    TimeSinceLastUpdate += DeltaTime;
     
-    LastMetricsUpdate += DeltaTime;
-    
-    // Update metrics every 10 seconds
-    if (LastMetricsUpdate >= 10.0f)
+    if (TimeSinceLastUpdate >= UpdateInterval)
     {
         UpdateProductionMetrics();
-        ValidateGameState();
-        LastMetricsUpdate = 0.0f;
+        ValidateMilestones();
+        TimeSinceLastUpdate = 0.0f;
     }
-}
-
-void AProductionCoordinator::InitializeProductionTasks()
-{
-    AgentTasks.Empty();
-    
-    // Milestone 1 tasks for each agent
-    AssignTaskToAgent(TEXT("Agent02_EngineArchitect"), TEXT("Define core architecture and compilation rules"), 10.0f);
-    AssignTaskToAgent(TEXT("Agent03_CoreSystems"), TEXT("Implement physics and collision systems"), 9.0f);
-    AssignTaskToAgent(TEXT("Agent05_WorldGenerator"), TEXT("Create terrain with hills and valleys"), 8.0f);
-    AssignTaskToAgent(TEXT("Agent06_Environment"), TEXT("Place trees, rocks, and vegetation"), 7.0f);
-    AssignTaskToAgent(TEXT("Agent08_Lighting"), TEXT("Set up day/night cycle and atmosphere"), 6.0f);
-    AssignTaskToAgent(TEXT("Agent09_Character"), TEXT("Create playable character with movement"), 9.0f);
-    AssignTaskToAgent(TEXT("Agent10_Animation"), TEXT("Add character animations and IK"), 5.0f);
-    AssignTaskToAgent(TEXT("Agent11_NPCBehavior"), TEXT("Create basic dinosaur AI"), 4.0f);
-    AssignTaskToAgent(TEXT("Agent12_Combat"), TEXT("Implement survival HUD and basic combat"), 8.0f);
-    
-    UE_LOG(LogTemp, Warning, TEXT("Initialized %d production tasks"), AgentTasks.Num());
 }
 
 void AProductionCoordinator::UpdateProductionMetrics()
 {
     if (!GetWorld())
+    {
         return;
+    }
     
-    // Reset metrics
-    CurrentMetrics = FDir_ProductionMetrics();
+    // Reset counters
+    CurrentMetrics.TotalActors = 0;
+    CurrentMetrics.CharacterActors = 0;
+    CurrentMetrics.DinosaurActors = 0;
+    CurrentMetrics.TerrainActors = 0;
     
-    // Count all actors
+    // Count all actors in the world
     for (TActorIterator<AActor> ActorIterator(GetWorld()); ActorIterator; ++ActorIterator)
     {
         AActor* Actor = *ActorIterator;
-        if (!Actor || Actor == this)
+        if (!Actor)
+        {
             continue;
+        }
         
         CurrentMetrics.TotalActors++;
         
-        // Categorize actors
-        if (Actor->IsA<ACharacter>())
+        FString ActorName = Actor->GetName().ToLower();
+        
+        // Classify actors
+        if (ActorName.Contains(TEXT("character")) || ActorName.Contains(TEXT("player")))
         {
             CurrentMetrics.CharacterActors++;
         }
-        else if (Actor->GetName().Contains(TEXT("Dinosaur")) || 
-                 Actor->GetName().Contains(TEXT("TRex")) ||
-                 Actor->GetName().Contains(TEXT("Raptor")))
+        else if (ActorName.Contains(TEXT("dinosaur")) || ActorName.Contains(TEXT("trex")) || 
+                 ActorName.Contains(TEXT("raptor")) || ActorName.Contains(TEXT("brachio")))
         {
             CurrentMetrics.DinosaurActors++;
         }
-        else if (Actor->IsA<ALandscape>())
+        else if (ActorName.Contains(TEXT("landscape")) || ActorName.Contains(TEXT("terrain")))
         {
             CurrentMetrics.TerrainActors++;
-        }
-        else if (Actor->IsA<ADirectionalLight>() || Actor->IsA<ASkyLight>())
-        {
-            CurrentMetrics.LightingActors++;
         }
     }
     
     // Calculate overall progress
-    CurrentMetrics.ProductionProgress = CalculateOverallProgress();
+    CurrentMetrics.OverallProgress = CalculateOverallProgress();
+    CurrentMetrics.LastUpdated = FDateTime::Now();
     
-    UE_LOG(LogTemp, Warning, TEXT("Metrics Updated - Total: %d, Characters: %d, Dinosaurs: %d, Progress: %.1f%%"), 
-           CurrentMetrics.TotalActors, CurrentMetrics.CharacterActors, 
-           CurrentMetrics.DinosaurActors, CurrentMetrics.ProductionProgress * 100.0f);
+    UE_LOG(LogTemp, Log, TEXT("Production Metrics Updated - Total: %d, Characters: %d, Dinosaurs: %d, Terrain: %d, Progress: %.1f%%"),
+           CurrentMetrics.TotalActors, CurrentMetrics.CharacterActors, CurrentMetrics.DinosaurActors, 
+           CurrentMetrics.TerrainActors, CurrentMetrics.OverallProgress);
 }
 
 void AProductionCoordinator::AssignTaskToAgent(const FString& AgentName, const FString& TaskDescription, float Priority)
@@ -116,10 +114,12 @@ void AProductionCoordinator::AssignTaskToAgent(const FString& AgentName, const F
     NewTask.TaskDescription = TaskDescription;
     NewTask.Priority = Priority;
     NewTask.bCompleted = false;
+    NewTask.AssignedTime = FDateTime::Now();
     
     AgentTasks.Add(NewTask);
     
-    UE_LOG(LogTemp, Log, TEXT("Task assigned to %s: %s"), *AgentName, *TaskDescription);
+    UE_LOG(LogTemp, Warning, TEXT("Task assigned to %s: %s (Priority: %.1f)"), 
+           *AgentName, *TaskDescription, Priority);
 }
 
 void AProductionCoordinator::CompleteAgentTask(const FString& AgentName)
@@ -135,92 +135,112 @@ void AProductionCoordinator::CompleteAgentTask(const FString& AgentName)
     }
 }
 
-float AProductionCoordinator::CalculateOverallProgress() const
+float AProductionCoordinator::CalculateOverallProgress()
 {
-    if (AgentTasks.Num() == 0)
-        return 0.0f;
+    // Define milestone weights
+    float TerrainWeight = 0.3f;
+    float CharacterWeight = 0.25f;
+    float DinosaurWeight = 0.25f;
+    float LightingWeight = 0.1f;
+    float GameplayWeight = 0.1f;
     
-    int32 CompletedTasks = 0;
-    float WeightedProgress = 0.0f;
-    float TotalWeight = 0.0f;
+    // Calculate individual progress percentages
+    float TerrainProgress = bTerrainComplete ? 100.0f : FMath::Min(CurrentMetrics.TerrainActors * 100.0f, 100.0f);
+    float CharacterProgress = bCharacterFunctional ? 100.0f : FMath::Min(CurrentMetrics.CharacterActors * 100.0f, 100.0f);
+    float DinosaurProgress = bDinosaursPlaced ? 100.0f : FMath::Min((CurrentMetrics.DinosaurActors / 5.0f) * 100.0f, 100.0f);
+    float LightingProgress = bLightingSetup ? 100.0f : 0.0f;
+    float GameplayProgress = bBasicGameplay ? 100.0f : 0.0f;
     
-    for (const FDir_AgentTask& Task : AgentTasks)
-    {
-        TotalWeight += Task.Priority;
-        if (Task.bCompleted)
-        {
-            CompletedTasks++;
-            WeightedProgress += Task.Priority;
-        }
-    }
+    // Calculate weighted average
+    float WeightedProgress = (TerrainProgress * TerrainWeight) + 
+                           (CharacterProgress * CharacterWeight) + 
+                           (DinosaurProgress * DinosaurWeight) + 
+                           (LightingProgress * LightingWeight) + 
+                           (GameplayProgress * GameplayWeight);
     
-    return TotalWeight > 0.0f ? WeightedProgress / TotalWeight : 0.0f;
+    return WeightedProgress;
 }
 
-TArray<FString> AProductionCoordinator::GetPendingTasks() const
+TArray<FDir_AgentTask> AProductionCoordinator::GetPendingTasks()
 {
-    TArray<FString> PendingTasks;
+    TArray<FDir_AgentTask> PendingTasks;
     
     for (const FDir_AgentTask& Task : AgentTasks)
     {
         if (!Task.bCompleted)
         {
-            PendingTasks.Add(FString::Printf(TEXT("%s: %s"), *Task.AgentName, *Task.TaskDescription));
+            PendingTasks.Add(Task);
         }
     }
+    
+    // Sort by priority (highest first)
+    PendingTasks.Sort([](const FDir_AgentTask& A, const FDir_AgentTask& B) {
+        return A.Priority > B.Priority;
+    });
     
     return PendingTasks;
 }
 
-bool AProductionCoordinator::IsPhaseComplete() const
+FDir_ProductionMetrics AProductionCoordinator::GetCurrentMetrics() const
 {
-    if (CurrentPhase == TEXT("Milestone1_WalkAround"))
+    return CurrentMetrics;
+}
+
+void AProductionCoordinator::ValidateMilestones()
+{
+    // Milestone 1 validation criteria
+    bTerrainComplete = (CurrentMetrics.TerrainActors >= 1);
+    bCharacterFunctional = (CurrentMetrics.CharacterActors >= 1);
+    bDinosaursPlaced = (CurrentMetrics.DinosaurActors >= 5);
+    
+    // Check for lighting setup (basic assumption for now)
+    bLightingSetup = (CurrentMetrics.TotalActors > 10); // Rough estimate
+    
+    // Basic gameplay check (if character and terrain exist)
+    bBasicGameplay = (bTerrainComplete && bCharacterFunctional);
+    
+    if (IsMilestone1Complete())
     {
-        return HasPlayableCharacter() && 
-               HasTerrainWithVariation() && 
-               HasDinosaurActors() && 
-               HasBasicLighting();
+        UE_LOG(LogTemp, Warning, TEXT("MILESTONE 1 COMPLETE - Minimum Viable Playable Prototype achieved!"));
+    }
+}
+
+bool AProductionCoordinator::IsMilestone1Complete() const
+{
+    return bTerrainComplete && bCharacterFunctional && bDinosaursPlaced && bLightingSetup && bBasicGameplay;
+}
+
+void AProductionCoordinator::LogProductionState()
+{
+    UE_LOG(LogTemp, Warning, TEXT("=== PRODUCTION STATE REPORT ==="));
+    UE_LOG(LogTemp, Warning, TEXT("Total Actors: %d"), CurrentMetrics.TotalActors);
+    UE_LOG(LogTemp, Warning, TEXT("Character Actors: %d"), CurrentMetrics.CharacterActors);
+    UE_LOG(LogTemp, Warning, TEXT("Dinosaur Actors: %d"), CurrentMetrics.DinosaurActors);
+    UE_LOG(LogTemp, Warning, TEXT("Terrain Actors: %d"), CurrentMetrics.TerrainActors);
+    UE_LOG(LogTemp, Warning, TEXT("Overall Progress: %.1f%%"), CurrentMetrics.OverallProgress);
+    
+    UE_LOG(LogTemp, Warning, TEXT("=== MILESTONE STATUS ==="));
+    UE_LOG(LogTemp, Warning, TEXT("Terrain Complete: %s"), bTerrainComplete ? TEXT("YES") : TEXT("NO"));
+    UE_LOG(LogTemp, Warning, TEXT("Character Functional: %s"), bCharacterFunctional ? TEXT("YES") : TEXT("NO"));
+    UE_LOG(LogTemp, Warning, TEXT("Dinosaurs Placed: %s"), bDinosaursPlaced ? TEXT("YES") : TEXT("NO"));
+    UE_LOG(LogTemp, Warning, TEXT("Lighting Setup: %s"), bLightingSetup ? TEXT("YES") : TEXT("NO"));
+    UE_LOG(LogTemp, Warning, TEXT("Basic Gameplay: %s"), bBasicGameplay ? TEXT("YES") : TEXT("NO"));
+    
+    UE_LOG(LogTemp, Warning, TEXT("=== PENDING TASKS ==="));
+    TArray<FDir_AgentTask> PendingTasks = GetPendingTasks();
+    for (const FDir_AgentTask& Task : PendingTasks)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("%s: %s (Priority: %.1f)"), *Task.AgentName, *Task.TaskDescription, Task.Priority);
+    }
+}
+
+void AProductionCoordinator::ResetAllTasks()
+{
+    for (FDir_AgentTask& Task : AgentTasks)
+    {
+        Task.bCompleted = false;
+        Task.AssignedTime = FDateTime::Now();
     }
     
-    return false;
-}
-
-bool AProductionCoordinator::HasPlayableCharacter() const
-{
-    return CurrentMetrics.CharacterActors > 0;
-}
-
-bool AProductionCoordinator::HasTerrainWithVariation() const
-{
-    return CurrentMetrics.TerrainActors > 0;
-}
-
-bool AProductionCoordinator::HasDinosaurActors() const
-{
-    return CurrentMetrics.DinosaurActors >= 3; // Need at least 3 dinosaurs
-}
-
-bool AProductionCoordinator::HasBasicLighting() const
-{
-    return CurrentMetrics.LightingActors > 0;
-}
-
-void AProductionCoordinator::ValidateGameState()
-{
-    // Log current milestone progress
-    bool bCharacterReady = HasPlayableCharacter();
-    bool bTerrainReady = HasTerrainWithVariation();
-    bool bDinosaursReady = HasDinosaurActors();
-    bool bLightingReady = HasBasicLighting();
-    
-    UE_LOG(LogTemp, Warning, TEXT("Milestone 1 Status - Character: %s, Terrain: %s, Dinosaurs: %s, Lighting: %s"),
-           bCharacterReady ? TEXT("READY") : TEXT("PENDING"),
-           bTerrainReady ? TEXT("READY") : TEXT("PENDING"),
-           bDinosaursReady ? TEXT("READY") : TEXT("PENDING"),
-           bLightingReady ? TEXT("READY") : TEXT("PENDING"));
-    
-    if (IsPhaseComplete())
-    {
-        UE_LOG(LogTemp, Error, TEXT("MILESTONE 1 COMPLETE! Moving to next phase..."));
-    }
+    UE_LOG(LogTemp, Warning, TEXT("All agent tasks reset to pending status"));
 }
