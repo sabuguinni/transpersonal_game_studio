@@ -1,388 +1,352 @@
 #include "Eng_ArchitectureManager.h"
 #include "Engine/World.h"
+#include "Engine/StaticMeshActor.h"
+#include "Components/StaticMeshComponent.h"
+#include "Engine/StaticMesh.h"
+#include "UObject/ConstructorHelpers.h"
+#include "Kismet/GameplayStatics.h"
 #include "Engine/Engine.h"
-#include "HAL/PlatformFilemanager.h"
-#include "Misc/DateTime.h"
-#include "Engine/GameViewportClient.h"
-#include "RenderingThread.h"
-#include "Stats/Stats.h"
 
 UEng_ArchitectureManager::UEng_ArchitectureManager()
 {
-    bSystemsInitialized = false;
-    TargetFrameTime = 16.67f; // 60 FPS target
-    MaxDrawCalls = 2000;
-    MaxMemoryMB = 4096.0f;
-    MaxActorCount = 8000; // Global limit from brain memories
+    bIsInitialized = false;
 }
 
 void UEng_ArchitectureManager::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
     
-    UE_LOG(LogTemp, Warning, TEXT("Engine Architecture Manager Initializing..."));
+    InitializeDefaultSettings();
+    Buildings.Empty();
+    bIsInitialized = true;
     
-    // Initialize core performance targets
-    SetPerformanceTargets(16.67f, 2000, 4096.0f);
-    
-    // Initialize core system modules
-    InitializeCoreModules();
-    
-    bSystemsInitialized = true;
-    
-    UE_LOG(LogTemp, Warning, TEXT("Engine Architecture Manager Initialized Successfully"));
+    UE_LOG(LogTemp, Warning, TEXT("ArchitectureManager: Initialized with max buildings: %d"), Settings.MaxBuildings);
 }
 
 void UEng_ArchitectureManager::Deinitialize()
 {
-    UE_LOG(LogTemp, Warning, TEXT("Engine Architecture Manager Deinitializing..."));
-    
-    // Cleanup all modules
-    SystemModules.Empty();
-    SystemErrors.Empty();
-    
-    bSystemsInitialized = false;
+    ClearAllBuildings();
+    bIsInitialized = false;
     
     Super::Deinitialize();
 }
 
-void UEng_ArchitectureManager::InitializeSystemModules()
+void UEng_ArchitectureManager::InitializeDefaultSettings()
 {
-    if (bSystemsInitialized)
+    Settings.MaxBuildings = 50;
+    Settings.BuildingSnapDistance = 100.0f;
+    Settings.bEnableAutoRepair = true;
+    Settings.WeatherDamageRate = 1.0f;
+    Settings.bRequireMaterials = true;
+}
+
+bool UEng_ArchitectureManager::CreateBuilding(EEng_BuildingType BuildingType, FVector Location, FRotator Rotation)
+{
+    if (!bIsInitialized)
+    {
+        UE_LOG(LogTemp, Error, TEXT("ArchitectureManager: Not initialized"));
+        return false;
+    }
+
+    if (Buildings.Num() >= Settings.MaxBuildings)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("ArchitectureManager: Maximum buildings reached (%d)"), Settings.MaxBuildings);
+        return false;
+    }
+
+    if (!IsValidBuildingLocation(Location, BuildingType))
+    {
+        UE_LOG(LogTemp, Warning, TEXT("ArchitectureManager: Invalid building location"));
+        return false;
+    }
+
+    if (Settings.bRequireMaterials && !HasRequiredMaterials(BuildingType))
+    {
+        UE_LOG(LogTemp, Warning, TEXT("ArchitectureManager: Missing required materials"));
+        return false;
+    }
+
+    FEng_BuildingData NewBuilding;
+    NewBuilding.BuildingType = BuildingType;
+    NewBuilding.Location = Location;
+    NewBuilding.Rotation = Rotation;
+    NewBuilding.Health = 100.0f;
+    NewBuilding.bIsConstructed = false;
+    NewBuilding.ConstructionProgress = 0.0f;
+    NewBuilding.RequiredMaterials = GetRequiredMaterials(BuildingType);
+
+    Buildings.Add(NewBuilding);
+    
+    // Spawn the actual building actor
+    AActor* BuildingActor = SpawnBuildingActor(NewBuilding);
+    if (BuildingActor)
+    {
+        UE_LOG(LogTemp, Log, TEXT("ArchitectureManager: Created building %s at %s"), 
+               *UEnum::GetValueAsString(BuildingType), *Location.ToString());
+        return true;
+    }
+
+    // Remove from array if spawn failed
+    Buildings.RemoveAt(Buildings.Num() - 1);
+    return false;
+}
+
+bool UEng_ArchitectureManager::RemoveBuilding(int32 BuildingIndex)
+{
+    if (!Buildings.IsValidIndex(BuildingIndex))
+    {
+        return false;
+    }
+
+    Buildings.RemoveAt(BuildingIndex);
+    UE_LOG(LogTemp, Log, TEXT("ArchitectureManager: Removed building at index %d"), BuildingIndex);
+    return true;
+}
+
+void UEng_ArchitectureManager::UpdateBuildingConstruction(int32 BuildingIndex, float ProgressDelta)
+{
+    if (!Buildings.IsValidIndex(BuildingIndex))
     {
         return;
     }
-    
-    InitializeCoreModules();
-    bSystemsInitialized = true;
-    
-    UE_LOG(LogTemp, Warning, TEXT("System Modules Initialized"));
-}
 
-void UEng_ArchitectureManager::InitializeCoreModules()
-{
-    // Core Engine Systems
-    RegisterSystemModule(TEXT("CoreEngine"), 100, TArray<FString>());
-    RegisterSystemModule(TEXT("Rendering"), 90, {TEXT("CoreEngine")});
-    RegisterSystemModule(TEXT("Physics"), 80, {TEXT("CoreEngine")});
-    RegisterSystemModule(TEXT("Audio"), 70, {TEXT("CoreEngine")});
+    FEng_BuildingData& Building = Buildings[BuildingIndex];
+    Building.ConstructionProgress = FMath::Clamp(Building.ConstructionProgress + ProgressDelta, 0.0f, 100.0f);
     
-    // Game Systems
-    RegisterSystemModule(TEXT("WorldGeneration"), 60, {TEXT("Physics"), TEXT("Rendering")});
-    RegisterSystemModule(TEXT("CharacterSystem"), 50, {TEXT("Physics")});
-    RegisterSystemModule(TEXT("DinosaurAI"), 40, {TEXT("CharacterSystem")});
-    RegisterSystemModule(TEXT("CombatSystem"), 30, {TEXT("CharacterSystem", TEXT("DinosaurAI")});
-    RegisterSystemModule(TEXT("QuestSystem"), 20, {TEXT("CharacterSystem")});
-    RegisterSystemModule(TEXT("UISystem"), 10, {TEXT("Rendering")});
-    
-    // Load core modules
-    LoadSystemModule(TEXT("CoreEngine"));
-    LoadSystemModule(TEXT("Rendering"));
-    LoadSystemModule(TEXT("Physics"));
-}
-
-void UEng_ArchitectureManager::RegisterSystemModule(const FString& ModuleName, int32 Priority, const TArray<FString>& Dependencies)
-{
-    FEng_SystemModule NewModule;
-    NewModule.ModuleName = ModuleName;
-    NewModule.Priority = Priority;
-    NewModule.Dependencies = Dependencies;
-    NewModule.bIsLoaded = false;
-    NewModule.bIsActive = false;
-    
-    SystemModules.Add(NewModule);
-    
-    UE_LOG(LogTemp, Log, TEXT("Registered System Module: %s (Priority: %d)"), *ModuleName, Priority);
-}
-
-bool UEng_ArchitectureManager::LoadSystemModule(const FString& ModuleName)
-{
-    FEng_SystemModule* Module = FindSystemModule(ModuleName);
-    if (!Module)
+    if (Building.ConstructionProgress >= 100.0f && !Building.bIsConstructed)
     {
-        SystemErrors.Add(FString::Printf(TEXT("Module not found: %s"), *ModuleName));
+        Building.bIsConstructed = true;
+        UE_LOG(LogTemp, Log, TEXT("ArchitectureManager: Building construction completed"));
+    }
+}
+
+TArray<FEng_BuildingData> UEng_ArchitectureManager::GetAllBuildings() const
+{
+    return Buildings;
+}
+
+FEng_BuildingData UEng_ArchitectureManager::GetBuildingData(int32 BuildingIndex) const
+{
+    if (Buildings.IsValidIndex(BuildingIndex))
+    {
+        return Buildings[BuildingIndex];
+    }
+    return FEng_BuildingData();
+}
+
+bool UEng_ArchitectureManager::IsValidBuildingLocation(FVector Location, EEng_BuildingType BuildingType) const
+{
+    // Check minimum distance from other buildings
+    float NearestDistance = GetNearestBuildingDistance(Location);
+    if (NearestDistance < Settings.BuildingSnapDistance)
+    {
         return false;
     }
-    
-    if (Module->bIsLoaded)
+
+    // Additional validation based on building type
+    switch (BuildingType)
     {
-        return true; // Already loaded
+        case EEng_BuildingType::Bridge:
+            // Bridges need special validation for water/gaps
+            break;
+        case EEng_BuildingType::Watchtower:
+            // Watchtowers need elevation validation
+            break;
+        default:
+            break;
     }
-    
-    // Check dependencies
-    if (!ResolveDependencies(ModuleName))
-    {
-        SystemErrors.Add(FString::Printf(TEXT("Failed to resolve dependencies for: %s"), *ModuleName));
-        return false;
-    }
-    
-    // Simulate module loading
-    Module->bIsLoaded = true;
-    Module->bIsActive = true;
-    
-    ValidateModuleLoad(ModuleName);
-    
-    UE_LOG(LogTemp, Warning, TEXT("Loaded System Module: %s"), *ModuleName);
+
     return true;
 }
 
-bool UEng_ArchitectureManager::UnloadSystemModule(const FString& ModuleName)
+float UEng_ArchitectureManager::GetNearestBuildingDistance(FVector Location) const
 {
-    FEng_SystemModule* Module = FindSystemModule(ModuleName);
-    if (!Module || !Module->bIsLoaded)
+    float NearestDistance = FLT_MAX;
+    
+    for (const FEng_BuildingData& Building : Buildings)
     {
-        return false;
-    }
-    
-    Module->bIsLoaded = false;
-    Module->bIsActive = false;
-    
-    UE_LOG(LogTemp, Warning, TEXT("Unloaded System Module: %s"), *ModuleName);
-    return true;
-}
-
-bool UEng_ArchitectureManager::IsSystemModuleLoaded(const FString& ModuleName) const
-{
-    const FEng_SystemModule* Module = SystemModules.FindByPredicate([&ModuleName](const FEng_SystemModule& Mod)
-    {
-        return Mod.ModuleName == ModuleName;
-    });
-    
-    return Module && Module->bIsLoaded;
-}
-
-TArray<FString> UEng_ArchitectureManager::GetLoadedModules() const
-{
-    TArray<FString> LoadedModules;
-    
-    for (const FEng_SystemModule& Module : SystemModules)
-    {
-        if (Module.bIsLoaded)
+        float Distance = FVector::Dist(Location, Building.Location);
+        if (Distance < NearestDistance)
         {
-            LoadedModules.Add(Module.ModuleName);
+            NearestDistance = Distance;
         }
     }
     
-    return LoadedModules;
+    return NearestDistance;
 }
 
-FEng_PerformanceMetrics UEng_ArchitectureManager::GetCurrentPerformanceMetrics() const
+void UEng_ArchitectureManager::SetArchitectureSettings(const FEng_ArchitectureSettings& NewSettings)
 {
-    return CurrentMetrics;
+    Settings = NewSettings;
+    UE_LOG(LogTemp, Log, TEXT("ArchitectureManager: Settings updated"));
 }
 
-void UEng_ArchitectureManager::UpdatePerformanceMetrics()
+FEng_ArchitectureSettings UEng_ArchitectureManager::GetArchitectureSettings() const
 {
-    UpdateSystemMetrics();
+    return Settings;
 }
 
-void UEng_ArchitectureManager::UpdateSystemMetrics()
+void UEng_ArchitectureManager::ApplyWeatherDamage(float DeltaTime)
 {
-    // Get frame time
-    if (GEngine && GEngine->GetGameViewport())
+    if (!Settings.bEnableAutoRepair)
     {
-        CurrentMetrics.FrameTime = FApp::GetDeltaTime() * 1000.0f; // Convert to ms
+        return;
     }
-    
-    // Estimate other metrics (in a real implementation, these would come from actual profiling)
-    CurrentMetrics.RenderTime = CurrentMetrics.FrameTime * 0.6f; // Assume 60% render time
-    CurrentMetrics.GameThreadTime = CurrentMetrics.FrameTime * 0.4f; // Assume 40% game thread
-    
-    // Actor count as proxy for complexity
-    if (UWorld* World = GetWorld())
+
+    for (FEng_BuildingData& Building : Buildings)
     {
-        CurrentMetrics.DrawCalls = FMath::Min(World->GetActorCount() * 2, 5000); // Estimate
-        CurrentMetrics.TriangleCount = World->GetActorCount() * 1000; // Estimate
-    }
-    
-    // Memory usage estimate
-    CurrentMetrics.MemoryUsage = FPlatformMemory::GetStats().UsedPhysical / (1024.0f * 1024.0f); // MB
-}
-
-bool UEng_ArchitectureManager::IsPerformanceWithinLimits() const
-{
-    return (CurrentMetrics.FrameTime <= TargetFrameTime) &&
-           (CurrentMetrics.DrawCalls <= MaxDrawCalls) &&
-           (CurrentMetrics.MemoryUsage <= MaxMemoryMB);
-}
-
-void UEng_ArchitectureManager::SetPerformanceTargets(float InTargetFrameTime, int32 InMaxDrawCalls, float InMaxMemoryMB)
-{
-    TargetFrameTime = InTargetFrameTime;
-    MaxDrawCalls = InMaxDrawCalls;
-    MaxMemoryMB = InMaxMemoryMB;
-    
-    UE_LOG(LogTemp, Log, TEXT("Performance targets set - FrameTime: %.2fms, DrawCalls: %d, Memory: %.1fMB"), 
-           TargetFrameTime, MaxDrawCalls, MaxMemoryMB);
-}
-
-bool UEng_ArchitectureManager::ValidateSystemIntegrity()
-{
-    SystemErrors.Empty();
-    
-    // Check all loaded modules
-    for (const FEng_SystemModule& Module : SystemModules)
-    {
-        if (Module.bIsLoaded)
+        if (Building.bIsConstructed && Building.Health > 0.0f)
         {
-            if (!CheckModuleDependencies(Module.ModuleName))
-            {
-                SystemErrors.Add(FString::Printf(TEXT("Module %s has unresolved dependencies"), *Module.ModuleName));
-            }
-        }
-    }
-    
-    // Check performance
-    UpdatePerformanceMetrics();
-    if (!IsPerformanceWithinLimits())
-    {
-        SystemErrors.Add(TEXT("Performance metrics exceed targets"));
-    }
-    
-    // Check actor count
-    if (!IsActorCountWithinLimits())
-    {
-        SystemErrors.Add(FString::Printf(TEXT("Actor count exceeds limit: %d/%d"), GetTotalActorCount(), MaxActorCount));
-    }
-    
-    return SystemErrors.Num() == 0;
-}
-
-TArray<FString> UEng_ArchitectureManager::GetSystemErrors() const
-{
-    return SystemErrors;
-}
-
-void UEng_ArchitectureManager::RunDiagnostics()
-{
-    UE_LOG(LogTemp, Warning, TEXT("Running System Diagnostics..."));
-    
-    ValidateSystemIntegrity();
-    UpdatePerformanceMetrics();
-    
-    UE_LOG(LogTemp, Warning, TEXT("Diagnostics Complete - Errors: %d"), SystemErrors.Num());
-    
-    for (const FString& Error : SystemErrors)
-    {
-        UE_LOG(LogTemp, Error, TEXT("System Error: %s"), *Error);
-    }
-}
-
-int32 UEng_ArchitectureManager::GetTotalActorCount() const
-{
-    if (UWorld* World = GetWorld())
-    {
-        return World->GetActorCount();
-    }
-    return 0;
-}
-
-bool UEng_ArchitectureManager::IsActorCountWithinLimits() const
-{
-    return GetTotalActorCount() <= MaxActorCount;
-}
-
-void UEng_ArchitectureManager::CleanupExcessActors()
-{
-    if (UWorld* World = GetWorld())
-    {
-        int32 CurrentCount = World->GetActorCount();
-        if (CurrentCount > MaxActorCount)
-        {
-            int32 ExcessCount = CurrentCount - MaxActorCount;
-            UE_LOG(LogTemp, Warning, TEXT("Cleaning up %d excess actors"), ExcessCount);
+            float Damage = Settings.WeatherDamageRate * DeltaTime;
+            Building.Health = FMath::Max(0.0f, Building.Health - Damage);
             
-            // This would implement actual cleanup logic
-            // For now, just log the need for cleanup
-        }
-    }
-}
-
-bool UEng_ArchitectureManager::CheckModuleDependencies(const FString& ModuleName) const
-{
-    const FEng_SystemModule* Module = SystemModules.FindByPredicate([&ModuleName](const FEng_SystemModule& Mod)
-    {
-        return Mod.ModuleName == ModuleName;
-    });
-    
-    if (!Module)
-    {
-        return false;
-    }
-    
-    for (const FString& Dependency : Module->Dependencies)
-    {
-        if (!IsSystemModuleLoaded(Dependency))
-        {
-            return false;
-        }
-    }
-    
-    return true;
-}
-
-TArray<FString> UEng_ArchitectureManager::GetModuleDependencies(const FString& ModuleName) const
-{
-    const FEng_SystemModule* Module = SystemModules.FindByPredicate([&ModuleName](const FEng_SystemModule& Mod)
-    {
-        return Mod.ModuleName == ModuleName;
-    });
-    
-    if (Module)
-    {
-        return Module->Dependencies;
-    }
-    
-    return TArray<FString>();
-}
-
-FEng_SystemModule* UEng_ArchitectureManager::FindSystemModule(const FString& ModuleName)
-{
-    return SystemModules.FindByPredicate([&ModuleName](const FEng_SystemModule& Mod)
-    {
-        return Mod.ModuleName == ModuleName;
-    });
-}
-
-bool UEng_ArchitectureManager::ResolveDependencies(const FString& ModuleName)
-{
-    const FEng_SystemModule* Module = SystemModules.FindByPredicate([&ModuleName](const FEng_SystemModule& Mod)
-    {
-        return Mod.ModuleName == ModuleName;
-    });
-    
-    if (!Module)
-    {
-        return false;
-    }
-    
-    // Load all dependencies first
-    for (const FString& Dependency : Module->Dependencies)
-    {
-        if (!IsSystemModuleLoaded(Dependency))
-        {
-            if (!LoadSystemModule(Dependency))
+            if (Building.Health <= 0.0f)
             {
-                return false;
+                UE_LOG(LogTemp, Warning, TEXT("ArchitectureManager: Building destroyed by weather"));
             }
         }
     }
+}
+
+TArray<FString> UEng_ArchitectureManager::GetRequiredMaterials(EEng_BuildingType BuildingType) const
+{
+    TArray<FString> Materials;
     
+    switch (BuildingType)
+    {
+        case EEng_BuildingType::Shelter:
+            Materials.Add("Wood");
+            Materials.Add("Stone");
+            Materials.Add("Leaves");
+            break;
+        case EEng_BuildingType::Storage:
+            Materials.Add("Wood");
+            Materials.Add("Vine");
+            break;
+        case EEng_BuildingType::Crafting:
+            Materials.Add("Stone");
+            Materials.Add("Wood");
+            Materials.Add("Bone");
+            break;
+        case EEng_BuildingType::Firepit:
+            Materials.Add("Stone");
+            Materials.Add("Flint");
+            break;
+        case EEng_BuildingType::Watchtower:
+            Materials.Add("Wood");
+            Materials.Add("Stone");
+            Materials.Add("Vine");
+            break;
+        case EEng_BuildingType::Fence:
+            Materials.Add("Wood");
+            Materials.Add("Vine");
+            break;
+        case EEng_BuildingType::Bridge:
+            Materials.Add("Wood");
+            Materials.Add("Vine");
+            Materials.Add("Stone");
+            break;
+        default:
+            break;
+    }
+    
+    return Materials;
+}
+
+bool UEng_ArchitectureManager::HasRequiredMaterials(EEng_BuildingType BuildingType) const
+{
+    // This would integrate with inventory system
+    // For now, return true to allow building
     return true;
 }
 
-void UEng_ArchitectureManager::ValidateModuleLoad(const FString& ModuleName)
+FString UEng_ArchitectureManager::GetBuildingMeshPath(EEng_BuildingType BuildingType) const
 {
-    // Perform post-load validation
-    if (ModuleName == TEXT("CoreEngine"))
+    switch (BuildingType)
     {
-        // Validate core engine systems
-        UE_LOG(LogTemp, Log, TEXT("Validated CoreEngine module"));
+        case EEng_BuildingType::Shelter:
+            return TEXT("/Engine/BasicShapes/Cube");
+        case EEng_BuildingType::Storage:
+            return TEXT("/Engine/BasicShapes/Cube");
+        case EEng_BuildingType::Crafting:
+            return TEXT("/Engine/BasicShapes/Cylinder");
+        case EEng_BuildingType::Firepit:
+            return TEXT("/Engine/BasicShapes/Cylinder");
+        case EEng_BuildingType::Watchtower:
+            return TEXT("/Engine/BasicShapes/Cube");
+        case EEng_BuildingType::Fence:
+            return TEXT("/Engine/BasicShapes/Cube");
+        case EEng_BuildingType::Bridge:
+            return TEXT("/Engine/BasicShapes/Cube");
+        default:
+            return TEXT("/Engine/BasicShapes/Cube");
     }
-    else if (ModuleName == TEXT("Physics"))
+}
+
+AActor* UEng_ArchitectureManager::SpawnBuildingActor(const FEng_BuildingData& BuildingData)
+{
+    UWorld* World = GetWorld();
+    if (!World)
     {
-        // Validate physics systems
-        UE_LOG(LogTemp, Log, TEXT("Validated Physics module"));
+        return nullptr;
     }
-    // Add more module-specific validations as needed
+
+    // Spawn a static mesh actor
+    AStaticMeshActor* BuildingActor = World->SpawnActor<AStaticMeshActor>(
+        AStaticMeshActor::StaticClass(),
+        BuildingData.Location,
+        BuildingData.Rotation
+    );
+
+    if (BuildingActor)
+    {
+        // Load appropriate mesh
+        FString MeshPath = GetBuildingMeshPath(BuildingData.BuildingType);
+        UStaticMesh* Mesh = LoadObject<UStaticMesh>(nullptr, *MeshPath);
+        
+        if (Mesh && BuildingActor->GetStaticMeshComponent())
+        {
+            BuildingActor->GetStaticMeshComponent()->SetStaticMesh(Mesh);
+            
+            // Set building type as actor label
+            FString BuildingName = UEnum::GetValueAsString(BuildingData.BuildingType);
+            BuildingActor->SetActorLabel(BuildingName);
+        }
+    }
+
+    return BuildingActor;
+}
+
+void UEng_ArchitectureManager::DebugSpawnTestBuildings()
+{
+    if (!bIsInitialized)
+    {
+        UE_LOG(LogTemp, Error, TEXT("ArchitectureManager: Not initialized for debug spawn"));
+        return;
+    }
+
+    // Spawn test buildings in a grid pattern
+    TArray<EEng_BuildingType> TestTypes = {
+        EEng_BuildingType::Shelter,
+        EEng_BuildingType::Storage,
+        EEng_BuildingType::Crafting,
+        EEng_BuildingType::Firepit,
+        EEng_BuildingType::Watchtower
+    };
+
+    FVector BaseLocation(0.0f, 0.0f, 100.0f);
+    
+    for (int32 i = 0; i < TestTypes.Num(); i++)
+    {
+        FVector SpawnLocation = BaseLocation + FVector(i * 300.0f, 0.0f, 0.0f);
+        CreateBuilding(TestTypes[i], SpawnLocation, FRotator::ZeroRotator);
+    }
+
+    UE_LOG(LogTemp, Warning, TEXT("ArchitectureManager: Spawned %d test buildings"), TestTypes.Num());
+}
+
+void UEng_ArchitectureManager::ClearAllBuildings()
+{
+    Buildings.Empty();
+    UE_LOG(LogTemp, Log, TEXT("ArchitectureManager: Cleared all buildings"));
 }
