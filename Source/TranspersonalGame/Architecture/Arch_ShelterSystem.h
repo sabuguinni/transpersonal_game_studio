@@ -4,17 +4,16 @@
 #include "GameFramework/Actor.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/BoxComponent.h"
-#include "Engine/StaticMesh.h"
-#include "../SharedTypes.h"
+#include "Engine/Engine.h"
 #include "Arch_ShelterSystem.generated.h"
 
 UENUM(BlueprintType)
 enum class EArch_ShelterType : uint8
 {
     CaveEntrance    UMETA(DisplayName = "Cave Entrance"),
-    RockOverhang    UMETA(DisplayName = "Rock Overhang"),
     StoneArchway    UMETA(DisplayName = "Stone Archway"),
-    NaturalAlcove   UMETA(DisplayName = "Natural Alcove")
+    RockOverhang    UMETA(DisplayName = "Rock Overhang"),
+    NaturalShelter  UMETA(DisplayName = "Natural Shelter")
 };
 
 USTRUCT(BlueprintType)
@@ -26,19 +25,16 @@ struct FArch_ShelterProperties
     EArch_ShelterType ShelterType = EArch_ShelterType::CaveEntrance;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter")
+    float ProtectionRadius = 500.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter")
     float WeatherProtection = 0.8f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter")
     float TemperatureModifier = 5.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter")
-    int32 MaxOccupants = 4;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter")
-    bool bProvidesWarmth = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter")
-    bool bBlocksWind = true;
+    bool bProvidesSafety = true;
 };
 
 UCLASS(BlueprintType, Blueprintable)
@@ -56,58 +52,41 @@ protected:
     UStaticMeshComponent* ShelterMesh;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    UBoxComponent* InteriorVolume;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    UBoxComponent* EntranceVolume;
+    UBoxComponent* ProtectionZone;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter Properties")
     FArch_ShelterProperties ShelterConfig;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter Properties")
-    TArray<AActor*> CurrentOccupants;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Visual")
+    TArray<UMaterialInterface*> WeatheredMaterials;
 
 public:
     virtual void Tick(float DeltaTime) override;
 
     UFUNCTION(BlueprintCallable, Category = "Shelter")
-    bool CanEnterShelter(AActor* Actor);
+    bool IsPlayerInShelter() const;
 
     UFUNCTION(BlueprintCallable, Category = "Shelter")
-    void EnterShelter(AActor* Actor);
+    float GetWeatherProtectionValue() const;
 
     UFUNCTION(BlueprintCallable, Category = "Shelter")
-    void ExitShelter(AActor* Actor);
+    void SetShelterType(EArch_ShelterType NewType);
 
-    UFUNCTION(BlueprintCallable, Category = "Shelter")
-    float GetWeatherProtection() const;
+    UFUNCTION(BlueprintImplementableEvent, Category = "Shelter")
+    void OnPlayerEnterShelter();
 
-    UFUNCTION(BlueprintCallable, Category = "Shelter")
-    float GetTemperatureBonus() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Shelter")
-    bool IsOccupied() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Shelter")
-    int32 GetAvailableSpace() const;
+    UFUNCTION(BlueprintImplementableEvent, Category = "Shelter")
+    void OnPlayerExitShelter();
 
 protected:
     UFUNCTION()
-    void OnEntranceOverlapBegin(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, 
-        UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult);
+    void OnProtectionZoneBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult);
 
     UFUNCTION()
-    void OnEntranceOverlapEnd(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, 
-        UPrimitiveComponent* OtherComp, int32 OtherBodyIndex);
-
-    UFUNCTION(BlueprintImplementableEvent, Category = "Shelter")
-    void OnActorEnteredShelter(AActor* Actor);
-
-    UFUNCTION(BlueprintImplementableEvent, Category = "Shelter")
-    void OnActorExitedShelter(AActor* Actor);
+    void OnProtectionZoneEndOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex);
 
 private:
-    void UpdateShelterEffects();
-    void ApplyShelterBenefits(AActor* Actor);
-    void RemoveShelterBenefits(AActor* Actor);
+    bool bPlayerInShelter = false;
+    float LastWeatherCheck = 0.0f;
+    const float WeatherCheckInterval = 2.0f;
 };
