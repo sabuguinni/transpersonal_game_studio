@@ -1,9 +1,9 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Engine/World.h"
 #include "GameFramework/Actor.h"
-#include "Engine/Engine.h"
-#include "Components/SceneComponent.h"
+#include "Components/ActorComponent.h"
 #include "QA_TestFramework.generated.h"
 
 UENUM(BlueprintType)
@@ -20,19 +20,19 @@ struct FQA_TestCase
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Test")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Test")
     FString TestName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Test")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Test")
     FString TestDescription;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Test")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Test")
     EQA_TestResult Result;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Test")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Test")
     FString ErrorMessage;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Test")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Test")
     float ExecutionTime;
 
     FQA_TestCase()
@@ -46,88 +46,64 @@ struct FQA_TestCase
 };
 
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API AQA_TestFramework : public AActor
+class TRANSPERSONALGAME_API UQA_TestFramework : public UObject
 {
     GENERATED_BODY()
 
 public:
-    AQA_TestFramework();
+    UQA_TestFramework();
 
-protected:
-    virtual void BeginPlay() override;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "QA Framework")
-    USceneComponent* RootSceneComponent;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Framework")
-    TArray<FQA_TestCase> TestCases;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Framework")
-    bool bAutoRunTests;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Framework")
-    float TestTimeout;
-
-public:
-    UFUNCTION(BlueprintCallable, Category = "QA Framework")
+    // Core testing methods
+    UFUNCTION(BlueprintCallable, Category = "QA Testing")
     void RunAllTests();
 
-    UFUNCTION(BlueprintCallable, Category = "QA Framework")
-    void RunSingleTest(const FString& TestName);
+    UFUNCTION(BlueprintCallable, Category = "QA Testing")
+    void RunVFXTests();
 
-    UFUNCTION(BlueprintCallable, Category = "QA Framework")
+    UFUNCTION(BlueprintCallable, Category = "QA Testing")
+    void RunCharacterTests();
+
+    UFUNCTION(BlueprintCallable, Category = "QA Testing")
+    void RunWorldTests();
+
+    UFUNCTION(BlueprintCallable, Category = "QA Testing")
+    void RunPerformanceTests();
+
+    // Test result management
+    UFUNCTION(BlueprintCallable, Category = "QA Testing")
+    TArray<FQA_TestCase> GetTestResults() const { return TestResults; }
+
+    UFUNCTION(BlueprintCallable, Category = "QA Testing")
+    int32 GetPassedTestCount() const;
+
+    UFUNCTION(BlueprintCallable, Category = "QA Testing")
+    int32 GetFailedTestCount() const;
+
+    UFUNCTION(BlueprintCallable, Category = "QA Testing")
+    float GetTestSuccessRate() const;
+
+    // Validation utilities
+    UFUNCTION(BlueprintCallable, Category = "QA Testing")
+    bool ValidateActorCount(int32 MaxActors = 8000);
+
+    UFUNCTION(BlueprintCallable, Category = "QA Testing")
+    bool ValidateClassCompilation(const FString& ClassName);
+
+    UFUNCTION(BlueprintCallable, Category = "QA Testing")
+    bool ValidateNiagaraComponents();
+
+    UFUNCTION(BlueprintCallable, Category = "QA Testing")
+    void GenerateTestReport();
+
+protected:
+    UPROPERTY(BlueprintReadOnly, Category = "QA Testing")
+    TArray<FQA_TestCase> TestResults;
+
+    UPROPERTY(BlueprintReadOnly, Category = "QA Testing")
+    float TotalTestTime;
+
+    // Internal test methods
+    void AddTestResult(const FString& TestName, const FString& Description, EQA_TestResult Result, const FString& ErrorMsg = TEXT(""));
     void ClearTestResults();
-
-    UFUNCTION(BlueprintCallable, Category = "QA Framework")
-    TArray<FQA_TestCase> GetTestResults() const;
-
-    UFUNCTION(BlueprintCallable, Category = "QA Framework")
-    void AddTestCase(const FString& TestName, const FString& Description);
-
-    // VFX Testing Functions
-    UFUNCTION(BlueprintCallable, Category = "QA VFX Tests")
-    void TestVFXParticleManager();
-
-    UFUNCTION(BlueprintCallable, Category = "QA VFX Tests")
-    void TestNiagaraSystemsLoading();
-
-    UFUNCTION(BlueprintCallable, Category = "QA VFX Tests")
-    void TestVFXIntegrationWithCharacters();
-
-    UFUNCTION(BlueprintCallable, Category = "QA VFX Tests")
-    void TestVFXIntegrationWithDinosaurs();
-
-    UFUNCTION(BlueprintCallable, Category = "QA VFX Tests")
-    void TestEnvironmentVFXSystems();
-
-    // Performance Testing Functions
-    UFUNCTION(BlueprintCallable, Category = "QA Performance Tests")
-    void TestActorCount();
-
-    UFUNCTION(BlueprintCallable, Category = "QA Performance Tests")
-    void TestNiagaraComponentCount();
-
-    UFUNCTION(BlueprintCallable, Category = "QA Performance Tests")
-    void TestMemoryUsage();
-
-    // Integration Testing Functions
-    UFUNCTION(BlueprintCallable, Category = "QA Integration Tests")
-    void TestCharacterMovement();
-
-    UFUNCTION(BlueprintCallable, Category = "QA Integration Tests")
-    void TestDinosaurAI();
-
-    UFUNCTION(BlueprintCallable, Category = "QA Integration Tests")
-    void TestWorldGeneration();
-
-    UFUNCTION(BlueprintCallable, Category = "QA Integration Tests")
-    void TestAudioSystems();
-
-private:
-    void LogTestResult(const FString& TestName, EQA_TestResult Result, const FString& Message = TEXT(""));
-    
-    FDateTime TestStartTime;
-    
-    void StartTestTimer();
-    float GetTestExecutionTime();
+    FQA_TestCase CreateTestCase(const FString& Name, const FString& Description);
 };
