@@ -5,71 +5,42 @@
 #include "SharedTypes.h"
 #include "Narr_StoryProgressionManager.generated.h"
 
+UENUM(BlueprintType)
+enum class ENarr_StoryPhase : uint8
+{
+    Awakening       UMETA(DisplayName = "Awakening"),
+    FirstHunt       UMETA(DisplayName = "First Hunt"),
+    TerritoryWars   UMETA(DisplayName = "Territory Wars"),
+    AlphaRising     UMETA(DisplayName = "Alpha Rising"),
+    Survival        UMETA(DisplayName = "Survival")
+};
+
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FNarr_StoryMilestone
+struct TRANSPERSONALGAME_API FNarr_StoryEvent
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    FString MilestoneID;
+    FString EventID;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    FText MilestoneName;
+    FString EventDescription;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    FText Description;
+    ENarr_StoryPhase RequiredPhase;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
     bool bCompleted;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    TArray<FString> RequiredConditions;
+    TArray<FString> PrerequisiteEvents;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    TArray<FString> UnlockedContent;
-
-    FNarr_StoryMilestone()
+    FNarr_StoryEvent()
     {
-        MilestoneID = TEXT("DefaultMilestone");
-        MilestoneName = FText::FromString(TEXT("Unknown Milestone"));
-        Description = FText::FromString(TEXT(""));
+        EventID = TEXT("");
+        EventDescription = TEXT("");
+        RequiredPhase = ENarr_StoryPhase::Awakening;
         bCompleted = false;
-    }
-};
-
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FNarr_PlayerProgress
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Progress")
-    int32 DaysAlive;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Progress")
-    int32 DinosaursSeen;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Progress")
-    int32 DinosaursSurvived;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Progress")
-    int32 ToolsCrafted;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Progress")
-    int32 SheltersBuilt;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Progress")
-    TArray<FString> BiomesExplored;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Progress")
-    TArray<FString> CompletedMilestones;
-
-    FNarr_PlayerProgress()
-    {
-        DaysAlive = 0;
-        DinosaursSeen = 0;
-        DinosaursSurvived = 0;
-        ToolsCrafted = 0;
-        SheltersBuilt = 0;
     }
 };
 
@@ -79,39 +50,41 @@ class TRANSPERSONALGAME_API UNarr_StoryProgressionManager : public UGameInstance
     GENERATED_BODY()
 
 public:
+    UNarr_StoryProgressionManager();
+
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
 
     UFUNCTION(BlueprintCallable, Category = "Story")
-    void UpdatePlayerProgress(const FString& ProgressType, int32 Value);
+    void AdvanceStoryPhase();
 
     UFUNCTION(BlueprintCallable, Category = "Story")
-    bool CheckMilestoneConditions(const FString& MilestoneID);
+    ENarr_StoryPhase GetCurrentStoryPhase() const;
 
     UFUNCTION(BlueprintCallable, Category = "Story")
-    void CompleteMilestone(const FString& MilestoneID);
+    void CompleteStoryEvent(const FString& EventID);
 
     UFUNCTION(BlueprintCallable, Category = "Story")
-    FNarr_PlayerProgress GetPlayerProgress() const;
+    bool IsStoryEventCompleted(const FString& EventID) const;
 
     UFUNCTION(BlueprintCallable, Category = "Story")
-    TArray<FNarr_StoryMilestone> GetAvailableMilestones() const;
+    TArray<FNarr_StoryEvent> GetAvailableEvents() const;
 
     UFUNCTION(BlueprintCallable, Category = "Story")
-    void TriggerStoryEvent(const FString& EventID, const FVector& Location);
+    float GetStoryProgress() const;
 
-protected:
-    UPROPERTY(BlueprintReadOnly, Category = "Story")
-    FNarr_PlayerProgress CurrentProgress;
+    UFUNCTION(BlueprintCallable, Category = "Story")
+    FString GetCurrentPhaseDescription() const;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Story")
-    TMap<FString, FNarr_StoryMilestone> StoryMilestones;
+private:
+    UPROPERTY()
+    ENarr_StoryPhase CurrentPhase;
 
-    UFUNCTION()
-    void InitializeStoryMilestones();
+    UPROPERTY()
+    TArray<FNarr_StoryEvent> StoryEvents;
 
-    UFUNCTION()
-    void CheckAllMilestones();
+    UPROPERTY()
+    int32 CompletedEventsCount;
 
-    UFUNCTION()
-    void UnlockContent(const TArray<FString>& ContentIDs);
+    void InitializeStoryEvents();
+    bool ArePrerequisitesMet(const FNarr_StoryEvent& Event) const;
 };
