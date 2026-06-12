@@ -1,228 +1,171 @@
 #include "Arch_StructuralManager.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "TimerManager.h"
+#include "Components/StaticMeshComponent.h"
+#include "Engine/StaticMesh.h"
+#include "UObject/ConstructorHelpers.h"
 #include "Kismet/GameplayStatics.h"
+#include "Math/UnrealMathUtility.h"
 
-UArch_StructuralManager::UArch_StructuralManager()
+AArch_StructuralManager::AArch_StructuralManager()
 {
-    PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 1.0f; // Update every second
-    
-    WeatheringRate = 0.001f; // Very slow degradation
-    BaseIntegrity = 1.0f;
-    bEnableWeathering = true;
+    PrimaryActorTick.bCanEverTick = true;
+
+    // Create root scene component
+    RootSceneComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootSceneComponent"));
+    RootComponent = RootSceneComponent;
+
+    // Create structure mesh component
+    StructureMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("StructureMesh"));
+    StructureMesh->SetupAttachment(RootComponent);
+
+    // Initialize default structural data
+    StructuralData.StructureType = EArch_StructureType::Shelter;
+    StructuralData.Dimensions = FVector(400.0f, 600.0f, 300.0f);
+    StructuralData.WeatheringLevel = 0.5f;
+    StructuralData.bHasVegetationGrowth = true;
+    StructuralData.StructuralIntegrity = 75;
+
+    // Initialize shelter locations for Cretaceous biomes
+    ShelterLocations.Add(FVector(50000, 50000, 100));    // Central highlands
+    ShelterLocations.Add(FVector(45000, 55000, 150));    // Forest edge
+    ShelterLocations.Add(FVector(55000, 45000, 80));     // River valley
+    ShelterLocations.Add(FVector(52000, 48000, 200));    // Mountain base
+
+    BiomePlacementRadius = 10000.0f;
 }
 
-void UArch_StructuralManager::BeginPlay()
+void AArch_StructuralManager::BeginPlay()
 {
     Super::BeginPlay();
     
-    // Initialize default structural elements if none exist
-    if (StructuralElements.Num() == 0)
-    {
-        FArch_StructuralElement DefaultArch;
-        DefaultArch.ElementName = TEXT("Ancient Stone Arch");
-        DefaultArch.Location = FVector(0.0f, 0.0f, 0.0f);
-        DefaultArch.Rotation = FRotator(0.0f, 0.0f, 0.0f);
-        DefaultArch.Scale = FVector(2.0f, 1.0f, 3.0f);
-        DefaultArch.IntegrityLevel = 0.8f; // Partially weathered
-        DefaultArch.AssociatedBiome = EBiomeType::Temperate;
-        
-        StructuralElements.Add(DefaultArch);
-    }
-    
-    // Initialize default interior space
-    if (InteriorSpaces.Num() == 0)
-    {
-        FArch_InteriorSpace DefaultChamber;
-        DefaultChamber.SpaceName = TEXT("Ancient Chamber");
-        DefaultChamber.Dimensions = FVector(800.0f, 600.0f, 400.0f);
-        DefaultChamber.ContainedObjects.Add(TEXT("Stone Fragments"));
-        DefaultChamber.ContainedObjects.Add(TEXT("Moss Growth"));
-        DefaultChamber.AmbientLightLevel = 0.2f;
-        DefaultChamber.bHasRoof = false; // Partially collapsed
-        DefaultChamber.StructuralSoundness = 0.6f;
-        
-        InteriorSpaces.Add(DefaultChamber);
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("Arch_StructuralManager initialized with %d elements and %d spaces"), 
-           StructuralElements.Num(), InteriorSpaces.Num());
+    // Initialize structural systems
+    PlaceStructuralElements();
+    ApplyEnvironmentalIntegration();
 }
 
-void UArch_StructuralManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void AArch_StructuralManager::Tick(float DeltaTime)
 {
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+    Super::Tick(DeltaTime);
     
-    if (bEnableWeathering)
-    {
-        ApplyWeathering(DeltaTime);
-    }
-    
-    CheckStructuralStability();
+    // Update weathering effects over time
+    UpdateWeatheringEffects(DeltaTime);
 }
 
-void UArch_StructuralManager::SpawnStructuralElement(const FArch_StructuralElement& Element)
+void AArch_StructuralManager::PlaceStructuralElements()
 {
-    StructuralElements.Add(Element);
-    
-    // Try to spawn physical representation in world
     UWorld* World = GetWorld();
-    if (World)
+    if (!World)
     {
-        FActorSpawnParameters SpawnParams;
-        SpawnParams.Name = FName(*Element.ElementName);
+        UE_LOG(LogTemp, Warning, TEXT("AArch_StructuralManager: No world context for structural placement"));
+        return;
+    }
+
+    // Set structure mesh scale based on structural data
+    if (StructureMesh)
+    {
+        FVector ScaleVector = StructuralData.Dimensions / 100.0f; // Convert to UE5 scale
+        StructureMesh->SetWorldScale3D(ScaleVector);
         
-        AStaticMeshActor* SpawnedActor = World->SpawnActor<AStaticMeshActor>(
-            AStaticMeshActor::StaticClass(),
-            Element.Location,
-            Element.Rotation,
-            SpawnParams
-        );
+        UE_LOG(LogTemp, Log, TEXT("AArch_StructuralManager: Structure scaled to %s"), *ScaleVector.ToString());
+    }
+
+    // Apply weathering material effects
+    if (StructureMesh && StructuralData.WeatheringLevel > 0.0f)
+    {
+        // Material weathering logic would be implemented here
+        UE_LOG(LogTemp, Log, TEXT("AArch_StructuralManager: Applied weathering level %f"), StructuralData.WeatheringLevel);
+    }
+}
+
+void AArch_StructuralManager::UpdateWeatheringEffects(float DeltaTime)
+{
+    // Gradually increase weathering over time (very slowly)
+    float WeatheringRate = 0.0001f; // Very slow weathering
+    StructuralData.WeatheringLevel = FMath::Clamp(StructuralData.WeatheringLevel + (WeatheringRate * DeltaTime), 0.0f, 1.0f);
+
+    // Decrease structural integrity based on weathering
+    if (StructuralData.WeatheringLevel > 0.7f)
+    {
+        float IntegrityLoss = 0.001f * DeltaTime;
+        StructuralData.StructuralIntegrity = FMath::Clamp(StructuralData.StructuralIntegrity - IntegrityLoss, 0, 100);
+    }
+}
+
+void AArch_StructuralManager::GenerateShelterNetwork()
+{
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        return;
+    }
+
+    for (const FVector& Location : ShelterLocations)
+    {
+        FVector OptimalLocation = GetOptimalShelterLocation(Location);
         
-        if (SpawnedActor)
-        {
-            SpawnedActor->SetActorScale3D(Element.Scale);
-            SpawnedActor->SetActorLabel(Element.ElementName);
-            
-            UE_LOG(LogTemp, Warning, TEXT("Spawned structural element: %s"), *Element.ElementName);
-        }
+        // Log shelter placement for debugging
+        UE_LOG(LogTemp, Log, TEXT("AArch_StructuralManager: Generated shelter at %s"), *OptimalLocation.ToString());
     }
 }
 
-void UArch_StructuralManager::CreateInteriorSpace(const FArch_InteriorSpace& Space)
+FVector AArch_StructuralManager::GetOptimalShelterLocation(const FVector& BiomeCenter) const
 {
-    InteriorSpaces.Add(Space);
-    
-    UE_LOG(LogTemp, Warning, TEXT("Created interior space: %s with dimensions %s"), 
-           *Space.SpaceName, *Space.Dimensions.ToString());
+    // Add some randomization for natural placement
+    FVector RandomOffset = FVector(
+        FMath::RandRange(-1000.0f, 1000.0f),
+        FMath::RandRange(-1000.0f, 1000.0f),
+        0.0f
+    );
+
+    return BiomeCenter + RandomOffset;
 }
 
-void UArch_StructuralManager::ApplyWeathering(float DeltaTime)
+void AArch_StructuralManager::ApplyEnvironmentalIntegration()
 {
-    for (FArch_StructuralElement& Element : StructuralElements)
+    // Integration with vegetation growth
+    if (StructuralData.bHasVegetationGrowth)
     {
-        UpdateElementIntegrity(Element, DeltaTime);
+        // Logic for moss and vegetation growth on structures
+        UE_LOG(LogTemp, Log, TEXT("AArch_StructuralManager: Applied vegetation growth integration"));
     }
-    
-    for (FArch_InteriorSpace& Space : InteriorSpaces)
-    {
-        // Apply weathering to interior spaces
-        float WeatheringDamage = WeatheringRate * DeltaTime;
-        if (!Space.bHasRoof)
-        {
-            WeatheringDamage *= 2.0f; // Exposed spaces weather faster
-        }
-        
-        Space.StructuralSoundness = FMath::Max(0.0f, Space.StructuralSoundness - WeatheringDamage);
-        Space.AmbientLightLevel = FMath::Min(1.0f, Space.AmbientLightLevel + (WeatheringDamage * 0.1f));
-    }
+
+    // Integration with weather systems
+    UE_LOG(LogTemp, Log, TEXT("AArch_StructuralManager: Applied environmental integration"));
 }
 
-float UArch_StructuralManager::GetStructuralIntegrity() const
+bool AArch_StructuralManager::IsStructureStable() const
 {
-    if (StructuralElements.Num() == 0)
-    {
-        return 0.0f;
-    }
-    
-    float TotalIntegrity = 0.0f;
-    for (const FArch_StructuralElement& Element : StructuralElements)
-    {
-        TotalIntegrity += Element.IntegrityLevel;
-    }
-    
-    return TotalIntegrity / StructuralElements.Num();
+    return StructuralData.StructuralIntegrity > 25;
 }
 
-TArray<FArch_StructuralElement> UArch_StructuralManager::GetElementsByBiome(EBiomeType BiomeType) const
+void AArch_StructuralManager::SetStructureType(EArch_StructureType NewType)
 {
-    TArray<FArch_StructuralElement> FilteredElements;
+    StructuralData.StructureType = NewType;
     
-    for (const FArch_StructuralElement& Element : StructuralElements)
+    // Adjust dimensions based on structure type
+    switch (NewType)
     {
-        if (Element.AssociatedBiome == BiomeType)
-        {
-            FilteredElements.Add(Element);
-        }
-    }
-    
-    return FilteredElements;
-}
-
-void UArch_StructuralManager::RepairStructure(float RepairAmount)
-{
-    for (FArch_StructuralElement& Element : StructuralElements)
-    {
-        Element.IntegrityLevel = FMath::Min(1.0f, Element.IntegrityLevel + RepairAmount);
-    }
-    
-    for (FArch_InteriorSpace& Space : InteriorSpaces)
-    {
-        Space.StructuralSoundness = FMath::Min(1.0f, Space.StructuralSoundness + RepairAmount);
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("Structure repaired by %f"), RepairAmount);
-}
-
-bool UArch_StructuralManager::IsStructureSafe() const
-{
-    float OverallIntegrity = GetStructuralIntegrity();
-    return OverallIntegrity > 0.3f; // Structure is safe if above 30% integrity
-}
-
-void UArch_StructuralManager::SetWeatheringEnabled(bool bEnabled)
-{
-    bEnableWeathering = bEnabled;
-    UE_LOG(LogTemp, Warning, TEXT("Weathering %s"), bEnabled ? TEXT("enabled") : TEXT("disabled"));
-}
-
-void UArch_StructuralManager::UpdateElementIntegrity(FArch_StructuralElement& Element, float DeltaTime)
-{
-    float EnvironmentalDamage = CalculateEnvironmentalDamage(Element);
-    float WeatheringDamage = WeatheringRate * DeltaTime * EnvironmentalDamage;
-    
-    Element.IntegrityLevel = FMath::Max(0.0f, Element.IntegrityLevel - WeatheringDamage);
-}
-
-void UArch_StructuralManager::CheckStructuralStability()
-{
-    float OverallIntegrity = GetStructuralIntegrity();
-    
-    if (OverallIntegrity < 0.2f)
-    {
-        // Structure is critically damaged
-        UE_LOG(LogTemp, Error, TEXT("CRITICAL: Structure integrity at %f - collapse imminent!"), OverallIntegrity);
-    }
-    else if (OverallIntegrity < 0.5f)
-    {
-        // Structure is damaged but stable
-        UE_LOG(LogTemp, Warning, TEXT("WARNING: Structure integrity at %f - repairs recommended"), OverallIntegrity);
-    }
-}
-
-float UArch_StructuralManager::CalculateEnvironmentalDamage(const FArch_StructuralElement& Element) const
-{
-    float DamageMultiplier = 1.0f;
-    
-    // Different biomes cause different weathering rates
-    switch (Element.AssociatedBiome)
-    {
-        case EBiomeType::Tropical:
-            DamageMultiplier = 1.5f; // High humidity and temperature
+        case EArch_StructureType::Shelter:
+            StructuralData.Dimensions = FVector(400.0f, 600.0f, 300.0f);
             break;
-        case EBiomeType::Desert:
-            DamageMultiplier = 1.2f; // Sand erosion and temperature extremes
+        case EArch_StructureType::Foundation:
+            StructuralData.Dimensions = FVector(800.0f, 800.0f, 100.0f);
             break;
-        case EBiomeType::Arctic:
-            DamageMultiplier = 1.3f; // Freeze-thaw cycles
+        case EArch_StructureType::Wall:
+            StructuralData.Dimensions = FVector(100.0f, 400.0f, 250.0f);
             break;
-        case EBiomeType::Temperate:
-        default:
-            DamageMultiplier = 1.0f; // Baseline weathering
+        case EArch_StructureType::Entrance:
+            StructuralData.Dimensions = FVector(200.0f, 100.0f, 220.0f);
+            break;
+        case EArch_StructureType::Support:
+            StructuralData.Dimensions = FVector(50.0f, 50.0f, 300.0f);
+            break;
+        case EArch_StructureType::Ruins:
+            StructuralData.Dimensions = FVector(600.0f, 800.0f, 200.0f);
             break;
     }
-    
-    return DamageMultiplier;
+
+    // Refresh structural elements
+    PlaceStructuralElements();
 }
