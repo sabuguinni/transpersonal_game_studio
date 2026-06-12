@@ -1,389 +1,195 @@
 #include "Build_CompilationValidator.h"
 #include "Engine/Engine.h"
 #include "HAL/FileManager.h"
-#include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
-#include "Engine/World.h"
-#include "Logging/LogMacros.h"
-
-DEFINE_LOG_CATEGORY_STATIC(LogBuildValidator, Log, All);
-
-UBuild_CompilationValidator::UBuild_CompilationValidator()
-{
-    bValidationInProgress = false;
-    LastValidationTime = 0.0f;
-}
+#include "Misc/DateTime.h"
 
 void UBuild_CompilationValidator::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
     
-    UE_LOG(LogBuildValidator, Log, TEXT("Build Compilation Validator initialized"));
+    OverallStatus = EBuild_CompilationStatus::Unknown;
+    LastValidationTime = FDateTime::Now();
     
-    // Initialize module tracking
-    ModuleStatuses.Empty();
-    
-    // Add core modules to track
-    TArray<FString> CoreModules = {
-        TEXT("TranspersonalGame"),
-        TEXT("Core"),
-        TEXT("World"),
-        TEXT("Character"),
-        TEXT("Combat"),
-        TEXT("Quest"),
-        TEXT("Audio"),
-        TEXT("VFX"),
-        TEXT("Integration")
-    };
-    
-    for (const FString& ModuleName : CoreModules)
-    {
-        FBuild_ModuleStatus NewStatus;
-        NewStatus.ModuleName = ModuleName;
-        NewStatus.Status = EBuild_CompilationStatus::Unknown;
-        ModuleStatuses.Add(ModuleName, NewStatus);
-    }
-}
-
-void UBuild_CompilationValidator::Deinitialize()
-{
-    ModuleStatuses.Empty();
-    Super::Deinitialize();
+    UE_LOG(LogTemp, Log, TEXT("Build_CompilationValidator initialized"));
 }
 
 void UBuild_CompilationValidator::ValidateAllModules()
 {
-    if (bValidationInProgress)
-    {
-        UE_LOG(LogBuildValidator, Warning, TEXT("Validation already in progress"));
-        return;
-    }
+    ModuleStatuses.Empty();
     
-    bValidationInProgress = true;
-    LastValidationTime = FPlatformTime::Seconds();
+    ValidateTranspersonalGameModule();
+    ValidateEngineModules();
+    CheckHeaderIncludes();
+    CheckLinkerDependencies();
+    UpdateOverallStatus();
     
-    UE_LOG(LogBuildValidator, Log, TEXT("Starting validation of all modules"));
+    LastValidationTime = FDateTime::Now();
     
-    for (auto& ModulePair : ModuleStatuses)
-    {
-        ValidateModule(ModulePair.Key);
-    }
-    
-    CheckForDuplicateTypes();
-    ValidateHeaderIncludes();
-    CheckForMissingImplementations();
-    
-    bValidationInProgress = false;
-    
-    UE_LOG(LogBuildValidator, Log, TEXT("Module validation completed"));
+    UE_LOG(LogTemp, Log, TEXT("Module validation completed. Overall status: %d"), (int32)OverallStatus);
 }
 
-void UBuild_CompilationValidator::ValidateModule(const FString& ModuleName)
+bool UBuild_CompilationValidator::CheckModuleCompilation(const FString& ModuleName)
 {
-    if (!ModuleStatuses.Contains(ModuleName))
+    FBuild_ModuleStatus NewStatus;
+    NewStatus.ModuleName = ModuleName;
+    NewStatus.Status = EBuild_CompilationStatus::Unknown;
+    
+    // Check if module binary exists
+    FString ProjectDir = FPaths::ProjectDir();
+    FString BinaryPath = FPaths::Combine(ProjectDir, TEXT("Binaries"), TEXT("Linux"), ModuleName + TEXT(".so"));
+    
+    if (IFileManager::Get().FileExists(*BinaryPath))
     {
-        FBuild_ModuleStatus NewStatus;
-        NewStatus.ModuleName = ModuleName;
-        NewStatus.Status = EBuild_CompilationStatus::Unknown;
-        ModuleStatuses.Add(ModuleName, NewStatus);
+        NewStatus.Status = EBuild_CompilationStatus::Success;
+        UE_LOG(LogTemp, Log, TEXT("Module %s: Binary found at %s"), *ModuleName, *BinaryPath);
+    }
+    else
+    {
+        NewStatus.Status = EBuild_CompilationStatus::Failed;
+        NewStatus.Errors.Add(FString::Printf(TEXT("Binary not found: %s"), *BinaryPath));
+        UE_LOG(LogTemp, Warning, TEXT("Module %s: Binary not found"), *ModuleName);
     }
     
-    FBuild_ModuleStatus& Status = ModuleStatuses[ModuleName];
-    Status.Status = EBuild_CompilationStatus::Compiling;
-    Status.ErrorMessages.Empty();
-    Status.WarningMessages.Empty();
-    
-    float StartTime = FPlatformTime::Seconds();
-    
-    CheckModuleCompilation(ModuleName);
-    
-    Status.CompilationTime = FPlatformTime::Seconds() - StartTime;
-    
-    UE_LOG(LogBuildValidator, Log, TEXT("Module %s validation completed in %.2fs"), 
-           *ModuleName, Status.CompilationTime);
-}
-
-EBuild_CompilationStatus UBuild_CompilationValidator::GetModuleStatus(const FString& ModuleName)
-{
-    if (ModuleStatuses.Contains(ModuleName))
-    {
-        return ModuleStatuses[ModuleName].Status;
-    }
-    return EBuild_CompilationStatus::Unknown;
-}
-
-TArray<FBuild_ModuleStatus> UBuild_CompilationValidator::GetAllModuleStatuses()
-{
-    TArray<FBuild_ModuleStatus> Statuses;
-    for (const auto& ModulePair : ModuleStatuses)
-    {
-        Statuses.Add(ModulePair.Value);
-    }
-    return Statuses;
-}
-
-bool UBuild_CompilationValidator::AreAllModulesValid()
-{
-    for (const auto& ModulePair : ModuleStatuses)
-    {
-        if (ModulePair.Value.Status == EBuild_CompilationStatus::Failed)
-        {
-            return false;
-        }
-    }
-    return true;
+    ModuleStatuses.Add(NewStatus);
+    return NewStatus.Status == EBuild_CompilationStatus::Success;
 }
 
 void UBuild_CompilationValidator::GenerateCompilationReport()
 {
-    FString ReportPath = FPaths::ProjectLogDir() / TEXT("CompilationReport.txt");
-    FString Report = TEXT("=== TRANSPERSONAL GAME COMPILATION REPORT ===\n\n");
+    UE_LOG(LogTemp, Log, TEXT("=== COMPILATION REPORT ==="));
+    UE_LOG(LogTemp, Log, TEXT("Validation Time: %s"), *LastValidationTime.ToString());
+    UE_LOG(LogTemp, Log, TEXT("Overall Status: %d"), (int32)OverallStatus);
     
-    Report += FString::Printf(TEXT("Generated: %s\n"), *FDateTime::Now().ToString());
-    Report += FString::Printf(TEXT("Total Modules: %d\n\n"), ModuleStatuses.Num());
-    
-    int32 SuccessCount = 0;
-    int32 FailedCount = 0;
-    int32 WarningCount = 0;
-    
-    for (const auto& ModulePair : ModuleStatuses)
+    for (const FBuild_ModuleStatus& Status : ModuleStatuses)
     {
-        const FBuild_ModuleStatus& Status = ModulePair.Value;
-        Report += FString::Printf(TEXT("Module: %s\n"), *Status.ModuleName);
-        Report += FString::Printf(TEXT("Status: %s\n"), 
-                                 *UEnum::GetValueAsString(Status.Status));
-        Report += FString::Printf(TEXT("Compilation Time: %.2fs\n"), Status.CompilationTime);
+        UE_LOG(LogTemp, Log, TEXT("Module: %s - Status: %d"), *Status.ModuleName, (int32)Status.Status);
         
-        if (Status.ErrorMessages.Num() > 0)
+        for (const FString& Error : Status.Errors)
         {
-            Report += TEXT("Errors:\n");
-            for (const FString& Error : Status.ErrorMessages)
-            {
-                Report += FString::Printf(TEXT("  - %s\n"), *Error);
-            }
+            UE_LOG(LogTemp, Error, TEXT("  ERROR: %s"), *Error);
         }
         
-        if (Status.WarningMessages.Num() > 0)
+        for (const FString& Warning : Status.Warnings)
         {
-            Report += TEXT("Warnings:\n");
-            for (const FString& Warning : Status.WarningMessages)
-            {
-                Report += FString::Printf(TEXT("  - %s\n"), *Warning);
-            }
-        }
-        
-        Report += TEXT("\n");
-        
-        switch (Status.Status)
-        {
-            case EBuild_CompilationStatus::Success:
-                SuccessCount++;
-                break;
-            case EBuild_CompilationStatus::Failed:
-                FailedCount++;
-                break;
-            case EBuild_CompilationStatus::Warning:
-                WarningCount++;
-                break;
+            UE_LOG(LogTemp, Warning, TEXT("  WARNING: %s"), *Warning);
         }
     }
     
-    Report += TEXT("=== SUMMARY ===\n");
-    Report += FString::Printf(TEXT("Success: %d\n"), SuccessCount);
-    Report += FString::Printf(TEXT("Failed: %d\n"), FailedCount);
-    Report += FString::Printf(TEXT("Warnings: %d\n"), WarningCount);
-    
-    FFileHelper::SaveStringToFile(Report, *ReportPath);
-    
-    UE_LOG(LogBuildValidator, Log, TEXT("Compilation report saved to: %s"), *ReportPath);
+    UE_LOG(LogTemp, Log, TEXT("=== END REPORT ==="));
 }
 
-void UBuild_CompilationValidator::CheckForDuplicateTypes()
+void UBuild_CompilationValidator::ValidateTranspersonalGameModule()
 {
-    UE_LOG(LogBuildValidator, Log, TEXT("Checking for duplicate types"));
+    CheckModuleCompilation(TEXT("TranspersonalGame"));
+    CheckModuleCompilation(TEXT("TranspersonalGameEditor"));
+}
+
+void UBuild_CompilationValidator::ValidateEngineModules()
+{
+    TArray<FString> RequiredModules = {
+        TEXT("Core"),
+        TEXT("CoreUObject"),
+        TEXT("Engine"),
+        TEXT("UnrealEd"),
+        TEXT("Slate"),
+        TEXT("SlateCore"),
+        TEXT("EditorStyle"),
+        TEXT("EditorWidgets"),
+        TEXT("ToolMenus")
+    };
     
-    TMap<FString, TArray<FString>> TypeLocations;
-    
-    // Scan source files for UCLASS, USTRUCT, UENUM declarations
-    FString SourceDir = FPaths::ProjectDir() / TEXT("Source/TranspersonalGame");
-    TArray<FString> FoundFiles;
-    IFileManager::Get().FindFilesRecursive(FoundFiles, *SourceDir, TEXT("*.h"), true, false);
-    
-    for (const FString& FilePath : FoundFiles)
+    for (const FString& ModuleName : RequiredModules)
     {
-        FString FileContent;
-        if (FFileHelper::LoadFileToString(FileContent, *FilePath))
-        {
-            TArray<FString> Lines;
-            FileContent.ParseIntoArrayLines(Lines);
-            
-            for (const FString& Line : Lines)
-            {
-                FString TrimmedLine = Line.TrimStartAndEnd();
-                
-                // Check for UCLASS declarations
-                if (TrimmedLine.StartsWith(TEXT("UCLASS")))
-                {
-                    // Find the class name in the next few lines
-                    // This is a simplified check
-                }
-                
-                // Check for USTRUCT declarations
-                if (TrimmedLine.StartsWith(TEXT("USTRUCT")))
-                {
-                    // Find the struct name
-                }
-                
-                // Check for UENUM declarations
-                if (TrimmedLine.StartsWith(TEXT("UENUM")))
-                {
-                    // Find the enum name
-                }
-            }
-        }
+        FBuild_ModuleStatus Status;
+        Status.ModuleName = ModuleName;
+        Status.Status = EBuild_CompilationStatus::Success; // Engine modules assumed working
+        ModuleStatuses.Add(Status);
     }
 }
 
-void UBuild_CompilationValidator::ValidateHeaderIncludes()
+void UBuild_CompilationValidator::CheckHeaderIncludes()
 {
-    UE_LOG(LogBuildValidator, Log, TEXT("Validating header includes"));
+    FString SourceDir = FPaths::Combine(FPaths::ProjectDir(), TEXT("Source"), TEXT("TranspersonalGame"));
     
-    // Check for common include issues
-    FString SourceDir = FPaths::ProjectDir() / TEXT("Source/TranspersonalGame");
-    TArray<FString> FoundFiles;
-    IFileManager::Get().FindFilesRecursive(FoundFiles, *SourceDir, TEXT("*.h"), true, false);
-    
-    for (const FString& FilePath : FoundFiles)
-    {
-        FString FileContent;
-        if (FFileHelper::LoadFileToString(FileContent, *FilePath))
-        {
-            // Check if .generated.h is the last include
-            TArray<FString> Lines;
-            FileContent.ParseIntoArrayLines(Lines);
-            
-            int32 LastIncludeIndex = -1;
-            int32 GeneratedIncludeIndex = -1;
-            
-            for (int32 i = 0; i < Lines.Num(); i++)
-            {
-                FString TrimmedLine = Lines[i].TrimStartAndEnd();
-                if (TrimmedLine.StartsWith(TEXT("#include")))
-                {
-                    LastIncludeIndex = i;
-                    if (TrimmedLine.Contains(TEXT(".generated.h")))
-                    {
-                        GeneratedIncludeIndex = i;
-                    }
-                }
-            }
-            
-            if (GeneratedIncludeIndex != -1 && GeneratedIncludeIndex != LastIncludeIndex)
-            {
-                UE_LOG(LogBuildValidator, Warning, 
-                       TEXT("File %s: .generated.h is not the last include"), 
-                       *FPaths::GetCleanFilename(FilePath));
-            }
-        }
-    }
-}
-
-void UBuild_CompilationValidator::CheckModuleCompilation(const FString& ModuleName)
-{
-    FBuild_ModuleStatus& Status = ModuleStatuses[ModuleName];
-    
-    // Simulate compilation check by looking for common issues
-    bool bHasErrors = false;
-    bool bHasWarnings = false;
-    
-    // Check if module directory exists
-    FString ModuleDir = FPaths::ProjectDir() / TEXT("Source/TranspersonalGame/") + ModuleName;
-    if (!IFileManager::Get().DirectoryExists(*ModuleDir))
-    {
-        Status.ErrorMessages.Add(FString::Printf(TEXT("Module directory not found: %s"), *ModuleDir));
-        bHasErrors = true;
-    }
-    
-    // Check for .h/.cpp pairs
     TArray<FString> HeaderFiles;
-    IFileManager::Get().FindFiles(HeaderFiles, *(ModuleDir / TEXT("*.h")), true, false);
+    IFileManager::Get().FindFilesRecursive(HeaderFiles, *SourceDir, TEXT("*.h"), true, false);
+    
+    int32 ValidHeaders = 0;
+    int32 InvalidHeaders = 0;
     
     for (const FString& HeaderFile : HeaderFiles)
     {
-        FString BaseName = FPaths::GetBaseFilename(HeaderFile);
-        FString CppFile = ModuleDir / (BaseName + TEXT(".cpp"));
-        
-        if (!IFileManager::Get().FileExists(*CppFile))
+        FString FileContent;
+        if (FFileHelper::LoadFileToString(FileContent, *HeaderFile))
         {
-            Status.WarningMessages.Add(FString::Printf(TEXT("Missing implementation: %s.cpp"), *BaseName));
-            bHasWarnings = true;
-        }
-    }
-    
-    if (bHasErrors)
-    {
-        Status.Status = EBuild_CompilationStatus::Failed;
-    }
-    else if (bHasWarnings)
-    {
-        Status.Status = EBuild_CompilationStatus::Warning;
-    }
-    else
-    {
-        Status.Status = EBuild_CompilationStatus::Success;
-    }
-}
-
-void UBuild_CompilationValidator::ParseCompilationErrors(const FString& ModuleName, const FString& LogOutput)
-{
-    // Parse UE5 compilation log output for errors and warnings
-    TArray<FString> Lines;
-    LogOutput.ParseIntoArrayLines(Lines);
-    
-    FBuild_ModuleStatus& Status = ModuleStatuses[ModuleName];
-    
-    for (const FString& Line : Lines)
-    {
-        if (Line.Contains(TEXT("error")))
-        {
-            Status.ErrorMessages.Add(Line);
-        }
-        else if (Line.Contains(TEXT("warning")))
-        {
-            Status.WarningMessages.Add(Line);
-        }
-    }
-}
-
-void UBuild_CompilationValidator::CheckForMissingImplementations()
-{
-    UE_LOG(LogBuildValidator, Log, TEXT("Checking for missing implementations"));
-    
-    // This would check for functions declared in headers but not implemented in .cpp files
-    // For now, just log that the check is running
-    
-    for (auto& ModulePair : ModuleStatuses)
-    {
-        FBuild_ModuleStatus& Status = ModulePair.Value;
-        
-        // Check if module has any .cpp files
-        FString ModuleDir = FPaths::ProjectDir() / TEXT("Source/TranspersonalGame/") + Status.ModuleName;
-        TArray<FString> CppFiles;
-        IFileManager::Get().FindFiles(CppFiles, *(ModuleDir / TEXT("*.cpp")), true, false);
-        
-        if (CppFiles.Num() == 0)
-        {
-            Status.WarningMessages.Add(TEXT("No implementation files found"));
-            if (Status.Status == EBuild_CompilationStatus::Success)
+            if (FileContent.Contains(TEXT("#pragma once")) || FileContent.Contains(TEXT("#ifndef")))
             {
-                Status.Status = EBuild_CompilationStatus::Warning;
+                ValidHeaders++;
+            }
+            else
+            {
+                InvalidHeaders++;
+                UE_LOG(LogTemp, Warning, TEXT("Header missing include guard: %s"), *HeaderFile);
+            }
+        }
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("Header validation: %d valid, %d invalid"), ValidHeaders, InvalidHeaders);
+}
+
+void UBuild_CompilationValidator::CheckLinkerDependencies()
+{
+    FString BuildFile = FPaths::Combine(FPaths::ProjectDir(), TEXT("Source"), TEXT("TranspersonalGame"), TEXT("TranspersonalGame.Build.cs"));
+    
+    FString BuildContent;
+    if (FFileHelper::LoadFileToString(BuildContent, *BuildFile))
+    {
+        TArray<FString> RequiredDependencies = {
+            TEXT("Core"),
+            TEXT("CoreUObject"),
+            TEXT("Engine"),
+            TEXT("UnrealEd")
+        };
+        
+        for (const FString& Dependency : RequiredDependencies)
+        {
+            if (!BuildContent.Contains(Dependency))
+            {
+                UE_LOG(LogTemp, Warning, TEXT("Missing dependency in Build.cs: %s"), *Dependency);
             }
         }
     }
 }
 
-void UBuild_CompilationValidator::ValidateUPropertyMacros()
+void UBuild_CompilationValidator::UpdateOverallStatus()
 {
-    // Check for proper UPROPERTY usage
-    UE_LOG(LogBuildValidator, Log, TEXT("Validating UPROPERTY macros"));
+    bool HasErrors = false;
+    bool HasWarnings = false;
+    
+    for (const FBuild_ModuleStatus& Status : ModuleStatuses)
+    {
+        if (Status.Status == EBuild_CompilationStatus::Failed)
+        {
+            HasErrors = true;
+            break;
+        }
+        else if (Status.Status == EBuild_CompilationStatus::Warning)
+        {
+            HasWarnings = true;
+        }
+    }
+    
+    if (HasErrors)
+    {
+        OverallStatus = EBuild_CompilationStatus::Failed;
+    }
+    else if (HasWarnings)
+    {
+        OverallStatus = EBuild_CompilationStatus::Warning;
+    }
+    else
+    {
+        OverallStatus = EBuild_CompilationStatus::Success;
+    }
 }
