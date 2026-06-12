@@ -3,59 +3,53 @@
 #include "CoreMinimal.h"
 #include "Engine/TriggerBox.h"
 #include "Components/AudioComponent.h"
-#include "Sound/SoundCue.h"
+#include "SharedTypes.h"
 #include "Narr_StoryTrigger.generated.h"
 
 UENUM(BlueprintType)
 enum class ENarr_TriggerType : uint8
 {
-    FirstDinosaur     UMETA(DisplayName = "First Dinosaur Encounter"),
-    WaterSource       UMETA(DisplayName = "Water Source Discovery"),
-    NightFall         UMETA(DisplayName = "Night Fall Warning"),
-    PredatorNear      UMETA(DisplayName = "Predator Nearby"),
-    SafeZone          UMETA(DisplayName = "Safe Zone Entry"),
-    CraftingHint      UMETA(DisplayName = "Crafting Tutorial"),
-    DangerZone        UMETA(DisplayName = "Danger Zone Warning")
+    CaveDiscovery,
+    HuntingGround,
+    TribalMemory,
+    DangerWarning,
+    SafeZone
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FNarr_StoryEvent
+struct FNarr_StoryData
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story Event")
-    FString EventID;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    FString StoryTitle;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story Event")
-    FText NarrativeText;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    FString NarrativeText;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story Event")
-    USoundCue* VoiceOverCue;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    FString CharacterName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story Event")
-    float DisplayDuration;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    float TriggerRadius;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story Event")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    bool bOneTimeOnly;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
     bool bRequiresPlayerInput;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story Event")
-    bool bOnlyTriggerOnce;
-
-    FNarr_StoryEvent()
+    FNarr_StoryData()
     {
-        EventID = TEXT("");
-        NarrativeText = FText::GetEmpty();
-        VoiceOverCue = nullptr;
-        DisplayDuration = 5.0f;
+        StoryTitle = TEXT("Untitled Story");
+        NarrativeText = TEXT("An ancient tale unfolds...");
+        CharacterName = TEXT("Narrator");
+        TriggerRadius = 200.0f;
+        bOneTimeOnly = true;
         bRequiresPlayerInput = false;
-        bOnlyTriggerOnce = true;
     }
 };
 
-/**
- * Story trigger that activates narrative events when player enters specific areas
- * Designed for survival game storytelling through environmental triggers
- */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API ANarr_StoryTrigger : public ATriggerBox
 {
@@ -67,63 +61,44 @@ public:
 protected:
     virtual void BeginPlay() override;
 
-    UFUNCTION()
-    void OnTriggerEnter(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, 
-                       UPrimitiveComponent* OtherComponent, int32 OtherBodyIndex, 
-                       bool bFromSweep, const FHitResult& SweepResult);
-
-    UFUNCTION()
-    void OnTriggerExit(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, 
-                      UPrimitiveComponent* OtherComponent, int32 OtherBodyIndex);
-
-public:
-    // Trigger configuration
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story Trigger")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
     ENarr_TriggerType TriggerType;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story Trigger")
-    FNarr_StoryEvent StoryEvent;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    FNarr_StoryData StoryData;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story Trigger")
-    bool bIsActive;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    class UAudioComponent* AudioComponent;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story Trigger")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    class USoundBase* NarrativeSound;
+
+    UPROPERTY(BlueprintReadOnly, Category = "State")
     bool bHasBeenTriggered;
 
-    // Audio component for voice-over
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio")
-    UAudioComponent* AudioComponent;
+    UPROPERTY(BlueprintReadOnly, Category = "State")
+    float LastTriggerTime;
 
-    // Survival context
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival Context")
-    float ThreatLevel;
+public:
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    void TriggerStoryEvent(AActor* TriggeringActor);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival Context")
-    bool bIncreaseFearOnTrigger;
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    void PlayNarrativeAudio();
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival Context")
-    float FearIncreaseAmount;
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    void SetStoryData(const FNarr_StoryData& NewStoryData);
 
-    // Functions
-    UFUNCTION(BlueprintCallable, Category = "Story Trigger")
-    void TriggerStoryEvent();
+    UFUNCTION(BlueprintPure, Category = "Narrative")
+    bool CanTrigger() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Story Trigger")
-    void ResetTrigger();
+    UFUNCTION(BlueprintImplementableEvent, Category = "Narrative")
+    void OnStoryTriggered(const FNarr_StoryData& Story);
 
-    UFUNCTION(BlueprintCallable, Category = "Story Trigger")
-    void SetTriggerActive(bool bActive);
+protected:
+    UFUNCTION()
+    void OnOverlapBegin(UPrimitiveComponent* OverlappedComp, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult);
 
-    UFUNCTION(BlueprintImplementableEvent, Category = "Story Trigger")
-    void OnStoryEventTriggered(const FNarr_StoryEvent& Event);
-
-    UFUNCTION(BlueprintImplementableEvent, Category = "Story Trigger")
-    void OnPlayerEnterTrigger();
-
-    UFUNCTION(BlueprintImplementableEvent, Category = "Story Trigger")
-    void OnPlayerExitTrigger();
-
-private:
-    void PlayVoiceOver();
-    void UpdatePlayerFear();
+    UFUNCTION()
+    void OnOverlapEnd(UPrimitiveComponent* OverlappedComp, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex);
 };
