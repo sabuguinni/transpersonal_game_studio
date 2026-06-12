@@ -1,365 +1,434 @@
 #include "Core_PhysicsSystemManager.h"
-#include "Engine/World.h"
 #include "Engine/Engine.h"
-#include "Components/SkeletalMeshComponent.h"
-#include "Components/StaticMeshComponent.h"
-#include "Components/PrimitiveComponent.h"
-#include "PhysicsEngine/PhysicsSettings.h"
-#include "PhysicsEngine/PhysicalMaterial.h"
-#include "Engine/StaticMesh.h"
 #include "Engine/World.h"
 #include "GameFramework/WorldSettings.h"
+#include "PhysicsEngine/PhysicsSettings.h"
+#include "Components/PrimitiveComponent.h"
+#include "Components/StaticMeshComponent.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "PhysicalMaterials/PhysicalMaterial.h"
+#include "GameFramework/Character.h"
+#include "GameFramework/CharacterMovementComponent.h"
 
 UCore_PhysicsSystemManager::UCore_PhysicsSystemManager()
 {
-    PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickGroup = TG_PrePhysics;
+    // Initialize default physics settings
+    CurrentPhysicsSettings.GravityScale = 1.0f;
+    CurrentPhysicsSettings.MaxPhysicsDeltaTime = 0.033f;
+    CurrentPhysicsSettings.MaxSubsteps = 6;
+    CurrentPhysicsSettings.PhysicsQuality = ECore_PhysicsQuality::High;
+    CurrentPhysicsSettings.bEnableRagdollPhysics = true;
+    CurrentPhysicsSettings.bEnableTerrainInteraction = true;
     
-    // Initialize default values
-    GravityMultiplier = 1.0f;
-    bPhysicsEnabled = true;
-    MaxPhysicsSubsteps = 4;
-    PhysicsTimestep = 0.016f;
-    
-    // Collision defaults
-    DefaultDynamicProfile = "BlockAll";
-    DefaultStaticProfile = "BlockAllDynamic";
-    bUseComplexCollisionForStatic = true;
-    
-    // Ragdoll defaults
-    bRagdollEnabled = true;
-    RagdollTimeout = 10.0f;
-    RagdollLinearDamping = 0.1f;
-    RagdollAngularDamping = 0.1f;
-    
-    // Destruction defaults
-    bDestructibleEnabled = true;
-    MaxDestructibleChunks = 20;
-    DebrisLifetime = 30.0f;
-    
-    // Initialize arrays
-    ActiveRagdolls.Empty();
-    RagdollTimestamps.Empty();
-    ActiveDebris.Empty();
-    DebrisTimestamps.Empty();
-    
-    CachedWorld = nullptr;
+    CachedPhysicsSettings = nullptr;
+    LastPhysicsFrameTime = 0.0f;
+    LastPhysicsBodiesCount = 0;
 }
 
-void UCore_PhysicsSystemManager::BeginPlay()
+void UCore_PhysicsSystemManager::Initialize(FSubsystemCollectionBase& Collection)
 {
-    Super::BeginPlay();
+    Super::Initialize(Collection);
     
-    // Cache world reference
-    CachedWorld = GetWorld();
+    UE_LOG(LogTemp, Warning, TEXT("Core_PhysicsSystemManager: Initializing physics system"));
     
-    // Initialize physics system
-    InitializePhysicsSystem();
+    // Cache physics settings
+    CachedPhysicsSettings = GetMutableDefault<UPhysicsSettings>();
     
-    UE_LOG(LogTemp, Warning, TEXT("Core_PhysicsSystemManager: Physics system initialized"));
+    // Initialize physics configuration
+    InitializePhysicsSettings();
+    
+    UE_LOG(LogTemp, Warning, TEXT("Core_PhysicsSystemManager: Physics system initialized successfully"));
 }
 
-void UCore_PhysicsSystemManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void UCore_PhysicsSystemManager::Deinitialize()
 {
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+    UE_LOG(LogTemp, Warning, TEXT("Core_PhysicsSystemManager: Deinitializing physics system"));
     
-    if (!bPhysicsEnabled || !CachedWorld)
+    // Clean up terrain physics map
+    TerrainPhysicsMap.Empty();
+    
+    // Clean up ragdoll actors array
+    RagdollEnabledActors.Empty();
+    
+    CachedPhysicsSettings = nullptr;
+    
+    Super::Deinitialize();
+}
+
+void UCore_PhysicsSystemManager::InitializePhysicsSettings()
+{
+    if (!CachedPhysicsSettings)
+    {
+        UE_LOG(LogTemp, Error, TEXT("Core_PhysicsSystemManager: Physics settings not available"));
+        return;
+    }
+    
+    ApplyPhysicsSettings();
+    
+    UE_LOG(LogTemp, Warning, TEXT("Core_PhysicsSystemManager: Physics settings initialized"));
+    UE_LOG(LogTemp, Warning, TEXT("  - Gravity Scale: %f"), CurrentPhysicsSettings.GravityScale);
+    UE_LOG(LogTemp, Warning, TEXT("  - Max Physics Delta Time: %f"), CurrentPhysicsSettings.MaxPhysicsDeltaTime);
+    UE_LOG(LogTemp, Warning, TEXT("  - Physics Quality: %d"), (int32)CurrentPhysicsSettings.PhysicsQuality);
+}
+
+void UCore_PhysicsSystemManager::SetPhysicsQuality(ECore_PhysicsQuality NewQuality)
+{
+    CurrentPhysicsSettings.PhysicsQuality = NewQuality;
+    
+    // Adjust physics settings based on quality
+    switch (NewQuality)
+    {
+        case ECore_PhysicsQuality::Low:
+            CurrentPhysicsSettings.MaxPhysicsDeltaTime = 0.05f;
+            CurrentPhysicsSettings.MaxSubsteps = 2;
+            break;
+        case ECore_PhysicsQuality::Medium:
+            CurrentPhysicsSettings.MaxPhysicsDeltaTime = 0.04f;
+            CurrentPhysicsSettings.MaxSubsteps = 4;
+            break;
+        case ECore_PhysicsQuality::High:
+            CurrentPhysicsSettings.MaxPhysicsDeltaTime = 0.033f;
+            CurrentPhysicsSettings.MaxSubsteps = 6;
+            break;
+        case ECore_PhysicsQuality::Ultra:
+            CurrentPhysicsSettings.MaxPhysicsDeltaTime = 0.02f;
+            CurrentPhysicsSettings.MaxSubsteps = 8;
+            break;
+    }
+    
+    ApplyPhysicsSettings();
+    
+    UE_LOG(LogTemp, Warning, TEXT("Core_PhysicsSystemManager: Physics quality set to %d"), (int32)NewQuality);
+}
+
+void UCore_PhysicsSystemManager::SetGravityScale(float NewGravityScale)
+{
+    CurrentPhysicsSettings.GravityScale = FMath::Clamp(NewGravityScale, 0.1f, 5.0f);
+    ApplyPhysicsSettings();
+    
+    UE_LOG(LogTemp, Warning, TEXT("Core_PhysicsSystemManager: Gravity scale set to %f"), CurrentPhysicsSettings.GravityScale);
+}
+
+void UCore_PhysicsSystemManager::UpdatePhysicsSettings(const FCore_PhysicsSettings& NewSettings)
+{
+    CurrentPhysicsSettings = NewSettings;
+    ApplyPhysicsSettings();
+    
+    UE_LOG(LogTemp, Warning, TEXT("Core_PhysicsSystemManager: Physics settings updated"));
+}
+
+void UCore_PhysicsSystemManager::RegisterTerrainActor(AActor* TerrainActor, const FCore_TerrainPhysicsData& PhysicsData)
+{
+    if (!TerrainActor)
+    {
+        UE_LOG(LogTemp, Error, TEXT("Core_PhysicsSystemManager: Cannot register null terrain actor"));
+        return;
+    }
+    
+    TerrainPhysicsMap.Add(TerrainActor, PhysicsData);
+    
+    // Apply physics material to terrain components
+    TArray<UStaticMeshComponent*> StaticMeshComponents;
+    TerrainActor->GetComponents<UStaticMeshComponent>(StaticMeshComponents);
+    
+    for (UStaticMeshComponent* MeshComp : StaticMeshComponents)
+    {
+        if (MeshComp)
+        {
+            // Set collision properties based on terrain type
+            MeshComp->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+            MeshComp->SetCollisionResponseToAllChannels(ECR_Block);
+        }
+    }
+    
+    UE_LOG(LogTemp, Warning, TEXT("Core_PhysicsSystemManager: Registered terrain actor %s with type %d"), 
+           *TerrainActor->GetName(), (int32)PhysicsData.TerrainType);
+}
+
+void UCore_PhysicsSystemManager::UnregisterTerrainActor(AActor* TerrainActor)
+{
+    if (TerrainPhysicsMap.Remove(TerrainActor) > 0)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Core_PhysicsSystemManager: Unregistered terrain actor %s"), 
+               *TerrainActor->GetName());
+    }
+}
+
+FCore_TerrainPhysicsData UCore_PhysicsSystemManager::GetTerrainPhysicsData(AActor* TerrainActor) const
+{
+    if (const FCore_TerrainPhysicsData* Data = TerrainPhysicsMap.Find(TerrainActor))
+    {
+        return *Data;
+    }
+    
+    // Return default terrain data
+    FCore_TerrainPhysicsData DefaultData;
+    DefaultData.TerrainType = ECore_TerrainType::Grass;
+    DefaultData.Friction = 0.7f;
+    DefaultData.Restitution = 0.3f;
+    DefaultData.Density = 1.0f;
+    DefaultData.bAffectsMovement = true;
+    DefaultData.MovementSpeedMultiplier = 1.0f;
+    
+    return DefaultData;
+}
+
+ECore_TerrainType UCore_PhysicsSystemManager::GetTerrainTypeAtLocation(const FVector& WorldLocation) const
+{
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        return ECore_TerrainType::Grass;
+    }
+    
+    // Perform line trace to find terrain at location
+    FHitResult HitResult;
+    FVector TraceStart = WorldLocation + FVector(0, 0, 1000);
+    FVector TraceEnd = WorldLocation - FVector(0, 0, 1000);
+    
+    FCollisionQueryParams QueryParams;
+    QueryParams.bTraceComplex = true;
+    
+    if (World->LineTraceSingleByChannel(HitResult, TraceStart, TraceEnd, ECC_WorldStatic, QueryParams))
+    {
+        if (AActor* HitActor = HitResult.GetActor())
+        {
+            if (const FCore_TerrainPhysicsData* Data = TerrainPhysicsMap.Find(HitActor))
+            {
+                return Data->TerrainType;
+            }
+        }
+    }
+    
+    return ECore_TerrainType::Grass;
+}
+
+void UCore_PhysicsSystemManager::EnableRagdollForActor(AActor* Actor)
+{
+    if (!Actor)
+    {
+        UE_LOG(LogTemp, Error, TEXT("Core_PhysicsSystemManager: Cannot enable ragdoll for null actor"));
+        return;
+    }
+    
+    if (ACharacter* Character = Cast<ACharacter>(Actor))
+    {
+        if (USkeletalMeshComponent* SkeletalMesh = Character->GetMesh())
+        {
+            SkeletalMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+            SkeletalMesh->SetSimulatePhysics(true);
+            SkeletalMesh->WakeAllRigidBodies();
+            
+            // Disable character movement
+            if (UCharacterMovementComponent* MovementComp = Character->GetCharacterMovement())
+            {
+                MovementComp->DisableMovement();
+            }
+            
+            RagdollEnabledActors.AddUnique(Actor);
+            
+            UE_LOG(LogTemp, Warning, TEXT("Core_PhysicsSystemManager: Enabled ragdoll for %s"), *Actor->GetName());
+        }
+    }
+}
+
+void UCore_PhysicsSystemManager::DisableRagdollForActor(AActor* Actor)
+{
+    if (!Actor)
     {
         return;
     }
     
-    // Update ragdoll timeout system
-    if (bRagdollEnabled && RagdollTimeout > 0.0f)
+    if (ACharacter* Character = Cast<ACharacter>(Actor))
     {
-        UpdateRagdollSystem(DeltaTime);
-    }
-    
-    // Update debris cleanup system
-    if (bDestructibleEnabled && DebrisLifetime > 0.0f)
-    {
-        UpdateDebrisSystem(DeltaTime);
+        if (USkeletalMeshComponent* SkeletalMesh = Character->GetMesh())
+        {
+            SkeletalMesh->SetSimulatePhysics(false);
+            SkeletalMesh->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+            SkeletalMesh->PutAllRigidBodiesToSleep();
+            
+            // Re-enable character movement
+            if (UCharacterMovementComponent* MovementComp = Character->GetCharacterMovement())
+            {
+                MovementComp->SetMovementMode(MOVE_Walking);
+            }
+            
+            RagdollEnabledActors.Remove(Actor);
+            
+            UE_LOG(LogTemp, Warning, TEXT("Core_PhysicsSystemManager: Disabled ragdoll for %s"), *Actor->GetName());
+        }
     }
 }
 
-void UCore_PhysicsSystemManager::InitializePhysicsSystem()
+bool UCore_PhysicsSystemManager::IsRagdollEnabled(AActor* Actor) const
 {
-    if (!CachedWorld)
+    return RagdollEnabledActors.Contains(Actor);
+}
+
+bool UCore_PhysicsSystemManager::ValidatePhysicsSetup() const
+{
+    bool bIsValid = true;
+    
+    // Validate physics settings
+    if (!CachedPhysicsSettings)
     {
-        UE_LOG(LogTemp, Error, TEXT("Core_PhysicsSystemManager: No valid world reference"));
-        return;
+        UE_LOG(LogTemp, Error, TEXT("Core_PhysicsSystemManager: Physics settings not available"));
+        bIsValid = false;
     }
     
-    // Load default physics materials
-    LoadDefaultPhysicsMaterials();
+    // Validate world
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        UE_LOG(LogTemp, Error, TEXT("Core_PhysicsSystemManager: World not available"));
+        bIsValid = false;
+    }
     
-    // Configure world physics settings
-    ConfigureWorldPhysics();
+    // Validate terrain actors
+    for (const auto& TerrainPair : TerrainPhysicsMap)
+    {
+        if (!IsValid(TerrainPair.Key))
+        {
+            UE_LOG(LogTemp, Error, TEXT("Core_PhysicsSystemManager: Invalid terrain actor in registry"));
+            bIsValid = false;
+        }
+    }
     
-    // Setup collision profiles
-    SetupCollisionProfiles();
+    return bIsValid;
+}
+
+TArray<FString> UCore_PhysicsSystemManager::GetPhysicsValidationErrors() const
+{
+    TArray<FString> Errors;
     
-    UE_LOG(LogTemp, Warning, TEXT("Core_PhysicsSystemManager: Physics system configuration complete"));
+    if (!CachedPhysicsSettings)
+    {
+        Errors.Add(TEXT("Physics settings not available"));
+    }
+    
+    if (!GetWorld())
+    {
+        Errors.Add(TEXT("World not available"));
+    }
+    
+    for (const auto& TerrainPair : TerrainPhysicsMap)
+    {
+        if (!IsValid(TerrainPair.Key))
+        {
+            Errors.Add(FString::Printf(TEXT("Invalid terrain actor: %s"), 
+                       TerrainPair.Key ? *TerrainPair.Key->GetName() : TEXT("NULL")));
+        }
+    }
+    
+    return Errors;
+}
+
+float UCore_PhysicsSystemManager::GetCurrentPhysicsFrameTime() const
+{
+    return LastPhysicsFrameTime;
+}
+
+int32 UCore_PhysicsSystemManager::GetActivePhysicsBodies() const
+{
+    return LastPhysicsBodiesCount;
+}
+
+void UCore_PhysicsSystemManager::OptimizePhysicsPerformance()
+{
+    MonitorPhysicsPerformance();
+    
+    // Auto-adjust quality based on performance
+    if (LastPhysicsFrameTime > 20.0f) // Over 20ms physics frame time
+    {
+        if (CurrentPhysicsSettings.PhysicsQuality != ECore_PhysicsQuality::Low)
+        {
+            ECore_PhysicsQuality NewQuality = static_cast<ECore_PhysicsQuality>(
+                static_cast<int32>(CurrentPhysicsSettings.PhysicsQuality) - 1);
+            SetPhysicsQuality(NewQuality);
+            
+            UE_LOG(LogTemp, Warning, TEXT("Core_PhysicsSystemManager: Auto-reduced physics quality due to performance"));
+        }
+    }
 }
 
 void UCore_PhysicsSystemManager::ApplyPhysicsSettings()
 {
-    if (!CachedWorld)
+    if (!CachedPhysicsSettings)
     {
         return;
     }
     
-    // Apply gravity settings
-    AWorldSettings* WorldSettings = CachedWorld->GetWorldSettings();
-    if (WorldSettings)
+    // Apply gravity scale to world settings
+    UWorld* World = GetWorld();
+    if (World && World->GetWorldSettings())
     {
-        float BaseGravity = -980.0f; // Standard Earth gravity in cm/s²
-        WorldSettings->DefaultGravityZ = BaseGravity * GravityMultiplier;
-        
-        UE_LOG(LogTemp, Warning, TEXT("Core_PhysicsSystemManager: Applied gravity multiplier %.2f (%.2f cm/s²)"), 
-               GravityMultiplier, WorldSettings->DefaultGravityZ);
+        World->GetWorldSettings()->GlobalGravityZ = -980.0f * CurrentPhysicsSettings.GravityScale;
     }
     
     // Apply physics solver settings
-    if (UPhysicsSettings* PhysicsSettings = UPhysicsSettings::Get())
+    CachedPhysicsSettings->MaxPhysicsDeltaTime = CurrentPhysicsSettings.MaxPhysicsDeltaTime;
+    CachedPhysicsSettings->MaxSubsteps = CurrentPhysicsSettings.MaxSubsteps;
+    
+    UpdateTerrainPhysicsMaterials();
+}
+
+void UCore_PhysicsSystemManager::UpdateTerrainPhysicsMaterials()
+{
+    // Update physics materials for registered terrain
+    for (const auto& TerrainPair : TerrainPhysicsMap)
     {
-        PhysicsSettings->MaxSubsteps = MaxPhysicsSubsteps;
-        PhysicsSettings->FixedTimeStep = PhysicsTimestep;
+        AActor* TerrainActor = TerrainPair.Key;
+        const FCore_TerrainPhysicsData& PhysicsData = TerrainPair.Value;
         
-        UE_LOG(LogTemp, Warning, TEXT("Core_PhysicsSystemManager: Applied physics solver settings"));
-    }
-}
-
-bool UCore_PhysicsSystemManager::EnableRagdoll(USkeletalMeshComponent* SkeletalMesh)
-{
-    if (!SkeletalMesh || !bRagdollEnabled)
-    {
-        return false;
-    }
-    
-    // Check if physics asset exists
-    if (!SkeletalMesh->GetPhysicsAsset())
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Core_PhysicsSystemManager: No physics asset on skeletal mesh %s"), 
-               *SkeletalMesh->GetName());
-        return false;
-    }
-    
-    // Enable ragdoll physics
-    SkeletalMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-    SkeletalMesh->SetSimulatePhysics(true);
-    SkeletalMesh->SetAllBodiesSimulatePhysics(true);
-    
-    // Apply damping settings
-    SkeletalMesh->SetAllPhysicsLinearVelocity(FVector::ZeroVector);
-    SkeletalMesh->SetAllPhysicsAngularVelocityInDegrees(FVector::ZeroVector);
-    
-    // Track ragdoll for timeout system
-    if (RagdollTimeout > 0.0f)
-    {
-        ActiveRagdolls.Add(SkeletalMesh);
-        RagdollTimestamps.Add(CachedWorld->GetTimeSeconds());
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("Core_PhysicsSystemManager: Enabled ragdoll on %s"), 
-           *SkeletalMesh->GetName());
-    
-    return true;
-}
-
-bool UCore_PhysicsSystemManager::DisableRagdoll(USkeletalMeshComponent* SkeletalMesh)
-{
-    if (!SkeletalMesh)
-    {
-        return false;
-    }
-    
-    // Disable ragdoll physics
-    SkeletalMesh->SetSimulatePhysics(false);
-    SkeletalMesh->SetAllBodiesSimulatePhysics(false);
-    SkeletalMesh->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
-    
-    // Remove from tracking
-    int32 Index = ActiveRagdolls.Find(SkeletalMesh);
-    if (Index != INDEX_NONE)
-    {
-        ActiveRagdolls.RemoveAt(Index);
-        RagdollTimestamps.RemoveAt(Index);
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("Core_PhysicsSystemManager: Disabled ragdoll on %s"), 
-           *SkeletalMesh->GetName());
-    
-    return true;
-}
-
-AActor* UCore_PhysicsSystemManager::CreateDestructibleFromMesh(UStaticMesh* SourceMesh, FVector Location, FRotator Rotation)
-{
-    if (!SourceMesh || !bDestructibleEnabled || !CachedWorld)
-    {
-        return nullptr;
-    }
-    
-    // Create basic destructible actor (placeholder implementation)
-    // In a full implementation, this would create a proper destructible mesh
-    AActor* DestructibleActor = CachedWorld->SpawnActor<AActor>(AActor::StaticClass(), Location, Rotation);
-    if (DestructibleActor)
-    {
-        // Add static mesh component
-        UStaticMeshComponent* MeshComp = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("DestructibleMesh"));
-        if (MeshComp)
+        if (!IsValid(TerrainActor))
         {
-            MeshComp->SetStaticMesh(SourceMesh);
-            MeshComp->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-            MeshComp->SetSimulatePhysics(true);
-            DestructibleActor->SetRootComponent(MeshComp);
+            continue;
         }
         
-        // Track for cleanup
-        ActiveDebris.Add(DestructibleActor);
-        DebrisTimestamps.Add(CachedWorld->GetTimeSeconds());
+        TArray<UStaticMeshComponent*> StaticMeshComponents;
+        TerrainActor->GetComponents<UStaticMeshComponent>(StaticMeshComponents);
         
-        UE_LOG(LogTemp, Warning, TEXT("Core_PhysicsSystemManager: Created destructible from mesh %s"), 
-               *SourceMesh->GetName());
-    }
-    
-    return DestructibleActor;
-}
-
-void UCore_PhysicsSystemManager::ApplyPhysicsMaterial(UPrimitiveComponent* Component, UPhysicalMaterial* Material)
-{
-    if (!Component || !Material)
-    {
-        return;
-    }
-    
-    Component->SetPhysMaterialOverride(Material);
-    
-    UE_LOG(LogTemp, Log, TEXT("Core_PhysicsSystemManager: Applied physics material %s to %s"), 
-           *Material->GetName(), *Component->GetName());
-}
-
-UPhysicalMaterial* UCore_PhysicsSystemManager::GetPhysicsMaterialBySurface(const FString& SurfaceType)
-{
-    FString LowerSurface = SurfaceType.ToLower();
-    
-    if (LowerSurface.Contains("organic") || LowerSurface.Contains("flesh") || LowerSurface.Contains("wood"))
-    {
-        return OrganicMaterial;
-    }
-    else if (LowerSurface.Contains("stone") || LowerSurface.Contains("rock") || LowerSurface.Contains("concrete"))
-    {
-        return StoneMaterial;
-    }
-    else if (LowerSurface.Contains("metal") || LowerSurface.Contains("steel") || LowerSurface.Contains("iron"))
-    {
-        return MetalMaterial;
-    }
-    else if (LowerSurface.Contains("water") || LowerSurface.Contains("liquid"))
-    {
-        return WaterMaterial;
-    }
-    
-    // Default to organic material
-    return OrganicMaterial;
-}
-
-void UCore_PhysicsSystemManager::GetPhysicsStats(int32& ActiveBodies, int32& Constraints, float& SimulationTime)
-{
-    // Placeholder implementation - would query actual physics world stats
-    ActiveBodies = ActiveRagdolls.Num() + ActiveDebris.Num();
-    Constraints = ActiveBodies * 2; // Rough estimate
-    SimulationTime = PhysicsTimestep;
-}
-
-void UCore_PhysicsSystemManager::SetPhysicsProfilingEnabled(bool bEnabled)
-{
-    // Placeholder for physics profiling toggle
-    UE_LOG(LogTemp, Warning, TEXT("Core_PhysicsSystemManager: Physics profiling %s"), 
-           bEnabled ? TEXT("enabled") : TEXT("disabled"));
-}
-
-void UCore_PhysicsSystemManager::UpdateRagdollSystem(float DeltaTime)
-{
-    if (!CachedWorld)
-    {
-        return;
-    }
-    
-    float CurrentTime = CachedWorld->GetTimeSeconds();
-    
-    // Check for expired ragdolls
-    for (int32 i = ActiveRagdolls.Num() - 1; i >= 0; i--)
-    {
-        if (!IsValid(ActiveRagdolls[i]) || (CurrentTime - RagdollTimestamps[i]) >= RagdollTimeout)
+        for (UStaticMeshComponent* MeshComp : StaticMeshComponents)
         {
-            if (IsValid(ActiveRagdolls[i]))
+            if (MeshComp)
             {
-                DisableRagdoll(ActiveRagdolls[i]);
-            }
-            else
-            {
-                ActiveRagdolls.RemoveAt(i);
-                RagdollTimestamps.RemoveAt(i);
+                // Apply physics material properties
+                // Note: In a full implementation, you would create and assign actual UPhysicalMaterial assets
+                UE_LOG(LogTemp, Log, TEXT("Updating physics material for %s: Friction=%f, Restitution=%f"), 
+                       *TerrainActor->GetName(), PhysicsData.Friction, PhysicsData.Restitution);
             }
         }
     }
 }
 
-void UCore_PhysicsSystemManager::UpdateDebrisSystem(float DeltaTime)
+void UCore_PhysicsSystemManager::MonitorPhysicsPerformance()
 {
-    if (!CachedWorld)
+    UWorld* World = GetWorld();
+    if (!World)
     {
         return;
     }
     
-    float CurrentTime = CachedWorld->GetTimeSeconds();
+    // Get physics frame time (simplified - in real implementation would use proper profiling)
+    LastPhysicsFrameTime = FApp::GetDeltaTime() * 1000.0f; // Convert to milliseconds
     
-    // Check for expired debris
-    for (int32 i = ActiveDebris.Num() - 1; i >= 0; i--)
+    // Count active physics bodies (simplified)
+    LastPhysicsBodiesCount = 0;
+    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
     {
-        if (!IsValid(ActiveDebris[i]) || (CurrentTime - DebrisTimestamps[i]) >= DebrisLifetime)
+        AActor* Actor = *ActorItr;
+        if (Actor)
         {
-            if (IsValid(ActiveDebris[i]))
+            TArray<UPrimitiveComponent*> PrimitiveComponents;
+            Actor->GetComponents<UPrimitiveComponent>(PrimitiveComponents);
+            
+            for (UPrimitiveComponent* PrimComp : PrimitiveComponents)
             {
-                ActiveDebris[i]->Destroy();
+                if (PrimComp && PrimComp->IsSimulatingPhysics())
+                {
+                    LastPhysicsBodiesCount++;
+                }
             }
-            ActiveDebris.RemoveAt(i);
-            DebrisTimestamps.RemoveAt(i);
         }
     }
-}
-
-void UCore_PhysicsSystemManager::LoadDefaultPhysicsMaterials()
-{
-    // Load default physics materials from content
-    // In a real implementation, these would be actual asset references
-    
-    UE_LOG(LogTemp, Warning, TEXT("Core_PhysicsSystemManager: Loading default physics materials"));
-    
-    // Placeholder - would load actual physics material assets
-    OrganicMaterial = nullptr;
-    StoneMaterial = nullptr;
-    MetalMaterial = nullptr;
-    WaterMaterial = nullptr;
-}
-
-void UCore_PhysicsSystemManager::ConfigureWorldPhysics()
-{
-    if (!CachedWorld)
-    {
-        return;
-    }
-    
-    // Apply current physics settings
-    ApplyPhysicsSettings();
-    
-    UE_LOG(LogTemp, Warning, TEXT("Core_PhysicsSystemManager: World physics configured"));
-}
-
-void UCore_PhysicsSystemManager::SetupCollisionProfiles()
-{
-    // Setup custom collision profiles
-    // This would typically be done through project settings or collision profile assets
-    
-    UE_LOG(LogTemp, Warning, TEXT("Core_PhysicsSystemManager: Collision profiles configured"));
 }
