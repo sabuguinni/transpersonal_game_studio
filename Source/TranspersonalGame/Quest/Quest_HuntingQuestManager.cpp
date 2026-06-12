@@ -1,251 +1,197 @@
 #include "Quest_HuntingQuestManager.h"
 #include "Engine/Engine.h"
+#include "Engine/World.h"
+#include "GameFramework/PlayerController.h"
 #include "Kismet/GameplayStatics.h"
 
 UQuest_HuntingQuestManager::UQuest_HuntingQuestManager()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    
-    QuestTimeLimit = 1800.0f; // 30 minutes default
-    ElapsedTime = 0.0f;
-    bIsQuestActive = false;
-    QuestDescription = TEXT("Hunt the specified targets to complete this quest.");
-    QuestGiver = TEXT("Tribal Elder");
+    TrackingRange = 2000.0f;
+    bShowTrackingMarkers = true;
+    MaxActiveHunts = 3;
+    HuntTimeLimit = 600.0f; // 10 minutes
 }
 
 void UQuest_HuntingQuestManager::BeginPlay()
 {
     Super::BeginPlay();
-    
-    UE_LOG(LogTemp, Warning, TEXT("Quest_HuntingQuestManager initialized"));
+    InitializeDefaultHunts();
 }
 
 void UQuest_HuntingQuestManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-
-    if (bIsQuestActive)
-    {
-        UpdateQuestTimer(DeltaTime);
-        CheckTimeLimit();
-    }
-}
-
-void UQuest_HuntingQuestManager::StartHuntingQuest(const TArray<FQuest_HuntingTarget>& Targets, const FQuest_HuntingReward& Reward, float TimeLimit)
-{
-    if (bIsQuestActive)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Cannot start new hunting quest - quest already active"));
-        return;
-    }
-
-    ActiveHuntingTargets = Targets;
-    CurrentReward = Reward;
-    QuestTimeLimit = TimeLimit;
-    ElapsedTime = 0.0f;
-    bIsQuestActive = true;
-
-    // Reset all target counts
-    for (FQuest_HuntingTarget& Target : ActiveHuntingTargets)
-    {
-        Target.CurrentCount = 0;
-    }
-
-    UE_LOG(LogTemp, Warning, TEXT("Hunting quest started with %d targets"), ActiveHuntingTargets.Num());
     
-    // Notify player
-    if (GEngine)
+    if (bShowTrackingMarkers)
     {
-        GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Green, 
-            FString::Printf(TEXT("New Hunting Quest: %s"), *QuestDescription));
+        UpdateTrackingMarkers();
     }
+    
+    CheckHuntTimeouts();
 }
 
-void UQuest_HuntingQuestManager::RegisterKill(const FString& Species, const FString& WeaponUsed, float Distance)
+void UQuest_HuntingQuestManager::StartHuntingQuest(const FString& TargetSpecies, int32 RequiredKills, bool bStealth)
 {
-    if (!bIsQuestActive)
+    if (ActiveHuntTargets.Num() >= MaxActiveHunts)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Maximum active hunts reached. Cannot start new hunt for %s"), *TargetSpecies);
+        return;
+    }
+
+    // Check if hunt already exists
+    if (FindHuntTarget(TargetSpecies))
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Hunt for %s already active"), *TargetSpecies);
+        return;
+    }
+
+    FQuest_HuntTarget NewHunt;
+    NewHunt.TargetSpecies = TargetSpecies;
+    NewHunt.RequiredKills = RequiredKills;
+    NewHunt.CurrentKills = 0;
+    NewHunt.MinDistance = bStealth ? 1000.0f : 500.0f;
+    NewHunt.bRequiresStealth = bStealth;
+
+    ActiveHuntTargets.Add(NewHunt);
+    
+    UE_LOG(LogTemp, Log, TEXT("Started hunting quest for %s - Required: %d, Stealth: %s"), 
+           *TargetSpecies, RequiredKills, bStealth ? TEXT("Yes") : TEXT("No"));
+}
+
+void UQuest_HuntingQuestManager::RegisterKill(const FString& KilledSpecies, float Distance, bool bWasStealth)
+{
+    FQuest_HuntTarget* HuntTarget = FindHuntTarget(KilledSpecies);
+    if (!HuntTarget)
     {
         return;
     }
 
-    for (FQuest_HuntingTarget& Target : ActiveHuntingTargets)
+    // Check stealth requirement
+    if (HuntTarget->bRequiresStealth && !bWasStealth)
     {
-        if (Target.TargetSpecies == Species && Target.CurrentCount < Target.RequiredCount)
-        {
-            if (ValidateKill(Target, WeaponUsed, Distance))
-            {
-                Target.CurrentCount++;
-                UE_LOG(LogTemp, Warning, TEXT("Kill registered: %s (%d/%d)"), 
-                    *Species, Target.CurrentCount, Target.RequiredCount);
+        UE_LOG(LogTemp, Warning, TEXT("Kill of %s failed stealth requirement"), *KilledSpecies);
+        return;
+    }
 
-                if (GEngine)
-                {
-                    GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Yellow,
-                        FString::Printf(TEXT("%s killed! Progress: %d/%d"), 
-                        *Species, Target.CurrentCount, Target.RequiredCount));
-                }
+    // Check distance requirement
+    if (Distance < HuntTarget->MinDistance)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Kill of %s too close (%.1f < %.1f)"), *KilledSpecies, Distance, HuntTarget->MinDistance);
+        return;
+    }
 
-                if (CheckQuestCompletion())
-                {
-                    CompleteQuest();
-                }
-                break;
-            }
-        }
+    HuntTarget->CurrentKills++;
+    UE_LOG(LogTemp, Log, TEXT("Registered kill: %s (%d/%d)"), *KilledSpecies, HuntTarget->CurrentKills, HuntTarget->RequiredKills);
+
+    if (CheckQuestCompletion(KilledSpecies))
+    {
+        CompleteHuntingQuest(KilledSpecies);
     }
 }
 
-bool UQuest_HuntingQuestManager::CheckQuestCompletion()
+bool UQuest_HuntingQuestManager::CheckQuestCompletion(const FString& TargetSpecies)
 {
-    if (!bIsQuestActive)
+    FQuest_HuntTarget* HuntTarget = FindHuntTarget(TargetSpecies);
+    if (!HuntTarget)
     {
         return false;
     }
 
-    for (const FQuest_HuntingTarget& Target : ActiveHuntingTargets)
-    {
-        if (Target.CurrentCount < Target.RequiredCount)
-        {
-            return false;
-        }
-    }
-
-    return true;
+    return HuntTarget->CurrentKills >= HuntTarget->RequiredKills;
 }
 
-void UQuest_HuntingQuestManager::CompleteQuest()
+void UQuest_HuntingQuestManager::CompleteHuntingQuest(const FString& TargetSpecies)
 {
-    if (!bIsQuestActive)
+    FQuest_HuntTarget* HuntTarget = FindHuntTarget(TargetSpecies);
+    if (!HuntTarget)
     {
         return;
     }
 
-    bIsQuestActive = false;
-    
-    UE_LOG(LogTemp, Warning, TEXT("Hunting quest completed! Rewards granted."));
-    
-    if (GEngine)
+    // Award rewards
+    for (const FQuest_HuntingReward& Reward : QuestRewards)
     {
-        GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Green, 
-            TEXT("Quest Complete! Rewards granted."));
+        UE_LOG(LogTemp, Log, TEXT("Awarded: %s x%d, XP: %.1f"), *Reward.ItemName, Reward.Quantity, Reward.ExperiencePoints);
     }
 
-    // Grant rewards logic would go here
-    // For now, just log the rewards
-    for (const FString& Item : CurrentReward.ItemRewards)
+    // Remove completed hunt
+    ActiveHuntTargets.RemoveAll([TargetSpecies](const FQuest_HuntTarget& Hunt)
     {
-        UE_LOG(LogTemp, Warning, TEXT("Reward item: %s"), *Item);
-    }
-    
-    if (CurrentReward.ExperienceReward > 0)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Experience reward: %d"), CurrentReward.ExperienceReward);
-    }
+        return Hunt.TargetSpecies == TargetSpecies;
+    });
+
+    UE_LOG(LogTemp, Log, TEXT("Completed hunting quest for %s"), *TargetSpecies);
 }
 
-void UQuest_HuntingQuestManager::FailQuest()
+TArray<FString> UQuest_HuntingQuestManager::GetActiveHuntTargets()
 {
-    if (!bIsQuestActive)
+    TArray<FString> Targets;
+    for (const FQuest_HuntTarget& Hunt : ActiveHuntTargets)
     {
-        return;
+        Targets.Add(Hunt.TargetSpecies);
     }
-
-    bIsQuestActive = false;
-    
-    UE_LOG(LogTemp, Warning, TEXT("Hunting quest failed!"));
-    
-    if (GEngine)
-    {
-        GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red, 
-            TEXT("Quest Failed!"));
-    }
+    return Targets;
 }
 
-TArray<FString> UQuest_HuntingQuestManager::GetQuestObjectives()
+float UQuest_HuntingQuestManager::GetHuntProgress(const FString& TargetSpecies)
 {
-    TArray<FString> Objectives;
-    
-    for (const FQuest_HuntingTarget& Target : ActiveHuntingTargets)
-    {
-        FString Objective = FString::Printf(TEXT("Hunt %s: %d/%d"), 
-            *Target.TargetSpecies, Target.CurrentCount, Target.RequiredCount);
-        
-        if (Target.bRequiresSpecificWeapon)
-        {
-            Objective += FString::Printf(TEXT(" (Use %s)"), *Target.RequiredWeaponType);
-        }
-        
-        Objectives.Add(Objective);
-    }
-    
-    return Objectives;
-}
-
-float UQuest_HuntingQuestManager::GetQuestProgress()
-{
-    if (ActiveHuntingTargets.Num() == 0)
+    FQuest_HuntTarget* HuntTarget = FindHuntTarget(TargetSpecies);
+    if (!HuntTarget || HuntTarget->RequiredKills == 0)
     {
         return 0.0f;
     }
 
-    int32 TotalRequired = 0;
-    int32 TotalCompleted = 0;
-
-    for (const FQuest_HuntingTarget& Target : ActiveHuntingTargets)
-    {
-        TotalRequired += Target.RequiredCount;
-        TotalCompleted += Target.CurrentCount;
-    }
-
-    return TotalRequired > 0 ? (float)TotalCompleted / (float)TotalRequired : 0.0f;
+    return static_cast<float>(HuntTarget->CurrentKills) / static_cast<float>(HuntTarget->RequiredKills);
 }
 
-FString UQuest_HuntingQuestManager::GetQuestStatusText()
+void UQuest_HuntingQuestManager::UpdateTrackingMarkers()
 {
-    if (!bIsQuestActive)
-    {
-        return TEXT("No active quest");
-    }
-
-    float Progress = GetQuestProgress() * 100.0f;
-    float TimeRemaining = QuestTimeLimit - ElapsedTime;
-    int32 MinutesRemaining = FMath::FloorToInt(TimeRemaining / 60.0f);
-    int32 SecondsRemaining = FMath::FloorToInt(TimeRemaining - (MinutesRemaining * 60));
-
-    return FString::Printf(TEXT("Progress: %.1f%% | Time: %02d:%02d"), 
-        Progress, MinutesRemaining, SecondsRemaining);
+    // This would update UI markers showing hunt targets on the map
+    // Implementation would depend on UI system
 }
 
-void UQuest_HuntingQuestManager::UpdateQuestTimer(float DeltaTime)
+void UQuest_HuntingQuestManager::CancelHuntingQuest(const FString& TargetSpecies)
 {
-    ElapsedTime += DeltaTime;
+    ActiveHuntTargets.RemoveAll([TargetSpecies](const FQuest_HuntTarget& Hunt)
+    {
+        return Hunt.TargetSpecies == TargetSpecies;
+    });
+
+    UE_LOG(LogTemp, Log, TEXT("Cancelled hunting quest for %s"), *TargetSpecies);
 }
 
-void UQuest_HuntingQuestManager::CheckTimeLimit()
+void UQuest_HuntingQuestManager::InitializeDefaultHunts()
 {
-    if (ElapsedTime >= QuestTimeLimit)
-    {
-        FailQuest();
-    }
+    // Setup default reward structure
+    FQuest_HuntingReward MeatReward;
+    MeatReward.ItemName = TEXT("Raw Meat");
+    MeatReward.Quantity = 3;
+    MeatReward.ExperiencePoints = 50.0f;
+
+    FQuest_HuntingReward HideReward;
+    HideReward.ItemName = TEXT("Animal Hide");
+    HideReward.Quantity = 1;
+    HideReward.ExperiencePoints = 25.0f;
+
+    QuestRewards.Add(MeatReward);
+    QuestRewards.Add(HideReward);
 }
 
-bool UQuest_HuntingQuestManager::ValidateKill(const FQuest_HuntingTarget& Target, const FString& WeaponUsed, float Distance)
+void UQuest_HuntingQuestManager::CheckHuntTimeouts()
 {
-    // Check weapon requirement
-    if (Target.bRequiresSpecificWeapon && Target.RequiredWeaponType != WeaponUsed)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Kill invalid: Wrong weapon. Required: %s, Used: %s"), 
-            *Target.RequiredWeaponType, *WeaponUsed);
-        return false;
-    }
+    // Implementation for time-limited hunts
+    // Would check elapsed time and cancel expired hunts
+}
 
-    // Check distance requirement
-    if (Distance < Target.MinimumDistance)
+FQuest_HuntTarget* UQuest_HuntingQuestManager::FindHuntTarget(const FString& TargetSpecies)
+{
+    for (FQuest_HuntTarget& Hunt : ActiveHuntTargets)
     {
-        UE_LOG(LogTemp, Warning, TEXT("Kill invalid: Too close. Required: %.1f, Actual: %.1f"), 
-            Target.MinimumDistance, Distance);
-        return false;
+        if (Hunt.TargetSpecies == TargetSpecies)
+        {
+            return &Hunt;
+        }
     }
-
-    return true;
+    return nullptr;
 }
