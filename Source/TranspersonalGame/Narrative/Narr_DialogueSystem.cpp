@@ -3,134 +3,200 @@
 
 UNarr_DialogueSystem::UNarr_DialogueSystem()
 {
-    CurrentConversationID = TEXT("");
-    CurrentDialogueIndex = 0;
-    bConversationActive = false;
+    PrimaryComponentTick.bCanEverTick = false;
+    bDialogueActive = false;
+    CurrentLineIndex = 0;
+    CurrentSequenceID = TEXT("");
 }
 
-void UNarr_DialogueSystem::Initialize(FSubsystemCollectionBase& Collection)
+void UNarr_DialogueSystem::BeginPlay()
 {
-    Super::Initialize(Collection);
-    LoadDefaultConversations();
-    UE_LOG(LogTemp, Warning, TEXT("Narr_DialogueSystem initialized"));
+    Super::BeginPlay();
+    InitializeDefaultDialogues();
 }
 
-void UNarr_DialogueSystem::StartConversation(const FString& ConversationID)
+void UNarr_DialogueSystem::InitializeDefaultDialogues()
 {
-    if (RegisteredConversations.Contains(ConversationID))
+    // Elder Kael - Tribal Wisdom
+    FNarr_DialogueSequence ElderIntro;
+    ElderIntro.SequenceID = TEXT("elder_intro");
+    ElderIntro.bRepeatable = false;
+
+    FNarr_DialogueLine ElderLine1;
+    ElderLine1.SpeakerName = TEXT("Elder Kael");
+    ElderLine1.DialogueText = FText::FromString(TEXT("Welcome, young hunter. I am Kael, keeper of the ancient ways."));
+    ElderLine1.Duration = 4.0f;
+
+    FNarr_DialogueLine ElderLine2;
+    ElderLine2.SpeakerName = TEXT("Elder Kael");
+    ElderLine2.DialogueText = FText::FromString(TEXT("The great beasts follow patterns older than memory. Learn them, or perish."));
+    ElderLine2.Duration = 5.0f;
+
+    ElderIntro.DialogueLines.Add(ElderLine1);
+    ElderIntro.DialogueLines.Add(ElderLine2);
+    DialogueDatabase.Add(ElderIntro.SequenceID, ElderIntro);
+
+    // War Chief - Danger Warning
+    FNarr_DialogueSequence WarningSequence;
+    WarningSequence.SequenceID = TEXT("danger_warning");
+    WarningSequence.bRepeatable = true;
+
+    FNarr_DialogueLine WarningLine;
+    WarningLine.SpeakerName = TEXT("War Chief");
+    WarningLine.DialogueText = FText::FromString(TEXT("Blood on the wind... something massive approaches. All hunters to the perimeter!"));
+    WarningLine.Duration = 4.5f;
+
+    WarningSequence.DialogueLines.Add(WarningLine);
+    DialogueDatabase.Add(WarningSequence.SequenceID, WarningSequence);
+
+    // Resource Gatherer - Survival Tips
+    FNarr_DialogueSequence ResourceTips;
+    ResourceTips.SequenceID = TEXT("resource_tips");
+    ResourceTips.bRepeatable = true;
+
+    FNarr_DialogueLine ResourceLine1;
+    ResourceLine1.SpeakerName = TEXT("Vera");
+    ResourceLine1.DialogueText = FText::FromString(TEXT("The earth provides for those who know where to look."));
+    ResourceLine1.Duration = 3.5f;
+
+    FNarr_DialogueLine ResourceLine2;
+    ResourceLine2.SpeakerName = TEXT("Vera");
+    ResourceLine2.DialogueText = FText::FromString(TEXT("Sharp stones by the river, healing herbs in the shadow of great trees."));
+    ResourceLine2.Duration = 4.0f;
+
+    ResourceTips.DialogueLines.Add(ResourceLine1);
+    ResourceTips.DialogueLines.Add(ResourceLine2);
+    DialogueDatabase.Add(ResourceTips.SequenceID, ResourceTips);
+
+    UE_LOG(LogTemp, Warning, TEXT("Dialogue System: Initialized %d default sequences"), DialogueDatabase.Num());
+}
+
+bool UNarr_DialogueSystem::StartDialogue(const FString& SequenceID)
+{
+    if (bDialogueActive)
     {
-        CurrentConversationID = ConversationID;
-        CurrentDialogueIndex = 0;
-        bConversationActive = true;
-        UE_LOG(LogTemp, Warning, TEXT("Started conversation: %s"), *ConversationID);
+        UE_LOG(LogTemp, Warning, TEXT("Dialogue System: Cannot start dialogue - another dialogue is active"));
+        return false;
     }
-    else
-    {
-        UE_LOG(LogTemp, Error, TEXT("Conversation not found: %s"), *ConversationID);
-    }
-}
 
-void UNarr_DialogueSystem::EndConversation()
-{
-    CurrentConversationID = TEXT("");
-    CurrentDialogueIndex = 0;
-    bConversationActive = false;
-    UE_LOG(LogTemp, Warning, TEXT("Conversation ended"));
+    if (!DialogueDatabase.Contains(SequenceID))
+    {
+        UE_LOG(LogTemp, Error, TEXT("Dialogue System: Sequence ID '%s' not found"), *SequenceID);
+        return false;
+    }
+
+    const FNarr_DialogueSequence& Sequence = DialogueDatabase[SequenceID];
+    
+    // Check required flags
+    if (!CheckRequiredFlags(Sequence.RequiredFlags))
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Dialogue System: Required flags not met for sequence '%s'"), *SequenceID);
+        return false;
+    }
+
+    CurrentSequenceID = SequenceID;
+    CurrentLineIndex = 0;
+    bDialogueActive = true;
+
+    UE_LOG(LogTemp, Log, TEXT("Dialogue System: Started sequence '%s'"), *SequenceID);
+    return true;
 }
 
 void UNarr_DialogueSystem::AdvanceDialogue()
 {
-    if (!bConversationActive || !RegisteredConversations.Contains(CurrentConversationID))
+    if (!bDialogueActive || CurrentSequenceID.IsEmpty())
     {
         return;
     }
 
-    const FNarr_ConversationData& CurrentConversation = RegisteredConversations[CurrentConversationID];
-    CurrentDialogueIndex++;
-
-    if (CurrentDialogueIndex >= CurrentConversation.DialogueEntries.Num())
+    if (!DialogueDatabase.Contains(CurrentSequenceID))
     {
-        EndConversation();
+        EndDialogue();
+        return;
+    }
+
+    const FNarr_DialogueSequence& Sequence = DialogueDatabase[CurrentSequenceID];
+    
+    if (CurrentLineIndex >= Sequence.DialogueLines.Num() - 1)
+    {
+        EndDialogue();
+        return;
+    }
+
+    CurrentLineIndex++;
+    UE_LOG(LogTemp, Log, TEXT("Dialogue System: Advanced to line %d"), CurrentLineIndex);
+}
+
+void UNarr_DialogueSystem::EndDialogue()
+{
+    bDialogueActive = false;
+    CurrentSequenceID = TEXT("");
+    CurrentLineIndex = 0;
+    UE_LOG(LogTemp, Log, TEXT("Dialogue System: Dialogue ended"));
+}
+
+FNarr_DialogueLine UNarr_DialogueSystem::GetCurrentLine() const
+{
+    if (!bDialogueActive || CurrentSequenceID.IsEmpty())
+    {
+        return FNarr_DialogueLine();
+    }
+
+    if (!DialogueDatabase.Contains(CurrentSequenceID))
+    {
+        return FNarr_DialogueLine();
+    }
+
+    const FNarr_DialogueSequence& Sequence = DialogueDatabase[CurrentSequenceID];
+    
+    if (CurrentLineIndex >= 0 && CurrentLineIndex < Sequence.DialogueLines.Num())
+    {
+        return Sequence.DialogueLines[CurrentLineIndex];
+    }
+
+    return FNarr_DialogueLine();
+}
+
+bool UNarr_DialogueSystem::HasFlag(const FString& FlagName) const
+{
+    return StoryFlags.Contains(FlagName);
+}
+
+void UNarr_DialogueSystem::SetFlag(const FString& FlagName)
+{
+    if (!StoryFlags.Contains(FlagName))
+    {
+        StoryFlags.Add(FlagName);
+        UE_LOG(LogTemp, Log, TEXT("Dialogue System: Set story flag '%s'"), *FlagName);
     }
 }
 
-bool UNarr_DialogueSystem::IsConversationActive() const
+void UNarr_DialogueSystem::LoadDialogueFromDataTable(UDataTable* DialogueTable)
 {
-    return bConversationActive;
-}
-
-FNarr_DialogueEntry UNarr_DialogueSystem::GetCurrentDialogue() const
-{
-    if (!bConversationActive || !RegisteredConversations.Contains(CurrentConversationID))
+    if (!DialogueTable)
     {
-        return FNarr_DialogueEntry();
+        UE_LOG(LogTemp, Error, TEXT("Dialogue System: Invalid DataTable provided"));
+        return;
     }
 
-    const FNarr_ConversationData& CurrentConversation = RegisteredConversations[CurrentConversationID];
-    if (CurrentDialogueIndex < CurrentConversation.DialogueEntries.Num())
+    // Implementation for loading from DataTable would go here
+    UE_LOG(LogTemp, Log, TEXT("Dialogue System: DataTable loading not yet implemented"));
+}
+
+void UNarr_DialogueSystem::RegisterDialogueSequence(const FString& SequenceID, const FNarr_DialogueSequence& Sequence)
+{
+    DialogueDatabase.Add(SequenceID, Sequence);
+    UE_LOG(LogTemp, Log, TEXT("Dialogue System: Registered sequence '%s' with %d lines"), *SequenceID, Sequence.DialogueLines.Num());
+}
+
+bool UNarr_DialogueSystem::CheckRequiredFlags(const TArray<FString>& RequiredFlags) const
+{
+    for (const FString& Flag : RequiredFlags)
     {
-        return CurrentConversation.DialogueEntries[CurrentDialogueIndex];
+        if (!HasFlag(Flag))
+        {
+            return false;
+        }
     }
-
-    return FNarr_DialogueEntry();
-}
-
-void UNarr_DialogueSystem::RegisterConversation(const FNarr_ConversationData& ConversationData)
-{
-    RegisteredConversations.Add(ConversationData.ConversationID, ConversationData);
-    UE_LOG(LogTemp, Warning, TEXT("Registered conversation: %s"), *ConversationData.ConversationID);
-}
-
-void UNarr_DialogueSystem::LoadDefaultConversations()
-{
-    // Tracker conversation
-    FNarr_ConversationData TrackerConversation;
-    TrackerConversation.ConversationID = TEXT("OldTracker_Hunt");
-    TrackerConversation.bIsRepeatable = false;
-
-    FNarr_DialogueEntry Entry1;
-    Entry1.SpeakerName = TEXT("Old Tracker");
-    Entry1.DialogueText = TEXT("The old tracker's eyes narrow as he studies the ground. Three-toed prints, deep in the mud. Fresh blood on the leaves. The great hunter has passed this way.");
-    Entry1.DisplayDuration = 5.0f;
-    TrackerConversation.DialogueEntries.Add(Entry1);
-
-    FNarr_DialogueEntry Entry2;
-    Entry2.SpeakerName = TEXT("Old Tracker");
-    Entry2.DialogueText = TEXT("You must be careful, young one. This beast is not like the others. It hunts with purpose, with intelligence.");
-    Entry2.DisplayDuration = 4.0f;
-    TrackerConversation.DialogueEntries.Add(Entry2);
-
-    RegisterConversation(TrackerConversation);
-
-    // Warning conversation
-    FNarr_ConversationData WarningConversation;
-    WarningConversation.ConversationID = TEXT("TribalWarner_Alert");
-    WarningConversation.bIsRepeatable = true;
-
-    FNarr_DialogueEntry Warning1;
-    Warning1.SpeakerName = TEXT("Tribal Warner");
-    Warning1.DialogueText = TEXT("Warning echoes through the valley - the great predator stirs. All who hear this call must seek shelter immediately. The hunt begins at dawn.");
-    Warning1.DisplayDuration = 6.0f;
-    WarningConversation.DialogueEntries.Add(Warning1);
-
-    RegisterConversation(WarningConversation);
-
-    // Survival tips conversation
-    FNarr_ConversationData SurvivalConversation;
-    SurvivalConversation.ConversationID = TEXT("Survivor_Tips");
-    SurvivalConversation.bIsRepeatable = true;
-
-    FNarr_DialogueEntry Tip1;
-    Tip1.SpeakerName = TEXT("Experienced Survivor");
-    Tip1.DialogueText = TEXT("Stay downwind when the great beasts hunt. Their nose is keener than their eyes.");
-    Tip1.DisplayDuration = 3.5f;
-    SurvivalConversation.DialogueEntries.Add(Tip1);
-
-    FNarr_DialogueEntry Tip2;
-    Tip2.SpeakerName = TEXT("Experienced Survivor");
-    Tip2.DialogueText = TEXT("Water sources draw both prey and predator. Approach with caution, leave quickly.");
-    Tip2.DisplayDuration = 4.0f;
-    SurvivalConversation.DialogueEntries.Add(Tip2);
-
-    RegisterConversation(SurvivalConversation);
+    return true;
 }
