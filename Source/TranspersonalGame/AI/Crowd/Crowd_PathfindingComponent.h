@@ -2,34 +2,43 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
+#include "Engine/Engine.h"
 #include "NavigationSystem.h"
-#include "NavMesh/RecastNavMesh.h"
+#include "NavMesh/NavMeshBoundsVolume.h"
 #include "AI/NavigationSystemBase.h"
 #include "Crowd_PathfindingComponent.generated.h"
 
 UENUM(BlueprintType)
 enum class ECrowd_PathfindingState : uint8
 {
-    Idle,
-    Planning,
-    Following,
-    Blocked,
-    Arrived
+    Idle UMETA(DisplayName = "Idle"),
+    Seeking UMETA(DisplayName = "Seeking Path"),
+    Following UMETA(DisplayName = "Following Path"),
+    Avoiding UMETA(DisplayName = "Avoiding Obstacle"),
+    Blocked UMETA(DisplayName = "Path Blocked"),
+    Arrived UMETA(DisplayName = "Destination Reached")
 };
 
 USTRUCT(BlueprintType)
-struct FCrowd_PathPoint
+struct TRANSPERSONALGAME_API FCrowd_PathNode
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FVector Location = FVector::ZeroVector;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding")
+    FVector Location;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float Radius = 100.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding")
+    float Radius;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    bool bIsWaypoint = false;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding")
+    bool bIsBlocked;
+
+    FCrowd_PathNode()
+    {
+        Location = FVector::ZeroVector;
+        Radius = 50.0f;
+        bIsBlocked = false;
+    }
 };
 
 UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
@@ -46,67 +55,85 @@ protected:
 public:
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding")
-    ECrowd_PathfindingState CurrentState = ECrowd_PathfindingState::Idle;
+    // Pathfinding state
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Pathfinding")
+    ECrowd_PathfindingState CurrentState;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding")
-    float MovementSpeed = 400.0f;
+    // Current path
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Pathfinding")
+    TArray<FCrowd_PathNode> CurrentPath;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding")
-    float AcceptanceRadius = 150.0f;
+    // Current path index
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Pathfinding")
+    int32 CurrentPathIndex;
 
+    // Target destination
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding")
-    float PathRecalculationInterval = 2.0f;
+    FVector TargetDestination;
 
+    // Movement speed
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding")
-    bool bUseNavMesh = true;
+    float MovementSpeed;
 
+    // Pathfinding radius
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding")
-    TArray<FCrowd_PathPoint> CurrentPath;
+    float PathfindingRadius;
 
+    // Arrival threshold
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding")
-    int32 CurrentPathIndex = 0;
+    float ArrivalThreshold;
+
+    // Obstacle avoidance settings
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Obstacle Avoidance")
+    float AvoidanceRadius;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Obstacle Avoidance")
+    float AvoidanceForce;
+
+    // Path recalculation timer
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding")
+    float PathRecalculationInterval;
+
+    // Public functions
+    UFUNCTION(BlueprintCallable, Category = "Pathfinding")
+    bool SetDestination(const FVector& NewDestination);
 
     UFUNCTION(BlueprintCallable, Category = "Pathfinding")
-    bool SetDestination(const FVector& Destination);
-
-    UFUNCTION(BlueprintCallable, Category = "Pathfinding")
-    bool SetWaypointPath(const TArray<FVector>& Waypoints);
-
-    UFUNCTION(BlueprintCallable, Category = "Pathfinding")
-    void StopMovement();
-
-    UFUNCTION(BlueprintCallable, Category = "Pathfinding")
-    FVector GetCurrentTarget() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Pathfinding")
-    float GetDistanceToTarget() const;
+    void ClearPath();
 
     UFUNCTION(BlueprintCallable, Category = "Pathfinding")
     bool IsPathValid() const;
 
     UFUNCTION(BlueprintCallable, Category = "Pathfinding")
-    void RecalculatePath();
-
-protected:
-    UFUNCTION(BlueprintCallable, Category = "Pathfinding")
-    bool FindPathToLocation(const FVector& TargetLocation);
+    FVector GetNextPathPoint() const;
 
     UFUNCTION(BlueprintCallable, Category = "Pathfinding")
-    void UpdateMovement(float DeltaTime);
+    float GetDistanceToDestination() const;
 
     UFUNCTION(BlueprintCallable, Category = "Pathfinding")
-    bool HasReachedCurrentTarget() const;
+    void PausePathfinding();
 
     UFUNCTION(BlueprintCallable, Category = "Pathfinding")
-    void AdvanceToNextPathPoint();
+    void ResumePathfinding();
 
 private:
-    FVector TargetDestination;
-    float LastPathCalculationTime;
-    UNavigationSystemV1* NavigationSystem;
-    bool bHasValidPath;
-    
+    // Internal pathfinding logic
+    bool FindPath(const FVector& Start, const FVector& End);
+    void UpdatePathFollowing(float DeltaTime);
+    void HandleObstacleAvoidance(float DeltaTime);
+    bool IsDestinationReachable(const FVector& Destination) const;
+    void RecalculatePathIfNeeded();
+
+    // Navigation system reference
     UPROPERTY()
-    TObjectPtr<APawn> OwnerPawn;
+    UNavigationSystemV1* NavigationSystem;
+
+    // Timers
+    float PathRecalculationTimer;
+    float LastPathUpdateTime;
+
+    // Internal state
+    bool bIsPaused;
+    bool bPathNeedsRecalculation;
+    FVector LastKnownPosition;
 };
