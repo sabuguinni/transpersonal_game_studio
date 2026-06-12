@@ -1,9 +1,9 @@
 #include "Arch_ShelterSystem.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/BoxComponent.h"
-#include "Engine/Engine.h"
 #include "GameFramework/Character.h"
-#include "../TranspersonalCharacter.h"
+#include "Engine/World.h"
+#include "TimerManager.h"
 
 AArch_ShelterSystem::AArch_ShelterSystem()
 {
@@ -18,219 +18,127 @@ AArch_ShelterSystem::AArch_ShelterSystem()
     ShelterMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
     ShelterMesh->SetCollisionObjectType(ECollisionChannel::ECC_WorldStatic);
 
-    // Create interior volume for shelter effects
-    InteriorVolume = CreateDefaultSubobject<UBoxComponent>(TEXT("InteriorVolume"));
-    InteriorVolume->SetupAttachment(RootComponent);
-    InteriorVolume->SetBoxExtent(FVector(300.0f, 300.0f, 200.0f));
-    InteriorVolume->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
-    InteriorVolume->SetCollisionObjectType(ECollisionChannel::ECC_WorldStatic);
-    InteriorVolume->SetCollisionResponseToAllChannels(ECollisionResponse::ECR_Ignore);
-    InteriorVolume->SetCollisionResponseToChannel(ECollisionChannel::ECC_Pawn, ECollisionResponse::ECR_Overlap);
-
-    // Create entrance volume for detection
-    EntranceVolume = CreateDefaultSubobject<UBoxComponent>(TEXT("EntranceVolume"));
-    EntranceVolume->SetupAttachment(RootComponent);
-    EntranceVolume->SetBoxExtent(FVector(150.0f, 150.0f, 150.0f));
-    EntranceVolume->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
-    EntranceVolume->SetCollisionObjectType(ECollisionChannel::ECC_WorldStatic);
-    EntranceVolume->SetCollisionResponseToAllChannels(ECollisionResponse::ECR_Ignore);
-    EntranceVolume->SetCollisionResponseToChannel(ECollisionChannel::ECC_Pawn, ECollisionResponse::ECR_Overlap);
+    // Create protection zone
+    ProtectionZone = CreateDefaultSubobject<UBoxComponent>(TEXT("ProtectionZone"));
+    ProtectionZone->SetupAttachment(RootComponent);
+    ProtectionZone->SetBoxExtent(FVector(500.0f, 500.0f, 300.0f));
+    ProtectionZone->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+    ProtectionZone->SetCollisionObjectType(ECollisionChannel::ECC_WorldStatic);
+    ProtectionZone->SetCollisionResponseToAllChannels(ECollisionResponse::ECR_Ignore);
+    ProtectionZone->SetCollisionResponseToChannel(ECollisionChannel::ECC_Pawn, ECollisionResponse::ECR_Overlap);
 
     // Initialize default shelter properties
     ShelterConfig.ShelterType = EArch_ShelterType::CaveEntrance;
+    ShelterConfig.ProtectionRadius = 500.0f;
     ShelterConfig.WeatherProtection = 0.8f;
     ShelterConfig.TemperatureModifier = 5.0f;
-    ShelterConfig.MaxOccupants = 4;
-    ShelterConfig.bProvidesWarmth = true;
-    ShelterConfig.bBlocksWind = true;
+    ShelterConfig.bProvidesSafety = true;
 
-    CurrentOccupants.Empty();
+    // Bind overlap events
+    ProtectionZone->OnComponentBeginOverlap.AddDynamic(this, &AArch_ShelterSystem::OnProtectionZoneBeginOverlap);
+    ProtectionZone->OnComponentEndOverlap.AddDynamic(this, &AArch_ShelterSystem::OnProtectionZoneEndOverlap);
 }
 
 void AArch_ShelterSystem::BeginPlay()
 {
     Super::BeginPlay();
 
-    // Bind overlap events
-    if (EntranceVolume)
-    {
-        EntranceVolume->OnComponentBeginOverlap.AddDynamic(this, &AArch_ShelterSystem::OnEntranceOverlapBegin);
-        EntranceVolume->OnComponentEndOverlap.AddDynamic(this, &AArch_ShelterSystem::OnEntranceOverlapEnd);
-    }
+    // Apply shelter type specific settings
+    SetShelterType(ShelterConfig.ShelterType);
 
-    // Set up mesh based on shelter type
-    if (ShelterMesh)
-    {
-        switch (ShelterConfig.ShelterType)
-        {
-            case EArch_ShelterType::CaveEntrance:
-                // Load cave entrance mesh when available
-                break;
-            case EArch_ShelterType::RockOverhang:
-                // Load rock overhang mesh when available
-                break;
-            case EArch_ShelterType::StoneArchway:
-                // Load stone archway mesh when available
-                break;
-            case EArch_ShelterType::NaturalAlcove:
-                // Load natural alcove mesh when available
-                break;
-        }
-    }
+    // Update protection zone size based on config
+    ProtectionZone->SetBoxExtent(FVector(ShelterConfig.ProtectionRadius, ShelterConfig.ProtectionRadius, 300.0f));
 }
 
 void AArch_ShelterSystem::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
 
-    UpdateShelterEffects();
+    // Periodic weather protection updates
+    LastWeatherCheck += DeltaTime;
+    if (LastWeatherCheck >= WeatherCheckInterval)
+    {
+        LastWeatherCheck = 0.0f;
+        
+        if (bPlayerInShelter)
+        {
+            // Apply weather protection benefits
+            // This would integrate with weather system when available
+        }
+    }
 }
 
-bool AArch_ShelterSystem::CanEnterShelter(AActor* Actor)
+bool AArch_ShelterSystem::IsPlayerInShelter() const
 {
-    if (!Actor || !IsValid(Actor))
-    {
-        return false;
-    }
-
-    // Check if shelter has space
-    if (CurrentOccupants.Num() >= ShelterConfig.MaxOccupants)
-    {
-        return false;
-    }
-
-    // Check if actor is already in shelter
-    if (CurrentOccupants.Contains(Actor))
-    {
-        return false;
-    }
-
-    return true;
+    return bPlayerInShelter;
 }
 
-void AArch_ShelterSystem::EnterShelter(AActor* Actor)
-{
-    if (!CanEnterShelter(Actor))
-    {
-        return;
-    }
-
-    CurrentOccupants.AddUnique(Actor);
-    ApplyShelterBenefits(Actor);
-    OnActorEnteredShelter(Actor);
-
-    UE_LOG(LogTemp, Log, TEXT("Actor %s entered shelter %s"), 
-        *Actor->GetName(), *GetName());
-}
-
-void AArch_ShelterSystem::ExitShelter(AActor* Actor)
-{
-    if (!Actor || !CurrentOccupants.Contains(Actor))
-    {
-        return;
-    }
-
-    CurrentOccupants.Remove(Actor);
-    RemoveShelterBenefits(Actor);
-    OnActorExitedShelter(Actor);
-
-    UE_LOG(LogTemp, Log, TEXT("Actor %s exited shelter %s"), 
-        *Actor->GetName(), *GetName());
-}
-
-float AArch_ShelterSystem::GetWeatherProtection() const
+float AArch_ShelterSystem::GetWeatherProtectionValue() const
 {
     return ShelterConfig.WeatherProtection;
 }
 
-float AArch_ShelterSystem::GetTemperatureBonus() const
+void AArch_ShelterSystem::SetShelterType(EArch_ShelterType NewType)
 {
-    return ShelterConfig.TemperatureModifier;
-}
+    ShelterConfig.ShelterType = NewType;
 
-bool AArch_ShelterSystem::IsOccupied() const
-{
-    return CurrentOccupants.Num() > 0;
-}
-
-int32 AArch_ShelterSystem::GetAvailableSpace() const
-{
-    return FMath::Max(0, ShelterConfig.MaxOccupants - CurrentOccupants.Num());
-}
-
-void AArch_ShelterSystem::OnEntranceOverlapBegin(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, 
-    UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
-{
-    if (OtherActor && OtherActor->IsA<ACharacter>())
+    // Apply type-specific properties
+    switch (NewType)
     {
-        EnterShelter(OtherActor);
+        case EArch_ShelterType::CaveEntrance:
+            ShelterConfig.WeatherProtection = 0.9f;
+            ShelterConfig.TemperatureModifier = 8.0f;
+            ShelterConfig.bProvidesSafety = true;
+            break;
+
+        case EArch_ShelterType::StoneArchway:
+            ShelterConfig.WeatherProtection = 0.7f;
+            ShelterConfig.TemperatureModifier = 3.0f;
+            ShelterConfig.bProvidesSafety = false;
+            break;
+
+        case EArch_ShelterType::RockOverhang:
+            ShelterConfig.WeatherProtection = 0.6f;
+            ShelterConfig.TemperatureModifier = 2.0f;
+            ShelterConfig.bProvidesSafety = false;
+            break;
+
+        case EArch_ShelterType::NaturalShelter:
+            ShelterConfig.WeatherProtection = 0.8f;
+            ShelterConfig.TemperatureModifier = 5.0f;
+            ShelterConfig.bProvidesSafety = true;
+            break;
     }
+
+    // Update protection zone size
+    ProtectionZone->SetBoxExtent(FVector(ShelterConfig.ProtectionRadius, ShelterConfig.ProtectionRadius, 300.0f));
 }
 
-void AArch_ShelterSystem::OnEntranceOverlapEnd(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, 
-    UPrimitiveComponent* OtherComp, int32 OtherBodyIndex)
+void AArch_ShelterSystem::OnProtectionZoneBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
 {
-    if (OtherActor && CurrentOccupants.Contains(OtherActor))
+    if (ACharacter* Character = Cast<ACharacter>(OtherActor))
     {
-        ExitShelter(OtherActor);
-    }
-}
-
-void AArch_ShelterSystem::UpdateShelterEffects()
-{
-    // Clean up invalid occupants
-    CurrentOccupants.RemoveAll([](AActor* Actor) {
-        return !IsValid(Actor);
-    });
-
-    // Apply continuous shelter benefits
-    for (AActor* Occupant : CurrentOccupants)
-    {
-        if (IsValid(Occupant))
+        // Check if this is the player character
+        if (Character->IsPlayerControlled())
         {
-            ApplyShelterBenefits(Occupant);
+            bPlayerInShelter = true;
+            OnPlayerEnterShelter();
+            
+            UE_LOG(LogTemp, Log, TEXT("Player entered shelter: %s"), *GetName());
         }
     }
 }
 
-void AArch_ShelterSystem::ApplyShelterBenefits(AActor* Actor)
+void AArch_ShelterSystem::OnProtectionZoneEndOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex)
 {
-    if (!IsValid(Actor))
+    if (ACharacter* Character = Cast<ACharacter>(OtherActor))
     {
-        return;
-    }
-
-    // Apply benefits to TranspersonalCharacter if applicable
-    if (ATranspersonalCharacter* Character = Cast<ATranspersonalCharacter>(Actor))
-    {
-        // Temperature regulation
-        if (ShelterConfig.bProvidesWarmth)
+        if (Character->IsPlayerControlled())
         {
-            // Character->ModifyTemperature(ShelterConfig.TemperatureModifier * GetWorld()->GetDeltaSeconds());
+            bPlayerInShelter = false;
+            OnPlayerExitShelter();
+            
+            UE_LOG(LogTemp, Log, TEXT("Player exited shelter: %s"), *GetName());
         }
-
-        // Weather protection reduces exposure effects
-        if (ShelterConfig.WeatherProtection > 0.0f)
-        {
-            // Character->SetWeatherProtection(ShelterConfig.WeatherProtection);
-        }
-
-        // Stamina regeneration bonus in shelter
-        // Character->ModifyStamina(10.0f * GetWorld()->GetDeltaSeconds());
-    }
-}
-
-void AArch_ShelterSystem::RemoveShelterBenefits(AActor* Actor)
-{
-    if (!IsValid(Actor))
-    {
-        return;
-    }
-
-    // Remove benefits from TranspersonalCharacter if applicable
-    if (ATranspersonalCharacter* Character = Cast<ATranspersonalCharacter>(Actor))
-    {
-        // Remove weather protection
-        // Character->SetWeatherProtection(0.0f);
     }
 }
