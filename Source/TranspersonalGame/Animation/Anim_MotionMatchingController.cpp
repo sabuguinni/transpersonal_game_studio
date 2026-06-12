@@ -1,284 +1,366 @@
 #include "Anim_MotionMatchingController.h"
-#include "Animation/AnimSequence.h"
-#include "Animation/AnimInstance.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Components/SkeletalMeshComponent.h"
-#include "Engine/Engine.h"
+#include "Animation/AnimInstance.h"
+#include "Animation/AnimSequence.h"
+#include "Animation/BlendSpace.h"
+#include "Animation/AnimMontage.h"
+#include "Engine/World.h"
+#include "DrawDebugHelpers.h"
+#include "Kismet/KismetMathLibrary.h"
 
 UAnim_MotionMatchingController::UAnim_MotionMatchingController()
 {
-    // Initialize motion matching weights
-    PositionWeight = 1.0f;
-    VelocityWeight = 2.0f;
-    AccelerationWeight = 0.5f;
-    SearchRadius = 100.0f;
+    PrimaryComponentTick.bCanEverTick = true;
+    PrimaryComponentTick.TickGroup = TG_PrePhysics;
     
-    // Initialize current motion data
+    // Initialize default values
+    WalkThreshold = 50.0f;
+    RunThreshold = 200.0f;
+    SprintThreshold = 400.0f;
+    MotionSmoothingRate = 5.0f;
+    TerrainAnalysisRadius = 100.0f;
+    
     CurrentMotionData = FAnim_MotionData();
+    PreviousMotionData = FAnim_MotionData();
 }
 
-void UAnim_MotionMatchingController::UpdateMotionData(ACharacter* Character)
+void UAnim_MotionMatchingController::BeginPlay()
 {
-    if (!Character)
+    Super::BeginPlay();
+    
+    // Cache character references
+    OwnerCharacter = Cast<ACharacter>(GetOwner());
+    if (OwnerCharacter)
     {
-        UE_LOG(LogTemp, Warning, TEXT("MotionMatchingController: Character is null"));
-        return;
-    }
-
-    UCharacterMovementComponent* MovementComp = Character->GetCharacterMovement();
-    if (!MovementComp)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("MotionMatchingController: No movement component found"));
-        return;
-    }
-
-    // Update velocity and speed
-    CurrentMotionData.Velocity = MovementComp->Velocity;
-    CurrentMotionData.Speed = CurrentMotionData.Velocity.Size();
-    
-    // Update acceleration
-    CurrentMotionData.Acceleration = MovementComp->GetCurrentAcceleration();
-    
-    // Calculate movement direction relative to character forward
-    FVector ForwardVector = Character->GetActorForwardVector();
-    FVector VelocityNormalized = CurrentMotionData.Velocity.GetSafeNormal();
-    CurrentMotionData.Direction = FVector::DotProduct(ForwardVector, VelocityNormalized);
-    
-    // Update movement states
-    CurrentMotionData.bIsMoving = CurrentMotionData.Speed > 10.0f;
-    CurrentMotionData.bIsJumping = MovementComp->IsFalling();
-    CurrentMotionData.bIsCrouching = MovementComp->IsCrouching();
-    
-    // Log motion data for debugging
-    UE_LOG(LogTemp, Log, TEXT("Motion Data - Speed: %f, Direction: %f, Moving: %s, Jumping: %s"), 
-           CurrentMotionData.Speed, 
-           CurrentMotionData.Direction,
-           CurrentMotionData.bIsMoving ? TEXT("true") : TEXT("false"),
-           CurrentMotionData.bIsJumping ? TEXT("true") : TEXT("false"));
-}
-
-FAnim_MotionClip UAnim_MotionMatchingController::FindBestMatchingClip(const FAnim_MotionData& TargetMotion)
-{
-    if (MotionDatabase.Num() == 0)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("MotionMatchingController: Motion database is empty"));
-        return FAnim_MotionClip();
-    }
-
-    float BestScore = FLT_MAX;
-    int32 BestClipIndex = 0;
-    
-    // Search through all clips in the database
-    for (int32 i = 0; i < MotionDatabase.Num(); i++)
-    {
-        const FAnim_MotionClip& Clip = MotionDatabase[i];
+        MovementComponent = OwnerCharacter->GetCharacterMovement();
+        MeshComponent = OwnerCharacter->GetMesh();
         
-        // Find best frame within this clip
-        for (int32 j = 0; j < Clip.MotionFrames.Num(); j++)
+        if (MovementComponent)
         {
-            float Score = CalculateMotionScore(TargetMotion, Clip.MotionFrames[j]);
-            
-            if (Score < BestScore)
-            {
-                BestScore = Score;
-                BestClipIndex = i;
-            }
+            UE_LOG(LogTemp, Log, TEXT("Motion Matching Controller initialized for: %s"), *OwnerCharacter->GetName());
+        }
+        else
+        {
+            UE_LOG(LogTemp, Warning, TEXT("Motion Matching Controller: No movement component found"));
+        }
+    }
+    else
+    {
+        UE_LOG(LogTemp, Error, TEXT("Motion Matching Controller: Owner is not a Character"));
+    }
+}
+
+void UAnim_MotionMatchingController::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+{
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+    
+    // Throttle updates for performance
+    LastUpdateTime += DeltaTime;
+    if (LastUpdateTime >= UpdateFrequency)
+    {
+        UpdateMotionData(LastUpdateTime);
+        UpdateBlendSpaceParameters();
+        LastUpdateTime = 0.0f;
+    }
+    
+    StateTransitionTimer += DeltaTime;
+}
+
+void UAnim_MotionMatchingController::UpdateMotionData(float DeltaTime)
+{
+    if (!OwnerCharacter || !MovementComponent)
+    {
+        return;
+    }
+    
+    // Store previous frame data
+    PreviousMotionData = CurrentMotionData;
+    
+    // Update velocity and speed
+    FVector CurrentVelocity = MovementComponent->Velocity;
+    CurrentMotionData.Velocity = CurrentVelocity;
+    CurrentMotionData.Speed = CurrentVelocity.Size();
+    
+    // Calculate acceleration
+    FVector AccelerationDelta = (CurrentVelocity - PreviousMotionData.Velocity) / FMath::Max(DeltaTime, 0.001f);
+    CurrentMotionData.Acceleration = FMath::VInterpTo(CurrentMotionData.Acceleration, AccelerationDelta, DeltaTime, MotionSmoothingRate);
+    
+    // Update direction relative to character forward
+    if (CurrentMotionData.Speed > 1.0f)
+    {
+        FVector ForwardVector = OwnerCharacter->GetActorForwardVector();
+        FVector VelocityDirection = CurrentVelocity.GetSafeNormal();
+        float DotProduct = FVector::DotProduct(ForwardVector, VelocityDirection);
+        CurrentMotionData.Direction = FMath::RadiansToDegrees(FMath::Acos(DotProduct));
+        
+        // Determine if moving left or right
+        FVector CrossProduct = FVector::CrossProduct(ForwardVector, VelocityDirection);
+        if (CrossProduct.Z < 0.0f)
+        {
+            CurrentMotionData.Direction *= -1.0f;
+        }
+    }
+    else
+    {
+        CurrentMotionData.Direction = 0.0f;
+    }
+    
+    // Update air state
+    CurrentMotionData.bIsInAir = MovementComponent->IsFalling();
+    if (!CurrentMotionData.bIsInAir)
+    {
+        LastGroundTime = GetWorld()->GetTimeSeconds();
+        LastGroundLocation = OwnerCharacter->GetActorLocation();
+    }
+    
+    // Update crouching state
+    CurrentMotionData.bIsCrouching = MovementComponent->IsCrouching();
+    
+    // Determine movement state
+    EAnim_MovementState NewState = DetermineMovementState();
+    if (NewState != CurrentMotionData.MovementState)
+    {
+        SetMovementState(NewState);
+    }
+    
+    // Analyze terrain
+    CurrentMotionData.TerrainType = AnalyzeTerrainType();
+}
+
+EAnim_MovementState UAnim_MotionMatchingController::DetermineMovementState() const
+{
+    if (!MovementComponent)
+    {
+        return EAnim_MovementState::Idle;
+    }
+    
+    // Check air states first
+    if (CurrentMotionData.bIsInAir)
+    {
+        if (MovementComponent->Velocity.Z > 50.0f)
+        {
+            return EAnim_MovementState::Jumping;
+        }
+        else if (MovementComponent->Velocity.Z < -50.0f)
+        {
+            return EAnim_MovementState::Falling;
+        }
+    }
+    else
+    {
+        // Just landed
+        float TimeSinceGrounded = GetWorld()->GetTimeSeconds() - LastGroundTime;
+        if (TimeSinceGrounded < 0.5f && PreviousMotionData.bIsInAir)
+        {
+            return EAnim_MovementState::Landing;
         }
     }
     
-    UE_LOG(LogTemp, Log, TEXT("Best matching clip: %s with score: %f"), 
-           *MotionDatabase[BestClipIndex].ClipName, BestScore);
+    // Check crouching
+    if (CurrentMotionData.bIsCrouching)
+    {
+        return EAnim_MovementState::Crouching;
+    }
     
-    return MotionDatabase[BestClipIndex];
+    // Determine ground movement state based on speed
+    float Speed = CurrentMotionData.Speed;
+    
+    if (Speed < WalkThreshold)
+    {
+        return EAnim_MovementState::Idle;
+    }
+    else if (Speed < RunThreshold)
+    {
+        return EAnim_MovementState::Walking;
+    }
+    else if (Speed < SprintThreshold)
+    {
+        return EAnim_MovementState::Running;
+    }
+    else
+    {
+        return EAnim_MovementState::Sprinting;
+    }
 }
 
-float UAnim_MotionMatchingController::CalculateMotionScore(const FAnim_MotionData& A, const FAnim_MotionData& B)
+void UAnim_MotionMatchingController::SetMovementState(EAnim_MovementState NewState)
 {
-    float Score = 0.0f;
+    if (CurrentMotionData.MovementState != NewState)
+    {
+        EAnim_MovementState PreviousState = CurrentMotionData.MovementState;
+        CurrentMotionData.MovementState = NewState;
+        StateTransitionTimer = 0.0f;
+        
+        UE_LOG(LogTemp, Log, TEXT("Movement state changed from %d to %d"), (int32)PreviousState, (int32)NewState);
+        
+        // Trigger animation montages for specific transitions
+        if (NewState == EAnim_MovementState::Jumping && JumpMontage && MeshComponent)
+        {
+            UAnimInstance* AnimInstance = MeshComponent->GetAnimInstance();
+            if (AnimInstance)
+            {
+                AnimInstance->Montage_Play(JumpMontage);
+            }
+        }
+        else if (NewState == EAnim_MovementState::Landing && LandMontage && MeshComponent)
+        {
+            UAnimInstance* AnimInstance = MeshComponent->GetAnimInstance();
+            if (AnimInstance)
+            {
+                AnimInstance->Montage_Play(LandMontage);
+            }
+        }
+    }
+}
+
+EAnim_TerrainType UAnim_MotionMatchingController::AnalyzeTerrainType() const
+{
+    if (!OwnerCharacter)
+    {
+        return EAnim_TerrainType::Flat;
+    }
     
-    // Velocity difference
-    float VelocityDiff = FVector::Dist(A.Velocity, B.Velocity);
-    Score += VelocityDiff * VelocityWeight;
+    float Slope = GetTerrainSlope();
     
-    // Acceleration difference
-    float AccelDiff = FVector::Dist(A.Acceleration, B.Acceleration);
-    Score += AccelDiff * AccelerationWeight;
+    // Classify terrain based on slope
+    if (FMath::Abs(Slope) < 5.0f)
+    {
+        return EAnim_TerrainType::Flat;
+    }
+    else if (Slope > 5.0f)
+    {
+        return EAnim_TerrainType::Uphill;
+    }
+    else if (Slope < -5.0f)
+    {
+        return EAnim_TerrainType::Downhill;
+    }
     
-    // Speed difference
-    float SpeedDiff = FMath::Abs(A.Speed - B.Speed);
-    Score += SpeedDiff * PositionWeight;
+    return EAnim_TerrainType::Flat;
+}
+
+float UAnim_MotionMatchingController::GetTerrainSlope() const
+{
+    if (!OwnerCharacter || !GetWorld())
+    {
+        return 0.0f;
+    }
     
-    // Direction difference
-    float DirectionDiff = FMath::Abs(A.Direction - B.Direction);
-    Score += DirectionDiff * 50.0f; // Direction weight
+    FVector StartLocation = OwnerCharacter->GetActorLocation();
+    FVector ForwardVector = OwnerCharacter->GetActorForwardVector();
     
-    // Boolean state penalties
-    if (A.bIsMoving != B.bIsMoving) Score += 100.0f;
-    if (A.bIsJumping != B.bIsJumping) Score += 200.0f;
-    if (A.bIsCrouching != B.bIsCrouching) Score += 150.0f;
+    // Cast ray forward to analyze slope
+    FVector TraceStart = StartLocation + FVector(0, 0, 50);
+    FVector TraceEnd = StartLocation + (ForwardVector * TerrainAnalysisRadius) - FVector(0, 0, 200);
+    
+    FHitResult HitResult;
+    FCollisionQueryParams QueryParams;
+    QueryParams.AddIgnoredActor(OwnerCharacter);
+    
+    bool bHit = GetWorld()->LineTraceSingleByChannel(
+        HitResult,
+        TraceStart,
+        TraceEnd,
+        ECC_WorldStatic,
+        QueryParams
+    );
+    
+    if (bHit)
+    {
+        FVector HitLocation = HitResult.Location;
+        FVector CurrentLocation = OwnerCharacter->GetActorLocation();
+        
+        float HeightDifference = HitLocation.Z - CurrentLocation.Z;
+        float HorizontalDistance = FVector::Dist2D(HitLocation, CurrentLocation);
+        
+        if (HorizontalDistance > 0.0f)
+        {
+            float SlopeRadians = FMath::Atan(HeightDifference / HorizontalDistance);
+            return FMath::RadiansToDegrees(SlopeRadians);
+        }
+    }
+    
+    return 0.0f;
+}
+
+UAnimSequence* UAnim_MotionMatchingController::SelectBestAnimation() const
+{
+    // Simple animation selection based on current state
+    switch (CurrentMotionData.MovementState)
+    {
+        case EAnim_MovementState::Idle:
+            if (IdleAnimations.Num() > 0)
+            {
+                return IdleAnimations[0];
+            }
+            break;
+            
+        case EAnim_MovementState::Walking:
+            if (WalkAnimations.Num() > 0)
+            {
+                return WalkAnimations[0];
+            }
+            break;
+            
+        case EAnim_MovementState::Running:
+        case EAnim_MovementState::Sprinting:
+            if (RunAnimations.Num() > 0)
+            {
+                return RunAnimations[0];
+            }
+            break;
+            
+        default:
+            break;
+    }
+    
+    return nullptr;
+}
+
+float UAnim_MotionMatchingController::CalculateAnimationScore(UAnimSequence* Animation) const
+{
+    if (!Animation)
+    {
+        return 0.0f;
+    }
+    
+    // Placeholder scoring system - in a full implementation this would
+    // analyze the animation's motion data against current character motion
+    float Score = 1.0f;
+    
+    // Factor in speed matching
+    // This would require animation metadata or motion analysis
     
     return Score;
 }
 
-void UAnim_MotionMatchingController::AddMotionClip(UAnimSequence* Animation, const FString& ClipName)
+void UAnim_MotionMatchingController::UpdateBlendSpaceParameters()
 {
-    if (!Animation)
+    // Update blend space coordinates based on current motion
+    // This would be used by the Animation Blueprint
+    
+    if (MovementBlendSpace && MeshComponent)
     {
-        UE_LOG(LogTemp, Warning, TEXT("MotionMatchingController: Animation sequence is null"));
-        return;
-    }
-
-    FAnim_MotionClip NewClip;
-    NewClip.AnimationSequence = Animation;
-    NewClip.ClipName = ClipName;
-    NewClip.ClipLength = Animation->GetPlayLength();
-    
-    // Analyze the animation sequence to extract motion data
-    AnalyzeAnimationSequence(Animation, NewClip);
-    
-    // Add to database
-    MotionDatabase.Add(NewClip);
-    
-    UE_LOG(LogTemp, Log, TEXT("Added motion clip: %s (Length: %f seconds, Frames: %d)"), 
-           *ClipName, NewClip.ClipLength, NewClip.MotionFrames.Num());
-}
-
-void UAnim_MotionMatchingController::BuildMotionDatabase()
-{
-    UE_LOG(LogTemp, Log, TEXT("Building motion database..."));
-    
-    // Clear existing database
-    ClearMotionDatabase();
-    
-    // TODO: Load animation sequences from content browser
-    // This would typically scan for animation assets and add them automatically
-    
-    UE_LOG(LogTemp, Log, TEXT("Motion database built with %d clips"), MotionDatabase.Num());
-}
-
-void UAnim_MotionMatchingController::ClearMotionDatabase()
-{
-    MotionDatabase.Empty();
-    UE_LOG(LogTemp, Log, TEXT("Motion database cleared"));
-}
-
-void UAnim_MotionMatchingController::PlayMotionClip(UAnimInstance* AnimInstance, const FAnim_MotionClip& Clip)
-{
-    if (!AnimInstance || !Clip.AnimationSequence)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("MotionMatchingController: Invalid animation instance or clip"));
-        return;
-    }
-
-    // Play the animation sequence
-    // Note: In a full implementation, this would handle blending and timing
-    UE_LOG(LogTemp, Log, TEXT("Playing motion clip: %s"), *Clip.ClipName);
-}
-
-void UAnim_MotionMatchingController::DebugPrintMotionData()
-{
-    UE_LOG(LogTemp, Warning, TEXT("=== MOTION DATA DEBUG ==="));
-    UE_LOG(LogTemp, Warning, TEXT("Velocity: %s"), *CurrentMotionData.Velocity.ToString());
-    UE_LOG(LogTemp, Warning, TEXT("Acceleration: %s"), *CurrentMotionData.Acceleration.ToString());
-    UE_LOG(LogTemp, Warning, TEXT("Speed: %f"), CurrentMotionData.Speed);
-    UE_LOG(LogTemp, Warning, TEXT("Direction: %f"), CurrentMotionData.Direction);
-    UE_LOG(LogTemp, Warning, TEXT("Is Moving: %s"), CurrentMotionData.bIsMoving ? TEXT("true") : TEXT("false"));
-    UE_LOG(LogTemp, Warning, TEXT("Is Jumping: %s"), CurrentMotionData.bIsJumping ? TEXT("true") : TEXT("false"));
-    UE_LOG(LogTemp, Warning, TEXT("Is Crouching: %s"), CurrentMotionData.bIsCrouching ? TEXT("true") : TEXT("false"));
-    UE_LOG(LogTemp, Warning, TEXT("Database Clips: %d"), MotionDatabase.Num());
-}
-
-void UAnim_MotionMatchingController::ValidateMotionDatabase()
-{
-    UE_LOG(LogTemp, Warning, TEXT("=== MOTION DATABASE VALIDATION ==="));
-    
-    for (int32 i = 0; i < MotionDatabase.Num(); i++)
-    {
-        const FAnim_MotionClip& Clip = MotionDatabase[i];
-        
-        bool bIsValid = true;
-        FString ValidationErrors;
-        
-        if (!Clip.AnimationSequence)
+        UAnimInstance* AnimInstance = MeshComponent->GetAnimInstance();
+        if (AnimInstance)
         {
-            bIsValid = false;
-            ValidationErrors += TEXT("Missing animation sequence; ");
+            FVector2D BlendCoords = GetBlendSpaceCoordinates();
+            // In a full implementation, this would set blend space parameters
+            // via the Animation Blueprint interface
         }
-        
-        if (Clip.MotionFrames.Num() == 0)
-        {
-            bIsValid = false;
-            ValidationErrors += TEXT("No motion frames; ");
-        }
-        
-        if (Clip.ClipLength <= 0.0f)
-        {
-            bIsValid = false;
-            ValidationErrors += TEXT("Invalid clip length; ");
-        }
-        
-        UE_LOG(LogTemp, Warning, TEXT("Clip %d (%s): %s - %s"), 
-               i, 
-               *Clip.ClipName,
-               bIsValid ? TEXT("VALID") : TEXT("INVALID"),
-               bIsValid ? TEXT("OK") : *ValidationErrors);
     }
 }
 
-void UAnim_MotionMatchingController::AnalyzeAnimationSequence(UAnimSequence* Animation, FAnim_MotionClip& OutClip)
+FVector2D UAnim_MotionMatchingController::GetBlendSpaceCoordinates() const
 {
-    if (!Animation)
-    {
-        return;
-    }
-
-    // Sample the animation at regular intervals to extract motion data
-    float SampleRate = 30.0f; // 30 FPS sampling
-    float SampleInterval = 1.0f / SampleRate;
-    int32 NumSamples = FMath::CeilToInt(Animation->GetPlayLength() * SampleRate);
+    // Calculate 2D blend space coordinates
+    // X-axis: Speed (normalized)
+    // Y-axis: Direction (-180 to 180 degrees, normalized to -1 to 1)
     
-    OutClip.MotionFrames.Empty();
-    OutClip.MotionFrames.Reserve(NumSamples);
+    float NormalizedSpeed = FMath::Clamp(CurrentMotionData.Speed / SprintThreshold, 0.0f, 1.0f);
+    float NormalizedDirection = FMath::Clamp(CurrentMotionData.Direction / 180.0f, -1.0f, 1.0f);
     
-    for (int32 i = 0; i < NumSamples; i++)
-    {
-        float SampleTime = i * SampleInterval;
-        
-        // Create motion data for this frame
-        // Note: In a full implementation, this would extract actual bone positions
-        // and calculate velocities/accelerations from the animation data
-        FAnim_MotionData FrameData;
-        
-        // Placeholder motion data extraction
-        // This would analyze root motion, bone velocities, etc.
-        FrameData.Speed = FMath::Sin(SampleTime * 2.0f) * 100.0f; // Example data
-        FrameData.Direction = FMath::Cos(SampleTime) * 0.5f;
-        FrameData.bIsMoving = FrameData.Speed > 10.0f;
-        
-        OutClip.MotionFrames.Add(FrameData);
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("Analyzed animation sequence: %d motion frames extracted"), 
-           OutClip.MotionFrames.Num());
-}
-
-FAnim_MotionData UAnim_MotionMatchingController::PredictNextMotion(const FAnim_MotionData& Current, float DeltaTime)
-{
-    FAnim_MotionData Predicted = Current;
-    
-    // Simple motion prediction based on current velocity and acceleration
-    Predicted.Velocity += Current.Acceleration * DeltaTime;
-    Predicted.Speed = Predicted.Velocity.Size();
-    
-    return Predicted;
-}
-
-void UAnim_MotionMatchingController::OptimizeDatabase()
-{
-    // Remove duplicate or very similar motion clips
-    // Optimize memory usage
-    // Build acceleration structures for faster searching
-    
-    UE_LOG(LogTemp, Log, TEXT("Motion database optimization completed"));
+    return FVector2D(NormalizedSpeed, NormalizedDirection);
 }
