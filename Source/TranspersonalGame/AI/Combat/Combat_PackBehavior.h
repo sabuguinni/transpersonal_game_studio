@@ -1,10 +1,30 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "GameFramework/Actor.h"
 #include "Components/ActorComponent.h"
-#include "Engine/Engine.h"
 #include "SharedTypes.h"
 #include "Combat_PackBehavior.generated.h"
+
+UENUM(BlueprintType)
+enum class ECombat_PackRole : uint8
+{
+    Alpha,      // Pack leader, makes decisions
+    Beta,       // Second in command, flanks
+    Hunter,     // Primary attacker
+    Scout,      // Reconnaissance and early warning
+    Support     // Backup and distraction
+};
+
+UENUM(BlueprintType)
+enum class ECombat_PackFormation : uint8
+{
+    Scattered,  // Spread out patrol
+    Line,       // Linear formation
+    Pincer,     // Flanking from both sides
+    Circle,     // Surround target
+    Ambush      // Hidden positions
+};
 
 USTRUCT(BlueprintType)
 struct TRANSPERSONALGAME_API FCombat_PackMember
@@ -12,48 +32,52 @@ struct TRANSPERSONALGAME_API FCombat_PackMember
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pack")
-    TWeakObjectPtr<AActor> MemberActor;
+    AActor* MemberActor = nullptr;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pack")
-    ECombat_PackRole Role;
+    ECombat_PackRole Role = ECombat_PackRole::Hunter;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pack")
-    float DistanceFromLeader;
+    FVector AssignedPosition = FVector::ZeroVector;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pack")
-    bool bIsAlive;
+    bool bIsAlive = true;
 
-    FCombat_PackMember()
-    {
-        MemberActor = nullptr;
-        Role = ECombat_PackRole::Follower;
-        DistanceFromLeader = 0.0f;
-        bIsAlive = true;
-    }
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pack")
+    float DistanceFromAlpha = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pack")
+    float LastCommunicationTime = 0.0f;
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FCombat_PackFormation
+struct TRANSPERSONALGAME_API FCombat_PackData
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Formation")
-    ECombat_FormationType FormationType;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pack")
+    TArray<FCombat_PackMember> Members;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Formation")
-    TArray<FVector> RelativePositions;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pack")
+    ECombat_PackFormation CurrentFormation = ECombat_PackFormation::Scattered;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Formation")
-    float FormationRadius;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pack")
+    FVector TargetLocation = FVector::ZeroVector;
 
-    FCombat_PackFormation()
-    {
-        FormationType = ECombat_FormationType::Circle;
-        FormationRadius = 300.0f;
-    }
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pack")
+    AActor* PrimaryTarget = nullptr;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pack")
+    float PackCohesion = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pack")
+    bool bInCombat = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pack")
+    float LastFormationChangeTime = 0.0f;
 };
 
-UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
+UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UCombat_PackBehavior : public UActorComponent
 {
     GENERATED_BODY()
@@ -67,9 +91,29 @@ protected:
 public:
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    // Pack Management
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pack Behavior")
+    FCombat_PackData PackData;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pack Behavior")
+    float MaxPackDistance = 2000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pack Behavior")
+    float FormationRadius = 500.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pack Behavior")
+    float CommunicationRange = 1500.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pack Behavior")
+    float FormationChangeDelay = 5.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pack Behavior")
+    bool bIsAlpha = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pack Behavior")
+    ECombat_PackRole MyRole = ECombat_PackRole::Hunter;
+
     UFUNCTION(BlueprintCallable, Category = "Pack Behavior")
-    void InitializePack(AActor* Leader, const TArray<AActor*>& Members);
+    void InitializePack(TArray<AActor*> PackMembers);
 
     UFUNCTION(BlueprintCallable, Category = "Pack Behavior")
     void AddPackMember(AActor* NewMember, ECombat_PackRole Role);
@@ -78,62 +122,33 @@ public:
     void RemovePackMember(AActor* Member);
 
     UFUNCTION(BlueprintCallable, Category = "Pack Behavior")
-    void SetPackFormation(ECombat_FormationType NewFormation);
+    void SetFormation(ECombat_PackFormation NewFormation);
 
-    // Combat Coordination
-    UFUNCTION(BlueprintCallable, Category = "Pack Combat")
-    void InitiatePackAttack(AActor* Target);
+    UFUNCTION(BlueprintCallable, Category = "Pack Behavior")
+    void SetPrimaryTarget(AActor* Target);
 
-    UFUNCTION(BlueprintCallable, Category = "Pack Combat")
-    void ExecuteFlankingManeuver(AActor* Target);
+    UFUNCTION(BlueprintCallable, Category = "Pack Behavior")
+    FVector GetAssignedPosition();
 
-    UFUNCTION(BlueprintCallable, Category = "Pack Combat")
-    void RetreatFormation();
+    UFUNCTION(BlueprintCallable, Category = "Pack Behavior")
+    void CommunicateWithPack(const FString& Message);
 
-    // Pack State
-    UFUNCTION(BlueprintPure, Category = "Pack Behavior")
-    bool IsPackLeader() const;
+    UFUNCTION(BlueprintCallable, Category = "Pack Behavior")
+    bool IsPackIntact();
 
-    UFUNCTION(BlueprintPure, Category = "Pack Behavior")
-    int32 GetPackSize() const;
+    UFUNCTION(BlueprintCallable, Category = "Pack Behavior")
+    AActor* GetAlphaMember();
 
-    UFUNCTION(BlueprintPure, Category = "Pack Behavior")
-    AActor* GetPackLeader() const;
-
-    UFUNCTION(BlueprintPure, Category = "Pack Behavior")
-    TArray<AActor*> GetLivingMembers() const;
-
-protected:
-    // Pack Data
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Pack", meta = (AllowPrivateAccess = "true"))
-    TArray<FCombat_PackMember> PackMembers;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Pack", meta = (AllowPrivateAccess = "true"))
-    TWeakObjectPtr<AActor> PackLeader;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Pack", meta = (AllowPrivateAccess = "true"))
-    FCombat_PackFormation CurrentFormation;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Pack", meta = (AllowPrivateAccess = "true"))
-    ECombat_PackState PackState;
-
-    // Combat Settings
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Combat", meta = (AllowPrivateAccess = "true"))
-    float AttackCoordinationRadius;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Combat", meta = (AllowPrivateAccess = "true"))
-    float FlankingDistance;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Combat", meta = (AllowPrivateAccess = "true"))
-    float RetreatThreshold;
-
-    // Internal Methods
-    void UpdatePackFormation();
-    void UpdatePackState();
-    FVector CalculateFormationPosition(int32 MemberIndex);
-    void BroadcastPackCommand(ECombat_PackCommand Command, AActor* Target = nullptr);
+    UFUNCTION(BlueprintCallable, Category = "Pack Behavior")
+    int32 GetLivingMemberCount();
 
 private:
-    float LastFormationUpdate;
-    TWeakObjectPtr<AActor> CurrentTarget;
+    void UpdatePackCohesion();
+    void UpdateFormationPositions();
+    void CheckPackIntegrity();
+    FVector CalculateFormationPosition(ECombat_PackRole Role, int32 MemberIndex);
+    void BroadcastToPackMembers(const FString& Message);
+    
+    float LastCohesionUpdate = 0.0f;
+    TArray<AActor*> NearbyPackMembers;
 };
