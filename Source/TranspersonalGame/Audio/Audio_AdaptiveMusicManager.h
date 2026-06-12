@@ -1,128 +1,117 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/GameInstanceSubsystem.h"
+#include "Components/ActorComponent.h"
 #include "Engine/World.h"
-#include "Components/AudioComponent.h"
 #include "Sound/SoundCue.h"
-#include "SharedTypes.h"
+#include "Components/AudioComponent.h"
 #include "Audio_AdaptiveMusicManager.generated.h"
 
 UENUM(BlueprintType)
-enum class EAudio_MusicLayer : uint8
+enum class EAudio_MusicState : uint8
 {
-    Ambient     UMETA(DisplayName = "Ambient"),
-    Tension     UMETA(DisplayName = "Tension"),
-    Combat      UMETA(DisplayName = "Combat"),
-    Exploration UMETA(DisplayName = "Exploration"),
-    Danger      UMETA(DisplayName = "Danger")
-};
-
-UENUM(BlueprintType)
-enum class EAudio_BiomeType : uint8
-{
-    Forest      UMETA(DisplayName = "Forest"),
-    Plains      UMETA(DisplayName = "Plains"),
-    River       UMETA(DisplayName = "River"),
-    Mountains   UMETA(DisplayName = "Mountains"),
-    Caves       UMETA(DisplayName = "Caves")
+    Calm,
+    Tension,
+    Danger,
+    Combat,
+    Exploration,
+    Dawn,
+    Dusk,
+    Night
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FAudio_MusicState
+struct TRANSPERSONALGAME_API FAudio_MusicLayer
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    EAudio_MusicLayer CurrentLayer = EAudio_MusicLayer::Ambient;
+    TSoftObjectPtr<USoundCue> SoundCue;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    EAudio_BiomeType CurrentBiome = EAudio_BiomeType::Forest;
+    float Volume = 1.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float IntensityLevel = 0.0f;
+    float FadeTime = 2.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float CrossfadeTime = 2.0f;
+    bool bIsActive = false;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    bool bIsInCombat = false;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    bool bDangerNearby = false;
+    FAudio_MusicLayer()
+    {
+        Volume = 1.0f;
+        FadeTime = 2.0f;
+        bIsActive = false;
+    }
 };
 
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UAudio_AdaptiveMusicManager : public UGameInstanceSubsystem
+UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UAudio_AdaptiveMusicManager : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
     UAudio_AdaptiveMusicManager();
 
-    // Subsystem interface
-    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
-    virtual void Deinitialize() override;
+protected:
+    virtual void BeginPlay() override;
 
-    // Music control
-    UFUNCTION(BlueprintCallable, Category = "Audio")
-    void SetMusicLayer(EAudio_MusicLayer NewLayer, float CrossfadeTime = 2.0f);
+public:
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
+    // Music state management
     UFUNCTION(BlueprintCallable, Category = "Audio")
-    void SetBiome(EAudio_BiomeType NewBiome);
-
-    UFUNCTION(BlueprintCallable, Category = "Audio")
-    void SetIntensity(float NewIntensity);
+    void SetMusicState(EAudio_MusicState NewState);
 
     UFUNCTION(BlueprintCallable, Category = "Audio")
-    void OnCombatStart();
+    EAudio_MusicState GetCurrentMusicState() const { return CurrentMusicState; }
+
+    // Layer management
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    void EnableMusicLayer(int32 LayerIndex, float FadeInTime = 2.0f);
 
     UFUNCTION(BlueprintCallable, Category = "Audio")
-    void OnCombatEnd();
+    void DisableMusicLayer(int32 LayerIndex, float FadeOutTime = 2.0f);
 
+    // Proximity-based music
     UFUNCTION(BlueprintCallable, Category = "Audio")
-    void OnDangerDetected(bool bDangerous);
+    void UpdateProximityMusic(const TArray<AActor*>& NearbyActors);
 
+    // Time of day music
     UFUNCTION(BlueprintCallable, Category = "Audio")
-    void UpdateMusicState(float DeltaTime);
-
-    // Getters
-    UFUNCTION(BlueprintPure, Category = "Audio")
-    FAudio_MusicState GetCurrentMusicState() const { return CurrentMusicState; }
-
-    UFUNCTION(BlueprintPure, Category = "Audio")
-    bool IsInCombat() const { return CurrentMusicState.bIsInCombat; }
+    void UpdateTimeOfDayMusic(float TimeOfDay);
 
 protected:
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    FAudio_MusicState CurrentMusicState;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Music Layers")
+    TArray<FAudio_MusicLayer> MusicLayers;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    TMap<EAudio_MusicLayer, TSoftObjectPtr<USoundCue>> MusicLayers;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Components")
+    TArray<UAudioComponent*> AudioComponents;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    TMap<EAudio_BiomeType, TSoftObjectPtr<USoundCue>> BiomeAmbience;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Music State")
+    EAudio_MusicState CurrentMusicState;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    UAudioComponent* MusicAudioComponent;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Music State")
+    EAudio_MusicState TargetMusicState;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    UAudioComponent* AmbienceAudioComponent;
+    // Transition timing
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Transitions")
+    float StateTransitionTime = 3.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    float MasterVolume = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Transitions")
+    float CurrentTransitionTime = 0.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    float MusicVolume = 0.7f;
+    // Proximity settings
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Proximity")
+    float DangerDetectionRadius = 2000.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    float AmbienceVolume = 0.5f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Proximity")
+    float TensionDetectionRadius = 3000.0f;
 
 private:
-    void CrossfadeToLayer(EAudio_MusicLayer NewLayer, float CrossfadeTime);
-    void UpdateBiomeAmbience();
-    void CalculateAdaptiveIntensity();
-
-    float LastIntensityUpdate = 0.0f;
-    float IntensityUpdateInterval = 1.0f;
+    void InitializeAudioComponents();
+    void ProcessMusicTransition(float DeltaTime);
+    void UpdateLayerVolumes(float DeltaTime);
+    EAudio_MusicState DetermineMusicStateFromProximity(const TArray<AActor*>& NearbyActors);
+    EAudio_MusicState DetermineMusicStateFromTimeOfDay(float TimeOfDay);
 };
