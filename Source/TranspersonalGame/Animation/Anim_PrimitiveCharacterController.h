@@ -4,9 +4,6 @@
 #include "Animation/AnimInstance.h"
 #include "Engine/Engine.h"
 #include "Components/SkeletalMeshComponent.h"
-#include "Animation/AnimMontage.h"
-#include "Animation/BlendSpace.h"
-#include "Animation/AnimSequence.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Anim_PrimitiveCharacterController.generated.h"
@@ -15,34 +12,28 @@ UENUM(BlueprintType)
 enum class EAnim_MovementState : uint8
 {
     Idle        UMETA(DisplayName = "Idle"),
-    Walking     UMETA(DisplayName = "Walking"),
+    Walking     UMETA(DisplayName = "Walking"), 
     Running     UMETA(DisplayName = "Running"),
-    Sprinting   UMETA(DisplayName = "Sprinting"),
-    Crouching   UMETA(DisplayName = "Crouching"),
     Jumping     UMETA(DisplayName = "Jumping"),
     Falling     UMETA(DisplayName = "Falling"),
-    Landing     UMETA(DisplayName = "Landing"),
-    Combat      UMETA(DisplayName = "Combat"),
-    Injured     UMETA(DisplayName = "Injured")
+    Crouching   UMETA(DisplayName = "Crouching"),
+    Combat      UMETA(DisplayName = "Combat")
 };
 
 UENUM(BlueprintType)
 enum class EAnim_ActionState : uint8
 {
     None            UMETA(DisplayName = "None"),
-    Crafting        UMETA(DisplayName = "Crafting"),
     Gathering       UMETA(DisplayName = "Gathering"),
+    Crafting        UMETA(DisplayName = "Crafting"),
     Hunting         UMETA(DisplayName = "Hunting"),
     Building        UMETA(DisplayName = "Building"),
     Eating          UMETA(DisplayName = "Eating"),
-    Drinking        UMETA(DisplayName = "Drinking"),
-    Sleeping        UMETA(DisplayName = "Sleeping"),
-    Hiding          UMETA(DisplayName = "Hiding"),
-    Climbing        UMETA(DisplayName = "Climbing")
+    Drinking        UMETA(DisplayName = "Drinking")
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FAnim_CharacterAnimData
+struct TRANSPERSONALGAME_API FAnim_CharacterAnimationData
 {
     GENERATED_BODY()
 
@@ -58,22 +49,22 @@ struct TRANSPERSONALGAME_API FAnim_CharacterAnimData
     UPROPERTY(BlueprintReadOnly, Category = "Movement")
     bool bIsCrouching;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Movement")
+    UPROPERTY(BlueprintReadOnly, Category = "State")
     EAnim_MovementState MovementState;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Action")
+    UPROPERTY(BlueprintReadOnly, Category = "State")
     EAnim_ActionState ActionState;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Survival")
-    float HealthPercent;
+    UPROPERTY(BlueprintReadOnly, Category = "Combat")
+    bool bIsInCombat;
 
     UPROPERTY(BlueprintReadOnly, Category = "Survival")
-    float StaminaPercent;
+    float HealthPercentage;
 
     UPROPERTY(BlueprintReadOnly, Category = "Survival")
-    float FearLevel;
+    float StaminaPercentage;
 
-    FAnim_CharacterAnimData()
+    FAnim_CharacterAnimationData()
     {
         Speed = 0.0f;
         Direction = 0.0f;
@@ -81,9 +72,9 @@ struct TRANSPERSONALGAME_API FAnim_CharacterAnimData
         bIsCrouching = false;
         MovementState = EAnim_MovementState::Idle;
         ActionState = EAnim_ActionState::None;
-        HealthPercent = 1.0f;
-        StaminaPercent = 1.0f;
-        FearLevel = 0.0f;
+        bIsInCombat = false;
+        HealthPercentage = 100.0f;
+        StaminaPercentage = 100.0f;
     }
 };
 
@@ -97,67 +88,56 @@ public:
 
 protected:
     virtual void NativeInitializeAnimation() override;
-    virtual void NativeUpdateAnimation(float DeltaTimeX) override;
+    virtual void NativeUpdateAnimation(float DeltaTime) override;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Character")
+    UPROPERTY(BlueprintReadOnly, Category = "Character Reference")
     class ACharacter* OwningCharacter;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Movement")
+    UPROPERTY(BlueprintReadOnly, Category = "Movement Component")
     class UCharacterMovementComponent* CharacterMovement;
 
     UPROPERTY(BlueprintReadOnly, Category = "Animation Data")
-    FAnim_CharacterAnimData AnimData;
+    FAnim_CharacterAnimationData AnimationData;
 
-    // Animation Assets
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Animations|Locomotion")
-    class UBlendSpace* LocomotionBlendSpace;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Animations|Actions")
-    class UAnimMontage* CraftingMontage;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Animations|Actions")
+    // Animation Montages for survival actions
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Animation Montages")
     class UAnimMontage* GatheringMontage;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Animations|Actions")
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Animation Montages")
+    class UAnimMontage* CraftingMontage;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Animation Montages")
     class UAnimMontage* HuntingMontage;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Animations|Combat")
-    class UAnimMontage* AttackMontage;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Animation Montages")
+    class UAnimMontage* BuildingMontage;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Animations|Combat")
-    class UAnimMontage* DefendMontage;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Animation Montages")
+    class UAnimMontage* EatingMontage;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Animations|Survival")
-    class UAnimMontage* InjuredMontage;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Animation Montages")
+    class UAnimMontage* DrinkingMontage;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Animations|Survival")
-    class UAnimMontage* FearMontage;
+    // Movement thresholds
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Movement Settings")
+    float WalkSpeedThreshold;
 
-public:
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    void PlayActionMontage(EAnim_ActionState ActionType);
-
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    void StopActionMontage();
-
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    void SetMovementState(EAnim_MovementState NewState);
-
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    void SetActionState(EAnim_ActionState NewState);
-
-    UFUNCTION(BlueprintPure, Category = "Animation")
-    bool IsPlayingActionMontage() const;
-
-    UFUNCTION(BlueprintPure, Category = "Animation")
-    EAnim_MovementState GetCurrentMovementState() const { return AnimData.MovementState; }
-
-    UFUNCTION(BlueprintPure, Category = "Animation")
-    EAnim_ActionState GetCurrentActionState() const { return AnimData.ActionState; }
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Movement Settings")
+    float RunSpeedThreshold;
 
 private:
     void UpdateMovementData();
-    void UpdateActionData();
-    void UpdateSurvivalData();
+    void UpdateActionState();
     EAnim_MovementState CalculateMovementState();
+
+public:
+    // Blueprint callable functions
+    UFUNCTION(BlueprintCallable, Category = "Animation Control")
+    void PlaySurvivalAction(EAnim_ActionState ActionType);
+
+    UFUNCTION(BlueprintCallable, Category = "Animation Control")
+    void StopCurrentAction();
+
+    UFUNCTION(BlueprintPure, Category = "Animation Data")
+    FAnim_CharacterAnimationData GetAnimationData() const { return AnimationData; }
 };
