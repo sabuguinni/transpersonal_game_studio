@@ -4,7 +4,7 @@
 #include "GameFramework/Actor.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/BoxComponent.h"
-#include "Engine/Engine.h"
+#include "Engine/StaticMesh.h"
 #include "../SharedTypes.h"
 #include "Arch_ShelterSystem.generated.h"
 
@@ -13,42 +13,32 @@ enum class EArch_ShelterType : uint8
 {
     CaveEntrance    UMETA(DisplayName = "Cave Entrance"),
     RockOverhang    UMETA(DisplayName = "Rock Overhang"),
-    StoneShelter    UMETA(DisplayName = "Stone Shelter"),
-    CliffDwelling   UMETA(DisplayName = "Cliff Dwelling")
+    StoneArchway    UMETA(DisplayName = "Stone Archway"),
+    NaturalAlcove   UMETA(DisplayName = "Natural Alcove")
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FArch_ShelterProperties
+struct FArch_ShelterProperties
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter")
     EArch_ShelterType ShelterType = EArch_ShelterType::CaveEntrance;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter")
     float WeatherProtection = 0.8f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float StructuralIntegrity = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter")
+    float TemperatureModifier = 5.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter")
     int32 MaxOccupants = 4;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter")
-    bool bProvidesSafety = true;
+    bool bProvidesWarmth = true;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter")
-    float TemperatureModifier = 5.0f;
-
-    FArch_ShelterProperties()
-    {
-        ShelterType = EArch_ShelterType::CaveEntrance;
-        WeatherProtection = 0.8f;
-        StructuralIntegrity = 1.0f;
-        MaxOccupants = 4;
-        bProvidesSafety = true;
-        TemperatureModifier = 5.0f;
-    }
+    bool bBlocksWind = true;
 };
 
 UCLASS(BlueprintType, Blueprintable)
@@ -69,16 +59,13 @@ protected:
     UBoxComponent* InteriorVolume;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    UBoxComponent* EntranceCollision;
+    UBoxComponent* EntranceVolume;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter Properties")
-    FArch_ShelterProperties ShelterData;
+    FArch_ShelterProperties ShelterConfig;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter Properties")
     TArray<AActor*> CurrentOccupants;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter Properties")
-    bool bIsOccupied = false;
 
 public:
     virtual void Tick(float DeltaTime) override;
@@ -87,36 +74,40 @@ public:
     bool CanEnterShelter(AActor* Actor);
 
     UFUNCTION(BlueprintCallable, Category = "Shelter")
-    bool EnterShelter(AActor* Actor);
+    void EnterShelter(AActor* Actor);
 
     UFUNCTION(BlueprintCallable, Category = "Shelter")
-    bool ExitShelter(AActor* Actor);
+    void ExitShelter(AActor* Actor);
 
     UFUNCTION(BlueprintCallable, Category = "Shelter")
-    float GetWeatherProtection() const { return ShelterData.WeatherProtection; }
+    float GetWeatherProtection() const;
 
     UFUNCTION(BlueprintCallable, Category = "Shelter")
-    float GetTemperatureBonus() const { return ShelterData.TemperatureModifier; }
+    float GetTemperatureBonus() const;
 
     UFUNCTION(BlueprintCallable, Category = "Shelter")
-    bool IsSafe() const { return ShelterData.bProvidesSafety; }
+    bool IsOccupied() const;
 
     UFUNCTION(BlueprintCallable, Category = "Shelter")
     int32 GetAvailableSpace() const;
 
 protected:
     UFUNCTION()
-    void OnEntranceBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult);
+    void OnEntranceOverlapBegin(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, 
+        UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult);
 
     UFUNCTION()
-    void OnEntranceEndOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex);
+    void OnEntranceOverlapEnd(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, 
+        UPrimitiveComponent* OtherComp, int32 OtherBodyIndex);
 
     UFUNCTION(BlueprintImplementableEvent, Category = "Shelter")
-    void OnOccupantEntered(AActor* Occupant);
+    void OnActorEnteredShelter(AActor* Actor);
 
     UFUNCTION(BlueprintImplementableEvent, Category = "Shelter")
-    void OnOccupantExited(AActor* Occupant);
+    void OnActorExitedShelter(AActor* Actor);
 
-    void UpdateShelterStatus();
-    void ApplyWeatherDamage(float DeltaTime);
+private:
+    void UpdateShelterEffects();
+    void ApplyShelterBenefits(AActor* Actor);
+    void RemoveShelterBenefits(AActor* Actor);
 };
