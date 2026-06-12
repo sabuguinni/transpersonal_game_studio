@@ -1,10 +1,11 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/World.h"
-#include "GameFramework/GameModeBase.h"
-#include "Components/ActorComponent.h"
-#include "SharedTypes.h"
+#include "GameFramework/Actor.h"
+#include "Engine/Engine.h"
+#include "Components/StaticMeshComponent.h"
+#include "Components/SphereComponent.h"
+#include "../SharedTypes.h"
 #include "Quest_HuntingQuestManager.generated.h"
 
 USTRUCT(BlueprintType)
@@ -13,7 +14,7 @@ struct TRANSPERSONALGAME_API FQuest_HuntTarget
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hunt Target")
-    FString TargetSpecies;
+    EDinosaurSpecies TargetSpecies;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hunt Target")
     int32 RequiredKills;
@@ -22,101 +23,125 @@ struct TRANSPERSONALGAME_API FQuest_HuntTarget
     int32 CurrentKills;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hunt Target")
-    float MinDistance;
+    FVector HuntingArea;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hunt Target")
-    bool bRequiresStealth;
+    float HuntingRadius;
 
     FQuest_HuntTarget()
     {
-        TargetSpecies = TEXT("Raptor");
+        TargetSpecies = EDinosaurSpecies::TRex;
         RequiredKills = 1;
         CurrentKills = 0;
-        MinDistance = 500.0f;
-        bRequiresStealth = false;
+        HuntingArea = FVector::ZeroVector;
+        HuntingRadius = 1000.0f;
     }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FQuest_HuntingReward
+struct TRANSPERSONALGAME_API FQuest_HuntingQuest
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Reward")
-    FString ItemName;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hunting Quest")
+    FString QuestName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Reward")
-    int32 Quantity;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hunting Quest")
+    FString QuestDescription;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Reward")
-    float ExperiencePoints;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hunting Quest")
+    TArray<FQuest_HuntTarget> HuntTargets;
 
-    FQuest_HuntingReward()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hunting Quest")
+    EQuestStatus QuestStatus;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hunting Quest")
+    float TimeLimit;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hunting Quest")
+    float ElapsedTime;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hunting Quest")
+    TArray<FString> RewardItems;
+
+    FQuest_HuntingQuest()
     {
-        ItemName = TEXT("Meat");
-        Quantity = 5;
-        ExperiencePoints = 100.0f;
+        QuestName = TEXT("Hunt the Beast");
+        QuestDescription = TEXT("Hunt dangerous creatures to protect the tribe");
+        QuestStatus = EQuestStatus::NotStarted;
+        TimeLimit = 600.0f; // 10 minutes
+        ElapsedTime = 0.0f;
     }
 };
 
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UQuest_HuntingQuestManager : public UActorComponent
+class TRANSPERSONALGAME_API AQuest_HuntingQuestManager : public AActor
 {
     GENERATED_BODY()
 
 public:
-    UQuest_HuntingQuestManager();
+    AQuest_HuntingQuestManager();
 
 protected:
     virtual void BeginPlay() override;
+    virtual void Tick(float DeltaTime) override;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    UStaticMeshComponent* QuestMarkerMesh;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    USphereComponent* InteractionSphere;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hunting Quests")
+    TArray<FQuest_HuntingQuest> ActiveHuntingQuests;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hunting Quests")
+    TArray<FQuest_HuntingQuest> CompletedHuntingQuests;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Settings")
+    float QuestUpdateInterval;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Settings")
+    bool bAutoGenerateQuests;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Settings")
+    int32 MaxActiveQuests;
 
 public:
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hunting Quests")
-    TArray<FQuest_HuntTarget> ActiveHuntTargets;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hunting Quests")
-    TArray<FQuest_HuntingReward> QuestRewards;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hunting Quests")
-    float TrackingRange;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hunting Quests")
-    bool bShowTrackingMarkers;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hunting Quests")
-    int32 MaxActiveHunts;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hunting Quests")
-    float HuntTimeLimit;
+    UFUNCTION(BlueprintCallable, Category = "Hunting Quests")
+    void StartHuntingQuest(const FString& QuestName);
 
     UFUNCTION(BlueprintCallable, Category = "Hunting Quests")
-    void StartHuntingQuest(const FString& TargetSpecies, int32 RequiredKills, bool bStealth);
+    void CompleteHuntingQuest(const FString& QuestName);
 
     UFUNCTION(BlueprintCallable, Category = "Hunting Quests")
-    void RegisterKill(const FString& KilledSpecies, float Distance, bool bWasStealth);
+    void RegisterDinosaurKill(EDinosaurSpecies Species, const FVector& KillLocation);
 
     UFUNCTION(BlueprintCallable, Category = "Hunting Quests")
-    bool CheckQuestCompletion(const FString& TargetSpecies);
+    void UpdateQuestProgress(const FString& QuestName);
 
     UFUNCTION(BlueprintCallable, Category = "Hunting Quests")
-    void CompleteHuntingQuest(const FString& TargetSpecies);
+    FQuest_HuntingQuest CreateRandomHuntingQuest();
 
     UFUNCTION(BlueprintCallable, Category = "Hunting Quests")
-    TArray<FString> GetActiveHuntTargets();
+    TArray<FQuest_HuntingQuest> GetActiveHuntingQuests() const;
 
     UFUNCTION(BlueprintCallable, Category = "Hunting Quests")
-    float GetHuntProgress(const FString& TargetSpecies);
+    bool IsQuestActive(const FString& QuestName) const;
 
     UFUNCTION(BlueprintCallable, Category = "Hunting Quests")
-    void UpdateTrackingMarkers();
+    void GenerateHuntingQuestsForArea(const FVector& AreaCenter, float AreaRadius);
 
-    UFUNCTION(BlueprintCallable, Category = "Hunting Quests")
-    void CancelHuntingQuest(const FString& TargetSpecies);
+protected:
+    UFUNCTION()
+    void OnInteractionSphereBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult);
+
+    void UpdateActiveQuests(float DeltaTime);
+    void CheckQuestCompletion();
+    void GenerateNewQuests();
+    FQuest_HuntTarget CreateHuntTarget(EDinosaurSpecies Species, int32 KillCount, const FVector& Area);
 
 private:
-    void InitializeDefaultHunts();
-    void CheckHuntTimeouts();
-    FQuest_HuntTarget* FindHuntTarget(const FString& TargetSpecies);
+    float LastQuestUpdateTime;
+    int32 QuestIDCounter;
 };
