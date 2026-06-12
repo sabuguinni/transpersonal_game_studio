@@ -2,97 +2,98 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
-#include "Engine/DataTable.h"
+#include "Engine/Engine.h"
 #include "SharedTypes.h"
 #include "NPCDailyRoutine.generated.h"
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FNPC_RoutineActivity : public FTableRowBase
+struct TRANSPERSONALGAME_API FNPC_RoutineActivity
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Activity")
-    ENPC_BehaviorType ActivityType = ENPC_BehaviorType::Idle;
+    ENPC_ActivityType ActivityType;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Activity")
-    float StartTime = 6.0f; // Hour of day (0-24)
+    float StartHour;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Activity")
-    float Duration = 2.0f; // Hours
+    float Duration;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Activity")
-    FVector ActivityLocation = FVector::ZeroVector;
+    FVector TargetLocation;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Activity")
-    float Priority = 1.0f;
+    float Priority;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Activity")
-    bool bCanBeInterrupted = true;
-};
+    bool bCanBeInterrupted;
 
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FNPC_SocialRelation
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Social")
-    AActor* RelatedNPC = nullptr;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Social")
-    ENPC_RelationType RelationType = ENPC_RelationType::Neutral;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Social")
-    float RelationStrength = 0.5f; // 0.0 to 1.0
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Social")
-    float LastInteractionTime = 0.0f;
+    FNPC_RoutineActivity()
+    {
+        ActivityType = ENPC_ActivityType::Idle;
+        StartHour = 8.0f;
+        Duration = 1.0f;
+        TargetLocation = FVector::ZeroVector;
+        Priority = 1.0f;
+        bCanBeInterrupted = true;
+    }
 };
 
 UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UNPC_DailyRoutineComponent : public UActorComponent
+class TRANSPERSONALGAME_API UNPC_DailyRoutine : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    UNPC_DailyRoutineComponent();
+    UNPC_DailyRoutine();
 
 protected:
     virtual void BeginPlay() override;
 
-public:
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Routine")
-    UDataTable* RoutineDataTable;
-
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Routine")
     TArray<FNPC_RoutineActivity> DailyActivities;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Social")
-    TArray<FNPC_SocialRelation> SocialRelations;
-
-    UPROPERTY(BlueprintReadOnly, Category = "State")
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Current State")
     FNPC_RoutineActivity CurrentActivity;
 
-    UPROPERTY(BlueprintReadOnly, Category = "State")
-    float CurrentGameTime = 6.0f; // Start at 6 AM
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Current State")
+    int32 CurrentActivityIndex;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
-    float TimeScale = 1.0f; // Game hours per real hour
+    float TimeScale;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
+    bool bUseGameTimeOfDay;
+
+public:
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+
+    UFUNCTION(BlueprintCallable, Category = "Routine")
+    void AddActivity(ENPC_ActivityType Type, float StartHour, float Duration, FVector Location, float Priority = 1.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "Routine")
+    void RemoveActivity(int32 ActivityIndex);
 
     UFUNCTION(BlueprintCallable, Category = "Routine")
     FNPC_RoutineActivity GetCurrentActivity();
 
     UFUNCTION(BlueprintCallable, Category = "Routine")
-    void SetCurrentActivity(const FNPC_RoutineActivity& NewActivity);
+    FNPC_RoutineActivity GetNextActivity();
 
-    UFUNCTION(BlueprintCallable, Category = "Social")
-    void UpdateSocialRelation(AActor* OtherNPC, ENPC_RelationType NewRelation, float Strength);
+    UFUNCTION(BlueprintCallable, Category = "Routine")
+    void InterruptCurrentActivity(ENPC_ActivityType NewActivity, float Duration);
 
-    UFUNCTION(BlueprintCallable, Category = "Social")
-    FNPC_SocialRelation GetSocialRelation(AActor* OtherNPC);
+    UFUNCTION(BlueprintCallable, Category = "Routine")
+    bool CanInterruptCurrentActivity();
+
+    UFUNCTION(BlueprintCallable, Category = "Routine")
+    void ResetRoutine();
+
+    UFUNCTION(BlueprintCallable, Category = "Routine")
+    float GetCurrentGameHour();
 
 private:
     void UpdateCurrentActivity();
-    void ProcessSocialInteractions();
+    int32 FindActivityForTime(float GameHour);
 };
