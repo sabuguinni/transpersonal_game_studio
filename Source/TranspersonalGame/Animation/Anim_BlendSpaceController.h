@@ -2,12 +2,19 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
-#include "Engine/Engine.h"
 #include "Animation/BlendSpace.h"
 #include "Animation/BlendSpace1D.h"
-#include "Animation/AnimSequence.h"
-#include "SharedTypes.h"
+#include "Engine/Engine.h"
 #include "Anim_BlendSpaceController.generated.h"
+
+UENUM(BlueprintType)
+enum class EAnim_BlendSpaceType : uint8
+{
+    Locomotion      UMETA(DisplayName = "Locomotion"),
+    Combat          UMETA(DisplayName = "Combat"),
+    Interaction     UMETA(DisplayName = "Interaction"),
+    Emotional       UMETA(DisplayName = "Emotional")
+};
 
 USTRUCT(BlueprintType)
 struct TRANSPERSONALGAME_API FAnim_BlendSpaceData
@@ -15,53 +22,27 @@ struct TRANSPERSONALGAME_API FAnim_BlendSpaceData
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Blend Space")
-    UBlendSpace* MovementBlendSpace;
+    UBlendSpace* BlendSpace2D;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Blend Space")
-    UBlendSpace1D* SpeedBlendSpace;
+    UBlendSpace1D* BlendSpace1D;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Blend Space")
-    float CurrentSpeed;
+    FVector2D CurrentInput;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Blend Space")
-    FVector2D MovementDirection;
+    float BlendWeight;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Blend Space")
-    bool bIsInAir;
+    bool bIsActive;
 
     FAnim_BlendSpaceData()
     {
-        MovementBlendSpace = nullptr;
-        SpeedBlendSpace = nullptr;
-        CurrentSpeed = 0.0f;
-        MovementDirection = FVector2D::ZeroVector;
-        bIsInAir = false;
-    }
-};
-
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FAnim_BlendSpaceConfig
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
-    float MaxWalkSpeed;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
-    float MaxRunSpeed;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
-    float BlendSpaceSmoothing;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
-    float DirectionChangeThreshold;
-
-    FAnim_BlendSpaceConfig()
-    {
-        MaxWalkSpeed = 400.0f;
-        MaxRunSpeed = 800.0f;
-        BlendSpaceSmoothing = 5.0f;
-        DirectionChangeThreshold = 0.1f;
+        BlendSpace2D = nullptr;
+        BlendSpace1D = nullptr;
+        CurrentInput = FVector2D::ZeroVector;
+        BlendWeight = 0.0f;
+        bIsActive = false;
     }
 };
 
@@ -76,65 +57,56 @@ public:
 protected:
     virtual void BeginPlay() override;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Blend Spaces")
+    TMap<EAnim_BlendSpaceType, FAnim_BlendSpaceData> BlendSpaces;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
+    float BlendSpeedMultiplier;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
+    float InputSmoothingSpeed;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "State")
+    EAnim_BlendSpaceType CurrentBlendSpaceType;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "State")
+    FVector2D SmoothedInput;
+
 public:
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    // Blend Space Management
-    UFUNCTION(BlueprintCallable, Category = "Animation|BlendSpace")
-    void InitializeBlendSpaces();
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    void SetBlendSpaceInput(EAnim_BlendSpaceType BlendSpaceType, const FVector2D& Input);
 
-    UFUNCTION(BlueprintCallable, Category = "Animation|BlendSpace")
-    void UpdateBlendSpaceValues(float Speed, const FVector2D& Direction);
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    void SetBlendSpace1DInput(EAnim_BlendSpaceType BlendSpaceType, float Input);
 
-    UFUNCTION(BlueprintCallable, Category = "Animation|BlendSpace")
-    void SetMovementBlendSpace(UBlendSpace* NewBlendSpace);
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    void SwitchToBlendSpace(EAnim_BlendSpaceType NewBlendSpaceType);
 
-    UFUNCTION(BlueprintCallable, Category = "Animation|BlendSpace")
-    void SetSpeedBlendSpace(UBlendSpace1D* NewBlendSpace);
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    void RegisterBlendSpace2D(EAnim_BlendSpaceType BlendSpaceType, UBlendSpace* BlendSpace);
 
-    // Blend Space Queries
-    UFUNCTION(BlueprintPure, Category = "Animation|BlendSpace")
-    FAnim_BlendSpaceData GetCurrentBlendSpaceData() const { return BlendSpaceData; }
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    void RegisterBlendSpace1D(EAnim_BlendSpaceType BlendSpaceType, UBlendSpace1D* BlendSpace);
 
-    UFUNCTION(BlueprintPure, Category = "Animation|BlendSpace")
-    float GetNormalizedSpeed() const;
+    UFUNCTION(BlueprintPure, Category = "Animation")
+    FVector2D GetCurrentBlendSpaceInput(EAnim_BlendSpaceType BlendSpaceType) const;
 
-    UFUNCTION(BlueprintPure, Category = "Animation|BlendSpace")
-    FVector2D GetSmoothedDirection() const { return SmoothedDirection; }
+    UFUNCTION(BlueprintPure, Category = "Animation")
+    float GetBlendSpaceWeight(EAnim_BlendSpaceType BlendSpaceType) const;
 
-    // Configuration
-    UFUNCTION(BlueprintCallable, Category = "Animation|BlendSpace")
-    void SetBlendSpaceConfig(const FAnim_BlendSpaceConfig& NewConfig);
+    UFUNCTION(BlueprintPure, Category = "Animation")
+    bool IsBlendSpaceActive(EAnim_BlendSpaceType BlendSpaceType) const;
 
-    UFUNCTION(BlueprintPure, Category = "Animation|BlendSpace")
-    FAnim_BlendSpaceConfig GetBlendSpaceConfig() const { return Config; }
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    void UpdateLocomotionBlendSpace(float Speed, float Direction);
 
-    // Animation Sampling
-    UFUNCTION(BlueprintCallable, Category = "Animation|BlendSpace")
-    UAnimSequence* SampleBlendSpaceAnimation(float Speed, const FVector2D& Direction);
-
-    UFUNCTION(BlueprintCallable, Category = "Animation|BlendSpace")
-    void CreateDefaultBlendSpaces();
-
-protected:
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Blend Space")
-    FAnim_BlendSpaceData BlendSpaceData;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
-    FAnim_BlendSpaceConfig Config;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Runtime")
-    FVector2D SmoothedDirection;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Runtime")
-    float SmoothedSpeed;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Runtime")
-    float LastUpdateTime;
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    void UpdateCombatBlendSpace(float AttackIntensity, float DefenseStance);
 
 private:
-    void UpdateSmoothedValues(float DeltaTime, float TargetSpeed, const FVector2D& TargetDirection);
+    void SmoothInputTransition(float DeltaTime);
+    void UpdateBlendWeights(float DeltaTime);
     void ValidateBlendSpaces();
-    UBlendSpace* CreateMovementBlendSpace();
-    UBlendSpace1D* CreateSpeedBlendSpace();
 };
