@@ -1,160 +1,189 @@
 #include "NPCDailyRoutine.h"
-#include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "TimerManager.h"
+#include "Kismet/GameplayStatics.h"
 
-UNPC_DailyRoutineComponent::UNPC_DailyRoutineComponent()
+UNPC_DailyRoutine::UNPC_DailyRoutine()
 {
     PrimaryComponentTick.bCanEverTick = true;
+    PrimaryComponentTick.TickInterval = 5.0f; // Check every 5 seconds
+    
+    CurrentActivityIndex = -1;
     TimeScale = 1.0f;
-    CurrentGameTime = 6.0f;
+    bUseGameTimeOfDay = true;
 }
 
-void UNPC_DailyRoutineComponent::BeginPlay()
+void UNPC_DailyRoutine::BeginPlay()
 {
     Super::BeginPlay();
     
-    // Initialize daily activities from data table if provided
-    if (RoutineDataTable)
+    // Set up default routine if none exists
+    if (DailyActivities.Num() == 0)
     {
-        TArray<FNPC_RoutineActivity*> AllActivities;
-        RoutineDataTable->GetAllRows<FNPC_RoutineActivity>(TEXT("NPCDailyRoutine"), AllActivities);
-        
-        for (FNPC_RoutineActivity* Activity : AllActivities)
-        {
-            if (Activity)
-            {
-                DailyActivities.Add(*Activity);
-            }
-        }
+        AddActivity(ENPC_ActivityType::Sleep, 22.0f, 8.0f, FVector::ZeroVector, 3.0f);
+        AddActivity(ENPC_ActivityType::Eat, 7.0f, 1.0f, FVector::ZeroVector, 2.0f);
+        AddActivity(ENPC_ActivityType::Work, 8.0f, 8.0f, FVector(1000, 0, 0), 2.0f);
+        AddActivity(ENPC_ActivityType::Eat, 12.0f, 1.0f, FVector::ZeroVector, 2.0f);
+        AddActivity(ENPC_ActivityType::Socialize, 18.0f, 2.0f, FVector(500, 500, 0), 1.0f);
+        AddActivity(ENPC_ActivityType::Eat, 19.0f, 1.0f, FVector::ZeroVector, 2.0f);
+        AddActivity(ENPC_ActivityType::Relax, 20.0f, 2.0f, FVector::ZeroVector, 1.0f);
     }
-    
-    // Sort activities by start time
-    DailyActivities.Sort([](const FNPC_RoutineActivity& A, const FNPC_RoutineActivity& B) {
-        return A.StartTime < B.StartTime;
-    });
     
     UpdateCurrentActivity();
 }
 
-void UNPC_DailyRoutineComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void UNPC_DailyRoutine::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
     
-    // Update game time
-    CurrentGameTime += DeltaTime * TimeScale / 3600.0f; // Convert seconds to hours
-    
-    // Wrap around 24 hours
-    if (CurrentGameTime >= 24.0f)
-    {
-        CurrentGameTime -= 24.0f;
-    }
-    
     UpdateCurrentActivity();
-    ProcessSocialInteractions();
 }
 
-FNPC_RoutineActivity UNPC_DailyRoutineComponent::GetCurrentActivity()
+void UNPC_DailyRoutine::AddActivity(ENPC_ActivityType Type, float StartHour, float Duration, FVector Location, float Priority)
 {
-    return CurrentActivity;
-}
-
-void UNPC_DailyRoutineComponent::SetCurrentActivity(const FNPC_RoutineActivity& NewActivity)
-{
-    CurrentActivity = NewActivity;
-}
-
-void UNPC_DailyRoutineComponent::UpdateSocialRelation(AActor* OtherNPC, ENPC_RelationType NewRelation, float Strength)
-{
-    if (!OtherNPC) return;
+    FNPC_RoutineActivity NewActivity;
+    NewActivity.ActivityType = Type;
+    NewActivity.StartHour = FMath::Fmod(StartHour, 24.0f);
+    NewActivity.Duration = Duration;
+    NewActivity.TargetLocation = Location;
+    NewActivity.Priority = Priority;
+    NewActivity.bCanBeInterrupted = (Priority < 2.5f);
     
-    // Find existing relation or create new one
-    FNPC_SocialRelation* ExistingRelation = SocialRelations.FindByPredicate([OtherNPC](const FNPC_SocialRelation& Relation) {
-        return Relation.RelatedNPC == OtherNPC;
+    DailyActivities.Add(NewActivity);
+    
+    // Sort activities by start time
+    DailyActivities.Sort([](const FNPC_RoutineActivity& A, const FNPC_RoutineActivity& B)
+    {
+        return A.StartHour < B.StartHour;
     });
-    
-    if (ExistingRelation)
+}
+
+void UNPC_DailyRoutine::RemoveActivity(int32 ActivityIndex)
+{
+    if (DailyActivities.IsValidIndex(ActivityIndex))
     {
-        ExistingRelation->RelationType = NewRelation;
-        ExistingRelation->RelationStrength = FMath::Clamp(Strength, 0.0f, 1.0f);
-        ExistingRelation->LastInteractionTime = CurrentGameTime;
-    }
-    else
-    {
-        FNPC_SocialRelation NewRelation_Struct;
-        NewRelation_Struct.RelatedNPC = OtherNPC;
-        NewRelation_Struct.RelationType = NewRelation;
-        NewRelation_Struct.RelationStrength = FMath::Clamp(Strength, 0.0f, 1.0f);
-        NewRelation_Struct.LastInteractionTime = CurrentGameTime;
-        SocialRelations.Add(NewRelation_Struct);
+        DailyActivities.RemoveAt(ActivityIndex);
+        UpdateCurrentActivity();
     }
 }
 
-FNPC_SocialRelation UNPC_DailyRoutineComponent::GetSocialRelation(AActor* OtherNPC)
+FNPC_RoutineActivity UNPC_DailyRoutine::GetCurrentActivity()
 {
-    FNPC_SocialRelation DefaultRelation;
-    if (!OtherNPC) return DefaultRelation;
+    if (DailyActivities.IsValidIndex(CurrentActivityIndex))
+    {
+        return DailyActivities[CurrentActivityIndex];
+    }
     
-    FNPC_SocialRelation* ExistingRelation = SocialRelations.FindByPredicate([OtherNPC](const FNPC_SocialRelation& Relation) {
-        return Relation.RelatedNPC == OtherNPC;
-    });
-    
-    return ExistingRelation ? *ExistingRelation : DefaultRelation;
+    return FNPC_RoutineActivity();
 }
 
-void UNPC_DailyRoutineComponent::UpdateCurrentActivity()
+FNPC_RoutineActivity UNPC_DailyRoutine::GetNextActivity()
 {
-    if (DailyActivities.Num() == 0) return;
+    int32 NextIndex = (CurrentActivityIndex + 1) % DailyActivities.Num();
     
-    // Find the current activity based on time
-    FNPC_RoutineActivity* BestActivity = nullptr;
-    float BestPriority = 0.0f;
-    
-    for (FNPC_RoutineActivity& Activity : DailyActivities)
+    if (DailyActivities.IsValidIndex(NextIndex))
     {
-        float EndTime = Activity.StartTime + Activity.Duration;
+        return DailyActivities[NextIndex];
+    }
+    
+    return FNPC_RoutineActivity();
+}
+
+void UNPC_DailyRoutine::InterruptCurrentActivity(ENPC_ActivityType NewActivity, float Duration)
+{
+    if (CanInterruptCurrentActivity())
+    {
+        FNPC_RoutineActivity InterruptActivity;
+        InterruptActivity.ActivityType = NewActivity;
+        InterruptActivity.StartHour = GetCurrentGameHour();
+        InterruptActivity.Duration = Duration;
+        InterruptActivity.Priority = 5.0f; // High priority for interruptions
+        InterruptActivity.bCanBeInterrupted = false;
         
-        // Handle activities that span midnight
-        bool IsActiveNow = false;
-        if (EndTime <= 24.0f)
+        CurrentActivity = InterruptActivity;
+    }
+}
+
+bool UNPC_DailyRoutine::CanInterruptCurrentActivity()
+{
+    return CurrentActivity.bCanBeInterrupted;
+}
+
+void UNPC_DailyRoutine::ResetRoutine()
+{
+    CurrentActivityIndex = -1;
+    UpdateCurrentActivity();
+}
+
+float UNPC_DailyRoutine::GetCurrentGameHour()
+{
+    if (bUseGameTimeOfDay)
+    {
+        // Try to get time from game state or world
+        UWorld* World = GetWorld();
+        if (World)
         {
-            IsActiveNow = (CurrentGameTime >= Activity.StartTime && CurrentGameTime < EndTime);
+            float GameTime = World->GetTimeSeconds() * TimeScale;
+            float HoursInDay = 24.0f;
+            return FMath::Fmod(GameTime / 3600.0f, HoursInDay);
+        }
+    }
+    
+    // Fallback to real time
+    FDateTime Now = FDateTime::Now();
+    return Now.GetHour() + (Now.GetMinute() / 60.0f);
+}
+
+void UNPC_DailyRoutine::UpdateCurrentActivity()
+{
+    if (DailyActivities.Num() == 0)
+    {
+        return;
+    }
+    
+    float CurrentHour = GetCurrentGameHour();
+    int32 NewActivityIndex = FindActivityForTime(CurrentHour);
+    
+    if (NewActivityIndex != CurrentActivityIndex)
+    {
+        CurrentActivityIndex = NewActivityIndex;
+        if (DailyActivities.IsValidIndex(CurrentActivityIndex))
+        {
+            CurrentActivity = DailyActivities[CurrentActivityIndex];
+        }
+    }
+}
+
+int32 UNPC_DailyRoutine::FindActivityForTime(float GameHour)
+{
+    int32 BestActivityIndex = 0;
+    
+    for (int32 i = 0; i < DailyActivities.Num(); i++)
+    {
+        const FNPC_RoutineActivity& Activity = DailyActivities[i];
+        float EndHour = FMath::Fmod(Activity.StartHour + Activity.Duration, 24.0f);
+        
+        // Handle activities that cross midnight
+        if (Activity.StartHour <= EndHour)
+        {
+            if (GameHour >= Activity.StartHour && GameHour < EndHour)
+            {
+                return i;
+            }
         }
         else
         {
-            // Activity spans midnight
-            float WrappedEndTime = EndTime - 24.0f;
-            IsActiveNow = (CurrentGameTime >= Activity.StartTime || CurrentGameTime < WrappedEndTime);
+            if (GameHour >= Activity.StartHour || GameHour < EndHour)
+            {
+                return i;
+            }
         }
         
-        if (IsActiveNow && Activity.Priority > BestPriority)
+        // Keep track of the closest activity
+        if (Activity.StartHour <= GameHour)
         {
-            BestActivity = &Activity;
-            BestPriority = Activity.Priority;
+            BestActivityIndex = i;
         }
     }
     
-    if (BestActivity && (CurrentActivity.ActivityType != BestActivity->ActivityType || 
-        !CurrentActivity.ActivityLocation.Equals(BestActivity->ActivityLocation, 100.0f)))
-    {
-        CurrentActivity = *BestActivity;
-    }
-}
-
-void UNPC_DailyRoutineComponent::ProcessSocialInteractions()
-{
-    // Decay social relations over time
-    for (FNPC_SocialRelation& Relation : SocialRelations)
-    {
-        float TimeSinceInteraction = CurrentGameTime - Relation.LastInteractionTime;
-        if (TimeSinceInteraction > 24.0f) // More than a day
-        {
-            Relation.RelationStrength *= 0.99f; // Slow decay
-        }
-    }
-    
-    // Remove very weak relations
-    SocialRelations.RemoveAll([](const FNPC_SocialRelation& Relation) {
-        return Relation.RelationStrength < 0.1f;
-    });
+    return BestActivityIndex;
 }
