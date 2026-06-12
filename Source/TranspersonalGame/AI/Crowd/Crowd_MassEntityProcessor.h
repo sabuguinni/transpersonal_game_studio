@@ -1,23 +1,22 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "MassEntityTypes.h"
 #include "MassProcessor.h"
+#include "MassEntityTypes.h"
 #include "MassCommonFragments.h"
 #include "MassMovementFragments.h"
 #include "SharedTypes.h"
 #include "Crowd_MassEntityProcessor.generated.h"
 
-// Forward declarations
 class UMassEntitySubsystem;
-struct FCrowd_AgentFragment;
+struct FCrowd_MovementFragment;
 struct FCrowd_BehaviorFragment;
 
 /**
- * Mass Entity Processor for handling 50,000+ crowd agents simultaneously
- * Implements high-performance crowd simulation using UE5 Mass Entity framework
+ * Mass Entity processor for crowd simulation
+ * Handles movement, pathfinding, and LOD for up to 50,000 entities
  */
-UCLASS(BlueprintType, Blueprintable)
+UCLASS(BlueprintType, meta = (DisplayName = "Crowd Mass Entity Processor"))
 class TRANSPERSONALGAME_API UCrowd_MassEntityProcessor : public UMassProcessor
 {
     GENERATED_BODY()
@@ -30,143 +29,73 @@ public:
     virtual void Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context) override;
 
 protected:
-    // Core processing queries
+    // Query for crowd entities with movement
     FMassEntityQuery MovementQuery;
+    
+    // Query for crowd entities with behavior
     FMassEntityQuery BehaviorQuery;
+    
+    // Query for LOD processing
     FMassEntityQuery LODQuery;
-    FMassEntityQuery PathfindingQuery;
 
-    // Performance settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 MaxAgentsPerFrame = 5000;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance") 
-    float ProcessingTimeSlice = 0.016f; // 16ms per frame
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    bool bEnableLODCulling = true;
-
-    // Crowd behavior parameters
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
-    float SeparationRadius = 150.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
-    float AlignmentRadius = 200.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
-    float CohesionRadius = 250.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
-    float MaxSpeed = 300.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
-    float MaxForce = 100.0f;
-
-private:
-    // Processing methods
+    // Processing functions
     void ProcessMovement(FMassEntityManager& EntityManager, FMassExecutionContext& Context);
     void ProcessBehavior(FMassEntityManager& EntityManager, FMassExecutionContext& Context);
     void ProcessLOD(FMassEntityManager& EntityManager, FMassExecutionContext& Context);
-    void ProcessPathfinding(FMassEntityManager& EntityManager, FMassExecutionContext& Context);
 
-    // Utility methods
-    FVector CalculateFlockingForce(const FVector& Position, const FVector& Velocity, 
-                                  const TArray<FVector>& Neighbors, const TArray<FVector>& NeighborVelocities);
+    // Movement parameters
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Movement")
+    float MaxSpeed = 300.0f;
     
-    float CalculateLODLevel(const FVector& AgentPosition, const FVector& ViewerPosition);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Movement")
+    float AccelerationRate = 600.0f;
     
-    bool ShouldProcessAgent(int32 AgentIndex, float DeltaTime);
-
-    // Performance tracking
-    mutable int32 ProcessedAgentsThisFrame = 0;
-    mutable float AccumulatedProcessingTime = 0.0f;
-};
-
-/**
- * Fragment for individual crowd agent data
- */
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FCrowd_AgentFragment : public FMassFragment
-{
-    GENERATED_BODY()
-
-    // Agent identity
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    int32 AgentID = 0;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    ECrowd_AgentType AgentType = ECrowd_AgentType::Civilian;
-
-    // Movement data
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FVector TargetLocation = FVector::ZeroVector;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FVector CurrentVelocity = FVector::ZeroVector;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float MovementSpeed = 200.0f;
-
-    // Behavior state
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    ECrowd_BehaviorState BehaviorState = ECrowd_BehaviorState::Wandering;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float StateTimer = 0.0f;
-
-    // LOD data
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    int32 LODLevel = 0;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float DistanceToViewer = 0.0f;
-
-    // Social data
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    TArray<int32> NearbyAgents;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    int32 GroupID = -1;
-};
-
-/**
- * Fragment for crowd behavior logic
- */
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FCrowd_BehaviorFragment : public FMassFragment
-{
-    GENERATED_BODY()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Movement")
+    float TurnRate = 180.0f;
 
     // Behavior parameters
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float SeparationWeight = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Behavior")
+    float WaypointReachDistance = 100.0f;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Behavior")
+    float AvoidanceRadius = 150.0f;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Behavior")
+    float FlockingStrength = 0.5f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float AlignmentWeight = 0.5f;
+    // LOD parameters
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd LOD")
+    float HighLODDistance = 500.0f;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd LOD")
+    float MediumLODDistance = 1500.0f;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd LOD")
+    float LowLODDistance = 3000.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float CohesionWeight = 0.3f;
+    // Performance tracking
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Performance")
+    int32 ProcessedEntities = 0;
+    
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Performance")
+    float LastProcessingTime = 0.0f;
+    
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Performance")
+    int32 HighLODCount = 0;
+    
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Performance")
+    int32 MediumLODCount = 0;
+    
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Performance")
+    int32 LowLODCount = 0;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float SeekWeight = 2.0f;
-
-    // Pathfinding data
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    TArray<FVector> PathPoints;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    int32 CurrentPathIndex = 0;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    bool bHasValidPath = false;
-
-    // Reaction data
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float ReactionRadius = 500.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float PanicThreshold = 0.7f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float CurrentStress = 0.0f;
+private:
+    // Helper functions
+    FVector CalculateFlockingForce(const FVector& EntityLocation, const TArray<FVector>& NearbyEntities);
+    FVector CalculateAvoidanceForce(const FVector& EntityLocation, const TArray<FVector>& Obstacles);
+    ECrowd_LODLevel DetermineLODLevel(const FVector& EntityLocation, const FVector& ViewerLocation);
+    
+    // Performance optimization
+    float LastUpdateTime = 0.0f;
+    static constexpr float UpdateInterval = 0.016f; // 60 FPS target
 };
