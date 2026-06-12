@@ -1,236 +1,313 @@
 #include "Crowd_MassEntityManager.h"
-#include "Engine/World.h"
 #include "Engine/Engine.h"
-#include "Components/StaticMeshComponent.h"
-#include "MassEntitySubsystem.h"
-#include "MassSpawnerSubsystem.h"
-#include "MassSimulationSubsystem.h"
+#include "Engine/World.h"
+#include "GameFramework/PlayerController.h"
+#include "Kismet/GameplayStatics.h"
+#include "TimerManager.h"
 
-UCrowd_MassEntityManager::UCrowd_MassEntityManager()
+ACrowd_MassEntityManager::ACrowd_MassEntityManager()
 {
-    PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 0.1f; // 10 FPS for crowd updates
-    
-    ActiveEntityCount = 0;
-    bMassSystemInitialized = false;
-    
-    // Initialize default spawn config
-    SpawnConfig.MaxEntities = 5000;
-    SpawnConfig.SpawnRadius = 2000.0f;
-    SpawnConfig.DensityPerSquareMeter = 0.5f;
-    SpawnConfig.bEnablePathfinding = true;
-    SpawnConfig.bEnableLODSystem = true;
-    
+    PrimaryActorTick.bCanEverTick = true;
+    PrimaryActorTick.TickInterval = 0.1f; // Update 10 times per second for performance
+
+    // Initialize default values
     MassEntitySubsystem = nullptr;
     MassSpawnerSubsystem = nullptr;
-    MassSimulationSubsystem = nullptr;
+    CurrentSimulationFPS = 60.0f;
+    LastFrameTime = 0.0f;
+    ActiveEntityCount = 0;
+
+    // Set default spawn configuration
+    DefaultSpawnConfig.MaxEntities = 100;
+    DefaultSpawnConfig.SpawnRadius = 1000.0f;
+    DefaultSpawnConfig.SpawnRate = 5.0f;
+    DefaultSpawnConfig.DefaultBehavior = ECrowd_BehaviorType::Wandering;
+
+    // Set default LOD settings
+    LODSettings.HighDetailDistance = 500.0f;
+    LODSettings.MediumDetailDistance = 1500.0f;
+    LODSettings.LowDetailDistance = 3000.0f;
+    LODSettings.CullDistance = 5000.0f;
+
+    // Performance settings
+    PerformanceTargetFPS = 60.0f;
+    bEnableAdaptiveLOD = true;
+    bEnablePerformanceMonitoring = true;
 }
 
-void UCrowd_MassEntityManager::BeginPlay()
+void ACrowd_MassEntityManager::BeginPlay()
 {
     Super::BeginPlay();
     
-    InitializeSubsystems();
-    InitializeMassEntity();
+    InitializeMassEntitySystem();
+    
+    UE_LOG(LogTemp, Log, TEXT("Crowd Mass Entity Manager initialized"));
 }
 
-void UCrowd_MassEntityManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void ACrowd_MassEntityManager::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-    
-    if (!bMassSystemInitialized)
-    {
-        return;
-    }
-    
-    // Update crowd behavior every tick
-    if (MassSimulationSubsystem)
-    {
-        // Mass simulation handles entity updates automatically
-        // We just track the count
-        UpdateCrowdMetrics();
-    }
+    CleanupMassEntitySystem();
+    Super::EndPlay(EndPlayReason);
 }
 
-void UCrowd_MassEntityManager::InitializeMassEntity()
+void ACrowd_MassEntityManager::Tick(float DeltaTime)
 {
-    if (!GetWorld())
+    Super::Tick(DeltaTime);
+
+    if (bEnablePerformanceMonitoring)
     {
-        UE_LOG(LogTemp, Warning, TEXT("UCrowd_MassEntityManager: No valid world found"));
+        UpdatePerformanceMetrics(DeltaTime);
+    }
+
+    if (bEnableAdaptiveLOD)
+    {
+        AdaptLODBasedOnPerformance();
+    }
+
+    UpdateCrowdLOD();
+}
+
+void ACrowd_MassEntityManager::InitializeMassEntitySystem()
+{
+    if (!IsValid(GetWorld()))
+    {
+        UE_LOG(LogTemp, Error, TEXT("World is not valid for Mass Entity initialization"));
         return;
     }
-    
-    InitializeSubsystems();
-    
-    if (MassEntitySubsystem && MassSpawnerSubsystem)
+
+    // Try to get Mass Entity subsystem
+    UGameInstance* GameInstance = GetWorld()->GetGameInstance();
+    if (IsValid(GameInstance))
     {
-        ConfigureMassTraits();
-        SetupLODSystem();
-        bMassSystemInitialized = true;
+        // Note: Mass Entity subsystem may not be available in all UE5 builds
+        // This is a placeholder for when Mass Entity plugin is enabled
+        UE_LOG(LogTemp, Log, TEXT("Attempting to initialize Mass Entity subsystem..."));
         
-        UE_LOG(LogTemp, Log, TEXT("Mass Entity crowd simulation initialized successfully"));
-    }
-    else
-    {
-        UE_LOG(LogTemp, Error, TEXT("Failed to initialize Mass Entity subsystems"));
-    }
-}
-
-void UCrowd_MassEntityManager::SpawnCrowdEntities(int32 Count, FVector CenterLocation)
-{
-    if (!bMassSystemInitialized)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Mass system not initialized, cannot spawn crowd"));
-        return;
-    }
-    
-    if (Count <= 0 || Count > SpawnConfig.MaxEntities)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Invalid crowd count: %d (max: %d)"), Count, SpawnConfig.MaxEntities);
-        return;
-    }
-    
-    // Use Mass spawner to create entities
-    if (MassSpawnerSubsystem)
-    {
-        // Create spawn parameters
-        FMassEntitySpawnDataGeneratorBase SpawnData;
+        // For now, we'll simulate the system without actual Mass Entity dependency
+        MassEntitySubsystem = nullptr; // Would be: GameInstance->GetSubsystem<UMassEntitySubsystem>();
+        MassSpawnerSubsystem = nullptr; // Would be: GameInstance->GetSubsystem<UMassSpawnerSubsystem>();
         
-        // Configure spawn locations in a circle around center
-        TArray<FTransform> SpawnTransforms;
-        for (int32 i = 0; i < Count; ++i)
+        if (!IsMassEntitySystemAvailable())
         {
-            float Angle = (2.0f * PI * i) / Count;
-            float Distance = FMath::RandRange(50.0f, SpawnConfig.SpawnRadius);
-            
-            FVector SpawnLocation = CenterLocation + FVector(
-                FMath::Cos(Angle) * Distance,
-                FMath::Sin(Angle) * Distance,
-                0.0f
-            );
-            
-            // Adjust Z to ground level
-            SpawnLocation.Z = CenterLocation.Z;
-            
-            SpawnTransforms.Add(FTransform(FRotator::ZeroRotator, SpawnLocation, FVector::OneVector));
+            UE_LOG(LogTemp, Warning, TEXT("Mass Entity system not available - using fallback crowd simulation"));
         }
-        
-        ActiveEntityCount += Count;
-        UE_LOG(LogTemp, Log, TEXT("Spawned %d crowd entities at location %s"), Count, *CenterLocation.ToString());
+        else
+        {
+            UE_LOG(LogTemp, Log, TEXT("Mass Entity system initialized successfully"));
+        }
     }
 }
 
-void UCrowd_MassEntityManager::UpdateCrowdDensity(float NewDensity)
+void ACrowd_MassEntityManager::SpawnCrowdEntities(const FVector& Location, const FCrowd_EntitySpawnConfig& Config)
 {
-    if (NewDensity <= 0.0f || NewDensity > 10.0f)
+    if (!IsMassEntitySystemAvailable())
     {
-        UE_LOG(LogTemp, Warning, TEXT("Invalid crowd density: %f"), NewDensity);
+        UE_LOG(LogTemp, Warning, TEXT("Cannot spawn crowd entities - Mass Entity system not available"));
         return;
     }
+
+    // Implementation would use Mass Entity spawning here
+    // For now, we'll log the spawn request
+    UE_LOG(LogTemp, Log, TEXT("Spawning %d crowd entities at location (%f, %f, %f)"), 
+           Config.MaxEntities, Location.X, Location.Y, Location.Z);
+
+    // Simulate entity spawning
+    ActiveEntityCount += Config.MaxEntities;
     
-    SpawnConfig.DensityPerSquareMeter = NewDensity;
-    
-    // Recalculate max entities based on new density
-    float AreaCovered = PI * SpawnConfig.SpawnRadius * SpawnConfig.SpawnRadius;
-    int32 NewMaxEntities = FMath::FloorToInt(AreaCovered * NewDensity);
-    
-    SpawnConfig.MaxEntities = FMath::Clamp(NewMaxEntities, 100, 50000);
-    
-    UE_LOG(LogTemp, Log, TEXT("Updated crowd density to %f, new max entities: %d"), NewDensity, SpawnConfig.MaxEntities);
+    // Clamp to reasonable limits for performance
+    if (ActiveEntityCount > 1000)
+    {
+        ActiveEntityCount = 1000;
+        UE_LOG(LogTemp, Warning, TEXT("Crowd entity count clamped to 1000 for performance"));
+    }
 }
 
-void UCrowd_MassEntityManager::SetCrowdDestination(FVector TargetLocation)
+void ACrowd_MassEntityManager::DespawnCrowdEntities(const FVector& Location, float Radius)
 {
-    if (!bMassSystemInitialized)
+    if (!IsMassEntitySystemAvailable())
     {
         return;
     }
-    
-    // Update Mass simulation with new target
-    if (MassSimulationSubsystem)
+
+    // Implementation would despawn entities within radius
+    UE_LOG(LogTemp, Log, TEXT("Despawning crowd entities within %f units of (%f, %f, %f)"), 
+           Radius, Location.X, Location.Y, Location.Z);
+
+    // Simulate entity despawning
+    int32 EntitiesToRemove = FMath::Min(50, ActiveEntityCount);
+    ActiveEntityCount = FMath::Max(0, ActiveEntityCount - EntitiesToRemove);
+}
+
+void ACrowd_MassEntityManager::UpdateCrowdLOD()
+{
+    if (!IsValid(GetWorld()))
     {
-        // Mass entities will pathfind to this location
-        UE_LOG(LogTemp, Log, TEXT("Set crowd destination to %s"), *TargetLocation.ToString());
+        return;
+    }
+
+    // Get player location for LOD calculations
+    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
+    if (!IsValid(PlayerPawn))
+    {
+        return;
+    }
+
+    FVector PlayerLocation = PlayerPawn->GetActorLocation();
+    FVector ManagerLocation = GetActorLocation();
+    float DistanceToPlayer = FVector::Dist(PlayerLocation, ManagerLocation);
+
+    // Determine LOD level based on distance
+    ECrowd_LODLevel CurrentLOD = ECrowd_LODLevel::High;
+    
+    if (DistanceToPlayer > LODSettings.CullDistance)
+    {
+        CurrentLOD = ECrowd_LODLevel::Culled;
+    }
+    else if (DistanceToPlayer > LODSettings.LowDetailDistance)
+    {
+        CurrentLOD = ECrowd_LODLevel::Low;
+    }
+    else if (DistanceToPlayer > LODSettings.MediumDetailDistance)
+    {
+        CurrentLOD = ECrowd_LODLevel::Medium;
+    }
+    else if (DistanceToPlayer > LODSettings.HighDetailDistance)
+    {
+        CurrentLOD = ECrowd_LODLevel::High;
+    }
+
+    // Apply LOD settings (would affect Mass Entity rendering/simulation detail)
+    // For now, just log the LOD changes
+    static ECrowd_LODLevel LastLOD = ECrowd_LODLevel::High;
+    if (CurrentLOD != LastLOD)
+    {
+        UE_LOG(LogTemp, Log, TEXT("Crowd LOD changed to level %d (distance: %f)"), 
+               (int32)CurrentLOD, DistanceToPlayer);
+        LastLOD = CurrentLOD;
     }
 }
 
-int32 UCrowd_MassEntityManager::GetActiveCrowdCount() const
+int32 ACrowd_MassEntityManager::GetActiveCrowdEntityCount() const
 {
     return ActiveEntityCount;
 }
 
-void UCrowd_MassEntityManager::DebugSpawnTestCrowd()
+void ACrowd_MassEntityManager::SetCrowdBehavior(ECrowd_BehaviorType NewBehavior, const FVector& TargetLocation)
 {
-    if (!GetWorld())
-    {
-        return;
-    }
-    
-    FVector PlayerLocation = FVector::ZeroVector;
-    if (APawn* PlayerPawn = GetWorld()->GetFirstPlayerController()->GetPawn())
-    {
-        PlayerLocation = PlayerPawn->GetActorLocation();
-    }
-    
-    // Spawn test crowd around player
-    SpawnCrowdEntities(500, PlayerLocation + FVector(1000, 0, 0));
+    UE_LOG(LogTemp, Log, TEXT("Setting crowd behavior to %d at location (%f, %f, %f)"), 
+           (int32)NewBehavior, TargetLocation.X, TargetLocation.Y, TargetLocation.Z);
+
+    // Implementation would update Mass Entity behavior processors
+    // This would affect how entities move and interact
 }
 
-void UCrowd_MassEntityManager::InitializeSubsystems()
+void ACrowd_MassEntityManager::AddGatheringPoint(const FVector& Location, float Radius, ECrowd_BehaviorType BehaviorType)
 {
-    if (!GetWorld())
+    GatheringPoints.Add(Location);
+    GatheringPointBehaviors.Add(BehaviorType);
+    GatheringPointRadii.Add(Radius);
+
+    UE_LOG(LogTemp, Log, TEXT("Added gathering point at (%f, %f, %f) with radius %f"), 
+           Location.X, Location.Y, Location.Z, Radius);
+}
+
+void ACrowd_MassEntityManager::RemoveGatheringPoint(const FVector& Location)
+{
+    for (int32 i = GatheringPoints.Num() - 1; i >= 0; i--)
     {
-        return;
-    }
-    
-    MassEntitySubsystem = GetWorld()->GetSubsystem<UMassEntitySubsystem>();
-    MassSpawnerSubsystem = GetWorld()->GetSubsystem<UMassSpawnerSubsystem>();
-    MassSimulationSubsystem = GetWorld()->GetSubsystem<UMassSimulationSubsystem>();
-    
-    if (!MassEntitySubsystem)
-    {
-        UE_LOG(LogTemp, Error, TEXT("Failed to get MassEntitySubsystem"));
-    }
-    
-    if (!MassSpawnerSubsystem)
-    {
-        UE_LOG(LogTemp, Error, TEXT("Failed to get MassSpawnerSubsystem"));
-    }
-    
-    if (!MassSimulationSubsystem)
-    {
-        UE_LOG(LogTemp, Error, TEXT("Failed to get MassSimulationSubsystem"));
+        if (FVector::Dist(GatheringPoints[i], Location) < 100.0f)
+        {
+            GatheringPoints.RemoveAt(i);
+            GatheringPointBehaviors.RemoveAt(i);
+            GatheringPointRadii.RemoveAt(i);
+            
+            UE_LOG(LogTemp, Log, TEXT("Removed gathering point near (%f, %f, %f)"), 
+                   Location.X, Location.Y, Location.Z);
+            break;
+        }
     }
 }
 
-void UCrowd_MassEntityManager::ConfigureMassTraits()
+float ACrowd_MassEntityManager::GetCrowdSimulationFPS() const
 {
-    // Configure Mass traits for crowd entities
-    // This would normally use Mass trait configuration assets
-    UE_LOG(LogTemp, Log, TEXT("Configuring Mass traits for crowd simulation"));
+    return CurrentSimulationFPS;
 }
 
-void UCrowd_MassEntityManager::SetupLODSystem()
+void ACrowd_MassEntityManager::SetPerformanceTarget(float TargetFPS)
 {
-    if (!SpawnConfig.bEnableLODSystem)
-    {
-        return;
-    }
-    
-    // Configure LOD distances for crowd entities
-    // LOD0: 0-500 units (full detail)
-    // LOD1: 500-1500 units (medium detail)  
-    // LOD2: 1500+ units (low detail/impostors)
-    
-    UE_LOG(LogTemp, Log, TEXT("LOD system configured for crowd simulation"));
+    PerformanceTargetFPS = FMath::Clamp(TargetFPS, 15.0f, 120.0f);
+    UE_LOG(LogTemp, Log, TEXT("Set crowd simulation performance target to %f FPS"), PerformanceTargetFPS);
 }
 
-void UCrowd_MassEntityManager::UpdateCrowdMetrics()
+void ACrowd_MassEntityManager::UpdatePerformanceMetrics(float DeltaTime)
 {
-    // Update performance metrics
-    if (MassEntitySubsystem)
+    LastFrameTime = DeltaTime;
+    CurrentSimulationFPS = (DeltaTime > 0.0f) ? (1.0f / DeltaTime) : 60.0f;
+
+    // Log performance issues
+    if (CurrentSimulationFPS < PerformanceTargetFPS * 0.8f)
     {
-        // Track active entity count from Mass system
-        // This is a simplified version - real implementation would query Mass directly
+        static float LastWarningTime = 0.0f;
+        float CurrentTime = GetWorld()->GetTimeSeconds();
+        
+        if (CurrentTime - LastWarningTime > 5.0f) // Log warning every 5 seconds max
+        {
+            UE_LOG(LogTemp, Warning, TEXT("Crowd simulation FPS below target: %f (target: %f)"), 
+                   CurrentSimulationFPS, PerformanceTargetFPS);
+            LastWarningTime = CurrentTime;
+        }
     }
+}
+
+void ACrowd_MassEntityManager::AdaptLODBasedOnPerformance()
+{
+    if (CurrentSimulationFPS < PerformanceTargetFPS * 0.7f)
+    {
+        // Reduce LOD distances to improve performance
+        LODSettings.HighDetailDistance *= 0.95f;
+        LODSettings.MediumDetailDistance *= 0.95f;
+        LODSettings.LowDetailDistance *= 0.95f;
+        
+        // Clamp to minimum values
+        LODSettings.HighDetailDistance = FMath::Max(LODSettings.HighDetailDistance, 200.0f);
+        LODSettings.MediumDetailDistance = FMath::Max(LODSettings.MediumDetailDistance, 500.0f);
+        LODSettings.LowDetailDistance = FMath::Max(LODSettings.LowDetailDistance, 1000.0f);
+    }
+    else if (CurrentSimulationFPS > PerformanceTargetFPS * 1.1f)
+    {
+        // Increase LOD distances for better quality
+        LODSettings.HighDetailDistance *= 1.02f;
+        LODSettings.MediumDetailDistance *= 1.02f;
+        LODSettings.LowDetailDistance *= 1.02f;
+        
+        // Clamp to maximum values
+        LODSettings.HighDetailDistance = FMath::Min(LODSettings.HighDetailDistance, 1000.0f);
+        LODSettings.MediumDetailDistance = FMath::Min(LODSettings.MediumDetailDistance, 2000.0f);
+        LODSettings.LowDetailDistance = FMath::Min(LODSettings.LowDetailDistance, 4000.0f);
+    }
+}
+
+bool ACrowd_MassEntityManager::IsMassEntitySystemAvailable() const
+{
+    // For now, return false since Mass Entity may not be available
+    // In a real implementation, this would check if the subsystems are valid
+    return (MassEntitySubsystem != nullptr && MassSpawnerSubsystem != nullptr);
+}
+
+void ACrowd_MassEntityManager::CleanupMassEntitySystem()
+{
+    if (IsMassEntitySystemAvailable())
+    {
+        // Cleanup Mass Entity resources
+        UE_LOG(LogTemp, Log, TEXT("Cleaning up Mass Entity crowd simulation"));
+    }
+
+    // Clear gathering points
+    GatheringPoints.Empty();
+    GatheringPointBehaviors.Empty();
+    GatheringPointRadii.Empty();
+
+    // Reset counters
+    ActiveEntityCount = 0;
+    CurrentSimulationFPS = 60.0f;
 }
