@@ -3,42 +3,64 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "Components/ExponentialHeightFogComponent.h"
-#include "Components/DirectionalLightComponent.h"
-#include "Components/SkyLightComponent.h"
-#include "Engine/DirectionalLight.h"
-#include "Engine/SkyLight.h"
-#include "Engine/ExponentialHeightFog.h"
-#include "TranspersonalGame.h"
+#include "Components/VolumetricCloudComponent.h"
+#include "Particles/ParticleSystemComponent.h"
 #include "Light_VolumetricFogManager.generated.h"
 
+UENUM(BlueprintType)
+enum class ELight_FogType : uint8
+{
+    None            UMETA(DisplayName = "None"),
+    Light           UMETA(DisplayName = "Light Mist"),
+    Medium          UMETA(DisplayName = "Medium Fog"),
+    Heavy           UMETA(DisplayName = "Heavy Fog"),
+    Volumetric      UMETA(DisplayName = "Volumetric Fog")
+};
+
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FLight_VolumetricFogSettings
+struct TRANSPERSONALGAME_API FLight_FogSettings
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Volumetric Fog")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fog")
     float FogDensity = 0.02f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Volumetric Fog")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fog")
     float FogHeightFalloff = 0.2f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Volumetric Fog")
-    FColor FogInscatteringColor = FColor(180, 200, 255, 255);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fog")
+    float StartDistance = 5000.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Volumetric Fog")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fog")
+    FLinearColor FogInscatteringColor = FLinearColor(0.447f, 0.639f, 1.0f, 1.0f);
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Volumetric")
+    bool bVolumetricFog = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Volumetric")
     float VolumetricFogScatteringDistribution = 0.2f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Volumetric Fog")
-    FColor VolumetricFogAlbedo = FColor(240, 240, 255, 255);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Volumetric")
+    FLinearColor VolumetricFogAlbedo = FLinearColor(1.0f, 1.0f, 1.0f, 1.0f);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Volumetric Fog")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Volumetric")
+    float VolumetricFogEmissive = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Volumetric")
     float VolumetricFogExtinctionScale = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Volumetric Fog")
-    float SunVolumetricScatteringIntensity = 2.5f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Volumetric Fog")
-    float SkyLightVolumetricIntensity = 1.5f;
+    FLight_FogSettings()
+    {
+        FogDensity = 0.02f;
+        FogHeightFalloff = 0.2f;
+        StartDistance = 5000.0f;
+        FogInscatteringColor = FLinearColor(0.447f, 0.639f, 1.0f, 1.0f);
+        bVolumetricFog = true;
+        VolumetricFogScatteringDistribution = 0.2f;
+        VolumetricFogAlbedo = FLinearColor(1.0f, 1.0f, 1.0f, 1.0f);
+        VolumetricFogEmissive = 0.0f;
+        VolumetricFogExtinctionScale = 1.0f;
+    }
 };
 
 UCLASS(BlueprintType, Blueprintable)
@@ -55,56 +77,73 @@ protected:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
     class USceneComponent* RootSceneComponent;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Volumetric Settings")
-    FLight_VolumetricFogSettings VolumetricSettings;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fog System")
+    ELight_FogType CurrentFogType = ELight_FogType::Light;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Fog References")
-    class AExponentialHeightFog* FogActor;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fog System")
+    FLight_FogSettings FogSettings;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Light References")
-    class ADirectionalLight* SunLight;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fog System")
+    float FogTransitionSpeed = 1.0f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Light References")
-    class ASkyLight* SkyLight;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmospheric Effects")
+    bool bEnableAtmosphericPerspective = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmospheric Effects")
+    float AtmosphericPerspectiveDistance = 100000.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "References")
+    class AExponentialHeightFog* HeightFogActor;
+
+    UPROPERTY(BlueprintReadOnly, Category = "References")
+    class AVolumetricCloud* VolumetricCloudActor;
 
 public:
-    UFUNCTION(BlueprintCallable, Category = "Volumetric Fog")
-    void InitializeVolumetricFog();
+    virtual void Tick(float DeltaTime) override;
 
-    UFUNCTION(BlueprintCallable, Category = "Volumetric Fog")
-    void UpdateVolumetricSettings(const FLight_VolumetricFogSettings& NewSettings);
+    UFUNCTION(BlueprintCallable, Category = "Fog System")
+    void SetFogType(ELight_FogType NewFogType);
 
-    UFUNCTION(BlueprintCallable, Category = "Volumetric Fog")
-    void SetFogDensity(float NewDensity);
+    UFUNCTION(BlueprintCallable, Category = "Fog System")
+    void ApplyFogSettings(const FLight_FogSettings& Settings);
 
-    UFUNCTION(BlueprintCallable, Category = "Volumetric Fog")
-    void SetFogHeightFalloff(float NewFalloff);
+    UFUNCTION(BlueprintCallable, Category = "Fog System")
+    void TransitionToFogType(ELight_FogType TargetFogType, float TransitionDuration = 3.0f);
 
-    UFUNCTION(BlueprintCallable, Category = "Volumetric Fog")
-    void SetVolumetricScatteringIntensity(float NewIntensity);
+    UFUNCTION(BlueprintCallable, Category = "Fog System")
+    void CreateMorningMist();
 
-    UFUNCTION(BlueprintCallable, Category = "Volumetric Fog")
-    void ApplyCretaceousAtmosphere();
+    UFUNCTION(BlueprintCallable, Category = "Fog System")
+    void CreateEveningFog();
 
-    UFUNCTION(BlueprintCallable, Category = "Volumetric Fog")
-    void SaveAtmosphericSettings();
+    UFUNCTION(BlueprintCallable, Category = "Fog System")
+    void CreateStormFog();
 
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Editor Tools")
-    void EditorApplyVolumetricFog();
+    UFUNCTION(BlueprintCallable, Category = "Fog System")
+    void ClearAllFog();
 
-protected:
-    UFUNCTION()
-    void FindExistingLightingActors();
+    UFUNCTION(BlueprintCallable, Category = "Atmospheric Effects")
+    void EnableVolumetricLightScattering(bool bEnable);
 
-    UFUNCTION()
-    void CreateVolumetricFogActor();
+    UFUNCTION(BlueprintCallable, Category = "Atmospheric Effects")
+    void SetAtmosphericPerspective(bool bEnable, float Distance = 100000.0f);
 
-    UFUNCTION()
-    void ConfigureSunLight();
+    UFUNCTION(BlueprintPure, Category = "Fog System")
+    ELight_FogType GetCurrentFogType() const { return CurrentFogType; }
 
-    UFUNCTION()
-    void ConfigureSkyLight();
+    UFUNCTION(BlueprintPure, Category = "Fog System")
+    FLight_FogSettings GetCurrentFogSettings() const { return FogSettings; }
 
-    UFUNCTION()
-    void ApplyFogSettings();
+private:
+    void InitializeFogComponents();
+    void UpdateFogTransition(float DeltaTime);
+    void ApplyFogTypeSettings(ELight_FogType FogType);
+    
+    // Transition variables
+    bool bIsTransitioning = false;
+    float TransitionTimer = 0.0f;
+    float TransitionDuration = 3.0f;
+    ELight_FogType TargetFogType;
+    FLight_FogSettings StartFogSettings;
+    FLight_FogSettings TargetFogSettings;
 };
