@@ -3,12 +3,78 @@
 #include "CoreMinimal.h"
 #include "Engine/World.h"
 #include "Subsystems/WorldSubsystem.h"
-#include "../../SharedTypes.h"
+#include "Components/ActorComponent.h"
+#include "../SharedTypes.h"
 #include "BiomeManager.generated.h"
 
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FEng_BiomeData
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    EBiomeType BiomeType = EBiomeType::Forest;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    FString BiomeName = TEXT("Unknown");
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    float Temperature = 20.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    float Humidity = 50.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    float Fertility = 50.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    TArray<TSubclassOf<class APawn>> NativeDinosaurs;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    TArray<FString> VegetationTypes;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    FLinearColor BiomeColor = FLinearColor::Green;
+
+    FEng_BiomeData()
+    {
+        BiomeType = EBiomeType::Forest;
+        BiomeName = TEXT("Forest");
+        Temperature = 22.0f;
+        Humidity = 70.0f;
+        Fertility = 80.0f;
+        BiomeColor = FLinearColor::Green;
+    }
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FEng_BiomeZone
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Zone")
+    FVector Center = FVector::ZeroVector;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Zone")
+    float Radius = 1000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Zone")
+    FEng_BiomeData BiomeData;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Zone")
+    bool bIsActive = true;
+
+    FEng_BiomeZone()
+    {
+        Center = FVector::ZeroVector;
+        Radius = 1000.0f;
+        bIsActive = true;
+    }
+};
+
 /**
- * Biome System Architecture - Core biome management and world generation integration
- * Manages biome definitions, transitions, and environmental parameters
+ * BiomeManager - World Subsystem for managing biome zones and environmental systems
+ * Handles biome transitions, environmental effects, and ecosystem simulation
  */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UBiomeManager : public UWorldSubsystem
@@ -21,85 +87,76 @@ public:
     // USubsystem interface
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
+    virtual bool ShouldCreateSubsystem(UObject* Outer) const override;
 
-    // Core biome management
-    UFUNCTION(BlueprintCallable, Category = "Biome System")
-    EEng_BiomeType GetBiomeAtLocation(const FVector& WorldLocation) const;
+    // Biome Management
+    UFUNCTION(BlueprintCallable, Category = "Biome")
+    void InitializeBiomes();
 
-    UFUNCTION(BlueprintCallable, Category = "Biome System")
-    FEng_BiomeData GetBiomeData(EEng_BiomeType BiomeType) const;
+    UFUNCTION(BlueprintCallable, Category = "Biome")
+    EBiomeType GetBiomeAtLocation(const FVector& Location) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Biome System")
-    void RegisterBiomeZone(const FEng_BiomeZone& BiomeZone);
+    UFUNCTION(BlueprintCallable, Category = "Biome")
+    FEng_BiomeData GetBiomeData(EBiomeType BiomeType) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Biome System")
-    TArray<FEng_BiomeZone> GetBiomeZonesInRadius(const FVector& Center, float Radius) const;
+    UFUNCTION(BlueprintCallable, Category = "Biome")
+    void AddBiomeZone(const FEng_BiomeZone& NewZone);
 
-    // Environmental parameters
+    UFUNCTION(BlueprintCallable, Category = "Biome")
+    void RemoveBiomeZone(const FVector& Location);
+
+    UFUNCTION(BlueprintCallable, Category = "Biome")
+    TArray<FEng_BiomeZone> GetAllBiomeZones() const { return BiomeZones; }
+
+    // Environmental Effects
     UFUNCTION(BlueprintCallable, Category = "Environment")
-    float GetTemperatureAtLocation(const FVector& WorldLocation) const;
+    float GetTemperatureAtLocation(const FVector& Location) const;
 
     UFUNCTION(BlueprintCallable, Category = "Environment")
-    float GetHumidityAtLocation(const FVector& WorldLocation) const;
+    float GetHumidityAtLocation(const FVector& Location) const;
 
     UFUNCTION(BlueprintCallable, Category = "Environment")
-    EEng_WeatherType GetWeatherAtLocation(const FVector& WorldLocation) const;
+    float GetFertilityAtLocation(const FVector& Location) const;
 
-    // Biome transitions
-    UFUNCTION(BlueprintCallable, Category = "Biome System")
-    bool IsInBiomeTransitionZone(const FVector& WorldLocation, float TransitionRadius = 500.0f) const;
+    // Biome Transitions
+    UFUNCTION(BlueprintCallable, Category = "Biome")
+    void UpdateBiomeTransitions(float DeltaTime);
 
-    UFUNCTION(BlueprintCallable, Category = "Biome System")
-    FEng_BiomeTransition CalculateBiomeTransition(const FVector& WorldLocation) const;
+    UFUNCTION(BlueprintCallable, Category = "Biome")
+    bool IsLocationInBiomeTransition(const FVector& Location) const;
 
-    // Debug and validation
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Debug")
-    void ValidateBiomeConfiguration();
+    // Debug and Visualization
+    UFUNCTION(BlueprintCallable, Category = "Debug", CallInEditor)
+    void DebugDrawBiomes() const;
 
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Debug")
-    void GenerateDebugBiomeMap();
+    UFUNCTION(BlueprintCallable, Category = "Debug", CallInEditor)
+    void CreateTestBiomes();
 
 protected:
-    // Biome configuration
+    // Biome Data Storage
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Biome Data")
+    TArray<FEng_BiomeZone> BiomeZones;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Biome Data")
+    TMap<EBiomeType, FEng_BiomeData> BiomeDataMap;
+
+    // Configuration
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Configuration")
-    TMap<EEng_BiomeType, FEng_BiomeData> BiomeDefinitions;
+    float BiomeTransitionRadius = 200.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Configuration")
-    TArray<FEng_BiomeZone> ActiveBiomeZones;
+    float UpdateFrequency = 1.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Configuration")
-    float BiomeTransitionSmoothness = 0.3f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Configuration")
-    int32 BiomeResolution = 100; // Units per biome sample
-
-    // Environmental parameters
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Environment")
-    FEng_EnvironmentalParameters GlobalEnvironmentalParams;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Environment")
-    float TemperatureVariation = 15.0f; // Celsius variation
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Environment")
-    float HumidityVariation = 0.4f; // 0-1 range variation
+    bool bEnableDebugDraw = false;
 
 private:
-    // Internal biome calculation
-    EEng_BiomeType CalculateBiomeFromParameters(float Temperature, float Humidity, float Elevation) const;
+    // Internal Methods
+    void SetupDefaultBiomes();
+    FEng_BiomeZone* FindBiomeZoneAtLocation(const FVector& Location);
+    float CalculateDistanceWeight(const FVector& Location, const FEng_BiomeZone& Zone) const;
     
-    // Noise generation for environmental variation
-    float GenerateTemperatureNoise(const FVector& Location) const;
-    float GenerateHumidityNoise(const FVector& Location) const;
-    
-    // Biome zone management
-    void InitializeDefaultBiomes();
-    void UpdateBiomeZoneCache();
-    
-    // Cache for performance
-    mutable TMap<FIntVector, EEng_BiomeType> BiomeCache;
-    mutable TMap<FIntVector, FEng_EnvironmentalParameters> EnvironmentCache;
-    
-    // Configuration validation
-    bool ValidateBiomeData(const FEng_BiomeData& BiomeData) const;
-    void LogBiomeSystemStatus() const;
+    // Timer for periodic updates
+    FTimerHandle UpdateTimer;
+    float LastUpdateTime = 0.0f;
 };
