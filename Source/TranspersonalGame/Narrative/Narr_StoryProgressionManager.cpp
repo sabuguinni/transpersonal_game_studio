@@ -1,226 +1,197 @@
 #include "Narr_StoryProgressionManager.h"
 #include "Engine/Engine.h"
-#include "Kismet/GameplayStatics.h"
+
+UNarr_StoryProgressionManager::UNarr_StoryProgressionManager()
+{
+    CurrentPhase = ENarr_StoryPhase::Awakening;
+    CompletedEventsCount = 0;
+}
 
 void UNarr_StoryProgressionManager::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
-    
-    // Initialize player progress
-    CurrentProgress = FNarr_PlayerProgress();
-    
-    // Initialize story milestones
-    InitializeStoryMilestones();
-    
-    UE_LOG(LogTemp, Log, TEXT("Narr_StoryProgressionManager initialized with %d milestones"), StoryMilestones.Num());
+    InitializeStoryEvents();
+    UE_LOG(LogTemp, Warning, TEXT("Narr_StoryProgressionManager initialized"));
 }
 
-void UNarr_StoryProgressionManager::UpdatePlayerProgress(const FString& ProgressType, int32 Value)
+void UNarr_StoryProgressionManager::AdvanceStoryPhase()
 {
-    if (ProgressType == TEXT("DaysAlive"))
+    switch (CurrentPhase)
     {
-        CurrentProgress.DaysAlive = FMath::Max(CurrentProgress.DaysAlive, Value);
-    }
-    else if (ProgressType == TEXT("DinosaursSeen"))
-    {
-        CurrentProgress.DinosaursSeen += Value;
-    }
-    else if (ProgressType == TEXT("DinosaursSurvived"))
-    {
-        CurrentProgress.DinosaursSurvived += Value;
-    }
-    else if (ProgressType == TEXT("ToolsCrafted"))
-    {
-        CurrentProgress.ToolsCrafted += Value;
-    }
-    else if (ProgressType == TEXT("SheltersBuilt"))
-    {
-        CurrentProgress.SheltersBuilt += Value;
+        case ENarr_StoryPhase::Awakening:
+            CurrentPhase = ENarr_StoryPhase::FirstHunt;
+            break;
+        case ENarr_StoryPhase::FirstHunt:
+            CurrentPhase = ENarr_StoryPhase::TerritoryWars;
+            break;
+        case ENarr_StoryPhase::TerritoryWars:
+            CurrentPhase = ENarr_StoryPhase::AlphaRising;
+            break;
+        case ENarr_StoryPhase::AlphaRising:
+            CurrentPhase = ENarr_StoryPhase::Survival;
+            break;
+        default:
+            break;
     }
     
-    // Check if any milestones are now completed
-    CheckAllMilestones();
-    
-    UE_LOG(LogTemp, Log, TEXT("Updated progress: %s = %d"), *ProgressType, Value);
+    UE_LOG(LogTemp, Warning, TEXT("Story phase advanced to: %d"), (int32)CurrentPhase);
 }
 
-bool UNarr_StoryProgressionManager::CheckMilestoneConditions(const FString& MilestoneID)
+ENarr_StoryPhase UNarr_StoryProgressionManager::GetCurrentStoryPhase() const
 {
-    if (FNarr_StoryMilestone* Milestone = StoryMilestones.Find(MilestoneID))
+    return CurrentPhase;
+}
+
+void UNarr_StoryProgressionManager::CompleteStoryEvent(const FString& EventID)
+{
+    for (FNarr_StoryEvent& Event : StoryEvents)
     {
-        if (Milestone->bCompleted)
+        if (Event.EventID == EventID && !Event.bCompleted)
         {
-            return true;
+            Event.bCompleted = true;
+            CompletedEventsCount++;
+            UE_LOG(LogTemp, Warning, TEXT("Story event completed: %s"), *EventID);
+            break;
         }
-        
-        // Check all required conditions
-        for (const FString& Condition : Milestone->RequiredConditions)
-        {
-            if (Condition == TEXT("FirstDay") && CurrentProgress.DaysAlive >= 1)
-            {
-                continue;
-            }
-            else if (Condition == TEXT("FirstDinosaur") && CurrentProgress.DinosaursSeen >= 1)
-            {
-                continue;
-            }
-            else if (Condition == TEXT("FirstTool") && CurrentProgress.ToolsCrafted >= 1)
-            {
-                continue;
-            }
-            else if (Condition == TEXT("FirstShelter") && CurrentProgress.SheltersBuilt >= 1)
-            {
-                continue;
-            }
-            else if (Condition == TEXT("SurviveWeek") && CurrentProgress.DaysAlive >= 7)
-            {
-                continue;
-            }
-            else
-            {
-                return false; // Condition not met
-            }
-        }
-        
-        return true; // All conditions met
     }
-    
+}
+
+bool UNarr_StoryProgressionManager::IsStoryEventCompleted(const FString& EventID) const
+{
+    for (const FNarr_StoryEvent& Event : StoryEvents)
+    {
+        if (Event.EventID == EventID)
+        {
+            return Event.bCompleted;
+        }
+    }
     return false;
 }
 
-void UNarr_StoryProgressionManager::CompleteMilestone(const FString& MilestoneID)
+TArray<FNarr_StoryEvent> UNarr_StoryProgressionManager::GetAvailableEvents() const
 {
-    if (FNarr_StoryMilestone* Milestone = StoryMilestones.Find(MilestoneID))
-    {
-        if (!Milestone->bCompleted)
-        {
-            Milestone->bCompleted = true;
-            CurrentProgress.CompletedMilestones.Add(MilestoneID);
-            
-            // Unlock associated content
-            UnlockContent(Milestone->UnlockedContent);
-            
-            // Display milestone completion
-            if (GEngine)
-            {
-                FString CompletionText = FString::Printf(TEXT("MILESTONE COMPLETED: %s"), 
-                                                       *Milestone->MilestoneName.ToString());
-                GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Green, CompletionText);
-            }
-            
-            UE_LOG(LogTemp, Log, TEXT("Completed milestone: %s"), *MilestoneID);
-        }
-    }
-}
-
-FNarr_PlayerProgress UNarr_StoryProgressionManager::GetPlayerProgress() const
-{
-    return CurrentProgress;
-}
-
-TArray<FNarr_StoryMilestone> UNarr_StoryProgressionManager::GetAvailableMilestones() const
-{
-    TArray<FNarr_StoryMilestone> AvailableMilestones;
+    TArray<FNarr_StoryEvent> AvailableEvents;
     
-    for (const auto& MilestonePair : StoryMilestones)
+    for (const FNarr_StoryEvent& Event : StoryEvents)
     {
-        if (!MilestonePair.Value.bCompleted)
+        if (!Event.bCompleted && Event.RequiredPhase == CurrentPhase && ArePrerequisitesMet(Event))
         {
-            AvailableMilestones.Add(MilestonePair.Value);
+            AvailableEvents.Add(Event);
         }
     }
     
-    return AvailableMilestones;
+    return AvailableEvents;
 }
 
-void UNarr_StoryProgressionManager::TriggerStoryEvent(const FString& EventID, const FVector& Location)
+float UNarr_StoryProgressionManager::GetStoryProgress() const
 {
-    if (EventID == TEXT("DinosaurEncounter"))
+    if (StoryEvents.Num() == 0)
     {
-        UpdatePlayerProgress(TEXT("DinosaursSeen"), 1);
-    }
-    else if (EventID == TEXT("DinosaurSurvival"))
-    {
-        UpdatePlayerProgress(TEXT("DinosaursSurvived"), 1);
-    }
-    else if (EventID == TEXT("ToolCrafted"))
-    {
-        UpdatePlayerProgress(TEXT("ToolsCrafted"), 1);
-    }
-    else if (EventID == TEXT("ShelterBuilt"))
-    {
-        UpdatePlayerProgress(TEXT("SheltersBuilt"), 1);
+        return 0.0f;
     }
     
-    UE_LOG(LogTemp, Log, TEXT("Triggered story event: %s at location %s"), *EventID, *Location.ToString());
+    return (float)CompletedEventsCount / (float)StoryEvents.Num();
 }
 
-void UNarr_StoryProgressionManager::InitializeStoryMilestones()
+FString UNarr_StoryProgressionManager::GetCurrentPhaseDescription() const
 {
-    // First Day milestone
-    FNarr_StoryMilestone FirstDay;
-    FirstDay.MilestoneID = TEXT("FirstDay");
-    FirstDay.MilestoneName = FText::FromString(TEXT("First Dawn"));
-    FirstDay.Description = FText::FromString(TEXT("Survive your first day in the prehistoric world"));
-    FirstDay.RequiredConditions.Add(TEXT("FirstDay"));
-    FirstDay.UnlockedContent.Add(TEXT("BasicCrafting"));
-    StoryMilestones.Add(FirstDay.MilestoneID, FirstDay);
-    
-    // First Dinosaur milestone
-    FNarr_StoryMilestone FirstDinosaur;
-    FirstDinosaur.MilestoneID = TEXT("FirstEncounter");
-    FirstDinosaur.MilestoneName = FText::FromString(TEXT("Ancient Giants"));
-    FirstDinosaur.Description = FText::FromString(TEXT("Witness your first dinosaur in the wild"));
-    FirstDinosaur.RequiredConditions.Add(TEXT("FirstDinosaur"));
-    FirstDinosaur.UnlockedContent.Add(TEXT("DinosaurLore"));
-    StoryMilestones.Add(FirstDinosaur.MilestoneID, FirstDinosaur);
-    
-    // First Tool milestone
-    FNarr_StoryMilestone FirstTool;
-    FirstTool.MilestoneID = TEXT("FirstTool");
-    FirstTool.MilestoneName = FText::FromString(TEXT("Stone Age Begins"));
-    FirstTool.Description = FText::FromString(TEXT("Craft your first primitive tool"));
-    FirstTool.RequiredConditions.Add(TEXT("FirstTool"));
-    FirstTool.UnlockedContent.Add(TEXT("AdvancedCrafting"));
-    StoryMilestones.Add(FirstTool.MilestoneID, FirstTool);
-    
-    // First Shelter milestone
-    FNarr_StoryMilestone FirstShelter;
-    FirstShelter.MilestoneID = TEXT("FirstShelter");
-    FirstShelter.MilestoneName = FText::FromString(TEXT("Safe Haven"));
-    FirstShelter.Description = FText::FromString(TEXT("Build your first shelter from the elements"));
-    FirstShelter.RequiredConditions.Add(TEXT("FirstShelter"));
-    FirstShelter.UnlockedContent.Add(TEXT("Construction"));
-    StoryMilestones.Add(FirstShelter.MilestoneID, FirstShelter);
-    
-    // Survive Week milestone
-    FNarr_StoryMilestone SurviveWeek;
-    SurviveWeek.MilestoneID = TEXT("SurviveWeek");
-    SurviveWeek.MilestoneName = FText::FromString(TEXT("Seasoned Survivor"));
-    SurviveWeek.Description = FText::FromString(TEXT("Survive for seven days in the prehistoric world"));
-    SurviveWeek.RequiredConditions.Add(TEXT("SurviveWeek"));
-    SurviveWeek.UnlockedContent.Add(TEXT("ExpertSurvival"));
-    StoryMilestones.Add(SurviveWeek.MilestoneID, SurviveWeek);
+    switch (CurrentPhase)
+    {
+        case ENarr_StoryPhase::Awakening:
+            return TEXT("You awaken in a dangerous prehistoric world. Learn to survive.");
+        case ENarr_StoryPhase::FirstHunt:
+            return TEXT("The hunt begins. Prove yourself against the ancient predators.");
+        case ENarr_StoryPhase::TerritoryWars:
+            return TEXT("Territorial conflicts emerge. Establish your dominance.");
+        case ENarr_StoryPhase::AlphaRising:
+            return TEXT("Rise to become the apex predator of your domain.");
+        case ENarr_StoryPhase::Survival:
+            return TEXT("Ultimate survival. Master the prehistoric world.");
+        default:
+            return TEXT("Unknown phase");
+    }
 }
 
-void UNarr_StoryProgressionManager::CheckAllMilestones()
+void UNarr_StoryProgressionManager::InitializeStoryEvents()
 {
-    for (auto& MilestonePair : StoryMilestones)
+    StoryEvents.Empty();
+
+    // Awakening Phase Events
+    FNarr_StoryEvent Event1;
+    Event1.EventID = TEXT("FirstSteps");
+    Event1.EventDescription = TEXT("Take your first steps in the prehistoric world");
+    Event1.RequiredPhase = ENarr_StoryPhase::Awakening;
+    StoryEvents.Add(Event1);
+
+    FNarr_StoryEvent Event2;
+    Event2.EventID = TEXT("FindWater");
+    Event2.EventDescription = TEXT("Locate a source of fresh water");
+    Event2.RequiredPhase = ENarr_StoryPhase::Awakening;
+    StoryEvents.Add(Event2);
+
+    FNarr_StoryEvent Event3;
+    Event3.EventID = TEXT("CraftTool");
+    Event3.EventDescription = TEXT("Craft your first primitive tool");
+    Event3.RequiredPhase = ENarr_StoryPhase::Awakening;
+    Event3.PrerequisiteEvents.Add(TEXT("FirstSteps"));
+    StoryEvents.Add(Event3);
+
+    // First Hunt Phase Events
+    FNarr_StoryEvent Event4;
+    Event4.EventID = TEXT("FirstKill");
+    Event4.EventDescription = TEXT("Successfully hunt your first prey");
+    Event4.RequiredPhase = ENarr_StoryPhase::FirstHunt;
+    Event4.PrerequisiteEvents.Add(TEXT("CraftTool"));
+    StoryEvents.Add(Event4);
+
+    FNarr_StoryEvent Event5;
+    Event5.EventID = TEXT("AvoidPredator");
+    Event5.EventDescription = TEXT("Survive an encounter with a large predator");
+    Event5.RequiredPhase = ENarr_StoryPhase::FirstHunt;
+    StoryEvents.Add(Event5);
+
+    // Territory Wars Phase Events
+    FNarr_StoryEvent Event6;
+    Event6.EventID = TEXT("ClaimTerritory");
+    Event6.EventDescription = TEXT("Establish your hunting territory");
+    Event6.RequiredPhase = ENarr_StoryPhase::TerritoryWars;
+    Event6.PrerequisiteEvents.Add(TEXT("FirstKill"));
+    StoryEvents.Add(Event6);
+
+    FNarr_StoryEvent Event7;
+    Event7.EventID = TEXT("DefendTerritory");
+    Event7.EventDescription = TEXT("Successfully defend your territory from intruders");
+    Event7.RequiredPhase = ENarr_StoryPhase::TerritoryWars;
+    Event7.PrerequisiteEvents.Add(TEXT("ClaimTerritory"));
+    StoryEvents.Add(Event7);
+
+    // Alpha Rising Phase Events
+    FNarr_StoryEvent Event8;
+    Event8.EventID = TEXT("DefeatAlpha");
+    Event8.EventDescription = TEXT("Challenge and defeat an alpha predator");
+    Event8.RequiredPhase = ENarr_StoryPhase::AlphaRising;
+    Event8.PrerequisiteEvents.Add(TEXT("DefendTerritory"));
+    StoryEvents.Add(Event8);
+
+    // Survival Phase Events
+    FNarr_StoryEvent Event9;
+    Event9.EventID = TEXT("MasterSurvival");
+    Event9.EventDescription = TEXT("Achieve mastery over the prehistoric world");
+    Event9.RequiredPhase = ENarr_StoryPhase::Survival;
+    Event9.PrerequisiteEvents.Add(TEXT("DefeatAlpha"));
+    StoryEvents.Add(Event9);
+
+    UE_LOG(LogTemp, Warning, TEXT("Initialized %d story events"), StoryEvents.Num());
+}
+
+bool UNarr_StoryProgressionManager::ArePrerequisitesMet(const FNarr_StoryEvent& Event) const
+{
+    for (const FString& PrereqID : Event.PrerequisiteEvents)
     {
-        if (!MilestonePair.Value.bCompleted && CheckMilestoneConditions(MilestonePair.Key))
+        if (!IsStoryEventCompleted(PrereqID))
         {
-            CompleteMilestone(MilestonePair.Key);
+            return false;
         }
     }
-}
-
-void UNarr_StoryProgressionManager::UnlockContent(const TArray<FString>& ContentIDs)
-{
-    for (const FString& ContentID : ContentIDs)
-    {
-        UE_LOG(LogTemp, Log, TEXT("Unlocked content: %s"), *ContentID);
-        
-        // Here you would implement actual content unlocking
-        // e.g., enable new crafting recipes, unlock new areas, etc.
-    }
+    return true;
 }
