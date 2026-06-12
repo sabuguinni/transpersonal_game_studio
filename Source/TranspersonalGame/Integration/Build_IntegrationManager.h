@@ -5,82 +5,66 @@
 #include "SharedTypes.h"
 #include "Build_IntegrationManager.generated.h"
 
-UENUM(BlueprintType)
-enum class EBuild_IntegrationStatus : uint8
-{
-    Unknown         UMETA(DisplayName = "Unknown"),
-    Validating      UMETA(DisplayName = "Validating"),
-    Valid           UMETA(DisplayName = "Valid"),
-    Invalid         UMETA(DisplayName = "Invalid"),
-    CompileError    UMETA(DisplayName = "Compile Error"),
-    RuntimeError    UMETA(DisplayName = "Runtime Error")
-};
-
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FBuild_ModuleStatus
+struct TRANSPERSONALGAME_API FBuild_SystemStatus
 {
     GENERATED_BODY()
 
     UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    FString ModuleName;
+    FString SystemName;
 
     UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    EBuild_IntegrationStatus Status;
+    EBuild_ValidationStatus Status;
 
     UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    int32 ClassCount;
+    FString ErrorMessage;
 
     UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    int32 ActorCount;
+    float LastCheckTime;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    FString LastError;
-
-    FBuild_ModuleStatus()
+    FBuild_SystemStatus()
     {
-        ModuleName = TEXT("");
-        Status = EBuild_IntegrationStatus::Unknown;
-        ClassCount = 0;
-        ActorCount = 0;
-        LastError = TEXT("");
+        SystemName = TEXT("");
+        Status = EBuild_ValidationStatus::Unknown;
+        ErrorMessage = TEXT("");
+        LastCheckTime = 0.0f;
     }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FBuild_SystemHealth
+struct TRANSPERSONALGAME_API FBuild_IntegrationReport
 {
     GENERATED_BODY()
 
     UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    float FrameRate;
+    TArray<FBuild_SystemStatus> SystemStatuses;
 
     UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    float MemoryUsageMB;
+    int32 TotalActorCount;
 
     UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    int32 TotalActors;
+    int32 ActiveSystemCount;
 
     UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    int32 ActiveComponents;
+    float BuildTime;
 
     UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    bool bIsStable;
+    bool bIsPlayable;
 
-    FBuild_SystemHealth()
+    FBuild_IntegrationReport()
     {
-        FrameRate = 0.0f;
-        MemoryUsageMB = 0.0f;
-        TotalActors = 0;
-        ActiveComponents = 0;
-        bIsStable = false;
+        TotalActorCount = 0;
+        ActiveSystemCount = 0;
+        BuildTime = 0.0f;
+        bIsPlayable = false;
     }
 };
 
 /**
- * Integration Manager - Orchestrates build validation and system health monitoring
- * Ensures all modules work together correctly and maintains build stability
+ * Integration Manager - Orchestrates all game systems and validates build integrity
+ * Ensures all 18 agent outputs work together as a cohesive game
  */
-UCLASS(BlueprintType)
+UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UBuild_IntegrationManager : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
@@ -92,56 +76,38 @@ public:
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
-    // Integration validation
     UFUNCTION(BlueprintCallable, Category = "Integration")
-    void ValidateAllModules();
+    FBuild_IntegrationReport GenerateIntegrationReport();
 
     UFUNCTION(BlueprintCallable, Category = "Integration")
-    void ValidateModule(const FString& ModuleName);
+    bool ValidateSystemIntegrity();
 
     UFUNCTION(BlueprintCallable, Category = "Integration")
-    EBuild_IntegrationStatus GetModuleStatus(const FString& ModuleName);
-
-    // System health monitoring
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    FBuild_SystemHealth GetSystemHealth();
+    void EnforceActorCap(int32 MaxActors = 8000);
 
     UFUNCTION(BlueprintCallable, Category = "Integration")
-    void RunIntegrationTests();
-
-    // Build management
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    void CreateBuildSnapshot();
+    TArray<FBuild_SystemStatus> GetSystemStatuses();
 
     UFUNCTION(BlueprintCallable, Category = "Integration")
-    bool RestoreBuildSnapshot(const FString& SnapshotName);
+    bool IsGamePlayable();
 
-    // Error reporting
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    TArray<FString> GetIntegrationErrors();
-
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    void ClearIntegrationErrors();
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Integration")
+    void RunFullIntegrationTest();
 
 protected:
     UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    TMap<FString, FBuild_ModuleStatus> ModuleStatuses;
+    TArray<FBuild_SystemStatus> CachedSystemStatuses;
 
     UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    FBuild_SystemHealth CurrentSystemHealth;
+    float LastValidationTime;
 
     UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    TArray<FString> IntegrationErrors;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    bool bValidationInProgress;
+    bool bIntegrationValid;
 
 private:
-    void ValidateModuleClasses(const FString& ModuleName);
-    void ValidateModuleActors(const FString& ModuleName);
-    void UpdateSystemHealth();
-    void LogIntegrationError(const FString& Error);
-
-    FTimerHandle ValidationTimerHandle;
-    FTimerHandle HealthMonitorHandle;
+    void ValidateWorldGeneration();
+    void ValidateCharacterSystems();
+    void ValidateAISystems();
+    void ValidateQASystems();
+    void UpdateSystemStatus(const FString& SystemName, EBuild_ValidationStatus Status, const FString& ErrorMessage = TEXT(""));
 };
