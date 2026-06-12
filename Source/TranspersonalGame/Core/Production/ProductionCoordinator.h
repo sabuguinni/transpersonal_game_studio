@@ -6,123 +6,113 @@
 #include "Components/ActorComponent.h"
 #include "ProductionCoordinator.generated.h"
 
-/**
- * Production milestone tracking structure
- */
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FDir_ProductionMilestone
+UENUM(BlueprintType)
+enum class EDir_AgentStatus : uint8
 {
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Milestone")
-    FString MilestoneName;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Milestone")
-    bool bIsComplete;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Milestone")
-    float CompletionPercentage;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Milestone")
-    TArray<FString> Requirements;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Milestone")
-    TArray<FString> CompletedRequirements;
-
-    FDir_ProductionMilestone()
-    {
-        MilestoneName = TEXT("Unnamed Milestone");
-        bIsComplete = false;
-        CompletionPercentage = 0.0f;
-    }
+    Idle UMETA(DisplayName = "Idle"),
+    Working UMETA(DisplayName = "Working"), 
+    Completed UMETA(DisplayName = "Completed"),
+    Blocked UMETA(DisplayName = "Blocked"),
+    Failed UMETA(DisplayName = "Failed")
 };
 
-/**
- * Agent task tracking structure
- */
+UENUM(BlueprintType)
+enum class EDir_ProductionPhase : uint8
+{
+    PreProduction UMETA(DisplayName = "Pre-Production"),
+    CoreSystems UMETA(DisplayName = "Core Systems"),
+    ContentCreation UMETA(DisplayName = "Content Creation"),
+    Integration UMETA(DisplayName = "Integration"),
+    Testing UMETA(DisplayName = "Testing"),
+    Polish UMETA(DisplayName = "Polish")
+};
+
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FDir_AgentTask
+struct FDir_AgentTask
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent Task")
     FString AgentName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent")
-    int32 AgentID;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent Task")
+    FString TaskDescription;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent")
-    FString CurrentTask;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent Task")
+    EDir_AgentStatus Status;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent")
-    float TaskProgress;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent Task")
+    float Priority;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent")
-    bool bTaskComplete;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent Task")
+    int32 CycleAssigned;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent")
-    FString LastOutput;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent Task")
+    int32 CycleCompleted;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent")
-    int32 CycleCount;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent Task")
+    TArray<FString> Dependencies;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent Task")
+    TArray<FString> Deliverables;
 
     FDir_AgentTask()
     {
-        AgentName = TEXT("Unknown Agent");
-        AgentID = 0;
-        CurrentTask = TEXT("No Task Assigned");
-        TaskProgress = 0.0f;
-        bTaskComplete = false;
-        LastOutput = TEXT("");
-        CycleCount = 0;
+        AgentName = TEXT("");
+        TaskDescription = TEXT("");
+        Status = EDir_AgentStatus::Idle;
+        Priority = 1.0f;
+        CycleAssigned = 0;
+        CycleCompleted = 0;
     }
 };
 
-/**
- * Production metrics structure
- */
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FDir_ProductionMetrics
+struct FDir_ProductionMetrics
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Metrics")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production Metrics")
     int32 TotalActorsInLevel;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Metrics")
-    int32 DinosaurCount;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production Metrics")
+    int32 PlayableCharacters;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Metrics")
-    int32 CharacterCount;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production Metrics")
+    int32 DinosaurActors;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Metrics")
-    int32 EnvironmentActorCount;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production Metrics")
+    int32 EnvironmentActors;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Metrics")
-    float OverallCompletion;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production Metrics")
+    float TerrainCoverage;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Metrics")
-    int32 SystemsImplemented;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production Metrics")
+    bool bHasWorkingGameMode;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Metrics")
-    int32 TotalSystems;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production Metrics")
+    bool bHasPlayerController;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production Metrics")
+    bool bHasLighting;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production Metrics")
+    float OverallCompletionPercentage;
 
     FDir_ProductionMetrics()
     {
         TotalActorsInLevel = 0;
-        DinosaurCount = 0;
-        CharacterCount = 0;
-        EnvironmentActorCount = 0;
-        OverallCompletion = 0.0f;
-        SystemsImplemented = 0;
-        TotalSystems = 19;
+        PlayableCharacters = 0;
+        DinosaurActors = 0;
+        EnvironmentActors = 0;
+        TerrainCoverage = 0.0f;
+        bHasWorkingGameMode = false;
+        bHasPlayerController = false;
+        bHasLighting = false;
+        OverallCompletionPercentage = 0.0f;
     }
 };
 
-/**
- * Studio Director Production Coordinator
- * Manages the entire production pipeline and coordinates all 19 agents
- */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API AProductionCoordinator : public AActor
 {
@@ -134,81 +124,86 @@ public:
 protected:
     virtual void BeginPlay() override;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production State")
+    EDir_ProductionPhase CurrentPhase;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production State")
+    int32 CurrentCycle;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production State")
+    TArray<FDir_AgentTask> AgentTasks;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production State")
+    FDir_ProductionMetrics CurrentMetrics;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production State")
+    TArray<FString> CompletedMilestones;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production State")
+    TArray<FString> BlockingIssues;
+
 public:
     virtual void Tick(float DeltaTime) override;
 
-    // Production Milestones
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production")
-    TArray<FDir_ProductionMilestone> ProductionMilestones;
+    // Production Management Functions
+    UFUNCTION(BlueprintCallable, Category = "Production Management")
+    void InitializeProductionCycle(int32 CycleNumber);
 
-    // Agent Tasks
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production")
-    TArray<FDir_AgentTask> AgentTasks;
+    UFUNCTION(BlueprintCallable, Category = "Production Management")
+    void AssignTaskToAgent(const FString& AgentName, const FString& TaskDescription, float Priority = 1.0f);
 
-    // Current Production Metrics
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production")
-    FDir_ProductionMetrics CurrentMetrics;
+    UFUNCTION(BlueprintCallable, Category = "Production Management")
+    void CompleteAgentTask(const FString& AgentName, const TArray<FString>& Deliverables);
 
-    // Current Cycle Information
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production")
-    int32 CurrentCycle;
+    UFUNCTION(BlueprintCallable, Category = "Production Management")
+    void BlockAgentTask(const FString& AgentName, const FString& BlockingReason);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production")
-    FString CurrentCycleID;
+    // Metrics and Analysis
+    UFUNCTION(BlueprintCallable, Category = "Production Analysis")
+    FDir_ProductionMetrics CalculateCurrentMetrics();
 
-    // Production State
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production")
-    bool bProductionActive;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production")
-    float ProductionStartTime;
-
-    // Blueprint callable functions
-    UFUNCTION(BlueprintCallable, Category = "Production", CallInEditor)
-    void InitializeProduction();
-
-    UFUNCTION(BlueprintCallable, Category = "Production", CallInEditor)
-    void UpdateProductionMetrics();
-
-    UFUNCTION(BlueprintCallable, Category = "Production", CallInEditor)
-    void ValidateMilestone1();
-
-    UFUNCTION(BlueprintCallable, Category = "Production", CallInEditor)
-    void AssignAgentTasks();
-
-    UFUNCTION(BlueprintCallable, Category = "Production", CallInEditor)
-    void GenerateProductionReport();
-
-    UFUNCTION(BlueprintCallable, Category = "Production")
+    UFUNCTION(BlueprintCallable, Category = "Production Analysis")
     float GetOverallProgress() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Production")
-    bool IsMilestone1Complete() const;
+    UFUNCTION(BlueprintCallable, Category = "Production Analysis")
+    TArray<FString> GetActiveAgents() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Production")
-    FString GetCurrentProductionStatus() const;
+    UFUNCTION(BlueprintCallable, Category = "Production Analysis")
+    TArray<FString> GetBlockedAgents() const;
 
-    // Agent coordination functions
-    UFUNCTION(BlueprintCallable, Category = "Agents")
-    void UpdateAgentTask(int32 AgentID, const FString& TaskDescription, float Progress);
+    UFUNCTION(BlueprintCallable, Category = "Production Analysis")
+    bool ValidateMinimumPlayableState() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Agents")
-    FDir_AgentTask GetAgentTask(int32 AgentID) const;
+    // Milestone Validation
+    UFUNCTION(BlueprintCallable, Category = "Milestone Validation")
+    bool CheckMilestone_WalkAround() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Agents")
-    TArray<FDir_AgentTask> GetIncompleteAgentTasks() const;
+    UFUNCTION(BlueprintCallable, Category = "Milestone Validation")
+    bool CheckMilestone_BasicSurvival() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Milestone Validation")
+    bool CheckMilestone_DinosaurEncounters() const;
+
+    // Agent Coordination
+    UFUNCTION(BlueprintCallable, Category = "Agent Coordination")
+    void CoordinateAgentSequence();
+
+    UFUNCTION(BlueprintCallable, Category = "Agent Coordination")
+    FString GetNextPriorityAgent() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Agent Coordination")
+    void ReportProductionStatus() const;
+
+    // Debug and Development
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Development")
+    void DebugPrintProductionState();
+
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Development")
+    void ForceRecalculateMetrics();
 
 private:
-    // Internal helper functions
-    void SetupMilestone1Requirements();
-    void CountLevelActors();
-    void ValidateGameSystems();
-    void CalculateCompletionPercentage();
-
-    // Milestone validation helpers
-    bool ValidateCharacterMovement() const;
-    bool ValidateTerrainSystem() const;
-    bool ValidateDinosaurPlaceholders() const;
-    bool ValidateLightingSystem() const;
-    bool ValidateGameMode() const;
+    void UpdateProductionPhase();
+    void ValidateAgentDependencies();
+    int32 CountActorsByClass(UClass* ActorClass) const;
+    bool HasRequiredGameSystems() const;
 };
