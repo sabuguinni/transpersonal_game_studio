@@ -1,178 +1,122 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/World.h"
-#include "Components/ActorComponent.h"
+#include "GameFramework/Actor.h"
+#include "Components/SkeletalMeshComponent.h"
 #include "Engine/SkeletalMesh.h"
 #include "Materials/MaterialInterface.h"
-#include "SharedTypes.h"
 #include "Char_MetaHumanManager.generated.h"
 
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FChar_CharacterAppearance
+UENUM(BlueprintType)
+enum class EChar_SkinTone : uint8
 {
-    GENERATED_BODY()
+    Fair = 0,
+    Medium,
+    Olive,
+    Tan,
+    Dark
+};
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
-    TSoftObjectPtr<USkeletalMesh> BaseMesh;
+UENUM(BlueprintType)
+enum class EChar_BodyBuild : uint8
+{
+    Lean = 0,
+    Average,
+    Muscular,
+    Heavy
+};
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
-    TSoftObjectPtr<UMaterialInterface> SkinMaterial;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
-    TSoftObjectPtr<UMaterialInterface> HairMaterial;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
-    TSoftObjectPtr<UMaterialInterface> ClothingMaterial;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
-    FLinearColor SkinTone;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
-    FLinearColor HairColor;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
-    float BodyScale;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
-    int32 FaceVariant;
-
-    FChar_CharacterAppearance()
-    {
-        SkinTone = FLinearColor(0.8f, 0.6f, 0.4f, 1.0f);
-        HairColor = FLinearColor(0.2f, 0.1f, 0.05f, 1.0f);
-        BodyScale = 1.0f;
-        FaceVariant = 0;
-    }
+UENUM(BlueprintType)
+enum class EChar_ClothingStyle : uint8
+{
+    LeatherWraps = 0,
+    FurCloak,
+    PlantFiber,
+    AnimalHide,
+    Minimal
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FChar_TribalVariant
+struct FChar_CharacterPreset
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal")
-    FString VariantName;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
+    FString PresetName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal")
-    ETribalRole TribalRole;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
+    EChar_SkinTone SkinTone;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal")
-    FChar_CharacterAppearance Appearance;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
+    EChar_BodyBuild BodyBuild;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal")
-    TArray<TSoftObjectPtr<UStaticMesh>> EquipmentMeshes;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
+    EChar_ClothingStyle ClothingStyle;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal")
-    float AgeModifier;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
+    float ScarIntensity;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal")
-    bool bHasTribalMarkings;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
+    float WeatheringLevel;
 
-    FChar_TribalVariant()
+    FChar_CharacterPreset()
     {
-        VariantName = TEXT("Default");
-        TribalRole = ETribalRole::Gatherer;
-        AgeModifier = 0.0f;
-        bHasTribalMarkings = false;
+        PresetName = TEXT("Default");
+        SkinTone = EChar_SkinTone::Medium;
+        BodyBuild = EChar_BodyBuild::Average;
+        ClothingStyle = EChar_ClothingStyle::LeatherWraps;
+        ScarIntensity = 0.3f;
+        WeatheringLevel = 0.5f;
     }
 };
 
-/**
- * MetaHuman Manager - Handles character creation, appearance customization, and tribal variants
- * Manages the visual diversity of characters in the Cretaceous world
- */
-UCLASS(BlueprintType, Blueprintable, meta = (BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UChar_MetaHumanManager : public UActorComponent
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API AChar_MetaHumanManager : public AActor
 {
     GENERATED_BODY()
 
 public:
-    UChar_MetaHumanManager();
+    AChar_MetaHumanManager();
 
 protected:
     virtual void BeginPlay() override;
 
-    // === CHARACTER APPEARANCE SYSTEM ===
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character System")
-    TArray<FChar_TribalVariant> TribalVariants;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Presets")
+    TArray<FChar_CharacterPreset> AvailablePresets;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character System")
-    TArray<TSoftObjectPtr<USkeletalMesh>> BaseMeshes;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Meshes")
+    TArray<TSoftObjectPtr<USkeletalMesh>> MaleCharacterMeshes;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character System")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Meshes")
+    TArray<TSoftObjectPtr<USkeletalMesh>> FemaleCharacterMeshes;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Materials")
     TArray<TSoftObjectPtr<UMaterialInterface>> SkinMaterials;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character System")
-    TArray<TSoftObjectPtr<UMaterialInterface>> HairMaterials;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character System")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Materials")
     TArray<TSoftObjectPtr<UMaterialInterface>> ClothingMaterials;
 
-    // === METAHUMAN INTEGRATION ===
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaHuman")
-    bool bUseMetaHumans;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaHuman")
-    TArray<TSoftObjectPtr<USkeletalMesh>> MetaHumanMeshes;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaHuman")
-    int32 MaxCharacterVariants;
-
 public:
-    // === CHARACTER CREATION ===
     UFUNCTION(BlueprintCallable, Category = "Character Creation")
-    FChar_CharacterAppearance CreateRandomAppearance(ETribalRole Role = ETribalRole::Gatherer);
-
-    UFUNCTION(BlueprintCallable, Category = "Character Creation")
-    FChar_TribalVariant CreateTribalVariant(const FString& Name, ETribalRole Role);
+    void ApplyCharacterPreset(class ATranspersonalCharacter* Character, const FChar_CharacterPreset& Preset);
 
     UFUNCTION(BlueprintCallable, Category = "Character Creation")
-    bool ApplyAppearanceToCharacter(AActor* Character, const FChar_CharacterAppearance& Appearance);
+    void RandomizeCharacterAppearance(class ATranspersonalCharacter* Character);
 
-    // === APPEARANCE CUSTOMIZATION ===
-    UFUNCTION(BlueprintCallable, Category = "Customization")
-    void SetCharacterSkinTone(AActor* Character, const FLinearColor& SkinTone);
+    UFUNCTION(BlueprintCallable, Category = "Character Creation")
+    FChar_CharacterPreset GetRandomPreset() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Customization")
-    void SetCharacterHairColor(AActor* Character, const FLinearColor& HairColor);
+    UFUNCTION(BlueprintCallable, Category = "Character Creation")
+    void SetCharacterSkinTone(class ATranspersonalCharacter* Character, EChar_SkinTone SkinTone);
 
-    UFUNCTION(BlueprintCallable, Category = "Customization")
-    void SetCharacterBodyScale(AActor* Character, float Scale);
+    UFUNCTION(BlueprintCallable, Category = "Character Creation")
+    void SetCharacterClothing(class ATranspersonalCharacter* Character, EChar_ClothingStyle ClothingStyle);
 
-    UFUNCTION(BlueprintCallable, Category = "Customization")
-    void ApplyTribalMarkings(AActor* Character, bool bApply);
-
-    // === TRIBAL SYSTEM ===
-    UFUNCTION(BlueprintCallable, Category = "Tribal System")
-    FChar_TribalVariant GetTribalVariantByRole(ETribalRole Role);
-
-    UFUNCTION(BlueprintCallable, Category = "Tribal System")
-    TArray<FChar_TribalVariant> GetAllTribalVariants() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Tribal System")
-    void RegisterTribalVariant(const FChar_TribalVariant& Variant);
-
-    // === METAHUMAN INTEGRATION ===
-    UFUNCTION(BlueprintCallable, Category = "MetaHuman")
-    bool LoadMetaHumanAssets();
-
-    UFUNCTION(BlueprintCallable, Category = "MetaHuman")
-    USkeletalMesh* GetRandomMetaHumanMesh();
-
-    UFUNCTION(BlueprintCallable, Category = "MetaHuman")
-    bool IsMetaHumanAvailable() const;
-
-    // === UTILITY ===
-    UFUNCTION(BlueprintCallable, Category = "Utility")
-    void InitializeDefaultVariants();
-
-    UFUNCTION(BlueprintCallable, Category = "Utility")
-    int32 GetCharacterVariantCount() const;
+    UFUNCTION(BlueprintCallable, Category = "Character Creation")
+    void ApplyWeatheringEffects(class ATranspersonalCharacter* Character, float WeatheringLevel);
 
 private:
-    void LoadDefaultAssets();
-    void CreateDefaultTribalVariants();
-    FLinearColor GenerateRandomSkinTone();
-    FLinearColor GenerateRandomHairColor();
+    void InitializeDefaultPresets();
+    UMaterialInterface* GetSkinMaterialForTone(EChar_SkinTone SkinTone) const;
+    UMaterialInterface* GetClothingMaterialForStyle(EChar_ClothingStyle ClothingStyle) const;
 };
