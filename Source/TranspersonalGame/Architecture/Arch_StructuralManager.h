@@ -3,31 +3,38 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "Components/StaticMeshComponent.h"
-#include "Components/SceneComponent.h"
-#include "Engine/World.h"
+#include "Components/BoxComponent.h"
+#include "Engine/TriggerBox.h"
+#include "SharedTypes.h"
 #include "Arch_StructuralManager.generated.h"
 
 UENUM(BlueprintType)
 enum class EArch_StructureType : uint8
 {
-    Shelter         UMETA(DisplayName = "Primitive Shelter"),
-    Foundation      UMETA(DisplayName = "Stone Foundation"),
-    Wall            UMETA(DisplayName = "Stone Wall"),
-    Entrance        UMETA(DisplayName = "Entrance Opening"),
-    Support         UMETA(DisplayName = "Support Beam"),
-    Ruins           UMETA(DisplayName = "Ancient Ruins")
+    Foundation         UMETA(DisplayName = "Stone Foundation"),
+    Wall              UMETA(DisplayName = "Stone Wall"),
+    Archway           UMETA(DisplayName = "Stone Archway"),
+    Circle            UMETA(DisplayName = "Stone Circle"),
+    Shelter           UMETA(DisplayName = "Primitive Shelter"),
+    Platform          UMETA(DisplayName = "Raised Platform")
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FArch_StructuralData
+struct FArch_StructureData
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    EArch_StructureType StructureType = EArch_StructureType::Shelter;
+    EArch_StructureType StructureType = EArch_StructureType::Foundation;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    FVector Dimensions = FVector(400.0f, 600.0f, 300.0f);
+    FVector Location = FVector::ZeroVector;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
+    FRotator Rotation = FRotator::ZeroRotator;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
+    FVector Scale = FVector::OneVector;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
     float WeatheringLevel = 0.5f;
@@ -36,15 +43,17 @@ struct TRANSPERSONALGAME_API FArch_StructuralData
     bool bHasVegetationGrowth = true;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    int32 StructuralIntegrity = 75;
+    int32 AgeInYears = 1000;
 
-    FArch_StructuralData()
+    FArch_StructureData()
     {
-        StructureType = EArch_StructureType::Shelter;
-        Dimensions = FVector(400.0f, 600.0f, 300.0f);
+        StructureType = EArch_StructureType::Foundation;
+        Location = FVector::ZeroVector;
+        Rotation = FRotator::ZeroRotator;
+        Scale = FVector::OneVector;
         WeatheringLevel = 0.5f;
         bHasVegetationGrowth = true;
-        StructuralIntegrity = 75;
+        AgeInYears = 1000;
     }
 };
 
@@ -62,42 +71,62 @@ protected:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
     USceneComponent* RootSceneComponent;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    UStaticMeshComponent* StructureMesh;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
+    TArray<FArch_StructureData> ManagedStructures;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    FArch_StructuralData StructuralData;
+    float StructureSpawnRadius = 50000.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    TArray<FVector> ShelterLocations;
+    int32 MaxStructuresPerBiome = 5;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    float BiomePlacementRadius = 10000.0f;
+    bool bAutoGenerateStructures = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Materials")
+    UMaterialInterface* StoneMaterial;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Materials")
+    UMaterialInterface* WeatheredStoneMaterial;
 
 public:
     virtual void Tick(float DeltaTime) override;
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void PlaceStructuralElements();
+    void SpawnStructure(EArch_StructureType StructureType, FVector Location, FRotator Rotation = FRotator::ZeroRotator);
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void UpdateWeatheringEffects(float DeltaTime);
+    void SpawnFoundationPattern(FVector CenterLocation, int32 Width = 3, int32 Height = 2);
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void GenerateShelterNetwork();
+    void SpawnStoneCircle(FVector CenterLocation, float Radius = 800.0f, int32 NumStones = 8);
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    FVector GetOptimalShelterLocation(const FVector& BiomeCenter) const;
+    void ApplyWeathering(AActor* StructureActor, float WeatheringLevel);
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void ApplyEnvironmentalIntegration();
-
-    UFUNCTION(BlueprintPure, Category = "Architecture")
-    bool IsStructureStable() const;
+    void AddVegetationGrowth(AActor* StructureActor);
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void SetStructureType(EArch_StructureType NewType);
+    TArray<AActor*> GetNearbyStructures(FVector Location, float SearchRadius = 5000.0f);
 
-    UFUNCTION(BlueprintPure, Category = "Architecture")
-    FArch_StructuralData GetStructuralData() const { return StructuralData; }
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    void CleanupOldStructures();
+
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Architecture")
+    void GenerateTestStructures();
+
+protected:
+    UFUNCTION()
+    void OnStructureInteraction(AActor* OverlappedActor, AActor* OtherActor);
+
+    void CreateInteractionTrigger(AActor* StructureActor, FVector TriggerScale = FVector(5, 5, 3));
+
+    AActor* SpawnStructureActor(EArch_StructureType StructureType, FVector Location, FRotator Rotation, FVector Scale);
+
+    void ConfigureStructureMesh(AActor* StructureActor, EArch_StructureType StructureType);
+
+private:
+    TArray<AActor*> SpawnedStructures;
+    TArray<ATriggerBox*> InteractionTriggers;
 };
