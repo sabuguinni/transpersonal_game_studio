@@ -3,117 +3,105 @@
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
 #include "Engine/World.h"
-#include "GameFramework/Character.h"
+#include "Components/StaticMeshComponent.h"
 #include "Components/SkeletalMeshComponent.h"
-#include "Components/CapsuleComponent.h"
-#include "GameFramework/CharacterMovementComponent.h"
+#include "Components/SphereComponent.h"
+#include "GameFramework/Actor.h"
+#include "Kismet/GameplayStatics.h"
 #include "Engine/Engine.h"
 #include "SharedTypes.h"
 #include "Perf_PhysicsPerformanceIntegrator.generated.h"
 
 UENUM(BlueprintType)
-enum class EPerf_PhysicsQualityLevel : uint8
+enum class EPerf_PhysicsLODLevel : uint8
 {
-    Ultra       UMETA(DisplayName = "Ultra Quality"),
-    High        UMETA(DisplayName = "High Quality"),
-    Medium      UMETA(DisplayName = "Medium Quality"),
-    Low         UMETA(DisplayName = "Low Quality"),
-    Minimal     UMETA(DisplayName = "Minimal Quality")
-};
-
-UENUM(BlueprintType)
-enum class EPerf_PhysicsOptimizationMode : uint8
-{
-    Performance     UMETA(DisplayName = "Performance Focused"),
-    Balanced        UMETA(DisplayName = "Balanced"),
-    Quality         UMETA(DisplayName = "Quality Focused"),
-    Adaptive        UMETA(DisplayName = "Adaptive")
+    HighDetail      UMETA(DisplayName = "High Detail"),
+    MediumDetail    UMETA(DisplayName = "Medium Detail"),
+    LowDetail       UMETA(DisplayName = "Low Detail"),
+    NoPhysics       UMETA(DisplayName = "No Physics")
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FPerf_PhysicsPerformanceMetrics
+struct FPerf_PhysicsPerformanceMetrics
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Physics Performance")
-    float CurrentFPS;
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float PhysicsFrameTime = 0.0f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Physics Performance")
-    float AverageFrameTime;
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    int32 ActivePhysicsObjects = 0;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Physics Performance")
-    int32 ActivePhysicsActors;
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    int32 CollisionChecks = 0;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Physics Performance")
-    int32 ActiveRagdolls;
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float MemoryUsageMB = 0.0f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Physics Performance")
-    float PhysicsMemoryUsageMB;
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float AverageFrameRate = 0.0f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Physics Performance")
-    float PhysicsSimulationTime;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Physics Performance")
-    bool bIsPerformanceTarget;
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    int32 RagdollBodies = 0;
 
     FPerf_PhysicsPerformanceMetrics()
     {
-        CurrentFPS = 60.0f;
-        AverageFrameTime = 16.67f;
-        ActivePhysicsActors = 0;
-        ActiveRagdolls = 0;
-        PhysicsMemoryUsageMB = 0.0f;
-        PhysicsSimulationTime = 0.0f;
-        bIsPerformanceTarget = true;
+        PhysicsFrameTime = 0.0f;
+        ActivePhysicsObjects = 0;
+        CollisionChecks = 0;
+        MemoryUsageMB = 0.0f;
+        AverageFrameRate = 60.0f;
+        RagdollBodies = 0;
     }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FPerf_PhysicsOptimizationSettings
+struct FPerf_PhysicsOptimizationSettings
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Optimization")
-    EPerf_PhysicsQualityLevel QualityLevel;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Optimization")
+    float HighDetailDistance = 3000.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Optimization")
-    EPerf_PhysicsOptimizationMode OptimizationMode;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Optimization")
+    float MediumDetailDistance = 8000.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Optimization")
-    float MaxPhysicsDistance;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Optimization")
+    float LowDetailDistance = 15000.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Optimization")
-    int32 MaxActiveRagdolls;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Optimization")
+    int32 MaxPhysicsObjects = 100;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Optimization")
-    float RagdollCullingDistance;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Optimization")
+    float PhysicsFrameBudget = 16.67f; // 60 FPS target
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Optimization")
-    float PhysicsUpdateRate;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Optimization")
+    bool bEnablePhysicsThreading = true;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Optimization")
-    bool bEnableAdaptiveQuality;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Optimization")
+    int32 PhysicsThreadCount = 4;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Optimization")
-    bool bEnablePhysicsLOD;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Optimization")
-    bool bEnableRagdollPooling;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Optimization")
+    bool bEnableAsyncPhysics = true;
 
     FPerf_PhysicsOptimizationSettings()
     {
-        QualityLevel = EPerf_PhysicsQualityLevel::High;
-        OptimizationMode = EPerf_PhysicsOptimizationMode::Balanced;
-        MaxPhysicsDistance = 5000.0f;
-        MaxActiveRagdolls = 10;
-        RagdollCullingDistance = 3000.0f;
-        PhysicsUpdateRate = 60.0f;
-        bEnableAdaptiveQuality = true;
-        bEnablePhysicsLOD = true;
-        bEnableRagdollPooling = true;
+        HighDetailDistance = 3000.0f;
+        MediumDetailDistance = 8000.0f;
+        LowDetailDistance = 15000.0f;
+        MaxPhysicsObjects = 100;
+        PhysicsFrameBudget = 16.67f;
+        bEnablePhysicsThreading = true;
+        PhysicsThreadCount = 4;
+        bEnableAsyncPhysics = true;
     }
 };
 
+/**
+ * Performance integrator specifically designed for physics systems optimization
+ * Manages physics LOD, collision optimization, threading, and performance monitoring
+ * Integrates with Core Systems' DinosaurPhysicsIntegrator for optimal performance
+ */
 UCLASS(ClassGroup=(Performance), meta=(BlueprintSpawnableComponent))
 class TRANSPERSONALGAME_API UPerf_PhysicsPerformanceIntegrator : public UActorComponent
 {
@@ -127,138 +115,128 @@ protected:
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 public:
-    // Performance Monitoring
+    // Core Performance Management
     UFUNCTION(BlueprintCallable, Category = "Physics Performance")
-    FPerf_PhysicsPerformanceMetrics GetPhysicsPerformanceMetrics() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Physics Performance")
-    void UpdatePerformanceMetrics();
+    void InitializePhysicsPerformanceSystem();
 
     UFUNCTION(BlueprintCallable, Category = "Physics Performance")
-    bool IsPerformanceTargetMet() const;
+    void UpdatePhysicsLOD();
 
-    // Physics Optimization
-    UFUNCTION(BlueprintCallable, Category = "Physics Optimization")
-    void SetPhysicsQualityLevel(EPerf_PhysicsQualityLevel NewQualityLevel);
+    UFUNCTION(BlueprintCallable, Category = "Physics Performance")
+    void OptimizePhysicsThreading();
 
-    UFUNCTION(BlueprintCallable, Category = "Physics Optimization")
-    void SetOptimizationMode(EPerf_PhysicsOptimizationMode NewMode);
-
-    UFUNCTION(BlueprintCallable, Category = "Physics Optimization")
-    void OptimizePhysicsActors();
-
-    UFUNCTION(BlueprintCallable, Category = "Physics Optimization")
-    void OptimizeRagdollSystems();
-
-    // Adaptive Quality Control
-    UFUNCTION(BlueprintCallable, Category = "Adaptive Quality")
-    void EnableAdaptiveQuality(bool bEnable);
-
-    UFUNCTION(BlueprintCallable, Category = "Adaptive Quality")
-    void UpdateAdaptiveQuality();
-
-    UFUNCTION(BlueprintCallable, Category = "Adaptive Quality")
-    void AdjustQualityBasedOnPerformance();
+    UFUNCTION(BlueprintCallable, Category = "Physics Performance")
+    void ManagePhysicsBudget();
 
     // LOD Management
     UFUNCTION(BlueprintCallable, Category = "Physics LOD")
-    void UpdatePhysicsLOD();
+    EPerf_PhysicsLODLevel CalculatePhysicsLOD(AActor* Actor, const FVector& ViewerLocation) const;
 
     UFUNCTION(BlueprintCallable, Category = "Physics LOD")
-    void SetPhysicsLODDistance(float Distance);
+    void ApplyPhysicsLOD(AActor* Actor, EPerf_PhysicsLODLevel LODLevel);
 
     UFUNCTION(BlueprintCallable, Category = "Physics LOD")
-    int32 GetPhysicsLODLevel(float Distance) const;
+    void UpdateAllActorsLOD();
 
-    // Ragdoll Management
-    UFUNCTION(BlueprintCallable, Category = "Ragdoll Management")
-    void ManageRagdollPool();
+    // Collision Optimization
+    UFUNCTION(BlueprintCallable, Category = "Physics Optimization")
+    void OptimizeCollisionSettings(UPrimitiveComponent* Component, float Distance);
 
-    UFUNCTION(BlueprintCallable, Category = "Ragdoll Management")
-    void CullDistantRagdolls();
+    UFUNCTION(BlueprintCallable, Category = "Physics Optimization")
+    void CreateOptimizationZones();
 
-    UFUNCTION(BlueprintCallable, Category = "Ragdoll Management")
-    int32 GetActiveRagdollCount() const;
+    UFUNCTION(BlueprintCallable, Category = "Physics Optimization")
+    void UpdateCollisionOptimization();
 
-    // Memory Optimization
+    // Performance Monitoring
+    UFUNCTION(BlueprintCallable, Category = "Performance Monitoring")
+    FPerf_PhysicsPerformanceMetrics GetCurrentPerformanceMetrics() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Performance Monitoring")
+    void StartPerformanceMonitoring();
+
+    UFUNCTION(BlueprintCallable, Category = "Performance Monitoring")
+    void StopPerformanceMonitoring();
+
+    UFUNCTION(BlueprintCallable, Category = "Performance Monitoring")
+    bool IsPerformanceWithinBudget() const;
+
+    // Ragdoll Optimization
+    UFUNCTION(BlueprintCallable, Category = "Ragdoll Performance")
+    void OptimizeRagdollPerformance(USkeletalMeshComponent* SkeletalMesh);
+
+    UFUNCTION(BlueprintCallable, Category = "Ragdoll Performance")
+    void EnableRagdollLOD(USkeletalMeshComponent* SkeletalMesh, float Distance);
+
+    UFUNCTION(BlueprintCallable, Category = "Ragdoll Performance")
+    void DisableDistantRagdolls();
+
+    // Memory Management
     UFUNCTION(BlueprintCallable, Category = "Memory Optimization")
     void OptimizePhysicsMemory();
 
     UFUNCTION(BlueprintCallable, Category = "Memory Optimization")
-    float GetPhysicsMemoryUsage() const;
+    void CleanupUnusedPhysicsObjects();
 
     UFUNCTION(BlueprintCallable, Category = "Memory Optimization")
-    void CleanupUnusedPhysicsAssets();
+    float GetPhysicsMemoryUsage() const;
 
-    // Debug and Profiling
+    // Debug and Visualization
     UFUNCTION(BlueprintCallable, Category = "Debug", CallInEditor = true)
-    void DebugPhysicsPerformance();
+    void DebugDrawPhysicsLOD();
+
+    UFUNCTION(BlueprintCallable, Category = "Debug", CallInEditor = true)
+    void DebugDrawOptimizationZones();
 
     UFUNCTION(BlueprintCallable, Category = "Debug")
     void LogPerformanceMetrics();
 
-    UFUNCTION(BlueprintCallable, Category = "Debug")
-    void DisplayPerformanceHUD(bool bShow);
-
 protected:
-    // Core Properties
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Performance")
+    // Configuration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
     FPerf_PhysicsOptimizationSettings OptimizationSettings;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Physics Performance")
+    // Performance Tracking
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
     FPerf_PhysicsPerformanceMetrics CurrentMetrics;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance Targets")
-    float TargetFPS;
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    bool bIsMonitoringActive = false;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance Targets")
-    float MaxFrameTime;
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float MonitoringStartTime = 0.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance Targets")
-    float MaxPhysicsMemoryMB;
+    // LOD Management
+    UPROPERTY(BlueprintReadOnly, Category = "LOD")
+    TArray<AActor*> TrackedActors;
 
-    // Optimization State
-    UPROPERTY(BlueprintReadOnly, Category = "Optimization State")
-    bool bIsOptimizing;
+    UPROPERTY(BlueprintReadOnly, Category = "LOD")
+    TMap<AActor*, EPerf_PhysicsLODLevel> ActorLODLevels;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Optimization State")
-    float LastOptimizationTime;
+    // Optimization Zones
+    UPROPERTY(BlueprintReadOnly, Category = "Optimization")
+    TArray<AActor*> OptimizationZones;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Optimization State")
-    int32 OptimizationCycles;
+    // Performance Thresholds
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Thresholds")
+    float TargetFrameRate = 60.0f;
 
-    // Performance Tracking
-    UPROPERTY()
-    TArray<float> FrameTimeHistory;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Thresholds")
+    float MaxPhysicsFrameTime = 5.0f;
 
-    UPROPERTY()
-    TArray<int32> PhysicsActorCountHistory;
-
-    UPROPERTY()
-    float PerformanceUpdateInterval;
-
-    UPROPERTY()
-    float LastPerformanceUpdate;
-
-    // Physics Actor Management
-    UPROPERTY()
-    TArray<TWeakObjectPtr<AActor>> TrackedPhysicsActors;
-
-    UPROPERTY()
-    TArray<TWeakObjectPtr<AActor>> ActiveRagdolls;
-
-    UPROPERTY()
-    TMap<TWeakObjectPtr<AActor>, int32> ActorLODLevels;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Thresholds")
+    float MaxMemoryUsageMB = 512.0f;
 
 private:
-    // Internal Methods
-    void InitializePerformanceTracking();
-    void UpdateFrameTimeHistory(float DeltaTime);
-    void ScanForPhysicsActors();
-    void ApplyQualitySettings();
-    void ProcessAdaptiveQuality();
-    float CalculateDistanceToPlayer(AActor* Actor) const;
-    void ApplyPhysicsLOD(AActor* Actor, int32 LODLevel);
-    void OptimizeActorPhysics(AActor* Actor);
-    void CleanupWeakReferences();
+    // Internal tracking
+    float LastUpdateTime = 0.0f;
+    int32 FrameCounter = 0;
+    float AccumulatedFrameTime = 0.0f;
+    
+    // Helper functions
+    void UpdatePerformanceMetrics();
+    void ApplyOptimizationBasedOnPerformance();
+    AActor* GetPlayerViewpoint() const;
+    float CalculateDistanceToViewer(AActor* Actor) const;
+    void ConfigurePhysicsSettings();
 };
