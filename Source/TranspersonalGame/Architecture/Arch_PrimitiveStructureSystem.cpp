@@ -1,267 +1,310 @@
 #include "Arch_PrimitiveStructureSystem.h"
-#include "Components/StaticMeshComponent.h"
 #include "Engine/Engine.h"
-#include "Materials/MaterialInstanceDynamic.h"
+#include "Engine/World.h"
+#include "Components/StaticMeshComponent.h"
+#include "Components/BoxComponent.h"
+#include "Sound/SoundCue.h"
+#include "Kismet/GameplayStatics.h"
+#include "Engine/StaticMesh.h"
+#include "Materials/MaterialInterface.h"
 
-UArch_PrimitiveStructureSystem::UArch_PrimitiveStructureSystem()
+AArch_PrimitiveStructureActor::AArch_PrimitiveStructureActor()
 {
-    PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 5.0f; // Check every 5 seconds for weather damage
-    
-    StructureMesh = nullptr;
-    WeatherDamageRate = 0.1f;
-    bAffectedByWeather = true;
+    PrimaryActorTick.bCanEverTick = true;
+
+    // Create root component
+    RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootComponent"));
+
+    // Create structure mesh component
+    StructureMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("StructureMesh"));
+    StructureMesh->SetupAttachment(RootComponent);
+    StructureMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+    StructureMesh->SetCollisionObjectType(ECollisionChannel::ECC_WorldStatic);
+    StructureMesh->SetCollisionResponseToAllChannels(ECollisionResponse::ECR_Block);
+
+    // Create interaction volume
+    InteractionVolume = CreateDefaultSubobject<UBoxComponent>(TEXT("InteractionVolume"));
+    InteractionVolume->SetupAttachment(RootComponent);
+    InteractionVolume->SetBoxExtent(FVector(300.0f, 300.0f, 200.0f));
+    InteractionVolume->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+    InteractionVolume->SetCollisionObjectType(ECollisionChannel::ECC_WorldDynamic);
+    InteractionVolume->SetCollisionResponseToAllChannels(ECollisionResponse::ECR_Ignore);
+    InteractionVolume->SetCollisionResponseToChannel(ECollisionChannel::ECC_Pawn, ECollisionResponse::ECR_Overlap);
+
+    // Bind overlap events
+    InteractionVolume->OnComponentBeginOverlap.AddDynamic(this, &AArch_PrimitiveStructureActor::OnInteractionVolumeBeginOverlap);
+    InteractionVolume->OnComponentEndOverlap.AddDynamic(this, &AArch_PrimitiveStructureActor::OnInteractionVolumeEndOverlap);
+
+    // Initialize default properties
+    StructureConfig.StructureType = EArch_PrimitiveStructureType::StoneArchway;
+    StructureConfig.WeatheringLevel = 0.5f;
+    StructureConfig.bHasMossGrowth = true;
+    StructureConfig.bHasToolMarks = false;
+    StructureConfig.StructuralIntegrity = 1.0f;
+    StructureConfig.Dimensions = FVector(400.0f, 200.0f, 300.0f);
+
+    bProvidesWeatherProtection = true;
+    ProtectionRadius = 500.0f;
+    bPlayerInside = false;
+    LastWeatherCheckTime = 0.0f;
 }
 
-void UArch_PrimitiveStructureSystem::BeginPlay()
+void AArch_PrimitiveStructureActor::BeginPlay()
 {
     Super::BeginPlay();
     
-    // Initialize default structure if not set
-    if (StructureData.StructureType == EArch_StructureType::None)
-    {
-        InitializeStructure(EArch_StructureType::StoneShelter, EArch_MaterialType::Stone);
-    }
-    
-    UpdateStructureMaterial();
-    CalculateWeatherResistance();
-}
+    UpdateStructureMesh();
+    ConfigureCollisionAndPhysics();
 
-void UArch_PrimitiveStructureSystem::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
-{
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-    
-    // Apply weather damage over time if enabled
-    if (bAffectedByWeather && StructureData.StructuralIntegrity > 0.0f)
+    // Start ambient sound if configured
+    if (AmbientSound)
     {
-        float WeatherDamage = WeatherDamageRate * DeltaTime;
-        ApplyWeatherDamage(WeatherDamage);
+        UGameplayStatics::PlaySoundAtLocation(this, AmbientSound, GetActorLocation(), 0.3f);
     }
 }
 
-void UArch_PrimitiveStructureSystem::InitializeStructure(EArch_StructureType Type, EArch_MaterialType Material)
+void AArch_PrimitiveStructureActor::Tick(float DeltaTime)
 {
-    StructureData.StructureType = Type;
-    StructureData.PrimaryMaterial = Material;
-    
-    // Set default values based on structure type
-    switch (Type)
-    {
-        case EArch_StructureType::StoneShelter:
-            StructureData.StructuralIntegrity = 100.0f;
-            StructureData.WeatherResistance = 80.0f;
-            StructureData.bIsHabitable = true;
-            StructureData.MaxOccupants = 4;
-            break;
-            
-        case EArch_StructureType::WoodLean:
-            StructureData.StructuralIntegrity = 60.0f;
-            StructureData.WeatherResistance = 30.0f;
-            StructureData.bIsHabitable = true;
-            StructureData.MaxOccupants = 2;
-            break;
-            
-        case EArch_StructureType::CaveEntrance:
-            StructureData.StructuralIntegrity = 150.0f;
-            StructureData.WeatherResistance = 95.0f;
-            StructureData.bIsHabitable = true;
-            StructureData.MaxOccupants = 8;
-            break;
-            
-        case EArch_StructureType::RockFormation:
-            StructureData.StructuralIntegrity = 200.0f;
-            StructureData.WeatherResistance = 90.0f;
-            StructureData.bIsHabitable = false;
-            StructureData.MaxOccupants = 0;
-            break;
-            
-        case EArch_StructureType::BoneStructure:
-            StructureData.StructuralIntegrity = 40.0f;
-            StructureData.WeatherResistance = 20.0f;
-            StructureData.bIsHabitable = true;
-            StructureData.MaxOccupants = 1;
-            break;
-            
-        default:
-            StructureData.StructuralIntegrity = 50.0f;
-            StructureData.WeatherResistance = 25.0f;
-            StructureData.bIsHabitable = false;
-            StructureData.MaxOccupants = 0;
-            break;
-    }
-    
-    UpdateStructureMaterial();
-    CalculateWeatherResistance();
-    
-    UE_LOG(LogTemp, Log, TEXT("Architecture: Initialized %s structure with %s material"), 
-           *UEnum::GetValueAsString(Type), *UEnum::GetValueAsString(Material));
-}
+    Super::Tick(DeltaTime);
 
-void UArch_PrimitiveStructureSystem::ApplyWeatherDamage(float DamageAmount)
-{
-    if (!bAffectedByWeather || DamageAmount <= 0.0f)
+    // Periodic weather protection checks
+    LastWeatherCheckTime += DeltaTime;
+    if (LastWeatherCheckTime >= 1.0f) // Check every second
     {
-        return;
-    }
-    
-    // Reduce damage based on weather resistance
-    float ActualDamage = DamageAmount * (1.0f - (StructureData.WeatherResistance / 100.0f));
-    StructureData.StructuralIntegrity = FMath::Max(0.0f, StructureData.StructuralIntegrity - ActualDamage);
-    
-    // Update material to show wear
-    UpdateStructureMaterial();
-    
-    if (StructureData.StructuralIntegrity <= 0.0f)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Architecture: Structure has collapsed due to weather damage!"));
-        StructureData.bIsHabitable = false;
-        StructureData.MaxOccupants = 0;
-    }
-}
-
-void UArch_PrimitiveStructureSystem::RepairStructure(float RepairAmount)
-{
-    if (RepairAmount <= 0.0f)
-    {
-        return;
-    }
-    
-    float MaxIntegrity = 100.0f;
-    switch (StructureData.StructureType)
-    {
-        case EArch_StructureType::CaveEntrance:
-            MaxIntegrity = 150.0f;
-            break;
-        case EArch_StructureType::RockFormation:
-            MaxIntegrity = 200.0f;
-            break;
-        default:
-            MaxIntegrity = 100.0f;
-            break;
-    }
-    
-    StructureData.StructuralIntegrity = FMath::Min(MaxIntegrity, StructureData.StructuralIntegrity + RepairAmount);
-    
-    // Restore habitability if structure is stable again
-    if (IsStructureStable())
-    {
-        InitializeStructure(StructureData.StructureType, StructureData.PrimaryMaterial);
-    }
-    
-    UpdateStructureMaterial();
-    
-    UE_LOG(LogTemp, Log, TEXT("Architecture: Structure repaired by %.1f points, integrity now %.1f"), 
-           RepairAmount, StructureData.StructuralIntegrity);
-}
-
-bool UArch_PrimitiveStructureSystem::CanSupportOccupants(int32 NumOccupants) const
-{
-    return IsStructureStable() && 
-           StructureData.bIsHabitable && 
-           NumOccupants <= StructureData.MaxOccupants;
-}
-
-FVector UArch_PrimitiveStructureSystem::GetShelterPoint() const
-{
-    AActor* Owner = GetOwner();
-    if (!Owner)
-    {
-        return FVector::ZeroVector;
-    }
-    
-    FVector OwnerLocation = Owner->GetActorLocation();
-    FVector Forward = Owner->GetActorForwardVector();
-    
-    // Return a point slightly inside the structure for shelter
-    return OwnerLocation + (Forward * -50.0f) + FVector(0.0f, 0.0f, 100.0f);
-}
-
-bool UArch_PrimitiveStructureSystem::IsStructureStable() const
-{
-    return StructureData.StructuralIntegrity > 25.0f;
-}
-
-void UArch_PrimitiveStructureSystem::UpdateStructureMaterial()
-{
-    if (!StructureMaterials.IsEmpty() && GetOwner())
-    {
-        UStaticMeshComponent* MeshComp = GetOwner()->FindComponentByClass<UStaticMeshComponent>();
-        if (MeshComp && StructureMaterials.IsValidIndex(0))
+        LastWeatherCheckTime = 0.0f;
+        
+        if (bPlayerInside && bProvidesWeatherProtection)
         {
-            UMaterialInstanceDynamic* DynMaterial = UMaterialInstanceDynamic::Create(StructureMaterials[0], this);
-            if (DynMaterial)
-            {
-                // Set wear parameter based on structural integrity
-                float WearAmount = 1.0f - (StructureData.StructuralIntegrity / 100.0f);
-                DynMaterial->SetScalarParameterValue(TEXT("WearAmount"), WearAmount);
-                
-                // Set material type color
-                FLinearColor MaterialColor = FLinearColor::White;
-                switch (StructureData.PrimaryMaterial)
-                {
-                    case EArch_MaterialType::Stone:
-                        MaterialColor = FLinearColor(0.6f, 0.6f, 0.5f, 1.0f);
-                        break;
-                    case EArch_MaterialType::Wood:
-                        MaterialColor = FLinearColor(0.4f, 0.3f, 0.2f, 1.0f);
-                        break;
-                    case EArch_MaterialType::Bone:
-                        MaterialColor = FLinearColor(0.9f, 0.9f, 0.8f, 1.0f);
-                        break;
-                    case EArch_MaterialType::Hide:
-                        MaterialColor = FLinearColor(0.3f, 0.2f, 0.1f, 1.0f);
-                        break;
-                    case EArch_MaterialType::Mud:
-                        MaterialColor = FLinearColor(0.4f, 0.3f, 0.2f, 1.0f);
-                        break;
-                }
-                
-                DynMaterial->SetVectorParameterValue(TEXT("BaseColor"), MaterialColor);
-                MeshComp->SetMaterial(0, DynMaterial);
-            }
+            // Could trigger weather protection effects here
         }
     }
 }
 
-void UArch_PrimitiveStructureSystem::CalculateWeatherResistance()
+void AArch_PrimitiveStructureActor::SetStructureType(EArch_PrimitiveStructureType NewType)
 {
-    float BaseResistance = 50.0f;
-    
-    // Material-based resistance modifiers
-    switch (StructureData.PrimaryMaterial)
+    StructureConfig.StructureType = NewType;
+    UpdateStructureMesh();
+}
+
+bool AArch_PrimitiveStructureActor::IsPlayerInProtectedArea(const FVector& PlayerLocation) const
+{
+    if (!bProvidesWeatherProtection)
     {
-        case EArch_MaterialType::Stone:
-            BaseResistance = 80.0f;
+        return false;
+    }
+
+    float Distance = FVector::Dist(GetActorLocation(), PlayerLocation);
+    return Distance <= ProtectionRadius;
+}
+
+float AArch_PrimitiveStructureActor::GetWeatherProtectionStrength() const
+{
+    if (!bProvidesWeatherProtection)
+    {
+        return 0.0f;
+    }
+
+    float BaseProtection = 0.8f;
+    float IntegrityModifier = StructureConfig.StructuralIntegrity;
+    float WeatheringPenalty = StructureConfig.WeatheringLevel * 0.3f;
+
+    return BaseProtection * IntegrityModifier * (1.0f - WeatheringPenalty);
+}
+
+void AArch_PrimitiveStructureActor::OnInteractionVolumeBeginOverlap(UPrimitiveComponent* OverlappedComponent, 
+    AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
+{
+    if (OtherActor && OtherActor->IsA<APawn>())
+    {
+        bPlayerInside = true;
+        OnPlayerEnterStructure();
+        
+        if (GEngine)
+        {
+            FString StructureName = UEnum::GetValueAsString(StructureConfig.StructureType);
+            GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Green, 
+                FString::Printf(TEXT("Entered %s - Weather Protection: %.1f%%"), 
+                *StructureName, GetWeatherProtectionStrength() * 100.0f));
+        }
+    }
+}
+
+void AArch_PrimitiveStructureActor::OnInteractionVolumeEndOverlap(UPrimitiveComponent* OverlappedComponent, 
+    AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex)
+{
+    if (OtherActor && OtherActor->IsA<APawn>())
+    {
+        bPlayerInside = false;
+        OnPlayerExitStructure();
+        
+        if (GEngine)
+        {
+            GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Yellow, TEXT("Left structure protection"));
+        }
+    }
+}
+
+void AArch_PrimitiveStructureActor::UpdateStructureMesh()
+{
+    if (!StructureMesh)
+    {
+        return;
+    }
+
+    // Set mesh based on structure type
+    UStaticMesh* MeshToUse = nullptr;
+    
+    switch (StructureConfig.StructureType)
+    {
+        case EArch_PrimitiveStructureType::StoneArchway:
+            // Try to load archway mesh, fallback to cube
+            MeshToUse = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube"));
             break;
-        case EArch_MaterialType::Wood:
-            BaseResistance = 30.0f;
+            
+        case EArch_PrimitiveStructureType::CaveEntrance:
+            MeshToUse = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Sphere"));
             break;
-        case EArch_MaterialType::Bone:
-            BaseResistance = 20.0f;
+            
+        case EArch_PrimitiveStructureType::RockOverhang:
+            MeshToUse = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Wedge"));
             break;
-        case EArch_MaterialType::Hide:
-            BaseResistance = 40.0f;
+            
+        case EArch_PrimitiveStructureType::StonePlatform:
+            MeshToUse = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube"));
             break;
-        case EArch_MaterialType::Mud:
-            BaseResistance = 25.0f;
+            
+        case EArch_PrimitiveStructureType::NaturalBridge:
+            MeshToUse = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cylinder"));
+            break;
+            
+        case EArch_PrimitiveStructureType::WeatheredPillar:
+            MeshToUse = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cylinder"));
             break;
     }
-    
-    // Structure type modifiers
-    switch (StructureData.StructureType)
+
+    if (MeshToUse)
     {
-        case EArch_StructureType::CaveEntrance:
-            BaseResistance += 15.0f;
-            break;
-        case EArch_StructureType::RockFormation:
-            BaseResistance += 10.0f;
-            break;
-        case EArch_StructureType::StoneShelter:
-            BaseResistance += 5.0f;
-            break;
-        default:
-            break;
+        StructureMesh->SetStaticMesh(MeshToUse);
+        
+        // Scale based on dimensions
+        FVector Scale = StructureConfig.Dimensions / 100.0f; // Convert to scale factor
+        SetActorScale3D(Scale);
+    }
+}
+
+void AArch_PrimitiveStructureActor::ConfigureCollisionAndPhysics()
+{
+    if (StructureMesh)
+    {
+        // Configure collision based on structure type
+        switch (StructureConfig.StructureType)
+        {
+            case EArch_PrimitiveStructureType::StoneArchway:
+            case EArch_PrimitiveStructureType::CaveEntrance:
+                // These should allow passage
+                StructureMesh->SetCollisionResponseToChannel(ECollisionChannel::ECC_Pawn, ECollisionResponse::ECR_Ignore);
+                break;
+                
+            default:
+                // Solid structures
+                StructureMesh->SetCollisionResponseToChannel(ECollisionChannel::ECC_Pawn, ECollisionResponse::ECR_Block);
+                break;
+        }
+    }
+}
+
+// Blueprint Function Library Implementation
+TArray<AArch_PrimitiveStructureActor*> UArch_PrimitiveStructureLibrary::FindNearbyStructures(const FVector& Location, float Radius)
+{
+    TArray<AArch_PrimitiveStructureActor*> NearbyStructures;
+    
+    if (UWorld* World = GEngine->GetCurrentPlayWorld())
+    {
+        for (TActorIterator<AArch_PrimitiveStructureActor> ActorItr(World); ActorItr; ++ActorItr)
+        {
+            AArch_PrimitiveStructureActor* Structure = *ActorItr;
+            if (Structure && FVector::Dist(Structure->GetActorLocation(), Location) <= Radius)
+            {
+                NearbyStructures.Add(Structure);
+            }
+        }
     }
     
-    StructureData.WeatherResistance = FMath::Clamp(BaseResistance, 0.0f, 100.0f);
+    return NearbyStructures;
+}
+
+AArch_PrimitiveStructureActor* UArch_PrimitiveStructureLibrary::GetClosestStructure(const FVector& Location)
+{
+    AArch_PrimitiveStructureActor* ClosestStructure = nullptr;
+    float ClosestDistance = FLT_MAX;
+    
+    if (UWorld* World = GEngine->GetCurrentPlayWorld())
+    {
+        for (TActorIterator<AArch_PrimitiveStructureActor> ActorItr(World); ActorItr; ++ActorItr)
+        {
+            AArch_PrimitiveStructureActor* Structure = *ActorItr;
+            if (Structure)
+            {
+                float Distance = FVector::Dist(Structure->GetActorLocation(), Location);
+                if (Distance < ClosestDistance)
+                {
+                    ClosestDistance = Distance;
+                    ClosestStructure = Structure;
+                }
+            }
+        }
+    }
+    
+    return ClosestStructure;
+}
+
+bool UArch_PrimitiveStructureLibrary::IsLocationProtectedByStructure(const FVector& Location)
+{
+    if (UWorld* World = GEngine->GetCurrentPlayWorld())
+    {
+        for (TActorIterator<AArch_PrimitiveStructureActor> ActorItr(World); ActorItr; ++ActorItr)
+        {
+            AArch_PrimitiveStructureActor* Structure = *ActorItr;
+            if (Structure && Structure->IsPlayerInProtectedArea(Location))
+            {
+                return true;
+            }
+        }
+    }
+    
+    return false;
+}
+
+void UArch_PrimitiveStructureLibrary::SpawnStructureCluster(const FVector& CenterLocation, int32 Count, float SpreadRadius)
+{
+    if (UWorld* World = GEngine->GetCurrentPlayWorld())
+    {
+        for (int32 i = 0; i < Count; i++)
+        {
+            // Random position within spread radius
+            FVector RandomOffset = FVector(
+                FMath::RandRange(-SpreadRadius, SpreadRadius),
+                FMath::RandRange(-SpreadRadius, SpreadRadius),
+                0.0f
+            );
+            
+            FVector SpawnLocation = CenterLocation + RandomOffset;
+            
+            // Random structure type
+            int32 TypeIndex = FMath::RandRange(0, 5);
+            EArch_PrimitiveStructureType StructureType = static_cast<EArch_PrimitiveStructureType>(TypeIndex);
+            
+            // Spawn the structure
+            AArch_PrimitiveStructureActor* NewStructure = World->SpawnActor<AArch_PrimitiveStructureActor>(
+                AArch_PrimitiveStructureActor::StaticClass(),
+                SpawnLocation,
+                FRotator::ZeroRotator
+            );
+            
+            if (NewStructure)
+            {
+                NewStructure->SetStructureType(StructureType);
+            }
+        }
+    }
 }
