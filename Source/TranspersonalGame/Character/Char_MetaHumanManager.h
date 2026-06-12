@@ -1,155 +1,135 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
-#include "Engine/World.h"
-#include "Components/SkeletalMeshComponent.h"
-#include "Components/StaticMeshComponent.h"
+#include "Engine/GameInstanceSubsystem.h"
+#include "Engine/SkeletalMesh.h"
 #include "Materials/MaterialInterface.h"
-#include "Engine/DataTable.h"
 #include "Char_MetaHumanManager.generated.h"
 
-// Character appearance data structure
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FChar_AppearanceData
+struct TRANSPERSONALGAME_API FChar_CharacterPreset
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
-    FString CharacterName;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
+    FString PresetName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
-    TSoftObjectPtr<USkeletalMesh> BaseMesh;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
+    TSoftObjectPtr<USkeletalMesh> CharacterMesh;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
     TSoftObjectPtr<UMaterialInterface> SkinMaterial;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
+    TSoftObjectPtr<UMaterialInterface> HairMaterial;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
     TSoftObjectPtr<UMaterialInterface> ClothingMaterial;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
-    TArray<TSoftObjectPtr<UStaticMesh>> AccessoryMeshes;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
     FLinearColor SkinTone;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
-    float BodyMass;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
+    FLinearColor HairColor;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
-    float Height;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
+    float WeatheringIntensity;
 
-    FChar_AppearanceData()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
+    float ScarIntensity;
+
+    FChar_CharacterPreset()
     {
-        CharacterName = TEXT("Primitive Human");
+        PresetName = TEXT("Default");
         SkinTone = FLinearColor(0.8f, 0.6f, 0.4f, 1.0f);
-        BodyMass = 1.0f;
-        Height = 1.0f;
+        HairColor = FLinearColor(0.2f, 0.1f, 0.05f, 1.0f);
+        WeatheringIntensity = 0.5f;
+        ScarIntensity = 0.3f;
     }
 };
 
-// Character archetype for different roles
 UENUM(BlueprintType)
-enum class EChar_Archetype : uint8
+enum class EChar_CharacterType : uint8
 {
-    Hunter      UMETA(DisplayName = "Hunter"),
-    Gatherer    UMETA(DisplayName = "Gatherer"),
-    Crafter     UMETA(DisplayName = "Crafter"),
-    Scout       UMETA(DisplayName = "Scout"),
-    Elder       UMETA(DisplayName = "Elder"),
-    Child       UMETA(DisplayName = "Child")
-};
-
-// Clothing style for Cretaceous period
-UENUM(BlueprintType)
-enum class EChar_ClothingStyle : uint8
-{
-    AnimalHide      UMETA(DisplayName = "Animal Hide"),
-    PlantFiber      UMETA(DisplayName = "Plant Fiber"),
-    BoneArmor       UMETA(DisplayName = "Bone Armor"),
-    Minimal         UMETA(DisplayName = "Minimal"),
-    Ceremonial      UMETA(DisplayName = "Ceremonial")
+    Player,
+    TribalNPC,
+    ElderNPC,
+    WarriorNPC,
+    ShamanNPC,
+    ChildNPC
 };
 
 /**
- * MetaHuman Manager for creating and customizing prehistoric human characters
- * Handles character appearance, clothing, and accessories for Cretaceous period
+ * MetaHuman Manager - Handles character creation and customization for prehistoric humans
+ * Manages character presets, material variations, and visual diversity
  */
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API AChar_MetaHumanManager : public AActor
+class TRANSPERSONALGAME_API UChar_MetaHumanManager : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
 public:
-    AChar_MetaHumanManager();
+    UChar_MetaHumanManager();
+
+    // Subsystem interface
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
+
+    // Character creation and customization
+    UFUNCTION(BlueprintCallable, Category = "MetaHuman")
+    FChar_CharacterPreset CreateRandomCharacterPreset(EChar_CharacterType CharacterType);
+
+    UFUNCTION(BlueprintCallable, Category = "MetaHuman")
+    void ApplyCharacterPreset(class ACharacter* Character, const FChar_CharacterPreset& Preset);
+
+    UFUNCTION(BlueprintCallable, Category = "MetaHuman")
+    void ApplyWeatheringEffects(class USkeletalMeshComponent* MeshComponent, float Intensity);
+
+    UFUNCTION(BlueprintCallable, Category = "MetaHuman")
+    void ApplySurvivalScars(class USkeletalMeshComponent* MeshComponent, float Intensity);
+
+    UFUNCTION(BlueprintCallable, Category = "MetaHuman")
+    TArray<FChar_CharacterPreset> GetAvailablePresets() const { return CharacterPresets; }
+
+    // Material and texture management
+    UFUNCTION(BlueprintCallable, Category = "MetaHuman")
+    UMaterialInstanceDynamic* CreateCustomSkinMaterial(const FLinearColor& SkinTone, float Weathering);
+
+    UFUNCTION(BlueprintCallable, Category = "MetaHuman")
+    UMaterialInstanceDynamic* CreateCustomHairMaterial(const FLinearColor& HairColor);
+
+    UFUNCTION(BlueprintCallable, Category = "MetaHuman")
+    void LoadCharacterAssets();
 
 protected:
-    virtual void BeginPlay() override;
+    // Character presets database
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MetaHuman")
+    TArray<FChar_CharacterPreset> CharacterPresets;
 
-    // Character appearance database
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Database")
-    TSoftObjectPtr<UDataTable> CharacterAppearanceTable;
+    // Base materials for customization
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Materials")
+    TSoftObjectPtr<UMaterialInterface> BaseSkinMaterial;
 
-    // Available character archetypes
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Creation")
-    TArray<EChar_Archetype> AvailableArchetypes;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Materials")
+    TSoftObjectPtr<UMaterialInterface> BaseHairMaterial;
 
-    // Default appearance data for each archetype
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Creation")
-    TMap<EChar_Archetype, FChar_AppearanceData> ArchetypeDefaults;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Materials")
+    TSoftObjectPtr<UMaterialInterface> BaseClothingMaterial;
 
-    // Material parameter collections for dynamic customization
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Materials")
-    TSoftObjectPtr<class UMaterialParameterCollection> SkinParameterCollection;
+    // Skin tone variations for diversity
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Diversity")
+    TArray<FLinearColor> SkinToneVariations;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Materials")
-    TSoftObjectPtr<class UMaterialParameterCollection> ClothingParameterCollection;
-
-public:
-    // Create a new character with specified archetype
-    UFUNCTION(BlueprintCallable, Category = "Character Creation")
-    class ATranspersonalCharacter* CreateCharacterFromArchetype(EChar_Archetype Archetype, FVector SpawnLocation, FRotator SpawnRotation);
-
-    // Customize existing character appearance
-    UFUNCTION(BlueprintCallable, Category = "Character Customization")
-    void ApplyAppearanceData(class ATranspersonalCharacter* Character, const FChar_AppearanceData& AppearanceData);
-
-    // Generate random appearance within archetype constraints
-    UFUNCTION(BlueprintCallable, Category = "Character Generation")
-    FChar_AppearanceData GenerateRandomAppearance(EChar_Archetype Archetype);
-
-    // Apply clothing style to character
-    UFUNCTION(BlueprintCallable, Category = "Character Customization")
-    void ApplyClothingStyle(class ATranspersonalCharacter* Character, EChar_ClothingStyle ClothingStyle);
-
-    // Add accessories to character (jewelry, weapons, tools)
-    UFUNCTION(BlueprintCallable, Category = "Character Customization")
-    void AddCharacterAccessories(class ATranspersonalCharacter* Character, const TArray<TSoftObjectPtr<UStaticMesh>>& Accessories);
-
-    // Update skin tone and body proportions
-    UFUNCTION(BlueprintCallable, Category = "Character Customization")
-    void UpdatePhysicalTraits(class ATranspersonalCharacter* Character, FLinearColor SkinTone, float BodyMass, float Height);
-
-    // Get appearance data for character
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Character Info")
-    FChar_AppearanceData GetCharacterAppearance(class ATranspersonalCharacter* Character);
-
-    // Validate character setup
-    UFUNCTION(BlueprintCallable, Category = "Character Validation")
-    bool ValidateCharacterSetup(class ATranspersonalCharacter* Character);
-
-protected:
-    // Initialize archetype defaults
-    void InitializeArchetypeDefaults();
-
-    // Load appearance data from data table
-    FChar_AppearanceData* GetAppearanceDataFromTable(const FString& CharacterName);
-
-    // Apply material parameters
-    void ApplyMaterialParameters(class USkeletalMeshComponent* MeshComponent, const FChar_AppearanceData& AppearanceData);
+    // Hair color variations
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Diversity")
+    TArray<FLinearColor> HairColorVariations;
 
 private:
-    // Cache for loaded assets
-    TMap<FString, TSoftObjectPtr<USkeletalMesh>> LoadedMeshCache;
-    TMap<FString, TSoftObjectPtr<UMaterialInterface>> LoadedMaterialCache;
+    void InitializeDefaultPresets();
+    void InitializeSkinToneVariations();
+    void InitializeHairColorVariations();
+    
+    FChar_CharacterPreset GeneratePresetForType(EChar_CharacterType CharacterType);
+    FLinearColor GetRandomSkinTone() const;
+    FLinearColor GetRandomHairColor() const;
 };
