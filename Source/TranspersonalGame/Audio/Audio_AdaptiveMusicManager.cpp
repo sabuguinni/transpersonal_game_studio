@@ -1,267 +1,221 @@
 #include "Audio_AdaptiveMusicManager.h"
-#include "Engine/World.h"
-#include "Engine/GameInstance.h"
 #include "Components/AudioComponent.h"
 #include "Sound/SoundCue.h"
+#include "Engine/World.h"
+#include "GameFramework/Actor.h"
 #include "Kismet/GameplayStatics.h"
-#include "TimerManager.h"
 
 UAudio_AdaptiveMusicManager::UAudio_AdaptiveMusicManager()
 {
-    // Initialize default music state
-    CurrentMusicState.CurrentLayer = EAudio_MusicLayer::Ambient;
-    CurrentMusicState.CurrentBiome = EAudio_BiomeType::Forest;
-    CurrentMusicState.IntensityLevel = 0.0f;
-    CurrentMusicState.CrossfadeTime = 2.0f;
-    CurrentMusicState.bIsInCombat = false;
-    CurrentMusicState.bDangerNearby = false;
-
-    MasterVolume = 1.0f;
-    MusicVolume = 0.7f;
-    AmbienceVolume = 0.5f;
-    LastIntensityUpdate = 0.0f;
-    IntensityUpdateInterval = 1.0f;
+    PrimaryComponentTick.bCanEverTick = true;
+    PrimaryComponentTick.TickInterval = 0.1f; // Update 10 times per second
+    
+    CurrentMusicState = EAudio_MusicState::Calm;
+    TargetMusicState = EAudio_MusicState::Calm;
+    StateTransitionTime = 3.0f;
+    CurrentTransitionTime = 0.0f;
+    
+    DangerDetectionRadius = 2000.0f;
+    TensionDetectionRadius = 3000.0f;
+    
+    // Initialize music layers
+    MusicLayers.SetNum(8); // One for each music state
+    AudioComponents.SetNum(8);
 }
 
-void UAudio_AdaptiveMusicManager::Initialize(FSubsystemCollectionBase& Collection)
+void UAudio_AdaptiveMusicManager::BeginPlay()
 {
-    Super::Initialize(Collection);
+    Super::BeginPlay();
+    InitializeAudioComponents();
+}
 
-    UE_LOG(LogTemp, Warning, TEXT("Audio_AdaptiveMusicManager: Initializing adaptive music system"));
+void UAudio_AdaptiveMusicManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+{
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+    
+    ProcessMusicTransition(DeltaTime);
+    UpdateLayerVolumes(DeltaTime);
+}
 
-    // Create audio components
-    if (UGameInstance* GameInstance = GetGameInstance())
+void UAudio_AdaptiveMusicManager::SetMusicState(EAudio_MusicState NewState)
+{
+    if (NewState != CurrentMusicState)
     {
-        if (UWorld* World = GameInstance->GetWorld())
+        TargetMusicState = NewState;
+        CurrentTransitionTime = 0.0f;
+    }
+}
+
+void UAudio_AdaptiveMusicManager::EnableMusicLayer(int32 LayerIndex, float FadeInTime)
+{
+    if (MusicLayers.IsValidIndex(LayerIndex) && AudioComponents.IsValidIndex(LayerIndex))
+    {
+        MusicLayers[LayerIndex].bIsActive = true;
+        MusicLayers[LayerIndex].FadeTime = FadeInTime;
+        
+        if (AudioComponents[LayerIndex] && MusicLayers[LayerIndex].SoundCue.LoadSynchronous())
         {
-            // Create music audio component
-            MusicAudioComponent = NewObject<UAudioComponent>(this);
-            if (MusicAudioComponent)
-            {
-                MusicAudioComponent->SetVolumeMultiplier(MusicVolume * MasterVolume);
-                MusicAudioComponent->bAutoActivate = false;
-                MusicAudioComponent->RegisterComponent();
-            }
-
-            // Create ambience audio component
-            AmbienceAudioComponent = NewObject<UAudioComponent>(this);
-            if (AmbienceAudioComponent)
-            {
-                AmbienceAudioComponent->SetVolumeMultiplier(AmbienceVolume * MasterVolume);
-                AmbienceAudioComponent->bAutoActivate = false;
-                AmbienceAudioComponent->RegisterComponent();
-            }
-
-            UE_LOG(LogTemp, Warning, TEXT("Audio_AdaptiveMusicManager: Audio components created"));
+            AudioComponents[LayerIndex]->SetSound(MusicLayers[LayerIndex].SoundCue.LoadSynchronous());
+            AudioComponents[LayerIndex]->Play();
         }
     }
-
-    // Initialize with forest ambience
-    SetBiome(EAudio_BiomeType::Forest);
-    SetMusicLayer(EAudio_MusicLayer::Ambient);
 }
 
-void UAudio_AdaptiveMusicManager::Deinitialize()
+void UAudio_AdaptiveMusicManager::DisableMusicLayer(int32 LayerIndex, float FadeOutTime)
 {
-    if (MusicAudioComponent)
+    if (MusicLayers.IsValidIndex(LayerIndex))
     {
-        MusicAudioComponent->Stop();
-        MusicAudioComponent = nullptr;
+        MusicLayers[LayerIndex].bIsActive = false;
+        MusicLayers[LayerIndex].FadeTime = FadeOutTime;
     }
-
-    if (AmbienceAudioComponent)
-    {
-        AmbienceAudioComponent->Stop();
-        AmbienceAudioComponent = nullptr;
-    }
-
-    Super::Deinitialize();
 }
 
-void UAudio_AdaptiveMusicManager::SetMusicLayer(EAudio_MusicLayer NewLayer, float CrossfadeTime)
+void UAudio_AdaptiveMusicManager::UpdateProximityMusic(const TArray<AActor*>& NearbyActors)
 {
-    if (CurrentMusicState.CurrentLayer == NewLayer)
-    {
-        return;
-    }
-
-    UE_LOG(LogTemp, Warning, TEXT("Audio_AdaptiveMusicManager: Changing music layer to %d"), (int32)NewLayer);
-
-    CurrentMusicState.CurrentLayer = NewLayer;
-    CurrentMusicState.CrossfadeTime = CrossfadeTime;
-
-    CrossfadeToLayer(NewLayer, CrossfadeTime);
+    EAudio_MusicState ProximityState = DetermineMusicStateFromProximity(NearbyActors);
+    SetMusicState(ProximityState);
 }
 
-void UAudio_AdaptiveMusicManager::SetBiome(EAudio_BiomeType NewBiome)
+void UAudio_AdaptiveMusicManager::UpdateTimeOfDayMusic(float TimeOfDay)
 {
-    if (CurrentMusicState.CurrentBiome == NewBiome)
-    {
-        return;
-    }
-
-    UE_LOG(LogTemp, Warning, TEXT("Audio_AdaptiveMusicManager: Changing biome to %d"), (int32)NewBiome);
-
-    CurrentMusicState.CurrentBiome = NewBiome;
-    UpdateBiomeAmbience();
-}
-
-void UAudio_AdaptiveMusicManager::SetIntensity(float NewIntensity)
-{
-    NewIntensity = FMath::Clamp(NewIntensity, 0.0f, 1.0f);
+    EAudio_MusicState TimeState = DetermineMusicStateFromTimeOfDay(TimeOfDay);
     
-    if (FMath::Abs(CurrentMusicState.IntensityLevel - NewIntensity) < 0.1f)
+    // Only override if not in danger/combat
+    if (CurrentMusicState != EAudio_MusicState::Danger && CurrentMusicState != EAudio_MusicState::Combat)
     {
-        return;
-    }
-
-    CurrentMusicState.IntensityLevel = NewIntensity;
-
-    // Automatically adjust music layer based on intensity
-    if (NewIntensity > 0.8f && !CurrentMusicState.bIsInCombat)
-    {
-        SetMusicLayer(EAudio_MusicLayer::Danger);
-    }
-    else if (NewIntensity > 0.6f)
-    {
-        SetMusicLayer(EAudio_MusicLayer::Tension);
-    }
-    else if (NewIntensity > 0.3f)
-    {
-        SetMusicLayer(EAudio_MusicLayer::Exploration);
-    }
-    else
-    {
-        SetMusicLayer(EAudio_MusicLayer::Ambient);
-    }
-
-    // Adjust volume based on intensity
-    if (MusicAudioComponent)
-    {
-        float IntensityVolume = FMath::Lerp(0.3f, 1.0f, NewIntensity);
-        MusicAudioComponent->SetVolumeMultiplier(MusicVolume * MasterVolume * IntensityVolume);
+        SetMusicState(TimeState);
     }
 }
 
-void UAudio_AdaptiveMusicManager::OnCombatStart()
+void UAudio_AdaptiveMusicManager::InitializeAudioComponents()
 {
-    UE_LOG(LogTemp, Warning, TEXT("Audio_AdaptiveMusicManager: Combat started"));
-
-    CurrentMusicState.bIsInCombat = true;
-    SetMusicLayer(EAudio_MusicLayer::Combat, 0.5f); // Fast transition to combat music
-    SetIntensity(1.0f);
-}
-
-void UAudio_AdaptiveMusicManager::OnCombatEnd()
-{
-    UE_LOG(LogTemp, Warning, TEXT("Audio_AdaptiveMusicManager: Combat ended"));
-
-    CurrentMusicState.bIsInCombat = false;
-    
-    // Return to appropriate layer based on current situation
-    if (CurrentMusicState.bDangerNearby)
+    for (int32 i = 0; i < AudioComponents.Num(); i++)
     {
-        SetMusicLayer(EAudio_MusicLayer::Tension, 3.0f);
-        SetIntensity(0.7f);
-    }
-    else
-    {
-        SetMusicLayer(EAudio_MusicLayer::Ambient, 4.0f);
-        SetIntensity(0.2f);
-    }
-}
-
-void UAudio_AdaptiveMusicManager::OnDangerDetected(bool bDangerous)
-{
-    CurrentMusicState.bDangerNearby = bDangerous;
-
-    if (bDangerous && !CurrentMusicState.bIsInCombat)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Audio_AdaptiveMusicManager: Danger detected"));
-        SetMusicLayer(EAudio_MusicLayer::Tension);
-        SetIntensity(0.8f);
-    }
-    else if (!bDangerous && !CurrentMusicState.bIsInCombat)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Audio_AdaptiveMusicManager: Danger cleared"));
-        SetMusicLayer(EAudio_MusicLayer::Exploration);
-        SetIntensity(0.4f);
-    }
-}
-
-void UAudio_AdaptiveMusicManager::UpdateMusicState(float DeltaTime)
-{
-    LastIntensityUpdate += DeltaTime;
-
-    if (LastIntensityUpdate >= IntensityUpdateInterval)
-    {
-        CalculateAdaptiveIntensity();
-        LastIntensityUpdate = 0.0f;
-    }
-}
-
-void UAudio_AdaptiveMusicManager::CrossfadeToLayer(EAudio_MusicLayer NewLayer, float CrossfadeTime)
-{
-    if (!MusicAudioComponent)
-    {
-        return;
-    }
-
-    // Find the sound cue for the new layer
-    if (USoundCue** FoundCue = MusicLayers.Find(NewLayer))
-    {
-        if (USoundCue* NewCue = FoundCue->LoadSynchronous())
+        if (!AudioComponents[i])
         {
-            // Stop current music
-            MusicAudioComponent->Stop();
+            AudioComponents[i] = GetOwner()->CreateDefaultSubobject<UAudioComponent>(
+                FName(*FString::Printf(TEXT("MusicLayer_%d"), i))
+            );
             
-            // Set new sound and play
-            MusicAudioComponent->SetSound(NewCue);
-            MusicAudioComponent->Play();
-
-            UE_LOG(LogTemp, Warning, TEXT("Audio_AdaptiveMusicManager: Started playing new music layer"));
+            if (AudioComponents[i])
+            {
+                AudioComponents[i]->bAutoActivate = false;
+                AudioComponents[i]->SetVolumeMultiplier(0.0f);
+            }
         }
-    }
-    else
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Audio_AdaptiveMusicManager: No sound cue found for layer %d"), (int32)NewLayer);
     }
 }
 
-void UAudio_AdaptiveMusicManager::UpdateBiomeAmbience()
+void UAudio_AdaptiveMusicManager::ProcessMusicTransition(float DeltaTime)
 {
-    if (!AmbienceAudioComponent)
+    if (CurrentMusicState != TargetMusicState)
     {
-        return;
-    }
-
-    // Find the ambience sound for the current biome
-    if (USoundCue** FoundCue = BiomeAmbience.Find(CurrentMusicState.CurrentBiome))
-    {
-        if (USoundCue* NewCue = FoundCue->LoadSynchronous())
+        CurrentTransitionTime += DeltaTime;
+        
+        if (CurrentTransitionTime >= StateTransitionTime)
         {
-            // Stop current ambience
-            AmbienceAudioComponent->Stop();
+            CurrentMusicState = TargetMusicState;
+            CurrentTransitionTime = 0.0f;
             
-            // Set new ambience and play
-            AmbienceAudioComponent->SetSound(NewCue);
-            AmbienceAudioComponent->Play();
-
-            UE_LOG(LogTemp, Warning, TEXT("Audio_AdaptiveMusicManager: Started playing biome ambience"));
+            // Activate target layer
+            int32 TargetLayerIndex = static_cast<int32>(TargetMusicState);
+            EnableMusicLayer(TargetLayerIndex, 2.0f);
+            
+            // Disable other layers
+            for (int32 i = 0; i < MusicLayers.Num(); i++)
+            {
+                if (i != TargetLayerIndex)
+                {
+                    DisableMusicLayer(i, 2.0f);
+                }
+            }
         }
-    }
-    else
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Audio_AdaptiveMusicManager: No ambience sound found for biome %d"), (int32)CurrentMusicState.CurrentBiome);
     }
 }
 
-void UAudio_AdaptiveMusicManager::CalculateAdaptiveIntensity()
+void UAudio_AdaptiveMusicManager::UpdateLayerVolumes(float DeltaTime)
 {
-    // This would normally calculate intensity based on game state
-    // For now, we maintain current intensity unless explicitly changed
+    for (int32 i = 0; i < MusicLayers.Num(); i++)
+    {
+        if (AudioComponents.IsValidIndex(i) && AudioComponents[i])
+        {
+            float CurrentVolume = AudioComponents[i]->GetVolumeMultiplier();
+            float TargetVolume = MusicLayers[i].bIsActive ? MusicLayers[i].Volume : 0.0f;
+            
+            if (!FMath::IsNearlyEqual(CurrentVolume, TargetVolume, 0.01f))
+            {
+                float FadeSpeed = 1.0f / FMath::Max(MusicLayers[i].FadeTime, 0.1f);
+                float NewVolume = FMath::FInterpTo(CurrentVolume, TargetVolume, DeltaTime, FadeSpeed);
+                AudioComponents[i]->SetVolumeMultiplier(NewVolume);
+                
+                // Stop audio component if volume reaches zero
+                if (NewVolume <= 0.01f && !MusicLayers[i].bIsActive)
+                {
+                    AudioComponents[i]->Stop();
+                }
+            }
+        }
+    }
+}
+
+EAudio_MusicState UAudio_AdaptiveMusicManager::DetermineMusicStateFromProximity(const TArray<AActor*>& NearbyActors)
+{
+    float ClosestDangerDistance = FLT_MAX;
+    bool bFoundDanger = false;
     
-    // Example: Check for nearby enemies, player health, etc.
-    // float NewIntensity = CalculateIntensityFromGameState();
-    // SetIntensity(NewIntensity);
+    FVector OwnerLocation = GetOwner()->GetActorLocation();
+    
+    for (AActor* Actor : NearbyActors)
+    {
+        if (!Actor) continue;
+        
+        FString ActorLabel = Actor->GetActorLabel().ToLower();
+        
+        // Check for dangerous dinosaurs
+        if (ActorLabel.Contains(TEXT("trex")) || ActorLabel.Contains(TEXT("raptor")))
+        {
+            float Distance = FVector::Dist(OwnerLocation, Actor->GetActorLocation());
+            
+            if (Distance < DangerDetectionRadius)
+            {
+                bFoundDanger = true;
+                ClosestDangerDistance = FMath::Min(ClosestDangerDistance, Distance);
+            }
+        }
+    }
+    
+    if (bFoundDanger)
+    {
+        if (ClosestDangerDistance < DangerDetectionRadius * 0.5f)
+        {
+            return EAudio_MusicState::Danger;
+        }
+        else
+        {
+            return EAudio_MusicState::Tension;
+        }
+    }
+    
+    return EAudio_MusicState::Exploration;
+}
+
+EAudio_MusicState UAudio_AdaptiveMusicManager::DetermineMusicStateFromTimeOfDay(float TimeOfDay)
+{
+    // TimeOfDay assumed to be 0.0-24.0
+    if (TimeOfDay >= 5.0f && TimeOfDay < 7.0f)
+    {
+        return EAudio_MusicState::Dawn;
+    }
+    else if (TimeOfDay >= 18.0f && TimeOfDay < 20.0f)
+    {
+        return EAudio_MusicState::Dusk;
+    }
+    else if (TimeOfDay >= 20.0f || TimeOfDay < 5.0f)
+    {
+        return EAudio_MusicState::Night;
+    }
+    else
+    {
+        return EAudio_MusicState::Calm;
+    }
 }
