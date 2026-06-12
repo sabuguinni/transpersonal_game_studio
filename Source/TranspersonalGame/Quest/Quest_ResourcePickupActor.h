@@ -4,8 +4,20 @@
 #include "GameFramework/Actor.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/SphereComponent.h"
-#include "Quest_CraftingSystem.h"
+#include "Engine/Engine.h"
+#include "../SharedTypes.h"
 #include "Quest_ResourcePickupActor.generated.h"
+
+UENUM(BlueprintType)
+enum class EQuest_ResourceType : uint8
+{
+    Rock        UMETA(DisplayName = "Rock"),
+    Stick       UMETA(DisplayName = "Stick"),
+    Leaf        UMETA(DisplayName = "Leaf"),
+    Fiber       UMETA(DisplayName = "Fiber"),
+    Berries     UMETA(DisplayName = "Berries"),
+    Flint       UMETA(DisplayName = "Flint")
+};
 
 UCLASS()
 class TRANSPERSONALGAME_API AQuest_ResourcePickupActor : public AActor
@@ -22,44 +34,59 @@ protected:
     UStaticMeshComponent* MeshComponent;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    USphereComponent* CollisionSphere;
+    USphereComponent* CollisionComponent;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Resource")
     EQuest_ResourceType ResourceType;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Resource")
-    int32 ResourceAmount;
+    FString ResourceName;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Resource")
+    int32 ResourceQuantity;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Resource")
     float PickupRange;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Resource")
-    bool bAutoPickup;
+    bool bCanBePickedUp;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Visual")
-    FVector MeshScale;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Respawn")
+    bool bShouldRespawn;
 
-public:
-    UFUNCTION(BlueprintCallable, Category = "Resource")
-    void SetResourceType(EQuest_ResourceType NewResourceType);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Respawn")
+    float RespawnTime;
 
-    UFUNCTION(BlueprintCallable, Category = "Resource")
-    EQuest_ResourceType GetResourceType() const;
+    UPROPERTY(BlueprintReadOnly, Category = "State")
+    bool bIsPickedUp;
 
-    UFUNCTION(BlueprintCallable, Category = "Resource")
-    int32 GetResourceAmount() const;
+    UPROPERTY(BlueprintReadOnly, Category = "State")
+    float RespawnTimer;
 
-    UFUNCTION(BlueprintCallable, Category = "Resource")
-    bool CanBePickedUp() const;
+public:    
+    virtual void Tick(float DeltaTime) override;
+
+    UFUNCTION()
+    void OnOverlapBegin(UPrimitiveComponent* OverlappedComp, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult);
 
     UFUNCTION(BlueprintCallable, Category = "Resource")
     void PickupResource(AActor* PickupActor);
 
-protected:
-    UFUNCTION()
-    void OnOverlapBegin(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComponent, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult);
+    UFUNCTION(BlueprintCallable, Category = "Resource")
+    void SetResourceType(EQuest_ResourceType NewType);
 
-private:
-    void SetupMeshForResourceType();
-    void ConfigureCollision();
+    UFUNCTION(BlueprintCallable, Category = "Resource")
+    FString GetResourceTypeString();
+
+    UFUNCTION(BlueprintCallable, Category = "Respawn")
+    void StartRespawnTimer();
+
+    UFUNCTION(BlueprintCallable, Category = "Respawn")
+    void RespawnResource();
+
+    UFUNCTION(BlueprintCallable, Category = "Visual")
+    void SetResourceMesh();
+
+    UFUNCTION(BlueprintCallable, Category = "Visual")
+    void SetVisibility(bool bVisible);
 };
