@@ -2,176 +2,162 @@
 
 #include "CoreMinimal.h"
 #include "Engine/GameInstanceSubsystem.h"
-#include "Subsystems/WorldSubsystem.h"
 #include "Engine/World.h"
-#include "GameFramework/Actor.h"
-#include "Components/ActorComponent.h"
-#include "../SharedTypes.h"
+#include "Components/StaticMeshComponent.h"
 #include "Eng_ArchitectureManager.generated.h"
 
+UENUM(BlueprintType)
+enum class EEng_BuildingType : uint8
+{
+    None            UMETA(DisplayName = "None"),
+    Shelter         UMETA(DisplayName = "Basic Shelter"),
+    Storage         UMETA(DisplayName = "Storage Hut"),
+    Crafting        UMETA(DisplayName = "Crafting Station"),
+    Firepit         UMETA(DisplayName = "Fire Pit"),
+    Watchtower      UMETA(DisplayName = "Watch Tower"),
+    Fence           UMETA(DisplayName = "Wooden Fence"),
+    Bridge          UMETA(DisplayName = "Rope Bridge")
+};
+
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEng_SystemModule
+struct TRANSPERSONALGAME_API FEng_BuildingData
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    FString ModuleName;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Building")
+    EEng_BuildingType BuildingType = EEng_BuildingType::None;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    bool bIsLoaded;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Building")
+    FVector Location = FVector::ZeroVector;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    bool bIsActive;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Building")
+    FRotator Rotation = FRotator::ZeroRotator;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    int32 Priority;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Building")
+    float Health = 100.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    TArray<FString> Dependencies;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Building")
+    bool bIsConstructed = false;
 
-    FEng_SystemModule()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Building")
+    TArray<FString> RequiredMaterials;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Building")
+    float ConstructionProgress = 0.0f;
+
+    FEng_BuildingData()
     {
-        ModuleName = TEXT("Unknown");
-        bIsLoaded = false;
-        bIsActive = false;
-        Priority = 0;
+        BuildingType = EEng_BuildingType::None;
+        Location = FVector::ZeroVector;
+        Rotation = FRotator::ZeroRotator;
+        Health = 100.0f;
+        bIsConstructed = false;
+        ConstructionProgress = 0.0f;
     }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEng_PerformanceMetrics
+struct TRANSPERSONALGAME_API FEng_ArchitectureSettings
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float FrameTime;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
+    int32 MaxBuildings = 50;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float RenderTime;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
+    float BuildingSnapDistance = 100.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float GameThreadTime;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
+    bool bEnableAutoRepair = true;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 DrawCalls;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
+    float WeatherDamageRate = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 TriangleCount;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
+    bool bRequireMaterials = true;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float MemoryUsage;
-
-    FEng_PerformanceMetrics()
+    FEng_ArchitectureSettings()
     {
-        FrameTime = 0.0f;
-        RenderTime = 0.0f;
-        GameThreadTime = 0.0f;
-        DrawCalls = 0;
-        TriangleCount = 0;
-        MemoryUsage = 0.0f;
+        MaxBuildings = 50;
+        BuildingSnapDistance = 100.0f;
+        bEnableAutoRepair = true;
+        WeatherDamageRate = 1.0f;
+        bRequireMaterials = true;
     }
 };
 
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UEng_ArchitectureManager : public UWorldSubsystem
+class TRANSPERSONALGAME_API UEng_ArchitectureManager : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
 public:
     UEng_ArchitectureManager();
 
-    // USubsystem interface
+    // Subsystem overrides
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
-    // Core Architecture Management
+    // Building Management
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void InitializeSystemModules();
-
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void RegisterSystemModule(const FString& ModuleName, int32 Priority, const TArray<FString>& Dependencies);
+    bool CreateBuilding(EEng_BuildingType BuildingType, FVector Location, FRotator Rotation);
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    bool LoadSystemModule(const FString& ModuleName);
+    bool RemoveBuilding(int32 BuildingIndex);
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    bool UnloadSystemModule(const FString& ModuleName);
+    void UpdateBuildingConstruction(int32 BuildingIndex, float ProgressDelta);
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    bool IsSystemModuleLoaded(const FString& ModuleName) const;
+    TArray<FEng_BuildingData> GetAllBuildings() const;
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    TArray<FString> GetLoadedModules() const;
+    FEng_BuildingData GetBuildingData(int32 BuildingIndex) const;
 
-    // Performance Monitoring
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    FEng_PerformanceMetrics GetCurrentPerformanceMetrics() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void UpdatePerformanceMetrics();
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    bool IsPerformanceWithinLimits() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void SetPerformanceTargets(float TargetFrameTime, int32 MaxDrawCalls, float MaxMemoryMB);
-
-    // System Validation
-    UFUNCTION(BlueprintCallable, Category = "Validation")
-    bool ValidateSystemIntegrity();
-
-    UFUNCTION(BlueprintCallable, Category = "Validation")
-    TArray<FString> GetSystemErrors() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Validation")
-    void RunDiagnostics();
-
-    // Actor Management
+    // Validation
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    int32 GetTotalActorCount() const;
+    bool IsValidBuildingLocation(FVector Location, EEng_BuildingType BuildingType) const;
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    bool IsActorCountWithinLimits() const;
+    float GetNearestBuildingDistance(FVector Location) const;
+
+    // Settings
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    void SetArchitectureSettings(const FEng_ArchitectureSettings& NewSettings);
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void CleanupExcessActors();
+    FEng_ArchitectureSettings GetArchitectureSettings() const;
 
-    // Module Dependencies
+    // Weather damage system
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    bool CheckModuleDependencies(const FString& ModuleName) const;
+    void ApplyWeatherDamage(float DeltaTime);
+
+    // Material requirements
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    TArray<FString> GetRequiredMaterials(EEng_BuildingType BuildingType) const;
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    TArray<FString> GetModuleDependencies(const FString& ModuleName) const;
+    bool HasRequiredMaterials(EEng_BuildingType BuildingType) const;
+
+    // Debug and testing
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Architecture")
+    void DebugSpawnTestBuildings();
+
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Architecture")
+    void ClearAllBuildings();
 
 protected:
-    UPROPERTY(BlueprintReadOnly, Category = "Architecture")
-    TArray<FEng_SystemModule> SystemModules;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Architecture")
+    TArray<FEng_BuildingData> Buildings;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    FEng_PerformanceMetrics CurrentMetrics;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
+    FEng_ArchitectureSettings Settings;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float TargetFrameTime;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    int32 MaxDrawCalls;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float MaxMemoryMB;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Architecture")
-    int32 MaxActorCount;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    TArray<FString> SystemErrors;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Architecture")
-    bool bSystemsInitialized;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Architecture")
+    bool bIsInitialized = false;
 
 private:
-    void InitializeCoreModules();
-    void ValidateModuleLoad(const FString& ModuleName);
-    void UpdateSystemMetrics();
-    FEng_SystemModule* FindSystemModule(const FString& ModuleName);
-    bool ResolveDependencies(const FString& ModuleName);
+    void InitializeDefaultSettings();
+    FString GetBuildingMeshPath(EEng_BuildingType BuildingType) const;
+    AActor* SpawnBuildingActor(const FEng_BuildingData& BuildingData);
 };
