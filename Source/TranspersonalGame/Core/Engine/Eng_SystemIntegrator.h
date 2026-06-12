@@ -1,25 +1,25 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Engine/GameInstanceSubsystem.h"
 #include "Engine/World.h"
-#include "Subsystems/GameInstanceSubsystem.h"
-#include "Components/ActorComponent.h"
-#include "Engine/Engine.h"
 #include "Eng_SystemIntegrator.generated.h"
 
 UENUM(BlueprintType)
 enum class EEng_SystemType : uint8
 {
-    Core            UMETA(DisplayName = "Core Systems"),
-    Physics         UMETA(DisplayName = "Physics & Collision"),
-    Rendering       UMETA(DisplayName = "Rendering & Graphics"),
-    Audio           UMETA(DisplayName = "Audio Systems"),
-    Input           UMETA(DisplayName = "Input & Controls"),
-    Networking      UMETA(DisplayName = "Networking"),
-    AI              UMETA(DisplayName = "AI & Behavior"),
-    Gameplay        UMETA(DisplayName = "Gameplay Logic"),
-    UI              UMETA(DisplayName = "User Interface"),
-    Performance     UMETA(DisplayName = "Performance & Optimization")
+    None            UMETA(DisplayName = "None"),
+    Physics         UMETA(DisplayName = "Physics System"),
+    World           UMETA(DisplayName = "World Generation"),
+    Biome           UMETA(DisplayName = "Biome System"),
+    Architecture    UMETA(DisplayName = "Architecture System"),
+    Character       UMETA(DisplayName = "Character System"),
+    Dinosaur        UMETA(DisplayName = "Dinosaur System"),
+    Combat          UMETA(DisplayName = "Combat System"),
+    Survival        UMETA(DisplayName = "Survival System"),
+    Quest           UMETA(DisplayName = "Quest System"),
+    Audio           UMETA(DisplayName = "Audio System"),
+    VFX             UMETA(DisplayName = "VFX System")
 };
 
 USTRUCT(BlueprintType)
@@ -27,174 +27,182 @@ struct TRANSPERSONALGAME_API FEng_SystemStatus
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "System")
-    EEng_SystemType SystemType;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System")
+    EEng_SystemType SystemType = EEng_SystemType::None;
 
-    UPROPERTY(BlueprintReadOnly, Category = "System")
-    bool bIsInitialized;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System")
+    bool bIsInitialized = false;
 
-    UPROPERTY(BlueprintReadOnly, Category = "System")
-    bool bIsActive;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System")
+    bool bIsActive = false;
 
-    UPROPERTY(BlueprintReadOnly, Category = "System")
-    float PerformanceScore;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System")
+    float PerformanceScore = 100.0f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "System")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System")
     FString LastError;
 
-    UPROPERTY(BlueprintReadOnly, Category = "System")
-    float LastUpdateTime;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System")
+    float LastUpdateTime = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System")
+    int32 UpdateCount = 0;
 
     FEng_SystemStatus()
     {
-        SystemType = EEng_SystemType::Core;
+        SystemType = EEng_SystemType::None;
         bIsInitialized = false;
         bIsActive = false;
-        PerformanceScore = 1.0f;
+        PerformanceScore = 100.0f;
         LastError = TEXT("");
         LastUpdateTime = 0.0f;
+        UpdateCount = 0;
     }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEng_IntegrationReport
+struct TRANSPERSONALGAME_API FEng_IntegrationSettings
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    int32 TotalSystems;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration")
+    bool bEnablePerformanceMonitoring = true;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    int32 ActiveSystems;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration")
+    float PerformanceUpdateInterval = 1.0f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    int32 FailedSystems;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration")
+    float CriticalPerformanceThreshold = 30.0f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    float OverallPerformanceScore;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration")
+    bool bAutoDisablePoorPerformers = true;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    TArray<FString> CriticalErrors;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration")
+    int32 MaxSystemErrors = 5;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    float ReportGenerationTime;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration")
+    bool bEnableSystemDependencies = true;
 
-    FEng_IntegrationReport()
+    FEng_IntegrationSettings()
     {
-        TotalSystems = 0;
-        ActiveSystems = 0;
-        FailedSystems = 0;
-        OverallPerformanceScore = 1.0f;
-        CriticalErrors.Empty();
-        ReportGenerationTime = 0.0f;
+        bEnablePerformanceMonitoring = true;
+        PerformanceUpdateInterval = 1.0f;
+        CriticalPerformanceThreshold = 30.0f;
+        bAutoDisablePoorPerformers = true;
+        MaxSystemErrors = 5;
+        bEnableSystemDependencies = true;
     }
 };
 
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UEng_SystemIntegratorSubsystem : public UGameInstanceSubsystem
+class TRANSPERSONALGAME_API UEng_SystemIntegrator : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
 public:
+    UEng_SystemIntegrator();
+
+    // Subsystem overrides
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
-    virtual void Tick(float DeltaTime) override;
-    virtual bool ShouldCreateSubsystem(UObject* Outer) const override;
 
-    UFUNCTION(BlueprintCallable, Category = "System Integration")
-    void InitializeAllSystems();
+    // System Registration
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    void RegisterSystem(EEng_SystemType SystemType);
 
-    UFUNCTION(BlueprintCallable, Category = "System Integration")
-    void RegisterSystem(EEng_SystemType SystemType, UObject* SystemObject);
-
-    UFUNCTION(BlueprintCallable, Category = "System Integration")
+    UFUNCTION(BlueprintCallable, Category = "Integration")
     void UnregisterSystem(EEng_SystemType SystemType);
 
-    UFUNCTION(BlueprintCallable, Category = "System Integration")
-    bool IsSystemActive(EEng_SystemType SystemType) const;
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    bool IsSystemRegistered(EEng_SystemType SystemType) const;
 
-    UFUNCTION(BlueprintCallable, Category = "System Integration")
+    // System Control
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    void ActivateSystem(EEng_SystemType SystemType);
+
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    void DeactivateSystem(EEng_SystemType SystemType);
+
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    void ActivateAllSystems();
+
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    void DeactivateAllSystems();
+
+    // System Status
+    UFUNCTION(BlueprintCallable, Category = "Integration")
     FEng_SystemStatus GetSystemStatus(EEng_SystemType SystemType) const;
 
-    UFUNCTION(BlueprintCallable, Category = "System Integration")
-    FEng_IntegrationReport GenerateIntegrationReport();
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    TArray<FEng_SystemStatus> GetAllSystemStatus() const;
 
-    UFUNCTION(BlueprintCallable, Category = "System Integration")
-    void ValidateSystemIntegration();
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    int32 GetActiveSystemCount() const;
 
-    UFUNCTION(BlueprintCallable, Category = "System Integration")
-    void OptimizeSystemPerformance();
+    // Performance Monitoring
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    void UpdateSystemPerformance(EEng_SystemType SystemType, float PerformanceScore);
 
-    UFUNCTION(BlueprintCallable, Category = "Debug")
-    void LogSystemStatus();
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    float GetAveragePerformance() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Debug")
-    void ForceSystemRestart(EEng_SystemType SystemType);
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    TArray<EEng_SystemType> GetPoorPerformingSystems() const;
+
+    // Error Handling
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    void ReportSystemError(EEng_SystemType SystemType, const FString& ErrorMessage);
+
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    void ClearSystemErrors(EEng_SystemType SystemType);
+
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    int32 GetSystemErrorCount(EEng_SystemType SystemType) const;
+
+    // Settings
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    void SetIntegrationSettings(const FEng_IntegrationSettings& NewSettings);
+
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    FEng_IntegrationSettings GetIntegrationSettings() const;
+
+    // System Dependencies
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    bool ValidateSystemDependencies(EEng_SystemType SystemType) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    TArray<EEng_SystemType> GetSystemDependencies(EEng_SystemType SystemType) const;
+
+    // Debug and Testing
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Integration")
+    void DebugPrintSystemStatus();
+
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Integration")
+    void RunSystemIntegrationTests();
+
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Integration")
+    void ResetAllSystems();
 
 protected:
-    UPROPERTY(BlueprintReadOnly, Category = "Systems")
-    TMap<EEng_SystemType, FEng_SystemStatus> SystemStatuses;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Integration")
+    TMap<EEng_SystemType, FEng_SystemStatus> SystemStatusMap;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Systems")
-    TMap<EEng_SystemType, TWeakObjectPtr<UObject>> RegisteredSystems;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Integration")
+    TMap<EEng_SystemType, int32> SystemErrorCounts;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float LastValidationTime;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration")
+    FEng_IntegrationSettings Settings;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float ValidationInterval;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Integration")
+    bool bIsInitialized = false;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Integration")
+    float LastPerformanceUpdate = 0.0f;
 
 private:
-    void UpdateSystemStatus(EEng_SystemType SystemType);
-    void ValidateSystemDependencies();
-    void CheckSystemPerformance();
-    bool IsSystemCritical(EEng_SystemType SystemType) const;
-    void HandleSystemFailure(EEng_SystemType SystemType, const FString& Error);
-};
-
-UCLASS(BlueprintType, Blueprintable, ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UEng_SystemIntegratorComponent : public UActorComponent
-{
-    GENERATED_BODY()
-
-public:
-    UEng_SystemIntegratorComponent();
-
-protected:
-    virtual void BeginPlay() override;
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
-
-public:
-    UFUNCTION(BlueprintCallable, Category = "System Integration")
-    void RegisterWithIntegrator();
-
-    UFUNCTION(BlueprintCallable, Category = "System Integration")
-    void UnregisterFromIntegrator();
-
-    UFUNCTION(BlueprintCallable, Category = "System Integration")
-    bool ValidateSystemIntegration();
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    float GetSystemPerformanceScore() const;
-
-    UFUNCTION(BlueprintCallable, Category = "System Integration")
-    void ReportSystemError(const FString& ErrorMessage);
-
-protected:
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
-    EEng_SystemType ManagedSystemType;
-
-    UPROPERTY(BlueprintReadOnly, Category = "State")
-    bool bIsRegisteredWithIntegrator;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float PerformanceScore;
-
-    UPROPERTY(BlueprintReadOnly, Category = "State")
-    TArray<FString> RecentErrors;
-
-private:
-    void CalculatePerformanceScore();
-    void ValidateComponentIntegration();
-    void CleanupOldErrors();
+    void InitializeDefaultSettings();
+    void UpdatePerformanceMonitoring();
+    void HandlePoorPerformance(EEng_SystemType SystemType);
+    TArray<EEng_SystemType> GetRequiredDependencies(EEng_SystemType SystemType) const;
+    bool AreAllDependenciesActive(const TArray<EEng_SystemType>& Dependencies) const;
 };
