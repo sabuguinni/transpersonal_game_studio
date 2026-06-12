@@ -1,166 +1,271 @@
 #include "Narr_DialogueManager.h"
+#include "Components/SphereComponent.h"
+#include "Components/StaticMeshComponent.h"
 #include "Engine/Engine.h"
-#include "TimerManager.h"
+#include "GameFramework/Character.h"
 #include "Kismet/GameplayStatics.h"
 
-UNarr_DialogueManager::UNarr_DialogueManager()
+ANarr_DialogueManager::ANarr_DialogueManager()
 {
-    CurrentSequenceID = TEXT("");
-    CurrentLineIndex = 0;
-    bIsPlaying = false;
-    ProximityRange = 500.0f;
+    PrimaryActorTick.bCanEverTick = true;
+
+    // Create root component
+    RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootComponent"));
+
+    // Create interaction sphere
+    InteractionSphere = CreateDefaultSubobject<USphereComponent>(TEXT("InteractionSphere"));
+    InteractionSphere->SetupAttachment(RootComponent);
+    InteractionSphere->SetSphereRadius(300.0f);
+    InteractionSphere->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+    InteractionSphere->SetCollisionResponseToAllChannels(ECR_Ignore);
+    InteractionSphere->SetCollisionResponseToChannel(ECC_Pawn, ECR_Overlap);
+
+    // Create visual marker
+    VisualMarker = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("VisualMarker"));
+    VisualMarker->SetupAttachment(RootComponent);
+    VisualMarker->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+
+    // Initialize properties
+    InteractionRadius = 300.0f;
+    bIsActive = true;
+    bPlayerInRange = false;
+    CurrentPlayer = nullptr;
+    NPCPersonality = ENarr_NPCPersonality::Wise;
+
+    // Initialize dialogue tree
+    DialogueTree.TreeName = TEXT("DefaultDialogue");
+    DialogueTree.CurrentDialogueID = 0;
+
+    // Bind overlap events
+    InteractionSphere->OnComponentBeginOverlap.AddDynamic(this, &ANarr_DialogueManager::OnInteractionSphereBeginOverlap);
+    InteractionSphere->OnComponentEndOverlap.AddDynamic(this, &ANarr_DialogueManager::OnInteractionSphereEndOverlap);
 }
 
-void UNarr_DialogueManager::Initialize(FSubsystemCollectionBase& Collection)
+void ANarr_DialogueManager::BeginPlay()
 {
-    Super::Initialize(Collection);
-    LoadDefaultDialogues();
-    UE_LOG(LogTemp, Log, TEXT("Narrative Dialogue Manager initialized"));
-}
-
-void UNarr_DialogueManager::StartDialogueSequence(const FString& SequenceID)
-{
-    if (bIsPlaying)
-    {
-        StopCurrentDialogue();
-    }
-
-    if (DialogueDatabase.Contains(SequenceID))
-    {
-        CurrentSequenceID = SequenceID;
-        CurrentLineIndex = 0;
-        bIsPlaying = true;
-        PlayNextLine();
-        UE_LOG(LogTemp, Log, TEXT("Started dialogue sequence: %s"), *SequenceID);
-    }
-    else
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Dialogue sequence not found: %s"), *SequenceID);
-    }
-}
-
-void UNarr_DialogueManager::StopCurrentDialogue()
-{
-    if (bIsPlaying)
-    {
-        bIsPlaying = false;
-        CurrentSequenceID = TEXT("");
-        CurrentLineIndex = 0;
-        UE_LOG(LogTemp, Log, TEXT("Stopped current dialogue"));
-    }
-}
-
-bool UNarr_DialogueManager::IsDialoguePlaying() const
-{
-    return bIsPlaying;
-}
-
-void UNarr_DialogueManager::RegisterDialogueSequence(const FNarr_DialogueSequence& Sequence)
-{
-    DialogueDatabase.Add(Sequence.SequenceID, Sequence);
-    UE_LOG(LogTemp, Log, TEXT("Registered dialogue sequence: %s"), *Sequence.SequenceID);
-}
-
-void UNarr_DialogueManager::TriggerContextualDialogue(const FString& Context, const FVector& Location)
-{
-    // Context-based dialogue triggering for environmental storytelling
-    FString ContextSequenceID = FString::Printf(TEXT("Context_%s"), *Context);
+    Super::BeginPlay();
     
-    if (DialogueDatabase.Contains(ContextSequenceID))
+    UpdateVisualMarker();
+    
+    // Create default dialogue if none exists
+    if (DialogueTree.DialogueEntries.Num() == 0)
     {
-        StartDialogueSequence(ContextSequenceID);
-    }
-    else
-    {
-        UE_LOG(LogTemp, Log, TEXT("No contextual dialogue found for: %s"), *Context);
+        FNarr_DialogueEntry DefaultEntry;
+        DefaultEntry.SpeakerName = TEXT("Elder");
+        DefaultEntry.DialogueText = FText::FromString(TEXT("Greetings, survivor. The path ahead is treacherous."));
+        DefaultEntry.RequiredQuestStage = ENarr_QuestStage::Tutorial;
+        DefaultEntry.bIsQuestDialogue = false;
+        DefaultEntry.EmotionalIntensity = 0.6f;
+        
+        DialogueTree.DialogueEntries.Add(DefaultEntry);
     }
 }
 
-void UNarr_DialogueManager::PlayNextLine()
+void ANarr_DialogueManager::Tick(float DeltaTime)
 {
-    if (!bIsPlaying || !DialogueDatabase.Contains(CurrentSequenceID))
+    Super::Tick(DeltaTime);
+    
+    if (bPlayerInRange && CurrentPlayer)
+    {
+        // Update visual marker based on player proximity
+        float Distance = FVector::Dist(GetActorLocation(), CurrentPlayer->GetActorLocation());
+        if (Distance <= InteractionRadius * 0.5f)
+        {
+            // Player very close - brighten marker
+            UpdateVisualMarker();
+        }
+    }
+}
+
+void ANarr_DialogueManager::StartDialogue(AActor* PlayerActor)
+{
+    if (!bIsActive || !PlayerActor || !CanStartDialogue(PlayerActor))
     {
         return;
     }
 
-    const FNarr_DialogueSequence& CurrentSequence = DialogueDatabase[CurrentSequenceID];
+    CurrentPlayer = PlayerActor;
+    DialogueTree.CurrentDialogueID = 0;
     
-    if (CurrentLineIndex >= CurrentSequence.DialogueLines.Num())
+    // Log dialogue start
+    if (GEngine)
     {
-        // Sequence completed
-        StopCurrentDialogue();
-        return;
+        FString LogMessage = FString::Printf(TEXT("Starting dialogue with %s"), *DialogueTree.TreeName);
+        GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Green, LogMessage);
     }
 
-    const FNarr_DialogueLine& CurrentLine = CurrentSequence.DialogueLines[CurrentLineIndex];
-    
-    // Display dialogue text (would integrate with UI system)
-    UE_LOG(LogTemp, Log, TEXT("[%s]: %s"), *CurrentLine.SpeakerName, *CurrentLine.DialogueText);
-    
-    // Set timer for next line
-    FTimerHandle TimerHandle;
-    GetWorld()->GetTimerManager().SetTimer(
-        TimerHandle,
-        this,
-        &UNarr_DialogueManager::OnLineCompleted,
-        CurrentLine.Duration,
-        false
-    );
+    OnDialogueStarted();
 }
 
-void UNarr_DialogueManager::OnLineCompleted()
+void ANarr_DialogueManager::EndDialogue()
 {
-    CurrentLineIndex++;
-    PlayNextLine();
+    if (GEngine)
+    {
+        GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Yellow, TEXT("Dialogue ended"));
+    }
+
+    CurrentPlayer = nullptr;
+    DialogueTree.CurrentDialogueID = 0;
+    
+    OnDialogueEnded();
 }
 
-void UNarr_DialogueManager::LoadDefaultDialogues()
+FNarr_DialogueEntry ANarr_DialogueManager::GetCurrentDialogue()
 {
-    // Hunter Warning Sequence
-    FNarr_DialogueSequence HunterWarning;
-    HunterWarning.SequenceID = TEXT("HunterWarning");
-    HunterWarning.bIsRepeatable = false;
-    HunterWarning.bRequiresProximity = true;
+    if (DialogueTree.DialogueEntries.IsValidIndex(DialogueTree.CurrentDialogueID))
+    {
+        return DialogueTree.DialogueEntries[DialogueTree.CurrentDialogueID];
+    }
+    
+    // Return empty dialogue if invalid
+    FNarr_DialogueEntry EmptyEntry;
+    EmptyEntry.DialogueText = FText::FromString(TEXT("..."));
+    return EmptyEntry;
+}
 
-    FNarr_DialogueLine Line1;
-    Line1.SpeakerName = TEXT("Ancient Hunter");
-    Line1.DialogueText = TEXT("The ancient hunter crouches by the riverbank, his weathered hands tracing fresh claw marks in the mud.");
-    Line1.Duration = 4.0f;
-    HunterWarning.DialogueLines.Add(Line1);
+void ANarr_DialogueManager::SelectResponse(int32 ResponseIndex)
+{
+    FNarr_DialogueEntry CurrentEntry = GetCurrentDialogue();
+    
+    if (CurrentEntry.NextDialogueIDs.IsValidIndex(ResponseIndex))
+    {
+        int32 NextID = CurrentEntry.NextDialogueIDs[ResponseIndex];
+        if (DialogueTree.DialogueEntries.IsValidIndex(NextID))
+        {
+            DialogueTree.CurrentDialogueID = NextID;
+            
+            if (GEngine)
+            {
+                FString LogMessage = FString::Printf(TEXT("Selected response %d, moving to dialogue %d"), ResponseIndex, NextID);
+                GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Cyan, LogMessage);
+            }
+            
+            OnResponseSelected(ResponseIndex);
+        }
+        else
+        {
+            // End dialogue if no valid next ID
+            EndDialogue();
+        }
+    }
+    else
+    {
+        // Invalid response - end dialogue
+        EndDialogue();
+    }
+}
 
-    FNarr_DialogueLine Line2;
-    Line2.SpeakerName = TEXT("Ancient Hunter");
-    Line2.DialogueText = TEXT("Three claws, deep gouges... This is no ordinary predator. The great beast has awakened from its slumber.");
-    Line2.Duration = 5.0f;
-    HunterWarning.DialogueLines.Add(Line2);
+bool ANarr_DialogueManager::CanStartDialogue(AActor* PlayerActor)
+{
+    if (!PlayerActor || !bIsActive)
+    {
+        return false;
+    }
 
-    RegisterDialogueSequence(HunterWarning);
+    // Check distance
+    float Distance = FVector::Dist(GetActorLocation(), PlayerActor->GetActorLocation());
+    if (Distance > InteractionRadius)
+    {
+        return false;
+    }
 
-    // Tribe Warning Sequence
-    FNarr_DialogueSequence TribeWarning;
-    TribeWarning.SequenceID = TEXT("TribeWarning");
-    TribeWarning.bIsRepeatable = true;
-    TribeWarning.bRequiresProximity = false;
+    // Check quest requirements for current dialogue
+    FNarr_DialogueEntry CurrentEntry = GetCurrentDialogue();
+    return CheckQuestRequirements(CurrentEntry);
+}
 
-    FNarr_DialogueLine WarningLine;
-    WarningLine.SpeakerName = TEXT("Tribe Lookout");
-    WarningLine.DialogueText = TEXT("Danger approaches from the north! The ground trembles beneath massive footsteps. Seek high ground immediately!");
-    WarningLine.Duration = 4.5f;
-    TribeWarning.DialogueLines.Add(WarningLine);
+void ANarr_DialogueManager::SetDialogueTree(const FNarr_DialogueTree& NewTree)
+{
+    DialogueTree = NewTree;
+    DialogueTree.CurrentDialogueID = 0;
+    
+    if (GEngine)
+    {
+        FString LogMessage = FString::Printf(TEXT("Dialogue tree set: %s with %d entries"), 
+                                           *NewTree.TreeName, NewTree.DialogueEntries.Num());
+        GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Blue, LogMessage);
+    }
+}
 
-    RegisterDialogueSequence(TribeWarning);
+void ANarr_DialogueManager::AddVoiceLine(const FString& VoiceURL)
+{
+    VoiceLineURLs.Add(VoiceURL);
+    
+    if (GEngine)
+    {
+        FString LogMessage = FString::Printf(TEXT("Added voice line: %s"), *VoiceURL);
+        GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Magenta, LogMessage);
+    }
+}
 
-    // Contextual dialogues for environmental storytelling
-    FNarr_DialogueSequence RiverContext;
-    RiverContext.SequenceID = TEXT("Context_River");
-    RiverContext.bIsRepeatable = true;
-    RiverContext.bRequiresProximity = true;
+void ANarr_DialogueManager::OnInteractionSphereBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
+{
+    if (OtherActor && OtherActor->IsA<ACharacter>())
+    {
+        bPlayerInRange = true;
+        CurrentPlayer = OtherActor;
+        
+        if (GEngine)
+        {
+            GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Green, TEXT("Player entered dialogue range"));
+        }
+        
+        UpdateVisualMarker();
+    }
+}
 
-    FNarr_DialogueLine RiverLine;
-    RiverLine.SpeakerName = TEXT("Narrator");
-    RiverLine.DialogueText = TEXT("The river runs red with the blood of recent kills. Something large has been hunting here.");
-    RiverLine.Duration = 3.5f;
-    RiverContext.DialogueLines.Add(RiverLine);
+void ANarr_DialogueManager::OnInteractionSphereEndOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex)
+{
+    if (OtherActor && OtherActor == CurrentPlayer)
+    {
+        bPlayerInRange = false;
+        
+        if (GEngine)
+        {
+            GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Red, TEXT("Player left dialogue range"));
+        }
+        
+        // End dialogue if active
+        if (CurrentPlayer)
+        {
+            EndDialogue();
+        }
+        
+        CurrentPlayer = nullptr;
+        UpdateVisualMarker();
+    }
+}
 
-    RegisterDialogueSequence(RiverContext);
+void ANarr_DialogueManager::UpdateVisualMarker()
+{
+    if (VisualMarker)
+    {
+        // Scale marker based on interaction state
+        float Scale = bPlayerInRange ? 1.5f : 1.0f;
+        VisualMarker->SetWorldScale3D(FVector(Scale, Scale, Scale));
+        
+        // Change color based on availability
+        if (bIsActive && CanStartDialogue(CurrentPlayer))
+        {
+            // Green for available dialogue
+            VisualMarker->SetVectorParameterValueOnMaterials(TEXT("Color"), FVector(0.0f, 1.0f, 0.0f));
+        }
+        else if (bPlayerInRange)
+        {
+            // Yellow for player in range but dialogue unavailable
+            VisualMarker->SetVectorParameterValueOnMaterials(TEXT("Color"), FVector(1.0f, 1.0f, 0.0f));
+        }
+        else
+        {
+            // Blue for default state
+            VisualMarker->SetVectorParameterValueOnMaterials(TEXT("Color"), FVector(0.0f, 0.0f, 1.0f));
+        }
+    }
+}
+
+bool ANarr_DialogueManager::CheckQuestRequirements(const FNarr_DialogueEntry& Entry)
+{
+    // For now, always return true - quest integration will be handled by Quest system
+    // TODO: Integrate with Quest_ProgressionManager to check actual quest stage
+    return true;
 }
