@@ -7,11 +7,67 @@
 #include "Perception/AIPerceptionComponent.h"
 #include "Perception/AISightConfig.h"
 #include "Perception/AIHearingConfig.h"
-#include "SharedTypes.h"
 #include "Combat_CombatAIController.generated.h"
 
-class APawn;
-class UBehaviorTree;
+UENUM(BlueprintType)
+enum class ECombat_CombatStyle : uint8
+{
+    AmbushPredator UMETA(DisplayName = "Ambush Predator"),
+    PackHunter UMETA(DisplayName = "Pack Hunter"),
+    Defensive UMETA(DisplayName = "Defensive"),
+    Flee UMETA(DisplayName = "Flee"),
+    Tank UMETA(DisplayName = "Tank")
+};
+
+UENUM(BlueprintType)
+enum class ECombat_CombatState : uint8
+{
+    Idle UMETA(DisplayName = "Idle"),
+    Patrolling UMETA(DisplayName = "Patrolling"),
+    Investigating UMETA(DisplayName = "Investigating"),
+    Stalking UMETA(DisplayName = "Stalking"),
+    Attacking UMETA(DisplayName = "Attacking"),
+    Fleeing UMETA(DisplayName = "Fleeing"),
+    Defending UMETA(DisplayName = "Defending")
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FCombat_CombatStats
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Stats")
+    float Aggression = 0.5f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Stats")
+    float AttackRange = 500.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Stats")
+    float DetectionRange = 800.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Stats")
+    float AttackDamage = 25.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Stats")
+    float AttackCooldown = 2.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Stats")
+    float MovementSpeed = 400.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Stats")
+    ECombat_CombatStyle CombatStyle = ECombat_CombatStyle::AmbushPredator;
+
+    FCombat_CombatStats()
+    {
+        Aggression = 0.5f;
+        AttackRange = 500.0f;
+        DetectionRange = 800.0f;
+        AttackDamage = 25.0f;
+        AttackCooldown = 2.0f;
+        MovementSpeed = 400.0f;
+        CombatStyle = ECombat_CombatStyle::AmbushPredator;
+    }
+};
 
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API ACombat_CombatAIController : public AAIController
@@ -23,143 +79,105 @@ public:
 
 protected:
     virtual void BeginPlay() override;
-    virtual void Possess(APawn* InPawn) override;
+    virtual void Tick(float DeltaTime) override;
+    virtual void OnPossess(APawn* InPawn) override;
 
-    // Behavior Tree Component
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI")
-    UBehaviorTreeComponent* BehaviorTreeComponent;
+    // AI Perception
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI Perception")
+    class UAIPerceptionComponent* AIPerceptionComponent;
 
-    // AI Perception Component
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI")
-    UAIPerceptionComponent* AIPerceptionComponent;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI Perception")
+    class UAISightConfig* SightConfig;
 
-    // Sight Configuration
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI")
-    UAISightConfig* SightConfig;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI Perception")
+    class UAIHearingConfig* HearingConfig;
 
-    // Hearing Configuration
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI")
-    UAIHearingConfig* HearingConfig;
+    // Behavior Tree
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI Behavior")
+    class UBehaviorTree* CombatBehaviorTree;
 
-    // Combat Behavior Tree
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
-    UBehaviorTree* CombatBehaviorTree;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI Behavior")
+    class UBehaviorTreeComponent* BehaviorTreeComponent;
 
-    // Combat State
-    UPROPERTY(BlueprintReadOnly, Category = "Combat AI")
-    ECombat_AIState CurrentCombatState;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI Behavior")
+    class UBlackboardComponent* BlackboardComponent;
 
-    // Combat Target
-    UPROPERTY(BlueprintReadOnly, Category = "Combat AI")
-    AActor* CombatTarget;
+    // Combat Stats
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+    FCombat_CombatStats CombatStats;
 
-    // Combat Range
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
-    float AttackRange = 300.0f;
+    UPROPERTY(BlueprintReadOnly, Category = "Combat")
+    ECombat_CombatState CurrentCombatState;
 
-    // Detection Range
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
-    float DetectionRange = 1500.0f;
+    UPROPERTY(BlueprintReadOnly, Category = "Combat")
+    AActor* CurrentTarget;
 
-    // Aggression Level
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float AggressionLevel = 0.5f;
+    UPROPERTY(BlueprintReadOnly, Category = "Combat")
+    FVector LastKnownTargetLocation;
 
-    // Pack Behavior
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
-    bool bIsPackHunter = false;
+    UPROPERTY(BlueprintReadOnly, Category = "Combat")
+    float LastAttackTime;
 
-    // Territorial Behavior
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
-    bool bIsTerritorial = true;
-
-    // Territory Center
-    UPROPERTY(BlueprintReadOnly, Category = "Combat AI")
-    FVector TerritoryCenter;
-
-    // Territory Radius
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
-    float TerritoryRadius = 2000.0f;
+    UPROPERTY(BlueprintReadOnly, Category = "Combat")
+    bool bIsInCombat;
 
 public:
-    // Combat State Management
-    UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    void SetCombatState(ECombat_AIState NewState);
+    // Combat Functions
+    UFUNCTION(BlueprintCallable, Category = "Combat")
+    void SetCombatState(ECombat_CombatState NewState);
 
-    UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    ECombat_AIState GetCombatState() const { return CurrentCombatState; }
+    UFUNCTION(BlueprintCallable, Category = "Combat")
+    void SetTarget(AActor* NewTarget);
 
-    // Target Management
-    UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    void SetCombatTarget(AActor* NewTarget);
+    UFUNCTION(BlueprintCallable, Category = "Combat")
+    bool CanAttack() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    AActor* GetCombatTarget() const { return CombatTarget; }
+    UFUNCTION(BlueprintCallable, Category = "Combat")
+    void PerformAttack();
 
-    // Combat Queries
-    UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    bool IsInCombat() const;
+    UFUNCTION(BlueprintCallable, Category = "Combat")
+    float GetDistanceToTarget() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    bool CanAttackTarget() const;
+    UFUNCTION(BlueprintCallable, Category = "Combat")
+    bool IsTargetInAttackRange() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    bool IsTargetInRange(float Range) const;
+    UFUNCTION(BlueprintCallable, Category = "Combat")
+    bool IsTargetInDetectionRange() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    bool IsInTerritory() const;
+    UFUNCTION(BlueprintCallable, Category = "Combat")
+    void UpdateCombatBehavior();
 
-    // Combat Actions
-    UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    void StartCombat(AActor* Target);
-
-    UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    void EndCombat();
-
-    UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    void ExecuteAttack();
-
-    UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    void ExecuteDefense();
-
-    UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    void ExecuteRetreat();
-
-    // Pack Coordination
-    UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    void CoordinateWithPack();
-
-    UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    void CallForBackup();
-
-    // Territory Management
-    UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    void SetTerritory(FVector Center, float Radius);
-
-    UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    void DefendTerritory();
+    UFUNCTION(BlueprintCallable, Category = "Combat")
+    void InitializeCombatStats();
 
 protected:
-    // Perception Events
+    // AI Perception Callbacks
     UFUNCTION()
     void OnPerceptionUpdated(const TArray<AActor*>& UpdatedActors);
 
     UFUNCTION()
     void OnTargetPerceptionUpdated(AActor* Actor, FAIStimulus Stimulus);
 
-    // Combat Decision Making
-    void UpdateCombatDecision();
-    void EvaluateThreatLevel();
-    void SelectBestTarget();
+    // Combat Behavior Functions
+    void HandleIdleState();
+    void HandlePatrollingState();
+    void HandleInvestigatingState();
+    void HandleStalkingState();
+    void HandleAttackingState();
+    void HandleFleeingState();
+    void HandleDefendingState();
 
-    // Blackboard Keys
-    void InitializeBlackboard();
+    // Utility Functions
+    bool ShouldEngageTarget(AActor* PotentialTarget) const;
+    bool ShouldFleeFromTarget(AActor* PotentialTarget) const;
+    FVector GetRandomPatrolPoint() const;
     void UpdateBlackboardValues();
 
 private:
-    // Internal state tracking
-    float LastCombatTime;
-    float LastPerceptionUpdate;
-    TArray<AActor*> NearbyThreats;
-    TArray<AActor*> PackMembers;
+    FVector HomeLocation;
+    float PatrolRadius;
+    FTimerHandle CombatUpdateTimer;
+    TArray<AActor*> DetectedEnemies;
+    float StateChangeTime;
+    int32 AttackComboCount;
 };
