@@ -1,247 +1,277 @@
 #include "Light_VolumetricFogManager.h"
-#include "Components/SceneComponent.h"
-#include "Engine/World.h"
-#include "EngineUtils.h"
+#include "Engine/ExponentialHeightFog.h"
+#include "Components/ExponentialHeightFogComponent.h"
+#include "Engine/VolumetricCloud.h"
+#include "Components/VolumetricCloudComponent.h"
 #include "Kismet/GameplayStatics.h"
+#include "Engine/World.h"
+#include "Math/UnrealMathUtility.h"
 
 ALight_VolumetricFogManager::ALight_VolumetricFogManager()
 {
-    PrimaryActorTick.bCanEverTick = false;
-
-    RootSceneComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootScene"));
+    PrimaryActorTick.bCanEverTick = true;
+    
+    RootSceneComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootComponent"));
     RootComponent = RootSceneComponent;
-
-    // Initialize default volumetric fog settings for Cretaceous period
-    VolumetricSettings.FogDensity = 0.02f;
-    VolumetricSettings.FogHeightFalloff = 0.2f;
-    VolumetricSettings.FogInscatteringColor = FColor(180, 200, 255, 255);
-    VolumetricSettings.VolumetricFogScatteringDistribution = 0.2f;
-    VolumetricSettings.VolumetricFogAlbedo = FColor(240, 240, 255, 255);
-    VolumetricSettings.VolumetricFogExtinctionScale = 1.0f;
-    VolumetricSettings.SunVolumetricScatteringIntensity = 2.5f;
-    VolumetricSettings.SkyLightVolumetricIntensity = 1.5f;
-
-    FogActor = nullptr;
-    SunLight = nullptr;
-    SkyLight = nullptr;
+    
+    // Initialize default values
+    CurrentFogType = ELight_FogType::Light;
+    FogTransitionSpeed = 1.0f;
+    bEnableAtmosphericPerspective = true;
+    AtmosphericPerspectiveDistance = 100000.0f;
+    
+    // Initialize fog settings for Cretaceous atmosphere
+    FogSettings.FogDensity = 0.02f;
+    FogSettings.FogHeightFalloff = 0.2f;
+    FogSettings.StartDistance = 5000.0f;
+    FogSettings.FogInscatteringColor = FLinearColor(0.447f, 0.639f, 1.0f, 1.0f);
+    FogSettings.bVolumetricFog = true;
+    FogSettings.VolumetricFogScatteringDistribution = 0.2f;
+    FogSettings.VolumetricFogAlbedo = FLinearColor(1.0f, 1.0f, 1.0f, 1.0f);
+    FogSettings.VolumetricFogEmissive = 0.0f;
+    FogSettings.VolumetricFogExtinctionScale = 1.0f;
+    
+    HeightFogActor = nullptr;
+    VolumetricCloudActor = nullptr;
 }
 
 void ALight_VolumetricFogManager::BeginPlay()
 {
     Super::BeginPlay();
     
-    InitializeVolumetricFog();
+    InitializeFogComponents();
+    ApplyFogSettings(FogSettings);
 }
 
-void ALight_VolumetricFogManager::InitializeVolumetricFog()
+void ALight_VolumetricFogManager::Tick(float DeltaTime)
 {
-    FindExistingLightingActors();
+    Super::Tick(DeltaTime);
     
-    if (!FogActor)
+    if (bIsTransitioning)
     {
-        CreateVolumetricFogActor();
+        UpdateFogTransition(DeltaTime);
     }
-    
-    ConfigureSunLight();
-    ConfigureSkyLight();
-    ApplyFogSettings();
 }
 
-void ALight_VolumetricFogManager::FindExistingLightingActors()
+void ALight_VolumetricFogManager::SetFogType(ELight_FogType NewFogType)
+{
+    if (CurrentFogType != NewFogType)
+    {
+        CurrentFogType = NewFogType;
+        ApplyFogTypeSettings(NewFogType);
+    }
+}
+
+void ALight_VolumetricFogManager::ApplyFogSettings(const FLight_FogSettings& Settings)
+{
+    FogSettings = Settings;
+    
+    if (HeightFogActor)
+    {
+        UExponentialHeightFogComponent* FogComp = HeightFogActor->GetComponent();
+        if (FogComp)
+        {
+            FogComp->SetFogDensity(Settings.FogDensity);
+            FogComp->SetFogHeightFalloff(Settings.FogHeightFalloff);
+            FogComp->SetStartDistance(Settings.StartDistance);
+            FogComp->SetFogInscatteringColor(Settings.FogInscatteringColor);
+            FogComp->SetVolumetricFog(Settings.bVolumetricFog);
+            
+            if (Settings.bVolumetricFog)
+            {
+                FogComp->SetVolumetricFogScatteringDistribution(Settings.VolumetricFogScatteringDistribution);
+                FogComp->SetVolumetricFogAlbedo(Settings.VolumetricFogAlbedo);
+                FogComp->SetVolumetricFogEmissive(Settings.VolumetricFogEmissive);
+                FogComp->SetVolumetricFogExtinctionScale(Settings.VolumetricFogExtinctionScale);
+            }
+        }
+    }
+}
+
+void ALight_VolumetricFogManager::TransitionToFogType(ELight_FogType TargetFogType, float TransitionDuration)
+{
+    if (CurrentFogType == TargetFogType) return;
+    
+    this->TargetFogType = TargetFogType;
+    this->TransitionDuration = TransitionDuration;
+    TransitionTimer = 0.0f;
+    bIsTransitioning = true;
+    
+    // Store current settings as start point
+    StartFogSettings = FogSettings;
+    
+    // Generate target settings based on fog type
+    ApplyFogTypeSettings(TargetFogType);
+    TargetFogSettings = FogSettings;
+    
+    // Restore start settings for smooth transition
+    FogSettings = StartFogSettings;
+}
+
+void ALight_VolumetricFogManager::CreateMorningMist()
+{
+    FLight_FogSettings MistSettings;
+    MistSettings.FogDensity = 0.01f;
+    MistSettings.FogHeightFalloff = 0.5f;
+    MistSettings.StartDistance = 1000.0f;
+    MistSettings.FogInscatteringColor = FLinearColor(0.8f, 0.9f, 1.0f, 1.0f);
+    MistSettings.bVolumetricFog = true;
+    MistSettings.VolumetricFogScatteringDistribution = 0.1f;
+    MistSettings.VolumetricFogAlbedo = FLinearColor(0.9f, 0.95f, 1.0f, 1.0f);
+    
+    ApplyFogSettings(MistSettings);
+    CurrentFogType = ELight_FogType::Light;
+}
+
+void ALight_VolumetricFogManager::CreateEveningFog()
+{
+    FLight_FogSettings EveningSettings;
+    EveningSettings.FogDensity = 0.05f;
+    EveningSettings.FogHeightFalloff = 0.15f;
+    EveningSettings.StartDistance = 2000.0f;
+    EveningSettings.FogInscatteringColor = FLinearColor(0.7f, 0.6f, 0.8f, 1.0f);
+    EveningSettings.bVolumetricFog = true;
+    EveningSettings.VolumetricFogScatteringDistribution = 0.3f;
+    EveningSettings.VolumetricFogAlbedo = FLinearColor(0.8f, 0.7f, 0.9f, 1.0f);
+    
+    ApplyFogSettings(EveningSettings);
+    CurrentFogType = ELight_FogType::Medium;
+}
+
+void ALight_VolumetricFogManager::CreateStormFog()
+{
+    FLight_FogSettings StormSettings;
+    StormSettings.FogDensity = 0.08f;
+    StormSettings.FogHeightFalloff = 0.1f;
+    StormSettings.StartDistance = 500.0f;
+    StormSettings.FogInscatteringColor = FLinearColor(0.4f, 0.4f, 0.5f, 1.0f);
+    StormSettings.bVolumetricFog = true;
+    StormSettings.VolumetricFogScatteringDistribution = 0.5f;
+    StormSettings.VolumetricFogAlbedo = FLinearColor(0.6f, 0.6f, 0.7f, 1.0f);
+    StormSettings.VolumetricFogExtinctionScale = 1.5f;
+    
+    ApplyFogSettings(StormSettings);
+    CurrentFogType = ELight_FogType::Heavy;
+}
+
+void ALight_VolumetricFogManager::ClearAllFog()
+{
+    FLight_FogSettings ClearSettings;
+    ClearSettings.FogDensity = 0.001f;
+    ClearSettings.FogHeightFalloff = 1.0f;
+    ClearSettings.StartDistance = 50000.0f;
+    ClearSettings.bVolumetricFog = false;
+    
+    ApplyFogSettings(ClearSettings);
+    CurrentFogType = ELight_FogType::None;
+}
+
+void ALight_VolumetricFogManager::EnableVolumetricLightScattering(bool bEnable)
+{
+    FogSettings.bVolumetricFog = bEnable;
+    ApplyFogSettings(FogSettings);
+}
+
+void ALight_VolumetricFogManager::SetAtmosphericPerspective(bool bEnable, float Distance)
+{
+    bEnableAtmosphericPerspective = bEnable;
+    AtmosphericPerspectiveDistance = Distance;
+    
+    // Apply atmospheric perspective settings if available
+    if (HeightFogActor)
+    {
+        UExponentialHeightFogComponent* FogComp = HeightFogActor->GetComponent();
+        if (FogComp)
+        {
+            // Configure atmospheric perspective through fog settings
+            if (bEnable)
+            {
+                FogComp->SetStartDistance(FMath::Min(FogSettings.StartDistance, Distance * 0.1f));
+            }
+        }
+    }
+}
+
+void ALight_VolumetricFogManager::InitializeFogComponents()
 {
     UWorld* World = GetWorld();
     if (!World) return;
-
-    // Find existing fog actor
-    for (TActorIterator<AExponentialHeightFog> ActorItr(World); ActorItr; ++ActorItr)
-    {
-        FogActor = *ActorItr;
-        break;
-    }
-
-    // Find existing directional light
-    for (TActorIterator<ADirectionalLight> ActorItr(World); ActorItr; ++ActorItr)
-    {
-        SunLight = *ActorItr;
-        break;
-    }
-
-    // Find existing sky light
-    for (TActorIterator<ASkyLight> ActorItr(World); ActorItr; ++ActorItr)
-    {
-        SkyLight = *ActorItr;
-        break;
-    }
-}
-
-void ALight_VolumetricFogManager::CreateVolumetricFogActor()
-{
-    UWorld* World = GetWorld();
-    if (!World) return;
-
-    FActorSpawnParameters SpawnParams;
-    SpawnParams.Owner = this;
-    SpawnParams.Instigator = nullptr;
-
-    FogActor = World->SpawnActor<AExponentialHeightFog>(
-        AExponentialHeightFog::StaticClass(),
-        FVector::ZeroVector,
-        FRotator::ZeroRotator,
-        SpawnParams
-    );
-}
-
-void ALight_VolumetricFogManager::ConfigureSunLight()
-{
-    if (!SunLight)
-    {
-        UWorld* World = GetWorld();
-        if (!World) return;
-
-        FActorSpawnParameters SpawnParams;
-        SpawnParams.Owner = this;
-
-        SunLight = World->SpawnActor<ADirectionalLight>(
-            ADirectionalLight::StaticClass(),
-            FVector(0, 0, 500),
-            FRotator(-45, 0, 0),
-            SpawnParams
-        );
-    }
-
-    if (SunLight)
-    {
-        UDirectionalLightComponent* LightComp = SunLight->GetComponent();
-        if (LightComp)
-        {
-            LightComp->SetIntensity(8.0f);
-            LightComp->SetLightColor(FColor(255, 245, 210, 255));
-            LightComp->SetCastVolumetricShadow(true);
-            LightComp->SetVolumetricScatteringIntensity(VolumetricSettings.SunVolumetricScatteringIntensity);
-        }
-    }
-}
-
-void ALight_VolumetricFogManager::ConfigureSkyLight()
-{
-    if (!SkyLight)
-    {
-        UWorld* World = GetWorld();
-        if (!World) return;
-
-        FActorSpawnParameters SpawnParams;
-        SpawnParams.Owner = this;
-
-        SkyLight = World->SpawnActor<ASkyLight>(
-            ASkyLight::StaticClass(),
-            FVector(0, 0, 1000),
-            FRotator::ZeroRotator,
-            SpawnParams
-        );
-    }
-
-    if (SkyLight)
-    {
-        USkyLightComponent* SkyComp = SkyLight->GetLightComponent();
-        if (SkyComp)
-        {
-            SkyComp->SetIntensity(VolumetricSettings.SkyLightVolumetricIntensity);
-            SkyComp->SetLightColor(FColor(200, 220, 255, 255));
-            SkyComp->SetRealTimeCapture(true);
-            SkyComp->SetCastVolumetricShadow(true);
-        }
-    }
-}
-
-void ALight_VolumetricFogManager::ApplyFogSettings()
-{
-    if (!FogActor) return;
-
-    UExponentialHeightFogComponent* FogComp = FogActor->GetComponent();
-    if (!FogComp) return;
-
-    FogComp->SetFogDensity(VolumetricSettings.FogDensity);
-    FogComp->SetFogHeightFalloff(VolumetricSettings.FogHeightFalloff);
-    FogComp->SetFogInscatteringColor(FLinearColor(VolumetricSettings.FogInscatteringColor));
-    FogComp->SetVolumetricFog(true);
-    FogComp->SetVolumetricFogScatteringDistribution(VolumetricSettings.VolumetricFogScatteringDistribution);
-    FogComp->SetVolumetricFogAlbedo(FLinearColor(VolumetricSettings.VolumetricFogAlbedo));
-    FogComp->SetVolumetricFogExtinctionScale(VolumetricSettings.VolumetricFogExtinctionScale);
-}
-
-void ALight_VolumetricFogManager::UpdateVolumetricSettings(const FLight_VolumetricFogSettings& NewSettings)
-{
-    VolumetricSettings = NewSettings;
-    ApplyFogSettings();
-    ConfigureSunLight();
-    ConfigureSkyLight();
-}
-
-void ALight_VolumetricFogManager::SetFogDensity(float NewDensity)
-{
-    VolumetricSettings.FogDensity = FMath::Clamp(NewDensity, 0.001f, 1.0f);
     
-    if (FogActor)
+    // Find existing ExponentialHeightFog
+    TArray<AActor*> FoundActors;
+    UGameplayStatics::GetAllActorsOfClass(World, AExponentialHeightFog::StaticClass(), FoundActors);
+    if (FoundActors.Num() > 0)
     {
-        UExponentialHeightFogComponent* FogComp = FogActor->GetComponent();
-        if (FogComp)
-        {
-            FogComp->SetFogDensity(VolumetricSettings.FogDensity);
-        }
+        HeightFogActor = Cast<AExponentialHeightFog>(FoundActors[0]);
     }
-}
-
-void ALight_VolumetricFogManager::SetFogHeightFalloff(float NewFalloff)
-{
-    VolumetricSettings.FogHeightFalloff = FMath::Clamp(NewFalloff, 0.001f, 2.0f);
     
-    if (FogActor)
+    // Find existing VolumetricCloud
+    FoundActors.Empty();
+    UGameplayStatics::GetAllActorsOfClass(World, AVolumetricCloud::StaticClass(), FoundActors);
+    if (FoundActors.Num() > 0)
     {
-        UExponentialHeightFogComponent* FogComp = FogActor->GetComponent();
-        if (FogComp)
-        {
-            FogComp->SetFogHeightFalloff(VolumetricSettings.FogHeightFalloff);
-        }
+        VolumetricCloudActor = Cast<AVolumetricCloud>(FoundActors[0]);
     }
 }
 
-void ALight_VolumetricFogManager::SetVolumetricScatteringIntensity(float NewIntensity)
+void ALight_VolumetricFogManager::UpdateFogTransition(float DeltaTime)
 {
-    VolumetricSettings.SunVolumetricScatteringIntensity = FMath::Clamp(NewIntensity, 0.0f, 10.0f);
+    TransitionTimer += DeltaTime;
+    float Alpha = FMath::Clamp(TransitionTimer / TransitionDuration, 0.0f, 1.0f);
     
-    if (SunLight)
+    // Smooth transition curve
+    Alpha = FMath::SmoothStep(0.0f, 1.0f, Alpha);
+    
+    // Interpolate fog settings
+    FLight_FogSettings InterpolatedSettings;
+    InterpolatedSettings.FogDensity = FMath::Lerp(StartFogSettings.FogDensity, TargetFogSettings.FogDensity, Alpha);
+    InterpolatedSettings.FogHeightFalloff = FMath::Lerp(StartFogSettings.FogHeightFalloff, TargetFogSettings.FogHeightFalloff, Alpha);
+    InterpolatedSettings.StartDistance = FMath::Lerp(StartFogSettings.StartDistance, TargetFogSettings.StartDistance, Alpha);
+    InterpolatedSettings.FogInscatteringColor = FMath::Lerp(StartFogSettings.FogInscatteringColor, TargetFogSettings.FogInscatteringColor, Alpha);
+    InterpolatedSettings.VolumetricFogScatteringDistribution = FMath::Lerp(StartFogSettings.VolumetricFogScatteringDistribution, TargetFogSettings.VolumetricFogScatteringDistribution, Alpha);
+    InterpolatedSettings.VolumetricFogAlbedo = FMath::Lerp(StartFogSettings.VolumetricFogAlbedo, TargetFogSettings.VolumetricFogAlbedo, Alpha);
+    InterpolatedSettings.VolumetricFogEmissive = FMath::Lerp(StartFogSettings.VolumetricFogEmissive, TargetFogSettings.VolumetricFogEmissive, Alpha);
+    InterpolatedSettings.VolumetricFogExtinctionScale = FMath::Lerp(StartFogSettings.VolumetricFogExtinctionScale, TargetFogSettings.VolumetricFogExtinctionScale, Alpha);
+    InterpolatedSettings.bVolumetricFog = TargetFogSettings.bVolumetricFog;
+    
+    ApplyFogSettings(InterpolatedSettings);
+    
+    // Check if transition is complete
+    if (Alpha >= 1.0f)
     {
-        UDirectionalLightComponent* LightComp = SunLight->GetComponent();
-        if (LightComp)
-        {
-            LightComp->SetVolumetricScatteringIntensity(VolumetricSettings.SunVolumetricScatteringIntensity);
-        }
+        bIsTransitioning = false;
+        CurrentFogType = TargetFogType;
+        FogSettings = TargetFogSettings;
     }
 }
 
-void ALight_VolumetricFogManager::ApplyCretaceousAtmosphere()
+void ALight_VolumetricFogManager::ApplyFogTypeSettings(ELight_FogType FogType)
 {
-    // Optimized settings for Cretaceous period atmosphere
-    VolumetricSettings.FogDensity = 0.025f;
-    VolumetricSettings.FogHeightFalloff = 0.15f;
-    VolumetricSettings.FogInscatteringColor = FColor(190, 210, 255, 255);
-    VolumetricSettings.VolumetricFogScatteringDistribution = 0.3f;
-    VolumetricSettings.VolumetricFogAlbedo = FColor(245, 245, 255, 255);
-    VolumetricSettings.SunVolumetricScatteringIntensity = 3.0f;
-    VolumetricSettings.SkyLightVolumetricIntensity = 1.8f;
-
-    UpdateVolumetricSettings(VolumetricSettings);
-}
-
-void ALight_VolumetricFogManager::SaveAtmosphericSettings()
-{
-    // This would typically save to a config file or level data
-    // For now, we ensure the settings persist in the actor
-    UE_LOG(LogTemp, Warning, TEXT("Volumetric atmospheric settings saved"));
-}
-
-void ALight_VolumetricFogManager::EditorApplyVolumetricFog()
-{
-    InitializeVolumetricFog();
-    ApplyCretaceousAtmosphere();
+    switch (FogType)
+    {
+        case ELight_FogType::None:
+            ClearAllFog();
+            break;
+        case ELight_FogType::Light:
+            CreateMorningMist();
+            break;
+        case ELight_FogType::Medium:
+            CreateEveningFog();
+            break;
+        case ELight_FogType::Heavy:
+            CreateStormFog();
+            break;
+        case ELight_FogType::Volumetric:
+            {
+                FLight_FogSettings VolumetricSettings;
+                VolumetricSettings.FogDensity = 0.03f;
+                VolumetricSettings.FogHeightFalloff = 0.3f;
+                VolumetricSettings.StartDistance = 3000.0f;
+                VolumetricSettings.bVolumetricFog = true;
+                VolumetricSettings.VolumetricFogScatteringDistribution = 0.4f;
+                VolumetricSettings.VolumetricFogExtinctionScale = 1.2f;
+                ApplyFogSettings(VolumetricSettings);
+            }
+            break;
+    }
 }
