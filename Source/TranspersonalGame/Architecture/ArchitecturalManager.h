@@ -2,56 +2,111 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "Engine/StaticMeshActor.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/SceneComponent.h"
-#include "Engine/StaticMesh.h"
-#include "Materials/MaterialInterface.h"
 #include "../SharedTypes.h"
 #include "ArchitecturalManager.generated.h"
 
 UENUM(BlueprintType)
 enum class EArch_StructureType : uint8
 {
-    None = 0,
-    Platform,
-    Pillar,
-    Archway,
-    Ruins,
-    CaveDwelling,
-    StoneBridge
+    Foundation,
+    Wall,
+    Roof,
+    Door,
+    Window,
+    Firepit,
+    StoragePit,
+    WaterBasin,
+    ToolCache,
+    ResourceZone
+};
+
+UENUM(BlueprintType)
+enum class EArch_MaterialType : uint8
+{
+    Limestone,
+    Sandstone,
+    Clay,
+    Wood,
+    Bone,
+    Hide,
+    Stone,
+    Mud
+};
+
+UENUM(BlueprintType)
+enum class EArch_ConstructionTechnique : uint8
+{
+    DryStone,
+    MudMortar,
+    WoodFrame,
+    EarthWork,
+    BoneReinforced,
+    WattleAndDaub
 };
 
 USTRUCT(BlueprintType)
-struct FArch_StructureData
+struct FArch_StructuralElement
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    EArch_StructureType StructureType = EArch_StructureType::None;
+    EArch_StructureType StructureType;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    FVector Dimensions = FVector(400.0f, 400.0f, 100.0f);
+    EArch_MaterialType PrimaryMaterial;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    float WeatheringLevel = 0.5f;
+    EArch_ConstructionTechnique Technique;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    bool bHasMossGrowth = true;
+    FVector Dimensions;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    bool bHasCarvings = false;
+    float StructuralIntegrity;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    EBiomeType BiomeType = EBiomeType::Savanna;
+    float WeatherResistance;
 
-    FArch_StructureData()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
+    int32 AgeInYears;
+
+    FArch_StructuralElement()
     {
-        StructureType = EArch_StructureType::Platform;
-        Dimensions = FVector(400.0f, 400.0f, 100.0f);
-        WeatheringLevel = 0.5f;
-        bHasMossGrowth = true;
-        bHasCarvings = false;
-        BiomeType = EBiomeType::Savanna;
+        StructureType = EArch_StructureType::Foundation;
+        PrimaryMaterial = EArch_MaterialType::Stone;
+        Technique = EArch_ConstructionTechnique::DryStone;
+        Dimensions = FVector(100, 100, 50);
+        StructuralIntegrity = 100.0f;
+        WeatherResistance = 75.0f;
+        AgeInYears = 0;
+    }
+};
+
+USTRUCT(BlueprintType)
+struct FArch_EnvironmentalStory
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Storytelling")
+    FString StoryElement;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Storytelling")
+    FString ArchaeologicalEvidence;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Storytelling")
+    TArray<FString> AssociatedArtifacts;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Storytelling")
+    float PreservationLevel;
+
+    FArch_EnvironmentalStory()
+    {
+        StoryElement = TEXT("Unknown Settlement");
+        ArchaeologicalEvidence = TEXT("Structural remains");
+        PreservationLevel = 50.0f;
     }
 };
 
@@ -69,61 +124,69 @@ protected:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
     USceneComponent* RootSceneComponent;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    UStaticMeshComponent* StructureMesh;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
+    TArray<FArch_StructuralElement> StructuralElements;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    FArch_StructureData StructureData;
+    TArray<FArch_EnvironmentalStory> EnvironmentalStories;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    TArray<UStaticMesh*> PlatformMeshes;
+    TArray<AActor*> FoundationActors;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    TArray<UStaticMesh*> PillarMeshes;
+    TArray<AActor*> StorytellingActors;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    TArray<UStaticMesh*> ArchwayMeshes;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    TArray<UMaterialInterface*> StoneMaterials;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    TArray<UMaterialInterface*> WeatheredMaterials;
+    TArray<AActor*> ResourceZoneActors;
 
 public:
     virtual void Tick(float DeltaTime) override;
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void SetStructureType(EArch_StructureType NewType);
+    void InitializeArchitecturalFramework();
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void ApplyWeathering(float WeatheringAmount);
+    void CreateStructuralElement(EArch_StructureType Type, FVector Location, EArch_MaterialType Material);
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void SetBiomeAdaptation(EBiomeType BiomeType);
+    void PlaceEnvironmentalStoryElement(const FString& StoryName, FVector Location);
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void GenerateStructure();
+    void UpdateStructuralIntegrity(float DeltaTime);
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void AddMossGrowth(bool bEnable);
+    void ApplyWeatherDamage(float WeatherIntensity);
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void AddCarvings(bool bEnable);
+    TArray<FArch_StructuralElement> GetNearbyStructures(FVector Location, float Radius);
 
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Architecture")
-    void RegenerateStructure();
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    FArch_EnvironmentalStory AnalyzeArchaeologicalSite(FVector Location);
+
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    bool CanBuildAtLocation(FVector Location, EArch_StructureType StructureType);
+
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    void RegisterFoundationActor(AActor* FoundationActor);
+
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    void RegisterStorytellingActor(AActor* StoryActor);
+
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    void RegisterResourceZoneActor(AActor* ResourceActor);
 
 protected:
     UFUNCTION()
-    void UpdateStructureMesh();
+    void OnStructuralElementDestroyed();
 
     UFUNCTION()
-    void ApplyBiomeSpecificMaterials();
+    void ValidateArchitecturalIntegrity();
 
     UFUNCTION()
-    UStaticMesh* GetMeshForStructureType(EArch_StructureType Type);
+    void UpdateEnvironmentalStorytelling();
 
-    UFUNCTION()
-    UMaterialInterface* GetMaterialForBiome(EBiomeType BiomeType, bool bWeathered);
+private:
+    float ArchitecturalUpdateInterval;
+    float LastArchitecturalUpdate;
+    bool bIsInitialized;
 };
