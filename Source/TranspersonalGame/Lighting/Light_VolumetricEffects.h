@@ -3,17 +3,20 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "Components/StaticMeshComponent.h"
-#include "Materials/MaterialParameterCollection.h"
+#include "Components/PointLightComponent.h"
+#include "Components/SpotLightComponent.h"
+#include "Particles/ParticleSystemComponent.h"
 #include "Light_VolumetricEffects.generated.h"
 
 UENUM(BlueprintType)
 enum class ELight_VolumetricType : uint8
 {
-    Sunbeams        UMETA(DisplayName = "Sunbeams"),
-    Dust            UMETA(DisplayName = "Dust Particles"),
-    Pollen          UMETA(DisplayName = "Pollen"),
-    Mist            UMETA(DisplayName = "Ground Mist"),
-    Steam           UMETA(DisplayName = "Volcanic Steam")
+    Sunbeams,
+    Firelight,
+    Moonbeams,
+    Mist,
+    Smoke,
+    Dust
 };
 
 USTRUCT(BlueprintType)
@@ -25,24 +28,24 @@ struct FLight_VolumetricSettings
     float Intensity = 1.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Volumetric")
-    float Density = 0.5f;
+    FLinearColor Color = FLinearColor::White;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Volumetric")
-    FLinearColor Tint = FLinearColor::White;
+    float Density = 0.5f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Volumetric")
     float ScatteringDistribution = 0.2f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Volumetric")
-    float ExtinctionScale = 1.0f;
+    bool bCastVolumetricShadows = true;
 
     FLight_VolumetricSettings()
     {
         Intensity = 1.0f;
+        Color = FLinearColor::White;
         Density = 0.5f;
-        Tint = FLinearColor::White;
         ScatteringDistribution = 0.2f;
-        ExtinctionScale = 1.0f;
+        bCastVolumetricShadows = true;
     }
 };
 
@@ -60,53 +63,49 @@ protected:
 public:
     virtual void Tick(float DeltaTime) override;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Volumetric Effects")
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    class UStaticMeshComponent* VolumeMesh;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    class UPointLightComponent* VolumetricLight;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    class UParticleSystemComponent* ParticleEffect;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Volumetric Settings")
     ELight_VolumetricType VolumetricType = ELight_VolumetricType::Sunbeams;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Volumetric Effects")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Volumetric Settings")
     FLight_VolumetricSettings VolumetricSettings;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
-    bool bAnimateIntensity = true;
+    bool bAnimateIntensity = false;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
     float AnimationSpeed = 1.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
-    float IntensityVariation = 0.3f;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    TObjectPtr<UStaticMeshComponent> VolumeMeshComponent;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Material")
-    TObjectPtr<UMaterialInterface> VolumetricMaterial;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Material")
-    TObjectPtr<UMaterialParameterCollection> VolumetricMPC;
+    float IntensityVariation = 0.2f;
 
     UFUNCTION(BlueprintCallable, Category = "Volumetric Effects")
     void SetVolumetricType(ELight_VolumetricType NewType);
 
     UFUNCTION(BlueprintCallable, Category = "Volumetric Effects")
-    void UpdateVolumetricParameters();
+    void ApplyVolumetricSettings(const FLight_VolumetricSettings& Settings);
 
     UFUNCTION(BlueprintCallable, Category = "Volumetric Effects")
-    void SetIntensity(float NewIntensity);
+    void CreateSunbeamEffect(FVector SunDirection, float BeamLength = 1000.0f);
 
     UFUNCTION(BlueprintCallable, Category = "Volumetric Effects")
-    void SetDensity(float NewDensity);
+    void CreateFirelightEffect(float FlickerIntensity = 0.3f);
 
     UFUNCTION(BlueprintCallable, Category = "Volumetric Effects")
-    void CreateCretaceousSunbeams();
-
-    UFUNCTION(BlueprintCallable, Category = "Volumetric Effects")
-    void CreatePrehistoricMist();
+    void CreateAtmosphericMist(float MistDensity = 0.1f);
 
 private:
-    void InitializeVolumetricMesh();
-    void AnimateVolumetricEffects(float DeltaTime);
-    void UpdateMaterialParameters();
+    void UpdateVolumetricEffect();
+    void AnimateVolumetricIntensity(float DeltaTime);
     
-    float AnimationTime = 0.0f;
-    float BaseIntensity = 1.0f;
+    float BaseIntensity;
+    float AnimationTime;
 };
