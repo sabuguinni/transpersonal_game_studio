@@ -2,60 +2,32 @@
 
 #include "CoreMinimal.h"
 #include "MassProcessor.h"
-#include "MassEntityTypes.h"
-#include "MassMovementFragments.h"
+#include "MassEntityQuery.h"
 #include "MassCommonFragments.h"
 #include "NavigationSystem.h"
-#include "NavMesh/RecastNavMesh.h"
-#include "AI/NavigationSystemBase.h"
+#include "Navigation/PathFollowingComponent.h"
+#include "Crowd_MassEntityTraits.h"
 #include "Crowd_PathfindingProcessor.generated.h"
 
-USTRUCT()
-struct TRANSPERSONALGAME_API FCrowd_PathfindingFragment : public FMassFragment
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FCrowd_PathfindingData
 {
     GENERATED_BODY()
 
-    FVector TargetLocation;
-    FVector CurrentPath[10]; // Simple path array
-    int32 CurrentPathIndex;
-    int32 PathLength;
-    float PathfindingCooldown;
-    bool bHasValidPath;
-    bool bReachedTarget;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding")
+    TArray<FVector> WaypointPath;
 
-    FCrowd_PathfindingFragment()
-        : TargetLocation(FVector::ZeroVector)
-        , CurrentPathIndex(0)
-        , PathLength(0)
-        , PathfindingCooldown(0.0f)
-        , bHasValidPath(false)
-        , bReachedTarget(false)
-    {
-        for (int32 i = 0; i < 10; i++)
-        {
-            CurrentPath[i] = FVector::ZeroVector;
-        }
-    }
-};
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding")
+    int32 CurrentWaypointIndex = 0;
 
-USTRUCT()
-struct TRANSPERSONALGAME_API FCrowd_NavigationFragment : public FMassFragment
-{
-    GENERATED_BODY()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding")
+    float PathRecalculationTimer = 0.0f;
 
-    float MovementSpeed;
-    float AvoidanceRadius;
-    float StoppingDistance;
-    int32 NavigationFlags;
-    float MaxPathLength;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding")
+    bool bPathValid = false;
 
-    FCrowd_NavigationFragment()
-        : MovementSpeed(150.0f)
-        , AvoidanceRadius(100.0f)
-        , StoppingDistance(50.0f)
-        , NavigationFlags(0)
-        , MaxPathLength(2000.0f)
-    {}
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding")
+    FVector LastKnownTarget = FVector::ZeroVector;
 };
 
 UCLASS()
@@ -70,46 +42,45 @@ protected:
     virtual void ConfigureQueries() override;
     virtual void Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context) override;
 
+    // Pathfinding methods
+    bool FindPathToTarget(const FVector& StartLocation, const FVector& TargetLocation, TArray<FVector>& OutPath);
+    FVector GetNextWaypoint(const FCrowd_PathfindingData& PathData, const FVector& CurrentLocation);
+    bool ShouldRecalculatePath(const FCrowd_PathfindingData& PathData, const FVector& CurrentTarget);
+    
+    // Flocking and avoidance
+    FVector CalculateFlockingForce(const FVector& EntityLocation, const TArray<FVector>& NearbyEntities);
+    FVector CalculateAvoidanceForce(const FVector& EntityLocation, const FVector& EntityVelocity);
+    FVector CalculateSeekForce(const FVector& EntityLocation, const FVector& TargetLocation, float MaxSpeed);
+
 private:
     FMassEntityQuery EntityQuery;
 
-    // Pathfinding methods
-    bool FindPathToTarget(const FVector& StartLocation, const FVector& TargetLocation, 
-                         FVector* OutPath, int32& OutPathLength, int32 MaxPathPoints = 10);
-    
-    bool IsPathClear(const FVector& Start, const FVector& End, float AvoidanceRadius);
-    
-    FVector GetNextPathPoint(const FCrowd_PathfindingFragment& PathFragment);
-    
-    void UpdatePathfinding(FCrowd_PathfindingFragment& PathFragment, 
-                          const FTransformFragment& Transform,
-                          const FCrowd_NavigationFragment& NavFragment,
-                          float DeltaTime);
-    
-    void ProcessMovementAlongPath(FTransformFragment& Transform,
-                                 FMassVelocityFragment& Velocity,
-                                 const FCrowd_PathfindingFragment& PathFragment,
-                                 const FCrowd_NavigationFragment& NavFragment,
-                                 float DeltaTime);
+    UPROPERTY(EditAnywhere, Category = "Pathfinding Settings")
+    float PathRecalculationInterval = 2.0f;
 
-    // Navigation system reference
+    UPROPERTY(EditAnywhere, Category = "Pathfinding Settings")
+    float WaypointReachDistance = 100.0f;
+
+    UPROPERTY(EditAnywhere, Category = "Pathfinding Settings")
+    float MaxPathDistance = 5000.0f;
+
+    UPROPERTY(EditAnywhere, Category = "Flocking Settings")
+    float FlockingWeight = 0.3f;
+
+    UPROPERTY(EditAnywhere, Category = "Flocking Settings")
+    float AvoidanceWeight = 0.5f;
+
+    UPROPERTY(EditAnywhere, Category = "Flocking Settings")
+    float SeekWeight = 0.7f;
+
+    UPROPERTY(EditAnywhere, Category = "Flocking Settings")
+    float NeighborSearchRadius = 300.0f;
+
+    // Cache for navigation system
     UPROPERTY()
-    class UNavigationSystemV1* NavigationSystem;
+    UNavigationSystemV1* NavigationSystem;
 
-    // Pathfinding settings
-    UPROPERTY(EditAnywhere, Category = "Pathfinding")
-    float PathfindingUpdateInterval;
-
-    UPROPERTY(EditAnywhere, Category = "Pathfinding")
-    float PathValidationDistance;
-
-    UPROPERTY(EditAnywhere, Category = "Pathfinding")
-    int32 MaxEntitiesPerFrame;
-
-    UPROPERTY(EditAnywhere, Category = "Pathfinding")
-    bool bUseSimplePathfinding;
-
-    // Performance tracking
-    int32 ProcessedEntitiesThisFrame;
-    float LastPathfindingTime;
+    // Waypoint cache for performance
+    TArray<FVector> GlobalWaypoints;
+    float WaypointCacheUpdateTimer = 0.0f;
 };
