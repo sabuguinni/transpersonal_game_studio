@@ -4,66 +4,77 @@
 #include "Subsystems/WorldSubsystem.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
-#include "Components/ActorComponent.h"
+#include "Components/StaticMeshComponent.h"
 #include "SharedTypes.h"
 #include "Crowd_MassEntitySubsystem.generated.h"
 
-// Forward declarations
-class UCrowd_MassAgentComponent;
-class ACrowd_SpawnPoint;
-class ACrowd_Waypoint;
-
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FCrowd_AgentData
+struct TRANSPERSONALGAME_API FCrowd_EntityData
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent")
-    FVector Location = FVector::ZeroVector;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Entity")
+    FVector Position;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent")
-    FVector Velocity = FVector::ZeroVector;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Entity")
+    FRotator Rotation;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent")
-    float Speed = 150.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Entity")
+    float MovementSpeed;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent")
-    ECrowd_BehaviorState BehaviorState = ECrowd_BehaviorState::Idle;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Entity")
+    ECrowd_BehaviorState BehaviorState;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent")
-    int32 AgentID = -1;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Entity")
+    int32 EntityID;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent")
-    float LODDistance = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Entity")
+    float LODDistance;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent")
-    bool bIsVisible = true;
+    FCrowd_EntityData()
+    {
+        Position = FVector::ZeroVector;
+        Rotation = FRotator::ZeroRotator;
+        MovementSpeed = 100.0f;
+        BehaviorState = ECrowd_BehaviorState::Idle;
+        EntityID = -1;
+        LODDistance = 0.0f;
+    }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FCrowd_SpawnConfiguration
+struct TRANSPERSONALGAME_API FCrowd_SpawnGroup
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn")
-    int32 MaxAgents = 50000;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Spawn")
+    FVector GroupCenter;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn")
-    int32 VisibleAgents = 1000;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Spawn")
+    float GroupRadius;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn")
-    float SpawnRadius = 2000.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Spawn")
+    int32 MaxEntities;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn")
-    float CullingDistance = 2000.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Spawn")
+    TArray<FCrowd_EntityData> ActiveEntities;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn")
-    float UpdateFrequencyHigh = 30.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Spawn")
+    ECrowd_GroupType GroupType;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn")
-    float UpdateFrequencyLow = 5.0f;
+    FCrowd_SpawnGroup()
+    {
+        GroupCenter = FVector::ZeroVector;
+        GroupRadius = 500.0f;
+        MaxEntities = 20;
+        GroupType = ECrowd_GroupType::Gathering;
+    }
 };
 
+/**
+ * Mass Entity Subsystem for managing large-scale crowd simulation
+ * Handles up to 50,000 crowd entities with LOD and performance optimization
+ */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UCrowd_MassEntitySubsystem : public UWorldSubsystem
 {
@@ -77,71 +88,104 @@ public:
     virtual void Deinitialize() override;
     virtual bool ShouldCreateSubsystem(UObject* Outer) const override;
 
-    // Crowd simulation core methods
+    // Crowd Management
     UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    void InitializeCrowdSimulation();
+    void InitializeCrowdSystem();
 
     UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    void SpawnCrowdAgents(int32 NumAgents, FVector SpawnCenter, float SpawnRadius);
+    void SpawnCrowdGroup(const FCrowd_SpawnGroup& GroupConfig);
 
     UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
     void UpdateCrowdSimulation(float DeltaTime);
 
     UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    void SetCrowdBehaviorState(ECrowd_BehaviorState NewState);
+    void SetCrowdDensity(float NewDensity);
 
-    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    void RegisterSpawnPoint(ACrowd_SpawnPoint* SpawnPoint);
+    // Entity Management
+    UFUNCTION(BlueprintCallable, Category = "Crowd Entities")
+    int32 CreateCrowdEntity(const FVector& SpawnLocation, const FRotator& SpawnRotation);
 
-    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    void RegisterWaypoint(ACrowd_Waypoint* Waypoint);
+    UFUNCTION(BlueprintCallable, Category = "Crowd Entities")
+    void RemoveCrowdEntity(int32 EntityID);
 
-    // LOD and performance methods
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void UpdateAgentLOD(const FVector& ViewerLocation);
+    UFUNCTION(BlueprintCallable, Category = "Crowd Entities")
+    void UpdateEntityBehavior(int32 EntityID, ECrowd_BehaviorState NewState);
 
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void CullDistantAgents(const FVector& ViewerLocation);
+    // LOD System
+    UFUNCTION(BlueprintCallable, Category = "Crowd LOD")
+    void UpdateCrowdLOD(const FVector& ViewerLocation);
 
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    int32 GetActiveAgentCount() const { return ActiveAgents.Num(); }
+    UFUNCTION(BlueprintCallable, Category = "Crowd LOD")
+    void SetLODDistances(const TArray<float>& NewLODDistances);
 
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    int32 GetVisibleAgentCount() const;
+    // Performance Monitoring
+    UFUNCTION(BlueprintCallable, Category = "Crowd Performance")
+    int32 GetActiveCrowdEntityCount() const;
 
-    // Configuration
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
-    FCrowd_SpawnConfiguration SpawnConfig;
+    UFUNCTION(BlueprintCallable, Category = "Crowd Performance")
+    float GetCrowdSimulationFrameTime() const;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
-    bool bEnableCrowdSimulation = true;
+    UFUNCTION(BlueprintCallable, Category = "Crowd Performance")
+    void SetMaxCrowdEntities(int32 NewMaxEntities);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
-    bool bEnableLOD = true;
+    // Behavior Control
+    UFUNCTION(BlueprintCallable, Category = "Crowd Behavior")
+    void TriggerCrowdReaction(const FVector& EventLocation, float EventRadius, ECrowd_ReactionType ReactionType);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
-    bool bEnableCulling = true;
+    UFUNCTION(BlueprintCallable, Category = "Crowd Behavior")
+    void SetGlobalCrowdBehavior(ECrowd_BehaviorState NewBehaviorState);
 
 protected:
-    // Internal crowd data
-    UPROPERTY()
-    TArray<FCrowd_AgentData> ActiveAgents;
+    // Core crowd data
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Crowd Data")
+    TArray<FCrowd_EntityData> CrowdEntities;
 
-    UPROPERTY()
-    TArray<ACrowd_SpawnPoint*> SpawnPoints;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Crowd Data")
+    TArray<FCrowd_SpawnGroup> SpawnGroups;
 
-    UPROPERTY()
-    TArray<ACrowd_Waypoint*> Waypoints;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Config")
+    int32 MaxCrowdEntities;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Config")
+    float CrowdDensity;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Config")
+    float UpdateFrequency;
+
+    // LOD Configuration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD Config")
+    TArray<float> LODDistances;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD Config")
+    float MaxRenderDistance;
 
     // Performance tracking
-    float LastUpdateTime = 0.0f;
-    int32 NextAgentID = 0;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Performance")
+    float LastFrameTime;
 
-    // Internal methods
-    void CreateAgentAtLocation(const FVector& Location);
-    void UpdateAgentBehavior(FCrowd_AgentData& Agent, float DeltaTime);
-    void UpdateAgentMovement(FCrowd_AgentData& Agent, float DeltaTime);
-    FVector CalculateSteeringForce(const FCrowd_AgentData& Agent);
-    FVector FindNearestWaypoint(const FVector& Location);
-    bool IsAgentVisible(const FCrowd_AgentData& Agent, const FVector& ViewerLocation);
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Performance")
+    int32 ActiveEntityCount;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Performance")
+    int32 VisibleEntityCount;
+
+private:
+    // Internal systems
+    void UpdateEntityPositions(float DeltaTime);
+    void UpdateEntityBehaviors(float DeltaTime);
+    void CullDistantEntities(const FVector& ViewerLocation);
+    void OptimizeEntityCount();
+    
+    // Utility functions
+    FVector CalculateEntityMovement(const FCrowd_EntityData& Entity, float DeltaTime);
+    bool IsEntityVisible(const FCrowd_EntityData& Entity, const FVector& ViewerLocation);
+    void RecycleInactiveEntities();
+
+    // Entity ID management
+    int32 NextEntityID;
+    TArray<int32> FreeEntityIDs;
+
+    // Timing
+    float LastUpdateTime;
+    float AccumulatedTime;
 };
