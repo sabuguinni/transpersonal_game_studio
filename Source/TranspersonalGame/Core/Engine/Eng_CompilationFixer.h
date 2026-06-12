@@ -1,14 +1,22 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/GameInstanceSubsystem.h"
+#include "Engine/Engine.h"
 #include "Engine/World.h"
+#include "GameFramework/Actor.h"
+#include "Components/ActorComponent.h"
+#include "UObject/Object.h"
+#include "Subsystems/GameInstanceSubsystem.h"
+
 #include "Eng_CompilationFixer.generated.h"
 
+// Forward declarations
+class UEngArch_BiomeManager;
+class AEng_DinosaurBase;
+
 /**
- * Engine Architect's Compilation Fixer
- * Supreme authority for fixing compilation issues across the entire project
- * Detects and resolves common C++ compilation problems automatically
+ * Compilation Fixer - Resolves missing implementations and duplicate definitions
+ * Cycle 009 - Engine Architect
  */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UEng_CompilationFixer : public UGameInstanceSubsystem
@@ -18,58 +26,54 @@ class TRANSPERSONALGAME_API UEng_CompilationFixer : public UGameInstanceSubsyste
 public:
     UEng_CompilationFixer();
 
-    // Subsystem interface
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
-    // Compilation fixing functions
-    UFUNCTION(BlueprintCallable, Category = "Engine Architect|Compilation")
-    void FixAllCompilationIssues();
+    // Fix missing .cpp implementations
+    UFUNCTION(BlueprintCallable, Category = "Compilation")
+    void FixMissingImplementations();
 
-    UFUNCTION(BlueprintCallable, Category = "Engine Architect|Compilation")
+    // Remove duplicate files
+    UFUNCTION(BlueprintCallable, Category = "Compilation")
+    void RemoveDuplicateDefinitions();
+
+    // Validate compilation status
+    UFUNCTION(BlueprintCallable, Category = "Compilation")
+    bool ValidateCompilationStatus();
+
+    // Fix include paths
+    UFUNCTION(BlueprintCallable, Category = "Compilation")
     void FixIncludePaths();
 
-    UFUNCTION(BlueprintCallable, Category = "Engine Architect|Compilation")
-    void FixMissingHeaders();
-
-    UFUNCTION(BlueprintCallable, Category = "Engine Architect|Compilation")
+    // Fix API compatibility issues
+    UFUNCTION(BlueprintCallable, Category = "Compilation")
     void FixAPICompatibility();
 
-    UFUNCTION(BlueprintCallable, Category = "Engine Architect|Compilation")
-    void RemoveDuplicateFiles();
-
-    UFUNCTION(BlueprintCallable, Category = "Engine Architect|Compilation")
-    void ImplementMissingStubs();
-
-    UFUNCTION(BlueprintCallable, Category = "Engine Architect|Compilation")
-    bool ValidateProjectCompilation();
-
-    // Diagnostic functions
-    UFUNCTION(BlueprintCallable, Category = "Engine Architect|Diagnostics")
-    TArray<FString> GetCompilationErrors();
-
-    UFUNCTION(BlueprintCallable, Category = "Engine Architect|Diagnostics")
-    TArray<FString> GetMissingIncludes();
-
-    UFUNCTION(BlueprintCallable, Category = "Engine Architect|Diagnostics")
-    TArray<FString> GetDuplicateDefinitions();
-
 protected:
-    // Internal fixing methods
-    void FixHeaderIncludeOrder();
-    void FixGeneratedIncludeOrder();
-    void FixUPropertyMacros();
-    void FixUFunctionMacros();
-    void FixForwardDeclarations();
-    void FixModuleDependencies();
+    // Track compilation issues
+    UPROPERTY(BlueprintReadOnly, Category = "Status")
+    TArray<FString> CompilationErrors;
 
-    // Validation state
-    UPROPERTY(BlueprintReadOnly, Category = "Engine Architect")
-    bool bCompilationValid;
+    UPROPERTY(BlueprintReadOnly, Category = "Status")
+    TArray<FString> FixedFiles;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Engine Architect")
-    int32 FixedIssuesCount;
+    UPROPERTY(BlueprintReadOnly, Category = "Status")
+    bool bCompilationClean;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Engine Architect")
-    TArray<FString> LastCompilationErrors;
+    // Fix specific file types
+    void FixHeaderOnlyClasses();
+    void FixEmptyImplementations();
+    void FixDuplicateTypes();
+    void FixMissingIncludes();
+    void FixUE5Compatibility();
+
+private:
+    // Internal tracking
+    TMap<FString, FString> FilePathMap;
+    TArray<FString> ProcessedFiles;
+    
+    // Validation helpers
+    bool IsFileEmpty(const FString& FilePath);
+    bool HasMatchingImplementation(const FString& HeaderPath);
+    void LogCompilationFix(const FString& Message);
 };
