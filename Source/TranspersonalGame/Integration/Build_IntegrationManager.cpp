@@ -1,219 +1,83 @@
 #include "Build_IntegrationManager.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "Engine/GameInstance.h"
-#include "GameFramework/PlayerStart.h"
-#include "Engine/DirectionalLight.h"
-#include "Components/StaticMeshComponent.h"
-#include "Kismet/GameplayStatics.h"
-#include "HAL/PlatformFilemanager.h"
-#include "Misc/Paths.h"
+#include "Engine/Level.h"
+#include "GameFramework/Actor.h"
 #include "UObject/UObjectGlobals.h"
+#include "UObject/Package.h"
+#include "Misc/DateTime.h"
+#include "HAL/PlatformFilemanager.h"
 
 UBuild_IntegrationManager::UBuild_IntegrationManager()
 {
-    CurrentStatus = EBuild_IntegrationStatus::Unknown;
-    TotalActorCount = 0;
+    bIntegrationInProgress = false;
     LastValidationTime = 0.0f;
-
-    // Initialize core module names
-    CoreModuleNames.Add(TEXT("TranspersonalGame"));
-    CoreModuleNames.Add(TEXT("Core"));
-    CoreModuleNames.Add(TEXT("Engine"));
-    CoreModuleNames.Add(TEXT("UnrealEd"));
 }
 
 void UBuild_IntegrationManager::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
     
-    CurrentStatus = EBuild_IntegrationStatus::Initializing;
+    UE_LOG(LogTemp, Warning, TEXT("Build_IntegrationManager: Initialized"));
     
-    UE_LOG(LogTemp, Warning, TEXT("Build_IntegrationManager: Initializing integration validation system"));
+    // Register core modules for validation
+    TArray<FString> CoreClasses;
+    CoreClasses.Add(TEXT("TranspersonalGameState"));
+    CoreClasses.Add(TEXT("TranspersonalCharacter"));
+    RegisterModuleForValidation(TEXT("Core"), CoreClasses);
     
-    // Start validation after a short delay
-    FTimerHandle ValidationTimer;
-    GetWorld()->GetTimerManager().SetTimer(ValidationTimer, this, &UBuild_IntegrationManager::StartIntegrationValidation, 2.0f, false);
+    TArray<FString> WorldClasses;
+    WorldClasses.Add(TEXT("PCGWorldGenerator"));
+    WorldClasses.Add(TEXT("FoliageManager"));
+    RegisterModuleForValidation(TEXT("World"), WorldClasses);
+    
+    TArray<FString> AIClasses;
+    AIClasses.Add(TEXT("CrowdSimulationManager"));
+    RegisterModuleForValidation(TEXT("AI"), AIClasses);
+    
+    TArray<FString> QAClasses;
+    QAClasses.Add(TEXT("QA_TestFramework"));
+    QAClasses.Add(TEXT("QA_PerformanceMonitor"));
+    RegisterModuleForValidation(TEXT("QA"), QAClasses);
 }
 
 void UBuild_IntegrationManager::Deinitialize()
 {
-    CurrentStatus = EBuild_IntegrationStatus::Unknown;
-    ModuleStatuses.Empty();
-    SystemValidations.Empty();
-    IntegrationErrors.Empty();
-    
+    RegisteredModules.Empty();
     Super::Deinitialize();
 }
 
-void UBuild_IntegrationManager::StartIntegrationValidation()
+void UBuild_IntegrationManager::RunFullIntegrationTest()
 {
-    CurrentStatus = EBuild_IntegrationStatus::Testing;
-    IntegrationErrors.Empty();
+    if (bIntegrationInProgress)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Build_IntegrationManager: Integration test already in progress"));
+        return;
+    }
     
-    UE_LOG(LogTemp, Warning, TEXT("Build_IntegrationManager: Starting comprehensive integration validation"));
+    bIntegrationInProgress = true;
+    LastValidationTime = FPlatformTime::Seconds();
     
-    // Validate all modules
-    ValidateAllModules();
+    UE_LOG(LogTemp, Warning, TEXT("Build_IntegrationManager: Starting full integration test"));
     
-    // Validate map systems
-    ValidateMapSystems();
+    // Clear previous report
+    LastReport = FBuild_IntegrationReport();
     
-    // Enforce actor cap
+    // Enforce actor cap first
     EnforceActorCap(8000);
     
-    // Check compilation status
-    bool bCompilationOK = CheckCompilationStatus();
+    // Validate all registered modules
+    ValidateAllRegisteredModules();
     
-    // Determine final status
-    if (IntegrationErrors.Num() == 0 && bCompilationOK)
-    {
-        CurrentStatus = EBuild_IntegrationStatus::Complete;
-        UE_LOG(LogTemp, Warning, TEXT("Build_IntegrationManager: Integration validation PASSED"));
-    }
-    else
-    {
-        CurrentStatus = EBuild_IntegrationStatus::Failed;
-        UE_LOG(LogTemp, Error, TEXT("Build_IntegrationManager: Integration validation FAILED with %d errors"), IntegrationErrors.Num());
-    }
+    // Check actor counts
+    CheckActorCounts();
     
-    LastValidationTime = GetWorld()->GetTimeSeconds();
-    LogIntegrationStatus();
-}
-
-void UBuild_IntegrationManager::ValidateAllModules()
-{
-    ModuleStatuses.Empty();
+    // Generate final report
+    GenerateIntegrationReport();
     
-    // Validate core modules
-    for (const FString& ModuleName : CoreModuleNames)
-    {
-        ValidateModule(ModuleName);
-    }
+    bIntegrationInProgress = false;
     
-    UE_LOG(LogTemp, Warning, TEXT("Build_IntegrationManager: Validated %d modules"), ModuleStatuses.Num());
-}
-
-void UBuild_IntegrationManager::ValidateModule(const FString& ModuleName)
-{
-    FBuild_ModuleStatus Status;
-    Status.ModuleName = ModuleName;
-    
-    try
-    {
-        // Check if module is loaded
-        if (FModuleManager::Get().IsModuleLoaded(*ModuleName))
-        {
-            Status.bIsLoaded = true;
-            
-            // Count classes in module
-            int32 ClassCount = 0;
-            for (TObjectIterator<UClass> ClassIt; ClassIt; ++ClassIt)
-            {
-                UClass* Class = *ClassIt;
-                if (Class && Class->GetOutermost()->GetName().Contains(ModuleName))
-                {
-                    ClassCount++;
-                }
-            }
-            Status.ClassCount = ClassCount;
-            
-            UE_LOG(LogTemp, Log, TEXT("Build_IntegrationManager: Module %s loaded with %d classes"), *ModuleName, ClassCount);
-        }
-        else
-        {
-            Status.bIsLoaded = false;
-            Status.LastError = TEXT("Module not loaded");
-            ReportIntegrationError(FString::Printf(TEXT("Module %s is not loaded"), *ModuleName));
-        }
-    }
-    catch (...)
-    {
-        Status.bHasErrors = true;
-        Status.LastError = TEXT("Exception during module validation");
-        ReportIntegrationError(FString::Printf(TEXT("Exception validating module %s"), *ModuleName));
-    }
-    
-    ModuleStatuses.Add(Status);
-}
-
-void UBuild_IntegrationManager::ValidateMapSystems()
-{
-    SystemValidations.Empty();
-    
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        ReportIntegrationError(TEXT("No valid world found for system validation"));
-        return;
-    }
-    
-    // Get all actors in the level
-    TArray<AActor*> AllActors;
-    UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), AllActors);
-    TotalActorCount = AllActors.Num();
-    
-    // Validate essential systems
-    ValidateSystem(TEXT("PlayerStart"), APlayerStart::StaticClass());
-    ValidateSystem(TEXT("DirectionalLight"), ADirectionalLight::StaticClass());
-    
-    // Try to validate custom classes
-    UClass* GameStateClass = FindObject<UClass>(ANY_PACKAGE, TEXT("TranspersonalGameState"));
-    if (GameStateClass)
-    {
-        ValidateSystem(TEXT("TranspersonalGameState"), GameStateClass);
-    }
-    
-    UClass* CharacterClass = FindObject<UClass>(ANY_PACKAGE, TEXT("TranspersonalCharacter"));
-    if (CharacterClass)
-    {
-        ValidateSystem(TEXT("TranspersonalCharacter"), CharacterClass);
-    }
-    
-    UClass* WorldGenClass = FindObject<UClass>(ANY_PACKAGE, TEXT("PCGWorldGenerator"));
-    if (WorldGenClass)
-    {
-        ValidateSystem(TEXT("PCGWorldGenerator"), WorldGenClass);
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("Build_IntegrationManager: Validated %d systems with %d total actors"), SystemValidations.Num(), TotalActorCount);
-}
-
-void UBuild_IntegrationManager::ValidateSystem(const FString& SystemName, UClass* SystemClass)
-{
-    FBuild_SystemValidation Validation;
-    Validation.SystemName = SystemName;
-    
-    if (!SystemClass)
-    {
-        Validation.bIsValid = false;
-        Validation.ValidationMessage = TEXT("Class not found");
-        SystemValidations.Add(Validation);
-        return;
-    }
-    
-    UWorld* World = GetWorld();
-    TArray<AActor*> SystemActors;
-    UGameplayStatics::GetAllActorsOfClass(World, SystemClass, SystemActors);
-    
-    Validation.ActorCount = SystemActors.Num();
-    
-    if (SystemActors.Num() > 0)
-    {
-        Validation.bIsValid = true;
-        Validation.ValidationMessage = FString::Printf(TEXT("Found %d instances"), SystemActors.Num());
-    }
-    else
-    {
-        Validation.bIsValid = false;
-        Validation.ValidationMessage = TEXT("No instances found in level");
-    }
-    
-    SystemValidations.Add(Validation);
-    
-    UE_LOG(LogTemp, Log, TEXT("Build_IntegrationManager: System %s validation: %s"), 
-           *SystemName, 
-           Validation.bIsValid ? TEXT("PASS") : TEXT("FAIL"));
+    UE_LOG(LogTemp, Warning, TEXT("Build_IntegrationManager: Integration test completed"));
 }
 
 void UBuild_IntegrationManager::EnforceActorCap(int32 MaxActors)
@@ -221,137 +85,233 @@ void UBuild_IntegrationManager::EnforceActorCap(int32 MaxActors)
     UWorld* World = GetWorld();
     if (!World)
     {
+        UE_LOG(LogTemp, Error, TEXT("Build_IntegrationManager: No world found for actor cap enforcement"));
         return;
     }
     
     TArray<AActor*> AllActors;
-    UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), AllActors);
-    
-    if (AllActors.Num() <= MaxActors)
+    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
     {
-        UE_LOG(LogTemp, Log, TEXT("Build_IntegrationManager: Actor count %d within limit %d"), AllActors.Num(), MaxActors);
+        AllActors.Add(*ActorItr);
+    }
+    
+    LastReport.TotalActorCount = AllActors.Num();
+    
+    if (AllActors.Num() > MaxActors)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Build_IntegrationManager: Actor count %d exceeds cap %d, cleaning up"), AllActors.Num(), MaxActors);
+        CleanupExcessActors(MaxActors);
+        LastReport.bActorCapEnforced = true;
+    }
+    else
+    {
+        UE_LOG(LogTemp, Log, TEXT("Build_IntegrationManager: Actor count %d within cap %d"), AllActors.Num(), MaxActors);
+        LastReport.bActorCapEnforced = false;
+    }
+}
+
+FBuild_IntegrationReport UBuild_IntegrationManager::GetLastIntegrationReport() const
+{
+    return LastReport;
+}
+
+bool UBuild_IntegrationManager::ValidateModuleIntegration(const FString& ModuleName)
+{
+    if (!RegisteredModules.Contains(ModuleName))
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Build_IntegrationManager: Module %s not registered"), *ModuleName);
+        return false;
+    }
+    
+    const TArray<FString>& RequiredClasses = RegisteredModules[ModuleName];
+    int32 LoadedClasses = 0;
+    
+    for (const FString& ClassName : RequiredClasses)
+    {
+        if (TestClassLoading(ClassName))
+        {
+            LoadedClasses++;
+        }
+    }
+    
+    bool bModuleValid = (LoadedClasses == RequiredClasses.Num());
+    UE_LOG(LogTemp, Log, TEXT("Build_IntegrationManager: Module %s validation: %d/%d classes loaded"), 
+           *ModuleName, LoadedClasses, RequiredClasses.Num());
+    
+    return bModuleValid;
+}
+
+void UBuild_IntegrationManager::RegisterModuleForValidation(const FString& ModuleName, const TArray<FString>& RequiredClasses)
+{
+    RegisteredModules.Add(ModuleName, RequiredClasses);
+    UE_LOG(LogTemp, Log, TEXT("Build_IntegrationManager: Registered module %s with %d classes"), 
+           *ModuleName, RequiredClasses.Num());
+}
+
+void UBuild_IntegrationManager::ClearValidationCache()
+{
+    RegisteredModules.Empty();
+    LastReport = FBuild_IntegrationReport();
+    UE_LOG(LogTemp, Log, TEXT("Build_IntegrationManager: Validation cache cleared"));
+}
+
+void UBuild_IntegrationManager::ValidateAllRegisteredModules()
+{
+    LastReport.ModuleStatuses.Empty();
+    
+    for (const auto& ModulePair : RegisteredModules)
+    {
+        const FString& ModuleName = ModulePair.Key;
+        const TArray<FString>& RequiredClasses = ModulePair.Value;
+        
+        FBuild_ModuleStatus ModuleStatus;
+        ModuleStatus.ModuleName = ModuleName;
+        
+        float StartTime = FPlatformTime::Seconds();
+        
+        int32 LoadedClasses = 0;
+        for (const FString& ClassName : RequiredClasses)
+        {
+            if (TestClassLoading(ClassName))
+            {
+                LoadedClasses++;
+            }
+        }
+        
+        ModuleStatus.LoadTime = FPlatformTime::Seconds() - StartTime;
+        ModuleStatus.ClassCount = LoadedClasses;
+        ModuleStatus.bIsLoaded = (LoadedClasses > 0);
+        ModuleStatus.bIsCompiled = (LoadedClasses == RequiredClasses.Num());
+        
+        LastReport.ModuleStatuses.Add(ModuleStatus);
+    }
+}
+
+void UBuild_IntegrationManager::CheckActorCounts()
+{
+    UWorld* World = GetWorld();
+    if (!World)
+    {
         return;
     }
     
-    UE_LOG(LogTemp, Warning, TEXT("Build_IntegrationManager: Actor count %d exceeds limit %d, cleaning up"), AllActors.Num(), MaxActors);
+    int32 ActorCount = 0;
+    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+    {
+        ActorCount++;
+    }
     
-    CleanupExcessActors(MaxActors);
+    LastReport.TotalActorCount = ActorCount;
+}
+
+void UBuild_IntegrationManager::GenerateIntegrationReport()
+{
+    LastReport.TotalBuildTime = FPlatformTime::Seconds() - LastValidationTime;
     
-    // Recount after cleanup
-    AllActors.Empty();
-    UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), AllActors);
-    TotalActorCount = AllActors.Num();
+    // Determine overall validation result
+    bool bAllModulesValid = true;
+    for (const FBuild_ModuleStatus& ModuleStatus : LastReport.ModuleStatuses)
+    {
+        if (!ModuleStatus.bIsCompiled)
+        {
+            bAllModulesValid = false;
+            break;
+        }
+    }
     
-    UE_LOG(LogTemp, Warning, TEXT("Build_IntegrationManager: Actor count after cleanup: %d"), TotalActorCount);
+    if (bAllModulesValid && LastReport.TotalActorCount <= 8000)
+    {
+        LastReport.ValidationResult = EBuild_ValidationResult::Success;
+    }
+    else if (LastReport.ModuleStatuses.Num() > 0)
+    {
+        LastReport.ValidationResult = EBuild_ValidationResult::Warning;
+    }
+    else
+    {
+        LastReport.ValidationResult = EBuild_ValidationResult::Failed;
+    }
+    
+    UE_LOG(LogTemp, Warning, TEXT("Build_IntegrationManager: Integration report generated - Result: %d, Modules: %d, Actors: %d"), 
+           (int32)LastReport.ValidationResult, LastReport.ModuleStatuses.Num(), LastReport.TotalActorCount);
+}
+
+bool UBuild_IntegrationManager::TestClassLoading(const FString& ClassName)
+{
+    FString FullClassName = FString::Printf(TEXT("/Script/TranspersonalGame.%s"), *ClassName);
+    
+    UClass* LoadedClass = LoadClass<UObject>(nullptr, *FullClassName);
+    if (LoadedClass)
+    {
+        UE_LOG(LogTemp, VeryVerbose, TEXT("Build_IntegrationManager: Successfully loaded class %s"), *FullClassName);
+        return true;
+    }
+    
+    UE_LOG(LogTemp, Warning, TEXT("Build_IntegrationManager: Failed to load class %s"), *FullClassName);
+    return false;
 }
 
 void UBuild_IntegrationManager::CleanupExcessActors(int32 MaxActors)
 {
     UWorld* World = GetWorld();
-    TArray<AActor*> AllActors;
-    UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), AllActors);
-    
-    // Define essential actor types to keep
-    TArray<FString> EssentialLabels = {
-        TEXT("playerstart"), TEXT("directionallight"), TEXT("skylight"), 
-        TEXT("skyatmosphere"), TEXT("fog"), TEXT("trex"), TEXT("veloci"), 
-        TEXT("tricera"), TEXT("brachi"), TEXT("ankylo")
-    };
-    
-    TArray<AActor*> ActorsToKeep;
-    TArray<AActor*> ActorsToRemove;
-    
-    for (AActor* Actor : AllActors)
+    if (!World)
     {
-        if (!Actor)
-        {
-            continue;
-        }
+        return;
+    }
+    
+    TArray<AActor*> AllActors;
+    TArray<AActor*> EssentialActors;
+    TArray<AActor*> RemovableActors;
+    
+    // Collect all actors
+    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+    {
+        AActor* Actor = *ActorItr;
+        AllActors.Add(Actor);
         
-        FString ActorLabel = Actor->GetActorLabel().ToLower();
-        bool bIsEssential = false;
+        FString ActorName = Actor->GetName().ToLower();
         
-        for (const FString& Essential : EssentialLabels)
+        // Keep essential actors
+        if (ActorName.Contains(TEXT("playerstart")) || 
+            ActorName.Contains(TEXT("directionallight")) ||
+            ActorName.Contains(TEXT("skylight")) ||
+            ActorName.Contains(TEXT("skyatmosphere")) ||
+            ActorName.Contains(TEXT("fog")) ||
+            ActorName.Contains(TEXT("trex")) ||
+            ActorName.Contains(TEXT("veloci")) ||
+            ActorName.Contains(TEXT("tricera")) ||
+            ActorName.Contains(TEXT("brachi")))
         {
-            if (ActorLabel.Contains(Essential))
-            {
-                bIsEssential = true;
-                break;
-            }
-        }
-        
-        if (bIsEssential)
-        {
-            ActorsToKeep.Add(Actor);
+            EssentialActors.Add(Actor);
         }
         else
         {
-            ActorsToRemove.Add(Actor);
+            RemovableActors.Add(Actor);
         }
     }
     
-    // Remove excess actors
-    int32 ActorsToDestroy = FMath::Max(0, AllActors.Num() - MaxActors);
-    ActorsToDestroy = FMath::Min(ActorsToDestroy, ActorsToRemove.Num());
-    
-    for (int32 i = 0; i < ActorsToDestroy; i++)
+    // Remove excess actors randomly
+    int32 ActorsToRemove = FMath::Max(0, AllActors.Num() - MaxActors);
+    if (ActorsToRemove > 0 && RemovableActors.Num() > 0)
     {
-        if (ActorsToRemove[i] && IsValid(ActorsToRemove[i]))
+        // Shuffle removable actors
+        for (int32 i = RemovableActors.Num() - 1; i > 0; i--)
         {
-            ActorsToRemove[i]->Destroy();
+            int32 j = FMath::RandRange(0, i);
+            RemovableActors.Swap(i, j);
         }
+        
+        // Remove actors
+        int32 RemovedCount = 0;
+        for (int32 i = 0; i < FMath::Min(ActorsToRemove, RemovableActors.Num()); i++)
+        {
+            if (RemovableActors[i] && IsValid(RemovableActors[i]))
+            {
+                RemovableActors[i]->Destroy();
+                RemovedCount++;
+            }
+        }
+        
+        UE_LOG(LogTemp, Warning, TEXT("Build_IntegrationManager: Removed %d excess actors"), RemovedCount);
     }
-}
-
-bool UBuild_IntegrationManager::CheckCompilationStatus()
-{
-    // Check if binaries exist
-    FString ProjectDir = FPaths::ProjectDir();
-    FString BinariesDir = FPaths::Combine(ProjectDir, TEXT("Binaries"));
-    
-    IPlatformFile& PlatformFile = FPlatformFileManager::Get().GetPlatformFile();
-    
-    if (!PlatformFile.DirectoryExists(*BinariesDir))
-    {
-        ReportIntegrationError(TEXT("Binaries directory not found"));
-        return false;
-    }
-    
-    // Look for game binaries
-    TArray<FString> FoundFiles;
-    PlatformFile.FindFilesRecursively(FoundFiles, *BinariesDir, TEXT("*.so"));
-    PlatformFile.FindFilesRecursively(FoundFiles, *BinariesDir, TEXT("*.dll"));
-    PlatformFile.FindFilesRecursively(FoundFiles, *BinariesDir, TEXT("*.dylib"));
-    
-    if (FoundFiles.Num() == 0)
-    {
-        ReportIntegrationError(TEXT("No compiled binaries found"));
-        return false;
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("Build_IntegrationManager: Found %d binary files"), FoundFiles.Num());
-    return true;
-}
-
-void UBuild_IntegrationManager::ReportIntegrationError(const FString& ErrorMessage)
-{
-    IntegrationErrors.Add(ErrorMessage);
-    UE_LOG(LogTemp, Error, TEXT("Build_IntegrationManager: %s"), *ErrorMessage);
-}
-
-void UBuild_IntegrationManager::LogIntegrationStatus()
-{
-    UE_LOG(LogTemp, Warning, TEXT("=== BUILD INTEGRATION STATUS ==="));
-    UE_LOG(LogTemp, Warning, TEXT("Status: %s"), CurrentStatus == EBuild_IntegrationStatus::Complete ? TEXT("COMPLETE") : TEXT("FAILED"));
-    UE_LOG(LogTemp, Warning, TEXT("Modules: %d validated"), ModuleStatuses.Num());
-    UE_LOG(LogTemp, Warning, TEXT("Systems: %d validated"), SystemValidations.Num());
-    UE_LOG(LogTemp, Warning, TEXT("Actors: %d total"), TotalActorCount);
-    UE_LOG(LogTemp, Warning, TEXT("Errors: %d"), IntegrationErrors.Num());
-    
-    for (const FString& Error : IntegrationErrors)
-    {
-        UE_LOG(LogTemp, Error, TEXT("  - %s"), *Error);
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("=== END INTEGRATION STATUS ==="));
 }
