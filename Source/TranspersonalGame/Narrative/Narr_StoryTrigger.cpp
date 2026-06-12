@@ -1,180 +1,161 @@
 #include "Narr_StoryTrigger.h"
-#include "Components/BoxComponent.h"
 #include "Components/AudioComponent.h"
+#include "Components/StaticMeshComponent.h"
 #include "Engine/Engine.h"
 #include "GameFramework/Character.h"
 #include "Kismet/GameplayStatics.h"
-#include "Sound/SoundCue.h"
 
 ANarr_StoryTrigger::ANarr_StoryTrigger()
 {
     PrimaryActorTick.bCanEverTick = false;
 
-    // Initialize trigger properties
-    TriggerType = ENarr_TriggerType::FirstDinosaur;
-    bIsActive = true;
+    // Initialize trigger type
+    TriggerType = ENarr_TriggerType::CaveDiscovery;
+    
+    // Initialize state
     bHasBeenTriggered = false;
-    ThreatLevel = 0.5f;
-    bIncreaseFearOnTrigger = false;
-    FearIncreaseAmount = 10.0f;
+    LastTriggerTime = 0.0f;
 
     // Create audio component
     AudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("AudioComponent"));
     AudioComponent->SetupAttachment(RootComponent);
     AudioComponent->bAutoActivate = false;
 
-    // Set default trigger box size
-    UBoxComponent* BoxComp = GetCollisionComponent();
-    if (BoxComp)
-    {
-        BoxComp->SetBoxExtent(FVector(200.0f, 200.0f, 100.0f));
-    }
+    // Set default collision
+    GetCollisionComponent()->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+    GetCollisionComponent()->SetCollisionResponseToAllChannels(ECR_Ignore);
+    GetCollisionComponent()->SetCollisionResponseToChannel(ECC_Pawn, ECR_Overlap);
 
-    // Initialize default story event
-    StoryEvent.EventID = TEXT("DefaultEvent");
-    StoryEvent.NarrativeText = FText::FromString(TEXT("Something important happened here..."));
-    StoryEvent.VoiceOverCue = nullptr;
-    StoryEvent.DisplayDuration = 5.0f;
-    StoryEvent.bRequiresPlayerInput = false;
-    StoryEvent.bOnlyTriggerOnce = true;
+    // Bind overlap events
+    OnActorBeginOverlap.AddDynamic(this, &ANarr_StoryTrigger::OnOverlapBegin);
+    OnActorEndOverlap.AddDynamic(this, &ANarr_StoryTrigger::OnOverlapEnd);
+
+    // Initialize default story data
+    StoryData.StoryTitle = TEXT("Ancient Discovery");
+    StoryData.NarrativeText = TEXT("You have discovered something ancient and mysterious...");
+    StoryData.CharacterName = TEXT("Narrator");
+    StoryData.TriggerRadius = 200.0f;
+    StoryData.bOneTimeOnly = true;
+    StoryData.bRequiresPlayerInput = false;
 }
 
 void ANarr_StoryTrigger::BeginPlay()
 {
     Super::BeginPlay();
 
-    // Bind overlap events
-    OnActorBeginOverlap.AddDynamic(this, &ANarr_StoryTrigger::OnTriggerEnter);
-    OnActorEndOverlap.AddDynamic(this, &ANarr_StoryTrigger::OnTriggerExit);
+    // Set up trigger based on type
+    switch (TriggerType)
+    {
+        case ENarr_TriggerType::CaveDiscovery:
+            StoryData.StoryTitle = TEXT("Cave Discovery");
+            StoryData.NarrativeText = TEXT("The darkness ahead whispers of ancient secrets. Your ancestors once sheltered here from the great storms.");
+            StoryData.CharacterName = TEXT("Cave Echo");
+            break;
 
-    UE_LOG(LogTemp, Log, TEXT("Narr_StoryTrigger initialized: %s"), *StoryEvent.EventID);
+        case ENarr_TriggerType::HuntingGround:
+            StoryData.StoryTitle = TEXT("Ancient Hunting Ground");
+            StoryData.NarrativeText = TEXT("The bones scattered here tell of great hunts. Your people once brought down the mighty beasts in this very place.");
+            StoryData.CharacterName = TEXT("Spirit of the Hunt");
+            break;
+
+        case ENarr_TriggerType::TribalMemory:
+            StoryData.StoryTitle = TEXT("Tribal Memory Stone");
+            StoryData.NarrativeText = TEXT("These stones remember the old ways. Touch them and feel the wisdom of those who came before.");
+            StoryData.CharacterName = TEXT("Stone Memory");
+            break;
+
+        case ENarr_TriggerType::DangerWarning:
+            StoryData.StoryTitle = TEXT("Danger Zone");
+            StoryData.NarrativeText = TEXT("Beware! The great predators mark this territory. Tread carefully or become their next prey.");
+            StoryData.CharacterName = TEXT("Warning Voice");
+            break;
+
+        case ENarr_TriggerType::SafeZone:
+            StoryData.StoryTitle = TEXT("Safe Haven");
+            StoryData.NarrativeText = TEXT("Here you may rest. The ancient protections still hold, keeping the dangers at bay.");
+            StoryData.CharacterName = TEXT("Guardian Spirit");
+            break;
+    }
 }
 
-void ANarr_StoryTrigger::OnTriggerEnter(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor,
-                                       UPrimitiveComponent* OtherComponent, int32 OtherBodyIndex,
-                                       bool bFromSweep, const FHitResult& SweepResult)
+void ANarr_StoryTrigger::TriggerStoryEvent(AActor* TriggeringActor)
 {
-    // Check if it's the player character
-    ACharacter* PlayerCharacter = Cast<ACharacter>(OtherActor);
-    if (!PlayerCharacter || !bIsActive)
+    if (!CanTrigger())
     {
         return;
     }
 
-    // Check if this trigger should only fire once
-    if (StoryEvent.bOnlyTriggerOnce && bHasBeenTriggered)
-    {
-        return;
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("Player entered story trigger: %s"), *StoryEvent.EventID);
-
-    // Trigger the story event
-    TriggerStoryEvent();
-
-    // Call Blueprint implementable event
-    OnPlayerEnterTrigger();
-}
-
-void ANarr_StoryTrigger::OnTriggerExit(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor,
-                                      UPrimitiveComponent* OtherComponent, int32 OtherBodyIndex)
-{
-    ACharacter* PlayerCharacter = Cast<ACharacter>(OtherActor);
-    if (!PlayerCharacter)
-    {
-        return;
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("Player exited story trigger: %s"), *StoryEvent.EventID);
-
-    // Call Blueprint implementable event
-    OnPlayerExitTrigger();
-}
-
-void ANarr_StoryTrigger::TriggerStoryEvent()
-{
-    if (!bIsActive)
+    // Check if triggering actor is a character
+    ACharacter* Character = Cast<ACharacter>(TriggeringActor);
+    if (!Character)
     {
         return;
     }
 
     // Mark as triggered
     bHasBeenTriggered = true;
+    LastTriggerTime = GetWorld()->GetTimeSeconds();
 
-    // Play voice-over if available
-    PlayVoiceOver();
+    // Play narrative audio if available
+    PlayNarrativeAudio();
 
-    // Update player fear if configured
-    if (bIncreaseFearOnTrigger)
-    {
-        UpdatePlayerFear();
-    }
+    // Log the story event
+    UE_LOG(LogTemp, Log, TEXT("Story Triggered: %s - %s"), *StoryData.StoryTitle, *StoryData.NarrativeText);
 
-    // Display narrative text (this would typically be handled by UI system)
+    // Display message to player (in a real game, this would go to UI)
     if (GEngine)
     {
-        FString DisplayText = FString::Printf(TEXT("[NARRATIVE] %s"), 
-                                            *StoryEvent.NarrativeText.ToString());
-        GEngine->AddOnScreenDebugMessage(-1, StoryEvent.DisplayDuration, FColor::Yellow, DisplayText);
+        FString DisplayText = FString::Printf(TEXT("%s: %s"), *StoryData.CharacterName, *StoryData.NarrativeText);
+        GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Yellow, DisplayText);
     }
 
-    // Log the event
-    UE_LOG(LogTemp, Warning, TEXT("Story Event Triggered: %s - %s"), 
-           *StoryEvent.EventID, *StoryEvent.NarrativeText.ToString());
-
-    // Call Blueprint implementable event
-    OnStoryEventTriggered(StoryEvent);
+    // Call Blueprint event
+    OnStoryTriggered(StoryData);
 }
 
-void ANarr_StoryTrigger::ResetTrigger()
+void ANarr_StoryTrigger::PlayNarrativeAudio()
 {
-    bHasBeenTriggered = false;
-    bIsActive = true;
-    
-    if (AudioComponent && AudioComponent->IsPlaying())
+    if (NarrativeSound && AudioComponent)
     {
-        AudioComponent->Stop();
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("Story trigger reset: %s"), *StoryEvent.EventID);
-}
-
-void ANarr_StoryTrigger::SetTriggerActive(bool bActive)
-{
-    bIsActive = bActive;
-    
-    if (!bActive && AudioComponent && AudioComponent->IsPlaying())
-    {
-        AudioComponent->Stop();
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("Story trigger %s set to: %s"), 
-           *StoryEvent.EventID, bActive ? TEXT("Active") : TEXT("Inactive"));
-}
-
-void ANarr_StoryTrigger::PlayVoiceOver()
-{
-    if (StoryEvent.VoiceOverCue && AudioComponent)
-    {
-        AudioComponent->SetSound(StoryEvent.VoiceOverCue);
+        AudioComponent->SetSound(NarrativeSound);
         AudioComponent->Play();
-        
-        UE_LOG(LogTemp, Log, TEXT("Playing voice-over for story event: %s"), *StoryEvent.EventID);
     }
 }
 
-void ANarr_StoryTrigger::UpdatePlayerFear()
+void ANarr_StoryTrigger::SetStoryData(const FNarr_StoryData& NewStoryData)
 {
-    // Find the player character and update fear
-    ACharacter* PlayerCharacter = UGameplayStatics::GetPlayerCharacter(GetWorld(), 0);
-    if (PlayerCharacter)
+    StoryData = NewStoryData;
+}
+
+bool ANarr_StoryTrigger::CanTrigger() const
+{
+    if (StoryData.bOneTimeOnly && bHasBeenTriggered)
     {
-        // This would typically interface with the player's survival stats system
-        // For now, we'll just log the fear increase
-        UE_LOG(LogTemp, Warning, TEXT("Player fear increased by %.1f due to story trigger: %s"), 
-               FearIncreaseAmount, *StoryEvent.EventID);
-        
-        // In a real implementation, this would call something like:
-        // PlayerCharacter->GetSurvivalComponent()->IncreaseFear(FearIncreaseAmount);
+        return false;
+    }
+
+    // Prevent rapid re-triggering
+    float CurrentTime = GetWorld()->GetTimeSeconds();
+    if (CurrentTime - LastTriggerTime < 2.0f)
+    {
+        return false;
+    }
+
+    return true;
+}
+
+void ANarr_StoryTrigger::OnOverlapBegin(UPrimitiveComponent* OverlappedComp, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
+{
+    TriggerStoryEvent(OtherActor);
+}
+
+void ANarr_StoryTrigger::OnOverlapEnd(UPrimitiveComponent* OverlappedComp, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex)
+{
+    // Optional: Handle when player leaves trigger area
+    ACharacter* Character = Cast<ACharacter>(OtherActor);
+    if (Character && AudioComponent && AudioComponent->IsPlaying())
+    {
+        // Fade out audio when leaving trigger
+        AudioComponent->FadeOut(1.0f, 0.0f);
     }
 }
