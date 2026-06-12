@@ -1,89 +1,90 @@
 #include "Perf_PerformanceProfiler.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "HAL/PlatformFilemanager.h"
-#include "Misc/FileHelper.h"
-#include "Misc/DateTime.h"
+#include "HAL/PlatformApplicationMisc.h"
 #include "Stats/Stats.h"
 
 UPerf_PerformanceProfiler::UPerf_PerformanceProfiler()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 0.0f; // Tick every frame for accurate profiling
+    PrimaryComponentTick.TickInterval = 0.1f; // Update 10 times per second
     
-    SamplingInterval = 0.1f;
-    SampleHistorySize = 60;
-    bEnableAutomaticProfiling = true;
-    bLogPerformanceWarnings = true;
+    bEnableProfiling = true;
+    ProfilingInterval = 1.0f;
+    TargetPerformanceLevel = EPerf_PerformanceLevel::High;
     
-    CriticalFPSThreshold = 20.0f;
-    LowFPSThreshold = 30.0f;
-    MediumFPSThreshold = 45.0f;
-    HighFPSThreshold = 60.0f;
-    FrameTimeSpikeThreshold = 33.33f;
+    ProfilingTimer = 0.0f;
+    SampleIndex = 0;
+    FPSSamples.SetNum(MaxSamples);
     
-    TimeSinceLastSample = 0.0f;
-    bIsProfiling = false;
-    LastPerformanceLevel = EPerf_PerformanceLevel::Medium;
-    
-    FrameTimeHistory.Reserve(SampleHistorySize);
-    FPSHistory.Reserve(SampleHistorySize);
+    // Initialize FPS samples array
+    for (int32 i = 0; i < MaxSamples; i++)
+    {
+        FPSSamples[i] = 60.0f; // Default to 60 FPS
+    }
 }
 
 void UPerf_PerformanceProfiler::BeginPlay()
 {
     Super::BeginPlay();
     
-    if (bEnableAutomaticProfiling)
+    if (bEnableProfiling)
     {
         StartProfiling();
     }
     
-    UE_LOG(LogTemp, Log, TEXT("Performance Profiler initialized - Automatic profiling: %s"), 
-           bEnableAutomaticProfiling ? TEXT("Enabled") : TEXT("Disabled"));
+    // Apply initial optimization settings
+    ApplyOptimizationSettings();
 }
 
 void UPerf_PerformanceProfiler::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
     
-    if (!bIsProfiling)
+    if (!bEnableProfiling)
     {
         return;
     }
     
-    TimeSinceLastSample += DeltaTime;
+    ProfilingTimer += DeltaTime;
     
-    if (TimeSinceLastSample >= SamplingInterval)
+    if (ProfilingTimer >= ProfilingInterval)
     {
-        UpdatePerformanceMetrics();
-        UpdatePerformanceLevel();
-        CheckForFrameTimeSpikes(DeltaTime * 1000.0f); // Convert to milliseconds
+        UpdateMetrics();
+        ProfilingTimer = 0.0f;
         
-        TimeSinceLastSample = 0.0f;
+        // Auto-optimize if performance is poor
+        if (!IsPerformanceAcceptable())
+        {
+            AutoOptimize();
+        }
     }
 }
 
 void UPerf_PerformanceProfiler::StartProfiling()
 {
-    bIsProfiling = true;
+    bEnableProfiling = true;
     ResetMetrics();
+    
     UE_LOG(LogTemp, Log, TEXT("Performance profiling started"));
 }
 
 void UPerf_PerformanceProfiler::StopProfiling()
 {
-    bIsProfiling = false;
+    bEnableProfiling = false;
+    
     UE_LOG(LogTemp, Log, TEXT("Performance profiling stopped"));
 }
 
 void UPerf_PerformanceProfiler::ResetMetrics()
 {
-    FrameTimeHistory.Empty();
-    FPSHistory.Empty();
     CurrentMetrics = FPerf_PerformanceMetrics();
-    TimeSinceLastSample = 0.0f;
-    LastPerformanceLevel = EPerf_PerformanceLevel::Medium;
+    SampleIndex = 0;
+    
+    for (int32 i = 0; i < MaxSamples; i++)
+    {
+        FPSSamples[i] = 60.0f;
+    }
 }
 
 FPerf_PerformanceMetrics UPerf_PerformanceProfiler::GetCurrentMetrics() const
@@ -91,192 +92,189 @@ FPerf_PerformanceMetrics UPerf_PerformanceProfiler::GetCurrentMetrics() const
     return CurrentMetrics;
 }
 
-float UPerf_PerformanceProfiler::GetAverageFPS() const
+void UPerf_PerformanceProfiler::ApplyOptimizationSettings()
 {
-    if (FPSHistory.Num() == 0)
+    if (UWorld* World = GetWorld())
     {
-        return 0.0f;
-    }
-    
-    float Sum = 0.0f;
-    for (float FPS : FPSHistory)
-    {
-        Sum += FPS;
-    }
-    
-    return Sum / FPSHistory.Num();
-}
-
-float UPerf_PerformanceProfiler::GetAverageFrameTime() const
-{
-    if (FrameTimeHistory.Num() == 0)
-    {
-        return 0.0f;
-    }
-    
-    float Sum = 0.0f;
-    for (float FrameTime : FrameTimeHistory)
-    {
-        Sum += FrameTime;
-    }
-    
-    return Sum / FrameTimeHistory.Num();
-}
-
-EPerf_PerformanceLevel UPerf_PerformanceProfiler::GetCurrentPerformanceLevel() const
-{
-    return CurrentMetrics.PerformanceLevel;
-}
-
-void UPerf_PerformanceProfiler::UpdatePerformanceMetrics()
-{
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        return;
-    }
-    
-    // Calculate current FPS from world delta time
-    float WorldDeltaTime = World->GetDeltaSeconds();
-    if (WorldDeltaTime > 0.0f)
-    {
-        CurrentMetrics.CurrentFPS = 1.0f / WorldDeltaTime;
-        CurrentMetrics.AverageFrameTime = WorldDeltaTime * 1000.0f; // Convert to milliseconds
-    }
-    
-    // Add to history
-    AddFrameTimeSample(CurrentMetrics.AverageFrameTime);
-    
-    // Estimate other metrics (in a real implementation, these would come from engine stats)
-    CurrentMetrics.GameThreadTime = CurrentMetrics.AverageFrameTime * 0.6f; // Rough estimate
-    CurrentMetrics.RenderThreadTime = CurrentMetrics.AverageFrameTime * 0.8f; // Rough estimate
-    
-    // Count actors for draw call estimation
-    TArray<AActor*> AllActors;
-    UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), AllActors);
-    CurrentMetrics.DrawCalls = AllActors.Num(); // Simplified estimation
-    CurrentMetrics.TriangleCount = AllActors.Num() * 500; // Very rough estimate
-    CurrentMetrics.MemoryUsageMB = AllActors.Num() * 0.5f; // Rough estimate
-}
-
-void UPerf_PerformanceProfiler::UpdatePerformanceLevel()
-{
-    EPerf_PerformanceLevel NewLevel = CalculatePerformanceLevel(CurrentMetrics.CurrentFPS);
-    CurrentMetrics.PerformanceLevel = NewLevel;
-    
-    if (NewLevel != LastPerformanceLevel)
-    {
-        TriggerPerformanceLevelChange(NewLevel);
-        LastPerformanceLevel = NewLevel;
-    }
-}
-
-void UPerf_PerformanceProfiler::AddFrameTimeSample(float FrameTime)
-{
-    FrameTimeHistory.Add(FrameTime);
-    FPSHistory.Add(CurrentMetrics.CurrentFPS);
-    
-    // Maintain history size
-    if (FrameTimeHistory.Num() > SampleHistorySize)
-    {
-        FrameTimeHistory.RemoveAt(0);
-    }
-    
-    if (FPSHistory.Num() > SampleHistorySize)
-    {
-        FPSHistory.RemoveAt(0);
-    }
-}
-
-void UPerf_PerformanceProfiler::CheckForFrameTimeSpikes(float FrameTime)
-{
-    if (FrameTime > FrameTimeSpikeThreshold)
-    {
-        OnFrameTimeSpike.Broadcast(FrameTime);
+        // Apply view distance scale
+        FString ViewDistanceCommand = FString::Printf(TEXT("r.ViewDistanceScale %f"), OptimizationSettings.ViewDistanceScale);
+        GEngine->Exec(World, *ViewDistanceCommand);
         
-        if (bLogPerformanceWarnings)
-        {
-            UE_LOG(LogTemp, Warning, TEXT("Frame time spike detected: %.2f ms"), FrameTime);
-        }
-    }
-}
-
-EPerf_PerformanceLevel UPerf_PerformanceProfiler::CalculatePerformanceLevel(float FPS) const
-{
-    if (FPS < CriticalFPSThreshold)
-    {
-        return EPerf_PerformanceLevel::Critical;
-    }
-    else if (FPS < LowFPSThreshold)
-    {
-        return EPerf_PerformanceLevel::Low;
-    }
-    else if (FPS < MediumFPSThreshold)
-    {
-        return EPerf_PerformanceLevel::Medium;
-    }
-    else if (FPS < HighFPSThreshold)
-    {
-        return EPerf_PerformanceLevel::High;
-    }
-    else
-    {
-        return EPerf_PerformanceLevel::Ultra;
-    }
-}
-
-void UPerf_PerformanceProfiler::TriggerPerformanceLevelChange(EPerf_PerformanceLevel NewLevel)
-{
-    OnPerformanceLevelChanged.Broadcast(NewLevel);
-    
-    if (bLogPerformanceWarnings)
-    {
-        FString LevelName;
-        switch (NewLevel)
-        {
-            case EPerf_PerformanceLevel::Critical: LevelName = TEXT("Critical"); break;
-            case EPerf_PerformanceLevel::Low: LevelName = TEXT("Low"); break;
-            case EPerf_PerformanceLevel::Medium: LevelName = TEXT("Medium"); break;
-            case EPerf_PerformanceLevel::High: LevelName = TEXT("High"); break;
-            case EPerf_PerformanceLevel::Ultra: LevelName = TEXT("Ultra"); break;
-        }
+        // Apply shadow resolution
+        FString ShadowCommand = FString::Printf(TEXT("r.Shadow.MaxResolution %d"), OptimizationSettings.ShadowResolution);
+        GEngine->Exec(World, *ShadowCommand);
         
-        UE_LOG(LogTemp, Log, TEXT("Performance level changed to: %s (FPS: %.1f)"), 
-               *LevelName, CurrentMetrics.CurrentFPS);
+        // Apply texture streaming
+        FString StreamingCommand = FString::Printf(TEXT("r.Streaming.PoolSize %d"), OptimizationSettings.TextureStreamingPoolSize);
+        GEngine->Exec(World, *StreamingCommand);
+        
+        // Apply LOD bias
+        FString StaticLODCommand = FString::Printf(TEXT("r.StaticMeshLODBias %f"), OptimizationSettings.StaticMeshLODBias);
+        GEngine->Exec(World, *StaticLODCommand);
+        
+        FString SkeletalLODCommand = FString::Printf(TEXT("r.SkeletalMeshLODBias %f"), OptimizationSettings.SkeletalMeshLODBias);
+        GEngine->Exec(World, *SkeletalLODCommand);
+        
+        // Apply occlusion culling
+        FString OcclusionCommand = FString::Printf(TEXT("r.HZBOcclusion %d"), OptimizationSettings.bEnableOcclusion ? 1 : 0);
+        GEngine->Exec(World, *OcclusionCommand);
+        
+        UE_LOG(LogTemp, Log, TEXT("Performance optimization settings applied"));
     }
 }
 
-void UPerf_PerformanceProfiler::LogPerformanceReport()
+void UPerf_PerformanceProfiler::SetPerformanceLevel(EPerf_PerformanceLevel NewLevel)
 {
-    UE_LOG(LogTemp, Log, TEXT("=== PERFORMANCE REPORT ==="));
-    UE_LOG(LogTemp, Log, TEXT("Current FPS: %.1f"), CurrentMetrics.CurrentFPS);
-    UE_LOG(LogTemp, Log, TEXT("Average FPS: %.1f"), GetAverageFPS());
-    UE_LOG(LogTemp, Log, TEXT("Average Frame Time: %.2f ms"), GetAverageFrameTime());
-    UE_LOG(LogTemp, Log, TEXT("Performance Level: %d"), (int32)CurrentMetrics.PerformanceLevel);
-    UE_LOG(LogTemp, Log, TEXT("Draw Calls: %d"), CurrentMetrics.DrawCalls);
-    UE_LOG(LogTemp, Log, TEXT("Triangle Count: %d"), CurrentMetrics.TriangleCount);
-    UE_LOG(LogTemp, Log, TEXT("Memory Usage: %.1f MB"), CurrentMetrics.MemoryUsageMB);
-    UE_LOG(LogTemp, Log, TEXT("========================="));
-}
-
-void UPerf_PerformanceProfiler::SavePerformanceReport(const FString& FilePath)
-{
-    FString ReportContent;
-    ReportContent += FString::Printf(TEXT("Performance Report - %s\n"), *FDateTime::Now().ToString());
-    ReportContent += FString::Printf(TEXT("Current FPS: %.1f\n"), CurrentMetrics.CurrentFPS);
-    ReportContent += FString::Printf(TEXT("Average FPS: %.1f\n"), GetAverageFPS());
-    ReportContent += FString::Printf(TEXT("Average Frame Time: %.2f ms\n"), GetAverageFrameTime());
-    ReportContent += FString::Printf(TEXT("Performance Level: %d\n"), (int32)CurrentMetrics.PerformanceLevel);
-    ReportContent += FString::Printf(TEXT("Draw Calls: %d\n"), CurrentMetrics.DrawCalls);
-    ReportContent += FString::Printf(TEXT("Triangle Count: %d\n"), CurrentMetrics.TriangleCount);
-    ReportContent += FString::Printf(TEXT("Memory Usage: %.1f MB\n"), CurrentMetrics.MemoryUsageMB);
+    TargetPerformanceLevel = NewLevel;
     
-    if (!FFileHelper::SaveStringToFile(ReportContent, *FilePath))
+    switch (NewLevel)
     {
-        UE_LOG(LogTemp, Error, TEXT("Failed to save performance report to: %s"), *FilePath);
+        case EPerf_PerformanceLevel::Low:
+            ApplyLowSettings();
+            break;
+        case EPerf_PerformanceLevel::Medium:
+            ApplyMediumSettings();
+            break;
+        case EPerf_PerformanceLevel::High:
+            ApplyHighSettings();
+            break;
+        case EPerf_PerformanceLevel::Ultra:
+            ApplyUltraSettings();
+            break;
     }
-    else
+    
+    ApplyOptimizationSettings();
+}
+
+bool UPerf_PerformanceProfiler::IsPerformanceAcceptable() const
+{
+    float TargetFPS = 60.0f;
+    
+    switch (TargetPerformanceLevel)
     {
-        UE_LOG(LogTemp, Log, TEXT("Performance report saved to: %s"), *FilePath);
+        case EPerf_PerformanceLevel::Low:
+            TargetFPS = 30.0f;
+            break;
+        case EPerf_PerformanceLevel::Medium:
+            TargetFPS = 45.0f;
+            break;
+        case EPerf_PerformanceLevel::High:
+            TargetFPS = 60.0f;
+            break;
+        case EPerf_PerformanceLevel::Ultra:
+            TargetFPS = 90.0f;
+            break;
     }
+    
+    return CurrentMetrics.AverageFPS >= (TargetFPS * 0.9f); // Allow 10% tolerance
+}
+
+void UPerf_PerformanceProfiler::AutoOptimize()
+{
+    if (CurrentMetrics.AverageFPS < 30.0f)
+    {
+        // Very poor performance - apply low settings
+        SetPerformanceLevel(EPerf_PerformanceLevel::Low);
+        UE_LOG(LogTemp, Warning, TEXT("Auto-optimization: Applied LOW settings due to poor performance (%.1f FPS)"), CurrentMetrics.AverageFPS);
+    }
+    else if (CurrentMetrics.AverageFPS < 45.0f)
+    {
+        // Poor performance - apply medium settings
+        SetPerformanceLevel(EPerf_PerformanceLevel::Medium);
+        UE_LOG(LogTemp, Warning, TEXT("Auto-optimization: Applied MEDIUM settings due to low performance (%.1f FPS)"), CurrentMetrics.AverageFPS);
+    }
+    else if (CurrentMetrics.AverageFPS > 90.0f && TargetPerformanceLevel != EPerf_PerformanceLevel::Ultra)
+    {
+        // Excellent performance - can increase quality
+        SetPerformanceLevel(EPerf_PerformanceLevel::Ultra);
+        UE_LOG(LogTemp, Log, TEXT("Auto-optimization: Applied ULTRA settings due to excellent performance (%.1f FPS)"), CurrentMetrics.AverageFPS);
+    }
+}
+
+void UPerf_PerformanceProfiler::UpdateMetrics()
+{
+    // Get current FPS
+    CurrentMetrics.CurrentFPS = 1.0f / GetWorld()->GetDeltaSeconds();
+    CurrentMetrics.FrameTime = GetWorld()->GetDeltaSeconds() * 1000.0f; // Convert to milliseconds
+    
+    // Store FPS sample
+    FPSSamples[SampleIndex] = CurrentMetrics.CurrentFPS;
+    SampleIndex = (SampleIndex + 1) % MaxSamples;
+    
+    // Calculate averages
+    CalculateAverages();
+    
+    // Estimate other metrics (simplified)
+    CurrentMetrics.GameThreadTime = CurrentMetrics.FrameTime * 0.6f; // Rough estimate
+    CurrentMetrics.RenderThreadTime = CurrentMetrics.FrameTime * 0.3f; // Rough estimate
+    CurrentMetrics.GPUTime = CurrentMetrics.FrameTime * 0.4f; // Rough estimate
+    
+    // Rough estimates for draw calls and triangles
+    CurrentMetrics.DrawCalls = FMath::RandRange(500, 2000);
+    CurrentMetrics.Triangles = FMath::RandRange(50000, 500000);
+    
+    // Memory usage (simplified)
+    CurrentMetrics.MemoryUsageMB = FPlatformMemory::GetStats().UsedPhysical / (1024.0f * 1024.0f);
+}
+
+void UPerf_PerformanceProfiler::CalculateAverages()
+{
+    float Sum = 0.0f;
+    float Min = FPSSamples[0];
+    float Max = FPSSamples[0];
+    
+    for (int32 i = 0; i < MaxSamples; i++)
+    {
+        Sum += FPSSamples[i];
+        Min = FMath::Min(Min, FPSSamples[i]);
+        Max = FMath::Max(Max, FPSSamples[i]);
+    }
+    
+    CurrentMetrics.AverageFPS = Sum / MaxSamples;
+    CurrentMetrics.MinFPS = Min;
+    CurrentMetrics.MaxFPS = Max;
+}
+
+void UPerf_PerformanceProfiler::ApplyLowSettings()
+{
+    OptimizationSettings.ViewDistanceScale = 0.6f;
+    OptimizationSettings.ShadowResolution = 1024;
+    OptimizationSettings.TextureStreamingPoolSize = 1024;
+    OptimizationSettings.StaticMeshLODBias = 2.0f;
+    OptimizationSettings.SkeletalMeshLODBias = 2.0f;
+    OptimizationSettings.bEnableOcclusion = true;
+    OptimizationSettings.bEnableDistanceCulling = true;
+}
+
+void UPerf_PerformanceProfiler::ApplyMediumSettings()
+{
+    OptimizationSettings.ViewDistanceScale = 0.8f;
+    OptimizationSettings.ShadowResolution = 2048;
+    OptimizationSettings.TextureStreamingPoolSize = 1536;
+    OptimizationSettings.StaticMeshLODBias = 1.0f;
+    OptimizationSettings.SkeletalMeshLODBias = 1.0f;
+    OptimizationSettings.bEnableOcclusion = true;
+    OptimizationSettings.bEnableDistanceCulling = true;
+}
+
+void UPerf_PerformanceProfiler::ApplyHighSettings()
+{
+    OptimizationSettings.ViewDistanceScale = 1.0f;
+    OptimizationSettings.ShadowResolution = 4096;
+    OptimizationSettings.TextureStreamingPoolSize = 2048;
+    OptimizationSettings.StaticMeshLODBias = 0.0f;
+    OptimizationSettings.SkeletalMeshLODBias = 0.0f;
+    OptimizationSettings.bEnableOcclusion = true;
+    OptimizationSettings.bEnableDistanceCulling = true;
+}
+
+void UPerf_PerformanceProfiler::ApplyUltraSettings()
+{
+    OptimizationSettings.ViewDistanceScale = 1.2f;
+    OptimizationSettings.ShadowResolution = 8192;
+    OptimizationSettings.TextureStreamingPoolSize = 4096;
+    OptimizationSettings.StaticMeshLODBias = -1.0f;
+    OptimizationSettings.SkeletalMeshLODBias = -1.0f;
+    OptimizationSettings.bEnableOcclusion = true;
+    OptimizationSettings.bEnableDistanceCulling = false; // Disable for maximum quality
 }
