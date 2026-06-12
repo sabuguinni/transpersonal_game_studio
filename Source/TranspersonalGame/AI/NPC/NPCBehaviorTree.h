@@ -2,10 +2,10 @@
 
 #include "CoreMinimal.h"
 #include "BehaviorTree/BehaviorTree.h"
-#include "BehaviorTree/BehaviorTreeComponent.h"
 #include "BehaviorTree/BlackboardComponent.h"
-#include "Engine/Engine.h"
-#include "TranspersonalGame/Core/SharedTypes.h"
+#include "BehaviorTree/BehaviorTreeComponent.h"
+#include "Engine/DataAsset.h"
+#include "SharedTypes.h"
 #include "NPCBehaviorTree.generated.h"
 
 USTRUCT(BlueprintType)
@@ -14,7 +14,7 @@ struct TRANSPERSONALGAME_API FNPC_BehaviorState
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Behavior")
-    ENPC_NPCState CurrentState = ENPC_NPCState::Idle;
+    ENPC_BehaviorType CurrentBehavior = ENPC_BehaviorType::Idle;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Behavior")
     float StateTimer = 0.0f;
@@ -26,86 +26,56 @@ struct TRANSPERSONALGAME_API FNPC_BehaviorState
     AActor* TargetActor = nullptr;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Behavior")
-    float AlertLevel = 0.0f;
+    bool bIsInterrupted = false;
+};
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Behavior")
-    bool bIsInCombat = false;
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FNPC_MemoryData
+{
+    GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Behavior")
-    TArray<FVector> PatrolPoints;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Memory")
+    TArray<FVector> KnownPlayerLocations;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Behavior")
-    int32 CurrentPatrolIndex = 0;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Memory")
+    float LastPlayerSightTime = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Memory")
+    TArray<AActor*> KnownThreats;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Memory")
+    TArray<FVector> SafeLocations;
 };
 
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UNPC_BehaviorTreeManager : public UObject
+class TRANSPERSONALGAME_API UNPC_BehaviorTreeAsset : public UDataAsset
 {
     GENERATED_BODY()
 
 public:
-    UNPC_BehaviorTreeManager();
+    UNPC_BehaviorTreeAsset();
 
-    UFUNCTION(BlueprintCallable, Category = "NPC Behavior")
-    void InitializeBehaviorTree(class ANPC_BaseCharacter* NPCOwner);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior Tree")
+    UBehaviorTree* IdleBehaviorTree;
 
-    UFUNCTION(BlueprintCallable, Category = "NPC Behavior")
-    void UpdateBehaviorState(float DeltaTime);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior Tree")
+    UBehaviorTree* PatrolBehaviorTree;
 
-    UFUNCTION(BlueprintCallable, Category = "NPC Behavior")
-    void SetBehaviorState(ENPC_NPCState NewState);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior Tree")
+    UBehaviorTree* ChaseBehaviorTree;
 
-    UFUNCTION(BlueprintCallable, Category = "NPC Behavior")
-    ENPC_NPCState GetCurrentState() const { return BehaviorState.CurrentState; }
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior Tree")
+    UBehaviorTree* FleeBehaviorTree;
 
-    UFUNCTION(BlueprintCallable, Category = "NPC Behavior")
-    void AddPatrolPoint(const FVector& Point);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior Settings")
+    float PatrolRadius = 1000.0f;
 
-    UFUNCTION(BlueprintCallable, Category = "NPC Behavior")
-    void SetTargetActor(AActor* Target);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior Settings")
+    float ChaseDistance = 1500.0f;
 
-    UFUNCTION(BlueprintCallable, Category = "NPC Behavior")
-    void OnPlayerDetected(AActor* Player, float Distance);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior Settings")
+    float FleeDistance = 500.0f;
 
-    UFUNCTION(BlueprintCallable, Category = "NPC Behavior")
-    void OnPlayerLost();
-
-    UFUNCTION(BlueprintCallable, Category = "NPC Behavior")
-    void OnCombatStart(AActor* Enemy);
-
-    UFUNCTION(BlueprintCallable, Category = "NPC Behavior")
-    void OnCombatEnd();
-
-protected:
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "NPC Behavior")
-    FNPC_BehaviorState BehaviorState;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Behavior")
-    UBehaviorTree* BehaviorTreeAsset;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "NPC Behavior")
-    class ANPC_BaseCharacter* OwnerNPC;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Behavior")
-    float PatrolSpeed = 150.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Behavior")
-    float ChaseSpeed = 400.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Behavior")
-    float DetectionRange = 1500.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Behavior")
-    float LostPlayerTime = 5.0f;
-
-private:
-    void ProcessIdleState(float DeltaTime);
-    void ProcessPatrolState(float DeltaTime);
-    void ProcessChaseState(float DeltaTime);
-    void ProcessCombatState(float DeltaTime);
-    void ProcessFleeState(float DeltaTime);
-
-    FVector GetNextPatrolPoint();
-    bool IsPlayerInRange() const;
-    void UpdateAlertLevel(float DeltaTime);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior Settings")
+    float MemoryDuration = 30.0f;
 };
