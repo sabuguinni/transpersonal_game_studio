@@ -1,163 +1,155 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/GameInstanceSubsystem.h"
 #include "Engine/World.h"
-#include "Math/Vector.h"
-#include "Containers/Array.h"
-#include "Containers/Map.h"
+#include "Subsystems/WorldSubsystem.h"
+#include "Engine/Engine.h"
+#include "Components/ActorComponent.h"
 #include "../SharedTypes.h"
 #include "Eng_BiomeSystemManager.generated.h"
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEng_BiomeDefinition
+struct TRANSPERSONALGAME_API FEng_BiomeData
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    EBiomeType BiomeType = EBiomeType::Savanna;
+    EBiomeType BiomeType = EBiomeType::Grassland;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    FVector CenterLocation = FVector::ZeroVector;
+    float Temperature = 25.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float Radius = 15000.0f;
+    float Humidity = 50.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float TemperatureRange = 25.0f;
+    float Elevation = 0.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float HumidityLevel = 0.5f;
+    TArray<FString> AllowedVegetation;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float DangerLevel = 0.5f;
+    TArray<FString> AllowedDinosaurs;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    TArray<EDinosaurSpecies> NativeDinosaurs;
+    float WaterProximity = 0.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    TArray<FString> VegetationTypes;
-
-    FEng_BiomeDefinition()
+    FEng_BiomeData()
     {
-        BiomeType = EBiomeType::Savanna;
-        CenterLocation = FVector::ZeroVector;
-        Radius = 15000.0f;
-        TemperatureRange = 25.0f;
-        HumidityLevel = 0.5f;
-        DangerLevel = 0.5f;
+        AllowedVegetation.Add(TEXT("Grass"));
+        AllowedVegetation.Add(TEXT("Fern"));
+        AllowedDinosaurs.Add(TEXT("Triceratops"));
+        AllowedDinosaurs.Add(TEXT("Parasaurolophus"));
     }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEng_BiomeDistributionRule
+struct TRANSPERSONALGAME_API FEng_BiomeTransition
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Distribution")
-    EBiomeType TargetBiome = EBiomeType::Savanna;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Transition")
+    EBiomeType FromBiome = EBiomeType::Grassland;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Distribution")
-    float SpawnPercentage = 0.2f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Transition")
+    EBiomeType ToBiome = EBiomeType::Forest;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Distribution")
-    int32 MaxActorsPerBiome = 1000;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Transition")
+    float TransitionDistance = 1000.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Distribution")
-    bool bRequiresBiomeCompatibility = true;
-
-    FEng_BiomeDistributionRule()
-    {
-        TargetBiome = EBiomeType::Savanna;
-        SpawnPercentage = 0.2f;
-        MaxActorsPerBiome = 1000;
-        bRequiresBiomeCompatibility = true;
-    }
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Transition")
+    float BlendFactor = 0.5f;
 };
 
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UEng_BiomeSystemManager : public UGameInstanceSubsystem
+class TRANSPERSONALGAME_API UEng_BiomeSystemManager : public UWorldSubsystem
 {
     GENERATED_BODY()
 
 public:
     UEng_BiomeSystemManager();
 
-    // Subsystem Interface
+    // UWorldSubsystem interface
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
+    virtual bool ShouldCreateSubsystem(UObject* Outer) const override;
 
-    // Biome Management
-    UFUNCTION(BlueprintCallable, Category = "Biome System")
-    void InitializeBiomes();
-
+    // Core biome system methods
     UFUNCTION(BlueprintCallable, Category = "Biome System")
     EBiomeType GetBiomeAtLocation(const FVector& WorldLocation) const;
 
     UFUNCTION(BlueprintCallable, Category = "Biome System")
-    FEng_BiomeDefinition GetBiomeDefinition(EBiomeType BiomeType) const;
+    FEng_BiomeData GetBiomeData(EBiomeType BiomeType) const;
 
     UFUNCTION(BlueprintCallable, Category = "Biome System")
-    TArray<FVector> GetDistributedSpawnLocations(int32 TotalActors, float SpawnRadius = 100.0f) const;
+    float GetTemperatureAtLocation(const FVector& WorldLocation) const;
 
     UFUNCTION(BlueprintCallable, Category = "Biome System")
-    FVector GetRandomLocationInBiome(EBiomeType BiomeType, float MinDistanceFromCenter = 0.0f) const;
+    float GetHumidityAtLocation(const FVector& WorldLocation) const;
 
     UFUNCTION(BlueprintCallable, Category = "Biome System")
-    bool IsLocationInBiome(const FVector& Location, EBiomeType BiomeType) const;
+    bool CanSpawnVegetationAtLocation(const FVector& WorldLocation, const FString& VegetationType) const;
 
-    // Distribution System
-    UFUNCTION(BlueprintCallable, Category = "Distribution")
-    void SetDistributionRules(const TArray<FEng_BiomeDistributionRule>& Rules);
+    UFUNCTION(BlueprintCallable, Category = "Biome System")
+    bool CanSpawnDinosaurAtLocation(const FVector& WorldLocation, const FString& DinosaurType) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Distribution")
-    TArray<FEng_BiomeDistributionRule> GetCurrentDistributionRules() const;
+    UFUNCTION(BlueprintCallable, Category = "Biome System")
+    TArray<FString> GetAllowedVegetationAtLocation(const FVector& WorldLocation) const;
 
-    // Actor Management
-    UFUNCTION(BlueprintCallable, Category = "Actor Management")
-    void RegisterActorInBiome(AActor* Actor, EBiomeType BiomeType);
+    UFUNCTION(BlueprintCallable, Category = "Biome System")
+    TArray<FString> GetAllowedDinosaursAtLocation(const FVector& WorldLocation) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Actor Management")
-    int32 GetActorCountInBiome(EBiomeType BiomeType) const;
+    UFUNCTION(BlueprintCallable, Category = "Biome System")
+    void RegisterBiomeTransition(const FEng_BiomeTransition& Transition);
 
-    UFUNCTION(BlueprintCallable, Category = "Actor Management")
-    TArray<AActor*> GetActorsInBiome(EBiomeType BiomeType) const;
+    UFUNCTION(BlueprintCallable, Category = "Biome System")
+    float CalculateBiomeBlendFactor(const FVector& WorldLocation, EBiomeType BiomeA, EBiomeType BiomeB) const;
 
-    // Environmental Queries
-    UFUNCTION(BlueprintCallable, Category = "Environment")
-    float GetTemperatureAtLocation(const FVector& Location) const;
+    // Debug and testing methods
+    UFUNCTION(BlueprintCallable, Category = "Biome System", CallInEditor = true)
+    void DebugPrintBiomeAtLocation(const FVector& WorldLocation);
 
-    UFUNCTION(BlueprintCallable, Category = "Environment")
-    float GetHumidityAtLocation(const FVector& Location) const;
+    UFUNCTION(BlueprintCallable, Category = "Biome System", CallInEditor = true)
+    void GenerateBiomeMap(int32 MapSize = 100);
 
-    UFUNCTION(BlueprintCallable, Category = "Environment")
-    float GetDangerLevelAtLocation(const FVector& Location) const;
+    UFUNCTION(BlueprintCallable, Category = "Biome System")
+    void SetBiomeOverride(const FVector& WorldLocation, EBiomeType NewBiome, float Radius);
 
-    // Validation and Debugging
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Debug")
-    void ValidateBiomeConfiguration();
-
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Debug")
-    void LogBiomeStatistics();
+    UFUNCTION(BlueprintCallable, Category = "Biome System")
+    void ClearBiomeOverrides();
 
 protected:
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
-    TMap<EBiomeType, FEng_BiomeDefinition> BiomeDefinitions;
+    // Core biome data storage
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Biome Data", meta = (AllowPrivateAccess = "true"))
+    TMap<EBiomeType, FEng_BiomeData> BiomeDataMap;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
-    TArray<FEng_BiomeDistributionRule> DistributionRules;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Biome Data", meta = (AllowPrivateAccess = "true"))
+    TArray<FEng_BiomeTransition> BiomeTransitions;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Runtime")
-    TMap<EBiomeType, TArray<TWeakObjectPtr<AActor>>> BiomeActors;
+    // Biome generation parameters
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Generation", meta = (AllowPrivateAccess = "true"))
+    float NoiseScale = 0.001f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
-    bool bAutoInitializeOnStartup = true;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Generation", meta = (AllowPrivateAccess = "true"))
+    float TemperatureNoiseScale = 0.0005f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
-    float BiomeTransitionZone = 2000.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Generation", meta = (AllowPrivateAccess = "true"))
+    float HumidityNoiseScale = 0.0008f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Generation", meta = (AllowPrivateAccess = "true"))
+    float ElevationInfluence = 0.1f;
+
+    // Runtime biome overrides for testing
+    UPROPERTY()
+    TMap<FVector, EBiomeType> BiomeOverrides;
+
+    UPROPERTY()
+    TMap<FVector, float> OverrideRadii;
 
 private:
-    void SetupDefaultBiomes();
-    void SetupDefaultDistributionRules();
-    float CalculateDistanceToBiomeCenter(const FVector& Location, EBiomeType BiomeType) const;
+    // Internal helper methods
+    float GeneratePerlinNoise(float X, float Y, float Scale) const;
+    EBiomeType CalculateBiomeFromFactors(float Temperature, float Humidity, float Elevation) const;
+    void InitializeBiomeData();
+    bool IsLocationInBiomeOverride(const FVector& WorldLocation, EBiomeType& OutBiome) const;
 };
