@@ -2,172 +2,143 @@
 
 #include "CoreMinimal.h"
 #include "Engine/World.h"
-#include "GameFramework/WorldSettings.h"
+#include "Components/ActorComponent.h"
+#include "Engine/Engine.h"
 #include "PhysicsEngine/PhysicsSettings.h"
-#include "Components/StaticMeshComponent.h"
-#include "Components/SkeletalMeshComponent.h"
-#include "GameFramework/CharacterMovementComponent.h"
-#include "PhysicalMaterials/PhysicalMaterial.h"
-#include "Subsystems/WorldSubsystem.h"
 #include "Core_PhysicsSystemManager.generated.h"
 
 UENUM(BlueprintType)
-enum class ECore_PhysicsQuality : uint8
+enum class ECore_PhysicsMode : uint8
 {
-    Low         UMETA(DisplayName = "Low Quality"),
-    Medium      UMETA(DisplayName = "Medium Quality"),
-    High        UMETA(DisplayName = "High Quality"),
-    Ultra       UMETA(DisplayName = "Ultra Quality")
-};
-
-UENUM(BlueprintType)
-enum class ECore_TerrainType : uint8
-{
-    Grass       UMETA(DisplayName = "Grass"),
-    Rock        UMETA(DisplayName = "Rock"),
-    Sand        UMETA(DisplayName = "Sand"),
-    Mud         UMETA(DisplayName = "Mud"),
-    Snow        UMETA(DisplayName = "Snow"),
-    Water       UMETA(DisplayName = "Water"),
-    Lava        UMETA(DisplayName = "Lava")
+    Standard        UMETA(DisplayName = "Standard Physics"),
+    HighPrecision   UMETA(DisplayName = "High Precision"),
+    Performance     UMETA(DisplayName = "Performance Optimized"),
+    Cinematic       UMETA(DisplayName = "Cinematic Quality")
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FCore_PhysicsSettings
+struct FCore_PhysicsProfile
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Profile")
     float GravityScale = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
-    float MaxPhysicsDeltaTime = 0.033f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Profile")
+    float LinearDamping = 0.01f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
-    int32 MaxSubsteps = 6;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Profile")
+    float AngularDamping = 0.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
-    ECore_PhysicsQuality PhysicsQuality = ECore_PhysicsQuality::High;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Profile")
+    float MaxAngularVelocity = 3600.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
-    bool bEnableRagdollPhysics = true;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Profile")
+    bool bEnableCCD = false;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
-    bool bEnableTerrainInteraction = true;
-};
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Profile")
+    int32 SolverIterations = 8;
 
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FCore_TerrainPhysicsData
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
-    ECore_TerrainType TerrainType = ECore_TerrainType::Grass;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
-    float Friction = 0.7f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
-    float Restitution = 0.3f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
-    float Density = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
-    bool bAffectsMovement = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
-    float MovementSpeedMultiplier = 1.0f;
+    FCore_PhysicsProfile()
+    {
+        GravityScale = 1.0f;
+        LinearDamping = 0.01f;
+        AngularDamping = 0.0f;
+        MaxAngularVelocity = 3600.0f;
+        bEnableCCD = false;
+        SolverIterations = 8;
+    }
 };
 
 /**
- * Core Physics System Manager
- * Manages physics settings, terrain interaction, and ragdoll systems
- * Provides centralized physics configuration for the prehistoric survival game
+ * Core Physics System Manager - Handles global physics configuration and optimization
+ * Manages physics profiles, collision layers, and performance settings
  */
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UCore_PhysicsSystemManager : public UWorldSubsystem
+UCLASS(BlueprintType, Blueprintable, ClassGroup=(TranspersonalGame))
+class TRANSPERSONALGAME_API UCore_PhysicsSystemManager : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
     UCore_PhysicsSystemManager();
 
-    // USubsystem Interface
-    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
-    virtual void Deinitialize() override;
+protected:
+    virtual void BeginPlay() override;
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    // Physics Configuration
-    UFUNCTION(BlueprintCallable, Category = "Core Physics")
-    void InitializePhysicsSettings();
+public:
+    // Physics Mode Management
+    UFUNCTION(BlueprintCallable, Category = "Physics System")
+    void SetPhysicsMode(ECore_PhysicsMode NewMode);
 
-    UFUNCTION(BlueprintCallable, Category = "Core Physics")
-    void SetPhysicsQuality(ECore_PhysicsQuality NewQuality);
+    UFUNCTION(BlueprintPure, Category = "Physics System")
+    ECore_PhysicsMode GetCurrentPhysicsMode() const { return CurrentPhysicsMode; }
 
-    UFUNCTION(BlueprintCallable, Category = "Core Physics")
-    void SetGravityScale(float NewGravityScale);
+    // Physics Profile Management
+    UFUNCTION(BlueprintCallable, Category = "Physics System")
+    void ApplyPhysicsProfile(const FCore_PhysicsProfile& Profile);
 
-    UFUNCTION(BlueprintCallable, Category = "Core Physics")
-    void UpdatePhysicsSettings(const FCore_PhysicsSettings& NewSettings);
-
-    // Terrain Physics
-    UFUNCTION(BlueprintCallable, Category = "Core Physics")
-    void RegisterTerrainActor(AActor* TerrainActor, const FCore_TerrainPhysicsData& PhysicsData);
-
-    UFUNCTION(BlueprintCallable, Category = "Core Physics")
-    void UnregisterTerrainActor(AActor* TerrainActor);
-
-    UFUNCTION(BlueprintCallable, Category = "Core Physics")
-    FCore_TerrainPhysicsData GetTerrainPhysicsData(AActor* TerrainActor) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Core Physics")
-    ECore_TerrainType GetTerrainTypeAtLocation(const FVector& WorldLocation) const;
-
-    // Ragdoll System
-    UFUNCTION(BlueprintCallable, Category = "Core Physics")
-    void EnableRagdollForActor(AActor* Actor);
-
-    UFUNCTION(BlueprintCallable, Category = "Core Physics")
-    void DisableRagdollForActor(AActor* Actor);
-
-    UFUNCTION(BlueprintCallable, Category = "Core Physics")
-    bool IsRagdollEnabled(AActor* Actor) const;
-
-    // Physics Validation
-    UFUNCTION(BlueprintCallable, Category = "Core Physics")
-    bool ValidatePhysicsSetup() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Core Physics")
-    TArray<FString> GetPhysicsValidationErrors() const;
+    UFUNCTION(BlueprintPure, Category = "Physics System")
+    FCore_PhysicsProfile GetCurrentPhysicsProfile() const { return CurrentProfile; }
 
     // Performance Monitoring
-    UFUNCTION(BlueprintCallable, Category = "Core Physics")
-    float GetCurrentPhysicsFrameTime() const;
+    UFUNCTION(BlueprintCallable, Category = "Physics System")
+    void EnablePhysicsProfiler(bool bEnable);
 
-    UFUNCTION(BlueprintCallable, Category = "Core Physics")
-    int32 GetActivePhysicsBodies() const;
+    UFUNCTION(BlueprintPure, Category = "Physics System")
+    float GetPhysicsFrameTime() const { return PhysicsFrameTime; }
 
-    UFUNCTION(BlueprintCallable, Category = "Core Physics")
-    void OptimizePhysicsPerformance();
+    UFUNCTION(BlueprintPure, Category = "Physics System")
+    int32 GetActiveRigidBodies() const { return ActiveRigidBodies; }
+
+    // Collision Management
+    UFUNCTION(BlueprintCallable, Category = "Physics System")
+    void RegisterCollisionProfile(const FName& ProfileName, const FCollisionResponseContainer& Responses);
+
+    UFUNCTION(BlueprintCallable, Category = "Physics System")
+    void OptimizeCollisionForPerformance();
+
+    // Gravity and World Physics
+    UFUNCTION(BlueprintCallable, Category = "Physics System")
+    void SetWorldGravity(const FVector& NewGravity);
+
+    UFUNCTION(BlueprintPure, Category = "Physics System")
+    FVector GetWorldGravity() const;
+
+    // Debug and Visualization
+    UFUNCTION(BlueprintCallable, Category = "Physics System", CallInEditor = true)
+    void DebugDrawPhysicsStats();
+
+    UFUNCTION(BlueprintCallable, Category = "Physics System")
+    void TogglePhysicsVisualization(bool bShowCollision, bool bShowConstraints, bool bShowMass);
 
 protected:
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Core Physics", meta = (AllowPrivateAccess = "true"))
-    FCore_PhysicsSettings CurrentPhysicsSettings;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Physics System")
+    ECore_PhysicsMode CurrentPhysicsMode;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Core Physics", meta = (AllowPrivateAccess = "true"))
-    TMap<AActor*, FCore_TerrainPhysicsData> TerrainPhysicsMap;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Physics System")
+    FCore_PhysicsProfile CurrentProfile;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Core Physics", meta = (AllowPrivateAccess = "true"))
-    TArray<AActor*> RagdollEnabledActors;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Physics System")
+    bool bPhysicsProfilerEnabled;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Physics System")
+    float PhysicsFrameTime;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Physics System")
+    int32 ActiveRigidBodies;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Physics System")
+    float ProfilerUpdateInterval;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Physics System")
+    TMap<FName, FCollisionResponseContainer> CustomCollisionProfiles;
 
 private:
-    void ApplyPhysicsSettings();
-    void UpdateTerrainPhysicsMaterials();
-    void MonitorPhysicsPerformance();
-    
-    UPROPERTY()
-    class UPhysicsSettings* CachedPhysicsSettings;
-    
-    float LastPhysicsFrameTime;
-    int32 LastPhysicsBodiesCount;
+    void UpdatePhysicsProfiler();
+    void ApplyPhysicsModeSettings();
+    void CountActiveRigidBodies();
+
+    float ProfilerTimer;
+    UWorld* CachedWorld;
 };
