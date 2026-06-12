@@ -1,40 +1,63 @@
 #include "Narr_StoryProgressionManager.h"
 #include "Engine/Engine.h"
+#include "Narr_DialogueManager.h"
 
 UNarr_StoryProgressionManager::UNarr_StoryProgressionManager()
 {
     CurrentPhase = ENarr_StoryPhase::Awakening;
-    CompletedEventsCount = 0;
+    DinosaurKillCount = 0;
+    DaysStoryMilestones.Empty();
+    StoryFlags.Empty();
 }
 
 void UNarr_StoryProgressionManager::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
-    InitializeStoryEvents();
-    UE_LOG(LogTemp, Warning, TEXT("Narr_StoryProgressionManager initialized"));
+    InitializeStoryMilestones();
+    UE_LOG(LogTemp, Log, TEXT("Story Progression Manager initialized"));
 }
 
 void UNarr_StoryProgressionManager::AdvanceStoryPhase()
 {
+    ENarr_StoryPhase NewPhase = CurrentPhase;
+    
     switch (CurrentPhase)
     {
         case ENarr_StoryPhase::Awakening:
-            CurrentPhase = ENarr_StoryPhase::FirstHunt;
+            if (DinosaurKillCount >= 1)
+            {
+                NewPhase = ENarr_StoryPhase::FirstHunt;
+            }
             break;
         case ENarr_StoryPhase::FirstHunt:
-            CurrentPhase = ENarr_StoryPhase::TerritoryWars;
+            if (DinosaurKillCount >= 5)
+            {
+                NewPhase = ENarr_StoryPhase::TerritoryWars;
+            }
             break;
         case ENarr_StoryPhase::TerritoryWars:
-            CurrentPhase = ENarr_StoryPhase::AlphaRising;
+            if (DinosaurKillCount >= 15)
+            {
+                NewPhase = ENarr_StoryPhase::AlphaChallenge;
+            }
             break;
-        case ENarr_StoryPhase::AlphaRising:
-            CurrentPhase = ENarr_StoryPhase::Survival;
+        case ENarr_StoryPhase::AlphaChallenge:
+            if (StoryFlags.Contains(TEXT("AlphaDefeated")) && StoryFlags[TEXT("AlphaDefeated")])
+            {
+                NewPhase = ENarr_StoryPhase::Mastery;
+            }
             break;
-        default:
+        case ENarr_StoryPhase::Mastery:
+            // Final phase - no advancement
             break;
     }
-    
-    UE_LOG(LogTemp, Warning, TEXT("Story phase advanced to: %d"), (int32)CurrentPhase);
+
+    if (NewPhase != CurrentPhase)
+    {
+        CurrentPhase = NewPhase;
+        UnlockPhaseContent(NewPhase);
+        UE_LOG(LogTemp, Log, TEXT("Story phase advanced to: %d"), (int32)NewPhase);
+    }
 }
 
 ENarr_StoryPhase UNarr_StoryProgressionManager::GetCurrentStoryPhase() const
@@ -42,156 +65,138 @@ ENarr_StoryPhase UNarr_StoryProgressionManager::GetCurrentStoryPhase() const
     return CurrentPhase;
 }
 
-void UNarr_StoryProgressionManager::CompleteStoryEvent(const FString& EventID)
+void UNarr_StoryProgressionManager::CompleteMilestone(const FString& MilestoneID)
 {
-    for (FNarr_StoryEvent& Event : StoryEvents)
+    for (FNarr_StoryMilestone& Milestone : StoryMilestones)
     {
-        if (Event.EventID == EventID && !Event.bCompleted)
+        if (Milestone.MilestoneID == MilestoneID && !Milestone.bIsCompleted)
         {
-            Event.bCompleted = true;
-            CompletedEventsCount++;
-            UE_LOG(LogTemp, Warning, TEXT("Story event completed: %s"), *EventID);
+            Milestone.bIsCompleted = true;
+            
+            // Unlock associated dialogues
+            if (UNarr_DialogueManager* DialogueManager = GetGameInstance()->GetSubsystem<UNarr_DialogueManager>())
+            {
+                for (const FString& DialogueID : Milestone.UnlockDialogues)
+                {
+                    // Trigger unlocked dialogue
+                    UE_LOG(LogTemp, Log, TEXT("Unlocked dialogue: %s"), *DialogueID);
+                }
+            }
+            
+            UE_LOG(LogTemp, Log, TEXT("Completed milestone: %s"), *MilestoneID);
+            CheckPhaseProgression();
             break;
         }
     }
 }
 
-bool UNarr_StoryProgressionManager::IsStoryEventCompleted(const FString& EventID) const
+bool UNarr_StoryProgressionManager::IsMilestoneCompleted(const FString& MilestoneID) const
 {
-    for (const FNarr_StoryEvent& Event : StoryEvents)
+    for (const FNarr_StoryMilestone& Milestone : StoryMilestones)
     {
-        if (Event.EventID == EventID)
+        if (Milestone.MilestoneID == MilestoneID)
         {
-            return Event.bCompleted;
+            return Milestone.bIsCompleted;
         }
     }
     return false;
 }
 
-TArray<FNarr_StoryEvent> UNarr_StoryProgressionManager::GetAvailableEvents() const
+void UNarr_StoryProgressionManager::TriggerStoryEvent(const FString& EventName)
 {
-    TArray<FNarr_StoryEvent> AvailableEvents;
-    
-    for (const FNarr_StoryEvent& Event : StoryEvents)
+    if (EventName == TEXT("DinosaurKilled"))
     {
-        if (!Event.bCompleted && Event.RequiredPhase == CurrentPhase && ArePrerequisitesMet(Event))
-        {
-            AvailableEvents.Add(Event);
-        }
+        DinosaurKillCount++;
+        UE_LOG(LogTemp, Log, TEXT("Dinosaur kill count: %d"), DinosaurKillCount);
+        AdvanceStoryPhase();
     }
-    
-    return AvailableEvents;
+    else if (EventName == TEXT("DayPassed"))
+    {
+        DaysStoryMilestones++;
+        UE_LOG(LogTemp, Log, TEXT("Days survived: %d"), DaysStoryMilestones);
+    }
+    else if (EventName == TEXT("AlphaDefeated"))
+    {
+        StoryFlags.Add(TEXT("AlphaDefeated"), true);
+        AdvanceStoryPhase();
+    }
 }
 
-float UNarr_StoryProgressionManager::GetStoryProgress() const
-{
-    if (StoryEvents.Num() == 0)
-    {
-        return 0.0f;
-    }
-    
-    return (float)CompletedEventsCount / (float)StoryEvents.Num();
-}
-
-FString UNarr_StoryProgressionManager::GetCurrentPhaseDescription() const
+FString UNarr_StoryProgressionManager::GetCurrentPhaseNarration() const
 {
     switch (CurrentPhase)
     {
         case ENarr_StoryPhase::Awakening:
-            return TEXT("You awaken in a dangerous prehistoric world. Learn to survive.");
+            return TEXT("You awaken in a world where giants roam. Every shadow could hide death, every sound could be your last warning.");
         case ENarr_StoryPhase::FirstHunt:
-            return TEXT("The hunt begins. Prove yourself against the ancient predators.");
+            return TEXT("Blood on your hands marks the beginning. You are no longer prey - you are learning to hunt.");
         case ENarr_StoryPhase::TerritoryWars:
-            return TEXT("Territorial conflicts emerge. Establish your dominance.");
-        case ENarr_StoryPhase::AlphaRising:
-            return TEXT("Rise to become the apex predator of your domain.");
-        case ENarr_StoryPhase::Survival:
-            return TEXT("Ultimate survival. Master the prehistoric world.");
+            return TEXT("The land knows your scent now. Predators circle, testing your resolve. Territory must be claimed with fang and claw.");
+        case ENarr_StoryPhase::AlphaChallenge:
+            return TEXT("The apex predator has taken notice. Only one can rule this domain. The final hunt begins.");
+        case ENarr_StoryPhase::Mastery:
+            return TEXT("You stand atop the food chain. The prehistoric world bows to your dominance. You have become the apex predator.");
         default:
-            return TEXT("Unknown phase");
+            return TEXT("The story unfolds...");
     }
 }
 
-void UNarr_StoryProgressionManager::InitializeStoryEvents()
+void UNarr_StoryProgressionManager::InitializeStoryMilestones()
 {
-    StoryEvents.Empty();
+    // First Kill Milestone
+    FNarr_StoryMilestone FirstKill;
+    FirstKill.MilestoneID = TEXT("FirstKill");
+    FirstKill.Description = TEXT("Kill your first dinosaur");
+    FirstKill.RequiredPhase = ENarr_StoryPhase::Awakening;
+    FirstKill.UnlockDialogues.Add(TEXT("FirstKillCelebration"));
+    StoryMilestones.Add(FirstKill);
 
-    // Awakening Phase Events
-    FNarr_StoryEvent Event1;
-    Event1.EventID = TEXT("FirstSteps");
-    Event1.EventDescription = TEXT("Take your first steps in the prehistoric world");
-    Event1.RequiredPhase = ENarr_StoryPhase::Awakening;
-    StoryEvents.Add(Event1);
+    // Pack Hunter Milestone
+    FNarr_StoryMilestone PackHunter;
+    PackHunter.MilestoneID = TEXT("PackHunter");
+    PackHunter.Description = TEXT("Defeat a pack of raptors");
+    PackHunter.RequiredPhase = ENarr_StoryPhase::FirstHunt;
+    PackHunter.UnlockDialogues.Add(TEXT("PackVictory"));
+    StoryMilestones.Add(PackHunter);
 
-    FNarr_StoryEvent Event2;
-    Event2.EventID = TEXT("FindWater");
-    Event2.EventDescription = TEXT("Locate a source of fresh water");
-    Event2.RequiredPhase = ENarr_StoryPhase::Awakening;
-    StoryEvents.Add(Event2);
+    // Territory Claimed Milestone
+    FNarr_StoryMilestone TerritoryClaimed;
+    TerritoryClaimed.MilestoneID = TEXT("TerritoryClaimed");
+    TerritoryClaimed.Description = TEXT("Establish dominance over a territory");
+    TerritoryClaimed.RequiredPhase = ENarr_StoryPhase::TerritoryWars;
+    TerritoryClaimed.UnlockDialogues.Add(TEXT("TerritoryVictory"));
+    StoryMilestones.Add(TerritoryClaimed);
 
-    FNarr_StoryEvent Event3;
-    Event3.EventID = TEXT("CraftTool");
-    Event3.EventDescription = TEXT("Craft your first primitive tool");
-    Event3.RequiredPhase = ENarr_StoryPhase::Awakening;
-    Event3.PrerequisiteEvents.Add(TEXT("FirstSteps"));
-    StoryEvents.Add(Event3);
-
-    // First Hunt Phase Events
-    FNarr_StoryEvent Event4;
-    Event4.EventID = TEXT("FirstKill");
-    Event4.EventDescription = TEXT("Successfully hunt your first prey");
-    Event4.RequiredPhase = ENarr_StoryPhase::FirstHunt;
-    Event4.PrerequisiteEvents.Add(TEXT("CraftTool"));
-    StoryEvents.Add(Event4);
-
-    FNarr_StoryEvent Event5;
-    Event5.EventID = TEXT("AvoidPredator");
-    Event5.EventDescription = TEXT("Survive an encounter with a large predator");
-    Event5.RequiredPhase = ENarr_StoryPhase::FirstHunt;
-    StoryEvents.Add(Event5);
-
-    // Territory Wars Phase Events
-    FNarr_StoryEvent Event6;
-    Event6.EventID = TEXT("ClaimTerritory");
-    Event6.EventDescription = TEXT("Establish your hunting territory");
-    Event6.RequiredPhase = ENarr_StoryPhase::TerritoryWars;
-    Event6.PrerequisiteEvents.Add(TEXT("FirstKill"));
-    StoryEvents.Add(Event6);
-
-    FNarr_StoryEvent Event7;
-    Event7.EventID = TEXT("DefendTerritory");
-    Event7.EventDescription = TEXT("Successfully defend your territory from intruders");
-    Event7.RequiredPhase = ENarr_StoryPhase::TerritoryWars;
-    Event7.PrerequisiteEvents.Add(TEXT("ClaimTerritory"));
-    StoryEvents.Add(Event7);
-
-    // Alpha Rising Phase Events
-    FNarr_StoryEvent Event8;
-    Event8.EventID = TEXT("DefeatAlpha");
-    Event8.EventDescription = TEXT("Challenge and defeat an alpha predator");
-    Event8.RequiredPhase = ENarr_StoryPhase::AlphaRising;
-    Event8.PrerequisiteEvents.Add(TEXT("DefendTerritory"));
-    StoryEvents.Add(Event8);
-
-    // Survival Phase Events
-    FNarr_StoryEvent Event9;
-    Event9.EventID = TEXT("MasterSurvival");
-    Event9.EventDescription = TEXT("Achieve mastery over the prehistoric world");
-    Event9.RequiredPhase = ENarr_StoryPhase::Survival;
-    Event9.PrerequisiteEvents.Add(TEXT("DefeatAlpha"));
-    StoryEvents.Add(Event9);
-
-    UE_LOG(LogTemp, Warning, TEXT("Initialized %d story events"), StoryEvents.Num());
+    // Alpha Defeated Milestone
+    FNarr_StoryMilestone AlphaDefeated;
+    AlphaDefeated.MilestoneID = TEXT("AlphaDefeated");
+    AlphaDefeated.Description = TEXT("Defeat the apex predator");
+    AlphaDefeated.RequiredPhase = ENarr_StoryPhase::AlphaChallenge;
+    AlphaDefeated.UnlockDialogues.Add(TEXT("AlphaVictory"));
+    StoryMilestones.Add(AlphaDefeated);
 }
 
-bool UNarr_StoryProgressionManager::ArePrerequisitesMet(const FNarr_StoryEvent& Event) const
+void UNarr_StoryProgressionManager::CheckPhaseProgression()
 {
-    for (const FString& PrereqID : Event.PrerequisiteEvents)
+    AdvanceStoryPhase();
+}
+
+void UNarr_StoryProgressionManager::UnlockPhaseContent(ENarr_StoryPhase Phase)
+{
+    // Unlock phase-specific content like new areas, creatures, or abilities
+    switch (Phase)
     {
-        if (!IsStoryEventCompleted(PrereqID))
-        {
-            return false;
-        }
+        case ENarr_StoryPhase::FirstHunt:
+            StoryFlags.Add(TEXT("CanCraftAdvancedWeapons"), true);
+            break;
+        case ENarr_StoryPhase::TerritoryWars:
+            StoryFlags.Add(TEXT("CanBuildShelters"), true);
+            break;
+        case ENarr_StoryPhase::AlphaChallenge:
+            StoryFlags.Add(TEXT("CanAccessAlphaTerritory"), true);
+            break;
+        case ENarr_StoryPhase::Mastery:
+            StoryFlags.Add(TEXT("HasMasteredSurvival"), true);
+            break;
     }
-    return true;
 }
