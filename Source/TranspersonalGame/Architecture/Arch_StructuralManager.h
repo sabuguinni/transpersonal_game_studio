@@ -1,135 +1,103 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/World.h"
-#include "Components/ActorComponent.h"
-#include "Engine/StaticMeshActor.h"
+#include "GameFramework/Actor.h"
 #include "Components/StaticMeshComponent.h"
-#include "SharedTypes.h"
+#include "Components/SceneComponent.h"
+#include "Engine/World.h"
 #include "Arch_StructuralManager.generated.h"
 
+UENUM(BlueprintType)
+enum class EArch_StructureType : uint8
+{
+    Shelter         UMETA(DisplayName = "Primitive Shelter"),
+    Foundation      UMETA(DisplayName = "Stone Foundation"),
+    Wall            UMETA(DisplayName = "Stone Wall"),
+    Entrance        UMETA(DisplayName = "Entrance Opening"),
+    Support         UMETA(DisplayName = "Support Beam"),
+    Ruins           UMETA(DisplayName = "Ancient Ruins")
+};
+
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FArch_StructuralElement
+struct TRANSPERSONALGAME_API FArch_StructuralData
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    FString ElementName;
+    EArch_StructureType StructureType = EArch_StructureType::Shelter;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    FVector Location;
+    FVector Dimensions = FVector(400.0f, 600.0f, 300.0f);
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    FRotator Rotation;
+    float WeatheringLevel = 0.5f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    FVector Scale;
+    bool bHasVegetationGrowth = true;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    float IntegrityLevel;
+    int32 StructuralIntegrity = 75;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    EBiomeType AssociatedBiome;
-
-    FArch_StructuralElement()
+    FArch_StructuralData()
     {
-        ElementName = TEXT("Unknown");
-        Location = FVector::ZeroVector;
-        Rotation = FRotator::ZeroRotator;
-        Scale = FVector::OneVector;
-        IntegrityLevel = 1.0f;
-        AssociatedBiome = EBiomeType::Temperate;
+        StructureType = EArch_StructureType::Shelter;
+        Dimensions = FVector(400.0f, 600.0f, 300.0f);
+        WeatheringLevel = 0.5f;
+        bHasVegetationGrowth = true;
+        StructuralIntegrity = 75;
     }
 };
 
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FArch_InteriorSpace
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interior")
-    FString SpaceName;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interior")
-    FVector Dimensions;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interior")
-    TArray<FString> ContainedObjects;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interior")
-    float AmbientLightLevel;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interior")
-    bool bHasRoof;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interior")
-    float StructuralSoundness;
-
-    FArch_InteriorSpace()
-    {
-        SpaceName = TEXT("Unnamed Space");
-        Dimensions = FVector(500.0f, 500.0f, 300.0f);
-        AmbientLightLevel = 0.3f;
-        bHasRoof = true;
-        StructuralSoundness = 1.0f;
-    }
-};
-
-UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UArch_StructuralManager : public UActorComponent
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API AArch_StructuralManager : public AActor
 {
     GENERATED_BODY()
 
 public:
-    UArch_StructuralManager();
+    AArch_StructuralManager();
 
 protected:
     virtual void BeginPlay() override;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    TArray<FArch_StructuralElement> StructuralElements;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    USceneComponent* RootSceneComponent;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    UStaticMeshComponent* StructureMesh;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    TArray<FArch_InteriorSpace> InteriorSpaces;
+    FArch_StructuralData StructuralData;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    float WeatheringRate;
+    TArray<FVector> ShelterLocations;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    float BaseIntegrity;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    bool bEnableWeathering;
+    float BiomePlacementRadius = 10000.0f;
 
 public:
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+    virtual void Tick(float DeltaTime) override;
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void SpawnStructuralElement(const FArch_StructuralElement& Element);
+    void PlaceStructuralElements();
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void CreateInteriorSpace(const FArch_InteriorSpace& Space);
+    void UpdateWeatheringEffects(float DeltaTime);
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void ApplyWeathering(float DeltaTime);
+    void GenerateShelterNetwork();
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    float GetStructuralIntegrity() const;
+    FVector GetOptimalShelterLocation(const FVector& BiomeCenter) const;
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    TArray<FArch_StructuralElement> GetElementsByBiome(EBiomeType BiomeType) const;
+    void ApplyEnvironmentalIntegration();
+
+    UFUNCTION(BlueprintPure, Category = "Architecture")
+    bool IsStructureStable() const;
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void RepairStructure(float RepairAmount);
+    void SetStructureType(EArch_StructureType NewType);
 
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    bool IsStructureSafe() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void SetWeatheringEnabled(bool bEnabled);
-
-private:
-    void UpdateElementIntegrity(FArch_StructuralElement& Element, float DeltaTime);
-    void CheckStructuralStability();
-    float CalculateEnvironmentalDamage(const FArch_StructuralElement& Element) const;
+    UFUNCTION(BlueprintPure, Category = "Architecture")
+    FArch_StructuralData GetStructuralData() const { return StructuralData; }
 };
