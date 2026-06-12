@@ -26,71 +26,59 @@ struct FBuild_ModuleStatus
     EBuild_CompilationStatus Status;
 
     UPROPERTY(BlueprintReadOnly)
-    TArray<FString> ErrorMessages;
+    TArray<FString> Errors;
 
     UPROPERTY(BlueprintReadOnly)
-    TArray<FString> WarningMessages;
+    TArray<FString> Warnings;
 
     UPROPERTY(BlueprintReadOnly)
-    float CompilationTime;
+    float CompileTime;
 
     FBuild_ModuleStatus()
     {
         ModuleName = TEXT("");
         Status = EBuild_CompilationStatus::Unknown;
-        CompilationTime = 0.0f;
+        CompileTime = 0.0f;
     }
 };
 
-UCLASS(BlueprintType)
+UCLASS()
 class TRANSPERSONALGAME_API UBuild_CompilationValidator : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
 public:
-    UBuild_CompilationValidator();
-
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
-    virtual void Deinitialize() override;
 
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
     void ValidateAllModules();
 
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    void ValidateModule(const FString& ModuleName);
+    bool CheckModuleCompilation(const FString& ModuleName);
 
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    EBuild_CompilationStatus GetModuleStatus(const FString& ModuleName);
+    TArray<FBuild_ModuleStatus> GetModuleStatuses() const { return ModuleStatuses; }
 
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    TArray<FBuild_ModuleStatus> GetAllModuleStatuses();
-
-    UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    bool AreAllModulesValid();
+    EBuild_CompilationStatus GetOverallStatus() const { return OverallStatus; }
 
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
     void GenerateCompilationReport();
 
-    UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    void CheckForDuplicateTypes();
-
-    UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    void ValidateHeaderIncludes();
-
 protected:
-    UPROPERTY(BlueprintReadOnly)
-    TMap<FString, FBuild_ModuleStatus> ModuleStatuses;
+    UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
+    TArray<FBuild_ModuleStatus> ModuleStatuses;
 
-    UPROPERTY(BlueprintReadOnly)
-    bool bValidationInProgress;
+    UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
+    EBuild_CompilationStatus OverallStatus;
 
-    UPROPERTY(BlueprintReadOnly)
-    float LastValidationTime;
+    UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
+    FDateTime LastValidationTime;
 
 private:
-    void CheckModuleCompilation(const FString& ModuleName);
-    void ParseCompilationErrors(const FString& ModuleName, const FString& LogOutput);
-    void CheckForMissingImplementations();
-    void ValidateUPropertyMacros();
-    void CheckGeneratedHeaders();
+    void ValidateTranspersonalGameModule();
+    void ValidateEngineModules();
+    void CheckHeaderIncludes();
+    void CheckLinkerDependencies();
+    void UpdateOverallStatus();
 };
