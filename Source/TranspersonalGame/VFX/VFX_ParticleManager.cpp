@@ -1,204 +1,282 @@
 #include "VFX_ParticleManager.h"
-#include "NiagaraFunctionLibrary.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
+#include "GameFramework/Actor.h"
+#include "NiagaraFunctionLibrary.h"
 #include "Kismet/GameplayStatics.h"
-#include "DrawDebugHelpers.h"
 
-AVFX_ParticleManager::AVFX_ParticleManager()
+UVFX_ParticleManager::UVFX_ParticleManager()
 {
-    PrimaryActorTick.bCanEverTick = true;
-    PrimaryActorTick.TickInterval = 1.0f; // Tick once per second for cleanup
+    PrimaryComponentTick.bCanEverTick = true;
+    PrimaryComponentTick.bStartWithTickEnabled = true;
     
-    MaxActiveEffects = 50.0f;
-    EffectCullDistance = 5000.0f;
+    bUseNiagaraSystem = true;
+    GlobalEffectScale = 1.0f;
+    MaxActiveEffects = 50;
+    
+    // Initialize default effect database
+    FVFX_EffectData CampfireEffect;
+    CampfireEffect.EffectType = EVFX_EffectType::Fire_Campfire;
+    CampfireEffect.Duration = -1.0f; // Looping
+    CampfireEffect.Scale = FVector(1.0f, 1.0f, 1.0f);
+    EffectDatabase.Add(CampfireEffect);
+    
+    FVFX_EffectData FootstepEffect;
+    FootstepEffect.EffectType = EVFX_EffectType::Dino_Footstep;
+    FootstepEffect.Duration = 2.0f;
+    FootstepEffect.Scale = FVector(1.5f, 1.5f, 1.0f);
+    EffectDatabase.Add(FootstepEffect);
+    
+    FVFX_EffectData RainEffect;
+    RainEffect.EffectType = EVFX_EffectType::Weather_Rain;
+    RainEffect.Duration = -1.0f; // Looping
+    RainEffect.Scale = FVector(10.0f, 10.0f, 5.0f);
+    EffectDatabase.Add(RainEffect);
+    
+    FVFX_EffectData BloodEffect;
+    BloodEffect.EffectType = EVFX_EffectType::Combat_Blood;
+    BloodEffect.Duration = 3.0f;
+    BloodEffect.Scale = FVector(0.8f, 0.8f, 0.8f);
+    EffectDatabase.Add(BloodEffect);
+    
+    FVFX_EffectData DustEffect;
+    DustEffect.EffectType = EVFX_EffectType::Environment_Dust;
+    DustEffect.Duration = 4.0f;
+    DustEffect.Scale = FVector(2.0f, 2.0f, 1.0f);
+    EffectDatabase.Add(DustEffect);
+    
+    FVFX_EffectData SplashEffect;
+    SplashEffect.EffectType = EVFX_EffectType::Water_Splash;
+    SplashEffect.Duration = 1.5f;
+    SplashEffect.Scale = FVector(1.2f, 1.2f, 1.2f);
+    EffectDatabase.Add(SplashEffect);
 }
 
-void AVFX_ParticleManager::BeginPlay()
+void UVFX_ParticleManager::BeginPlay()
 {
     Super::BeginPlay();
-    InitializeEffectSystems();
     
-    UE_LOG(LogTemp, Log, TEXT("VFX_ParticleManager: Initialized with %d effect types"), EffectSystems.Num());
+    UE_LOG(LogTemp, Log, TEXT("VFX ParticleManager initialized with %d effect types"), EffectDatabase.Num());
 }
 
-void AVFX_ParticleManager::InitializeEffectSystems()
+void UVFX_ParticleManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
-    // Initialize with placeholder paths - these would be replaced with actual Niagara systems
-    // For now, we create the mapping structure
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
     
-    // Fire effects
-    EffectSystems.Add(EVFX_EffectType::Fire_Campfire, nullptr);
-    
-    // Dust and impact effects
-    EffectSystems.Add(EVFX_EffectType::Dust_Footstep, nullptr);
-    EffectSystems.Add(EVFX_EffectType::Blood_Impact, nullptr);
-    
-    // Weather effects
-    EffectSystems.Add(EVFX_EffectType::Weather_Rain, nullptr);
-    EffectSystems.Add(EVFX_EffectType::Weather_Fog, nullptr);
-    
-    // Utility effects
-    EffectSystems.Add(EVFX_EffectType::Smoke_General, nullptr);
-    EffectSystems.Add(EVFX_EffectType::Sparks_Crafting, nullptr);
-    EffectSystems.Add(EVFX_EffectType::Water_Splash, nullptr);
-    
-    UE_LOG(LogTemp, Log, TEXT("VFX_ParticleManager: Effect systems initialized"));
+    CleanupFinishedEffects();
 }
 
-UNiagaraComponent* AVFX_ParticleManager::SpawnEffect(EVFX_EffectType EffectType, FVector Location, FRotator Rotation, float Duration)
+void UVFX_ParticleManager::SpawnEffect(EVFX_EffectType EffectType, FVector Location, FRotator Rotation, float Scale)
 {
-    if (!IsLocationVisible(Location))
+    if (ActiveNiagaraComponents.Num() + ActiveParticleComponents.Num() >= MaxActiveEffects)
     {
-        return nullptr;
+        UE_LOG(LogTemp, Warning, TEXT("VFX ParticleManager: Max active effects reached (%d)"), MaxActiveEffects);
+        return;
     }
     
-    if (ActiveEffects.Num() >= MaxActiveEffects)
+    FVFX_EffectData* EffectData = GetEffectData(EffectType);
+    if (!EffectData)
     {
-        CleanupExpiredEffects();
-        if (ActiveEffects.Num() >= MaxActiveEffects)
+        UE_LOG(LogTemp, Warning, TEXT("VFX ParticleManager: Effect type not found"));
+        return;
+    }
+    
+    float FinalScale = Scale * GlobalEffectScale;
+    
+    if (bUseNiagaraSystem && EffectData->NiagaraSystem.IsValid())
+    {
+        SpawnNiagaraEffect(*EffectData, Location, Rotation, FinalScale);
+    }
+    else if (EffectData->LegacyParticleSystem.IsValid())
+    {
+        SpawnLegacyEffect(*EffectData, Location, Rotation, FinalScale);
+    }
+    else
+    {
+        UE_LOG(LogTemp, Warning, TEXT("VFX ParticleManager: No valid particle system found for effect type"));
+    }
+}
+
+void UVFX_ParticleManager::SpawnEffectAtActor(EVFX_EffectType EffectType, AActor* TargetActor, FVector Offset)
+{
+    if (!TargetActor)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("VFX ParticleManager: Target actor is null"));
+        return;
+    }
+    
+    FVector SpawnLocation = TargetActor->GetActorLocation() + Offset;
+    FRotator SpawnRotation = TargetActor->GetActorRotation();
+    
+    SpawnEffect(EffectType, SpawnLocation, SpawnRotation);
+}
+
+void UVFX_ParticleManager::StopAllEffects()
+{
+    for (UNiagaraComponent* NiagaraComp : ActiveNiagaraComponents)
+    {
+        if (IsValid(NiagaraComp))
         {
-            UE_LOG(LogTemp, Warning, TEXT("VFX_ParticleManager: Max effects reached, skipping spawn"));
-            return nullptr;
+            NiagaraComp->Deactivate();
         }
     }
     
-    UNiagaraSystem** FoundSystem = EffectSystems.Find(EffectType);
-    if (!FoundSystem || !*FoundSystem)
+    for (UParticleSystemComponent* ParticleComp : ActiveParticleComponents)
     {
-        UE_LOG(LogTemp, Warning, TEXT("VFX_ParticleManager: Effect system not found for type %d"), (int32)EffectType);
-        return nullptr;
+        if (IsValid(ParticleComp))
+        {
+            ParticleComp->Deactivate();
+        }
     }
     
-    UNiagaraComponent* NewEffect = UNiagaraFunctionLibrary::SpawnSystemAtLocation(
+    ActiveNiagaraComponents.Empty();
+    ActiveParticleComponents.Empty();
+    
+    UE_LOG(LogTemp, Log, TEXT("VFX ParticleManager: All effects stopped"));
+}
+
+void UVFX_ParticleManager::SetEffectQuality(int32 QualityLevel)
+{
+    // Quality levels: 0=Low, 1=Medium, 2=High, 3=Ultra
+    switch (QualityLevel)
+    {
+        case 0: // Low
+            GlobalEffectScale = 0.5f;
+            MaxActiveEffects = 20;
+            bUseNiagaraSystem = false;
+            break;
+        case 1: // Medium
+            GlobalEffectScale = 0.75f;
+            MaxActiveEffects = 35;
+            bUseNiagaraSystem = true;
+            break;
+        case 2: // High
+            GlobalEffectScale = 1.0f;
+            MaxActiveEffects = 50;
+            bUseNiagaraSystem = true;
+            break;
+        case 3: // Ultra
+            GlobalEffectScale = 1.5f;
+            MaxActiveEffects = 75;
+            bUseNiagaraSystem = true;
+            break;
+        default:
+            QualityLevel = 2; // Default to High
+            break;
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("VFX ParticleManager: Quality set to %d, Scale: %f, MaxEffects: %d"), 
+           QualityLevel, GlobalEffectScale, MaxActiveEffects);
+}
+
+void UVFX_ParticleManager::CleanupFinishedEffects()
+{
+    // Clean up finished Niagara components
+    for (int32 i = ActiveNiagaraComponents.Num() - 1; i >= 0; i--)
+    {
+        UNiagaraComponent* NiagaraComp = ActiveNiagaraComponents[i];
+        if (!IsValid(NiagaraComp) || !NiagaraComp->IsActive())
+        {
+            ActiveNiagaraComponents.RemoveAt(i);
+        }
+    }
+    
+    // Clean up finished particle components
+    for (int32 i = ActiveParticleComponents.Num() - 1; i >= 0; i--)
+    {
+        UParticleSystemComponent* ParticleComp = ActiveParticleComponents[i];
+        if (!IsValid(ParticleComp) || !ParticleComp->IsActive())
+        {
+            ActiveParticleComponents.RemoveAt(i);
+        }
+    }
+}
+
+FVFX_EffectData* UVFX_ParticleManager::GetEffectData(EVFX_EffectType EffectType)
+{
+    for (FVFX_EffectData& Effect : EffectDatabase)
+    {
+        if (Effect.EffectType == EffectType)
+        {
+            return &Effect;
+        }
+    }
+    return nullptr;
+}
+
+void UVFX_ParticleManager::SpawnNiagaraEffect(const FVFX_EffectData& EffectData, FVector Location, FRotator Rotation, float Scale)
+{
+    if (!EffectData.NiagaraSystem.IsValid())
+    {
+        return;
+    }
+    
+    UNiagaraSystem* NiagaraSystem = EffectData.NiagaraSystem.LoadSynchronous();
+    if (!NiagaraSystem)
+    {
+        return;
+    }
+    
+    UNiagaraComponent* NiagaraComp = UNiagaraFunctionLibrary::SpawnSystemAtLocation(
         GetWorld(),
-        *FoundSystem,
+        NiagaraSystem,
         Location,
         Rotation,
-        FVector::OneVector,
+        EffectData.Scale * Scale,
         true,
         true,
         ENCPoolMethod::None,
         true
     );
     
-    if (NewEffect)
+    if (NiagaraComp)
     {
-        ActiveEffects.Add(NewEffect);
-        UE_LOG(LogTemp, Log, TEXT("VFX_ParticleManager: Spawned effect type %d at %s"), (int32)EffectType, *Location.ToString());
+        ActiveNiagaraComponents.Add(NiagaraComp);
         
-        // Set auto-destroy timer if duration is specified
-        if (Duration > 0.0f)
+        if (EffectData.Duration > 0.0f)
         {
+            // Set auto-destroy timer for non-looping effects
             FTimerHandle TimerHandle;
-            GetWorld()->GetTimerManager().SetTimer(TimerHandle, [this, NewEffect]()
+            GetWorld()->GetTimerManager().SetTimer(TimerHandle, [NiagaraComp]()
             {
-                if (NewEffect && IsValid(NewEffect))
+                if (IsValid(NiagaraComp))
                 {
-                    ActiveEffects.Remove(NewEffect);
-                    NewEffect->DestroyComponent();
+                    NiagaraComp->Deactivate();
                 }
-            }, Duration, false);
+            }, EffectData.Duration, false);
         }
-    }
-    
-    return NewEffect;
-}
-
-void AVFX_ParticleManager::SpawnCampfireEffect(FVector Location)
-{
-    UNiagaraComponent* FireEffect = SpawnEffect(EVFX_EffectType::Fire_Campfire, Location, FRotator::ZeroRotator, 0.0f); // Persistent fire
-    if (FireEffect)
-    {
-        // Set fire-specific parameters
-        SetEffectIntensity(FireEffect, 1.0f);
-        UE_LOG(LogTemp, Log, TEXT("VFX_ParticleManager: Campfire effect spawned at %s"), *Location.ToString());
-    }
-}
-
-void AVFX_ParticleManager::SpawnFootstepDust(FVector Location, float Intensity)
-{
-    UNiagaraComponent* DustEffect = SpawnEffect(EVFX_EffectType::Dust_Footstep, Location, FRotator::ZeroRotator, 2.0f);
-    if (DustEffect)
-    {
-        SetEffectIntensity(DustEffect, Intensity);
-        UE_LOG(LogTemp, Log, TEXT("VFX_ParticleManager: Footstep dust spawned at %s with intensity %f"), *Location.ToString(), Intensity);
-    }
-}
-
-void AVFX_ParticleManager::SpawnBloodImpact(FVector Location, FVector ImpactNormal)
-{
-    FRotator ImpactRotation = ImpactNormal.Rotation();
-    UNiagaraComponent* BloodEffect = SpawnEffect(EVFX_EffectType::Blood_Impact, Location, ImpactRotation, 3.0f);
-    if (BloodEffect)
-    {
-        UE_LOG(LogTemp, Log, TEXT("VFX_ParticleManager: Blood impact spawned at %s"), *Location.ToString());
-    }
-}
-
-void AVFX_ParticleManager::SpawnWeatherEffect(EVFX_EffectType WeatherType, FVector Location, float Intensity)
-{
-    if (WeatherType == EVFX_EffectType::Weather_Rain || WeatherType == EVFX_EffectType::Weather_Fog)
-    {
-        UNiagaraComponent* WeatherEffect = SpawnEffect(WeatherType, Location, FRotator::ZeroRotator, 0.0f); // Persistent weather
-        if (WeatherEffect)
-        {
-            SetEffectIntensity(WeatherEffect, Intensity);
-            UE_LOG(LogTemp, Log, TEXT("VFX_ParticleManager: Weather effect type %d spawned at %s"), (int32)WeatherType, *Location.ToString());
-        }
-    }
-}
-
-void AVFX_ParticleManager::CleanupExpiredEffects()
-{
-    ActiveEffects.RemoveAll([](UNiagaraComponent* Effect)
-    {
-        return !IsValid(Effect) || !Effect->IsActive();
-    });
-    
-    UE_LOG(LogTemp, Log, TEXT("VFX_ParticleManager: Cleanup complete, %d active effects remaining"), ActiveEffects.Num());
-}
-
-void AVFX_ParticleManager::SetEffectIntensity(UNiagaraComponent* Effect, float Intensity)
-{
-    if (Effect && IsValid(Effect))
-    {
-        // Set common intensity parameters that most Niagara systems should have
-        Effect->SetFloatParameter(FName("Intensity"), Intensity);
-        Effect->SetFloatParameter(FName("SpawnRate"), Intensity * 100.0f);
-        Effect->SetFloatParameter(FName("Scale"), Intensity);
-    }
-}
-
-bool AVFX_ParticleManager::IsLocationVisible(FVector Location)
-{
-    // Simple distance check for now - could be expanded with frustum culling
-    if (APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0))
-    {
-        float Distance = FVector::Dist(PlayerPawn->GetActorLocation(), Location);
-        return Distance <= EffectCullDistance;
-    }
-    return true; // Default to visible if no player found
-}
-
-void AVFX_ParticleManager::CullDistantEffects()
-{
-    if (APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0))
-    {
-        FVector PlayerLocation = PlayerPawn->GetActorLocation();
         
-        ActiveEffects.RemoveAll([this, PlayerLocation](UNiagaraComponent* Effect)
-        {
-            if (!IsValid(Effect))
-                return true;
-                
-            float Distance = FVector::Dist(PlayerLocation, Effect->GetComponentLocation());
-            if (Distance > EffectCullDistance)
-            {
-                Effect->DestroyComponent();
-                return true;
-            }
-            return false;
-        });
+        UE_LOG(LogTemp, Log, TEXT("VFX ParticleManager: Spawned Niagara effect at %s"), *Location.ToString());
+    }
+}
+
+void UVFX_ParticleManager::SpawnLegacyEffect(const FVFX_EffectData& EffectData, FVector Location, FRotator Rotation, float Scale)
+{
+    if (!EffectData.LegacyParticleSystem.IsValid())
+    {
+        return;
+    }
+    
+    UParticleSystem* ParticleSystem = EffectData.LegacyParticleSystem.LoadSynchronous();
+    if (!ParticleSystem)
+    {
+        return;
+    }
+    
+    UParticleSystemComponent* ParticleComp = UGameplayStatics::SpawnEmitterAtLocation(
+        GetWorld(),
+        ParticleSystem,
+        Location,
+        Rotation,
+        EffectData.Scale * Scale,
+        true,
+        EPSCPoolMethod::None,
+        true
+    );
+    
+    if (ParticleComp)
+    {
+        ActiveParticleComponents.Add(ParticleComp);
+        UE_LOG(LogTemp, Log, TEXT("VFX ParticleManager: Spawned legacy particle effect at %s"), *Location.ToString());
     }
 }
