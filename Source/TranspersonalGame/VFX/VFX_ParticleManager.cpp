@@ -1,199 +1,171 @@
 #include "VFX_ParticleManager.h"
-#include "Components/SceneComponent.h"
-#include "NiagaraComponent.h"
-#include "NiagaraSystem.h"
-#include "NiagaraFunctionLibrary.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "TimerManager.h"
 
 AVFX_ParticleManager::AVFX_ParticleManager()
 {
-    PrimaryActorTick.bCanEverTick = false;
+    PrimaryActorTick.bCanEverTick = true;
 
     RootSceneComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootSceneComponent"));
     RootComponent = RootSceneComponent;
 
-    InitializeParticleConfigs();
+    InitializeParticleLibrary();
 }
 
 void AVFX_ParticleManager::BeginPlay()
 {
     Super::BeginPlay();
     
-    // Set up cleanup timer for expired effects
-    if (GetWorld())
-    {
-        GetWorld()->GetTimerManager().SetTimer(
-            FTimerHandle(),
-            this,
-            &AVFX_ParticleManager::CleanupExpiredEffects,
-            2.0f,  // Check every 2 seconds
-            true   // Loop
-        );
-    }
+    UE_LOG(LogTemp, Log, TEXT("VFX_ParticleManager: BeginPlay - System initialized"));
 }
 
-void AVFX_ParticleManager::InitializeParticleConfigs()
+void AVFX_ParticleManager::Tick(float DeltaTime)
 {
-    // Initialize default particle configurations
-    FVFX_ParticleConfig CampfireConfig;
-    CampfireConfig.Duration = 0.0f;  // Infinite duration
-    CampfireConfig.bAutoDestroy = false;
-    ParticleConfigs.Add(EVFX_EffectType::Fire_Campfire, CampfireConfig);
-
-    FVFX_ParticleConfig FootstepConfig;
-    FootstepConfig.Duration = 3.0f;
-    FootstepConfig.bAutoDestroy = true;
-    ParticleConfigs.Add(EVFX_EffectType::Dust_Footstep, FootstepConfig);
-
-    FVFX_ParticleConfig BloodConfig;
-    BloodConfig.Duration = 8.0f;
-    BloodConfig.bAutoDestroy = true;
-    ParticleConfigs.Add(EVFX_EffectType::Blood_Splatter, BloodConfig);
-
-    FVFX_ParticleConfig WaterConfig;
-    WaterConfig.Duration = 4.0f;
-    WaterConfig.bAutoDestroy = true;
-    ParticleConfigs.Add(EVFX_EffectType::Water_Splash, WaterConfig);
-
-    FVFX_ParticleConfig SmokeConfig;
-    SmokeConfig.Duration = 6.0f;
-    SmokeConfig.bAutoDestroy = true;
-    ParticleConfigs.Add(EVFX_EffectType::Smoke_Rising, SmokeConfig);
-
-    FVFX_ParticleConfig SparksConfig;
-    SparksConfig.Duration = 2.0f;
-    SparksConfig.bAutoDestroy = true;
-    ParticleConfigs.Add(EVFX_EffectType::Sparks_Impact, SparksConfig);
+    Super::Tick(DeltaTime);
+    
+    UpdateActiveEffects(DeltaTime);
 }
 
-UNiagaraComponent* AVFX_ParticleManager::SpawnParticleEffect(EVFX_EffectType EffectType, FVector Location, FRotator Rotation)
+void AVFX_ParticleManager::InitializeParticleLibrary()
 {
-    if (EffectType == EVFX_EffectType::None)
+    // Initialize default particle effects
+    FVFX_ParticleEffect FireEffect;
+    FireEffect.DefaultScale = FVector(1.0f, 1.0f, 1.5f);
+    FireEffect.DefaultLifetime = 10.0f;
+    FireEffect.bAutoDestroy = false;
+    ParticleLibrary.Add(EVFX_EffectType::Fire, FireEffect);
+
+    FVFX_ParticleEffect DustEffect;
+    DustEffect.DefaultScale = FVector(2.0f, 2.0f, 1.0f);
+    DustEffect.DefaultLifetime = 3.0f;
+    DustEffect.bAutoDestroy = true;
+    ParticleLibrary.Add(EVFX_EffectType::Dust, DustEffect);
+
+    FVFX_ParticleEffect BloodEffect;
+    BloodEffect.DefaultScale = FVector(0.8f, 0.8f, 0.8f);
+    BloodEffect.DefaultLifetime = 2.0f;
+    BloodEffect.bAutoDestroy = true;
+    ParticleLibrary.Add(EVFX_EffectType::Blood, BloodEffect);
+
+    FVFX_ParticleEffect WaterEffect;
+    WaterEffect.DefaultScale = FVector(1.5f, 1.5f, 1.0f);
+    WaterEffect.DefaultLifetime = 8.0f;
+    WaterEffect.bAutoDestroy = false;
+    ParticleLibrary.Add(EVFX_EffectType::Water, WaterEffect);
+
+    FVFX_ParticleEffect SmokeEffect;
+    SmokeEffect.DefaultScale = FVector(2.0f, 2.0f, 3.0f);
+    SmokeEffect.DefaultLifetime = 15.0f;
+    SmokeEffect.bAutoDestroy = false;
+    ParticleLibrary.Add(EVFX_EffectType::Smoke, SmokeEffect);
+
+    UE_LOG(LogTemp, Log, TEXT("VFX_ParticleManager: Particle library initialized with %d effects"), ParticleLibrary.Num());
+}
+
+UNiagaraComponent* AVFX_ParticleManager::SpawnParticleEffect(EVFX_EffectType EffectType, FVector Location, FRotator Rotation, FVector Scale)
+{
+    if (!ParticleLibrary.Contains(EffectType))
     {
+        UE_LOG(LogTemp, Warning, TEXT("VFX_ParticleManager: Effect type not found in library"));
         return nullptr;
     }
 
-    FVFX_ParticleConfig* Config = ParticleConfigs.Find(EffectType);
-    if (!Config)
+    const FVFX_ParticleEffect& EffectData = ParticleLibrary[EffectType];
+    
+    if (!EffectData.ParticleSystem.IsValid())
     {
-        UE_LOG(LogTemp, Warning, TEXT("VFX_ParticleManager: No configuration found for effect type"));
+        UE_LOG(LogTemp, Warning, TEXT("VFX_ParticleManager: Particle system not loaded for effect type"));
         return nullptr;
     }
 
-    // For now, create a basic Niagara component without a specific system
-    // In a real implementation, you would load the appropriate Niagara system asset
-    UNiagaraComponent* ParticleComponent = UNiagaraFunctionLibrary::SpawnSystemAtLocation(
-        GetWorld(),
-        Config->ParticleSystem,  // This would be loaded from content browser
-        Location,
-        Rotation,
-        FVector::OneVector,
-        Config->bAutoDestroy
-    );
-
-    if (ParticleComponent)
+    UNiagaraComponent* NewEffect = NewObject<UNiagaraComponent>(this);
+    if (NewEffect)
     {
-        ActiveParticles.Add(ParticleComponent);
+        NewEffect->SetAsset(EffectData.ParticleSystem.Get());
+        NewEffect->SetWorldLocation(Location);
+        NewEffect->SetWorldRotation(Rotation);
+        NewEffect->SetWorldScale3D(Scale * EffectData.DefaultScale);
         
-        // Set up auto-destroy timer if needed
-        if (Config->bAutoDestroy && Config->Duration > 0.0f)
+        NewEffect->AttachToComponent(RootComponent, FAttachmentTransformRules::KeepWorldTransform);
+        NewEffect->Activate();
+
+        ActiveEffects.Add(NewEffect);
+
+        if (EffectData.bAutoDestroy && EffectData.DefaultLifetime > 0.0f)
         {
-            FTimerHandle DestroyTimer;
-            GetWorld()->GetTimerManager().SetTimer(
-                DestroyTimer,
-                [ParticleComponent]()
-                {
-                    if (IsValid(ParticleComponent))
-                    {
-                        ParticleComponent->DestroyComponent();
-                    }
-                },
-                Config->Duration,
-                false
-            );
+            FTimerHandle TimerHandle;
+            GetWorld()->GetTimerManager().SetTimer(TimerHandle, [this, NewEffect]()
+            {
+                StopParticleEffect(NewEffect);
+            }, EffectData.DefaultLifetime, false);
         }
 
-        UE_LOG(LogTemp, Log, TEXT("VFX_ParticleManager: Spawned particle effect at location %s"), *Location.ToString());
+        UE_LOG(LogTemp, Log, TEXT("VFX_ParticleManager: Spawned effect at location %s"), *Location.ToString());
+        return NewEffect;
     }
 
-    return ParticleComponent;
+    return nullptr;
 }
 
-void AVFX_ParticleManager::SpawnCampfireEffect(FVector Location)
+void AVFX_ParticleManager::StopParticleEffect(UNiagaraComponent* Effect)
 {
-    UNiagaraComponent* Effect = SpawnParticleEffect(EVFX_EffectType::Fire_Campfire, Location);
-    if (Effect)
+    if (Effect && ActiveEffects.Contains(Effect))
     {
-        // Set campfire-specific parameters
-        Effect->SetFloatParameter(TEXT("FireIntensity"), 1.0f);
-        Effect->SetFloatParameter(TEXT("SmokeAmount"), 0.7f);
-        Effect->SetVectorParameter(TEXT("WindDirection"), FVector(0.1f, 0.0f, 1.0f));
+        Effect->Deactivate();
+        ActiveEffects.Remove(Effect);
+        Effect->DestroyComponent();
+        
+        UE_LOG(LogTemp, Log, TEXT("VFX_ParticleManager: Stopped and removed particle effect"));
     }
 }
 
-void AVFX_ParticleManager::SpawnFootstepDust(FVector Location, float ImpactForce)
+void AVFX_ParticleManager::StopAllEffects()
 {
-    UNiagaraComponent* Effect = SpawnParticleEffect(EVFX_EffectType::Dust_Footstep, Location);
-    if (Effect)
+    for (UNiagaraComponent* Effect : ActiveEffects)
     {
-        // Set dust-specific parameters based on impact force
-        float DustAmount = FMath::Clamp(ImpactForce, 0.5f, 2.0f);
-        Effect->SetFloatParameter(TEXT("DustAmount"), DustAmount);
-        Effect->SetFloatParameter(TEXT("ParticleSize"), DustAmount * 0.5f);
-        Effect->SetVectorParameter(TEXT("ImpactDirection"), FVector(0.0f, 0.0f, 1.0f));
+        if (Effect)
+        {
+            Effect->Deactivate();
+            Effect->DestroyComponent();
+        }
     }
+    
+    ActiveEffects.Empty();
+    UE_LOG(LogTemp, Log, TEXT("VFX_ParticleManager: Stopped all active effects"));
 }
 
-void AVFX_ParticleManager::SpawnBloodSplatter(FVector Location, FVector ImpactDirection)
+void AVFX_ParticleManager::RegisterParticleSystem(EVFX_EffectType EffectType, UNiagaraSystem* ParticleSystem)
 {
-    UNiagaraComponent* Effect = SpawnParticleEffect(EVFX_EffectType::Blood_Splatter, Location);
-    if (Effect)
+    if (ParticleSystem && ParticleLibrary.Contains(EffectType))
     {
-        // Set blood-specific parameters
-        FVector NormalizedDirection = ImpactDirection.GetSafeNormal();
-        Effect->SetVectorParameter(TEXT("SplatterDirection"), NormalizedDirection);
-        Effect->SetFloatParameter(TEXT("BloodAmount"), 1.0f);
-        Effect->SetVectorParameter(TEXT("BloodColor"), FVector(0.8f, 0.1f, 0.1f));
+        ParticleLibrary[EffectType].ParticleSystem = ParticleSystem;
+        UE_LOG(LogTemp, Log, TEXT("VFX_ParticleManager: Registered particle system for effect type"));
     }
-}
-
-void AVFX_ParticleManager::SpawnWaterSplash(FVector Location, float SplashSize)
-{
-    UNiagaraComponent* Effect = SpawnParticleEffect(EVFX_EffectType::Water_Splash, Location);
-    if (Effect)
-    {
-        // Set water splash parameters
-        float ClampedSize = FMath::Clamp(SplashSize, 0.5f, 3.0f);
-        Effect->SetFloatParameter(TEXT("SplashSize"), ClampedSize);
-        Effect->SetFloatParameter(TEXT("DropletCount"), ClampedSize * 50.0f);
-        Effect->SetVectorParameter(TEXT("WaterColor"), FVector(0.2f, 0.6f, 0.9f));
-    }
-}
-
-void AVFX_ParticleManager::CleanupExpiredEffects()
-{
-    CleanupNullComponents();
 }
 
 int32 AVFX_ParticleManager::GetActiveEffectCount() const
 {
-    int32 ValidCount = 0;
-    for (UNiagaraComponent* Component : ActiveParticles)
-    {
-        if (IsValid(Component))
-        {
-            ValidCount++;
-        }
-    }
-    return ValidCount;
+    return ActiveEffects.Num();
 }
 
-void AVFX_ParticleManager::CleanupNullComponents()
+void AVFX_ParticleManager::CleanupFinishedEffects()
 {
-    ActiveParticles.RemoveAll([](UNiagaraComponent* Component)
+    ActiveEffects.RemoveAll([](UNiagaraComponent* Effect)
     {
-        return !IsValid(Component);
+        return !Effect || !Effect->IsActive();
     });
+}
+
+void AVFX_ParticleManager::UpdateActiveEffects(float DeltaTime)
+{
+    // Clean up finished effects every few seconds
+    static float CleanupTimer = 0.0f;
+    CleanupTimer += DeltaTime;
+    
+    if (CleanupTimer >= 5.0f)
+    {
+        CleanupFinishedEffects();
+        CleanupTimer = 0.0f;
+    }
 }
