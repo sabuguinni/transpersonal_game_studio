@@ -1,216 +1,135 @@
 #include "QA_ValidationReport.h"
-#include "Engine/Engine.h"
-#include "HAL/PlatformFilemanager.h"
-#include "Misc/FileHelper.h"
-#include "Misc/Paths.h"
-#include "Misc/DateTime.h"
 
 UQA_ValidationReport::UQA_ValidationReport()
 {
-    CurrentCycleID = TEXT("UNKNOWN_CYCLE");
+    ReportTitle = TEXT("Transpersonal Game QA Validation Report");
+    ReportTimestamp = FDateTime::Now();
+    TotalActorsInLevel = 0;
+    CriticalSystemsOnline = 0;
+    OverallValidationTime = 0.0f;
+    bReadyForIntegration = false;
+    IntegrationNotes = TEXT("Validation in progress...");
 }
 
-void UQA_ValidationReport::Initialize(FSubsystemCollectionBase& Collection)
+void UQA_ValidationReport::AddSystemReport(const FString& SystemName, EQA_SystemStatus Status, const FString& Message)
 {
-    Super::Initialize(Collection);
+    FQA_SystemReport NewReport;
+    NewReport.SystemName = SystemName;
+    NewReport.Status = Status;
+    NewReport.StatusMessage = Message;
+    NewReport.ValidationTime = FPlatformTime::Seconds();
     
-    UE_LOG(LogTemp, Log, TEXT("QA Validation Report System Initialized"));
+    // Set test counts based on status
+    switch (Status)
+    {
+        case EQA_SystemStatus::Operational:
+            NewReport.TestsPassed = 1;
+            NewReport.TestsFailed = 0;
+            break;
+        case EQA_SystemStatus::Warning:
+            NewReport.TestsPassed = 1;
+            NewReport.TestsFailed = 0;
+            break;
+        case EQA_SystemStatus::Critical:
+        case EQA_SystemStatus::Offline:
+            NewReport.TestsPassed = 0;
+            NewReport.TestsFailed = 1;
+            break;
+        default:
+            NewReport.TestsPassed = 0;
+            NewReport.TestsFailed = 0;
+            break;
+    }
     
-    // Set current cycle ID from environment or default
-    CurrentCycleID = TEXT("PROD_CYCLE_AUTO_20260518_003");
+    SystemReports.Add(NewReport);
     
-    // Initialize system health with default values
-    SystemHealth = FQA_SystemHealth();
+    // Update critical systems count
+    if (Status == EQA_SystemStatus::Operational)
+    {
+        CriticalSystemsOnline++;
+    }
 }
 
-void UQA_ValidationReport::Deinitialize()
+float UQA_ValidationReport::GetSuccessRate() const
 {
-    // Save final report before shutdown
-    GenerateReport();
+    if (SystemReports.Num() == 0)
+    {
+        return 0.0f;
+    }
     
-    Super::Deinitialize();
+    int32 SuccessfulSystems = 0;
+    for (const FQA_SystemReport& Report : SystemReports)
+    {
+        if (Report.Status == EQA_SystemStatus::Operational || Report.Status == EQA_SystemStatus::Warning)
+        {
+            SuccessfulSystems++;
+        }
+    }
+    
+    return (float)SuccessfulSystems / SystemReports.Num() * 100.0f;
 }
 
-void UQA_ValidationReport::AddTestResult(const FString& TestName, EQA_ValidationStatus Status, const FString& Message, float ExecutionTime)
+int32 UQA_ValidationReport::GetCriticalIssueCount() const
 {
-    FQA_TestResult NewResult;
-    NewResult.TestName = TestName;
-    NewResult.Status = Status;
-    NewResult.Message = Message;
-    NewResult.ExecutionTime = ExecutionTime;
-    
-    TestResults.Add(NewResult);
-    
-    // Log the result immediately
-    LogTestResult(NewResult);
-}
-
-void UQA_ValidationReport::UpdateSystemHealth(int32 ActorCount, float MemoryUsage, int32 ClassCount, int32 AssetCount, bool bHealthy)
-{
-    SystemHealth.ActorCount = ActorCount;
-    SystemHealth.MemoryUsagePercent = MemoryUsage;
-    SystemHealth.LoadedClassCount = ClassCount;
-    SystemHealth.AvailableAssetCount = AssetCount;
-    SystemHealth.bBridgeHealthy = bHealthy;
-    
-    UE_LOG(LogTemp, Log, TEXT("QA System Health Updated: Actors=%d, Memory=%.1f%%, Classes=%d, Assets=%d, Healthy=%s"),
-        ActorCount, MemoryUsage, ClassCount, AssetCount, bHealthy ? TEXT("Yes") : TEXT("No"));
-}
-
-void UQA_ValidationReport::GenerateReport()
-{
-    UE_LOG(LogTemp, Warning, TEXT("=== QA VALIDATION REPORT - %s ==="), *CurrentCycleID);
-    
-    // Count results by status
-    int32 PassCount = 0;
-    int32 WarningCount = 0;
-    int32 FailCount = 0;
     int32 CriticalCount = 0;
-    
-    for (const FQA_TestResult& Result : TestResults)
+    for (const FQA_SystemReport& Report : SystemReports)
     {
-        switch (Result.Status)
+        if (Report.Status == EQA_SystemStatus::Critical || Report.Status == EQA_SystemStatus::Offline)
         {
-            case EQA_ValidationStatus::Pass:
-                PassCount++;
-                break;
-            case EQA_ValidationStatus::Warning:
-                WarningCount++;
-                break;
-            case EQA_ValidationStatus::Fail:
-                FailCount++;
-                break;
-            case EQA_ValidationStatus::Critical:
-                CriticalCount++;
-                break;
+            CriticalCount++;
         }
     }
-    
-    UE_LOG(LogTemp, Warning, TEXT("Test Results Summary:"));
-    UE_LOG(LogTemp, Warning, TEXT("  PASS: %d"), PassCount);
-    UE_LOG(LogTemp, Warning, TEXT("  WARN: %d"), WarningCount);
-    UE_LOG(LogTemp, Warning, TEXT("  FAIL: %d"), FailCount);
-    UE_LOG(LogTemp, Warning, TEXT("  CRITICAL: %d"), CriticalCount);
-    
-    UE_LOG(LogTemp, Warning, TEXT("System Health:"));
-    UE_LOG(LogTemp, Warning, TEXT("  Actors: %d"), SystemHealth.ActorCount);
-    UE_LOG(LogTemp, Warning, TEXT("  Memory: %.1f%%"), SystemHealth.MemoryUsagePercent);
-    UE_LOG(LogTemp, Warning, TEXT("  Classes: %d"), SystemHealth.LoadedClassCount);
-    UE_LOG(LogTemp, Warning, TEXT("  Assets: %d"), SystemHealth.AvailableAssetCount);
-    UE_LOG(LogTemp, Warning, TEXT("  Bridge: %s"), SystemHealth.bBridgeHealthy ? TEXT("HEALTHY") : TEXT("DEGRADED"));
-    
-    // Overall status
-    bool bOverallPass = (CriticalCount == 0) && (FailCount < 3) && SystemHealth.bBridgeHealthy;
-    UE_LOG(LogTemp, Warning, TEXT("OVERALL STATUS: %s"), bOverallPass ? TEXT("PASS") : TEXT("NEEDS ATTENTION"));
-    
-    UE_LOG(LogTemp, Warning, TEXT("=== END QA REPORT ==="));
-    
-    // Save to file
-    SaveReportToFile();
+    return CriticalCount;
 }
 
-void UQA_ValidationReport::ClearResults()
+FString UQA_ValidationReport::GenerateReportSummary() const
 {
-    TestResults.Empty();
-    SystemHealth = FQA_SystemHealth();
+    FString Summary;
+    Summary += FString::Printf(TEXT("=== QA VALIDATION SUMMARY ===\n"));
+    Summary += FString::Printf(TEXT("Report: %s\n"), *ReportTitle);
+    Summary += FString::Printf(TEXT("Timestamp: %s\n"), *ReportTimestamp.ToString());
+    Summary += FString::Printf(TEXT("Systems Tested: %d\n"), SystemReports.Num());
+    Summary += FString::Printf(TEXT("Success Rate: %.1f%%\n"), GetSuccessRate());
+    Summary += FString::Printf(TEXT("Critical Issues: %d\n"), GetCriticalIssueCount());
+    Summary += FString::Printf(TEXT("Critical Systems Online: %d\n"), CriticalSystemsOnline);
+    Summary += FString::Printf(TEXT("Total Actors: %d\n"), TotalActorsInLevel);
+    Summary += FString::Printf(TEXT("Validation Time: %.2f seconds\n"), OverallValidationTime);
+    Summary += FString::Printf(TEXT("Ready for Integration: %s\n"), bReadyForIntegration ? TEXT("YES") : TEXT("NO"));
     
-    UE_LOG(LogTemp, Log, TEXT("QA Validation results cleared"));
-}
-
-int32 UQA_ValidationReport::GetPassCount() const
-{
-    int32 Count = 0;
-    for (const FQA_TestResult& Result : TestResults)
+    if (!IntegrationNotes.IsEmpty())
     {
-        if (Result.Status == EQA_ValidationStatus::Pass)
-        {
-            Count++;
-        }
-    }
-    return Count;
-}
-
-int32 UQA_ValidationReport::GetFailCount() const
-{
-    int32 Count = 0;
-    for (const FQA_TestResult& Result : TestResults)
-    {
-        if (Result.Status == EQA_ValidationStatus::Fail || Result.Status == EQA_ValidationStatus::Critical)
-        {
-            Count++;
-        }
-    }
-    return Count;
-}
-
-void UQA_ValidationReport::LogTestResult(const FQA_TestResult& Result)
-{
-    FString StatusString;
-    switch (Result.Status)
-    {
-        case EQA_ValidationStatus::Pass:
-            StatusString = TEXT("PASS");
-            break;
-        case EQA_ValidationStatus::Warning:
-            StatusString = TEXT("WARN");
-            break;
-        case EQA_ValidationStatus::Fail:
-            StatusString = TEXT("FAIL");
-            break;
-        case EQA_ValidationStatus::Critical:
-            StatusString = TEXT("CRITICAL");
-            break;
+        Summary += FString::Printf(TEXT("Integration Notes: %s\n"), *IntegrationNotes);
     }
     
-    UE_LOG(LogTemp, Log, TEXT("QA [%s] %s: %s (%.2fs)"), 
-        *StatusString, *Result.TestName, *Result.Message, Result.ExecutionTime);
-}
-
-void UQA_ValidationReport::SaveReportToFile()
-{
-    FString ReportContent;
-    ReportContent += FString::Printf(TEXT("QA Validation Report - %s\n"), *CurrentCycleID);
-    ReportContent += FString::Printf(TEXT("Generated: %s\n\n"), *FDateTime::Now().ToString());
-    
-    // Add test results
-    ReportContent += TEXT("Test Results:\n");
-    for (const FQA_TestResult& Result : TestResults)
+    Summary += TEXT("\n=== SYSTEM STATUS DETAILS ===\n");
+    for (const FQA_SystemReport& Report : SystemReports)
     {
-        FString StatusString;
-        switch (Result.Status)
+        FString StatusText;
+        switch (Report.Status)
         {
-            case EQA_ValidationStatus::Pass: StatusString = TEXT("PASS"); break;
-            case EQA_ValidationStatus::Warning: StatusString = TEXT("WARN"); break;
-            case EQA_ValidationStatus::Fail: StatusString = TEXT("FAIL"); break;
-            case EQA_ValidationStatus::Critical: StatusString = TEXT("CRITICAL"); break;
+            case EQA_SystemStatus::Operational:
+                StatusText = TEXT("OPERATIONAL");
+                break;
+            case EQA_SystemStatus::Warning:
+                StatusText = TEXT("WARNING");
+                break;
+            case EQA_SystemStatus::Critical:
+                StatusText = TEXT("CRITICAL");
+                break;
+            case EQA_SystemStatus::Offline:
+                StatusText = TEXT("OFFLINE");
+                break;
+            default:
+                StatusText = TEXT("NOT TESTED");
+                break;
         }
         
-        ReportContent += FString::Printf(TEXT("[%s] %s: %s (%.2fs)\n"), 
-            *StatusString, *Result.TestName, *Result.Message, Result.ExecutionTime);
+        Summary += FString::Printf(TEXT("%s: %s - %s\n"), 
+                                   *Report.SystemName, 
+                                   *StatusText, 
+                                   *Report.StatusMessage);
     }
     
-    // Add system health
-    ReportContent += TEXT("\nSystem Health:\n");
-    ReportContent += FString::Printf(TEXT("Actors: %d\n"), SystemHealth.ActorCount);
-    ReportContent += FString::Printf(TEXT("Memory: %.1f%%\n"), SystemHealth.MemoryUsagePercent);
-    ReportContent += FString::Printf(TEXT("Classes: %d\n"), SystemHealth.LoadedClassCount);
-    ReportContent += FString::Printf(TEXT("Assets: %d\n"), SystemHealth.AvailableAssetCount);
-    ReportContent += FString::Printf(TEXT("Bridge: %s\n"), SystemHealth.bBridgeHealthy ? TEXT("HEALTHY") : TEXT("DEGRADED"));
-    
-    // Save to temp file
-    FString FilePath = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("QA"), FString::Printf(TEXT("ValidationReport_%s.txt"), *CurrentCycleID));
-    
-    // Ensure directory exists
-    IPlatformFile& PlatformFile = FPlatformFileManager::Get().GetPlatformFile();
-    PlatformFile.CreateDirectoryTree(*FPaths::GetPath(FilePath));
-    
-    // Write file
-    if (FFileHelper::SaveStringToFile(ReportContent, *FilePath))
-    {
-        UE_LOG(LogTemp, Log, TEXT("QA Report saved to: %s"), *FilePath);
-    }
-    else
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Failed to save QA Report to: %s"), *FilePath);
-    }
+    Summary += TEXT("=== END REPORT ===\n");
+    return Summary;
 }
