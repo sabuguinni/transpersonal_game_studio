@@ -1,43 +1,39 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Components/ActorComponent.h"
 #include "Engine/World.h"
-#include "GameFramework/Actor.h"
+#include "GameFramework/GameModeBase.h"
+#include "Components/ActorComponent.h"
 #include "SharedTypes.h"
 #include "Quest_HuntingQuestManager.generated.h"
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FQuest_HuntingTarget
+struct TRANSPERSONALGAME_API FQuest_HuntTarget
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hunting")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hunt Target")
     FString TargetSpecies;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hunting")
-    int32 RequiredCount;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hunt Target")
+    int32 RequiredKills;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hunting")
-    int32 CurrentCount;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hunt Target")
+    int32 CurrentKills;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hunting")
-    float MinimumDistance;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hunt Target")
+    float MinDistance;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hunting")
-    bool bRequiresSpecificWeapon;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hunt Target")
+    bool bRequiresStealth;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hunting")
-    FString RequiredWeaponType;
-
-    FQuest_HuntingTarget()
+    FQuest_HuntTarget()
     {
-        TargetSpecies = TEXT("Unknown");
-        RequiredCount = 1;
-        CurrentCount = 0;
-        MinimumDistance = 1000.0f;
-        bRequiresSpecificWeapon = false;
-        RequiredWeaponType = TEXT("Any");
+        TargetSpecies = TEXT("Raptor");
+        RequiredKills = 1;
+        CurrentKills = 0;
+        MinDistance = 500.0f;
+        bRequiresStealth = false;
     }
 };
 
@@ -46,27 +42,24 @@ struct TRANSPERSONALGAME_API FQuest_HuntingReward
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rewards")
-    TArray<FString> ItemRewards;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Reward")
+    FString ItemName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rewards")
-    int32 ExperienceReward;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Reward")
+    int32 Quantity;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rewards")
-    float HealthBonus;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rewards")
-    float StaminaBonus;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Reward")
+    float ExperiencePoints;
 
     FQuest_HuntingReward()
     {
-        ExperienceReward = 100;
-        HealthBonus = 0.0f;
-        StaminaBonus = 0.0f;
+        ItemName = TEXT("Meat");
+        Quantity = 5;
+        ExperiencePoints = 100.0f;
     }
 };
 
-UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
+UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UQuest_HuntingQuestManager : public UActorComponent
 {
     GENERATED_BODY()
@@ -80,53 +73,50 @@ protected:
 public:
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Management")
-    TArray<FQuest_HuntingTarget> ActiveHuntingTargets;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hunting Quests")
+    TArray<FQuest_HuntTarget> ActiveHuntTargets;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Management")
-    FQuest_HuntingReward CurrentReward;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hunting Quests")
+    TArray<FQuest_HuntingReward> QuestRewards;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Management")
-    float QuestTimeLimit;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hunting Quests")
+    float TrackingRange;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Management")
-    float ElapsedTime;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hunting Quests")
+    bool bShowTrackingMarkers;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Management")
-    bool bIsQuestActive;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hunting Quests")
+    int32 MaxActiveHunts;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Management")
-    FString QuestDescription;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hunting Quests")
+    float HuntTimeLimit;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Management")
-    FString QuestGiver;
+    UFUNCTION(BlueprintCallable, Category = "Hunting Quests")
+    void StartHuntingQuest(const FString& TargetSpecies, int32 RequiredKills, bool bStealth);
 
-    UFUNCTION(BlueprintCallable, Category = "Quest Management")
-    void StartHuntingQuest(const TArray<FQuest_HuntingTarget>& Targets, const FQuest_HuntingReward& Reward, float TimeLimit);
+    UFUNCTION(BlueprintCallable, Category = "Hunting Quests")
+    void RegisterKill(const FString& KilledSpecies, float Distance, bool bWasStealth);
 
-    UFUNCTION(BlueprintCallable, Category = "Quest Management")
-    void RegisterKill(const FString& Species, const FString& WeaponUsed, float Distance);
+    UFUNCTION(BlueprintCallable, Category = "Hunting Quests")
+    bool CheckQuestCompletion(const FString& TargetSpecies);
 
-    UFUNCTION(BlueprintCallable, Category = "Quest Management")
-    bool CheckQuestCompletion();
+    UFUNCTION(BlueprintCallable, Category = "Hunting Quests")
+    void CompleteHuntingQuest(const FString& TargetSpecies);
 
-    UFUNCTION(BlueprintCallable, Category = "Quest Management")
-    void CompleteQuest();
+    UFUNCTION(BlueprintCallable, Category = "Hunting Quests")
+    TArray<FString> GetActiveHuntTargets();
 
-    UFUNCTION(BlueprintCallable, Category = "Quest Management")
-    void FailQuest();
+    UFUNCTION(BlueprintCallable, Category = "Hunting Quests")
+    float GetHuntProgress(const FString& TargetSpecies);
 
-    UFUNCTION(BlueprintCallable, Category = "Quest Management")
-    TArray<FString> GetQuestObjectives();
+    UFUNCTION(BlueprintCallable, Category = "Hunting Quests")
+    void UpdateTrackingMarkers();
 
-    UFUNCTION(BlueprintCallable, Category = "Quest Management")
-    float GetQuestProgress();
-
-    UFUNCTION(BlueprintCallable, Category = "Quest Management")
-    FString GetQuestStatusText();
+    UFUNCTION(BlueprintCallable, Category = "Hunting Quests")
+    void CancelHuntingQuest(const FString& TargetSpecies);
 
 private:
-    void UpdateQuestTimer(float DeltaTime);
-    void CheckTimeLimit();
-    bool ValidateKill(const FQuest_HuntingTarget& Target, const FString& WeaponUsed, float Distance);
+    void InitializeDefaultHunts();
+    void CheckHuntTimeouts();
+    FQuest_HuntTarget* FindHuntTarget(const FString& TargetSpecies);
 };
