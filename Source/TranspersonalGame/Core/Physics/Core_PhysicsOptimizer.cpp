@@ -1,290 +1,323 @@
 #include "Core_PhysicsOptimizer.h"
-#include "Engine/World.h"
 #include "Engine/Engine.h"
+#include "Engine/World.h"
+#include "GameFramework/Pawn.h"
 #include "Components/PrimitiveComponent.h"
-#include "GameFramework/Character.h"
-#include "Components/CapsuleComponent.h"
-#include "Landscape/LandscapeComponent.h"
-#include "Engine/StaticMeshActor.h"
+#include "PhysicsEngine/PhysicsSettings.h"
+#include "HAL/IConsoleManager.h"
 
 UCore_PhysicsOptimizer::UCore_PhysicsOptimizer()
 {
-    OptimizationLevel = 2;
-    bEnableAdvancedCollision = true;
-    MaxPhysicsObjects = 500;
-    PhysicsTimeStep = 0.016667f; // 60 FPS
+    PrimaryComponentTick.bCanEverTick = true;
+    PrimaryComponentTick.TickInterval = 0.1f; // Tick 10 times per second for optimization
+    
+    // Initialize LOD settings with reasonable defaults
+    LODSettings.NearDistance = 500.0f;
+    LODSettings.MidDistance = 1500.0f;
+    LODSettings.FarDistance = 3000.0f;
+    LODSettings.MaxNearPhysicsActors = 50;
+    LODSettings.MaxMidPhysicsActors = 25;
+    LODSettings.MaxFarPhysicsActors = 10;
+    
+    // Initialize performance tracking
+    FrameTimeHistory.Reserve(MaxFrameHistory);
 }
 
-void UCore_PhysicsOptimizer::OptimizeCharacterPhysics(ACharacter* Character)
+void UCore_PhysicsOptimizer::BeginPlay()
 {
-    if (!Character)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("OptimizeCharacterPhysics: Invalid character"));
-        return;
-    }
+    Super::BeginPlay();
+    
+    // Initialize performance monitoring
+    UpdatePerformanceMetrics();
+    
+    UE_LOG(LogTemp, Log, TEXT("Core_PhysicsOptimizer: Initialized with LOD distances Near=%f, Mid=%f, Far=%f"), 
+           LODSettings.NearDistance, LODSettings.MidDistance, LODSettings.FarDistance);
+}
 
-    // Optimize capsule collision for terrain interaction
-    UCapsuleComponent* CapsuleComp = Character->GetCapsuleComponent();
-    if (CapsuleComp)
+void UCore_PhysicsOptimizer::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+{
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+    
+    // Update performance metrics every tick
+    UpdatePerformanceMetrics();
+    
+    // Track frame time for adaptive quality
+    if (FrameTimeHistory.Num() >= MaxFrameHistory)
     {
-        // Set optimal collision responses for terrain interaction
-        CapsuleComp->SetCollisionResponseToChannel(ECC_WorldStatic, ECR_Block);
-        CapsuleComp->SetCollisionResponseToChannel(ECC_WorldDynamic, ECR_Block);
-        CapsuleComp->SetCollisionResponseToChannel(ECC_Pawn, ECR_Block);
+        FrameTimeHistory.RemoveAt(0);
+    }
+    FrameTimeHistory.Add(DeltaTime * 1000.0f); // Convert to milliseconds
+    
+    // Run optimization at intervals
+    float CurrentTime = GetWorld()->GetTimeSeconds();
+    if (CurrentTime - LastOptimizationTime >= OptimizationInterval)
+    {
+        if (bEnablePhysicsLOD)
+        {
+            OptimizePhysicsLOD();
+        }
         
-        // Optimize collision detection method
-        CapsuleComp->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+        if (bEnableAdaptiveQuality)
+        {
+            AdjustPhysicsQuality(TargetFrameTime);
+        }
         
-        UE_LOG(LogTemp, Log, TEXT("Optimized character physics for %s"), *Character->GetName());
+        LastOptimizationTime = CurrentTime;
     }
-
-    // Optimize skeletal mesh physics
-    USkeletalMeshComponent* SkeletalMesh = Character->GetMesh();
-    if (SkeletalMesh)
-    {
-        // Prepare for potential ragdoll activation
-        SkeletalMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-        SkeletalMesh->SetCollisionObjectType(ECC_Pawn);
-        
-        // Optimize physics asset settings if available
-        if (SkeletalMesh->GetPhysicsAsset())
-        {
-            SkeletalMesh->SetAllBodiesSimulatePhysics(false); // Start with physics disabled
-            SkeletalMesh->SetAllBodiesCollisionObjectType(ECC_PhysicsBody);
-        }
-    }
-
-    // Update performance metrics
-    PerformanceMetrics.Add(FString::Printf(TEXT("Character_%s"), *Character->GetName()), 1.0f);
 }
 
-void UCore_PhysicsOptimizer::OptimizeLandscapePhysics(ALandscape* Landscape)
+void UCore_PhysicsOptimizer::OptimizePhysicsLOD()
 {
-    if (!Landscape)
+    if (!GetWorld())
     {
-        UE_LOG(LogTemp, Warning, TEXT("OptimizeLandscapePhysics: Invalid landscape"));
         return;
     }
-
-    // Get landscape components for optimization
-    TArray<ULandscapeComponent*> LandscapeComponents;
-    Landscape->GetLandscapeComponents(LandscapeComponents);
-
-    for (ULandscapeComponent* Component : LandscapeComponents)
+    
+    // Get player location for distance calculations
+    APawn* PlayerPawn = GetWorld()->GetFirstPlayerController()->GetPawn();
+    if (!PlayerPawn)
     {
-        if (Component)
-        {
-            // Optimize collision settings for performance
-            Component->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-            Component->SetCollisionObjectType(ECC_WorldStatic);
-            Component->SetCollisionResponseToAllChannels(ECR_Block);
-            
-            // Special handling for character interaction
-            Component->SetCollisionResponseToChannel(ECC_Pawn, ECR_Block);
-        }
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("Optimized landscape physics for %s with %d components"), 
-           *Landscape->GetName(), LandscapeComponents.Num());
-
-    // Update performance metrics
-    PerformanceMetrics.Add(FString::Printf(TEXT("Landscape_%s"), *Landscape->GetName()), 
-                          static_cast<float>(LandscapeComponents.Num()));
-}
-
-void UCore_PhysicsOptimizer::PrepareRagdollPhysics(USkeletalMeshComponent* SkeletalMesh)
-{
-    if (!SkeletalMesh)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("PrepareRagdollPhysics: Invalid skeletal mesh"));
         return;
     }
-
-    // Ensure physics asset is available
-    if (!SkeletalMesh->GetPhysicsAsset())
+    
+    FVector PlayerLocation = PlayerPawn->GetActorLocation();
+    
+    // Clean up invalid actor references
+    TrackedPhysicsActors.RemoveAll([](const TWeakObjectPtr<AActor>& WeakActor) {
+        return !WeakActor.IsValid();
+    });
+    
+    // Apply LOD to all tracked physics actors
+    for (const TWeakObjectPtr<AActor>& WeakActor : TrackedPhysicsActors)
     {
-        UE_LOG(LogTemp, Warning, TEXT("PrepareRagdollPhysics: No physics asset found for %s"), 
-               *SkeletalMesh->GetName());
-        return;
-    }
-
-    // Configure for ragdoll activation
-    SkeletalMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-    SkeletalMesh->SetCollisionObjectType(ECC_PhysicsBody);
-    
-    // Set up collision responses for ragdoll
-    SkeletalMesh->SetCollisionResponseToChannel(ECC_WorldStatic, ECR_Block);
-    SkeletalMesh->SetCollisionResponseToChannel(ECC_WorldDynamic, ECR_Block);
-    SkeletalMesh->SetCollisionResponseToChannel(ECC_Pawn, ECR_Ignore);
-    
-    // Prepare physics bodies (but don't activate yet)
-    SkeletalMesh->SetAllBodiesSimulatePhysics(false);
-    SkeletalMesh->SetAllBodiesCollisionObjectType(ECC_PhysicsBody);
-    
-    UE_LOG(LogTemp, Log, TEXT("Prepared ragdoll physics for %s"), *SkeletalMesh->GetName());
-
-    // Update performance metrics
-    PerformanceMetrics.Add(FString::Printf(TEXT("Ragdoll_%s"), *SkeletalMesh->GetName()), 1.0f);
-}
-
-void UCore_PhysicsOptimizer::OptimizeDestructiblePhysics(UStaticMeshComponent* StaticMesh)
-{
-    if (!StaticMesh)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("OptimizeDestructiblePhysics: Invalid static mesh"));
-        return;
-    }
-
-    // Configure for destruction system
-    StaticMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-    StaticMesh->SetCollisionObjectType(ECC_WorldDynamic);
-    
-    // Set up collision responses
-    StaticMesh->SetCollisionResponseToAllChannels(ECR_Block);
-    StaticMesh->SetCollisionResponseToChannel(ECC_Pawn, ECR_Block);
-    
-    // Enable physics simulation for destruction
-    StaticMesh->SetSimulatePhysics(true);
-    
-    // Optimize mass and physics properties
-    StaticMesh->SetMassOverrideInKg(NAME_None, 100.0f, true);
-    
-    UE_LOG(LogTemp, Log, TEXT("Optimized destructible physics for %s"), *StaticMesh->GetName());
-
-    // Update performance metrics
-    PerformanceMetrics.Add(FString::Printf(TEXT("Destructible_%s"), *StaticMesh->GetName()), 1.0f);
-}
-
-FString UCore_PhysicsOptimizer::GetPhysicsPerformanceReport()
-{
-    FString Report = TEXT("=== PHYSICS PERFORMANCE REPORT ===\n");
-    Report += FString::Printf(TEXT("Optimization Level: %d\n"), OptimizationLevel);
-    Report += FString::Printf(TEXT("Max Physics Objects: %d\n"), MaxPhysicsObjects);
-    Report += FString::Printf(TEXT("Physics Time Step: %.6f\n"), PhysicsTimeStep);
-    Report += TEXT("\nOptimized Objects:\n");
-
-    for (const auto& Metric : PerformanceMetrics)
-    {
-        Report += FString::Printf(TEXT("- %s: %.2f\n"), *Metric.Key, Metric.Value);
-    }
-
-    // Calculate current physics load
-    UWorld* World = GEngine ? GEngine->GetWorldFromContextObject(this, EGetWorldErrorMode::LogAndReturnNull) : nullptr;
-    if (World)
-    {
-        float PhysicsLoad = CalculatePhysicsLoad(World);
-        Report += FString::Printf(TEXT("\nCurrent Physics Load: %.2f%%\n"), PhysicsLoad * 100.0f);
-    }
-
-    Report += TEXT("=== END REPORT ===");
-    return Report;
-}
-
-void UCore_PhysicsOptimizer::BatchOptimizeWorldPhysics()
-{
-    UWorld* World = GEngine ? GEngine->GetWorldFromContextObject(this, EGetWorldErrorMode::LogAndReturnNull) : nullptr;
-    if (!World)
-    {
-        UE_LOG(LogTemp, Error, TEXT("BatchOptimizeWorldPhysics: No valid world found"));
-        return;
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("Starting batch physics optimization..."));
-
-    int32 OptimizedCount = 0;
-
-    // Optimize all characters
-    for (TActorIterator<ACharacter> ActorItr(World); ActorItr; ++ActorItr)
-    {
-        ACharacter* Character = *ActorItr;
-        if (Character)
+        if (AActor* Actor = WeakActor.Get())
         {
-            OptimizeCharacterPhysics(Character);
-            OptimizedCount++;
+            float Distance = FVector::Dist(PlayerLocation, Actor->GetActorLocation());
+            ApplyLODToActor(Actor, Distance);
         }
     }
-
-    // Optimize all landscapes
-    for (TActorIterator<ALandscape> ActorItr(World); ActorItr; ++ActorItr)
-    {
-        ALandscape* Landscape = *ActorItr;
-        if (Landscape)
-        {
-            OptimizeLandscapePhysics(Landscape);
-            OptimizedCount++;
-        }
-    }
-
-    // Optimize static mesh actors for destruction
-    for (TActorIterator<AStaticMeshActor> ActorItr(World); ActorItr; ++ActorItr)
-    {
-        AStaticMeshActor* StaticMeshActor = *ActorItr;
-        if (StaticMeshActor && StaticMeshActor->GetStaticMeshComponent())
-        {
-            OptimizeDestructiblePhysics(StaticMeshActor->GetStaticMeshComponent());
-            OptimizedCount++;
-        }
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("Batch optimization complete. Optimized %d objects."), OptimizedCount);
+    
+    UE_LOG(LogTemp, VeryVerbose, TEXT("Core_PhysicsOptimizer: Optimized LOD for %d physics actors"), TrackedPhysicsActors.Num());
 }
 
-bool UCore_PhysicsOptimizer::ValidateCollisionSettings(UPrimitiveComponent* Component)
+void UCore_PhysicsOptimizer::RegisterPhysicsActor(AActor* Actor)
 {
-    if (!Component)
+    if (Actor && Actor->GetRootComponent() && Actor->GetRootComponent()->IsSimulatingPhysics())
     {
-        return false;
+        TrackedPhysicsActors.AddUnique(Actor);
+        UE_LOG(LogTemp, Log, TEXT("Core_PhysicsOptimizer: Registered physics actor %s"), *Actor->GetName());
     }
-
-    // Check if collision is properly configured
-    ECollisionEnabled::Type CollisionEnabled = Component->GetCollisionEnabled();
-    if (CollisionEnabled == ECollisionEnabled::NoCollision)
-    {
-        return false;
-    }
-
-    // Validate collision object type
-    ECollisionChannel ObjectType = Component->GetCollisionObjectType();
-    return (ObjectType != ECC_MAX);
 }
 
-float UCore_PhysicsOptimizer::CalculatePhysicsLoad(UWorld* World)
+void UCore_PhysicsOptimizer::UnregisterPhysicsActor(AActor* Actor)
 {
-    if (!World)
+    if (Actor)
+    {
+        TrackedPhysicsActors.RemoveAll([Actor](const TWeakObjectPtr<AActor>& WeakActor) {
+            return WeakActor.Get() == Actor;
+        });
+        UE_LOG(LogTemp, Log, TEXT("Core_PhysicsOptimizer: Unregistered physics actor %s"), *Actor->GetName());
+    }
+}
+
+float UCore_PhysicsOptimizer::GetAverageFrameTime() const
+{
+    if (FrameTimeHistory.Num() == 0)
     {
         return 0.0f;
     }
-
-    int32 PhysicsObjectCount = 0;
-    int32 TotalObjectCount = 0;
-
-    // Count physics-enabled objects
-    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+    
+    float Total = 0.0f;
+    for (float FrameTime : FrameTimeHistory)
     {
-        AActor* Actor = *ActorItr;
-        if (Actor)
+        Total += FrameTime;
+    }
+    
+    return Total / FrameTimeHistory.Num();
+}
+
+void UCore_PhysicsOptimizer::AdjustPhysicsQuality(float TargetFrameTime)
+{
+    float AverageFrameTime = GetAverageFrameTime();
+    
+    if (AverageFrameTime > TargetFrameTime * 1.2f) // 20% over target
+    {
+        // Reduce physics quality
+        PhysicsSubstepScale = FMath::Max(0.5f, PhysicsSubstepScale - 0.1f);
+        OptimizePhysicsSettings();
+        
+        UE_LOG(LogTemp, Warning, TEXT("Core_PhysicsOptimizer: Reducing physics quality - FrameTime: %fms, Target: %fms"), 
+               AverageFrameTime, TargetFrameTime);
+    }
+    else if (AverageFrameTime < TargetFrameTime * 0.8f) // 20% under target
+    {
+        // Increase physics quality
+        PhysicsSubstepScale = FMath::Min(1.0f, PhysicsSubstepScale + 0.05f);
+        OptimizePhysicsSettings();
+        
+        UE_LOG(LogTemp, Log, TEXT("Core_PhysicsOptimizer: Increasing physics quality - FrameTime: %fms, Target: %fms"), 
+               AverageFrameTime, TargetFrameTime);
+    }
+}
+
+void UCore_PhysicsOptimizer::SetPhysicsSubstepScale(float NewScale)
+{
+    PhysicsSubstepScale = FMath::Clamp(NewScale, 0.1f, 2.0f);
+    OptimizePhysicsSettings();
+    
+    UE_LOG(LogTemp, Log, TEXT("Core_PhysicsOptimizer: Physics substep scale set to %f"), PhysicsSubstepScale);
+}
+
+void UCore_PhysicsOptimizer::DebugPhysicsPerformance()
+{
+    if (GEngine)
+    {
+        FString DebugString = FString::Printf(
+            TEXT("Physics Performance:\nFrame Time: %.2fms\nActive Bodies: %d\nSleeping Bodies: %d\nCollision Checks: %d\nLOD Scale: %.2f"),
+            CurrentMetrics.AveragePhysicsStepTime,
+            CurrentMetrics.ActiveRigidBodies,
+            CurrentMetrics.SleepingRigidBodies,
+            CurrentMetrics.CollisionChecks,
+            PhysicsSubstepScale
+        );
+        
+        GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Yellow, DebugString);
+    }
+}
+
+void UCore_PhysicsOptimizer::LogPhysicsStats()
+{
+    UE_LOG(LogTemp, Log, TEXT("=== Core Physics Optimizer Stats ==="));
+    UE_LOG(LogTemp, Log, TEXT("Physics Frame Time: %.2fms"), CurrentMetrics.PhysicsFrameTime);
+    UE_LOG(LogTemp, Log, TEXT("Average Frame Time: %.2fms"), GetAverageFrameTime());
+    UE_LOG(LogTemp, Log, TEXT("Active Rigid Bodies: %d"), CurrentMetrics.ActiveRigidBodies);
+    UE_LOG(LogTemp, Log, TEXT("Sleeping Rigid Bodies: %d"), CurrentMetrics.SleepingRigidBodies);
+    UE_LOG(LogTemp, Log, TEXT("Collision Checks: %d"), CurrentMetrics.CollisionChecks);
+    UE_LOG(LogTemp, Log, TEXT("Tracked Physics Actors: %d"), TrackedPhysicsActors.Num());
+    UE_LOG(LogTemp, Log, TEXT("Physics Substep Scale: %.2f"), PhysicsSubstepScale);
+    UE_LOG(LogTemp, Log, TEXT("====================================="));
+}
+
+void UCore_PhysicsOptimizer::UpdatePerformanceMetrics()
+{
+    if (!GetWorld())
+    {
+        return;
+    }
+    
+    // Get physics statistics from the world
+    UWorld* World = GetWorld();
+    if (World->GetPhysicsScene())
+    {
+        // Update basic metrics (simplified for now)
+        CurrentMetrics.PhysicsFrameTime = GetAverageFrameTime();
+        CurrentMetrics.AveragePhysicsStepTime = CurrentMetrics.PhysicsFrameTime;
+        
+        // Count physics actors in the world
+        int32 ActiveBodies = 0;
+        int32 SleepingBodies = 0;
+        
+        for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
         {
-            TotalObjectCount++;
-            
-            TArray<UPrimitiveComponent*> PrimitiveComponents;
-            Actor->GetComponents<UPrimitiveComponent>(PrimitiveComponents);
-            
-            for (UPrimitiveComponent* Component : PrimitiveComponents)
+            AActor* Actor = *ActorItr;
+            if (Actor && Actor->GetRootComponent())
             {
-                if (Component && Component->IsSimulatingPhysics())
+                UPrimitiveComponent* PrimComp = Cast<UPrimitiveComponent>(Actor->GetRootComponent());
+                if (PrimComp && PrimComp->IsSimulatingPhysics())
                 {
-                    PhysicsObjectCount++;
-                    break; // Count actor only once
+                    if (PrimComp->IsAnyRigidBodyAwake())
+                    {
+                        ActiveBodies++;
+                    }
+                    else
+                    {
+                        SleepingBodies++;
+                    }
                 }
             }
         }
+        
+        CurrentMetrics.ActiveRigidBodies = ActiveBodies;
+        CurrentMetrics.SleepingRigidBodies = SleepingBodies;
+        CurrentMetrics.CollisionChecks = ActiveBodies * 2; // Rough estimate
     }
+}
 
-    // Calculate load as percentage of max physics objects
-    if (MaxPhysicsObjects > 0)
+void UCore_PhysicsOptimizer::ApplyLODToActor(AActor* Actor, float Distance)
+{
+    if (!Actor)
     {
-        return FMath::Clamp(static_cast<float>(PhysicsObjectCount) / static_cast<float>(MaxPhysicsObjects), 0.0f, 1.0f);
+        return;
     }
+    
+    ECore_PhysicsLODLevel LODLevel = CalculateLODLevel(Distance);
+    UPrimitiveComponent* PrimComp = Cast<UPrimitiveComponent>(Actor->GetRootComponent());
+    
+    if (!PrimComp)
+    {
+        return;
+    }
+    
+    // Apply LOD settings based on distance
+    switch (LODLevel)
+    {
+        case ECore_PhysicsLODLevel::Near:
+            PrimComp->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+            PrimComp->SetSimulatePhysics(true);
+            break;
+            
+        case ECore_PhysicsLODLevel::Mid:
+            PrimComp->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+            PrimComp->SetSimulatePhysics(true);
+            // Reduce physics update frequency
+            break;
+            
+        case ECore_PhysicsLODLevel::Far:
+            PrimComp->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+            PrimComp->SetSimulatePhysics(false);
+            break;
+            
+        case ECore_PhysicsLODLevel::Disabled:
+            PrimComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+            PrimComp->SetSimulatePhysics(false);
+            break;
+    }
+}
 
-    return 0.0f;
+void UCore_PhysicsOptimizer::OptimizePhysicsSettings()
+{
+    // Apply global physics optimization settings
+    if (UPhysicsSettings* PhysicsSettings = UPhysicsSettings::Get())
+    {
+        // Adjust physics solver iterations based on performance
+        // This would require engine modifications or console commands
+        
+        if (GetWorld())
+        {
+            // Use console commands to adjust physics settings
+            FString SubstepCommand = FString::Printf(TEXT("p.Chaos.Solver.FixedDeltaTime %f"), 
+                                                   0.0166f * PhysicsSubstepScale);
+            GetWorld()->Exec(GetWorld(), *SubstepCommand);
+        }
+    }
+}
+
+ECore_PhysicsLODLevel UCore_PhysicsOptimizer::CalculateLODLevel(float Distance) const
+{
+    if (Distance <= LODSettings.NearDistance)
+    {
+        return ECore_PhysicsLODLevel::Near;
+    }
+    else if (Distance <= LODSettings.MidDistance)
+    {
+        return ECore_PhysicsLODLevel::Mid;
+    }
+    else if (Distance <= LODSettings.FarDistance)
+    {
+        return ECore_PhysicsLODLevel::Far;
+    }
+    else
+    {
+        return ECore_PhysicsLODLevel::Disabled;
+    }
 }
