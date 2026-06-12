@@ -1,115 +1,145 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/DeveloperSettings.h"
-#include "SharedTypes.h"
+#include "UObject/NoExportTypes.h"
+#include "Engine/Engine.h"
 #include "Build_CompilationValidator.generated.h"
 
+UENUM(BlueprintType)
+enum class EBuild_CompilationResult : uint8
+{
+    Unknown,
+    Success,
+    Warning,
+    Error,
+    Fatal
+};
+
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FBuild_ModuleInfo
+struct FBuild_CompilationIssue
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Compilation")
+    UPROPERTY(BlueprintReadOnly)
+    EBuild_CompilationResult Severity;
+
+    UPROPERTY(BlueprintReadOnly)
+    FString FileName;
+
+    UPROPERTY(BlueprintReadOnly)
+    int32 LineNumber;
+
+    UPROPERTY(BlueprintReadOnly)
+    FString Message;
+
+    UPROPERTY(BlueprintReadOnly)
+    FString Category;
+
+    FBuild_CompilationIssue()
+    {
+        Severity = EBuild_CompilationResult::Unknown;
+        FileName = TEXT("");
+        LineNumber = 0;
+        Message = TEXT("");
+        Category = TEXT("");
+    }
+};
+
+USTRUCT(BlueprintType)
+struct FBuild_ModuleCompilationStatus
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadOnly)
     FString ModuleName;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Compilation")
-    int32 HeaderCount;
+    UPROPERTY(BlueprintReadOnly)
+    EBuild_CompilationResult Result;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Compilation")
-    int32 SourceCount;
+    UPROPERTY(BlueprintReadOnly)
+    TArray<FBuild_CompilationIssue> Issues;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Compilation")
-    EBuild_ValidationStatus CompilationStatus;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Compilation")
-    TArray<FString> CompilationErrors;
-
-    FBuild_ModuleInfo()
-    {
-        ModuleName = TEXT("");
-        HeaderCount = 0;
-        SourceCount = 0;
-        CompilationStatus = EBuild_ValidationStatus::Unknown;
-    }
-};
-
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FBuild_CompilationReport
-{
-    GENERATED_BODY()
-
-    UPROPERTY(BlueprintReadOnly, Category = "Compilation")
-    TArray<FBuild_ModuleInfo> ModuleInfos;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Compilation")
-    int32 TotalHeaderFiles;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Compilation")
-    int32 TotalSourceFiles;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Compilation")
-    int32 OrphanedHeaders;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Compilation")
-    bool bAllModulesCompile;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Compilation")
+    UPROPERTY(BlueprintReadOnly)
     float CompilationTime;
 
-    FBuild_CompilationReport()
+    UPROPERTY(BlueprintReadOnly)
+    int32 SourceFileCount;
+
+    UPROPERTY(BlueprintReadOnly)
+    int32 HeaderFileCount;
+
+    FBuild_ModuleCompilationStatus()
     {
-        TotalHeaderFiles = 0;
-        TotalSourceFiles = 0;
-        OrphanedHeaders = 0;
-        bAllModulesCompile = false;
+        ModuleName = TEXT("");
+        Result = EBuild_CompilationResult::Unknown;
         CompilationTime = 0.0f;
+        SourceFileCount = 0;
+        HeaderFileCount = 0;
     }
 };
 
-/**
- * Compilation Validator - Ensures all code compiles and follows UE5 standards
- * Validates header/source file pairs and compilation integrity
- */
-UCLASS(Config = Game, DefaultConfig, BlueprintType)
-class TRANSPERSONALGAME_API UBuild_CompilationValidator : public UDeveloperSettings
+UCLASS(BlueprintType)
+class TRANSPERSONALGAME_API UBuild_CompilationValidator : public UObject
 {
     GENERATED_BODY()
 
 public:
     UBuild_CompilationValidator();
 
-    UFUNCTION(BlueprintCallable, Category = "Compilation")
-    FBuild_CompilationReport GenerateCompilationReport();
+    // Compilation validation
+    UFUNCTION(BlueprintCallable, Category = "Build Compilation")
+    static bool ValidateProjectCompilation();
 
-    UFUNCTION(BlueprintCallable, Category = "Compilation")
-    bool ValidateHeaderSourcePairs();
+    UFUNCTION(BlueprintCallable, Category = "Build Compilation")
+    static TArray<FBuild_ModuleCompilationStatus> GetModuleCompilationStatus();
 
-    UFUNCTION(BlueprintCallable, Category = "Compilation")
-    TArray<FString> FindOrphanedHeaders();
+    UFUNCTION(BlueprintCallable, Category = "Build Compilation")
+    static bool CheckSourceFileIntegrity();
 
-    UFUNCTION(BlueprintCallable, Category = "Compilation")
-    bool ValidateUE5Standards();
+    UFUNCTION(BlueprintCallable, Category = "Build Compilation")
+    static bool ValidateHeaderIncludes();
 
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Compilation")
-    void RunCompilationValidation();
+    UFUNCTION(BlueprintCallable, Category = "Build Compilation")
+    static bool CheckForDuplicateDefinitions();
 
-    UFUNCTION(BlueprintCallable, Category = "Compilation")
-    TArray<FBuild_ModuleInfo> GetModuleInfos();
+    // File analysis
+    UFUNCTION(BlueprintCallable, Category = "Build Compilation")
+    static TArray<FString> FindOrphanedHeaders();
+
+    UFUNCTION(BlueprintCallable, Category = "Build Compilation")
+    static TArray<FString> FindMissingImplementations();
+
+    UFUNCTION(BlueprintCallable, Category = "Build Compilation")
+    static bool ValidateUClassMacros();
+
+    // Error reporting
+    UFUNCTION(BlueprintCallable, Category = "Build Compilation")
+    static void ReportCompilationIssue(const FBuild_CompilationIssue& Issue);
+
+    UFUNCTION(BlueprintPure, Category = "Build Compilation")
+    static TArray<FBuild_CompilationIssue> GetCompilationIssues();
+
+    UFUNCTION(BlueprintCallable, Category = "Build Compilation")
+    static void ClearCompilationIssues();
+
+    // Build system integration
+    UFUNCTION(BlueprintCallable, Category = "Build Compilation")
+    static bool TriggerHotReload();
+
+    UFUNCTION(BlueprintCallable, Category = "Build Compilation")
+    static bool CheckBuildConfiguration();
+
+    UFUNCTION(BlueprintPure, Category = "Build Compilation")
+    static FString GetLastCompilationLog();
 
 protected:
-    UPROPERTY(Config, BlueprintReadOnly, Category = "Compilation")
-    TArray<FString> RequiredModules;
-
-    UPROPERTY(Config, BlueprintReadOnly, Category = "Compilation")
-    TArray<FString> OptionalModules;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Compilation")
-    TArray<FBuild_ModuleInfo> CachedModuleInfos;
+    static TArray<FBuild_CompilationIssue> CompilationIssues;
+    static FString LastCompilationLog;
 
 private:
-    void ValidateModule(const FString& ModulePath, FBuild_ModuleInfo& ModuleInfo);
-    bool CheckHeaderSourcePair(const FString& HeaderPath);
-    TArray<FString> GetCompilationErrors(const FString& ModulePath);
-    bool ValidateUE5Macros(const FString& FilePath);
+    static bool AnalyzeSourceFile(const FString& FilePath, FBuild_ModuleCompilationStatus& Status);
+    static bool ValidateHeaderFile(const FString& FilePath);
+    static bool CheckIncludeDependencies(const FString& FilePath);
+    static void ParseCompilationOutput(const FString& Output, TArray<FBuild_CompilationIssue>& Issues);
+    static EBuild_CompilationResult DetermineOverallResult(const TArray<FBuild_CompilationIssue>& Issues);
 };
