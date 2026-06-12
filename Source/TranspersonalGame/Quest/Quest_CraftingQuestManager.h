@@ -1,9 +1,9 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
-#include "Engine/Engine.h"
+#include "Engine/World.h"
 #include "Components/ActorComponent.h"
+#include "Engine/Engine.h"
 #include "../SharedTypes.h"
 #include "Quest_CraftingQuestManager.generated.h"
 
@@ -12,26 +12,29 @@ struct TRANSPERSONALGAME_API FQuest_CraftingRecipe
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Recipe")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crafting")
     FString RecipeName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Recipe")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crafting")
     TArray<FString> RequiredMaterials;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Recipe")
-    TArray<int32> RequiredQuantities;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crafting")
+    TArray<int32> MaterialQuantities;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Recipe")
-    FString CraftedItem;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crafting")
+    FString ResultItem;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Recipe")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crafting")
     float CraftingTime;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crafting")
+    int32 ExperienceReward;
 
     FQuest_CraftingRecipe()
     {
-        RecipeName = TEXT("Unknown Recipe");
-        CraftedItem = TEXT("Unknown Item");
+        RecipeName = TEXT("");
         CraftingTime = 5.0f;
+        ExperienceReward = 10;
     }
 };
 
@@ -40,77 +43,74 @@ struct TRANSPERSONALGAME_API FQuest_CraftingObjective
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Objective")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
     FString ObjectiveID;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Objective")
-    FString Description;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    FString ItemToCraft;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Objective")
-    FString RequiredItem;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    int32 QuantityRequired;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Objective")
-    int32 RequiredQuantity;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    int32 CurrentProgress;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Objective")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
     bool bIsCompleted;
 
     FQuest_CraftingObjective()
     {
-        ObjectiveID = TEXT("craft_001");
-        Description = TEXT("Craft basic tool");
-        RequiredItem = TEXT("Stone Axe");
-        RequiredQuantity = 1;
+        ObjectiveID = TEXT("");
+        ItemToCraft = TEXT("");
+        QuantityRequired = 1;
+        CurrentProgress = 0;
         bIsCompleted = false;
     }
 };
 
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API AQuest_CraftingQuestManager : public AActor
+UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UQuest_CraftingQuestManager : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    AQuest_CraftingQuestManager();
+    UQuest_CraftingQuestManager();
 
 protected:
     virtual void BeginPlay() override;
-
-public:
-    virtual void Tick(float DeltaTime) override;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crafting System")
     TArray<FQuest_CraftingRecipe> AvailableRecipes;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest System")
-    TArray<FQuest_CraftingObjective> ActiveObjectives;
+    TArray<FQuest_CraftingObjective> ActiveCraftingObjectives;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Player Inventory")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Inventory")
     TMap<FString, int32> PlayerInventory;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crafting System")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "UI")
     bool bCraftingMenuOpen;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crafting System")
-    float CraftingProgress;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Experience")
+    int32 CraftingExperience;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crafting System")
-    FString CurrentlyCrafting;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Experience")
+    int32 CraftingLevel;
+
+public:
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
     UFUNCTION(BlueprintCallable, Category = "Crafting")
-    void InitializeBasicRecipes();
+    void InitializeCraftingSystem();
+
+    UFUNCTION(BlueprintCallable, Category = "Crafting")
+    void AddBasicRecipes();
 
     UFUNCTION(BlueprintCallable, Category = "Crafting")
     bool CanCraftItem(const FString& ItemName);
 
     UFUNCTION(BlueprintCallable, Category = "Crafting")
-    bool StartCrafting(const FString& ItemName);
-
-    UFUNCTION(BlueprintCallable, Category = "Crafting")
-    void UpdateCraftingProgress(float DeltaTime);
-
-    UFUNCTION(BlueprintCallable, Category = "Crafting")
-    void CompleteCrafting();
+    bool CraftItem(const FString& ItemName);
 
     UFUNCTION(BlueprintCallable, Category = "Inventory")
     void AddItemToInventory(const FString& ItemName, int32 Quantity);
@@ -122,13 +122,22 @@ public:
     bool RemoveItemFromInventory(const FString& ItemName, int32 Quantity);
 
     UFUNCTION(BlueprintCallable, Category = "Quest")
-    void CheckCraftingObjectives();
+    void AddCraftingObjective(const FString& ObjectiveID, const FString& ItemName, int32 Quantity);
 
     UFUNCTION(BlueprintCallable, Category = "Quest")
-    void CompleteObjective(const FString& ObjectiveID);
+    void UpdateCraftingProgress(const FString& ItemName, int32 Quantity);
+
+    UFUNCTION(BlueprintCallable, Category = "Quest")
+    bool IsObjectiveCompleted(const FString& ObjectiveID);
 
     UFUNCTION(BlueprintCallable, Category = "UI")
     void ToggleCraftingMenu();
+
+    UFUNCTION(BlueprintCallable, Category = "Experience")
+    void AddCraftingExperience(int32 Experience);
+
+    UFUNCTION(BlueprintCallable, Category = "Experience")
+    void CheckLevelUp();
 
     UFUNCTION(BlueprintCallable, Category = "Debug")
     void DebugPrintInventory();
