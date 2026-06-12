@@ -1,402 +1,360 @@
 #include "Combat_DinosaurCombatAI.h"
-#include "Engine/Engine.h"
+#include "Engine/World.h"
+#include "GameFramework/Actor.h"
 #include "GameFramework/Pawn.h"
-#include "GameFramework/Character.h"
-#include "Components/SkeletalMeshComponent.h"
 #include "Kismet/GameplayStatics.h"
-#include "Kismet/KismetMathLibrary.h"
-#include "BehaviorTree/BehaviorTree.h"
-#include "BehaviorTree/BlackboardComponent.h"
-#include "Perception/AIPerceptionComponent.h"
-#include "Perception/AISenseConfig_Sight.h"
-#include "Perception/AISenseConfig_Hearing.h"
+#include "Engine/Engine.h"
 
-ACombat_DinosaurCombatAI::ACombat_DinosaurCombatAI()
+UCombat_DinosaurCombatAI::UCombat_DinosaurCombatAI()
 {
-    PrimaryActorTick.bCanEverTick = true;
-
-    // Initialize components
-    BehaviorTreeComponent = CreateDefaultSubobject<UBehaviorTreeComponent>(TEXT("BehaviorTreeComponent"));
-    BlackboardComponent = CreateDefaultSubobject<UBlackboardComponent>(TEXT("BlackboardComponent"));
-    AIPerceptionComponent = CreateDefaultSubobject<UAIPerceptionComponent>(TEXT("AIPerceptionComponent"));
-
-    // Configure sight perception
-    UAISenseConfig_Sight* SightConfig = CreateDefaultSubobject<UAISenseConfig_Sight>(TEXT("SightConfig"));
-    SightConfig->SightRadius = 2000.0f;
-    SightConfig->LoseSightRadius = 2500.0f;
-    SightConfig->PeripheralVisionAngleDegrees = 120.0f;
-    SightConfig->DetectionByAffiliation.bDetectNeutrals = true;
-    SightConfig->DetectionByAffiliation.bDetectFriendlies = true;
-    SightConfig->DetectionByAffiliation.bDetectEnemies = true;
-    AIPerceptionComponent->ConfigureSense(*SightConfig);
-
-    // Configure hearing perception
-    UAISenseConfig_Hearing* HearingConfig = CreateDefaultSubobject<UAISenseConfig_Hearing>(TEXT("HearingConfig"));
-    HearingConfig->HearingRange = 1500.0f;
-    HearingConfig->DetectionByAffiliation.bDetectNeutrals = true;
-    HearingConfig->DetectionByAffiliation.bDetectFriendlies = true;
-    HearingConfig->DetectionByAffiliation.bDetectEnemies = true;
-    AIPerceptionComponent->ConfigureSense(*HearingConfig);
-
-    AIPerceptionComponent->SetDominantSense(SightConfig->GetSenseImplementation());
-
-    // Default combat settings
-    AttackRange = 300.0f;
-    FleeHealthThreshold = 0.2f;
-    AggressionLevel = 0.7f;
-    DinosaurSpecies = ECombat_DinosaurSpecies::TRex;
-    CurrentCombatState = ECombat_CombatState::Idle;
-
-    // Initialize state
+    PrimaryComponentTick.bCanEverTick = true;
+    
+    CurrentCombatState = ECombat_DinosaurCombatState::Idle;
+    DinosaurSpecies = ECombat_DinosaurSpecies::Raptor;
     CurrentTarget = nullptr;
+    AttackCooldown = 2.0f;
     LastAttackTime = 0.0f;
-    CombatStartTime = 0.0f;
-    bIsInCombat = false;
+    StateChangeInterval = 5.0f;
+    LastStateChangeTime = 0.0f;
 }
 
-void ACombat_DinosaurCombatAI::BeginPlay()
+void UCombat_DinosaurCombatAI::BeginPlay()
 {
     Super::BeginPlay();
+    
+    // Configure default stats based on species
+    ConfigureForSpecies(DinosaurSpecies);
+    
+    // Start with patrolling behavior
+    SetCombatState(ECombat_DinosaurCombatState::Patrolling);
+    
+    UE_LOG(LogTemp, Warning, TEXT("DinosaurCombatAI initialized for %s"), 
+           *GetOwner()->GetName());
+}
 
-    // Bind perception events
-    if (AIPerceptionComponent)
+void UCombat_DinosaurCombatAI::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+{
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+    
+    UpdateCombatBehavior(DeltaTime);
+}
+
+void UCombat_DinosaurCombatAI::SetCombatState(ECombat_DinosaurCombatState NewState)
+{
+    if (CurrentCombatState != NewState)
     {
-        AIPerceptionComponent->OnPerceptionUpdated.AddDynamic(this, &ACombat_DinosaurCombatAI::OnPerceptionUpdated);
-        AIPerceptionComponent->OnTargetPerceptionUpdated.AddDynamic(this, &ACombat_DinosaurCombatAI::OnTargetPerceptionUpdated);
-    }
-
-    // Initialize species-specific behavior
-    InitializeSpeciesBehavior();
-
-    // Start behavior tree if available
-    if (BlackboardComponent && BehaviorTreeComponent)
-    {
-        UseBlackboard(BlackboardComponent);
-        RunBehaviorTree(nullptr); // Will be set via Blueprint
+        CurrentCombatState = NewState;
+        LastStateChangeTime = GetWorld()->GetTimeSeconds();
+        
+        UE_LOG(LogTemp, Log, TEXT("%s changed combat state to %d"), 
+               *GetOwner()->GetName(), (int32)NewState);
     }
 }
 
-void ACombat_DinosaurCombatAI::Tick(float DeltaTime)
+void UCombat_DinosaurCombatAI::SetTarget(AActor* NewTarget)
 {
-    Super::Tick(DeltaTime);
-
-    UpdateCombatState();
-
-    // Update species-specific behavior
-    switch (DinosaurSpecies)
+    CurrentTarget = NewTarget;
+    
+    if (CurrentTarget)
     {
-        case ECombat_DinosaurSpecies::TRex:
-            UpdateTRexBehavior();
-            break;
-        case ECombat_DinosaurSpecies::Velociraptor:
-            UpdateVelociraptorBehavior();
-            break;
-        case ECombat_DinosaurSpecies::Triceratops:
-            UpdateTriceratopsBehavior();
-            break;
-        case ECombat_DinosaurSpecies::Brachiosaurus:
-            UpdateBrachiosaurusBehavior();
-            break;
+        // Switch to hunting when target acquired
+        SetCombatState(ECombat_DinosaurCombatState::Hunting);
+        UE_LOG(LogTemp, Log, TEXT("%s acquired target: %s"), 
+               *GetOwner()->GetName(), *CurrentTarget->GetName());
+    }
+    else
+    {
+        // Return to patrolling when target lost
+        SetCombatState(ECombat_DinosaurCombatState::Patrolling);
     }
 }
 
-void ACombat_DinosaurCombatAI::StartCombat(AActor* Target)
+void UCombat_DinosaurCombatAI::InitiateAttack()
 {
-    if (!Target) return;
-
-    CurrentTarget = Target;
-    bIsInCombat = true;
-    CombatStartTime = GetWorld()->GetTimeSeconds();
-    CurrentCombatState = ECombat_CombatState::Aggressive;
-
-    // Update blackboard
-    if (BlackboardComponent)
+    if (!CanAttack())
     {
-        BlackboardComponent->SetValueAsObject(TEXT("Target"), Target);
-        BlackboardComponent->SetValueAsBool(TEXT("InCombat"), true);
+        return;
     }
-
-    UE_LOG(LogTemp, Warning, TEXT("Combat AI: %s starting combat with %s"), 
-           *GetPawn()->GetName(), *Target->GetName());
+    
+    SetCombatState(ECombat_DinosaurCombatState::Attacking);
+    LastAttackTime = GetWorld()->GetTimeSeconds();
+    
+    if (CurrentTarget)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("%s attacking %s for %.1f damage!"), 
+               *GetOwner()->GetName(), *CurrentTarget->GetName(), CombatStats.AttackDamage);
+        
+        // TODO: Apply damage to target
+        // TODO: Play attack animation
+        // TODO: Trigger attack sound effects
+    }
 }
 
-void ACombat_DinosaurCombatAI::EndCombat()
+void UCombat_DinosaurCombatAI::ExecuteFleeingBehavior()
 {
+    SetCombatState(ECombat_DinosaurCombatState::Fleeing);
+    
+    if (CurrentTarget)
+    {
+        MoveAwayFromTarget();
+        UE_LOG(LogTemp, Log, TEXT("%s fleeing from %s"), 
+               *GetOwner()->GetName(), *CurrentTarget->GetName());
+    }
+}
+
+void UCombat_DinosaurCombatAI::StartPatrolling()
+{
+    SetCombatState(ECombat_DinosaurCombatState::Patrolling);
     CurrentTarget = nullptr;
-    bIsInCombat = false;
-    CurrentCombatState = ECombat_CombatState::Idle;
-
-    // Update blackboard
-    if (BlackboardComponent)
-    {
-        BlackboardComponent->SetValueAsObject(TEXT("Target"), nullptr);
-        BlackboardComponent->SetValueAsBool(TEXT("InCombat"), false);
-    }
-
-    UE_LOG(LogTemp, Warning, TEXT("Combat AI: %s ending combat"), *GetPawn()->GetName());
+    
+    UE_LOG(LogTemp, Log, TEXT("%s started patrolling"), *GetOwner()->GetName());
 }
 
-void ACombat_DinosaurCombatAI::FleeFromThreat(AActor* Threat)
+bool UCombat_DinosaurCombatAI::DetectNearbyThreats()
 {
-    if (!Threat) return;
-
-    CurrentCombatState = ECombat_CombatState::Fleeing;
-
-    // Calculate flee direction (opposite from threat)
-    FVector FleeDirection = GetPawn()->GetActorLocation() - Threat->GetActorLocation();
-    FleeDirection.Normalize();
-    FVector FleeLocation = GetPawn()->GetActorLocation() + (FleeDirection * 2000.0f);
-
-    // Move to flee location
-    MoveToLocation(FleeLocation);
-
-    // Update blackboard
-    if (BlackboardComponent)
+    AActor* Player = FindClosestPlayer();
+    
+    if (Player)
     {
-        BlackboardComponent->SetValueAsVector(TEXT("FleeLocation"), FleeLocation);
-        BlackboardComponent->SetValueAsBool(TEXT("IsFleeing"), true);
+        float DistanceToPlayer = FVector::Dist(GetOwner()->GetActorLocation(), Player->GetActorLocation());
+        
+        if (DistanceToPlayer <= CombatStats.DetectionRadius)
+        {
+            SetTarget(Player);
+            return true;
+        }
     }
-
-    UE_LOG(LogTemp, Warning, TEXT("Combat AI: %s fleeing from %s"), 
-           *GetPawn()->GetName(), *Threat->GetName());
+    
+    return false;
 }
 
-void ACombat_DinosaurCombatAI::AttackTarget(AActor* Target)
+AActor* UCombat_DinosaurCombatAI::FindClosestPlayer()
 {
-    if (!Target || !IsInAttackRange(Target)) return;
+    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
+    return PlayerPawn;
+}
 
-    float CurrentTime = GetWorld()->GetTimeSeconds();
-    float AttackCooldown = 2.0f; // Base attack cooldown
-
-    // Adjust cooldown based on species
-    switch (DinosaurSpecies)
+void UCombat_DinosaurCombatAI::ConfigureForSpecies(ECombat_DinosaurSpecies Species)
+{
+    DinosaurSpecies = Species;
+    
+    switch (Species)
     {
         case ECombat_DinosaurSpecies::TRex:
+            CombatStats.Health = 200.0f;
+            CombatStats.AttackDamage = 50.0f;
+            CombatStats.AttackRange = 300.0f;
+            CombatStats.MovementSpeed = 400.0f;
+            CombatStats.DetectionRadius = 1500.0f;
+            CombatStats.AggressionLevel = 0.9f;
             AttackCooldown = 3.0f;
             break;
-        case ECombat_DinosaurSpecies::Velociraptor:
+            
+        case ECombat_DinosaurSpecies::Raptor:
+            CombatStats.Health = 80.0f;
+            CombatStats.AttackDamage = 30.0f;
+            CombatStats.AttackRange = 150.0f;
+            CombatStats.MovementSpeed = 600.0f;
+            CombatStats.DetectionRadius = 1200.0f;
+            CombatStats.AggressionLevel = 0.8f;
             AttackCooldown = 1.5f;
             break;
+            
         case ECombat_DinosaurSpecies::Triceratops:
+            CombatStats.Health = 150.0f;
+            CombatStats.AttackDamage = 40.0f;
+            CombatStats.AttackRange = 250.0f;
+            CombatStats.MovementSpeed = 250.0f;
+            CombatStats.DetectionRadius = 800.0f;
+            CombatStats.AggressionLevel = 0.3f;
             AttackCooldown = 2.5f;
             break;
+            
         case ECombat_DinosaurSpecies::Brachiosaurus:
+            CombatStats.Health = 300.0f;
+            CombatStats.AttackDamage = 20.0f;
+            CombatStats.AttackRange = 400.0f;
+            CombatStats.MovementSpeed = 150.0f;
+            CombatStats.DetectionRadius = 600.0f;
+            CombatStats.AggressionLevel = 0.1f;
             AttackCooldown = 4.0f;
             break;
-    }
-
-    if (CurrentTime - LastAttackTime >= AttackCooldown)
-    {
-        LastAttackTime = CurrentTime;
-        CurrentCombatState = ECombat_CombatState::Attacking;
-
-        // Face the target
-        FVector LookDirection = Target->GetActorLocation() - GetPawn()->GetActorLocation();
-        LookDirection.Z = 0.0f;
-        LookDirection.Normalize();
-        FRotator LookRotation = FRotationMatrix::MakeFromX(LookDirection).Rotator();
-        GetPawn()->SetActorRotation(LookRotation);
-
-        // Update blackboard for attack animation
-        if (BlackboardComponent)
-        {
-            BlackboardComponent->SetValueAsBool(TEXT("ShouldAttack"), true);
-        }
-
-        UE_LOG(LogTemp, Warning, TEXT("Combat AI: %s attacking %s"), 
-               *GetPawn()->GetName(), *Target->GetName());
-    }
-}
-
-bool ACombat_DinosaurCombatAI::IsInAttackRange(AActor* Target) const
-{
-    if (!Target || !GetPawn()) return false;
-
-    float Distance = FVector::Dist(GetPawn()->GetActorLocation(), Target->GetActorLocation());
-    return Distance <= AttackRange;
-}
-
-void ACombat_DinosaurCombatAI::UpdateCombatState()
-{
-    if (!bIsInCombat) return;
-
-    // Check if target is still valid
-    if (!CurrentTarget || !IsValid(CurrentTarget))
-    {
-        EndCombat();
-        return;
-    }
-
-    // Check if target is too far away
-    float DistanceToTarget = FVector::Dist(GetPawn()->GetActorLocation(), CurrentTarget->GetActorLocation());
-    if (DistanceToTarget > 3000.0f) // Lost target
-    {
-        EndCombat();
-        return;
-    }
-
-    // Check health for fleeing (if pawn has health component)
-    if (GetPawn())
-    {
-        // This would need to be connected to actual health system
-        // For now, use random chance to simulate low health fleeing
-        if (FMath::RandRange(0.0f, 1.0f) < 0.01f) // 1% chance per tick to flee
-        {
-            FleeFromThreat(CurrentTarget);
-        }
-    }
-}
-
-void ACombat_DinosaurCombatAI::OnPerceptionUpdated(const TArray<AActor*>& UpdatedActors)
-{
-    for (AActor* Actor : UpdatedActors)
-    {
-        if (!Actor) continue;
-
-        // Check if this is a player or other dinosaur
-        if (Actor->IsA<ACharacter>() && !bIsInCombat)
-        {
-            float Distance = FVector::Dist(GetPawn()->GetActorLocation(), Actor->GetActorLocation());
             
-            // Start combat if close enough and aggressive enough
-            if (Distance < AttackRange * 2.0f && FMath::RandRange(0.0f, 1.0f) < AggressionLevel)
-            {
-                StartCombat(Actor);
-            }
-        }
+        case ECombat_DinosaurSpecies::Ankylosaurus:
+            CombatStats.Health = 180.0f;
+            CombatStats.AttackDamage = 35.0f;
+            CombatStats.AttackRange = 200.0f;
+            CombatStats.MovementSpeed = 200.0f;
+            CombatStats.DetectionRadius = 700.0f;
+            CombatStats.AggressionLevel = 0.4f;
+            AttackCooldown = 3.5f;
+            break;
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("Configured %s for species %d"), 
+           *GetOwner()->GetName(), (int32)Species);
+}
+
+void UCombat_DinosaurCombatAI::UpdateCombatBehavior(float DeltaTime)
+{
+    switch (CurrentCombatState)
+    {
+        case ECombat_DinosaurCombatState::Idle:
+            ProcessIdleState();
+            break;
+        case ECombat_DinosaurCombatState::Patrolling:
+            ProcessPatrollingState();
+            break;
+        case ECombat_DinosaurCombatState::Hunting:
+            ProcessHuntingState();
+            break;
+        case ECombat_DinosaurCombatState::Attacking:
+            ProcessAttackingState();
+            break;
+        case ECombat_DinosaurCombatState::Fleeing:
+            ProcessFleeingState();
+            break;
+        case ECombat_DinosaurCombatState::Defending:
+            ProcessDefendingState();
+            break;
     }
 }
 
-void ACombat_DinosaurCombatAI::OnTargetPerceptionUpdated(AActor* Actor, FAIStimulus Stimulus)
+void UCombat_DinosaurCombatAI::ProcessIdleState()
 {
-    if (!Actor) return;
-
-    if (Stimulus.WasSuccessfullySensed())
+    // Periodically check for threats
+    if (DetectNearbyThreats())
     {
-        // Target acquired
-        if (BlackboardComponent)
+        return; // State changed to hunting
+    }
+    
+    // After some time, start patrolling
+    float CurrentTime = GetWorld()->GetTimeSeconds();
+    if (CurrentTime - LastStateChangeTime > StateChangeInterval)
+    {
+        StartPatrolling();
+    }
+}
+
+void UCombat_DinosaurCombatAI::ProcessPatrollingState()
+{
+    // Check for threats while patrolling
+    if (DetectNearbyThreats())
+    {
+        return; // State changed to hunting
+    }
+    
+    // TODO: Implement actual patrol movement
+    // For now, just continue patrolling
+}
+
+void UCombat_DinosaurCombatAI::ProcessHuntingState()
+{
+    if (!CurrentTarget)
+    {
+        StartPatrolling();
+        return;
+    }
+    
+    // Check if target is still in detection range
+    float DistanceToTarget = FVector::Dist(GetOwner()->GetActorLocation(), CurrentTarget->GetActorLocation());
+    
+    if (DistanceToTarget > CombatStats.DetectionRadius * 1.5f) // Give some buffer
+    {
+        SetTarget(nullptr); // Lose target
+        return;
+    }
+    
+    // Move towards target
+    MoveTowardsTarget();
+    
+    // Attack if in range
+    if (IsTargetInRange())
+    {
+        InitiateAttack();
+    }
+}
+
+void UCombat_DinosaurCombatAI::ProcessAttackingState()
+{
+    // Return to hunting after attack
+    float CurrentTime = GetWorld()->GetTimeSeconds();
+    if (CurrentTime - LastAttackTime > 1.0f) // Attack animation duration
+    {
+        SetCombatState(ECombat_DinosaurCombatState::Hunting);
+    }
+}
+
+void UCombat_DinosaurCombatAI::ProcessFleeingState()
+{
+    if (CurrentTarget)
+    {
+        MoveAwayFromTarget();
+        
+        // Stop fleeing if far enough away
+        float DistanceToTarget = FVector::Dist(GetOwner()->GetActorLocation(), CurrentTarget->GetActorLocation());
+        if (DistanceToTarget > CombatStats.DetectionRadius * 2.0f)
         {
-            BlackboardComponent->SetValueAsObject(TEXT("SensedTarget"), Actor);
+            StartPatrolling();
         }
     }
     else
     {
-        // Target lost
-        if (BlackboardComponent && BlackboardComponent->GetValueAsObject(TEXT("SensedTarget")) == Actor)
-        {
-            BlackboardComponent->SetValueAsObject(TEXT("SensedTarget"), nullptr);
-        }
+        StartPatrolling();
     }
 }
 
-void ACombat_DinosaurCombatAI::InitializeSpeciesBehavior()
+void UCombat_DinosaurCombatAI::ProcessDefendingState()
 {
-    switch (DinosaurSpecies)
-    {
-        case ECombat_DinosaurSpecies::TRex:
-            AttackRange = 500.0f;
-            AggressionLevel = 0.9f;
-            FleeHealthThreshold = 0.1f;
-            break;
-        case ECombat_DinosaurSpecies::Velociraptor:
-            AttackRange = 250.0f;
-            AggressionLevel = 0.8f;
-            FleeHealthThreshold = 0.3f;
-            break;
-        case ECombat_DinosaurSpecies::Triceratops:
-            AttackRange = 400.0f;
-            AggressionLevel = 0.5f;
-            FleeHealthThreshold = 0.2f;
-            break;
-        case ECombat_DinosaurSpecies::Brachiosaurus:
-            AttackRange = 600.0f;
-            AggressionLevel = 0.2f;
-            FleeHealthThreshold = 0.4f;
-            break;
-    }
+    // Similar to hunting but with defensive positioning
+    ProcessHuntingState();
 }
 
-void ACombat_DinosaurCombatAI::UpdateTRexBehavior()
+bool UCombat_DinosaurCombatAI::IsTargetInRange() const
 {
-    // T-Rex: Aggressive, powerful attacks, territorial
-    if (bIsInCombat && CurrentTarget)
+    if (!CurrentTarget)
     {
-        float Distance = FVector::Dist(GetPawn()->GetActorLocation(), CurrentTarget->GetActorLocation());
-        
-        if (Distance <= AttackRange)
-        {
-            AttackTarget(CurrentTarget);
-        }
-        else if (Distance < 1000.0f)
-        {
-            // Chase the target
-            MoveToActor(CurrentTarget);
-        }
+        return false;
     }
+    
+    float DistanceToTarget = FVector::Dist(GetOwner()->GetActorLocation(), CurrentTarget->GetActorLocation());
+    return DistanceToTarget <= CombatStats.AttackRange;
 }
 
-void ACombat_DinosaurCombatAI::UpdateVelociraptorBehavior()
+bool UCombat_DinosaurCombatAI::CanAttack() const
 {
-    // Velociraptor: Pack hunter, quick attacks, flanking
-    if (bIsInCombat && CurrentTarget)
-    {
-        float Distance = FVector::Dist(GetPawn()->GetActorLocation(), CurrentTarget->GetActorLocation());
-        
-        if (Distance <= AttackRange)
-        {
-            AttackTarget(CurrentTarget);
-        }
-        else
-        {
-            // Try to flank the target
-            FVector TargetLocation = CurrentTarget->GetActorLocation();
-            FVector FlankDirection = FVector::CrossProduct(
-                CurrentTarget->GetActorForwardVector(), 
-                FVector::UpVector
-            );
-            FVector FlankPosition = TargetLocation + (FlankDirection * 300.0f);
-            MoveToLocation(FlankPosition);
-        }
-    }
+    float CurrentTime = GetWorld()->GetTimeSeconds();
+    return (CurrentTime - LastAttackTime) >= AttackCooldown;
 }
 
-void ACombat_DinosaurCombatAI::UpdateTriceratopsBehavior()
+void UCombat_DinosaurCombatAI::MoveTowardsTarget()
 {
-    // Triceratops: Defensive, charges when threatened
-    if (bIsInCombat && CurrentTarget)
+    if (!CurrentTarget)
     {
-        float Distance = FVector::Dist(GetPawn()->GetActorLocation(), CurrentTarget->GetActorLocation());
-        
-        if (Distance <= AttackRange)
-        {
-            AttackTarget(CurrentTarget);
-        }
-        else if (Distance < 800.0f)
-        {
-            // Charge attack
-            MoveToActor(CurrentTarget);
-        }
+        return;
     }
+    
+    FVector OwnerLocation = GetOwner()->GetActorLocation();
+    FVector TargetLocation = CurrentTarget->GetActorLocation();
+    FVector Direction = (TargetLocation - OwnerLocation).GetSafeNormal();
+    
+    // TODO: Use proper movement component
+    // For now, just log the intended movement
+    UE_LOG(LogTemp, VeryVerbose, TEXT("%s moving towards target"), *GetOwner()->GetName());
 }
 
-void ACombat_DinosaurCombatAI::UpdateBrachiosaurusBehavior()
+void UCombat_DinosaurCombatAI::MoveAwayFromTarget()
 {
-    // Brachiosaurus: Mostly peaceful, defensive when attacked
-    if (bIsInCombat && CurrentTarget)
+    if (!CurrentTarget)
     {
-        float Distance = FVector::Dist(GetPawn()->GetActorLocation(), CurrentTarget->GetActorLocation());
-        
-        if (Distance <= AttackRange)
-        {
-            AttackTarget(CurrentTarget);
-        }
-        else
-        {
-            // Try to move away (defensive behavior)
-            FVector AwayDirection = GetPawn()->GetActorLocation() - CurrentTarget->GetActorLocation();
-            AwayDirection.Normalize();
-            FVector MoveLocation = GetPawn()->GetActorLocation() + (AwayDirection * 500.0f);
-            MoveToLocation(MoveLocation);
-        }
+        return;
     }
+    
+    FVector OwnerLocation = GetOwner()->GetActorLocation();
+    FVector TargetLocation = CurrentTarget->GetActorLocation();
+    FVector Direction = (OwnerLocation - TargetLocation).GetSafeNormal();
+    
+    // TODO: Use proper movement component
+    // For now, just log the intended movement
+    UE_LOG(LogTemp, VeryVerbose, TEXT("%s fleeing from target"), *GetOwner()->GetName());
 }
