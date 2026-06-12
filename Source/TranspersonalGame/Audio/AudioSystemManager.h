@@ -2,17 +2,19 @@
 
 #include "CoreMinimal.h"
 #include "Engine/GameInstanceSubsystem.h"
-#include "Sound/SoundCue.h"
 #include "Components/AudioComponent.h"
+#include "Sound/SoundCue.h"
+#include "Sound/SoundAttenuation.h"
 #include "AudioSystemManager.generated.h"
 
 UENUM(BlueprintType)
 enum class EAudio_SoundCategory : uint8
 {
     Ambient,
-    Music,
-    SFX,
-    Voice,
+    Dinosaur,
+    Player,
+    Weather,
+    Combat,
     UI
 };
 
@@ -25,43 +27,32 @@ struct TRANSPERSONALGAME_API FAudio_SoundConfig
     TSoftObjectPtr<USoundCue> SoundCue;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    EAudio_SoundCategory Category = EAudio_SoundCategory::SFX;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
     float VolumeMultiplier = 1.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
     float PitchMultiplier = 1.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    bool bLooping = false;
+    EAudio_SoundCategory Category = EAudio_SoundCategory::Ambient;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    float FadeInTime = 0.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    float FadeOutTime = 0.0f;
+    bool bIs3D = true;
 
     FAudio_SoundConfig()
     {
-        SoundCue = nullptr;
-        Category = EAudio_SoundCategory::SFX;
         VolumeMultiplier = 1.0f;
         PitchMultiplier = 1.0f;
-        bLooping = false;
-        FadeInTime = 0.0f;
-        FadeOutTime = 0.0f;
+        Category = EAudio_SoundCategory::Ambient;
+        bIs3D = true;
     }
 };
 
-UCLASS(BlueprintType, Blueprintable)
+UCLASS()
 class TRANSPERSONALGAME_API UAudioSystemManager : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
 public:
-    UAudioSystemManager();
-
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
@@ -69,10 +60,7 @@ public:
     void PlaySound2D(const FAudio_SoundConfig& SoundConfig);
 
     UFUNCTION(BlueprintCallable, Category = "Audio System")
-    void PlaySound3D(const FAudio_SoundConfig& SoundConfig, const FVector& Location);
-
-    UFUNCTION(BlueprintCallable, Category = "Audio System")
-    void StopAllSounds();
+    void PlaySound3D(const FAudio_SoundConfig& SoundConfig, FVector Location);
 
     UFUNCTION(BlueprintCallable, Category = "Audio System")
     void SetMasterVolume(float Volume);
@@ -81,20 +69,20 @@ public:
     void SetCategoryVolume(EAudio_SoundCategory Category, float Volume);
 
     UFUNCTION(BlueprintCallable, Category = "Audio System")
-    float GetMasterVolume() const { return MasterVolume; }
+    void StopAllSounds();
 
     UFUNCTION(BlueprintCallable, Category = "Audio System")
-    float GetCategoryVolume(EAudio_SoundCategory Category) const;
+    void StopSoundsOfCategory(EAudio_SoundCategory Category);
 
 protected:
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio System")
-    float MasterVolume = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio System")
+    UPROPERTY()
     TMap<EAudio_SoundCategory, float> CategoryVolumes;
 
     UPROPERTY()
     TArray<UAudioComponent*> ActiveAudioComponents;
+
+    UPROPERTY()
+    float MasterVolume = 1.0f;
 
 private:
     void InitializeDefaultVolumes();
