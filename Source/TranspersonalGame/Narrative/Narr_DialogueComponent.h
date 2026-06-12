@@ -2,12 +2,20 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
-#include "Engine/DataTable.h"
-#include "SharedTypes.h"
+#include "Engine/Engine.h"
 #include "Narr_DialogueComponent.generated.h"
 
+UENUM(BlueprintType)
+enum class ENarr_DialogueState : uint8
+{
+    Idle,
+    Speaking,
+    WaitingForResponse,
+    Completed
+};
+
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FNarr_DialogueLine
+struct FNarr_DialogueLine
 {
     GENERATED_BODY()
 
@@ -15,48 +23,20 @@ struct TRANSPERSONALGAME_API FNarr_DialogueLine
     FString SpeakerName;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    FText DialogueText;
+    FString DialogueText;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    float DisplayDuration;
+    float Duration;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    bool bRequiresPlayerResponse;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    TArray<FText> PlayerResponses;
+    bool bIsPlayerChoice;
 
     FNarr_DialogueLine()
     {
-        SpeakerName = TEXT("Unknown");
-        DialogueText = FText::FromString(TEXT("..."));
-        DisplayDuration = 3.0f;
-        bRequiresPlayerResponse = false;
-    }
-};
-
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FNarr_DialogueSequence
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    FString SequenceID;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    TArray<FNarr_DialogueLine> DialogueLines;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    bool bIsRepeatable;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    int32 Priority;
-
-    FNarr_DialogueSequence()
-    {
-        SequenceID = TEXT("DefaultSequence");
-        bIsRepeatable = true;
-        Priority = 1;
+        SpeakerName = TEXT("");
+        DialogueText = TEXT("");
+        Duration = 3.0f;
+        bIsPlayerChoice = false;
     }
 };
 
@@ -71,56 +51,48 @@ public:
 protected:
     virtual void BeginPlay() override;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue System")
-    TArray<FNarr_DialogueSequence> DialogueSequences;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue System")
-    FString CurrentSequenceID;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue System")
-    int32 CurrentLineIndex;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue System")
-    bool bDialogueActive;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue System")
-    float InteractionRange;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue System")
-    TArray<FString> CompletedSequences;
-
 public:
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    bool StartDialogueSequence(const FString& SequenceID);
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
+    // Dialogue Management
     UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    bool AdvanceDialogue();
+    void StartDialogue();
 
     UFUNCTION(BlueprintCallable, Category = "Dialogue")
     void EndDialogue();
 
     UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    FNarr_DialogueLine GetCurrentDialogueLine() const;
+    void NextDialogueLine();
 
     UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    bool IsDialogueActive() const { return bDialogueActive; }
+    bool IsDialogueActive() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    bool CanInteract(AActor* PlayerActor) const;
+    // Dialogue Content
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    TArray<FNarr_DialogueLine> DialogueLines;
 
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    void AddDialogueSequence(const FNarr_DialogueSequence& NewSequence);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    FString NPCName;
 
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    bool HasCompletedSequence(const FString& SequenceID) const;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    float InteractionRange;
 
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    TArray<FString> GetAvailableSequences() const;
+protected:
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Dialogue")
+    ENarr_DialogueState CurrentState;
 
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    void SetPlayerResponse(int32 ResponseIndex);
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Dialogue")
+    int32 CurrentLineIndex;
 
-private:
-    FNarr_DialogueSequence* FindSequence(const FString& SequenceID);
-    void MarkSequenceCompleted(const FString& SequenceID);
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Dialogue")
+    float CurrentLineTimer;
+
+    // Player reference
+    UPROPERTY()
+    class APawn* PlayerPawn;
+
+    // Helper functions
+    void UpdateDialogueTimer(float DeltaTime);
+    bool IsPlayerInRange() const;
+    void DisplayCurrentLine();
 };
