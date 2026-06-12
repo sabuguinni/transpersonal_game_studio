@@ -1,256 +1,227 @@
 #include "ArchitecturalStructureManager.h"
+#include "Components/StaticMeshComponent.h"
+#include "Components/SceneComponent.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "Engine/StaticMeshActor.h"
-#include "Components/StaticMeshComponent.h"
-#include "UObject/ConstructorHelpers.h"
-#include "Engine/StaticMesh.h"
+#include "Materials/MaterialInterface.h"
 
-UArchitecturalStructureManager::UArchitecturalStructureManager()
+AArchitecturalStructureManager::AArchitecturalStructureManager()
 {
-    PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 5.0f;
-    
-    MaxSpawnDistance = 100000.0f;
-    MaxStructuresPerBiome = 20;
-    bAutoSpawnStructures = true;
+    PrimaryActorTick.bCanEverTick = true;
+
+    // Create root component
+    RootSceneComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootSceneComponent"));
+    RootComponent = RootSceneComponent;
+
+    // Create structure mesh component
+    StructureMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("StructureMesh"));
+    StructureMesh->SetupAttachment(RootComponent);
+
+    // Initialize default values
+    StructureData.StructureType = EArch_StructureType::Foundation;
+    StructureData.Material = EArch_ConstructionMaterial::Stone;
+    StructureData.StructuralIntegrity = 100.0f;
+    StructureData.WeatherResistance = 80.0f;
+    StructureData.ConstructionCost = 10;
+    StructureData.bIsCompleted = false;
+
+    SnapRadius = 100.0f;
+    bCanBeDestroyed = true;
+    MaxHealth = 200.0f;
+    CurrentHealth = MaxHealth;
+
+    // Initialize snap points for foundation
+    SnapPoints.Add(FVector(0, 0, 0));
+    SnapPoints.Add(FVector(400, 0, 0));
+    SnapPoints.Add(FVector(0, 600, 0));
+    SnapPoints.Add(FVector(400, 600, 0));
 }
 
-void UArchitecturalStructureManager::BeginPlay()
+void AArchitecturalStructureManager::BeginPlay()
 {
     Super::BeginPlay();
     
-    if (bAutoSpawnStructures)
+    UpdateMeshMaterial();
+    
+    if (StructureData.bIsCompleted)
     {
-        InitializeBiomeStructures();
+        OnStructureCompleted();
     }
 }
 
-void UArchitecturalStructureManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void AArchitecturalStructureManager::Tick(float DeltaTime)
 {
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-    
-    // Update structural integrity and manage structure lifecycle
-    for (int32 i = StructureRegistry.Num() - 1; i >= 0; --i)
+    Super::Tick(DeltaTime);
+
+    if (StructureData.bIsCompleted)
     {
-        FArch_StructureData& Structure = StructureRegistry[i];
-        
-        // Simulate weathering over time
-        Structure.StructuralIntegrity -= DeltaTime * 0.01f; // Very slow decay
-        
-        if (Structure.StructuralIntegrity <= 0.0f)
+        ApplyWeatherEffects(DeltaTime);
+        UpdateStructuralIntegrity();
+    }
+}
+
+void AArchitecturalStructureManager::InitializeStructure(EArch_StructureType Type, EArch_ConstructionMaterial Material)
+{
+    StructureData.StructureType = Type;
+    StructureData.Material = Material;
+
+    // Set material-specific properties
+    switch (Material)
+    {
+        case EArch_ConstructionMaterial::Stone:
+            StructureData.WeatherResistance = 90.0f;
+            StructureData.ConstructionCost = 15;
+            MaxHealth = 300.0f;
+            break;
+        case EArch_ConstructionMaterial::Wood:
+            StructureData.WeatherResistance = 60.0f;
+            StructureData.ConstructionCost = 8;
+            MaxHealth = 150.0f;
+            break;
+        case EArch_ConstructionMaterial::Clay:
+            StructureData.WeatherResistance = 70.0f;
+            StructureData.ConstructionCost = 10;
+            MaxHealth = 180.0f;
+            break;
+        case EArch_ConstructionMaterial::Bone:
+            StructureData.WeatherResistance = 50.0f;
+            StructureData.ConstructionCost = 12;
+            MaxHealth = 120.0f;
+            break;
+        case EArch_ConstructionMaterial::Hide:
+            StructureData.WeatherResistance = 40.0f;
+            StructureData.ConstructionCost = 5;
+            MaxHealth = 80.0f;
+            break;
+        case EArch_ConstructionMaterial::Thatch:
+            StructureData.WeatherResistance = 30.0f;
+            StructureData.ConstructionCost = 3;
+            MaxHealth = 60.0f;
+            break;
+    }
+
+    CurrentHealth = MaxHealth;
+    UpdateMeshMaterial();
+
+    UE_LOG(LogTemp, Log, TEXT("Initialized %s structure with %s material"), 
+           *UEnum::GetValueAsString(Type), 
+           *UEnum::GetValueAsString(Material));
+}
+
+bool AArchitecturalStructureManager::CanSnapToLocation(const FVector& Location) const
+{
+    for (const FVector& SnapPoint : SnapPoints)
+    {
+        FVector WorldSnapPoint = GetActorTransform().TransformPosition(SnapPoint);
+        float Distance = FVector::Dist(Location, WorldSnapPoint);
+        if (Distance <= SnapRadius)
         {
-            UE_LOG(LogTemp, Warning, TEXT("Structure collapsed due to weathering"));
-            StructureRegistry.RemoveAt(i);
+            return true;
         }
     }
+    return false;
 }
 
-bool UArchitecturalStructureManager::SpawnStructureAtLocation(EArch_StructureType StructureType, FVector Location, FRotator Rotation, FString BiomeName)
+FVector AArchitecturalStructureManager::GetNearestSnapPoint(const FVector& Location) const
 {
-    if (!GetWorld())
+    if (SnapPoints.Num() == 0)
     {
-        UE_LOG(LogTemp, Error, TEXT("ArchitecturalStructureManager: No valid world"));
-        return false;
+        return GetActorLocation();
     }
-    
-    // Check if we're within spawn distance limits
-    if (FVector::Dist(Location, FVector::ZeroVector) > MaxSpawnDistance)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Structure spawn location too far from origin"));
-        return false;
-    }
-    
-    // Check biome structure limit
-    TArray<FArch_StructureData> BiomeStructures = GetStructuresInBiome(BiomeName);
-    if (BiomeStructures.Num() >= MaxStructuresPerBiome)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Maximum structures reached for biome: %s"), *BiomeName);
-        return false;
-    }
-    
-    // Create the structure actor
-    AActor* StructureActor = CreateStructureActor(StructureType, Location, Rotation);
-    if (!StructureActor)
-    {
-        UE_LOG(LogTemp, Error, TEXT("Failed to create structure actor"));
-        return false;
-    }
-    
-    // Register the structure
-    FArch_StructureData NewStructure;
-    NewStructure.StructureType = StructureType;
-    NewStructure.Location = Location;
-    NewStructure.Rotation = Rotation;
-    NewStructure.BiomeName = BiomeName;
-    NewStructure.bIsInteractable = true;
-    NewStructure.StructuralIntegrity = 100.0f;
-    
-    RegisterStructure(NewStructure);
-    SpawnedStructureActors.Add(StructureActor);
-    
-    UE_LOG(LogTemp, Log, TEXT("Spawned structure %s at %s in biome %s"), 
-           *UEnum::GetValueAsString(StructureType), *Location.ToString(), *BiomeName);
-    
-    return true;
-}
 
-void UArchitecturalStructureManager::RegisterStructure(const FArch_StructureData& StructureData)
-{
-    StructureRegistry.Add(StructureData);
-    
-    UE_LOG(LogTemp, Log, TEXT("Registered structure in biome: %s. Total structures: %d"), 
-           *StructureData.BiomeName, StructureRegistry.Num());
-}
+    FVector NearestPoint = GetActorTransform().TransformPosition(SnapPoints[0]);
+    float MinDistance = FVector::Dist(Location, NearestPoint);
 
-TArray<FArch_StructureData> UArchitecturalStructureManager::GetStructuresInBiome(const FString& BiomeName) const
-{
-    TArray<FArch_StructureData> BiomeStructures;
-    
-    for (const FArch_StructureData& Structure : StructureRegistry)
+    for (int32 i = 1; i < SnapPoints.Num(); i++)
     {
-        if (Structure.BiomeName == BiomeName)
+        FVector WorldSnapPoint = GetActorTransform().TransformPosition(SnapPoints[i]);
+        float Distance = FVector::Dist(Location, WorldSnapPoint);
+        if (Distance < MinDistance)
         {
-            BiomeStructures.Add(Structure);
+            MinDistance = Distance;
+            NearestPoint = WorldSnapPoint;
         }
     }
-    
-    return BiomeStructures;
+
+    return NearestPoint;
 }
 
-void UArchitecturalStructureManager::ClearStructuresInBiome(const FString& BiomeName)
+void AArchitecturalStructureManager::CompleteConstruction()
 {
-    for (int32 i = StructureRegistry.Num() - 1; i >= 0; --i)
-    {
-        if (StructureRegistry[i].BiomeName == BiomeName)
-        {
-            StructureRegistry.RemoveAt(i);
-        }
-    }
+    StructureData.bIsCompleted = true;
+    StructureData.StructuralIntegrity = 100.0f;
     
-    UE_LOG(LogTemp, Log, TEXT("Cleared structures in biome: %s"), *BiomeName);
+    UpdateMeshMaterial();
+    OnStructureCompleted();
+
+    UE_LOG(LogTemp, Log, TEXT("Construction completed for %s structure"), 
+           *UEnum::GetValueAsString(StructureData.StructureType));
 }
 
-void UArchitecturalStructureManager::SpawnStructuresForAllBiomes()
+void AArchitecturalStructureManager::TakeDamage(float DamageAmount)
 {
-    if (!GetWorld())
+    if (!bCanBeDestroyed)
     {
-        UE_LOG(LogTemp, Error, TEXT("No valid world for structure spawning"));
         return;
     }
-    
-    // Define biome locations based on world coordinates
-    TArray<TPair<FString, FVector>> BiomeLocations = {
-        {TEXT("Savana"), FVector(0.0f, 0.0f, 100.0f)},
-        {TEXT("Floresta"), FVector(-45000.0f, 40000.0f, 100.0f)},
-        {TEXT("Deserto"), FVector(55000.0f, 0.0f, 100.0f)},
-        {TEXT("Pantano"), FVector(-50000.0f, -45000.0f, 100.0f)},
-        {TEXT("Montanha"), FVector(40000.0f, 50000.0f, 200.0f)}
-    };
-    
-    for (const auto& BiomePair : BiomeLocations)
+
+    CurrentHealth = FMath::Max(0.0f, CurrentHealth - DamageAmount);
+    StructureData.StructuralIntegrity = (CurrentHealth / MaxHealth) * 100.0f;
+
+    OnStructureDamaged(DamageAmount);
+
+    if (CurrentHealth <= 0.0f)
     {
-        FString BiomeName = BiomePair.Key;
-        FVector BaseLocation = BiomePair.Value;
-        
-        // Spawn 3-5 structures per biome
-        int32 StructuresToSpawn = FMath::RandRange(3, 5);
-        
-        for (int32 i = 0; i < StructuresToSpawn; ++i)
-        {
-            // Random offset within biome area
-            FVector RandomOffset = FVector(
-                FMath::RandRange(-5000.0f, 5000.0f),
-                FMath::RandRange(-5000.0f, 5000.0f),
-                FMath::RandRange(-50.0f, 100.0f)
-            );
-            
-            FVector SpawnLocation = BaseLocation + RandomOffset;
-            FRotator RandomRotation = FRotator(0.0f, FMath::RandRange(0.0f, 360.0f), 0.0f);
-            
-            // Choose random structure type
-            EArch_StructureType StructureType = static_cast<EArch_StructureType>(
-                FMath::RandRange(0, static_cast<int32>(EArch_StructureType::NaturalArch))
-            );
-            
-            SpawnStructureAtLocation(StructureType, SpawnLocation, RandomRotation, BiomeName);
-        }
+        OnStructureDestroyed();
+        Destroy();
     }
-    
-    UE_LOG(LogTemp, Log, TEXT("Spawned structures for all biomes. Total: %d"), GetTotalStructureCount());
+
+    UpdateMeshMaterial();
 }
 
-int32 UArchitecturalStructureManager::GetTotalStructureCount() const
+bool AArchitecturalStructureManager::IsStructureStable() const
 {
-    return StructureRegistry.Num();
+    return StructureData.StructuralIntegrity > 25.0f && StructureData.bIsCompleted;
 }
 
-void UArchitecturalStructureManager::InitializeBiomeStructures()
+void AArchitecturalStructureManager::UpdateStructuralIntegrity()
 {
-    UE_LOG(LogTemp, Log, TEXT("Initializing biome structures..."));
-    
-    // Spawn initial structures for each biome
-    SpawnStructuresForAllBiomes();
+    // Gradual degradation over time based on weather resistance
+    float DegradationRate = (100.0f - StructureData.WeatherResistance) * 0.001f;
+    StructureData.StructuralIntegrity = FMath::Max(0.0f, StructureData.StructuralIntegrity - DegradationRate);
+
+    // Update health based on structural integrity
+    CurrentHealth = (StructureData.StructuralIntegrity / 100.0f) * MaxHealth;
+
+    if (StructureData.StructuralIntegrity <= 0.0f)
+    {
+        OnStructureDestroyed();
+        Destroy();
+    }
 }
 
-AActor* UArchitecturalStructureManager::CreateStructureActor(EArch_StructureType StructureType, FVector Location, FRotator Rotation)
+void AArchitecturalStructureManager::ApplyWeatherEffects(float DeltaTime)
 {
-    if (!GetWorld())
-    {
-        return nullptr;
-    }
-    
-    // Create a static mesh actor
-    AStaticMeshActor* StructureActor = GetWorld()->SpawnActor<AStaticMeshActor>(Location, Rotation);
-    if (!StructureActor)
-    {
-        return nullptr;
-    }
-    
-    // Get the mesh path for this structure type
-    FString MeshPath = GetStructureMeshPath(StructureType);
-    
-    // Try to load the mesh
-    UStaticMesh* StructureMesh = LoadObject<UStaticMesh>(nullptr, *MeshPath);
-    if (StructureMesh && StructureActor->GetStaticMeshComponent())
-    {
-        StructureActor->GetStaticMeshComponent()->SetStaticMesh(StructureMesh);
-    }
-    else
-    {
-        // Fallback to basic cube if specific mesh not found
-        UStaticMesh* CubeMesh = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube"));
-        if (CubeMesh && StructureActor->GetStaticMeshComponent())
-        {
-            StructureActor->GetStaticMeshComponent()->SetStaticMesh(CubeMesh);
-            // Scale it appropriately for the structure type
-            FVector StructureScale = FVector(2.0f, 2.0f, 4.0f); // Pillar-like proportions
-            StructureActor->SetActorScale3D(StructureScale);
-        }
-    }
-    
-    // Set actor label
-    FString StructureTypeName = UEnum::GetValueAsString(StructureType);
-    StructureActor->SetActorLabel(FString::Printf(TEXT("Structure_%s_%d"), *StructureTypeName, FMath::Rand()));
-    
-    return StructureActor;
+    // Weather effects reduce structural integrity over time
+    // This would be enhanced with actual weather system integration
+    float WeatherDamage = (1.0f - (StructureData.WeatherResistance / 100.0f)) * DeltaTime * 0.1f;
+    StructureData.StructuralIntegrity = FMath::Max(0.0f, StructureData.StructuralIntegrity - WeatherDamage);
 }
 
-FString UArchitecturalStructureManager::GetStructureMeshPath(EArch_StructureType StructureType) const
+void AArchitecturalStructureManager::UpdateMeshMaterial()
 {
-    switch (StructureType)
+    if (!StructureMesh)
     {
-        case EArch_StructureType::StonePillar:
-            return TEXT("/Game/LandscapePackOne/Meshes/SM_Rock_01");
-        case EArch_StructureType::RockFormation:
-            return TEXT("/Game/LandscapePackTwo/Meshes/SM_Rock_Formation");
-        case EArch_StructureType::CaveEntrance:
-            return TEXT("/Game/ANGRY_MESH/Meshes/SM_Cave_Entrance");
-        case EArch_StructureType::AncientRuin:
-            return TEXT("/Game/LandscapePackOne/Meshes/SM_Stone_Wall");
-        case EArch_StructureType::NaturalArch:
-            return TEXT("/Game/LandscapePackTwo/Meshes/SM_Natural_Arch");
-        default:
-            return TEXT("/Engine/BasicShapes/Cube");
+        return;
     }
+
+    // This would be enhanced with actual material switching based on:
+    // - Construction material type
+    // - Structural integrity level
+    // - Completion status
+    
+    // For now, just log the material update
+    UE_LOG(LogTemp, Log, TEXT("Updated material for %s structure (Integrity: %.1f%%)"), 
+           *UEnum::GetValueAsString(StructureData.StructureType),
+           StructureData.StructuralIntegrity);
 }
