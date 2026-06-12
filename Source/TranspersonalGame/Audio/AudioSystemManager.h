@@ -2,61 +2,55 @@
 
 #include "CoreMinimal.h"
 #include "Engine/GameInstanceSubsystem.h"
-#include "Components/AudioComponent.h"
 #include "Sound/SoundCue.h"
-#include "Sound/SoundBase.h"
+#include "Components/AudioComponent.h"
 #include "AudioSystemManager.generated.h"
 
 UENUM(BlueprintType)
-enum class EAudio_AudioType : uint8
+enum class EAudio_SoundCategory : uint8
 {
+    Ambient,
     Music,
     SFX,
-    Ambience,
     Voice,
     UI
 };
 
-UENUM(BlueprintType)
-enum class EAudio_AudioPriority : uint8
-{
-    Low,
-    Medium,
-    High,
-    Critical
-};
-
 USTRUCT(BlueprintType)
-struct FAudio_AudioSettings
+struct TRANSPERSONALGAME_API FAudio_SoundConfig
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    float MasterVolume = 1.0f;
+    TSoftObjectPtr<USoundCue> SoundCue;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    float MusicVolume = 0.8f;
+    EAudio_SoundCategory Category = EAudio_SoundCategory::SFX;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    float SFXVolume = 1.0f;
+    float VolumeMultiplier = 1.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    float AmbienceVolume = 0.6f;
+    float PitchMultiplier = 1.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    float VoiceVolume = 1.0f;
+    bool bLooping = false;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    float UIVolume = 0.8f;
+    float FadeInTime = 0.0f;
 
-    FAudio_AudioSettings()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    float FadeOutTime = 0.0f;
+
+    FAudio_SoundConfig()
     {
-        MasterVolume = 1.0f;
-        MusicVolume = 0.8f;
-        SFXVolume = 1.0f;
-        AmbienceVolume = 0.6f;
-        VoiceVolume = 1.0f;
-        UIVolume = 0.8f;
+        SoundCue = nullptr;
+        Category = EAudio_SoundCategory::SFX;
+        VolumeMultiplier = 1.0f;
+        PitchMultiplier = 1.0f;
+        bLooping = false;
+        FadeInTime = 0.0f;
+        FadeOutTime = 0.0f;
     }
 };
 
@@ -68,82 +62,43 @@ class TRANSPERSONALGAME_API UAudioSystemManager : public UGameInstanceSubsystem
 public:
     UAudioSystemManager();
 
-    // Subsystem interface
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
-    // Audio playback functions
-    UFUNCTION(BlueprintCallable, Category = "Audio")
-    UAudioComponent* PlaySound2D(USoundBase* Sound, EAudio_AudioType AudioType = EAudio_AudioType::SFX, float VolumeMultiplier = 1.0f);
+    UFUNCTION(BlueprintCallable, Category = "Audio System")
+    void PlaySound2D(const FAudio_SoundConfig& SoundConfig);
 
-    UFUNCTION(BlueprintCallable, Category = "Audio")
-    UAudioComponent* PlaySound3D(USoundBase* Sound, FVector Location, EAudio_AudioType AudioType = EAudio_AudioType::SFX, float VolumeMultiplier = 1.0f);
+    UFUNCTION(BlueprintCallable, Category = "Audio System")
+    void PlaySound3D(const FAudio_SoundConfig& SoundConfig, const FVector& Location);
 
-    UFUNCTION(BlueprintCallable, Category = "Audio")
-    void PlayMusic(USoundBase* MusicTrack, bool bLoop = true, float FadeInTime = 2.0f);
+    UFUNCTION(BlueprintCallable, Category = "Audio System")
+    void StopAllSounds();
 
-    UFUNCTION(BlueprintCallable, Category = "Audio")
-    void StopMusic(float FadeOutTime = 2.0f);
-
-    UFUNCTION(BlueprintCallable, Category = "Audio")
-    void SetAmbientSound(USoundBase* AmbienceSound, bool bLoop = true);
-
-    // Volume control
-    UFUNCTION(BlueprintCallable, Category = "Audio")
+    UFUNCTION(BlueprintCallable, Category = "Audio System")
     void SetMasterVolume(float Volume);
 
-    UFUNCTION(BlueprintCallable, Category = "Audio")
-    void SetVolumeByType(EAudio_AudioType AudioType, float Volume);
+    UFUNCTION(BlueprintCallable, Category = "Audio System")
+    void SetCategoryVolume(EAudio_SoundCategory Category, float Volume);
 
-    UFUNCTION(BlueprintCallable, Category = "Audio")
-    float GetVolumeByType(EAudio_AudioType AudioType) const;
+    UFUNCTION(BlueprintCallable, Category = "Audio System")
+    float GetMasterVolume() const { return MasterVolume; }
 
-    // Audio settings
-    UFUNCTION(BlueprintCallable, Category = "Audio")
-    void ApplyAudioSettings(const FAudio_AudioSettings& Settings);
-
-    UFUNCTION(BlueprintCallable, Category = "Audio")
-    FAudio_AudioSettings GetAudioSettings() const;
-
-    // Dynamic audio system
-    UFUNCTION(BlueprintCallable, Category = "Audio")
-    void UpdateDynamicAudio(float DeltaTime);
-
-    UFUNCTION(BlueprintCallable, Category = "Audio")
-    void SetThreatLevel(float ThreatLevel);
-
-    UFUNCTION(BlueprintCallable, Category = "Audio")
-    void TriggerDinosaurProximityAudio(float Distance, bool bIsLargeDinosaur = false);
+    UFUNCTION(BlueprintCallable, Category = "Audio System")
+    float GetCategoryVolume(EAudio_SoundCategory Category) const;
 
 protected:
-    // Audio settings
-    UPROPERTY(BlueprintReadOnly, Category = "Audio")
-    FAudio_AudioSettings CurrentSettings;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio System")
+    float MasterVolume = 1.0f;
 
-    // Audio components
-    UPROPERTY(BlueprintReadOnly, Category = "Audio")
-    UAudioComponent* MusicComponent;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Audio")
-    UAudioComponent* AmbienceComponent;
-
-    // Dynamic audio state
-    UPROPERTY(BlueprintReadOnly, Category = "Audio")
-    float CurrentThreatLevel = 0.0f;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Audio")
-    float LastDinosaurProximityTime = 0.0f;
-
-    // Audio pools for performance
-    UPROPERTY()
-    TArray<UAudioComponent*> AudioComponentPool;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio System")
+    TMap<EAudio_SoundCategory, float> CategoryVolumes;
 
     UPROPERTY()
     TArray<UAudioComponent*> ActiveAudioComponents;
 
 private:
-    void InitializeAudioComponentPool();
-    UAudioComponent* GetPooledAudioComponent();
-    void ReturnAudioComponentToPool(UAudioComponent* Component);
-    float CalculateVolumeMultiplier(EAudio_AudioType AudioType) const;
+    void InitializeDefaultVolumes();
+    void CleanupFinishedComponents();
 };
+
+#include "AudioSystemManager.generated.h"
