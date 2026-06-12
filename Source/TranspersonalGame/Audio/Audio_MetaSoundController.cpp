@@ -1,269 +1,201 @@
 #include "Audio_MetaSoundController.h"
-#include "Engine/Engine.h"
 #include "Components/AudioComponent.h"
+#include "Engine/World.h"
+#include "GameFramework/Actor.h"
+#include "Sound/SoundBase.h"
 #include "MetasoundSource.h"
-#include "Kismet/GameplayStatics.h"
 
 UAudio_MetaSoundController::UAudio_MetaSoundController()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 0.1f; // Update 10 times per second
-
-    AudioComponent = nullptr;
-    CurrentMetaSound = nullptr;
-    MasterVolume = 1.0f;
-    CurrentDangerLevel = 0.0f;
-    CurrentHeartbeatIntensity = 0.0f;
+    ParameterInterpolationSpeed = 2.0f;
+    CurrentFootstepIntensity = 0.0f;
+    CurrentAmbientLevel = 0.5f;
 }
 
 void UAudio_MetaSoundController::BeginPlay()
 {
     Super::BeginPlay();
-    
-    InitializeAudioComponent();
-    
-    UE_LOG(LogTemp, Log, TEXT("Audio_MetaSoundController initialized for %s"), 
-           *GetOwner()->GetName());
+    InitializeMetaSounds();
 }
 
 void UAudio_MetaSoundController::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-    
-    // Continuously apply parameter updates to active MetaSound
-    if (AudioComponent && AudioComponent->IsPlaying() && CurrentMetaSound)
+    UpdateParameterInterpolation(DeltaTime);
+}
+
+void UAudio_MetaSoundController::InitializeMetaSounds()
+{
+    // Initialize default MetaSound configurations for prehistoric game
+    FAudio_MetaSoundConfig FootstepConfig;
+    FootstepConfig.ParameterName = "Intensity";
+    FootstepConfig.DefaultValue = 0.5f;
+    FootstepConfig.MinValue = 0.0f;
+    FootstepConfig.MaxValue = 1.0f;
+    MetaSoundConfigs.Add(FootstepConfig);
+
+    FAudio_MetaSoundConfig AmbientConfig;
+    AmbientConfig.ParameterName = "AmbientLevel";
+    AmbientConfig.DefaultValue = 0.3f;
+    AmbientConfig.MinValue = 0.0f;
+    AmbientConfig.MaxValue = 1.0f;
+    MetaSoundConfigs.Add(AmbientConfig);
+
+    FAudio_MetaSoundConfig RoarConfig;
+    RoarConfig.ParameterName = "Aggression";
+    RoarConfig.DefaultValue = 0.7f;
+    RoarConfig.MinValue = 0.0f;
+    RoarConfig.MaxValue = 1.0f;
+    MetaSoundConfigs.Add(RoarConfig);
+
+    // Initialize current parameters
+    for (const FAudio_MetaSoundConfig& Config : MetaSoundConfigs)
     {
-        ApplyParametersToMetaSound();
+        CurrentParameters.Add(Config.ParameterName, Config.DefaultValue);
+        TargetParameters.Add(Config.ParameterName, Config.DefaultValue);
     }
 }
 
-void UAudio_MetaSoundController::PlayMetaSound(UMetaSoundSource* MetaSound, FVector Location)
+void UAudio_MetaSoundController::SetMetaSoundParameter(const FString& ParameterName, float Value)
 {
-    if (!MetaSound)
+    if (TargetParameters.Contains(ParameterName))
     {
-        UE_LOG(LogTemp, Warning, TEXT("Attempted to play null MetaSound"));
-        return;
-    }
-
-    StopMetaSound();
-    
-    CurrentMetaSound = MetaSound;
-    
-    if (!AudioComponent)
-    {
-        InitializeAudioComponent();
-    }
-
-    if (AudioComponent)
-    {
-        if (Location != FVector::ZeroVector)
+        // Find the config to clamp value
+        for (const FAudio_MetaSoundConfig& Config : MetaSoundConfigs)
         {
-            AudioComponent->SetWorldLocation(Location);
-        }
-        
-        AudioComponent->SetSound(MetaSound);
-        AudioComponent->SetVolumeMultiplier(MasterVolume);
-        AudioComponent->Play();
-        
-        // Apply any existing parameters
-        ApplyParametersToMetaSound();
-        
-        UE_LOG(LogTemp, Log, TEXT("Playing MetaSound: %s"), *MetaSound->GetName());
-    }
-}
-
-void UAudio_MetaSoundController::StopMetaSound()
-{
-    if (AudioComponent && AudioComponent->IsPlaying())
-    {
-        AudioComponent->Stop();
-    }
-    
-    CurrentMetaSound = nullptr;
-    ActiveParameters.Empty();
-}
-
-void UAudio_MetaSoundController::SetFloatParameter(FName ParameterName, float Value)
-{
-    UpdateParameterValue(ParameterName, Value);
-    
-    if (AudioComponent && AudioComponent->IsPlaying())
-    {
-        AudioComponent->SetFloatParameter(ParameterName, Value);
-    }
-}
-
-void UAudio_MetaSoundController::SetIntParameter(FName ParameterName, int32 Value)
-{
-    if (AudioComponent && AudioComponent->IsPlaying())
-    {
-        AudioComponent->SetIntParameter(ParameterName, Value);
-    }
-    
-    // Store in ActiveParameters for later application
-    FAudio_MetaSoundParameter NewParam;
-    NewParam.ParameterName = ParameterName;
-    NewParam.IntValue = Value;
-    ActiveParameters.Add(NewParam);
-}
-
-void UAudio_MetaSoundController::SetBoolParameter(FName ParameterName, bool Value)
-{
-    if (AudioComponent && AudioComponent->IsPlaying())
-    {
-        AudioComponent->SetBoolParameter(ParameterName, Value);
-    }
-    
-    // Store in ActiveParameters for later application
-    FAudio_MetaSoundParameter NewParam;
-    NewParam.ParameterName = ParameterName;
-    NewParam.BoolValue = Value;
-    ActiveParameters.Add(NewParam);
-}
-
-void UAudio_MetaSoundController::TriggerEvent(EAudio_MetaSoundTrigger TriggerType, float Intensity)
-{
-    UMetaSoundSource* MetaSound = GetMetaSoundForTrigger(TriggerType);
-    if (MetaSound)
-    {
-        PlayMetaSound(MetaSound);
-        SetFloatParameter(FName("Intensity"), Intensity);
-        
-        UE_LOG(LogTemp, Log, TEXT("Triggered MetaSound event: %d with intensity %f"), 
-               (int32)TriggerType, Intensity);
-    }
-}
-
-void UAudio_MetaSoundController::UpdateDangerLevel(float DangerLevel)
-{
-    CurrentDangerLevel = FMath::Clamp(DangerLevel, 0.0f, 1.0f);
-    SetFloatParameter(FName("DangerLevel"), CurrentDangerLevel);
-    
-    // Also update heartbeat based on danger
-    float HeartbeatRate = FMath::Lerp(60.0f, 120.0f, CurrentDangerLevel);
-    SetFloatParameter(FName("HeartbeatRate"), HeartbeatRate);
-}
-
-void UAudio_MetaSoundController::UpdateHeartbeatIntensity(float Intensity)
-{
-    CurrentHeartbeatIntensity = FMath::Clamp(Intensity, 0.0f, 1.0f);
-    SetFloatParameter(FName("HeartbeatIntensity"), CurrentHeartbeatIntensity);
-    SetFloatParameter(FName("HeartbeatVolume"), CurrentHeartbeatIntensity * 0.8f);
-}
-
-void UAudio_MetaSoundController::UpdateEnvironmentAmbience(const FString& BiomeType, float Intensity)
-{
-    SetFloatParameter(FName("AmbienceIntensity"), Intensity);
-    
-    // Set biome-specific parameters
-    if (BiomeType == "Forest")
-    {
-        SetFloatParameter(FName("ForestDensity"), Intensity);
-        SetBoolParameter(FName("IsForest"), true);
-        SetBoolParameter(FName("IsDesert"), false);
-        SetBoolParameter(FName("IsMountain"), false);
-    }
-    else if (BiomeType == "Desert")
-    {
-        SetFloatParameter(FName("WindIntensity"), Intensity);
-        SetBoolParameter(FName("IsDesert"), true);
-        SetBoolParameter(FName("IsForest"), false);
-        SetBoolParameter(FName("IsMountain"), false);
-    }
-    else if (BiomeType == "Mountain")
-    {
-        SetFloatParameter(FName("EchoIntensity"), Intensity);
-        SetBoolParameter(FName("IsMountain"), true);
-        SetBoolParameter(FName("IsForest"), false);
-        SetBoolParameter(FName("IsDesert"), false);
-    }
-}
-
-void UAudio_MetaSoundController::RegisterMetaSoundAsset(EAudio_MetaSoundTrigger TriggerType, UMetaSoundSource* MetaSound)
-{
-    if (MetaSound)
-    {
-        MetaSoundAssets.Add(TriggerType, MetaSound);
-        UE_LOG(LogTemp, Log, TEXT("Registered MetaSound for trigger type: %d"), (int32)TriggerType);
-    }
-}
-
-bool UAudio_MetaSoundController::IsMetaSoundPlaying() const
-{
-    return AudioComponent && AudioComponent->IsPlaying();
-}
-
-void UAudio_MetaSoundController::SetMasterVolume(float Volume)
-{
-    MasterVolume = FMath::Clamp(Volume, 0.0f, 1.0f);
-    
-    if (AudioComponent)
-    {
-        AudioComponent->SetVolumeMultiplier(MasterVolume);
-    }
-}
-
-void UAudio_MetaSoundController::InitializeAudioComponent()
-{
-    if (!AudioComponent)
-    {
-        AudioComponent = GetOwner()->FindComponentByClass<UAudioComponent>();
-        
-        if (!AudioComponent)
-        {
-            AudioComponent = NewObject<UAudioComponent>(GetOwner());
-            AudioComponent->AttachToComponent(GetOwner()->GetRootComponent(), 
-                                            FAttachmentTransformRules::KeepWorldTransform);
-            AudioComponent->RegisterComponent();
-        }
-        
-        AudioComponent->SetVolumeMultiplier(MasterVolume);
-    }
-}
-
-void UAudio_MetaSoundController::ApplyParametersToMetaSound()
-{
-    if (!AudioComponent || !AudioComponent->IsPlaying())
-    {
-        return;
-    }
-    
-    for (const FAudio_MetaSoundParameter& Param : ActiveParameters)
-    {
-        if (Param.ParameterName != NAME_None)
-        {
-            AudioComponent->SetFloatParameter(Param.ParameterName, Param.FloatValue);
+            if (Config.ParameterName == ParameterName)
+            {
+                float ClampedValue = FMath::Clamp(Value, Config.MinValue, Config.MaxValue);
+                TargetParameters[ParameterName] = ClampedValue;
+                break;
+            }
         }
     }
 }
 
-void UAudio_MetaSoundController::UpdateParameterValue(FName ParameterName, float Value)
+void UAudio_MetaSoundController::PlayMetaSound(const FString& ConfigName)
 {
-    // Find existing parameter or create new one
-    FAudio_MetaSoundParameter* ExistingParam = ActiveParameters.FindByPredicate(
-        [ParameterName](const FAudio_MetaSoundParameter& Param)
-        {
-            return Param.ParameterName == ParameterName;
-        });
-    
-    if (ExistingParam)
+    UAudioComponent* AudioComp = GetOrCreateAudioComponent(ConfigName);
+    if (AudioComp && !AudioComp->IsPlaying())
     {
-        ExistingParam->FloatValue = Value;
-    }
-    else
-    {
-        FAudio_MetaSoundParameter NewParam;
-        NewParam.ParameterName = ParameterName;
-        NewParam.FloatValue = Value;
-        ActiveParameters.Add(NewParam);
+        AudioComp->Play();
     }
 }
 
-UMetaSoundSource* UAudio_MetaSoundController::GetMetaSoundForTrigger(EAudio_MetaSoundTrigger TriggerType) const
+void UAudio_MetaSoundController::StopMetaSound(const FString& ConfigName)
 {
-    if (const auto* FoundMetaSound = MetaSoundAssets.Find(TriggerType))
+    if (UAudioComponent** AudioCompPtr = ActiveMetaSounds.Find(ConfigName))
     {
-        return *FoundMetaSound;
+        if (*AudioCompPtr && (*AudioCompPtr)->IsPlaying())
+        {
+            (*AudioCompPtr)->Stop();
+        }
     }
-    return nullptr;
+}
+
+void UAudio_MetaSoundController::PlayDinosaurFootsteps(float Intensity, float Speed)
+{
+    SetMetaSoundParameter("Intensity", Intensity);
+    SetMetaSoundParameter("Speed", Speed);
+    PlayMetaSound("DinosaurFootsteps");
+    
+    CurrentFootstepIntensity = Intensity;
+}
+
+void UAudio_MetaSoundController::PlayDinosaurRoar(float Aggression, float Distance)
+{
+    SetMetaSoundParameter("Aggression", Aggression);
+    SetMetaSoundParameter("Distance", Distance);
+    PlayMetaSound("DinosaurRoar");
+}
+
+void UAudio_MetaSoundController::UpdateAmbientForest(float TimeOfDay, float WeatherIntensity)
+{
+    // Calculate ambient level based on time of day and weather
+    float AmbientLevel = 0.3f + (TimeOfDay * 0.4f) + (WeatherIntensity * 0.3f);
+    AmbientLevel = FMath::Clamp(AmbientLevel, 0.0f, 1.0f);
+    
+    SetMetaSoundParameter("AmbientLevel", AmbientLevel);
+    SetMetaSoundParameter("WeatherIntensity", WeatherIntensity);
+    PlayMetaSound("ForestAmbient");
+    
+    CurrentAmbientLevel = AmbientLevel;
+}
+
+void UAudio_MetaSoundController::PlayCraftingSound(const FString& MaterialType)
+{
+    if (MaterialType == "Stone")
+    {
+        SetMetaSoundParameter("MaterialHardness", 0.8f);
+    }
+    else if (MaterialType == "Wood")
+    {
+        SetMetaSoundParameter("MaterialHardness", 0.4f);
+    }
+    else if (MaterialType == "Bone")
+    {
+        SetMetaSoundParameter("MaterialHardness", 0.6f);
+    }
+    
+    PlayMetaSound("CraftingSound");
+}
+
+void UAudio_MetaSoundController::UpdateParameterInterpolation(float DeltaTime)
+{
+    for (auto& ParamPair : CurrentParameters)
+    {
+        const FString& ParamName = ParamPair.Key;
+        float& CurrentValue = ParamPair.Value;
+        
+        if (TargetParameters.Contains(ParamName))
+        {
+            float TargetValue = TargetParameters[ParamName];
+            
+            if (!FMath::IsNearlyEqual(CurrentValue, TargetValue, 0.01f))
+            {
+                CurrentValue = FMath::FInterpTo(CurrentValue, TargetValue, DeltaTime, ParameterInterpolationSpeed);
+                
+                // Apply the interpolated value to active audio components
+                for (auto& AudioPair : ActiveMetaSounds)
+                {
+                    if (AudioPair.Value && AudioPair.Value->IsPlaying())
+                    {
+                        // Note: Actual MetaSound parameter setting would require MetaSound-specific API
+                        // This is a placeholder for the parameter update mechanism
+                    }
+                }
+            }
+        }
+    }
+}
+
+UAudioComponent* UAudio_MetaSoundController::GetOrCreateAudioComponent(const FString& ConfigName)
+{
+    if (UAudioComponent** ExistingComp = ActiveMetaSounds.Find(ConfigName))
+    {
+        return *ExistingComp;
+    }
+    
+    // Create new audio component
+    UAudioComponent* NewAudioComp = NewObject<UAudioComponent>(GetOwner());
+    if (NewAudioComp)
+    {
+        NewAudioComp->AttachToComponent(GetOwner()->GetRootComponent(), 
+            FAttachmentTransformRules::KeepWorldTransform);
+        
+        // Find matching MetaSound asset
+        for (const FAudio_MetaSoundConfig& Config : MetaSoundConfigs)
+        {
+            if (Config.ParameterName.Contains(ConfigName) && Config.MetaSoundAsset.IsValid())
+            {
+                NewAudioComp->SetSound(Config.MetaSoundAsset.LoadSynchronous());
+                break;
+            }
+        }
+        
+        ActiveMetaSounds.Add(ConfigName, NewAudioComp);
+    }
+    
+    return NewAudioComp;
 }
