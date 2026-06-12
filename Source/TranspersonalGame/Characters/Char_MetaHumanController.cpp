@@ -1,31 +1,39 @@
 #include "Char_MetaHumanController.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "Components/CapsuleComponent.h"
+#include "GameFramework/Character.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Engine/Engine.h"
-#include "GameFramework/Character.h"
 
 UChar_MetaHumanController::UChar_MetaHumanController()
 {
     PrimaryComponentTick.bCanEverTick = false;
     
-    // Initialize default appearance settings
-    AppearanceSettings = FChar_AppearanceSettings();
+    // Initialize default character variation
+    CharacterVariation.CharacterType = EChar_CharacterType::Player;
+    CharacterVariation.AgeGroup = EChar_AgeGroup::YoungAdult;
+    CharacterVariation.ScaleModifier = FVector(1.0f, 1.0f, 1.0f);
+    CharacterVariation.CharacterName = TEXT("Tribal Survivor");
+    CharacterVariation.CharacterDescription = FText::FromString(TEXT("A resilient human adapting to survive in the dangerous Cretaceous world"));
+    
+    bAutoApplyVariation = true;
+    bEnableSubsurfaceScattering = true;
+    bEnableDynamicShadows = true;
+    SkinSubsurfaceIntensity = 1.0f;
+    SkinSubsurfaceColor = FLinearColor(1.0f, 0.4f, 0.3f, 1.0f);
 }
 
 void UChar_MetaHumanController::BeginPlay()
 {
     Super::BeginPlay();
     
-    // Find the skeletal mesh component on the owner
-    if (AActor* Owner = GetOwner())
+    if (bAutoApplyVariation)
     {
-        TargetMeshComponent = Owner->FindComponentByClass<USkeletalMeshComponent>();
-        if (TargetMeshComponent)
-        {
-            // Apply initial appearance settings
-            ApplyAppearanceSettings();
-        }
+        ApplyCharacterVariation(CharacterVariation);
     }
+    
+    // Optimize for fire lighting by default
+    OptimizeForFireLighting();
 }
 
 void UChar_MetaHumanController::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
@@ -33,223 +41,215 @@ void UChar_MetaHumanController::TickComponent(float DeltaTime, ELevelTick TickTy
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 }
 
-void UChar_MetaHumanController::ApplyAppearanceSettings()
+void UChar_MetaHumanController::ApplyCharacterVariation(const FChar_CharacterVariation& NewVariation)
 {
-    if (!TargetMeshComponent)
-    {
-        return;
-    }
-
-    // Update materials based on appearance settings
-    UpdateSkinMaterial();
-    UpdateHairMaterial();
-    UpdateEyeMaterial();
-    UpdateMeshMorphTargets();
-}
-
-void UChar_MetaHumanController::SetSkinTone(EChar_SkinTone NewSkinTone)
-{
-    AppearanceSettings.SkinTone = NewSkinTone;
-    UpdateSkinMaterial();
-}
-
-void UChar_MetaHumanController::SetBodyBuild(EChar_BodyBuild NewBodyBuild)
-{
-    AppearanceSettings.BodyBuild = NewBodyBuild;
-    UpdateMeshMorphTargets();
-}
-
-void UChar_MetaHumanController::SetWeatheringLevel(float NewWeatheringLevel)
-{
-    AppearanceSettings.WeatheringLevel = FMath::Clamp(NewWeatheringLevel, 0.0f, 1.0f);
-    UpdateSkinMaterial();
-}
-
-void UChar_MetaHumanController::SetScarLevel(float NewScarLevel)
-{
-    AppearanceSettings.ScarLevel = FMath::Clamp(NewScarLevel, 0.0f, 1.0f);
-    UpdateSkinMaterial();
-}
-
-void UChar_MetaHumanController::SetHairColor(FLinearColor NewHairColor)
-{
-    AppearanceSettings.HairColor = NewHairColor;
-    UpdateHairMaterial();
-}
-
-void UChar_MetaHumanController::SetEyeColor(FLinearColor NewEyeColor)
-{
-    AppearanceSettings.EyeColor = NewEyeColor;
-    UpdateEyeMaterial();
-}
-
-void UChar_MetaHumanController::RandomizeAppearance()
-{
-    // Randomize skin tone
-    int32 SkinToneIndex = FMath::RandRange(0, 4);
-    AppearanceSettings.SkinTone = static_cast<EChar_SkinTone>(SkinToneIndex);
+    CharacterVariation = NewVariation;
     
-    // Randomize body build
-    int32 BodyBuildIndex = FMath::RandRange(0, 3);
-    AppearanceSettings.BodyBuild = static_cast<EChar_BodyBuild>(BodyBuildIndex);
+    UpdateCharacterMesh();
+    UpdateCharacterMaterials();
+    UpdateLightingConfiguration();
     
-    // Randomize weathering and scars
-    AppearanceSettings.WeatheringLevel = FMath::RandRange(0.2f, 0.8f);
-    AppearanceSettings.ScarLevel = FMath::RandRange(0.0f, 0.6f);
+    // Apply scale modification
+    if (AActor* Owner = GetOwner())
+    {
+        Owner->SetActorScale3D(CharacterVariation.ScaleModifier);
+    }
     
-    // Randomize hair color (earth tones)
-    TArray<FLinearColor> HairColors = {
-        FLinearColor::Black,
-        FLinearColor(0.2f, 0.1f, 0.05f, 1.0f), // Dark Brown
-        FLinearColor(0.4f, 0.2f, 0.1f, 1.0f),  // Brown
-        FLinearColor(0.6f, 0.4f, 0.2f, 1.0f),  // Light Brown
-        FLinearColor(0.8f, 0.6f, 0.3f, 1.0f)   // Blonde
-    };
-    AppearanceSettings.HairColor = HairColors[FMath::RandRange(0, HairColors.Num() - 1)];
+    UE_LOG(LogTemp, Log, TEXT("Applied character variation: %s"), *CharacterVariation.CharacterName);
+}
+
+void UChar_MetaHumanController::SetCharacterType(EChar_CharacterType NewType)
+{
+    CharacterVariation.CharacterType = NewType;
     
-    // Randomize eye color
-    TArray<FLinearColor> EyeColors = {
-        FLinearColor(0.4f, 0.2f, 0.1f, 1.0f), // Brown
-        FLinearColor(0.2f, 0.4f, 0.6f, 1.0f), // Blue
-        FLinearColor(0.3f, 0.5f, 0.2f, 1.0f), // Green
-        FLinearColor(0.5f, 0.4f, 0.2f, 1.0f)  // Hazel
-    };
-    AppearanceSettings.EyeColor = EyeColors[FMath::RandRange(0, EyeColors.Num() - 1)];
-    
-    // Apply all changes
-    ApplyAppearanceSettings();
-}
-
-void UChar_MetaHumanController::LoadPresetAppearance(const FString& PresetName)
-{
-    // TODO: Implement preset loading from save system
-    UE_LOG(LogTemp, Warning, TEXT("LoadPresetAppearance: %s - Not yet implemented"), *PresetName);
-}
-
-void UChar_MetaHumanController::SaveAppearancePreset(const FString& PresetName)
-{
-    // TODO: Implement preset saving to save system
-    UE_LOG(LogTemp, Warning, TEXT("SaveAppearancePreset: %s - Not yet implemented"), *PresetName);
-}
-
-void UChar_MetaHumanController::UpdateSkinMaterial()
-{
-    if (!TargetMeshComponent || !SkinMaterial)
+    // Update character properties based on type
+    switch (NewType)
     {
-        return;
-    }
-
-    // Create dynamic material instance if needed
-    if (!DynamicSkinMaterial)
-    {
-        DynamicSkinMaterial = UMaterialInstanceDynamic::Create(SkinMaterial, this);
-        if (DynamicSkinMaterial)
-        {
-            TargetMeshComponent->SetMaterial(0, DynamicSkinMaterial);
-        }
-    }
-
-    if (DynamicSkinMaterial)
-    {
-        // Set skin tone parameter
-        float SkinToneValue = 0.5f;
-        switch (AppearanceSettings.SkinTone)
-        {
-            case EChar_SkinTone::Fair:
-                SkinToneValue = 0.9f;
-                break;
-            case EChar_SkinTone::Medium:
-                SkinToneValue = 0.7f;
-                break;
-            case EChar_SkinTone::Olive:
-                SkinToneValue = 0.5f;
-                break;
-            case EChar_SkinTone::Dark:
-                SkinToneValue = 0.3f;
-                break;
-            case EChar_SkinTone::VeryDark:
-                SkinToneValue = 0.1f;
-                break;
-        }
-        
-        DynamicSkinMaterial->SetScalarParameterValue(TEXT("SkinTone"), SkinToneValue);
-        DynamicSkinMaterial->SetScalarParameterValue(TEXT("WeatheringLevel"), AppearanceSettings.WeatheringLevel);
-        DynamicSkinMaterial->SetScalarParameterValue(TEXT("ScarLevel"), AppearanceSettings.ScarLevel);
-    }
-}
-
-void UChar_MetaHumanController::UpdateHairMaterial()
-{
-    if (!TargetMeshComponent || !HairMaterial)
-    {
-        return;
-    }
-
-    // Create dynamic material instance if needed
-    if (!DynamicHairMaterial)
-    {
-        DynamicHairMaterial = UMaterialInstanceDynamic::Create(HairMaterial, this);
-        if (DynamicHairMaterial)
-        {
-            TargetMeshComponent->SetMaterial(1, DynamicHairMaterial);
-        }
-    }
-
-    if (DynamicHairMaterial)
-    {
-        DynamicHairMaterial->SetVectorParameterValue(TEXT("HairColor"), AppearanceSettings.HairColor);
-    }
-}
-
-void UChar_MetaHumanController::UpdateEyeMaterial()
-{
-    if (!TargetMeshComponent || !EyeMaterial)
-    {
-        return;
-    }
-
-    // Create dynamic material instance if needed
-    if (!DynamicEyeMaterial)
-    {
-        DynamicEyeMaterial = UMaterialInstanceDynamic::Create(EyeMaterial, this);
-        if (DynamicEyeMaterial)
-        {
-            TargetMeshComponent->SetMaterial(2, DynamicEyeMaterial);
-        }
-    }
-
-    if (DynamicEyeMaterial)
-    {
-        DynamicEyeMaterial->SetVectorParameterValue(TEXT("EyeColor"), AppearanceSettings.EyeColor);
-    }
-}
-
-void UChar_MetaHumanController::UpdateMeshMorphTargets()
-{
-    if (!TargetMeshComponent)
-    {
-        return;
-    }
-
-    // Apply body build morph targets
-    float BuildValue = 0.0f;
-    switch (AppearanceSettings.BodyBuild)
-    {
-        case EChar_BodyBuild::Lean:
-            BuildValue = -0.5f;
+        case EChar_CharacterType::TribalElder:
+            CharacterVariation.ScaleModifier = FVector(1.1f, 1.1f, 1.1f);
+            CharacterVariation.CharacterName = TEXT("Tribal Elder");
+            CharacterVariation.CharacterDescription = FText::FromString(TEXT("Wise leader of the tribe with extensive survival knowledge"));
             break;
-        case EChar_BodyBuild::Athletic:
-            BuildValue = 0.0f;
+            
+        case EChar_CharacterType::Gatherer:
+            CharacterVariation.ScaleModifier = FVector(0.95f, 0.95f, 1.0f);
+            CharacterVariation.CharacterName = TEXT("Gatherer");
+            CharacterVariation.CharacterDescription = FText::FromString(TEXT("Skilled in finding and collecting edible plants and resources"));
             break;
-        case EChar_BodyBuild::Stocky:
-            BuildValue = 0.3f;
+            
+        case EChar_CharacterType::Hunter:
+            CharacterVariation.ScaleModifier = FVector(1.05f, 1.05f, 1.0f);
+            CharacterVariation.CharacterName = TEXT("Hunter");
+            CharacterVariation.CharacterDescription = FText::FromString(TEXT("Expert tracker and hunter of prehistoric creatures"));
             break;
-        case EChar_BodyBuild::Muscular:
-            BuildValue = 0.7f;
+            
+        case EChar_CharacterType::Scout:
+            CharacterVariation.ScaleModifier = FVector(0.9f, 0.9f, 1.0f);
+            CharacterVariation.CharacterName = TEXT("Scout");
+            CharacterVariation.CharacterDescription = FText::FromString(TEXT("Fast and agile explorer who surveys dangerous territories"));
+            break;
+            
+        case EChar_CharacterType::Warrior:
+            CharacterVariation.ScaleModifier = FVector(1.15f, 1.15f, 1.05f);
+            CharacterVariation.CharacterName = TEXT("Warrior");
+            CharacterVariation.CharacterDescription = FText::FromString(TEXT("Fierce defender of the tribe against dinosaur threats"));
+            break;
+            
+        case EChar_CharacterType::Shaman:
+            CharacterVariation.ScaleModifier = FVector(1.0f, 1.0f, 1.0f);
+            CharacterVariation.CharacterName = TEXT("Tribal Healer");
+            CharacterVariation.CharacterDescription = FText::FromString(TEXT("Knowledgeable in herbal medicine and tribal customs"));
+            break;
+            
+        default:
+            CharacterVariation.ScaleModifier = FVector(1.0f, 1.0f, 1.0f);
+            CharacterVariation.CharacterName = TEXT("Tribal Survivor");
             break;
     }
+    
+    ApplyCharacterVariation(CharacterVariation);
+}
 
-    // Set morph target values (these would be actual morph target names in a real MetaHuman)
-    TargetMeshComponent->SetMorphTarget(TEXT("BodyBuild"), BuildValue);
-    TargetMeshComponent->SetMorphTarget(TEXT("Muscle"), BuildValue * 0.8f);
+void UChar_MetaHumanController::SetAgeGroup(EChar_AgeGroup NewAgeGroup)
+{
+    CharacterVariation.AgeGroup = NewAgeGroup;
+    
+    // Adjust scale based on age
+    FVector BaseScale = CharacterVariation.ScaleModifier;
+    
+    switch (NewAgeGroup)
+    {
+        case EChar_AgeGroup::Child:
+            CharacterVariation.ScaleModifier = BaseScale * 0.7f;
+            break;
+        case EChar_AgeGroup::Teenager:
+            CharacterVariation.ScaleModifier = BaseScale * 0.85f;
+            break;
+        case EChar_AgeGroup::YoungAdult:
+            CharacterVariation.ScaleModifier = BaseScale * 1.0f;
+            break;
+        case EChar_AgeGroup::MiddleAged:
+            CharacterVariation.ScaleModifier = BaseScale * 1.05f;
+            break;
+        case EChar_AgeGroup::Elder:
+            CharacterVariation.ScaleModifier = BaseScale * 0.95f;
+            break;
+    }
+    
+    ApplyCharacterVariation(CharacterVariation);
+}
+
+void UChar_MetaHumanController::OptimizeForFireLighting()
+{
+    ACharacter* Character = Cast<ACharacter>(GetOwner());
+    if (!Character)
+    {
+        return;
+    }
+    
+    USkeletalMeshComponent* MeshComp = Character->GetMesh();
+    if (!MeshComp)
+    {
+        return;
+    }
+    
+    // Enable subsurface scattering for realistic skin lighting
+    if (bEnableSubsurfaceScattering)
+    {
+        // Create dynamic material instances for subsurface scattering
+        for (int32 i = 0; i < MeshComp->GetNumMaterials(); ++i)
+        {
+            UMaterialInterface* Material = MeshComp->GetMaterial(i);
+            if (Material)
+            {
+                UMaterialInstanceDynamic* DynamicMaterial = UMaterialInstanceDynamic::Create(Material, this);
+                if (DynamicMaterial)
+                {
+                    // Set subsurface parameters for fire lighting
+                    DynamicMaterial->SetScalarParameterValue(TEXT("SubsurfaceIntensity"), SkinSubsurfaceIntensity);
+                    DynamicMaterial->SetVectorParameterValue(TEXT("SubsurfaceColor"), SkinSubsurfaceColor);
+                    
+                    MeshComp->SetMaterial(i, DynamicMaterial);
+                }
+            }
+        }
+    }
+    
+    // Configure shadow casting for fire lighting
+    ConfigureShadowCasting(bEnableDynamicShadows, true);
+    
+    UE_LOG(LogTemp, Log, TEXT("Optimized character lighting for fire environments"));
+}
+
+void UChar_MetaHumanController::ConfigureShadowCasting(bool bCastDynamicShadows, bool bCastStaticShadows)
+{
+    ACharacter* Character = Cast<ACharacter>(GetOwner());
+    if (!Character)
+    {
+        return;
+    }
+    
+    USkeletalMeshComponent* MeshComp = Character->GetMesh();
+    if (!MeshComp)
+    {
+        return;
+    }
+    
+    MeshComp->SetCastShadow(bCastDynamicShadows || bCastStaticShadows);
+    MeshComp->bCastDynamicShadow = bCastDynamicShadows;
+    MeshComp->bCastStaticShadow = bCastStaticShadows;
+    MeshComp->bReceivesDecals = true;
+    
+    UE_LOG(LogTemp, Log, TEXT("Configured shadow casting - Dynamic: %s, Static: %s"), 
+           bCastDynamicShadows ? TEXT("True") : TEXT("False"),
+           bCastStaticShadows ? TEXT("True") : TEXT("False"));
+}
+
+void UChar_MetaHumanController::UpdateCharacterMesh()
+{
+    ACharacter* Character = Cast<ACharacter>(GetOwner());
+    if (!Character)
+    {
+        return;
+    }
+    
+    USkeletalMeshComponent* MeshComp = Character->GetMesh();
+    if (!MeshComp || !CharacterVariation.CharacterMesh)
+    {
+        return;
+    }
+    
+    MeshComp->SetSkeletalMesh(CharacterVariation.CharacterMesh);
+    UE_LOG(LogTemp, Log, TEXT("Updated character mesh for %s"), *CharacterVariation.CharacterName);
+}
+
+void UChar_MetaHumanController::UpdateCharacterMaterials()
+{
+    ACharacter* Character = Cast<ACharacter>(GetOwner());
+    if (!Character)
+    {
+        return;
+    }
+    
+    USkeletalMeshComponent* MeshComp = Character->GetMesh();
+    if (!MeshComp)
+    {
+        return;
+    }
+    
+    // Apply character-specific materials
+    for (int32 i = 0; i < CharacterVariation.CharacterMaterials.Num() && i < MeshComp->GetNumMaterials(); ++i)
+    {
+        if (CharacterVariation.CharacterMaterials[i])
+        {
+            MeshComp->SetMaterial(i, CharacterVariation.CharacterMaterials[i]);
+        }
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("Updated character materials for %s"), *CharacterVariation.CharacterName);
+}
+
+void UChar_MetaHumanController::UpdateLightingConfiguration()
+{
+    OptimizeForFireLighting();
 }
