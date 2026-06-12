@@ -1,38 +1,46 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/Engine.h"
-#include "Subsystems/EngineSubsystem.h"
-#include "SharedTypes.h"
+#include "Engine/GameInstanceSubsystem.h"
+#include "Engine/World.h"
+#include "UObject/Class.h"
 #include "Eng_CompilationValidator.generated.h"
 
+UENUM(BlueprintType)
+enum class EEng_CompilationStatus : uint8
+{
+    Unknown,
+    Compiling,
+    Success,
+    Failed,
+    Warning
+};
+
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEng_ModuleStatus
+struct TRANSPERSONALGAME_API FEng_ClassValidationResult
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Module")
-    FString ModuleName;
+    UPROPERTY(BlueprintReadOnly)
+    FString ClassName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Module")
-    bool bIsLoaded;
+    UPROPERTY(BlueprintReadOnly)
+    bool bClassLoaded;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Module")
-    bool bHasErrors;
+    UPROPERTY(BlueprintReadOnly)
+    bool bCDOConstructed;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Module")
-    int32 ClassCount;
+    UPROPERTY(BlueprintReadOnly)
+    bool bPropertiesAccessible;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Module")
-    TArray<FString> ErrorMessages;
+    UPROPERTY(BlueprintReadOnly)
+    FString ErrorMessage;
 
-    FEng_ModuleStatus()
-    {
-        ModuleName = TEXT("Unknown");
-        bIsLoaded = false;
-        bHasErrors = false;
-        ClassCount = 0;
-    }
+    FEng_ClassValidationResult()
+        : bClassLoaded(false)
+        , bCDOConstructed(false)
+        , bPropertiesAccessible(false)
+    {}
 };
 
 USTRUCT(BlueprintType)
@@ -40,81 +48,113 @@ struct TRANSPERSONALGAME_API FEng_CompilationReport
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Compilation")
-    bool bOverallSuccess;
+    UPROPERTY(BlueprintReadOnly)
+    EEng_CompilationStatus OverallStatus;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Compilation")
-    int32 TotalModules;
+    UPROPERTY(BlueprintReadOnly)
+    int32 TotalClassesTested;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Compilation")
-    int32 LoadedModules;
+    UPROPERTY(BlueprintReadOnly)
+    int32 ClassesLoaded;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Compilation")
-    int32 TotalClasses;
+    UPROPERTY(BlueprintReadOnly)
+    int32 CDOsConstructed;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Compilation")
-    TArray<FEng_ModuleStatus> ModuleStatuses;
+    UPROPERTY(BlueprintReadOnly)
+    TArray<FEng_ClassValidationResult> ValidationResults;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Compilation")
-    FDateTime ReportTime;
+    UPROPERTY(BlueprintReadOnly)
+    TArray<FString> MissingCppFiles;
+
+    UPROPERTY(BlueprintReadOnly)
+    TArray<FString> DuplicateTypes;
+
+    UPROPERTY(BlueprintReadOnly)
+    TArray<FString> APICompatibilityIssues;
 
     FEng_CompilationReport()
-    {
-        bOverallSuccess = false;
-        TotalModules = 0;
-        LoadedModules = 0;
-        TotalClasses = 0;
-        ReportTime = FDateTime::Now();
-    }
+        : OverallStatus(EEng_CompilationStatus::Unknown)
+        , TotalClassesTested(0)
+        , ClassesLoaded(0)
+        , CDOsConstructed(0)
+    {}
 };
 
+/**
+ * Engine Architect's Compilation Validator
+ * Validates C++ compilation, class loading, and runtime functionality
+ * Identifies missing .cpp files, duplicate types, and API compatibility issues
+ */
 UCLASS(BlueprintType)
-class TRANSPERSONALGAME_API UEng_CompilationValidator : public UEngineSubsystem
+class TRANSPERSONALGAME_API UEng_CompilationValidator : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
 public:
-    UEng_CompilationValidator();
-
-    // USubsystem interface
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
-    UFUNCTION(BlueprintCallable, Category = "Compilation Validator")
-    FEng_CompilationReport ValidateProjectCompilation();
+    // Core validation functions
+    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
+    FEng_CompilationReport RunFullValidation();
 
-    UFUNCTION(BlueprintCallable, Category = "Compilation Validator")
-    bool ValidateModuleIntegrity(const FString& ModuleName);
+    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
+    FEng_ClassValidationResult ValidateClass(const FString& ClassName);
 
-    UFUNCTION(BlueprintCallable, Category = "Compilation Validator")
-    TArray<FString> GetMissingCppFiles();
+    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
+    TArray<FString> FindMissingCppFiles();
 
-    UFUNCTION(BlueprintCallable, Category = "Compilation Validator")
-    bool FixCommonCompilationIssues();
+    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
+    TArray<FString> FindDuplicateTypes();
 
-    UFUNCTION(BlueprintCallable, Category = "Compilation Validator")
+    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
+    bool FixCompilationIssues();
+
+    // Runtime testing
+    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
+    bool TestClassInstantiation(const FString& ClassName);
+
+    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
+    bool TestSubsystemAccess(const FString& SubsystemName);
+
+    // Reporting
+    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
     void GenerateCompilationReport();
 
-    UFUNCTION(BlueprintCallable, Category = "Compilation Validator", CallInEditor = true)
-    void ValidateAllSystems();
-
-    UFUNCTION(BlueprintCallable, Category = "Compilation Validator")
-    FEng_CompilationReport GetLastReport() const { return LastCompilationReport; }
+    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
+    EEng_CompilationStatus GetCurrentCompilationStatus() const;
 
 protected:
-    UPROPERTY(BlueprintReadOnly, Category = "Compilation Validator")
-    FEng_CompilationReport LastCompilationReport;
+    UPROPERTY()
+    FEng_CompilationReport LastValidationReport;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Compilation Validator")
-    TArray<FString> RequiredModules;
+    UPROPERTY()
+    EEng_CompilationStatus CurrentStatus;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Compilation Validator")
-    TArray<FString> CriticalClasses;
+    // Internal validation helpers
+    bool ValidateClassLoading(const FString& ClassName, FEng_ClassValidationResult& Result);
+    bool ValidateCDOConstruction(UClass* Class, FEng_ClassValidationResult& Result);
+    bool ValidatePropertyAccess(UClass* Class, FEng_ClassValidationResult& Result);
+    
+    // File system validation
+    void ScanForMissingImplementations();
+    void ScanForDuplicateDefinitions();
+    void CheckAPICompatibility();
+
+    // Auto-fixing capabilities
+    bool CreateMissingCppStub(const FString& HeaderPath);
+    bool FixIncludePaths(const FString& FilePath);
+    bool UpdateAPICompatibility(const FString& FilePath);
 
 private:
-    void InitializeRequiredModules();
-    void InitializeCriticalClasses();
-    bool CheckClassExists(const FString& ClassName);
-    FEng_ModuleStatus ValidateModule(const FString& ModuleName);
-    void LogValidationResults(const FEng_CompilationReport& Report);
+    // Core classes that must always work
+    TArray<FString> CoreClassNames;
+    
+    // Known API compatibility issues in UE5.5
+    TMap<FString, FString> APIReplacements;
+    
+    void InitializeCoreClassList();
+    void InitializeAPIReplacements();
 };
+
+#include "Eng_CompilationValidator.generated.h"
