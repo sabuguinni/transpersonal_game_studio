@@ -1,37 +1,20 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "UObject/NoExportTypes.h"
+#include "Components/ActorComponent.h"
 #include "Animation/AnimMontage.h"
 #include "Animation/AnimInstance.h"
-#include "Components/ActorComponent.h"
 #include "Engine/Engine.h"
 #include "Anim_MontageController.generated.h"
 
 UENUM(BlueprintType)
-enum class EAnim_MontageType : uint8
+enum class EAnim_MontageCategory : uint8
 {
-    Attack          UMETA(DisplayName = "Attack"),
-    Dodge           UMETA(DisplayName = "Dodge"),
-    Block           UMETA(DisplayName = "Block"),
-    Interact        UMETA(DisplayName = "Interact"),
-    Craft           UMETA(DisplayName = "Craft"),
-    Gather          UMETA(DisplayName = "Gather"),
-    Climb           UMETA(DisplayName = "Climb"),
-    Swim            UMETA(DisplayName = "Swim"),
-    Injured         UMETA(DisplayName = "Injured"),
+    Combat          UMETA(DisplayName = "Combat"),
+    Interaction     UMETA(DisplayName = "Interaction"),
+    Emotion         UMETA(DisplayName = "Emotion"),
     Death           UMETA(DisplayName = "Death"),
-    Emote           UMETA(DisplayName = "Emote"),
     Special         UMETA(DisplayName = "Special")
-};
-
-UENUM(BlueprintType)
-enum class EAnim_MontagePriority : uint8
-{
-    Low         UMETA(DisplayName = "Low"),
-    Normal      UMETA(DisplayName = "Normal"),
-    High        UMETA(DisplayName = "High"),
-    Critical    UMETA(DisplayName = "Critical")
 };
 
 USTRUCT(BlueprintType)
@@ -40,84 +23,38 @@ struct TRANSPERSONALGAME_API FAnim_MontageData
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Montage")
-    class UAnimMontage* Montage = nullptr;
+    UAnimMontage* Montage;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Montage")
-    EAnim_MontageType Type = EAnim_MontageType::Special;
+    float PlayRate;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Montage")
-    EAnim_MontagePriority Priority = EAnim_MontagePriority::Normal;
+    float BlendInTime;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Montage")
-    float PlayRate = 1.0f;
+    float BlendOutTime;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Montage")
-    float BlendInTime = 0.25f;
+    bool bLooping;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Montage")
-    float BlendOutTime = 0.25f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Montage")
-    bool bCanBeInterrupted = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Montage")
-    FString Description;
+    int32 Priority;
 
     FAnim_MontageData()
     {
         Montage = nullptr;
-        Type = EAnim_MontageType::Special;
-        Priority = EAnim_MontagePriority::Normal;
         PlayRate = 1.0f;
         BlendInTime = 0.25f;
         BlendOutTime = 0.25f;
-        bCanBeInterrupted = true;
-        Description = TEXT("Default Montage");
+        bLooping = false;
+        Priority = 0;
     }
 };
 
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FAnim_PlayingMontage
-{
-    GENERATED_BODY()
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnMontageCompleted, EAnim_MontageCategory, Category, FName, MontageName);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnMontageBlendedOut, EAnim_MontageCategory, Category, FName, MontageName);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnMontageNotify, EAnim_MontageCategory, Category, FName, MontageName, FName, NotifyName);
 
-    UPROPERTY(BlueprintReadOnly, Category = "Playing Montage")
-    class UAnimMontage* Montage = nullptr;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Playing Montage")
-    EAnim_MontageType Type = EAnim_MontageType::Special;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Playing Montage")
-    EAnim_MontagePriority Priority = EAnim_MontagePriority::Normal;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Playing Montage")
-    float StartTime = 0.0f;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Playing Montage")
-    float Duration = 0.0f;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Playing Montage")
-    bool bCanBeInterrupted = true;
-
-    FAnim_PlayingMontage()
-    {
-        Montage = nullptr;
-        Type = EAnim_MontageType::Special;
-        Priority = EAnim_MontagePriority::Normal;
-        StartTime = 0.0f;
-        Duration = 0.0f;
-        bCanBeInterrupted = true;
-    }
-};
-
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnMontageStarted, UAnimMontage*, Montage, EAnim_MontageType, Type);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnMontageEnded, UAnimMontage*, Montage, bool, bInterrupted);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnMontageNotify, UAnimMontage*, Montage, FName, NotifyName, const FBranchingPointNotifyPayload&, Payload);
-
-/**
- * Component for managing animation montages on prehistoric characters
- * Handles combat animations, survival actions, and contextual interactions
- */
 UCLASS(ClassGroup=(Animation), meta=(BlueprintSpawnableComponent))
 class TRANSPERSONALGAME_API UAnim_MontageController : public UActorComponent
 {
@@ -128,139 +65,80 @@ public:
 
 protected:
     virtual void BeginPlay() override;
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    // Montage library
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Montage Library")
-    TMap<EAnim_MontageType, FAnim_MontageData> MontageLibrary;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Montages")
+    TMap<EAnim_MontageCategory, TMap<FName, FAnim_MontageData>> MontageLibrary;
 
-    // Currently playing montages
-    UPROPERTY(BlueprintReadOnly, Category = "Playing Montages")
-    TArray<FAnim_PlayingMontage> PlayingMontages;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "State")
+    TMap<EAnim_MontageCategory, FName> CurrentlyPlayingMontages;
 
-    // Component references
-    UPROPERTY(BlueprintReadOnly, Category = "References")
-    class ACharacter* OwnerCharacter = nullptr;
-
-    UPROPERTY(BlueprintReadOnly, Category = "References")
-    class UAnimInstance* AnimInstance = nullptr;
-
-    UPROPERTY(BlueprintReadOnly, Category = "References")
-    class USkeletalMeshComponent* MeshComponent = nullptr;
-
-    // Settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
-    int32 MaxConcurrentMontages = 3;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "State")
+    TArray<EAnim_MontageCategory> MontageQueue;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
-    bool bAutoStopLowPriorityMontages = true;
+    bool bAllowMontageInterruption;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
-    float DefaultPlayRate = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
-    float DefaultBlendTime = 0.25f;
+    float GlobalPlayRateMultiplier;
 
 public:
-    // Montage playback functions
-    UFUNCTION(BlueprintCallable, Category = "Animation Montage")
-    bool PlayMontage(EAnim_MontageType MontageType, float PlayRate = -1.0f, float BlendInTime = -1.0f);
+    UPROPERTY(BlueprintAssignable, Category = "Events")
+    FOnMontageCompleted OnMontageCompleted;
 
-    UFUNCTION(BlueprintCallable, Category = "Animation Montage")
-    bool PlayMontageByReference(UAnimMontage* Montage, EAnim_MontagePriority Priority = EAnim_MontagePriority::Normal, float PlayRate = 1.0f);
+    UPROPERTY(BlueprintAssignable, Category = "Events")
+    FOnMontageBlendedOut OnMontageBlendedOut;
 
-    UFUNCTION(BlueprintCallable, Category = "Animation Montage")
-    void StopMontage(EAnim_MontageType MontageType, float BlendOutTime = -1.0f);
-
-    UFUNCTION(BlueprintCallable, Category = "Animation Montage")
-    void StopAllMontages(float BlendOutTime = -1.0f);
-
-    UFUNCTION(BlueprintCallable, Category = "Animation Montage")
-    void StopMontagesOfPriority(EAnim_MontagePriority Priority, float BlendOutTime = -1.0f);
-
-    // Montage query functions
-    UFUNCTION(BlueprintPure, Category = "Animation Montage")
-    bool IsMontageTypePlaying(EAnim_MontageType MontageType) const;
-
-    UFUNCTION(BlueprintPure, Category = "Animation Montage")
-    bool IsAnyMontagePlaying() const;
-
-    UFUNCTION(BlueprintPure, Category = "Animation Montage")
-    int32 GetPlayingMontageCount() const;
-
-    UFUNCTION(BlueprintPure, Category = "Animation Montage")
-    UAnimMontage* GetCurrentMontageOfType(EAnim_MontageType MontageType) const;
-
-    UFUNCTION(BlueprintPure, Category = "Animation Montage")
-    TArray<UAnimMontage*> GetAllPlayingMontages() const;
-
-    // Montage library management
-    UFUNCTION(BlueprintCallable, Category = "Animation Montage")
-    void RegisterMontage(EAnim_MontageType MontageType, UAnimMontage* Montage, EAnim_MontagePriority Priority = EAnim_MontagePriority::Normal);
-
-    UFUNCTION(BlueprintCallable, Category = "Animation Montage")
-    void UnregisterMontage(EAnim_MontageType MontageType);
-
-    UFUNCTION(BlueprintCallable, Category = "Animation Montage")
-    void LoadDefaultMontages();
-
-    // Survival-specific montage functions
-    UFUNCTION(BlueprintCallable, Category = "Survival Animations")
-    void PlayAttackMontage(int32 AttackVariant = 0);
-
-    UFUNCTION(BlueprintCallable, Category = "Survival Animations")
-    void PlayDodgeMontage(FVector DodgeDirection);
-
-    UFUNCTION(BlueprintCallable, Category = "Survival Animations")
-    void PlayInteractionMontage(const FString& InteractionType);
-
-    UFUNCTION(BlueprintCallable, Category = "Survival Animations")
-    void PlayCraftingMontage(const FString& CraftingType);
-
-    UFUNCTION(BlueprintCallable, Category = "Survival Animations")
-    void PlayGatheringMontage(const FString& ResourceType);
-
-    UFUNCTION(BlueprintCallable, Category = "Survival Animations")
-    void PlayInjuryMontage(float InjurySeverity);
-
-    UFUNCTION(BlueprintCallable, Category = "Survival Animations")
-    void PlayDeathMontage();
-
-    // Event delegates
-    UPROPERTY(BlueprintAssignable, Category = "Animation Events")
-    FOnMontageStarted OnMontageStarted;
-
-    UPROPERTY(BlueprintAssignable, Category = "Animation Events")
-    FOnMontageEnded OnMontageEnded;
-
-    UPROPERTY(BlueprintAssignable, Category = "Animation Events")
+    UPROPERTY(BlueprintAssignable, Category = "Events")
     FOnMontageNotify OnMontageNotify;
 
-protected:
-    // Internal functions
-    void UpdatePlayingMontages();
-    void CleanupFinishedMontages();
-    bool CanPlayMontage(const FAnim_MontageData& MontageData) const;
-    void HandleMontageInterruption(EAnim_MontagePriority NewPriority);
-    
-    // Montage event handlers
-    UFUNCTION()
-    void OnMontageBlendingOut(UAnimMontage* Montage, bool bInterrupted);
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    void RegisterMontage(EAnim_MontageCategory Category, FName MontageName, const FAnim_MontageData& MontageData);
 
-    UFUNCTION()
-    void OnMontageNotifyBegin(FName NotifyName, const FBranchingPointNotifyPayload& BranchingPointPayload);
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    bool PlayMontage(EAnim_MontageCategory Category, FName MontageName, float PlayRate = 1.0f);
 
-    UFUNCTION()
-    void OnMontageNotifyEnd(FName NotifyName, const FBranchingPointNotifyPayload& BranchingPointPayload);
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    void StopMontage(EAnim_MontageCategory Category, float BlendOutTime = 0.25f);
+
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    void StopAllMontages(float BlendOutTime = 0.25f);
+
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    void QueueMontage(EAnim_MontageCategory Category, FName MontageName);
+
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    void PlayQueuedMontages();
+
+    UFUNCTION(BlueprintPure, Category = "Animation")
+    bool IsMontagePlayingInCategory(EAnim_MontageCategory Category) const;
+
+    UFUNCTION(BlueprintPure, Category = "Animation")
+    FName GetCurrentMontageInCategory(EAnim_MontageCategory Category) const;
+
+    UFUNCTION(BlueprintPure, Category = "Animation")
+    float GetMontagePosition(EAnim_MontageCategory Category) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    void SetMontagePosition(EAnim_MontageCategory Category, float Position);
+
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    void SetMontagePlayRate(EAnim_MontageCategory Category, float PlayRate);
+
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    bool PlayCombatMontage(FName MontageName, float PlayRate = 1.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    bool PlayInteractionMontage(FName MontageName, float PlayRate = 1.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    bool PlayDeathMontage(FName MontageName, float PlayRate = 1.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    void JumpToMontageSection(EAnim_MontageCategory Category, FName SectionName);
 
 private:
-    // Internal state
-    float LastUpdateTime = 0.0f;
-    bool bIsInitialized = false;
-    
-    // Helper functions
-    FAnim_MontageData* FindMontageData(EAnim_MontageType MontageType);
-    const FAnim_MontageData* FindMontageData(EAnim_MontageType MontageType) const;
-    void RemovePlayingMontage(UAnimMontage* Montage);
-    void AddPlayingMontage(const FAnim_MontageData& MontageData);
+    UAnimInstance* GetAnimInstance() const;
+    void OnMontageEnded(UAnimMontage* Montage, bool bInterrupted);
+    void ProcessMontageQueue();
+    bool CanPlayMontage(EAnim_MontageCategory Category, int32 Priority) const;
 };
