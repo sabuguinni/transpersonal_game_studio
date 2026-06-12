@@ -1,115 +1,137 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Components/ActorComponent.h"
-#include "Engine/StaticMeshActor.h"
-#include "Materials/MaterialInterface.h"
-#include "SharedTypes.h"
+#include "GameFramework/Actor.h"
+#include "Components/StaticMeshComponent.h"
+#include "Components/BoxComponent.h"
+#include "Engine/TriggerVolume.h"
+#include "../SharedTypes.h"
 #include "Arch_PrimitiveStructureSystem.generated.h"
 
 UENUM(BlueprintType)
-enum class EArch_StructureType : uint8
+enum class EArch_PrimitiveStructureType : uint8
 {
-    None            UMETA(DisplayName = "None"),
-    StoneShelter    UMETA(DisplayName = "Stone Shelter"),
-    WoodLean        UMETA(DisplayName = "Wood Lean-to"),
-    CaveEntrance    UMETA(DisplayName = "Cave Entrance"),
-    RockFormation   UMETA(DisplayName = "Rock Formation"),
-    BoneStructure   UMETA(DisplayName = "Bone Structure")
-};
-
-UENUM(BlueprintType)
-enum class EArch_MaterialType : uint8
-{
-    Stone           UMETA(DisplayName = "Stone"),
-    Wood            UMETA(DisplayName = "Wood"),
-    Bone            UMETA(DisplayName = "Bone"),
-    Hide            UMETA(DisplayName = "Hide"),
-    Mud             UMETA(DisplayName = "Mud")
+    StoneArchway        UMETA(DisplayName = "Stone Archway"),
+    CaveEntrance        UMETA(DisplayName = "Cave Entrance"),
+    RockOverhang        UMETA(DisplayName = "Rock Overhang"),
+    StonePlatform       UMETA(DisplayName = "Stone Platform"),
+    NaturalBridge       UMETA(DisplayName = "Natural Bridge"),
+    WeatheredPillar     UMETA(DisplayName = "Weathered Pillar")
 };
 
 USTRUCT(BlueprintType)
-struct FArch_StructureData
+struct TRANSPERSONALGAME_API FArch_StructureProperties
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    EArch_StructureType StructureType = EArch_StructureType::None;
+    EArch_PrimitiveStructureType StructureType = EArch_PrimitiveStructureType::StoneArchway;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    EArch_MaterialType PrimaryMaterial = EArch_MaterialType::Stone;
+    float WeatheringLevel = 0.5f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    float StructuralIntegrity = 100.0f;
+    bool bHasMossGrowth = true;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    float WeatherResistance = 50.0f;
+    bool bHasToolMarks = false;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    bool bIsHabitable = false;
+    float StructuralIntegrity = 1.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    int32 MaxOccupants = 1;
+    FVector Dimensions = FVector(400.0f, 200.0f, 300.0f);
 
-    FArch_StructureData()
+    FArch_StructureProperties()
     {
-        StructureType = EArch_StructureType::None;
-        PrimaryMaterial = EArch_MaterialType::Stone;
-        StructuralIntegrity = 100.0f;
-        WeatherResistance = 50.0f;
-        bIsHabitable = false;
-        MaxOccupants = 1;
+        StructureType = EArch_PrimitiveStructureType::StoneArchway;
+        WeatheringLevel = 0.5f;
+        bHasMossGrowth = true;
+        bHasToolMarks = false;
+        StructuralIntegrity = 1.0f;
+        Dimensions = FVector(400.0f, 200.0f, 300.0f);
     }
 };
 
-UCLASS(ClassGroup=(Architecture), meta=(BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UArch_PrimitiveStructureSystem : public UActorComponent
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API AArch_PrimitiveStructureActor : public AActor
 {
     GENERATED_BODY()
 
 public:
-    UArch_PrimitiveStructureSystem();
+    AArch_PrimitiveStructureActor();
 
 protected:
     virtual void BeginPlay() override;
 
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    UStaticMeshComponent* StructureMesh;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    UBoxComponent* InteractionVolume;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure Properties")
+    FArch_StructureProperties StructureConfig;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Gameplay")
+    bool bProvidesWeatherProtection = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Gameplay")
+    float ProtectionRadius = 500.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    class USoundCue* AmbientSound;
+
 public:
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure Data")
-    FArch_StructureData StructureData;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mesh")
-    UStaticMesh* StructureMesh;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Materials")
-    TArray<UMaterialInterface*> StructureMaterials;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather")
-    float WeatherDamageRate = 0.1f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather")
-    bool bAffectedByWeather = true;
+    virtual void Tick(float DeltaTime) override;
 
     UFUNCTION(BlueprintCallable, Category = "Structure")
-    void InitializeStructure(EArch_StructureType Type, EArch_MaterialType Material);
+    void SetStructureType(EArch_PrimitiveStructureType NewType);
 
     UFUNCTION(BlueprintCallable, Category = "Structure")
-    void ApplyWeatherDamage(float DamageAmount);
+    bool IsPlayerInProtectedArea(const FVector& PlayerLocation) const;
 
     UFUNCTION(BlueprintCallable, Category = "Structure")
-    void RepairStructure(float RepairAmount);
+    float GetWeatherProtectionStrength() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Structure")
-    bool CanSupportOccupants(int32 NumOccupants) const;
+    UFUNCTION(BlueprintImplementableEvent, Category = "Structure")
+    void OnPlayerEnterStructure();
 
-    UFUNCTION(BlueprintCallable, Category = "Structure")
-    FVector GetShelterPoint() const;
+    UFUNCTION(BlueprintImplementableEvent, Category = "Structure")
+    void OnPlayerExitStructure();
 
-    UFUNCTION(BlueprintPure, Category = "Structure")
-    bool IsStructureStable() const;
+protected:
+    UFUNCTION()
+    void OnInteractionVolumeBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor,
+        UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult);
+
+    UFUNCTION()
+    void OnInteractionVolumeEndOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor,
+        UPrimitiveComponent* OtherComp, int32 OtherBodyIndex);
 
 private:
-    void UpdateStructureMaterial();
-    void CalculateWeatherResistance();
+    void UpdateStructureMesh();
+    void ConfigureCollisionAndPhysics();
+    
+    bool bPlayerInside = false;
+    float LastWeatherCheckTime = 0.0f;
+};
+
+UCLASS(BlueprintType)
+class TRANSPERSONALGAME_API UArch_PrimitiveStructureLibrary : public UBlueprintFunctionLibrary
+{
+    GENERATED_BODY()
+
+public:
+    UFUNCTION(BlueprintCallable, Category = "Architecture", CallInEditor = true)
+    static TArray<AArch_PrimitiveStructureActor*> FindNearbyStructures(const FVector& Location, float Radius);
+
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    static AArch_PrimitiveStructureActor* GetClosestStructure(const FVector& Location);
+
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    static bool IsLocationProtectedByStructure(const FVector& Location);
+
+    UFUNCTION(BlueprintCallable, Category = "Architecture", CallInEditor = true)
+    static void SpawnStructureCluster(const FVector& CenterLocation, int32 Count, float SpreadRadius);
 };
