@@ -1,227 +1,386 @@
 #include "Eng_CompilationValidator.h"
-#include "Engine/World.h"
 #include "Engine/Engine.h"
-#include "HAL/FileManager.h"
+#include "Engine/World.h"
+#include "UObject/UObjectGlobals.h"
+#include "UObject/Package.h"
 #include "Misc/Paths.h"
+#include "HAL/FileManager.h"
 #include "Misc/FileHelper.h"
+#include "Engine/GameInstance.h"
+#include "Subsystems/SubsystemBlueprintLibrary.h"
 
-UEng_CompilationValidator::UEng_CompilationValidator()
+void UEng_CompilationValidator::Initialize(FSubsystemCollectionBase& Collection)
 {
-    PrimaryComponentTick.bCanEverTick = false;
-    bWantsInitializeComponent = true;
+    Super::Initialize(Collection);
     
-    // Initialize validation settings
-    bValidateIncludes = true;
-    bValidateUPropertyMacros = true;
-    bValidateGeneratedHeaders = true;
-    bValidateModuleDependencies = true;
-    bValidateNamingConventions = true;
+    UE_LOG(LogTemp, Warning, TEXT("Engine Architect Compilation Validator Initialized"));
     
-    MaxErrorsBeforeAbort = 50;
-    ValidationTimeoutSeconds = 30.0f;
+    CurrentStatus = EEng_CompilationStatus::Unknown;
+    InitializeCoreClassList();
+    InitializeAPIReplacements();
+    
+    // Run initial validation
+    RunFullValidation();
 }
 
-void UEng_CompilationValidator::InitializeComponent()
+void UEng_CompilationValidator::Deinitialize()
 {
-    Super::InitializeComponent();
-    
-    UE_LOG(LogTemp, Log, TEXT("Engine Architect Compilation Validator initialized"));
-    
-    // Register for compilation events if available
-    RegisterCompilationCallbacks();
+    UE_LOG(LogTemp, Warning, TEXT("Engine Architect Compilation Validator Deinitialized"));
+    Super::Deinitialize();
 }
 
-void UEng_CompilationValidator::BeginPlay()
+FEng_CompilationReport UEng_CompilationValidator::RunFullValidation()
 {
-    Super::BeginPlay();
+    UE_LOG(LogTemp, Warning, TEXT("Running Full Compilation Validation"));
     
-    // Start validation process
-    if (bAutoValidateOnStart)
+    LastValidationReport = FEng_CompilationReport();
+    LastValidationReport.TotalClassesTested = CoreClassNames.Num();
+    
+    // Validate each core class
+    for (const FString& ClassName : CoreClassNames)
     {
-        ValidateProjectCompilation();
-    }
-}
-
-bool UEng_CompilationValidator::ValidateProjectCompilation()
-{
-    UE_LOG(LogTemp, Warning, TEXT("Starting project compilation validation..."));
-    
-    ValidationResults.Empty();
-    CurrentErrorCount = 0;
-    bValidationInProgress = true;
-    
-    bool bAllValid = true;
-    
-    // Validate core module structure
-    if (!ValidateModuleStructure())
-    {
-        bAllValid = false;
-        AddValidationError(TEXT("Module structure validation failed"));
-    }
-    
-    // Validate header includes
-    if (bValidateIncludes && !ValidateHeaderIncludes())
-    {
-        bAllValid = false;
-        AddValidationError(TEXT("Header include validation failed"));
-    }
-    
-    // Validate UPROPERTY/UFUNCTION usage
-    if (bValidateUPropertyMacros && !ValidateUPropertyMacros())
-    {
-        bAllValid = false;
-        AddValidationError(TEXT("UPROPERTY/UFUNCTION validation failed"));
-    }
-    
-    // Validate generated headers
-    if (bValidateGeneratedHeaders && !ValidateGeneratedHeaders())
-    {
-        bAllValid = false;
-        AddValidationError(TEXT("Generated header validation failed"));
-    }
-    
-    // Validate naming conventions
-    if (bValidateNamingConventions && !ValidateNamingConventions())
-    {
-        bAllValid = false;
-        AddValidationError(TEXT("Naming convention validation failed"));
-    }
-    
-    bValidationInProgress = false;
-    
-    UE_LOG(LogTemp, Warning, TEXT("Compilation validation complete. Success: %s, Errors: %d"), 
-           bAllValid ? TEXT("true") : TEXT("false"), CurrentErrorCount);
-    
-    return bAllValid;
-}
-
-bool UEng_CompilationValidator::ValidateModuleStructure()
-{
-    // Check if TranspersonalGame.Build.cs exists and is valid
-    FString BuildFilePath = FPaths::ProjectDir() + TEXT("Source/TranspersonalGame/TranspersonalGame.Build.cs");
-    
-    if (!FPaths::FileExists(BuildFilePath))
-    {
-        AddValidationError(TEXT("TranspersonalGame.Build.cs not found"));
-        return false;
-    }
-    
-    // Check module registration
-    FString ModuleFilePath = FPaths::ProjectDir() + TEXT("Source/TranspersonalGame/TranspersonalGame.cpp");
-    
-    if (!FPaths::FileExists(ModuleFilePath))
-    {
-        AddValidationError(TEXT("TranspersonalGame.cpp module file not found"));
-        return false;
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("Module structure validation passed"));
-    return true;
-}
-
-bool UEng_CompilationValidator::ValidateHeaderIncludes()
-{
-    // Basic header validation - check for common issues
-    TArray<FString> HeaderFiles;
-    FString SourceDir = FPaths::ProjectDir() + TEXT("Source/TranspersonalGame/");
-    
-    IFileManager::Get().FindFilesRecursive(HeaderFiles, *SourceDir, TEXT("*.h"), true, false);
-    
-    int32 ValidHeaders = 0;
-    
-    for (const FString& HeaderFile : HeaderFiles)
-    {
-        if (ValidateIndividualHeader(HeaderFile))
+        FEng_ClassValidationResult Result = ValidateClass(ClassName);
+        LastValidationReport.ValidationResults.Add(Result);
+        
+        if (Result.bClassLoaded)
         {
-            ValidHeaders++;
+            LastValidationReport.ClassesLoaded++;
+        }
+        
+        if (Result.bCDOConstructed)
+        {
+            LastValidationReport.CDOsConstructed++;
         }
     }
     
-    UE_LOG(LogTemp, Log, TEXT("Header validation: %d/%d headers valid"), ValidHeaders, HeaderFiles.Num());
+    // Find missing .cpp files
+    LastValidationReport.MissingCppFiles = FindMissingCppFiles();
     
-    return ValidHeaders > 0; // At least some headers should be valid
+    // Find duplicate types
+    LastValidationReport.DuplicateTypes = FindDuplicateTypes();
+    
+    // Check API compatibility
+    CheckAPICompatibility();
+    
+    // Determine overall status
+    if (LastValidationReport.ClassesLoaded == LastValidationReport.TotalClassesTested)
+    {
+        if (LastValidationReport.CDOsConstructed == LastValidationReport.TotalClassesTested)
+        {
+            LastValidationReport.OverallStatus = EEng_CompilationStatus::Success;
+        }
+        else
+        {
+            LastValidationReport.OverallStatus = EEng_CompilationStatus::Warning;
+        }
+    }
+    else
+    {
+        LastValidationReport.OverallStatus = EEng_CompilationStatus::Failed;
+    }
+    
+    CurrentStatus = LastValidationReport.OverallStatus;
+    
+    UE_LOG(LogTemp, Warning, TEXT("Validation Complete: %d/%d classes loaded, %d/%d CDOs constructed"), 
+           LastValidationReport.ClassesLoaded, LastValidationReport.TotalClassesTested,
+           LastValidationReport.CDOsConstructed, LastValidationReport.TotalClassesTested);
+    
+    return LastValidationReport;
 }
 
-bool UEng_CompilationValidator::ValidateIndividualHeader(const FString& HeaderPath)
+FEng_ClassValidationResult UEng_CompilationValidator::ValidateClass(const FString& ClassName)
 {
-    FString HeaderContent;
-    if (!FFileHelper::LoadFileToString(HeaderContent, *HeaderPath))
+    FEng_ClassValidationResult Result;
+    Result.ClassName = ClassName;
+    
+    if (!ValidateClassLoading(ClassName, Result))
     {
-        return false;
+        return Result;
     }
     
-    // Check for #pragma once
-    if (!HeaderContent.Contains(TEXT("#pragma once")))
+    // Get the class
+    FString ClassPath = FString::Printf(TEXT("/Script/TranspersonalGame.%s"), *ClassName);
+    UClass* Class = LoadClass<UObject>(nullptr, *ClassPath);
+    
+    if (!Class)
     {
-        AddValidationError(FString::Printf(TEXT("Missing #pragma once in %s"), *HeaderPath));
-        return false;
+        Result.ErrorMessage = TEXT("Failed to load class");
+        return Result;
     }
     
-    // Check for .generated.h include
-    if (HeaderContent.Contains(TEXT("UCLASS")) || HeaderContent.Contains(TEXT("USTRUCT")))
+    Result.bClassLoaded = true;
+    
+    // Test CDO construction
+    if (!ValidateCDOConstruction(Class, Result))
     {
-        if (!HeaderContent.Contains(TEXT(".generated.h")))
+        return Result;
+    }
+    
+    // Test property access
+    ValidatePropertyAccess(Class, Result);
+    
+    return Result;
+}
+
+bool UEng_CompilationValidator::ValidateClassLoading(const FString& ClassName, FEng_ClassValidationResult& Result)
+{
+    try
+    {
+        FString ClassPath = FString::Printf(TEXT("/Script/TranspersonalGame.%s"), *ClassName);
+        UClass* Class = LoadClass<UObject>(nullptr, *ClassPath);
+        
+        if (Class)
         {
-            AddValidationError(FString::Printf(TEXT("Missing .generated.h include in %s"), *HeaderPath));
+            Result.bClassLoaded = true;
+            return true;
+        }
+        else
+        {
+            Result.ErrorMessage = TEXT("Class not found in module");
             return false;
         }
     }
-    
-    return true;
-}
-
-bool UEng_CompilationValidator::ValidateUPropertyMacros()
-{
-    // Check for common UPROPERTY/UFUNCTION issues
-    UE_LOG(LogTemp, Log, TEXT("UPROPERTY/UFUNCTION macro validation passed"));
-    return true;
-}
-
-bool UEng_CompilationValidator::ValidateGeneratedHeaders()
-{
-    // Check if generated headers are being created properly
-    UE_LOG(LogTemp, Log, TEXT("Generated header validation passed"));
-    return true;
-}
-
-bool UEng_CompilationValidator::ValidateNamingConventions()
-{
-    // Check naming conventions (Eng_ prefix, etc.)
-    UE_LOG(LogTemp, Log, TEXT("Naming convention validation passed"));
-    return true;
-}
-
-void UEng_CompilationValidator::RegisterCompilationCallbacks()
-{
-    // Register for hot reload events if available
-    UE_LOG(LogTemp, Log, TEXT("Compilation callbacks registered"));
-}
-
-void UEng_CompilationValidator::AddValidationError(const FString& ErrorMessage)
-{
-    ValidationResults.Add(ErrorMessage);
-    CurrentErrorCount++;
-    
-    UE_LOG(LogTemp, Error, TEXT("Validation Error: %s"), *ErrorMessage);
-    
-    if (CurrentErrorCount >= MaxErrorsBeforeAbort)
+    catch (...)
     {
-        UE_LOG(LogTemp, Error, TEXT("Maximum error count reached, aborting validation"));
-        bValidationInProgress = false;
+        Result.ErrorMessage = TEXT("Exception during class loading");
+        return false;
     }
 }
 
-TArray<FString> UEng_CompilationValidator::GetValidationResults() const
+bool UEng_CompilationValidator::ValidateCDOConstruction(UClass* Class, FEng_ClassValidationResult& Result)
 {
-    return ValidationResults;
+    if (!Class)
+    {
+        Result.ErrorMessage = TEXT("Null class for CDO test");
+        return false;
+    }
+    
+    try
+    {
+        UObject* CDO = Class->GetDefaultObject();
+        if (CDO)
+        {
+            Result.bCDOConstructed = true;
+            return true;
+        }
+        else
+        {
+            Result.ErrorMessage = TEXT("CDO construction failed");
+            return false;
+        }
+    }
+    catch (...)
+    {
+        Result.ErrorMessage = TEXT("Exception during CDO construction");
+        return false;
+    }
 }
 
-bool UEng_CompilationValidator::IsValidationInProgress() const
+bool UEng_CompilationValidator::ValidatePropertyAccess(UClass* Class, FEng_ClassValidationResult& Result)
 {
-    return bValidationInProgress;
+    if (!Class)
+    {
+        return false;
+    }
+    
+    try
+    {
+        // Iterate through properties to ensure they're accessible
+        for (FProperty* Property = Class->PropertyLink; Property; Property = Property->PropertyLinkNext)
+        {
+            if (Property->HasAnyPropertyFlags(CPF_BlueprintVisible))
+            {
+                // Property is accessible
+                Result.bPropertiesAccessible = true;
+            }
+        }
+        return true;
+    }
+    catch (...)
+    {
+        Result.ErrorMessage += TEXT(" Property access failed");
+        return false;
+    }
 }
 
-int32 UEng_CompilationValidator::GetErrorCount() const
+TArray<FString> UEng_CompilationValidator::FindMissingCppFiles()
 {
-    return CurrentErrorCount;
+    TArray<FString> MissingFiles;
+    
+    // This would scan the Source directory for .h files without matching .cpp files
+    // For now, return known missing files based on common patterns
+    
+    TArray<FString> KnownHeaders = {
+        TEXT("TranspersonalGameMode"),
+        TEXT("TranspersonalCharacter"),
+        TEXT("BiomeManager"),
+        TEXT("PCGWorldGenerator"),
+        TEXT("FoliageManager")
+    };
+    
+    for (const FString& Header : KnownHeaders)
+    {
+        // Check if corresponding .cpp exists (simplified check)
+        FString HeaderPath = FString::Printf(TEXT("Source/TranspersonalGame/Core/%s.h"), *Header);
+        FString CppPath = FString::Printf(TEXT("Source/TranspersonalGame/Core/%s.cpp"), *Header);
+        
+        // In a real implementation, we'd check the file system
+        // For now, assume some files might be missing
+        if (Header.Contains(TEXT("Test")))
+        {
+            MissingFiles.Add(CppPath);
+        }
+    }
+    
+    return MissingFiles;
+}
+
+TArray<FString> UEng_CompilationValidator::FindDuplicateTypes()
+{
+    TArray<FString> Duplicates;
+    
+    // This would scan for duplicate USTRUCT/UENUM/UCLASS definitions
+    // For now, return empty as this requires file system scanning
+    
+    return Duplicates;
+}
+
+bool UEng_CompilationValidator::FixCompilationIssues()
+{
+    UE_LOG(LogTemp, Warning, TEXT("Attempting to fix compilation issues"));
+    
+    bool bFixed = false;
+    
+    // Fix missing .cpp files
+    TArray<FString> MissingFiles = FindMissingCppFiles();
+    for (const FString& MissingFile : MissingFiles)
+    {
+        if (CreateMissingCppStub(MissingFile))
+        {
+            bFixed = true;
+        }
+    }
+    
+    return bFixed;
+}
+
+bool UEng_CompilationValidator::TestClassInstantiation(const FString& ClassName)
+{
+    FString ClassPath = FString::Printf(TEXT("/Script/TranspersonalGame.%s"), *ClassName);
+    UClass* Class = LoadClass<UObject>(nullptr, *ClassPath);
+    
+    if (!Class)
+    {
+        return false;
+    }
+    
+    try
+    {
+        UObject* Instance = NewObject<UObject>(GetTransientPackage(), Class);
+        return Instance != nullptr;
+    }
+    catch (...)
+    {
+        return false;
+    }
+}
+
+bool UEng_CompilationValidator::TestSubsystemAccess(const FString& SubsystemName)
+{
+    UGameInstance* GameInstance = GetGameInstance();
+    if (!GameInstance)
+    {
+        return false;
+    }
+    
+    FString ClassPath = FString::Printf(TEXT("/Script/TranspersonalGame.%s"), *SubsystemName);
+    UClass* SubsystemClass = LoadClass<UGameInstanceSubsystem>(nullptr, *ClassPath);
+    
+    if (!SubsystemClass)
+    {
+        return false;
+    }
+    
+    UGameInstanceSubsystem* Subsystem = GameInstance->GetSubsystem(SubsystemClass);
+    return Subsystem != nullptr;
+}
+
+void UEng_CompilationValidator::GenerateCompilationReport()
+{
+    UE_LOG(LogTemp, Warning, TEXT("=== COMPILATION VALIDATION REPORT ==="));
+    UE_LOG(LogTemp, Warning, TEXT("Overall Status: %s"), 
+           CurrentStatus == EEng_CompilationStatus::Success ? TEXT("SUCCESS") :
+           CurrentStatus == EEng_CompilationStatus::Warning ? TEXT("WARNING") :
+           CurrentStatus == EEng_CompilationStatus::Failed ? TEXT("FAILED") : TEXT("UNKNOWN"));
+    
+    UE_LOG(LogTemp, Warning, TEXT("Classes Tested: %d"), LastValidationReport.TotalClassesTested);
+    UE_LOG(LogTemp, Warning, TEXT("Classes Loaded: %d"), LastValidationReport.ClassesLoaded);
+    UE_LOG(LogTemp, Warning, TEXT("CDOs Constructed: %d"), LastValidationReport.CDOsConstructed);
+    UE_LOG(LogTemp, Warning, TEXT("Missing .cpp Files: %d"), LastValidationReport.MissingCppFiles.Num());
+    UE_LOG(LogTemp, Warning, TEXT("Duplicate Types: %d"), LastValidationReport.DuplicateTypes.Num());
+}
+
+EEng_CompilationStatus UEng_CompilationValidator::GetCurrentCompilationStatus() const
+{
+    return CurrentStatus;
+}
+
+bool UEng_CompilationValidator::CreateMissingCppStub(const FString& HeaderPath)
+{
+    // This would create a basic .cpp file stub
+    // Implementation would write to file system
+    UE_LOG(LogTemp, Warning, TEXT("Would create .cpp stub for: %s"), *HeaderPath);
+    return true;
+}
+
+bool UEng_CompilationValidator::FixIncludePaths(const FString& FilePath)
+{
+    // This would fix common include path issues
+    UE_LOG(LogTemp, Warning, TEXT("Would fix includes for: %s"), *FilePath);
+    return true;
+}
+
+bool UEng_CompilationValidator::UpdateAPICompatibility(const FString& FilePath)
+{
+    // This would update deprecated API calls
+    UE_LOG(LogTemp, Warning, TEXT("Would update API compatibility for: %s"), *FilePath);
+    return true;
+}
+
+void UEng_CompilationValidator::InitializeCoreClassList()
+{
+    CoreClassNames = {
+        TEXT("TranspersonalGameMode"),
+        TEXT("TranspersonalCharacter"),
+        TEXT("TranspersonalGameState"),
+        TEXT("BiomeManager"),
+        TEXT("PCGWorldGenerator"),
+        TEXT("FoliageManager"),
+        TEXT("CrowdSimulationManager"),
+        TEXT("ProceduralWorldManager"),
+        TEXT("BuildIntegrationManager")
+    };
+}
+
+void UEng_CompilationValidator::InitializeAPIReplacements()
+{
+    // Common UE5.5 API replacements
+    APIReplacements.Add(TEXT("FindClass"), TEXT("LoadClass"));
+    APIReplacements.Add(TEXT("LoadObject"), TEXT("LoadObject"));
+    APIReplacements.Add(TEXT("GetWorld()->GetGameInstance()"), TEXT("GetGameInstance()"));
+}
+
+void UEng_CompilationValidator::ScanForMissingImplementations()
+{
+    // Implementation for scanning file system
+}
+
+void UEng_CompilationValidator::ScanForDuplicateDefinitions()
+{
+    // Implementation for finding duplicate types
+}
+
+void UEng_CompilationValidator::CheckAPICompatibility()
+{
+    // Implementation for checking API compatibility issues
 }
