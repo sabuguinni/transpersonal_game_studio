@@ -2,12 +2,23 @@
 
 #include "CoreMinimal.h"
 #include "Animation/AnimInstance.h"
+#include "Engine/Engine.h"
+#include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
-#include "../SharedTypes.h"
-#include "Anim_MotionMatchingSystem.h"
 #include "Anim_PrimitiveAnimInstance.generated.h"
 
-UCLASS()
+UENUM(BlueprintType)
+enum class EAnim_MovementState : uint8
+{
+    Idle        UMETA(DisplayName = "Idle"),
+    Walking     UMETA(DisplayName = "Walking"),
+    Running     UMETA(DisplayName = "Running"),
+    Jumping     UMETA(DisplayName = "Jumping"),
+    Falling     UMETA(DisplayName = "Falling"),
+    Crouching   UMETA(DisplayName = "Crouching")
+};
+
+UCLASS(Transient, Blueprintable, BlueprintType)
 class TRANSPERSONALGAME_API UAnim_PrimitiveAnimInstance : public UAnimInstance
 {
     GENERATED_BODY()
@@ -17,137 +28,42 @@ public:
 
 protected:
     virtual void NativeInitializeAnimation() override;
-    virtual void NativeUpdateAnimation(float DeltaTime) override;
+    virtual void NativeUpdateAnimation(float DeltaTimeX) override;
 
-public:
-    // Animation Properties
-    UPROPERTY(BlueprintReadOnly, Category = "Movement")
+    // Movement properties
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Movement", meta = (AllowPrivateAccess = "true"))
     float Speed;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Movement")
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Movement", meta = (AllowPrivateAccess = "true"))
     float Direction;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Movement")
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Movement", meta = (AllowPrivateAccess = "true"))
     bool bIsInAir;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Movement")
-    bool bIsCrouching;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Movement")
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Movement", meta = (AllowPrivateAccess = "true"))
     bool bIsAccelerating;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Movement")
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Movement", meta = (AllowPrivateAccess = "true"))
+    bool bIsCrouching;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Movement", meta = (AllowPrivateAccess = "true"))
     EAnim_MovementState MovementState;
 
-    // IK Properties
-    UPROPERTY(BlueprintReadOnly, Category = "IK")
-    FAnim_IKFootData LeftFootIK;
+    // Character reference
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Character", meta = (AllowPrivateAccess = "true"))
+    ACharacter* OwningCharacter;
 
-    UPROPERTY(BlueprintReadOnly, Category = "IK")
-    FAnim_IKFootData RightFootIK;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Character", meta = (AllowPrivateAccess = "true"))
+    UCharacterMovementComponent* CharacterMovement;
 
-    UPROPERTY(BlueprintReadOnly, Category = "IK")
-    float IKBodyOffset;
+    // Animation thresholds
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Settings")
+    float WalkSpeedThreshold;
 
-    // Survival Animation Properties
-    UPROPERTY(BlueprintReadOnly, Category = "Survival")
-    float HealthPercent;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Survival")
-    float StaminaPercent;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Survival")
-    float FearLevel;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Survival")
-    bool bIsInjured;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Survival")
-    bool bIsExhausted;
-
-    // Combat Animation Properties
-    UPROPERTY(BlueprintReadOnly, Category = "Combat")
-    bool bIsInCombat;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Combat")
-    bool bIsBlocking;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Combat")
-    bool bIsAttacking;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Combat")
-    EAnim_WeaponType CurrentWeaponType;
-
-    // Environmental Animation Properties
-    UPROPERTY(BlueprintReadOnly, Category = "Environment")
-    float GroundSlope;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Environment")
-    bool bIsOnUnevenTerrain;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Environment")
-    bool bIsInWater;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Environment")
-    float WaterDepth;
-
-protected:
-    // Component References
-    UPROPERTY()
-    class ACharacter* OwnerCharacter;
-
-    UPROPERTY()
-    class UCharacterMovementComponent* MovementComponent;
-
-    UPROPERTY()
-    class UAnim_MotionMatchingSystem* MotionMatchingSystem;
-
-    UPROPERTY()
-    class UTranspersonalGameState* GameState;
-
-    // Animation Functions
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    void UpdateMovementProperties();
-
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    void UpdateIKProperties();
-
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    void UpdateSurvivalProperties();
-
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    void UpdateCombatProperties();
-
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    void UpdateEnvironmentalProperties();
-
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    float CalculateGroundSlope();
-
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    bool CheckUnevenTerrain();
-
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    void UpdateBodyIK();
-
-    // Animation Events
-    UFUNCTION(BlueprintImplementableEvent, Category = "Animation Events")
-    void OnMovementStateChanged(EAnim_MovementState NewState);
-
-    UFUNCTION(BlueprintImplementableEvent, Category = "Animation Events")
-    void OnCombatStateChanged(bool bInCombat);
-
-    UFUNCTION(BlueprintImplementableEvent, Category = "Animation Events")
-    void OnInjuryStateChanged(bool bInjured);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Settings")
+    float RunSpeedThreshold;
 
 private:
-    // Internal state tracking
-    EAnim_MovementState PreviousMovementState;
-    bool bPreviousCombatState;
-    bool bPreviousInjuryState;
-    
-    // Smoothing values
-    float SpeedSmoothRate;
-    float DirectionSmoothRate;
-    float IKSmoothRate;
+    void UpdateMovementValues();
+    void UpdateMovementState();
 };
