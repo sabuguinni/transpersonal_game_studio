@@ -2,62 +2,106 @@
 
 #include "CoreMinimal.h"
 #include "MassProcessor.h"
-#include "MassEntityTypes.h"
-#include "MassExecutionContext.h"
+#include "MassEntityQuery.h"
 #include "MassCommonFragments.h"
 #include "MassMovementFragments.h"
-#include "MassNavigationFragments.h"
-#include "SharedTypes.h"
+#include "MassRepresentationFragments.h"
+#include "Crowd_MassEntityConfig.h"
+#include "Engine/World.h"
 #include "Crowd_MassProcessor.generated.h"
 
-/**
- * Mass processor for crowd simulation entities
- * Handles movement, pathfinding, and behavior for large numbers of NPCs
- */
+// Mass processor for crowd behavior logic
 UCLASS()
-class TRANSPERSONALGAME_API UCrowd_MassProcessor : public UMassProcessor
+class TRANSPERSONALGAME_API UCrowd_BehaviorProcessor : public UMassProcessor
 {
     GENERATED_BODY()
 
 public:
-    UCrowd_MassProcessor();
+    UCrowd_BehaviorProcessor();
 
 protected:
     virtual void ConfigureQueries() override;
-    virtual void Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context) override;
+    virtual void Execute(UMassEntitySubsystem& EntitySubsystem, FMassExecutionContext& Context) override;
 
 private:
-    // Query for entities with movement and navigation
-    FMassEntityQuery MovementQuery;
-    
-    // Query for entities needing pathfinding
-    FMassEntityQuery PathfindingQuery;
-    
-    // Query for entities with behavior state
-    FMassEntityQuery BehaviorQuery;
+    // Query for entities with crowd behavior
+    FMassEntityQuery CrowdQuery;
 
-    // Process movement for crowd entities
-    void ProcessMovement(FMassEntityManager& EntityManager, FMassExecutionContext& Context);
+    // Helper functions
+    void ProcessBehaviorState(FMassExecutionContext& Context, FCrowd_BehaviorFragment& BehaviorFragment, 
+                             FTransformFragment& TransformFragment, FMassVelocityFragment& VelocityFragment, float DeltaTime);
     
-    // Process pathfinding for crowd entities
-    void ProcessPathfinding(FMassEntityManager& EntityManager, FMassExecutionContext& Context);
+    void UpdateIdleBehavior(FCrowd_BehaviorFragment& BehaviorFragment, FTransformFragment& TransformFragment, 
+                           FMassVelocityFragment& VelocityFragment, float DeltaTime);
     
-    // Process behavior state changes
-    void ProcessBehavior(FMassEntityManager& EntityManager, FMassExecutionContext& Context);
+    void UpdateWalkingBehavior(FCrowd_BehaviorFragment& BehaviorFragment, FTransformFragment& TransformFragment, 
+                              FMassVelocityFragment& VelocityFragment, float DeltaTime);
+    
+    void UpdateFleeingBehavior(FCrowd_BehaviorFragment& BehaviorFragment, FTransformFragment& TransformFragment, 
+                              FMassVelocityFragment& VelocityFragment, float DeltaTime);
 
-    UPROPERTY(EditAnywhere, Category = "Crowd Settings")
-    float MovementSpeed = 150.0f;
-    
-    UPROPERTY(EditAnywhere, Category = "Crowd Settings")
-    float PathfindingUpdateInterval = 0.5f;
-    
-    UPROPERTY(EditAnywhere, Category = "Crowd Settings")
-    float BehaviorUpdateInterval = 1.0f;
-    
-    UPROPERTY(EditAnywhere, Category = "Crowd Settings")
-    float MaxCrowdDistance = 5000.0f;
+    FVector GetRandomWalkTarget(const FVector& CurrentLocation, float Radius = 500.0f);
+    bool ShouldChangeState(const FCrowd_BehaviorFragment& BehaviorFragment, float DeltaTime);
+    ECrowd_BehaviorState GetNextRandomState(ECrowd_AgentType AgentType);
+};
+
+// Mass processor for crowd social behavior and flocking
+UCLASS()
+class TRANSPERSONALGAME_API UCrowd_SocialProcessor : public UMassProcessor
+{
+    GENERATED_BODY()
+
+public:
+    UCrowd_SocialProcessor();
+
+protected:
+    virtual void ConfigureQueries() override;
+    virtual void Execute(UMassEntitySubsystem& EntitySubsystem, FMassExecutionContext& Context) override;
 
 private:
-    float LastPathfindingUpdate = 0.0f;
-    float LastBehaviorUpdate = 0.0f;
+    // Query for entities with social behavior
+    FMassEntityQuery SocialQuery;
+
+    // Flocking behavior functions
+    FVector CalculateSeparation(const FVector& EntityLocation, const TArray<FMassEntityHandle>& NearbyEntities, 
+                               UMassEntitySubsystem& EntitySubsystem, float AvoidanceRadius);
+    
+    FVector CalculateCohesion(const FVector& EntityLocation, const TArray<FMassEntityHandle>& NearbyEntities, 
+                             UMassEntitySubsystem& EntitySubsystem);
+    
+    FVector CalculateAlignment(const TArray<FMassEntityHandle>& NearbyEntities, 
+                              UMassEntitySubsystem& EntitySubsystem);
+
+    void FindNearbyEntities(const FVector& EntityLocation, FMassExecutionContext& Context, 
+                           TArray<FMassEntityHandle>& OutNearbyEntities, float SearchRadius);
+};
+
+// Mass processor for crowd LOD management
+UCLASS()
+class TRANSPERSONALGAME_API UCrowd_LODProcessor : public UMassProcessor
+{
+    GENERATED_BODY()
+
+public:
+    UCrowd_LODProcessor();
+
+protected:
+    virtual void ConfigureQueries() override;
+    virtual void Execute(UMassEntitySubsystem& EntitySubsystem, FMassExecutionContext& Context) override;
+
+private:
+    // Query for entities with LOD representation
+    FMassEntityQuery LODQuery;
+
+    // LOD management functions
+    void UpdateLODLevel(FMassRepresentationFragment& RepresentationFragment, 
+                       const FVector& EntityLocation, const FVector& ViewerLocation);
+    
+    float CalculateDistanceToViewer(const FVector& EntityLocation);
+    FVector GetPlayerViewLocation();
+
+    // LOD distance thresholds
+    float HighLODDistance = 500.0f;
+    float MediumLODDistance = 1500.0f;
+    float LowLODDistance = 3000.0f;
 };
