@@ -1,174 +1,364 @@
 #include "Quest_ExplorationQuestManager.h"
 #include "Engine/Engine.h"
+#include "Engine/World.h"
+#include "GameFramework/Pawn.h"
+#include "GameFramework/PlayerController.h"
 #include "Kismet/GameplayStatics.h"
-#include "Math/UnrealMathUtility.h"
+#include "Components/PrimitiveComponent.h"
+#include "Engine/TriggerBox.h"
 
-UQuest_ExplorationQuestManager::UQuest_ExplorationQuestManager()
+AQuest_ExplorationQuestManager::AQuest_ExplorationQuestManager()
 {
-    PrimaryComponentTick.bCanEverTick = true;
-    PlayerDetectionRadius = 300.0f;
-    CompletedExplorationCount = 0;
-    bAutoGenerateQuests = true;
+    PrimaryActorTick.bCanEverTick = true;
+    
+    ObjectiveCheckInterval = 2.0f;
+    bDebugMode = false;
+    
+    // Set up root component
+    RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootComponent"));
 }
 
-void UQuest_ExplorationQuestManager::BeginPlay()
+void AQuest_ExplorationQuestManager::BeginPlay()
 {
     Super::BeginPlay();
     
-    if (bAutoGenerateQuests)
+    // Initialize default exploration quests
+    InitializeDefaultQuests();
+    
+    // Start objective checking timer
+    GetWorld()->GetTimerManager().SetTimer(
+        ObjectiveCheckTimer,
+        this,
+        &AQuest_ExplorationQuestManager::CheckObjectiveProgress,
+        ObjectiveCheckInterval,
+        true
+    );
+    
+    if (bDebugMode)
     {
-        // Generate initial exploration quests
-        GenerateRandomExplorationQuest();
-        GenerateRandomExplorationQuest();
+        UE_LOG(LogTemp, Warning, TEXT("ExplorationQuestManager: BeginPlay - Quest system initialized"));
     }
 }
 
-void UQuest_ExplorationQuestManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void AQuest_ExplorationQuestManager::Tick(float DeltaTime)
 {
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+    Super::Tick(DeltaTime);
+    
+    // Additional per-frame quest logic if needed
+    if (bDebugMode && ActiveQuests.Num() > 0)
+    {
+        // Debug display active quest count
+        if (GEngine)
+        {
+            GEngine->AddOnScreenDebugMessage(
+                -1, 0.0f, FColor::Green,
+                FString::Printf(TEXT("Active Quests: %d"), ActiveQuests.Num())
+            );
+        }
+    }
+}
 
-    // Get player location
-    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
+void AQuest_ExplorationQuestManager::StartExplorationQuest(const FString& QuestName)
+{
+    // Find quest by name and activate it
+    for (FQuest_ExplorationQuest& Quest : ActiveQuests)
+    {
+        if (Quest.QuestName == QuestName && !Quest.bIsActive)
+        {
+            Quest.bIsActive = true;
+            
+            if (bDebugMode)
+            {
+                UE_LOG(LogTemp, Warning, TEXT("ExplorationQuestManager: Started quest '%s'"), *QuestName);
+            }
+            
+            OnQuestStarted(QuestName);
+            return;
+        }
+    }
+    
+    UE_LOG(LogTemp, Warning, TEXT("ExplorationQuestManager: Quest '%s' not found or already active"), *QuestName);
+}
+
+void AQuest_ExplorationQuestManager::CompleteObjective(const FString& QuestName, const FString& ObjectiveName)
+{
+    for (FQuest_ExplorationQuest& Quest : ActiveQuests)
+    {
+        if (Quest.QuestName == QuestName && Quest.bIsActive)
+        {
+            for (FQuest_ExplorationObjective& Objective : Quest.Objectives)
+            {
+                if (Objective.ObjectiveName == ObjectiveName && !Objective.bIsCompleted)
+                {
+                    MarkObjectiveComplete(Quest, Objective);
+                    return;
+                }
+            }
+        }
+    }
+}
+
+bool AQuest_ExplorationQuestManager::IsQuestActive(const FString& QuestName) const
+{
+    for (const FQuest_ExplorationQuest& Quest : ActiveQuests)
+    {
+        if (Quest.QuestName == QuestName)
+        {
+            return Quest.bIsActive && !Quest.bIsCompleted;
+        }
+    }
+    return false;
+}
+
+bool AQuest_ExplorationQuestManager::IsObjectiveCompleted(const FString& QuestName, const FString& ObjectiveName) const
+{
+    for (const FQuest_ExplorationQuest& Quest : ActiveQuests)
+    {
+        if (Quest.QuestName == QuestName)
+        {
+            for (const FQuest_ExplorationObjective& Objective : Quest.Objectives)
+            {
+                if (Objective.ObjectiveName == ObjectiveName)
+                {
+                    return Objective.bIsCompleted;
+                }
+            }
+        }
+    }
+    return false;
+}
+
+void AQuest_ExplorationQuestManager::RegisterDiscoveryItem(AActor* DiscoveryActor)
+{
+    if (DiscoveryActor && !DiscoveryItems.Contains(DiscoveryActor))
+    {
+        DiscoveryItems.Add(DiscoveryActor);
+        
+        if (bDebugMode)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("ExplorationQuestManager: Registered discovery item '%s'"), 
+                *DiscoveryActor->GetName());
+        }
+    }
+}
+
+void AQuest_ExplorationQuestManager::RegisterExplorationTrigger(ATriggerBox* TriggerBox)
+{
+    if (TriggerBox && !ExplorationTriggers.Contains(TriggerBox))
+    {
+        ExplorationTriggers.Add(TriggerBox);
+        
+        if (bDebugMode)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("ExplorationQuestManager: Registered exploration trigger '%s'"), 
+                *TriggerBox->GetName());
+        }
+    }
+}
+
+void AQuest_ExplorationQuestManager::CheckPlayerProximityToObjectives(APawn* PlayerPawn)
+{
     if (!PlayerPawn)
     {
         return;
     }
-
+    
     FVector PlayerLocation = PlayerPawn->GetActorLocation();
     
-    // Check exploration progress
-    CheckExplorationProgress(PlayerLocation);
-}
-
-void UQuest_ExplorationQuestManager::CreateExplorationQuest(const FString& LocationName, const FVector& TargetLocation, float Radius)
-{
-    FQuest_ExplorationObjective NewQuest;
-    NewQuest.LocationName = LocationName;
-    NewQuest.TargetLocation = TargetLocation;
-    NewQuest.ExplorationRadius = Radius;
-    NewQuest.bIsCompleted = false;
-    NewQuest.DiscoveryReward = TEXT("Territory Knowledge");
-
-    ActiveExplorationQuests.Add(NewQuest);
-
-    if (GEngine)
+    for (FQuest_ExplorationQuest& Quest : ActiveQuests)
     {
-        GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Green, 
-            FString::Printf(TEXT("New exploration quest: Discover %s"), *LocationName));
+        if (!Quest.bIsActive || Quest.bIsCompleted)
+        {
+            continue;
+        }
+        
+        for (FQuest_ExplorationObjective& Objective : Quest.Objectives)
+        {
+            if (!Objective.bIsCompleted)
+            {
+                if (CheckLocationObjective(Objective, PlayerPawn))
+                {
+                    MarkObjectiveComplete(Quest, Objective);
+                }
+            }
+        }
     }
 }
 
-bool UQuest_ExplorationQuestManager::CheckExplorationProgress(const FVector& PlayerLocation)
+float AQuest_ExplorationQuestManager::GetQuestCompletionPercentage(const FString& QuestName) const
 {
-    bool bProgressMade = false;
-
-    for (int32 i = 0; i < ActiveExplorationQuests.Num(); i++)
+    for (const FQuest_ExplorationQuest& Quest : ActiveQuests)
     {
-        FQuest_ExplorationObjective& Quest = ActiveExplorationQuests[i];
-        
-        if (!Quest.bIsCompleted)
+        if (Quest.QuestName == QuestName)
         {
-            float DistanceToTarget = FVector::Dist(PlayerLocation, Quest.TargetLocation);
+            if (Quest.Objectives.Num() == 0)
+            {
+                return 0.0f;
+            }
             
-            if (DistanceToTarget <= Quest.ExplorationRadius)
+            int32 CompletedCount = 0;
+            for (const FQuest_ExplorationObjective& Objective : Quest.Objectives)
             {
-                CompleteExplorationQuest(i);
-                bProgressMade = true;
+                if (Objective.bIsCompleted)
+                {
+                    CompletedCount++;
+                }
             }
+            
+            return (float)CompletedCount / (float)Quest.Objectives.Num();
         }
     }
-
-    return bProgressMade;
+    return 0.0f;
 }
 
-void UQuest_ExplorationQuestManager::CompleteExplorationQuest(int32 QuestIndex)
+TArray<FString> AQuest_ExplorationQuestManager::GetActiveQuestNames() const
 {
-    if (QuestIndex >= 0 && QuestIndex < ActiveExplorationQuests.Num())
+    TArray<FString> QuestNames;
+    
+    for (const FQuest_ExplorationQuest& Quest : ActiveQuests)
     {
-        FQuest_ExplorationObjective& Quest = ActiveExplorationQuests[QuestIndex];
+        if (Quest.bIsActive && !Quest.bIsCompleted)
+        {
+            QuestNames.Add(Quest.QuestName);
+        }
+    }
+    
+    return QuestNames;
+}
+
+int32 AQuest_ExplorationQuestManager::CalculateQuestReward(const FString& QuestName) const
+{
+    for (const FQuest_ExplorationQuest& Quest : ActiveQuests)
+    {
+        if (Quest.QuestName == QuestName)
+        {
+            int32 TotalReward = Quest.TotalExperienceReward;
+            
+            for (const FQuest_ExplorationObjective& Objective : Quest.Objectives)
+            {
+                TotalReward += Objective.ExperienceReward;
+            }
+            
+            return TotalReward;
+        }
+    }
+    return 0;
+}
+
+void AQuest_ExplorationQuestManager::CheckObjectiveProgress()
+{
+    // Get player pawn for proximity checks
+    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
+    if (PlayerPawn)
+    {
+        CheckPlayerProximityToObjectives(PlayerPawn);
+    }
+}
+
+void AQuest_ExplorationQuestManager::InitializeDefaultQuests()
+{
+    // Create "First Steps" exploration quest
+    FQuest_ExplorationQuest FirstStepsQuest;
+    FirstStepsQuest.QuestName = TEXT("First Steps");
+    FirstStepsQuest.QuestDescription = TEXT("Begin your journey by exploring the immediate area and discovering key landmarks.");
+    FirstStepsQuest.bIsActive = true;
+    FirstStepsQuest.TotalExperienceReward = 200;
+    
+    // Add objectives to First Steps quest
+    FQuest_ExplorationObjective CaveObjective;
+    CaveObjective.ObjectiveName = TEXT("Find Cave Entrance");
+    CaveObjective.Description = TEXT("Locate the mysterious cave entrance to the north");
+    CaveObjective.ObjectiveType = EQuest_ExplorationObjectiveType::DiscoverLocation;
+    CaveObjective.TargetLocation = FVector(2000, 1000, 200);
+    CaveObjective.CompletionRadius = 300.0f;
+    CaveObjective.ExperienceReward = 50;
+    FirstStepsQuest.Objectives.Add(CaveObjective);
+    
+    FQuest_ExplorationObjective CliffObjective;
+    CliffObjective.ObjectiveName = TEXT("Reach High Ground");
+    CliffObjective.Description = TEXT("Climb to the high cliff for a better view of the area");
+    CliffObjective.ObjectiveType = EQuest_ExplorationObjectiveType::ReachElevation;
+    CliffObjective.TargetLocation = FVector(-1500, 2000, 800);
+    CliffObjective.CompletionRadius = 400.0f;
+    CliffObjective.ExperienceReward = 75;
+    FirstStepsQuest.Objectives.Add(CliffObjective);
+    
+    ActiveQuests.Add(FirstStepsQuest);
+    
+    // Create "Resource Discovery" quest
+    FQuest_ExplorationQuest ResourceQuest;
+    ResourceQuest.QuestName = TEXT("Resource Discovery");
+    ResourceQuest.QuestDescription = TEXT("Find essential resources scattered throughout the prehistoric landscape.");
+    ResourceQuest.bIsActive = false;
+    ResourceQuest.TotalExperienceReward = 300;
+    
+    FQuest_ExplorationObjective WaterObjective;
+    WaterObjective.ObjectiveName = TEXT("Find Water Source");
+    WaterObjective.Description = TEXT("Locate a reliable source of fresh water");
+    WaterObjective.ObjectiveType = EQuest_ExplorationObjectiveType::FindResource;
+    WaterObjective.TargetLocation = FVector(-200, 1200, 90);
+    WaterObjective.CompletionRadius = 250.0f;
+    WaterObjective.ExperienceReward = 100;
+    ResourceQuest.Objectives.Add(WaterObjective);
+    
+    ActiveQuests.Add(ResourceQuest);
+    
+    if (bDebugMode)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("ExplorationQuestManager: Initialized %d default quests"), ActiveQuests.Num());
+    }
+}
+
+bool AQuest_ExplorationQuestManager::CheckLocationObjective(const FQuest_ExplorationObjective& Objective, APawn* PlayerPawn)
+{
+    if (!PlayerPawn)
+    {
+        return false;
+    }
+    
+    FVector PlayerLocation = PlayerPawn->GetActorLocation();
+    float Distance = FVector::Dist(PlayerLocation, Objective.TargetLocation);
+    
+    return Distance <= Objective.CompletionRadius;
+}
+
+void AQuest_ExplorationQuestManager::MarkObjectiveComplete(FQuest_ExplorationQuest& Quest, FQuest_ExplorationObjective& Objective)
+{
+    Objective.bIsCompleted = true;
+    
+    if (bDebugMode)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("ExplorationQuestManager: Completed objective '%s' in quest '%s'"), 
+            *Objective.ObjectiveName, *Quest.QuestName);
+    }
+    
+    OnObjectiveCompleted(Quest.QuestName, Objective.ObjectiveName);
+    
+    // Check if all objectives in quest are complete
+    bool bAllObjectivesComplete = true;
+    for (const FQuest_ExplorationObjective& QuestObjective : Quest.Objectives)
+    {
+        if (!QuestObjective.bIsCompleted)
+        {
+            bAllObjectivesComplete = false;
+            break;
+        }
+    }
+    
+    if (bAllObjectivesComplete && !Quest.bIsCompleted)
+    {
+        Quest.bIsCompleted = true;
+        int32 TotalReward = CalculateQuestReward(Quest.QuestName);
         
-        if (!Quest.bIsCompleted)
+        // Move to completed quests
+        CompletedQuests.Add(Quest);
+        
+        OnQuestCompleted(Quest.QuestName, TotalReward);
+        
+        if (bDebugMode)
         {
-            Quest.bIsCompleted = true;
-            CompletedExplorationCount++;
-
-            if (GEngine)
-            {
-                GEngine->AddOnScreenDebugMessage(-1, 8.0f, FColor::Yellow, 
-                    FString::Printf(TEXT("Exploration Complete! Discovered: %s - Reward: %s"), 
-                    *Quest.LocationName, *Quest.DiscoveryReward));
-            }
-
-            // Generate new quest after completion
-            if (bAutoGenerateQuests && CompletedExplorationCount % 2 == 0)
-            {
-                GenerateRandomExplorationQuest();
-            }
+            UE_LOG(LogTemp, Warning, TEXT("ExplorationQuestManager: Completed quest '%s' with reward %d"), 
+                *Quest.QuestName, TotalReward);
         }
     }
-}
-
-TArray<FQuest_ExplorationObjective> UQuest_ExplorationQuestManager::GetActiveQuests() const
-{
-    return ActiveExplorationQuests;
-}
-
-void UQuest_ExplorationQuestManager::GenerateRandomExplorationQuest()
-{
-    // Generate random exploration locations around the map
-    TArray<FString> LocationNames = {
-        TEXT("Ancient Cave System"),
-        TEXT("Dinosaur Nesting Grounds"),
-        TEXT("Crystal Formation"),
-        TEXT("Volcanic Hot Springs"),
-        TEXT("Dense Jungle Grove"),
-        TEXT("Rocky Cliff Overlook"),
-        TEXT("Riverbank Settlement"),
-        TEXT("Bone Graveyard")
-    };
-
-    TArray<FString> Rewards = {
-        TEXT("Stone Tools"),
-        TEXT("Rare Minerals"),
-        TEXT("Fresh Water Source"),
-        TEXT("Safe Shelter Location"),
-        TEXT("Hunting Ground Access"),
-        TEXT("Medicinal Plants"),
-        TEXT("Crafting Materials"),
-        TEXT("Territory Map")
-    };
-
-    // Random location within reasonable map bounds
-    FVector RandomLocation = FVector(
-        FMath::RandRange(-5000.0f, 5000.0f),
-        FMath::RandRange(-5000.0f, 5000.0f),
-        FMath::RandRange(0.0f, 1000.0f)
-    );
-
-    FString RandomLocationName = LocationNames[FMath::RandRange(0, LocationNames.Num() - 1)];
-    FString RandomReward = Rewards[FMath::RandRange(0, Rewards.Num() - 1)];
-
-    FQuest_ExplorationObjective NewQuest;
-    NewQuest.LocationName = RandomLocationName;
-    NewQuest.TargetLocation = RandomLocation;
-    NewQuest.ExplorationRadius = FMath::RandRange(400.0f, 800.0f);
-    NewQuest.bIsCompleted = false;
-    NewQuest.DiscoveryReward = RandomReward;
-
-    ActiveExplorationQuests.Add(NewQuest);
-}
-
-FString UQuest_ExplorationQuestManager::GetQuestProgressText() const
-{
-    int32 ActiveCount = 0;
-    for (const FQuest_ExplorationObjective& Quest : ActiveExplorationQuests)
-    {
-        if (!Quest.bIsCompleted)
-        {
-            ActiveCount++;
-        }
-    }
-
-    return FString::Printf(TEXT("Exploration Progress: %d Active Quests | %d Completed"), 
-        ActiveCount, CompletedExplorationCount);
 }
