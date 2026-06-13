@@ -5,10 +5,11 @@
 #include "Components/DirectionalLightComponent.h"
 #include "Components/SkyLightComponent.h"
 #include "Components/ExponentialHeightFogComponent.h"
+#include "Components/PostProcessComponent.h"
 #include "Engine/DirectionalLight.h"
 #include "Engine/SkyLight.h"
 #include "Engine/ExponentialHeightFog.h"
-#include "Engine/World.h"
+#include "Engine/PostProcessVolume.h"
 #include "Light_AtmosphericSystem.generated.h"
 
 UENUM(BlueprintType)
@@ -22,34 +23,55 @@ enum class ELight_TimeOfDay : uint8
     Night       UMETA(DisplayName = "Night")
 };
 
+UENUM(BlueprintType)
+enum class ELight_WeatherType : uint8
+{
+    Clear       UMETA(DisplayName = "Clear"),
+    Hazy        UMETA(DisplayName = "Hazy"),
+    Overcast    UMETA(DisplayName = "Overcast"),
+    Stormy      UMETA(DisplayName = "Stormy"),
+    Foggy       UMETA(DisplayName = "Foggy")
+};
+
 USTRUCT(BlueprintType)
 struct FLight_AtmosphericSettings
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
-    float SunIntensity = 5.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sun")
+    float SunIntensity = 8.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
-    FLinearColor SunColor = FLinearColor(1.0f, 0.94f, 0.78f, 1.0f);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sun")
+    FLinearColor SunColor = FLinearColor(1.0f, 0.92f, 0.71f, 1.0f);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
-    float SkyLightIntensity = 1.5f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sun")
+    float SunTemperature = 5800.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fog")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmosphere")
     float FogDensity = 0.02f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fog")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmosphere")
     float FogHeightFalloff = 0.2f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fog")
-    FLinearColor FogInscatteringColor = FLinearColor(1.0f, 0.9f, 0.7f, 1.0f);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmosphere")
+    FLinearColor FogInscatteringColor = FLinearColor(0.71f, 0.63f, 0.47f, 1.0f);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Volumetric")
-    bool bVolumetricFog = true;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sky")
+    float SkyLightIntensity = 2.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Volumetric")
-    float VolumetricScatteringDistribution = 0.2f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PostProcess")
+    float WhiteTemperature = 5600.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PostProcess")
+    float ColorSaturation = 1.15f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PostProcess")
+    float ColorContrast = 1.1f;
+
+    FLight_AtmosphericSettings()
+    {
+        // Default Cretaceous period settings
+    }
 };
 
 UCLASS(BlueprintType, Blueprintable)
@@ -66,26 +88,41 @@ protected:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
     class USceneComponent* RootSceneComponent;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Time")
-    ELight_TimeOfDay CurrentTimeOfDay = ELight_TimeOfDay::Morning;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
+    ELight_TimeOfDay CurrentTimeOfDay = ELight_TimeOfDay::Afternoon;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather")
+    ELight_WeatherType CurrentWeather = ELight_WeatherType::Clear;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
     FLight_AtmosphericSettings AtmosphericSettings;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cycle")
-    bool bEnableDayNightCycle = false;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "References")
+    TSoftObjectPtr<ADirectionalLight> SunLight;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cycle", meta = (EditCondition = "bEnableDayNightCycle"))
-    float DayDurationMinutes = 20.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "References")
+    TSoftObjectPtr<ASkyLight> SkyLight;
 
-    UPROPERTY(BlueprintReadOnly, Category = "References")
-    ADirectionalLight* SunLight;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "References")
+    TSoftObjectPtr<AExponentialHeightFog> AtmosphericFog;
 
-    UPROPERTY(BlueprintReadOnly, Category = "References")
-    ASkyLight* SkyLightActor;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "References")
+    TSoftObjectPtr<APostProcessVolume> PostProcessVolume;
 
-    UPROPERTY(BlueprintReadOnly, Category = "References")
-    AExponentialHeightFog* FogActor;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
+    float DayNightCycleDuration = 1200.0f; // 20 minutes real time
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
+    bool bEnableDayNightCycle = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
+    bool bEnableWeatherTransitions = true;
+
+    UPROPERTY(BlueprintReadOnly, Category = "State")
+    float CurrentTimeOfDayFloat = 14.0f; // 2 PM
+
+    UPROPERTY(BlueprintReadOnly, Category = "State")
+    float WeatherTransitionProgress = 0.0f;
 
 public:
     virtual void Tick(float DeltaTime) override;
@@ -93,31 +130,48 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Lighting")
     void SetTimeOfDay(ELight_TimeOfDay NewTimeOfDay);
 
-    UFUNCTION(BlueprintCallable, Category = "Lighting")
-    void ApplyAtmosphericSettings(const FLight_AtmosphericSettings& Settings);
+    UFUNCTION(BlueprintCallable, Category = "Weather")
+    void SetWeatherType(ELight_WeatherType NewWeatherType);
 
-    UFUNCTION(BlueprintCallable, Category = "Lighting")
-    void SetCretaceousLighting();
+    UFUNCTION(BlueprintCallable, Category = "Settings")
+    void ApplyAtmosphericSettings(const FLight_AtmosphericSettings& NewSettings);
 
-    UFUNCTION(BlueprintCallable, Category = "Lighting")
-    void UpdateVolumetricFog(bool bEnable, float Density = 0.02f);
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    void StartDayNightCycle();
 
-    UFUNCTION(CallInEditor, Category = "Setup")
-    void FindAndConfigureLightingActors();
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    void StopDayNightCycle();
+
+    UFUNCTION(BlueprintCallable, Category = "Weather")
+    void TransitionToWeather(ELight_WeatherType TargetWeather, float TransitionDuration = 30.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "Setup")
+    void FindAndLinkLightingActors();
+
+    UFUNCTION(BlueprintCallable, Category = "Setup")
+    void CreateCretaceousLightingSetup();
+
+    UFUNCTION(BlueprintCallable, Category = "Lumen")
+    void EnableLumenGlobalIllumination();
+
+    UFUNCTION(BlueprintPure, Category = "Time")
+    float GetNormalizedTimeOfDay() const;
+
+    UFUNCTION(BlueprintPure, Category = "Sun")
+    FRotator CalculateSunRotation(float TimeOfDay) const;
+
+    UFUNCTION(BlueprintPure, Category = "Settings")
+    FLight_AtmosphericSettings GetSettingsForTimeAndWeather(ELight_TimeOfDay TimeOfDay, ELight_WeatherType Weather) const;
 
 protected:
-    UFUNCTION()
-    void UpdateDayNightCycle(float DeltaTime);
-
-    UFUNCTION()
-    void ConfigureDirectionalLight();
-
-    UFUNCTION()
-    void ConfigureSkyLight();
-
-    UFUNCTION()
-    void ConfigureHeightFog();
+    void UpdateLightingForTimeOfDay();
+    void UpdateWeatherEffects();
+    void InterpolateLightingSettings(const FLight_AtmosphericSettings& From, const FLight_AtmosphericSettings& To, float Alpha);
 
 private:
-    float CurrentCycleTime = 0.0f;
+    float DayNightCycleTimer = 0.0f;
+    ELight_WeatherType TargetWeatherType = ELight_WeatherType::Clear;
+    float WeatherTransitionTimer = 0.0f;
+    float WeatherTransitionDuration = 30.0f;
+    bool bIsTransitioningWeather = false;
 };
