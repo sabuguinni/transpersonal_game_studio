@@ -1,272 +1,313 @@
 #include "Audio_MetaSoundManager.h"
 #include "Components/AudioComponent.h"
-#include "Engine/World.h"
-#include "GameFramework/PlayerController.h"
-#include "Kismet/GameplayStatics.h"
+#include "Sound/SoundCue.h"
 #include "MetasoundSource.h"
+#include "Engine/Engine.h"
+#include "Kismet/GameplayStatics.h"
 
-AAudio_MetaSoundManager::AAudio_MetaSoundManager()
+UAudio_MetaSoundManager::UAudio_MetaSoundManager()
 {
-    PrimaryActorTick.bCanEverTick = true;
+    PrimaryComponentTick.bCanEverTick = true;
+    PrimaryComponentTick.TickInterval = 0.1f; // Update 10 times per second
 
-    // Create root component
-    RootSceneComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootComponent"));
-    RootComponent = RootSceneComponent;
-
-    // Create audio components
-    BiomeAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("BiomeAudioComponent"));
-    BiomeAudioComponent->SetupAttachment(RootComponent);
-    BiomeAudioComponent->bAutoActivate = false;
-
-    WeatherAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("WeatherAudioComponent"));
-    WeatherAudioComponent->SetupAttachment(RootComponent);
-    WeatherAudioComponent->bAutoActivate = false;
-
-    ThreatAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("ThreatAudioComponent"));
-    ThreatAudioComponent->SetupAttachment(RootComponent);
-    ThreatAudioComponent->bAutoActivate = false;
-
-    // Initialize state
+    // Initialize default values
     CurrentBiome = EAudio_BiomeType::Forest;
-    CurrentTimeOfDay = EAudio_TimeOfDay::Day;
-    CurrentWeather = EAudio_WeatherState::Clear;
-    bThreatActive = false;
-    ThreatLevel = 0.0f;
+    CurrentThreatLevel = EAudio_ThreatLevel::Safe;
+    BiomeTransitionTimer = 0.0f;
+    ThreatTransitionTimer = 0.0f;
+    bIsTransitioning = false;
 
-    // Initialize biome audio data
-    FAudio_BiomeAudioData ForestData;
-    ForestData.BaseVolume = 0.4f;
-    ForestData.FadeInTime = 3.0f;
-    ForestData.FadeOutTime = 2.0f;
-    BiomeAudioMap.Add(EAudio_BiomeType::Forest, ForestData);
-
-    FAudio_BiomeAudioData PlainsData;
-    PlainsData.BaseVolume = 0.3f;
-    PlainsData.FadeInTime = 2.5f;
-    PlainsData.FadeOutTime = 1.8f;
-    BiomeAudioMap.Add(EAudio_BiomeType::Plains, PlainsData);
-
-    FAudio_BiomeAudioData RiverData;
-    RiverData.BaseVolume = 0.6f;
-    RiverData.FadeInTime = 2.0f;
-    RiverData.FadeOutTime = 1.5f;
-    BiomeAudioMap.Add(EAudio_BiomeType::River, RiverData);
-
-    // Initialize threat audio data
-    TRexThreatAudio.TriggerDistance = 2000.0f;
-    TRexThreatAudio.MaxVolume = 0.9f;
-    TRexThreatAudio.FadeSpeed = 4.0f;
+    // Initialize audio components as null - will be created in BeginPlay
+    BiomeAudioComponent = nullptr;
+    ThreatAudioComponent = nullptr;
+    NarrativeAudioComponent = nullptr;
 }
 
-void AAudio_MetaSoundManager::BeginPlay()
+void UAudio_MetaSoundManager::BeginPlay()
 {
     Super::BeginPlay();
-
-    // Start with forest biome audio
-    UpdateBiomeAudio();
-    UpdateWeatherAudio();
-}
-
-void AAudio_MetaSoundManager::Tick(float DeltaTime)
-{
-    Super::Tick(DeltaTime);
-
-    // Update threat audio based on nearby threats
-    UpdateThreatAudio(DeltaTime);
-}
-
-void AAudio_MetaSoundManager::SetBiome(EAudio_BiomeType NewBiome)
-{
-    if (CurrentBiome != NewBiome)
-    {
-        CurrentBiome = NewBiome;
-        UpdateBiomeAudio();
-    }
-}
-
-void AAudio_MetaSoundManager::SetTimeOfDay(EAudio_TimeOfDay NewTimeOfDay)
-{
-    if (CurrentTimeOfDay != NewTimeOfDay)
-    {
-        CurrentTimeOfDay = NewTimeOfDay;
-        UpdateBiomeAudio(); // Biome audio changes with time of day
-    }
-}
-
-void AAudio_MetaSoundManager::SetWeather(EAudio_WeatherState NewWeather)
-{
-    if (CurrentWeather != NewWeather)
-    {
-        CurrentWeather = NewWeather;
-        UpdateWeatherAudio();
-    }
-}
-
-void AAudio_MetaSoundManager::TriggerThreatAudio(float ThreatDistance)
-{
-    bThreatActive = true;
     
-    // Calculate threat level based on distance
-    float NormalizedDistance = FMath::Clamp(ThreatDistance / TRexThreatAudio.TriggerDistance, 0.0f, 1.0f);
-    ThreatLevel = 1.0f - NormalizedDistance; // Closer = higher threat level
+    InitializeAudioComponents();
+    ConfigureBiomeAudio();
+    ConfigureThreatAudio();
 
-    if (ThreatAudioComponent && TRexThreatAudio.ThreatMetaSound)
+    UE_LOG(LogTemp, Log, TEXT("Audio_MetaSoundManager: Initialized with %d biome configs"), BiomeAudioConfigs.Num());
+}
+
+void UAudio_MetaSoundManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+{
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+
+    if (bIsTransitioning)
     {
-        if (!ThreatAudioComponent->IsPlaying())
-        {
-            ThreatAudioComponent->SetSound(TRexThreatAudio.ThreatMetaSound);
-            ThreatAudioComponent->Play();
-        }
-        
-        // Set volume based on threat level
-        float TargetVolume = ThreatLevel * TRexThreatAudio.MaxVolume;
-        ThreatAudioComponent->SetVolumeMultiplier(TargetVolume);
+        UpdateBiomeTransition(DeltaTime);
+        UpdateThreatTransition(DeltaTime);
     }
 }
 
-void AAudio_MetaSoundManager::StopThreatAudio()
+void UAudio_MetaSoundManager::InitializeAudioComponents()
 {
-    bThreatActive = false;
-    ThreatLevel = 0.0f;
-    
-    if (ThreatAudioComponent && ThreatAudioComponent->IsPlaying())
+    if (!GetOwner())
     {
-        ThreatAudioComponent->FadeOut(1.0f, 0.0f);
-    }
-}
-
-void AAudio_MetaSoundManager::UpdatePlayerFootsteps(bool bIsWalking, bool bIsRunning)
-{
-    // This would be called by the character movement component
-    // to trigger appropriate footstep sounds based on movement state
-    // Implementation depends on MetaSound setup for footsteps
-}
-
-void AAudio_MetaSoundManager::UpdateBiomeAudio()
-{
-    if (!BiomeAudioComponent)
+        UE_LOG(LogTemp, Error, TEXT("Audio_MetaSoundManager: No owner actor found"));
         return;
-
-    FAudio_BiomeAudioData* BiomeData = BiomeAudioMap.Find(CurrentBiome);
-    if (BiomeData && BiomeData->AmbientMetaSound)
-    {
-        // Stop current audio if playing
-        if (BiomeAudioComponent->IsPlaying())
-        {
-            BiomeAudioComponent->FadeOut(BiomeData->FadeOutTime, 0.0f);
-        }
-
-        // Set new MetaSound and play
-        BiomeAudioComponent->SetSound(BiomeData->AmbientMetaSound);
-        
-        // Adjust volume based on time of day
-        float TimeModifier = 1.0f;
-        switch (CurrentTimeOfDay)
-        {
-            case EAudio_TimeOfDay::Dawn:
-                TimeModifier = 0.7f;
-                break;
-            case EAudio_TimeOfDay::Day:
-                TimeModifier = 1.0f;
-                break;
-            case EAudio_TimeOfDay::Dusk:
-                TimeModifier = 0.8f;
-                break;
-            case EAudio_TimeOfDay::Night:
-                TimeModifier = 0.5f;
-                break;
-        }
-
-        float FinalVolume = BiomeData->BaseVolume * TimeModifier;
-        BiomeAudioComponent->SetVolumeMultiplier(0.0f);
-        BiomeAudioComponent->Play();
-        BiomeAudioComponent->FadeIn(BiomeData->FadeInTime, FinalVolume);
     }
+
+    // Create biome audio component
+    BiomeAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("BiomeAudioComponent"));
+    if (BiomeAudioComponent)
+    {
+        BiomeAudioComponent->SetAutoActivate(false);
+        BiomeAudioComponent->SetVolumeMultiplier(0.5f);
+        BiomeAudioComponent->bIsUISound = false;
+        BiomeAudioComponent->bAllowSpatialization = true;
+    }
+
+    // Create threat audio component
+    ThreatAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("ThreatAudioComponent"));
+    if (ThreatAudioComponent)
+    {
+        ThreatAudioComponent->SetAutoActivate(false);
+        ThreatAudioComponent->SetVolumeMultiplier(0.3f);
+        ThreatAudioComponent->bIsUISound = false;
+        ThreatAudioComponent->bAllowSpatialization = true;
+    }
+
+    // Create narrative audio component
+    NarrativeAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("NarrativeAudioComponent"));
+    if (NarrativeAudioComponent)
+    {
+        NarrativeAudioComponent->SetAutoActivate(false);
+        NarrativeAudioComponent->SetVolumeMultiplier(0.8f);
+        NarrativeAudioComponent->bIsUISound = true; // Narrative should not be spatialized
+        NarrativeAudioComponent->bAllowSpatialization = false;
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("Audio_MetaSoundManager: Audio components initialized"));
 }
 
-void AAudio_MetaSoundManager::UpdateWeatherAudio()
+void UAudio_MetaSoundManager::SetBiome(EAudio_BiomeType NewBiome)
 {
-    if (!WeatherAudioComponent)
+    if (NewBiome == CurrentBiome)
+    {
         return;
-
-    TObjectPtr<UMetaSoundSource>* WeatherSound = WeatherAudioMap.Find(CurrentWeather);
-    
-    if (WeatherSound && *WeatherSound)
-    {
-        if (WeatherAudioComponent->IsPlaying())
-        {
-            WeatherAudioComponent->FadeOut(1.0f, 0.0f);
-        }
-
-        WeatherAudioComponent->SetSound(*WeatherSound);
-        WeatherAudioComponent->SetVolumeMultiplier(0.0f);
-        WeatherAudioComponent->Play();
-        WeatherAudioComponent->FadeIn(2.0f, 0.6f);
     }
-    else if (CurrentWeather == EAudio_WeatherState::Clear)
-    {
-        // Stop weather audio for clear weather
-        if (WeatherAudioComponent->IsPlaying())
-        {
-            WeatherAudioComponent->FadeOut(2.0f, 0.0f);
-        }
-    }
+
+    EAudio_BiomeType PreviousBiome = CurrentBiome;
+    CurrentBiome = NewBiome;
+    bIsTransitioning = true;
+    BiomeTransitionTimer = 0.0f;
+
+    UE_LOG(LogTemp, Log, TEXT("Audio_MetaSoundManager: Transitioning from %d to %d"), 
+           static_cast<int32>(PreviousBiome), static_cast<int32>(NewBiome));
+
+    ConfigureBiomeAudio();
 }
 
-void AAudio_MetaSoundManager::UpdateThreatAudio(float DeltaTime)
+void UAudio_MetaSoundManager::SetThreatLevel(EAudio_ThreatLevel NewThreatLevel)
 {
-    if (!bThreatActive)
-        return;
-
-    // Check for nearby threats (T-Rex actors)
-    TArray<AActor*> FoundActors;
-    UGameplayStatics::GetAllActorsOfClass(GetWorld(), AActor::StaticClass(), FoundActors);
-    
-    bool bThreatNearby = false;
-    float ClosestThreatDistance = TRexThreatAudio.TriggerDistance;
-
-    // Get player location
-    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
-    if (!PlayerPawn)
-        return;
-
-    FVector PlayerLocation = PlayerPawn->GetActorLocation();
-
-    // Check for T-Rex actors
-    for (AActor* Actor : FoundActors)
+    if (NewThreatLevel == CurrentThreatLevel)
     {
-        if (Actor && Actor->GetName().Contains(TEXT("TRex")))
-        {
-            float Distance = FVector::Dist(PlayerLocation, Actor->GetActorLocation());
-            if (Distance <= TRexThreatAudio.TriggerDistance)
-            {
-                bThreatNearby = true;
-                ClosestThreatDistance = FMath::Min(ClosestThreatDistance, Distance);
-            }
-        }
+        return;
     }
 
-    if (bThreatNearby)
+    EAudio_ThreatLevel PreviousThreatLevel = CurrentThreatLevel;
+    CurrentThreatLevel = NewThreatLevel;
+    bIsTransitioning = true;
+    ThreatTransitionTimer = 0.0f;
+
+    UE_LOG(LogTemp, Log, TEXT("Audio_MetaSoundManager: Threat level changed from %d to %d"), 
+           static_cast<int32>(PreviousThreatLevel), static_cast<int32>(NewThreatLevel));
+
+    ConfigureThreatAudio();
+}
+
+void UAudio_MetaSoundManager::PlaySurvivalNarrative(int32 NarrativeIndex)
+{
+    if (!NarrativeAudioComponent || SurvivalNarrativeLines.Num() == 0)
     {
-        TriggerThreatAudio(ClosestThreatDistance);
+        UE_LOG(LogTemp, Warning, TEXT("Audio_MetaSoundManager: Cannot play survival narrative - component or lines missing"));
+        return;
+    }
+
+    if (NarrativeIndex >= 0 && NarrativeIndex < SurvivalNarrativeLines.Num())
+    {
+        if (SurvivalNarrativeLines[NarrativeIndex])
+        {
+            NarrativeAudioComponent->SetSound(SurvivalNarrativeLines[NarrativeIndex]);
+            NarrativeAudioComponent->Play();
+            UE_LOG(LogTemp, Log, TEXT("Audio_MetaSoundManager: Playing survival narrative %d"), NarrativeIndex);
+        }
     }
     else
     {
-        StopThreatAudio();
+        UE_LOG(LogTemp, Warning, TEXT("Audio_MetaSoundManager: Invalid narrative index %d"), NarrativeIndex);
     }
 }
 
-void AAudio_MetaSoundManager::CrossfadeAudio(UAudioComponent* FromComponent, UAudioComponent* ToComponent, float FadeTime)
+void UAudio_MetaSoundManager::PlayTribalDialogue(int32 DialogueIndex)
 {
-    if (FromComponent && FromComponent->IsPlaying())
+    if (!NarrativeAudioComponent || TribalDialogueLines.Num() == 0)
     {
-        FromComponent->FadeOut(FadeTime, 0.0f);
+        UE_LOG(LogTemp, Warning, TEXT("Audio_MetaSoundManager: Cannot play tribal dialogue - component or lines missing"));
+        return;
     }
 
-    if (ToComponent)
+    if (DialogueIndex >= 0 && DialogueIndex < TribalDialogueLines.Num())
     {
-        ToComponent->SetVolumeMultiplier(0.0f);
-        ToComponent->Play();
-        ToComponent->FadeIn(FadeTime, 1.0f);
+        if (TribalDialogueLines[DialogueIndex])
+        {
+            NarrativeAudioComponent->SetSound(TribalDialogueLines[DialogueIndex]);
+            NarrativeAudioComponent->Play();
+            UE_LOG(LogTemp, Log, TEXT("Audio_MetaSoundManager: Playing tribal dialogue %d"), DialogueIndex);
+        }
+    }
+    else
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Audio_MetaSoundManager: Invalid dialogue index %d"), DialogueIndex);
+    }
+}
+
+void UAudio_MetaSoundManager::StopNarrative()
+{
+    if (NarrativeAudioComponent && NarrativeAudioComponent->IsPlaying())
+    {
+        NarrativeAudioComponent->Stop();
+        UE_LOG(LogTemp, Log, TEXT("Audio_MetaSoundManager: Stopped narrative audio"));
+    }
+}
+
+void UAudio_MetaSoundManager::SetMetaSoundParameter(const FName& ParameterName, float Value)
+{
+    if (BiomeAudioComponent && BiomeAudioComponent->GetSound())
+    {
+        // Note: MetaSound parameter setting requires UE5.1+ specific API
+        // This is a placeholder for the actual MetaSound parameter interface
+        UE_LOG(LogTemp, Log, TEXT("Audio_MetaSoundManager: Setting MetaSound parameter %s to %f"), 
+               *ParameterName.ToString(), Value);
+    }
+}
+
+void UAudio_MetaSoundManager::SetBiomeIntensity(float Intensity)
+{
+    SetMetaSoundParameter(FName("BiomeIntensity"), FMath::Clamp(Intensity, 0.0f, 1.0f));
+}
+
+void UAudio_MetaSoundManager::SetThreatIntensity(float Intensity)
+{
+    SetMetaSoundParameter(FName("ThreatIntensity"), FMath::Clamp(Intensity, 0.0f, 1.0f));
+}
+
+void UAudio_MetaSoundManager::UpdateBiomeTransition(float DeltaTime)
+{
+    if (!BiomeAudioComponent)
+    {
+        return;
+    }
+
+    BiomeTransitionTimer += DeltaTime;
+
+    const FAudio_BiomeAudioConfig* CurrentConfig = BiomeAudioConfigs.Find(CurrentBiome);
+    if (!CurrentConfig)
+    {
+        return;
+    }
+
+    float TransitionProgress = FMath::Clamp(BiomeTransitionTimer / CurrentConfig->FadeInTime, 0.0f, 1.0f);
+    float NewVolume = FMath::Lerp(0.0f, CurrentConfig->BaseVolume, TransitionProgress);
+    
+    BiomeAudioComponent->SetVolumeMultiplier(NewVolume);
+
+    if (TransitionProgress >= 1.0f)
+    {
+        bIsTransitioning = false;
+        BiomeTransitionTimer = 0.0f;
+        UE_LOG(LogTemp, Log, TEXT("Audio_MetaSoundManager: Biome transition completed"));
+    }
+}
+
+void UAudio_MetaSoundManager::UpdateThreatTransition(float DeltaTime)
+{
+    if (!ThreatAudioComponent)
+    {
+        return;
+    }
+
+    ThreatTransitionTimer += DeltaTime;
+
+    // Simple threat audio fade based on threat level
+    float TargetVolume = 0.0f;
+    switch (CurrentThreatLevel)
+    {
+        case EAudio_ThreatLevel::Safe:
+            TargetVolume = 0.0f;
+            break;
+        case EAudio_ThreatLevel::Caution:
+            TargetVolume = 0.2f;
+            break;
+        case EAudio_ThreatLevel::Danger:
+            TargetVolume = 0.5f;
+            break;
+        case EAudio_ThreatLevel::Critical:
+            TargetVolume = 0.8f;
+            break;
+    }
+
+    float TransitionProgress = FMath::Clamp(ThreatTransitionTimer / 2.0f, 0.0f, 1.0f); // 2 second transition
+    float CurrentVolume = ThreatAudioComponent->GetVolumeMultiplier();
+    float NewVolume = FMath::Lerp(CurrentVolume, TargetVolume, TransitionProgress);
+    
+    ThreatAudioComponent->SetVolumeMultiplier(NewVolume);
+
+    if (TransitionProgress >= 1.0f)
+    {
+        ThreatTransitionTimer = 0.0f;
+    }
+}
+
+void UAudio_MetaSoundManager::ConfigureBiomeAudio()
+{
+    if (!BiomeAudioComponent)
+    {
+        return;
+    }
+
+    const FAudio_BiomeAudioConfig* Config = BiomeAudioConfigs.Find(CurrentBiome);
+    if (Config && Config->AmbientMetaSound)
+    {
+        BiomeAudioComponent->SetSound(Config->AmbientMetaSound);
+        BiomeAudioComponent->SetVolumeMultiplier(0.0f); // Start at 0 for transition
+        BiomeAudioComponent->Play();
+        UE_LOG(LogTemp, Log, TEXT("Audio_MetaSoundManager: Configured biome audio for type %d"), static_cast<int32>(CurrentBiome));
+    }
+    else
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Audio_MetaSoundManager: No audio config found for biome %d"), static_cast<int32>(CurrentBiome));
+    }
+}
+
+void UAudio_MetaSoundManager::ConfigureThreatAudio()
+{
+    if (!ThreatAudioComponent)
+    {
+        return;
+    }
+
+    UMetaSoundSource** ThreatSound = ThreatAudioSources.Find(CurrentThreatLevel);
+    if (ThreatSound && *ThreatSound)
+    {
+        ThreatAudioComponent->SetSound(*ThreatSound);
+        ThreatAudioComponent->SetVolumeMultiplier(0.0f); // Start at 0 for transition
+        ThreatAudioComponent->Play();
+        UE_LOG(LogTemp, Log, TEXT("Audio_MetaSoundManager: Configured threat audio for level %d"), static_cast<int32>(CurrentThreatLevel));
+    }
+    else
+    {
+        // Stop threat audio if no sound configured for this level
+        if (ThreatAudioComponent->IsPlaying())
+        {
+            ThreatAudioComponent->Stop();
+        }
+        UE_LOG(LogTemp, Log, TEXT("Audio_MetaSoundManager: No threat audio for level %d"), static_cast<int32>(CurrentThreatLevel));
     }
 }
