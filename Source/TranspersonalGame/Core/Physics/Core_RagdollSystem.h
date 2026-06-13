@@ -2,54 +2,50 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
-#include "Engine/World.h"
+#include "Engine/Engine.h"
 #include "Components/SkeletalMeshComponent.h"
-#include "Animation/AnimInstance.h"
-#include "PhysicsEngine/PhysicsConstraintComponent.h"
-#include "SharedTypes.h"
+#include "PhysicsEngine/PhysicsAsset.h"
+#include "Subsystems/GameInstanceSubsystem.h"
+#include "Core/Shared/SharedTypes.h"
 #include "Core_RagdollSystem.generated.h"
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FCore_RagdollState
+struct TRANSPERSONALGAME_API FCore_RagdollData
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadWrite, Category = "Ragdoll")
-    bool bIsRagdollActive = false;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll")
+    float ImpactForce = 1000.0f;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Ragdoll")
-    float RagdollDuration = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll")
+    float BlendTime = 0.5f;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Ragdoll")
-    float MaxRagdollTime = 10.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll")
+    bool bUsePhysicsBlend = true;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Ragdoll")
-    FVector ImpactForce = FVector::ZeroVector;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll")
+    FVector HitDirection = FVector::ZeroVector;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Ragdoll")
-    FVector ImpactLocation = FVector::ZeroVector;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll")
+    FName HitBoneName = NAME_None;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Ragdoll")
-    float RecoveryBlendTime = 2.0f;
-
-    FCore_RagdollState()
+    FCore_RagdollData()
     {
-        bIsRagdollActive = false;
-        RagdollDuration = 0.0f;
-        MaxRagdollTime = 10.0f;
-        ImpactForce = FVector::ZeroVector;
-        ImpactLocation = FVector::ZeroVector;
-        RecoveryBlendTime = 2.0f;
+        ImpactForce = 1000.0f;
+        BlendTime = 0.5f;
+        bUsePhysicsBlend = true;
+        HitDirection = FVector::ZeroVector;
+        HitBoneName = NAME_None;
     }
 };
 
 UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UCore_RagdollSystem : public UActorComponent
+class TRANSPERSONALGAME_API UCore_RagdollComponent : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    UCore_RagdollSystem();
+    UCore_RagdollComponent();
 
 protected:
     virtual void BeginPlay() override;
@@ -57,59 +53,84 @@ protected:
 public:
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    // Ragdoll activation/deactivation
     UFUNCTION(BlueprintCallable, Category = "Ragdoll")
-    void ActivateRagdoll(const FVector& ImpactForce, const FVector& ImpactLocation);
+    void ActivateRagdoll(const FCore_RagdollData& RagdollData);
 
     UFUNCTION(BlueprintCallable, Category = "Ragdoll")
     void DeactivateRagdoll();
 
     UFUNCTION(BlueprintCallable, Category = "Ragdoll")
-    void ForceRecovery();
-
-    // State queries
-    UFUNCTION(BlueprintPure, Category = "Ragdoll")
-    bool IsRagdollActive() const { return RagdollState.bIsRagdollActive; }
-
-    UFUNCTION(BlueprintPure, Category = "Ragdoll")
-    float GetRagdollDuration() const { return RagdollState.RagdollDuration; }
-
-    UFUNCTION(BlueprintPure, Category = "Ragdoll")
-    FCore_RagdollState GetRagdollState() const { return RagdollState; }
-
-    // Configuration
-    UFUNCTION(BlueprintCallable, Category = "Ragdoll")
-    void SetMaxRagdollTime(float NewMaxTime) { RagdollState.MaxRagdollTime = NewMaxTime; }
+    bool IsRagdollActive() const;
 
     UFUNCTION(BlueprintCallable, Category = "Ragdoll")
-    void SetRecoveryBlendTime(float NewBlendTime) { RagdollState.RecoveryBlendTime = NewBlendTime; }
+    void ApplyImpulseToRagdoll(const FVector& Impulse, const FName& BoneName = NAME_None);
+
+    UFUNCTION(BlueprintCallable, Category = "Ragdoll")
+    void SetRagdollPhysicsBlend(float BlendWeight);
 
 protected:
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ragdoll")
-    FCore_RagdollState RagdollState;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll")
-    float MinImpactForceForRagdoll = 500.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll")
-    float RagdollPhysicsBlend = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll")
-    bool bAutoRecovery = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll")
-    TArray<FName> CriticalBones;
-
-private:
-    UPROPERTY()
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
     USkeletalMeshComponent* SkeletalMeshComp;
 
-    UPROPERTY()
-    UAnimInstance* AnimInstance;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll Settings")
+    float MaxRagdollTime = 10.0f;
 
-    void InitializeRagdollSystem();
-    void UpdateRagdollPhysics(float DeltaTime);
-    void BlendToRecovery();
-    bool ShouldAutoRecover() const;
-    void ApplyImpactForce();
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll Settings")
+    float PhysicsBlendWeight = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll Settings")
+    bool bAutoDeactivate = true;
+
+private:
+    bool bIsRagdollActive = false;
+    float RagdollTimer = 0.0f;
+    FCore_RagdollData CurrentRagdollData;
+
+    void FindSkeletalMeshComponent();
+    void BlendToRagdoll();
+    void BlendFromRagdoll();
+};
+
+UCLASS()
+class TRANSPERSONALGAME_API UCore_RagdollManager : public UGameInstanceSubsystem
+{
+    GENERATED_BODY()
+
+public:
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
+
+    UFUNCTION(BlueprintCallable, Category = "Ragdoll Manager")
+    static UCore_RagdollManager* GetRagdollManager(const UObject* WorldContext);
+
+    UFUNCTION(BlueprintCallable, Category = "Ragdoll Manager")
+    void RegisterRagdollComponent(UCore_RagdollComponent* Component);
+
+    UFUNCTION(BlueprintCallable, Category = "Ragdoll Manager")
+    void UnregisterRagdollComponent(UCore_RagdollComponent* Component);
+
+    UFUNCTION(BlueprintCallable, Category = "Ragdoll Manager")
+    void DeactivateAllRagdolls();
+
+    UFUNCTION(BlueprintCallable, Category = "Ragdoll Manager")
+    int32 GetActiveRagdollCount() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Ragdoll Manager")
+    void SetGlobalRagdollSettings(float MaxTime, bool bAutoDeactivate);
+
+protected:
+    UPROPERTY()
+    TArray<UCore_RagdollComponent*> ActiveRagdolls;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Global Settings")
+    float GlobalMaxRagdollTime = 15.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Global Settings")
+    bool bGlobalAutoDeactivate = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Global Settings")
+    int32 MaxSimultaneousRagdolls = 20;
+
+private:
+    void CleanupInvalidComponents();
 };
