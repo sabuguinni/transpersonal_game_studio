@@ -1,115 +1,155 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/GameInstanceSubsystem.h"
-#include "SharedTypes.h"
+#include "Engine/World.h"
+#include "GameFramework/Actor.h"
+#include "Components/ActorComponent.h"
 #include "Build_IntegrationManager.generated.h"
 
+UENUM(BlueprintType)
+enum class EBuild_IntegrationStatus : uint8
+{
+    Unknown = 0,
+    Initializing = 1,
+    Ready = 2,
+    Warning = 3,
+    Error = 4,
+    Critical = 5
+};
+
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FBuild_ModuleStatus
+struct TRANSPERSONALGAME_API FBuild_SystemHealth
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Build")
-    FString ModuleName;
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    FString SystemName;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Build")
-    bool bIsCompiled;
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    EBuild_IntegrationStatus Status;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Build")
-    bool bIsLoaded;
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    float HealthScore;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Build")
-    int32 ClassCount;
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    FString LastError;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Build")
-    float LoadTime;
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    int32 ActorCount;
 
-    FBuild_ModuleStatus()
+    FBuild_SystemHealth()
     {
-        ModuleName = TEXT("");
-        bIsCompiled = false;
-        bIsLoaded = false;
-        ClassCount = 0;
-        LoadTime = 0.0f;
+        SystemName = TEXT("");
+        Status = EBuild_IntegrationStatus::Unknown;
+        HealthScore = 0.0f;
+        LastError = TEXT("");
+        ActorCount = 0;
     }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FBuild_IntegrationReport
+struct TRANSPERSONALGAME_API FBuild_PerformanceMetrics
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Build")
-    TArray<FBuild_ModuleStatus> ModuleStatuses;
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    int32 TotalActors;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Build")
-    int32 TotalActorCount;
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    int32 StaticMeshActors;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Build")
-    bool bActorCapEnforced;
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    int32 SkeletalMeshActors;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Build")
-    float TotalBuildTime;
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    int32 LightActors;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Build")
-    EBuild_ValidationResult ValidationResult;
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    int32 CustomActors;
 
-    FBuild_IntegrationReport()
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float MemoryUsageMB;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float FrameTimeMS;
+
+    FBuild_PerformanceMetrics()
     {
-        TotalActorCount = 0;
-        bActorCapEnforced = false;
-        TotalBuildTime = 0.0f;
-        ValidationResult = EBuild_ValidationResult::Pending;
+        TotalActors = 0;
+        StaticMeshActors = 0;
+        SkeletalMeshActors = 0;
+        LightActors = 0;
+        CustomActors = 0;
+        MemoryUsageMB = 0.0f;
+        FrameTimeMS = 0.0f;
     }
 };
 
-UCLASS(BlueprintType)
-class TRANSPERSONALGAME_API UBuild_IntegrationManager : public UGameInstanceSubsystem
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API UBuild_IntegrationManager : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
     UBuild_IntegrationManager();
 
-    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
-    virtual void Deinitialize() override;
-
-    UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    void RunFullIntegrationTest();
-
-    UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    void EnforceActorCap(int32 MaxActors = 8000);
-
-    UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    FBuild_IntegrationReport GetLastIntegrationReport() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    bool ValidateModuleIntegration(const FString& ModuleName);
-
-    UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    void RegisterModuleForValidation(const FString& ModuleName, const TArray<FString>& RequiredClasses);
-
-    UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    void ClearValidationCache();
-
 protected:
-    UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
-    FBuild_IntegrationReport LastReport;
+    virtual void BeginPlay() override;
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
-    TMap<FString, TArray<FString>> RegisteredModules;
+public:
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    EBuild_IntegrationStatus OverallStatus;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
-    bool bIntegrationInProgress;
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    TArray<FBuild_SystemHealth> SystemHealthReports;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
-    float LastValidationTime;
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    FBuild_PerformanceMetrics CurrentMetrics;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Integration")
+    int32 MaxActorCount;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Integration")
+    int32 MaxDinosaurCount;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Integration")
+    float HealthCheckInterval;
+
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    void PerformFullSystemCheck();
+
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    void ValidateModuleCompilation();
+
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    void EnforceActorLimits();
+
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    FBuild_PerformanceMetrics GetCurrentPerformanceMetrics();
+
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    EBuild_IntegrationStatus GetSystemStatus(const FString& SystemName);
+
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    void ReportSystemError(const FString& SystemName, const FString& ErrorMessage);
+
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    bool IsSystemHealthy(const FString& SystemName);
+
+    UFUNCTION(BlueprintCallable, Category = "Integration", CallInEditor = true)
+    void RunIntegrationTests();
 
 private:
-    void ValidateAllRegisteredModules();
-    void CheckActorCounts();
-    void GenerateIntegrationReport();
-    bool TestClassLoading(const FString& ClassName);
-    void CleanupExcessActors(int32 MaxActors);
+    UPROPERTY()
+    float LastHealthCheckTime;
+
+    UPROPERTY()
+    TMap<FString, float> SystemHealthScores;
+
+    void UpdateSystemHealth();
+    void CalculatePerformanceMetrics();
+    void CheckCriticalSystems();
+    void ValidateActorCounts();
+    void CleanupExcessActors();
 };
