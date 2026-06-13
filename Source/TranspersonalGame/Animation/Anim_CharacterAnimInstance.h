@@ -2,9 +2,10 @@
 
 #include "CoreMinimal.h"
 #include "Animation/AnimInstance.h"
-#include "Components/CapsuleComponent.h"
+#include "Engine/Engine.h"
+#include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
-#include "../SharedTypes.h"
+#include "Components/CapsuleComponent.h"
 #include "Anim_CharacterAnimInstance.generated.h"
 
 UCLASS(BlueprintType, Blueprintable)
@@ -15,91 +16,51 @@ class TRANSPERSONALGAME_API UAnim_CharacterAnimInstance : public UAnimInstance
 public:
     UAnim_CharacterAnimInstance();
 
-    virtual void NativeInitializeAnimation() override;
-    virtual void NativeUpdateAnimation(float DeltaTimeX) override;
-
 protected:
+    virtual void NativeInitializeAnimation() override;
+    virtual void NativeUpdateAnimation(float DeltaTime) override;
+
     // Movement State Variables
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Movement", meta = (AllowPrivateAccess = "true"))
+    UPROPERTY(BlueprintReadOnly, Category = "Movement", meta = (AllowPrivateAccess = "true"))
     float Speed;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Movement", meta = (AllowPrivateAccess = "true"))
+    UPROPERTY(BlueprintReadOnly, Category = "Movement", meta = (AllowPrivateAccess = "true"))
     float Direction;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Movement", meta = (AllowPrivateAccess = "true"))
+    UPROPERTY(BlueprintReadOnly, Category = "Movement", meta = (AllowPrivateAccess = "true"))
     bool bIsInAir;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Movement", meta = (AllowPrivateAccess = "true"))
+    UPROPERTY(BlueprintReadOnly, Category = "Movement", meta = (AllowPrivateAccess = "true"))
     bool bIsAccelerating;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Movement", meta = (AllowPrivateAccess = "true"))
+    UPROPERTY(BlueprintReadOnly, Category = "Movement", meta = (AllowPrivateAccess = "true"))
     bool bIsCrouching;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Movement", meta = (AllowPrivateAccess = "true"))
+    UPROPERTY(BlueprintReadOnly, Category = "Movement", meta = (AllowPrivateAccess = "true"))
     bool bIsRunning;
 
-    // Survival State Variables
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Survival", meta = (AllowPrivateAccess = "true"))
-    float HealthPercent;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Survival", meta = (AllowPrivateAccess = "true"))
-    float StaminaPercent;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Survival", meta = (AllowPrivateAccess = "true"))
-    float FearLevel;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Survival", meta = (AllowPrivateAccess = "true"))
-    ESurvivalState SurvivalState;
-
-    // Animation Blend Variables
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Animation", meta = (AllowPrivateAccess = "true"))
-    float IdleToWalkBlend;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Animation", meta = (AllowPrivateAccess = "true"))
-    float WalkToRunBlend;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Animation", meta = (AllowPrivateAccess = "true"))
-    float FearIntensity;
-
-    // IK Variables
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "IK", meta = (AllowPrivateAccess = "true"))
-    float LeftFootIKOffset;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "IK", meta = (AllowPrivateAccess = "true"))
-    float RightFootIKOffset;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "IK", meta = (AllowPrivateAccess = "true"))
-    FRotator LeftFootIKRotation;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "IK", meta = (AllowPrivateAccess = "true"))
-    FRotator RightFootIKRotation;
-
-    // Combat Variables
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat", meta = (AllowPrivateAccess = "true"))
-    bool bIsInCombat;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat", meta = (AllowPrivateAccess = "true"))
-    EWeaponType CurrentWeaponType;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat", meta = (AllowPrivateAccess = "true"))
-    bool bIsAttacking;
-
-private:
-    // Cached references
-    UPROPERTY()
+    // Character Reference
+    UPROPERTY(BlueprintReadOnly, Category = "Character", meta = (AllowPrivateAccess = "true"))
     class ACharacter* Character;
 
-    UPROPERTY()
-    class UCharacterMovementComponent* MovementComponent;
+    UPROPERTY(BlueprintReadOnly, Category = "Character", meta = (AllowPrivateAccess = "true"))
+    class UCharacterMovementComponent* CharacterMovement;
 
-    // Helper functions
-    void UpdateMovementVariables();
-    void UpdateSurvivalVariables();
-    void UpdateIKVariables(float DeltaTime);
-    void UpdateCombatVariables();
+    // Animation State Functions
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    void UpdateMovementState();
 
-    // IK Helper functions
-    float GetFootIKOffset(FName SocketName, float TraceDistance = 50.0f);
-    FRotator GetFootIKRotation(FName SocketName);
-    bool LineTraceFromSocket(FName SocketName, float TraceDistance, FHitResult& OutHit);
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    void UpdateAirborneState();
+
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    void UpdateCombatState();
+
+private:
+    // Internal calculation variables
+    FVector Velocity;
+    FVector LastFrameVelocity;
+    float GroundSpeed;
+    float AccelerationThreshold;
+    float RunSpeedThreshold;
 };
