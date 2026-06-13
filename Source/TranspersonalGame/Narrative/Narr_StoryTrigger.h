@@ -3,50 +3,51 @@
 #include "CoreMinimal.h"
 #include "Engine/TriggerBox.h"
 #include "Components/AudioComponent.h"
-#include "SharedTypes.h"
+#include "../SharedTypes.h"
 #include "Narr_StoryTrigger.generated.h"
 
 UENUM(BlueprintType)
 enum class ENarr_TriggerType : uint8
 {
-    CaveDiscovery,
-    HuntingGround,
-    TribalMemory,
-    DangerWarning,
-    SafeZone
+    OpeningNarrative    UMETA(DisplayName = "Opening Narrative"),
+    DinosaurEncounter   UMETA(DisplayName = "Dinosaur Encounter"),
+    LocationDiscovery   UMETA(DisplayName = "Location Discovery"),
+    QuestProgression    UMETA(DisplayName = "Quest Progression"),
+    DangerWarning       UMETA(DisplayName = "Danger Warning"),
+    LoreReveal          UMETA(DisplayName = "Lore Reveal")
 };
 
 USTRUCT(BlueprintType)
-struct FNarr_StoryData
+struct TRANSPERSONALGAME_API FNarr_NarrativeEvent
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    FString StoryTitle;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    FString EventName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
     FString NarrativeText;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    FString CharacterName;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    FString AudioFilePath;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    float TriggerRadius;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    float DisplayDuration;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    bool bOneTimeOnly;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    bool bPlayOnce;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    bool bRequiresPlayerInput;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    ENarr_TriggerType TriggerType;
 
-    FNarr_StoryData()
+    FNarr_NarrativeEvent()
     {
-        StoryTitle = TEXT("Untitled Story");
-        NarrativeText = TEXT("An ancient tale unfolds...");
-        CharacterName = TEXT("Narrator");
-        TriggerRadius = 200.0f;
-        bOneTimeOnly = true;
-        bRequiresPlayerInput = false;
+        EventName = TEXT("");
+        NarrativeText = TEXT("");
+        AudioFilePath = TEXT("");
+        DisplayDuration = 5.0f;
+        bPlayOnce = true;
+        TriggerType = ENarr_TriggerType::OpeningNarrative;
     }
 };
 
@@ -62,43 +63,39 @@ protected:
     virtual void BeginPlay() override;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    ENarr_TriggerType TriggerType;
+    FNarr_NarrativeEvent NarrativeEvent;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    FNarr_StoryData StoryData;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
+    bool bRequiresLineOfSight;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
+    float CooldownTime;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    class UAudioComponent* AudioComponent;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    class USoundBase* NarrativeSound;
-
-    UPROPERTY(BlueprintReadOnly, Category = "State")
-    bool bHasBeenTriggered;
-
-    UPROPERTY(BlueprintReadOnly, Category = "State")
-    float LastTriggerTime;
+    class UAudioComponent* NarrativeAudio;
 
 public:
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void TriggerStoryEvent(AActor* TriggeringActor);
+    void TriggerNarrativeEvent(class APawn* TriggeringPawn);
 
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void PlayNarrativeAudio();
+    void ResetTrigger();
 
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void SetStoryData(const FNarr_StoryData& NewStoryData);
+    UFUNCTION(BlueprintImplementableEvent, Category = "Events")
+    void OnNarrativeTriggered(const FString& EventName, const FString& NarrativeText);
 
-    UFUNCTION(BlueprintPure, Category = "Narrative")
-    bool CanTrigger() const;
-
-    UFUNCTION(BlueprintImplementableEvent, Category = "Narrative")
-    void OnStoryTriggered(const FNarr_StoryData& Story);
+    UFUNCTION(BlueprintImplementableEvent, Category = "Events")
+    void OnNarrativeCompleted();
 
 protected:
     UFUNCTION()
-    void OnOverlapBegin(UPrimitiveComponent* OverlappedComp, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult);
+    void OnActorBeginOverlap(AActor* OverlappedActor, AActor* OtherActor);
 
-    UFUNCTION()
-    void OnOverlapEnd(UPrimitiveComponent* OverlappedComp, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex);
+private:
+    bool bHasTriggered;
+    float LastTriggerTime;
+    
+    void InitializeDefaultNarratives();
+    bool CheckLineOfSight(APawn* PlayerPawn);
+    void PlayNarrativeAudio();
 };
