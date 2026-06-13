@@ -1,343 +1,375 @@
 #include "Build_IntegrationValidator.h"
-#include "Engine/World.h"
 #include "Engine/Engine.h"
+#include "Engine/World.h"
 #include "EngineUtils.h"
-#include "GameFramework/Actor.h"
-#include "GameFramework/PlayerStart.h"
-#include "Components/DirectionalLightComponent.h"
-#include "Components/SkyLightComponent.h"
-#include "Components/SkyAtmosphereComponent.h"
-#include "Components/ExponentialHeightFogComponent.h"
+#include "TimerManager.h"
+#include "UObject/UObjectGlobals.h"
 
-UBuild_IntegrationValidator::UBuild_IntegrationValidator()
+ABuild_IntegrationValidator::ABuild_IntegrationValidator()
 {
-    PrimaryComponentTick.bCanEverTick = false;
-    
-    MaxTotalActors = 8000;
-    MaxDinosaurActors = 150;
-    
-    CoreSystemClasses = {
-        TEXT("TranspersonalGameState"),
-        TEXT("TranspersonalCharacter"),
-        TEXT("PCGWorldGenerator"),
-        TEXT("FoliageManager"),
-        TEXT("CrowdSimulationManager"),
-        TEXT("ProceduralWorldManager"),
-        TEXT("BuildIntegrationManager")
-    };
-    
-    EssentialActorTypes = {
-        TEXT("PlayerStart"),
-        TEXT("DirectionalLight"),
-        TEXT("SkyLight"),
-        TEXT("SkyAtmosphere"),
-        TEXT("ExponentialHeightFog")
-    };
+    PrimaryActorTick.bCanEverTick = false;
+
+    RootSceneComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootSceneComponent"));
+    RootComponent = RootSceneComponent;
+
+    // Initialize default metrics
+    CurrentMetrics.TotalActors = 0;
+    CurrentMetrics.DinosaurCount = 0;
+    CurrentMetrics.EnvironmentCount = 0;
+    CurrentMetrics.CharacterCount = 0;
+    CurrentMetrics.LightingCount = 0;
+    CurrentMetrics.AudioCount = 0;
+    CurrentMetrics.VFXCount = 0;
+    CurrentMetrics.QACount = 0;
+    CurrentMetrics.OverallHealth = EBuild_SystemHealth::Healthy;
+    CurrentMetrics.PerformanceScore = 100.0f;
 }
 
-FBuild_IntegrationReport UBuild_IntegrationValidator::ValidateAllSystems()
+void ABuild_IntegrationValidator::BeginPlay()
 {
-    FBuild_IntegrationReport Report;
-    
-    UWorld* World = GetWorld();
-    if (!World)
+    Super::BeginPlay();
+
+    if (bAutoValidateOnBeginPlay)
     {
-        UE_LOG(LogTemp, Error, TEXT("Build_IntegrationValidator: No valid world found"));
-        return Report;
+        ValidateAllSystems();
     }
-    
-    // Count total actors
-    Report.TotalActors = 0;
-    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+
+    // Set up periodic validation
+    if (ValidationInterval > 0.0f)
     {
-        Report.TotalActors++;
+        GetWorldTimerManager().SetTimer(
+            ValidationTimerHandle,
+            this,
+            &ABuild_IntegrationValidator::PerformPeriodicValidation,
+            ValidationInterval,
+            true
+        );
     }
-    
-    // Validate each core system
-    for (const FString& SystemClass : CoreSystemClasses)
-    {
-        FBuild_SystemReport SystemReport = ValidateSystem(SystemClass, SystemClass);
-        Report.SystemReports.Add(SystemReport);
-        
-        if (SystemReport.Status == EBuild_SystemStatus::Functional)
-        {
-            Report.ReadySystems++;
-        }
-    }
-    
-    // Calculate integration score
-    Report.IntegrationScore = CalculateIntegrationScore();
-    Report.bBuildReady = Report.IntegrationScore >= 70.0f;
-    
-    UE_LOG(LogTemp, Warning, TEXT("Integration Report: %d/%d systems ready, Score: %.1f, Total Actors: %d"), 
-           Report.ReadySystems, CoreSystemClasses.Num(), Report.IntegrationScore, Report.TotalActors);
-    
-    return Report;
 }
 
-bool UBuild_IntegrationValidator::ValidateSystemClasses()
+void ABuild_IntegrationValidator::ValidateAllSystems()
 {
+    ClearValidationResults();
+
+    UE_LOG(LogTemp, Warning, TEXT("Integration Validator: Starting system validation"));
+
+    // Validate module compilation
+    if (!ValidateModuleCompilation())
+    {
+        ValidationErrors.Add(TEXT("Module compilation validation failed"));
+    }
+
+    // Validate actor counts and system health
+    ValidateSystemActorCounts();
+    ValidateEssentialSystems();
+    ValidatePerformanceMetrics();
+
+    // Validate cross-system dependencies
+    if (!ValidateCrossSystemDependencies())
+    {
+        ValidationWarnings.Add(TEXT("Cross-system dependency issues detected"));
+    }
+
+    // Calculate performance score
+    CurrentMetrics.PerformanceScore = CalculatePerformanceScore();
+
+    // Update overall health status
+    UpdateHealthStatus();
+
+    UE_LOG(LogTemp, Warning, TEXT("Integration Validator: Validation complete - Health: %d, Score: %.1f"), 
+           (int32)CurrentMetrics.OverallHealth, CurrentMetrics.PerformanceScore);
+}
+
+bool ABuild_IntegrationValidator::ValidateModuleCompilation()
+{
+    // Test loading of core module classes
+    TArray<FString> CoreClasses = {
+        TEXT("/Script/TranspersonalGame.TranspersonalGameState"),
+        TEXT("/Script/TranspersonalGame.TranspersonalCharacter"),
+        TEXT("/Script/TranspersonalGame.PCGWorldGenerator"),
+        TEXT("/Script/TranspersonalGame.FoliageManager"),
+        TEXT("/Script/TranspersonalGame.CrowdSimulationManager")
+    };
+
     int32 LoadedClasses = 0;
-    
-    for (const FString& ClassName : CoreSystemClasses)
+    for (const FString& ClassName : CoreClasses)
     {
-        FString ClassPath = FString::Printf(TEXT("/Script/TranspersonalGame.%s"), *ClassName);
-        UClass* LoadedClass = LoadClass<UObject>(nullptr, *ClassPath);
-        
+        UClass* LoadedClass = LoadClass<UObject>(nullptr, *ClassName);
         if (LoadedClass)
         {
             LoadedClasses++;
-            UE_LOG(LogTemp, Log, TEXT("Class loaded successfully: %s"), *ClassName);
+            UE_LOG(LogTemp, Log, TEXT("Integration Validator: Successfully loaded class %s"), *ClassName);
         }
         else
         {
-            UE_LOG(LogTemp, Warning, TEXT("Failed to load class: %s"), *ClassName);
+            ValidationErrors.Add(FString::Printf(TEXT("Failed to load core class: %s"), *ClassName));
         }
     }
-    
-    return LoadedClasses >= (CoreSystemClasses.Num() * 0.7f); // 70% threshold
+
+    return LoadedClasses == CoreClasses.Num();
 }
 
-bool UBuild_IntegrationValidator::ValidateActorCounts()
+bool ABuild_IntegrationValidator::ValidateCrossSystemDependencies()
 {
     UWorld* World = GetWorld();
-    if (!World) return false;
-    
-    int32 TotalActors = 0;
-    int32 DinosaurActors = 0;
-    
-    TArray<FString> DinosaurLabels = {
-        TEXT("trex"), TEXT("veloci"), TEXT("tricera"), TEXT("brachi"),
-        TEXT("ankylo"), TEXT("parasauro"), TEXT("pachy"), TEXT("proto"), TEXT("tsinta")
-    };
-    
-    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+    if (!World)
     {
-        TotalActors++;
-        
-        FString ActorLabel = ActorItr->GetActorLabel().ToLower();
-        for (const FString& DinoLabel : DinosaurLabels)
-        {
-            if (ActorLabel.Contains(DinoLabel))
-            {
-                DinosaurActors++;
-                break;
-            }
-        }
+        ValidationErrors.Add(TEXT("World reference is null"));
+        return false;
     }
-    
-    bool bCountsValid = (TotalActors <= MaxTotalActors) && (DinosaurActors <= MaxDinosaurActors);
-    
-    UE_LOG(LogTemp, Warning, TEXT("Actor Validation: Total=%d (max %d), Dinosaurs=%d (max %d), Valid=%s"),
-           TotalActors, MaxTotalActors, DinosaurActors, MaxDinosaurActors, 
-           bCountsValid ? TEXT("YES") : TEXT("NO"));
-    
-    return bCountsValid;
-}
 
-bool UBuild_IntegrationValidator::ValidateCrossSystemIntegration()
-{
-    UWorld* World = GetWorld();
-    if (!World) return false;
-    
-    // Check for essential actors
-    int32 EssentialFound = 0;
-    
-    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
-    {
-        FString ActorClass = ActorItr->GetClass()->GetName();
-        
-        for (const FString& EssentialType : EssentialActorTypes)
-        {
-            if (ActorClass.Contains(EssentialType))
-            {
-                EssentialFound++;
-                break;
-            }
-        }
-    }
-    
-    bool bIntegrationValid = EssentialFound >= (EssentialActorTypes.Num() * 0.8f); // 80% threshold
-    
-    UE_LOG(LogTemp, Warning, TEXT("Cross-System Integration: %d/%d essential actors found, Valid=%s"),
-           EssentialFound, EssentialActorTypes.Num(), bIntegrationValid ? TEXT("YES") : TEXT("NO"));
-    
-    return bIntegrationValid;
-}
+    // Check for essential actor dependencies
+    bool bHasPlayerStart = false;
+    bool bHasLighting = false;
+    bool bHasCharacter = false;
 
-float UBuild_IntegrationValidator::CalculateIntegrationScore()
-{
-    float Score = 0.0f;
-    
-    // System class validation (40 points)
-    if (ValidateSystemClasses())
-    {
-        Score += 40.0f;
-    }
-    
-    // Actor count validation (30 points)
-    if (ValidateActorCounts())
-    {
-        Score += 30.0f;
-    }
-    
-    // Cross-system integration (30 points)
-    if (ValidateCrossSystemIntegration())
-    {
-        Score += 30.0f;
-    }
-    
-    return FMath::Clamp(Score, 0.0f, 100.0f);
-}
-
-void UBuild_IntegrationValidator::EnforceActorCaps()
-{
-    UWorld* World = GetWorld();
-    if (!World) return;
-    
-    TArray<AActor*> AllActors;
-    TArray<AActor*> DinosaurActors;
-    TArray<AActor*> EssentialActors;
-    
-    TArray<FString> DinosaurLabels = {
-        TEXT("trex"), TEXT("veloci"), TEXT("tricera"), TEXT("brachi"),
-        TEXT("ankylo"), TEXT("parasauro"), TEXT("pachy"), TEXT("proto"), TEXT("tsinta")
-    };
-    
-    // Categorize actors
     for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
     {
         AActor* Actor = *ActorItr;
-        AllActors.Add(Actor);
-        
+        if (!Actor) continue;
+
         FString ActorLabel = Actor->GetActorLabel().ToLower();
-        FString ActorClass = Actor->GetClass()->GetName().ToLower();
         
-        // Check if dinosaur
-        bool bIsDinosaur = false;
-        for (const FString& DinoLabel : DinosaurLabels)
+        if (ActorLabel.Contains(TEXT("playerstart")))
+        {
+            bHasPlayerStart = true;
+        }
+        else if (ActorLabel.Contains(TEXT("light")) || ActorLabel.Contains(TEXT("sun")))
+        {
+            bHasLighting = true;
+        }
+        else if (ActorLabel.Contains(TEXT("character")) || ActorLabel.Contains(TEXT("player")))
+        {
+            bHasCharacter = true;
+        }
+    }
+
+    if (!bHasPlayerStart)
+    {
+        ValidationErrors.Add(TEXT("No PlayerStart found in level"));
+    }
+    if (!bHasLighting)
+    {
+        ValidationWarnings.Add(TEXT("No lighting actors found"));
+    }
+    if (!bHasCharacter)
+    {
+        ValidationWarnings.Add(TEXT("No character actors found"));
+    }
+
+    return bHasPlayerStart && bHasLighting;
+}
+
+float ABuild_IntegrationValidator::CalculatePerformanceScore()
+{
+    float Score = 100.0f;
+
+    // Penalize for too many actors
+    if (CurrentMetrics.TotalActors > 8000)
+    {
+        Score -= 30.0f;
+    }
+    else if (CurrentMetrics.TotalActors > 5000)
+    {
+        Score -= 15.0f;
+    }
+
+    // Penalize for too few essential actors
+    if (CurrentMetrics.DinosaurCount < 5)
+    {
+        Score -= 20.0f;
+    }
+    if (CurrentMetrics.EnvironmentCount < 50)
+    {
+        Score -= 10.0f;
+    }
+    if (CurrentMetrics.LightingCount < 2)
+    {
+        Score -= 15.0f;
+    }
+
+    // Bonus for good system balance
+    if (CurrentMetrics.DinosaurCount >= 10 && CurrentMetrics.DinosaurCount <= 150)
+    {
+        Score += 5.0f;
+    }
+    if (CurrentMetrics.EnvironmentCount >= 100 && CurrentMetrics.EnvironmentCount <= 1000)
+    {
+        Score += 5.0f;
+    }
+
+    return FMath::Clamp(Score, 0.0f, 100.0f);
+}
+
+void ABuild_IntegrationValidator::ValidateSystemActorCounts()
+{
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        ValidationErrors.Add(TEXT("World reference is null during actor count validation"));
+        return;
+    }
+
+    // Reset counters
+    CurrentMetrics.TotalActors = 0;
+    CurrentMetrics.DinosaurCount = 0;
+    CurrentMetrics.EnvironmentCount = 0;
+    CurrentMetrics.CharacterCount = 0;
+    CurrentMetrics.LightingCount = 0;
+    CurrentMetrics.AudioCount = 0;
+    CurrentMetrics.VFXCount = 0;
+    CurrentMetrics.QACount = 0;
+
+    TArray<FString> DinoLabels = {TEXT("trex"), TEXT("veloci"), TEXT("tricera"), TEXT("brachi"), TEXT("ankylo"), TEXT("parasauro")};
+    TArray<FString> EnvLabels = {TEXT("tree"), TEXT("rock"), TEXT("grass"), TEXT("bush"), TEXT("flower"), TEXT("plant")};
+    TArray<FString> LightLabels = {TEXT("light"), TEXT("sun"), TEXT("sky"), TEXT("fog")};
+
+    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+    {
+        AActor* Actor = *ActorItr;
+        if (!Actor) continue;
+
+        CurrentMetrics.TotalActors++;
+        FString ActorLabel = Actor->GetActorLabel().ToLower();
+
+        // Categorize actors
+        bool bCategorized = false;
+        for (const FString& DinoLabel : DinoLabels)
         {
             if (ActorLabel.Contains(DinoLabel))
             {
-                DinosaurActors.Add(Actor);
-                bIsDinosaur = true;
+                CurrentMetrics.DinosaurCount++;
+                bCategorized = true;
                 break;
             }
         }
-        
-        // Check if essential
-        if (!bIsDinosaur)
+
+        if (!bCategorized)
         {
-            for (const FString& EssentialType : EssentialActorTypes)
+            for (const FString& EnvLabel : EnvLabels)
             {
-                if (ActorClass.Contains(EssentialType.ToLower()))
+                if (ActorLabel.Contains(EnvLabel))
                 {
-                    EssentialActors.Add(Actor);
+                    CurrentMetrics.EnvironmentCount++;
+                    bCategorized = true;
                     break;
                 }
             }
         }
-    }
-    
-    // Enforce dinosaur cap
-    if (DinosaurActors.Num() > MaxDinosaurActors)
-    {
-        DinosaurActors.Sort([](const AActor& A, const AActor& B) {
-            return FMath::RandBool();
-        });
-        
-        for (int32 i = MaxDinosaurActors; i < DinosaurActors.Num(); i++)
+
+        if (!bCategorized)
         {
-            if (DinosaurActors[i] && IsValid(DinosaurActors[i]))
+            for (const FString& LightLabel : LightLabels)
             {
-                DinosaurActors[i]->Destroy();
+                if (ActorLabel.Contains(LightLabel))
+                {
+                    CurrentMetrics.LightingCount++;
+                    bCategorized = true;
+                    break;
+                }
             }
         }
-        
-        UE_LOG(LogTemp, Warning, TEXT("Enforced dinosaur cap: removed %d excess dinosaurs"), 
-               DinosaurActors.Num() - MaxDinosaurActors);
-    }
-    
-    // Enforce total actor cap
-    if (AllActors.Num() > MaxTotalActors)
-    {
-        TArray<AActor*> NonEssentialActors;
-        for (AActor* Actor : AllActors)
+
+        if (!bCategorized)
         {
-            if (!EssentialActors.Contains(Actor))
+            if (ActorLabel.Contains(TEXT("character")) || ActorLabel.Contains(TEXT("player")))
             {
-                NonEssentialActors.Add(Actor);
+                CurrentMetrics.CharacterCount++;
+            }
+            else if (ActorLabel.Contains(TEXT("audio")) || ActorLabel.Contains(TEXT("sound")))
+            {
+                CurrentMetrics.AudioCount++;
+            }
+            else if (ActorLabel.Contains(TEXT("vfx")) || ActorLabel.Contains(TEXT("particle")))
+            {
+                CurrentMetrics.VFXCount++;
+            }
+            else if (ActorLabel.Contains(TEXT("qa_")) || ActorLabel.Contains(TEXT("test")))
+            {
+                CurrentMetrics.QACount++;
             }
         }
-        
-        NonEssentialActors.Sort([](const AActor& A, const AActor& B) {
-            return FMath::RandBool();
-        });
-        
-        int32 ActorsToRemove = AllActors.Num() - MaxTotalActors;
-        for (int32 i = 0; i < FMath::Min(ActorsToRemove, NonEssentialActors.Num()); i++)
-        {
-            if (NonEssentialActors[i] && IsValid(NonEssentialActors[i]))
-            {
-                NonEssentialActors[i]->Destroy();
-            }
-        }
-        
-        UE_LOG(LogTemp, Warning, TEXT("Enforced total actor cap: removed %d excess actors"), ActorsToRemove);
     }
 }
 
-FBuild_SystemReport UBuild_IntegrationValidator::ValidateSystem(const FString& SystemName, const FString& ClassName)
+void ABuild_IntegrationValidator::ValidateEssentialSystems()
 {
-    FBuild_SystemReport Report;
-    Report.SystemName = SystemName;
-    
-    FString ClassPath = FString::Printf(TEXT("/Script/TranspersonalGame.%s"), *ClassName);
-    UClass* SystemClass = LoadClass<UObject>(nullptr, *ClassPath);
-    
-    if (!SystemClass)
+    // Check for minimum required actors in each system
+    if (CurrentMetrics.DinosaurCount == 0)
     {
-        Report.Status = EBuild_SystemStatus::NotLoaded;
-        Report.ErrorMessage = TEXT("Class not found");
-        return Report;
+        ValidationErrors.Add(TEXT("No dinosaur actors found - critical for gameplay"));
     }
-    
-    Report.Status = EBuild_SystemStatus::Loaded;
-    
-    // Count actors of this type
-    UWorld* World = GetWorld();
-    if (World)
+    else if (CurrentMetrics.DinosaurCount < 5)
     {
-        for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
-        {
-            if (ActorItr->GetClass() == SystemClass)
-            {
-                Report.ActorCount++;
-            }
-        }
-        
-        if (Report.ActorCount > 0)
-        {
-            Report.Status = EBuild_SystemStatus::Functional;
-        }
+        ValidationWarnings.Add(TEXT("Low dinosaur count - may impact gameplay variety"));
     }
-    
-    return Report;
+
+    if (CurrentMetrics.EnvironmentCount < 20)
+    {
+        ValidationWarnings.Add(TEXT("Low environment actor count - world may feel empty"));
+    }
+
+    if (CurrentMetrics.LightingCount == 0)
+    {
+        ValidationErrors.Add(TEXT("No lighting actors found - level will be dark"));
+    }
+
+    if (CurrentMetrics.CharacterCount == 0)
+    {
+        ValidationWarnings.Add(TEXT("No character actors found - may indicate missing player setup"));
+    }
 }
 
-int32 UBuild_IntegrationValidator::CountActorsByType(const FString& ActorType)
+void ABuild_IntegrationValidator::ValidatePerformanceMetrics()
 {
-    UWorld* World = GetWorld();
-    if (!World) return 0;
-    
-    int32 Count = 0;
-    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+    if (CurrentMetrics.TotalActors > 8000)
     {
-        if (ActorItr->GetClass()->GetName().Contains(ActorType))
-        {
-            Count++;
-        }
+        ValidationWarnings.Add(FString::Printf(TEXT("High actor count (%d) may impact performance"), CurrentMetrics.TotalActors));
     }
-    
-    return Count;
+
+    if (CurrentMetrics.DinosaurCount > 150)
+    {
+        ValidationWarnings.Add(FString::Printf(TEXT("High dinosaur count (%d) may impact AI performance"), CurrentMetrics.DinosaurCount));
+    }
+}
+
+void ABuild_IntegrationValidator::UpdateHealthStatus()
+{
+    if (ValidationErrors.Num() > 0)
+    {
+        CurrentMetrics.OverallHealth = EBuild_SystemHealth::Critical;
+    }
+    else if (ValidationWarnings.Num() > 3)
+    {
+        CurrentMetrics.OverallHealth = EBuild_SystemHealth::Degraded;
+    }
+    else if (ValidationWarnings.Num() > 0)
+    {
+        CurrentMetrics.OverallHealth = EBuild_SystemHealth::Healthy;
+    }
+    else
+    {
+        CurrentMetrics.OverallHealth = EBuild_SystemHealth::Healthy;
+    }
+
+    // Additional health checks based on performance score
+    if (CurrentMetrics.PerformanceScore < 50.0f)
+    {
+        CurrentMetrics.OverallHealth = EBuild_SystemHealth::Critical;
+    }
+    else if (CurrentMetrics.PerformanceScore < 70.0f && CurrentMetrics.OverallHealth == EBuild_SystemHealth::Healthy)
+    {
+        CurrentMetrics.OverallHealth = EBuild_SystemHealth::Degraded;
+    }
+}
+
+void ABuild_IntegrationValidator::ClearValidationResults()
+{
+    ValidationErrors.Empty();
+    ValidationWarnings.Empty();
+}
+
+void ABuild_IntegrationValidator::PerformPeriodicValidation()
+{
+    ValidateAllSystems();
 }
