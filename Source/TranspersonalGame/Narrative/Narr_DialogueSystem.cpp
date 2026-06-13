@@ -1,191 +1,233 @@
 #include "Narr_DialogueSystem.h"
-#include "Engine/DataTable.h"
 #include "Engine/World.h"
-#include "GameFramework/Actor.h"
-#include "TranspersonalGame.h"
+#include "TimerManager.h"
 
 UNarr_DialogueSystem::UNarr_DialogueSystem()
 {
+    PrimaryComponentTick.bCanEverTick = false;
+    DefaultDialogueDuration = 4.0f;
+    bAutoAdvanceDialogue = true;
     bDialogueActive = false;
-    CurrentSpeaker = nullptr;
-    CurrentListener = nullptr;
-    DialogueDataTable = nullptr;
+    CurrentDialogueIndex = 0;
+    CurrentSpeaker = TEXT("");
+    CurrentDialogue = TEXT("");
+    ActiveSequenceID = TEXT("");
 }
 
-void UNarr_DialogueSystem::Initialize(FSubsystemCollectionBase& Collection)
+void UNarr_DialogueSystem::BeginPlay()
 {
-    Super::Initialize(Collection);
+    Super::BeginPlay();
     
-    UE_LOG(LogTranspersonalGame, Log, TEXT("Narrative Dialogue System initialized"));
-    
-    bDialogueActive = false;
-    CurrentDialogue = FNarr_DialogueEntry();
-    RegisteredDialogueActors.Empty();
+    // Register default dialogue sequences
+    RegisterTribalDialogues();
+    RegisterSurvivalDialogues();
+    RegisterHuntDialogues();
 }
 
-bool UNarr_DialogueSystem::StartDialogue(const FString& DialogueID, AActor* Speaker, AActor* Listener)
+void UNarr_DialogueSystem::StartDialogueSequence(const FString& SequenceID)
 {
-    if (!Speaker || !Listener)
-    {
-        UE_LOG(LogTranspersonalGame, Warning, TEXT("Cannot start dialogue: Invalid speaker or listener"));
-        return false;
-    }
-
     if (bDialogueActive)
     {
-        UE_LOG(LogTranspersonalGame, Warning, TEXT("Cannot start dialogue: Another dialogue is already active"));
-        return false;
+        EndDialogue();
     }
 
-    if (!LoadDialogueEntry(DialogueID))
+    // Find the requested sequence
+    FNarr_DialogueSequence* FoundSequence = nullptr;
+    for (FNarr_DialogueSequence& Sequence : DialogueSequences)
     {
-        UE_LOG(LogTranspersonalGame, Warning, TEXT("Cannot start dialogue: Failed to load dialogue entry %s"), *DialogueID);
-        return false;
+        if (Sequence.SequenceID == SequenceID)
+        {
+            FoundSequence = &Sequence;
+            break;
+        }
     }
 
-    CurrentSpeaker = Speaker;
-    CurrentListener = Listener;
+    if (!FoundSequence || FoundSequence->DialogueEntries.Num() == 0)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Dialogue sequence not found or empty: %s"), *SequenceID);
+        return;
+    }
+
+    ActiveSequenceID = SequenceID;
+    CurrentDialogueIndex = 0;
     bDialogueActive = true;
+    
+    ProcessCurrentDialogue();
+}
 
-    UE_LOG(LogTranspersonalGame, Log, TEXT("Started dialogue %s between %s and %s"), 
-           *DialogueID, 
-           *Speaker->GetName(), 
-           *Listener->GetName());
+void UNarr_DialogueSystem::AdvanceDialogue()
+{
+    if (!bDialogueActive)
+    {
+        return;
+    }
 
-    return true;
+    CurrentDialogueIndex++;
+    
+    FNarr_DialogueSequence* ActiveSequence = nullptr;
+    for (FNarr_DialogueSequence& Sequence : DialogueSequences)
+    {
+        if (Sequence.SequenceID == ActiveSequenceID)
+        {
+            ActiveSequence = &Sequence;
+            break;
+        }
+    }
+
+    if (!ActiveSequence || CurrentDialogueIndex >= ActiveSequence->DialogueEntries.Num())
+    {
+        EndDialogue();
+        return;
+    }
+
+    ProcessCurrentDialogue();
 }
 
 void UNarr_DialogueSystem::EndDialogue()
 {
-    if (!bDialogueActive)
-    {
-        return;
-    }
-
-    UE_LOG(LogTranspersonalGame, Log, TEXT("Ending dialogue"));
-
     bDialogueActive = false;
-    CurrentSpeaker = nullptr;
-    CurrentListener = nullptr;
-    CurrentDialogue = FNarr_DialogueEntry();
-}
-
-bool UNarr_DialogueSystem::SelectPlayerChoice(int32 ChoiceIndex)
-{
-    if (!bDialogueActive)
-    {
-        UE_LOG(LogTranspersonalGame, Warning, TEXT("Cannot select choice: No active dialogue"));
-        return false;
-    }
-
-    if (CurrentDialogue.DialogueType != ENarr_DialogueType::PlayerChoice)
-    {
-        UE_LOG(LogTranspersonalGame, Warning, TEXT("Cannot select choice: Current dialogue is not a player choice"));
-        return false;
-    }
-
-    if (ChoiceIndex < 0 || ChoiceIndex >= CurrentDialogue.PlayerChoices.Num())
-    {
-        UE_LOG(LogTranspersonalGame, Warning, TEXT("Cannot select choice: Invalid choice index %d"), ChoiceIndex);
-        return false;
-    }
-
-    UE_LOG(LogTranspersonalGame, Log, TEXT("Player selected choice %d: %s"), 
-           ChoiceIndex, 
-           *CurrentDialogue.PlayerChoices[ChoiceIndex]);
-
-    ProcessDialogueChoice(CurrentDialogue.NextDialogueID);
-    return true;
-}
-
-FNarr_DialogueEntry UNarr_DialogueSystem::GetCurrentDialogue() const
-{
-    return CurrentDialogue;
-}
-
-bool UNarr_DialogueSystem::IsDialogueActive() const
-{
-    return bDialogueActive;
-}
-
-void UNarr_DialogueSystem::LoadDialogueData(UDataTable* DialogueTable)
-{
-    if (!DialogueTable)
-    {
-        UE_LOG(LogTranspersonalGame, Warning, TEXT("Cannot load dialogue data: Invalid data table"));
-        return;
-    }
-
-    DialogueDataTable = DialogueTable;
-    UE_LOG(LogTranspersonalGame, Log, TEXT("Loaded dialogue data table with %d entries"), 
-           DialogueTable->GetRowNames().Num());
-}
-
-void UNarr_DialogueSystem::RegisterDialogueActor(AActor* Actor, const FString& ActorID)
-{
-    if (!Actor || ActorID.IsEmpty())
-    {
-        UE_LOG(LogTranspersonalGame, Warning, TEXT("Cannot register dialogue actor: Invalid actor or ID"));
-        return;
-    }
-
-    RegisteredDialogueActors.Add(ActorID, Actor);
-    UE_LOG(LogTranspersonalGame, Log, TEXT("Registered dialogue actor %s with ID %s"), 
-           *Actor->GetName(), 
-           *ActorID);
-}
-
-bool UNarr_DialogueSystem::LoadDialogueEntry(const FString& DialogueID)
-{
-    if (!DialogueDataTable)
-    {
-        UE_LOG(LogTranspersonalGame, Warning, TEXT("Cannot load dialogue entry: No data table loaded"));
-        return false;
-    }
-
-    FNarr_DialogueEntry* FoundEntry = DialogueDataTable->FindRow<FNarr_DialogueEntry>(FName(*DialogueID), TEXT("LoadDialogueEntry"));
+    CurrentSpeaker = TEXT("");
+    CurrentDialogue = TEXT("");
+    ActiveSequenceID = TEXT("");
+    CurrentDialogueIndex = 0;
     
-    if (!FoundEntry)
+    if (GetWorld())
     {
-        UE_LOG(LogTranspersonalGame, Warning, TEXT("Dialogue entry not found: %s"), *DialogueID);
-        return false;
+        GetWorld()->GetTimerManager().ClearTimer(DialogueTimerHandle);
     }
-
-    if (!CheckDialogueRequirements(*FoundEntry))
-    {
-        UE_LOG(LogTranspersonalGame, Log, TEXT("Dialogue requirements not met for: %s"), *DialogueID);
-        return false;
-    }
-
-    CurrentDialogue = *FoundEntry;
-    return true;
 }
 
-void UNarr_DialogueSystem::ProcessDialogueChoice(const FString& NextDialogueID)
+void UNarr_DialogueSystem::AddDialogueSequence(const FNarr_DialogueSequence& NewSequence)
 {
-    if (NextDialogueID.IsEmpty())
+    DialogueSequences.Add(NewSequence);
+}
+
+void UNarr_DialogueSystem::ProcessCurrentDialogue()
+{
+    FNarr_DialogueSequence* ActiveSequence = nullptr;
+    for (FNarr_DialogueSequence& Sequence : DialogueSequences)
+    {
+        if (Sequence.SequenceID == ActiveSequenceID)
+        {
+            ActiveSequence = &Sequence;
+            break;
+        }
+    }
+
+    if (!ActiveSequence || CurrentDialogueIndex >= ActiveSequence->DialogueEntries.Num())
     {
         EndDialogue();
         return;
     }
 
-    if (!LoadDialogueEntry(NextDialogueID))
+    const FNarr_DialogueEntry& CurrentEntry = ActiveSequence->DialogueEntries[CurrentDialogueIndex];
+    CurrentSpeaker = CurrentEntry.SpeakerName;
+    CurrentDialogue = CurrentEntry.DialogueText;
+
+    // Auto-advance if enabled and not a player choice
+    if (bAutoAdvanceDialogue && !CurrentEntry.bIsPlayerChoice && GetWorld())
     {
-        UE_LOG(LogTranspersonalGame, Warning, TEXT("Failed to load next dialogue: %s"), *NextDialogueID);
-        EndDialogue();
+        float Duration = CurrentEntry.Duration > 0 ? CurrentEntry.Duration : DefaultDialogueDuration;
+        GetWorld()->GetTimerManager().SetTimer(DialogueTimerHandle, this, &UNarr_DialogueSystem::AutoAdvanceToNext, Duration, false);
     }
 }
 
-bool UNarr_DialogueSystem::CheckDialogueRequirements(const FNarr_DialogueEntry& Entry)
+void UNarr_DialogueSystem::AutoAdvanceToNext()
 {
-    if (!Entry.bRequiresItem)
-    {
-        return true;
-    }
+    AdvanceDialogue();
+}
 
-    // TODO: Implement item requirement checking when inventory system is available
-    UE_LOG(LogTranspersonalGame, Log, TEXT("Item requirement check not implemented yet: %s"), 
-           *Entry.RequiredItemName);
-    
-    return true; // For now, assume all requirements are met
+void UNarr_DialogueSystem::RegisterTribalDialogues()
+{
+    // Elder Gatherer dialogue sequence
+    FNarr_DialogueSequence ElderSequence;
+    ElderSequence.SequenceID = TEXT("ElderGatherer_Introduction");
+    ElderSequence.bRepeatable = true;
+    ElderSequence.RequiredQuestStage = 0;
+
+    FNarr_DialogueEntry Entry1;
+    Entry1.SpeakerName = TEXT("Elder Gatherer");
+    Entry1.DialogueText = TEXT("Greetings, traveler. I am Elder Gatherer of the valley tribe. The berries in our sacred grove have become scarce.");
+    Entry1.Duration = 5.0f;
+    ElderSequence.DialogueEntries.Add(Entry1);
+
+    FNarr_DialogueEntry Entry2;
+    Entry2.SpeakerName = TEXT("Elder Gatherer");
+    Entry2.DialogueText = TEXT("The great beasts have been feeding there. We need a skilled hunter to drive them away safely.");
+    Entry2.Duration = 4.0f;
+    ElderSequence.DialogueEntries.Add(Entry2);
+
+    DialogueSequences.Add(ElderSequence);
+
+    // Lost Hunter dialogue sequence
+    FNarr_DialogueSequence LostHunterSequence;
+    LostHunterSequence.SequenceID = TEXT("LostHunter_Plea");
+    LostHunterSequence.bRepeatable = false;
+    LostHunterSequence.RequiredQuestStage = 0;
+
+    FNarr_DialogueEntry Entry3;
+    Entry3.SpeakerName = TEXT("Lost Hunter");
+    Entry3.DialogueText = TEXT("Help me, please! I am Lost Hunter, separated from my tribe during the great migration.");
+    Entry3.Duration = 4.0f;
+    LostHunterSequence.DialogueEntries.Add(Entry3);
+
+    FNarr_DialogueEntry Entry4;
+    Entry4.SpeakerName = TEXT("Lost Hunter");
+    Entry4.DialogueText = TEXT("The path through the hills is treacherous. I fear the pack-hunters have caught my scent.");
+    Entry4.Duration = 4.0f;
+    LostHunterSequence.DialogueEntries.Add(Entry4);
+
+    DialogueSequences.Add(LostHunterSequence);
+}
+
+void UNarr_DialogueSystem::RegisterSurvivalDialogues()
+{
+    // Shelter Builder dialogue
+    FNarr_DialogueSequence ShelterSequence;
+    ShelterSequence.SequenceID = TEXT("ShelterBuilder_Advice");
+    ShelterSequence.bRepeatable = true;
+    ShelterSequence.RequiredQuestStage = 0;
+
+    FNarr_DialogueEntry Entry1;
+    Entry1.SpeakerName = TEXT("Shelter Builder");
+    Entry1.DialogueText = TEXT("The storms come without warning in these lands. A wise hunter always prepares shelter before nightfall.");
+    Entry1.Duration = 5.0f;
+    ShelterSequence.DialogueEntries.Add(Entry1);
+
+    FNarr_DialogueEntry Entry2;
+    Entry2.SpeakerName = TEXT("Shelter Builder");
+    Entry2.DialogueText = TEXT("Look for caves or overhanging rocks. Build walls with stones and branches. Fire keeps the night predators away.");
+    Entry2.Duration = 6.0f;
+    ShelterSequence.DialogueEntries.Add(Entry2);
+
+    DialogueSequences.Add(ShelterSequence);
+}
+
+void UNarr_DialogueSystem::RegisterHuntDialogues()
+{
+    // Hunt Master dialogue
+    FNarr_DialogueSequence HuntSequence;
+    HuntSequence.SequenceID = TEXT("HuntMaster_Training");
+    HuntSequence.bRepeatable = true;
+    HuntSequence.RequiredQuestStage = 0;
+
+    FNarr_DialogueEntry Entry1;
+    Entry1.SpeakerName = TEXT("Hunt Master");
+    Entry1.DialogueText = TEXT("The great hunt begins at dawn. Listen well, young hunter. The Velociraptors hunt in coordinated packs.");
+    Entry1.Duration = 5.0f;
+    HuntSequence.DialogueEntries.Add(Entry1);
+
+    FNarr_DialogueEntry Entry2;
+    Entry2.SpeakerName = TEXT("Hunt Master");
+    Entry2.DialogueText = TEXT("Never face them alone. Use terrain to your advantage. High ground and narrow passages break their formation.");
+    Entry2.Duration = 5.0f;
+    HuntSequence.DialogueEntries.Add(Entry2);
+
+    FNarr_DialogueEntry Entry3;
+    Entry3.SpeakerName = TEXT("Hunt Master");
+    Entry3.DialogueText = TEXT("The Tyrannosaurus Rex is a different challenge entirely. Its roar alone can paralyze prey. Stay mobile, strike from distance.");
+    Entry3.Duration = 6.0f;
+    HuntSequence.DialogueEntries.Add(Entry3);
+
+    DialogueSequences.Add(HuntSequence);
 }
