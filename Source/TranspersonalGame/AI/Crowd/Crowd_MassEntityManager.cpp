@@ -1,408 +1,226 @@
 #include "Crowd_MassEntityManager.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "Components/StaticMeshComponent.h"
-#include "Components/SphereComponent.h"
-#include "Engine/StaticMesh.h"
-#include "UObject/ConstructorHelpers.h"
 #include "Kismet/GameplayStatics.h"
-#include "Engine/TargetPoint.h"
-#include "GameFramework/Character.h"
-#include "DrawDebugHelpers.h"
+#include "Math/UnrealMathUtility.h"
 
-ACrowd_MassEntityManager::ACrowd_MassEntityManager()
+UCrowd_MassEntityManager::UCrowd_MassEntityManager()
 {
-    PrimaryActorTick.bCanEverTick = true;
-    PrimaryActorTick.TickInterval = 0.1f; // Update every 100ms
-
-    // Create root component
-    RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootComponent"));
-
-    // Create visualization mesh
-    VisualizationMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("VisualizationMesh"));
-    VisualizationMesh->SetupAttachment(RootComponent);
-    
-    // Create detection sphere
-    DetectionSphere = CreateDefaultSubobject<USphereComponent>(TEXT("DetectionSphere"));
-    DetectionSphere->SetupAttachment(RootComponent);
-    DetectionSphere->SetSphereRadius(EntityConfig.SpawnRadius);
-
-    // Set default values
-    EntityConfig.MaxEntities = 500;
-    EntityConfig.SpawnRadius = 1500.0f;
-    EntityConfig.MovementSpeed = 150.0f;
-    EntityConfig.LODDistance0 = 500.0f;
-    EntityConfig.LODDistance1 = 1500.0f;
-    EntityConfig.LODDistance2 = 3000.0f;
-
-    // Initialize default waypoint network
-    WaypointNetwork.Add(FVector(1000, 1000, 100));   // Market area
-    WaypointNetwork.Add(FVector(-1000, 1000, 100));  // Residential
-    WaypointNetwork.Add(FVector(1000, -1000, 100));  // Gathering point
-    WaypointNetwork.Add(FVector(-1000, -1000, 100)); // Work area
-    WaypointNetwork.Add(FVector(0, 2000, 100));      // Central plaza
-
-    // Initialize default behavior zones
-    FCrowd_BehaviorZone MarketZone;
-    MarketZone.ZoneName = TEXT("BusyMarket");
-    MarketZone.ZoneCenter = FVector(1000, 1000, 50);
-    MarketZone.ZoneRadius = 800.0f;
-    MarketZone.BehaviorType = ECrowdBehaviorType::Gathering;
-    MarketZone.DensityMultiplier = 2.0f;
-    BehaviorZones.Add(MarketZone);
-
-    FCrowd_BehaviorZone ResidentialZone;
-    ResidentialZone.ZoneName = TEXT("QuietResidential");
-    ResidentialZone.ZoneCenter = FVector(-1000, 1000, 50);
-    ResidentialZone.ZoneRadius = 600.0f;
-    ResidentialZone.BehaviorType = ECrowdBehaviorType::Wandering;
-    ResidentialZone.DensityMultiplier = 0.5f;
-    BehaviorZones.Add(ResidentialZone);
-
-    FCrowd_BehaviorZone WorkZone;
-    WorkZone.ZoneName = TEXT("WorkArea");
-    WorkZone.ZoneCenter = FVector(-1000, -1000, 50);
-    WorkZone.ZoneRadius = 700.0f;
-    WorkZone.BehaviorType = ECrowdBehaviorType::Working;
-    WorkZone.DensityMultiplier = 1.5f;
-    BehaviorZones.Add(WorkZone);
-
-    // Initialize default panic responses
-    FCrowd_PanicResponse DinosaurPanic;
-    DinosaurPanic.TriggerLocation = FVector(500, 500, 100);
-    DinosaurPanic.TriggerRadius = 800.0f;
-    DinosaurPanic.PanicDuration = 45.0f;
-    DinosaurPanic.EvacuationSpeed = 400.0f;
-    DinosaurPanic.EvacuationTarget = FVector(0, -2000, 100);
-    PanicResponses.Add(DinosaurPanic);
-
-    FCrowd_PanicResponse CombatPanic;
-    CombatPanic.TriggerLocation = FVector(-500, -500, 100);
-    CombatPanic.TriggerRadius = 600.0f;
-    CombatPanic.PanicDuration = 30.0f;
-    CombatPanic.EvacuationSpeed = 350.0f;
-    CombatPanic.EvacuationTarget = FVector(0, -2000, 100);
-    PanicResponses.Add(CombatPanic);
+    ActiveEntityCount = 0;
+    CurrentDensityMultiplier = 1.0f;
+    bIsCrowdSystemActive = false;
 }
 
-void ACrowd_MassEntityManager::BeginPlay()
+void UCrowd_MassEntityManager::Initialize(FSubsystemCollectionBase& Collection)
 {
-    Super::BeginPlay();
+    Super::Initialize(Collection);
     
-    if (!bSystemInitialized)
-    {
-        InitializeCrowdSystem();
-    }
+    UE_LOG(LogTemp, Warning, TEXT("Crowd Mass Entity Manager Initialized"));
+    
+    // Initialize default configurations
+    SpawnConfig = FCrowd_SpawnConfiguration();
+    LODConfig = FCrowd_LODConfiguration();
+    
+    // Reserve space for entity arrays
+    EntityLocations.Reserve(SpawnConfig.MaxEntities);
+    EntityLODLevels.Reserve(SpawnConfig.MaxEntities);
+    EntityActiveStates.Reserve(SpawnConfig.MaxEntities);
+    
+    InitializeCrowdSystem();
 }
 
-void ACrowd_MassEntityManager::Tick(float DeltaTime)
+void UCrowd_MassEntityManager::Deinitialize()
 {
-    Super::Tick(DeltaTime);
+    ClearAllCrowdEntities();
+    bIsCrowdSystemActive = false;
+    
+    UE_LOG(LogTemp, Warning, TEXT("Crowd Mass Entity Manager Deinitialized"));
+    
+    Super::Deinitialize();
+}
 
-    if (!bSystemInitialized)
+void UCrowd_MassEntityManager::InitializeCrowdSystem()
+{
+    if (bIsCrowdSystemActive)
     {
         return;
     }
-
-    // Update LOD system based on player location
-    if (bEnableLODSystem)
-    {
-        APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
-        if (PlayerPawn)
-        {
-            UpdateCrowdLOD(PlayerPawn->GetActorLocation());
-        }
-    }
-
-    // Check for panic triggers
-    if (bEnablePanicSystem)
-    {
-        // This would be triggered by external events like combat or dinosaur encounters
-        // For now, we just maintain the system structure
-    }
-
-    LastUpdateTime += DeltaTime;
+    
+    UE_LOG(LogTemp, Warning, TEXT("Initializing Crowd System - Max Entities: %d"), SpawnConfig.MaxEntities);
+    
+    // Clear existing data
+    EntityLocations.Empty();
+    EntityLODLevels.Empty();
+    EntityActiveStates.Empty();
+    
+    ActiveEntityCount = 0;
+    bIsCrowdSystemActive = true;
+    
+    UE_LOG(LogTemp, Warning, TEXT("Crowd System Initialized Successfully"));
 }
 
-void ACrowd_MassEntityManager::InitializeCrowdSystem()
+void UCrowd_MassEntityManager::SpawnCrowdEntities(const FVector& CenterLocation, int32 EntityCount)
 {
-    UE_LOG(LogTemp, Warning, TEXT("Crowd_MassEntityManager: Initializing crowd system"));
-
-    CreateWaypointNetwork();
-    CreateBehaviorZones();
-    SpawnCrowdEntities(EntityConfig.MaxEntities);
-
-    bSystemInitialized = true;
-    UE_LOG(LogTemp, Warning, TEXT("Crowd_MassEntityManager: System initialized with %d entities"), SpawnedEntities.Num());
-}
-
-void ACrowd_MassEntityManager::SpawnCrowdEntities(int32 Count)
-{
-    if (!GetWorld())
+    if (!bIsCrowdSystemActive)
     {
+        UE_LOG(LogTemp, Warning, TEXT("Crowd system not active - cannot spawn entities"));
         return;
     }
-
-    // Clear existing entities
-    for (AActor* Entity : SpawnedEntities)
+    
+    // Clamp entity count to available slots
+    int32 AvailableSlots = SpawnConfig.MaxEntities - ActiveEntityCount;
+    int32 EntitiesToSpawn = FMath::Min(EntityCount, AvailableSlots);
+    
+    UE_LOG(LogTemp, Warning, TEXT("Spawning %d crowd entities at location: %s"), EntitiesToSpawn, *CenterLocation.ToString());
+    
+    for (int32 i = 0; i < EntitiesToSpawn; i++)
     {
-        if (IsValid(Entity))
-        {
-            Entity->Destroy();
-        }
-    }
-    SpawnedEntities.Empty();
-
-    // Spawn new entities using basic actors as placeholders
-    // In a full implementation, these would be Mass Entity instances
-    for (int32 i = 0; i < Count; ++i)
-    {
-        FVector SpawnLocation = GetActorLocation() + FVector(
-            FMath::RandRange(-EntityConfig.SpawnRadius, EntityConfig.SpawnRadius),
-            FMath::RandRange(-EntityConfig.SpawnRadius, EntityConfig.SpawnRadius),
-            100.0f
+        // Generate random spawn location within radius
+        float Angle = FMath::RandRange(0.0f, 2.0f * PI);
+        float Distance = FMath::RandRange(SpawnConfig.MinSpawnDistance, SpawnConfig.SpawnRadius);
+        
+        FVector SpawnLocation = CenterLocation + FVector(
+            FMath::Cos(Angle) * Distance,
+            FMath::Sin(Angle) * Distance,
+            0.0f
         );
-
-        FActorSpawnParameters SpawnParams;
-        SpawnParams.Owner = this;
-        SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
-
-        AActor* CrowdEntity = GetWorld()->SpawnActor<AActor>(AActor::StaticClass(), SpawnLocation, FRotator::ZeroRotator, SpawnParams);
-        if (CrowdEntity)
-        {
-            CrowdEntity->SetActorLabel(FString::Printf(TEXT("CrowdEntity_%d"), i));
-            SpawnedEntities.Add(CrowdEntity);
-        }
+        
+        SpawnEntityAtLocation(SpawnLocation);
     }
-
-    UE_LOG(LogTemp, Warning, TEXT("Crowd_MassEntityManager: Spawned %d crowd entities"), SpawnedEntities.Num());
+    
+    UE_LOG(LogTemp, Warning, TEXT("Spawned %d entities - Total active: %d"), EntitiesToSpawn, ActiveEntityCount);
 }
 
-void ACrowd_MassEntityManager::UpdateCrowdLOD(const FVector& ViewerLocation)
+void UCrowd_MassEntityManager::UpdateCrowdLOD(const FVector& ViewerLocation)
 {
-    if (SpawnedEntities.Num() == 0)
+    if (!bIsCrowdSystemActive || EntityLocations.Num() == 0)
     {
         return;
     }
-
-    int32 LOD0Count = 0, LOD1Count = 0, LOD2Count = 0, CulledCount = 0;
-
-    for (AActor* Entity : SpawnedEntities)
+    
+    int32 UpdatedEntities = 0;
+    
+    for (int32 i = 0; i < EntityLocations.Num(); i++)
     {
-        if (!IsValid(Entity))
+        if (!EntityActiveStates[i])
         {
             continue;
         }
+        
+        float Distance = FVector::Dist(ViewerLocation, EntityLocations[i]);
+        UpdateEntityLOD(i, Distance);
+        UpdatedEntities++;
+    }
+    
+    // Cull distant entities
+    CullDistantEntities(ViewerLocation);
+    
+    // Log LOD update (throttled)
+    static float LastLogTime = 0.0f;
+    float CurrentTime = FPlatformTime::Seconds();
+    if (CurrentTime - LastLogTime > 5.0f)
+    {
+        UE_LOG(LogTemp, Log, TEXT("Updated LOD for %d crowd entities"), UpdatedEntities);
+        LastLogTime = CurrentTime;
+    }
+}
 
-        float Distance = FVector::Dist(ViewerLocation, Entity->GetActorLocation());
+void UCrowd_MassEntityManager::SetCrowdDensity(float NewDensity)
+{
+    CurrentDensityMultiplier = FMath::Clamp(NewDensity, 0.1f, 2.0f);
+    UE_LOG(LogTemp, Warning, TEXT("Crowd density set to: %f"), CurrentDensityMultiplier);
+}
 
-        if (Distance <= EntityConfig.LODDistance0)
+int32 UCrowd_MassEntityManager::GetActiveCrowdCount() const
+{
+    return ActiveEntityCount;
+}
+
+void UCrowd_MassEntityManager::ClearAllCrowdEntities()
+{
+    UE_LOG(LogTemp, Warning, TEXT("Clearing all crowd entities - Count: %d"), ActiveEntityCount);
+    
+    EntityLocations.Empty();
+    EntityLODLevels.Empty();
+    EntityActiveStates.Empty();
+    ActiveEntityCount = 0;
+}
+
+void UCrowd_MassEntityManager::UpdateEntityLOD(int32 EntityIndex, float DistanceToViewer)
+{
+    if (EntityIndex < 0 || EntityIndex >= EntityLODLevels.Num())
+    {
+        return;
+    }
+    
+    int32 NewLODLevel = 3; // Default to culled
+    
+    if (DistanceToViewer <= LODConfig.HighLODDistance)
+    {
+        NewLODLevel = 0; // High LOD
+    }
+    else if (DistanceToViewer <= LODConfig.MediumLODDistance)
+    {
+        NewLODLevel = 1; // Medium LOD
+    }
+    else if (DistanceToViewer <= LODConfig.LowLODDistance)
+    {
+        NewLODLevel = 2; // Low LOD
+    }
+    
+    EntityLODLevels[EntityIndex] = NewLODLevel;
+}
+
+void UCrowd_MassEntityManager::CullDistantEntities(const FVector& ViewerLocation)
+{
+    int32 CulledCount = 0;
+    
+    for (int32 i = EntityLocations.Num() - 1; i >= 0; i--)
+    {
+        if (!EntityActiveStates[i])
         {
-            // LOD0: Full detail
-            Entity->SetActorHiddenInGame(false);
-            Entity->SetActorTickEnabled(true);
-            LOD0Count++;
+            continue;
         }
-        else if (Distance <= EntityConfig.LODDistance1)
+        
+        float Distance = FVector::Dist(ViewerLocation, EntityLocations[i]);
+        
+        if (Distance > LODConfig.CullDistance)
         {
-            // LOD1: Reduced detail
-            Entity->SetActorHiddenInGame(false);
-            Entity->SetActorTickEnabled(false);
-            LOD1Count++;
-        }
-        else if (Distance <= EntityConfig.LODDistance2)
-        {
-            // LOD2: Minimal detail
-            Entity->SetActorHiddenInGame(false);
-            Entity->SetActorTickEnabled(false);
-            LOD2Count++;
-        }
-        else
-        {
-            // Culled: Hidden
-            Entity->SetActorHiddenInGame(true);
-            Entity->SetActorTickEnabled(false);
+            DespawnEntity(i);
             CulledCount++;
         }
     }
-
-    // Debug output every 5 seconds
-    if (FMath::Fmod(LastUpdateTime, 5.0f) < 0.1f)
+    
+    if (CulledCount > 0)
     {
-        UE_LOG(LogTemp, Log, TEXT("Crowd LOD: LOD0=%d, LOD1=%d, LOD2=%d, Culled=%d"), 
-               LOD0Count, LOD1Count, LOD2Count, CulledCount);
+        UE_LOG(LogTemp, Log, TEXT("Culled %d distant crowd entities"), CulledCount);
     }
 }
 
-void ACrowd_MassEntityManager::TriggerPanicResponse(const FVector& TriggerLocation, float Radius)
+void UCrowd_MassEntityManager::SpawnEntityAtLocation(const FVector& Location)
 {
-    UE_LOG(LogTemp, Warning, TEXT("Crowd_MassEntityManager: Panic response triggered at %s"), *TriggerLocation.ToString());
-
-    // Find entities within panic radius
-    TArray<AActor*> PanickedEntities;
-    for (AActor* Entity : SpawnedEntities)
-    {
-        if (IsValid(Entity))
-        {
-            float Distance = FVector::Dist(TriggerLocation, Entity->GetActorLocation());
-            if (Distance <= Radius)
-            {
-                PanickedEntities.Add(Entity);
-            }
-        }
-    }
-
-    // Apply panic behavior (move away from trigger)
-    for (AActor* Entity : PanickedEntities)
-    {
-        FVector AwayDirection = (Entity->GetActorLocation() - TriggerLocation).GetSafeNormal();
-        FVector PanicTarget = Entity->GetActorLocation() + (AwayDirection * 1000.0f);
-        
-        // In a full implementation, this would set the entity's movement target
-        // For now, we just log the panic response
-        UE_LOG(LogTemp, Log, TEXT("Entity %s panicking, moving to %s"), 
-               *Entity->GetName(), *PanicTarget.ToString());
-    }
-
-    UE_LOG(LogTemp, Warning, TEXT("Crowd_MassEntityManager: %d entities affected by panic"), PanickedEntities.Num());
-}
-
-void ACrowd_MassEntityManager::CreateWaypointNetwork()
-{
-    if (!GetWorld())
+    if (ActiveEntityCount >= SpawnConfig.MaxEntities)
     {
         return;
     }
-
-    // Clear existing waypoints
-    for (AActor* Waypoint : WaypointActors)
-    {
-        if (IsValid(Waypoint))
-        {
-            Waypoint->Destroy();
-        }
-    }
-    WaypointActors.Empty();
-
-    // Create waypoint actors
-    for (int32 i = 0; i < WaypointNetwork.Num(); ++i)
-    {
-        FActorSpawnParameters SpawnParams;
-        SpawnParams.Owner = this;
-
-        ATargetPoint* Waypoint = GetWorld()->SpawnActor<ATargetPoint>(
-            ATargetPoint::StaticClass(), 
-            WaypointNetwork[i], 
-            FRotator::ZeroRotator, 
-            SpawnParams
-        );
-
-        if (Waypoint)
-        {
-            Waypoint->SetActorLabel(FString::Printf(TEXT("CrowdWaypoint_%d"), i + 1));
-            WaypointActors.Add(Waypoint);
-        }
-    }
-
-    UE_LOG(LogTemp, Warning, TEXT("Crowd_MassEntityManager: Created %d waypoints"), WaypointActors.Num());
+    
+    EntityLocations.Add(Location);
+    EntityLODLevels.Add(0); // Start with high LOD
+    EntityActiveStates.Add(true);
+    
+    ActiveEntityCount++;
 }
 
-void ACrowd_MassEntityManager::CreateBehaviorZones()
+void UCrowd_MassEntityManager::DespawnEntity(int32 EntityIndex)
 {
-    if (!GetWorld())
+    if (EntityIndex < 0 || EntityIndex >= EntityActiveStates.Num())
     {
         return;
     }
-
-    // Clear existing zones
-    for (AActor* Zone : ZoneActors)
+    
+    if (EntityActiveStates[EntityIndex])
     {
-        if (IsValid(Zone))
-        {
-            Zone->Destroy();
-        }
+        EntityActiveStates[EntityIndex] = false;
+        ActiveEntityCount--;
     }
-    ZoneActors.Empty();
-
-    // Create zone visualization actors
-    for (const FCrowd_BehaviorZone& Zone : BehaviorZones)
-    {
-        FActorSpawnParameters SpawnParams;
-        SpawnParams.Owner = this;
-
-        AActor* ZoneActor = GetWorld()->SpawnActor<AActor>(
-            AActor::StaticClass(), 
-            Zone.ZoneCenter, 
-            FRotator::ZeroRotator, 
-            SpawnParams
-        );
-
-        if (ZoneActor)
-        {
-            ZoneActor->SetActorLabel(FString::Printf(TEXT("CrowdZone_%s"), *Zone.ZoneName));
-            ZoneActor->SetActorScale3D(FVector(Zone.ZoneRadius / 100.0f, Zone.ZoneRadius / 100.0f, 1.0f));
-            ZoneActors.Add(ZoneActor);
-        }
-    }
-
-    UE_LOG(LogTemp, Warning, TEXT("Crowd_MassEntityManager: Created %d behavior zones"), ZoneActors.Num());
-}
-
-void ACrowd_MassEntityManager::ValidateCrowdSystem()
-{
-    UE_LOG(LogTemp, Warning, TEXT("=== Crowd System Validation ==="));
-    UE_LOG(LogTemp, Warning, TEXT("Max Entities: %d"), EntityConfig.MaxEntities);
-    UE_LOG(LogTemp, Warning, TEXT("Spawn Radius: %.1f"), EntityConfig.SpawnRadius);
-    UE_LOG(LogTemp, Warning, TEXT("Active Entities: %d"), SpawnedEntities.Num());
-    UE_LOG(LogTemp, Warning, TEXT("Waypoints: %d"), WaypointActors.Num());
-    UE_LOG(LogTemp, Warning, TEXT("Behavior Zones: %d"), BehaviorZones.Num());
-    UE_LOG(LogTemp, Warning, TEXT("Panic Responses: %d"), PanicResponses.Num());
-    UE_LOG(LogTemp, Warning, TEXT("System Initialized: %s"), bSystemInitialized ? TEXT("Yes") : TEXT("No"));
-    UE_LOG(LogTemp, Warning, TEXT("LOD System: %s"), bEnableLODSystem ? TEXT("Enabled") : TEXT("Disabled"));
-    UE_LOG(LogTemp, Warning, TEXT("Panic System: %s"), bEnablePanicSystem ? TEXT("Enabled") : TEXT("Disabled"));
-}
-
-int32 ACrowd_MassEntityManager::GetActiveCrowdCount() const
-{
-    int32 ActiveCount = 0;
-    for (const AActor* Entity : SpawnedEntities)
-    {
-        if (IsValid(Entity) && !Entity->IsActorBeingDestroyed())
-        {
-            ActiveCount++;
-        }
-    }
-    return ActiveCount;
-}
-
-float ACrowd_MassEntityManager::GetCrowdDensity(const FVector& Location, float Radius) const
-{
-    int32 EntitiesInRadius = 0;
-    for (const AActor* Entity : SpawnedEntities)
-    {
-        if (IsValid(Entity))
-        {
-            float Distance = FVector::Dist(Location, Entity->GetActorLocation());
-            if (Distance <= Radius)
-            {
-                EntitiesInRadius++;
-            }
-        }
-    }
-
-    float Area = PI * Radius * Radius;
-    return EntitiesInRadius / Area; // Entities per square unit
-}
-
-ECrowdBehaviorType ACrowd_MassEntityManager::GetZoneBehaviorType(const FVector& Location) const
-{
-    for (const FCrowd_BehaviorZone& Zone : BehaviorZones)
-    {
-        float Distance = FVector::Dist(Location, Zone.ZoneCenter);
-        if (Distance <= Zone.ZoneRadius)
-        {
-            return Zone.BehaviorType;
-        }
-    }
-    return ECrowdBehaviorType::Wandering; // Default behavior
 }
