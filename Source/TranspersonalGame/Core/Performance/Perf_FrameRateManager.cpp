@@ -1,290 +1,230 @@
 #include "Perf_FrameRateManager.h"
 #include "Engine/World.h"
 #include "Engine/Engine.h"
-#include "GameFramework/GameStateBase.h"
-#include "Components/StaticMeshComponent.h"
-#include "PhysicsEngine/BodyInstance.h"
+#include "TimerManager.h"
+#include "HAL/PlatformApplicationMisc.h"
 
 UPerf_FrameRateManager::UPerf_FrameRateManager()
 {
-    PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 0.0f;
-
-    PerformanceTarget = EPerf_PerformanceTarget::PC_60FPS;
-    bAdaptivePerformanceEnabled = true;
+    CurrentTarget = EPerf_PerformanceTarget::PC_60FPS;
+    bIsTracking = false;
+    bAdaptiveQualityEnabled = false;
     TargetFrameRate = 60.0f;
-    PerformanceCheckInterval = 1.0f;
-    MaxPhysicsActors = 500;
-    LODDistanceMultiplier = 1.0f;
-
-    bMonitoringActive = false;
-    MonitoringTimer = 0.0f;
-    FrameCount = 0;
+    FrameCounter = 0;
     TotalFrameTime = 0.0f;
-
-    FrameTimeHistory.Reserve(300); // Store 5 seconds at 60fps
+    LastUpdateTime = 0.0;
+    FrameTimeHistory.Reserve(120); // 2 seconds at 60fps
 }
 
-void UPerf_FrameRateManager::BeginPlay()
+void UPerf_FrameRateManager::Initialize(FSubsystemCollectionBase& Collection)
 {
-    Super::BeginPlay();
+    Super::Initialize(Collection);
+    UE_LOG(LogTemp, Log, TEXT("FrameRateManager: Initialized"));
+}
+
+void UPerf_FrameRateManager::Deinitialize()
+{
+    StopFrameTracking();
+    Super::Deinitialize();
+}
+
+bool UPerf_FrameRateManager::ShouldCreateSubsystem(UObject* Outer) const
+{
+    return true;
+}
+
+void UPerf_FrameRateManager::OnWorldBeginPlay(UWorld& InWorld)
+{
+    Super::OnWorldBeginPlay(InWorld);
     
-    StartPerformanceMonitoring();
+    // Auto-start tracking when world begins play
+    StartFrameTracking();
     
-    // Set initial performance target
-    switch (PerformanceTarget)
+    // Set default performance target based on platform
+    if (FPlatformApplicationMisc::IsRunningOnBattery())
     {
-        case EPerf_PerformanceTarget::Console_30FPS:
-            TargetFrameRate = 30.0f;
-            break;
-        case EPerf_PerformanceTarget::PC_60FPS:
-            TargetFrameRate = 60.0f;
-            break;
-        case EPerf_PerformanceTarget::PC_120FPS:
-            TargetFrameRate = 120.0f;
-            break;
-        case EPerf_PerformanceTarget::Adaptive:
-            TargetFrameRate = 60.0f; // Start with 60fps
-            break;
+        SetPerformanceTarget(EPerf_PerformanceTarget::Mobile_30FPS);
     }
-
-    UE_LOG(LogTemp, Log, TEXT("FrameRateManager initialized - Target: %.1f FPS"), TargetFrameRate);
-}
-
-void UPerf_FrameRateManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
-{
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-
-    if (bMonitoringActive)
+    else
     {
-        UpdateFrameData(DeltaTime);
-        
-        MonitoringTimer += DeltaTime;
-        if (MonitoringTimer >= PerformanceCheckInterval)
-        {
-            if (bAdaptivePerformanceEnabled)
-            {
-                CheckAdaptivePerformance();
-            }
-            MonitoringTimer = 0.0f;
-        }
+        SetPerformanceTarget(EPerf_PerformanceTarget::PC_60FPS);
     }
-}
-
-void UPerf_FrameRateManager::StartPerformanceMonitoring()
-{
-    bMonitoringActive = true;
-    ResetPerformanceStats();
-    UE_LOG(LogTemp, Log, TEXT("Performance monitoring started"));
-}
-
-void UPerf_FrameRateManager::StopPerformanceMonitoring()
-{
-    bMonitoringActive = false;
-    UE_LOG(LogTemp, Log, TEXT("Performance monitoring stopped"));
-}
-
-FPerf_FrameData UPerf_FrameRateManager::GetCurrentFrameData() const
-{
-    return CurrentFrameData;
 }
 
 void UPerf_FrameRateManager::SetPerformanceTarget(EPerf_PerformanceTarget Target)
 {
-    PerformanceTarget = Target;
+    CurrentTarget = Target;
     
     switch (Target)
     {
-        case EPerf_PerformanceTarget::Console_30FPS:
-            TargetFrameRate = 30.0f;
-            MaxPhysicsActors = 200;
-            LODDistanceMultiplier = 0.7f;
-            break;
         case EPerf_PerformanceTarget::PC_60FPS:
             TargetFrameRate = 60.0f;
-            MaxPhysicsActors = 500;
-            LODDistanceMultiplier = 1.0f;
             break;
-        case EPerf_PerformanceTarget::PC_120FPS:
-            TargetFrameRate = 120.0f;
-            MaxPhysicsActors = 1000;
-            LODDistanceMultiplier = 1.5f;
+        case EPerf_PerformanceTarget::Console_30FPS:
+        case EPerf_PerformanceTarget::Mobile_30FPS:
+            TargetFrameRate = 30.0f;
             break;
         case EPerf_PerformanceTarget::Adaptive:
-            // Keep current settings, will be adjusted automatically
+            TargetFrameRate = 60.0f; // Start high, adapt down
+            EnableAdaptiveQuality(true);
             break;
     }
-
-    ApplyPerformanceOptimizations();
-    UE_LOG(LogTemp, Log, TEXT("Performance target set to %.1f FPS"), TargetFrameRate);
-}
-
-void UPerf_FrameRateManager::EnableAdaptivePerformance(bool bEnable)
-{
-    bAdaptivePerformanceEnabled = bEnable;
-    UE_LOG(LogTemp, Log, TEXT("Adaptive performance %s"), bEnable ? TEXT("enabled") : TEXT("disabled"));
-}
-
-void UPerf_FrameRateManager::OptimizeForCurrentFrameRate()
-{
-    if (CurrentFrameData.AverageFPS < TargetFrameRate * 0.8f) // Below 80% of target
-    {
-        // Reduce quality settings
-        MaxPhysicsActors = FMath::Max(100, MaxPhysicsActors - 50);
-        LODDistanceMultiplier = FMath::Max(0.5f, LODDistanceMultiplier - 0.1f);
-        
-        UE_LOG(LogTemp, Warning, TEXT("Performance below target - reducing quality"));
-    }
-    else if (CurrentFrameData.AverageFPS > TargetFrameRate * 1.2f) // Above 120% of target
-    {
-        // Increase quality settings
-        MaxPhysicsActors = FMath::Min(1000, MaxPhysicsActors + 25);
-        LODDistanceMultiplier = FMath::Min(2.0f, LODDistanceMultiplier + 0.05f);
-        
-        UE_LOG(LogTemp, Log, TEXT("Performance above target - increasing quality"));
-    }
-
-    ApplyPerformanceOptimizations();
-}
-
-void UPerf_FrameRateManager::SetMaxPhysicsActors(int32 MaxActors)
-{
-    MaxPhysicsActors = FMath::Clamp(MaxActors, 50, 2000);
-    ApplyPerformanceOptimizations();
-}
-
-void UPerf_FrameRateManager::SetLODDistanceMultiplier(float Multiplier)
-{
-    LODDistanceMultiplier = FMath::Clamp(Multiplier, 0.1f, 3.0f);
-    ApplyPerformanceOptimizations();
-}
-
-void UPerf_FrameRateManager::LogPerformanceStats()
-{
-    UE_LOG(LogTemp, Log, TEXT("=== PERFORMANCE STATS ==="));
-    UE_LOG(LogTemp, Log, TEXT("Current FPS: %.1f"), CurrentFrameData.CurrentFPS);
-    UE_LOG(LogTemp, Log, TEXT("Average FPS: %.1f"), CurrentFrameData.AverageFPS);
-    UE_LOG(LogTemp, Log, TEXT("Min FPS: %.1f"), CurrentFrameData.MinFPS);
-    UE_LOG(LogTemp, Log, TEXT("Max FPS: %.1f"), CurrentFrameData.MaxFPS);
-    UE_LOG(LogTemp, Log, TEXT("Frame Time: %.2f ms"), CurrentFrameData.FrameTime * 1000.0f);
-    UE_LOG(LogTemp, Log, TEXT("Target FPS: %.1f"), TargetFrameRate);
-    UE_LOG(LogTemp, Log, TEXT("Max Physics Actors: %d"), MaxPhysicsActors);
-    UE_LOG(LogTemp, Log, TEXT("LOD Distance Multiplier: %.2f"), LODDistanceMultiplier);
-    UE_LOG(LogTemp, Log, TEXT("========================"));
-}
-
-void UPerf_FrameRateManager::ResetPerformanceStats()
-{
-    CurrentFrameData = FPerf_FrameData();
-    FrameTimeHistory.Empty();
-    FrameCount = 0;
-    TotalFrameTime = 0.0f;
-    MonitoringTimer = 0.0f;
-}
-
-void UPerf_FrameRateManager::UpdateFrameData(float DeltaTime)
-{
-    FrameCount++;
-    TotalFrameTime += DeltaTime;
-
-    // Current FPS
-    CurrentFrameData.CurrentFPS = (DeltaTime > 0.0f) ? 1.0f / DeltaTime : 0.0f;
-    CurrentFrameData.FrameTime = DeltaTime;
-
-    // Store frame time history
-    FrameTimeHistory.Add(DeltaTime);
-    if (FrameTimeHistory.Num() > 300) // Keep last 5 seconds at 60fps
-    {
-        FrameTimeHistory.RemoveAt(0);
-    }
-
-    // Calculate average FPS from history
-    if (FrameTimeHistory.Num() > 0)
-    {
-        float AverageFrameTime = 0.0f;
-        for (float FrameTime : FrameTimeHistory)
-        {
-            AverageFrameTime += FrameTime;
-        }
-        AverageFrameTime /= FrameTimeHistory.Num();
-        CurrentFrameData.AverageFPS = (AverageFrameTime > 0.0f) ? 1.0f / AverageFrameTime : 0.0f;
-    }
-
-    // Update min/max FPS
-    if (CurrentFrameData.CurrentFPS < CurrentFrameData.MinFPS && CurrentFrameData.CurrentFPS > 0.0f)
-    {
-        CurrentFrameData.MinFPS = CurrentFrameData.CurrentFPS;
-    }
-    if (CurrentFrameData.CurrentFPS > CurrentFrameData.MaxFPS)
-    {
-        CurrentFrameData.MaxFPS = CurrentFrameData.CurrentFPS;
-    }
-
-    // Estimate render and game time (simplified)
-    CurrentFrameData.RenderTime = DeltaTime * 0.6f; // Assume 60% render
-    CurrentFrameData.GameTime = DeltaTime * 0.4f;   // Assume 40% game logic
-}
-
-void UPerf_FrameRateManager::ApplyPerformanceOptimizations()
-{
-    UWorld* World = GetWorld();
-    if (!World) return;
-
-    // Apply physics actor limits
-    TArray<AActor*> PhysicsActors;
-    int32 ActivePhysicsCount = 0;
     
-    for (AActor* Actor : World->GetCurrentLevel()->Actors)
-    {
-        if (Actor && Actor->GetRootComponent())
-        {
-            UStaticMeshComponent* MeshComp = Actor->FindComponentByClass<UStaticMeshComponent>();
-            if (MeshComp && MeshComp->GetBodyInstance())
-            {
-                ActivePhysicsCount++;
-                if (ActivePhysicsCount > MaxPhysicsActors)
-                {
-                    // Disable physics on distant actors
-                    float Distance = FVector::Dist(Actor->GetActorLocation(), 
-                        World->GetFirstPlayerController()->GetPawn()->GetActorLocation());
-                    
-                    if (Distance > 5000.0f * LODDistanceMultiplier)
-                    {
-                        MeshComp->SetSimulatePhysics(false);
-                    }
-                }
-            }
-        }
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("Applied performance optimizations - Active physics actors: %d"), 
-           FMath::Min(ActivePhysicsCount, MaxPhysicsActors));
+    UE_LOG(LogTemp, Log, TEXT("FrameRateManager: Target set to %f FPS"), TargetFrameRate);
 }
 
-void UPerf_FrameRateManager::CheckAdaptivePerformance()
+FPerf_FrameMetrics UPerf_FrameRateManager::GetCurrentMetrics() const
 {
-    if (PerformanceTarget != EPerf_PerformanceTarget::Adaptive) return;
+    return FrameMetrics;
+}
 
-    float PerformanceRatio = CurrentFrameData.AverageFPS / TargetFrameRate;
+bool UPerf_FrameRateManager::IsPerformanceTargetMet() const
+{
+    return FrameMetrics.bIsTargetMet;
+}
 
-    if (PerformanceRatio < 0.85f) // Below 85% of target
+void UPerf_FrameRateManager::StartFrameTracking()
+{
+    if (bIsTracking)
+        return;
+        
+    bIsTracking = true;
+    ResetMetrics();
+    
+    UWorld* World = GetWorld();
+    if (World)
     {
-        // Reduce target frame rate
-        if (TargetFrameRate > 30.0f)
-        {
-            TargetFrameRate = FMath::Max(30.0f, TargetFrameRate - 5.0f);
-            UE_LOG(LogTemp, Warning, TEXT("Adaptive: Reducing target to %.1f FPS"), TargetFrameRate);
-        }
-        OptimizeForCurrentFrameRate();
+        World->GetTimerManager().SetTimer(
+            MetricsUpdateTimer,
+            this,
+            &UPerf_FrameRateManager::UpdateFrameMetrics,
+            0.1f, // Update every 100ms
+            true
+        );
     }
-    else if (PerformanceRatio > 1.15f) // Above 115% of target
+    
+    UE_LOG(LogTemp, Log, TEXT("FrameRateManager: Started frame tracking"));
+}
+
+void UPerf_FrameRateManager::StopFrameTracking()
+{
+    if (!bIsTracking)
+        return;
+        
+    bIsTracking = false;
+    
+    UWorld* World = GetWorld();
+    if (World)
     {
-        // Increase target frame rate
-        if (TargetFrameRate < 120.0f)
+        World->GetTimerManager().ClearTimer(MetricsUpdateTimer);
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("FrameRateManager: Stopped frame tracking"));
+}
+
+void UPerf_FrameRateManager::ResetMetrics()
+{
+    FrameMetrics = FPerf_FrameMetrics();
+    FrameTimeHistory.Empty();
+    FrameCounter = 0;
+    TotalFrameTime = 0.0f;
+    LastUpdateTime = FPlatformTime::Seconds();
+}
+
+void UPerf_FrameRateManager::EnableAdaptiveQuality(bool bEnable)
+{
+    bAdaptiveQualityEnabled = bEnable;
+    UE_LOG(LogTemp, Log, TEXT("FrameRateManager: Adaptive quality %s"), 
+           bEnable ? TEXT("enabled") : TEXT("disabled"));
+}
+
+float UPerf_FrameRateManager::GetTargetFrameRate() const
+{
+    return TargetFrameRate;
+}
+
+void UPerf_FrameRateManager::UpdateFrameMetrics()
+{
+    if (!bIsTracking)
+        return;
+        
+    double CurrentTime = FPlatformTime::Seconds();
+    float DeltaTime = CurrentTime - LastUpdateTime;
+    LastUpdateTime = CurrentTime;
+    
+    if (DeltaTime > 0.0f)
+    {
+        FrameMetrics.CurrentFPS = 1.0f / DeltaTime;
+        FrameMetrics.FrameTime = DeltaTime * 1000.0f; // Convert to milliseconds
+        
+        // Update history
+        FrameTimeHistory.Add(DeltaTime);
+        if (FrameTimeHistory.Num() > 120) // Keep last 2 seconds
         {
-            TargetFrameRate = FMath::Min(120.0f, TargetFrameRate + 5.0f);
-            UE_LOG(LogTemp, Log, TEXT("Adaptive: Increasing target to %.1f FPS"), TargetFrameRate);
+            FrameTimeHistory.RemoveAt(0);
         }
-        OptimizeForCurrentFrameRate();
+        
+        // Calculate statistics
+        TotalFrameTime += DeltaTime;
+        FrameCounter++;
+        
+        if (FrameCounter > 0)
+        {
+            FrameMetrics.AverageFPS = FrameCounter / TotalFrameTime;
+        }
+        
+        // Update min/max
+        if (FrameMetrics.CurrentFPS < FrameMetrics.MinFPS)
+        {
+            FrameMetrics.MinFPS = FrameMetrics.CurrentFPS;
+        }
+        if (FrameMetrics.CurrentFPS > FrameMetrics.MaxFPS)
+        {
+            FrameMetrics.MaxFPS = FrameMetrics.CurrentFPS;
+        }
+        
+        CheckPerformanceTarget();
+        
+        if (bAdaptiveQualityEnabled)
+        {
+            AdjustQualitySettings();
+        }
+    }
+}
+
+void UPerf_FrameRateManager::CheckPerformanceTarget()
+{
+    float Tolerance = TargetFrameRate * 0.1f; // 10% tolerance
+    FrameMetrics.bIsTargetMet = (FrameMetrics.AverageFPS >= (TargetFrameRate - Tolerance));
+}
+
+void UPerf_FrameRateManager::AdjustQualitySettings()
+{
+    if (FrameTimeHistory.Num() < 30) // Need enough samples
+        return;
+        
+    // Calculate recent average
+    float RecentTotal = 0.0f;
+    int32 SampleCount = FMath::Min(30, FrameTimeHistory.Num());
+    for (int32 i = FrameTimeHistory.Num() - SampleCount; i < FrameTimeHistory.Num(); i++)
+    {
+        RecentTotal += FrameTimeHistory[i];
+    }
+    float RecentAvgFPS = SampleCount / RecentTotal;
+    
+    // Adjust quality based on performance
+    float TargetTolerance = TargetFrameRate * 0.15f; // 15% tolerance for adjustments
+    
+    if (RecentAvgFPS < (TargetFrameRate - TargetTolerance))
+    {
+        // Performance is poor, reduce quality
+        UE_LOG(LogTemp, Warning, TEXT("FrameRateManager: Performance below target (%.1f < %.1f), considering quality reduction"), 
+               RecentAvgFPS, TargetFrameRate);
+    }
+    else if (RecentAvgFPS > (TargetFrameRate + TargetTolerance))
+    {
+        // Performance is good, can increase quality
+        UE_LOG(LogTemp, Log, TEXT("FrameRateManager: Performance above target (%.1f > %.1f), considering quality increase"), 
+               RecentAvgFPS, TargetFrameRate);
     }
 }
