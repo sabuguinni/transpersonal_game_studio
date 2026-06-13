@@ -1,150 +1,122 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
+#include "Components/ActorComponent.h"
+#include "Engine/StaticMeshActor.h"
 #include "Components/StaticMeshComponent.h"
-#include "Components/SceneComponent.h"
-#include "Engine/StaticMesh.h"
-#include "../SharedTypes.h"
+#include "Engine/World.h"
+#include "SharedTypes.h"
 #include "Arch_CretaceousStructureSystem.generated.h"
 
 UENUM(BlueprintType)
 enum class EArch_StructureType : uint8
 {
-    ShelterBasic     UMETA(DisplayName = "Basic Shelter"),
-    ShelterAdvanced  UMETA(DisplayName = "Advanced Shelter"),
-    StoragePit       UMETA(DisplayName = "Storage Pit"),
-    FirePit          UMETA(DisplayName = "Fire Pit"),
-    WaterCatchment   UMETA(DisplayName = "Water Catchment"),
-    DefensiveWall    UMETA(DisplayName = "Defensive Wall"),
-    WatchTower       UMETA(DisplayName = "Watch Tower"),
-    BridgeSimple     UMETA(DisplayName = "Simple Bridge"),
-    CaveEntrance     UMETA(DisplayName = "Cave Entrance")
+    StoneDwelling,
+    RockShelter,
+    CaveEntrance,
+    WoodPlatform,
+    BoneFramework,
+    ClayHut
 };
 
 UENUM(BlueprintType)
-enum class EArch_BuildMaterial : uint8
+enum class EArch_WeatheringLevel : uint8
 {
-    Wood            UMETA(DisplayName = "Wood"),
-    Stone           UMETA(DisplayName = "Stone"),
-    Mud             UMETA(DisplayName = "Mud/Clay"),
-    Bone            UMETA(DisplayName = "Bone"),
-    Hide            UMETA(DisplayName = "Animal Hide"),
-    Thatch          UMETA(DisplayName = "Thatch/Grass"),
-    Mixed           UMETA(DisplayName = "Mixed Materials")
+    Fresh,
+    Aged,
+    Weathered,
+    Ancient,
+    Ruins
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FArch_StructureConfig
+struct FArch_StructureConfig
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    EArch_StructureType StructureType = EArch_StructureType::ShelterBasic;
+    EArch_StructureType StructureType = EArch_StructureType::StoneDwelling;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    EArch_BuildMaterial PrimaryMaterial = EArch_BuildMaterial::Wood;
+    EArch_WeatheringLevel WeatheringLevel = EArch_WeatheringLevel::Fresh;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
     float StructuralIntegrity = 100.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    float WeatherResistance = 50.0f;
+    bool bHasInterior = true;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    int32 MaxOccupants = 2;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    bool bProvidesShelter = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    bool bProvidesStorage = false;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    bool bProvidesWarmth = false;
+    FVector Dimensions = FVector(400.0f, 400.0f, 300.0f);
 
     FArch_StructureConfig()
     {
-        StructureType = EArch_StructureType::ShelterBasic;
-        PrimaryMaterial = EArch_BuildMaterial::Wood;
+        StructureType = EArch_StructureType::StoneDwelling;
+        WeatheringLevel = EArch_WeatheringLevel::Fresh;
         StructuralIntegrity = 100.0f;
-        WeatherResistance = 50.0f;
-        MaxOccupants = 2;
-        bProvidesShelter = true;
-        bProvidesStorage = false;
-        bProvidesWarmth = false;
+        bHasInterior = true;
+        Dimensions = FVector(400.0f, 400.0f, 300.0f);
     }
 };
 
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API AArch_CretaceousStructure : public AActor
+UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UArch_CretaceousStructureSystem : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    AArch_CretaceousStructure();
+    UArch_CretaceousStructureSystem();
 
 protected:
     virtual void BeginPlay() override;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    USceneComponent* RootSceneComponent;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    UStaticMeshComponent* MainStructureMesh;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    UStaticMeshComponent* SupportBeamsMesh;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    UStaticMeshComponent* RoofMesh;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure Config")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
     FArch_StructureConfig StructureConfig;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure State")
-    float CurrentIntegrity = 100.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
+    TArray<UStaticMeshComponent*> StructureComponents;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure State")
-    float DamageAccumulated = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
+    float WeatheringRate = 0.1f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure State")
-    bool bIsOccupied = false;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure State")
-    int32 CurrentOccupants = 0;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
+    bool bEnableWeathering = true;
 
 public:
-    virtual void Tick(float DeltaTime) override;
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    UFUNCTION(BlueprintCallable, Category = "Structure")
-    void ApplyWeatherDamage(float DamageAmount);
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    void InitializeStructure(const FArch_StructureConfig& Config);
 
-    UFUNCTION(BlueprintCallable, Category = "Structure")
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    void ApplyWeathering(float WeatheringAmount);
+
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    void SetStructureType(EArch_StructureType NewType);
+
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    EArch_StructureType GetStructureType() const { return StructureConfig.StructureType; }
+
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    float GetStructuralIntegrity() const { return StructureConfig.StructuralIntegrity; }
+
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
     void RepairStructure(float RepairAmount);
 
-    UFUNCTION(BlueprintCallable, Category = "Structure")
-    bool CanAccommodateOccupants(int32 NumOccupants) const;
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    bool CanEnterInterior() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Structure")
-    void SetOccupancy(int32 NumOccupants);
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    TArray<FVector> GetInteriorSpawnPoints() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Structure")
-    float GetShelterEffectiveness() const;
+private:
+    void CreateStructureComponents();
+    void UpdateMaterialsForWeathering();
+    UStaticMesh* GetMeshForStructureType(EArch_StructureType Type);
+    UMaterialInterface* GetMaterialForWeathering(EArch_WeatheringLevel Level);
 
-    UFUNCTION(BlueprintCallable, Category = "Structure")
-    void UpdateStructureMeshes();
+    UPROPERTY()
+    TArray<FVector> InteriorSpawnPoints;
 
-    UFUNCTION(BlueprintImplementableEvent, Category = "Structure")
-    void OnStructureDestroyed();
-
-    UFUNCTION(BlueprintImplementableEvent, Category = "Structure")
-    void OnOccupancyChanged(int32 NewOccupants);
-
-protected:
-    void InitializeStructureComponents();
-    void ApplyMaterialBasedProperties();
-    void CalculateWeatherResistance();
-    UStaticMesh* GetMeshForStructureType() const;
-    UStaticMesh* GetMeshForMaterial(EArch_BuildMaterial Material) const;
+    float WeatheringTimer = 0.0f;
 };
