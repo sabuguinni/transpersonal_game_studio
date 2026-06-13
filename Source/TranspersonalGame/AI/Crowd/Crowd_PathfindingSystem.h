@@ -1,60 +1,59 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/World.h"
 #include "GameFramework/Actor.h"
 #include "Components/ActorComponent.h"
 #include "NavigationSystem.h"
-#include "NavMesh/RecastNavMesh.h"
+#include "Navigation/PathFollowingComponent.h"
 #include "SharedTypes.h"
 #include "Crowd_PathfindingSystem.generated.h"
 
 USTRUCT(BlueprintType)
-struct FCrowd_PathfindingRequest
+struct FCrowd_Waypoint
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding")
-    int32 AgentID = -1;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Waypoint")
+    FVector Location = FVector::ZeroVector;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding")
-    FVector StartLocation = FVector::ZeroVector;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Waypoint")
+    float Radius = 100.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding")
-    FVector TargetLocation = FVector::ZeroVector;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Waypoint")
+    int32 WaypointID = -1;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding")
-    TArray<FVector> PathPoints;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Waypoint")
+    TArray<int32> ConnectedWaypoints;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding")
-    bool bIsPathValid = false;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding")
-    float PathLength = 0.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding")
-    int32 CurrentWaypointIndex = 0;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Waypoint")
+    bool bIsActive = true;
 };
 
 USTRUCT(BlueprintType)
-struct FCrowd_NavigationArea
+struct FCrowd_PathRequest
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Navigation")
-    FVector CenterLocation = FVector::ZeroVector;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Path Request")
+    int32 AgentID = -1;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Navigation")
-    float Radius = 1000.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Path Request")
+    FVector StartLocation = FVector::ZeroVector;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Navigation")
-    int32 MaxAgentsInArea = 100;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Path Request")
+    FVector TargetLocation = FVector::ZeroVector;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Navigation")
-    TArray<int32> AgentsInArea;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Path Request")
+    TArray<FVector> PathPoints;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Navigation")
-    bool bIsHighTrafficArea = false;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Path Request")
+    bool bPathFound = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Path Request")
+    float PathLength = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Path Request")
+    int32 CurrentPathIndex = 0;
 };
 
 UCLASS(BlueprintType, Blueprintable)
@@ -72,69 +71,70 @@ public:
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding")
-    int32 MaxConcurrentPaths = 200;
+    TArray<FCrowd_Waypoint> WaypointNetwork;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding")
-    float PathfindingUpdateInterval = 0.1f;
+    TArray<FCrowd_PathRequest> ActivePathRequests;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding")
-    float WaypointReachDistance = 50.0f;
+    int32 MaxPathRequests = 50;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding")
-    TArray<FCrowd_PathfindingRequest> ActivePathRequests;
+    float PathfindingRadius = 3000.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding")
-    TArray<FCrowd_NavigationArea> NavigationAreas;
+    bool bUseNavigationMesh = true;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding")
-    bool bEnableFlowFields = true;
+    bool bUseWaypointNetwork = true;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding")
-    bool bEnableAvoidance = true;
+    float WaypointSpacing = 500.0f;
 
     UFUNCTION(BlueprintCallable, Category = "Pathfinding")
     void InitializePathfindingSystem();
 
     UFUNCTION(BlueprintCallable, Category = "Pathfinding")
+    void GenerateWaypointNetwork();
+
+    UFUNCTION(BlueprintCallable, Category = "Pathfinding")
     int32 RequestPath(int32 AgentID, const FVector& StartLocation, const FVector& TargetLocation);
 
     UFUNCTION(BlueprintCallable, Category = "Pathfinding")
-    bool GetPathForAgent(int32 AgentID, FCrowd_PathfindingRequest& OutPathRequest);
+    bool GetPathForAgent(int32 AgentID, TArray<FVector>& OutPathPoints);
 
     UFUNCTION(BlueprintCallable, Category = "Pathfinding")
-    void UpdatePathfinding(float DeltaTime);
+    FVector GetNextPathPoint(int32 AgentID);
 
     UFUNCTION(BlueprintCallable, Category = "Pathfinding")
-    FVector GetNextWaypoint(int32 AgentID, const FVector& CurrentLocation);
+    bool AdvancePathPoint(int32 AgentID);
 
     UFUNCTION(BlueprintCallable, Category = "Pathfinding")
-    bool IsWaypointReached(const FVector& AgentLocation, const FVector& WaypointLocation);
+    void ClearPathRequest(int32 AgentID);
 
     UFUNCTION(BlueprintCallable, Category = "Pathfinding")
-    void AdvanceToNextWaypoint(int32 AgentID);
+    int32 FindNearestWaypoint(const FVector& Location);
 
     UFUNCTION(BlueprintCallable, Category = "Pathfinding")
-    void CreateNavigationAreas();
+    TArray<int32> FindPathBetweenWaypoints(int32 StartWaypointID, int32 EndWaypointID);
 
     UFUNCTION(BlueprintCallable, Category = "Pathfinding")
-    void UpdateNavigationAreas();
+    bool IsLocationReachable(const FVector& StartLocation, const FVector& TargetLocation);
 
     UFUNCTION(BlueprintCallable, Category = "Pathfinding")
-    FVector CalculateAvoidanceForce(int32 AgentID, const FVector& AgentLocation, const FVector& DesiredVelocity);
+    void UpdatePathRequests();
 
     UFUNCTION(BlueprintCallable, Category = "Pathfinding")
-    TArray<FVector> GenerateFlowField(const FVector& TargetLocation, float FieldRadius);
-
-    UFUNCTION(BlueprintCallable, Category = "Pathfinding")
-    void ClearCompletedPaths();
-
-    UFUNCTION(BlueprintCallable, Category = "Pathfinding")
-    int32 GetActivePathCount() const;
+    int32 GetActivePathRequestCount() const;
 
 private:
-    float PathfindingTimer = 0.0f;
-    int32 NextRequestID = 0;
+    void ProcessPathRequest(FCrowd_PathRequest& PathRequest);
+    bool FindNavMeshPath(const FVector& Start, const FVector& End, TArray<FVector>& OutPath);
+    bool FindWaypointPath(const FVector& Start, const FVector& End, TArray<FVector>& OutPath);
+    void ConnectNearbyWaypoints();
     
-    UPROPERTY()
-    class UNavigationSystemV1* NavigationSystem = nullptr;
+    float PathUpdateTimer = 0.0f;
+    float PathUpdateInterval = 0.1f;
+    int32 PathRequestsPerFrame = 5;
+    int32 CurrentRequestIndex = 0;
 };
