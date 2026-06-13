@@ -1,382 +1,478 @@
 #include "NPCBehaviorActor.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/SphereComponent.h"
+#include "Perception/PawnSensingComponent.h"
+#include "AIController.h"
+#include "BehaviorTree/BlackboardComponent.h"
+#include "GameFramework/CharacterMovementComponent.h"
 #include "Engine/Engine.h"
-#include "Engine/World.h"
-#include "GameFramework/Actor.h"
-#include "DrawDebugHelpers.h"
 #include "Kismet/GameplayStatics.h"
+#include "Kismet/KismetMathLibrary.h"
 
 ANPCBehaviorActor::ANPCBehaviorActor()
 {
     PrimaryActorTick.bCanEverTick = true;
 
-    // CREATE COMPONENTS
-    NPCMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("NPCMesh"));
-    RootComponent = NPCMesh;
+    // Setup character mesh (basic capsule for now)
+    GetMesh()->SetRelativeLocation(FVector(0.0f, 0.0f, -88.0f));
+    GetMesh()->SetRelativeRotation(FRotator(0.0f, -90.0f, 0.0f));
 
+    // Create pawn sensing component
+    PawnSensing = CreateDefaultSubobject<UPawnSensingComponent>(TEXT("PawnSensing"));
+    PawnSensing->SightRadius = 1500.0f;
+    PawnSensing->HearingThreshold = 1200.0f;
+    PawnSensing->LOSHearingThreshold = 800.0f;
+    PawnSensing->SetPeripheralVisionAngle(90.0f);
+    
+    // Bind sensing events
+    PawnSensing->OnSeePawn.AddDynamic(this, &ANPCBehaviorActor::OnSeePawn);
+    PawnSensing->OnHearNoise.AddDynamic(this, &ANPCBehaviorActor::OnHearNoise);
+
+    // Create interaction sphere
     InteractionSphere = CreateDefaultSubobject<USphereComponent>(TEXT("InteractionSphere"));
     InteractionSphere->SetupAttachment(RootComponent);
-    InteractionSphere->SetSphereRadius(300.0f);
+    InteractionSphere->SetSphereRadius(InteractionRange);
+    InteractionSphere->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+    InteractionSphere->SetCollisionResponseToAllChannels(ECR_Ignore);
+    InteractionSphere->SetCollisionResponseToChannel(ECC_Pawn, ECR_Overlap);
 
-    DetectionSphere = CreateDefaultSubobject<USphereComponent>(TEXT("DetectionSphere"));
-    DetectionSphere->SetupAttachment(RootComponent);
-    DetectionSphere->SetSphereRadius(1500.0f);
+    // Setup movement
+    GetCharacterMovement()->MaxWalkSpeed = 300.0f;
+    GetCharacterMovement()->RotationRate = FRotator(0.0f, 540.0f, 0.0f);
 
-    // INITIALIZE DEFAULT VALUES
-    NPCType = ENPC_BehaviorType::Gatherer;
-    NPCName = TEXT("Unknown");
+    // Initialize default values
+    NPCName = TEXT("Unnamed NPC");
+    Profession = ENPC_Profession::Gatherer;
     Age = 25;
-    Experience = 50.0f;
-
+    FearLevel = 0.0f;
+    SocialNeed = 50.0f;
+    CurrentState = ENPC_BehaviorState::Idle;
     PatrolRadius = 1000.0f;
     InteractionRange = 300.0f;
-    DetectionRange = 1500.0f;
-    MovementSpeed = 200.0f;
-
-    CurrentEmotion = ENPC_EmotionalState::Calm;
-    EmotionIntensity = 1.0f;
-    EmotionDecayRate = 0.1f;
-
-    MaxMemories = 50;
-    MemoryDecayRate = 0.05f;
-
-    HomeLocation = FVector::ZeroVector;
-    WorkLocation = FVector::ZeroVector;
-    WorkStartTime = 8.0f;  // 8 AM
-    WorkEndTime = 18.0f;   // 6 PM
-
-    SocialRadius = 500.0f;
-    bCanTrade = true;
-    bCanGiveQuests = true;
-
-    // INTERNAL STATE
-    bIsPatrolling = false;
-    PatrolCenter = FVector::ZeroVector;
-    CurrentTarget = FVector::ZeroVector;
-    LastEmotionUpdate = 0.0f;
-    LastMemoryCleanup = 0.0f;
-    LastRoutineCheck = 0.0f;
+    MaxMemoryEntries = 10;
+    MemoryDecayRate = 0.1f;
+    
+    // AI Controller class
+    AIControllerClass = AAIController::StaticClass();
 }
 
 void ANPCBehaviorActor::BeginPlay()
 {
     Super::BeginPlay();
-
-    // INITIALIZE PATROL CENTER
-    PatrolCenter = GetActorLocation();
-    HomeLocation = GetActorLocation();
     
-    // SET WORK LOCATION BASED ON NPC TYPE
-    switch (NPCType)
+    HomeLocation = GetActorLocation();
+    CurrentTarget = HomeLocation;
+    
+    InitializeSchedule();
+    
+    // Start behavior tree if available
+    if (BehaviorTreeAsset && GetController())
     {
-        case ENPC_BehaviorType::Gatherer:
-            WorkLocation = PatrolCenter + FVector(500, 0, 0);
-            break;
-        case ENPC_BehaviorType::Hunter:
-            WorkLocation = PatrolCenter + FVector(0, 800, 0);
-            break;
-        case ENPC_BehaviorType::Elder:
-            WorkLocation = PatrolCenter;
-            break;
-        case ENPC_BehaviorType::Scout:
-            WorkLocation = PatrolCenter + FVector(1200, 1200, 100);
-            break;
-        case ENPC_BehaviorType::Trader:
-            WorkLocation = PatrolCenter + FVector(-300, 300, 0);
-            break;
-        default:
-            WorkLocation = PatrolCenter;
-            break;
+        if (AAIController* AIController = Cast<AAIController>(GetController()))
+        {
+            AIController->RunBehaviorTree(BehaviorTreeAsset);
+        }
     }
-
-    // START INITIAL BEHAVIOR
-    StartPatrol();
 }
 
 void ANPCBehaviorActor::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
-
-    // UPDATE EMOTIONAL STATE
-    UpdateEmotionalState(DeltaTime);
-
-    // CLEANUP MEMORIES PERIODICALLY
-    if (GetWorld()->GetTimeSeconds() - LastMemoryCleanup > 30.0f)
+    
+    UpdateMemories(DeltaTime);
+    ProcessBehaviorLogic(DeltaTime);
+    HandleMovement(DeltaTime);
+    UpdateFearLevel(DeltaTime);
+    
+    StateChangeTimer += DeltaTime;
+    
+    // Update schedule every 60 seconds
+    if (GetWorld()->GetTimeSeconds() - LastScheduleUpdate > 60.0f)
     {
-        CleanupMemories();
-        LastMemoryCleanup = GetWorld()->GetTimeSeconds();
+        UpdateDailySchedule();
+        LastScheduleUpdate = GetWorld()->GetTimeSeconds();
     }
+}
 
-    // CHECK DAILY ROUTINE
-    if (GetWorld()->GetTimeSeconds() - LastRoutineCheck > 60.0f)
+void ANPCBehaviorActor::SetBehaviorState(ENPC_BehaviorState NewState)
+{
+    if (CurrentState != NewState)
     {
-        CheckDailyRoutine();
-        LastRoutineCheck = GetWorld()->GetTimeSeconds();
-    }
-
-    // PATROL BEHAVIOR
-    if (bIsPatrolling)
-    {
-        FVector CurrentLocation = GetActorLocation();
-        float DistanceToTarget = FVector::Dist(CurrentLocation, CurrentTarget);
-
-        if (DistanceToTarget < 100.0f)
+        CurrentState = NewState;
+        StateChangeTimer = 0.0f;
+        
+        // Update blackboard if AI controller exists
+        if (AAIController* AIController = Cast<AAIController>(GetController()))
         {
-            CurrentTarget = GetRandomPatrolPoint();
-        }
-        else
-        {
-            FVector Direction = (CurrentTarget - CurrentLocation).GetSafeNormal();
-            FVector NewLocation = CurrentLocation + (Direction * MovementSpeed * DeltaTime);
-            SetActorLocation(NewLocation);
-        }
-    }
-
-    // CHECK FOR NEARBY ACTORS
-    TArray<AActor*> NearbyActors = GetNearbyActors();
-    for (AActor* Actor : NearbyActors)
-    {
-        if (Actor && Actor->IsA<APawn>())
-        {
-            float Distance = FVector::Dist(GetActorLocation(), Actor->GetActorLocation());
-            
-            // REACT TO PLAYER
-            if (Distance < InteractionRange)
+            if (UBlackboardComponent* BlackboardComp = AIController->GetBlackboardComponent())
             {
-                if (CurrentEmotion == ENPC_EmotionalState::Calm)
-                {
-                    SetEmotionalState(ENPC_EmotionalState::Curious, 0.7f);
-                    AddMemory(Actor->GetActorLocation(), TEXT("PlayerEncounter"), 0.8f);
-                }
+                BlackboardComp->SetValueAsEnum(TEXT("BehaviorState"), (uint8)CurrentState);
             }
         }
     }
 }
 
-void ANPCBehaviorActor::StartPatrol()
+void ANPCBehaviorActor::UpdateDailySchedule()
 {
-    bIsPatrolling = true;
-    CurrentTarget = GetRandomPatrolPoint();
-}
-
-void ANPCBehaviorActor::StopPatrol()
-{
-    bIsPatrolling = false;
-}
-
-void ANPCBehaviorActor::SetEmotionalState(ENPC_EmotionalState NewEmotion, float Intensity)
-{
-    CurrentEmotion = NewEmotion;
-    EmotionIntensity = FMath::Clamp(Intensity, 0.0f, 2.0f);
-    LastEmotionUpdate = GetWorld()->GetTimeSeconds();
-
-    // ADJUST BEHAVIOR BASED ON EMOTION
-    switch (NewEmotion)
+    if (DailySchedule.Num() == 0) return;
+    
+    // Simple time simulation - use game time
+    float CurrentHour = FMath::Fmod(GetWorld()->GetTimeSeconds() / 3600.0f, 24.0f);
+    
+    // Find appropriate schedule entry
+    for (int32 i = 0; i < DailySchedule.Num(); i++)
     {
-        case ENPC_EmotionalState::Afraid:
-            MovementSpeed = 300.0f;
-            DetectionRange = 2000.0f;
+        const FNPC_DailySchedule& Schedule = DailySchedule[i];
+        if (CurrentHour >= Schedule.StartHour && CurrentHour < Schedule.EndHour)
+        {
+            CurrentScheduleIndex = i;
+            SetBehaviorState(Schedule.ScheduledActivity);
+            
+            if (Schedule.WorkLocation != FVector::ZeroVector)
+            {
+                CurrentTarget = HomeLocation + Schedule.WorkLocation;
+            }
             break;
-        case ENPC_EmotionalState::Aggressive:
-            MovementSpeed = 250.0f;
-            DetectionRange = 1800.0f;
+        }
+    }
+}
+
+void ANPCBehaviorActor::AddMemory(AActor* Actor, FVector Location, float ThreatLevel)
+{
+    if (!Actor) return;
+    
+    // Check if we already have memory of this actor
+    for (FNPC_Memory& Memory : ShortTermMemory)
+    {
+        if (Memory.RememberedActor == Actor)
+        {
+            // Update existing memory
+            Memory.LastKnownLocation = Location;
+            Memory.Timestamp = GetWorld()->GetTimeSeconds();
+            Memory.ThreatLevel = FMath::Max(Memory.ThreatLevel, ThreatLevel);
+            return;
+        }
+    }
+    
+    // Add new memory
+    FNPC_Memory NewMemory;
+    NewMemory.RememberedActor = Actor;
+    NewMemory.LastKnownLocation = Location;
+    NewMemory.Timestamp = GetWorld()->GetTimeSeconds();
+    NewMemory.ThreatLevel = ThreatLevel;
+    
+    ShortTermMemory.Add(NewMemory);
+    
+    // Remove oldest memories if we exceed limit
+    while (ShortTermMemory.Num() > MaxMemoryEntries)
+    {
+        ShortTermMemory.RemoveAt(0);
+    }
+}
+
+FNPC_Memory ANPCBehaviorActor::GetMemoryOfActor(AActor* Actor)
+{
+    for (const FNPC_Memory& Memory : ShortTermMemory)
+    {
+        if (Memory.RememberedActor == Actor)
+        {
+            return Memory;
+        }
+    }
+    
+    return FNPC_Memory(); // Return empty memory if not found
+}
+
+void ANPCBehaviorActor::UpdateMemories(float DeltaTime)
+{
+    float CurrentTime = GetWorld()->GetTimeSeconds();
+    
+    // Decay and remove old memories
+    for (int32 i = ShortTermMemory.Num() - 1; i >= 0; i--)
+    {
+        FNPC_Memory& Memory = ShortTermMemory[i];
+        
+        // Decay threat level over time
+        Memory.ThreatLevel = FMath::Max(0.0f, Memory.ThreatLevel - (MemoryDecayRate * DeltaTime));
+        
+        // Remove memories older than 5 minutes or with no threat
+        float MemoryAge = CurrentTime - Memory.Timestamp;
+        if (MemoryAge > 300.0f || Memory.ThreatLevel <= 0.1f)
+        {
+            ShortTermMemory.RemoveAt(i);
+        }
+    }
+}
+
+void ANPCBehaviorActor::OnPlayerApproach(AActor* Player)
+{
+    if (!Player) return;
+    
+    AddMemory(Player, Player->GetActorLocation(), 0.2f); // Low threat for player
+    
+    // React based on profession and current state
+    switch (Profession)
+    {
+        case ENPC_Profession::Elder:
+            if (CurrentState == ENPC_BehaviorState::Idle)
+            {
+                SetBehaviorState(ENPC_BehaviorState::Socializing);
+            }
             break;
-        case ENPC_EmotionalState::Calm:
-            MovementSpeed = 200.0f;
-            DetectionRange = 1500.0f;
+            
+        case ENPC_Profession::Hunter:
+            SetBehaviorState(ENPC_BehaviorState::Investigating);
             break;
+            
+        case ENPC_Profession::Child:
+            if (FearLevel > 30.0f)
+            {
+                SetBehaviorState(ENPC_BehaviorState::Fleeing);
+            }
+            break;
+            
         default:
             break;
     }
 }
 
-void ANPCBehaviorActor::AddMemory(FVector Location, const FString& EventType, float Importance)
+void ANPCBehaviorActor::OnDinosaurSighted(AActor* Dinosaur)
 {
-    FNPC_Memory NewMemory;
-    NewMemory.Location = Location;
-    NewMemory.EventType = EventType;
-    NewMemory.Timestamp = GetWorld()->GetTimeSeconds();
-    NewMemory.Importance = Importance;
-
-    Memories.Add(NewMemory);
-
-    // REMOVE OLDEST MEMORY IF LIMIT EXCEEDED
-    if (Memories.Num() > MaxMemories)
-    {
-        Memories.RemoveAt(0);
-    }
-}
-
-void ANPCBehaviorActor::UpdateRelationship(AActor* OtherActor, float RelationshipChange)
-{
-    if (!OtherActor) return;
-
-    if (Relationships.Contains(OtherActor))
-    {
-        float CurrentRelationship = Relationships[OtherActor];
-        Relationships[OtherActor] = FMath::Clamp(CurrentRelationship + RelationshipChange, -1.0f, 1.0f);
-    }
-    else
-    {
-        Relationships.Add(OtherActor, FMath::Clamp(RelationshipChange, -1.0f, 1.0f));
-    }
-}
-
-bool ANPCBehaviorActor::CanInteractWith(AActor* OtherActor)
-{
-    if (!OtherActor) return false;
-
-    float Distance = FVector::Dist(GetActorLocation(), OtherActor->GetActorLocation());
-    if (Distance > InteractionRange) return false;
-
-    // CHECK RELATIONSHIP
-    if (Relationships.Contains(OtherActor))
-    {
-        float Relationship = Relationships[OtherActor];
-        if (Relationship < -0.5f) return false; // Too hostile
-    }
-
-    // CHECK EMOTIONAL STATE
-    if (CurrentEmotion == ENPC_EmotionalState::Afraid && EmotionIntensity > 1.0f)
-    {
-        return false;
-    }
-
-    return HasLineOfSight(OtherActor);
-}
-
-void ANPCBehaviorActor::PerformDailyRoutine()
-{
-    // SIMPLIFIED TIME SYSTEM (0-24 hours)
-    float CurrentTime = FMath::Fmod(GetWorld()->GetTimeSeconds() / 3600.0f, 24.0f);
-
-    if (CurrentTime >= WorkStartTime && CurrentTime <= WorkEndTime)
-    {
-        // WORK TIME - MOVE TO WORK LOCATION
-        if (FVector::Dist(GetActorLocation(), WorkLocation) > 200.0f)
-        {
-            FVector Direction = (WorkLocation - GetActorLocation()).GetSafeNormal();
-            FVector NewLocation = GetActorLocation() + (Direction * MovementSpeed * 0.016f);
-            SetActorLocation(NewLocation);
-        }
-    }
-    else
-    {
-        // REST TIME - MOVE TO HOME
-        if (FVector::Dist(GetActorLocation(), HomeLocation) > 200.0f)
-        {
-            FVector Direction = (HomeLocation - GetActorLocation()).GetSafeNormal();
-            FVector NewLocation = GetActorLocation() + (Direction * MovementSpeed * 0.016f);
-            SetActorLocation(NewLocation);
-        }
-    }
-}
-
-TArray<AActor*> ANPCBehaviorActor::GetNearbyActors()
-{
-    TArray<AActor*> NearbyActors;
+    if (!Dinosaur) return;
     
-    if (GetWorld())
-    {
-        for (TActorIterator<AActor> ActorItr(GetWorld()); ActorItr; ++ActorItr)
-        {
-            AActor* Actor = *ActorItr;
-            if (Actor && Actor != this)
-            {
-                float Distance = FVector::Dist(GetActorLocation(), Actor->GetActorLocation());
-                if (Distance <= DetectionRange)
-                {
-                    NearbyActors.Add(Actor);
-                }
-            }
-        }
-    }
+    float ThreatLevel = 0.8f; // High threat for dinosaurs
+    AddMemory(Dinosaur, Dinosaur->GetActorLocation(), ThreatLevel);
     
-    return NearbyActors;
-}
-
-bool ANPCBehaviorActor::IsPlayerInRange()
-{
-    if (GetWorld())
-    {
-        APawn* Player = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
-        if (Player)
-        {
-            float Distance = FVector::Dist(GetActorLocation(), Player->GetActorLocation());
-            return Distance <= DetectionRange;
-        }
-    }
-    return false;
-}
-
-bool ANPCBehaviorActor::HasLineOfSight(AActor* Target)
-{
-    if (!Target || !GetWorld()) return false;
-
-    FVector Start = GetActorLocation() + FVector(0, 0, 50); // Eye level
-    FVector End = Target->GetActorLocation() + FVector(0, 0, 50);
-
-    FHitResult HitResult;
-    FCollisionQueryParams QueryParams;
-    QueryParams.AddIgnoredActor(this);
-    QueryParams.AddIgnoredActor(Target);
-
-    bool bHit = GetWorld()->LineTraceSingleByChannel(
-        HitResult,
-        Start,
-        End,
-        ECollisionChannel::ECC_Visibility,
-        QueryParams
-    );
-
-    return !bHit; // No obstacle = line of sight
-}
-
-void ANPCBehaviorActor::UpdateEmotionalState(float DeltaTime)
-{
-    // DECAY EMOTION INTENSITY OVER TIME
-    if (EmotionIntensity > 0.1f)
-    {
-        EmotionIntensity -= EmotionDecayRate * DeltaTime;
-        EmotionIntensity = FMath::Max(EmotionIntensity, 0.1f);
-    }
-
-    // RETURN TO CALM STATE IF EMOTION IS LOW
-    if (EmotionIntensity <= 0.2f && CurrentEmotion != ENPC_EmotionalState::Calm)
-    {
-        SetEmotionalState(ENPC_EmotionalState::Calm, 0.1f);
-    }
-}
-
-void ANPCBehaviorActor::CleanupMemories()
-{
-    float CurrentTime = GetWorld()->GetTimeSeconds();
+    // Increase fear level
+    FearLevel = FMath::Min(100.0f, FearLevel + 25.0f);
     
-    // REMOVE OLD OR LOW IMPORTANCE MEMORIES
-    Memories.RemoveAll([CurrentTime, this](const FNPC_Memory& Memory)
+    // Most NPCs should flee from dinosaurs
+    if (Profession != ENPC_Profession::Hunter || FearLevel > 60.0f)
     {
-        float Age = CurrentTime - Memory.Timestamp;
-        float DecayThreshold = Memory.Importance * 1000.0f; // Important memories last longer
-        return Age > DecayThreshold;
-    });
-}
-
-void ANPCBehaviorActor::CheckDailyRoutine()
-{
-    PerformDailyRoutine();
+        SetBehaviorState(ENPC_BehaviorState::Fleeing);
+        CurrentTarget = HomeLocation; // Run home
+    }
 }
 
 FVector ANPCBehaviorActor::GetRandomPatrolPoint()
 {
-    float Angle = FMath::RandRange(0.0f, 360.0f);
-    float Distance = FMath::RandRange(PatrolRadius * 0.3f, PatrolRadius);
+    FVector RandomDirection = FMath::VRand();
+    RandomDirection.Z = 0.0f; // Keep on ground level
+    RandomDirection.Normalize();
     
-    FVector Offset = FVector(
-        FMath::Cos(FMath::DegreesToRadians(Angle)) * Distance,
-        FMath::Sin(FMath::DegreesToRadians(Angle)) * Distance,
-        0.0f
-    );
+    float RandomDistance = FMath::RandRange(PatrolRadius * 0.3f, PatrolRadius);
+    return HomeLocation + (RandomDirection * RandomDistance);
+}
+
+bool ANPCBehaviorActor::ShouldFlee()
+{
+    // Check for high-threat memories
+    for (const FNPC_Memory& Memory : ShortTermMemory)
+    {
+        if (Memory.ThreatLevel > 0.5f)
+        {
+            float MemoryAge = GetWorld()->GetTimeSeconds() - Memory.Timestamp;
+            if (MemoryAge < 60.0f) // Recent threat
+            {
+                return true;
+            }
+        }
+    }
     
-    return PatrolCenter + Offset;
+    return FearLevel > 70.0f;
+}
+
+void ANPCBehaviorActor::OnSeePawn(APawn* Pawn)
+{
+    if (!Pawn) return;
+    
+    // Determine if this is a player or dinosaur
+    if (Pawn->IsA<ACharacter>() && Pawn->IsPlayerControlled())
+    {
+        OnPlayerApproach(Pawn);
+    }
+    else
+    {
+        // Assume it's a dinosaur or other threat
+        OnDinosaurSighted(Pawn);
+    }
+}
+
+void ANPCBehaviorActor::OnHearNoise(APawn* NoiseInstigator, const FVector& Location, float Volume)
+{
+    if (Volume > 0.5f) // Only react to significant noise
+    {
+        AddMemory(NoiseInstigator, Location, Volume * 0.3f);
+        
+        if (CurrentState == ENPC_BehaviorState::Idle)
+        {
+            SetBehaviorState(ENPC_BehaviorState::Investigating);
+            CurrentTarget = Location;
+        }
+    }
+}
+
+void ANPCBehaviorActor::InitializeSchedule()
+{
+    // Create default schedule based on profession
+    DailySchedule.Empty();
+    
+    switch (Profession)
+    {
+        case ENPC_Profession::Elder:
+            {
+                FNPC_DailySchedule MorningSchedule;
+                MorningSchedule.StartHour = 6.0f;
+                MorningSchedule.EndHour = 12.0f;
+                MorningSchedule.ScheduledActivity = ENPC_BehaviorState::Socializing;
+                DailySchedule.Add(MorningSchedule);
+                
+                FNPC_DailySchedule AfternoonSchedule;
+                AfternoonSchedule.StartHour = 12.0f;
+                AfternoonSchedule.EndHour = 18.0f;
+                AfternoonSchedule.ScheduledActivity = ENPC_BehaviorState::Working;
+                DailySchedule.Add(AfternoonSchedule);
+            }
+            break;
+            
+        case ENPC_Profession::Hunter:
+            {
+                FNPC_DailySchedule HuntingSchedule;
+                HuntingSchedule.StartHour = 5.0f;
+                HuntingSchedule.EndHour = 11.0f;
+                HuntingSchedule.ScheduledActivity = ENPC_BehaviorState::Patrolling;
+                HuntingSchedule.WorkLocation = FVector(2000, 0, 0);
+                DailySchedule.Add(HuntingSchedule);
+            }
+            break;
+            
+        case ENPC_Profession::Gatherer:
+            {
+                FNPC_DailySchedule GatheringSchedule;
+                GatheringSchedule.StartHour = 7.0f;
+                GatheringSchedule.EndHour = 16.0f;
+                GatheringSchedule.ScheduledActivity = ENPC_BehaviorState::Working;
+                GatheringSchedule.WorkLocation = FVector(0, 1500, 0);
+                DailySchedule.Add(GatheringSchedule);
+            }
+            break;
+            
+        default:
+            {
+                FNPC_DailySchedule DefaultSchedule;
+                DefaultSchedule.StartHour = 8.0f;
+                DefaultSchedule.EndHour = 17.0f;
+                DefaultSchedule.ScheduledActivity = ENPC_BehaviorState::Working;
+                DailySchedule.Add(DefaultSchedule);
+            }
+            break;
+    }
+}
+
+void ANPCBehaviorActor::ProcessBehaviorLogic(float DeltaTime)
+{
+    switch (CurrentState)
+    {
+        case ENPC_BehaviorState::Idle:
+            if (StateChangeTimer > 10.0f) // Change state after 10 seconds
+            {
+                if (ShouldFlee())
+                {
+                    SetBehaviorState(ENPC_BehaviorState::Fleeing);
+                }
+                else if (FMath::RandRange(0.0f, 1.0f) > 0.7f)
+                {
+                    SetBehaviorState(ENPC_BehaviorState::Patrolling);
+                    CurrentTarget = GetRandomPatrolPoint();
+                }
+            }
+            break;
+            
+        case ENPC_BehaviorState::Patrolling:
+            {
+                float DistanceToTarget = FVector::Dist(GetActorLocation(), CurrentTarget);
+                if (DistanceToTarget < 100.0f || StateChangeTimer > 30.0f)
+                {
+                    if (ShouldFlee())
+                    {
+                        SetBehaviorState(ENPC_BehaviorState::Fleeing);
+                    }
+                    else
+                    {
+                        CurrentTarget = GetRandomPatrolPoint();
+                        StateChangeTimer = 0.0f;
+                    }
+                }
+            }
+            break;
+            
+        case ENPC_BehaviorState::Fleeing:
+            {
+                float DistanceToHome = FVector::Dist(GetActorLocation(), HomeLocation);
+                if (DistanceToHome < 200.0f && !ShouldFlee())
+                {
+                    SetBehaviorState(ENPC_BehaviorState::Idle);
+                    FearLevel = FMath::Max(0.0f, FearLevel - 20.0f);
+                }
+            }
+            break;
+            
+        case ENPC_BehaviorState::Investigating:
+            if (StateChangeTimer > 15.0f)
+            {
+                SetBehaviorState(ENPC_BehaviorState::Idle);
+            }
+            break;
+            
+        default:
+            break;
+    }
+}
+
+void ANPCBehaviorActor::HandleMovement(float DeltaTime)
+{
+    if (CurrentState == ENPC_BehaviorState::Idle || CurrentState == ENPC_BehaviorState::Socializing)
+    {
+        return; // No movement needed
+    }
+    
+    FVector Direction = (CurrentTarget - GetActorLocation()).GetSafeNormal();
+    float Distance = FVector::Dist(GetActorLocation(), CurrentTarget);
+    
+    if (Distance > 50.0f)
+    {
+        // Move towards target
+        AddMovementInput(Direction, 1.0f);
+        
+        // Adjust speed based on behavior state
+        float SpeedMultiplier = 1.0f;
+        switch (CurrentState)
+        {
+            case ENPC_BehaviorState::Fleeing:
+                SpeedMultiplier = 1.5f;
+                break;
+            case ENPC_BehaviorState::Patrolling:
+                SpeedMultiplier = 0.7f;
+                break;
+            case ENPC_BehaviorState::Working:
+                SpeedMultiplier = 0.8f;
+                break;
+            default:
+                break;
+        }
+        
+        GetCharacterMovement()->MaxWalkSpeed = 300.0f * SpeedMultiplier;
+    }
+}
+
+void ANPCBehaviorActor::UpdateFearLevel(float DeltaTime)
+{
+    // Gradually reduce fear over time when safe
+    if (!ShouldFlee())
+    {
+        FearLevel = FMath::Max(0.0f, FearLevel - (10.0f * DeltaTime));
+    }
+    
+    // Increase social need over time
+    SocialNeed = FMath::Min(100.0f, SocialNeed + (5.0f * DeltaTime));
 }
