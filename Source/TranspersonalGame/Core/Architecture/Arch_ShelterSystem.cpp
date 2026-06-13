@@ -1,329 +1,309 @@
 #include "Arch_ShelterSystem.h"
 #include "Components/StaticMeshComponent.h"
+#include "Components/BoxComponent.h"
 #include "Engine/Engine.h"
-#include "UObject/ConstructorHelpers.h"
+#include "Math/UnrealMathUtility.h"
 
-AArch_ShelterSystem::AArch_ShelterSystem()
+UArch_ShelterSystem::UArch_ShelterSystem()
 {
-    PrimaryActorTick.bCanEverTick = true;
+    PrimaryComponentTick.bCanEverTick = true;
+    PrimaryComponentTick.TickInterval = 5.0f; // Update every 5 seconds for performance
 
-    // Create root component
-    RootSceneComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootSceneComponent"));
-    RootComponent = RootSceneComponent;
-
-    // Create mesh components
-    WallMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("WallMesh"));
-    WallMesh->SetupAttachment(RootComponent);
-
-    RoofMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("RoofMesh"));
-    RoofMesh->SetupAttachment(RootComponent);
-
-    FloorMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("FloorMesh"));
-    FloorMesh->SetupAttachment(RootComponent);
-
-    // Initialize default values
-    ShelterConfig = FArch_ShelterConfig();
-    WeatherDamageRate = 1.0f;
-    RepairEfficiency = 5.0f;
-    CurrentOccupants.Empty();
-
-    // Set default mesh positions
-    if (WallMesh)
-    {
-        WallMesh->SetRelativeLocation(FVector(0.0f, 0.0f, 100.0f));
-    }
-
-    if (RoofMesh)
-    {
-        RoofMesh->SetRelativeLocation(FVector(0.0f, 0.0f, 200.0f));
-    }
-
-    if (FloorMesh)
-    {
-        FloorMesh->SetRelativeLocation(FVector(0.0f, 0.0f, 0.0f));
-    }
+    // Initialize default shelter properties
+    ShelterData = FArch_ShelterProperties();
+    WeatheringRate = 0.001f;
+    RainDamageMultiplier = 1.5f;
+    WindDamageMultiplier = 1.2f;
+    CurrentOccupants = 0;
+    AccumulatedDamage = 0.0f;
 }
 
-void AArch_ShelterSystem::BeginPlay()
+void UArch_ShelterSystem::BeginPlay()
 {
     Super::BeginPlay();
-    
-    InitializeShelter(ShelterConfig.ShelterType);
-    UpdateMeshVisibility();
-    ApplyStateEffects();
-}
 
-void AArch_ShelterSystem::Tick(float DeltaTime)
-{
-    Super::Tick(DeltaTime);
-    
-    ProcessDegradation(DeltaTime);
-    UpdateShelterState();
-}
-
-void AArch_ShelterSystem::InitializeShelter(EArch_ShelterType NewType)
-{
-    ShelterConfig.ShelterType = NewType;
-
-    // Configure shelter based on type
-    switch (NewType)
+    // Initialize visual components if they exist
+    if (AActor* Owner = GetOwner())
     {
-        case EArch_ShelterType::StoneHut:
-            ShelterConfig.StructuralIntegrity = 100.0f;
-            ShelterConfig.WeatherResistance = 90.0f;
-            ShelterConfig.InsulationValue = 80.0f;
-            ShelterConfig.MaxOccupants = 4;
-            break;
-
-        case EArch_ShelterType::WoodLean:
-            ShelterConfig.StructuralIntegrity = 70.0f;
-            ShelterConfig.WeatherResistance = 60.0f;
-            ShelterConfig.InsulationValue = 50.0f;
-            ShelterConfig.MaxOccupants = 2;
-            break;
-
-        case EArch_ShelterType::CaveEntrance:
-            ShelterConfig.StructuralIntegrity = 95.0f;
-            ShelterConfig.WeatherResistance = 100.0f;
-            ShelterConfig.InsulationValue = 90.0f;
-            ShelterConfig.MaxOccupants = 6;
-            break;
-
-        case EArch_ShelterType::BoneFrame:
-            ShelterConfig.StructuralIntegrity = 60.0f;
-            ShelterConfig.WeatherResistance = 40.0f;
-            ShelterConfig.InsulationValue = 30.0f;
-            ShelterConfig.MaxOccupants = 3;
-            break;
-
-        case EArch_ShelterType::HideWall:
-            ShelterConfig.StructuralIntegrity = 50.0f;
-            ShelterConfig.WeatherResistance = 30.0f;
-            ShelterConfig.InsulationValue = 60.0f;
-            ShelterConfig.MaxOccupants = 2;
-            break;
-
-        default:
-            ShelterConfig.StructuralIntegrity = 50.0f;
-            ShelterConfig.WeatherResistance = 50.0f;
-            ShelterConfig.InsulationValue = 50.0f;
-            ShelterConfig.MaxOccupants = 1;
-            break;
-    }
-
-    UpdateMeshVisibility();
-}
-
-void AArch_ShelterSystem::ApplyWeatherDamage(float DamageAmount)
-{
-    float ActualDamage = DamageAmount * (1.0f - (ShelterConfig.WeatherResistance / 100.0f));
-    ShelterConfig.StructuralIntegrity = FMath::Max(0.0f, ShelterConfig.StructuralIntegrity - ActualDamage);
-    
-    UpdateShelterState();
-}
-
-void AArch_ShelterSystem::RepairShelter(float RepairAmount)
-{
-    float ActualRepair = RepairAmount * (RepairEfficiency / 10.0f);
-    ShelterConfig.StructuralIntegrity = FMath::Min(100.0f, ShelterConfig.StructuralIntegrity + ActualRepair);
-    
-    UpdateShelterState();
-}
-
-bool AArch_ShelterSystem::CanEnterShelter(AActor* Actor)
-{
-    if (!Actor)
-    {
-        return false;
-    }
-
-    if (ShelterConfig.CurrentState == EArch_ShelterState::Collapsed)
-    {
-        return false;
-    }
-
-    if (CurrentOccupants.Num() >= ShelterConfig.MaxOccupants)
-    {
-        return false;
-    }
-
-    return true;
-}
-
-void AArch_ShelterSystem::EnterShelter(AActor* Actor)
-{
-    if (CanEnterShelter(Actor) && !CurrentOccupants.Contains(Actor))
-    {
-        CurrentOccupants.Add(Actor);
+        MainStructureMesh = Owner->FindComponentByClass<UStaticMeshComponent>();
+        InteriorVolume = Owner->FindComponentByClass<UBoxComponent>();
         
-        if (GEngine)
+        if (!InteriorVolume)
         {
-            GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Green, 
-                FString::Printf(TEXT("Actor entered shelter: %s"), *Actor->GetName()));
+            // Create interior volume if it doesn't exist
+            InteriorVolume = NewObject<UBoxComponent>(Owner);
+            InteriorVolume->SetupAttachment(Owner->GetRootComponent());
+            InteriorVolume->SetBoxExtent(FVector(300.0f, 300.0f, 200.0f));
+            InteriorVolume->RegisterComponent();
+        }
+    }
+
+    UpdateVisualState();
+}
+
+void UArch_ShelterSystem::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+{
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+
+    // Apply gradual weathering
+    if (ShelterData.Condition != EArch_ShelterCondition::Collapsed)
+    {
+        AccumulatedDamage += WeatheringRate * DeltaTime;
+        
+        if (AccumulatedDamage > 10.0f)
+        {
+            AccumulatedDamage = 0.0f;
+            UpdateShelterCondition();
         }
     }
 }
 
-void AArch_ShelterSystem::ExitShelter(AActor* Actor)
+void UArch_ShelterSystem::InitializeShelter(EArch_ShelterType Type, EArch_ShelterCondition InitialCondition)
 {
-    if (Actor && CurrentOccupants.Contains(Actor))
+    ShelterData.ShelterType = Type;
+    ShelterData.Condition = InitialCondition;
+
+    // Set type-specific properties
+    switch (Type)
     {
-        CurrentOccupants.Remove(Actor);
-        
-        if (GEngine)
-        {
-            GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Yellow, 
-                FString::Printf(TEXT("Actor exited shelter: %s"), *Actor->GetName()));
-        }
+        case EArch_ShelterType::CircularStone:
+            ShelterData.WeatherProtection = 0.85f;
+            ShelterData.TemperatureInsulation = 0.7f;
+            ShelterData.MaxOccupants = 6;
+            ShelterData.StructuralIntegrity = 0.9f;
+            ShelterData.bHasFirePit = true;
+            break;
+
+        case EArch_ShelterType::RectangularStone:
+            ShelterData.WeatherProtection = 0.8f;
+            ShelterData.TemperatureInsulation = 0.75f;
+            ShelterData.MaxOccupants = 8;
+            ShelterData.StructuralIntegrity = 0.85f;
+            ShelterData.bHasFirePit = true;
+            break;
+
+        case EArch_ShelterType::NaturalCave:
+            ShelterData.WeatherProtection = 0.95f;
+            ShelterData.TemperatureInsulation = 0.9f;
+            ShelterData.MaxOccupants = 12;
+            ShelterData.StructuralIntegrity = 1.0f;
+            ShelterData.bHasFirePit = false;
+            break;
+
+        case EArch_ShelterType::RockOverhang:
+            ShelterData.WeatherProtection = 0.6f;
+            ShelterData.TemperatureInsulation = 0.4f;
+            ShelterData.MaxOccupants = 4;
+            ShelterData.StructuralIntegrity = 0.95f;
+            ShelterData.bHasFirePit = false;
+            break;
+
+        case EArch_ShelterType::TreeHollow:
+            ShelterData.WeatherProtection = 0.5f;
+            ShelterData.TemperatureInsulation = 0.6f;
+            ShelterData.MaxOccupants = 2;
+            ShelterData.StructuralIntegrity = 0.6f;
+            ShelterData.bHasFirePit = false;
+            break;
+
+        case EArch_ShelterType::CliffAlcove:
+            ShelterData.WeatherProtection = 0.75f;
+            ShelterData.TemperatureInsulation = 0.5f;
+            ShelterData.MaxOccupants = 3;
+            ShelterData.StructuralIntegrity = 0.9f;
+            ShelterData.bHasFirePit = false;
+            break;
     }
+
+    // Apply condition modifiers
+    float ConditionMultiplier = 1.0f;
+    switch (InitialCondition)
+    {
+        case EArch_ShelterCondition::Pristine:
+            ConditionMultiplier = 1.0f;
+            break;
+        case EArch_ShelterCondition::Good:
+            ConditionMultiplier = 0.9f;
+            break;
+        case EArch_ShelterCondition::Weathered:
+            ConditionMultiplier = 0.75f;
+            break;
+        case EArch_ShelterCondition::Damaged:
+            ConditionMultiplier = 0.5f;
+            break;
+        case EArch_ShelterCondition::Ruined:
+            ConditionMultiplier = 0.25f;
+            break;
+        case EArch_ShelterCondition::Collapsed:
+            ConditionMultiplier = 0.1f;
+            break;
+    }
+
+    ShelterData.WeatherProtection *= ConditionMultiplier;
+    ShelterData.TemperatureInsulation *= ConditionMultiplier;
+    ShelterData.StructuralIntegrity *= ConditionMultiplier;
+
+    UpdateVisualState();
 }
 
-float AArch_ShelterSystem::GetShelterEffectiveness() const
+bool UArch_ShelterSystem::CanProvideWeatherProtection() const
 {
-    float BaseEffectiveness = ShelterConfig.StructuralIntegrity / 100.0f;
-    float WeatherBonus = ShelterConfig.WeatherResistance / 200.0f;
-    float InsulationBonus = ShelterConfig.InsulationValue / 200.0f;
-    
-    return FMath::Clamp(BaseEffectiveness + WeatherBonus + InsulationBonus, 0.0f, 1.0f);
+    return ShelterData.WeatherProtection > 0.3f && ShelterData.Condition != EArch_ShelterCondition::Collapsed;
 }
 
-void AArch_ShelterSystem::UpdateShelterState()
+float UArch_ShelterSystem::GetTemperatureModifier() const
 {
-    if (ShelterConfig.StructuralIntegrity > 80.0f)
+    if (ShelterData.Condition == EArch_ShelterCondition::Collapsed)
     {
-        ShelterConfig.CurrentState = EArch_ShelterState::Intact;
+        return 0.0f;
     }
-    else if (ShelterConfig.StructuralIntegrity > 60.0f)
-    {
-        ShelterConfig.CurrentState = EArch_ShelterState::Weathered;
-    }
-    else if (ShelterConfig.StructuralIntegrity > 30.0f)
-    {
-        ShelterConfig.CurrentState = EArch_ShelterState::Damaged;
-    }
-    else if (ShelterConfig.StructuralIntegrity > 10.0f)
-    {
-        ShelterConfig.CurrentState = EArch_ShelterState::Ruined;
-    }
-    else
-    {
-        ShelterConfig.CurrentState = EArch_ShelterState::Collapsed;
-        CurrentOccupants.Empty(); // Force evacuation
-    }
-
-    ApplyStateEffects();
+    return ShelterData.TemperatureInsulation;
 }
 
-void AArch_ShelterSystem::SetFirePit(bool bEnabled)
+int32 UArch_ShelterSystem::GetAvailableSpace() const
 {
-    ShelterConfig.bHasFirePit = bEnabled;
-    
-    if (bEnabled)
+    if (ShelterData.Condition == EArch_ShelterCondition::Collapsed)
     {
-        ShelterConfig.InsulationValue += 20.0f;
+        return 0;
     }
-    else
-    {
-        ShelterConfig.InsulationValue = FMath::Max(0.0f, ShelterConfig.InsulationValue - 20.0f);
-    }
+    return FMath::Max(0, ShelterData.MaxOccupants - CurrentOccupants);
 }
 
-void AArch_ShelterSystem::SetStorageArea(bool bEnabled)
+void UArch_ShelterSystem::ApplyWeatherDamage(float DeltaTime, bool bIsRaining, float WindStrength)
 {
-    ShelterConfig.bHasStorageArea = bEnabled;
-    
-    if (bEnabled)
-    {
-        ShelterConfig.MaxOccupants = FMath::Max(1, ShelterConfig.MaxOccupants - 1);
-    }
-    else
-    {
-        ShelterConfig.MaxOccupants += 1;
-    }
-}
-
-void AArch_ShelterSystem::UpdateMeshVisibility()
-{
-    if (!WallMesh || !RoofMesh || !FloorMesh)
+    if (ShelterData.Condition == EArch_ShelterCondition::Collapsed)
     {
         return;
     }
 
-    bool bShouldBeVisible = (ShelterConfig.CurrentState != EArch_ShelterState::Collapsed);
-    
-    WallMesh->SetVisibility(bShouldBeVisible);
-    RoofMesh->SetVisibility(bShouldBeVisible && ShelterConfig.CurrentState != EArch_ShelterState::Ruined);
-    FloorMesh->SetVisibility(bShouldBeVisible);
-}
+    float DamageAmount = WeatheringRate * DeltaTime;
 
-void AArch_ShelterSystem::ApplyStateEffects()
-{
-    float StateMultiplier = 1.0f;
-    
-    switch (ShelterConfig.CurrentState)
+    if (bIsRaining)
     {
-        case EArch_ShelterState::Intact:
-            StateMultiplier = 1.0f;
-            break;
-        case EArch_ShelterState::Weathered:
-            StateMultiplier = 0.9f;
-            break;
-        case EArch_ShelterState::Damaged:
-            StateMultiplier = 0.7f;
-            break;
-        case EArch_ShelterState::Ruined:
-            StateMultiplier = 0.4f;
-            break;
-        case EArch_ShelterState::Collapsed:
-            StateMultiplier = 0.0f;
-            break;
+        DamageAmount *= RainDamageMultiplier;
     }
 
-    // Apply state effects to shelter properties
-    float OriginalWeatherResistance = ShelterConfig.WeatherResistance;
-    float OriginalInsulation = ShelterConfig.InsulationValue;
+    if (WindStrength > 0.5f)
+    {
+        DamageAmount *= WindDamageMultiplier * WindStrength;
+    }
+
+    // Natural shelters are more resistant to weather
+    if (ShelterData.ShelterType == EArch_ShelterType::NaturalCave || 
+        ShelterData.ShelterType == EArch_ShelterType::RockOverhang)
+    {
+        DamageAmount *= 0.1f;
+    }
+
+    AccumulatedDamage += DamageAmount;
     
-    // These are temporary effects, not permanent modifications
-    // In a real implementation, you'd store base values separately
+    if (AccumulatedDamage > 5.0f)
+    {
+        UpdateShelterCondition();
+        AccumulatedDamage = 0.0f;
+    }
 }
 
-float AArch_ShelterSystem::CalculateWeatherProtection() const
+void UArch_ShelterSystem::RepairShelter(float RepairAmount)
 {
-    float BaseProtection = ShelterConfig.WeatherResistance / 100.0f;
-    float StateModifier = 1.0f;
-    
-    switch (ShelterConfig.CurrentState)
+    if (ShelterData.Condition == EArch_ShelterCondition::Collapsed)
     {
-        case EArch_ShelterState::Intact:
-            StateModifier = 1.0f;
-            break;
-        case EArch_ShelterState::Weathered:
-            StateModifier = 0.85f;
-            break;
-        case EArch_ShelterState::Damaged:
-            StateModifier = 0.6f;
-            break;
-        case EArch_ShelterState::Ruined:
-            StateModifier = 0.3f;
-            break;
-        case EArch_ShelterState::Collapsed:
-            StateModifier = 0.0f;
-            break;
+        return; // Cannot repair collapsed structures
     }
+
+    AccumulatedDamage = FMath::Max(0.0f, AccumulatedDamage - RepairAmount);
     
-    return BaseProtection * StateModifier;
+    // Potentially improve condition
+    if (AccumulatedDamage <= 0.0f)
+    {
+        int32 CurrentConditionValue = static_cast<int32>(ShelterData.Condition);
+        if (CurrentConditionValue > 0)
+        {
+            ShelterData.Condition = static_cast<EArch_ShelterCondition>(CurrentConditionValue - 1);
+            UpdateVisualState();
+        }
+    }
 }
 
-void AArch_ShelterSystem::ProcessDegradation(float DeltaTime)
+FVector UArch_ShelterSystem::GetOptimalFirePitLocation() const
 {
-    // Apply gradual weather damage over time
-    float DegradationRate = WeatherDamageRate * DeltaTime * 0.1f; // Very slow degradation
-    
-    // Increase degradation if shelter is occupied beyond capacity
-    if (CurrentOccupants.Num() > ShelterConfig.MaxOccupants)
+    if (!ShelterData.bHasFirePit || !InteriorVolume)
     {
-        DegradationRate *= 2.0f;
+        return FVector::ZeroVector;
+    }
+
+    FVector InteriorCenter = CalculateInteriorCenter();
+    
+    // Place fire pit slightly off-center for realism
+    FVector Offset = FVector(50.0f, 0.0f, -100.0f);
+    return InteriorCenter + Offset;
+}
+
+TArray<FVector> UArch_ShelterSystem::GetStorageLocations() const
+{
+    TArray<FVector> StorageLocations;
+    
+    if (!ShelterData.bHasStorageArea || !InteriorVolume)
+    {
+        return StorageLocations;
+    }
+
+    FVector InteriorCenter = CalculateInteriorCenter();
+    FVector BoxExtent = InteriorVolume->GetScaledBoxExtent();
+
+    // Create storage locations along the walls
+    StorageLocations.Add(InteriorCenter + FVector(BoxExtent.X * 0.8f, 0.0f, -BoxExtent.Z * 0.5f));
+    StorageLocations.Add(InteriorCenter + FVector(-BoxExtent.X * 0.8f, 0.0f, -BoxExtent.Z * 0.5f));
+    StorageLocations.Add(InteriorCenter + FVector(0.0f, BoxExtent.Y * 0.8f, -BoxExtent.Z * 0.5f));
+    StorageLocations.Add(InteriorCenter + FVector(0.0f, -BoxExtent.Y * 0.8f, -BoxExtent.Z * 0.5f));
+
+    return StorageLocations;
+}
+
+void UArch_ShelterSystem::UpdateShelterCondition()
+{
+    int32 CurrentConditionValue = static_cast<int32>(ShelterData.Condition);
+    
+    if (AccumulatedDamage > 20.0f && CurrentConditionValue < 5)
+    {
+        ShelterData.Condition = static_cast<EArch_ShelterCondition>(CurrentConditionValue + 1);
+        UpdateVisualState();
+    }
+}
+
+void UArch_ShelterSystem::UpdateVisualState()
+{
+    // This would typically update material parameters, mesh visibility, etc.
+    // For now, we'll log the state change
+    if (GEngine)
+    {
+        FString ConditionString;
+        switch (ShelterData.Condition)
+        {
+            case EArch_ShelterCondition::Pristine: ConditionString = TEXT("Pristine"); break;
+            case EArch_ShelterCondition::Good: ConditionString = TEXT("Good"); break;
+            case EArch_ShelterCondition::Weathered: ConditionString = TEXT("Weathered"); break;
+            case EArch_ShelterCondition::Damaged: ConditionString = TEXT("Damaged"); break;
+            case EArch_ShelterCondition::Ruined: ConditionString = TEXT("Ruined"); break;
+            case EArch_ShelterCondition::Collapsed: ConditionString = TEXT("Collapsed"); break;
+        }
+        
+        GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Yellow, 
+            FString::Printf(TEXT("Shelter condition updated to: %s"), *ConditionString));
+    }
+}
+
+FVector UArch_ShelterSystem::CalculateInteriorCenter() const
+{
+    if (InteriorVolume)
+    {
+        return InteriorVolume->GetComponentLocation();
     }
     
-    ApplyWeatherDamage(DegradationRate);
+    if (AActor* Owner = GetOwner())
+    {
+        return Owner->GetActorLocation();
+    }
+    
+    return FVector::ZeroVector;
 }
