@@ -1,158 +1,118 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
+#include "Engine/GameInstanceSubsystem.h"
 #include "Engine/World.h"
-#include "Components/StaticMeshComponent.h"
-#include "Components/SphereComponent.h"
-#include "MassEntityTypes.h"
-#include "MassSpawnerTypes.h"
+#include "Components/ActorComponent.h"
 #include "SharedTypes.h"
 #include "Crowd_MassEntityManager.generated.h"
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FCrowd_EntityConfig
+struct TRANSPERSONALGAME_API FCrowd_SpawnConfiguration
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Config")
-    int32 MaxEntities = 500;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Spawn")
+    int32 MaxEntities = 1000;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Config")
-    float SpawnRadius = 1500.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Spawn")
+    float SpawnRadius = 2000.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Config")
-    float MovementSpeed = 150.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Spawn")
+    float MinSpawnDistance = 100.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Config")
-    float LODDistance0 = 500.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Spawn")
+    float DespawnDistance = 5000.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Config")
-    float LODDistance1 = 1500.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Config")
-    float LODDistance2 = 3000.0f;
+    FCrowd_SpawnConfiguration()
+    {
+        MaxEntities = 1000;
+        SpawnRadius = 2000.0f;
+        MinSpawnDistance = 100.0f;
+        DespawnDistance = 5000.0f;
+    }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FCrowd_BehaviorZone
+struct TRANSPERSONALGAME_API FCrowd_LODConfiguration
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior Zone")
-    FString ZoneName;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd LOD")
+    float HighLODDistance = 500.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior Zone")
-    FVector ZoneCenter;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd LOD")
+    float MediumLODDistance = 1500.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior Zone")
-    float ZoneRadius = 800.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd LOD")
+    float LowLODDistance = 3000.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior Zone")
-    ECrowdBehaviorType BehaviorType = ECrowdBehaviorType::Wandering;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd LOD")
+    float CullDistance = 5000.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior Zone")
-    float DensityMultiplier = 1.0f;
-};
-
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FCrowd_PanicResponse
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Panic Response")
-    FVector TriggerLocation;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Panic Response")
-    float TriggerRadius = 500.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Panic Response")
-    float PanicDuration = 30.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Panic Response")
-    float EvacuationSpeed = 300.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Panic Response")
-    FVector EvacuationTarget;
+    FCrowd_LODConfiguration()
+    {
+        HighLODDistance = 500.0f;
+        MediumLODDistance = 1500.0f;
+        LowLODDistance = 3000.0f;
+        CullDistance = 5000.0f;
+    }
 };
 
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API ACrowd_MassEntityManager : public AActor
+class TRANSPERSONALGAME_API UCrowd_MassEntityManager : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
 public:
-    ACrowd_MassEntityManager();
+    UCrowd_MassEntityManager();
 
-protected:
-    virtual void BeginPlay() override;
-    virtual void Tick(float DeltaTime) override;
+    // USubsystem interface
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    class UStaticMeshComponent* VisualizationMesh;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    class USphereComponent* DetectionSphere;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Configuration")
-    FCrowd_EntityConfig EntityConfig;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Configuration")
-    TArray<FCrowd_BehaviorZone> BehaviorZones;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Configuration")
-    TArray<FCrowd_PanicResponse> PanicResponses;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Configuration")
-    TArray<FVector> WaypointNetwork;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Configuration")
-    bool bEnableLODSystem = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Configuration")
-    bool bEnablePanicSystem = true;
-
-private:
-    UPROPERTY()
-    TArray<class AActor*> SpawnedEntities;
-
-    UPROPERTY()
-    TArray<class AActor*> WaypointActors;
-
-    UPROPERTY()
-    TArray<class AActor*> ZoneActors;
-
-    float LastUpdateTime = 0.0f;
-    bool bSystemInitialized = false;
-
-public:
+    // Crowd management functions
     UFUNCTION(BlueprintCallable, Category = "Crowd Management")
     void InitializeCrowdSystem();
 
     UFUNCTION(BlueprintCallable, Category = "Crowd Management")
-    void SpawnCrowdEntities(int32 Count);
+    void SpawnCrowdEntities(const FVector& CenterLocation, int32 EntityCount);
 
     UFUNCTION(BlueprintCallable, Category = "Crowd Management")
     void UpdateCrowdLOD(const FVector& ViewerLocation);
 
     UFUNCTION(BlueprintCallable, Category = "Crowd Management")
-    void TriggerPanicResponse(const FVector& TriggerLocation, float Radius);
+    void SetCrowdDensity(float NewDensity);
 
     UFUNCTION(BlueprintCallable, Category = "Crowd Management")
-    void CreateWaypointNetwork();
-
-    UFUNCTION(BlueprintCallable, Category = "Crowd Management")
-    void CreateBehaviorZones();
-
-    UFUNCTION(BlueprintCallable, Category = "Crowd Management", CallInEditor)
-    void ValidateCrowdSystem();
-
-    UFUNCTION(BlueprintPure, Category = "Crowd Management")
     int32 GetActiveCrowdCount() const;
 
-    UFUNCTION(BlueprintPure, Category = "Crowd Management")
-    float GetCrowdDensity(const FVector& Location, float Radius) const;
+    UFUNCTION(BlueprintCallable, Category = "Crowd Management")
+    void ClearAllCrowdEntities();
 
-    UFUNCTION(BlueprintPure, Category = "Crowd Management")
-    ECrowdBehaviorType GetZoneBehaviorType(const FVector& Location) const;
+protected:
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
+    FCrowd_SpawnConfiguration SpawnConfig;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
+    FCrowd_LODConfiguration LODConfig;
+
+    UPROPERTY(BlueprintReadOnly, Category = "State")
+    int32 ActiveEntityCount;
+
+    UPROPERTY(BlueprintReadOnly, Category = "State")
+    float CurrentDensityMultiplier;
+
+    UPROPERTY(BlueprintReadOnly, Category = "State")
+    bool bIsCrowdSystemActive;
+
+private:
+    void UpdateEntityLOD(int32 EntityIndex, float DistanceToViewer);
+    void CullDistantEntities(const FVector& ViewerLocation);
+    void SpawnEntityAtLocation(const FVector& Location);
+    void DespawnEntity(int32 EntityIndex);
+
+    TArray<FVector> EntityLocations;
+    TArray<int32> EntityLODLevels;
+    TArray<bool> EntityActiveStates;
 };
