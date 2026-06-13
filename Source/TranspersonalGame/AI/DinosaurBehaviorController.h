@@ -5,13 +5,10 @@
 #include "BehaviorTree/BehaviorTreeComponent.h"
 #include "BehaviorTree/BlackboardComponent.h"
 #include "Perception/AIPerceptionComponent.h"
-#include "Perception/AISightConfig.h"
-#include "Perception/AIHearingConfig.h"
-#include "SharedTypes.h"
+#include "Perception/AISenseConfig_Sight.h"
+#include "Perception/AISenseConfig_Hearing.h"
+#include "../Core/SharedTypes.h"
 #include "DinosaurBehaviorController.generated.h"
-
-class UBehaviorTree;
-class APawn;
 
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API ADinosaurBehaviorController : public AAIController
@@ -23,29 +20,89 @@ public:
 
 protected:
     virtual void BeginPlay() override;
-    virtual void Possess(APawn* InPawn) override;
+    virtual void OnPossess(APawn* InPawn) override;
 
-    // Core AI Components
+    // Behavior Tree Component
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI")
-    class UBehaviorTreeComponent* BehaviorTreeComponent;
+    UBehaviorTreeComponent* BehaviorTreeComponent;
 
+    // AI Perception
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI")
-    class UBlackboardComponent* BlackboardComponent;
+    UAIPerceptionComponent* AIPerceptionComponent;
 
+    // Sight Configuration
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI")
-    class UAIPerceptionComponent* PerceptionComponent;
+    UAISenseConfig_Sight* SightConfig;
 
-    // Behavior Trees for different dinosaur types
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI")
-    class UBehaviorTree* TRexBehaviorTree;
+    // Hearing Configuration
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI")
+    UAISenseConfig_Hearing* HearingConfig;
 
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI")
-    class UBehaviorTree* RaptorBehaviorTree;
+    // Behavior Tree Asset
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI")
+    class UBehaviorTree* BehaviorTreeAsset;
 
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI")
-    class UBehaviorTree* HerbivoreeBehaviorTree;
+    // Blackboard Asset
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI")
+    class UBlackboardData* BlackboardAsset;
 
-    // AI Settings
+public:
+    // Perception Events
+    UFUNCTION()
+    void OnPerceptionUpdated(const TArray<AActor*>& UpdatedActors);
+
+    UFUNCTION()
+    void OnTargetPerceptionUpdated(AActor* Actor, FAIStimulus Stimulus);
+
+    // Behavior Control
+    UFUNCTION(BlueprintCallable, Category = "AI")
+    void StartBehaviorTree();
+
+    UFUNCTION(BlueprintCallable, Category = "AI")
+    void StopBehaviorTree();
+
+    UFUNCTION(BlueprintCallable, Category = "AI")
+    void SetBehaviorState(ENPC_BehaviorState NewState);
+
+    UFUNCTION(BlueprintCallable, Category = "AI")
+    void SetTargetActor(AActor* Target);
+
+    UFUNCTION(BlueprintCallable, Category = "AI")
+    AActor* GetTargetActor() const;
+
+    // Dinosaur-specific behavior
+    UFUNCTION(BlueprintCallable, Category = "AI")
+    void SetTerritoryCenter(FVector Center, float Radius);
+
+    UFUNCTION(BlueprintCallable, Category = "AI")
+    void SetPackLeader(ADinosaurBehaviorController* Leader);
+
+    UFUNCTION(BlueprintCallable, Category = "AI")
+    void AddPackMember(ADinosaurBehaviorController* Member);
+
+    UFUNCTION(BlueprintCallable, Category = "AI")
+    void RemovePackMember(ADinosaurBehaviorController* Member);
+
+protected:
+    // Territory data
+    UPROPERTY(BlueprintReadOnly, Category = "Territory")
+    FVector TerritoryCenter;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Territory")
+    float TerritoryRadius;
+
+    // Pack behavior
+    UPROPERTY(BlueprintReadOnly, Category = "Pack")
+    ADinosaurBehaviorController* PackLeader;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Pack")
+    TArray<ADinosaurBehaviorController*> PackMembers;
+
+    // Current behavior state
+    UPROPERTY(BlueprintReadOnly, Category = "AI")
+    ENPC_BehaviorState CurrentBehaviorState;
+
+    // Perception range settings
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI")
     float SightRadius;
 
@@ -56,92 +113,9 @@ protected:
     float PeripheralVisionAngleDegrees;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI")
-    float HearingRange;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI")
-    float PatrolRadius;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI")
-    float ChaseRange;
-
-    // Dinosaur Type
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur")
-    EDinosaurType DinosaurType;
-
-    // Current State
-    UPROPERTY(BlueprintReadOnly, Category = "AI")
-    EDinosaurBehaviorState CurrentBehaviorState;
-
-    // Target References
-    UPROPERTY(BlueprintReadOnly, Category = "AI")
-    AActor* CurrentTarget;
-
-    UPROPERTY(BlueprintReadOnly, Category = "AI")
-    FVector PatrolCenter;
-
-    UPROPERTY(BlueprintReadOnly, Category = "AI")
-    FVector LastKnownPlayerLocation;
-
-public:
-    // AI Functions
-    UFUNCTION(BlueprintCallable, Category = "AI")
-    void StartBehaviorTree();
-
-    UFUNCTION(BlueprintCallable, Category = "AI")
-    void SetBehaviorState(EDinosaurBehaviorState NewState);
-
-    UFUNCTION(BlueprintCallable, Category = "AI")
-    void SetTarget(AActor* NewTarget);
-
-    UFUNCTION(BlueprintCallable, Category = "AI")
-    void ClearTarget();
-
-    UFUNCTION(BlueprintCallable, Category = "AI")
-    bool IsPlayerInSight() const;
-
-    UFUNCTION(BlueprintCallable, Category = "AI")
-    bool IsPlayerInChaseRange() const;
-
-    UFUNCTION(BlueprintCallable, Category = "AI")
-    FVector GetRandomPatrolPoint() const;
-
-    // Pack Behavior (for Raptors)
-    UFUNCTION(BlueprintCallable, Category = "Pack")
-    void JoinPack(ADinosaurBehaviorController* PackLeader);
-
-    UFUNCTION(BlueprintCallable, Category = "Pack")
-    void LeavePack();
-
-    UFUNCTION(BlueprintCallable, Category = "Pack")
-    bool IsInPack() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Pack")
-    TArray<ADinosaurBehaviorController*> GetPackMembers() const;
-
-protected:
-    // Perception Events
-    UFUNCTION()
-    void OnPerceptionUpdated(const TArray<AActor*>& UpdatedActors);
-
-    UFUNCTION()
-    void OnTargetPerceptionUpdated(AActor* Actor, FAIStimulus Stimulus);
-
-    // Pack System
-    UPROPERTY()
-    ADinosaurBehaviorController* PackLeader;
-
-    UPROPERTY()
-    TArray<ADinosaurBehaviorController*> PackMembers;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pack")
-    int32 MaxPackSize;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pack")
-    float PackCoordinationRange;
+    float HearingRadius;
 
 private:
     void SetupPerception();
     void SetupBlackboard();
-    UBehaviorTree* GetBehaviorTreeForType() const;
-    void UpdateBlackboardValues();
 };
