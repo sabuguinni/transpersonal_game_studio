@@ -1,137 +1,87 @@
 #include "Char_TribalWarriorAsset.h"
+#include "Engine/SkeletalMesh.h"
+#include "Engine/StaticMesh.h"
+#include "Materials/MaterialInterface.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Engine/Engine.h"
 
 UChar_TribalWarriorAsset::UChar_TribalWarriorAsset()
 {
-    // Initialize default values
-    bHasFacePaint = false;
-    bHasScars = false;
-    bHasTattoos = false;
-    WeatheringLevel = 0.5f;
-    bIsFemale = false;
+    // Initialize with default configuration
+    WarriorConfig = FChar_TribalWarriorConfig();
 }
 
 void UChar_TribalWarriorAsset::ApplyToSkeletalMesh(USkeletalMeshComponent* MeshComponent)
 {
     if (!MeshComponent)
     {
-        UE_LOG(LogTemp, Warning, TEXT("UChar_TribalWarriorAsset::ApplyToSkeletalMesh - Invalid MeshComponent"));
+        UE_LOG(LogTemp, Warning, TEXT("UChar_TribalWarriorAsset::ApplyToSkeletalMesh - MeshComponent is null"));
         return;
     }
 
-    // Apply the warrior mesh if available
-    if (WarriorMesh.IsValid())
+    // Load and apply the skeletal mesh
+    if (WarriorConfig.BodyMesh.IsValid())
     {
-        USkeletalMesh* LoadedMesh = WarriorMesh.LoadSynchronous();
+        USkeletalMesh* LoadedMesh = WarriorConfig.BodyMesh.LoadSynchronous();
         if (LoadedMesh)
         {
             MeshComponent->SetSkeletalMesh(LoadedMesh);
-            UE_LOG(LogTemp, Log, TEXT("Applied tribal warrior mesh to character"));
+            UE_LOG(LogTemp, Log, TEXT("Applied tribal warrior body mesh to component"));
         }
     }
 
-    // Apply random skin material
-    UMaterialInterface* SkinMat = GetRandomSkinMaterial();
-    if (SkinMat)
+    // Apply skin material
+    if (WarriorConfig.SkinMaterial.IsValid())
     {
-        MeshComponent->SetMaterial(0, SkinMat); // Assume slot 0 is skin
-        UE_LOG(LogTemp, Log, TEXT("Applied skin material to character"));
+        UMaterialInterface* SkinMat = WarriorConfig.SkinMaterial.LoadSynchronous();
+        if (SkinMat)
+        {
+            MeshComponent->SetMaterial(0, SkinMat);
+            UE_LOG(LogTemp, Log, TEXT("Applied skin material to tribal warrior"));
+        }
     }
 
-    // Apply random clothing material
-    UMaterialInterface* ClothingMat = GetRandomClothingMaterial();
-    if (ClothingMat)
+    // Apply clothing material to material slot 1 (if exists)
+    if (WarriorConfig.ClothingMaterial.IsValid())
     {
-        MeshComponent->SetMaterial(1, ClothingMat); // Assume slot 1 is clothing
-        UE_LOG(LogTemp, Log, TEXT("Applied clothing material to character"));
+        UMaterialInterface* ClothingMat = WarriorConfig.ClothingMaterial.LoadSynchronous();
+        if (ClothingMat)
+        {
+            MeshComponent->SetMaterial(1, ClothingMat);
+            UE_LOG(LogTemp, Log, TEXT("Applied clothing material to tribal warrior"));
+        }
     }
 
-    // Apply random jewelry material
-    UMaterialInterface* JewelryMat = GetRandomJewelryMaterial();
-    if (JewelryMat)
+    // Apply bone jewelry material to material slot 2 (if exists)
+    if (WarriorConfig.BoneJewelryMaterial.IsValid())
     {
-        MeshComponent->SetMaterial(2, JewelryMat); // Assume slot 2 is jewelry
-        UE_LOG(LogTemp, Log, TEXT("Applied jewelry material to character"));
-    }
-
-    // Apply random tool material
-    UMaterialInterface* ToolMat = GetRandomToolMaterial();
-    if (ToolMat)
-    {
-        MeshComponent->SetMaterial(3, ToolMat); // Assume slot 3 is tools
-        UE_LOG(LogTemp, Log, TEXT("Applied tool material to character"));
+        UMaterialInterface* JewelryMat = WarriorConfig.BoneJewelryMaterial.LoadSynchronous();
+        if (JewelryMat)
+        {
+            MeshComponent->SetMaterial(2, JewelryMat);
+            UE_LOG(LogTemp, Log, TEXT("Applied bone jewelry material to tribal warrior"));
+        }
     }
 }
 
-UMaterialInterface* UChar_TribalWarriorAsset::GetRandomSkinMaterial() const
+USkeletalMesh* UChar_TribalWarriorAsset::GetBodyMesh()
 {
-    if (SkinMaterials.Num() == 0)
+    if (WarriorConfig.BodyMesh.IsValid())
     {
-        return nullptr;
+        return WarriorConfig.BodyMesh.LoadSynchronous();
     }
-
-    int32 RandomIndex = FMath::RandRange(0, SkinMaterials.Num() - 1);
-    TSoftObjectPtr<UMaterialInterface> SoftMaterial = SkinMaterials[RandomIndex];
     
-    if (SoftMaterial.IsValid())
-    {
-        return SoftMaterial.LoadSynchronous();
-    }
-
+    UE_LOG(LogTemp, Warning, TEXT("UChar_TribalWarriorAsset::GetBodyMesh - No valid body mesh configured"));
     return nullptr;
 }
 
-UMaterialInterface* UChar_TribalWarriorAsset::GetRandomClothingMaterial() const
+UStaticMesh* UChar_TribalWarriorAsset::GetSpearMesh()
 {
-    if (ClothingMaterials.Num() == 0)
+    if (WarriorConfig.SpearMesh.IsValid())
     {
-        return nullptr;
+        return WarriorConfig.SpearMesh.LoadSynchronous();
     }
-
-    int32 RandomIndex = FMath::RandRange(0, ClothingMaterials.Num() - 1);
-    TSoftObjectPtr<UMaterialInterface> SoftMaterial = ClothingMaterials[RandomIndex];
     
-    if (SoftMaterial.IsValid())
-    {
-        return SoftMaterial.LoadSynchronous();
-    }
-
-    return nullptr;
-}
-
-UMaterialInterface* UChar_TribalWarriorAsset::GetRandomJewelryMaterial() const
-{
-    if (JewelryMaterials.Num() == 0)
-    {
-        return nullptr;
-    }
-
-    int32 RandomIndex = FMath::RandRange(0, JewelryMaterials.Num() - 1);
-    TSoftObjectPtr<UMaterialInterface> SoftMaterial = JewelryMaterials[RandomIndex];
-    
-    if (SoftMaterial.IsValid())
-    {
-        return SoftMaterial.LoadSynchronous();
-    }
-
-    return nullptr;
-}
-
-UMaterialInterface* UChar_TribalWarriorAsset::GetRandomToolMaterial() const
-{
-    if (ToolMaterials.Num() == 0)
-    {
-        return nullptr;
-    }
-
-    int32 RandomIndex = FMath::RandRange(0, ToolMaterials.Num() - 1);
-    TSoftObjectPtr<UMaterialInterface> SoftMaterial = ToolMaterials[RandomIndex];
-    
-    if (SoftMaterial.IsValid())
-    {
-        return SoftMaterial.LoadSynchronous();
-    }
-
+    UE_LOG(LogTemp, Warning, TEXT("UChar_TribalWarriorAsset::GetSpearMesh - No valid spear mesh configured"));
     return nullptr;
 }
