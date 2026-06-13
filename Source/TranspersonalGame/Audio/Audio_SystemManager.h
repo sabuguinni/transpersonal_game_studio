@@ -5,137 +5,152 @@
 #include "Engine/Engine.h"
 #include "Components/AudioComponent.h"
 #include "Sound/SoundCue.h"
+#include "Sound/SoundWave.h"
 #include "Audio_SystemManager.generated.h"
 
 UENUM(BlueprintType)
-enum class EAudio_BiomeType : uint8
+enum class EAudio_MusicLayer : uint8
 {
-    Forest      UMETA(DisplayName = "Forest"),
-    Plains      UMETA(DisplayName = "Plains"),
-    River       UMETA(DisplayName = "River"),
-    Cave        UMETA(DisplayName = "Cave"),
-    Mountain    UMETA(DisplayName = "Mountain")
+    Ambient     UMETA(DisplayName = "Ambient"),
+    Tension     UMETA(DisplayName = "Tension"),
+    Combat      UMETA(DisplayName = "Combat"),
+    Exploration UMETA(DisplayName = "Exploration"),
+    Stealth     UMETA(DisplayName = "Stealth")
 };
 
 UENUM(BlueprintType)
-enum class EAudio_ThreatLevel : uint8
+enum class EAudio_SFXCategory : uint8
 {
-    Peaceful    UMETA(DisplayName = "Peaceful"),
-    Alert       UMETA(DisplayName = "Alert"),
-    Danger      UMETA(DisplayName = "Danger"),
-    Combat      UMETA(DisplayName = "Combat")
+    Footsteps   UMETA(DisplayName = "Footsteps"),
+    Environment UMETA(DisplayName = "Environment"),
+    Dinosaurs   UMETA(DisplayName = "Dinosaurs"),
+    UI          UMETA(DisplayName = "UI"),
+    Combat      UMETA(DisplayName = "Combat"),
+    Crafting    UMETA(DisplayName = "Crafting")
 };
 
 USTRUCT(BlueprintType)
-struct FAudio_BiomeSettings
+struct TRANSPERSONALGAME_API FAudio_MusicState
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    TSoftObjectPtr<USoundCue> AmbientSound;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Music")
+    EAudio_MusicLayer CurrentLayer;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    float Volume = 0.5f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Music")
+    float TensionLevel;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    float FadeInTime = 2.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Music")
+    float FadeTime;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    float FadeOutTime = 1.5f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Music")
+    bool bIsTransitioning;
+
+    FAudio_MusicState()
+    {
+        CurrentLayer = EAudio_MusicLayer::Ambient;
+        TensionLevel = 0.0f;
+        FadeTime = 2.0f;
+        bIsTransitioning = false;
+    }
 };
 
 USTRUCT(BlueprintType)
-struct FAudio_ThreatSettings
+struct TRANSPERSONALGAME_API FAudio_SpatialConfig
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    TSoftObjectPtr<USoundCue> ThreatMusic;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spatial")
+    float MaxDistance;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    float IntensityMultiplier = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spatial")
+    float AttenuationRadius;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    float HeartbeatVolume = 0.3f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spatial")
+    bool bUseOcclusion;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spatial")
+    float OcclusionStrength;
+
+    FAudio_SpatialConfig()
+    {
+        MaxDistance = 5000.0f;
+        AttenuationRadius = 1000.0f;
+        bUseOcclusion = true;
+        OcclusionStrength = 0.8f;
+    }
 };
 
-/**
- * Audio System Manager - Handles adaptive music, ambient sounds, and threat audio
- * Provides biome-based ambient audio and dynamic threat level music
- */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UAudio_SystemManager : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
 public:
-    UAudio_SystemManager();
-
-    // Subsystem overrides
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
-    // Biome audio management
-    UFUNCTION(BlueprintCallable, Category = "Audio System")
-    void SetCurrentBiome(EAudio_BiomeType NewBiome);
+    // Music System
+    UFUNCTION(BlueprintCallable, Category = "Audio|Music")
+    void SetMusicLayer(EAudio_MusicLayer NewLayer, float FadeTime = 2.0f);
 
-    UFUNCTION(BlueprintCallable, Category = "Audio System")
-    void SetThreatLevel(EAudio_ThreatLevel NewThreatLevel);
+    UFUNCTION(BlueprintCallable, Category = "Audio|Music")
+    void SetTensionLevel(float TensionValue);
 
-    // Audio control
-    UFUNCTION(BlueprintCallable, Category = "Audio System")
-    void PlayFootstepSound(const FVector& Location, bool bIsHeavy = false);
+    UFUNCTION(BlueprintCallable, Category = "Audio|Music")
+    void PlayStinger(USoundCue* StingerSound);
 
-    UFUNCTION(BlueprintCallable, Category = "Audio System")
-    void PlayDinosaurSound(const FString& DinosaurType, const FVector& Location);
+    // SFX System
+    UFUNCTION(BlueprintCallable, Category = "Audio|SFX")
+    UAudioComponent* PlaySFXAtLocation(USoundWave* Sound, FVector Location, float VolumeMultiplier = 1.0f);
 
-    UFUNCTION(BlueprintCallable, Category = "Audio System")
-    void SetTimeOfDay(float TimeRatio); // 0.0 = midnight, 0.5 = noon
+    UFUNCTION(BlueprintCallable, Category = "Audio|SFX")
+    UAudioComponent* PlaySFXAttached(USoundWave* Sound, USceneComponent* AttachComponent, float VolumeMultiplier = 1.0f);
 
-    // Audio zones
-    UFUNCTION(BlueprintCallable, Category = "Audio System")
-    void RegisterAudioZone(class AAudio_Zone* Zone);
+    UFUNCTION(BlueprintCallable, Category = "Audio|SFX")
+    void StopAllSFXOfCategory(EAudio_SFXCategory Category);
 
-    UFUNCTION(BlueprintCallable, Category = "Audio System")
-    void UnregisterAudioZone(class AAudio_Zone* Zone);
+    // Footstep System
+    UFUNCTION(BlueprintCallable, Category = "Audio|Footsteps")
+    void PlayFootstepSound(FVector Location, float Weight, bool bIsRunning);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio|Footsteps")
+    void RegisterFootstepSurface(const FString& SurfaceType, USoundWave* WalkSound, USoundWave* RunSound);
+
+    // Environmental Audio
+    UFUNCTION(BlueprintCallable, Category = "Audio|Environment")
+    void SetAmbientVolume(float Volume);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio|Environment")
+    void PlayEnvironmentalLoop(USoundWave* LoopSound, FVector Location, float Radius);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio|Environment")
+    void StopEnvironmentalLoop(USoundWave* LoopSound);
 
 protected:
-    // Current state
-    UPROPERTY(BlueprintReadOnly, Category = "Audio State")
-    EAudio_BiomeType CurrentBiome;
+    UPROPERTY(BlueprintReadOnly, Category = "Audio|State")
+    FAudio_MusicState MusicState;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Audio State")
-    EAudio_ThreatLevel CurrentThreatLevel;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Audio State")
-    float CurrentTimeOfDay;
-
-    // Audio components
-    UPROPERTY()
-    UAudioComponent* AmbientAudioComponent;
+    UPROPERTY(BlueprintReadOnly, Category = "Audio|Config")
+    FAudio_SpatialConfig SpatialConfig;
 
     UPROPERTY()
-    UAudioComponent* MusicAudioComponent;
+    TArray<UAudioComponent*> ActiveAudioComponents;
 
     UPROPERTY()
-    UAudioComponent* ThreatAudioComponent;
+    TMap<EAudio_SFXCategory, TArray<UAudioComponent*>> CategoryComponents;
 
-    // Settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Settings")
-    TMap<EAudio_BiomeType, FAudio_BiomeSettings> BiomeSettings;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Settings")
-    TMap<EAudio_ThreatLevel, FAudio_ThreatSettings> ThreatSettings;
-
-    // Registered zones
     UPROPERTY()
-    TArray<class AAudio_Zone*> RegisteredZones;
+    TMap<FString, USoundWave*> FootstepWalkSounds;
+
+    UPROPERTY()
+    TMap<FString, USoundWave*> FootstepRunSounds;
+
+    UPROPERTY()
+    TArray<UAudioComponent*> EnvironmentalLoops;
 
 private:
-    void UpdateAmbientAudio();
-    void UpdateThreatAudio();
-    void UpdateTimeBasedAudio();
-
-    // Audio transition
-    void FadeAudioComponent(UAudioComponent* Component, float TargetVolume, float FadeTime);
+    void UpdateMusicLayers();
+    void CleanupFinishedComponents();
+    FString GetSurfaceTypeAtLocation(FVector Location);
 };
