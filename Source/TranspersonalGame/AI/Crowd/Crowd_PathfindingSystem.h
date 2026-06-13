@@ -1,35 +1,21 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Engine/World.h"
 #include "GameFramework/Actor.h"
+#include "Components/ActorComponent.h"
 #include "NavigationSystem.h"
 #include "NavMesh/RecastNavMesh.h"
-#include "AI/NavigationSystemBase.h"
-#include "Engine/World.h"
+#include "SharedTypes.h"
 #include "Crowd_PathfindingSystem.generated.h"
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FCrowd_PathNode
+struct FCrowd_PathfindingRequest
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding")
-    FVector Location = FVector::ZeroVector;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding")
-    float Cost = 0.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding")
-    bool bIsBlocked = false;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding")
-    int32 NodeID = -1;
-};
-
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FCrowd_PathRequest
-{
-    GENERATED_BODY()
+    int32 AgentID = -1;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding")
     FVector StartLocation = FVector::ZeroVector;
@@ -38,99 +24,117 @@ struct TRANSPERSONALGAME_API FCrowd_PathRequest
     FVector TargetLocation = FVector::ZeroVector;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding")
-    int32 RequestID = -1;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding")
-    float Priority = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding")
-    bool bIsComplete = false;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding")
     TArray<FVector> PathPoints;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding")
+    bool bIsPathValid = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding")
+    float PathLength = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding")
+    int32 CurrentWaypointIndex = 0;
+};
+
+USTRUCT(BlueprintType)
+struct FCrowd_NavigationArea
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Navigation")
+    FVector CenterLocation = FVector::ZeroVector;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Navigation")
+    float Radius = 1000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Navigation")
+    int32 MaxAgentsInArea = 100;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Navigation")
+    TArray<int32> AgentsInArea;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Navigation")
+    bool bIsHighTrafficArea = false;
 };
 
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API ACrowd_PathfindingSystem : public AActor
+class TRANSPERSONALGAME_API UCrowd_PathfindingSystem : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    ACrowd_PathfindingSystem();
+    UCrowd_PathfindingSystem();
 
 protected:
     virtual void BeginPlay() override;
-    virtual void Tick(float DeltaTime) override;
 
 public:
-    // Request a path for crowd entity
-    UFUNCTION(BlueprintCallable, Category = "Crowd Pathfinding")
-    int32 RequestPath(const FVector& StartLocation, const FVector& TargetLocation, float Priority = 1.0f);
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    // Get path result if ready
-    UFUNCTION(BlueprintCallable, Category = "Crowd Pathfinding")
-    bool GetPathResult(int32 RequestID, TArray<FVector>& OutPath);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding")
+    int32 MaxConcurrentPaths = 200;
 
-    // Check if path request is complete
-    UFUNCTION(BlueprintCallable, Category = "Crowd Pathfinding")
-    bool IsPathReady(int32 RequestID);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding")
+    float PathfindingUpdateInterval = 0.1f;
 
-    // Cancel path request
-    UFUNCTION(BlueprintCallable, Category = "Crowd Pathfinding")
-    void CancelPathRequest(int32 RequestID);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding")
+    float WaypointReachDistance = 50.0f;
 
-    // Get navigation mesh bounds
-    UFUNCTION(BlueprintCallable, Category = "Crowd Pathfinding")
-    FBox GetNavigationBounds();
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding")
+    TArray<FCrowd_PathfindingRequest> ActivePathRequests;
 
-    // Check if location is navigable
-    UFUNCTION(BlueprintCallable, Category = "Crowd Pathfinding")
-    bool IsLocationNavigable(const FVector& Location, float Radius = 50.0f);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding")
+    TArray<FCrowd_NavigationArea> NavigationAreas;
 
-    // Find nearest navigable location
-    UFUNCTION(BlueprintCallable, Category = "Crowd Pathfinding")
-    FVector FindNearestNavigableLocation(const FVector& Location, float SearchRadius = 500.0f);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding")
+    bool bEnableFlowFields = true;
 
-protected:
-    // Process pending path requests
-    void ProcessPathRequests();
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding")
+    bool bEnableAvoidance = true;
 
-    // Calculate path using navigation mesh
-    bool CalculatePath(const FVector& Start, const FVector& End, TArray<FVector>& OutPath);
+    UFUNCTION(BlueprintCallable, Category = "Pathfinding")
+    void InitializePathfindingSystem();
 
-    // Smooth path for crowd movement
-    void SmoothPath(TArray<FVector>& Path);
+    UFUNCTION(BlueprintCallable, Category = "Pathfinding")
+    int32 RequestPath(int32 AgentID, const FVector& StartLocation, const FVector& TargetLocation);
 
-    // Check for dynamic obstacles
-    bool CheckForObstacles(const FVector& Start, const FVector& End);
+    UFUNCTION(BlueprintCallable, Category = "Pathfinding")
+    bool GetPathForAgent(int32 AgentID, FCrowd_PathfindingRequest& OutPathRequest);
+
+    UFUNCTION(BlueprintCallable, Category = "Pathfinding")
+    void UpdatePathfinding(float DeltaTime);
+
+    UFUNCTION(BlueprintCallable, Category = "Pathfinding")
+    FVector GetNextWaypoint(int32 AgentID, const FVector& CurrentLocation);
+
+    UFUNCTION(BlueprintCallable, Category = "Pathfinding")
+    bool IsWaypointReached(const FVector& AgentLocation, const FVector& WaypointLocation);
+
+    UFUNCTION(BlueprintCallable, Category = "Pathfinding")
+    void AdvanceToNextWaypoint(int32 AgentID);
+
+    UFUNCTION(BlueprintCallable, Category = "Pathfinding")
+    void CreateNavigationAreas();
+
+    UFUNCTION(BlueprintCallable, Category = "Pathfinding")
+    void UpdateNavigationAreas();
+
+    UFUNCTION(BlueprintCallable, Category = "Pathfinding")
+    FVector CalculateAvoidanceForce(int32 AgentID, const FVector& AgentLocation, const FVector& DesiredVelocity);
+
+    UFUNCTION(BlueprintCallable, Category = "Pathfinding")
+    TArray<FVector> GenerateFlowField(const FVector& TargetLocation, float FieldRadius);
+
+    UFUNCTION(BlueprintCallable, Category = "Pathfinding")
+    void ClearCompletedPaths();
+
+    UFUNCTION(BlueprintCallable, Category = "Pathfinding")
+    int32 GetActivePathCount() const;
 
 private:
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Pathfinding", meta = (AllowPrivateAccess = "true"))
-    class UNavigationSystemV1* NavigationSystem;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding Settings", meta = (AllowPrivateAccess = "true"))
-    int32 MaxPathRequestsPerFrame = 10;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding Settings", meta = (AllowPrivateAccess = "true"))
-    float PathSmoothingRadius = 100.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding Settings", meta = (AllowPrivateAccess = "true"))
-    float ObstacleCheckRadius = 75.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding Settings", meta = (AllowPrivateAccess = "true"))
-    float MaxPathLength = 5000.0f;
-
-    // Path request queue
+    float PathfindingTimer = 0.0f;
+    int32 NextRequestID = 0;
+    
     UPROPERTY()
-    TArray<FCrowd_PathRequest> PendingRequests;
-
-    UPROPERTY()
-    TArray<FCrowd_PathRequest> CompletedRequests;
-
-    // Request ID counter
-    int32 NextRequestID = 1;
-
-    // Performance tracking
-    float LastProcessTime = 0.0f;
-    int32 PathsProcessedThisFrame = 0;
+    class UNavigationSystemV1* NavigationSystem = nullptr;
 };
