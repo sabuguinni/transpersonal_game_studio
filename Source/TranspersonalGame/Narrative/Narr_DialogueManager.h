@@ -2,14 +2,14 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
-#include "Components/SphereComponent.h"
+#include "Engine/TriggerBox.h"
 #include "Components/StaticMeshComponent.h"
-#include "Engine/DataTable.h"
-#include "SharedTypes.h"
+#include "Components/SphereComponent.h"
+#include "../SharedTypes.h"
 #include "Narr_DialogueManager.generated.h"
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FNarr_DialogueEntry
+struct TRANSPERSONALGAME_API FNarr_DialogueNode
 {
     GENERATED_BODY()
 
@@ -17,51 +17,55 @@ struct TRANSPERSONALGAME_API FNarr_DialogueEntry
     FString SpeakerName;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    FText DialogueText;
+    FString DialogueText;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    TArray<FText> ResponseOptions;
+    TArray<FString> ResponseOptions;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    TArray<int32> NextDialogueIDs;
+    TArray<int32> NextNodeIndices;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    ENarr_QuestStage RequiredQuestStage;
+    bool bIsEndNode;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    bool bIsQuestDialogue;
+    FString AudioFilePath;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    float EmotionalIntensity;
-
-    FNarr_DialogueEntry()
+    FNarr_DialogueNode()
     {
-        SpeakerName = TEXT("Unknown");
-        DialogueText = FText::GetEmpty();
-        RequiredQuestStage = ENarr_QuestStage::Tutorial;
-        bIsQuestDialogue = false;
-        EmotionalIntensity = 0.5f;
+        SpeakerName = TEXT("");
+        DialogueText = TEXT("");
+        bIsEndNode = false;
+        AudioFilePath = TEXT("");
     }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FNarr_DialogueTree
+struct TRANSPERSONALGAME_API FNarr_StoryArc
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    TArray<FNarr_DialogueEntry> DialogueEntries;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    FString ArcName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    int32 CurrentDialogueID;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    FString ArcDescription;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    FString TreeName;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    TArray<FNarr_DialogueNode> DialogueNodes;
 
-    FNarr_DialogueTree()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    int32 CurrentNodeIndex;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    bool bArcCompleted;
+
+    FNarr_StoryArc()
     {
-        CurrentDialogueID = 0;
-        TreeName = TEXT("DefaultTree");
+        ArcName = TEXT("");
+        ArcDescription = TEXT("");
+        CurrentNodeIndex = 0;
+        bArcCompleted = false;
     }
 };
 
@@ -77,70 +81,70 @@ protected:
     virtual void BeginPlay() override;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    USphereComponent* InteractionSphere;
+    class USphereComponent* InteractionSphere;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    UStaticMeshComponent* VisualMarker;
+    class UStaticMeshComponent* NPCMesh;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    FNarr_DialogueTree DialogueTree;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    TArray<FNarr_StoryArc> StoryArcs;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    ENarr_NPCPersonality NPCPersonality;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    int32 CurrentStoryArcIndex;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    float InteractionRadius;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    FString NPCName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    bool bIsActive;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    FString NPCRole;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    TArray<FString> VoiceLineURLs;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
+    float InteractionRange;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
+    bool bAutoStartDialogue;
 
 public:
     virtual void Tick(float DeltaTime) override;
 
     UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    void StartDialogue(AActor* PlayerActor);
+    void StartDialogue(class APawn* PlayerPawn);
+
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    void ProcessPlayerResponse(int32 ResponseIndex);
 
     UFUNCTION(BlueprintCallable, Category = "Dialogue")
     void EndDialogue();
 
     UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    FNarr_DialogueEntry GetCurrentDialogue();
+    FNarr_DialogueNode GetCurrentDialogueNode();
 
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    void SelectResponse(int32 ResponseIndex);
+    UFUNCTION(BlueprintCallable, Category = "Story")
+    void AdvanceStoryArc();
 
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    bool CanStartDialogue(AActor* PlayerActor);
+    UFUNCTION(BlueprintCallable, Category = "Story")
+    void SetStoryArc(int32 ArcIndex);
 
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    void SetDialogueTree(const FNarr_DialogueTree& NewTree);
+    UFUNCTION(BlueprintCallable, Category = "Story")
+    bool IsStoryArcCompleted(int32 ArcIndex);
 
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    void AddVoiceLine(const FString& VoiceURL);
+    UFUNCTION(BlueprintImplementableEvent, Category = "Events")
+    void OnDialogueStarted(const FString& NPCName, const FString& FirstLine);
 
-    UFUNCTION(BlueprintImplementableEvent, Category = "Dialogue")
-    void OnDialogueStarted();
-
-    UFUNCTION(BlueprintImplementableEvent, Category = "Dialogue")
+    UFUNCTION(BlueprintImplementableEvent, Category = "Events")
     void OnDialogueEnded();
 
-    UFUNCTION(BlueprintImplementableEvent, Category = "Dialogue")
-    void OnResponseSelected(int32 ResponseIndex);
+    UFUNCTION(BlueprintImplementableEvent, Category = "Events")
+    void OnStoryArcCompleted(const FString& ArcName);
 
 protected:
     UFUNCTION()
-    void OnInteractionSphereBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult);
-
-    UFUNCTION()
-    void OnInteractionSphereEndOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex);
+    void OnInteractionSphereBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComponent, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult);
 
 private:
-    bool bPlayerInRange;
-    AActor* CurrentPlayer;
+    class APawn* CurrentPlayer;
+    bool bInDialogue;
     
-    void UpdateVisualMarker();
-    bool CheckQuestRequirements(const FNarr_DialogueEntry& Entry);
+    void InitializeDefaultStoryArcs();
+    void SetupInteractionComponents();
 };
