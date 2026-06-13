@@ -1,116 +1,121 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "GameFramework/Actor.h"
 #include "Engine/World.h"
-#include "GameFramework/GameModeBase.h"
-#include "Components/ActorComponent.h"
+#include "Components/SceneComponent.h"
 #include "Build_IntegrationValidator.generated.h"
 
 UENUM(BlueprintType)
-enum class EBuild_SystemStatus : uint8
+enum class EBuild_SystemHealth : uint8
 {
-    NotLoaded,
-    Loaded,
-    Functional,
-    Error
+    Healthy     UMETA(DisplayName = "Healthy"),
+    Degraded    UMETA(DisplayName = "Degraded"),
+    Critical    UMETA(DisplayName = "Critical"),
+    Failed      UMETA(DisplayName = "Failed")
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FBuild_SystemReport
+struct FBuild_SystemMetrics
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    FString SystemName;
+    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
+    int32 TotalActors = 0;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    EBuild_SystemStatus Status;
+    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
+    int32 DinosaurCount = 0;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    FString ErrorMessage;
+    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
+    int32 EnvironmentCount = 0;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    int32 ActorCount;
+    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
+    int32 CharacterCount = 0;
 
-    FBuild_SystemReport()
-    {
-        SystemName = TEXT("");
-        Status = EBuild_SystemStatus::NotLoaded;
-        ErrorMessage = TEXT("");
-        ActorCount = 0;
-    }
-};
+    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
+    int32 LightingCount = 0;
 
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FBuild_IntegrationReport
-{
-    GENERATED_BODY()
+    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
+    int32 AudioCount = 0;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    TArray<FBuild_SystemReport> SystemReports;
+    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
+    int32 VFXCount = 0;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    int32 TotalActors;
+    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
+    int32 QACount = 0;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    int32 ReadySystems;
+    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
+    EBuild_SystemHealth OverallHealth = EBuild_SystemHealth::Healthy;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    float IntegrationScore;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    bool bBuildReady;
-
-    FBuild_IntegrationReport()
-    {
-        TotalActors = 0;
-        ReadySystems = 0;
-        IntegrationScore = 0.0f;
-        bBuildReady = false;
-    }
+    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
+    float PerformanceScore = 100.0f;
 };
 
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UBuild_IntegrationValidator : public UActorComponent
+class TRANSPERSONALGAME_API ABuild_IntegrationValidator : public AActor
 {
     GENERATED_BODY()
 
 public:
-    UBuild_IntegrationValidator();
-
-    UFUNCTION(BlueprintCallable, Category = "Integration", CallInEditor = true)
-    FBuild_IntegrationReport ValidateAllSystems();
-
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    bool ValidateSystemClasses();
-
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    bool ValidateActorCounts();
-
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    bool ValidateCrossSystemIntegration();
-
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    float CalculateIntegrationScore();
-
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    void EnforceActorCaps();
+    ABuild_IntegrationValidator();
 
 protected:
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration")
-    int32 MaxTotalActors;
+    virtual void BeginPlay() override;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    USceneComponent* RootSceneComponent;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    FBuild_SystemMetrics CurrentMetrics;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration")
-    int32 MaxDinosaurActors;
+    bool bAutoValidateOnBeginPlay = true;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration")
-    TArray<FString> CoreSystemClasses;
+    float ValidationInterval = 30.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration")
-    TArray<FString> EssentialActorTypes;
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    TArray<FString> ValidationErrors;
 
-private:
-    FBuild_SystemReport ValidateSystem(const FString& SystemName, const FString& ClassName);
-    void PruneExcessActors();
-    int32 CountActorsByType(const FString& ActorType);
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    TArray<FString> ValidationWarnings;
+
+public:
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    void ValidateAllSystems();
+
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    FBuild_SystemMetrics GetSystemMetrics() const { return CurrentMetrics; }
+
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    EBuild_SystemHealth GetOverallHealth() const { return CurrentMetrics.OverallHealth; }
+
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    TArray<FString> GetValidationErrors() const { return ValidationErrors; }
+
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    TArray<FString> GetValidationWarnings() const { return ValidationWarnings; }
+
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    void ClearValidationResults();
+
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    bool ValidateModuleCompilation();
+
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    bool ValidateCrossSystemDependencies();
+
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    float CalculatePerformanceScore();
+
+protected:
+    UFUNCTION()
+    void PerformPeriodicValidation();
+
+    void ValidateSystemActorCounts();
+    void ValidateEssentialSystems();
+    void ValidatePerformanceMetrics();
+    void UpdateHealthStatus();
+
+    FTimerHandle ValidationTimerHandle;
 };
