@@ -1,444 +1,270 @@
 #include "Arch_InteriorManager.h"
 #include "Engine/Engine.h"
-#include "Engine/World.h"
 #include "Components/StaticMeshComponent.h"
-#include "Components/SceneComponent.h"
-#include "Materials/MaterialInterface.h"
+#include "Components/BoxComponent.h"
 #include "UObject/ConstructorHelpers.h"
-#include "Kismet/GameplayStatics.h"
 
-UArch_InteriorManager::UArch_InteriorManager()
+AArch_InteriorManager::AArch_InteriorManager()
 {
-    PrimaryComponentTick.bCanEverTick = false;
-    
-    // Initialize interior type probabilities
-    InteriorTypeProbabilities.Add(EArch_InteriorType::CaveDwelling, 0.4f);
-    InteriorTypeProbabilities.Add(EArch_InteriorType::ElevatedShelter, 0.25f);
-    InteriorTypeProbabilities.Add(EArch_InteriorType::RockShelter, 0.2f);
-    InteriorTypeProbabilities.Add(EArch_InteriorType::GatheringCircle, 0.15f);
-    
-    // Initialize default interior settings
-    DefaultInteriorSettings.MaxOccupants = 6;
-    DefaultInteriorSettings.FirePitRadius = 150.0f;
-    DefaultInteriorSettings.SleepingAreaRadius = 200.0f;
-    DefaultInteriorSettings.StorageCapacity = 20;
-    DefaultInteriorSettings.ComfortLevel = 0.7f;
-    DefaultInteriorSettings.ProtectionLevel = 0.8f;
-    
-    // Initialize component arrays
-    ActiveInteriors.Empty();
-    InteriorComponents.Empty();
-    FirePitLocations.Empty();
-    SleepingAreas.Empty();
-    StorageAreas.Empty();
+    PrimaryActorTick.bCanEverTick = true;
+
+    // Create root scene component
+    RootSceneComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootSceneComponent"));
+    RootComponent = RootSceneComponent;
+
+    // Create interior bounds
+    InteriorBounds = CreateDefaultSubobject<UBoxComponent>(TEXT("InteriorBounds"));
+    InteriorBounds->SetupAttachment(RootComponent);
+    InteriorBounds->SetBoxExtent(FVector(500.0f, 500.0f, 300.0f));
+
+    // Initialize default values
+    StructureType = EArch_StructureType::Dwelling;
+    InteriorSize = 500.0f;
+    bHasFirePit = true;
+    bHasSleepingArea = true;
+    bHasStorageArea = true;
 }
 
-void UArch_InteriorManager::BeginPlay()
+void AArch_InteriorManager::BeginPlay()
 {
     Super::BeginPlay();
     
-    if (GetWorld())
+    UE_LOG(LogTemp, Warning, TEXT("Arch_InteriorManager: BeginPlay - Setting up interior"));
+    SetupInteriorForStructure(StructureType);
+}
+
+void AArch_InteriorManager::Tick(float DeltaTime)
+{
+    Super::Tick(DeltaTime);
+}
+
+void AArch_InteriorManager::SetupInteriorForStructure(EArch_StructureType InStructureType)
+{
+    StructureType = InStructureType;
+    ClearInterior();
+
+    switch (StructureType)
     {
-        UE_LOG(LogTemp, Log, TEXT("Arch_InteriorManager: Initialized in world %s"), *GetWorld()->GetName());
-        InitializeInteriorSystem();
+        case EArch_StructureType::Dwelling:
+            SetupDwellingInterior();
+            break;
+        case EArch_StructureType::Shelter:
+            SetupShelterInterior();
+            break;
+        case EArch_StructureType::Storage:
+            SetupStorageInterior();
+            break;
+        case EArch_StructureType::Workshop:
+            SetupWorkshopInterior();
+            break;
+        case EArch_StructureType::Ruins:
+            SetupRuinInterior();
+            break;
     }
+
+    UE_LOG(LogTemp, Log, TEXT("Arch_InteriorManager: Interior setup complete for structure type %d"), (int32)StructureType);
 }
 
-void UArch_InteriorManager::InitializeInteriorSystem()
+bool AArch_InteriorManager::AddInteriorItem(EArch_InteriorType ItemType, FVector Location, FRotator Rotation)
 {
-    // Clear existing data
-    ActiveInteriors.Empty();
-    InteriorComponents.Empty();
-    
-    UE_LOG(LogTemp, Log, TEXT("Arch_InteriorManager: Interior system initialized"));
-}
-
-bool UArch_InteriorManager::CreateInterior(const FVector& Location, EArch_InteriorType Type, const FArch_InteriorSettings& Settings)
-{
-    if (!GetWorld())
+    // Check if location is within interior bounds
+    if (!IsLocationInsideInterior(Location))
     {
-        UE_LOG(LogTemp, Error, TEXT("Arch_InteriorManager: Cannot create interior - no valid world"));
+        UE_LOG(LogTemp, Warning, TEXT("Arch_InteriorManager: Location outside interior bounds"));
         return false;
     }
-    
-    // Create interior data structure
-    FArch_InteriorData NewInterior;
-    NewInterior.InteriorID = FGuid::NewGuid();
-    NewInterior.Location = Location;
-    NewInterior.Type = Type;
-    NewInterior.Settings = Settings;
-    NewInterior.CreationTime = GetWorld()->GetTimeSeconds();
-    NewInterior.bIsActive = true;
-    NewInterior.CurrentOccupants = 0;
-    
-    // Setup interior based on type
-    switch (Type)
-    {
-        case EArch_InteriorType::CaveDwelling:
-            SetupCaveDwelling(NewInterior);
-            break;
-        case EArch_InteriorType::ElevatedShelter:
-            SetupElevatedShelter(NewInterior);
-            break;
-        case EArch_InteriorType::RockShelter:
-            SetupRockShelter(NewInterior);
-            break;
-        case EArch_InteriorType::GatheringCircle:
-            SetupGatheringCircle(NewInterior);
-            break;
-        default:
-            UE_LOG(LogTemp, Warning, TEXT("Arch_InteriorManager: Unknown interior type"));
-            return false;
-    }
-    
-    // Add to active interiors
-    ActiveInteriors.Add(NewInterior);
-    
-    UE_LOG(LogTemp, Log, TEXT("Arch_InteriorManager: Created interior of type %d at location %s"), 
-           (int32)Type, *Location.ToString());
-    
+
+    // Create new interior item
+    FArch_InteriorItem NewItem;
+    NewItem.ItemName = FString::Printf(TEXT("InteriorItem_%d"), InteriorItems.Num() + 1);
+    NewItem.ItemType = ItemType;
+    NewItem.RelativeLocation = Location - GetActorLocation();
+    NewItem.RelativeRotation = Rotation;
+    NewItem.bIsInteractable = (ItemType != EArch_InteriorType::Decoration);
+    NewItem.WearLevel = FMath::RandRange(0.0f, 0.3f);
+
+    // Add to interior items
+    InteriorItems.Add(NewItem);
+
+    // Spawn the visual representation
+    SpawnInteriorItem(NewItem);
+
+    UE_LOG(LogTemp, Log, TEXT("Arch_InteriorManager: Interior item added: %s"), *NewItem.ItemName);
     return true;
 }
 
-void UArch_InteriorManager::SetupCaveDwelling(FArch_InteriorData& InteriorData)
+void AArch_InteriorManager::RemoveInteriorItem(int32 ItemIndex)
 {
-    const FVector& Location = InteriorData.Location;
-    
-    // Create fire pit at center
-    FVector FirePitLocation = Location;
-    FirePitLocations.Add(FirePitLocation);
-    
-    // Create sleeping areas around the fire pit
-    const float SleepingRadius = InteriorData.Settings.SleepingAreaRadius;
-    const int32 NumSleepingAreas = FMath::Min(InteriorData.Settings.MaxOccupants, 8);
-    
-    for (int32 i = 0; i < NumSleepingAreas; i++)
+    if (InteriorItems.IsValidIndex(ItemIndex))
     {
-        float Angle = (2.0f * PI * i) / NumSleepingAreas;
-        FVector SleepingLocation = Location + FVector(
-            FMath::Cos(Angle) * SleepingRadius,
-            FMath::Sin(Angle) * SleepingRadius,
-            0.0f
-        );
-        
-        FArch_SleepingArea SleepingArea;
-        SleepingArea.Location = SleepingLocation;
-        SleepingArea.Rotation = FRotator(0.0f, FMath::RadiansToDegrees(Angle + PI), 0.0f);
-        SleepingArea.bIsOccupied = false;
-        SleepingArea.ComfortLevel = InteriorData.Settings.ComfortLevel;
-        
-        SleepingAreas.Add(SleepingArea);
+        InteriorItems.RemoveAt(ItemIndex);
+        UE_LOG(LogTemp, Log, TEXT("Arch_InteriorManager: Interior item removed at index %d"), ItemIndex);
     }
-    
-    // Create storage areas along walls
-    const int32 NumStorageAreas = FMath::Min(InteriorData.Settings.StorageCapacity / 5, 6);
-    for (int32 i = 0; i < NumStorageAreas; i++)
-    {
-        float Angle = (2.0f * PI * i) / NumStorageAreas;
-        FVector StorageLocation = Location + FVector(
-            FMath::Cos(Angle) * (SleepingRadius + 100.0f),
-            FMath::Sin(Angle) * (SleepingRadius + 100.0f),
-            50.0f
-        );
-        
-        FArch_StorageArea StorageArea;
-        StorageArea.Location = StorageLocation;
-        StorageArea.Capacity = 5;
-        StorageArea.CurrentItems = 0;
-        StorageArea.StorageType = EArch_StorageType::WallNiche;
-        
-        StorageAreas.Add(StorageArea);
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("Arch_InteriorManager: Setup cave dwelling with %d sleeping areas and %d storage areas"), 
-           NumSleepingAreas, NumStorageAreas);
 }
 
-void UArch_InteriorManager::SetupElevatedShelter(FArch_InteriorData& InteriorData)
+TArray<FArch_InteriorItem> AArch_InteriorManager::GetInteractableItems()
 {
-    const FVector& Location = InteriorData.Location;
+    TArray<FArch_InteriorItem> InteractableItems;
     
-    // Elevated shelter is 4-5 meters above ground
-    FVector ElevatedLocation = Location + FVector(0.0f, 0.0f, 450.0f);
-    
-    // Central fire pit (smaller for safety)
-    FirePitLocations.Add(ElevatedLocation);
-    
-    // Sleeping areas around perimeter
-    const float PlatformRadius = InteriorData.Settings.SleepingAreaRadius * 0.8f; // Smaller platform
-    const int32 NumSleepingAreas = FMath::Min(InteriorData.Settings.MaxOccupants, 6);
-    
-    for (int32 i = 0; i < NumSleepingAreas; i++)
+    for (const FArch_InteriorItem& Item : InteriorItems)
     {
-        float Angle = (2.0f * PI * i) / NumSleepingAreas;
-        FVector SleepingLocation = ElevatedLocation + FVector(
-            FMath::Cos(Angle) * PlatformRadius,
-            FMath::Sin(Angle) * PlatformRadius,
-            0.0f
-        );
-        
-        FArch_SleepingArea SleepingArea;
-        SleepingArea.Location = SleepingLocation;
-        SleepingArea.Rotation = FRotator(0.0f, FMath::RadiansToDegrees(Angle + PI), 0.0f);
-        SleepingArea.bIsOccupied = false;
-        SleepingArea.ComfortLevel = InteriorData.Settings.ComfortLevel * 0.9f; // Slightly less comfortable
-        
-        SleepingAreas.Add(SleepingArea);
-    }
-    
-    // Storage areas hanging from platform
-    const int32 NumStorageAreas = 4;
-    for (int32 i = 0; i < NumStorageAreas; i++)
-    {
-        float Angle = (PI * 0.5f * i); // Cardinal directions
-        FVector StorageLocation = ElevatedLocation + FVector(
-            FMath::Cos(Angle) * (PlatformRadius + 50.0f),
-            FMath::Sin(Angle) * (PlatformRadius + 50.0f),
-            -100.0f
-        );
-        
-        FArch_StorageArea StorageArea;
-        StorageArea.Location = StorageLocation;
-        StorageArea.Capacity = 3;
-        StorageArea.CurrentItems = 0;
-        StorageArea.StorageType = EArch_StorageType::HangingBasket;
-        
-        StorageAreas.Add(StorageArea);
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("Arch_InteriorManager: Setup elevated shelter at height %f"), ElevatedLocation.Z);
-}
-
-void UArch_InteriorManager::SetupRockShelter(FArch_InteriorData& InteriorData)
-{
-    const FVector& Location = InteriorData.Location;
-    
-    // Fire pit near the front of the shelter
-    FVector FirePitLocation = Location + FVector(200.0f, 0.0f, 0.0f);
-    FirePitLocations.Add(FirePitLocation);
-    
-    // Sleeping areas along the back wall
-    const int32 NumSleepingAreas = InteriorData.Settings.MaxOccupants;
-    const float ShelterWidth = 400.0f;
-    
-    for (int32 i = 0; i < NumSleepingAreas; i++)
-    {
-        float YOffset = (i - (NumSleepingAreas - 1) * 0.5f) * (ShelterWidth / NumSleepingAreas);
-        FVector SleepingLocation = Location + FVector(-150.0f, YOffset, 0.0f);
-        
-        FArch_SleepingArea SleepingArea;
-        SleepingArea.Location = SleepingLocation;
-        SleepingArea.Rotation = FRotator(0.0f, 0.0f, 0.0f);
-        SleepingArea.bIsOccupied = false;
-        SleepingArea.ComfortLevel = InteriorData.Settings.ComfortLevel;
-        
-        SleepingAreas.Add(SleepingArea);
-    }
-    
-    // Storage areas carved into rock walls
-    const int32 NumStorageAreas = 6;
-    for (int32 i = 0; i < NumStorageAreas; i++)
-    {
-        float YOffset = (i - (NumStorageAreas - 1) * 0.5f) * 80.0f;
-        FVector StorageLocation = Location + FVector(-200.0f, YOffset, 100.0f);
-        
-        FArch_StorageArea StorageArea;
-        StorageArea.Location = StorageLocation;
-        StorageArea.Capacity = 4;
-        StorageArea.CurrentItems = 0;
-        StorageArea.StorageType = EArch_StorageType::RockNiche;
-        
-        StorageAreas.Add(StorageArea);
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("Arch_InteriorManager: Setup rock shelter with %d sleeping areas"), NumSleepingAreas);
-}
-
-void UArch_InteriorManager::SetupGatheringCircle(FArch_InteriorData& InteriorData)
-{
-    const FVector& Location = InteriorData.Location;
-    
-    // Central fire pit
-    FirePitLocations.Add(Location);
-    
-    // Stone seating arranged in circle
-    const float CircleRadius = InteriorData.Settings.SleepingAreaRadius;
-    const int32 NumSeats = InteriorData.Settings.MaxOccupants * 2; // More seating for gatherings
-    
-    for (int32 i = 0; i < NumSeats; i++)
-    {
-        float Angle = (2.0f * PI * i) / NumSeats;
-        FVector SeatLocation = Location + FVector(
-            FMath::Cos(Angle) * CircleRadius,
-            FMath::Sin(Angle) * CircleRadius,
-            0.0f
-        );
-        
-        FArch_SleepingArea SeatArea; // Reusing sleeping area struct for seating
-        SeatArea.Location = SeatLocation;
-        SeatArea.Rotation = FRotator(0.0f, FMath::RadiansToDegrees(Angle + PI), 0.0f);
-        SeatArea.bIsOccupied = false;
-        SeatArea.ComfortLevel = 0.5f; // Stone seating is less comfortable
-        
-        SleepingAreas.Add(SeatArea);
-    }
-    
-    // Tool storage areas around perimeter
-    const int32 NumToolAreas = 8;
-    for (int32 i = 0; i < NumToolAreas; i++)
-    {
-        float Angle = (2.0f * PI * i) / NumToolAreas;
-        FVector StorageLocation = Location + FVector(
-            FMath::Cos(Angle) * (CircleRadius + 150.0f),
-            FMath::Sin(Angle) * (CircleRadius + 150.0f),
-            0.0f
-        );
-        
-        FArch_StorageArea StorageArea;
-        StorageArea.Location = StorageLocation;
-        StorageArea.Capacity = 2;
-        StorageArea.CurrentItems = 0;
-        StorageArea.StorageType = EArch_StorageType::GroundCache;
-        
-        StorageAreas.Add(StorageArea);
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("Arch_InteriorManager: Setup gathering circle with %d seats"), NumSeats);
-}
-
-bool UArch_InteriorManager::RemoveInterior(const FGuid& InteriorID)
-{
-    for (int32 i = ActiveInteriors.Num() - 1; i >= 0; i--)
-    {
-        if (ActiveInteriors[i].InteriorID == InteriorID)
+        if (Item.bIsInteractable)
         {
-            ActiveInteriors.RemoveAt(i);
-            UE_LOG(LogTemp, Log, TEXT("Arch_InteriorManager: Removed interior %s"), *InteriorID.ToString());
-            return true;
+            InteractableItems.Add(Item);
         }
     }
     
-    UE_LOG(LogTemp, Warning, TEXT("Arch_InteriorManager: Interior %s not found for removal"), *InteriorID.ToString());
+    return InteractableItems;
+}
+
+void AArch_InteriorManager::GenerateRandomInterior()
+{
+    UE_LOG(LogTemp, Warning, TEXT("Arch_InteriorManager: Generating random interior"));
+    
+    ClearInterior();
+    
+    // Random structure type
+    StructureType = static_cast<EArch_StructureType>(FMath::RandRange(0, 4));
+    SetupInteriorForStructure(StructureType);
+}
+
+void AArch_InteriorManager::ClearInterior()
+{
+    InteriorItems.Empty();
+    UE_LOG(LogTemp, Log, TEXT("Arch_InteriorManager: Interior cleared"));
+}
+
+bool AArch_InteriorManager::IsLocationInsideInterior(FVector WorldLocation)
+{
+    if (InteriorBounds)
+    {
+        FVector LocalLocation = InteriorBounds->GetComponentTransform().InverseTransformPosition(WorldLocation);
+        FVector BoxExtent = InteriorBounds->GetScaledBoxExtent();
+        
+        return (FMath::Abs(LocalLocation.X) <= BoxExtent.X &&
+                FMath::Abs(LocalLocation.Y) <= BoxExtent.Y &&
+                FMath::Abs(LocalLocation.Z) <= BoxExtent.Z);
+    }
+    
     return false;
 }
 
-FArch_InteriorData* UArch_InteriorManager::GetInteriorByID(const FGuid& InteriorID)
+void AArch_InteriorManager::SpawnInteriorItem(const FArch_InteriorItem& Item)
 {
-    for (FArch_InteriorData& Interior : ActiveInteriors)
+    // Create a static mesh component for the item
+    UStaticMeshComponent* ItemMesh = CreateDefaultSubobject<UStaticMeshComponent>(
+        *FString::Printf(TEXT("ItemMesh_%d"), InteriorItems.Num())
+    );
+    
+    if (ItemMesh)
     {
-        if (Interior.InteriorID == InteriorID)
+        ItemMesh->SetupAttachment(RootComponent);
+        ItemMesh->SetRelativeLocation(Item.RelativeLocation);
+        ItemMesh->SetRelativeRotation(Item.RelativeRotation);
+        
+        // Apply wear-based scaling
+        float Scale = 1.0f - (Item.WearLevel * 0.2f);
+        ItemMesh->SetRelativeScale3D(FVector(Scale));
+        
+        UE_LOG(LogTemp, Log, TEXT("Arch_InteriorManager: Item mesh spawned for %s"), *Item.ItemName);
+    }
+}
+
+void AArch_InteriorManager::SetupDwellingInterior()
+{
+    UE_LOG(LogTemp, Log, TEXT("Arch_InteriorManager: Setting up dwelling interior"));
+    
+    // Central fire pit
+    if (bHasFirePit)
+    {
+        AddInteriorItem(EArch_InteriorType::FirePit, FVector(0, 0, 0), FRotator::ZeroRotator);
+    }
+    
+    // Sleeping areas around the edges
+    if (bHasSleepingArea)
+    {
+        for (int32 i = 0; i < 3; i++)
         {
-            return &Interior;
+            float Angle = (i * 120.0f) * PI / 180.0f;
+            FVector SleepLocation = FVector(FMath::Cos(Angle) * 300.0f, FMath::Sin(Angle) * 300.0f, 0.0f);
+            AddInteriorItem(EArch_InteriorType::Furniture, SleepLocation, FRotator(0, i * 120.0f, 0));
         }
     }
     
-    return nullptr;
-}
-
-TArray<FArch_InteriorData*> UArch_InteriorManager::GetInteriorsInRadius(const FVector& Location, float Radius)
-{
-    TArray<FArch_InteriorData*> NearbyInteriors;
-    
-    for (FArch_InteriorData& Interior : ActiveInteriors)
+    // Storage areas
+    if (bHasStorageArea)
     {
-        float Distance = FVector::Dist(Interior.Location, Location);
-        if (Distance <= Radius)
-        {
-            NearbyInteriors.Add(&Interior);
-        }
+        AddInteriorItem(EArch_InteriorType::Storage, FVector(200, 200, 0), FRotator::ZeroRotator);
+        AddInteriorItem(EArch_InteriorType::Storage, FVector(-200, 200, 0), FRotator::ZeroRotator);
     }
     
-    return NearbyInteriors;
+    // Decorative elements
+    AddInteriorItem(EArch_InteriorType::Decoration, FVector(100, -200, 50), FRotator::ZeroRotator);
+    AddInteriorItem(EArch_InteriorType::Decoration, FVector(-100, -200, 50), FRotator::ZeroRotator);
 }
 
-bool UArch_InteriorManager::CanEnterInterior(const FGuid& InteriorID, int32 NumOccupants)
+void AArch_InteriorManager::SetupShelterInterior()
 {
-    FArch_InteriorData* Interior = GetInteriorByID(InteriorID);
-    if (!Interior)
-    {
-        return false;
-    }
+    UE_LOG(LogTemp, Log, TEXT("Arch_InteriorManager: Setting up shelter interior"));
     
-    return (Interior->CurrentOccupants + NumOccupants) <= Interior->Settings.MaxOccupants;
+    // Simple fire pit
+    AddInteriorItem(EArch_InteriorType::FirePit, FVector(0, 0, 0), FRotator::ZeroRotator);
+    
+    // Basic sleeping area
+    AddInteriorItem(EArch_InteriorType::Furniture, FVector(150, 0, 0), FRotator::ZeroRotator);
+    
+    // Minimal storage
+    AddInteriorItem(EArch_InteriorType::Storage, FVector(-150, 0, 0), FRotator::ZeroRotator);
 }
 
-bool UArch_InteriorManager::EnterInterior(const FGuid& InteriorID, int32 NumOccupants)
+void AArch_InteriorManager::SetupStorageInterior()
 {
-    FArch_InteriorData* Interior = GetInteriorByID(InteriorID);
-    if (!Interior || !CanEnterInterior(InteriorID, NumOccupants))
+    UE_LOG(LogTemp, Log, TEXT("Arch_InteriorManager: Setting up storage interior"));
+    
+    // Multiple storage containers
+    for (int32 i = 0; i < 6; i++)
     {
-        return false;
-    }
-    
-    Interior->CurrentOccupants += NumOccupants;
-    UE_LOG(LogTemp, Log, TEXT("Arch_InteriorManager: %d occupants entered interior. Total: %d/%d"), 
-           NumOccupants, Interior->CurrentOccupants, Interior->Settings.MaxOccupants);
-    
-    return true;
-}
-
-bool UArch_InteriorManager::ExitInterior(const FGuid& InteriorID, int32 NumOccupants)
-{
-    FArch_InteriorData* Interior = GetInteriorByID(InteriorID);
-    if (!Interior)
-    {
-        return false;
-    }
-    
-    Interior->CurrentOccupants = FMath::Max(0, Interior->CurrentOccupants - NumOccupants);
-    UE_LOG(LogTemp, Log, TEXT("Arch_InteriorManager: %d occupants exited interior. Total: %d/%d"), 
-           NumOccupants, Interior->CurrentOccupants, Interior->Settings.MaxOccupants);
-    
-    return true;
-}
-
-EArch_InteriorType UArch_InteriorManager::GetRandomInteriorType() const
-{
-    float RandomValue = FMath::FRand();
-    float CumulativeProbability = 0.0f;
-    
-    for (const auto& Pair : InteriorTypeProbabilities)
-    {
-        CumulativeProbability += Pair.Value;
-        if (RandomValue <= CumulativeProbability)
-        {
-            return Pair.Key;
-        }
-    }
-    
-    // Fallback to cave dwelling
-    return EArch_InteriorType::CaveDwelling;
-}
-
-void UArch_InteriorManager::UpdateInteriorSystem(float DeltaTime)
-{
-    // Update interior states, maintenance, etc.
-    for (FArch_InteriorData& Interior : ActiveInteriors)
-    {
-        if (Interior.bIsActive)
-        {
-            // Update interior logic here
-            // For now, just ensure it stays active
-        }
+        float Angle = (i * 60.0f) * PI / 180.0f;
+        FVector StorageLocation = FVector(FMath::Cos(Angle) * 200.0f, FMath::Sin(Angle) * 200.0f, 0.0f);
+        AddInteriorItem(EArch_InteriorType::Storage, StorageLocation, FRotator(0, i * 60.0f, 0));
     }
 }
 
-int32 UArch_InteriorManager::GetActiveInteriorCount() const
+void AArch_InteriorManager::SetupWorkshopInterior()
 {
-    return ActiveInteriors.Num();
+    UE_LOG(LogTemp, Log, TEXT("Arch_InteriorManager: Setting up workshop interior"));
+    
+    // Central work area
+    AddInteriorItem(EArch_InteriorType::Furniture, FVector(0, 0, 0), FRotator::ZeroRotator);
+    
+    // Tool storage around edges
+    for (int32 i = 0; i < 4; i++)
+    {
+        float Angle = (i * 90.0f) * PI / 180.0f;
+        FVector ToolLocation = FVector(FMath::Cos(Angle) * 250.0f, FMath::Sin(Angle) * 250.0f, 0.0f);
+        AddInteriorItem(EArch_InteriorType::Storage, ToolLocation, FRotator(0, i * 90.0f, 0));
+    }
+    
+    // Fire pit for metalworking
+    AddInteriorItem(EArch_InteriorType::FirePit, FVector(200, 0, 0), FRotator::ZeroRotator);
 }
 
-TArray<FVector> UArch_InteriorManager::GetAllFirePitLocations() const
+void AArch_InteriorManager::SetupRuinInterior()
 {
-    return FirePitLocations;
-}
-
-TArray<FArch_SleepingArea> UArch_InteriorManager::GetAllSleepingAreas() const
-{
-    return SleepingAreas;
-}
-
-TArray<FArch_StorageArea> UArch_InteriorManager::GetAllStorageAreas() const
-{
-    return StorageAreas;
+    UE_LOG(LogTemp, Log, TEXT("Arch_InteriorManager: Setting up ruin interior"));
+    
+    // Scattered debris and remnants
+    for (int32 i = 0; i < 5; i++)
+    {
+        FVector RandomLocation = FVector(
+            FMath::RandRange(-200.0f, 200.0f),
+            FMath::RandRange(-200.0f, 200.0f),
+            0.0f
+        );
+        
+        EArch_InteriorType RandomType = static_cast<EArch_InteriorType>(FMath::RandRange(0, 3));
+        FRotator RandomRotation = FRotator(0, FMath::RandRange(0.0f, 360.0f), 0);
+        
+        AddInteriorItem(RandomType, RandomLocation, RandomRotation);
+    }
 }
