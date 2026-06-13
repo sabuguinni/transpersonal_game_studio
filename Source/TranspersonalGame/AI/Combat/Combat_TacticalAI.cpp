@@ -1,280 +1,490 @@
 #include "Combat_TacticalAI.h"
-#include "Engine/World.h"
+#include "BehaviorTree/BehaviorTree.h"
+#include "BehaviorTree/BehaviorTreeComponent.h"
+#include "BehaviorTree/BlackboardComponent.h"
+#include "Perception/AIPerceptionComponent.h"
+#include "Perception/AISightConfig.h"
+#include "Perception/AIHearingConfig.h"
+#include "GameFramework/Character.h"
 #include "GameFramework/Pawn.h"
+#include "Engine/World.h"
 #include "Kismet/GameplayStatics.h"
 #include "DrawDebugHelpers.h"
-#include "Engine/Engine.h"
 
-UCombat_TacticalAI::UCombat_TacticalAI()
+ACombat_TacticalAI::ACombat_TacticalAI()
 {
-    PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 0.1f; // Update 10 times per second
+    PrimaryActorTick.bCanEverTick = true;
+
+    // Initialize AI components
+    BehaviorTreeComponent = CreateDefaultSubobject<UBehaviorTreeComponent>(TEXT("BehaviorTreeComponent"));
+    BlackboardComponent = CreateDefaultSubobject<UBlackboardComponent>(TEXT("BlackboardComponent"));
+    AIPerceptionComponent = CreateDefaultSubobject<UAIPerceptionComponent>(TEXT("AIPerceptionComponent"));
+
+    // Set up AI Perception - Sight
+    UAISightConfig* SightConfig = CreateDefaultSubobject<UAISightConfig>(TEXT("SightConfig"));
+    if (SightConfig)
+    {
+        SightConfig->SightRadius = 2000.0f;
+        SightConfig->LoseSightRadius = 2200.0f;
+        SightConfig->PeripheralVisionAngleDegrees = 90.0f;
+        SightConfig->SetMaxAge(5.0f);
+        SightConfig->DetectionByAffiliation.bDetectNeutrals = true;
+        SightConfig->DetectionByAffiliation.bDetectFriendlies = true;
+        SightConfig->DetectionByAffiliation.bDetectEnemies = true;
+        
+        AIPerceptionComponent->ConfigureSense(*SightConfig);
+    }
+
+    // Set up AI Perception - Hearing
+    UAIHearingConfig* HearingConfig = CreateDefaultSubobject<UAIHearingConfig>(TEXT("HearingConfig"));
+    if (HearingConfig)
+    {
+        HearingConfig->HearingRange = 1500.0f;
+        HearingConfig->SetMaxAge(3.0f);
+        HearingConfig->DetectionByAffiliation.bDetectNeutrals = true;
+        HearingConfig->DetectionByAffiliation.bDetectFriendlies = true;
+        HearingConfig->DetectionByAffiliation.bDetectEnemies = true;
+        
+        AIPerceptionComponent->ConfigureSense(*HearingConfig);
+    }
+
+    AIPerceptionComponent->SetDominantSense(SightConfig->GetSenseImplementation());
+
+    // Initialize tactical data
+    TacticalData = FCombat_TacticalData();
+    CurrentTacticalState = ECombat_TacticalState::Patrol;
+    CurrentTarget = nullptr;
+    LastKnownTargetLocation = FVector::ZeroVector;
+    
+    // Initialize timing variables
+    LastStateUpdateTime = 0.0f;
+    StateUpdateInterval = 0.5f; // Update tactical state every 0.5 seconds
+    bIsInCombat = false;
+    CombatStartTime = 0.0f;
 }
 
-void UCombat_TacticalAI::BeginPlay()
+void ACombat_TacticalAI::BeginPlay()
 {
     Super::BeginPlay();
-    
-    TacticalData.CurrentState = ECombat_TacticalState::Patrol;
-    LastStateChangeTime = GetWorld()->GetTimeSeconds();
-    
-    FindPlayerTarget();
+
+    // Bind perception events
+    if (AIPerceptionComponent)
+    {
+        AIPerceptionComponent->OnPerceptionUpdated.AddDynamic(this, &ACombat_TacticalAI::OnPerceptionUpdated);
+    }
+
+    // Start behavior tree if assigned
+    if (BehaviorTree && BehaviorTreeComponent)
+    {
+        BehaviorTreeComponent->StartTree(*BehaviorTree);
+    }
+
+    // Initialize blackboard values
+    if (BlackboardComponent)
+    {
+        BlackboardComponent->SetValueAsEnum(TEXT("TacticalState"), static_cast<uint8>(CurrentTacticalState));
+        BlackboardComponent->SetValueAsFloat(TEXT("AggressionLevel"), TacticalData.AggressionLevel);
+        BlackboardComponent->SetValueAsFloat(TEXT("SightRange"), TacticalData.SightRange);
+    }
 }
 
-void UCombat_TacticalAI::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void ACombat_TacticalAI::Tick(float DeltaTime)
 {
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-    
-    if (!PlayerTarget)
-    {
-        FindPlayerTarget();
-        return;
-    }
-    
-    // Update tactical data
-    TacticalData.DistanceToPlayer = FVector::Dist(GetOwner()->GetActorLocation(), PlayerTarget->GetActorLocation());
-    TacticalData.bHasLineOfSight = HasLineOfSightToPlayer();
-    TacticalData.ThreatLevel = CalculateThreatLevel();
-    
-    if (TacticalData.bHasLineOfSight)
-    {
-        TacticalData.LastKnownPlayerLocation = PlayerTarget->GetActorLocation();
-        TacticalData.TimesSincePlayerSeen = 0.0f;
-    }
-    else
-    {
-        TacticalData.TimesSincePlayerSeen += DeltaTime;
-    }
-    
-    // Update tactical state based on conditions
-    UpdateTacticalState();
-}
+    Super::Tick(DeltaTime);
 
-void UCombat_TacticalAI::UpdateTacticalState()
-{
     float CurrentTime = GetWorld()->GetTimeSeconds();
-    if (CurrentTime - LastStateChangeTime < StateChangeDelay)
+    
+    // Update tactical state periodically
+    if (CurrentTime - LastStateUpdateTime >= StateUpdateInterval)
     {
-        return; // Prevent rapid state changes
+        UpdateTacticalState();
+        ProcessCombatLogic();
+        LastStateUpdateTime = CurrentTime;
     }
-    
-    ECombat_TacticalState NewState = TacticalData.CurrentState;
-    
-    // State machine logic
-    switch (TacticalData.CurrentState)
+
+    // Debug visualization in development builds
+    #if WITH_EDITOR
+    if (CurrentTarget)
     {
-        case ECombat_TacticalState::Patrol:
-            if (TacticalData.DistanceToPlayer <= AlertRadius && TacticalData.bHasLineOfSight)
-            {
-                NewState = ECombat_TacticalState::Alert;
-            }
-            break;
-            
-        case ECombat_TacticalState::Alert:
-            if (TacticalData.DistanceToPlayer <= AttackRadius)
-            {
-                NewState = ECombat_TacticalState::Attacking;
-            }
-            else if (TacticalData.bHasLineOfSight && bCanFlank && TacticalData.DistanceToPlayer > AttackRadius)
-            {
-                NewState = ECombat_TacticalState::Flanking;
-            }
-            else if (!TacticalData.bHasLineOfSight && TacticalData.TimesSincePlayerSeen < 5.0f)
-            {
-                NewState = ECombat_TacticalState::Hunting;
-            }
-            else if (TacticalData.TimesSincePlayerSeen > 10.0f)
-            {
-                NewState = ECombat_TacticalState::Patrol;
-            }
-            break;
-            
-        case ECombat_TacticalState::Hunting:
-            if (TacticalData.bHasLineOfSight)
-            {
-                NewState = ECombat_TacticalState::Alert;
-            }
-            else if (TacticalData.TimesSincePlayerSeen > 15.0f)
-            {
-                NewState = ECombat_TacticalState::Patrol;
-            }
-            break;
-            
-        case ECombat_TacticalState::Attacking:
-            if (ShouldRetreat())
-            {
-                NewState = ECombat_TacticalState::Retreating;
-            }
-            else if (TacticalData.DistanceToPlayer > AttackRadius * 1.5f)
-            {
-                NewState = ECombat_TacticalState::Alert;
-            }
-            break;
-            
-        case ECombat_TacticalState::Flanking:
-            if (TacticalData.DistanceToPlayer <= AttackRadius)
-            {
-                NewState = ECombat_TacticalState::Attacking;
-            }
-            else if (!TacticalData.bHasLineOfSight)
-            {
-                NewState = ECombat_TacticalState::Hunting;
-            }
-            break;
-            
-        case ECombat_TacticalState::Retreating:
-            if (TacticalData.DistanceToPlayer > AlertRadius * 2.0f)
-            {
-                NewState = ECombat_TacticalState::Patrol;
-            }
-            break;
-            
-        case ECombat_TacticalState::Ambush:
-            if (TacticalData.DistanceToPlayer <= AttackRadius)
-            {
-                NewState = ECombat_TacticalState::Attacking;
-            }
-            break;
+        DrawDebugLine(GetWorld(), GetPawn()->GetActorLocation(), CurrentTarget->GetActorLocation(), 
+                     FColor::Red, false, 0.1f, 0, 2.0f);
     }
-    
-    if (NewState != TacticalData.CurrentState)
+    #endif
+}
+
+void ACombat_TacticalAI::SetTacticalState(ECombat_TacticalState NewState)
+{
+    if (CurrentTacticalState != NewState)
     {
-        SetTacticalState(NewState);
+        ECombat_TacticalState PreviousState = CurrentTacticalState;
+        CurrentTacticalState = NewState;
+
+        // Update blackboard
+        if (BlackboardComponent)
+        {
+            BlackboardComponent->SetValueAsEnum(TEXT("TacticalState"), static_cast<uint8>(CurrentTacticalState));
+        }
+
+        // Handle state transitions
+        switch (NewState)
+        {
+            case ECombat_TacticalState::Engage:
+                bIsInCombat = true;
+                CombatStartTime = GetWorld()->GetTimeSeconds();
+                CommunicateWithAllies();
+                break;
+            case ECombat_TacticalState::Retreat:
+                bIsInCombat = false;
+                break;
+            case ECombat_TacticalState::Patrol:
+                bIsInCombat = false;
+                CurrentTarget = nullptr;
+                break;
+        }
+
+        UE_LOG(LogTemp, Warning, TEXT("TacticalAI %s: State changed from %d to %d"), 
+               *GetName(), static_cast<int32>(PreviousState), static_cast<int32>(NewState));
     }
 }
 
-void UCombat_TacticalAI::SetTacticalState(ECombat_TacticalState NewState)
+void ACombat_TacticalAI::SetTarget(AActor* NewTarget)
 {
-    ECombat_TacticalState OldState = TacticalData.CurrentState;
-    TacticalData.CurrentState = NewState;
-    LastStateChangeTime = GetWorld()->GetTimeSeconds();
-    
-    // Log state changes for debugging
-    UE_LOG(LogTemp, Log, TEXT("TacticalAI %s: State changed from %d to %d"), 
-           *GetOwner()->GetName(), (int32)OldState, (int32)NewState);
-    
-    // Trigger state-specific behaviors
-    switch (NewState)
+    if (CurrentTarget != NewTarget)
     {
-        case ECombat_TacticalState::Alert:
-            OnPlayerDetected(TacticalData.LastKnownPlayerLocation);
-            break;
-        case ECombat_TacticalState::Patrol:
-            OnPlayerLost();
-            break;
+        CurrentTarget = NewTarget;
+        
+        if (CurrentTarget)
+        {
+            LastKnownTargetLocation = CurrentTarget->GetActorLocation();
+            
+            // Update blackboard
+            if (BlackboardComponent)
+            {
+                BlackboardComponent->SetValueAsObject(TEXT("TargetActor"), CurrentTarget);
+                BlackboardComponent->SetValueAsVector(TEXT("TargetLocation"), LastKnownTargetLocation);
+            }
+        }
+        else
+        {
+            // Clear target from blackboard
+            if (BlackboardComponent)
+            {
+                BlackboardComponent->ClearValue(TEXT("TargetActor"));
+                BlackboardComponent->ClearValue(TEXT("TargetLocation"));
+            }
+        }
     }
 }
 
-FVector UCombat_TacticalAI::GetFlankingPosition()
+void ACombat_TacticalAI::AddAlliedUnit(AActor* AllyActor)
 {
-    if (!PlayerTarget)
+    if (AllyActor && !AlliedUnits.Contains(AllyActor))
     {
-        return GetOwner()->GetActorLocation();
+        AlliedUnits.Add(AllyActor);
+        UE_LOG(LogTemp, Log, TEXT("TacticalAI %s: Added ally %s"), *GetName(), *AllyActor->GetName());
+    }
+}
+
+void ACombat_TacticalAI::RemoveAlliedUnit(AActor* AllyActor)
+{
+    if (AlliedUnits.Contains(AllyActor))
+    {
+        AlliedUnits.Remove(AllyActor);
+        UE_LOG(LogTemp, Log, TEXT("TacticalAI %s: Removed ally %s"), *GetName(), *AllyActor->GetName());
+    }
+}
+
+FVector ACombat_TacticalAI::GetFlankingPosition(AActor* Target, float FlankDistance)
+{
+    if (!Target || !GetPawn())
+    {
+        return FVector::ZeroVector;
+    }
+
+    FVector TargetLocation = Target->GetActorLocation();
+    FVector MyLocation = GetPawn()->GetActorLocation();
+    FVector DirectionToTarget = (TargetLocation - MyLocation).GetSafeNormal();
+    
+    // Calculate perpendicular vector for flanking
+    FVector FlankDirection = FVector::CrossProduct(DirectionToTarget, FVector::UpVector).GetSafeNormal();
+    
+    // Randomize left or right flanking
+    if (FMath::RandBool())
+    {
+        FlankDirection *= -1.0f;
     }
     
-    FVector PlayerLocation = PlayerTarget->GetActorLocation();
-    FVector MyLocation = GetOwner()->GetActorLocation();
-    FVector ToPlayer = (PlayerLocation - MyLocation).GetSafeNormal();
+    FVector FlankPosition = TargetLocation + (FlankDirection * FlankDistance);
     
-    // Calculate flanking position 90 degrees to the side
-    FVector FlankDirection = FVector::CrossProduct(ToPlayer, FVector::UpVector).GetSafeNormal();
-    FVector FlankPosition = PlayerLocation + (FlankDirection * FlankingDistance);
+    // Ensure the position is on the ground (basic height adjustment)
+    FHitResult HitResult;
+    FVector TraceStart = FlankPosition + FVector(0, 0, 500);
+    FVector TraceEnd = FlankPosition - FVector(0, 0, 500);
+    
+    if (GetWorld()->LineTraceSingleByChannel(HitResult, TraceStart, TraceEnd, ECC_WorldStatic))
+    {
+        FlankPosition.Z = HitResult.Location.Z + 100.0f; // Add small offset above ground
+    }
     
     return FlankPosition;
 }
 
-bool UCombat_TacticalAI::ShouldRetreat()
+bool ACombat_TacticalAI::ShouldRetreat() const
 {
-    // Check if owner has health component and is below threshold
-    if (APawn* OwnerPawn = Cast<APawn>(GetOwner()))
+    if (!GetPawn())
     {
-        // Simple retreat logic based on distance and threat level
-        if (TacticalData.ThreatLevel > 8.0f && TacticalData.DistanceToPlayer < AttackRadius * 0.5f)
+        return false;
+    }
+
+    // Check health percentage (assuming Character has health)
+    if (ACharacter* Character = Cast<ACharacter>(GetPawn()))
+    {
+        // Basic retreat logic - retreat if outnumbered significantly
+        int32 NearbyEnemies = 0;
+        int32 NearbyAllies = 0;
+        
+        TArray<AActor*> NearbyActors;
+        UGameplayStatics::GetAllActorsOfClass(GetWorld(), APawn::StaticClass(), NearbyActors);
+        
+        FVector MyLocation = GetPawn()->GetActorLocation();
+        float ThreatRadius = 1000.0f;
+        
+        for (AActor* Actor : NearbyActors)
         {
-            return true;
+            if (Actor == GetPawn()) continue;
+            
+            float Distance = FVector::Dist(MyLocation, Actor->GetActorLocation());
+            if (Distance <= ThreatRadius)
+            {
+                if (AlliedUnits.Contains(Actor))
+                {
+                    NearbyAllies++;
+                }
+                else
+                {
+                    NearbyEnemies++;
+                }
+            }
         }
+        
+        // Retreat if outnumbered 2:1 or more
+        return (NearbyEnemies >= 2 && NearbyAllies == 0) || 
+               (NearbyEnemies > NearbyAllies * 2);
     }
     
     return false;
 }
 
-void UCombat_TacticalAI::OnPlayerDetected(FVector PlayerLocation)
+void ACombat_TacticalAI::ExecuteFormation(ECombat_Formation Formation)
 {
-    TacticalData.LastKnownPlayerLocation = PlayerLocation;
-    TacticalData.TimesSincePlayerSeen = 0.0f;
-    
-    // Broadcast to other AI units nearby
-    UE_LOG(LogTemp, Warning, TEXT("TacticalAI %s: Player detected at %s"), 
-           *GetOwner()->GetName(), *PlayerLocation.ToString());
-}
-
-void UCombat_TacticalAI::OnPlayerLost()
-{
-    UE_LOG(LogTemp, Log, TEXT("TacticalAI %s: Player lost, returning to patrol"), 
-           *GetOwner()->GetName());
-}
-
-void UCombat_TacticalAI::FindPlayerTarget()
-{
-    if (UWorld* World = GetWorld())
+    if (AlliedUnits.Num() == 0)
     {
-        PlayerTarget = UGameplayStatics::GetPlayerPawn(World, 0);
+        return;
+    }
+
+    // Basic formation implementation
+    switch (Formation)
+    {
+        case ECombat_Formation::Line:
+            // Arrange allies in a line formation
+            for (int32 i = 0; i < AlliedUnits.Num(); i++)
+            {
+                if (ACombat_TacticalAI* AllyAI = Cast<ACombat_TacticalAI>(AlliedUnits[i]))
+                {
+                    FVector FormationPos = GetPawn()->GetActorLocation() + 
+                                         FVector(0, (i - AlliedUnits.Num()/2) * 200.0f, 0);
+                    // Send formation position to ally (would need custom implementation)
+                }
+            }
+            break;
+        case ECombat_Formation::Circle:
+            // Arrange allies in a circle around the leader
+            for (int32 i = 0; i < AlliedUnits.Num(); i++)
+            {
+                float Angle = (2.0f * PI * i) / AlliedUnits.Num();
+                FVector FormationPos = GetPawn()->GetActorLocation() + 
+                                     FVector(FMath::Cos(Angle) * 300.0f, FMath::Sin(Angle) * 300.0f, 0);
+                // Send formation position to ally
+            }
+            break;
     }
 }
 
-bool UCombat_TacticalAI::HasLineOfSightToPlayer()
+float ACombat_TacticalAI::GetDistanceToTarget() const
 {
-    if (!PlayerTarget)
+    if (!CurrentTarget || !GetPawn())
+    {
+        return -1.0f;
+    }
+    
+    return FVector::Dist(GetPawn()->GetActorLocation(), CurrentTarget->GetActorLocation());
+}
+
+bool ACombat_TacticalAI::HasLineOfSightToTarget() const
+{
+    if (!CurrentTarget || !GetPawn())
     {
         return false;
     }
     
-    FVector StartLocation = GetOwner()->GetActorLocation();
-    FVector EndLocation = PlayerTarget->GetActorLocation();
-    
     FHitResult HitResult;
-    FCollisionQueryParams QueryParams;
-    QueryParams.AddIgnoredActor(GetOwner());
-    QueryParams.AddIgnoredActor(PlayerTarget);
+    FVector Start = GetPawn()->GetActorLocation() + FVector(0, 0, 50); // Eye level
+    FVector End = CurrentTarget->GetActorLocation() + FVector(0, 0, 50);
     
-    bool bHit = GetWorld()->LineTraceSingleByChannel(
-        HitResult,
-        StartLocation,
-        EndLocation,
-        ECollisionChannel::ECC_Visibility,
-        QueryParams
-    );
+    bool bHit = GetWorld()->LineTraceSingleByChannel(HitResult, Start, End, ECC_Visibility);
     
-    // Draw debug line in development builds
-    #if WITH_EDITOR
-    DrawDebugLine(GetWorld(), StartLocation, EndLocation, 
-                  bHit ? FColor::Red : FColor::Green, false, 0.1f);
-    #endif
-    
-    return !bHit; // No hit means clear line of sight
+    return !bHit || HitResult.GetActor() == CurrentTarget;
 }
 
-float UCombat_TacticalAI::CalculateThreatLevel()
+void ACombat_TacticalAI::OnPerceptionUpdated(const TArray<AActor*>& UpdatedActors)
 {
-    float Threat = 0.0f;
-    
-    // Distance-based threat (closer = more threatening)
-    if (TacticalData.DistanceToPlayer < AttackRadius)
+    for (AActor* Actor : UpdatedActors)
     {
-        Threat += 5.0f * (1.0f - (TacticalData.DistanceToPlayer / AttackRadius));
+        if (!Actor || Actor == GetPawn())
+        {
+            continue;
+        }
+        
+        // Check if this is a potential target (player or enemy)
+        if (Actor->IsA<ACharacter>() && !AlliedUnits.Contains(Actor))
+        {
+            FActorPerceptionBlueprintInfo PerceptionInfo;
+            AIPerceptionComponent->GetActorsPerception(Actor, PerceptionInfo);
+            
+            if (PerceptionInfo.bIsHostile || CurrentTacticalState == ECombat_TacticalState::Patrol)
+            {
+                SetTarget(Actor);
+                SetTacticalState(ECombat_TacticalState::Investigate);
+            }
+        }
     }
-    
-    // Line of sight increases threat
-    if (TacticalData.bHasLineOfSight)
+}
+
+void ACombat_TacticalAI::UpdateTacticalState()
+{
+    if (!GetPawn())
     {
-        Threat += 3.0f;
+        return;
     }
-    
-    // Recent player sighting increases threat
-    if (TacticalData.TimesSincePlayerSeen < 5.0f)
+
+    switch (CurrentTacticalState)
     {
-        Threat += 2.0f * (1.0f - (TacticalData.TimesSincePlayerSeen / 5.0f));
+        case ECombat_TacticalState::Patrol:
+            // Look for targets
+            if (CurrentTarget)
+            {
+                SetTacticalState(ECombat_TacticalState::Investigate);
+            }
+            break;
+            
+        case ECombat_TacticalState::Investigate:
+            if (CurrentTarget)
+            {
+                float DistanceToTarget = GetDistanceToTarget();
+                if (DistanceToTarget <= 500.0f && HasLineOfSightToTarget())
+                {
+                    SetTacticalState(ECombat_TacticalState::Engage);
+                }
+                else if (DistanceToTarget > TacticalData.SightRange * 1.5f)
+                {
+                    SetTacticalState(ECombat_TacticalState::Patrol);
+                }
+            }
+            break;
+            
+        case ECombat_TacticalState::Engage:
+            if (ShouldRetreat())
+            {
+                SetTacticalState(ECombat_TacticalState::Retreat);
+            }
+            else if (TacticalData.FlankingTendency > 0.5f && FMath::RandFloat() < 0.3f)
+            {
+                SetTacticalState(ECombat_TacticalState::Flank);
+            }
+            break;
+            
+        case ECombat_TacticalState::Flank:
+            // Return to engage after flanking maneuver
+            if (bIsInCombat && GetWorld()->GetTimeSeconds() - CombatStartTime > 5.0f)
+            {
+                SetTacticalState(ECombat_TacticalState::Engage);
+            }
+            break;
+            
+        case ECombat_TacticalState::Retreat:
+            // Check if it's safe to re-engage
+            if (!ShouldRetreat() && CurrentTarget && GetDistanceToTarget() > 1000.0f)
+            {
+                SetTacticalState(ECombat_TacticalState::Investigate);
+            }
+            break;
     }
+}
+
+void ACombat_TacticalAI::ProcessCombatLogic()
+{
+    if (!CurrentTarget)
+    {
+        return;
+    }
+
+    // Update last known target location
+    if (HasLineOfSightToTarget())
+    {
+        LastKnownTargetLocation = CurrentTarget->GetActorLocation();
+        if (BlackboardComponent)
+        {
+            BlackboardComponent->SetValueAsVector(TEXT("TargetLocation"), LastKnownTargetLocation);
+        }
+    }
+
+    // Execute formation if in combat and has allies
+    if (bIsInCombat && AlliedUnits.Num() > 0 && TacticalData.PreferredFormation != ECombat_Formation::None)
+    {
+        ExecuteFormation(TacticalData.PreferredFormation);
+    }
+}
+
+FVector ACombat_TacticalAI::CalculateOptimalPosition()
+{
+    if (!CurrentTarget || !GetPawn())
+    {
+        return GetPawn()->GetActorLocation();
+    }
+
+    FVector MyLocation = GetPawn()->GetActorLocation();
+    FVector TargetLocation = CurrentTarget->GetActorLocation();
     
-    return FMath::Clamp(Threat, 0.0f, 10.0f);
+    switch (CurrentTacticalState)
+    {
+        case ECombat_TacticalState::Flank:
+            return GetFlankingPosition(CurrentTarget, 400.0f);
+            
+        case ECombat_TacticalState::Retreat:
+            // Move away from target
+            return MyLocation + ((MyLocation - TargetLocation).GetSafeNormal() * 1000.0f);
+            
+        case ECombat_TacticalState::Engage:
+            // Move closer to optimal combat range
+            return TargetLocation + ((MyLocation - TargetLocation).GetSafeNormal() * 300.0f);
+            
+        default:
+            return MyLocation;
+    }
+}
+
+void ACombat_TacticalAI::CommunicateWithAllies()
+{
+    // Basic ally communication system
+    for (AActor* Ally : AlliedUnits)
+    {
+        if (ACombat_TacticalAI* AllyAI = Cast<ACombat_TacticalAI>(Ally))
+        {
+            if (CurrentTarget && AllyAI->CurrentTarget != CurrentTarget)
+            {
+                AllyAI->SetTarget(CurrentTarget);
+                AllyAI->SetTacticalState(ECombat_TacticalState::Investigate);
+            }
+        }
+    }
 }
