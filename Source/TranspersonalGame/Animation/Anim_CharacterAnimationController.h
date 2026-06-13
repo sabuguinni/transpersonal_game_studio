@@ -2,81 +2,77 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
+#include "Engine/Engine.h"
 #include "Animation/AnimInstance.h"
 #include "Animation/AnimMontage.h"
 #include "Animation/BlendSpace.h"
-#include "Engine/Engine.h"
+#include "Components/SkeletalMeshComponent.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
-#include "../SharedTypes.h"
 #include "Anim_CharacterAnimationController.generated.h"
 
-class ACharacter;
-class UAnimInstance;
-class UAnimMontage;
-class UBlendSpace;
-
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FAnim_MovementState
+UENUM(BlueprintType)
+enum class EAnim_MovementState : uint8
 {
-    GENERATED_BODY()
+    Idle        UMETA(DisplayName = "Idle"),
+    Walking     UMETA(DisplayName = "Walking"),
+    Running     UMETA(DisplayName = "Running"),
+    Jumping     UMETA(DisplayName = "Jumping"),
+    Falling     UMETA(DisplayName = "Falling"),
+    Crouching   UMETA(DisplayName = "Crouching"),
+    Combat      UMETA(DisplayName = "Combat")
+};
 
-    UPROPERTY(BlueprintReadWrite, Category = "Animation")
-    float Speed = 0.0f;
-
-    UPROPERTY(BlueprintReadWrite, Category = "Animation")
-    float Direction = 0.0f;
-
-    UPROPERTY(BlueprintReadWrite, Category = "Animation")
-    bool bIsInAir = false;
-
-    UPROPERTY(BlueprintReadWrite, Category = "Animation")
-    bool bIsCrouching = false;
-
-    UPROPERTY(BlueprintReadWrite, Category = "Animation")
-    EAnim_MovementMode MovementMode = EAnim_MovementMode::Walking;
-
-    FAnim_MovementState()
-    {
-        Speed = 0.0f;
-        Direction = 0.0f;
-        bIsInAir = false;
-        bIsCrouching = false;
-        MovementMode = EAnim_MovementMode::Walking;
-    }
+UENUM(BlueprintType)
+enum class EAnim_ActionState : uint8
+{
+    None            UMETA(DisplayName = "None"),
+    Gathering       UMETA(DisplayName = "Gathering"),
+    Crafting        UMETA(DisplayName = "Crafting"),
+    Attacking       UMETA(DisplayName = "Attacking"),
+    Defending       UMETA(DisplayName = "Defending"),
+    Interacting     UMETA(DisplayName = "Interacting")
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FAnim_ActionState
+struct FAnim_AnimationSet
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadWrite, Category = "Animation")
-    bool bIsAttacking = false;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
+    class UAnimMontage* IdleMontage;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Animation")
-    bool bIsBlocking = false;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
+    class UAnimMontage* WalkMontage;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Animation")
-    bool bIsInteracting = false;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
+    class UAnimMontage* RunMontage;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Animation")
-    bool bIsCrafting = false;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
+    class UAnimMontage* JumpMontage;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Animation")
-    EAnim_ActionType CurrentAction = EAnim_ActionType::None;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
+    class UAnimMontage* FallMontage;
 
-    FAnim_ActionState()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
+    class UAnimMontage* CrouchMontage;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
+    class UBlendSpace* LocomotionBlendSpace;
+
+    FAnim_AnimationSet()
     {
-        bIsAttacking = false;
-        bIsBlocking = false;
-        bIsInteracting = false;
-        bIsCrafting = false;
-        CurrentAction = EAnim_ActionType::None;
+        IdleMontage = nullptr;
+        WalkMontage = nullptr;
+        RunMontage = nullptr;
+        JumpMontage = nullptr;
+        FallMontage = nullptr;
+        CrouchMontage = nullptr;
+        LocomotionBlendSpace = nullptr;
     }
 };
 
-UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
+UCLASS(ClassGroup=(TranspersonalGame), meta=(BlueprintSpawnableComponent))
 class TRANSPERSONALGAME_API UAnim_CharacterAnimationController : public UActorComponent
 {
     GENERATED_BODY()
@@ -86,72 +82,126 @@ public:
 
 protected:
     virtual void BeginPlay() override;
-
-public:
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    // Movement Animation Control
+public:
+    // Animation state management
     UFUNCTION(BlueprintCallable, Category = "Animation")
-    void UpdateMovementAnimation(float Speed, float Direction, bool bInAir);
+    void SetMovementState(EAnim_MovementState NewState);
 
     UFUNCTION(BlueprintCallable, Category = "Animation")
-    void SetMovementMode(EAnim_MovementMode NewMode);
-
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    void TriggerJumpAnimation();
-
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    void TriggerLandingAnimation();
-
-    // Action Animation Control
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    void PlayAttackAnimation(EAnim_AttackType AttackType);
-
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    void PlayInteractionAnimation(EAnim_InteractionType InteractionType);
-
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    void PlayEmoteAnimation(EAnim_EmoteType EmoteType);
-
-    // Animation State Queries
-    UFUNCTION(BlueprintPure, Category = "Animation")
-    FAnim_MovementState GetMovementState() const { return MovementState; }
+    void SetActionState(EAnim_ActionState NewState);
 
     UFUNCTION(BlueprintPure, Category = "Animation")
-    FAnim_ActionState GetActionState() const { return ActionState; }
+    EAnim_MovementState GetMovementState() const { return CurrentMovementState; }
 
     UFUNCTION(BlueprintPure, Category = "Animation")
-    bool IsPlayingMontage() const;
+    EAnim_ActionState GetActionState() const { return CurrentActionState; }
 
-    // Animation Assets
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Assets")
-    TObjectPtr<UBlendSpace> MovementBlendSpace;
+    // Animation playback
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    void PlayAnimationMontage(UAnimMontage* Montage, float PlayRate = 1.0f);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Assets")
-    TObjectPtr<UAnimMontage> JumpMontage;
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    void StopAnimationMontage(UAnimMontage* Montage);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Assets")
-    TObjectPtr<UAnimMontage> AttackMontage;
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    void StopAllMontages();
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Assets")
-    TObjectPtr<UAnimMontage> InteractionMontage;
+    // Movement animation
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    void UpdateMovementAnimation();
+
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    void PlayJumpAnimation();
+
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    void PlayLandAnimation();
+
+    // Action animations
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    void PlayGatherAnimation();
+
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    void PlayCraftAnimation();
+
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    void PlayAttackAnimation();
+
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    void PlayDefendAnimation();
+
+    // Animation properties
+    UFUNCTION(BlueprintPure, Category = "Animation")
+    float GetMovementSpeed() const;
+
+    UFUNCTION(BlueprintPure, Category = "Animation")
+    float GetMovementDirection() const;
+
+    UFUNCTION(BlueprintPure, Category = "Animation")
+    bool IsInAir() const;
+
+    UFUNCTION(BlueprintPure, Category = "Animation")
+    bool IsCrouching() const;
+
+protected:
+    // Animation assets
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
+    FAnim_AnimationSet AnimationSet;
+
+    // State tracking
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Animation")
+    EAnim_MovementState CurrentMovementState;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Animation")
+    EAnim_ActionState CurrentActionState;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Animation")
+    EAnim_MovementState PreviousMovementState;
+
+    // Animation parameters
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Animation")
+    float MovementSpeed;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Animation")
+    float MovementDirection;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Animation")
+    bool bIsInAir;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Animation")
+    bool bIsCrouching;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Animation")
+    bool bIsMoving;
+
+    // Component references
+    UPROPERTY()
+    class ACharacter* OwnerCharacter;
+
+    UPROPERTY()
+    class UCharacterMovementComponent* MovementComponent;
+
+    UPROPERTY()
+    class USkeletalMeshComponent* SkeletalMeshComponent;
+
+    UPROPERTY()
+    class UAnimInstance* AnimInstance;
+
+    // Animation settings
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Settings")
+    float MovementSpeedThreshold;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Settings")
+    float RunSpeedThreshold;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Settings")
+    float AnimationBlendTime;
 
 private:
-    UPROPERTY()
-    TObjectPtr<ACharacter> OwnerCharacter;
-
-    UPROPERTY()
-    TObjectPtr<UAnimInstance> AnimInstance;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Animation State", meta = (AllowPrivateAccess = "true"))
-    FAnim_MovementState MovementState;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Animation State", meta = (AllowPrivateAccess = "true"))
-    FAnim_ActionState ActionState;
-
-    // Internal Methods
-    void InitializeAnimationAssets();
-    void UpdateAnimationState(float DeltaTime);
-    void HandleMovementTransitions();
-    void HandleActionTransitions();
+    void InitializeReferences();
+    void UpdateAnimationParameters();
+    EAnim_MovementState CalculateMovementState();
+    void HandleStateTransition(EAnim_MovementState NewState);
+    void PlayStateAnimation(EAnim_MovementState State);
 };
