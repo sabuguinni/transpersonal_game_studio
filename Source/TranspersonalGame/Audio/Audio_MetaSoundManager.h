@@ -1,9 +1,10 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
+#include "Components/ActorComponent.h"
 #include "Engine/World.h"
 #include "Components/AudioComponent.h"
+#include "Sound/SoundCue.h"
 #include "MetasoundSource.h"
 #include "Audio_MetaSoundManager.generated.h"
 
@@ -13,36 +14,26 @@ enum class EAudio_BiomeType : uint8
     Forest      UMETA(DisplayName = "Forest"),
     Plains      UMETA(DisplayName = "Plains"),
     River       UMETA(DisplayName = "River"),
-    Mountain    UMETA(DisplayName = "Mountain"),
-    Cave        UMETA(DisplayName = "Cave")
+    Cave        UMETA(DisplayName = "Cave"),
+    Mountain    UMETA(DisplayName = "Mountain")
 };
 
 UENUM(BlueprintType)
-enum class EAudio_TimeOfDay : uint8
+enum class EAudio_ThreatLevel : uint8
 {
-    Dawn        UMETA(DisplayName = "Dawn"),
-    Day         UMETA(DisplayName = "Day"),
-    Dusk        UMETA(DisplayName = "Dusk"),
-    Night       UMETA(DisplayName = "Night")
-};
-
-UENUM(BlueprintType)
-enum class EAudio_WeatherState : uint8
-{
-    Clear       UMETA(DisplayName = "Clear"),
-    Cloudy      UMETA(DisplayName = "Cloudy"),
-    Rain        UMETA(DisplayName = "Rain"),
-    Storm       UMETA(DisplayName = "Storm"),
-    Fog         UMETA(DisplayName = "Fog")
+    Safe        UMETA(DisplayName = "Safe"),
+    Caution     UMETA(DisplayName = "Caution"),
+    Danger      UMETA(DisplayName = "Danger"),
+    Critical    UMETA(DisplayName = "Critical")
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FAudio_BiomeAudioData
+struct FAudio_BiomeAudioConfig
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Audio")
-    TObjectPtr<UMetaSoundSource> AmbientMetaSound;
+    class UMetaSoundSource* AmbientMetaSound;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Audio")
     float BaseVolume = 0.5f;
@@ -51,119 +42,114 @@ struct TRANSPERSONALGAME_API FAudio_BiomeAudioData
     float FadeInTime = 2.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Audio")
-    float FadeOutTime = 1.5f;
+    float FadeOutTime = 2.0f;
 
-    FAudio_BiomeAudioData()
+    FAudio_BiomeAudioConfig()
     {
         AmbientMetaSound = nullptr;
         BaseVolume = 0.5f;
         FadeInTime = 2.0f;
-        FadeOutTime = 1.5f;
+        FadeOutTime = 2.0f;
     }
 };
 
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FAudio_ThreatAudioData
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Threat Audio")
-    TObjectPtr<UMetaSoundSource> ThreatMetaSound;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Threat Audio")
-    float TriggerDistance = 1500.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Threat Audio")
-    float MaxVolume = 0.8f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Threat Audio")
-    float FadeSpeed = 3.0f;
-
-    FAudio_ThreatAudioData()
-    {
-        ThreatMetaSound = nullptr;
-        TriggerDistance = 1500.0f;
-        MaxVolume = 0.8f;
-        FadeSpeed = 3.0f;
-    }
-};
-
-UCLASS(Blueprintable, BlueprintType)
-class TRANSPERSONALGAME_API AAudio_MetaSoundManager : public AActor
+UCLASS(ClassGroup=(Audio), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UAudio_MetaSoundManager : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    AAudio_MetaSoundManager();
+    UAudio_MetaSoundManager();
 
 protected:
     virtual void BeginPlay() override;
-    virtual void Tick(float DeltaTime) override;
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    TObjectPtr<USceneComponent> RootSceneComponent;
+    // Biome audio configurations
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Audio", meta = (AllowPrivateAccess = "true"))
+    TMap<EAudio_BiomeType, FAudio_BiomeAudioConfig> BiomeAudioConfigs;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    TObjectPtr<UAudioComponent> BiomeAudioComponent;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    TObjectPtr<UAudioComponent> WeatherAudioComponent;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    TObjectPtr<UAudioComponent> ThreatAudioComponent;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Data")
-    TMap<EAudio_BiomeType, FAudio_BiomeAudioData> BiomeAudioMap;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Data")
-    TMap<EAudio_WeatherState, TObjectPtr<UMetaSoundSource>> WeatherAudioMap;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Data")
-    FAudio_ThreatAudioData TRexThreatAudio;
-
-    UPROPERTY(BlueprintReadOnly, Category = "State")
+    // Current active biome
+    UPROPERTY(BlueprintReadOnly, Category = "Audio State", meta = (AllowPrivateAccess = "true"))
     EAudio_BiomeType CurrentBiome;
 
-    UPROPERTY(BlueprintReadOnly, Category = "State")
-    EAudio_TimeOfDay CurrentTimeOfDay;
+    // Current threat level
+    UPROPERTY(BlueprintReadOnly, Category = "Audio State", meta = (AllowPrivateAccess = "true"))
+    EAudio_ThreatLevel CurrentThreatLevel;
 
-    UPROPERTY(BlueprintReadOnly, Category = "State")
-    EAudio_WeatherState CurrentWeather;
+    // Audio components for layered soundscape
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio Components", meta = (AllowPrivateAccess = "true"))
+    class UAudioComponent* BiomeAudioComponent;
 
-    UPROPERTY(BlueprintReadOnly, Category = "State")
-    bool bThreatActive;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio Components", meta = (AllowPrivateAccess = "true"))
+    class UAudioComponent* ThreatAudioComponent;
 
-    UPROPERTY(BlueprintReadOnly, Category = "State")
-    float ThreatLevel;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio Components", meta = (AllowPrivateAccess = "true"))
+    class UAudioComponent* NarrativeAudioComponent;
+
+    // Threat audio assets
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Threat Audio", meta = (AllowPrivateAccess = "true"))
+    TMap<EAudio_ThreatLevel, class UMetaSoundSource*> ThreatAudioSources;
+
+    // Narrative voice lines
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative Audio", meta = (AllowPrivateAccess = "true"))
+    TArray<class USoundWave*> SurvivalNarrativeLines;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative Audio", meta = (AllowPrivateAccess = "true"))
+    TArray<class USoundWave*> TribalDialogueLines;
+
+    // Audio transition timers
+    UPROPERTY(BlueprintReadOnly, Category = "Audio State", meta = (AllowPrivateAccess = "true"))
+    float BiomeTransitionTimer;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Audio State", meta = (AllowPrivateAccess = "true"))
+    float ThreatTransitionTimer;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Audio State", meta = (AllowPrivateAccess = "true"))
+    bool bIsTransitioning;
 
 public:
-    UFUNCTION(BlueprintCallable, Category = "Audio Control")
+    // Biome management functions
+    UFUNCTION(BlueprintCallable, Category = "Audio Management")
     void SetBiome(EAudio_BiomeType NewBiome);
 
-    UFUNCTION(BlueprintCallable, Category = "Audio Control")
-    void SetTimeOfDay(EAudio_TimeOfDay NewTimeOfDay);
+    UFUNCTION(BlueprintCallable, Category = "Audio Management")
+    void SetThreatLevel(EAudio_ThreatLevel NewThreatLevel);
 
-    UFUNCTION(BlueprintCallable, Category = "Audio Control")
-    void SetWeather(EAudio_WeatherState NewWeather);
+    // Narrative audio functions
+    UFUNCTION(BlueprintCallable, Category = "Narrative Audio")
+    void PlaySurvivalNarrative(int32 NarrativeIndex);
 
-    UFUNCTION(BlueprintCallable, Category = "Audio Control")
-    void TriggerThreatAudio(float ThreatDistance);
+    UFUNCTION(BlueprintCallable, Category = "Narrative Audio")
+    void PlayTribalDialogue(int32 DialogueIndex);
 
-    UFUNCTION(BlueprintCallable, Category = "Audio Control")
-    void StopThreatAudio();
+    UFUNCTION(BlueprintCallable, Category = "Narrative Audio")
+    void StopNarrative();
 
-    UFUNCTION(BlueprintCallable, Category = "Audio Control")
-    void UpdatePlayerFootsteps(bool bIsWalking, bool bIsRunning);
-
+    // Audio state queries
     UFUNCTION(BlueprintPure, Category = "Audio State")
     EAudio_BiomeType GetCurrentBiome() const { return CurrentBiome; }
 
     UFUNCTION(BlueprintPure, Category = "Audio State")
-    bool IsThreatActive() const { return bThreatActive; }
+    EAudio_ThreatLevel GetCurrentThreatLevel() const { return CurrentThreatLevel; }
+
+    UFUNCTION(BlueprintPure, Category = "Audio State")
+    bool IsTransitioning() const { return bIsTransitioning; }
+
+    // MetaSound parameter control
+    UFUNCTION(BlueprintCallable, Category = "MetaSound Control")
+    void SetMetaSoundParameter(const FName& ParameterName, float Value);
+
+    UFUNCTION(BlueprintCallable, Category = "MetaSound Control")
+    void SetBiomeIntensity(float Intensity);
+
+    UFUNCTION(BlueprintCallable, Category = "MetaSound Control")
+    void SetThreatIntensity(float Intensity);
 
 private:
-    void UpdateBiomeAudio();
-    void UpdateWeatherAudio();
-    void UpdateThreatAudio(float DeltaTime);
-    void CrossfadeAudio(UAudioComponent* FromComponent, UAudioComponent* ToComponent, float FadeTime);
+    void InitializeAudioComponents();
+    void UpdateBiomeTransition(float DeltaTime);
+    void UpdateThreatTransition(float DeltaTime);
+    void ConfigureBiomeAudio();
+    void ConfigureThreatAudio();
 };
