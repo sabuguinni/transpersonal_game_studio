@@ -3,51 +3,57 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "Components/StaticMeshComponent.h"
-#include "Engine/World.h"
+#include "Engine/StaticMesh.h"
+#include "Materials/MaterialInterface.h"
+#include "SharedTypes.h"
 #include "World_TerrainGenerator.generated.h"
 
 UENUM(BlueprintType)
 enum class EWorld_TerrainType : uint8
 {
-    Flat        UMETA(DisplayName = "Flat"),
-    Hills       UMETA(DisplayName = "Hills"),
-    Mountains   UMETA(DisplayName = "Mountains"),
-    Valley      UMETA(DisplayName = "Valley"),
-    Canyon      UMETA(DisplayName = "Canyon"),
-    Plateau     UMETA(DisplayName = "Plateau")
+    Hills           UMETA(DisplayName = "Hills"),
+    Mountains       UMETA(DisplayName = "Mountains"),
+    Valley          UMETA(DisplayName = "Valley"),
+    Plateau         UMETA(DisplayName = "Plateau"),
+    Canyon          UMETA(DisplayName = "Canyon"),
+    Coastline       UMETA(DisplayName = "Coastline")
 };
 
 USTRUCT(BlueprintType)
-struct FWorld_TerrainSettings
+struct TRANSPERSONALGAME_API FWorld_TerrainChunk
 {
     GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
+    FVector ChunkLocation = FVector::ZeroVector;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
+    FVector ChunkSize = FVector(1000.0f, 1000.0f, 500.0f);
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
     EWorld_TerrainType TerrainType = EWorld_TerrainType::Hills;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
-    float HeightScale = 100.0f;
+    float HeightVariation = 200.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
     float NoiseScale = 0.01f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
-    int32 Octaves = 4;
+    int32 DetailLevel = 1;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
-    float Persistence = 0.5f;
+    UPROPERTY(BlueprintReadOnly, Category = "Terrain")
+    bool bIsGenerated = false;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
-    float Lacunarity = 2.0f;
-
-    FWorld_TerrainSettings()
+    FWorld_TerrainChunk()
     {
+        ChunkLocation = FVector::ZeroVector;
+        ChunkSize = FVector(1000.0f, 1000.0f, 500.0f);
         TerrainType = EWorld_TerrainType::Hills;
-        HeightScale = 100.0f;
+        HeightVariation = 200.0f;
         NoiseScale = 0.01f;
-        Octaves = 4;
-        Persistence = 0.5f;
-        Lacunarity = 2.0f;
+        DetailLevel = 1;
+        bIsGenerated = false;
     }
 };
 
@@ -62,57 +68,79 @@ public:
 protected:
     virtual void BeginPlay() override;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    class UStaticMeshComponent* TerrainMesh;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
-    FWorld_TerrainSettings TerrainSettings;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Generation")
-    int32 TerrainSize = 512;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Generation")
-    float TerrainScale = 100.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water")
-    float WaterLevel = 0.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water")
-    bool bGenerateRivers = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water")
-    int32 RiverCount = 3;
-
 public:
     virtual void Tick(float DeltaTime) override;
 
-    UFUNCTION(BlueprintCallable, Category = "Terrain", CallInEditor)
-    void GenerateTerrain();
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    USceneComponent* RootSceneComponent;
 
-    UFUNCTION(BlueprintCallable, Category = "Terrain")
-    float GetHeightAtLocation(const FVector& WorldLocation) const;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Generation")
+    TArray<FWorld_TerrainChunk> TerrainChunks;
 
-    UFUNCTION(BlueprintCallable, Category = "Water", CallInEditor)
-    void GenerateWaterBodies();
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Generation")
+    float WorldSize = 20000.0f;
 
-    UFUNCTION(BlueprintCallable, Category = "Terrain")
-    FVector GetSurfaceNormal(const FVector& WorldLocation) const;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Generation")
+    float ChunkSize = 2000.0f;
 
-    UFUNCTION(BlueprintCallable, Category = "Terrain")
-    bool IsLocationUnderwater(const FVector& WorldLocation) const;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Generation")
+    int32 MaxActiveChunks = 25;
 
-    UFUNCTION(BlueprintCallable, Category = "Generation")
-    void ApplyErosion(int32 Iterations = 100);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Generation")
+    float PlayerCheckRadius = 5000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Generation")
+    TSoftObjectPtr<UStaticMesh> HillsMesh;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Generation")
+    TSoftObjectPtr<UStaticMesh> MountainsMesh;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Generation")
+    TSoftObjectPtr<UMaterialInterface> TerrainMaterial;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Terrain Generation")
+    FVector PlayerLastLocation = FVector::ZeroVector;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Terrain Generation")
+    int32 GeneratedChunksCount = 0;
+
+    UFUNCTION(BlueprintCallable, Category = "Terrain Generation")
+    void GenerateTerrainAroundPlayer();
+
+    UFUNCTION(BlueprintCallable, Category = "Terrain Generation")
+    void GenerateTerrainChunk(const FWorld_TerrainChunk& ChunkData);
+
+    UFUNCTION(BlueprintCallable, Category = "Terrain Generation")
+    void ClearDistantChunks();
+
+    UFUNCTION(BlueprintCallable, Category = "Terrain Generation")
+    FWorld_TerrainChunk CreateChunkData(const FVector& Location, EWorld_TerrainType TerrainType);
+
+    UFUNCTION(BlueprintCallable, Category = "Terrain Generation")
+    EWorld_TerrainType DetermineTerrainType(const FVector& Location) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Terrain Generation")
+    float GetHeightAtLocation(const FVector& Location) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Terrain Generation")
+    TArray<FVector> GetChunkCentersAroundPlayer(float Radius) const;
+
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Terrain Generation")
+    void RegenerateAllTerrain();
+
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Terrain Generation")
+    void ClearAllTerrain();
 
 private:
-    float PerlinNoise(float X, float Y) const;
-    float FractalNoise(float X, float Y) const;
-    void CreateTerrainMesh();
-    void GenerateRivers();
-    void PlaceLakes();
+    UPROPERTY()
+    TArray<UStaticMeshComponent*> ActiveChunkMeshes;
 
-    TArray<FVector> TerrainVertices;
-    TArray<int32> TerrainIndices;
-    TArray<FVector> TerrainNormals;
-    TArray<FVector2D> TerrainUVs;
+    UPROPERTY()
+    float LastPlayerCheckTime = 0.0f;
+
+    void UpdatePlayerLocation();
+    FVector GetPlayerLocation() const;
+    float PerlinNoise2D(float X, float Y, float Scale) const;
+    void SpawnChunkMesh(const FWorld_TerrainChunk& ChunkData);
+    void RemoveChunkMesh(int32 ChunkIndex);
 };
