@@ -6,42 +6,33 @@
 #include "SharedTypes.h"
 #include "Arch_StructuralIntegrity.generated.h"
 
-UENUM(BlueprintType)
-enum class EArch_StructuralState : uint8
-{
-    Pristine        UMETA(DisplayName = "Pristine"),
-    Weathered       UMETA(DisplayName = "Weathered"),
-    Damaged         UMETA(DisplayName = "Damaged"),
-    Ruined          UMETA(DisplayName = "Ruined"),
-    Collapsed       UMETA(DisplayName = "Collapsed")
-};
-
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FArch_DamagePattern
+struct TRANSPERSONALGAME_API FArch_DamageState
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Damage")
-    float CrackSeverity = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structural Damage")
+    float IntegrityPercentage = 100.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Damage")
-    float MossGrowth = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structural Damage")
+    float WeatheringRate = 0.1f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Damage")
-    float WeatheringIntensity = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structural Damage")
+    float LastDamageTime = 0.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Damage")
-    TArray<FVector> CrackLocations;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structural Damage")
+    bool bIsCollapsed = false;
 
-    FArch_DamagePattern()
+    FArch_DamageState()
     {
-        CrackSeverity = 0.0f;
-        MossGrowth = 0.0f;
-        WeatheringIntensity = 0.0f;
+        IntegrityPercentage = 100.0f;
+        WeatheringRate = 0.1f;
+        LastDamageTime = 0.0f;
+        bIsCollapsed = false;
     }
 };
 
-UCLASS(ClassGroup=(Architecture), meta=(BlueprintSpawnableComponent))
+UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
 class TRANSPERSONALGAME_API UArch_StructuralIntegrity : public UActorComponent
 {
     GENERATED_BODY()
@@ -52,56 +43,42 @@ public:
 protected:
     virtual void BeginPlay() override;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structural System")
+    FArch_DamageState DamageState;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structural System")
+    float MaxIntegrity = 100.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structural System")
+    float WeatherResistance = 50.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structural System")
+    float ImpactThreshold = 25.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structural System")
+    TArray<class UStaticMeshComponent*> StructuralElements;
+
 public:
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structural Integrity")
-    EArch_StructuralState CurrentState = EArch_StructuralState::Pristine;
+    UFUNCTION(BlueprintCallable, Category = "Structural System")
+    void ApplyDamage(float DamageAmount, const FVector& ImpactPoint);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structural Integrity")
-    float StructuralHealth = 100.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structural Integrity")
-    float MaxStructuralHealth = 100.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structural Integrity")
-    float WeatheringRate = 0.1f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structural Integrity")
-    float RainDamageMultiplier = 2.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structural Integrity")
-    float WindDamageMultiplier = 1.5f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structural Integrity")
-    FArch_DamagePattern DamagePattern;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structural Integrity")
-    bool bCanCollapse = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structural Integrity")
-    float CollapseThreshold = 10.0f;
-
-    UFUNCTION(BlueprintCallable, Category = "Structural Integrity")
-    void ApplyWeatherDamage(float DamageAmount, EWeatherType WeatherType);
-
-    UFUNCTION(BlueprintCallable, Category = "Structural Integrity")
-    void ApplyImpactDamage(float DamageAmount, FVector ImpactLocation);
-
-    UFUNCTION(BlueprintCallable, Category = "Structural Integrity")
-    void UpdateStructuralState();
-
-    UFUNCTION(BlueprintCallable, Category = "Structural Integrity")
-    void TriggerCollapse();
-
-    UFUNCTION(BlueprintCallable, Category = "Structural Integrity")
-    bool IsStructureStable() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Structural Integrity")
-    float GetStructuralHealthPercentage() const;
-
-private:
+    UFUNCTION(BlueprintCallable, Category = "Structural System")
     void ProcessWeathering(float DeltaTime);
-    void UpdateDamagePattern();
-    void ApplyVisualDamage();
+
+    UFUNCTION(BlueprintCallable, Category = "Structural System")
+    bool CheckStructuralCollapse();
+
+    UFUNCTION(BlueprintCallable, Category = "Structural System")
+    void UpdateVisualDamage();
+
+    UFUNCTION(BlueprintCallable, Category = "Structural System")
+    float GetIntegrityPercentage() const { return DamageState.IntegrityPercentage; }
+
+    UFUNCTION(BlueprintCallable, Category = "Structural System")
+    bool IsStructureStable() const { return DamageState.IntegrityPercentage > 25.0f && !DamageState.bIsCollapsed; }
+
+    UFUNCTION(BlueprintCallable, Category = "Structural System")
+    void RepairStructure(float RepairAmount);
 };
