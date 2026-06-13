@@ -1,274 +1,520 @@
 #include "NPC_DinosaurBehaviorTree.h"
-#include "BehaviorTree/BehaviorTree.h"
-#include "BehaviorTree/BlackboardComponent.h"
-#include "AIController.h"
-#include "Engine/Engine.h"
 #include "GameFramework/Pawn.h"
+#include "GameFramework/PlayerController.h"
+#include "Engine/World.h"
 #include "Kismet/GameplayStatics.h"
+#include "Kismet/KismetMathLibrary.h"
+#include "Components/PrimitiveComponent.h"
+#include "DrawDebugHelpers.h"
 
 UNPC_DinosaurBehaviorTree::UNPC_DinosaurBehaviorTree()
 {
-    TRexDetectionRadius = 3000.0f;
-    RaptorDetectionRadius = 1500.0f;
-    PackCoordinationRadius = 2000.0f;
-    BehaviorUpdateInterval = 0.5f;
-    
-    CreateDefaultBehaviorTrees();
+    PrimaryComponentTick.bCanEverTick = true;
+    PrimaryComponentTick.TickInterval = 0.1f; // 10 FPS for behavior updates
 }
 
-void UNPC_DinosaurBehaviorTree::InitializeDinosaurAI(APawn* DinosaurPawn, ENPC_DinosaurSpecies Species)
+void UNPC_DinosaurBehaviorTree::BeginPlay()
 {
-    if (!DinosaurPawn)
+    Super::BeginPlay();
+
+    // Get owner pawn reference
+    OwnerPawn = Cast<APawn>(GetOwner());
+    if (!OwnerPawn)
     {
-        UE_LOG(LogTemp, Warning, TEXT("DinosaurBehaviorTree: Cannot initialize AI - DinosaurPawn is null"));
+        UE_LOG(LogTemp, Error, TEXT("DinosaurBehaviorTree: Owner is not a Pawn"));
         return;
     }
 
-    // Initialize dinosaur state
-    FNPC_DinosaurState NewState;
-    NewState.CurrentBehavior = ENPC_DinosaurBehavior::Idle;
-    
-    // Set species-specific defaults
+    // Find player pawn
+    PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
+    if (!PlayerPawn)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("DinosaurBehaviorTree: Player pawn not found"));
+    }
+
+    // Initialize home location
+    if (DinosaurMemory.HomeLocation == FVector::ZeroVector)
+    {
+        DinosaurMemory.HomeLocation = OwnerPawn->GetActorLocation();
+    }
+
+    // Generate initial patrol points if none exist
+    if (DinosaurMemory.PatrolPoints.Num() == 0)
+    {
+        GenerateRandomPatrolPoints();
+    }
+
+    // Set species-specific stats
     switch (Species)
     {
         case ENPC_DinosaurSpecies::TRex:
-            NewState.AggressionLevel = 0.8f;
-            NewState.HungerLevel = 0.6f;
-            NewState.FearLevel = 0.1f;
+            DinosaurStats.Health = 200.0f;
+            DinosaurStats.Aggression = 80.0f;
+            DinosaurStats.TerritorialRadius = 5000.0f;
+            DinosaurStats.DetectionRadius = 3000.0f;
+            DinosaurStats.AttackRange = 400.0f;
+            DinosaurStats.MovementSpeed = 300.0f;
+            DinosaurStats.ChaseSpeed = 500.0f;
             break;
-        case ENPC_DinosaurSpecies::Raptor:
-            NewState.AggressionLevel = 0.7f;
-            NewState.HungerLevel = 0.5f;
-            NewState.FearLevel = 0.3f;
+        case ENPC_DinosaurSpecies::Velociraptor:
+            DinosaurStats.Health = 80.0f;
+            DinosaurStats.Aggression = 90.0f;
+            DinosaurStats.TerritorialRadius = 2000.0f;
+            DinosaurStats.DetectionRadius = 2500.0f;
+            DinosaurStats.AttackRange = 200.0f;
+            DinosaurStats.MovementSpeed = 600.0f;
+            DinosaurStats.ChaseSpeed = 800.0f;
             break;
         case ENPC_DinosaurSpecies::Triceratops:
-            NewState.AggressionLevel = 0.3f;
-            NewState.HungerLevel = 0.4f;
-            NewState.FearLevel = 0.6f;
+            DinosaurStats.Health = 300.0f;
+            DinosaurStats.Aggression = 40.0f;
+            DinosaurStats.TerritorialRadius = 3000.0f;
+            DinosaurStats.DetectionRadius = 1500.0f;
+            DinosaurStats.AttackRange = 300.0f;
+            DinosaurStats.MovementSpeed = 200.0f;
+            DinosaurStats.ChaseSpeed = 350.0f;
+            break;
+        case ENPC_DinosaurSpecies::Brachiosaurus:
+            DinosaurStats.Health = 500.0f;
+            DinosaurStats.Aggression = 10.0f;
+            DinosaurStats.TerritorialRadius = 4000.0f;
+            DinosaurStats.DetectionRadius = 1000.0f;
+            DinosaurStats.AttackRange = 500.0f;
+            DinosaurStats.MovementSpeed = 150.0f;
+            DinosaurStats.ChaseSpeed = 200.0f;
             break;
         default:
-            NewState.AggressionLevel = 0.5f;
-            NewState.HungerLevel = 0.3f;
-            NewState.FearLevel = 0.4f;
+            // Default stats already set in struct
             break;
     }
 
-    DinosaurStates.Add(DinosaurPawn, NewState);
+    // Start behavior timers
+    GetWorld()->GetTimerManager().SetTimer(StateUpdateTimer, this, &UNPC_DinosaurBehaviorTree::UpdateBehaviorState, StateChangeInterval, true);
+    GetWorld()->GetTimerManager().SetTimer(PlayerDetectionTimer, this, &UNPC_DinosaurBehaviorTree::DetectPlayer, PlayerDetectionInterval, true);
 
-    // Get AI Controller and set up behavior tree
-    AAIController* AIController = Cast<AAIController>(DinosaurPawn->GetController());
-    if (AIController && AIController->GetBlackboardComponent())
+    UE_LOG(LogTemp, Log, TEXT("DinosaurBehaviorTree initialized for %s"), *UEnum::GetValueAsString(Species));
+}
+
+void UNPC_DinosaurBehaviorTree::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+{
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+
+    if (!OwnerPawn || !PlayerPawn)
+        return;
+
+    StateTimer += DeltaTime;
+
+    // Execute current behavior state
+    switch (CurrentState)
     {
-        SetupBlackboardKeys(AIController->GetBlackboardComponent(), NewState);
+        case ENPC_DinosaurBehaviorState::Idle:
+            ExecuteIdleBehavior(DeltaTime);
+            break;
+        case ENPC_DinosaurBehaviorState::Patrolling:
+            ExecutePatrolBehavior(DeltaTime);
+            break;
+        case ENPC_DinosaurBehaviorState::Hunting:
+            ExecuteHuntingBehavior(DeltaTime);
+            break;
+        case ENPC_DinosaurBehaviorState::Chasing:
+            ExecuteChasingBehavior(DeltaTime);
+            break;
+        case ENPC_DinosaurBehaviorState::Attacking:
+            ExecuteAttackingBehavior(DeltaTime);
+            break;
+        case ENPC_DinosaurBehaviorState::Fleeing:
+            ExecuteFleeingBehavior(DeltaTime);
+            break;
+        case ENPC_DinosaurBehaviorState::Feeding:
+            ExecuteFeedingBehavior(DeltaTime);
+            break;
+        case ENPC_DinosaurBehaviorState::Sleeping:
+            ExecuteSleepingBehavior(DeltaTime);
+            break;
+        case ENPC_DinosaurBehaviorState::Territorial:
+            ExecuteTerritorialBehavior(DeltaTime);
+            break;
+    }
+
+    UpdateMemory();
+}
+
+void UNPC_DinosaurBehaviorTree::SetBehaviorState(ENPC_DinosaurBehaviorState NewState)
+{
+    if (CurrentState != NewState)
+    {
+        ENPC_DinosaurBehaviorState OldState = CurrentState;
+        CurrentState = NewState;
+        StateTimer = 0.0f;
         
-        // Start appropriate behavior tree based on species
-        UBehaviorTree* SelectedBT = nullptr;
-        switch (Species)
-        {
-            case ENPC_DinosaurSpecies::TRex:
-                SelectedBT = TRexBehaviorTree;
-                break;
-            case ENPC_DinosaurSpecies::Raptor:
-                SelectedBT = RaptorBehaviorTree;
-                break;
-            default:
-                SelectedBT = HerbivoreBehaviorTree;
-                break;
-        }
-        
-        if (SelectedBT)
-        {
-            AIController->RunBehaviorTree(SelectedBT);
-            UE_LOG(LogTemp, Log, TEXT("DinosaurBehaviorTree: Started behavior tree for %s"), *DinosaurPawn->GetName());
-        }
+        UE_LOG(LogTemp, Log, TEXT("DinosaurBehavior: State changed from %s to %s"), 
+            *UEnum::GetValueAsString(OldState), 
+            *UEnum::GetValueAsString(NewState));
     }
 }
 
-void UNPC_DinosaurBehaviorTree::UpdateDinosaurBehavior(APawn* DinosaurPawn, const FNPC_DinosaurState& NewState)
+void UNPC_DinosaurBehaviorTree::InitializePatrolPoints(const TArray<FVector>& Points)
 {
-    if (!DinosaurPawn || !DinosaurStates.Contains(DinosaurPawn))
-    {
-        return;
-    }
-
-    FNPC_DinosaurState& CurrentState = DinosaurStates[DinosaurPawn];
-    CurrentState = NewState;
-
-    // Update blackboard with new state
-    AAIController* AIController = Cast<AAIController>(DinosaurPawn->GetController());
-    if (AIController && AIController->GetBlackboardComponent())
-    {
-        SetupBlackboardKeys(AIController->GetBlackboardComponent(), CurrentState);
-    }
+    DinosaurMemory.PatrolPoints = Points;
+    CurrentPatrolIndex = 0;
+    UE_LOG(LogTemp, Log, TEXT("DinosaurBehavior: Initialized %d patrol points"), Points.Num());
 }
 
-FNPC_DinosaurState UNPC_DinosaurBehaviorTree::GetDinosaurState(APawn* DinosaurPawn)
+void UNPC_DinosaurBehaviorTree::SetHomeLocation(const FVector& Location)
 {
-    if (DinosaurStates.Contains(DinosaurPawn))
-    {
-        return DinosaurStates[DinosaurPawn];
-    }
-    
-    return FNPC_DinosaurState();
+    DinosaurMemory.HomeLocation = Location;
 }
 
-void UNPC_DinosaurBehaviorTree::SetDinosaurTarget(APawn* DinosaurPawn, AActor* NewTarget)
+bool UNPC_DinosaurBehaviorTree::CanSeePlayer() const
 {
-    if (!DinosaurPawn || !DinosaurStates.Contains(DinosaurPawn))
-    {
-        return;
-    }
-
-    FNPC_DinosaurState& State = DinosaurStates[DinosaurPawn];
-    State.CurrentTarget = NewTarget;
-    
-    if (NewTarget)
-    {
-        State.CurrentBehavior = ENPC_DinosaurBehavior::Hunting;
-        State.LastKnownThreatLocation = NewTarget->GetActorLocation();
-        UE_LOG(LogTemp, Log, TEXT("DinosaurBehaviorTree: %s targeting %s"), *DinosaurPawn->GetName(), *NewTarget->GetName());
-    }
-    else
-    {
-        State.CurrentBehavior = ENPC_DinosaurBehavior::Idle;
-    }
-
-    UpdateDinosaurBehavior(DinosaurPawn, State);
-}
-
-void UNPC_DinosaurBehaviorTree::TriggerDinosaurAlert(APawn* DinosaurPawn, FVector ThreatLocation, float ThreatLevel)
-{
-    if (!DinosaurPawn || !DinosaurStates.Contains(DinosaurPawn))
-    {
-        return;
-    }
-
-    FNPC_DinosaurState& State = DinosaurStates[DinosaurPawn];
-    State.LastKnownThreatLocation = ThreatLocation;
-    State.FearLevel = FMath::Clamp(State.FearLevel + ThreatLevel, 0.0f, 1.0f);
-    
-    // Determine behavior based on threat level and dinosaur characteristics
-    if (ThreatLevel > 0.7f && State.FearLevel > State.AggressionLevel)
-    {
-        State.CurrentBehavior = ENPC_DinosaurBehavior::Fleeing;
-    }
-    else if (ThreatLevel > 0.3f)
-    {
-        State.CurrentBehavior = ENPC_DinosaurBehavior::Alert;
-    }
-
-    UpdateDinosaurBehavior(DinosaurPawn, State);
-    
-    UE_LOG(LogTemp, Log, TEXT("DinosaurBehaviorTree: %s alerted to threat at %s"), 
-           *DinosaurPawn->GetName(), *ThreatLocation.ToString());
-}
-
-bool UNPC_DinosaurBehaviorTree::IsInPackFormation(APawn* DinosaurPawn)
-{
-    if (!DinosaurPawn)
-    {
+    if (!PlayerPawn || !OwnerPawn)
         return false;
-    }
 
-    TArray<APawn*> PackMembers = GetNearbyPackMembers(DinosaurPawn, PackCoordinationRadius);
-    return PackMembers.Num() >= 2; // At least 2 other pack members nearby
+    float Distance = GetDistanceToPlayer();
+    if (Distance > DinosaurStats.DetectionRadius)
+        return false;
+
+    // Simple line of sight check
+    FVector Start = OwnerPawn->GetActorLocation();
+    FVector End = PlayerPawn->GetActorLocation();
+    
+    FHitResult HitResult;
+    FCollisionQueryParams QueryParams;
+    QueryParams.AddIgnoredActor(OwnerPawn);
+    QueryParams.AddIgnoredActor(PlayerPawn);
+
+    bool bHit = GetWorld()->LineTraceSingleByChannel(HitResult, Start, End, ECC_Visibility, QueryParams);
+    
+    return !bHit; // Can see if no obstruction
 }
 
-TArray<APawn*> UNPC_DinosaurBehaviorTree::GetNearbyPackMembers(APawn* DinosaurPawn, float SearchRadius)
+float UNPC_DinosaurBehaviorTree::GetDistanceToPlayer() const
 {
-    TArray<APawn*> PackMembers;
-    
-    if (!DinosaurPawn)
-    {
-        return PackMembers;
-    }
+    if (!PlayerPawn || !OwnerPawn)
+        return FLT_MAX;
 
-    FVector DinosaurLocation = DinosaurPawn->GetActorLocation();
+    return FVector::Dist(OwnerPawn->GetActorLocation(), PlayerPawn->GetActorLocation());
+}
+
+void UNPC_DinosaurBehaviorTree::MoveToLocation(const FVector& TargetLocation)
+{
+    if (!OwnerPawn)
+        return;
+
+    CurrentTargetLocation = TargetLocation;
+    bIsMovingToTarget = true;
+
+    // Simple movement towards target
+    FVector CurrentLocation = OwnerPawn->GetActorLocation();
+    FVector Direction = (TargetLocation - CurrentLocation).GetSafeNormal();
     
-    // Find all pawns within search radius
-    TArray<AActor*> FoundActors;
-    UGameplayStatics::GetAllActorsOfClass(DinosaurPawn->GetWorld(), APawn::StaticClass(), FoundActors);
+    float Speed = (CurrentState == ENPC_DinosaurBehaviorState::Chasing) ? DinosaurStats.ChaseSpeed : DinosaurStats.MovementSpeed;
+    FVector NewLocation = CurrentLocation + (Direction * Speed * GetWorld()->GetDeltaSeconds());
     
-    for (AActor* Actor : FoundActors)
+    OwnerPawn->SetActorLocation(NewLocation);
+    
+    // Face movement direction
+    if (!Direction.IsZero())
     {
-        APawn* OtherPawn = Cast<APawn>(Actor);
-        if (OtherPawn && OtherPawn != DinosaurPawn)
-        {
-            float Distance = FVector::Dist(DinosaurLocation, OtherPawn->GetActorLocation());
-            if (Distance <= SearchRadius)
+        FRotator NewRotation = FRotationMatrix::MakeFromX(Direction).Rotator();
+        OwnerPawn->SetActorRotation(NewRotation);
+    }
+}
+
+void UNPC_DinosaurBehaviorTree::AttackPlayer()
+{
+    if (!PlayerPawn || !IsInAttackRange())
+        return;
+
+    UE_LOG(LogTemp, Log, TEXT("DinosaurBehavior: Attacking player!"));
+    
+    // Simple attack implementation
+    DinosaurMemory.bIsInCombat = true;
+    
+    // TODO: Implement actual damage dealing
+    // For now, just log the attack
+}
+
+void UNPC_DinosaurBehaviorTree::FleeFromThreat(const FVector& ThreatLocation)
+{
+    if (!OwnerPawn)
+        return;
+
+    // Move away from threat
+    FVector FleeDirection = (OwnerPawn->GetActorLocation() - ThreatLocation).GetSafeNormal();
+    FVector FleeTarget = OwnerPawn->GetActorLocation() + (FleeDirection * 2000.0f);
+    
+    MoveToLocation(FleeTarget);
+    SetBehaviorState(ENPC_DinosaurBehaviorState::Fleeing);
+}
+
+void UNPC_DinosaurBehaviorTree::UpdateBehaviorState(float DeltaTime)
+{
+    if (!PlayerPawn || !OwnerPawn)
+        return;
+
+    float PlayerDistance = GetDistanceToPlayer();
+    bool bCanSeePlayer = CanSeePlayer();
+
+    // State transition logic based on distance and visibility
+    switch (CurrentState)
+    {
+        case ENPC_DinosaurBehaviorState::Idle:
+            if (bCanSeePlayer && PlayerDistance < DinosaurStats.DetectionRadius)
             {
-                // Check if it's the same species (simplified check by name)
-                FString DinosaurName = DinosaurPawn->GetName().ToLower();
-                FString OtherName = OtherPawn->GetName().ToLower();
-                
-                if ((DinosaurName.Contains(TEXT("raptor")) && OtherName.Contains(TEXT("raptor"))) ||
-                    (DinosaurName.Contains(TEXT("rex")) && OtherName.Contains(TEXT("rex"))))
+                if (DinosaurStats.Aggression > 50.0f)
                 {
-                    PackMembers.Add(OtherPawn);
+                    SetBehaviorState(ENPC_DinosaurBehaviorState::Hunting);
+                }
+                else
+                {
+                    SetBehaviorState(ENPC_DinosaurBehaviorState::Territorial);
                 }
             }
-        }
+            else if (StateTimer > 3.0f)
+            {
+                SetBehaviorState(ENPC_DinosaurBehaviorState::Patrolling);
+            }
+            break;
+
+        case ENPC_DinosaurBehaviorState::Patrolling:
+            if (bCanSeePlayer && PlayerDistance < DinosaurStats.DetectionRadius)
+            {
+                SetBehaviorState(ENPC_DinosaurBehaviorState::Hunting);
+            }
+            break;
+
+        case ENPC_DinosaurBehaviorState::Hunting:
+            if (PlayerDistance < DinosaurStats.AttackRange)
+            {
+                SetBehaviorState(ENPC_DinosaurBehaviorState::Attacking);
+            }
+            else if (PlayerDistance < DinosaurStats.DetectionRadius * 1.5f)
+            {
+                SetBehaviorState(ENPC_DinosaurBehaviorState::Chasing);
+            }
+            else if (!bCanSeePlayer)
+            {
+                SetBehaviorState(ENPC_DinosaurBehaviorState::Patrolling);
+            }
+            break;
+
+        case ENPC_DinosaurBehaviorState::Chasing:
+            if (PlayerDistance < DinosaurStats.AttackRange)
+            {
+                SetBehaviorState(ENPC_DinosaurBehaviorState::Attacking);
+            }
+            else if (PlayerDistance > DinosaurStats.DetectionRadius * 2.0f)
+            {
+                SetBehaviorState(ENPC_DinosaurBehaviorState::Patrolling);
+            }
+            break;
+
+        case ENPC_DinosaurBehaviorState::Attacking:
+            if (PlayerDistance > DinosaurStats.AttackRange * 1.5f)
+            {
+                SetBehaviorState(ENPC_DinosaurBehaviorState::Chasing);
+            }
+            break;
+
+        case ENPC_DinosaurBehaviorState::Fleeing:
+            if (StateTimer > 10.0f) // Flee for 10 seconds
+            {
+                SetBehaviorState(ENPC_DinosaurBehaviorState::Patrolling);
+            }
+            break;
+
+        default:
+            break;
     }
-    
-    return PackMembers;
 }
 
-void UNPC_DinosaurBehaviorTree::CreateDefaultBehaviorTrees()
+void UNPC_DinosaurBehaviorTree::ExecuteIdleBehavior(float DeltaTime)
 {
-    // In a real implementation, these would be loaded from assets
-    // For now, we'll set them to nullptr and create them in Blueprint
-    TRexBehaviorTree = nullptr;
-    RaptorBehaviorTree = nullptr;
-    HerbivoreBehaviorTree = nullptr;
-    DinosaurBlackboard = nullptr;
-}
-
-void UNPC_DinosaurBehaviorTree::SetupBlackboardKeys(UBlackboardComponent* BlackboardComp, const FNPC_DinosaurState& State)
-{
-    if (!BlackboardComp)
+    // Simple idle behavior - just stand and occasionally look around
+    if (FMath::RandRange(0.0f, 1.0f) < 0.01f) // 1% chance per tick
     {
+        FRotator RandomRotation = FRotator(0, FMath::RandRange(-180.0f, 180.0f), 0);
+        OwnerPawn->SetActorRotation(RandomRotation);
+    }
+}
+
+void UNPC_DinosaurBehaviorTree::ExecutePatrolBehavior(float DeltaTime)
+{
+    if (DinosaurMemory.PatrolPoints.Num() == 0)
         return;
-    }
 
-    // Set blackboard values based on current state
-    BlackboardComp->SetValueAsEnum(TEXT("CurrentBehavior"), static_cast<uint8>(State.CurrentBehavior));
-    BlackboardComp->SetValueAsFloat(TEXT("AggressionLevel"), State.AggressionLevel);
-    BlackboardComp->SetValueAsFloat(TEXT("HungerLevel"), State.HungerLevel);
-    BlackboardComp->SetValueAsFloat(TEXT("FearLevel"), State.FearLevel);
-    BlackboardComp->SetValueAsVector(TEXT("LastThreatLocation"), State.LastKnownThreatLocation);
-    
-    if (State.CurrentTarget)
+    FVector TargetPoint = DinosaurMemory.PatrolPoints[CurrentPatrolIndex];
+    float DistanceToTarget = FVector::Dist(OwnerPawn->GetActorLocation(), TargetPoint);
+
+    if (DistanceToTarget < PatrolPointReachDistance)
     {
-        BlackboardComp->SetValueAsObject(TEXT("TargetActor"), State.CurrentTarget);
+        // Move to next patrol point
+        CurrentPatrolIndex = (CurrentPatrolIndex + 1) % DinosaurMemory.PatrolPoints.Num();
     }
     else
     {
-        BlackboardComp->ClearValue(TEXT("TargetActor"));
+        MoveToLocation(TargetPoint);
     }
 }
 
-ENPC_DinosaurBehavior UNPC_DinosaurBehaviorTree::CalculateOptimalBehavior(const FNPC_DinosaurState& CurrentState, ENPC_DinosaurSpecies Species)
+void UNPC_DinosaurBehaviorTree::ExecuteHuntingBehavior(float DeltaTime)
 {
-    // Simple behavior calculation based on state values
-    if (CurrentState.FearLevel > 0.7f)
+    if (PlayerPawn)
     {
-        return ENPC_DinosaurBehavior::Fleeing;
+        DinosaurMemory.LastKnownPlayerLocation = PlayerPawn->GetActorLocation();
+        DinosaurMemory.LastPlayerSightingTime = GetWorld()->GetTimeSeconds();
+        MoveToLocation(DinosaurMemory.LastKnownPlayerLocation);
+    }
+}
+
+void UNPC_DinosaurBehaviorTree::ExecuteChasingBehavior(float DeltaTime)
+{
+    if (PlayerPawn)
+    {
+        MoveToLocation(PlayerPawn->GetActorLocation());
+    }
+}
+
+void UNPC_DinosaurBehaviorTree::ExecuteAttackingBehavior(float DeltaTime)
+{
+    AttackPlayer();
+}
+
+void UNPC_DinosaurBehaviorTree::ExecuteFleeingBehavior(float DeltaTime)
+{
+    // Continue fleeing towards home location
+    MoveToLocation(DinosaurMemory.HomeLocation);
+}
+
+void UNPC_DinosaurBehaviorTree::ExecuteFeedingBehavior(float DeltaTime)
+{
+    // Simple feeding behavior - stay in place and "eat"
+    DinosaurStats.Hunger = FMath::Max(0.0f, DinosaurStats.Hunger - (DeltaTime * 10.0f));
+    
+    if (DinosaurStats.Hunger <= 0.0f)
+    {
+        SetBehaviorState(ENPC_DinosaurBehaviorState::Idle);
+    }
+}
+
+void UNPC_DinosaurBehaviorTree::ExecuteSleepingBehavior(float DeltaTime)
+{
+    // Restore stamina while sleeping
+    DinosaurStats.Stamina = FMath::Min(100.0f, DinosaurStats.Stamina + (DeltaTime * 20.0f));
+    
+    if (DinosaurStats.Stamina >= 100.0f)
+    {
+        SetBehaviorState(ENPC_DinosaurBehaviorState::Idle);
+    }
+}
+
+void UNPC_DinosaurBehaviorTree::ExecuteTerritorialBehavior(float DeltaTime)
+{
+    if (IsPlayerInTerritory())
+    {
+        // Move towards player to intimidate
+        if (PlayerPawn)
+        {
+            FVector PlayerLocation = PlayerPawn->GetActorLocation();
+            FVector Direction = (PlayerLocation - OwnerPawn->GetActorLocation()).GetSafeNormal();
+            FVector IntimidatePosition = PlayerLocation - (Direction * (DinosaurStats.AttackRange * 2.0f));
+            MoveToLocation(IntimidatePosition);
+        }
+    }
+    else
+    {
+        SetBehaviorState(ENPC_DinosaurBehaviorState::Patrolling);
+    }
+}
+
+void UNPC_DinosaurBehaviorTree::DetectPlayer()
+{
+    if (CanSeePlayer())
+    {
+        DinosaurMemory.bHasSeenPlayer = true;
+        DinosaurMemory.LastKnownPlayerLocation = PlayerPawn->GetActorLocation();
+        DinosaurMemory.LastPlayerSightingTime = GetWorld()->GetTimeSeconds();
+    }
+}
+
+void UNPC_DinosaurBehaviorTree::UpdateMemory()
+{
+    // Update hunger over time
+    DinosaurStats.Hunger = FMath::Min(100.0f, DinosaurStats.Hunger + (GetWorld()->GetDeltaSeconds() * 0.5f));
+    
+    // Update stamina based on activity
+    float StaminaDrain = 0.0f;
+    switch (CurrentState)
+    {
+        case ENPC_DinosaurBehaviorState::Chasing:
+            StaminaDrain = 2.0f;
+            break;
+        case ENPC_DinosaurBehaviorState::Attacking:
+            StaminaDrain = 3.0f;
+            break;
+        case ENPC_DinosaurBehaviorState::Fleeing:
+            StaminaDrain = 2.5f;
+            break;
+        default:
+            StaminaDrain = 0.1f;
+            break;
     }
     
-    if (CurrentState.HungerLevel > 0.8f && Species != ENPC_DinosaurSpecies::Triceratops)
+    DinosaurStats.Stamina = FMath::Max(0.0f, DinosaurStats.Stamina - (GetWorld()->GetDeltaSeconds() * StaminaDrain));
+    
+    // If stamina is low, consider resting
+    if (DinosaurStats.Stamina < 20.0f && CurrentState != ENPC_DinosaurBehaviorState::Sleeping)
     {
-        return ENPC_DinosaurBehavior::Hunting;
+        if (FMath::RandRange(0.0f, 1.0f) < 0.1f) // 10% chance to sleep when tired
+        {
+            SetBehaviorState(ENPC_DinosaurBehaviorState::Sleeping);
+        }
+    }
+}
+
+FVector UNPC_DinosaurBehaviorTree::GetNextPatrolPoint()
+{
+    if (DinosaurMemory.PatrolPoints.Num() == 0)
+        return OwnerPawn->GetActorLocation();
+
+    return DinosaurMemory.PatrolPoints[CurrentPatrolIndex];
+}
+
+bool UNPC_DinosaurBehaviorTree::IsInAttackRange() const
+{
+    return GetDistanceToPlayer() <= DinosaurStats.AttackRange;
+}
+
+bool UNPC_DinosaurBehaviorTree::IsPlayerInTerritory() const
+{
+    if (!PlayerPawn)
+        return false;
+
+    float DistanceFromHome = FVector::Dist(PlayerPawn->GetActorLocation(), DinosaurMemory.HomeLocation);
+    return DistanceFromHome <= DinosaurStats.TerritorialRadius;
+}
+
+void UNPC_DinosaurBehaviorTree::GenerateRandomPatrolPoints()
+{
+    DinosaurMemory.PatrolPoints.Empty();
+    
+    FVector HomeLocation = DinosaurMemory.HomeLocation;
+    int32 NumPoints = FMath::RandRange(3, 6);
+    
+    for (int32 i = 0; i < NumPoints; i++)
+    {
+        float Angle = (360.0f / NumPoints) * i + FMath::RandRange(-30.0f, 30.0f);
+        float Distance = FMath::RandRange(DinosaurStats.TerritorialRadius * 0.3f, DinosaurStats.TerritorialRadius * 0.7f);
+        
+        FVector Offset = FVector(
+            FMath::Cos(FMath::DegreesToRadians(Angle)) * Distance,
+            FMath::Sin(FMath::DegreesToRadians(Angle)) * Distance,
+            0.0f
+        );
+        
+        DinosaurMemory.PatrolPoints.Add(HomeLocation + Offset);
     }
     
-    if (CurrentState.AggressionLevel > 0.6f && CurrentState.CurrentTarget)
-    {
-        return ENPC_DinosaurBehavior::Hunting;
-    }
-    
-    if (CurrentState.StateTimer > 30.0f) // Change behavior after 30 seconds
-    {
-        return ENPC_DinosaurBehavior::Patrolling;
-    }
-    
-    return ENPC_DinosaurBehavior::Idle;
+    UE_LOG(LogTemp, Log, TEXT("DinosaurBehavior: Generated %d patrol points"), NumPoints);
 }
