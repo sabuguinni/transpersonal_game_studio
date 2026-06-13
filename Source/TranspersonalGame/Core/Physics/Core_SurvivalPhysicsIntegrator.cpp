@@ -1,286 +1,386 @@
 #include "Core_SurvivalPhysicsIntegrator.h"
-#include "GameFramework/Character.h"
+#include "Core/GameFramework/TranspersonalCharacter.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Engine/World.h"
-#include "Kismet/GameplayStatics.h"
+#include "TimerManager.h"
 
 UCore_SurvivalPhysicsIntegrator::UCore_SurvivalPhysicsIntegrator()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 0.1f; // Update 10 times per second for performance
+    PrimaryComponentTick.TickInterval = 0.1f; // Update 10 times per second
     
-    // Initialize terrain movement modifiers
-    TerrainMovementModifiers.Add(ETT_Normal, 1.0f);
-    TerrainMovementModifiers.Add(ETT_Sand, 0.8f);
-    TerrainMovementModifiers.Add(ETT_Mud, 0.6f);
-    TerrainMovementModifiers.Add(ETT_Rock, 0.9f);
-    TerrainMovementModifiers.Add(ETT_Grass, 1.1f);
-    TerrainMovementModifiers.Add(ETT_Snow, 0.7f);
-    TerrainMovementModifiers.Add(ETT_Water, 0.5f);
-    TerrainMovementModifiers.Add(ETT_Ice, 0.4f);
+    // Initialize default values
+    UpdateFrequency = 0.1f;
+    bEnableDebugOutput = false;
     
-    CurrentHazard = EEH_None;
+    // Set default thresholds
+    LowStaminaThreshold = 0.3f;
+    LowHealthThreshold = 0.25f;
+    HighFearThreshold = 0.7f;
+    CriticalHungerThreshold = 0.2f;
+    CriticalThirstThreshold = 0.15f;
+    
+    // Set default multiplier ranges
+    MovementSpeedRange = FVector2D(0.4f, 1.2f);
+    JumpForceRange = FVector2D(0.5f, 1.1f);
+    CollisionDamageRange = FVector2D(0.8f, 2.0f);
+    RagdollThresholdRange = FVector2D(0.3f, 1.5f);
+    
+    LastUpdateTime = 0.0f;
 }
 
 void UCore_SurvivalPhysicsIntegrator::BeginPlay()
 {
     Super::BeginPlay();
     
-    // Get component references
-    AActor* Owner = GetOwner();
-    if (Owner)
-    {
-        SurvivalComp = Owner->FindComponentByClass<USurvivalComponent>();
-        MovementComp = Owner->FindComponentByClass<UCharacterMovementComponent>();
-        CapsuleComp = Owner->FindComponentByClass<UCapsuleComponent>();
-        
-        // Cache original movement values
-        if (MovementComp)
-        {
-            OriginalMaxWalkSpeed = MovementComp->MaxWalkSpeed;
-            OriginalJumpZVelocity = MovementComp->JumpZVelocity;
-        }
-        
-        if (!SurvivalComp)
-        {
-            UE_LOG(LogTemp, Warning, TEXT("Core_SurvivalPhysicsIntegrator: No SurvivalComponent found on %s"), *Owner->GetName());
-        }
-    }
+    InitializeComponent();
+    
+    // Set up tick interval
+    SetComponentTickInterval(UpdateFrequency);
 }
 
 void UCore_SurvivalPhysicsIntegrator::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
     
-    // Performance optimization - only update at intervals
+    // Check if enough time has passed for update
     float CurrentTime = GetWorld()->GetTimeSeconds();
-    if (CurrentTime - LastUpdateTime < UpdateInterval)
+    if (CurrentTime - LastUpdateTime >= UpdateFrequency)
     {
-        return;
-    }
-    LastUpdateTime = CurrentTime;
-    
-    // Update all survival physics integrations
-    UpdateMovementFromSurvival();
-    
-    // Update limp timer for injury effects
-    if (InjuryLevel > 0.0f && bEnableLimpEffect)
-    {
-        LimpTimer += DeltaTime;
+        UpdatePhysicsFromSurvival();
+        LastUpdateTime = CurrentTime;
     }
 }
 
-void UCore_SurvivalPhysicsIntegrator::UpdateMovementFromSurvival()
+void UCore_SurvivalPhysicsIntegrator::InitializeComponent()
 {
-    if (!MovementComp || !SurvivalComp)
+    CacheComponentReferences();
+    ResetPhysicsState();
+    
+    if (bEnableDebugOutput)
     {
-        return;
+        UE_LOG(LogTemp, Log, TEXT("SurvivalPhysicsIntegrator: Component initialized for %s"), 
+               OwnerCharacter ? *OwnerCharacter->GetName() : TEXT("Unknown"));
     }
-    
-    // Apply all physics modifications
-    ApplyStaminaPhysics();
-    ApplyTemperaturePhysics();
-    ApplyInjuryPhysics();
-    ApplyCarryingCapacityPhysics();
-    HandleEnvironmentalHazards();
-    
-    // Calculate final movement multiplier
-    float FinalMultiplier = GetTotalMovementMultiplier();
-    
-    // Apply to movement component
-    MovementComp->MaxWalkSpeed = OriginalMaxWalkSpeed * FinalMultiplier;
-    MovementComp->JumpZVelocity = OriginalJumpZVelocity * FMath::Max(FinalMultiplier, StaminaJumpHeightMultiplier);
 }
 
-void UCore_SurvivalPhysicsIntegrator::ApplyStaminaPhysics()
+void UCore_SurvivalPhysicsIntegrator::CacheComponentReferences()
 {
-    if (!SurvivalComp)
-    {
-        return;
-    }
+    OwnerCharacter = Cast<ATranspersonalCharacter>(GetOwner());
     
-    float StaminaRatio = SurvivalComp->GetStaminaRatio();
-    
-    // Calculate stamina-based movement multiplier
-    float StaminaMultiplier;
-    if (StaminaRatio <= CriticalStaminaThreshold)
+    if (OwnerCharacter)
     {
-        // Severe stamina depletion - significant movement penalty
-        StaminaMultiplier = MinStaminaSpeedMultiplier;
-    }
-    else
-    {
-        // Linear interpolation between min and max based on stamina
-        float NormalizedStamina = (StaminaRatio - CriticalStaminaThreshold) / (1.0f - CriticalStaminaThreshold);
-        StaminaMultiplier = FMath::Lerp(MinStaminaSpeedMultiplier, BaseStaminaSpeedMultiplier, NormalizedStamina);
-    }
-    
-    // Store for use in total calculation
-    BaseStaminaSpeedMultiplier = StaminaMultiplier;
-}
-
-void UCore_SurvivalPhysicsIntegrator::ApplyTemperaturePhysics()
-{
-    if (!SurvivalComp)
-    {
-        return;
-    }
-    
-    float Temperature = SurvivalComp->GetTemperature();
-    float OptimalTemp = SurvivalComp->GetOptimalTemperature();
-    float TempDifference = FMath::Abs(Temperature - OptimalTemp);
-    
-    // Apply temperature penalties if outside comfortable range
-    if (TempDifference > TemperaturePenaltyThreshold)
-    {
-        if (Temperature < OptimalTemp - TemperaturePenaltyThreshold)
+        // Get survival system from GameInstance
+        if (UGameInstance* GameInstance = OwnerCharacter->GetGameInstance())
         {
-            // Too cold - apply cold penalty
-            BaseStaminaSpeedMultiplier *= ColdMovementPenalty;
-        }
-        else if (Temperature > OptimalTemp + TemperaturePenaltyThreshold)
-        {
-            // Too hot - apply heat penalty
-            BaseStaminaSpeedMultiplier *= HeatMovementPenalty;
+            SurvivalSystem = GameInstance->GetSubsystem<UEng_SurvivalSystemManager>();
         }
     }
+    
+    if (!OwnerCharacter)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("SurvivalPhysicsIntegrator: Failed to get TranspersonalCharacter reference"));
+    }
+    
+    if (!SurvivalSystem)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("SurvivalPhysicsIntegrator: Failed to get SurvivalSystemManager reference"));
+    }
 }
 
-void UCore_SurvivalPhysicsIntegrator::ApplyInjuryPhysics()
+void UCore_SurvivalPhysicsIntegrator::UpdatePhysicsFromSurvival()
 {
-    if (!SurvivalComp)
+    if (!OwnerCharacter || !SurvivalSystem)
     {
         return;
     }
     
-    // Get injury level from health ratio (lower health = more injuries)
-    float HealthRatio = SurvivalComp->GetHealthRatio();
-    InjuryLevel = 1.0f - HealthRatio;
+    // Calculate new physics state based on survival stats
+    CurrentPhysicsState.MovementSpeedMultiplier = CalculateMovementSpeedMultiplier();
+    CurrentPhysicsState.JumpForceMultiplier = CalculateJumpForceMultiplier();
+    CurrentPhysicsState.AccelerationMultiplier = CurrentPhysicsState.MovementSpeedMultiplier * 0.8f;
+    CurrentPhysicsState.CollisionDamageMultiplier = CalculateCollisionDamageMultiplier();
+    CurrentPhysicsState.RagdollThresholdMultiplier = CalculateRagdollThresholdMultiplier();
+    CurrentPhysicsState.FearTremorIntensity = CalculateFearTremorIntensity();
     
-    // Apply injury movement penalty
-    float InjuryMultiplier = 1.0f - (InjuryLevel * InjuryMovementPenalty);
-    BaseStaminaSpeedMultiplier *= FMath::Max(InjuryMultiplier, 0.1f); // Minimum 10% speed
+    // Apply fear-based effects
+    CurrentPhysicsState.bFearInducedClumsiness = (GetSurvivalStatNormalized(TEXT("Fear")) > HighFearThreshold);
     
-    // Apply limp effect for visual/gameplay impact
-    if (bEnableLimpEffect && InjuryLevel > 0.3f && MovementComp)
+    // Environmental physics modifications
+    float HealthRatio = GetSurvivalStatNormalized(TEXT("Health"));
+    float StaminaRatio = GetSurvivalStatNormalized(TEXT("Stamina"));
+    
+    CurrentPhysicsState.GroundFrictionMultiplier = FMath::Lerp(0.7f, 1.1f, StaminaRatio);
+    CurrentPhysicsState.AirResistanceMultiplier = FMath::Lerp(0.9f, 1.2f, HealthRatio);
+    CurrentPhysicsState.GravityScaleMultiplier = FMath::Lerp(1.1f, 0.95f, StaminaRatio);
+    
+    // Apply the calculated state to the character
+    ApplyPhysicsStateToCharacter();
+    
+    if (bEnableDebugOutput)
     {
-        // Create irregular movement pattern
-        float LimpEffect = FMath::Sin(LimpTimer * 3.0f) * LimpIntensity * InjuryLevel;
-        float CurrentSpeed = MovementComp->MaxWalkSpeed * (1.0f + LimpEffect * 0.1f);
-        MovementComp->MaxWalkSpeed = FMath::Max(CurrentSpeed, OriginalMaxWalkSpeed * 0.2f);
+        LogCurrentPhysicsState();
     }
 }
 
-void UCore_SurvivalPhysicsIntegrator::ApplyCarryingCapacityPhysics()
+float UCore_SurvivalPhysicsIntegrator::CalculateMovementSpeedMultiplier() const
 {
-    float CurrentWeight = CalculateCurrentWeight();
-    float Overweight = FMath::Max(0.0f, CurrentWeight - BaseCarryingCapacity);
-    
-    if (Overweight > 0.0f)
+    if (!OwnerCharacter || !SurvivalSystem)
     {
-        if (Overweight >= MaxOverweight)
-        {
-            // Cannot move when severely overloaded
-            BaseStaminaSpeedMultiplier *= 0.1f;
-        }
-        else
-        {
-            // Apply overweight penalty
-            float WeightPenalty = 1.0f - (Overweight * OverweightPenalty);
-            BaseStaminaSpeedMultiplier *= FMath::Max(WeightPenalty, 0.2f);
-        }
+        return 1.0f;
+    }
+    
+    float StaminaRatio = GetSurvivalStatNormalized(TEXT("Stamina"));
+    float HungerRatio = GetSurvivalStatNormalized(TEXT("Hunger"));
+    float ThirstRatio = GetSurvivalStatNormalized(TEXT("Thirst"));
+    float HealthRatio = GetSurvivalStatNormalized(TEXT("Health"));
+    
+    // Combine survival stats with different weights
+    float CombinedRatio = (StaminaRatio * 0.4f) + (HungerRatio * 0.25f) + (ThirstRatio * 0.2f) + (HealthRatio * 0.15f);
+    
+    return InterpolateMultiplier(CombinedRatio, MovementSpeedRange);
+}
+
+float UCore_SurvivalPhysicsIntegrator::CalculateJumpForceMultiplier() const
+{
+    if (!OwnerCharacter || !SurvivalSystem)
+    {
+        return 1.0f;
+    }
+    
+    float StaminaRatio = GetSurvivalStatNormalized(TEXT("Stamina"));
+    float HealthRatio = GetSurvivalStatNormalized(TEXT("Health"));
+    
+    // Jump is primarily affected by stamina and health
+    float CombinedRatio = (StaminaRatio * 0.7f) + (HealthRatio * 0.3f);
+    
+    return InterpolateMultiplier(CombinedRatio, JumpForceRange);
+}
+
+float UCore_SurvivalPhysicsIntegrator::CalculateCollisionDamageMultiplier() const
+{
+    if (!OwnerCharacter || !SurvivalSystem)
+    {
+        return 1.0f;
+    }
+    
+    float HealthRatio = GetSurvivalStatNormalized(TEXT("Health"));
+    float FearRatio = GetSurvivalStatNormalized(TEXT("Fear"));
+    
+    // Lower health = more damage from collisions
+    // Higher fear = more damage from panic
+    float VulnerabilityRatio = 1.0f - ((HealthRatio * 0.6f) + ((1.0f - FearRatio) * 0.4f));
+    
+    return InterpolateMultiplier(VulnerabilityRatio, CollisionDamageRange);
+}
+
+float UCore_SurvivalPhysicsIntegrator::CalculateRagdollThresholdMultiplier() const
+{
+    if (!OwnerCharacter || !SurvivalSystem)
+    {
+        return 1.0f;
+    }
+    
+    float HealthRatio = GetSurvivalStatNormalized(TEXT("Health"));
+    float StaminaRatio = GetSurvivalStatNormalized(TEXT("Stamina"));
+    
+    // Lower health/stamina = easier to ragdoll
+    float ResistanceRatio = (HealthRatio * 0.6f) + (StaminaRatio * 0.4f);
+    
+    return InterpolateMultiplier(ResistanceRatio, RagdollThresholdRange);
+}
+
+float UCore_SurvivalPhysicsIntegrator::CalculateFearTremorIntensity() const
+{
+    if (!OwnerCharacter || !SurvivalSystem)
+    {
+        return 0.0f;
+    }
+    
+    float FearRatio = GetSurvivalStatNormalized(TEXT("Fear"));
+    
+    // Tremor starts at 50% fear and increases exponentially
+    if (FearRatio < 0.5f)
+    {
+        return 0.0f;
+    }
+    
+    float TremorRange = FearRatio - 0.5f; // 0.0 to 0.5
+    return FMath::Pow(TremorRange * 2.0f, 2.0f) * 10.0f; // 0 to 10 intensity
+}
+
+float UCore_SurvivalPhysicsIntegrator::GetSurvivalStatNormalized(const FString& StatName) const
+{
+    if (!OwnerCharacter || !SurvivalSystem)
+    {
+        return 1.0f;
+    }
+    
+    // Get normalized survival stats from the character
+    if (StatName == TEXT("Health"))
+    {
+        return OwnerCharacter->GetHealthPercentage();
+    }
+    else if (StatName == TEXT("Stamina"))
+    {
+        return OwnerCharacter->GetStaminaPercentage();
+    }
+    else if (StatName == TEXT("Hunger"))
+    {
+        return OwnerCharacter->GetHungerPercentage();
+    }
+    else if (StatName == TEXT("Thirst"))
+    {
+        return OwnerCharacter->GetThirstPercentage();
+    }
+    else if (StatName == TEXT("Fear"))
+    {
+        return OwnerCharacter->GetFearPercentage();
+    }
+    
+    return 1.0f;
+}
+
+float UCore_SurvivalPhysicsIntegrator::InterpolateMultiplier(float NormalizedValue, const FVector2D& Range) const
+{
+    return FMath::Lerp(Range.X, Range.Y, FMath::Clamp(NormalizedValue, 0.0f, 1.0f));
+}
+
+void UCore_SurvivalPhysicsIntegrator::ApplyPhysicsStateToCharacter()
+{
+    if (!OwnerCharacter)
+    {
+        return;
+    }
+    
+    ApplyMovementModifications();
+    ApplyCollisionModifications();
+    ApplyEnvironmentalModifications();
+    ApplyFearEffects();
+}
+
+void UCore_SurvivalPhysicsIntegrator::ApplyMovementModifications()
+{
+    if (!OwnerCharacter)
+    {
+        return;
+    }
+    
+    UCharacterMovementComponent* MovementComp = OwnerCharacter->GetCharacterMovement();
+    if (!MovementComp)
+    {
+        return;
+    }
+    
+    // Apply movement speed modifications
+    float BaseMaxWalkSpeed = 600.0f; // Default UE5 walk speed
+    MovementComp->MaxWalkSpeed = BaseMaxWalkSpeed * CurrentPhysicsState.MovementSpeedMultiplier;
+    
+    // Apply jump force modifications
+    float BaseJumpZVelocity = 420.0f; // Default UE5 jump velocity
+    MovementComp->JumpZVelocity = BaseJumpZVelocity * CurrentPhysicsState.JumpForceMultiplier;
+    
+    // Apply acceleration modifications
+    float BaseMaxAcceleration = 2048.0f; // Default UE5 acceleration
+    MovementComp->MaxAcceleration = BaseMaxAcceleration * CurrentPhysicsState.AccelerationMultiplier;
+    
+    // Apply ground friction modifications
+    MovementComp->GroundFriction = 8.0f * CurrentPhysicsState.GroundFrictionMultiplier;
+}
+
+void UCore_SurvivalPhysicsIntegrator::ApplyCollisionModifications()
+{
+    if (!OwnerCharacter)
+    {
+        return;
+    }
+    
+    UCapsuleComponent* CapsuleComp = OwnerCharacter->GetCapsuleComponent();
+    if (!CapsuleComp)
+    {
+        return;
+    }
+    
+    // Modify collision response based on physics state
+    // This would typically involve custom collision handling
+    // For now, we store the multiplier for use in damage calculations
+}
+
+void UCore_SurvivalPhysicsIntegrator::ApplyEnvironmentalModifications()
+{
+    if (!OwnerCharacter)
+    {
+        return;
+    }
+    
+    UCharacterMovementComponent* MovementComp = OwnerCharacter->GetCharacterMovement();
+    if (!MovementComp)
+    {
+        return;
+    }
+    
+    // Apply gravity scale modifications
+    MovementComp->GravityScale = CurrentPhysicsState.GravityScaleMultiplier;
+}
+
+void UCore_SurvivalPhysicsIntegrator::ApplyFearEffects()
+{
+    if (!OwnerCharacter || CurrentPhysicsState.FearTremorIntensity <= 0.0f)
+    {
+        return;
+    }
+    
+    // Apply camera shake or movement tremor based on fear
+    // This would typically involve adding random movement offsets
+    // For now, we just log the effect
+    if (bEnableDebugOutput)
+    {
+        UE_LOG(LogTemp, Log, TEXT("SurvivalPhysicsIntegrator: Applying fear tremor intensity: %f"), 
+               CurrentPhysicsState.FearTremorIntensity);
     }
 }
 
-void UCore_SurvivalPhysicsIntegrator::HandleEnvironmentalHazards()
+bool UCore_SurvivalPhysicsIntegrator::IsInCriticalSurvivalState() const
 {
-    // This would typically be called by environmental systems
-    // For now, apply terrain-based modifiers
-    
-    // Get current terrain type (simplified - would normally use terrain detection)
-    ECore_TerrainType CurrentTerrain = ETT_Normal; // Default
-    
-    // Apply terrain modifier
-    if (TerrainMovementModifiers.Contains(CurrentTerrain))
+    if (!OwnerCharacter || !SurvivalSystem)
     {
-        BaseStaminaSpeedMultiplier *= TerrainMovementModifiers[CurrentTerrain];
+        return false;
     }
     
-    // Handle specific environmental hazards
-    switch (CurrentHazard)
+    float HealthRatio = GetSurvivalStatNormalized(TEXT("Health"));
+    float HungerRatio = GetSurvivalStatNormalized(TEXT("Hunger"));
+    float ThirstRatio = GetSurvivalStatNormalized(TEXT("Thirst"));
+    
+    return (HealthRatio < LowHealthThreshold) || 
+           (HungerRatio < CriticalHungerThreshold) || 
+           (ThirstRatio < CriticalThirstThreshold);
+}
+
+bool UCore_SurvivalPhysicsIntegrator::IsPhysicsCompromised() const
+{
+    return (CurrentPhysicsState.MovementSpeedMultiplier < 0.6f) ||
+           (CurrentPhysicsState.JumpForceMultiplier < 0.7f) ||
+           (CurrentPhysicsState.FearTremorIntensity > 5.0f);
+}
+
+void UCore_SurvivalPhysicsIntegrator::ResetPhysicsState()
+{
+    CurrentPhysicsState = FCore_SurvivalPhysicsState();
+    
+    if (OwnerCharacter)
     {
-        case EEH_Quicksand:
-            BaseStaminaSpeedMultiplier *= 0.3f;
-            break;
-        case EEH_UnstableTerrain:
-            BaseStaminaSpeedMultiplier *= 0.7f;
-            break;
-        case EEH_WaterCurrent:
-            BaseStaminaSpeedMultiplier *= 0.5f;
-            break;
-        case EEH_Muddy:
-            BaseStaminaSpeedMultiplier *= 0.6f;
-            break;
-        case EEH_Rocky:
-            BaseStaminaSpeedMultiplier *= 0.8f;
-            break;
-        case EEH_Steep:
-            BaseStaminaSpeedMultiplier *= 0.4f;
-            break;
-        default:
-            // No additional penalty
-            break;
+        ApplyPhysicsStateToCharacter();
     }
 }
 
-float UCore_SurvivalPhysicsIntegrator::CalculateCurrentWeight() const
+void UCore_SurvivalPhysicsIntegrator::LogCurrentPhysicsState() const
 {
-    // Simplified weight calculation
-    // In a full implementation, this would sum inventory items, equipment, etc.
-    float BaseWeight = 70.0f; // Base character weight in kg
-    
-    // Add equipment weight (placeholder)
-    float EquipmentWeight = 10.0f;
-    
-    // Add inventory weight (placeholder)
-    float InventoryWeight = 5.0f;
-    
-    return BaseWeight + EquipmentWeight + InventoryWeight;
-}
-
-float UCore_SurvivalPhysicsIntegrator::GetTotalMovementMultiplier() const
-{
-    // BaseStaminaSpeedMultiplier already contains all applied modifiers
-    return FMath::Clamp(BaseStaminaSpeedMultiplier, 0.1f, 2.0f);
-}
-
-bool UCore_SurvivalPhysicsIntegrator::CanPerformPhysicalAction() const
-{
-    if (!SurvivalComp)
-    {
-        return true; // Default to allowing actions if no survival component
-    }
-    
-    // Check if character has enough stamina for physical actions
-    float StaminaRatio = SurvivalComp->GetStaminaRatio();
-    if (StaminaRatio < 0.1f)
-    {
-        return false; // Too exhausted
-    }
-    
-    // Check if injury level is too high
-    if (InjuryLevel > 0.8f)
-    {
-        return false; // Too injured
-    }
-    
-    // Check if overweight prevents actions
-    float CurrentWeight = CalculateCurrentWeight();
-    if (CurrentWeight - BaseCarryingCapacity >= MaxOverweight)
-    {
-        return false; // Too overloaded
-    }
-    
-    return true;
+    UE_LOG(LogTemp, Log, TEXT("SurvivalPhysicsIntegrator State:"));
+    UE_LOG(LogTemp, Log, TEXT("  Movement Speed: %f"), CurrentPhysicsState.MovementSpeedMultiplier);
+    UE_LOG(LogTemp, Log, TEXT("  Jump Force: %f"), CurrentPhysicsState.JumpForceMultiplier);
+    UE_LOG(LogTemp, Log, TEXT("  Collision Damage: %f"), CurrentPhysicsState.CollisionDamageMultiplier);
+    UE_LOG(LogTemp, Log, TEXT("  Ragdoll Threshold: %f"), CurrentPhysicsState.RagdollThresholdMultiplier);
+    UE_LOG(LogTemp, Log, TEXT("  Fear Tremor: %f"), CurrentPhysicsState.FearTremorIntensity);
+    UE_LOG(LogTemp, Log, TEXT("  Critical State: %s"), IsInCriticalSurvivalState() ? TEXT("Yes") : TEXT("No"));
 }
