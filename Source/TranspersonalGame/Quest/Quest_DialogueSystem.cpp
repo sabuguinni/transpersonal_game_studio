@@ -1,199 +1,220 @@
 #include "Quest_DialogueSystem.h"
 #include "Engine/Engine.h"
-#include "Engine/World.h"
-#include "Kismet/GameplayStatics.h"
 
 UQuest_DialogueSystem::UQuest_DialogueSystem()
 {
+    PrimaryComponentTick.bCanEverTick = false;
+    
+    CurrentSequenceID = TEXT("");
+    CurrentLineIndex = 0;
     bIsDialogueActive = false;
-    CurrentNPCName = TEXT("");
-    CurrentLineIndex = 0;
+    InteractionRange = 300.0f;
 }
 
-void UQuest_DialogueSystem::Initialize(FSubsystemCollectionBase& Collection)
+void UQuest_DialogueSystem::BeginPlay()
 {
-    Super::Initialize(Collection);
-    
+    Super::BeginPlay();
     InitializeDefaultDialogues();
-    
-    UE_LOG(LogTemp, Warning, TEXT("Quest Dialogue System initialized"));
 }
 
-void UQuest_DialogueSystem::RegisterDialogueTree(const FQuest_DialogueTree& DialogueTree)
+bool UQuest_DialogueSystem::StartDialogue(const FString& SequenceID)
 {
-    if (!DialogueTree.NPCName.IsEmpty())
+    if (DialogueSequences.Contains(SequenceID))
     {
-        DialogueTrees.Add(DialogueTree.NPCName, DialogueTree);
-        UE_LOG(LogTemp, Warning, TEXT("Registered dialogue tree for NPC: %s"), *DialogueTree.NPCName);
+        CurrentSequenceID = SequenceID;
+        CurrentLineIndex = 0;
+        bIsDialogueActive = true;
+        
+        UE_LOG(LogTemp, Log, TEXT("Started dialogue sequence: %s"), *SequenceID);
+        return true;
     }
+    
+    UE_LOG(LogTemp, Warning, TEXT("Dialogue sequence not found: %s"), *SequenceID);
+    return false;
 }
 
-FQuest_DialogueTree UQuest_DialogueSystem::GetDialogueTreeForNPC(const FString& NPCName)
+void UQuest_DialogueSystem::NextDialogueLine()
 {
-    if (DialogueTrees.Contains(NPCName))
+    if (!bIsDialogueActive || !DialogueSequences.Contains(CurrentSequenceID))
     {
-        return DialogueTrees[NPCName];
+        return;
     }
     
-    return FQuest_DialogueTree();
-}
-
-bool UQuest_DialogueSystem::StartDialogue(const FString& NPCName, AActor* PlayerActor)
-{
-    if (bIsDialogueActive)
+    FQuest_DialogueSequence& CurrentSequence = DialogueSequences[CurrentSequenceID];
+    
+    if (CurrentLineIndex < CurrentSequence.DialogueLines.Num() - 1)
     {
-        UE_LOG(LogTemp, Warning, TEXT("Cannot start dialogue - dialogue already active"));
-        return false;
+        CurrentLineIndex++;
     }
-    
-    if (!DialogueTrees.Contains(NPCName))
+    else
     {
-        UE_LOG(LogTemp, Warning, TEXT("No dialogue tree found for NPC: %s"), *NPCName);
-        return false;
+        // End of sequence
+        if (!CurrentSequence.NextSequenceID.IsEmpty())
+        {
+            StartDialogue(CurrentSequence.NextSequenceID);
+        }
+        else
+        {
+            EndDialogue();
+        }
     }
-    
-    FQuest_DialogueTree DialogueTree = DialogueTrees[NPCName];
-    
-    if (!CanAccessDialogue(DialogueTree))
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Player cannot access dialogue for NPC: %s"), *NPCName);
-        return false;
-    }
-    
-    bIsDialogueActive = true;
-    CurrentNPCName = NPCName;
-    CurrentLineIndex = 0;
-    
-    // Play first dialogue line if available
-    if (DialogueTree.DialogueLines.Num() > 0)
-    {
-        PlayDialogueLine(DialogueTree.DialogueLines[0]);
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("Started dialogue with NPC: %s"), *NPCName);
-    return true;
-}
-
-void UQuest_DialogueSystem::PlayDialogueLine(const FQuest_DialogueLine& DialogueLine)
-{
-    // Log the dialogue line for now
-    UE_LOG(LogTemp, Warning, TEXT("%s: %s"), *DialogueLine.SpeakerName, *DialogueLine.DialogueText);
-    
-    // In a full implementation, this would:
-    // 1. Display UI with dialogue text
-    // 2. Play audio if AudioURL is provided
-    // 3. Handle timing based on Duration
-    // 4. Trigger quest events if bIsQuestRelated is true
 }
 
 void UQuest_DialogueSystem::EndDialogue()
 {
     bIsDialogueActive = false;
-    CurrentNPCName = TEXT("");
+    CurrentSequenceID = TEXT("");
     CurrentLineIndex = 0;
     
-    UE_LOG(LogTemp, Warning, TEXT("Dialogue ended"));
+    UE_LOG(LogTemp, Log, TEXT("Dialogue ended"));
 }
 
-bool UQuest_DialogueSystem::IsDialogueActive() const
+FQuest_DialogueLine UQuest_DialogueSystem::GetCurrentDialogueLine() const
 {
-    return bIsDialogueActive;
+    if (bIsDialogueActive && DialogueSequences.Contains(CurrentSequenceID))
+    {
+        const FQuest_DialogueSequence& CurrentSequence = DialogueSequences[CurrentSequenceID];
+        if (CurrentLineIndex < CurrentSequence.DialogueLines.Num())
+        {
+            return CurrentSequence.DialogueLines[CurrentLineIndex];
+        }
+    }
+    
+    return FQuest_DialogueLine();
+}
+
+void UQuest_DialogueSystem::AddDialogueSequence(const FString& SequenceID, const FQuest_DialogueSequence& Sequence)
+{
+    DialogueSequences.Add(SequenceID, Sequence);
+    UE_LOG(LogTemp, Log, TEXT("Added dialogue sequence: %s"), *SequenceID);
+}
+
+void UQuest_DialogueSystem::SetupHuntQuestDialogue()
+{
+    FQuest_DialogueSequence HuntQuestGive;
+    HuntQuestGive.SequenceID = TEXT("hunt_quest_give");
+    HuntQuestGive.bIsRepeatable = false;
+    
+    FQuest_DialogueLine Line1;
+    Line1.SpeakerName = TEXT("Elder Korth");
+    Line1.DialogueText = FText::FromString(TEXT("Attention survivor! A massive Tyrannosaurus Rex has been spotted near the eastern cliffs."));
+    Line1.DialogueType = EQuest_DialogueType::QuestGive;
+    Line1.DisplayDuration = 4.0f;
+    
+    FQuest_DialogueLine Line2;
+    Line2.SpeakerName = TEXT("Elder Korth");
+    Line2.DialogueText = FText::FromString(TEXT("This apex predator poses a significant threat to our settlement. Your mission: track and eliminate this beast."));
+    Line2.DialogueType = EQuest_DialogueType::QuestGive;
+    Line2.DisplayDuration = 4.5f;
+    
+    FQuest_DialogueLine Line3;
+    Line3.SpeakerName = TEXT("Elder Korth");
+    Line3.DialogueText = FText::FromString(TEXT("Gather your weapons, study its movement patterns, and strike when the moment is right. The safety of our people depends on your success."));
+    Line3.DialogueType = EQuest_DialogueType::QuestGive;
+    Line3.DisplayDuration = 5.0f;
+    Line3.PlayerResponses.Add(TEXT("I'll hunt the beast down."));
+    Line3.PlayerResponses.Add(TEXT("This sounds too dangerous."));
+    
+    HuntQuestGive.DialogueLines.Add(Line1);
+    HuntQuestGive.DialogueLines.Add(Line2);
+    HuntQuestGive.DialogueLines.Add(Line3);
+    
+    AddDialogueSequence(TEXT("hunt_quest_give"), HuntQuestGive);
+    
+    // Hunt quest completion dialogue
+    FQuest_DialogueSequence HuntQuestComplete;
+    HuntQuestComplete.SequenceID = TEXT("hunt_quest_complete");
+    HuntQuestComplete.bIsRepeatable = false;
+    
+    FQuest_DialogueLine CompleteLine1;
+    CompleteLine1.SpeakerName = TEXT("Elder Korth");
+    CompleteLine1.DialogueText = FText::FromString(TEXT("Well done, hunter! The great beast has fallen and our camp is safe once more."));
+    CompleteLine1.DialogueType = EQuest_DialogueType::QuestComplete;
+    CompleteLine1.DisplayDuration = 3.5f;
+    
+    FQuest_DialogueLine CompleteLine2;
+    CompleteLine2.SpeakerName = TEXT("Elder Korth");
+    CompleteLine2.DialogueText = FText::FromString(TEXT("Your courage and skill have earned you the respect of all survivors. Take these crafted tools as your reward."));
+    CompleteLine2.DialogueType = EQuest_DialogueType::QuestComplete;
+    CompleteLine2.DisplayDuration = 4.0f;
+    
+    HuntQuestComplete.DialogueLines.Add(CompleteLine1);
+    HuntQuestComplete.DialogueLines.Add(CompleteLine2);
+    
+    AddDialogueSequence(TEXT("hunt_quest_complete"), HuntQuestComplete);
+}
+
+void UQuest_DialogueSystem::SetupCollectQuestDialogue()
+{
+    FQuest_DialogueSequence CollectQuestGive;
+    CollectQuestGive.SequenceID = TEXT("collect_quest_give");
+    CollectQuestGive.bIsRepeatable = true;
+    
+    FQuest_DialogueLine Line1;
+    Line1.SpeakerName = TEXT("Gatherer Naia");
+    Line1.DialogueText = FText::FromString(TEXT("Our food stores are running dangerously low. We need fresh berries and roots to survive the coming days."));
+    Line1.DialogueType = EQuest_DialogueType::QuestGive;
+    Line1.DisplayDuration = 4.0f;
+    
+    FQuest_DialogueLine Line2;
+    Line2.SpeakerName = TEXT("Gatherer Naia");
+    Line2.DialogueText = FText::FromString(TEXT("Search the forest groves for purple berries and dig up the thick roots near the river. Bring back 10 of each."));
+    Line2.DialogueType = EQuest_DialogueType::QuestGive;
+    Line2.DisplayDuration = 4.5f;
+    Line2.PlayerResponses.Add(TEXT("I'll gather what you need."));
+    Line2.PlayerResponses.Add(TEXT("Can't someone else do this?"));
+    
+    CollectQuestGive.DialogueLines.Add(Line1);
+    CollectQuestGive.DialogueLines.Add(Line2);
+    
+    AddDialogueSequence(TEXT("collect_quest_give"), CollectQuestGive);
+}
+
+void UQuest_DialogueSystem::SetupExploreQuestDialogue()
+{
+    FQuest_DialogueSequence ExploreQuestGive;
+    ExploreQuestGive.SequenceID = TEXT("explore_quest_give");
+    ExploreQuestGive.bIsRepeatable = false;
+    
+    FQuest_DialogueLine Line1;
+    Line1.SpeakerName = TEXT("Scout Theron");
+    Line1.DialogueText = FText::FromString(TEXT("Strange smoke has been seen rising from the northern valleys. We need to know what lies beyond those hills."));
+    Line1.DialogueType = EQuest_DialogueType::QuestGive;
+    Line1.DisplayDuration = 4.0f;
+    
+    FQuest_DialogueLine Line2;
+    Line2.SpeakerName = TEXT("Scout Theron");
+    Line2.DialogueText = FText::FromString(TEXT("Venture north, map the territory, and report back what you discover. Be careful - unknown lands hold unknown dangers."));
+    Line2.DialogueType = EQuest_DialogueType::QuestGive;
+    Line2.DisplayDuration = 4.5f;
+    Line2.PlayerResponses.Add(TEXT("I'll scout the northern lands."));
+    Line2.PlayerResponses.Add(TEXT("Send someone more experienced."));
+    
+    ExploreQuestGive.DialogueLines.Add(Line1);
+    ExploreQuestGive.DialogueLines.Add(Line2);
+    
+    AddDialogueSequence(TEXT("explore_quest_give"), ExploreQuestGive);
 }
 
 void UQuest_DialogueSystem::InitializeDefaultDialogues()
 {
-    // Hunt Master Dialogue
-    FQuest_DialogueTree HuntMasterTree;
-    HuntMasterTree.TreeID = TEXT("hunt_master_01");
-    HuntMasterTree.NPCName = TEXT("HuntMaster_NPC");
-    HuntMasterTree.bIsRepeatable = true;
+    SetupHuntQuestDialogue();
+    SetupCollectQuestDialogue();
+    SetupExploreQuestDialogue();
     
-    FQuest_DialogueLine HuntLine1;
-    HuntLine1.SpeakerName = TEXT("Hunt Master");
-    HuntLine1.DialogueText = TEXT("Greetings, survivor. I am the Hunt Master. The great beasts of this land hold the key to our tribe's survival.");
-    HuntLine1.Duration = 5.0f;
-    HuntLine1.bIsQuestRelated = true;
+    // Generic greeting dialogue
+    FQuest_DialogueSequence Greeting;
+    Greeting.SequenceID = TEXT("generic_greeting");
+    Greeting.bIsRepeatable = true;
     
-    FQuest_DialogueLine HuntLine2;
-    HuntLine2.SpeakerName = TEXT("Hunt Master");
-    HuntLine2.DialogueText = TEXT("Bring me proof of your hunting prowess - the hide of a mighty Triceratops, the claw of a swift Raptor, or if you dare... the tooth of the apex predator, the Tyrannosaurus Rex.");
-    HuntLine2.Duration = 8.0f;
-    HuntLine2.bIsQuestRelated = true;
+    FQuest_DialogueLine GreetLine;
+    GreetLine.SpeakerName = TEXT("Survivor");
+    GreetLine.DialogueText = FText::FromString(TEXT("Stay alert out there. This world doesn't forgive the careless."));
+    GreetLine.DialogueType = EQuest_DialogueType::Greeting;
+    GreetLine.DisplayDuration = 3.0f;
     
-    FQuest_DialogueLine HuntLine3;
-    HuntLine3.SpeakerName = TEXT("Hunt Master");
-    HuntLine3.DialogueText = TEXT("Each hunt will test your courage and skill. Are you ready to prove yourself as a true hunter of the ancient world?");
-    HuntLine3.Duration = 6.0f;
-    HuntLine3.bIsQuestRelated = true;
+    Greeting.DialogueLines.Add(GreetLine);
+    AddDialogueSequence(TEXT("generic_greeting"), Greeting);
     
-    HuntMasterTree.DialogueLines.Add(HuntLine1);
-    HuntMasterTree.DialogueLines.Add(HuntLine2);
-    HuntMasterTree.DialogueLines.Add(HuntLine3);
-    
-    RegisterDialogueTree(HuntMasterTree);
-    
-    // Gatherer Elder Dialogue
-    FQuest_DialogueTree GathererTree;
-    GathererTree.TreeID = TEXT("gatherer_elder_01");
-    GathererTree.NPCName = TEXT("GathererElder_NPC");
-    GathererTree.bIsRepeatable = true;
-    
-    FQuest_DialogueLine GatherLine1;
-    GatherLine1.SpeakerName = TEXT("Gatherer Elder");
-    GatherLine1.DialogueText = TEXT("Young one, the earth provides all we need, but only to those who know where to look and how to gather with respect.");
-    GatherLine1.Duration = 6.0f;
-    GatherLine1.bIsQuestRelated = true;
-    
-    FQuest_DialogueLine GatherLine2;
-    GatherLine2.SpeakerName = TEXT("Gatherer Elder");
-    GatherLine2.DialogueText = TEXT("The sacred stones near the canyon hold power for our tools. The ancient trees whisper secrets of strong wood for our shelters.");
-    GatherLine2.Duration = 7.0f;
-    GatherLine2.bIsQuestRelated = true;
-    
-    FQuest_DialogueLine GatherLine3;
-    GatherLine3.SpeakerName = TEXT("Gatherer Elder");
-    GatherLine3.DialogueText = TEXT("Learn the ways of gathering, and you will never go hungry. But remember - take only what you need, for the land must provide for generations to come.");
-    GatherLine3.Duration = 8.0f;
-    GatherLine3.bIsQuestRelated = true;
-    
-    GathererTree.DialogueLines.Add(GatherLine1);
-    GathererTree.DialogueLines.Add(GatherLine2);
-    GathererTree.DialogueLines.Add(GatherLine3);
-    
-    RegisterDialogueTree(GathererTree);
-    
-    // Scout Dialogue
-    FQuest_DialogueTree ScoutTree;
-    ScoutTree.TreeID = TEXT("scout_01");
-    ScoutTree.NPCName = TEXT("Scout_NPC");
-    ScoutTree.bIsRepeatable = true;
-    
-    FQuest_DialogueLine ScoutLine1;
-    ScoutLine1.SpeakerName = TEXT("Scout");
-    ScoutLine1.DialogueText = TEXT("I've seen movement beyond the ridge. Large shapes moving through the mist. We must know what dangers lurk in the unknown territories.");
-    ScoutLine1.Duration = 7.0f;
-    ScoutLine1.bIsQuestRelated = true;
-    
-    FQuest_DialogueLine ScoutLine2;
-    ScoutLine2.SpeakerName = TEXT("Scout");
-    ScoutLine2.DialogueText = TEXT("Will you venture into the unexplored lands? Map the territories, mark the dangers, and return with knowledge that could save our people?");
-    ScoutLine2.Duration = 6.0f;
-    ScoutLine2.bIsQuestRelated = true;
-    
-    ScoutTree.DialogueLines.Add(ScoutLine1);
-    ScoutTree.DialogueLines.Add(ScoutLine2);
-    
-    RegisterDialogueTree(ScoutTree);
-}
-
-bool UQuest_DialogueSystem::CanAccessDialogue(const FQuest_DialogueTree& DialogueTree)
-{
-    // For now, all dialogues are accessible
-    // In a full implementation, this would check:
-    // 1. Required quest completion status
-    // 2. Player level/stats
-    // 3. Previous dialogue history
-    // 4. Time-based restrictions
-    
-    return true;
+    UE_LOG(LogTemp, Log, TEXT("Quest dialogue system initialized with %d sequences"), DialogueSequences.Num());
 }
