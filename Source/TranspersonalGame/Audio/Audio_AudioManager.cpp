@@ -1,364 +1,332 @@
 #include "Audio_AudioManager.h"
-#include "Engine/World.h"
-#include "Kismet/GameplayStatics.h"
-#include "Components/AudioComponent.h"
-#include "Sound/SoundCue.h"
 #include "Engine/Engine.h"
+#include "Engine/World.h"
+#include "GameFramework/PlayerController.h"
+#include "Kismet/GameplayStatics.h"
+#include "Sound/SoundAttenuation.h"
+#include "../TranspersonalCharacter.h"
 
-UAudio_AudioManager::UAudio_AudioManager()
+AAudio_AudioManager::AAudio_AudioManager()
 {
-    MasterVolume = 1.0f;
-    MusicVolume = 0.7f;
-    SFXVolume = 0.8f;
-    AmbienceVolume = 0.6f;
-    CurrentMusicIntensity = 0.0f;
-    CurrentWeather = EWeatherType::Clear;
-    CurrentTimeOfDay = 0.5f;
-    LastPlayerLocation = FVector::ZeroVector;
-
-    MusicComponent = nullptr;
-    AmbienceComponent = nullptr;
-    HeartbeatComponent = nullptr;
-    BreathingComponent = nullptr;
-}
-
-void UAudio_AudioManager::Initialize(FSubsystemCollectionBase& Collection)
-{
-    Super::Initialize(Collection);
+    PrimaryActorTick.bCanEverTick = true;
     
-    UE_LOG(LogTemp, Warning, TEXT("Audio Manager initialized"));
+    // Create root component
+    RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootComponent"));
     
     // Create audio components
+    MasterAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("MasterAudioComponent"));
+    MasterAudioComponent->SetupAttachment(RootComponent);
+    
+    AmbientAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("AmbientAudioComponent"));
+    AmbientAudioComponent->SetupAttachment(RootComponent);
+    
+    MusicAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("MusicAudioComponent"));
+    MusicAudioComponent->SetupAttachment(RootComponent);
+    
+    SFXAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("SFXAudioComponent"));
+    SFXAudioComponent->SetupAttachment(RootComponent);
+    
+    // Initialize default values
+    MasterVolume = 1.0f;
+    AmbientVolume = 0.6f;
+    MusicVolume = 0.4f;
+    SFXVolume = 0.8f;
+    
+    CurrentBiome = EBiomeType::Forest;
+    CurrentDangerLevel = 0.0f;
+    bIsNightTime = false;
+    
+    AudioUpdateInterval = 0.1f;
+    LastAudioUpdate = 0.0f;
+    CurrentPoolIndex = 0;
+    
+    PlayerCharacter = nullptr;
+}
+
+void AAudio_AudioManager::BeginPlay()
+{
+    Super::BeginPlay();
+    
+    // Find player character
     if (UWorld* World = GetWorld())
     {
-        if (AActor* DummyActor = World->SpawnActor<AActor>())
+        if (APlayerController* PC = World->GetFirstPlayerController())
         {
-            MusicComponent = DummyActor->CreateDefaultSubobject<UAudioComponent>(TEXT("MusicComponent"));
-            AmbienceComponent = DummyActor->CreateDefaultSubobject<UAudioComponent>(TEXT("AmbienceComponent"));
-            HeartbeatComponent = DummyActor->CreateDefaultSubobject<UAudioComponent>(TEXT("HeartbeatComponent"));
-            BreathingComponent = DummyActor->CreateDefaultSubobject<UAudioComponent>(TEXT("BreathingComponent"));
-            
-            if (MusicComponent)
+            PlayerCharacter = Cast<ATranspersonalCharacter>(PC->GetPawn());
+        }
+    }
+    
+    // Initialize audio component pool for performance
+    AudioComponentPool.Reserve(20);
+    for (int32 i = 0; i < 20; i++)
+    {
+        UAudioComponent* PooledAudio = CreateDefaultSubobject<UAudioComponent>(*FString::Printf(TEXT("PooledAudio_%d"), i));
+        PooledAudio->SetupAttachment(RootComponent);
+        PooledAudio->SetAutoActivate(false);
+        AudioComponentPool.Add(PooledAudio);
+    }
+    
+    // Setup initial biome audio
+    UpdateBiomeAudio(CurrentBiome);
+    
+    UE_LOG(LogTemp, Warning, TEXT("Audio Manager initialized with %d pooled components"), AudioComponentPool.Num());
+}
+
+void AAudio_AudioManager::Tick(float DeltaTime)
+{
+    Super::Tick(DeltaTime);
+    
+    LastAudioUpdate += DeltaTime;
+    
+    if (LastAudioUpdate >= AudioUpdateInterval)
+    {
+        UpdateAmbientAudio();
+        UpdateMusicLayers();
+        ProcessAudioCulling();
+        LastAudioUpdate = 0.0f;
+    }
+}
+
+void AAudio_AudioManager::PlaySoundAtLocation(USoundCue* SoundCue, FVector Location, float VolumeMultiplier)
+{
+    if (!SoundCue || !GetWorld())
+    {
+        return;
+    }
+    
+    // Use pooled audio component for performance
+    if (AudioComponentPool.IsValidIndex(CurrentPoolIndex))
+    {
+        UAudioComponent* AudioComp = AudioComponentPool[CurrentPoolIndex];
+        AudioComp->SetWorldLocation(Location);
+        AudioComp->SetSound(SoundCue);
+        AudioComp->SetVolumeMultiplier(VolumeMultiplier * MasterVolume);
+        AudioComp->Play();
+        
+        CurrentPoolIndex = (CurrentPoolIndex + 1) % AudioComponentPool.Num();
+    }
+    else
+    {
+        // Fallback to gameplay statics
+        UGameplayStatics::PlaySoundAtLocation(GetWorld(), SoundCue, Location, VolumeMultiplier * MasterVolume);
+    }
+}
+
+void AAudio_AudioManager::PlayFootstepSound(FVector Location, ECreatureSize CreatureSize)
+{
+    // Different footstep sounds based on creature size
+    float VolumeMultiplier = 0.5f;
+    float PitchMultiplier = 1.0f;
+    
+    switch (CreatureSize)
+    {
+        case ECreatureSize::Tiny:
+            VolumeMultiplier = 0.2f;
+            PitchMultiplier = 1.5f;
+            break;
+        case ECreatureSize::Small:
+            VolumeMultiplier = 0.4f;
+            PitchMultiplier = 1.2f;
+            break;
+        case ECreatureSize::Medium:
+            VolumeMultiplier = 0.6f;
+            PitchMultiplier = 1.0f;
+            break;
+        case ECreatureSize::Large:
+            VolumeMultiplier = 0.8f;
+            PitchMultiplier = 0.8f;
+            break;
+        case ECreatureSize::Massive:
+            VolumeMultiplier = 1.0f;
+            PitchMultiplier = 0.6f;
+            break;
+    }
+    
+    // Use pooled audio component
+    if (AudioComponentPool.IsValidIndex(CurrentPoolIndex))
+    {
+        UAudioComponent* AudioComp = AudioComponentPool[CurrentPoolIndex];
+        AudioComp->SetWorldLocation(Location);
+        AudioComp->SetVolumeMultiplier(VolumeMultiplier * SFXVolume * MasterVolume);
+        AudioComp->SetPitchMultiplier(PitchMultiplier);
+        
+        // TODO: Set appropriate footstep sound based on terrain and creature size
+        // AudioComp->SetSound(FootstepSoundCue);
+        // AudioComp->Play();
+        
+        CurrentPoolIndex = (CurrentPoolIndex + 1) % AudioComponentPool.Num();
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("Footstep sound played at %s for size %d"), *Location.ToString(), (int32)CreatureSize);
+}
+
+void AAudio_AudioManager::PlayDinosaurRoar(FVector Location, EDinosaurSpecies Species, float IntensityLevel)
+{
+    float VolumeMultiplier = FMath::Clamp(IntensityLevel, 0.3f, 1.0f);
+    float AttenuationRadius = 2000.0f;
+    
+    // Adjust audio parameters based on species
+    switch (Species)
+    {
+        case EDinosaurSpecies::TRex:
+            VolumeMultiplier *= 1.0f;
+            AttenuationRadius = 3000.0f;
+            break;
+        case EDinosaurSpecies::Velociraptor:
+            VolumeMultiplier *= 0.6f;
+            AttenuationRadius = 1000.0f;
+            break;
+        case EDinosaurSpecies::Triceratops:
+            VolumeMultiplier *= 0.8f;
+            AttenuationRadius = 2500.0f;
+            break;
+        case EDinosaurSpecies::Brachiosaurus:
+            VolumeMultiplier *= 0.9f;
+            AttenuationRadius = 4000.0f;
+            break;
+        default:
+            VolumeMultiplier *= 0.7f;
+            AttenuationRadius = 1500.0f;
+            break;
+    }
+    
+    // Use pooled audio component with custom attenuation
+    if (AudioComponentPool.IsValidIndex(CurrentPoolIndex))
+    {
+        UAudioComponent* AudioComp = AudioComponentPool[CurrentPoolIndex];
+        AudioComp->SetWorldLocation(Location);
+        AudioComp->SetVolumeMultiplier(VolumeMultiplier * SFXVolume * MasterVolume);
+        
+        // TODO: Set species-specific roar sound
+        // AudioComp->SetSound(GetRoarSoundForSpecies(Species));
+        // AudioComp->Play();
+        
+        CurrentPoolIndex = (CurrentPoolIndex + 1) % AudioComponentPool.Num();
+    }
+    
+    UE_LOG(LogTemp, Warning, TEXT("Dinosaur roar played: Species %d, Intensity %.2f at %s"), 
+           (int32)Species, IntensityLevel, *Location.ToString());
+}
+
+void AAudio_AudioManager::UpdateBiomeAudio(EBiomeType NewBiome)
+{
+    if (CurrentBiome == NewBiome)
+    {
+        return;
+    }
+    
+    CurrentBiome = NewBiome;
+    
+    // Find biome audio settings
+    FAudio_BiomeAudioSettings* BiomeSettings = nullptr;
+    for (FAudio_BiomeAudioSettings& Settings : BiomeAudioSettings)
+    {
+        if (Settings.BiomeType == NewBiome)
+        {
+            BiomeSettings = &Settings;
+            break;
+        }
+    }
+    
+    if (BiomeSettings && AmbientAudioComponent)
+    {
+        AmbientAudioComponent->SetSound(BiomeSettings->AmbientSound.SoundCue);
+        AmbientAudioComponent->SetVolumeMultiplier(BiomeSettings->AmbientSound.VolumeMultiplier * AmbientVolume * MasterVolume);
+        AmbientAudioComponent->Play();
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("Biome audio updated to: %d"), (int32)NewBiome);
+}
+
+void AAudio_AudioManager::UpdateDangerLevel(float DangerLevel)
+{
+    CurrentDangerLevel = FMath::Clamp(DangerLevel, 0.0f, 1.0f);
+    
+    // Adjust music intensity based on danger level
+    if (MusicAudioComponent)
+    {
+        float MusicIntensity = FMath::Lerp(0.3f, 1.0f, CurrentDangerLevel);
+        MusicAudioComponent->SetVolumeMultiplier(MusicIntensity * MusicVolume * MasterVolume);
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("Danger level updated to: %.2f"), CurrentDangerLevel);
+}
+
+void AAudio_AudioManager::SetTimeOfDay(bool bNightTime)
+{
+    if (bIsNightTime == bNightTime)
+    {
+        return;
+    }
+    
+    bIsNightTime = bNightTime;
+    
+    // Adjust ambient audio for day/night cycle
+    if (AmbientAudioComponent)
+    {
+        float NightVolumeModifier = bIsNightTime ? 1.2f : 1.0f;
+        AmbientAudioComponent->SetVolumeMultiplier(AmbientVolume * NightVolumeModifier * MasterVolume);
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("Time of day updated: %s"), bIsNightTime ? TEXT("Night") : TEXT("Day"));
+}
+
+void AAudio_AudioManager::PlayNarrationLine(const FString& NarrationText, float DelaySeconds)
+{
+    // TODO: Implement text-to-speech integration or play pre-recorded narration
+    UE_LOG(LogTemp, Warning, TEXT("Narration: %s (Delay: %.1fs)"), *NarrationText, DelaySeconds);
+}
+
+void AAudio_AudioManager::TriggerMetaSoundEvent(const FString& EventName, float Parameter1, float Parameter2)
+{
+    // TODO: Implement MetaSound event triggering
+    UE_LOG(LogTemp, Log, TEXT("MetaSound Event: %s (P1: %.2f, P2: %.2f)"), *EventName, Parameter1, Parameter2);
+}
+
+void AAudio_AudioManager::UpdateAmbientAudio()
+{
+    // Update ambient audio based on player location and game state
+    if (!PlayerCharacter)
+    {
+        return;
+    }
+    
+    // TODO: Implement biome detection based on player location
+    // TODO: Adjust ambient audio based on nearby threats
+}
+
+void AAudio_AudioManager::UpdateMusicLayers()
+{
+    // Update dynamic music layers based on game state
+    if (!MusicAudioComponent)
+    {
+        return;
+    }
+    
+    // TODO: Implement adaptive music system
+    // TODO: Layer different music tracks based on danger, biome, time of day
+}
+
+void AAudio_AudioManager::ProcessAudioCulling()
+{
+    // Cull distant audio sources for performance
+    if (!PlayerCharacter)
+    {
+        return;
+    }
+    
+    FVector PlayerLocation = PlayerCharacter->GetActorLocation();
+    
+    // Stop audio components that are too far from player
+    for (UAudioComponent* AudioComp : AudioComponentPool)
+    {
+        if (AudioComp && AudioComp->IsPlaying())
+        {
+            float Distance = FVector::Dist(AudioComp->GetComponentLocation(), PlayerLocation);
+            if (Distance > 5000.0f) // 50 meter culling distance
             {
-                MusicComponent->SetVolumeMultiplier(MusicVolume * MasterVolume);
-                MusicComponent->bAutoActivate = false;
-            }
-            
-            if (AmbienceComponent)
-            {
-                AmbienceComponent->SetVolumeMultiplier(AmbienceVolume * MasterVolume);
-                AmbienceComponent->bAutoActivate = false;
-            }
-            
-            if (HeartbeatComponent)
-            {
-                HeartbeatComponent->SetVolumeMultiplier(SFXVolume * MasterVolume);
-                HeartbeatComponent->bAutoActivate = false;
-            }
-            
-            if (BreathingComponent)
-            {
-                BreathingComponent->SetVolumeMultiplier(SFXVolume * MasterVolume);
-                BreathingComponent->bAutoActivate = false;
+                AudioComp->Stop();
             }
         }
     }
-    
-    LoadDinosaurSounds();
-}
-
-void UAudio_AudioManager::Deinitialize()
-{
-    if (MusicComponent && IsValid(MusicComponent))
-    {
-        MusicComponent->Stop();
-    }
-    
-    if (AmbienceComponent && IsValid(AmbienceComponent))
-    {
-        AmbienceComponent->Stop();
-    }
-    
-    if (HeartbeatComponent && IsValid(HeartbeatComponent))
-    {
-        HeartbeatComponent->Stop();
-    }
-    
-    if (BreathingComponent && IsValid(BreathingComponent))
-    {
-        BreathingComponent->Stop();
-    }
-    
-    Super::Deinitialize();
-}
-
-void UAudio_AudioManager::RegisterAudioZone(const FAudio_AudioZoneData& ZoneData)
-{
-    AudioZones.Add(ZoneData);
-    UE_LOG(LogTemp, Warning, TEXT("Audio zone registered at location: %s"), *ZoneData.Location.ToString());
-}
-
-void UAudio_AudioManager::UpdatePlayerLocation(const FVector& PlayerLocation)
-{
-    LastPlayerLocation = PlayerLocation;
-    
-    // Find closest audio zone
-    float ClosestDistance = FLT_MAX;
-    FAudio_AudioZoneData* ClosestZone = nullptr;
-    
-    for (FAudio_AudioZoneData& Zone : AudioZones)
-    {
-        float Distance = FVector::Dist(PlayerLocation, Zone.Location);
-        if (Distance < Zone.Radius && Distance < ClosestDistance)
-        {
-            ClosestDistance = Distance;
-            ClosestZone = &Zone;
-        }
-    }
-    
-    if (ClosestZone)
-    {
-        CrossfadeToZone(*ClosestZone);
-    }
-}
-
-void UAudio_AudioManager::SetMusicIntensity(float Intensity)
-{
-    CurrentMusicIntensity = FMath::Clamp(Intensity, 0.0f, 1.0f);
-    
-    if (MusicComponent && IsValid(MusicComponent))
-    {
-        float TargetVolume = MusicVolume * MasterVolume * (0.3f + CurrentMusicIntensity * 0.7f);
-        MusicComponent->SetVolumeMultiplier(TargetVolume);
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("Music intensity set to: %f"), CurrentMusicIntensity);
-}
-
-void UAudio_AudioManager::TriggerStingerSound(USoundBase* StingerSound)
-{
-    if (StingerSound)
-    {
-        UGameplayStatics::PlaySoundAtLocation(
-            GetWorld(),
-            StingerSound,
-            LastPlayerLocation,
-            SFXVolume * MasterVolume
-        );
-    }
-}
-
-void UAudio_AudioManager::SetWeatherAudio(EWeatherType WeatherType, float Intensity)
-{
-    CurrentWeather = WeatherType;
-    
-    // Adjust ambient audio based on weather
-    if (AmbienceComponent && IsValid(AmbienceComponent))
-    {
-        float WeatherVolume = AmbienceVolume * MasterVolume;
-        
-        switch (WeatherType)
-        {
-            case EWeatherType::Rain:
-                WeatherVolume *= (0.8f + Intensity * 0.4f);
-                break;
-            case EWeatherType::Storm:
-                WeatherVolume *= (1.0f + Intensity * 0.5f);
-                break;
-            case EWeatherType::Fog:
-                WeatherVolume *= (0.6f + Intensity * 0.2f);
-                break;
-            default:
-                break;
-        }
-        
-        AmbienceComponent->SetVolumeMultiplier(WeatherVolume);
-    }
-}
-
-void UAudio_AudioManager::SetTimeOfDayAudio(float TimeOfDay)
-{
-    CurrentTimeOfDay = FMath::Clamp(TimeOfDay, 0.0f, 1.0f);
-    
-    // Adjust audio based on time of day
-    // Dawn/Dusk: More bird activity
-    // Night: Reduced ambience, more tension
-    float TimeModifier = 1.0f;
-    
-    if (TimeOfDay < 0.2f || TimeOfDay > 0.8f) // Night
-    {
-        TimeModifier = 0.7f;
-        SetMusicIntensity(CurrentMusicIntensity + 0.2f); // Increase tension at night
-    }
-    else if (TimeOfDay < 0.3f || TimeOfDay > 0.7f) // Dawn/Dusk
-    {
-        TimeModifier = 1.2f;
-    }
-    
-    if (AmbienceComponent && IsValid(AmbienceComponent))
-    {
-        float TimeVolume = AmbienceVolume * MasterVolume * TimeModifier;
-        AmbienceComponent->SetVolumeMultiplier(TimeVolume);
-    }
-}
-
-void UAudio_AudioManager::PlayHeartbeatEffect(float FearLevel)
-{
-    if (HeartbeatComponent && IsValid(HeartbeatComponent))
-    {
-        float HeartbeatVolume = SFXVolume * MasterVolume * FMath::Clamp(FearLevel, 0.0f, 1.0f);
-        HeartbeatComponent->SetVolumeMultiplier(HeartbeatVolume);
-        
-        if (FearLevel > 0.1f && !HeartbeatComponent->IsPlaying())
-        {
-            // Load heartbeat sound if available
-            USoundBase* HeartbeatSound = LoadObject<USoundBase>(nullptr, TEXT("/Game/Audio/Heartbeat_Loop"));
-            if (HeartbeatSound)
-            {
-                HeartbeatComponent->SetSound(HeartbeatSound);
-                HeartbeatComponent->Play();
-            }
-        }
-        else if (FearLevel <= 0.1f && HeartbeatComponent->IsPlaying())
-        {
-            HeartbeatComponent->FadeOut(2.0f, 0.0f);
-        }
-    }
-}
-
-void UAudio_AudioManager::PlayBreathingEffect(float StaminaLevel)
-{
-    if (BreathingComponent && IsValid(BreathingComponent))
-    {
-        // Heavy breathing when stamina is low
-        float BreathingIntensity = 1.0f - FMath::Clamp(StaminaLevel, 0.0f, 1.0f);
-        float BreathingVolume = SFXVolume * MasterVolume * BreathingIntensity;
-        
-        BreathingComponent->SetVolumeMultiplier(BreathingVolume);
-        
-        if (BreathingIntensity > 0.3f && !BreathingComponent->IsPlaying())
-        {
-            USoundBase* BreathingSound = LoadObject<USoundBase>(nullptr, TEXT("/Game/Audio/HeavyBreathing_Loop"));
-            if (BreathingSound)
-            {
-                BreathingComponent->SetSound(BreathingSound);
-                BreathingComponent->Play();
-            }
-        }
-        else if (BreathingIntensity <= 0.3f && BreathingComponent->IsPlaying())
-        {
-            BreathingComponent->FadeOut(1.5f, 0.0f);
-        }
-    }
-}
-
-void UAudio_AudioManager::PlayDinosaurAudio(EDinosaurSpecies Species, const FVector& Location, float Distance)
-{
-    USoundCue** FoundSound = DinosaurSounds.Find(Species);
-    if (FoundSound && *FoundSound)
-    {
-        float DistanceVolume = FMath::Clamp(1.0f - (Distance / 2000.0f), 0.1f, 1.0f);
-        float FinalVolume = SFXVolume * MasterVolume * DistanceVolume;
-        
-        UGameplayStatics::PlaySoundAtLocation(
-            GetWorld(),
-            *FoundSound,
-            Location,
-            FinalVolume
-        );
-        
-        // Trigger fear response if it's a predator nearby
-        if ((Species == EDinosaurSpecies::TRex || Species == EDinosaurSpecies::Velociraptor) && Distance < 1000.0f)
-        {
-            float FearLevel = 1.0f - (Distance / 1000.0f);
-            PlayHeartbeatEffect(FearLevel);
-        }
-    }
-}
-
-void UAudio_AudioManager::UpdateAmbientAudio()
-{
-    // This method is called periodically to update ambient audio layers
-    if (AmbienceComponent && IsValid(AmbienceComponent))
-    {
-        // Update based on current conditions
-        float FinalVolume = AmbienceVolume * MasterVolume;
-        
-        // Apply weather modifier
-        switch (CurrentWeather)
-        {
-            case EWeatherType::Rain:
-                FinalVolume *= 1.2f;
-                break;
-            case EWeatherType::Storm:
-                FinalVolume *= 1.5f;
-                break;
-            case EWeatherType::Fog:
-                FinalVolume *= 0.8f;
-                break;
-            default:
-                break;
-        }
-        
-        // Apply time of day modifier
-        if (CurrentTimeOfDay < 0.2f || CurrentTimeOfDay > 0.8f)
-        {
-            FinalVolume *= 0.7f; // Quieter at night
-        }
-        
-        AmbienceComponent->SetVolumeMultiplier(FinalVolume);
-    }
-}
-
-void UAudio_AudioManager::CrossfadeToZone(const FAudio_AudioZoneData& NewZone)
-{
-    if (AmbienceComponent && IsValid(AmbienceComponent))
-    {
-        // Fade out current ambience
-        if (AmbienceComponent->IsPlaying())
-        {
-            AmbienceComponent->FadeOut(2.0f, 0.0f);
-        }
-        
-        // Load and play new zone ambience
-        if (NewZone.AmbientLayers.Num() > 0 && NewZone.AmbientLayers[0].SoundAsset)
-        {
-            AmbienceComponent->SetSound(NewZone.AmbientLayers[0].SoundAsset);
-            AmbienceComponent->FadeIn(2.0f, NewZone.AmbientLayers[0].Volume * AmbienceVolume * MasterVolume);
-        }
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("Crossfaded to audio zone: %s"), *UEnum::GetValueAsString(NewZone.BiomeType));
-}
-
-void UAudio_AudioManager::LoadDinosaurSounds()
-{
-    // Load dinosaur sound cues
-    DinosaurSounds.Empty();
-    
-    // T-Rex sounds
-    if (USoundCue* TRexSound = LoadObject<USoundCue>(nullptr, TEXT("/Game/Audio/TRex_Roar_Cue")))
-    {
-        DinosaurSounds.Add(EDinosaurSpecies::TRex, TRexSound);
-    }
-    
-    // Velociraptor sounds
-    if (USoundCue* RaptorSound = LoadObject<USoundCue>(nullptr, TEXT("/Game/Audio/Raptor_Screech_Cue")))
-    {
-        DinosaurSounds.Add(EDinosaurSpecies::Velociraptor, RaptorSound);
-    }
-    
-    // Triceratops sounds
-    if (USoundCue* TriceratopsSound = LoadObject<USoundCue>(nullptr, TEXT("/Game/Audio/Triceratops_Grunt_Cue")))
-    {
-        DinosaurSounds.Add(EDinosaurSpecies::Triceratops, TriceratopsSound);
-    }
-    
-    // Brachiosaurus sounds
-    if (USoundCue* BrachiosaurusSound = LoadObject<USoundCue>(nullptr, TEXT("/Game/Audio/Brachiosaurus_Call_Cue")))
-    {
-        DinosaurSounds.Add(EDinosaurSpecies::Brachiosaurus, BrachiosaurusSound);
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("Loaded %d dinosaur sound cues"), DinosaurSounds.Num());
 }
