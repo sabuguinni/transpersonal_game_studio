@@ -1,65 +1,137 @@
 #include "Char_TribalWarriorAsset.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Engine/Engine.h"
 
 UChar_TribalWarriorAsset::UChar_TribalWarriorAsset()
 {
-    // Default character appearance settings
-    HeightScale = 1.0f;
-    SkinTone = FLinearColor(0.8f, 0.6f, 0.4f, 1.0f); // Natural skin tone
-    HairColor = FLinearColor(0.2f, 0.15f, 0.1f, 1.0f); // Dark brown hair
-    
-    // Default behavior settings
-    AggressionLevel = 0.5f;
-    SocialRank = 0.5f;
-    
-    // Default character tags
-    CharacterTags.Add(FName("Tribal"));
-    CharacterTags.Add(FName("Warrior"));
-    CharacterTags.Add(FName("Human"));
+    // Initialize default values
+    bHasFacePaint = false;
+    bHasScars = false;
+    bHasTattoos = false;
+    WeatheringLevel = 0.5f;
+    bIsFemale = false;
 }
 
-bool UChar_TribalWarriorAsset::IsAssetValid() const
+void UChar_TribalWarriorAsset::ApplyToSkeletalMesh(USkeletalMeshComponent* MeshComponent)
 {
-    // Check if essential assets are assigned
-    bool bHasBodyMesh = !BodyMesh.IsNull();
-    bool bHasSkinMaterial = !SkinMaterial.IsNull();
-    bool bHasWeapon = !SpearMesh.IsNull() || !KnifeMesh.IsNull();
-    
-    return bHasBodyMesh && bHasSkinMaterial && bHasWeapon;
+    if (!MeshComponent)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("UChar_TribalWarriorAsset::ApplyToSkeletalMesh - Invalid MeshComponent"));
+        return;
+    }
+
+    // Apply the warrior mesh if available
+    if (WarriorMesh.IsValid())
+    {
+        USkeletalMesh* LoadedMesh = WarriorMesh.LoadSynchronous();
+        if (LoadedMesh)
+        {
+            MeshComponent->SetSkeletalMesh(LoadedMesh);
+            UE_LOG(LogTemp, Log, TEXT("Applied tribal warrior mesh to character"));
+        }
+    }
+
+    // Apply random skin material
+    UMaterialInterface* SkinMat = GetRandomSkinMaterial();
+    if (SkinMat)
+    {
+        MeshComponent->SetMaterial(0, SkinMat); // Assume slot 0 is skin
+        UE_LOG(LogTemp, Log, TEXT("Applied skin material to character"));
+    }
+
+    // Apply random clothing material
+    UMaterialInterface* ClothingMat = GetRandomClothingMaterial();
+    if (ClothingMat)
+    {
+        MeshComponent->SetMaterial(1, ClothingMat); // Assume slot 1 is clothing
+        UE_LOG(LogTemp, Log, TEXT("Applied clothing material to character"));
+    }
+
+    // Apply random jewelry material
+    UMaterialInterface* JewelryMat = GetRandomJewelryMaterial();
+    if (JewelryMat)
+    {
+        MeshComponent->SetMaterial(2, JewelryMat); // Assume slot 2 is jewelry
+        UE_LOG(LogTemp, Log, TEXT("Applied jewelry material to character"));
+    }
+
+    // Apply random tool material
+    UMaterialInterface* ToolMat = GetRandomToolMaterial();
+    if (ToolMat)
+    {
+        MeshComponent->SetMaterial(3, ToolMat); // Assume slot 3 is tools
+        UE_LOG(LogTemp, Log, TEXT("Applied tool material to character"));
+    }
 }
 
-TArray<FString> UChar_TribalWarriorAsset::GetMissingAssets() const
+UMaterialInterface* UChar_TribalWarriorAsset::GetRandomSkinMaterial() const
 {
-    TArray<FString> MissingAssets;
-    
-    if (BodyMesh.IsNull())
+    if (SkinMaterials.Num() == 0)
     {
-        MissingAssets.Add(TEXT("Body Mesh"));
+        return nullptr;
     }
+
+    int32 RandomIndex = FMath::RandRange(0, SkinMaterials.Num() - 1);
+    TSoftObjectPtr<UMaterialInterface> SoftMaterial = SkinMaterials[RandomIndex];
     
-    if (SkinMaterial.IsNull())
+    if (SoftMaterial.IsValid())
     {
-        MissingAssets.Add(TEXT("Skin Material"));
+        return SoftMaterial.LoadSynchronous();
     }
-    
-    if (ClothingMaterial.IsNull())
+
+    return nullptr;
+}
+
+UMaterialInterface* UChar_TribalWarriorAsset::GetRandomClothingMaterial() const
+{
+    if (ClothingMaterials.Num() == 0)
     {
-        MissingAssets.Add(TEXT("Clothing Material"));
+        return nullptr;
     }
+
+    int32 RandomIndex = FMath::RandRange(0, ClothingMaterials.Num() - 1);
+    TSoftObjectPtr<UMaterialInterface> SoftMaterial = ClothingMaterials[RandomIndex];
     
-    if (SpearMesh.IsNull())
+    if (SoftMaterial.IsValid())
     {
-        MissingAssets.Add(TEXT("Spear Mesh"));
+        return SoftMaterial.LoadSynchronous();
     }
-    
-    if (KnifeMesh.IsNull())
+
+    return nullptr;
+}
+
+UMaterialInterface* UChar_TribalWarriorAsset::GetRandomJewelryMaterial() const
+{
+    if (JewelryMaterials.Num() == 0)
     {
-        MissingAssets.Add(TEXT("Knife Mesh"));
+        return nullptr;
     }
+
+    int32 RandomIndex = FMath::RandRange(0, JewelryMaterials.Num() - 1);
+    TSoftObjectPtr<UMaterialInterface> SoftMaterial = JewelryMaterials[RandomIndex];
     
-    if (BoneNecklaceMesh.IsNull())
+    if (SoftMaterial.IsValid())
     {
-        MissingAssets.Add(TEXT("Bone Necklace Mesh"));
+        return SoftMaterial.LoadSynchronous();
     }
+
+    return nullptr;
+}
+
+UMaterialInterface* UChar_TribalWarriorAsset::GetRandomToolMaterial() const
+{
+    if (ToolMaterials.Num() == 0)
+    {
+        return nullptr;
+    }
+
+    int32 RandomIndex = FMath::RandRange(0, ToolMaterials.Num() - 1);
+    TSoftObjectPtr<UMaterialInterface> SoftMaterial = ToolMaterials[RandomIndex];
     
-    return MissingAssets;
+    if (SoftMaterial.IsValid())
+    {
+        return SoftMaterial.LoadSynchronous();
+    }
+
+    return nullptr;
 }
