@@ -1,214 +1,258 @@
 #include "Arch_StructuralIntegritySystem.h"
-#include "Engine/Engine.h"
+#include "Engine/World.h"
+#include "TimerManager.h"
 #include "Components/StaticMeshComponent.h"
-#include "GameFramework/Actor.h"
+#include "Materials/MaterialInterface.h"
+#include "Engine/Engine.h"
 
 UArch_StructuralIntegritySystem::UArch_StructuralIntegritySystem()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 1.0f; // Tick every second for performance
-
-    // Initialize default structural properties
-    StructuralProperties = FArch_StructuralProperties();
-    bAffectedByWeather = true;
-    bAffectedBySeismic = false;
-    MossGrowthRate = 0.05f;
-    CurrentMossLevel = 0.0f;
+    PrimaryComponentTick.TickInterval = 1.0f;
+    
+    // Initialize default values
+    StructuralData = FArch_StructuralData();
+    DegradationRate = 0.1f;
+    WeatherDamageMultiplier = 1.0f;
+    bEnableTimeDegradation = true;
+    bEnableWeatherDegradation = true;
+    bAutoUpdateMaterials = true;
+    
+    LastDegradationTime = 0.0f;
 }
 
 void UArch_StructuralIntegritySystem::BeginPlay()
 {
     Super::BeginPlay();
     
-    // Initialize weathering based on material type
-    UpdateWeatheringLevel();
+    InitializeMaterialArrays();
     
-    UE_LOG(LogTemp, Log, TEXT("Structural Integrity System initialized for %s"), 
-           GetOwner() ? *GetOwner()->GetName() : TEXT("Unknown"));
+    // Start degradation timer
+    if (bEnableTimeDegradation && GetWorld())
+    {
+        GetWorld()->GetTimerManager().SetTimer(
+            DegradationTimerHandle,
+            this,
+            &UArch_StructuralIntegritySystem::ProcessDegradation,
+            60.0f, // Process every minute
+            true
+        );
+    }
+    
+    // Initial visual update
+    UpdateVisualCondition();
 }
 
 void UArch_StructuralIntegritySystem::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-
-    if (bAffectedByWeather)
-    {
-        UpdateWeathering(DeltaTime);
-        UpdateMossGrowth(DeltaTime);
-    }
-
-    CheckForCollapse();
+    
+    // Check for structural failure
+    CheckStructuralFailure();
+    
+    // Update age
+    StructuralData.AgeInYears += DeltaTime / (365.0f * 24.0f * 3600.0f); // Convert seconds to years
 }
 
-void UArch_StructuralIntegritySystem::ApplyDamage(float DamageAmount, bool bIsSeismic)
+void UArch_StructuralIntegritySystem::ApplyDamage(float DamageAmount)
 {
-    if (DamageAmount <= 0.0f)
-        return;
-
-    // Apply material resistance
-    float MaterialMultiplier = GetMaterialWeatheringMultiplier();
-    float ActualDamage = DamageAmount * MaterialMultiplier;
-
-    // Seismic damage is more severe for certain materials
-    if (bIsSeismic && bAffectedBySeismic)
+    if (DamageAmount <= 0.0f) return;
+    
+    float PreviousIntegrity = StructuralData.IntegrityValue;
+    StructuralData.IntegrityValue = FMath::Clamp(StructuralData.IntegrityValue - DamageAmount, 0.0f, 100.0f);
+    
+    // Update condition based on new integrity
+    EArch_StructuralCondition NewCondition = GetConditionFromIntegrity(StructuralData.IntegrityValue);
+    if (NewCondition != StructuralData.Condition)
     {
-        if (StructuralProperties.Material == EArch_StructuralMaterial::Stone)
-        {
-            ActualDamage *= 0.5f; // Stone resists seismic better
-        }
-        else if (StructuralProperties.Material == EArch_StructuralMaterial::Wood)
-        {
-            ActualDamage *= 1.5f; // Wood is more vulnerable to seismic
-        }
+        StructuralData.Condition = NewCondition;
+        UpdateVisualCondition();
     }
-
-    StructuralProperties.CurrentIntegrity = FMath::Max(0.0f, 
-        StructuralProperties.CurrentIntegrity - ActualDamage);
-
-    UpdateWeatheringLevel();
-    UpdateVisualState();
-
-    UE_LOG(LogTemp, Warning, TEXT("Structure %s took %.1f damage, integrity now %.1f%%"), 
-           GetOwner() ? *GetOwner()->GetName() : TEXT("Unknown"),
-           ActualDamage, GetIntegrityPercentage());
+    
+    UE_LOG(LogTemp, Log, TEXT("Structure damaged: %.1f -> %.1f integrity"), PreviousIntegrity, StructuralData.IntegrityValue);
 }
 
 void UArch_StructuralIntegritySystem::RepairStructure(float RepairAmount)
 {
-    if (RepairAmount <= 0.0f)
-        return;
+    if (RepairAmount <= 0.0f) return;
+    
+    float PreviousIntegrity = StructuralData.IntegrityValue;
+    StructuralData.IntegrityValue = FMath::Clamp(StructuralData.IntegrityValue + RepairAmount, 0.0f, 100.0f);
+    
+    // Update condition based on new integrity
+    EArch_StructuralCondition NewCondition = GetConditionFromIntegrity(StructuralData.IntegrityValue);
+    if (NewCondition != StructuralData.Condition)
+    {
+        StructuralData.Condition = NewCondition;
+        UpdateVisualCondition();
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("Structure repaired: %.1f -> %.1f integrity"), PreviousIntegrity, StructuralData.IntegrityValue);
+}
 
-    StructuralProperties.CurrentIntegrity = FMath::Min(StructuralProperties.MaxIntegrity,
-        StructuralProperties.CurrentIntegrity + RepairAmount);
+bool UArch_StructuralIntegritySystem::CanSupportLoad(float AdditionalLoad) const
+{
+    if (!StructuralData.bIsLoadBearing) return true;
+    
+    float TotalLoad = StructuralData.CurrentLoad + AdditionalLoad;
+    float EffectiveMaxLoad = StructuralData.MaxLoad * (StructuralData.IntegrityValue / 100.0f);
+    
+    return TotalLoad <= EffectiveMaxLoad;
+}
 
-    UpdateWeatheringLevel();
-    UpdateVisualState();
+void UArch_StructuralIntegritySystem::AddLoad(float LoadAmount)
+{
+    if (!StructuralData.bIsLoadBearing || LoadAmount <= 0.0f) return;
+    
+    StructuralData.CurrentLoad += LoadAmount;
+    
+    // Check if overloaded
+    float EffectiveMaxLoad = StructuralData.MaxLoad * (StructuralData.IntegrityValue / 100.0f);
+    if (StructuralData.CurrentLoad > EffectiveMaxLoad)
+    {
+        float OverloadDamage = (StructuralData.CurrentLoad - EffectiveMaxLoad) * 0.1f;
+        ApplyDamage(OverloadDamage);
+        UE_LOG(LogTemp, Warning, TEXT("Structure overloaded! Applying %.1f damage"), OverloadDamage);
+    }
+}
 
-    UE_LOG(LogTemp, Log, TEXT("Structure %s repaired by %.1f, integrity now %.1f%%"), 
-           GetOwner() ? *GetOwner()->GetName() : TEXT("Unknown"),
-           RepairAmount, GetIntegrityPercentage());
+void UArch_StructuralIntegritySystem::RemoveLoad(float LoadAmount)
+{
+    if (!StructuralData.bIsLoadBearing || LoadAmount <= 0.0f) return;
+    
+    StructuralData.CurrentLoad = FMath::Max(0.0f, StructuralData.CurrentLoad - LoadAmount);
+}
+
+EArch_StructuralCondition UArch_StructuralIntegritySystem::GetConditionFromIntegrity(float Integrity) const
+{
+    if (Integrity >= 90.0f) return EArch_StructuralCondition::Pristine;
+    if (Integrity >= 75.0f) return EArch_StructuralCondition::Good;
+    if (Integrity >= 50.0f) return EArch_StructuralCondition::Weathered;
+    if (Integrity >= 25.0f) return EArch_StructuralCondition::Damaged;
+    if (Integrity >= 10.0f) return EArch_StructuralCondition::Crumbling;
+    return EArch_StructuralCondition::Ruined;
+}
+
+void UArch_StructuralIntegritySystem::UpdateVisualCondition()
+{
+    if (!bAutoUpdateMaterials) return;
+    
+    UpdateMaterialBasedOnCondition();
 }
 
 bool UArch_StructuralIntegritySystem::IsStructureStable() const
 {
-    return StructuralProperties.CurrentIntegrity > StructuralProperties.CollapseThreshold;
+    return StructuralData.IntegrityValue > 10.0f && 
+           StructuralData.Condition != EArch_StructuralCondition::Ruined;
 }
 
-float UArch_StructuralIntegritySystem::GetIntegrityPercentage() const
+void UArch_StructuralIntegritySystem::SetMaterialType(EArch_MaterialType NewMaterialType)
 {
-    if (StructuralProperties.MaxIntegrity <= 0.0f)
-        return 0.0f;
-
-    return (StructuralProperties.CurrentIntegrity / StructuralProperties.MaxIntegrity) * 100.0f;
-}
-
-void UArch_StructuralIntegritySystem::UpdateWeathering(float DeltaTime)
-{
-    if (StructuralProperties.WeatheringRate <= 0.0f)
-        return;
-
-    float WeatheringDamage = StructuralProperties.WeatheringRate * DeltaTime * GetMaterialWeatheringMultiplier();
+    StructuralData.MaterialType = NewMaterialType;
     
-    // Environmental factors
-    if (CurrentMossLevel > 0.5f)
+    // Update weather resistance based on material
+    switch (NewMaterialType)
     {
-        WeatheringDamage *= 1.2f; // Moss accelerates weathering
-    }
-
-    StructuralProperties.CurrentIntegrity = FMath::Max(0.0f,
-        StructuralProperties.CurrentIntegrity - WeatheringDamage);
-
-    UpdateWeatheringLevel();
-}
-
-void UArch_StructuralIntegritySystem::UpdateMossGrowth(float DeltaTime)
-{
-    if (MossGrowthRate <= 0.0f)
-        return;
-
-    // Moss grows faster on damaged structures
-    float GrowthMultiplier = 1.0f;
-    if (GetIntegrityPercentage() < 75.0f)
-    {
-        GrowthMultiplier = 1.5f;
-    }
-
-    CurrentMossLevel = FMath::Min(1.0f, CurrentMossLevel + (MossGrowthRate * DeltaTime * GrowthMultiplier));
-
-    // Update visual state when moss level changes significantly
-    static float LastMossLevel = 0.0f;
-    if (FMath::Abs(CurrentMossLevel - LastMossLevel) > 0.1f)
-    {
-        UpdateVisualState();
-        LastMossLevel = CurrentMossLevel;
+        case EArch_MaterialType::Stone:
+            StructuralData.WeatherResistance = 0.9f;
+            break;
+        case EArch_MaterialType::Wood:
+            StructuralData.WeatherResistance = 0.6f;
+            break;
+        case EArch_MaterialType::Bone:
+            StructuralData.WeatherResistance = 0.7f;
+            break;
+        case EArch_MaterialType::Clay:
+            StructuralData.WeatherResistance = 0.4f;
+            break;
+        case EArch_MaterialType::Hide:
+            StructuralData.WeatherResistance = 0.3f;
+            break;
+        case EArch_MaterialType::Thatch:
+            StructuralData.WeatherResistance = 0.2f;
+            break;
     }
 }
 
-void UArch_StructuralIntegritySystem::CheckForCollapse()
+void UArch_StructuralIntegritySystem::ProcessDegradation()
 {
-    if (!StructuralProperties.bCanCollapse)
-        return;
-
-    if (StructuralProperties.CurrentIntegrity <= StructuralProperties.CollapseThreshold)
+    if (!bEnableTimeDegradation) return;
+    
+    float DegradationAmount = GetMaterialDegradationRate() * DegradationRate;
+    
+    if (bEnableWeatherDegradation)
     {
-        if (StructuralProperties.WeatheringLevel != EArch_WeatheringLevel::Collapsed)
+        DegradationAmount *= GetWeatherImpact();
+    }
+    
+    ApplyDamage(DegradationAmount);
+    
+    UE_LOG(LogTemp, VeryVerbose, TEXT("Processed degradation: %.2f damage applied"), DegradationAmount);
+}
+
+void UArch_StructuralIntegritySystem::CheckStructuralFailure()
+{
+    if (StructuralData.IntegrityValue <= 0.0f && StructuralData.Condition != EArch_StructuralCondition::Ruined)
+    {
+        StructuralData.Condition = EArch_StructuralCondition::Ruined;
+        UpdateVisualCondition();
+        
+        UE_LOG(LogTemp, Warning, TEXT("Structure has completely failed!"));
+        
+        // Notify owner actor of structural failure
+        if (AActor* Owner = GetOwner())
         {
-            StructuralProperties.WeatheringLevel = EArch_WeatheringLevel::Collapsed;
-            OnStructureCollapsed();
-            
-            UE_LOG(LogTemp, Error, TEXT("Structure %s has collapsed!"), 
-                   GetOwner() ? *GetOwner()->GetName() : TEXT("Unknown"));
+            // Could trigger collapse effects, sound, particles, etc.
         }
     }
 }
 
-void UArch_StructuralIntegritySystem::UpdateWeatheringLevel()
+void UArch_StructuralIntegritySystem::UpdateMaterialBasedOnCondition()
 {
-    EArch_WeatheringLevel OldLevel = StructuralProperties.WeatheringLevel;
-    float IntegrityPercent = GetIntegrityPercentage();
-
-    if (IntegrityPercent > 90.0f)
+    if (ConditionMaterials.Num() == 0) return;
+    
+    // Find static mesh component to update
+    if (AActor* Owner = GetOwner())
     {
-        StructuralProperties.WeatheringLevel = EArch_WeatheringLevel::Pristine;
-    }
-    else if (IntegrityPercent > 70.0f)
-    {
-        StructuralProperties.WeatheringLevel = EArch_WeatheringLevel::Weathered;
-    }
-    else if (IntegrityPercent > 40.0f)
-    {
-        StructuralProperties.WeatheringLevel = EArch_WeatheringLevel::Damaged;
-    }
-    else if (IntegrityPercent > StructuralProperties.CollapseThreshold)
-    {
-        StructuralProperties.WeatheringLevel = EArch_WeatheringLevel::Ruined;
-    }
-    else
-    {
-        StructuralProperties.WeatheringLevel = EArch_WeatheringLevel::Collapsed;
-    }
-
-    if (OldLevel != StructuralProperties.WeatheringLevel)
-    {
-        OnWeatheringLevelChanged(StructuralProperties.WeatheringLevel);
+        UStaticMeshComponent* MeshComp = Owner->FindComponentByClass<UStaticMeshComponent>();
+        if (MeshComp && ConditionMaterials.IsValidIndex(static_cast<int32>(StructuralData.Condition)))
+        {
+            UMaterialInterface* NewMaterial = ConditionMaterials[static_cast<int32>(StructuralData.Condition)];
+            if (NewMaterial)
+            {
+                MeshComp->SetMaterial(0, NewMaterial);
+            }
+        }
     }
 }
 
-float UArch_StructuralIntegritySystem::GetMaterialWeatheringMultiplier() const
+float UArch_StructuralIntegritySystem::GetMaterialDegradationRate() const
 {
-    switch (StructuralProperties.Material)
+    switch (StructuralData.MaterialType)
     {
-        case EArch_StructuralMaterial::Stone:
-            return 0.3f; // Stone weathers slowly
-        case EArch_StructuralMaterial::Wood:
-            return 1.5f; // Wood weathers faster
-        case EArch_StructuralMaterial::Bone:
-            return 1.2f; // Bone weathers moderately
-        case EArch_StructuralMaterial::Clay:
-            return 2.0f; // Clay weathers quickly
-        case EArch_StructuralMaterial::Hide:
-            return 3.0f; // Hide degrades rapidly
-        default:
-            return 1.0f;
+        case EArch_MaterialType::Stone: return 0.1f;
+        case EArch_MaterialType::Wood: return 0.5f;
+        case EArch_MaterialType::Bone: return 0.3f;
+        case EArch_MaterialType::Clay: return 0.8f;
+        case EArch_MaterialType::Hide: return 1.2f;
+        case EArch_MaterialType::Thatch: return 1.5f;
+        default: return 0.5f;
+    }
+}
+
+float UArch_StructuralIntegritySystem::GetWeatherImpact() const
+{
+    // Base weather impact (could be enhanced with actual weather system)
+    float BaseWeatherDamage = 1.0f - StructuralData.WeatherResistance;
+    return BaseWeatherDamage * WeatherDamageMultiplier;
+}
+
+void UArch_StructuralIntegritySystem::InitializeMaterialArrays()
+{
+    // Initialize with default materials if empty
+    if (ConditionMaterials.Num() == 0)
+    {
+        ConditionMaterials.SetNum(6); // One for each condition state
+        // Materials will be set up in Blueprint or by other systems
     }
 }
