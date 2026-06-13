@@ -1,239 +1,213 @@
 #include "VFX_ParticleManager.h"
-#include "NiagaraFunctionLibrary.h"
-#include "Components/SceneComponent.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
+#include "TimerManager.h"
+#include "Kismet/GameplayStatics.h"
 
-AVFX_ParticleManager::AVFX_ParticleManager()
+UVFX_ParticleManager::UVFX_ParticleManager()
 {
-    PrimaryActorTick.bCanEverTick = false;
+    PrimaryComponentTick.bCanEverTick = true;
+    PrimaryComponentTick.TickInterval = 1.0f; // Check every second for cleanup
     
-    RootSceneComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootSceneComponent"));
-    RootComponent = RootSceneComponent;
-    
-    LoadDefaultParticleConfigs();
+    InitializeParticleDatabase();
 }
 
-void AVFX_ParticleManager::BeginPlay()
+void UVFX_ParticleManager::BeginPlay()
 {
     Super::BeginPlay();
-    InitializeParticleSystem();
+    
+    // Initialize particle database with default values
+    InitializeParticleDatabase();
+    
+    UE_LOG(LogTemp, Warning, TEXT("VFX_ParticleManager: Initialized with %d particle types"), ParticleDatabase.Num());
 }
 
-void AVFX_ParticleManager::LoadDefaultParticleConfigs()
+void UVFX_ParticleManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
-    ParticleConfigs.Empty();
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
     
-    // Campfire configuration
-    FVFX_ParticleConfig CampfireConfig;
-    CampfireConfig.ParticleType = EVFX_ParticleType::Campfire;
-    CampfireConfig.Intensity = 1.0f;
-    CampfireConfig.Duration = -1.0f; // Infinite
-    CampfireConfig.bAutoActivate = false;
-    ParticleConfigs.Add(CampfireConfig);
-    
-    // Dust cloud configuration
-    FVFX_ParticleConfig DustConfig;
-    DustConfig.ParticleType = EVFX_ParticleType::DustCloud;
-    DustConfig.Intensity = 0.8f;
-    DustConfig.Duration = 2.0f;
-    DustConfig.bAutoActivate = false;
-    ParticleConfigs.Add(DustConfig);
-    
-    // Blood splatter configuration
-    FVFX_ParticleConfig BloodConfig;
-    BloodConfig.ParticleType = EVFX_ParticleType::BloodSplatter;
-    BloodConfig.Intensity = 1.2f;
-    BloodConfig.Duration = 1.5f;
-    BloodConfig.bAutoActivate = false;
-    ParticleConfigs.Add(BloodConfig);
-    
-    // Rain drops configuration
-    FVFX_ParticleConfig RainConfig;
-    RainConfig.ParticleType = EVFX_ParticleType::RainDrops;
-    RainConfig.Intensity = 0.6f;
-    RainConfig.Duration = -1.0f; // Infinite
-    RainConfig.bAutoActivate = false;
-    ParticleConfigs.Add(RainConfig);
-    
-    // Breath vapor configuration
-    FVFX_ParticleConfig BreathConfig;
-    BreathConfig.ParticleType = EVFX_ParticleType::BreathVapor;
-    BreathConfig.Intensity = 0.4f;
-    BreathConfig.Duration = 3.0f;
-    BreathConfig.bAutoActivate = false;
-    ParticleConfigs.Add(BreathConfig);
-    
-    // Sparks configuration
-    FVFX_ParticleConfig SparksConfig;
-    SparksConfig.ParticleType = EVFX_ParticleType::Sparks;
-    SparksConfig.Intensity = 1.5f;
-    SparksConfig.Duration = 0.8f;
-    SparksConfig.bAutoActivate = false;
-    ParticleConfigs.Add(SparksConfig);
-    
-    // Insects configuration
-    FVFX_ParticleConfig InsectsConfig;
-    InsectsConfig.ParticleType = EVFX_ParticleType::Insects;
-    InsectsConfig.Intensity = 0.3f;
-    InsectsConfig.Duration = -1.0f; // Infinite
-    InsectsConfig.bAutoActivate = false;
-    ParticleConfigs.Add(InsectsConfig);
-    
-    // Water spray configuration
-    FVFX_ParticleConfig WaterConfig;
-    WaterConfig.ParticleType = EVFX_ParticleType::WaterSpray;
-    WaterConfig.Intensity = 1.1f;
-    WaterConfig.Duration = 2.5f;
-    WaterConfig.bAutoActivate = false;
-    ParticleConfigs.Add(WaterConfig);
+    // Cleanup expired particles every tick
+    RemoveNullParticles();
 }
 
-void AVFX_ParticleManager::InitializeParticleSystem()
+void UVFX_ParticleManager::InitializeParticleDatabase()
 {
-    ActiveParticles.Empty();
+    // Initialize all particle types with default data
+    // In production, these would reference actual Niagara assets
     
-    for (const FVFX_ParticleConfig& Config : ParticleConfigs)
+    FVFX_ParticleData CampfireData;
+    CampfireData.DefaultLifetime = -1.0f; // Persistent
+    CampfireData.bAutoDestroy = false;
+    CampfireData.DefaultScale = FVector(1.5f, 1.5f, 2.0f);
+    ParticleDatabase.Add(EVFX_ParticleType::Campfire, CampfireData);
+    
+    FVFX_ParticleData DustData;
+    DustData.DefaultLifetime = 3.0f;
+    DustData.bAutoDestroy = true;
+    DustData.DefaultScale = FVector(2.0f, 2.0f, 1.0f);
+    ParticleDatabase.Add(EVFX_ParticleType::DinosaurDust, DustData);
+    
+    FVFX_ParticleData BloodData;
+    BloodData.DefaultLifetime = 2.0f;
+    BloodData.bAutoDestroy = true;
+    BloodData.DefaultScale = FVector(1.0f, 1.0f, 1.0f);
+    ParticleDatabase.Add(EVFX_ParticleType::BloodSplatter, BloodData);
+    
+    FVFX_ParticleData WaterData;
+    WaterData.DefaultLifetime = 4.0f;
+    WaterData.bAutoDestroy = true;
+    WaterData.DefaultScale = FVector(1.5f, 1.5f, 1.5f);
+    ParticleDatabase.Add(EVFX_ParticleType::WaterSplash, WaterData);
+    
+    FVFX_ParticleData VaporData;
+    VaporData.DefaultLifetime = 2.5f;
+    VaporData.bAutoDestroy = true;
+    VaporData.DefaultScale = FVector(0.8f, 0.8f, 1.2f);
+    ParticleDatabase.Add(EVFX_ParticleType::BreathVapor, VaporData);
+    
+    FVFX_ParticleData RainData;
+    RainData.DefaultLifetime = -1.0f; // Persistent weather
+    RainData.bAutoDestroy = false;
+    RainData.DefaultScale = FVector(10.0f, 10.0f, 5.0f);
+    ParticleDatabase.Add(EVFX_ParticleType::WeatherRain, RainData);
+    
+    FVFX_ParticleData AshData;
+    AshData.DefaultLifetime = 15.0f;
+    AshData.bAutoDestroy = true;
+    AshData.DefaultScale = FVector(5.0f, 5.0f, 3.0f);
+    ParticleDatabase.Add(EVFX_ParticleType::VolcanicAsh, AshData);
+    
+    FVFX_ParticleData InsectData;
+    InsectData.DefaultLifetime = 8.0f;
+    InsectData.bAutoDestroy = true;
+    InsectData.DefaultScale = FVector(3.0f, 3.0f, 2.0f);
+    ParticleDatabase.Add(EVFX_ParticleType::InsectSwarm, InsectData);
+}
+
+UNiagaraComponent* UVFX_ParticleManager::SpawnParticleEffect(EVFX_ParticleType ParticleType, FVector Location, FRotator Rotation, FVector Scale)
+{
+    if (!ParticleDatabase.Contains(ParticleType))
     {
-        if (Config.bAutoActivate)
-        {
-            UNiagaraComponent* ParticleComponent = CreateParticleComponent(Config);
-            if (ParticleComponent)
-            {
-                ActiveParticles.Add(Config.ParticleType, ParticleComponent);
-            }
-        }
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("VFX_ParticleManager: Initialized with %d particle configs"), ParticleConfigs.Num());
-}
-
-UNiagaraComponent* AVFX_ParticleManager::CreateParticleComponent(const FVFX_ParticleConfig& Config)
-{
-    if (!Config.NiagaraSystem.IsValid())
-    {
-        UE_LOG(LogTemp, Warning, TEXT("VFX_ParticleManager: No Niagara system assigned for particle type %d"), (int32)Config.ParticleType);
+        UE_LOG(LogTemp, Error, TEXT("VFX_ParticleManager: Unknown particle type requested"));
         return nullptr;
     }
     
-    UNiagaraComponent* ParticleComponent = NewObject<UNiagaraComponent>(this);
+    const FVFX_ParticleData& ParticleData = ParticleDatabase[ParticleType];
+    
+    // For now, create a basic Niagara component without specific system
+    // In production, this would load the actual Niagara asset
+    UNiagaraComponent* ParticleComponent = UGameplayStatics::SpawnEmitterAtLocation(
+        GetWorld(),
+        nullptr, // Would be ParticleData.NiagaraSystem in production
+        Location,
+        Rotation,
+        Scale.IsZero() ? ParticleData.DefaultScale : Scale,
+        true // Auto destroy
+    );
+    
     if (ParticleComponent)
     {
-        ParticleComponent->SetAsset(Config.NiagaraSystem.Get());
-        ParticleComponent->AttachToComponent(RootComponent, FAttachmentTransformRules::KeepWorldTransform);
-        ParticleComponent->SetAutoActivate(Config.bAutoActivate);
+        ActiveParticles.Add(ParticleComponent);
         
-        // Set intensity parameter if supported
-        ParticleComponent->SetFloatParameter(TEXT("Intensity"), Config.Intensity);
-        
-        // Set duration if finite
-        if (Config.Duration > 0.0f)
-        {
-            ParticleComponent->SetFloatParameter(TEXT("Duration"), Config.Duration);
-        }
-        
-        return ParticleComponent;
-    }
-    
-    return nullptr;
-}
-
-void AVFX_ParticleManager::SpawnParticleEffect(EVFX_ParticleType ParticleType, FVector Location, FRotator Rotation, float CustomIntensity)
-{
-    // Find config for this particle type
-    const FVFX_ParticleConfig* Config = ParticleConfigs.FindByPredicate([ParticleType](const FVFX_ParticleConfig& Cfg)
-    {
-        return Cfg.ParticleType == ParticleType;
-    });
-    
-    if (!Config)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("VFX_ParticleManager: No config found for particle type %d"), (int32)ParticleType);
-        return;
-    }
-    
-    // Stop existing effect if active
-    StopParticleEffect(ParticleType);
-    
-    // Create new particle component
-    UNiagaraComponent* ParticleComponent = CreateParticleComponent(*Config);
-    if (ParticleComponent)
-    {
-        ParticleComponent->SetWorldLocationAndRotation(Location, Rotation);
-        ParticleComponent->SetFloatParameter(TEXT("Intensity"), CustomIntensity);
-        ParticleComponent->Activate();
-        
-        ActiveParticles.Add(ParticleType, ParticleComponent);
-        
-        // Auto-destroy finite duration effects
-        if (Config->Duration > 0.0f)
+        // Set auto-destroy timer if specified
+        if (ParticleData.bAutoDestroy && ParticleData.DefaultLifetime > 0.0f)
         {
             FTimerHandle TimerHandle;
-            GetWorld()->GetTimerManager().SetTimer(TimerHandle, [this, ParticleType]()
+            GetWorld()->GetTimerManager().SetTimer(TimerHandle, [ParticleComponent]()
             {
-                StopParticleEffect(ParticleType);
-            }, Config->Duration, false);
+                if (IsValid(ParticleComponent))
+                {
+                    ParticleComponent->DestroyComponent();
+                }
+            }, ParticleData.DefaultLifetime, false);
         }
         
-        UE_LOG(LogTemp, Log, TEXT("VFX_ParticleManager: Spawned particle effect %d at location %s"), (int32)ParticleType, *Location.ToString());
+        UE_LOG(LogTemp, Log, TEXT("VFX_ParticleManager: Spawned particle effect at location %s"), *Location.ToString());
     }
+    
+    return ParticleComponent;
 }
 
-void AVFX_ParticleManager::StopParticleEffect(EVFX_ParticleType ParticleType)
+void UVFX_ParticleManager::SpawnCampfireEffect(FVector Location)
 {
-    UNiagaraComponent** FoundComponent = ActiveParticles.Find(ParticleType);
-    if (FoundComponent && *FoundComponent)
-    {
-        (*FoundComponent)->Deactivate();
-        (*FoundComponent)->DestroyComponent();
-        ActiveParticles.Remove(ParticleType);
-        
-        UE_LOG(LogTemp, Log, TEXT("VFX_ParticleManager: Stopped particle effect %d"), (int32)ParticleType);
-    }
+    SpawnParticleEffect(EVFX_ParticleType::Campfire, Location);
+    UE_LOG(LogTemp, Log, TEXT("VFX_ParticleManager: Campfire effect spawned at %s"), *Location.ToString());
 }
 
-void AVFX_ParticleManager::StopAllParticleEffects()
+void UVFX_ParticleManager::SpawnDinosaurDustEffect(FVector Location, FVector Direction)
 {
-    for (auto& ParticlePair : ActiveParticles)
+    FRotator DustRotation = Direction.Rotation();
+    SpawnParticleEffect(EVFX_ParticleType::DinosaurDust, Location, DustRotation);
+    UE_LOG(LogTemp, Log, TEXT("VFX_ParticleManager: Dinosaur dust effect spawned"));
+}
+
+void UVFX_ParticleManager::SpawnBloodSplatterEffect(FVector Location, FVector ImpactDirection)
+{
+    FRotator BloodRotation = ImpactDirection.Rotation();
+    SpawnParticleEffect(EVFX_ParticleType::BloodSplatter, Location, BloodRotation);
+    UE_LOG(LogTemp, Log, TEXT("VFX_ParticleManager: Blood splatter effect spawned"));
+}
+
+void UVFX_ParticleManager::SpawnWaterSplashEffect(FVector Location, float Intensity)
+{
+    FVector SplashScale = FVector(Intensity, Intensity, Intensity);
+    SpawnParticleEffect(EVFX_ParticleType::WaterSplash, Location, FRotator::ZeroRotator, SplashScale);
+    UE_LOG(LogTemp, Log, TEXT("VFX_ParticleManager: Water splash effect spawned with intensity %f"), Intensity);
+}
+
+void UVFX_ParticleManager::SpawnBreathVaporEffect(FVector Location, FVector Direction)
+{
+    FRotator VaporRotation = Direction.Rotation();
+    SpawnParticleEffect(EVFX_ParticleType::BreathVapor, Location, VaporRotation);
+}
+
+void UVFX_ParticleManager::SpawnWeatherRainEffect(FVector Location, float Intensity)
+{
+    FVector RainScale = FVector(Intensity * 10.0f, Intensity * 10.0f, Intensity * 5.0f);
+    SpawnParticleEffect(EVFX_ParticleType::WeatherRain, Location, FRotator::ZeroRotator, RainScale);
+    UE_LOG(LogTemp, Log, TEXT("VFX_ParticleManager: Weather rain effect spawned"));
+}
+
+void UVFX_ParticleManager::SpawnVolcanicAshEffect(FVector Location, FVector WindDirection)
+{
+    FRotator AshRotation = WindDirection.Rotation();
+    SpawnParticleEffect(EVFX_ParticleType::VolcanicAsh, Location, AshRotation);
+}
+
+void UVFX_ParticleManager::SpawnInsectSwarmEffect(FVector Location, float SwarmSize)
+{
+    FVector SwarmScale = FVector(SwarmSize * 3.0f, SwarmSize * 3.0f, SwarmSize * 2.0f);
+    SpawnParticleEffect(EVFX_ParticleType::InsectSwarm, Location, FRotator::ZeroRotator, SwarmScale);
+}
+
+void UVFX_ParticleManager::CleanupExpiredParticles()
+{
+    RemoveNullParticles();
+    UE_LOG(LogTemp, Log, TEXT("VFX_ParticleManager: Cleanup completed, %d active particles remaining"), ActiveParticles.Num());
+}
+
+void UVFX_ParticleManager::StopAllParticleEffects()
+{
+    for (UNiagaraComponent* Particle : ActiveParticles)
     {
-        if (ParticlePair.Value)
+        if (IsValid(Particle))
         {
-            ParticlePair.Value->Deactivate();
-            ParticlePair.Value->DestroyComponent();
+            Particle->DestroyComponent();
         }
     }
-    
     ActiveParticles.Empty();
-    UE_LOG(LogTemp, Log, TEXT("VFX_ParticleManager: Stopped all particle effects"));
+    UE_LOG(LogTemp, Warning, TEXT("VFX_ParticleManager: All particle effects stopped"));
 }
 
-bool AVFX_ParticleManager::IsParticleEffectActive(EVFX_ParticleType ParticleType) const
+int32 UVFX_ParticleManager::GetActiveParticleCount() const
 {
-    UNiagaraComponent* const* FoundComponent = ActiveParticles.Find(ParticleType);
-    return FoundComponent && *FoundComponent && (*FoundComponent)->IsActive();
+    return ActiveParticles.Num();
 }
 
-void AVFX_ParticleManager::SetParticleIntensity(EVFX_ParticleType ParticleType, float NewIntensity)
+void UVFX_ParticleManager::RemoveNullParticles()
 {
-    UNiagaraComponent** FoundComponent = ActiveParticles.Find(ParticleType);
-    if (FoundComponent && *FoundComponent)
+    ActiveParticles.RemoveAll([](UNiagaraComponent* Particle)
     {
-        (*FoundComponent)->SetFloatParameter(TEXT("Intensity"), NewIntensity);
-        UE_LOG(LogTemp, Log, TEXT("VFX_ParticleManager: Set intensity %.2f for particle effect %d"), NewIntensity, (int32)ParticleType);
-    }
-}
-
-UNiagaraComponent* AVFX_ParticleManager::GetParticleComponent(EVFX_ParticleType ParticleType) const
-{
-    UNiagaraComponent* const* FoundComponent = ActiveParticles.Find(ParticleType);
-    return FoundComponent ? *FoundComponent : nullptr;
-}
-
-void AVFX_ParticleManager::RefreshParticleConfigs()
-{
-    StopAllParticleEffects();
-    LoadDefaultParticleConfigs();
-    InitializeParticleSystem();
-    
-    UE_LOG(LogTemp, Warning, TEXT("VFX_ParticleManager: Refreshed particle configurations"));
+        return !IsValid(Particle);
+    });
 }
