@@ -3,285 +3,215 @@
 #include "Engine/StaticMesh.h"
 #include "Materials/MaterialInterface.h"
 #include "Components/StaticMeshComponent.h"
+#include "Engine/World.h"
+#include "Kismet/GameplayStatics.h"
 
-AArch_CretaceousStructure::AArch_CretaceousStructure()
+UArch_CretaceousStructureSystem::UArch_CretaceousStructureSystem()
 {
-    PrimaryActorTick.bCanEverTick = true;
-
-    // Create root component
-    RootSceneComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootSceneComponent"));
-    RootComponent = RootSceneComponent;
-
-    // Create main structure mesh
-    MainStructureMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("MainStructureMesh"));
-    MainStructureMesh->SetupAttachment(RootComponent);
-
-    // Create support beams mesh
-    SupportBeamsMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("SupportBeamsMesh"));
-    SupportBeamsMesh->SetupAttachment(RootComponent);
-
-    // Create roof mesh
-    RoofMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("RoofMesh"));
-    RoofMesh->SetupAttachment(RootComponent);
-
-    // Initialize default structure config
-    StructureConfig.StructureType = EArch_StructureType::ShelterBasic;
-    StructureConfig.PrimaryMaterial = EArch_BuildMaterial::Wood;
-    StructureConfig.StructuralIntegrity = 100.0f;
-    StructureConfig.WeatherResistance = 50.0f;
-    StructureConfig.MaxOccupants = 2;
-    StructureConfig.bProvidesShelter = true;
-    StructureConfig.bProvidesStorage = false;
-    StructureConfig.bProvidesWarmth = false;
-
-    // Initialize state
-    CurrentIntegrity = StructureConfig.StructuralIntegrity;
-    DamageAccumulated = 0.0f;
-    bIsOccupied = false;
-    CurrentOccupants = 0;
+    PrimaryComponentTick.bCanEverTick = true;
+    PrimaryComponentTick.TickInterval = 1.0f; // Tick every second for weathering
+    
+    StructureConfig = FArch_StructureConfig();
+    WeatheringRate = 0.1f;
+    bEnableWeathering = true;
+    WeatheringTimer = 0.0f;
 }
 
-void AArch_CretaceousStructure::BeginPlay()
+void UArch_CretaceousStructureSystem::BeginPlay()
 {
     Super::BeginPlay();
     
-    InitializeStructureComponents();
-    ApplyMaterialBasedProperties();
-    UpdateStructureMeshes();
-}
-
-void AArch_CretaceousStructure::Tick(float DeltaTime)
-{
-    Super::Tick(DeltaTime);
-
-    // Apply gradual weather damage over time
-    if (CurrentIntegrity > 0.0f)
-    {
-        float WeatherDamageRate = (100.0f - StructureConfig.WeatherResistance) * 0.001f; // Base damage per second
-        ApplyWeatherDamage(WeatherDamageRate * DeltaTime);
-    }
-
-    // Check for structure collapse
-    if (CurrentIntegrity <= 0.0f && bIsOccupied)
-    {
-        SetOccupancy(0);
-        OnStructureDestroyed();
-    }
-}
-
-void AArch_CretaceousStructure::ApplyWeatherDamage(float DamageAmount)
-{
-    if (DamageAmount <= 0.0f) return;
-
-    DamageAccumulated += DamageAmount;
-    CurrentIntegrity = FMath::Max(0.0f, CurrentIntegrity - DamageAmount);
-
-    // Update visual state based on damage
-    if (CurrentIntegrity < StructureConfig.StructuralIntegrity * 0.5f)
-    {
-        // Structure is heavily damaged - could trigger visual effects
-        UpdateStructureMeshes();
-    }
-}
-
-void AArch_CretaceousStructure::RepairStructure(float RepairAmount)
-{
-    if (RepairAmount <= 0.0f) return;
-
-    CurrentIntegrity = FMath::Min(StructureConfig.StructuralIntegrity, CurrentIntegrity + RepairAmount);
-    DamageAccumulated = FMath::Max(0.0f, DamageAccumulated - RepairAmount);
-
-    UpdateStructureMeshes();
-}
-
-bool AArch_CretaceousStructure::CanAccommodateOccupants(int32 NumOccupants) const
-{
-    if (CurrentIntegrity <= 0.0f) return false;
-    if (NumOccupants <= 0) return true;
+    CreateStructureComponents();
     
-    return (CurrentOccupants + NumOccupants) <= StructureConfig.MaxOccupants;
-}
-
-void AArch_CretaceousStructure::SetOccupancy(int32 NumOccupants)
-{
-    int32 PreviousOccupants = CurrentOccupants;
-    CurrentOccupants = FMath::Clamp(NumOccupants, 0, StructureConfig.MaxOccupants);
-    bIsOccupied = (CurrentOccupants > 0);
-
-    if (PreviousOccupants != CurrentOccupants)
-    {
-        OnOccupancyChanged(CurrentOccupants);
-    }
-}
-
-float AArch_CretaceousStructure::GetShelterEffectiveness() const
-{
-    if (CurrentIntegrity <= 0.0f) return 0.0f;
-
-    float BaseEffectiveness = 1.0f;
+    // Initialize interior spawn points based on structure type
+    InteriorSpawnPoints.Empty();
+    FVector Center = GetOwner()->GetActorLocation();
     
-    // Reduce effectiveness based on damage
-    float IntegrityRatio = CurrentIntegrity / StructureConfig.StructuralIntegrity;
-    BaseEffectiveness *= IntegrityRatio;
-
-    // Material-based effectiveness
-    switch (StructureConfig.PrimaryMaterial)
-    {
-        case EArch_BuildMaterial::Stone:
-            BaseEffectiveness *= 1.2f; // Stone provides better shelter
-            break;
-        case EArch_BuildMaterial::Wood:
-            BaseEffectiveness *= 1.0f; // Wood is baseline
-            break;
-        case EArch_BuildMaterial::Mud:
-            BaseEffectiveness *= 0.8f; // Mud is less effective
-            break;
-        case EArch_BuildMaterial::Hide:
-            BaseEffectiveness *= 0.9f; // Hide is decent but not great
-            break;
-        case EArch_BuildMaterial::Thatch:
-            BaseEffectiveness *= 0.7f; // Thatch is basic
-            break;
-        default:
-            break;
-    }
-
-    // Weather resistance affects shelter effectiveness
-    BaseEffectiveness *= (StructureConfig.WeatherResistance / 100.0f);
-
-    return FMath::Clamp(BaseEffectiveness, 0.0f, 1.5f);
-}
-
-void AArch_CretaceousStructure::UpdateStructureMeshes()
-{
-    if (!MainStructureMesh) return;
-
-    // Get appropriate mesh based on structure type and material
-    UStaticMesh* NewMesh = GetMeshForStructureType();
-    if (NewMesh && MainStructureMesh->GetStaticMesh() != NewMesh)
-    {
-        MainStructureMesh->SetStaticMesh(NewMesh);
-    }
-
-    // Update material based on primary material and damage state
-    UStaticMesh* MaterialMesh = GetMeshForMaterial(StructureConfig.PrimaryMaterial);
-    if (MaterialMesh && SupportBeamsMesh)
-    {
-        SupportBeamsMesh->SetStaticMesh(MaterialMesh);
-    }
-
-    // Adjust mesh opacity/color based on damage
-    float IntegrityRatio = CurrentIntegrity / StructureConfig.StructuralIntegrity;
-    if (IntegrityRatio < 0.5f)
-    {
-        // Structure is heavily damaged - could apply damaged material
-        // This would typically involve material parameter collection updates
-    }
-}
-
-void AArch_CretaceousStructure::InitializeStructureComponents()
-{
-    if (!MainStructureMesh || !SupportBeamsMesh || !RoofMesh) return;
-
-    // Set collision for main structure
-    MainStructureMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-    MainStructureMesh->SetCollisionObjectType(ECollisionChannel::ECC_WorldStatic);
-    MainStructureMesh->SetCollisionResponseToAllChannels(ECollisionResponse::ECR_Block);
-
-    // Support beams typically don't need collision
-    SupportBeamsMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-    
-    // Roof might need collision for weather protection
-    RoofMesh->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
-    RoofMesh->SetCollisionObjectType(ECollisionChannel::ECC_WorldStatic);
-}
-
-void AArch_CretaceousStructure::ApplyMaterialBasedProperties()
-{
-    // Adjust structure properties based on primary material
-    switch (StructureConfig.PrimaryMaterial)
-    {
-        case EArch_BuildMaterial::Stone:
-            StructureConfig.StructuralIntegrity = FMath::Max(StructureConfig.StructuralIntegrity, 150.0f);
-            StructureConfig.WeatherResistance = FMath::Max(StructureConfig.WeatherResistance, 80.0f);
-            break;
-            
-        case EArch_BuildMaterial::Wood:
-            StructureConfig.StructuralIntegrity = FMath::Max(StructureConfig.StructuralIntegrity, 100.0f);
-            StructureConfig.WeatherResistance = FMath::Max(StructureConfig.WeatherResistance, 60.0f);
-            break;
-            
-        case EArch_BuildMaterial::Mud:
-            StructureConfig.StructuralIntegrity = FMath::Max(StructureConfig.StructuralIntegrity, 70.0f);
-            StructureConfig.WeatherResistance = FMath::Max(StructureConfig.WeatherResistance, 40.0f);
-            break;
-            
-        case EArch_BuildMaterial::Hide:
-            StructureConfig.StructuralIntegrity = FMath::Max(StructureConfig.StructuralIntegrity, 60.0f);
-            StructureConfig.WeatherResistance = FMath::Max(StructureConfig.WeatherResistance, 70.0f);
-            break;
-            
-        case EArch_BuildMaterial::Thatch:
-            StructureConfig.StructuralIntegrity = FMath::Max(StructureConfig.StructuralIntegrity, 50.0f);
-            StructureConfig.WeatherResistance = FMath::Max(StructureConfig.WeatherResistance, 30.0f);
-            break;
-            
-        default:
-            break;
-    }
-
-    // Update current integrity to match new structural integrity
-    CurrentIntegrity = StructureConfig.StructuralIntegrity;
-}
-
-void AArch_CretaceousStructure::CalculateWeatherResistance()
-{
-    float BaseResistance = 50.0f;
-    
-    // Material contributes to weather resistance
-    switch (StructureConfig.PrimaryMaterial)
-    {
-        case EArch_BuildMaterial::Stone:
-            BaseResistance += 30.0f;
-            break;
-        case EArch_BuildMaterial::Wood:
-            BaseResistance += 10.0f;
-            break;
-        case EArch_BuildMaterial::Hide:
-            BaseResistance += 20.0f;
-            break;
-        default:
-            break;
-    }
-
-    // Structure type affects weather resistance
     switch (StructureConfig.StructureType)
     {
-        case EArch_StructureType::ShelterAdvanced:
-            BaseResistance += 20.0f;
+        case EArch_StructureType::StoneDwelling:
+            InteriorSpawnPoints.Add(Center + FVector(0, 0, 50));
+            InteriorSpawnPoints.Add(Center + FVector(100, 100, 50));
+            InteriorSpawnPoints.Add(Center + FVector(-100, 100, 50));
+            break;
+        case EArch_StructureType::RockShelter:
+            InteriorSpawnPoints.Add(Center + FVector(0, -150, 50));
             break;
         case EArch_StructureType::CaveEntrance:
-            BaseResistance += 40.0f; // Caves are naturally weather-resistant
+            InteriorSpawnPoints.Add(Center + FVector(0, -200, 50));
+            InteriorSpawnPoints.Add(Center + FVector(0, -400, 50));
             break;
         default:
+            InteriorSpawnPoints.Add(Center + FVector(0, 0, 50));
             break;
     }
-
-    StructureConfig.WeatherResistance = FMath::Clamp(BaseResistance, 0.0f, 100.0f);
 }
 
-UStaticMesh* AArch_CretaceousStructure::GetMeshForStructureType() const
+void UArch_CretaceousStructureSystem::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
-    // In a real implementation, this would load specific meshes based on structure type
-    // For now, return nullptr and let the designer set meshes manually
-    // This would typically use LoadObject<UStaticMesh> with specific asset paths
-    return nullptr;
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+    
+    if (bEnableWeathering && StructureConfig.StructuralIntegrity > 0.0f)
+    {
+        WeatheringTimer += DeltaTime;
+        
+        // Apply weathering every 60 seconds
+        if (WeatheringTimer >= 60.0f)
+        {
+            ApplyWeathering(WeatheringRate);
+            WeatheringTimer = 0.0f;
+        }
+    }
 }
 
-UStaticMesh* AArch_CretaceousStructure::GetMeshForMaterial(EArch_BuildMaterial Material) const
+void UArch_CretaceousStructureSystem::InitializeStructure(const FArch_StructureConfig& Config)
 {
-    // In a real implementation, this would load material-specific meshes
-    // For now, return nullptr and let the designer set meshes manually
-    // This would typically use LoadObject<UStaticMesh> with specific asset paths
-    return nullptr;
+    StructureConfig = Config;
+    CreateStructureComponents();
+    UpdateMaterialsForWeathering();
+}
+
+void UArch_CretaceousStructureSystem::ApplyWeathering(float WeatheringAmount)
+{
+    StructureConfig.StructuralIntegrity = FMath::Clamp(
+        StructureConfig.StructuralIntegrity - WeatheringAmount, 
+        0.0f, 
+        100.0f
+    );
+    
+    // Update weathering level based on structural integrity
+    if (StructureConfig.StructuralIntegrity > 80.0f)
+        StructureConfig.WeatheringLevel = EArch_WeatheringLevel::Fresh;
+    else if (StructureConfig.StructuralIntegrity > 60.0f)
+        StructureConfig.WeatheringLevel = EArch_WeatheringLevel::Aged;
+    else if (StructureConfig.StructuralIntegrity > 40.0f)
+        StructureConfig.WeatheringLevel = EArch_WeatheringLevel::Weathered;
+    else if (StructureConfig.StructuralIntegrity > 20.0f)
+        StructureConfig.WeatheringLevel = EArch_WeatheringLevel::Ancient;
+    else
+        StructureConfig.WeatheringLevel = EArch_WeatheringLevel::Ruins;
+    
+    UpdateMaterialsForWeathering();
+    
+    UE_LOG(LogTemp, Log, TEXT("Structure weathering applied: Integrity %.1f%%, Level %d"), 
+           StructureConfig.StructuralIntegrity, (int32)StructureConfig.WeatheringLevel);
+}
+
+void UArch_CretaceousStructureSystem::SetStructureType(EArch_StructureType NewType)
+{
+    StructureConfig.StructureType = NewType;
+    CreateStructureComponents();
+}
+
+void UArch_CretaceousStructureSystem::RepairStructure(float RepairAmount)
+{
+    StructureConfig.StructuralIntegrity = FMath::Clamp(
+        StructureConfig.StructuralIntegrity + RepairAmount, 
+        0.0f, 
+        100.0f
+    );
+    
+    UpdateMaterialsForWeathering();
+}
+
+bool UArch_CretaceousStructureSystem::CanEnterInterior() const
+{
+    return StructureConfig.bHasInterior && StructureConfig.StructuralIntegrity > 10.0f;
+}
+
+TArray<FVector> UArch_CretaceousStructureSystem::GetInteriorSpawnPoints() const
+{
+    return InteriorSpawnPoints;
+}
+
+void UArch_CretaceousStructureSystem::CreateStructureComponents()
+{
+    // Clear existing components
+    for (UStaticMeshComponent* Component : StructureComponents)
+    {
+        if (IsValid(Component))
+        {
+            Component->DestroyComponent();
+        }
+    }
+    StructureComponents.Empty();
+    
+    // Create new structure based on type
+    UStaticMesh* StructureMesh = GetMeshForStructureType(StructureConfig.StructureType);
+    if (StructureMesh)
+    {
+        UStaticMeshComponent* MainComponent = NewObject<UStaticMeshComponent>(GetOwner());
+        MainComponent->SetStaticMesh(StructureMesh);
+        MainComponent->AttachToComponent(GetOwner()->GetRootComponent(), 
+                                       FAttachmentTransformRules::KeepWorldTransform);
+        MainComponent->RegisterComponent();
+        StructureComponents.Add(MainComponent);
+        
+        // Add additional components based on structure complexity
+        switch (StructureConfig.StructureType)
+        {
+            case EArch_StructureType::StoneDwelling:
+                // Add foundation stones
+                for (int32 i = 0; i < 8; i++)
+                {
+                    UStaticMeshComponent* Stone = NewObject<UStaticMeshComponent>(GetOwner());
+                    float Angle = (i * 45.0f) * PI / 180.0f;
+                    FVector StonePos = FVector(FMath::Cos(Angle) * 200.0f, FMath::Sin(Angle) * 200.0f, -50.0f);
+                    Stone->SetRelativeLocation(StonePos);
+                    Stone->AttachToComponent(MainComponent, FAttachmentTransformRules::KeepRelativeTransform);
+                    Stone->RegisterComponent();
+                    StructureComponents.Add(Stone);
+                }
+                break;
+            case EArch_StructureType::WoodPlatform:
+                // Add support beams
+                for (int32 i = 0; i < 4; i++)
+                {
+                    UStaticMeshComponent* Beam = NewObject<UStaticMeshComponent>(GetOwner());
+                    FVector BeamPos = FVector((i % 2) * 300.0f - 150.0f, (i / 2) * 300.0f - 150.0f, -100.0f);
+                    Beam->SetRelativeLocation(BeamPos);
+                    Beam->AttachToComponent(MainComponent, FAttachmentTransformRules::KeepRelativeTransform);
+                    Beam->RegisterComponent();
+                    StructureComponents.Add(Beam);
+                }
+                break;
+        }
+    }
+    
+    UpdateMaterialsForWeathering();
+}
+
+void UArch_CretaceousStructureSystem::UpdateMaterialsForWeathering()
+{
+    UMaterialInterface* WeatheringMaterial = GetMaterialForWeathering(StructureConfig.WeatheringLevel);
+    
+    for (UStaticMeshComponent* Component : StructureComponents)
+    {
+        if (IsValid(Component) && WeatheringMaterial)
+        {
+            Component->SetMaterial(0, WeatheringMaterial);
+        }
+    }
+}
+
+UStaticMesh* UArch_CretaceousStructureSystem::GetMeshForStructureType(EArch_StructureType Type)
+{
+    // Return basic cube mesh as placeholder - in production these would be proper assets
+    return LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube"));
+}
+
+UMaterialInterface* UArch_CretaceousStructureSystem::GetMaterialForWeathering(EArch_WeatheringLevel Level)
+{
+    // Return basic material as placeholder - in production these would be weathering materials
+    switch (Level)
+    {
+        case EArch_WeatheringLevel::Fresh:
+            return LoadObject<UMaterialInterface>(nullptr, TEXT("/Engine/BasicShapes/BasicShapeMaterial"));
+        case EArch_WeatheringLevel::Aged:
+        case EArch_WeatheringLevel::Weathered:
+        case EArch_WeatheringLevel::Ancient:
+        case EArch_WeatheringLevel::Ruins:
+        default:
+            return LoadObject<UMaterialInterface>(nullptr, TEXT("/Engine/BasicShapes/BasicShapeMaterial"));
+    }
 }
