@@ -1,23 +1,19 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/Engine.h"
-#include "Engine/World.h"
 #include "Components/ActorComponent.h"
+#include "Engine/StaticMeshActor.h"
 #include "Components/StaticMeshComponent.h"
-#include "Components/SkeletalMeshComponent.h"
-#include "Engine/StaticMesh.h"
-#include "Animation/SkeletalMeshActor.h"
 #include "Perf_LODController.generated.h"
 
 UENUM(BlueprintType)
 enum class EPerf_LODQuality : uint8
 {
-    Ultra          UMETA(DisplayName = "Ultra Quality"),
-    High           UMETA(DisplayName = "High Quality"),
-    Medium         UMETA(DisplayName = "Medium Quality"),
-    Low            UMETA(DisplayName = "Low Quality"),
-    Potato         UMETA(DisplayName = "Potato Quality")
+    Ultra = 0,
+    High = 1,
+    Medium = 2,
+    Low = 3,
+    Potato = 4
 };
 
 USTRUCT(BlueprintType)
@@ -25,37 +21,26 @@ struct TRANSPERSONALGAME_API FPerf_LODSettings
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
-    float LOD0Distance = 1000.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD Settings")
+    float NearDistance = 500.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
-    float LOD1Distance = 3000.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD Settings")
+    float MediumDistance = 1500.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
-    float LOD2Distance = 6000.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD Settings")
+    float FarDistance = 3000.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
-    float LOD3Distance = 10000.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD Settings")
+    float CullDistance = 5000.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
-    bool bEnableDistanceLOD = true;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD Settings")
+    EPerf_LODQuality QualityLevel = EPerf_LODQuality::Medium;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
-    bool bEnableScreenSizeLOD = true;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD Settings")
+    bool bEnableDistanceCulling = true;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
-    float MinScreenSize = 0.01f;
-
-    FPerf_LODSettings()
-    {
-        LOD0Distance = 1000.0f;
-        LOD1Distance = 3000.0f;
-        LOD2Distance = 6000.0f;
-        LOD3Distance = 10000.0f;
-        bEnableDistanceLOD = true;
-        bEnableScreenSizeLOD = true;
-        MinScreenSize = 0.01f;
-    }
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD Settings")
+    bool bEnableFrustumCulling = true;
 };
 
 USTRUCT(BlueprintType)
@@ -64,29 +49,22 @@ struct TRANSPERSONALGAME_API FPerf_MeshLODData
     GENERATED_BODY()
 
     UPROPERTY(BlueprintReadOnly, Category = "LOD Data")
-    TWeakObjectPtr<UStaticMeshComponent> StaticMeshComponent;
+    TWeakObjectPtr<UStaticMeshComponent> MeshComponent;
 
     UPROPERTY(BlueprintReadOnly, Category = "LOD Data")
-    TWeakObjectPtr<USkeletalMeshComponent> SkeletalMeshComponent;
+    float DistanceToPlayer = 0.0f;
 
     UPROPERTY(BlueprintReadOnly, Category = "LOD Data")
     int32 CurrentLODLevel = 0;
 
     UPROPERTY(BlueprintReadOnly, Category = "LOD Data")
-    float LastDistance = 0.0f;
+    bool bIsVisible = true;
 
     UPROPERTY(BlueprintReadOnly, Category = "LOD Data")
-    float LastScreenSize = 1.0f;
-
-    FPerf_MeshLODData()
-    {
-        CurrentLODLevel = 0;
-        LastDistance = 0.0f;
-        LastScreenSize = 1.0f;
-    }
+    bool bIsCulled = false;
 };
 
-UCLASS(BlueprintType, Blueprintable)
+UCLASS(ClassGroup=(Performance), meta=(BlueprintSpawnableComponent))
 class TRANSPERSONALGAME_API UPerf_LODController : public UActorComponent
 {
     GENERATED_BODY()
@@ -94,82 +72,62 @@ class TRANSPERSONALGAME_API UPerf_LODController : public UActorComponent
 public:
     UPerf_LODController();
 
-protected:
     virtual void BeginPlay() override;
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-public:
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD Settings")
+    UFUNCTION(BlueprintCallable, Category = "Performance LOD")
+    void SetLODSettings(const FPerf_LODSettings& NewSettings);
+
+    UFUNCTION(BlueprintCallable, Category = "Performance LOD")
+    FPerf_LODSettings GetLODSettings() const { return LODSettings; }
+
+    UFUNCTION(BlueprintCallable, Category = "Performance LOD")
+    void RegisterMeshComponent(UStaticMeshComponent* MeshComp);
+
+    UFUNCTION(BlueprintCallable, Category = "Performance LOD")
+    void UnregisterMeshComponent(UStaticMeshComponent* MeshComp);
+
+    UFUNCTION(BlueprintCallable, Category = "Performance LOD")
+    void UpdateLODForAllMeshes();
+
+    UFUNCTION(BlueprintCallable, Category = "Performance LOD")
+    void SetGlobalLODQuality(EPerf_LODQuality Quality);
+
+    UFUNCTION(BlueprintCallable, Category = "Performance LOD")
+    TArray<FPerf_MeshLODData> GetMeshLODData() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Performance LOD")
+    int32 GetVisibleMeshCount() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Performance LOD")
+    int32 GetCulledMeshCount() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Performance LOD")
+    void EnableLODSystem(bool bEnable);
+
+protected:
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD Controller")
     FPerf_LODSettings LODSettings;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD Settings")
-    EPerf_LODQuality QualityLevel = EPerf_LODQuality::High;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD Controller")
     float UpdateFrequency = 0.1f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 MaxMeshesPerFrame = 50;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD Controller")
+    bool bEnableLODSystem = true;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Statistics")
-    int32 TotalMeshes = 0;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD Controller")
+    bool bDebugDrawLOD = false;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Statistics")
-    int32 LOD0Meshes = 0;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Statistics")
-    int32 LOD1Meshes = 0;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Statistics")
-    int32 LOD2Meshes = 0;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Statistics")
-    int32 LOD3Meshes = 0;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Statistics")
-    float AverageTriangleReduction = 0.0f;
-
-    UFUNCTION(BlueprintCallable, Category = "LOD Control")
-    void UpdateLODLevels();
-
-    UFUNCTION(BlueprintCallable, Category = "LOD Control")
-    void SetQualityLevel(EPerf_LODQuality NewQuality);
-
-    UFUNCTION(BlueprintCallable, Category = "LOD Control")
-    void SetLODDistance(int32 LODLevel, float Distance);
-
-    UFUNCTION(BlueprintCallable, Category = "LOD Control")
-    void EnableDistanceLOD(bool bEnable);
-
-    UFUNCTION(BlueprintCallable, Category = "LOD Control")
-    void EnableScreenSizeLOD(bool bEnable);
-
-    UFUNCTION(BlueprintCallable, Category = "Statistics")
-    float GetTriangleReduction() const { return AverageTriangleReduction; }
-
-    UFUNCTION(BlueprintCallable, Category = "Statistics")
-    int32 GetMeshCountAtLOD(int32 LODLevel) const;
-
-    UFUNCTION(BlueprintCallable, Category = "LOD Control")
-    void ForceLODLevel(int32 LODLevel);
-
-    UFUNCTION(BlueprintCallable, Category = "LOD Control")
-    void ResetLODLevels();
+    UPROPERTY(BlueprintReadOnly, Category = "LOD Controller")
+    TArray<FPerf_MeshLODData> ManagedMeshes;
 
 private:
     float TimeSinceLastUpdate = 0.0f;
-    int32 CurrentMeshIndex = 0;
-    
-    UPROPERTY()
-    TArray<FPerf_MeshLODData> TrackedMeshes;
-    
-    void GatherMeshComponents();
-    void UpdateMeshLOD(FPerf_MeshLODData& MeshData);
-    int32 CalculateLODLevel(float Distance, float ScreenSize) const;
-    float CalculateScreenSize(const FVector& MeshLocation, const FVector& MeshBounds) const;
-    float GetDistanceToPlayer(const FVector& Location) const;
-    void ApplyLODToStaticMesh(UStaticMeshComponent* MeshComp, int32 LODLevel);
-    void ApplyLODToSkeletalMesh(USkeletalMeshComponent* MeshComp, int32 LODLevel);
-    void UpdateStatistics();
-    void ApplyQualitySettings();
+    TWeakObjectPtr<APawn> PlayerPawn;
+
+    void UpdateLODForMesh(FPerf_MeshLODData& MeshData);
+    int32 CalculateLODLevel(float Distance) const;
+    bool ShouldCullMesh(const FPerf_MeshLODData& MeshData) const;
+    void FindPlayerPawn();
+    void DebugDrawLODInfo();
 };
