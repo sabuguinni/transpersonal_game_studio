@@ -1,363 +1,246 @@
 #include "Audio_SystemManager.h"
 #include "Components/AudioComponent.h"
 #include "Sound/SoundCue.h"
-#include "Kismet/GameplayStatics.h"
 #include "Engine/World.h"
-#include "GameFramework/Pawn.h"
+#include "Kismet/GameplayStatics.h"
+#include "TimerManager.h"
 
-AAudio_SystemManager::AAudio_SystemManager()
+UAudio_SystemManager::UAudio_SystemManager()
 {
-    PrimaryActorTick.bCanEverTick = true;
-
-    // Create audio components
-    AmbientAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("AmbientAudio"));
-    RootComponent = AmbientAudioComponent;
-
-    NarrativeAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("NarrativeAudio"));
-    NarrativeAudioComponent->SetupAttachment(RootComponent);
-
-    EffectsAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("EffectsAudio"));
-    EffectsAudioComponent->SetupAttachment(RootComponent);
-
-    // Initialize default values
-    MasterVolume = 1.0f;
-    AmbientVolume = 0.7f;
-    NarrativeVolume = 1.0f;
-    EffectsVolume = 0.8f;
-    FadeTime = 2.0f;
-
-    CurrentAtmosphere = EAudio_AtmosphereType::Forest_Calm;
-    CurrentTensionLevel = 0.0f;
-    bIsNarrativePlaying = false;
-
-    LastPlayerLocation = FVector::ZeroVector;
-    TensionUpdateTimer = 0.0f;
-    CurrentTriggerZoneIndex = -1;
-
-    // Configure audio components
-    AmbientAudioComponent->bAutoActivate = true;
-    AmbientAudioComponent->SetVolumeMultiplier(AmbientVolume);
-
-    NarrativeAudioComponent->bAutoActivate = false;
-    NarrativeAudioComponent->SetVolumeMultiplier(NarrativeVolume);
-
-    EffectsAudioComponent->bAutoActivate = false;
-    EffectsAudioComponent->SetVolumeMultiplier(EffectsVolume);
+    CurrentBiome = EAudio_BiomeType::Forest;
+    CurrentThreatLevel = EAudio_ThreatLevel::Peaceful;
+    CurrentTimeOfDay = 0.5f; // Noon
 }
 
-void AAudio_SystemManager::BeginPlay()
+void UAudio_SystemManager::Initialize(FSubsystemCollectionBase& Collection)
 {
-    Super::BeginPlay();
+    Super::Initialize(Collection);
 
-    // Initialize default trigger zones and narrative clips
-    InitializeDefaultTriggerZones();
-    InitializeDefaultNarrativeClips();
-
-    // Start with forest calm atmosphere
-    SetAtmosphere(EAudio_AtmosphereType::Forest_Calm, false);
-}
-
-void AAudio_SystemManager::Tick(float DeltaTime)
-{
-    Super::Tick(DeltaTime);
-
-    // Update tension timer
-    TensionUpdateTimer += DeltaTime;
-
-    // Update audio state every 0.5 seconds
-    if (TensionUpdateTimer >= 0.5f)
+    // Initialize audio components
+    UWorld* World = GetWorld();
+    if (World)
     {
-        TensionUpdateTimer = 0.0f;
-
-        // Get player location
-        APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
-        if (PlayerPawn)
+        // Create ambient audio component
+        AmbientAudioComponent = NewObject<UAudioComponent>(this);
+        if (AmbientAudioComponent)
         {
-            FVector PlayerLocation = PlayerPawn->GetActorLocation();
-            UpdatePlayerLocation(PlayerLocation);
+            AmbientAudioComponent->bAutoActivate = false;
+            AmbientAudioComponent->SetVolumeMultiplier(0.5f);
+        }
+
+        // Create music audio component
+        MusicAudioComponent = NewObject<UAudioComponent>(this);
+        if (MusicAudioComponent)
+        {
+            MusicAudioComponent->bAutoActivate = false;
+            MusicAudioComponent->SetVolumeMultiplier(0.3f);
+        }
+
+        // Create threat audio component
+        ThreatAudioComponent = NewObject<UAudioComponent>(this);
+        if (ThreatAudioComponent)
+        {
+            ThreatAudioComponent->bAutoActivate = false;
+            ThreatAudioComponent->SetVolumeMultiplier(0.4f);
+        }
+
+        // Initialize default biome settings
+        FAudio_BiomeSettings ForestSettings;
+        ForestSettings.Volume = 0.5f;
+        ForestSettings.FadeInTime = 2.0f;
+        ForestSettings.FadeOutTime = 1.5f;
+        BiomeSettings.Add(EAudio_BiomeType::Forest, ForestSettings);
+
+        FAudio_BiomeSettings PlainsSettings;
+        PlainsSettings.Volume = 0.4f;
+        PlainsSettings.FadeInTime = 3.0f;
+        PlainsSettings.FadeOutTime = 2.0f;
+        BiomeSettings.Add(EAudio_BiomeType::Plains, PlainsSettings);
+
+        FAudio_BiomeSettings RiverSettings;
+        RiverSettings.Volume = 0.6f;
+        RiverSettings.FadeInTime = 1.5f;
+        RiverSettings.FadeOutTime = 1.0f;
+        BiomeSettings.Add(EAudio_BiomeType::River, RiverSettings);
+
+        // Initialize threat settings
+        FAudio_ThreatSettings PeacefulSettings;
+        PeacefulSettings.IntensityMultiplier = 0.5f;
+        PeacefulSettings.HeartbeatVolume = 0.0f;
+        ThreatSettings.Add(EAudio_ThreatLevel::Peaceful, PeacefulSettings);
+
+        FAudio_ThreatSettings DangerSettings;
+        DangerSettings.IntensityMultiplier = 1.5f;
+        DangerSettings.HeartbeatVolume = 0.3f;
+        ThreatSettings.Add(EAudio_ThreatLevel::Danger, DangerSettings);
+
+        FAudio_ThreatSettings CombatSettings;
+        CombatSettings.IntensityMultiplier = 2.0f;
+        CombatSettings.HeartbeatVolume = 0.5f;
+        ThreatSettings.Add(EAudio_ThreatLevel::Combat, CombatSettings);
+
+        UE_LOG(LogTemp, Log, TEXT("Audio System Manager initialized"));
+    }
+}
+
+void UAudio_SystemManager::Deinitialize()
+{
+    // Clean up audio components
+    if (AmbientAudioComponent)
+    {
+        AmbientAudioComponent->Stop();
+        AmbientAudioComponent = nullptr;
+    }
+
+    if (MusicAudioComponent)
+    {
+        MusicAudioComponent->Stop();
+        MusicAudioComponent = nullptr;
+    }
+
+    if (ThreatAudioComponent)
+    {
+        ThreatAudioComponent->Stop();
+        ThreatAudioComponent = nullptr;
+    }
+
+    RegisteredZones.Empty();
+
+    Super::Deinitialize();
+}
+
+void UAudio_SystemManager::SetCurrentBiome(EAudio_BiomeType NewBiome)
+{
+    if (CurrentBiome != NewBiome)
+    {
+        CurrentBiome = NewBiome;
+        UpdateAmbientAudio();
+        UE_LOG(LogTemp, Log, TEXT("Audio biome changed to: %d"), (int32)NewBiome);
+    }
+}
+
+void UAudio_SystemManager::SetThreatLevel(EAudio_ThreatLevel NewThreatLevel)
+{
+    if (CurrentThreatLevel != NewThreatLevel)
+    {
+        CurrentThreatLevel = NewThreatLevel;
+        UpdateThreatAudio();
+        UE_LOG(LogTemp, Log, TEXT("Threat level changed to: %d"), (int32)NewThreatLevel);
+    }
+}
+
+void UAudio_SystemManager::PlayFootstepSound(const FVector& Location, bool bIsHeavy)
+{
+    // Play footstep sound at location
+    UWorld* World = GetWorld();
+    if (World)
+    {
+        // TODO: Load appropriate footstep sound based on surface type and weight
+        // For now, just log the footstep
+        UE_LOG(LogTemp, Log, TEXT("Footstep at location: %s, Heavy: %s"), 
+               *Location.ToString(), bIsHeavy ? TEXT("Yes") : TEXT("No"));
+    }
+}
+
+void UAudio_SystemManager::PlayDinosaurSound(const FString& DinosaurType, const FVector& Location)
+{
+    UWorld* World = GetWorld();
+    if (World)
+    {
+        // TODO: Load and play dinosaur-specific sounds
+        UE_LOG(LogTemp, Log, TEXT("Dinosaur sound: %s at location: %s"), 
+               *DinosaurType, *Location.ToString());
+    }
+}
+
+void UAudio_SystemManager::SetTimeOfDay(float TimeRatio)
+{
+    CurrentTimeOfDay = FMath::Clamp(TimeRatio, 0.0f, 1.0f);
+    UpdateTimeBasedAudio();
+}
+
+void UAudio_SystemManager::RegisterAudioZone(class AAudio_Zone* Zone)
+{
+    if (Zone && !RegisteredZones.Contains(Zone))
+    {
+        RegisteredZones.Add(Zone);
+        UE_LOG(LogTemp, Log, TEXT("Audio zone registered"));
+    }
+}
+
+void UAudio_SystemManager::UnregisterAudioZone(class AAudio_Zone* Zone)
+{
+    if (Zone)
+    {
+        RegisteredZones.Remove(Zone);
+        UE_LOG(LogTemp, Log, TEXT("Audio zone unregistered"));
+    }
+}
+
+void UAudio_SystemManager::UpdateAmbientAudio()
+{
+    if (!AmbientAudioComponent)
+        return;
+
+    const FAudio_BiomeSettings* Settings = BiomeSettings.Find(CurrentBiome);
+    if (Settings)
+    {
+        // Fade out current audio
+        FadeAudioComponent(AmbientAudioComponent, 0.0f, Settings->FadeOutTime);
+
+        // TODO: Load and play new biome ambient sound
+        // For now, just adjust volume
+        FadeAudioComponent(AmbientAudioComponent, Settings->Volume, Settings->FadeInTime);
+    }
+}
+
+void UAudio_SystemManager::UpdateThreatAudio()
+{
+    if (!ThreatAudioComponent)
+        return;
+
+    const FAudio_ThreatSettings* Settings = ThreatSettings.Find(CurrentThreatLevel);
+    if (Settings)
+    {
+        float TargetVolume = Settings->IntensityMultiplier * 0.3f;
+        FadeAudioComponent(ThreatAudioComponent, TargetVolume, 1.0f);
+
+        // TODO: Trigger heartbeat audio if needed
+        if (Settings->HeartbeatVolume > 0.0f)
+        {
+            UE_LOG(LogTemp, Log, TEXT("Heartbeat audio triggered with volume: %f"), Settings->HeartbeatVolume);
         }
     }
-
-    // Update narrative playing status
-    bIsNarrativePlaying = NarrativeAudioComponent->IsPlaying();
 }
 
-void AAudio_SystemManager::SetAtmosphere(EAudio_AtmosphereType NewAtmosphere, bool bFadeTransition)
+void UAudio_SystemManager::UpdateTimeBasedAudio()
 {
-    if (CurrentAtmosphere == NewAtmosphere)
-    {
-        return;
-    }
-
-    CurrentAtmosphere = NewAtmosphere;
-
-    // Update ambient audio based on atmosphere
-    UpdateAmbientAudio();
-
-    UE_LOG(LogTemp, Log, TEXT("Audio System: Changed atmosphere to %d"), (int32)NewAtmosphere);
-}
-
-void AAudio_SystemManager::PlayNarrativeClip(const FString& ClipName, float Priority)
-{
-    FAudio_NarrativeClip* Clip = FindNarrativeClip(ClipName);
-    if (!Clip)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Audio System: Narrative clip '%s' not found"), *ClipName);
-        return;
-    }
-
-    // Check if already played and set to play once
-    if (Clip->bPlayOnce && Clip->bHasPlayed)
-    {
-        UE_LOG(LogTemp, Log, TEXT("Audio System: Narrative clip '%s' already played"), *ClipName);
-        return;
-    }
-
-    // Stop current narrative if lower priority
-    if (bIsNarrativePlaying)
-    {
-        // For now, always interrupt with new clip
-        StopNarrative();
-    }
-
-    // Load and play the sound
-    if (Clip->AudioClip.IsValid())
-    {
-        USoundCue* SoundCue = Clip->AudioClip.LoadSynchronous();
-        if (SoundCue)
-        {
-            NarrativeAudioComponent->SetSound(SoundCue);
-            NarrativeAudioComponent->Play();
-            Clip->bHasPlayed = true;
-            bIsNarrativePlaying = true;
-
-            UE_LOG(LogTemp, Log, TEXT("Audio System: Playing narrative clip '%s'"), *ClipName);
-        }
-    }
-}
-
-void AAudio_SystemManager::StopNarrative()
-{
-    if (NarrativeAudioComponent->IsPlaying())
-    {
-        NarrativeAudioComponent->Stop();
-        bIsNarrativePlaying = false;
-        UE_LOG(LogTemp, Log, TEXT("Audio System: Stopped narrative"));
-    }
-}
-
-void AAudio_SystemManager::SetTensionLevel(float TensionLevel)
-{
-    CurrentTensionLevel = FMath::Clamp(TensionLevel, 0.0f, 1.0f);
-
-    // Adjust ambient volume based on tension
-    float TensionVolume = AmbientVolume * (1.0f + CurrentTensionLevel * 0.5f);
-    AmbientAudioComponent->SetVolumeMultiplier(TensionVolume * MasterVolume);
-
-    UE_LOG(LogTemp, VeryVerbose, TEXT("Audio System: Tension level set to %.2f"), CurrentTensionLevel);
-}
-
-void AAudio_SystemManager::UpdatePlayerLocation(FVector PlayerLocation)
-{
-    LastPlayerLocation = PlayerLocation;
-
-    // Check for trigger zone changes
-    int32 NewZoneIndex = GetActiveZoneForLocation(PlayerLocation);
+    // Adjust audio based on time of day
+    float NightMultiplier = 1.0f;
     
-    if (NewZoneIndex != CurrentTriggerZoneIndex && NewZoneIndex >= 0)
+    // Night time (0.0-0.2 and 0.8-1.0) should be quieter
+    if (CurrentTimeOfDay < 0.2f || CurrentTimeOfDay > 0.8f)
     {
-        CurrentTriggerZoneIndex = NewZoneIndex;
-        const FAudio_TriggerZone& Zone = TriggerZones[NewZoneIndex];
-        
-        // Change atmosphere based on zone
-        SetAtmosphere(Zone.AtmosphereType, true);
-        
-        UE_LOG(LogTemp, Log, TEXT("Audio System: Entered zone %d, atmosphere: %d"), 
-               NewZoneIndex, (int32)Zone.AtmosphereType);
+        NightMultiplier = 0.6f; // Quieter at night
     }
 
-    // Update tension based on location
-    UpdateTensionBasedOnLocation(PlayerLocation);
-}
-
-void AAudio_SystemManager::AddTriggerZone(FVector Location, float Radius, EAudio_AtmosphereType AtmosphereType)
-{
-    FAudio_TriggerZone NewZone;
-    NewZone.Location = Location;
-    NewZone.Radius = Radius;
-    NewZone.AtmosphereType = AtmosphereType;
-    NewZone.VolumeMultiplier = 1.0f;
-    NewZone.bIsActive = true;
-
-    TriggerZones.Add(NewZone);
-
-    UE_LOG(LogTemp, Log, TEXT("Audio System: Added trigger zone at %s"), *Location.ToString());
-}
-
-void AAudio_SystemManager::RemoveTriggerZone(int32 ZoneIndex)
-{
-    if (TriggerZones.IsValidIndex(ZoneIndex))
+    if (AmbientAudioComponent)
     {
-        TriggerZones.RemoveAt(ZoneIndex);
-        UE_LOG(LogTemp, Log, TEXT("Audio System: Removed trigger zone %d"), ZoneIndex);
+        AmbientAudioComponent->SetVolumeMultiplier(0.5f * NightMultiplier);
     }
+
+    UE_LOG(LogTemp, Log, TEXT("Time-based audio updated. Time: %f, Multiplier: %f"), 
+           CurrentTimeOfDay, NightMultiplier);
 }
 
-int32 AAudio_SystemManager::GetActiveZoneForLocation(FVector Location)
+void UAudio_SystemManager::FadeAudioComponent(UAudioComponent* Component, float TargetVolume, float FadeTime)
 {
-    for (int32 i = 0; i < TriggerZones.Num(); i++)
-    {
-        const FAudio_TriggerZone& Zone = TriggerZones[i];
-        if (Zone.bIsActive)
-        {
-            float Distance = FVector::Dist(Location, Zone.Location);
-            if (Distance <= Zone.Radius)
-            {
-                return i;
-            }
-        }
-    }
-    return -1;
-}
+    if (!Component)
+        return;
 
-void AAudio_SystemManager::SetMasterVolume(float Volume)
-{
-    MasterVolume = FMath::Clamp(Volume, 0.0f, 1.0f);
+    // Simple immediate volume change for now
+    // TODO: Implement smooth fade transition
+    Component->SetVolumeMultiplier(TargetVolume);
     
-    // Update all component volumes
-    AmbientAudioComponent->SetVolumeMultiplier(AmbientVolume * MasterVolume);
-    NarrativeAudioComponent->SetVolumeMultiplier(NarrativeVolume * MasterVolume);
-    EffectsAudioComponent->SetVolumeMultiplier(EffectsVolume * MasterVolume);
-}
-
-void AAudio_SystemManager::SetAmbientVolume(float Volume)
-{
-    AmbientVolume = FMath::Clamp(Volume, 0.0f, 1.0f);
-    AmbientAudioComponent->SetVolumeMultiplier(AmbientVolume * MasterVolume);
-}
-
-void AAudio_SystemManager::SetNarrativeVolume(float Volume)
-{
-    NarrativeVolume = FMath::Clamp(Volume, 0.0f, 1.0f);
-    NarrativeAudioComponent->SetVolumeMultiplier(NarrativeVolume * MasterVolume);
-}
-
-void AAudio_SystemManager::SetEffectsVolume(float Volume)
-{
-    EffectsVolume = FMath::Clamp(Volume, 0.0f, 1.0f);
-    EffectsAudioComponent->SetVolumeMultiplier(EffectsVolume * MasterVolume);
-}
-
-bool AAudio_SystemManager::IsNarrativePlaying() const
-{
-    return bIsNarrativePlaying;
-}
-
-float AAudio_SystemManager::GetCurrentTensionLevel() const
-{
-    return CurrentTensionLevel;
-}
-
-EAudio_AtmosphereType AAudio_SystemManager::GetCurrentAtmosphere() const
-{
-    return CurrentAtmosphere;
-}
-
-void AAudio_SystemManager::UpdateAmbientAudio()
-{
-    // This would load different ambient sounds based on atmosphere
-    // For now, just log the change
-    UE_LOG(LogTemp, Log, TEXT("Audio System: Updated ambient audio for atmosphere %d"), (int32)CurrentAtmosphere);
-}
-
-void AAudio_SystemManager::UpdateTensionBasedOnLocation(FVector PlayerLocation)
-{
-    // Calculate tension based on proximity to danger zones
-    float MaxTension = 0.0f;
-
-    for (const FAudio_TriggerZone& Zone : TriggerZones)
-    {
-        if (Zone.AtmosphereType == EAudio_AtmosphereType::Predator_Territory ||
-            Zone.AtmosphereType == EAudio_AtmosphereType::Danger_Zone)
-        {
-            float Distance = FVector::Dist(PlayerLocation, Zone.Location);
-            float TensionRadius = Zone.Radius * 1.5f; // Tension extends beyond zone
-            
-            if (Distance < TensionRadius)
-            {
-                float TensionValue = 1.0f - (Distance / TensionRadius);
-                MaxTension = FMath::Max(MaxTension, TensionValue);
-            }
-        }
-    }
-
-    SetTensionLevel(MaxTension);
-}
-
-void AAudio_SystemManager::CrossfadeAmbientAudio(USoundCue* NewSound)
-{
-    if (NewSound && AmbientAudioComponent)
-    {
-        // Simple implementation - just change the sound
-        // In a full implementation, this would do proper crossfading
-        AmbientAudioComponent->SetSound(NewSound);
-        if (!AmbientAudioComponent->IsPlaying())
-        {
-            AmbientAudioComponent->Play();
-        }
-    }
-}
-
-FAudio_NarrativeClip* AAudio_SystemManager::FindNarrativeClip(const FString& ClipName)
-{
-    for (FAudio_NarrativeClip& Clip : NarrativeClips)
-    {
-        if (Clip.ClipName == ClipName)
-        {
-            return &Clip;
-        }
-    }
-    return nullptr;
-}
-
-void AAudio_SystemManager::InitializeDefaultTriggerZones()
-{
-    // Add default trigger zones matching the map layout
-    AddTriggerZone(FVector(500, 500, 100), 1000, EAudio_AtmosphereType::Forest_Calm);
-    AddTriggerZone(FVector(-800, 200, 150), 800, EAudio_AtmosphereType::Predator_Territory);
-    AddTriggerZone(FVector(1200, -600, 80), 600, EAudio_AtmosphereType::Water_Source);
-    AddTriggerZone(FVector(0, 1000, 120), 700, EAudio_AtmosphereType::Danger_Zone);
-    AddTriggerZone(FVector(-500, -800, 90), 400, EAudio_AtmosphereType::Safe_Zone);
-
-    UE_LOG(LogTemp, Log, TEXT("Audio System: Initialized %d default trigger zones"), TriggerZones.Num());
-}
-
-void AAudio_SystemManager::InitializeDefaultNarrativeClips()
-{
-    // Initialize narrative clips with default settings
-    FAudio_NarrativeClip AtmosphereClip;
-    AtmosphereClip.ClipName = TEXT("AtmosphereNarrator");
-    AtmosphereClip.Priority = 1.0f;
-    AtmosphereClip.bPlayOnce = false;
-    NarrativeClips.Add(AtmosphereClip);
-
-    FAudio_NarrativeClip SurvivalClip;
-    SurvivalClip.ClipName = TEXT("SurvivalGuide");
-    SurvivalClip.Priority = 2.0f;
-    SurvivalClip.bPlayOnce = true;
-    NarrativeClips.Add(SurvivalClip);
-
-    FAudio_NarrativeClip QuestClip;
-    QuestClip.ClipName = TEXT("QuestNarrator");
-    QuestClip.Priority = 1.5f;
-    QuestClip.bPlayOnce = false;
-    NarrativeClips.Add(QuestClip);
-
-    FAudio_NarrativeClip WarningClip;
-    WarningClip.ClipName = TEXT("FieldResearcher");
-    WarningClip.Priority = 3.0f;
-    WarningClip.bPlayOnce = false;
-    NarrativeClips.Add(WarningClip);
-
-    UE_LOG(LogTemp, Log, TEXT("Audio System: Initialized %d narrative clips"), NarrativeClips.Num());
+    UE_LOG(LogTemp, Log, TEXT("Audio component volume set to: %f"), TargetVolume);
 }
