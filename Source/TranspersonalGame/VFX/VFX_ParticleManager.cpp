@@ -1,213 +1,356 @@
 #include "VFX_ParticleManager.h"
+#include "Components/SceneComponent.h"
+#include "NiagaraComponent.h"
+#include "NiagaraSystem.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "TimerManager.h"
 #include "Kismet/GameplayStatics.h"
 
-UVFX_ParticleManager::UVFX_ParticleManager()
+AVFX_ParticleManager::AVFX_ParticleManager()
 {
-    PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 1.0f; // Check every second for cleanup
-    
-    InitializeParticleDatabase();
+    PrimaryActorTick.bCanEverTick = true;
+
+    // Create root component
+    RootSceneComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootScene"));
+    RootComponent = RootSceneComponent;
+
+    // Create primary particle system component
+    PrimaryParticleSystem = CreateDefaultSubobject<UNiagaraComponent>(TEXT("PrimaryParticleSystem"));
+    PrimaryParticleSystem->SetupAttachment(RootComponent);
+
+    // Initialize VFX settings
+    EffectIntensityMultiplier = 1.0f;
+    bEnableWeatherEffects = true;
+    bEnableCombatEffects = true;
+    bEnableEnvironmentalEffects = true;
+
+    // Performance settings
+    MaxActiveParticles = 50;
+    EffectCullDistance = 5000.0f;
+    CurrentWeatherIntensity = 0.0f;
+    bIsRaining = false;
+
+    // Load default VFX assets (placeholder paths)
+    static ConstructorHelpers::FObjectFinder<UNiagaraSystem> CampfireFinder(TEXT("/Game/VFX/NS_Fire_Campfire"));
+    if (CampfireFinder.Succeeded())
+    {
+        CampfireEffect = CampfireFinder.Object;
+    }
+
+    static ConstructorHelpers::FObjectFinder<UNiagaraSystem> DustFinder(TEXT("/Game/VFX/NS_Environment_Dust"));
+    if (DustFinder.Succeeded())
+    {
+        DustImpactEffect = DustFinder.Object;
+    }
+
+    static ConstructorHelpers::FObjectFinder<UNiagaraSystem> RainFinder(TEXT("/Game/VFX/NS_Weather_Rain"));
+    if (RainFinder.Succeeded())
+    {
+        RainEffect = RainFinder.Object;
+    }
 }
 
-void UVFX_ParticleManager::BeginPlay()
+void AVFX_ParticleManager::BeginPlay()
 {
     Super::BeginPlay();
     
-    // Initialize particle database with default values
-    InitializeParticleDatabase();
+    UpdatePerformanceSettings();
     
-    UE_LOG(LogTemp, Warning, TEXT("VFX_ParticleManager: Initialized with %d particle types"), ParticleDatabase.Num());
+    UE_LOG(LogTemp, Warning, TEXT("VFX ParticleManager initialized with %d max particles"), MaxActiveParticles);
 }
 
-void UVFX_ParticleManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void AVFX_ParticleManager::Tick(float DeltaTime)
 {
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-    
-    // Cleanup expired particles every tick
-    RemoveNullParticles();
-}
+    Super::Tick(DeltaTime);
 
-void UVFX_ParticleManager::InitializeParticleDatabase()
-{
-    // Initialize all particle types with default data
-    // In production, these would reference actual Niagara assets
-    
-    FVFX_ParticleData CampfireData;
-    CampfireData.DefaultLifetime = -1.0f; // Persistent
-    CampfireData.bAutoDestroy = false;
-    CampfireData.DefaultScale = FVector(1.5f, 1.5f, 2.0f);
-    ParticleDatabase.Add(EVFX_ParticleType::Campfire, CampfireData);
-    
-    FVFX_ParticleData DustData;
-    DustData.DefaultLifetime = 3.0f;
-    DustData.bAutoDestroy = true;
-    DustData.DefaultScale = FVector(2.0f, 2.0f, 1.0f);
-    ParticleDatabase.Add(EVFX_ParticleType::DinosaurDust, DustData);
-    
-    FVFX_ParticleData BloodData;
-    BloodData.DefaultLifetime = 2.0f;
-    BloodData.bAutoDestroy = true;
-    BloodData.DefaultScale = FVector(1.0f, 1.0f, 1.0f);
-    ParticleDatabase.Add(EVFX_ParticleType::BloodSplatter, BloodData);
-    
-    FVFX_ParticleData WaterData;
-    WaterData.DefaultLifetime = 4.0f;
-    WaterData.bAutoDestroy = true;
-    WaterData.DefaultScale = FVector(1.5f, 1.5f, 1.5f);
-    ParticleDatabase.Add(EVFX_ParticleType::WaterSplash, WaterData);
-    
-    FVFX_ParticleData VaporData;
-    VaporData.DefaultLifetime = 2.5f;
-    VaporData.bAutoDestroy = true;
-    VaporData.DefaultScale = FVector(0.8f, 0.8f, 1.2f);
-    ParticleDatabase.Add(EVFX_ParticleType::BreathVapor, VaporData);
-    
-    FVFX_ParticleData RainData;
-    RainData.DefaultLifetime = -1.0f; // Persistent weather
-    RainData.bAutoDestroy = false;
-    RainData.DefaultScale = FVector(10.0f, 10.0f, 5.0f);
-    ParticleDatabase.Add(EVFX_ParticleType::WeatherRain, RainData);
-    
-    FVFX_ParticleData AshData;
-    AshData.DefaultLifetime = 15.0f;
-    AshData.bAutoDestroy = true;
-    AshData.DefaultScale = FVector(5.0f, 5.0f, 3.0f);
-    ParticleDatabase.Add(EVFX_ParticleType::VolcanicAsh, AshData);
-    
-    FVFX_ParticleData InsectData;
-    InsectData.DefaultLifetime = 8.0f;
-    InsectData.bAutoDestroy = true;
-    InsectData.DefaultScale = FVector(3.0f, 3.0f, 2.0f);
-    ParticleDatabase.Add(EVFX_ParticleType::InsectSwarm, InsectData);
-}
-
-UNiagaraComponent* UVFX_ParticleManager::SpawnParticleEffect(EVFX_ParticleType ParticleType, FVector Location, FRotator Rotation, FVector Scale)
-{
-    if (!ParticleDatabase.Contains(ParticleType))
+    // Cleanup inactive effects periodically
+    static float CleanupTimer = 0.0f;
+    CleanupTimer += DeltaTime;
+    if (CleanupTimer >= 5.0f)
     {
-        UE_LOG(LogTemp, Error, TEXT("VFX_ParticleManager: Unknown particle type requested"));
-        return nullptr;
+        CleanupInactiveEffects();
+        CleanupTimer = 0.0f;
     }
-    
-    const FVFX_ParticleData& ParticleData = ParticleDatabase[ParticleType];
-    
-    // For now, create a basic Niagara component without specific system
-    // In production, this would load the actual Niagara asset
-    UNiagaraComponent* ParticleComponent = UGameplayStatics::SpawnEmitterAtLocation(
+
+    // Update weather effects
+    if (bIsRaining && bEnableWeatherEffects)
+    {
+        // Update rain intensity based on weather system
+        if (PrimaryParticleSystem && RainEffect)
+        {
+            PrimaryParticleSystem->SetFloatParameter(TEXT("Intensity"), CurrentWeatherIntensity);
+        }
+    }
+}
+
+void AVFX_ParticleManager::SpawnCampfireEffect(FVector Location, FRotator Rotation)
+{
+    if (!bEnableEnvironmentalEffects || !CampfireEffect || !ShouldSpawnEffect(Location))
+    {
+        return;
+    }
+
+    UNiagaraComponent* CampfireComponent = UGameplayStatics::SpawnEmitterAtLocation(
         GetWorld(),
-        nullptr, // Would be ParticleData.NiagaraSystem in production
+        CampfireEffect,
         Location,
-        Rotation,
-        Scale.IsZero() ? ParticleData.DefaultScale : Scale,
-        true // Auto destroy
+        Rotation
     );
-    
-    if (ParticleComponent)
+
+    if (CampfireComponent)
     {
-        ActiveParticles.Add(ParticleComponent);
+        CampfireComponent->SetFloatParameter(TEXT("IntensityMultiplier"), EffectIntensityMultiplier);
+        ActiveParticleSystems.Add(CampfireComponent);
         
-        // Set auto-destroy timer if specified
-        if (ParticleData.bAutoDestroy && ParticleData.DefaultLifetime > 0.0f)
+        UE_LOG(LogTemp, Log, TEXT("Spawned campfire VFX at location: %s"), *Location.ToString());
+    }
+}
+
+void AVFX_ParticleManager::SpawnDustImpact(FVector Location, float Intensity)
+{
+    if (!bEnableEnvironmentalEffects || !DustImpactEffect || !ShouldSpawnEffect(Location))
+    {
+        return;
+    }
+
+    UNiagaraComponent* DustComponent = UGameplayStatics::SpawnEmitterAtLocation(
+        GetWorld(),
+        DustImpactEffect,
+        Location,
+        FRotator::ZeroRotator
+    );
+
+    if (DustComponent)
+    {
+        float FinalIntensity = Intensity * EffectIntensityMultiplier;
+        DustComponent->SetFloatParameter(TEXT("ImpactIntensity"), FinalIntensity);
+        DustComponent->SetFloatParameter(TEXT("ParticleCount"), FMath::Clamp(FinalIntensity * 100.0f, 10.0f, 500.0f));
+        
+        ActiveParticleSystems.Add(DustComponent);
+        
+        UE_LOG(LogTemp, Log, TEXT("Spawned dust impact VFX with intensity: %f"), FinalIntensity);
+    }
+}
+
+void AVFX_ParticleManager::SpawnFootstepDust(FVector Location, float DinosaurSize)
+{
+    if (!bEnableEnvironmentalEffects || !FootstepDustEffect || !ShouldSpawnEffect(Location))
+    {
+        return;
+    }
+
+    UNiagaraComponent* FootstepComponent = UGameplayStatics::SpawnEmitterAtLocation(
+        GetWorld(),
+        FootstepDustEffect,
+        Location,
+        FRotator::ZeroRotator
+    );
+
+    if (FootstepComponent)
+    {
+        float SizeMultiplier = FMath::Clamp(DinosaurSize, 0.1f, 5.0f);
+        FootstepComponent->SetFloatParameter(TEXT("SizeMultiplier"), SizeMultiplier);
+        FootstepComponent->SetFloatParameter(TEXT("DustAmount"), SizeMultiplier * EffectIntensityMultiplier * 50.0f);
+        
+        ActiveParticleSystems.Add(FootstepComponent);
+        
+        UE_LOG(LogTemp, Log, TEXT("Spawned footstep dust for dinosaur size: %f"), DinosaurSize);
+    }
+}
+
+void AVFX_ParticleManager::StartRainEffect(float Intensity)
+{
+    if (!bEnableWeatherEffects || !RainEffect)
+    {
+        return;
+    }
+
+    CurrentWeatherIntensity = FMath::Clamp(Intensity, 0.0f, 2.0f);
+    bIsRaining = true;
+
+    if (PrimaryParticleSystem)
+    {
+        PrimaryParticleSystem->SetAsset(RainEffect);
+        PrimaryParticleSystem->SetFloatParameter(TEXT("RainIntensity"), CurrentWeatherIntensity);
+        PrimaryParticleSystem->Activate();
+        
+        UE_LOG(LogTemp, Warning, TEXT("Started rain effect with intensity: %f"), CurrentWeatherIntensity);
+    }
+}
+
+void AVFX_ParticleManager::StopRainEffect()
+{
+    bIsRaining = false;
+    CurrentWeatherIntensity = 0.0f;
+
+    if (PrimaryParticleSystem)
+    {
+        PrimaryParticleSystem->Deactivate();
+        UE_LOG(LogTemp, Warning, TEXT("Stopped rain effect"));
+    }
+}
+
+void AVFX_ParticleManager::SpawnBloodSplatter(FVector Location, FVector Direction, float Amount)
+{
+    if (!bEnableCombatEffects || !BloodSplatterEffect || !ShouldSpawnEffect(Location))
+    {
+        return;
+    }
+
+    FRotator BloodRotation = Direction.Rotation();
+    UNiagaraComponent* BloodComponent = UGameplayStatics::SpawnEmitterAtLocation(
+        GetWorld(),
+        BloodSplatterEffect,
+        Location,
+        BloodRotation
+    );
+
+    if (BloodComponent)
+    {
+        float BloodAmount = FMath::Clamp(Amount * EffectIntensityMultiplier, 0.1f, 3.0f);
+        BloodComponent->SetFloatParameter(TEXT("BloodAmount"), BloodAmount);
+        BloodComponent->SetVectorParameter(TEXT("SplatterDirection"), Direction);
+        
+        ActiveParticleSystems.Add(BloodComponent);
+        
+        UE_LOG(LogTemp, Log, TEXT("Spawned blood splatter with amount: %f"), BloodAmount);
+    }
+}
+
+void AVFX_ParticleManager::SpawnImpactSparks(FVector Location, FVector Normal)
+{
+    if (!bEnableCombatEffects || !ImpactSparkEffect || !ShouldSpawnEffect(Location))
+    {
+        return;
+    }
+
+    FRotator SparkRotation = Normal.Rotation();
+    UNiagaraComponent* SparkComponent = UGameplayStatics::SpawnEmitterAtLocation(
+        GetWorld(),
+        ImpactSparkEffect,
+        Location,
+        SparkRotation
+    );
+
+    if (SparkComponent)
+    {
+        SparkComponent->SetVectorParameter(TEXT("ImpactNormal"), Normal);
+        SparkComponent->SetFloatParameter(TEXT("SparkIntensity"), EffectIntensityMultiplier);
+        
+        ActiveParticleSystems.Add(SparkComponent);
+        
+        UE_LOG(LogTemp, Log, TEXT("Spawned impact sparks at location: %s"), *Location.ToString());
+    }
+}
+
+void AVFX_ParticleManager::SetGlobalVFXIntensity(float NewIntensity)
+{
+    EffectIntensityMultiplier = FMath::Clamp(NewIntensity, 0.0f, 10.0f);
+    
+    // Update all active particle systems
+    for (UNiagaraComponent* ParticleComp : ActiveParticleSystems)
+    {
+        if (IsValid(ParticleComp))
         {
-            FTimerHandle TimerHandle;
-            GetWorld()->GetTimerManager().SetTimer(TimerHandle, [ParticleComponent]()
+            ParticleComp->SetFloatParameter(TEXT("IntensityMultiplier"), EffectIntensityMultiplier);
+        }
+    }
+    
+    UE_LOG(LogTemp, Warning, TEXT("Set global VFX intensity to: %f"), EffectIntensityMultiplier);
+}
+
+void AVFX_ParticleManager::EnableVFXCategory(EVFX_EffectCategory Category, bool bEnable)
+{
+    switch (Category)
+    {
+        case EVFX_EffectCategory::Weather:
+            bEnableWeatherEffects = bEnable;
+            if (!bEnable && bIsRaining)
             {
-                if (IsValid(ParticleComponent))
-                {
-                    ParticleComponent->DestroyComponent();
-                }
-            }, ParticleData.DefaultLifetime, false);
-        }
-        
-        UE_LOG(LogTemp, Log, TEXT("VFX_ParticleManager: Spawned particle effect at location %s"), *Location.ToString());
+                StopRainEffect();
+            }
+            break;
+            
+        case EVFX_EffectCategory::Combat:
+            bEnableCombatEffects = bEnable;
+            break;
+            
+        case EVFX_EffectCategory::Environmental:
+            bEnableEnvironmentalEffects = bEnable;
+            break;
+            
+        default:
+            break;
     }
     
-    return ParticleComponent;
+    UE_LOG(LogTemp, Warning, TEXT("VFX Category %d enabled: %s"), (int32)Category, bEnable ? TEXT("true") : TEXT("false"));
 }
 
-void UVFX_ParticleManager::SpawnCampfireEffect(FVector Location)
+void AVFX_ParticleManager::CleanupInactiveEffects()
 {
-    SpawnParticleEffect(EVFX_ParticleType::Campfire, Location);
-    UE_LOG(LogTemp, Log, TEXT("VFX_ParticleManager: Campfire effect spawned at %s"), *Location.ToString());
-}
-
-void UVFX_ParticleManager::SpawnDinosaurDustEffect(FVector Location, FVector Direction)
-{
-    FRotator DustRotation = Direction.Rotation();
-    SpawnParticleEffect(EVFX_ParticleType::DinosaurDust, Location, DustRotation);
-    UE_LOG(LogTemp, Log, TEXT("VFX_ParticleManager: Dinosaur dust effect spawned"));
-}
-
-void UVFX_ParticleManager::SpawnBloodSplatterEffect(FVector Location, FVector ImpactDirection)
-{
-    FRotator BloodRotation = ImpactDirection.Rotation();
-    SpawnParticleEffect(EVFX_ParticleType::BloodSplatter, Location, BloodRotation);
-    UE_LOG(LogTemp, Log, TEXT("VFX_ParticleManager: Blood splatter effect spawned"));
-}
-
-void UVFX_ParticleManager::SpawnWaterSplashEffect(FVector Location, float Intensity)
-{
-    FVector SplashScale = FVector(Intensity, Intensity, Intensity);
-    SpawnParticleEffect(EVFX_ParticleType::WaterSplash, Location, FRotator::ZeroRotator, SplashScale);
-    UE_LOG(LogTemp, Log, TEXT("VFX_ParticleManager: Water splash effect spawned with intensity %f"), Intensity);
-}
-
-void UVFX_ParticleManager::SpawnBreathVaporEffect(FVector Location, FVector Direction)
-{
-    FRotator VaporRotation = Direction.Rotation();
-    SpawnParticleEffect(EVFX_ParticleType::BreathVapor, Location, VaporRotation);
-}
-
-void UVFX_ParticleManager::SpawnWeatherRainEffect(FVector Location, float Intensity)
-{
-    FVector RainScale = FVector(Intensity * 10.0f, Intensity * 10.0f, Intensity * 5.0f);
-    SpawnParticleEffect(EVFX_ParticleType::WeatherRain, Location, FRotator::ZeroRotator, RainScale);
-    UE_LOG(LogTemp, Log, TEXT("VFX_ParticleManager: Weather rain effect spawned"));
-}
-
-void UVFX_ParticleManager::SpawnVolcanicAshEffect(FVector Location, FVector WindDirection)
-{
-    FRotator AshRotation = WindDirection.Rotation();
-    SpawnParticleEffect(EVFX_ParticleType::VolcanicAsh, Location, AshRotation);
-}
-
-void UVFX_ParticleManager::SpawnInsectSwarmEffect(FVector Location, float SwarmSize)
-{
-    FVector SwarmScale = FVector(SwarmSize * 3.0f, SwarmSize * 3.0f, SwarmSize * 2.0f);
-    SpawnParticleEffect(EVFX_ParticleType::InsectSwarm, Location, FRotator::ZeroRotator, SwarmScale);
-}
-
-void UVFX_ParticleManager::CleanupExpiredParticles()
-{
-    RemoveNullParticles();
-    UE_LOG(LogTemp, Log, TEXT("VFX_ParticleManager: Cleanup completed, %d active particles remaining"), ActiveParticles.Num());
-}
-
-void UVFX_ParticleManager::StopAllParticleEffects()
-{
-    for (UNiagaraComponent* Particle : ActiveParticles)
+    int32 CleanedCount = 0;
+    
+    for (int32 i = ActiveParticleSystems.Num() - 1; i >= 0; i--)
     {
-        if (IsValid(Particle))
+        UNiagaraComponent* ParticleComp = ActiveParticleSystems[i];
+        if (!IsValid(ParticleComp) || !ParticleComp->IsActive())
         {
-            Particle->DestroyComponent();
+            ActiveParticleSystems.RemoveAt(i);
+            CleanedCount++;
         }
     }
-    ActiveParticles.Empty();
-    UE_LOG(LogTemp, Warning, TEXT("VFX_ParticleManager: All particle effects stopped"));
-}
-
-int32 UVFX_ParticleManager::GetActiveParticleCount() const
-{
-    return ActiveParticles.Num();
-}
-
-void UVFX_ParticleManager::RemoveNullParticles()
-{
-    ActiveParticles.RemoveAll([](UNiagaraComponent* Particle)
+    
+    if (CleanedCount > 0)
     {
-        return !IsValid(Particle);
-    });
+        UE_LOG(LogTemp, Log, TEXT("Cleaned up %d inactive VFX components"), CleanedCount);
+    }
+}
+
+void AVFX_ParticleManager::UpdatePerformanceSettings()
+{
+    // Adjust performance based on current actor count
+    if (UWorld* World = GetWorld())
+    {
+        int32 ActorCount = World->GetCurrentLevel()->Actors.Num();
+        
+        if (ActorCount > 5000)
+        {
+            MaxActiveParticles = 25;
+            EffectCullDistance = 3000.0f;
+        }
+        else if (ActorCount > 2000)
+        {
+            MaxActiveParticles = 35;
+            EffectCullDistance = 4000.0f;
+        }
+        else
+        {
+            MaxActiveParticles = 50;
+            EffectCullDistance = 5000.0f;
+        }
+        
+        UE_LOG(LogTemp, Log, TEXT("Updated VFX performance: %d max particles, %f cull distance"), 
+               MaxActiveParticles, EffectCullDistance);
+    }
+}
+
+bool AVFX_ParticleManager::ShouldSpawnEffect(FVector Location) const
+{
+    // Check if we're at particle limit
+    if (ActiveParticleSystems.Num() >= MaxActiveParticles)
+    {
+        return false;
+    }
+    
+    // Check distance culling
+    if (APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0))
+    {
+        float DistanceToPlayer = FVector::Dist(Location, PlayerPawn->GetActorLocation());
+        if (DistanceToPlayer > EffectCullDistance)
+        {
+            return false;
+        }
+    }
+    
+    return true;
 }
