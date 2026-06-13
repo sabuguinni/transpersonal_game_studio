@@ -2,7 +2,10 @@
 
 #include "CoreMinimal.h"
 #include "Engine/GameInstanceSubsystem.h"
-#include "SharedTypes.h"
+#include "Engine/World.h"
+#include "Components/ActorComponent.h"
+#include "Subsystems/WorldSubsystem.h"
+#include "../SharedTypes.h"
 #include "Eng_BiomeSystemManager.generated.h"
 
 USTRUCT(BlueprintType)
@@ -11,39 +14,49 @@ struct TRANSPERSONALGAME_API FEng_BiomeConfiguration
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    EBiomeType BiomeType = EBiomeType::Temperate;
+    EBiomeType BiomeType = EBiomeType::Forest;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float Temperature = 20.0f;
+    float Temperature = 25.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float Humidity = 0.5f;
+    float Humidity = 60.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float Elevation = 0.0f;
+    float Elevation = 100.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    TArray<EDinosaurSpecies> NativeDinosaurs;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    TArray<EVegetationType> VegetationTypes;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float DinosaurSpawnRate = 1.0f;
+    TArray<TSubclassOf<class APawn>> AllowedDinosaurs;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
     int32 MaxDinosaursPerBiome = 25;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float VegetationDensity = 1.0f;
+    float SpawnRadius = 5000.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float ResourceAbundance = 1.0f;
+    float VegetationDensity = 0.7f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    TArray<class UStaticMesh*> VegetationMeshes;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    FLinearColor AmbientColor = FLinearColor::White;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    float FogDensity = 0.02f;
 
     FEng_BiomeConfiguration()
     {
-        NativeDinosaurs.Add(EDinosaurSpecies::Parasaurolophus);
-        VegetationTypes.Add(EVegetationType::Fern);
+        BiomeType = EBiomeType::Forest;
+        Temperature = 25.0f;
+        Humidity = 60.0f;
+        Elevation = 100.0f;
+        MaxDinosaursPerBiome = 25;
+        SpawnRadius = 5000.0f;
+        VegetationDensity = 0.7f;
+        AmbientColor = FLinearColor::White;
+        FogDensity = 0.02f;
     }
 };
 
@@ -53,7 +66,7 @@ struct TRANSPERSONALGAME_API FEng_BiomeTransition
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Transition")
-    EBiomeType FromBiome = EBiomeType::Temperate;
+    EBiomeType FromBiome = EBiomeType::Forest;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Transition")
     EBiomeType ToBiome = EBiomeType::Desert;
@@ -63,21 +76,29 @@ struct TRANSPERSONALGAME_API FEng_BiomeTransition
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Transition")
     float BlendFactor = 0.5f;
+
+    FEng_BiomeTransition()
+    {
+        FromBiome = EBiomeType::Forest;
+        ToBiome = EBiomeType::Desert;
+        TransitionDistance = 1000.0f;
+        BlendFactor = 0.5f;
+    }
 };
 
-UCLASS(BlueprintType)
-class TRANSPERSONALGAME_API UEng_BiomeSystemManager : public UGameInstanceSubsystem
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API UEng_BiomeSystemManager : public UWorldSubsystem
 {
     GENERATED_BODY()
 
 public:
+    UEng_BiomeSystemManager();
+
+    // USubsystem interface
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
-    // Biome Configuration
-    UFUNCTION(BlueprintCallable, Category = "Biome System")
-    void InitializeBiomeSystem();
-
+    // Biome Management
     UFUNCTION(BlueprintCallable, Category = "Biome System")
     EBiomeType GetBiomeAtLocation(const FVector& WorldLocation) const;
 
@@ -88,19 +109,8 @@ public:
     void SetBiomeConfiguration(EBiomeType BiomeType, const FEng_BiomeConfiguration& Configuration);
 
     UFUNCTION(BlueprintCallable, Category = "Biome System")
-    TArray<EBiomeType> GetAvailableBiomes() const;
+    TArray<EBiomeType> GetAllBiomeTypes() const;
 
-    // Biome Transitions
-    UFUNCTION(BlueprintCallable, Category = "Biome System")
-    float GetBiomeBlendFactor(const FVector& WorldLocation, EBiomeType& PrimaryBiome, EBiomeType& SecondaryBiome) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Biome System")
-    void AddBiomeTransition(const FEng_BiomeTransition& Transition);
-
-    UFUNCTION(BlueprintCallable, Category = "Biome System")
-    void RemoveBiomeTransition(EBiomeType FromBiome, EBiomeType ToBiome);
-
-    // Environmental Queries
     UFUNCTION(BlueprintCallable, Category = "Biome System")
     float GetTemperatureAtLocation(const FVector& WorldLocation) const;
 
@@ -108,20 +118,31 @@ public:
     float GetHumidityAtLocation(const FVector& WorldLocation) const;
 
     UFUNCTION(BlueprintCallable, Category = "Biome System")
-    TArray<EDinosaurSpecies> GetNativeDinosaursAtLocation(const FVector& WorldLocation) const;
+    bool IsLocationSuitableForDinosaur(const FVector& WorldLocation, TSubclassOf<APawn> DinosaurClass) const;
+
+    // Biome Transitions
+    UFUNCTION(BlueprintCallable, Category = "Biome System")
+    void AddBiomeTransition(const FEng_BiomeTransition& Transition);
 
     UFUNCTION(BlueprintCallable, Category = "Biome System")
-    TArray<EVegetationType> GetVegetationTypesAtLocation(const FVector& WorldLocation) const;
-
-    // Spawning Support
-    UFUNCTION(BlueprintCallable, Category = "Biome System")
-    bool CanSpawnDinosaurAtLocation(const FVector& WorldLocation, EDinosaurSpecies Species) const;
+    FEng_BiomeTransition GetBiomeTransition(EBiomeType FromBiome, EBiomeType ToBiome) const;
 
     UFUNCTION(BlueprintCallable, Category = "Biome System")
-    int32 GetMaxDinosaursForBiome(EBiomeType BiomeType) const;
+    float GetBiomeBlendFactor(const FVector& WorldLocation, EBiomeType BiomeA, EBiomeType BiomeB) const;
+
+    // World Generation Integration
+    UFUNCTION(BlueprintCallable, Category = "Biome System")
+    void GenerateBiomeMap(int32 WorldSizeKm = 16);
 
     UFUNCTION(BlueprintCallable, Category = "Biome System")
-    float GetSpawnRateMultiplierAtLocation(const FVector& WorldLocation) const;
+    void ApplyBiomeToRegion(const FVector& CenterLocation, float Radius, EBiomeType BiomeType);
+
+    // Performance and Optimization
+    UFUNCTION(BlueprintCallable, Category = "Biome System")
+    void UpdateBiomeCache();
+
+    UFUNCTION(BlueprintCallable, Category = "Biome System")
+    void ClearBiomeCache();
 
     // Debug and Visualization
     UFUNCTION(BlueprintCallable, Category = "Biome System", CallInEditor = true)
@@ -130,29 +151,29 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Biome System", CallInEditor = true)
     void ValidateBiomeConfiguration();
 
-    UFUNCTION(BlueprintCallable, Category = "Biome System")
-    void LogBiomeSystemStatus() const;
-
 protected:
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Configuration", meta = (AllowPrivateAccess = "true"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome System")
     TMap<EBiomeType, FEng_BiomeConfiguration> BiomeConfigurations;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Configuration", meta = (AllowPrivateAccess = "true"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome System")
     TArray<FEng_BiomeTransition> BiomeTransitions;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Configuration", meta = (AllowPrivateAccess = "true"))
-    float BiomeGridSize = 10000.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome System")
+    int32 BiomeCacheResolution = 100;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Configuration", meta = (AllowPrivateAccess = "true"))
-    int32 BiomeNoiseOctaves = 4;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome System")
+    float BiomeUpdateFrequency = 5.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Configuration", meta = (AllowPrivateAccess = "true"))
-    float BiomeNoiseScale = 0.001f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome System")
+    bool bEnableBiomeDebugDraw = false;
 
 private:
-    void SetupDefaultBiomeConfigurations();
-    float GenerateBiomeNoise(const FVector& Location, int32 Seed) const;
-    EBiomeType DetermineBiomeFromNoise(float NoiseValue, float Elevation) const;
-};
+    // Internal biome calculation
+    EBiomeType CalculateBiomeFromEnvironment(const FVector& WorldLocation) const;
+    void InitializeDefaultBiomeConfigurations();
+    void CacheBiomeData();
 
-#include "Eng_BiomeSystemManager.generated.h"
+    // Cached biome data for performance
+    TMap<FIntPoint, EBiomeType> BiomeCache;
+    FTimerHandle BiomeUpdateTimer;
+};
