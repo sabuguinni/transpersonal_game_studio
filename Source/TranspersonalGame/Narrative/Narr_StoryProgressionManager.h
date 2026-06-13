@@ -2,53 +2,81 @@
 
 #include "CoreMinimal.h"
 #include "Subsystems/GameInstanceSubsystem.h"
-#include "Engine/Engine.h"
-#include "../SharedTypes.h"
+#include "Engine/DataTable.h"
+#include "SharedTypes.h"
 #include "Narr_StoryProgressionManager.generated.h"
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FNarr_StoryEvent
+struct TRANSPERSONALGAME_API FNarr_StoryChapter
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    FString EventID;
+    FString ChapterID;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    FString EventTitle;
+    FString ChapterTitle;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    FText EventDescription;
+    FString ChapterDescription;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    bool bCompleted;
+    TArray<FString> RequiredQuestIDs;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    float CompletionTime;
+    TArray<FString> UnlockedQuestIDs;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    TArray<FString> UnlockedFlags;
+    bool bIsCompleted;
 
-    FNarr_StoryEvent()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    int32 ChapterOrder;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    FString NarrativeText;
+
+    FNarr_StoryChapter()
     {
-        EventID = TEXT("default_event");
-        EventTitle = TEXT("Unknown Event");
-        EventDescription = FText::FromString(TEXT("An event occurred"));
-        bCompleted = false;
-        CompletionTime = 0.0f;
+        ChapterID = "";
+        ChapterTitle = "";
+        ChapterDescription = "";
+        bIsCompleted = false;
+        ChapterOrder = 0;
+        NarrativeText = "";
     }
 };
 
-UENUM(BlueprintType)
-enum class ENarr_StoryPhase : uint8
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FNarr_PlayerChoice
 {
-    Awakening       UMETA(DisplayName = "Awakening"),
-    FirstHunt       UMETA(DisplayName = "First Hunt"),
-    TribalContact   UMETA(DisplayName = "Tribal Contact"),
-    TerritoryWars   UMETA(DisplayName = "Territory Wars"),
-    GreatMigration  UMETA(DisplayName = "Great Migration"),
-    Survival        UMETA(DisplayName = "Survival"),
-    Mastery         UMETA(DisplayName = "Mastery")
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Choice")
+    FString ChoiceID;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Choice")
+    FString ChoiceText;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Choice")
+    FString ConsequenceDescription;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Choice")
+    TArray<FString> AffectedNPCs;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Choice")
+    float MoralityImpact;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Choice")
+    bool bWasChosen;
+
+    FNarr_PlayerChoice()
+    {
+        ChoiceID = "";
+        ChoiceText = "";
+        ConsequenceDescription = "";
+        MoralityImpact = 0.0f;
+        bWasChosen = false;
+    }
 };
 
 UCLASS()
@@ -58,75 +86,81 @@ class TRANSPERSONALGAME_API UNarr_StoryProgressionManager : public UGameInstance
 
 public:
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
-    virtual void Deinitialize() override;
 
 protected:
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    ENarr_StoryPhase CurrentPhase;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story Progression")
+    TArray<FNarr_StoryChapter> StoryChapters;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    TMap<FString, FNarr_StoryEvent> StoryEvents;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story Progression")
+    FString CurrentChapterID;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    TArray<FString> CompletedEvents;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story Progression")
+    TArray<FNarr_PlayerChoice> PlayerChoiceHistory;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    TArray<FString> ActiveFlags;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story Progression")
+    float PlayerMorality;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    float GameStartTime;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story Progression")
+    int32 TotalQuestsCompleted;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    int32 DinosaurEncounters;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story Progression")
+    TArray<FString> UnlockedRegions;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    int32 SuccessfulHunts;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    int32 ResourcesGathered;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story Progression")
+    TMap<FString, int32> NPCRelationshipLevels;
 
 public:
-    UFUNCTION(BlueprintCallable, Category = "Story")
-    void TriggerStoryEvent(const FString& EventID);
+    UFUNCTION(BlueprintCallable, Category = "Story Progression")
+    void InitializeStoryChapters();
 
-    UFUNCTION(BlueprintCallable, Category = "Story")
-    bool IsEventCompleted(const FString& EventID) const;
+    UFUNCTION(BlueprintCallable, Category = "Story Progression")
+    bool AdvanceToNextChapter();
 
-    UFUNCTION(BlueprintCallable, Category = "Story")
-    ENarr_StoryPhase GetCurrentPhase() const { return CurrentPhase; }
+    UFUNCTION(BlueprintCallable, Category = "Story Progression")
+    FNarr_StoryChapter GetCurrentChapter();
 
-    UFUNCTION(BlueprintCallable, Category = "Story")
-    void AdvanceToNextPhase();
+    UFUNCTION(BlueprintCallable, Category = "Story Progression")
+    bool IsChapterUnlocked(const FString& ChapterID);
 
-    UFUNCTION(BlueprintCallable, Category = "Story")
-    bool HasStoryFlag(const FString& FlagName) const;
+    UFUNCTION(BlueprintCallable, Category = "Story Progression")
+    void CompleteChapter(const FString& ChapterID);
 
-    UFUNCTION(BlueprintCallable, Category = "Story")
-    void SetStoryFlag(const FString& FlagName);
+    UFUNCTION(BlueprintCallable, Category = "Story Progression")
+    void RecordPlayerChoice(const FNarr_PlayerChoice& Choice);
 
-    UFUNCTION(BlueprintCallable, Category = "Story")
-    void RemoveStoryFlag(const FString& FlagName);
+    UFUNCTION(BlueprintCallable, Category = "Story Progression")
+    float GetPlayerMorality();
 
-    UFUNCTION(BlueprintCallable, Category = "Story")
-    TArray<FNarr_StoryEvent> GetActiveEvents() const;
+    UFUNCTION(BlueprintCallable, Category = "Story Progression")
+    void ModifyPlayerMorality(float Delta);
 
-    UFUNCTION(BlueprintCallable, Category = "Story")
-    void RegisterDinosaurEncounter();
+    UFUNCTION(BlueprintCallable, Category = "Story Progression")
+    TArray<FString> GetUnlockedQuests();
 
-    UFUNCTION(BlueprintCallable, Category = "Story")
-    void RegisterSuccessfulHunt();
+    UFUNCTION(BlueprintCallable, Category = "Story Progression")
+    void UnlockRegion(const FString& RegionName);
 
-    UFUNCTION(BlueprintCallable, Category = "Story")
-    void RegisterResourceGathered();
+    UFUNCTION(BlueprintCallable, Category = "Story Progression")
+    bool IsRegionUnlocked(const FString& RegionName);
 
-    UFUNCTION(BlueprintCallable, Category = "Story")
-    float GetSurvivalTime() const;
+    UFUNCTION(BlueprintCallable, Category = "Story Progression")
+    void UpdateNPCRelationship(const FString& NPCID, int32 Delta);
 
-    UFUNCTION(BlueprintCallable, Category = "Story")
-    FString GetPhaseDescription() const;
+    UFUNCTION(BlueprintCallable, Category = "Story Progression")
+    int32 GetNPCRelationshipLevel(const FString& NPCID);
 
-private:
-    void InitializeStoryEvents();
-    void CheckPhaseProgression();
-    FString GetPhaseDescriptionInternal(ENarr_StoryPhase Phase) const;
+    UFUNCTION(BlueprintCallable, Category = "Story Progression")
+    TArray<FString> GetStoryMilestones();
+
+protected:
+    UFUNCTION()
+    void SetupDefaultChapters();
+
+    UFUNCTION()
+    bool CheckChapterRequirements(const FNarr_StoryChapter& Chapter);
+
+    UFUNCTION()
+    void TriggerChapterEvents(const FString& ChapterID);
 };
+
+#include "Narr_StoryProgressionManager.generated.h"
