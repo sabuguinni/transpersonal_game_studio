@@ -5,367 +5,229 @@
 #include "GameFramework/PlayerController.h"
 #include "Kismet/GameplayStatics.h"
 #include "Components/StaticMeshComponent.h"
-#include "Components/SkeletalMeshComponent.h"
-#include "Components/PrimitiveComponent.h"
-#include "Engine/StaticMeshActor.h"
-#include "TimerManager.h"
 
 APerf_LODManager::APerf_LODManager()
 {
     PrimaryActorTick.bCanEverTick = true;
-    PrimaryActorTick.TickInterval = 0.1f; // 10 FPS for performance monitoring
-    
-    // Set default LOD settings
-    LODSettings.MaxDrawDistance = 10000.0f;
-    LODSettings.CullingDistance = 15000.0f;
-    LODSettings.MaxPhysicsActors = 100;
-    LODSettings.bEnableDistanceCulling = true;
-    LODSettings.bOptimizeCollision = true;
-    
-    CurrentLODLevel = EPerf_LODLevel::High;
-    PerformanceCheckInterval = 1.0f;
-    TargetFrameRate = 60.0f;
-    MinAcceptableFrameRate = 45.0f;
-    
-    LastPerformanceCheck = 0.0f;
-    FrameTimeAccumulator = 0.0f;
-    FrameCount = 0;
-    AverageFrameTime = 0.0f;
+    PrimaryActorTick.TickInterval = 0.1f; // 10 FPS for LOD updates
+
+    UpdateFrequency = 0.1f;
+    bEnableLODSystem = true;
+    MaxMeshesToProcess = 100;
+    CurrentLODUpdates = 0;
+    LastUpdateTime = 0.0f;
+    TimeSinceLastUpdate = 0.0f;
+    CachedPlayerPawn = nullptr;
+
+    // Initialize default LOD settings
+    DefaultLODSettings = FPerf_MeshLODSettings();
 }
 
 void APerf_LODManager::BeginPlay()
 {
     Super::BeginPlay();
     
-    // Find player pawn
-    PlayerPawn = UGameplayStatics::GetPlayerPawn(this, 0);
-    if (!PlayerPawn)
+    CachePlayerPawn();
+    
+    if (GEngine)
     {
-        UE_LOG(LogTemp, Warning, TEXT("LODManager: Player pawn not found"));
+        GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Green, 
+            FString::Printf(TEXT("LOD Manager initialized with %d managed meshes"), ManagedMeshes.Num()));
     }
-    
-    // Auto-register nearby actors for LOD management
-    TArray<AActor*> AllActors;
-    UGameplayStatics::GetAllActorsOfClass(this, AActor::StaticClass(), AllActors);
-    
-    for (AActor* Actor : AllActors)
-    {
-        if (Actor && Actor != this && Actor->IsA<AStaticMeshActor>())
-        {
-            RegisterActorForLOD(Actor);
-        }
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("LODManager: Initialized with %d managed actors"), ManagedActors.Num());
 }
 
 void APerf_LODManager::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
-    
-    UpdatePerformanceMetrics(DeltaTime);
-    
-    // Check performance and adjust LOD periodically
-    LastPerformanceCheck += DeltaTime;
-    if (LastPerformanceCheck >= PerformanceCheckInterval)
-    {
-        AutoAdjustLODLevel();
-        UpdateDistanceCulling();
-        LastPerformanceCheck = 0.0f;
-    }
-}
 
-void APerf_LODManager::UpdatePerformanceMetrics(float DeltaTime)
-{
-    FrameTimeAccumulator += DeltaTime;
-    FrameCount++;
-    
-    // Calculate average frame time over 60 frames
-    if (FrameCount >= 60)
+    if (!bEnableLODSystem)
     {
-        AverageFrameTime = FrameTimeAccumulator / FrameCount;
-        FrameTimeAccumulator = 0.0f;
-        FrameCount = 0;
-    }
-}
-
-void APerf_LODManager::RegisterActorForLOD(AActor* Actor)
-{
-    if (Actor && !ManagedActors.Contains(Actor))
-    {
-        ManagedActors.Add(Actor);
-        ApplyLODToActor(Actor, CurrentLODLevel);
-    }
-}
-
-void APerf_LODManager::UnregisterActorFromLOD(AActor* Actor)
-{
-    if (Actor)
-    {
-        ManagedActors.Remove(Actor);
-    }
-}
-
-void APerf_LODManager::SetLODLevel(EPerf_LODLevel NewLODLevel)
-{
-    if (CurrentLODLevel != NewLODLevel)
-    {
-        CurrentLODLevel = NewLODLevel;
-        
-        // Apply new LOD level to all managed actors
-        for (AActor* Actor : ManagedActors)
-        {
-            if (IsValid(Actor))
-            {
-                ApplyLODToActor(Actor, CurrentLODLevel);
-            }
-        }
-        
-        UE_LOG(LogTemp, Log, TEXT("LODManager: Set LOD level to %d"), (int32)CurrentLODLevel);
-    }
-}
-
-void APerf_LODManager::ApplyLODToActor(AActor* Actor, EPerf_LODLevel LODLevel)
-{
-    if (!IsValid(Actor))
         return;
-    
-    // Get mesh components
-    TArray<UStaticMeshComponent*> StaticMeshComps;
-    Actor->GetComponents<UStaticMeshComponent>(StaticMeshComps);
-    
-    TArray<USkeletalMeshComponent*> SkeletalMeshComps;
-    Actor->GetComponents<USkeletalMeshComponent>(SkeletalMeshComps);
-    
-    float LODDistanceMultiplier = 1.0f;
-    bool bEnableCollision = true;
-    
-    switch (LODLevel)
-    {
-        case EPerf_LODLevel::Ultra:
-            LODDistanceMultiplier = 1.5f;
-            bEnableCollision = true;
-            break;
-        case EPerf_LODLevel::High:
-            LODDistanceMultiplier = 1.0f;
-            bEnableCollision = true;
-            break;
-        case EPerf_LODLevel::Medium:
-            LODDistanceMultiplier = 0.8f;
-            bEnableCollision = true;
-            break;
-        case EPerf_LODLevel::Low:
-            LODDistanceMultiplier = 0.6f;
-            bEnableCollision = false;
-            break;
-        case EPerf_LODLevel::Minimal:
-            LODDistanceMultiplier = 0.4f;
-            bEnableCollision = false;
-            break;
     }
-    
-    // Apply settings to static mesh components
-    for (UStaticMeshComponent* MeshComp : StaticMeshComps)
+
+    TimeSinceLastUpdate += DeltaTime;
+
+    if (TimeSinceLastUpdate >= UpdateFrequency)
     {
-        if (MeshComp)
-        {
-            float MaxDistance = LODSettings.MaxDrawDistance * LODDistanceMultiplier;
-            MeshComp->SetCullDistance(MaxDistance);
-            
-            if (LODSettings.bOptimizeCollision)
-            {
-                OptimizeActorCollision(Actor, bEnableCollision);
-            }
-        }
+        UpdateAllMeshLODs();
+        TimeSinceLastUpdate = 0.0f;
+        LastUpdateTime = GetWorld()->GetTimeSeconds();
     }
-    
-    // Apply settings to skeletal mesh components
-    for (USkeletalMeshComponent* SkeletalComp : SkeletalMeshComps)
+}
+
+void APerf_LODManager::RegisterMeshComponent(UStaticMeshComponent* MeshComponent)
+{
+    if (MeshComponent && !ManagedMeshes.Contains(MeshComponent))
     {
-        if (SkeletalComp)
+        ManagedMeshes.Add(MeshComponent);
+        
+        if (GEngine)
         {
-            float MaxDistance = LODSettings.MaxDrawDistance * LODDistanceMultiplier;
-            SkeletalComp->SetCullDistance(MaxDistance);
+            GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Blue, 
+                FString::Printf(TEXT("Registered mesh: %s (Total: %d)"), 
+                    *MeshComponent->GetName(), ManagedMeshes.Num()));
         }
     }
 }
 
-void APerf_LODManager::OptimizeActorCollision(AActor* Actor, bool bOptimize)
+void APerf_LODManager::UnregisterMeshComponent(UStaticMeshComponent* MeshComponent)
 {
-    if (!IsValid(Actor))
+    if (MeshComponent)
+    {
+        ManagedMeshes.Remove(MeshComponent);
+        
+        if (GEngine)
+        {
+            GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Yellow, 
+                FString::Printf(TEXT("Unregistered mesh: %s (Total: %d)"), 
+                    *MeshComponent->GetName(), ManagedMeshes.Num()));
+        }
+    }
+}
+
+void APerf_LODManager::UpdateLODForMesh(UStaticMeshComponent* MeshComponent, float DistanceToPlayer)
+{
+    if (!MeshComponent || !MeshComponent->GetStaticMesh())
+    {
         return;
-    
-    TArray<UPrimitiveComponent*> PrimitiveComps;
-    Actor->GetComponents<UPrimitiveComponent>(PrimitiveComps);
-    
-    for (UPrimitiveComponent* PrimComp : PrimitiveComps)
-    {
-        if (PrimComp)
-        {
-            if (bOptimize)
-            {
-                // Enable collision but optimize it
-                PrimComp->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-                PrimComp->SetCollisionObjectType(ECollisionChannel::ECC_WorldStatic);
-            }
-            else
-            {
-                // Disable collision for distant objects
-                PrimComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-            }
-        }
     }
-}
 
-float APerf_LODManager::GetDistanceToPlayer(AActor* Actor) const
-{
-    if (!IsValid(Actor) || !IsValid(PlayerPawn))
-        return 99999.0f;
+    int32 OptimalLOD = GetOptimalLODLevel(DistanceToPlayer, DefaultLODSettings);
     
-    return FVector::Dist(Actor->GetActorLocation(), PlayerPawn->GetActorLocation());
-}
-
-void APerf_LODManager::UpdateDistanceCulling()
-{
-    if (!LODSettings.bEnableDistanceCulling || !IsValid(PlayerPawn))
+    // Check if mesh should be culled
+    if (DefaultLODSettings.bEnableDistanceCulling && 
+        DistanceToPlayer > DefaultLODSettings.MaxDrawDistance)
+    {
+        MeshComponent->SetVisibility(false);
         return;
-    
-    for (AActor* Actor : ManagedActors)
+    }
+    else
     {
-        if (!IsValid(Actor))
-            continue;
-        
-        float Distance = GetDistanceToPlayer(Actor);
-        
-        // Hide actors beyond culling distance
-        bool bShouldBeVisible = Distance <= LODSettings.CullingDistance;
-        Actor->SetActorHiddenInGame(!bShouldBeVisible);
-        
-        // Disable tick for very distant actors
-        bool bShouldTick = Distance <= LODSettings.MaxDrawDistance;
-        Actor->SetActorTickEnabled(bShouldTick);
+        MeshComponent->SetVisibility(true);
+    }
+
+    // Set LOD level
+    MeshComponent->SetForcedLodModel(OptimalLOD + 1); // UE5 uses 1-based LOD indices
+    CurrentLODUpdates++;
+}
+
+void APerf_LODManager::UpdateAllMeshLODs()
+{
+    if (!CachedPlayerPawn)
+    {
+        CachePlayerPawn();
+        if (!CachedPlayerPawn)
+        {
+            return;
+        }
+    }
+
+    CurrentLODUpdates = 0;
+    FVector PlayerLocation = CachedPlayerPawn->GetActorLocation();
+
+    // Process meshes in batches to avoid frame spikes
+    int32 MeshesToProcess = FMath::Min(MaxMeshesToProcess, ManagedMeshes.Num());
+    
+    for (int32 i = 0; i < MeshesToProcess; ++i)
+    {
+        if (ManagedMeshes.IsValidIndex(i) && ManagedMeshes[i])
+        {
+            float Distance = GetDistanceToPlayer(ManagedMeshes[i]->GetComponentLocation());
+            UpdateLODForMesh(ManagedMeshes[i], Distance);
+        }
+    }
+
+    // Clean up invalid mesh references
+    ManagedMeshes.RemoveAll([](const UStaticMeshComponent* Mesh) 
+    {
+        return !IsValid(Mesh);
+    });
+}
+
+int32 APerf_LODManager::GetOptimalLODLevel(float Distance, const FPerf_MeshLODSettings& Settings)
+{
+    int32 LODLevel = 0;
+
+    for (int32 i = Settings.LODLevels.Num() - 1; i >= 0; --i)
+    {
+        if (Distance >= Settings.LODLevels[i].Distance)
+        {
+            LODLevel = Settings.LODLevels[i].LODIndex;
+            break;
+        }
+    }
+
+    return LODLevel;
+}
+
+void APerf_LODManager::SetLODSettings(const FPerf_MeshLODSettings& NewSettings)
+{
+    DefaultLODSettings = NewSettings;
+    
+    if (GEngine)
+    {
+        GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Orange, 
+            TEXT("LOD settings updated"));
     }
 }
 
-void APerf_LODManager::OptimizePhysicsActors()
+float APerf_LODManager::GetDistanceToPlayer(const FVector& MeshLocation)
 {
-    TArray<AActor*> PhysicsActors;
-    
-    for (AActor* Actor : ManagedActors)
+    if (!CachedPlayerPawn)
     {
-        if (!IsValid(Actor))
-            continue;
-        
-        TArray<UPrimitiveComponent*> PrimitiveComps;
-        Actor->GetComponents<UPrimitiveComponent>(PrimitiveComps);
-        
-        for (UPrimitiveComponent* PrimComp : PrimitiveComps)
-        {
-            if (PrimComp && PrimComp->IsSimulatingPhysics())
-            {
-                PhysicsActors.Add(Actor);
-                break;
-            }
-        }
+        return 10000.0f; // Return large distance if no player
     }
-    
-    // Disable physics for excess actors (keep closest to player)
-    if (PhysicsActors.Num() > LODSettings.MaxPhysicsActors)
-    {
-        // Sort by distance to player
-        PhysicsActors.Sort([this](const AActor& A, const AActor& B) {
-            float DistA = GetDistanceToPlayer(const_cast<AActor*>(&A));
-            float DistB = GetDistanceToPlayer(const_cast<AActor*>(&B));
-            return DistA < DistB;
-        });
-        
-        // Disable physics for distant actors
-        for (int32 i = LODSettings.MaxPhysicsActors; i < PhysicsActors.Num(); i++)
-        {
-            AActor* Actor = PhysicsActors[i];
-            TArray<UPrimitiveComponent*> PrimitiveComps;
-            Actor->GetComponents<UPrimitiveComponent>(PrimitiveComps);
-            
-            for (UPrimitiveComponent* PrimComp : PrimitiveComps)
-            {
-                if (PrimComp && PrimComp->IsSimulatingPhysics())
-                {
-                    PrimComp->SetSimulatePhysics(false);
-                }
-            }
-        }
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("LODManager: Optimized physics for %d actors"), PhysicsActors.Num());
+
+    return FVector::Dist(CachedPlayerPawn->GetActorLocation(), MeshLocation);
 }
 
-float APerf_LODManager::GetCurrentFrameRate() const
+void APerf_LODManager::EnableLODSystem(bool bEnable)
 {
-    if (AverageFrameTime > 0.0f)
+    bEnableLODSystem = bEnable;
+    
+    if (GEngine)
     {
-        return 1.0f / AverageFrameTime;
+        GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Cyan, 
+            FString::Printf(TEXT("LOD System %s"), bEnable ? TEXT("Enabled") : TEXT("Disabled")));
     }
-    return 0.0f;
 }
 
-void APerf_LODManager::AutoAdjustLODLevel()
+void APerf_LODManager::SetUpdateFrequency(float NewFrequency)
 {
-    float CurrentFPS = GetCurrentFrameRate();
+    UpdateFrequency = FMath::Clamp(NewFrequency, 0.01f, 1.0f);
+    PrimaryActorTick.TickInterval = UpdateFrequency;
     
-    if (CurrentFPS <= 0.0f)
-        return; // Not enough data yet
-    
-    EPerf_LODLevel NewLODLevel = CurrentLODLevel;
-    
-    if (CurrentFPS < MinAcceptableFrameRate)
+    if (GEngine)
     {
-        // Performance is poor, reduce LOD level
-        switch (CurrentLODLevel)
+        GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Purple, 
+            FString::Printf(TEXT("LOD Update Frequency: %.2f"), UpdateFrequency));
+    }
+}
+
+void APerf_LODManager::CachePlayerPawn()
+{
+    if (UWorld* World = GetWorld())
+    {
+        if (APlayerController* PC = World->GetFirstPlayerController())
         {
-            case EPerf_LODLevel::Ultra:
-                NewLODLevel = EPerf_LODLevel::High;
-                break;
-            case EPerf_LODLevel::High:
-                NewLODLevel = EPerf_LODLevel::Medium;
-                break;
-            case EPerf_LODLevel::Medium:
-                NewLODLevel = EPerf_LODLevel::Low;
-                break;
-            case EPerf_LODLevel::Low:
-                NewLODLevel = EPerf_LODLevel::Minimal;
-                break;
-            case EPerf_LODLevel::Minimal:
-                // Already at minimum
-                break;
+            CachedPlayerPawn = PC->GetPawn();
         }
     }
-    else if (CurrentFPS > TargetFrameRate + 10.0f)
+}
+
+void APerf_LODManager::ProcessMeshBatch(int32 StartIndex, int32 EndIndex)
+{
+    if (!CachedPlayerPawn)
     {
-        // Performance is good, can increase LOD level
-        switch (CurrentLODLevel)
-        {
-            case EPerf_LODLevel::Minimal:
-                NewLODLevel = EPerf_LODLevel::Low;
-                break;
-            case EPerf_LODLevel::Low:
-                NewLODLevel = EPerf_LODLevel::Medium;
-                break;
-            case EPerf_LODLevel::Medium:
-                NewLODLevel = EPerf_LODLevel::High;
-                break;
-            case EPerf_LODLevel::High:
-                NewLODLevel = EPerf_LODLevel::Ultra;
-                break;
-            case EPerf_LODLevel::Ultra:
-                // Already at maximum
-                break;
-        }
+        return;
     }
-    
-    if (NewLODLevel != CurrentLODLevel)
+
+    for (int32 i = StartIndex; i < EndIndex && i < ManagedMeshes.Num(); ++i)
     {
-        SetLODLevel(NewLODLevel);
-        UE_LOG(LogTemp, Log, TEXT("LODManager: Auto-adjusted LOD from %d to %d (FPS: %.1f)"), 
-               (int32)CurrentLODLevel, (int32)NewLODLevel, CurrentFPS);
+        if (ManagedMeshes.IsValidIndex(i) && ManagedMeshes[i])
+        {
+            float Distance = GetDistanceToPlayer(ManagedMeshes[i]->GetComponentLocation());
+            UpdateLODForMesh(ManagedMeshes[i], Distance);
+        }
     }
 }
