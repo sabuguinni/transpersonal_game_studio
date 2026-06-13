@@ -1,15 +1,13 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
-#include "Engine/TriggerBox.h"
-#include "Components/StaticMeshComponent.h"
-#include "Components/SphereComponent.h"
-#include "../SharedTypes.h"
+#include "Components/ActorComponent.h"
+#include "Engine/Engine.h"
+#include "SharedTypes.h"
 #include "Narr_DialogueManager.generated.h"
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FNarr_DialogueNode
+struct TRANSPERSONALGAME_API FNarr_DialogueLine
 {
     GENERATED_BODY()
 
@@ -20,131 +18,122 @@ struct TRANSPERSONALGAME_API FNarr_DialogueNode
     FString DialogueText;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    TArray<FString> ResponseOptions;
+    float Duration;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    TArray<int32> NextNodeIndices;
+    ENarr_EmotionalTone EmotionalTone;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    bool bIsEndNode;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    FString AudioFilePath;
-
-    FNarr_DialogueNode()
+    FNarr_DialogueLine()
     {
         SpeakerName = TEXT("");
         DialogueText = TEXT("");
-        bIsEndNode = false;
-        AudioFilePath = TEXT("");
+        Duration = 3.0f;
+        EmotionalTone = ENarr_EmotionalTone::Neutral;
     }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FNarr_StoryArc
+struct TRANSPERSONALGAME_API FNarr_DialogueSequence
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    FString ArcName;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    FString SequenceID;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    FString ArcDescription;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    TArray<FNarr_DialogueLine> DialogueLines;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    TArray<FNarr_DialogueNode> DialogueNodes;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    bool bIsRepeatable;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    int32 CurrentNodeIndex;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    int32 Priority;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    bool bArcCompleted;
-
-    FNarr_StoryArc()
+    FNarr_DialogueSequence()
     {
-        ArcName = TEXT("");
-        ArcDescription = TEXT("");
-        CurrentNodeIndex = 0;
-        bArcCompleted = false;
+        SequenceID = TEXT("");
+        bIsRepeatable = false;
+        Priority = 1;
     }
 };
 
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API ANarr_DialogueManager : public AActor
+UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UNarr_DialogueManager : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    ANarr_DialogueManager();
+    UNarr_DialogueManager();
 
 protected:
     virtual void BeginPlay() override;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    class USphereComponent* InteractionSphere;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue System")
+    TArray<FNarr_DialogueSequence> DialogueSequences;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    class UStaticMeshComponent* NPCMesh;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue System")
+    float DialogueDisplayTime;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    TArray<FNarr_StoryArc> StoryArcs;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue System")
+    bool bAutoAdvanceDialogue;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    int32 CurrentStoryArcIndex;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue System")
+    int32 MaxConcurrentDialogues;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    FString NPCName;
+    UPROPERTY(BlueprintReadOnly, Category = "Dialogue System")
+    FString CurrentSpeaker;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    FString NPCRole;
+    UPROPERTY(BlueprintReadOnly, Category = "Dialogue System")
+    FString CurrentDialogueText;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
-    float InteractionRange;
+    UPROPERTY(BlueprintReadOnly, Category = "Dialogue System")
+    bool bIsDialogueActive;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
-    bool bAutoStartDialogue;
+    UPROPERTY(BlueprintReadOnly, Category = "Dialogue System")
+    int32 CurrentLineIndex;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Dialogue System")
+    FString CurrentSequenceID;
 
 public:
-    virtual void Tick(float DeltaTime) override;
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
     UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    void StartDialogue(class APawn* PlayerPawn);
+    void StartDialogueSequence(const FString& SequenceID);
 
     UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    void ProcessPlayerResponse(int32 ResponseIndex);
+    void StopCurrentDialogue();
 
     UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    void EndDialogue();
+    void AdvanceDialogue();
 
     UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    FNarr_DialogueNode GetCurrentDialogueNode();
+    void AddDialogueSequence(const FNarr_DialogueSequence& NewSequence);
 
-    UFUNCTION(BlueprintCallable, Category = "Story")
-    void AdvanceStoryArc();
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    bool HasDialogueSequence(const FString& SequenceID) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Story")
-    void SetStoryArc(int32 ArcIndex);
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    void TriggerContextualDialogue(ENarr_SurvivalEvent EventType);
 
-    UFUNCTION(BlueprintCallable, Category = "Story")
-    bool IsStoryArcCompleted(int32 ArcIndex);
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    void SetDialogueDisplayTime(float NewDisplayTime);
 
-    UFUNCTION(BlueprintImplementableEvent, Category = "Events")
-    void OnDialogueStarted(const FString& NPCName, const FString& FirstLine);
+    UFUNCTION(BlueprintPure, Category = "Dialogue")
+    bool IsDialogueActive() const { return bIsDialogueActive; }
 
-    UFUNCTION(BlueprintImplementableEvent, Category = "Events")
-    void OnDialogueEnded();
+    UFUNCTION(BlueprintPure, Category = "Dialogue")
+    FString GetCurrentSpeaker() const { return CurrentSpeaker; }
 
-    UFUNCTION(BlueprintImplementableEvent, Category = "Events")
-    void OnStoryArcCompleted(const FString& ArcName);
-
-protected:
-    UFUNCTION()
-    void OnInteractionSphereBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComponent, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult);
+    UFUNCTION(BlueprintPure, Category = "Dialogue")
+    FString GetCurrentDialogueText() const { return CurrentDialogueText; }
 
 private:
-    class APawn* CurrentPlayer;
-    bool bInDialogue;
-    
-    void InitializeDefaultStoryArcs();
-    void SetupInteractionComponents();
+    void ProcessCurrentDialogueLine();
+    void OnDialogueLineComplete();
+    FNarr_DialogueSequence* FindDialogueSequence(const FString& SequenceID);
+    void InitializeDefaultDialogues();
+
+    float CurrentLineTimer;
+    int32 ActiveDialogueCount;
 };
