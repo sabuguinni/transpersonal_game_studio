@@ -1,493 +1,338 @@
 #include "NPCBehaviorComponent.h"
-#include "Engine/World.h"
 #include "Engine/Engine.h"
-#include "GameFramework/Actor.h"
+#include "Engine/World.h"
+#include "GameFramework/Pawn.h"
+#include "GameFramework/PlayerController.h"
 #include "Kismet/GameplayStatics.h"
-#include "Components/PrimitiveComponent.h"
 
-UNPC_BehaviorComponent::UNPC_BehaviorComponent()
+UNPCBehaviorComponent::UNPCBehaviorComponent()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 0.1f; // Update 10 times per second for performance
-
-    // Initialize default values
-    CurrentBehaviorState = ENPC_BehaviorState::Idle;
-    CurrentEmotion = ENPC_Emotion::Neutral;
-    EmotionIntensity = 1.0f;
-    NPCName = TEXT("Unnamed NPC");
-    NPCRole = TEXT("Villager");
-
-    // Default personality traits (can be randomized or set per NPC)
-    Courage = 0.5f;
+    
+    // Default values
+    CurrentState = ENPC_BehaviorState::Idle;
+    PersonalityType = ENPC_PersonalityType::Cautious;
+    
+    Aggressiveness = 0.3f;
     Curiosity = 0.5f;
-    Sociability = 0.5f;
-    Aggression = 0.3f;
-    Intelligence = 0.5f;
-
-    // Memory system defaults
-    MaxMemories = 20;
-    MemoryDecayRate = 0.01f;
-
-    // Schedule defaults
-    CurrentTimeOfDay = 0.0f;
-    bFollowDailySchedule = true;
-
-    // Internal state
-    LastEmotionChangeTime = 0.0f;
-    LastBehaviorChangeTime = 0.0f;
-    CurrentTarget = nullptr;
-    HomeLocation = FVector::ZeroVector;
+    Sociability = 0.4f;
+    
+    MaxShortTermMemories = 10;
+    MaxLongTermMemories = 50;
+    
+    CurrentPatrolIndex = 0;
+    PatrolRadius = 1000.0f;
+    PatrolSpeed = 150.0f;
+    
+    SightRange = 1500.0f;
+    HearingRange = 800.0f;
+    AlertnessLevel = 0.0f;
+    
+    DailyRoutineTimer = 0.0f;
+    RoutineChangeInterval = 300.0f; // 5 minutes
 }
 
-void UNPC_BehaviorComponent::BeginPlay()
+void UNPCBehaviorComponent::BeginPlay()
 {
     Super::BeginPlay();
-
-    // Set home location to current position
-    if (GetOwner())
-    {
-        HomeLocation = GetOwner()->GetActorLocation();
-    }
-
-    // Initialize default daily schedule if none exists
-    if (DailySchedule.Num() == 0)
-    {
-        // Create a basic schedule: Sleep, Work, Socialize, Rest
-        AddScheduledActivity(0.0f, 6.0f, ENPC_BehaviorState::Sleeping, HomeLocation, TEXT("Night rest"));
-        AddScheduledActivity(6.0f, 12.0f, ENPC_BehaviorState::Working, HomeLocation + FVector(500, 0, 0), TEXT("Morning work"));
-        AddScheduledActivity(12.0f, 14.0f, ENPC_BehaviorState::Eating, HomeLocation, TEXT("Midday meal"));
-        AddScheduledActivity(14.0f, 18.0f, ENPC_BehaviorState::Socializing, HomeLocation + FVector(0, 500, 0), TEXT("Afternoon socializing"));
-        AddScheduledActivity(18.0f, 20.0f, ENPC_BehaviorState::Eating, HomeLocation, TEXT("Evening meal"));
-        AddScheduledActivity(20.0f, 24.0f, ENPC_BehaviorState::Idle, HomeLocation, TEXT("Evening rest"));
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("NPC Behavior Component initialized for %s"), *NPCName);
+    
+    // Initialize patrol route
+    InitializePatrolRoute();
+    
+    // Set up timers
+    GetWorld()->GetTimerManager().SetTimer(BehaviorUpdateTimer, this, &UNPCBehaviorComponent::UpdateBehavior, 1.0f, true);
+    GetWorld()->GetTimerManager().SetTimer(MemoryProcessTimer, this, &UNPCBehaviorComponent::ConsolidateMemories, 30.0f, true);
 }
 
-void UNPC_BehaviorComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void UNPCBehaviorComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-
-    if (!GetOwner())
+    
+    // Update daily routine
+    UpdateDailyRoutine(DeltaTime);
+    
+    // Process memories
+    ProcessMemories(DeltaTime);
+    
+    // Update alertness based on environment
+    if (DetectPlayer())
     {
-        return;
-    }
-
-    // Update time tracking
-    LastEmotionChangeTime += DeltaTime;
-    LastBehaviorChangeTime += DeltaTime;
-
-    // Process emotional decay
-    ProcessEmotionalDecay(DeltaTime);
-
-    // Update daily routine based on time
-    if (bFollowDailySchedule)
-    {
-        // Get current time of day from world (simplified - using game time)
-        CurrentTimeOfDay = FMath::Fmod(GetWorld()->GetTimeSeconds() / 3600.0f, 24.0f); // Convert to hours
-        UpdateDailyRoutine(CurrentTimeOfDay);
-    }
-
-    // Check for nearby actors periodically
-    if (LastBehaviorChangeTime > 2.0f) // Check every 2 seconds
-    {
-        CheckForNearbyActors();
-        LastBehaviorChangeTime = 0.0f;
-    }
-
-    // Execute current behavior
-    ExecuteCurrentBehavior();
-
-    // Clean up old memories
-    if (FMath::RandRange(0.0f, 1.0f) < 0.01f) // 1% chance per tick
-    {
-        ForgetOldMemories();
-    }
-}
-
-void UNPC_BehaviorComponent::SetBehaviorState(ENPC_BehaviorState NewState)
-{
-    if (CurrentBehaviorState != NewState)
-    {
-        ENPC_BehaviorState OldState = CurrentBehaviorState;
-        CurrentBehaviorState = NewState;
-        LastBehaviorChangeTime = 0.0f;
-
-        UE_LOG(LogTemp, Log, TEXT("%s changed behavior from %d to %d"), 
-               *NPCName, (int32)OldState, (int32)NewState);
-
-        // Trigger emotional responses to behavior changes
-        switch (NewState)
-        {
-        case ENPC_BehaviorState::Fleeing:
-            SetEmotion(ENPC_Emotion::Fearful, 0.8f);
-            break;
-        case ENPC_BehaviorState::Socializing:
-            if (Sociability > 0.6f)
-            {
-                SetEmotion(ENPC_Emotion::Happy, 0.6f);
-            }
-            break;
-        case ENPC_BehaviorState::Working:
-            SetEmotion(ENPC_Emotion::Neutral, 0.5f);
-            break;
-        case ENPC_BehaviorState::Investigating:
-            if (Curiosity > 0.5f)
-            {
-                SetEmotion(ENPC_Emotion::Curious, 0.7f);
-            }
-            break;
-        }
-    }
-}
-
-void UNPC_BehaviorComponent::SetEmotion(ENPC_Emotion NewEmotion, float Intensity)
-{
-    CurrentEmotion = NewEmotion;
-    EmotionIntensity = FMath::Clamp(Intensity, 0.0f, 1.0f);
-    LastEmotionChangeTime = 0.0f;
-
-    UE_LOG(LogTemp, Log, TEXT("%s emotion changed to %d (intensity: %.2f)"), 
-           *NPCName, (int32)NewEmotion, EmotionIntensity);
-}
-
-ENPC_BehaviorState UNPC_BehaviorComponent::GetCurrentBehaviorState() const
-{
-    return CurrentBehaviorState;
-}
-
-ENPC_Emotion UNPC_BehaviorComponent::GetCurrentEmotion() const
-{
-    return CurrentEmotion;
-}
-
-void UNPC_BehaviorComponent::AddMemory(AActor* Subject, ENPC_Emotion Emotion, ENPC_Relationship Relationship, const FString& Description)
-{
-    if (!Subject)
-    {
-        return;
-    }
-
-    // Check if memory already exists
-    FNPC_Memory* ExistingMemory = FindMemory(Subject);
-    if (ExistingMemory)
-    {
-        // Update existing memory
-        ExistingMemory->LastSeenLocation = Subject->GetActorLocation();
-        ExistingMemory->LastSeenTime = GetWorld()->GetTimeSeconds();
-        ExistingMemory->AssociatedEmotion = Emotion;
-        ExistingMemory->Relationship = Relationship;
-        ExistingMemory->MemoryDescription = Description;
+        AlertnessLevel = FMath::Clamp(AlertnessLevel + DeltaTime * 0.5f, 0.0f, 1.0f);
     }
     else
     {
-        // Create new memory
-        FNPC_Memory NewMemory;
-        NewMemory.Subject = Subject;
-        NewMemory.LastSeenLocation = Subject->GetActorLocation();
-        NewMemory.LastSeenTime = GetWorld()->GetTimeSeconds();
-        NewMemory.AssociatedEmotion = Emotion;
-        NewMemory.Relationship = Relationship;
-        NewMemory.TrustLevel = 0.0f;
-        NewMemory.MemoryDescription = Description;
-
-        Memories.Add(NewMemory);
-
-        // Remove oldest memory if we exceed max
-        if (Memories.Num() > MaxMemories)
-        {
-            Memories.RemoveAt(0);
-        }
+        AlertnessLevel = FMath::Clamp(AlertnessLevel - DeltaTime * 0.2f, 0.0f, 1.0f);
     }
-
-    UE_LOG(LogTemp, Log, TEXT("%s added memory of %s: %s"), 
-           *NPCName, *Subject->GetName(), *Description);
 }
 
-FNPC_Memory* UNPC_BehaviorComponent::FindMemory(AActor* Subject)
+void UNPCBehaviorComponent::SetBehaviorState(ENPC_BehaviorState NewState)
 {
-    if (!Subject)
+    if (CurrentState != NewState)
     {
-        return nullptr;
+        CurrentState = NewState;
+        
+        // Log state change for debugging
+        UE_LOG(LogTemp, Warning, TEXT("NPC %s changed state to %d"), 
+               *GetOwner()->GetName(), 
+               static_cast<int32>(NewState));
+        
+        // Add memory of state change
+        AddMemory(GetOwner()->GetActorLocation(), 
+                 FString::Printf(TEXT("StateChange_%d"), static_cast<int32>(NewState)), 
+                 0.3f);
     }
-
-    for (FNPC_Memory& Memory : Memories)
-    {
-        if (Memory.Subject == Subject)
-        {
-            return &Memory;
-        }
-    }
-
-    return nullptr;
 }
 
-void UNPC_BehaviorComponent::UpdateMemory(AActor* Subject, ENPC_Emotion Emotion, float TrustChange)
+void UNPCBehaviorComponent::AddMemory(FVector Location, FString EventType, float Importance)
 {
-    FNPC_Memory* Memory = FindMemory(Subject);
-    if (Memory)
+    FNPC_MemoryEntry NewMemory;
+    NewMemory.Location = Location;
+    NewMemory.EventType = EventType;
+    NewMemory.Importance = Importance;
+    NewMemory.Timestamp = GetWorld()->GetTimeSeconds();
+    
+    ShortTermMemory.Add(NewMemory);
+    
+    // Limit short-term memory size
+    if (ShortTermMemory.Num() > MaxShortTermMemories)
     {
-        Memory->AssociatedEmotion = Emotion;
-        Memory->TrustLevel = FMath::Clamp(Memory->TrustLevel + TrustChange, -1.0f, 1.0f);
-        Memory->LastSeenTime = GetWorld()->GetTimeSeconds();
-        Memory->LastSeenLocation = Subject->GetActorLocation();
-
-        UE_LOG(LogTemp, Log, TEXT("%s updated memory of %s (trust: %.2f)"), 
-               *NPCName, *Subject->GetName(), Memory->TrustLevel);
+        ShortTermMemory.RemoveAt(0);
     }
 }
 
-void UNPC_BehaviorComponent::ForgetOldMemories()
+void UNPCBehaviorComponent::ProcessMemories(float DeltaTime)
 {
     float CurrentTime = GetWorld()->GetTimeSeconds();
     
-    for (int32 i = Memories.Num() - 1; i >= 0; i--)
+    // Decay memory importance over time
+    for (FNPC_MemoryEntry& Memory : ShortTermMemory)
     {
-        float MemoryAge = CurrentTime - Memories[i].LastSeenTime;
-        float ForgetChance = MemoryAge * MemoryDecayRate;
-        
-        if (FMath::RandRange(0.0f, 1.0f) < ForgetChance)
-        {
-            UE_LOG(LogTemp, Log, TEXT("%s forgot memory of %s"), 
-                   *NPCName, Memories[i].Subject ? *Memories[i].Subject->GetName() : TEXT("Unknown"));
-            Memories.RemoveAt(i);
-        }
-    }
-}
-
-void UNPC_BehaviorComponent::ReactToActor(AActor* OtherActor)
-{
-    if (!OtherActor || OtherActor == GetOwner())
-    {
-        return;
-    }
-
-    // Find existing memory or create impression
-    FNPC_Memory* Memory = FindMemory(OtherActor);
-    ENPC_Relationship Relationship = Memory ? Memory->Relationship : ENPC_Relationship::Stranger;
-
-    // React based on personality and relationship
-    float DistanceToActor = FVector::Dist(GetOwner()->GetActorLocation(), OtherActor->GetActorLocation());
-
-    if (DistanceToActor < 500.0f) // Close proximity
-    {
-        switch (Relationship)
-        {
-        case ENPC_Relationship::Friend:
-        case ENPC_Relationship::Ally:
-            SetEmotion(ENPC_Emotion::Happy, 0.6f);
-            if (CurrentBehaviorState == ENPC_BehaviorState::Idle)
-            {
-                SetBehaviorState(ENPC_BehaviorState::Socializing);
-            }
-            break;
-
-        case ENPC_Relationship::Enemy:
-            SetEmotion(ENPC_Emotion::Angry, 0.8f);
-            if (Courage > 0.6f)
-            {
-                SetBehaviorState(ENPC_BehaviorState::Investigating);
-            }
-            else
-            {
-                SetBehaviorState(ENPC_BehaviorState::Fleeing);
-            }
-            break;
-
-        case ENPC_Relationship::Stranger:
-        case ENPC_Relationship::Unknown:
-            if (Curiosity > 0.5f)
-            {
-                SetEmotion(ENPC_Emotion::Curious, 0.5f);
-                SetBehaviorState(ENPC_BehaviorState::Investigating);
-            }
-            else if (Courage < 0.4f)
-            {
-                SetEmotion(ENPC_Emotion::Suspicious, 0.4f);
-            }
-            break;
-        }
-
-        // Add or update memory
-        if (!Memory)
-        {
-            AddMemory(OtherActor, CurrentEmotion, ENPC_Relationship::Stranger, TEXT("First encounter"));
-        }
-        else
-        {
-            UpdateMemory(OtherActor, CurrentEmotion, 0.0f);
-        }
-    }
-}
-
-ENPC_Relationship UNPC_BehaviorComponent::GetRelationshipWith(AActor* OtherActor)
-{
-    FNPC_Memory* Memory = FindMemory(OtherActor);
-    return Memory ? Memory->Relationship : ENPC_Relationship::Unknown;
-}
-
-void UNPC_BehaviorComponent::StartConversation(AActor* OtherActor)
-{
-    if (!OtherActor)
-    {
-        return;
-    }
-
-    SetBehaviorState(ENPC_BehaviorState::Socializing);
-    CurrentTarget = OtherActor;
-
-    ENPC_Relationship Relationship = GetRelationshipWith(OtherActor);
-    
-    // Adjust emotion based on relationship
-    switch (Relationship)
-    {
-    case ENPC_Relationship::Friend:
-        SetEmotion(ENPC_Emotion::Happy, 0.7f);
-        break;
-    case ENPC_Relationship::Enemy:
-        SetEmotion(ENPC_Emotion::Angry, 0.6f);
-        break;
-    default:
-        SetEmotion(ENPC_Emotion::Curious, 0.5f);
-        break;
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("%s started conversation with %s"), 
-           *NPCName, *OtherActor->GetName());
-}
-
-void UNPC_BehaviorComponent::UpdateDailyRoutine(float TimeOfDay)
-{
-    FNPC_DailySchedule* CurrentActivity = GetCurrentScheduledActivity();
-    
-    if (CurrentActivity && CurrentActivity->Activity != CurrentBehaviorState)
-    {
-        // Only change behavior if not in a high-priority state
-        if (CurrentBehaviorState != ENPC_BehaviorState::Fleeing && 
-            CurrentBehaviorState != ENPC_BehaviorState::Investigating)
-        {
-            SetBehaviorState(CurrentActivity->Activity);
-            
-            UE_LOG(LogTemp, Log, TEXT("%s following schedule: %s at %.1f"), 
-                   *NPCName, *CurrentActivity->ActivityDescription, TimeOfDay);
-        }
-    }
-}
-
-FNPC_DailySchedule* UNPC_BehaviorComponent::GetCurrentScheduledActivity()
-{
-    for (FNPC_DailySchedule& Schedule : DailySchedule)
-    {
-        if (CurrentTimeOfDay >= Schedule.StartTime && CurrentTimeOfDay < Schedule.EndTime)
-        {
-            return &Schedule;
-        }
+        float TimeSinceEvent = CurrentTime - Memory.Timestamp;
+        float DecayRate = 0.1f; // Memories decay at 10% per minute
+        Memory.Importance = FMath::Max(0.0f, Memory.Importance - (DecayRate * TimeSinceEvent / 60.0f));
     }
     
-    return nullptr;
-}
-
-void UNPC_BehaviorComponent::AddScheduledActivity(float StartTime, float EndTime, ENPC_BehaviorState Activity, FVector Location, const FString& Description)
-{
-    FNPC_DailySchedule NewActivity;
-    NewActivity.StartTime = StartTime;
-    NewActivity.EndTime = EndTime;
-    NewActivity.Activity = Activity;
-    NewActivity.ActivityLocation = Location;
-    NewActivity.ActivityDescription = Description;
-    
-    DailySchedule.Add(NewActivity);
-    
-    // Sort schedule by start time
-    DailySchedule.Sort([](const FNPC_DailySchedule& A, const FNPC_DailySchedule& B) {
-        return A.StartTime < B.StartTime;
+    // Remove very weak memories
+    ShortTermMemory.RemoveAll([](const FNPC_MemoryEntry& Memory) {
+        return Memory.Importance < 0.05f;
     });
 }
 
-void UNPC_BehaviorComponent::ProcessEmotionalDecay(float DeltaTime)
+void UNPCBehaviorComponent::InitializePatrolRoute()
 {
-    // Emotions gradually return to neutral over time
-    if (CurrentEmotion != ENPC_Emotion::Neutral && LastEmotionChangeTime > 10.0f)
+    if (PatrolPoints.Num() == 0)
     {
-        EmotionIntensity = FMath::Max(0.0f, EmotionIntensity - (DeltaTime * 0.1f));
+        // Generate random patrol points around the NPC's starting location
+        FVector StartLocation = GetOwner()->GetActorLocation();
         
-        if (EmotionIntensity <= 0.1f)
+        for (int32 i = 0; i < 4; i++)
         {
-            SetEmotion(ENPC_Emotion::Neutral, 0.0f);
+            float Angle = (i * 90.0f) * PI / 180.0f;
+            FVector PatrolPoint = StartLocation + FVector(
+                FMath::Cos(Angle) * PatrolRadius,
+                FMath::Sin(Angle) * PatrolRadius,
+                0.0f
+            );
+            PatrolPoints.Add(PatrolPoint);
         }
     }
 }
 
-void UNPC_BehaviorComponent::CheckForNearbyActors()
+FVector UNPCBehaviorComponent::GetNextPatrolPoint()
 {
-    if (!GetOwner())
+    if (PatrolPoints.Num() == 0)
     {
-        return;
+        return GetOwner()->GetActorLocation();
     }
+    
+    CurrentPatrolIndex = (CurrentPatrolIndex + 1) % PatrolPoints.Num();
+    return PatrolPoints[CurrentPatrolIndex];
+}
 
-    // Find nearby actors
-    TArray<AActor*> FoundActors;
-    UGameplayStatics::GetAllActorsOfClass(GetWorld(), AActor::StaticClass(), FoundActors);
-
-    for (AActor* Actor : FoundActors)
+bool UNPCBehaviorComponent::DetectPlayer()
+{
+    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
+    if (!PlayerPawn)
     {
-        if (Actor && Actor != GetOwner())
+        return false;
+    }
+    
+    float DistanceToPlayer = FVector::Dist(GetOwner()->GetActorLocation(), PlayerPawn->GetActorLocation());
+    
+    // Check if player is within sight range
+    if (DistanceToPlayer <= SightRange)
+    {
+        // Add memory of player sighting
+        AddMemory(PlayerPawn->GetActorLocation(), TEXT("PlayerSighting"), 0.8f);
+        return true;
+    }
+    
+    return false;
+}
+
+void UNPCBehaviorComponent::UpdateDailyRoutine(float DeltaTime)
+{
+    DailyRoutineTimer += DeltaTime;
+    
+    if (DailyRoutineTimer >= RoutineChangeInterval)
+    {
+        DailyRoutineTimer = 0.0f;
+        
+        // Change behavior based on personality and current state
+        switch (PersonalityType)
         {
-            float Distance = FVector::Dist(GetOwner()->GetActorLocation(), Actor->GetActorLocation());
-            
-            // React to actors within perception range
-            if (Distance < 1000.0f) // 10 meter perception range
+            case ENPC_PersonalityType::Cautious:
+                if (AlertnessLevel > 0.5f)
+                {
+                    SetBehaviorState(ENPC_BehaviorState::Fleeing);
+                }
+                else
+                {
+                    SetBehaviorState(ENPC_BehaviorState::Patrolling);
+                }
+                break;
+                
+            case ENPC_PersonalityType::Curious:
+                if (ShortTermMemory.Num() > 0)
+                {
+                    SetBehaviorState(ENPC_BehaviorState::Investigating);
+                }
+                else
+                {
+                    SetBehaviorState(ENPC_BehaviorState::Patrolling);
+                }
+                break;
+                
+            case ENPC_PersonalityType::Social:
+                SetBehaviorState(ENPC_BehaviorState::Socializing);
+                break;
+                
+            case ENPC_PersonalityType::Aggressive:
+                if (AlertnessLevel > 0.3f)
+                {
+                    SetBehaviorState(ENPC_BehaviorState::Investigating);
+                }
+                else
+                {
+                    SetBehaviorState(ENPC_BehaviorState::Patrolling);
+                }
+                break;
+                
+            default:
+                SetBehaviorState(ENPC_BehaviorState::Idle);
+                break;
+        }
+    }
+}
+
+void UNPCBehaviorComponent::UpdateBehavior()
+{
+    // This function is called every second to update NPC behavior
+    switch (CurrentState)
+    {
+        case ENPC_BehaviorState::Patrolling:
+            // Move towards next patrol point
+            if (PatrolPoints.Num() > 0)
             {
-                ReactToActor(Actor);
-                break; // Only react to one actor per check for performance
+                FVector CurrentLocation = GetOwner()->GetActorLocation();
+                FVector TargetLocation = PatrolPoints[CurrentPatrolIndex];
+                float DistanceToTarget = FVector::Dist(CurrentLocation, TargetLocation);
+                
+                if (DistanceToTarget < 100.0f) // Reached patrol point
+                {
+                    GetNextPatrolPoint();
+                }
+            }
+            break;
+            
+        case ENPC_BehaviorState::Investigating:
+            // Investigate the most recent important memory
+            if (ShortTermMemory.Num() > 0)
+            {
+                FNPC_MemoryEntry* MostImportant = nullptr;
+                float HighestImportance = 0.0f;
+                
+                for (FNPC_MemoryEntry& Memory : ShortTermMemory)
+                {
+                    if (Memory.Importance > HighestImportance)
+                    {
+                        HighestImportance = Memory.Importance;
+                        MostImportant = &Memory;
+                    }
+                }
+                
+                if (MostImportant)
+                {
+                    // Move towards the memory location
+                    float DistanceToMemory = FVector::Dist(GetOwner()->GetActorLocation(), MostImportant->Location);
+                    if (DistanceToMemory < 150.0f)
+                    {
+                        // Finished investigating
+                        SetBehaviorState(ENPC_BehaviorState::Idle);
+                    }
+                }
+            }
+            break;
+            
+        case ENPC_BehaviorState::Fleeing:
+            // Move away from threats
+            if (AlertnessLevel < 0.2f)
+            {
+                SetBehaviorState(ENPC_BehaviorState::Idle);
+            }
+            break;
+            
+        default:
+            // Idle behavior - occasionally switch to patrolling
+            if (FMath::RandRange(0.0f, 1.0f) < 0.1f)
+            {
+                SetBehaviorState(ENPC_BehaviorState::Patrolling);
+            }
+            break;
+    }
+}
+
+void UNPCBehaviorComponent::ConsolidateMemories()
+{
+    float CurrentTime = GetWorld()->GetTimeSeconds();
+    
+    // Move important short-term memories to long-term
+    for (int32 i = ShortTermMemory.Num() - 1; i >= 0; i--)
+    {
+        FNPC_MemoryEntry& Memory = ShortTermMemory[i];
+        float MemoryAge = CurrentTime - Memory.Timestamp;
+        
+        // Memories older than 5 minutes with high importance become long-term
+        if (MemoryAge > 300.0f && Memory.Importance > 0.6f)
+        {
+            LongTermMemory.Add(Memory);
+            ShortTermMemory.RemoveAt(i);
+            
+            // Limit long-term memory size
+            if (LongTermMemory.Num() > MaxLongTermMemories)
+            {
+                LongTermMemory.RemoveAt(0);
             }
         }
     }
 }
 
-void UNPC_BehaviorComponent::ExecuteCurrentBehavior()
+float UNPCBehaviorComponent::CalculateMemoryImportance(const FNPC_MemoryEntry& Memory, float CurrentTime)
 {
-    if (!GetOwner())
+    float TimeSinceEvent = CurrentTime - Memory.Timestamp;
+    float BaseImportance = Memory.Importance;
+    
+    // Importance decays over time, but some events maintain importance longer
+    if (Memory.EventType.Contains(TEXT("PlayerSighting")))
     {
-        return;
+        return BaseImportance * FMath::Exp(-TimeSinceEvent / 600.0f); // 10-minute half-life
     }
-
-    // Simple behavior execution - in a full implementation, this would drive movement and animations
-    switch (CurrentBehaviorState)
+    else if (Memory.EventType.Contains(TEXT("Danger")))
     {
-    case ENPC_BehaviorState::Patrolling:
-        // Move towards patrol points
-        break;
-        
-    case ENPC_BehaviorState::Fleeing:
-        // Move away from threats
-        if (CurrentTarget)
-        {
-            FVector FleeDirection = (GetOwner()->GetActorLocation() - CurrentTarget->GetActorLocation()).GetSafeNormal();
-            // In full implementation, would move the actor
-        }
-        break;
-        
-    case ENPC_BehaviorState::Investigating:
-        // Move towards points of interest
-        if (CurrentTarget)
-        {
-            FVector InvestigateDirection = (CurrentTarget->GetActorLocation() - GetOwner()->GetActorLocation()).GetSafeNormal();
-            // In full implementation, would move the actor
-        }
-        break;
-        
-    case ENPC_BehaviorState::Socializing:
-        // Face towards social target
-        if (CurrentTarget)
-        {
-            FVector LookDirection = (CurrentTarget->GetActorLocation() - GetOwner()->GetActorLocation()).GetSafeNormal();
-            // In full implementation, would rotate the actor
-        }
-        break;
-        
-    default:
-        // Idle or other states - minimal processing
-        break;
+        return BaseImportance * FMath::Exp(-TimeSinceEvent / 1200.0f); // 20-minute half-life
+    }
+    else
+    {
+        return BaseImportance * FMath::Exp(-TimeSinceEvent / 300.0f); // 5-minute half-life
     }
 }
