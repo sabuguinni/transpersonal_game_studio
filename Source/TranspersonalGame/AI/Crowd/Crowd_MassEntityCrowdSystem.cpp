@@ -3,7 +3,7 @@
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
 #include "Kismet/GameplayStatics.h"
-#include "DrawDebugHelpers.h"
+#include "Math/UnrealMathUtility.h"
 
 UCrowd_MassEntityCrowdSystem::UCrowd_MassEntityCrowdSystem()
 {
@@ -16,42 +16,38 @@ UCrowd_MassEntityCrowdSystem::UCrowd_MassEntityCrowdSystem()
     bEnablePathfinding = true;
     bEnableLODSystem = true;
     
-    // Initialize flocking parameters
     FlockingParams.SeparationWeight = 2.0f;
     FlockingParams.AlignmentWeight = 1.0f;
     FlockingParams.CohesionWeight = 1.0f;
     FlockingParams.NeighborRadius = 200.0f;
     FlockingParams.MaxSpeed = 300.0f;
     FlockingParams.MaxForce = 500.0f;
+    
+    LODUpdateTimer = 0.0f;
+    LODUpdateInterval = 0.5f;
 }
 
 void UCrowd_MassEntityCrowdSystem::BeginPlay()
 {
     Super::BeginPlay();
-    
     InitializeCrowdSystem();
-    
-    UE_LOG(LogTemp, Warning, TEXT("Crowd System initialized with max size: %d"), MaxCrowdSize);
 }
 
 void UCrowd_MassEntityCrowdSystem::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
     
-    if (CrowdAgents.Num() > 0)
+    if (bEnableLODSystem)
     {
-        UpdateCrowdBehavior(DeltaTime);
-        
-        if (bEnableLODSystem)
+        LODUpdateTimer += DeltaTime;
+        if (LODUpdateTimer >= LODUpdateInterval)
         {
-            LODUpdateTimer += DeltaTime;
-            if (LODUpdateTimer >= LODUpdateInterval)
-            {
-                UpdateLODSystem();
-                LODUpdateTimer = 0.0f;
-            }
+            UpdateLODSystem();
+            LODUpdateTimer = 0.0f;
         }
     }
+    
+    UpdateCrowdBehavior(DeltaTime);
 }
 
 void UCrowd_MassEntityCrowdSystem::InitializeCrowdSystem()
@@ -61,8 +57,9 @@ void UCrowd_MassEntityCrowdSystem::InitializeCrowdSystem()
     MediumDetailAgents.Empty();
     LowDetailAgents.Empty();
     
-    // Spawn initial crowd agents
     SpawnCrowdAgents(FMath::Min(MaxCrowdSize, 500)); // Start with 500 agents
+    
+    UE_LOG(LogTemp, Warning, TEXT("Crowd System Initialized with %d agents"), CrowdAgents.Num());
 }
 
 void UCrowd_MassEntityCrowdSystem::SpawnCrowdAgents(int32 NumAgents)
@@ -74,7 +71,7 @@ void UCrowd_MassEntityCrowdSystem::SpawnCrowdAgents(int32 NumAgents)
     
     FVector OwnerLocation = GetOwner() ? GetOwner()->GetActorLocation() : FVector::ZeroVector;
     
-    for (int32 i = 0; i < NumAgents; i++)
+    for (int32 i = 0; i < NumAgents; ++i)
     {
         FCrowd_CrowdAgent NewAgent;
         
@@ -108,15 +105,32 @@ void UCrowd_MassEntityCrowdSystem::UpdateCrowdBehavior(float DeltaTime)
         return;
     }
     
-    // Update each active agent
-    for (int32 i = 0; i < CrowdAgents.Num(); i++)
+    // Update only high and medium detail agents for performance
+    TArray<int32> ActiveAgents;
+    ActiveAgents.Append(HighDetailAgents);
+    ActiveAgents.Append(MediumDetailAgents);
+    
+    // If no LOD system, update all agents
+    if (!bEnableLODSystem)
     {
-        FCrowd_CrowdAgent& Agent = CrowdAgents[i];
-        
-        if (!Agent.bIsActive)
+        ActiveAgents.Empty();
+        for (int32 i = 0; i < CrowdAgents.Num(); ++i)
+        {
+            if (CrowdAgents[i].bIsActive)
+            {
+                ActiveAgents.Add(i);
+            }
+        }
+    }
+    
+    for (int32 AgentIndex : ActiveAgents)
+    {
+        if (!CrowdAgents.IsValidIndex(AgentIndex) || !CrowdAgents[AgentIndex].bIsActive)
         {
             continue;
         }
+        
+        FCrowd_CrowdAgent& Agent = CrowdAgents[AgentIndex];
         
         // Calculate flocking forces
         FVector FlockingForce = CalculateFlockingForce(Agent);
@@ -124,7 +138,7 @@ void UCrowd_MassEntityCrowdSystem::UpdateCrowdBehavior(float DeltaTime)
         // Apply forces to velocity
         Agent.Velocity += FlockingForce * DeltaTime;
         
-        // Limit velocity to max speed
+        // Clamp velocity to max speed
         if (Agent.Velocity.Size() > FlockingParams.MaxSpeed)
         {
             Agent.Velocity = Agent.Velocity.GetSafeNormal() * FlockingParams.MaxSpeed;
@@ -133,14 +147,17 @@ void UCrowd_MassEntityCrowdSystem::UpdateCrowdBehavior(float DeltaTime)
         // Update position
         Agent.Position += Agent.Velocity * DeltaTime;
         
-        // Keep agents within bounds
-        FVector OwnerLocation = GetOwner() ? GetOwner()->GetActorLocation() : FVector::ZeroVector;
-        float DistanceFromCenter = FVector::Dist(Agent.Position, OwnerLocation);
-        
-        if (DistanceFromCenter > SpawnRadius * 1.5f)
+        // Simple boundary wrapping
+        if (GetOwner())
         {
-            FVector DirectionToCenter = (OwnerLocation - Agent.Position).GetSafeNormal();
-            Agent.Velocity += DirectionToCenter * FlockingParams.MaxForce * DeltaTime;
+            FVector OwnerLocation = GetOwner()->GetActorLocation();
+            float MaxDistance = SpawnRadius * 1.5f;
+            
+            FVector ToOwner = OwnerLocation - Agent.Position;
+            if (ToOwner.Size() > MaxDistance)
+            {
+                Agent.Position = OwnerLocation + ToOwner.GetSafeNormal() * (MaxDistance * 0.8f);
+            }
         }
     }
 }
@@ -151,23 +168,17 @@ void UCrowd_MassEntityCrowdSystem::SetCrowdBehaviorState(ECrowd_CrowdBehaviorSta
     {
         Agent.BehaviorState = NewState;
     }
-    
-    UE_LOG(LogTemp, Warning, TEXT("Set crowd behavior state to: %d"), (int32)NewState);
 }
 
 FVector UCrowd_MassEntityCrowdSystem::CalculateFlockingForce(const FCrowd_CrowdAgent& Agent)
 {
-    FVector SeparationForce = CalculateSeparationForce(Agent);
-    FVector AlignmentForce = CalculateAlignmentForce(Agent);
-    FVector CohesionForce = CalculateCohesionForce(Agent);
+    FVector SeparationForce = CalculateSeparationForce(Agent) * FlockingParams.SeparationWeight;
+    FVector AlignmentForce = CalculateAlignmentForce(Agent) * FlockingParams.AlignmentWeight;
+    FVector CohesionForce = CalculateCohesionForce(Agent) * FlockingParams.CohesionWeight;
     
-    // Weight the forces
-    FVector TotalForce = 
-        SeparationForce * FlockingParams.SeparationWeight +
-        AlignmentForce * FlockingParams.AlignmentWeight +
-        CohesionForce * FlockingParams.CohesionWeight;
+    FVector TotalForce = SeparationForce + AlignmentForce + CohesionForce;
     
-    // Limit force magnitude
+    // Clamp total force
     if (TotalForce.Size() > FlockingParams.MaxForce)
     {
         TotalForce = TotalForce.GetSafeNormal() * FlockingParams.MaxForce;
@@ -189,12 +200,12 @@ FVector UCrowd_MassEntityCrowdSystem::CalculateSeparationForce(const FCrowd_Crow
         }
         
         float Distance = FVector::Dist(Agent.Position, OtherAgent.Position);
-        
-        if (Distance < FlockingParams.NeighborRadius && Distance > 0.0f)
+        if (Distance > 0.0f && Distance < FlockingParams.NeighborRadius * 0.5f)
         {
-            FVector Difference = Agent.Position - OtherAgent.Position;
-            Difference = Difference.GetSafeNormal() / Distance; // Weight by distance
-            SeparationForce += Difference;
+            FVector Diff = Agent.Position - OtherAgent.Position;
+            Diff.Normalize();
+            Diff /= Distance; // Weight by distance
+            SeparationForce += Diff;
             NeighborCount++;
         }
     }
@@ -202,7 +213,8 @@ FVector UCrowd_MassEntityCrowdSystem::CalculateSeparationForce(const FCrowd_Crow
     if (NeighborCount > 0)
     {
         SeparationForce /= NeighborCount;
-        SeparationForce = SeparationForce.GetSafeNormal() * FlockingParams.MaxSpeed;
+        SeparationForce.Normalize();
+        SeparationForce *= FlockingParams.MaxSpeed;
         SeparationForce -= Agent.Velocity;
     }
     
@@ -222,8 +234,7 @@ FVector UCrowd_MassEntityCrowdSystem::CalculateAlignmentForce(const FCrowd_Crowd
         }
         
         float Distance = FVector::Dist(Agent.Position, OtherAgent.Position);
-        
-        if (Distance < FlockingParams.NeighborRadius)
+        if (Distance > 0.0f && Distance < FlockingParams.NeighborRadius)
         {
             AlignmentForce += OtherAgent.Velocity;
             NeighborCount++;
@@ -233,7 +244,8 @@ FVector UCrowd_MassEntityCrowdSystem::CalculateAlignmentForce(const FCrowd_Crowd
     if (NeighborCount > 0)
     {
         AlignmentForce /= NeighborCount;
-        AlignmentForce = AlignmentForce.GetSafeNormal() * FlockingParams.MaxSpeed;
+        AlignmentForce.Normalize();
+        AlignmentForce *= FlockingParams.MaxSpeed;
         AlignmentForce -= Agent.Velocity;
     }
     
@@ -253,8 +265,7 @@ FVector UCrowd_MassEntityCrowdSystem::CalculateCohesionForce(const FCrowd_CrowdA
         }
         
         float Distance = FVector::Dist(Agent.Position, OtherAgent.Position);
-        
-        if (Distance < FlockingParams.NeighborRadius)
+        if (Distance > 0.0f && Distance < FlockingParams.NeighborRadius)
         {
             CohesionForce += OtherAgent.Position;
             NeighborCount++;
@@ -265,7 +276,8 @@ FVector UCrowd_MassEntityCrowdSystem::CalculateCohesionForce(const FCrowd_CrowdA
     {
         CohesionForce /= NeighborCount;
         CohesionForce -= Agent.Position;
-        CohesionForce = CohesionForce.GetSafeNormal() * FlockingParams.MaxSpeed;
+        CohesionForce.Normalize();
+        CohesionForce *= FlockingParams.MaxSpeed;
         CohesionForce -= Agent.Velocity;
     }
     
@@ -274,18 +286,9 @@ FVector UCrowd_MassEntityCrowdSystem::CalculateCohesionForce(const FCrowd_CrowdA
 
 void UCrowd_MassEntityCrowdSystem::UpdateLODSystem()
 {
-    if (!GetWorld())
+    if (!GetWorld() || CrowdAgents.Num() == 0)
     {
         return;
-    }
-    
-    // Get player location for LOD calculations
-    APlayerController* PlayerController = GetWorld()->GetFirstPlayerController();
-    FVector PlayerLocation = FVector::ZeroVector;
-    
-    if (PlayerController && PlayerController->GetPawn())
-    {
-        PlayerLocation = PlayerController->GetPawn()->GetActorLocation();
     }
     
     // Clear LOD arrays
@@ -293,17 +296,25 @@ void UCrowd_MassEntityCrowdSystem::UpdateLODSystem()
     MediumDetailAgents.Empty();
     LowDetailAgents.Empty();
     
-    // Categorize agents by distance from player
-    for (int32 i = 0; i < CrowdAgents.Num(); i++)
+    // Get player location for distance calculations
+    FVector PlayerLocation = FVector::ZeroVector;
+    if (APlayerController* PC = UGameplayStatics::GetPlayerController(GetWorld(), 0))
     {
-        const FCrowd_CrowdAgent& Agent = CrowdAgents[i];
-        
-        if (!Agent.bIsActive)
+        if (APawn* PlayerPawn = PC->GetPawn())
+        {
+            PlayerLocation = PlayerPawn->GetActorLocation();
+        }
+    }
+    
+    // Categorize agents by distance from player
+    for (int32 i = 0; i < CrowdAgents.Num(); ++i)
+    {
+        if (!CrowdAgents[i].bIsActive)
         {
             continue;
         }
         
-        float DistanceToPlayer = FVector::Dist(Agent.Position, PlayerLocation);
+        float DistanceToPlayer = FVector::Dist(CrowdAgents[i].Position, PlayerLocation);
         
         if (DistanceToPlayer < 500.0f)
         {
@@ -319,30 +330,22 @@ void UCrowd_MassEntityCrowdSystem::UpdateLODSystem()
         }
     }
     
-    // Deactivate distant agents if we have too many
-    if (CrowdAgents.Num() > MaxCrowdSize)
+    // Limit high detail agents for performance
+    if (HighDetailAgents.Num() > 100)
     {
-        int32 AgentsToDeactivate = CrowdAgents.Num() - MaxCrowdSize;
-        int32 DeactivatedCount = 0;
-        
-        // Start with the most distant agents
-        for (int32 AgentIndex : LowDetailAgents)
-        {
-            if (DeactivatedCount >= AgentsToDeactivate)
-            {
-                break;
-            }
-            
-            CrowdAgents[AgentIndex].bIsActive = false;
-            DeactivatedCount++;
-        }
+        HighDetailAgents.SetNum(100);
+    }
+    
+    // Limit medium detail agents
+    if (MediumDetailAgents.Num() > 200)
+    {
+        MediumDetailAgents.SetNum(200);
     }
 }
 
 int32 UCrowd_MassEntityCrowdSystem::GetActiveCrowdAgentCount() const
 {
     int32 ActiveCount = 0;
-    
     for (const FCrowd_CrowdAgent& Agent : CrowdAgents)
     {
         if (Agent.bIsActive)
@@ -350,6 +353,5 @@ int32 UCrowd_MassEntityCrowdSystem::GetActiveCrowdAgentCount() const
             ActiveCount++;
         }
     }
-    
     return ActiveCount;
 }
