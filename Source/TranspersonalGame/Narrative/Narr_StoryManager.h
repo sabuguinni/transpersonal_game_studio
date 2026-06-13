@@ -1,97 +1,167 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Subsystems/GameInstanceSubsystem.h"
-#include "Engine/Engine.h"
+#include "Engine/GameInstanceSubsystem.h"
+#include "Engine/DataTable.h"
 #include "Narr_StoryManager.generated.h"
 
 UENUM(BlueprintType)
-enum class ENarr_StoryChapter : uint8
+enum class ENarr_StoryPhase : uint8
 {
-    Awakening,      // Player starts alone, learns basic survival
-    Discovery,      // First dinosaur encounters, territory awareness
-    Adaptation,     // Tool crafting, shelter building
-    Confrontation,  // Major predator encounters
-    Mastery,        // Advanced survival, leadership
-    Legacy          // End game content
+    Awakening,      // Player awakens in prehistoric world
+    FirstHunt,      // Learning to hunt small prey
+    TribalContact,  // Meeting other survivors
+    TerritoryWar,   // Conflict over resources
+    AlphaChallenge, // Facing apex predators
+    Mastery         // Becoming apex survivor
+};
+
+UENUM(BlueprintType)
+enum class ENarr_StoryEvent : uint8
+{
+    PlayerSpawn,
+    FirstKill,
+    FirstDeath,
+    TribalMeeting,
+    ResourceDiscovery,
+    TerritoryMarked,
+    AlphaEncounter,
+    SurvivalMilestone
 };
 
 USTRUCT(BlueprintType)
-struct FNarr_StoryEvent
+struct TRANSPERSONALGAME_API FNarr_StoryState : public FTableRowBase
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    FString EventID;
+    ENarr_StoryPhase CurrentPhase;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    FString EventDescription;
+    int32 SurvivalDays;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    ENarr_StoryChapter RequiredChapter;
+    int32 KillCount;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    bool bIsCompleted;
+    int32 DeathCount;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    TArray<FString> Prerequisites;
+    TArray<FString> CompletedEvents;
 
-    FNarr_StoryEvent()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    TArray<FString> ActiveObjectives;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    bool bTribalContactMade;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    bool bTerritoryEstablished;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    bool bAlphaDefeated;
+
+    FNarr_StoryState()
     {
-        EventID = TEXT("");
-        EventDescription = TEXT("");
-        RequiredChapter = ENarr_StoryChapter::Awakening;
-        bIsCompleted = false;
+        CurrentPhase = ENarr_StoryPhase::Awakening;
+        SurvivalDays = 0;
+        KillCount = 0;
+        DeathCount = 0;
+        bTribalContactMade = false;
+        bTerritoryEstablished = false;
+        bAlphaDefeated = false;
     }
 };
 
-UCLASS()
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FNarr_StoryTrigger : public FTableRowBase
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    ENarr_StoryEvent TriggerEvent;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    ENarr_StoryPhase RequiredPhase;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    FString TriggerDescription;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    FString DialogueID;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    TArray<FString> UnlockObjectives;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    bool bAdvancePhase;
+
+    FNarr_StoryTrigger()
+    {
+        TriggerEvent = ENarr_StoryEvent::PlayerSpawn;
+        RequiredPhase = ENarr_StoryPhase::Awakening;
+        bAdvancePhase = false;
+    }
+};
+
+UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UNarr_StoryManager : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
 public:
+    UNarr_StoryManager();
+
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
 
-    // Story Progression
     UFUNCTION(BlueprintCallable, Category = "Story")
-    void AdvanceToChapter(ENarr_StoryChapter NewChapter);
+    void TriggerStoryEvent(ENarr_StoryEvent Event, AActor* Instigator = nullptr);
 
     UFUNCTION(BlueprintCallable, Category = "Story")
-    ENarr_StoryChapter GetCurrentChapter() const;
+    void AdvanceStoryPhase(ENarr_StoryPhase NewPhase);
 
     UFUNCTION(BlueprintCallable, Category = "Story")
-    void CompleteStoryEvent(const FString& EventID);
+    ENarr_StoryPhase GetCurrentPhase() const;
 
     UFUNCTION(BlueprintCallable, Category = "Story")
-    bool IsStoryEventCompleted(const FString& EventID) const;
-
-    // Story Events
-    UFUNCTION(BlueprintCallable, Category = "Story")
-    void RegisterStoryEvent(const FNarr_StoryEvent& NewEvent);
+    FNarr_StoryState GetStoryState() const;
 
     UFUNCTION(BlueprintCallable, Category = "Story")
-    TArray<FNarr_StoryEvent> GetAvailableEvents() const;
-
-    // Narrative Triggers
-    UFUNCTION(BlueprintCallable, Category = "Story")
-    void TriggerNarrativeEvent(const FString& EventName);
+    void UpdateSurvivalStats(int32 DaysAlive, int32 Kills, int32 Deaths);
 
     UFUNCTION(BlueprintCallable, Category = "Story")
-    FString GetChapterDescription(ENarr_StoryChapter Chapter) const;
+    void CompleteObjective(const FString& ObjectiveID);
+
+    UFUNCTION(BlueprintCallable, Category = "Story")
+    void AddObjective(const FString& ObjectiveID, const FString& Description);
+
+    UFUNCTION(BlueprintCallable, Category = "Story")
+    TArray<FString> GetActiveObjectives() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Story")
+    void LoadStoryData(UDataTable* StoryTable);
+
+    UFUNCTION(BlueprintCallable, Category = "Story")
+    void SaveStoryProgress();
+
+    UFUNCTION(BlueprintCallable, Category = "Story")
+    void LoadStoryProgress();
 
 protected:
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Story")
-    ENarr_StoryChapter CurrentChapter;
+    UPROPERTY(BlueprintReadOnly, Category = "Story")
+    FNarr_StoryState CurrentStoryState;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Story")
-    TArray<FNarr_StoryEvent> StoryEvents;
+    UPROPERTY()
+    UDataTable* StoryDataTable;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Story")
-    TArray<FString> CompletedEvents;
+    UPROPERTY()
+    TMap<ENarr_StoryEvent, FNarr_StoryTrigger> StoryTriggers;
 
 private:
-    void InitializeDefaultStoryEvents();
-    bool ArePrerequisitesMet(const FNarr_StoryEvent& Event) const;
-    void BroadcastChapterChange(ENarr_StoryChapter NewChapter);
+    void ProcessStoryTrigger(const FNarr_StoryTrigger& Trigger, AActor* Instigator);
+    bool CheckPhaseRequirements(ENarr_StoryPhase Phase);
+    void InitializeDefaultObjectives();
+    FString GetPhaseDescription(ENarr_StoryPhase Phase);
 };
+
+#include "Narr_StoryManager.generated.h"
