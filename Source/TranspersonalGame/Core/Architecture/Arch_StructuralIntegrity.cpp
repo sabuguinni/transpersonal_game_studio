@@ -1,190 +1,173 @@
 #include "Arch_StructuralIntegrity.h"
 #include "Components/StaticMeshComponent.h"
-#include "Materials/MaterialInstanceDynamic.h"
-#include "Kismet/GameplayStatics.h"
 #include "Engine/World.h"
+#include "TimerManager.h"
+#include "Materials/MaterialInstanceDynamic.h"
 
 UArch_StructuralIntegrity::UArch_StructuralIntegrity()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 1.0f; // Update every second
+    PrimaryComponentTick.TickInterval = 1.0f;
     
-    CurrentState = EArch_StructuralState::Pristine;
-    StructuralHealth = 100.0f;
-    MaxStructuralHealth = 100.0f;
-    WeatheringRate = 0.1f;
-    RainDamageMultiplier = 2.0f;
-    WindDamageMultiplier = 1.5f;
-    bCanCollapse = true;
-    CollapseThreshold = 10.0f;
+    MaxIntegrity = 100.0f;
+    WeatherResistance = 50.0f;
+    ImpactThreshold = 25.0f;
+    
+    DamageState.IntegrityPercentage = 100.0f;
+    DamageState.WeatheringRate = 0.1f;
+    DamageState.LastDamageTime = 0.0f;
+    DamageState.bIsCollapsed = false;
 }
 
 void UArch_StructuralIntegrity::BeginPlay()
 {
     Super::BeginPlay();
     
-    // Initialize damage pattern
-    DamagePattern.CrackSeverity = 0.0f;
-    DamagePattern.MossGrowth = FMath::RandRange(0.0f, 0.2f);
-    DamagePattern.WeatheringIntensity = 0.0f;
+    // Find all static mesh components in the owner actor
+    if (AActor* Owner = GetOwner())
+    {
+        TArray<UStaticMeshComponent*> MeshComponents;
+        Owner->GetComponents<UStaticMeshComponent>(MeshComponents);
+        
+        for (UStaticMeshComponent* MeshComp : MeshComponents)
+        {
+            if (MeshComp && MeshComp->GetStaticMesh())
+            {
+                StructuralElements.Add(MeshComp);
+            }
+        }
+    }
     
-    UpdateStructuralState();
+    // Initialize damage state
+    DamageState.LastDamageTime = GetWorld()->GetTimeSeconds();
 }
 
 void UArch_StructuralIntegrity::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
     
-    ProcessWeathering(DeltaTime);
-    UpdateStructuralState();
-}
-
-void UArch_StructuralIntegrity::ApplyWeatherDamage(float DamageAmount, EWeatherType WeatherType)
-{
-    float MultipliedDamage = DamageAmount;
-    
-    switch (WeatherType)
+    if (!DamageState.bIsCollapsed)
     {
-        case EWeatherType::Rain:
-        case EWeatherType::Storm:
-            MultipliedDamage *= RainDamageMultiplier;
-            DamagePattern.MossGrowth += 0.1f;
-            break;
-        case EWeatherType::Wind:
-            MultipliedDamage *= WindDamageMultiplier;
-            break;
-        default:
-            break;
-    }
-    
-    StructuralHealth = FMath::Clamp(StructuralHealth - MultipliedDamage, 0.0f, MaxStructuralHealth);
-    UpdateDamagePattern();
-    ApplyVisualDamage();
-}
-
-void UArch_StructuralIntegrity::ApplyImpactDamage(float DamageAmount, FVector ImpactLocation)
-{
-    StructuralHealth = FMath::Clamp(StructuralHealth - DamageAmount, 0.0f, MaxStructuralHealth);
-    
-    // Add crack at impact location
-    DamagePattern.CrackLocations.Add(ImpactLocation);
-    DamagePattern.CrackSeverity += DamageAmount * 0.01f;
-    
-    UpdateDamagePattern();
-    ApplyVisualDamage();
-    
-    if (StructuralHealth <= CollapseThreshold && bCanCollapse)
-    {
-        TriggerCollapse();
-    }
-}
-
-void UArch_StructuralIntegrity::UpdateStructuralState()
-{
-    float HealthPercentage = GetStructuralHealthPercentage();
-    
-    if (HealthPercentage > 80.0f)
-    {
-        CurrentState = EArch_StructuralState::Pristine;
-    }
-    else if (HealthPercentage > 60.0f)
-    {
-        CurrentState = EArch_StructuralState::Weathered;
-    }
-    else if (HealthPercentage > 30.0f)
-    {
-        CurrentState = EArch_StructuralState::Damaged;
-    }
-    else if (HealthPercentage > 10.0f)
-    {
-        CurrentState = EArch_StructuralState::Ruined;
-    }
-    else
-    {
-        CurrentState = EArch_StructuralState::Collapsed;
-        if (bCanCollapse)
-        {
-            TriggerCollapse();
-        }
-    }
-}
-
-void UArch_StructuralIntegrity::TriggerCollapse()
-{
-    CurrentState = EArch_StructuralState::Collapsed;
-    
-    // Disable collision and physics
-    if (AActor* Owner = GetOwner())
-    {
-        if (UStaticMeshComponent* MeshComp = Owner->FindComponentByClass<UStaticMeshComponent>())
-        {
-            MeshComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-            MeshComp->SetSimulatePhysics(false);
-        }
+        ProcessWeathering(DeltaTime);
         
-        // Mark for destruction after delay
-        Owner->SetLifeSpan(5.0f);
+        if (CheckStructuralCollapse())
+        {
+            DamageState.bIsCollapsed = true;
+            UpdateVisualDamage();
+        }
     }
 }
 
-bool UArch_StructuralIntegrity::IsStructureStable() const
+void UArch_StructuralIntegrity::ApplyDamage(float DamageAmount, const FVector& ImpactPoint)
 {
-    return CurrentState != EArch_StructuralState::Collapsed && StructuralHealth > CollapseThreshold;
-}
-
-float UArch_StructuralIntegrity::GetStructuralHealthPercentage() const
-{
-    return (StructuralHealth / MaxStructuralHealth) * 100.0f;
-}
-
-void UArch_StructuralIntegrity::ProcessWeathering(float DeltaTime)
-{
-    if (CurrentState == EArch_StructuralState::Collapsed)
+    if (DamageState.bIsCollapsed)
     {
         return;
     }
     
-    // Apply gradual weathering over time
-    float WeatheringDamage = WeatheringRate * DeltaTime;
-    StructuralHealth = FMath::Clamp(StructuralHealth - WeatheringDamage, 0.0f, MaxStructuralHealth);
+    // Apply damage based on impact threshold
+    float ActualDamage = FMath::Max(0.0f, DamageAmount - ImpactThreshold);
+    DamageState.IntegrityPercentage = FMath::Max(0.0f, DamageState.IntegrityPercentage - ActualDamage);
+    DamageState.LastDamageTime = GetWorld()->GetTimeSeconds();
     
-    // Increase weathering intensity
-    DamagePattern.WeatheringIntensity += WeatheringDamage * 0.001f;
-    DamagePattern.WeatheringIntensity = FMath::Clamp(DamagePattern.WeatheringIntensity, 0.0f, 1.0f);
+    UpdateVisualDamage();
     
-    // Moss growth over time
-    DamagePattern.MossGrowth += DeltaTime * 0.001f;
-    DamagePattern.MossGrowth = FMath::Clamp(DamagePattern.MossGrowth, 0.0f, 1.0f);
-}
-
-void UArch_StructuralIntegrity::UpdateDamagePattern()
-{
-    float HealthPercentage = GetStructuralHealthPercentage();
-    
-    // Update crack severity based on health
-    DamagePattern.CrackSeverity = FMath::Lerp(0.0f, 1.0f, 1.0f - (HealthPercentage / 100.0f));
-    
-    // Clamp all damage values
-    DamagePattern.CrackSeverity = FMath::Clamp(DamagePattern.CrackSeverity, 0.0f, 1.0f);
-    DamagePattern.MossGrowth = FMath::Clamp(DamagePattern.MossGrowth, 0.0f, 1.0f);
-    DamagePattern.WeatheringIntensity = FMath::Clamp(DamagePattern.WeatheringIntensity, 0.0f, 1.0f);
-}
-
-void UArch_StructuralIntegrity::ApplyVisualDamage()
-{
-    if (AActor* Owner = GetOwner())
+    // Check for immediate collapse
+    if (DamageState.IntegrityPercentage <= 0.0f)
     {
-        if (UStaticMeshComponent* MeshComp = Owner->FindComponentByClass<UStaticMeshComponent>())
+        DamageState.bIsCollapsed = true;
+    }
+}
+
+void UArch_StructuralIntegrity::ProcessWeathering(float DeltaTime)
+{
+    if (DamageState.bIsCollapsed)
+    {
+        return;
+    }
+    
+    // Calculate weathering based on resistance
+    float WeatheringDamage = (DamageState.WeatheringRate * DeltaTime) / FMath::Max(1.0f, WeatherResistance / 10.0f);
+    DamageState.IntegrityPercentage = FMath::Max(0.0f, DamageState.IntegrityPercentage - WeatheringDamage);
+    
+    // Update visual state periodically
+    float TimeSinceLastDamage = GetWorld()->GetTimeSeconds() - DamageState.LastDamageTime;
+    if (TimeSinceLastDamage > 5.0f)
+    {
+        UpdateVisualDamage();
+        DamageState.LastDamageTime = GetWorld()->GetTimeSeconds();
+    }
+}
+
+bool UArch_StructuralIntegrity::CheckStructuralCollapse()
+{
+    return DamageState.IntegrityPercentage <= 15.0f;
+}
+
+void UArch_StructuralIntegrity::UpdateVisualDamage()
+{
+    float DamageRatio = 1.0f - (DamageState.IntegrityPercentage / 100.0f);
+    
+    for (UStaticMeshComponent* Element : StructuralElements)
+    {
+        if (!Element)
         {
-            // Create dynamic material instance if needed
-            UMaterialInstanceDynamic* DynMaterial = MeshComp->CreateDynamicMaterialInstance(0);
+            continue;
+        }
+        
+        // Create dynamic material instance if needed
+        UMaterialInterface* CurrentMaterial = Element->GetMaterial(0);
+        if (CurrentMaterial)
+        {
+            UMaterialInstanceDynamic* DynMaterial = Element->CreateDynamicMaterialInstance(0, CurrentMaterial);
             if (DynMaterial)
             {
-                // Apply damage parameters to material
-                DynMaterial->SetScalarParameterValue(TEXT("CrackSeverity"), DamagePattern.CrackSeverity);
-                DynMaterial->SetScalarParameterValue(TEXT("MossGrowth"), DamagePattern.MossGrowth);
-                DynMaterial->SetScalarParameterValue(TEXT("WeatheringIntensity"), DamagePattern.WeatheringIntensity);
+                // Set damage parameters
+                DynMaterial->SetScalarParameterValue(TEXT("DamageAmount"), DamageRatio);
+                DynMaterial->SetScalarParameterValue(TEXT("WeatheringIntensity"), DamageRatio * 0.8f);
+                DynMaterial->SetScalarParameterValue(TEXT("MossGrowth"), DamageRatio * 0.6f);
+            }
+        }
+        
+        // Adjust collision if heavily damaged
+        if (DamageState.IntegrityPercentage < 30.0f)
+        {
+            Element->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+        }
+        
+        // Hide elements if collapsed
+        if (DamageState.bIsCollapsed)
+        {
+            Element->SetVisibility(false);
+            Element->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+        }
+    }
+}
+
+void UArch_StructuralIntegrity::RepairStructure(float RepairAmount)
+{
+    if (DamageState.bIsCollapsed && RepairAmount < 50.0f)
+    {
+        return; // Cannot repair collapsed structure with small repair amount
+    }
+    
+    DamageState.IntegrityPercentage = FMath::Min(MaxIntegrity, DamageState.IntegrityPercentage + RepairAmount);
+    
+    // Restore structure if repaired enough
+    if (DamageState.bIsCollapsed && DamageState.IntegrityPercentage > 25.0f)
+    {
+        DamageState.bIsCollapsed = false;
+        
+        // Restore visibility and collision
+        for (UStaticMeshComponent* Element : StructuralElements)
+        {
+            if (Element)
+            {
+                Element->SetVisibility(true);
+                Element->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
             }
         }
     }
+    
+    UpdateVisualDamage();
 }
