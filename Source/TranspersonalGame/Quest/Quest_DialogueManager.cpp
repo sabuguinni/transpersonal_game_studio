@@ -1,315 +1,257 @@
 #include "Quest_DialogueManager.h"
-#include "Components/SphereComponent.h"
-#include "Components/StaticMeshComponent.h"
-#include "Engine/Engine.h"
-#include "GameFramework/Character.h"
+#include "Engine/World.h"
+#include "GameFramework/PlayerController.h"
 #include "Kismet/GameplayStatics.h"
+#include "../TranspersonalCharacter.h"
 
-AQuest_DialogueManager::AQuest_DialogueManager()
+UQuest_DialogueManager::UQuest_DialogueManager()
 {
-    PrimaryActorTick.bCanEverTick = true;
+    PrimaryComponentTick.bCanEverTick = false;
+    
+    CurrentDialogueID = -1;
+    bDialogueActive = false;
+    DialogueRange = 300.0f;
+    CurrentNPC = nullptr;
 
-    // Create root component
-    RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootComponent"));
+    // Initialize basic dialogue entries for prehistoric NPCs
+    FQuest_DialogueEntry WelcomeDialogue;
+    WelcomeDialogue.DialogueID = 1;
+    WelcomeDialogue.NPCName = TEXT("Tribal Elder");
+    WelcomeDialogue.DialogueText = TEXT("Welcome, young hunter. The great beasts roam these lands. Are you prepared to face them?");
+    WelcomeDialogue.bIsQuestDialogue = true;
+    WelcomeDialogue.AssociatedQuestID = TEXT("HUNT_FIRST_DINOSAUR");
+    
+    FQuest_DialogueOption Option1;
+    Option1.OptionText = TEXT("I am ready to hunt the great beasts!");
+    Option1.NextDialogueID = 2;
+    Option1.RewardExperience = 10;
+    
+    FQuest_DialogueOption Option2;
+    Option2.OptionText = TEXT("I need more preparation first.");
+    Option2.NextDialogueID = 3;
+    
+    WelcomeDialogue.PlayerOptions.Add(Option1);
+    WelcomeDialogue.PlayerOptions.Add(Option2);
+    DialogueDatabase.Add(WelcomeDialogue);
 
-    // Create interaction sphere
-    InteractionSphere = CreateDefaultSubobject<USphereComponent>(TEXT("InteractionSphere"));
-    InteractionSphere->SetupAttachment(RootComponent);
-    InteractionSphere->SetSphereRadius(300.0f);
-    InteractionSphere->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
-    InteractionSphere->SetCollisionResponseToAllChannels(ECR_Ignore);
-    InteractionSphere->SetCollisionResponseToChannel(ECC_Pawn, ECR_Overlap);
+    FQuest_DialogueEntry HuntDialogue;
+    HuntDialogue.DialogueID = 2;
+    HuntDialogue.NPCName = TEXT("Tribal Elder");
+    HuntDialogue.DialogueText = TEXT("Good! Take this stone spear. Hunt a Raptor and bring back its claw as proof of your skill.");
+    HuntDialogue.bIsQuestDialogue = true;
+    HuntDialogue.AssociatedQuestID = TEXT("HUNT_RAPTOR_CLAW");
+    
+    FQuest_DialogueOption HuntOption;
+    HuntOption.OptionText = TEXT("I will return with the claw.");
+    HuntOption.NextDialogueID = -1;
+    HuntOption.RewardExperience = 25;
+    
+    HuntDialogue.PlayerOptions.Add(HuntOption);
+    DialogueDatabase.Add(HuntDialogue);
 
-    // Create dialogue marker mesh
-    DialogueMarker = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("DialogueMarker"));
-    DialogueMarker->SetupAttachment(RootComponent);
-
-    // Initialize default values
-    InteractionRange = 300.0f;
-    bIsInConversation = false;
-    bPlayerInRange = false;
-    NPCName = FText::FromString("Survivor");
-    CurrentConversationID = "";
-    CurrentDialogueID = "";
-
-    // Bind overlap events
-    InteractionSphere->OnComponentBeginOverlap.AddDynamic(this, &AQuest_DialogueManager::OnInteractionSphereBeginOverlap);
-    InteractionSphere->OnComponentEndOverlap.AddDynamic(this, &AQuest_DialogueManager::OnInteractionSphereEndOverlap);
+    FQuest_DialogueEntry PrepDialogue;
+    PrepDialogue.DialogueID = 3;
+    PrepDialogue.NPCName = TEXT("Tribal Elder");
+    PrepDialogue.DialogueText = TEXT("Wise choice. Gather 5 stones and 3 sticks first. Then return to me.");
+    PrepDialogue.bIsQuestDialogue = true;
+    PrepDialogue.AssociatedQuestID = TEXT("GATHER_BASIC_MATERIALS");
+    
+    FQuest_DialogueOption PrepOption;
+    PrepOption.OptionText = TEXT("I will gather the materials.");
+    PrepOption.NextDialogueID = -1;
+    PrepOption.RewardExperience = 15;
+    
+    PrepDialogue.PlayerOptions.Add(PrepOption);
+    DialogueDatabase.Add(PrepDialogue);
 }
 
-void AQuest_DialogueManager::BeginPlay()
+void UQuest_DialogueManager::BeginPlay()
 {
     Super::BeginPlay();
-
-    // Initialize default conversation trees if none exist
-    if (ConversationTrees.Num() == 0)
-    {
-        // Create tutorial conversation
-        FQuest_ConversationTree TutorialTree;
-        TutorialTree.ConversationID = "tutorial_basic";
-        TutorialTree.StartDialogueID = "tutorial_start";
-
-        FQuest_DialogueEntry StartEntry;
-        StartEntry.DialogueID = "tutorial_start";
-        StartEntry.DialogueText = FText::FromString("Welcome, survivor. This world is harsh and unforgiving. The dinosaurs rule here, not us.");
-        StartEntry.ResponseOptions.Add(FText::FromString("Tell me what I need to know."));
-        StartEntry.ResponseOptions.Add(FText::FromString("I can handle myself."));
-        StartEntry.NextDialogueIDs.Add("tutorial_advice");
-        StartEntry.NextDialogueIDs.Add("tutorial_warning");
-        StartEntry.bIsQuestStart = false;
-
-        FQuest_DialogueEntry AdviceEntry;
-        AdviceEntry.DialogueID = "tutorial_advice";
-        AdviceEntry.DialogueText = FText::FromString("Stay quiet, move carefully. Hunt the small ones first. Build shelter before nightfall.");
-        AdviceEntry.ResponseOptions.Add(FText::FromString("Any other advice?"));
-        AdviceEntry.ResponseOptions.Add(FText::FromString("I understand."));
-        AdviceEntry.NextDialogueIDs.Add("tutorial_resources");
-        AdviceEntry.NextDialogueIDs.Add("tutorial_end");
-
-        FQuest_DialogueEntry WarningEntry;
-        WarningEntry.DialogueID = "tutorial_warning";
-        WarningEntry.DialogueText = FText::FromString("Overconfidence will get you killed. The raptors hunt in packs. The T-Rex fears nothing.");
-        AdviceEntry.ResponseOptions.Add(FText::FromString("I'll be careful."));
-        AdviceEntry.NextDialogueIDs.Add("tutorial_end");
-
-        FQuest_DialogueEntry ResourcesEntry;
-        ResourcesEntry.DialogueID = "tutorial_resources";
-        ResourcesEntry.DialogueText = FText::FromString("Gather stones for tools, sticks for spears. Fresh water is life. Cooked meat lasts longer.");
-        ResourcesEntry.ResponseOptions.Add(FText::FromString("Thank you for the guidance."));
-        ResourcesEntry.NextDialogueIDs.Add("tutorial_end");
-
-        FQuest_DialogueEntry EndEntry;
-        EndEntry.DialogueID = "tutorial_end";
-        EndEntry.DialogueText = FText::FromString("Survive another day, and maybe we'll talk again.");
-        EndEntry.bIsQuestEnd = true;
-
-        TutorialTree.DialogueEntries.Add(StartEntry);
-        TutorialTree.DialogueEntries.Add(AdviceEntry);
-        TutorialTree.DialogueEntries.Add(WarningEntry);
-        TutorialTree.DialogueEntries.Add(ResourcesEntry);
-        TutorialTree.DialogueEntries.Add(EndEntry);
-
-        ConversationTrees.Add(TutorialTree);
-
-        // Create hunting quest conversation
-        FQuest_ConversationTree HuntingTree;
-        HuntingTree.ConversationID = "hunting_raptors";
-        HuntingTree.StartDialogueID = "hunting_start";
-
-        FQuest_DialogueEntry HuntStart;
-        HuntStart.DialogueID = "hunting_start";
-        HuntStart.DialogueText = FText::FromString("The raptor pack grows bolder. They killed two of ours yesterday.");
-        HuntStart.ResponseOptions.Add(FText::FromString("I'll hunt them down."));
-        HuntStart.ResponseOptions.Add(FText::FromString("We should defend instead."));
-        HuntStart.NextDialogueIDs.Add("hunting_accept");
-        HuntStart.NextDialogueIDs.Add("hunting_decline");
-        HuntStart.QuestID = "hunt_raptor_pack";
-        HuntStart.bIsQuestStart = true;
-
-        FQuest_DialogueEntry HuntAccept;
-        HuntAccept.DialogueID = "hunting_accept";
-        HuntAccept.DialogueText = FText::FromString("Good. They nest in the eastern ravine. Three adults, maybe more. Bring back their claws as proof.");
-        HuntAccept.ResponseOptions.Add(FText::FromString("I'll return with their claws."));
-        HuntAccept.NextDialogueIDs.Add("hunting_end");
-
-        FQuest_DialogueEntry HuntDecline;
-        HuntDecline.DialogueID = "hunting_decline";
-        HuntDecline.DialogueText = FText::FromString("Defense won't work forever. They're learning our patterns.");
-        HuntDecline.ResponseOptions.Add(FText::FromString("Maybe you're right."));
-        HuntDecline.NextDialogueIDs.Add("hunting_accept");
-
-        FQuest_DialogueEntry HuntEnd;
-        HuntEnd.DialogueID = "hunting_end";
-        HuntEnd.DialogueText = FText::FromString("Be careful out there. Raptors are smarter than they look.");
-        HuntEnd.bIsQuestEnd = true;
-
-        HuntingTree.DialogueEntries.Add(HuntStart);
-        HuntingTree.DialogueEntries.Add(HuntAccept);
-        HuntingTree.DialogueEntries.Add(HuntDecline);
-        HuntingTree.DialogueEntries.Add(HuntEnd);
-
-        ConversationTrees.Add(HuntingTree);
-    }
 }
 
-void AQuest_DialogueManager::Tick(float DeltaTime)
+bool UQuest_DialogueManager::StartDialogue(AActor* NPC, int32 StartingDialogueID)
 {
-    Super::Tick(DeltaTime);
-
-    // Update interaction availability based on player proximity
-    bool bCurrentlyInRange = IsPlayerInRange();
-    if (bCurrentlyInRange != bPlayerInRange)
-    {
-        bPlayerInRange = bCurrentlyInRange;
-        // Could trigger UI updates here
-    }
-}
-
-bool AQuest_DialogueManager::StartConversation(const FString& ConversationID)
-{
-    if (bIsInConversation)
+    if (!NPC || bDialogueActive)
     {
         return false;
     }
 
-    FQuest_ConversationTree* Tree = FindConversationTree(ConversationID);
-    if (!Tree || Tree->StartDialogueID.IsEmpty())
-    {
-        return false;
-    }
-
-    CurrentConversationID = ConversationID;
-    CurrentDialogueID = Tree->StartDialogueID;
-    bIsInConversation = true;
-
-    OnConversationStarted();
-    
-    FQuest_DialogueEntry CurrentEntry = GetCurrentDialogue();
-    OnDialogueChanged(CurrentEntry);
-
-    return true;
-}
-
-void AQuest_DialogueManager::EndConversation()
-{
-    if (!bIsInConversation)
-    {
-        return;
-    }
-
-    bIsInConversation = false;
-    CurrentConversationID = "";
-    CurrentDialogueID = "";
-
-    OnConversationEnded();
-}
-
-FQuest_DialogueEntry AQuest_DialogueManager::GetCurrentDialogue()
-{
-    FQuest_DialogueEntry EmptyEntry;
-    
-    if (!bIsInConversation || CurrentDialogueID.IsEmpty())
-    {
-        return EmptyEntry;
-    }
-
-    FQuest_DialogueEntry* Entry = FindDialogueEntry(CurrentDialogueID);
-    return Entry ? *Entry : EmptyEntry;
-}
-
-bool AQuest_DialogueManager::SelectResponse(int32 ResponseIndex)
-{
-    if (!bIsInConversation)
-    {
-        return false;
-    }
-
-    FQuest_DialogueEntry* CurrentEntry = FindDialogueEntry(CurrentDialogueID);
-    if (!CurrentEntry || ResponseIndex < 0 || ResponseIndex >= CurrentEntry->NextDialogueIDs.Num())
-    {
-        return false;
-    }
-
-    FString NextDialogueID = CurrentEntry->NextDialogueIDs[ResponseIndex];
-    
-    // Check if this ends the conversation
-    FQuest_DialogueEntry* NextEntry = FindDialogueEntry(NextDialogueID);
-    if (NextEntry && NextEntry->bIsQuestEnd)
-    {
-        CurrentDialogueID = NextDialogueID;
-        OnDialogueChanged(*NextEntry);
-        EndConversation();
-        return true;
-    }
-
-    // Continue to next dialogue
-    CurrentDialogueID = NextDialogueID;
-    if (NextEntry)
-    {
-        OnDialogueChanged(*NextEntry);
-    }
-
-    return true;
-}
-
-TArray<FText> AQuest_DialogueManager::GetCurrentResponseOptions()
-{
-    TArray<FText> EmptyOptions;
-    
-    if (!bIsInConversation)
-    {
-        return EmptyOptions;
-    }
-
-    FQuest_DialogueEntry* Entry = FindDialogueEntry(CurrentDialogueID);
-    return Entry ? Entry->ResponseOptions : EmptyOptions;
-}
-
-bool AQuest_DialogueManager::IsPlayerInRange()
-{
+    // Check if player is in range
     APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
     if (!PlayerPawn)
     {
         return false;
     }
 
-    float Distance = FVector::Dist(GetActorLocation(), PlayerPawn->GetActorLocation());
-    return Distance <= InteractionRange;
-}
-
-void AQuest_DialogueManager::OnInteractionSphereBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
-{
-    if (OtherActor && OtherActor->IsA<ACharacter>())
+    float Distance = FVector::Dist(PlayerPawn->GetActorLocation(), NPC->GetActorLocation());
+    if (Distance > DialogueRange)
     {
-        bPlayerInRange = true;
+        return false;
     }
+
+    FQuest_DialogueEntry* DialogueEntry = FindDialogueByID(StartingDialogueID);
+    if (!DialogueEntry)
+    {
+        return false;
+    }
+
+    CurrentNPC = NPC;
+    CurrentDialogueID = StartingDialogueID;
+    bDialogueActive = true;
+
+    return true;
 }
 
-void AQuest_DialogueManager::OnInteractionSphereEndOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex)
+void UQuest_DialogueManager::EndDialogue()
 {
-    if (OtherActor && OtherActor->IsA<ACharacter>())
+    bDialogueActive = false;
+    CurrentDialogueID = -1;
+    CurrentNPC = nullptr;
+}
+
+bool UQuest_DialogueManager::SelectDialogueOption(int32 OptionIndex)
+{
+    if (!bDialogueActive)
     {
-        bPlayerInRange = false;
-        if (bIsInConversation)
+        return false;
+    }
+
+    FQuest_DialogueEntry* CurrentEntry = FindDialogueByID(CurrentDialogueID);
+    if (!CurrentEntry || OptionIndex < 0 || OptionIndex >= CurrentEntry->PlayerOptions.Num())
+    {
+        return false;
+    }
+
+    const FQuest_DialogueOption& SelectedOption = CurrentEntry->PlayerOptions[OptionIndex];
+
+    // Check requirements
+    if (!CheckDialogueRequirements(SelectedOption))
+    {
+        return false;
+    }
+
+    // Process rewards
+    ProcessDialogueRewards(SelectedOption);
+
+    // Move to next dialogue or end
+    if (SelectedOption.NextDialogueID == -1)
+    {
+        EndDialogue();
+    }
+    else
+    {
+        CurrentDialogueID = SelectedOption.NextDialogueID;
+    }
+
+    return true;
+}
+
+FQuest_DialogueEntry UQuest_DialogueManager::GetCurrentDialogue() const
+{
+    if (!bDialogueActive)
+    {
+        return FQuest_DialogueEntry();
+    }
+
+    for (const FQuest_DialogueEntry& Entry : DialogueDatabase)
+    {
+        if (Entry.DialogueID == CurrentDialogueID)
         {
-            EndConversation();
+            return Entry;
+        }
+    }
+
+    return FQuest_DialogueEntry();
+}
+
+TArray<FQuest_DialogueOption> UQuest_DialogueManager::GetCurrentOptions() const
+{
+    FQuest_DialogueEntry CurrentEntry = GetCurrentDialogue();
+    return CurrentEntry.PlayerOptions;
+}
+
+void UQuest_DialogueManager::AddDialogueEntry(const FQuest_DialogueEntry& NewEntry)
+{
+    DialogueDatabase.Add(NewEntry);
+}
+
+void UQuest_DialogueManager::LoadDialoguesFromDataTable(UDataTable* DialogueTable)
+{
+    if (!DialogueTable)
+    {
+        return;
+    }
+
+    DialogueDatabase.Empty();
+    
+    TArray<FQuest_DialogueEntry*> AllRows;
+    DialogueTable->GetAllRows<FQuest_DialogueEntry>(TEXT("LoadDialogues"), AllRows);
+    
+    for (FQuest_DialogueEntry* Row : AllRows)
+    {
+        if (Row)
+        {
+            DialogueDatabase.Add(*Row);
         }
     }
 }
 
-FQuest_DialogueEntry* AQuest_DialogueManager::FindDialogueEntry(const FString& DialogueID)
+bool UQuest_DialogueManager::CanPlayerAffordOption(const FQuest_DialogueOption& Option) const
 {
-    if (CurrentConversationID.IsEmpty())
-    {
-        return nullptr;
-    }
+    return CheckDialogueRequirements(Option);
+}
 
-    FQuest_ConversationTree* Tree = FindConversationTree(CurrentConversationID);
-    if (!Tree)
-    {
-        return nullptr;
-    }
-
-    for (FQuest_DialogueEntry& Entry : Tree->DialogueEntries)
+FQuest_DialogueEntry* UQuest_DialogueManager::FindDialogueByID(int32 DialogueID)
+{
+    for (FQuest_DialogueEntry& Entry : DialogueDatabase)
     {
         if (Entry.DialogueID == DialogueID)
         {
             return &Entry;
         }
     }
-
     return nullptr;
 }
 
-FQuest_ConversationTree* AQuest_DialogueManager::FindConversationTree(const FString& ConversationID)
+void UQuest_DialogueManager::ProcessDialogueRewards(const FQuest_DialogueOption& SelectedOption)
 {
-    for (FQuest_ConversationTree& Tree : ConversationTrees)
+    if (SelectedOption.RewardExperience > 0)
     {
-        if (Tree.ConversationID == ConversationID)
+        APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
+        if (PlayerPawn)
         {
-            return &Tree;
+            ATranspersonalCharacter* Player = Cast<ATranspersonalCharacter>(PlayerPawn);
+            if (Player)
+            {
+                // Add experience to player (assuming TranspersonalCharacter has experience system)
+                // Player->AddExperience(SelectedOption.RewardExperience);
+            }
         }
     }
+}
 
-    return nullptr;
+bool UQuest_DialogueManager::CheckDialogueRequirements(const FQuest_DialogueOption& Option) const
+{
+    if (!Option.bRequiresItem)
+    {
+        return true;
+    }
+
+    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
+    if (!PlayerPawn)
+    {
+        return false;
+    }
+
+    ATranspersonalCharacter* Player = Cast<ATranspersonalCharacter>(PlayerPawn);
+    if (!Player)
+    {
+        return false;
+    }
+
+    // Check if player has required item in inventory
+    // This would need to be implemented based on the inventory system
+    // For now, return true as placeholder
+    return true;
 }
