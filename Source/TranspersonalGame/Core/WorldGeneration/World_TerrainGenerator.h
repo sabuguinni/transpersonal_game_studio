@@ -2,100 +2,52 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
-#include "Engine/World.h"
 #include "Components/StaticMeshComponent.h"
-#include "Components/SceneComponent.h"
-#include "Math/UnrealMathUtility.h"
-#include "SharedTypes.h"
+#include "Engine/World.h"
 #include "World_TerrainGenerator.generated.h"
 
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FWorld_ErosionData
+UENUM(BlueprintType)
+enum class EWorld_TerrainType : uint8
 {
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Erosion")
-    float WaterLevel;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Erosion")
-    float SedimentCapacity;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Erosion")
-    float ErosionRate;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Erosion")
-    float DepositionRate;
-
-    FWorld_ErosionData()
-    {
-        WaterLevel = 0.0f;
-        SedimentCapacity = 1.0f;
-        ErosionRate = 0.1f;
-        DepositionRate = 0.05f;
-    }
+    Flat        UMETA(DisplayName = "Flat"),
+    Hills       UMETA(DisplayName = "Hills"),
+    Mountains   UMETA(DisplayName = "Mountains"),
+    Valley      UMETA(DisplayName = "Valley"),
+    Canyon      UMETA(DisplayName = "Canyon"),
+    Plateau     UMETA(DisplayName = "Plateau")
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FWorld_BiomeRegion
+struct FWorld_TerrainSettings
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    FVector CenterLocation;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
+    EWorld_TerrainType TerrainType = EWorld_TerrainType::Hills;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float Radius;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
+    float HeightScale = 100.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    EBiomeType BiomeType;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
+    float NoiseScale = 0.01f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float Temperature;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
+    int32 Octaves = 4;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float Humidity;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
+    float Persistence = 0.5f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float Elevation;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
+    float Lacunarity = 2.0f;
 
-    FWorld_BiomeRegion()
+    FWorld_TerrainSettings()
     {
-        CenterLocation = FVector::ZeroVector;
-        Radius = 1000.0f;
-        BiomeType = EBiomeType::Grassland;
-        Temperature = 20.0f;
-        Humidity = 0.5f;
-        Elevation = 100.0f;
-    }
-};
-
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FWorld_RiverSegment
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "River")
-    FVector StartPoint;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "River")
-    FVector EndPoint;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "River")
-    float Width;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "River")
-    float Depth;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "River")
-    float FlowRate;
-
-    FWorld_RiverSegment()
-    {
-        StartPoint = FVector::ZeroVector;
-        EndPoint = FVector::ZeroVector;
-        Width = 100.0f;
-        Depth = 50.0f;
-        FlowRate = 1.0f;
+        TerrainType = EWorld_TerrainType::Hills;
+        HeightScale = 100.0f;
+        NoiseScale = 0.01f;
+        Octaves = 4;
+        Persistence = 0.5f;
+        Lacunarity = 2.0f;
     }
 };
 
@@ -111,167 +63,56 @@ protected:
     virtual void BeginPlay() override;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    USceneComponent* RootSceneComponent;
+    class UStaticMeshComponent* TerrainMesh;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    UStaticMeshComponent* TerrainMeshComponent;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
+    FWorld_TerrainSettings TerrainSettings;
 
-    // Terrain Generation Parameters
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Generation")
-    float TerrainSize;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Generation")
+    int32 TerrainSize = 512;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Generation")
-    float HeightScale;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Generation")
+    float TerrainScale = 100.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Generation")
-    int32 TerrainResolution;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water")
+    float WaterLevel = 0.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Generation")
-    float NoiseScale;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water")
+    bool bGenerateRivers = true;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Generation")
-    int32 NoiseOctaves;
-
-    // Erosion Simulation Parameters
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Erosion")
-    int32 ErosionIterations;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Erosion")
-    float RainRate;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Erosion")
-    float EvaporationRate;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Erosion")
-    float SedimentCapacityConstant;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Erosion")
-    float MinSedimentCapacity;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Erosion")
-    float DepositSpeed;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Erosion")
-    float ErodeSpeed;
-
-    // River Generation Parameters
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rivers")
-    float RiverDensity;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rivers")
-    int32 MaxRiverLength;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rivers")
-    float RiverWidthMultiplier;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rivers")
-    float RiverDepthMultiplier;
-
-    // Biome Configuration
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biomes")
-    TArray<FWorld_BiomeRegion> BiomeRegions;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biomes")
-    float BiomeTransitionSmoothness;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biomes")
-    float TemperatureGradient;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biomes")
-    float HumidityVariation;
-
-    // Generated Data
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Generated Data")
-    TArray<FWorld_RiverSegment> GeneratedRivers;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Generated Data")
-    TArray<FWorld_ErosionData> ErosionMap;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Generated Data")
-    bool bTerrainGenerated;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water")
+    int32 RiverCount = 3;
 
 public:
     virtual void Tick(float DeltaTime) override;
 
-    // Core Generation Functions
-    UFUNCTION(BlueprintCallable, Category = "Terrain Generation")
+    UFUNCTION(BlueprintCallable, Category = "Terrain", CallInEditor)
     void GenerateTerrain();
 
-    UFUNCTION(BlueprintCallable, Category = "Terrain Generation")
-    void ApplyErosionSimulation();
+    UFUNCTION(BlueprintCallable, Category = "Terrain")
+    float GetHeightAtLocation(const FVector& WorldLocation) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Terrain Generation")
-    void GenerateRiverNetwork();
+    UFUNCTION(BlueprintCallable, Category = "Water", CallInEditor)
+    void GenerateWaterBodies();
 
-    UFUNCTION(BlueprintCallable, Category = "Terrain Generation")
-    void ApplyBiomeDistribution();
+    UFUNCTION(BlueprintCallable, Category = "Terrain")
+    FVector GetSurfaceNormal(const FVector& WorldLocation) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Terrain Generation")
-    void FinalizeTerrainGeneration();
+    UFUNCTION(BlueprintCallable, Category = "Terrain")
+    bool IsLocationUnderwater(const FVector& WorldLocation) const;
 
-    // Utility Functions
-    UFUNCTION(BlueprintCallable, Category = "Terrain Utilities")
-    float GetHeightAtLocation(FVector WorldLocation) const;
+    UFUNCTION(BlueprintCallable, Category = "Generation")
+    void ApplyErosion(int32 Iterations = 100);
 
-    UFUNCTION(BlueprintCallable, Category = "Terrain Utilities")
-    EBiomeType GetBiomeAtLocation(FVector WorldLocation) const;
+private:
+    float PerlinNoise(float X, float Y) const;
+    float FractalNoise(float X, float Y) const;
+    void CreateTerrainMesh();
+    void GenerateRivers();
+    void PlaceLakes();
 
-    UFUNCTION(BlueprintCallable, Category = "Terrain Utilities")
-    float GetTemperatureAtLocation(FVector WorldLocation) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Terrain Utilities")
-    float GetHumidityAtLocation(FVector WorldLocation) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Terrain Utilities")
-    bool IsLocationNearRiver(FVector WorldLocation, float Threshold = 200.0f) const;
-
-    // Erosion Simulation Functions
-    UFUNCTION(BlueprintCallable, Category = "Erosion")
-    void SimulateWaterDroplet(FVector StartLocation, int32 MaxSteps);
-
-    UFUNCTION(BlueprintCallable, Category = "Erosion")
-    void CalculateFlowMap();
-
-    UFUNCTION(BlueprintCallable, Category = "Erosion")
-    void ApplySedimentTransport();
-
-    // River Generation Functions
-    UFUNCTION(BlueprintCallable, Category = "Rivers")
-    TArray<FVector> TraceRiverPath(FVector StartLocation, FVector TargetDirection);
-
-    UFUNCTION(BlueprintCallable, Category = "Rivers")
-    void CreateRiverMesh(const TArray<FVector>& RiverPath, float Width, float Depth);
-
-    UFUNCTION(BlueprintCallable, Category = "Rivers")
-    void ConnectRiverSystems();
-
-    // Biome Functions
-    UFUNCTION(BlueprintCallable, Category = "Biomes")
-    void CreateBiomeTransitions();
-
-    UFUNCTION(BlueprintCallable, Category = "Biomes")
-    void ApplyBiomeSpecificFeatures();
-
-    UFUNCTION(BlueprintCallable, Category = "Biomes")
-    void GenerateGeologicalFeatures();
-
-    // Editor Functions
-    UFUNCTION(CallInEditor, Category = "Editor Tools")
-    void RegenerateTerrainInEditor();
-
-    UFUNCTION(CallInEditor, Category = "Editor Tools")
-    void ClearGeneratedTerrain();
-
-    UFUNCTION(CallInEditor, Category = "Editor Tools")
-    void ExportTerrainData();
-
-protected:
-    // Internal Helper Functions
-    float GeneratePerlinNoise(float X, float Y, float Scale, int32 Octaves) const;
-    FVector CalculateGradient(FVector Location) const;
-    float InterpolateBiomeValue(FVector Location, float BiomeValue1, float BiomeValue2, float Distance) const;
-    void UpdateErosionData(int32 Index, const FWorld_ErosionData& NewData);
-    bool ValidateTerrainParameters() const;
-    void InitializeDefaultBiomes();
-    void SetupTerrainMesh();
+    TArray<FVector> TerrainVertices;
+    TArray<int32> TerrainIndices;
+    TArray<FVector> TerrainNormals;
+    TArray<FVector2D> TerrainUVs;
 };
