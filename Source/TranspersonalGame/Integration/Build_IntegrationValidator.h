@@ -49,81 +49,73 @@ class TRANSPERSONALGAME_API UBuild_IntegrationValidator : public UActorComponent
 public:
     UBuild_IntegrationValidator();
 
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    void RunFullValidation();
-
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    bool ValidateModuleCompilation();
-
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    bool ValidateClassLoading();
-
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    bool ValidateLevelIntegrity();
-
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    bool ValidatePerformanceMetrics();
-
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    TArray<FBuild_ValidationReport> GetValidationReports() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    void ClearValidationReports();
-
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    void LogValidationSummary();
-
 protected:
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    TArray<FBuild_ValidationReport> ValidationReports;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
-    bool bVerboseLogging;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
-    float PerformanceThresholdFPS;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
-    int32 MaxMemoryUsageMB;
-
-private:
-    void AddValidationReport(const FString& TestName, EBuild_ValidationResult Result, const FString& Message, float ExecutionTime = 0.0f);
-    bool ValidateSpecificClass(const FString& ClassName);
-    void ValidateActorCounts();
-    void ValidateSystemIntegration();
-};
-
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API ABuild_IntegrationTestActor : public AActor
-{
-    GENERATED_BODY()
+    virtual void BeginPlay() override;
 
 public:
-    ABuild_IntegrationTestActor();
+    // Core validation functions
+    UFUNCTION(BlueprintCallable, Category = "Integration Validation")
+    TArray<FBuild_ValidationReport> RunFullValidationSuite();
 
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    void RunIntegrationTests();
+    UFUNCTION(BlueprintCallable, Category = "Integration Validation")
+    FBuild_ValidationReport ValidateClassLoading();
 
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    void TestCrossSystemCommunication();
+    UFUNCTION(BlueprintCallable, Category = "Integration Validation")
+    FBuild_ValidationReport ValidateCrossSystemIntegration();
 
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    void ValidateBuildConfiguration();
+    UFUNCTION(BlueprintCallable, Category = "Integration Validation")
+    FBuild_ValidationReport ValidateActorSpawning();
+
+    UFUNCTION(BlueprintCallable, Category = "Integration Validation")
+    FBuild_ValidationReport ValidateComponentSystems();
+
+    UFUNCTION(BlueprintCallable, Category = "Integration Validation")
+    FBuild_ValidationReport ValidateGameplayFramework();
+
+    // Actor cap management
+    UFUNCTION(BlueprintCallable, Category = "Integration Validation")
+    int32 GetCurrentActorCount();
+
+    UFUNCTION(BlueprintCallable, Category = "Integration Validation")
+    bool EnforceActorCap(int32 MaxActors = 8000);
+
+    UFUNCTION(BlueprintCallable, Category = "Integration Validation")
+    TArray<AActor*> GetNonEssentialActors();
+
+    // Build status reporting
+    UFUNCTION(BlueprintCallable, Category = "Integration Validation")
+    FString GenerateBuildStatusReport();
+
+    UFUNCTION(BlueprintCallable, Category = "Integration Validation")
+    bool SaveValidationReport(const FString& ReportContent);
 
 protected:
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    class UBuild_IntegrationValidator* IntegrationValidator;
+    UPROPERTY(BlueprintReadOnly, Category = "Validation State")
+    TArray<FBuild_ValidationReport> LastValidationResults;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Testing")
-    bool bAutoRunOnBeginPlay;
+    UPROPERTY(BlueprintReadOnly, Category = "Validation State")
+    float LastValidationTime;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Testing")
-    float TestInterval;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Validation Settings")
+    int32 MaxAllowedActors;
 
-    virtual void BeginPlay() override;
-    virtual void Tick(float DeltaTime) override;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Validation Settings")
+    bool bAutoEnforceActorCap;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Validation Settings")
+    TArray<FString> EssentialActorLabels;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Validation Settings")
+    TArray<FString> CriticalClassPaths;
 
 private:
-    FTimerHandle TestTimerHandle;
-    void PeriodicValidation();
+    // Internal validation helpers
+    bool ValidateClassPath(const FString& ClassPath);
+    bool TestActorSpawn(UClass* ActorClass, const FVector& Location);
+    void CleanupTestActors();
+    FString FormatValidationTime(float TimeInSeconds);
+
+    // Test actor tracking
+    UPROPERTY()
+    TArray<AActor*> SpawnedTestActors;
 };
