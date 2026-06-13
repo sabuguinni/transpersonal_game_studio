@@ -2,120 +2,162 @@
 
 #include "CoreMinimal.h"
 #include "Engine/World.h"
-#include "GameFramework/Actor.h"
-#include "Components/ActorComponent.h"
+#include "GameFramework/GameModeBase.h"
+#include "Subsystems/GameInstanceSubsystem.h"
 #include "Build_IntegrationValidator.generated.h"
 
 UENUM(BlueprintType)
-enum class EBuild_ValidationResult : uint8
+enum class EBuild_ValidationStatus : uint8
 {
-    Success     UMETA(DisplayName = "Success"),
-    Warning     UMETA(DisplayName = "Warning"),
-    Error       UMETA(DisplayName = "Error"),
-    Critical    UMETA(DisplayName = "Critical")
+    Unknown,
+    Passed,
+    Failed,
+    Warning,
+    Critical
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FBuild_ValidationReport
+struct FBuild_ValidationResult
 {
     GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadOnly, Category = "Validation")
+    EBuild_ValidationStatus Status = EBuild_ValidationStatus::Unknown;
 
     UPROPERTY(BlueprintReadOnly, Category = "Validation")
     FString TestName;
 
     UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    EBuild_ValidationResult Result;
+    FString ErrorMessage;
 
     UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    FString Message;
+    float ExecutionTime = 0.0f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    float ExecutionTime;
-
-    FBuild_ValidationReport()
+    FBuild_ValidationResult()
     {
+        Status = EBuild_ValidationStatus::Unknown;
         TestName = TEXT("");
-        Result = EBuild_ValidationResult::Success;
-        Message = TEXT("");
+        ErrorMessage = TEXT("");
         ExecutionTime = 0.0f;
     }
 };
 
+USTRUCT(BlueprintType)
+struct FBuild_ActorInventory
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    int32 TotalActors = 0;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    int32 DinosaurActors = 0;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    int32 EnvironmentActors = 0;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    int32 LightingActors = 0;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    int32 CustomActors = 0;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    bool bCapExceeded = false;
+
+    FBuild_ActorInventory()
+    {
+        TotalActors = 0;
+        DinosaurActors = 0;
+        EnvironmentActors = 0;
+        LightingActors = 0;
+        CustomActors = 0;
+        bCapExceeded = false;
+    }
+};
+
+/**
+ * Integration Validator - Ensures all agent outputs integrate correctly
+ * Validates compilation, actor limits, contamination, and cross-system compatibility
+ */
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UBuild_IntegrationValidator : public UActorComponent
+class TRANSPERSONALGAME_API UBuild_IntegrationValidator : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
 public:
     UBuild_IntegrationValidator();
 
-protected:
-    virtual void BeginPlay() override;
+    // Subsystem interface
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
 
-public:
     // Core validation functions
-    UFUNCTION(BlueprintCallable, Category = "Integration Validation")
-    TArray<FBuild_ValidationReport> RunFullValidationSuite();
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    TArray<FBuild_ValidationResult> RunFullValidationSuite();
 
-    UFUNCTION(BlueprintCallable, Category = "Integration Validation")
-    FBuild_ValidationReport ValidateClassLoading();
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    FBuild_ValidationResult ValidateCompilation();
 
-    UFUNCTION(BlueprintCallable, Category = "Integration Validation")
-    FBuild_ValidationReport ValidateCrossSystemIntegration();
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    FBuild_ValidationResult ValidateActorCap();
 
-    UFUNCTION(BlueprintCallable, Category = "Integration Validation")
-    FBuild_ValidationReport ValidateActorSpawning();
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    FBuild_ValidationResult ValidateContamination();
 
-    UFUNCTION(BlueprintCallable, Category = "Integration Validation")
-    FBuild_ValidationReport ValidateComponentSystems();
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    FBuild_ValidationResult ValidateCoreClasses();
 
-    UFUNCTION(BlueprintCallable, Category = "Integration Validation")
-    FBuild_ValidationReport ValidateGameplayFramework();
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    FBuild_ValidationResult ValidateCrossSystemIntegration();
 
-    // Actor cap management
-    UFUNCTION(BlueprintCallable, Category = "Integration Validation")
-    int32 GetCurrentActorCount();
+    // Actor management
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    FBuild_ActorInventory GetActorInventory();
 
-    UFUNCTION(BlueprintCallable, Category = "Integration Validation")
+    UFUNCTION(BlueprintCallable, Category = "Integration")
     bool EnforceActorCap(int32 MaxActors = 8000);
 
-    UFUNCTION(BlueprintCallable, Category = "Integration Validation")
-    TArray<AActor*> GetNonEssentialActors();
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    int32 CleanupContaminatedActors();
 
-    // Build status reporting
-    UFUNCTION(BlueprintCallable, Category = "Integration Validation")
-    FString GenerateBuildStatusReport();
+    // Build status
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    bool IsSystemHealthy();
 
-    UFUNCTION(BlueprintCallable, Category = "Integration Validation")
-    bool SaveValidationReport(const FString& ReportContent);
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    FString GetBuildStatusReport();
+
+    // Editor-only validation
+    UFUNCTION(CallInEditor, Category = "Integration")
+    void RunEditorValidation();
 
 protected:
-    UPROPERTY(BlueprintReadOnly, Category = "Validation State")
-    TArray<FBuild_ValidationReport> LastValidationResults;
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    TArray<FBuild_ValidationResult> LastValidationResults;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Validation State")
-    float LastValidationTime;
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    FBuild_ActorInventory CurrentInventory;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Validation Settings")
-    int32 MaxAllowedActors;
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    float LastValidationTime = 0.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Validation Settings")
-    bool bAutoEnforceActorCap;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Validation Settings")
-    TArray<FString> EssentialActorLabels;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Validation Settings")
-    TArray<FString> CriticalClassPaths;
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    bool bValidationInProgress = false;
 
 private:
     // Internal validation helpers
-    bool ValidateClassPath(const FString& ClassPath);
-    bool TestActorSpawn(UClass* ActorClass, const FVector& Location);
-    void CleanupTestActors();
-    FString FormatValidationTime(float TimeInSeconds);
+    bool ValidateSourceFileStructure();
+    bool ValidateBinaryFiles();
+    bool ValidateModuleDependencies();
+    TArray<AActor*> FindContaminatedActors();
+    TArray<UClass*> GetCoreGameClasses();
+    bool TestCrossSystemCompatibility();
 
-    // Test actor tracking
-    UPROPERTY()
-    TArray<AActor*> SpawnedTestActors;
+    // Contamination keywords
+    TArray<FString> ContaminationKeywords;
+    
+    // Essential actor types to preserve during cleanup
+    TArray<FString> EssentialActorTypes;
+    TArray<FString> DinosaurActorTypes;
 };
