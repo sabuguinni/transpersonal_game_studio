@@ -1,357 +1,317 @@
 #include "Perf_FrameRateController.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "HAL/IConsoleManager.h"
-#include "Kismet/GameplayStatics.h"
+#include "HAL/PlatformApplicationMisc.h"
+#include "RHI.h"
+#include "Stats/Stats.h"
+#include "TimerManager.h"
 
 UPerf_FrameRateController::UPerf_FrameRateController()
 {
-    PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 0.0f; // Tick every frame for accurate monitoring
-    
-    CurrentFrameRate = 60.0f;
-    CurrentFrameTime = 1.0f / 60.0f;
-    AverageFrameRate = 60.0f;
-    bIsMonitoring = false;
-    PerformanceCheckTimer = 0.0f;
-    QualityAdjustmentCooldown = 0.0f;
-    ConsecutivePoorFrames = 0;
-    
-    FrameTimeHistory.Reserve(MaxFrameHistorySize);
+    LastFrameTime = 0.0f;
+    MetricsAccumulator = 0.0f;
+    MetricsFrameCount = 0;
+    bInitialized = false;
 }
 
-void UPerf_FrameRateController::BeginPlay()
+void UPerf_FrameRateController::Initialize(FSubsystemCollectionBase& Collection)
 {
-    Super::BeginPlay();
+    Super::Initialize(Collection);
     
-    // Apply initial settings
-    ApplyFrameRateSettings();
-    
-    // Start monitoring by default
-    StartPerformanceMonitoring();
-    
-    UE_LOG(LogTemp, Log, TEXT("FrameRateController: Initialized with target %d FPS"), 
-           static_cast<int32>(FrameRateSettings.TargetFrameRate));
-}
-
-void UPerf_FrameRateController::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
-{
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-    
-    if (bIsMonitoring)
+    if (!bInitialized)
     {
-        UpdateFrameRateMetrics(DeltaTime);
+        // Initialize frame rate settings
+        FrameRateSettings = FPerf_FrameRateSettings();
+        CurrentMetrics = FPerf_FrameRateMetrics();
         
-        PerformanceCheckTimer += DeltaTime;
-        if (PerformanceCheckTimer >= PerformanceCheckInterval)
+        // Reserve history array
+        FrameTimeHistory.Reserve(MetricsHistorySize);
+        
+        // Start metrics timer
+        if (UWorld* World = GetWorld())
         {
-            CheckPerformanceAndAdjust();
-            PerformanceCheckTimer = 0.0f;
+            World->GetTimerManager().SetTimer(
+                MetricsTimerHandle,
+                this,
+                &UPerf_FrameRateController::UpdateMetrics,
+                MetricsUpdateInterval,
+                true
+            );
         }
         
-        // Update cooldown timer
-        if (QualityAdjustmentCooldown > 0.0f)
-        {
-            QualityAdjustmentCooldown -= DeltaTime;
-        }
+        // Apply initial frame rate settings
+        OptimizeForPlatform();
+        ApplyFrameRateLimit();
+        
+        bInitialized = true;
+        
+        UE_LOG(LogTemp, Log, TEXT("FrameRateController: Initialized successfully"));
     }
 }
 
-void UPerf_FrameRateController::SetTargetFrameRate(EPerf_FrameRateTarget NewTarget)
+void UPerf_FrameRateController::Deinitialize()
 {
-    FrameRateSettings.TargetFrameRate = NewTarget;
-    ApplyFrameRateSettings();
+    if (UWorld* World = GetWorld())
+    {
+        World->GetTimerManager().ClearTimer(MetricsTimerHandle);
+    }
     
-    UE_LOG(LogTemp, Log, TEXT("FrameRateController: Target frame rate changed to %d"), 
-           static_cast<int32>(NewTarget));
+    bInitialized = false;
+    Super::Deinitialize();
 }
 
-void UPerf_FrameRateController::SetQualityLevel(EPerf_QualityLevel NewQuality)
+void UPerf_FrameRateController::SetTargetFrameRate(EPerf_FrameRateTarget TargetRate)
 {
-    FrameRateSettings.QualityLevel = NewQuality;
-    ApplyQualitySettings(NewQuality);
+    FrameRateSettings.TargetFrameRate = TargetRate;
+    ApplyFrameRateLimit();
+    HandleFrameRateChange();
     
-    UE_LOG(LogTemp, Log, TEXT("FrameRateController: Quality level changed to %d"), 
-           static_cast<int32>(NewQuality));
+    UE_LOG(LogTemp, Log, TEXT("FrameRateController: Target frame rate set to %d"), (int32)TargetRate);
 }
 
-void UPerf_FrameRateController::EnableAutoQualityAdjustment(bool bEnable)
+void UPerf_FrameRateController::SetCustomFrameRate(float CustomRate)
 {
-    FrameRateSettings.bAutoAdjustQuality = bEnable;
+    FrameRateSettings.CustomFrameRate = FMath::Clamp(CustomRate, 10.0f, 240.0f);
+    if (FrameRateSettings.TargetFrameRate == EPerf_FrameRateTarget::Auto)
+    {
+        ApplyFrameRateLimit();
+    }
     
-    UE_LOG(LogTemp, Log, TEXT("FrameRateController: Auto quality adjustment %s"), 
-           bEnable ? TEXT("enabled") : TEXT("disabled"));
+    UE_LOG(LogTemp, Log, TEXT("FrameRateController: Custom frame rate set to %.1f"), CustomRate);
 }
 
-float UPerf_FrameRateController::GetCurrentFrameRate() const
+void UPerf_FrameRateController::EnableVSync(bool bEnable)
 {
-    return CurrentFrameRate;
+    FrameRateSettings.bVSyncEnabled = bEnable;
+    
+    // Apply VSync setting
+    if (GEngine && GEngine->GameUserSettings)
+    {
+        GEngine->GameUserSettings->SetVSyncEnabled(bEnable);
+        GEngine->GameUserSettings->ApplySettings(false);
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("FrameRateController: VSync %s"), bEnable ? TEXT("enabled") : TEXT("disabled"));
 }
 
-float UPerf_FrameRateController::GetCurrentFrameTime() const
+void UPerf_FrameRateController::EnableAdaptiveFrameRate(bool bEnable)
 {
-    return CurrentFrameTime;
+    FrameRateSettings.bAdaptiveFrameRate = bEnable;
+    
+    if (bEnable)
+    {
+        DetectOptimalFrameRate();
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("FrameRateController: Adaptive frame rate %s"), bEnable ? TEXT("enabled") : TEXT("disabled"));
 }
 
-bool UPerf_FrameRateController::IsPerformanceTargetMet() const
+FPerf_FrameRateMetrics UPerf_FrameRateController::GetFrameRateMetrics() const
 {
-    float TargetFrameTime = 1.0f / FrameRateSettings.MaxDesiredFrameRate;
-    return CurrentFrameTime <= (TargetFrameTime / FrameRateSettings.PerformanceThreshold);
+    return CurrentMetrics;
 }
 
-void UPerf_FrameRateController::AdjustQualityForPerformance()
+float UPerf_FrameRateController::GetCurrentFPS() const
 {
-    if (!FrameRateSettings.bAutoAdjustQuality || QualityAdjustmentCooldown > 0.0f)
+    return CurrentMetrics.CurrentFPS;
+}
+
+void UPerf_FrameRateController::ResetMetrics()
+{
+    CurrentMetrics = FPerf_FrameRateMetrics();
+    FrameTimeHistory.Empty();
+    MetricsAccumulator = 0.0f;
+    MetricsFrameCount = 0;
+    
+    UE_LOG(LogTemp, Log, TEXT("FrameRateController: Metrics reset"));
+}
+
+void UPerf_FrameRateController::ApplyFrameRateSettings(const FPerf_FrameRateSettings& Settings)
+{
+    FrameRateSettings = Settings;
+    ApplyFrameRateLimit();
+    EnableVSync(Settings.bVSyncEnabled);
+    
+    UE_LOG(LogTemp, Log, TEXT("FrameRateController: Settings applied"));
+}
+
+FPerf_FrameRateSettings UPerf_FrameRateController::GetFrameRateSettings() const
+{
+    return FrameRateSettings;
+}
+
+void UPerf_FrameRateController::OptimizeForPlatform()
+{
+    // Detect platform capabilities
+    bool bIsDesktop = FPlatformApplicationMisc::IsThisApplicationForeground();
+    bool bIsHighEnd = GRHISupportsHDROutput;
+    
+    if (FrameRateSettings.TargetFrameRate == EPerf_FrameRateTarget::Auto)
+    {
+        if (bIsDesktop && bIsHighEnd)
+        {
+            FrameRateSettings.TargetFrameRate = EPerf_FrameRateTarget::FPS_60;
+        }
+        else
+        {
+            FrameRateSettings.TargetFrameRate = EPerf_FrameRateTarget::FPS_30;
+        }
+    }
+    
+    // Enable adaptive frame rate for better performance
+    FrameRateSettings.bAdaptiveFrameRate = true;
+    
+    UE_LOG(LogTemp, Log, TEXT("FrameRateController: Platform optimization complete"));
+}
+
+bool UPerf_FrameRateController::IsFrameRateStable() const
+{
+    if (FrameTimeHistory.Num() < 10)
+    {
+        return false;
+    }
+    
+    float TargetFPS = 60.0f;
+    switch (FrameRateSettings.TargetFrameRate)
+    {
+        case EPerf_FrameRateTarget::FPS_30: TargetFPS = 30.0f; break;
+        case EPerf_FrameRateTarget::FPS_60: TargetFPS = 60.0f; break;
+        case EPerf_FrameRateTarget::FPS_120: TargetFPS = 120.0f; break;
+        default: TargetFPS = FrameRateSettings.CustomFrameRate; break;
+    }
+    
+    float Variance = FMath::Abs(CurrentMetrics.CurrentFPS - TargetFPS);
+    return Variance <= FrameRateSettings.FrameRateTolerance;
+}
+
+void UPerf_FrameRateController::ForceGarbageCollection()
+{
+    if (GEngine)
+    {
+        GEngine->ForceGarbageCollection(true);
+        UE_LOG(LogTemp, Log, TEXT("FrameRateController: Forced garbage collection"));
+    }
+}
+
+void UPerf_FrameRateController::UpdateMetrics()
+{
+    if (!bInitialized)
     {
         return;
     }
     
-    if (!IsPerformanceTargetMet())
+    // Get current frame time
+    float CurrentFrameTime = FApp::GetDeltaTime();
+    if (CurrentFrameTime > 0.0f)
     {
-        // Decrease quality
-        switch (FrameRateSettings.QualityLevel)
+        CurrentMetrics.CurrentFPS = 1.0f / CurrentFrameTime;
+        CurrentMetrics.FrameTime = CurrentFrameTime * 1000.0f; // Convert to milliseconds
+        
+        // Update history
+        FrameTimeHistory.Add(CurrentFrameTime);
+        if (FrameTimeHistory.Num() > MetricsHistorySize)
         {
-            case EPerf_QualityLevel::Ultra:
-                SetQualityLevel(EPerf_QualityLevel::High);
-                break;
-            case EPerf_QualityLevel::High:
-                SetQualityLevel(EPerf_QualityLevel::Medium);
-                break;
-            case EPerf_QualityLevel::Medium:
-                SetQualityLevel(EPerf_QualityLevel::Low);
-                break;
-            case EPerf_QualityLevel::Low:
-                // Already at lowest quality
-                break;
-            case EPerf_QualityLevel::Auto:
-                SetQualityLevel(EPerf_QualityLevel::Medium);
-                break;
+            FrameTimeHistory.RemoveAt(0);
         }
         
-        QualityAdjustmentCooldown = QualityAdjustmentCooldownTime;
-        UE_LOG(LogTemp, Warning, TEXT("FrameRateController: Quality reduced due to poor performance"));
-    }
-    else if (AverageFrameRate > FrameRateSettings.MaxDesiredFrameRate * 1.1f)
-    {
-        // Increase quality if we have headroom
-        switch (FrameRateSettings.QualityLevel)
+        // Calculate statistics
+        if (FrameTimeHistory.Num() > 0)
         {
-            case EPerf_QualityLevel::Low:
-                SetQualityLevel(EPerf_QualityLevel::Medium);
-                break;
-            case EPerf_QualityLevel::Medium:
-                SetQualityLevel(EPerf_QualityLevel::High);
-                break;
-            case EPerf_QualityLevel::High:
-                SetQualityLevel(EPerf_QualityLevel::Ultra);
-                break;
-            case EPerf_QualityLevel::Ultra:
-                // Already at highest quality
-                break;
-            case EPerf_QualityLevel::Auto:
-                SetQualityLevel(EPerf_QualityLevel::High);
-                break;
+            float TotalTime = 0.0f;
+            float MinTime = FrameTimeHistory[0];
+            float MaxTime = FrameTimeHistory[0];
+            
+            for (float Time : FrameTimeHistory)
+            {
+                TotalTime += Time;
+                MinTime = FMath::Min(MinTime, Time);
+                MaxTime = FMath::Max(MaxTime, Time);
+            }
+            
+            CurrentMetrics.AverageFPS = FrameTimeHistory.Num() / TotalTime;
+            CurrentMetrics.MinFPS = 1.0f / MaxTime;
+            CurrentMetrics.MaxFPS = 1.0f / MinTime;
         }
         
-        QualityAdjustmentCooldown = QualityAdjustmentCooldownTime;
-        UE_LOG(LogTemp, Log, TEXT("FrameRateController: Quality increased due to performance headroom"));
+        // Check for frame drops
+        float TargetFrameTime = 1.0f / 60.0f; // Default to 60 FPS
+        if (CurrentFrameTime > TargetFrameTime * 1.5f)
+        {
+            CurrentMetrics.FrameDropCount++;
+        }
+        
+        // Adaptive frame rate adjustment
+        if (FrameRateSettings.bAdaptiveFrameRate)
+        {
+            if (!IsFrameRateStable() && CurrentMetrics.CurrentFPS < 30.0f)
+            {
+                // Consider reducing quality settings or frame rate target
+                UE_LOG(LogTemp, Warning, TEXT("FrameRateController: Performance below threshold, consider optimization"));
+            }
+        }
     }
 }
 
-void UPerf_FrameRateController::ResetToDefaultSettings()
+void UPerf_FrameRateController::ApplyFrameRateLimit()
 {
-    FrameRateSettings = FPerf_FrameRateSettings();
-    ApplyFrameRateSettings();
-    ApplyQualitySettings(FrameRateSettings.QualityLevel);
+    float TargetFPS = 60.0f;
     
-    UE_LOG(LogTemp, Log, TEXT("FrameRateController: Settings reset to defaults"));
-}
-
-void UPerf_FrameRateController::StartPerformanceMonitoring()
-{
-    bIsMonitoring = true;
-    FrameTimeHistory.Empty();
-    PerformanceCheckTimer = 0.0f;
-    
-    UE_LOG(LogTemp, Log, TEXT("FrameRateController: Performance monitoring started"));
-}
-
-void UPerf_FrameRateController::StopPerformanceMonitoring()
-{
-    bIsMonitoring = false;
-    
-    UE_LOG(LogTemp, Log, TEXT("FrameRateController: Performance monitoring stopped"));
-}
-
-void UPerf_FrameRateController::LogPerformanceStats()
-{
-    UE_LOG(LogTemp, Log, TEXT("FrameRateController Performance Stats:"));
-    UE_LOG(LogTemp, Log, TEXT("  Current FPS: %.2f"), CurrentFrameRate);
-    UE_LOG(LogTemp, Log, TEXT("  Average FPS: %.2f"), AverageFrameRate);
-    UE_LOG(LogTemp, Log, TEXT("  Current Frame Time: %.4f ms"), CurrentFrameTime * 1000.0f);
-    UE_LOG(LogTemp, Log, TEXT("  Target Met: %s"), IsPerformanceTargetMet() ? TEXT("Yes") : TEXT("No"));
-    UE_LOG(LogTemp, Log, TEXT("  Quality Level: %d"), static_cast<int32>(FrameRateSettings.QualityLevel));
-}
-
-void UPerf_FrameRateController::UpdateFrameRateMetrics(float DeltaTime)
-{
-    CurrentFrameTime = DeltaTime;
-    CurrentFrameRate = (DeltaTime > 0.0f) ? (1.0f / DeltaTime) : 0.0f;
-    
-    // Add to history
-    FrameTimeHistory.Add(DeltaTime);
-    if (FrameTimeHistory.Num() > MaxFrameHistorySize)
+    switch (FrameRateSettings.TargetFrameRate)
     {
-        FrameTimeHistory.RemoveAt(0);
+        case EPerf_FrameRateTarget::FPS_30:
+            TargetFPS = 30.0f;
+            break;
+        case EPerf_FrameRateTarget::FPS_60:
+            TargetFPS = 60.0f;
+            break;
+        case EPerf_FrameRateTarget::FPS_120:
+            TargetFPS = 120.0f;
+            break;
+        case EPerf_FrameRateTarget::Unlimited:
+            TargetFPS = 0.0f; // No limit
+            break;
+        case EPerf_FrameRateTarget::Auto:
+        default:
+            TargetFPS = FrameRateSettings.CustomFrameRate;
+            break;
     }
     
-    // Calculate average
-    AverageFrameRate = CalculateAverageFrameRate();
-}
-
-void UPerf_FrameRateController::CheckPerformanceAndAdjust()
-{
-    if (!IsPerformanceTargetMet())
+    // Apply frame rate limit
+    if (GEngine)
     {
-        ConsecutivePoorFrames++;
-        
-        if (ConsecutivePoorFrames >= PoorFrameThreshold)
+        if (TargetFPS > 0.0f)
         {
-            AdjustQualityForPerformance();
-            ConsecutivePoorFrames = 0;
+            GEngine->SetMaxFPS(TargetFPS);
         }
-    }
-    else
-    {
-        ConsecutivePoorFrames = 0;
-    }
-}
-
-void UPerf_FrameRateController::ApplyFrameRateSettings()
-{
-    if (IConsoleManager& ConsoleManager = IConsoleManager::Get())
-    {
-        // Set target frame rate
-        int32 TargetFPS = 60;
-        switch (FrameRateSettings.TargetFrameRate)
+        else
         {
-            case EPerf_FrameRateTarget::FPS_30:
-                TargetFPS = 30;
-                break;
-            case EPerf_FrameRateTarget::FPS_60:
-                TargetFPS = 60;
-                break;
-            case EPerf_FrameRateTarget::FPS_120:
-                TargetFPS = 120;
-                break;
-            case EPerf_FrameRateTarget::FPS_Unlimited:
-                TargetFPS = 0;
-                break;
-        }
-        
-        if (auto* MaxFPSVar = ConsoleManager.FindConsoleVariable(TEXT("t.MaxFPS")))
-        {
-            MaxFPSVar->Set(TargetFPS);
-        }
-        
-        // Set VSync
-        if (auto* VSyncVar = ConsoleManager.FindConsoleVariable(TEXT("r.VSync")))
-        {
-            VSyncVar->Set(FrameRateSettings.bEnableVSync ? 1 : 0);
-        }
-        
-        // Set frame smoothing
-        if (auto* SmoothFrameRateVar = ConsoleManager.FindConsoleVariable(TEXT("t.SmoothFrameRate")))
-        {
-            SmoothFrameRateVar->Set(FrameRateSettings.bEnableFrameSmoothing ? 1 : 0);
-        }
-        
-        // Set min/max desired frame rates
-        if (auto* MinFrameRateVar = ConsoleManager.FindConsoleVariable(TEXT("t.MinDesiredFrameRate")))
-        {
-            MinFrameRateVar->Set(FrameRateSettings.MinDesiredFrameRate);
-        }
-        
-        if (auto* MaxFrameRateVar = ConsoleManager.FindConsoleVariable(TEXT("t.MaxDesiredFrameRate")))
-        {
-            MaxFrameRateVar->Set(FrameRateSettings.MaxDesiredFrameRate);
+            GEngine->SetMaxFPS(0.0f); // Remove limit
         }
     }
 }
 
-void UPerf_FrameRateController::ApplyQualitySettings(EPerf_QualityLevel Quality)
+void UPerf_FrameRateController::DetectOptimalFrameRate()
 {
-    if (IConsoleManager& ConsoleManager = IConsoleManager::Get())
+    // Simple heuristic for optimal frame rate detection
+    if (CurrentMetrics.AverageFPS > 55.0f)
     {
-        switch (Quality)
-        {
-            case EPerf_QualityLevel::Low:
-                // Low quality settings
-                if (auto* ShadowQuality = ConsoleManager.FindConsoleVariable(TEXT("r.ShadowQuality")))
-                    ShadowQuality->Set(1);
-                if (auto* TextureQuality = ConsoleManager.FindConsoleVariable(TEXT("r.TextureQuality")))
-                    TextureQuality->Set(1);
-                if (auto* EffectsQuality = ConsoleManager.FindConsoleVariable(TEXT("r.EffectsQuality")))
-                    EffectsQuality->Set(1);
-                break;
-                
-            case EPerf_QualityLevel::Medium:
-                // Medium quality settings
-                if (auto* ShadowQuality = ConsoleManager.FindConsoleVariable(TEXT("r.ShadowQuality")))
-                    ShadowQuality->Set(2);
-                if (auto* TextureQuality = ConsoleManager.FindConsoleVariable(TEXT("r.TextureQuality")))
-                    TextureQuality->Set(2);
-                if (auto* EffectsQuality = ConsoleManager.FindConsoleVariable(TEXT("r.EffectsQuality")))
-                    EffectsQuality->Set(2);
-                break;
-                
-            case EPerf_QualityLevel::High:
-                // High quality settings
-                if (auto* ShadowQuality = ConsoleManager.FindConsoleVariable(TEXT("r.ShadowQuality")))
-                    ShadowQuality->Set(3);
-                if (auto* TextureQuality = ConsoleManager.FindConsoleVariable(TEXT("r.TextureQuality")))
-                    TextureQuality->Set(3);
-                if (auto* EffectsQuality = ConsoleManager.FindConsoleVariable(TEXT("r.EffectsQuality")))
-                    EffectsQuality->Set(3);
-                break;
-                
-            case EPerf_QualityLevel::Ultra:
-                // Ultra quality settings
-                if (auto* ShadowQuality = ConsoleManager.FindConsoleVariable(TEXT("r.ShadowQuality")))
-                    ShadowQuality->Set(4);
-                if (auto* TextureQuality = ConsoleManager.FindConsoleVariable(TEXT("r.TextureQuality")))
-                    TextureQuality->Set(4);
-                if (auto* EffectsQuality = ConsoleManager.FindConsoleVariable(TEXT("r.EffectsQuality")))
-                    EffectsQuality->Set(4);
-                break;
-                
-            case EPerf_QualityLevel::Auto:
-                // Auto will be handled by the adjustment system
-                break;
-        }
+        // System can handle 60 FPS
+        FrameRateSettings.TargetFrameRate = EPerf_FrameRateTarget::FPS_60;
     }
-}
-
-float UPerf_FrameRateController::CalculateAverageFrameRate() const
-{
-    if (FrameTimeHistory.Num() == 0)
+    else if (CurrentMetrics.AverageFPS > 25.0f)
     {
-        return 60.0f;
+        // System should target 30 FPS
+        FrameRateSettings.TargetFrameRate = EPerf_FrameRateTarget::FPS_30;
     }
     
-    float TotalFrameTime = 0.0f;
-    for (float FrameTime : FrameTimeHistory)
-    {
-        TotalFrameTime += FrameTime;
-    }
-    
-    float AverageFrameTime = TotalFrameTime / FrameTimeHistory.Num();
-    return (AverageFrameTime > 0.0f) ? (1.0f / AverageFrameTime) : 0.0f;
+    ApplyFrameRateLimit();
 }
 
-bool UPerf_FrameRateController::ShouldAdjustQuality() const
+void UPerf_FrameRateController::HandleFrameRateChange()
 {
-    return FrameRateSettings.bAutoAdjustQuality && 
-           QualityAdjustmentCooldown <= 0.0f && 
-           FrameTimeHistory.Num() >= MaxFrameHistorySize / 2;
+    // Reset metrics when frame rate target changes
+    ResetMetrics();
+    
+    // Force a garbage collection to clear any performance issues
+    ForceGarbageCollection();
 }
