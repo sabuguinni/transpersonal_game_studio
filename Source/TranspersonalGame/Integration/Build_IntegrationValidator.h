@@ -1,151 +1,143 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/GameInstanceSubsystem.h"
+#include "GameFramework/Actor.h"
 #include "Engine/World.h"
-#include "Components/ActorComponent.h"
+#include "Components/SceneComponent.h"
 #include "Build_IntegrationValidator.generated.h"
 
 UENUM(BlueprintType)
-enum class EBuild_ValidationResult : uint8
+enum class EBuild_IntegrationStatus : uint8
 {
-    Success     UMETA(DisplayName = "Success"),
-    Warning     UMETA(DisplayName = "Warning"),
-    Error       UMETA(DisplayName = "Error"),
-    Critical    UMETA(DisplayName = "Critical")
+    Unknown,
+    Healthy,
+    Warning,
+    Critical,
+    Failed
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FBuild_ValidationReport
+struct FBuild_ModuleStatus
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    FString SystemName;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    EBuild_ValidationResult Result;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    FString Message;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    float ValidationTime;
-
-    FBuild_ValidationReport()
-    {
-        SystemName = TEXT("");
-        Result = EBuild_ValidationResult::Success;
-        Message = TEXT("");
-        ValidationTime = 0.0f;
-    }
-};
-
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FBuild_SystemHealth
-{
-    GENERATED_BODY()
-
-    UPROPERTY(BlueprintReadOnly, Category = "Health")
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
     FString ModuleName;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Health")
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
     bool bIsLoaded;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Health")
-    bool bHasCDO;
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    bool bCanSpawn;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Health")
-    int32 ActorCount;
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    FString ErrorMessage;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Health")
-    TArray<FString> Dependencies;
-
-    FBuild_SystemHealth()
+    FBuild_ModuleStatus()
     {
         ModuleName = TEXT("");
         bIsLoaded = false;
-        bHasCDO = false;
-        ActorCount = 0;
+        bCanSpawn = false;
+        ErrorMessage = TEXT("");
     }
 };
 
-/**
- * Integration Validator - Validates system integration and build health
- * Monitors cross-system dependencies and compilation status
- */
+USTRUCT(BlueprintType)
+struct FBuild_IntegrationReport
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    EBuild_IntegrationStatus OverallStatus;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    int32 TotalActors;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    int32 WorkingModules;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    int32 TotalModules;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    float IntegrationScore;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    TArray<FBuild_ModuleStatus> ModuleStatuses;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    TArray<FString> Recommendations;
+
+    FBuild_IntegrationReport()
+    {
+        OverallStatus = EBuild_IntegrationStatus::Unknown;
+        TotalActors = 0;
+        WorkingModules = 0;
+        TotalModules = 0;
+        IntegrationScore = 0.0f;
+    }
+};
+
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UBuild_IntegrationValidator : public UGameInstanceSubsystem
+class TRANSPERSONALGAME_API ABuild_IntegrationValidator : public AActor
 {
     GENERATED_BODY()
 
 public:
-    UBuild_IntegrationValidator();
-
-    // USubsystem interface
-    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
-    virtual void Deinitialize() override;
-
-    UFUNCTION(BlueprintCallable, Category = "Integration", CallInEditor = true)
-    void ValidateAllSystems();
-
-    UFUNCTION(BlueprintCallable, Category = "Integration", CallInEditor = true)
-    void ValidateSystemIntegration(const FString& SystemName);
-
-    UFUNCTION(BlueprintCallable, Category = "Integration", CallInEditor = true)
-    void ValidateBuildHealth();
-
-    UFUNCTION(BlueprintCallable, Category = "Integration", CallInEditor = true)
-    void ValidateDependencies();
-
-    UFUNCTION(BlueprintCallable, Category = "Integration", CallInEditor = true)
-    void GenerateIntegrationReport();
-
-    UFUNCTION(BlueprintPure, Category = "Integration")
-    TArray<FBuild_ValidationReport> GetValidationReports() const { return ValidationReports; }
-
-    UFUNCTION(BlueprintPure, Category = "Integration")
-    TArray<FBuild_SystemHealth> GetSystemHealthReports() const { return SystemHealthReports; }
-
-    UFUNCTION(BlueprintPure, Category = "Integration")
-    bool IsSystemHealthy(const FString& SystemName) const;
-
-    UFUNCTION(BlueprintPure, Category = "Integration")
-    int32 GetTotalActorCount() const;
-
-    UFUNCTION(BlueprintPure, Category = "Integration")
-    float GetLastValidationTime() const { return LastValidationTime; }
+    ABuild_IntegrationValidator();
 
 protected:
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    TArray<FBuild_ValidationReport> ValidationReports;
+    virtual void BeginPlay() override;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    USceneComponent* RootSceneComponent;
 
     UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    TArray<FBuild_SystemHealth> SystemHealthReports;
+    FBuild_IntegrationReport CurrentReport;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    float LastValidationTime;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration")
+    TArray<FString> CriticalModules;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    bool bValidationInProgress;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration")
+    bool bAutoValidateOnBeginPlay;
 
-private:
-    void ValidateQASystem();
-    void ValidateVFXSystem();
-    void ValidateAudioSystem();
-    void ValidateNarrativeSystem();
-    void ValidateQuestSystem();
-    void ValidateCrowdSystem();
-    void ValidateCombatSystem();
-    void ValidateNPCSystem();
-    void ValidateCoreSystem(const FString& ClassName);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration")
+    float ValidationInterval;
+
+    FTimerHandle ValidationTimerHandle;
+
+public:
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    void RunFullValidation();
+
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    FBuild_IntegrationReport GetCurrentReport() const { return CurrentReport; }
+
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    bool ValidateModule(const FString& ModuleName, FBuild_ModuleStatus& OutStatus);
+
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    void ValidateAllModules();
+
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    void ValidateLevelIntegration();
+
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    void ValidateBuildHealth();
+
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    float CalculateIntegrationScore();
+
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    void GenerateRecommendations();
+
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Integration")
+    void EditorValidateAll();
+
+protected:
+    void PeriodicValidation();
     
-    void AddValidationReport(const FString& SystemName, EBuild_ValidationResult Result, const FString& Message);
-    void AddSystemHealthReport(const FString& ModuleName, bool bLoaded, bool bHasCDO, int32 ActorCount, const TArray<FString>& Dependencies);
+    bool TestModuleSpawning(const FString& ModuleName);
     
-    FBuild_SystemHealth CreateSystemHealthReport(const FString& ModuleName);
-    bool ValidateClassLoading(const FString& ClassName);
-    bool ValidateCDOConstruction(UClass* Class);
-    int32 CountActorsOfClass(const FString& ClassName);
-    TArray<FString> GetSystemDependencies(const FString& SystemName);
+    void LogValidationResults();
 };
