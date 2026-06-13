@@ -1,280 +1,272 @@
 #include "Audio_MetaSoundManager.h"
 #include "Components/AudioComponent.h"
-#include "Engine/Engine.h"
-#include "TimerManager.h"
-#include "Sound/SoundBase.h"
+#include "Engine/World.h"
+#include "GameFramework/PlayerController.h"
 #include "Kismet/GameplayStatics.h"
+#include "MetasoundSource.h"
 
 AAudio_MetaSoundManager::AAudio_MetaSoundManager()
 {
     PrimaryActorTick.bCanEverTick = true;
-    
-    // Initialize audio components
-    InitializeAudioComponents();
-    
-    // Set default states
-    CurrentMusicState = EAudio_MusicState::Calm;
-    CurrentAmbientZone = EAudio_AmbientZone::Forest;
-    
-    // Set default volumes
-    MasterVolume = 1.0f;
-    MusicVolume = 0.7f;
-    AmbientVolume = 0.5f;
-    SFXVolume = 1.0f;
+
+    // Create root component
+    RootSceneComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootComponent"));
+    RootComponent = RootSceneComponent;
+
+    // Create audio components
+    BiomeAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("BiomeAudioComponent"));
+    BiomeAudioComponent->SetupAttachment(RootComponent);
+    BiomeAudioComponent->bAutoActivate = false;
+
+    WeatherAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("WeatherAudioComponent"));
+    WeatherAudioComponent->SetupAttachment(RootComponent);
+    WeatherAudioComponent->bAutoActivate = false;
+
+    ThreatAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("ThreatAudioComponent"));
+    ThreatAudioComponent->SetupAttachment(RootComponent);
+    ThreatAudioComponent->bAutoActivate = false;
+
+    // Initialize state
+    CurrentBiome = EAudio_BiomeType::Forest;
+    CurrentTimeOfDay = EAudio_TimeOfDay::Day;
+    CurrentWeather = EAudio_WeatherState::Clear;
+    bThreatActive = false;
+    ThreatLevel = 0.0f;
+
+    // Initialize biome audio data
+    FAudio_BiomeAudioData ForestData;
+    ForestData.BaseVolume = 0.4f;
+    ForestData.FadeInTime = 3.0f;
+    ForestData.FadeOutTime = 2.0f;
+    BiomeAudioMap.Add(EAudio_BiomeType::Forest, ForestData);
+
+    FAudio_BiomeAudioData PlainsData;
+    PlainsData.BaseVolume = 0.3f;
+    PlainsData.FadeInTime = 2.5f;
+    PlainsData.FadeOutTime = 1.8f;
+    BiomeAudioMap.Add(EAudio_BiomeType::Plains, PlainsData);
+
+    FAudio_BiomeAudioData RiverData;
+    RiverData.BaseVolume = 0.6f;
+    RiverData.FadeInTime = 2.0f;
+    RiverData.FadeOutTime = 1.5f;
+    BiomeAudioMap.Add(EAudio_BiomeType::River, RiverData);
+
+    // Initialize threat audio data
+    TRexThreatAudio.TriggerDistance = 2000.0f;
+    TRexThreatAudio.MaxVolume = 0.9f;
+    TRexThreatAudio.FadeSpeed = 4.0f;
 }
 
 void AAudio_MetaSoundManager::BeginPlay()
 {
     Super::BeginPlay();
-    
-    LoadDefaultSoundLayers();
-    UpdateVolumeSettings();
-    
-    // Start with default music and ambient
-    SetMusicState(CurrentMusicState);
-    SetAmbientZone(CurrentAmbientZone);
+
+    // Start with forest biome audio
+    UpdateBiomeAudio();
+    UpdateWeatherAudio();
 }
 
 void AAudio_MetaSoundManager::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
-    
-    if (bIsFadingMusic)
+
+    // Update threat audio based on nearby threats
+    UpdateThreatAudio(DeltaTime);
+}
+
+void AAudio_MetaSoundManager::SetBiome(EAudio_BiomeType NewBiome)
+{
+    if (CurrentBiome != NewBiome)
     {
-        ProcessMusicFade();
-    }
-    
-    if (bIsFadingAmbient)
-    {
-        ProcessAmbientFade();
+        CurrentBiome = NewBiome;
+        UpdateBiomeAudio();
     }
 }
 
-void AAudio_MetaSoundManager::InitializeAudioComponents()
+void AAudio_MetaSoundManager::SetTimeOfDay(EAudio_TimeOfDay NewTimeOfDay)
 {
-    // Create music audio component
-    MusicAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("MusicAudioComponent"));
-    if (MusicAudioComponent)
+    if (CurrentTimeOfDay != NewTimeOfDay)
     {
-        MusicAudioComponent->bAutoActivate = false;
-        MusicAudioComponent->SetVolumeMultiplier(MusicVolume);
-    }
-    
-    // Create ambient audio component
-    AmbientAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("AmbientAudioComponent"));
-    if (AmbientAudioComponent)
-    {
-        AmbientAudioComponent->bAutoActivate = false;
-        AmbientAudioComponent->SetVolumeMultiplier(AmbientVolume);
-    }
-    
-    // Create SFX audio component
-    SFXAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("SFXAudioComponent"));
-    if (SFXAudioComponent)
-    {
-        SFXAudioComponent->bAutoActivate = false;
-        SFXAudioComponent->SetVolumeMultiplier(SFXVolume);
+        CurrentTimeOfDay = NewTimeOfDay;
+        UpdateBiomeAudio(); // Biome audio changes with time of day
     }
 }
 
-void AAudio_MetaSoundManager::LoadDefaultSoundLayers()
+void AAudio_MetaSoundManager::SetWeather(EAudio_WeatherState NewWeather)
 {
-    // Initialize empty sound layers - to be populated via Blueprint or data assets
-    for (int32 i = 0; i < (int32)EAudio_MusicState::Danger + 1; i++)
+    if (CurrentWeather != NewWeather)
     {
-        EAudio_MusicState State = (EAudio_MusicState)i;
-        MusicLayers.Add(State, FAudio_SoundLayer());
-    }
-    
-    for (int32 i = 0; i < (int32)EAudio_AmbientZone::Mountain + 1; i++)
-    {
-        EAudio_AmbientZone Zone = (EAudio_AmbientZone)i;
-        AmbientLayers.Add(Zone, FAudio_SoundLayer());
+        CurrentWeather = NewWeather;
+        UpdateWeatherAudio();
     }
 }
 
-void AAudio_MetaSoundManager::UpdateVolumeSettings()
+void AAudio_MetaSoundManager::TriggerThreatAudio(float ThreatDistance)
 {
-    if (MusicAudioComponent)
-    {
-        MusicAudioComponent->SetVolumeMultiplier(MasterVolume * MusicVolume);
-    }
+    bThreatActive = true;
     
-    if (AmbientAudioComponent)
-    {
-        AmbientAudioComponent->SetVolumeMultiplier(MasterVolume * AmbientVolume);
-    }
-    
-    if (SFXAudioComponent)
-    {
-        SFXAudioComponent->SetVolumeMultiplier(MasterVolume * SFXVolume);
-    }
-}
+    // Calculate threat level based on distance
+    float NormalizedDistance = FMath::Clamp(ThreatDistance / TRexThreatAudio.TriggerDistance, 0.0f, 1.0f);
+    ThreatLevel = 1.0f - NormalizedDistance; // Closer = higher threat level
 
-void AAudio_MetaSoundManager::SetMusicState(EAudio_MusicState NewState)
-{
-    if (CurrentMusicState == NewState) return;
-    
-    CurrentMusicState = NewState;
-    
-    if (MusicLayers.Contains(NewState))
+    if (ThreatAudioComponent && TRexThreatAudio.ThreatMetaSound)
     {
-        const FAudio_SoundLayer& Layer = MusicLayers[NewState];
-        if (Layer.SoundAsset && MusicAudioComponent)
+        if (!ThreatAudioComponent->IsPlaying())
         {
-            MusicAudioComponent->Stop();
-            MusicAudioComponent->SetSound(Layer.SoundAsset);
-            MusicAudioComponent->SetVolumeMultiplier(MasterVolume * MusicVolume * Layer.Volume);
-            MusicAudioComponent->Play();
+            ThreatAudioComponent->SetSound(TRexThreatAudio.ThreatMetaSound);
+            ThreatAudioComponent->Play();
         }
+        
+        // Set volume based on threat level
+        float TargetVolume = ThreatLevel * TRexThreatAudio.MaxVolume;
+        ThreatAudioComponent->SetVolumeMultiplier(TargetVolume);
     }
 }
 
-void AAudio_MetaSoundManager::SetAmbientZone(EAudio_AmbientZone NewZone)
+void AAudio_MetaSoundManager::StopThreatAudio()
 {
-    if (CurrentAmbientZone == NewZone) return;
+    bThreatActive = false;
+    ThreatLevel = 0.0f;
     
-    CurrentAmbientZone = NewZone;
-    
-    if (AmbientLayers.Contains(NewZone))
+    if (ThreatAudioComponent && ThreatAudioComponent->IsPlaying())
     {
-        const FAudio_SoundLayer& Layer = AmbientLayers[NewZone];
-        if (Layer.SoundAsset && AmbientAudioComponent)
-        {
-            AmbientAudioComponent->Stop();
-            AmbientAudioComponent->SetSound(Layer.SoundAsset);
-            AmbientAudioComponent->SetVolumeMultiplier(MasterVolume * AmbientVolume * Layer.Volume);
-            AmbientAudioComponent->Play();
-        }
+        ThreatAudioComponent->FadeOut(1.0f, 0.0f);
     }
 }
 
-void AAudio_MetaSoundManager::PlaySFX(USoundBase* SoundEffect, float Volume)
+void AAudio_MetaSoundManager::UpdatePlayerFootsteps(bool bIsWalking, bool bIsRunning)
 {
-    if (SoundEffect && SFXAudioComponent)
-    {
-        SFXAudioComponent->SetSound(SoundEffect);
-        SFXAudioComponent->SetVolumeMultiplier(MasterVolume * SFXVolume * Volume);
-        SFXAudioComponent->Play();
-    }
+    // This would be called by the character movement component
+    // to trigger appropriate footstep sounds based on movement state
+    // Implementation depends on MetaSound setup for footsteps
 }
 
-void AAudio_MetaSoundManager::SetMasterVolume(float Volume)
+void AAudio_MetaSoundManager::UpdateBiomeAudio()
 {
-    MasterVolume = FMath::Clamp(Volume, 0.0f, 1.0f);
-    UpdateVolumeSettings();
-}
-
-void AAudio_MetaSoundManager::SetMusicVolume(float Volume)
-{
-    MusicVolume = FMath::Clamp(Volume, 0.0f, 1.0f);
-    UpdateVolumeSettings();
-}
-
-void AAudio_MetaSoundManager::SetAmbientVolume(float Volume)
-{
-    AmbientVolume = FMath::Clamp(Volume, 0.0f, 1.0f);
-    UpdateVolumeSettings();
-}
-
-void AAudio_MetaSoundManager::SetSFXVolume(float Volume)
-{
-    SFXVolume = FMath::Clamp(Volume, 0.0f, 1.0f);
-    UpdateVolumeSettings();
-}
-
-void AAudio_MetaSoundManager::FadeToMusicState(EAudio_MusicState NewState, float FadeTime)
-{
-    if (CurrentMusicState == NewState || !MusicAudioComponent) return;
-    
-    // Setup fade parameters
-    MusicFadeStartVolume = MusicAudioComponent->VolumeMultiplier;
-    MusicFadeTargetVolume = 0.0f;
-    MusicFadeCurrentTime = 0.0f;
-    MusicFadeDuration = FadeTime * 0.5f; // Half time to fade out
-    bIsFadingMusic = true;
-    
-    // Store the target state for after fade
-    EAudio_MusicState TargetState = NewState;
-    
-    // Set timer to switch music at halfway point
-    GetWorldTimerManager().SetTimer(MusicFadeTimer, [this, TargetState]()
-    {
-        SetMusicState(TargetState);
-        // Start fade in
-        MusicFadeStartVolume = 0.0f;
-        if (MusicLayers.Contains(TargetState))
-        {
-            MusicFadeTargetVolume = MasterVolume * MusicVolume * MusicLayers[TargetState].Volume;
-        }
-        MusicFadeCurrentTime = 0.0f;
-    }, MusicFadeDuration, false);
-}
-
-void AAudio_MetaSoundManager::FadeToAmbientZone(EAudio_AmbientZone NewZone, float FadeTime)
-{
-    if (CurrentAmbientZone == NewZone || !AmbientAudioComponent) return;
-    
-    // Setup fade parameters
-    AmbientFadeStartVolume = AmbientAudioComponent->VolumeMultiplier;
-    AmbientFadeTargetVolume = 0.0f;
-    AmbientFadeCurrentTime = 0.0f;
-    AmbientFadeDuration = FadeTime * 0.5f; // Half time to fade out
-    bIsFadingAmbient = true;
-    
-    // Store the target zone for after fade
-    EAudio_AmbientZone TargetZone = NewZone;
-    
-    // Set timer to switch ambient at halfway point
-    GetWorldTimerManager().SetTimer(AmbientFadeTimer, [this, TargetZone]()
-    {
-        SetAmbientZone(TargetZone);
-        // Start fade in
-        AmbientFadeStartVolume = 0.0f;
-        if (AmbientLayers.Contains(TargetZone))
-        {
-            AmbientFadeTargetVolume = MasterVolume * AmbientVolume * AmbientLayers[TargetZone].Volume;
-        }
-        AmbientFadeCurrentTime = 0.0f;
-    }, AmbientFadeDuration, false);
-}
-
-void AAudio_MetaSoundManager::ProcessMusicFade()
-{
-    if (!MusicAudioComponent || MusicFadeDuration <= 0.0f)
-    {
-        bIsFadingMusic = false;
+    if (!BiomeAudioComponent)
         return;
-    }
-    
-    MusicFadeCurrentTime += GetWorld()->GetDeltaSeconds();
-    float Alpha = FMath::Clamp(MusicFadeCurrentTime / MusicFadeDuration, 0.0f, 1.0f);
-    
-    float CurrentVolume = FMath::Lerp(MusicFadeStartVolume, MusicFadeTargetVolume, Alpha);
-    MusicAudioComponent->SetVolumeMultiplier(CurrentVolume);
-    
-    if (Alpha >= 1.0f)
+
+    FAudio_BiomeAudioData* BiomeData = BiomeAudioMap.Find(CurrentBiome);
+    if (BiomeData && BiomeData->AmbientMetaSound)
     {
-        bIsFadingMusic = false;
+        // Stop current audio if playing
+        if (BiomeAudioComponent->IsPlaying())
+        {
+            BiomeAudioComponent->FadeOut(BiomeData->FadeOutTime, 0.0f);
+        }
+
+        // Set new MetaSound and play
+        BiomeAudioComponent->SetSound(BiomeData->AmbientMetaSound);
+        
+        // Adjust volume based on time of day
+        float TimeModifier = 1.0f;
+        switch (CurrentTimeOfDay)
+        {
+            case EAudio_TimeOfDay::Dawn:
+                TimeModifier = 0.7f;
+                break;
+            case EAudio_TimeOfDay::Day:
+                TimeModifier = 1.0f;
+                break;
+            case EAudio_TimeOfDay::Dusk:
+                TimeModifier = 0.8f;
+                break;
+            case EAudio_TimeOfDay::Night:
+                TimeModifier = 0.5f;
+                break;
+        }
+
+        float FinalVolume = BiomeData->BaseVolume * TimeModifier;
+        BiomeAudioComponent->SetVolumeMultiplier(0.0f);
+        BiomeAudioComponent->Play();
+        BiomeAudioComponent->FadeIn(BiomeData->FadeInTime, FinalVolume);
     }
 }
 
-void AAudio_MetaSoundManager::ProcessAmbientFade()
+void AAudio_MetaSoundManager::UpdateWeatherAudio()
 {
-    if (!AmbientAudioComponent || AmbientFadeDuration <= 0.0f)
-    {
-        bIsFadingAmbient = false;
+    if (!WeatherAudioComponent)
         return;
-    }
+
+    TObjectPtr<UMetaSoundSource>* WeatherSound = WeatherAudioMap.Find(CurrentWeather);
     
-    AmbientFadeCurrentTime += GetWorld()->GetDeltaSeconds();
-    float Alpha = FMath::Clamp(AmbientFadeCurrentTime / AmbientFadeDuration, 0.0f, 1.0f);
-    
-    float CurrentVolume = FMath::Lerp(AmbientFadeStartVolume, AmbientFadeTargetVolume, Alpha);
-    AmbientAudioComponent->SetVolumeMultiplier(CurrentVolume);
-    
-    if (Alpha >= 1.0f)
+    if (WeatherSound && *WeatherSound)
     {
-        bIsFadingAmbient = false;
+        if (WeatherAudioComponent->IsPlaying())
+        {
+            WeatherAudioComponent->FadeOut(1.0f, 0.0f);
+        }
+
+        WeatherAudioComponent->SetSound(*WeatherSound);
+        WeatherAudioComponent->SetVolumeMultiplier(0.0f);
+        WeatherAudioComponent->Play();
+        WeatherAudioComponent->FadeIn(2.0f, 0.6f);
+    }
+    else if (CurrentWeather == EAudio_WeatherState::Clear)
+    {
+        // Stop weather audio for clear weather
+        if (WeatherAudioComponent->IsPlaying())
+        {
+            WeatherAudioComponent->FadeOut(2.0f, 0.0f);
+        }
+    }
+}
+
+void AAudio_MetaSoundManager::UpdateThreatAudio(float DeltaTime)
+{
+    if (!bThreatActive)
+        return;
+
+    // Check for nearby threats (T-Rex actors)
+    TArray<AActor*> FoundActors;
+    UGameplayStatics::GetAllActorsOfClass(GetWorld(), AActor::StaticClass(), FoundActors);
+    
+    bool bThreatNearby = false;
+    float ClosestThreatDistance = TRexThreatAudio.TriggerDistance;
+
+    // Get player location
+    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
+    if (!PlayerPawn)
+        return;
+
+    FVector PlayerLocation = PlayerPawn->GetActorLocation();
+
+    // Check for T-Rex actors
+    for (AActor* Actor : FoundActors)
+    {
+        if (Actor && Actor->GetName().Contains(TEXT("TRex")))
+        {
+            float Distance = FVector::Dist(PlayerLocation, Actor->GetActorLocation());
+            if (Distance <= TRexThreatAudio.TriggerDistance)
+            {
+                bThreatNearby = true;
+                ClosestThreatDistance = FMath::Min(ClosestThreatDistance, Distance);
+            }
+        }
+    }
+
+    if (bThreatNearby)
+    {
+        TriggerThreatAudio(ClosestThreatDistance);
+    }
+    else
+    {
+        StopThreatAudio();
+    }
+}
+
+void AAudio_MetaSoundManager::CrossfadeAudio(UAudioComponent* FromComponent, UAudioComponent* ToComponent, float FadeTime)
+{
+    if (FromComponent && FromComponent->IsPlaying())
+    {
+        FromComponent->FadeOut(FadeTime, 0.0f);
+    }
+
+    if (ToComponent)
+    {
+        ToComponent->SetVolumeMultiplier(0.0f);
+        ToComponent->Play();
+        ToComponent->FadeIn(FadeTime, 1.0f);
     }
 }
