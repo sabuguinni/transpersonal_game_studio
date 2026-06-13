@@ -1,143 +1,92 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Components/ActorComponent.h"
+#include "Engine/World.h"
 #include "GameFramework/Actor.h"
-#include "Components/AudioComponent.h"
-#include "Sound/SoundCue.h"
-#include "Engine/TriggerVolume.h"
 #include "Narr_SurvivalNarrator.generated.h"
 
 UENUM(BlueprintType)
-enum class ENarr_NarrationType : uint8
+enum class ENarr_SurvivalEvent : uint8
 {
-    Environmental,
-    Danger,
-    Discovery,
-    Survival,
-    Predator
+    None = 0,
+    FirstHunt,
+    PackEncounter,
+    WaterFound,
+    ShelterBuilt,
+    FireDiscovered,
+    TerritoryMarked,
+    AlphaChallenge,
+    StormSurvived
 };
 
 USTRUCT(BlueprintType)
-struct FNarr_NarrativeEvent
+struct FNarr_SurvivalMoment
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    FString EventID;
+    UPROPERTY(BlueprintReadOnly)
+    ENarr_SurvivalEvent EventType = ENarr_SurvivalEvent::None;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    FText NarrativeText;
+    UPROPERTY(BlueprintReadOnly)
+    FString NarrativeText;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    ENarr_NarrationType NarrationType;
+    UPROPERTY(BlueprintReadOnly)
+    float Intensity = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    float TriggerRadius;
+    UPROPERTY(BlueprintReadOnly)
+    bool bIsTriggered = false;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    bool bIsOneShot;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    float Priority;
-
-    FNarr_NarrativeEvent()
+    FNarr_SurvivalMoment()
     {
-        EventID = TEXT("");
-        NarrativeText = FText::GetEmpty();
-        NarrationType = ENarr_NarrationType::Environmental;
-        TriggerRadius = 500.0f;
-        bIsOneShot = true;
-        Priority = 1.0f;
+        EventType = ENarr_SurvivalEvent::None;
+        NarrativeText = TEXT("");
+        Intensity = 1.0f;
+        bIsTriggered = false;
     }
 };
 
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API ANarr_SurvivalNarrator : public AActor
+UCLASS(ClassGroup=(Narrative), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UNarr_SurvivalNarrator : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    ANarr_SurvivalNarrator();
+    UNarr_SurvivalNarrator();
+
+    UFUNCTION(BlueprintCallable, Category = "Survival Narrative")
+    void TriggerSurvivalEvent(ENarr_SurvivalEvent EventType, float Intensity = 1.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "Survival Narrative")
+    FString GetCurrentNarrative() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Survival Narrative")
+    bool HasActiveNarrative() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Survival Narrative")
+    void ClearCurrentNarrative();
 
 protected:
     virtual void BeginPlay() override;
 
-public:
-    virtual void Tick(float DeltaTime) override;
+    UPROPERTY(BlueprintReadOnly, Category = "Survival Narrative")
+    FNarr_SurvivalMoment CurrentMoment;
 
-    // Core Components
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    class USceneComponent* RootSceneComponent;
+    UPROPERTY(BlueprintReadOnly, Category = "Survival Narrative")
+    TArray<FNarr_SurvivalMoment> EventHistory;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    class UAudioComponent* NarrativeAudioComponent;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival Narrative")
+    float NarrativeDuration = 8.0f;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    class USphereComponent* TriggerSphere;
-
-    // Narrative Events
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    TArray<FNarr_NarrativeEvent> NarrativeEvents;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    float PlayerDetectionRadius;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    float NarrativeCooldown;
-
-    // Audio Settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    class USoundCue* DefaultNarrativeCue;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    float VolumeMultiplier;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    float PitchMultiplier;
-
-    // State Management
-    UPROPERTY(BlueprintReadOnly, Category = "State")
-    bool bIsNarrativePlaying;
-
-    UPROPERTY(BlueprintReadOnly, Category = "State")
-    float LastNarrativeTime;
-
-    UPROPERTY(BlueprintReadOnly, Category = "State")
-    TArray<FString> TriggeredEvents;
-
-    // Functions
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void TriggerNarrative(const FString& EventID);
-
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void PlayNarrativeEvent(const FNarr_NarrativeEvent& Event);
-
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    bool CanTriggerNarrative() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void StopCurrentNarrative();
-
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    FNarr_NarrativeEvent GetNarrativeEventByID(const FString& EventID) const;
-
-    UFUNCTION(BlueprintImplementableEvent, Category = "Narrative")
-    void OnNarrativeTriggered(const FNarr_NarrativeEvent& Event);
-
-    UFUNCTION(BlueprintImplementableEvent, Category = "Narrative")
-    void OnNarrativeCompleted(const FNarr_NarrativeEvent& Event);
-
-protected:
-    UFUNCTION()
-    void OnTriggerOverlapBegin(UPrimitiveComponent* OverlappedComp, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult);
-
-    UFUNCTION()
-    void OnTriggerOverlapEnd(UPrimitiveComponent* OverlappedComp, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival Narrative")
+    bool bAutoTriggerEvents = true;
 
 private:
-    void CheckPlayerProximity();
-    void ProcessNarrativeQueue();
+    void InitializeSurvivalEvents();
+    FString GenerateNarrativeForEvent(ENarr_SurvivalEvent EventType, float Intensity);
     
-    TArray<FNarr_NarrativeEvent> PendingNarratives;
-    class APawn* CachedPlayerPawn;
+    UPROPERTY()
+    TMap<ENarr_SurvivalEvent, FString> EventNarratives;
+
+    FTimerHandle NarrativeClearTimer;
 };
