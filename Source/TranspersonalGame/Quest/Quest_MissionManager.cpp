@@ -1,322 +1,369 @@
 #include "Quest_MissionManager.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "Engine/DataTable.h"
 #include "Kismet/GameplayStatics.h"
 
 UQuest_MissionManager::UQuest_MissionManager()
 {
-    MissionDataTable = nullptr;
+    MaxActiveMissions = 5;
+    bIsInitialized = false;
 }
 
 void UQuest_MissionManager::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
     
-    UE_LOG(LogTemp, Warning, TEXT("Quest_MissionManager: Initializing mission system"));
+    UE_LOG(LogTemp, Warning, TEXT("Quest_MissionManager: Initializing quest system"));
     
-    LoadMissionDatabase();
-    InitializeSurvivalMissions();
-    RegisterMissionCallbacks();
+    InitializeDefaultMissions();
+    SetupCrowdIntegration();
+    
+    bIsInitialized = true;
+    UE_LOG(LogTemp, Warning, TEXT("Quest_MissionManager: Quest system initialized with %d available missions"), AvailableMissions.Num());
 }
 
 void UQuest_MissionManager::Deinitialize()
 {
     ActiveMissions.Empty();
-    CompletedMissions.Empty();
-    MissionDatabase.Empty();
+    AvailableMissions.Empty();
+    CrowdMissionRegistry.Empty();
+    bIsInitialized = false;
     
     Super::Deinitialize();
 }
 
+bool UQuest_MissionManager::CreateMission(const FString& MissionID, const FString& Name, const FString& Description, EQuest_MissionType Type)
+{
+    if (MissionID.IsEmpty() || Name.IsEmpty())
+    {
+        UE_LOG(LogTemp, Error, TEXT("Quest_MissionManager: Cannot create mission with empty ID or name"));
+        return false;
+    }
+    
+    if (AvailableMissions.Contains(MissionID) || ActiveMissions.Contains(MissionID))
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Quest_MissionManager: Mission %s already exists"), *MissionID);
+        return false;
+    }
+    
+    FQuest_MissionData NewMission;
+    NewMission.MissionID = MissionID;
+    NewMission.MissionName = Name;
+    NewMission.MissionDescription = Description;
+    NewMission.MissionType = Type;
+    NewMission.MissionStatus = EQuest_MissionStatus::Available;
+    
+    AvailableMissions.Add(MissionID, NewMission);
+    UE_LOG(LogTemp, Log, TEXT("Quest_MissionManager: Created mission %s - %s"), *MissionID, *Name);
+    
+    return true;
+}
+
 bool UQuest_MissionManager::StartMission(const FString& MissionID)
 {
-    if (MissionID.IsEmpty())
+    if (!AvailableMissions.Contains(MissionID))
     {
-        UE_LOG(LogTemp, Warning, TEXT("Quest_MissionManager: Cannot start mission with empty ID"));
+        UE_LOG(LogTemp, Error, TEXT("Quest_MissionManager: Mission %s not found in available missions"), *MissionID);
         return false;
     }
-
-    if (IsMissionActive(MissionID))
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Quest_MissionManager: Mission %s is already active"), *MissionID);
-        return false;
-    }
-
-    if (IsMissionCompleted(MissionID))
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Quest_MissionManager: Mission %s is already completed"), *MissionID);
-        return false;
-    }
-
-    if (!ValidateMissionPrerequisites(MissionID))
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Quest_MissionManager: Mission %s prerequisites not met"), *MissionID);
-        return false;
-    }
-
-    FQuest_MissionData* MissionData = MissionDatabase.Find(MissionID);
-    if (!MissionData)
-    {
-        UE_LOG(LogTemp, Error, TEXT("Quest_MissionManager: Mission data not found for %s"), *MissionID);
-        return false;
-    }
-
-    FQuest_ActiveMission NewActiveMission;
-    NewActiveMission.MissionID = MissionID;
-    NewActiveMission.StartTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
-    NewActiveMission.ObjectiveStates.SetNum(MissionData->Objectives.Num());
-    for (int32 i = 0; i < NewActiveMission.ObjectiveStates.Num(); i++)
-    {
-        NewActiveMission.ObjectiveStates[i] = false;
-    }
-
-    ActiveMissions.Add(NewActiveMission);
     
-    UE_LOG(LogTemp, Log, TEXT("Quest_MissionManager: Started mission %s with %d objectives"), 
-           *MissionID, MissionData->Objectives.Num());
+    if (ActiveMissions.Num() >= MaxActiveMissions)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Quest_MissionManager: Cannot start mission %s - maximum active missions reached"), *MissionID);
+        return false;
+    }
     
-    BroadcastMissionUpdate(MissionID, TEXT("Started"));
+    FQuest_MissionData MissionData = AvailableMissions[MissionID];
+    MissionData.MissionStatus = EQuest_MissionStatus::Active;
+    MissionData.ElapsedTime = 0.0f;
+    
+    ActiveMissions.Add(MissionID, MissionData);
+    AvailableMissions.Remove(MissionID);
+    
+    BroadcastMissionEvent(MissionID, TEXT("MissionStarted"));
+    UE_LOG(LogTemp, Log, TEXT("Quest_MissionManager: Started mission %s"), *MissionID);
+    
     return true;
 }
 
 bool UQuest_MissionManager::CompleteMission(const FString& MissionID)
 {
-    for (int32 i = 0; i < ActiveMissions.Num(); i++)
+    if (!ActiveMissions.Contains(MissionID))
     {
-        if (ActiveMissions[i].MissionID == MissionID)
-        {
-            ActiveMissions[i].bIsCompleted = true;
-            CompletedMissions.AddUnique(MissionID);
-            
-            FQuest_MissionData* MissionData = MissionDatabase.Find(MissionID);
-            if (MissionData)
-            {
-                UE_LOG(LogTemp, Log, TEXT("Quest_MissionManager: Completed mission %s - Reward: %d XP"), 
-                       *MissionID, MissionData->ExperienceReward);
-            }
-            
-            ActiveMissions.RemoveAt(i);
-            BroadcastMissionUpdate(MissionID, TEXT("Completed"));
-            return true;
-        }
+        UE_LOG(LogTemp, Error, TEXT("Quest_MissionManager: Cannot complete mission %s - not active"), *MissionID);
+        return false;
     }
     
-    UE_LOG(LogTemp, Warning, TEXT("Quest_MissionManager: Cannot complete mission %s - not active"), *MissionID);
-    return false;
+    FQuest_MissionData& MissionData = ActiveMissions[MissionID];
+    MissionData.MissionStatus = EQuest_MissionStatus::Completed;
+    
+    // Award experience
+    UE_LOG(LogTemp, Log, TEXT("Quest_MissionManager: Mission %s completed! Awarded %d experience"), *MissionID, MissionData.ExperienceReward);
+    
+    BroadcastMissionEvent(MissionID, TEXT("MissionCompleted"));
+    ActiveMissions.Remove(MissionID);
+    
+    return true;
 }
 
 bool UQuest_MissionManager::FailMission(const FString& MissionID)
 {
-    for (int32 i = 0; i < ActiveMissions.Num(); i++)
+    if (!ActiveMissions.Contains(MissionID))
     {
-        if (ActiveMissions[i].MissionID == MissionID)
-        {
-            ActiveMissions[i].bIsFailed = true;
-            ActiveMissions.RemoveAt(i);
-            
-            UE_LOG(LogTemp, Log, TEXT("Quest_MissionManager: Failed mission %s"), *MissionID);
-            BroadcastMissionUpdate(MissionID, TEXT("Failed"));
-            return true;
-        }
+        UE_LOG(LogTemp, Error, TEXT("Quest_MissionManager: Cannot fail mission %s - not active"), *MissionID);
+        return false;
     }
     
-    return false;
+    FQuest_MissionData& MissionData = ActiveMissions[MissionID];
+    MissionData.MissionStatus = EQuest_MissionStatus::Failed;
+    
+    BroadcastMissionEvent(MissionID, TEXT("MissionFailed"));
+    ActiveMissions.Remove(MissionID);
+    
+    UE_LOG(LogTemp, Log, TEXT("Quest_MissionManager: Mission %s failed"), *MissionID);
+    return true;
 }
 
-bool UQuest_MissionManager::UpdateObjective(const FString& MissionID, int32 ObjectiveIndex, bool bCompleted)
+FQuest_MissionData UQuest_MissionManager::GetMissionData(const FString& MissionID)
 {
-    for (FQuest_ActiveMission& Mission : ActiveMissions)
+    if (ActiveMissions.Contains(MissionID))
     {
-        if (Mission.MissionID == MissionID)
-        {
-            if (ObjectiveIndex >= 0 && ObjectiveIndex < Mission.ObjectiveStates.Num())
-            {
-                Mission.ObjectiveStates[ObjectiveIndex] = bCompleted;
-                
-                UE_LOG(LogTemp, Log, TEXT("Quest_MissionManager: Updated objective %d for mission %s: %s"), 
-                       ObjectiveIndex, *MissionID, bCompleted ? TEXT("Completed") : TEXT("Reset"));
-                
-                // Check if all objectives are completed
-                bool bAllCompleted = true;
-                for (bool ObjectiveState : Mission.ObjectiveStates)
-                {
-                    if (!ObjectiveState)
-                    {
-                        bAllCompleted = false;
-                        break;
-                    }
-                }
-                
-                if (bAllCompleted)
-                {
-                    CompleteMission(MissionID);
-                }
-                
-                BroadcastMissionUpdate(MissionID, TEXT("ObjectiveUpdated"));
-                return true;
-            }
-        }
+        return ActiveMissions[MissionID];
     }
     
-    return false;
-}
-
-TArray<FQuest_ActiveMission> UQuest_MissionManager::GetActiveMissions() const
-{
-    return ActiveMissions;
-}
-
-TArray<FString> UQuest_MissionManager::GetCompletedMissions() const
-{
-    return CompletedMissions;
-}
-
-FQuest_MissionData UQuest_MissionManager::GetMissionData(const FString& MissionID) const
-{
-    if (const FQuest_MissionData* FoundData = MissionDatabase.Find(MissionID))
+    if (AvailableMissions.Contains(MissionID))
     {
-        return *FoundData;
+        return AvailableMissions[MissionID];
     }
     
     return FQuest_MissionData();
 }
 
-bool UQuest_MissionManager::IsMissionActive(const FString& MissionID) const
+TArray<FQuest_MissionData> UQuest_MissionManager::GetActiveMissions()
 {
-    for (const FQuest_ActiveMission& Mission : ActiveMissions)
+    TArray<FQuest_MissionData> Missions;
+    for (const auto& Mission : ActiveMissions)
     {
-        if (Mission.MissionID == MissionID)
-        {
-            return true;
-        }
+        Missions.Add(Mission.Value);
     }
-    return false;
+    return Missions;
 }
 
-bool UQuest_MissionManager::IsMissionCompleted(const FString& MissionID) const
+TArray<FQuest_MissionData> UQuest_MissionManager::GetAvailableMissions()
 {
-    return CompletedMissions.Contains(MissionID);
-}
-
-void UQuest_MissionManager::LoadMissionDatabase()
-{
-    // In a real implementation, this would load from a DataTable asset
-    // For now, we'll create missions programmatically
-    CreateSurvivalMissions();
-}
-
-void UQuest_MissionManager::CreateSurvivalMissions()
-{
-    // Survival Mission 1: First Hunt
-    FQuest_MissionData FirstHunt;
-    FirstHunt.MissionID = TEXT("HUNT_001");
-    FirstHunt.MissionTitle = TEXT("First Hunt");
-    FirstHunt.MissionDescription = TEXT("Hunt your first dinosaur to survive in this prehistoric world.");
-    FirstHunt.Objectives.Add(TEXT("Find a small herbivore dinosaur"));
-    FirstHunt.Objectives.Add(TEXT("Craft a stone spear"));
-    FirstHunt.Objectives.Add(TEXT("Successfully hunt the dinosaur"));
-    FirstHunt.Rewards.Add(TEXT("Raw Meat x5"));
-    FirstHunt.Rewards.Add(TEXT("Dinosaur Hide x2"));
-    FirstHunt.ExperienceReward = 100;
-    FirstHunt.bIsMainQuest = true;
-    FirstHunt.MissionLocation = FVector(0, 0, 100);
-    FirstHunt.MissionRadius = 5000.0f;
-    MissionDatabase.Add(FirstHunt.MissionID, FirstHunt);
-
-    // Survival Mission 2: Shelter Building
-    FQuest_MissionData ShelterBuild;
-    ShelterBuild.MissionID = TEXT("BUILD_001");
-    ShelterBuild.MissionTitle = TEXT("Build Your First Shelter");
-    ShelterBuild.MissionDescription = TEXT("Create a basic shelter to protect yourself from predators and weather.");
-    ShelterBuild.Objectives.Add(TEXT("Gather 20 wood pieces"));
-    ShelterBuild.Objectives.Add(TEXT("Collect 15 stones"));
-    ShelterBuild.Objectives.Add(TEXT("Find a suitable location"));
-    ShelterBuild.Objectives.Add(TEXT("Build a basic hut"));
-    ShelterBuild.Rewards.Add(TEXT("Shelter Blueprint"));
-    ShelterBuild.Rewards.Add(TEXT("Crafting Table"));
-    ShelterBuild.ExperienceReward = 150;
-    ShelterBuild.bIsMainQuest = true;
-    ShelterBuild.MissionLocation = FVector(2000, 2000, 100);
-    ShelterBuild.MissionRadius = 3000.0f;
-    MissionDatabase.Add(ShelterBuild.MissionID, ShelterBuild);
-
-    // Survival Mission 3: Water Source
-    FQuest_MissionData WaterSource;
-    WaterSource.MissionID = TEXT("WATER_001");
-    WaterSource.MissionTitle = TEXT("Find Fresh Water");
-    WaterSource.MissionDescription = TEXT("Locate a reliable source of fresh water for long-term survival.");
-    WaterSource.Objectives.Add(TEXT("Explore the nearby river"));
-    WaterSource.Objectives.Add(TEXT("Craft a water container"));
-    WaterSource.Objectives.Add(TEXT("Collect 10 units of fresh water"));
-    WaterSource.Rewards.Add(TEXT("Water Container"));
-    WaterSource.Rewards.Add(TEXT("Fresh Water x10"));
-    WaterSource.ExperienceReward = 75;
-    WaterSource.bIsMainQuest = false;
-    WaterSource.MissionLocation = FVector(-3000, 1000, 50);
-    WaterSource.MissionRadius = 4000.0f;
-    MissionDatabase.Add(WaterSource.MissionID, WaterSource);
-
-    // Survival Mission 4: Predator Encounter
-    FQuest_MissionData PredatorEncounter;
-    PredatorEncounter.MissionID = TEXT("COMBAT_001");
-    PredatorEncounter.MissionTitle = TEXT("Survive the Predator");
-    PredatorEncounter.MissionDescription = TEXT("A dangerous predator has been spotted near your area. Prepare for combat or find a way to avoid it.");
-    PredatorEncounter.Objectives.Add(TEXT("Craft advanced weapons"));
-    PredatorEncounter.Objectives.Add(TEXT("Set up defensive traps"));
-    PredatorEncounter.Objectives.Add(TEXT("Survive the predator encounter"));
-    PredatorEncounter.Prerequisites.Add(TEXT("HUNT_001"));
-    PredatorEncounter.Prerequisites.Add(TEXT("BUILD_001"));
-    PredatorEncounter.Rewards.Add(TEXT("Predator Trophy"));
-    PredatorEncounter.Rewards.Add(TEXT("Advanced Crafting Materials"));
-    PredatorEncounter.ExperienceReward = 250;
-    PredatorEncounter.bIsMainQuest = true;
-    PredatorEncounter.MissionLocation = FVector(5000, -2000, 200);
-    PredatorEncounter.MissionRadius = 6000.0f;
-    MissionDatabase.Add(PredatorEncounter.MissionID, PredatorEncounter);
-
-    UE_LOG(LogTemp, Log, TEXT("Quest_MissionManager: Created %d survival missions"), MissionDatabase.Num());
-}
-
-void UQuest_MissionManager::InitializeSurvivalMissions()
-{
-    // Auto-start the first tutorial mission
-    if (MissionDatabase.Contains(TEXT("HUNT_001")))
+    TArray<FQuest_MissionData> Missions;
+    for (const auto& Mission : AvailableMissions)
     {
-        StartMission(TEXT("HUNT_001"));
-        UE_LOG(LogTemp, Log, TEXT("Quest_MissionManager: Auto-started tutorial mission HUNT_001"));
+        Missions.Add(Mission.Value);
     }
+    return Missions;
 }
 
-void UQuest_MissionManager::RegisterMissionCallbacks()
+bool UQuest_MissionManager::AddObjective(const FString& MissionID, const FString& ObjectiveText, int32 TargetCount)
 {
-    // This would register delegates for mission events in a full implementation
-    UE_LOG(LogTemp, Log, TEXT("Quest_MissionManager: Mission callbacks registered"));
-}
-
-bool UQuest_MissionManager::ValidateMissionPrerequisites(const FString& MissionID) const
-{
-    const FQuest_MissionData* MissionData = MissionDatabase.Find(MissionID);
+    FQuest_MissionData* MissionData = nullptr;
+    
+    if (ActiveMissions.Contains(MissionID))
+    {
+        MissionData = &ActiveMissions[MissionID];
+    }
+    else if (AvailableMissions.Contains(MissionID))
+    {
+        MissionData = &AvailableMissions[MissionID];
+    }
+    
     if (!MissionData)
     {
+        UE_LOG(LogTemp, Error, TEXT("Quest_MissionManager: Cannot add objective to mission %s - mission not found"), *MissionID);
         return false;
     }
-
-    for (const FString& Prerequisite : MissionData->Prerequisites)
-    {
-        if (!IsMissionCompleted(Prerequisite))
-        {
-            UE_LOG(LogTemp, Warning, TEXT("Quest_MissionManager: Prerequisite %s not completed for mission %s"), 
-                   *Prerequisite, *MissionID);
-            return false;
-        }
-    }
-
+    
+    FQuest_MissionObjective NewObjective;
+    NewObjective.ObjectiveText = ObjectiveText;
+    NewObjective.TargetCount = TargetCount;
+    NewObjective.CurrentCount = 0;
+    NewObjective.bIsCompleted = false;
+    
+    MissionData->Objectives.Add(NewObjective);
+    UE_LOG(LogTemp, Log, TEXT("Quest_MissionManager: Added objective to mission %s: %s"), *MissionID, *ObjectiveText);
+    
     return true;
 }
 
-void UQuest_MissionManager::BroadcastMissionUpdate(const FString& MissionID, const FString& UpdateType)
+bool UQuest_MissionManager::UpdateObjectiveProgress(const FString& MissionID, int32 ObjectiveIndex, int32 Progress)
 {
-    // In a full implementation, this would broadcast to UI and other systems
-    UE_LOG(LogTemp, Log, TEXT("Quest_MissionManager: Mission %s - %s"), *MissionID, *UpdateType);
+    if (!ActiveMissions.Contains(MissionID))
+    {
+        return false;
+    }
+    
+    FQuest_MissionData& MissionData = ActiveMissions[MissionID];
+    
+    if (!MissionData.Objectives.IsValidIndex(ObjectiveIndex))
+    {
+        return false;
+    }
+    
+    FQuest_MissionObjective& Objective = MissionData.Objectives[ObjectiveIndex];
+    Objective.CurrentCount = FMath::Min(Objective.CurrentCount + Progress, Objective.TargetCount);
+    
+    if (Objective.CurrentCount >= Objective.TargetCount)
+    {
+        Objective.bIsCompleted = true;
+        UE_LOG(LogTemp, Log, TEXT("Quest_MissionManager: Objective completed: %s"), *Objective.ObjectiveText);
+    }
+    
+    CheckMissionCompletion();
+    return true;
+}
+
+bool UQuest_MissionManager::CompleteObjective(const FString& MissionID, int32 ObjectiveIndex)
+{
+    if (!ActiveMissions.Contains(MissionID))
+    {
+        return false;
+    }
+    
+    FQuest_MissionData& MissionData = ActiveMissions[MissionID];
+    
+    if (!MissionData.Objectives.IsValidIndex(ObjectiveIndex))
+    {
+        return false;
+    }
+    
+    FQuest_MissionObjective& Objective = MissionData.Objectives[ObjectiveIndex];
+    Objective.bIsCompleted = true;
+    Objective.CurrentCount = Objective.TargetCount;
+    
+    CheckMissionCompletion();
+    return true;
+}
+
+void UQuest_MissionManager::OnCrowdEventTriggered(const FString& EventType, const FVector& Location, int32 CrowdSize)
+{
+    UE_LOG(LogTemp, Log, TEXT("Quest_MissionManager: Crowd event triggered - %s at location (%f, %f, %f) with %d entities"), 
+           *EventType, Location.X, Location.Y, Location.Z, CrowdSize);
+    
+    // Check if any active missions are waiting for this crowd event
+    for (auto& Mission : ActiveMissions)
+    {
+        if (CrowdMissionRegistry.Contains(Mission.Key))
+        {
+            FString ExpectedEventType = CrowdMissionRegistry[Mission.Key];
+            if (ExpectedEventType == EventType)
+            {
+                // Update mission progress based on crowd event
+                UpdateObjectiveProgress(Mission.Key, 0, 1);
+            }
+        }
+    }
+}
+
+void UQuest_MissionManager::RegisterCrowdMission(const FString& MissionID, const FString& CrowdEventType)
+{
+    CrowdMissionRegistry.Add(MissionID, CrowdEventType);
+    UE_LOG(LogTemp, Log, TEXT("Quest_MissionManager: Registered crowd mission %s for event %s"), *MissionID, *CrowdEventType);
+}
+
+void UQuest_MissionManager::UpdateMissionTimers(float DeltaTime)
+{
+    for (auto& Mission : ActiveMissions)
+    {
+        FQuest_MissionData& MissionData = Mission.Value;
+        
+        if (MissionData.TimeLimit > 0.0f)
+        {
+            MissionData.ElapsedTime += DeltaTime;
+            
+            if (MissionData.ElapsedTime >= MissionData.TimeLimit)
+            {
+                FailMission(Mission.Key);
+                break; // Exit loop since we modified the container
+            }
+        }
+    }
+}
+
+void UQuest_MissionManager::CheckMissionCompletion()
+{
+    TArray<FString> CompletedMissions;
+    
+    for (const auto& Mission : ActiveMissions)
+    {
+        const FQuest_MissionData& MissionData = Mission.Value;
+        
+        bool bAllObjectivesComplete = true;
+        for (const FQuest_MissionObjective& Objective : MissionData.Objectives)
+        {
+            if (!Objective.bIsCompleted)
+            {
+                bAllObjectivesComplete = false;
+                break;
+            }
+        }
+        
+        if (bAllObjectivesComplete && MissionData.Objectives.Num() > 0)
+        {
+            CompletedMissions.Add(Mission.Key);
+        }
+    }
+    
+    for (const FString& MissionID : CompletedMissions)
+    {
+        CompleteMission(MissionID);
+    }
+}
+
+void UQuest_MissionManager::InitializeDefaultMissions()
+{
+    // Gathering mission
+    CreateMission(TEXT("GATHER_BERRIES"), TEXT("Sacred Grove Harvest"), 
+                 TEXT("Collect crimson berries from the dangerous territories to feed the hungry tribe."), 
+                 EQuest_MissionType::Gathering);
+    AddObjective(TEXT("GATHER_BERRIES"), TEXT("Collect 10 crimson berries"), 10);
+    AddObjective(TEXT("GATHER_BERRIES"), TEXT("Return to Elder Gatherer"), 1);
+    
+    // Escort mission
+    CreateMission(TEXT("ESCORT_HUNTER"), TEXT("Lost in the Hills"), 
+                 TEXT("Guide the lost hunter safely through the treacherous hills to the river crossing."), 
+                 EQuest_MissionType::Escort);
+    AddObjective(TEXT("ESCORT_HUNTER"), TEXT("Find the lost hunter"), 1);
+    AddObjective(TEXT("ESCORT_HUNTER"), TEXT("Escort to river crossing"), 1);
+    AddObjective(TEXT("ESCORT_HUNTER"), TEXT("Avoid predator encounters"), 1);
+    
+    // Evacuation mission
+    CreateMission(TEXT("VILLAGE_EVACUATION"), TEXT("Emergency Evacuation"), 
+                 TEXT("Help evacuate the village before the approaching predator pack arrives."), 
+                 EQuest_MissionType::Evacuation);
+    AddObjective(TEXT("VILLAGE_EVACUATION"), TEXT("Warn 5 villagers"), 5);
+    AddObjective(TEXT("VILLAGE_EVACUATION"), TEXT("Guide crowd to safety"), 1);
+    
+    // Register crowd integration
+    RegisterCrowdMission(TEXT("VILLAGE_EVACUATION"), TEXT("evacuation"));
+    RegisterCrowdMission(TEXT("GATHER_BERRIES"), TEXT("gathering"));
+    
+    UE_LOG(LogTemp, Log, TEXT("Quest_MissionManager: Initialized %d default missions"), AvailableMissions.Num());
+}
+
+void UQuest_MissionManager::SetupCrowdIntegration()
+{
+    // This would typically connect to the crowd simulation system
+    // For now, we just log that the integration is set up
+    UE_LOG(LogTemp, Log, TEXT("Quest_MissionManager: Crowd integration system ready"));
+}
+
+bool UQuest_MissionManager::ValidateMissionData(const FQuest_MissionData& MissionData)
+{
+    if (MissionData.MissionID.IsEmpty() || MissionData.MissionName.IsEmpty())
+    {
+        return false;
+    }
+    
+    return true;
+}
+
+void UQuest_MissionManager::BroadcastMissionEvent(const FString& MissionID, const FString& EventType)
+{
+    // This would typically broadcast to other systems (UI, audio, etc.)
+    UE_LOG(LogTemp, Log, TEXT("Quest_MissionManager: Broadcasting event %s for mission %s"), *EventType, *MissionID);
 }
