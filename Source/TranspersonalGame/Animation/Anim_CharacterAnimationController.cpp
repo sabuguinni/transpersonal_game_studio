@@ -1,39 +1,37 @@
 #include "Anim_CharacterAnimationController.h"
-#include "GameFramework/Character.h"
-#include "GameFramework/CharacterMovementComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Animation/AnimInstance.h"
 #include "Animation/AnimMontage.h"
-#include "Animation/BlendSpace.h"
+#include "GameFramework/Character.h"
+#include "GameFramework/CharacterMovementComponent.h"
 #include "Engine/Engine.h"
-#include "Kismet/KismetMathLibrary.h"
 
 UAnim_CharacterAnimationController::UAnim_CharacterAnimationController()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.bStartWithTickEnabled = true;
     
-    // Initialize state
+    // Initialize default states
     CurrentMovementState = EAnim_MovementState::Idle;
-    CurrentActionState = EAnim_ActionState::None;
-    PreviousMovementState = EAnim_MovementState::Idle;
+    CurrentCombatState = EAnim_CombatState::Unarmed;
+    CurrentSurvivalAction = EAnim_SurvivalAction::None;
     
-    // Initialize animation parameters
-    MovementSpeed = 0.0f;
+    bIsInCombat = false;
+    bIsInjured = false;
+    InjuryLevel = 0.0f;
+    
+    CurrentSpeed = 0.0f;
     MovementDirection = 0.0f;
-    bIsInAir = false;
-    bIsCrouching = false;
     bIsMoving = false;
+    bIsGrounded = true;
     
-    // Initialize settings
-    MovementSpeedThreshold = 10.0f;
-    RunSpeedThreshold = 300.0f;
-    AnimationBlendTime = 0.25f;
+    DefaultTransitionTime = 0.2f;
+    bIsTransitioning = false;
+    TransitionTimer = 0.0f;
     
-    // Initialize component references
-    OwnerCharacter = nullptr;
-    MovementComponent = nullptr;
-    SkeletalMeshComponent = nullptr;
+    PreviousState = EAnim_MovementState::Idle;
+    TargetState = EAnim_MovementState::Idle;
+    
+    CharacterMesh = nullptr;
     AnimInstance = nullptr;
 }
 
@@ -41,298 +39,342 @@ void UAnim_CharacterAnimationController::BeginPlay()
 {
     Super::BeginPlay();
     
-    InitializeReferences();
-    
-    if (OwnerCharacter)
+    // Get character mesh component
+    if (AActor* Owner = GetOwner())
     {
-        UE_LOG(LogTemp, Warning, TEXT("Animation Controller initialized for character: %s"), *OwnerCharacter->GetName());
+        if (ACharacter* Character = Cast<ACharacter>(Owner))
+        {
+            CharacterMesh = Character->GetMesh();
+            if (CharacterMesh)
+            {
+                AnimInstance = CharacterMesh->GetAnimInstance();
+            }
+        }
     }
+    
+    // Initialize default state transitions
+    if (StateTransitions.Num() == 0)
+    {
+        // Add common state transitions
+        FAnim_StateTransition IdleToWalk;
+        IdleToWalk.FromState = EAnim_MovementState::Idle;
+        IdleToWalk.ToState = EAnim_MovementState::Walking;
+        IdleToWalk.TransitionDuration = 0.15f;
+        StateTransitions.Add(IdleToWalk);
+        
+        FAnim_StateTransition WalkToRun;
+        WalkToRun.FromState = EAnim_MovementState::Walking;
+        WalkToRun.ToState = EAnim_MovementState::Running;
+        WalkToRun.TransitionDuration = 0.2f;
+        StateTransitions.Add(WalkToRun);
+        
+        FAnim_StateTransition RunToSprint;
+        RunToSprint.FromState = EAnim_MovementState::Running;
+        RunToSprint.ToState = EAnim_MovementState::Sprinting;
+        RunToSprint.TransitionDuration = 0.25f;
+        StateTransitions.Add(RunToSprint);
+        
+        FAnim_StateTransition AnyToJump;
+        AnyToJump.FromState = EAnim_MovementState::Idle; // Will be handled specially
+        AnyToJump.ToState = EAnim_MovementState::Jumping;
+        AnyToJump.TransitionDuration = 0.1f;
+        StateTransitions.Add(AnyToJump);
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("Animation Controller initialized for %s"), *GetOwner()->GetName());
 }
 
 void UAnim_CharacterAnimationController::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
     
-    if (OwnerCharacter && MovementComponent)
-    {
-        UpdateAnimationParameters();
-        UpdateMovementAnimation();
-    }
+    UpdateAnimationState(DeltaTime);
 }
 
-void UAnim_CharacterAnimationController::InitializeReferences()
+void UAnim_CharacterAnimationController::UpdateAnimationState(float DeltaTime)
 {
-    OwnerCharacter = Cast<ACharacter>(GetOwner());
-    if (OwnerCharacter)
-    {
-        MovementComponent = OwnerCharacter->GetCharacterMovement();
-        SkeletalMeshComponent = OwnerCharacter->GetMesh();
-        
-        if (SkeletalMeshComponent)
-        {
-            AnimInstance = SkeletalMeshComponent->GetAnimInstance();
-        }
-    }
-}
-
-void UAnim_CharacterAnimationController::UpdateAnimationParameters()
-{
-    if (!MovementComponent || !OwnerCharacter)
-    {
+    if (!CharacterMesh || !AnimInstance)
         return;
+    
+    // Update transition timer
+    if (bIsTransitioning)
+    {
+        TransitionTimer += DeltaTime;
+        if (TransitionTimer >= GetTransitionDuration(PreviousState, TargetState))
+        {
+            CurrentMovementState = TargetState;
+            bIsTransitioning = false;
+            TransitionTimer = 0.0f;
+        }
     }
     
-    // Update movement speed
-    FVector Velocity = MovementComponent->Velocity;
-    MovementSpeed = Velocity.Size();
-    bIsMoving = MovementSpeed > MovementSpeedThreshold;
-    
-    // Update movement direction
-    if (bIsMoving)
+    // Update movement data from character
+    if (ACharacter* Character = Cast<ACharacter>(GetOwner()))
     {
-        FVector ForwardVector = OwnerCharacter->GetActorForwardVector();
-        FVector VelocityNormalized = Velocity.GetSafeNormal();
-        float DotProduct = FVector::DotProduct(ForwardVector, VelocityNormalized);
-        MovementDirection = FMath::RadiansToDegrees(FMath::Acos(DotProduct));
+        if (UCharacterMovementComponent* MovementComp = Character->GetCharacterMovement())
+        {
+            FVector Velocity = MovementComp->Velocity;
+            CurrentSpeed = Velocity.Size();
+            bIsMoving = CurrentSpeed > 1.0f;
+            bIsGrounded = MovementComp->IsMovingOnGround();
+            
+            // Calculate movement direction relative to character forward
+            if (bIsMoving)
+            {
+                FVector ForwardVector = Character->GetActorForwardVector();
+                FVector RightVector = Character->GetActorRightVector();
+                
+                FVector NormalizedVelocity = Velocity.GetSafeNormal();
+                MovementDirection = FMath::Atan2(FVector::DotProduct(NormalizedVelocity, RightVector), 
+                                               FVector::DotProduct(NormalizedVelocity, ForwardVector));
+                MovementDirection = FMath::RadiansToDegrees(MovementDirection);
+            }
+            
+            // Update blend space data
+            LocomotionBlendSpace.SpeedX = FVector::DotProduct(Velocity, Character->GetActorForwardVector());
+            LocomotionBlendSpace.SpeedY = FVector::DotProduct(Velocity, Character->GetActorRightVector());
+            LocomotionBlendSpace.Direction = MovementDirection;
+        }
+    }
+    
+    // Auto-update movement state based on speed
+    if (!bIsTransitioning && CurrentSurvivalAction == EAnim_SurvivalAction::None)
+    {
+        EAnim_MovementState NewState = CurrentMovementState;
         
-        // Determine if moving left or right
-        FVector RightVector = OwnerCharacter->GetActorRightVector();
-        float RightDot = FVector::DotProduct(RightVector, VelocityNormalized);
-        if (RightDot < 0.0f)
+        if (!bIsGrounded)
         {
-            MovementDirection = -MovementDirection;
+            if (CurrentMovementState != EAnim_MovementState::Jumping && CurrentMovementState != EAnim_MovementState::Falling)
+            {
+                NewState = EAnim_MovementState::Falling;
+            }
         }
-    }
-    else
-    {
-        MovementDirection = 0.0f;
-    }
-    
-    // Update air state
-    bIsInAir = MovementComponent->IsFalling();
-    
-    // Update crouch state
-    bIsCrouching = MovementComponent->IsCrouching();
-}
-
-EAnim_MovementState UAnim_CharacterAnimationController::CalculateMovementState()
-{
-    if (!MovementComponent)
-    {
-        return EAnim_MovementState::Idle;
-    }
-    
-    // Check if in air
-    if (bIsInAir)
-    {
-        if (MovementComponent->Velocity.Z > 0.0f)
+        else if (CurrentSpeed < 1.0f)
         {
-            return EAnim_MovementState::Jumping;
+            NewState = EAnim_MovementState::Idle;
+        }
+        else if (CurrentSpeed < 200.0f)
+        {
+            NewState = EAnim_MovementState::Walking;
+        }
+        else if (CurrentSpeed < 400.0f)
+        {
+            NewState = EAnim_MovementState::Running;
         }
         else
         {
-            return EAnim_MovementState::Falling;
+            NewState = EAnim_MovementState::Sprinting;
         }
-    }
-    
-    // Check if crouching
-    if (bIsCrouching)
-    {
-        return EAnim_MovementState::Crouching;
-    }
-    
-    // Check movement speed
-    if (bIsMoving)
-    {
-        if (MovementSpeed >= RunSpeedThreshold)
+        
+        if (NewState != CurrentMovementState)
         {
-            return EAnim_MovementState::Running;
-        }
-        else
-        {
-            return EAnim_MovementState::Walking;
+            SetMovementState(NewState);
         }
     }
-    
-    return EAnim_MovementState::Idle;
 }
 
 void UAnim_CharacterAnimationController::SetMovementState(EAnim_MovementState NewState)
 {
-    if (CurrentMovementState != NewState)
+    if (NewState == CurrentMovementState || !CanTransitionTo(NewState))
+        return;
+    
+    ProcessStateTransition(NewState);
+    
+    UE_LOG(LogTemp, Log, TEXT("Movement state changed from %d to %d"), 
+           (int32)CurrentMovementState, (int32)NewState);
+}
+
+void UAnim_CharacterAnimationController::SetCombatState(EAnim_CombatState NewState)
+{
+    if (NewState == CurrentCombatState)
+        return;
+    
+    CurrentCombatState = NewState;
+    bIsInCombat = (NewState != EAnim_CombatState::Unarmed);
+    
+    // Play combat montage if available
+    if (CombatMontages.Contains(NewState))
     {
-        PreviousMovementState = CurrentMovementState;
-        CurrentMovementState = NewState;
-        HandleStateTransition(NewState);
+        PlayCombatMontage(NewState);
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("Combat state changed to %d"), (int32)NewState);
+}
+
+void UAnim_CharacterAnimationController::PlaySurvivalAction(EAnim_SurvivalAction Action)
+{
+    if (Action == EAnim_SurvivalAction::None)
+    {
+        CurrentSurvivalAction = Action;
+        return;
+    }
+    
+    if (SurvivalActionMontages.Contains(Action))
+    {
+        UAnimMontage* Montage = SurvivalActionMontages[Action];
+        if (Montage && AnimInstance)
+        {
+            AnimInstance->Montage_Play(Montage);
+            CurrentSurvivalAction = Action;
+            
+            UE_LOG(LogTemp, Log, TEXT("Playing survival action montage: %d"), (int32)Action);
+        }
+    }
+    else
+    {
+        UE_LOG(LogTemp, Warning, TEXT("No montage found for survival action: %d"), (int32)Action);
     }
 }
 
-void UAnim_CharacterAnimationController::SetActionState(EAnim_ActionState NewState)
+void UAnim_CharacterAnimationController::PlayCombatMontage(EAnim_CombatState CombatState)
 {
-    if (CurrentActionState != NewState)
+    if (CombatMontages.Contains(CombatState))
     {
-        CurrentActionState = NewState;
-        
-        // Handle action state changes
-        switch (NewState)
+        UAnimMontage* Montage = CombatMontages[CombatState];
+        if (Montage && AnimInstance)
         {
-            case EAnim_ActionState::Gathering:
-                PlayGatherAnimation();
-                break;
-            case EAnim_ActionState::Crafting:
-                PlayCraftAnimation();
-                break;
-            case EAnim_ActionState::Attacking:
-                PlayAttackAnimation();
-                break;
-            case EAnim_ActionState::Defending:
-                PlayDefendAnimation();
-                break;
-            default:
-                break;
+            AnimInstance->Montage_Play(Montage);
+            UE_LOG(LogTemp, Log, TEXT("Playing combat montage: %d"), (int32)CombatState);
         }
     }
 }
 
-void UAnim_CharacterAnimationController::UpdateMovementAnimation()
+void UAnim_CharacterAnimationController::TriggerJump()
 {
-    EAnim_MovementState NewState = CalculateMovementState();
-    SetMovementState(NewState);
-}
-
-void UAnim_CharacterAnimationController::HandleStateTransition(EAnim_MovementState NewState)
-{
-    PlayStateAnimation(NewState);
-    
-    UE_LOG(LogTemp, Log, TEXT("Animation state changed from %d to %d"), 
-           static_cast<int32>(PreviousMovementState), 
-           static_cast<int32>(NewState));
-}
-
-void UAnim_CharacterAnimationController::PlayStateAnimation(EAnim_MovementState State)
-{
-    if (!AnimInstance)
+    if (JumpMontage && AnimInstance && bIsGrounded)
     {
-        return;
+        AnimInstance->Montage_Play(JumpMontage);
+        SetMovementState(EAnim_MovementState::Jumping);
+        UE_LOG(LogTemp, Log, TEXT("Jump animation triggered"));
     }
-    
-    UAnimMontage* MontageToPlay = nullptr;
-    
-    switch (State)
+}
+
+void UAnim_CharacterAnimationController::TriggerLanding()
+{
+    if (LandMontage && AnimInstance)
     {
-        case EAnim_MovementState::Idle:
-            MontageToPlay = AnimationSet.IdleMontage;
+        AnimInstance->Montage_Play(LandMontage);
+        UE_LOG(LogTemp, Log, TEXT("Landing animation triggered"));
+    }
+}
+
+void UAnim_CharacterAnimationController::TriggerDeath()
+{
+    if (DeathMontage && AnimInstance)
+    {
+        AnimInstance->Montage_Play(DeathMontage);
+        SetMovementState(EAnim_MovementState::Idle);
+        SetCombatState(EAnim_CombatState::Dead);
+        UE_LOG(LogTemp, Log, TEXT("Death animation triggered"));
+    }
+}
+
+void UAnim_CharacterAnimationController::UpdateMovementData(float Speed, float Direction, bool IsGrounded)
+{
+    CurrentSpeed = Speed;
+    MovementDirection = Direction;
+    bIsGrounded = IsGrounded;
+    bIsMoving = Speed > 1.0f;
+}
+
+void UAnim_CharacterAnimationController::SetInjuryState(bool Injured, float Level)
+{
+    bIsInjured = Injured;
+    InjuryLevel = FMath::Clamp(Level, 0.0f, 1.0f);
+    
+    UE_LOG(LogTemp, Log, TEXT("Injury state set: %s, Level: %f"), 
+           Injured ? TEXT("True") : TEXT("False"), InjuryLevel);
+}
+
+bool UAnim_CharacterAnimationController::IsPlayingMontage() const
+{
+    if (AnimInstance)
+    {
+        return AnimInstance->IsAnyMontagePlaying();
+    }
+    return false;
+}
+
+float UAnim_CharacterAnimationController::GetCurrentMontagePosition() const
+{
+    if (AnimInstance && IsPlayingMontage())
+    {
+        return AnimInstance->Montage_GetPosition(AnimInstance->GetCurrentActiveMontage());
+    }
+    return 0.0f;
+}
+
+void UAnim_CharacterAnimationController::StopCurrentMontage()
+{
+    if (AnimInstance && IsPlayingMontage())
+    {
+        AnimInstance->Montage_Stop(0.2f);
+        CurrentSurvivalAction = EAnim_SurvivalAction::None;
+        UE_LOG(LogTemp, Log, TEXT("Current montage stopped"));
+    }
+}
+
+void UAnim_CharacterAnimationController::ProcessStateTransition(EAnim_MovementState NewState)
+{
+    if (bIsTransitioning)
+        return;
+    
+    PreviousState = CurrentMovementState;
+    TargetState = NewState;
+    bIsTransitioning = true;
+    TransitionTimer = 0.0f;
+    
+    // Find and play transition montage if available
+    for (const FAnim_StateTransition& Transition : StateTransitions)
+    {
+        if (Transition.FromState == PreviousState && Transition.ToState == TargetState)
+        {
+            if (Transition.TransitionMontage && AnimInstance)
+            {
+                AnimInstance->Montage_Play(Transition.TransitionMontage);
+            }
             break;
-        case EAnim_MovementState::Walking:
-            MontageToPlay = AnimationSet.WalkMontage;
-            break;
-        case EAnim_MovementState::Running:
-            MontageToPlay = AnimationSet.RunMontage;
-            break;
+        }
+    }
+}
+
+bool UAnim_CharacterAnimationController::CanTransitionTo(EAnim_MovementState NewState) const
+{
+    // Always allow transition to idle or falling
+    if (NewState == EAnim_MovementState::Idle || NewState == EAnim_MovementState::Falling)
+        return true;
+    
+    // Don't allow transitions while playing survival actions
+    if (CurrentSurvivalAction != EAnim_SurvivalAction::None)
+        return false;
+    
+    // Don't allow transitions while in death state
+    if (CurrentCombatState == EAnim_CombatState::Dead)
+        return false;
+    
+    // Check for valid transition rules
+    switch (CurrentMovementState)
+    {
         case EAnim_MovementState::Jumping:
-            MontageToPlay = AnimationSet.JumpMontage;
-            break;
         case EAnim_MovementState::Falling:
-            MontageToPlay = AnimationSet.FallMontage;
-            break;
-        case EAnim_MovementState::Crouching:
-            MontageToPlay = AnimationSet.CrouchMontage;
-            break;
+            return (NewState == EAnim_MovementState::Landing || NewState == EAnim_MovementState::Idle);
+        
+        case EAnim_MovementState::Landing:
+            return (NewState == EAnim_MovementState::Idle || NewState == EAnim_MovementState::Walking);
+        
         default:
-            break;
+            return true;
     }
-    
-    if (MontageToPlay)
+}
+
+float UAnim_CharacterAnimationController::GetTransitionDuration(EAnim_MovementState FromState, EAnim_MovementState ToState) const
+{
+    for (const FAnim_StateTransition& Transition : StateTransitions)
     {
-        PlayAnimationMontage(MontageToPlay);
+        if (Transition.FromState == FromState && Transition.ToState == ToState)
+        {
+            return Transition.TransitionDuration;
+        }
     }
-}
-
-void UAnim_CharacterAnimationController::PlayAnimationMontage(UAnimMontage* Montage, float PlayRate)
-{
-    if (!AnimInstance || !Montage)
-    {
-        return;
-    }
-    
-    AnimInstance->Montage_Play(Montage, PlayRate);
-    UE_LOG(LogTemp, Log, TEXT("Playing animation montage: %s"), *Montage->GetName());
-}
-
-void UAnim_CharacterAnimationController::StopAnimationMontage(UAnimMontage* Montage)
-{
-    if (!AnimInstance || !Montage)
-    {
-        return;
-    }
-    
-    AnimInstance->Montage_Stop(AnimationBlendTime, Montage);
-}
-
-void UAnim_CharacterAnimationController::StopAllMontages()
-{
-    if (!AnimInstance)
-    {
-        return;
-    }
-    
-    AnimInstance->StopAllMontages(AnimationBlendTime);
-}
-
-void UAnim_CharacterAnimationController::PlayJumpAnimation()
-{
-    if (AnimationSet.JumpMontage)
-    {
-        PlayAnimationMontage(AnimationSet.JumpMontage);
-    }
-}
-
-void UAnim_CharacterAnimationController::PlayLandAnimation()
-{
-    // Transition back to appropriate ground state
-    UpdateMovementAnimation();
-}
-
-void UAnim_CharacterAnimationController::PlayGatherAnimation()
-{
-    // Play gathering animation - could be a specific montage for resource collection
-    UE_LOG(LogTemp, Log, TEXT("Playing gather animation"));
-}
-
-void UAnim_CharacterAnimationController::PlayCraftAnimation()
-{
-    // Play crafting animation - could be a specific montage for item creation
-    UE_LOG(LogTemp, Log, TEXT("Playing craft animation"));
-}
-
-void UAnim_CharacterAnimationController::PlayAttackAnimation()
-{
-    // Play attack animation - could be weapon-specific montages
-    UE_LOG(LogTemp, Log, TEXT("Playing attack animation"));
-}
-
-void UAnim_CharacterAnimationController::PlayDefendAnimation()
-{
-    // Play defend animation - could be blocking or dodging montages
-    UE_LOG(LogTemp, Log, TEXT("Playing defend animation"));
-}
-
-float UAnim_CharacterAnimationController::GetMovementSpeed() const
-{
-    return MovementSpeed;
-}
-
-float UAnim_CharacterAnimationController::GetMovementDirection() const
-{
-    return MovementDirection;
-}
-
-bool UAnim_CharacterAnimationController::IsInAir() const
-{
-    return bIsInAir;
-}
-
-bool UAnim_CharacterAnimationController::IsCrouching() const
-{
-    return bIsCrouching;
+    return DefaultTransitionTime;
 }
