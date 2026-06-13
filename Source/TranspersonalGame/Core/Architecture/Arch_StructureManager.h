@@ -1,10 +1,10 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/World.h"
+#include "GameFramework/Actor.h"
 #include "Components/StaticMeshComponent.h"
-#include "Engine/StaticMeshActor.h"
-#include "Subsystems/WorldSubsystem.h"
+#include "Components/SceneComponent.h"
+#include "Engine/TriggerVolume.h"
 #include "SharedTypes.h"
 #include "Arch_StructureManager.generated.h"
 
@@ -17,77 +17,80 @@ struct TRANSPERSONALGAME_API FArch_StructureData
     FString StructureName;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    FVector Location;
+    EArch_StructureType StructureType;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    FRotator Rotation;
+    FVector PlacementLocation;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    EBiomeType BiomeType;
+    FRotator PlacementRotation;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    float StructureHealth;
+    float DegradationLevel;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    bool bIsRuin;
+    bool bIsAccessible;
 
     FArch_StructureData()
     {
-        StructureName = TEXT("DefaultStructure");
-        Location = FVector::ZeroVector;
-        Rotation = FRotator::ZeroRotator;
-        BiomeType = EBiomeType::Savana;
-        StructureHealth = 100.0f;
-        bIsRuin = false;
+        StructureName = TEXT("");
+        StructureType = EArch_StructureType::Dwelling;
+        PlacementLocation = FVector::ZeroVector;
+        PlacementRotation = FRotator::ZeroRotator;
+        DegradationLevel = 0.0f;
+        bIsAccessible = true;
     }
 };
 
-UENUM(BlueprintType)
-enum class EArch_StructureType : uint8
-{
-    Pillar      UMETA(DisplayName = "Stone Pillar"),
-    Shelter     UMETA(DisplayName = "Primitive Shelter"),
-    Platform    UMETA(DisplayName = "Stone Platform"),
-    Ruin        UMETA(DisplayName = "Ancient Ruin"),
-    Bridge      UMETA(DisplayName = "Stone Bridge")
-};
-
-UCLASS()
-class TRANSPERSONALGAME_API UArch_StructureManager : public UWorldSubsystem
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API AArch_StructureManager : public AActor
 {
     GENERATED_BODY()
 
 public:
-    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
-    virtual void Deinitialize() override;
-
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void SpawnStructureAtBiome(EBiomeType BiomeType, EArch_StructureType StructureType, int32 Count = 5);
-
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void SpawnPillarCluster(FVector CenterLocation, int32 PillarCount = 3);
-
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void SpawnShelterInterior(FVector Location, bool bIncludeFurniture = true);
-
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    TArray<AActor*> GetStructuresInRadius(FVector Center, float Radius);
-
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void PopulateAllBiomesWithStructures();
+    AArch_StructureManager();
 
 protected:
-    UPROPERTY(BlueprintReadOnly, Category = "Architecture")
-    TArray<FArch_StructureData> SpawnedStructures;
+    virtual void BeginPlay() override;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Architecture")
-    TArray<AActor*> StructureActors;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    USceneComponent* RootSceneComponent;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure Management")
+    TArray<FArch_StructureData> ManagedStructures;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure Management")
+    float PlacementRadius;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure Management")
+    int32 MaxStructuresPerBiome;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure Management")
+    float MinDistanceBetweenStructures;
+
+public:
+    virtual void Tick(float DeltaTime) override;
+
+    UFUNCTION(BlueprintCallable, Category = "Structure Management")
+    bool PlaceStructure(EArch_StructureType StructureType, FVector Location, FRotator Rotation);
+
+    UFUNCTION(BlueprintCallable, Category = "Structure Management")
+    void RemoveStructure(int32 StructureIndex);
+
+    UFUNCTION(BlueprintCallable, Category = "Structure Management")
+    TArray<FArch_StructureData> GetStructuresInRadius(FVector CenterLocation, float Radius);
+
+    UFUNCTION(BlueprintCallable, Category = "Structure Management")
+    void UpdateStructureDegradation(float DeltaTime);
+
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Structure Management")
+    void GenerateStructuresInBiome();
+
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Structure Management")
+    void ClearAllStructures();
 
 private:
-    void CreatePrimitivePillar(FVector Location, FRotator Rotation);
-    void CreatePrimitiveShelter(FVector Location, FRotator Rotation);
-    void CreateStoneRuin(FVector Location, FRotator Rotation);
-    
-    FVector GetBiomeCenter(EBiomeType BiomeType);
-    FVector GetRandomLocationInBiome(EBiomeType BiomeType, float Radius = 5000.0f);
+    bool IsLocationValidForPlacement(FVector Location, EArch_StructureType StructureType);
+    FVector FindNearestValidPlacement(FVector DesiredLocation, EArch_StructureType StructureType);
+    void SpawnStructureMesh(const FArch_StructureData& StructureData);
 };
