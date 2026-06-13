@@ -1,249 +1,233 @@
 #include "Audio_EffectsManager.h"
-#include "Components/SceneComponent.h"
-#include "Components/AudioComponent.h"
-#include "Engine/Engine.h"
-#include "Sound/SoundCue.h"
+#include "Engine/World.h"
+#include "Engine/DirectionalLight.h"
+#include "Components/DirectionalLightComponent.h"
 #include "Kismet/GameplayStatics.h"
+#include "Engine/Engine.h"
+#include "Camera/PlayerCameraManager.h"
+#include "GameFramework/PlayerController.h"
+#include "Sound/SoundCue.h"
+#include "Components/AudioComponent.h"
 
-AAudio_EffectsManager::AAudio_EffectsManager()
+UAudio_EffectsManager::UAudio_EffectsManager()
 {
-    PrimaryActorTick.bCanEverTick = true;
+    PrimaryComponentTick.bCanEverTick = true;
+    PrimaryComponentTick.TickGroup = TG_PostUpdateWork;
 
-    RootSceneComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootSceneComponent"));
-    RootComponent = RootSceneComponent;
+    // Initialize default values
+    DamageFlashData.Duration = 0.5f;
+    DamageFlashData.Intensity = 0.8f;
+    DamageFlashData.Color = FLinearColor::Red;
 
-    MasterVolume = 1.0f;
-    EffectsVolume = 0.8f;
-    MaxSimultaneousEffects = 32;
+    DayNightCycleDuration = 1200.0f; // 20 minutes
+    CurrentTimeOfDay = 0.5f; // Start at noon
+
+    // Create ambient audio component
+    AmbientAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("AmbientAudio"));
 }
 
-void AAudio_EffectsManager::BeginPlay()
+void UAudio_EffectsManager::BeginPlay()
 {
     Super::BeginPlay();
+
+    InitializeFootstepData();
+
+    // Find the directional light in the scene
+    TArray<AActor*> FoundActors;
+    UGameplayStatics::GetAllActorsOfClass(GetWorld(), ADirectionalLight::StaticClass(), FoundActors);
     
-    InitializeEffectLibrary();
-    
-    UE_LOG(LogTemp, Warning, TEXT("Audio Effects Manager initialized with %d effect types"), EffectLibrary.Num());
-}
-
-void AAudio_EffectsManager::Tick(float DeltaTime)
-{
-    Super::Tick(DeltaTime);
-    
-    CleanupFinishedComponents();
-}
-
-void AAudio_EffectsManager::InitializeEffectLibrary()
-{
-    // Initialize default effect data for each type
-    FAudio_EffectData FootstepData;
-    FootstepData.EffectType = EAudio_EffectType::Footstep;
-    FootstepData.Volume = 0.6f;
-    FootstepData.MaxDistance = 1000.0f;
-    EffectLibrary.Add(EAudio_EffectType::Footstep, FootstepData);
-
-    FAudio_EffectData RoarData;
-    RoarData.EffectType = EAudio_EffectType::Roar;
-    RoarData.Volume = 1.0f;
-    RoarData.MaxDistance = 8000.0f;
-    EffectLibrary.Add(EAudio_EffectType::Roar, RoarData);
-
-    FAudio_EffectData AmbientData;
-    AmbientData.EffectType = EAudio_EffectType::Ambient;
-    AmbientData.Volume = 0.4f;
-    AmbientData.MaxDistance = 15000.0f;
-    EffectLibrary.Add(EAudio_EffectType::Ambient, AmbientData);
-
-    FAudio_EffectData ImpactData;
-    ImpactData.EffectType = EAudio_EffectType::Impact;
-    ImpactData.Volume = 0.8f;
-    ImpactData.MaxDistance = 3000.0f;
-    EffectLibrary.Add(EAudio_EffectType::Impact, ImpactData);
-
-    FAudio_EffectData EnvironmentalData;
-    EnvironmentalData.EffectType = EAudio_EffectType::Environmental;
-    EnvironmentalData.Volume = 0.5f;
-    EnvironmentalData.MaxDistance = 12000.0f;
-    EffectLibrary.Add(EAudio_EffectType::Environmental, EnvironmentalData);
-
-    FAudio_EffectData UIData;
-    UIData.EffectType = EAudio_EffectType::UI;
-    UIData.Volume = 0.7f;
-    UIData.bIs3D = false;
-    UIData.MaxDistance = 0.0f;
-    EffectLibrary.Add(EAudio_EffectType::UI, UIData);
-}
-
-void AAudio_EffectsManager::PlayEffect(EAudio_EffectType EffectType, FVector Location, float VolumeMultiplier)
-{
-    if (ActiveAudioComponents.Num() >= MaxSimultaneousEffects)
+    if (FoundActors.Num() > 0)
     {
-        UE_LOG(LogTemp, Warning, TEXT("Max simultaneous audio effects reached (%d)"), (int32)MaxSimultaneousEffects);
-        return;
-    }
-
-    if (!EffectLibrary.Contains(EffectType))
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Effect type not found in library: %d"), (int32)EffectType);
-        return;
-    }
-
-    const FAudio_EffectData& EffectData = EffectLibrary[EffectType];
-    UAudioComponent* NewAudioComponent = CreateAudioComponent(EffectData, Location);
-    
-    if (NewAudioComponent)
-    {
-        float FinalVolume = EffectData.Volume * VolumeMultiplier * EffectsVolume * MasterVolume;
-        NewAudioComponent->SetVolumeMultiplier(FinalVolume);
-        NewAudioComponent->Play();
-        
-        ActiveAudioComponents.Add(NewAudioComponent);
-        
-        UE_LOG(LogTemp, Log, TEXT("Playing audio effect type %d at location %s"), 
-               (int32)EffectType, *Location.ToString());
-    }
-}
-
-void AAudio_EffectsManager::PlayEffectAtActor(EAudio_EffectType EffectType, AActor* TargetActor, float VolumeMultiplier)
-{
-    if (!TargetActor)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Cannot play effect at null actor"));
-        return;
-    }
-
-    PlayEffect(EffectType, TargetActor->GetActorLocation(), VolumeMultiplier);
-}
-
-void AAudio_EffectsManager::StopAllEffects()
-{
-    for (UAudioComponent* AudioComp : ActiveAudioComponents)
-    {
-        if (AudioComp && IsValid(AudioComp))
+        SunLight = Cast<ADirectionalLight>(FoundActors[0]);
+        if (SunLight)
         {
-            AudioComp->Stop();
+            UE_LOG(LogTemp, Warning, TEXT("Audio_EffectsManager: Found DirectionalLight for day/night cycle"));
         }
-    }
-    
-    ActiveAudioComponents.Empty();
-    UE_LOG(LogTemp, Log, TEXT("Stopped all audio effects"));
-}
-
-void AAudio_EffectsManager::StopEffectType(EAudio_EffectType EffectType)
-{
-    for (int32 i = ActiveAudioComponents.Num() - 1; i >= 0; i--)
-    {
-        UAudioComponent* AudioComp = ActiveAudioComponents[i];
-        if (AudioComp && IsValid(AudioComp))
-        {
-            // Note: In a full implementation, we'd store effect type with each component
-            // For now, we'll stop all as a simplified approach
-            AudioComp->Stop();
-            ActiveAudioComponents.RemoveAt(i);
-        }
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("Stopped all effects of type %d"), (int32)EffectType);
-}
-
-void AAudio_EffectsManager::SetMasterVolume(float NewVolume)
-{
-    MasterVolume = FMath::Clamp(NewVolume, 0.0f, 1.0f);
-    
-    // Update all active components
-    for (UAudioComponent* AudioComp : ActiveAudioComponents)
-    {
-        if (AudioComp && IsValid(AudioComp))
-        {
-            float CurrentVolume = AudioComp->GetVolumeMultiplier();
-            AudioComp->SetVolumeMultiplier(CurrentVolume * MasterVolume);
-        }
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("Master volume set to %f"), MasterVolume);
-}
-
-void AAudio_EffectsManager::SetEffectsVolume(float NewVolume)
-{
-    EffectsVolume = FMath::Clamp(NewVolume, 0.0f, 1.0f);
-    UE_LOG(LogTemp, Log, TEXT("Effects volume set to %f"), EffectsVolume);
-}
-
-bool AAudio_EffectsManager::IsEffectPlaying(EAudio_EffectType EffectType) const
-{
-    for (UAudioComponent* AudioComp : ActiveAudioComponents)
-    {
-        if (AudioComp && IsValid(AudioComp) && AudioComp->IsPlaying())
-        {
-            return true;
-        }
-    }
-    return false;
-}
-
-int32 AAudio_EffectsManager::GetActiveEffectCount() const
-{
-    int32 ActiveCount = 0;
-    for (UAudioComponent* AudioComp : ActiveAudioComponents)
-    {
-        if (AudioComp && IsValid(AudioComp) && AudioComp->IsPlaying())
-        {
-            ActiveCount++;
-        }
-    }
-    return ActiveCount;
-}
-
-void AAudio_EffectsManager::CleanupFinishedComponents()
-{
-    for (int32 i = ActiveAudioComponents.Num() - 1; i >= 0; i--)
-    {
-        UAudioComponent* AudioComp = ActiveAudioComponents[i];
-        if (!AudioComp || !IsValid(AudioComp) || !AudioComp->IsPlaying())
-        {
-            if (AudioComp && IsValid(AudioComp))
-            {
-                AudioComp->DestroyComponent();
-            }
-            ActiveAudioComponents.RemoveAt(i);
-        }
-    }
-}
-
-UAudioComponent* AAudio_EffectsManager::CreateAudioComponent(const FAudio_EffectData& EffectData, FVector Location)
-{
-    UAudioComponent* NewAudioComponent = NewObject<UAudioComponent>(this);
-    if (!NewAudioComponent)
-    {
-        UE_LOG(LogTemp, Error, TEXT("Failed to create audio component"));
-        return nullptr;
-    }
-
-    NewAudioComponent->AttachToComponent(RootComponent, FAttachmentTransformRules::KeepWorldTransform);
-    NewAudioComponent->SetWorldLocation(Location);
-    
-    // Configure audio component properties
-    NewAudioComponent->SetVolumeMultiplier(EffectData.Volume);
-    NewAudioComponent->SetPitchMultiplier(EffectData.Pitch);
-    
-    if (EffectData.bIs3D)
-    {
-        NewAudioComponent->bAllowSpatialization = true;
-        NewAudioComponent->bOverrideAttenuation = true;
-        // Set up basic attenuation settings
-        NewAudioComponent->AttenuationOverrides.bAttenuate = true;
-        NewAudioComponent->AttenuationOverrides.AttenuationShape = EAttenuationShape::Sphere;
-        NewAudioComponent->AttenuationOverrides.FalloffDistance = EffectData.MaxDistance;
     }
     else
     {
-        NewAudioComponent->bAllowSpatialization = false;
+        UE_LOG(LogTemp, Warning, TEXT("Audio_EffectsManager: No DirectionalLight found for day/night cycle"));
     }
 
-    // Note: In a full implementation, we'd load the actual sound cue here
-    // For now, we create the component structure
+    // Setup ambient audio
+    if (AmbientAudioComponent)
+    {
+        AmbientAudioComponent->bAutoActivate = true;
+        AmbientAudioComponent->SetVolumeMultiplier(0.3f);
+    }
+}
+
+void UAudio_EffectsManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+{
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+
+    // Update day/night cycle
+    UpdateDayNightCycle(DeltaTime);
+
+    // Handle screen flash effect
+    if (bIsFlashing)
+    {
+        ScreenFlashTimer -= DeltaTime;
+        if (ScreenFlashTimer <= 0.0f)
+        {
+            bIsFlashing = false;
+            ScreenFlashTimer = 0.0f;
+        }
+    }
+}
+
+void UAudio_EffectsManager::TriggerDamageFlash(float Duration, float Intensity, FLinearColor Color)
+{
+    ActiveFlashData.Duration = Duration;
+    ActiveFlashData.Intensity = Intensity;
+    ActiveFlashData.Color = Color;
     
-    NewAudioComponent->RegisterComponent();
+    ScreenFlashTimer = Duration;
+    bIsFlashing = true;
+
+    UE_LOG(LogTemp, Warning, TEXT("Audio_EffectsManager: Damage flash triggered - Duration: %f, Intensity: %f"), Duration, Intensity);
+
+    // Apply screen flash effect via player camera manager
+    APlayerController* PC = GetWorld()->GetFirstPlayerController();
+    if (PC && PC->PlayerCameraManager)
+    {
+        PC->PlayerCameraManager->StartCameraFade(0.0f, Intensity, Duration * 0.5f, Color, false, true);
+        PC->PlayerCameraManager->StartCameraFade(Intensity, 0.0f, Duration * 0.5f, Color, false, true);
+    }
+}
+
+void UAudio_EffectsManager::PlayFootstepEffect(ESurvivalCreatureType CreatureType, FVector Location, float VolumeOverride)
+{
+    if (!FootstepDataMap.Contains(CreatureType))
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Audio_EffectsManager: No footstep data for creature type %d"), (int32)CreatureType);
+        return;
+    }
+
+    const FAudio_FootstepData& FootstepData = FootstepDataMap[CreatureType];
     
-    return NewAudioComponent;
+    // Play footstep sound
+    if (FootstepData.FootstepSound)
+    {
+        float FinalVolume = FootstepData.VolumeMultiplier * VolumeOverride;
+        UGameplayStatics::PlaySoundAtLocation(GetWorld(), FootstepData.FootstepSound, Location, FinalVolume);
+        
+        UE_LOG(LogTemp, Log, TEXT("Audio_EffectsManager: Played footstep for creature %d at location %s"), 
+               (int32)CreatureType, *Location.ToString());
+    }
+
+    // Trigger camera shake for large creatures
+    if (CreatureType == ESurvivalCreatureType::TRex || CreatureType == ESurvivalCreatureType::Brachiosaurus)
+    {
+        if (TRexFootstepShake)
+        {
+            TriggerCameraShake(TRexFootstepShake, FootstepData.ShakeIntensity, FootstepData.ShakeRadius);
+        }
+    }
+}
+
+void UAudio_EffectsManager::TriggerCameraShake(TSubclassOf<UCameraShakeBase> ShakeClass, float Intensity, float Radius)
+{
+    if (!ShakeClass)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Audio_EffectsManager: No camera shake class provided"));
+        return;
+    }
+
+    APlayerController* PC = GetWorld()->GetFirstPlayerController();
+    if (PC && PC->PlayerCameraManager)
+    {
+        PC->PlayerCameraManager->StartCameraShake(ShakeClass, Intensity);
+        UE_LOG(LogTemp, Log, TEXT("Audio_EffectsManager: Camera shake triggered with intensity %f"), Intensity);
+    }
+}
+
+void UAudio_EffectsManager::UpdateDayNightCycle(float DeltaTime)
+{
+    if (DayNightCycleDuration <= 0.0f) return;
+
+    // Update time of day (0.0 to 1.0)
+    float TimeIncrement = DeltaTime / DayNightCycleDuration;
+    CurrentTimeOfDay += TimeIncrement;
+    
+    // Wrap around at 1.0
+    if (CurrentTimeOfDay >= 1.0f)
+    {
+        CurrentTimeOfDay -= 1.0f;
+    }
+
+    UpdateDirectionalLightRotation();
+}
+
+void UAudio_EffectsManager::UpdateDirectionalLightRotation()
+{
+    if (!SunLight || !SunLight->GetLightComponent()) return;
+
+    // Convert time of day to sun angle (0.0 = midnight, 0.5 = noon)
+    float SunAngle = (CurrentTimeOfDay - 0.5f) * 180.0f; // -90 to +90 degrees
+    
+    // Create rotation for the sun
+    FRotator SunRotation = FRotator(SunAngle, 45.0f, 0.0f); // 45 degree yaw offset
+    SunLight->GetLightComponent()->SetWorldRotation(SunRotation);
+
+    // Adjust light intensity based on time of day
+    float LightIntensity = 1.0f;
+    if (IsNightTime())
+    {
+        LightIntensity = 0.1f; // Dim moonlight
+    }
+    else
+    {
+        // Gradual transition during dawn/dusk
+        float NoonDistance = FMath::Abs(CurrentTimeOfDay - 0.5f) * 2.0f; // 0.0 at noon, 1.0 at midnight
+        LightIntensity = FMath::Lerp(3.0f, 0.1f, NoonDistance);
+    }
+    
+    SunLight->GetLightComponent()->SetIntensity(LightIntensity);
+}
+
+void UAudio_EffectsManager::SetAmbientVolume(float Volume)
+{
+    if (AmbientAudioComponent)
+    {
+        AmbientAudioComponent->SetVolumeMultiplier(FMath::Clamp(Volume, 0.0f, 1.0f));
+    }
+}
+
+void UAudio_EffectsManager::PlaySoundAtLocation(USoundCue* Sound, FVector Location, float Volume, float Pitch)
+{
+    if (Sound)
+    {
+        UGameplayStatics::PlaySoundAtLocation(GetWorld(), Sound, Location, Volume, Pitch);
+    }
+}
+
+void UAudio_EffectsManager::InitializeFootstepData()
+{
+    // Initialize footstep data for different creature types
+    FAudio_FootstepData TRexFootstep;
+    TRexFootstep.VolumeMultiplier = 2.0f;
+    TRexFootstep.ShakeRadius = 1500.0f;
+    TRexFootstep.ShakeIntensity = 3.0f;
+    FootstepDataMap.Add(ESurvivalCreatureType::TRex, TRexFootstep);
+
+    FAudio_FootstepData RaptorFootstep;
+    RaptorFootstep.VolumeMultiplier = 0.8f;
+    RaptorFootstep.ShakeRadius = 200.0f;
+    RaptorFootstep.ShakeIntensity = 0.5f;
+    FootstepDataMap.Add(ESurvivalCreatureType::Velociraptor, RaptorFootstep);
+
+    FAudio_FootstepData BrachioFootstep;
+    BrachioFootstep.VolumeMultiplier = 2.5f;
+    BrachioFootstep.ShakeRadius = 2000.0f;
+    BrachioFootstep.ShakeIntensity = 2.0f;
+    FootstepDataMap.Add(ESurvivalCreatureType::Brachiosaurus, BrachioFootstep);
+
+    FAudio_FootstepData PlayerFootstep;
+    PlayerFootstep.VolumeMultiplier = 0.3f;
+    PlayerFootstep.ShakeRadius = 0.0f;
+    PlayerFootstep.ShakeIntensity = 0.0f;
+    FootstepDataMap.Add(ESurvivalCreatureType::Human, PlayerFootstep);
+
+    UE_LOG(LogTemp, Warning, TEXT("Audio_EffectsManager: Initialized footstep data for %d creature types"), FootstepDataMap.Num());
 }
