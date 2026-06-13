@@ -1,69 +1,77 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Components/ActorComponent.h"
 #include "Engine/Engine.h"
+#include "Components/ActorComponent.h"
+#include "Engine/World.h"
+#include "TimerManager.h"
 #include "Arch_StructuralIntegritySystem.generated.h"
 
 UENUM(BlueprintType)
-enum class EArch_StructuralMaterial : uint8
+enum class EArch_StructuralCondition : uint8
 {
-    Stone       UMETA(DisplayName = "Stone"),
-    Wood        UMETA(DisplayName = "Wood"),
-    Bone        UMETA(DisplayName = "Bone"),
-    Clay        UMETA(DisplayName = "Clay"),
-    Hide        UMETA(DisplayName = "Hide")
+    Pristine        UMETA(DisplayName = "Pristine"),
+    Good           UMETA(DisplayName = "Good"),
+    Weathered      UMETA(DisplayName = "Weathered"),
+    Damaged        UMETA(DisplayName = "Damaged"),
+    Crumbling      UMETA(DisplayName = "Crumbling"),
+    Ruined         UMETA(DisplayName = "Ruined")
 };
 
 UENUM(BlueprintType)
-enum class EArch_WeatheringLevel : uint8
+enum class EArch_MaterialType : uint8
 {
-    Pristine    UMETA(DisplayName = "Pristine"),
-    Weathered   UMETA(DisplayName = "Weathered"),
-    Damaged     UMETA(DisplayName = "Damaged"),
-    Ruined      UMETA(DisplayName = "Ruined"),
-    Collapsed   UMETA(DisplayName = "Collapsed")
+    Stone          UMETA(DisplayName = "Stone"),
+    Wood           UMETA(DisplayName = "Wood"),
+    Bone           UMETA(DisplayName = "Bone"),
+    Clay           UMETA(DisplayName = "Clay"),
+    Hide           UMETA(DisplayName = "Hide"),
+    Thatch         UMETA(DisplayName = "Thatch")
 };
 
 USTRUCT(BlueprintType)
-struct FArch_StructuralProperties
+struct TRANSPERSONALGAME_API FArch_StructuralData
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structural Integrity")
-    float MaxIntegrity = 100.0f;
+    float IntegrityValue = 100.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structural Integrity")
-    float CurrentIntegrity = 100.0f;
+    EArch_StructuralCondition Condition = EArch_StructuralCondition::Pristine;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structural Integrity")
-    EArch_StructuralMaterial Material = EArch_StructuralMaterial::Stone;
+    EArch_MaterialType MaterialType = EArch_MaterialType::Stone;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structural Integrity")
-    EArch_WeatheringLevel WeatheringLevel = EArch_WeatheringLevel::Pristine;
+    float WeatherResistance = 0.8f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structural Integrity")
-    float WeatheringRate = 0.1f;
+    float AgeInYears = 0.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structural Integrity")
-    bool bCanCollapse = true;
+    bool bIsLoadBearing = false;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structural Integrity")
-    float CollapseThreshold = 25.0f;
+    float MaxLoad = 1000.0f;
 
-    FArch_StructuralProperties()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structural Integrity")
+    float CurrentLoad = 0.0f;
+
+    FArch_StructuralData()
     {
-        MaxIntegrity = 100.0f;
-        CurrentIntegrity = 100.0f;
-        Material = EArch_StructuralMaterial::Stone;
-        WeatheringLevel = EArch_WeatheringLevel::Pristine;
-        WeatheringRate = 0.1f;
-        bCanCollapse = true;
-        CollapseThreshold = 25.0f;
+        IntegrityValue = 100.0f;
+        Condition = EArch_StructuralCondition::Pristine;
+        MaterialType = EArch_MaterialType::Stone;
+        WeatherResistance = 0.8f;
+        AgeInYears = 0.0f;
+        bIsLoadBearing = false;
+        MaxLoad = 1000.0f;
+        CurrentLoad = 0.0f;
     }
 };
 
-UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
+UCLASS(ClassGroup=(TranspersonalGame), meta=(BlueprintSpawnableComponent))
 class TRANSPERSONALGAME_API UArch_StructuralIntegritySystem : public UActorComponent
 {
     GENERATED_BODY()
@@ -76,50 +84,75 @@ protected:
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 public:
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structural Properties")
-    FArch_StructuralProperties StructuralProperties;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structural Data")
+    FArch_StructuralData StructuralData;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environmental Effects")
-    bool bAffectedByWeather = true;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Degradation Settings")
+    float DegradationRate = 0.1f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environmental Effects")
-    bool bAffectedBySeismic = false;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Degradation Settings")
+    float WeatherDamageMultiplier = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environmental Effects")
-    float MossGrowthRate = 0.05f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Degradation Settings")
+    bool bEnableTimeDegradation = true;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environmental Effects")
-    float CurrentMossLevel = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Degradation Settings")
+    bool bEnableWeatherDegradation = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Visual Updates")
+    bool bAutoUpdateMaterials = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Visual Updates")
+    TArray<class UMaterialInterface*> ConditionMaterials;
 
     UFUNCTION(BlueprintCallable, Category = "Structural Integrity")
-    void ApplyDamage(float DamageAmount, bool bIsSeismic = false);
+    void ApplyDamage(float DamageAmount);
 
     UFUNCTION(BlueprintCallable, Category = "Structural Integrity")
     void RepairStructure(float RepairAmount);
 
     UFUNCTION(BlueprintCallable, Category = "Structural Integrity")
+    bool CanSupportLoad(float AdditionalLoad) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Structural Integrity")
+    void AddLoad(float LoadAmount);
+
+    UFUNCTION(BlueprintCallable, Category = "Structural Integrity")
+    void RemoveLoad(float LoadAmount);
+
+    UFUNCTION(BlueprintCallable, Category = "Structural Integrity")
+    EArch_StructuralCondition GetConditionFromIntegrity(float Integrity) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Structural Integrity")
+    void UpdateVisualCondition();
+
+    UFUNCTION(BlueprintCallable, Category = "Structural Integrity")
+    float GetStructuralIntegrity() const { return StructuralData.IntegrityValue; }
+
+    UFUNCTION(BlueprintCallable, Category = "Structural Integrity")
+    EArch_StructuralCondition GetCurrentCondition() const { return StructuralData.Condition; }
+
+    UFUNCTION(BlueprintPure, Category = "Structural Integrity")
     bool IsStructureStable() const;
 
     UFUNCTION(BlueprintCallable, Category = "Structural Integrity")
-    float GetIntegrityPercentage() const;
+    void SetMaterialType(EArch_MaterialType NewMaterialType);
 
-    UFUNCTION(BlueprintCallable, Category = "Environmental Effects")
-    void UpdateWeathering(float DeltaTime);
+protected:
+    UFUNCTION()
+    void ProcessDegradation();
 
-    UFUNCTION(BlueprintCallable, Category = "Environmental Effects")
-    void UpdateMossGrowth(float DeltaTime);
+    UFUNCTION()
+    void CheckStructuralFailure();
 
-    UFUNCTION(BlueprintImplementableEvent, Category = "Structural Events")
-    void OnStructureCollapsed();
-
-    UFUNCTION(BlueprintImplementableEvent, Category = "Structural Events")
-    void OnWeatheringLevelChanged(EArch_WeatheringLevel NewLevel);
-
-    UFUNCTION(BlueprintImplementableEvent, Category = "Visual Effects")
-    void UpdateVisualState();
+    UFUNCTION()
+    void UpdateMaterialBasedOnCondition();
 
 private:
-    void CheckForCollapse();
-    void UpdateWeatheringLevel();
-    float GetMaterialWeatheringMultiplier() const;
+    FTimerHandle DegradationTimerHandle;
+    float LastDegradationTime = 0.0f;
+    
+    float GetMaterialDegradationRate() const;
+    float GetWeatherImpact() const;
+    void InitializeMaterialArrays();
 };
