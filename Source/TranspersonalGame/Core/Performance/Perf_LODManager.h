@@ -1,139 +1,114 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
+#include "Engine/World.h"
+#include "Components/ActorComponent.h"
 #include "Components/StaticMeshComponent.h"
-#include "Engine/StaticMesh.h"
+#include "Engine/StaticMeshActor.h"
 #include "SharedTypes.h"
 #include "Perf_LODManager.generated.h"
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FPerf_LODLevel
+struct TRANSPERSONALGAME_API FPerf_LODSettings
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
-    float Distance;
+    float HighDetailDistance = 1000.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
-    int32 LODIndex;
+    float MediumDetailDistance = 3000.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
-    float CullingDistance;
+    float LowDetailDistance = 8000.0f;
 
-    FPerf_LODLevel()
-    {
-        Distance = 1000.0f;
-        LODIndex = 0;
-        CullingDistance = 5000.0f;
-    }
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
+    float CullDistance = 15000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
+    bool bEnableDistanceCulling = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
+    bool bEnableFrustumCulling = true;
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FPerf_MeshLODSettings
+struct TRANSPERSONALGAME_API FPerf_ActorLODData
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
-    TArray<FPerf_LODLevel> LODLevels;
+    TWeakObjectPtr<AActor> Actor;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
-    bool bEnableDistanceCulling;
+    float LastDistanceToPlayer = 0.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
-    float MaxDrawDistance;
+    EPerf_LODLevel CurrentLODLevel = EPerf_LODLevel::High;
 
-    FPerf_MeshLODSettings()
-    {
-        bEnableDistanceCulling = true;
-        MaxDrawDistance = 10000.0f;
-        
-        // Default LOD levels
-        FPerf_LODLevel LOD0;
-        LOD0.Distance = 0.0f;
-        LOD0.LODIndex = 0;
-        LOD0.CullingDistance = 2000.0f;
-        LODLevels.Add(LOD0);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
+    bool bIsVisible = true;
 
-        FPerf_LODLevel LOD1;
-        LOD1.Distance = 1500.0f;
-        LOD1.LODIndex = 1;
-        LOD1.CullingDistance = 4000.0f;
-        LODLevels.Add(LOD1);
-
-        FPerf_LODLevel LOD2;
-        LOD2.Distance = 3000.0f;
-        LOD2.LODIndex = 2;
-        LOD2.CullingDistance = 8000.0f;
-        LODLevels.Add(LOD2);
-    }
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
+    float LastUpdateTime = 0.0f;
 };
 
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API APerf_LODManager : public AActor
+UCLASS(ClassGroup=(Performance), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UPerf_LODManager : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    APerf_LODManager();
+    UPerf_LODManager();
 
 protected:
     virtual void BeginPlay() override;
-    virtual void Tick(float DeltaTime) override;
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 public:
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    FPerf_MeshLODSettings DefaultLODSettings;
+    UFUNCTION(BlueprintCallable, Category = "Performance|LOD")
+    void RegisterActor(AActor* Actor);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float UpdateFrequency;
+    UFUNCTION(BlueprintCallable, Category = "Performance|LOD")
+    void UnregisterActor(AActor* Actor);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    bool bEnableLODSystem;
+    UFUNCTION(BlueprintCallable, Category = "Performance|LOD")
+    void UpdateLODForActor(AActor* Actor, float DistanceToPlayer);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 MaxMeshesToProcess;
+    UFUNCTION(BlueprintCallable, Category = "Performance|LOD")
+    void SetLODSettings(const FPerf_LODSettings& NewSettings);
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    TArray<UStaticMeshComponent*> ManagedMeshes;
+    UFUNCTION(BlueprintCallable, Category = "Performance|LOD")
+    FPerf_LODSettings GetLODSettings() const { return LODSettings; }
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    int32 CurrentLODUpdates;
+    UFUNCTION(BlueprintCallable, Category = "Performance|LOD")
+    void ForceUpdateAllActors();
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float LastUpdateTime;
+    UFUNCTION(BlueprintCallable, Category = "Performance|LOD")
+    int32 GetRegisteredActorCount() const { return RegisteredActors.Num(); }
 
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void RegisterMeshComponent(UStaticMeshComponent* MeshComponent);
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void UnregisterMeshComponent(UStaticMeshComponent* MeshComponent);
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void UpdateLODForMesh(UStaticMeshComponent* MeshComponent, float DistanceToPlayer);
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void UpdateAllMeshLODs();
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    int32 GetOptimalLODLevel(float Distance, const FPerf_MeshLODSettings& Settings);
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void SetLODSettings(const FPerf_MeshLODSettings& NewSettings);
-
-    UFUNCTION(BlueprintPure, Category = "Performance")
-    float GetDistanceToPlayer(const FVector& MeshLocation);
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void EnableLODSystem(bool bEnable);
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
+    UFUNCTION(BlueprintCallable, Category = "Performance|LOD")
     void SetUpdateFrequency(float NewFrequency);
 
-private:
-    float TimeSinceLastUpdate;
-    APawn* CachedPlayerPawn;
+protected:
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|LOD")
+    FPerf_LODSettings LODSettings;
 
-    void CachePlayerPawn();
-    void ProcessMeshBatch(int32 StartIndex, int32 EndIndex);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|LOD")
+    TArray<FPerf_ActorLODData> RegisteredActors;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|LOD")
+    float UpdateFrequency = 0.1f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|LOD")
+    float TimeSinceLastUpdate = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|LOD")
+    bool bIsEnabled = true;
+
+private:
+    APawn* GetPlayerPawn() const;
+    void UpdateActorLOD(FPerf_ActorLODData& ActorData, float DistanceToPlayer);
+    void SetActorLODLevel(AActor* Actor, EPerf_LODLevel LODLevel);
+    void CleanupInvalidActors();
 };
