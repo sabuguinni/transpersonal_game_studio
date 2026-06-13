@@ -2,12 +2,54 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
-#include "Components/StaticMeshComponent.h"
+#include "Components/SceneComponent.h"
 #include "Particles/ParticleSystemComponent.h"
 #include "NiagaraComponent.h"
 #include "NiagaraSystem.h"
-#include "SharedTypes.h"
+#include "Engine/World.h"
 #include "VFX_ParticleManager.generated.h"
+
+UENUM(BlueprintType)
+enum class EVFX_ParticleType : uint8
+{
+    Fire_Campfire UMETA(DisplayName = "Campfire"),
+    Dust_DinosaurFootstep UMETA(DisplayName = "Dinosaur Footstep"),
+    Weather_Rain UMETA(DisplayName = "Rain"),
+    Weather_Snow UMETA(DisplayName = "Snow"),
+    Blood_Impact UMETA(DisplayName = "Blood Impact"),
+    Water_Splash UMETA(DisplayName = "Water Splash"),
+    Smoke_Cooking UMETA(DisplayName = "Cooking Smoke"),
+    Sparks_Crafting UMETA(DisplayName = "Crafting Sparks")
+};
+
+USTRUCT(BlueprintType)
+struct FVFX_ParticleConfig
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Config")
+    EVFX_ParticleType ParticleType = EVFX_ParticleType::Fire_Campfire;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Config")
+    TSoftObjectPtr<UNiagaraSystem> NiagaraSystem;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Config")
+    FVector SpawnLocation = FVector::ZeroVector;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Config")
+    float Duration = 5.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Config")
+    float Scale = 1.0f;
+
+    FVFX_ParticleConfig()
+    {
+        ParticleType = EVFX_ParticleType::Fire_Campfire;
+        SpawnLocation = FVector::ZeroVector;
+        Duration = 5.0f;
+        Scale = 1.0f;
+    }
+};
 
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API AVFX_ParticleManager : public AActor
@@ -23,91 +65,34 @@ protected:
 public:
     virtual void Tick(float DeltaTime) override;
 
-    // Core VFX Components
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "VFX Core")
-    class USceneComponent* RootSceneComponent;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "VFX Core")
-    class UNiagaraComponent* PrimaryParticleSystem;
-
-    // VFX Categories
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Fire")
-    class UNiagaraSystem* CampfireEffect;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Fire")
-    class UNiagaraSystem* EmberEffect;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Environment")
-    class UNiagaraSystem* DustImpactEffect;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Environment")
-    class UNiagaraSystem* FootstepDustEffect;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Weather")
-    class UNiagaraSystem* RainEffect;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Weather")
-    class UNiagaraSystem* FogEffect;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Combat")
-    class UNiagaraSystem* BloodSplatterEffect;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Combat")
-    class UNiagaraSystem* ImpactSparkEffect;
-
-    // VFX Control Properties
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Settings", meta = (ClampMin = "0.0", ClampMax = "10.0"))
-    float EffectIntensityMultiplier;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    USceneComponent* RootSceneComponent;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Settings")
-    bool bEnableWeatherEffects;
+    TArray<FVFX_ParticleConfig> ParticleConfigs;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Settings")
-    bool bEnableCombatEffects;
+    bool bAutoStartParticles = true;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Settings")
-    bool bEnableEnvironmentalEffects;
+    float GlobalScale = 1.0f;
 
-    // VFX Methods
-    UFUNCTION(BlueprintCallable, Category = "VFX Fire")
-    void SpawnCampfireEffect(FVector Location, FRotator Rotation = FRotator::ZeroRotator);
+    UFUNCTION(BlueprintCallable, Category = "VFX Control")
+    void SpawnParticleEffect(EVFX_ParticleType ParticleType, FVector Location, float Scale = 1.0f);
 
-    UFUNCTION(BlueprintCallable, Category = "VFX Environment")
-    void SpawnDustImpact(FVector Location, float Intensity = 1.0f);
+    UFUNCTION(BlueprintCallable, Category = "VFX Control")
+    void StopAllParticles();
 
-    UFUNCTION(BlueprintCallable, Category = "VFX Environment")
-    void SpawnFootstepDust(FVector Location, float DinosaurSize = 1.0f);
+    UFUNCTION(BlueprintCallable, Category = "VFX Control")
+    void StartAllParticles();
 
-    UFUNCTION(BlueprintCallable, Category = "VFX Weather")
-    void StartRainEffect(float Intensity = 1.0f);
-
-    UFUNCTION(BlueprintCallable, Category = "VFX Weather")
-    void StopRainEffect();
-
-    UFUNCTION(BlueprintCallable, Category = "VFX Combat")
-    void SpawnBloodSplatter(FVector Location, FVector Direction, float Amount = 1.0f);
-
-    UFUNCTION(BlueprintCallable, Category = "VFX Combat")
-    void SpawnImpactSparks(FVector Location, FVector Normal);
-
-    UFUNCTION(BlueprintCallable, Category = "VFX System")
-    void SetGlobalVFXIntensity(float NewIntensity);
-
-    UFUNCTION(BlueprintCallable, Category = "VFX System")
-    void EnableVFXCategory(EVFX_EffectCategory Category, bool bEnable);
+    UFUNCTION(BlueprintCallable, Category = "VFX Control")
+    UNiagaraComponent* CreateNiagaraComponent(UNiagaraSystem* System, FVector Location, float Scale = 1.0f);
 
 private:
-    // Internal VFX tracking
-    TArray<class UNiagaraComponent*> ActiveParticleSystems;
-    
-    float CurrentWeatherIntensity;
-    bool bIsRaining;
-    
-    // Performance optimization
-    int32 MaxActiveParticles;
-    float EffectCullDistance;
-    
-    void CleanupInactiveEffects();
-    void UpdatePerformanceSettings();
-    bool ShouldSpawnEffect(FVector Location) const;
+    UPROPERTY()
+    TArray<UNiagaraComponent*> ActiveParticleComponents;
+
+    void InitializeDefaultParticles();
+    UNiagaraSystem* GetNiagaraSystemForType(EVFX_ParticleType ParticleType);
 };
