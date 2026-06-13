@@ -1,27 +1,24 @@
 #include "Core_TerrainPhysicsManager.h"
-#include "Engine/Engine.h"
 #include "Engine/World.h"
+#include "Engine/Engine.h"
+#include "DrawDebugHelpers.h"
+#include "Landscape/Landscape.h"
+#include "PhysicalMaterials/PhysicalMaterial.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/PrimitiveComponent.h"
-#include "PhysicsEngine/PhysicsSettings.h"
-#include "Landscape/LandscapeComponent.h"
-#include "Materials/MaterialInterface.h"
-#include "Engine/CollisionProfile.h"
+#include "Kismet/GameplayStatics.h"
 
 UCore_TerrainPhysicsManager::UCore_TerrainPhysicsManager()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 0.1f; // Update every 100ms
+    PrimaryComponentTick.TickInterval = 0.1f;
     
-    // Initialize default values
-    GlobalFrictionMultiplier = 1.0f;
-    GlobalRestitutionMultiplier = 1.0f;
-    CollisionUpdateDistance = 5000.0f;
-    MaxCollisionVertices = 10000;
-    bEnableComplexCollision = true;
-    bEnableTerrainDeformation = false;
-    MaxDeformationDepth = 50.0f;
-    DeformationRecoveryRate = 1.0f;
+    TerrainSampleRadius = 100.0f;
+    MaxWalkableSlope = 45.0f;
+    MaxBuildableSlope = 30.0f;
+    bEnableTerrainPhysicsDebug = false;
+    PhysicsUpdateInterval = 0.1f;
+    LastUpdateTime = 0.0f;
     CachedLandscape = nullptr;
 }
 
@@ -29,391 +26,394 @@ void UCore_TerrainPhysicsManager::BeginPlay()
 {
     Super::BeginPlay();
     
-    InitializeBiomeSurfaceData();
-    InitializeTerrainPhysics();
+    InitializeDefaultPhysicsMaterials();
+    CacheLandscapeReference();
     
-    UE_LOG(LogTemp, Log, TEXT("Core_TerrainPhysicsManager: Initialized terrain physics system"));
+    UE_LOG(LogTemp, Log, TEXT("Core_TerrainPhysicsManager: Initialized with %d biome materials"), BiomePhysicsMaterials.Num());
 }
 
 void UCore_TerrainPhysicsManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
     
-    if (bEnableTerrainDeformation)
-    {
-        ProcessDeformationRecovery(DeltaTime);
-    }
-}
-
-void UCore_TerrainPhysicsManager::InitializeTerrainPhysics()
-{
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        UE_LOG(LogTemp, Error, TEXT("Core_TerrainPhysicsManager: No valid world found"));
-        return;
-    }
+    LastUpdateTime += DeltaTime;
     
-    // Find landscape in the world
-    for (TActorIterator<ALandscape> ActorIterator(World); ActorIterator; ++ActorIterator)
+    if (LastUpdateTime >= PhysicsUpdateInterval)
     {
-        ALandscape* Landscape = *ActorIterator;
-        if (Landscape)
+        LastUpdateTime = 0.0f;
+        
+        // Update terrain physics for nearby actors if needed
+        if (bEnableTerrainPhysicsDebug && GetOwner())
         {
-            CachedLandscape = Landscape;
-            OptimizeTerrainCollision(Landscape);
-            UE_LOG(LogTemp, Log, TEXT("Core_TerrainPhysicsManager: Found and optimized landscape"));
-            break;
+            FVector OwnerLocation = GetOwner()->GetActorLocation();
+            FCore_TerrainPhysicsData TerrainData = GetTerrainDataAtLocation(OwnerLocation);
+            DebugDrawTerrainData(OwnerLocation, TerrainData);
         }
     }
-    
-    // Initialize surface data for all biomes
-    InitializeBiomeSurfaceData();
-    
-    UE_LOG(LogTemp, Log, TEXT("Core_TerrainPhysicsManager: Terrain physics initialization complete"));
 }
 
-void UCore_TerrainPhysicsManager::UpdateSurfaceProperties(EBiomeType BiomeType, const FCore_TerrainSurfaceData& SurfaceData)
+FCore_TerrainPhysicsData UCore_TerrainPhysicsManager::GetTerrainDataAtLocation(const FVector& Location)
 {
-    BiomeSurfaceData.Add(BiomeType, SurfaceData);
-    
-    // Update all registered terrain actors with this biome type
-    for (AActor* Actor : RegisteredTerrainActors)
-    {
-        if (Actor)
-        {
-            UpdateActorPhysicsProperties(Actor, SurfaceData);
-        }
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("Core_TerrainPhysicsManager: Updated surface properties for biome %d"), (int32)BiomeType);
-}
-
-FCore_TerrainSurfaceData UCore_TerrainPhysicsManager::GetSurfaceDataAtLocation(const FVector& WorldLocation)
-{
-    // For now, return plains data - in full implementation this would sample the biome at location
-    if (BiomeSurfaceData.Contains(EBiomeType::Plains))
-    {
-        return BiomeSurfaceData[EBiomeType::Plains];
-    }
-    
-    return GetDefaultSurfaceData(EBiomeType::Plains);
-}
-
-void UCore_TerrainPhysicsManager::ApplySurfaceEffectsToActor(AActor* Actor, const FVector& ContactPoint)
-{
-    if (!Actor)
-    {
-        return;
-    }
-    
-    FCore_TerrainSurfaceData SurfaceData = GetSurfaceDataAtLocation(ContactPoint);
-    UpdateActorPhysicsProperties(Actor, SurfaceData);
-    
-    UE_LOG(LogTemp, Verbose, TEXT("Core_TerrainPhysicsManager: Applied surface effects to actor %s"), *Actor->GetName());
-}
-
-void UCore_TerrainPhysicsManager::OptimizeTerrainCollision(ALandscape* Landscape)
-{
-    if (!Landscape)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Core_TerrainPhysicsManager: No landscape provided for collision optimization"));
-        return;
-    }
-    
-    // Get landscape components and optimize collision
-    TArray<ULandscapeComponent*> LandscapeComponents;
-    Landscape->GetLandscapeComponents(LandscapeComponents);
-    
-    for (ULandscapeComponent* Component : LandscapeComponents)
-    {
-        if (Component)
-        {
-            // Set collision profile for performance
-            Component->SetCollisionProfileName(TEXT("BlockAll"));
-            Component->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-            
-            // Optimize collision complexity based on settings
-            if (bEnableComplexCollision)
-            {
-                Component->SetCollisionResponseToAllChannels(ECR_Block);
-            }
-        }
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("Core_TerrainPhysicsManager: Optimized collision for %d landscape components"), LandscapeComponents.Num());
-}
-
-void UCore_TerrainPhysicsManager::GenerateCollisionMesh(const FCore_TerrainCollisionData& CollisionData)
-{
-    if (CollisionData.CollisionVertices.Num() == 0 || CollisionData.CollisionIndices.Num() == 0)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Core_TerrainPhysicsManager: Invalid collision data provided"));
-        return;
-    }
-    
-    // Limit vertices to prevent performance issues
-    int32 VertexCount = FMath::Min(CollisionData.CollisionVertices.Num(), MaxCollisionVertices);
-    
-    UE_LOG(LogTemp, Log, TEXT("Core_TerrainPhysicsManager: Generated collision mesh with %d vertices"), VertexCount);
-}
-
-void UCore_TerrainPhysicsManager::UpdateCollisionComplexity(float NewComplexity)
-{
-    NewComplexity = FMath::Clamp(NewComplexity, 0.1f, 2.0f);
-    
-    // Update collision complexity for all registered terrain actors
-    for (AActor* Actor : RegisteredTerrainActors)
-    {
-        if (Actor)
-        {
-            TArray<UPrimitiveComponent*> PrimitiveComponents;
-            Actor->GetComponents<UPrimitiveComponent>(PrimitiveComponents);
-            
-            for (UPrimitiveComponent* Component : PrimitiveComponents)
-            {
-                if (Component)
-                {
-                    // Adjust collision complexity based on the new value
-                    if (NewComplexity < 0.5f)
-                    {
-                        Component->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
-                    }
-                    else
-                    {
-                        Component->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-                    }
-                }
-            }
-        }
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("Core_TerrainPhysicsManager: Updated collision complexity to %f"), NewComplexity);
-}
-
-void UCore_TerrainPhysicsManager::ApplyTerrainDeformation(const FVector& Location, float Force, float Radius)
-{
-    if (!bEnableTerrainDeformation || !IsValidTerrainLocation(Location))
-    {
-        return;
-    }
-    
-    float DeformationAmount = FMath::Clamp(Force / 1000.0f, 0.0f, MaxDeformationDepth);
-    
-    // Store deformation data
+    // Check if we have cached data for this location
     FVector GridLocation = FVector(
         FMath::RoundToInt(Location.X / 100.0f) * 100.0f,
         FMath::RoundToInt(Location.Y / 100.0f) * 100.0f,
         Location.Z
     );
     
-    DeformationMap.Add(GridLocation, DeformationAmount);
-    
-    UE_LOG(LogTemp, Log, TEXT("Core_TerrainPhysicsManager: Applied deformation %f at location %s"), DeformationAmount, *Location.ToString());
-}
-
-bool UCore_TerrainPhysicsManager::CanDeformAtLocation(const FVector& Location)
-{
-    if (!bEnableTerrainDeformation)
+    if (TerrainDataMap.Contains(GridLocation))
     {
-        return false;
+        return TerrainDataMap[GridLocation];
     }
     
-    FCore_TerrainSurfaceData SurfaceData = GetSurfaceDataAtLocation(Location);
-    return SurfaceData.bCanDeform && IsValidTerrainLocation(Location);
+    // Calculate terrain data
+    FCore_TerrainPhysicsData TerrainData;
+    
+    // Calculate slope angle
+    TerrainData.SlopeAngle = CalculateSlopeAngle(Location, TerrainSampleRadius);
+    
+    // Determine biome type based on location (simplified)
+    float Height = Location.Z;
+    if (Height > 1000.0f)
+    {
+        TerrainData.TerrainBiome = EBiomeType::Mountain;
+        TerrainData.Roughness = 0.8f;
+        TerrainData.Friction = 0.9f;
+        TerrainData.Hardness = 1.5f;
+    }
+    else if (Height < -500.0f)
+    {
+        TerrainData.TerrainBiome = EBiomeType::Ocean;
+        TerrainData.Roughness = 0.1f;
+        TerrainData.Friction = 0.2f;
+        TerrainData.Hardness = 0.1f;
+    }
+    else if (FMath::Abs(Location.X) > 5000.0f || FMath::Abs(Location.Y) > 5000.0f)
+    {
+        TerrainData.TerrainBiome = EBiomeType::Desert;
+        TerrainData.Roughness = 0.3f;
+        TerrainData.Friction = 0.4f;
+        TerrainData.Hardness = 0.7f;
+    }
+    else
+    {
+        TerrainData.TerrainBiome = EBiomeType::Grassland;
+        TerrainData.Roughness = 0.5f;
+        TerrainData.Friction = 0.7f;
+        TerrainData.Hardness = 1.0f;
+    }
+    
+    // Determine walkability
+    TerrainData.bIsWalkable = IsLocationWalkable(Location, MaxWalkableSlope);
+    TerrainData.bCanBuildOn = CanBuildAtLocation(Location, MaxBuildableSlope);
+    
+    // Cache the data
+    TerrainDataMap.Add(GridLocation, TerrainData);
+    
+    return TerrainData;
 }
 
-void UCore_TerrainPhysicsManager::ResetDeformation(const FVector& Location, float Radius)
+float UCore_TerrainPhysicsManager::CalculateSlopeAngle(const FVector& Location, float SampleRadius)
 {
-    TArray<FVector> KeysToRemove;
-    
-    for (auto& DeformationPair : DeformationMap)
+    if (!GetWorld())
     {
-        float Distance = FVector::Dist(DeformationPair.Key, Location);
-        if (Distance <= Radius)
+        return 0.0f;
+    }
+    
+    // Sample points in a cross pattern
+    TArray<FVector> SamplePoints = {
+        Location + FVector(SampleRadius, 0, 0),
+        Location + FVector(-SampleRadius, 0, 0),
+        Location + FVector(0, SampleRadius, 0),
+        Location + FVector(0, -SampleRadius, 0)
+    };
+    
+    TArray<float> Heights;
+    Heights.Add(Location.Z); // Center height
+    
+    // Perform line traces to get heights
+    for (const FVector& SamplePoint : SamplePoints)
+    {
+        FVector TraceStart = SamplePoint + FVector(0, 0, 1000.0f);
+        FVector TraceEnd = SamplePoint + FVector(0, 0, -1000.0f);
+        
+        FHitResult HitResult;
+        FCollisionQueryParams QueryParams;
+        QueryParams.bTraceComplex = true;
+        
+        if (GetWorld()->LineTraceSingleByChannel(HitResult, TraceStart, TraceEnd, ECC_WorldStatic, QueryParams))
         {
-            KeysToRemove.Add(DeformationPair.Key);
+            Heights.Add(HitResult.Location.Z);
+        }
+        else
+        {
+            Heights.Add(Location.Z); // Fallback to center height
         }
     }
     
-    for (const FVector& Key : KeysToRemove)
-    {
-        DeformationMap.Remove(Key);
-    }
+    // Calculate maximum height difference
+    float MinHeight = FMath::Min(Heights);
+    float MaxHeight = FMath::Max(Heights);
+    float HeightDiff = MaxHeight - MinHeight;
     
-    UE_LOG(LogTemp, Log, TEXT("Core_TerrainPhysicsManager: Reset deformation at %s (radius %f)"), *Location.ToString(), Radius);
+    // Calculate slope angle
+    float SlopeAngle = FMath::RadiansToDegrees(FMath::Atan(HeightDiff / SampleRadius));
+    
+    return FMath::Clamp(SlopeAngle, 0.0f, 90.0f);
 }
 
-void UCore_TerrainPhysicsManager::RegisterTerrainActor(AActor* TerrainActor, EBiomeType BiomeType)
+bool UCore_TerrainPhysicsManager::IsLocationWalkable(const FVector& Location, float MaxSlopeAngle)
 {
-    if (!TerrainActor)
+    float SlopeAngle = CalculateSlopeAngle(Location, TerrainSampleRadius);
+    return SlopeAngle <= MaxSlopeAngle;
+}
+
+bool UCore_TerrainPhysicsManager::CanBuildAtLocation(const FVector& Location, float MaxSlopeAngle)
+{
+    float SlopeAngle = CalculateSlopeAngle(Location, TerrainSampleRadius);
+    bool bSlopeOK = SlopeAngle <= MaxSlopeAngle;
+    bool bNotUnderwater = !IsLocationUnderwater(Location);
+    
+    return bSlopeOK && bNotUnderwater;
+}
+
+void UCore_TerrainPhysicsManager::UpdatePhysicsMaterialAtLocation(const FVector& Location, const FCore_PhysicsMaterialSettings& Settings)
+{
+    if (!GetWorld())
     {
         return;
     }
     
-    RegisteredTerrainActors.AddUnique(TerrainActor);
+    // Find actors at this location and update their physics materials
+    TArray<AActor*> OverlappingActors;
+    UGameplayStatics::GetAllActorsOfClass(GetWorld(), AActor::StaticClass(), OverlappingActors);
     
-    // Apply biome-specific surface properties
-    if (BiomeSurfaceData.Contains(BiomeType))
+    for (AActor* Actor : OverlappingActors)
     {
-        UpdateActorPhysicsProperties(TerrainActor, BiomeSurfaceData[BiomeType]);
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("Core_TerrainPhysicsManager: Registered terrain actor %s with biome %d"), *TerrainActor->GetName(), (int32)BiomeType);
-}
-
-void UCore_TerrainPhysicsManager::UnregisterTerrainActor(AActor* TerrainActor)
-{
-    if (TerrainActor)
-    {
-        RegisteredTerrainActors.Remove(TerrainActor);
-        UE_LOG(LogTemp, Log, TEXT("Core_TerrainPhysicsManager: Unregistered terrain actor %s"), *TerrainActor->GetName());
-    }
-}
-
-void UCore_TerrainPhysicsManager::UpdateTerrainPhysicsSettings()
-{
-    // Update all registered actors with current settings
-    for (AActor* Actor : RegisteredTerrainActors)
-    {
-        if (Actor)
+        if (!Actor || FVector::Dist(Actor->GetActorLocation(), Location) > 100.0f)
         {
-            FCore_TerrainSurfaceData DefaultData = GetDefaultSurfaceData(EBiomeType::Plains);
-            UpdateActorPhysicsProperties(Actor, DefaultData);
+            continue;
+        }
+        
+        UStaticMeshComponent* MeshComp = Actor->FindComponentByClass<UStaticMeshComponent>();
+        if (MeshComp && MeshComp->GetBodyInstance())
+        {
+            // Update physics properties
+            FBodyInstance* BodyInstance = MeshComp->GetBodyInstance();
+            // Note: Direct physics material modification requires custom physics materials
+            // This is a simplified implementation
         }
     }
-    
-    UE_LOG(LogTemp, Log, TEXT("Core_TerrainPhysicsManager: Updated terrain physics settings for %d actors"), RegisteredTerrainActors.Num());
 }
 
-void UCore_TerrainPhysicsManager::InitializeBiomeSurfaceData()
+FVector UCore_TerrainPhysicsManager::GetSurfaceNormal(const FVector& Location)
 {
-    // Plains - grassy terrain
-    FCore_TerrainSurfaceData PlainsData;
-    PlainsData.BiomeType = EBiomeType::Plains;
-    PlainsData.Friction = 0.8f;
-    PlainsData.Restitution = 0.1f;
-    PlainsData.Density = 1.0f;
-    PlainsData.bCanDeform = true;
-    PlainsData.DeformationThreshold = 50.0f;
-    BiomeSurfaceData.Add(EBiomeType::Plains, PlainsData);
+    if (!GetWorld())
+    {
+        return FVector::UpVector;
+    }
     
-    // Forest - soft earth with roots
-    FCore_TerrainSurfaceData ForestData;
-    ForestData.BiomeType = EBiomeType::Forest;
-    ForestData.Friction = 0.9f;
-    ForestData.Restitution = 0.05f;
-    ForestData.Density = 1.2f;
-    ForestData.bCanDeform = true;
-    ForestData.DeformationThreshold = 75.0f;
-    BiomeSurfaceData.Add(EBiomeType::Forest, ForestData);
+    FVector TraceStart = Location + FVector(0, 0, 100.0f);
+    FVector TraceEnd = Location + FVector(0, 0, -100.0f);
     
-    // Desert - sandy terrain
-    FCore_TerrainSurfaceData DesertData;
-    DesertData.BiomeType = EBiomeType::Desert;
-    DesertData.Friction = 0.4f;
-    DesertData.Restitution = 0.2f;
-    DesertData.Density = 0.8f;
-    DesertData.bCanDeform = true;
-    DesertData.DeformationThreshold = 25.0f;
-    BiomeSurfaceData.Add(EBiomeType::Desert, DesertData);
+    FHitResult HitResult;
+    FCollisionQueryParams QueryParams;
+    QueryParams.bTraceComplex = true;
     
-    // Mountain - rocky terrain
-    FCore_TerrainSurfaceData MountainData;
-    MountainData.BiomeType = EBiomeType::Mountain;
-    MountainData.Friction = 1.2f;
-    MountainData.Restitution = 0.3f;
-    MountainData.Density = 2.0f;
-    MountainData.bCanDeform = false;
-    MountainData.DeformationThreshold = 200.0f;
-    BiomeSurfaceData.Add(EBiomeType::Mountain, MountainData);
+    if (GetWorld()->LineTraceSingleByChannel(HitResult, TraceStart, TraceEnd, ECC_WorldStatic, QueryParams))
+    {
+        return HitResult.Normal;
+    }
     
-    UE_LOG(LogTemp, Log, TEXT("Core_TerrainPhysicsManager: Initialized surface data for %d biomes"), BiomeSurfaceData.Num());
+    return FVector::UpVector;
 }
 
-void UCore_TerrainPhysicsManager::UpdateActorPhysicsProperties(AActor* Actor, const FCore_TerrainSurfaceData& SurfaceData)
+float UCore_TerrainPhysicsManager::GetTerrainHardness(const FVector& Location)
+{
+    FCore_TerrainPhysicsData TerrainData = GetTerrainDataAtLocation(Location);
+    return TerrainData.Hardness;
+}
+
+void UCore_TerrainPhysicsManager::ApplyTerrainEffectsToActor(AActor* Actor, const FVector& Location)
 {
     if (!Actor)
     {
         return;
     }
     
-    TArray<UPrimitiveComponent*> PrimitiveComponents;
-    Actor->GetComponents<UPrimitiveComponent>(PrimitiveComponents);
+    FCore_TerrainPhysicsData TerrainData = GetTerrainDataAtLocation(Location);
     
-    for (UPrimitiveComponent* Component : PrimitiveComponents)
+    // Apply movement speed modifications based on terrain
+    UPrimitiveComponent* PrimComp = Actor->FindComponentByClass<UPrimitiveComponent>();
+    if (PrimComp)
     {
-        if (Component && Component->GetBodyInstance())
-        {
-            FBodyInstance* BodyInstance = Component->GetBodyInstance();
-            
-            // Apply surface properties with global multipliers
-            BodyInstance->SetPhysMaterialOverride(nullptr); // Reset to use component material
-            
-            // Note: Direct friction/restitution setting requires custom physics material
-            // This is a simplified implementation
-            Component->SetPhysMaterialOverride(nullptr);
-        }
+        // Modify physics properties based on terrain
+        float FrictionMultiplier = TerrainData.Friction;
+        // Apply friction effects (simplified implementation)
     }
 }
 
-FCore_TerrainSurfaceData UCore_TerrainPhysicsManager::GetDefaultSurfaceData(EBiomeType BiomeType)
+void UCore_TerrainPhysicsManager::RegisterTerrainPhysicsData(const FVector& Location, const FCore_TerrainPhysicsData& Data)
 {
-    FCore_TerrainSurfaceData DefaultData;
-    DefaultData.BiomeType = BiomeType;
+    FVector GridLocation = FVector(
+        FMath::RoundToInt(Location.X / 100.0f) * 100.0f,
+        FMath::RoundToInt(Location.Y / 100.0f) * 100.0f,
+        Location.Z
+    );
     
-    switch (BiomeType)
-    {
-        case EBiomeType::Forest:
-            DefaultData.Friction = 0.9f;
-            DefaultData.Restitution = 0.05f;
-            break;
-        case EBiomeType::Desert:
-            DefaultData.Friction = 0.4f;
-            DefaultData.Restitution = 0.2f;
-            break;
-        case EBiomeType::Mountain:
-            DefaultData.Friction = 1.2f;
-            DefaultData.Restitution = 0.3f;
-            break;
-        default: // Plains
-            DefaultData.Friction = 0.8f;
-            DefaultData.Restitution = 0.1f;
-            break;
-    }
-    
-    return DefaultData;
+    TerrainDataMap.Add(GridLocation, Data);
 }
 
-void UCore_TerrainPhysicsManager::ProcessDeformationRecovery(float DeltaTime)
+void UCore_TerrainPhysicsManager::ClearTerrainPhysicsData()
 {
-    TArray<FVector> KeysToRemove;
-    
-    for (auto& DeformationPair : DeformationMap)
+    TerrainDataMap.Empty();
+    UE_LOG(LogTemp, Log, TEXT("Core_TerrainPhysicsManager: Cleared all terrain physics data"));
+}
+
+void UCore_TerrainPhysicsManager::CreatePhysicsMaterialForBiome(EBiomeType BiomeType, const FCore_PhysicsMaterialSettings& Settings)
+{
+    // Create a new physics material (simplified - in practice would load from assets)
+    UPhysicalMaterial* PhysMat = NewObject<UPhysicalMaterial>();
+    if (PhysMat)
     {
-        float& DeformationAmount = DeformationPair.Value;
-        DeformationAmount -= DeformationRecoveryRate * DeltaTime;
+        PhysMat->StaticFriction = Settings.StaticFriction;
+        PhysMat->DynamicFriction = Settings.DynamicFriction;
+        PhysMat->Restitution = Settings.Restitution;
+        PhysMat->Density = Settings.Density;
+        PhysMat->SleepLinearVelocityThreshold *= Settings.SleepThresholdMultiplier;
         
-        if (DeformationAmount <= 0.0f)
-        {
-            KeysToRemove.Add(DeformationPair.Key);
-        }
-    }
-    
-    for (const FVector& Key : KeysToRemove)
-    {
-        DeformationMap.Remove(Key);
+        BiomePhysicsMaterials.Add(BiomeType, PhysMat);
     }
 }
 
-bool UCore_TerrainPhysicsManager::IsValidTerrainLocation(const FVector& Location)
+UPhysicalMaterial* UCore_TerrainPhysicsManager::GetPhysicsMaterialForBiome(EBiomeType BiomeType)
 {
-    UWorld* World = GetWorld();
-    if (!World)
+    if (BiomePhysicsMaterials.Contains(BiomeType))
     {
-        return false;
+        return BiomePhysicsMaterials[BiomeType];
     }
     
-    // Simple bounds check - in full implementation this would check against landscape bounds
-    return FMath::Abs(Location.X) < 100000.0f && FMath::Abs(Location.Y) < 100000.0f;
+    return nullptr;
+}
+
+TArray<FVector> UCore_TerrainPhysicsManager::GetNearbyWalkablePositions(const FVector& CenterLocation, float Radius, int32 NumSamples)
+{
+    TArray<FVector> WalkablePositions;
+    
+    for (int32 i = 0; i < NumSamples; i++)
+    {
+        float Angle = (2.0f * PI * i) / NumSamples;
+        FVector SampleLocation = CenterLocation + FVector(
+            FMath::Cos(Angle) * Radius,
+            FMath::Sin(Angle) * Radius,
+            0.0f
+        );
+        
+        if (IsLocationWalkable(SampleLocation))
+        {
+            WalkablePositions.Add(SampleLocation);
+        }
+    }
+    
+    return WalkablePositions;
+}
+
+bool UCore_TerrainPhysicsManager::IsLocationUnderwater(const FVector& Location)
+{
+    // Simplified water detection - assumes water level at Z=0
+    return Location.Z < 0.0f;
+}
+
+float UCore_TerrainPhysicsManager::GetWaterDepthAtLocation(const FVector& Location)
+{
+    if (IsLocationUnderwater(Location))
+    {
+        return FMath::Abs(Location.Z);
+    }
+    
+    return 0.0f;
+}
+
+void UCore_TerrainPhysicsManager::InitializeDefaultPhysicsMaterials()
+{
+    // Create default physics materials for each biome type
+    FCore_PhysicsMaterialSettings GrasslandSettings;
+    GrasslandSettings.StaticFriction = 0.7f;
+    GrasslandSettings.DynamicFriction = 0.6f;
+    GrasslandSettings.Restitution = 0.3f;
+    CreatePhysicsMaterialForBiome(EBiomeType::Grassland, GrasslandSettings);
+    
+    FCore_PhysicsMaterialSettings DesertSettings;
+    DesertSettings.StaticFriction = 0.4f;
+    DesertSettings.DynamicFriction = 0.3f;
+    DesertSettings.Restitution = 0.1f;
+    CreatePhysicsMaterialForBiome(EBiomeType::Desert, DesertSettings);
+    
+    FCore_PhysicsMaterialSettings MountainSettings;
+    MountainSettings.StaticFriction = 0.9f;
+    MountainSettings.DynamicFriction = 0.8f;
+    MountainSettings.Restitution = 0.5f;
+    CreatePhysicsMaterialForBiome(EBiomeType::Mountain, MountainSettings);
+    
+    FCore_PhysicsMaterialSettings OceanSettings;
+    OceanSettings.StaticFriction = 0.1f;
+    OceanSettings.DynamicFriction = 0.05f;
+    OceanSettings.Restitution = 0.0f;
+    CreatePhysicsMaterialForBiome(EBiomeType::Ocean, OceanSettings);
+    
+    UE_LOG(LogTemp, Log, TEXT("Core_TerrainPhysicsManager: Initialized %d default physics materials"), BiomePhysicsMaterials.Num());
+}
+
+void UCore_TerrainPhysicsManager::CacheLandscapeReference()
+{
+    if (GetWorld())
+    {
+        TArray<AActor*> FoundActors;
+        UGameplayStatics::GetAllActorsOfClass(GetWorld(), ALandscape::StaticClass(), FoundActors);
+        
+        if (FoundActors.Num() > 0)
+        {
+            CachedLandscape = Cast<ALandscape>(FoundActors[0]);
+            UE_LOG(LogTemp, Log, TEXT("Core_TerrainPhysicsManager: Cached landscape reference"));
+        }
+    }
+}
+
+FVector UCore_TerrainPhysicsManager::PerformLineTrace(const FVector& Start, const FVector& End)
+{
+    if (!GetWorld())
+    {
+        return Start;
+    }
+    
+    FHitResult HitResult;
+    FCollisionQueryParams QueryParams;
+    QueryParams.bTraceComplex = true;
+    
+    if (GetWorld()->LineTraceSingleByChannel(HitResult, Start, End, ECC_WorldStatic, QueryParams))
+    {
+        return HitResult.Location;
+    }
+    
+    return End;
+}
+
+void UCore_TerrainPhysicsManager::DebugDrawTerrainData(const FVector& Location, const FCore_TerrainPhysicsData& Data)
+{
+    if (!GetWorld() || !bEnableTerrainPhysicsDebug)
+    {
+        return;
+    }
+    
+    // Draw slope angle visualization
+    FColor SlopeColor = Data.SlopeAngle > MaxWalkableSlope ? FColor::Red : FColor::Green;
+    DrawDebugSphere(GetWorld(), Location, 50.0f, 8, SlopeColor, false, PhysicsUpdateInterval);
+    
+    // Draw terrain type text
+    FString TerrainInfo = FString::Printf(TEXT("Slope: %.1f°\nBiome: %d\nWalkable: %s"), 
+        Data.SlopeAngle, 
+        (int32)Data.TerrainBiome,
+        Data.bIsWalkable ? TEXT("Yes") : TEXT("No"));
+    
+    DrawDebugString(GetWorld(), Location + FVector(0, 0, 100), TerrainInfo, nullptr, FColor::White, PhysicsUpdateInterval);
 }
