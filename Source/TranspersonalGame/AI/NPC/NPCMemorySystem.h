@@ -2,81 +2,86 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
-#include "Engine/Engine.h"
-#include "SharedTypes.h"
+#include "NPCBehaviorTypes.h"
 #include "NPCMemorySystem.generated.h"
 
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FNPC_MemoryEntry
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory")
-    FVector Location;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory")
-    float Timestamp;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory")
-    ENPC_MemoryType MemoryType;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory")
-    float Importance;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory")
-    AActor* RelatedActor;
-
-    FNPC_MemoryEntry()
-    {
-        Location = FVector::ZeroVector;
-        Timestamp = 0.0f;
-        MemoryType = ENPC_MemoryType::Neutral;
-        Importance = 1.0f;
-        RelatedActor = nullptr;
-    }
-};
-
 UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UNPC_MemorySystem : public UActorComponent
+class TRANSPERSONALGAME_API UNPCMemorySystem : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    UNPC_MemorySystem();
+    UNPCMemorySystem();
 
 protected:
     virtual void BeginPlay() override;
 
+public:
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+
+    // Memory management
+    UFUNCTION(BlueprintCallable, Category = "NPC Memory")
+    void AddMemoryEntry(AActor* Target, const FVector& Location, float ThreatLevel, bool bIsHostile);
+
+    UFUNCTION(BlueprintCallable, Category = "NPC Memory")
+    void UpdateMemoryEntry(AActor* Target, const FVector& NewLocation);
+
+    UFUNCTION(BlueprintCallable, Category = "NPC Memory")
+    void RemoveMemoryEntry(AActor* Target);
+
+    UFUNCTION(BlueprintCallable, Category = "NPC Memory")
+    FNPC_MemoryEntry GetMemoryEntry(AActor* Target);
+
+    UFUNCTION(BlueprintCallable, Category = "NPC Memory")
+    bool HasMemoryOf(AActor* Target);
+
+    UFUNCTION(BlueprintCallable, Category = "NPC Memory")
+    TArray<FNPC_MemoryEntry> GetAllMemories();
+
+    UFUNCTION(BlueprintCallable, Category = "NPC Memory")
+    TArray<FNPC_MemoryEntry> GetHostileMemories();
+
+    UFUNCTION(BlueprintCallable, Category = "NPC Memory")
+    void ClearOldMemories(float MaxAge = 300.0f);
+
+    // Threat assessment
+    UFUNCTION(BlueprintCallable, Category = "NPC Memory")
+    float CalculateThreatLevel(AActor* Target);
+
+    UFUNCTION(BlueprintCallable, Category = "NPC Memory")
+    AActor* GetHighestThreatTarget();
+
+    UFUNCTION(BlueprintCallable, Category = "NPC Memory")
+    FVector GetLastKnownLocation(AActor* Target);
+
+    // Memory sharing between NPCs
+    UFUNCTION(BlueprintCallable, Category = "NPC Memory")
+    void ShareMemoryWith(UNPCMemorySystem* OtherNPC, float ShareRadius = 1000.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "NPC Memory")
+    void ReceiveSharedMemory(const FNPC_MemoryEntry& SharedMemory);
+
+protected:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory Settings")
-    int32 MaxMemoryEntries;
+    float MemoryDecayRate = 1.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory Settings")
-    float MemoryDecayRate;
+    float MaxMemoryAge = 600.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory Settings")
-    float ForgetThreshold;
+    int32 MaxMemoryEntries = 20;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory Settings")
+    float MemoryUpdateInterval = 1.0f;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Memory Data")
     TArray<FNPC_MemoryEntry> MemoryEntries;
 
-public:
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Memory Data")
+    float LastMemoryUpdate = 0.0f;
 
-    UFUNCTION(BlueprintCallable, Category = "Memory")
-    void AddMemory(FVector Location, ENPC_MemoryType Type, float Importance, AActor* Actor = nullptr);
-
-    UFUNCTION(BlueprintCallable, Category = "Memory")
-    TArray<FNPC_MemoryEntry> GetMemoriesOfType(ENPC_MemoryType Type);
-
-    UFUNCTION(BlueprintCallable, Category = "Memory")
-    FNPC_MemoryEntry GetMostImportantMemory();
-
-    UFUNCTION(BlueprintCallable, Category = "Memory")
-    bool HasMemoryOfActor(AActor* Actor);
-
-    UFUNCTION(BlueprintCallable, Category = "Memory")
-    void ForgetOldMemories();
-
-    UFUNCTION(BlueprintCallable, Category = "Memory")
-    void ClearAllMemories();
+private:
+    void UpdateMemoryDecay(float DeltaTime);
+    void CleanupOldMemories();
+    int32 FindMemoryIndex(AActor* Target);
 };
