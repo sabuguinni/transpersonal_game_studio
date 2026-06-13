@@ -1,20 +1,31 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/World.h"
+#include "Engine/Engine.h"
 #include "Components/ActorComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
 #include "Materials/MaterialInterface.h"
 #include "GameFramework/Actor.h"
-#include "Subsystems/WorldSubsystem.h"
-#include "SharedTypes.h"
 #include "Core_DestructionSystem.generated.h"
 
+UENUM(BlueprintType)
+enum class ECore_DestructionType : uint8
+{
+    None            UMETA(DisplayName = "None"),
+    Fracture        UMETA(DisplayName = "Fracture"),
+    Shatter         UMETA(DisplayName = "Shatter"),
+    Crumble         UMETA(DisplayName = "Crumble"),
+    Explode         UMETA(DisplayName = "Explode")
+};
+
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FCore_DestructionData
+struct FCore_DestructionData
 {
     GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Destruction")
+    ECore_DestructionType DestructionType = ECore_DestructionType::None;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Destruction")
     float Health = 100.0f;
@@ -26,19 +37,29 @@ struct TRANSPERSONALGAME_API FCore_DestructionData
     float ExplosionForce = 500.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Destruction")
-    bool bCanBeDestroyed = true;
+    bool bCanRegenerate = false;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Destruction")
-    TArray<UStaticMesh*> FragmentMeshes;
+    float RegenerationTime = 30.0f;
+
+    FCore_DestructionData()
+    {
+        DestructionType = ECore_DestructionType::None;
+        Health = 100.0f;
+        FragmentCount = 8.0f;
+        ExplosionForce = 500.0f;
+        bCanRegenerate = false;
+        RegenerationTime = 30.0f;
+    }
 };
 
-UCLASS(BlueprintType, Blueprintable, ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UCore_DestructionComponent : public UActorComponent
+UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent), BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API UCore_DestructionSystem : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    UCore_DestructionComponent();
+    UCore_DestructionSystem();
 
 protected:
     virtual void BeginPlay() override;
@@ -46,62 +67,47 @@ protected:
 public:
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Destruction")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Destruction Settings")
     FCore_DestructionData DestructionData;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Destruction")
-    UStaticMeshComponent* MeshComponent;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Destruction Settings")
+    TArray<UStaticMesh*> FragmentMeshes;
 
-    UFUNCTION(BlueprintCallable, Category = "Destruction")
-    void ApplyDamage(float DamageAmount);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Destruction Settings")
+    UMaterialInterface* FragmentMaterial;
 
-    UFUNCTION(BlueprintCallable, Category = "Destruction")
-    void TriggerDestruction();
-
-    UFUNCTION(BlueprintCallable, Category = "Destruction")
-    bool IsDestroyed() const;
-
-private:
+    UPROPERTY(BlueprintReadOnly, Category = "Destruction State")
     bool bIsDestroyed = false;
-    float CurrentHealth = 100.0f;
 
-    void SpawnFragments();
-    void CreateFragment(const FVector& Position, const FVector& Velocity);
-};
+    UPROPERTY(BlueprintReadOnly, Category = "Destruction State")
+    float CurrentHealth;
 
-UCLASS()
-class TRANSPERSONALGAME_API UCore_DestructionSystemManager : public UWorldSubsystem
-{
-    GENERATED_BODY()
+    UPROPERTY(BlueprintReadOnly, Category = "Destruction State")
+    float RegenerationTimer = 0.0f;
 
-public:
-    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
-    virtual void Deinitialize() override;
+    UFUNCTION(BlueprintCallable, Category = "Destruction")
+    void ApplyDamage(float DamageAmount, const FVector& ImpactPoint, const FVector& ImpactNormal);
 
-    UFUNCTION(BlueprintCallable, Category = "Destruction System")
-    void RegisterDestructibleActor(AActor* Actor, const FCore_DestructionData& DestructionData);
+    UFUNCTION(BlueprintCallable, Category = "Destruction")
+    void TriggerDestruction(const FVector& ImpactPoint, const FVector& ImpactDirection);
 
-    UFUNCTION(BlueprintCallable, Category = "Destruction System")
-    void UnregisterDestructibleActor(AActor* Actor);
+    UFUNCTION(BlueprintCallable, Category = "Destruction")
+    void StartRegeneration();
 
-    UFUNCTION(BlueprintCallable, Category = "Destruction System")
-    void ProcessAreaDestruction(const FVector& Center, float Radius, float Damage);
+    UFUNCTION(BlueprintCallable, Category = "Destruction")
+    void ResetDestruction();
 
-    UFUNCTION(BlueprintCallable, Category = "Destruction System")
-    TArray<AActor*> GetDestructibleActorsInRadius(const FVector& Center, float Radius);
+    UFUNCTION(BlueprintImplementableEvent, Category = "Destruction Events")
+    void OnDestructionTriggered(const FVector& ImpactPoint);
 
-protected:
-    UPROPERTY()
-    TMap<AActor*, FCore_DestructionData> RegisteredActors;
-
-    UPROPERTY()
-    TArray<AActor*> FragmentActors;
-
-    void CleanupFragments();
-    void UpdateDestructionStates();
+    UFUNCTION(BlueprintImplementableEvent, Category = "Destruction Events")
+    void OnRegenerationComplete();
 
 private:
-    FTimerHandle CleanupTimer;
-    static constexpr float CleanupInterval = 30.0f;
-    static constexpr int32 MaxFragments = 500;
+    void CreateFragments(const FVector& ImpactPoint, const FVector& ImpactDirection);
+    void ProcessRegeneration(float DeltaTime);
+
+    TArray<AActor*> SpawnedFragments;
+    UStaticMeshComponent* OriginalMeshComponent;
+    bool bRegenerationInProgress = false;
 };
