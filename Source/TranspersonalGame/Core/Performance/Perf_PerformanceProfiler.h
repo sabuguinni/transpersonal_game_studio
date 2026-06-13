@@ -1,119 +1,128 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
+#include "Components/ActorComponent.h"
 #include "Engine/Engine.h"
-#include "Engine/World.h"
-#include "Components/StaticMeshComponent.h"
-#include "Components/SceneComponent.h"
-#include "HAL/PlatformFilemanager.h"
-#include "Misc/DateTime.h"
+#include "HAL/IConsoleManager.h"
+#include "Stats/Stats.h"
+#include "SharedTypes.h"
 #include "Perf_PerformanceProfiler.generated.h"
 
+DECLARE_STATS_GROUP(TEXT("TranspersonalGame"), STATGROUP_TranspersonalGame, STATCAT_Advanced);
+
+DECLARE_CYCLE_STAT(TEXT("Survival Physics Update"), STAT_SurvivalPhysicsUpdate, STATGROUP_TranspersonalGame);
+DECLARE_CYCLE_STAT(TEXT("Dinosaur AI Tick"), STAT_DinosaurAITick, STATGROUP_TranspersonalGame);
+DECLARE_CYCLE_STAT(TEXT("World Generation"), STAT_WorldGeneration, STATGROUP_TranspersonalGame);
+DECLARE_CYCLE_STAT(TEXT("Foliage Rendering"), STAT_FoliageRendering, STATGROUP_TranspersonalGame);
+DECLARE_CYCLE_STAT(TEXT("Crowd Simulation"), STAT_CrowdSimulation, STATGROUP_TranspersonalGame);
+
+DECLARE_DWORD_COUNTER_STAT(TEXT("Active Dinosaurs"), STAT_ActiveDinosaurs, STATGROUP_TranspersonalGame);
+DECLARE_DWORD_COUNTER_STAT(TEXT("Visible Actors"), STAT_VisibleActors, STATGROUP_TranspersonalGame);
+DECLARE_DWORD_COUNTER_STAT(TEXT("Physics Bodies"), STAT_PhysicsBodies, STATGROUP_TranspersonalGame);
+
+DECLARE_FLOAT_COUNTER_STAT(TEXT("Frame Time (ms)"), STAT_FrameTime, STATGROUP_TranspersonalGame);
+DECLARE_FLOAT_COUNTER_STAT(TEXT("GPU Time (ms)"), STAT_GPUTime, STATGROUP_TranspersonalGame);
+DECLARE_FLOAT_COUNTER_STAT(TEXT("Memory Usage (MB)"), STAT_MemoryUsage, STATGROUP_TranspersonalGame);
+
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FPerf_PerformanceMetrics
+struct TRANSPERSONALGAME_API FPerf_FrameMetrics
 {
     GENERATED_BODY()
 
     UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float CurrentFPS = 0.0f;
+    float FrameTime;
 
     UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float AverageFPS = 0.0f;
+    float GPUTime;
 
     UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float MinFPS = 0.0f;
+    float CPUTime;
 
     UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float MaxFPS = 0.0f;
+    int32 DrawCalls;
 
     UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float FrameTime = 0.0f;
+    int32 Triangles;
 
     UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    int32 DrawCalls = 0;
+    float MemoryUsage;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    int32 TriangleCount = 0;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float GPUTime = 0.0f;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float CPUTime = 0.0f;
-
-    FPerf_PerformanceMetrics()
-    {
-        CurrentFPS = 60.0f;
-        AverageFPS = 60.0f;
-        MinFPS = 60.0f;
-        MaxFPS = 60.0f;
-        FrameTime = 16.67f;
-        DrawCalls = 0;
-        TriangleCount = 0;
-        GPUTime = 0.0f;
-        CPUTime = 0.0f;
-    }
+    FPerf_FrameMetrics()
+        : FrameTime(0.0f)
+        , GPUTime(0.0f)
+        , CPUTime(0.0f)
+        , DrawCalls(0)
+        , Triangles(0)
+        , MemoryUsage(0.0f)
+    {}
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FPerf_OptimizationSettings
+struct TRANSPERSONALGAME_API FPerf_SystemMetrics
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadWrite, Category = "Optimization")
-    float TargetFPS = 60.0f;
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float SurvivalPhysicsTime;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Optimization")
-    float MinAcceptableFPS = 30.0f;
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float DinosaurAITime;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Optimization")
-    bool bAutoOptimize = true;
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float WorldGenTime;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Optimization")
-    bool bEnableLODOptimization = true;
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float FoliageRenderTime;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Optimization")
-    bool bEnableTextureStreaming = true;
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float CrowdSimTime;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Optimization")
-    float ViewDistanceScale = 1.0f;
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    int32 ActiveDinosaurs;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Optimization")
-    int32 ShadowQuality = 3;
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    int32 VisibleActors;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Optimization")
-    int32 PostProcessQuality = 3;
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    int32 PhysicsBodies;
 
-    FPerf_OptimizationSettings()
-    {
-        TargetFPS = 60.0f;
-        MinAcceptableFPS = 30.0f;
-        bAutoOptimize = true;
-        bEnableLODOptimization = true;
-        bEnableTextureStreaming = true;
-        ViewDistanceScale = 1.0f;
-        ShadowQuality = 3;
-        PostProcessQuality = 3;
-    }
+    FPerf_SystemMetrics()
+        : SurvivalPhysicsTime(0.0f)
+        , DinosaurAITime(0.0f)
+        , WorldGenTime(0.0f)
+        , FoliageRenderTime(0.0f)
+        , CrowdSimTime(0.0f)
+        , ActiveDinosaurs(0)
+        , VisibleActors(0)
+        , PhysicsBodies(0)
+    {}
 };
 
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API APerf_PerformanceProfiler : public AActor
+UENUM(BlueprintType)
+enum class EPerf_ProfilerMode : uint8
+{
+    Disabled        UMETA(DisplayName = "Disabled"),
+    Basic           UMETA(DisplayName = "Basic Metrics"),
+    Detailed        UMETA(DisplayName = "Detailed Profiling"),
+    Development     UMETA(DisplayName = "Development Mode")
+};
+
+UCLASS(ClassGroup=(Performance), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UPerf_PerformanceProfiler : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    APerf_PerformanceProfiler();
+    UPerf_PerformanceProfiler();
 
 protected:
     virtual void BeginPlay() override;
     virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 public:
-    virtual void Tick(float DeltaTime) override;
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    // Core profiling functionality
+    // Profiler Control
     UFUNCTION(BlueprintCallable, Category = "Performance")
     void StartProfiling();
 
@@ -124,78 +133,99 @@ public:
     void ResetMetrics();
 
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    FPerf_PerformanceMetrics GetCurrentMetrics() const;
+    void SetProfilerMode(EPerf_ProfilerMode NewMode);
+
+    // Metrics Access
+    UFUNCTION(BlueprintPure, Category = "Performance")
+    FPerf_FrameMetrics GetCurrentFrameMetrics() const { return CurrentFrameMetrics; }
+
+    UFUNCTION(BlueprintPure, Category = "Performance")
+    FPerf_SystemMetrics GetCurrentSystemMetrics() const { return CurrentSystemMetrics; }
+
+    UFUNCTION(BlueprintPure, Category = "Performance")
+    float GetAverageFrameRate() const;
+
+    UFUNCTION(BlueprintPure, Category = "Performance")
+    float GetMinFrameRate() const { return MinFrameRate; }
+
+    UFUNCTION(BlueprintPure, Category = "Performance")
+    float GetMaxFrameRate() const { return MaxFrameRate; }
+
+    // Performance Warnings
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    bool IsPerformanceCritical() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    TArray<FString> GetPerformanceWarnings() const;
+
+    // Debug Display
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void EnableOnScreenDisplay(bool bEnable);
 
     UFUNCTION(BlueprintCallable, Category = "Performance")
     void LogPerformanceReport();
 
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void SavePerformanceLog();
-
-    // Optimization functions
-    UFUNCTION(BlueprintCallable, Category = "Optimization")
-    void ApplyOptimizationSettings();
-
-    UFUNCTION(BlueprintCallable, Category = "Optimization")
-    void AutoOptimizeForTarget();
-
-    UFUNCTION(BlueprintCallable, Category = "Optimization")
-    bool IsPerformanceAcceptable() const;
-
 protected:
-    // Components
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    USceneComponent* RootSceneComponent;
+    // Core profiling data
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Performance")
+    EPerf_ProfilerMode ProfilerMode;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    UStaticMeshComponent* ProfilerMesh;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Performance")
+    bool bIsProfilingActive;
 
-    // Performance data
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    FPerf_PerformanceMetrics CurrentMetrics;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Performance")
+    FPerf_FrameMetrics CurrentFrameMetrics;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Optimization")
-    FPerf_OptimizationSettings OptimizationSettings;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Performance")
+    FPerf_SystemMetrics CurrentSystemMetrics;
 
-    // Profiling state
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    bool bIsProfiling = false;
+    // Frame rate tracking
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Performance")
+    float MinFrameRate;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float ProfilingStartTime = 0.0f;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Performance")
+    float MaxFrameRate;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float TotalProfilingTime = 0.0f;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Performance")
+    float FrameRateSum;
 
-    // FPS tracking
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    TArray<float> FPSSamples;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Performance")
+    int32 FrameCount;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    int32 MaxSamples = 300; // 5 seconds at 60fps
+    // Performance thresholds
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance Thresholds")
+    float TargetFrameRate;
 
-    // Performance history
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    TArray<FPerf_PerformanceMetrics> MetricsHistory;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance Thresholds")
+    float CriticalFrameRate;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    int32 MaxHistoryEntries = 1000;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance Thresholds")
+    float MaxGPUTime;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance Thresholds")
+    float MaxMemoryUsage;
+
+    // Display settings
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Display")
+    bool bShowOnScreenDisplay;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Display")
+    float UpdateInterval;
 
 private:
-    // Internal profiling functions
-    void UpdatePerformanceMetrics(float DeltaTime);
-    void CalculateAverages();
+    // Internal tracking
+    float LastUpdateTime;
+    TArray<FString> PerformanceWarnings;
+    
+    // Console variables
+    static TAutoConsoleVariable<int32> CVarProfilerEnabled;
+    static TAutoConsoleVariable<int32> CVarShowStats;
+    static TAutoConsoleVariable<float> CVarTargetFrameRate;
+
+    // Internal methods
+    void UpdateFrameMetrics();
+    void UpdateSystemMetrics();
     void CheckPerformanceThresholds();
-    void ApplyAutoOptimizations();
-    
-    // Utility functions
-    float GetCurrentFrameTime() const;
-    int32 GetCurrentDrawCalls() const;
-    int32 GetCurrentTriangleCount() const;
-    float GetGPUTime() const;
-    float GetCPUTime() const;
-    
-    // Logging
-    void LogMetrics(const FPerf_PerformanceMetrics& Metrics);
-    FString FormatMetricsString(const FPerf_PerformanceMetrics& Metrics) const;
+    void DisplayOnScreenStats();
+    void UpdateConsoleVariables();
 };
