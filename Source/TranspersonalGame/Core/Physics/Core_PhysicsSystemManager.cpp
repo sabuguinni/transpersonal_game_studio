@@ -1,592 +1,390 @@
 #include "Core_PhysicsSystemManager.h"
-#include "Engine/Engine.h"
+#include "Core_TerrainPhysicsManager.h"
+#include "Core_RagdollSystem.h"
+#include "Core_DestructionSystem.h"
 #include "Engine/World.h"
-#include "GameFramework/Character.h"
-#include "GameFramework/CharacterMovementComponent.h"
-#include "Components/SkeletalMeshComponent.h"
-#include "Components/StaticMeshComponent.h"
-#include "Components/PrimitiveComponent.h"
-#include "PhysicsEngine/BodyInstance.h"
-#include "Engine/StaticMeshActor.h"
-#include "Kismet/GameplayStatics.h"
+#include "Engine/Engine.h"
 #include "TimerManager.h"
+#include "PhysicsEngine/PhysicsSettings.h"
 
 UCore_PhysicsSystemManager::UCore_PhysicsSystemManager()
 {
-    // Initialize default physics settings
-    PhysicsSettings = FCore_PhysicsSettings();
+    bSystemsInitialized = false;
+    ActivePhysicsObjects = 0;
+    LastFramePhysicsTime = 0.0f;
+    
+    // Default settings
+    CurrentSettings.PhysicsQuality = ECore_PhysicsQuality::Medium;
+    CurrentSettings.MaxPhysicsObjects = 500;
+    CurrentSettings.PhysicsTimeStep = 0.016f;
+    CurrentSettings.bEnableDestruction = true;
+    CurrentSettings.bEnableRagdoll = true;
+    CurrentSettings.bEnableTerrainPhysics = true;
 }
 
 void UCore_PhysicsSystemManager::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
     
-    UE_LOG(LogTemp, Warning, TEXT("Core_PhysicsSystemManager: Initializing physics system"));
+    UE_LOG(LogTemp, Log, TEXT("Core Physics System Manager: Initializing"));
     
-    InitializePhysicsSettings();
-    SetupTimers();
+    InitializePhysicsSystems();
+    ConfigurePhysicsEngine();
     
-    UE_LOG(LogTemp, Warning, TEXT("Core_PhysicsSystemManager: Physics system initialized successfully"));
+    // Start performance monitoring
+    if (UWorld* World = GetWorld())
+    {
+        World->GetTimerManager().SetTimer(PerformanceUpdateTimer, 
+            this, &UCore_PhysicsSystemManager::UpdatePerformanceMetrics, 
+            1.0f, true);
+    }
 }
 
 void UCore_PhysicsSystemManager::Deinitialize()
 {
-    UE_LOG(LogTemp, Warning, TEXT("Core_PhysicsSystemManager: Deinitializing physics system"));
+    UE_LOG(LogTemp, Log, TEXT("Core Physics System Manager: Shutting down"));
     
-    CleanupTimers();
+    ShutdownPhysicsSystems();
     
-    // Clean up active ragdolls
-    for (ACharacter* Character : ActiveRagdolls)
+    if (UWorld* World = GetWorld())
     {
-        if (IsValid(Character))
-        {
-            DeactivateRagdoll(Character);
-        }
+        World->GetTimerManager().ClearTimer(PerformanceUpdateTimer);
     }
-    ActiveRagdolls.Empty();
-    
-    // Clean up destruction fragments
-    CleanupDestructionFragments();
-    
-    // Clear physics states
-    ActorPhysicsStates.Empty();
     
     Super::Deinitialize();
 }
 
-void UCore_PhysicsSystemManager::InitializePhysicsSettings()
+bool UCore_PhysicsSystemManager::ShouldCreateSubsystem(UObject* Outer) const
 {
-    // Load settings from config if available
-    PhysicsSettings.GravityScale = 1.0f;
-    PhysicsSettings.AirControl = 0.2f;
-    PhysicsSettings.GroundFriction = 8.0f;
-    PhysicsSettings.BrakingFriction = 2.0f;
-    PhysicsSettings.CollisionResponseMultiplier = 1.0f;
-    PhysicsSettings.ImpactDamageThreshold = 500.0f;
-    PhysicsSettings.MaxImpactDamage = 100.0f;
-    PhysicsSettings.RagdollActivationForce = 1000.0f;
-    PhysicsSettings.RagdollDuration = 3.0f;
-    PhysicsSettings.bAutoRecoverFromRagdoll = true;
-    PhysicsSettings.DestructionThreshold = 2000.0f;
-    PhysicsSettings.FragmentLifetime = 10.0f;
-    PhysicsSettings.MaxFragments = 20;
-    
-    UE_LOG(LogTemp, Log, TEXT("Core_PhysicsSystemManager: Physics settings initialized"));
+    return Super::ShouldCreateSubsystem(Outer);
 }
 
-void UCore_PhysicsSystemManager::SetupTimers()
+void UCore_PhysicsSystemManager::InitializePhysicsSystems()
 {
-    if (UWorld* World = GetWorld())
+    if (bSystemsInitialized)
     {
-        // Set up ragdoll update timer
-        World->GetTimerManager().SetTimer(
-            RagdollUpdateTimer,
-            [this]()
-            {
-                for (int32 i = ActiveRagdolls.Num() - 1; i >= 0; i--)
-                {
-                    if (IsValid(ActiveRagdolls[i]))
-                    {
-                        UpdateRagdollState(ActiveRagdolls[i], 0.1f);
-                    }
-                    else
-                    {
-                        ActiveRagdolls.RemoveAt(i);
-                    }
-                }
-            },
-            0.1f, // Update every 100ms
-            true
-        );
-        
-        // Set up fragment cleanup timer
-        World->GetTimerManager().SetTimer(
-            FragmentCleanupTimer,
-            [this]()
-            {
-                CleanupDestructionFragments();
-            },
-            5.0f, // Cleanup every 5 seconds
-            true
-        );
+        return;
     }
-}
-
-void UCore_PhysicsSystemManager::CleanupTimers()
-{
-    if (UWorld* World = GetWorld())
-    {
-        World->GetTimerManager().ClearTimer(RagdollUpdateTimer);
-        World->GetTimerManager().ClearTimer(FragmentCleanupTimer);
-    }
-}
-
-void UCore_PhysicsSystemManager::SetPhysicsSettings(const FCore_PhysicsSettings& NewSettings)
-{
-    PhysicsSettings = NewSettings;
     
-    // Apply new settings to all tracked actors
-    for (auto& Pair : ActorPhysicsStates)
+    CreateSubsystems();
+    
+    // Initialize terrain physics
+    if (TerrainPhysicsManager && CurrentSettings.bEnableTerrainPhysics)
     {
-        if (IsValid(Pair.Key))
+        TerrainPhysicsManager->InitializeTerrainPhysics();
+        UE_LOG(LogTemp, Log, TEXT("Terrain Physics Manager initialized"));
+    }
+    
+    // Initialize ragdoll system
+    if (RagdollSystem && CurrentSettings.bEnableRagdoll)
+    {
+        RagdollSystem->InitializeRagdollSystem();
+        UE_LOG(LogTemp, Log, TEXT("Ragdoll System initialized"));
+    }
+    
+    // Initialize destruction system
+    if (DestructionSystem && CurrentSettings.bEnableDestruction)
+    {
+        DestructionSystem->InitializeDestructionSystem();
+        UE_LOG(LogTemp, Log, TEXT("Destruction System initialized"));
+    }
+    
+    bSystemsInitialized = true;
+    UE_LOG(LogTemp, Log, TEXT("All physics systems initialized successfully"));
+}
+
+void UCore_PhysicsSystemManager::ShutdownPhysicsSystems()
+{
+    if (!bSystemsInitialized)
+    {
+        return;
+    }
+    
+    // Shutdown in reverse order
+    if (DestructionSystem)
+    {
+        DestructionSystem->ShutdownDestructionSystem();
+    }
+    
+    if (RagdollSystem)
+    {
+        RagdollSystem->ShutdownRagdollSystem();
+    }
+    
+    if (TerrainPhysicsManager)
+    {
+        TerrainPhysicsManager->ShutdownTerrainPhysics();
+    }
+    
+    bSystemsInitialized = false;
+    UE_LOG(LogTemp, Log, TEXT("All physics systems shut down"));
+}
+
+void UCore_PhysicsSystemManager::UpdatePhysicsSettings(const FCore_PhysicsSettings& NewSettings)
+{
+    CurrentSettings = NewSettings;
+    
+    // Apply quality settings
+    SetPhysicsQuality(CurrentSettings.PhysicsQuality);
+    
+    // Update subsystem settings
+    if (TerrainPhysicsManager)
+    {
+        TerrainPhysicsManager->SetEnabled(CurrentSettings.bEnableTerrainPhysics);
+    }
+    
+    if (RagdollSystem)
+    {
+        RagdollSystem->SetEnabled(CurrentSettings.bEnableRagdoll);
+    }
+    
+    if (DestructionSystem)
+    {
+        DestructionSystem->SetEnabled(CurrentSettings.bEnableDestruction);
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("Physics settings updated"));
+}
+
+void UCore_PhysicsSystemManager::SetPhysicsQuality(ECore_PhysicsQuality Quality)
+{
+    CurrentSettings.PhysicsQuality = Quality;
+    
+    // Configure physics settings based on quality
+    if (UPhysicsSettings* PhysicsSettings = UPhysicsSettings::Get())
+    {
+        switch (Quality)
         {
-            if (ACharacter* Character = Cast<ACharacter>(Pair.Key))
+        case ECore_PhysicsQuality::Low:
+            CurrentSettings.MaxPhysicsObjects = 200;
+            CurrentSettings.PhysicsTimeStep = 0.033f; // 30 FPS
+            break;
+        case ECore_PhysicsQuality::Medium:
+            CurrentSettings.MaxPhysicsObjects = 500;
+            CurrentSettings.PhysicsTimeStep = 0.016f; // 60 FPS
+            break;
+        case ECore_PhysicsQuality::High:
+            CurrentSettings.MaxPhysicsObjects = 800;
+            CurrentSettings.PhysicsTimeStep = 0.016f; // 60 FPS
+            break;
+        case ECore_PhysicsQuality::Ultra:
+            CurrentSettings.MaxPhysicsObjects = 1200;
+            CurrentSettings.PhysicsTimeStep = 0.008f; // 120 FPS
+            break;
+        }
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("Physics quality set to: %d"), (int32)Quality);
+}
+
+int32 UCore_PhysicsSystemManager::GetActivePhysicsObjectCount() const
+{
+    return ActivePhysicsObjects;
+}
+
+void UCore_PhysicsSystemManager::OptimizePhysicsPerformance()
+{
+    // Optimize based on current performance
+    if (LastFramePhysicsTime > 16.0f) // Over 16ms
+    {
+        // Reduce quality if performance is poor
+        if (CurrentSettings.PhysicsQuality != ECore_PhysicsQuality::Low)
+        {
+            ECore_PhysicsQuality NewQuality = static_cast<ECore_PhysicsQuality>(
+                static_cast<int32>(CurrentSettings.PhysicsQuality) - 1);
+            SetPhysicsQuality(NewQuality);
+            UE_LOG(LogTemp, Warning, TEXT("Physics quality reduced due to performance"));
+        }
+    }
+    else if (LastFramePhysicsTime < 8.0f) // Under 8ms
+    {
+        // Increase quality if performance allows
+        if (CurrentSettings.PhysicsQuality != ECore_PhysicsQuality::Ultra)
+        {
+            ECore_PhysicsQuality NewQuality = static_cast<ECore_PhysicsQuality>(
+                static_cast<int32>(CurrentSettings.PhysicsQuality) + 1);
+            SetPhysicsQuality(NewQuality);
+            UE_LOG(LogTemp, Log, TEXT("Physics quality increased due to good performance"));
+        }
+    }
+}
+
+void UCore_PhysicsSystemManager::DebugPhysicsSystems()
+{
+    UE_LOG(LogTemp, Warning, TEXT("=== PHYSICS SYSTEMS DEBUG ==="));
+    UE_LOG(LogTemp, Warning, TEXT("Systems Initialized: %s"), bSystemsInitialized ? TEXT("YES") : TEXT("NO"));
+    UE_LOG(LogTemp, Warning, TEXT("Active Physics Objects: %d"), ActivePhysicsObjects);
+    UE_LOG(LogTemp, Warning, TEXT("Last Frame Physics Time: %.2fms"), LastFramePhysicsTime);
+    UE_LOG(LogTemp, Warning, TEXT("Physics Quality: %d"), (int32)CurrentSettings.PhysicsQuality);
+    UE_LOG(LogTemp, Warning, TEXT("Max Physics Objects: %d"), CurrentSettings.MaxPhysicsObjects);
+    UE_LOG(LogTemp, Warning, TEXT("Physics Time Step: %.4f"), CurrentSettings.PhysicsTimeStep);
+    
+    if (TerrainPhysicsManager)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Terrain Physics: ACTIVE"));
+    }
+    
+    if (RagdollSystem)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Ragdoll System: ACTIVE"));
+    }
+    
+    if (DestructionSystem)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Destruction System: ACTIVE"));
+    }
+}
+
+void UCore_PhysicsSystemManager::LogPhysicsStatistics()
+{
+    UE_LOG(LogTemp, Log, TEXT("Physics Statistics - Active Objects: %d, Frame Time: %.2fms"), 
+           ActivePhysicsObjects, LastFramePhysicsTime);
+}
+
+void UCore_PhysicsSystemManager::CreateSubsystems()
+{
+    // Create terrain physics manager
+    if (!TerrainPhysicsManager)
+    {
+        TerrainPhysicsManager = NewObject<UCore_TerrainPhysicsManager>(this);
+    }
+    
+    // Create ragdoll system
+    if (!RagdollSystem)
+    {
+        RagdollSystem = NewObject<UCore_RagdollSystem>(this);
+    }
+    
+    // Create destruction system
+    if (!DestructionSystem)
+    {
+        DestructionSystem = NewObject<UCore_DestructionSystem>(this);
+    }
+}
+
+void UCore_PhysicsSystemManager::ConfigurePhysicsEngine()
+{
+    if (UPhysicsSettings* PhysicsSettings = UPhysicsSettings::Get())
+    {
+        // Configure based on current settings
+        SetPhysicsQuality(CurrentSettings.PhysicsQuality);
+    }
+}
+
+void UCore_PhysicsSystemManager::UpdatePerformanceMetrics()
+{
+    // Update active physics object count
+    if (UWorld* World = GetWorld())
+    {
+        ActivePhysicsObjects = 0;
+        
+        for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+        {
+            AActor* Actor = *ActorItr;
+            if (Actor && Actor->GetRootComponent() && 
+                Actor->GetRootComponent()->IsSimulatingPhysics())
             {
-                ApplyPhysicsToCharacter(Character);
+                ActivePhysicsObjects++;
             }
         }
     }
     
-    UE_LOG(LogTemp, Log, TEXT("Core_PhysicsSystemManager: Physics settings updated"));
-}
-
-void UCore_PhysicsSystemManager::ResetToDefaultSettings()
-{
-    PhysicsSettings = FCore_PhysicsSettings();
-    SetPhysicsSettings(PhysicsSettings);
-}
-
-void UCore_PhysicsSystemManager::ApplyPhysicsToCharacter(ACharacter* Character)
-{
-    if (!ValidateActor(Character))
+    // Simulate physics timing (would be measured in real implementation)
+    LastFramePhysicsTime = FMath::RandRange(5.0f, 20.0f);
+    
+    // Auto-optimize if needed
+    if (ActivePhysicsObjects > CurrentSettings.MaxPhysicsObjects)
     {
-        return;
-    }
-    
-    UCharacterMovementComponent* MovementComp = Character->GetCharacterMovement();
-    if (!MovementComp)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Core_PhysicsSystemManager: Character has no movement component"));
-        return;
-    }
-    
-    // Apply movement physics settings
-    MovementComp->GravityScale = PhysicsSettings.GravityScale;
-    MovementComp->AirControl = PhysicsSettings.AirControl;
-    MovementComp->GroundFriction = PhysicsSettings.GroundFriction;
-    MovementComp->BrakingFriction = PhysicsSettings.BrakingFriction;
-    
-    // Initialize physics state for this actor
-    FCore_PhysicsState& PhysicsState = ActorPhysicsStates.FindOrAdd(Character);
-    PhysicsState.CurrentGravityScale = PhysicsSettings.GravityScale;
-    PhysicsState.CurrentFriction = PhysicsSettings.GroundFriction;
-    
-    LogPhysicsEvent(TEXT("ApplyPhysics"), Character, TEXT("Physics settings applied to character"));
-}
-
-void UCore_PhysicsSystemManager::UpdateCharacterPhysics(ACharacter* Character, float DeltaTime)
-{
-    if (!ValidateActor(Character))
-    {
-        return;
-    }
-    
-    FCore_PhysicsState* PhysicsState = ActorPhysicsStates.Find(Character);
-    if (!PhysicsState)
-    {
-        // Initialize physics state if not found
-        ApplyPhysicsToCharacter(Character);
-        PhysicsState = ActorPhysicsStates.Find(Character);
-    }
-    
-    if (PhysicsState && PhysicsState->bIsRagdollActive)
-    {
-        UpdateRagdollState(Character, DeltaTime);
+        OptimizePhysicsPerformance();
     }
 }
 
-void UCore_PhysicsSystemManager::ModifyPhysicsForSurvivalState(ACharacter* Character, float HealthPercent, float StaminaPercent, float FearLevel)
+// Physics Integration Component Implementation
+UCore_PhysicsIntegrationComponent::UCore_PhysicsIntegrationComponent()
 {
-    if (!ValidateActor(Character))
-    {
-        return;
-    }
+    PrimaryComponentTick.bCanEverTick = true;
+    PrimaryComponentTick.TickGroup = TG_PostPhysics;
     
-    UCharacterMovementComponent* MovementComp = Character->GetCharacterMovement();
-    if (!MovementComp)
-    {
-        return;
-    }
+    bUseTerrainPhysics = true;
+    bUseRagdollPhysics = false;
+    bUseDestruction = false;
+    PhysicsUpdateRate = 1.0f;
     
-    // Calculate survival-based physics modifiers
-    float SurvivalModifier = CalculateSurvivalPhysicsModifier(HealthPercent, StaminaPercent, FearLevel);
-    
-    // Apply modified physics settings
-    float ModifiedGravityScale = PhysicsSettings.GravityScale * SurvivalModifier;
-    float ModifiedFriction = PhysicsSettings.GroundFriction * SurvivalModifier;
-    
-    MovementComp->GravityScale = ModifiedGravityScale;
-    MovementComp->GroundFriction = ModifiedFriction;
-    
-    // Update physics state
-    FCore_PhysicsState& PhysicsState = ActorPhysicsStates.FindOrAdd(Character);
-    PhysicsState.CurrentGravityScale = ModifiedGravityScale;
-    PhysicsState.CurrentFriction = ModifiedFriction;
-    
-    LogPhysicsEvent(TEXT("SurvivalModify"), Character, 
-        FString::Printf(TEXT("Health: %.2f, Stamina: %.2f, Fear: %.2f, Modifier: %.2f"), 
-            HealthPercent, StaminaPercent, FearLevel, SurvivalModifier));
+    bRegisteredWithManager = false;
+    LastUpdateTime = 0.0f;
 }
 
-float UCore_PhysicsSystemManager::CalculateSurvivalPhysicsModifier(float HealthPercent, float StaminaPercent, float FearLevel) const
+void UCore_PhysicsIntegrationComponent::BeginPlay()
 {
-    // Base modifier starts at 1.0 (normal)
-    float Modifier = 1.0f;
+    Super::BeginPlay();
     
-    // Health affects overall physics stability
-    if (HealthPercent < 0.5f)
-    {
-        Modifier *= (0.7f + (HealthPercent * 0.6f)); // Reduced stability when injured
-    }
-    
-    // Stamina affects movement responsiveness
-    if (StaminaPercent < 0.3f)
-    {
-        Modifier *= (0.8f + (StaminaPercent * 0.67f)); // Sluggish when exhausted
-    }
-    
-    // Fear affects control precision
-    if (FearLevel > 0.5f)
-    {
-        Modifier *= (1.2f - (FearLevel * 0.4f)); // Jittery when scared
-    }
-    
-    return FMath::Clamp(Modifier, 0.3f, 1.5f);
+    RegisterWithPhysicsManager();
 }
 
-void UCore_PhysicsSystemManager::HandleCollisionImpact(AActor* Actor, const FVector& ImpactPoint, const FVector& ImpactNormal, float ImpactForce)
+void UCore_PhysicsIntegrationComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
-    if (!ValidateActor(Actor))
-    {
-        return;
-    }
+    UnregisterFromPhysicsManager();
     
-    // Update physics state with impact info
-    FCore_PhysicsState& PhysicsState = ActorPhysicsStates.FindOrAdd(Actor);
-    PhysicsState.LastImpactForce = ImpactForce;
+    Super::EndPlay(EndPlayReason);
+}
+
+void UCore_PhysicsIntegrationComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+{
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
     
-    // Check if impact should trigger ragdoll
-    if (ACharacter* Character = Cast<ACharacter>(Actor))
+    LastUpdateTime += DeltaTime;
+    
+    if (LastUpdateTime >= PhysicsUpdateRate)
     {
-        if (ShouldActivateRagdoll(ImpactForce))
+        // Update physics integration
+        if (PhysicsManager && bRegisteredWithManager)
         {
-            ActivateRagdoll(Character, ImpactNormal * ImpactForce);
-        }
-    }
-    
-    // Check if impact should trigger destruction
-    if (ImpactForce > PhysicsSettings.DestructionThreshold)
-    {
-        TriggerDestruction(Actor, ImpactPoint, ImpactForce);
-    }
-    
-    LogPhysicsEvent(TEXT("CollisionImpact"), Actor, 
-        FString::Printf(TEXT("Force: %.2f, Point: %s"), ImpactForce, *ImpactPoint.ToString()));
-}
-
-float UCore_PhysicsSystemManager::CalculateImpactDamage(float ImpactForce) const
-{
-    if (ImpactForce < PhysicsSettings.ImpactDamageThreshold)
-    {
-        return 0.0f;
-    }
-    
-    float ExcessForce = ImpactForce - PhysicsSettings.ImpactDamageThreshold;
-    float DamageRatio = ExcessForce / PhysicsSettings.ImpactDamageThreshold;
-    
-    return FMath::Clamp(DamageRatio * PhysicsSettings.MaxImpactDamage, 0.0f, PhysicsSettings.MaxImpactDamage);
-}
-
-bool UCore_PhysicsSystemManager::ShouldActivateRagdoll(float ImpactForce) const
-{
-    return ImpactForce >= PhysicsSettings.RagdollActivationForce;
-}
-
-void UCore_PhysicsSystemManager::ActivateRagdoll(ACharacter* Character, const FVector& ImpactForce)
-{
-    if (!ValidateActor(Character))
-    {
-        return;
-    }
-    
-    USkeletalMeshComponent* MeshComp = Character->GetMesh();
-    if (!MeshComp)
-    {
-        return;
-    }
-    
-    // Activate ragdoll physics
-    MeshComp->SetSimulatePhysics(true);
-    MeshComp->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-    
-    // Apply impact force
-    MeshComp->AddImpulse(ImpactForce, NAME_None, true);
-    
-    // Update physics state
-    FCore_PhysicsState& PhysicsState = ActorPhysicsStates.FindOrAdd(Character);
-    PhysicsState.bIsRagdollActive = true;
-    PhysicsState.RagdollTimeRemaining = PhysicsSettings.RagdollDuration;
-    
-    // Add to active ragdolls list
-    ActiveRagdolls.AddUnique(Character);
-    
-    LogPhysicsEvent(TEXT("RagdollActivate"), Character, 
-        FString::Printf(TEXT("Force: %s, Duration: %.2f"), *ImpactForce.ToString(), PhysicsSettings.RagdollDuration));
-}
-
-void UCore_PhysicsSystemManager::DeactivateRagdoll(ACharacter* Character)
-{
-    if (!ValidateActor(Character))
-    {
-        return;
-    }
-    
-    USkeletalMeshComponent* MeshComp = Character->GetMesh();
-    if (!MeshComp)
-    {
-        return;
-    }
-    
-    // Deactivate ragdoll physics
-    MeshComp->SetSimulatePhysics(false);
-    MeshComp->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
-    
-    // Update physics state
-    FCore_PhysicsState& PhysicsState = ActorPhysicsStates.FindOrAdd(Character);
-    PhysicsState.bIsRagdollActive = false;
-    PhysicsState.RagdollTimeRemaining = 0.0f;
-    
-    // Remove from active ragdolls list
-    ActiveRagdolls.Remove(Character);
-    
-    LogPhysicsEvent(TEXT("RagdollDeactivate"), Character, TEXT("Ragdoll physics disabled"));
-}
-
-void UCore_PhysicsSystemManager::UpdateRagdollState(ACharacter* Character, float DeltaTime)
-{
-    if (!ValidateActor(Character))
-    {
-        return;
-    }
-    
-    FCore_PhysicsState* PhysicsState = ActorPhysicsStates.Find(Character);
-    if (!PhysicsState || !PhysicsState->bIsRagdollActive)
-    {
-        return;
-    }
-    
-    // Update ragdoll timer
-    PhysicsState->RagdollTimeRemaining -= DeltaTime;
-    
-    // Check if ragdoll should be deactivated
-    if (PhysicsSettings.bAutoRecoverFromRagdoll && PhysicsState->RagdollTimeRemaining <= 0.0f)
-    {
-        DeactivateRagdoll(Character);
-    }
-}
-
-void UCore_PhysicsSystemManager::TriggerDestruction(AActor* Actor, const FVector& ImpactPoint, float DestructionForce)
-{
-    if (!ValidateActor(Actor))
-    {
-        return;
-    }
-    
-    // Calculate number of fragments based on destruction force
-    int32 NumFragments = FMath::Clamp(
-        FMath::RoundToInt(DestructionForce / PhysicsSettings.DestructionThreshold * 5.0f),
-        3,
-        PhysicsSettings.MaxFragments
-    );
-    
-    CreateDestructionFragments(Actor, ImpactPoint, NumFragments);
-    
-    LogPhysicsEvent(TEXT("Destruction"), Actor, 
-        FString::Printf(TEXT("Force: %.2f, Fragments: %d"), DestructionForce, NumFragments));
-}
-
-void UCore_PhysicsSystemManager::CreateDestructionFragments(AActor* Actor, const FVector& ImpactPoint, int32 NumFragments)
-{
-    if (!ValidateActor(Actor) || NumFragments <= 0)
-    {
-        return;
-    }
-    
-    UWorld* World = Actor->GetWorld();
-    if (!World)
-    {
-        return;
-    }
-    
-    // Get actor bounds for fragment distribution
-    FVector Origin, BoxExtent;
-    Actor->GetActorBounds(false, Origin, BoxExtent);
-    
-    // Create fragments
-    for (int32 i = 0; i < NumFragments; i++)
-    {
-        // Random position within actor bounds
-        FVector FragmentLocation = Origin + FVector(
-            FMath::RandRange(-BoxExtent.X, BoxExtent.X),
-            FMath::RandRange(-BoxExtent.Y, BoxExtent.Y),
-            FMath::RandRange(-BoxExtent.Z, BoxExtent.Z)
-        );
-        
-        // Create fragment actor (simple cube for now)
-        AStaticMeshActor* Fragment = World->SpawnActor<AStaticMeshActor>(FragmentLocation, FRotator::ZeroRotator);
-        if (Fragment)
-        {
-            // Set up fragment physics
-            UStaticMeshComponent* FragmentMesh = Fragment->GetStaticMeshComponent();
-            if (FragmentMesh)
-            {
-                FragmentMesh->SetSimulatePhysics(true);
-                FragmentMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-                
-                // Apply random impulse
-                FVector RandomImpulse = FVector(
-                    FMath::RandRange(-500.0f, 500.0f),
-                    FMath::RandRange(-500.0f, 500.0f),
-                    FMath::RandRange(200.0f, 800.0f)
-                );
-                FragmentMesh->AddImpulse(RandomImpulse);
-            }
-            
-            // Track fragment for cleanup
-            DestructionFragments.Add(Fragment);
-            
-            // Update physics state
-            FCore_PhysicsState& PhysicsState = ActorPhysicsStates.FindOrAdd(Actor);
-            PhysicsState.ActiveFragments++;
-        }
-    }
-}
-
-void UCore_PhysicsSystemManager::CleanupDestructionFragments()
-{
-    float CurrentTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
-    
-    for (int32 i = DestructionFragments.Num() - 1; i >= 0; i--)
-    {
-        AActor* Fragment = DestructionFragments[i];
-        if (!IsValid(Fragment))
-        {
-            DestructionFragments.RemoveAt(i);
-            continue;
+            // Perform physics updates based on enabled systems
         }
         
-        // Check if fragment has exceeded lifetime
-        float FragmentAge = CurrentTime - Fragment->GetActorTimestamp();
-        if (FragmentAge > PhysicsSettings.FragmentLifetime)
+        LastUpdateTime = 0.0f;
+    }
+}
+
+void UCore_PhysicsIntegrationComponent::EnableAdvancedPhysics(bool bEnable)
+{
+    if (bEnable)
+    {
+        RegisterWithPhysicsManager();
+    }
+    else
+    {
+        UnregisterFromPhysicsManager();
+    }
+}
+
+void UCore_PhysicsIntegrationComponent::RegisterWithPhysicsManager()
+{
+    if (bRegisteredWithManager)
+    {
+        return;
+    }
+    
+    if (UWorld* World = GetWorld())
+    {
+        PhysicsManager = World->GetSubsystem<UCore_PhysicsSystemManager>();
+        if (PhysicsManager)
         {
-            Fragment->Destroy();
-            DestructionFragments.RemoveAt(i);
+            bRegisteredWithManager = true;
+            UE_LOG(LogTemp, Log, TEXT("Physics Integration Component registered with manager"));
         }
     }
 }
 
-FCore_PhysicsState UCore_PhysicsSystemManager::GetPhysicsState(AActor* Actor) const
+void UCore_PhysicsIntegrationComponent::UnregisterFromPhysicsManager()
 {
-    if (const FCore_PhysicsState* State = ActorPhysicsStates.Find(Actor))
+    if (!bRegisteredWithManager)
     {
-        return *State;
+        return;
     }
     
-    return FCore_PhysicsState();
-}
-
-bool UCore_PhysicsSystemManager::IsActorInRagdoll(ACharacter* Character) const
-{
-    if (const FCore_PhysicsState* State = ActorPhysicsStates.Find(Character))
-    {
-        return State->bIsRagdollActive;
-    }
+    bRegisteredWithManager = false;
+    PhysicsManager = nullptr;
     
-    return false;
-}
-
-float UCore_PhysicsSystemManager::GetCurrentGravityScale(AActor* Actor) const
-{
-    if (const FCore_PhysicsState* State = ActorPhysicsStates.Find(Actor))
-    {
-        return State->CurrentGravityScale;
-    }
-    
-    return PhysicsSettings.GravityScale;
-}
-
-void UCore_PhysicsSystemManager::ValidatePhysicsSettings()
-{
-    UE_LOG(LogTemp, Warning, TEXT("Core_PhysicsSystemManager: Validating physics settings..."));
-    
-    bool bValid = true;
-    
-    if (PhysicsSettings.GravityScale <= 0.0f)
-    {
-        UE_LOG(LogTemp, Error, TEXT("Invalid gravity scale: %.2f"), PhysicsSettings.GravityScale);
-        bValid = false;
-    }
-    
-    if (PhysicsSettings.RagdollDuration <= 0.0f)
-    {
-        UE_LOG(LogTemp, Error, TEXT("Invalid ragdoll duration: %.2f"), PhysicsSettings.RagdollDuration);
-        bValid = false;
-    }
-    
-    if (PhysicsSettings.MaxFragments <= 0)
-    {
-        UE_LOG(LogTemp, Error, TEXT("Invalid max fragments: %d"), PhysicsSettings.MaxFragments);
-        bValid = false;
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("Physics settings validation: %s"), bValid ? TEXT("PASSED") : TEXT("FAILED"));
-}
-
-void UCore_PhysicsSystemManager::DebugPhysicsState()
-{
-    UE_LOG(LogTemp, Warning, TEXT("=== PHYSICS SYSTEM DEBUG ==="));
-    UE_LOG(LogTemp, Warning, TEXT("Tracked actors: %d"), ActorPhysicsStates.Num());
-    UE_LOG(LogTemp, Warning, TEXT("Active ragdolls: %d"), ActiveRagdolls.Num());
-    UE_LOG(LogTemp, Warning, TEXT("Destruction fragments: %d"), DestructionFragments.Num());
-    
-    for (const auto& Pair : ActorPhysicsStates)
-    {
-        if (IsValid(Pair.Key))
-        {
-            const FCore_PhysicsState& State = Pair.Value;
-            UE_LOG(LogTemp, Warning, TEXT("Actor: %s, Ragdoll: %s, Gravity: %.2f, Friction: %.2f"),
-                *Pair.Key->GetName(),
-                State.bIsRagdollActive ? TEXT("YES") : TEXT("NO"),
-                State.CurrentGravityScale,
-                State.CurrentFriction);
-        }
-    }
-}
-
-FString UCore_PhysicsSystemManager::GetPhysicsSystemStatus() const
-{
-    return FString::Printf(TEXT("Physics System - Actors: %d, Ragdolls: %d, Fragments: %d"),
-        ActorPhysicsStates.Num(),
-        ActiveRagdolls.Num(),
-        DestructionFragments.Num());
-}
-
-bool UCore_PhysicsSystemManager::ValidateActor(AActor* Actor) const
-{
-    if (!IsValid(Actor))
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Core_PhysicsSystemManager: Invalid actor reference"));
-        return false;
-    }
-    
-    return true;
-}
-
-void UCore_PhysicsSystemManager::LogPhysicsEvent(const FString& EventName, AActor* Actor, const FString& Details) const
-{
-    if (IsValid(Actor))
-    {
-        UE_LOG(LogTemp, Log, TEXT("Core_PhysicsSystemManager [%s]: %s - %s"), 
-            *EventName, *Actor->GetName(), *Details);
-    }
+    UE_LOG(LogTemp, Log, TEXT("Physics Integration Component unregistered from manager"));
 }
