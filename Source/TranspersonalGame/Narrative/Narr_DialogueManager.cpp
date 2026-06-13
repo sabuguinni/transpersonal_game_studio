@@ -2,270 +2,261 @@
 #include "Components/SphereComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/Engine.h"
-#include "GameFramework/Character.h"
+#include "GameFramework/Pawn.h"
 #include "Kismet/GameplayStatics.h"
 
 ANarr_DialogueManager::ANarr_DialogueManager()
 {
     PrimaryActorTick.bCanEverTick = true;
+    
+    SetupInteractionComponents();
+    
+    // Initialize default values
+    CurrentStoryArcIndex = 0;
+    InteractionRange = 300.0f;
+    bAutoStartDialogue = true;
+    bInDialogue = false;
+    CurrentPlayer = nullptr;
+    NPCName = TEXT("Tribal Elder");
+    NPCRole = TEXT("Village Leader");
+}
 
+void ANarr_DialogueManager::SetupInteractionComponents()
+{
     // Create root component
     RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootComponent"));
-
+    
     // Create interaction sphere
     InteractionSphere = CreateDefaultSubobject<USphereComponent>(TEXT("InteractionSphere"));
     InteractionSphere->SetupAttachment(RootComponent);
-    InteractionSphere->SetSphereRadius(300.0f);
+    InteractionSphere->SetSphereRadius(InteractionRange);
     InteractionSphere->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
     InteractionSphere->SetCollisionResponseToAllChannels(ECR_Ignore);
     InteractionSphere->SetCollisionResponseToChannel(ECC_Pawn, ECR_Overlap);
-
-    // Create visual marker
-    VisualMarker = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("VisualMarker"));
-    VisualMarker->SetupAttachment(RootComponent);
-    VisualMarker->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-
-    // Initialize properties
-    InteractionRadius = 300.0f;
-    bIsActive = true;
-    bPlayerInRange = false;
-    CurrentPlayer = nullptr;
-    NPCPersonality = ENarr_NPCPersonality::Wise;
-
-    // Initialize dialogue tree
-    DialogueTree.TreeName = TEXT("DefaultDialogue");
-    DialogueTree.CurrentDialogueID = 0;
-
-    // Bind overlap events
-    InteractionSphere->OnComponentBeginOverlap.AddDynamic(this, &ANarr_DialogueManager::OnInteractionSphereBeginOverlap);
-    InteractionSphere->OnComponentEndOverlap.AddDynamic(this, &ANarr_DialogueManager::OnInteractionSphereEndOverlap);
+    
+    // Create NPC mesh component
+    NPCMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("NPCMesh"));
+    NPCMesh->SetupAttachment(RootComponent);
+    NPCMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+    NPCMesh->SetCollisionResponseToAllChannels(ECR_Block);
 }
 
 void ANarr_DialogueManager::BeginPlay()
 {
     Super::BeginPlay();
     
-    UpdateVisualMarker();
-    
-    // Create default dialogue if none exists
-    if (DialogueTree.DialogueEntries.Num() == 0)
+    // Bind overlap events
+    if (InteractionSphere)
     {
-        FNarr_DialogueEntry DefaultEntry;
-        DefaultEntry.SpeakerName = TEXT("Elder");
-        DefaultEntry.DialogueText = FText::FromString(TEXT("Greetings, survivor. The path ahead is treacherous."));
-        DefaultEntry.RequiredQuestStage = ENarr_QuestStage::Tutorial;
-        DefaultEntry.bIsQuestDialogue = false;
-        DefaultEntry.EmotionalIntensity = 0.6f;
-        
-        DialogueTree.DialogueEntries.Add(DefaultEntry);
+        InteractionSphere->OnComponentBeginOverlap.AddDynamic(this, &ANarr_DialogueManager::OnInteractionSphereBeginOverlap);
     }
+    
+    // Initialize default story arcs
+    InitializeDefaultStoryArcs();
+}
+
+void ANarr_DialogueManager::InitializeDefaultStoryArcs()
+{
+    // Main Story Arc - Introduction
+    FNarr_StoryArc IntroArc;
+    IntroArc.ArcName = TEXT("Tribal Introduction");
+    IntroArc.ArcDescription = TEXT("First meeting with the tribal elder");
+    
+    // Opening dialogue node
+    FNarr_DialogueNode OpeningNode;
+    OpeningNode.SpeakerName = NPCName;
+    OpeningNode.DialogueText = TEXT("Stranger... you survived the night. Few do in their first week. The dinosaurs grow bolder as winter approaches.");
+    OpeningNode.ResponseOptions.Add(TEXT("How do I survive here?"));
+    OpeningNode.ResponseOptions.Add(TEXT("What happened to this place?"));
+    OpeningNode.ResponseOptions.Add(TEXT("I need to find others like me."));
+    OpeningNode.NextNodeIndices = {1, 2, 3};
+    OpeningNode.bIsEndNode = false;
+    IntroArc.DialogueNodes.Add(OpeningNode);
+    
+    // Survival advice node
+    FNarr_DialogueNode SurvivalNode;
+    SurvivalNode.SpeakerName = NPCName;
+    SurvivalNode.DialogueText = TEXT("Listen well. Stay downwind of the large predators. The raptors hunt in packs - never face more than one. Water sources are death traps at dawn and dusk.");
+    SurvivalNode.ResponseOptions.Add(TEXT("What about shelter?"));
+    SurvivalNode.ResponseOptions.Add(TEXT("Where can I find food?"));
+    SurvivalNode.NextNodeIndices = {4, 5};
+    SurvivalNode.bIsEndNode = false;
+    IntroArc.DialogueNodes.Add(SurvivalNode);
+    
+    // History node
+    FNarr_DialogueNode HistoryNode;
+    HistoryNode.SpeakerName = NPCName;
+    HistoryNode.DialogueText = TEXT("This was once a thriving valley. Then the great migration began. Herds of giants trampled our crops. Predators followed. We adapted or died.");
+    HistoryNode.ResponseOptions.Add(TEXT("How many survived?"));
+    HistoryNode.NextNodeIndices = {6};
+    HistoryNode.bIsEndNode = false;
+    IntroArc.DialogueNodes.Add(HistoryNode);
+    
+    // Community node
+    FNarr_DialogueNode CommunityNode;
+    CommunityNode.SpeakerName = NPCName;
+    CommunityNode.DialogueText = TEXT("There are others. Scattered camps across the valley. But trust is earned with blood here. Prove yourself first.");
+    CommunityNode.ResponseOptions.Add(TEXT("How do I prove myself?"));
+    CommunityNode.NextNodeIndices = {7};
+    CommunityNode.bIsEndNode = false;
+    IntroArc.DialogueNodes.Add(CommunityNode);
+    
+    // Shelter advice node
+    FNarr_DialogueNode ShelterNode;
+    ShelterNode.SpeakerName = NPCName;
+    ShelterNode.DialogueText = TEXT("High ground, always. Caves seem safe but become traps. Build lean-tos against rock faces. Multiple escape routes.");
+    SurvivalNode.bIsEndNode = true;
+    IntroArc.DialogueNodes.Add(ShelterNode);
+    
+    // Food advice node
+    FNarr_DialogueNode FoodNode;
+    FoodNode.SpeakerName = NPCName;
+    FoodNode.DialogueText = TEXT("Berries and roots sustain you, but meat makes you strong. Hunt the small ones first. Learn their patterns. Patience feeds you, haste feeds them.");
+    FoodNode.bIsEndNode = true;
+    IntroArc.DialogueNodes.Add(FoodNode);
+    
+    // Survivors node
+    FNarr_DialogueNode SurvivorsNode;
+    SurvivorsNode.SpeakerName = NPCName;
+    SurvivorsNode.DialogueText = TEXT("Of fifty families, perhaps twelve remain. We are scattered like seeds on stone. But seeds can grow, given time.");
+    SurvivorsNode.bIsEndNode = true;
+    IntroArc.DialogueNodes.Add(SurvivorsNode);
+    
+    // Proving node
+    FNarr_DialogueNode ProvingNode;
+    ProvingNode.SpeakerName = NPCName;
+    ProvingNode.DialogueText = TEXT("Bring us meat from a raptor kill. Not scraps - a clean kill. Show us you can hunt, not just scavenge. Then we talk of joining our fire.");
+    ProvingNode.bIsEndNode = true;
+    IntroArc.DialogueNodes.Add(ProvingNode);
+    
+    StoryArcs.Add(IntroArc);
+    
+    // Hunting Quest Arc
+    FNarr_StoryArc HuntingArc;
+    HuntingArc.ArcName = TEXT("The Raptor Hunt");
+    HuntingArc.ArcDescription = TEXT("Prove hunting skills by taking down a raptor");
+    
+    FNarr_DialogueNode HuntingIntro;
+    HuntingIntro.SpeakerName = NPCName;
+    HuntingIntro.DialogueText = TEXT("You return. Good. The pack that killed our hunters nests in the eastern ravine. Three adults, two juveniles. Take one adult - clean kill, no scavenging.");
+    HuntingIntro.ResponseOptions.Add(TEXT("I'll need better weapons."));
+    HuntingIntro.ResponseOptions.Add(TEXT("Tell me about their hunting patterns."));
+    HuntingIntro.NextNodeIndices = {1, 2};
+    HuntingIntro.bIsEndNode = false;
+    HuntingArc.DialogueNodes.Add(HuntingIntro);
+    
+    StoryArcs.Add(HuntingArc);
 }
 
 void ANarr_DialogueManager::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
-    
-    if (bPlayerInRange && CurrentPlayer)
+}
+
+void ANarr_DialogueManager::OnInteractionSphereBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComponent, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
+{
+    if (APawn* PlayerPawn = Cast<APawn>(OtherActor))
     {
-        // Update visual marker based on player proximity
-        float Distance = FVector::Dist(GetActorLocation(), CurrentPlayer->GetActorLocation());
-        if (Distance <= InteractionRadius * 0.5f)
+        if (PlayerPawn->IsPlayerControlled() && bAutoStartDialogue && !bInDialogue)
         {
-            // Player very close - brighten marker
-            UpdateVisualMarker();
+            StartDialogue(PlayerPawn);
         }
     }
 }
 
-void ANarr_DialogueManager::StartDialogue(AActor* PlayerActor)
+void ANarr_DialogueManager::StartDialogue(APawn* PlayerPawn)
 {
-    if (!bIsActive || !PlayerActor || !CanStartDialogue(PlayerActor))
-    {
-        return;
-    }
-
-    CurrentPlayer = PlayerActor;
-    DialogueTree.CurrentDialogueID = 0;
+    if (!PlayerPawn || bInDialogue) return;
     
-    // Log dialogue start
-    if (GEngine)
+    CurrentPlayer = PlayerPawn;
+    bInDialogue = true;
+    
+    if (StoryArcs.IsValidIndex(CurrentStoryArcIndex))
     {
-        FString LogMessage = FString::Printf(TEXT("Starting dialogue with %s"), *DialogueTree.TreeName);
-        GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Green, LogMessage);
+        FNarr_StoryArc& CurrentArc = StoryArcs[CurrentStoryArcIndex];
+        if (CurrentArc.DialogueNodes.IsValidIndex(CurrentArc.CurrentNodeIndex))
+        {
+            FNarr_DialogueNode& CurrentNode = CurrentArc.DialogueNodes[CurrentArc.CurrentNodeIndex];
+            OnDialogueStarted(CurrentNode.SpeakerName, CurrentNode.DialogueText);
+        }
     }
+}
 
-    OnDialogueStarted();
+void ANarr_DialogueManager::ProcessPlayerResponse(int32 ResponseIndex)
+{
+    if (!bInDialogue || !StoryArcs.IsValidIndex(CurrentStoryArcIndex)) return;
+    
+    FNarr_StoryArc& CurrentArc = StoryArcs[CurrentStoryArcIndex];
+    if (!CurrentArc.DialogueNodes.IsValidIndex(CurrentArc.CurrentNodeIndex)) return;
+    
+    FNarr_DialogueNode& CurrentNode = CurrentArc.DialogueNodes[CurrentArc.CurrentNodeIndex];
+    
+    if (CurrentNode.NextNodeIndices.IsValidIndex(ResponseIndex))
+    {
+        int32 NextNodeIndex = CurrentNode.NextNodeIndices[ResponseIndex];
+        if (CurrentArc.DialogueNodes.IsValidIndex(NextNodeIndex))
+        {
+            CurrentArc.CurrentNodeIndex = NextNodeIndex;
+            FNarr_DialogueNode& NextNode = CurrentArc.DialogueNodes[NextNodeIndex];
+            
+            if (NextNode.bIsEndNode)
+            {
+                EndDialogue();
+            }
+        }
+    }
 }
 
 void ANarr_DialogueManager::EndDialogue()
 {
-    if (GEngine)
-    {
-        GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Yellow, TEXT("Dialogue ended"));
-    }
-
-    CurrentPlayer = nullptr;
-    DialogueTree.CurrentDialogueID = 0;
+    if (!bInDialogue) return;
     
+    bInDialogue = false;
+    CurrentPlayer = nullptr;
     OnDialogueEnded();
 }
 
-FNarr_DialogueEntry ANarr_DialogueManager::GetCurrentDialogue()
+FNarr_DialogueNode ANarr_DialogueManager::GetCurrentDialogueNode()
 {
-    if (DialogueTree.DialogueEntries.IsValidIndex(DialogueTree.CurrentDialogueID))
+    if (StoryArcs.IsValidIndex(CurrentStoryArcIndex))
     {
-        return DialogueTree.DialogueEntries[DialogueTree.CurrentDialogueID];
+        FNarr_StoryArc& CurrentArc = StoryArcs[CurrentStoryArcIndex];
+        if (CurrentArc.DialogueNodes.IsValidIndex(CurrentArc.CurrentNodeIndex))
+        {
+            return CurrentArc.DialogueNodes[CurrentArc.CurrentNodeIndex];
+        }
     }
     
-    // Return empty dialogue if invalid
-    FNarr_DialogueEntry EmptyEntry;
-    EmptyEntry.DialogueText = FText::FromString(TEXT("..."));
-    return EmptyEntry;
+    return FNarr_DialogueNode();
 }
 
-void ANarr_DialogueManager::SelectResponse(int32 ResponseIndex)
+void ANarr_DialogueManager::AdvanceStoryArc()
 {
-    FNarr_DialogueEntry CurrentEntry = GetCurrentDialogue();
-    
-    if (CurrentEntry.NextDialogueIDs.IsValidIndex(ResponseIndex))
+    if (StoryArcs.IsValidIndex(CurrentStoryArcIndex))
     {
-        int32 NextID = CurrentEntry.NextDialogueIDs[ResponseIndex];
-        if (DialogueTree.DialogueEntries.IsValidIndex(NextID))
-        {
-            DialogueTree.CurrentDialogueID = NextID;
-            
-            if (GEngine)
-            {
-                FString LogMessage = FString::Printf(TEXT("Selected response %d, moving to dialogue %d"), ResponseIndex, NextID);
-                GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Cyan, LogMessage);
-            }
-            
-            OnResponseSelected(ResponseIndex);
-        }
-        else
-        {
-            // End dialogue if no valid next ID
-            EndDialogue();
-        }
-    }
-    else
-    {
-        // Invalid response - end dialogue
-        EndDialogue();
-    }
-}
-
-bool ANarr_DialogueManager::CanStartDialogue(AActor* PlayerActor)
-{
-    if (!PlayerActor || !bIsActive)
-    {
-        return false;
-    }
-
-    // Check distance
-    float Distance = FVector::Dist(GetActorLocation(), PlayerActor->GetActorLocation());
-    if (Distance > InteractionRadius)
-    {
-        return false;
-    }
-
-    // Check quest requirements for current dialogue
-    FNarr_DialogueEntry CurrentEntry = GetCurrentDialogue();
-    return CheckQuestRequirements(CurrentEntry);
-}
-
-void ANarr_DialogueManager::SetDialogueTree(const FNarr_DialogueTree& NewTree)
-{
-    DialogueTree = NewTree;
-    DialogueTree.CurrentDialogueID = 0;
-    
-    if (GEngine)
-    {
-        FString LogMessage = FString::Printf(TEXT("Dialogue tree set: %s with %d entries"), 
-                                           *NewTree.TreeName, NewTree.DialogueEntries.Num());
-        GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Blue, LogMessage);
-    }
-}
-
-void ANarr_DialogueManager::AddVoiceLine(const FString& VoiceURL)
-{
-    VoiceLineURLs.Add(VoiceURL);
-    
-    if (GEngine)
-    {
-        FString LogMessage = FString::Printf(TEXT("Added voice line: %s"), *VoiceURL);
-        GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Magenta, LogMessage);
-    }
-}
-
-void ANarr_DialogueManager::OnInteractionSphereBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
-{
-    if (OtherActor && OtherActor->IsA<ACharacter>())
-    {
-        bPlayerInRange = true;
-        CurrentPlayer = OtherActor;
+        StoryArcs[CurrentStoryArcIndex].bArcCompleted = true;
+        OnStoryArcCompleted(StoryArcs[CurrentStoryArcIndex].ArcName);
         
-        if (GEngine)
+        if (StoryArcs.IsValidIndex(CurrentStoryArcIndex + 1))
         {
-            GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Green, TEXT("Player entered dialogue range"));
+            CurrentStoryArcIndex++;
         }
-        
-        UpdateVisualMarker();
     }
 }
 
-void ANarr_DialogueManager::OnInteractionSphereEndOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex)
+void ANarr_DialogueManager::SetStoryArc(int32 ArcIndex)
 {
-    if (OtherActor && OtherActor == CurrentPlayer)
+    if (StoryArcs.IsValidIndex(ArcIndex))
     {
-        bPlayerInRange = false;
-        
-        if (GEngine)
-        {
-            GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Red, TEXT("Player left dialogue range"));
-        }
-        
-        // End dialogue if active
-        if (CurrentPlayer)
-        {
-            EndDialogue();
-        }
-        
-        CurrentPlayer = nullptr;
-        UpdateVisualMarker();
+        CurrentStoryArcIndex = ArcIndex;
     }
 }
 
-void ANarr_DialogueManager::UpdateVisualMarker()
+bool ANarr_DialogueManager::IsStoryArcCompleted(int32 ArcIndex)
 {
-    if (VisualMarker)
+    if (StoryArcs.IsValidIndex(ArcIndex))
     {
-        // Scale marker based on interaction state
-        float Scale = bPlayerInRange ? 1.5f : 1.0f;
-        VisualMarker->SetWorldScale3D(FVector(Scale, Scale, Scale));
-        
-        // Change color based on availability
-        if (bIsActive && CanStartDialogue(CurrentPlayer))
-        {
-            // Green for available dialogue
-            VisualMarker->SetVectorParameterValueOnMaterials(TEXT("Color"), FVector(0.0f, 1.0f, 0.0f));
-        }
-        else if (bPlayerInRange)
-        {
-            // Yellow for player in range but dialogue unavailable
-            VisualMarker->SetVectorParameterValueOnMaterials(TEXT("Color"), FVector(1.0f, 1.0f, 0.0f));
-        }
-        else
-        {
-            // Blue for default state
-            VisualMarker->SetVectorParameterValueOnMaterials(TEXT("Color"), FVector(0.0f, 0.0f, 1.0f));
-        }
+        return StoryArcs[ArcIndex].bArcCompleted;
     }
-}
-
-bool ANarr_DialogueManager::CheckQuestRequirements(const FNarr_DialogueEntry& Entry)
-{
-    // For now, always return true - quest integration will be handled by Quest system
-    // TODO: Integrate with Quest_ProgressionManager to check actual quest stage
-    return true;
+    return false;
 }
