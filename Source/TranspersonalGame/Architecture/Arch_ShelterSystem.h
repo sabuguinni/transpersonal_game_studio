@@ -1,92 +1,160 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
+#include "Components/ActorComponent.h"
+#include "Engine/StaticMeshActor.h"
 #include "Components/StaticMeshComponent.h"
-#include "Components/BoxComponent.h"
-#include "Engine/Engine.h"
+#include "Materials/MaterialInstanceDynamic.h"
 #include "Arch_ShelterSystem.generated.h"
 
 UENUM(BlueprintType)
 enum class EArch_ShelterType : uint8
 {
-    CaveEntrance    UMETA(DisplayName = "Cave Entrance"),
-    StoneArchway    UMETA(DisplayName = "Stone Archway"),
-    RockOverhang    UMETA(DisplayName = "Rock Overhang"),
-    NaturalShelter  UMETA(DisplayName = "Natural Shelter")
+    None = 0,
+    StoneRuin,
+    WoodLeanTo,
+    CaveEntrance,
+    RockOverhang,
+    BuriedShelter
+};
+
+UENUM(BlueprintType)
+enum class EArch_ShelterCondition : uint8
+{
+    Pristine = 0,
+    Weathered,
+    Damaged,
+    Ruined,
+    Collapsed
 };
 
 USTRUCT(BlueprintType)
-struct FArch_ShelterProperties
+struct FArch_ShelterData
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter")
-    EArch_ShelterType ShelterType = EArch_ShelterType::CaveEntrance;
+    EArch_ShelterType ShelterType = EArch_ShelterType::None;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter")
-    float ProtectionRadius = 500.0f;
+    EArch_ShelterCondition Condition = EArch_ShelterCondition::Weathered;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter")
-    float WeatherProtection = 0.8f;
+    float WeatheringLevel = 0.5f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter")
-    float TemperatureModifier = 5.0f;
+    float MossGrowth = 0.3f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter")
-    bool bProvidesSafety = true;
+    float StructuralIntegrity = 0.7f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter")
+    bool bCanProvideProtection = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter")
+    float ProtectionRadius = 300.0f;
+
+    FArch_ShelterData()
+    {
+        ShelterType = EArch_ShelterType::StoneRuin;
+        Condition = EArch_ShelterCondition::Weathered;
+        WeatheringLevel = 0.5f;
+        MossGrowth = 0.3f;
+        StructuralIntegrity = 0.7f;
+        bCanProvideProtection = true;
+        ProtectionRadius = 300.0f;
+    }
 };
 
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API AArch_ShelterSystem : public AActor
+UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent), BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API UArch_ShelterSystem : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    AArch_ShelterSystem();
+    UArch_ShelterSystem();
 
 protected:
     virtual void BeginPlay() override;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    UStaticMeshComponent* ShelterMesh;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    UBoxComponent* ProtectionZone;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter Properties")
-    FArch_ShelterProperties ShelterConfig;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Visual")
-    TArray<UMaterialInterface*> WeatheredMaterials;
-
 public:
-    virtual void Tick(float DeltaTime) override;
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    UFUNCTION(BlueprintCallable, Category = "Shelter")
-    bool IsPlayerInShelter() const;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter System")
+    FArch_ShelterData ShelterData;
 
-    UFUNCTION(BlueprintCallable, Category = "Shelter")
-    float GetWeatherProtectionValue() const;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter System")
+    TArray<UStaticMeshComponent*> ShelterMeshComponents;
 
-    UFUNCTION(BlueprintCallable, Category = "Shelter")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter System")
+    UMaterialInterface* BaseStoneMaterial;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter System")
+    UMaterialInterface* WeatheredStoneMaterial;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter System")
+    UMaterialInterface* MossyMaterial;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Shelter System")
+    TArray<UMaterialInstanceDynamic*> DynamicMaterials;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter System")
+    float WeatheringRate = 0.001f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter System")
+    float MossGrowthRate = 0.0005f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter System")
+    bool bEnableWeathering = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter System")
+    bool bEnableMossGrowth = true;
+
+    // Core shelter management functions
+    UFUNCTION(BlueprintCallable, Category = "Shelter System")
+    void InitializeShelter(EArch_ShelterType InShelterType, EArch_ShelterCondition InCondition);
+
+    UFUNCTION(BlueprintCallable, Category = "Shelter System")
+    void UpdateShelterCondition(float DeltaTime);
+
+    UFUNCTION(BlueprintCallable, Category = "Shelter System")
+    void ApplyWeathering(float WeatheringAmount);
+
+    UFUNCTION(BlueprintCallable, Category = "Shelter System")
+    void ApplyMossGrowth(float MossAmount);
+
+    UFUNCTION(BlueprintCallable, Category = "Shelter System")
+    void UpdateMaterialParameters();
+
+    UFUNCTION(BlueprintCallable, Category = "Shelter System")
+    bool CanProvideProtection() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Shelter System")
+    float GetProtectionValue() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Shelter System")
     void SetShelterType(EArch_ShelterType NewType);
 
-    UFUNCTION(BlueprintImplementableEvent, Category = "Shelter")
-    void OnPlayerEnterShelter();
+    UFUNCTION(BlueprintCallable, Category = "Shelter System")
+    void SetCondition(EArch_ShelterCondition NewCondition);
 
-    UFUNCTION(BlueprintImplementableEvent, Category = "Shelter")
-    void OnPlayerExitShelter();
+    UFUNCTION(BlueprintCallable, Category = "Shelter System")
+    void RepairShelter(float RepairAmount);
 
-protected:
-    UFUNCTION()
-    void OnProtectionZoneBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult);
+    UFUNCTION(BlueprintCallable, Category = "Shelter System")
+    void DamageShelter(float DamageAmount);
 
-    UFUNCTION()
-    void OnProtectionZoneEndOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex);
+    UFUNCTION(BlueprintCallable, Category = "Shelter System")
+    TArray<FVector> GetShelterBounds() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Shelter System")
+    bool IsPlayerInShelter(const FVector& PlayerLocation) const;
 
 private:
-    bool bPlayerInShelter = false;
-    float LastWeatherCheck = 0.0f;
-    const float WeatherCheckInterval = 2.0f;
+    void CreateDynamicMaterials();
+    void UpdateWeatheringEffects();
+    void UpdateMossEffects();
+    void ValidateShelterIntegrity();
+    FLinearColor GetWeatheringColor() const;
+    float GetMossOpacity() const;
 };
