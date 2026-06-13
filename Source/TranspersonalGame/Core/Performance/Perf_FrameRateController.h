@@ -2,141 +2,168 @@
 
 #include "CoreMinimal.h"
 #include "Engine/World.h"
-#include "GameFramework/GameModeBase.h"
-#include "Components/ActorComponent.h"
+#include "Engine/GameInstance.h"
+#include "Subsystems/GameInstanceSubsystem.h"
+#include "SharedTypes.h"
 #include "Perf_FrameRateController.generated.h"
 
 UENUM(BlueprintType)
 enum class EPerf_FrameRateTarget : uint8
 {
-    FPS_30 UMETA(DisplayName = "30 FPS"),
-    FPS_60 UMETA(DisplayName = "60 FPS"),
-    FPS_120 UMETA(DisplayName = "120 FPS"),
-    FPS_Unlimited UMETA(DisplayName = "Unlimited")
-};
-
-UENUM(BlueprintType)
-enum class EPerf_QualityLevel : uint8
-{
-    Low UMETA(DisplayName = "Low Quality"),
-    Medium UMETA(DisplayName = "Medium Quality"),
-    High UMETA(DisplayName = "High Quality"),
-    Ultra UMETA(DisplayName = "Ultra Quality"),
-    Auto UMETA(DisplayName = "Auto Adjust")
+    Auto        UMETA(DisplayName = "Auto Detect"),
+    FPS_30      UMETA(DisplayName = "30 FPS"),
+    FPS_60      UMETA(DisplayName = "60 FPS"),
+    FPS_120     UMETA(DisplayName = "120 FPS"),
+    Unlimited   UMETA(DisplayName = "Unlimited")
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FPerf_FrameRateSettings
+struct FPerf_FrameRateSettings
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Frame Rate")
-    EPerf_FrameRateTarget TargetFrameRate = EPerf_FrameRateTarget::FPS_60;
+    EPerf_FrameRateTarget TargetFrameRate = EPerf_FrameRateTarget::Auto;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Frame Rate", meta = (ClampMin = "10.0", ClampMax = "240.0"))
+    float CustomFrameRate = 60.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Frame Rate")
-    bool bEnableVSync = true;
+    bool bVSyncEnabled = true;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Frame Rate")
-    bool bEnableFrameSmoothing = true;
+    bool bAdaptiveFrameRate = true;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Frame Rate")
-    float MinDesiredFrameRate = 30.0f;
+    float FrameRateTolerance = 5.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Frame Rate")
-    float MaxDesiredFrameRate = 60.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quality")
-    EPerf_QualityLevel QualityLevel = EPerf_QualityLevel::Auto;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quality")
-    bool bAutoAdjustQuality = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float PerformanceThreshold = 0.9f; // 90% of target frame time
+    FPerf_FrameRateSettings()
+    {
+        TargetFrameRate = EPerf_FrameRateTarget::Auto;
+        CustomFrameRate = 60.0f;
+        bVSyncEnabled = true;
+        bAdaptiveFrameRate = true;
+        FrameRateTolerance = 5.0f;
+    }
 };
 
-UCLASS(ClassGroup=(Performance), meta=(BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UPerf_FrameRateController : public UActorComponent
+USTRUCT(BlueprintType)
+struct FPerf_FrameRateMetrics
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
+    float CurrentFPS = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
+    float AverageFPS = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
+    float MinFPS = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
+    float MaxFPS = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
+    float FrameTime = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
+    int32 FrameDropCount = 0;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
+    float GPUTime = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
+    float CPUTime = 0.0f;
+
+    FPerf_FrameRateMetrics()
+    {
+        CurrentFPS = 0.0f;
+        AverageFPS = 0.0f;
+        MinFPS = 0.0f;
+        MaxFPS = 0.0f;
+        FrameTime = 0.0f;
+        FrameDropCount = 0;
+        GPUTime = 0.0f;
+        CPUTime = 0.0f;
+    }
+};
+
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API UPerf_FrameRateController : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
 public:
     UPerf_FrameRateController();
 
-protected:
-    virtual void BeginPlay() override;
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+    // Subsystem overrides
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
 
-public:
-    // Frame rate control functions
+    // Frame rate control
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    void SetTargetFrameRate(EPerf_FrameRateTarget NewTarget);
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void SetQualityLevel(EPerf_QualityLevel NewQuality);
+    void SetTargetFrameRate(EPerf_FrameRateTarget TargetRate);
 
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    void EnableAutoQualityAdjustment(bool bEnable);
+    void SetCustomFrameRate(float CustomRate);
 
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    float GetCurrentFrameRate() const;
+    void EnableVSync(bool bEnable);
 
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    float GetCurrentFrameTime() const;
+    void EnableAdaptiveFrameRate(bool bEnable);
+
+    // Metrics
+    UFUNCTION(BlueprintPure, Category = "Performance")
+    FPerf_FrameRateMetrics GetFrameRateMetrics() const;
+
+    UFUNCTION(BlueprintPure, Category = "Performance")
+    float GetCurrentFPS() const;
 
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    bool IsPerformanceTargetMet() const;
+    void ResetMetrics();
 
-    // Quality adjustment functions
+    // Settings
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    void AdjustQualityForPerformance();
+    void ApplyFrameRateSettings(const FPerf_FrameRateSettings& Settings);
 
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void ResetToDefaultSettings();
+    UFUNCTION(BlueprintPure, Category = "Performance")
+    FPerf_FrameRateSettings GetFrameRateSettings() const;
 
-    // Performance monitoring
+    // Optimization
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    void StartPerformanceMonitoring();
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void StopPerformanceMonitoring();
+    void OptimizeForPlatform();
 
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    void LogPerformanceStats();
+    bool IsFrameRateStable() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void ForceGarbageCollection();
 
 protected:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
     FPerf_FrameRateSettings FrameRateSettings;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float CurrentFrameRate;
+    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
+    FPerf_FrameRateMetrics CurrentMetrics;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float CurrentFrameTime;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
+    float MetricsUpdateInterval = 0.1f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float AverageFrameRate;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    bool bIsMonitoring;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
+    int32 MetricsHistorySize = 60;
 
 private:
-    // Internal performance tracking
-    TArray<float> FrameTimeHistory;
-    float PerformanceCheckTimer;
-    float QualityAdjustmentCooldown;
-    int32 ConsecutivePoorFrames;
-    
-    static const int32 MaxFrameHistorySize = 60; // 1 second at 60fps
-    static const float PerformanceCheckInterval = 1.0f;
-    static const float QualityAdjustmentCooldownTime = 5.0f;
-    static const int32 PoorFrameThreshold = 10;
+    void UpdateMetrics();
+    void ApplyFrameRateLimit();
+    void DetectOptimalFrameRate();
+    void HandleFrameRateChange();
 
-    // Internal helper functions
-    void UpdateFrameRateMetrics(float DeltaTime);
-    void CheckPerformanceAndAdjust();
-    void ApplyFrameRateSettings();
-    void ApplyQualitySettings(EPerf_QualityLevel Quality);
-    float CalculateAverageFrameRate() const;
-    bool ShouldAdjustQuality() const;
+    FTimerHandle MetricsTimerHandle;
+    TArray<float> FrameTimeHistory;
+    float LastFrameTime;
+    float MetricsAccumulator;
+    int32 MetricsFrameCount;
+    bool bInitialized;
 };
