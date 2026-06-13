@@ -1,240 +1,354 @@
 #include "Crowd_MassEntityManager.h"
-#include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "MassEntitySubsystem.h"
-#include "MassSpawnerSubsystem.h"
-#include "MassEntityTemplateRegistry.h"
-#include "Components/StaticMeshComponent.h"
+#include "Engine/Engine.h"
+#include "GameFramework/PlayerController.h"
+#include "GameFramework/Pawn.h"
+#include "Kismet/GameplayStatics.h"
+#include "Math/UnrealMathUtility.h"
 
-ACrowd_MassEntityManager::ACrowd_MassEntityManager()
+UCrowd_MassEntityManager::UCrowd_MassEntityManager()
 {
-    PrimaryActorTick.bCanEverTick = true;
-    PrimaryActorTick.TickInterval = 1.0f;
-
-    MaxEntitiesPerBiome = 1000;
-    SpawnRadius = 15000.0f;
-    TotalActiveEntities = 0;
-
-    MassEntitySubsystem = nullptr;
-    MassSpawnerSubsystem = nullptr;
+    // Set default spawn configuration
+    SpawnConfig.MaxEntities = 1000;
+    SpawnConfig.SpawnRadius = 2000.0f;
+    SpawnConfig.LODDistance_High = 500.0f;
+    SpawnConfig.LODDistance_Medium = 1500.0f;
+    SpawnConfig.LODDistance_Low = 3000.0f;
+    SpawnConfig.MovementSpeed = 150.0f;
+    SpawnConfig.bEnablePathfinding = true;
+    SpawnConfig.bEnableLODSystem = true;
 }
 
-void ACrowd_MassEntityManager::BeginPlay()
+void UCrowd_MassEntityManager::Initialize(FSubsystemCollectionBase& Collection)
 {
-    Super::BeginPlay();
+    Super::Initialize(Collection);
     
-    InitializeMassSubsystems();
-    InitializeBiomeSpawning();
+    UE_LOG(LogTemp, Log, TEXT("Crowd_MassEntityManager: Initializing crowd simulation system"));
     
-    // Auto-spawn entities on begin play
-    FTimerHandle SpawnTimer;
-    GetWorld()->GetTimerManager().SetTimer(SpawnTimer, this, &ACrowd_MassEntityManager::SpawnMassEntitiesAcrossAllBiomes, 2.0f, false);
+    // Initialize crowd system
+    InitializeCrowdSystem();
 }
 
-void ACrowd_MassEntityManager::Tick(float DeltaTime)
+void UCrowd_MassEntityManager::Deinitialize()
 {
-    Super::Tick(DeltaTime);
+    ClearAllCrowdEntities();
+    bIsInitialized = false;
     
-    // Update entity positions every tick
-    UpdateEntityPositions();
-    
-    // Cleanup invalid entities periodically
-    static float CleanupTimer = 0.0f;
-    CleanupTimer += DeltaTime;
-    if (CleanupTimer >= 10.0f)
+    Super::Deinitialize();
+}
+
+bool UCrowd_MassEntityManager::ShouldCreateSubsystem(UObject* Outer) const
+{
+    return true;
+}
+
+void UCrowd_MassEntityManager::InitializeCrowdSystem()
+{
+    if (bIsInitialized)
     {
-        CleanupInvalidEntities();
-        CleanupTimer = 0.0f;
-    }
-}
-
-void ACrowd_MassEntityManager::InitializeMassSubsystems()
-{
-    if (UWorld* World = GetWorld())
-    {
-        MassEntitySubsystem = World->GetSubsystem<UMassEntitySubsystem>();
-        MassSpawnerSubsystem = World->GetSubsystem<UMassSpawnerSubsystem>();
-        
-        if (MassEntitySubsystem)
-        {
-            UE_LOG(LogTemp, Warning, TEXT("MassEntitySubsystem initialized successfully"));
-        }
-        else
-        {
-            UE_LOG(LogTemp, Error, TEXT("Failed to get MassEntitySubsystem"));
-        }
-    }
-}
-
-void ACrowd_MassEntityManager::InitializeBiomeSpawning()
-{
-    BiomeSpawnData.Empty();
-    
-    // Initialize spawn data for all 5 biomes
-    TArray<TPair<EBiomeType, FVector>> BiomeLocations = {
-        {EBiomeType::Savanna, FVector(0, 0, 100)},
-        {EBiomeType::Swamp, FVector(-50000, -45000, 100)},
-        {EBiomeType::Forest, FVector(-45000, 40000, 100)},
-        {EBiomeType::Desert, FVector(55000, 0, 100)},
-        {EBiomeType::Mountain, FVector(40000, 50000, 100)}
-    };
-    
-    for (const auto& BiomePair : BiomeLocations)
-    {
-        FCrowd_EntitySpawnData SpawnData;
-        SpawnData.Location = BiomePair.Value;
-        SpawnData.Rotation = FRotator::ZeroRotator;
-        SpawnData.EntityType = ECrowd_EntityType::Herbivore;
-        SpawnData.Count = MaxEntitiesPerBiome / 5; // Distribute evenly
-        
-        BiomeSpawnData.Add(SpawnData);
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("Initialized %d biome spawn locations"), BiomeSpawnData.Num());
-}
-
-void ACrowd_MassEntityManager::SpawnEntitiesInBiome(EBiomeType BiomeType, int32 Count)
-{
-    FVector BiomeCenter = GetBiomeCenter(BiomeType);
-    
-    for (int32 i = 0; i < Count; i++)
-    {
-        FCrowd_EntitySpawnData SpawnData;
-        
-        // Random position within biome radius
-        float RandomX = FMath::RandRange(-SpawnRadius, SpawnRadius);
-        float RandomY = FMath::RandRange(-SpawnRadius, SpawnRadius);
-        SpawnData.Location = BiomeCenter + FVector(RandomX, RandomY, 0);
-        SpawnData.Rotation = FRotator(0, FMath::RandRange(0.0f, 360.0f), 0);
-        SpawnData.EntityType = (i % 3 == 0) ? ECrowd_EntityType::Predator : ECrowd_EntityType::Herbivore;
-        SpawnData.Count = 1;
-        
-        FMassEntityHandle EntityHandle = SpawnSingleMassEntity(SpawnData);
-        if (EntityHandle.IsValid())
-        {
-            ManagedEntities.Add(EntityHandle);
-            TotalActiveEntities++;
-        }
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("Spawned %d entities in biome at %s"), Count, *BiomeCenter.ToString());
-}
-
-void ACrowd_MassEntityManager::SpawnMassEntitiesAcrossAllBiomes()
-{
-    if (!MassEntitySubsystem)
-    {
-        UE_LOG(LogTemp, Error, TEXT("MassEntitySubsystem not available for spawning"));
         return;
     }
+
+    // Clear existing data
+    CrowdEntities.Empty();
+    PathfindingWaypoints.Empty();
     
-    // Clear existing entities
-    ManagedEntities.Empty();
-    TotalActiveEntities = 0;
-    
-    // Spawn in all biomes
-    TArray<EBiomeType> AllBiomes = {
-        EBiomeType::Savanna,
-        EBiomeType::Swamp,
-        EBiomeType::Forest,
-        EBiomeType::Desert,
-        EBiomeType::Mountain
-    };
-    
-    int32 EntitiesPerBiome = MaxEntitiesPerBiome / AllBiomes.Num();
-    
-    for (EBiomeType BiomeType : AllBiomes)
+    // Generate default waypoints for pathfinding
+    const int32 WaypointCount = 20;
+    for (int32 i = 0; i < WaypointCount; i++)
     {
-        SpawnEntitiesInBiome(BiomeType, EntitiesPerBiome);
+        FVector Waypoint;
+        Waypoint.X = FMath::RandRange(-SpawnConfig.SpawnRadius, SpawnConfig.SpawnRadius);
+        Waypoint.Y = FMath::RandRange(-SpawnConfig.SpawnRadius, SpawnConfig.SpawnRadius);
+        Waypoint.Z = FMath::RandRange(50.0f, 300.0f);
+        
+        PathfindingWaypoints.Add(Waypoint);
     }
     
-    UE_LOG(LogTemp, Warning, TEXT("Mass entity spawning complete: %d total entities across %d biomes"), 
-           TotalActiveEntities, AllBiomes.Num());
+    bIsInitialized = true;
+    CurrentBehaviorMode = ECrowd_BehaviorMode::Wandering;
+    
+    UE_LOG(LogTemp, Log, TEXT("Crowd_MassEntityManager: System initialized with %d waypoints"), PathfindingWaypoints.Num());
 }
 
-void ACrowd_MassEntityManager::UpdateEntityPositions()
+void UCrowd_MassEntityManager::SpawnCrowdEntities(int32 Count, FVector CenterLocation, float Radius)
 {
-    if (!MassEntitySubsystem || ManagedEntities.Num() == 0)
+    if (!bIsInitialized)
+    {
+        InitializeCrowdSystem();
+    }
+
+    // Limit spawn count to prevent performance issues
+    const int32 ActualCount = FMath::Min(Count, SpawnConfig.MaxEntities - CrowdEntities.Num());
+    
+    for (int32 i = 0; i < ActualCount; i++)
+    {
+        FCrowd_EntityData NewEntity;
+        NewEntity.EntityID = CrowdEntities.Num() + i;
+        
+        // Random spawn location within radius
+        const float Angle = FMath::RandRange(0.0f, 2.0f * PI);
+        const float Distance = FMath::RandRange(0.0f, Radius);
+        
+        NewEntity.CurrentLocation.X = CenterLocation.X + Distance * FMath::Cos(Angle);
+        NewEntity.CurrentLocation.Y = CenterLocation.Y + Distance * FMath::Sin(Angle);
+        NewEntity.CurrentLocation.Z = CenterLocation.Z + FMath::RandRange(0.0f, 100.0f);
+        
+        // Set initial target
+        NewEntity.TargetLocation = GetRandomWaypoint();
+        NewEntity.bIsActive = true;
+        NewEntity.LODLevel = ECrowd_LODLevel::High;
+        NewEntity.LastUpdateTime = GetWorld()->GetTimeSeconds();
+        
+        CrowdEntities.Add(NewEntity);
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("Crowd_MassEntityManager: Spawned %d entities (Total: %d)"), ActualCount, CrowdEntities.Num());
+}
+
+void UCrowd_MassEntityManager::UpdateCrowdLOD(FVector PlayerLocation)
+{
+    if (!SpawnConfig.bEnableLODSystem)
+    {
+        return;
+    }
+
+    const float CurrentTime = GetWorld()->GetTimeSeconds();
+    
+    // Throttle LOD updates for performance
+    if (CurrentTime - LastLODUpdateTime < 0.1f) // Update every 100ms
     {
         return;
     }
     
-    // Update entity positions using Mass Entity system
-    // This would typically involve fragment updates in a real Mass Entity implementation
+    LastLODUpdateTime = CurrentTime;
     
-    static float UpdateTimer = 0.0f;
-    UpdateTimer += GetWorld()->GetDeltaSeconds();
-    
-    if (UpdateTimer >= 5.0f) // Update every 5 seconds
+    for (FCrowd_EntityData& Entity : CrowdEntities)
     {
-        UE_LOG(LogTemp, Log, TEXT("Updating positions for %d mass entities"), ManagedEntities.Num());
-        UpdateTimer = 0.0f;
+        if (!Entity.bIsActive)
+        {
+            continue;
+        }
+        
+        Entity.DistanceToPlayer = FVector::Dist(Entity.CurrentLocation, PlayerLocation);
+        UpdateEntityLOD(Entity, Entity.DistanceToPlayer);
     }
 }
 
-void ACrowd_MassEntityManager::CleanupInvalidEntities()
+void UCrowd_MassEntityManager::UpdateEntityLOD(FCrowd_EntityData& Entity, float DistanceToPlayer)
 {
-    if (!MassEntitySubsystem)
+    ECrowd_LODLevel NewLODLevel;
+    
+    if (DistanceToPlayer <= SpawnConfig.LODDistance_High)
+    {
+        NewLODLevel = ECrowd_LODLevel::High;
+    }
+    else if (DistanceToPlayer <= SpawnConfig.LODDistance_Medium)
+    {
+        NewLODLevel = ECrowd_LODLevel::Medium;
+    }
+    else if (DistanceToPlayer <= SpawnConfig.LODDistance_Low)
+    {
+        NewLODLevel = ECrowd_LODLevel::Low;
+    }
+    else
+    {
+        NewLODLevel = ECrowd_LODLevel::Culled;
+    }
+    
+    Entity.LODLevel = NewLODLevel;
+}
+
+void UCrowd_MassEntityManager::SetCrowdBehaviorMode(ECrowd_BehaviorMode NewMode)
+{
+    CurrentBehaviorMode = NewMode;
+    UE_LOG(LogTemp, Log, TEXT("Crowd_MassEntityManager: Behavior mode changed to %d"), (int32)NewMode);
+}
+
+void UCrowd_MassEntityManager::UpdateCrowdMovement(float DeltaTime)
+{
+    if (!bIsInitialized || !SpawnConfig.bEnablePathfinding)
     {
         return;
     }
+
+    const float CurrentTime = GetWorld()->GetTimeSeconds();
     
-    int32 RemovedCount = 0;
-    
-    for (int32 i = ManagedEntities.Num() - 1; i >= 0; i--)
+    for (FCrowd_EntityData& Entity : CrowdEntities)
     {
-        if (!ManagedEntities[i].IsValid())
+        if (!Entity.bIsActive || Entity.LODLevel == ECrowd_LODLevel::Culled)
         {
-            ManagedEntities.RemoveAt(i);
-            RemovedCount++;
-            TotalActiveEntities--;
+            continue;
+        }
+        
+        // Update frequency based on LOD level
+        float UpdateInterval = 0.1f; // High LOD
+        if (Entity.LODLevel == ECrowd_LODLevel::Medium)
+        {
+            UpdateInterval = 0.2f;
+        }
+        else if (Entity.LODLevel == ECrowd_LODLevel::Low)
+        {
+            UpdateInterval = 0.5f;
+        }
+        
+        if (CurrentTime - Entity.LastUpdateTime >= UpdateInterval)
+        {
+            ApplyMovementBehavior(Entity, DeltaTime);
+            Entity.LastUpdateTime = CurrentTime;
         }
     }
-    
-    if (RemovedCount > 0)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Cleaned up %d invalid entities. Active count: %d"), 
-               RemovedCount, TotalActiveEntities);
-    }
 }
 
-void ACrowd_MassEntityManager::TestMassEntitySpawning()
+void UCrowd_MassEntityManager::ApplyMovementBehavior(FCrowd_EntityData& Entity, float DeltaTime)
 {
-    UE_LOG(LogTemp, Warning, TEXT("Testing Mass Entity spawning system..."));
-    SpawnMassEntitiesAcrossAllBiomes();
-}
-
-FVector ACrowd_MassEntityManager::GetBiomeCenter(EBiomeType BiomeType) const
-{
-    switch (BiomeType)
+    const float DistanceToTarget = FVector::Dist(Entity.CurrentLocation, Entity.TargetLocation);
+    
+    // If close to target, pick new waypoint
+    if (DistanceToTarget < 100.0f)
     {
-        case EBiomeType::Savanna: return FVector(0, 0, 100);
-        case EBiomeType::Swamp: return FVector(-50000, -45000, 100);
-        case EBiomeType::Forest: return FVector(-45000, 40000, 100);
-        case EBiomeType::Desert: return FVector(55000, 0, 100);
-        case EBiomeType::Mountain: return FVector(40000, 50000, 100);
-        default: return FVector::ZeroVector;
-    }
-}
-
-FMassEntityHandle ACrowd_MassEntityManager::SpawnSingleMassEntity(const FCrowd_EntitySpawnData& SpawnData)
-{
-    if (!MassEntitySubsystem)
-    {
-        return FMassEntityHandle();
+        Entity.TargetLocation = GetRandomWaypoint();
     }
     
-    // In a real implementation, this would create a Mass Entity with proper fragments
-    // For now, we'll create a placeholder handle
+    // Move towards target
+    const FVector Direction = (Entity.TargetLocation - Entity.CurrentLocation).GetSafeNormal();
+    float MovementSpeed = SpawnConfig.MovementSpeed;
     
-    // This is a simplified version - real Mass Entity spawning requires:
-    // 1. Entity archetype definition
-    // 2. Fragment composition
-    // 3. Proper entity creation through MassEntitySubsystem
+    // Adjust speed based on LOD level
+    switch (Entity.LODLevel)
+    {
+        case ECrowd_LODLevel::High:
+            MovementSpeed *= 1.0f;
+            break;
+        case ECrowd_LODLevel::Medium:
+            MovementSpeed *= 0.7f;
+            break;
+        case ECrowd_LODLevel::Low:
+            MovementSpeed *= 0.3f;
+            break;
+        default:
+            return;
+    }
     
-    UE_LOG(LogTemp, Log, TEXT("Spawning mass entity at %s with type %d"), 
-           *SpawnData.Location.ToString(), (int32)SpawnData.EntityType);
+    // Apply behavior-specific modifiers
+    switch (CurrentBehaviorMode)
+    {
+        case ECrowd_BehaviorMode::Wandering:
+            // Add some randomness to movement
+            MovementSpeed *= FMath::RandRange(0.8f, 1.2f);
+            break;
+        case ECrowd_BehaviorMode::Fleeing:
+            MovementSpeed *= 2.0f;
+            break;
+        case ECrowd_BehaviorMode::Gathering:
+            MovementSpeed *= 0.5f;
+            break;
+    }
     
-    // Return a mock handle for now - in real implementation this would be from MassEntitySubsystem
-    return FMassEntityHandle();
+    Entity.CurrentLocation += Direction * MovementSpeed * DeltaTime;
+}
+
+FVector UCrowd_MassEntityManager::GetRandomWaypoint() const
+{
+    if (PathfindingWaypoints.Num() == 0)
+    {
+        return FVector::ZeroVector;
+    }
+    
+    const int32 RandomIndex = FMath::RandRange(0, PathfindingWaypoints.Num() - 1);
+    return PathfindingWaypoints[RandomIndex];
+}
+
+void UCrowd_MassEntityManager::CreatePathfindingZone(FVector Center, float Radius, FString ZoneName)
+{
+    // Generate waypoints in circular pattern around center
+    const int32 WaypointsPerZone = 8;
+    
+    for (int32 i = 0; i < WaypointsPerZone; i++)
+    {
+        const float Angle = (2.0f * PI * i) / WaypointsPerZone;
+        const float Distance = FMath::RandRange(Radius * 0.3f, Radius * 0.8f);
+        
+        FVector Waypoint;
+        Waypoint.X = Center.X + Distance * FMath::Cos(Angle);
+        Waypoint.Y = Center.Y + Distance * FMath::Sin(Angle);
+        Waypoint.Z = Center.Z + FMath::RandRange(-50.0f, 50.0f);
+        
+        PathfindingWaypoints.Add(Waypoint);
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("Crowd_MassEntityManager: Created pathfinding zone '%s' with %d waypoints"), *ZoneName, WaypointsPerZone);
+}
+
+void UCrowd_MassEntityManager::ClearAllCrowdEntities()
+{
+    CrowdEntities.Empty();
+    UE_LOG(LogTemp, Log, TEXT("Crowd_MassEntityManager: Cleared all crowd entities"));
+}
+
+void UCrowd_MassEntityManager::SetSpawnConfiguration(const FCrowd_EntitySpawnConfig& NewConfig)
+{
+    SpawnConfig = NewConfig;
+    UE_LOG(LogTemp, Log, TEXT("Crowd_MassEntityManager: Updated spawn configuration"));
+}
+
+int32 UCrowd_MassEntityManager::GetActiveCrowdCount() const
+{
+    int32 ActiveCount = 0;
+    for (const FCrowd_EntityData& Entity : CrowdEntities)
+    {
+        if (Entity.bIsActive)
+        {
+            ActiveCount++;
+        }
+    }
+    return ActiveCount;
+}
+
+int32 UCrowd_MassEntityManager::GetHighLODCount() const
+{
+    int32 Count = 0;
+    for (const FCrowd_EntityData& Entity : CrowdEntities)
+    {
+        if (Entity.bIsActive && Entity.LODLevel == ECrowd_LODLevel::High)
+        {
+            Count++;
+        }
+    }
+    return Count;
+}
+
+int32 UCrowd_MassEntityManager::GetMediumLODCount() const
+{
+    int32 Count = 0;
+    for (const FCrowd_EntityData& Entity : CrowdEntities)
+    {
+        if (Entity.bIsActive && Entity.LODLevel == ECrowd_LODLevel::Medium)
+        {
+            Count++;
+        }
+    }
+    return Count;
+}
+
+int32 UCrowd_MassEntityManager::GetLowLODCount() const
+{
+    int32 Count = 0;
+    for (const FCrowd_EntityData& Entity : CrowdEntities)
+    {
+        if (Entity.bIsActive && Entity.LODLevel == ECrowd_LODLevel::Low)
+        {
+            Count++;
+        }
+    }
+    return Count;
+}
+
+void UCrowd_MassEntityManager::OptimizePerformance()
+{
+    // Remove inactive entities periodically
+    CrowdEntities.RemoveAll([](const FCrowd_EntityData& Entity)
+    {
+        return !Entity.bIsActive;
+    });
 }
