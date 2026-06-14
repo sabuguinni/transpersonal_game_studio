@@ -1,15 +1,39 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Components/ActorComponent.h"
-#include "Engine/StaticMesh.h"
-#include "Materials/MaterialInterface.h"
-#include "Materials/MaterialInstanceDynamic.h"
+#include "UObject/NoExportTypes.h"
+#include "Engine/DataTable.h"
 #include "SharedTypes.h"
 #include "Char_TribalCustomization.generated.h"
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FChar_TribalClothing
+struct FChar_TribalMarkingPattern
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal Markings")
+    FString PatternName;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal Markings")
+    UTexture2D* PatternTexture;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal Markings")
+    FLinearColor DefaultColor;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal Markings")
+    float Intensity;
+
+    FChar_TribalMarkingPattern()
+    {
+        PatternName = TEXT("None");
+        PatternTexture = nullptr;
+        DefaultColor = FLinearColor::White;
+        Intensity = 1.0f;
+    }
+};
+
+USTRUCT(BlueprintType)
+struct FChar_TribalClothingSet
 {
     GENERATED_BODY()
 
@@ -17,165 +41,121 @@ struct TRANSPERSONALGAME_API FChar_TribalClothing
     FString ClothingName;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Clothing")
-    TSoftObjectPtr<UStaticMesh> ClothingMesh;
+    USkeletalMesh* ChestPiece;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Clothing")
-    TSoftObjectPtr<UMaterialInterface> ClothingMaterial;
+    USkeletalMesh* LegPiece;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Clothing")
-    FVector AttachmentOffset;
+    USkeletalMesh* FootPiece;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Clothing")
-    FRotator AttachmentRotation;
+    UMaterialInterface* ClothingMaterial;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Clothing")
-    FName SocketName;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Clothing")
-    float WeatheringLevel;
-
-    FChar_TribalClothing()
+    FChar_TribalClothingSet()
     {
         ClothingName = TEXT("Basic Hide");
-        AttachmentOffset = FVector::ZeroVector;
-        AttachmentRotation = FRotator::ZeroRotator;
-        SocketName = NAME_None;
-        WeatheringLevel = 0.5f;
+        ChestPiece = nullptr;
+        LegPiece = nullptr;
+        FootPiece = nullptr;
+        ClothingMaterial = nullptr;
     }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FChar_TribalWeapon
+struct FChar_TribalWeaponSet
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weapon")
-    FString WeaponName;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weapons")
+    FString WeaponSetName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weapon")
-    TSoftObjectPtr<UStaticMesh> WeaponMesh;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weapons")
+    UStaticMesh* PrimaryWeapon;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weapon")
-    TSoftObjectPtr<UMaterialInterface> WeaponMaterial;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weapons")
+    UStaticMesh* SecondaryWeapon;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weapon")
-    FName AttachSocket;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weapons")
+    UStaticMesh* Shield;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weapon")
-    EChar_WeaponType WeaponType;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weapons")
+    UStaticMesh* RangedWeapon;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weapon")
-    float CraftingQuality;
-
-    FChar_TribalWeapon()
+    FChar_TribalWeaponSet()
     {
-        WeaponName = TEXT("Stone Spear");
-        AttachSocket = TEXT("hand_r");
-        WeaponType = EChar_WeaponType::Spear;
-        CraftingQuality = 0.5f;
+        WeaponSetName = TEXT("Stone Age Basic");
+        PrimaryWeapon = nullptr;
+        SecondaryWeapon = nullptr;
+        Shield = nullptr;
+        RangedWeapon = nullptr;
     }
 };
 
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FChar_TribalAccessory
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Accessory")
-    FString AccessoryName;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Accessory")
-    TSoftObjectPtr<UStaticMesh> AccessoryMesh;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Accessory")
-    TSoftObjectPtr<UMaterialInterface> AccessoryMaterial;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Accessory")
-    FName AttachSocket;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Accessory")
-    EChar_AccessoryType AccessoryType;
-
-    FChar_TribalAccessory()
-    {
-        AccessoryName = TEXT("Bone Necklace");
-        AttachSocket = TEXT("neck_01");
-        AccessoryType = EChar_AccessoryType::Necklace;
-    }
-};
-
-UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UChar_TribalCustomization : public UActorComponent
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API UChar_TribalCustomization : public UObject
 {
     GENERATED_BODY()
 
 public:
     UChar_TribalCustomization();
 
-protected:
-    virtual void BeginPlay() override;
+    // Customization Data Arrays
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Customization|Markings")
+    TArray<FChar_TribalMarkingPattern> AvailableMarkings;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal Clothing")
-    TArray<FChar_TribalClothing> AvailableClothing;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Customization|Clothing")
+    TArray<FChar_TribalClothingSet> AvailableClothing;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal Weapons")
-    TArray<FChar_TribalWeapon> AvailableWeapons;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Customization|Weapons")
+    TArray<FChar_TribalWeaponSet> AvailableWeapons;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal Accessories")
-    TArray<FChar_TribalAccessory> AvailableAccessories;
+    // Skin Tone Presets
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Customization|Appearance")
+    TArray<FLinearColor> SkinTonePresets;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Current Equipment")
-    FChar_TribalClothing CurrentClothing;
+    // Body Build Presets
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Customization|Appearance")
+    TArray<float> BodyBuildPresets;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Current Equipment")
-    FChar_TribalWeapon CurrentWeapon;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Current Equipment")
-    TArray<FChar_TribalAccessory> CurrentAccessories;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Attachment Components")
-    TArray<UStaticMeshComponent*> AttachedComponents;
-
-public:
+    // Customization Functions
     UFUNCTION(BlueprintCallable, Category = "Tribal Customization")
-    void EquipClothing(const FChar_TribalClothing& Clothing);
+    FChar_TribalMarkingPattern GetMarkingPattern(int32 Index) const;
 
     UFUNCTION(BlueprintCallable, Category = "Tribal Customization")
-    void EquipWeapon(const FChar_TribalWeapon& Weapon);
+    FChar_TribalClothingSet GetClothingSet(int32 Index) const;
 
     UFUNCTION(BlueprintCallable, Category = "Tribal Customization")
-    void EquipAccessory(const FChar_TribalAccessory& Accessory);
+    FChar_TribalWeaponSet GetWeaponSet(int32 Index) const;
 
     UFUNCTION(BlueprintCallable, Category = "Tribal Customization")
-    void RemoveAccessory(EChar_AccessoryType AccessoryType);
+    FLinearColor GetSkinTonePreset(int32 Index) const;
 
     UFUNCTION(BlueprintCallable, Category = "Tribal Customization")
-    void RandomizeTribalAppearance();
+    float GetBodyBuildPreset(int32 Index) const;
 
     UFUNCTION(BlueprintCallable, Category = "Tribal Customization")
-    void ApplyWeathering(float WeatheringAmount);
+    void InitializeDefaultCustomizations();
 
     UFUNCTION(BlueprintCallable, Category = "Tribal Customization")
-    void SetCraftingQuality(float QualityLevel);
+    FChar_TribalMarkingPattern CreateRandomMarkingPattern() const;
 
     UFUNCTION(BlueprintCallable, Category = "Tribal Customization")
-    FChar_TribalClothing GetRandomClothing();
+    FLinearColor GenerateRandomTribalColor() const;
 
     UFUNCTION(BlueprintCallable, Category = "Tribal Customization")
-    FChar_TribalWeapon GetRandomWeapon();
+    int32 GetMarkingPatternCount() const { return AvailableMarkings.Num(); }
 
     UFUNCTION(BlueprintCallable, Category = "Tribal Customization")
-    FChar_TribalAccessory GetRandomAccessory();
+    int32 GetClothingSetCount() const { return AvailableClothing.Num(); }
 
     UFUNCTION(BlueprintCallable, Category = "Tribal Customization")
-    void InitializeDefaultItems();
+    int32 GetWeaponSetCount() const { return AvailableWeapons.Num(); }
 
 private:
-    void CreateClothingItems();
-    void CreateWeaponItems();
-    void CreateAccessoryItems();
-    
-    UStaticMeshComponent* CreateAttachedComponent();
-    void AttachComponentToSocket(UStaticMeshComponent* Component, FName SocketName, const FVector& Offset, const FRotator& Rotation);
-    void UpdateMaterialWeathering(UMaterialInstanceDynamic* Material, float WeatheringLevel);
+    void SetupDefaultMarkings();
+    void SetupDefaultClothing();
+    void SetupDefaultWeapons();
+    void SetupDefaultSkinTones();
+    void SetupDefaultBodyBuilds();
 };
