@@ -1,267 +1,314 @@
 #include "Build_IntegrationValidator.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "GameFramework/Character.h"
-#include "GameFramework/PlayerStart.h"
-#include "Engine/Light.h"
-#include "Landscape/Landscape.h"
-#include "FoliageInstancedStaticMeshComponent.h"
-#include "AIController.h"
-#include "GameFramework/Pawn.h"
+#include "EngineUtils.h"
+#include "GameFramework/Actor.h"
 #include "UObject/UObjectGlobals.h"
-#include "Engine/ObjectLibrary.h"
+#include "Misc/DateTime.h"
+#include "HAL/PlatformFilemanager.h"
 
 UBuild_IntegrationValidator::UBuild_IntegrationValidator()
 {
-    CriticalSystemNames.Add(TEXT("TranspersonalCharacter"));
-    CriticalSystemNames.Add(TEXT("TranspersonalGameState"));
-    CriticalSystemNames.Add(TEXT("PCGWorldGenerator"));
-    CriticalSystemNames.Add(TEXT("FoliageManager"));
-    CriticalSystemNames.Add(TEXT("CrowdSimulationManager"));
-    CriticalSystemNames.Add(TEXT("ProceduralWorldManager"));
-    CriticalSystemNames.Add(TEXT("BuildIntegrationManager"));
+    PrimaryComponentTick.bCanEverTick = true;
+    PrimaryComponentTick.TickInterval = 5.0f; // Validate every 5 seconds
+    
+    CurrentBuildStatus = EBuild_IntegrationStatus::Unknown;
+    ValidationInterval = 30.0f; // Full validation every 30 seconds
+    MaxActorCount = 8000;
+    MaxDinosaurCount = 150;
+    LastValidationTime = 0.0f;
+    bValidationEnabled = true;
+    
+    // Initialize core module names
+    CoreModuleNames.Add(TEXT("TranspersonalGameState"));
+    CoreModuleNames.Add(TEXT("TranspersonalCharacter"));
+    CoreModuleNames.Add(TEXT("PCGWorldGenerator"));
+    CoreModuleNames.Add(TEXT("FoliageManager"));
+    CoreModuleNames.Add(TEXT("CrowdSimulationManager"));
 }
 
-FBuild_IntegrationReport UBuild_IntegrationValidator::ValidateAllSystems()
+void UBuild_IntegrationValidator::BeginPlay()
 {
-    FBuild_IntegrationReport Report;
+    Super::BeginPlay();
     
-    // Validate each critical system
-    for (const FString& SystemName : CriticalSystemNames)
-    {
-        FString ClassName = FString::Printf(TEXT("/Script/TranspersonalGame.%s"), *SystemName);
-        UClass* SystemClass = LoadClass<UObject>(nullptr, *ClassName);
-        
-        FBuild_SystemReport SystemReport = ValidateSystem(SystemName, SystemClass);
-        Report.SystemReports.Add(SystemReport);
-        
-        if (SystemReport.Status == EBuild_SystemStatus::Functional)
-        {
-            Report.FunctionalSystemCount++;
-        }
-    }
+    // Perform initial validation
+    ValidateSystemIntegration();
     
-    // Calculate overall metrics
-    Report.TotalActorCount = GetActorCount();
-    Report.OverallHealthScore = (float)Report.FunctionalSystemCount / (float)CriticalSystemNames.Num() * 100.0f;
-    Report.bIsGameReady = (Report.OverallHealthScore >= 70.0f) && (Report.TotalActorCount > 0);
-    
-    LastReport = Report;
-    return Report;
+    UE_LOG(LogTemp, Log, TEXT("Build_IntegrationValidator: System validation started"));
 }
 
-FBuild_SystemReport UBuild_IntegrationValidator::ValidateSystem(const FString& SystemName, UClass* SystemClass)
+void UBuild_IntegrationValidator::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+{
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+    
+    if (!bValidationEnabled)
+        return;
+    
+    LastValidationTime += DeltaTime;
+    
+    // Perform full validation at intervals
+    if (LastValidationTime >= ValidationInterval)
+    {
+        ValidateSystemIntegration();
+        LastValidationTime = 0.0f;
+    }
+}
+
+FBuild_SystemReport UBuild_IntegrationValidator::ValidateSystemIntegration()
 {
     FBuild_SystemReport Report;
-    Report.SystemName = SystemName;
+    Report.BuildTimestamp = FDateTime::Now().ToString();
     
-    if (!SystemClass)
+    // Validate module loading
+    bool bModulesHealthy = ValidateModuleLoading();
+    
+    // Validate actor counts
+    bool bActorCountsHealthy = ValidateActorCounts();
+    
+    // Validate core gameplay
+    bool bGameplayHealthy = ValidateCoreGameplay();
+    
+    // Count total actors
+    UWorld* World = GetWorld();
+    if (World)
     {
-        Report.Status = EBuild_SystemStatus::Failed;
-        Report.ErrorMessage = TEXT("Class not found or failed to load");
-        Report.PerformanceScore = 0.0f;
-        return Report;
+        int32 ActorCount = 0;
+        for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+        {
+            ActorCount++;
+        }
+        Report.TotalActors = ActorCount;
+        
+        // Count dinosaurs
+        TArray<FString> DinoKeywords = {TEXT("trex"), TEXT("raptor"), TEXT("brachi"), TEXT("tricera"), TEXT("ankylo")};
+        Report.DinosaurCount = CountActorsByKeyword(DinoKeywords);
     }
     
-    // Test class instantiation
-    if (!SystemClass->GetDefaultObject())
+    // Count loaded modules
+    int32 LoadedCount = 0;
+    for (const FString& ModuleName : CoreModuleNames)
     {
-        Report.Status = EBuild_SystemStatus::Failed;
-        Report.ErrorMessage = TEXT("Default object construction failed");
-        Report.PerformanceScore = 0.0f;
-        return Report;
+        FBuild_ModuleStatus ModuleStatus = ValidateModule(ModuleName, ModuleName);
+        Report.ModuleStatuses.Add(ModuleStatus);
+        if (ModuleStatus.bIsLoaded)
+        {
+            LoadedCount++;
+        }
     }
+    Report.LoadedModules = LoadedCount;
     
-    // Measure performance
-    Report.PerformanceScore = MeasureSystemPerformance(SystemClass);
-    
-    // Check dependencies
-    if (!CheckSystemDependencies(SystemName))
+    // Determine overall status
+    if (bModulesHealthy && bActorCountsHealthy && bGameplayHealthy)
     {
-        Report.Status = EBuild_SystemStatus::Degraded;
-        Report.ErrorMessage = TEXT("Missing dependencies");
+        Report.OverallStatus = EBuild_IntegrationStatus::Healthy;
+    }
+    else if (LoadedCount >= 3 && Report.TotalActors <= MaxActorCount)
+    {
+        Report.OverallStatus = EBuild_IntegrationStatus::Warning;
     }
     else
     {
-        Report.Status = EBuild_SystemStatus::Functional;
-        Report.ErrorMessage = TEXT("System operational");
+        Report.OverallStatus = EBuild_IntegrationStatus::Critical;
     }
+    
+    CurrentBuildStatus = Report.OverallStatus;
+    LastSystemReport = Report;
+    
+    // Log status
+    FString StatusString = TEXT("Unknown");
+    switch (Report.OverallStatus)
+    {
+        case EBuild_IntegrationStatus::Healthy: StatusString = TEXT("Healthy"); break;
+        case EBuild_IntegrationStatus::Warning: StatusString = TEXT("Warning"); break;
+        case EBuild_IntegrationStatus::Critical: StatusString = TEXT("Critical"); break;
+        case EBuild_IntegrationStatus::Failed: StatusString = TEXT("Failed"); break;
+    }
+    
+    LogIntegrationStatus(FString::Printf(TEXT("System Status: %s | Actors: %d | Modules: %d/%d | Dinosaurs: %d"),
+        *StatusString, Report.TotalActors, Report.LoadedModules, CoreModuleNames.Num(), Report.DinosaurCount));
     
     return Report;
 }
 
-bool UBuild_IntegrationValidator::ValidateModuleCompilation()
+bool UBuild_IntegrationValidator::ValidateModuleLoading()
 {
-    // Check if critical classes can be loaded
-    for (const FString& SystemName : CriticalSystemNames)
+    int32 LoadedCount = 0;
+    
+    for (const FString& ModuleName : CoreModuleNames)
     {
-        if (!ValidateClassLoading(SystemName))
+        FString ClassName = FString::Printf(TEXT("/Script/TranspersonalGame.%s"), *ModuleName);
+        UClass* LoadedClass = LoadClass<UObject>(nullptr, *ClassName);
+        
+        if (LoadedClass)
         {
-            return false;
+            LoadedCount++;
+        }
+        else
+        {
+            LogIntegrationStatus(FString::Printf(TEXT("Failed to load module: %s"), *ModuleName), true);
         }
     }
-    return true;
+    
+    bool bHealthy = LoadedCount >= (CoreModuleNames.Num() * 0.6f); // At least 60% loaded
+    return bHealthy;
 }
 
-int32 UBuild_IntegrationValidator::GetActorCount()
+bool UBuild_IntegrationValidator::ValidateActorCounts()
 {
-    UWorld* World = GEngine ? GEngine->GetCurrentPlayWorld() : nullptr;
+    UWorld* World = GetWorld();
     if (!World)
+        return false;
+    
+    int32 TotalActors = 0;
+    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
     {
-        // Try to get editor world
-        for (const FWorldContext& Context : GEngine->GetWorldContexts())
+        TotalActors++;
+    }
+    
+    TArray<FString> DinoKeywords = {TEXT("trex"), TEXT("raptor"), TEXT("brachi"), TEXT("tricera"), TEXT("ankylo")};
+    int32 DinoCount = CountActorsByKeyword(DinoKeywords);
+    
+    bool bActorCountHealthy = TotalActors <= MaxActorCount;
+    bool bDinoCountHealthy = DinoCount <= MaxDinosaurCount;
+    
+    if (!bActorCountHealthy)
+    {
+        LogIntegrationStatus(FString::Printf(TEXT("Actor count exceeded: %d/%d"), TotalActors, MaxActorCount), true);
+    }
+    
+    if (!bDinoCountHealthy)
+    {
+        LogIntegrationStatus(FString::Printf(TEXT("Dinosaur count exceeded: %d/%d"), DinoCount, MaxDinosaurCount), true);
+    }
+    
+    return bActorCountHealthy && bDinoCountHealthy;
+}
+
+bool UBuild_IntegrationValidator::ValidateCoreGameplay()
+{
+    UWorld* World = GetWorld();
+    if (!World)
+        return false;
+    
+    // Check for essential gameplay elements
+    bool bHasPlayerStart = false;
+    bool bHasLighting = false;
+    bool bHasGameMode = false;
+    
+    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+    {
+        AActor* Actor = *ActorItr;
+        FString ClassName = Actor->GetClass()->GetName().ToLower();
+        
+        if (ClassName.Contains(TEXT("playerstart")))
         {
-            if (Context.WorldType == EWorldType::Editor)
+            bHasPlayerStart = true;
+        }
+        else if (ClassName.Contains(TEXT("light")))
+        {
+            bHasLighting = true;
+        }
+        else if (ClassName.Contains(TEXT("gamemode")))
+        {
+            bHasGameMode = true;
+        }
+    }
+    
+    bool bGameplayHealthy = bHasPlayerStart && bHasLighting;
+    
+    if (!bGameplayHealthy)
+    {
+        LogIntegrationStatus(TEXT("Core gameplay validation failed - missing essential elements"), true);
+    }
+    
+    return bGameplayHealthy;
+}
+
+void UBuild_IntegrationValidator::GenerateBuildReport()
+{
+    FBuild_SystemReport Report = ValidateSystemIntegration();
+    
+    FString ReportText = FString::Printf(TEXT(
+        "=== TRANSPERSONAL GAME STUDIO - BUILD INTEGRATION REPORT ===\n"
+        "Timestamp: %s\n"
+        "Overall Status: %s\n"
+        "Total Actors: %d\n"
+        "Dinosaur Count: %d\n"
+        "Loaded Modules: %d/%d\n"
+        "\nModule Details:\n"
+    ), *Report.BuildTimestamp, 
+       *UEnum::GetValueAsString(Report.OverallStatus),
+       Report.TotalActors,
+       Report.DinosaurCount,
+       Report.LoadedModules,
+       CoreModuleNames.Num());
+    
+    for (const FBuild_ModuleStatus& ModuleStatus : Report.ModuleStatuses)
+    {
+        ReportText += FString::Printf(TEXT("- %s: %s\n"), 
+            *ModuleStatus.ModuleName, 
+            ModuleStatus.bIsLoaded ? TEXT("LOADED") : TEXT("FAILED"));
+    }
+    
+    ReportText += TEXT("=== END REPORT ===\n");
+    
+    UE_LOG(LogTemp, Log, TEXT("%s"), *ReportText);
+    LogIntegrationStatus(TEXT("Build report generated successfully"));
+}
+
+FBuild_ModuleStatus UBuild_IntegrationValidator::ValidateModule(const FString& ModuleName, const FString& ClassName)
+{
+    FBuild_ModuleStatus Status;
+    Status.ModuleName = ModuleName;
+    
+    FString FullClassName = FString::Printf(TEXT("/Script/TranspersonalGame.%s"), *ClassName);
+    UClass* LoadedClass = LoadClass<UObject>(nullptr, *FullClassName);
+    
+    Status.bIsLoaded = (LoadedClass != nullptr);
+    Status.ClassCount = Status.bIsLoaded ? 1 : 0;
+    
+    if (!Status.bIsLoaded)
+    {
+        Status.ErrorMessage = FString::Printf(TEXT("Failed to load class: %s"), *FullClassName);
+    }
+    
+    return Status;
+}
+
+int32 UBuild_IntegrationValidator::CountActorsByKeyword(const TArray<FString>& Keywords)
+{
+    UWorld* World = GetWorld();
+    if (!World)
+        return 0;
+    
+    int32 Count = 0;
+    
+    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+    {
+        AActor* Actor = *ActorItr;
+        FString ActorLabel = Actor->GetActorLabel().ToLower();
+        
+        for (const FString& Keyword : Keywords)
+        {
+            if (ActorLabel.Contains(Keyword.ToLower()))
             {
-                World = Context.World();
-                break;
+                Count++;
+                break; // Don't double-count actors with multiple keywords
             }
         }
     }
     
-    if (World)
-    {
-        return World->GetActorCount();
-    }
-    
-    return 0;
+    return Count;
 }
 
-float UBuild_IntegrationValidator::CalculatePerformanceScore()
+void UBuild_IntegrationValidator::LogIntegrationStatus(const FString& Message, bool bIsError)
 {
-    float Score = 100.0f;
-    
-    int32 ActorCount = GetActorCount();
-    
-    // Penalize high actor counts
-    if (ActorCount > 8000)
+    if (bIsError)
     {
-        Score -= 30.0f;
+        UE_LOG(LogTemp, Error, TEXT("Build_IntegrationValidator: %s"), *Message);
     }
-    else if (ActorCount > 6000)
+    else
     {
-        Score -= 15.0f;
+        UE_LOG(LogTemp, Log, TEXT("Build_IntegrationValidator: %s"), *Message);
     }
-    
-    // Check system functionality
-    int32 FunctionalSystems = 0;
-    for (const FString& SystemName : CriticalSystemNames)
-    {
-        if (ValidateClassLoading(SystemName))
-        {
-            FunctionalSystems++;
-        }
-    }
-    
-    float SystemScore = (float)FunctionalSystems / (float)CriticalSystemNames.Num() * 50.0f;
-    Score = FMath::Min(Score, 50.0f + SystemScore);
-    
-    return FMath::Clamp(Score, 0.0f, 100.0f);
-}
-
-bool UBuild_IntegrationValidator::ValidateCriticalSystems()
-{
-    int32 FunctionalCount = 0;
-    
-    for (const FString& SystemName : CriticalSystemNames)
-    {
-        if (ValidateClassLoading(SystemName))
-        {
-            FunctionalCount++;
-        }
-    }
-    
-    // Require at least 70% of systems to be functional
-    float FunctionalPercentage = (float)FunctionalCount / (float)CriticalSystemNames.Num();
-    return FunctionalPercentage >= 0.7f;
-}
-
-bool UBuild_IntegrationValidator::ValidateClassLoading(const FString& ClassName)
-{
-    FString FullClassName = FString::Printf(TEXT("/Script/TranspersonalGame.%s"), *ClassName);
-    UClass* LoadedClass = LoadClass<UObject>(nullptr, *FullClassName);
-    
-    if (!LoadedClass)
-    {
-        return false;
-    }
-    
-    // Try to get default object
-    UObject* DefaultObject = LoadedClass->GetDefaultObject();
-    return DefaultObject != nullptr;
-}
-
-float UBuild_IntegrationValidator::MeasureSystemPerformance(UClass* SystemClass)
-{
-    if (!SystemClass)
-    {
-        return 0.0f;
-    }
-    
-    // Basic performance metric based on class complexity
-    float Score = 100.0f;
-    
-    // Check number of properties
-    int32 PropertyCount = 0;
-    for (TFieldIterator<FProperty> PropIt(SystemClass); PropIt; ++PropIt)
-    {
-        PropertyCount++;
-    }
-    
-    // Penalize overly complex classes
-    if (PropertyCount > 50)
-    {
-        Score -= 20.0f;
-    }
-    else if (PropertyCount > 30)
-    {
-        Score -= 10.0f;
-    }
-    
-    // Check if default object constructs quickly
-    double StartTime = FPlatformTime::Seconds();
-    UObject* DefaultObject = SystemClass->GetDefaultObject();
-    double ConstructionTime = FPlatformTime::Seconds() - StartTime;
-    
-    if (ConstructionTime > 0.1)
-    {
-        Score -= 30.0f;
-    }
-    else if (ConstructionTime > 0.05)
-    {
-        Score -= 15.0f;
-    }
-    
-    return FMath::Clamp(Score, 0.0f, 100.0f);
-}
-
-bool UBuild_IntegrationValidator::CheckSystemDependencies(const FString& SystemName)
-{
-    // Basic dependency validation
-    // In a full implementation, this would check module dependencies,
-    // required components, etc.
-    
-    if (SystemName == TEXT("TranspersonalCharacter"))
-    {
-        // Character depends on movement component
-        UClass* MovementClass = LoadClass<UObject>(nullptr, TEXT("/Script/Engine.CharacterMovementComponent"));
-        return MovementClass != nullptr;
-    }
-    
-    if (SystemName == TEXT("FoliageManager"))
-    {
-        // Foliage depends on landscape
-        UClass* LandscapeClass = LoadClass<UObject>(nullptr, TEXT("/Script/Landscape.Landscape"));
-        return LandscapeClass != nullptr;
-    }
-    
-    if (SystemName == TEXT("CrowdSimulationManager"))
-    {
-        // Crowd simulation depends on AI
-        UClass* AIClass = LoadClass<UObject>(nullptr, TEXT("/Script/AIModule.AIController"));
-        return AIClass != nullptr;
-    }
-    
-    // Default to true for other systems
-    return true;
 }
