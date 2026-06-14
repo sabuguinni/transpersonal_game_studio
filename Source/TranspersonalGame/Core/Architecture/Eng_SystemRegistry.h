@@ -4,20 +4,8 @@
 #include "Engine/GameInstanceSubsystem.h"
 #include "Eng_SystemRegistry.generated.h"
 
-UENUM(BlueprintType)
-enum class EEng_SystemType : uint8
-{
-    WorldGeneration,
-    BiomeManagement,
-    PerformanceMonitoring,
-    ResourceStreaming,
-    PhysicsCore,
-    AudioCore,
-    VFXCore
-};
-
 USTRUCT(BlueprintType)
-struct FEng_SystemInfo
+struct TRANSPERSONALGAME_API FEng_SystemInfo
 {
     GENERATED_BODY()
 
@@ -25,21 +13,19 @@ struct FEng_SystemInfo
     FString SystemName;
 
     UPROPERTY(BlueprintReadOnly)
-    EEng_SystemType SystemType;
-
-    UPROPERTY(BlueprintReadOnly)
-    bool bIsActive;
+    bool bIsInitialized;
 
     UPROPERTY(BlueprintReadOnly)
     float InitializationTime;
 
+    UPROPERTY(BlueprintReadOnly)
+    int32 Priority;
+
     FEng_SystemInfo()
-    {
-        SystemName = TEXT("Unknown");
-        SystemType = EEng_SystemType::WorldGeneration;
-        bIsActive = false;
-        InitializationTime = 0.0f;
-    }
+        : bIsInitialized(false)
+        , InitializationTime(0.0f)
+        , Priority(0)
+    {}
 };
 
 UCLASS()
@@ -52,10 +38,10 @@ public:
     virtual void Deinitialize() override;
 
     UFUNCTION(BlueprintCallable, Category = "System Registry")
-    void RegisterSystem(const FString& SystemName, EEng_SystemType SystemType);
+    void RegisterSystem(const FString& SystemName, int32 Priority = 0);
 
     UFUNCTION(BlueprintCallable, Category = "System Registry")
-    void UnregisterSystem(const FString& SystemName);
+    void MarkSystemInitialized(const FString& SystemName, float InitTime);
 
     UFUNCTION(BlueprintCallable, Category = "System Registry")
     bool IsSystemRegistered(const FString& SystemName) const;
@@ -70,5 +56,7 @@ private:
     UPROPERTY()
     TMap<FString, FEng_SystemInfo> RegisteredSystems;
 
-    void LogSystemStatus() const;
+    void LogSystemStatus();
 };
+
+#include "Eng_SystemRegistry.generated.h"
