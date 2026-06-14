@@ -1,377 +1,154 @@
 #include "World_BiomeSystem.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "DrawDebugHelpers.h"
-#include "Kismet/KismetMathLibrary.h"
+#include "Kismet/GameplayStatics.h"
 #include "Math/UnrealMathUtility.h"
 
 UWorld_BiomeSystem::UWorld_BiomeSystem()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickGroup = TG_PostUpdateWork;
-    
-    BiomeNoiseScale = 0.001f;
-    BiomeBlendDistance = 1000.0f;
-    BiomeResolution = 128;
+    BiomeTransitionRadius = 5000.0f;
+    BiomeResolution = 512;
+    bEnableBiomeTransitions = true;
 }
 
 void UWorld_BiomeSystem::BeginPlay()
 {
     Super::BeginPlay();
-    
-    InitializeBiomeDatabase();
-    GenerateDefaultBiomes();
-    UpdateBiomeTransitions();
+    InitializeBiomes();
 }
 
 void UWorld_BiomeSystem::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
     
-    // Update biome system periodically
-    static float UpdateTimer = 0.0f;
-    UpdateTimer += DeltaTime;
-    
-    if (UpdateTimer >= 5.0f) // Update every 5 seconds
+    if (bEnableBiomeTransitions)
     {
         UpdateBiomeTransitions();
-        UpdateTimer = 0.0f;
     }
 }
 
-void UWorld_BiomeSystem::InitializeBiomeDatabase()
+void UWorld_BiomeSystem::InitializeBiomes()
 {
-    // Forest biome
-    FWorld_BiomeData ForestData;
-    ForestData.BiomeType = EWorld_BiomeType::Forest;
-    ForestData.BiomeName = TEXT("Dense Forest");
-    ForestData.BiomeColor = FLinearColor(0.2f, 0.6f, 0.2f, 1.0f);
-    ForestData.Temperature = 18.0f;
-    ForestData.Humidity = 0.8f;
-    ForestData.Elevation = 100.0f;
-    ForestData.VegetationTypes = {TEXT("Oak_Tree"), TEXT("Pine_Tree"), TEXT("Fern"), TEXT("Moss")};
-    ForestData.WildlifeTypes = {TEXT("Deer"), TEXT("Bear"), TEXT("Wolf"), TEXT("Rabbit")};
-    ForestData.SpawnDensity = 1.2f;
-    BiomeDatabase.Add(EWorld_BiomeType::Forest, ForestData);
-
-    // Plains biome
-    FWorld_BiomeData PlainsData;
-    PlainsData.BiomeType = EWorld_BiomeType::Plains;
-    PlainsData.BiomeName = TEXT("Open Plains");
-    PlainsData.BiomeColor = FLinearColor(0.4f, 0.7f, 0.3f, 1.0f);
-    PlainsData.Temperature = 22.0f;
-    PlainsData.Humidity = 0.4f;
-    PlainsData.Elevation = 50.0f;
-    PlainsData.VegetationTypes = {TEXT("Grass"), TEXT("Wildflower"), TEXT("Shrub")};
-    PlainsData.WildlifeTypes = {TEXT("Bison"), TEXT("Horse"), TEXT("Eagle")};
-    PlainsData.SpawnDensity = 0.8f;
-    BiomeDatabase.Add(EWorld_BiomeType::Plains, PlainsData);
-
-    // Swampland biome
-    FWorld_BiomeData SwampData;
-    SwampData.BiomeType = EWorld_BiomeType::Swampland;
-    SwampData.BiomeName = TEXT("Misty Swampland");
-    SwampData.BiomeColor = FLinearColor(0.3f, 0.4f, 0.2f, 1.0f);
-    SwampData.Temperature = 25.0f;
-    SwampData.Humidity = 0.95f;
-    SwampData.Elevation = -20.0f;
-    SwampData.VegetationTypes = {TEXT("Cypress_Tree"), TEXT("Moss"), TEXT("Reed"), TEXT("Lily_Pad")};
-    SwampData.WildlifeTypes = {TEXT("Alligator"), TEXT("Frog"), TEXT("Heron")};
-    SwampData.SpawnDensity = 1.0f;
-    BiomeDatabase.Add(EWorld_BiomeType::Swampland, SwampData);
-
-    // Canyon biome
-    FWorld_BiomeData CanyonData;
-    CanyonData.BiomeType = EWorld_BiomeType::Canyon;
-    CanyonData.BiomeName = TEXT("Red Rock Canyon");
-    CanyonData.BiomeColor = FLinearColor(0.8f, 0.4f, 0.2f, 1.0f);
-    CanyonData.Temperature = 30.0f;
-    CanyonData.Humidity = 0.2f;
-    CanyonData.Elevation = 200.0f;
-    CanyonData.VegetationTypes = {TEXT("Cactus"), TEXT("Desert_Shrub"), TEXT("Rock_Formation")};
-    CanyonData.WildlifeTypes = {TEXT("Lizard"), TEXT("Snake"), TEXT("Vulture")};
-    CanyonData.SpawnDensity = 0.5f;
-    BiomeDatabase.Add(EWorld_BiomeType::Canyon, CanyonData);
-
-    // Mountains biome
-    FWorld_BiomeData MountainData;
-    MountainData.BiomeType = EWorld_BiomeType::Mountains;
-    MountainData.BiomeName = TEXT("Rocky Mountains");
-    MountainData.BiomeColor = FLinearColor(0.5f, 0.5f, 0.6f, 1.0f);
-    MountainData.Temperature = 10.0f;
-    MountainData.Humidity = 0.6f;
-    MountainData.Elevation = 500.0f;
-    MountainData.VegetationTypes = {TEXT("Pine_Tree"), TEXT("Rock"), TEXT("Alpine_Grass")};
-    MountainData.WildlifeTypes = {TEXT("Mountain_Goat"), TEXT("Eagle"), TEXT("Bear")};
-    MountainData.SpawnDensity = 0.6f;
-    BiomeDatabase.Add(EWorld_BiomeType::Mountains, MountainData);
-
-    UE_LOG(LogTemp, Warning, TEXT("BiomeSystem: Initialized %d biome types"), BiomeDatabase.Num());
+    CreateDefaultBiomes();
+    UE_LOG(LogTemp, Warning, TEXT("BiomeSystem: Initialized %d biomes"), BiomeDatabase.Num());
 }
 
-EWorld_BiomeType UWorld_BiomeSystem::GetBiomeAtLocation(FVector WorldLocation) const
+void UWorld_BiomeSystem::CreateDefaultBiomes()
 {
-    float HighestInfluence = 0.0f;
-    EWorld_BiomeType DominantBiome = EWorld_BiomeType::Forest;
+    BiomeDatabase.Empty();
 
-    // Check registered biome zones first
-    for (const FBiomeZone& Zone : BiomeZones)
-    {
-        float Influence = CalculateDistanceInfluence(WorldLocation, Zone);
-        if (Influence > HighestInfluence)
-        {
-            HighestInfluence = Influence;
-            DominantBiome = Zone.BiomeType;
-        }
-    }
+    // Swampland Biome
+    FWorld_BiomeData SwampBiome;
+    SwampBiome.BiomeName = TEXT("Swampland");
+    SwampBiome.BiomeColor = FLinearColor(0.2f, 0.4f, 0.3f, 1.0f);
+    SwampBiome.Temperature = 28.0f;
+    SwampBiome.Humidity = 0.9f;
+    SwampBiome.Elevation = -50.0f;
+    BiomeDatabase.Add(SwampBiome.BiomeName, SwampBiome);
 
-    // If no strong zone influence, use noise-based determination
-    if (HighestInfluence < 0.3f)
-    {
-        float NoiseValue = CalculateNoiseValue(WorldLocation);
-        DominantBiome = DetermineBiomeFromNoise(NoiseValue, WorldLocation);
-    }
+    // Canyon Biome
+    FWorld_BiomeData CanyonBiome;
+    CanyonBiome.BiomeName = TEXT("Canyon");
+    CanyonBiome.BiomeColor = FLinearColor(0.8f, 0.4f, 0.2f, 1.0f);
+    CanyonBiome.Temperature = 35.0f;
+    CanyonBiome.Humidity = 0.2f;
+    CanyonBiome.Elevation = 200.0f;
+    BiomeDatabase.Add(CanyonBiome.BiomeName, CanyonBiome);
 
-    return DominantBiome;
+    // Forest Biome
+    FWorld_BiomeData ForestBiome;
+    ForestBiome.BiomeName = TEXT("Forest");
+    ForestBiome.BiomeColor = FLinearColor(0.3f, 0.6f, 0.2f, 1.0f);
+    ForestBiome.Temperature = 22.0f;
+    ForestBiome.Humidity = 0.7f;
+    ForestBiome.Elevation = 100.0f;
+    BiomeDatabase.Add(ForestBiome.BiomeName, ForestBiome);
+
+    // Plains Biome
+    FWorld_BiomeData PlainsBiome;
+    PlainsBiome.BiomeName = TEXT("Plains");
+    PlainsBiome.BiomeColor = FLinearColor(0.6f, 0.8f, 0.3f, 1.0f);
+    PlainsBiome.Temperature = 25.0f;
+    PlainsBiome.Humidity = 0.4f;
+    PlainsBiome.Elevation = 50.0f;
+    BiomeDatabase.Add(PlainsBiome.BiomeName, PlainsBiome);
+
+    // Mountain Biome
+    FWorld_BiomeData MountainBiome;
+    MountainBiome.BiomeName = TEXT("Mountain");
+    MountainBiome.BiomeColor = FLinearColor(0.5f, 0.5f, 0.6f, 1.0f);
+    MountainBiome.Temperature = 15.0f;
+    MountainBiome.Humidity = 0.3f;
+    MountainBiome.Elevation = 500.0f;
+    BiomeDatabase.Add(MountainBiome.BiomeName, MountainBiome);
 }
 
-FWorld_BiomeData UWorld_BiomeSystem::GetBiomeData(EWorld_BiomeType BiomeType) const
+FWorld_BiomeData UWorld_BiomeSystem::GetBiomeAtLocation(const FVector& WorldLocation)
 {
-    if (const FWorld_BiomeData* FoundData = BiomeDatabase.Find(BiomeType))
-    {
-        return *FoundData;
-    }
+    // Simple noise-based biome selection for now
+    float NoiseX = WorldLocation.X * 0.0001f;
+    float NoiseY = WorldLocation.Y * 0.0001f;
+    float NoiseValue = FMath::PerlinNoise2D(FVector2D(NoiseX, NoiseY));
     
-    // Return default forest data if not found
-    return BiomeDatabase.FindRef(EWorld_BiomeType::Forest);
-}
-
-float UWorld_BiomeSystem::GetBiomeInfluence(FVector WorldLocation, EWorld_BiomeType BiomeType) const
-{
-    float TotalInfluence = 0.0f;
-
-    // Check zone-based influence
-    for (const FBiomeZone& Zone : BiomeZones)
+    // Map noise to biome types
+    if (NoiseValue < -0.4f)
     {
-        if (Zone.BiomeType == BiomeType)
-        {
-            TotalInfluence += CalculateDistanceInfluence(WorldLocation, Zone);
-        }
+        return BiomeDatabase.Contains(TEXT("Swampland")) ? BiomeDatabase[TEXT("Swampland")] : FWorld_BiomeData();
     }
-
-    // Add noise-based influence
-    float NoiseValue = CalculateNoiseValue(WorldLocation);
-    EWorld_BiomeType NoiseBiome = DetermineBiomeFromNoise(NoiseValue, WorldLocation);
-    if (NoiseBiome == BiomeType)
+    else if (NoiseValue < -0.1f)
     {
-        TotalInfluence += 0.5f;
+        return BiomeDatabase.Contains(TEXT("Forest")) ? BiomeDatabase[TEXT("Forest")] : FWorld_BiomeData();
     }
-
-    return FMath::Clamp(TotalInfluence, 0.0f, 1.0f);
-}
-
-TArray<EWorld_BiomeType> UWorld_BiomeSystem::GetNearbyBiomes(FVector WorldLocation, float Radius) const
-{
-    TArray<EWorld_BiomeType> NearbyBiomes;
-    TSet<EWorld_BiomeType> UniqueTypes;
-
-    // Sample points in a circle around the location
-    int32 SampleCount = 16;
-    for (int32 i = 0; i < SampleCount; ++i)
+    else if (NoiseValue < 0.2f)
     {
-        float Angle = (2.0f * PI * i) / SampleCount;
-        FVector SamplePoint = WorldLocation + FVector(
-            FMath::Cos(Angle) * Radius,
-            FMath::Sin(Angle) * Radius,
-            0.0f
-        );
-
-        EWorld_BiomeType BiomeAtPoint = GetBiomeAtLocation(SamplePoint);
-        UniqueTypes.Add(BiomeAtPoint);
+        return BiomeDatabase.Contains(TEXT("Plains")) ? BiomeDatabase[TEXT("Plains")] : FWorld_BiomeData();
     }
-
-    // Convert set to array
-    for (EWorld_BiomeType BiomeType : UniqueTypes)
+    else if (NoiseValue < 0.5f)
     {
-        NearbyBiomes.Add(BiomeType);
+        return BiomeDatabase.Contains(TEXT("Canyon")) ? BiomeDatabase[TEXT("Canyon")] : FWorld_BiomeData();
     }
-
-    return NearbyBiomes;
-}
-
-void UWorld_BiomeSystem::RegisterBiomeZone(FVector Center, float Radius, EWorld_BiomeType BiomeType)
-{
-    FBiomeZone NewZone;
-    NewZone.Center = Center;
-    NewZone.Radius = Radius;
-    NewZone.BiomeType = BiomeType;
-    NewZone.Strength = 1.0f;
-
-    BiomeZones.Add(NewZone);
-    
-    UE_LOG(LogTemp, Warning, TEXT("BiomeSystem: Registered %s biome zone at %s with radius %.1f"), 
-        *UEnum::GetValueAsString(BiomeType), *Center.ToString(), Radius);
+    else
+    {
+        return BiomeDatabase.Contains(TEXT("Mountain")) ? BiomeDatabase[TEXT("Mountain")] : FWorld_BiomeData();
+    }
 }
 
 void UWorld_BiomeSystem::UpdateBiomeTransitions()
 {
-    // Clear existing transitions
-    BiomeTransitions.Empty();
+    // Update biome transitions based on player location or other criteria
+    // This would be called periodically to smooth biome boundaries
+}
 
-    // Generate transitions between adjacent biome zones
-    for (int32 i = 0; i < BiomeZones.Num(); ++i)
+TArray<FString> UWorld_BiomeSystem::GetAvailableBiomes() const
+{
+    TArray<FString> BiomeNames;
+    BiomeDatabase.GetKeys(BiomeNames);
+    return BiomeNames;
+}
+
+void UWorld_BiomeSystem::SetBiomeAtLocation(const FVector& WorldLocation, const FString& BiomeName)
+{
+    if (BiomeDatabase.Contains(BiomeName))
     {
-        for (int32 j = i + 1; j < BiomeZones.Num(); ++j)
-        {
-            const FBiomeZone& ZoneA = BiomeZones[i];
-            const FBiomeZone& ZoneB = BiomeZones[j];
-
-            float Distance = FVector::Dist(ZoneA.Center, ZoneB.Center);
-            float CombinedRadius = ZoneA.Radius + ZoneB.Radius;
-
-            // If zones are close enough, create a transition
-            if (Distance < CombinedRadius + BiomeBlendDistance)
-            {
-                FWorld_BiomeTransition Transition;
-                Transition.FromBiome = ZoneA.BiomeType;
-                Transition.ToBiome = ZoneB.BiomeType;
-                Transition.TransitionWidth = FMath::Min(BiomeBlendDistance, Distance * 0.5f);
-                Transition.BlendStrength = 0.5f;
-
-                BiomeTransitions.Add(Transition);
-            }
-        }
-    }
-
-    UE_LOG(LogTemp, Warning, TEXT("BiomeSystem: Updated %d biome transitions"), BiomeTransitions.Num());
-}
-
-void UWorld_BiomeSystem::GenerateDefaultBiomes()
-{
-    // Clear existing zones
-    BiomeZones.Empty();
-
-    // Create default biome layout
-    RegisterBiomeZone(FVector(0, 0, 0), 2000.0f, EWorld_BiomeType::Forest);
-    RegisterBiomeZone(FVector(5000, 0, 0), 1500.0f, EWorld_BiomeType::Plains);
-    RegisterBiomeZone(FVector(-3000, 3000, -50), 1200.0f, EWorld_BiomeType::Swampland);
-    RegisterBiomeZone(FVector(3000, -4000, 300), 1800.0f, EWorld_BiomeType::Canyon);
-    RegisterBiomeZone(FVector(-5000, -2000, 600), 2200.0f, EWorld_BiomeType::Mountains);
-
-    UE_LOG(LogTemp, Warning, TEXT("BiomeSystem: Generated %d default biome zones"), BiomeZones.Num());
-}
-
-float UWorld_BiomeSystem::GetTemperatureAtLocation(FVector WorldLocation) const
-{
-    EWorld_BiomeType BiomeType = GetBiomeAtLocation(WorldLocation);
-    FWorld_BiomeData BiomeData = GetBiomeData(BiomeType);
-    
-    // Add elevation-based temperature variation
-    float ElevationEffect = -WorldLocation.Z * 0.01f; // Cooler at higher elevations
-    
-    return BiomeData.Temperature + ElevationEffect;
-}
-
-float UWorld_BiomeSystem::GetHumidityAtLocation(FVector WorldLocation) const
-{
-    EWorld_BiomeType BiomeType = GetBiomeAtLocation(WorldLocation);
-    FWorld_BiomeData BiomeData = GetBiomeData(BiomeType);
-    
-    return BiomeData.Humidity;
-}
-
-FLinearColor UWorld_BiomeSystem::GetBiomeColorAtLocation(FVector WorldLocation) const
-{
-    EWorld_BiomeType BiomeType = GetBiomeAtLocation(WorldLocation);
-    FWorld_BiomeData BiomeData = GetBiomeData(BiomeType);
-    
-    return BiomeData.BiomeColor;
-}
-
-void UWorld_BiomeSystem::DebugDrawBiomes()
-{
-    if (!GetWorld()) return;
-
-    // Draw biome zones
-    for (const FBiomeZone& Zone : BiomeZones)
-    {
-        FWorld_BiomeData BiomeData = GetBiomeData(Zone.BiomeType);
-        FColor DebugColor = BiomeData.BiomeColor.ToFColor(true);
-        
-        DrawDebugSphere(GetWorld(), Zone.Center, Zone.Radius, 32, DebugColor, false, 10.0f, 0, 5.0f);
-        
-        // Draw biome name
-        FString BiomeName = BiomeData.BiomeName;
-        DrawDebugString(GetWorld(), Zone.Center + FVector(0, 0, Zone.Radius + 100), BiomeName, nullptr, DebugColor, 10.0f);
-    }
-
-    UE_LOG(LogTemp, Warning, TEXT("BiomeSystem: Debug drawing %d biome zones"), BiomeZones.Num());
-}
-
-void UWorld_BiomeSystem::ClearBiomeZones()
-{
-    BiomeZones.Empty();
-    BiomeTransitions.Empty();
-    
-    UE_LOG(LogTemp, Warning, TEXT("BiomeSystem: Cleared all biome zones"));
-}
-
-float UWorld_BiomeSystem::CalculateNoiseValue(FVector WorldLocation) const
-{
-    // Simple Perlin-like noise using sin/cos functions
-    float X = WorldLocation.X * BiomeNoiseScale;
-    float Y = WorldLocation.Y * BiomeNoiseScale;
-    
-    float Noise1 = FMath::Sin(X) * FMath::Cos(Y);
-    float Noise2 = FMath::Sin(X * 2.0f) * FMath::Cos(Y * 2.0f) * 0.5f;
-    float Noise3 = FMath::Sin(X * 4.0f) * FMath::Cos(Y * 4.0f) * 0.25f;
-    
-    return (Noise1 + Noise2 + Noise3) * 0.5f + 0.5f; // Normalize to 0-1
-}
-
-EWorld_BiomeType UWorld_BiomeSystem::DetermineBiomeFromNoise(float NoiseValue, FVector WorldLocation) const
-{
-    // Use noise value and elevation to determine biome
-    float Elevation = WorldLocation.Z;
-    
-    if (Elevation > 400.0f)
-    {
-        return EWorld_BiomeType::Mountains;
-    }
-    else if (Elevation < -10.0f)
-    {
-        return EWorld_BiomeType::Swampland;
-    }
-    else if (NoiseValue > 0.7f)
-    {
-        return EWorld_BiomeType::Forest;
-    }
-    else if (NoiseValue > 0.4f)
-    {
-        return EWorld_BiomeType::Plains;
-    }
-    else
-    {
-        return EWorld_BiomeType::Canyon;
+        // Implementation for setting biome at specific location
+        UE_LOG(LogTemp, Warning, TEXT("BiomeSystem: Set biome %s at location %s"), *BiomeName, *WorldLocation.ToString());
     }
 }
 
-float UWorld_BiomeSystem::CalculateDistanceInfluence(FVector Location, const FBiomeZone& Zone) const
+FWorld_BiomeData UWorld_BiomeSystem::BlendBiomes(const FWorld_BiomeData& BiomeA, const FWorld_BiomeData& BiomeB, float BlendFactor)
 {
-    float Distance = FVector::Dist(Location, Zone.Center);
-    
-    if (Distance <= Zone.Radius)
-    {
-        // Inside the zone - full influence
-        return Zone.Strength;
-    }
-    else if (Distance <= Zone.Radius + BiomeBlendDistance)
-    {
-        // In transition zone - falloff influence
-        float BlendFactor = (Distance - Zone.Radius) / BiomeBlendDistance;
-        return Zone.Strength * (1.0f - BlendFactor);
-    }
-    
-    // Outside influence range
-    return 0.0f;
+    FWorld_BiomeData BlendedBiome;
+    BlendedBiome.BiomeName = FString::Printf(TEXT("%s_%s_Blend"), *BiomeA.BiomeName, *BiomeB.BiomeName);
+    BlendedBiome.BiomeColor = FMath::Lerp(BiomeA.BiomeColor, BiomeB.BiomeColor, BlendFactor);
+    BlendedBiome.Temperature = FMath::Lerp(BiomeA.Temperature, BiomeB.Temperature, BlendFactor);
+    BlendedBiome.Humidity = FMath::Lerp(BiomeA.Humidity, BiomeB.Humidity, BlendFactor);
+    BlendedBiome.Elevation = FMath::Lerp(BiomeA.Elevation, BiomeB.Elevation, BlendFactor);
+    return BlendedBiome;
+}
+
+FString UWorld_BiomeSystem::GetDominantBiome(const FVector& WorldLocation)
+{
+    FWorld_BiomeData CurrentBiome = GetBiomeAtLocation(WorldLocation);
+    return CurrentBiome.BiomeName;
 }
