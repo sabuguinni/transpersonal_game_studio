@@ -20,7 +20,7 @@ enum class EAnim_MovementState : uint8
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FAnim_MovementData
+struct FAnim_MovementData
 {
     GENERATED_BODY()
 
@@ -61,53 +61,43 @@ class TRANSPERSONALGAME_API UAnim_CharacterAnimBlueprint : public UAnimInstance
 public:
     UAnim_CharacterAnimBlueprint();
 
-protected:
     virtual void NativeInitializeAnimation() override;
     virtual void NativeUpdateAnimation(float DeltaTimeX) override;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Character")
-    class ACharacter* OwnerCharacter;
+protected:
+    UPROPERTY(BlueprintReadOnly, Category = "Character Reference")
+    class ACharacter* OwningCharacter;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Character")
+    UPROPERTY(BlueprintReadOnly, Category = "Character Reference")
     class UCharacterMovementComponent* MovementComponent;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Animation Data")
+    UPROPERTY(BlueprintReadOnly, Category = "Movement Data")
     FAnim_MovementData MovementData;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Animation Data")
-    float WalkSpeedThreshold = 150.0f;
+    UPROPERTY(BlueprintReadOnly, Category = "Animation Settings")
+    float WalkSpeedThreshold = 100.0f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Animation Data")
+    UPROPERTY(BlueprintReadOnly, Category = "Animation Settings")
     float RunSpeedThreshold = 300.0f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Animation Data")
-    float JumpVelocityThreshold = 100.0f;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Animation Data")
-    float FallVelocityThreshold = -100.0f;
+    UPROPERTY(BlueprintReadOnly, Category = "Animation Settings")
+    float JumpVelocityThreshold = 50.0f;
 
     UFUNCTION(BlueprintCallable, Category = "Animation")
     void UpdateMovementState();
 
     UFUNCTION(BlueprintCallable, Category = "Animation")
-    void CalculateDirection();
+    EAnim_MovementState CalculateMovementState() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    bool ShouldEnterIdleState() const;
+    UFUNCTION(BlueprintPure, Category = "Animation")
+    bool ShouldPlayIdleAnimation() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    bool ShouldEnterWalkState() const;
+    UFUNCTION(BlueprintPure, Category = "Animation")
+    bool ShouldPlayWalkAnimation() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    bool ShouldEnterRunState() const;
+    UFUNCTION(BlueprintPure, Category = "Animation")
+    bool ShouldPlayRunAnimation() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    bool ShouldEnterJumpState() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    bool ShouldEnterFallState() const;
-
-private:
-    void UpdateMovementData();
-    void UpdateCharacterReferences();
+    UFUNCTION(BlueprintPure, Category = "Animation")
+    bool ShouldPlayJumpAnimation() const;
 };
