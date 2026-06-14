@@ -1,49 +1,236 @@
 #include "World_BiomeManager.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
+#include "Kismet/GameplayStatics.h"
+#include "Engine/StaticMeshActor.h"
+#include "Components/StaticMeshComponent.h"
 #include "Kismet/KismetMathLibrary.h"
 
-AWorld_BiomeManager::AWorld_BiomeManager()
+void UWorld_BiomeManager::Initialize(FSubsystemCollectionBase& Collection)
 {
-    PrimaryActorTick.bCanEverTick = false;
-    bAutoGenerateBiomes = true;
-    MaxBiomeCount = 8;
-    BiomeTransitionDistance = 1000.0f;
+    Super::Initialize(Collection);
+    
+    UE_LOG(LogTemp, Warning, TEXT("World_BiomeManager: Initialized"));
+    
+    // Initialize default biome configurations
+    ActiveBiomes.Empty();
+    BiomeActorCounts.Empty();
+    
+    // Initialize biome actor counters
+    BiomeActorCounts.Add(EBiomeType::Forest, 0);
+    BiomeActorCounts.Add(EBiomeType::Desert, 0);
+    BiomeActorCounts.Add(EBiomeType::Swampland, 0);
+    BiomeActorCounts.Add(EBiomeType::Canyon, 0);
 }
 
-void AWorld_BiomeManager::BeginPlay()
+void UWorld_BiomeManager::Deinitialize()
 {
-    Super::BeginPlay();
+    ActiveBiomes.Empty();
+    BiomeActorCounts.Empty();
     
-    if (bAutoGenerateBiomes && BiomeZones.Num() == 0)
+    UE_LOG(LogTemp, Warning, TEXT("World_BiomeManager: Deinitialized"));
+    Super::Deinitialize();
+}
+
+void UWorld_BiomeManager::CreateBiome(const FWorld_BiomeData& BiomeData)
+{
+    // Add to active biomes
+    ActiveBiomes.Add(BiomeData);
+    
+    // Generate terrain and vegetation for this biome
+    GenerateTerrainForBiome(BiomeData);
+    SpawnVegetationInBiome(BiomeData);
+    
+    if (BiomeData.WaterLevel > 0.0f)
     {
-        InitializeDefaultBiomes();
+        CreateWaterBodies(BiomeData);
     }
     
-    UE_LOG(LogTemp, Warning, TEXT("BiomeManager initialized with %d biome zones"), BiomeZones.Num());
+    UE_LOG(LogTemp, Warning, TEXT("World_BiomeManager: Created biome of type %d at location %s"), 
+           (int32)BiomeData.BiomeType, *BiomeData.CenterLocation.ToString());
 }
 
-EWorld_BiomeType AWorld_BiomeManager::GetBiomeAtLocation(const FVector& WorldLocation) const
+void UWorld_BiomeManager::GenerateSwamplandBiome(FVector CenterLocation, float Radius)
 {
-    float ClosestDistance = FLT_MAX;
-    EWorld_BiomeType ClosestBiome = EWorld_BiomeType::Forest;
+    FWorld_BiomeData SwampData;
+    SwampData.BiomeType = EBiomeType::Swampland;
+    SwampData.CenterLocation = CenterLocation;
+    SwampData.Radius = Radius;
+    SwampData.VegetationDensity = 0.7f;
+    SwampData.WaterLevel = 50.0f;
+    SwampData.RockDensity = 0.1f;
+    SwampData.AmbientTint = FLinearColor(0.8f, 1.0f, 0.9f, 1.0f); // Greenish tint
     
-    for (const FWorld_BiomeData& Biome : BiomeZones)
+    CreateBiome(SwampData);
+    
+    // Spawn specific swampland features
+    UWorld* World = GetWorld();
+    if (!World) return;
+    
+    int32 WaterBodyCount = FMath::RandRange(8, 15);
+    for (int32 i = 0; i < WaterBodyCount; i++)
     {
-        float Distance = CalculateDistanceToBiome(WorldLocation, Biome);
-        if (Distance < ClosestDistance)
+        FVector WaterLocation = CenterLocation + FVector(
+            FMath::RandRange(-Radius * 0.8f, Radius * 0.8f),
+            FMath::RandRange(-Radius * 0.8f, Radius * 0.8f),
+            -20.0f
+        );
+        
+        SpawnBiomeActor(WaterLocation, FVector(3, 3, 0.1f), FString::Printf(TEXT("SwampWater_%d"), i));
+        BiomeActorCounts[EBiomeType::Swampland]++;
+    }
+    
+    // Spawn cypress-like tall trees
+    int32 TreeCount = FMath::RandRange(12, 20);
+    for (int32 i = 0; i < TreeCount; i++)
+    {
+        FVector TreeLocation = CenterLocation + FVector(
+            FMath::RandRange(-Radius * 0.9f, Radius * 0.9f),
+            FMath::RandRange(-Radius * 0.9f, Radius * 0.9f),
+            FMath::RandRange(0, 50)
+        );
+        
+        SpawnBiomeActor(TreeLocation, FVector(2, 2, 4), FString::Printf(TEXT("SwampTree_%d"), i));
+        BiomeActorCounts[EBiomeType::Swampland]++;
+    }
+}
+
+void UWorld_BiomeManager::GenerateCanyonBiome(FVector CenterLocation, float Radius)
+{
+    FWorld_BiomeData CanyonData;
+    CanyonData.BiomeType = EBiomeType::Canyon;
+    CanyonData.CenterLocation = CenterLocation;
+    CanyonData.Radius = Radius;
+    CanyonData.VegetationDensity = 0.2f;
+    CanyonData.WaterLevel = 0.0f;
+    CanyonData.RockDensity = 0.8f;
+    CanyonData.AmbientTint = FLinearColor(1.0f, 0.8f, 0.7f, 1.0f); // Reddish tint
+    
+    CreateBiome(CanyonData);
+    
+    // Spawn canyon rock formations
+    UWorld* World = GetWorld();
+    if (!World) return;
+    
+    int32 RockCount = FMath::RandRange(10, 18);
+    for (int32 i = 0; i < RockCount; i++)
+    {
+        FVector RockLocation = CenterLocation + FVector(
+            FMath::RandRange(-Radius * 0.9f, Radius * 0.9f),
+            FMath::RandRange(-Radius * 0.9f, Radius * 0.9f),
+            FMath::RandRange(100, 400)
+        );
+        
+        FVector RockScale = FVector(
+            FMath::RandRange(3.0f, 8.0f),
+            FMath::RandRange(2.0f, 5.0f),
+            FMath::RandRange(4.0f, 10.0f)
+        );
+        
+        SpawnBiomeActor(RockLocation, RockScale, FString::Printf(TEXT("CanyonRock_%d"), i));
+        BiomeActorCounts[EBiomeType::Canyon]++;
+    }
+}
+
+void UWorld_BiomeManager::GenerateForestBiome(FVector CenterLocation, float Radius)
+{
+    FWorld_BiomeData ForestData;
+    ForestData.BiomeType = EBiomeType::Forest;
+    ForestData.CenterLocation = CenterLocation;
+    ForestData.Radius = Radius;
+    ForestData.VegetationDensity = 0.8f;
+    ForestData.WaterLevel = 0.0f;
+    ForestData.RockDensity = 0.3f;
+    ForestData.AmbientTint = FLinearColor(0.9f, 1.0f, 0.8f, 1.0f); // Green tint
+    
+    CreateBiome(ForestData);
+    
+    // Spawn dense forest vegetation
+    UWorld* World = GetWorld();
+    if (!World) return;
+    
+    int32 TreeCount = FMath::RandRange(25, 40);
+    for (int32 i = 0; i < TreeCount; i++)
+    {
+        FVector TreeLocation = CenterLocation + FVector(
+            FMath::RandRange(-Radius * 0.95f, Radius * 0.95f),
+            FMath::RandRange(-Radius * 0.95f, Radius * 0.95f),
+            FMath::RandRange(-20, 80)
+        );
+        
+        FVector TreeScale = FVector(
+            FMath::RandRange(1.5f, 3.0f),
+            FMath::RandRange(1.5f, 3.0f),
+            FMath::RandRange(3.0f, 6.0f)
+        );
+        
+        SpawnBiomeActor(TreeLocation, TreeScale, FString::Printf(TEXT("ForestTree_%d"), i));
+        BiomeActorCounts[EBiomeType::Forest]++;
+    }
+}
+
+void UWorld_BiomeManager::GenerateDesertBiome(FVector CenterLocation, float Radius)
+{
+    FWorld_BiomeData DesertData;
+    DesertData.BiomeType = EBiomeType::Desert;
+    DesertData.CenterLocation = CenterLocation;
+    DesertData.Radius = Radius;
+    DesertData.VegetationDensity = 0.1f;
+    DesertData.WaterLevel = 0.0f;
+    DesertData.RockDensity = 0.4f;
+    DesertData.AmbientTint = FLinearColor(1.0f, 0.9f, 0.7f, 1.0f); // Sandy tint
+    
+    CreateBiome(DesertData);
+    
+    // Spawn sparse desert features
+    UWorld* World = GetWorld();
+    if (!World) return;
+    
+    // Sparse vegetation (cacti, dead trees)
+    int32 VegCount = FMath::RandRange(5, 12);
+    for (int32 i = 0; i < VegCount; i++)
+    {
+        FVector VegLocation = CenterLocation + FVector(
+            FMath::RandRange(-Radius * 0.8f, Radius * 0.8f),
+            FMath::RandRange(-Radius * 0.8f, Radius * 0.8f),
+            FMath::RandRange(0, 30)
+        );
+        
+        SpawnBiomeActor(VegLocation, FVector(0.8f, 0.8f, 2.0f), FString::Printf(TEXT("DesertPlant_%d"), i));
+        BiomeActorCounts[EBiomeType::Desert]++;
+    }
+    
+    // Rock outcroppings
+    int32 RockCount = FMath::RandRange(8, 15);
+    for (int32 i = 0; i < RockCount; i++)
+    {
+        FVector RockLocation = CenterLocation + FVector(
+            FMath::RandRange(-Radius * 0.9f, Radius * 0.9f),
+            FMath::RandRange(-Radius * 0.9f, Radius * 0.9f),
+            FMath::RandRange(0, 100)
+        );
+        
+        SpawnBiomeActor(RockLocation, FVector(2, 2, 1.5f), FString::Printf(TEXT("DesertRock_%d"), i));
+        BiomeActorCounts[EBiomeType::Desert]++;
+    }
+}
+
+EBiomeType UWorld_BiomeManager::GetBiomeAtLocation(FVector WorldLocation) const
+{
+    for (const FWorld_BiomeData& Biome : ActiveBiomes)
+    {
+        if (IsLocationInBiome(WorldLocation, Biome))
         {
-            ClosestDistance = Distance;
-            ClosestBiome = Biome.BiomeType;
+            return Biome.BiomeType;
         }
     }
     
-    return ClosestBiome;
+    return EBiomeType::Forest; // Default fallback
 }
 
-FWorld_BiomeData AWorld_BiomeManager::GetBiomeData(EWorld_BiomeType BiomeType) const
+FWorld_BiomeData UWorld_BiomeManager::GetBiomeData(EBiomeType BiomeType) const
 {
-    for (const FWorld_BiomeData& Biome : BiomeZones)
+    for (const FWorld_BiomeData& Biome : ActiveBiomes)
     {
         if (Biome.BiomeType == BiomeType)
         {
@@ -51,196 +238,86 @@ FWorld_BiomeData AWorld_BiomeManager::GetBiomeData(EWorld_BiomeType BiomeType) c
         }
     }
     
-    // Return default if not found
-    return FWorld_BiomeData();
+    // Return default biome data if not found
+    FWorld_BiomeData DefaultBiome;
+    DefaultBiome.BiomeType = BiomeType;
+    return DefaultBiome;
 }
 
-float AWorld_BiomeManager::GetTemperatureAtLocation(const FVector& WorldLocation) const
+void UWorld_BiomeManager::GenerateTerrainForBiome(const FWorld_BiomeData& BiomeData)
 {
-    EWorld_BiomeType CurrentBiome = GetBiomeAtLocation(WorldLocation);
-    FWorld_BiomeData BiomeData = GetBiomeData(CurrentBiome);
+    // Terrain generation logic would go here
+    // For now, we'll just log the terrain generation
+    UE_LOG(LogTemp, Warning, TEXT("World_BiomeManager: Generated terrain for biome %d"), (int32)BiomeData.BiomeType);
+}
+
+void UWorld_BiomeManager::SpawnVegetationInBiome(const FWorld_BiomeData& BiomeData)
+{
+    // Vegetation spawning logic based on biome density
+    UE_LOG(LogTemp, Warning, TEXT("World_BiomeManager: Spawned vegetation for biome %d with density %f"), 
+           (int32)BiomeData.BiomeType, BiomeData.VegetationDensity);
+}
+
+void UWorld_BiomeManager::CreateWaterBodies(const FWorld_BiomeData& BiomeData)
+{
+    if (BiomeData.WaterLevel <= 0.0f) return;
     
-    // Add some variation based on elevation
-    float ElevationModifier = -(WorldLocation.Z - BiomeData.Elevation) * 0.01f;
+    UE_LOG(LogTemp, Warning, TEXT("World_BiomeManager: Created water bodies for biome %d at level %f"), 
+           (int32)BiomeData.BiomeType, BiomeData.WaterLevel);
+}
+
+void UWorld_BiomeManager::OptimizeBiomePerformance()
+{
+    int32 TotalActors = GetTotalBiomeActors();
     
-    return BiomeData.Temperature + ElevationModifier;
-}
-
-float AWorld_BiomeManager::GetHumidityAtLocation(const FVector& WorldLocation) const
-{
-    EWorld_BiomeType CurrentBiome = GetBiomeAtLocation(WorldLocation);
-    FWorld_BiomeData BiomeData = GetBiomeData(CurrentBiome);
-    
-    return BiomeData.Humidity;
-}
-
-TArray<FString> AWorld_BiomeManager::GetVegetationForBiome(EWorld_BiomeType BiomeType) const
-{
-    FWorld_BiomeData BiomeData = GetBiomeData(BiomeType);
-    return BiomeData.VegetationTypes;
-}
-
-TArray<FString> AWorld_BiomeManager::GetDinosaursForBiome(EWorld_BiomeType BiomeType) const
-{
-    FWorld_BiomeData BiomeData = GetBiomeData(BiomeType);
-    return BiomeData.DinosaurSpecies;
-}
-
-void AWorld_BiomeManager::GenerateDefaultBiomes()
-{
-    ClearAllBiomes();
-    InitializeDefaultBiomes();
-    
-    UE_LOG(LogTemp, Warning, TEXT("Generated %d default biomes"), BiomeZones.Num());
-}
-
-void AWorld_BiomeManager::ClearAllBiomes()
-{
-    BiomeZones.Empty();
-}
-
-void AWorld_BiomeManager::AddBiomeZone(const FWorld_BiomeData& NewBiome)
-{
-    BiomeZones.Add(NewBiome);
-}
-
-bool AWorld_BiomeManager::IsLocationInBiome(const FVector& WorldLocation, EWorld_BiomeType BiomeType) const
-{
-    for (const FWorld_BiomeData& Biome : BiomeZones)
+    if (TotalActors > 5000)
     {
-        if (Biome.BiomeType == BiomeType)
+        UE_LOG(LogTemp, Warning, TEXT("World_BiomeManager: Performance optimization needed - %d actors"), TotalActors);
+        
+        // Implement LOD or culling logic here
+        for (auto& BiomeCount : BiomeActorCounts)
         {
-            float Distance = FVector::Dist(WorldLocation, Biome.CenterLocation);
-            return Distance <= Biome.Radius;
-        }
-    }
-    
-    return false;
-}
-
-float AWorld_BiomeManager::GetBiomeInfluenceAtLocation(const FVector& WorldLocation, EWorld_BiomeType BiomeType) const
-{
-    for (const FWorld_BiomeData& Biome : BiomeZones)
-    {
-        if (Biome.BiomeType == BiomeType)
-        {
-            float Distance = CalculateDistanceToBiome(WorldLocation, Biome);
-            if (Distance <= Biome.Radius)
+            if (BiomeCount.Value > 1000)
             {
-                return FMath::Clamp(1.0f - (Distance / Biome.Radius), 0.0f, 1.0f);
+                UE_LOG(LogTemp, Warning, TEXT("Biome %d has %d actors - consider optimization"), 
+                       (int32)BiomeCount.Key, BiomeCount.Value);
             }
         }
     }
-    
-    return 0.0f;
 }
 
-void AWorld_BiomeManager::InitializeDefaultBiomes()
+int32 UWorld_BiomeManager::GetTotalBiomeActors() const
 {
-    // Forest biome - center of map
-    BiomeZones.Add(CreateBiomeData(EWorld_BiomeType::Forest, FVector(0, 0, 150), 4000.0f));
-    
-    // Desert biome - southeast
-    BiomeZones.Add(CreateBiomeData(EWorld_BiomeType::Desert, FVector(6000, -6000, 50), 3500.0f));
-    
-    // Mountain biome - north
-    BiomeZones.Add(CreateBiomeData(EWorld_BiomeType::Mountain, FVector(0, 8000, 800), 3000.0f));
-    
-    // Swamp biome - southwest
-    BiomeZones.Add(CreateBiomeData(EWorld_BiomeType::Swamp, FVector(-6000, -4000, 0), 2500.0f));
-    
-    // Volcanic biome - northeast
-    BiomeZones.Add(CreateBiomeData(EWorld_BiomeType::Volcanic, FVector(8000, 6000, 400), 2000.0f));
-    
-    // Tundra biome - northwest
-    BiomeZones.Add(CreateBiomeData(EWorld_BiomeType::Tundra, FVector(-8000, 8000, 200), 4000.0f));
-    
-    // Coastal biome - west
-    BiomeZones.Add(CreateBiomeData(EWorld_BiomeType::Coastal, FVector(-10000, 0, 50), 3000.0f));
-    
-    // Plains biome - east
-    BiomeZones.Add(CreateBiomeData(EWorld_BiomeType::Plains, FVector(10000, 0, 100), 3500.0f));
-}
-
-FWorld_BiomeData AWorld_BiomeManager::CreateBiomeData(EWorld_BiomeType Type, const FVector& Center, float Radius)
-{
-    FWorld_BiomeData BiomeData;
-    BiomeData.BiomeType = Type;
-    BiomeData.CenterLocation = Center;
-    BiomeData.Radius = Radius;
-    BiomeData.Elevation = Center.Z;
-    
-    switch (Type)
+    int32 Total = 0;
+    for (const auto& BiomeCount : BiomeActorCounts)
     {
-        case EWorld_BiomeType::Forest:
-            BiomeData.Temperature = 18.0f;
-            BiomeData.Humidity = 0.7f;
-            BiomeData.VegetationTypes = {"OakTree", "PineTree", "Fern", "Moss"};
-            BiomeData.DinosaurSpecies = {"Triceratops", "Parasaurolophus", "Compsognathus"};
-            BiomeData.ResourceDensity = 1.2f;
-            break;
-            
-        case EWorld_BiomeType::Desert:
-            BiomeData.Temperature = 35.0f;
-            BiomeData.Humidity = 0.1f;
-            BiomeData.VegetationTypes = {"Cactus", "SagebrushBush", "DeadTree"};
-            BiomeData.DinosaurSpecies = {"Dilophosaurus", "Protoceratops", "Oviraptor"};
-            BiomeData.ResourceDensity = 0.3f;
-            break;
-            
-        case EWorld_BiomeType::Mountain:
-            BiomeData.Temperature = 5.0f;
-            BiomeData.Humidity = 0.4f;
-            BiomeData.VegetationTypes = {"AlpineTree", "MountainGrass", "Lichen"};
-            BiomeData.DinosaurSpecies = {"Ankylosaurus", "Stegosaurus", "Pteranodon"};
-            BiomeData.ResourceDensity = 0.8f;
-            break;
-            
-        case EWorld_BiomeType::Swamp:
-            BiomeData.Temperature = 25.0f;
-            BiomeData.Humidity = 0.9f;
-            BiomeData.VegetationTypes = {"CypressTree", "Cattails", "SwampMoss", "LilyPads"};
-            BiomeData.DinosaurSpecies = {"Spinosaurus", "Baryonyx", "Deinonychus"};
-            BiomeData.ResourceDensity = 1.1f;
-            break;
-            
-        case EWorld_BiomeType::Volcanic:
-            BiomeData.Temperature = 45.0f;
-            BiomeData.Humidity = 0.2f;
-            BiomeData.VegetationTypes = {"VolcanicRock", "LavaFlow", "SulfurDeposit"};
-            BiomeData.DinosaurSpecies = {"Carnotaurus", "Giganotosaurus", "Therizinosaurus"};
-            BiomeData.ResourceDensity = 0.5f;
-            break;
-            
-        case EWorld_BiomeType::Tundra:
-            BiomeData.Temperature = -10.0f;
-            BiomeData.Humidity = 0.3f;
-            BiomeData.VegetationTypes = {"IceFormation", "TundraGrass", "FrozenBush"};
-            BiomeData.DinosaurSpecies = {"Mammoth", "WoollyRhino", "SabertoothTiger"};
-            BiomeData.ResourceDensity = 0.4f;
-            break;
-            
-        case EWorld_BiomeType::Coastal:
-            BiomeData.Temperature = 15.0f;
-            BiomeData.Humidity = 0.8f;
-            BiomeData.VegetationTypes = {"Seaweed", "CoastalGrass", "Driftwood", "Coral"};
-            BiomeData.DinosaurSpecies = {"Plesiosaur", "Mosasaurus", "Pteranodon"};
-            BiomeData.ResourceDensity = 1.0f;
-            break;
-            
-        case EWorld_BiomeType::Plains:
-            BiomeData.Temperature = 22.0f;
-            BiomeData.Humidity = 0.5f;
-            BiomeData.VegetationTypes = {"GrassPlains", "WildFlowers", "ScatteredTrees"};
-            BiomeData.DinosaurSpecies = {"Brachiosaurus", "Gallimimus", "TyrannosaurusRex"};
-            BiomeData.ResourceDensity = 0.9f;
-            break;
+        Total += BiomeCount.Value;
     }
-    
-    return BiomeData;
+    return Total;
 }
 
-float AWorld_BiomeManager::CalculateDistanceToBiome(const FVector& Location, const FWorld_BiomeData& Biome) const
+void UWorld_BiomeManager::SpawnBiomeActor(FVector Location, FVector Scale, const FString& Label)
 {
-    return FVector::Dist(Location, Biome.CenterLocation);
+    UWorld* World = GetWorld();
+    if (!World) return;
+    
+    // For now, we'll use basic static mesh actors as placeholders
+    // In a full implementation, this would spawn appropriate meshes based on biome type
+    AActor* SpawnedActor = World->SpawnActor<AActor>(AActor::StaticClass(), Location, FRotator::ZeroRotator);
+    if (SpawnedActor)
+    {
+        SpawnedActor->SetActorLabel(Label);
+        SpawnedActor->SetActorScale3D(Scale);
+    }
+}
+
+float UWorld_BiomeManager::CalculateDistanceFromBiomeCenter(FVector Location, const FWorld_BiomeData& BiomeData) const
+{
+    return FVector::Dist2D(Location, BiomeData.CenterLocation);
+}
+
+bool UWorld_BiomeManager::IsLocationInBiome(FVector Location, const FWorld_BiomeData& BiomeData) const
+{
+    float Distance = CalculateDistanceFromBiomeCenter(Location, BiomeData);
+    return Distance <= BiomeData.Radius;
 }
