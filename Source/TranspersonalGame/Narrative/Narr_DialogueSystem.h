@@ -1,122 +1,92 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/GameInstanceSubsystem.h"
+#include "Engine/World.h"
+#include "Components/ActorComponent.h"
 #include "Engine/DataTable.h"
-#include "SharedTypes.h"
 #include "Narr_DialogueSystem.generated.h"
+
+UENUM(BlueprintType)
+enum class ENarr_DialogueType : uint8
+{
+    Warning,
+    Information,
+    Quest,
+    Survival,
+    Combat
+};
 
 USTRUCT(BlueprintType)
 struct TRANSPERSONALGAME_API FNarr_DialogueEntry
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dialogue")
-    FString DialogueID;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dialogue")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
     FString SpeakerName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dialogue")
-    FString DialogueText;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    FText DialogueText;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dialogue")
-    FString AudioPath;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    ENarr_DialogueType DialogueType;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dialogue")
-    TArray<FString> ResponseOptions;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    float DisplayDuration;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dialogue")
-    TArray<FString> NextDialogueIDs;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dialogue")
-    ESurvivalNeed RequiredNeed;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dialogue")
-    float RequiredNeedValue;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    bool bRequiresPlayerResponse;
 
     FNarr_DialogueEntry()
     {
-        DialogueID = "";
-        SpeakerName = "";
-        DialogueText = "";
-        AudioPath = "";
-        RequiredNeed = ESurvivalNeed::None;
-        RequiredNeedValue = 0.0f;
+        SpeakerName = TEXT("Unknown");
+        DialogueText = FText::FromString(TEXT("..."));
+        DialogueType = ENarr_DialogueType::Information;
+        DisplayDuration = 3.0f;
+        bRequiresPlayerResponse = false;
     }
 };
 
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FNarr_ConversationState
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Conversation")
-    FString CurrentDialogueID;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Conversation")
-    FString ConversationPartner;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Conversation")
-    TArray<FString> CompletedDialogues;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Conversation")
-    bool bInConversation;
-
-    FNarr_ConversationState()
-    {
-        CurrentDialogueID = "";
-        ConversationPartner = "";
-        bInConversation = false;
-    }
-};
-
-UCLASS(BlueprintType)
-class TRANSPERSONALGAME_API UNarr_DialogueSystem : public UGameInstanceSubsystem
+UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UNarr_DialogueSystem : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
     UNarr_DialogueSystem();
 
-    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
-    virtual void Deinitialize() override;
-
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    bool StartConversation(const FString& NPCName, const FString& StartingDialogueID);
-
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    void EndConversation();
-
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    FNarr_DialogueEntry GetCurrentDialogue();
-
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    bool SelectResponse(int32 ResponseIndex);
-
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    TArray<FString> GetAvailableResponses();
-
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    bool IsInConversation() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    void RegisterDialogue(const FNarr_DialogueEntry& DialogueEntry);
-
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    bool HasCompletedDialogue(const FString& DialogueID) const;
-
 protected:
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Dialogue")
-    FNarr_ConversationState CurrentConversation;
+    virtual void BeginPlay() override;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Dialogue")
-    TMap<FString, FNarr_DialogueEntry> DialogueDatabase;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    TArray<FNarr_DialogueEntry> DialogueEntries;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Dialogue")
-    TArray<FString> GlobalCompletedDialogues;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    int32 CurrentDialogueIndex;
 
-    void LoadDefaultDialogues();
-    bool CheckDialogueRequirements(const FNarr_DialogueEntry& Dialogue);
-    void MarkDialogueCompleted(const FString& DialogueID);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    bool bIsDialogueActive;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    float DialogueRange;
+
+public:
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    void StartDialogue();
+
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    void NextDialogue();
+
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    void EndDialogue();
+
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    FNarr_DialogueEntry GetCurrentDialogue() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    void AddDialogueEntry(const FNarr_DialogueEntry& NewEntry);
+
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    bool IsPlayerInRange() const;
 };
