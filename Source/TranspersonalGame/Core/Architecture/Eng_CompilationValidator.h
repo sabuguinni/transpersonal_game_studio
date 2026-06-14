@@ -5,66 +5,59 @@
 #include "Eng_CompilationValidator.generated.h"
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEng_ClassValidation
+struct TRANSPERSONALGAME_API FEng_CompilationIssue
 {
-    GENERATED_BODY()
+	GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly)
-    FString ClassName;
+	UPROPERTY(BlueprintReadOnly, Category = "Compilation")
+	FString ModuleName;
 
-    UPROPERTY(BlueprintReadOnly)
-    bool bIsLoaded;
+	UPROPERTY(BlueprintReadOnly, Category = "Compilation")
+	FString FileName;
 
-    UPROPERTY(BlueprintReadOnly)
-    bool bHasValidCDO;
+	UPROPERTY(BlueprintReadOnly, Category = "Compilation")
+	FString ErrorMessage;
 
-    UPROPERTY(BlueprintReadOnly)
-    int32 PropertyCount;
+	UPROPERTY(BlueprintReadOnly, Category = "Compilation")
+	int32 LineNumber;
 
-    UPROPERTY(BlueprintReadOnly)
-    int32 FunctionCount;
-
-    UPROPERTY(BlueprintReadOnly)
-    FString ErrorMessage;
-
-    FEng_ClassValidation()
-        : bIsLoaded(false)
-        , bHasValidCDO(false)
-        , PropertyCount(0)
-        , FunctionCount(0)
-    {}
+	FEng_CompilationIssue()
+	{
+		ModuleName = TEXT("");
+		FileName = TEXT("");
+		ErrorMessage = TEXT("");
+		LineNumber = 0;
+	}
 };
 
-UCLASS()
+UCLASS(BlueprintType)
 class TRANSPERSONALGAME_API UEng_CompilationValidator : public UGameInstanceSubsystem
 {
-    GENERATED_BODY()
+	GENERATED_BODY()
 
 public:
-    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
 
-    UFUNCTION(BlueprintCallable, Category = "Compilation Validator")
-    void ValidateAllClasses();
+	UFUNCTION(BlueprintCallable, Category = "Architecture")
+	void ValidateProjectCompilation();
 
-    UFUNCTION(BlueprintCallable, Category = "Compilation Validator")
-    FEng_ClassValidation ValidateClass(const FString& ClassName);
+	UFUNCTION(BlueprintCallable, Category = "Architecture")
+	TArray<FEng_CompilationIssue> GetCompilationIssues() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Compilation Validator")
-    TArray<FEng_ClassValidation> GetValidationResults() const;
+	UFUNCTION(BlueprintCallable, Category = "Architecture")
+	bool HasCompilationErrors() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Compilation Validator")
-    bool AreAllClassesValid() const;
+	UFUNCTION(BlueprintCallable, Category = "Architecture")
+	void FixMissingCppFiles();
 
-    UFUNCTION(BlueprintCallable, Category = "Compilation Validator")
-    void GenerateValidationReport();
+	UFUNCTION(BlueprintCallable, Category = "Architecture")
+	void ValidateHeaderCppParity();
 
 private:
-    UPROPERTY()
-    TArray<FEng_ClassValidation> ValidationResults;
+	UPROPERTY()
+	TArray<FEng_CompilationIssue> CompilationIssues;
 
-    TArray<FString> GetKnownClasses() const;
-    bool ValidateClassProperties(UClass* Class, FEng_ClassValidation& Validation);
-    bool ValidateClassFunctions(UClass* Class, FEng_ClassValidation& Validation);
+	void ScanForMissingImplementations();
+	void ValidateIncludePaths();
+	void CheckForDuplicateDefinitions();
 };
-
-#include "Eng_CompilationValidator.generated.h"
