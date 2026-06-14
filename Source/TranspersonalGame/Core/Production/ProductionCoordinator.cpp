@@ -1,258 +1,269 @@
 #include "ProductionCoordinator.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
+#include "TimerManager.h"
 #include "EngineUtils.h"
-#include "GameFramework/Actor.h"
+#include "GameFramework/Character.h"
 #include "Components/StaticMeshComponent.h"
 #include "Landscape/Landscape.h"
+#include "Engine/DirectionalLight.h"
 
-UDir_ProductionCoordinator::UDir_ProductionCoordinator()
+UProductionCoordinator::UProductionCoordinator()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 5.0f; // Update every 5 seconds
+    ProductionUpdateInterval = 30.0f; // Update every 30 seconds
     
-    CurrentPhase = EDir_ProductionPhase::Prototype;
-    CycleCompletionThreshold = 75.0f;
-    CurrentCycleNumber = 20;
+    // Initialize default production metrics
+    CurrentMetrics.CurrentPhase = EDir_ProductionPhase::Prototype;
+    CurrentMetrics.CompletionPercentage = 15.0f; // Current prototype state
 }
 
-void UDir_ProductionCoordinator::BeginPlay()
+void UProductionCoordinator::BeginPlay()
 {
     Super::BeginPlay();
     
-    InitializeAgentTasks();
-    AnalyzeProductionState();
+    // Start production monitoring timer
+    if (GetWorld())
+    {
+        GetWorld()->GetTimerManager().SetTimer(
+            ProductionTimerHandle,
+            this,
+            &UProductionCoordinator::UpdateProductionTimer,
+            ProductionUpdateInterval,
+            true
+        );
+    }
     
-    UE_LOG(LogTemp, Warning, TEXT("ProductionCoordinator: Studio Director coordination system initialized"));
+    // Initialize the production pipeline
+    InitializeProductionPipeline();
+    
+    UE_LOG(LogTemp, Warning, TEXT("ProductionCoordinator: System initialized and monitoring started"));
 }
 
-void UDir_ProductionCoordinator::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void UProductionCoordinator::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
     
-    // Periodic production state analysis
-    static float AnalysisTimer = 0.0f;
-    AnalysisTimer += DeltaTime;
-    
-    if (AnalysisTimer >= 30.0f) // Analyze every 30 seconds
-    {
-        AnalyzeProductionState();
-        CheckPhaseTransition();
-        AnalysisTimer = 0.0f;
-    }
+    // Lightweight per-frame updates
+    CoordinateAgentPriorities();
 }
 
-void UDir_ProductionCoordinator::InitializeAgentTasks()
+void UProductionCoordinator::AssignTaskToAgent(const FString& AgentName, const FString& TaskDescription, float Priority)
 {
-    AgentTasks.Empty();
+    FDir_AgentTask NewTask;
+    NewTask.AgentName = AgentName;
+    NewTask.TaskDescription = TaskDescription;
+    NewTask.Priority = Priority;
+    NewTask.Status = EDir_AgentStatus::Working;
+    NewTask.StartTime = FDateTime::Now();
+    NewTask.EstimatedCompletion = FDateTime::Now() + FTimespan::FromMinutes(30); // Default 30min estimate
     
-    // Initialize all 19 agent tasks
-    TArray<FString> AgentNames = {
-        TEXT("Engine Architect"),
-        TEXT("Core Systems Programmer"),
-        TEXT("Performance Optimizer"),
-        TEXT("Procedural World Generator"),
-        TEXT("Environment Artist"),
-        TEXT("Architecture & Interior Agent"),
-        TEXT("Lighting & Atmosphere Agent"),
-        TEXT("Character Artist Agent"),
-        TEXT("Animation Agent"),
-        TEXT("NPC Behavior Agent"),
-        TEXT("Combat & Enemy AI Agent"),
-        TEXT("Crowd & Traffic Simulation"),
-        TEXT("Quest & Mission Designer"),
-        TEXT("Narrative & Dialogue Agent"),
-        TEXT("Audio Agent"),
-        TEXT("VFX Agent"),
-        TEXT("QA & Testing Agent"),
-        TEXT("Integration & Build Agent")
-    };
+    // Remove existing task for this agent if any
+    AgentTasks.RemoveAll([&AgentName](const FDir_AgentTask& Task) {
+        return Task.AgentName == AgentName;
+    });
     
-    for (int32 i = 0; i < AgentNames.Num(); i++)
-    {
-        FDir_AgentTask NewTask;
-        NewTask.AgentName = AgentNames[i];
-        NewTask.TaskDescription = FString::Printf(TEXT("Cycle %d production tasks"), CurrentCycleNumber);
-        NewTask.Status = EDir_AgentStatus::Pending;
-        NewTask.Priority = i + 1; // Sequential priority based on chain order
-        NewTask.CompletionPercentage = 0.0f;
-        NewTask.LastUpdate = FDateTime::Now();
-        
-        AgentTasks.Add(NewTask);
-    }
+    AgentTasks.Add(NewTask);
     
-    UE_LOG(LogTemp, Warning, TEXT("ProductionCoordinator: Initialized %d agent tasks"), AgentTasks.Num());
+    UE_LOG(LogTemp, Log, TEXT("ProductionCoordinator: Assigned task '%s' to agent '%s' with priority %.2f"), 
+           *TaskDescription, *AgentName, Priority);
 }
 
-void UDir_ProductionCoordinator::UpdateAgentTask(const FString& AgentName, EDir_AgentStatus NewStatus, float CompletionPercentage)
+void UProductionCoordinator::UpdateAgentStatus(const FString& AgentName, EDir_AgentStatus NewStatus)
 {
     for (FDir_AgentTask& Task : AgentTasks)
     {
         if (Task.AgentName == AgentName)
         {
             Task.Status = NewStatus;
-            Task.CompletionPercentage = FMath::Clamp(CompletionPercentage, 0.0f, 100.0f);
-            Task.LastUpdate = FDateTime::Now();
             
-            UE_LOG(LogTemp, Warning, TEXT("ProductionCoordinator: Updated %s - Status: %d, Completion: %.1f%%"), 
-                   *AgentName, (int32)NewStatus, CompletionPercentage);
+            if (NewStatus == EDir_AgentStatus::Completed)
+            {
+                UE_LOG(LogTemp, Warning, TEXT("ProductionCoordinator: Agent '%s' completed task: %s"), 
+                       *AgentName, *Task.TaskDescription);
+            }
             break;
         }
     }
 }
 
-void UDir_ProductionCoordinator::AnalyzeProductionState()
+void UProductionCoordinator::UpdateProductionMetrics()
 {
-    if (!GetWorld())
+    AnalyzeWorldState();
+    
+    // Calculate completion percentage based on current world state
+    float BaseCompletion = 15.0f; // Base prototype completion
+    
+    if (CurrentMetrics.CharacterCount > 0) BaseCompletion += 10.0f;
+    if (CurrentMetrics.DinosaurCount >= 5) BaseCompletion += 15.0f;
+    if (CurrentMetrics.TerrainActors > 0) BaseCompletion += 10.0f;
+    if (CurrentMetrics.TotalActors > 100) BaseCompletion += 5.0f;
+    
+    // Count completed agent tasks
+    int32 CompletedTasks = AgentTasks.Num() > 0 ? 
+        AgentTasks.FilterByPredicate([](const FDir_AgentTask& Task) {
+            return Task.Status == EDir_AgentStatus::Completed;
+        }).Num() : 0;
+    
+    if (AgentTasks.Num() > 0)
     {
-        return;
+        float TaskCompletion = (float)CompletedTasks / AgentTasks.Num() * 20.0f;
+        BaseCompletion += TaskCompletion;
     }
     
-    CountActorsByCategory();
-    UpdatePrototypeCompletion();
+    CurrentMetrics.CompletionPercentage = FMath::Clamp(BaseCompletion, 0.0f, 100.0f);
     
-    CurrentMetrics.LastAnalysis = FDateTime::Now();
-    
-    UE_LOG(LogTemp, Warning, TEXT("ProductionCoordinator: Analysis Complete - Total Actors: %d, Prototype: %.1f%%"), 
-           CurrentMetrics.TotalActors, CurrentMetrics.PrototypeCompletion);
+    // Update production phase based on completion
+    if (CurrentMetrics.CompletionPercentage >= 80.0f)
+    {
+        CurrentMetrics.CurrentPhase = EDir_ProductionPhase::Beta;
+    }
+    else if (CurrentMetrics.CompletionPercentage >= 50.0f)
+    {
+        CurrentMetrics.CurrentPhase = EDir_ProductionPhase::Alpha;
+    }
+    else if (CurrentMetrics.CompletionPercentage >= 25.0f)
+    {
+        CurrentMetrics.CurrentPhase = EDir_ProductionPhase::Prototype;
+    }
 }
 
-void UDir_ProductionCoordinator::CountActorsByCategory()
+FDir_ProductionMetrics UProductionCoordinator::GetProductionMetrics() const
+{
+    return CurrentMetrics;
+}
+
+TArray<FDir_AgentTask> UProductionCoordinator::GetAgentTasks() const
+{
+    return AgentTasks;
+}
+
+void UProductionCoordinator::SetProductionPhase(EDir_ProductionPhase NewPhase)
+{
+    CurrentMetrics.CurrentPhase = NewPhase;
+    UE_LOG(LogTemp, Warning, TEXT("ProductionCoordinator: Production phase changed to %d"), (int32)NewPhase);
+}
+
+void UProductionCoordinator::InitializeProductionPipeline()
+{
+    // Clear existing tasks
+    AgentTasks.Empty();
+    
+    // Assign initial tasks to key agents for prototype phase
+    AssignTaskToAgent(TEXT("Engine Architect"), TEXT("Optimize core systems for 60fps target"), 9.0f);
+    AssignTaskToAgent(TEXT("Procedural World Generator"), TEXT("Generate varied terrain with biomes"), 8.5f);
+    AssignTaskToAgent(TEXT("Character Artist"), TEXT("Create playable character with survival stats"), 8.0f);
+    AssignTaskToAgent(TEXT("Animation Agent"), TEXT("Implement character movement animations"), 7.5f);
+    AssignTaskToAgent(TEXT("NPC Behavior Agent"), TEXT("Create basic dinosaur AI behaviors"), 7.0f);
+    AssignTaskToAgent(TEXT("Combat & Enemy AI"), TEXT("Implement dinosaur combat mechanics"), 6.5f);
+    AssignTaskToAgent(TEXT("Environment Artist"), TEXT("Populate world with props and vegetation"), 6.0f);
+    AssignTaskToAgent(TEXT("Lighting & Atmosphere"), TEXT("Setup dynamic day/night cycle"), 5.5f);
+    
+    UE_LOG(LogTemp, Warning, TEXT("ProductionCoordinator: Production pipeline initialized with %d agent tasks"), AgentTasks.Num());
+}
+
+void UProductionCoordinator::GenerateProductionReport()
+{
+    UpdateProductionMetrics();
+    
+    UE_LOG(LogTemp, Warning, TEXT("=== PRODUCTION REPORT ==="));
+    UE_LOG(LogTemp, Warning, TEXT("Phase: %d"), (int32)CurrentMetrics.CurrentPhase);
+    UE_LOG(LogTemp, Warning, TEXT("Completion: %.1f%%"), CurrentMetrics.CompletionPercentage);
+    UE_LOG(LogTemp, Warning, TEXT("Total Actors: %d"), CurrentMetrics.TotalActors);
+    UE_LOG(LogTemp, Warning, TEXT("Characters: %d"), CurrentMetrics.CharacterCount);
+    UE_LOG(LogTemp, Warning, TEXT("Dinosaurs: %d"), CurrentMetrics.DinosaurCount);
+    UE_LOG(LogTemp, Warning, TEXT("Terrain: %d"), CurrentMetrics.TerrainActors);
+    
+    UE_LOG(LogTemp, Warning, TEXT("=== AGENT STATUS ==="));
+    for (const FDir_AgentTask& Task : AgentTasks)
+    {
+        FString StatusStr;
+        switch (Task.Status)
+        {
+            case EDir_AgentStatus::Idle: StatusStr = TEXT("IDLE"); break;
+            case EDir_AgentStatus::Working: StatusStr = TEXT("WORKING"); break;
+            case EDir_AgentStatus::Completed: StatusStr = TEXT("COMPLETED"); break;
+            case EDir_AgentStatus::Blocked: StatusStr = TEXT("BLOCKED"); break;
+            case EDir_AgentStatus::Failed: StatusStr = TEXT("FAILED"); break;
+        }
+        
+        UE_LOG(LogTemp, Warning, TEXT("%s: %s [%s] Priority: %.1f"), 
+               *Task.AgentName, *Task.TaskDescription, *StatusStr, Task.Priority);
+    }
+    UE_LOG(LogTemp, Warning, TEXT("=== END REPORT ==="));
+}
+
+void UProductionCoordinator::UpdateProductionTimer()
+{
+    UpdateProductionMetrics();
+    GenerateProductionReport();
+}
+
+void UProductionCoordinator::AnalyzeWorldState()
 {
     if (!GetWorld())
     {
         return;
     }
     
+    // Reset counters
     CurrentMetrics.TotalActors = 0;
+    CurrentMetrics.DinosaurCount = 0;
+    CurrentMetrics.CharacterCount = 0;
     CurrentMetrics.TerrainActors = 0;
-    CurrentMetrics.CharacterActors = 0;
-    CurrentMetrics.DinosaurActors = 0;
-    CurrentMetrics.EnvironmentActors = 0;
-    CurrentMetrics.LightingActors = 0;
     
-    for (TActorIterator<AActor> ActorItr(GetWorld()); ActorItr; ++ActorItr)
+    // Count all actors in the world
+    for (TActorIterator<AActor> ActorIterator(GetWorld()); ActorIterator; ++ActorIterator)
     {
-        AActor* Actor = *ActorItr;
-        if (!Actor)
-        {
-            continue;
-        }
+        AActor* Actor = *ActorIterator;
+        if (!Actor) continue;
         
         CurrentMetrics.TotalActors++;
         
-        FString ActorName = Actor->GetName().ToLower();
-        FString ActorLabel = Actor->GetActorLabel().ToLower();
+        // Count characters
+        if (Cast<ACharacter>(Actor))
+        {
+            CurrentMetrics.CharacterCount++;
+        }
         
-        // Categorize actors
-        if (ActorName.Contains(TEXT("landscape")) || ActorLabel.Contains(TEXT("terrain")))
+        // Count dinosaurs (by name pattern)
+        FString ActorName = Actor->GetName().ToLower();
+        if (ActorName.Contains(TEXT("trex")) || ActorName.Contains(TEXT("veloci")) || 
+            ActorName.Contains(TEXT("tricera")) || ActorName.Contains(TEXT("brachi")) ||
+            ActorName.Contains(TEXT("ankylo")) || ActorName.Contains(TEXT("parasauro")))
+        {
+            CurrentMetrics.DinosaurCount++;
+        }
+        
+        // Count terrain actors
+        if (Cast<ALandscape>(Actor) || ActorName.Contains(TEXT("landscape")) || ActorName.Contains(TEXT("terrain")))
         {
             CurrentMetrics.TerrainActors++;
         }
-        else if (ActorName.Contains(TEXT("character")) || ActorLabel.Contains(TEXT("player")))
-        {
-            CurrentMetrics.CharacterActors++;
-        }
-        else if (ActorLabel.Contains(TEXT("trex")) || ActorLabel.Contains(TEXT("veloci")) || 
-                 ActorLabel.Contains(TEXT("tricera")) || ActorLabel.Contains(TEXT("brachi")))
-        {
-            CurrentMetrics.DinosaurActors++;
-        }
-        else if (ActorLabel.Contains(TEXT("tree")) || ActorLabel.Contains(TEXT("rock")) || 
-                 ActorLabel.Contains(TEXT("bush")) || ActorLabel.Contains(TEXT("grass")))
-        {
-            CurrentMetrics.EnvironmentActors++;
-        }
-        else if (ActorName.Contains(TEXT("light")) || ActorName.Contains(TEXT("sun")) || 
-                 ActorName.Contains(TEXT("sky")) || ActorName.Contains(TEXT("fog")))
-        {
-            CurrentMetrics.LightingActors++;
-        }
     }
 }
 
-void UDir_ProductionCoordinator::UpdatePrototypeCompletion()
+void UProductionCoordinator::CoordinateAgentPriorities()
 {
-    float Completion = 0.0f;
-    
-    // Prototype completion criteria
-    bool bHasPlayerCharacter = CurrentMetrics.CharacterActors > 0;
-    bool bHasTerrain = CurrentMetrics.TerrainActors > 0;
-    bool bHasDinosaurs = CurrentMetrics.DinosaurActors > 0;
-    bool bHasEnvironment = CurrentMetrics.EnvironmentActors > 10;
-    bool bHasLighting = CurrentMetrics.LightingActors > 0;
-    
-    // Each component contributes 20% to completion
-    if (bHasPlayerCharacter) Completion += 20.0f;
-    if (bHasTerrain) Completion += 20.0f;
-    if (bHasDinosaurs) Completion += 20.0f;
-    if (bHasEnvironment) Completion += 20.0f;
-    if (bHasLighting) Completion += 20.0f;
-    
-    CurrentMetrics.PrototypeCompletion = Completion;
-}
-
-void UDir_ProductionCoordinator::CheckPhaseTransition()
-{
-    if (CurrentPhase == EDir_ProductionPhase::Prototype && CurrentMetrics.PrototypeCompletion >= CycleCompletionThreshold)
+    // Adjust agent priorities based on current production needs
+    for (FDir_AgentTask& Task : AgentTasks)
     {
-        AdvanceProductionPhase();
-    }
-}
-
-void UDir_ProductionCoordinator::AdvanceProductionPhase()
-{
-    switch (CurrentPhase)
-    {
-        case EDir_ProductionPhase::PreProduction:
-            CurrentPhase = EDir_ProductionPhase::Prototype;
-            break;
-        case EDir_ProductionPhase::Prototype:
-            CurrentPhase = EDir_ProductionPhase::Alpha;
-            break;
-        case EDir_ProductionPhase::Alpha:
-            CurrentPhase = EDir_ProductionPhase::Beta;
-            break;
-        case EDir_ProductionPhase::Beta:
-            CurrentPhase = EDir_ProductionPhase::Gold;
-            break;
-        case EDir_ProductionPhase::Gold:
-            // Already at final phase
-            break;
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("ProductionCoordinator: Advanced to phase: %d"), (int32)CurrentPhase);
-}
-
-bool UDir_ProductionCoordinator::IsPrototypeComplete() const
-{
-    return CurrentMetrics.PrototypeCompletion >= CycleCompletionThreshold;
-}
-
-void UDir_ProductionCoordinator::ForceProductionAnalysis()
-{
-    AnalyzeProductionState();
-    LogProductionStatus();
-}
-
-void UDir_ProductionCoordinator::LogProductionStatus()
-{
-    UE_LOG(LogTemp, Warning, TEXT("=== PRODUCTION STATUS REPORT ==="));
-    UE_LOG(LogTemp, Warning, TEXT("Current Phase: %d"), (int32)CurrentPhase);
-    UE_LOG(LogTemp, Warning, TEXT("Cycle Number: %d"), CurrentCycleNumber);
-    UE_LOG(LogTemp, Warning, TEXT("Total Actors: %d"), CurrentMetrics.TotalActors);
-    UE_LOG(LogTemp, Warning, TEXT("Terrain Actors: %d"), CurrentMetrics.TerrainActors);
-    UE_LOG(LogTemp, Warning, TEXT("Character Actors: %d"), CurrentMetrics.CharacterActors);
-    UE_LOG(LogTemp, Warning, TEXT("Dinosaur Actors: %d"), CurrentMetrics.DinosaurActors);
-    UE_LOG(LogTemp, Warning, TEXT("Environment Actors: %d"), CurrentMetrics.EnvironmentActors);
-    UE_LOG(LogTemp, Warning, TEXT("Lighting Actors: %d"), CurrentMetrics.LightingActors);
-    UE_LOG(LogTemp, Warning, TEXT("Prototype Completion: %.1f%%"), CurrentMetrics.PrototypeCompletion);
-    UE_LOG(LogTemp, Warning, TEXT("================================"));
-    
-    // Log agent task status
-    for (const FDir_AgentTask& Task : AgentTasks)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Agent: %s | Status: %d | Completion: %.1f%%"), 
-               *Task.AgentName, (int32)Task.Status, Task.CompletionPercentage);
+        // Boost priority for blocked agents
+        if (Task.Status == EDir_AgentStatus::Blocked)
+        {
+            Task.Priority = FMath::Min(Task.Priority + 0.1f, 10.0f);
+        }
+        
+        // Reduce priority for completed tasks
+        if (Task.Status == EDir_AgentStatus::Completed)
+        {
+            Task.Priority = FMath::Max(Task.Priority - 0.05f, 0.1f);
+        }
+        
+        // Increase priority for overdue tasks
+        if (FDateTime::Now() > Task.EstimatedCompletion && Task.Status == EDir_AgentStatus::Working)
+        {
+            Task.Priority = FMath::Min(Task.Priority + 0.2f, 10.0f);
+        }
     }
 }
