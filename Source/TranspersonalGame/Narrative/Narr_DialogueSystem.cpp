@@ -1,151 +1,186 @@
 #include "Narr_DialogueSystem.h"
 #include "Engine/World.h"
-#include "GameFramework/Pawn.h"
+#include "GameFramework/Actor.h"
 #include "Kismet/GameplayStatics.h"
-#include "Engine/Engine.h"
 
-UNarr_DialogueSystem::UNarr_DialogueSystem()
+UNarr_DialogueComponent::UNarr_DialogueComponent()
 {
-    PrimaryComponentTick.bCanEverTick = true;
-    CurrentDialogueIndex = 0;
+    PrimaryComponentTick.bCanEverTick = false;
     bIsDialogueActive = false;
-    DialogueRange = 500.0f;
-
-    // Add default survival dialogue entries
-    FNarr_DialogueEntry WelcomeEntry;
-    WelcomeEntry.SpeakerName = TEXT("Tribal Elder");
-    WelcomeEntry.DialogueText = FText::FromString(TEXT("Welcome to the ancient hunting grounds. Survival depends on your wits and courage."));
-    WelcomeEntry.DialogueType = ENarr_DialogueType::Information;
-    WelcomeEntry.DisplayDuration = 4.0f;
-    DialogueEntries.Add(WelcomeEntry);
-
-    FNarr_DialogueEntry WarningEntry;
-    WarningEntry.SpeakerName = TEXT("Scout");
-    WarningEntry.DialogueText = FText::FromString(TEXT("Beware the great predators! They hunt in packs and show no mercy."));
-    WarningEntry.DialogueType = ENarr_DialogueType::Warning;
-    WarningEntry.DisplayDuration = 3.5f;
-    DialogueEntries.Add(WarningEntry);
-
-    FNarr_DialogueEntry SurvivalEntry;
-    SurvivalEntry.SpeakerName = TEXT("Craftsman");
-    SurvivalEntry.DialogueText = FText::FromString(TEXT("Stone and wood are your allies. Craft tools to increase your chances of survival."));
-    SurvivalEntry.DialogueType = ENarr_DialogueType::Survival;
-    SurvivalEntry.DisplayDuration = 4.5f;
-    DialogueEntries.Add(SurvivalEntry);
+    InteractionRange = 300.0f;
+    CurrentTreeID = TEXT("");
 }
 
-void UNarr_DialogueSystem::BeginPlay()
+void UNarr_DialogueComponent::BeginPlay()
 {
     Super::BeginPlay();
+    
+    // Initialize default dialogue trees
+    FNarr_DialogueTree DefaultTree;
+    DefaultTree.TreeID = TEXT("DefaultGreeting");
+    
+    FNarr_DialogueEntry GreetingEntry;
+    GreetingEntry.SpeakerName = TEXT("Tribal Elder");
+    GreetingEntry.DialogueText = FText::FromString(TEXT("Greetings, traveler. These lands are dangerous."));
+    GreetingEntry.Duration = 4.0f;
+    GreetingEntry.ResponseOptions.Add(TEXT("Tell me about the dangers"));
+    GreetingEntry.ResponseOptions.Add(TEXT("I can handle myself"));
+    
+    DefaultTree.Entries.Add(GreetingEntry);
+    DialogueTrees.Add(DefaultTree);
 }
 
-void UNarr_DialogueSystem::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void UNarr_DialogueComponent::StartDialogue(const FString& TreeID)
 {
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-
-    if (bIsDialogueActive && IsPlayerInRange())
+    if (TreeID.IsEmpty())
     {
-        // Auto-advance dialogue after display duration
-        static float DialogueTimer = 0.0f;
-        DialogueTimer += DeltaTime;
-        
-        if (DialogueTimer >= GetCurrentDialogue().DisplayDuration)
+        return;
+    }
+
+    for (const FNarr_DialogueTree& Tree : DialogueTrees)
+    {
+        if (Tree.TreeID == TreeID)
         {
-            NextDialogue();
-            DialogueTimer = 0.0f;
+            CurrentTreeID = TreeID;
+            bIsDialogueActive = true;
+            break;
         }
     }
 }
 
-void UNarr_DialogueSystem::StartDialogue()
-{
-    if (DialogueEntries.Num() > 0 && IsPlayerInRange())
-    {
-        CurrentDialogueIndex = 0;
-        bIsDialogueActive = true;
-        
-        FNarr_DialogueEntry CurrentEntry = GetCurrentDialogue();
-        FString DisplayText = FString::Printf(TEXT("%s: %s"), 
-            *CurrentEntry.SpeakerName, 
-            *CurrentEntry.DialogueText.ToString());
-        
-        if (GEngine)
-        {
-            GEngine->AddOnScreenDebugMessage(-1, CurrentEntry.DisplayDuration, FColor::Yellow, DisplayText);
-        }
-        
-        UE_LOG(LogTemp, Log, TEXT("Dialogue Started: %s"), *DisplayText);
-    }
-}
-
-void UNarr_DialogueSystem::NextDialogue()
-{
-    if (bIsDialogueActive && DialogueEntries.Num() > 0)
-    {
-        CurrentDialogueIndex++;
-        
-        if (CurrentDialogueIndex >= DialogueEntries.Num())
-        {
-            EndDialogue();
-            return;
-        }
-        
-        FNarr_DialogueEntry CurrentEntry = GetCurrentDialogue();
-        FString DisplayText = FString::Printf(TEXT("%s: %s"), 
-            *CurrentEntry.SpeakerName, 
-            *CurrentEntry.DialogueText.ToString());
-        
-        if (GEngine)
-        {
-            GEngine->AddOnScreenDebugMessage(-1, CurrentEntry.DisplayDuration, FColor::Yellow, DisplayText);
-        }
-        
-        UE_LOG(LogTemp, Log, TEXT("Next Dialogue: %s"), *DisplayText);
-    }
-}
-
-void UNarr_DialogueSystem::EndDialogue()
+void UNarr_DialogueComponent::EndDialogue()
 {
     bIsDialogueActive = false;
-    CurrentDialogueIndex = 0;
-    
-    if (GEngine)
-    {
-        GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Green, TEXT("Dialogue Ended"));
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("Dialogue System: Conversation ended"));
+    CurrentTreeID = TEXT("");
 }
 
-FNarr_DialogueEntry UNarr_DialogueSystem::GetCurrentDialogue() const
+FNarr_DialogueEntry UNarr_DialogueComponent::GetCurrentEntry()
 {
-    if (DialogueEntries.IsValidIndex(CurrentDialogueIndex))
+    if (!bIsDialogueActive || CurrentTreeID.IsEmpty())
     {
-        return DialogueEntries[CurrentDialogueIndex];
+        return FNarr_DialogueEntry();
     }
-    
+
+    for (FNarr_DialogueTree& Tree : DialogueTrees)
+    {
+        if (Tree.TreeID == CurrentTreeID)
+        {
+            if (Tree.Entries.IsValidIndex(Tree.CurrentEntryIndex))
+            {
+                return Tree.Entries[Tree.CurrentEntryIndex];
+            }
+            break;
+        }
+    }
+
     return FNarr_DialogueEntry();
 }
 
-void UNarr_DialogueSystem::AddDialogueEntry(const FNarr_DialogueEntry& NewEntry)
+void UNarr_DialogueComponent::AdvanceDialogue()
 {
-    DialogueEntries.Add(NewEntry);
-    UE_LOG(LogTemp, Log, TEXT("Dialogue System: Added new entry from %s"), *NewEntry.SpeakerName);
+    if (!bIsDialogueActive || CurrentTreeID.IsEmpty())
+    {
+        return;
+    }
+
+    for (FNarr_DialogueTree& Tree : DialogueTrees)
+    {
+        if (Tree.TreeID == CurrentTreeID)
+        {
+            Tree.CurrentEntryIndex++;
+            if (Tree.CurrentEntryIndex >= Tree.Entries.Num())
+            {
+                EndDialogue();
+            }
+            break;
+        }
+    }
 }
 
-bool UNarr_DialogueSystem::IsPlayerInRange() const
+bool UNarr_DialogueComponent::CanInteract(AActor* InteractingActor)
 {
-    if (!GetWorld())
+    if (!InteractingActor || !GetOwner())
     {
         return false;
     }
+
+    float Distance = FVector::Dist(GetOwner()->GetActorLocation(), InteractingActor->GetActorLocation());
+    return Distance <= InteractionRange;
+}
+
+void UNarr_DialogueComponent::AddDialogueTree(const FNarr_DialogueTree& NewTree)
+{
+    DialogueTrees.Add(NewTree);
+}
+
+void UNarr_DialogueManager::Initialize(FSubsystemCollectionBase& Collection)
+{
+    Super::Initialize(Collection);
     
-    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
-    if (!PlayerPawn || !GetOwner())
+    // Register default dialogue trees
+    FNarr_DialogueTree HunterTree;
+    HunterTree.TreeID = TEXT("HunterIntro");
+    
+    FNarr_DialogueEntry HunterEntry1;
+    HunterEntry1.SpeakerName = TEXT("Tribal Hunter");
+    HunterEntry1.DialogueText = FText::FromString(TEXT("The great beasts stalk these lands. You need weapons."));
+    HunterEntry1.Duration = 5.0f;
+    HunterEntry1.ResponseOptions.Add(TEXT("What weapons do you recommend?"));
+    HunterEntry1.ResponseOptions.Add(TEXT("I have my own tools"));
+    
+    FNarr_DialogueEntry HunterEntry2;
+    HunterEntry2.SpeakerName = TEXT("Tribal Hunter");
+    HunterEntry2.DialogueText = FText::FromString(TEXT("Stone spears and fire. Nothing else will pierce their hide."));
+    HunterEntry2.Duration = 4.0f;
+    
+    HunterTree.Entries.Add(HunterEntry1);
+    HunterTree.Entries.Add(HunterEntry2);
+    
+    RegisterDialogueTree(HunterTree.TreeID, HunterTree);
+}
+
+void UNarr_DialogueManager::RegisterDialogueTree(const FString& TreeID, const FNarr_DialogueTree& Tree)
+{
+    if (!TreeID.IsEmpty())
     {
-        return false;
+        GlobalDialogueTrees.Add(TreeID, Tree);
+    }
+}
+
+FNarr_DialogueTree UNarr_DialogueManager::GetDialogueTree(const FString& TreeID)
+{
+    if (GlobalDialogueTrees.Contains(TreeID))
+    {
+        return GlobalDialogueTrees[TreeID];
     }
     
-    float Distance = FVector::Dist(GetOwner()->GetActorLocation(), PlayerPawn->GetActorLocation());
-    return Distance <= DialogueRange;
+    return FNarr_DialogueTree();
+}
+
+void UNarr_DialogueManager::MarkDialogueCompleted(const FString& TreeID)
+{
+    if (!TreeID.IsEmpty() && !CompletedDialogues.Contains(TreeID))
+    {
+        CompletedDialogues.Add(TreeID);
+    }
+}
+
+bool UNarr_DialogueManager::IsDialogueCompleted(const FString& TreeID)
+{
+    return CompletedDialogues.Contains(TreeID);
+}
+
+TArray<FString> UNarr_DialogueManager::GetAvailableDialogues()
+{
+    TArray<FString> AvailableDialogues;
+    
+    for (const auto& DialoguePair : GlobalDialogueTrees)
+    {
+        if (!IsDialogueCompleted(DialoguePair.Key))
+        {
+            AvailableDialogues.Add(DialoguePair.Key);
+        }
+    }
+    
+    return AvailableDialogues;
 }
