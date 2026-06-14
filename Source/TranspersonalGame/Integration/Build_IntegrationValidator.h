@@ -2,46 +2,43 @@
 
 #include "CoreMinimal.h"
 #include "Engine/World.h"
-#include "GameFramework/GameStateBase.h"
-#include "Subsystems/GameInstanceSubsystem.h"
+#include "GameFramework/Actor.h"
+#include "Components/ActorComponent.h"
 #include "Build_IntegrationValidator.generated.h"
 
 UENUM(BlueprintType)
-enum class EBuild_ValidationStatus : uint8
+enum class EBuild_IntegrationStatus : uint8
 {
     Unknown,
-    Passed,
-    Failed,
-    Warning
+    Validating,
+    Success,
+    Warning,
+    Failed
 };
 
 USTRUCT(BlueprintType)
-struct FBuild_ModuleStatus
+struct FBuild_SystemHealth
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly)
-    FString ModuleName;
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    FString SystemName;
 
-    UPROPERTY(BlueprintReadOnly)
-    EBuild_ValidationStatus Status;
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    EBuild_IntegrationStatus Status;
 
-    UPROPERTY(BlueprintReadOnly)
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
     FString ErrorMessage;
 
-    UPROPERTY(BlueprintReadOnly)
-    int32 ClassesLoaded;
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    float PerformanceScore;
 
-    UPROPERTY(BlueprintReadOnly)
-    int32 TotalClasses;
-
-    FBuild_ModuleStatus()
+    FBuild_SystemHealth()
     {
-        ModuleName = TEXT("");
-        Status = EBuild_ValidationStatus::Unknown;
+        SystemName = TEXT("");
+        Status = EBuild_IntegrationStatus::Unknown;
         ErrorMessage = TEXT("");
-        ClassesLoaded = 0;
-        TotalClasses = 0;
+        PerformanceScore = 0.0f;
     }
 };
 
@@ -50,72 +47,93 @@ struct FBuild_IntegrationReport
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly)
-    TArray<FBuild_ModuleStatus> ModuleStatuses;
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    TArray<FBuild_SystemHealth> SystemHealthChecks;
 
-    UPROPERTY(BlueprintReadOnly)
-    int32 TotalActors;
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    int32 TotalActorCount;
 
-    UPROPERTY(BlueprintReadOnly)
-    int32 DinosaurActors;
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    int32 CustomClassCount;
 
-    UPROPERTY(BlueprintReadOnly)
-    bool bGameStateValid;
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    float OverallHealthScore;
 
-    UPROPERTY(BlueprintReadOnly)
-    bool bCharacterSystemValid;
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    bool bIsLevelPlayable;
 
-    UPROPERTY(BlueprintReadOnly)
-    FString BuildTimestamp;
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    FDateTime ReportTimestamp;
 
     FBuild_IntegrationReport()
     {
-        TotalActors = 0;
-        DinosaurActors = 0;
-        bGameStateValid = false;
-        bCharacterSystemValid = false;
-        BuildTimestamp = TEXT("");
+        TotalActorCount = 0;
+        CustomClassCount = 0;
+        OverallHealthScore = 0.0f;
+        bIsLevelPlayable = false;
+        ReportTimestamp = FDateTime::Now();
     }
 };
 
-/**
- * Integration validation subsystem for build quality assurance
- * Validates module loading, cross-system dependencies, and runtime integrity
- */
-UCLASS()
-class TRANSPERSONALGAME_API UBuild_IntegrationValidator : public UGameInstanceSubsystem
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API UBuild_IntegrationValidator : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
-    virtual void Deinitialize() override;
-
-    UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    FBuild_IntegrationReport ValidateFullSystem();
-
-    UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    EBuild_ValidationStatus ValidateModule(const FString& ModuleName);
-
-    UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    bool ValidateCrossSystemDependencies();
-
-    UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    void LogIntegrationReport(const FBuild_IntegrationReport& Report);
-
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Build Integration")
-    void RunEditorValidation();
+    UBuild_IntegrationValidator();
 
 protected:
-    UPROPERTY()
+    virtual void BeginPlay() override;
+
+public:
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+
+    UFUNCTION(BlueprintCallable, Category = "Integration", CallInEditor)
+    FBuild_IntegrationReport ValidateCurrentLevel();
+
+    UFUNCTION(BlueprintCallable, Category = "Integration", CallInEditor)
+    bool ValidateSystemIntegration(const FString& SystemName);
+
+    UFUNCTION(BlueprintCallable, Category = "Integration", CallInEditor)
+    void RunPerformanceAnalysis();
+
+    UFUNCTION(BlueprintCallable, Category = "Integration", CallInEditor)
+    void GenerateIntegrationReport();
+
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    float CalculateSystemHealth(const FString& SystemName);
+
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    bool CheckCrossSystemCompatibility();
+
+protected:
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
     FBuild_IntegrationReport LastReport;
 
-    UPROPERTY()
-    TArray<FString> CriticalModules;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration")
+    TArray<FString> SystemsToValidate;
 
-    void InitializeCriticalModules();
-    bool ValidateActorCounts();
-    bool ValidateGameState();
-    bool ValidateCharacterSystem();
-    FBuild_ModuleStatus ValidateModuleClasses(const FString& ModuleName);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration")
+    float ValidationInterval;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration")
+    int32 MaxActorCountThreshold;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration")
+    bool bAutoValidateOnPlay;
+
+private:
+    float LastValidationTime;
+    bool bValidationInProgress;
+
+    FBuild_SystemHealth ValidateCharacterSystem();
+    FBuild_SystemHealth ValidateWorldGenSystem();
+    FBuild_SystemHealth ValidateFoliageSystem();
+    FBuild_SystemHealth ValidateCrowdSimSystem();
+    FBuild_SystemHealth ValidateQAFramework();
+
+    void LogIntegrationResults(const FBuild_IntegrationReport& Report);
+    bool CheckActorCountLimits();
+    bool CheckPerformanceMetrics();
 };
