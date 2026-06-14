@@ -5,47 +5,49 @@ void UEng_SystemRegistry::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
     
-    UE_LOG(LogTemp, Warning, TEXT("Engine System Registry initialized"));
+    UE_LOG(LogTemp, Warning, TEXT("SystemRegistry: Initializing core system registry"));
     
-    // Register core systems
-    RegisterSystem(TEXT("WorldGeneration"), EEng_SystemType::WorldGeneration);
-    RegisterSystem(TEXT("BiomeManagement"), EEng_SystemType::BiomeManagement);
-    RegisterSystem(TEXT("PerformanceMonitoring"), EEng_SystemType::PerformanceMonitoring);
+    // Register core engine systems
+    RegisterSystem(TEXT("BiomeSystem"), 100);
+    RegisterSystem(TEXT("WorldArchitecture"), 90);
+    RegisterSystem(TEXT("PerformanceManager"), 80);
+    RegisterSystem(TEXT("ProductionDirector"), 70);
     
     LogSystemStatus();
 }
 
 void UEng_SystemRegistry::Deinitialize()
 {
-    UE_LOG(LogTemp, Warning, TEXT("Engine System Registry deinitialized"));
+    UE_LOG(LogTemp, Warning, TEXT("SystemRegistry: Shutting down - %d systems registered"), RegisteredSystems.Num());
     RegisteredSystems.Empty();
     Super::Deinitialize();
 }
 
-void UEng_SystemRegistry::RegisterSystem(const FString& SystemName, EEng_SystemType SystemType)
+void UEng_SystemRegistry::RegisterSystem(const FString& SystemName, int32 Priority)
 {
     if (RegisteredSystems.Contains(SystemName))
     {
-        UE_LOG(LogTemp, Warning, TEXT("System %s already registered"), *SystemName);
+        UE_LOG(LogTemp, Warning, TEXT("SystemRegistry: System %s already registered"), *SystemName);
         return;
     }
 
     FEng_SystemInfo NewSystem;
     NewSystem.SystemName = SystemName;
-    NewSystem.SystemType = SystemType;
-    NewSystem.bIsActive = true;
-    NewSystem.InitializationTime = FPlatformTime::Seconds();
+    NewSystem.Priority = Priority;
+    NewSystem.bIsInitialized = false;
+    NewSystem.InitializationTime = 0.0f;
 
     RegisteredSystems.Add(SystemName, NewSystem);
-    
-    UE_LOG(LogTemp, Log, TEXT("Registered system: %s"), *SystemName);
+    UE_LOG(LogTemp, Log, TEXT("SystemRegistry: Registered system %s with priority %d"), *SystemName, Priority);
 }
 
-void UEng_SystemRegistry::UnregisterSystem(const FString& SystemName)
+void UEng_SystemRegistry::MarkSystemInitialized(const FString& SystemName, float InitTime)
 {
-    if (RegisteredSystems.Remove(SystemName) > 0)
+    if (FEng_SystemInfo* System = RegisteredSystems.Find(SystemName))
     {
-        UE_LOG(LogTemp, Log, TEXT("Unregistered system: %s"), *SystemName);
+        System->bIsInitialized = true;
+        System->InitializationTime = InitTime;
+        UE_LOG(LogTemp, Log, TEXT("SystemRegistry: System %s initialized in %.3fs"), *SystemName, InitTime);
     }
 }
 
@@ -57,34 +59,49 @@ bool UEng_SystemRegistry::IsSystemRegistered(const FString& SystemName) const
 TArray<FEng_SystemInfo> UEng_SystemRegistry::GetAllSystems() const
 {
     TArray<FEng_SystemInfo> Systems;
-    RegisteredSystems.GenerateValueArray(Systems);
+    for (const auto& Pair : RegisteredSystems)
+    {
+        Systems.Add(Pair.Value);
+    }
+    
+    // Sort by priority (higher first)
+    Systems.Sort([](const FEng_SystemInfo& A, const FEng_SystemInfo& B) {
+        return A.Priority > B.Priority;
+    });
+    
     return Systems;
 }
 
 void UEng_SystemRegistry::ValidateSystemDependencies()
 {
-    UE_LOG(LogTemp, Warning, TEXT("Validating system dependencies..."));
+    int32 InitializedCount = 0;
+    int32 TotalCount = RegisteredSystems.Num();
     
-    for (const auto& SystemPair : RegisteredSystems)
+    for (const auto& Pair : RegisteredSystems)
     {
-        const FEng_SystemInfo& System = SystemPair.Value;
-        UE_LOG(LogTemp, Log, TEXT("System %s is %s"), 
-            *System.SystemName, 
-            System.bIsActive ? TEXT("ACTIVE") : TEXT("INACTIVE"));
+        if (Pair.Value.bIsInitialized)
+        {
+            InitializedCount++;
+        }
     }
+    
+    float InitPercentage = TotalCount > 0 ? (float)InitializedCount / TotalCount * 100.0f : 0.0f;
+    UE_LOG(LogTemp, Warning, TEXT("SystemRegistry: %d/%d systems initialized (%.1f%%)"), 
+           InitializedCount, TotalCount, InitPercentage);
 }
 
-void UEng_SystemRegistry::LogSystemStatus() const
+void UEng_SystemRegistry::LogSystemStatus()
 {
-    UE_LOG(LogTemp, Warning, TEXT("=== ENGINE SYSTEM REGISTRY STATUS ==="));
-    UE_LOG(LogTemp, Warning, TEXT("Total registered systems: %d"), RegisteredSystems.Num());
+    UE_LOG(LogTemp, Warning, TEXT("SystemRegistry: Current system status:"));
     
-    for (const auto& SystemPair : RegisteredSystems)
+    TArray<FEng_SystemInfo> Systems = GetAllSystems();
+    for (const FEng_SystemInfo& System : Systems)
     {
-        const FEng_SystemInfo& System = SystemPair.Value;
-        UE_LOG(LogTemp, Log, TEXT("- %s [%s] - Active: %s"), 
-            *System.SystemName,
-            *UEnum::GetValueAsString(System.SystemType),
-            System.bIsActive ? TEXT("YES") : TEXT("NO"));
+        FString Status = System.bIsInitialized ? 
+            FString::Printf(TEXT("READY (%.3fs)"), System.InitializationTime) : 
+            TEXT("PENDING");
+        
+        UE_LOG(LogTemp, Warning, TEXT("  [P%d] %s: %s"), 
+               System.Priority, *System.SystemName, *Status);
     }
 }
