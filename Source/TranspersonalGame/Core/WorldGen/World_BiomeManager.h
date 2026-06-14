@@ -4,87 +4,42 @@
 #include "GameFramework/Actor.h"
 #include "Engine/World.h"
 #include "Components/StaticMeshComponent.h"
-#include "Components/PointLightComponent.h"
-#include "Landscape/Classes/Landscape.h"
 #include "SharedTypes.h"
 #include "World_BiomeManager.generated.h"
 
 UENUM(BlueprintType)
 enum class EWorld_BiomeType : uint8
 {
-    DenseForest     UMETA(DisplayName = "Dense Forest"),
-    OpenPlains      UMETA(DisplayName = "Open Plains"), 
-    RockyHighlands  UMETA(DisplayName = "Rocky Highlands"),
-    SwampWetlands   UMETA(DisplayName = "Swamp Wetlands"),
-    VolcanicRegion  UMETA(DisplayName = "Volcanic Region")
+    Forest      UMETA(DisplayName = "Forest"),
+    Swampland   UMETA(DisplayName = "Swampland"),
+    Canyon      UMETA(DisplayName = "Canyon"),
+    Plains      UMETA(DisplayName = "Plains"),
+    Mountains   UMETA(DisplayName = "Mountains"),
+    Desert      UMETA(DisplayName = "Desert")
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FWorld_BiomeData
+struct FWorld_BiomeData
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    EWorld_BiomeType BiomeType;
+    EWorld_BiomeType BiomeType = EWorld_BiomeType::Forest;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    FVector Center;
+    FVector BiomeCenter = FVector::ZeroVector;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float Radius;
+    float BiomeRadius = 5000.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float TreeDensity;
+    float VegetationDensity = 1.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    bool bHasUndergrowth;
+    float WaterLevel = 0.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    FLinearColor AmbientLighting;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float Temperature;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float Humidity;
-
-    FWorld_BiomeData()
-    {
-        BiomeType = EWorld_BiomeType::DenseForest;
-        Center = FVector::ZeroVector;
-        Radius = 1000.0f;
-        TreeDensity = 0.5f;
-        bHasUndergrowth = true;
-        AmbientLighting = FLinearColor::White;
-        Temperature = 25.0f;
-        Humidity = 0.6f;
-    }
-};
-
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FWorld_LandmarkData
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Landmark")
-    FString Name;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Landmark")
-    FVector Location;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Landmark")
-    FVector Scale;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Landmark")
-    EWorld_BiomeType AssociatedBiome;
-
-    FWorld_LandmarkData()
-    {
-        Name = TEXT("Unknown Landmark");
-        Location = FVector::ZeroVector;
-        Scale = FVector::OneVector;
-        AssociatedBiome = EWorld_BiomeType::DenseForest;
-    }
+    FLinearColor BiomeTint = FLinearColor::White;
 };
 
 UCLASS(BlueprintType, Blueprintable)
@@ -98,68 +53,47 @@ public:
 protected:
     virtual void BeginPlay() override;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome System")
-    TArray<FWorld_BiomeData> BiomeZones;
+public:
+    virtual void Tick(float DeltaTime) override;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome System")
-    TArray<FWorld_LandmarkData> PrehistoricLandmarks;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biomes")
+    TArray<FWorld_BiomeData> BiomeRegions;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome System")
-    float BiomeTransitionDistance;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Generation")
+    int32 MaxVegetationPerBiome = 100;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome System")
-    bool bEnableDynamicWeather;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Generation")
+    float BiomeTransitionDistance = 1000.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome System")
-    float WeatherUpdateInterval;
-
-    // Biome detection and management
-    UFUNCTION(BlueprintCallable, Category = "Biome System")
-    EWorld_BiomeType GetBiomeAtLocation(const FVector& Location) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Biome System")
-    FWorld_BiomeData GetBiomeData(EWorld_BiomeType BiomeType) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Biome System")
-    float GetDistanceToBiomeCenter(const FVector& Location, EWorld_BiomeType BiomeType) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Biome System")
-    TArray<EWorld_BiomeType> GetNearbyBiomes(const FVector& Location, float SearchRadius) const;
-
-    // Procedural generation
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Biome System")
+    UFUNCTION(BlueprintCallable, Category = "Biome Management")
     void GenerateAllBiomes();
 
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Biome System")
-    void GenerateBiome(EWorld_BiomeType BiomeType);
+    UFUNCTION(BlueprintCallable, Category = "Biome Management")
+    void GenerateBiome(const FWorld_BiomeData& BiomeData);
 
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Biome System")
+    UFUNCTION(BlueprintCallable, Category = "Biome Management")
+    EWorld_BiomeType GetBiomeAtLocation(const FVector& Location) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Biome Management")
+    void CreateSwamplandBiome(const FVector& Center, float Radius);
+
+    UFUNCTION(BlueprintCallable, Category = "Biome Management")
+    void CreateCanyonBiome(const FVector& Center, float Radius);
+
+    UFUNCTION(BlueprintCallable, Category = "Biome Management")
+    void CreateForestBiome(const FVector& Center, float Radius);
+
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Debug")
+    void DebugShowBiomeBounds();
+
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Debug")
     void ClearAllBiomes();
 
-    // Landmark management
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Biome System")
-    void GenerateLandmarks();
-
-    UFUNCTION(BlueprintCallable, Category = "Biome System")
-    FWorld_LandmarkData GetNearestLandmark(const FVector& Location) const;
-
-    // Environmental effects
-    UFUNCTION(BlueprintCallable, Category = "Biome System")
-    FLinearColor GetBiomeAmbientColor(const FVector& Location) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Biome System")
-    float GetBiomeTemperature(const FVector& Location) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Biome System")
-    float GetBiomeHumidity(const FVector& Location) const;
-
 private:
-    void InitializeDefaultBiomes();
-    void InitializeDefaultLandmarks();
-    void SpawnBiomeVegetation(const FWorld_BiomeData& BiomeData);
-    void SpawnBiomeLighting(const FWorld_BiomeData& BiomeData);
-    void SpawnBiomeTerrain(const FWorld_BiomeData& BiomeData);
+    void SpawnVegetationInBiome(const FWorld_BiomeData& BiomeData);
+    void SpawnWaterFeatures(const FWorld_BiomeData& BiomeData);
+    void ApplyBiomeLighting(const FWorld_BiomeData& BiomeData);
 
-    FTimerHandle WeatherUpdateTimer;
-    void UpdateDynamicWeather();
+    UPROPERTY()
+    TArray<AActor*> SpawnedBiomeActors;
 };
