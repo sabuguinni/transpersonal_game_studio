@@ -1,292 +1,207 @@
 #include "Anim_MotionMatchingSystem.h"
+#include "Engine/Engine.h"
 #include "GameFramework/Character.h"
+#include "GameFramework/CharacterMovementComponent.h"
 #include "Components/SkeletalMeshComponent.h"
-#include "Animation/AnimInstance.h"
-#include "Kismet/KismetMathLibrary.h"
 
 UAnim_MotionMatchingSystem::UAnim_MotionMatchingSystem()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.bStartWithTickEnabled = true;
     
-    // Default weights
-    VelocityWeight = 1.0f;
-    AccelerationWeight = 0.5f;
-    DirectionWeight = 0.3f;
     SearchRadius = 100.0f;
     BlendTime = 0.2f;
-    
-    // Initialize state
-    CurrentState = EAnim_MotionState::Idle;
-    CurrentClip = nullptr;
+    bEnableMotionMatching = true;
+    CurrentClipIndex = -1;
     CurrentPlayTime = 0.0f;
-    PreviousVelocity = FVector::ZeroVector;
-    TransitionTimer = 0.0f;
-    bIsTransitioning = false;
-    
-    MovementComponent = nullptr;
-    OwnerCharacter = nullptr;
+    LastUpdateTime = 0.0f;
+    bDatabaseInitialized = false;
 }
 
 void UAnim_MotionMatchingSystem::BeginPlay()
 {
     Super::BeginPlay();
     
-    // Get owner character and movement component
-    OwnerCharacter = Cast<ACharacter>(GetOwner());
-    if (OwnerCharacter)
-    {
-        MovementComponent = OwnerCharacter->GetCharacterMovement();
-    }
-    
-    // Preprocess motion database
-    PreprocessMotionDatabase();
+    InitializeMotionDatabase();
 }
 
 void UAnim_MotionMatchingSystem::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-    
-    if (!MovementComponent || !OwnerCharacter)
+
+    if (!bEnableMotionMatching || !bDatabaseInitialized)
     {
         return;
     }
-    
-    // Update motion data
-    UpdateMotionData();
-    
-    // Handle transitions
-    if (bIsTransitioning)
-    {
-        TransitionTimer += DeltaTime;
-        if (TransitionTimer >= BlendTime)
-        {
-            bIsTransitioning = false;
-            TransitionTimer = 0.0f;
-        }
-    }
-    else
-    {
-        // Find best matching animation
-        FAnim_MotionClip* BestMatch = FindBestMatch();
-        if (BestMatch && BestMatch != CurrentClip)
-        {
-            TransitionToClip(BestMatch, 0.0f);
-        }
-    }
-    
-    // Update play time
-    if (CurrentClip)
-    {
-        CurrentPlayTime += DeltaTime;
-        if (CurrentPlayTime >= CurrentClip->EndTime)
-        {
-            CurrentPlayTime = CurrentClip->StartTime;
-        }
-    }
+
+    ProcessMotionMatching(DeltaTime);
 }
 
-void UAnim_MotionMatchingSystem::UpdateMotionData()
+void UAnim_MotionMatchingSystem::UpdateCurrentFeatures(const FVector& InVelocity, const FVector& InAcceleration, bool bInIsJumping, bool bInIsCrouching)
 {
-    if (!MovementComponent)
-    {
-        return;
-    }
-    
-    // Get current velocity and calculate acceleration
-    FVector CurrentVelocity = MovementComponent->Velocity;
-    FVector CurrentAcceleration = (CurrentVelocity - PreviousVelocity) / GetWorld()->GetDeltaSeconds();
-    
-    // Update motion frame
-    CurrentMotion.Velocity = CurrentVelocity;
-    CurrentMotion.Acceleration = CurrentAcceleration;
-    CurrentMotion.Speed = CurrentVelocity.Size();
-    CurrentMotion.bIsMoving = CurrentMotion.Speed > 10.0f;
-    CurrentMotion.bIsInAir = MovementComponent->IsFalling();
-    
-    // Calculate movement direction relative to character facing
-    if (CurrentMotion.bIsMoving)
-    {
-        FVector ForwardVector = OwnerCharacter->GetActorForwardVector();
-        FVector VelocityDirection = CurrentVelocity.GetSafeNormal();
-        CurrentMotion.Direction = FMath::RadiansToDegrees(FMath::Acos(FVector::DotProduct(ForwardVector, VelocityDirection)));
-    }
-    else
-    {
-        CurrentMotion.Direction = 0.0f;
-    }
-    
-    // Update motion state
-    CurrentState = DetermineMotionState();
-    
-    // Store previous velocity for next frame
-    PreviousVelocity = CurrentVelocity;
+    CurrentFeatures.Velocity = InVelocity;
+    CurrentFeatures.Acceleration = InAcceleration;
+    CurrentFeatures.Speed = InVelocity.Size();
+    CurrentFeatures.Direction = FMath::Atan2(InVelocity.Y, InVelocity.X);
+    CurrentFeatures.bIsMoving = CurrentFeatures.Speed > 10.0f;
+    CurrentFeatures.bIsJumping = bInIsJumping;
+    CurrentFeatures.bIsCrouching = bInIsCrouching;
 }
 
-FAnim_MotionClip* UAnim_MotionMatchingSystem::FindBestMatch()
+int32 UAnim_MotionMatchingSystem::FindBestMatchingClip(const FAnim_MotionFeature& TargetFeatures)
 {
     if (MotionDatabase.Num() == 0)
     {
-        return nullptr;
+        return -1;
     }
-    
-    FAnim_MotionClip* BestClip = nullptr;
-    float BestCost = FLT_MAX;
-    
-    for (FAnim_MotionClip& Clip : MotionDatabase)
+
+    int32 BestClipIndex = -1;
+    float BestDistance = FLT_MAX;
+
+    for (int32 ClipIndex = 0; ClipIndex < MotionDatabase.Num(); ++ClipIndex)
     {
-        if (!Clip.Animation || Clip.MotionData.Num() == 0)
-        {
-            continue;
-        }
+        const FAnim_MotionClip& Clip = MotionDatabase[ClipIndex];
         
-        // Find best frame within this clip
-        for (int32 FrameIndex = 0; FrameIndex < Clip.MotionData.Num(); FrameIndex++)
+        for (const FAnim_MotionFeature& Feature : Clip.Features)
         {
-            const FAnim_MotionFrame& ClipFrame = Clip.MotionData[FrameIndex];
-            float Cost = CalculateMotionCost(CurrentMotion, ClipFrame);
+            float Distance = CalculateFeatureDistance(TargetFeatures, Feature);
             
-            if (Cost < BestCost)
+            if (Distance < BestDistance && Distance <= SearchRadius)
             {
-                BestCost = Cost;
-                BestClip = &Clip;
+                BestDistance = Distance;
+                BestClipIndex = ClipIndex;
             }
         }
     }
-    
-    return BestClip;
+
+    return BestClipIndex;
 }
 
-float UAnim_MotionMatchingSystem::CalculateMotionCost(const FAnim_MotionFrame& TargetMotion, const FAnim_MotionFrame& ClipMotion)
+void UAnim_MotionMatchingSystem::AddMotionClip(UAnimSequence* AnimSeq, const TArray<FAnim_MotionFeature>& ClipFeatures)
 {
-    float Cost = 0.0f;
-    
-    // Velocity cost
-    float VelocityCost = FVector::Dist(TargetMotion.Velocity, ClipMotion.Velocity);
-    Cost += VelocityCost * VelocityWeight;
-    
-    // Acceleration cost
-    float AccelerationCost = FVector::Dist(TargetMotion.Acceleration, ClipMotion.Acceleration);
-    Cost += AccelerationCost * AccelerationWeight;
-    
-    // Direction cost
-    float DirectionCost = FMath::Abs(TargetMotion.Direction - ClipMotion.Direction);
-    Cost += DirectionCost * DirectionWeight;
-    
-    // State matching bonus
-    if (TargetMotion.bIsMoving == ClipMotion.bIsMoving)
-    {
-        Cost *= 0.8f; // 20% bonus for matching movement state
-    }
-    
-    if (TargetMotion.bIsInAir == ClipMotion.bIsInAir)
-    {
-        Cost *= 0.9f; // 10% bonus for matching air state
-    }
-    
-    return Cost;
-}
-
-void UAnim_MotionMatchingSystem::TransitionToClip(FAnim_MotionClip* NewClip, float StartTime)
-{
-    if (!NewClip || !NewClip->Animation)
+    if (!AnimSeq)
     {
         return;
     }
-    
-    CurrentClip = NewClip;
-    CurrentPlayTime = StartTime;
-    bIsTransitioning = true;
-    TransitionTimer = 0.0f;
-    
-    // Play animation on skeletal mesh
-    if (OwnerCharacter && OwnerCharacter->GetMesh())
-    {
-        OwnerCharacter->GetMesh()->PlayAnimation(NewClip->Animation, true);
-    }
-}
 
-EAnim_MotionState UAnim_MotionMatchingSystem::DetermineMotionState()
-{
-    if (!MovementComponent)
-    {
-        return EAnim_MotionState::Idle;
-    }
-    
-    if (MovementComponent->IsFalling())
-    {
-        return MovementComponent->Velocity.Z < 0 ? EAnim_MotionState::Falling : EAnim_MotionState::Jumping;
-    }
-    
-    if (MovementComponent->IsCrouching())
-    {
-        return CurrentMotion.bIsMoving ? EAnim_MotionState::Crawling : EAnim_MotionState::Crouching;
-    }
-    
-    if (CurrentMotion.Speed > 300.0f)
-    {
-        return EAnim_MotionState::Running;
-    }
-    else if (CurrentMotion.Speed > 50.0f)
-    {
-        return EAnim_MotionState::Walking;
-    }
-    
-    return EAnim_MotionState::Idle;
-}
-
-void UAnim_MotionMatchingSystem::AddMotionClip(UAnimSequence* Animation, const FString& ClipName)
-{
-    if (!Animation)
-    {
-        return;
-    }
-    
     FAnim_MotionClip NewClip;
-    NewClip.Animation = Animation;
-    NewClip.ClipName = ClipName;
+    NewClip.AnimSequence = AnimSeq;
+    NewClip.Features = ClipFeatures;
     NewClip.StartTime = 0.0f;
-    NewClip.EndTime = Animation->GetPlayLength();
-    
-    // TODO: Extract motion data from animation
-    // This would require analyzing bone positions and velocities frame by frame
-    // For now, create placeholder motion data
-    int32 NumFrames = FMath::Max(1, FMath::FloorToInt(NewClip.EndTime * 30.0f)); // 30 FPS sampling
-    NewClip.MotionData.Reserve(NumFrames);
-    
-    for (int32 i = 0; i < NumFrames; i++)
-    {
-        FAnim_MotionFrame Frame;
-        // Placeholder - in real implementation, extract from animation
-        Frame.Speed = FMath::RandRange(0.0f, 400.0f);
-        Frame.bIsMoving = Frame.Speed > 10.0f;
-        NewClip.MotionData.Add(Frame);
-    }
-    
+    NewClip.EndTime = AnimSeq->GetPlayLength();
+    NewClip.ClipID = MotionDatabase.Num();
+
     MotionDatabase.Add(NewClip);
+    
+    UE_LOG(LogTemp, Log, TEXT("Motion Matching: Added clip %s with %d features"), 
+           *AnimSeq->GetName(), ClipFeatures.Num());
 }
 
-void UAnim_MotionMatchingSystem::PreprocessMotionDatabase()
+void UAnim_MotionMatchingSystem::ClearMotionDatabase()
 {
-    // Validate and process all clips in the database
-    for (int32 i = MotionDatabase.Num() - 1; i >= 0; i--)
+    MotionDatabase.Empty();
+    CurrentClipIndex = -1;
+    bDatabaseInitialized = false;
+}
+
+UAnimSequence* UAnim_MotionMatchingSystem::GetCurrentAnimSequence() const
+{
+    if (CurrentClipIndex >= 0 && CurrentClipIndex < MotionDatabase.Num())
     {
-        FAnim_MotionClip& Clip = MotionDatabase[i];
-        
-        if (!Clip.Animation)
-        {
-            UE_LOG(LogTemp, Warning, TEXT("Motion clip %s has no animation - removing"), *Clip.ClipName);
-            MotionDatabase.RemoveAt(i);
-            continue;
-        }
-        
-        // Ensure motion data exists
-        if (Clip.MotionData.Num() == 0)
-        {
-            UE_LOG(LogTemp, Log, TEXT("Generating motion data for clip %s"), *Clip.ClipName);
-            AddMotionClip(Clip.Animation, Clip.ClipName);
-        }
+        return MotionDatabase[CurrentClipIndex].AnimSequence;
     }
     
-    UE_LOG(LogTemp, Log, TEXT("Motion database preprocessed: %d clips"), MotionDatabase.Num());
+    return nullptr;
+}
+
+float UAnim_MotionMatchingSystem::CalculateFeatureDistance(const FAnim_MotionFeature& FeatureA, const FAnim_MotionFeature& FeatureB) const
+{
+    float VelocityWeight = 1.0f;
+    float AccelerationWeight = 0.5f;
+    float SpeedWeight = 1.5f;
+    float DirectionWeight = 0.8f;
+    float BooleanWeight = 2.0f;
+
+    float VelocityDist = FVector::Dist(FeatureA.Velocity, FeatureB.Velocity) * VelocityWeight;
+    float AccelDist = FVector::Dist(FeatureA.Acceleration, FeatureB.Acceleration) * AccelerationWeight;
+    float SpeedDist = FMath::Abs(FeatureA.Speed - FeatureB.Speed) * SpeedWeight;
+    float DirectionDist = FMath::Abs(FeatureA.Direction - FeatureB.Direction) * DirectionWeight;
+    
+    float BooleanDist = 0.0f;
+    if (FeatureA.bIsMoving != FeatureB.bIsMoving) BooleanDist += BooleanWeight;
+    if (FeatureA.bIsJumping != FeatureB.bIsJumping) BooleanDist += BooleanWeight;
+    if (FeatureA.bIsCrouching != FeatureB.bIsCrouching) BooleanDist += BooleanWeight;
+
+    return VelocityDist + AccelDist + SpeedDist + DirectionDist + BooleanDist;
+}
+
+void UAnim_MotionMatchingSystem::InitializeMotionDatabase()
+{
+    // Create basic motion features for common movement states
+    TArray<FAnim_MotionFeature> IdleFeatures;
+    FAnim_MotionFeature IdleFeature;
+    IdleFeature.Velocity = FVector::ZeroVector;
+    IdleFeature.Speed = 0.0f;
+    IdleFeature.bIsMoving = false;
+    IdleFeatures.Add(IdleFeature);
+
+    TArray<FAnim_MotionFeature> WalkFeatures;
+    FAnim_MotionFeature WalkFeature;
+    WalkFeature.Velocity = FVector(150.0f, 0.0f, 0.0f);
+    WalkFeature.Speed = 150.0f;
+    WalkFeature.bIsMoving = true;
+    WalkFeatures.Add(WalkFeature);
+
+    TArray<FAnim_MotionFeature> RunFeatures;
+    FAnim_MotionFeature RunFeature;
+    RunFeature.Velocity = FVector(400.0f, 0.0f, 0.0f);
+    RunFeature.Speed = 400.0f;
+    RunFeature.bIsMoving = true;
+    RunFeatures.Add(RunFeature);
+
+    TArray<FAnim_MotionFeature> JumpFeatures;
+    FAnim_MotionFeature JumpFeature;
+    JumpFeature.Velocity = FVector(200.0f, 0.0f, 300.0f);
+    JumpFeature.Speed = 200.0f;
+    JumpFeature.bIsJumping = true;
+    JumpFeatures.Add(JumpFeature);
+
+    bDatabaseInitialized = true;
+    
+    UE_LOG(LogTemp, Log, TEXT("Motion Matching System: Database initialized with basic movement features"));
+}
+
+void UAnim_MotionMatchingSystem::ProcessMotionMatching(float DeltaTime)
+{
+    LastUpdateTime += DeltaTime;
+    
+    // Update motion matching every 0.1 seconds for performance
+    if (LastUpdateTime < 0.1f)
+    {
+        return;
+    }
+    
+    LastUpdateTime = 0.0f;
+
+    // Find best matching clip based on current features
+    int32 BestClipIndex = FindBestMatchingClip(CurrentFeatures);
+    
+    if (BestClipIndex != -1 && BestClipIndex != CurrentClipIndex)
+    {
+        CurrentClipIndex = BestClipIndex;
+        CurrentPlayTime = 0.0f;
+        
+        UE_LOG(LogTemp, Log, TEXT("Motion Matching: Switched to clip %d"), CurrentClipIndex);
+    }
+    
+    // Update play time
+    if (CurrentClipIndex >= 0 && CurrentClipIndex < MotionDatabase.Num())
+    {
+        CurrentPlayTime += DeltaTime;
+        
+        const FAnim_MotionClip& CurrentClip = MotionDatabase[CurrentClipIndex];
+        if (CurrentPlayTime >= CurrentClip.EndTime)
+        {
+            CurrentPlayTime = 0.0f; // Loop the animation
+        }
+    }
 }
