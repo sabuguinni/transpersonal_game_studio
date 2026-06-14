@@ -2,137 +2,187 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
-#include "Components/ActorComponent.h"
 #include "Engine/World.h"
-#include "Particles/ParticleSystemComponent.h"
-#include "NiagaraComponent.h"
+#include "Components/SceneComponent.h"
 #include "NiagaraSystem.h"
-#include "Camera/CameraShakeBase.h"
-#include "Engine/DecalActor.h"
-#include "Components/DecalComponent.h"
-#include "Materials/MaterialInterface.h"
+#include "NiagaraComponent.h"
 #include "Sound/SoundCue.h"
 #include "Components/AudioComponent.h"
-#include "../SharedTypes.h"
+#include "Engine/Engine.h"
+#include "SharedTypes.h"
 #include "VFX_ImpactEffectsManager.generated.h"
-
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FVFX_ImpactEffectData
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
-    TSoftObjectPtr<UNiagaraSystem> ParticleSystem;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
-    TSoftObjectPtr<USoundCue> ImpactSound;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
-    TSubclassOf<UCameraShakeBase> CameraShake;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
-    TSoftObjectPtr<UMaterialInterface> DecalMaterial;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
-    float DecalSize;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
-    float DecalLifetime;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
-    float CameraShakeScale;
-
-    FVFX_ImpactEffectData()
-    {
-        DecalSize = 100.0f;
-        DecalLifetime = 30.0f;
-        CameraShakeScale = 1.0f;
-    }
-};
 
 UENUM(BlueprintType)
 enum class EVFX_ImpactType : uint8
 {
     DinosaurFootstep    UMETA(DisplayName = "Dinosaur Footstep"),
-    PlayerFootstep      UMETA(DisplayName = "Player Footstep"),
-    RockImpact          UMETA(DisplayName = "Rock Impact"),
-    TreeFall            UMETA(DisplayName = "Tree Fall"),
-    WaterSplash         UMETA(DisplayName = "Water Splash"),
-    BloodSplatter       UMETA(DisplayName = "Blood Splatter"),
-    DustCloud           UMETA(DisplayName = "Dust Cloud"),
-    FireSpark           UMETA(DisplayName = "Fire Spark")
+    WeaponHit          UMETA(DisplayName = "Weapon Hit"),
+    RockImpact         UMETA(DisplayName = "Rock Impact"),
+    TreeFall           UMETA(DisplayName = "Tree Fall"),
+    BodySlam           UMETA(DisplayName = "Body Slam"),
+    ClawStrike         UMETA(DisplayName = "Claw Strike")
+};
+
+UENUM(BlueprintType)
+enum class EVFX_SurfaceType : uint8
+{
+    Dirt               UMETA(DisplayName = "Dirt"),
+    Rock               UMETA(DisplayName = "Rock"),
+    Grass              UMETA(DisplayName = "Grass"),
+    Sand               UMETA(DisplayName = "Sand"),
+    Mud                UMETA(DisplayName = "Mud"),
+    Water              UMETA(DisplayName = "Water"),
+    Wood               UMETA(DisplayName = "Wood")
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FVFX_ImpactEffect
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Impact Effect")
+    TSoftObjectPtr<UNiagaraSystem> ParticleSystem;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Impact Effect")
+    TSoftObjectPtr<USoundCue> ImpactSound;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Impact Effect")
+    float ParticleScale = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Impact Effect")
+    float SoundVolume = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Impact Effect")
+    float EffectDuration = 2.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Impact Effect")
+    bool bCreateDecal = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Impact Effect")
+    FLinearColor DecalColor = FLinearColor::Brown;
+
+    FVFX_ImpactEffect()
+    {
+        ParticleScale = 1.0f;
+        SoundVolume = 1.0f;
+        EffectDuration = 2.0f;
+        bCreateDecal = true;
+        DecalColor = FLinearColor::Brown;
+    }
 };
 
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UVFX_ImpactEffectsManager : public UActorComponent
+class TRANSPERSONALGAME_API AVFX_ImpactEffectsManager : public AActor
 {
     GENERATED_BODY()
 
 public:
-    UVFX_ImpactEffectsManager();
+    AVFX_ImpactEffectsManager();
 
 protected:
     virtual void BeginPlay() override;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Impact Effects")
-    TMap<EVFX_ImpactType, FVFX_ImpactEffectData> ImpactEffects;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    USceneComponent* RootSceneComponent;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Settings")
-    float MaxEffectDistance;
+    // Impact effect mappings
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Impact Effects")
+    TMap<EVFX_ImpactType, FVFX_ImpactEffect> ImpactEffectMap;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Settings")
-    int32 MaxSimultaneousEffects;
+    // Surface-specific effect variations
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Effects")
+    TMap<EVFX_SurfaceType, FVFX_ImpactEffect> SurfaceEffectMap;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Settings")
-    bool bEnableCameraShake;
+    // Active effect components
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Active Effects")
+    TArray<UNiagaraComponent*> ActiveParticleEffects;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Settings")
-    bool bEnableDecals;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Active Effects")
+    TArray<UAudioComponent*> ActiveAudioEffects;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Settings")
-    bool bEnableParticles;
+    // Effect settings
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
+    float MaxSimultaneousEffects = 20.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Settings")
-    bool bEnableAudio;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
+    float EffectCullDistance = 5000.0f;
 
-private:
-    UPROPERTY()
-    TArray<UNiagaraComponent*> ActiveParticleComponents;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
+    bool bEnableImpactDecals = true;
 
-    UPROPERTY()
-    TArray<ADecalActor*> ActiveDecals;
-
-    UPROPERTY()
-    TArray<UAudioComponent*> ActiveAudioComponents;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
+    float DecalLifetime = 30.0f;
 
 public:
-    UFUNCTION(BlueprintCallable, Category = "VFX Impact Effects")
-    void PlayImpactEffect(EVFX_ImpactType ImpactType, const FVector& Location, const FRotator& Rotation = FRotator::ZeroRotator, float Scale = 1.0f);
+    // Main impact effect function
+    UFUNCTION(BlueprintCallable, Category = "VFX Impact")
+    void TriggerImpactEffect(EVFX_ImpactType ImpactType, EVFX_SurfaceType SurfaceType, 
+                           FVector Location, FVector Normal, float Intensity = 1.0f);
 
-    UFUNCTION(BlueprintCallable, Category = "VFX Impact Effects")
-    void PlayDinosaurFootstep(const FVector& Location, float DinosaurSize = 1.0f);
+    // Dinosaur-specific impact effects
+    UFUNCTION(BlueprintCallable, Category = "VFX Impact")
+    void TriggerDinosaurFootstep(FVector Location, float DinosaurSize = 1.0f, 
+                               EVFX_SurfaceType SurfaceType = EVFX_SurfaceType::Dirt);
 
-    UFUNCTION(BlueprintCallable, Category = "VFX Impact Effects")
-    void PlayPlayerFootstep(const FVector& Location, bool bIsRunning = false);
+    UFUNCTION(BlueprintCallable, Category = "VFX Impact")
+    void TriggerDinosaurBodySlam(FVector Location, FVector Normal, float DinosaurSize = 1.0f);
 
-    UFUNCTION(BlueprintCallable, Category = "VFX Impact Effects")
-    void PlayBloodSplatter(const FVector& Location, const FVector& Direction);
+    // Weapon impact effects
+    UFUNCTION(BlueprintCallable, Category = "VFX Impact")
+    void TriggerWeaponImpact(FVector Location, FVector Normal, float WeaponDamage = 1.0f,
+                           EVFX_SurfaceType SurfaceType = EVFX_SurfaceType::Dirt);
 
-    UFUNCTION(BlueprintCallable, Category = "VFX Impact Effects")
-    void PlayEnvironmentalEffect(EVFX_ImpactType EffectType, const FVector& Location, float Intensity = 1.0f);
+    // Environmental impact effects
+    UFUNCTION(BlueprintCallable, Category = "VFX Impact")
+    void TriggerRockImpact(FVector Location, FVector Normal, float RockSize = 1.0f);
 
-    UFUNCTION(BlueprintCallable, Category = "VFX Impact Effects")
+    UFUNCTION(BlueprintCallable, Category = "VFX Impact")
+    void TriggerTreeFall(FVector Location, FVector Direction, float TreeSize = 1.0f);
+
+    // Effect management
+    UFUNCTION(BlueprintCallable, Category = "VFX Management")
     void CleanupExpiredEffects();
 
-    UFUNCTION(BlueprintCallable, Category = "VFX Impact Effects")
-    void SetEffectsEnabled(bool bParticles, bool bDecals, bool bCameraShake, bool bAudio);
+    UFUNCTION(BlueprintCallable, Category = "VFX Management")
+    void StopAllEffects();
+
+    UFUNCTION(BlueprintCallable, Category = "VFX Management")
+    int32 GetActiveEffectCount() const;
+
+    // Configuration
+    UFUNCTION(BlueprintCallable, Category = "VFX Configuration")
+    void SetEffectIntensity(float NewIntensity);
+
+    UFUNCTION(BlueprintCallable, Category = "VFX Configuration")
+    void SetMaxSimultaneousEffects(int32 MaxEffects);
+
+    UFUNCTION(BlueprintCallable, Category = "VFX Configuration")
+    void EnableImpactDecals(bool bEnable);
 
 private:
-    void SpawnParticleEffect(const FVFX_ImpactEffectData& EffectData, const FVector& Location, const FRotator& Rotation, float Scale);
-    void SpawnDecalEffect(const FVFX_ImpactEffectData& EffectData, const FVector& Location, const FRotator& Rotation, float Scale);
-    void PlayCameraShakeEffect(const FVFX_ImpactEffectData& EffectData, const FVector& Location, float Scale);
-    void PlayAudioEffect(const FVFX_ImpactEffectData& EffectData, const FVector& Location, float Scale);
+    // Internal effect creation
+    void CreateParticleEffect(const FVFX_ImpactEffect& EffectData, FVector Location, 
+                            FVector Normal, float Scale);
     
-    bool IsPlayerInRange(const FVector& Location) const;
-    void RemoveOldestEffect();
+    void CreateAudioEffect(const FVFX_ImpactEffect& EffectData, FVector Location, float Volume);
+    
+    void CreateDecalEffect(const FVFX_ImpactEffect& EffectData, FVector Location, 
+                         FVector Normal, float Scale);
+
+    // Effect cleanup
+    void RemoveExpiredEffects();
+    bool IsEffectExpired(UNiagaraComponent* Effect, float CurrentTime) const;
+    bool IsAudioExpired(UAudioComponent* Audio) const;
+
+    // Distance culling
+    bool ShouldCullEffect(FVector EffectLocation) const;
+    FVector GetPlayerLocation() const;
+
+    // Effect initialization
+    void InitializeDefaultEffects();
+    void LoadEffectAssets();
+
+    // Effect intensity scaling
+    float GlobalEffectIntensity = 1.0f;
+    float CalculateScaledIntensity(float BaseIntensity) const;
 };
