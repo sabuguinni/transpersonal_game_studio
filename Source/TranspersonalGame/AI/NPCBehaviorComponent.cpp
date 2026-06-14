@@ -1,68 +1,62 @@
 #include "NPCBehaviorComponent.h"
-#include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerController.h"
 #include "Kismet/GameplayStatics.h"
+#include "Math/UnrealMathUtility.h"
+#include "DrawDebugHelpers.h"
 
 UNPCBehaviorComponent::UNPCBehaviorComponent()
 {
     PrimaryComponentTick.bCanEverTick = true;
+    PrimaryComponentTick.TickInterval = 0.1f;
     
-    // Default values
     CurrentState = ENPC_BehaviorState::Idle;
-    PersonalityType = ENPC_PersonalityType::Cautious;
-    
-    Aggressiveness = 0.3f;
-    Curiosity = 0.5f;
-    Sociability = 0.4f;
-    
-    MaxShortTermMemories = 10;
-    MaxLongTermMemories = 50;
-    
-    CurrentPatrolIndex = 0;
-    PatrolRadius = 1000.0f;
-    PatrolSpeed = 150.0f;
-    
-    SightRange = 1500.0f;
-    HearingRange = 800.0f;
-    AlertnessLevel = 0.0f;
-    
-    DailyRoutineTimer = 0.0f;
-    RoutineChangeInterval = 300.0f; // 5 minutes
+    DinosaurType = ENPC_DinosaurType::TRex;
+    PatrolCenter = FVector::ZeroVector;
+    CurrentTarget = FVector::ZeroVector;
+    PlayerTarget = nullptr;
+    DistanceToPlayer = 0.0f;
+    bIsPackHunter = false;
+    StateChangeTimer = 0.0f;
+    PatrolWaitTimer = 0.0f;
+    bHasValidTarget = false;
+    LastKnownPlayerLocation = FVector::ZeroVector;
 }
 
 void UNPCBehaviorComponent::BeginPlay()
 {
     Super::BeginPlay();
     
-    // Initialize patrol route
-    InitializePatrolRoute();
+    // Initialize patrol center to current location
+    if (AActor* Owner = GetOwner())
+    {
+        PatrolCenter = Owner->GetActorLocation();
+        CurrentTarget = PatrolCenter;
+    }
     
-    // Set up timers
-    GetWorld()->GetTimerManager().SetTimer(BehaviorUpdateTimer, this, &UNPCBehaviorComponent::UpdateBehavior, 1.0f, true);
-    GetWorld()->GetTimerManager().SetTimer(MemoryProcessTimer, this, &UNPCBehaviorComponent::ConsolidateMemories, 30.0f, true);
+    // Setup dinosaur-specific stats
+    SetupDinosaurStats(DinosaurType);
+    
+    // Start behavior update timer
+    if (UWorld* World = GetWorld())
+    {
+        World->GetTimerManager().SetTimer(BehaviorUpdateTimer, 
+            [this]() { UpdateBehavior(0.1f); }, 
+            0.1f, true);
+    }
 }
 
 void UNPCBehaviorComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
     
-    // Update daily routine
-    UpdateDailyRoutine(DeltaTime);
+    // Update timers
+    StateChangeTimer += DeltaTime;
+    PatrolWaitTimer += DeltaTime;
     
-    // Process memories
-    ProcessMemories(DeltaTime);
-    
-    // Update alertness based on environment
-    if (DetectPlayer())
-    {
-        AlertnessLevel = FMath::Clamp(AlertnessLevel + DeltaTime * 0.5f, 0.0f, 1.0f);
-    }
-    else
-    {
-        AlertnessLevel = FMath::Clamp(AlertnessLevel - DeltaTime * 0.2f, 0.0f, 1.0f);
-    }
+    // Find nearest player
+    FindNearestPlayer();
 }
 
 void UNPCBehaviorComponent::SetBehaviorState(ENPC_BehaviorState NewState)
@@ -70,269 +64,258 @@ void UNPCBehaviorComponent::SetBehaviorState(ENPC_BehaviorState NewState)
     if (CurrentState != NewState)
     {
         CurrentState = NewState;
+        StateChangeTimer = 0.0f;
         
-        // Log state change for debugging
-        UE_LOG(LogTemp, Warning, TEXT("NPC %s changed state to %d"), 
-               *GetOwner()->GetName(), 
-               static_cast<int32>(NewState));
-        
-        // Add memory of state change
-        AddMemory(GetOwner()->GetActorLocation(), 
-                 FString::Printf(TEXT("StateChange_%d"), static_cast<int32>(NewState)), 
-                 0.3f);
-    }
-}
-
-void UNPCBehaviorComponent::AddMemory(FVector Location, FString EventType, float Importance)
-{
-    FNPC_MemoryEntry NewMemory;
-    NewMemory.Location = Location;
-    NewMemory.EventType = EventType;
-    NewMemory.Importance = Importance;
-    NewMemory.Timestamp = GetWorld()->GetTimeSeconds();
-    
-    ShortTermMemory.Add(NewMemory);
-    
-    // Limit short-term memory size
-    if (ShortTermMemory.Num() > MaxShortTermMemories)
-    {
-        ShortTermMemory.RemoveAt(0);
-    }
-}
-
-void UNPCBehaviorComponent::ProcessMemories(float DeltaTime)
-{
-    float CurrentTime = GetWorld()->GetTimeSeconds();
-    
-    // Decay memory importance over time
-    for (FNPC_MemoryEntry& Memory : ShortTermMemory)
-    {
-        float TimeSinceEvent = CurrentTime - Memory.Timestamp;
-        float DecayRate = 0.1f; // Memories decay at 10% per minute
-        Memory.Importance = FMath::Max(0.0f, Memory.Importance - (DecayRate * TimeSinceEvent / 60.0f));
-    }
-    
-    // Remove very weak memories
-    ShortTermMemory.RemoveAll([](const FNPC_MemoryEntry& Memory) {
-        return Memory.Importance < 0.05f;
-    });
-}
-
-void UNPCBehaviorComponent::InitializePatrolRoute()
-{
-    if (PatrolPoints.Num() == 0)
-    {
-        // Generate random patrol points around the NPC's starting location
-        FVector StartLocation = GetOwner()->GetActorLocation();
-        
-        for (int32 i = 0; i < 4; i++)
+        // Debug logging
+        if (AActor* Owner = GetOwner())
         {
-            float Angle = (i * 90.0f) * PI / 180.0f;
-            FVector PatrolPoint = StartLocation + FVector(
-                FMath::Cos(Angle) * PatrolRadius,
-                FMath::Sin(Angle) * PatrolRadius,
-                0.0f
-            );
-            PatrolPoints.Add(PatrolPoint);
+            UE_LOG(LogTemp, Log, TEXT("%s changed state to %d"), 
+                *Owner->GetName(), (int32)NewState);
         }
     }
 }
 
-FVector UNPCBehaviorComponent::GetNextPatrolPoint()
+void UNPCBehaviorComponent::InitializeBehavior(ENPC_DinosaurType Type)
 {
-    if (PatrolPoints.Num() == 0)
-    {
-        return GetOwner()->GetActorLocation();
-    }
-    
-    CurrentPatrolIndex = (CurrentPatrolIndex + 1) % PatrolPoints.Num();
-    return PatrolPoints[CurrentPatrolIndex];
+    DinosaurType = Type;
+    SetupDinosaurStats(Type);
+    SetBehaviorState(ENPC_BehaviorState::Patrol);
 }
 
-bool UNPCBehaviorComponent::DetectPlayer()
+void UNPCBehaviorComponent::UpdateBehavior(float DeltaTime)
 {
-    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
-    if (!PlayerPawn)
+    if (!GetOwner()) return;
+    
+    // Pack coordination for pack hunters
+    if (bIsPackHunter && PackMembers.Num() > 0)
     {
-        return false;
+        CoordinatePackBehavior();
     }
     
-    float DistanceToPlayer = FVector::Dist(GetOwner()->GetActorLocation(), PlayerPawn->GetActorLocation());
-    
-    // Check if player is within sight range
-    if (DistanceToPlayer <= SightRange)
-    {
-        // Add memory of player sighting
-        AddMemory(PlayerPawn->GetActorLocation(), TEXT("PlayerSighting"), 0.8f);
-        return true;
-    }
-    
-    return false;
-}
-
-void UNPCBehaviorComponent::UpdateDailyRoutine(float DeltaTime)
-{
-    DailyRoutineTimer += DeltaTime;
-    
-    if (DailyRoutineTimer >= RoutineChangeInterval)
-    {
-        DailyRoutineTimer = 0.0f;
-        
-        // Change behavior based on personality and current state
-        switch (PersonalityType)
-        {
-            case ENPC_PersonalityType::Cautious:
-                if (AlertnessLevel > 0.5f)
-                {
-                    SetBehaviorState(ENPC_BehaviorState::Fleeing);
-                }
-                else
-                {
-                    SetBehaviorState(ENPC_BehaviorState::Patrolling);
-                }
-                break;
-                
-            case ENPC_PersonalityType::Curious:
-                if (ShortTermMemory.Num() > 0)
-                {
-                    SetBehaviorState(ENPC_BehaviorState::Investigating);
-                }
-                else
-                {
-                    SetBehaviorState(ENPC_BehaviorState::Patrolling);
-                }
-                break;
-                
-            case ENPC_PersonalityType::Social:
-                SetBehaviorState(ENPC_BehaviorState::Socializing);
-                break;
-                
-            case ENPC_PersonalityType::Aggressive:
-                if (AlertnessLevel > 0.3f)
-                {
-                    SetBehaviorState(ENPC_BehaviorState::Investigating);
-                }
-                else
-                {
-                    SetBehaviorState(ENPC_BehaviorState::Patrolling);
-                }
-                break;
-                
-            default:
-                SetBehaviorState(ENPC_BehaviorState::Idle);
-                break;
-        }
-    }
-}
-
-void UNPCBehaviorComponent::UpdateBehavior()
-{
-    // This function is called every second to update NPC behavior
+    // State machine
     switch (CurrentState)
     {
-        case ENPC_BehaviorState::Patrolling:
-            // Move towards next patrol point
-            if (PatrolPoints.Num() > 0)
+        case ENPC_BehaviorState::Idle:
+            if (StateChangeTimer > 2.0f)
             {
-                FVector CurrentLocation = GetOwner()->GetActorLocation();
-                FVector TargetLocation = PatrolPoints[CurrentPatrolIndex];
-                float DistanceToTarget = FVector::Dist(CurrentLocation, TargetLocation);
-                
-                if (DistanceToTarget < 100.0f) // Reached patrol point
-                {
-                    GetNextPatrolPoint();
-                }
+                SetBehaviorState(ENPC_BehaviorState::Patrol);
             }
             break;
             
-        case ENPC_BehaviorState::Investigating:
-            // Investigate the most recent important memory
-            if (ShortTermMemory.Num() > 0)
+        case ENPC_BehaviorState::Patrol:
+            PatrolBehavior();
+            if (PlayerTarget && DistanceToPlayer <= BehaviorStats.ChaseDistance)
             {
-                FNPC_MemoryEntry* MostImportant = nullptr;
-                float HighestImportance = 0.0f;
-                
-                for (FNPC_MemoryEntry& Memory : ShortTermMemory)
-                {
-                    if (Memory.Importance > HighestImportance)
-                    {
-                        HighestImportance = Memory.Importance;
-                        MostImportant = &Memory;
-                    }
-                }
-                
-                if (MostImportant)
-                {
-                    // Move towards the memory location
-                    float DistanceToMemory = FVector::Dist(GetOwner()->GetActorLocation(), MostImportant->Location);
-                    if (DistanceToMemory < 150.0f)
-                    {
-                        // Finished investigating
-                        SetBehaviorState(ENPC_BehaviorState::Idle);
-                    }
-                }
+                SetBehaviorState(ENPC_BehaviorState::Chase);
             }
             break;
             
-        case ENPC_BehaviorState::Fleeing:
-            // Move away from threats
-            if (AlertnessLevel < 0.2f)
+        case ENPC_BehaviorState::Chase:
+            ChaseBehavior();
+            if (DistanceToPlayer <= BehaviorStats.AttackDistance)
             {
-                SetBehaviorState(ENPC_BehaviorState::Idle);
+                SetBehaviorState(ENPC_BehaviorState::Attack);
+            }
+            else if (DistanceToPlayer > BehaviorStats.ChaseDistance * 1.5f)
+            {
+                SetBehaviorState(ENPC_BehaviorState::Patrol);
             }
             break;
             
-        default:
-            // Idle behavior - occasionally switch to patrolling
-            if (FMath::RandRange(0.0f, 1.0f) < 0.1f)
+        case ENPC_BehaviorState::Attack:
+            AttackBehavior();
+            if (DistanceToPlayer > BehaviorStats.AttackDistance * 1.2f)
             {
-                SetBehaviorState(ENPC_BehaviorState::Patrolling);
+                SetBehaviorState(ENPC_BehaviorState::Chase);
             }
+            break;
+            
+        case ENPC_BehaviorState::Flee:
+            FleeBehavior();
+            if (DistanceToPlayer > BehaviorStats.FleeDistance * 2.0f)
+            {
+                SetBehaviorState(ENPC_BehaviorState::Patrol);
+            }
+            break;
+            
+        case ENPC_BehaviorState::Dead:
+            // Do nothing when dead
             break;
     }
 }
 
-void UNPCBehaviorComponent::ConsolidateMemories()
+void UNPCBehaviorComponent::FindNearestPlayer()
 {
-    float CurrentTime = GetWorld()->GetTimeSeconds();
-    
-    // Move important short-term memories to long-term
-    for (int32 i = ShortTermMemory.Num() - 1; i >= 0; i--)
+    if (UWorld* World = GetWorld())
     {
-        FNPC_MemoryEntry& Memory = ShortTermMemory[i];
-        float MemoryAge = CurrentTime - Memory.Timestamp;
-        
-        // Memories older than 5 minutes with high importance become long-term
-        if (MemoryAge > 300.0f && Memory.Importance > 0.6f)
+        if (APlayerController* PC = World->GetFirstPlayerController())
         {
-            LongTermMemory.Add(Memory);
-            ShortTermMemory.RemoveAt(i);
-            
-            // Limit long-term memory size
-            if (LongTermMemory.Num() > MaxLongTermMemories)
+            if (APawn* PlayerPawn = PC->GetPawn())
             {
-                LongTermMemory.RemoveAt(0);
+                PlayerTarget = PlayerPawn;
+                DistanceToPlayer = FVector::Dist(GetOwner()->GetActorLocation(), 
+                    PlayerPawn->GetActorLocation());
+                LastKnownPlayerLocation = PlayerPawn->GetActorLocation();
             }
         }
     }
 }
 
-float UNPCBehaviorComponent::CalculateMemoryImportance(const FNPC_MemoryEntry& Memory, float CurrentTime)
+void UNPCBehaviorComponent::PatrolBehavior()
 {
-    float TimeSinceEvent = CurrentTime - Memory.Timestamp;
-    float BaseImportance = Memory.Importance;
+    if (!GetOwner()) return;
     
-    // Importance decays over time, but some events maintain importance longer
-    if (Memory.EventType.Contains(TEXT("PlayerSighting")))
+    FVector CurrentLocation = GetOwner()->GetActorLocation();
+    float DistanceToTarget = FVector::Dist(CurrentLocation, CurrentTarget);
+    
+    // If reached patrol point or no target, find new patrol point
+    if (DistanceToTarget < 200.0f || !bHasValidTarget)
     {
-        return BaseImportance * FMath::Exp(-TimeSinceEvent / 600.0f); // 10-minute half-life
+        if (PatrolWaitTimer > 3.0f)
+        {
+            // Generate random patrol point within radius
+            FVector RandomDirection = FMath::VRand();
+            RandomDirection.Z = 0.0f; // Keep on ground level
+            RandomDirection.Normalize();
+            
+            float RandomDistance = FMath::RandRange(500.0f, BehaviorStats.PatrolRadius);
+            CurrentTarget = PatrolCenter + (RandomDirection * RandomDistance);
+            bHasValidTarget = true;
+            PatrolWaitTimer = 0.0f;
+        }
     }
-    else if (Memory.EventType.Contains(TEXT("Danger")))
+}
+
+void UNPCBehaviorComponent::ChaseBehavior()
+{
+    if (PlayerTarget)
     {
-        return BaseImportance * FMath::Exp(-TimeSinceEvent / 1200.0f); // 20-minute half-life
+        CurrentTarget = PlayerTarget->GetActorLocation();
+        bHasValidTarget = true;
+        
+        // Update last known location
+        LastKnownPlayerLocation = CurrentTarget;
     }
-    else
+    else if (LastKnownPlayerLocation != FVector::ZeroVector)
     {
-        return BaseImportance * FMath::Exp(-TimeSinceEvent / 300.0f); // 5-minute half-life
+        // Chase last known location
+        CurrentTarget = LastKnownPlayerLocation;
+        bHasValidTarget = true;
+    }
+}
+
+void UNPCBehaviorComponent::AttackBehavior()
+{
+    if (PlayerTarget)
+    {
+        // Face the player
+        if (AActor* Owner = GetOwner())
+        {
+            FVector Direction = (PlayerTarget->GetActorLocation() - Owner->GetActorLocation()).GetSafeNormal();
+            FRotator NewRotation = FRotationMatrix::MakeFromX(Direction).Rotator();
+            Owner->SetActorRotation(NewRotation);
+        }
+        
+        // Attack logic would go here (damage dealing, animation triggers, etc.)
+        UE_LOG(LogTemp, Log, TEXT("%s is attacking player!"), 
+            *GetOwner()->GetName());
+    }
+}
+
+void UNPCBehaviorComponent::FleeBehavior()
+{
+    if (PlayerTarget && GetOwner())
+    {
+        // Run away from player
+        FVector FleeDirection = (GetOwner()->GetActorLocation() - PlayerTarget->GetActorLocation()).GetSafeNormal();
+        CurrentTarget = GetOwner()->GetActorLocation() + (FleeDirection * BehaviorStats.FleeDistance);
+        bHasValidTarget = true;
+    }
+}
+
+void UNPCBehaviorComponent::SetupDinosaurStats(ENPC_DinosaurType Type)
+{
+    switch (Type)
+    {
+        case ENPC_DinosaurType::TRex:
+            BehaviorStats.PatrolRadius = 5000.0f;
+            BehaviorStats.ChaseDistance = 3000.0f;
+            BehaviorStats.AttackDistance = 400.0f;
+            BehaviorStats.MovementSpeed = 800.0f;
+            BehaviorStats.Aggression = 0.9f;
+            BehaviorStats.Fear = 0.1f;
+            bIsPackHunter = false;
+            break;
+            
+        case ENPC_DinosaurType::Velociraptor:
+            BehaviorStats.PatrolRadius = 2000.0f;
+            BehaviorStats.ChaseDistance = 1500.0f;
+            BehaviorStats.AttackDistance = 200.0f;
+            BehaviorStats.MovementSpeed = 1200.0f;
+            BehaviorStats.Aggression = 0.8f;
+            BehaviorStats.Fear = 0.3f;
+            bIsPackHunter = true;
+            break;
+            
+        case ENPC_DinosaurType::Triceratops:
+            BehaviorStats.PatrolRadius = 1500.0f;
+            BehaviorStats.ChaseDistance = 1000.0f;
+            BehaviorStats.AttackDistance = 300.0f;
+            BehaviorStats.MovementSpeed = 400.0f;
+            BehaviorStats.Aggression = 0.5f;
+            BehaviorStats.Fear = 0.4f;
+            bIsPackHunter = false;
+            break;
+            
+        case ENPC_DinosaurType::Brachiosaurus:
+            BehaviorStats.PatrolRadius = 3000.0f;
+            BehaviorStats.ChaseDistance = 800.0f;
+            BehaviorStats.AttackDistance = 500.0f;
+            BehaviorStats.MovementSpeed = 300.0f;
+            BehaviorStats.Aggression = 0.2f;
+            BehaviorStats.Fear = 0.7f;
+            bIsPackHunter = false;
+            break;
+            
+        case ENPC_DinosaurType::Ankylosaurus:
+            BehaviorStats.PatrolRadius = 1000.0f;
+            BehaviorStats.ChaseDistance = 600.0f;
+            BehaviorStats.AttackDistance = 250.0f;
+            BehaviorStats.MovementSpeed = 200.0f;
+            BehaviorStats.Aggression = 0.3f;
+            BehaviorStats.Fear = 0.5f;
+            bIsPackHunter = false;
+            break;
+    }
+}
+
+void UNPCBehaviorComponent::AddPackMember(AActor* Member)
+{
+    if (Member && !PackMembers.Contains(Member))
+    {
+        PackMembers.Add(Member);
+    }
+}
+
+void UNPCBehaviorComponent::CoordinatePackBehavior()
+{
+    // Pack coordination logic
+    if (CurrentState == ENPC_BehaviorState::Chase || CurrentState == ENPC_BehaviorState::Attack)
+    {
+        // Share target information with pack members
+        for (AActor* PackMember : PackMembers)
+        {
+            if (PackMember && IsValid(PackMember))
+            {
+                if (UNPCBehaviorComponent* PackBehavior = PackMember->FindComponentByClass<UNPCBehaviorComponent>())
+                {
+                    if (PackBehavior->CurrentState == ENPC_BehaviorState::Patrol)
+                    {
+                        PackBehavior->SetBehaviorState(ENPC_BehaviorState::Chase);
+                        PackBehavior->CurrentTarget = this->CurrentTarget;
+                    }
+                }
+            }
+        }
     }
 }
