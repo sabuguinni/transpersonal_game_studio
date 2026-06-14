@@ -15,7 +15,8 @@ enum class EAnim_MovementState : uint8
     Running     UMETA(DisplayName = "Running"),
     Jumping     UMETA(DisplayName = "Jumping"),
     Falling     UMETA(DisplayName = "Falling"),
-    Crouching   UMETA(DisplayName = "Crouching")
+    Crouching   UMETA(DisplayName = "Crouching"),
+    Swimming    UMETA(DisplayName = "Swimming")
 };
 
 USTRUCT(BlueprintType)
@@ -24,25 +25,22 @@ struct TRANSPERSONALGAME_API FAnim_MovementData
     GENERATED_BODY()
 
     UPROPERTY(BlueprintReadOnly, Category = "Movement")
-    float Speed;
+    float Speed = 0.0f;
 
     UPROPERTY(BlueprintReadOnly, Category = "Movement")
-    float Direction;
+    float Direction = 0.0f;
 
     UPROPERTY(BlueprintReadOnly, Category = "Movement")
-    bool bIsInAir;
+    bool bIsInAir = false;
 
     UPROPERTY(BlueprintReadOnly, Category = "Movement")
-    bool bIsCrouching;
+    bool bIsCrouching = false;
 
     UPROPERTY(BlueprintReadOnly, Category = "Movement")
-    EAnim_MovementState MovementState;
+    bool bIsSwimming = false;
 
     UPROPERTY(BlueprintReadOnly, Category = "Movement")
-    FVector Velocity;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Movement")
-    float GroundSpeed;
+    EAnim_MovementState MovementState = EAnim_MovementState::Idle;
 
     FAnim_MovementData()
     {
@@ -50,16 +48,11 @@ struct TRANSPERSONALGAME_API FAnim_MovementData
         Direction = 0.0f;
         bIsInAir = false;
         bIsCrouching = false;
+        bIsSwimming = false;
         MovementState = EAnim_MovementState::Idle;
-        Velocity = FVector::ZeroVector;
-        GroundSpeed = 0.0f;
     }
 };
 
-/**
- * Animation Blueprint class for TranspersonalCharacter
- * Handles state machine transitions and movement-based animations
- */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UAnim_CharacterAnimBlueprint : public UAnimInstance
 {
@@ -69,72 +62,52 @@ public:
     UAnim_CharacterAnimBlueprint();
 
 protected:
-    // Animation update functions
     virtual void NativeInitializeAnimation() override;
     virtual void NativeUpdateAnimation(float DeltaTimeX) override;
 
-    // Movement data
-    UPROPERTY(BlueprintReadOnly, Category = "Animation", meta = (AllowPrivateAccess = "true"))
+    UPROPERTY(BlueprintReadOnly, Category = "Character")
+    class ACharacter* OwnerCharacter;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Character")
+    class UCharacterMovementComponent* MovementComponent;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Animation Data")
     FAnim_MovementData MovementData;
 
-    // Character reference
-    UPROPERTY(BlueprintReadOnly, Category = "Animation", meta = (AllowPrivateAccess = "true"))
-    ACharacter* OwnerCharacter;
+    UPROPERTY(BlueprintReadOnly, Category = "Animation Data")
+    float WalkSpeedThreshold = 150.0f;
 
-    // Movement component reference
-    UPROPERTY(BlueprintReadOnly, Category = "Animation", meta = (AllowPrivateAccess = "true"))
-    UCharacterMovementComponent* MovementComponent;
+    UPROPERTY(BlueprintReadOnly, Category = "Animation Data")
+    float RunSpeedThreshold = 300.0f;
 
-    // Animation thresholds
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Thresholds")
-    float WalkSpeedThreshold;
+    UPROPERTY(BlueprintReadOnly, Category = "Animation Data")
+    float JumpVelocityThreshold = 100.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Thresholds")
-    float RunSpeedThreshold;
+    UPROPERTY(BlueprintReadOnly, Category = "Animation Data")
+    float FallVelocityThreshold = -100.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Thresholds")
-    float IdleSpeedThreshold;
-
-public:
-    // Animation state functions
     UFUNCTION(BlueprintCallable, Category = "Animation")
     void UpdateMovementState();
 
     UFUNCTION(BlueprintCallable, Category = "Animation")
-    bool ShouldPlayIdleAnimation() const;
+    void CalculateDirection();
 
     UFUNCTION(BlueprintCallable, Category = "Animation")
-    bool ShouldPlayWalkAnimation() const;
+    bool ShouldEnterIdleState() const;
 
     UFUNCTION(BlueprintCallable, Category = "Animation")
-    bool ShouldPlayRunAnimation() const;
+    bool ShouldEnterWalkState() const;
 
     UFUNCTION(BlueprintCallable, Category = "Animation")
-    bool ShouldPlayJumpAnimation() const;
+    bool ShouldEnterRunState() const;
 
     UFUNCTION(BlueprintCallable, Category = "Animation")
-    float GetMovementDirection() const;
+    bool ShouldEnterJumpState() const;
 
     UFUNCTION(BlueprintCallable, Category = "Animation")
-    float GetMovementSpeed() const;
-
-    // Animation montage functions
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    void PlayJumpMontage();
-
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    void PlayLandMontage();
+    bool ShouldEnterFallState() const;
 
 private:
-    // Internal state tracking
-    EAnim_MovementState PreviousMovementState;
-    float StateChangeTimer;
-    bool bWasInAir;
-    
-    // Animation assets
-    UPROPERTY(EditAnywhere, Category = "Animation Assets", meta = (AllowPrivateAccess = "true"))
-    UAnimMontage* JumpMontage;
-
-    UPROPERTY(EditAnywhere, Category = "Animation Assets", meta = (AllowPrivateAccess = "true"))
-    UAnimMontage* LandMontage;
+    void UpdateMovementData();
+    void UpdateCharacterReferences();
 };
