@@ -1,436 +1,346 @@
 #include "Perf_PhysicsOptimizer.h"
 #include "Engine/World.h"
-#include "Engine/Engine.h"
 #include "GameFramework/Pawn.h"
-#include "GameFramework/PlayerController.h"
-#include "Components/StaticMeshComponent.h"
-#include "Components/SkeletalMeshComponent.h"
 #include "Components/PrimitiveComponent.h"
+#include "PhysicsEngine/BodyInstance.h"
+#include "Engine/Engine.h"
 #include "Kismet/GameplayStatics.h"
 
 UPerf_PhysicsOptimizer::UPerf_PhysicsOptimizer()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 1.0f;
-    
+    PrimaryComponentTick.TickInterval = 0.1f; // Update 10 times per second
+
+    // Initialize LOD settings
+    HighLODSettings.MaxDistance = 2000.0f;
+    HighLODSettings.MaxSimulatingBodies = 50;
+    HighLODSettings.UpdateFrequency = 60.0f;
+    HighLODSettings.bEnableComplexCollision = true;
+
+    MediumLODSettings.MaxDistance = 5000.0f;
+    MediumLODSettings.MaxSimulatingBodies = 30;
+    MediumLODSettings.UpdateFrequency = 30.0f;
+    MediumLODSettings.bEnableComplexCollision = false;
+
+    LowLODSettings.MaxDistance = 10000.0f;
+    LowLODSettings.MaxSimulatingBodies = 10;
+    LowLODSettings.UpdateFrequency = 10.0f;
+    LowLODSettings.bEnableComplexCollision = false;
+
+    PhysicsCullingDistance = 8000.0f;
+    MaxPhysicsBodies = 150;
     OptimizationUpdateInterval = 1.0f;
-    bEnableAutomaticOptimization = true;
-    LastOptimizationTime = 0.0f;
 }
 
 void UPerf_PhysicsOptimizer::BeginPlay()
 {
     Super::BeginPlay();
     
-    FindPhysicsActors();
-    UpdatePhysicsStats();
-    
-    UE_LOG(LogTemp, Warning, TEXT("PhysicsOptimizer: Initialized with %d physics actors"), TrackedPhysicsActors.Num());
+    UE_LOG(LogTemp, Log, TEXT("Physics Optimizer initialized"));
+    UpdatePhysicsLODForAllActors();
 }
 
 void UPerf_PhysicsOptimizer::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-    
-    if (!bEnableAutomaticOptimization)
-    {
-        return;
-    }
-    
-    LastOptimizationTime += DeltaTime;
-    
-    if (LastOptimizationTime >= OptimizationUpdateInterval)
-    {
-        OptimizePhysicsActors();
-        UpdatePhysicsStats();
-        LastOptimizationTime = 0.0f;
-    }
-}
 
-void UPerf_PhysicsOptimizer::OptimizePhysicsActors()
-{
-    if (!GetWorld())
+    TimeSinceLastOptimization += DeltaTime;
+    
+    if (TimeSinceLastOptimization >= OptimizationUpdateInterval)
     {
-        return;
+        UpdatePhysicsMetrics();
+        OptimizePhysicsSettings();
+        EnforcePhysicsBudget();
+        TimeSinceLastOptimization = 0.0f;
     }
-    
-    // Update tracked actors list
-    FindPhysicsActors();
-    
-    // Apply distance-based LOD
-    if (PhysicsSettings.bEnablePhysicsLOD)
-    {
-        for (auto& WeakActor : TrackedPhysicsActors)
-        {
-            if (AActor* Actor = WeakActor.Get())
-            {
-                float Distance = GetDistanceToPlayer(Actor);
-                EPerf_PhysicsLOD LODLevel = CalculateLODLevel(Distance);
-                SetPhysicsLOD(Actor, LODLevel);
-            }
-        }
-    }
-    
-    // Cull distant actors
-    if (PhysicsSettings.bEnableDistanceCulling)
-    {
-        CullDistantPhysicsActors();
-    }
-    
-    // Enforce limits
-    EnforcePhysicsLimits();
 }
 
 void UPerf_PhysicsOptimizer::SetPhysicsLOD(AActor* Actor, EPerf_PhysicsLOD LODLevel)
 {
     if (!Actor)
     {
+        UE_LOG(LogTemp, Warning, TEXT("SetPhysicsLOD: Invalid actor"));
         return;
     }
-    
-    TArray<UPrimitiveComponent*> PrimitiveComponents;
-    Actor->GetComponents<UPrimitiveComponent>(PrimitiveComponents);
-    
-    for (UPrimitiveComponent* PrimComp : PrimitiveComponents)
+
+    ActorLODMap.Add(Actor, LODLevel);
+
+    switch (LODLevel)
     {
-        if (!PrimComp)
+        case EPerf_PhysicsLOD::High:
+            ApplyLODSettings(Actor, HighLODSettings);
+            break;
+        case EPerf_PhysicsLOD::Medium:
+            ApplyLODSettings(Actor, MediumLODSettings);
+            break;
+        case EPerf_PhysicsLOD::Low:
+            ApplyLODSettings(Actor, LowLODSettings);
+            break;
+        case EPerf_PhysicsLOD::Disabled:
+            PutPhysicsBodyToSleep(Actor);
+            break;
+    }
+}
+
+EPerf_PhysicsLOD UPerf_PhysicsOptimizer::GetPhysicsLOD(AActor* Actor) const
+{
+    if (const EPerf_PhysicsLOD* LOD = ActorLODMap.Find(Actor))
+    {
+        return *LOD;
+    }
+    return EPerf_PhysicsLOD::High; // Default
+}
+
+void UPerf_PhysicsOptimizer::UpdatePhysicsLODForAllActors()
+{
+    UWorld* World = GetWorld();
+    if (!World) return;
+
+    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+    {
+        AActor* Actor = *ActorItr;
+        if (Actor && Actor->GetRootComponent() && Actor->GetRootComponent()->IsSimulatingPhysics())
         {
-            continue;
-        }
-        
-        switch (LODLevel)
-        {
-            case EPerf_PhysicsLOD::High:
-                PrimComp->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-                PrimComp->SetSimulatePhysics(true);
-                break;
-                
-            case EPerf_PhysicsLOD::Medium:
-                PrimComp->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
-                PrimComp->SetSimulatePhysics(false);
-                break;
-                
-            case EPerf_PhysicsLOD::Low:
-                PrimComp->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
-                PrimComp->SetSimulatePhysics(false);
-                break;
-                
-            case EPerf_PhysicsLOD::Disabled:
-                PrimComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-                PrimComp->SetSimulatePhysics(false);
-                break;
+            OptimizeActorPhysics(Actor);
         }
     }
 }
 
-void UPerf_PhysicsOptimizer::CullDistantPhysicsActors()
+FPerf_PhysicsMetrics UPerf_PhysicsOptimizer::GetPhysicsMetrics() const
 {
-    if (!GetWorld())
-    {
-        return;
-    }
-    
-    // Restore previously culled actors that are now close enough
-    RestoreCulledActors();
-    
-    for (auto& WeakActor : TrackedPhysicsActors)
-    {
-        if (AActor* Actor = WeakActor.Get())
-        {
-            float Distance = GetDistanceToPlayer(Actor);
-            
-            if (Distance > PhysicsSettings.LowLODDistance * 1.5f) // Cull beyond low LOD distance
-            {
-                DisablePhysicsForActor(Actor);
-                CulledActors.AddUnique(WeakActor);
-            }
-        }
-    }
+    return CurrentMetrics;
 }
 
-void UPerf_PhysicsOptimizer::EnforcePhysicsLimits()
+void UPerf_PhysicsOptimizer::OptimizePhysicsSettings()
 {
-    UpdatePhysicsStats();
-    
-    // Enforce ragdoll limits
-    if (CurrentStats.ActiveRagdolls > PhysicsSettings.MaxRagdolls)
+    UWorld* World = GetWorld();
+    if (!World) return;
+
+    int32 ActiveBodies = 0;
+    int32 SleepingBodies = 0;
+
+    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
     {
-        int32 ExcessRagdolls = CurrentStats.ActiveRagdolls - PhysicsSettings.MaxRagdolls;
-        UE_LOG(LogTemp, Warning, TEXT("PhysicsOptimizer: Excess ragdolls detected: %d"), ExcessRagdolls);
-        
-        // Disable oldest/furthest ragdolls
-        for (auto& WeakActor : TrackedPhysicsActors)
+        AActor* Actor = *ActorItr;
+        if (Actor && Actor->GetRootComponent())
         {
-            if (AActor* Actor = WeakActor.Get())
+            UPrimitiveComponent* PrimComp = Cast<UPrimitiveComponent>(Actor->GetRootComponent());
+            if (PrimComp && PrimComp->IsSimulatingPhysics())
             {
-                if (USkeletalMeshComponent* SkelMesh = Actor->FindComponentByClass<USkeletalMeshComponent>())
+                if (IsPhysicsBodySleeping(Actor))
                 {
-                    if (SkelMesh->IsSimulatingPhysics())
-                    {
-                        SkelMesh->SetSimulatePhysics(false);
-                        ExcessRagdolls--;
-                        if (ExcessRagdolls <= 0) break;
-                    }
+                    SleepingBodies++;
+                }
+                else
+                {
+                    ActiveBodies++;
+                    OptimizeActorPhysics(Actor);
                 }
             }
         }
     }
-    
-    // Enforce destruction object limits
-    if (CurrentStats.ActiveDestructionObjects > PhysicsSettings.MaxDestructionObjects)
+
+    CurrentMetrics.ActivePhysicsBodies = ActiveBodies;
+    CurrentMetrics.SleepingBodies = SleepingBodies;
+}
+
+void UPerf_PhysicsOptimizer::SetPhysicsCullingDistance(float Distance)
+{
+    PhysicsCullingDistance = FMath::Max(Distance, 100.0f);
+    UE_LOG(LogTemp, Log, TEXT("Physics culling distance set to: %f"), PhysicsCullingDistance);
+}
+
+float UPerf_PhysicsOptimizer::GetPhysicsCullingDistance() const
+{
+    return PhysicsCullingDistance;
+}
+
+void UPerf_PhysicsOptimizer::PutPhysicsBodyToSleep(AActor* Actor)
+{
+    if (!Actor) return;
+
+    UPrimitiveComponent* PrimComp = Cast<UPrimitiveComponent>(Actor->GetRootComponent());
+    if (PrimComp && PrimComp->IsSimulatingPhysics())
     {
-        int32 ExcessDestruction = CurrentStats.ActiveDestructionObjects - PhysicsSettings.MaxDestructionObjects;
-        UE_LOG(LogTemp, Warning, TEXT("PhysicsOptimizer: Excess destruction objects: %d"), ExcessDestruction);
-        
-        // Disable furthest destruction objects
-        for (auto& WeakActor : TrackedPhysicsActors)
+        PrimComp->PutRigidBodyToSleep();
+    }
+}
+
+void UPerf_PhysicsOptimizer::WakePhysicsBody(AActor* Actor)
+{
+    if (!Actor) return;
+
+    UPrimitiveComponent* PrimComp = Cast<UPrimitiveComponent>(Actor->GetRootComponent());
+    if (PrimComp && PrimComp->IsSimulatingPhysics())
+    {
+        PrimComp->WakeRigidBody();
+    }
+}
+
+bool UPerf_PhysicsOptimizer::IsPhysicsBodySleeping(AActor* Actor) const
+{
+    if (!Actor) return false;
+
+    UPrimitiveComponent* PrimComp = Cast<UPrimitiveComponent>(Actor->GetRootComponent());
+    if (PrimComp && PrimComp->IsSimulatingPhysics())
+    {
+        return PrimComp->RigidBodyIsAwake() == false;
+    }
+    return false;
+}
+
+void UPerf_PhysicsOptimizer::SetMaxPhysicsBodies(int32 MaxBodies)
+{
+    MaxPhysicsBodies = FMath::Max(MaxBodies, 10);
+    UE_LOG(LogTemp, Log, TEXT("Max physics bodies set to: %d"), MaxPhysicsBodies);
+}
+
+int32 UPerf_PhysicsOptimizer::GetMaxPhysicsBodies() const
+{
+    return MaxPhysicsBodies;
+}
+
+void UPerf_PhysicsOptimizer::EnforcePhysicsBudget()
+{
+    UWorld* World = GetWorld();
+    if (!World) return;
+
+    TArray<AActor*> PhysicsActors;
+    
+    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+    {
+        AActor* Actor = *ActorItr;
+        if (Actor && Actor->GetRootComponent())
         {
-            if (AActor* Actor = WeakActor.Get())
+            UPrimitiveComponent* PrimComp = Cast<UPrimitiveComponent>(Actor->GetRootComponent());
+            if (PrimComp && PrimComp->IsSimulatingPhysics())
             {
-                FString ActorName = Actor->GetName();
-                if (ActorName.Contains(TEXT("Destruction")) || ActorName.Contains(TEXT("Debris")))
+                PhysicsActors.Add(Actor);
+            }
+        }
+    }
+
+    if (PhysicsActors.Num() > MaxPhysicsBodies)
+    {
+        // Sort by distance to player
+        APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(World, 0);
+        if (PlayerPawn)
+        {
+            PhysicsActors.Sort([this, PlayerPawn](const AActor& A, const AActor& B) {
+                float DistA = FVector::Dist(A.GetActorLocation(), PlayerPawn->GetActorLocation());
+                float DistB = FVector::Dist(B.GetActorLocation(), PlayerPawn->GetActorLocation());
+                return DistA < DistB;
+            });
+        }
+
+        // Put distant actors to sleep
+        for (int32 i = MaxPhysicsBodies; i < PhysicsActors.Num(); i++)
+        {
+            PutPhysicsBodyToSleep(PhysicsActors[i]);
+        }
+
+        UE_LOG(LogTemp, Log, TEXT("Physics budget enforced: %d bodies active, %d put to sleep"), 
+               MaxPhysicsBodies, PhysicsActors.Num() - MaxPhysicsBodies);
+    }
+}
+
+void UPerf_PhysicsOptimizer::UpdatePhysicsMetrics()
+{
+    UWorld* World = GetWorld();
+    if (!World) return;
+
+    CurrentMetrics.ActivePhysicsBodies = 0;
+    CurrentMetrics.SleepingBodies = 0;
+    CurrentMetrics.CollisionChecks = 0;
+
+    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+    {
+        AActor* Actor = *ActorItr;
+        if (Actor && Actor->GetRootComponent())
+        {
+            UPrimitiveComponent* PrimComp = Cast<UPrimitiveComponent>(Actor->GetRootComponent());
+            if (PrimComp && PrimComp->IsSimulatingPhysics())
+            {
+                if (IsPhysicsBodySleeping(Actor))
                 {
-                    DisablePhysicsForActor(Actor);
-                    ExcessDestruction--;
-                    if (ExcessDestruction <= 0) break;
+                    CurrentMetrics.SleepingBodies++;
+                }
+                else
+                {
+                    CurrentMetrics.ActivePhysicsBodies++;
                 }
             }
         }
     }
+
+    // Estimate physics step time (simplified)
+    CurrentMetrics.PhysicsStepTime = World->GetDeltaSeconds() * 1000.0f; // Convert to milliseconds
+    CurrentMetrics.MemoryUsageMB = (CurrentMetrics.ActivePhysicsBodies * 0.5f) + (CurrentMetrics.SleepingBodies * 0.1f);
 }
 
-void UPerf_PhysicsOptimizer::UpdatePhysicsStats()
+void UPerf_PhysicsOptimizer::ApplyLODSettings(AActor* Actor, const FPerf_PhysicsLODSettings& Settings)
 {
-    CurrentStats = FPerf_PhysicsStats();
-    
-    if (!GetWorld())
-    {
-        return;
-    }
-    
-    for (auto& WeakActor : TrackedPhysicsActors)
-    {
-        if (AActor* Actor = WeakActor.Get())
-        {
-            // Count ragdolls
-            if (USkeletalMeshComponent* SkelMesh = Actor->FindComponentByClass<USkeletalMeshComponent>())
-            {
-                if (SkelMesh->IsSimulatingPhysics())
-                {
-                    CurrentStats.ActiveRagdolls++;
-                }
-            }
-            
-            // Count destruction objects
-            FString ActorName = Actor->GetName();
-            if (ActorName.Contains(TEXT("Destruction")) || ActorName.Contains(TEXT("Debris")))
-            {
-                CurrentStats.ActiveDestructionObjects++;
-            }
-            
-            // Count simulating actors
-            TArray<UPrimitiveComponent*> PrimitiveComponents;
-            Actor->GetComponents<UPrimitiveComponent>(PrimitiveComponents);
-            
-            for (UPrimitiveComponent* PrimComp : PrimitiveComponents)
-            {
-                if (PrimComp && PrimComp->IsSimulatingPhysics())
-                {
-                    CurrentStats.SimulatingActors++;
-                    break;
-                }
-            }
-        }
-    }
-    
-    CurrentStats.CulledActors = CulledActors.Num();
-    
-    // Get physics frame time (simplified)
-    CurrentStats.PhysicsFrameTime = GetWorld()->GetDeltaSeconds();
-}
+    if (!Actor) return;
 
-void UPerf_PhysicsOptimizer::DisablePhysicsForActor(AActor* Actor)
-{
-    if (!Actor)
-    {
-        return;
-    }
-    
-    TArray<UPrimitiveComponent*> PrimitiveComponents;
-    Actor->GetComponents<UPrimitiveComponent>(PrimitiveComponents);
-    
-    for (UPrimitiveComponent* PrimComp : PrimitiveComponents)
-    {
-        if (PrimComp)
-        {
-            PrimComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-            PrimComp->SetSimulatePhysics(false);
-        }
-    }
-}
+    UPrimitiveComponent* PrimComp = Cast<UPrimitiveComponent>(Actor->GetRootComponent());
+    if (!PrimComp) return;
 
-void UPerf_PhysicsOptimizer::EnablePhysicsForActor(AActor* Actor)
-{
-    if (!Actor)
+    // Apply collision complexity
+    if (Settings.bEnableComplexCollision)
     {
-        return;
+        PrimComp->SetCollisionResponseToAllChannels(ECR_Block);
     }
-    
-    TArray<UPrimitiveComponent*> PrimitiveComponents;
-    Actor->GetComponents<UPrimitiveComponent>(PrimitiveComponents);
-    
-    for (UPrimitiveComponent* PrimComp : PrimitiveComponents)
+    else
     {
-        if (PrimComp)
-        {
-            PrimComp->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-            PrimComp->SetSimulatePhysics(true);
-        }
+        PrimComp->SetCollisionResponseToAllChannels(ECR_Ignore);
+        PrimComp->SetCollisionResponseToChannel(ECC_WorldStatic, ECR_Block);
+        PrimComp->SetCollisionResponseToChannel(ECC_WorldDynamic, ECR_Block);
     }
-}
 
-bool UPerf_PhysicsOptimizer::IsPhysicsPerformanceGood() const
-{
-    bool bGoodPerformance = true;
-    
-    if (CurrentStats.ActiveRagdolls > PhysicsSettings.MaxRagdolls * 0.8f)
+    // Adjust physics update frequency (simplified approach)
+    if (Settings.UpdateFrequency < 30.0f)
     {
-        bGoodPerformance = false;
+        PrimComp->SetComponentTickInterval(1.0f / Settings.UpdateFrequency);
     }
-    
-    if (CurrentStats.ActiveDestructionObjects > PhysicsSettings.MaxDestructionObjects * 0.8f)
+    else
     {
-        bGoodPerformance = false;
-    }
-    
-    if (CurrentStats.SimulatingActors > PhysicsSettings.MaxSimulatingActors * 0.8f)
-    {
-        bGoodPerformance = false;
-    }
-    
-    return bGoodPerformance;
-}
-
-void UPerf_PhysicsOptimizer::ApplyPerformancePreset(const FString& PresetName)
-{
-    if (PresetName == TEXT("High"))
-    {
-        PhysicsSettings.MaxRagdolls = 15;
-        PhysicsSettings.MaxDestructionObjects = 75;
-        PhysicsSettings.MaxSimulatingActors = 150;
-        PhysicsSettings.HighLODDistance = 1500.0f;
-        PhysicsSettings.MediumLODDistance = 3000.0f;
-        PhysicsSettings.LowLODDistance = 6000.0f;
-    }
-    else if (PresetName == TEXT("Medium"))
-    {
-        PhysicsSettings.MaxRagdolls = 10;
-        PhysicsSettings.MaxDestructionObjects = 50;
-        PhysicsSettings.MaxSimulatingActors = 100;
-        PhysicsSettings.HighLODDistance = 1000.0f;
-        PhysicsSettings.MediumLODDistance = 2500.0f;
-        PhysicsSettings.LowLODDistance = 5000.0f;
-    }
-    else if (PresetName == TEXT("Low"))
-    {
-        PhysicsSettings.MaxRagdolls = 5;
-        PhysicsSettings.MaxDestructionObjects = 25;
-        PhysicsSettings.MaxSimulatingActors = 50;
-        PhysicsSettings.HighLODDistance = 500.0f;
-        PhysicsSettings.MediumLODDistance = 1500.0f;
-        PhysicsSettings.LowLODDistance = 3000.0f;
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("PhysicsOptimizer: Applied %s performance preset"), *PresetName);
-}
-
-void UPerf_PhysicsOptimizer::FindPhysicsActors()
-{
-    TrackedPhysicsActors.Empty();
-    
-    if (!GetWorld())
-    {
-        return;
-    }
-    
-    for (TActorIterator<AActor> ActorIterator(GetWorld()); ActorIterator; ++ActorIterator)
-    {
-        AActor* Actor = *ActorIterator;
-        if (!Actor)
-        {
-            continue;
-        }
-        
-        // Check if actor has physics components
-        TArray<UPrimitiveComponent*> PrimitiveComponents;
-        Actor->GetComponents<UPrimitiveComponent>(PrimitiveComponents);
-        
-        for (UPrimitiveComponent* PrimComp : PrimitiveComponents)
-        {
-            if (PrimComp && (PrimComp->IsSimulatingPhysics() || 
-                PrimComp->GetCollisionEnabled() != ECollisionEnabled::NoCollision))
-            {
-                TrackedPhysicsActors.AddUnique(Actor);
-                break;
-            }
-        }
+        PrimComp->SetComponentTickInterval(0.0f); // Default tick
     }
 }
 
 float UPerf_PhysicsOptimizer::GetDistanceToPlayer(AActor* Actor) const
 {
-    if (!Actor || !GetWorld())
-    {
-        return 99999.0f;
-    }
-    
-    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
-    if (!PlayerPawn)
-    {
-        return 99999.0f;
-    }
-    
+    if (!Actor) return 0.0f;
+
+    UWorld* World = GetWorld();
+    if (!World) return 0.0f;
+
+    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(World, 0);
+    if (!PlayerPawn) return 0.0f;
+
     return FVector::Dist(Actor->GetActorLocation(), PlayerPawn->GetActorLocation());
 }
 
-void UPerf_PhysicsOptimizer::RestoreCulledActors()
+void UPerf_PhysicsOptimizer::OptimizeActorPhysics(AActor* Actor)
 {
-    for (int32 i = CulledActors.Num() - 1; i >= 0; i--)
-    {
-        if (AActor* Actor = CulledActors[i].Get())
-        {
-            float Distance = GetDistanceToPlayer(Actor);
-            
-            if (Distance <= PhysicsSettings.LowLODDistance)
-            {
-                EnablePhysicsForActor(Actor);
-                CulledActors.RemoveAt(i);
-            }
-        }
-        else
-        {
-            // Remove invalid weak pointer
-            CulledActors.RemoveAt(i);
-        }
-    }
-}
+    if (!Actor) return;
 
-EPerf_PhysicsLOD UPerf_PhysicsOptimizer::CalculateLODLevel(float Distance) const
-{
-    if (Distance <= PhysicsSettings.HighLODDistance)
+    float Distance = GetDistanceToPlayer(Actor);
+
+    if (Distance > PhysicsCullingDistance)
     {
-        return EPerf_PhysicsLOD::High;
+        SetPhysicsLOD(Actor, EPerf_PhysicsLOD::Disabled);
     }
-    else if (Distance <= PhysicsSettings.MediumLODDistance)
+    else if (Distance > LowLODSettings.MaxDistance)
     {
-        return EPerf_PhysicsLOD::Medium;
+        SetPhysicsLOD(Actor, EPerf_PhysicsLOD::Low);
     }
-    else if (Distance <= PhysicsSettings.LowLODDistance)
+    else if (Distance > MediumLODSettings.MaxDistance)
     {
-        return EPerf_PhysicsLOD::Low;
+        SetPhysicsLOD(Actor, EPerf_PhysicsLOD::Medium);
     }
     else
     {
-        return EPerf_PhysicsLOD::Disabled;
+        SetPhysicsLOD(Actor, EPerf_PhysicsLOD::High);
     }
 }
