@@ -3,322 +3,357 @@
 #include "Components/StaticMeshComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/CapsuleComponent.h"
-#include "Kismet/KismetSystemLibrary.h"
 #include "Engine/Engine.h"
+#include "DrawDebugHelpers.h"
 
 UCore_CollisionSystem::UCore_CollisionSystem()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.bStartWithTickEnabled = true;
-    
-    // Default collision settings
-    CollisionData.CollisionType = ECore_CollisionType::Dynamic;
-    CollisionData.Mass = 1.0f;
-    CollisionData.Friction = 0.7f;
-    CollisionData.Restitution = 0.3f;
-    CollisionData.bCanBlock = true;
-    CollisionData.bCanOverlap = false;
-    
-    // Default object types for collision
-    CollisionObjectTypes.Add(UEngineTypes::ConvertToObjectType(ECollisionChannel::ECC_WorldStatic));
-    CollisionObjectTypes.Add(UEngineTypes::ConvertToObjectType(ECollisionChannel::ECC_WorldDynamic));
-    CollisionObjectTypes.Add(UEngineTypes::ConvertToObjectType(ECollisionChannel::ECC_Pawn));
+    PrimaryComponentTick.TickInterval = 0.016f; // 60 FPS
+
+    // Initialize default settings
+    CollisionSettings = FCore_CollisionSettings();
+    bEnableAdvancedCollision = true;
+    CollisionCheckFrequency = 60.0f;
+    MaxCollisionEvents = 50;
+
+    LastCollisionCheckTime = 0.0f;
+    CollisionEventCount = 0;
+
+    RecentCollisions.Reserve(MaxCollisionEvents);
 }
 
 void UCore_CollisionSystem::BeginPlay()
 {
     Super::BeginPlay();
-    
-    // Find primary collision component
-    AActor* Owner = GetOwner();
-    if (Owner)
+
+    // Apply initial collision settings
+    ApplyCollisionSettings();
+
+    // Bind collision events
+    UPrimitiveComponent* PrimComp = GetOwnerPrimitiveComponent();
+    if (PrimComp)
     {
-        // Try to find the main collision component
-        PrimaryCollisionComponent = Owner->GetRootComponent() ? Cast<UPrimitiveComponent>(Owner->GetRootComponent()) : nullptr;
-        
-        if (!PrimaryCollisionComponent)
-        {
-            // Look for static mesh component
-            PrimaryCollisionComponent = Owner->FindComponentByClass<UStaticMeshComponent>();
-        }
-        
-        if (!PrimaryCollisionComponent)
-        {
-            // Look for skeletal mesh component
-            PrimaryCollisionComponent = Owner->FindComponentByClass<USkeletalMeshComponent>();
-        }
-        
-        if (!PrimaryCollisionComponent)
-        {
-            // Look for capsule component
-            PrimaryCollisionComponent = Owner->FindComponentByClass<UCapsuleComponent>();
-        }
-        
-        // Bind collision events if we found a component
-        if (PrimaryCollisionComponent)
-        {
-            Owner->OnActorHit.AddDynamic(this, &UCore_CollisionSystem::HandleActorHit);
-            Owner->OnActorBeginOverlap.AddDynamic(this, &UCore_CollisionSystem::HandleActorBeginOverlap);
-            Owner->OnActorEndOverlap.AddDynamic(this, &UCore_CollisionSystem::HandleActorEndOverlap);
-            
-            UpdateCollisionProfile();
-        }
+        PrimComp->OnComponentHit.AddDynamic(this, &UCore_CollisionSystem::OnComponentHit);
+        PrimComp->OnComponentBeginOverlap.AddDynamic(this, &UCore_CollisionSystem::OnComponentBeginOverlap);
     }
+
+    UE_LOG(LogTemp, Log, TEXT("Core_CollisionSystem: Initialized for %s"), 
+           GetOwner() ? *GetOwner()->GetName() : TEXT("Unknown"));
 }
 
 void UCore_CollisionSystem::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-    
-    // Update collision state if needed
-    if (PrimaryCollisionComponent && bCollisionEnabled)
+
+    if (bEnableAdvancedCollision)
     {
-        // Perform any continuous collision checks here
-        LastCollisionTime += DeltaTime;
+        UpdateCollisionDetection(DeltaTime);
     }
 }
 
-bool UCore_CollisionSystem::LineTrace(const FVector& Start, const FVector& End, FHitResult& HitResult)
+void UCore_CollisionSystem::SetCollisionProfile(ECore_CollisionProfile NewProfile)
 {
-    if (!GetWorld()) return false;
-    
-    FCollisionQueryParams QueryParams;
-    QueryParams.AddIgnoredActor(GetOwner());
-    QueryParams.bTraceComplex = true;
-    
-    return GetWorld()->LineTraceSingleByChannel(
-        HitResult,
-        Start,
-        End,
-        ECollisionChannel::ECC_Visibility,
-        QueryParams
-    );
-}
-
-bool UCore_CollisionSystem::SphereTrace(const FVector& Start, const FVector& End, float Radius, FHitResult& HitResult)
-{
-    if (!GetWorld()) return false;
-    
-    FCollisionQueryParams QueryParams;
-    QueryParams.AddIgnoredActor(GetOwner());
-    QueryParams.bTraceComplex = true;
-    
-    return GetWorld()->SweepSingleByChannel(
-        HitResult,
-        Start,
-        End,
-        FQuat::Identity,
-        ECollisionChannel::ECC_Visibility,
-        FCollisionShape::MakeSphere(Radius),
-        QueryParams
-    );
-}
-
-bool UCore_CollisionSystem::BoxTrace(const FVector& Start, const FVector& End, const FVector& HalfSize, FHitResult& HitResult)
-{
-    if (!GetWorld()) return false;
-    
-    FCollisionQueryParams QueryParams;
-    QueryParams.AddIgnoredActor(GetOwner());
-    QueryParams.bTraceComplex = true;
-    
-    return GetWorld()->SweepSingleByChannel(
-        HitResult,
-        Start,
-        End,
-        FQuat::Identity,
-        ECollisionChannel::ECC_Visibility,
-        FCollisionShape::MakeBox(HalfSize),
-        QueryParams
-    );
-}
-
-TArray<FHitResult> UCore_CollisionSystem::MultiLineTrace(const FVector& Start, const FVector& End)
-{
-    TArray<FHitResult> HitResults;
-    
-    if (!GetWorld()) return HitResults;
-    
-    FCollisionQueryParams QueryParams;
-    QueryParams.AddIgnoredActor(GetOwner());
-    QueryParams.bTraceComplex = true;
-    
-    GetWorld()->LineTraceMultiByChannel(
-        HitResults,
-        Start,
-        End,
-        ECollisionChannel::ECC_Visibility,
-        QueryParams
-    );
-    
-    return HitResults;
-}
-
-bool UCore_CollisionSystem::SphereOverlap(const FVector& Location, float Radius, TArray<AActor*>& OverlappingActors)
-{
-    if (!GetWorld()) return false;
-    
-    TArray<FOverlapResult> OverlapResults;
-    FCollisionQueryParams QueryParams;
-    QueryParams.AddIgnoredActor(GetOwner());
-    
-    bool bHasOverlaps = GetWorld()->OverlapMultiByChannel(
-        OverlapResults,
-        Location,
-        FQuat::Identity,
-        ECollisionChannel::ECC_WorldDynamic,
-        FCollisionShape::MakeSphere(Radius),
-        QueryParams
-    );
-    
-    OverlappingActors.Empty();
-    for (const FOverlapResult& Result : OverlapResults)
-    {
-        if (Result.GetActor())
-        {
-            OverlappingActors.Add(Result.GetActor());
-        }
-    }
-    
-    return bHasOverlaps;
-}
-
-bool UCore_CollisionSystem::BoxOverlap(const FVector& Location, const FVector& HalfSize, TArray<AActor*>& OverlappingActors)
-{
-    if (!GetWorld()) return false;
-    
-    TArray<FOverlapResult> OverlapResults;
-    FCollisionQueryParams QueryParams;
-    QueryParams.AddIgnoredActor(GetOwner());
-    
-    bool bHasOverlaps = GetWorld()->OverlapMultiByChannel(
-        OverlapResults,
-        Location,
-        FQuat::Identity,
-        ECollisionChannel::ECC_WorldDynamic,
-        FCollisionShape::MakeBox(HalfSize),
-        QueryParams
-    );
-    
-    OverlappingActors.Empty();
-    for (const FOverlapResult& Result : OverlapResults)
-    {
-        if (Result.GetActor())
-        {
-            OverlappingActors.Add(Result.GetActor());
-        }
-    }
-    
-    return bHasOverlaps;
+    CollisionSettings.CollisionProfile = NewProfile;
+    ApplyCollisionSettings();
 }
 
 void UCore_CollisionSystem::SetCollisionEnabled(bool bEnabled)
 {
-    bCollisionEnabled = bEnabled;
-    
-    if (PrimaryCollisionComponent)
+    CollisionSettings.bEnableCollision = bEnabled;
+    ApplyCollisionSettings();
+}
+
+void UCore_CollisionSystem::SetCollisionSettings(const FCore_CollisionSettings& NewSettings)
+{
+    CollisionSettings = NewSettings;
+    ApplyCollisionSettings();
+}
+
+bool UCore_CollisionSystem::IsCollisionEnabled() const
+{
+    return CollisionSettings.bEnableCollision;
+}
+
+ECore_CollisionProfile UCore_CollisionSystem::GetCurrentCollisionProfile() const
+{
+    return CollisionSettings.CollisionProfile;
+}
+
+TArray<FCore_CollisionEvent> UCore_CollisionSystem::GetRecentCollisions() const
+{
+    return RecentCollisions;
+}
+
+bool UCore_CollisionSystem::PerformLineTrace(const FVector& Start, const FVector& End, FHitResult& OutHit)
+{
+    if (!GetWorld())
     {
-        if (bEnabled)
+        return false;
+    }
+
+    FCollisionQueryParams QueryParams;
+    QueryParams.AddIgnoredActor(GetOwner());
+    QueryParams.bTraceComplex = true;
+
+    bool bHit = GetWorld()->LineTraceSingleByChannel(
+        OutHit,
+        Start,
+        End,
+        ECC_Visibility,
+        QueryParams
+    );
+
+    if (bHit)
+    {
+        ProcessCollisionEvent(OutHit, (End - Start).Size());
+    }
+
+    return bHit;
+}
+
+bool UCore_CollisionSystem::PerformSphereTrace(const FVector& Start, const FVector& End, float Radius, FHitResult& OutHit)
+{
+    if (!GetWorld())
+    {
+        return false;
+    }
+
+    FCollisionQueryParams QueryParams;
+    QueryParams.AddIgnoredActor(GetOwner());
+    QueryParams.bTraceComplex = true;
+
+    bool bHit = GetWorld()->SweepSingleByChannel(
+        OutHit,
+        Start,
+        End,
+        FQuat::Identity,
+        ECC_Visibility,
+        FCollisionShape::MakeSphere(Radius),
+        QueryParams
+    );
+
+    if (bHit)
+    {
+        ProcessCollisionEvent(OutHit, (End - Start).Size() * Radius);
+    }
+
+    return bHit;
+}
+
+TArray<AActor*> UCore_CollisionSystem::GetOverlappingActors(float SearchRadius)
+{
+    TArray<AActor*> OverlappingActors;
+    
+    if (!GetWorld() || !GetOwner())
+    {
+        return OverlappingActors;
+    }
+
+    FVector OwnerLocation = GetOwner()->GetActorLocation();
+    
+    TArray<FOverlapResult> OverlapResults;
+    FCollisionQueryParams QueryParams;
+    QueryParams.AddIgnoredActor(GetOwner());
+
+    bool bHasOverlaps = GetWorld()->OverlapMultiByChannel(
+        OverlapResults,
+        OwnerLocation,
+        FQuat::Identity,
+        ECC_Pawn,
+        FCollisionShape::MakeSphere(SearchRadius),
+        QueryParams
+    );
+
+    if (bHasOverlaps)
+    {
+        for (const FOverlapResult& Result : OverlapResults)
         {
-            PrimaryCollisionComponent->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-        }
-        else
-        {
-            PrimaryCollisionComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+            if (Result.GetActor())
+            {
+                OverlappingActors.AddUnique(Result.GetActor());
+            }
         }
     }
+
+    return OverlappingActors;
 }
 
-void UCore_CollisionSystem::SetCollisionType(ECore_CollisionType NewType)
+void UCore_CollisionSystem::OnComponentHit(UPrimitiveComponent* HitComp, AActor* OtherActor, UPrimitiveComponent* OtherComp, FVector NormalImpulse, const FHitResult& Hit)
 {
-    CollisionData.CollisionType = NewType;
-    UpdateCollisionProfile();
-}
-
-void UCore_CollisionSystem::UpdateCollisionProfile()
-{
-    if (!PrimaryCollisionComponent) return;
-    
-    switch (CollisionData.CollisionType)
+    if (!CollisionSettings.bEnableCollision)
     {
-        case ECore_CollisionType::Static:
-            PrimaryCollisionComponent->SetCollisionObjectType(ECollisionChannel::ECC_WorldStatic);
-            PrimaryCollisionComponent->SetCollisionResponseToAllChannels(ECR_Block);
+        return;
+    }
+
+    float ImpactForce = NormalImpulse.Size();
+    ProcessCollisionEvent(Hit, ImpactForce);
+
+    UE_LOG(LogTemp, Log, TEXT("Core_CollisionSystem: Hit detected with %s, Force: %f"), 
+           OtherActor ? *OtherActor->GetName() : TEXT("Unknown"), ImpactForce);
+}
+
+void UCore_CollisionSystem::OnComponentBeginOverlap(UPrimitiveComponent* OverlappedComp, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
+{
+    if (!CollisionSettings.bEnableCollision || !CollisionSettings.bGenerateOverlapEvents)
+    {
+        return;
+    }
+
+    ProcessCollisionEvent(SweepResult, 0.0f); // Overlap events have no impact force
+
+    UE_LOG(LogTemp, Log, TEXT("Core_CollisionSystem: Overlap detected with %s"), 
+           OtherActor ? *OtherActor->GetName() : TEXT("Unknown"));
+}
+
+void UCore_CollisionSystem::ClearCollisionHistory()
+{
+    RecentCollisions.Empty();
+    CollisionEventCount = 0;
+}
+
+void UCore_CollisionSystem::ApplyCollisionSettings()
+{
+    UPrimitiveComponent* PrimComp = GetOwnerPrimitiveComponent();
+    if (!PrimComp)
+    {
+        return;
+    }
+
+    // Apply collision enabled state
+    PrimComp->SetCollisionEnabled(CollisionSettings.bEnableCollision ? ECollisionEnabled::QueryAndPhysics : ECollisionEnabled::NoCollision);
+
+    // Apply overlap events
+    PrimComp->SetGenerateOverlapEvents(CollisionSettings.bGenerateOverlapEvents);
+
+    // Apply step up capability
+    PrimComp->SetCanCharacterStepUpOn(CollisionSettings.bCanCharacterStepUpOn ? ECB_Yes : ECB_No);
+
+    // Apply collision profile based on enum
+    FName ProfileName;
+    switch (CollisionSettings.CollisionProfile)
+    {
+        case ECore_CollisionProfile::Character:
+            ProfileName = TEXT("Pawn");
             break;
-            
-        case ECore_CollisionType::Dynamic:
-            PrimaryCollisionComponent->SetCollisionObjectType(ECollisionChannel::ECC_WorldDynamic);
-            PrimaryCollisionComponent->SetCollisionResponseToAllChannels(ECR_Block);
+        case ECore_CollisionProfile::Dinosaur:
+            ProfileName = TEXT("Pawn");
             break;
-            
-        case ECore_CollisionType::Character:
-            PrimaryCollisionComponent->SetCollisionObjectType(ECollisionChannel::ECC_Pawn);
-            PrimaryCollisionComponent->SetCollisionResponseToAllChannels(ECR_Block);
-            PrimaryCollisionComponent->SetCollisionResponseToChannel(ECollisionChannel::ECC_Pawn, ECR_Ignore);
+        case ECore_CollisionProfile::Environment:
+            ProfileName = TEXT("WorldStatic");
             break;
-            
-        case ECore_CollisionType::Projectile:
-            PrimaryCollisionComponent->SetCollisionObjectType(ECollisionChannel::ECC_WorldDynamic);
-            PrimaryCollisionComponent->SetCollisionResponseToAllChannels(ECR_Block);
-            PrimaryCollisionComponent->SetCollisionResponseToChannel(ECollisionChannel::ECC_Pawn, ECR_Block);
+        case ECore_CollisionProfile::Projectile:
+            ProfileName = TEXT("Projectile");
             break;
-            
-        case ECore_CollisionType::Trigger:
-            PrimaryCollisionComponent->SetCollisionObjectType(ECollisionChannel::ECC_WorldDynamic);
-            PrimaryCollisionComponent->SetCollisionResponseToAllChannels(ECR_Overlap);
+        case ECore_CollisionProfile::Trigger:
+            ProfileName = TEXT("Trigger");
             break;
-            
-        case ECore_CollisionType::None:
+        case ECore_CollisionProfile::Destructible:
+            ProfileName = TEXT("Destructible");
+            break;
         default:
-            PrimaryCollisionComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+            ProfileName = TEXT("BlockAll");
             break;
     }
+
+    PrimComp->SetCollisionProfileName(ProfileName);
+
+    UE_LOG(LogTemp, Log, TEXT("Core_CollisionSystem: Applied collision profile %s"), *ProfileName.ToString());
+}
+
+float UCore_CollisionSystem::GetCollisionIntensity(const FCore_CollisionEvent& Event) const
+{
+    // Calculate intensity based on impact force and other factors
+    float BaseIntensity = Event.ImpactForce / 1000.0f; // Normalize to 0-1 range roughly
     
-    // Apply physical material properties if this is a physics object
-    if (PrimaryCollisionComponent->IsSimulatingPhysics())
+    // Factor in the type of collision
+    float TypeMultiplier = 1.0f;
+    if (Event.HitActor)
     {
-        PrimaryCollisionComponent->SetMassOverrideInKg(NAME_None, CollisionData.Mass);
+        // Increase intensity for certain actor types
+        if (Event.HitActor->GetClass()->GetName().Contains(TEXT("Dinosaur")))
+        {
+            TypeMultiplier = 2.0f;
+        }
+        else if (Event.HitActor->GetClass()->GetName().Contains(TEXT("Character")))
+        {
+            TypeMultiplier = 1.5f;
+        }
+    }
+
+    return FMath::Clamp(BaseIntensity * TypeMultiplier, 0.0f, 10.0f);
+}
+
+void UCore_CollisionSystem::UpdateCollisionDetection(float DeltaTime)
+{
+    LastCollisionCheckTime += DeltaTime;
+    
+    // Perform periodic collision checks based on frequency
+    if (LastCollisionCheckTime >= (1.0f / CollisionCheckFrequency))
+    {
+        LastCollisionCheckTime = 0.0f;
         
-        // Note: Friction and Restitution would typically be set via Physical Materials
-        // For now, we'll store them in our data structure for potential use
+        // Perform environmental collision check
+        if (GetOwner())
+        {
+            FVector OwnerLocation = GetOwner()->GetActorLocation();
+            FVector DownVector = OwnerLocation + FVector(0, 0, -200.0f);
+            
+            FHitResult GroundHit;
+            if (PerformLineTrace(OwnerLocation, DownVector, GroundHit))
+            {
+                // Ground collision detected - could be used for footstep effects, etc.
+            }
+        }
     }
 }
 
-void UCore_CollisionSystem::HandleActorHit(AActor* SelfActor, AActor* OtherActor, FVector NormalImpulse, const FHitResult& Hit)
+void UCore_CollisionSystem::ProcessCollisionEvent(const FHitResult& Hit, float ImpactForce)
 {
-    if (!bCollisionEnabled) return;
-    
+    FCore_CollisionEvent NewEvent;
+    NewEvent.HitActor = Hit.GetActor();
+    NewEvent.HitComponent = Hit.GetComponent();
+    NewEvent.ImpactPoint = Hit.ImpactPoint;
+    NewEvent.ImpactNormal = Hit.ImpactNormal;
+    NewEvent.ImpactForce = ImpactForce;
+    NewEvent.Timestamp = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
+
+    RegisterCollisionEvent(NewEvent);
+
     // Broadcast the collision event
-    OnCollisionDetected(Hit);
-    
-    // Log collision for debugging
-    if (GEngine)
+    OnCollisionDetected.Broadcast(NewEvent);
+}
+
+void UCore_CollisionSystem::RegisterCollisionEvent(const FCore_CollisionEvent& Event)
+{
+    // Add to recent collisions array
+    RecentCollisions.Add(Event);
+    CollisionEventCount++;
+
+    // Maintain maximum size
+    if (RecentCollisions.Num() > MaxCollisionEvents)
     {
-        FString Message = FString::Printf(TEXT("Collision: %s hit %s"), 
-            SelfActor ? *SelfActor->GetName() : TEXT("Unknown"),
-            OtherActor ? *OtherActor->GetName() : TEXT("Unknown"));
-        GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Yellow, Message);
+        RecentCollisions.RemoveAt(0);
     }
 }
 
-void UCore_CollisionSystem::HandleActorBeginOverlap(AActor* OverlappedActor, AActor* OtherActor)
+UPrimitiveComponent* UCore_CollisionSystem::GetOwnerPrimitiveComponent() const
 {
-    if (!bCollisionEnabled || !OtherActor) return;
-    
-    // Track overlapping actors
-    CurrentOverlaps.AddUnique(OtherActor);
-    
-    // Broadcast overlap event
-    OnOverlapBegin(OtherActor);
-}
+    if (!GetOwner())
+    {
+        return nullptr;
+    }
 
-void UCore_CollisionSystem::HandleActorEndOverlap(AActor* OverlappedActor, AActor* OtherActor)
-{
-    if (!bCollisionEnabled || !OtherActor) return;
-    
-    // Remove from tracking
-    CurrentOverlaps.Remove(OtherActor);
-    
-    // Broadcast overlap end event
-    OnOverlapEnd(OtherActor);
+    // Try to find the main collision component
+    UPrimitiveComponent* PrimComp = GetOwner()->FindComponentByClass<UCapsuleComponent>();
+    if (!PrimComp)
+    {
+        PrimComp = GetOwner()->FindComponentByClass<UStaticMeshComponent>();
+    }
+    if (!PrimComp)
+    {
+        PrimComp = GetOwner()->FindComponentByClass<USkeletalMeshComponent>();
+    }
+
+    return PrimComp;
 }
