@@ -1,21 +1,20 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
-#include "Components/StaticMeshComponent.h"
+#include "Components/ActorComponent.h"
+#include "Particles/ParticleSystemComponent.h"
 #include "NiagaraComponent.h"
-#include "NiagaraFunctionLibrary.h"
-#include "Engine/Engine.h"
+#include "NiagaraSystem.h"
+#include "Engine/StaticMeshActor.h"
 #include "VFX_FireSystem.generated.h"
 
 UENUM(BlueprintType)
-enum class EVFX_FireIntensity : uint8
+enum class EVFX_FireType : uint8
 {
-    Ember       UMETA(DisplayName = "Ember"),
-    Small       UMETA(DisplayName = "Small Fire"),
-    Medium      UMETA(DisplayName = "Medium Fire"),
-    Large       UMETA(DisplayName = "Large Fire"),
-    Inferno     UMETA(DisplayName = "Inferno")
+    Campfire        UMETA(DisplayName = "Campfire"),
+    Torch           UMETA(DisplayName = "Torch"),
+    WildFire        UMETA(DisplayName = "Wild Fire"),
+    CookingFire     UMETA(DisplayName = "Cooking Fire")
 };
 
 USTRUCT(BlueprintType)
@@ -24,87 +23,102 @@ struct FVFX_FireParams
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fire VFX")
-    EVFX_FireIntensity Intensity = EVFX_FireIntensity::Medium;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fire VFX", meta = (ClampMin = "0.1", ClampMax = "5.0"))
-    float FlameHeight = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fire VFX", meta = (ClampMin = "0.1", ClampMax = "3.0"))
-    float FlameWidth = 0.8f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fire VFX", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float SmokeAmount = 0.5f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fire VFX", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float EmberCount = 0.3f;
+    float FlameIntensity = 1.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fire VFX")
-    FLinearColor FlameColor = FLinearColor(1.0f, 0.4f, 0.1f, 1.0f);
+    float SmokeAmount = 0.8f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fire VFX")
+    float EmberCount = 50.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fire VFX")
+    FLinearColor FlameColor = FLinearColor(1.0f, 0.6f, 0.2f, 1.0f);
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fire VFX")
+    bool bCastLight = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fire VFX")
+    float LightRadius = 500.0f;
+
+    FVFX_FireParams()
+    {
+        FlameIntensity = 1.0f;
+        SmokeAmount = 0.8f;
+        EmberCount = 50.0f;
+        FlameColor = FLinearColor(1.0f, 0.6f, 0.2f, 1.0f);
+        bCastLight = true;
+        LightRadius = 500.0f;
+    }
 };
 
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API AVFX_FireSystem : public AActor
+UCLASS(ClassGroup=(VFX), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UVFX_FireSystem : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    AVFX_FireSystem();
+    UVFX_FireSystem();
 
 protected:
     virtual void BeginPlay() override;
 
 public:
-    virtual void Tick(float DeltaTime) override;
-
-    // Fire system components
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    UStaticMeshComponent* FireBaseMesh;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    UNiagaraComponent* FlameParticles;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    UNiagaraComponent* SmokeParticles;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    UNiagaraComponent* EmberParticles;
-
-    // Fire parameters
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fire VFX")
-    FVFX_FireParams FireParams;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fire VFX")
-    bool bAutoStart = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fire VFX")
-    bool bFlickerEffect = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fire VFX", meta = (ClampMin = "0.1", ClampMax = "10.0"))
-    float FlickerSpeed = 2.0f;
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
     // Fire control functions
-    UFUNCTION(BlueprintCallable, Category = "Fire VFX")
-    void StartFire();
+    UFUNCTION(BlueprintCallable, Category = "VFX Fire")
+    void StartFire(EVFX_FireType FireType, const FVFX_FireParams& Params);
 
-    UFUNCTION(BlueprintCallable, Category = "Fire VFX")
+    UFUNCTION(BlueprintCallable, Category = "VFX Fire")
     void StopFire();
 
-    UFUNCTION(BlueprintCallable, Category = "Fire VFX")
-    void SetFireIntensity(EVFX_FireIntensity NewIntensity);
+    UFUNCTION(BlueprintCallable, Category = "VFX Fire")
+    void SetFireIntensity(float NewIntensity);
 
-    UFUNCTION(BlueprintCallable, Category = "Fire VFX")
-    void UpdateFireParameters(const FVFX_FireParams& NewParams);
+    UFUNCTION(BlueprintCallable, Category = "VFX Fire")
+    bool IsFireActive() const { return bFireActive; }
 
-    UFUNCTION(BlueprintCallable, Category = "Fire VFX")
-    bool IsFireActive() const;
+    // Configuration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Fire")
+    EVFX_FireType CurrentFireType = EVFX_FireType::Campfire;
 
-private:
-    void InitializeFireComponents();
-    void UpdateFlickerEffect(float DeltaTime);
-    void ApplyFireParameters();
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Fire")
+    FVFX_FireParams FireParameters;
 
-    // Internal state
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Fire")
+    TSoftObjectPtr<UNiagaraSystem> FlameEffect;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Fire")
+    TSoftObjectPtr<UNiagaraSystem> SmokeEffect;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Fire")
+    TSoftObjectPtr<UNiagaraSystem> EmberEffect;
+
+protected:
+    // Components
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "VFX Components")
+    UNiagaraComponent* FlameComponent;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "VFX Components")
+    UNiagaraComponent* SmokeComponent;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "VFX Components")
+    UNiagaraComponent* EmberComponent;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "VFX Components")
+    class UPointLightComponent* FireLight;
+
+    // State
+    UPROPERTY(BlueprintReadOnly, Category = "VFX State")
     bool bFireActive = false;
-    float FlickerTimer = 0.0f;
-    float BaseFlameHeight = 1.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "VFX State")
+    float CurrentIntensity = 1.0f;
+
+    // Internal functions
+    void UpdateFireEffects();
+    void SetupFireLight();
+    void LoadFireAssets();
 };
+
+#include "VFX_FireSystem.generated.h"
