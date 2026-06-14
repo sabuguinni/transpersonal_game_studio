@@ -2,213 +2,41 @@
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "Kismet/GameplayStatics.h"
-#include "Math/UnrealMathUtility.h"
 
-UEng_BiomeManager::UEng_BiomeManager()
-{
-    BiomeTransitionDistance = 1000.0f;
-    BiomeMapResolution = 512;
-}
-
-void UEng_BiomeManager::Initialize(FSubsystemCollectionBase& Collection)
-{
-    Super::Initialize(Collection);
-    InitializeBiomeDatabase();
-    UE_LOG(LogTemp, Warning, TEXT("BiomeManager initialized"));
-}
-
-void UEng_BiomeManager::Deinitialize()
-{
-    BiomeDatabase.Empty();
-    BiomeRegions.Empty();
-    Super::Deinitialize();
-}
-
-void UEng_BiomeManager::InitializeBiomeDatabase()
-{
-    // Plains biome
-    FEng_BiomeData PlainsData;
-    PlainsData.BiomeType = EBiomeType::Plains;
-    PlainsData.Temperature = 22.0f;
-    PlainsData.Humidity = 0.4f;
-    PlainsData.Elevation = 100.0f;
-    PlainsData.VegetationDensity = 0.6f;
-    PlainsData.DinosaurSpawnRate = 0.3f;
-    BiomeDatabase.Add(EBiomeType::Plains, PlainsData);
-
-    // Forest biome
-    FEng_BiomeData ForestData;
-    ForestData.BiomeType = EBiomeType::Forest;
-    ForestData.Temperature = 18.0f;
-    ForestData.Humidity = 0.8f;
-    ForestData.Elevation = 200.0f;
-    ForestData.VegetationDensity = 1.5f;
-    ForestData.DinosaurSpawnRate = 0.5f;
-    BiomeDatabase.Add(EBiomeType::Forest, ForestData);
-
-    // Desert biome
-    FEng_BiomeData DesertData;
-    DesertData.BiomeType = EBiomeType::Desert;
-    DesertData.Temperature = 35.0f;
-    DesertData.Humidity = 0.1f;
-    DesertData.Elevation = 50.0f;
-    DesertData.VegetationDensity = 0.1f;
-    DesertData.DinosaurSpawnRate = 0.2f;
-    BiomeDatabase.Add(EBiomeType::Desert, DesertData);
-
-    // Mountain biome
-    FEng_BiomeData MountainData;
-    MountainData.BiomeType = EBiomeType::Mountain;
-    MountainData.Temperature = 5.0f;
-    MountainData.Humidity = 0.6f;
-    MountainData.Elevation = 800.0f;
-    MountainData.VegetationDensity = 0.3f;
-    MountainData.DinosaurSpawnRate = 0.1f;
-    BiomeDatabase.Add(EBiomeType::Mountain, MountainData);
-
-    // Swamp biome
-    FEng_BiomeData SwampData;
-    SwampData.BiomeType = EBiomeType::Swamp;
-    SwampData.Temperature = 28.0f;
-    SwampData.Humidity = 0.95f;
-    SwampData.Elevation = -20.0f;
-    SwampData.VegetationDensity = 1.2f;
-    SwampData.DinosaurSpawnRate = 0.4f;
-    BiomeDatabase.Add(EBiomeType::Swamp, SwampData);
-}
-
-EBiomeType UEng_BiomeManager::GetBiomeAtLocation(const FVector& WorldLocation)
-{
-    float Temperature = GetTemperatureAtLocation(WorldLocation);
-    float Humidity = GetHumidityAtLocation(WorldLocation);
-    float Elevation = WorldLocation.Z;
-
-    return CalculateBiomeFromEnvironment(Temperature, Humidity, Elevation);
-}
-
-EBiomeType UEng_BiomeManager::CalculateBiomeFromEnvironment(float Temperature, float Humidity, float Elevation)
-{
-    // High elevation = Mountain
-    if (Elevation > 600.0f)
-    {
-        return EBiomeType::Mountain;
-    }
-    
-    // Low elevation + high humidity = Swamp
-    if (Elevation < 50.0f && Humidity > 0.8f)
-    {
-        return EBiomeType::Swamp;
-    }
-    
-    // High temperature + low humidity = Desert
-    if (Temperature > 30.0f && Humidity < 0.3f)
-    {
-        return EBiomeType::Desert;
-    }
-    
-    // High humidity + moderate temperature = Forest
-    if (Humidity > 0.6f && Temperature > 15.0f && Temperature < 25.0f)
-    {
-        return EBiomeType::Forest;
-    }
-    
-    // Default to Plains
-    return EBiomeType::Plains;
-}
-
-FEng_BiomeData UEng_BiomeManager::GetBiomeData(EBiomeType BiomeType)
-{
-    if (BiomeDatabase.Contains(BiomeType))
-    {
-        return BiomeDatabase[BiomeType];
-    }
-    
-    return FEng_BiomeData(); // Return default
-}
-
-void UEng_BiomeManager::SetBiomeData(EBiomeType BiomeType, const FEng_BiomeData& BiomeData)
-{
-    BiomeDatabase.Add(BiomeType, BiomeData);
-}
-
-TArray<EBiomeType> UEng_BiomeManager::GetAllBiomeTypes()
-{
-    TArray<EBiomeType> BiomeTypes;
-    BiomeDatabase.GetKeys(BiomeTypes);
-    return BiomeTypes;
-}
-
-float UEng_BiomeManager::GetTemperatureAtLocation(const FVector& WorldLocation)
-{
-    float BaseTemp = 25.0f;
-    float ElevationEffect = -0.006f * WorldLocation.Z; // Temperature drops with elevation
-    float LatitudeEffect = GetNoiseValue(FVector2D(WorldLocation.X, WorldLocation.Y), 0.0001f) * 20.0f;
-    
-    return BaseTemp + ElevationEffect + LatitudeEffect;
-}
-
-float UEng_BiomeManager::GetHumidityAtLocation(const FVector& WorldLocation)
-{
-    float BaseHumidity = 0.5f;
-    float NoiseVariation = GetNoiseValue(FVector2D(WorldLocation.X, WorldLocation.Y), 0.0005f) * 0.4f;
-    
-    return FMath::Clamp(BaseHumidity + NoiseVariation, 0.0f, 1.0f);
-}
-
-float UEng_BiomeManager::GetNoiseValue(const FVector2D& Location, float Scale)
-{
-    // Simple Perlin-like noise using sine waves
-    float X = Location.X * Scale;
-    float Y = Location.Y * Scale;
-    
-    float Noise = FMath::Sin(X * 2.1f + Y * 1.7f) * 0.5f +
-                  FMath::Sin(X * 1.3f - Y * 2.3f) * 0.3f +
-                  FMath::Sin(X * 3.7f + Y * 0.9f) * 0.2f;
-    
-    return (Noise + 1.0f) * 0.5f; // Normalize to 0-1
-}
-
-void UEng_BiomeManager::GenerateBiomeMap(int32 WorldSize)
-{
-    BiomeRegions.Empty();
-    
-    int32 RegionCount = FMath::Max(1, WorldSize / 2000); // One region per 2km
-    
-    for (int32 i = 0; i < RegionCount; i++)
-    {
-        FVector2D RegionCenter;
-        RegionCenter.X = FMath::RandRange(-WorldSize / 2, WorldSize / 2);
-        RegionCenter.Y = FMath::RandRange(-WorldSize / 2, WorldSize / 2);
-        BiomeRegions.Add(RegionCenter);
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("Generated %d biome regions for world size %d"), RegionCount, WorldSize);
-}
-
-void UEng_BiomeManager::UpdateBiomeTransitions()
-{
-    // Update transition zones between biomes
-    // This would be called periodically to smooth biome boundaries
-    UE_LOG(LogTemp, Log, TEXT("Biome transitions updated"));
-}
-
-// BiomeComponent implementation
 UEng_BiomeComponent::UEng_BiomeComponent()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    UpdateInterval = 1.0f;
-    CurrentBiome = EBiomeType::Plains;
-    TimeSinceLastUpdate = 0.0f;
+    
+    // Default biome setup
+    BiomeData.BiomeType = EEng_BiomeType::Grassland;
+    BiomeData.Temperature = 25.0f;
+    BiomeData.Humidity = 0.5f;
+    BiomeData.Fertility = 0.7f;
+    BiomeData.SpawnDensity = 1.0f;
+    
+    // Default species for grassland
+    BiomeData.DinosaurSpecies.Add(TEXT("Triceratops"));
+    BiomeData.DinosaurSpecies.Add(TEXT("Parasaurolophus"));
+    BiomeData.DinosaurSpecies.Add(TEXT("Ankylosaurus"));
+    
+    BiomeData.VegetationTypes.Add(TEXT("Grass"));
+    BiomeData.VegetationTypes.Add(TEXT("Ferns"));
+    BiomeData.VegetationTypes.Add(TEXT("SmallTrees"));
+    
+    BiomeRadius = 5000.0f;
 }
 
 void UEng_BiomeComponent::BeginPlay()
 {
     Super::BeginPlay();
     
-    BiomeManager = GetWorld()->GetGameInstance()->GetSubsystem<UEng_BiomeManager>();
-    if (BiomeManager)
+    // Register with biome manager
+    if (UWorld* World = GetWorld())
     {
-        UpdateCurrentBiome();
+        if (AEng_BiomeManager* BiomeManager = Cast<AEng_BiomeManager>(UGameplayStatics::GetActorOfClass(World, AEng_BiomeManager::StaticClass())))
+        {
+            BiomeManager->RegisterBiome(this);
+        }
     }
 }
 
@@ -216,41 +44,183 @@ void UEng_BiomeComponent::TickComponent(float DeltaTime, ELevelTick TickType, FA
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
     
-    TimeSinceLastUpdate += DeltaTime;
-    if (TimeSinceLastUpdate >= UpdateInterval)
-    {
-        UpdateCurrentBiome();
-        TimeSinceLastUpdate = 0.0f;
-    }
+    UpdateBiomeInfluence(DeltaTime);
 }
 
-void UEng_BiomeComponent::UpdateCurrentBiome()
+EEng_BiomeType UEng_BiomeComponent::GetBiomeType() const
 {
-    if (!BiomeManager || !GetOwner())
+    return BiomeData.BiomeType;
+}
+
+float UEng_BiomeComponent::GetTemperature() const
+{
+    return BiomeData.Temperature;
+}
+
+float UEng_BiomeComponent::GetHumidity() const
+{
+    return BiomeData.Humidity;
+}
+
+bool UEng_BiomeComponent::IsLocationInBiome(const FVector& Location) const
+{
+    if (!GetOwner())
     {
-        return;
+        return false;
     }
     
-    FVector OwnerLocation = GetOwner()->GetActorLocation();
-    EBiomeType NewBiome = BiomeManager->GetBiomeAtLocation(OwnerLocation);
+    float Distance = FVector::Dist(GetOwner()->GetActorLocation(), Location);
+    return Distance <= BiomeRadius;
+}
+
+void UEng_BiomeComponent::UpdateBiomeInfluence(float DeltaTime)
+{
+    // Update biome influence based on time of day, weather, etc.
+    // This is where dynamic biome changes would be calculated
     
-    if (NewBiome != CurrentBiome)
+    // Example: Temperature variation based on time
+    if (UWorld* World = GetWorld())
     {
-        EBiomeType OldBiome = CurrentBiome;
-        CurrentBiome = NewBiome;
-        OnBiomeChanged.Broadcast(OldBiome, NewBiome);
+        float TimeOfDay = World->GetTimeSeconds();
+        float DayNightCycle = FMath::Sin(TimeOfDay * 0.001f); // Slow cycle
         
-        UE_LOG(LogTemp, Log, TEXT("Biome changed from %d to %d at location %s"), 
-               (int32)OldBiome, (int32)NewBiome, *OwnerLocation.ToString());
+        // Slight temperature variation
+        float BaseTemp = BiomeData.Temperature;
+        float TempVariation = DayNightCycle * 5.0f; // ±5 degrees
+        BiomeData.Temperature = BaseTemp + TempVariation;
     }
 }
 
-FEng_BiomeData UEng_BiomeComponent::GetCurrentBiomeData() const
+AEng_BiomeManager::AEng_BiomeManager()
 {
-    if (BiomeManager)
+    PrimaryActorTick.bCanEverTick = true;
+    
+    BiomeUpdateInterval = 5.0f;
+    LastUpdateTime = 0.0f;
+}
+
+void AEng_BiomeManager::BeginPlay()
+{
+    Super::BeginPlay();
+    
+    UE_LOG(LogTemp, Warning, TEXT("BiomeManager: Started managing biomes"));
+}
+
+void AEng_BiomeManager::Tick(float DeltaTime)
+{
+    Super::Tick(DeltaTime);
+    
+    LastUpdateTime += DeltaTime;
+    if (LastUpdateTime >= BiomeUpdateInterval)
     {
-        return BiomeManager->GetBiomeData(CurrentBiome);
+        UpdateAllBiomes(DeltaTime);
+        LastUpdateTime = 0.0f;
+    }
+}
+
+EEng_BiomeType AEng_BiomeManager::GetBiomeAtLocation(const FVector& Location) const
+{
+    UEng_BiomeComponent* ClosestBiome = FindClosestBiome(Location);
+    if (ClosestBiome && ClosestBiome->IsLocationInBiome(Location))
+    {
+        return ClosestBiome->GetBiomeType();
     }
     
-    return FEng_BiomeData();
+    return EEng_BiomeType::Grassland; // Default fallback
+}
+
+FEng_BiomeData AEng_BiomeManager::GetBiomeDataAtLocation(const FVector& Location) const
+{
+    UEng_BiomeComponent* ClosestBiome = FindClosestBiome(Location);
+    if (ClosestBiome && ClosestBiome->IsLocationInBiome(Location))
+    {
+        return ClosestBiome->BiomeData;
+    }
+    
+    // Return default biome data
+    FEng_BiomeData DefaultData;
+    DefaultData.BiomeType = EEng_BiomeType::Grassland;
+    DefaultData.Temperature = 25.0f;
+    DefaultData.Humidity = 0.5f;
+    DefaultData.Fertility = 0.7f;
+    DefaultData.SpawnDensity = 1.0f;
+    return DefaultData;
+}
+
+void AEng_BiomeManager::RegisterBiome(UEng_BiomeComponent* BiomeComponent)
+{
+    if (BiomeComponent && !ActiveBiomes.Contains(BiomeComponent))
+    {
+        ActiveBiomes.Add(BiomeComponent);
+        UE_LOG(LogTemp, Warning, TEXT("BiomeManager: Registered biome %s"), 
+               *UEnum::GetValueAsString(BiomeComponent->GetBiomeType()));
+    }
+}
+
+void AEng_BiomeManager::UnregisterBiome(UEng_BiomeComponent* BiomeComponent)
+{
+    if (BiomeComponent)
+    {
+        ActiveBiomes.Remove(BiomeComponent);
+        UE_LOG(LogTemp, Warning, TEXT("BiomeManager: Unregistered biome"));
+    }
+}
+
+TArray<UEng_BiomeComponent*> AEng_BiomeManager::GetBiomesInRange(const FVector& Location, float Range) const
+{
+    TArray<UEng_BiomeComponent*> BiomesInRange;
+    
+    for (UEng_BiomeComponent* Biome : ActiveBiomes)
+    {
+        if (Biome && Biome->GetOwner())
+        {
+            float Distance = FVector::Dist(Biome->GetOwner()->GetActorLocation(), Location);
+            if (Distance <= Range)
+            {
+                BiomesInRange.Add(Biome);
+            }
+        }
+    }
+    
+    return BiomesInRange;
+}
+
+void AEng_BiomeManager::UpdateAllBiomes(float DeltaTime)
+{
+    // Clean up invalid biomes
+    ActiveBiomes.RemoveAll([](UEng_BiomeComponent* Biome) {
+        return !IsValid(Biome) || !IsValid(Biome->GetOwner());
+    });
+    
+    // Update biome interactions and environmental effects
+    for (UEng_BiomeComponent* Biome : ActiveBiomes)
+    {
+        if (Biome)
+        {
+            Biome->UpdateBiomeInfluence(DeltaTime);
+        }
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("BiomeManager: Updated %d active biomes"), ActiveBiomes.Num());
+}
+
+UEng_BiomeComponent* AEng_BiomeManager::FindClosestBiome(const FVector& Location) const
+{
+    UEng_BiomeComponent* ClosestBiome = nullptr;
+    float ClosestDistance = FLT_MAX;
+    
+    for (UEng_BiomeComponent* Biome : ActiveBiomes)
+    {
+        if (Biome && Biome->GetOwner())
+        {
+            float Distance = FVector::Dist(Biome->GetOwner()->GetActorLocation(), Location);
+            if (Distance < ClosestDistance)
+            {
+                ClosestDistance = Distance;
+                ClosestBiome = Biome;
+            }
+        }
+    }
+    
+    return ClosestBiome;
 }
