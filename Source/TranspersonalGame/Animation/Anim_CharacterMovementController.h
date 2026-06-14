@@ -6,86 +6,41 @@
 #include "Animation/AnimInstance.h"
 #include "Animation/AnimMontage.h"
 #include "Animation/BlendSpace.h"
+#include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
+#include "../Core/SharedTypes.h"
 #include "Anim_CharacterMovementController.generated.h"
 
-UENUM(BlueprintType)
-enum class EAnim_MovementState : uint8
-{
-    Idle        UMETA(DisplayName = "Idle"),
-    Walking     UMETA(DisplayName = "Walking"),
-    Running     UMETA(DisplayName = "Running"),
-    Jumping     UMETA(DisplayName = "Jumping"),
-    Falling     UMETA(DisplayName = "Falling"),
-    Crouching   UMETA(DisplayName = "Crouching"),
-    Swimming    UMETA(DisplayName = "Swimming")
-};
-
-UENUM(BlueprintType)
-enum class EAnim_SurvivalState : uint8
-{
-    Normal      UMETA(DisplayName = "Normal"),
-    Exhausted   UMETA(DisplayName = "Exhausted"),
-    Injured     UMETA(DisplayName = "Injured"),
-    Fearful     UMETA(DisplayName = "Fearful"),
-    Hungry      UMETA(DisplayName = "Hungry"),
-    Thirsty     UMETA(DisplayName = "Thirsty")
-};
-
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FAnim_MovementData
+struct TRANSPERSONALGAME_API FAnim_MovementState
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Movement")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
     float Speed;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Movement")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
     float Direction;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Movement")
-    bool bIsMoving;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Movement")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
     bool bIsInAir;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Movement")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
     bool bIsCrouching;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Movement")
-    EAnim_MovementState MovementState;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
+    EAnim_MovementMode MovementMode;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Survival")
-    EAnim_SurvivalState SurvivalState;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Survival")
-    float HealthPercentage;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Survival")
-    float StaminaPercentage;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Survival")
-    float FearLevel;
-
-    FAnim_MovementData()
+    FAnim_MovementState()
     {
         Speed = 0.0f;
         Direction = 0.0f;
-        bIsMoving = false;
         bIsInAir = false;
         bIsCrouching = false;
-        MovementState = EAnim_MovementState::Idle;
-        SurvivalState = EAnim_SurvivalState::Normal;
-        HealthPercentage = 1.0f;
-        StaminaPercentage = 1.0f;
-        FearLevel = 0.0f;
+        MovementMode = EAnim_MovementMode::Walking;
     }
 };
 
-/**
- * Animation controller that manages character movement and survival state animations
- * Bridges between character movement component and animation blueprint
- */
 UCLASS(ClassGroup=(Animation), meta=(BlueprintSpawnableComponent))
 class TRANSPERSONALGAME_API UAnim_CharacterMovementController : public UActorComponent
 {
@@ -100,53 +55,57 @@ protected:
 public:
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    // Animation data access
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    FAnim_MovementData GetMovementData() const { return CurrentMovementData; }
+    // Movement state tracking
+    UPROPERTY(BlueprintReadOnly, Category = "Animation")
+    FAnim_MovementState CurrentMovementState;
 
+    // Animation assets
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation|Idle")
+    class UAnimSequence* IdleAnimation;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation|Movement")
+    class UBlendSpace* WalkRunBlendSpace;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation|Jump")
+    class UAnimMontage* JumpMontage;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation|Crouch")
+    class UAnimSequence* CrouchIdleAnimation;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation|Crouch")
+    class UBlendSpace* CrouchWalkBlendSpace;
+
+    // Movement thresholds
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation|Settings")
+    float WalkSpeedThreshold = 150.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation|Settings")
+    float RunSpeedThreshold = 300.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation|Settings")
+    float DirectionSmoothingSpeed = 10.0f;
+
+    // Functions
     UFUNCTION(BlueprintCallable, Category = "Animation")
     void UpdateMovementState();
 
     UFUNCTION(BlueprintCallable, Category = "Animation")
-    void UpdateSurvivalState();
-
-    // Animation triggers
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    void TriggerJumpAnimation();
+    void PlayJumpAnimation();
 
     UFUNCTION(BlueprintCallable, Category = "Animation")
-    void TriggerLandAnimation();
+    EAnim_MovementMode GetCurrentMovementMode() const;
 
     UFUNCTION(BlueprintCallable, Category = "Animation")
-    void TriggerFearReaction(float FearIntensity);
+    float GetMovementSpeed() const;
 
     UFUNCTION(BlueprintCallable, Category = "Animation")
-    void TriggerInjuryAnimation();
+    float GetMovementDirection() const;
 
-    // Animation montages
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Assets")
-    class UAnimMontage* JumpMontage;
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    bool IsMoving() const;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Assets")
-    class UAnimMontage* LandMontage;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Assets")
-    class UAnimMontage* FearReactionMontage;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Assets")
-    class UAnimMontage* InjuryMontage;
-
-    // Blend spaces
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Assets")
-    class UBlendSpace* LocomotionBlendSpace;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Assets")
-    class UBlendSpace* CrouchBlendSpace;
-
-protected:
-    UPROPERTY(BlueprintReadOnly, Category = "Animation Data")
-    FAnim_MovementData CurrentMovementData;
-
+private:
+    // Cached references
     UPROPERTY()
     class ACharacter* OwnerCharacter;
 
@@ -156,29 +115,11 @@ protected:
     UPROPERTY()
     class UAnimInstance* AnimInstance;
 
-    // Internal state tracking
-    UPROPERTY()
-    float LastSpeed;
+    // Internal state
+    float PreviousDirection;
+    float DirectionSmoothingTimer;
 
-    UPROPERTY()
-    float SpeedChangeRate;
-
-    UPROPERTY()
-    float DirectionChangeRate;
-
-    // Survival state thresholds
-    UPROPERTY(EditAnywhere, Category = "Survival Thresholds")
-    float ExhaustedThreshold = 0.2f;
-
-    UPROPERTY(EditAnywhere, Category = "Survival Thresholds")
-    float InjuredThreshold = 0.5f;
-
-    UPROPERTY(EditAnywhere, Category = "Survival Thresholds")
-    float FearThreshold = 0.3f;
-
-private:
-    void UpdateMovementValues();
-    void UpdateSurvivalValues();
-    EAnim_MovementState DetermineMovementState();
-    EAnim_SurvivalState DetermineSurvivalState();
+    void CacheReferences();
+    void UpdateAnimationBlueprint();
+    EAnim_MovementMode DetermineMovementMode();
 };
