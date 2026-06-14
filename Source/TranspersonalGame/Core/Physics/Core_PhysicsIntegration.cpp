@@ -1,418 +1,500 @@
 #include "Core_PhysicsIntegration.h"
+#include "Core_PhysicsCore.h"
+#include "Core/Engine/Eng_SystemRegistry.h"
 #include "Engine/World.h"
+#include "Engine/GameInstance.h"
 #include "Components/PrimitiveComponent.h"
-#include "PhysicalMaterials/PhysicalMaterial.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "GameFramework/Character.h"
+#include "PhysicsEngine/PhysicsSettings.h"
 #include "Engine/Engine.h"
-#include "DrawDebugHelpers.h"
-#include "CollisionQueryParams.h"
 
 UCore_PhysicsIntegration::UCore_PhysicsIntegration()
 {
-    PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.bStartWithTickEnabled = true;
-    
-    // Initialize default physics properties
-    Friction = 0.7f;
-    Restitution = 0.3f;
-    Density = 1.0f;
-    
-    // Initialize collision settings
-    CollisionObjectType = ECC_WorldDynamic;
-    CollisionResponseToWorld = ECR_Block;
-    CollisionResponseToPawn = ECR_Block;
-    CollisionResponseToVehicle = ECR_Block;
-    
-    // Initialize performance settings
-    bOptimizePerformance = true;
-    PhysicsLODLevel = 1;
-    MaxSimulationDistance = 5000.0f;
-    CullingDistance = 10000.0f;
-    
-    // Initialize physics state
-    bPhysicsEnabled = true;
-    bGravityEnabled = true;
-    CustomGravity = FVector(0.0f, 0.0f, -980.0f);
-    
-    // Initialize force multipliers
-    MaxForceMultiplier = 1.0f;
-    MaxImpulseMultiplier = 1.0f;
-    MaxTorqueMultiplier = 1.0f;
-    
-    // Initialize internal variables
-    LastPerformanceCheck = 0.0f;
-    PhysicsObjectCount = 0;
-    AverageFrameTime = 0.016f; // 60 FPS baseline
+    PhysicsCore = nullptr;
+    SystemRegistry = nullptr;
+    PhysicsStatus = ECore_SystemStatus::Uninitialized;
+    PhysicsQualityLevel = 1.0f;
+    TimeSinceLastUpdate = 0.0f;
+    PhysicsUpdateFrequency = 0.033f; // 30Hz default
+    bIsInitialized = false;
+    bIsShuttingDown = false;
+    PerformanceTimer = 0.0f;
+    LastPhysicsTime = 0.0f;
+
+    // Initialize metrics
+    CurrentMetrics.PhysicsTime = 0.0f;
+    CurrentMetrics.CollisionChecks = 0;
+    CurrentMetrics.ActiveRigidBodies = 0;
+    CurrentMetrics.MemoryUsage = 0.0f;
+    CurrentMetrics.QualityLevel = PhysicsQualityLevel;
 }
 
-void UCore_PhysicsIntegration::BeginPlay()
+void UCore_PhysicsIntegration::Initialize(FSubsystemCollectionBase& Collection)
 {
-    Super::BeginPlay();
-    
-    InitializePhysicsSettings();
-    
-    UE_LOG(LogTemp, Log, TEXT("Core_PhysicsIntegration: Component initialized for %s"), 
-           GetOwner() ? *GetOwner()->GetName() : TEXT("Unknown"));
-}
+    Super::Initialize(Collection);
 
-void UCore_PhysicsIntegration::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
-{
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-    
-    if (bOptimizePerformance)
+    UE_LOG(LogTemp, Log, TEXT("Core_PhysicsIntegration: Initializing physics integration subsystem"));
+
+    // Get SystemRegistry reference
+    if (UGameInstance* GameInstance = GetGameInstance())
     {
-        UpdatePhysicsLOD();
-        
-        // Performance monitoring every second
-        LastPerformanceCheck += DeltaTime;
-        if (LastPerformanceCheck >= 1.0f)
+        SystemRegistry = GameInstance->GetSubsystem<UEng_SystemRegistry>();
+        if (!SystemRegistry)
         {
-            ValidatePhysicsState();
-            LastPerformanceCheck = 0.0f;
+            UE_LOG(LogTemp, Warning, TEXT("Core_PhysicsIntegration: SystemRegistry not found"));
+            PhysicsStatus = ECore_SystemStatus::Error;
+            return;
         }
     }
-    
-    // Update average frame time for performance tracking
-    AverageFrameTime = (AverageFrameTime * 0.9f) + (DeltaTime * 0.1f);
-}
 
-void UCore_PhysicsIntegration::SetPhysicsMaterial(UPhysicalMaterial* Material)
-{
-    if (!Material)
+    // Register with SystemRegistry
+    if (!RegisterWithSystemRegistry())
     {
-        UE_LOG(LogTemp, Warning, TEXT("Core_PhysicsIntegration: Attempted to set null physics material"));
+        UE_LOG(LogTemp, Error, TEXT("Core_PhysicsIntegration: Failed to register with SystemRegistry"));
+        PhysicsStatus = ECore_SystemStatus::Error;
         return;
     }
-    
-    CurrentPhysicsMaterial = Material;
-    
-    // Apply material properties to owner's primitive component
-    if (AActor* Owner = GetOwner())
+
+    PhysicsStatus = ECore_SystemStatus::Initializing;
+    bIsInitialized = true;
+
+    UE_LOG(LogTemp, Log, TEXT("Core_PhysicsIntegration: Physics integration subsystem initialized successfully"));
+}
+
+void UCore_PhysicsIntegration::Deinitialize()
+{
+    UE_LOG(LogTemp, Log, TEXT("Core_PhysicsIntegration: Deinitializing physics integration subsystem"));
+
+    bIsShuttingDown = true;
+    ShutdownPhysicsSystems();
+
+    PhysicsCore = nullptr;
+    SystemRegistry = nullptr;
+    PhysicsStatus = ECore_SystemStatus::Uninitialized;
+
+    Super::Deinitialize();
+}
+
+bool UCore_PhysicsIntegration::InitializePhysicsSystems()
+{
+    if (!bIsInitialized || bIsShuttingDown)
     {
-        if (UPrimitiveComponent* PrimComp = Owner->FindComponentByClass<UPrimitiveComponent>())
+        UE_LOG(LogTemp, Warning, TEXT("Core_PhysicsIntegration: Cannot initialize - subsystem not ready"));
+        return false;
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("Core_PhysicsIntegration: Initializing physics systems"));
+
+    PhysicsStatus = ECore_SystemStatus::Initializing;
+
+    // Get or create PhysicsCore
+    if (UGameInstance* GameInstance = GetGameInstance())
+    {
+        PhysicsCore = GameInstance->GetSubsystem<UCore_PhysicsCore>();
+        if (!PhysicsCore)
         {
-            PrimComp->SetPhysMaterialOverride(Material);
-            
-            // Update local properties from material
-            Friction = Material->Friction;
-            Restitution = Material->Restitution;
-            Density = Material->Density;
+            UE_LOG(LogTemp, Error, TEXT("Core_PhysicsIntegration: PhysicsCore subsystem not found"));
+            PhysicsStatus = ECore_SystemStatus::Error;
+            return false;
         }
     }
-    
-    UE_LOG(LogTemp, Log, TEXT("Core_PhysicsIntegration: Physics material set to %s"), *Material->GetName());
-}
 
-UPhysicalMaterial* UCore_PhysicsIntegration::GetCurrentPhysicsMaterial() const
-{
-    return CurrentPhysicsMaterial;
-}
-
-void UCore_PhysicsIntegration::ConfigureCollisionResponse(ECollisionResponse ResponseType)
-{
-    CollisionResponseToWorld = ResponseType;
-    CollisionResponseToPawn = ResponseType;
-    CollisionResponseToVehicle = ResponseType;
-    
-    // Apply to owner's primitive component
-    if (AActor* Owner = GetOwner())
+    // Validate system dependencies
+    if (!ValidateSystemDependencies())
     {
-        if (UPrimitiveComponent* PrimComp = Owner->FindComponentByClass<UPrimitiveComponent>())
-        {
-            PrimComp->SetCollisionResponseToAllChannels(ResponseType);
-        }
+        UE_LOG(LogTemp, Error, TEXT("Core_PhysicsIntegration: System dependency validation failed"));
+        PhysicsStatus = ECore_SystemStatus::Error;
+        return false;
     }
-    
-    UE_LOG(LogTemp, Log, TEXT("Core_PhysicsIntegration: Collision response configured"));
+
+    // Setup physics profiles
+    SetupPhysicsProfiles();
+
+    // Initialize performance monitoring
+    PerformanceTimer = 0.0f;
+    LastPhysicsTime = 0.0f;
+    CurrentMetrics.QualityLevel = PhysicsQualityLevel;
+
+    PhysicsStatus = ECore_SystemStatus::Running;
+
+    UE_LOG(LogTemp, Log, TEXT("Core_PhysicsIntegration: Physics systems initialized successfully"));
+    return true;
 }
 
-void UCore_PhysicsIntegration::SetCollisionObjectType(ECollisionChannel ObjectType)
+void UCore_PhysicsIntegration::ShutdownPhysicsSystems()
 {
-    CollisionObjectType = ObjectType;
-    
-    // Apply to owner's primitive component
-    if (AActor* Owner = GetOwner())
+    UE_LOG(LogTemp, Log, TEXT("Core_PhysicsIntegration: Shutting down physics systems"));
+
+    PhysicsStatus = ECore_SystemStatus::ShuttingDown;
+
+    // Reset references
+    PhysicsCore = nullptr;
+
+    PhysicsStatus = ECore_SystemStatus::Uninitialized;
+
+    UE_LOG(LogTemp, Log, TEXT("Core_PhysicsIntegration: Physics systems shutdown complete"));
+}
+
+ECore_SystemStatus UCore_PhysicsIntegration::GetPhysicsSystemStatus() const
+{
+    return PhysicsStatus;
+}
+
+bool UCore_PhysicsIntegration::RegisterWithSystemRegistry()
+{
+    if (!SystemRegistry)
     {
-        if (UPrimitiveComponent* PrimComp = Owner->FindComponentByClass<UPrimitiveComponent>())
-        {
-            PrimComp->SetCollisionObjectType(ObjectType);
-        }
+        UE_LOG(LogTemp, Error, TEXT("Core_PhysicsIntegration: SystemRegistry not available for registration"));
+        return false;
     }
-    
-    UE_LOG(LogTemp, Log, TEXT("Core_PhysicsIntegration: Collision object type set"));
-}
 
-void UCore_PhysicsIntegration::OptimizePhysicsPerformance(bool bEnable)
-{
-    bOptimizePerformance = bEnable;
-    
-    if (bEnable)
+    // Register as a core physics system
+    FCore_SystemInfo PhysicsSystemInfo;
+    PhysicsSystemInfo.SystemName = TEXT("PhysicsIntegration");
+    PhysicsSystemInfo.SystemType = ECore_SystemType::Physics;
+    PhysicsSystemInfo.Priority = 100; // High priority for physics
+    PhysicsSystemInfo.Status = PhysicsStatus;
+    PhysicsSystemInfo.bIsCore = true;
+
+    bool bRegistered = SystemRegistry->RegisterSystem(PhysicsSystemInfo);
+    if (bRegistered)
     {
-        UpdatePhysicsLOD();
+        UE_LOG(LogTemp, Log, TEXT("Core_PhysicsIntegration: Successfully registered with SystemRegistry"));
     }
-    
-    UE_LOG(LogTemp, Log, TEXT("Core_PhysicsIntegration: Physics optimization %s"), 
-           bEnable ? TEXT("enabled") : TEXT("disabled"));
-}
-
-void UCore_PhysicsIntegration::SetPhysicsLOD(int32 LODLevel)
-{
-    PhysicsLODLevel = FMath::Clamp(LODLevel, 0, 3);
-    
-    if (bOptimizePerformance)
+    else
     {
-        UpdatePhysicsLOD();
+        UE_LOG(LogTemp, Error, TEXT("Core_PhysicsIntegration: Failed to register with SystemRegistry"));
     }
-    
-    UE_LOG(LogTemp, Log, TEXT("Core_PhysicsIntegration: Physics LOD set to %d"), PhysicsLODLevel);
+
+    return bRegistered;
 }
 
-void UCore_PhysicsIntegration::EnablePhysicsSimulation(bool bEnable)
+void UCore_PhysicsIntegration::ApplySurvivalPhysicsProfile(AActor* Character)
 {
-    bPhysicsEnabled = bEnable;
-    
-    // Apply to owner's primitive component
-    if (AActor* Owner = GetOwner())
+    if (!Character || !PhysicsCore)
     {
-        if (UPrimitiveComponent* PrimComp = Owner->FindComponentByClass<UPrimitiveComponent>())
-        {
-            PrimComp->SetSimulatePhysics(bEnable);
-        }
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("Core_PhysicsIntegration: Physics simulation %s"), 
-           bEnable ? TEXT("enabled") : TEXT("disabled"));
-}
-
-bool UCore_PhysicsIntegration::IsPhysicsSimulationEnabled() const
-{
-    return bPhysicsEnabled;
-}
-
-void UCore_PhysicsIntegration::ApplyForce(const FVector& Force, const FVector& Location)
-{
-    if (!bPhysicsEnabled)
-    {
+        UE_LOG(LogTemp, Warning, TEXT("Core_PhysicsIntegration: Invalid character or PhysicsCore for survival profile"));
         return;
     }
-    
-    if (AActor* Owner = GetOwner())
+
+    UE_LOG(LogTemp, Log, TEXT("Core_PhysicsIntegration: Applying survival physics profile to %s"), *Character->GetName());
+
+    // Apply character physics profile through PhysicsCore
+    PhysicsCore->ApplyPhysicsProfile(Character, ECore_PhysicsProfile::Character);
+
+    // Configure survival-specific physics
+    if (UPrimitiveComponent* PrimComp = Character->GetRootComponent<UPrimitiveComponent>())
     {
-        if (UPrimitiveComponent* PrimComp = Owner->FindComponentByClass<UPrimitiveComponent>())
-        {
-            FVector ScaledForce = Force * MaxForceMultiplier;
-            PrimComp->AddForceAtLocation(ScaledForce, Location);
-            
-            UE_LOG(LogTemp, VeryVerbose, TEXT("Core_PhysicsIntegration: Applied force %s at location %s"), 
-                   *ScaledForce.ToString(), *Location.ToString());
-        }
+        // Set realistic mass for human character
+        PrimComp->SetMassOverrideInKg(NAME_None, 70.0f, true);
+        
+        // Configure collision for survival interactions
+        PrimComp->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+        PrimComp->SetCollisionObjectType(ECollisionChannel::ECC_Pawn);
+        
+        // Enable physics simulation for ragdoll capability
+        PrimComp->SetSimulatePhysics(false); // Start with kinematic, enable for ragdoll
     }
+
+    UE_LOG(LogTemp, Log, TEXT("Core_PhysicsIntegration: Survival physics profile applied successfully"));
 }
 
-void UCore_PhysicsIntegration::ApplyImpulse(const FVector& Impulse, const FVector& Location)
+void UCore_PhysicsIntegration::ApplyDinosaurPhysicsProfile(AActor* Dinosaur, ECore_DinosaurSize DinosaurSize)
 {
-    if (!bPhysicsEnabled)
+    if (!Dinosaur || !PhysicsCore)
     {
+        UE_LOG(LogTemp, Warning, TEXT("Core_PhysicsIntegration: Invalid dinosaur or PhysicsCore for dinosaur profile"));
         return;
     }
-    
-    if (AActor* Owner = GetOwner())
+
+    UE_LOG(LogTemp, Log, TEXT("Core_PhysicsIntegration: Applying dinosaur physics profile to %s"), *Dinosaur->GetName());
+
+    // Apply dinosaur physics profile through PhysicsCore
+    PhysicsCore->ApplyPhysicsProfile(Dinosaur, ECore_PhysicsProfile::Dinosaur);
+
+    // Configure size-specific physics
+    if (UPrimitiveComponent* PrimComp = Dinosaur->GetRootComponent<UPrimitiveComponent>())
     {
-        if (UPrimitiveComponent* PrimComp = Owner->FindComponentByClass<UPrimitiveComponent>())
+        float Mass = 100.0f; // Default mass
+        
+        // Adjust mass based on dinosaur size
+        switch (DinosaurSize)
         {
-            FVector ScaledImpulse = Impulse * MaxImpulseMultiplier;
-            PrimComp->AddImpulseAtLocation(ScaledImpulse, Location);
-            
-            UE_LOG(LogTemp, VeryVerbose, TEXT("Core_PhysicsIntegration: Applied impulse %s at location %s"), 
-                   *ScaledImpulse.ToString(), *Location.ToString());
+            case ECore_DinosaurSize::Small:
+                Mass = 50.0f; // Compsognathus, small raptors
+                break;
+            case ECore_DinosaurSize::Medium:
+                Mass = 500.0f; // Velociraptors, Dilophosaurus
+                break;
+            case ECore_DinosaurSize::Large:
+                Mass = 2000.0f; // Allosaurus, Carnotaurus
+                break;
+            case ECore_DinosaurSize::Massive:
+                Mass = 8000.0f; // T-Rex, Brachiosaurus
+                break;
         }
+        
+        PrimComp->SetMassOverrideInKg(NAME_None, Mass, true);
+        
+        // Configure collision for dinosaur interactions
+        PrimComp->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+        PrimComp->SetCollisionObjectType(ECollisionChannel::ECC_Pawn);
     }
+
+    UE_LOG(LogTemp, Log, TEXT("Core_PhysicsIntegration: Dinosaur physics profile applied successfully"));
 }
 
-void UCore_PhysicsIntegration::ApplyTorque(const FVector& Torque)
+void UCore_PhysicsIntegration::ConfigureTerrainPhysics(AActor* TerrainActor, ECore_TerrainType TerrainType)
 {
-    if (!bPhysicsEnabled)
+    if (!TerrainActor || !PhysicsCore)
     {
+        UE_LOG(LogTemp, Warning, TEXT("Core_PhysicsIntegration: Invalid terrain actor or PhysicsCore"));
         return;
     }
-    
-    if (AActor* Owner = GetOwner())
+
+    UE_LOG(LogTemp, Log, TEXT("Core_PhysicsIntegration: Configuring terrain physics for %s"), *TerrainActor->GetName());
+
+    // Apply environment physics profile
+    PhysicsCore->ApplyPhysicsProfile(TerrainActor, ECore_PhysicsProfile::Environment);
+
+    // Configure terrain-specific physics properties
+    if (UPrimitiveComponent* PrimComp = TerrainActor->GetRootComponent<UPrimitiveComponent>())
     {
-        if (UPrimitiveComponent* PrimComp = Owner->FindComponentByClass<UPrimitiveComponent>())
+        // Set terrain as static
+        PrimComp->SetMobility(EComponentMobility::Static);
+        PrimComp->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+        PrimComp->SetCollisionObjectType(ECollisionChannel::ECC_WorldStatic);
+        
+        // Configure surface properties based on terrain type
+        switch (TerrainType)
         {
-            FVector ScaledTorque = Torque * MaxTorqueMultiplier;
-            PrimComp->AddTorqueInRadians(ScaledTorque);
-            
-            UE_LOG(LogTemp, VeryVerbose, TEXT("Core_PhysicsIntegration: Applied torque %s"), 
-                   *ScaledTorque.ToString());
+            case ECore_TerrainType::Grass:
+                // Soft, slightly bouncy surface
+                break;
+            case ECore_TerrainType::Rock:
+                // Hard, low friction surface
+                break;
+            case ECore_TerrainType::Mud:
+                // High friction, energy absorbing surface
+                break;
+            case ECore_TerrainType::Sand:
+                // Medium friction, slightly unstable surface
+                break;
+            case ECore_TerrainType::Water:
+                // Special water physics handling
+                break;
         }
     }
+
+    UE_LOG(LogTemp, Log, TEXT("Core_PhysicsIntegration: Terrain physics configured successfully"));
 }
 
-bool UCore_PhysicsIntegration::LineTrace(const FVector& Start, const FVector& End, FHitResult& HitResult)
+void UCore_PhysicsIntegration::EnableSurvivalRagdoll(AActor* Character, float ImpactForce)
 {
-    if (UWorld* World = GetWorld())
+    if (!Character || !PhysicsCore)
     {
-        FCollisionQueryParams QueryParams;
-        QueryParams.AddIgnoredActor(GetOwner());
-        QueryParams.bTraceComplex = false;
-        QueryParams.bReturnPhysicalMaterial = true;
-        
-        bool bHit = World->LineTraceSingleByChannel(
-            HitResult,
-            Start,
-            End,
-            ECC_WorldStatic,
-            QueryParams
-        );
-        
-        return bHit;
+        UE_LOG(LogTemp, Warning, TEXT("Core_PhysicsIntegration: Invalid character or PhysicsCore for ragdoll"));
+        return;
     }
-    
-    return false;
-}
 
-bool UCore_PhysicsIntegration::SphereTrace(const FVector& Start, const FVector& End, float Radius, FHitResult& HitResult)
-{
-    if (UWorld* World = GetWorld())
-    {
-        FCollisionQueryParams QueryParams;
-        QueryParams.AddIgnoredActor(GetOwner());
-        QueryParams.bTraceComplex = false;
-        QueryParams.bReturnPhysicalMaterial = true;
-        
-        bool bHit = World->SweepSingleByChannel(
-            HitResult,
-            Start,
-            End,
-            FQuat::Identity,
-            ECC_WorldStatic,
-            FCollisionShape::MakeSphere(Radius),
-            QueryParams
-        );
-        
-        return bHit;
-    }
-    
-    return false;
-}
+    UE_LOG(LogTemp, Log, TEXT("Core_PhysicsIntegration: Enabling survival ragdoll for %s with force %f"), *Character->GetName(), ImpactForce);
 
-bool UCore_PhysicsIntegration::BoxTrace(const FVector& Start, const FVector& End, const FVector& HalfSize, FHitResult& HitResult)
-{
-    if (UWorld* World = GetWorld())
-    {
-        FCollisionQueryParams QueryParams;
-        QueryParams.AddIgnoredActor(GetOwner());
-        QueryParams.bTraceComplex = false;
-        QueryParams.bReturnPhysicalMaterial = true;
-        
-        bool bHit = World->SweepSingleByChannel(
-            HitResult,
-            Start,
-            End,
-            FQuat::Identity,
-            ECC_WorldStatic,
-            FCollisionShape::MakeBox(HalfSize),
-            QueryParams
-        );
-        
-        return bHit;
-    }
-    
-    return false;
-}
+    // Apply ragdoll physics profile
+    PhysicsCore->ApplyPhysicsProfile(Character, ECore_PhysicsProfile::Ragdoll);
 
-void UCore_PhysicsIntegration::InitializePhysicsSettings()
-{
-    if (AActor* Owner = GetOwner())
+    // Enable ragdoll physics on skeletal mesh
+    if (ACharacter* CharacterPawn = Cast<ACharacter>(Character))
     {
-        if (UPrimitiveComponent* PrimComp = Owner->FindComponentByClass<UPrimitiveComponent>())
+        if (USkeletalMeshComponent* SkelMesh = CharacterPawn->GetMesh())
         {
-            // Apply initial physics settings
-            PrimComp->SetSimulatePhysics(bPhysicsEnabled);
-            PrimComp->SetEnableGravity(bGravityEnabled);
-            PrimComp->SetCollisionObjectType(CollisionObjectType);
-            PrimComp->SetCollisionResponseToAllChannels(CollisionResponseToWorld);
+            // Enable ragdoll physics
+            SkelMesh->SetSimulatePhysics(true);
+            SkelMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
             
-            // Apply custom gravity if set
-            if (!CustomGravity.Equals(FVector(0.0f, 0.0f, -980.0f)))
+            // Apply impact force if specified
+            if (ImpactForce > 0.0f)
             {
-                // Note: Custom gravity requires world-level changes in UE5
-                UE_LOG(LogTemp, Log, TEXT("Core_PhysicsIntegration: Custom gravity detected but requires world-level implementation"));
+                FVector ImpactDirection = FVector(0, 0, 1); // Default upward impact
+                SkelMesh->AddImpulse(ImpactDirection * ImpactForce, NAME_None, true);
             }
         }
     }
+
+    UE_LOG(LogTemp, Log, TEXT("Core_PhysicsIntegration: Survival ragdoll enabled successfully"));
 }
 
-void UCore_PhysicsIntegration::UpdatePhysicsLOD()
+void UCore_PhysicsIntegration::ConfigureProjectilePhysics(AActor* Projectile, float Mass, float Drag)
 {
-    if (!GetOwner())
+    if (!Projectile || !PhysicsCore)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Core_PhysicsIntegration: Invalid projectile or PhysicsCore"));
+        return;
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("Core_PhysicsIntegration: Configuring projectile physics for %s"), *Projectile->GetName());
+
+    // Apply projectile physics profile
+    PhysicsCore->ApplyPhysicsProfile(Projectile, ECore_PhysicsProfile::Projectile);
+
+    // Configure projectile-specific physics
+    if (UPrimitiveComponent* PrimComp = Projectile->GetRootComponent<UPrimitiveComponent>())
+    {
+        PrimComp->SetMassOverrideInKg(NAME_None, Mass, true);
+        PrimComp->SetSimulatePhysics(true);
+        PrimComp->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+        PrimComp->SetCollisionObjectType(ECollisionChannel::ECC_WorldDynamic);
+        
+        // Configure drag for realistic projectile motion
+        PrimComp->SetLinearDamping(Drag);
+        PrimComp->SetAngularDamping(Drag * 0.5f);
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("Core_PhysicsIntegration: Projectile physics configured successfully"));
+}
+
+void UCore_PhysicsIntegration::UpdatePhysicsQuality(float DeltaTime)
+{
+    if (!bIsInitialized || bIsShuttingDown)
     {
         return;
     }
-    
-    // Calculate distance to player
-    float DistanceToPlayer = 0.0f;
-    if (UWorld* World = GetWorld())
+
+    TimeSinceLastUpdate += DeltaTime;
+    PerformanceTimer += DeltaTime;
+
+    // Update performance metrics
+    if (PerformanceTimer >= PhysicsUpdateFrequency)
     {
-        if (APawn* PlayerPawn = World->GetFirstPlayerController()->GetPawn())
-        {
-            DistanceToPlayer = FVector::Dist(GetOwner()->GetActorLocation(), PlayerPawn->GetActorLocation());
-        }
+        UpdatePerformanceMetrics(DeltaTime);
+        PerformanceTimer = 0.0f;
     }
-    
-    // Apply LOD based on distance and performance settings
-    if (UPrimitiveComponent* PrimComp = GetOwner()->FindComponentByClass<UPrimitiveComponent>())
+
+    // Adjust physics quality based on performance
+    if (CurrentMetrics.PhysicsTime > 16.0f) // If physics takes more than 16ms
     {
-        if (DistanceToPlayer > CullingDistance)
-        {
-            // Disable physics simulation at extreme distances
-            PrimComp->SetSimulatePhysics(false);
-        }
-        else if (DistanceToPlayer > MaxSimulationDistance)
-        {
-            // Reduce physics complexity
-            PrimComp->SetSimulatePhysics(false);
-        }
-        else
-        {
-            // Full physics simulation within range
-            PrimComp->SetSimulatePhysics(bPhysicsEnabled);
-        }
+        PhysicsQualityLevel = FMath::Max(0.5f, PhysicsQualityLevel - 0.1f);
+        UE_LOG(LogTemp, Warning, TEXT("Core_PhysicsIntegration: Reducing physics quality to %f"), PhysicsQualityLevel);
     }
+    else if (CurrentMetrics.PhysicsTime < 8.0f) // If physics takes less than 8ms
+    {
+        PhysicsQualityLevel = FMath::Min(1.0f, PhysicsQualityLevel + 0.05f);
+    }
+
+    CurrentMetrics.QualityLevel = PhysicsQualityLevel;
 }
 
-void UCore_PhysicsIntegration::ValidatePhysicsState()
+FCore_PhysicsMetrics UCore_PhysicsIntegration::GetPhysicsMetrics() const
 {
-    // Count physics objects in the world for performance monitoring
-    PhysicsObjectCount = 0;
+    return CurrentMetrics;
+}
+
+bool UCore_PhysicsIntegration::ValidatePhysicsIntegrity()
+{
+    if (!bIsInitialized || bIsShuttingDown)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Core_PhysicsIntegration: Cannot validate - subsystem not ready"));
+        return false;
+    }
+
+    // Validate PhysicsCore availability
+    if (!PhysicsCore)
+    {
+        UE_LOG(LogTemp, Error, TEXT("Core_PhysicsIntegration: PhysicsCore reference is null"));
+        return false;
+    }
+
+    // Validate SystemRegistry integration
+    if (!SystemRegistry)
+    {
+        UE_LOG(LogTemp, Error, TEXT("Core_PhysicsIntegration: SystemRegistry reference is null"));
+        return false;
+    }
+
+    // Check physics system status
+    if (PhysicsStatus != ECore_SystemStatus::Running)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Core_PhysicsIntegration: Physics system not running (Status: %d)"), (int32)PhysicsStatus);
+        return false;
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("Core_PhysicsIntegration: Physics integrity validation passed"));
+    return true;
+}
+
+void UCore_PhysicsIntegration::SetupPhysicsProfiles()
+{
+    if (!PhysicsCore)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Core_PhysicsIntegration: Cannot setup physics profiles - PhysicsCore not available"));
+        return;
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("Core_PhysicsIntegration: Setting up physics profiles"));
+
+    // Physics profiles are managed by PhysicsCore
+    // This method can be extended to configure integration-specific profile settings
+    
+    UE_LOG(LogTemp, Log, TEXT("Core_PhysicsIntegration: Physics profiles setup complete"));
+}
+
+bool UCore_PhysicsIntegration::ValidateSystemDependencies() const
+{
+    // Check PhysicsCore availability
+    if (!PhysicsCore)
+    {
+        UE_LOG(LogTemp, Error, TEXT("Core_PhysicsIntegration: PhysicsCore dependency not satisfied"));
+        return false;
+    }
+
+    // Check SystemRegistry availability
+    if (!SystemRegistry)
+    {
+        UE_LOG(LogTemp, Error, TEXT("Core_PhysicsIntegration: SystemRegistry dependency not satisfied"));
+        return false;
+    }
+
+    // Check world availability
+    if (!GetWorld())
+    {
+        UE_LOG(LogTemp, Error, TEXT("Core_PhysicsIntegration: World dependency not satisfied"));
+        return false;
+    }
+
+    return true;
+}
+
+void UCore_PhysicsIntegration::UpdatePerformanceMetrics(float DeltaTime)
+{
+    // Update physics timing
+    CurrentMetrics.PhysicsTime = LastPhysicsTime;
+    
+    // Count active rigid bodies in the world
+    CurrentMetrics.ActiveRigidBodies = 0;
+    CurrentMetrics.CollisionChecks = 0;
+    
     if (UWorld* World = GetWorld())
     {
+        // Count physics actors
         for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
         {
-            if (AActor* Actor = *ActorItr)
+            AActor* Actor = *ActorItr;
+            if (Actor && Actor->GetRootComponent())
             {
-                if (UPrimitiveComponent* PrimComp = Actor->FindComponentByClass<UPrimitiveComponent>())
+                if (UPrimitiveComponent* PrimComp = Cast<UPrimitiveComponent>(Actor->GetRootComponent()))
                 {
                     if (PrimComp->IsSimulatingPhysics())
                     {
-                        PhysicsObjectCount++;
+                        CurrentMetrics.ActiveRigidBodies++;
                     }
                 }
             }
         }
     }
+
+    // Estimate memory usage (simplified)
+    CurrentMetrics.MemoryUsage = CurrentMetrics.ActiveRigidBodies * 0.1f; // 0.1MB per rigid body estimate
     
-    // Log performance warnings if needed
-    if (AverageFrameTime > 0.033f) // Below 30 FPS
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Core_PhysicsIntegration: Performance warning - Average frame time: %f, Physics objects: %d"), 
-               AverageFrameTime, PhysicsObjectCount);
-    }
-    
-    // Auto-optimize if performance is poor
-    if (AverageFrameTime > 0.05f && PhysicsObjectCount > 100) // Below 20 FPS with many objects
-    {
-        PhysicsLODLevel = FMath::Min(PhysicsLODLevel + 1, 3);
-        UE_LOG(LogTemp, Log, TEXT("Core_PhysicsIntegration: Auto-increasing LOD level to %d due to performance"), PhysicsLODLevel);
-    }
+    // Update quality level
+    CurrentMetrics.QualityLevel = PhysicsQualityLevel;
 }
