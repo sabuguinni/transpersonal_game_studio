@@ -1,178 +1,167 @@
 #include "Audio_SoundManager.h"
-#include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "Components/AudioComponent.h"
-#include "Sound/SoundCue.h"
 #include "Kismet/GameplayStatics.h"
-#include "Engine/GameInstance.h"
-
-UAudio_SoundManager::UAudio_SoundManager()
-{
-    MasterVolume = 1.0f;
-    CurrentAmbientComponent = nullptr;
-    CurrentMusicComponent = nullptr;
-    CurrentAmbientSound = TEXT("");
-    CurrentMusicTrack = TEXT("");
-}
+#include "Sound/SoundCue.h"
+#include "Components/AudioComponent.h"
+#include "Engine/Engine.h"
 
 void UAudio_SoundManager::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
     
-    InitializeCategoryVolumes();
+    // Initialize category volumes
+    CategoryVolumes.Add(EAudio_SoundCategory::Ambient, 0.8f);
+    CategoryVolumes.Add(EAudio_SoundCategory::Dinosaur, 1.0f);
+    CategoryVolumes.Add(EAudio_SoundCategory::Player, 0.9f);
+    CategoryVolumes.Add(EAudio_SoundCategory::Environment, 0.7f);
+    CategoryVolumes.Add(EAudio_SoundCategory::UI, 0.6f);
+    CategoryVolumes.Add(EAudio_SoundCategory::Music, 0.5f);
+    
     InitializeDefaultSounds();
     
-    UE_LOG(LogTemp, Log, TEXT("Audio_SoundManager initialized"));
+    UE_LOG(LogTemp, Log, TEXT("Audio_SoundManager initialized successfully"));
 }
 
 void UAudio_SoundManager::Deinitialize()
 {
     StopAllSounds();
-    
     RegisteredSounds.Empty();
-    ActiveAudioComponents.Empty();
+    ActiveSounds.Empty();
     CategoryVolumes.Empty();
-    
-    CurrentAmbientComponent = nullptr;
-    CurrentMusicComponent = nullptr;
     
     Super::Deinitialize();
 }
 
-void UAudio_SoundManager::InitializeCategoryVolumes()
+UAudioComponent* UAudio_SoundManager::PlaySound2D(const FString& SoundName, float VolumeMultiplier)
 {
-    CategoryVolumes.Add(EAudio_SoundCategory::Ambient, 0.7f);
-    CategoryVolumes.Add(EAudio_SoundCategory::Music, 0.6f);
-    CategoryVolumes.Add(EAudio_SoundCategory::SFX, 0.8f);
-    CategoryVolumes.Add(EAudio_SoundCategory::Voice, 1.0f);
-    CategoryVolumes.Add(EAudio_SoundCategory::UI, 0.5f);
-    CategoryVolumes.Add(EAudio_SoundCategory::Footsteps, 0.6f);
-    CategoryVolumes.Add(EAudio_SoundCategory::DinosaurSounds, 0.9f);
-    CategoryVolumes.Add(EAudio_SoundCategory::WeatherSounds, 0.7f);
-}
-
-void UAudio_SoundManager::InitializeDefaultSounds()
-{
-    // Register default prehistoric ambient sounds
-    FAudio_SoundEntry ForestAmbient;
-    ForestAmbient.SoundName = TEXT("ForestAmbient");
-    ForestAmbient.Category = EAudio_SoundCategory::Ambient;
-    ForestAmbient.Volume = 0.7f;
-    ForestAmbient.bLoop = true;
-    ForestAmbient.FadeInTime = 2.0f;
-    ForestAmbient.FadeOutTime = 2.0f;
-    RegisterSound(ForestAmbient);
-
-    // Register T-Rex footsteps
-    FAudio_SoundEntry TRexFootsteps;
-    TRexFootsteps.SoundName = TEXT("TRexFootsteps");
-    TRexFootsteps.Category = EAudio_SoundCategory::DinosaurSounds;
-    TRexFootsteps.Volume = 0.9f;
-    TRexFootsteps.bLoop = false;
-    RegisterSound(TRexFootsteps);
-
-    // Register danger warning
-    FAudio_SoundEntry DangerWarning;
-    DangerWarning.SoundName = TEXT("DangerWarning");
-    DangerWarning.Category = EAudio_SoundCategory::Voice;
-    DangerWarning.Volume = 1.0f;
-    DangerWarning.bLoop = false;
-    RegisterSound(DangerWarning);
-
-    // Register survival narration
-    FAudio_SoundEntry SurvivalNarration;
-    SurvivalNarration.SoundName = TEXT("SurvivalNarration");
-    SurvivalNarration.Category = EAudio_SoundCategory::Voice;
-    SurvivalNarration.Volume = 0.8f;
-    SurvivalNarration.bLoop = false;
-    RegisterSound(SurvivalNarration);
-}
-
-void UAudio_SoundManager::PlaySound(const FString& SoundName, AActor* WorldContext)
-{
-    if (!RegisteredSounds.Contains(SoundName))
+    FAudio_SoundEntry* SoundEntry = FindSoundEntry(SoundName);
+    if (!SoundEntry || !SoundEntry->SoundCue.LoadSynchronous())
     {
-        UE_LOG(LogTemp, Warning, TEXT("Sound not registered: %s"), *SoundName);
-        return;
+        UE_LOG(LogTemp, Warning, TEXT("Sound not found or failed to load: %s"), *SoundName);
+        return nullptr;
     }
-
-    const FAudio_SoundEntry& SoundEntry = RegisteredSounds[SoundName];
     
-    if (!SoundEntry.SoundAsset.IsValid())
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Invalid sound asset for: %s"), *SoundName);
-        return;
-    }
-
-    UAudioComponent* AudioComp = CreateAudioComponent(WorldContext);
-    if (!AudioComp)
-    {
-        return;
-    }
-
-    AudioComp->SetSound(SoundEntry.SoundAsset.LoadSynchronous());
-    AudioComp->SetVolumeMultiplier(CalculateFinalVolume(SoundEntry));
-    AudioComp->SetPitchMultiplier(SoundEntry.Pitch);
-    AudioComp->bAutoDestroy = !SoundEntry.bLoop;
-
-    if (SoundEntry.bLoop)
-    {
-        ActiveAudioComponents.Add(SoundName, AudioComp);
-    }
-
-    if (SoundEntry.FadeInTime > 0.0f)
-    {
-        AudioComp->FadeIn(SoundEntry.FadeInTime, CalculateFinalVolume(SoundEntry));
-    }
-    else
-    {
-        AudioComp->Play();
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("Playing sound: %s"), *SoundName);
-}
-
-void UAudio_SoundManager::PlaySoundAtLocation(const FString& SoundName, FVector Location, AActor* WorldContext)
-{
-    if (!RegisteredSounds.Contains(SoundName))
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Sound not registered: %s"), *SoundName);
-        return;
-    }
-
-    const FAudio_SoundEntry& SoundEntry = RegisteredSounds[SoundName];
-    
-    if (!SoundEntry.SoundAsset.IsValid())
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Invalid sound asset for: %s"), *SoundName);
-        return;
-    }
-
-    UWorld* World = WorldContext ? WorldContext->GetWorld() : GetWorld();
+    UWorld* World = GetWorld();
     if (!World)
     {
-        return;
+        return nullptr;
     }
-
-    UGameplayStatics::PlaySoundAtLocation(
+    
+    float FinalVolume = CalculateFinalVolume(*SoundEntry, VolumeMultiplier);
+    
+    UAudioComponent* AudioComp = UGameplayStatics::SpawnSound2D(
         World,
-        SoundEntry.SoundAsset.LoadSynchronous(),
-        Location,
-        CalculateFinalVolume(SoundEntry),
-        SoundEntry.Pitch
+        SoundEntry->SoundCue.Get(),
+        FinalVolume,
+        SoundEntry->Pitch
     );
+    
+    if (AudioComp)
+    {
+        ActiveSounds.Add(SoundName, AudioComp);
+        
+        if (SoundEntry->FadeInTime > 0.0f)
+        {
+            AudioComp->FadeIn(SoundEntry->FadeInTime, FinalVolume);
+        }
+    }
+    
+    return AudioComp;
+}
 
-    UE_LOG(LogTemp, Log, TEXT("Playing sound at location: %s"), *SoundName);
+UAudioComponent* UAudio_SoundManager::PlaySoundAtLocation(const FString& SoundName, FVector Location, float VolumeMultiplier)
+{
+    FAudio_SoundEntry* SoundEntry = FindSoundEntry(SoundName);
+    if (!SoundEntry || !SoundEntry->SoundCue.LoadSynchronous())
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Sound not found or failed to load: %s"), *SoundName);
+        return nullptr;
+    }
+    
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        return nullptr;
+    }
+    
+    float FinalVolume = CalculateFinalVolume(*SoundEntry, VolumeMultiplier);
+    
+    UAudioComponent* AudioComp = UGameplayStatics::SpawnSoundAtLocation(
+        World,
+        SoundEntry->SoundCue.Get(),
+        Location,
+        FRotator::ZeroRotator,
+        FinalVolume,
+        SoundEntry->Pitch
+    );
+    
+    if (AudioComp)
+    {
+        ActiveSounds.Add(SoundName + TEXT("_") + FString::FromInt(FMath::Rand()), AudioComp);
+        
+        if (SoundEntry->FadeInTime > 0.0f)
+        {
+            AudioComp->FadeIn(SoundEntry->FadeInTime, FinalVolume);
+        }
+    }
+    
+    return AudioComp;
+}
+
+UAudioComponent* UAudio_SoundManager::PlaySoundAttached(const FString& SoundName, USceneComponent* AttachComponent, float VolumeMultiplier)
+{
+    if (!AttachComponent)
+    {
+        return nullptr;
+    }
+    
+    FAudio_SoundEntry* SoundEntry = FindSoundEntry(SoundName);
+    if (!SoundEntry || !SoundEntry->SoundCue.LoadSynchronous())
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Sound not found or failed to load: %s"), *SoundName);
+        return nullptr;
+    }
+    
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        return nullptr;
+    }
+    
+    float FinalVolume = CalculateFinalVolume(*SoundEntry, VolumeMultiplier);
+    
+    UAudioComponent* AudioComp = UGameplayStatics::SpawnSoundAttached(
+        SoundEntry->SoundCue.Get(),
+        AttachComponent,
+        NAME_None,
+        FVector::ZeroVector,
+        EAttachLocation::KeepRelativeOffset,
+        false,
+        FinalVolume,
+        SoundEntry->Pitch
+    );
+    
+    if (AudioComp)
+    {
+        ActiveSounds.Add(SoundName + TEXT("_attached"), AudioComp);
+        
+        if (SoundEntry->FadeInTime > 0.0f)
+        {
+            AudioComp->FadeIn(SoundEntry->FadeInTime, FinalVolume);
+        }
+    }
+    
+    return AudioComp;
 }
 
 void UAudio_SoundManager::StopSound(const FString& SoundName)
 {
-    if (ActiveAudioComponents.Contains(SoundName))
+    if (UAudioComponent** AudioCompPtr = ActiveSounds.Find(SoundName))
     {
-        UAudioComponent* AudioComp = ActiveAudioComponents[SoundName];
-        if (IsValid(AudioComp))
+        UAudioComponent* AudioComp = *AudioCompPtr;
+        if (AudioComp && IsValid(AudioComp))
         {
-            const FAudio_SoundEntry* SoundEntry = RegisteredSounds.Find(SoundName);
+            FAudio_SoundEntry* SoundEntry = FindSoundEntry(SoundName);
             if (SoundEntry && SoundEntry->FadeOutTime > 0.0f)
             {
                 AudioComp->FadeOut(SoundEntry->FadeOutTime, 0.0f);
@@ -182,56 +171,48 @@ void UAudio_SoundManager::StopSound(const FString& SoundName)
                 AudioComp->Stop();
             }
         }
-        ActiveAudioComponents.Remove(SoundName);
+        ActiveSounds.Remove(SoundName);
     }
 }
 
 void UAudio_SoundManager::StopAllSounds()
 {
-    for (auto& Pair : ActiveAudioComponents)
+    for (auto& SoundPair : ActiveSounds)
     {
-        if (IsValid(Pair.Value))
+        if (SoundPair.Value && IsValid(SoundPair.Value))
         {
-            Pair.Value->Stop();
+            SoundPair.Value->Stop();
         }
     }
-    ActiveAudioComponents.Empty();
-
-    if (IsValid(CurrentAmbientComponent))
+    ActiveSounds.Empty();
+    
+    if (CurrentAmbientLoop && IsValid(CurrentAmbientLoop))
     {
-        CurrentAmbientComponent->Stop();
-        CurrentAmbientComponent = nullptr;
+        CurrentAmbientLoop->Stop();
+        CurrentAmbientLoop = nullptr;
     }
-
-    if (IsValid(CurrentMusicComponent))
-    {
-        CurrentMusicComponent->Stop();
-        CurrentMusicComponent = nullptr;
-    }
-
-    CurrentAmbientSound = TEXT("");
-    CurrentMusicTrack = TEXT("");
 }
 
 void UAudio_SoundManager::StopSoundsByCategory(EAudio_SoundCategory Category)
 {
-    TArray<FString> SoundsToStop;
+    TArray<FString> SoundsToRemove;
     
-    for (const auto& Pair : ActiveAudioComponents)
+    for (auto& SoundPair : ActiveSounds)
     {
-        if (RegisteredSounds.Contains(Pair.Key))
+        FAudio_SoundEntry* SoundEntry = FindSoundEntry(SoundPair.Key);
+        if (SoundEntry && SoundEntry->Category == Category)
         {
-            const FAudio_SoundEntry& SoundEntry = RegisteredSounds[Pair.Key];
-            if (SoundEntry.Category == Category)
+            if (SoundPair.Value && IsValid(SoundPair.Value))
             {
-                SoundsToStop.Add(Pair.Key);
+                SoundPair.Value->Stop();
             }
+            SoundsToRemove.Add(SoundPair.Key);
         }
     }
-
-    for (const FString& SoundName : SoundsToStop)
+    
+    for (const FString& SoundName : SoundsToRemove)
     {
-        StopSound(SoundName);
+        ActiveSounds.Remove(SoundName);
     }
 }
 
@@ -239,13 +220,17 @@ void UAudio_SoundManager::SetMasterVolume(float Volume)
 {
     MasterVolume = FMath::Clamp(Volume, 0.0f, 1.0f);
     
-    // Update all active audio components
-    for (const auto& Pair : ActiveAudioComponents)
+    // Update all active sounds
+    for (auto& SoundPair : ActiveSounds)
     {
-        if (IsValid(Pair.Value) && RegisteredSounds.Contains(Pair.Key))
+        if (SoundPair.Value && IsValid(SoundPair.Value))
         {
-            const FAudio_SoundEntry& SoundEntry = RegisteredSounds[Pair.Key];
-            Pair.Value->SetVolumeMultiplier(CalculateFinalVolume(SoundEntry));
+            FAudio_SoundEntry* SoundEntry = FindSoundEntry(SoundPair.Key);
+            if (SoundEntry)
+            {
+                float NewVolume = CalculateFinalVolume(*SoundEntry, 1.0f);
+                SoundPair.Value->SetVolumeMultiplier(NewVolume);
+            }
         }
     }
 }
@@ -255,14 +240,15 @@ void UAudio_SoundManager::SetCategoryVolume(EAudio_SoundCategory Category, float
     CategoryVolumes.Add(Category, FMath::Clamp(Volume, 0.0f, 1.0f));
     
     // Update active sounds in this category
-    for (const auto& Pair : ActiveAudioComponents)
+    for (auto& SoundPair : ActiveSounds)
     {
-        if (IsValid(Pair.Value) && RegisteredSounds.Contains(Pair.Key))
+        FAudio_SoundEntry* SoundEntry = FindSoundEntry(SoundPair.Key);
+        if (SoundEntry && SoundEntry->Category == Category)
         {
-            const FAudio_SoundEntry& SoundEntry = RegisteredSounds[Pair.Key];
-            if (SoundEntry.Category == Category)
+            if (SoundPair.Value && IsValid(SoundPair.Value))
             {
-                Pair.Value->SetVolumeMultiplier(CalculateFinalVolume(SoundEntry));
+                float NewVolume = CalculateFinalVolume(*SoundEntry, 1.0f);
+                SoundPair.Value->SetVolumeMultiplier(NewVolume);
             }
         }
     }
@@ -270,8 +256,11 @@ void UAudio_SoundManager::SetCategoryVolume(EAudio_SoundCategory Category, float
 
 float UAudio_SoundManager::GetCategoryVolume(EAudio_SoundCategory Category) const
 {
-    const float* Volume = CategoryVolumes.Find(Category);
-    return Volume ? *Volume : 1.0f;
+    if (const float* Volume = CategoryVolumes.Find(Category))
+    {
+        return *Volume;
+    }
+    return 1.0f;
 }
 
 void UAudio_SoundManager::RegisterSound(const FAudio_SoundEntry& SoundEntry)
@@ -280,155 +269,128 @@ void UAudio_SoundManager::RegisterSound(const FAudio_SoundEntry& SoundEntry)
     UE_LOG(LogTemp, Log, TEXT("Registered sound: %s"), *SoundEntry.SoundName);
 }
 
-void UAudio_SoundManager::UnregisterSound(const FString& SoundName)
-{
-    StopSound(SoundName);
-    RegisteredSounds.Remove(SoundName);
-}
-
 bool UAudio_SoundManager::IsSoundRegistered(const FString& SoundName) const
 {
     return RegisteredSounds.Contains(SoundName);
 }
 
-bool UAudio_SoundManager::IsSoundPlaying(const FString& SoundName) const
+void UAudio_SoundManager::PlayDinosaurRoar(const FString& DinosaurType, FVector Location)
 {
-    if (ActiveAudioComponents.Contains(SoundName))
-    {
-        UAudioComponent* AudioComp = ActiveAudioComponents[SoundName];
-        return IsValid(AudioComp) && AudioComp->IsPlaying();
-    }
-    return false;
+    FString SoundName = TEXT("Roar_") + DinosaurType;
+    PlaySoundAtLocation(SoundName, Location, 1.0f);
 }
 
-void UAudio_SoundManager::PlayAmbientSound(const FString& SoundName, float FadeInTime)
+void UAudio_SoundManager::PlayFootstepSound(const FString& SurfaceType, FVector Location)
 {
-    if (CurrentAmbientSound == SoundName && IsValid(CurrentAmbientComponent) && CurrentAmbientComponent->IsPlaying())
-    {
-        return; // Already playing this ambient sound
-    }
+    FString SoundName = TEXT("Footstep_") + SurfaceType;
+    PlaySoundAtLocation(SoundName, Location, 0.8f);
+}
 
-    // Stop current ambient sound
-    if (IsValid(CurrentAmbientComponent))
-    {
-        CurrentAmbientComponent->FadeOut(2.0f, 0.0f);
-    }
-
-    if (!RegisteredSounds.Contains(SoundName))
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Ambient sound not registered: %s"), *SoundName);
-        return;
-    }
-
-    const FAudio_SoundEntry& SoundEntry = RegisteredSounds[SoundName];
+void UAudio_SoundManager::StartAmbientLoop(const FString& BiomeType)
+{
+    StopAmbientLoop();
     
-    CurrentAmbientComponent = CreateAudioComponent();
-    if (!CurrentAmbientComponent)
-    {
-        return;
-    }
-
-    CurrentAmbientComponent->SetSound(SoundEntry.SoundAsset.LoadSynchronous());
-    CurrentAmbientComponent->SetVolumeMultiplier(CalculateFinalVolume(SoundEntry));
-    CurrentAmbientComponent->bAutoDestroy = false;
-    
-    CurrentAmbientComponent->FadeIn(FadeInTime, CalculateFinalVolume(SoundEntry));
-    CurrentAmbientSound = SoundName;
+    FString SoundName = TEXT("Ambient_") + BiomeType;
+    CurrentAmbientLoop = PlaySound2D(SoundName, 1.0f);
 }
 
-void UAudio_SoundManager::StopAmbientSound(float FadeOutTime)
+void UAudio_SoundManager::StopAmbientLoop()
 {
-    if (IsValid(CurrentAmbientComponent))
+    if (CurrentAmbientLoop && IsValid(CurrentAmbientLoop))
     {
-        CurrentAmbientComponent->FadeOut(FadeOutTime, 0.0f);
-        CurrentAmbientComponent = nullptr;
+        CurrentAmbientLoop->FadeOut(2.0f, 0.0f);
+        CurrentAmbientLoop = nullptr;
     }
-    CurrentAmbientSound = TEXT("");
 }
 
-void UAudio_SoundManager::PlayMusic(const FString& MusicName, float FadeInTime)
+FAudio_SoundEntry* UAudio_SoundManager::FindSoundEntry(const FString& SoundName)
 {
-    if (CurrentMusicTrack == MusicName && IsValid(CurrentMusicComponent) && CurrentMusicComponent->IsPlaying())
-    {
-        return; // Already playing this music
-    }
-
-    // Stop current music
-    if (IsValid(CurrentMusicComponent))
-    {
-        CurrentMusicComponent->FadeOut(3.0f, 0.0f);
-    }
-
-    if (!RegisteredSounds.Contains(MusicName))
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Music not registered: %s"), *MusicName);
-        return;
-    }
-
-    const FAudio_SoundEntry& SoundEntry = RegisteredSounds[MusicName];
-    
-    CurrentMusicComponent = CreateAudioComponent();
-    if (!CurrentMusicComponent)
-    {
-        return;
-    }
-
-    CurrentMusicComponent->SetSound(SoundEntry.SoundAsset.LoadSynchronous());
-    CurrentMusicComponent->SetVolumeMultiplier(CalculateFinalVolume(SoundEntry));
-    CurrentMusicComponent->bAutoDestroy = false;
-    
-    CurrentMusicComponent->FadeIn(FadeInTime, CalculateFinalVolume(SoundEntry));
-    CurrentMusicTrack = MusicName;
+    return RegisteredSounds.Find(SoundName);
 }
 
-void UAudio_SoundManager::StopMusic(float FadeOutTime)
-{
-    if (IsValid(CurrentMusicComponent))
-    {
-        CurrentMusicComponent->FadeOut(FadeOutTime, 0.0f);
-        CurrentMusicComponent = nullptr;
-    }
-    CurrentMusicTrack = TEXT("");
-}
-
-void UAudio_SoundManager::CrossfadeMusic(const FString& NewMusicName, float CrossfadeTime)
-{
-    // Start new music with fade in
-    PlayMusic(NewMusicName, CrossfadeTime);
-}
-
-UAudioComponent* UAudio_SoundManager::CreateAudioComponent(AActor* WorldContext)
-{
-    UWorld* World = nullptr;
-    
-    if (WorldContext)
-    {
-        World = WorldContext->GetWorld();
-    }
-    else
-    {
-        World = GetWorld();
-    }
-    
-    if (!World)
-    {
-        UE_LOG(LogTemp, Error, TEXT("No valid world context for audio component creation"));
-        return nullptr;
-    }
-
-    UAudioComponent* AudioComp = NewObject<UAudioComponent>(World);
-    if (!AudioComp)
-    {
-        UE_LOG(LogTemp, Error, TEXT("Failed to create audio component"));
-        return nullptr;
-    }
-
-    AudioComp->RegisterComponent();
-    return AudioComp;
-}
-
-float UAudio_SoundManager::CalculateFinalVolume(const FAudio_SoundEntry& SoundEntry) const
+float UAudio_SoundManager::CalculateFinalVolume(const FAudio_SoundEntry& SoundEntry, float VolumeMultiplier) const
 {
     float CategoryVolume = GetCategoryVolume(SoundEntry.Category);
-    return MasterVolume * CategoryVolume * SoundEntry.Volume;
+    return SoundEntry.Volume * CategoryVolume * MasterVolume * VolumeMultiplier;
+}
+
+void UAudio_SoundManager::InitializeDefaultSounds()
+{
+    // Register default prehistoric sounds
+    FAudio_SoundEntry Entry;
+    
+    // Dinosaur roars
+    Entry.SoundName = TEXT("Roar_TRex");
+    Entry.Category = EAudio_SoundCategory::Dinosaur;
+    Entry.Volume = 1.0f;
+    RegisterSound(Entry);
+    
+    Entry.SoundName = TEXT("Roar_Raptor");
+    Entry.Volume = 0.8f;
+    RegisterSound(Entry);
+    
+    Entry.SoundName = TEXT("Roar_Triceratops");
+    Entry.Volume = 0.9f;
+    RegisterSound(Entry);
+    
+    // Ambient sounds
+    Entry.Category = EAudio_SoundCategory::Ambient;
+    Entry.bLooping = true;
+    Entry.FadeInTime = 3.0f;
+    Entry.FadeOutTime = 2.0f;
+    
+    Entry.SoundName = TEXT("Ambient_Forest");
+    Entry.Volume = 0.6f;
+    RegisterSound(Entry);
+    
+    Entry.SoundName = TEXT("Ambient_Plains");
+    Entry.Volume = 0.5f;
+    RegisterSound(Entry);
+    
+    Entry.SoundName = TEXT("Ambient_River");
+    Entry.Volume = 0.7f;
+    RegisterSound(Entry);
+    
+    // Environment sounds
+    Entry.Category = EAudio_SoundCategory::Environment;
+    Entry.bLooping = false;
+    Entry.FadeInTime = 0.0f;
+    Entry.FadeOutTime = 0.0f;
+    
+    Entry.SoundName = TEXT("Footstep_Dirt");
+    Entry.Volume = 0.4f;
+    RegisterSound(Entry);
+    
+    Entry.SoundName = TEXT("Footstep_Grass");
+    Entry.Volume = 0.3f;
+    RegisterSound(Entry);
+    
+    Entry.SoundName = TEXT("Footstep_Stone");
+    Entry.Volume = 0.6f;
+    RegisterSound(Entry);
+    
+    Entry.SoundName = TEXT("Fire_Crackling");
+    Entry.Volume = 0.5f;
+    Entry.bLooping = true;
+    RegisterSound(Entry);
+    
+    UE_LOG(LogTemp, Log, TEXT("Default prehistoric sounds registered"));
+}
+
+void UAudio_SoundManager::CleanupFinishedSounds()
+{
+    TArray<FString> SoundsToRemove;
+    
+    for (auto& SoundPair : ActiveSounds)
+    {
+        if (!SoundPair.Value || !IsValid(SoundPair.Value) || !SoundPair.Value->IsPlaying())
+        {
+            SoundsToRemove.Add(SoundPair.Key);
+        }
+    }
+    
+    for (const FString& SoundName : SoundsToRemove)
+    {
+        ActiveSounds.Remove(SoundName);
+    }
 }
