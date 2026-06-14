@@ -1,44 +1,47 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/GameInstanceSubsystem.h"
+#include "Engine/Engine.h"
+#include "Subsystems/GameInstanceSubsystem.h"
+#include "SharedTypes.h"
 #include "Eng_ModuleValidator.generated.h"
 
 USTRUCT(BlueprintType)
-struct FEng_ModuleValidationResult
+struct TRANSPERSONALGAME_API FEng_ModuleValidationResult
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly)
+    UPROPERTY(BlueprintReadOnly, Category = "Validation")
     FString ModuleName;
 
-    UPROPERTY(BlueprintReadOnly)
+    UPROPERTY(BlueprintReadOnly, Category = "Validation")
     bool bIsValid;
 
-    UPROPERTY(BlueprintReadOnly)
+    UPROPERTY(BlueprintReadOnly, Category = "Validation")
+    float ValidationScore;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Validation")
     TArray<FString> ValidationErrors;
 
-    UPROPERTY(BlueprintReadOnly)
+    UPROPERTY(BlueprintReadOnly, Category = "Validation")
     TArray<FString> ValidationWarnings;
-
-    UPROPERTY(BlueprintReadOnly)
-    float ValidationTime;
 
     FEng_ModuleValidationResult()
     {
-        ModuleName = TEXT("Unknown");
+        ModuleName = TEXT("");
         bIsValid = false;
-        ValidationTime = 0.0f;
+        ValidationScore = 0.0f;
     }
 };
 
-UCLASS()
+UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UEng_ModuleValidator : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
 public:
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
 
     UFUNCTION(BlueprintCallable, Category = "Module Validation")
     FEng_ModuleValidationResult ValidateModule(const FString& ModuleName);
@@ -47,13 +50,21 @@ public:
     TArray<FEng_ModuleValidationResult> ValidateAllModules();
 
     UFUNCTION(BlueprintCallable, Category = "Module Validation")
-    void RunCompilationTest();
+    bool IsModuleArchitectureCompliant(const FString& ModuleName);
 
     UFUNCTION(BlueprintCallable, Category = "Module Validation")
-    bool CheckClassAvailability(const FString& ClassName);
+    void GenerateArchitectureReport();
+
+protected:
+    UPROPERTY(BlueprintReadOnly, Category = "Validation")
+    TMap<FString, FEng_ModuleValidationResult> ModuleValidationCache;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Validation")
+    float OverallArchitectureScore;
 
 private:
-    void ValidateTranspersonalGameModule(FEng_ModuleValidationResult& Result);
-    void ValidateEngineArchitecture(FEng_ModuleValidationResult& Result);
-    void CheckRequiredClasses(FEng_ModuleValidationResult& Result);
+    bool ValidateModuleStructure(const FString& ModuleName, FEng_ModuleValidationResult& Result);
+    bool ValidateModuleDependencies(const FString& ModuleName, FEng_ModuleValidationResult& Result);
+    bool ValidateModulePerformance(const FString& ModuleName, FEng_ModuleValidationResult& Result);
+    void UpdateArchitectureScore();
 };
