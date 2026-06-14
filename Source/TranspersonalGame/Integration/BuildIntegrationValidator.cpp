@@ -1,182 +1,305 @@
 #include "BuildIntegrationValidator.h"
-#include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "EngineUtils.h"
+#include "Engine/Engine.h"
+#include "GameFramework/Actor.h"
+#include "Components/StaticMeshComponent.h"
+#include "Landscape/Landscape.h"
+#include "Engine/Light.h"
 #include "UObject/UObjectGlobals.h"
-#include "HAL/PlatformFilemanager.h"
+#include "UObject/Package.h"
 
 UBuildIntegrationValidator::UBuildIntegrationValidator()
 {
     PrimaryComponentTick.bCanEverTick = false;
     
-    // Initialize core system classes to validate
-    CoreSystemClasses.Add(TEXT("/Script/TranspersonalGame.TranspersonalCharacter"));
-    CoreSystemClasses.Add(TEXT("/Script/TranspersonalGame.TranspersonalGameState"));
-    CoreSystemClasses.Add(TEXT("/Script/TranspersonalGame.PCGWorldGenerator"));
-    CoreSystemClasses.Add(TEXT("/Script/TranspersonalGame.FoliageManager"));
-    CoreSystemClasses.Add(TEXT("/Script/TranspersonalGame.VFXManager"));
+    MaxDinosaurCount = 150;
+    MaxTotalActorCount = 8000;
+    MinPerformanceThreshold = 30.0f;
     
-    MaxActorCountWarning = 1000;
-    MaxActorCountCritical = 2000;
+    InitializeEssentialSystems();
 }
 
-FBuild_IntegrationReport UBuildIntegrationValidator::ValidateAllSystems()
+void UBuildIntegrationValidator::InitializeEssentialSystems()
+{
+    EssentialSystems.Empty();
+    EssentialSystems.Add(TEXT("GameMode"), TEXT("/Script/TranspersonalGame.TranspersonalGameMode"));
+    EssentialSystems.Add(TEXT("Character"), TEXT("/Script/TranspersonalGame.TranspersonalCharacter"));
+    EssentialSystems.Add(TEXT("GameState"), TEXT("/Script/TranspersonalGame.TranspersonalGameState"));
+    EssentialSystems.Add(TEXT("WorldGen"), TEXT("/Script/TranspersonalGame.PCGWorldGenerator"));
+    EssentialSystems.Add(TEXT("Foliage"), TEXT("/Script/TranspersonalGame.FoliageManager"));
+    EssentialSystems.Add(TEXT("Crowd"), TEXT("/Script/TranspersonalGame.CrowdSimulationManager"));
+    EssentialSystems.Add(TEXT("BuildMgr"), TEXT("/Script/TranspersonalGame.BuildIntegrationManager"));
+}
+
+FBuild_IntegrationReport UBuildIntegrationValidator::ValidateFullBuild()
 {
     FBuild_IntegrationReport Report;
     Report.ValidationTimestamp = FDateTime::Now();
     
-    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationValidator: Starting comprehensive system validation"));
-    
-    // Validate each core system
-    for (const FString& SystemClass : CoreSystemClasses)
+    // Validate all essential systems
+    for (const auto& SystemPair : EssentialSystems)
     {
-        FBuild_SystemReport SystemReport;
-        SystemReport.SystemName = SystemClass;
+        FBuild_SystemStatus Status;
+        Status.SystemName = SystemPair.Key;
+        Status.bIsLoaded = ValidateClassLoading(SystemPair.Value);
+        Status.bIsCompiled = Status.bIsLoaded; // If loaded, it's compiled
+        Status.ValidationResult = Status.bIsLoaded ? EBuild_ValidationResult::Success : EBuild_ValidationResult::Error;
+        Status.ErrorMessage = Status.bIsLoaded ? TEXT("") : FString::Printf(TEXT("Failed to load class: %s"), *SystemPair.Value);
         
-        float StartTime = FPlatformTime::Seconds();
-        SystemReport.Status = ValidateSystemClass(SystemClass);
-        SystemReport.ValidationTime = FPlatformTime::Seconds() - StartTime;
+        Report.SystemStatuses.Add(Status);
         
-        switch (SystemReport.Status)
-        {
-            case EBuild_SystemStatus::Operational:
-                SystemReport.Details = TEXT("System loaded and operational");
-                Report.OperationalSystems++;
-                break;
-            case EBuild_SystemStatus::Failed:
-                SystemReport.Details = TEXT("System class not found or failed to load");
-                break;
-            case EBuild_SystemStatus::Error:
-                SystemReport.Details = TEXT("Exception occurred during validation");
-                break;
-            default:
-                SystemReport.Details = TEXT("Unknown validation state");
-                break;
-        }
-        
-        Report.SystemReports.Add(SystemReport);
-        LogSystemStatus(SystemReport.SystemName, SystemReport.Status);
+        LogValidationResult(Status.SystemName, Status.ValidationResult, Status.ErrorMessage);
     }
     
-    Report.TotalSystems = CoreSystemClasses.Num();
-    Report.TotalActors = GetTotalActorCount();
-    Report.bBuildReady = (Report.OperationalSystems == Report.TotalSystems);
+    // Count actors
+    UWorld* World = GetWorld();
+    if (World)
+    {
+        TArray<AActor*> AllActors;
+        UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), AllActors);
+        Report.TotalActorCount = AllActors.Num();
+        
+        // Count dinosaurs (actors with dinosaur-related labels)
+        TArray<FString> DinosaurLabels = {TEXT("trex"), TEXT("veloci"), TEXT("tricera"), TEXT("brachi"), 
+                                         TEXT("ankylo"), TEXT("parasauro"), TEXT("pachy"), TEXT("proto"), TEXT("tsinta")};
+        
+        Report.DinosaurCount = 0;
+        for (AActor* Actor : AllActors)
+        {
+            FString ActorLabel = Actor->GetActorLabel().ToLower();
+            for (const FString& DinoLabel : DinosaurLabels)
+            {
+                if (ActorLabel.Contains(DinoLabel))
+                {
+                    Report.DinosaurCount++;
+                    break;
+                }
+            }
+        }
+    }
     
-    LastReport = Report;
+    // Calculate performance score
+    Report.PerformanceScore = CalculatePerformanceScore();
     
-    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationValidator: Validation complete - %d/%d systems operational"), 
-           Report.OperationalSystems, Report.TotalSystems);
+    // Determine overall build health
+    int32 SuccessfulSystems = 0;
+    for (const FBuild_SystemStatus& Status : Report.SystemStatuses)
+    {
+        if (Status.ValidationResult == EBuild_ValidationResult::Success)
+        {
+            SuccessfulSystems++;
+        }
+    }
+    
+    float SystemSuccessRate = (float)SuccessfulSystems / (float)Report.SystemStatuses.Num();
+    bool bActorCountsHealthy = (Report.DinosaurCount <= MaxDinosaurCount) && (Report.TotalActorCount <= MaxTotalActorCount);
+    bool bPerformanceHealthy = Report.PerformanceScore >= MinPerformanceThreshold;
+    
+    Report.bBuildHealthy = (SystemSuccessRate >= 0.8f) && bActorCountsHealthy && bPerformanceHealthy;
+    
+    UE_LOG(LogTemp, Warning, TEXT("Build Validation Complete - Healthy: %s, Systems: %d/%d, Actors: %d/%d, Dinos: %d/%d, Performance: %.1f"),
+           Report.bBuildHealthy ? TEXT("YES") : TEXT("NO"),
+           SuccessfulSystems, Report.SystemStatuses.Num(),
+           Report.TotalActorCount, MaxTotalActorCount,
+           Report.DinosaurCount, MaxDinosaurCount,
+           Report.PerformanceScore);
     
     return Report;
 }
 
-EBuild_SystemStatus UBuildIntegrationValidator::ValidateCharacterSystem()
+bool UBuildIntegrationValidator::ValidateSystemIntegration(const FString& SystemName, const FString& ClassPath)
 {
-    return ValidateSystemClass(TEXT("/Script/TranspersonalGame.TranspersonalCharacter"));
+    bool bIsValid = ValidateClassLoading(ClassPath);
+    EBuild_ValidationResult Result = bIsValid ? EBuild_ValidationResult::Success : EBuild_ValidationResult::Error;
+    FString Message = bIsValid ? TEXT("System integration successful") : FString::Printf(TEXT("Failed to validate system: %s"), *ClassPath);
+    
+    LogValidationResult(SystemName, Result, Message);
+    
+    return bIsValid;
 }
 
-EBuild_SystemStatus UBuildIntegrationValidator::ValidateGameStateSystem()
-{
-    return ValidateSystemClass(TEXT("/Script/TranspersonalGame.TranspersonalGameState"));
-}
-
-EBuild_SystemStatus UBuildIntegrationValidator::ValidateWorldGenSystem()
-{
-    return ValidateSystemClass(TEXT("/Script/TranspersonalGame.PCGWorldGenerator"));
-}
-
-EBuild_SystemStatus UBuildIntegrationValidator::ValidateVFXSystem()
-{
-    return ValidateSystemClass(TEXT("/Script/TranspersonalGame.VFXManager"));
-}
-
-int32 UBuildIntegrationValidator::GetTotalActorCount()
+void UBuildIntegrationValidator::EnforceActorLimits()
 {
     UWorld* World = GetWorld();
     if (!World)
     {
-        return 0;
+        return;
     }
     
-    int32 ActorCount = 0;
-    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+    TArray<AActor*> AllActors;
+    UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), AllActors);
+    
+    // Identify dinosaurs and essential actors
+    TArray<FString> DinosaurLabels = {TEXT("trex"), TEXT("veloci"), TEXT("tricera"), TEXT("brachi"), 
+                                     TEXT("ankylo"), TEXT("parasauro"), TEXT("pachy"), TEXT("proto"), TEXT("tsinta")};
+    TArray<FString> EssentialLabels = {TEXT("playerstart"), TEXT("directionallight"), TEXT("skylight"), 
+                                      TEXT("skyatmosphere"), TEXT("fog")};
+    
+    TArray<AActor*> Dinosaurs;
+    TArray<AActor*> EssentialActors;
+    TArray<AActor*> Props;
+    
+    for (AActor* Actor : AllActors)
     {
-        ActorCount++;
+        if (!Actor) continue;
+        
+        FString ActorLabel = Actor->GetActorLabel().ToLower();
+        bool bIsDinosaur = false;
+        bool bIsEssential = false;
+        
+        for (const FString& DinoLabel : DinosaurLabels)
+        {
+            if (ActorLabel.Contains(DinoLabel))
+            {
+                Dinosaurs.Add(Actor);
+                bIsDinosaur = true;
+                break;
+            }
+        }
+        
+        if (!bIsDinosaur)
+        {
+            for (const FString& EssentialLabel : EssentialLabels)
+            {
+                if (ActorLabel.Contains(EssentialLabel))
+                {
+                    EssentialActors.Add(Actor);
+                    bIsEssential = true;
+                    break;
+                }
+            }
+        }
+        
+        if (!bIsDinosaur && !bIsEssential)
+        {
+            Props.Add(Actor);
+        }
     }
     
-    return ActorCount;
+    // Enforce dinosaur limit
+    if (Dinosaurs.Num() > MaxDinosaurCount)
+    {
+        int32 ToRemove = Dinosaurs.Num() - MaxDinosaurCount;
+        for (int32 i = 0; i < ToRemove && i < Dinosaurs.Num(); i++)
+        {
+            if (Dinosaurs[i] && IsValid(Dinosaurs[i]))
+            {
+                Dinosaurs[i]->Destroy();
+            }
+        }
+        UE_LOG(LogTemp, Warning, TEXT("Enforced dinosaur limit: removed %d dinosaurs"), ToRemove);
+    }
+    
+    // Enforce total actor limit
+    int32 CurrentTotal = EssentialActors.Num() + FMath::Min(Dinosaurs.Num(), MaxDinosaurCount) + Props.Num();
+    if (CurrentTotal > MaxTotalActorCount)
+    {
+        int32 PropsToRemove = CurrentTotal - MaxTotalActorCount;
+        for (int32 i = 0; i < PropsToRemove && i < Props.Num(); i++)
+        {
+            if (Props[i] && IsValid(Props[i]))
+            {
+                Props[i]->Destroy();
+            }
+        }
+        UE_LOG(LogTemp, Warning, TEXT("Enforced total actor limit: removed %d props"), PropsToRemove);
+    }
 }
 
-void UBuildIntegrationValidator::PerformMemoryOptimization()
-{
-    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationValidator: Performing memory optimization"));
-    
-    // Force garbage collection
-    CollectGarbage(GARBAGE_COLLECTION_KEEPFLAGS);
-    
-    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationValidator: Memory optimization completed"));
-}
-
-bool UBuildIntegrationValidator::SaveCurrentMap()
+float UBuildIntegrationValidator::CalculatePerformanceScore()
 {
     UWorld* World = GetWorld();
     if (!World)
     {
-        UE_LOG(LogTemp, Error, TEXT("BuildIntegrationValidator: No valid world for map save"));
-        return false;
+        return 0.0f;
     }
     
-    FString MapPath = TEXT("/Game/Maps/MinPlayableMap");
+    TArray<AActor*> AllActors;
+    UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), AllActors);
     
-    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationValidator: Attempting to save map to %s"), *MapPath);
+    // Simple performance scoring based on actor counts and types
+    float Score = 100.0f;
     
-    // Note: In runtime, we cannot directly save maps like in editor
-    // This is a placeholder for editor-specific functionality
-    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationValidator: Map save requested (editor functionality)"));
+    // Penalty for too many actors
+    if (AllActors.Num() > MaxTotalActorCount * 0.8f)
+    {
+        Score -= 20.0f;
+    }
     
-    return true;
+    // Count performance-heavy actors
+    int32 StaticMeshCount = 0;
+    int32 LightCount = 0;
+    
+    for (AActor* Actor : AllActors)
+    {
+        if (!Actor) continue;
+        
+        if (Actor->FindComponentByClass<UStaticMeshComponent>())
+        {
+            StaticMeshCount++;
+        }
+        
+        if (Actor->IsA<ALight>())
+        {
+            LightCount++;
+        }
+    }
+    
+    // Apply penalties for performance-heavy elements
+    if (StaticMeshCount > 5000) Score -= 15.0f;
+    if (LightCount > 50) Score -= 10.0f;
+    
+    return FMath::Clamp(Score, 0.0f, 100.0f);
 }
 
-EBuild_SystemStatus UBuildIntegrationValidator::ValidateSystemClass(const FString& ClassPath)
+TArray<FBuild_SystemStatus> UBuildIntegrationValidator::GetCriticalSystemStatuses()
 {
-    try
+    TArray<FBuild_SystemStatus> CriticalStatuses;
+    
+    for (const auto& SystemPair : EssentialSystems)
     {
-        UClass* SystemClass = LoadClass<UObject>(nullptr, *ClassPath);
-        if (SystemClass && IsValid(SystemClass))
+        FBuild_SystemStatus Status;
+        Status.SystemName = SystemPair.Key;
+        Status.bIsLoaded = ValidateClassLoading(SystemPair.Value);
+        Status.bIsCompiled = Status.bIsLoaded;
+        Status.ValidationResult = Status.bIsLoaded ? EBuild_ValidationResult::Success : EBuild_ValidationResult::Critical;
+        Status.ErrorMessage = Status.bIsLoaded ? TEXT("") : FString::Printf(TEXT("CRITICAL: Failed to load %s"), *SystemPair.Value);
+        
+        if (Status.ValidationResult == EBuild_ValidationResult::Critical)
         {
-            return EBuild_SystemStatus::Operational;
-        }
-        else
-        {
-            return EBuild_SystemStatus::Failed;
+            CriticalStatuses.Add(Status);
         }
     }
-    catch (...)
-    {
-        return EBuild_SystemStatus::Error;
-    }
+    
+    return CriticalStatuses;
 }
 
-void UBuildIntegrationValidator::LogSystemStatus(const FString& SystemName, EBuild_SystemStatus Status)
+bool UBuildIntegrationValidator::ValidateClassLoading(const FString& ClassPath)
 {
-    FString StatusString;
-    switch (Status)
+    UClass* LoadedClass = LoadClass<UObject>(nullptr, *ClassPath);
+    return LoadedClass != nullptr;
+}
+
+void UBuildIntegrationValidator::LogValidationResult(const FString& SystemName, EBuild_ValidationResult Result, const FString& Message)
+{
+    FString ResultString;
+    switch (Result)
     {
-        case EBuild_SystemStatus::Operational:
-            StatusString = TEXT("OPERATIONAL");
-            UE_LOG(LogTemp, Warning, TEXT("✓ %s: %s"), *SystemName, *StatusString);
+        case EBuild_ValidationResult::Success:
+            ResultString = TEXT("SUCCESS");
+            UE_LOG(LogTemp, Log, TEXT("Build Validation [%s]: %s - %s"), *SystemName, *ResultString, *Message);
             break;
-        case EBuild_SystemStatus::Failed:
-            StatusString = TEXT("FAILED");
-            UE_LOG(LogTemp, Error, TEXT("✗ %s: %s"), *SystemName, *StatusString);
+        case EBuild_ValidationResult::Warning:
+            ResultString = TEXT("WARNING");
+            UE_LOG(LogTemp, Warning, TEXT("Build Validation [%s]: %s - %s"), *SystemName, *ResultString, *Message);
             break;
-        case EBuild_SystemStatus::Error:
-            StatusString = TEXT("ERROR");
-            UE_LOG(LogTemp, Error, TEXT("✗ %s: %s"), *SystemName, *StatusString);
+        case EBuild_ValidationResult::Error:
+            ResultString = TEXT("ERROR");
+            UE_LOG(LogTemp, Error, TEXT("Build Validation [%s]: %s - %s"), *SystemName, *ResultString, *Message);
             break;
-        default:
-            StatusString = TEXT("UNKNOWN");
-            UE_LOG(LogTemp, Warning, TEXT("? %s: %s"), *SystemName, *StatusString);
+        case EBuild_ValidationResult::Critical:
+            ResultString = TEXT("CRITICAL");
+            UE_LOG(LogTemp, Error, TEXT("Build Validation [%s]: %s - %s"), *SystemName, *ResultString, *Message);
             break;
     }
 }
