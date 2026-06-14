@@ -1,148 +1,127 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/GameStateBase.h"
+#include "GameFramework/Actor.h"
 #include "Engine/World.h"
-#include "Components/ActorComponent.h"
-#include "../Core/SharedTypes.h"
+#include "Components/SphereComponent.h"
+#include "SharedTypes.h"
 #include "CombatAIManager.generated.h"
 
-// Combat AI tactical states
-UENUM(BlueprintType)
-enum class ECombat_TacticalState : uint8
-{
-    Idle UMETA(DisplayName = "Idle"),
-    Patrol UMETA(DisplayName = "Patrol"),
-    Alert UMETA(DisplayName = "Alert"),
-    Hunt UMETA(DisplayName = "Hunt"),
-    Attack UMETA(DisplayName = "Attack"),
-    Flee UMETA(DisplayName = "Flee"),
-    Territorial UMETA(DisplayName = "Territorial")
-};
+class ACombat_DinosaurAIController;
+class UBehaviorTreeComponent;
+class UBlackboardComponent;
 
-// Combat engagement range
-UENUM(BlueprintType)
-enum class ECombat_EngagementRange : uint8
-{
-    Close UMETA(DisplayName = "Close Range (0-5m)"),
-    Medium UMETA(DisplayName = "Medium Range (5-15m)"),
-    Long UMETA(DisplayName = "Long Range (15m+)")
-};
-
-// Combat AI data structure
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FCombat_AIData
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
-    ECombat_TacticalState CurrentState = ECombat_TacticalState::Idle;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
-    float AggressionLevel = 0.5f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
-    float FearThreshold = 0.7f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
-    float TerritoryRadius = 1000.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
-    ECombat_EngagementRange PreferredRange = ECombat_EngagementRange::Medium;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
-    bool bIsPackHunter = false;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
-    float AttackCooldown = 2.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
-    float LastAttackTime = 0.0f;
-};
-
-/**
- * Combat AI Manager - Orchestrates tactical combat behavior for dinosaurs and enemies
- * Manages threat assessment, pack coordination, and adaptive combat tactics
- */
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UCombatAIManager : public UActorComponent
+class TRANSPERSONALGAME_API ACombatAIManager : public AActor
 {
     GENERATED_BODY()
 
 public:
-    UCombatAIManager();
+    ACombatAIManager();
 
 protected:
     virtual void BeginPlay() override;
+    virtual void Tick(float DeltaTime) override;
+
+    // Combat zone detection
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat")
+    USphereComponent* CombatDetectionSphere;
+
+    // Combat state management
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+    float CombatRange = 2000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+    float AlertRange = 3000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+    float PackCoordinationRange = 1500.0f;
+
+    // AI behavior parameters
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI")
+    float AggressionLevel = 0.7f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI")
+    float HuntingEfficiency = 0.8f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI")
+    float TerritorialRadius = 2500.0f;
+
+    // Combat tactics
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tactics")
+    bool bEnablePackHunting = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tactics")
+    bool bEnableFlankingBehavior = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tactics")
+    bool bEnableAmbushTactics = true;
+
+    // Dynamic difficulty
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Difficulty")
+    float PlayerSkillLevel = 0.5f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Difficulty")
+    float DifficultyScaling = 1.0f;
 
 public:
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+    // Combat management functions
+    UFUNCTION(BlueprintCallable, Category = "Combat")
+    void InitiateCombatEncounter(AActor* Player, AActor* Dinosaur);
 
-    // Core combat AI functions
-    UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    void InitializeCombatAI(AActor* OwnerActor);
+    UFUNCTION(BlueprintCallable, Category = "Combat")
+    void EndCombatEncounter(AActor* Player, AActor* Dinosaur);
 
-    UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    void UpdateTacticalState(float DeltaTime);
+    UFUNCTION(BlueprintCallable, Category = "Combat")
+    void UpdateCombatState(float DeltaTime);
 
-    UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    ECombat_TacticalState EvaluateThreatLevel(AActor* Target);
+    UFUNCTION(BlueprintCallable, Category = "Combat")
+    void CoordinatePackHunting(TArray<AActor*> PackMembers, AActor* Target);
 
-    UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    bool ShouldEngageTarget(AActor* Target);
+    UFUNCTION(BlueprintCallable, Category = "Combat")
+    void ExecuteFlankingManeuver(AActor* Dinosaur, AActor* Target);
 
-    UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    FVector CalculateOptimalPosition(AActor* Target);
+    UFUNCTION(BlueprintCallable, Category = "Combat")
+    void TriggerAmbushBehavior(AActor* Dinosaur, AActor* Target);
 
-    UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    void ExecuteAttackPattern(AActor* Target);
+    // AI state queries
+    UFUNCTION(BlueprintPure, Category = "Combat")
+    bool IsInCombat(AActor* Dinosaur) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    void CoordinatePackBehavior(TArray<AActor*> PackMembers);
+    UFUNCTION(BlueprintPure, Category = "Combat")
+    bool CanEngageCombat(AActor* Dinosaur, AActor* Target) const;
 
-    // Threat assessment
-    UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    float CalculateThreatScore(AActor* Target);
+    UFUNCTION(BlueprintPure, Category = "Combat")
+    float GetOptimalAttackDistance(AActor* Dinosaur) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    TArray<AActor*> FindNearbyThreats(float SearchRadius);
+    UFUNCTION(BlueprintPure, Category = "Combat")
+    FVector GetFlankingPosition(AActor* Dinosaur, AActor* Target) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    AActor* SelectPrimaryTarget(TArray<AActor*> PotentialTargets);
+    // Difficulty adaptation
+    UFUNCTION(BlueprintCallable, Category = "Difficulty")
+    void AdjustDifficultyBasedOnPerformance(bool PlayerWon, float EncounterDuration);
 
-    // Combat properties
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
-    FCombat_AIData CombatData;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
-    float ThreatDetectionRadius = 1500.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
-    float CombatUpdateInterval = 0.1f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
-    bool bEnablePackCoordination = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
-    int32 MaxPackSize = 5;
+    UFUNCTION(BlueprintCallable, Category = "Difficulty")
+    void SetDynamicDifficulty(float NewDifficulty);
 
 private:
-    // Internal state
-    UPROPERTY()
-    AActor* CurrentTarget;
+    // Internal combat tracking
+    TMap<AActor*, float> CombatTimers;
+    TMap<AActor*, AActor*> CombatPairs;
+    TArray<AActor*> ActiveCombatants;
 
-    UPROPERTY()
-    TArray<AActor*> KnownThreats;
+    // Pack hunting coordination
+    TMap<AActor*, TArray<AActor*>> PackGroups;
+    TMap<AActor*, FVector> FlankingPositions;
 
-    UPROPERTY()
-    TArray<AActor*> PackMembers;
+    // Performance tracking for difficulty
+    float AverageEncounterDuration = 30.0f;
+    float PlayerWinRate = 0.5f;
+    int32 TotalEncounters = 0;
 
-    float LastUpdateTime;
-    float StateChangeTime;
-
-    // Internal functions
-    void UpdateThreatAssessment();
-    void ProcessPackCoordination();
-    bool IsWithinTerritory(FVector Position);
-    FVector GetFleeDirection(AActor* Threat);
+    // Helper functions
+    void UpdateCombatTimers(float DeltaTime);
+    void ManagePackCoordination();
+    void CalculateFlankingPositions();
+    bool ValidateFlankingPosition(const FVector& Position, AActor* Target) const;
 };
