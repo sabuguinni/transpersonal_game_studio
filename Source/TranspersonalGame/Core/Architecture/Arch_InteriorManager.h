@@ -3,19 +3,22 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "Components/StaticMeshComponent.h"
-#include "Components/BoxComponent.h"
 #include "Components/PointLightComponent.h"
+#include "Components/AudioComponent.h"
 #include "Engine/TriggerVolume.h"
+#include "SharedTypes.h"
 #include "Arch_InteriorManager.generated.h"
 
 UENUM(BlueprintType)
 enum class EArch_InteriorType : uint8
 {
-    Cave = 0,
-    StoneShelter = 1,
-    LogHut = 2,
-    RockOverhang = 3,
-    BuriedDwelling = 4
+    Cave,
+    Shelter,
+    Dwelling,
+    Storage,
+    Workshop,
+    Ritual,
+    Burial
 };
 
 USTRUCT(BlueprintType)
@@ -27,28 +30,28 @@ struct FArch_InteriorData
     EArch_InteriorType InteriorType = EArch_InteriorType::Cave;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interior")
-    float ComfortLevel = 50.0f;
+    float AmbientTemperature = 18.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interior")
-    float WarmthBonus = 25.0f;
+    float Humidity = 0.6f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interior")
-    bool bHasFirePit = false;
+    float AirQuality = 0.8f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interior")
-    bool bHasSleepingArea = false;
+    bool bHasNaturalLight = false;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interior")
-    int32 MaxOccupants = 1;
+    bool bHasFireSource = false;
 
-    FArch_InteriorData()
-    {
-        ComfortLevel = 50.0f;
-        WarmthBonus = 25.0f;
-        bHasFirePit = false;
-        bHasSleepingArea = false;
-        MaxOccupants = 1;
-    }
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interior")
+    TArray<FVector> FurniturePositions;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interior")
+    TArray<FVector> StoragePositions;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interior")
+    float ComfortLevel = 0.5f;
 };
 
 UCLASS(BlueprintType, Blueprintable)
@@ -63,70 +66,101 @@ protected:
     virtual void BeginPlay() override;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    class USceneComponent* RootSceneComponent;
+    UStaticMeshComponent* FloorMesh;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    class UStaticMeshComponent* InteriorMesh;
+    UStaticMeshComponent* WallMesh;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    class UBoxComponent* InteriorTrigger;
+    UStaticMeshComponent* CeilingMesh;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    class UPointLightComponent* FireLight;
+    UPointLightComponent* AmbientLight;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    class UStaticMeshComponent* FirePitMesh;
+    UPointLightComponent* FireLight;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interior Settings")
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    UAudioComponent* AmbientAudio;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interior Data")
     FArch_InteriorData InteriorData;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interior Settings")
-    TArray<class UStaticMeshComponent*> FurnitureComponents;
+    float LightIntensity = 1.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interior Settings")
+    FLinearColor AmbientLightColor = FLinearColor(1.0f, 0.9f, 0.7f, 1.0f);
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interior Settings")
+    FLinearColor FireLightColor = FLinearColor(1.0f, 0.6f, 0.2f, 1.0f);
+
+    UPROPERTY(BlueprintReadOnly, Category = "State")
+    TArray<AActor*> InteriorObjects;
+
+    UPROPERTY(BlueprintReadOnly, Category = "State")
     bool bIsOccupied = false;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interior Settings")
-    TArray<AActor*> CurrentOccupants;
+    UPROPERTY(BlueprintReadOnly, Category = "State")
+    float CurrentTemperature = 18.0f;
 
 public:
     virtual void Tick(float DeltaTime) override;
 
     UFUNCTION(BlueprintCallable, Category = "Interior")
-    void SetupInteriorType(EArch_InteriorType NewType);
+    void InitializeInterior(EArch_InteriorType Type, FVector Dimensions);
 
     UFUNCTION(BlueprintCallable, Category = "Interior")
-    void AddFurniture(UStaticMesh* FurnitureMesh, FVector RelativeLocation, FRotator RelativeRotation);
+    void AddInteriorObject(AActor* Object, FVector LocalPosition);
 
     UFUNCTION(BlueprintCallable, Category = "Interior")
-    void LightFirePit();
+    void RemoveInteriorObject(AActor* Object);
 
     UFUNCTION(BlueprintCallable, Category = "Interior")
-    void ExtinguishFirePit();
+    void SetFireActive(bool bActive);
 
     UFUNCTION(BlueprintCallable, Category = "Interior")
-    bool CanAccommodateOccupant() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Interior")
-    void AddOccupant(AActor* NewOccupant);
-
-    UFUNCTION(BlueprintCallable, Category = "Interior")
-    void RemoveOccupant(AActor* OccupantToRemove);
+    void UpdateAmbientConditions(float DeltaTime);
 
     UFUNCTION(BlueprintCallable, Category = "Interior")
     float GetComfortLevel() const;
 
     UFUNCTION(BlueprintCallable, Category = "Interior")
-    float GetWarmthBonus() const;
+    bool IsWellVentilated() const;
 
-    UFUNCTION()
-    void OnInteriorEnter(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult);
+    UFUNCTION(BlueprintCallable, Category = "Interior")
+    FVector GetRandomFurniturePosition() const;
 
-    UFUNCTION()
-    void OnInteriorExit(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex);
+    UFUNCTION(BlueprintCallable, Category = "Interior")
+    FVector GetRandomStoragePosition() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Interior")
+    void SetOccupied(bool bOccupied);
+
+    UFUNCTION(BlueprintImplementableEvent, Category = "Interior")
+    void OnInteriorEntered(AActor* Occupant);
+
+    UFUNCTION(BlueprintImplementableEvent, Category = "Interior")
+    void OnInteriorExited(AActor* Occupant);
+
+    UFUNCTION(BlueprintImplementableEvent, Category = "Interior")
+    void OnFireLit();
+
+    UFUNCTION(BlueprintImplementableEvent, Category = "Interior")
+    void OnFireExtinguished();
+
+protected:
+    void ConfigureInteriorForType(EArch_InteriorType Type);
+    void SetupLighting();
+    void SetupAmbientAudio();
+    void UpdateLighting(float DeltaTime);
+    void UpdateTemperature(float DeltaTime);
 
 private:
-    void UpdateFirePitVisuals();
-    void SetupInteriorMesh();
-    void ConfigureInteriorSettings();
+    float FireFlickerTime = 0.0f;
+    float TemperatureUpdateTimer = 0.0f;
+    const float TemperatureUpdateInterval = 2.0f;
+    bool bFireIsActive = false;
 };
+
+#include "Arch_InteriorManager.generated.h"
