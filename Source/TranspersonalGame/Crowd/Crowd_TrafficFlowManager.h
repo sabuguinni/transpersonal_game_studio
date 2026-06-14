@@ -2,67 +2,55 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
-#include "Components/StaticMeshComponent.h"
 #include "Engine/World.h"
-#include "SharedTypes.h"
+#include "Components/StaticMeshComponent.h"
+#include "Components/SceneComponent.h"
 #include "Crowd_TrafficFlowManager.generated.h"
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FCrowd_TrafficFlow
+struct TRANSPERSONALGAME_API FCrowd_TrafficNode
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Traffic Flow")
-    FVector StartLocation;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FVector Location;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Traffic Flow")
-    FVector EndLocation;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float Capacity;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Traffic Flow")
-    float FlowIntensity;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float CurrentDensity;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Traffic Flow")
-    int32 MaxEntities;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    TArray<int32> ConnectedNodes;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Traffic Flow")
-    TArray<AActor*> AssignedEntities;
-
-    FCrowd_TrafficFlow()
+    FCrowd_TrafficNode()
     {
-        StartLocation = FVector::ZeroVector;
-        EndLocation = FVector::ZeroVector;
-        FlowIntensity = 1.0f;
-        MaxEntities = 10;
+        Location = FVector::ZeroVector;
+        Capacity = 100.0f;
+        CurrentDensity = 0.0f;
     }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FCrowd_DensityZone
+struct TRANSPERSONALGAME_API FCrowd_FlowField
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Density Zone")
-    FVector CenterLocation;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FVector FlowDirection;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Density Zone")
-    float Radius;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float FlowStrength;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Density Zone")
-    ECrowd_DensityLevel DensityLevel;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float Congestion;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Density Zone")
-    int32 CurrentEntityCount;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Density Zone")
-    int32 MaxEntityCount;
-
-    FCrowd_DensityZone()
+    FCrowd_FlowField()
     {
-        CenterLocation = FVector::ZeroVector;
-        Radius = 500.0f;
-        DensityLevel = ECrowd_DensityLevel::Medium;
-        CurrentEntityCount = 0;
-        MaxEntityCount = 20;
+        FlowDirection = FVector::ForwardVector;
+        FlowStrength = 1.0f;
+        Congestion = 0.0f;
     }
 };
 
@@ -80,60 +68,48 @@ protected:
 public:
     virtual void Tick(float DeltaTime) override;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Traffic Management")
-    TArray<FCrowd_TrafficFlow> TrafficFlows;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Traffic Flow")
+    TArray<FCrowd_TrafficNode> TrafficNodes;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Traffic Management")
-    TArray<FCrowd_DensityZone> DensityZones;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Traffic Flow")
+    TMap<FVector2D, FCrowd_FlowField> FlowFieldGrid;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Traffic Management")
-    float UpdateInterval;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Traffic Flow")
+    float GridCellSize;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Traffic Management")
-    int32 MaxSimulatedEntities;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Traffic Flow")
+    float MaxFlowSpeed;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Traffic Management")
-    float MovementSpeed;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Traffic Flow")
+    float CongestionThreshold;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Traffic Management")
-    bool bEnableTrafficSimulation;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    USceneComponent* RootSceneComponent;
 
-    UFUNCTION(BlueprintCallable, Category = "Traffic Management")
-    void InitializeTrafficFlows();
+    UFUNCTION(BlueprintCallable, Category = "Traffic Flow")
+    void InitializeTrafficNetwork();
 
-    UFUNCTION(BlueprintCallable, Category = "Traffic Management")
-    void CreateTrafficFlow(FVector StartPos, FVector EndPos, float Intensity);
+    UFUNCTION(BlueprintCallable, Category = "Traffic Flow")
+    void UpdateFlowFields();
 
-    UFUNCTION(BlueprintCallable, Category = "Traffic Management")
-    void UpdateEntityMovement();
+    UFUNCTION(BlueprintCallable, Category = "Traffic Flow")
+    FVector GetFlowDirection(const FVector& WorldLocation);
 
-    UFUNCTION(BlueprintCallable, Category = "Traffic Management")
-    void AssignEntitiesToFlows();
+    UFUNCTION(BlueprintCallable, Category = "Traffic Flow")
+    float GetCongestionLevel(const FVector& WorldLocation);
 
-    UFUNCTION(BlueprintCallable, Category = "Traffic Management")
-    void UpdateDensityZones();
+    UFUNCTION(BlueprintCallable, Category = "Traffic Flow")
+    void AddTrafficNode(const FVector& Location, float Capacity);
 
-    UFUNCTION(BlueprintCallable, Category = "Traffic Management")
-    int32 GetEntityCountInZone(const FCrowd_DensityZone& Zone);
+    UFUNCTION(BlueprintCallable, Category = "Traffic Flow")
+    void ConnectNodes(int32 NodeA, int32 NodeB);
 
-    UFUNCTION(BlueprintCallable, Category = "Traffic Management")
-    bool IsLocationInDensityZone(FVector Location, const FCrowd_DensityZone& Zone);
-
-    UFUNCTION(BlueprintCallable, Category = "Traffic Management")
-    void OptimizeTrafficFlow();
-
-    UFUNCTION(BlueprintCallable, Category = "Traffic Management", CallInEditor)
-    void DebugDrawTrafficFlows();
+    UFUNCTION(BlueprintCallable, Category = "Traffic Flow")
+    void UpdateNodeDensity(int32 NodeIndex, float DensityChange);
 
 private:
-    UPROPERTY()
-    TArray<AActor*> ManagedEntities;
-
-    UPROPERTY()
-    float LastUpdateTime;
-
-    void FindAndRegisterCrowdEntities();
-    void MoveEntityAlongFlow(AActor* Entity, const FCrowd_TrafficFlow& Flow, float DeltaTime);
-    FVector CalculateFlowDirection(const FCrowd_TrafficFlow& Flow, FVector CurrentPos);
-    void BalanceEntityDistribution();
+    void CalculateFlowField(const FVector2D& GridPosition);
+    void PropagateFlow();
+    FVector2D WorldToGrid(const FVector& WorldLocation);
+    FVector GridToWorld(const FVector2D& GridPosition);
 };
