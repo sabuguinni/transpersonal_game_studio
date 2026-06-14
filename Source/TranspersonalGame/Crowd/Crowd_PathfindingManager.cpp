@@ -1,394 +1,474 @@
 #include "Crowd_PathfindingManager.h"
+#include "Components/StaticMeshComponent.h"
 #include "Engine/Engine.h"
-#include "Engine/World.h"
+#include "Engine/StaticMesh.h"
+#include "Materials/Material.h"
+#include "DrawDebugHelpers.h"
 #include "NavigationSystem.h"
-#include "AI/Navigation/NavigationTypes.h"
-#include "AI/Navigation/RecastNavMesh.h"
-#include "Kismet/GameplayStatics.h"
-#include "TimerManager.h"
+#include "AI/NavigationSystemBase.h"
+#include "Kismet/KismetMathLibrary.h"
 
-UCrowd_PathfindingManager::UCrowd_PathfindingManager()
+ACrowd_PathfindingManager::ACrowd_PathfindingManager()
 {
-    NavSystem = nullptr;
-    MaxConcurrentRequests = 100;
-    PathfindingTimeSlice = 0.016f; // 16ms per frame
-    bUseAsyncPathfinding = true;
-    CrowdDensityThreshold = 5.0f;
-    AvoidanceStrength = 2.0f;
-    NextRequestID = 1;
+    PrimaryActorTick.bCanEverTick = true;
+    
+    // Create visualization mesh component
+    VisualizationMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("VisualizationMesh"));
+    RootComponent = VisualizationMesh;
+    
+    // Initialize default values
+    WaypointRadius = 200.0f;
+    MaxPathDistance = 3000.0f;
+    MaxPathNodes = 50;
+    bEnableDynamicObstacles = true;
+    bEnableFlowFields = true;
+    PathUpdateInterval = 1.0f;
+    MaxConcurrentPaths = 100;
+    LastPathUpdate = 0.0f;
+    bPathVisualizationEnabled = false;
 }
 
-void UCrowd_PathfindingManager::Initialize(FSubsystemCollectionBase& Collection)
+void ACrowd_PathfindingManager::BeginPlay()
 {
-    Super::Initialize(Collection);
+    Super::BeginPlay();
     
-    UE_LOG(LogTemp, Warning, TEXT("Crowd_PathfindingManager: Initializing pathfinding subsystem"));
+    // Initialize pathfinding system
+    InitializePathNetwork();
+    GeneratePathNodes();
+    ConnectPathNodes();
     
-    // Get navigation system reference
-    if (UWorld* World = GetWorld())
+    UE_LOG(LogTemp, Warning, TEXT("Crowd Pathfinding Manager initialized with %d waypoints"), Waypoints.Num());
+}
+
+void ACrowd_PathfindingManager::Tick(float DeltaTime)
+{
+    Super::Tick(DeltaTime);
+    
+    LastPathUpdate += DeltaTime;
+    
+    // Update pathfinding system periodically
+    if (LastPathUpdate >= PathUpdateInterval)
     {
-        NavSystem = FNavigationSystem::GetCurrent<UNavigationSystemV1>(World);
-        if (NavSystem)
+        UpdateDynamicObstacles();
+        UpdatePathNetwork();
+        LastPathUpdate = 0.0f;
+    }
+    
+    // Draw debug visualization if enabled
+    if (bPathVisualizationEnabled)
+    {
+        DrawPathNetwork();
+        DrawWaypoints();
+    }
+}
+
+TArray<FVector> ACrowd_PathfindingManager::FindPath(const FVector& StartLocation, const FVector& EndLocation)
+{
+    TArray<FVector> Path;
+    
+    // Simple A* pathfinding implementation
+    FVector CurrentLocation = StartLocation;
+    FVector TargetLocation = EndLocation;
+    
+    // Check if direct path is possible
+    if (!IsPathBlocked(StartLocation, EndLocation))
+    {
+        Path.Add(StartLocation);
+        Path.Add(EndLocation);
+        return Path;
+    }
+    
+    // Use waypoint-based pathfinding
+    FVector NearestStartWaypoint = GetNearestWaypoint(StartLocation);
+    FVector NearestEndWaypoint = GetNearestWaypoint(EndLocation);
+    
+    Path.Add(StartLocation);
+    
+    if (NearestStartWaypoint != FVector::ZeroVector)
+    {
+        Path.Add(NearestStartWaypoint);
+    }
+    
+    // Add intermediate waypoints if needed
+    float DistanceToTarget = FVector::Dist(NearestStartWaypoint, NearestEndWaypoint);
+    if (DistanceToTarget > WaypointRadius * 2.0f)
+    {
+        // Find intermediate waypoints
+        for (const FCrowd_Waypoint& Waypoint : Waypoints)
         {
-            UE_LOG(LogTemp, Warning, TEXT("Crowd_PathfindingManager: Navigation system found"));
-        }
-        else
-        {
-            UE_LOG(LogTemp, Error, TEXT("Crowd_PathfindingManager: No navigation system found"));
-        }
-        
-        // Start async processing timer
-        if (bUseAsyncPathfinding)
-        {
-            World->GetTimerManager().SetTimer(
-                PathfindingTimerHandle,
-                this,
-                &UCrowd_PathfindingManager::ProcessPendingRequests,
-                PathfindingTimeSlice,
-                true
-            );
-        }
-    }
-}
-
-void UCrowd_PathfindingManager::Deinitialize()
-{
-    if (UWorld* World = GetWorld())
-    {
-        World->GetTimerManager().ClearTimer(PathfindingTimerHandle);
-    }
-    
-    PendingRequests.Empty();
-    CompletedPaths.Empty();
-    
-    UE_LOG(LogTemp, Warning, TEXT("Crowd_PathfindingManager: Subsystem deinitialized"));
-    
-    Super::Deinitialize();
-}
-
-bool UCrowd_PathfindingManager::FindPath(const FCrowd_PathRequest& Request, TArray<FVector>& OutPath)
-{
-    OutPath.Empty();
-    
-    if (!ValidatePathRequest(Request))
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Crowd_PathfindingManager: Invalid path request"));
-        return false;
-    }
-    
-    return ProcessPathRequest(Request, OutPath);
-}
-
-bool UCrowd_PathfindingManager::FindPathAsync(const FCrowd_PathRequest& Request, int32& OutRequestID)
-{
-    if (!ValidatePathRequest(Request))
-    {
-        OutRequestID = -1;
-        return false;
-    }
-    
-    if (PendingRequests.Num() >= MaxConcurrentRequests)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Crowd_PathfindingManager: Too many pending requests"));
-        OutRequestID = -1;
-        return false;
-    }
-    
-    FCrowd_PathRequest NewRequest = Request;
-    NewRequest.RequestID = NextRequestID++;
-    OutRequestID = NewRequest.RequestID;
-    
-    // Insert high priority requests at the front
-    if (NewRequest.bHighPriority)
-    {
-        PendingRequests.Insert(NewRequest, 0);
-    }
-    else
-    {
-        PendingRequests.Add(NewRequest);
-    }
-    
-    return true;
-}
-
-bool UCrowd_PathfindingManager::GetAsyncPathResult(int32 RequestID, TArray<FVector>& OutPath)
-{
-    OutPath.Empty();
-    
-    if (TArray<FVector>* FoundPath = CompletedPaths.Find(RequestID))
-    {
-        OutPath = *FoundPath;
-        CompletedPaths.Remove(RequestID);
-        return true;
-    }
-    
-    return false;
-}
-
-bool UCrowd_PathfindingManager::FindCrowdSafePath(const FVector& Start, const FVector& End, float CrowdRadius, TArray<FVector>& OutPath)
-{
-    OutPath.Empty();
-    
-    if (!NavSystem)
-    {
-        return false;
-    }
-    
-    // Check if start and end locations are in crowded areas
-    FVector SafeStart = Start;
-    FVector SafeEnd = End;
-    
-    if (IsCrowdedArea(Start, CrowdRadius))
-    {
-        if (!AvoidCrowdedAreas(Start, CrowdRadius * 2.0f, SafeStart))
-        {
-            SafeStart = Start; // Fallback to original
+            if (Waypoint.bIsActive)
+            {
+                float DistToStart = FVector::Dist(Waypoint.Location, NearestStartWaypoint);
+                float DistToEnd = FVector::Dist(Waypoint.Location, NearestEndWaypoint);
+                
+                if (DistToStart < DistanceToTarget && DistToEnd < DistanceToTarget)
+                {
+                    Path.Add(Waypoint.Location);
+                }
+            }
         }
     }
     
-    if (IsCrowdedArea(End, CrowdRadius))
+    if (NearestEndWaypoint != FVector::ZeroVector)
     {
-        if (!AvoidCrowdedAreas(End, CrowdRadius * 2.0f, SafeEnd))
+        Path.Add(NearestEndWaypoint);
+    }
+    
+    Path.Add(EndLocation);
+    
+    return Path;
+}
+
+FVector ACrowd_PathfindingManager::GetNearestWaypoint(const FVector& Location)
+{
+    FVector NearestWaypoint = FVector::ZeroVector;
+    float MinDistance = MAX_FLT;
+    
+    for (const FCrowd_Waypoint& Waypoint : Waypoints)
+    {
+        if (Waypoint.bIsActive)
         {
-            SafeEnd = End; // Fallback to original
+            float Distance = FVector::Dist(Location, Waypoint.Location);
+            if (Distance < MinDistance)
+            {
+                MinDistance = Distance;
+                NearestWaypoint = Waypoint.Location;
+            }
         }
     }
     
-    // Create path request with adjusted locations
-    FCrowd_PathRequest Request;
-    Request.StartLocation = SafeStart;
-    Request.EndLocation = SafeEnd;
-    Request.MaxSearchDistance = FVector::Dist(SafeStart, SafeEnd) * 2.0f;
-    
-    return ProcessPathRequest(Request, OutPath);
+    return NearestWaypoint;
 }
 
-bool UCrowd_PathfindingManager::AvoidCrowdedAreas(const FVector& Location, float AvoidanceRadius, FVector& OutSafeLocation)
+bool ACrowd_PathfindingManager::IsPathBlocked(const FVector& StartLocation, const FVector& EndLocation)
 {
-    if (!NavSystem)
+    // Check for dynamic obstacles
+    for (int32 i = 0; i < DynamicObstacles.Num(); i++)
     {
-        OutSafeLocation = Location;
-        return false;
-    }
-    
-    // Try multiple directions to find a safe location
-    const int32 NumDirections = 8;
-    const float AngleStep = 360.0f / NumDirections;
-    
-    for (int32 i = 0; i < NumDirections; i++)
-    {
-        float Angle = i * AngleStep;
-        FVector Direction = FVector(
-            FMath::Cos(FMath::DegreesToRadians(Angle)),
-            FMath::Sin(FMath::DegreesToRadians(Angle)),
-            0.0f
-        );
-        
-        FVector TestLocation = Location + (Direction * AvoidanceRadius);
-        
-        if (IsLocationNavigable(TestLocation) && !IsCrowdedArea(TestLocation, AvoidanceRadius * 0.5f))
+        float DistanceToObstacle = FMath::PointDistToSegment(DynamicObstacles[i], StartLocation, EndLocation);
+        if (DistanceToObstacle < ObstacleRadii[i])
         {
-            OutSafeLocation = TestLocation;
             return true;
         }
     }
     
-    OutSafeLocation = Location;
-    return false;
-}
-
-bool UCrowd_PathfindingManager::IsLocationNavigable(const FVector& Location)
-{
-    if (!NavSystem)
+    // Use navigation system for more accurate pathfinding
+    UNavigationSystemV1* NavSys = UNavigationSystemV1::GetCurrent(GetWorld());
+    if (NavSys)
     {
-        return false;
-    }
-    
-    FNavLocation NavLocation;
-    return NavSystem->ProjectPointToNavigation(Location, NavLocation, FVector(100.0f, 100.0f, 500.0f));
-}
-
-bool UCrowd_PathfindingManager::GetRandomNavigableLocation(const FVector& Origin, float Radius, FVector& OutLocation)
-{
-    if (!NavSystem)
-    {
-        OutLocation = Origin;
-        return false;
-    }
-    
-    FNavLocation NavLocation;
-    bool bFound = NavSystem->GetRandomReachablePointInRadius(Origin, Radius, NavLocation);
-    
-    if (bFound)
-    {
-        OutLocation = NavLocation.Location;
-        return true;
-    }
-    
-    OutLocation = Origin;
-    return false;
-}
-
-void UCrowd_PathfindingManager::SetMaxConcurrentRequests(int32 MaxRequests)
-{
-    MaxConcurrentRequests = FMath::Max(1, MaxRequests);
-    
-    // Trim pending requests if necessary
-    if (PendingRequests.Num() > MaxConcurrentRequests)
-    {
-        PendingRequests.SetNum(MaxConcurrentRequests);
-    }
-}
-
-int32 UCrowd_PathfindingManager::GetPendingRequestCount() const
-{
-    return PendingRequests.Num();
-}
-
-void UCrowd_PathfindingManager::ClearAllRequests()
-{
-    PendingRequests.Empty();
-    CompletedPaths.Empty();
-    UE_LOG(LogTemp, Warning, TEXT("Crowd_PathfindingManager: All requests cleared"));
-}
-
-bool UCrowd_PathfindingManager::ProcessPathRequest(const FCrowd_PathRequest& Request, TArray<FVector>& OutPath)
-{
-    OutPath.Empty();
-    
-    if (!NavSystem)
-    {
-        return false;
-    }
-    
-    // Project start and end points to navigation mesh
-    FNavLocation StartNavLocation, EndNavLocation;
-    
-    if (!NavSystem->ProjectPointToNavigation(Request.StartLocation, StartNavLocation))
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Crowd_PathfindingManager: Cannot project start location to navmesh"));
-        return false;
-    }
-    
-    if (!NavSystem->ProjectPointToNavigation(Request.EndLocation, EndNavLocation))
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Crowd_PathfindingManager: Cannot project end location to navmesh"));
-        return false;
-    }
-    
-    // Find path using navigation system
-    FPathFindingQuery Query;
-    Query.StartLocation = StartNavLocation.Location;
-    Query.EndLocation = EndNavLocation.Location;
-    Query.NavData = NavSystem->GetDefaultNavDataInstance();
-    
-    FPathFindingResult Result = NavSystem->FindPathSync(Query);
-    
-    if (Result.IsSuccessful() && Result.Path.IsValid())
-    {
-        const TArray<FNavPathPoint>& PathPoints = Result.Path->GetPathPoints();
+        FNavLocation NavStart, NavEnd;
+        bool bValidStart = NavSys->ProjectPointToNavigation(StartLocation, NavStart);
+        bool bValidEnd = NavSys->ProjectPointToNavigation(EndLocation, NavEnd);
         
-        for (const FNavPathPoint& Point : PathPoints)
+        if (!bValidStart || !bValidEnd)
         {
-            OutPath.Add(Point.Location);
+            return true;
         }
-        
-        return true;
     }
     
     return false;
 }
 
-bool UCrowd_PathfindingManager::ValidatePathRequest(const FCrowd_PathRequest& Request)
+void ACrowd_PathfindingManager::AddDynamicObstacle(const FVector& Location, float Radius)
 {
-    // Check if locations are valid
-    if (Request.StartLocation.IsZero() || Request.EndLocation.IsZero())
-    {
-        return false;
-    }
+    DynamicObstacles.Add(Location);
+    ObstacleRadii.Add(Radius);
     
-    // Check distance
-    float Distance = FVector::Dist(Request.StartLocation, Request.EndLocation);
-    if (Distance > Request.MaxSearchDistance)
+    // Limit the number of dynamic obstacles for performance
+    if (DynamicObstacles.Num() > 100)
     {
-        return false;
-    }
-    
-    return true;
-}
-
-void UCrowd_PathfindingManager::ProcessPendingRequests()
-{
-    if (PendingRequests.Num() == 0)
-    {
-        return;
-    }
-    
-    // Process one request per frame to maintain performance
-    FCrowd_PathRequest Request = PendingRequests[0];
-    PendingRequests.RemoveAt(0);
-    
-    TArray<FVector> ResultPath;
-    if (ProcessPathRequest(Request, ResultPath))
-    {
-        CompletedPaths.Add(Request.RequestID, ResultPath);
-    }
-    
-    // Cleanup old completed paths periodically
-    static int32 CleanupCounter = 0;
-    if (++CleanupCounter >= 100)
-    {
-        CleanupCompletedRequests();
-        CleanupCounter = 0;
+        DynamicObstacles.RemoveAt(0);
+        ObstacleRadii.RemoveAt(0);
     }
 }
 
-float UCrowd_PathfindingManager::CalculateCrowdDensity(const FVector& Location, float Radius)
+void ACrowd_PathfindingManager::RemoveDynamicObstacle(const FVector& Location)
 {
-    if (!GetWorld())
+    for (int32 i = DynamicObstacles.Num() - 1; i >= 0; i--)
     {
-        return 0.0f;
-    }
-    
-    // Count nearby pawns/actors
-    TArray<AActor*> NearbyActors;
-    UGameplayStatics::GetAllActorsOfClass(GetWorld(), APawn::StaticClass(), NearbyActors);
-    
-    int32 CrowdCount = 0;
-    for (AActor* Actor : NearbyActors)
-    {
-        if (Actor && FVector::Dist(Actor->GetActorLocation(), Location) <= Radius)
+        if (FVector::Dist(DynamicObstacles[i], Location) < 50.0f)
         {
-            CrowdCount++;
+            DynamicObstacles.RemoveAt(i);
+            ObstacleRadii.RemoveAt(i);
+            break;
+        }
+    }
+}
+
+void ACrowd_PathfindingManager::UpdatePathNetwork()
+{
+    // Update waypoint connectivity based on current obstacles
+    for (FCrowd_Waypoint& Waypoint : Waypoints)
+    {
+        if (IsLocationBlocked(Waypoint.Location))
+        {
+            Waypoint.bIsActive = false;
+        }
+        else
+        {
+            Waypoint.bIsActive = true;
+        }
+    }
+}
+
+void ACrowd_PathfindingManager::OptimizePathNodes()
+{
+    // Remove redundant path nodes
+    for (int32 i = PathNodes.Num() - 1; i >= 0; i--)
+    {
+        if (PathNodes[i].bIsBlocked || PathNodes[i].ConnectedNodes.Num() == 0)
+        {
+            PathNodes.RemoveAt(i);
         }
     }
     
-    // Calculate density (actors per square meter)
-    float Area = PI * Radius * Radius / 10000.0f; // Convert to square meters
-    return CrowdCount / FMath::Max(Area, 1.0f);
+    UE_LOG(LogTemp, Warning, TEXT("Path network optimized: %d nodes remaining"), PathNodes.Num());
 }
 
-bool UCrowd_PathfindingManager::IsCrowdedArea(const FVector& Location, float Radius)
+FVector ACrowd_PathfindingManager::GetFlowFieldDirection(const FVector& Location, const FVector& Target)
 {
-    float Density = CalculateCrowdDensity(Location, Radius);
-    return Density > CrowdDensityThreshold;
-}
-
-void UCrowd_PathfindingManager::CleanupCompletedRequests()
-{
-    // Remove old completed paths to prevent memory bloat
-    const int32 MaxCompletedPaths = 50;
-    
-    if (CompletedPaths.Num() > MaxCompletedPaths)
+    if (!bEnableFlowFields)
     {
-        // Remove oldest entries (simple cleanup - could be improved with timestamps)
-        TArray<int32> Keys;
-        CompletedPaths.GetKeys(Keys);
+        return (Target - Location).GetSafeNormal();
+    }
+    
+    // Check flow field cache
+    if (FlowField.Contains(Location))
+    {
+        return FlowField[Location];
+    }
+    
+    // Calculate flow field direction
+    FVector Direction = (Target - Location).GetSafeNormal();
+    
+    // Adjust for obstacles
+    for (int32 i = 0; i < DynamicObstacles.Num(); i++)
+    {
+        FVector ToObstacle = DynamicObstacles[i] - Location;
+        float Distance = ToObstacle.Size();
         
-        int32 ToRemove = CompletedPaths.Num() - MaxCompletedPaths;
-        for (int32 i = 0; i < ToRemove && i < Keys.Num(); i++)
+        if (Distance < ObstacleRadii[i] * 2.0f)
         {
-            CompletedPaths.Remove(Keys[i]);
+            FVector AvoidanceVector = ToObstacle.GetSafeNormal() * -1.0f;
+            Direction += AvoidanceVector * (1.0f - Distance / (ObstacleRadii[i] * 2.0f));
         }
     }
+    
+    Direction.Normalize();
+    FlowField.Add(Location, Direction);
+    
+    return Direction;
+}
+
+void ACrowd_PathfindingManager::GenerateFlowField(const FVector& TargetLocation)
+{
+    FlowField.Empty();
+    
+    // Generate flow field for the entire area
+    float GridSize = 100.0f;
+    int32 GridWidth = 100;
+    int32 GridHeight = 100;
+    
+    FVector StartLocation = GetActorLocation() - FVector(GridWidth * GridSize * 0.5f, GridHeight * GridSize * 0.5f, 0.0f);
+    
+    for (int32 x = 0; x < GridWidth; x++)
+    {
+        for (int32 y = 0; y < GridHeight; y++)
+        {
+            FVector GridLocation = StartLocation + FVector(x * GridSize, y * GridSize, 0.0f);
+            FVector Direction = GetFlowFieldDirection(GridLocation, TargetLocation);
+            FlowField.Add(GridLocation, Direction);
+        }
+    }
+    
+    UE_LOG(LogTemp, Warning, TEXT("Flow field generated with %d grid points"), FlowField.Num());
+}
+
+void ACrowd_PathfindingManager::ClearFlowField()
+{
+    FlowField.Empty();
+}
+
+void ACrowd_PathfindingManager::DrawPathNetwork()
+{
+    if (!GetWorld()) return;
+    
+    // Draw waypoints
+    for (const FCrowd_Waypoint& Waypoint : Waypoints)
+    {
+        FColor WaypointColor = Waypoint.bIsActive ? FColor::Green : FColor::Red;
+        DrawDebugSphere(GetWorld(), Waypoint.Location, Waypoint.Radius, 12, WaypointColor, false, 0.1f);
+    }
+    
+    // Draw path nodes
+    for (const FCrowd_PathNode& Node : PathNodes)
+    {
+        FColor NodeColor = Node.bIsBlocked ? FColor::Red : FColor::Blue;
+        DrawDebugSphere(GetWorld(), Node.Position, 25.0f, 8, NodeColor, false, 0.1f);
+        
+        // Draw connections
+        for (int32 ConnectedIndex : Node.ConnectedNodes)
+        {
+            if (PathNodes.IsValidIndex(ConnectedIndex))
+            {
+                DrawDebugLine(GetWorld(), Node.Position, PathNodes[ConnectedIndex].Position, FColor::Yellow, false, 0.1f);
+            }
+        }
+    }
+    
+    // Draw dynamic obstacles
+    for (int32 i = 0; i < DynamicObstacles.Num(); i++)
+    {
+        DrawDebugSphere(GetWorld(), DynamicObstacles[i], ObstacleRadii[i], 12, FColor::Orange, false, 0.1f);
+    }
+}
+
+void ACrowd_PathfindingManager::DrawWaypoints()
+{
+    if (!GetWorld()) return;
+    
+    for (int32 i = 0; i < Waypoints.Num(); i++)
+    {
+        const FCrowd_Waypoint& Waypoint = Waypoints[i];
+        FColor Color = Waypoint.bIsActive ? FColor::Cyan : FColor::Magenta;
+        
+        DrawDebugSphere(GetWorld(), Waypoint.Location, Waypoint.Radius, 16, Color, false, 0.1f);
+        DrawDebugString(GetWorld(), Waypoint.Location + FVector(0, 0, 100), FString::Printf(TEXT("WP_%d"), i), nullptr, Color, 0.1f);
+    }
+}
+
+void ACrowd_PathfindingManager::TogglePathVisualization()
+{
+    bPathVisualizationEnabled = !bPathVisualizationEnabled;
+    UE_LOG(LogTemp, Warning, TEXT("Path visualization %s"), bPathVisualizationEnabled ? TEXT("enabled") : TEXT("disabled"));
+}
+
+void ACrowd_PathfindingManager::InitializePathNetwork()
+{
+    // Create default waypoints in a grid pattern
+    Waypoints.Empty();
+    
+    int32 GridSize = 8;
+    float Spacing = 500.0f;
+    FVector CenterLocation = GetActorLocation();
+    
+    for (int32 x = 0; x < GridSize; x++)
+    {
+        for (int32 y = 0; y < GridSize; y++)
+        {
+            FCrowd_Waypoint NewWaypoint;
+            NewWaypoint.Location = CenterLocation + FVector(
+                (x - GridSize * 0.5f) * Spacing,
+                (y - GridSize * 0.5f) * Spacing,
+                0.0f
+            );
+            NewWaypoint.Radius = WaypointRadius;
+            NewWaypoint.Priority = FMath::RandRange(1, 5);
+            NewWaypoint.bIsActive = true;
+            
+            Waypoints.Add(NewWaypoint);
+        }
+    }
+    
+    UE_LOG(LogTemp, Warning, TEXT("Initialized %d waypoints"), Waypoints.Num());
+}
+
+void ACrowd_PathfindingManager::UpdateDynamicObstacles()
+{
+    // Update obstacle positions and remove expired ones
+    for (int32 i = DynamicObstacles.Num() - 1; i >= 0; i--)
+    {
+        // Remove obstacles that are too far from any waypoint
+        bool bNearWaypoint = false;
+        for (const FCrowd_Waypoint& Waypoint : Waypoints)
+        {
+            if (FVector::Dist(DynamicObstacles[i], Waypoint.Location) < MaxPathDistance)
+            {
+                bNearWaypoint = true;
+                break;
+            }
+        }
+        
+        if (!bNearWaypoint)
+        {
+            DynamicObstacles.RemoveAt(i);
+            ObstacleRadii.RemoveAt(i);
+        }
+    }
+}
+
+float ACrowd_PathfindingManager::CalculatePathCost(const FVector& Start, const FVector& End)
+{
+    float Distance = FVector::Dist(Start, End);
+    float Cost = Distance;
+    
+    // Add penalty for obstacles
+    for (int32 i = 0; i < DynamicObstacles.Num(); i++)
+    {
+        float DistanceToObstacle = FMath::PointDistToSegment(DynamicObstacles[i], Start, End);
+        if (DistanceToObstacle < ObstacleRadii[i] * 2.0f)
+        {
+            Cost += 1000.0f; // High penalty for paths near obstacles
+        }
+    }
+    
+    return Cost;
+}
+
+bool ACrowd_PathfindingManager::IsLocationBlocked(const FVector& Location)
+{
+    for (int32 i = 0; i < DynamicObstacles.Num(); i++)
+    {
+        if (FVector::Dist(Location, DynamicObstacles[i]) < ObstacleRadii[i])
+        {
+            return true;
+        }
+    }
+    
+    return false;
+}
+
+void ACrowd_PathfindingManager::GeneratePathNodes()
+{
+    PathNodes.Empty();
+    
+    // Generate path nodes based on waypoints
+    for (const FCrowd_Waypoint& Waypoint : Waypoints)
+    {
+        FCrowd_PathNode NewNode;
+        NewNode.Position = Waypoint.Location;
+        NewNode.MovementCost = 1.0f / FMath::Max(1.0f, float(Waypoint.Priority));
+        NewNode.bIsBlocked = !Waypoint.bIsActive;
+        
+        PathNodes.Add(NewNode);
+    }
+    
+    UE_LOG(LogTemp, Warning, TEXT("Generated %d path nodes"), PathNodes.Num());
+}
+
+void ACrowd_PathfindingManager::ConnectPathNodes()
+{
+    // Connect nearby path nodes
+    for (int32 i = 0; i < PathNodes.Num(); i++)
+    {
+        for (int32 j = i + 1; j < PathNodes.Num(); j++)
+        {
+            float Distance = FVector::Dist(PathNodes[i].Position, PathNodes[j].Position);
+            
+            if (Distance <= WaypointRadius * 2.0f && !IsPathBlocked(PathNodes[i].Position, PathNodes[j].Position))
+            {
+                PathNodes[i].ConnectedNodes.Add(j);
+                PathNodes[j].ConnectedNodes.Add(i);
+            }
+        }
+    }
+    
+    // Log connectivity statistics
+    int32 TotalConnections = 0;
+    for (const FCrowd_PathNode& Node : PathNodes)
+    {
+        TotalConnections += Node.ConnectedNodes.Num();
+    }
+    
+    UE_LOG(LogTemp, Warning, TEXT("Path nodes connected: %d total connections"), TotalConnections);
 }
