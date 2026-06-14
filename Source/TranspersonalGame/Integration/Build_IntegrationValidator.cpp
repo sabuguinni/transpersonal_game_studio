@@ -2,211 +2,104 @@
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
-#include "HAL/PlatformFilemanager.h"
-#include "Misc/DateTime.h"
-#include "Stats/Stats.h"
-#include "Engine/GameViewportClient.h"
-#include "TranspersonalGame/TranspersonalGame.h"
+#include "GameFramework/Actor.h"
+#include "Components/StaticMeshComponent.h"
+#include "Engine/StaticMeshActor.h"
+#include "Engine/Light.h"
+#include "Components/LightComponent.h"
+#include "Engine/DirectionalLight.h"
+#include "Engine/SkyLight.h"
+#include "Kismet/GameplayStatics.h"
 
-UBuild_IntegrationValidator::UBuild_IntegrationValidator()
+ABuild_IntegrationValidator::ABuild_IntegrationValidator()
 {
+    PrimaryActorTick.bCanEverTick = false;
+
+    RootSceneComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootSceneComponent"));
+    RootComponent = RootSceneComponent;
+
+    // Initialize validation data
     TotalActorCount = 0;
     DinosaurCount = 0;
-    LastValidationTime = 0.0f;
-    bSystemHealthy = true;
+    bPerformanceWithinLimits = false;
+    LastValidationTime = FDateTime::Now();
 }
 
-void UBuild_IntegrationValidator::Initialize(FSubsystemCollectionBase& Collection)
+void ABuild_IntegrationValidator::BeginPlay()
 {
-    Super::Initialize(Collection);
-    UE_LOG(LogTranspersonalGame, Log, TEXT("Build Integration Validator initialized"));
+    Super::BeginPlay();
     
-    // Run initial validation
-    RunFullValidationSuite();
+    // Auto-run validation on begin play
+    RunFullValidation();
 }
 
-void UBuild_IntegrationValidator::Deinitialize()
+void ABuild_IntegrationValidator::RunFullValidation()
 {
-    ValidationResults.Empty();
-    Super::Deinitialize();
-}
-
-void UBuild_IntegrationValidator::RunFullValidationSuite()
-{
-    double StartTime = FPlatformTime::Seconds();
-    ValidationResults.Empty();
-    bSystemHealthy = true;
-
-    UE_LOG(LogTranspersonalGame, Log, TEXT("Starting full validation suite"));
-
-    // Core validation tests
+    ClearValidationResults();
+    
+    UE_LOG(LogTemp, Warning, TEXT("Build Integration Validator: Starting full validation"));
+    
     ValidateModuleCompilation();
-    ValidateActorIntegrity();
-    ValidatePerformanceMetrics();
-    ValidateSystemDependencies();
+    ValidateActorCounts();
+    ValidateSystemIntegration();
+    ValidatePerformance();
     
-    // Cleanup and enforcement
-    CleanupOrphanedActors();
-    EnforceActorLimits();
+    LastValidationTime = FDateTime::Now();
+    
+    GenerateValidationReport();
+}
 
-    LastValidationTime = FPlatformTime::Seconds() - StartTime;
-    
-    // Check overall health
-    for (const FBuild_ValidationReport& Report : ValidationResults)
+void ABuild_IntegrationValidator::ValidateModuleCompilation()
+{
+    // Test core module classes
+    TArray<TPair<FString, FString>> TestClasses = {
+        {TEXT("TranspersonalGameState"), TEXT("/Script/TranspersonalGame.TranspersonalGameState")},
+        {TEXT("TranspersonalCharacter"), TEXT("/Script/TranspersonalGame.TranspersonalCharacter")},
+        {TEXT("PCGWorldGenerator"), TEXT("/Script/TranspersonalGame.PCGWorldGenerator")},
+        {TEXT("FoliageManager"), TEXT("/Script/TranspersonalGame.FoliageManager")},
+        {TEXT("CrowdSimulationManager"), TEXT("/Script/TranspersonalGame.CrowdSimulationManager")},
+        {TEXT("ProceduralWorldManager"), TEXT("/Script/TranspersonalGame.ProceduralWorldManager")},
+        {TEXT("BuildIntegrationManager"), TEXT("/Script/TranspersonalGame.BuildIntegrationManager")}
+    };
+
+    int32 LoadedClasses = 0;
+    for (const auto& TestClass : TestClasses)
     {
-        if (Report.Result == EBuild_ValidationResult::Critical || Report.Result == EBuild_ValidationResult::Fail)
+        if (ValidateClassLoading(TestClass.Key, TestClass.Value))
         {
-            bSystemHealthy = false;
-            break;
+            LoadedClasses++;
         }
     }
 
-    UE_LOG(LogTranspersonalGame, Log, TEXT("Validation suite completed in %.3f seconds. System healthy: %s"), 
-           LastValidationTime, bSystemHealthy ? TEXT("YES") : TEXT("NO"));
+    EBuild_ValidationStatus Status = (LoadedClasses == TestClasses.Num()) ? 
+        EBuild_ValidationStatus::Pass : EBuild_ValidationStatus::Warning;
+    
+    FString Message = FString::Printf(TEXT("Loaded %d/%d core classes"), LoadedClasses, TestClasses.Num());
+    AddValidationResult(TEXT("Module Compilation"), Status, Message, LoadedClasses);
 }
 
-void UBuild_IntegrationValidator::ValidateModuleCompilation()
+void ABuild_IntegrationValidator::ValidateActorCounts()
 {
-    double StartTime = FPlatformTime::Seconds();
-    
-    // Check if TranspersonalGame module is loaded
-    FModuleManager& ModuleManager = FModuleManager::Get();
-    bool bModuleLoaded = ModuleManager.IsModuleLoaded("TranspersonalGame");
-    
-    if (bModuleLoaded)
-    {
-        AddValidationResult(TEXT("Module Compilation"), EBuild_ValidationResult::Pass, 
-                          TEXT("TranspersonalGame module loaded successfully"), 
-                          FPlatformTime::Seconds() - StartTime);
-    }
-    else
-    {
-        AddValidationResult(TEXT("Module Compilation"), EBuild_ValidationResult::Critical, 
-                          TEXT("TranspersonalGame module failed to load"), 
-                          FPlatformTime::Seconds() - StartTime);
-    }
-}
-
-void UBuild_IntegrationValidator::ValidateActorIntegrity()
-{
-    double StartTime = FPlatformTime::Seconds();
-    
     UWorld* World = GetWorld();
     if (!World)
     {
-        AddValidationResult(TEXT("Actor Integrity"), EBuild_ValidationResult::Critical, 
-                          TEXT("No valid world found"), 
-                          FPlatformTime::Seconds() - StartTime);
+        AddValidationResult(TEXT("Actor Count"), EBuild_ValidationStatus::Fail, TEXT("No world found"));
         return;
     }
 
-    CountActorsByType();
-    
-    int32 ValidActors = 0;
-    int32 InvalidActors = 0;
-    
-    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
-    {
-        AActor* Actor = *ActorItr;
-        if (Actor && IsValid(Actor))
-        {
-            ValidActors++;
-        }
-        else
-        {
-            InvalidActors++;
-        }
-    }
-    
-    FString Details = FString::Printf(TEXT("Valid: %d, Invalid: %d, Total: %d, Dinosaurs: %d"), 
-                                    ValidActors, InvalidActors, TotalActorCount, DinosaurCount);
-    
-    EBuild_ValidationResult Result = (InvalidActors > 10) ? EBuild_ValidationResult::Warning : EBuild_ValidationResult::Pass;
-    
-    AddValidationResult(TEXT("Actor Integrity"), Result, Details, FPlatformTime::Seconds() - StartTime);
-}
+    TArray<AActor*> AllActors;
+    UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), AllActors);
+    TotalActorCount = AllActors.Num();
 
-void UBuild_IntegrationValidator::ValidatePerformanceMetrics()
-{
-    double StartTime = FPlatformTime::Seconds();
-    
-    // Get current FPS
-    float CurrentFPS = 0.0f;
-    if (GEngine && GEngine->GetGameViewport())
-    {
-        CurrentFPS = 1.0f / FApp::GetDeltaTime();
-    }
-    
-    // Memory usage
-    FPlatformMemoryStats MemStats = FPlatformMemory::GetStats();
-    float MemoryUsageMB = MemStats.UsedPhysical / (1024.0f * 1024.0f);
-    
-    FString Details = FString::Printf(TEXT("FPS: %.1f, Memory: %.1f MB, Actors: %d"), 
-                                    CurrentFPS, MemoryUsageMB, TotalActorCount);
-    
-    EBuild_ValidationResult Result = EBuild_ValidationResult::Pass;
-    if (CurrentFPS < 30.0f)
-    {
-        Result = EBuild_ValidationResult::Warning;
-    }
-    if (CurrentFPS < 15.0f || MemoryUsageMB > 4096.0f)
-    {
-        Result = EBuild_ValidationResult::Fail;
-    }
-    
-    AddValidationResult(TEXT("Performance Metrics"), Result, Details, FPlatformTime::Seconds() - StartTime);
-}
-
-void UBuild_IntegrationValidator::ValidateSystemDependencies()
-{
-    double StartTime = FPlatformTime::Seconds();
-    
-    // Check critical subsystems
-    TArray<FString> MissingSubsystems;
-    
-    UWorld* World = GetWorld();
-    if (World)
-    {
-        // Check for game mode
-        if (!World->GetAuthGameMode())
-        {
-            MissingSubsystems.Add(TEXT("GameMode"));
-        }
-        
-        // Check for player controller
-        if (!World->GetFirstPlayerController())
-        {
-            MissingSubsystems.Add(TEXT("PlayerController"));
-        }
-    }
-    
-    FString Details = MissingSubsystems.Num() > 0 ? 
-                     FString::Printf(TEXT("Missing: %s"), *FString::Join(MissingSubsystems, TEXT(", "))) :
-                     TEXT("All critical subsystems present");
-    
-    EBuild_ValidationResult Result = MissingSubsystems.Num() > 0 ? EBuild_ValidationResult::Warning : EBuild_ValidationResult::Pass;
-    
-    AddValidationResult(TEXT("System Dependencies"), Result, Details, FPlatformTime::Seconds() - StartTime);
-}
-
-void UBuild_IntegrationValidator::CountActorsByType()
-{
-    UWorld* World = GetWorld();
-    if (!World) return;
-    
-    TotalActorCount = 0;
-    DinosaurCount = 0;
-    
+    // Count dinosaurs (actors with dinosaur-related labels)
     TArray<FString> DinosaurLabels = {TEXT("trex"), TEXT("veloci"), TEXT("tricera"), TEXT("brachi"), 
                                      TEXT("ankylo"), TEXT("parasauro"), TEXT("pachy"), TEXT("proto"), TEXT("tsinta")};
     
-    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+    DinosaurCount = 0;
+    for (AActor* Actor : AllActors)
     {
-        AActor* Actor = *ActorItr;
-        if (Actor && IsValid(Actor))
+        if (Actor)
         {
-            TotalActorCount++;
-            
             FString ActorLabel = Actor->GetActorLabel().ToLower();
             for (const FString& DinoLabel : DinosaurLabels)
             {
@@ -218,181 +111,168 @@ void UBuild_IntegrationValidator::CountActorsByType()
             }
         }
     }
+
+    // Validate counts against limits
+    EBuild_ValidationStatus Status = EBuild_ValidationStatus::Pass;
+    FString Message = FString::Printf(TEXT("Total: %d, Dinosaurs: %d"), TotalActorCount, DinosaurCount);
+    
+    if (TotalActorCount > 8000)
+    {
+        Status = EBuild_ValidationStatus::Warning;
+        Message += TEXT(" - Total actor count high");
+    }
+    
+    if (DinosaurCount > 150)
+    {
+        Status = EBuild_ValidationStatus::Warning;
+        Message += TEXT(" - Dinosaur count high");
+    }
+
+    AddValidationResult(TEXT("Actor Counts"), Status, Message, TotalActorCount);
 }
 
-void UBuild_IntegrationValidator::EnforceActorLimits()
+void ABuild_IntegrationValidator::ValidateSystemIntegration()
 {
-    double StartTime = FPlatformTime::Seconds();
-    
-    EnforceDinosaurLimit();
-    EnforceTotalActorLimit();
-    
-    AddValidationResult(TEXT("Actor Limits"), EBuild_ValidationResult::Pass, 
-                      FString::Printf(TEXT("Enforced limits - Total: %d, Dinosaurs: %d"), TotalActorCount, DinosaurCount),
-                      FPlatformTime::Seconds() - StartTime);
-}
-
-void UBuild_IntegrationValidator::EnforceDinosaurLimit()
-{
-    if (DinosaurCount <= 150) return;
-    
     UWorld* World = GetWorld();
-    if (!World) return;
-    
-    TArray<AActor*> DinosaurActors;
-    TArray<FString> DinosaurLabels = {TEXT("trex"), TEXT("veloci"), TEXT("tricera"), TEXT("brachi"), 
-                                     TEXT("ankylo"), TEXT("parasauro"), TEXT("pachy"), TEXT("proto"), TEXT("tsinta")};
-    
-    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+    if (!World)
     {
-        AActor* Actor = *ActorItr;
-        if (Actor && IsValid(Actor))
-        {
-            FString ActorLabel = Actor->GetActorLabel().ToLower();
-            for (const FString& DinoLabel : DinosaurLabels)
-            {
-                if (ActorLabel.Contains(DinoLabel))
-                {
-                    DinosaurActors.Add(Actor);
-                    break;
-                }
-            }
-        }
+        AddValidationResult(TEXT("System Integration"), EBuild_ValidationStatus::Fail, TEXT("No world found"));
+        return;
     }
+
+    // Check for essential systems
+    int32 SystemsFound = 0;
     
-    // Remove excess dinosaurs randomly
-    while (DinosaurActors.Num() > 150)
-    {
-        int32 RandomIndex = FMath::RandRange(0, DinosaurActors.Num() - 1);
-        AActor* ActorToRemove = DinosaurActors[RandomIndex];
-        if (ActorToRemove)
-        {
-            ActorToRemove->Destroy();
-        }
-        DinosaurActors.RemoveAt(RandomIndex);
-    }
+    // Check for lighting
+    TArray<AActor*> DirectionalLights;
+    UGameplayStatics::GetAllActorsOfClass(World, ADirectionalLight::StaticClass(), DirectionalLights);
+    if (DirectionalLights.Num() > 0) SystemsFound++;
+
+    TArray<AActor*> SkyLights;
+    UGameplayStatics::GetAllActorsOfClass(World, ASkyLight::StaticClass(), SkyLights);
+    if (SkyLights.Num() > 0) SystemsFound++;
+
+    // Check for static meshes (environment)
+    TArray<AActor*> StaticMeshes;
+    UGameplayStatics::GetAllActorsOfClass(World, AStaticMeshActor::StaticClass(), StaticMeshes);
+    if (StaticMeshes.Num() > 0) SystemsFound++;
+
+    EBuild_ValidationStatus Status = (SystemsFound >= 3) ? 
+        EBuild_ValidationStatus::Pass : EBuild_ValidationStatus::Warning;
     
-    DinosaurCount = DinosaurActors.Num();
+    FString Message = FString::Printf(TEXT("Found %d essential systems"), SystemsFound);
+    AddValidationResult(TEXT("System Integration"), Status, Message, SystemsFound);
 }
 
-void UBuild_IntegrationValidator::EnforceTotalActorLimit()
+void ABuild_IntegrationValidator::ValidatePerformance()
 {
-    if (TotalActorCount <= 8000) return;
+    // Performance validation based on actor counts and system complexity
+    bPerformanceWithinLimits = (TotalActorCount <= 8000 && DinosaurCount <= 150);
     
-    UWorld* World = GetWorld();
-    if (!World) return;
+    EBuild_ValidationStatus Status = bPerformanceWithinLimits ? 
+        EBuild_ValidationStatus::Pass : EBuild_ValidationStatus::Warning;
     
-    TArray<AActor*> NonEssentialActors;
-    TArray<FString> EssentialLabels = {TEXT("playerstart"), TEXT("directionallight"), TEXT("skylight"), 
-                                      TEXT("skyatmosphere"), TEXT("fog")};
+    FString Message = bPerformanceWithinLimits ? 
+        TEXT("Performance within acceptable limits") : 
+        TEXT("Performance may be impacted by high actor counts");
     
-    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
-    {
-        AActor* Actor = *ActorItr;
-        if (Actor && IsValid(Actor))
-        {
-            FString ActorLabel = Actor->GetActorLabel().ToLower();
-            bool bIsEssential = false;
-            
-            for (const FString& EssentialLabel : EssentialLabels)
-            {
-                if (ActorLabel.Contains(EssentialLabel))
-                {
-                    bIsEssential = true;
-                    break;
-                }
-            }
-            
-            if (!bIsEssential)
-            {
-                NonEssentialActors.Add(Actor);
-            }
-        }
-    }
-    
-    // Remove excess non-essential actors
-    int32 ActorsToRemove = TotalActorCount - 7000;
-    while (NonEssentialActors.Num() > 0 && ActorsToRemove > 0)
-    {
-        int32 RandomIndex = FMath::RandRange(0, NonEssentialActors.Num() - 1);
-        AActor* ActorToRemove = NonEssentialActors[RandomIndex];
-        if (ActorToRemove)
-        {
-            ActorToRemove->Destroy();
-            ActorsToRemove--;
-        }
-        NonEssentialActors.RemoveAt(RandomIndex);
-    }
-    
-    // Recount after cleanup
-    CountActorsByType();
+    AddValidationResult(TEXT("Performance"), Status, Message);
 }
 
-void UBuild_IntegrationValidator::CleanupOrphanedActors()
+void ABuild_IntegrationValidator::GenerateValidationReport()
 {
-    double StartTime = FPlatformTime::Seconds();
+    UE_LOG(LogTemp, Warning, TEXT("=== BUILD INTEGRATION VALIDATION REPORT ==="));
+    UE_LOG(LogTemp, Warning, TEXT("Validation Time: %s"), *LastValidationTime.ToString());
+    UE_LOG(LogTemp, Warning, TEXT("Total Systems Tested: %d"), SystemValidations.Num());
     
-    UWorld* World = GetWorld();
-    if (!World) return;
-    
-    int32 OrphanedCount = 0;
-    
-    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+    for (const FBuild_SystemValidation& Validation : SystemValidations)
     {
-        AActor* Actor = *ActorItr;
-        if (Actor && !IsValid(Actor))
+        FString StatusString;
+        switch (Validation.Status)
         {
-            OrphanedCount++;
-        }
-    }
-    
-    AddValidationResult(TEXT("Orphaned Cleanup"), EBuild_ValidationResult::Pass, 
-                      FString::Printf(TEXT("Found %d orphaned actors"), OrphanedCount),
-                      FPlatformTime::Seconds() - StartTime);
-}
-
-void UBuild_IntegrationValidator::GenerateIntegrationReport()
-{
-    UE_LOG(LogTranspersonalGame, Log, TEXT("=== INTEGRATION REPORT ==="));
-    UE_LOG(LogTranspersonalGame, Log, TEXT("Total Actors: %d"), TotalActorCount);
-    UE_LOG(LogTranspersonalGame, Log, TEXT("Dinosaur Count: %d"), DinosaurCount);
-    UE_LOG(LogTranspersonalGame, Log, TEXT("System Healthy: %s"), bSystemHealthy ? TEXT("YES") : TEXT("NO"));
-    UE_LOG(LogTranspersonalGame, Log, TEXT("Last Validation Time: %.3f seconds"), LastValidationTime);
-    
-    for (const FBuild_ValidationReport& Report : ValidationResults)
-    {
-        FString ResultStr;
-        switch (Report.Result)
-        {
-            case EBuild_ValidationResult::Pass: ResultStr = TEXT("PASS"); break;
-            case EBuild_ValidationResult::Warning: ResultStr = TEXT("WARN"); break;
-            case EBuild_ValidationResult::Fail: ResultStr = TEXT("FAIL"); break;
-            case EBuild_ValidationResult::Critical: ResultStr = TEXT("CRIT"); break;
+            case EBuild_ValidationStatus::Pass: StatusString = TEXT("PASS"); break;
+            case EBuild_ValidationStatus::Fail: StatusString = TEXT("FAIL"); break;
+            case EBuild_ValidationStatus::Warning: StatusString = TEXT("WARN"); break;
+            default: StatusString = TEXT("UNKNOWN"); break;
         }
         
-        UE_LOG(LogTranspersonalGame, Log, TEXT("[%s] %s: %s (%.3fs)"), 
-               *ResultStr, *Report.TestName, *Report.Details, Report.ExecutionTime);
+        UE_LOG(LogTemp, Warning, TEXT("%s: %s - %s"), 
+               *Validation.SystemName, *StatusString, *Validation.ErrorMessage);
     }
-    UE_LOG(LogTranspersonalGame, Log, TEXT("=== END REPORT ==="));
-}
-
-TArray<FBuild_ValidationReport> UBuild_IntegrationValidator::GetValidationResults() const
-{
-    return ValidationResults;
-}
-
-bool UBuild_IntegrationValidator::IsSystemHealthy() const
-{
-    return bSystemHealthy;
-}
-
-void UBuild_IntegrationValidator::AddValidationResult(const FString& TestName, EBuild_ValidationResult Result, const FString& Details, float ExecutionTime)
-{
-    FBuild_ValidationReport Report;
-    Report.TestName = TestName;
-    Report.Result = Result;
-    Report.Details = Details;
-    Report.ExecutionTime = ExecutionTime;
     
-    ValidationResults.Add(Report);
+    UE_LOG(LogTemp, Warning, TEXT("Overall Status: %s"), 
+           *UEnum::GetValueAsString(GetOverallStatus()));
+    UE_LOG(LogTemp, Warning, TEXT("=== END VALIDATION REPORT ==="));
+}
+
+EBuild_ValidationStatus ABuild_IntegrationValidator::GetOverallStatus() const
+{
+    bool bHasFail = false;
+    bool bHasWarning = false;
+    
+    for (const FBuild_SystemValidation& Validation : SystemValidations)
+    {
+        if (Validation.Status == EBuild_ValidationStatus::Fail)
+        {
+            bHasFail = true;
+        }
+        else if (Validation.Status == EBuild_ValidationStatus::Warning)
+        {
+            bHasWarning = true;
+        }
+    }
+    
+    if (bHasFail) return EBuild_ValidationStatus::Fail;
+    if (bHasWarning) return EBuild_ValidationStatus::Warning;
+    return EBuild_ValidationStatus::Pass;
+}
+
+FString ABuild_IntegrationValidator::GetValidationSummary() const
+{
+    int32 PassCount = 0;
+    int32 FailCount = 0;
+    int32 WarnCount = 0;
+    
+    for (const FBuild_SystemValidation& Validation : SystemValidations)
+    {
+        switch (Validation.Status)
+        {
+            case EBuild_ValidationStatus::Pass: PassCount++; break;
+            case EBuild_ValidationStatus::Fail: FailCount++; break;
+            case EBuild_ValidationStatus::Warning: WarnCount++; break;
+        }
+    }
+    
+    return FString::Printf(TEXT("Pass: %d, Warn: %d, Fail: %d"), PassCount, WarnCount, FailCount);
+}
+
+void ABuild_IntegrationValidator::AddValidationResult(const FString& SystemName, EBuild_ValidationStatus Status, const FString& ErrorMessage, int32 ActorCount)
+{
+    FBuild_SystemValidation NewValidation;
+    NewValidation.SystemName = SystemName;
+    NewValidation.Status = Status;
+    NewValidation.ErrorMessage = ErrorMessage;
+    NewValidation.ActorCount = ActorCount;
+    
+    SystemValidations.Add(NewValidation);
+}
+
+void ABuild_IntegrationValidator::ClearValidationResults()
+{
+    SystemValidations.Empty();
+}
+
+bool ABuild_IntegrationValidator::ValidateClassLoading(const FString& ClassName, const FString& ClassPath)
+{
+    UClass* LoadedClass = StaticLoadClass(UObject::StaticClass(), nullptr, *ClassPath);
+    if (LoadedClass)
+    {
+        UE_LOG(LogTemp, Log, TEXT("Successfully loaded class: %s"), *ClassName);
+        return true;
+    }
+    else
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Failed to load class: %s at path: %s"), *ClassName, *ClassPath);
+        return false;
+    }
 }
