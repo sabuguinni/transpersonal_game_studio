@@ -1,456 +1,323 @@
 #include "Arch_ShelterManager.h"
-#include "Components/StaticMeshComponent.h"
-#include "Materials/MaterialInterface.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "GameFramework/Actor.h"
-#include "UObject/ConstructorHelpers.h"
+#include "TimerManager.h"
+#include "Kismet/GameplayStatics.h"
 #include "Components/PrimitiveComponent.h"
+#include "GameFramework/Character.h"
 
-UArch_ShelterManager::UArch_ShelterManager()
+AArch_ShelterManager::AArch_ShelterManager()
 {
-    PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 1.0f;
+    PrimaryActorTick.bCanEverTick = true;
 
-    // Initialize default shelter data
-    ShelterData.ShelterType = EArch_ShelterType::CaveEntrance;
-    ShelterData.ShelterSize = FVector(400.0f, 300.0f, 250.0f);
-    ShelterData.ProtectionRadius = 500.0f;
-    ShelterData.WeatherProtection = 0.8f;
-    ShelterData.TemperatureBonus = 5.0f;
-    ShelterData.bHasFirePit = false;
-    ShelterData.bIsOccupied = false;
-    ShelterData.MaxOccupants = 4;
+    // Create root component
+    RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootComponent"));
 
-    CurrentCondition = 1.0f;
+    // Create shelter mesh component
+    ShelterMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("ShelterMesh"));
+    ShelterMesh->SetupAttachment(RootComponent);
+    ShelterMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+    ShelterMesh->SetCollisionObjectType(ECollisionChannel::ECC_WorldStatic);
+
+    // Create protection zone
+    ProtectionZone = CreateDefaultSubobject<UBoxComponent>(TEXT("ProtectionZone"));
+    ProtectionZone->SetupAttachment(RootComponent);
+    ProtectionZone->SetBoxExtent(FVector(500.0f, 500.0f, 300.0f));
+    ProtectionZone->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+    ProtectionZone->SetCollisionObjectType(ECollisionChannel::ECC_WorldDynamic);
+    ProtectionZone->SetCollisionResponseToAllChannels(ECollisionResponse::ECR_Overlap);
+
+    // Create fire pit mesh
+    FirePitMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("FirePitMesh"));
+    FirePitMesh->SetupAttachment(RootComponent);
+    FirePitMesh->SetRelativeLocation(FVector(0.0f, 0.0f, -50.0f));
+    FirePitMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+
+    // Create storage area mesh
+    StorageAreaMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("StorageAreaMesh"));
+    StorageAreaMesh->SetupAttachment(RootComponent);
+    StorageAreaMesh->SetRelativeLocation(FVector(-200.0f, 200.0f, 0.0f));
+    StorageAreaMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+
+    // Initialize default values
+    bIsOccupied = false;
+    CurrentTemperature = 20.0f;
+    bFireLit = false;
+    FireIntensity = 0.0f;
+    ShelterAge = 0.0f;
     LastMaintenanceTime = 0.0f;
+    bNeedsRepair = false;
 
-    // Initialize default interior elements
-    FArch_InteriorElement FirePit;
-    FirePit.ElementName = TEXT("FirePit");
-    FirePit.RelativeLocation = FVector(0.0f, 0.0f, -50.0f);
-    FirePit.RelativeRotation = FRotator::ZeroRotator;
-    FirePit.Scale = FVector(1.0f, 1.0f, 0.5f);
-    FirePit.bIsActive = false;
-    InteriorElements.Add(FirePit);
-
-    FArch_InteriorElement SleepingArea;
-    SleepingArea.ElementName = TEXT("SleepingArea");
-    SleepingArea.RelativeLocation = FVector(-150.0f, 100.0f, -30.0f);
-    SleepingArea.RelativeRotation = FRotator::ZeroRotator;
-    SleepingArea.Scale = FVector(2.0f, 1.5f, 0.3f);
-    SleepingArea.bIsActive = true;
-    InteriorElements.Add(SleepingArea);
-
-    FArch_InteriorElement ToolStorage;
-    ToolStorage.ElementName = TEXT("ToolStorage");
-    ToolStorage.RelativeLocation = FVector(120.0f, -80.0f, 20.0f);
-    ToolStorage.RelativeRotation = FRotator(0.0f, 45.0f, 0.0f);
-    ToolStorage.Scale = FVector(0.8f, 0.8f, 1.2f);
-    ToolStorage.bIsActive = true;
-    InteriorElements.Add(ToolStorage);
+    // Bind overlap events
+    ProtectionZone->OnComponentBeginOverlap.AddDynamic(this, &AArch_ShelterManager::OnProtectionZoneBeginOverlap);
+    ProtectionZone->OnComponentEndOverlap.AddDynamic(this, &AArch_ShelterManager::OnProtectionZoneEndOverlap);
 }
 
-void UArch_ShelterManager::BeginPlay()
+void AArch_ShelterManager::BeginPlay()
 {
     Super::BeginPlay();
-    
-    CreateMainStructure();
-    CreateInteriorElements();
-    ApplyMaterialsBasedOnType();
-    SetupCollisionAndPhysics();
-    
-    UE_LOG(LogTemp, Warning, TEXT("Arch_ShelterManager: Shelter initialized with type %d"), (int32)ShelterData.ShelterType);
+
+    // Initialize shelter with default configuration
+    InitializeShelter(ShelterConfig);
+
+    // Start update timers
+    GetWorld()->GetTimerManager().SetTimer(
+        ConditionUpdateTimer,
+        [this]() { UpdateShelterConditions(1.0f); },
+        1.0f,
+        true
+    );
+
+    GetWorld()->GetTimerManager().SetTimer(
+        FireUpdateTimer,
+        [this]() { UpdateFireEffects(0.1f); },
+        0.1f,
+        true
+    );
 }
 
-void UArch_ShelterManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void AArch_ShelterManager::Tick(float DeltaTime)
 {
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-    
-    UpdateShelterCondition(DeltaTime);
+    Super::Tick(DeltaTime);
+
+    ShelterAge += DeltaTime;
+    UpdateOccupancyState();
 }
 
-void UArch_ShelterManager::InitializeShelter(EArch_ShelterType InShelterType, FVector InSize)
+void AArch_ShelterManager::InitializeShelter(const FArch_ShelterConfig& Config)
 {
-    ShelterData.ShelterType = InShelterType;
-    ShelterData.ShelterSize = InSize;
-    
-    // Adjust protection values based on shelter type
-    switch (InShelterType)
+    ShelterConfig = Config;
+
+    // Update protection zone size
+    ProtectionZone->SetBoxExtent(FVector(Config.ProtectionRadius, Config.ProtectionRadius, 300.0f));
+
+    // Setup shelter mesh based on type
+    SetupShelterMesh();
+
+    // Setup interior elements
+    SetupInteriorElements();
+
+    UE_LOG(LogTemp, Log, TEXT("Shelter initialized: Type=%d, Protection=%.2f"), 
+           (int32)Config.ShelterType, Config.WeatherProtection);
+}
+
+void AArch_ShelterManager::SetupShelterMesh()
+{
+    if (ShelterMeshVariants.Num() > 0)
     {
-        case EArch_ShelterType::CaveEntrance:
-            ShelterData.WeatherProtection = 0.9f;
-            ShelterData.TemperatureBonus = 8.0f;
-            ShelterData.MaxOccupants = 6;
-            break;
-        case EArch_ShelterType::RockShelter:
-            ShelterData.WeatherProtection = 0.7f;
-            ShelterData.TemperatureBonus = 4.0f;
-            ShelterData.MaxOccupants = 4;
-            break;
-        case EArch_ShelterType::TreeHollow:
-            ShelterData.WeatherProtection = 0.6f;
-            ShelterData.TemperatureBonus = 3.0f;
-            ShelterData.MaxOccupants = 2;
-            break;
-        case EArch_ShelterType::StoneHut:
-            ShelterData.WeatherProtection = 0.8f;
-            ShelterData.TemperatureBonus = 6.0f;
-            ShelterData.MaxOccupants = 5;
-            break;
-        case EArch_ShelterType::LeanTo:
-            ShelterData.WeatherProtection = 0.5f;
-            ShelterData.TemperatureBonus = 2.0f;
-            ShelterData.MaxOccupants = 3;
-            break;
-        case EArch_ShelterType::Windbreak:
-            ShelterData.WeatherProtection = 0.4f;
-            ShelterData.TemperatureBonus = 1.0f;
-            ShelterData.MaxOccupants = 2;
-            break;
-    }
-    
-    CreateMainStructure();
-    ApplyMaterialsBasedOnType();
-}
-
-void UArch_ShelterManager::AddInteriorElement(const FArch_InteriorElement& NewElement)
-{
-    // Check if element with same name already exists
-    for (int32 i = 0; i < InteriorElements.Num(); i++)
-    {
-        if (InteriorElements[i].ElementName == NewElement.ElementName)
+        int32 MeshIndex = FMath::Clamp((int32)ShelterConfig.ShelterType, 0, ShelterMeshVariants.Num() - 1);
+        if (ShelterMeshVariants[MeshIndex])
         {
-            InteriorElements[i] = NewElement;
-            CreateInteriorElements();
-            return;
+            ShelterMesh->SetStaticMesh(ShelterMeshVariants[MeshIndex]);
         }
     }
-    
-    InteriorElements.Add(NewElement);
-    CreateInteriorElements();
-}
 
-void UArch_ShelterManager::RemoveInteriorElement(const FString& ElementName)
-{
-    for (int32 i = InteriorElements.Num() - 1; i >= 0; i--)
+    if (ShelterMaterials.Num() > 0)
     {
-        if (InteriorElements[i].ElementName == ElementName)
+        int32 MaterialIndex = FMath::RandRange(0, ShelterMaterials.Num() - 1);
+        if (ShelterMaterials[MaterialIndex])
         {
-            InteriorElements.RemoveAt(i);
-            break;
+            ShelterMesh->SetMaterial(0, ShelterMaterials[MaterialIndex]);
         }
     }
-    CreateInteriorElements();
 }
 
-bool UArch_ShelterManager::CanProvideProtection(FVector TestLocation) const
+void AArch_ShelterManager::SetupInteriorElements()
 {
-    if (!GetOwner())
+    // Show/hide fire pit based on configuration
+    FirePitMesh->SetVisibility(ShelterConfig.bHasFirePit);
+    FirePitMesh->SetCollisionEnabled(ShelterConfig.bHasFirePit ? ECollisionEnabled::QueryAndPhysics : ECollisionEnabled::NoCollision);
+
+    // Show/hide storage area based on configuration
+    StorageAreaMesh->SetVisibility(ShelterConfig.bHasStorageArea);
+    StorageAreaMesh->SetCollisionEnabled(ShelterConfig.bHasStorageArea ? ECollisionEnabled::QueryAndPhysics : ECollisionEnabled::NoCollision);
+}
+
+bool AArch_ShelterManager::CanEnterShelter(AActor* Actor)
+{
+    if (!Actor || !IsValid(Actor))
     {
         return false;
     }
-    
-    FVector ShelterLocation = GetOwner()->GetActorLocation();
-    float Distance = FVector::Dist(TestLocation, ShelterLocation);
-    
-    return Distance <= ShelterData.ProtectionRadius;
+
+    if (CurrentOccupants.Num() >= ShelterConfig.MaxOccupants)
+    {
+        return false;
+    }
+
+    if (CurrentOccupants.Contains(Actor))
+    {
+        return false;
+    }
+
+    return IsLocationProtected(Actor->GetActorLocation());
 }
 
-float UArch_ShelterManager::GetProtectionLevel(FVector TestLocation) const
+void AArch_ShelterManager::EnterShelter(AActor* Actor)
 {
-    if (!CanProvideProtection(TestLocation))
+    if (CanEnterShelter(Actor))
+    {
+        CurrentOccupants.AddUnique(Actor);
+        UpdateOccupancyState();
+        
+        UE_LOG(LogTemp, Log, TEXT("Actor %s entered shelter. Occupants: %d/%d"), 
+               *Actor->GetName(), CurrentOccupants.Num(), ShelterConfig.MaxOccupants);
+    }
+}
+
+void AArch_ShelterManager::ExitShelter(AActor* Actor)
+{
+    if (CurrentOccupants.Contains(Actor))
+    {
+        CurrentOccupants.Remove(Actor);
+        UpdateOccupancyState();
+        
+        UE_LOG(LogTemp, Log, TEXT("Actor %s exited shelter. Occupants: %d/%d"), 
+               *Actor->GetName(), CurrentOccupants.Num(), ShelterConfig.MaxOccupants);
+    }
+}
+
+void AArch_ShelterManager::LightFire()
+{
+    if (ShelterConfig.bHasFirePit && !bFireLit)
+    {
+        bFireLit = true;
+        FireIntensity = 1.0f;
+        
+        UE_LOG(LogTemp, Log, TEXT("Fire lit in shelter"));
+    }
+}
+
+void AArch_ShelterManager::ExtinguishFire()
+{
+    if (bFireLit)
+    {
+        bFireLit = false;
+        FireIntensity = 0.0f;
+        
+        UE_LOG(LogTemp, Log, TEXT("Fire extinguished in shelter"));
+    }
+}
+
+float AArch_ShelterManager::GetWeatherProtectionAt(const FVector& Location)
+{
+    if (!IsLocationProtected(Location))
     {
         return 0.0f;
     }
-    
-    FVector ShelterLocation = GetOwner()->GetActorLocation();
-    float Distance = FVector::Dist(TestLocation, ShelterLocation);
-    float ProtectionFalloff = 1.0f - (Distance / ShelterData.ProtectionRadius);
-    
-    return ShelterData.WeatherProtection * ProtectionFalloff * CurrentCondition;
+
+    float Distance = FVector::Dist(GetActorLocation(), Location);
+    float MaxDistance = ShelterConfig.ProtectionRadius;
+    float ProtectionFactor = FMath::Clamp(1.0f - (Distance / MaxDistance), 0.0f, 1.0f);
+
+    return ShelterConfig.WeatherProtection * ProtectionFactor;
 }
 
-void UArch_ShelterManager::SetOccupancy(bool bOccupied, int32 NumOccupants)
+float AArch_ShelterManager::GetTemperatureModifierAt(const FVector& Location)
 {
-    ShelterData.bIsOccupied = bOccupied;
+    if (!IsLocationProtected(Location))
+    {
+        return 0.0f;
+    }
+
+    float BaseModifier = ShelterConfig.TemperatureModifier;
     
-    if (bOccupied && NumOccupants <= ShelterData.MaxOccupants)
+    if (bFireLit)
     {
-        // Enable fire pit if shelter is occupied
-        ShelterData.bHasFirePit = true;
-        ToggleFirePit(true);
+        float Distance = FVector::Dist(FirePitMesh->GetComponentLocation(), Location);
+        float FireRange = 300.0f;
+        float FireEffect = FMath::Clamp(1.0f - (Distance / FireRange), 0.0f, 1.0f);
+        BaseModifier += FireEffect * FireIntensity * 10.0f;
     }
-    else if (!bOccupied)
-    {
-        // Disable fire pit if shelter becomes unoccupied
-        ToggleFirePit(false);
-        CurrentOccupants.Empty();
-    }
+
+    return BaseModifier;
 }
 
-void UArch_ShelterManager::ToggleFirePit(bool bActive)
+void AArch_ShelterManager::UpdateShelterConditions(float DeltaTime)
 {
-    ShelterData.bHasFirePit = bActive;
-    
-    // Update fire pit element
-    for (FArch_InteriorElement& Element : InteriorElements)
+    // Update current temperature based on environment and fire
+    float BaseTemp = 20.0f; // Base environmental temperature
+    CurrentTemperature = BaseTemp + ShelterConfig.TemperatureModifier;
+
+    if (bFireLit)
     {
-        if (Element.ElementName == TEXT("FirePit"))
+        CurrentTemperature += FireIntensity * 15.0f;
+    }
+
+    // Check for maintenance needs
+    if (ShelterAge > 86400.0f) // 24 hours
+    {
+        float TimeSinceLastMaintenance = ShelterAge - LastMaintenanceTime;
+        if (TimeSinceLastMaintenance > 172800.0f) // 48 hours
         {
-            Element.bIsActive = bActive;
-            break;
-        }
-    }
-    
-    CreateInteriorElements();
-}
-
-void UArch_ShelterManager::GenerateBiomeSpecificShelter(EBiomeType BiomeType)
-{
-    // Set biome-specific shelter size and type
-    ShelterData.ShelterSize = GetBiomeSpecificSize(BiomeType);
-    
-    // Clear existing interior elements and add biome-specific ones
-    InteriorElements.Empty();
-    InteriorElements = GetBiomeSpecificInterior(BiomeType);
-    
-    // Adjust shelter type based on biome
-    switch (BiomeType)
-    {
-        case EBiomeType::TemperateForest:
-            ShelterData.ShelterType = EArch_ShelterType::TreeHollow;
-            break;
-        case EBiomeType::Mountain:
-            ShelterData.ShelterType = EArch_ShelterType::CaveEntrance;
-            break;
-        case EBiomeType::Swampland:
-            ShelterData.ShelterType = EArch_ShelterType::LeanTo;
-            break;
-        case EBiomeType::Desert:
-            ShelterData.ShelterType = EArch_ShelterType::RockShelter;
-            break;
-        default:
-            ShelterData.ShelterType = EArch_ShelterType::Windbreak;
-            break;
-    }
-    
-    InitializeShelter(ShelterData.ShelterType, ShelterData.ShelterSize);
-}
-
-void UArch_ShelterManager::ApplyWeatheringEffects(float WeatheringLevel)
-{
-    CurrentCondition = FMath::Clamp(1.0f - WeatheringLevel, 0.1f, 1.0f);
-    
-    // Reduce protection values based on weathering
-    float ConditionMultiplier = CurrentCondition;
-    ShelterData.WeatherProtection *= ConditionMultiplier;
-    ShelterData.TemperatureBonus *= ConditionMultiplier;
-}
-
-void UArch_ShelterManager::UpdateShelterCondition(float DeltaTime)
-{
-    // Gradual deterioration over time
-    float DeteriorationRate = 0.00001f; // Very slow deterioration
-    CurrentCondition = FMath::Clamp(CurrentCondition - (DeteriorationRate * DeltaTime), 0.1f, 1.0f);
-    
-    // Faster deterioration if exposed to weather and unoccupied
-    if (!ShelterData.bIsOccupied)
-    {
-        CurrentCondition = FMath::Clamp(CurrentCondition - (DeteriorationRate * 2.0f * DeltaTime), 0.1f, 1.0f);
-    }
-}
-
-void UArch_ShelterManager::CreateMainStructure()
-{
-    if (!GetOwner())
-    {
-        return;
-    }
-    
-    // Find or create main structure mesh component
-    MainStructureMesh = GetOwner()->FindComponentByClass<UStaticMeshComponent>();
-    if (!MainStructureMesh)
-    {
-        MainStructureMesh = NewObject<UStaticMeshComponent>(GetOwner(), TEXT("MainStructureMesh"));
-        GetOwner()->AddInstanceComponent(MainStructureMesh);
-        MainStructureMesh->AttachToComponent(GetOwner()->GetRootComponent(), FAttachmentTransformRules::KeepRelativeTransform);
-    }
-    
-    // Set mesh scale based on shelter size
-    FVector Scale = ShelterData.ShelterSize / 100.0f; // Normalize to reasonable scale
-    MainStructureMesh->SetRelativeScale3D(Scale);
-}
-
-void UArch_ShelterManager::CreateInteriorElements()
-{
-    if (!GetOwner())
-    {
-        return;
-    }
-    
-    // Clear existing interior meshes
-    for (UStaticMeshComponent* Mesh : InteriorMeshes)
-    {
-        if (Mesh)
-        {
-            Mesh->DestroyComponent();
-        }
-    }
-    InteriorMeshes.Empty();
-    
-    // Create new interior element meshes
-    for (const FArch_InteriorElement& Element : InteriorElements)
-    {
-        if (Element.bIsActive)
-        {
-            UStaticMeshComponent* ElementMesh = NewObject<UStaticMeshComponent>(GetOwner(), FName(*Element.ElementName));
-            if (ElementMesh)
-            {
-                GetOwner()->AddInstanceComponent(ElementMesh);
-                ElementMesh->AttachToComponent(GetOwner()->GetRootComponent(), FAttachmentTransformRules::KeepRelativeTransform);
-                ElementMesh->SetRelativeLocation(Element.RelativeLocation);
-                ElementMesh->SetRelativeRotation(Element.RelativeRotation);
-                ElementMesh->SetRelativeScale3D(Element.Scale);
-                InteriorMeshes.Add(ElementMesh);
-            }
+            bNeedsRepair = true;
         }
     }
 }
 
-void UArch_ShelterManager::ApplyMaterialsBasedOnType()
+void AArch_ShelterManager::ApplyWeatherEffects(float RainIntensity, float WindStrength)
 {
-    if (!MainStructureMesh)
+    // Reduce fire intensity during rain
+    if (bFireLit && RainIntensity > 0.1f)
     {
-        return;
-    }
-    
-    // Apply materials based on shelter type
-    switch (ShelterData.ShelterType)
-    {
-        case EArch_ShelterType::CaveEntrance:
-        case EArch_ShelterType::RockShelter:
-        case EArch_ShelterType::StoneHut:
-            if (StoneMaterial)
-            {
-                MainStructureMesh->SetMaterial(0, StoneMaterial);
-            }
-            break;
-        case EArch_ShelterType::TreeHollow:
-        case EArch_ShelterType::LeanTo:
-        case EArch_ShelterType::Windbreak:
-            if (WoodMaterial)
-            {
-                MainStructureMesh->SetMaterial(0, WoodMaterial);
-            }
-            break;
-    }
-    
-    // Apply moss material to some interior elements for realism
-    for (UStaticMeshComponent* Mesh : InteriorMeshes)
-    {
-        if (Mesh && MossMaterial)
+        float RainEffect = RainIntensity * 0.5f;
+        FireIntensity = FMath::Clamp(FireIntensity - RainEffect, 0.0f, 1.0f);
+        
+        if (FireIntensity <= 0.1f)
         {
-            Mesh->SetMaterial(0, MossMaterial);
+            ExtinguishFire();
+        }
+    }
+
+    // Strong winds can affect shelter integrity
+    if (WindStrength > 0.8f && bNeedsRepair)
+    {
+        // Potential for shelter damage during storms
+        UE_LOG(LogTemp, Warning, TEXT("Shelter experiencing stress from strong winds"));
+    }
+}
+
+void AArch_ShelterManager::UpdateFireEffects(float DeltaTime)
+{
+    if (bFireLit)
+    {
+        // Fire naturally diminishes over time
+        FireIntensity = FMath::Clamp(FireIntensity - (DeltaTime * 0.01f), 0.0f, 1.0f);
+        
+        if (FireIntensity <= 0.05f)
+        {
+            ExtinguishFire();
         }
     }
 }
 
-void UArch_ShelterManager::SetupCollisionAndPhysics()
+void AArch_ShelterManager::UpdateOccupancyState()
 {
-    if (!MainStructureMesh)
-    {
-        return;
-    }
-    
-    // Set up collision for shelter
-    MainStructureMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-    MainStructureMesh->SetCollisionResponseToAllChannels(ECollisionResponse::ECR_Block);
-    MainStructureMesh->SetCollisionResponseToChannel(ECollisionChannel::ECC_Pawn, ECollisionResponse::ECR_Overlap);
+    // Clean up invalid actors
+    CurrentOccupants.RemoveAll([](AActor* Actor) {
+        return !IsValid(Actor);
+    });
+
+    bIsOccupied = CurrentOccupants.Num() > 0;
 }
 
-FVector UArch_ShelterManager::GetBiomeSpecificSize(EBiomeType BiomeType) const
+bool AArch_ShelterManager::IsLocationProtected(const FVector& Location)
 {
-    switch (BiomeType)
+    return ProtectionZone->GetCollisionShape().IsInside(ProtectionZone->GetComponentTransform().InverseTransformPosition(Location));
+}
+
+void AArch_ShelterManager::OnProtectionZoneBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
+{
+    if (OtherActor && OtherActor->IsA<ACharacter>())
     {
-        case EBiomeType::TemperateForest:
-            return FVector(300.0f, 300.0f, 400.0f); // Tall tree hollow
-        case EBiomeType::Mountain:
-            return FVector(500.0f, 400.0f, 300.0f); // Wide cave entrance
-        case EBiomeType::Swampland:
-            return FVector(400.0f, 200.0f, 200.0f); // Low lean-to
-        case EBiomeType::Desert:
-            return FVector(350.0f, 250.0f, 180.0f); // Rock overhang
-        default:
-            return FVector(400.0f, 300.0f, 250.0f); // Default size
+        EnterShelter(OtherActor);
     }
 }
 
-TArray<FArch_InteriorElement> UArch_ShelterManager::GetBiomeSpecificInterior(EBiomeType BiomeType) const
+void AArch_ShelterManager::OnProtectionZoneEndOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex)
 {
-    TArray<FArch_InteriorElement> Elements;
-    
-    // Common fire pit
-    FArch_InteriorElement FirePit;
-    FirePit.ElementName = TEXT("FirePit");
-    FirePit.RelativeLocation = FVector(0.0f, 0.0f, -50.0f);
-    FirePit.bIsActive = false;
-    Elements.Add(FirePit);
-    
-    switch (BiomeType)
+    if (OtherActor)
     {
-        case EBiomeType::TemperateForest:
-        {
-            FArch_InteriorElement LeafBed;
-            LeafBed.ElementName = TEXT("LeafBed");
-            LeafBed.RelativeLocation = FVector(-100.0f, 80.0f, -40.0f);
-            LeafBed.Scale = FVector(1.5f, 1.0f, 0.2f);
-            Elements.Add(LeafBed);
-            
-            FArch_InteriorElement BarkStorage;
-            BarkStorage.ElementName = TEXT("BarkStorage");
-            BarkStorage.RelativeLocation = FVector(90.0f, -60.0f, 10.0f);
-            Elements.Add(BarkStorage);
-            break;
-        }
-        case EBiomeType::Mountain:
-        {
-            FArch_InteriorElement StoneSeat;
-            StoneSeat.ElementName = TEXT("StoneSeat");
-            StoneSeat.RelativeLocation = FVector(-150.0f, 0.0f, -30.0f);
-            StoneSeat.Scale = FVector(1.0f, 0.5f, 0.5f);
-            Elements.Add(StoneSeat);
-            
-            FArch_InteriorElement ToolRack;
-            ToolRack.ElementName = TEXT("ToolRack");
-            ToolRack.RelativeLocation = FVector(120.0f, -100.0f, 50.0f);
-            Elements.Add(ToolRack);
-            break;
-        }
-        case EBiomeType::Swampland:
-        {
-            FArch_InteriorElement RaisedPlatform;
-            RaisedPlatform.ElementName = TEXT("RaisedPlatform");
-            RaisedPlatform.RelativeLocation = FVector(-80.0f, 60.0f, 20.0f);
-            RaisedPlatform.Scale = FVector(2.0f, 1.5f, 0.3f);
-            Elements.Add(RaisedPlatform);
-            break;
-        }
-        case EBiomeType::Desert:
-        {
-            FArch_InteriorElement SandBed;
-            SandBed.ElementName = TEXT("SandBed");
-            SandBed.RelativeLocation = FVector(-120.0f, 70.0f, -45.0f);
-            SandBed.Scale = FVector(1.8f, 1.2f, 0.1f);
-            Elements.Add(SandBed);
-            
-            FArch_InteriorElement WaterStorage;
-            WaterStorage.ElementName = TEXT("WaterStorage");
-            WaterStorage.RelativeLocation = FVector(100.0f, -50.0f, -20.0f);
-            Elements.Add(WaterStorage);
-            break;
-        }
+        ExitShelter(OtherActor);
     }
-    
-    return Elements;
 }
