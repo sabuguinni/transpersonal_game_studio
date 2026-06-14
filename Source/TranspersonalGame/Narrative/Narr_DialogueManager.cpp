@@ -1,190 +1,316 @@
 #include "Narr_DialogueManager.h"
 #include "Engine/Engine.h"
-#include "Engine/World.h"
-#include "GameFramework/Actor.h"
+#include "Kismet/GameplayStatics.h"
 
-void UNarr_DialogueManager::Initialize(FSubsystemCollectionBase& Collection)
+ANarr_DialogueManager::ANarr_DialogueManager()
 {
-    Super::Initialize(Collection);
+    PrimaryActorTick.bCanEverTick = false;
     
-    bIsDialogueActive = false;
-    CurrentDialogueIndex = 0;
-    CurrentSpeaker = nullptr;
-    CurrentListener = nullptr;
-    
-    LoadDefaultDialogues();
-    
-    UE_LOG(LogTemp, Log, TEXT("Dialogue Manager initialized with %d sequences"), DialogueDatabase.Num());
+    CurrentDialogue = nullptr;
+    CurrentNodeID = 0;
+    bDialogueActive = false;
 }
 
-void UNarr_DialogueManager::Deinitialize()
+void ANarr_DialogueManager::BeginPlay()
 {
-    EndDialogue();
-    DialogueDatabase.Empty();
-    Super::Deinitialize();
-}
-
-void UNarr_DialogueManager::StartDialogue(const FString& SequenceID, AActor* Speaker, AActor* Listener)
-{
-    if (!Speaker || !Listener)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Cannot start dialogue: Invalid speaker or listener"));
-        return;
-    }
-
-    if (FNarr_DialogueSequence* Sequence = DialogueDatabase.Find(SequenceID))
-    {
-        if (!CheckPrerequisites(Sequence->Prerequisites))
-        {
-            UE_LOG(LogTemp, Warning, TEXT("Dialogue prerequisites not met for sequence: %s"), *SequenceID);
-            return;
-        }
-
-        CurrentSequence = *Sequence;
-        CurrentDialogueIndex = 0;
-        bIsDialogueActive = true;
-        CurrentSpeaker = Speaker;
-        CurrentListener = Listener;
-
-        UE_LOG(LogTemp, Log, TEXT("Started dialogue sequence: %s"), *SequenceID);
-    }
-    else
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Dialogue sequence not found: %s"), *SequenceID);
-    }
-}
-
-void UNarr_DialogueManager::EndDialogue()
-{
-    if (bIsDialogueActive)
-    {
-        bIsDialogueActive = false;
-        CurrentDialogueIndex = 0;
-        CurrentSpeaker = nullptr;
-        CurrentListener = nullptr;
-        CurrentSequence = FNarr_DialogueSequence();
-        
-        UE_LOG(LogTemp, Log, TEXT("Dialogue ended"));
-    }
-}
-
-void UNarr_DialogueManager::AdvanceDialogue()
-{
-    if (!bIsDialogueActive)
-    {
-        return;
-    }
-
-    CurrentDialogueIndex++;
+    Super::BeginPlay();
     
-    if (CurrentDialogueIndex >= CurrentSequence.DialogueEntries.Num())
+    // Initialize default dialogue trees
+    InitializeDefaultDialogues();
+}
+
+bool ANarr_DialogueManager::StartDialogue(const FString& TreeName)
+{
+    FNarr_DialogueTree* FoundTree = FindDialogueTree(TreeName);
+    if (!FoundTree)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Dialogue tree not found: %s"), *TreeName);
+        return false;
+    }
+
+    CurrentDialogue = FoundTree;
+    CurrentNodeID = FoundTree->RootNodeID;
+    bDialogueActive = true;
+
+    UE_LOG(LogTemp, Log, TEXT("Started dialogue: %s"), *TreeName);
+    return true;
+}
+
+bool ANarr_DialogueManager::AdvanceDialogue(int32 ResponseIndex)
+{
+    if (!bDialogueActive || !CurrentDialogue)
+    {
+        return false;
+    }
+
+    FNarr_DialogueNode* CurrentNode = FindNodeByID(CurrentNodeID);
+    if (!CurrentNode)
     {
         EndDialogue();
+        return false;
     }
-    else
-    {
-        UE_LOG(LogTemp, Log, TEXT("Advanced to dialogue entry %d"), CurrentDialogueIndex);
-    }
-}
 
-bool UNarr_DialogueManager::IsDialogueActive() const
-{
-    return bIsDialogueActive;
-}
-
-FNarr_DialogueEntry UNarr_DialogueManager::GetCurrentDialogue() const
-{
-    if (bIsDialogueActive && CurrentSequence.DialogueEntries.IsValidIndex(CurrentDialogueIndex))
+    // Check if this is an end node
+    if (CurrentNode->bIsEndNode || CurrentNode->NextNodeIDs.Num() == 0)
     {
-        return CurrentSequence.DialogueEntries[CurrentDialogueIndex];
+        EndDialogue();
+        return false;
     }
+
+    // Validate response index
+    if (ResponseIndex < 0 || ResponseIndex >= CurrentNode->NextNodeIDs.Num())
+    {
+        ResponseIndex = 0; // Default to first option
+    }
+
+    // Move to next node
+    CurrentNodeID = CurrentNode->NextNodeIDs[ResponseIndex];
     
-    return FNarr_DialogueEntry();
+    UE_LOG(LogTemp, Log, TEXT("Advanced dialogue to node: %d"), CurrentNodeID);
+    return true;
 }
 
-void UNarr_DialogueManager::RegisterDialogueSequence(const FNarr_DialogueSequence& Sequence)
+void ANarr_DialogueManager::EndDialogue()
 {
-    DialogueDatabase.Add(Sequence.SequenceID, Sequence);
-    UE_LOG(LogTemp, Log, TEXT("Registered dialogue sequence: %s"), *Sequence.SequenceID);
-}
-
-TArray<FString> UNarr_DialogueManager::GetAvailableDialogues(AActor* Speaker) const
-{
-    TArray<FString> AvailableDialogues;
+    CurrentDialogue = nullptr;
+    CurrentNodeID = 0;
+    bDialogueActive = false;
     
-    for (const auto& DialoguePair : DialogueDatabase)
+    UE_LOG(LogTemp, Log, TEXT("Dialogue ended"));
+}
+
+FNarr_DialogueLine ANarr_DialogueManager::GetCurrentDialogueLine()
+{
+    if (!bDialogueActive || !CurrentDialogue)
     {
-        if (CheckPrerequisites(DialoguePair.Value.Prerequisites))
+        return FNarr_DialogueLine();
+    }
+
+    FNarr_DialogueNode* CurrentNode = FindNodeByID(CurrentNodeID);
+    if (CurrentNode)
+    {
+        return CurrentNode->DialogueLine;
+    }
+
+    return FNarr_DialogueLine();
+}
+
+TArray<FString> ANarr_DialogueManager::GetCurrentResponseOptions()
+{
+    if (!bDialogueActive || !CurrentDialogue)
+    {
+        return TArray<FString>();
+    }
+
+    FNarr_DialogueNode* CurrentNode = FindNodeByID(CurrentNodeID);
+    if (CurrentNode)
+    {
+        return CurrentNode->DialogueLine.ResponseOptions;
+    }
+
+    return TArray<FString>();
+}
+
+void ANarr_DialogueManager::AddDialogueTree(const FNarr_DialogueTree& NewTree)
+{
+    DialogueTrees.Add(NewTree);
+    UE_LOG(LogTemp, Log, TEXT("Added dialogue tree: %s"), *NewTree.TreeName);
+}
+
+FNarr_DialogueTree* ANarr_DialogueManager::FindDialogueTree(const FString& TreeName)
+{
+    for (FNarr_DialogueTree& Tree : DialogueTrees)
+    {
+        if (Tree.TreeName == TreeName)
         {
-            AvailableDialogues.Add(DialoguePair.Key);
+            return &Tree;
         }
     }
-    
-    return AvailableDialogues;
+    return nullptr;
 }
 
-void UNarr_DialogueManager::LoadDefaultDialogues()
+FNarr_DialogueNode* ANarr_DialogueManager::FindNodeByID(int32 NodeID)
 {
-    // Tribal Elder Krog - Introduction
-    FNarr_DialogueSequence KrogIntro;
-    KrogIntro.SequenceID = TEXT("krog_intro");
-    KrogIntro.bIsRepeatable = false;
-    
-    FNarr_DialogueEntry Entry1;
-    Entry1.SpeakerName = TEXT("Krog");
-    Entry1.DialogueText = FText::FromString(TEXT("The ancient hunting grounds call to you, survivor. I am Krog, keeper of the old ways."));
-    Entry1.Duration = 4.5f;
-    Entry1.ResponseOptions.Add(TEXT("Who are you?"));
-    Entry1.ResponseOptions.Add(TEXT("What dangers lurk here?"));
-    
-    FNarr_DialogueEntry Entry2;
-    Entry2.SpeakerName = TEXT("Krog");
-    Entry2.DialogueText = FText::FromString(TEXT("The great beasts roam these lands - some friend, some foe. Listen well to the wind."));
-    Entry2.Duration = 4.0f;
-    
-    KrogIntro.DialogueEntries.Add(Entry1);
-    KrogIntro.DialogueEntries.Add(Entry2);
-    
-    RegisterDialogueSequence(KrogIntro);
-    
-    // Warning System
-    FNarr_DialogueSequence WarningSequence;
-    WarningSequence.SequenceID = TEXT("predator_warning");
-    WarningSequence.bIsRepeatable = true;
-    
-    FNarr_DialogueEntry Warning;
-    Warning.SpeakerName = TEXT("Warning System");
-    Warning.DialogueText = FText::FromString(TEXT("Warning! Massive predator approaching. Take shelter or prepare for battle."));
-    Warning.Duration = 3.5f;
-    
-    WarningSequence.DialogueEntries.Add(Warning);
-    
-    RegisterDialogueSequence(WarningSequence);
-    
-    // Hunter's Advice
-    FNarr_DialogueSequence HunterAdvice;
-    HunterAdvice.SequenceID = TEXT("hunter_advice");
-    HunterAdvice.bIsRepeatable = true;
-    
-    FNarr_DialogueEntry Advice1;
-    Advice1.SpeakerName = TEXT("Veteran Hunter");
-    Advice1.DialogueText = FText::FromString(TEXT("Track the wounded beasts to their lairs. They are weakest when cornered."));
-    Advice1.Duration = 4.0f;
-    
-    FNarr_DialogueEntry Advice2;
-    Advice2.SpeakerName = TEXT("Veteran Hunter");
-    Advice2.DialogueText = FText::FromString(TEXT("Remember - the pack hunts together. Never face a raptor alone."));
-    Advice2.Duration = 3.8f;
-    
-    HunterAdvice.DialogueEntries.Add(Advice1);
-    HunterAdvice.DialogueEntries.Add(Advice2);
-    
-    RegisterDialogueSequence(HunterAdvice);
+    if (!CurrentDialogue)
+    {
+        return nullptr;
+    }
+
+    for (FNarr_DialogueNode& Node : CurrentDialogue->Nodes)
+    {
+        if (Node.NodeID == NodeID)
+        {
+            return &Node;
+        }
+    }
+    return nullptr;
 }
 
-bool UNarr_DialogueManager::CheckPrerequisites(const TArray<FString>& Prerequisites) const
+void ANarr_DialogueManager::InitializeDefaultDialogues()
 {
-    // For now, assume all prerequisites are met
-    // In a full implementation, this would check game state, completed quests, etc.
-    return true;
+    DialogueTrees.Empty();
+    
+    CreateTribalElderDialogue();
+    CreateScoutDialogue();
+    CreateHunterDialogue();
+    
+    UE_LOG(LogTemp, Log, TEXT("Initialized %d default dialogue trees"), DialogueTrees.Num());
+}
+
+void ANarr_DialogueManager::CreateTribalElderDialogue()
+{
+    FNarr_DialogueTree ElderTree;
+    ElderTree.TreeName = TEXT("TribalElder");
+    ElderTree.RootNodeID = 1;
+
+    // Node 1: Elder greeting
+    FNarr_DialogueNode Node1;
+    Node1.NodeID = 1;
+    Node1.DialogueLine.SpeakerName = TEXT("Tribal Elder");
+    Node1.DialogueLine.DialogueText = TEXT("The great hunters move through these ancient lands. Stone tools and fire separate us from the beasts. What brings you to our territory?");
+    Node1.DialogueLine.AudioURL = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781435730205_Tribal_Elder.mp3");
+    Node1.DialogueLine.Duration = 10.0f;
+    Node1.DialogueLine.ResponseOptions.Add(TEXT("I seek knowledge of survival"));
+    Node1.DialogueLine.ResponseOptions.Add(TEXT("I need shelter for the night"));
+    Node1.DialogueLine.ResponseOptions.Add(TEXT("I must leave immediately"));
+    Node1.NextNodeIDs.Add(2);
+    Node1.NextNodeIDs.Add(3);
+    Node1.NextNodeIDs.Add(4);
+    Node1.bIsEndNode = false;
+
+    // Node 2: Knowledge path
+    FNarr_DialogueNode Node2;
+    Node2.NodeID = 2;
+    Node2.DialogueLine.SpeakerName = TEXT("Tribal Elder");
+    Node2.DialogueLine.DialogueText = TEXT("Wisdom comes through hardship. Watch the sky for storms, the ground for tracks, and always keep your fire burning. The beasts fear flame above all.");
+    Node2.DialogueLine.Duration = 8.0f;
+    Node2.bIsEndNode = true;
+
+    // Node 3: Shelter path
+    FNarr_DialogueNode Node3;
+    Node3.NodeID = 3;
+    Node3.DialogueLine.SpeakerName = TEXT("Tribal Elder");
+    Node3.DialogueLine.DialogueText = TEXT("Rest by our fire tonight, but be gone by dawn. The pack hunters grow bold when strangers linger. Take this advice: never sleep without a spear in hand.");
+    Node3.DialogueLine.Duration = 9.0f;
+    Node3.bIsEndNode = true;
+
+    // Node 4: Leave path
+    FNarr_DialogueNode Node4;
+    Node4.NodeID = 4;
+    Node4.DialogueLine.SpeakerName = TEXT("Tribal Elder");
+    Node4.DialogueLine.DialogueText = TEXT("Go then, but remember - the valley holds many dangers. Trust your instincts and may the spirits of the hunt protect you.");
+    Node4.DialogueLine.Duration = 7.0f;
+    Node4.bIsEndNode = true;
+
+    ElderTree.Nodes.Add(Node1);
+    ElderTree.Nodes.Add(Node2);
+    ElderTree.Nodes.Add(Node3);
+    ElderTree.Nodes.Add(Node4);
+
+    DialogueTrees.Add(ElderTree);
+}
+
+void ANarr_DialogueManager::CreateScoutDialogue()
+{
+    FNarr_DialogueTree ScoutTree;
+    ScoutTree.TreeName = TEXT("Scout");
+    ScoutTree.RootNodeID = 1;
+
+    // Node 1: Scout warning
+    FNarr_DialogueNode Node1;
+    Node1.NodeID = 1;
+    Node1.DialogueLine.SpeakerName = TEXT("Scout");
+    Node1.DialogueLine.DialogueText = TEXT("Danger approaches from the north! The pack hunters circle our territory. Have you seen any signs of the Velociraptors?");
+    Node1.DialogueLine.AudioURL = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781435734326_Scout_Warning.mp3");
+    Node1.DialogueLine.Duration = 8.0f;
+    Node1.DialogueLine.ResponseOptions.Add(TEXT("Yes, I saw tracks near the river"));
+    Node1.DialogueLine.ResponseOptions.Add(TEXT("No, but I'll help hunt them"));
+    Node1.DialogueLine.ResponseOptions.Add(TEXT("I must warn the others"));
+    Node1.NextNodeIDs.Add(2);
+    Node1.NextNodeIDs.Add(3);
+    Node1.NextNodeIDs.Add(4);
+    Node1.bIsEndNode = false;
+
+    // Node 2: Tracks information
+    FNarr_DialogueNode Node2;
+    Node2.NodeID = 2;
+    Node2.DialogueLine.SpeakerName = TEXT("Scout");
+    Node2.DialogueLine.DialogueText = TEXT("The river crossing! That's their hunting ground. We must move quickly before they strike our gathering parties. Take this spear and follow me!");
+    Node2.DialogueLine.Duration = 7.0f;
+    Node2.bIsEndNode = true;
+
+    // Node 3: Join hunt
+    FNarr_DialogueNode Node3;
+    Node3.NodeID = 3;
+    Node3.DialogueLine.SpeakerName = TEXT("Scout");
+    Node3.DialogueLine.DialogueText = TEXT("Good! We need every hunter. They move in packs of three, strike fast and retreat. Stay low, use the rocks for cover, and aim for the leader first.");
+    Node3.DialogueLine.Duration = 8.0f;
+    Node3.bIsEndNode = true;
+
+    // Node 4: Warn others
+    FNarr_DialogueNode Node4;
+    Node4.NodeID = 4;
+    Node4.DialogueLine.SpeakerName = TEXT("Scout");
+    Node4.DialogueLine.DialogueText = TEXT("Yes! Alert the camp immediately. Tell them to gather the children and elderly in the center. The hunters will form a protective circle. Go now!");
+    Node4.DialogueLine.Duration = 8.0f;
+    Node4.bIsEndNode = true;
+
+    ScoutTree.Nodes.Add(Node1);
+    ScoutTree.Nodes.Add(Node2);
+    ScoutTree.Nodes.Add(Node3);
+    ScoutTree.Nodes.Add(Node4);
+
+    DialogueTrees.Add(ScoutTree);
+}
+
+void ANarr_DialogueManager::CreateHunterDialogue()
+{
+    FNarr_DialogueTree HunterTree;
+    HunterTree.TreeName = TEXT("Hunter");
+    HunterTree.RootNodeID = 1;
+
+    // Node 1: Hunter encounter
+    FNarr_DialogueNode Node1;
+    Node1.NodeID = 1;
+    Node1.DialogueLine.SpeakerName = TEXT("Hunter");
+    Node1.DialogueLine.DialogueText = TEXT("You move quietly for an outsider. The great beasts have been restless lately. The Tyrant King stalks the eastern cliffs, and the long-necks flee south. What do you seek in these hunting grounds?");
+    Node1.DialogueLine.Duration = 10.0f;
+    Node1.DialogueLine.ResponseOptions.Add(TEXT("I seek to learn your hunting ways"));
+    Node1.DialogueLine.ResponseOptions.Add(TEXT("I need meat for my journey"));
+    Node1.DialogueLine.ResponseOptions.Add(TEXT("I bring warning of danger"));
+    Node1.NextNodeIDs.Add(2);
+    Node1.NextNodeIDs.Add(3);
+    Node1.NextNodeIDs.Add(4);
+    Node1.bIsEndNode = false;
+
+    // Node 2: Learn hunting
+    FNarr_DialogueNode Node2;
+    Node2.NodeID = 2;
+    Node2.DialogueLine.SpeakerName = TEXT("Hunter");
+    Node2.DialogueLine.DialogueText = TEXT("Patience is the hunter's greatest weapon. Read the wind, follow the dung trails, and never hunt alone. The small ones travel in packs - take one, the others will come for revenge.");
+    Node2.DialogueLine.Duration = 9.0f;
+    Node2.bIsEndNode = true;
+
+    // Node 3: Need meat
+    FNarr_DialogueNode Node3;
+    Node3.NodeID = 3;
+    Node3.DialogueLine.SpeakerName = TEXT("Hunter");
+    Node3.DialogueLine.DialogueText = TEXT("Meat must be earned, not given. But I have extra from yesterday's kill. Take this dried flesh, but remember - next time you must hunt for yourself or starve.");
+    Node3.DialogueLine.Duration = 8.0f;
+    Node3.bIsEndNode = true;
+
+    // Node 4: Warning
+    FNarr_DialogueNode Node4;
+    Node4.NodeID = 4;
+    Node4.DialogueLine.SpeakerName = TEXT("Hunter");
+    Node4.DialogueLine.DialogueText = TEXT("Speak quickly! What danger? If it threatens the hunting grounds, every hunter must know. The survival of the tribe depends on these lands remaining safe.");
+    Node4.DialogueLine.Duration = 8.0f;
+    Node4.bIsEndNode = true;
+
+    HunterTree.Nodes.Add(Node1);
+    HunterTree.Nodes.Add(Node2);
+    HunterTree.Nodes.Add(Node3);
+    HunterTree.Nodes.Add(Node4);
+
+    DialogueTrees.Add(HunterTree);
 }
