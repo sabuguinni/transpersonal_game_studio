@@ -1,147 +1,174 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/Engine.h"
+#include "Engine/GameInstanceSubsystem.h"
 #include "Components/ActorComponent.h"
-#include "Physics/PhysicsInterfaceCore.h"
-#include "Chaos/ChaosEngineInterface.h"
+#include "Engine/World.h"
+#include "PhysicsEngine/PhysicsSettings.h"
 #include "SharedTypes.h"
 #include "Core_PhysicsIntegration.generated.h"
 
+class UCore_PhysicsCore;
+class UEng_SystemRegistry;
+
 /**
- * Core Physics Integration System
- * Manages integration between UE5 Chaos Physics and custom physics systems
- * Handles physics material properties, collision responses, and performance optimization
+ * Core Physics Integration Subsystem
+ * Integrates physics systems with SystemRegistry and provides centralized physics management
+ * for survival gameplay mechanics including terrain interaction, character physics, and dinosaur behavior
  */
-UCLASS(BlueprintType, Blueprintable, ClassGroup=(TranspersonalGame))
-class TRANSPERSONALGAME_API UCore_PhysicsIntegration : public UActorComponent
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API UCore_PhysicsIntegration : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
 public:
     UCore_PhysicsIntegration();
 
+    // USubsystem interface
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
+
+    /**
+     * Initialize physics systems through SystemRegistry
+     * Called by SystemRegistry during controlled initialization
+     */
+    UFUNCTION(BlueprintCallable, Category = "Core Physics Integration")
+    bool InitializePhysicsSystems();
+
+    /**
+     * Shutdown physics systems
+     * Called by SystemRegistry during controlled shutdown
+     */
+    UFUNCTION(BlueprintCallable, Category = "Core Physics Integration")
+    void ShutdownPhysicsSystems();
+
+    /**
+     * Get physics system status
+     * Returns current initialization and health status
+     */
+    UFUNCTION(BlueprintCallable, Category = "Core Physics Integration")
+    ECore_SystemStatus GetPhysicsSystemStatus() const;
+
+    /**
+     * Register physics system with SystemRegistry
+     * Ensures proper lifecycle management
+     */
+    UFUNCTION(BlueprintCallable, Category = "Core Physics Integration")
+    bool RegisterWithSystemRegistry();
+
+    /**
+     * Apply survival physics profile to character
+     * Configures physics for realistic survival gameplay
+     */
+    UFUNCTION(BlueprintCallable, Category = "Core Physics Integration")
+    void ApplySurvivalPhysicsProfile(AActor* Character);
+
+    /**
+     * Apply dinosaur physics profile
+     * Configures physics for dinosaur AI and behavior
+     */
+    UFUNCTION(BlueprintCallable, Category = "Core Physics Integration")
+    void ApplyDinosaurPhysicsProfile(AActor* Dinosaur, ECore_DinosaurSize DinosaurSize);
+
+    /**
+     * Configure terrain physics interaction
+     * Sets up terrain-specific physics responses
+     */
+    UFUNCTION(BlueprintCallable, Category = "Core Physics Integration")
+    void ConfigureTerrainPhysics(AActor* TerrainActor, ECore_TerrainType TerrainType);
+
+    /**
+     * Enable ragdoll physics for survival scenarios
+     * Handles character death, unconsciousness, and impact physics
+     */
+    UFUNCTION(BlueprintCallable, Category = "Core Physics Integration")
+    void EnableSurvivalRagdoll(AActor* Character, float ImpactForce = 1000.0f);
+
+    /**
+     * Configure projectile physics for primitive weapons
+     * Handles spears, rocks, and other thrown weapons
+     */
+    UFUNCTION(BlueprintCallable, Category = "Core Physics Integration")
+    void ConfigureProjectilePhysics(AActor* Projectile, float Mass = 0.5f, float Drag = 0.1f);
+
+    /**
+     * Update physics simulation quality based on performance
+     * Dynamically adjusts physics quality for optimal performance
+     */
+    UFUNCTION(BlueprintCallable, Category = "Core Physics Integration")
+    void UpdatePhysicsQuality(float DeltaTime);
+
+    /**
+     * Get physics performance metrics
+     * Returns current physics system performance data
+     */
+    UFUNCTION(BlueprintCallable, Category = "Core Physics Integration")
+    FCore_PhysicsMetrics GetPhysicsMetrics() const;
+
+    /**
+     * Validate physics system integrity
+     * Checks for physics system errors and inconsistencies
+     */
+    UFUNCTION(BlueprintCallable, Category = "Core Physics Integration")
+    bool ValidatePhysicsIntegrity();
+
 protected:
-    virtual void BeginPlay() override;
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+    /** Reference to core physics system */
+    UPROPERTY(BlueprintReadOnly, Category = "Core Physics Integration")
+    UCore_PhysicsCore* PhysicsCore;
 
-public:
-    // Physics Material Management
-    UFUNCTION(BlueprintCallable, Category = "Physics Integration")
-    void SetPhysicsMaterial(UPhysicalMaterial* Material);
+    /** Reference to system registry */
+    UPROPERTY(BlueprintReadOnly, Category = "Core Physics Integration")
+    UEng_SystemRegistry* SystemRegistry;
 
-    UFUNCTION(BlueprintCallable, Category = "Physics Integration")
-    UPhysicalMaterial* GetCurrentPhysicsMaterial() const;
+    /** Current physics system status */
+    UPROPERTY(BlueprintReadOnly, Category = "Core Physics Integration")
+    ECore_SystemStatus PhysicsStatus;
 
-    // Collision Response System
-    UFUNCTION(BlueprintCallable, Category = "Physics Integration")
-    void ConfigureCollisionResponse(ECollisionResponse ResponseType);
+    /** Physics performance metrics */
+    UPROPERTY(BlueprintReadOnly, Category = "Core Physics Integration")
+    FCore_PhysicsMetrics CurrentMetrics;
 
-    UFUNCTION(BlueprintCallable, Category = "Physics Integration")
-    void SetCollisionObjectType(ECollisionChannel ObjectType);
+    /** Physics quality level (0.0 = lowest, 1.0 = highest) */
+    UPROPERTY(BlueprintReadOnly, Category = "Core Physics Integration", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float PhysicsQualityLevel;
 
-    // Performance Optimization
-    UFUNCTION(BlueprintCallable, Category = "Physics Integration")
-    void OptimizePhysicsPerformance(bool bEnableOptimization);
+    /** Time since last physics update */
+    UPROPERTY(BlueprintReadOnly, Category = "Core Physics Integration")
+    float TimeSinceLastUpdate;
 
-    UFUNCTION(BlueprintCallable, Category = "Physics Integration")
-    void SetPhysicsLOD(int32 LODLevel);
-
-    // Physics State Management
-    UFUNCTION(BlueprintCallable, Category = "Physics Integration")
-    void EnablePhysicsSimulation(bool bEnable);
-
-    UFUNCTION(BlueprintCallable, Category = "Physics Integration")
-    bool IsPhysicsSimulationEnabled() const;
-
-    // Force Application System
-    UFUNCTION(BlueprintCallable, Category = "Physics Integration")
-    void ApplyForce(const FVector& Force, const FVector& Location);
-
-    UFUNCTION(BlueprintCallable, Category = "Physics Integration")
-    void ApplyImpulse(const FVector& Impulse, const FVector& Location);
-
-    UFUNCTION(BlueprintCallable, Category = "Physics Integration")
-    void ApplyTorque(const FVector& Torque);
-
-    // Physics Query System
-    UFUNCTION(BlueprintCallable, Category = "Physics Integration")
-    bool LineTrace(const FVector& Start, const FVector& End, FHitResult& HitResult);
-
-    UFUNCTION(BlueprintCallable, Category = "Physics Integration")
-    bool SphereTrace(const FVector& Start, const FVector& End, float Radius, FHitResult& HitResult);
-
-    UFUNCTION(BlueprintCallable, Category = "Physics Integration")
-    bool BoxTrace(const FVector& Start, const FVector& End, const FVector& HalfSize, FHitResult& HitResult);
-
-protected:
-    // Physics Material Properties
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Material", meta = (AllowPrivateAccess = "true"))
-    UPhysicalMaterial* CurrentPhysicsMaterial;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Material", meta = (AllowPrivateAccess = "true"))
-    float Friction;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Material", meta = (AllowPrivateAccess = "true"))
-    float Restitution;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Material", meta = (AllowPrivateAccess = "true"))
-    float Density;
-
-    // Collision Configuration
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision", meta = (AllowPrivateAccess = "true"))
-    TEnumAsByte<ECollisionChannel> CollisionObjectType;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision", meta = (AllowPrivateAccess = "true"))
-    TEnumAsByte<ECollisionResponse> CollisionResponseToWorld;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision", meta = (AllowPrivateAccess = "true"))
-    TEnumAsByte<ECollisionResponse> CollisionResponseToPawn;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision", meta = (AllowPrivateAccess = "true"))
-    TEnumAsByte<ECollisionResponse> CollisionResponseToVehicle;
-
-    // Performance Settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance", meta = (AllowPrivateAccess = "true"))
-    bool bOptimizePerformance;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance", meta = (AllowPrivateAccess = "true"))
-    int32 PhysicsLODLevel;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance", meta = (AllowPrivateAccess = "true"))
-    float MaxSimulationDistance;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance", meta = (AllowPrivateAccess = "true"))
-    float CullingDistance;
-
-    // Physics State
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics State", meta = (AllowPrivateAccess = "true"))
-    bool bPhysicsEnabled;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics State", meta = (AllowPrivateAccess = "true"))
-    bool bGravityEnabled;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics State", meta = (AllowPrivateAccess = "true"))
-    FVector CustomGravity;
-
-    // Force Application
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Forces", meta = (AllowPrivateAccess = "true"))
-    float MaxForceMultiplier;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Forces", meta = (AllowPrivateAccess = "true"))
-    float MaxImpulseMultiplier;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Forces", meta = (AllowPrivateAccess = "true"))
-    float MaxTorqueMultiplier;
+    /** Physics update frequency in seconds */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Core Physics Integration", meta = (ClampMin = "0.016", ClampMax = "1.0"))
+    float PhysicsUpdateFrequency;
 
 private:
-    // Internal Physics Management
-    void InitializePhysicsSettings();
-    void UpdatePhysicsLOD();
-    void ValidatePhysicsState();
-    
-    // Performance Monitoring
-    float LastPerformanceCheck;
-    int32 PhysicsObjectCount;
-    float AverageFrameTime;
+    /** Internal initialization flag */
+    bool bIsInitialized;
+
+    /** Internal shutdown flag */
+    bool bIsShuttingDown;
+
+    /** Performance monitoring timer */
+    float PerformanceTimer;
+
+    /** Last frame physics time */
+    float LastPhysicsTime;
+
+    /**
+     * Internal method to setup physics profiles
+     * Configures default physics profiles for different object types
+     */
+    void SetupPhysicsProfiles();
+
+    /**
+     * Internal method to validate system dependencies
+     * Ensures all required systems are available
+     */
+    bool ValidateSystemDependencies() const;
+
+    /**
+     * Internal method to update performance metrics
+     * Calculates and updates physics performance data
+     */
+    void UpdatePerformanceMetrics(float DeltaTime);
 };
