@@ -4,43 +4,38 @@
 #include "Engine/GameInstanceSubsystem.h"
 #include "Eng_CompilationValidator.generated.h"
 
-UENUM(BlueprintType)
-enum class EEng_CompilationStatus : uint8
-{
-    NotTested,
-    Compiling,
-    Success,
-    Failed,
-    Warning
-};
-
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEng_ClassValidationResult
+struct TRANSPERSONALGAME_API FEng_ClassValidation
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
+    UPROPERTY(BlueprintReadOnly)
     FString ClassName;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    EEng_CompilationStatus Status;
+    UPROPERTY(BlueprintReadOnly)
+    bool bIsLoaded;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
+    UPROPERTY(BlueprintReadOnly)
+    bool bHasValidCDO;
+
+    UPROPERTY(BlueprintReadOnly)
+    int32 PropertyCount;
+
+    UPROPERTY(BlueprintReadOnly)
+    int32 FunctionCount;
+
+    UPROPERTY(BlueprintReadOnly)
     FString ErrorMessage;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    float ValidationTime;
-
-    FEng_ClassValidationResult()
-    {
-        ClassName = TEXT("");
-        Status = EEng_CompilationStatus::NotTested;
-        ErrorMessage = TEXT("");
-        ValidationTime = 0.0f;
-    }
+    FEng_ClassValidation()
+        : bIsLoaded(false)
+        , bHasValidCDO(false)
+        , PropertyCount(0)
+        , FunctionCount(0)
+    {}
 };
 
-UCLASS(BlueprintType)
+UCLASS()
 class TRANSPERSONALGAME_API UEng_CompilationValidator : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
@@ -48,36 +43,28 @@ class TRANSPERSONALGAME_API UEng_CompilationValidator : public UGameInstanceSubs
 public:
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
 
-    UFUNCTION(BlueprintCallable, Category = "Compilation")
+    UFUNCTION(BlueprintCallable, Category = "Compilation Validator")
     void ValidateAllClasses();
 
-    UFUNCTION(BlueprintCallable, Category = "Compilation")
-    bool ValidateClass(const FString& ClassPath);
+    UFUNCTION(BlueprintCallable, Category = "Compilation Validator")
+    FEng_ClassValidation ValidateClass(const FString& ClassName);
 
-    UFUNCTION(BlueprintCallable, Category = "Compilation")
-    TArray<FEng_ClassValidationResult> GetValidationResults() const;
+    UFUNCTION(BlueprintCallable, Category = "Compilation Validator")
+    TArray<FEng_ClassValidation> GetValidationResults() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Compilation")
-    int32 GetFailedClassCount() const;
+    UFUNCTION(BlueprintCallable, Category = "Compilation Validator")
+    bool AreAllClassesValid() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Compilation")
-    float GetOverallValidationTime() const;
-
-protected:
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    TArray<FEng_ClassValidationResult> ValidationResults;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    bool bValidationInProgress;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    float TotalValidationTime;
+    UFUNCTION(BlueprintCallable, Category = "Compilation Validator")
+    void GenerateValidationReport();
 
 private:
-    void ValidateTranspersonalClasses();
-    void ValidateEngineClasses();
-    FEng_ClassValidationResult TestClassAvailability(const FString& ClassPath);
-    void LogValidationSummary();
+    UPROPERTY()
+    TArray<FEng_ClassValidation> ValidationResults;
+
+    TArray<FString> GetKnownClasses() const;
+    bool ValidateClassProperties(UClass* Class, FEng_ClassValidation& Validation);
+    bool ValidateClassFunctions(UClass* Class, FEng_ClassValidation& Validation);
 };
 
 #include "Eng_CompilationValidator.generated.h"
