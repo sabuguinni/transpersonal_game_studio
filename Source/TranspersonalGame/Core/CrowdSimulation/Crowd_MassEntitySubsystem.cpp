@@ -1,45 +1,51 @@
 #include "Crowd_MassEntitySubsystem.h"
-#include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "Engine/StaticMeshActor.h"
-#include "Components/StaticMeshComponent.h"
-#include "UObject/ConstructorHelpers.h"
+#include "Engine/Engine.h"
 #include "Kismet/GameplayStatics.h"
+#include "DrawDebugHelpers.h"
 
 void UCrowd_MassEntitySubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
     
-    UE_LOG(LogTemp, Warning, TEXT("Crowd Mass Entity Subsystem Initialized"));
+    MaxCrowdEntities = 1000;
+    LODUpdateInterval = 0.1f;
+    HighLODDistance = 1000.0f;
+    MediumLODDistance = 2500.0f;
+    CullDistance = 5000.0f;
+    LODUpdateTimer = 0.0f;
     
-    // Reserve space for entities
-    EntityData.Reserve(1000);
-    EntityActors.Reserve(1000);
+    CrowdEntities.Reserve(MaxCrowdEntities);
+    
+    UE_LOG(LogTemp, Log, TEXT("Crowd Mass Entity Subsystem Initialized"));
 }
 
 void UCrowd_MassEntitySubsystem::Deinitialize()
 {
-    // Clean up all spawned actors
-    for (AActor* Actor : EntityActors)
-    {
-        if (IsValid(Actor))
-        {
-            Actor->Destroy();
-        }
-    }
-    
-    EntityData.Empty();
-    EntityActors.Empty();
+    CrowdEntities.Empty();
+    Waypoints.Empty();
     
     Super::Deinitialize();
 }
 
 void UCrowd_MassEntitySubsystem::Tick(float DeltaTime)
 {
-    if (EntityData.Num() > 0)
+    if (!GetWorld())
     {
-        UpdateEntityMovement(DeltaTime);
-        UpdateEntityLOD();
+        return;
+    }
+    
+    ProcessCrowdMovement(DeltaTime);
+    
+    LODUpdateTimer += DeltaTime;
+    if (LODUpdateTimer >= LODUpdateInterval)
+    {
+        APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
+        if (PlayerPawn)
+        {
+            UpdateCrowdLOD(PlayerPawn->GetActorLocation());
+        }
+        LODUpdateTimer = 0.0f;
     }
 }
 
@@ -48,180 +54,167 @@ bool UCrowd_MassEntitySubsystem::ShouldCreateSubsystem(UObject* Outer) const
     return true;
 }
 
-void UCrowd_MassEntitySubsystem::SpawnCrowdEntities(int32 Count, FVector SpawnCenter, float SpawnRadius)
+void UCrowd_MassEntitySubsystem::SpawnCrowdEntities(int32 Count, const FVector& Center, float Radius)
 {
-    UWorld* World = GetWorld();
-    if (!World)
+    if (!GetWorld())
     {
         return;
     }
-
-    for (int32 i = 0; i < Count; i++)
+    
+    int32 ActualCount = FMath::Min(Count, MaxCrowdEntities - CrowdEntities.Num());
+    
+    for (int32 i = 0; i < ActualCount; i++)
     {
-        // Generate random position within spawn radius
-        float Angle = FMath::RandRange(0.0f, 2.0f * PI);
-        float Distance = FMath::RandRange(0.0f, SpawnRadius);
+        FCrowd_EntityData NewEntity;
         
-        FVector SpawnLocation = SpawnCenter + FVector(
-            Distance * FMath::Cos(Angle),
-            Distance * FMath::Sin(Angle),
+        float Angle = FMath::RandRange(0.0f, 2.0f * PI);
+        float Distance = FMath::RandRange(0.0f, Radius);
+        
+        NewEntity.Location = Center + FVector(
+            FMath::Cos(Angle) * Distance,
+            FMath::Sin(Angle) * Distance,
             0.0f
         );
-
-        // Spawn static mesh actor
-        AStaticMeshActor* NewActor = World->SpawnActor<AStaticMeshActor>(
-            AStaticMeshActor::StaticClass(),
-            SpawnLocation,
-            FRotator::ZeroRotator
-        );
-
-        if (NewActor)
-        {
-            // Set basic cube mesh
-            UStaticMeshComponent* MeshComp = NewActor->GetStaticMeshComponent();
-            if (MeshComp)
-            {
-                static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeMeshAsset(TEXT("/Engine/BasicShapes/Cube"));
-                if (CubeMeshAsset.Succeeded())
-                {
-                    MeshComp->SetStaticMesh(CubeMeshAsset.Object);
-                    MeshComp->SetWorldScale3D(FVector(0.5f, 0.5f, 1.8f)); // Human-like proportions
-                }
-            }
-
-            NewActor->SetActorLabel(FString::Printf(TEXT("CrowdEntity_%d"), i));
-            EntityActors.Add(NewActor);
-
-            // Create entity data
-            FCrowd_EntityData NewEntity;
-            NewEntity.Position = SpawnLocation;
-            NewEntity.Velocity = FVector(
-                FMath::RandRange(-50.0f, 50.0f),
-                FMath::RandRange(-50.0f, 50.0f),
-                0.0f
-            );
-            NewEntity.Speed = FMath::RandRange(80.0f, 120.0f);
-            NewEntity.LODLevel = 0;
-            NewEntity.bIsActive = true;
-
-            EntityData.Add(NewEntity);
-        }
-    }
-
-    UE_LOG(LogTemp, Warning, TEXT("Spawned %d crowd entities"), Count);
-}
-
-void UCrowd_MassEntitySubsystem::UpdateEntityMovement(float DeltaTime)
-{
-    for (int32 i = 0; i < EntityData.Num(); i++)
-    {
-        if (!EntityData[i].bIsActive || i >= EntityActors.Num())
-        {
-            continue;
-        }
-
-        AActor* Actor = EntityActors[i];
-        if (!IsValid(Actor))
-        {
-            continue;
-        }
-
-        // Simple movement update
-        FVector NewPosition = EntityData[i].Position + (EntityData[i].Velocity * DeltaTime);
-        EntityData[i].Position = NewPosition;
         
-        Actor->SetActorLocation(NewPosition);
-
-        // Random direction change occasionally
-        if (FMath::RandRange(0.0f, 1.0f) < 0.01f) // 1% chance per frame
-        {
-            EntityData[i].Velocity = FVector(
-                FMath::RandRange(-EntityData[i].Speed, EntityData[i].Speed),
-                FMath::RandRange(-EntityData[i].Speed, EntityData[i].Speed),
-                0.0f
-            );
-        }
-    }
-}
-
-void UCrowd_MassEntitySubsystem::UpdateEntityLOD(const FVector& ViewerPosition)
-{
-    for (int32 i = 0; i < EntityData.Num(); i++)
-    {
-        if (i >= EntityActors.Num())
-        {
-            continue;
-        }
-
-        AActor* Actor = EntityActors[i];
-        if (!IsValid(Actor))
-        {
-            continue;
-        }
-
-        float Distance = FVector::Dist(ViewerPosition, EntityData[i].Position);
+        NewEntity.Speed = FMath::RandRange(80.0f, 150.0f);
+        NewEntity.Velocity = FVector(
+            FMath::RandRange(-1.0f, 1.0f),
+            FMath::RandRange(-1.0f, 1.0f),
+            0.0f
+        ).GetSafeNormal() * NewEntity.Speed;
         
-        UStaticMeshComponent* MeshComp = Actor->FindComponentByClass<UStaticMeshComponent>();
-        if (MeshComp)
-        {
-            if (Distance < LODDistance_High)
-            {
-                EntityData[i].LODLevel = 0; // High LOD
-                MeshComp->SetWorldScale3D(FVector(0.5f, 0.5f, 1.8f));
-                MeshComp->SetVisibility(true);
-            }
-            else if (Distance < LODDistance_Medium)
-            {
-                EntityData[i].LODLevel = 1; // Medium LOD
-                MeshComp->SetWorldScale3D(FVector(0.4f, 0.4f, 1.5f));
-                MeshComp->SetVisibility(true);
-            }
-            else if (Distance < LODDistance_Low)
-            {
-                EntityData[i].LODLevel = 2; // Low LOD
-                MeshComp->SetWorldScale3D(FVector(0.3f, 0.3f, 1.0f));
-                MeshComp->SetVisibility(true);
-            }
-            else
-            {
-                EntityData[i].LODLevel = 3; // Culled
-                MeshComp->SetVisibility(false);
-            }
-        }
+        NewEntity.LODLevel = 0;
+        NewEntity.bIsActive = true;
+        
+        CrowdEntities.Add(NewEntity);
     }
-}
-
-void UCrowd_MassEntitySubsystem::UpdateEntityLOD()
-{
-    // Get player position for LOD calculation
-    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
-    FVector ViewerPosition = PlayerPawn ? PlayerPawn->GetActorLocation() : FVector::ZeroVector;
     
-    UpdateEntityLOD(ViewerPosition);
+    UE_LOG(LogTemp, Log, TEXT("Spawned %d crowd entities at %s"), ActualCount, *Center.ToString());
 }
 
-void UCrowd_MassEntitySubsystem::CullDistantEntities(const FVector& ViewerPosition)
+void UCrowd_MassEntitySubsystem::UpdateCrowdLOD(const FVector& PlayerLocation)
 {
-    for (int32 i = 0; i < EntityData.Num(); i++)
+    for (FCrowd_EntityData& Entity : CrowdEntities)
     {
-        float Distance = FVector::Dist(ViewerPosition, EntityData[i].Position);
-        EntityData[i].bIsActive = (Distance < CullDistance);
+        if (Entity.bIsActive)
+        {
+            UpdateEntityLOD(Entity, PlayerLocation);
+        }
     }
 }
 
-void UCrowd_MassEntitySubsystem::SetEntityMovementTarget(int32 EntityIndex, const FVector& TargetPosition)
+void UCrowd_MassEntitySubsystem::UpdateEntityLOD(FCrowd_EntityData& Entity, const FVector& PlayerLocation)
 {
-    if (EntityIndex >= 0 && EntityIndex < EntityData.Num())
+    float Distance = FVector::Dist(Entity.Location, PlayerLocation);
+    
+    if (Distance > CullDistance)
     {
-        FVector Direction = (TargetPosition - EntityData[EntityIndex].Position).GetSafeNormal();
-        EntityData[EntityIndex].Velocity = Direction * EntityData[EntityIndex].Speed;
+        Entity.LODLevel = static_cast<int32>(ECrowd_LODLevel::Culled);
+        Entity.bIsActive = false;
+    }
+    else if (Distance > MediumLODDistance)
+    {
+        Entity.LODLevel = static_cast<int32>(ECrowd_LODLevel::Low);
+        Entity.bIsActive = true;
+    }
+    else if (Distance > HighLODDistance)
+    {
+        Entity.LODLevel = static_cast<int32>(ECrowd_LODLevel::Medium);
+        Entity.bIsActive = true;
+    }
+    else
+    {
+        Entity.LODLevel = static_cast<int32>(ECrowd_LODLevel::High);
+        Entity.bIsActive = true;
     }
 }
 
-int32 UCrowd_MassEntitySubsystem::GetActiveEntityCount() const
+void UCrowd_MassEntitySubsystem::ProcessCrowdMovement(float DeltaTime)
+{
+    for (int32 i = 0; i < CrowdEntities.Num(); i++)
+    {
+        FCrowd_EntityData& Entity = CrowdEntities[i];
+        
+        if (!Entity.bIsActive || Entity.LODLevel >= static_cast<int32>(ECrowd_LODLevel::Culled))
+        {
+            continue;
+        }
+        
+        FVector FlockingForce = CalculateFlockingBehavior(Entity, i);
+        Entity.Velocity += FlockingForce * DeltaTime;
+        Entity.Velocity = Entity.Velocity.GetClampedToMaxSize(Entity.Speed);
+        
+        Entity.Location += Entity.Velocity * DeltaTime;
+        
+        if (GetWorld() && Entity.LODLevel == static_cast<int32>(ECrowd_LODLevel::High))
+        {
+            DrawDebugSphere(GetWorld(), Entity.Location, 25.0f, 8, FColor::Green, false, 0.1f);
+        }
+    }
+}
+
+FVector UCrowd_MassEntitySubsystem::CalculateFlockingBehavior(const FCrowd_EntityData& Entity, int32 EntityIndex)
+{
+    FVector Separation = FVector::ZeroVector;
+    FVector Alignment = FVector::ZeroVector;
+    FVector Cohesion = FVector::ZeroVector;
+    
+    int32 NeighborCount = 0;
+    float NeighborRadius = 200.0f;
+    
+    for (int32 i = 0; i < CrowdEntities.Num(); i++)
+    {
+        if (i == EntityIndex || !CrowdEntities[i].bIsActive)
+        {
+            continue;
+        }
+        
+        float Distance = FVector::Dist(Entity.Location, CrowdEntities[i].Location);
+        
+        if (Distance < NeighborRadius)
+        {
+            FVector Diff = Entity.Location - CrowdEntities[i].Location;
+            if (Distance > 0.0f)
+            {
+                Separation += Diff.GetSafeNormal() / Distance;
+            }
+            
+            Alignment += CrowdEntities[i].Velocity;
+            Cohesion += CrowdEntities[i].Location;
+            NeighborCount++;
+        }
+    }
+    
+    if (NeighborCount > 0)
+    {
+        Alignment /= NeighborCount;
+        Alignment = Alignment.GetSafeNormal() * Entity.Speed;
+        Alignment = (Alignment - Entity.Velocity).GetClampedToMaxSize(50.0f);
+        
+        Cohesion /= NeighborCount;
+        Cohesion = (Cohesion - Entity.Location).GetSafeNormal() * Entity.Speed;
+        Cohesion = (Cohesion - Entity.Velocity).GetClampedToMaxSize(30.0f);
+    }
+    
+    Separation = Separation.GetClampedToMaxSize(100.0f);
+    
+    return (Separation * 1.5f + Alignment * 1.0f + Cohesion * 1.0f);
+}
+
+void UCrowd_MassEntitySubsystem::SetCrowdBehavior(int32 EntityIndex, const FVector& TargetLocation)
+{
+    if (CrowdEntities.IsValidIndex(EntityIndex))
+    {
+        FCrowd_EntityData& Entity = CrowdEntities[EntityIndex];
+        FVector Direction = (TargetLocation - Entity.Location).GetSafeNormal();
+        Entity.Velocity = Direction * Entity.Speed;
+    }
+}
+
+int32 UCrowd_MassEntitySubsystem::GetActiveCrowdCount() const
 {
     int32 ActiveCount = 0;
-    for (const FCrowd_EntityData& Entity : EntityData)
+    for (const FCrowd_EntityData& Entity : CrowdEntities)
     {
         if (Entity.bIsActive)
         {
@@ -229,4 +222,16 @@ int32 UCrowd_MassEntitySubsystem::GetActiveEntityCount() const
         }
     }
     return ActiveCount;
+}
+
+void UCrowd_MassEntitySubsystem::CullDistantEntities(const FVector& PlayerLocation, float CullDistance)
+{
+    for (FCrowd_EntityData& Entity : CrowdEntities)
+    {
+        float Distance = FVector::Dist(Entity.Location, PlayerLocation);
+        if (Distance > CullDistance)
+        {
+            Entity.bIsActive = false;
+        }
+    }
 }
