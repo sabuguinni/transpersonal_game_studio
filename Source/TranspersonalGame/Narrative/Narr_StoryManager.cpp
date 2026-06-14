@@ -1,142 +1,125 @@
 #include "Narr_StoryManager.h"
-#include "Engine/Engine.h"
-#include "Kismet/GameplayStatics.h"
+#include "Engine/World.h"
+#include "TimerManager.h"
+
+UNarr_StoryManager::UNarr_StoryManager()
+{
+    CurrentPhase = ENarr_StoryPhase::Awakening;
+    GameStartTime = 0.0f;
+}
 
 void UNarr_StoryManager::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
     
-    InitializeChapterTitles();
+    GameStartTime = FPlatformTime::Seconds();
+    InitializeStoryEvents();
     
-    // Initialize default story state
-    StoryState = FNarr_StoryState();
+    UE_LOG(LogTemp, Warning, TEXT("Story Manager initialized - Beginning Awakening phase"));
+}
+
+void UNarr_StoryManager::AdvanceStoryPhase(ENarr_StoryPhase NewPhase)
+{
+    if (NewPhase != CurrentPhase)
+    {
+        ENarr_StoryPhase OldPhase = CurrentPhase;
+        CurrentPhase = NewPhase;
+        OnPhaseChanged(OldPhase, NewPhase);
+        
+        UE_LOG(LogTemp, Warning, TEXT("Story phase advanced from %d to %d"), (int32)OldPhase, (int32)NewPhase);
+    }
+}
+
+void UNarr_StoryManager::TriggerStoryEvent(const FString& EventID)
+{
+    for (FNarr_StoryEvent& Event : StoryEvents)
+    {
+        if (Event.EventID == EventID && !Event.bIsCompleted)
+        {
+            Event.bIsCompleted = true;
+            Event.CompletionTime = FPlatformTime::Seconds() - GameStartTime;
+            
+            UE_LOG(LogTemp, Warning, TEXT("Story event triggered: %s"), *EventID);
+            break;
+        }
+    }
+}
+
+bool UNarr_StoryManager::IsEventCompleted(const FString& EventID) const
+{
+    for (const FNarr_StoryEvent& Event : StoryEvents)
+    {
+        if (Event.EventID == EventID)
+        {
+            return Event.bIsCompleted;
+        }
+    }
+    return false;
+}
+
+TArray<FNarr_StoryEvent> UNarr_StoryManager::GetActiveEvents() const
+{
+    TArray<FNarr_StoryEvent> ActiveEvents;
     
-    UE_LOG(LogTemp, Log, TEXT("Story Manager initialized - Starting Chapter 1"));
-}
-
-void UNarr_StoryManager::InitializeChapterTitles()
-{
-    ChapterTitles.Empty();
-    ChapterTitles.Add(1, TEXT("The Awakening"));
-    ChapterTitles.Add(2, TEXT("First Hunt"));
-    ChapterTitles.Add(3, TEXT("Valley of Shadows"));
-    ChapterTitles.Add(4, TEXT("Ancient Secrets"));
-    ChapterTitles.Add(5, TEXT("The Great Migration"));
-    ChapterTitles.Add(6, TEXT("Predator's Domain"));
-    ChapterTitles.Add(7, TEXT("Survival's Edge"));
-}
-
-void UNarr_StoryManager::AdvanceStory(const FString& EventName)
-{
-    if (EventName == TEXT("MeetElderThok"))
+    for (const FNarr_StoryEvent& Event : StoryEvents)
     {
-        StoryState.bHasMetElderThok = true;
-        StartQuest(TEXT("FirstHunt"));
-        UE_LOG(LogTemp, Log, TEXT("Story Event: Met Elder Thok - First Hunt quest started"));
-    }
-    else if (EventName == TEXT("EnterValley"))
-    {
-        StoryState.bHasEnteredValley = true;
-        if (StoryState.CurrentChapter < 3)
+        if (!Event.bIsCompleted)
         {
-            StoryState.CurrentChapter = 3;
-            UE_LOG(LogTemp, Log, TEXT("Story Advanced: Entered Valley - Chapter 3"));
+            ActiveEvents.Add(Event);
         }
     }
-    else if (EventName == TEXT("FindAncientRuins"))
-    {
-        StoryState.bHasFoundAncientRuins = true;
-        if (StoryState.CurrentChapter < 4)
-        {
-            StoryState.CurrentChapter = 4;
-            StartQuest(TEXT("AncientSecrets"));
-            UE_LOG(LogTemp, Log, TEXT("Story Advanced: Found Ancient Ruins - Chapter 4"));
-        }
-    }
-    else if (EventName == TEXT("DinosaurKilled"))
-    {
-        StoryState.DinosaurKillCount++;
-        if (StoryState.DinosaurKillCount >= 1 && IsQuestActive(TEXT("FirstHunt")))
-        {
-            CompleteQuest(TEXT("FirstHunt"));
-            StoryState.CurrentChapter = 2;
-            UE_LOG(LogTemp, Log, TEXT("Story Advanced: First Hunt completed - Chapter 2"));
-        }
-    }
+    
+    return ActiveEvents;
 }
 
-bool UNarr_StoryManager::IsQuestActive(const FString& QuestName) const
+void UNarr_StoryManager::InitializeStoryEvents()
 {
-    return StoryState.ActiveQuests.Contains(QuestName);
+    StoryEvents.Empty();
+    
+    // Awakening phase events
+    FNarr_StoryEvent FirstSteps;
+    FirstSteps.EventID = TEXT("first_steps");
+    FirstSteps.EventDescription = FText::FromString(TEXT("Take your first steps in the prehistoric world"));
+    StoryEvents.Add(FirstSteps);
+    
+    FNarr_StoryEvent FirstDinosaur;
+    FirstDinosaur.EventID = TEXT("first_dinosaur_encounter");
+    FirstDinosaur.EventDescription = FText::FromString(TEXT("Encounter your first dinosaur"));
+    StoryEvents.Add(FirstDinosaur);
+    
+    FNarr_StoryEvent FirstTool;
+    FirstTool.EventID = TEXT("craft_first_tool");
+    FirstTool.EventDescription = FText::FromString(TEXT("Craft your first stone tool"));
+    StoryEvents.Add(FirstTool);
+    
+    // First Hunt phase events
+    FNarr_StoryEvent FirstKill;
+    FirstKill.EventID = TEXT("first_kill");
+    FirstKill.EventDescription = FText::FromString(TEXT("Successfully hunt your first prey"));
+    StoryEvents.Add(FirstKill);
+    
+    FNarr_StoryEvent PredatorEscape;
+    PredatorEscape.EventID = TEXT("escape_predator");
+    PredatorEscape.EventDescription = FText::FromString(TEXT("Survive an encounter with a large predator"));
+    StoryEvents.Add(PredatorEscape);
 }
 
-bool UNarr_StoryManager::IsQuestCompleted(const FString& QuestName) const
+void UNarr_StoryManager::OnPhaseChanged(ENarr_StoryPhase OldPhase, ENarr_StoryPhase NewPhase)
 {
-    return StoryState.CompletedQuests.Contains(QuestName);
-}
-
-void UNarr_StoryManager::CompleteQuest(const FString& QuestName)
-{
-    if (IsQuestActive(QuestName))
+    // Handle phase transition logic
+    switch (NewPhase)
     {
-        StoryState.ActiveQuests.Remove(QuestName);
-        StoryState.CompletedQuests.AddUnique(QuestName);
-        
-        UE_LOG(LogTemp, Log, TEXT("Quest Completed: %s"), *QuestName);
-        
-        // Trigger completion events
-        if (QuestName == TEXT("FirstHunt"))
-        {
-            StartQuest(TEXT("ExploreValley"));
-        }
-        else if (QuestName == TEXT("AncientSecrets"))
-        {
-            StartQuest(TEXT("SurvivalMastery"));
-        }
-    }
-}
-
-void UNarr_StoryManager::StartQuest(const FString& QuestName)
-{
-    if (!IsQuestActive(QuestName) && !IsQuestCompleted(QuestName))
-    {
-        StoryState.ActiveQuests.AddUnique(QuestName);
-        UE_LOG(LogTemp, Log, TEXT("Quest Started: %s"), *QuestName);
-    }
-}
-
-FString UNarr_StoryManager::GetCurrentChapterTitle() const
-{
-    if (const FString* Title = ChapterTitles.Find(StoryState.CurrentChapter))
-    {
-        return *Title;
-    }
-    return TEXT("Unknown Chapter");
-}
-
-void UNarr_StoryManager::TriggerStoryEvent(const FString& EventName, const FVector& Location)
-{
-    HandleStoryTrigger(EventName, Location);
-    AdvanceStory(EventName);
-}
-
-void UNarr_StoryManager::HandleStoryTrigger(const FString& TriggerName, const FVector& Location)
-{
-    if (TriggerName == TEXT("Story_Trigger_Valley_Entrance"))
-    {
-        AdvanceStory(TEXT("EnterValley"));
-    }
-    else if (TriggerName == TEXT("Story_Trigger_Ancient_Ruins"))
-    {
-        AdvanceStory(TEXT("FindAncientRuins"));
-    }
-    else if (TriggerName == TEXT("Story_Trigger_Predator_Territory"))
-    {
-        if (StoryState.CurrentChapter < 6)
-        {
-            StoryState.CurrentChapter = 6;
-            StartQuest(TEXT("PredatorChallenge"));
-            UE_LOG(LogTemp, Log, TEXT("Story Advanced: Entered Predator Territory - Chapter 6"));
-        }
+        case ENarr_StoryPhase::FirstHunt:
+            // Unlock hunting-related events
+            break;
+        case ENarr_StoryPhase::TribalContact:
+            // Introduce tribal NPCs
+            break;
+        case ENarr_StoryPhase::TerritoryWars:
+            // Enable territorial conflicts
+            break;
+        case ENarr_StoryPhase::AlphaStatus:
+            // Player becomes apex predator
+            break;
     }
 }
