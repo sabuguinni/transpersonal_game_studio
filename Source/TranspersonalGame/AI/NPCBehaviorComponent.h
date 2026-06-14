@@ -2,7 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
-#include "Engine/World.h"
+#include "Engine/Engine.h"
 #include "TimerManager.h"
 #include "NPCBehaviorComponent.generated.h"
 
@@ -10,47 +10,58 @@ UENUM(BlueprintType)
 enum class ENPC_BehaviorState : uint8
 {
     Idle UMETA(DisplayName = "Idle"),
-    Patrolling UMETA(DisplayName = "Patrolling"),
-    Investigating UMETA(DisplayName = "Investigating"),
-    Fleeing UMETA(DisplayName = "Fleeing"),
-    Socializing UMETA(DisplayName = "Socializing"),
-    Working UMETA(DisplayName = "Working"),
-    Resting UMETA(DisplayName = "Resting")
+    Patrol UMETA(DisplayName = "Patrol"),
+    Chase UMETA(DisplayName = "Chase"),
+    Attack UMETA(DisplayName = "Attack"),
+    Flee UMETA(DisplayName = "Flee"),
+    Dead UMETA(DisplayName = "Dead")
 };
 
 UENUM(BlueprintType)
-enum class ENPC_PersonalityType : uint8
+enum class ENPC_DinosaurType : uint8
 {
-    Cautious UMETA(DisplayName = "Cautious"),
-    Aggressive UMETA(DisplayName = "Aggressive"),
-    Curious UMETA(DisplayName = "Curious"),
-    Social UMETA(DisplayName = "Social"),
-    Solitary UMETA(DisplayName = "Solitary")
+    TRex UMETA(DisplayName = "T-Rex"),
+    Velociraptor UMETA(DisplayName = "Velociraptor"),
+    Triceratops UMETA(DisplayName = "Triceratops"),
+    Brachiosaurus UMETA(DisplayName = "Brachiosaurus"),
+    Ankylosaurus UMETA(DisplayName = "Ankylosaurus")
 };
 
 USTRUCT(BlueprintType)
-struct FNPC_MemoryEntry
+struct FNPC_BehaviorStats
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FVector Location;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
+    float PatrolRadius = 3000.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float Timestamp;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
+    float ChaseDistance = 2000.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float Importance;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
+    float AttackDistance = 300.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FString EventType;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
+    float FleeDistance = 1000.0f;
 
-    FNPC_MemoryEntry()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
+    float MovementSpeed = 600.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
+    float Aggression = 0.7f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
+    float Fear = 0.3f;
+
+    FNPC_BehaviorStats()
     {
-        Location = FVector::ZeroVector;
-        Timestamp = 0.0f;
-        Importance = 0.0f;
-        EventType = TEXT("Unknown");
+        PatrolRadius = 3000.0f;
+        ChaseDistance = 2000.0f;
+        AttackDistance = 300.0f;
+        FleeDistance = 1000.0f;
+        MovementSpeed = 600.0f;
+        Aggression = 0.7f;
+        Fear = 0.3f;
     }
 };
 
@@ -64,96 +75,74 @@ public:
 
 protected:
     virtual void BeginPlay() override;
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 public:
-    // Current behavior state
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Behavior")
     ENPC_BehaviorState CurrentState;
 
-    // Personality traits
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Personality")
-    ENPC_PersonalityType PersonalityType;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Behavior")
+    ENPC_DinosaurType DinosaurType;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Personality", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float Aggressiveness;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Behavior")
+    FNPC_BehaviorStats BehaviorStats;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Personality", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float Curiosity;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Behavior")
+    FVector PatrolCenter;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Personality", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float Sociability;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Behavior")
+    FVector CurrentTarget;
 
-    // Memory system
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Memory")
-    TArray<FNPC_MemoryEntry> ShortTermMemory;
+    UPROPERTY(BlueprintReadOnly, Category = "NPC Behavior")
+    AActor* PlayerTarget;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Memory")
-    TArray<FNPC_MemoryEntry> LongTermMemory;
+    UPROPERTY(BlueprintReadOnly, Category = "NPC Behavior")
+    float DistanceToPlayer;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Memory")
-    int32 MaxShortTermMemories;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Behavior")
+    bool bIsPackHunter;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Memory")
-    int32 MaxLongTermMemories;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Behavior")
+    TArray<AActor*> PackMembers;
 
-    // Patrol behavior
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Patrol")
-    TArray<FVector> PatrolPoints;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Patrol")
-    int32 CurrentPatrolIndex;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Patrol")
-    float PatrolRadius;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Patrol")
-    float PatrolSpeed;
-
-    // Detection and awareness
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Detection")
-    float SightRange;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Detection")
-    float HearingRange;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Detection")
-    float AlertnessLevel;
-
-    // Daily routine
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Routine")
-    float DailyRoutineTimer;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Routine")
-    float RoutineChangeInterval;
-
-    // Functions
     UFUNCTION(BlueprintCallable, Category = "NPC Behavior")
     void SetBehaviorState(ENPC_BehaviorState NewState);
 
-    UFUNCTION(BlueprintCallable, Category = "NPC Memory")
-    void AddMemory(FVector Location, FString EventType, float Importance);
+    UFUNCTION(BlueprintCallable, Category = "NPC Behavior")
+    void InitializeBehavior(ENPC_DinosaurType Type);
 
-    UFUNCTION(BlueprintCallable, Category = "NPC Memory")
-    void ProcessMemories(float DeltaTime);
+    UFUNCTION(BlueprintCallable, Category = "NPC Behavior")
+    void UpdateBehavior(float DeltaTime);
 
-    UFUNCTION(BlueprintCallable, Category = "NPC Patrol")
-    void InitializePatrolRoute();
+    UFUNCTION(BlueprintCallable, Category = "NPC Behavior")
+    void FindNearestPlayer();
 
-    UFUNCTION(BlueprintCallable, Category = "NPC Patrol")
-    FVector GetNextPatrolPoint();
+    UFUNCTION(BlueprintCallable, Category = "NPC Behavior")
+    void PatrolBehavior();
 
-    UFUNCTION(BlueprintCallable, Category = "NPC Detection")
-    bool DetectPlayer();
+    UFUNCTION(BlueprintCallable, Category = "NPC Behavior")
+    void ChaseBehavior();
 
-    UFUNCTION(BlueprintCallable, Category = "NPC Routine")
-    void UpdateDailyRoutine(float DeltaTime);
+    UFUNCTION(BlueprintCallable, Category = "NPC Behavior")
+    void AttackBehavior();
+
+    UFUNCTION(BlueprintCallable, Category = "NPC Behavior")
+    void FleeBehavior();
+
+    UFUNCTION(BlueprintCallable, Category = "NPC Behavior")
+    void SetupDinosaurStats(ENPC_DinosaurType Type);
+
+    UFUNCTION(BlueprintCallable, Category = "NPC Behavior")
+    void AddPackMember(AActor* Member);
+
+    UFUNCTION(BlueprintCallable, Category = "NPC Behavior")
+    void CoordinatePackBehavior();
 
 private:
     FTimerHandle BehaviorUpdateTimer;
-    FTimerHandle MemoryProcessTimer;
-
-    void UpdateBehavior();
-    void ConsolidateMemories();
-    float CalculateMemoryImportance(const FNPC_MemoryEntry& Memory, float CurrentTime);
+    FVector LastKnownPlayerLocation;
+    float StateChangeTimer;
+    float PatrolWaitTimer;
+    bool bHasValidTarget;
 };
