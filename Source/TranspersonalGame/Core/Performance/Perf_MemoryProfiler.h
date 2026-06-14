@@ -2,7 +2,9 @@
 
 #include "CoreMinimal.h"
 #include "Engine/Engine.h"
+#include "Engine/World.h"
 #include "UObject/NoExportTypes.h"
+#include "Subsystems/GameInstanceSubsystem.h"
 #include "Perf_MemoryProfiler.generated.h"
 
 USTRUCT(BlueprintType)
@@ -17,104 +19,79 @@ struct TRANSPERSONALGAME_API FPerf_MemoryStats
     float UsedVirtualMemoryMB;
 
     UPROPERTY(BlueprintReadOnly, Category = "Memory")
-    float PeakUsedPhysicalMemoryMB;
+    float PeakPhysicalMemoryMB;
 
     UPROPERTY(BlueprintReadOnly, Category = "Memory")
-    float AvailablePhysicalMemoryMB;
+    int32 NumLoadedObjects;
 
     UPROPERTY(BlueprintReadOnly, Category = "Memory")
-    int32 ActiveActorCount;
+    int32 NumStaticMeshes;
 
     UPROPERTY(BlueprintReadOnly, Category = "Memory")
-    int32 ActiveComponentCount;
+    int32 NumTextures;
 
     UPROPERTY(BlueprintReadOnly, Category = "Memory")
     float TextureMemoryMB;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Memory")
-    float MeshMemoryMB;
 
     FPerf_MemoryStats()
     {
         UsedPhysicalMemoryMB = 0.0f;
         UsedVirtualMemoryMB = 0.0f;
-        PeakUsedPhysicalMemoryMB = 0.0f;
-        AvailablePhysicalMemoryMB = 0.0f;
-        ActiveActorCount = 0;
-        ActiveComponentCount = 0;
+        PeakPhysicalMemoryMB = 0.0f;
+        NumLoadedObjects = 0;
+        NumStaticMeshes = 0;
+        NumTextures = 0;
         TextureMemoryMB = 0.0f;
-        MeshMemoryMB = 0.0f;
     }
 };
 
-UENUM(BlueprintType)
-enum class EPerf_MemoryWarningLevel : uint8
-{
-    None        UMETA(DisplayName = "None"),
-    Low         UMETA(DisplayName = "Low"),
-    Medium      UMETA(DisplayName = "Medium"),
-    High        UMETA(DisplayName = "High"),
-    Critical    UMETA(DisplayName = "Critical")
-};
-
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UPerf_MemoryProfiler : public UObject
+UCLASS(BlueprintType)
+class TRANSPERSONALGAME_API UPerf_MemoryProfiler : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
 public:
     UPerf_MemoryProfiler();
 
-    UFUNCTION(BlueprintCallable, Category = "Performance|Memory")
+    // USubsystem interface
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
     FPerf_MemoryStats GetCurrentMemoryStats();
 
-    UFUNCTION(BlueprintCallable, Category = "Performance|Memory")
+    UFUNCTION(BlueprintCallable, Category = "Performance")
     void StartMemoryProfiling();
 
-    UFUNCTION(BlueprintCallable, Category = "Performance|Memory")
+    UFUNCTION(BlueprintCallable, Category = "Performance")
     void StopMemoryProfiling();
 
-    UFUNCTION(BlueprintCallable, Category = "Performance|Memory")
-    EPerf_MemoryWarningLevel GetMemoryWarningLevel();
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void LogMemoryReport();
 
-    UFUNCTION(BlueprintCallable, Category = "Performance|Memory")
+    UFUNCTION(BlueprintCallable, Category = "Performance")
     void ForceGarbageCollection();
 
-    UFUNCTION(BlueprintCallable, Category = "Performance|Memory")
-    void OptimizeMemoryUsage();
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    bool IsMemoryUsageHigh();
 
-    UFUNCTION(BlueprintCallable, Category = "Performance|Memory")
-    TArray<FString> GetMemoryHogs();
-
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Performance|Memory")
-    void ProfileCurrentLevel();
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void SetMemoryWarningThreshold(float ThresholdMB);
 
 protected:
-    UPROPERTY(BlueprintReadOnly, Category = "Memory")
+    UPROPERTY()
     bool bIsProfilingActive;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Memory")
-    FPerf_MemoryStats LastRecordedStats;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Memory")
+    UPROPERTY()
     float MemoryWarningThresholdMB;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Memory")
-    float MemoryCriticalThresholdMB;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Memory")
+    UPROPERTY()
     TArray<FPerf_MemoryStats> MemoryHistory;
 
-private:
+    FTimerHandle ProfilingTimerHandle;
+
     void UpdateMemoryStats();
     void CheckMemoryThresholds();
-    void LogMemoryWarning(EPerf_MemoryWarningLevel WarningLevel);
-    void CleanupUnusedAssets();
-    void OptimizeTextureMemory();
-    void OptimizeMeshMemory();
-    void AnalyzeActorMemoryUsage();
     float GetTextureMemoryUsage();
-    float GetMeshMemoryUsage();
-    int32 CountActiveActors();
-    int32 CountActiveComponents();
+    int32 CountObjectsByClass(UClass* ObjectClass);
 };
