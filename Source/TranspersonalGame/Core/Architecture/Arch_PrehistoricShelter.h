@@ -4,59 +4,51 @@
 #include "GameFramework/Actor.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/BoxComponent.h"
-#include "SharedTypes.h"
-#include "Arch_StructuralIntegrity.h"
+#include "Components/PointLightComponent.h"
+#include "Engine/TriggerVolume.h"
+#include "../SharedTypes.h"
 #include "Arch_PrehistoricShelter.generated.h"
 
 UENUM(BlueprintType)
 enum class EArch_ShelterType : uint8
 {
-    Cave            UMETA(DisplayName = "Natural Cave"),
+    CaveEntrance    UMETA(DisplayName = "Cave Entrance"),
     RockOverhang    UMETA(DisplayName = "Rock Overhang"),
-    StoneShelter    UMETA(DisplayName = "Stone Shelter"),
-    WoodLean        UMETA(DisplayName = "Wood Lean-to"),
-    BoneHut         UMETA(DisplayName = "Bone Hut")
+    NaturalArch     UMETA(DisplayName = "Natural Arch"),
+    StoneLedge      UMETA(DisplayName = "Stone Ledge")
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FArch_ShelterProperties
+struct FArch_ShelterProperties
 {
     GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter")
-    EArch_ShelterType ShelterType = EArch_ShelterType::Cave;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter")
     float WeatherProtection = 0.8f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter")
-    float TemperatureInsulation = 0.6f;
+    float TemperatureModifier = 5.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter")
-    float MaxOccupants = 4.0f;
+    float InteriorSpace = 100.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter")
-    bool bHasFirePit = false;
+    bool bHasFireplace = false;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter")
-    bool bHasStorageArea = false;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter")
-    float ComfortLevel = 0.5f;
+    bool bProvidesSafety = true;
 
     FArch_ShelterProperties()
     {
-        ShelterType = EArch_ShelterType::Cave;
         WeatherProtection = 0.8f;
-        TemperatureInsulation = 0.6f;
-        MaxOccupants = 4.0f;
-        bHasFirePit = false;
-        bHasStorageArea = false;
-        ComfortLevel = 0.5f;
+        TemperatureModifier = 5.0f;
+        InteriorSpace = 100.0f;
+        bHasFireplace = false;
+        bProvidesSafety = true;
     }
 };
 
-UCLASS(BlueprintType, Blueprintable)
+UCLASS(Blueprintable, BlueprintType)
 class TRANSPERSONALGAME_API AArch_PrehistoricShelter : public AActor
 {
     GENERATED_BODY()
@@ -67,9 +59,6 @@ public:
 protected:
     virtual void BeginPlay() override;
 
-public:
-    virtual void Tick(float DeltaTime) override;
-
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
     UStaticMeshComponent* ShelterMesh;
 
@@ -77,59 +66,60 @@ public:
     UBoxComponent* InteriorVolume;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    UArch_StructuralIntegrity* StructuralIntegrity;
+    UBoxComponent* EntranceVolume;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter Properties")
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    UPointLightComponent* InteriorLight;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter Configuration")
+    EArch_ShelterType ShelterType;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter Configuration")
     FArch_ShelterProperties ShelterProperties;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter Properties")
-    TArray<AActor*> CurrentOccupants;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter Configuration")
+    float ShelterScale = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter Properties")
-    bool bIsOccupied = false;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter Configuration")
+    bool bAutoConfigureForBiome = true;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter Properties")
-    float LastUsedTime = 0.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environmental")
-    EBiomeType PreferredBiome = EBiomeType::Forest;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environmental")
-    float MinDistanceFromWater = 500.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environmental")
-    float MaxDistanceFromWater = 2000.0f;
+public:
+    virtual void Tick(float DeltaTime) override;
 
     UFUNCTION(BlueprintCallable, Category = "Shelter")
-    bool CanAccommodateOccupant(AActor* Occupant);
+    void ConfigureShelterType(EArch_ShelterType NewType);
 
     UFUNCTION(BlueprintCallable, Category = "Shelter")
-    bool AddOccupant(AActor* Occupant);
+    float GetWeatherProtection() const;
 
     UFUNCTION(BlueprintCallable, Category = "Shelter")
-    bool RemoveOccupant(AActor* Occupant);
+    float GetTemperatureBonus() const;
 
     UFUNCTION(BlueprintCallable, Category = "Shelter")
-    float GetWeatherProtectionAt(FVector Location) const;
+    bool IsPlayerInShelter() const;
 
     UFUNCTION(BlueprintCallable, Category = "Shelter")
-    float GetTemperatureModifier() const;
+    void SetupFireplace(bool bEnable);
 
-    UFUNCTION(BlueprintCallable, Category = "Shelter")
-    bool IsLocationProtected(FVector Location) const;
+    UFUNCTION(BlueprintImplementableEvent, Category = "Shelter")
+    void OnPlayerEnterShelter();
 
-    UFUNCTION(BlueprintCallable, Category = "Shelter")
-    void UpdateShelterCondition();
+    UFUNCTION(BlueprintImplementableEvent, Category = "Shelter")
+    void OnPlayerExitShelter();
 
-    UFUNCTION(BlueprintCallable, Category = "Shelter")
-    TArray<FVector> GetStorageLocations() const;
+protected:
+    UFUNCTION()
+    void OnEntranceVolumeBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult);
 
-    UFUNCTION(BlueprintCallable, Category = "Shelter")
-    FVector GetFirePitLocation() const;
+    UFUNCTION()
+    void OnEntranceVolumeEndOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex);
 
 private:
     void InitializeShelterMesh();
-    void SetupInteriorVolume();
-    void UpdateOccupancyStatus();
-    bool ValidatePlacement() const;
+    void ConfigureLighting();
+    void SetupCollisionVolumes();
+
+    bool bPlayerInShelter;
+    float CurrentWeatherProtection;
+    float CurrentTemperatureBonus;
 };
