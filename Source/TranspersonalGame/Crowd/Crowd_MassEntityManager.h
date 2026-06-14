@@ -1,142 +1,102 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
 #include "Engine/World.h"
-#include "Components/StaticMeshComponent.h"
+#include "MassEntitySubsystem.h"
+#include "MassProcessingTypes.h"
+#include "MassEntityConfigAsset.h"
+#include "MassSpawnerSubsystem.h"
+#include "GameFramework/GameModeBase.h"
 #include "Crowd_MassEntityManager.generated.h"
 
 USTRUCT(BlueprintType)
-struct FCrowd_AgentData
+struct TRANSPERSONALGAME_API FCrowd_EntitySpawnData
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent")
-    FVector Position;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn")
+    FVector Location = FVector::ZeroVector;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent")
-    FVector Velocity;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn")
+    FRotator Rotation = FRotator::ZeroRotator;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent")
-    float Speed;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn")
+    int32 EntityCount = 100;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent")
-    int32 AgentID;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn")
+    float SpawnRadius = 1000.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent")
-    bool bIsActive;
-
-    FCrowd_AgentData()
-    {
-        Position = FVector::ZeroVector;
-        Velocity = FVector::ZeroVector;
-        Speed = 100.0f;
-        AgentID = 0;
-        bIsActive = true;
-    }
-};
-
-USTRUCT(BlueprintType)
-struct FCrowd_ZoneData
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Zone")
-    FVector Center;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Zone")
-    float Radius;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Zone")
-    int32 MaxAgents;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Zone")
-    TArray<int32> ActiveAgents;
-
-    FCrowd_ZoneData()
-    {
-        Center = FVector::ZeroVector;
-        Radius = 500.0f;
-        MaxAgents = 50;
-    }
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn")
+    bool bIsActive = true;
 };
 
 UENUM(BlueprintType)
-enum class ECrowd_LODLevel : uint8
+enum class ECrowd_EntityBehavior : uint8
 {
-    High    UMETA(DisplayName = "High Detail"),
-    Medium  UMETA(DisplayName = "Medium Detail"),
-    Low     UMETA(DisplayName = "Low Detail"),
-    Culled  UMETA(DisplayName = "Culled")
+    Wandering,
+    Following,
+    Fleeing,
+    Gathering,
+    Hunting,
+    Resting
 };
 
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API ACrowd_MassEntityManager : public AActor
+class TRANSPERSONALGAME_API UCrowd_MassEntityManager : public UObject
 {
     GENERATED_BODY()
 
 public:
-    ACrowd_MassEntityManager();
+    UCrowd_MassEntityManager();
+
+    UFUNCTION(BlueprintCallable, Category = "Mass Entity")
+    void InitializeMassSystem(UWorld* World);
+
+    UFUNCTION(BlueprintCallable, Category = "Mass Entity")
+    void SpawnEntityCluster(const FCrowd_EntitySpawnData& SpawnData);
+
+    UFUNCTION(BlueprintCallable, Category = "Mass Entity")
+    void UpdateEntityBehavior(ECrowd_EntityBehavior NewBehavior);
+
+    UFUNCTION(BlueprintCallable, Category = "Mass Entity")
+    void SetEntityCount(int32 NewCount);
+
+    UFUNCTION(BlueprintCallable, Category = "Mass Entity")
+    int32 GetActiveEntityCount() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Mass Entity")
+    void DestroyAllEntities();
+
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Mass Entity")
+    void TestSpawnEntities();
 
 protected:
-    virtual void BeginPlay() override;
-    virtual void Tick(float DeltaTime) override;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mass Entity")
+    TArray<FCrowd_EntitySpawnData> SpawnPoints;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    UStaticMeshComponent* RootMeshComponent;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mass Entity")
+    int32 MaxEntityCount = 50000;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Settings")
-    int32 MaxTotalAgents;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mass Entity")
+    ECrowd_EntityBehavior CurrentBehavior = ECrowd_EntityBehavior::Wandering;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Settings")
-    float UpdateFrequency;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mass Entity")
+    float EntitySpeed = 300.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Settings")
-    float LODDistance_High;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Settings")
-    float LODDistance_Medium;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Settings")
-    float LODDistance_Low;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Runtime Data")
-    TArray<FCrowd_AgentData> ActiveAgents;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Runtime Data")
-    TArray<FCrowd_ZoneData> CrowdZones;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Runtime Data")
-    int32 CurrentAgentCount;
-
-public:
-    UFUNCTION(BlueprintCallable, Category = "Crowd Management")
-    void SpawnCrowdZone(FVector Center, float Radius, int32 AgentCount);
-
-    UFUNCTION(BlueprintCallable, Category = "Crowd Management")
-    void UpdateCrowdLOD(FVector PlayerPosition);
-
-    UFUNCTION(BlueprintCallable, Category = "Crowd Management")
-    void SetCrowdBehavior(int32 ZoneIndex, const FString& BehaviorType);
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    int32 GetActiveAgentCount() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    float GetCurrentFPS() const;
-
-protected:
-    UFUNCTION()
-    void UpdateAgentPositions(float DeltaTime);
-
-    UFUNCTION()
-    ECrowd_LODLevel CalculateLODLevel(float DistanceToPlayer) const;
-
-    UFUNCTION()
-    void OptimizePerformance();
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mass Entity")
+    float EntityDetectionRadius = 500.0f;
 
 private:
-    float LastUpdateTime;
-    float PerformanceTimer;
-    bool bIsInitialized;
+    UPROPERTY()
+    TWeakObjectPtr<UWorld> CachedWorld;
+
+    UPROPERTY()
+    TWeakObjectPtr<UMassEntitySubsystem> MassSubsystem;
+
+    UPROPERTY()
+    TArray<FMassEntityHandle> SpawnedEntities;
+
+    void ProcessEntityMovement();
+    void UpdateEntityLOD();
+    void HandleEntityCollisions();
 };
