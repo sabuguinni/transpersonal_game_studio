@@ -1,273 +1,225 @@
 #include "Audio_FootstepSystem.h"
 #include "Components/AudioComponent.h"
 #include "Engine/World.h"
+#include "Kismet/GameplayStatics.h"
 #include "Engine/Engine.h"
-#include "GameFramework/Character.h"
-#include "GameFramework/CharacterMovementComponent.h"
-#include "Components/CapsuleComponent.h"
+#include "DrawDebugHelpers.h"
+#include "PhysicalMaterials/PhysicalMaterial.h"
+#include "Components/PrimitiveComponent.h"
 
 UAudio_FootstepSystem::UAudio_FootstepSystem()
 {
     PrimaryComponentTick.bCanEverTick = true;
+    bFootstepsEnabled = true;
+    GlobalVolumeMultiplier = 1.0f;
+    FootstepCooldown = 0.3f;
+    LastFootstepTime = 0.0f;
 
-    // Initialize state
-    CurrentSurface = EAudio_SurfaceType::Dirt;
-    CurrentMovement = EAudio_MovementType::Walk;
-    bIsMoving = false;
-    TimeSinceLastFootstep = 0.0f;
-
-    // Initialize footstep intervals
-    FootstepInterval = 0.5f;
-    RunFootstepInterval = 0.3f;
-    SneakFootstepInterval = 0.8f;
-    SurfaceDetectionDistance = 100.0f;
+    // Create audio component
+    AudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("FootstepAudioComponent"));
 }
 
 void UAudio_FootstepSystem::BeginPlay()
 {
     Super::BeginPlay();
-
-    // Create audio component
-    FootstepAudioComponent = NewObject<UAudioComponent>(this);
-    if (FootstepAudioComponent)
-    {
-        FootstepAudioComponent->bAutoActivate = false;
-        FootstepAudioComponent->AttachToComponent(GetOwner()->GetRootComponent(), 
-            FAttachmentTransformRules::KeepRelativeTransform);
-    }
-
-    // Initialize footstep data
     InitializeFootstepData();
 }
 
 void UAudio_FootstepSystem::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-
-    // Detect surface type
-    DetectSurfaceType();
-
-    // Update footstep timing
-    UpdateFootstepTiming(DeltaTime);
+    
+    // Update last footstep time tracking
+    LastFootstepTime += DeltaTime;
 }
 
-void UAudio_FootstepSystem::TriggerFootstep(EAudio_MovementType MovementType)
+void UAudio_FootstepSystem::PlayFootstep(EAudio_FootstepType FootstepType, EAudio_SurfaceType SurfaceType, FVector Location)
 {
-    PlayFootstepSound(MovementType);
-    TimeSinceLastFootstep = 0.0f;
-}
-
-void UAudio_FootstepSystem::SetMovementState(bool bMoving, bool bRunning, bool bSneaking)
-{
-    bIsMoving = bMoving;
-
-    if (bSneaking)
+    if (!bFootstepsEnabled || LastFootstepTime < FootstepCooldown)
     {
-        CurrentMovement = EAudio_MovementType::Sneak;
-    }
-    else if (bRunning)
-    {
-        CurrentMovement = EAudio_MovementType::Run;
-    }
-    else
-    {
-        CurrentMovement = EAudio_MovementType::Walk;
-    }
-}
-
-void UAudio_FootstepSystem::TriggerJumpSound()
-{
-    PlayFootstepSound(EAudio_MovementType::Jump);
-}
-
-void UAudio_FootstepSystem::TriggerLandSound()
-{
-    PlayFootstepSound(EAudio_MovementType::Land);
-}
-
-void UAudio_FootstepSystem::DetectSurfaceType()
-{
-    if (!GetOwner())
         return;
+    }
+
+    // Find footstep data for this combination
+    if (FootstepDataMap.Contains(FootstepType))
+    {
+        const TMap<EAudio_SurfaceType, FAudio_FootstepData>& SurfaceMap = FootstepDataMap[FootstepType];
+        if (SurfaceMap.Contains(SurfaceType))
+        {
+            const FAudio_FootstepData& FootstepData = SurfaceMap[SurfaceType];
+            
+            // Play footstep sound
+            if (FootstepData.FootstepSound && AudioComponent)
+            {
+                AudioComponent->SetWorldLocation(Location);
+                AudioComponent->SetSound(FootstepData.FootstepSound);
+                AudioComponent->SetVolumeMultiplier(FootstepData.VolumeMultiplier * GlobalVolumeMultiplier);
+                AudioComponent->SetPitchMultiplier(FootstepData.PitchMultiplier);
+                AudioComponent->Play();
+            }
+
+            // Spawn dust particle effect
+            if (FootstepData.DustParticle)
+            {
+                SpawnDustParticle(FootstepData.DustParticle, Location);
+            }
+
+            LastFootstepTime = 0.0f;
+        }
+    }
+}
+
+void UAudio_FootstepSystem::SetFootstepEnabled(bool bEnabled)
+{
+    bFootstepsEnabled = bEnabled;
+}
+
+void UAudio_FootstepSystem::SetVolumeMultiplier(float Multiplier)
+{
+    GlobalVolumeMultiplier = FMath::Clamp(Multiplier, 0.0f, 2.0f);
+}
+
+EAudio_SurfaceType UAudio_FootstepSystem::DetectSurfaceType(FVector Location)
+{
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        return EAudio_SurfaceType::Dirt;
+    }
 
     // Perform line trace downward to detect surface
-    FVector StartLocation = GetOwner()->GetActorLocation();
-    FVector EndLocation = StartLocation - FVector(0, 0, SurfaceDetectionDistance);
-
+    FVector TraceStart = Location + FVector(0, 0, 50);
+    FVector TraceEnd = Location - FVector(0, 0, 100);
+    
     FHitResult HitResult;
     FCollisionQueryParams QueryParams;
-    QueryParams.AddIgnoredActor(GetOwner());
-
-    bool bHit = GetWorld()->LineTraceSingleByChannel(
-        HitResult,
-        StartLocation,
-        EndLocation,
-        ECollisionChannel::ECC_WorldStatic,
-        QueryParams
-    );
-
-    if (bHit)
+    QueryParams.bTraceComplex = true;
+    
+    if (World->LineTraceSingleByChannel(HitResult, TraceStart, TraceEnd, ECC_WorldStatic, QueryParams))
     {
-        // Determine surface type based on hit result
-        // This is a simplified version - in a full implementation,
-        // you'd check material types or use physical materials
-        FString SurfaceName = HitResult.GetActor() ? HitResult.GetActor()->GetName() : TEXT("");
+        // Check physical material if available
+        if (HitResult.PhysMaterial.IsValid())
+        {
+            FString MaterialName = HitResult.PhysMaterial->GetName().ToLower();
+            
+            if (MaterialName.Contains("grass") || MaterialName.Contains("vegetation"))
+            {
+                return EAudio_SurfaceType::Grass;
+            }
+            else if (MaterialName.Contains("rock") || MaterialName.Contains("stone"))
+            {
+                return EAudio_SurfaceType::Rock;
+            }
+            else if (MaterialName.Contains("mud") || MaterialName.Contains("swamp"))
+            {
+                return EAudio_SurfaceType::Mud;
+            }
+            else if (MaterialName.Contains("sand"))
+            {
+                return EAudio_SurfaceType::Sand;
+            }
+            else if (MaterialName.Contains("water"))
+            {
+                return EAudio_SurfaceType::Water;
+            }
+        }
         
-        if (SurfaceName.Contains(TEXT("Grass")) || SurfaceName.Contains(TEXT("Foliage")))
+        // Check actor name/tag as fallback
+        if (HitResult.GetActor())
         {
-            CurrentSurface = EAudio_SurfaceType::Grass;
-        }
-        else if (SurfaceName.Contains(TEXT("Rock")) || SurfaceName.Contains(TEXT("Stone")))
-        {
-            CurrentSurface = EAudio_SurfaceType::Rock;
-        }
-        else if (SurfaceName.Contains(TEXT("Water")))
-        {
-            CurrentSurface = EAudio_SurfaceType::Water;
-        }
-        else if (SurfaceName.Contains(TEXT("Sand")))
-        {
-            CurrentSurface = EAudio_SurfaceType::Sand;
-        }
-        else if (SurfaceName.Contains(TEXT("Wood")))
-        {
-            CurrentSurface = EAudio_SurfaceType::Wood;
-        }
-        else if (SurfaceName.Contains(TEXT("Mud")))
-        {
-            CurrentSurface = EAudio_SurfaceType::Mud;
-        }
-        else
-        {
-            CurrentSurface = EAudio_SurfaceType::Dirt; // Default
+            FString ActorName = HitResult.GetActor()->GetName().ToLower();
+            if (ActorName.Contains("grass") || ActorName.Contains("vegetation"))
+            {
+                return EAudio_SurfaceType::Grass;
+            }
+            else if (ActorName.Contains("rock") || ActorName.Contains("stone"))
+            {
+                return EAudio_SurfaceType::Rock;
+            }
         }
     }
-}
 
-void UAudio_FootstepSystem::UpdateFootstepTiming(float DeltaTime)
-{
-    if (!bIsMoving)
-    {
-        TimeSinceLastFootstep = 0.0f;
-        return;
-    }
-
-    TimeSinceLastFootstep += DeltaTime;
-
-    float CurrentInterval = GetFootstepInterval();
-    if (TimeSinceLastFootstep >= CurrentInterval)
-    {
-        TriggerFootstep(CurrentMovement);
-    }
-}
-
-void UAudio_FootstepSystem::PlayFootstepSound(EAudio_MovementType MovementType)
-{
-    if (!FootstepAudioComponent)
-        return;
-
-    // Find the appropriate sound for current surface and movement type
-    TMap<EAudio_MovementType, FAudio_FootstepData>* SurfaceSounds = FootstepSoundMap.Find(CurrentSurface);
-    if (!SurfaceSounds)
-        return;
-
-    FAudio_FootstepData* FootstepData = SurfaceSounds->Find(MovementType);
-    if (!FootstepData || !FootstepData->FootstepMetaSound)
-        return;
-
-    // Set the MetaSound
-    FootstepAudioComponent->SetSound(FootstepData->FootstepMetaSound);
-
-    // Apply volume variation
-    float VolumeVariation = FMath::RandRange(-FootstepData->VolumeVariation, FootstepData->VolumeVariation);
-    float FinalVolume = FootstepData->BaseVolume + VolumeVariation;
-    FootstepAudioComponent->SetVolumeMultiplier(FMath::Clamp(FinalVolume, 0.1f, 1.0f));
-
-    // Apply pitch variation
-    float PitchVariation = FMath::RandRange(-FootstepData->PitchVariation, FootstepData->PitchVariation);
-    float FinalPitch = 1.0f + PitchVariation;
-    FootstepAudioComponent->SetPitchMultiplier(FMath::Clamp(FinalPitch, 0.5f, 2.0f));
-
-    // Play the sound
-    FootstepAudioComponent->Play();
-}
-
-float UAudio_FootstepSystem::GetFootstepInterval() const
-{
-    switch (CurrentMovement)
-    {
-        case EAudio_MovementType::Run:
-            return RunFootstepInterval;
-        case EAudio_MovementType::Sneak:
-            return SneakFootstepInterval;
-        case EAudio_MovementType::Walk:
-        default:
-            return FootstepInterval;
-    }
+    // Default to dirt for prehistoric environment
+    return EAudio_SurfaceType::Dirt;
 }
 
 void UAudio_FootstepSystem::InitializeFootstepData()
 {
-    // Initialize footstep data for different surface/movement combinations
+    // Initialize default footstep data for all combinations
     // This would typically be loaded from data assets or configured in Blueprint
-
-    // Dirt surface
-    TMap<EAudio_MovementType, FAudio_FootstepData> DirtSounds;
     
-    FAudio_FootstepData DirtWalk;
-    DirtWalk.BaseVolume = 0.6f;
-    DirtWalk.PitchVariation = 0.15f;
-    DirtSounds.Add(EAudio_MovementType::Walk, DirtWalk);
+    for (int32 FootstepTypeInt = 0; FootstepTypeInt < (int32)EAudio_FootstepType::Dinosaur + 1; FootstepTypeInt++)
+    {
+        EAudio_FootstepType FootstepType = (EAudio_FootstepType)FootstepTypeInt;
+        
+        for (int32 SurfaceTypeInt = 0; SurfaceTypeInt < (int32)EAudio_SurfaceType::Water + 1; SurfaceTypeInt++)
+        {
+            EAudio_SurfaceType SurfaceType = (EAudio_SurfaceType)SurfaceTypeInt;
+            
+            FAudio_FootstepData FootstepData;
+            
+            // Set volume based on footstep type
+            switch (FootstepType)
+            {
+                case EAudio_FootstepType::Light:
+                    FootstepData.VolumeMultiplier = 0.6f;
+                    FootstepData.PitchMultiplier = 1.1f;
+                    break;
+                case EAudio_FootstepType::Medium:
+                    FootstepData.VolumeMultiplier = 0.8f;
+                    FootstepData.PitchMultiplier = 1.0f;
+                    break;
+                case EAudio_FootstepType::Heavy:
+                    FootstepData.VolumeMultiplier = 1.0f;
+                    FootstepData.PitchMultiplier = 0.9f;
+                    break;
+                case EAudio_FootstepType::Dinosaur:
+                    FootstepData.VolumeMultiplier = 1.5f;
+                    FootstepData.PitchMultiplier = 0.7f;
+                    break;
+            }
+            
+            // Adjust volume based on surface type
+            switch (SurfaceType)
+            {
+                case EAudio_SurfaceType::Grass:
+                    FootstepData.VolumeMultiplier *= 0.8f;
+                    break;
+                case EAudio_SurfaceType::Rock:
+                    FootstepData.VolumeMultiplier *= 1.2f;
+                    FootstepData.PitchMultiplier *= 1.1f;
+                    break;
+                case EAudio_SurfaceType::Mud:
+                    FootstepData.VolumeMultiplier *= 0.9f;
+                    FootstepData.PitchMultiplier *= 0.8f;
+                    break;
+                case EAudio_SurfaceType::Sand:
+                    FootstepData.VolumeMultiplier *= 0.7f;
+                    break;
+                case EAudio_SurfaceType::Water:
+                    FootstepData.VolumeMultiplier *= 1.1f;
+                    FootstepData.PitchMultiplier *= 0.9f;
+                    break;
+                default:
+                    break;
+            }
+            
+            FootstepDataMap.FindOrAdd(FootstepType).Add(SurfaceType, FootstepData);
+        }
+    }
+}
 
-    FAudio_FootstepData DirtRun;
-    DirtRun.BaseVolume = 0.8f;
-    DirtRun.PitchVariation = 0.2f;
-    DirtSounds.Add(EAudio_MovementType::Run, DirtRun);
-
-    FAudio_FootstepData DirtSneak;
-    DirtSneak.BaseVolume = 0.3f;
-    DirtSneak.PitchVariation = 0.1f;
-    DirtSounds.Add(EAudio_MovementType::Sneak, DirtSneak);
-
-    FootstepSoundMap.Add(EAudio_SurfaceType::Dirt, DirtSounds);
-
-    // Grass surface
-    TMap<EAudio_MovementType, FAudio_FootstepData> GrassSounds;
-    
-    FAudio_FootstepData GrassWalk;
-    GrassWalk.BaseVolume = 0.5f;
-    GrassWalk.PitchVariation = 0.12f;
-    GrassSounds.Add(EAudio_MovementType::Walk, GrassWalk);
-
-    FAudio_FootstepData GrassRun;
-    GrassRun.BaseVolume = 0.7f;
-    GrassRun.PitchVariation = 0.18f;
-    GrassSounds.Add(EAudio_MovementType::Run, GrassRun);
-
-    FAudio_FootstepData GrassSneak;
-    GrassSneak.BaseVolume = 0.25f;
-    GrassSneak.PitchVariation = 0.08f;
-    GrassSounds.Add(EAudio_MovementType::Sneak, GrassSneak);
-
-    FootstepSoundMap.Add(EAudio_SurfaceType::Grass, GrassSounds);
-
-    // Rock surface
-    TMap<EAudio_MovementType, FAudio_FootstepData> RockSounds;
-    
-    FAudio_FootstepData RockWalk;
-    RockWalk.BaseVolume = 0.8f;
-    RockWalk.PitchVariation = 0.25f;
-    RockSounds.Add(EAudio_MovementType::Walk, RockWalk);
-
-    FAudio_FootstepData RockRun;
-    RockRun.BaseVolume = 1.0f;
-    RockRun.PitchVariation = 0.3f;
-    RockSounds.Add(EAudio_MovementType::Run, RockRun);
-
-    FAudio_FootstepData RockSneak;
-    RockSneak.BaseVolume = 0.4f;
-    RockSneak.PitchVariation = 0.15f;
-    RockSounds.Add(EAudio_MovementType::Sneak, RockSneak);
-
-    FootstepSoundMap.Add(EAudio_SurfaceType::Rock, RockSounds);
+void UAudio_FootstepSystem::SpawnDustParticle(UParticleSystem* ParticleSystem, FVector Location)
+{
+    if (ParticleSystem && GetWorld())
+    {
+        UGameplayStatics::SpawnEmitterAtLocation(
+            GetWorld(),
+            ParticleSystem,
+            Location,
+            FRotator::ZeroRotator,
+            FVector(1.0f),
+            true
+        );
+    }
 }
