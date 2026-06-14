@@ -1,20 +1,22 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
+#include "Components/ActorComponent.h"
+#include "Engine/World.h"
 #include "Components/StaticMeshComponent.h"
-#include "Components/BoxComponent.h"
-#include "Engine/TriggerVolume.h"
+#include "Materials/MaterialInterface.h"
+#include "SharedTypes.h"
 #include "Arch_ShelterManager.generated.h"
 
 UENUM(BlueprintType)
 enum class EArch_ShelterType : uint8
 {
-    StoneArchway,
-    CaveEntrance,
-    RockOverhang,
-    LogShelter,
-    BuriedDwelling
+    CaveEntrance    UMETA(DisplayName = "Cave Entrance"),
+    RockShelter     UMETA(DisplayName = "Rock Shelter"),
+    TreeHollow      UMETA(DisplayName = "Tree Hollow"),
+    StoneHut        UMETA(DisplayName = "Stone Hut"),
+    LeanTo          UMETA(DisplayName = "Lean-To"),
+    Windbreak       UMETA(DisplayName = "Windbreak")
 };
 
 USTRUCT(BlueprintType)
@@ -23,92 +25,153 @@ struct FArch_ShelterData
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter")
-    EArch_ShelterType ShelterType;
+    EArch_ShelterType ShelterType = EArch_ShelterType::CaveEntrance;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter")
-    FVector EntranceLocation;
+    FVector ShelterSize = FVector(400.0f, 300.0f, 250.0f);
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter")
-    FVector InteriorBounds;
+    float ProtectionRadius = 500.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter")
-    bool bHasFirePit;
+    float WeatherProtection = 0.8f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter")
-    bool bHasSleepingArea;
+    float TemperatureBonus = 5.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter")
-    float ProtectionLevel;
+    bool bHasFirePit = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter")
+    bool bIsOccupied = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter")
+    int32 MaxOccupants = 4;
 
     FArch_ShelterData()
     {
-        ShelterType = EArch_ShelterType::StoneArchway;
-        EntranceLocation = FVector::ZeroVector;
-        InteriorBounds = FVector(400, 400, 300);
+        ShelterType = EArch_ShelterType::CaveEntrance;
+        ShelterSize = FVector(400.0f, 300.0f, 250.0f);
+        ProtectionRadius = 500.0f;
+        WeatherProtection = 0.8f;
+        TemperatureBonus = 5.0f;
         bHasFirePit = false;
-        bHasSleepingArea = false;
-        ProtectionLevel = 0.5f;
+        bIsOccupied = false;
+        MaxOccupants = 4;
     }
 };
 
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API AArch_ShelterManager : public AActor
+USTRUCT(BlueprintType)
+struct FArch_InteriorElement
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interior")
+    FString ElementName = TEXT("FirePit");
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interior")
+    FVector RelativeLocation = FVector::ZeroVector;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interior")
+    FRotator RelativeRotation = FRotator::ZeroRotator;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interior")
+    FVector Scale = FVector::OneVector;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interior")
+    bool bIsActive = true;
+
+    FArch_InteriorElement()
+    {
+        ElementName = TEXT("FirePit");
+        RelativeLocation = FVector::ZeroVector;
+        RelativeRotation = FRotator::ZeroRotator;
+        Scale = FVector::OneVector;
+        bIsActive = true;
+    }
+};
+
+UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UArch_ShelterManager : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    AArch_ShelterManager();
+    UArch_ShelterManager();
 
 protected:
     virtual void BeginPlay() override;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    UStaticMeshComponent* EntranceMesh;
+public:
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    UBoxComponent* InteriorTrigger;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    UStaticMeshComponent* FirePitMesh;
-
+    // Core shelter properties
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter Configuration")
     FArch_ShelterData ShelterData;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter Configuration")
-    TArray<UStaticMesh*> EntranceMeshes;
+    TArray<FArch_InteriorElement> InteriorElements;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter Configuration")
-    UStaticMesh* FirePitMesh_Asset;
+    // Mesh components
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter Meshes")
+    class UStaticMeshComponent* MainStructureMesh;
 
-public:
-    virtual void Tick(float DeltaTime) override;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter Meshes")
+    TArray<class UStaticMeshComponent*> InteriorMeshes;
 
-    UFUNCTION(BlueprintCallable, Category = "Shelter")
-    void InitializeShelter(const FArch_ShelterData& NewShelterData);
+    // Materials
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter Materials")
+    class UMaterialInterface* StoneMaterial;
 
-    UFUNCTION(BlueprintCallable, Category = "Shelter")
-    void SetShelterType(EArch_ShelterType NewType);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter Materials")
+    class UMaterialInterface* WoodMaterial;
 
-    UFUNCTION(BlueprintCallable, Category = "Shelter")
-    bool IsPlayerInShelter() const;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter Materials")
+    class UMaterialInterface* MossMaterial;
 
-    UFUNCTION(BlueprintCallable, Category = "Shelter")
-    float GetProtectionLevel() const;
+    // Shelter management functions
+    UFUNCTION(BlueprintCallable, Category = "Shelter Management")
+    void InitializeShelter(EArch_ShelterType InShelterType, FVector InSize);
 
-    UFUNCTION(BlueprintCallable, Category = "Shelter")
-    void ToggleFirePit(bool bEnable);
+    UFUNCTION(BlueprintCallable, Category = "Shelter Management")
+    void AddInteriorElement(const FArch_InteriorElement& NewElement);
 
-protected:
-    UFUNCTION()
-    void OnInteriorEntered(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComponent, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult);
+    UFUNCTION(BlueprintCallable, Category = "Shelter Management")
+    void RemoveInteriorElement(const FString& ElementName);
 
-    UFUNCTION()
-    void OnInteriorExited(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComponent, int32 OtherBodyIndex);
+    UFUNCTION(BlueprintCallable, Category = "Shelter Management")
+    bool CanProvideProtection(FVector TestLocation) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Shelter Management")
+    float GetProtectionLevel(FVector TestLocation) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Shelter Management")
+    void SetOccupancy(bool bOccupied, int32 NumOccupants = 1);
+
+    UFUNCTION(BlueprintCallable, Category = "Shelter Management")
+    void ToggleFirePit(bool bActive);
+
+    // Biome-specific shelter generation
+    UFUNCTION(BlueprintCallable, Category = "Shelter Generation")
+    void GenerateBiomeSpecificShelter(EBiomeType BiomeType);
+
+    UFUNCTION(BlueprintCallable, Category = "Shelter Generation")
+    void ApplyWeatheringEffects(float WeatheringLevel);
+
+    UFUNCTION(BlueprintCallable, Category = "Shelter Generation")
+    void UpdateShelterCondition(float DeltaTime);
 
 private:
-    bool bPlayerInside;
-    float CurrentProtection;
+    // Internal state
+    float CurrentCondition = 1.0f;
+    float LastMaintenanceTime = 0.0f;
+    TArray<AActor*> CurrentOccupants;
 
-    void UpdateMeshBasedOnType();
-    void SetupInteriorTrigger();
+    // Helper functions
+    void CreateMainStructure();
+    void CreateInteriorElements();
+    void ApplyMaterialsBasedOnType();
+    void SetupCollisionAndPhysics();
+    FVector GetBiomeSpecificSize(EBiomeType BiomeType) const;
+    TArray<FArch_InteriorElement> GetBiomeSpecificInterior(EBiomeType BiomeType) const;
 };
