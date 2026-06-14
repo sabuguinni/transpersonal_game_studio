@@ -3,54 +3,37 @@
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
 #include "Engine/Engine.h"
-#include "Sound/SoundBase.h"
-#include "Particles/ParticleSystem.h"
 #include "Components/AudioComponent.h"
+#include "Sound/SoundCue.h"
+#include "SharedTypes.h"
 #include "Audio_FootstepSystem.generated.h"
 
-UENUM(BlueprintType)
-enum class EAudio_FootstepType : uint8
-{
-    Light       UMETA(DisplayName = "Light Step"),
-    Medium      UMETA(DisplayName = "Medium Step"), 
-    Heavy       UMETA(DisplayName = "Heavy Step"),
-    Dinosaur    UMETA(DisplayName = "Dinosaur Step")
-};
-
-UENUM(BlueprintType)
-enum class EAudio_SurfaceType : uint8
-{
-    Dirt        UMETA(DisplayName = "Dirt"),
-    Grass       UMETA(DisplayName = "Grass"),
-    Rock        UMETA(DisplayName = "Rock"),
-    Mud         UMETA(DisplayName = "Mud"),
-    Sand        UMETA(DisplayName = "Sand"),
-    Water       UMETA(DisplayName = "Water")
-};
-
 USTRUCT(BlueprintType)
-struct FAudio_FootstepData
+struct TRANSPERSONALGAME_API FAudio_FootstepData
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    USoundBase* FootstepSound;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Footstep")
+    TSoftObjectPtr<USoundCue> FootstepSound;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
-    UParticleSystem* DustParticle;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Footstep")
+    float VolumeMultiplier = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    float VolumeMultiplier;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Footstep")
+    float PitchMultiplier = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    float PitchMultiplier;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Footstep")
+    float MinDistance = 100.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Footstep")
+    float MaxDistance = 2000.0f;
 
     FAudio_FootstepData()
     {
-        FootstepSound = nullptr;
-        DustParticle = nullptr;
         VolumeMultiplier = 1.0f;
         PitchMultiplier = 1.0f;
+        MinDistance = 100.0f;
+        MaxDistance = 2000.0f;
     }
 };
 
@@ -68,37 +51,57 @@ protected:
 public:
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    UFUNCTION(BlueprintCallable, Category = "Audio|Footsteps")
-    void PlayFootstep(EAudio_FootstepType FootstepType, EAudio_SurfaceType SurfaceType, FVector Location);
+    // Footstep configuration per surface type
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Footsteps")
+    TMap<ESurfaceType, FAudio_FootstepData> FootstepSounds;
 
-    UFUNCTION(BlueprintCallable, Category = "Audio|Footsteps")
-    void SetFootstepEnabled(bool bEnabled);
+    // Player footstep settings
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Player Footsteps")
+    FAudio_FootstepData PlayerFootsteps;
 
-    UFUNCTION(BlueprintCallable, Category = "Audio|Footsteps")
-    void SetVolumeMultiplier(float Multiplier);
+    // Dinosaur footstep settings
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur Footsteps")
+    FAudio_FootstepData DinosaurFootsteps;
 
-    UFUNCTION(BlueprintCallable, Category = "Audio|Footsteps")
-    EAudio_SurfaceType DetectSurfaceType(FVector Location);
+    // Heavy creature (T-Rex) footstep settings
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Heavy Footsteps")
+    FAudio_FootstepData HeavyFootsteps;
 
-protected:
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Settings")
-    bool bFootstepsEnabled;
+    // Footstep timing
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Timing")
+    float FootstepInterval = 0.5f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Settings")
-    float GlobalVolumeMultiplier;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Timing")
+    float LastFootstepTime = 0.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Settings")
-    float FootstepCooldown;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Footstep Data")
-    TMap<EAudio_FootstepType, TMap<EAudio_SurfaceType, FAudio_FootstepData>> FootstepDataMap;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio|Components")
+    // Audio component for playing footsteps
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio")
     UAudioComponent* AudioComponent;
 
+    // Functions
+    UFUNCTION(BlueprintCallable, Category = "Footsteps")
+    void PlayFootstep(ESurfaceType SurfaceType, FVector Location, float VelocityMultiplier = 1.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "Footsteps")
+    void PlayPlayerFootstep(FVector Location, float MovementSpeed);
+
+    UFUNCTION(BlueprintCallable, Category = "Footsteps")
+    void PlayDinosaurFootstep(FVector Location, ECreatureSize CreatureSize);
+
+    UFUNCTION(BlueprintCallable, Category = "Footsteps")
+    ESurfaceType GetSurfaceTypeAtLocation(FVector Location);
+
+    UFUNCTION(BlueprintCallable, Category = "Footsteps")
+    void SetFootstepVolume(float NewVolume);
+
+    UFUNCTION(BlueprintCallable, Category = "Footsteps")
+    void EnableFootsteps(bool bEnable);
+
 private:
-    float LastFootstepTime;
+    bool bFootstepsEnabled = true;
+    float CurrentVolume = 1.0f;
     
-    void InitializeFootstepData();
-    void SpawnDustParticle(UParticleSystem* ParticleSystem, FVector Location);
+    // Helper functions
+    void InitializeFootstepSounds();
+    FAudio_FootstepData GetFootstepDataForSurface(ESurfaceType SurfaceType);
 };
