@@ -1,17 +1,19 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
-#include "Components/StaticMeshComponent.h"
-#include "Components/PointLightComponent.h"
-#include "Components/AudioComponent.h"
-#include "Components/ParticleSystemComponent.h"
+#include "Components/ActorComponent.h"
+#include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "SharedTypes.h"
+#include "Components/StaticMeshComponent.h"
+#include "Materials/MaterialInterface.h"
+#include "Particles/ParticleSystemComponent.h"
+#include "Sound/SoundCue.h"
+#include "Components/AudioComponent.h"
+#include "TranspersonalGame/Core/SharedTypes.h"
 #include "World_VolcanicBiomeSystem.generated.h"
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FWorld_VolcanicFeatureData
+struct TRANSPERSONALGAME_API FWorld_VolcanicFeature
 {
     GENERATED_BODY()
 
@@ -19,10 +21,10 @@ struct TRANSPERSONALGAME_API FWorld_VolcanicFeatureData
     FVector Location;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Volcanic Feature")
-    EWorld_VolcanicFeatureType FeatureType;
+    float Intensity; // 0.0 to 1.0
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Volcanic Feature")
-    float Intensity;
+    EWorld_VolcanicFeatureType FeatureType;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Volcanic Feature")
     float Radius;
@@ -30,194 +32,196 @@ struct TRANSPERSONALGAME_API FWorld_VolcanicFeatureData
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Volcanic Feature")
     bool bIsActive;
 
-    FWorld_VolcanicFeatureData()
+    FWorld_VolcanicFeature()
     {
         Location = FVector::ZeroVector;
-        FeatureType = EWorld_VolcanicFeatureType::HotSpring;
-        Intensity = 1.0f;
+        Intensity = 0.5f;
+        FeatureType = EWorld_VolcanicFeatureType::SteamVent;
         Radius = 500.0f;
         bIsActive = true;
     }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FWorld_VolcanicBiomeConfig
+struct TRANSPERSONALGAME_API FWorld_LavaFlowData
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Volcanic Config")
-    float VolcanicActivity;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lava Flow")
+    TArray<FVector> FlowPath;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Volcanic Config")
-    float GeothermalDensity;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lava Flow")
+    float FlowSpeed; // Units per second
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Volcanic Config")
-    float LavaFlowRate;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lava Flow")
+    float Temperature; // Celsius
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Volcanic Config")
-    float AmbientTemperature;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lava Flow")
+    float Width;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Volcanic Config")
-    bool bEnableVolcanicWeather;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lava Flow")
+    bool bIsFlowing;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Volcanic Config")
-    TArray<FWorld_VolcanicFeatureData> VolcanicFeatures;
-
-    FWorld_VolcanicBiomeConfig()
+    FWorld_LavaFlowData()
     {
-        VolcanicActivity = 0.7f;
-        GeothermalDensity = 0.5f;
-        LavaFlowRate = 0.3f;
-        AmbientTemperature = 45.0f;
-        bEnableVolcanicWeather = true;
+        FlowSpeed = 100.0f;
+        Temperature = 1200.0f;
+        Width = 200.0f;
+        bIsFlowing = true;
     }
 };
 
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API AWorld_VolcanicBiomeSystem : public AActor
+UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UWorld_VolcanicBiomeSystem : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    AWorld_VolcanicBiomeSystem();
+    UWorld_VolcanicBiomeSystem();
 
 protected:
     virtual void BeginPlay() override;
-    virtual void Tick(float DeltaTime) override;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    USceneComponent* RootSceneComponent;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    UStaticMeshComponent* VolcanicTerrainMesh;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    UPointLightComponent* VolcanicGlowLight;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    UAudioComponent* VolcanicAudioComponent;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    UParticleSystemComponent* SteamParticles;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    UParticleSystemComponent* LavaParticles;
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 public:
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Volcanic Biome")
-    FWorld_VolcanicBiomeConfig BiomeConfig;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Volcanic Biome")
-    float VolcanicIntensity;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Volcanic Biome")
-    bool bIsErupting;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Volcanic Biome")
-    float EruptionTimer;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Volcanic Biome")
-    float EruptionDuration;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Volcanic Biome")
-    TArray<AActor*> NearbyActors;
-
-    // Core volcanic system methods
+    // === VOLCANIC FEATURE MANAGEMENT ===
     UFUNCTION(BlueprintCallable, Category = "Volcanic System")
-    void InitializeVolcanicBiome();
+    void GenerateVolcanicFeatures(const FVector& CenterLocation, float BiomeRadius);
 
     UFUNCTION(BlueprintCallable, Category = "Volcanic System")
-    void UpdateVolcanicActivity(float DeltaTime);
+    void SpawnSteamVent(const FVector& Location, float Intensity);
 
     UFUNCTION(BlueprintCallable, Category = "Volcanic System")
-    void TriggerVolcanicEruption();
+    void SpawnLavaPool(const FVector& Location, float Radius);
 
     UFUNCTION(BlueprintCallable, Category = "Volcanic System")
-    void StopVolcanicEruption();
+    void CreateLavaFlow(const FVector& StartLocation, const FVector& EndLocation);
 
     UFUNCTION(BlueprintCallable, Category = "Volcanic System")
-    void CreateVolcanicFeature(const FWorld_VolcanicFeatureData& FeatureData);
+    void SpawnVolcanicRock(const FVector& Location, float Scale);
+
+    // === ENVIRONMENTAL EFFECTS ===
+    UFUNCTION(BlueprintCallable, Category = "Volcanic System")
+    void UpdateVolcanicActivity(float ActivityLevel);
 
     UFUNCTION(BlueprintCallable, Category = "Volcanic System")
-    void RemoveVolcanicFeature(int32 FeatureIndex);
+    void SpawnAshParticles(const FVector& Location, float Intensity);
 
-    // Geothermal system integration
-    UFUNCTION(BlueprintCallable, Category = "Geothermal")
-    void UpdateGeothermalActivity();
+    UFUNCTION(BlueprintCallable, Category = "Volcanic System")
+    void UpdateHeatDistortion(float DistortionStrength);
 
-    UFUNCTION(BlueprintCallable, Category = "Geothermal")
-    void CreateHotSpring(const FVector& Location, float Intensity);
+    // === VEGETATION SYSTEM ===
+    UFUNCTION(BlueprintCallable, Category = "Volcanic System")
+    void SpawnVolcanicVegetation(const FVector& Location);
 
-    UFUNCTION(BlueprintCallable, Category = "Geothermal")
-    void CreateGeothermalVent(const FVector& Location, float SteamIntensity);
+    UFUNCTION(BlueprintCallable, Category = "Volcanic System")
+    void PlaceFerns(const FVector& CenterLocation, float Radius, int32 Count);
 
-    // Lava flow system
-    UFUNCTION(BlueprintCallable, Category = "Lava Flow")
-    void InitializeLavaFlow(const FVector& StartLocation, const FVector& Direction);
+    UFUNCTION(BlueprintCallable, Category = "Volcanic System")
+    void PlaceCycads(const FVector& CenterLocation, float Radius, int32 Count);
 
-    UFUNCTION(BlueprintCallable, Category = "Lava Flow")
-    void UpdateLavaFlow(float DeltaTime);
+    // === AUDIO SYSTEM ===
+    UFUNCTION(BlueprintCallable, Category = "Volcanic System")
+    void UpdateVolcanicAmbientSounds();
 
-    UFUNCTION(BlueprintCallable, Category = "Lava Flow")
-    void CoolLavaFlow();
+    UFUNCTION(BlueprintCallable, Category = "Volcanic System")
+    void PlayLavaBubbleSound(const FVector& Location);
 
-    // Environmental effects
-    UFUNCTION(BlueprintCallable, Category = "Environmental")
-    void UpdateVolcanicLighting();
+    UFUNCTION(BlueprintCallable, Category = "Volcanic System")
+    void PlaySteamHissSound(const FVector& Location);
 
-    UFUNCTION(BlueprintCallable, Category = "Environmental")
-    void UpdateVolcanicAudio();
+    // === TEMPERATURE SYSTEM ===
+    UFUNCTION(BlueprintCallable, Category = "Volcanic System")
+    float GetTemperatureAtLocation(const FVector& Location) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Environmental")
-    void UpdateVolcanicParticles();
+    UFUNCTION(BlueprintCallable, Category = "Volcanic System")
+    bool IsLocationTooHot(const FVector& Location, float Threshold = 80.0f) const;
 
-    // Performance optimization
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void OptimizeVolcanicEffects(float PlayerDistance);
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void SetVolcanicLOD(int32 LODLevel);
-
-    // Integration with other systems
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    void IntegrateWithWeatherSystem();
-
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    void IntegrateWithBiomeAudio();
-
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    void NotifyNearbyActors();
+    UFUNCTION(BlueprintCallable, Category = "Volcanic System")
+    void UpdateTemperatureField();
 
 protected:
-    // Internal volcanic state
-    float CurrentVolcanicActivity;
-    float GeothermalHeatLevel;
-    float LavaTemperature;
-    bool bVolcanicSystemActive;
-    
-    // Timers and intervals
-    float VolcanicUpdateInterval;
-    float LastVolcanicUpdate;
-    float GeothermalUpdateInterval;
-    float LastGeothermalUpdate;
-    
-    // Performance tracking
-    int32 CurrentLODLevel;
-    float LastPerformanceCheck;
-    float PerformanceCheckInterval;
-    
-    // Integration references
-    class AWorld_BiomeAudioController* BiomeAudioController;
-    class AWorld_DynamicWeatherController* WeatherController;
-    class AWorld_PerformanceTerrainSystem* TerrainSystem;
+    // === VOLCANIC FEATURES ===
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Volcanic Features")
+    TArray<FWorld_VolcanicFeature> VolcanicFeatures;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Volcanic Features")
+    TArray<FWorld_LavaFlowData> LavaFlows;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Volcanic Features")
+    float BaseTemperature;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Volcanic Features")
+    float VolcanicActivityLevel; // 0.0 to 1.0
+
+    // === MESHES AND MATERIALS ===
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Assets")
+    class UStaticMesh* SteamVentMesh;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Assets")
+    class UStaticMesh* LavaPoolMesh;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Assets")
+    class UStaticMesh* VolcanicRockMesh;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Assets")
+    class UStaticMesh* FernMesh;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Assets")
+    class UStaticMesh* CycadMesh;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Assets")
+    class UMaterialInterface* LavaMaterial;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Assets")
+    class UMaterialInterface* VolcanicRockMaterial;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Assets")
+    class UMaterialInterface* AshMaterial;
+
+    // === PARTICLE SYSTEMS ===
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Effects")
+    class UParticleSystem* SteamParticles;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Effects")
+    class UParticleSystem* AshParticles;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Effects")
+    class UParticleSystem* LavaBubbleParticles;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Effects")
+    class UParticleSystem* HeatDistortionParticles;
+
+    // === AUDIO ===
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    class USoundCue* VolcanicAmbientSound;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    class USoundCue* LavaBubbleSound;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    class USoundCue* SteamHissSound;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    class UAudioComponent* AmbientAudioComponent;
+
+    // === SPAWNED COMPONENTS ===
+    UPROPERTY()
+    TArray<class UStaticMeshComponent*> SpawnedMeshComponents;
+
+    UPROPERTY()
+    TArray<class UParticleSystemComponent*> SpawnedParticleComponents;
+
+    UPROPERTY()
+    TArray<class UAudioComponent*> SpawnedAudioComponents;
 
 private:
-    // Internal helper methods
-    void UpdateInternalVolcanicState(float DeltaTime);
-    void CheckVolcanicTriggers();
-    void ProcessVolcanicEffects();
-    void ValidateVolcanicConfiguration();
-    FLinearColor CalculateVolcanicGlowColor() const;
-    float CalculateVolcanicSoundVolume() const;
-    void CleanupInactiveFeatures();
+    // === INTERNAL HELPERS ===
+    void InitializeVolcanicAssets();
+    void CleanupSpawnedComponents();
+    FVector FindSuitableVolcanicLocation(const FVector& CenterLocation, float SearchRadius) const;
+    bool IsValidVolcanicSpawnLocation(const FVector& Location) const;
+    float CalculateHeatIntensity(const FVector& Location) const;
+    void UpdateLavaFlowAnimation(float DeltaTime);
+    void UpdateParticleEffects(float DeltaTime);
 };
