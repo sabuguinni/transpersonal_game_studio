@@ -1,297 +1,229 @@
 #include "EnvArt_AtmosphericManager.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "Engine/DirectionalLight.h"
+#include "Kismet/GameplayStatics.h"
 #include "Components/DirectionalLightComponent.h"
 #include "Engine/VolumetricCloud.h"
-#include "Components/VolumetricCloudComponent.h"
-#include "Particles/ParticleSystemComponent.h"
-#include "Kismet/GameplayStatics.h"
-#include "Components/SceneComponent.h"
+#include "Particles/ParticleSystem.h"
+#include "Sound/SoundCue.h"
 
 AEnvArt_AtmosphericManager::AEnvArt_AtmosphericManager()
 {
     PrimaryActorTick.bCanEverTick = true;
 
-    // Create root component
+    // Create root scene component
     RootSceneComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootSceneComponent"));
     RootComponent = RootSceneComponent;
 
-    // Initialize default values
+    // Create atmospheric particle system component
+    AtmosphericParticles = CreateDefaultSubobject<UParticleSystemComponent>(TEXT("AtmosphericParticles"));
+    AtmosphericParticles->SetupAttachment(RootComponent);
+
+    // Create ambient audio component
+    AmbientAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("AmbientAudioComponent"));
+    AmbientAudioComponent->SetupAttachment(RootComponent);
+    AmbientAudioComponent->bAutoActivate = true;
+
+    // Initialize default atmospheric settings
+    AtmosphericSettings.SunColor = FLinearColor(1.0f, 0.8f, 0.6f, 1.0f);
+    AtmosphericSettings.SunIntensity = 3.5f;
+    AtmosphericSettings.SunElevation = -30.0f;
+    AtmosphericSettings.SunAzimuth = 45.0f;
+    AtmosphericSettings.FogDensity = 0.1f;
+    AtmosphericSettings.FogHeight = 200.0f;
+    AtmosphericSettings.FogColor = FLinearColor(0.9f, 0.95f, 1.0f, 1.0f);
+    AtmosphericSettings.ParticleDensity = 50.0f;
+    AtmosphericSettings.WindStrength = 1.0f;
+
     CurrentTimeOfDay = 12.0f; // Noon
-    DayDurationInMinutes = 20.0f; // 20 minute day cycle
-    bEnableDayNightCycle = true;
-    WeatherIntensity = 0.5f;
-    bIsRaining = false;
-    bIsFoggy = true;
-    CurrentZoneName = TEXT("Default");
-    TimeAccumulator = 0.0f;
+    CurrentWeatherIntensity = 0.5f; // Moderate weather
 }
 
 void AEnvArt_AtmosphericManager::BeginPlay()
 {
     Super::BeginPlay();
-    
-    // Initialize default atmospheric zones
-    InitializeDefaultAtmosphericZones();
-    
-    UE_LOG(LogTemp, Warning, TEXT("AtmosphericManager: Initialized with %d zones"), AtmosphericZones.Num());
+
+    // Find the directional light in the scene
+    TArray<AActor*> FoundActors;
+    UGameplayStatics::GetAllActorsOfClass(GetWorld(), ADirectionalLight::StaticClass(), FoundActors);
+    if (FoundActors.Num() > 0)
+    {
+        SunLight = Cast<ADirectionalLight>(FoundActors[0]);
+    }
+
+    // Apply initial golden hour lighting
+    ApplyGoldenHourLighting();
+
+    // Start ambient audio if sound cue is assigned
+    if (ForestAmbientSound && AmbientAudioComponent)
+    {
+        AmbientAudioComponent->SetSound(ForestAmbientSound);
+        AmbientAudioComponent->Play();
+    }
 }
 
 void AEnvArt_AtmosphericManager::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
-    
-    if (bEnableDayNightCycle)
-    {
-        TimeAccumulator += DeltaTime;
-        
-        // Update time of day
-        float DayDurationInSeconds = DayDurationInMinutes * 60.0f;
-        CurrentTimeOfDay = FMath::Fmod(TimeAccumulator / DayDurationInSeconds * 24.0f, 24.0f);
-        
-        // Update lighting based on time
-        UpdateLightingForTimeOfDay(CurrentTimeOfDay);
-    }
-    
-    // Update atmospheric effects
-    UpdateAtmosphericEffects(DeltaTime);
+
+    UpdateLightingBasedOnTime();
+    UpdateFogBasedOnWeather();
+    UpdateParticleEffects();
+    UpdateAmbientAudio();
 }
 
-void AEnvArt_AtmosphericManager::SetAtmosphericZone(const FString& ZoneName, const FVector& PlayerLocation)
+void AEnvArt_AtmosphericManager::SetTimeOfDay(float TimeHours)
 {
-    if (CurrentZoneName != ZoneName)
+    CurrentTimeOfDay = FMath::Clamp(TimeHours, 0.0f, 24.0f);
+    UpdateLightingBasedOnTime();
+}
+
+void AEnvArt_AtmosphericManager::SetWeatherIntensity(float Intensity)
+{
+    CurrentWeatherIntensity = FMath::Clamp(Intensity, 0.0f, 1.0f);
+    UpdateFogBasedOnWeather();
+}
+
+void AEnvArt_AtmosphericManager::SetFogDensity(float Density)
+{
+    AtmosphericSettings.FogDensity = FMath::Clamp(Density, 0.0f, 1.0f);
+    UpdateFogBasedOnWeather();
+}
+
+void AEnvArt_AtmosphericManager::SetWindStrength(float Strength)
+{
+    AtmosphericSettings.WindStrength = FMath::Clamp(Strength, 0.0f, 5.0f);
+    UpdateParticleEffects();
+}
+
+void AEnvArt_AtmosphericManager::ApplyGoldenHourLighting()
+{
+    if (SunLight)
     {
-        CurrentZoneName = ZoneName;
-        
-        // Find the zone and apply its settings
-        for (const FEnvArt_AtmosphericZone& Zone : AtmosphericZones)
+        // Set golden hour rotation (low angle, warm light)
+        FRotator GoldenHourRotation(AtmosphericSettings.SunElevation, AtmosphericSettings.SunAzimuth, 0.0f);
+        SunLight->SetActorRotation(GoldenHourRotation);
+
+        // Configure light properties
+        UDirectionalLightComponent* LightComponent = SunLight->GetDirectionalLightComponent();
+        if (LightComponent)
         {
-            if (Zone.ZoneName == ZoneName)
-            {
-                // Apply zone-specific atmospheric settings
-                UpdateDirectionalLight();
-                UpdateVolumetricFog();
-                
-                UE_LOG(LogTemp, Log, TEXT("AtmosphericManager: Switched to zone %s"), *ZoneName);
-                break;
-            }
+            LightComponent->SetLightColor(AtmosphericSettings.SunColor);
+            LightComponent->SetIntensity(AtmosphericSettings.SunIntensity);
+            LightComponent->SetCastVolumetricShadow(true);
+            LightComponent->SetVolumetricScatteringIntensity(1.5f);
         }
     }
 }
 
-void AEnvArt_AtmosphericManager::UpdateLightingForTimeOfDay(float TimeOfDay)
+void AEnvArt_AtmosphericManager::ApplyMidnightLighting()
 {
-    // Calculate sun angle based on time of day
-    float SunAngle = (TimeOfDay / 24.0f) * 360.0f - 90.0f; // -90 to 270 degrees
-    
-    // Find directional light in the world
-    UWorld* World = GetWorld();
-    if (!World) return;
-    
-    TArray<AActor*> FoundActors;
-    UGameplayStatics::GetAllActorsOfClass(World, ADirectionalLight::StaticClass(), FoundActors);
-    
-    for (AActor* Actor : FoundActors)
+    if (SunLight)
     {
-        if (ADirectionalLight* DirLight = Cast<ADirectionalLight>(Actor))
+        // Set midnight rotation (very low angle, cool light)
+        FRotator MidnightRotation(-80.0f, 180.0f, 0.0f);
+        SunLight->SetActorRotation(MidnightRotation);
+
+        // Configure night light properties
+        UDirectionalLightComponent* LightComponent = SunLight->GetDirectionalLightComponent();
+        if (LightComponent)
         {
-            // Update sun rotation
-            FRotator NewRotation = FRotator(SunAngle, 30.0f, 0.0f);
-            DirLight->SetActorRotation(NewRotation);
+            FLinearColor MoonColor(0.3f, 0.4f, 0.6f, 1.0f);
+            LightComponent->SetLightColor(MoonColor);
+            LightComponent->SetIntensity(0.5f);
+        }
+    }
+}
+
+void AEnvArt_AtmosphericManager::CreateVolumetricFogZone(FVector Location, FVector Scale)
+{
+    // Spawn volumetric cloud actor for fog effect
+    AVolumetricCloud* FogActor = GetWorld()->SpawnActor<AVolumetricCloud>(Location, FRotator::ZeroRotator);
+    if (FogActor)
+    {
+        FogActor->SetActorScale3D(Scale);
+        VolumetricFogActor = FogActor;
+
+        UVolumetricCloudComponent* CloudComponent = FogActor->GetVolumetricCloudComponent();
+        if (CloudComponent)
+        {
+            CloudComponent->SetLayerBottomAltitude(0.1f);
+            CloudComponent->SetLayerHeight(AtmosphericSettings.FogHeight / 100.0f);
+            CloudComponent->SetAlbedo(AtmosphericSettings.FogColor);
+        }
+    }
+}
+
+void AEnvArt_AtmosphericManager::SpawnAtmosphericParticles(FVector Location, float Density)
+{
+    if (AtmosphericParticles)
+    {
+        AtmosphericParticles->SetWorldLocation(Location);
+        // Configure particle density and wind effects
+        // Note: Specific particle system configuration would depend on the assigned particle system asset
+    }
+}
+
+void AEnvArt_AtmosphericManager::UpdateLightingBasedOnTime()
+{
+    if (!SunLight) return;
+
+    // Calculate sun angle based on time of day (0-24 hours)
+    float SunAngle = (CurrentTimeOfDay - 6.0f) * 15.0f - 90.0f; // 6 AM = 0 degrees, 12 PM = 90 degrees
+    float SunElevation = FMath::Sin(FMath::DegreesToRadians(SunAngle)) * 90.0f;
+
+    // Update sun rotation
+    FRotator NewRotation(SunElevation, AtmosphericSettings.SunAzimuth, 0.0f);
+    SunLight->SetActorRotation(NewRotation);
+
+    // Update light color and intensity based on time
+    UDirectionalLightComponent* LightComponent = SunLight->GetDirectionalLightComponent();
+    if (LightComponent)
+    {
+        if (CurrentTimeOfDay >= 6.0f && CurrentTimeOfDay <= 18.0f) // Daytime
+        {
+            float DayProgress = (CurrentTimeOfDay - 6.0f) / 12.0f;
+            float WarmnessFactor = 1.0f - FMath::Abs(DayProgress - 0.5f) * 2.0f; // Peak warmth at noon
             
-            // Update light color and intensity based on time
-            UDirectionalLightComponent* LightComp = DirLight->GetComponent<UDirectionalLightComponent>();
-            if (LightComp)
-            {
-                float IntensityMultiplier = 1.0f;
-                FLinearColor LightColor = FLinearColor::White;
-                
-                // Dawn/Dusk (5-7 AM, 6-8 PM)
-                if ((TimeOfDay >= 5.0f && TimeOfDay <= 7.0f) || (TimeOfDay >= 18.0f && TimeOfDay <= 20.0f))
-                {
-                    LightColor = FLinearColor(1.0f, 0.7f, 0.4f, 1.0f); // Orange
-                    IntensityMultiplier = 0.6f;
-                }
-                // Day (7 AM - 6 PM)
-                else if (TimeOfDay >= 7.0f && TimeOfDay <= 18.0f)
-                {
-                    LightColor = FLinearColor(1.0f, 0.95f, 0.8f, 1.0f); // Warm white
-                    IntensityMultiplier = 1.0f;
-                }
-                // Night (8 PM - 5 AM)
-                else
-                {
-                    LightColor = FLinearColor(0.3f, 0.4f, 0.8f, 1.0f); // Blue moonlight
-                    IntensityMultiplier = 0.1f;
-                }
-                
-                LightComp->SetLightColor(LightColor);
-                LightComp->SetIntensity(8.0f * IntensityMultiplier);
-            }
-        }
-    }
-}
-
-void AEnvArt_AtmosphericManager::SpawnParticleEffect(const FString& EffectName, const FVector& Location)
-{
-    // Add particle effect to active list
-    FEnvArt_ParticleEffect NewEffect;
-    NewEffect.EffectName = EffectName;
-    NewEffect.SpawnLocation = Location;
-    NewEffect.bIsActive = true;
-    
-    ParticleEffects.Add(NewEffect);
-    
-    UE_LOG(LogTemp, Log, TEXT("AtmosphericManager: Spawned particle effect %s at location %s"), 
-           *EffectName, *Location.ToString());
-}
-
-void AEnvArt_AtmosphericManager::SetWeatherConditions(bool bRain, bool bFog, float Intensity)
-{
-    bIsRaining = bRain;
-    bIsFoggy = bFog;
-    WeatherIntensity = FMath::Clamp(Intensity, 0.0f, 1.0f);
-    
-    // Update atmospheric effects based on weather
-    UpdateVolumetricFog();
-    
-    UE_LOG(LogTemp, Log, TEXT("AtmosphericManager: Weather updated - Rain: %s, Fog: %s, Intensity: %.2f"),
-           bIsRaining ? TEXT("true") : TEXT("false"),
-           bIsFoggy ? TEXT("true") : TEXT("false"),
-           WeatherIntensity);
-}
-
-FEnvArt_AtmosphericZone AEnvArt_AtmosphericManager::GetCurrentAtmosphericZone(const FVector& Location) const
-{
-    // Find the closest atmospheric zone
-    float MinDistance = FLT_MAX;
-    FEnvArt_AtmosphericZone ClosestZone;
-    
-    for (const FEnvArt_AtmosphericZone& Zone : AtmosphericZones)
-    {
-        float Distance = FVector::Dist(Location, Zone.ZoneCenter);
-        if (Distance < Zone.ZoneRadius && Distance < MinDistance)
-        {
-            MinDistance = Distance;
-            ClosestZone = Zone;
-        }
-    }
-    
-    return ClosestZone;
-}
-
-void AEnvArt_AtmosphericManager::InitializeDefaultAtmosphericZones()
-{
-    AtmosphericZones.Empty();
-    
-    // Forest Zone
-    FEnvArt_AtmosphericZone ForestZone;
-    ForestZone.ZoneName = TEXT("Forest");
-    ForestZone.ZoneCenter = FVector(0, 0, 0);
-    ForestZone.ZoneRadius = 3000.0f;
-    ForestZone.FogColor = FLinearColor(0.8f, 0.9f, 0.7f, 1.0f);
-    ForestZone.FogDensity = 0.15f;
-    ForestZone.LightColor = FLinearColor(0.9f, 0.95f, 0.7f, 1.0f);
-    ForestZone.LightIntensity = 6.0f;
-    AtmosphericZones.Add(ForestZone);
-    
-    // Plains Zone
-    FEnvArt_AtmosphericZone PlainsZone;
-    PlainsZone.ZoneName = TEXT("Plains");
-    PlainsZone.ZoneCenter = FVector(5000, 5000, 0);
-    PlainsZone.ZoneRadius = 4000.0f;
-    PlainsZone.FogColor = FLinearColor(0.95f, 0.95f, 0.9f, 1.0f);
-    PlainsZone.FogDensity = 0.05f;
-    PlainsZone.LightColor = FLinearColor(1.0f, 0.9f, 0.8f, 1.0f);
-    PlainsZone.LightIntensity = 10.0f;
-    AtmosphericZones.Add(PlainsZone);
-    
-    // River Zone
-    FEnvArt_AtmosphericZone RiverZone;
-    RiverZone.ZoneName = TEXT("River");
-    RiverZone.ZoneCenter = FVector(-2000, 3000, 0);
-    RiverZone.ZoneRadius = 1500.0f;
-    RiverZone.FogColor = FLinearColor(0.9f, 0.95f, 1.0f, 1.0f);
-    RiverZone.FogDensity = 0.2f;
-    RiverZone.LightColor = FLinearColor(0.8f, 0.9f, 1.0f, 1.0f);
-    RiverZone.LightIntensity = 7.0f;
-    AtmosphericZones.Add(RiverZone);
-    
-    UE_LOG(LogTemp, Warning, TEXT("AtmosphericManager: Initialized %d default atmospheric zones"), AtmosphericZones.Num());
-}
-
-void AEnvArt_AtmosphericManager::UpdateAtmosphericEffects(float DeltaTime)
-{
-    // Update particle effects
-    for (int32 i = ParticleEffects.Num() - 1; i >= 0; i--)
-    {
-        FEnvArt_ParticleEffect& Effect = ParticleEffects[i];
-        
-        if (Effect.bIsActive)
-        {
-            Effect.ParticleLifetime -= DeltaTime;
+            FLinearColor DayColor = FLinearColor::LerpUsingHSV(
+                FLinearColor(1.0f, 0.6f, 0.4f, 1.0f), // Warm sunrise/sunset
+                FLinearColor(1.0f, 1.0f, 0.9f, 1.0f), // Cool noon
+                WarmnessFactor
+            );
             
-            if (Effect.ParticleLifetime <= 0.0f)
-            {
-                Effect.bIsActive = false;
-                ParticleEffects.RemoveAt(i);
-            }
+            LightComponent->SetLightColor(DayColor);
+            LightComponent->SetIntensity(FMath::Lerp(1.0f, 5.0f, WarmnessFactor));
+        }
+        else // Nighttime
+        {
+            FLinearColor NightColor(0.2f, 0.3f, 0.5f, 1.0f);
+            LightComponent->SetLightColor(NightColor);
+            LightComponent->SetIntensity(0.1f);
         }
     }
 }
 
-void AEnvArt_AtmosphericManager::UpdateDirectionalLight()
+void AEnvArt_AtmosphericManager::UpdateFogBasedOnWeather()
 {
-    // Implementation for updating directional light based on current zone
-    UWorld* World = GetWorld();
-    if (!World) return;
+    // Update fog density based on weather intensity and time of day
+    float EffectiveFogDensity = AtmosphericSettings.FogDensity * CurrentWeatherIntensity;
     
-    FEnvArt_AtmosphericZone CurrentZone = GetCurrentAtmosphericZone(GetActorLocation());
-    
-    TArray<AActor*> FoundActors;
-    UGameplayStatics::GetAllActorsOfClass(World, ADirectionalLight::StaticClass(), FoundActors);
-    
-    for (AActor* Actor : FoundActors)
+    // Increase fog during early morning and evening
+    if (CurrentTimeOfDay < 8.0f || CurrentTimeOfDay > 18.0f)
     {
-        if (ADirectionalLight* DirLight = Cast<ADirectionalLight>(Actor))
-        {
-            UDirectionalLightComponent* LightComp = DirLight->GetComponent<UDirectionalLightComponent>();
-            if (LightComp)
-            {
-                LightComp->SetLightColor(CurrentZone.LightColor);
-                LightComp->SetIntensity(CurrentZone.LightIntensity);
-            }
-        }
+        EffectiveFogDensity *= 1.5f;
     }
-}
 
-void AEnvArt_AtmosphericManager::UpdateVolumetricFog()
-{
-    // Implementation for updating volumetric fog based on current zone and weather
-    UWorld* World = GetWorld();
-    if (!World) return;
-    
-    FEnvArt_AtmosphericZone CurrentZone = GetCurrentAtmosphericZone(GetActorLocation());
-    
-    TArray<AActor*> FoundActors;
-    UGameplayStatics::GetAllActorsOfClass(World, AVolumetricCloud::StaticClass(), FoundActors);
-    
-    for (AActor* Actor : FoundActors)
+    // Apply fog settings to volumetric fog actor if available
+    if (VolumetricFogActor)
     {
-        if (AVolumetricCloud* CloudActor = Cast<AVolumetricCloud>(Actor))
+        AVolumetricCloud* CloudActor = Cast<AVolumetricCloud>(VolumetricFogActor);
+        if (CloudActor)
         {
-            UVolumetricCloudComponent* CloudComp = CloudActor->GetVolumetricCloudComponent();
-            if (CloudComp)
+            UVolumetricCloudComponent* CloudComponent = CloudActor->GetVolumetricCloudComponent();
+            if (CloudComponent)
             {
-                float FinalDensity = CurrentZone.FogDensity;
-                if (bIsFoggy)
-                {
-                    FinalDensity *= (1.0f + WeatherIntensity);
-                }
-                
-                CloudComp->SetAlbedo(CurrentZone.FogColor);
-                // Note: Density setting would depend on specific UE5 volumetric cloud properties
+                CloudComponent->SetLayerHeight(AtmosphericSettings.FogHeight / 100.0f * EffectiveFogDensity);
             }
         }
     }
@@ -299,44 +231,39 @@ void AEnvArt_AtmosphericManager::UpdateVolumetricFog()
 
 void AEnvArt_AtmosphericManager::UpdateParticleEffects()
 {
-    // Implementation for updating active particle effects
-    for (FEnvArt_ParticleEffect& Effect : ParticleEffects)
+    if (AtmosphericParticles)
     {
-        if (Effect.bIsActive)
-        {
-            // Update particle system properties based on weather and zone
-            float IntensityMultiplier = 1.0f;
-            
-            if (bIsRaining)
-            {
-                IntensityMultiplier *= (1.0f + WeatherIntensity * 0.5f);
-            }
-            
-            Effect.SpawnRate *= IntensityMultiplier;
-        }
+        // Update particle effects based on wind strength and weather
+        float EffectiveParticleDensity = AtmosphericSettings.ParticleDensity * CurrentWeatherIntensity;
+        
+        // Configure particle system parameters
+        // Note: Specific implementation would depend on the particle system asset
     }
 }
 
-void AEnvArt_AtmosphericManager::CalculateAtmosphericBlending(const FVector& PlayerLocation)
+void AEnvArt_AtmosphericManager::UpdateAmbientAudio()
 {
-    // Calculate blending between multiple atmospheric zones
-    TArray<float> ZoneInfluences;
-    float TotalInfluence = 0.0f;
-    
-    for (const FEnvArt_AtmosphericZone& Zone : AtmosphericZones)
+    if (AmbientAudioComponent)
     {
-        float Distance = FVector::Dist(PlayerLocation, Zone.ZoneCenter);
-        float Influence = FMath::Max(0.0f, 1.0f - (Distance / Zone.ZoneRadius));
-        ZoneInfluences.Add(Influence);
-        TotalInfluence += Influence;
-    }
-    
-    // Normalize influences and apply blended atmospheric settings
-    if (TotalInfluence > 0.0f)
-    {
-        for (int32 i = 0; i < ZoneInfluences.Num(); i++)
+        // Adjust ambient audio volume based on weather and time
+        float VolumeMultiplier = 0.5f + (CurrentWeatherIntensity * 0.5f);
+        
+        // Quieter at night
+        if (CurrentTimeOfDay < 6.0f || CurrentTimeOfDay > 20.0f)
         {
-            ZoneInfluences[i] /= TotalInfluence;
+            VolumeMultiplier *= 0.6f;
+        }
+        
+        AmbientAudioComponent->SetVolumeMultiplier(VolumeMultiplier);
+        
+        // Switch between day and night ambient sounds
+        if (CurrentTimeOfDay >= 6.0f && CurrentTimeOfDay <= 20.0f)
+        {
+            if (ForestAmbientSound && AmbientAudioComponent->GetSound() != ForestAmbientSound)
+            {
+                AmbientAudioComponent->SetSound(ForestAmbientSound);
+                AmbientAudioComponent->Play();
+            }
         }
     }
 }
