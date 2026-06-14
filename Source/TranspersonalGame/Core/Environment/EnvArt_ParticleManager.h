@@ -1,186 +1,125 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Components/ActorComponent.h"
-#include "Particles/ParticleSystemComponent.h"
+#include "GameFramework/Actor.h"
 #include "NiagaraComponent.h"
 #include "NiagaraSystem.h"
-#include "TranspersonalGame/SharedTypes.h"
+#include "Components/AudioComponent.h"
+#include "Sound/SoundCue.h"
+#include "SharedTypes.h"
 #include "EnvArt_ParticleManager.generated.h"
 
-DECLARE_LOG_CATEGORY_EXTERN(LogEnvArtParticles, Log, All);
+UENUM(BlueprintType)
+enum class EEnvArt_ParticleType : uint8
+{
+    Dust        UMETA(DisplayName = "Dust Motes"),
+    Pollen      UMETA(DisplayName = "Pollen"),
+    Leaves      UMETA(DisplayName = "Falling Leaves"),
+    Insects     UMETA(DisplayName = "Flying Insects"),
+    Spores      UMETA(DisplayName = "Spores"),
+    Ash         UMETA(DisplayName = "Volcanic Ash"),
+    Mist        UMETA(DisplayName = "Forest Mist"),
+    Fireflies   UMETA(DisplayName = "Fireflies")
+};
 
-/**
- * Atmospheric particle configuration for different environments
- */
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEnvArt_ParticleConfig
+struct TRANSPERSONALGAME_API FEnvArt_ParticleZone
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Particle Config")
-    EBiomeType BiomeType = EBiomeType::Savanna;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Zone")
+    FVector ZoneCenter = FVector::ZeroVector;
 
-    // Dust particles
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dust")
-    bool bEnableDust = true;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Zone")
+    FVector ZoneExtent = FVector(1000.0f, 1000.0f, 500.0f);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dust")
-    float DustSpawnRate = 5.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Zone")
+    EEnvArt_ParticleType ParticleType = EEnvArt_ParticleType::Dust;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dust")
-    FVector DustVelocity = FVector(10.0f, 0.0f, 5.0f);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Zone")
+    float ParticleDensity = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dust")
-    FLinearColor DustColor = FLinearColor(0.8f, 0.7f, 0.5f, 0.3f);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Zone")
+    bool bActiveInDaylight = true;
 
-    // Pollen particles
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pollen")
-    bool bEnablePollen = false;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Zone")
+    bool bActiveAtNight = false;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pollen")
-    float PollenSpawnRate = 2.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pollen")
-    FVector PollenVelocity = FVector(5.0f, 0.0f, 2.0f);
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pollen")
-    FLinearColor PollenColor = FLinearColor(1.0f, 1.0f, 0.8f, 0.4f);
-
-    // Mist/fog particles
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mist")
-    bool bEnableMist = false;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mist")
-    float MistSpawnRate = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mist")
-    float MistLifetime = 20.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mist")
-    FLinearColor MistColor = FLinearColor(0.9f, 0.9f, 1.0f, 0.2f);
-
-    // Wind interaction
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wind")
-    float WindSensitivity = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wind")
-    bool bAffectedByWind = true;
-
-    // Spawn area
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn")
-    FVector SpawnAreaSize = FVector(2000.0f, 2000.0f, 500.0f);
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn")
-    float ParticleLifetime = 10.0f;
+    FEnvArt_ParticleZone()
+    {
+        ZoneCenter = FVector::ZeroVector;
+        ZoneExtent = FVector(1000.0f, 1000.0f, 500.0f);
+        ParticleType = EEnvArt_ParticleType::Dust;
+        ParticleDensity = 1.0f;
+        bActiveInDaylight = true;
+        bActiveAtNight = false;
+    }
 };
 
-/**
- * Manages atmospheric particle effects for environmental storytelling
- * Creates dust motes, pollen, mist, and other ambient particles
- */
-UCLASS(ClassGroup=(Environment), meta=(BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UEnvArt_ParticleManager : public UActorComponent
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API AEnvArt_ParticleManager : public AActor
 {
     GENERATED_BODY()
 
 public:
-    UEnvArt_ParticleManager();
+    AEnvArt_ParticleManager();
 
 protected:
     virtual void BeginPlay() override;
 
 public:
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+    virtual void Tick(float DeltaTime) override;
 
-    // === PARTICLE SYSTEM CONFIGURATION ===
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Particle Zones")
+    TArray<FEnvArt_ParticleZone> ParticleZones;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Particle Manager")
-    float UpdateRadius = 5000.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wind")
+    FVector WindDirection = FVector(1.0f, 0.0f, 0.0f);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Particle Manager")
-    int32 MaxActiveParticleSystems = 20;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wind")
+    float WindStrength = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Particle Manager")
-    bool bUseNiagaraSystem = true;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
+    float UpdateFrequency = 1.0f;
 
-    // === BIOME PARTICLE CONFIGURATIONS ===
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
+    float MaxViewDistance = 5000.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Particles")
-    TMap<EBiomeType, FEnvArt_ParticleConfig> BiomeParticleConfigs;
+    UFUNCTION(BlueprintCallable, Category = "Particles")
+    void CreateForestDustZone(FVector Location, FVector Extent);
 
-    // === NIAGARA SYSTEM REFERENCES ===
+    UFUNCTION(BlueprintCallable, Category = "Particles")
+    void CreatePollenZone(FVector Location, FVector Extent);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Niagara Systems")
-    UNiagaraSystem* DustParticleSystem = nullptr;
+    UFUNCTION(BlueprintCallable, Category = "Particles")
+    void CreateFireflyZone(FVector Location, FVector Extent);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Niagara Systems")
-    UNiagaraSystem* PollenParticleSystem = nullptr;
+    UFUNCTION(BlueprintCallable, Category = "Particles")
+    void UpdateParticleZones();
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Niagara Systems")
-    UNiagaraSystem* MistParticleSystem = nullptr;
+    UFUNCTION(BlueprintCallable, Category = "Particles")
+    void SetWindParameters(FVector NewDirection, float NewStrength);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Niagara Systems")
-    UNiagaraSystem* WindParticleSystem = nullptr;
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    void PlayAmbientForestSounds();
 
-    // === ENVIRONMENTAL METHODS ===
-
-    UFUNCTION(BlueprintCallable, Category = "Particle Manager")
-    void InitializeParticleManager();
-
-    UFUNCTION(BlueprintCallable, Category = "Particle Manager")
-    void UpdateParticlesForBiome(EBiomeType BiomeType, const FVector& PlayerLocation);
-
-    UFUNCTION(BlueprintCallable, Category = "Particle Manager")
-    void SpawnDustParticles(const FVector& Location, const FEnvArt_ParticleConfig& Config);
-
-    UFUNCTION(BlueprintCallable, Category = "Particle Manager")
-    void SpawnPollenParticles(const FVector& Location, const FEnvArt_ParticleConfig& Config);
-
-    UFUNCTION(BlueprintCallable, Category = "Particle Manager")
-    void SpawnMistParticles(const FVector& Location, const FEnvArt_ParticleConfig& Config);
-
-    UFUNCTION(BlueprintCallable, Category = "Particle Manager")
-    void UpdateWindEffects(const FVector& WindDirection, float WindStrength);
-
-    UFUNCTION(BlueprintCallable, Category = "Particle Manager")
-    void CreateGoldenHourParticles(const FVector& SunDirection);
-
-    UFUNCTION(BlueprintCallable, Category = "Particle Manager")
-    void CreateForestMistEffect(const FVector& ForestCenter, float MistRadius);
-
-    UFUNCTION(BlueprintCallable, Category = "Particle Manager")
-    void SetParticleIntensity(float Intensity);
-
-    UFUNCTION(BlueprintCallable, Category = "Particle Manager")
-    void CleanupDistantParticles(const FVector& PlayerLocation);
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    void PlayDistantDinosaurRoars();
 
 private:
-    // === INTERNAL METHODS ===
-
-    void InitializeBiomeParticleConfigs();
-    void CreateNiagaraComponent(UNiagaraSystem* System, const FVector& Location, const FRotator& Rotation);
-    void UpdateParticleParameters(UNiagaraComponent* Component, const FEnvArt_ParticleConfig& Config);
-    bool IsLocationInRange(const FVector& Location, const FVector& PlayerLocation) const;
-    void RemoveOldestParticleSystem();
-
-    // === INTERNAL STATE ===
-
     UPROPERTY()
     TArray<UNiagaraComponent*> ActiveParticleSystems;
 
     UPROPERTY()
-    EBiomeType CurrentBiome = EBiomeType::Savanna;
+    UAudioComponent* AmbientAudioComponent;
 
-    FVector LastPlayerLocation = FVector::ZeroVector;
-    float ParticleUpdateTimer = 0.0f;
-    float ParticleUpdateInterval = 0.5f; // Update every 0.5 seconds
+    UPROPERTY()
+    UAudioComponent* DinosaurAudioComponent;
 
-    // Wind state
-    FVector CurrentWindDirection = FVector(1.0f, 0.0f, 0.0f);
-    float CurrentWindStrength = 1.0f;
+    float LastUpdateTime;
 
-    // Performance tracking
-    int32 ParticleSystemsSpawnedThisFrame = 0;
-    int32 MaxParticleSystemsPerFrame = 3;
+    void SpawnParticleSystem(const FEnvArt_ParticleZone& Zone);
+    void UpdateParticleSystemParameters(UNiagaraComponent* ParticleSystem, const FEnvArt_ParticleZone& Zone);
+    bool IsZoneActiveForTimeOfDay(const FEnvArt_ParticleZone& Zone) const;
+    float GetCurrentTimeOfDay() const;
 };
