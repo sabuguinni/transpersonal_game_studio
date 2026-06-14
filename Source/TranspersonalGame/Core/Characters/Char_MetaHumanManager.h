@@ -1,133 +1,216 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/World.h"
-#include "Components/ActorComponent.h"
-#include "Engine/SkeletalMesh.h"
-#include "Materials/MaterialInterface.h"
-#include "Materials/MaterialInstanceDynamic.h"
-#include "SharedTypes.h"
+#include "GameFramework/Actor.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Components/StaticMeshComponent.h"
+#include "Engine/DataTable.h"
 #include "Char_MetaHumanManager.generated.h"
 
+// Character appearance variation types
+UENUM(BlueprintType)
+enum class EChar_SkinTone : uint8
+{
+    VeryLight   UMETA(DisplayName = "Very Light"),
+    Light       UMETA(DisplayName = "Light"),
+    Medium      UMETA(DisplayName = "Medium"),
+    Dark        UMETA(DisplayName = "Dark"),
+    VeryDark    UMETA(DisplayName = "Very Dark")
+};
+
+UENUM(BlueprintType)
+enum class EChar_BodyBuild : uint8
+{
+    Lean        UMETA(DisplayName = "Lean"),
+    Average     UMETA(DisplayName = "Average"),
+    Muscular    UMETA(DisplayName = "Muscular"),
+    Heavy       UMETA(DisplayName = "Heavy")
+};
+
+UENUM(BlueprintType)
+enum class EChar_TribalMarkings : uint8
+{
+    None        UMETA(DisplayName = "None"),
+    Warrior     UMETA(DisplayName = "Warrior Marks"),
+    Hunter      UMETA(DisplayName = "Hunter Marks"),
+    Shaman      UMETA(DisplayName = "Shaman Marks"),
+    Elder       UMETA(DisplayName = "Elder Marks")
+};
+
+UENUM(BlueprintType)
+enum class EChar_ClothingStyle : uint8
+{
+    Minimal     UMETA(DisplayName = "Minimal Hide"),
+    Basic       UMETA(DisplayName = "Basic Wraps"),
+    Decorated   UMETA(DisplayName = "Decorated Hide"),
+    Ceremonial  UMETA(DisplayName = "Ceremonial Gear")
+};
+
+// Character appearance configuration
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FChar_MetaHumanPreset
+struct TRANSPERSONALGAME_API FChar_AppearanceConfig
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaHuman")
-    FString PresetName;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
+    EChar_SkinTone SkinTone = EChar_SkinTone::Medium;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaHuman")
-    TSoftObjectPtr<USkeletalMesh> BodyMesh;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
+    EChar_BodyBuild BodyBuild = EChar_BodyBuild::Average;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaHuman")
-    TSoftObjectPtr<USkeletalMesh> HeadMesh;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
+    EChar_TribalMarkings TribalMarkings = EChar_TribalMarkings::None;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaHuman")
-    TSoftObjectPtr<UMaterialInterface> SkinMaterial;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
+    EChar_ClothingStyle ClothingStyle = EChar_ClothingStyle::Basic;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaHuman")
-    TSoftObjectPtr<UMaterialInterface> HairMaterial;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
+    FLinearColor MarkingColor = FLinearColor::Red;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaHuman")
-    TSoftObjectPtr<UMaterialInterface> EyeMaterial;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
+    float BodyScale = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaHuman")
-    FLinearColor SkinTone;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaHuman")
-    FLinearColor HairColor;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaHuman")
-    FLinearColor EyeColor;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaHuman")
-    float WeatheringLevel;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaHuman")
-    float ScarIntensity;
-
-    FChar_MetaHumanPreset()
+    FChar_AppearanceConfig()
     {
-        PresetName = TEXT("Default");
-        SkinTone = FLinearColor(0.8f, 0.6f, 0.4f, 1.0f);
-        HairColor = FLinearColor(0.3f, 0.2f, 0.1f, 1.0f);
-        EyeColor = FLinearColor(0.2f, 0.4f, 0.6f, 1.0f);
-        WeatheringLevel = 0.5f;
-        ScarIntensity = 0.3f;
+        SkinTone = EChar_SkinTone::Medium;
+        BodyBuild = EChar_BodyBuild::Average;
+        TribalMarkings = EChar_TribalMarkings::None;
+        ClothingStyle = EChar_ClothingStyle::Basic;
+        MarkingColor = FLinearColor::Red;
+        BodyScale = 1.0f;
     }
 };
 
-UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UChar_MetaHumanManager : public UActorComponent
+// Equipment slot configuration
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FChar_EquipmentSlot
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Equipment")
+    FName SlotName;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Equipment")
+    FName AttachmentSocket;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Equipment")
+    TSoftObjectPtr<UStaticMesh> EquippedMesh;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Equipment")
+    FTransform RelativeTransform;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Equipment")
+    bool bIsEquipped = false;
+
+    FChar_EquipmentSlot()
+    {
+        SlotName = NAME_None;
+        AttachmentSocket = NAME_None;
+        EquippedMesh = nullptr;
+        RelativeTransform = FTransform::Identity;
+        bIsEquipped = false;
+    }
+};
+
+/**
+ * MetaHuman Character Manager
+ * Manages character appearance, equipment, and customization for tribal warriors
+ * Integrates with UE5 MetaHuman Creator pipeline for realistic character generation
+ */
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API AChar_MetaHumanManager : public AActor
 {
     GENERATED_BODY()
 
 public:
-    UChar_MetaHumanManager();
+    AChar_MetaHumanManager();
 
 protected:
     virtual void BeginPlay() override;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaHuman Presets")
-    TArray<FChar_MetaHumanPreset> TribalWarriorPresets;
+    // Core character mesh component
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Character", meta = (AllowPrivateAccess = "true"))
+    USkeletalMeshComponent* CharacterMesh;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaHuman Presets")
-    TArray<FChar_MetaHumanPreset> SurvivorPresets;
+    // Equipment attachment components
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Equipment", meta = (AllowPrivateAccess = "true"))
+    TArray<UStaticMeshComponent*> EquipmentComponents;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaHuman Presets")
-    TArray<FChar_MetaHumanPreset> ElderPresets;
+    // Character appearance configuration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
+    FChar_AppearanceConfig AppearanceConfig;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dynamic Materials")
+    // Equipment slots configuration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Equipment")
+    TArray<FChar_EquipmentSlot> EquipmentSlots;
+
+    // Available MetaHuman presets
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaHuman")
+    TArray<TSoftObjectPtr<USkeletalMesh>> MetaHumanPresets;
+
+    // Material instances for customization
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Materials")
     TArray<UMaterialInstanceDynamic*> DynamicMaterials;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Meshes")
-    USkeletalMeshComponent* BodyMeshComponent;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Meshes")
-    USkeletalMeshComponent* HeadMeshComponent;
-
 public:
+    // Character customization functions
+    UFUNCTION(BlueprintCallable, Category = "Character")
+    void ApplyAppearanceConfig(const FChar_AppearanceConfig& NewConfig);
+
+    UFUNCTION(BlueprintCallable, Category = "Character")
+    void SetSkinTone(EChar_SkinTone NewSkinTone);
+
+    UFUNCTION(BlueprintCallable, Category = "Character")
+    void SetBodyBuild(EChar_BodyBuild NewBodyBuild);
+
+    UFUNCTION(BlueprintCallable, Category = "Character")
+    void SetTribalMarkings(EChar_TribalMarkings NewMarkings, FLinearColor MarkingColor);
+
+    UFUNCTION(BlueprintCallable, Category = "Character")
+    void SetClothingStyle(EChar_ClothingStyle NewStyle);
+
+    // Equipment management functions
+    UFUNCTION(BlueprintCallable, Category = "Equipment")
+    bool EquipItem(FName SlotName, UStaticMesh* ItemMesh);
+
+    UFUNCTION(BlueprintCallable, Category = "Equipment")
+    bool UnequipItem(FName SlotName);
+
+    UFUNCTION(BlueprintCallable, Category = "Equipment")
+    void UnequipAllItems();
+
+    UFUNCTION(BlueprintCallable, Category = "Equipment")
+    UStaticMeshComponent* GetEquipmentComponent(FName SlotName);
+
+    // MetaHuman integration functions
     UFUNCTION(BlueprintCallable, Category = "MetaHuman")
-    void ApplyPreset(const FChar_MetaHumanPreset& Preset);
+    void LoadMetaHumanPreset(int32 PresetIndex);
 
     UFUNCTION(BlueprintCallable, Category = "MetaHuman")
-    void RandomizeAppearance(EChar_CharacterType CharacterType);
+    void RandomizeAppearance();
 
     UFUNCTION(BlueprintCallable, Category = "MetaHuman")
-    void SetSkinTone(FLinearColor NewSkinTone);
+    void CreateTribalWarriorVariation(int32 VariationSeed);
 
-    UFUNCTION(BlueprintCallable, Category = "MetaHuman")
-    void SetHairColor(FLinearColor NewHairColor);
+    // Utility functions
+    UFUNCTION(BlueprintCallable, Category = "Character")
+    FChar_AppearanceConfig GetCurrentAppearanceConfig() const { return AppearanceConfig; }
 
-    UFUNCTION(BlueprintCallable, Category = "MetaHuman")
-    void SetEyeColor(FLinearColor NewEyeColor);
+    UFUNCTION(BlueprintCallable, Category = "Equipment")
+    TArray<FChar_EquipmentSlot> GetEquipmentSlots() const { return EquipmentSlots; }
 
-    UFUNCTION(BlueprintCallable, Category = "MetaHuman")
-    void SetWeatheringLevel(float WeatheringLevel);
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Development")
+    void InitializeEquipmentSlots();
 
-    UFUNCTION(BlueprintCallable, Category = "MetaHuman")
-    void SetScarIntensity(float ScarIntensity);
-
-    UFUNCTION(BlueprintCallable, Category = "MetaHuman")
-    FChar_MetaHumanPreset GetRandomPreset(EChar_CharacterType CharacterType);
-
-    UFUNCTION(BlueprintCallable, Category = "MetaHuman")
-    void InitializeCharacterMeshes(USkeletalMeshComponent* InBodyMesh, USkeletalMeshComponent* InHeadMesh);
-
-    UFUNCTION(BlueprintCallable, Category = "MetaHuman")
-    void CreateDynamicMaterials();
-
-    UFUNCTION(BlueprintCallable, Category = "MetaHuman")
-    void UpdateMaterialParameters();
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Development")
+    void RefreshCharacterAppearance();
 
 private:
-    void InitializeDefaultPresets();
-    void SetupTribalWarriorPresets();
-    void SetupSurvivorPresets();
-    void SetupElderPresets();
-    
-    FLinearColor GenerateRandomSkinTone();
-    FLinearColor GenerateRandomHairColor();
-    FLinearColor GenerateRandomEyeColor();
+    // Internal helper functions
+    void UpdateMaterialParameters();
+    void CreateDynamicMaterials();
+    void SetupEquipmentComponents();
+    UMaterialInstanceDynamic* GetOrCreateDynamicMaterial(int32 MaterialIndex);
+    void ApplySkinToneToMaterial(UMaterialInstanceDynamic* Material, EChar_SkinTone SkinTone);
+    void ApplyTribalMarkingsToMaterial(UMaterialInstanceDynamic* Material, EChar_TribalMarkings Markings, FLinearColor Color);
 };
