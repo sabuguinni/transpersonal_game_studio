@@ -2,39 +2,36 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
-#include "Engine/Engine.h"
-#include "GameFramework/Character.h"
-#include "SharedTypes.h"
+#include "Engine/World.h"
+#include "GameFramework/Pawn.h"
+#include "BehaviorTree/BehaviorTreeComponent.h"
+#include "BehaviorTree/BlackboardComponent.h"
 #include "NPCBehaviorComponent.generated.h"
 
-USTRUCT(BlueprintType)
-struct FNPC_EmotionalState
+UENUM(BlueprintType)
+enum class ENPC_BehaviorState : uint8
 {
-    GENERATED_BODY()
+    Idle = 0,
+    Patrolling = 1,
+    Investigating = 2,
+    Fleeing = 3,
+    Socializing = 4,
+    Working = 5,
+    Sleeping = 6,
+    Alert = 7
+};
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Emotion")
-    float Fear = 0.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Emotion")
-    float Aggression = 0.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Emotion")
-    float Curiosity = 0.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Emotion")
-    float Hunger = 0.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Emotion")
-    float Fatigue = 0.0f;
-
-    FNPC_EmotionalState()
-    {
-        Fear = 0.0f;
-        Aggression = 0.0f;
-        Curiosity = 0.0f;
-        Hunger = 0.0f;
-        Fatigue = 0.0f;
-    }
+UENUM(BlueprintType)
+enum class ENPC_EmotionalState : uint8
+{
+    Calm = 0,
+    Curious = 1,
+    Afraid = 2,
+    Angry = 3,
+    Happy = 4,
+    Sad = 5,
+    Excited = 6,
+    Tired = 7
 };
 
 USTRUCT(BlueprintType)
@@ -42,47 +39,60 @@ struct FNPC_Memory
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
     FVector Location;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
     float Timestamp;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory")
-    float Importance;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    ENPC_EmotionalState EmotionalContext;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory")
-    FString EventType;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FString EventDescription;
 
     FNPC_Memory()
     {
         Location = FVector::ZeroVector;
         Timestamp = 0.0f;
-        Importance = 0.0f;
-        EventType = TEXT("None");
+        EmotionalContext = ENPC_EmotionalState::Calm;
+        EventDescription = TEXT("");
     }
 };
 
-UENUM(BlueprintType)
-enum class ENPC_BehaviorState : uint8
+USTRUCT(BlueprintType)
+struct FNPC_SocialRelationship
 {
-    Idle,
-    Patrolling,
-    Investigating,
-    Fleeing,
-    Attacking,
-    Feeding,
-    Resting,
-    Socializing
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    TWeakObjectPtr<APawn> TargetPawn;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float TrustLevel;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float FearLevel;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float LastInteractionTime;
+
+    FNPC_SocialRelationship()
+    {
+        TargetPawn = nullptr;
+        TrustLevel = 0.5f;
+        FearLevel = 0.0f;
+        LastInteractionTime = 0.0f;
+    }
 };
 
 UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UNPC_BehaviorComponent : public UActorComponent
+class TRANSPERSONALGAME_API UNPCBehaviorComponent : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    UNPC_BehaviorComponent();
+    UNPCBehaviorComponent();
 
 protected:
     virtual void BeginPlay() override;
@@ -90,68 +100,116 @@ protected:
 public:
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    // Core Behavior State
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
-    ENPC_BehaviorState CurrentState;
+    // Core Behavior Properties
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Behavior")
+    ENPC_BehaviorState CurrentBehaviorState;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
-    FNPC_EmotionalState EmotionalState;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Behavior")
+    ENPC_EmotionalState CurrentEmotionalState;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
-    TArray<FNPC_Memory> Memories;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Behavior")
+    float AlertnessLevel;
 
-    // Behavior Parameters
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
-    float DetectionRadius = 1000.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Behavior")
+    float EnergyLevel;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
-    float FleeThreshold = 0.7f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Behavior")
+    float SocialNeed;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
-    float AggressionThreshold = 0.8f;
+    // Memory System
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Memory")
+    TArray<FNPC_Memory> ShortTermMemory;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
-    float PatrolRadius = 2000.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Memory")
+    TArray<FNPC_Memory> LongTermMemory;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
-    FVector HomeLocation;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Memory")
+    int32 MaxShortTermMemories;
 
-    // Behavior Functions
-    UFUNCTION(BlueprintCallable, Category = "Behavior")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Memory")
+    int32 MaxLongTermMemories;
+
+    // Social Relationships
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Social")
+    TArray<FNPC_SocialRelationship> SocialRelationships;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Social")
+    float SocialInteractionRadius;
+
+    // Patrol System
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Patrol")
+    TArray<FVector> PatrolPoints;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Patrol")
+    int32 CurrentPatrolIndex;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Patrol")
+    float PatrolSpeed;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Patrol")
+    float PatrolWaitTime;
+
+    // Behavior Tree Integration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI")
+    class UBehaviorTreeComponent* BehaviorTreeComponent;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI")
+    class UBlackboardComponent* BlackboardComponent;
+
+    // Core Behavior Functions
+    UFUNCTION(BlueprintCallable, Category = "NPC Behavior")
     void SetBehaviorState(ENPC_BehaviorState NewState);
 
-    UFUNCTION(BlueprintCallable, Category = "Behavior")
-    void AddMemory(FVector Location, FString EventType, float Importance);
+    UFUNCTION(BlueprintCallable, Category = "NPC Behavior")
+    void SetEmotionalState(ENPC_EmotionalState NewState);
 
-    UFUNCTION(BlueprintCallable, Category = "Behavior")
-    void UpdateEmotionalState(float DeltaTime);
+    UFUNCTION(BlueprintCallable, Category = "NPC Behavior")
+    void UpdateAlertnessLevel(float DeltaAlertness);
 
-    UFUNCTION(BlueprintCallable, Category = "Behavior")
-    AActor* DetectNearbyThreats();
+    // Memory Functions
+    UFUNCTION(BlueprintCallable, Category = "NPC Memory")
+    void AddMemory(FVector Location, ENPC_EmotionalState Emotion, const FString& Description);
 
-    UFUNCTION(BlueprintCallable, Category = "Behavior")
-    void ExecuteBehavior(float DeltaTime);
+    UFUNCTION(BlueprintCallable, Category = "NPC Memory")
+    void ConsolidateMemories();
 
-    UFUNCTION(BlueprintCallable, Category = "Behavior")
-    FVector GetPatrolTarget();
+    UFUNCTION(BlueprintCallable, Category = "NPC Memory")
+    TArray<FNPC_Memory> GetMemoriesAtLocation(FVector Location, float Radius);
 
-    UFUNCTION(BlueprintCallable, Category = "Behavior")
-    bool ShouldFlee();
+    // Social Functions
+    UFUNCTION(BlueprintCallable, Category = "NPC Social")
+    void UpdateSocialRelationship(APawn* TargetPawn, float TrustDelta, float FearDelta);
 
-    UFUNCTION(BlueprintCallable, Category = "Behavior")
-    bool ShouldAttack();
+    UFUNCTION(BlueprintCallable, Category = "NPC Social")
+    FNPC_SocialRelationship GetSocialRelationship(APawn* TargetPawn);
+
+    UFUNCTION(BlueprintCallable, Category = "NPC Social")
+    TArray<APawn*> GetNearbyNPCs();
+
+    // Patrol Functions
+    UFUNCTION(BlueprintCallable, Category = "NPC Patrol")
+    void SetPatrolPoints(const TArray<FVector>& NewPatrolPoints);
+
+    UFUNCTION(BlueprintCallable, Category = "NPC Patrol")
+    FVector GetNextPatrolPoint();
+
+    UFUNCTION(BlueprintCallable, Category = "NPC Patrol")
+    void AdvancePatrolPoint();
+
+    // AI Integration
+    UFUNCTION(BlueprintCallable, Category = "AI")
+    void UpdateBlackboardValues();
+
+    UFUNCTION(BlueprintCallable, Category = "AI")
+    void InitializeBehaviorTree();
 
 private:
-    float StateTimer;
-    FVector CurrentTarget;
-    AActor* CurrentThreat;
-    
-    void ProcessIdleBehavior(float DeltaTime);
-    void ProcessPatrolBehavior(float DeltaTime);
-    void ProcessInvestigatingBehavior(float DeltaTime);
-    void ProcessFleeingBehavior(float DeltaTime);
-    void ProcessAttackingBehavior(float DeltaTime);
-    void ProcessFeedingBehavior(float DeltaTime);
-    void ProcessRestingBehavior(float DeltaTime);
-    void ProcessSocializingBehavior(float DeltaTime);
+    float LastMemoryConsolidationTime;
+    float LastSocialUpdate;
+    float PatrolTimer;
+
+    void UpdateEnergyAndNeeds(float DeltaTime);
+    void ProcessSocialInteractions(float DeltaTime);
+    void UpdatePatrolBehavior(float DeltaTime);
+    void HandleEmotionalDecay(float DeltaTime);
 };
