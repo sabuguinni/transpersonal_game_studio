@@ -1,384 +1,244 @@
 #include "Perf_PerformanceProfiler.h"
 #include "Engine/Engine.h"
-#include "Engine/World.h"
-#include "HAL/PlatformMemory.h"
+#include "HAL/PlatformFilemanager.h"
+#include "Misc/DateTime.h"
 #include "Stats/Stats.h"
 #include "RenderingThread.h"
-#include "Engine/GameViewportClient.h"
-#include "EngineUtils.h"
+#include "HAL/IConsoleManager.h"
 
 UPerf_PerformanceProfiler::UPerf_PerformanceProfiler()
 {
-    bIsProfilingActive = false;
-    bAutoOptimizationEnabled = false;
-    ProfilingStartTime = 0.0f;
+    PrimaryComponentTick.bCanEverTick = true;
+    PrimaryComponentTick.TickInterval = 0.1f; // Update 10 times per second
+    
+    bIsProfilingEnabled = true;
+    TargetFPS = 60.0f;
+    ProfilingUpdateInterval = 0.1f;
+    MaxSamples = 1000;
+    LastUpdateTime = 0.0f;
+    AccumulatedFrameTime = 0.0f;
     FrameCount = 0;
-    FrameHistory.Reserve(MaxFrameHistorySize);
 }
 
-void UPerf_PerformanceProfiler::Initialize(FSubsystemCollectionBase& Collection)
+void UPerf_PerformanceProfiler::BeginPlay()
 {
-    Super::Initialize(Collection);
+    Super::BeginPlay();
     
-    UE_LOG(LogTemp, Log, TEXT("Performance Profiler initialized"));
+    LastUpdateTime = GetCurrentTime();
     
-    // Set default thresholds
-    PerformanceThresholds = FPerf_PerformanceThresholds();
-    
-    // Start profiling automatically
-    StartProfiling();
+    if (bIsProfilingEnabled)
+    {
+        UE_LOG(LogTemp, Log, TEXT("Performance Profiler started - Target FPS: %.1f"), TargetFPS);
+    }
 }
 
-void UPerf_PerformanceProfiler::Deinitialize()
+void UPerf_PerformanceProfiler::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
-    StopProfiling();
-    Super::Deinitialize();
-}
-
-bool UPerf_PerformanceProfiler::ShouldCreateSubsystem(UObject* Outer) const
-{
-    return true;
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+    
+    if (!bIsProfilingEnabled)
+    {
+        return;
+    }
+    
+    AccumulatedFrameTime += DeltaTime;
+    FrameCount++;
+    
+    float CurrentTime = GetCurrentTime();
+    if (CurrentTime - LastUpdateTime >= ProfilingUpdateInterval)
+    {
+        UpdateMetrics();
+        LastUpdateTime = CurrentTime;
+        AccumulatedFrameTime = 0.0f;
+        FrameCount = 0;
+    }
 }
 
 void UPerf_PerformanceProfiler::StartProfiling()
 {
-    if (!bIsProfilingActive)
-    {
-        bIsProfilingActive = true;
-        ProfilingStartTime = GetWorld()->GetTimeSeconds();
-        FrameCount = 0;
-        FrameHistory.Empty();
-        
-        UE_LOG(LogTemp, Log, TEXT("Performance profiling started"));
-    }
+    bIsProfilingEnabled = true;
+    ClearSamples();
+    LastUpdateTime = GetCurrentTime();
+    AccumulatedFrameTime = 0.0f;
+    FrameCount = 0;
+    
+    UE_LOG(LogTemp, Log, TEXT("Performance profiling started"));
 }
 
 void UPerf_PerformanceProfiler::StopProfiling()
 {
-    if (bIsProfilingActive)
-    {
-        bIsProfilingActive = false;
-        UE_LOG(LogTemp, Log, TEXT("Performance profiling stopped. Total frames: %d"), FrameCount);
-    }
+    bIsProfilingEnabled = false;
+    UE_LOG(LogTemp, Log, TEXT("Performance profiling stopped"));
 }
 
-void UPerf_PerformanceProfiler::UpdatePerformanceData()
+void UPerf_PerformanceProfiler::BeginSample(const FString& SampleName, EPerf_ProfilerCategory Category)
 {
-    if (!bIsProfilingActive)
+    if (!bIsProfilingEnabled)
     {
         return;
     }
-
-    CollectFrameData();
-    AnalyzePerformance();
     
-    if (bAutoOptimizationEnabled)
+    float CurrentTime = GetCurrentTime();
+    ActiveSamples.Add(SampleName, CurrentTime);
+    
+    // Create sample entry
+    FPerf_ProfilerSample NewSample;
+    NewSample.SampleName = SampleName;
+    NewSample.Category = Category;
+    NewSample.StartTime = CurrentTime;
+    NewSample.EndTime = 0.0f;
+    NewSample.Duration = 0.0f;
+    
+    ProfilerSamples.Add(NewSample);
+    
+    // Limit sample count
+    if (ProfilerSamples.Num() > MaxSamples)
     {
-        ApplyAutoOptimizations();
+        ProfilerSamples.RemoveAt(0, ProfilerSamples.Num() - MaxSamples);
     }
-    
-    TrimFrameHistory();
-    FrameCount++;
 }
 
-void UPerf_PerformanceProfiler::CollectFrameData()
+void UPerf_PerformanceProfiler::EndSample(const FString& SampleName)
 {
-    UWorld* World = GetWorld();
-    if (!World)
+    if (!bIsProfilingEnabled)
     {
         return;
     }
+    
+    float* StartTimePtr = ActiveSamples.Find(SampleName);
+    if (!StartTimePtr)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("EndSample called for unknown sample: %s"), *SampleName);
+        return;
+    }
+    
+    float CurrentTime = GetCurrentTime();
+    float Duration = CurrentTime - *StartTimePtr;
+    
+    // Find the corresponding sample in the array and update it
+    for (int32 i = ProfilerSamples.Num() - 1; i >= 0; i--)
+    {
+        if (ProfilerSamples[i].SampleName == SampleName && ProfilerSamples[i].EndTime == 0.0f)
+        {
+            ProfilerSamples[i].EndTime = CurrentTime;
+            ProfilerSamples[i].Duration = Duration;
+            break;
+        }
+    }
+    
+    ActiveSamples.Remove(SampleName);
+}
 
-    CurrentFrameData = FPerf_FrameData();
+FPerf_PerformanceMetrics UPerf_PerformanceProfiler::GetCurrentMetrics() const
+{
+    return CurrentMetrics;
+}
+
+TArray<FPerf_ProfilerSample> UPerf_PerformanceProfiler::GetProfilerSamples() const
+{
+    return ProfilerSamples;
+}
+
+void UPerf_PerformanceProfiler::ClearSamples()
+{
+    ProfilerSamples.Empty();
+    ActiveSamples.Empty();
+}
+
+void UPerf_PerformanceProfiler::SetTargetFPS(float NewTargetFPS)
+{
+    TargetFPS = FMath::Clamp(NewTargetFPS, 15.0f, 120.0f);
+    UE_LOG(LogTemp, Log, TEXT("Target FPS set to: %.1f"), TargetFPS);
+}
+
+bool UPerf_PerformanceProfiler::IsPerformanceWithinTarget() const
+{
+    return CurrentMetrics.FPS >= (TargetFPS * 0.9f); // Allow 10% tolerance
+}
+
+void UPerf_PerformanceProfiler::LogPerformanceReport()
+{
+    if (!bIsProfilingEnabled)
+    {
+        return;
+    }
     
-    // Basic timing data
-    CurrentFrameData.DeltaTime = World->GetDeltaSeconds();
-    CurrentFrameData.FPS = (CurrentFrameData.DeltaTime > 0.0f) ? (1.0f / CurrentFrameData.DeltaTime) : 0.0f;
+    UE_LOG(LogTemp, Log, TEXT("=== PERFORMANCE REPORT ==="));
+    UE_LOG(LogTemp, Log, TEXT("FPS: %.1f (Target: %.1f)"), CurrentMetrics.FPS, TargetFPS);
+    UE_LOG(LogTemp, Log, TEXT("Frame Time: %.2f ms"), CurrentMetrics.FrameTime * 1000.0f);
+    UE_LOG(LogTemp, Log, TEXT("CPU Time: %.2f ms"), CurrentMetrics.CPUTime * 1000.0f);
+    UE_LOG(LogTemp, Log, TEXT("GPU Time: %.2f ms"), CurrentMetrics.GPUTime * 1000.0f);
+    UE_LOG(LogTemp, Log, TEXT("Memory Usage: %.1f MB"), CurrentMetrics.MemoryUsage);
+    UE_LOG(LogTemp, Log, TEXT("Draw Calls: %d"), CurrentMetrics.DrawCalls);
+    UE_LOG(LogTemp, Log, TEXT("Triangles: %d"), CurrentMetrics.Triangles);
+    UE_LOG(LogTemp, Log, TEXT("Performance Within Target: %s"), IsPerformanceWithinTarget() ? TEXT("YES") : TEXT("NO"));
     
-    // Collect render stats
-    CollectRenderStats();
+    // Log top 10 slowest samples
+    TArray<FPerf_ProfilerSample> SortedSamples = ProfilerSamples;
+    SortedSamples.Sort([](const FPerf_ProfilerSample& A, const FPerf_ProfilerSample& B) {
+        return A.Duration > B.Duration;
+    });
     
-    // Collect memory stats
+    UE_LOG(LogTemp, Log, TEXT("=== TOP PERFORMANCE SAMPLES ==="));
+    for (int32 i = 0; i < FMath::Min(10, SortedSamples.Num()); i++)
+    {
+        const FPerf_ProfilerSample& Sample = SortedSamples[i];
+        UE_LOG(LogTemp, Log, TEXT("%s: %.2f ms"), *Sample.SampleName, Sample.Duration * 1000.0f);
+    }
+}
+
+void UPerf_PerformanceProfiler::UpdateMetrics()
+{
+    if (FrameCount == 0)
+    {
+        return;
+    }
+    
+    // Calculate average frame time and FPS
+    float AverageFrameTime = AccumulatedFrameTime / FrameCount;
+    CurrentMetrics.FrameTime = AverageFrameTime;
+    CurrentMetrics.FPS = (AverageFrameTime > 0.0f) ? (1.0f / AverageFrameTime) : 0.0f;
+    
+    // Collect rendering and memory stats
+    CollectRenderingStats();
     CollectMemoryStats();
     
-    // Collect actor stats
-    CollectActorStats();
-    
-    // Add to history
-    FrameHistory.Add(CurrentFrameData);
+    // Log performance warnings
+    if (CurrentMetrics.FPS < TargetFPS * 0.8f)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Performance below target: %.1f FPS (Target: %.1f)"), 
+               CurrentMetrics.FPS, TargetFPS);
+    }
 }
 
-void UPerf_PerformanceProfiler::CollectRenderStats()
+void UPerf_PerformanceProfiler::CollectRenderingStats()
 {
-    // Get render thread stats (simplified approach)
-    CurrentFrameData.GPUTime = CurrentFrameData.DeltaTime * 1000.0f * 0.6f; // Estimate
-    CurrentFrameData.CPUTime = CurrentFrameData.DeltaTime * 1000.0f * 0.4f; // Estimate
-    
-    // Estimate draw calls and triangles based on visible actors
-    CurrentFrameData.DrawCalls = FMath::Max(100, CurrentFrameData.VisibleActors * 2);
-    CurrentFrameData.Triangles = FMath::Max(10000, CurrentFrameData.VisibleActors * 500);
+    // Get basic rendering stats
+    if (GEngine && GEngine->GetWorld())
+    {
+        // These are approximate values - in a real implementation you'd use proper stat collection
+        CurrentMetrics.CPUTime = CurrentMetrics.FrameTime * 0.6f; // Estimate CPU time as 60% of frame time
+        CurrentMetrics.GPUTime = CurrentMetrics.FrameTime * 0.4f; // Estimate GPU time as 40% of frame time
+        
+        // Estimate draw calls and triangles based on world complexity
+        UWorld* World = GEngine->GetWorld();
+        if (World)
+        {
+            int32 ActorCount = World->GetCurrentLevel()->Actors.Num();
+            CurrentMetrics.DrawCalls = FMath::Clamp(ActorCount * 2, 100, 5000);
+            CurrentMetrics.Triangles = FMath::Clamp(ActorCount * 500, 10000, 1000000);
+        }
+    }
 }
 
 void UPerf_PerformanceProfiler::CollectMemoryStats()
 {
-    // Get memory usage
+    // Get memory usage in MB
     FPlatformMemoryStats MemStats = FPlatformMemory::GetStats();
-    CurrentFrameData.MemoryUsageMB = MemStats.UsedPhysical / (1024.0f * 1024.0f);
+    CurrentMetrics.MemoryUsage = MemStats.UsedPhysical / (1024.0f * 1024.0f);
 }
 
-void UPerf_PerformanceProfiler::CollectActorStats()
+float UPerf_PerformanceProfiler::GetCurrentTime() const
 {
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        return;
-    }
-
-    int32 TotalActors = 0;
-    int32 VisibleActors = 0;
-
-    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
-    {
-        AActor* Actor = *ActorItr;
-        if (Actor && !Actor->IsPendingKill())
-        {
-            TotalActors++;
-            
-            // Simple visibility check
-            if (!Actor->IsHidden())
-            {
-                VisibleActors++;
-            }
-        }
-    }
-
-    CurrentFrameData.ActiveActors = TotalActors;
-    CurrentFrameData.VisibleActors = VisibleActors;
-}
-
-void UPerf_PerformanceProfiler::AnalyzePerformance()
-{
-    // Check if performance is within acceptable thresholds
-    bool bPerformanceGood = IsPerformanceWithinThresholds();
-    
-    if (!bPerformanceGood)
-    {
-        TArray<FString> Warnings = GetPerformanceWarnings();
-        for (const FString& Warning : Warnings)
-        {
-            UE_LOG(LogTemp, Warning, TEXT("Performance Warning: %s"), *Warning);
-        }
-    }
-}
-
-void UPerf_PerformanceProfiler::ApplyAutoOptimizations()
-{
-    // Simple auto-optimization logic
-    if (CurrentFrameData.FPS < PerformanceThresholds.MinimumFPS)
-    {
-        // Could trigger LOD adjustments, culling changes, etc.
-        UE_LOG(LogTemp, Log, TEXT("Auto-optimization triggered: FPS below minimum"));
-        TriggerPerformanceOptimization();
-    }
-}
-
-FPerf_FrameData UPerf_PerformanceProfiler::GetCurrentFrameData() const
-{
-    return CurrentFrameData;
-}
-
-FPerf_FrameData UPerf_PerformanceProfiler::GetAverageFrameData() const
-{
-    if (FrameHistory.Num() == 0)
-    {
-        return FPerf_FrameData();
-    }
-
-    FPerf_FrameData AverageData;
-    
-    for (const FPerf_FrameData& Frame : FrameHistory)
-    {
-        AverageData.DeltaTime += Frame.DeltaTime;
-        AverageData.GPUTime += Frame.GPUTime;
-        AverageData.CPUTime += Frame.CPUTime;
-        AverageData.MemoryUsageMB += Frame.MemoryUsageMB;
-        AverageData.DrawCalls += Frame.DrawCalls;
-        AverageData.Triangles += Frame.Triangles;
-        AverageData.ActiveActors += Frame.ActiveActors;
-        AverageData.VisibleActors += Frame.VisibleActors;
-    }
-
-    int32 NumFrames = FrameHistory.Num();
-    AverageData.DeltaTime /= NumFrames;
-    AverageData.FPS = CalculateAverageFPS();
-    AverageData.GPUTime /= NumFrames;
-    AverageData.CPUTime /= NumFrames;
-    AverageData.MemoryUsageMB /= NumFrames;
-    AverageData.DrawCalls /= NumFrames;
-    AverageData.Triangles /= NumFrames;
-    AverageData.ActiveActors /= NumFrames;
-    AverageData.VisibleActors /= NumFrames;
-
-    return AverageData;
-}
-
-bool UPerf_PerformanceProfiler::IsPerformanceWithinThresholds() const
-{
-    return CurrentFrameData.FPS >= PerformanceThresholds.MinimumFPS &&
-           CurrentFrameData.GPUTime <= PerformanceThresholds.MaxGPUTimeMS &&
-           CurrentFrameData.CPUTime <= PerformanceThresholds.MaxCPUTimeMS &&
-           CurrentFrameData.MemoryUsageMB <= PerformanceThresholds.MaxMemoryUsageMB &&
-           CurrentFrameData.DrawCalls <= PerformanceThresholds.MaxDrawCalls &&
-           CurrentFrameData.Triangles <= PerformanceThresholds.MaxTriangles;
-}
-
-TArray<FString> UPerf_PerformanceProfiler::GetPerformanceWarnings() const
-{
-    TArray<FString> Warnings;
-
-    if (CurrentFrameData.FPS < PerformanceThresholds.MinimumFPS)
-    {
-        Warnings.Add(FString::Printf(TEXT("FPS below minimum: %.1f < %.1f"), 
-            CurrentFrameData.FPS, PerformanceThresholds.MinimumFPS));
-    }
-
-    if (CurrentFrameData.GPUTime > PerformanceThresholds.MaxGPUTimeMS)
-    {
-        Warnings.Add(FString::Printf(TEXT("GPU time too high: %.2fms > %.2fms"), 
-            CurrentFrameData.GPUTime, PerformanceThresholds.MaxGPUTimeMS));
-    }
-
-    if (CurrentFrameData.CPUTime > PerformanceThresholds.MaxCPUTimeMS)
-    {
-        Warnings.Add(FString::Printf(TEXT("CPU time too high: %.2fms > %.2fms"), 
-            CurrentFrameData.CPUTime, PerformanceThresholds.MaxCPUTimeMS));
-    }
-
-    if (CurrentFrameData.MemoryUsageMB > PerformanceThresholds.MaxMemoryUsageMB)
-    {
-        Warnings.Add(FString::Printf(TEXT("Memory usage too high: %.1fMB > %.1fMB"), 
-            CurrentFrameData.MemoryUsageMB, PerformanceThresholds.MaxMemoryUsageMB));
-    }
-
-    if (CurrentFrameData.DrawCalls > PerformanceThresholds.MaxDrawCalls)
-    {
-        Warnings.Add(FString::Printf(TEXT("Draw calls too high: %d > %d"), 
-            CurrentFrameData.DrawCalls, PerformanceThresholds.MaxDrawCalls));
-    }
-
-    if (CurrentFrameData.Triangles > PerformanceThresholds.MaxTriangles)
-    {
-        Warnings.Add(FString::Printf(TEXT("Triangle count too high: %d > %d"), 
-            CurrentFrameData.Triangles, PerformanceThresholds.MaxTriangles));
-    }
-
-    return Warnings;
-}
-
-void UPerf_PerformanceProfiler::SetPerformanceThresholds(const FPerf_PerformanceThresholds& NewThresholds)
-{
-    PerformanceThresholds = NewThresholds;
-    UE_LOG(LogTemp, Log, TEXT("Performance thresholds updated"));
-}
-
-FPerf_PerformanceThresholds UPerf_PerformanceProfiler::GetPerformanceThresholds() const
-{
-    return PerformanceThresholds;
-}
-
-void UPerf_PerformanceProfiler::EnableAutoOptimization(bool bEnable)
-{
-    bAutoOptimizationEnabled = bEnable;
-    UE_LOG(LogTemp, Log, TEXT("Auto-optimization %s"), bEnable ? TEXT("enabled") : TEXT("disabled"));
-}
-
-void UPerf_PerformanceProfiler::TriggerPerformanceOptimization()
-{
-    UE_LOG(LogTemp, Log, TEXT("Performance optimization triggered"));
-    
-    // This would interface with other performance systems
-    // For now, just log the event
-}
-
-void UPerf_PerformanceProfiler::LogPerformanceData() const
-{
-    UE_LOG(LogTemp, Log, TEXT("=== PERFORMANCE DATA ==="));
-    UE_LOG(LogTemp, Log, TEXT("FPS: %.1f"), CurrentFrameData.FPS);
-    UE_LOG(LogTemp, Log, TEXT("GPU Time: %.2fms"), CurrentFrameData.GPUTime);
-    UE_LOG(LogTemp, Log, TEXT("CPU Time: %.2fms"), CurrentFrameData.CPUTime);
-    UE_LOG(LogTemp, Log, TEXT("Memory: %.1fMB"), CurrentFrameData.MemoryUsageMB);
-    UE_LOG(LogTemp, Log, TEXT("Draw Calls: %d"), CurrentFrameData.DrawCalls);
-    UE_LOG(LogTemp, Log, TEXT("Triangles: %d"), CurrentFrameData.Triangles);
-    UE_LOG(LogTemp, Log, TEXT("Active Actors: %d"), CurrentFrameData.ActiveActors);
-    UE_LOG(LogTemp, Log, TEXT("Visible Actors: %d"), CurrentFrameData.VisibleActors);
-}
-
-void UPerf_PerformanceProfiler::DumpPerformanceReport() const
-{
-    FPerf_FrameData AverageData = GetAverageFrameData();
-    
-    UE_LOG(LogTemp, Log, TEXT("=== PERFORMANCE REPORT ==="));
-    UE_LOG(LogTemp, Log, TEXT("Profiling Duration: %.1f seconds"), GetWorld()->GetTimeSeconds() - ProfilingStartTime);
-    UE_LOG(LogTemp, Log, TEXT("Total Frames: %d"), FrameCount);
-    UE_LOG(LogTemp, Log, TEXT("Average FPS: %.1f"), AverageData.FPS);
-    UE_LOG(LogTemp, Log, TEXT("Average GPU Time: %.2fms"), AverageData.GPUTime);
-    UE_LOG(LogTemp, Log, TEXT("Average CPU Time: %.2fms"), AverageData.CPUTime);
-    UE_LOG(LogTemp, Log, TEXT("Average Memory: %.1fMB"), AverageData.MemoryUsageMB);
-    UE_LOG(LogTemp, Log, TEXT("Performance Within Thresholds: %s"), IsPerformanceWithinThresholds() ? TEXT("Yes") : TEXT("No"));
-}
-
-float UPerf_PerformanceProfiler::CalculateAverageFPS() const
-{
-    if (FrameHistory.Num() == 0)
-    {
-        return 0.0f;
-    }
-
-    float TotalFPS = 0.0f;
-    for (const FPerf_FrameData& Frame : FrameHistory)
-    {
-        TotalFPS += Frame.FPS;
-    }
-
-    return TotalFPS / FrameHistory.Num();
-}
-
-float UPerf_PerformanceProfiler::CalculateAverageGPUTime() const
-{
-    if (FrameHistory.Num() == 0)
-    {
-        return 0.0f;
-    }
-
-    float TotalGPUTime = 0.0f;
-    for (const FPerf_FrameData& Frame : FrameHistory)
-    {
-        TotalGPUTime += Frame.GPUTime;
-    }
-
-    return TotalGPUTime / FrameHistory.Num();
-}
-
-float UPerf_PerformanceProfiler::CalculateAverageCPUTime() const
-{
-    if (FrameHistory.Num() == 0)
-    {
-        return 0.0f;
-    }
-
-    float TotalCPUTime = 0.0f;
-    for (const FPerf_FrameData& Frame : FrameHistory)
-    {
-        TotalCPUTime += Frame.CPUTime;
-    }
-
-    return TotalCPUTime / FrameHistory.Num();
-}
-
-void UPerf_PerformanceProfiler::TrimFrameHistory()
-{
-    if (FrameHistory.Num() > MaxFrameHistorySize)
-    {
-        FrameHistory.RemoveAt(0, FrameHistory.Num() - MaxFrameHistorySize);
-    }
+    return FPlatformTime::Seconds();
 }
