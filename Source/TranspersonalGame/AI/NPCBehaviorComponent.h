@@ -2,214 +2,241 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
-#include "Engine/World.h"
-#include "GameFramework/Pawn.h"
+#include "Engine/Engine.h"
+#include "GameFramework/Character.h"
+#include "AIController.h"
 #include "BehaviorTree/BehaviorTreeComponent.h"
 #include "BehaviorTree/BlackboardComponent.h"
+#include "Perception/AIPerceptionComponent.h"
 #include "NPCBehaviorComponent.generated.h"
 
-UENUM(BlueprintType)
-enum class ENPC_BehaviorState : uint8
-{
-    Idle = 0,
-    Patrolling = 1,
-    Investigating = 2,
-    Fleeing = 3,
-    Socializing = 4,
-    Working = 5,
-    Sleeping = 6,
-    Alert = 7
-};
-
-UENUM(BlueprintType)
-enum class ENPC_EmotionalState : uint8
-{
-    Calm = 0,
-    Curious = 1,
-    Afraid = 2,
-    Angry = 3,
-    Happy = 4,
-    Sad = 5,
-    Excited = 6,
-    Tired = 7
-};
-
+// NPC Memory System - tracks relationships and experiences
 USTRUCT(BlueprintType)
-struct FNPC_Memory
+struct TRANSPERSONALGAME_API FNPC_Memory
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FVector Location;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory")
+    AActor* RememberedActor;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float Timestamp;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory")
+    float Relationship; // -100 to 100 (enemy to friend)
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    ENPC_EmotionalState EmotionalContext;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory")
+    FVector LastSeenLocation;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FString EventDescription;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory")
+    float LastSeenTime;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory")
+    bool bIsHostile;
 
     FNPC_Memory()
     {
-        Location = FVector::ZeroVector;
-        Timestamp = 0.0f;
-        EmotionalContext = ENPC_EmotionalState::Calm;
-        EventDescription = TEXT("");
+        RememberedActor = nullptr;
+        Relationship = 0.0f;
+        LastSeenLocation = FVector::ZeroVector;
+        LastSeenTime = 0.0f;
+        bIsHostile = false;
     }
 };
 
+// NPC Emotional State - affects behavior decisions
 USTRUCT(BlueprintType)
-struct FNPC_SocialRelationship
+struct TRANSPERSONALGAME_API FNPC_EmotionalState
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    TWeakObjectPtr<APawn> TargetPawn;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Emotions")
+    float Fear; // 0-100
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float TrustLevel;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Emotions")
+    float Anger; // 0-100
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float FearLevel;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Emotions")
+    float Curiosity; // 0-100
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float LastInteractionTime;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Emotions")
+    float Alertness; // 0-100
 
-    FNPC_SocialRelationship()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Emotions")
+    float SocialNeed; // 0-100
+
+    FNPC_EmotionalState()
     {
-        TargetPawn = nullptr;
-        TrustLevel = 0.5f;
-        FearLevel = 0.0f;
-        LastInteractionTime = 0.0f;
+        Fear = 20.0f;
+        Anger = 10.0f;
+        Curiosity = 30.0f;
+        Alertness = 50.0f;
+        SocialNeed = 40.0f;
     }
+};
+
+// Daily routine activities
+UENUM(BlueprintType)
+enum class ENPC_Activity : uint8
+{
+    Idle UMETA(DisplayName = "Idle"),
+    Patrolling UMETA(DisplayName = "Patrolling"),
+    Foraging UMETA(DisplayName = "Foraging"),
+    Socializing UMETA(DisplayName = "Socializing"),
+    Resting UMETA(DisplayName = "Resting"),
+    Fleeing UMETA(DisplayName = "Fleeing"),
+    Investigating UMETA(DisplayName = "Investigating"),
+    Working UMETA(DisplayName = "Working"),
+    Hunting UMETA(DisplayName = "Hunting")
+};
+
+// NPC social roles in tribe
+UENUM(BlueprintType)
+enum class ENPC_Role : uint8
+{
+    Hunter UMETA(DisplayName = "Hunter"),
+    Gatherer UMETA(DisplayName = "Gatherer"),
+    Guard UMETA(DisplayName = "Guard"),
+    Elder UMETA(DisplayName = "Elder"),
+    Child UMETA(DisplayName = "Child"),
+    Crafter UMETA(DisplayName = "Crafter"),
+    Scout UMETA(DisplayName = "Scout"),
+    Shaman UMETA(DisplayName = "Shaman")
 };
 
 UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UNPCBehaviorComponent : public UActorComponent
+class TRANSPERSONALGAME_API UNPC_BehaviorComponent : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    UNPCBehaviorComponent();
+    UNPC_BehaviorComponent();
 
 protected:
     virtual void BeginPlay() override;
-
-public:
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    // Core Behavior Properties
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Behavior")
-    ENPC_BehaviorState CurrentBehaviorState;
+public:
+    // === CORE NPC PROPERTIES ===
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Identity")
+    FString NPCName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Behavior")
-    ENPC_EmotionalState CurrentEmotionalState;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Identity")
+    ENPC_Role NPCRole;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Behavior")
-    float AlertnessLevel;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Identity")
+    int32 Age;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Behavior")
-    float EnergyLevel;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Identity")
+    float Experience; // 0-100
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Behavior")
-    float SocialNeed;
+    // === MEMORY SYSTEM ===
+    
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Memory")
+    TArray<FNPC_Memory> Memories;
 
-    // Memory System
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Memory")
-    TArray<FNPC_Memory> ShortTermMemory;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory")
+    int32 MaxMemories;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Memory")
-    TArray<FNPC_Memory> LongTermMemory;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory")
+    float MemoryDecayRate;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Memory")
-    int32 MaxShortTermMemories;
+    // === EMOTIONAL STATE ===
+    
+    UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "Emotions")
+    FNPC_EmotionalState CurrentEmotions;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Memory")
-    int32 MaxLongTermMemories;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Emotions")
+    float EmotionDecayRate;
 
-    // Social Relationships
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Social")
-    TArray<FNPC_SocialRelationship> SocialRelationships;
+    // === BEHAVIOR STATE ===
+    
+    UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "Behavior")
+    ENPC_Activity CurrentActivity;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Social")
-    float SocialInteractionRadius;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
+    float ActivityTimer;
 
-    // Patrol System
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Patrol")
-    TArray<FVector> PatrolPoints;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
+    FVector HomeLocation;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Patrol")
-    int32 CurrentPatrolIndex;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
+    float PatrolRadius;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Patrol")
-    float PatrolSpeed;
+    // === SOCIAL BEHAVIOR ===
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Social")
+    TArray<AActor*> TribeMates;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Patrol")
-    float PatrolWaitTime;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Social")
+    AActor* CurrentTarget;
 
-    // Behavior Tree Integration
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI")
-    class UBehaviorTreeComponent* BehaviorTreeComponent;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Social")
+    float SocialInteractionRange;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI")
-    class UBlackboardComponent* BlackboardComponent;
+    // === SURVIVAL INSTINCTS ===
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival")
+    float DangerThreshold;
 
-    // Core Behavior Functions
-    UFUNCTION(BlueprintCallable, Category = "NPC Behavior")
-    void SetBehaviorState(ENPC_BehaviorState NewState);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival")
+    float FleeDistance;
 
-    UFUNCTION(BlueprintCallable, Category = "NPC Behavior")
-    void SetEmotionalState(ENPC_EmotionalState NewState);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival")
+    TArray<TSubclassOf<AActor>> ThreatClasses;
 
-    UFUNCTION(BlueprintCallable, Category = "NPC Behavior")
-    void UpdateAlertnessLevel(float DeltaAlertness);
+    // === BEHAVIOR FUNCTIONS ===
+    
+    UFUNCTION(BlueprintCallable, Category = "Memory")
+    void RememberActor(AActor* Actor, float RelationshipValue, bool bIsHostile = false);
 
-    // Memory Functions
-    UFUNCTION(BlueprintCallable, Category = "NPC Memory")
-    void AddMemory(FVector Location, ENPC_EmotionalState Emotion, const FString& Description);
+    UFUNCTION(BlueprintCallable, Category = "Memory")
+    FNPC_Memory* FindMemory(AActor* Actor);
 
-    UFUNCTION(BlueprintCallable, Category = "NPC Memory")
-    void ConsolidateMemories();
+    UFUNCTION(BlueprintCallable, Category = "Memory")
+    void UpdateMemory(AActor* Actor, float RelationshipChange);
 
-    UFUNCTION(BlueprintCallable, Category = "NPC Memory")
-    TArray<FNPC_Memory> GetMemoriesAtLocation(FVector Location, float Radius);
+    UFUNCTION(BlueprintCallable, Category = "Memory")
+    void ForgetOldMemories();
 
-    // Social Functions
-    UFUNCTION(BlueprintCallable, Category = "NPC Social")
-    void UpdateSocialRelationship(APawn* TargetPawn, float TrustDelta, float FearDelta);
+    UFUNCTION(BlueprintCallable, Category = "Emotions")
+    void ModifyEmotion(const FString& EmotionName, float Change);
 
-    UFUNCTION(BlueprintCallable, Category = "NPC Social")
-    FNPC_SocialRelationship GetSocialRelationship(APawn* TargetPawn);
+    UFUNCTION(BlueprintCallable, Category = "Emotions")
+    void UpdateEmotionalState(float DeltaTime);
 
-    UFUNCTION(BlueprintCallable, Category = "NPC Social")
-    TArray<APawn*> GetNearbyNPCs();
+    UFUNCTION(BlueprintCallable, Category = "Behavior")
+    void SetActivity(ENPC_Activity NewActivity);
 
-    // Patrol Functions
-    UFUNCTION(BlueprintCallable, Category = "NPC Patrol")
-    void SetPatrolPoints(const TArray<FVector>& NewPatrolPoints);
+    UFUNCTION(BlueprintCallable, Category = "Behavior")
+    bool ShouldFlee();
 
-    UFUNCTION(BlueprintCallable, Category = "NPC Patrol")
-    FVector GetNextPatrolPoint();
+    UFUNCTION(BlueprintCallable, Category = "Behavior")
+    AActor* FindNearestThreat();
 
-    UFUNCTION(BlueprintCallable, Category = "NPC Patrol")
-    void AdvancePatrolPoint();
+    UFUNCTION(BlueprintCallable, Category = "Behavior")
+    AActor* FindNearestTribeMate();
 
-    // AI Integration
+    UFUNCTION(BlueprintCallable, Category = "Social")
+    void InitiateSocialInteraction(AActor* Target);
+
+    UFUNCTION(BlueprintCallable, Category = "Social")
+    bool IsInSocialRange(AActor* Target);
+
+    // === AI INTEGRATION ===
+    
     UFUNCTION(BlueprintCallable, Category = "AI")
     void UpdateBlackboardValues();
 
     UFUNCTION(BlueprintCallable, Category = "AI")
-    void InitializeBehaviorTree();
+    void ReactToPerception(AActor* PerceivedActor, bool bCanSee);
 
 private:
-    float LastMemoryConsolidationTime;
-    float LastSocialUpdate;
-    float PatrolTimer;
-
-    void UpdateEnergyAndNeeds(float DeltaTime);
-    void ProcessSocialInteractions(float DeltaTime);
-    void UpdatePatrolBehavior(float DeltaTime);
-    void HandleEmotionalDecay(float DeltaTime);
+    // Internal state tracking
+    float LastEmotionUpdate;
+    float LastMemoryCleanup;
+    
+    // Helper functions
+    void DecayEmotions(float DeltaTime);
+    void CleanupMemories();
+    bool IsActorThreat(AActor* Actor);
+    float CalculateRelationshipChange(AActor* Actor);
 };
