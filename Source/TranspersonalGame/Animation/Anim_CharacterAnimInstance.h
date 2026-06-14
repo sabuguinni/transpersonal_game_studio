@@ -5,36 +5,12 @@
 #include "Engine/Engine.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
-#include "Components/CapsuleComponent.h"
-#include "../Core/Characters/Char_CharacterVariations.h"
+#include "Kismet/KismetMathLibrary.h"
+#include "../Core/SharedTypes.h"
 #include "Anim_CharacterAnimInstance.generated.h"
 
-UENUM(BlueprintType)
-enum class EAnim_MovementState : uint8
-{
-    Idle        UMETA(DisplayName = "Idle"),
-    Walking     UMETA(DisplayName = "Walking"),
-    Running     UMETA(DisplayName = "Running"),
-    Jumping     UMETA(DisplayName = "Jumping"),
-    Falling     UMETA(DisplayName = "Falling"),
-    Crouching   UMETA(DisplayName = "Crouching"),
-    Combat      UMETA(DisplayName = "Combat")
-};
-
-UENUM(BlueprintType)
-enum class EAnim_WeaponType : uint8
-{
-    None        UMETA(DisplayName = "None"),
-    Spear       UMETA(DisplayName = "Spear"),
-    Club        UMETA(DisplayName = "Club"),
-    Bow         UMETA(DisplayName = "Bow"),
-    Axe         UMETA(DisplayName = "Axe"),
-    Knife       UMETA(DisplayName = "Knife"),
-    Sling       UMETA(DisplayName = "Sling")
-};
-
 USTRUCT(BlueprintType)
-struct FAnim_MovementData
+struct TRANSPERSONALGAME_API FAnim_MovementState
 {
     GENERATED_BODY()
 
@@ -48,46 +24,71 @@ struct FAnim_MovementData
     bool bIsInAir = false;
 
     UPROPERTY(BlueprintReadOnly, Category = "Movement")
+    bool bIsAccelerating = false;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Movement")
     bool bIsCrouching = false;
 
     UPROPERTY(BlueprintReadOnly, Category = "Movement")
-    float JumpHeight = 0.0f;
+    bool bIsRunning = false;
 
     UPROPERTY(BlueprintReadOnly, Category = "Movement")
-    FVector Velocity = FVector::ZeroVector;
+    float AimPitch = 0.0f;
 
     UPROPERTY(BlueprintReadOnly, Category = "Movement")
-    float Acceleration = 0.0f;
+    float AimYaw = 0.0f;
 };
 
 USTRUCT(BlueprintType)
-struct FAnim_IKData
+struct TRANSPERSONALGAME_API FAnim_WeaponState
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "IK")
-    FVector LeftFootIKLocation = FVector::ZeroVector;
+    UPROPERTY(BlueprintReadOnly, Category = "Weapon")
+    bool bIsHoldingWeapon = false;
 
-    UPROPERTY(BlueprintReadOnly, Category = "IK")
-    FVector RightFootIKLocation = FVector::ZeroVector;
+    UPROPERTY(BlueprintReadOnly, Category = "Weapon")
+    EWeaponType WeaponType = EWeaponType::None;
 
-    UPROPERTY(BlueprintReadOnly, Category = "IK")
-    FRotator LeftFootIKRotation = FRotator::ZeroRotator;
+    UPROPERTY(BlueprintReadOnly, Category = "Weapon")
+    bool bIsAttacking = false;
 
-    UPROPERTY(BlueprintReadOnly, Category = "IK")
-    FRotator RightFootIKRotation = FRotator::ZeroRotator;
+    UPROPERTY(BlueprintReadOnly, Category = "Weapon")
+    bool bIsBlocking = false;
 
-    UPROPERTY(BlueprintReadOnly, Category = "IK")
-    float LeftFootIKAlpha = 0.0f;
-
-    UPROPERTY(BlueprintReadOnly, Category = "IK")
-    float RightFootIKAlpha = 0.0f;
-
-    UPROPERTY(BlueprintReadOnly, Category = "IK")
-    float HipOffset = 0.0f;
+    UPROPERTY(BlueprintReadOnly, Category = "Weapon")
+    float AttackComboIndex = 0.0f;
 };
 
-UCLASS(Blueprintable, BlueprintType)
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FAnim_SurvivalState
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadOnly, Category = "Survival")
+    float HealthPercentage = 1.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Survival")
+    float StaminaPercentage = 1.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Survival")
+    float FearLevel = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Survival")
+    bool bIsInjured = false;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Survival")
+    bool bIsExhausted = false;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Survival")
+    bool bIsTerrorized = false;
+};
+
+/**
+ * Animation Instance for primitive human characters
+ * Handles movement, weapon, and survival state animations
+ */
+UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UAnim_CharacterAnimInstance : public UAnimInstance
 {
     GENERATED_BODY()
@@ -95,55 +96,74 @@ class TRANSPERSONALGAME_API UAnim_CharacterAnimInstance : public UAnimInstance
 public:
     UAnim_CharacterAnimInstance();
 
-protected:
     virtual void NativeInitializeAnimation() override;
     virtual void NativeUpdateAnimation(float DeltaTime) override;
 
+protected:
+    // Character reference
     UPROPERTY(BlueprintReadOnly, Category = "Character")
     class ACharacter* OwnerCharacter;
 
     UPROPERTY(BlueprintReadOnly, Category = "Character")
     class UCharacterMovementComponent* MovementComponent;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Animation State")
-    EAnim_MovementState CurrentMovementState;
+    // Animation states
+    UPROPERTY(BlueprintReadOnly, Category = "Animation States")
+    FAnim_MovementState MovementState;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Animation State")
-    EAnim_WeaponType CurrentWeaponType;
+    UPROPERTY(BlueprintReadOnly, Category = "Animation States")
+    FAnim_WeaponState WeaponState;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Movement Data")
-    FAnim_MovementData MovementData;
+    UPROPERTY(BlueprintReadOnly, Category = "Animation States")
+    FAnim_SurvivalState SurvivalState;
 
-    UPROPERTY(BlueprintReadOnly, Category = "IK Data")
-    FAnim_IKData IKData;
+    // Animation parameters
+    UPROPERTY(BlueprintReadOnly, Category = "Animation")
+    float WalkSpeed = 150.0f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Character Archetype")
-    EChar_CharacterArchetype CharacterArchetype;
+    UPROPERTY(BlueprintReadOnly, Category = "Animation")
+    float RunSpeed = 400.0f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Animation Modifiers")
-    float ArchetypeSpeedModifier = 1.0f;
+    UPROPERTY(BlueprintReadOnly, Category = "Animation")
+    float JumpThreshold = 100.0f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Animation Modifiers")
-    float ArchetypeAggressionModifier = 1.0f;
+    UPROPERTY(BlueprintReadOnly, Category = "Animation")
+    float AccelerationThreshold = 10.0f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Animation Modifiers")
-    float ArchetypePrecisionModifier = 1.0f;
+    // Blend space parameters
+    UPROPERTY(BlueprintReadOnly, Category = "Blend Space")
+    float BlendSpaceX = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Blend Space")
+    float BlendSpaceY = 0.0f;
+
+    // IK parameters
+    UPROPERTY(BlueprintReadOnly, Category = "IK")
+    bool bEnableFootIK = true;
+
+    UPROPERTY(BlueprintReadOnly, Category = "IK")
+    float LeftFootIKOffset = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "IK")
+    float RightFootIKOffset = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "IK")
+    FRotator LeftFootIKRotation = FRotator::ZeroRotator;
+
+    UPROPERTY(BlueprintReadOnly, Category = "IK")
+    FRotator RightFootIKRotation = FRotator::ZeroRotator;
 
 private:
-    void UpdateMovementData(float DeltaTime);
-    void UpdateMovementState();
-    void UpdateIKData(float DeltaTime);
-    void UpdateArchetypeModifiers();
-    
-    FVector PerformFootTrace(const FVector& FootLocation, float TraceDistance = 50.0f);
-    float CalculateFootIKAlpha(const FVector& IKLocation);
+    // Update functions
+    void UpdateMovementState(float DeltaTime);
+    void UpdateWeaponState(float DeltaTime);
+    void UpdateSurvivalState(float DeltaTime);
+    void UpdateBlendSpaceParameters(float DeltaTime);
+    void UpdateFootIK(float DeltaTime);
 
-    UPROPERTY()
-    float LastUpdateTime = 0.0f;
-
-    UPROPERTY()
-    float IKInterpSpeed = 15.0f;
-
-    UPROPERTY()
-    float FootTraceDistance = 100.0f;
+    // Helper functions
+    float CalculateDirection(const FVector& Velocity, const FRotator& Rotation) const;
+    bool IsMovingOnGround() const;
+    FVector GetFootLocation(const FName& SocketName) const;
+    float PerformFootTrace(const FVector& FootLocation, FRotator& OutRotation) const;
 };
