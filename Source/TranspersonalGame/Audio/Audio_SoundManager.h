@@ -1,24 +1,21 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/GameInstance.h"
-#include "Components/AudioComponent.h"
-#include "Sound/SoundCue.h"
-#include "Sound/SoundWave.h"
 #include "Subsystems/GameInstanceSubsystem.h"
+#include "Engine/Engine.h"
+#include "Sound/SoundCue.h"
+#include "Components/AudioComponent.h"
 #include "Audio_SoundManager.generated.h"
 
 UENUM(BlueprintType)
 enum class EAudio_SoundCategory : uint8
 {
     Ambient,
-    Music,
-    SFX,
-    Voice,
+    Dinosaur,
+    Player,
+    Environment,
     UI,
-    Footsteps,
-    DinosaurSounds,
-    WeatherSounds
+    Music
 };
 
 USTRUCT(BlueprintType)
@@ -30,7 +27,7 @@ struct FAudio_SoundEntry
     FString SoundName;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    TSoftObjectPtr<USoundBase> SoundAsset;
+    TSoftObjectPtr<USoundCue> SoundCue;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     EAudio_SoundCategory Category;
@@ -42,7 +39,7 @@ struct FAudio_SoundEntry
     float Pitch = 1.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    bool bLoop = false;
+    bool bLooping = false;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     float FadeInTime = 0.0f;
@@ -53,112 +50,92 @@ struct FAudio_SoundEntry
     FAudio_SoundEntry()
     {
         SoundName = TEXT("");
-        Category = EAudio_SoundCategory::SFX;
-        Volume = 1.0f;
-        Pitch = 1.0f;
-        bLoop = false;
-        FadeInTime = 0.0f;
-        FadeOutTime = 0.0f;
+        Category = EAudio_SoundCategory::Ambient;
     }
 };
 
-UCLASS(BlueprintType)
+UCLASS()
 class TRANSPERSONALGAME_API UAudio_SoundManager : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
 public:
-    UAudio_SoundManager();
-
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
-    // Sound playback functions
-    UFUNCTION(BlueprintCallable, Category = "Audio")
-    void PlaySound(const FString& SoundName, AActor* WorldContext = nullptr);
+    // Play sound functions
+    UFUNCTION(BlueprintCallable, Category = "Audio Manager")
+    UAudioComponent* PlaySound2D(const FString& SoundName, float VolumeMultiplier = 1.0f);
 
-    UFUNCTION(BlueprintCallable, Category = "Audio")
-    void PlaySoundAtLocation(const FString& SoundName, FVector Location, AActor* WorldContext = nullptr);
+    UFUNCTION(BlueprintCallable, Category = "Audio Manager")
+    UAudioComponent* PlaySoundAtLocation(const FString& SoundName, FVector Location, float VolumeMultiplier = 1.0f);
 
-    UFUNCTION(BlueprintCallable, Category = "Audio")
-    void StopSound(const FString& SoundName);
-
-    UFUNCTION(BlueprintCallable, Category = "Audio")
-    void StopAllSounds();
-
-    UFUNCTION(BlueprintCallable, Category = "Audio")
-    void StopSoundsByCategory(EAudio_SoundCategory Category);
-
-    // Volume control
-    UFUNCTION(BlueprintCallable, Category = "Audio")
-    void SetMasterVolume(float Volume);
-
-    UFUNCTION(BlueprintCallable, Category = "Audio")
-    void SetCategoryVolume(EAudio_SoundCategory Category, float Volume);
-
-    UFUNCTION(BlueprintCallable, Category = "Audio")
-    float GetMasterVolume() const { return MasterVolume; }
-
-    UFUNCTION(BlueprintCallable, Category = "Audio")
-    float GetCategoryVolume(EAudio_SoundCategory Category) const;
+    UFUNCTION(BlueprintCallable, Category = "Audio Manager")
+    UAudioComponent* PlaySoundAttached(const FString& SoundName, USceneComponent* AttachComponent, float VolumeMultiplier = 1.0f);
 
     // Sound management
-    UFUNCTION(BlueprintCallable, Category = "Audio")
+    UFUNCTION(BlueprintCallable, Category = "Audio Manager")
+    void StopSound(const FString& SoundName);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio Manager")
+    void StopAllSounds();
+
+    UFUNCTION(BlueprintCallable, Category = "Audio Manager")
+    void StopSoundsByCategory(EAudio_SoundCategory Category);
+
+    // Volume controls
+    UFUNCTION(BlueprintCallable, Category = "Audio Manager")
+    void SetMasterVolume(float Volume);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio Manager")
+    void SetCategoryVolume(EAudio_SoundCategory Category, float Volume);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio Manager")
+    float GetCategoryVolume(EAudio_SoundCategory Category) const;
+
+    // Sound registration
+    UFUNCTION(BlueprintCallable, Category = "Audio Manager")
     void RegisterSound(const FAudio_SoundEntry& SoundEntry);
 
-    UFUNCTION(BlueprintCallable, Category = "Audio")
-    void UnregisterSound(const FString& SoundName);
-
-    UFUNCTION(BlueprintCallable, Category = "Audio")
+    UFUNCTION(BlueprintCallable, Category = "Audio Manager")
     bool IsSoundRegistered(const FString& SoundName) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Audio")
-    bool IsSoundPlaying(const FString& SoundName) const;
+    // Prehistoric-specific sounds
+    UFUNCTION(BlueprintCallable, Category = "Audio Manager")
+    void PlayDinosaurRoar(const FString& DinosaurType, FVector Location);
 
-    // Ambient and music control
-    UFUNCTION(BlueprintCallable, Category = "Audio")
-    void PlayAmbientSound(const FString& SoundName, float FadeInTime = 2.0f);
+    UFUNCTION(BlueprintCallable, Category = "Audio Manager")
+    void PlayFootstepSound(const FString& SurfaceType, FVector Location);
 
-    UFUNCTION(BlueprintCallable, Category = "Audio")
-    void StopAmbientSound(float FadeOutTime = 2.0f);
+    UFUNCTION(BlueprintCallable, Category = "Audio Manager")
+    void StartAmbientLoop(const FString& BiomeType);
 
-    UFUNCTION(BlueprintCallable, Category = "Audio")
-    void PlayMusic(const FString& MusicName, float FadeInTime = 3.0f);
-
-    UFUNCTION(BlueprintCallable, Category = "Audio")
-    void StopMusic(float FadeOutTime = 3.0f);
-
-    UFUNCTION(BlueprintCallable, Category = "Audio")
-    void CrossfadeMusic(const FString& NewMusicName, float CrossfadeTime = 5.0f);
+    UFUNCTION(BlueprintCallable, Category = "Audio Manager")
+    void StopAmbientLoop();
 
 protected:
+    // Sound registry
     UPROPERTY()
     TMap<FString, FAudio_SoundEntry> RegisteredSounds;
 
+    // Active audio components
     UPROPERTY()
-    TMap<FString, UAudioComponent*> ActiveAudioComponents;
+    TMap<FString, UAudioComponent*> ActiveSounds;
+
+    // Volume settings
+    UPROPERTY()
+    float MasterVolume = 1.0f;
 
     UPROPERTY()
     TMap<EAudio_SoundCategory, float> CategoryVolumes;
 
+    // Current ambient loop
     UPROPERTY()
-    float MasterVolume;
+    UAudioComponent* CurrentAmbientLoop = nullptr;
 
-    UPROPERTY()
-    UAudioComponent* CurrentAmbientComponent;
-
-    UPROPERTY()
-    UAudioComponent* CurrentMusicComponent;
-
-    UPROPERTY()
-    FString CurrentAmbientSound;
-
-    UPROPERTY()
-    FString CurrentMusicTrack;
-
-private:
+    // Helper functions
+    FAudio_SoundEntry* FindSoundEntry(const FString& SoundName);
+    float CalculateFinalVolume(const FAudio_SoundEntry& SoundEntry, float VolumeMultiplier) const;
     void InitializeDefaultSounds();
-    void InitializeCategoryVolumes();
-    UAudioComponent* CreateAudioComponent(AActor* WorldContext = nullptr);
-    float CalculateFinalVolume(const FAudio_SoundEntry& SoundEntry) const;
+    void CleanupFinishedSounds();
 };
