@@ -1,91 +1,106 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/World.h"
-#include "Components/ActorComponent.h"
-#include "Engine/TriggerVolume.h"
+#include "GameFramework/Actor.h"
+#include "Components/StaticMeshComponent.h"
+#include "Components/BoxComponent.h"
+#include "Engine/Engine.h"
 #include "Arch_StructureManager.generated.h"
 
 UENUM(BlueprintType)
 enum class EArch_StructureType : uint8
 {
-    Dwelling,
-    Ruins,
-    Shelter,
-    Storage,
-    Defensive
+    StoneArchway     UMETA(DisplayName = "Stone Archway"),
+    CaveEntrance     UMETA(DisplayName = "Cave Entrance"),
+    RockShelter      UMETA(DisplayName = "Rock Shelter"),
+    StonePlatform    UMETA(DisplayName = "Stone Platform"),
+    AncientRuins     UMETA(DisplayName = "Ancient Ruins")
 };
 
 USTRUCT(BlueprintType)
-struct FArch_StructureData
+struct FArch_StructureConfig
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    EArch_StructureType StructureType;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
+    EArch_StructureType StructureType = EArch_StructureType::StoneArchway;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FVector Location;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
+    float ProtectionRadius = 500.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float Integrity;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
+    float TemperatureModifier = 5.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    bool bIsOccupied;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
+    bool bProvidesWeatherProtection = true;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    TArray<FString> InteriorItems;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
+    int32 MaxOccupants = 4;
 
-    FArch_StructureData()
+    FArch_StructureConfig()
     {
-        StructureType = EArch_StructureType::Dwelling;
-        Location = FVector::ZeroVector;
-        Integrity = 100.0f;
-        bIsOccupied = false;
+        StructureType = EArch_StructureType::StoneArchway;
+        ProtectionRadius = 500.0f;
+        TemperatureModifier = 5.0f;
+        bProvidesWeatherProtection = true;
+        MaxOccupants = 4;
     }
 };
 
-UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UArch_StructureManager : public UActorComponent
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API AArch_StructureManager : public AActor
 {
     GENERATED_BODY()
 
 public:
-    UArch_StructureManager();
+    AArch_StructureManager();
 
 protected:
     virtual void BeginPlay() override;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    TArray<FArch_StructureData> RegisteredStructures;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    UStaticMeshComponent* StructureMesh;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    float StructureDetectionRange;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    UBoxComponent* ProtectionZone;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    bool bAutoDetectStructures;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure Config")
+    FArch_StructureConfig StructureConfig;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure Config")
+    TArray<AActor*> CurrentOccupants;
 
 public:
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+    virtual void Tick(float DeltaTime) override;
 
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void RegisterStructure(const FArch_StructureData& StructureData);
+    UFUNCTION(BlueprintCallable, Category = "Structure")
+    bool CanEnterStructure(AActor* Actor);
 
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void UnregisterStructure(int32 StructureIndex);
+    UFUNCTION(BlueprintCallable, Category = "Structure")
+    bool EnterStructure(AActor* Actor);
 
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    TArray<FArch_StructureData> GetNearbyStructures(FVector PlayerLocation, float SearchRadius);
+    UFUNCTION(BlueprintCallable, Category = "Structure")
+    bool ExitStructure(AActor* Actor);
 
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    bool IsInsideStructure(FVector Location);
+    UFUNCTION(BlueprintCallable, Category = "Structure")
+    float GetProtectionLevel(const FVector& Location);
 
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void UpdateStructureIntegrity(int32 StructureIndex, float NewIntegrity);
+    UFUNCTION(BlueprintCallable, Category = "Structure")
+    bool IsLocationProtected(const FVector& Location);
 
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void SetStructureOccupancy(int32 StructureIndex, bool bOccupied);
+    UFUNCTION(BlueprintCallable, Category = "Structure")
+    void SetStructureType(EArch_StructureType NewType);
 
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    FArch_StructureData GetStructureAtLocation(FVector Location, float Tolerance = 100.0f);
+    UFUNCTION(BlueprintCallable, Category = "Structure")
+    TArray<AActor*> GetCurrentOccupants() const { return CurrentOccupants; }
+
+protected:
+    UFUNCTION()
+    void OnProtectionZoneBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult);
+
+    UFUNCTION()
+    void OnProtectionZoneEndOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex);
+
+    void UpdateStructureMesh();
+    void UpdateProtectionRadius();
 };
