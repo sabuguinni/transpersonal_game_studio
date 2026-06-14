@@ -2,42 +2,41 @@
 
 #include "CoreMinimal.h"
 #include "Engine/GameInstanceSubsystem.h"
-#include "SharedTypes.h"
 #include "Narr_StoryManager.generated.h"
 
+UENUM(BlueprintType)
+enum class ENarr_StoryPhase : uint8
+{
+    Awakening,
+    FirstHunt,
+    TribalContact,
+    TerritoryWars,
+    AlphaStatus
+};
+
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FNarr_StoryState
+struct FNarr_StoryEvent
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    int32 CurrentChapter;
+    UPROPERTY(BlueprintReadOnly, Category = "Story")
+    FString EventID;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    TArray<FString> CompletedQuests;
+    UPROPERTY(BlueprintReadOnly, Category = "Story")
+    FText EventDescription;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    TArray<FString> ActiveQuests;
+    UPROPERTY(BlueprintReadOnly, Category = "Story")
+    bool bIsCompleted;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    bool bHasMetElderThok;
+    UPROPERTY(BlueprintReadOnly, Category = "Story")
+    float CompletionTime;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    bool bHasEnteredValley;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    bool bHasFoundAncientRuins;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    int32 DinosaurKillCount;
-
-    FNarr_StoryState()
+    FNarr_StoryEvent()
     {
-        CurrentChapter = 1;
-        bHasMetElderThok = false;
-        bHasEnteredValley = false;
-        bHasFoundAncientRuins = false;
-        DinosaurKillCount = 0;
+        EventID = TEXT("");
+        EventDescription = FText::GetEmpty();
+        bIsCompleted = false;
+        CompletionTime = 0.0f;
     }
 };
 
@@ -47,36 +46,36 @@ class TRANSPERSONALGAME_API UNarr_StoryManager : public UGameInstanceSubsystem
     GENERATED_BODY()
 
 public:
+    UNarr_StoryManager();
+
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
 
     UFUNCTION(BlueprintCallable, Category = "Story")
-    void AdvanceStory(const FString& EventName);
+    void AdvanceStoryPhase(ENarr_StoryPhase NewPhase);
 
     UFUNCTION(BlueprintCallable, Category = "Story")
-    bool IsQuestActive(const FString& QuestName) const;
+    void TriggerStoryEvent(const FString& EventID);
 
     UFUNCTION(BlueprintCallable, Category = "Story")
-    bool IsQuestCompleted(const FString& QuestName) const;
+    bool IsEventCompleted(const FString& EventID) const;
 
     UFUNCTION(BlueprintCallable, Category = "Story")
-    void CompleteQuest(const FString& QuestName);
+    ENarr_StoryPhase GetCurrentPhase() const { return CurrentPhase; }
 
     UFUNCTION(BlueprintCallable, Category = "Story")
-    void StartQuest(const FString& QuestName);
-
-    UFUNCTION(BlueprintCallable, Category = "Story")
-    FString GetCurrentChapterTitle() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Story")
-    void TriggerStoryEvent(const FString& EventName, const FVector& Location);
+    TArray<FNarr_StoryEvent> GetActiveEvents() const;
 
 protected:
     UPROPERTY(BlueprintReadOnly, Category = "Story")
-    FNarr_StoryState StoryState;
+    ENarr_StoryPhase CurrentPhase;
 
-    UPROPERTY(EditDefaultsOnly, Category = "Story")
-    TMap<int32, FString> ChapterTitles;
+    UPROPERTY(BlueprintReadOnly, Category = "Story")
+    TArray<FNarr_StoryEvent> StoryEvents;
 
-    void InitializeChapterTitles();
-    void HandleStoryTrigger(const FString& TriggerName, const FVector& Location);
+    UPROPERTY(BlueprintReadOnly, Category = "Story")
+    float GameStartTime;
+
+private:
+    void InitializeStoryEvents();
+    void OnPhaseChanged(ENarr_StoryPhase OldPhase, ENarr_StoryPhase NewPhase);
 };
