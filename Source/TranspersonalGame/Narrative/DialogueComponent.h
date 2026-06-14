@@ -2,12 +2,10 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
-#include "Engine/DataTable.h"
 #include "NarrativeManager.h"
 #include "DialogueComponent.generated.h"
 
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnDialogueTriggered, const FString&, DialogueID, AActor*, Speaker);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnDialogueCompleted, const FString&, DialogueID);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnDialogueTriggered, const FString&, DialogueText, const FString&, SpeakerName);
 
 UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
 class TRANSPERSONALGAME_API UDialogueComponent : public UActorComponent
@@ -21,53 +19,49 @@ protected:
     virtual void BeginPlay() override;
 
 public:
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    void TriggerDialogue(const FString& DialogueID);
-
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    void SetDialogueEnabled(bool bEnabled);
-
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    bool IsDialogueActive() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    void AddDialogueOption(const FString& DialogueID, const FString& OptionText);
-
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    void SelectDialogueOption(int32 OptionIndex);
-
     UPROPERTY(BlueprintAssignable, Category = "Dialogue")
     FOnDialogueTriggered OnDialogueTriggered;
 
-    UPROPERTY(BlueprintAssignable, Category = "Dialogue")
-    FOnDialogueCompleted OnDialogueCompleted;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    FString CharacterName;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    TArray<FString> AvailableDialogues;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    float InteractionRange;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    bool bCanRepeatDialogue;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    TArray<FString> RequiredStoryFlags;
+
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    void TriggerDialogue(int32 DialogueIndex = 0);
+
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    bool CanInteract() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    TArray<FString> GetAvailableDialogueOptions() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    void StartConversation(AActor* Interactor);
+
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    void EndConversation();
 
 protected:
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    bool bDialogueEnabled;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    FString DefaultDialogueID;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    float DialogueRange;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    bool bAutoTriggerOnOverlap;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Dialogue")
-    bool bDialogueActive;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Dialogue")
-    FString CurrentDialogueID;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Dialogue")
-    TArray<FString> CurrentDialogueOptions;
-
-private:
     UPROPERTY()
     UNarrativeManager* NarrativeManager;
 
-    void InitializeNarrativeManager();
-    bool IsPlayerInRange() const;
+    UPROPERTY()
+    AActor* CurrentInteractor;
+
+    UPROPERTY()
+    TArray<FString> UsedDialogues;
+
+    bool CheckStoryRequirements() const;
+    FString GetRandomAvailableDialogue() const;
 };
