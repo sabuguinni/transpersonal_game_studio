@@ -2,8 +2,8 @@
 
 #include "CoreMinimal.h"
 #include "Engine/World.h"
+#include "GameFramework/Actor.h"
 #include "Components/ActorComponent.h"
-#include "Engine/Engine.h"
 #include "QA_TestFramework.generated.h"
 
 UENUM(BlueprintType)
@@ -16,7 +16,7 @@ enum class EQA_TestResult : uint8
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FQA_TestCase
+struct FQA_TestCase
 {
     GENERATED_BODY()
 
@@ -45,130 +45,75 @@ struct TRANSPERSONALGAME_API FQA_TestCase
     }
 };
 
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FQA_TestSuite
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Test Suite")
-    FString SuiteName;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Test Suite")
-    TArray<FQA_TestCase> TestCases;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Test Suite")
-    int32 PassCount;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Test Suite")
-    int32 FailCount;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Test Suite")
-    int32 WarningCount;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Test Suite")
-    float TotalExecutionTime;
-
-    FQA_TestSuite()
-    {
-        SuiteName = TEXT("");
-        PassCount = 0;
-        FailCount = 0;
-        WarningCount = 0;
-        TotalExecutionTime = 0.0f;
-    }
-};
-
-/**
- * QA Test Framework Component for automated testing of game systems
- * Provides comprehensive validation of VFX, audio, lighting, and performance
- */
-UCLASS(ClassGroup=(QA), meta=(BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UQA_TestFramework : public UActorComponent
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API UQA_TestFramework : public UObject
 {
     GENERATED_BODY()
 
 public:
     UQA_TestFramework();
 
-protected:
-    virtual void BeginPlay() override;
-
-public:
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
-
-    // Test execution functions
-    UFUNCTION(BlueprintCallable, Category = "QA Testing")
+    // Core testing functions
+    UFUNCTION(BlueprintCallable, Category = "QA Framework")
     void RunAllTests();
 
-    UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    void RunVFXTests();
+    UFUNCTION(BlueprintCallable, Category = "QA Framework")
+    void RunModuleTests(const FString& ModuleName);
 
-    UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    void RunAudioTests();
-
-    UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    void RunLightingTests();
-
-    UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    void RunPerformanceTests();
-
-    UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    void RunIntegrationTests();
-
-    // Test result functions
-    UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    FQA_TestSuite GetTestResults() const { return TestSuite; }
-
-    UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    void ClearTestResults();
-
-    UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    void ExportTestResults(const FString& FilePath);
+    UFUNCTION(BlueprintCallable, Category = "QA Framework")
+    FQA_TestCase RunSingleTest(const FString& TestName);
 
     // Validation functions
-    UFUNCTION(BlueprintCallable, Category = "QA Validation")
-    bool ValidateWeatherSystem();
+    UFUNCTION(BlueprintCallable, Category = "QA Framework")
+    bool ValidateClassExists(const FString& ClassName);
 
-    UFUNCTION(BlueprintCallable, Category = "QA Validation")
-    bool ValidateParticleEffects();
+    UFUNCTION(BlueprintCallable, Category = "QA Framework")
+    bool ValidateActorSpawn(UClass* ActorClass, const FVector& Location);
 
-    UFUNCTION(BlueprintCallable, Category = "QA Validation")
-    bool ValidateAudioIntegration();
+    UFUNCTION(BlueprintCallable, Category = "QA Framework")
+    bool ValidateComponentAttachment(AActor* Actor, UClass* ComponentClass);
 
-    UFUNCTION(BlueprintCallable, Category = "QA Validation")
-    bool ValidateLightingSetup();
+    UFUNCTION(BlueprintCallable, Category = "QA Framework")
+    bool ValidateLevelAssets();
 
-    UFUNCTION(BlueprintCallable, Category = "QA Validation")
-    bool ValidatePerformanceMetrics();
+    // Performance testing
+    UFUNCTION(BlueprintCallable, Category = "QA Framework")
+    float MeasureFrameRate(float Duration = 5.0f);
 
-protected:
-    // Test suite data
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "QA Test Results")
-    FQA_TestSuite TestSuite;
+    UFUNCTION(BlueprintCallable, Category = "QA Framework")
+    int32 CountActorsInLevel();
 
-    // Test configuration
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Configuration")
-    bool bAutoRunTests;
+    UFUNCTION(BlueprintCallable, Category = "QA Framework")
+    float MeasureMemoryUsage();
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Configuration")
-    float TestInterval;
+    // Reporting
+    UFUNCTION(BlueprintCallable, Category = "QA Framework")
+    void GenerateTestReport();
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Configuration")
-    bool bLogTestResults;
+    UFUNCTION(BlueprintCallable, Category = "QA Framework")
+    void ExportTestResults(const FString& FilePath);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Configuration")
-    int32 MaxActorCountThreshold;
+    UPROPERTY(BlueprintReadOnly, Category = "QA Framework")
+    TArray<FQA_TestCase> TestResults;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Configuration")
-    float TargetFrameRate;
+    UPROPERTY(BlueprintReadOnly, Category = "QA Framework")
+    int32 PassedTests;
+
+    UPROPERTY(BlueprintReadOnly, Category = "QA Framework")
+    int32 FailedTests;
+
+    UPROPERTY(BlueprintReadOnly, Category = "QA Framework")
+    int32 WarningTests;
 
 private:
     // Internal test functions
-    void AddTestCase(const FString& TestName, const FString& Description, EQA_TestResult Result, const FString& ErrorMsg = TEXT(""));
-    void LogTestResult(const FQA_TestCase& TestCase);
-    void CalculateTestSuiteStats();
+    FQA_TestCase TestCoreModules();
+    FQA_TestCase TestVFXSystems();
+    FQA_TestCase TestCharacterSystems();
+    FQA_TestCase TestWorldGeneration();
+    FQA_TestCase TestAISystems();
+    FQA_TestCase TestPerformance();
 
-    // Timer for automatic testing
-    float TestTimer;
-    bool bTestsCompleted;
+    void LogTestResult(const FQA_TestCase& TestCase);
+    void ResetTestResults();
 };
