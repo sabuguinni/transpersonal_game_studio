@@ -1,104 +1,166 @@
 #include "Quest_ObjectiveManager.h"
-#include "Components/SphereComponent.h"
-#include "Components/StaticMeshComponent.h"
 #include "Engine/Engine.h"
-#include "GameFramework/Character.h"
+#include "Engine/World.h"
+#include "Components/StaticMeshComponent.h"
+#include "Engine/TriggerBox.h"
 #include "Kismet/GameplayStatics.h"
+#include "DrawDebugHelpers.h"
 
 AQuest_ObjectiveManager::AQuest_ObjectiveManager()
 {
     PrimaryActorTick.bCanEverTick = true;
-
-    // Create root component
-    RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootComponent"));
-
-    // Create trigger sphere
-    TriggerSphere = CreateDefaultSubobject<USphereComponent>(TEXT("TriggerSphere"));
-    TriggerSphere->SetupAttachment(RootComponent);
-    TriggerSphere->SetSphereRadius(200.0f);
-    TriggerSphere->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
-    TriggerSphere->SetCollisionResponseToAllChannels(ECR_Ignore);
-    TriggerSphere->SetCollisionResponseToChannel(ECC_Pawn, ECR_Overlap);
-
-    // Create objective marker mesh
-    ObjectiveMarker = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("ObjectiveMarker"));
-    ObjectiveMarker->SetupAttachment(RootComponent);
-    ObjectiveMarker->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-
-    // Initialize settings
-    ObjectiveCheckRadius = 200.0f;
-    bAutoActivateObjectives = true;
-
-    // Bind overlap event
-    TriggerSphere->OnComponentBeginOverlap.AddDynamic(this, &AQuest_ObjectiveManager::OnTriggerBeginOverlap);
+    ObjectiveCheckInterval = 1.0f;
+    bDebugObjectives = true;
 }
 
 void AQuest_ObjectiveManager::BeginPlay()
 {
     Super::BeginPlay();
     
-    InitializeDefaultObjectives();
-    UpdateObjectiveMarkers();
+    SetupDefaultObjectives();
+    
+    if (bDebugObjectives)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Quest_ObjectiveManager: Initialized with %d default objectives"), ActiveObjectives.Num());
+    }
 }
 
 void AQuest_ObjectiveManager::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
-
-    // Check player location for location-based objectives
-    if (ACharacter* PlayerCharacter = UGameplayStatics::GetPlayerCharacter(GetWorld(), 0))
+    
+    static float CheckTimer = 0.0f;
+    CheckTimer += DeltaTime;
+    
+    if (CheckTimer >= ObjectiveCheckInterval)
     {
-        CheckLocationObjectives(PlayerCharacter->GetActorLocation());
+        CheckObjectiveCompletion();
+        UpdateObjectiveTriggers();
+        CheckTimer = 0.0f;
+    }
+    
+    // Debug draw active objectives
+    if (bDebugObjectives)
+    {
+        for (const FQuest_ObjectiveData& Objective : ActiveObjectives)
+        {
+            if (Objective.Status == EQuest_ObjectiveStatus::Active)
+            {
+                FColor DebugColor = FColor::Yellow;
+                switch (Objective.ObjectiveType)
+                {
+                    case EQuest_ObjectiveType::Hunt:
+                        DebugColor = FColor::Red;
+                        break;
+                    case EQuest_ObjectiveType::Gather:
+                        DebugColor = FColor::Green;
+                        break;
+                    case EQuest_ObjectiveType::Explore:
+                        DebugColor = FColor::Blue;
+                        break;
+                    case EQuest_ObjectiveType::Defend:
+                        DebugColor = FColor::Orange;
+                        break;
+                    case EQuest_ObjectiveType::Escort:
+                        DebugColor = FColor::Purple;
+                        break;
+                    case EQuest_ObjectiveType::Survive:
+                        DebugColor = FColor::Cyan;
+                        break;
+                }
+                
+                DrawDebugSphere(GetWorld(), Objective.TargetLocation, Objective.CompletionRadius, 12, DebugColor, false, ObjectiveCheckInterval + 0.1f);
+                DrawDebugString(GetWorld(), Objective.TargetLocation + FVector(0, 0, 100), 
+                               FString::Printf(TEXT("%s (%d/%d)"), *Objective.ObjectiveName, Objective.CurrentCount, Objective.RequiredCount),
+                               nullptr, DebugColor, ObjectiveCheckInterval + 0.1f);
+            }
+        }
     }
 }
 
-void AQuest_ObjectiveManager::AddObjective(const FQuest_ObjectiveData& NewObjective)
+void AQuest_ObjectiveManager::CreateObjective(const FString& ObjectiveID, const FString& Name, const FString& Description, 
+                                             EQuest_ObjectiveType Type, const FVector& Location, int32 RequiredCount)
 {
-    ActiveObjectives.Add(NewObjective);
-    UpdateObjectiveMarkers();
+    FQuest_ObjectiveData NewObjective;
+    NewObjective.ObjectiveID = ObjectiveID;
+    NewObjective.ObjectiveName = Name;
+    NewObjective.Description = Description;
+    NewObjective.ObjectiveType = Type;
+    NewObjective.Status = EQuest_ObjectiveStatus::Inactive;
+    NewObjective.RequiredCount = RequiredCount;
+    NewObjective.CurrentCount = 0;
+    NewObjective.TargetLocation = Location;
+    NewObjective.CompletionRadius = 500.0f;
     
-    if (bAutoActivateObjectives)
+    ActiveObjectives.Add(NewObjective);
+    
+    if (bDebugObjectives)
     {
-        ActivateObjective(NewObjective.ObjectiveID);
+        UE_LOG(LogTemp, Warning, TEXT("Quest_ObjectiveManager: Created objective %s at location %s"), *Name, *Location.ToString());
     }
 }
 
 void AQuest_ObjectiveManager::ActivateObjective(const FString& ObjectiveID)
 {
-    if (FQuest_ObjectiveData* Objective = FindObjectiveByID(ObjectiveID))
+    FQuest_ObjectiveData* Objective = FindObjectiveByID(ObjectiveID);
+    if (Objective)
     {
         Objective->Status = EQuest_ObjectiveStatus::Active;
-        OnObjectiveActivated(*Objective);
         
-        UE_LOG(LogTemp, Log, TEXT("Quest Objective Activated: %s"), *Objective->ObjectiveTitle);
+        if (bDebugObjectives)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("Quest_ObjectiveManager: Activated objective %s"), *Objective->ObjectiveName);
+        }
     }
 }
 
 void AQuest_ObjectiveManager::CompleteObjective(const FString& ObjectiveID)
 {
-    if (FQuest_ObjectiveData* Objective = FindObjectiveByID(ObjectiveID))
+    FQuest_ObjectiveData* Objective = FindObjectiveByID(ObjectiveID);
+    if (Objective)
     {
         Objective->Status = EQuest_ObjectiveStatus::Completed;
         CompletedObjectives.Add(*Objective);
-        ActiveObjectives.RemoveAll([&ObjectiveID](const FQuest_ObjectiveData& Obj) {
-            return Obj.ObjectiveID == ObjectiveID;
-        });
+        ActiveObjectives.RemoveAll([ObjectiveID](const FQuest_ObjectiveData& Obj) { return Obj.ObjectiveID == ObjectiveID; });
         
-        OnObjectiveCompleted(*Objective);
-        UpdateObjectiveMarkers();
-        
-        UE_LOG(LogTemp, Log, TEXT("Quest Objective Completed: %s"), *Objective->ObjectiveTitle);
+        if (bDebugObjectives)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("Quest_ObjectiveManager: Completed objective %s"), *Objective->ObjectiveName);
+        }
     }
 }
 
 void AQuest_ObjectiveManager::FailObjective(const FString& ObjectiveID)
 {
-    if (FQuest_ObjectiveData* Objective = FindObjectiveByID(ObjectiveID))
+    FQuest_ObjectiveData* Objective = FindObjectiveByID(ObjectiveID);
+    if (Objective)
     {
         Objective->Status = EQuest_ObjectiveStatus::Failed;
-        OnObjectiveFailed(*Objective);
         
-        UE_LOG(LogTemp, Warning, TEXT("Quest Objective Failed: %s"), *Objective->ObjectiveTitle);
+        if (bDebugObjectives)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("Quest_ObjectiveManager: Failed objective %s"), *Objective->ObjectiveName);
+        }
+    }
+}
+
+void AQuest_ObjectiveManager::UpdateObjectiveProgress(const FString& ObjectiveID, int32 ProgressAmount)
+{
+    FQuest_ObjectiveData* Objective = FindObjectiveByID(ObjectiveID);
+    if (Objective && Objective->Status == EQuest_ObjectiveStatus::Active)
+    {
+        Objective->CurrentCount = FMath::Clamp(Objective->CurrentCount + ProgressAmount, 0, Objective->RequiredCount);
+        
+        if (Objective->CurrentCount >= Objective->RequiredCount)
+        {
+            CompleteObjective(ObjectiveID);
+        }
+        
+        if (bDebugObjectives)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("Quest_ObjectiveManager: Updated objective %s progress to %d/%d"), 
+                   *Objective->ObjectiveName, Objective->CurrentCount, Objective->RequiredCount);
+        }
     }
 }
 
@@ -118,7 +180,7 @@ bool AQuest_ObjectiveManager::IsObjectiveCompleted(const FString& ObjectiveID) c
 {
     for (const FQuest_ObjectiveData& Objective : CompletedObjectives)
     {
-        if (Objective.ObjectiveID == ObjectiveID)
+        if (Objective.ObjectiveID == ObjectiveID && Objective.Status == EQuest_ObjectiveStatus::Completed)
         {
             return true;
         }
@@ -149,58 +211,25 @@ FQuest_ObjectiveData AQuest_ObjectiveManager::GetObjectiveData(const FString& Ob
 
 TArray<FQuest_ObjectiveData> AQuest_ObjectiveManager::GetActiveObjectives() const
 {
-    TArray<FQuest_ObjectiveData> ActiveList;
+    TArray<FQuest_ObjectiveData> Result;
     for (const FQuest_ObjectiveData& Objective : ActiveObjectives)
     {
         if (Objective.Status == EQuest_ObjectiveStatus::Active)
         {
-            ActiveList.Add(Objective);
+            Result.Add(Objective);
         }
     }
-    return ActiveList;
-}
-
-void AQuest_ObjectiveManager::UpdateObjectiveProgress(const FString& ObjectiveID, int32 ProgressAmount)
-{
-    if (FQuest_ObjectiveData* Objective = FindObjectiveByID(ObjectiveID))
-    {
-        Objective->CurrentCount += ProgressAmount;
-        
-        if (Objective->CurrentCount >= Objective->RequiredCount)
-        {
-            CompleteObjective(ObjectiveID);
-        }
-        else
-        {
-            OnObjectiveProgressUpdated(*Objective);
-        }
-    }
+    return Result;
 }
 
 void AQuest_ObjectiveManager::CheckLocationObjectives(const FVector& PlayerLocation)
 {
     for (FQuest_ObjectiveData& Objective : ActiveObjectives)
     {
-        if (Objective.Status == EQuest_ObjectiveStatus::Active && 
-            Objective.ObjectiveType == EQuest_ObjectiveType::Reach_Location)
+        if (Objective.Status == EQuest_ObjectiveStatus::Active && Objective.ObjectiveType == EQuest_ObjectiveType::Explore)
         {
             float Distance = FVector::Dist(PlayerLocation, Objective.TargetLocation);
             if (Distance <= Objective.CompletionRadius)
-            {
-                CompleteObjective(Objective.ObjectiveID);
-            }
-        }
-    }
-}
-
-void AQuest_ObjectiveManager::CheckHuntingObjectives(const FString& DinosaurType)
-{
-    for (FQuest_ObjectiveData& Objective : ActiveObjectives)
-    {
-        if (Objective.Status == EQuest_ObjectiveStatus::Active && 
-            Objective.ObjectiveType == EQuest_ObjectiveType::Hunt_Dinosaur)
-        {
-            if (Objective.RequiredItems.Contains(DinosaurType))
             {
                 UpdateObjectiveProgress(Objective.ObjectiveID, 1);
             }
@@ -208,14 +237,27 @@ void AQuest_ObjectiveManager::CheckHuntingObjectives(const FString& DinosaurType
     }
 }
 
-void AQuest_ObjectiveManager::CheckGatheringObjectives(const FString& ItemType, int32 Amount)
+void AQuest_ObjectiveManager::CheckHuntObjectives(const FString& KilledActorLabel)
 {
     for (FQuest_ObjectiveData& Objective : ActiveObjectives)
     {
-        if (Objective.Status == EQuest_ObjectiveStatus::Active && 
-            Objective.ObjectiveType == EQuest_ObjectiveType::Gather_Resources)
+        if (Objective.Status == EQuest_ObjectiveStatus::Active && Objective.ObjectiveType == EQuest_ObjectiveType::Hunt)
         {
-            if (Objective.RequiredItems.Contains(ItemType))
+            if (KilledActorLabel.Contains(Objective.TargetActorLabel) || Objective.TargetActorLabel.Contains(KilledActorLabel))
+            {
+                UpdateObjectiveProgress(Objective.ObjectiveID, 1);
+            }
+        }
+    }
+}
+
+void AQuest_ObjectiveManager::CheckGatherObjectives(const FString& GatheredItem, int32 Amount)
+{
+    for (FQuest_ObjectiveData& Objective : ActiveObjectives)
+    {
+        if (Objective.Status == EQuest_ObjectiveStatus::Active && Objective.ObjectiveType == EQuest_ObjectiveType::Gather)
+        {
+            if (Objective.RequiredItems.Contains(GatheredItem))
             {
                 UpdateObjectiveProgress(Objective.ObjectiveID, Amount);
             }
@@ -223,66 +265,66 @@ void AQuest_ObjectiveManager::CheckGatheringObjectives(const FString& ItemType, 
     }
 }
 
-void AQuest_ObjectiveManager::OnTriggerBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, 
-                                                   UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, 
-                                                   bool bFromSweep, const FHitResult& SweepResult)
+void AQuest_ObjectiveManager::SetupDefaultObjectives()
 {
-    if (ACharacter* PlayerCharacter = Cast<ACharacter>(OtherActor))
+    // Hunt Quest: Kill T-Rex
+    CreateObjective("HUNT_TREX", "Hunt the Great Predator", "Track and kill the T-Rex that threatens our tribe", 
+                   EQuest_ObjectiveType::Hunt, FVector(2000, 0, 100), 1);
+    
+    FQuest_ObjectiveData* HuntObjective = FindObjectiveByID("HUNT_TREX");
+    if (HuntObjective)
     {
-        CheckLocationObjectives(PlayerCharacter->GetActorLocation());
+        HuntObjective->TargetActorLabel = "trex";
+        HuntObjective->CompletionRadius = 1000.0f;
+    }
+    
+    // Gather Quest: Collect Berries
+    CreateObjective("GATHER_BERRIES", "Harvest Food Supplies", "Gather berries to feed the tribe during the harsh season", 
+                   EQuest_ObjectiveType::Gather, FVector(-1500, 1500, 100), 10);
+    
+    FQuest_ObjectiveData* GatherObjective = FindObjectiveByID("GATHER_BERRIES");
+    if (GatherObjective)
+    {
+        GatherObjective->RequiredItems.Add("Berries");
+        GatherObjective->RequiredItems.Add("Fruit");
+        GatherObjective->CompletionRadius = 800.0f;
+    }
+    
+    // Explore Quest: Discover Cave
+    CreateObjective("EXPLORE_CAVE", "Discover the Hidden Cave", "Find the ancient cave system in the eastern mountains", 
+                   EQuest_ObjectiveType::Explore, FVector(3000, -2000, 200), 1);
+    
+    FQuest_ObjectiveData* ExploreObjective = FindObjectiveByID("EXPLORE_CAVE");
+    if (ExploreObjective)
+    {
+        ExploreObjective->CompletionRadius = 600.0f;
+    }
+    
+    // Activate all default objectives
+    ActivateObjective("HUNT_TREX");
+    ActivateObjective("GATHER_BERRIES");
+    ActivateObjective("EXPLORE_CAVE");
+}
+
+void AQuest_ObjectiveManager::CheckObjectiveCompletion()
+{
+    // Check for player location and update exploration objectives
+    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
+    if (PlayerPawn)
+    {
+        CheckLocationObjectives(PlayerPawn->GetActorLocation());
     }
 }
 
-void AQuest_ObjectiveManager::InitializeDefaultObjectives()
+void AQuest_ObjectiveManager::UpdateObjectiveTriggers()
 {
-    // Initialize hunting objectives
-    FQuest_ObjectiveData HuntRaptorObjective;
-    HuntRaptorObjective.ObjectiveID = "HUNT_RAPTOR_001";
-    HuntRaptorObjective.ObjectiveTitle = "Hunt Velociraptors";
-    HuntRaptorObjective.ObjectiveDescription = "Hunt 3 Velociraptors for meat and materials";
-    HuntRaptorObjective.ObjectiveType = EQuest_ObjectiveType::Hunt_Dinosaur;
-    HuntRaptorObjective.Status = EQuest_ObjectiveStatus::Inactive;
-    HuntRaptorObjective.RequiredCount = 3;
-    HuntRaptorObjective.CurrentCount = 0;
-    HuntRaptorObjective.RequiredItems.Add("Velociraptor");
-    ActiveObjectives.Add(HuntRaptorObjective);
-
-    // Initialize exploration objectives
-    FQuest_ObjectiveData ExploreForestObjective;
-    ExploreForestObjective.ObjectiveID = "EXPLORE_FOREST_001";
-    ExploreForestObjective.ObjectiveTitle = "Explore the Ancient Forest";
-    ExploreForestObjective.ObjectiveDescription = "Discover the secrets of the ancient forest";
-    ExploreForestObjective.ObjectiveType = EQuest_ObjectiveType::Explore_Location;
-    ExploreForestObjective.Status = EQuest_ObjectiveStatus::Inactive;
-    ExploreForestObjective.TargetLocation = FVector(1000, 1000, 100);
-    ExploreForestObjective.CompletionRadius = 300.0f;
-    ExploreForestObjective.RequiredCount = 1;
-    ExploreForestObjective.CurrentCount = 0;
-    ActiveObjectives.Add(ExploreForestObjective);
-
-    // Initialize gathering objectives
-    FQuest_ObjectiveData GatherStonesObjective;
-    GatherStonesObjective.ObjectiveID = "GATHER_STONES_001";
-    GatherStonesObjective.ObjectiveTitle = "Gather Stones";
-    GatherStonesObjective.ObjectiveDescription = "Collect 10 stones for crafting tools";
-    GatherStonesObjective.ObjectiveType = EQuest_ObjectiveType::Gather_Resources;
-    GatherStonesObjective.Status = EQuest_ObjectiveStatus::Inactive;
-    GatherStonesObjective.RequiredCount = 10;
-    GatherStonesObjective.CurrentCount = 0;
-    GatherStonesObjective.RequiredItems.Add("Stone");
-    ActiveObjectives.Add(GatherStonesObjective);
-}
-
-void AQuest_ObjectiveManager::UpdateObjectiveMarkers()
-{
-    // Update visual markers based on active objectives
-    if (ObjectiveMarker && ActiveObjectives.Num() > 0)
+    // Update trigger boxes for objectives if needed
+    for (ATriggerBox* Trigger : ObjectiveTriggers)
     {
-        ObjectiveMarker->SetVisibility(true);
-    }
-    else if (ObjectiveMarker)
-    {
-        ObjectiveMarker->SetVisibility(false);
+        if (IsValid(Trigger))
+        {
+            // Trigger logic can be expanded here
+        }
     }
 }
 
