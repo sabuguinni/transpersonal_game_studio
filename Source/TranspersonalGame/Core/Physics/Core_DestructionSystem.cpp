@@ -4,33 +4,43 @@
 #include "Components/PrimitiveComponent.h"
 #include "Engine/StaticMeshActor.h"
 #include "Kismet/GameplayStatics.h"
-#include "Math/UnrealMathUtility.h"
+#include "Kismet/KismetMathLibrary.h"
+#include "TimerManager.h"
 
 UCore_DestructionSystem::UCore_DestructionSystem()
 {
     PrimaryComponentTick.bCanEverTick = true;
     PrimaryComponentTick.bStartWithTickEnabled = true;
     
-    CurrentHealth = DestructionData.Health;
+    // Initialize destruction data with defaults
+    DestructionData.Health = 100.0f;
+    DestructionData.DamageThreshold = 50.0f;
+    DestructionData.DestructionType = ECore_DestructionType::Fragmentation;
+    DestructionData.FragmentCount = 8;
+    DestructionData.FragmentLifetime = 10.0f;
+    DestructionData.bApplyPhysicsToFragments = true;
+    
+    bCanBeDestroyed = true;
+    bDestroyOnZeroHealth = true;
+    ImpactForceMultiplier = 1.0f;
     bIsDestroyed = false;
-    bRegenerationInProgress = false;
-    RegenerationTimer = 0.0f;
 }
 
 void UCore_DestructionSystem::BeginPlay()
 {
     Super::BeginPlay();
     
-    CurrentHealth = DestructionData.Health;
-    
-    // Find the static mesh component on the owner
-    if (AActor* Owner = GetOwner())
+    // Ensure we have a valid mesh component
+    UStaticMeshComponent* MeshComp = GetOwnerMeshComponent();
+    if (MeshComp)
     {
-        OriginalMeshComponent = Owner->FindComponentByClass<UStaticMeshComponent>();
-        if (!OriginalMeshComponent)
-        {
-            UE_LOG(LogTemp, Warning, TEXT("Core_DestructionSystem: No StaticMeshComponent found on owner %s"), *Owner->GetName());
-        }
+        // Enable collision events if not already enabled
+        MeshComp->SetNotifyRigidBodyCollision(true);
+        UE_LOG(LogTemp, Log, TEXT("DestructionSystem initialized for actor: %s"), *GetOwner()->GetName());
+    }
+    else
+    {
+        UE_LOG(LogTemp, Warning, TEXT("DestructionSystem: No StaticMeshComponent found on owner actor"));
     }
 }
 
@@ -38,193 +48,285 @@ void UCore_DestructionSystem::TickComponent(float DeltaTime, ELevelTick TickType
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
     
-    if (bRegenerationInProgress)
+    // Clean up destroyed fragments periodically
+    if (SpawnedFragments.Num() > 0)
     {
-        ProcessRegeneration(DeltaTime);
+        SpawnedFragments.RemoveAll([](AActor* Fragment) {
+            return !IsValid(Fragment);
+        });
     }
 }
 
-void UCore_DestructionSystem::ApplyDamage(float DamageAmount, const FVector& ImpactPoint, const FVector& ImpactNormal)
+void UCore_DestructionSystem::ApplyDamage(float DamageAmount, FVector ImpactLocation, FVector ImpactForce)
 {
-    if (bIsDestroyed || DamageAmount <= 0.0f)
+    if (!bCanBeDestroyed || bIsDestroyed)
     {
         return;
     }
     
-    CurrentHealth = FMath::Max(0.0f, CurrentHealth - DamageAmount);
+    float PreviousHealth = DestructionData.Health;
+    DestructionData.Health = FMath::Max(0.0f, DestructionData.Health - DamageAmount);
     
-    UE_LOG(LogTemp, Log, TEXT("Core_DestructionSystem: Applied %.2f damage, health now %.2f"), DamageAmount, CurrentHealth);
+    // Broadcast damage event
+    OnDamageReceived.Broadcast(DamageAmount, DestructionData.Health);
     
-    if (CurrentHealth <= 0.0f)
+    UE_LOG(LogTemp, Log, TEXT("DestructionSystem: Applied %.2f damage, health: %.2f/%.2f"), 
+           DamageAmount, DestructionData.Health, 100.0f);
+    
+    // Check if we should trigger destruction
+    if (DestructionData.Health <= 0.0f && bDestroyOnZeroHealth)
     {
-        FVector ImpactDirection = ImpactNormal * -1.0f;
-        TriggerDestruction(ImpactPoint, ImpactDirection);
+        TriggerDestruction(ImpactLocation, ImpactForce);
+    }
+    else if (DamageAmount >= DestructionData.DamageThreshold)
+    {
+        // Apply impact force to the mesh if available
+        UStaticMeshComponent* MeshComp = GetOwnerMeshComponent();
+        if (MeshComp && MeshComp->IsSimulatingPhysics())
+        {
+            FVector AdjustedForce = ImpactForce * ImpactForceMultiplier;
+            MeshComp->AddImpulseAtLocation(AdjustedForce, ImpactLocation);
+        }
     }
 }
 
-void UCore_DestructionSystem::TriggerDestruction(const FVector& ImpactPoint, const FVector& ImpactDirection)
+void UCore_DestructionSystem::TriggerDestruction(FVector ImpactLocation, FVector ImpactForce)
 {
-    if (bIsDestroyed)
+    if (bIsDestroyed || !bCanBeDestroyed)
     {
         return;
     }
     
     bIsDestroyed = true;
     
-    UE_LOG(LogTemp, Log, TEXT("Core_DestructionSystem: Triggering destruction of type %d"), (int32)DestructionData.DestructionType);
-    
-    // Hide original mesh
-    if (OriginalMeshComponent)
+    // Use owner's location if impact location is zero
+    if (ImpactLocation.IsZero())
     {
-        OriginalMeshComponent->SetVisibility(false);
-        OriginalMeshComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+        ImpactLocation = GetOwner()->GetActorLocation();
     }
     
-    // Create fragments based on destruction type
-    CreateFragments(ImpactPoint, ImpactDirection);
+    UE_LOG(LogTemp, Log, TEXT("DestructionSystem: Triggering destruction of type %d"), 
+           static_cast<int32>(DestructionData.DestructionType));
     
-    // Trigger Blueprint event
-    OnDestructionTriggered(ImpactPoint);
-    
-    // Start regeneration if enabled
-    if (DestructionData.bCanRegenerate)
+    // Handle different destruction types
+    switch (DestructionData.DestructionType)
     {
-        StartRegeneration();
+        case ECore_DestructionType::Fragmentation:
+            CreateFragments(ImpactLocation, ImpactForce);
+            break;
+            
+        case ECore_DestructionType::Collapse:
+            HandleCollapse(ImpactLocation);
+            break;
+            
+        case ECore_DestructionType::Explosion:
+            HandleExplosion(ImpactLocation, 500.0f);
+            break;
+            
+        case ECore_DestructionType::Erosion:
+            // Gradual destruction - could be implemented with timeline
+            CreateFragments(ImpactLocation, ImpactForce * 0.5f);
+            break;
+            
+        default:
+            CreateFragments(ImpactLocation, ImpactForce);
+            break;
     }
+    
+    // Broadcast destruction event
+    OnDestruction.Broadcast(GetOwner(), ImpactLocation, DestructionData.DestructionType);
+    
+    // Hide or destroy the original actor after a short delay
+    FTimerHandle DestroyTimer;
+    GetWorld()->GetTimerManager().SetTimer(DestroyTimer, [this]()
+    {
+        if (IsValid(GetOwner()))
+        {
+            GetOwner()->SetActorHiddenInGame(true);
+            GetOwner()->SetActorEnableCollision(false);
+        }
+    }, 0.1f, false);
 }
 
-void UCore_DestructionSystem::CreateFragments(const FVector& ImpactPoint, const FVector& ImpactDirection)
+void UCore_DestructionSystem::CreateFragments(FVector ImpactLocation, FVector ImpactForce)
 {
-    if (!GetWorld() || !OriginalMeshComponent || FragmentMeshes.Num() == 0)
+    UStaticMeshComponent* OriginalMesh = GetOwnerMeshComponent();
+    if (!OriginalMesh || !OriginalMesh->GetStaticMesh())
     {
-        UE_LOG(LogTemp, Warning, TEXT("Core_DestructionSystem: Cannot create fragments - missing requirements"));
+        UE_LOG(LogTemp, Warning, TEXT("DestructionSystem: Cannot create fragments - no valid mesh"));
         return;
     }
     
-    const FVector OwnerLocation = GetOwner()->GetActorLocation();
-    const FVector OwnerBounds = OriginalMeshComponent->Bounds.BoxExtent;
+    FVector OwnerLocation = GetOwner()->GetActorLocation();
+    FRotator OwnerRotation = GetOwner()->GetActorRotation();
+    FVector OwnerScale = GetOwner()->GetActorScale3D();
     
-    int32 NumFragments = FMath::Clamp((int32)DestructionData.FragmentCount, 2, 20);
-    
-    for (int32 i = 0; i < NumFragments; i++)
+    // Create fragments around the impact location
+    for (int32 i = 0; i < DestructionData.FragmentCount; i++)
     {
-        // Random position around the original object
-        FVector FragmentLocation = OwnerLocation + FVector(
-            FMath::RandRange(-OwnerBounds.X, OwnerBounds.X),
-            FMath::RandRange(-OwnerBounds.Y, OwnerBounds.Y),
-            FMath::RandRange(-OwnerBounds.Z * 0.5f, OwnerBounds.Z)
+        // Calculate fragment spawn location
+        float Angle = (2.0f * PI * i) / DestructionData.FragmentCount;
+        float Radius = FMath::RandRange(50.0f, 200.0f);
+        FVector FragmentOffset = FVector(
+            FMath::Cos(Angle) * Radius,
+            FMath::Sin(Angle) * Radius,
+            FMath::RandRange(-50.0f, 50.0f)
         );
         
-        // Random rotation
+        FVector FragmentLocation = OwnerLocation + FragmentOffset;
         FRotator FragmentRotation = FRotator(
-            FMath::RandRange(-180.0f, 180.0f),
-            FMath::RandRange(-180.0f, 180.0f),
-            FMath::RandRange(-180.0f, 180.0f)
+            FMath::RandRange(-45.0f, 45.0f),
+            FMath::RandRange(0.0f, 360.0f),
+            FMath::RandRange(-45.0f, 45.0f)
         );
         
         // Spawn fragment actor
         FActorSpawnParameters SpawnParams;
-        SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+        SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
         
-        AStaticMeshActor* Fragment = GetWorld()->SpawnActor<AStaticMeshActor>(FragmentLocation, FragmentRotation, SpawnParams);
+        AStaticMeshActor* Fragment = GetWorld()->SpawnActor<AStaticMeshActor>(
+            AStaticMeshActor::StaticClass(),
+            FragmentLocation,
+            FragmentRotation,
+            SpawnParams
+        );
         
         if (Fragment)
         {
             UStaticMeshComponent* FragmentMesh = Fragment->GetStaticMeshComponent();
             if (FragmentMesh)
             {
-                // Set random fragment mesh
-                int32 MeshIndex = FMath::RandRange(0, FragmentMeshes.Num() - 1);
-                FragmentMesh->SetStaticMesh(FragmentMeshes[MeshIndex]);
+                // Set the same mesh as original (in a real implementation, you'd use fractured pieces)
+                FragmentMesh->SetStaticMesh(OriginalMesh->GetStaticMesh());
+                FragmentMesh->SetMaterial(0, OriginalMesh->GetMaterial(0));
                 
-                if (FragmentMaterial)
+                // Scale down the fragment
+                float FragmentScale = FMath::RandRange(0.2f, 0.6f);
+                Fragment->SetActorScale3D(OwnerScale * FragmentScale);
+                
+                // Enable physics if requested
+                if (DestructionData.bApplyPhysicsToFragments)
                 {
-                    FragmentMesh->SetMaterial(0, FragmentMaterial);
+                    FragmentMesh->SetSimulatePhysics(true);
+                    FragmentMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+                    
+                    // Apply impulse based on impact force and fragment location
+                    FVector FragmentVelocity = CalculateFragmentVelocity(ImpactLocation, FragmentLocation, ImpactForce);
+                    FragmentMesh->SetPhysicsLinearVelocity(FragmentVelocity);
+                    
+                    // Add some angular velocity for realistic tumbling
+                    FVector AngularVelocity = FVector(
+                        FMath::RandRange(-720.0f, 720.0f),
+                        FMath::RandRange(-720.0f, 720.0f),
+                        FMath::RandRange(-720.0f, 720.0f)
+                    );
+                    FragmentMesh->SetPhysicsAngularVelocityInDegrees(AngularVelocity);
                 }
                 
-                // Enable physics and apply impulse
-                FragmentMesh->SetSimulatePhysics(true);
-                FragmentMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+                // Set fragment lifetime
+                Fragment->SetLifeSpan(DestructionData.FragmentLifetime);
                 
-                // Calculate impulse direction
-                FVector ImpulseDirection = (FragmentLocation - ImpactPoint).GetSafeNormal();
-                if (ImpulseDirection.IsNearlyZero())
-                {
-                    ImpulseDirection = ImpactDirection;
-                }
+                // Track the fragment
+                SpawnedFragments.Add(Fragment);
                 
-                // Add randomness to impulse
-                ImpulseDirection += FVector(
-                    FMath::RandRange(-0.3f, 0.3f),
-                    FMath::RandRange(-0.3f, 0.3f),
-                    FMath::RandRange(0.1f, 0.5f)
-                );
-                
-                float ImpulseStrength = DestructionData.ExplosionForce * FMath::RandRange(0.5f, 1.5f);
-                FragmentMesh->AddImpulse(ImpulseDirection * ImpulseStrength);
-                
-                // Add angular impulse for spinning
-                FVector AngularImpulse = FVector(
-                    FMath::RandRange(-1000.0f, 1000.0f),
-                    FMath::RandRange(-1000.0f, 1000.0f),
-                    FMath::RandRange(-1000.0f, 1000.0f)
-                );
-                FragmentMesh->AddAngularImpulseInDegrees(AngularImpulse);
+                UE_LOG(LogTemp, Log, TEXT("DestructionSystem: Created fragment %d at location %s"), 
+                       i, *FragmentLocation.ToString());
             }
-            
-            SpawnedFragments.Add(Fragment);
-            
-            // Schedule fragment cleanup
-            FTimerHandle CleanupTimer;
-            GetWorld()->GetTimerManager().SetTimer(CleanupTimer, [Fragment]()
-            {
-                if (IsValid(Fragment))
-                {
-                    Fragment->Destroy();
-                }
-            }, FMath::RandRange(5.0f, 15.0f), false);
         }
     }
     
-    UE_LOG(LogTemp, Log, TEXT("Core_DestructionSystem: Created %d fragments"), SpawnedFragments.Num());
+    UE_LOG(LogTemp, Log, TEXT("DestructionSystem: Created %d fragments"), DestructionData.FragmentCount);
 }
 
-void UCore_DestructionSystem::StartRegeneration()
+void UCore_DestructionSystem::HandleCollapse(FVector ImpactLocation)
 {
-    if (!DestructionData.bCanRegenerate || bRegenerationInProgress)
+    // For collapse, create fewer, larger fragments that fall downward
+    int32 CollapseFragments = FMath::Max(3, DestructionData.FragmentCount / 2);
+    
+    // Temporarily modify fragment count for collapse
+    int32 OriginalCount = DestructionData.FragmentCount;
+    DestructionData.FragmentCount = CollapseFragments;
+    
+    // Create fragments with downward force
+    FVector DownwardForce = FVector(0.0f, 0.0f, -1000.0f);
+    CreateFragments(ImpactLocation, DownwardForce);
+    
+    // Restore original fragment count
+    DestructionData.FragmentCount = OriginalCount;
+}
+
+void UCore_DestructionSystem::HandleExplosion(FVector ImpactLocation, float ExplosionRadius)
+{
+    // Create fragments with outward explosive force
+    FVector ExplosiveForce = FVector(0.0f, 0.0f, 500.0f); // Upward component
+    CreateFragments(ImpactLocation, ExplosiveForce);
+    
+    // Apply additional explosive force to nearby objects
+    TArray<AActor*> NearbyActors;
+    UKismetSystemLibrary::SphereOverlapActors(
+        GetWorld(),
+        ImpactLocation,
+        ExplosionRadius,
+        TArray<TEnumAsByte<EObjectTypeQuery>>(),
+        AStaticMeshActor::StaticClass(),
+        TArray<AActor*>(),
+        NearbyActors
+    );
+    
+    for (AActor* Actor : NearbyActors)
+    {
+        if (Actor && Actor != GetOwner())
+        {
+            UStaticMeshComponent* MeshComp = Actor->FindComponentByClass<UStaticMeshComponent>();
+            if (MeshComp && MeshComp->IsSimulatingPhysics())
+            {
+                FVector Direction = (Actor->GetActorLocation() - ImpactLocation).GetSafeNormal();
+                float Distance = FVector::Dist(Actor->GetActorLocation(), ImpactLocation);
+                float ForceMagnitude = FMath::Lerp(2000.0f, 500.0f, Distance / ExplosionRadius);
+                
+                MeshComp->AddImpulse(Direction * ForceMagnitude, NAME_None, true);
+            }
+        }
+    }
+}
+
+float UCore_DestructionSystem::GetHealthPercentage() const
+{
+    return (DestructionData.Health / 100.0f) * 100.0f;
+}
+
+void UCore_DestructionSystem::RepairDamage(float RepairAmount)
+{
+    if (bIsDestroyed)
     {
         return;
     }
     
-    bRegenerationInProgress = true;
-    RegenerationTimer = 0.0f;
+    float PreviousHealth = DestructionData.Health;
+    DestructionData.Health = FMath::Min(100.0f, DestructionData.Health + RepairAmount);
     
-    UE_LOG(LogTemp, Log, TEXT("Core_DestructionSystem: Starting regeneration (%.2f seconds)"), DestructionData.RegenerationTime);
+    UE_LOG(LogTemp, Log, TEXT("DestructionSystem: Repaired %.2f damage, health: %.2f/100.0f"), 
+           RepairAmount, DestructionData.Health);
 }
 
-void UCore_DestructionSystem::ProcessRegeneration(float DeltaTime)
+void UCore_DestructionSystem::SetDestructionType(ECore_DestructionType NewType)
 {
-    if (!bRegenerationInProgress)
-    {
-        return;
-    }
-    
-    RegenerationTimer += DeltaTime;
-    
-    if (RegenerationTimer >= DestructionData.RegenerationTime)
-    {
-        ResetDestruction();
-        bRegenerationInProgress = false;
-        RegenerationTimer = 0.0f;
-        
-        OnRegenerationComplete();
-        UE_LOG(LogTemp, Log, TEXT("Core_DestructionSystem: Regeneration complete"));
-    }
+    DestructionData.DestructionType = NewType;
+    UE_LOG(LogTemp, Log, TEXT("DestructionSystem: Changed destruction type to %d"), static_cast<int32>(NewType));
 }
 
-void UCore_DestructionSystem::ResetDestruction()
+UStaticMeshComponent* UCore_DestructionSystem::GetOwnerMeshComponent() const
 {
-    // Clean up existing fragments
+    if (!GetOwner())
+    {
+        return nullptr;
+    }
+    
+    return GetOwner()->FindComponentByClass<UStaticMeshComponent>();
+}
+
+void UCore_DestructionSystem::CleanupFragments()
+{
     for (AActor* Fragment : SpawnedFragments)
     {
         if (IsValid(Fragment))
@@ -233,19 +335,23 @@ void UCore_DestructionSystem::ResetDestruction()
         }
     }
     SpawnedFragments.Empty();
+}
+
+FVector UCore_DestructionSystem::CalculateFragmentVelocity(FVector ImpactLocation, FVector FragmentLocation, FVector ImpactForce) const
+{
+    // Calculate direction from impact to fragment
+    FVector Direction = (FragmentLocation - ImpactLocation).GetSafeNormal();
     
-    // Restore original mesh
-    if (OriginalMeshComponent)
-    {
-        OriginalMeshComponent->SetVisibility(true);
-        OriginalMeshComponent->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-    }
+    // Add some randomization
+    Direction += FVector(
+        FMath::RandRange(-0.3f, 0.3f),
+        FMath::RandRange(-0.3f, 0.3f),
+        FMath::RandRange(0.1f, 0.5f)  // Slight upward bias
+    );
+    Direction.Normalize();
     
-    // Reset state
-    bIsDestroyed = false;
-    CurrentHealth = DestructionData.Health;
-    bRegenerationInProgress = false;
-    RegenerationTimer = 0.0f;
+    // Calculate velocity magnitude based on impact force
+    float VelocityMagnitude = FMath::Clamp(ImpactForce.Size() * 0.1f, 200.0f, 1000.0f);
     
-    UE_LOG(LogTemp, Log, TEXT("Core_DestructionSystem: Destruction reset"));
+    return Direction * VelocityMagnitude;
 }
