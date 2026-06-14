@@ -2,61 +2,72 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
-#include "Engine/TargetPoint.h"
-#include "Components/SphereComponent.h"
-#include "SharedTypes.h"
+#include "Engine/World.h"
+#include "Components/StaticMeshComponent.h"
 #include "Crowd_MassEntityManager.generated.h"
+
+USTRUCT(BlueprintType)
+struct FCrowd_AgentData
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent")
+    FVector Position;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent")
+    FVector Velocity;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent")
+    float Speed;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent")
+    int32 AgentID;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent")
+    bool bIsActive;
+
+    FCrowd_AgentData()
+    {
+        Position = FVector::ZeroVector;
+        Velocity = FVector::ZeroVector;
+        Speed = 100.0f;
+        AgentID = 0;
+        bIsActive = true;
+    }
+};
+
+USTRUCT(BlueprintType)
+struct FCrowd_ZoneData
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Zone")
+    FVector Center;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Zone")
+    float Radius;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Zone")
+    int32 MaxAgents;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Zone")
+    TArray<int32> ActiveAgents;
+
+    FCrowd_ZoneData()
+    {
+        Center = FVector::ZeroVector;
+        Radius = 500.0f;
+        MaxAgents = 50;
+    }
+};
 
 UENUM(BlueprintType)
 enum class ECrowd_LODLevel : uint8
 {
-    High     UMETA(DisplayName = "High Detail"),
-    Medium   UMETA(DisplayName = "Medium Detail"), 
-    Low      UMETA(DisplayName = "Low Detail"),
-    Culled   UMETA(DisplayName = "Culled")
-};
-
-UENUM(BlueprintType)
-enum class ECrowd_BehaviorMode : uint8
-{
-    Wandering   UMETA(DisplayName = "Wandering"),
-    Fleeing     UMETA(DisplayName = "Fleeing"),
-    Gathering   UMETA(DisplayName = "Gathering"),
-    Following   UMETA(DisplayName = "Following")
-};
-
-USTRUCT(BlueprintType)
-struct FCrowd_EntityData
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FVector Position;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FVector Velocity;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    ECrowd_LODLevel LODLevel;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    ECrowd_BehaviorMode BehaviorMode;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float DistanceToPlayer;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    int32 EntityID;
-
-    FCrowd_EntityData()
-    {
-        Position = FVector::ZeroVector;
-        Velocity = FVector::ZeroVector;
-        LODLevel = ECrowd_LODLevel::High;
-        BehaviorMode = ECrowd_BehaviorMode::Wandering;
-        DistanceToPlayer = 0.0f;
-        EntityID = -1;
-    }
+    High    UMETA(DisplayName = "High Detail"),
+    Medium  UMETA(DisplayName = "Medium Detail"),
+    Low     UMETA(DisplayName = "Low Detail"),
+    Culled  UMETA(DisplayName = "Culled")
 };
 
 UCLASS(BlueprintType, Blueprintable)
@@ -69,103 +80,63 @@ public:
 
 protected:
     virtual void BeginPlay() override;
-
-public:
     virtual void Tick(float DeltaTime) override;
 
-    // Mass Entity System
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Simulation")
-    int32 MaxCrowdEntities;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    UStaticMeshComponent* RootMeshComponent;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Simulation")
-    float SpawnRadius;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Settings")
+    int32 MaxTotalAgents;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Simulation")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Settings")
     float UpdateFrequency;
 
-    // LOD System
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD System")
-    float HighLODDistance;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Settings")
+    float LODDistance_High;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD System")
-    float MediumLODDistance;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Settings")
+    float LODDistance_Medium;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD System")
-    float LowLODDistance;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Settings")
+    float LODDistance_Low;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD System")
-    float CullDistance;
+    UPROPERTY(BlueprintReadOnly, Category = "Runtime Data")
+    TArray<FCrowd_AgentData> ActiveAgents;
 
-    // Pathfinding
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding")
-    TArray<ATargetPoint*> WaypointNetwork;
+    UPROPERTY(BlueprintReadOnly, Category = "Runtime Data")
+    TArray<FCrowd_ZoneData> CrowdZones;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding")
-    float WaypointRadius;
+    UPROPERTY(BlueprintReadOnly, Category = "Runtime Data")
+    int32 CurrentAgentCount;
 
-    // Behavior System
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
-    float FleeDistance;
+public:
+    UFUNCTION(BlueprintCallable, Category = "Crowd Management")
+    void SpawnCrowdZone(FVector Center, float Radius, int32 AgentCount);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
-    float GatherDistance;
+    UFUNCTION(BlueprintCallable, Category = "Crowd Management")
+    void UpdateCrowdLOD(FVector PlayerPosition);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
-    float MovementSpeed;
-
-    // Performance
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 EntitiesPerFrame;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    bool bEnablePerformanceThrottling;
-
-    // Components
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    USphereComponent* InfluenceRadius;
-
-    // Crowd Data
-    UPROPERTY(BlueprintReadOnly, Category = "Crowd Data")
-    TArray<FCrowd_EntityData> CrowdEntities;
-
-    // Public Methods
-    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    void SpawnCrowdEntities(int32 Count);
-
-    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    void UpdateCrowdLOD();
-
-    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    void UpdateCrowdBehavior(float DeltaTime);
-
-    UFUNCTION(BlueprintCallable, Category = "Pathfinding")
-    ATargetPoint* GetNearestWaypoint(const FVector& Position);
-
-    UFUNCTION(BlueprintCallable, Category = "Pathfinding")
-    FVector GetRandomWaypointPosition();
-
-    UFUNCTION(BlueprintCallable, Category = "Behavior")
-    void TriggerFleeResponse(const FVector& ThreatLocation);
-
-    UFUNCTION(BlueprintCallable, Category = "Behavior")
-    void TriggerGatherResponse(const FVector& GatherLocation);
+    UFUNCTION(BlueprintCallable, Category = "Crowd Management")
+    void SetCrowdBehavior(int32 ZoneIndex, const FString& BehaviorType);
 
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    int32 GetActiveEntityCount() const;
+    int32 GetActiveAgentCount() const;
 
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    float GetPerformanceMetric() const;
+    float GetCurrentFPS() const;
+
+protected:
+    UFUNCTION()
+    void UpdateAgentPositions(float DeltaTime);
+
+    UFUNCTION()
+    ECrowd_LODLevel CalculateLODLevel(float DistanceToPlayer) const;
+
+    UFUNCTION()
+    void OptimizePerformance();
 
 private:
-    // Internal tracking
     float LastUpdateTime;
-    int32 CurrentUpdateIndex;
-    APawn* PlayerPawn;
-
-    // Internal methods
-    void UpdateEntityLOD(FCrowd_EntityData& Entity);
-    void UpdateEntityBehavior(FCrowd_EntityData& Entity, float DeltaTime);
-    FVector CalculateFleeDirection(const FVector& EntityPos, const FVector& ThreatPos);
-    FVector CalculateWanderDirection(const FCrowd_EntityData& Entity);
-    void OptimizePerformance();
+    float PerformanceTimer;
+    bool bIsInitialized;
 };
