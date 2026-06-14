@@ -2,22 +2,25 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
-#include "NiagaraSystem.h"
-#include "NiagaraComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Particles/ParticleSystemComponent.h"
+#include "NiagaraComponent.h"
+#include "NiagaraSystem.h"
 #include "Engine/World.h"
+#include "SharedTypes.h"
 #include "VFX_EffectManager.generated.h"
 
 UENUM(BlueprintType)
 enum class EVFX_EffectType : uint8
 {
-    Fire_Campfire       UMETA(DisplayName = "Campfire"),
-    Dust_Footstep      UMETA(DisplayName = "Dinosaur Footstep"),
-    Weather_Rain       UMETA(DisplayName = "Rain"),
-    Combat_BloodImpact UMETA(DisplayName = "Blood Impact"),
-    Water_Splash       UMETA(DisplayName = "Water Splash"),
-    Smoke_Cooking      UMETA(DisplayName = "Cooking Smoke"),
-    Sparks_Crafting    UMETA(DisplayName = "Crafting Sparks")
+    Fire_Campfire UMETA(DisplayName = "Campfire"),
+    Dust_Footstep UMETA(DisplayName = "Footstep Dust"),
+    Blood_Impact UMETA(DisplayName = "Blood Splatter"),
+    Water_Splash UMETA(DisplayName = "Water Splash"),
+    Smoke_General UMETA(DisplayName = "General Smoke"),
+    Rain_Weather UMETA(DisplayName = "Rain"),
+    Wind_Particles UMETA(DisplayName = "Wind Debris"),
+    Volcanic_Ash UMETA(DisplayName = "Volcanic Ash")
 };
 
 USTRUCT(BlueprintType)
@@ -26,23 +29,27 @@ struct FVFX_EffectData
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
-    UNiagaraSystem* NiagaraSystem;
+    EVFX_EffectType EffectType = EVFX_EffectType::Fire_Campfire;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
-    float Duration;
+    float Duration = 5.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
-    float Scale;
+    float Intensity = 1.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
-    bool bAutoDestroy;
+    FVector Scale = FVector(1.0f, 1.0f, 1.0f);
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+    bool bLooping = false;
 
     FVFX_EffectData()
     {
-        NiagaraSystem = nullptr;
+        EffectType = EVFX_EffectType::Fire_Campfire;
         Duration = 5.0f;
-        Scale = 1.0f;
-        bAutoDestroy = true;
+        Intensity = 1.0f;
+        Scale = FVector(1.0f, 1.0f, 1.0f);
+        bLooping = false;
     }
 };
 
@@ -57,64 +64,56 @@ public:
 protected:
     virtual void BeginPlay() override;
 
-    // VFX Effect Database
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Database")
-    TMap<EVFX_EffectType, FVFX_EffectData> EffectDatabase;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    USceneComponent* RootSceneComponent;
 
-    // Active effect tracking
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "VFX Runtime")
-    TArray<UNiagaraComponent*> ActiveEffects;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "VFX")
+    UNiagaraComponent* PrimaryEffectComponent;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "VFX")
+    UNiagaraComponent* SecondaryEffectComponent;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Settings")
+    FVFX_EffectData CurrentEffectData;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Settings")
+    TMap<EVFX_EffectType, class UNiagaraSystem*> EffectSystems;
 
 public:
-    // Core VFX spawning functions
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    UNiagaraComponent* SpawnEffect(EVFX_EffectType EffectType, FVector Location, FRotator Rotation = FRotator::ZeroRotator, float CustomScale = 1.0f);
+    virtual void Tick(float DeltaTime) override;
 
     UFUNCTION(BlueprintCallable, Category = "VFX")
-    UNiagaraComponent* SpawnEffectAtActor(EVFX_EffectType EffectType, AActor* TargetActor, FVector Offset = FVector::ZeroVector);
+    void PlayEffect(EVFX_EffectType EffectType, FVector Location, float Intensity = 1.0f);
 
     UFUNCTION(BlueprintCallable, Category = "VFX")
-    void StopEffect(UNiagaraComponent* EffectComponent);
+    void StopEffect();
 
     UFUNCTION(BlueprintCallable, Category = "VFX")
-    void StopAllEffects();
+    void SetEffectIntensity(float NewIntensity);
 
-    // Prehistoric environment effects
-    UFUNCTION(BlueprintCallable, Category = "VFX Environment")
-    void CreateCampfire(FVector Location);
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    void PlayCampfireEffect(FVector Location);
 
-    UFUNCTION(BlueprintCallable, Category = "VFX Environment")
-    void CreateDinosaurFootstep(FVector Location, float DinosaurSize = 1.0f);
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    void PlayFootstepDust(FVector Location, float DinosaurSize = 1.0f);
 
-    UFUNCTION(BlueprintCallable, Category = "VFX Environment")
-    void CreateRainEffect(FVector Location, float Intensity = 1.0f);
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    void PlayBloodSplatter(FVector Location, FVector Direction);
 
-    // Combat effects
-    UFUNCTION(BlueprintCallable, Category = "VFX Combat")
-    void CreateBloodImpact(FVector Location, FVector ImpactDirection);
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    void PlayWaterSplash(FVector Location, float SplashSize = 1.0f);
 
-    UFUNCTION(BlueprintCallable, Category = "VFX Combat")
-    void CreateWaterSplash(FVector Location, float SplashSize = 1.0f);
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    void StartWeatherEffect(EVFX_EffectType WeatherType);
 
-    // Survival crafting effects
-    UFUNCTION(BlueprintCallable, Category = "VFX Survival")
-    void CreateCraftingSparks(FVector Location);
-
-    UFUNCTION(BlueprintCallable, Category = "VFX Survival")
-    void CreateCookingSmoke(FVector Location);
-
-    // Effect management
-    UFUNCTION(BlueprintCallable, Category = "VFX Management")
-    int32 GetActiveEffectCount() const;
-
-    UFUNCTION(BlueprintCallable, Category = "VFX Management")
-    void CleanupFinishedEffects();
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    void StopWeatherEffect();
 
 private:
-    void InitializeEffectDatabase();
-    void CleanupEffect(UNiagaraComponent* Effect);
+    void InitializeEffectSystems();
+    UNiagaraSystem* GetEffectSystem(EVFX_EffectType EffectType);
+    void UpdateEffectParameters();
 
-    // Timer for automatic cleanup
-    FTimerHandle CleanupTimerHandle;
-    void PerformPeriodicCleanup();
+    float EffectTimer;
+    bool bEffectActive;
 };
