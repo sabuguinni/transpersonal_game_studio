@@ -1,162 +1,136 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/World.h"
-#include "Components/StaticMeshComponent.h"
-#include "Components/ActorComponent.h"
 #include "GameFramework/Actor.h"
-#include "SharedTypes.h"
+#include "Components/StaticMeshComponent.h"
+#include "Components/SceneComponent.h"
+#include "Engine/StaticMesh.h"
+#include "Materials/MaterialInterface.h"
 #include "Arch_DwellingManager.generated.h"
 
 UENUM(BlueprintType)
 enum class EArch_DwellingType : uint8
 {
+    SimpleHut       UMETA(DisplayName = "Simple Hut"),
+    StoneArchway    UMETA(DisplayName = "Stone Archway"),
     CaveEntrance    UMETA(DisplayName = "Cave Entrance"),
-    StoneHut        UMETA(DisplayName = "Stone Hut"),
     RockShelter     UMETA(DisplayName = "Rock Shelter"),
-    UndergroundDen  UMETA(DisplayName = "Underground Den"),
-    TreeHouse       UMETA(DisplayName = "Tree House")
+    TribalLodge     UMETA(DisplayName = "Tribal Lodge")
+};
+
+UENUM(BlueprintType)
+enum class EArch_DwellingState : uint8
+{
+    Pristine        UMETA(DisplayName = "Pristine"),
+    Weathered       UMETA(DisplayName = "Weathered"),
+    Damaged         UMETA(DisplayName = "Damaged"),
+    Ruined          UMETA(DisplayName = "Ruined"),
+    Collapsed       UMETA(DisplayName = "Collapsed")
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FArch_DwellingData
+struct FArch_DwellingConfig
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dwelling")
-    EArch_DwellingType DwellingType = EArch_DwellingType::CaveEntrance;
+    EArch_DwellingType DwellingType = EArch_DwellingType::SimpleHut;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dwelling")
-    FVector Location = FVector::ZeroVector;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dwelling")
-    FRotator Rotation = FRotator::ZeroRotator;
+    EArch_DwellingState CurrentState = EArch_DwellingState::Pristine;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dwelling")
     float StructuralIntegrity = 100.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dwelling")
-    bool bIsOccupied = false;
+    float WeatheringRate = 0.1f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dwelling")
+    bool bHasFirePit = true;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dwelling")
     int32 MaxOccupants = 4;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dwelling")
-    float WeatherResistance = 0.8f;
-
-    FArch_DwellingData()
+    FArch_DwellingConfig()
     {
-        DwellingType = EArch_DwellingType::CaveEntrance;
-        Location = FVector::ZeroVector;
-        Rotation = FRotator::ZeroRotator;
+        DwellingType = EArch_DwellingType::SimpleHut;
+        CurrentState = EArch_DwellingState::Pristine;
         StructuralIntegrity = 100.0f;
-        bIsOccupied = false;
+        WeatheringRate = 0.1f;
+        bHasFirePit = true;
         MaxOccupants = 4;
-        WeatherResistance = 0.8f;
     }
 };
 
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API AArch_DwellingActor : public AActor
+class TRANSPERSONALGAME_API AArch_DwellingManager : public AActor
 {
     GENERATED_BODY()
 
 public:
-    AArch_DwellingActor();
+    AArch_DwellingManager();
 
 protected:
     virtual void BeginPlay() override;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    class UStaticMeshComponent* DwellingMesh;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    class UStaticMeshComponent* InteriorMesh;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dwelling Data")
-    FArch_DwellingData DwellingInfo;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dwelling Data")
-    TArray<AActor*> CurrentOccupants;
 
 public:
     virtual void Tick(float DeltaTime) override;
 
-    UFUNCTION(BlueprintCallable, Category = "Dwelling")
-    bool CanEnterDwelling(AActor* Actor);
+    // Core Components
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    USceneComponent* RootSceneComponent;
 
-    UFUNCTION(BlueprintCallable, Category = "Dwelling")
-    bool EnterDwelling(AActor* Actor);
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    UStaticMeshComponent* MainStructureMesh;
 
-    UFUNCTION(BlueprintCallable, Category = "Dwelling")
-    bool ExitDwelling(AActor* Actor);
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    UStaticMeshComponent* FirePitMesh;
 
-    UFUNCTION(BlueprintCallable, Category = "Dwelling")
-    float GetStructuralIntegrity() const { return DwellingInfo.StructuralIntegrity; }
+    // Configuration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dwelling Config")
+    FArch_DwellingConfig DwellingConfig;
 
-    UFUNCTION(BlueprintCallable, Category = "Dwelling")
-    void RepairDwelling(float RepairAmount);
+    // Materials for different states
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Materials")
+    TArray<UMaterialInterface*> StateMaterials;
 
+    // Dwelling Management
     UFUNCTION(BlueprintCallable, Category = "Dwelling")
-    void DamageDwelling(float DamageAmount);
-
-    UFUNCTION(BlueprintCallable, Category = "Dwelling")
-    EArch_DwellingType GetDwellingType() const { return DwellingInfo.DwellingType; }
-
-    UFUNCTION(BlueprintCallable, Category = "Dwelling")
-    bool IsOccupied() const { return DwellingInfo.bIsOccupied; }
+    void InitializeDwelling(EArch_DwellingType Type, FVector Location);
 
     UFUNCTION(BlueprintCallable, Category = "Dwelling")
-    int32 GetOccupantCount() const { return CurrentOccupants.Num(); }
+    void UpdateStructuralIntegrity(float DeltaIntegrity);
 
     UFUNCTION(BlueprintCallable, Category = "Dwelling")
-    float GetWeatherProtection() const { return DwellingInfo.WeatherResistance; }
-};
+    void ApplyWeathering(float DeltaTime);
 
-UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UArch_DwellingManager : public UActorComponent
-{
-    GENERATED_BODY()
+    UFUNCTION(BlueprintCallable, Category = "Dwelling")
+    void SetDwellingState(EArch_DwellingState NewState);
 
-public:
-    UArch_DwellingManager();
+    UFUNCTION(BlueprintCallable, Category = "Dwelling")
+    bool CanAccommodateOccupants(int32 OccupantCount) const;
 
-protected:
-    virtual void BeginPlay() override;
+    UFUNCTION(BlueprintCallable, Category = "Dwelling")
+    void CreateInteriorLayout();
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dwelling Management")
-    TArray<AArch_DwellingActor*> ManagedDwellings;
+    UFUNCTION(BlueprintCallable, Category = "Dwelling")
+    void SpawnFirePit();
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dwelling Management")
-    int32 MaxDwellings = 50;
+    UFUNCTION(BlueprintCallable, Category = "Dwelling")
+    void AddSleepingAreas(int32 Count);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dwelling Management")
-    float DwellingSpawnRadius = 10000.0f;
+    // Getters
+    UFUNCTION(BlueprintPure, Category = "Dwelling")
+    EArch_DwellingType GetDwellingType() const { return DwellingConfig.DwellingType; }
 
-public:
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+    UFUNCTION(BlueprintPure, Category = "Dwelling")
+    EArch_DwellingState GetCurrentState() const { return DwellingConfig.CurrentState; }
 
-    UFUNCTION(BlueprintCallable, Category = "Dwelling Management")
-    AArch_DwellingActor* SpawnDwelling(EArch_DwellingType Type, FVector Location, FRotator Rotation);
+    UFUNCTION(BlueprintPure, Category = "Dwelling")
+    float GetStructuralIntegrity() const { return DwellingConfig.StructuralIntegrity; }
 
-    UFUNCTION(BlueprintCallable, Category = "Dwelling Management")
-    void RemoveDwelling(AArch_DwellingActor* Dwelling);
-
-    UFUNCTION(BlueprintCallable, Category = "Dwelling Management")
-    TArray<AArch_DwellingActor*> GetNearbyDwellings(FVector Location, float Radius);
-
-    UFUNCTION(BlueprintCallable, Category = "Dwelling Management")
-    AArch_DwellingActor* FindNearestDwelling(FVector Location);
-
-    UFUNCTION(BlueprintCallable, Category = "Dwelling Management")
-    void GenerateRandomDwellings(int32 Count, EBiomeType BiomeType);
-
-    UFUNCTION(BlueprintCallable, Category = "Dwelling Management")
-    int32 GetDwellingCount() const { return ManagedDwellings.Num(); }
-
-    UFUNCTION(BlueprintCallable, Category = "Dwelling Management")
-    void UpdateDwellingIntegrity(float DeltaTime);
-
-    UFUNCTION(BlueprintCallable, Category = "Dwelling Management")
-    void CleanupDestroyedDwellings();
+private:
+    void UpdateMaterialBasedOnState();
+    void HandleStructuralCollapse();
+    FVector GetRandomInteriorPosition() const;
 };
